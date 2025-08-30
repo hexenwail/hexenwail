@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2023 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@freemail.hu                            *
+//*                  email: mpxplay@hotmail.com                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -169,6 +169,7 @@ static void azx_init_pci(struct intelhd_card_s *card)
   case AZX_DRIVER_PCH:
   case AZX_DRIVER_SKL:
   case AZX_DRIVER_HDMI:
+  case AZX_DRIVER_ZHAOXINHDMI:
    tmp = pcibios_ReadConfig_Word(card->pci_dev, INTEL_SCH_HDA_DEVC);
    if(tmp&INTEL_SCH_HDA_DEVC_NOSNOOP)
     pcibios_WriteConfig_Word(card->pci_dev, INTEL_SCH_HDA_DEVC, tmp & (~INTEL_SCH_HDA_DEVC_NOSNOOP));
@@ -970,10 +971,15 @@ static pci_device_s intelhda_devices[]={
  {"Intel SKL (Raptor Lake)",     0x8086, 0x51cb, AZX_DRIVER_SKL },
  {"Intel SKL (Raptor Lake)",     0x8086, 0x51ce, AZX_DRIVER_SKL },
  {"Intel SKL (Raptor Lake)",     0x8086, 0x51cf, AZX_DRIVER_SKL },
- {"Intel SKL (Meteorlake-P)",    0x8086, 0x7e28, AZX_DRIVER_SKL },
+ {"Intel SKL (Raptor Lake)",     0x8086, 0x7e28, AZX_DRIVER_SKL },
+ {"Intel SKL (Battlemage)",      0x8086, 0xe2f7, AZX_DRIVER_SKL },
  {"Intel SKL (Lunarlake-P)",     0x8086, 0xa828, AZX_DRIVER_SKL },
- {"Intel SKL (Broxton-P)",       0x8086, 0x5a98, AZX_DRIVER_SKL },
- {"Intel SKL (Broxton-T)",       0x8086, 0x1a98, AZX_DRIVER_SKL },
+ {"Intel SKL (Arrow Lake-S)",    0x8086, 0x7f50, AZX_DRIVER_SKL },
+ {"Intel SKL (Arrow Lake)",      0x8086, 0x7728, AZX_DRIVER_SKL },
+ {"Intel SKL (Panther Lake)",    0x8086, 0xe428, AZX_DRIVER_SKL },
+ {"Intel SKL (Panther Lake-H)",  0x8086, 0xe328, AZX_DRIVER_SKL },
+ {"Intel SKL (Wildcat Lake)",    0x8086, 0x4d28, AZX_DRIVER_SKL },
+ {"Intel SKL (ApolloLake)",      0x8086, 0x5a98, AZX_DRIVER_SKL },
  {"Intel SKL (Gemini-Lake)",     0x8086, 0x3198, AZX_DRIVER_SKL },
  {"Intel HDMI (Haswell)",        0x8086, 0x0a0c, AZX_DRIVER_HDMI },
  {"Intel HDMI (Haswell)",        0x8086, 0x0c0c, AZX_DRIVER_HDMI },
@@ -1047,6 +1053,7 @@ static pci_device_s intelhda_devices[]={
  {"ATI HDNS",     0x1002, 0xab28, AZX_DRIVER_ATIHDMI_NS },
  {"ATI HDNS",     0x1002, 0xab30, AZX_DRIVER_ATIHDMI_NS },
  {"ATI HDNS",     0x1002, 0xab38, AZX_DRIVER_ATIHDMI_NS },
+ {"ATI HDNS",     0x1002, 0xab40, AZX_DRIVER_ATIHDMI_NS },
  {"VIA 82xx",     0x1106, 0x3288, AZX_DRIVER_VIA },
  {"VIA 7122",     0x1106, 0x9170, AZX_DRIVER_GENERIC },
  {"VIA 6122",     0x1106, 0x9140, AZX_DRIVER_GENERIC },
@@ -1061,6 +1068,13 @@ static pci_device_s intelhda_devices[]={
  {"Vortex86MX",   0x17f3, 0x3010, AZX_DRIVER_GENERIC },
  {"VMwareHD",     0x15ad, 0x1977, AZX_DRIVER_GENERIC },
  {"Zhaoxin",      0x1d17, 0x3288, AZX_DRIVER_ZHAOXIN },
+ {"Zhaoxin HDMI", 0x1d17, 0x9141, AZX_DRIVER_ZHAOXINHDMI },
+ {"Zhaoxin HDMI", 0x1d17, 0x9142, AZX_DRIVER_ZHAOXINHDMI },
+ {"Zhaoxin HDMI", 0x1d17, 0x9144, AZX_DRIVER_ZHAOXINHDMI },
+ {"Zhaoxin HDMI", 0x1d17, 0x9145, AZX_DRIVER_ZHAOXINHDMI },
+ {"Zhaoxin HDMI", 0x1d17, 0x9146, AZX_DRIVER_ZHAOXINHDMI },
+ {"Loongson HDA", 0x0014, 0x7a07, AZX_DRIVER_LOONGSON },
+ {"Loongson HDMI",0x0014, 0x7a37, AZX_DRIVER_HDMI },
 
  {"NVidia MCP51", 0x10de, 0x026c, AZX_DRIVER_NVIDIA },
  {"NVidia MCP55", 0x10de, 0x0371, AZX_DRIVER_NVIDIA },
@@ -1092,6 +1106,7 @@ static pci_device_s intelhda_devices[]={
 };
 
 static struct codec_vendor_list_s codecvendorlist[]={
+ {0x0014,"Loongson"},
  {0x1002,"ATI"},
  {0x1013,"Cirrus Logic"},
  {0x1057,"Motorola"},

@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2009 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@freemail.hu                            *
+//*                  email: mpxplay@hotmail.com                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
