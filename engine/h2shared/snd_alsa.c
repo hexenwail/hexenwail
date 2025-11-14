@@ -151,14 +151,14 @@ static qboolean S_ALSA_Init (dma_t *dma)
 	}
 
 	rate = desired_speed;
-	err = hx2snd_pcm_hw_params_set_rate_near (pcm, hw, &rate, 0);
+	err = hx2snd_pcm_hw_params_set_rate_near (pcm, hw, &rate, NULL);
 	if (err < 0)
 	{
 		Con_Printf("Problems setting sample rate, trying alternatives..\n");
 		for (i = 0; i < MAX_TRYRATES; i++)
 		{
 			rate = tryrates[i];
-			err = hx2snd_pcm_hw_params_set_rate_near (pcm, hw, &rate, 0);
+			err = hx2snd_pcm_hw_params_set_rate_near (pcm, hw, &rate, NULL);
 			if (err < 0)
 			{
 				Con_DPrintf ("Unable to set sample rate %d\n", tryrates[i]);
@@ -212,7 +212,7 @@ static qboolean S_ALSA_Init (dma_t *dma)
 
 	/* pick a period size near the buffer_size we got from ALSA */
 	frag_size = buffer_size / NB_PERIODS;
-	err = hx2snd_pcm_hw_params_set_period_size_near (pcm, hw, &frag_size, 0);
+	err = hx2snd_pcm_hw_params_set_period_size_near (pcm, hw, &frag_size, NULL);
 	ALSA_CHECK_ERR(err, "unable to set period size near %i. %s\n",
 				(int)frag_size, hx2snd_strerror(err));
 

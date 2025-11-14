@@ -1640,7 +1640,7 @@ static void FindBuiltinParameters (int func)
 		{
 			if (ds->op >= OP_CALL0 && ds->op <= OP_CALL8)
 			{
-				arg1 = PR_PrintStringAtOfs(ds->a, 0);
+				arg1 = PR_PrintStringAtOfs(ds->a, NULL);
 
 				if (arg1)
 				{
@@ -1717,7 +1717,7 @@ static void FindBuiltinParameters (int func)
 
 	/* find name */
 	memset (sname, 0, sizeof(sname));
-	arg1 = PR_PrintStringAtOfs(dsf->a, 0);
+	arg1 = PR_PrintStringAtOfs(dsf->a, NULL);
 	q_snprintf(sname, sizeof(sname), "%s", arg1);
 
 	/* look for first two parms */
