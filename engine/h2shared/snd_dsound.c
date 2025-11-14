@@ -17,6 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#define CINTERFACE 1 /* for dsound.h */
+
 #include "quakedef.h"
 #include "snd_sys.h"
 
@@ -25,6 +27,7 @@
 #include "winquake.h"
 #include "snd_dsound.h"
 #include <mmsystem.h>
+#define DIRECTSOUND_VERSION 0x0300
 #include <dsound.h>
 
 static char s_ds_driver[] = "DirectSound";

@@ -22,9 +22,21 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#ifndef __cplusplus
+#define CINTERFACE 1 /* for dinput.h */
+#endif
+
+#ifdef __cplusplus
+#define GUID_REF(X)  (X)
+#else
+#define GUID_REF(X) &(X)
+#endif
+
 #include "quakedef.h"
 #include "winquake.h"
 #include <mmsystem.h>
+
+#define DIRECTINPUT_VERSION 0x0300
 #include <dinput.h>
 
 // mouse variables
@@ -99,9 +111,9 @@ static HRESULT (WINAPI *pDirectInputCreate)(HINSTANCE, DWORD, LPDIRECTINPUT*, LP
 
 #else	/* ! DX_DLSYM : linked to dinput */
 
-#define diformat           c_dfDIMouse
-#define pDirectInputCreate DirectInputCreateA
-#define Q_GUID_SysMouse    GUID_SysMouse
+#define diformat            c_dfDIMouse
+#define pDirectInputCreate  DirectInputCreateA
+#define Q_GUID_SysMouse     GUID_SysMouse
 
 #endif	/* DX_DLSYM */
 
@@ -394,7 +406,7 @@ static qboolean IN_InitDInput (void)
 	}
 
 // obtain an interface to the system mouse device.
-	hr = IDirectInput_CreateDevice(g_pdi, D3D_GUID(Q_GUID_SysMouse), &g_pMouse, NULL);
+	hr = IDirectInput_CreateDevice(g_pdi, GUID_REF(Q_GUID_SysMouse), &g_pMouse, NULL);
 	if (FAILED(hr))
 	{
 		Con_SafePrintf ("Couldn't open DI mouse device\n");
