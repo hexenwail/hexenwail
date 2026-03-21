@@ -29,20 +29,11 @@
 #ifdef PLATFORM_WINDOWS
 #include <windows.h>
 #endif
-#ifdef PLATFORM_DOS
-#include <time.h>
-#endif
 #ifdef PLATFORM_OS2
 #include <sys/timeb.h>
 #endif
 #ifdef PLATFORM_UNIX
 #include <sys/time.h>
-#include <time.h>
-#endif
-#ifdef PLATFORM_AMIGA
-#include <proto/exec.h>
-#include <proto/dos.h>
-#include <proto/timer.h>
 #include <time.h>
 #endif
 
@@ -54,16 +45,6 @@ char **myargv;
 char		com_token[1024];
 
 // PRIVATE DATA DEFINITIONS ------------------------------------------------
-
-#ifdef PLATFORM_AMIGA
-struct timerequest	*timerio;
-struct MsgPort		*timerport;
-#if defined(__MORPHOS__) || defined(__VBCC__)
-struct Library		*TimerBase;
-#else
-struct Device		*TimerBase;
-#endif
-#endif /* _AMIGA */
 
 // REPLACEMENTS FOR LIBRARY FUNCTIONS --------------------------------------
 
@@ -189,13 +170,6 @@ double COM_GetTime (void)
 	return (double)ul1.QuadPart / 10000000.0;
 }
 
-#elif defined(PLATFORM_DOS)
-double COM_GetTime (void)
-{
-/* See  DJGPP uclock() man page for its limitations */
-	return (double) uclock() / (double) UCLOCKS_PER_SEC;
-}
-
 #elif defined(PLATFORM_OS2)
 double COM_GetTime (void)
 {
@@ -210,74 +184,6 @@ double COM_GetTime (void)
 	struct timeval tv;
 	gettimeofday (&tv, NULL);
 	return tv.tv_sec + tv.tv_usec / 1000000.0;
-}
-
-#elif defined(PLATFORM_AMIGA)
-static void AMIGA_TimerCleanup (void)
-{
-	if (TimerBase)
-	{
-		/*
-		if (!CheckIO((struct IORequest *) timerio)
-		{
-			AbortIO((struct IORequest *) timerio);
-			WaitIO((struct IORequest *) timerio);
-		}
-		*/
-		WaitIO((struct IORequest *) timerio);
-		CloseDevice((struct IORequest *) timerio);
-		DeleteIORequest((struct IORequest *) timerio);
-		DeleteMsgPort(timerport);
-		TimerBase = NULL;
-	}
-}
-
-static void AMIGA_TimerInit (void)
-{
-	if ((timerport = CreateMsgPort()))
-	{
-		if ((timerio = (struct timerequest *)CreateIORequest(timerport, sizeof(struct timerequest))))
-		{
-			if (OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ,
-					(struct IORequest *) timerio, 0) == 0)
-			{
-#if defined(__MORPHOS__) || defined(__VBCC__)
-				TimerBase = (struct Library *)timerio->tr_node.io_Device;
-#else
-				TimerBase = timerio->tr_node.io_Device;
-#endif
-			}
-			else
-			{
-				DeleteIORequest((struct IORequest *)timerio);
-				DeleteMsgPort(timerport);
-			}
-		}
-		else
-		{
-			DeleteMsgPort(timerport);
-		}
-	}
-
-	if (!TimerBase)
-		COM_Error("Can't open timer.device");
-
-	atexit (AMIGA_TimerCleanup);
-	/* 1us wait, for timer cleanup success */
-	timerio->tr_node.io_Command = TR_ADDREQUEST;
-	timerio->tr_time.tv_secs = 0;
-	timerio->tr_time.tv_micro = 1;
-	SendIO((struct IORequest *) timerio);
-	WaitIO((struct IORequest *) timerio);
-}
-
-double COM_GetTime (void)
-{
-	struct timeval tv;
-	if (!TimerBase)
-		AMIGA_TimerInit();
-	GetSysTime(&tv);
-	return tv.tv_secs + tv.tv_micro / 1000000.0;
 }
 
 #else /* GENERIC CASE: */

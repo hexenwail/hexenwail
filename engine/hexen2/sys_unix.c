@@ -22,11 +22,7 @@
  */
 
 #include "quakedef.h"
-#if defined(PLATFORM_OSX)
-#include "sys_osx.h"	/* Mac OS X specifics */
-#elif defined(SDLQUAKE)
-#include "sys_sdl.h"	/* alternative implementations using SDL. */
-#endif
+#include "sys_sdl.h"
 #include "userdir.h"
 #include "debuglog.h"
 
@@ -44,20 +40,15 @@
 #include <fnmatch.h>
 #include <time.h>
 #include <utime.h>
-#if defined(SDLQUAKE)
-#include "sdl_inc.h"
-#endif
 
 
-#define MIN_MEM_ALLOC	0x1000000
-#define STD_MEM_ALLOC	0x2000000
+#define MIN_MEM_ALLOC	0x4000000	/* 64 mb */
+#define STD_MEM_ALLOC	0x20000000	/* 512 mb */
 
 cvar_t		sys_nostdout = {"sys_nostdout", "0", CVAR_NONE};
 cvar_t		sys_throttle = {"sys_throttle", "0.02", CVAR_ARCHIVE};
 
 qboolean		isDedicated;
-static double		starttime;
-static qboolean		first = true;
 
 
 /*
@@ -114,10 +105,6 @@ long Sys_filesize (const char *path)
 
 int Sys_FileType (const char *path)
 {
-	/*
-	if (access(path, R_OK) == -1)
-		return 0;
-	*/
 	struct stat	st;
 
 	if (stat(path, &st) != 0)
@@ -137,7 +124,6 @@ int Sys_CopyFile (const char *frompath, const char *topath)
 	FILE	*in, *out;
 	struct stat	st;
 	struct utimbuf	tm;
-/*	off_t	remaining, count;*/
 	size_t	remaining, count;
 
 	if (stat(frompath, &st) != 0)
@@ -254,6 +240,34 @@ void Sys_FindClose (void)
 	}
 }
 
+int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
+{
+	DIR		*d;
+	struct dirent	*ent;
+	struct stat	st;
+	int		count = 0;
+
+	d = opendir(path);
+	if (!d)
+		return 0;
+
+	while ((ent = readdir(d)) != NULL && count < maxdirs)
+	{
+		if (ent->d_name[0] == '.')
+			continue;	/* skip ".", ".." and hidden dirs */
+		if (stat(va("%s/%s", path, ent->d_name), &st) != 0)
+			continue;
+		if (!S_ISDIR(st.st_mode))
+			continue;
+		q_strlcpy(dirs[count], ent->d_name, 64);
+		count++;
+	}
+
+	closedir(d);
+	return count;
+}
+
+
 /*
 ===============================================================================
 
@@ -262,20 +276,12 @@ SYSTEM IO
 ===============================================================================
 */
 
-/*
-================
-Sys_MakeCodeWriteable
-================
-*/
 #if id386 && !defined(GLQUAKE)
 void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length)
 {
 	int		r;
 	unsigned long	endaddr = startaddr + length;
-// systems with mprotect but not getpagesize (or similar) probably don't
-// need to page align the arguments to mprotect (eg, QNX)
 #if !(defined(__QNX__) || defined(__QNXNTO__))
-//	int		psize = getpagesize ();
 	long		psize = sysconf (_SC_PAGESIZE);
 	startaddr &= ~(psize - 1);
 	endaddr = (endaddr + psize - 1) & ~(psize - 1);
@@ -286,29 +292,6 @@ void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length)
 		Sys_Error("Protection change failed\n");
 }
 #endif	/* id386, !GLQUAKE */
-
-
-/*
-================
-Sys_Init
-================
-*/
-static void Sys_Init (void)
-{
-/* do we really need these with opengl ?? */
-	Sys_SetFPCW();
-#if defined(SDLQUAKE)
-	if (SDL_Init(0) < 0)
-		Sys_Error("SDL failed to initialize.");
-#endif
-}
-
-static void Sys_AtExit (void)
-{
-#if defined(SDLQUAKE)
-	SDL_Quit();
-#endif
-}
 
 
 #if !defined(Sys_ErrorMessage)
@@ -371,77 +354,6 @@ void Sys_Quit (void)
 
 /*
 ================
-Sys_DoubleTime
-================
-*/
-double Sys_DoubleTime (void)
-{
-	struct timeval	tp;
-	double		now;
-
-	gettimeofday (&tp, NULL);
-
-	now = tp.tv_sec + tp.tv_usec / 1e6;
-
-	if (first)
-	{
-		first = false;
-		starttime = now;
-		return 0.0;
-	}
-
-	return now - starttime;
-}
-
-char *Sys_DateTimeString (char *buf)
-{
-	static char strbuf[24];
-	time_t t;
-	struct tm *l;
-	int val;
-
-	if (!buf) buf = strbuf;
-
-	t = time(NULL);
-	l = localtime(&t);
-
-	val = l->tm_mon + 1;	/* tm_mon: months since January [0,11] */
-	buf[0] = val / 10 + '0';
-	buf[1] = val % 10 + '0';
-	buf[2] = '/';
-	val = l->tm_mday;
-	buf[3] = val / 10 + '0';
-	buf[4] = val % 10 + '0';
-	buf[5] = '/';
-	val = l->tm_year / 100 + 19;	/* tm_year: #years since 1900. */
-	buf[6] = val / 10 + '0';
-	buf[7] = val % 10 + '0';
-	val = l->tm_year % 100;
-	buf[8] = val / 10 + '0';
-	buf[9] = val % 10 + '0';
-
-	buf[10] = ' ';
-
-	val = l->tm_hour;
-	buf[11] = val / 10 + '0';
-	buf[12] = val % 10 + '0';
-	buf[13] = ':';
-	val = l->tm_min;
-	buf[14] = val / 10 + '0';
-	buf[15] = val % 10 + '0';
-	buf[16] = ':';
-	val = l->tm_sec;
-	buf[17] = val / 10 + '0';
-	buf[18] = val % 10 + '0';
-
-	buf[19] = '\0';
-
-	return buf;
-}
-
-
-/*
-================
 Sys_ConsoleInput
 ================
 */
@@ -493,27 +405,8 @@ const char *Sys_ConsoleInput (void)
 	return NULL;
 }
 
-void Sys_Sleep (unsigned long msecs)
-{
-	usleep (msecs * 1000);
-}
 
-void Sys_SendKeyEvents (void)
-{
-	IN_SendKeyEvents();
-}
-
-#if !defined(Sys_GetClipboardData)
-#define Sys_GetClipboardData Sys_GetClipboardData /* */
-char *Sys_GetClipboardData (void)
-{
-	return NULL;
-}
-#endif
-
-#if !defined(Sys_GetBasedir)
-#define Sys_GetBasedir UNIX_GetBasedir
-static int UNIX_GetBasedir (char *argv0, char *dst, size_t dstsize)
+static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 {
 	char	*tmp;
 
@@ -532,7 +425,6 @@ static int UNIX_GetBasedir (char *argv0, char *dst, size_t dstsize)
 
 	return 0;
 }
-#endif /* Sys_GetBasedir */
 
 #if DO_USERDIRS
 static int Sys_GetUserdir (char *dst, size_t dstsize)
@@ -550,10 +442,6 @@ static int Sys_GetUserdir (char *dst, size_t dstsize)
 	if (home_dir == NULL)
 		return 1;
 
-/* what would be a maximum path for a file in the user's directory...
- * $HOME/AOT_USERDIR/game_dir/dirname1/dirname2/dirname3/filename.ext
- * still fits in the MAX_OSPATH == 256 definition, but just in case.
- */
 	n = strlen(home_dir) + strlen(AOT_USERDIR) + 50;
 	if (n >= dstsize)
 	{
@@ -565,16 +453,6 @@ static int Sys_GetUserdir (char *dst, size_t dstsize)
 	return 0;
 }
 #endif	/* DO_USERDIRS */
-
-static void Sys_CheckSDL (void)
-{
-#if defined(SDLQUAKE)
-	const SDL_version *sdl_version;
-
-	sdl_version = SDL_Linked_Version();
-	Sys_Printf("Found SDL version %i.%i.%i\n",sdl_version->major,sdl_version->minor,sdl_version->patch);
-#endif
-}
 
 static void PrintVersion (void)
 {
@@ -593,37 +471,22 @@ static const char *help_strings[] = {
 	"     [-portals | -h2mp ]     Run the Portal of Praevus mission pack",
 #   endif
 #endif
-#ifndef SVGAQUAKE
 	"     [-w | -window ]         Run the game windowed",
 	"     [-f | -fullscreen]      Run the game fullscreen",
-#endif
 	"     [-width X [-height Y]]  Select screen size",
 #ifdef GLQUAKE
 	"     [-bpp]                  Depth for GL fullscreen mode",
 	"     [-vsync]                Enable sync with monitor refresh",
 	"     [-g | -gllibrary]       Select 3D rendering library",
 	"     [-fsaa N]               Enable N sample antialiasing",
-	"     [-paltex]               Enable 8-bit textures",
-	"     [-nomtex]               Disable multitexture detection/usage",
 #endif
 #if !defined(_NO_SOUND)
 #if SOUND_NUMDRIVERS
 	"     [-s | -nosound]         Run the game without sound",
 #endif
-#if (SOUND_NUMDRIVERS > 1)
-#if HAVE_OSS_SOUND
-	"     [-sndoss]               Use OSS sound",
-#endif
-#if HAVE_ALSA_SOUND
-	"     [-sndalsa]              Use ALSA sound (alsa > 1.0.1)",
-#endif
-#if HAVE_SUN_SOUND
-	"     [-sndsun | -sndbsd]     Use SUN / BSD sound",
-#endif
 #if HAVE_SDL_SOUND
 	"     [-sndsdl]               Use SDL sound",
 #endif
-#endif	/*  SOUND_NUMDRIVERS */
 #endif	/* _NO_SOUND */
 	"     [-nomouse]              Disable mouse usage",
 	"     [-listen N]             Enable multiplayer with max N players",
@@ -661,7 +524,6 @@ static char	userdir[MAX_OSPATH];
 int main (int argc, char **argv)
 {
 	int			i;
-	double		time, oldtime, newtime;
 
 	PrintVersion();
 
@@ -724,57 +586,12 @@ int main (int argc, char **argv)
 	if (!parms.membase)
 		Sys_Error ("Insufficient memory.");
 
-	Sys_Init ();
-	atexit (Sys_AtExit);
+	Sys_SDLInit ();
+	atexit (Sys_SDLShutdown);
 
 	Host_Init();
 
-	oldtime = Sys_DoubleTime ();
-
-	/* main window message loop */
-	while (1)
-	{
-	    if (isDedicated)
-	    {
-		newtime = Sys_DoubleTime ();
-		time = newtime - oldtime;
-
-		while (time < sys_ticrate.value )
-		{
-			usleep (1000);
-			newtime = Sys_DoubleTime ();
-			time = newtime - oldtime;
-		}
-
-		Host_Frame (time);
-		oldtime = newtime;
-	    }
-	    else
-	    {
-#if defined(SDLQUAKE)
-		/* If we have no input focus at all, sleep a bit */
-		if (!VID_HasMouseOrInputFocus() || cl.paused) {
-			usleep (16000);
-		}
-		/* If we're minimised, sleep a bit more */
-		if (VID_IsMinimized()) {
-			scr_skipupdate = 1;
-			usleep (32000);
-		} else {
-			scr_skipupdate = 0;
-		}
-#endif
-		newtime = Sys_DoubleTime ();
-		time = newtime - oldtime;
-
-		Host_Frame (time);
-
-		if (time < sys_throttle.value)
-			usleep (1000);
-
-		oldtime = newtime;
-	    }
-	}
+	Sys_MainLoop ();
 
 	return 0;
 }

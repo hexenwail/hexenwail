@@ -27,7 +27,7 @@
 #include "io_msvc.h"
 #elif defined(PLATFORM_OS2) && defined(__WATCOMC__)
 #include <direct.h>
-#elif !defined(PLATFORM_AMIGA)
+#else
 #include <unistd.h>
 #endif
 

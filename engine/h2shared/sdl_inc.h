@@ -26,67 +26,18 @@
 #error "SDLQUAKE must be defined in order to use sdl_inc.h"
 #endif	/* SDLQUAKE */
 
-#if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
-#include <SDL/SDL.h>
-#else
-#include "SDL.h"
-#endif
+#include <SDL3/SDL.h>
 
 /* =================================================================
 Minimum required SDL versions:
 =================================================================== */
 
-#if SDL_VERSION_ATLEAST(1,3,0)
-
-#define SDL_MIN_X	2
+#define SDL_MIN_X	3
 #define SDL_MIN_Y	0
 #define SDL_MIN_Z	0
 
-#else	/* SDL-1.2.x */
-
-#define SDL_MIN_X	1
-#define SDL_MIN_Y	2
-
-#if defined(__APPLE__) && defined(__MACH__)			/* Mac OS X */
-#  if defined (__ppc__) || defined(__POWERPC__)
-#   define SDL_MIN_Z	9
-#  else
-#   define SDL_MIN_Z	14	/* need 1.2.14 for x86/x86_64 support on OS X */
-#  endif
-#else
-#   define SDL_MIN_Z	0
-#endif
-#endif	/* SDL-1.2.x */
-
-#define SDL_REQUIREDVERSION	(SDL_VERSIONNUM(SDL_MIN_X,SDL_MIN_Y,SDL_MIN_Z))
-
-#if !(SDL_VERSION_ATLEAST(SDL_MIN_X,SDL_MIN_Y,SDL_MIN_Z))
+#if !SDL_VERSION_ATLEAST(SDL_MIN_X,SDL_MIN_Y,SDL_MIN_Z)
 #error SDL version found is too old
 #endif
 
-
-/* the defines below are actually part of SDL_GLattr enums in SDL
-   versions supporting that relevant feature. */
-
-/* gl stereo attribute was added to SDL beginning from v1.2.5 */
-#define SDL_VER_WITH_STEREO		(SDL_VERSIONNUM(1,2,5))
-#if SDL_COMPILEDVERSION < SDL_VER_WITH_STEREO
-#define SDL_GL_STEREO			(SDL_GL_ACCUM_ALPHA_SIZE+1)
-#endif	/* SDL_VER_WITH_STEREO */
-
-/* multisampling was added to SDL beginning from v1.2.6 */
-#define SDL_VER_WITH_MULTISAMPLING	(SDL_VERSIONNUM(1,2,6))
-#if SDL_COMPILEDVERSION < SDL_VER_WITH_MULTISAMPLING
-#define SDL_GL_MULTISAMPLEBUFFERS	(SDL_GL_ACCUM_ALPHA_SIZE+2)
-#define SDL_GL_MULTISAMPLESAMPLES	(SDL_GL_ACCUM_ALPHA_SIZE+3)
-#endif	/* SDL_VER_WITH_MULTISAMPLING */
-
-/* swapinterval was added to SDL beginning from v1.2.10 */
-#define SDL_VER_WITH_SWAPINTERVAL	(SDL_VERSIONNUM(1,2,10))
-#if SDL_COMPILEDVERSION < SDL_VER_WITH_SWAPINTERVAL
-#define SDL_GL_ACCELERATED_VISUAL	(SDL_GL_MULTISAMPLESAMPLES+1)
-#define SDL_GL_SWAP_CONTROL		(SDL_GL_MULTISAMPLESAMPLES+2)
-#endif	/* SDL_VER_WITH_SWAPINTERVAL */
-
 #endif	/* __HX2_SDL_INC */
-

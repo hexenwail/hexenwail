@@ -395,7 +395,7 @@ void SV_DropClient (qboolean crash)
 		// this will set the body to a dead frame, among other things
 			saveSelf = *sv_globals.self;
 			*sv_globals.self = EDICT_TO_PROG(host_client->edict);
-			PR_ExecuteProgram (*sv_globals.ClientDisconnect);
+			PR_ExecuteProgram (*sv_globals.ClientDisconnect, "ClientDisconnect");
 			*sv_globals.self = saveSelf;
 		}
 

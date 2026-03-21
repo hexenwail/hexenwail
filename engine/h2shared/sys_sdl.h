@@ -1,10 +1,11 @@
-/* alternative SDL-using implementations of system functions needed by
- * common sys_unix.c, when platform specific ones are not available. */
+/* sys_sdl.h -- Shared SDL system function declarations */
 
 #ifndef SYS_SDL_H
 #define SYS_SDL_H
 
-/* NOTHING HERE YET */
+void Sys_CheckSDL (void);
+void Sys_SDLInit (void);
+void Sys_SDLShutdown (void);
+void Sys_MainLoop (void);
 
 #endif /* SYS_SDL_H */
-

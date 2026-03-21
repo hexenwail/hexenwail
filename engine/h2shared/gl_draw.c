@@ -23,6 +23,9 @@
 
 #include "quakedef.h"
 #include "hashindex.h"
+#include "gl_shader.h"
+#include "gl_vbo.h"
+#include "gl_matrix.h"
 
 #if ENDIAN_RUNTIME_DETECT
 /* initialized by VID_Init() */
@@ -42,7 +45,7 @@ qboolean	draw_reinit = false;
 static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
 static cvar_t	gl_constretch = {"gl_constretch", "0", CVAR_ARCHIVE};
 static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
-static cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "1", CVAR_ARCHIVE};
+cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
 
 static GLuint		menuplyr_textures[MAX_PLAYER_CLASS];	// player textures in multiplayer config screens
 static GLuint		draw_backtile;
@@ -93,7 +96,7 @@ static const char	*cs_data = {
 	"................................"
 };
 
-int		gl_filter_idx = 4; /* Bilinear */
+int		gl_filter_idx = 5; /* Trilinear */
 
 gltexture_t	gltextures[MAX_GLTEXTURES];
 int			numgltextures;
@@ -471,6 +474,8 @@ void Draw_ReInit (void)
 	draw_reinit = true;
 
 	D_ClearOpenGLTextures(0);
+	if (lightmap_textures[0])
+		glDeleteTextures_fp (MAX_LIGHTMAPS, lightmap_textures);
 	memset (lightmap_textures, 0, sizeof(lightmap_textures));
 	// make sure all of alias models are cleared
 	Draw_ClearAllModels ();
@@ -518,9 +523,18 @@ void Draw_Init (void)
 	// load the charset: 8*8 graphic characters
 	chars = FS_LoadTempFile ("gfx/menu/conchars.lmp", NULL);
 	Draw_PicCheckError (chars, "gfx/menu/conchars.lmp");
-	if (fs_filesize != 256*128) {
-		Sys_Error ("gfx/menu/conchars.lmp: bad size.");
+
+	// SoT/karma2 mods have larger charset (32776 bytes) but it's raw data, not a qpic
+	// Accept both standard 32768 and extended 32768+ sizes as raw character data
+	if (fs_filesize < 256*128) {
+		Sys_Error ("gfx/menu/conchars.lmp: bad size (%d bytes, expected at least %d).",
+			fs_filesize, 256*128);
 	}
+	// Only process the first 256*128 bytes to avoid buffer overruns
+	if (fs_filesize > 256*128) {
+		Con_DPrintf ("conchars.lmp: larger file (%ld bytes), using first 32768\n", fs_filesize);
+	}
+
 	for (i = 0; i < 256*128; i++)
 	{
 		if (chars[i] == 0)
@@ -602,16 +616,17 @@ void Draw_Character (int x, int y, unsigned int num)
 
 	GL_Bind (char_texture);
 
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (fcol, frow);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (fcol + xsize, frow);
-	glVertex2f_fp (x+8, y);
-	glTexCoord2f_fp (fcol + xsize, frow + ysize);
-	glVertex2f_fp (x+8, y+8);
-	glTexCoord2f_fp (fcol, frow + ysize);
-	glVertex2f_fp (x, y+8);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (fcol, frow);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow);
+	GL_ImmVertex2f (x+8, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
+	GL_ImmVertex2f (x+8, y+8);
+	GL_ImmTexCoord2f (fcol, frow + ysize);
+	GL_ImmVertex2f (x, y+8);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 /*
@@ -656,26 +671,23 @@ void Draw_Crosshair (void)
 	{
 		pColor = (unsigned char *) &d_8to24table[(byte) crosshaircolor.integer];
 
-		glTexEnvf_fp (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-		glColor4ubv_fp (pColor);
 		GL_Bind (cs_texture);
 
 		// Our crosshair is now 32x32, but we're drawing 16x16 here
 		// to have a smaller pic. If, in the pixmap, the pixels are
 		// not drawn in doubles, the final image on the screen may
 		// have some of the pixels missing. Sigh...
-		glBegin_fp (GL_QUADS);
-		glTexCoord2f_fp (0, 0);
-		glVertex2f_fp (x - 7, y - 7);
-		glTexCoord2f_fp (1, 0);
-		glVertex2f_fp (x + 9, y - 7);
-		glTexCoord2f_fp (1, 1);
-		glVertex2f_fp (x + 9, y + 9);
-		glTexCoord2f_fp (0, 1);
-		glVertex2f_fp (x - 7, y + 9);
-
-		glEnd_fp ();
-		glTexEnvf_fp (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+		GL_ImmBegin();
+		GL_ImmColor4ubv (pColor);
+		GL_ImmTexCoord2f (0, 0);
+		GL_ImmVertex2f (x - 7, y - 7);
+		GL_ImmTexCoord2f (1, 0);
+		GL_ImmVertex2f (x + 9, y - 7);
+		GL_ImmTexCoord2f (1, 1);
+		GL_ImmVertex2f (x + 9, y + 9);
+		GL_ImmTexCoord2f (0, 1);
+		GL_ImmVertex2f (x - 7, y + 9);
+		GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	}
 	else if (crosshair.integer)
 	{
@@ -730,16 +742,17 @@ void Draw_SmallCharacter (int x, int y, int num)
 
 	GL_Bind (char_smalltexture);
 
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (fcol, frow);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (fcol + xsize, frow);
-	glVertex2f_fp (x+8, y);
-	glTexCoord2f_fp (fcol + xsize, frow + ysize);
-	glVertex2f_fp (x+8, y+8);
-	glTexCoord2f_fp (fcol, frow + ysize);
-	glVertex2f_fp (x, y+8);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (fcol, frow);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow);
+	GL_ImmVertex2f (x+8, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
+	GL_ImmVertex2f (x+8, y+8);
+	GL_ImmTexCoord2f (fcol, frow + ysize);
+	GL_ImmVertex2f (x, y+8);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 //==========================================================================
@@ -779,16 +792,17 @@ void Draw_BigCharacter (int x, int y, int num)
 
 	GL_Bind (char_menufonttexture);
 
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (fcol, frow);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (fcol + xsize, frow);
-	glVertex2f_fp (x+20, y);
-	glTexCoord2f_fp (fcol + xsize, frow + ysize);
-	glVertex2f_fp (x+20, y+20);
-	glTexCoord2f_fp (fcol, frow + ysize);
-	glVertex2f_fp (x, y+20);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (fcol, frow);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow);
+	GL_ImmVertex2f (x+20, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
+	GL_ImmVertex2f (x+20, y+20);
+	GL_ImmTexCoord2f (fcol, frow + ysize);
+	GL_ImmVertex2f (x, y+20);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 
@@ -802,22 +816,22 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 	glpic_t			*gl;
 
 	gl = (glpic_t *)pic->data;
-	glColor4f_fp (1,1,1,1);
 	GL_Bind (gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (gl->sl, gl->tl);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (gl->sh, gl->tl);
-	glVertex2f_fp (x+pic->width, y);
-	glTexCoord2f_fp (gl->sh, gl->th);
-	glVertex2f_fp (x+pic->width, y+pic->height);
-	glTexCoord2f_fp (gl->sl, gl->th);
-	glVertex2f_fp (x, y+pic->height);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (gl->sl, gl->tl);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (gl->sh, gl->tl);
+	GL_ImmVertex2f (x+pic->width, y);
+	GL_ImmTexCoord2f (gl->sh, gl->th);
+	GL_ImmVertex2f (x+pic->width, y+pic->height);
+	GL_ImmTexCoord2f (gl->sl, gl->th);
+	GL_ImmVertex2f (x, y+pic->height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -833,23 +847,20 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	glpic_t			*gl;
 
 	gl = (glpic_t *)pic->data;
-	glDisable_fp(GL_ALPHA_TEST);
 	glEnable_fp (GL_BLEND);
 	glCullFace_fp(GL_FRONT);
-	glColor4f_fp (1,1,1,alpha);
 	GL_Bind (gl->texnum);
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (gl->sl, gl->tl);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (gl->sh, gl->tl);
-	glVertex2f_fp (x+pic->width, y);
-	glTexCoord2f_fp (gl->sh, gl->th);
-	glVertex2f_fp (x+pic->width, y+pic->height);
-	glTexCoord2f_fp (gl->sl, gl->th);
-	glVertex2f_fp (x, y+pic->height);
-	glEnd_fp ();
-	glColor4f_fp (1,1,1,1);
-	glEnable_fp(GL_ALPHA_TEST);
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, alpha);
+	GL_ImmTexCoord2f (gl->sl, gl->tl);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (gl->sh, gl->tl);
+	GL_ImmVertex2f (x+pic->width, y);
+	GL_ImmTexCoord2f (gl->sh, gl->th);
+	GL_ImmVertex2f (x+pic->width, y+pic->height);
+	GL_ImmTexCoord2f (gl->sl, gl->th);
+	GL_ImmVertex2f (x, y+pic->height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	glDisable_fp (GL_BLEND);
 }
 
@@ -923,22 +934,22 @@ void Draw_IntermissionPic (qpic_t *pic)
 	glpic_t			*gl;
 
 	gl = (glpic_t *)pic->data;
-	glColor4f_fp (1,1,1,1);
 	GL_Bind (gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 
-	glBegin_fp(GL_QUADS);
-	glTexCoord2f_fp(0.0f, 0.0f);
-	glVertex2f_fp(0.0f, 0.0f);
-	glTexCoord2f_fp(1.0f, 0.0f);
-	glVertex2f_fp(vid.width, 0.0f);
-	glTexCoord2f_fp(1.0f, 1.0f);
-	glVertex2f_fp(vid.width, vid.height);
-	glTexCoord2f_fp(0.0f, 1.0f);
-	glVertex2f_fp(0.0f, vid.height);
-	glEnd_fp();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (0.0f, 0.0f);
+	GL_ImmVertex2f (0.0f, 0.0f);
+	GL_ImmTexCoord2f (1.0f, 0.0f);
+	GL_ImmVertex2f (vid.width, 0.0f);
+	GL_ImmTexCoord2f (1.0f, 1.0f);
+	GL_ImmVertex2f (vid.width, vid.height);
+	GL_ImmTexCoord2f (0.0f, 1.0f);
+	GL_ImmVertex2f (0.0f, vid.height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -963,18 +974,18 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	newtl = gl->tl + (srcy*oldglheight)/pic->height;
 	newth = newtl + (height*oldglheight)/pic->height;
 
-	glColor4f_fp (1,1,1,1);
 	GL_Bind (gl->texnum);
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (newsl, newtl);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (newsh, newtl);
-	glVertex2f_fp (x+width, y);
-	glTexCoord2f_fp (newsh, newth);
-	glVertex2f_fp (x+width, y+height);
-	glTexCoord2f_fp (newsl, newth);
-	glVertex2f_fp (x, y+height);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (newsl, newtl);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (newsh, newtl);
+	GL_ImmVertex2f (x+width, y);
+	GL_ImmTexCoord2f (newsh, newth);
+	GL_ImmVertex2f (x+width, y+height);
+	GL_ImmTexCoord2f (newsl, newth);
+	GL_ImmVertex2f (x, y+height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 void Draw_PicCropped (int x, int y, qpic_t *pic)
@@ -1016,18 +1027,18 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 		th = gl->th;//(height-0.01)/pic->height;
 	}
 
-	glColor4f_fp (1,1,1,1);
 	GL_Bind (gl->texnum);
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (gl->sl, tl);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (gl->sh, tl);
-	glVertex2f_fp (x+pic->width, y);
-	glTexCoord2f_fp (gl->sh, th);
-	glVertex2f_fp (x+pic->width, y+height);
-	glTexCoord2f_fp (gl->sl, th);
-	glVertex2f_fp (x, y+height);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (gl->sl, tl);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (gl->sh, tl);
+	GL_ImmVertex2f (x+pic->width, y);
+	GL_ImmTexCoord2f (gl->sh, th);
+	GL_ImmVertex2f (x+pic->width, y+height);
+	GL_ImmTexCoord2f (gl->sl, th);
+	GL_ImmVertex2f (x, y+height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
@@ -1074,18 +1085,18 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 		height = h;
 	}
 
-	glColor4f_fp (1,1,1,1);
 	GL_Bind (gl->texnum);
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (gl->sl, tl);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (gl->sh, tl);
-	glVertex2f_fp (x+pic->width, y);
-	glTexCoord2f_fp (gl->sh, th);
-	glVertex2f_fp (x+pic->width, y+height);
-	glTexCoord2f_fp (gl->sl, th);
-	glVertex2f_fp (x, y+height);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (gl->sl, tl);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (gl->sh, tl);
+	GL_ImmVertex2f (x+pic->width, y);
+	GL_ImmTexCoord2f (gl->sh, th);
+	GL_ImmVertex2f (x+pic->width, y+height);
+	GL_ImmTexCoord2f (gl->sl, th);
+	GL_ImmVertex2f (x, y+height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 /*
@@ -1149,17 +1160,17 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	glColor3f_fp (1,1,1);
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (0, 0);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp (( float )PLAYER_PIC_WIDTH / PLAYER_DEST_WIDTH, 0);
-	glVertex2f_fp (x+pic->width, y);
-	glTexCoord2f_fp (( float )PLAYER_PIC_WIDTH / PLAYER_DEST_WIDTH, ( float )PLAYER_PIC_HEIGHT / PLAYER_DEST_HEIGHT);
-	glVertex2f_fp (x+pic->width, y+pic->height);
-	glTexCoord2f_fp (0, ( float )PLAYER_PIC_HEIGHT / PLAYER_DEST_HEIGHT);
-	glVertex2f_fp (x, y+pic->height);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor3f (1, 1, 1);
+	GL_ImmTexCoord2f (0, 0);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (( float )PLAYER_PIC_WIDTH / PLAYER_DEST_WIDTH, 0);
+	GL_ImmVertex2f (x+pic->width, y);
+	GL_ImmTexCoord2f (( float )PLAYER_PIC_WIDTH / PLAYER_DEST_WIDTH, ( float )PLAYER_PIC_HEIGHT / PLAYER_DEST_HEIGHT);
+	GL_ImmVertex2f (x+pic->width, y+pic->height);
+	GL_ImmTexCoord2f (0, ( float )PLAYER_PIC_HEIGHT / PLAYER_DEST_HEIGHT);
+	GL_ImmVertex2f (x, y+pic->height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 
@@ -1171,25 +1182,22 @@ Draw_ConsoleBackground
 */
 static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 {
-	glDisable_fp(GL_ALPHA_TEST);
 	glEnable_fp (GL_BLEND);
 	glCullFace_fp(GL_FRONT);
-	glColor4f_fp (1,1,1,alpha);
 	GL_Bind (num);
 
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (0, 0 + ofs);
-	glVertex2f_fp (0, 0);
-	glTexCoord2f_fp (1, 0 + ofs);
-	glVertex2f_fp (vid.conwidth, 0);
-	glTexCoord2f_fp (1, 1);
-	glVertex2f_fp (vid.conwidth, lines);
-	glTexCoord2f_fp (0, 1);
-	glVertex2f_fp (0, lines);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, alpha);
+	GL_ImmTexCoord2f (0, 0 + ofs);
+	GL_ImmVertex2f (0, 0);
+	GL_ImmTexCoord2f (1, 0 + ofs);
+	GL_ImmVertex2f (vid.conwidth, 0);
+	GL_ImmTexCoord2f (1, 1);
+	GL_ImmVertex2f (vid.conwidth, lines);
+	GL_ImmTexCoord2f (0, 1);
+	GL_ImmVertex2f (0, lines);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
-	glColor4f_fp (1,1,1,1);
-	glEnable_fp(GL_ALPHA_TEST);
 	glDisable_fp (GL_BLEND);
 }
 
@@ -1233,18 +1241,18 @@ refresh window.
 */
 void Draw_TileClear (int x, int y, int w, int h)
 {
-	glColor3f_fp (1,1,1);
 	GL_Bind (draw_backtile);
-	glBegin_fp (GL_QUADS);
-	glTexCoord2f_fp (x/64.0, y/64.0);
-	glVertex2f_fp (x, y);
-	glTexCoord2f_fp ( (x+w)/64.0, y/64.0);
-	glVertex2f_fp (x+w, y);
-	glTexCoord2f_fp ( (x+w)/64.0, (y+h)/64.0);
-	glVertex2f_fp (x+w, y+h);
-	glTexCoord2f_fp (x/64.0, (y+h)/64.0);
-	glVertex2f_fp (x, y+h);
-	glEnd_fp ();
+	GL_ImmBegin();
+	GL_ImmColor3f (1, 1, 1);
+	GL_ImmTexCoord2f (x/64.0, y/64.0);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f ( (x+w)/64.0, y/64.0);
+	GL_ImmVertex2f (x+w, y);
+	GL_ImmTexCoord2f ( (x+w)/64.0, (y+h)/64.0);
+	GL_ImmVertex2f (x+w, y+h);
+	GL_ImmTexCoord2f (x/64.0, (y+h)/64.0);
+	GL_ImmVertex2f (x, y+h);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 }
 
 
@@ -1257,21 +1265,15 @@ Fills a box of pixels with a single color
 */
 void Draw_Fill (int x, int y, int w, int h, int c)
 {
-	glDisable_fp (GL_TEXTURE_2D);
-	glColor3f_fp (host_basepal[c*3]/255.0,
+	GL_ImmBegin();
+	GL_ImmColor3f (host_basepal[c*3]/255.0,
 				host_basepal[c*3+1]/255.0,
 				host_basepal[c*3+2]/255.0);
-
-	glBegin_fp (GL_QUADS);
-
-	glVertex2f_fp (x,y);
-	glVertex2f_fp (x+w, y);
-	glVertex2f_fp (x+w, y+h);
-	glVertex2f_fp (x, y+h);
-
-	glEnd_fp ();
-	glColor3f_fp (1,1,1);
-	glEnable_fp (GL_TEXTURE_2D);
+	GL_ImmVertex2f (x,y);
+	GL_ImmVertex2f (x+w, y);
+	GL_ImmVertex2f (x+w, y+h);
+	GL_ImmVertex2f (x, y+h);
+	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 }
 
 //=============================================================================
@@ -1287,21 +1289,15 @@ void Draw_FadeScreen (void)
 	int		bx, by, ex, ey;
 	int		c;
 
-	glAlphaFunc_fp(GL_ALWAYS, 0);
-
 	glEnable_fp (GL_BLEND);
-	glDisable_fp (GL_TEXTURE_2D);
 
-	glColor4f_fp (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.1);
-	glBegin_fp (GL_QUADS);
-
-	glVertex2f_fp (0,0);
-	glVertex2f_fp (vid.width, 0);
-	glVertex2f_fp (vid.width, vid.height);
-	glVertex2f_fp (0, vid.height);
-	glEnd_fp ();
-
-	glColor4f_fp (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.018);
+	GL_ImmBegin();
+	GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.1);
+	GL_ImmVertex2f (0,0);
+	GL_ImmVertex2f (vid.width, 0);
+	GL_ImmVertex2f (vid.width, vid.height);
+	GL_ImmVertex2f (0, vid.height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 
 	for (c = 0 ; c < 40 ; c++)
 	{
@@ -1318,19 +1314,16 @@ void Draw_FadeScreen (void)
 		if (ey > vid.height)
 			ey = vid.height;
 
-		glBegin_fp (GL_QUADS);
-		glVertex2f_fp (bx, by);
-		glVertex2f_fp (ex, by);
-		glVertex2f_fp (ex, ey);
-		glVertex2f_fp (bx, ey);
-		glEnd_fp ();
+		GL_ImmBegin();
+		GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.018);
+		GL_ImmVertex2f (bx, by);
+		GL_ImmVertex2f (ex, by);
+		GL_ImmVertex2f (ex, ey);
+		GL_ImmVertex2f (bx, ey);
+		GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 	}
 
-	glColor4f_fp (1,1,1,1);
-	glEnable_fp (GL_TEXTURE_2D);
 	glDisable_fp (GL_BLEND);
-
-	glAlphaFunc_fp(GL_GREATER, 0.632);
 
 	Sbar_Changed();
 }
@@ -1348,20 +1341,18 @@ void GL_Set2D (void)
 {
 	glViewport_fp (glx, gly, glwidth, glheight);
 
-	glMatrixMode_fp(GL_PROJECTION);
-	glLoadIdentity_fp ();
-	glOrtho_fp  (0, vid.width, vid.height, 0, -99999, 99999);
-
-	glMatrixMode_fp(GL_MODELVIEW);
-	glLoadIdentity_fp ();
+	GL_MatrixMode(GL_MAT_PROJECTION);
+	GL_LoadIdentity();
+	GL_Ortho(0, vid.width, vid.height, 0, -99999, 99999);
+	GL_MatrixMode(GL_MAT_MODELVIEW);
+	GL_LoadIdentity();
 
 	glDisable_fp (GL_DEPTH_TEST);
 	glDisable_fp (GL_CULL_FACE);
 	glDisable_fp (GL_BLEND);
-	glEnable_fp (GL_ALPHA_TEST);
-//	glDisable_fp (GL_ALPHA_TEST);
 
-	glColor4f_fp (1,1,1,1);
+	/* enable alpha test for 2D draws (menu text, HUD) */
+	GL_SetAlphaThreshold(0.666f);
 }
 
 //====================================================================
@@ -1519,48 +1510,6 @@ static void GL_MipMap (const byte *in, byte *out, int *width, int *height, int d
 }
 
 /*
-================
-fxPalTexImage2D
-
-Acts the same as glTexImage2D, except that it maps color
-into the current palette and uses paletteized textures.
-If you are on a 3Dfx card and your texture has no alpha,
-then download it as a palettized texture to save memory.
-
-fxpal_buf is a pointer to hunk allocated temporary buffer.
-The callers of fxPalTexImage2D() are responsible for the
-allocation and freeing of fxpal_buf. According to Pa3PyX,
-fxpal_buf must remain static until all mipmap reductions
-are uploaded, otherwise garbage results with 3dfx.
-================
-*/
-static unsigned char	*fxpal_buf;
-
-static void fxPalTexImage2D (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels)
-{
-	GLsizei		i;
-
-	// we don't want textures with alpha
-	if (internalformat != 3)
-		Sys_Error ("%s: internalformat != 3", __thisfunc__);
-
-	for (i = 0; i < width * height; i++)
-	{
-		int	r, g, b, idx;
-		r = ((unsigned char *)pixels)[i * 4];
-		g = ((unsigned char *)pixels)[i * 4 +1];
-		b = ((unsigned char *)pixels)[i * 4 +2];
-		r >>= 8 - INVERSE_PAL_R_BITS;
-		g >>= 8 - INVERSE_PAL_G_BITS;
-		b >>= 8 - INVERSE_PAL_B_BITS;
-		idx = (r << (INVERSE_PAL_G_BITS + INVERSE_PAL_B_BITS)) | (g << INVERSE_PAL_B_BITS) | b;
-		fxpal_buf[i] = inverse_pal[idx];
-	}
-
-	glTexImage2D_fp(target, level, GL_COLOR_INDEX8_EXT, width, height, border, GL_COLOR_INDEX, GL_UNSIGNED_BYTE, fxpal_buf);
-}
-
-/*
 ===============
 GL_Upload32
 ===============
@@ -1572,21 +1521,8 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	int		mark = 0;
 	int		scaled_width, scaled_height;
 
-	if (gl_tex_NPOT && !is8bit)
-	{
-		scaled_width = glt->width >> gl_picmip.integer;
-		scaled_height = glt->height >> gl_picmip.integer;
-	}
-	else
-	{
-	// Snap the height and width to a power of 2.
-		for (scaled_width = 1; scaled_width < glt->width; scaled_width <<= 1)
-			;
-		for (scaled_height = 1; scaled_height < glt->height; scaled_height <<= 1)
-			;
-		scaled_width >>= gl_picmip.integer;
-		scaled_height >>= gl_picmip.integer;
-	}
+	scaled_width = glt->width >> gl_picmip.integer;
+	scaled_height = glt->height >> gl_picmip.integer;
 
 	if (scaled_width < 1)
 		scaled_width = 1;
@@ -1600,21 +1536,86 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	if (scaled_height > gl_max_size)
 		scaled_height = gl_max_size;
 
-	// 3dfx has some aspect ratio constraints.
-	// can't go beyond 8 to 1 or below 1 to 8.
-	if (is_3dfx)
+	samples = (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format;
+
+	// Binarize alpha for alpha-tested textures: snap to 0 or 255.
+	// Many external TGAs have smooth/anti-aliased alpha meant for blending,
+	// but alpha-tested textures (fence brushes, EF_HOLEY models) need binary
+	// alpha for GL_ALPHA_TEST to work. After binarizing, flood RGB from opaque
+	// neighbors into transparent pixels to prevent black fringe artifacts.
+	if ((glt->flags & TEX_FENCE) || ((glt->flags & TEX_HOLEY) && (glt->flags & TEX_RGBA)))
 	{
-		if (scaled_width * 8 < scaled_height)
+		int i, s, pass;
+		byte *rgba;
+		unsigned int *cleaned_data;
+
+		if (!mark)
+			mark = Hunk_LowMark();
+		cleaned_data = (unsigned int *) Hunk_AllocName(glt->width * glt->height * sizeof(unsigned int), "texbuf_fence");
+		memcpy(cleaned_data, data, glt->width * glt->height * sizeof(unsigned int));
+
+		s = glt->width * glt->height;
+		rgba = (byte *)cleaned_data;
+
+		// Step 1: Binarize alpha at threshold 128
+		for (i = 0; i < s; i++)
 		{
-			scaled_width = scaled_height >> 3;
+			int offset = i * 4;
+			rgba[offset + 3] = (rgba[offset + 3] >= 128) ? 255 : 0;
 		}
-		else if (scaled_height * 8 < scaled_width)
+
+		// Step 2: Flood RGB from opaque neighbors into transparent pixels.
+		// This prevents black fringes when texture filtering samples across
+		// the opaque/transparent boundary. Run multiple passes to propagate
+		// colors inward from edges.
+		for (pass = 0; pass < 4; pass++)
 		{
-			scaled_height = scaled_width >> 3;
+			for (i = 0; i < s; i++)
+			{
+				int offset = i * 4;
+				if (rgba[offset + 3] != 0)
+					continue;
+
+				// Check 4 neighbors for an opaque pixel to copy RGB from
+				if (i >= glt->width && rgba[(i - glt->width) * 4 + 3] == 255)
+				{
+					int n = (i - glt->width) * 4;
+					rgba[offset+0] = rgba[n+0];
+					rgba[offset+1] = rgba[n+1];
+					rgba[offset+2] = rgba[n+2];
+				}
+				else if (i + glt->width < s && rgba[(i + glt->width) * 4 + 3] == 255)
+				{
+					int n = (i + glt->width) * 4;
+					rgba[offset+0] = rgba[n+0];
+					rgba[offset+1] = rgba[n+1];
+					rgba[offset+2] = rgba[n+2];
+				}
+				else if (i > 0 && rgba[(i - 1) * 4 + 3] == 255)
+				{
+					int n = (i - 1) * 4;
+					rgba[offset+0] = rgba[n+0];
+					rgba[offset+1] = rgba[n+1];
+					rgba[offset+2] = rgba[n+2];
+				}
+				else if (i + 1 < s && rgba[(i + 1) * 4 + 3] == 255)
+				{
+					int n = (i + 1) * 4;
+					rgba[offset+0] = rgba[n+0];
+					rgba[offset+1] = rgba[n+1];
+					rgba[offset+2] = rgba[n+2];
+				}
+			}
 		}
+
+		data = cleaned_data;
 	}
 
-	samples = (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format;
+	// Force GL_RGBA8 (0x8058) sized internal format for alpha-tested textures.
+	// The legacy internal format '4' may not reliably store alpha on
+	// some Mesa/Intel drivers. GL_RGBA8 explicitly requires 8-bit RGBA.
+	if (glt->flags & (TEX_FENCE | TEX_HOLEY))
+		samples = 0x8058; /* GL_RGBA8 */
 
 	if (scaled_width == glt->width && scaled_height == glt->height)
 	{
@@ -1622,22 +1623,13 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	}
 	else
 	{
-		mark = Hunk_LowMark();
+		if (!mark)
+			mark = Hunk_LowMark();
 		scaled = (unsigned int *) Hunk_AllocName(scaled_width * scaled_height * sizeof(unsigned int), "texbuf_upload32");
 		GL_ResampleTexture (data, glt->width, glt->height, scaled, scaled_width, scaled_height);
 	}
 
-	if (is8bit && !(glt->flags & TEX_ALPHA))
-	{
-		if (!mark)
-			mark = Hunk_LowMark();
-		fxpal_buf = (unsigned char *) Hunk_AllocName(scaled_width * scaled_height, "texbuf_upload8pal");
-		fxPalTexImage2D (GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
-	}
-	else
-	{
-		glTexImage2D_fp (GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
-	}
+	glTexImage2D_fp (GL_TEXTURE_2D, 0, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
 
 	if (glt->flags & TEX_MIPMAP)
 	{
@@ -1648,9 +1640,19 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		{
 			GL_MipMap ((byte *)scaled, (byte *)scaled, &scaled_width, &scaled_height, 1, 1);
 			miplevel++;
-			if (is8bit && !(glt->flags & TEX_ALPHA))
-				fxPalTexImage2D (GL_TEXTURE_2D, miplevel, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
-			else	glTexImage2D_fp (GL_TEXTURE_2D, miplevel, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
+
+			/* Re-binarize alpha in mipmaps for alpha-tested textures.
+			 * GL_MipMap averages alpha values, creating intermediate
+			 * values that would leak through the alpha test. */
+			if (glt->flags & (TEX_FENCE | TEX_HOLEY))
+			{
+				int ii, mipsize = scaled_width * scaled_height;
+				byte *miprgba = (byte *)scaled;
+				for (ii = 0; ii < mipsize; ii++)
+					miprgba[ii * 4 + 3] = (miprgba[ii * 4 + 3] >= 128) ? 255 : 0;
+			}
+
+			glTexImage2D_fp (GL_TEXTURE_2D, miplevel, samples, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, scaled);
 		}
 	}
 
@@ -1760,7 +1762,23 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 			{
 				p = data[i];
 				if (p == 0)
+				{
+					// Index 0 is transparent - flood RGB like we do for index 255
+					if (i > glt->width && data[i-glt->width] != 0)
+						p = data[i-glt->width];
+					else if (i < s-glt->width && data[i+glt->width] != 0)
+						p = data[i+glt->width];
+					else if (i > 0 && data[i-1] != 0)
+						p = data[i-1];
+					else if (i < s-1 && data[i+1] != 0)
+						p = data[i+1];
+					/* copy rgb components from neighbor */
+					((byte *)&trans[i])[0] = ((byte *)&d_8to24table[p])[0];
+					((byte *)&trans[i])[1] = ((byte *)&d_8to24table[p])[1];
+					((byte *)&trans[i])[2] = ((byte *)&d_8to24table[p])[2];
+					/* set alpha to 0 */
 					trans[i] &= MASK_rgb;
+				}
 			}
 			else if (glt->flags & TEX_SPECIAL_TRANS)
 			{
@@ -1777,14 +1795,10 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 	}
 	else
 	{
-		if (s&3)
-			Sys_Error ("%s: s&3", __thisfunc__);
-		for (i = 0; i < s; i += 4)
+		// Handle non-multiple-of-4 texture sizes (for SoT mod compatibility)
+		for (i = 0; i < s; i++)
 		{
 			trans[i] = d_8to24table[data[i]];
-			trans[i+1] = d_8to24table[data[i+1]];
-			trans[i+2] = d_8to24table[data[i+2]];
-			trans[i+3] = d_8to24table[data[i+3]];
 		}
 	}
 
@@ -1825,6 +1839,7 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 			{
 				if (crc != glt->crc ||
 				    (glt->flags & TEX_MIPMAP) != (flags & TEX_MIPMAP) ||
+				    (glt->flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) != (flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) ||
 				    width  != glt->width || height != glt->height)
 				{ /* not the same, delete and rebind to new image */
 					Con_DPrintf ("Texture cache mismatch: %lu, %s, reloading\n",

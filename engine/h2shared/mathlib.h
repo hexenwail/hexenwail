@@ -41,6 +41,9 @@ static inline int IS_NAN (float x) {
 #endif
 int Q_isnan (float x);	/* For 32 bit floats only. */
 
+//johnfitz -- from joequake
+#define Q_rint(x) ((x) > 0 ? (int)((x) + 0.5) : (int)((x) - 0.5))
+
 // square root approximation for single precision floats
 // https://en.wikipedia.org/wiki/Methods_of_computing_square_roots#Approximations_that_depend_on_the_floating_point_representation
 static inline float Q_sqrt (float x)
@@ -186,6 +189,7 @@ static inline float _inl_VectorNormalizeFast (vec3_t v)
 #define VectorNormalizeFast(a)	_inl_VectorNormalizeFast((a))
 
 int Q_log2(int val);
+int NearestMultiple(int num, int mul);
 
 void R_ConcatRotations (float in1[3][3], float in2[3][3], float out[3][3]);
 void R_ConcatTransforms (float in1[3][4], float in2[3][4], float out[3][4]);

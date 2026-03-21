@@ -147,7 +147,7 @@ static const char *pr_opnames[] =
 #define OPC ((eval_t *)&pr_globals[st->c])
 #endif
 
-void PR_ExecuteProgram (func_t fnum)
+void PR_ExecuteProgram (func_t fnum, const char *funcname)
 {
 	eval_t		*ptr, *a, *b, *c;
 	float		*vecptr;
@@ -160,6 +160,7 @@ void PR_ExecuteProgram (func_t fnum)
 	/* switch/case support:  */
 	int	case_type = -1;
 	float	switch_float = 0;
+	char	error_msg[256];
 
 	if (!fnum || fnum >= progs->numfunctions)
 	{
@@ -167,7 +168,8 @@ void PR_ExecuteProgram (func_t fnum)
 		{
 			ED_Print(PROG_TO_EDICT(*sv_globals.self));
 		}
-		Host_Error("%s: NULL function", __thisfunc__);
+		q_snprintf(error_msg, sizeof(error_msg), "%s: NULL function %s", __thisfunc__, funcname ? funcname : "(unknown)");
+		Host_Error("%s", error_msg);
 	}
 
 	f = &pr_functions[fnum];

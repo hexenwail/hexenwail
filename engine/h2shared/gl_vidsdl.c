@@ -39,7 +39,11 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "sdl_inc.h"
+#include "gl_postprocess.h"
+#include "gl_shader.h"
+#include "gl_vbo.h"
 #include "filenames.h"
+
 
 #define WARP_WIDTH		320
 #define WARP_HEIGHT		200
@@ -115,8 +119,8 @@ typedef struct {
 } attributes_t;
 static attributes_t	vid_attribs;
 
-static const SDL_VideoInfo	*vid_info;
-static SDL_Surface	*screen;
+static SDL_Window	*window;
+static SDL_GLContext	glcontext;
 static qboolean	vid_menu_fs;
 static qboolean	fs_toggle_works = true;
 
@@ -138,7 +142,12 @@ static cvar_t	vid_mode = {"vid_mode", "0", CVAR_NONE};
 static cvar_t	vid_config_consize = {"vid_config_consize", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_glx = {"vid_config_glx", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_ARCHIVE};
-static cvar_t	vid_config_fscr= {"vid_config_fscr", "0", CVAR_ARCHIVE};
+static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};
+static cvar_t	vid_window_x = {"vid_window_x", "-1", CVAR_ARCHIVE};
+static cvar_t	vid_window_y = {"vid_window_y", "-1", CVAR_ARCHIVE};
+static cvar_t	vid_vsync = {"vid_vsync", "1", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
+extern cvar_t	gl_texture_anisotropy;	/* defined in gl_draw.c */
+static cvar_t	vid_borderless = {"vid_borderless", "0", CVAR_ARCHIVE};
 // cvars for compatibility with the software version
 static cvar_t	vid_config_swx = {"vid_config_swx", "320", CVAR_ARCHIVE};
 static cvar_t	vid_config_swy = {"vid_config_swy", "240", CVAR_ARCHIVE};
@@ -160,47 +169,19 @@ static const char	*gl_library;
 static const char	*gl_vendor;
 static const char	*gl_renderer;
 static const char	*gl_version;
-static const char	*gl_extensions;
-qboolean	is_3dfx = false;
 
 GLint		gl_max_size = 256;
-static qboolean	have_NPOT = false;
-qboolean	gl_tex_NPOT = false;
-static cvar_t	gl_texture_NPOT = {"gl_texture_NPOT", "0", CVAR_ARCHIVE};
 GLfloat		gl_max_anisotropy;
 float		gldepthmin, gldepthmax;
 
-/* palettized textures */
-static qboolean	have8bit = false;
-qboolean	is8bit = false;
-static cvar_t	vid_config_gl8bit = {"vid_config_gl8bit", "0", CVAR_ARCHIVE};
-
 /* Gamma stuff */
 #define	USE_GAMMA_RAMPS			0
-
-/* 3dfx gamma hacks: see fx_gamma.c */
-#define	USE_3DFX_RAMPS			0
-#if defined(USE_3DFXGAMMA)
-#include "fx_gamma.h"
-#endif
-
-#if (USE_GAMMA_RAMPS) || (defined(USE_3DFXGAMMA) && (USE_3DFX_RAMPS))
-static unsigned short	orig_ramps[3][256];
-#endif
-
-static qboolean	fx_gamma   = false;	// 3dfx-specific gamma control
 static qboolean	gammaworks = false;	// whether hw-gamma works
-
-// multitexturing
-qboolean	gl_mtexable = false;
-static GLint	num_tmus = 1;
-static qboolean	have_mtex = false;
-static cvar_t	gl_multitexture = {"gl_multitexture", "0", CVAR_ARCHIVE};
 
 // multisampling
 static int	multisample = 0; // do not set this if SDL cannot multisample
 static qboolean	sdl_has_multisample = false;
-static cvar_t	vid_config_fsaa = {"vid_config_fsaa", "0", CVAR_ARCHIVE};
+static cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_ARCHIVE};
 
 // stencil buffer
 qboolean	have_stencil = false;
@@ -219,30 +200,6 @@ cvar_t		_enable_mouse = {"_enable_mouse", "1", CVAR_ARCHIVE};
 
 
 //====================================
-
-static qboolean GL_ParseExtensionList (const char *list, const char *name)
-{
-	const char	*start;
-	const char	*where, *terminator;
-
-	if (!list || !name || !*name)
-		return false;
-	if (strchr(name, ' ') != NULL)
-		return false;	// extension names must not have spaces
-
-	start = list;
-	while (1) {
-		where = strstr (start, name);
-		if (!where)
-			break;
-		terminator = where + strlen (name);
-		if (where == start || where[-1] == ' ')
-			if (*terminator == ' ' || *terminator == '\0')
-				return true;
-		start = terminator;
-	}
-	return false;
-}
 
 //====================================
 
@@ -274,14 +231,20 @@ void VID_HandlePause (qboolean paused)
 	}
 }
 
+SDL_Window *VID_GetWindow (void)
+{
+	return window;
+}
+
 qboolean VID_HasMouseOrInputFocus (void)
 {
-	return (SDL_GetAppState() & (SDL_APPMOUSEFOCUS | SDL_APPINPUTFOCUS)) != 0;
+	return (SDL_GetWindowFlags(window) & (SDL_WINDOW_MOUSE_FOCUS | SDL_WINDOW_INPUT_FOCUS)) != 0;
 }
 
 qboolean VID_IsMinimized (void)
 {
-	return !(SDL_GetAppState() & SDL_APPACTIVE);
+	/* SDL3: SDL_WINDOW_SHOWN removed; check SDL_WINDOW_MINIMIZED instead */
+	return (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0;
 }
 
 
@@ -301,21 +264,30 @@ static void VID_SetIcon (void)
 	SDL_Color	color;
 	Uint8		*ptr;
 	int		i, mask;
+	SDL_Palette	*palette;
 
-	icon = SDL_CreateRGBSurface(SDL_SWSURFACE, hx2icon_width, hx2icon_height, 8, 0, 0, 0, 0);
+	icon = SDL_CreateSurface(hx2icon_width, hx2icon_height, SDL_PIXELFORMAT_INDEX8);
 	if (icon == NULL)
 		return;
 
-	SDL_SetColorKey(icon, SDL_SRCCOLORKEY, 0);
+	SDL_SetSurfaceColorKey(icon, true, 0);
 
-	color.r = 255;
-	color.g = 255;
-	color.b = 255;
-	SDL_SetColors(icon, &color, 0, 1);	/* just in case */
-	color.r = 192;
-	color.g = 0;
-	color.b = 0;
-	SDL_SetColors(icon, &color, 1, 1);
+	palette = SDL_CreatePalette(256);
+	if (palette)
+	{
+		color.r = 255;
+		color.g = 255;
+		color.b = 255;
+		color.a = 255;
+		SDL_SetPaletteColors(palette, &color, 0, 1);	/* just in case */
+		color.r = 192;
+		color.g = 0;
+		color.b = 0;
+		color.a = 255;
+		SDL_SetPaletteColors(palette, &color, 1, 1);
+		SDL_SetSurfacePalette(icon, palette);
+		SDL_DestroyPalette(palette);
+	}
 
 	ptr = (Uint8 *)icon->pixels;
 	/* one bit represents a pixel, black or white:  each
@@ -329,8 +301,8 @@ static void VID_SetIcon (void)
 		}
 	}
 
-	SDL_WM_SetIcon(icon, NULL);
-	SDL_FreeSurface(icon);
+	SDL_SetWindowIcon(window, icon);
+	SDL_DestroySurface(icon);
 #endif /* !OSX */
 }
 
@@ -410,15 +382,13 @@ float VID_ReportConsize(void)
 
 static qboolean VID_SetMode (int modenum)
 {
-	Uint32	flags;
 	int	i, is_fullscreen;
+	SDL_DisplayID	display_id;
+	const SDL_DisplayMode	*desktop_mode;
+	int	screen_w, screen_h, drawable_w, drawable_h;
+	int	scaling_factor = 100;
 
 	in_mode_set = true;
-
-	//flags = (SDL_OPENGL|SDL_NOFRAME);
-	flags = (SDL_OPENGL);
-	if (vid_config_fscr.integer)
-		flags |= SDL_FULLSCREEN;
 
 	// setup the attributes
 	if (bpp >= 32)
@@ -439,11 +409,12 @@ static qboolean VID_SetMode (int modenum)
 	}
 	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
 
-	if (multisample && !sdl_has_multisample)
-	{
-		multisample = 0;
-		Con_SafePrintf ("SDL ver < %d, multisampling disabled\n", SDL_VER_WITH_MULTISAMPLING);
-	}
+	/* request OpenGL 4.3 compatibility profile — still have some
+	 * legacy GL state/enum usage that doesn't work in core profile */
+	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
+	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
+	SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY );
+
 	if (multisample)
 	{
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
@@ -452,36 +423,97 @@ static qboolean VID_SetMode (int modenum)
 
 	Con_SafePrintf ("Requested mode %d: %dx%dx%d\n", modenum, modelist[modenum].width, modelist[modenum].height, bpp);
 
-	VID_SetIcon();
+	// SDL3: SDL_CreateWindow no longer takes x,y position params
+	{
+		Uint32 wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+		if (vid_borderless.integer && !vid_config_fscr.integer)
+			wflags |= SDL_WINDOW_BORDERLESS;
+		window = SDL_CreateWindow("",
+					  modelist[modenum].width, modelist[modenum].height,
+					  wflags);
+	}
 
-	screen = SDL_SetVideoMode (modelist[modenum].width, modelist[modenum].height, bpp, flags);
-	if (!screen)
+	if (!window)
 	{
 		if (!multisample)
-		{
 			Sys_Error ("Couldn't set video mode: %s", SDL_GetError());
-		}
 		else
 		{
 			Con_SafePrintf ("multisample window failed\n");
 			multisample = 0;
 			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
 			SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, multisample);
-			screen = SDL_SetVideoMode (modelist[modenum].width, modelist[modenum].height, bpp, flags);
-			if (!screen)
+			window = SDL_CreateWindow("",
+						  modelist[modenum].width, modelist[modenum].height,
+						  SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+			if (!window)
 				Sys_Error ("Couldn't set video mode: %s", SDL_GetError());
 		}
 	}
 
+	// Restore saved window position, or center on first run
+	if (!vid_config_fscr.integer && vid_window_x.integer >= 0 && vid_window_y.integer >= 0)
+		SDL_SetWindowPosition(window, vid_window_x.integer, vid_window_y.integer);
+	else
+		SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+
+	// Check HiDPI scaling
+	SDL_GetWindowSize(window, &screen_w, &screen_h);
+	SDL_GetWindowSizeInPixels(window, &drawable_w, &drawable_h);
+	scaling_factor = (100 * drawable_w) / screen_w;
+	if (scaling_factor != 100)
+		Con_Printf ("High DPI scaling in effect! (%d%%)\n", scaling_factor);
+
+	// Handle fullscreen after window creation
+	if (vid_config_fscr.integer)
+	{
+		// Check if resolution matches desktop
+		// (SDL3 fullscreen uses borderless by default when matching desktop res)
+		display_id = SDL_GetDisplayForWindow(window);
+		desktop_mode = SDL_GetDesktopDisplayMode(display_id);
+		if (desktop_mode && screen_w == desktop_mode->w && screen_h == desktop_mode->h)
+			Con_Printf ("Fullscreen res matches desktop\n");
+
+		// SDL3: just use SDL_WINDOW_FULLSCREEN, no more FULLSCREEN_DESKTOP
+		SDL_SetWindowFullscreen(window, true);
+		SDL_SyncWindow(window);
+	}
+
+	glcontext = SDL_GL_CreateContext(window);
+	if (!glcontext)
+	{
+		SDL_DestroyWindow(window);
+		window = NULL;
+		Sys_Error ("Couldn't create gl context: %s", SDL_GetError());
+	}
+
+	VID_SetIcon();
+	SDL_SetWindowTitle(window, WM_TITLEBAR_TEXT);
+
+	// Apply vsync: 0=off, 1=on, -1=adaptive
+	if (!SDL_GL_SetSwapInterval(vid_vsync.integer))
+	{
+		if (vid_vsync.integer == -1)	// adaptive failed, try normal
+			SDL_GL_SetSwapInterval(1);
+	}
+
+	// SDL3: only SDL_WINDOW_FULLSCREEN, no FULLSCREEN_DESKTOP
+	is_fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? 1 : 0;
+
+	/* Use drawable pixel size for rendering dimensions.
+	 * SDL3 HiDPI: logical size can differ from actual framebuffer size. */
+	SDL_GetWindowSizeInPixels(window, &drawable_w, &drawable_h);
+	WRWidth = drawable_w;
+	WRHeight = drawable_h;
+
 	// set vid_modenum properly and adjust other vars
 	vid_modenum = modenum;
-	is_fullscreen = (screen->flags & SDL_FULLSCREEN) ? 1 : 0;
 	modestate = (is_fullscreen) ? MS_FULLDIB : MS_WINDOWED;
-	Cvar_SetValueQuick (&vid_config_glx, modelist[vid_modenum].width);
-	Cvar_SetValueQuick (&vid_config_gly, modelist[vid_modenum].height);
+	Cvar_SetValueQuick (&vid_config_glx, WRWidth);
+	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
 	Cvar_SetValueQuick (&vid_config_fscr, is_fullscreen);
-	WRWidth = vid.width = vid.conwidth = modelist[modenum].width;
-	WRHeight = vid.height = vid.conheight = modelist[modenum].height;
+	vid.width = vid.conwidth = WRWidth;
+	vid.height = vid.conheight = WRHeight;
 
 	// setup the effective console width
 	VID_ConWidth(modenum);
@@ -495,8 +527,6 @@ static qboolean VID_SetMode (int modenum)
 	}
 	Cvar_SetValueQuick (&vid_config_fsaa, multisample);
 
-	SDL_WM_SetCaption(WM_TITLEBAR_TEXT, WM_ICON_TEXT);
-
 	IN_HideMouse ();
 
 	in_mode_set = false;
@@ -507,204 +537,24 @@ static qboolean VID_SetMode (int modenum)
 
 //====================================
 
-#if 0 /* No.. */
-static void CheckSetGlobalPalette (void)
-{
-	gl3DfxSetPaletteEXT_f gl3DfxSetPaletteEXT_fp;
-
-	if (GL_ParseExtensionList(gl_extensions, "3DFX_set_global_palette"))
-	{
-		gl3DfxSetPaletteEXT_fp = (gl3DfxSetPaletteEXT_f) SDL_GL_GetProcAddress("gl3DfxSetPaletteEXT");
-		if (!gl3DfxSetPaletteEXT_fp)
-			gl3DfxSetPaletteEXT_fp = (gl3DfxSetPaletteEXT_f) SDL_GL_GetProcAddress("3DFX_set_global_palette");
-		if (!gl3DfxSetPaletteEXT_fp)
-			return;
-		Con_SafePrintf("Found 3DFX_set_global_palette\n");
-	}
-	else if (GL_ParseExtensionList(gl_extensions, "POWERVR_set_global_palette"))
-	{
-		gl3DfxSetPaletteEXT_fp = (gl3DfxSetPaletteEXT_f) SDL_GL_GetProcAddress("glSetGlobalPalettePOWERVR");
-		if (!gl3DfxSetPaletteEXT_fp)
-			gl3DfxSetPaletteEXT_fp = (gl3DfxSetPaletteEXT_f) SDL_GL_GetProcAddress("POWERVR_set_global_palette");
-		if (!gl3DfxSetPaletteEXT_fp)
-			return;
-		Con_SafePrintf("Found POWERVR_set_global_palette\n");
-	}
-	else {
-		return;
-	}
-
-	have8bit = true;
-	if (!vid_config_gl8bit.integer)
-		return;
-	else
-	{
-		int i;
-		GLubyte table[256][4];
-		char *oldpal;
-
-		is8bit = true;
-		oldpal = (char *) d_8to24table;
-		for (i = 0; i < 256; i++) {
-			table[i][2] = *oldpal++;
-			table[i][1] = *oldpal++;
-			table[i][0] = *oldpal++;
-			table[i][3] = 255;
-			oldpal++;
-		}
-		glEnable_fp (GL_SHARED_TEXTURE_PALETTE_EXT);
-		gl3DfxSetPaletteEXT_fp ((GLuint *)table);
-	}
-}
-#endif /* #if 0 */
-
-static void CheckSharedTexturePalette (void)
-{
-	glColorTableEXT_f glColorTableEXT_fp;
-
-	if (!GL_ParseExtensionList(gl_extensions, "GL_EXT_shared_texture_palette"))
-		return;
-
-	glColorTableEXT_fp = (glColorTableEXT_f) SDL_GL_GetProcAddress("glColorTableEXT");
-	if (glColorTableEXT_fp == NULL)
-		return;
-
-	have8bit = true;
-	Con_SafePrintf("Found GL_EXT_shared_texture_palette\n");
-	if (!vid_config_gl8bit.integer)
-		return;
-	else
-	{
-		int i;
-		char thePalette[256*3];
-		char *oldPalette, *newPalette;
-
-		is8bit = true;
-		oldPalette = (char *) d_8to24table;
-		newPalette = thePalette;
-		for (i = 0; i < 256; i++) {
-			*newPalette++ = *oldPalette++;
-			*newPalette++ = *oldPalette++;
-			*newPalette++ = *oldPalette++;
-			oldPalette++;
-		}
-
-		glEnable_fp (GL_SHARED_TEXTURE_PALETTE_EXT);
-		glColorTableEXT_fp (GL_SHARED_TEXTURE_PALETTE_EXT, GL_RGB, 256,
-					GL_RGB, GL_UNSIGNED_BYTE, (void *) thePalette);
-	}
-}
-
-static void VID_Init8bitPalette (void)
-{
-	have8bit = false;
-	is8bit = false;
-
-	/* Check for 8bit Extensions and initialize them */
-	CheckSharedTexturePalette();
-#if 0	/* No.. */
-	if (!have8bit)
-		CheckSetGlobalPalette();
-#endif
-
-	if (is8bit)
-		Con_SafePrintf("8-bit palettized textures enabled\n");
-}
-
-
-#if !defined(USE_3DFXGAMMA)
-static inline int  FUNC_UNUSED Init_3dfxGammaCtrl (void) { return 0; }
-static inline void FUNC_UNUSED Shutdown_3dfxGamma (void) {/*nothing*/}
-static inline int  FUNC_UNUSED do3dfxGammaCtrl (float _f) { return 0; }
-static inline int  FUNC_UNUSED glGetDeviceGammaRamp3DFX (void *_p) { return 0; }
-static inline int  FUNC_UNUSED glSetDeviceGammaRamp3DFX (void *_p) { return 0; }
-static inline qboolean FUNC_UNUSED VID_Check3dfxGamma (void) { return false; }
-#else
-static qboolean VID_Check3dfxGamma (void)
-{
-	int		ret;
-
-	if (COM_CheckParm("-no3dfxgamma"))
-		return false;
-
-	/* refuse 3dfxgamma with DRI drivers */
-	if (!q_strncasecmp(gl_renderer, "Mesa DRI", 8) ||
-	    !q_strncasecmp(gl_renderer, "Mesa Glide - DRI", 16))
-		return false;
-
-#if USE_3DFX_RAMPS /* not recommended for Voodoo1, currently crashes */
-	ret = glGetDeviceGammaRamp3DFX(orig_ramps);
-	if (ret != 0)
-	{
-		Con_SafePrintf ("Using 3dfx glide3 specific gamma ramps\n");
-		return true;
-	}
-#else
-	ret = Init_3dfxGammaCtrl();
-	if (ret > 0)
-	{
-		Con_SafePrintf ("Using 3dfx glide%d gamma controls\n", ret);
-		return true;
-	}
-#endif
-	return false;
-}
-#endif	/* USE_3DFXGAMMA */
-
 static void VID_InitGamma (void)
 {
-	gammaworks = fx_gamma = false;
-	/* we don't have WGL_3DFX_gamma_control or an equivalent in unix.
-	 * assuming is_3dfx means Voodoo1 or Voodoo2, this means we dont
-	 * have hw-gamma. */
-	/* Here is an evil hack abusing the exposed Glide symbols: */
-	if (is_3dfx)
-		fx_gamma = VID_Check3dfxGamma();
-	if (!fx_gamma) {
-		#if USE_GAMMA_RAMPS
-		gammaworks	= (SDL_GetGammaRamp(orig_ramps[0], orig_ramps[1], orig_ramps[2]) == 0);
-		if (gammaworks)
-		    gammaworks	= (SDL_SetGammaRamp(orig_ramps[0], orig_ramps[1], orig_ramps[2]) == 0);
-		#else
-		gammaworks	= (SDL_SetGamma(1, 1, 1) == 0);
-		#endif
-	}
+	gammaworks = false;
+	/* SDL2 removed standalone SDL_SetGamma/SDL_GetGammaRamp;
+	 * For now, hw-gamma via SDL is not supported. */
 
-	if (!gammaworks && !fx_gamma)
+	if (!gammaworks)
 		Con_SafePrintf("gamma adjustment not available\n");
 }
 
 static void VID_ShutdownGamma (void)
 {
-#if USE_3DFX_RAMPS
-	if (fx_gamma) glSetDeviceGammaRamp3DFX(orig_ramps);
-#else
-/*	if (fx_gamma) do3dfxGammaCtrl(1);*/
-#endif
-	Shutdown_3dfxGamma();
-#if USE_GAMMA_RAMPS	/* restore hw-gamma */
-	if (gammaworks) SDL_SetGammaRamp(orig_ramps[0], orig_ramps[1], orig_ramps[2]);
-#else
-	if (gammaworks) SDL_SetGamma (1,1,1);
-#endif
+	/* hw-gamma restore via SDL not supported */
 }
 
 static void VID_SetGamma (void)
 {
-#if (!USE_GAMMA_RAMPS) || (!USE_3DFX_RAMPS)
-	float	value = (v_gamma.value > (1.0 / GAMMA_MAX))?
-			(1.0 / v_gamma.value) : GAMMA_MAX;
-#endif
-#if USE_3DFX_RAMPS
-	if (fx_gamma) glSetDeviceGammaRamp3DFX(ramps);
-#else
-	if (fx_gamma) do3dfxGammaCtrl(value);
-#endif
-#if USE_GAMMA_RAMPS
-	if (gammaworks) SDL_SetGammaRamp(ramps[0], ramps[1], ramps[2]);
-#else
-	if (gammaworks) SDL_SetGamma(value,value,value);
-#endif
+	/* hw-gamma via SDL not supported */
 }
 
 void VID_ShiftPalette (const unsigned char *palette)
@@ -713,129 +563,53 @@ void VID_ShiftPalette (const unsigned char *palette)
 }
 
 
-static void CheckMultiTextureExtensions (void)
+/* GL_CompileShader and GL_LinkProgram are now in gl_shader.c */
+
+static void GL_LoadFunctionPointers (void)
 {
-	gl_mtexable = have_mtex = false;
+	/* load shader function pointers */
+	glCreateShader_fp = (glCreateShader_f) SDL_GL_GetProcAddress("glCreateShader");
+	glDeleteShader_fp = (glDeleteShader_f) SDL_GL_GetProcAddress("glDeleteShader");
+	glShaderSource_fp = (glShaderSource_f) SDL_GL_GetProcAddress("glShaderSource");
+	glCompileShader_fp = (glCompileShader_f) SDL_GL_GetProcAddress("glCompileShader");
+	glGetShaderiv_fp = (glGetShaderiv_f) SDL_GL_GetProcAddress("glGetShaderiv");
+	glGetShaderInfoLog_fp = (glGetShaderInfoLog_f) SDL_GL_GetProcAddress("glGetShaderInfoLog");
+	glCreateProgram_fp = (glCreateProgram_f) SDL_GL_GetProcAddress("glCreateProgram");
+	glDeleteProgram_fp = (glDeleteProgram_f) SDL_GL_GetProcAddress("glDeleteProgram");
+	glAttachShader_fp = (glAttachShader_f) SDL_GL_GetProcAddress("glAttachShader");
+	glLinkProgram_fp = (glLinkProgram_f) SDL_GL_GetProcAddress("glLinkProgram");
+	glUseProgram_fp = (glUseProgram_f) SDL_GL_GetProcAddress("glUseProgram");
+	glGetProgramiv_fp = (glGetProgramiv_f) SDL_GL_GetProcAddress("glGetProgramiv");
+	glGetProgramInfoLog_fp = (glGetProgramInfoLog_f) SDL_GL_GetProcAddress("glGetProgramInfoLog");
+	glGetUniformLocation_fp = (glGetUniformLocation_f) SDL_GL_GetProcAddress("glGetUniformLocation");
+	glUniform1i_fp = (glUniform1i_f) SDL_GL_GetProcAddress("glUniform1i");
+	glUniform1f_fp = (glUniform1f_f) SDL_GL_GetProcAddress("glUniform1f");
+	glUniform3f_fp = (glUniform3f_f) SDL_GL_GetProcAddress("glUniform3f");
+	glUniform4f_fp = (glUniform4f_f) SDL_GL_GetProcAddress("glUniform4f");
+	glUniformMatrix4fv_fp = (glUniformMatrix4fv_f) SDL_GL_GetProcAddress("glUniformMatrix4fv");
+	glBindAttribLocation_fp = (glBindAttribLocation_f) SDL_GL_GetProcAddress("glBindAttribLocation");
 
-	if (COM_CheckParm("-nomtex"))
+	/* VBO/VAO functions */
+	glGenBuffers_fp = (glGenBuffers_f) SDL_GL_GetProcAddress("glGenBuffers");
+	glDeleteBuffers_fp = (glDeleteBuffers_f) SDL_GL_GetProcAddress("glDeleteBuffers");
+	glBindBuffer_fp = (glBindBuffer_f) SDL_GL_GetProcAddress("glBindBuffer");
+	glBufferData_fp = (glBufferData_f) SDL_GL_GetProcAddress("glBufferData");
+	glBufferSubData_fp = (glBufferSubData_f) SDL_GL_GetProcAddress("glBufferSubData");
+	glGenVertexArrays_fp = (glGenVertexArrays_f) SDL_GL_GetProcAddress("glGenVertexArrays");
+	glDeleteVertexArrays_fp = (glDeleteVertexArrays_f) SDL_GL_GetProcAddress("glDeleteVertexArrays");
+	glBindVertexArray_fp = (glBindVertexArray_f) SDL_GL_GetProcAddress("glBindVertexArray");
+	glVertexAttribPointer_fp = (glVertexAttribPointer_f) SDL_GL_GetProcAddress("glVertexAttribPointer");
+	glEnableVertexAttribArray_fp = (glEnableVertexAttribArray_f) SDL_GL_GetProcAddress("glEnableVertexAttribArray");
+	glDrawArrays_fp = (glDrawArrays_f) SDL_GL_GetProcAddress("glDrawArrays");
+	glDrawElements_fp = (glDrawElements_f) SDL_GL_GetProcAddress("glDrawElements");
+
+	if (!glCreateShader_fp || !glShaderSource_fp || !glCompileShader_fp ||
+	    !glCreateProgram_fp || !glAttachShader_fp || !glLinkProgram_fp ||
+	    !glUseProgram_fp || !glGetUniformLocation_fp || !glUniform1i_fp ||
+	    !glUniform1f_fp)
 	{
-		Con_SafePrintf("Multitexture extensions disabled\n");
+		Sys_Error("Required GL 4.3 shader functions not found");
 	}
-	else if (GL_ParseExtensionList(gl_extensions, "GL_ARB_multitexture"))
-	{
-		Con_SafePrintf("ARB Multitexture extensions found\n");
-
-		glGetIntegerv_fp(GL_MAX_TEXTURE_UNITS_ARB, &num_tmus);
-		if (num_tmus < 2)
-		{
-			Con_SafePrintf("ignoring multitexture (%i TMUs)\n", (int) num_tmus);
-			return;
-		}
-
-		glMultiTexCoord2fARB_fp = (glMultiTexCoord2fARB_f) SDL_GL_GetProcAddress("glMultiTexCoord2fARB");
-		glActiveTextureARB_fp = (glActiveTextureARB_f) SDL_GL_GetProcAddress("glActiveTextureARB");
-		if (glMultiTexCoord2fARB_fp == NULL || glActiveTextureARB_fp == NULL)
-		{
-			Con_SafePrintf ("Couldn't link to multitexture functions\n");
-			return;
-		}
-
-		have_mtex = true;
-		if (!gl_multitexture.integer)
-		{
-			Con_SafePrintf("ignoring multitexture (cvar disabled)\n");
-			return;
-		}
-
-		Con_SafePrintf("Found %i TMUs support\n", (int) num_tmus);
-		gl_mtexable = true;
-		glDisable_fp(GL_TEXTURE_2D);
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-	}
-	else
-	{
-		Con_SafePrintf("GL_ARB_multitexture not found\n");
-	}
-}
-
-static void CheckAnisotropyExtensions (void)
-{
-	gl_max_anisotropy = 1;
-
-	Con_SafePrintf("Anisotropic filtering ");
-	if (GL_ParseExtensionList(gl_extensions, "GL_EXT_texture_filter_anisotropic"))
-	{
-		GLfloat test1 = 0, test2 = 0;
-		GLuint tex;
-		glGetTexParameterfv_f glGetTexParameterfv_fp;
-
-		glGetTexParameterfv_fp = (glGetTexParameterfv_f) SDL_GL_GetProcAddress("glGetTexParameterfv");
-		if (glGetTexParameterfv_fp == NULL)
-		{
-			Con_SafePrintf("... can't check driver-lock status\n... ");
-			goto _skiptest;
-		}
-		// test to make sure we really have control over it
-		// 1.0 and 2.0 should always be legal values.
-		glGenTextures_fp(1, &tex);
-		glBindTexture_fp(GL_TEXTURE_2D, tex);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 1.0f);
-		glGetTexParameterfv_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &test1);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 2.0f);
-		glGetTexParameterfv_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, &test2);
-		glDeleteTextures_fp(1, &tex);
-		if (test1 != 1 || test2 != 2)
-		{
-			Con_SafePrintf("driver-locked @ %.1f\n", test1);
-		}
-		else
-		{
-		_skiptest:
-			glGetFloatv_fp(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &gl_max_anisotropy);
-			if (gl_max_anisotropy < 2)
-				Con_SafePrintf("broken\n");
-			else	Con_SafePrintf("found, max %.1f\n", gl_max_anisotropy);
-		}
-	}
-	else
-	{
-		Con_SafePrintf("not found\n");
-	}
-}
-
-static void CheckNonPowerOfTwoTextures (void)
-{
-/* On Mac OS X, old Radeons lie about NPOT textures capability, they
- * fallback to software with mipmap NPOT textures.  see, e.g.:
- * http://lists.apple.com/archives/mac-opengl/2006/Dec/msg00000.html
- * http://lists.apple.com/archives/mac-opengl/2009/Oct/msg00040.html
- * http://www.idevgames.com/forums/printthread.php?tid=3814&page=2
- * MH says NVIDIA once did the same with their GeForce FX on Windows:
- * http://forums.inside3d.com/viewtopic.php?f=10&t=4832
- * Therefore, advertisement of this extension is an unreliable way of
- * detecting the actual capability.
- */
-	gl_tex_NPOT = have_NPOT = false;
-	if (GL_ParseExtensionList(gl_extensions, "GL_ARB_texture_non_power_of_two"))
-	{
-		have_NPOT = true;
-		Con_SafePrintf("Found ARB_texture_non_power_of_two\n");
-		if (!gl_texture_NPOT.integer) {
-			Con_SafePrintf("ignoring texture_NPOT (cvar disabled)\n");
-		}
-		else {
-			gl_tex_NPOT = true;
-		}
-	}
-	else
-	{
-		Con_SafePrintf("GL_ARB_texture_non_power_of_two not found\n");
-	}
-}
-
-static void CheckStencilBuffer (void)
-{
-	have_stencil = !!vid_attribs.stencil;
 }
 
 
@@ -910,12 +684,6 @@ static void GL_ResetFunctions (void)
 #include "gl_func.h"
 
 	have_stencil = false;
-	gl_mtexable = false;
-	have_mtex = false;
-	have8bit = false;
-	is8bit = false;
-	have_NPOT = false;
-	gl_tex_NPOT = false;
 }
 
 /*
@@ -949,51 +717,43 @@ static void GL_Init (void)
 
 	gl_version = (const char *)glGetString_fp (GL_VERSION);
 	Con_SafePrintf ("GL_VERSION: %s\n", gl_version);
-	gl_extensions = (const char *)glGetString_fp (GL_EXTENSIONS);
-	Con_SafeDPrintf ("GL_EXTENSIONS: %s\n", gl_extensions);
 
 	glGetIntegerv_fp(GL_MAX_TEXTURE_SIZE, &gl_max_size);
 	if (gl_max_size < 256)	// Refuse to work when less than 256
 		Sys_Error ("hardware capable of min. 256k opengl texture size needed");
 	Con_SafePrintf("OpenGL max.texture size: %i\n", (int) gl_max_size);
 
-	is_3dfx = false;
-	if (!q_strncasecmp(gl_renderer, "3dfx", 4)	  ||
-	    !q_strncasecmp(gl_renderer, "SAGE Glide", 10) ||
-	    !q_strncasecmp(gl_renderer, "Glide ", 6)	  || /* possible with Mesa 3.x/4.x/5.0.x */
-	    !q_strncasecmp(gl_renderer, "Mesa Glide", 10))
-	{
-	// This should hopefully detect Voodoo1 and Voodoo2
-	// hardware and possibly Voodoo Rush.
-	// Voodoo Banshee, Voodoo3 and later are hw-accelerated
-	// by DRI in XFree86-4.x and should be: is_3dfx = false.
-		Con_SafePrintf("3dfx Voodoo found\n");
-		is_3dfx = true;
-	}
+	/* GL 4.3: multitexture is always available */
+	glActiveTextureARB_fp = (glActiveTextureARB_f) SDL_GL_GetProcAddress("glActiveTexture");
+	if (!glActiveTextureARB_fp)
+		Sys_Error("glActiveTexture not found");
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
-//	if (!q_strncasecmp(gl_renderer, "PowerVR", 7))
-//		fullsbardraw = true;
+	/* GL 4.3: anisotropic filtering is always available */
+	gl_max_anisotropy = 1;
+	glGetFloatv_fp(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &gl_max_anisotropy);
+	Con_SafePrintf("Anisotropic filtering: max %.1f\n", gl_max_anisotropy);
 
-	CheckMultiTextureExtensions();
-	CheckAnisotropyExtensions();
-	CheckNonPowerOfTwoTextures();
-	CheckStencilBuffer();
+	/* NPOT textures: always available on GL 4.3 */
+	Con_SafePrintf("NPOT textures enabled\n");
+
+	/* stencil buffer */
+	have_stencil = !!vid_attribs.stencil;
+
+	/* load shader and VBO function pointers */
+	GL_LoadFunctionPointers();
+	GL_Shaders_Init();
+	GL_VBO_Init();
+	GL_PostProcess_Init();
 
 //	glClearColor_fp(1,0,0,0);
 	glCullFace_fp(GL_FRONT);
-	glEnable_fp(GL_TEXTURE_2D);
-
-	glEnable_fp(GL_ALPHA_TEST);
-	glAlphaFunc_fp(GL_GREATER, 0.632); // 1 - e^-1 : replaced 0.666 to avoid clipping of smaller fonts/graphics
 #if 0 /* causes side effects at least in 16 bpp.  */
 	/* Get rid of Z-fighting for textures by offsetting the
 	 * drawing of entity models compared to normal polygons.
-	 * (See: R_DrawBrushModel.)
-	 * (Only works if gl_ztrick is turned off) */
+	 * (See: R_DrawBrushModel.) */
 	glPolygonOffset_fp(0.05f, 25.0f);
 #endif /* #if 0 */
-	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
-	glShadeModel_fp (GL_FLAT);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1002,9 +762,6 @@ static void GL_Init (void)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
 	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-//	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
 	if (multisample)
 	{
@@ -1031,7 +788,7 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 void GL_EndRendering (void)
 {
 	if (!scr_skipupdate)
-		SDL_GL_SwapBuffers();
+		SDL_GL_SwapWindow(window);
 
 // handle the mouse state when windowed if that's changed
 	if (_enable_mouse.integer != enable_mouse /*&& modestate == MS_WINDOWED*/)
@@ -1245,7 +1002,7 @@ static void VID_ChangeVideoMode (int newmode)
 {
 	int	temp;
 
-	if (!screen)
+	if (!window)
 		return;
 
 	temp = scr_disabled_for_loading;
@@ -1256,6 +1013,11 @@ static void VID_ChangeVideoMode (int newmode)
 	CDAudio_Pause ();
 	BGM_Pause ();
 	S_ClearBuffer ();
+
+	// Shut down GPU resources before destroying GL context
+	GL_PostProcess_Shutdown();
+	GL_VBO_Shutdown();
+	GL_Shaders_Shutdown();
 
 	// Unload all textures and reset texture counts
 	D_ClearOpenGLTextures(0);
@@ -1272,19 +1034,18 @@ static void VID_ChangeVideoMode (int newmode)
 	IN_ShowMouse ();
 
 	// Kill device and rendering contexts
-	SDL_FreeSurface(screen);
+	SDL_GL_DestroyContext(glcontext);
+	SDL_DestroyWindow(window);
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);	// also unloads the opengl driver
 
 	// re-init sdl_video, set the mode and re-init opengl
-	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
+	if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
 		Sys_Error ("Couldn't init video: %s", SDL_GetError());
 #ifdef GL_DLSYM
 	if (!GL_OpenLibrary(gl_library))
 		Sys_Error ("Unable to load GL library %s", (gl_library != NULL) ? gl_library : SDL_GetError());
 #endif
 	VID_SetMode (newmode);
-	// re-get the video info since we re-inited sdl_video
-	vid_info = SDL_GetVideoInfo();
 
 	// Reload graphics wad file (Draw_PicFromWad writes glpic_t data (sizes,
 	// texnums) right on top of the original pic data, so the pic data will
@@ -1295,7 +1056,6 @@ static void VID_ChangeVideoMode (int newmode)
 	// Initialize extensions and default OpenGL parameters
 	GL_Init();
 	VID_InitGamma();
-	VID_Init8bitPalette();
 
 	// Reload pre-map pics, fonts, console, etc
 	Draw_Init();
@@ -1355,9 +1115,9 @@ static int sort_modes (const void *arg1, const void *arg2)
 	return a1->width - a2->width;
 }
 
-static void VID_PrepareModes (SDL_Rect **sdl_modes)
+static void VID_PrepareModes (void)
 {
-	int	i, j;
+	int	i, j, k;
 	qboolean	not_multiple;
 
 	num_fmodes = 0;
@@ -1378,12 +1138,57 @@ static void VID_PrepareModes (SDL_Rect **sdl_modes)
 		num_wmodes++;
 	}
 
-	// disaster scenario #1: no fullscreen modes. bind to the
-	// windowed modes list. limit it to 640x480 max. because
-	// we don't know the desktop dimensions
-	if (sdl_modes == (SDL_Rect **)0)
+	// Build fullscreen mode list from SDL3 display mode enumeration
 	{
-no_fmodes:
+		SDL_DisplayID	*displays;
+		int		num_displays = 0;
+
+		displays = SDL_GetDisplays(&num_displays);
+		if (displays)
+		{
+			for (i = 0; i < num_displays; i++)
+			{
+				int			mode_count = 0;
+				SDL_DisplayMode		**modes;
+
+				modes = SDL_GetFullscreenDisplayModes(displays[i], &mode_count);
+				if (!modes) continue;
+
+				for (j = 0; j < mode_count && num_fmodes < MAX_MODE_LIST; j++)
+				{
+					const SDL_DisplayMode *mode = modes[j];
+
+					// avoid multiple listings of the same dimension
+					not_multiple = true;
+					for (k = 0; k < num_fmodes; ++k)
+					{
+						if (fmodelist[k].width == mode->w && fmodelist[k].height == mode->h)
+						{
+							not_multiple = false;
+							break;
+						}
+					}
+
+					// avoid resolutions < 320x240
+					if (not_multiple && mode->w >= MIN_WIDTH && mode->h >= MIN_HEIGHT)
+					{
+						fmodelist[num_fmodes].width = mode->w;
+						fmodelist[num_fmodes].height = mode->h;
+						fmodelist[num_fmodes].halfscreen = 0;
+						fmodelist[num_fmodes].fullscreen = 1;
+						fmodelist[num_fmodes].bpp = 16;
+						q_snprintf (fmodelist[num_fmodes].modedesc, MAX_DESC, "%d x %d", mode->w, mode->h);
+						num_fmodes++;
+					}
+				}
+				SDL_free(modes);
+			}
+			SDL_free(displays);
+		}
+	}
+
+	if (!num_fmodes)
+	{
 		Con_SafePrintf ("No fullscreen video modes available\n");
 		num_wmodes = RES_640X480 + 1;
 		modelist = wmodelist;
@@ -1393,64 +1198,6 @@ no_fmodes:
 		Cvar_SetValueQuick (&vid_config_gly, modelist[vid_default].height);
 		return;
 	}
-
-	// another disaster scenario (#2)
-	if (sdl_modes == (SDL_Rect **)-1)
-	{	// Really should NOT HAVE happened! this return value is
-		// for windowed modes!  Since this means all resolutions
-		// are supported, use our standart modes as modes list.
-		Con_SafePrintf ("Unexpectedly received -1 from SDL_ListModes\n");
-		vid_maxwidth = MAXWIDTH;
-		vid_maxheight = MAXHEIGHT;
-	//	num_fmodes = -1;
-		num_fmodes = num_wmodes;
-		nummodes = &num_wmodes;
-		modelist = wmodelist;
-		vid_default = RES_640X480;
-		Cvar_SetValueQuick (&vid_config_glx, modelist[vid_default].width);
-		Cvar_SetValueQuick (&vid_config_gly, modelist[vid_default].height);
-		return;
-	}
-
-#if 0
-	// print the un-processed modelist as reported by SDL
-	for (j = 0; sdl_modes[j]; ++j)
-	{
-		Con_SafePrintf ("%d x %d\n", sdl_modes[j]->w, sdl_modes[j]->h);
-	}
-	Con_SafePrintf ("Total %d entries\n", j);
-#endif
-
-	for (i = 0; sdl_modes[i] && num_fmodes < MAX_MODE_LIST; ++i)
-	{
-		// avoid multiple listings of the same dimension
-		not_multiple = true;
-		for (j = 0; j < num_fmodes; ++j)
-		{
-			if (fmodelist[j].width == sdl_modes[i]->w && fmodelist[j].height == sdl_modes[i]->h)
-			{
-				not_multiple = false;
-				break;
-			}
-		}
-
-		// avoid resolutions < 320x240
-		if (not_multiple && sdl_modes[i]->w >= MIN_WIDTH && sdl_modes[i]->h >= MIN_HEIGHT)
-		{
-			fmodelist[num_fmodes].width = sdl_modes[i]->w;
-			fmodelist[num_fmodes].height = sdl_modes[i]->h;
-			// FIXME: look at gl_vidnt.c and learn how to
-			// really functionalize the halfscreen field?
-			fmodelist[num_fmodes].halfscreen = 0;
-			fmodelist[num_fmodes].fullscreen = 1;
-			fmodelist[num_fmodes].bpp = 16;
-			q_snprintf (fmodelist[num_fmodes].modedesc, MAX_DESC, "%d x %d", sdl_modes[i]->w, sdl_modes[i]->h);
-			num_fmodes++;
-		}
-	}
-
-	if (!num_fmodes)
-		goto no_fmodes;
 
 	// At his point, we have a list of valid fullscreen modes:
 	// Let's bind to it and use it for windowed modes, as well.
@@ -1540,28 +1287,23 @@ void	VID_Init (const unsigned char *palette)
 {
 #ifndef __MORPHOS__
 	static char nvidia_env_vsync[32] = "__GL_SYNC_TO_VBLANK=1";
-	static char fxmesa_env_fullscreen[32] = "MESA_GLX_FX=f";
-	static char fxmesa_env_multitex[32] = "FX_DONT_FAKE_MULTITEX=1";
-	static char fxglide_env_nosplash[32] = "FX_GLIDE_NO_SPLASH=1";
 #endif
 	int	i, temp, width, height;
-	SDL_Rect	**enumlist;
-	const SDL_version	*sdl_version;
 	const char	*read_vars[] = {
 				"vid_config_fscr",
-				"vid_config_gl8bit",
 				"vid_config_fsaa",
 				"vid_config_glx",
 				"vid_config_gly",
 				"vid_config_consize",
-				"gl_texture_NPOT",
-				"gl_multitexture",
 				"gl_lightmapfmt" };
 #define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
-	Cvar_RegisterVariable (&vid_config_gl8bit);
 	Cvar_RegisterVariable (&vid_config_fsaa);
 	Cvar_RegisterVariable (&vid_config_fscr);
+	Cvar_RegisterVariable (&vid_window_x);
+	Cvar_RegisterVariable (&vid_window_y);
+	Cvar_RegisterVariable (&vid_vsync);
+	Cvar_RegisterVariable (&vid_borderless);
 	Cvar_RegisterVariable (&vid_config_swy);
 	Cvar_RegisterVariable (&vid_config_swx);
 	Cvar_RegisterVariable (&vid_config_gly);
@@ -1569,9 +1311,7 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&vid_config_consize);
 	Cvar_RegisterVariable (&vid_mode);
 	Cvar_RegisterVariable (&_enable_mouse);
-	Cvar_RegisterVariable (&gl_texture_NPOT);
 	Cvar_RegisterVariable (&gl_lightmapfmt);
-	Cvar_RegisterVariable (&gl_multitexture);
 
 	Cmd_AddCommand ("vid_listmodes", VID_ListModes_f);
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
@@ -1581,10 +1321,8 @@ void	VID_Init (const unsigned char *palette)
 
 	vid.numpages = 2;
 
-	// see if the SDL version we linked to is multisampling-capable
-	sdl_version = SDL_Linked_Version();
-	if (SDL_VERSIONNUM(sdl_version->major,sdl_version->minor,sdl_version->patch) >= SDL_VER_WITH_MULTISAMPLING)
-		sdl_has_multisample = true;
+	// SDL3 always supports multisampling
+	sdl_has_multisample = true;
 
 #ifndef __MORPHOS__
 	// enable vsync for nvidia geforce or newer - S.A
@@ -1593,19 +1331,13 @@ void	VID_Init (const unsigned char *palette)
 		putenv(nvidia_env_vsync);
 		Con_SafePrintf ("Nvidia GL vsync enabled\n");
 	}
-
-	// set fxMesa mode to fullscreen, don't let it cheat multitexturing
-	putenv (fxmesa_env_fullscreen);
-	putenv (fxmesa_env_multitex);
-	// disable the 3dfx splash screen.
-	putenv (fxglide_env_nosplash);
 #endif
 
 	// init sdl
 	// the first check is actually unnecessary
 	if ((SDL_WasInit(SDL_INIT_VIDEO)) == 0)
 	{
-		if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
+		if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
 			Sys_Error ("Couldn't init video: %s", SDL_GetError());
 	}
 
@@ -1625,13 +1357,6 @@ void	VID_Init (const unsigned char *palette)
 		Sys_Error ("Unable to load GL library %s", (gl_library != NULL) ? gl_library : SDL_GetError());
 #endif
 
-	// this will contain the "best bpp" for the current display
-	// make sure to re-retrieve it if you ever re-init sdl_video
-	vid_info = SDL_GetVideoInfo();
-
-	// retrieve the list of fullscreen modes
-	enumlist = SDL_ListModes(NULL, SDL_OPENGL|SDL_FULLSCREEN);
-
 	i = COM_CheckParm("-bpp");
 	if (i && i < com_argc-1)
 	{
@@ -1639,7 +1364,7 @@ void	VID_Init (const unsigned char *palette)
 	}
 
 	// prepare the modelists, find the actual modenum for vid_default
-	VID_PrepareModes(enumlist);
+	VID_PrepareModes();
 
 	// set vid_mode to our safe default first
 	Cvar_SetValueQuick (&vid_mode, vid_default);
@@ -1663,6 +1388,19 @@ void	VID_Init (const unsigned char *palette)
 
 	width = vid_config_glx.integer;
 	height = vid_config_gly.integer;
+
+	/* Default to desktop resolution for fullscreen on first run (640x480 = no saved config) */
+	if (vid_config_fscr.integer && width == 640 && height == 480)
+	{
+		const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+		if (dm)
+		{
+			width = dm->w;
+			height = dm->h;
+			Cvar_SetValueQuick (&vid_config_glx, width);
+			Cvar_SetValueQuick (&vid_config_gly, height);
+		}
+	}
 
 	if (vid_config_consize.integer != width)
 		vid_conscale = true;
@@ -1735,9 +1473,6 @@ void	VID_Init (const unsigned char *palette)
 	if (i && i < com_argc-1)
 		multisample = atoi(com_argv[i+1]);
 
-	if (COM_CheckParm("-paltex"))
-		Cvar_SetQuick (&vid_config_gl8bit, "1");
-
 	vid.maxwarpwidth = WARP_WIDTH;
 	vid.maxwarpheight = WARP_HEIGHT;
 	vid.colormap = host_colormap;
@@ -1752,7 +1487,6 @@ void	VID_Init (const unsigned char *palette)
 	GL_SetupLightmapFmt();
 	GL_Init ();
 	VID_InitGamma();
-	VID_Init8bitPalette();
 
 	// lock the early-read cvars until Host_Init is finished
 	for (i = 0; i < (int)num_readvars; i++)
@@ -1774,7 +1508,23 @@ void	VID_Init (const unsigned char *palette)
 
 void	VID_Shutdown (void)
 {
+	GL_PostProcess_Shutdown();
 	VID_ShutdownGamma();
+
+	/* Save window position for next session */
+	if (window && modestate == MS_WINDOWED)
+	{
+		int wx, wy;
+		SDL_GetWindowPosition(window, &wx, &wy);
+		Cvar_SetValueQuick(&vid_window_x, wx);
+		Cvar_SetValueQuick(&vid_window_y, wy);
+	}
+
+	if (glcontext)
+		SDL_GL_DestroyContext(glcontext);
+	if (window)
+		SDL_DestroyWindow(window);
+
 	SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
@@ -1791,7 +1541,7 @@ void VID_ToggleFullscreen (void)
 {
 	int	is_fullscreen;
 
-	if (!screen) return;
+	if (!window) return;
 	if (!fs_toggle_works)
 		return;
 	if (!num_fmodes)
@@ -1799,14 +1549,37 @@ void VID_ToggleFullscreen (void)
 
 	S_ClearBuffer ();
 
-	// This doesn't seem to cause any trouble even
-	// with is_3dfx == true and FX_GLX_MESA == f
-	fs_toggle_works = (SDL_WM_ToggleFullScreen(screen) == 1);
+	// SDL3: only SDL_WINDOW_FULLSCREEN, no FULLSCREEN_DESKTOP
+	is_fullscreen = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+
+	// SDL3: SDL_SetWindowFullscreen takes bool: true for fullscreen, false for windowed
+	fs_toggle_works = SDL_SetWindowFullscreen(window, !is_fullscreen);
 	if (fs_toggle_works)
 	{
-		is_fullscreen = (screen->flags & SDL_FULLSCREEN) ? 1 : 0;
+		int dw, dh;
+
+		is_fullscreen = !is_fullscreen;
+		SDL_SyncWindow(window);
+
+		if (!is_fullscreen)
+		{
+			// Restore window to the mode's logical size
+			SDL_SetWindowSize(window, modelist[vid_modenum].width,
+						 modelist[vid_modenum].height);
+			SDL_SyncWindow(window);
+		}
+
+		SDL_GetWindowSizeInPixels(window, &dw, &dh);
+		WRWidth = dw;
+		WRHeight = dh;
+		vid.width = vid.conwidth = WRWidth;
+		vid.height = vid.conheight = WRHeight;
+		Cvar_SetValueQuick (&vid_config_glx, WRWidth);
+		Cvar_SetValueQuick (&vid_config_gly, WRHeight);
 		Cvar_SetValueQuick(&vid_config_fscr, is_fullscreen);
 		modestate = (is_fullscreen) ? MS_FULLDIB : MS_WINDOWED;
+		vid.recalc_refdef = 1;
+		glViewport_fp(0, 0, WRWidth, WRHeight);
 		if (is_fullscreen)
 		{
 		//	if (!_enable_mouse.integer)
@@ -1827,7 +1600,7 @@ void VID_ToggleFullscreen (void)
 	}
 	else
 	{
-		Con_Printf ("SDL_WM_ToggleFullScreen failed\n");
+		Con_Printf ("SDL_SetWindowFullscreen failed\n");
 	}
 }
 
@@ -1870,13 +1643,89 @@ static int	vid_cursor;
 static qboolean	want_fstoggle, need_apply;
 static qboolean	vid_menu_firsttime = true;
 
+// Aspect ratio filter for the video menu
+typedef struct {
+	const char	*name;
+	int		num;	// numerator (0 = "All", no filter)
+	int		den;	// denominator
+} aspect_t;
+
+static const aspect_t vid_aspects[] = {
+	{ "All",	0,	0  },
+	{ "4:3",	4,	3  },
+	{ "5:4",	5,	4  },
+	{ "16:9",	16,	9  },
+	{ "16:10",	16,	10 },
+	{ "21:9",	21,	9  },
+	{ "32:9",	32,	9  },
+};
+#define NUM_ASPECTS	(int)(sizeof(vid_aspects) / sizeof(vid_aspects[0]))
+
+static int	vid_menu_aspect;	// index into vid_aspects[]
+
+static qboolean VID_ModeMatchesAspect (int mode_idx)
+{
+	int w, h, aspect_num, aspect_den;
+
+	if (vid_menu_aspect == 0)	// "All"
+		return true;
+
+	w = modelist[mode_idx].width;
+	h = modelist[mode_idx].height;
+	aspect_num = vid_aspects[vid_menu_aspect].num;
+	aspect_den = vid_aspects[vid_menu_aspect].den;
+
+	// Cross-multiply to avoid floating point: w/h == num/den
+	// Use a small tolerance: abs(w*den - h*num) <= h
+	// This allows ~1 pixel of rounding per scanline
+	return (abs(w * aspect_den - h * aspect_num) <= h);
+}
+
+// Find the next mode matching the current aspect ratio in the given direction.
+// Returns -1 if no matching mode exists.
+static int VID_FindNextFilteredMode (int from, int dir)
+{
+	int i = from + dir;
+
+	while (i >= 0 && i < *nummodes)
+	{
+		if (VID_ModeMatchesAspect(i))
+			return i;
+		i += dir;
+	}
+	return -1;
+}
+
+// Snap vid_menunum to nearest matching mode when aspect filter changes
+static void VID_SnapToFilteredMode (void)
+{
+	int lo, hi;
+
+	if (vid_menu_aspect == 0)
+		return;	// "All" — keep current selection
+
+	if (VID_ModeMatchesAspect(vid_menunum))
+		return;	// already matches
+
+	// Search outward from current position
+	lo = VID_FindNextFilteredMode(vid_menunum, -1);
+	hi = VID_FindNextFilteredMode(vid_menunum, +1);
+
+	if (hi >= 0)
+		vid_menunum = hi;
+	else if (lo >= 0)
+		vid_menunum = lo;
+	// else: no modes match this aspect, keep current
+}
+
 enum {
 	VID_FULLSCREEN,	// make sure the fullscreen entry (0)
+	VID_ASPECT,	// aspect ratio filter
 	VID_RESOLUTION,	// is lower than resolution entry (1)
 	VID_MULTISAMPLE,
-	VID_MULTITEXTURE,
-	VID_NPOT,
-	VID_PALTEX,
+	VID_VSYNC,
+	VID_TEXFILTER,
+	VID_ANISOTROPY,
 	VID_BLANKLINE,	// spacer line
 	VID_RESET,
 	VID_APPLY,
@@ -1914,6 +1763,7 @@ static void VID_MenuDraw (void)
 	{	// settings for entering the menu first time
 		vid_menunum = vid_modenum;
 		vid_menu_fs = (modestate != MS_WINDOWED);
+		vid_menu_aspect = 0;	// "All"
 		vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
 		vid_menu_firsttime = false;
 	}
@@ -1921,19 +1771,19 @@ static void VID_MenuDraw (void)
 	want_fstoggle = ( ((modestate == MS_WINDOWED) && vid_menu_fs) || ((modestate != MS_WINDOWED) && !vid_menu_fs) );
 
 	need_apply = (vid_menunum != vid_modenum) || want_fstoggle ||
-			(have8bit && (is8bit != !!vid_config_gl8bit.integer)) ||
-			(have_mtex && (gl_mtexable != !!gl_multitexture.integer)) ||
-			(have_NPOT && (gl_tex_NPOT != !!gl_texture_NPOT.integer)) ||
 			(multisample != vid_config_fsaa.integer);
 
-	M_Print (76, 92 + 8*VID_FULLSCREEN, "Fullscreen: ");
-	M_DrawYesNo (76+12*8, 92 + 8*VID_FULLSCREEN, vid_menu_fs, !want_fstoggle);
+	M_Print (76, 92 + 8*VID_FULLSCREEN, "Fullscreen    :");
+	M_DrawYesNo (76+16*8, 92 + 8*VID_FULLSCREEN, vid_menu_fs, !want_fstoggle);
 
-	M_Print (76, 92 + 8*VID_RESOLUTION, "Resolution: ");
+	M_Print (76, 92 + 8*VID_ASPECT, "Aspect Ratio  :");
+	M_PrintWhite (76+16*8, 92 + 8*VID_ASPECT, vid_aspects[vid_menu_aspect].name);
+
+	M_Print (76, 92 + 8*VID_RESOLUTION, "Resolution    :");
 	if (vid_menunum == vid_modenum)
-		M_PrintWhite (76+12*8, 92 + 8*VID_RESOLUTION, modelist[vid_menunum].modedesc);
+		M_PrintWhite (76+16*8, 92 + 8*VID_RESOLUTION, modelist[vid_menunum].modedesc);
 	else
-		M_Print (76+12*8, 92 + 8*VID_RESOLUTION, modelist[vid_menunum].modedesc);
+		M_Print (76+16*8, 92 + 8*VID_RESOLUTION, modelist[vid_menunum].modedesc);
 
 	M_Print (76, 92 + 8*VID_MULTISAMPLE, "Antialiasing  :");
 	if (sdl_has_multisample)
@@ -1944,25 +1794,25 @@ static void VID_MenuDraw (void)
 			M_Print (76+16*8, 92 + 8*VID_MULTISAMPLE, va("%d",multisample));
 	}
 	else
-		M_PrintWhite (76+16*8, 92 + 8*VID_MULTISAMPLE, "Not found");
+		M_PrintWhite (76+16*8, 92 + 8*VID_MULTISAMPLE, "N/A");
 
-	M_Print (76, 92 + 8*VID_MULTITEXTURE, "Multitexturing:");
-	if (have_mtex)
-		M_DrawYesNo (76+16*8, 92 + 8*VID_MULTITEXTURE, gl_multitexture.integer, (gl_mtexable == !!gl_multitexture.integer));
+	M_Print (76, 92 + 8*VID_VSYNC, "VSync         :");
+	if (vid_vsync.integer == -1)
+		M_PrintWhite (76+16*8, 92 + 8*VID_VSYNC, "Adaptive");
+	else if (vid_vsync.integer)
+		M_PrintWhite (76+16*8, 92 + 8*VID_VSYNC, "On");
 	else
-		M_PrintWhite (76+16*8, 92 + 8*VID_MULTITEXTURE, "Not found");
+		M_PrintWhite (76+16*8, 92 + 8*VID_VSYNC, "Off");
 
-	M_Print (76, 92 + 8*VID_NPOT, "NPOT textures :");
-	if (have_NPOT)
-		M_DrawYesNo (76+16*8, 92 + 8*VID_NPOT, gl_texture_NPOT.integer, (gl_tex_NPOT == !!gl_texture_NPOT.integer));
-	else
-		M_PrintWhite (76+16*8, 92 + 8*VID_NPOT, "Not found");
+	M_Print (76, 92 + 8*VID_TEXFILTER, "Textures      :");
+	M_PrintWhite (76+16*8, 92 + 8*VID_TEXFILTER,
+		(gl_filter_idx <= 2) ? "Classic" : "Smooth");
 
-	M_Print (76, 92 + 8*VID_PALTEX, "8 bit textures:");
-	if (have8bit)
-		M_DrawYesNo (76+16*8, 92 + 8*VID_PALTEX, vid_config_gl8bit.integer, (is8bit == !!vid_config_gl8bit.integer));
+	M_Print (76, 92 + 8*VID_ANISOTROPY, "Anisotropy    :");
+	if (gl_max_anisotropy >= 2)
+		M_PrintWhite (76+16*8, 92 + 8*VID_ANISOTROPY, va("%dx", (int)gl_texture_anisotropy.value));
 	else
-		M_PrintWhite (76+16*8, 92 + 8*VID_PALTEX, "Not found");
+		M_PrintWhite (76+16*8, 92 + 8*VID_ANISOTROPY, "N/A");
 
 	if (need_apply)
 	{
@@ -2029,7 +1879,6 @@ static void VID_MenuKey (int key)
 			vid_menu_fs = (modestate != MS_WINDOWED);
 			vid_menunum = vid_modenum;
 			multisample = vid_config_fsaa.integer;
-			Cvar_SetValueQuick (&vid_config_gl8bit, is8bit);
 			vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
 			break;
 		case VID_APPLY:
@@ -2052,12 +1901,23 @@ static void VID_MenuKey (int key)
 			if (fs_toggle_works)
 				VID_ToggleFullscreen();
 			break;
-		case VID_RESOLUTION:
+		case VID_ASPECT:
 			S_LocalSound ("raven/menu1.wav");
-			vid_menunum--;
-			if (vid_menunum < 0)
-				vid_menunum = 0;
+			vid_menu_aspect--;
+			if (vid_menu_aspect < 0)
+				vid_menu_aspect = NUM_ASPECTS - 1;
+			VID_SnapToFilteredMode();
 			break;
+		case VID_RESOLUTION:
+		{
+			int next = VID_FindNextFilteredMode(vid_menunum, -1);
+			if (next >= 0)
+			{
+				S_LocalSound ("raven/menu1.wav");
+				vid_menunum = next;
+			}
+			break;
+		}
 		case VID_MULTISAMPLE:
 			if (!sdl_has_multisample)
 				break;
@@ -2068,17 +1928,27 @@ static void VID_MenuKey (int key)
 			else
 				multisample = 4;
 			break;
-		case VID_MULTITEXTURE:
-			if (have_mtex)
-				Cvar_SetQuick (&gl_multitexture, gl_multitexture.integer ? "0" : "1");
+		case VID_VSYNC:
+			if (vid_vsync.integer == 1)
+				Cvar_SetQuick (&vid_vsync, "0");
+			else if (vid_vsync.integer == 0)
+				Cvar_SetQuick (&vid_vsync, "-1");
+			else
+				Cvar_SetQuick (&vid_vsync, "1");
+			SDL_GL_SetSwapInterval(vid_vsync.integer);
 			break;
-		case VID_NPOT:
-			if (have_NPOT)
-				Cvar_SetQuick (&gl_texture_NPOT, gl_texture_NPOT.integer ? "0" : "1");
+		case VID_TEXFILTER:
+			/* toggle between Classic (nearest+mipmap) and Smooth (trilinear) */
+			Cvar_Set ("gl_texturemode", (gl_filter_idx <= 2) ?
+				"GL_LINEAR_MIPMAP_LINEAR" : "GL_NEAREST_MIPMAP_LINEAR");
 			break;
-		case VID_PALTEX:
-			if (have8bit)
-				Cvar_SetQuick (&vid_config_gl8bit, vid_config_gl8bit.integer ? "0" : "1");
+		case VID_ANISOTROPY:
+			if (gl_max_anisotropy >= 2)
+			{
+				int av = (int)gl_texture_anisotropy.value;
+				av = (av <= 1) ? (int)gl_max_anisotropy : av / 2;
+				Cvar_SetValueQuick(&gl_texture_anisotropy, av);
+			}
 			break;
 		}
 		return;
@@ -2091,12 +1961,23 @@ static void VID_MenuKey (int key)
 			if (fs_toggle_works)
 				VID_ToggleFullscreen();
 			break;
-		case VID_RESOLUTION:
+		case VID_ASPECT:
 			S_LocalSound ("raven/menu1.wav");
-			vid_menunum++;
-			if (vid_menunum >= *nummodes)
-				vid_menunum = *nummodes - 1;
+			vid_menu_aspect++;
+			if (vid_menu_aspect >= NUM_ASPECTS)
+				vid_menu_aspect = 0;
+			VID_SnapToFilteredMode();
 			break;
+		case VID_RESOLUTION:
+		{
+			int next = VID_FindNextFilteredMode(vid_menunum, +1);
+			if (next >= 0)
+			{
+				S_LocalSound ("raven/menu1.wav");
+				vid_menunum = next;
+			}
+			break;
+		}
 		case VID_MULTISAMPLE:
 			if (!sdl_has_multisample)
 				break;
@@ -2107,17 +1988,27 @@ static void VID_MenuKey (int key)
 			else if (multisample < 8)
 				multisample = 8;
 			break;
-		case VID_MULTITEXTURE:
-			if (have_mtex)
-				Cvar_SetQuick (&gl_multitexture, gl_multitexture.integer ? "0" : "1");
+		case VID_VSYNC:
+			if (vid_vsync.integer == 0)
+				Cvar_SetQuick (&vid_vsync, "1");
+			else if (vid_vsync.integer == 1)
+				Cvar_SetQuick (&vid_vsync, "-1");
+			else
+				Cvar_SetQuick (&vid_vsync, "0");
+			SDL_GL_SetSwapInterval(vid_vsync.integer);
 			break;
-		case VID_NPOT:
-			if (have_NPOT)
-				Cvar_SetQuick (&gl_texture_NPOT, gl_texture_NPOT.integer ? "0" : "1");
+		case VID_TEXFILTER:
+			Cvar_Set ("gl_texturemode", (gl_filter_idx <= 2) ?
+				"GL_LINEAR_MIPMAP_LINEAR" : "GL_NEAREST_MIPMAP_LINEAR");
 			break;
-		case VID_PALTEX:
-			if (have8bit)
-				Cvar_SetQuick (&vid_config_gl8bit, vid_config_gl8bit.integer ? "0" : "1");
+		case VID_ANISOTROPY:
+			if (gl_max_anisotropy >= 2)
+			{
+				int av = (int)gl_texture_anisotropy.value * 2;
+				if (av > (int)gl_max_anisotropy) av = 1;
+				if (av < 1) av = 2;
+				Cvar_SetValueQuick(&gl_texture_anisotropy, av);
+			}
 			break;
 		}
 		return;

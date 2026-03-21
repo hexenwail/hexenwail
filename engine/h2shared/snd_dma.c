@@ -71,7 +71,7 @@ int		s_rawend;
 portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
 
-#define	MAX_SFX		512
+#define	MAX_SFX		1024
 static sfx_t	*known_sfx = NULL;	// hunk allocated [MAX_SFX]
 static int	num_sfx;
 static hashindex_t	hash_sfx;
@@ -80,10 +80,10 @@ static sfx_t	*ambient_sfx[NUM_AMBIENTS];
 
 static qboolean	sound_started = false;
 
-int		desired_speed = 22050;
+int		desired_speed = 44100;
 int		desired_bits = 16;
 int		desired_channels = 2;
-const int	tryrates[] = { 11025, 22050, 44100, 48000, 96000, 16000, 24000, 8000 };
+const int	tryrates[] = { 44100, 48000, 22050, 11025, 96000, 24000, 16000, 8000 };
 const int	MAX_TRYRATES = sizeof(tryrates)/sizeof(tryrates[0]);
 
 cvar_t		bgmvolume = {"bgmvolume", "1", CVAR_ARCHIVE};
@@ -498,7 +498,7 @@ void SND_Spatialize (channel_t *ch)
 
 // calculate stereo seperation and distance attenuation
 	VectorSubtract(ch->origin, listener_origin, source_vec);
-	dist = VectorNormalizeFast(source_vec) * ch->dist_mult;
+	dist = VectorNormalize(source_vec) * ch->dist_mult;
 	dot = DotProduct(listener_right, source_vec);
 
 	if (shm->channels == 1)

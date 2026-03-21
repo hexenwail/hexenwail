@@ -8,10 +8,6 @@
 # argument to make, or export it. Also see build_cross_win64.sh.
 # Requires: a mingw-w64 compiler toolchain.
 #
-# To cross-compile for MacOSX on Unix: either pass the OSXBUILD=1
-# argument to make, or export it.  You would also need to pass a
-# suitable MACH_TYPE=xxx (ppc, x86, x86_64, or ppc64) argument to
-# make. Also see build_cross_osx.sh.
 #
 # To build a debug version:		make DEBUG=1 [other stuff]
 #
@@ -52,18 +48,6 @@ INCLUDES= -I. -I$(COMMONDIR) -I$(UHEXEN2_SHARED)
 
 # Other build flags
 
-ifeq ($(TARGET_OS),dos)
-INCLUDES+= -I$(OSLIBS)/dos
-LDFLAGS += $(OSLIBS)/dos/djtime/djtime.a -lc -lgcc
-endif
-ifeq ($(TARGET_OS),os2)
-INCLUDES+= -I$(OSLIBS)/os2/emx/include
-CFLAGS  += -Zmt
-ifndef DEBUG
-LDFLAGS += -s
-endif
-LDFLAGS += -Zmt
-endif
 ifeq ($(TARGET_OS),win32)
 CFLAGS  += -DWIN32_LEAN_AND_MEAN
 INCLUDES+= -I$(OSLIBS)/windows/misc/include
@@ -75,48 +59,6 @@ CFLAGS  += -DWIN32_LEAN_AND_MEAN
 INCLUDES+= -I$(OSLIBS)/windows/misc/include
 CFLAGS  += -m64
 LDFLAGS += -m64 -mconsole
-endif
-ifeq ($(TARGET_OS),aros)
-CFLAGS += -fno-common
-endif
-ifeq ($(TARGET_OS),morphos)
-CFLAGS  += -noixemul
-LDFLAGS += -noixemul
-LDLIBS  += -lm
-endif
-ifeq ($(TARGET_OS),amigaos)
-# use Bebbo's GCC6 toolchain
-BEBBO_TOOLCHAIN=yes
-# crt: libnix or clib2:
-USE_CLIB2=yes
-ifeq ($(BEBBO_TOOLCHAIN),yes)
-USE_CLIB2=no
-endif
-ifeq ($(USE_CLIB2),yes)
-CRT_FLAGS=-mcrt=clib2
-else
-CRT_FLAGS=-noixemul
-endif
-CFLAGS  += $(CRT_FLAGS) -m68020-60
-LDFLAGS += $(CRT_FLAGS) -m68020
-LDLIBS  += -lm
-ifndef DEBUG
-CFLAGS  += -fno-omit-frame-pointer
-endif
-# for extra missing headers
-INCLUDES += -I$(OSLIBS)/amigaos/include
-endif
-ifeq ($(TARGET_OS),darwin)
-CPUFLAGS=
-# require 10.5 for 64 bit builds
-ifeq ($(MACH_TYPE),x86_64)
-CFLAGS  +=-mmacosx-version-min=10.5
-LDFLAGS +=-mmacosx-version-min=10.5
-endif
-ifeq ($(MACH_TYPE),ppc64)
-CFLAGS  +=-mmacosx-version-min=10.5
-LDFLAGS +=-mmacosx-version-min=10.5
-endif
 endif
 ifeq ($(TARGET_OS),unix)
 LDLIBS  += -lm

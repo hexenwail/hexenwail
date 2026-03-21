@@ -43,7 +43,7 @@ static struct in_addr	myAddr,		// the local address returned by the OS.
 
 int winsock_initialized = 0;
 WSADATA		winsockdata;
-#define __wsaerr_static			/* not static: used by net_wipx.c too */
+#define __wsaerr_static
 #include "wsaerror.h"
 
 //=============================================================================

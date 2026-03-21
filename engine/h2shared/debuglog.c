@@ -22,18 +22,13 @@
 
 #include "quakedef.h"
 #include "debuglog.h"
-#ifdef PLATFORM_AMIGA
-#include <proto/exec.h>
-#include <proto/dos.h>
-#else
 #include <sys/stat.h>
 #include <fcntl.h>
-#endif
 #ifdef PLATFORM_WINDOWS
 #include <io.h>		/* write() */
 #include "io_msvc.h"
 #endif
-#if defined(PLATFORM_OS2)||defined(PLATFORM_DOS)
+#if defined(PLATFORM_OS2)
 #include <io.h>		/* write() */
 #endif
 #if defined(PLATFORM_UNIX) ||	\
@@ -46,27 +41,12 @@
 
 unsigned int		con_debuglog	= LOG_NONE;
 
-#ifdef PLATFORM_AMIGA
-static BPTR			log_fd = 0;
-#else
 static int			log_fd = -1;
-#endif
 static char		logfilename[MAX_OSPATH];	/* current logfile name	*/
 static char		logbuff[MAX_PRINTMSG];		/* our log text buffer	*/
 
 static const char	separator_line[] = "=======================================\n";
 
-#ifdef PLATFORM_AMIGA
-void LOG_Print (const char *logdata)
-{
-	if (!logdata || !*logdata)
-		return;
-	if (!log_fd)
-		return;
-
-	Write (log_fd, (CONST APTR) logdata, strlen(logdata));
-}
-#else
 void LOG_Print (const char *logdata)
 {
 	if (!logdata || !*logdata)
@@ -76,7 +56,6 @@ void LOG_Print (const char *logdata)
 
 	write (log_fd, logdata, strlen(logdata));
 }
-#endif
 
 void LOG_Printf (const char *fmt, ...)
 {
@@ -122,14 +101,6 @@ void LOG_Init (quakeparms_t *parms)
 	q_strlcat(logfilename, DEBUGLOG_FILENAME, sizeof(logfilename));
 	Sys_DateTimeString (session);
 
-#ifdef PLATFORM_AMIGA
-	if (!(log_fd = Open ((const STRPTR)logfilename, MODE_NEWFILE)))
-	{
-		con_debuglog = LOG_NONE;
-		Sys_PrintTerm ("Error: Unable to create log file\n");
-		return;
-	}
-#else
 	/*
 	Sys_unlink (logfilename);
 	*/
@@ -140,7 +111,6 @@ void LOG_Init (quakeparms_t *parms)
 		Sys_PrintTerm ("Error: Unable to create log file\n");
 		return;
 	}
-#endif
 
 	LOG_Printf("LOG started on: %s - LOG LEVEL: %s\n", session, (con_debuglog & LOG_DEVEL) ? "full" : "normal");
 
@@ -172,15 +142,6 @@ void LOG_Init (quakeparms_t *parms)
 	LOG_Print (separator_line);
 }
 
-#ifdef PLATFORM_AMIGA
-void LOG_Close (void)
-{
-	if (!log_fd)
-		return;
-	Close (log_fd);
-	log_fd = 0;
-}
-#else
 void LOG_Close (void)
 {
 	if (log_fd == -1)
@@ -188,4 +149,3 @@ void LOG_Close (void)
 	close (log_fd);
 	log_fd = -1;
 }
-#endif

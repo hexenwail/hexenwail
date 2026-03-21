@@ -99,22 +99,6 @@ char *q_strupr (char *str)
 	return str;
 }
 
-#ifdef __DJGPP__ /* override stock DJGPP versions of str[n]icmp by our q_str[n]casecmp: */
-#ifdef __cplusplus
-extern "C" {
-#endif
-int __stricmp(const char *, const char *) __attribute__((alias("q_strcasecmp")));
-int stricmp(const char *, const char *) __attribute__((alias("q_strcasecmp")));
-int strcasecmp(const char *, const char *) __attribute__((alias("q_strcasecmp")));
-int __strnicmp(const char *, const char *, size_t) __attribute__((alias("q_strncasecmp")));
-int strnicmp(const char *, const char *, size_t) __attribute__((alias("q_strncasecmp")));
-int strncasecmp(const char *, const char *, size_t) __attribute__((alias("q_strncasecmp")));
-char *strlwr(char *) __attribute__((alias("q_strlwr")));
-char *strupr(char *) __attribute__((alias("q_strlwr")));
-#ifdef __cplusplus
-}
-#endif
-#endif
 
 size_t qerr_strlcat (const char *caller, int linenum,
 		     char *dst, const char *src, size_t size)

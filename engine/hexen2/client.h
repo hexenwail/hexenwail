@@ -73,7 +73,7 @@ typedef struct
 	char		map[MAX_STYLESTRING];
 } lightstyle_t;
 
-#define	MAX_EFRAGS		640
+#define	MAX_EFRAGS		8192
 
 #define	MAX_MAPSTRING		2048
 #define	MAX_DEMOS		8
@@ -138,11 +138,9 @@ typedef struct
 
 // information for local display
 	int		stats[MAX_CL_STATS];	// health, etc
-	int		inv_order[MAX_INVENTORY];
 	int		inv_count, inv_startpos, inv_selected;
-	int		items;		// inventory bit flags
-	float		item_gettime[32];	// cl.time of aquiring item, for blinking
-	float		faceanimtime;		// use anim frame if cl.time < this
+	int		items;				// inventory bit flags
+	float	faceanimtime;		// use anim frame if cl.time < this
 
 	entvars_t	v;		// NOTE: not every field will be update
 					// you must specifically add them in
@@ -210,6 +208,10 @@ typedef struct
 //
 	struct qmodel_s	*model_precache[MAX_MODELS];
 	struct sfx_s	*sound_precache[MAX_SOUNDS];
+	struct ex_inventory_page_s ex_inventory[MAX_INVENTORY_EX_PAGES]; //ex_inventory_page_t *ex_inventory; 	// [cl.maxclients * (MAX_ITEMS_EX / 32)]
+	ex_item_t	*ex_items; // [MAX_ITEMS_EX or current count?]
+	int num_ex_items;
+	int next_page_id;
 
 	char		mapname[40];
 	char		levelname[40];		// for display on solo scoreboard

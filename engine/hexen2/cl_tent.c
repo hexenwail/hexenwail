@@ -54,6 +54,7 @@
 #define TE_STREAM_GAZE			31
 #define TE_STREAM_FAMINE		32
 #define TE_STREAM_LIGHTNING_SMALL	24
+#define TE_LIGHT_PULSE			33
 
 // TYPES -------------------------------------------------------------------
 
@@ -277,8 +278,36 @@ void CL_ParseTEnt(void)
 		pos[2] = MSG_ReadCoord ();
 		R_TeleportSplash (pos);
 		break;
+
+	case TE_LIGHT_PULSE:	// colored light pulse from model glow settings
+	{
+		int entidx = MSG_ReadShort();
+		entity_t *tent = &cl_entities[entidx];
+		dl = CL_AllocDlight(0);
+		VectorCopy(tent->origin, dl->origin);
+		dl->radius = 250;
+		dl->die = cl.time + 0.5;
+		dl->decay = 300;
+#	ifdef GLQUAKE
+		if ((gl_colored_dynamic_lights.integer) && (tent->model))
+		{
+			float *gs;
+			R_GetPimpFlags(tent, &gs);
+			dl->color[0] = gs[COLOR_R];
+			dl->color[1] = gs[COLOR_G];
+			dl->color[2] = gs[COLOR_B];
+			dl->color[3] = gs[COLOR_A];
+		}
+#	endif
+		break;
+	}
+
+	// SoT mod uses additional effect types beyond the standard range
+	// For now, skip unknown types gracefully to prevent crashes
 	default:
-		Sys_Error ("%s: bad type", __thisfunc__);
+		Con_DPrintf ("%s: Unknown effect type %d, skipping\n", __thisfunc__, type);
+		// Don't crash, just skip this effect
+		break;
 	}
 }
 

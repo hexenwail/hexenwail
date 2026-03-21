@@ -35,9 +35,6 @@ sizebuf_t	net_message;
 
 static sys_socket_t	net_socket = INVALID_SOCKET;
 
-#if defined(PLATFORM_AMIGA)
-struct Library	*SocketBase;
-#endif
 #ifdef PLATFORM_WINDOWS
 #include "wsaerror.h"
 static WSADATA	winsockdata;
@@ -242,7 +239,7 @@ static sys_socket_t UDP_OpenSocket (int port)
 	int		i;
 	sys_socket_t	newsocket;
 	struct sockaddr_in	address;
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_DOS)
+#if defined(PLATFORM_WINDOWS)
 	u_long	_true = 1;
 #else
 	int	_true = 1;
@@ -338,22 +335,6 @@ void NET_Init (int port)
 	if (sock_init() < 0)
 		Sys_Error ("Can't initialize IBM OS/2 sockets");
 #endif /* OS/2 */
-#ifdef PLATFORM_AMIGA
-	SocketBase = OpenLibrary("bsdsocket.library", 0);
-	if (!SocketBase)
-		Sys_Error ("Can't open bsdsocket.library.");
-#endif
-#if defined(PLATFORM_DOS) && defined(USE_WATT32)
-	int i, err;
-
-/*	dbug_init();*/
-	i = _watt_do_exit;
-	_watt_do_exit = 0;
-	err = sock_init();
-	_watt_do_exit = i;
-	if (err != 0)
-		Sys_Error ("WATTCP initialization failed (%s)", sock_init_err(err));
-#endif	/* WatTCP  */
 
 	// open the single socket to be used for all communications
 	net_socket = UDP_OpenSocket (port);
@@ -384,13 +365,6 @@ void	NET_Shutdown (void)
 	}
 #ifdef PLATFORM_WINDOWS
 	WSACleanup ();
-#endif
-#ifdef PLATFORM_AMIGA
-	if (SocketBase)
-	{
-		CloseLibrary(SocketBase);
-		SocketBase = NULL;
-	}
 #endif
 }
 

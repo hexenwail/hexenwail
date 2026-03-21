@@ -26,8 +26,8 @@
 #include <mmsystem.h>
 
 
-#define MIN_MEM_ALLOC	0x0800000
-#define STD_MEM_ALLOC	0x1000000
+#define MIN_MEM_ALLOC	0x2000000	/* 32 mb */
+#define STD_MEM_ALLOC	0x4000000	/* 64 mb */
 
 cvar_t		sys_nostdout = {"sys_nostdout", "0", CVAR_NONE};
 

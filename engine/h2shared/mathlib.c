@@ -337,6 +337,15 @@ int GreatestCommonDivisor (int i1, int i2)
 	}
 }
 
+/*
+===================
+NearestMultiple
+====================
+*/
+int NearestMultiple(int num, int mul)
+{
+	return ((num >= 0 ? (num / mul) * mul : ((num - mul + 1) / mul) * mul));
+}
 
 int Q_log2 (int val)
 {

@@ -20,7 +20,6 @@
  */
 
 #include "quakedef.h"
-#include "r_shared.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -42,6 +41,7 @@
 
 /* artifact counts are relative to the cnt_torch in entvars_t struct: */
 #define Inv_GetCount(artifact_num)	(int)(&cl.v.cnt_torch)[(artifact_num)]
+#define Inv_GetCountEx(artifact_num)	(int)(cl.ex_inventory[0].item_cnt)[(artifact_num)]
 
 // TYPES -------------------------------------------------------------------
 
@@ -351,8 +351,7 @@ void Sbar_Draw(void)
 	// Current inventory item
 	if (cl.inv_selected >= 0)
 	{
-		DrawBarArtifactIcon(144, 3, cl.inv_order[cl.inv_selected]);
-	//	Sbar_DrawTransPic(144, 3, Draw_CachePic(va("gfx/arti%02d.lmp", cl.inv_order[cl.inv_selected])));
+		DrawBarArtifactIcon(144, 3, cl.inv_selected);
 	}
 }
 
@@ -438,7 +437,7 @@ static void DrawFullScreenInfo(void)
 	// Current inventory item
 	if (cl.inv_selected >= 0)
 	{
-		DrawBarArtifactIcon(288, y+7, cl.inv_order[cl.inv_selected]);
+		DrawBarArtifactIcon(288, y + 7, cl.inv_selected);
 	}
 }
 
@@ -1159,7 +1158,7 @@ void Inv_Update(qboolean force)
 	{
 		// Just to be safe
 		if (cl.inv_selected >= 0 && cl.inv_count > 0)
-			cl.v.inventory = cl.inv_order[cl.inv_selected] + 1;
+			cl.v.inventory = cl.ex_inventory->item_id[cl.ex_inventory->inv_order[cl.inv_selected]];
 		else
 			cl.v.inventory = 0;
 
@@ -1182,17 +1181,64 @@ void Inv_Update(qboolean force)
 //
 //==========================================================================
 
-static void DrawBarArtifactIcon(int x, int y, int artifact)
+static void DrawBarArtifactIcon(int x, int y, int position)
 {
-	int	count;
+	int	j, i;
+	ex_inventory_page_t *page_seq, *page_from;
 
-	if (artifact < 0 || artifact >= MAX_INVENTORY)
+	if (position < 0 || position >= MAX_ITEMS_EX)
 		return;
-	Sbar_DrawTransPic(x, y, Draw_CachePic(va("gfx/arti%02d.lmp", artifact)));
-	if ((count = Inv_GetCount(artifact)) > 0)
+
+
+	j = NearestMultiple(position, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+	page_seq = cl.ex_inventory;
+	if (j > 0)
 	{
-		DrawBarArtifactNumber(x+20, y+21, count);
+		for (i = 0; i < j; i++)
+		{
+			page_seq = page_seq->next;
+		}
 	}
+
+	j = NearestMultiple(page_seq->inv_order[position & 31], MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+	page_from = cl.ex_inventory;
+	if (j > 0)
+	{
+		for (i = 0; i < j; i++)
+		{
+			page_from = page_from->next;
+		}
+	}
+
+	for (i = 0; i < cl.num_ex_items; i++)
+	{
+		if (cl.ex_items[i].id == page_from->item_id[position & 31])
+		{
+			Sbar_DrawTransPic(x, y, Draw_CachePic(cl.ex_items[i].icon));
+			DrawBarArtifactNumber(x + 20, y + 21, page_from->item_cnt[position & 31]);
+			break;
+		}
+	}
+
+	/*
+	while (page_from != NULL)
+	{
+		for (i = 0; i < MAX_INVENTORY_EX; i++)
+		{
+			//shan page_from
+			j = (page_from->inv_order[position & 31]);
+			if (cl.ex_items[j].id == page_from->item_id[j])
+			{
+				Sbar_DrawTransPic(x, y, Draw_CachePic(cl.ex_items[position].icon));
+				DrawBarArtifactNumber(x + 20, y + 21, page_from->item_cnt[j]);
+				break;
+			}
+
+		}
+
+		page_from = page_from->next;
+	}
+	*/
 }
 
 //==========================================================================
@@ -1234,7 +1280,7 @@ static void DrawArtifactInventory(void)
 		{ // Highlight icon
 			Sbar_DrawTransPic(x+9, y-12, Draw_CachePic("gfx/artisel.lmp"));
 		}
-		DrawBarArtifactIcon(x, y, cl.inv_order[(cl.inv_startpos + i) % cl.inv_count]);
+		DrawBarArtifactIcon(x, y, (cl.inv_startpos + i) % cl.inv_count);
 	}
 
 	/*
@@ -1430,36 +1476,205 @@ static void ToggleDM_f(void)
 
 void SB_InvChanged(void)
 {
-	int		counter, position;
-	qboolean	examined[MAX_INVENTORY];
+	int		counter, position, i, j;
+	int page_from_id, page_to_id, page_seq_id = 0;
+	ex_inventory_page_t *page_from, *page_to, *page_seq = cl.ex_inventory;
+	qboolean	examined[MAX_ITEMS_EX];
 	qboolean	ForceUpdate = false;
 
 	memset (examined, 0, sizeof(examined));
 
-	if (cl.inv_selected >= 0 && Inv_GetCount(cl.inv_order[cl.inv_selected]) == 0)
+
+	page_from = cl.ex_inventory;
+	page_from_id = NearestMultiple(cl.inv_selected, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+	if (page_from_id > 0)
+	{
+		for (i = 0; i < page_from_id; i++)
+		{
+			page_from = page_from->next;
+		}
+	}
+
+	page_to = cl.ex_inventory;
+	page_to_id = NearestMultiple(page_from->inv_order[cl.inv_selected & 31], MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+
+	if (page_to_id > 0)
+	{
+		for (i = 0; i < page_to_id; i++)
+		{
+			page_to = page_to->next;
+		}
+	}
+
+	if (cl.inv_selected >= 0 && (page_to->item_cnt[page_from->inv_order[cl.inv_selected & 31]] == 0))
 		ForceUpdate = true;
+
+
+	/*
+	while (page != NULL)
+	{
+		// removed items we no longer have from the order
+		for (counter = position = 0; counter < cl.inv_count; counter++)
+		{
+			if (page->item_cnt[page->inv_order[counter]] > 0)
+			{
+				page->inv_order[position] = page->inv_order[counter];
+				examined[page->inv_order[position]] = true;
+
+				position++;
+			}
+		}
+
+		page = page->next;
+	}
+	*/
+
 
 	// removed items we no longer have from the order
 	for (counter = position = 0; counter < cl.inv_count; counter++)
 	{
-		if (Inv_GetCount(cl.inv_order[counter]) > 0)
+
+		j = NearestMultiple(counter, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+		if (j != page_seq_id)
 		{
-			cl.inv_order[position] = cl.inv_order[counter];
-			examined[cl.inv_order[position]] = true;
+			page_seq_id = j;
+			page_seq = cl.ex_inventory;
+			if (page_seq_id > 0)
+			{
+				for (i = 0; i < page_seq_id; i++)
+				{
+					page_seq = page_seq->next;
+				}
+			}
+		}
+
+		j = NearestMultiple(page_seq->inv_order[counter & 31], MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+		if (j != page_from_id)
+		{
+			page_from_id = j;
+			page_from = cl.ex_inventory;
+			if (page_from_id > 0)
+			{
+				for (i = 0; i < page_from_id; i++)
+				{
+					page_from = page_from->next;
+				}
+			}
+		}
+
+		j = NearestMultiple(position, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+		if (j != page_to_id)
+		{
+			page_to_id = j;
+			page_to = cl.ex_inventory;
+			if (page_to_id > 0)
+			{
+				for (i = 0; i < page_to_id; i++)
+				{
+					page_to = page_to->next;
+				}
+			}
+		}
+
+
+		if (page_seq->item_cnt[page_from->inv_order[counter & 31]] > 0)
+		{
+			page_to->inv_order[position & 31] = page_from->inv_order[counter];
+			examined[page_to->inv_order[position]] = true;
+
+			position++;
+		}
+
+	}
+
+	/*
+	// removed items we no longer have from the order
+	for (counter = position = 0; counter < cl.inv_count; counter++)
+	{
+		if (cl.ex_inventory->item_cnt[cl.ex_inventory->inv_order[counter]] > 0)
+		{
+			cl.ex_inventory->inv_order[position] = cl.ex_inventory->inv_order[counter];
+			examined[cl.ex_inventory->inv_order[position]] = true;
 
 			position++;
 		}
 	}
+	*/
 
+	/*
 	// add in the new items
-	for (counter = 0; counter < MAX_INVENTORY; counter++)
+	for (counter = 0; counter < MAX_INVENTORY_EX; counter++)
 	{
 		if (!examined[counter])
 		{
-			if (Inv_GetCount(counter) > 0)
+			if (cl.ex_inventory->item_cnt[counter] > 0)
 			{
-				cl.inv_order[position] = counter;
+				cl.ex_inventory->inv_order[position] = counter;
 				position++;
+			}
+		}
+	}
+	*/
+
+
+	// add in the new items
+	page_from_id = 0;
+	page_to_id = 0;
+	page_seq_id = 0;
+	for (counter = 0; counter < cl.num_ex_items; counter++)
+	{
+		j = NearestMultiple(counter, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+		if (j != page_seq_id)
+		{
+			page_seq_id = j;
+			page_seq = cl.ex_inventory;
+			if (page_seq_id > 0)
+			{
+				for (i = 0; i < page_seq_id; i++)
+				{
+					page_seq = page_seq->next;
+				}
+			}
+		}
+
+		if (page_seq != NULL)
+		{
+			j = NearestMultiple(page_seq->inv_order[counter & 31], MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+			if (j != page_from_id)
+			{
+				page_from_id = j;
+				page_from = cl.ex_inventory;
+				if (page_from_id > 0)
+				{
+					for (i = 0; i < page_from_id; i++)
+					{
+						page_from = page_from->next;
+					}
+				}
+			}
+
+			j = NearestMultiple(position, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
+			if (j != page_to_id)
+			{
+				page_to_id = j;
+				page_to = cl.ex_inventory;
+				if (page_to_id > 0)
+				{
+					for (i = 0; i < page_to_id; i++)
+					{
+						page_to = page_to->next;
+					}
+				}
+			}
+
+
+			if (!examined[counter])
+			{
+				if (page_from->item_cnt[counter & 31] > 0)
+				{
+					page_to->inv_order[position & 31] = counter;
+					position++;
+				}
 			}
 		}
 	}

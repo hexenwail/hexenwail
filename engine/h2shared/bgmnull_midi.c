@@ -80,10 +80,13 @@ static void BGM_Loop_f (void)
 			bgmloop = !bgmloop;
 	}
 
-	if (bgmloop)
-		Con_Printf("Music will be looped\n");
-	else
-		Con_Printf("Music will not be looped\n");
+	if (developer.value >= 2)
+	{
+		if (bgmloop)
+			Con_Printf("Music will be looped\n");
+		else
+			Con_Printf("Music will not be looped\n");
+	}
 }
 
 static void BGM_Stop_f (void)

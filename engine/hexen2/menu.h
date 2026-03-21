@@ -33,19 +33,14 @@ enum m_state_e
 	m_setup,
 	m_net,
 	m_options,
-#ifdef GLQUAKE
-	m_opengl,
-#endif
+	m_display,
+	m_sound,
+	m_game,
 	m_video,
+	m_gamepad,
 	m_keys,
 	m_help,
 	m_quit,
-/* need net.h included before menu.h
-to see this definition's existance */
-#if defined(NET_USE_SERIAL)
-	m_serialconfig,
-	m_modemconfig,
-#endif
 	m_lanconfig,
 	m_gameoptions,
 	m_search,
@@ -53,7 +48,8 @@ to see this definition's existance */
 	m_class,
 	m_difficulty,
 	m_mload,
-	m_msave
+	m_msave,
+	m_mods
 };
 
 extern	enum m_state_e	m_state;

@@ -20,7 +20,10 @@
  */
 
 #include "quakedef.h"
-#include "r_local.h"
+#ifdef GLQUAKE
+#include "gl_shader.h"
+#include "gl_vbo.h"
+#endif
 
 
 #define	SFL_FLUFFY		1	// All largish flakes
@@ -1389,8 +1392,9 @@ void R_DrawParticles (void)
 
 	GL_Bind(particletexture);
 	glEnable_fp (GL_BLEND);
-	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBegin_fp (GL_TRIANGLES);
+	GL_SetAlphaThreshold(0.0f);
+
+	GL_ImmBegin();
 
 	VectorScale (vup, 1.5, r_pup);
 	VectorScale (vright, 1.5, r_pright);
@@ -1412,9 +1416,9 @@ void R_DrawParticles (void)
 	 * decrements their color against time. */
 		color = ((int)p->color) & 0x01ff;
 		if (color < 256)
-			glColor3ubv_fp ((byte *)&d_8to24table[color]);
+			GL_ImmColor3ubv ((byte *)&d_8to24table[color]);
 		else
-			glColor4ubv_fp ((byte *)&d_8to24TranslucentTable[color-256]);
+			GL_ImmColor4ubv ((byte *)&d_8to24TranslucentTable[color-256]);
 
 		// setup texture coordinates
 		i = 0;
@@ -1428,17 +1432,17 @@ void R_DrawParticles (void)
 				i = 1;
 		}
 
-		glTexCoord2fv_fp (ptex_coord[i][0]);
-		glVertex3fv_fp (p->org);
-		glTexCoord2fv_fp (ptex_coord[i][1]);
-		glVertex3f_fp (p->org[0] + r_pup[0]*scale, p->org[1] + r_pup[1]*scale, p->org[2] + r_pup[2]*scale);
-		glTexCoord2fv_fp (ptex_coord[i][2]);
-		glVertex3f_fp (p->org[0] + r_pright[0]*scale, p->org[1] + r_pright[1]*scale, p->org[2] + r_pright[2]*scale);
+		GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
+		GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
+		GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
+		GL_ImmVertex3f(p->org[0] + r_pup[0]*scale, p->org[1] + r_pup[1]*scale, p->org[2] + r_pup[2]*scale);
+		GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
+		GL_ImmVertex3f(p->org[0] + r_pright[0]*scale, p->org[1] + r_pright[1]*scale, p->org[2] + r_pright[2]*scale);
 	}
 
-	glEnd_fp ();
+	GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+	GL_SetAlphaThreshold(0.01f);
 	glDisable_fp (GL_BLEND);
-	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 }
 
 #else	/* !GLQUAKE */

@@ -99,18 +99,8 @@ const char *NET_SlistPrintServerName (int n);
 
 /* FIXME: driver related, but public:
  */
-extern	qboolean	serialAvailable;
-extern	qboolean	ipxAvailable;
 extern	qboolean	tcpipAvailable;
-extern	char		my_ipx_address[NET_NAMELEN];
 extern	char		my_tcpip_address[NET_NAMELEN];
-
-#undef	NET_USE_SERIAL
-/* allow the serial driver only for DOS builds
- * and only when USE_SERIAL is defined: */
-#if defined(PLATFORM_DOS) && defined(USE_SERIAL)
-#define	NET_USE_SERIAL	1
-#endif
 
 #undef	NO_LOOP_DRIVER
 /* The dedicated server application (h2ded)
@@ -118,13 +108,6 @@ extern	char		my_tcpip_address[NET_NAMELEN];
 #if defined(SERVERONLY)
 #define	NO_LOOP_DRIVER	1
 #endif	/* SERVERONLY */
-
-#if defined(NET_USE_SERIAL)
-extern	void (*GetComPortConfig) (int portNumber, int *port, int *irq, int *baud, qboolean *useModem);
-extern	void (*SetComPortConfig) (int portNumber, int port, int irq, int baud, qboolean useModem);
-extern	void (*GetModemConfig) (int portNumber, char *dialType, char *clear, char *init, char *hangup);
-extern	void (*SetModemConfig) (int portNumber, const char *dialType, const char *clear, const char *init, const char *hangup);
-#endif	/* NET_USE_SERIAL */
 
 #endif	/* __HX2_NET_H */
 

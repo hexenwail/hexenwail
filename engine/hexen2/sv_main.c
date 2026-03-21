@@ -124,9 +124,12 @@ void SV_Init (void)
 	case PROTOCOL_UQE_113:
 		p = "UQE/1.13";
 		break;
+	case PROTOCOL_UH2_114:
+		p = "Raven/MP/1.14";
+		break;
 	default:
-		Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i.",
-				sv_protocol, PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113);
+		Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i, %i.",
+				sv_protocol, PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113, PROTOCOL_UH2_114);
 		return; /* silence compiler */
 	}
 	Sys_Printf ("Server using protocol %i (%s)\n", sv_protocol, p);
@@ -362,13 +365,13 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 	}
 
 	if (volume < 0 || volume > 255)
-		Host_Error ("%s: volume = %i", __thisfunc__, volume);
+		Host_Error ("%s: volume = %i", __func__, volume);
 
 	if (attenuation < 0 || attenuation > 4)
-		Host_Error ("%s: attenuation = %f", __thisfunc__, attenuation);
+		Host_Error ("%s: attenuation = %f", __func__, attenuation);
 
 	if (channel < 0 || channel > 7)
-		Host_Error ("%s: channel = %i", __thisfunc__, channel);
+		Host_Error ("%s: channel = %i", __func__, channel);
 
 	if (sv.datagram.cursize > MAX_DATAGRAM-16)
 		return;
@@ -382,7 +385,7 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 
 	if (sound_num == MAX_SOUNDS || !sv.sound_precache[sound_num])
 	{
-		Con_Printf ("%s: %s not precached\n", __thisfunc__, sample);
+		Con_Printf ("%s: %s not precached\n", __func__, sample);
 		return;
 	}
 
@@ -400,7 +403,7 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 		if (sv_protocol == PROTOCOL_RAVEN_111)
 		{
 			Con_DPrintf("%s: protocol 18 violation: %s sound_num == %i >= %i\n",
-					__thisfunc__, sample, sound_num, MAX_SOUNDS_OLD);
+					__func__, sample, sound_num, MAX_SOUNDS_OLD);
 			return;
 		}
 		field_mask |= SND_OVERFLOW;
@@ -418,6 +421,98 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 	MSG_WriteByte (&sv.datagram, sound_num);
 	for (i = 0; i < 3; i++)
 		MSG_WriteCoord (&sv.datagram, entity->v.origin[i] + 0.5*(entity->v.mins[i]+entity->v.maxs[i]));
+}
+
+/*
+==================
+SV_UpdateExInventory
+==================
+*/
+int INV_UpdateExItem(ex_inventory_page_t *startPage, int inv_id, int inv_cnt, qboolean inc)
+{
+	qboolean bFound = false;
+	int i, j, result;
+	ex_inventory_page_t *page = startPage;
+
+	result = 0;
+
+	while (page != NULL)
+	{
+		// try to find a matching slot
+		for (i = 0; i < MAX_INVENTORY_EX; i++)
+		{
+			if (page->item_id[i] == inv_id)
+			{
+				if (inc)
+					page->item_cnt[i] += inv_cnt;
+				else
+					page->item_cnt[i] = inv_cnt;
+
+				page->changed_items |= (1 << i);
+				result = page->item_cnt[i];
+				bFound = true;
+
+				break;
+			}
+		}
+		page = page->next;
+	}
+
+	if (inv_cnt > 0)
+	{
+		// no matching slot found, create one at first empty
+		if (bFound == false)
+		{
+			page = startPage;
+
+			while (page != NULL)
+			{
+				for (i = 0; i < MAX_INVENTORY_EX; i++)
+				{
+					if (page->item_id[i] == 0)
+					{
+						page->item_id[i] = inv_id;
+
+						if (inc)
+							page->item_cnt[i] += inv_cnt;
+						else
+							page->item_cnt[i] = inv_cnt;
+
+						page->changed_items |= (1 << i);
+						page->new_items |= (1 << i);
+						result = page->item_cnt[i];
+						bFound = true;
+
+						break;
+					}
+				}
+
+				if (!bFound)
+				{
+					if (page->next == NULL)
+					{
+
+						//find matching or first empty inventory page
+						for (j = 0; ((j < (svs.maxclients * MAX_INVENTORY_EX_PAGES)) && (sv.ex_inventory_pages[j].id != 0) && (sv.ex_inventory_pages[j].client_id != i)); j++);
+						if (j < svs.maxclients * MAX_INVENTORY_EX_PAGES)
+						{
+							page->next = &sv.ex_inventory_pages[j];
+							if (page->next->id == 0)
+								page->next->id = ++sv.next_page_id;
+						}
+						//page = startPage; //shan find blank page?  with no associated client?
+					}
+					else
+						page = page->next;
+				}
+				else
+					break;
+			}
+		}
+	}
+
+
+	return result;
 }
 
 /*
@@ -470,6 +565,39 @@ static void SV_SendServerinfo (client_t *client)
 		MSG_WriteString (&client->message, *s);
 	MSG_WriteByte (&client->message, 0);
 
+	if (sv_protocol == PROTOCOL_UH2_114)
+	{
+		// send model effects
+		for (i = 1, s = sv.model_precache + 1; i < MAX_MODELS && *s; s++)
+		{
+			#if !defined(SERVERONLY) && defined(GLQUAKE)
+			if ((sv.models[i] != NULL) && (sv.models[i]->ex_flags != 0))
+			{
+				MSG_WriteString(&client->message, *s);
+				MSG_WriteShort(&client->message, sv.models[i]->ex_flags);
+				MSG_WriteFloat(&client->message, sv.models[i]->glow_settings[COLOR_R]);
+				MSG_WriteFloat(&client->message, sv.models[i]->glow_settings[COLOR_G]);
+				MSG_WriteFloat(&client->message, sv.models[i]->glow_settings[COLOR_B]);
+				MSG_WriteFloat(&client->message, sv.models[i]->glow_settings[COLOR_A]);
+			}
+			#endif
+			i++;
+		}
+		MSG_WriteByte(&client->message, 0);
+
+		// send inventory extension info
+		for (i = 0; i < sv.num_ex_items; i++)
+		{
+			//only send new/changed artifacts
+			if ((!strcmp(va("gfx/arti%02d.lmp", sv.ex_items[i].id), sv.ex_items[i].icon)) || (sv.ex_items[i].id > 15))
+			{
+				MSG_WriteByte(&client->message, sv.ex_items[i].id);
+				MSG_WriteString(&client->message, sv.ex_items[i].icon);
+			}
+		}
+		MSG_WriteByte(&client->message, 0);
+	}
+
 // send music
 	MSG_WriteByte (&client->message, svc_cdtrack);
 	MSG_WriteByte (&client->message, sv.cd_track);
@@ -511,7 +639,7 @@ static void SV_ConnectClient (int clientnum)
 	client_t		*client;
 	int				edictnum;
 	struct qsocket_s *netconnection;
-//	int			i;
+	int			i;
 	float			spawn_parms[NUM_SPAWN_PARMS];
 
 	client = svs.clients + clientnum;
@@ -535,6 +663,15 @@ static void SV_ConnectClient (int clientnum)
 	client->active = true;
 	client->spawned = false;
 	client->edict = ent;
+
+	//find matching or first empty inventory page
+	for (i = 0; ((i < svs.maxclients) && (sv.ex_inventory_pages[i].id != 0) && (sv.ex_inventory_pages[i].client_id != clientnum)); i++);
+	if (i < svs.maxclients)
+	{
+		client->ex_inventory = &sv.ex_inventory_pages[i];
+		if (client->ex_inventory->id == 0)
+			client->ex_inventory->id = ++sv.next_page_id;
+	}
 
 	SZ_Init (&client->message, client->msgbuf, sizeof(client->msgbuf));
 	client->message.allowoverflow = true;	// we can catch it
@@ -586,7 +723,7 @@ void SV_CheckForNewClients (void)
 		}
 
 		if (i == svs.maxclients)
-			Sys_Error ("%s: no free clients", __thisfunc__);
+			Sys_Error ("%s: no free clients", __func__);
 
 		svs.clients[i].netconnection = ret;
 		SV_ConnectClient (i);
@@ -1099,7 +1236,7 @@ SV_WriteClientdataToMessage
 */
 void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg)
 {
-	int	bits,sc1,sc2;
+	int	bits,sc1,sc2,sc3,sc4;
 	byte	test;
 	int	i;
 	edict_t	*other;
@@ -1264,6 +1401,13 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 	else
 	{
 		sc1 = sc2 = 0;
+		if (sv_protocol == PROTOCOL_UH2_114)
+		{
+			sc3 = host_client->ex_inventory->changed_items;
+			sc4 = host_client->ex_inventory->new_items;
+		}
+		else
+			sc3 = sc4 = 0;
 
 		if (ent->v.health != host_client->old_v.health)
 			sc1 |= SC1_HEALTH;
@@ -1385,7 +1529,7 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 		}
 	}
 
-	if (!sc1 && !sc2)
+	if (!sc1 && !sc2 && !sc3 && !sc4)
 		goto end;
 
 	MSG_WriteByte (&host_client->message, svc_update_inv);
@@ -1447,35 +1591,35 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 	if (sc1 & SC1_EXPERIENCE)
 		MSG_WriteLong (&host_client->message, ent->v.experience);
 	if (sc1 & SC1_CNT_TORCH)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_torch);
+		MSG_WriteByte(&host_client->message, ent->v.cnt_torch), INV_UpdateExItem(host_client->ex_inventory, 1, (int)ent->v.cnt_torch, false);
 	if (sc1 & SC1_CNT_H_BOOST)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_h_boost);
+		MSG_WriteByte(&host_client->message, ent->v.cnt_h_boost), INV_UpdateExItem(host_client->ex_inventory, 2, (int)ent->v.cnt_h_boost, false);
 	if (sc1 & SC1_CNT_SH_BOOST)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_sh_boost);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_sh_boost), INV_UpdateExItem(host_client->ex_inventory, 3, (int)ent->v.cnt_sh_boost, false);
 	if (sc1 & SC1_CNT_MANA_BOOST)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_mana_boost);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_mana_boost), INV_UpdateExItem(host_client->ex_inventory, 4, (int)ent->v.cnt_mana_boost, false);
 	if (sc1 & SC1_CNT_TELEPORT)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_teleport);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_teleport), INV_UpdateExItem(host_client->ex_inventory, 5, (int)ent->v.cnt_teleport, false);
 	if (sc1 & SC1_CNT_TOME)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_tome);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_tome), INV_UpdateExItem(host_client->ex_inventory, 6, (int)ent->v.cnt_tome, false);
 	if (sc1 & SC1_CNT_SUMMON)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_summon);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_summon), INV_UpdateExItem(host_client->ex_inventory, 7, (int)ent->v.cnt_summon, false);
 	if (sc1 & SC1_CNT_INVISIBILITY)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_invisibility);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_invisibility), INV_UpdateExItem(host_client->ex_inventory, 8, (int)ent->v.cnt_invisibility, false);
 	if (sc1 & SC1_CNT_GLYPH)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_glyph);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_glyph), INV_UpdateExItem(host_client->ex_inventory, 9, (int)ent->v.cnt_glyph, false);
 	if (sc1 & SC1_CNT_HASTE)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_haste);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_haste), INV_UpdateExItem(host_client->ex_inventory, 10, (int)ent->v.cnt_haste, false);
 	if (sc1 & SC1_CNT_BLAST)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_blast);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_blast), INV_UpdateExItem(host_client->ex_inventory, 11, (int)ent->v.cnt_blast, false);
 	if (sc1 & SC1_CNT_POLYMORPH)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_polymorph);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_polymorph), INV_UpdateExItem(host_client->ex_inventory, 12, (int)ent->v.cnt_polymorph, false);
 	if (sc1 & SC1_CNT_FLIGHT)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_flight);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_flight), INV_UpdateExItem(host_client->ex_inventory, 13, (int)ent->v.cnt_flight, false);
 	if (sc1 & SC1_CNT_CUBEOFFORCE)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_cubeofforce);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_cubeofforce), INV_UpdateExItem(host_client->ex_inventory, 14, (int)ent->v.cnt_cubeofforce, false);
 	if (sc1 & SC1_CNT_INVINCIBILITY)
-		MSG_WriteByte (&host_client->message, ent->v.cnt_invincibility);
+		MSG_WriteByte (&host_client->message, ent->v.cnt_invincibility), INV_UpdateExItem(host_client->ex_inventory, 15, (int)ent->v.cnt_invincibility, false);
 	if (sc1 & SC1_ARTIFACT_ACTIVE)
 		MSG_WriteFloat (&host_client->message, ent->v.artifact_active);
 	if (sc1 & SC1_ARTIFACT_LOW)
@@ -1551,6 +1695,65 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 		}
 	}
 
+ex_inv:	
+// extended inventory
+	if (sv_protocol == PROTOCOL_UH2_114)
+	{
+		//shan page loop here
+		ex_inventory_page_t *page = host_client->ex_inventory;
+
+		while (page != NULL)
+		{
+			sc3 = page->changed_items;
+			sc4 = page->new_items;
+
+			test = 0;
+			if (sc3 & 0x000000ff)
+				test |= 1;
+			if (sc3 & 0x0000ff00)
+				test |= 2;
+			if (sc3 & 0x00ff0000)
+				test |= 4;
+			if (sc3 & 0xff000000)
+				test |= 8;
+			if (page->next != NULL)
+				test |= 16;
+
+			MSG_WriteByte(&host_client->message, test);
+
+			if (test)
+			{
+				if (test & 1)
+					MSG_WriteByte(&host_client->message, sc3 & 0xff);
+				if (test & 2)
+					MSG_WriteByte(&host_client->message, (sc3 >> 8) & 0xff);
+				if (test & 4)
+					MSG_WriteByte(&host_client->message, (sc3 >> 16) & 0xff);
+				if (test & 8)
+					MSG_WriteByte(&host_client->message, (sc3 >> 24) & 0xff);
+
+				for (i = 0; i < MAX_INVENTORY_EX; i++)
+				{
+					if (sc3 & (1 << i))
+					{
+						MSG_WriteByte(&host_client->message, (page->item_cnt[i] + (((sc4 & (1 << i)) != 0)) * 128));
+						if (sc4 & (1 << i))
+						{
+							MSG_WriteByte(&host_client->message, (page->item_id[i]));
+						}
+					}
+				}
+
+				page->changed_items = 0;
+				page->new_items = 0;
+			}
+
+			page = page->next;
+		}
+
+	}
+
+	
 end:
 	memcpy (&client->old_v, &ent->v, sizeof(client->old_v));
 }
@@ -1774,7 +1977,7 @@ int SV_ModelIndex (const char *name)
 
 	if (i == MAX_MODELS || !sv.model_precache[i])
 	{
-		Con_Printf("%s: model %s not precached\n", __thisfunc__, name);
+		Con_Printf("%s: model %s not precached\n", __func__, name);
 		return 0;
 	}
 
@@ -1923,6 +2126,91 @@ void SV_SaveSpawnparms (void)
 	}
 }
 
+/*
+=============
+INV_Write
+
+For savegames
+=============
+*/
+void INV_WritePage(FILE *f, ex_inventory_page_t *page, int clientId)
+{
+	int i;
+
+	//Page: id, next_id, client_id, {item_id, item_cnt} ...
+	fprintf(f, "Page: %i %i %i", page->id, (page->next != NULL ? page->next->id : -1), clientId); //page_id, next_id, client_id
+	for (i = 0; i < MAX_INVENTORY_EX; i++)
+	{
+		if ((page->item_id[i] != 0) && (page->item_cnt[i] > 0))
+		{
+			fprintf(f, " %i %i", page->item_id[i], page->item_cnt[i]); //item_id, item_cnt
+		}
+	}
+	fprintf(f, "\n");
+}
+
+// All changes need to be in SV_SaveInventory(), SV_LoadInventory(), CL_ParseInventory()
+void SV_LoadInventory(FILE *FH)
+{
+	int Total = 0;
+	int id, clientId, nextId, count, c, i;
+	int item_id, item_cnt, item_idx;
+
+	fscanf(FH, "Pages: %d\n", &Total);
+	if (Total < 0 || Total > MAX_CLIENTS)
+		Host_Error("%s: bad numpages", __func__);
+
+	//Page: id, next_id, client_id, {item_id, item_cnt} ...
+	for (count = 0; count < Total; count++)
+	{
+		fscanf(FH, "Page: %d %d %d", &id, &nextId, &clientId);
+		for (i = 0; ((i < svs.maxclients) && (sv.ex_inventory_pages[i].id != 0) && (sv.ex_inventory_pages[i].client_id != clientId)); i++);
+		memset(&sv.ex_inventory_pages[i], 0, sizeof(ex_inventory_page_t));
+		sv.ex_inventory_pages[i].id = id;
+		sv.ex_inventory_pages[i].client_id = clientId;
+		if (id > sv.next_page_id)
+			sv.next_page_id = id;
+
+		item_idx = 0;
+		c = fgetc(FH);	/* read one char, see what it is: */
+		while ((c != '\n') && (c != '\r'))
+		{
+			fscanf(FH, "%d %d", &item_id, &item_cnt);
+			sv.ex_inventory_pages[i].item_id[item_idx] = item_id;
+			sv.ex_inventory_pages[i].item_cnt[item_idx] = item_cnt;
+			sv.ex_inventory_pages[i].changed_items |= (1 << item_idx);
+			sv.ex_inventory_pages[i].new_items |= (1 << item_idx);
+
+			item_idx++;
+			c = fgetc(FH);	/* read one char, see what it is: */
+		}
+	}
+
+	Total = Total;
+}
+
+void INV_SavePages(FILE *FH)
+{
+	int i, j;
+	client_t	*host_client;
+
+	j = 0;
+	host_client = svs.clients;
+	for (i = 0; i < svs.maxclients; i++, host_client++)
+	{
+		if (host_client->ex_inventory != NULL)
+			j++;
+	}
+
+	fprintf(FH, "Pages: %i\n", j);
+
+	host_client = svs.clients;
+	for (i = 0; i < svs.maxclients; i++, host_client++)
+	{
+		if (host_client->ex_inventory != NULL)
+			INV_WritePage(FH, host_client->ex_inventory, i);
+	}
+}
 
 /*
 ================
@@ -1944,7 +2232,7 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	scr_centertime_off = 0;
 #endif
 
-	Con_DPrintf ("%s: %s\n", __thisfunc__, server);
+	Con_DPrintf ("%s: %s\n", __func__, server);
 	if (svs.changelevel_issued)
 	{
 		SaveGamestate(true);
@@ -2068,9 +2356,27 @@ void SV_SpawnServer (const char *server, const char *startspot)
 		sv.models[i+1] = Mod_ForName (localmodels[i], false);
 	}
 
+	sv.num_ex_items = 0;
+	if (sv.ex_items == NULL)
+	{
+		sv.ex_items = (ex_item_t *)Hunk_AllocName(MAX_ITEMS_EX * sizeof(ex_item_t), "ex_items");
+		for (i = 0; i < 15; i++)
+		{
+			sv.num_ex_items += 1;
+			sv.ex_items[i].id = (int)(i + 1);
+			q_strlcpy(sv.ex_items[i].icon, va("gfx/arti%02d.lmp", i), MAX_QPATH);
+		}
+	}
+
+	if (sv.ex_inventory_pages == NULL)
+	{
+		sv.ex_inventory_pages = (ex_inventory_page_t *)Hunk_AllocName((svs.maxclients * MAX_INVENTORY_EX_PAGES) * sizeof(ex_inventory_page_t), "ex_pages");
+	}
+
 //
 // load the rest of the entities
 //
+
 	ent = EDICT_NUM(0);
 	memset (&ent->v, 0, progs->entityfields * 4);
 	ent->free = false;

@@ -28,13 +28,7 @@
 #define ARCHDEFS_H
 
 
-#if defined(__DJGPP__) || defined(__MSDOS__) || defined(__DOS__) || defined(_MSDOS)
-
-#   if !defined(PLATFORM_DOS)
-#	define	PLATFORM_DOS		1
-#   endif
-
-#elif defined(__OS2__) || defined(__EMX__)
+#if defined(__OS2__) || defined(__EMX__)
 
 #   if !defined(PLATFORM_OS2)
 #	define	PLATFORM_OS2		1
@@ -62,14 +56,6 @@
 
 #   if !defined(PLATFORM_MAC)
 #	define	PLATFORM_MAC		1
-#   endif
-
-#elif defined(__MORPHOS__) || defined(__AROS__) || defined(AMIGAOS)	|| \
-      defined(__amigaos__) || defined(__amigaos4__) ||defined(__amigados__) || \
-      defined(AMIGA) || defined(_AMIGA) || defined(__AMIGA__)
-
-#   if !defined(PLATFORM_AMIGA)
-#	define	PLATFORM_AMIGA		1
 #   endif
 
 #elif defined(__riscos__)
@@ -114,19 +100,10 @@
 #endif	/* PLATFORM_BSD (for convenience) */
 
 
-#if defined(PLATFORM_AMIGA) && !defined(PLATFORM_AMIGAOS3)
-#   if !defined(__MORPHOS__) && !defined(__AROS__) && !defined(__amigaos4__)
-#	define	PLATFORM_AMIGAOS3	1
-#   endif
-#endif	/* PLATFORM_AMIGAOS3 (for convenience) */
-
-
 #if defined(_WIN64)
 #	define	PLATFORM_STRING	"Win64"
 #elif defined(PLATFORM_WINDOWS)
 #	define	PLATFORM_STRING	"Windows"
-#elif defined(PLATFORM_DOS)
-#	define	PLATFORM_STRING	"DOS"
 #elif defined(PLATFORM_OS2)
 #	define	PLATFORM_STRING	"OS/2"
 #elif defined(__linux__) || defined(__linux)
@@ -139,14 +116,6 @@
 #	define	PLATFORM_STRING	"NetBSD"
 #elif defined(__OpenBSD__)
 #	define	PLATFORM_STRING	"OpenBSD"
-#elif defined(__MORPHOS__)
-#	define	PLATFORM_STRING	"MorphOS"
-#elif defined(__AROS__)
-#	define	PLATFORM_STRING	"AROS"
-#elif defined(__amigaos4__)
-#	define	PLATFORM_STRING	"AmigaOS4"
-#elif defined(PLATFORM_AMIGA)
-#	define	PLATFORM_STRING	"AmigaOS"
 #elif defined(__QNX__) || defined(__QNXNTO__)
 #	define	PLATFORM_STRING	"QNX"
 #elif defined(PLATFORM_HAIKU)

@@ -79,6 +79,22 @@
 
 #define K_COMMAND		170
 
+//
+// gamepad buttons (SDL3 Gamepad API)
+//
+#define	K_GP_A			243
+#define	K_GP_B			244
+#define	K_GP_X			245
+#define	K_GP_Y			246
+#define	K_GP_LSHOULDER		247
+#define	K_GP_RSHOULDER		248
+#define	K_GP_LTRIGGER		249
+#define	K_GP_RTRIGGER		250
+#define	K_GP_LTHUMB		251
+#define	K_GP_RTHUMB		252
+#define	K_GP_BACK		253
+#define	K_GP_START		254
+
 #define K_PAUSE			255
 
 //
@@ -175,6 +191,9 @@ void Key_WriteBindings (FILE *f);
 void Key_EndChat (void);
 const char *Key_GetChatBuffer (void);
 int Key_GetChatMsgLen (void);
+
+void Key_CharEvent (const char *text);
+void Key_SetTextInputMode (qboolean on);
 
 #endif	/* __HX2_KEYS_H */
 

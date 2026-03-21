@@ -127,10 +127,21 @@ typedef int	qboolean;
 COMPILE_TIME_ASSERT(falsehood, (0 == false));
 COMPILE_TIME_ASSERT(truth, (1  == true));
 #else
+/* C23 made true/false reserved keywords, so we use qfalse/qtrue
+ * in the enum and #define false/true for backward compatibility */
+#if __STDC_VERSION__ >= 202311L
+typedef enum {
+	qfalse = 0,
+	qtrue  = 1
+} qboolean;
+#define false qfalse
+#define true qtrue
+#else
 typedef enum {
 	false = 0,
 	true  = 1
 } qboolean;
+#endif
 COMPILE_TIME_ASSERT(falsehood, ((1 != 1) == false));
 COMPILE_TIME_ASSERT(truth, ((1 == 1) == true));
 #endif

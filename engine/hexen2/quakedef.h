@@ -31,7 +31,7 @@
 #define	HOT_VERSION_REL_DATE	"2022-10-25"
 #define	HOT_VERSION_STR		STRINGIFY(HOT_VERSION_MAJ) "." STRINGIFY(HOT_VERSION_MID) "." STRINGIFY(HOT_VERSION_MIN)
 #define	GLQUAKE_VERSION		1.00
-#define	ENGINE_VERSION		1.29
+#define	ENGINE_VERSION		1.2901
 #define	ENGINE_NAME		"Hexen2"
 
 #define	MAX_QPATH	64	// max length of a quake game pathname
@@ -84,10 +84,10 @@
 //
 // per-level limits
 //
-#define	MAX_EDICTS	600		// FIXME: ouch! ouch! ouch!
-#define	MAX_LIGHTSTYLES	64
+#define	MAX_EDICTS	8192
+#define	MAX_LIGHTSTYLES	256
 
-#define	MAX_MODELS	512		/* Sent over the net as a word */
+#define	MAX_MODELS	2048		/* Sent over the net as a word */
 #define	MAX_SOUNDS_OLD	256		/* Hexen2 v1.11 (protocol 18) and older: sent as a byte	*/
 #define	MAX_SOUNDS_H2MP	512		/* Mission Pack (protocol 19), messy thing:		*/
 					/* SV_StartSound sends it as a byte, but PF_ambientsound
@@ -120,6 +120,10 @@
 //#define	STAT_EXPERIENCE		17
 
 #define	MAX_INVENTORY		15	/* Max inventory array size */
+#define	MAX_INVENTORY_EX	32	/* Max extended inventory array size */
+#define MAX_INVENTORY_EX_PAGES	8
+#define MAX_ITEMS_EX		MAX_INVENTORY_EX * MAX_INVENTORY_EX_PAGES /* Max item definitions, thus / 8 = max pages */
+//#define MAX_ITEMS_EX		32  // 255
 /* the number of cnt_<artifact_name> members in the entvars_t struct:
    from cnt_torch to cnt_invincibility: 15 total (see in progdefs.h). */
 

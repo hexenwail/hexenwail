@@ -755,12 +755,13 @@ int FS_CreatePath (char *path)
 
 /*
 ===========
-FS_OpenFile
+FS_OpenFile_Internal
 
-Finds the file in the search path, returns fs_filesize.
+Internal function - finds the file in the search path, returns fs_filesize.
+If silent is true, suppresses error messages for missing files.
 ===========
 */
-long FS_OpenFile (const char *filename, FILE **file, unsigned int *path_id)
+static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned int *path_id, qboolean silent)
 {
 	searchpath_t	*search;
 	pack_t		*pak;
@@ -812,11 +813,40 @@ long FS_OpenFile (const char *filename, FILE **file, unsigned int *path_id)
 		}
 	}
 
-	Sys_DPrintf ("%s: can't find %s\n", __thisfunc__, filename);
+	// Only print "can't find" messages when developer >= 1 and not in silent mode
+	// (suppresses noise from optional external textures and missing assets)
+	if (!silent && developer.integer >= 1)
+		Sys_Printf ("%s: can't find %s\n", __thisfunc__, filename);
 
 	if (file) *file = NULL;
 	fs_filesize = -1;
 	return fs_filesize;
+}
+
+/*
+===========
+FS_OpenFile
+
+Finds the file in the search path, returns fs_filesize.
+===========
+*/
+long FS_OpenFile (const char *filename, FILE **file, unsigned int *path_id)
+{
+	return FS_OpenFile_Internal (filename, file, path_id, false);
+}
+
+/*
+===========
+FS_OpenFile_Silent
+
+Finds the file in the search path, returns fs_filesize.
+Does not print error messages for missing files.
+Use for optional file checks (e.g., external textures).
+===========
+*/
+long FS_OpenFile_Silent (const char *filename, FILE **file, unsigned int *path_id)
+{
+	return FS_OpenFile_Internal (filename, file, path_id, true);
 }
 
 /*
@@ -828,7 +858,7 @@ Returns whether the file is found in the hexen2 filesystem.
 */
 qboolean FS_FileExists (const char *filename, unsigned int *path_id)
 {
-	long ret = FS_OpenFile(filename, NULL, path_id);
+	long ret = FS_OpenFile_Silent(filename, NULL, path_id);
 	return (ret < 0) ? false : true;
 }
 
@@ -1161,7 +1191,11 @@ static int CheckRegistered (void)
 	if (!h)
 		return -1;
 
-	fread (check, 1, sizeof(check), h);
+	if (fread (check, 1, sizeof(check), h) != sizeof(check))
+	{
+		fclose (h);
+		return -1;
+	}
 	fclose (h);
 
 	for (i = 0; i < 128; i++)
@@ -1175,6 +1209,146 @@ static int CheckRegistered (void)
 
 	return 0;
 }
+
+/*
+================
+Host_Game_f
+
+Runtime mod switching: "game <dirname>" to switch, "game" to print current.
+================
+*/
+#if !defined(SERVERONLY)
+static void Host_Game_f (void)
+{
+	const char	*dir;
+	char		path[MAX_OSPATH];
+	qboolean	use_portals = false;
+
+	if (Cmd_Argc() < 2)
+	{
+		Con_Printf ("Current game directory: %s\n", fs_gamedir_nopath);
+		return;
+	}
+
+	dir = Cmd_Argv(1);
+
+	/* optional second arg: 1 = include portals data */
+	if (Cmd_Argc() >= 3)
+		use_portals = (atoi(Cmd_Argv(2)) != 0);
+
+	/* validate */
+	if (!*dir || !strcmp(dir, ".") || strstr(dir, "..") || strstr(dir, "/") || strstr(dir, "\\"))
+	{
+		Con_Printf ("gamedir should be a single directory name, not a path\n");
+		return;
+	}
+
+	/* switching back to base game */
+	if (!q_strcasecmp(dir, "data1"))
+		dir = "data1";
+
+	/* already the current game? */
+	if (!q_strcasecmp(fs_gamedir_nopath, dir))
+	{
+		Con_Printf ("Already running: %s\n", dir);
+		return;
+	}
+
+	/* validate that the directory exists (skip for data1) */
+	if (q_strcasecmp(dir, "data1"))
+	{
+		q_snprintf (path, sizeof(path), "%s/%s", host_parms->basedir, dir);
+		if (Sys_FileType(path) != FS_ENT_DIRECTORY)
+		{
+			Con_Printf ("Game directory \"%s\" not found\n", dir);
+			return;
+		}
+	}
+
+	/* === FULL ENGINE RESET === */
+
+	/* save config to old mod's directory before switching */
+	Host_WriteConfiguration ("config.cfg");
+
+	/* stop everything */
+	CL_Disconnect ();
+	Host_ShutdownServer (true);
+
+	/* flush all memory (models, sounds, hunk) */
+	Host_ClearMemory ();
+
+	/* clear stale client static state — close demo file if open */
+	if (cls.demofile)
+	{
+		fclose (cls.demofile);
+		cls.demofile = NULL;
+	}
+	memset (cls.demos, 0, sizeof(cls.demos));
+	cls.demonum = 0;
+	cls.demorecording = false;
+	cls.demoplayback = false;
+	cls.timedemo = false;
+	cls.signon = 0;
+
+	/* discard any pending commands from the old mod */
+	Cbuf_Clear ();
+
+	/* reset the filesystem back to base (data1 only) before
+	 * adding new game paths — FS_Gamedir strips paths above
+	 * fs_base_searchpaths, but we need a clean slate */
+	{
+		searchpath_t	*next;
+		while (fs_searchpaths != fs_base_searchpaths)
+		{
+			if (fs_searchpaths->pack)
+			{
+				fclose (fs_searchpaths->pack->handle);
+				Z_Free (fs_searchpaths->pack->files);
+				Hash_Free(&fs_searchpaths->pack->hash);
+				Z_Free (fs_searchpaths->pack);
+			}
+			next = fs_searchpaths->next;
+			Z_Free (fs_searchpaths);
+			fs_searchpaths = next;
+		}
+	}
+	Cache_Flush ();
+
+	/* optionally add portals as base for custom mods */
+	if (use_portals && q_strcasecmp(dir, "data1") && q_strcasecmp(dir, "portals"))
+	{
+		q_snprintf (path, sizeof(path), "%s/portals", host_parms->basedir);
+		if (Sys_FileType(path) == FS_ENT_DIRECTORY)
+		{
+			FS_AddGameDirectory ("portals", true);
+			fs_base_searchpaths = fs_searchpaths;
+		}
+	}
+
+	/* add the new game directory (skip for data1 — already in base) */
+	if (q_strcasecmp(dir, "data1"))
+		FS_AddGameDirectory (dir, !q_strcasecmp(dir, "portals"));
+	else
+	{
+		/* reset gamedir tracking to data1 */
+		qerr_strlcpy(__thisfunc__, __LINE__, fs_gamedir_nopath, "data1",
+						sizeof(fs_gamedir_nopath));
+		FS_MakePath_BUF (FS_BASEDIR, NULL, fs_gamedir, sizeof(fs_gamedir), "data1");
+		FS_MakePath_BUF (FS_USERBASE, NULL, fs_userdir, sizeof(fs_userdir), "data1");
+	}
+
+	/* flush non-persistent GL textures and reload menu/HUD graphics */
+#ifdef GLQUAKE
+	{ extern void TexMgr_NewGame (void); TexMgr_NewGame (); }
+#endif
+	Draw_ReInit ();
+
+	/* clean slate: reload binds, aliases, and configs from new mod */
+	Cbuf_AddText ("unbindall\nunaliasall\nexec hexen.rc\n");
+	Con_Printf ("\ngame changed to \"%s\"\n", dir);
+}
+#endif	/* !SERVERONLY */
+
 
 /*
 ================
@@ -1192,6 +1366,7 @@ void FS_Init (void)
 	Cmd_AddCommand ("path", FS_Path_f);
 #if !defined(SERVERONLY)
 	Cmd_AddCommand ("maplist", FS_Maplist_f);
+	Cmd_AddCommand ("game", Host_Game_f);
 #endif
 
 /* -basedir <path> overrides the system supplied base directory */

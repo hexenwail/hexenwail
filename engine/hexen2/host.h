@@ -48,6 +48,7 @@ extern	qboolean	isDedicated;
 
 extern	cvar_t		sys_ticrate;
 extern	cvar_t		sys_throttle;
+extern	cvar_t		host_maxfps;
 extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 
@@ -64,6 +65,7 @@ extern	double		realtime;		// not bounded in any way, changed at
 void Host_Init (void);
 void Host_InitCommands (void);
 void Host_Shutdown(void);
+void Host_WriteConfiguration (const char *fname);
 void Host_Callback_Notify (cvar_t *var);	/* callback function for CVAR_NOTIFY */
 /* Host_Error and Host_EndGame doesn't return either due to Sys_Error() or longjmp() */
 FUNC_NORETURN void Host_Error (const char *error, ...) FUNC_PRINTF(1,2);

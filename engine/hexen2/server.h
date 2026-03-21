@@ -39,6 +39,26 @@ typedef enum
 	ss_active
 } server_state_t;
 
+typedef struct ex_item_s
+{
+	int		id;
+	char		icon[MAX_QPATH];
+} ex_item_t;
+
+typedef struct ex_inventory_page_s
+{
+	int		id;
+	int		client_id;
+	int		changed_items;		// inventory change bit flags
+	int		new_items;		// inventory change bit flags
+	int		item_id[32];
+	int		item_cnt[32];
+	int		inv_order[32];
+	float	item_gettime[32];	// cl.time of aquiring item, for blinking
+	struct ex_inventory_page_s *next;
+	//struct ex_inventory_page_s	*next2;
+} ex_inventory_page_t;
+
 typedef struct
 {
 	qboolean	active;		// false if only a net client
@@ -80,6 +100,10 @@ typedef struct
 
 	sizebuf_t	signon;
 	byte		signon_buf[NET_MAXMESSAGE];
+	ex_item_t	*ex_items;
+	int			next_page_id;
+	ex_inventory_page_t	*ex_inventory_pages;
+	int			num_ex_items;
 } server_t;
 
 
@@ -129,6 +153,7 @@ typedef struct client_s
 
 // mission pack, objectives strings
 	unsigned int	info_mask, info_mask2;
+	ex_inventory_page_t *ex_inventory;
 } client_t;
 
 
@@ -266,6 +291,7 @@ void SV_StartParticle4 (vec3_t org, float radius, int color, int effect, int cou
 void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume, float attenuation);
 void SV_StopSound (edict_t *entity, int channel);
 void SV_UpdateSoundPos (edict_t *entity, int channel);
+int INV_UpdateExItem(ex_inventory_page_t *startPage, int inv_id, int inv_cnt, qboolean inc);
 
 void SV_DropClient (qboolean crash);
 
@@ -307,5 +333,10 @@ void SV_ParseEffect (sizebuf_t *sb);
 void SV_UpdateEffects (sizebuf_t *sb);
 void SV_SaveEffects (FILE *FH);
 void SV_LoadEffects (FILE *FH);
+
+/* Inventory save/load functions */
+void INV_WritePage(FILE *f, struct ex_inventory_page_s *page, int clientId);
+void INV_SavePages(FILE *FH);
+void SV_LoadInventory(FILE *FH);
 
 #endif	/* __HX2_SERVER_H */

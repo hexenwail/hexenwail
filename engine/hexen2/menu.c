@@ -23,7 +23,8 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
-#include "r_shared.h"
+#include "gl_postprocess.h"
+#include "sdl_inc.h"
 
 void (*vid_menudrawfn)(void);
 void (*vid_menukeyfn)(int key);
@@ -44,6 +45,7 @@ static void M_Menu_Help_f (void);
 void M_Menu_Quit_f (void);
 static void M_Menu_LanConfig_f (void);
 static void M_Menu_GameOptions_f (void);
+static void M_Menu_Mods_f (void);
 static void M_Menu_Search_f (void);
 static void M_Menu_ServerList_f (void);
 
@@ -57,6 +59,7 @@ static void M_Net_Draw (void);
 static void M_Options_Draw (void);
 static void M_Keys_Draw (void);
 static void M_Video_Draw (void);
+static void M_Mods_Draw (void);
 static void M_Help_Draw (void);
 static void M_Quit_Draw (void);
 static void M_LanConfig_Draw (void);
@@ -74,6 +77,7 @@ static void M_Net_Key (int key);
 static void M_Options_Key (int key);
 static void M_Keys_Key (int key);
 static void M_Video_Key (int key);
+static void M_Mods_Key (int key);
 static void M_Help_Key (int key);
 static void M_Quit_Key (int key);
 static void M_LanConfig_Key (int key);
@@ -81,14 +85,6 @@ static void M_GameOptions_Key (int key);
 static void M_Search_Key (int key);
 static void M_ServerList_Key (int key);
 
-#if defined(NET_USE_SERIAL)
-static void M_Menu_SerialConfig_f (void);
-static void M_Menu_ModemConfig_f (void);
-static void M_SerialConfig_Draw (void);
-static void M_ModemConfig_Draw (void);
-static void M_SerialConfig_Key (int key);
-static void M_ModemConfig_Key (int key);
-#endif	/* NET_USE_SERIAL */
 
 static qboolean	m_entersound;		// play after drawing a frame, so caching
 					// won't disrupt the sound
@@ -116,22 +112,8 @@ static void M_ConfigureNetSubsystem(void);
 #define StartingGame	(m_multiplayer_cursor == 1)
 #define JoiningGame		(m_multiplayer_cursor == 0)
 
-#if !defined(NET_USE_SERIAL)
-#define	_nums_serial		0
-#define	_ser_draw_offset	8		/* incr. the Y offset this much pixels */
-#else
-#define	_item_net_ser		0		/* order of serial menu entry */
-#define	_item_net_dc		1		/* order of direct connect menu entry */
-#define	_nums_serial		2
-#define	_ser_draw_offset	0
-#define	SerialConfig		(m_net_cursor == _item_net_ser)
-#define	DirectConfig		(m_net_cursor == _item_net_dc)
-#endif
+#define	_item_net_tcp		0	/* order of TCP menu entry */
 
-#define	_item_net_ipx		(0 + _nums_serial)	/* order of IPX menu entry */
-#define	_item_net_tcp		(1 + _nums_serial)	/* order of TCP menu entry */
-
-#define	IPXConfig		(m_net_cursor == _item_net_ipx)
 #define	TCPIPConfig		(m_net_cursor == _item_net_tcp)
 
 
@@ -212,11 +194,36 @@ void M_DrawCharacter (int cx, int line, int num)
 
 void M_Print (int cx, int cy, const char *str)
 {
+	int charset_offset = 256; 
+	
 	while (*str)
 	{
-		M_DrawCharacter (cx, cy, ((unsigned char)(*str))+256);
-		str++;
-		cx += 8;
+		if (str[0] == '\\' && str[1] == '1')
+		{
+			charset_offset = 0;
+			str += 2;
+		}
+		else if (str[0] == '\\' && str[1] == '2')
+		{
+			charset_offset = 128;
+			str += 2;
+		}
+		else if (str[0] == '\\' && str[1] == '3')
+		{
+			charset_offset = 256;
+			str += 2;
+		}
+		else if (str[0] == '\\' && str[1] == '4')
+		{
+			charset_offset = 384;
+			str += 2;
+		}
+		else
+		{
+			M_DrawCharacter(cx, cy, ((unsigned char)(*str)) + charset_offset);
+			str++;
+			cx += 8;
+		}
 	}
 }
 
@@ -578,7 +585,7 @@ void ScrollTitle (const char *name)
 /* MAIN MENU */
 
 static int	m_main_cursor;
-#define	MAIN_ITEMS	5
+#define	MAIN_ITEMS	7
 
 static void BGM_RestartMusic(void);
 static char	old_bgmtype[20];	// S.A
@@ -610,8 +617,10 @@ static void M_Main_Draw (void)
 	M_DrawBigString (72, 60 + (0 * 20), "SINGLE PLAYER");
 	M_DrawBigString (72, 60 + (1 * 20), "MULTIPLAYER");
 	M_DrawBigString (72, 60 + (2 * 20), "OPTIONS");
-	M_DrawBigString (72, 60 + (3 * 20), "HELP");
-	M_DrawBigString (72, 60 + (4 * 20), "QUIT");
+	M_DrawBigString (72, 60 + (3 * 20), "MODS");
+	M_DrawBigString (72, 60 + (4 * 20), "HELP");
+	M_DrawBigString (72, 60 + (5 * 20), "INTRO");
+	M_DrawBigString (72, 60 + (6 * 20), "QUIT");
 
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPic (43, 54 + m_main_cursor * 20,Draw_CachePic( va("gfx/menu/menudot%i.lmp", f+1 ) ) );
@@ -668,10 +677,19 @@ static void M_Main_Key (int key)
 			break;
 
 		case 3:
-			M_Menu_Help_f ();
+			M_Menu_Mods_f ();
 			break;
 
 		case 4:
+			M_Menu_Help_f ();
+			break;
+
+		case 5:
+			SDL_MinimizeWindow (VID_GetWindow());
+			SDL_OpenURL ("https://www.youtube.com/watch?v=3bJcIeH5r38&t=141s");
+			break;
+
+		case 6:
 			M_Menu_Quit_f ();
 			break;
 		}
@@ -759,7 +777,20 @@ static void M_Difficulty_Key (int key)
 			return;
 		}
 		Cbuf_AddText ("wait\n"); /* make m_none to really work */
-		Cbuf_AddText ("map demo1\n");
+
+		//Launch the old mission (on a custom map if so specificied in the command line)
+		int i = COM_CheckParm("-startold");
+		if (i && i < com_argc - 1)
+		{
+			Cbuf_AddText("map ");
+			Cbuf_AddText(com_argv[i + 1]);
+			Cbuf_AddText("\n");
+		}
+		else
+		{
+			Cbuf_AddText("map demo1\n");
+		}
+
 		break;
 	default:
 		Key_SetDest (key_game);
@@ -911,7 +942,7 @@ static void M_SinglePlayer_Draw (void)
 	if (gameflags & GAME_PORTALS)
 	{
 		M_DrawBigString (72, 60 + (3 * 20), "OLD MISSION");
-		M_DrawBigString (72, 60 + (4 * 20), "VIEW INTRO");
+		M_DrawBigString (72, 60 + (4 * 20), "PORTALS INTRO");
 	}
 
 	f = (int)(realtime * 10)%8;
@@ -1392,7 +1423,7 @@ static void M_MultiPlayer_Draw (void)
 			msave_message = NULL;
 	}
 
-	if (serialAvailable || ipxAvailable || tcpipAvailable)
+	if (tcpipAvailable)
 		return;
 	M_PrintWhite ((320/2) - ((27*8)/2), 160, "No Communications Available");
 }
@@ -1423,12 +1454,12 @@ static void M_MultiPlayer_Key (int key)
 		switch (m_multiplayer_cursor)
 		{
 		case 0:
-			if (serialAvailable || ipxAvailable || tcpipAvailable)
+			if (tcpipAvailable)
 				M_Menu_Net_f ();
 			break;
 
 		case 1:
-			if (serialAvailable || ipxAvailable || tcpipAvailable)
+			if (tcpipAvailable)
 				M_Menu_Net_f ();
 			break;
 
@@ -1676,30 +1707,13 @@ forward:
 //=============================================================================
 /* NET MENU */
 
-#define NET_ITEMS	(2 + _nums_serial)
+#define NET_ITEMS	1
 
 static int	m_net_cursor = 0;
 
 static const char *net_helpMessage[] =
 {
 /* .........1.........2.... */
-#if defined(NET_USE_SERIAL)
-  "                        ",
-  " Two computers connected",
-  "   through two modems.  ",
-  "                        ",
-
-  "                        ",
-  " Two computers connected",
-  " by a null-modem cable. ",
-  "                        ",
-#endif	/* NET_USE_SERIAL */
-
-  " Novell network LANs    ",
-  " or Windows 95 DOS-box. ",
-  "                        ",
-  "(LAN=Local Area Network)",
-
   " Commonly used to play  ",
   " over the Internet, but ",
   " also used on a Local   ",
@@ -1725,12 +1739,7 @@ static void M_Net_Draw (void)
 
 	ScrollTitle("gfx/menu/title4.lmp");
 
-#if defined(NET_USE_SERIAL)
-	M_DrawBigString (72, (64 + _ser_draw_offset) + (_item_net_ser * 20), "MODEM");
-	M_DrawBigString (72, (64 + _ser_draw_offset) + (_item_net_dc  * 20), "DIRECT CONNECT");
-#endif
-	M_DrawBigString (72, (64 + _ser_draw_offset) + (_item_net_ipx * 20), "IPX");
-	M_DrawBigString (72, (64 + _ser_draw_offset) + (_item_net_tcp * 20), "TCP/IP");
+	M_DrawBigString (72, 72 + (_item_net_tcp * 20), "TCP/IP");
 
 	f = (320 - 26*8) / 2;
 	M_DrawTextBox (f, 142, 24, 4);
@@ -1741,7 +1750,7 @@ static void M_Net_Draw (void)
 	M_Print (f, (142 + 4*8), net_helpMessage[m_net_cursor*4 + 3]);
 
 	f = (int)(realtime * 10)%8;
-	M_DrawTransPic (43, (56 + _ser_draw_offset) + m_net_cursor * 20, Draw_CachePic(va("gfx/menu/menudot%i.lmp", f+1)) );
+	M_DrawTransPic (43, 64 + m_net_cursor * 20, Draw_CachePic(va("gfx/menu/menudot%i.lmp", f+1)) );
 }
 
 static void M_Net_Key (int k)
@@ -1770,17 +1779,6 @@ again:
 		m_entersound = true;
 		switch (m_net_cursor)
 		{
-#if defined(NET_USE_SERIAL)
-		case _item_net_ser:
-			M_Menu_SerialConfig_f ();
-			break;
-		case _item_net_dc :
-			M_Menu_SerialConfig_f ();
-			break;
-#endif	/* NET_USE_SERIAL*/
-		case _item_net_ipx:
-			M_Menu_LanConfig_f ();
-			break;
 		case _item_net_tcp:
 			M_Menu_LanConfig_f ();
 			break;
@@ -1791,14 +1789,6 @@ again:
 		break;
 	}
 
-#if defined(NET_USE_SERIAL)
-	if (SerialConfig && !serialAvailable)
-		goto again;
-	if (DirectConfig && !serialAvailable)
-		goto again;
-#endif	/* NET_USE_SERIAL*/
-	if (IPXConfig && !ipxAvailable)
-		goto again;
 	if (TCPIPConfig && !tcpipAvailable)
 		goto again;
 
@@ -1820,36 +1810,30 @@ again:
 enum
 {
 	OPT_CUSTOMIZE = 0,
+	OPT_DISPLAY,
+	OPT_SOUND,
+	OPT_GAME,
+	OPT_GAMEPAD,
 	OPT_CONSOLE,
 	OPT_DEFAULTS,
-#ifdef GLQUAKE
-	OPT_SCALE,
-#endif
-	OPT_SCRSIZE,
-	OPT_GAMMA,
-	OPT_MOUSESPEED,
-	OPT_MUSICTYPE,
-	OPT_MUSICVOL,
-	OPT_SNDVOL,
-	OPT_ALWAYRUN,
-	OPT_INVMOUSE,
-	OPT_ALWAYSMLOOK,
-	OPT_USEMOUSE,
-	OPT_CROSSHAIR,
-	OPT_CHASE_ACTIVE,
-#ifdef GLQUAKE
-	OPT_OPENGL,
-#endif
-	OPT_VIDEO,
 	OPTIONS_ITEMS
 };
 
-#ifdef GLQUAKE
-// prototypes for the opengl menu
-static void M_Menu_OpenGL_f (void);
-static void M_OpenGL_Draw (void);
-static void M_OpenGL_Key (int k);
-#endif
+// prototypes for submenus
+static void M_Menu_Display_f (void);
+static void M_Display_Draw (void);
+static void M_Display_Key (int k);
+static void M_Menu_Sound_f (void);
+static void M_Sound_Draw (void);
+static void M_Sound_Key (int k);
+static void M_Menu_Game_f (void);
+static void M_Game_Draw (void);
+static void M_Game_Key (int k);
+
+// prototypes for the gamepad menu
+static void M_Menu_Gamepad_f (void);
+static void M_Gamepad_Draw (void);
+static void M_Gamepad_Key (int k);
 
 static int	options_cursor;
 
@@ -1858,46 +1842,407 @@ void M_Menu_Options_f (void)
 	Key_SetDest (key_menu);
 	m_state = m_options;
 	m_entersound = true;
-
-	// get the current music type
-	if (old_bgmtype[0] == 0)
-		q_strlcpy(old_bgmtype, bgmtype.string, sizeof(old_bgmtype));
-#if 0	/* change to 1 if dont want to disable mouse in fullscreen */
-	if ((options_cursor == OPT_USEMOUSE) && (modestate != MS_WINDOWED))
-		options_cursor = 0;
-#endif
 }
 
 
-static void M_AdjustSliders (int dir)
+static void M_DrawSlider (int x, int y, float range)
+{
+	int	i;
+
+	if (range < 0)
+		range = 0;
+	else if (range > 1)
+		range = 1;
+	M_DrawCharacter (x-8, y, 256);
+	for (i = 0; i < SLIDER_RANGE; i++)
+		M_DrawCharacter (x + i*8, y, 257);
+	M_DrawCharacter (x + i*8, y, 258);
+	M_DrawCharacter (x + (SLIDER_RANGE-1)*8 * range, y, 259);
+}
+
+void M_DrawCheckbox (int x, int y, int on)
+{
+	if (on)
+		M_Print (x, y, "on");
+	else
+		M_Print (x, y, "off");
+}
+
+static void M_Options_Draw (void)
+{
+	menu_disabled_mouse = false;
+	IN_ActivateMouse ();
+
+	ScrollTitle("gfx/menu/title3.lmp");
+
+	M_Print (76, 92 + 8*OPT_CUSTOMIZE,	"Key Setup");
+	M_Print (76, 92 + 8*OPT_DISPLAY,	"Display");
+	M_Print (76, 92 + 8*OPT_SOUND,		"Sound");
+	M_Print (76, 92 + 8*OPT_GAME,		"Game");
+	M_Print (76, 92 + 8*OPT_GAMEPAD,	"Controller");
+	M_Print (76, 92 + 8*OPT_CONSOLE,	"Go to Console");
+	M_Print (76, 92 + 8*OPT_DEFAULTS,	"Reset to Defaults");
+
+	// cursor
+	M_DrawCharacter (64, 92 + 8*options_cursor, 12 + ((int)(realtime*4) & 1));
+}
+
+
+static void M_Options_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+		M_Menu_Main_f ();
+		break;
+
+	case K_ENTER:
+		m_entersound = true;
+		switch (options_cursor)
+		{
+		case OPT_CUSTOMIZE:
+			M_Menu_Keys_f ();
+			break;
+		case OPT_DISPLAY:
+			M_Menu_Display_f ();
+			break;
+		case OPT_SOUND:
+			M_Menu_Sound_f ();
+			break;
+		case OPT_GAME:
+			M_Menu_Game_f ();
+			break;
+		case OPT_GAMEPAD:
+			M_Menu_Gamepad_f ();
+			break;
+		case OPT_CONSOLE:
+			m_state = m_none;
+			Con_ToggleConsole_f ();
+			break;
+		case OPT_DEFAULTS:
+			Cbuf_AddText ("exec default.cfg\n");
+			break;
+		}
+		return;
+
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		options_cursor--;
+		if (options_cursor < 0)
+			options_cursor = OPTIONS_ITEMS-1;
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		options_cursor++;
+		if (options_cursor >= OPTIONS_ITEMS)
+			options_cursor = 0;
+		break;
+	}
+}
+
+
+//=============================================================================
+/* DISPLAY MENU */
+
+enum
+{
+	DISP_PRESET = 0,
+	DISP_GAMMA,
+	DISP_CONTRAST,
+#ifdef GLQUAKE
+	DISP_SCALE,
+#endif
+	DISP_SCRSIZE,
+	DISP_RENDERSCALE,
+	DISP_SOFTEMU,
+	DISP_DITHER,
+	DISP_WATERCOLOR,
+	DISP_VIDEO,
+	DISP_ITEMS
+};
+
+static int	display_cursor;
+
+static void M_Menu_Display_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_display;
+	m_entersound = true;
+}
+
+static void M_Display_AdjustSliders (int dir)
 {
 	float	f;
 
 	S_LocalSound ("raven/menu3.wav");
 
-	switch (options_cursor)
+	switch (display_cursor)
 	{
-#ifdef GLQUAKE
-	case OPT_SCALE: 	// scale slider S.A.
-		VID_ChangeConsize(dir);
+	case DISP_PRESET:
+	{
+		/* 0=Custom, 1=Crunchy, 2=Retro, 3=Modern */
+		static int preset = 0;
+		preset += dir;
+		if (preset < 0) preset = 3;
+		if (preset > 3) preset = 0;
+
+		if (preset == 1)	/* Crunchy */
+		{
+			Cvar_SetValue ("r_scale", 0.25f);
+			Cvar_SetValue ("r_softemu", 2);
+			Cvar_SetValue ("r_dither", 2.0f);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+		}
+		else if (preset == 2)	/* Retro */
+		{
+			Cvar_SetValue ("r_scale", 0.5f);
+			Cvar_SetValue ("r_softemu", 1);
+			Cvar_SetValue ("r_dither", 1.0f);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+		}
+		else if (preset == 3)	/* Modern */
+		{
+			Cvar_SetValue ("r_scale", 1.0f);
+			Cvar_SetValue ("r_softemu", 0);
+			Cvar_SetValue ("r_dither", 1.0f);
+			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
+			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
+		}
+		/* preset == 0: Custom — keep current user settings */
 		break;
-#endif
-	case OPT_SCRSIZE:	// screen size
-		Cvar_SetValue ("viewsize", scr_viewsize.integer + dir * 10);
-		break;
-	case OPT_GAMMA:		// gamma
+	}
+	case DISP_GAMMA:
 		f = v_gamma.value - dir * 0.05;
 		if (f < 0.5)	f = 0.5;
 		else if (f > 1)	f = 1;
 		Cvar_SetValue ("gamma", f);
 		break;
-	case OPT_MOUSESPEED:	// mouse speed
-		f = sensitivity.value + dir * 0.5;
-		if (f > 11)	f = 11;
-		else if (f < 1)	f = 1;
-		Cvar_SetValue ("sensitivity", f);
+	case DISP_CONTRAST:
+		f = v_contrast.value + dir * 0.05;
+		if (f < 0.5)	f = 0.5;
+		else if (f > 2)	f = 2;
+		Cvar_SetValue ("contrast", f);
 		break;
-	case OPT_MUSICTYPE:	// bgm type
+#ifdef GLQUAKE
+	case DISP_SCALE:
+		VID_ChangeConsize(dir);
+		break;
+#endif
+	case DISP_SCRSIZE:
+	{
+		/* cycle between Full(110), Mini(120), Off(130), Clean(140) */
+		static const int hud_sizes[] = { 110, 120, 130, 140 };
+		int cur = 0, j;
+		for (j = 0; j < 4; j++)
+			if (scr_viewsize.integer >= hud_sizes[j])
+				cur = j;
+		cur += dir;
+		if (cur < 0) cur = 3;
+		if (cur > 3) cur = 0;
+		Cvar_SetValue ("viewsize", hud_sizes[cur]);
+		break;
+	}
+	case DISP_SOFTEMU:
+	{
+		int v = (int)r_softemu.value + dir;
+		if (v < 0) v = 2;
+		if (v > 2) v = 0;
+		Cvar_SetValue ("r_softemu", v);
+		break;
+	}
+	case DISP_DITHER:
+	{
+		float f = r_dither.value + dir * 0.25;
+		if (f < 0) f = 0;
+		if (f > 2) f = 2;
+		Cvar_SetValue ("r_dither", f);
+		break;
+	}
+	case DISP_WATERCOLOR:
+	{
+		int v = (int)Cvar_VariableValue("r_watercolor") + dir;
+		if (v < 0) v = 3;
+		if (v > 3) v = 0;
+		Cvar_SetValue ("r_watercolor", v);
+		break;
+	}
+	case DISP_RENDERSCALE:
+	{
+		static const float scale_steps[] = { 0.25f, 0.33f, 0.50f, 0.67f, 0.75f, 1.0f };
+		int i, num = sizeof(scale_steps) / sizeof(scale_steps[0]);
+		float cur = r_scale.value;
+		for (i = 0; i < num; i++)
+		{
+			if (scale_steps[i] >= cur - 0.01f)
+				break;
+		}
+		i += dir;
+		if (i < 0) i = 0;
+		if (i >= num) i = num - 1;
+		Cvar_SetValue ("r_scale", scale_steps[i]);
+		break;
+	}
+	}
+}
+
+static void M_Display_Draw (void)
+{
+	float	r;
+
+	ScrollTitle("gfx/menu/title3.lmp");
+	M_PrintWhite (96, 72, "Display Options");
+
+	M_Print (76, 92 + 8*DISP_PRESET,	"Preset        :");
+	{
+		/* detect current preset */
+		qboolean is_crunchy = (r_scale.value <= 0.25f && (int)r_softemu.value >= 2 && gl_filter_idx == 0);
+		qboolean is_retro = (r_scale.value > 0.25f && r_scale.value <= 0.5f && (int)r_softemu.value > 0 && gl_filter_idx <= 2);
+		qboolean is_modern = (r_scale.value >= 1.0f && (int)r_softemu.value == 0 && gl_filter_idx > 2);
+		if (is_crunchy)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
+		else if (is_retro)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
+		else if (is_modern)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
+		else
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Custom");
+	}
+
+	M_Print (76, 92 + 8*DISP_GAMMA,	"Brightness    :");
+	r = (1.0 - v_gamma.value) / 0.5;
+	M_DrawSlider (220, 92 + 8*DISP_GAMMA, r);
+
+	M_Print (76, 92 + 8*DISP_CONTRAST,	"Contrast      :");
+	r = (v_contrast.value - 0.5) / 1.5;
+	M_DrawSlider (220, 92 + 8*DISP_CONTRAST, r);
+
+#ifdef GLQUAKE
+	M_Print (76, 92 + 8*DISP_SCALE,	"UI Scale      :");
+	r = VID_ReportConsize();
+	M_DrawSlider (220, 92 + 8*DISP_SCALE, (r-1)/2);
+#endif
+
+	M_Print (76, 92 + 8*DISP_SCRSIZE,	"HUD Layout    :");
+	if (scr_viewsize.integer >= 140)
+		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Clean");
+	else if (scr_viewsize.integer >= 130)
+		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Off");
+	else if (scr_viewsize.integer >= 120)
+		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Mini");
+	else
+		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
+
+	M_Print (76, 92 + 8*DISP_RENDERSCALE,	"Render Scale  :");
+	if (r_scale.value >= 1.0f)
+		M_PrintWhite (220, 92 + 8*DISP_RENDERSCALE, "Native");
+	else
+		M_PrintWhite (220, 92 + 8*DISP_RENDERSCALE, va("%d%%", (int)(r_scale.value * 100)));
+
+	M_Print (76, 92 + 8*DISP_SOFTEMU,	"Retro Mode    :");
+	if ((int)r_softemu.value == 1)
+		M_PrintWhite (220, 92 + 8*DISP_SOFTEMU, "Dithered");
+	else if ((int)r_softemu.value == 2)
+		M_PrintWhite (220, 92 + 8*DISP_SOFTEMU, "Banded");
+	else
+		M_PrintWhite (220, 92 + 8*DISP_SOFTEMU, "Off");
+
+	M_Print (76, 92 + 8*DISP_DITHER,	"Dither Amount :");
+	r = r_dither.value / 2.0;
+	M_DrawSlider (220, 92 + 8*DISP_DITHER, r);
+
+	M_Print (76, 92 + 8*DISP_WATERCOLOR,	"Water Tint    :");
+	switch ((int)Cvar_VariableValue("r_watercolor"))
+	{
+	case 1:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Blue"); break;
+	case 2:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Green"); break;
+	case 3:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Clear"); break;
+	default: M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Classic"); break;
+	}
+
+	if (vid_menudrawfn)
+		M_Print (76, 92 + 8*DISP_VIDEO,	"Video Modes...");
+
+	M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
+}
+
+static void M_Display_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+		M_Menu_Options_f ();
+		break;
+	case K_ENTER:
+		m_entersound = true;
+		if (display_cursor == DISP_VIDEO)
+			M_Menu_Video_f ();
+		else
+			M_Display_AdjustSliders (1);
+		return;
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		display_cursor--;
+		if (display_cursor < 0)
+			display_cursor = DISP_ITEMS-1;
+		break;
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		display_cursor++;
+		if (display_cursor >= DISP_ITEMS)
+			display_cursor = 0;
+		break;
+	case K_LEFTARROW:
+		M_Display_AdjustSliders (-1);
+		break;
+	case K_RIGHTARROW:
+		M_Display_AdjustSliders (1);
+		break;
+	}
+	if (display_cursor == DISP_VIDEO && vid_menudrawfn == NULL)
+	{
+		if (k == K_UPARROW)
+			display_cursor = DISP_VIDEO - 1;
+		else
+			display_cursor = 0;
+	}
+}
+
+
+//=============================================================================
+/* SOUND MENU */
+
+enum
+{
+	SND_MUSICTYPE = 0,
+	SND_MUSICVOL,
+	SND_SFXVOL,
+	SND_ITEMS
+};
+
+static int	sound_cursor;
+
+static void M_Menu_Sound_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_sound;
+	m_entersound = true;
+
+	if (old_bgmtype[0] == 0)
+		q_strlcpy(old_bgmtype, bgmtype.string, sizeof(old_bgmtype));
+}
+
+static void M_Sound_AdjustSliders (int dir)
+{
+	float	f;
+
+	S_LocalSound ("raven/menu3.wav");
+
+	switch (sound_cursor)
+	{
+	case SND_MUSICTYPE:
 		if (q_strcasecmp(bgmtype.string,"midi") == 0)
 		{
 			if (bgm_extmusic.integer)
@@ -1940,20 +2285,148 @@ static void M_AdjustSliders (int dir)
 			}
 		}
 		break;
-	case OPT_MUSICVOL:	// music volume
+	case SND_MUSICVOL:
 		f = bgmvolume.value + dir * 0.1;
 		if (f < 0)	f = 0;
 		else if (f > 1)	f = 1;
 		Cvar_SetValue ("bgmvolume", f);
 		break;
-	case OPT_SNDVOL:	// sfx volume
+	case SND_SFXVOL:
 		f = sfxvolume.value + dir * 0.1;
 		if (f < 0)	f = 0;
 		else if (f > 1)	f = 1;
 		Cvar_SetValue ("volume", f);
 		break;
+	}
+}
 
-	case OPT_ALWAYRUN:	// always run
+static void M_Sound_Draw (void)
+{
+	float	r;
+
+	ScrollTitle("gfx/menu/title3.lmp");
+	M_PrintWhite (96, 72, "Sound Options");
+
+	M_Print (76, 92 + 8*SND_MUSICTYPE,	"Music Type    :");
+	if (q_strcasecmp(bgmtype.string, "midi") == 0)
+	{
+	    if (bgm_extmusic.integer)
+		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "ALL CODECS");
+	    else
+		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "MIDI ONLY");
+	}
+	else if (q_strcasecmp(bgmtype.string, "cd") == 0)
+		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "CD");
+	else
+		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "None");
+
+	M_Print (76, 92 + 8*SND_MUSICVOL,	"Music Volume  :");
+	r = bgmvolume.value;
+	M_DrawSlider (220, 92 + 8*SND_MUSICVOL, r);
+
+	M_Print (76, 92 + 8*SND_SFXVOL,	"Sound Volume  :");
+	r = sfxvolume.value;
+	M_DrawSlider (220, 92 + 8*SND_SFXVOL, r);
+
+	M_DrawCharacter (64, 92 + sound_cursor*8, 12+((int)(realtime*4)&1));
+}
+
+static void M_Sound_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+		M_Menu_Options_f ();
+		break;
+	case K_ENTER:
+		m_entersound = true;
+		M_Sound_AdjustSliders (1);
+		return;
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		sound_cursor--;
+		if (sound_cursor < 0)
+			sound_cursor = SND_ITEMS-1;
+		break;
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		sound_cursor++;
+		if (sound_cursor >= SND_ITEMS)
+			sound_cursor = 0;
+		break;
+	case K_LEFTARROW:
+		M_Sound_AdjustSliders (-1);
+		break;
+	case K_RIGHTARROW:
+		M_Sound_AdjustSliders (1);
+		break;
+	}
+}
+
+
+//=============================================================================
+/* GAME MENU */
+
+enum
+{
+	GAME_FOV = 0,
+	GAME_MAXFPS,
+	GAME_SHOWFPS,
+	GAME_ALWAYRUN,
+	GAME_MOUSESPEED,
+	GAME_INVMOUSE,
+	GAME_MLOOK,
+	GAME_USEMOUSE,
+	GAME_CROSSHAIR,
+	GAME_CHASE,
+	GAME_ITEMS
+};
+
+static int	game_cursor;
+
+static void M_Menu_Game_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_game;
+	m_entersound = true;
+}
+
+static void M_Game_AdjustSliders (int dir)
+{
+	float	f;
+
+	S_LocalSound ("raven/menu3.wav");
+
+	switch (game_cursor)
+	{
+	case GAME_FOV:
+		f = scr_fov.value + dir * 5;
+		if (f < 60)	f = 60;
+		else if (f > 130) f = 130;
+		Cvar_SetValue ("fov", f);
+		break;
+	case GAME_MAXFPS:
+	{
+		static const int fps_steps[] = { 24, 30, 60, 72, 90, 120, 144, 0 };
+		int i, cur = (int)host_maxfps.value;
+		int num_steps = sizeof(fps_steps) / sizeof(fps_steps[0]);
+
+		/* find current position */
+		for (i = 0; i < num_steps; i++)
+		{
+			if (fps_steps[i] >= cur || fps_steps[i] == 0)
+				break;
+		}
+		i += dir;
+		if (i < 0) i = 0;
+		if (i >= num_steps) i = num_steps - 1;
+		Cvar_SetValue ("host_maxfps", fps_steps[i]);
+		break;
+	}
+	case GAME_SHOWFPS:
+		Cvar_Set ("showfps", Cvar_VariableValue("showfps") ? "0" : "1");
+		break;
+	case GAME_ALWAYRUN:
 		if (cl_forwardspeed.value > 200)
 		{
 			Cvar_Set ("cl_forwardspeed", "200");
@@ -1965,504 +2438,293 @@ static void M_AdjustSliders (int dir)
 			Cvar_Set ("cl_backspeed", "400");
 		}
 		break;
-
-	case OPT_INVMOUSE:	// invert mouse
+	case GAME_MOUSESPEED:
+		f = sensitivity.value + dir * 0.5;
+		if (f > 11)	f = 11;
+		else if (f < 1)	f = 1;
+		Cvar_SetValue ("sensitivity", f);
+		break;
+	case GAME_INVMOUSE:
 		Cvar_SetValue ("m_pitch", -m_pitch.value);
 		break;
-
-	case OPT_ALWAYSMLOOK:
+	case GAME_MLOOK:
 		if (in_mlook.state & 1)
 			Cbuf_AddText("-mlook");
 		else
 			Cbuf_AddText("+mlook");
 		break;
-
-	case OPT_CROSSHAIR:
-		Cvar_Set ("crosshair", crosshair.integer ? "0" : "1");
-		break;
-
-	case OPT_CHASE_ACTIVE:	// chase_active
-		Cvar_Set ("chase_active", chase_active.integer ? "0" : "1");
-		break;
-
-	case OPT_USEMOUSE:	// _enable_mouse
+	case GAME_USEMOUSE:
 		Cvar_Set ("_enable_mouse", _enable_mouse.integer ? "0" : "1");
 		break;
-
-	default:
+	case GAME_CROSSHAIR:
+		Cvar_Set ("crosshair", crosshair.integer ? "0" : "1");
+		break;
+	case GAME_CHASE:
+		Cvar_Set ("chase_active", chase_active.integer ? "0" : "1");
 		break;
 	}
 }
 
-
-static void M_DrawSlider (int x, int y, float range)
+static void M_Game_Draw (void)
 {
-	int	i;
-
-	if (range < 0)
-		range = 0;
-	else if (range > 1)
-		range = 1;
-	M_DrawCharacter (x-8, y, 256);
-	for (i = 0; i < SLIDER_RANGE; i++)
-		M_DrawCharacter (x + i*8, y, 257);
-	M_DrawCharacter (x + i*8, y, 258);
-	M_DrawCharacter (x + (SLIDER_RANGE-1)*8 * range, y, 259);
-}
-
-void M_DrawCheckbox (int x, int y, int on)
-{
-	if (on)
-		M_Print (x, y, "on");
-	else
-		M_Print (x, y, "off");
-}
-
-static void M_Options_Draw (void)
-{
-	float		r;
-
-	menu_disabled_mouse = false;
-	IN_ActivateMouse ();	// we entered the customization menu
+	float	r;
 
 	ScrollTitle("gfx/menu/title3.lmp");
+	M_PrintWhite (96, 72, "Game Options");
 
-//	we use 22 character option titles. the increment to
-//	the x offset is: (22 - strlen(option_title)) * 8
-//	r goes from 0 (left) to 1 (right)
-	M_Print (16 + (4 * 8), 60 + 8*OPT_CUSTOMIZE,	"Customize controls");
-	M_Print (16 + (9 * 8), 60 + 8*OPT_CONSOLE,	"Go to console");
-	M_Print (16 + (5 * 8), 60 + 8*OPT_DEFAULTS,	"Reset to defaults");
-#ifdef GLQUAKE
-	M_Print (16 + (17 * 8), 60 + 8*OPT_SCALE,	"Scale");
-	r = VID_ReportConsize();
-	M_DrawSlider (220, 60 + 8*OPT_SCALE, (r-1)/2);
-#endif
-	M_Print (16 + (11 * 8), 60 + 8*OPT_SCRSIZE,	"Screen size");
-	r = (scr_viewsize.value - 30.0) / (130 - 30);
-	M_DrawSlider (220, 60 + 8*OPT_SCRSIZE, r);
+	M_Print (76, 92 + 8*GAME_FOV,		"Field of View :");
+	r = (scr_fov.value - 60) / (130 - 60);
+	M_DrawSlider (220, 92 + 8*GAME_FOV, r);
 
-	M_Print (16 + (12 * 8), 60 + 8*OPT_GAMMA,	"Brightness");
-	r = (1.0 - v_gamma.value) / 0.5;
-	M_DrawSlider (220, 60 + 8*OPT_GAMMA, r);
+	M_Print (76, 92 + 8*GAME_MAXFPS,	"FPS Limit     :");
+	if ((int)host_maxfps.value <= 0)
+		M_PrintWhite (220, 92 + 8*GAME_MAXFPS, "Unlimited");
+	else
+		M_PrintWhite (220, 92 + 8*GAME_MAXFPS, va("%d", (int)host_maxfps.value));
 
-	M_Print (16 + (11 * 8), 60 + 8*OPT_MOUSESPEED,	"Mouse Speed");
+	M_Print (76, 92 + 8*GAME_SHOWFPS,	"Show FPS      :");
+	M_DrawCheckbox (220, 92 + 8*GAME_SHOWFPS, (int)Cvar_VariableValue("showfps"));
+
+	M_Print (76, 92 + 8*GAME_ALWAYRUN,	"Always Run    :");
+	M_DrawCheckbox (220, 92 + 8*GAME_ALWAYRUN, (cl_forwardspeed.value > 200));
+
+	M_Print (76, 92 + 8*GAME_MOUSESPEED,	"Mouse Speed   :");
 	r = (sensitivity.value - 1) / 10;
-	M_DrawSlider (220, 60 + 8*OPT_MOUSESPEED, r);
+	M_DrawSlider (220, 92 + 8*GAME_MOUSESPEED, r);
 
-	M_Print (16 + (12 * 8), 60 + 8*OPT_MUSICTYPE,	"Music Type");
-	if (q_strcasecmp(bgmtype.string, "midi") == 0)
-	{
-	    if (bgm_extmusic.integer)
-		M_Print (220, 60 + 8*OPT_MUSICTYPE, "ALL CODECS");
-	    else
-		M_Print (220, 60 + 8*OPT_MUSICTYPE, "MIDI ONLY");
-	}
-	else if (q_strcasecmp(bgmtype.string, "cd") == 0)
-		M_Print (220, 60 + 8*OPT_MUSICTYPE, "CD");
-	else
-		M_Print (220, 60 + 8*OPT_MUSICTYPE, "None");
+	M_Print (76, 92 + 8*GAME_INVMOUSE,	"Invert Mouse  :");
+	M_DrawCheckbox (220, 92 + 8*GAME_INVMOUSE, m_pitch.value < 0);
 
-	M_Print (16 + (10 * 8), 60 + 8*OPT_MUSICVOL,	"Music Volume");
-	r = bgmvolume.value;
-	M_DrawSlider (220, 60 + 8*OPT_MUSICVOL, r);
+	M_Print (76, 92 + 8*GAME_MLOOK,	"Mouse Look    :");
+	M_DrawCheckbox (220, 92 + 8*GAME_MLOOK, in_mlook.state & 1);
 
-	M_Print (16 + (10 * 8), 60 + 8*OPT_SNDVOL,	"Sound Volume");
-	r = sfxvolume.value;
-	M_DrawSlider (220, 60 + 8*OPT_SNDVOL, r);
+	M_Print (76, 92 + 8*GAME_USEMOUSE,	"Use Mouse     :");
+	M_DrawCheckbox (220, 92 + 8*GAME_USEMOUSE, _enable_mouse.integer);
 
-	M_Print (16 + (12 * 8), 60 + 8*OPT_ALWAYRUN,	"Always Run");
-	M_DrawCheckbox (220, 60 + 8*OPT_ALWAYRUN, (cl_forwardspeed.value > 200));
+	M_Print (76, 92 + 8*GAME_CROSSHAIR,	"Crosshair     :");
+	M_DrawCheckbox (220, 92 + 8*GAME_CROSSHAIR, crosshair.integer);
 
-	M_Print (16 + (10 * 8), 60 + 8*OPT_INVMOUSE,	"Invert Mouse");
-	M_DrawCheckbox (220, 60 + 8*OPT_INVMOUSE, m_pitch.value < 0);
+	M_Print (76, 92 + 8*GAME_CHASE,	"Chase Mode    :");
+	M_DrawCheckbox (220, 92 + 8*GAME_CHASE, chase_active.integer);
 
-	M_Print (16 + (12 * 8), 60 + 8*OPT_ALWAYSMLOOK,	"Mouse Look");
-	M_DrawCheckbox (220, 60 + 8*OPT_ALWAYSMLOOK, in_mlook.state & 1);
-
-	M_Print (16 + (13 * 8), 60 + 8*OPT_USEMOUSE,	"Use Mouse");
-	M_DrawCheckbox (220, 60 + 8*OPT_USEMOUSE, _enable_mouse.integer);
-
-	M_Print (16 + (8 * 8), 60 + 8*OPT_CROSSHAIR,	"Show Crosshair");
-	M_DrawCheckbox (220, 60 + 8*OPT_CROSSHAIR, crosshair.integer);
-
-#ifdef GLQUAKE
-	M_Print (16 + (7 * 8), 60 + 8*OPT_OPENGL,	"OpenGL Features");
-#endif
-
-	M_Print (16 + (12 * 8), 60 + 8*OPT_CHASE_ACTIVE,	"Chase Mode");
-	M_DrawCheckbox (220, 60 + 8*OPT_CHASE_ACTIVE, chase_active.integer);
-
-	if (vid_menudrawfn)
-		M_Print (16 + (11 * 8), 60 + 8*OPT_VIDEO,	"Video Modes");
-
-	// cursor
-	M_DrawCharacter (200, 60 + 8*options_cursor, 12 + ((int)(realtime*4) & 1));
+	M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
 }
 
-
-static void M_Options_Key (int k)
-{
-	switch (k)
-	{
-	case K_ESCAPE:
-		M_Menu_Main_f ();
-		break;
-
-	case K_ENTER:
-		m_entersound = true;
-		switch (options_cursor)
-		{
-		case OPT_CUSTOMIZE:
-			M_Menu_Keys_f ();
-			break;
-		case OPT_CONSOLE:
-			m_state = m_none;
-			Con_ToggleConsole_f ();
-			break;
-		case OPT_DEFAULTS:
-			Cbuf_AddText ("exec default.cfg\n");
-			break;
-#ifdef GLQUAKE
-		case OPT_OPENGL:
-			M_Menu_OpenGL_f ();
-			break;
-#endif
-		case OPT_VIDEO:
-			M_Menu_Video_f ();
-			break;
-		default:
-			M_AdjustSliders (1);
-			break;
-		}
-		return;
-
-	case K_UPARROW:
-		S_LocalSound ("raven/menu1.wav");
-		options_cursor--;
-		if (options_cursor < 0)
-			options_cursor = OPTIONS_ITEMS-1;
-		break;
-
-	case K_DOWNARROW:
-		S_LocalSound ("raven/menu1.wav");
-		options_cursor++;
-		if (options_cursor >= OPTIONS_ITEMS)
-			options_cursor = 0;
-		break;
-
-	case K_LEFTARROW:
-		M_AdjustSliders (-1);
-		break;
-
-	case K_RIGHTARROW:
-		M_AdjustSliders (1);
-		break;
-	}
-#if 0	/* change to 1 if dont want to disable mouse in fullscreen */
-	if ((options_cursor == OPT_USEMOUSE) && (modestate != MS_WINDOWED))
-	{
-		if (k == K_UPARROW)
-			options_cursor = OPT_USEMOUSE - 1;
-		else
-		{
-			options_cursor = OPT_USEMOUSE + 1;
-			if (options_cursor == OPTIONS_ITEMS)
-				options_cursor = 0;
-		}
-	}
-#endif
-	if (options_cursor == OPT_VIDEO && vid_menudrawfn == NULL)
-	{
-		if (k == K_UPARROW)
-			options_cursor = OPT_VIDEO - 1;
-		else
-			options_cursor = 0;
-	}
-}
-
-
-//=============================================================================
-/* OPENGL FEATURES MENU */
-
-#ifdef GLQUAKE
-
-enum
-{
-	OGL_PURGETEX,
-	OGL_GLOW1,
-	OGL_GLOW2,
-	OGL_GLOW3,
-	OGL_LIGHTMAPFMT,
-	OGL_COLOREDLIGHT,
-	OGL_COLOREDSTATIC,
-	OGL_COLOREDDYNAMIC,
-	OGL_COLOREDEXTRA,
-	OGL_TEXFILTER,
-	OGL_ANISOTROPY,
-	OGL_ITEMS
-};
-
-static const struct
-{
-	const char	*name;	// legible string value
-	const char	*desc;	// description for user
-	int		glenum;	// opengl enum
-} lm_formats[] =
-{
-	{ "gl_luminance",	"gl_luminance (8 bit)",	GL_LUMINANCE	},
-	{ "gl_rgba",		"gl_rgba (32 bit)",	GL_RGBA		},
-	{ " ",			"Unknown value (?)",	0		}
-};
-
-#define	MAX_LMFORMATS	(sizeof(lm_formats) / sizeof(lm_formats[0]))
-
-static int	tex_mode;
-static int	lm_format;
-static int	opengl_cursor;
-
-static void M_Menu_OpenGL_f (void)
-{
-	Key_SetDest (key_menu);
-	m_state = m_opengl;
-	m_entersound = true;
-}
-
-
-static void M_OpenGL_Draw (void)
-{
-	int		i;
-
-	ScrollTitle("gfx/menu/title3.lmp");
-	M_PrintWhite (96, 72, "OpenGL Features:");
-
-//	we use 22 character option titles. the increment to
-//	the x offset is: (22 - strlen(option_title)) * 8
-
-	M_Print (32 + (4 * 8), 90 + 8*OGL_PURGETEX,	"Purge map textures");
-	M_DrawCheckbox (232, 90 + 8*OGL_PURGETEX, gl_purge_maptex.integer);
-
-	M_Print (32 + (9 * 8), 90 + 8*OGL_GLOW1,	"missile glows");
-	M_DrawCheckbox (232, 90 + 8*OGL_GLOW1, gl_missile_glows.integer);
-
-	M_Print (32 + (11 * 8), 90 + 8*OGL_GLOW2,	"torch glows");
-	M_DrawCheckbox (232, 90 + 8*OGL_GLOW2, gl_glows.integer);
-
-	M_Print (32 + (11 * 8), 90 + 8*OGL_GLOW3,	"other glows");
-	M_DrawCheckbox (232, 90 + 8*OGL_GLOW3, gl_other_glows.integer);
-
-	M_Print (32 + (6 * 8), 90 + 8*OGL_LIGHTMAPFMT,	"Lightmap Format:");
-	for (i = 0; i < (int)MAX_LMFORMATS; i++)
-	{
-		if (!q_strcasecmp(gl_lightmapfmt.string, lm_formats[i].name))
-			break;
-	}
-	lm_format = i;
-	M_Print (232, 90 + 8*OGL_LIGHTMAPFMT, lm_formats[lm_format].desc);
-
-	M_Print (32 + (6 * 8), 90 + 8*OGL_COLOREDLIGHT,	"Colored lights :");
-	M_Print (32 + (9 * 8), 90 + 8*OGL_COLOREDSTATIC, "static lights");
-	M_Print (32 + (8 * 8), 90 + 8*OGL_COLOREDDYNAMIC, "dynamic lights");
-	M_Print (32 + (10 * 8), 90 + 8*OGL_COLOREDEXTRA, "extra lights");
-	// bound the gl_coloredlight value
-	if (gl_coloredlight.integer < 0)
-		Cvar_Set ("gl_coloredlight", "0");
-	switch (gl_coloredlight.integer)
-	{
-	case 0:
-		M_Print (232, 90 + 8*OGL_COLOREDSTATIC, "none (white)");
-		break;
-	case 1:
-		M_Print (232, 90 + 8*OGL_COLOREDSTATIC, "colored");
-		break;
-	default:
-		M_Print (232, 90 + 8*OGL_COLOREDSTATIC, "blend");
-		break;
-	}
-	M_DrawCheckbox (232, 90 + 8*OGL_COLOREDDYNAMIC, gl_colored_dynamic_lights.integer);
-	M_DrawCheckbox (232, 90 + 8*OGL_COLOREDEXTRA, gl_extra_dynamic_lights.integer);
-
-	M_Print (32 + (5 * 8), 90 + 8*OGL_TEXFILTER,	"Texture filtering");
-	M_Print (232, 90 + 8*OGL_TEXFILTER, gl_texmodes[gl_filter_idx].name);
-
-	M_Print (32 + (5 * 8), 90 + 8*OGL_ANISOTROPY,	"Anisotropy level:");
-	M_Print (232, 90 + 8*OGL_ANISOTROPY, (gl_max_anisotropy < 2) ? "N/A" :
-				Cvar_VariableString("gl_texture_anisotropy"));
-
-	// cursor
-	M_DrawCharacter (216, 90 + opengl_cursor*8, 12+((int)(realtime*4)&1));
-
-	if (opengl_cursor == OGL_LIGHTMAPFMT && gl_lightmap_format != lm_formats[lm_format].glenum)
-	{
-		int	x = (320-25*8)/2;
-		for (i = 0; i < (int)MAX_LMFORMATS-1; i++)
-		{
-			if (gl_lightmap_format == lm_formats[i].glenum)
-				break;
-		}
-		M_DrawTextBox (x, 94 + 8*(OGL_LIGHTMAPFMT), 25, 5);
-		M_Print (x+16, 98 + 8*(OGL_LIGHTMAPFMT+1), "currently running with:");
-		M_Print (x+16, 98 + 8*(OGL_LIGHTMAPFMT+2), lm_formats[i].desc);
-		M_Print (x+16, 98 + 8*(OGL_LIGHTMAPFMT+3), "your selection will take");
-		M_Print (x+16, 98 + 8*(OGL_LIGHTMAPFMT+4), "effect upon level reload");
-	}
-	else if (opengl_cursor == OGL_COLOREDSTATIC)
-	{
-		int	x = (320-25*8)/2;
-
-		if (gl_lightmap_format != GL_RGBA)
-		{
-			if (gl_coloredlight.integer)
-			{
-				M_DrawTextBox (x, 94 + 8*(OGL_COLOREDSTATIC), 25, 3);
-				M_Print (x+16, 98 + 8*(OGL_COLOREDSTATIC+1), "  rgba lightmap format  ");
-				M_Print (x+16, 98 + 8*(OGL_COLOREDSTATIC+2), "      is required");
-			}
-		}
-		else if (gl_coloredlight.integer != gl_coloredstatic)
-		{
-			M_DrawTextBox (x, 94 + 8*(OGL_COLOREDSTATIC), 25, 3);
-			M_Print (x+16, 98 + 8*(OGL_COLOREDSTATIC+1), "your selection will take");
-			M_Print (x+16, 98 + 8*(OGL_COLOREDSTATIC+2), "effect upon level reload");
-		}
-	}
-}
-
-
-static void M_OpenGL_Key (int k)
+static void M_Game_Key (int k)
 {
 	switch (k)
 	{
 	case K_ESCAPE:
 		M_Menu_Options_f ();
 		break;
-
+	case K_ENTER:
+		m_entersound = true;
+		M_Game_AdjustSliders (1);
+		return;
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		if (--opengl_cursor == OGL_COLOREDLIGHT)
-			--opengl_cursor;
-		if (opengl_cursor < 0)
-			opengl_cursor = OGL_ITEMS-1;
+		game_cursor--;
+		if (game_cursor < 0)
+			game_cursor = GAME_ITEMS-1;
 		break;
-
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		if (++opengl_cursor == OGL_COLOREDLIGHT)
-			++opengl_cursor;
-		if (opengl_cursor >= OGL_ITEMS)
-			opengl_cursor = 0;
+		game_cursor++;
+		if (game_cursor >= GAME_ITEMS)
+			game_cursor = 0;
 		break;
-
-	case K_ENTER:
 	case K_LEFTARROW:
+		M_Game_AdjustSliders (-1);
+		break;
 	case K_RIGHTARROW:
-		m_entersound = true;
-		switch (opengl_cursor)
-		{
-		case OGL_PURGETEX:	// purge gl textures on map change
-			Cvar_Set ("gl_purge_maptex", gl_purge_maptex.integer ? "0" : "1");
-			break;
-
-		case OGL_GLOW1:	// glow effects, missiles
-			Cvar_Set ("gl_missile_glows", gl_missile_glows.integer ? "0" : "1");
-			break;
-
-		case OGL_GLOW2:	// glow effects, torches
-			Cvar_Set ("gl_glows", gl_glows.integer ? "0" : "1");
-			break;
-
-		case OGL_GLOW3:	// glow effects, other: mana, etc.
-			Cvar_Set ("gl_other_glows", gl_other_glows.integer ? "0" : "1");
-			break;
-
-		case OGL_LIGHTMAPFMT:	// lightmap format
-			switch (k)
-			{
-			case K_RIGHTARROW:
-				if (++lm_format >= (int)MAX_LMFORMATS - 1)
-					lm_format = MAX_LMFORMATS - 2;
-				Cvar_Set ("gl_lightmapfmt", lm_formats[lm_format].name);
-				break;
-			case K_LEFTARROW:
-				if (--lm_format < 0)
-					lm_format = 0;
-				Cvar_Set ("gl_lightmapfmt", lm_formats[lm_format].name);
-				break;
-			default:
-				break;
-			}
-			break;
-
-		case OGL_COLOREDSTATIC:	// static colored lights
-			switch (k)
-			{
-			case K_RIGHTARROW:
-				Cvar_Set ("gl_coloredlight", (gl_coloredlight.integer >= 1) ? "2" : "1");
-				break;
-			case K_LEFTARROW:
-				Cvar_Set ("gl_coloredlight", (gl_coloredlight.integer <= 1) ? "0" : "1");
-				break;
-			default:
-				break;
-			}
-			break;
-
-		case OGL_COLOREDDYNAMIC:	// dynamic colored lights
-			Cvar_Set ("gl_colored_dynamic_lights", gl_colored_dynamic_lights.integer ? "0" : "1");
-			break;
-
-		case OGL_COLOREDEXTRA:	// extra dynamic colored lights
-			Cvar_Set ("gl_extra_dynamic_lights", gl_extra_dynamic_lights.integer ? "0" : "1");
-			break;
-
-		case OGL_TEXFILTER:	// texture filter
-			tex_mode = gl_filter_idx;
-			switch (k)
-			{
-			case K_LEFTARROW:
-				if (--tex_mode < 0)
-					tex_mode = 0;
-				break;
-			case K_RIGHTARROW:
-				if (++tex_mode >= NUM_GL_FILTERS)
-					tex_mode = NUM_GL_FILTERS-1;
-				break;
-			default:
-				return;
-			}
-			Cvar_Set ("gl_texturemode", gl_texmodes[tex_mode].name);
-			break;
-
-		case OGL_ANISOTROPY:	// anisotropic filter level
-			if (gl_max_anisotropy < 2)
-				return;
-			tex_mode = Cvar_VariableValue("gl_texture_anisotropy");
-			switch (k)
-			{
-			case K_LEFTARROW:
-				if (--tex_mode < 1)
-					tex_mode = 1;
-				break;
-			case K_RIGHTARROW:
-				if (++tex_mode > gl_max_anisotropy)
-					tex_mode = gl_max_anisotropy;
-				break;
-			default:
-				return;
-			}
-			Cvar_SetValue ("gl_texture_anisotropy", tex_mode);
-			break;
-
-		default:
-			break;
-		}
-
-	default:
+		M_Game_AdjustSliders (1);
 		break;
 	}
 }
 
-#endif
+
+
+//=============================================================================
+/* GAMEPAD MENU */
+
+enum
+{
+	GPAD_SENSX = 0,
+	GPAD_SENSY,
+	GPAD_INVERT,
+	GPAD_SWAPSTICKS,
+	GPAD_ACCEL_LOOK,
+	GPAD_ACCEL_MOVE,
+	GPAD_DZ_LOOK,
+	GPAD_DZ_MOVE,
+	GPAD_DZ_TRIGGER,
+	GPAD_RUMBLE,
+	GPAD_ITEMS
+};
+
+static int	gamepad_cursor;
+
+static void M_Menu_Gamepad_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_gamepad;
+	m_entersound = true;
+}
+
+static void M_Gamepad_Draw (void)
+{
+	float	r;
+	int	y;
+
+	ScrollTitle("gfx/menu/title3.lmp");
+
+	if (IN_HasGamepad())
+		M_PrintWhite (80, 72, "Controller Options");
+	else
+		M_PrintWhite (64, 72, "Controller (not connected)");
+
+	y = 90;
+
+	M_Print (32, y + 8*GPAD_SENSX, "Yaw Speed");
+	r = (joy_sensitivity_yaw.value - 60) / (720 - 60);
+	M_DrawSlider (220, y + 8*GPAD_SENSX, r);
+
+	M_Print (32, y + 8*GPAD_SENSY, "Pitch Speed");
+	r = (joy_sensitivity_pitch.value - 60) / (720 - 60);
+	M_DrawSlider (220, y + 8*GPAD_SENSY, r);
+
+	M_Print (32, y + 8*GPAD_INVERT, "Invert Pitch");
+	M_DrawCheckbox (220, y + 8*GPAD_INVERT, joy_invert.integer);
+
+	M_Print (32, y + 8*GPAD_SWAPSTICKS, "Swap Sticks");
+	M_DrawCheckbox (220, y + 8*GPAD_SWAPSTICKS, joy_swapmovelook.integer);
+
+	M_Print (32, y + 8*GPAD_ACCEL_LOOK, "Look Accel");
+	r = (joy_exponent.value - 1.0) / (5.0 - 1.0);
+	M_DrawSlider (220, y + 8*GPAD_ACCEL_LOOK, r);
+
+	M_Print (32, y + 8*GPAD_ACCEL_MOVE, "Move Accel");
+	r = (joy_exponent_move.value - 1.0) / (5.0 - 1.0);
+	M_DrawSlider (220, y + 8*GPAD_ACCEL_MOVE, r);
+
+	M_Print (32, y + 8*GPAD_DZ_LOOK, "Look Deadzone");
+	r = joy_deadzone_look.value / 0.5;
+	M_DrawSlider (220, y + 8*GPAD_DZ_LOOK, r);
+
+	M_Print (32, y + 8*GPAD_DZ_MOVE, "Move Deadzone");
+	r = joy_deadzone_move.value / 0.5;
+	M_DrawSlider (220, y + 8*GPAD_DZ_MOVE, r);
+
+	M_Print (32, y + 8*GPAD_DZ_TRIGGER, "Trigger Thresh");
+	r = joy_deadzone_trigger.value / 0.75;
+	M_DrawSlider (220, y + 8*GPAD_DZ_TRIGGER, r);
+
+	M_Print (32, y + 8*GPAD_RUMBLE, "Vibration");
+	r = joy_rumble.value;
+	M_DrawSlider (220, y + 8*GPAD_RUMBLE, r);
+
+	M_DrawCharacter (208, y + gamepad_cursor*8, 12 + ((int)(realtime*4) & 1));
+}
+
+static void M_Gamepad_AdjustSliders (int dir)
+{
+	float	f;
+
+	S_LocalSound ("raven/menu3.wav");
+
+	switch (gamepad_cursor)
+	{
+	case GPAD_SENSX:
+		f = joy_sensitivity_yaw.value + dir * 30;
+		if (f < 60)  f = 60;
+		if (f > 720) f = 720;
+		Cvar_SetValue ("joy_sensitivity_yaw", f);
+		break;
+	case GPAD_SENSY:
+		f = joy_sensitivity_pitch.value + dir * 30;
+		if (f < 60)  f = 60;
+		if (f > 720) f = 720;
+		Cvar_SetValue ("joy_sensitivity_pitch", f);
+		break;
+	case GPAD_INVERT:
+		Cvar_Set ("joy_invert", joy_invert.integer ? "0" : "1");
+		break;
+	case GPAD_SWAPSTICKS:
+		Cvar_Set ("joy_swapmovelook", joy_swapmovelook.integer ? "0" : "1");
+		break;
+	case GPAD_ACCEL_LOOK:
+		f = joy_exponent.value + dir * 0.25;
+		if (f < 1.0) f = 1.0;
+		if (f > 5.0) f = 5.0;
+		Cvar_SetValue ("joy_exponent", f);
+		break;
+	case GPAD_ACCEL_MOVE:
+		f = joy_exponent_move.value + dir * 0.25;
+		if (f < 1.0) f = 1.0;
+		if (f > 5.0) f = 5.0;
+		Cvar_SetValue ("joy_exponent_move", f);
+		break;
+	case GPAD_DZ_LOOK:
+		f = joy_deadzone_look.value + dir * 0.025;
+		if (f < 0)   f = 0;
+		if (f > 0.5) f = 0.5;
+		Cvar_SetValue ("joy_deadzone_look", f);
+		break;
+	case GPAD_DZ_MOVE:
+		f = joy_deadzone_move.value + dir * 0.025;
+		if (f < 0)   f = 0;
+		if (f > 0.5) f = 0.5;
+		Cvar_SetValue ("joy_deadzone_move", f);
+		break;
+	case GPAD_DZ_TRIGGER:
+		f = joy_deadzone_trigger.value + dir * 0.05;
+		if (f < 0)    f = 0;
+		if (f > 0.75) f = 0.75;
+		Cvar_SetValue ("joy_deadzone_trigger", f);
+		break;
+	case GPAD_RUMBLE:
+		f = joy_rumble.value + dir * 0.1;
+		if (f < 0) f = 0;
+		if (f > 1) f = 1;
+		Cvar_SetValue ("joy_rumble", f);
+		break;
+	}
+}
+
+static void M_Gamepad_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+	case K_GP_B:
+		M_Menu_Options_f ();
+		break;
+
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		gamepad_cursor--;
+		if (gamepad_cursor < 0)
+			gamepad_cursor = GPAD_ITEMS - 1;
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		gamepad_cursor++;
+		if (gamepad_cursor >= GPAD_ITEMS)
+			gamepad_cursor = 0;
+		break;
+
+	case K_LEFTARROW:
+		M_Gamepad_AdjustSliders (-1);
+		break;
+
+	case K_RIGHTARROW:
+	case K_ENTER:
+	case K_GP_A:
+		M_Gamepad_AdjustSliders (1);
+		break;
+	}
+}
 
 
 //=============================================================================
@@ -2698,6 +2960,252 @@ static void M_Video_Key (int key)
 {
 	(*vid_menukeyfn) (key);
 }
+
+//=============================================================================
+/* MODS MENU */
+
+#define	MODS_MAX	32
+
+static char	mods_list[MODS_MAX][MAX_QPATH];
+static int	mods_count;
+static int	mods_cursor;
+static qboolean	mods_portals_toggle;	/* "with Portals" for custom mods */
+
+static int mods_strcmp (const void *a, const void *b)
+{
+	return q_strcasecmp ((const char *)a, (const char *)b);
+}
+
+static qboolean M_IsModDir (const char *dir)
+{
+	char	path[MAX_OSPATH];
+	int	i;
+
+	/* check for progs.dat */
+	q_snprintf (path, sizeof(path), "%s/%s/progs.dat", host_parms->basedir, dir);
+	if (Sys_FileType(path) == FS_ENT_FILE)
+		return true;
+
+	/* check for any pak file (pak0.pak through pak9.pak) */
+	for (i = 0; i < 10; i++)
+	{
+		q_snprintf (path, sizeof(path), "%s/%s/pak%d.pak", host_parms->basedir, dir, i);
+		if (Sys_FileType(path) == FS_ENT_FILE)
+			return true;
+	}
+
+	return false;
+}
+
+/* Fixed entries at top of mods list */
+#define MODS_FIXED_HEXEN2	0
+#define MODS_FIXED_PORTALS	1
+#define MODS_FIXED_COUNT	2	/* base game + portals */
+
+static qboolean	mods_have_portals;
+
+static void M_ScanMods (void)
+{
+	char	alldirs[MODS_MAX][MAX_QPATH];
+	char	path[MAX_OSPATH];
+	int	numdirs, i, custom_count;
+
+	mods_count = MODS_FIXED_COUNT;
+
+	/* check if portals directory exists */
+	q_snprintf (path, sizeof(path), "%s/portals", host_parms->basedir);
+	mods_have_portals = (Sys_FileType(path) == FS_ENT_DIRECTORY);
+
+	/* fixed entries */
+	q_strlcpy (mods_list[MODS_FIXED_HEXEN2], "data1", MAX_QPATH);
+	q_strlcpy (mods_list[MODS_FIXED_PORTALS], "portals", MAX_QPATH);
+
+	/* scan for custom mods */
+	numdirs = Sys_ListDirectories (host_parms->basedir, alldirs, MODS_MAX);
+	custom_count = 0;
+
+	for (i = 0; i < numdirs && (MODS_FIXED_COUNT + custom_count) < MODS_MAX; i++)
+	{
+		if (!q_strcasecmp(alldirs[i], "data1"))
+			continue;
+		if (!q_strcasecmp(alldirs[i], "portals"))
+			continue;
+		if (!q_strcasecmp(alldirs[i], "hw"))
+			continue;
+		if (!M_IsModDir(alldirs[i]))
+			continue;
+
+		q_strlcpy (mods_list[MODS_FIXED_COUNT + custom_count], alldirs[i], MAX_QPATH);
+		custom_count++;
+	}
+
+	/* sort only the custom mods (after the fixed entries) */
+	if (custom_count > 1)
+		qsort (&mods_list[MODS_FIXED_COUNT], custom_count, sizeof(mods_list[0]), mods_strcmp);
+
+	mods_count = MODS_FIXED_COUNT + custom_count;
+}
+
+static qboolean M_Mods_IsActive (int idx)
+{
+	if (idx == MODS_FIXED_HEXEN2)
+		return !q_strcasecmp(fs_gamedir_nopath, "data1");
+	if (idx == MODS_FIXED_PORTALS)
+		return !q_strcasecmp(fs_gamedir_nopath, "portals");
+	return !q_strcasecmp(fs_gamedir_nopath, mods_list[idx]);
+}
+
+static void M_Menu_Mods_f (void)
+{
+	int	i;
+
+	Key_SetDest (key_menu);
+	m_state = m_mods;
+	m_entersound = true;
+
+	M_ScanMods ();
+
+	/* place cursor on the active mod */
+	mods_cursor = 0;
+	for (i = 0; i < mods_count; i++)
+	{
+		if (M_Mods_IsActive(i))
+		{
+			mods_cursor = i;
+			break;
+		}
+	}
+
+	/* default portals toggle to current state */
+	mods_portals_toggle = (gameflags & GAME_PORTALS) ? true : false;
+}
+
+static void M_Mods_Draw (void)
+{
+	int		i, y;
+	const char	*label;
+	qboolean	active;
+
+	ScrollTitle("gfx/menu/title0.lmp");
+
+	y = 60;
+	for (i = 0; i < mods_count; i++)
+	{
+		active = M_Mods_IsActive(i);
+
+		/* display names for fixed entries */
+		if (i == MODS_FIXED_HEXEN2)
+			label = "Hexen II";
+		else if (i == MODS_FIXED_PORTALS)
+			label = "Portal of Praevus";
+		else
+			label = mods_list[i];
+
+		if (i == mods_cursor)
+			M_PrintWhite (64, y, label);
+		else
+			M_Print (64, y, label);
+
+		/* active indicator */
+		if (active)
+			M_PrintWhite (232, y, "<-");
+
+		/* dim the portals entry if not installed */
+		if (i == MODS_FIXED_PORTALS && !mods_have_portals)
+		{
+			/* overwrite with dim text */
+			M_Print (64, y, "Portal of Praevus");
+			M_Print (232, y, "(not found)");
+		}
+
+		/* separator between fixed and custom entries */
+		if (i == MODS_FIXED_COUNT - 1 && mods_count > MODS_FIXED_COUNT)
+		{
+			y += 4;
+			M_DrawCharacter (64, y, '-' + 128);
+			M_DrawCharacter (72, y, '-' + 128);
+			M_DrawCharacter (80, y, '-' + 128);
+			y += 4;
+		}
+
+		y += 8;
+	}
+
+	/* portals toggle — only show for custom mods when portals is installed */
+	if (mods_have_portals && mods_cursor >= MODS_FIXED_COUNT)
+	{
+		M_Print (64, y + 4, "Portals data:");
+		if (mods_portals_toggle)
+			M_PrintWhite (176, y + 4, "ON");
+		else
+			M_Print (176, y + 4, "off");
+	}
+
+	/* draw cursor — account for separator offset */
+	{
+		int cy = 60 + mods_cursor * 8;
+		if (mods_cursor >= MODS_FIXED_COUNT && mods_count > MODS_FIXED_COUNT)
+			cy += 8;	/* separator height */
+		M_DrawCharacter (56, cy, 12 + ((int)(realtime * 4) & 1));
+	}
+}
+
+static void M_Mods_Key (int key)
+{
+	switch (key)
+	{
+	case K_ESCAPE:
+	case K_GP_B:
+		M_Menu_Main_f ();
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (++mods_cursor >= mods_count)
+			mods_cursor = 0;
+		/* skip portals if not installed */
+		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
+			if (++mods_cursor >= mods_count)
+				mods_cursor = 0;
+		break;
+
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (--mods_cursor < 0)
+			mods_cursor = mods_count - 1;
+		/* skip portals if not installed */
+		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
+			if (--mods_cursor < 0)
+				mods_cursor = mods_count - 1;
+		break;
+
+	case K_LEFTARROW:
+	case K_RIGHTARROW:
+		/* toggle portals for custom mods only */
+		if (mods_have_portals && mods_cursor >= MODS_FIXED_COUNT)
+		{
+			S_LocalSound ("raven/menu1.wav");
+			mods_portals_toggle = !mods_portals_toggle;
+		}
+		break;
+
+	case K_ENTER:
+	case K_GP_A:
+		if (mods_count == 0)
+			break;
+		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
+			break;	/* can't select missing portals */
+		if (M_Mods_IsActive(mods_cursor))
+			break;	/* already active */
+		m_entersound = true;
+		Key_SetDest (key_game);
+		m_state = m_none;
+		Cbuf_AddText (va("game %s %d\n", mods_list[mods_cursor],
+				mods_portals_toggle ? 1 : 0));
+		break;
+	}
+}
+
 
 //=============================================================================
 /* HELP MENU */
@@ -3544,12 +4052,23 @@ static void M_Quit_Draw (void)
 	y = 12;
 	M_DrawTextBox (0, 0, 38, 23);
 
-// the increment to the x offset is for properly centering the line
-	M_Print      (16 + (8 * 8), y,		"Hexen II version " STRINGIFY(ENGINE_VERSION));
-	M_Print      (16 + (9 * 8), y + 8,	"by Raven Software");
-	M_PrintWhite (16 + (7 * 8), y + 16,	"Hammer of Thyrion " HOT_VERSION_STR);
-	M_PrintWhite (16 +(13 * 8), y + 24,	"Source Port");
-	y += 40;
+#define QUIT_CENTER(str)	((320 - (int)strlen(str) * 8) / 2)
+	{
+		const char *l0 = "Hexen II version " STRINGIFY(ENGINE_VERSION);
+		const char *l1 = "by Raven Software";
+		const char *l2 = "Hammer of Thyrion " HOT_VERSION_STR;
+		const char *l3 = "Source Port";
+		const char *l4 = "Shanjaq and Inky Additions";
+		const char *l5 = "for wabbit";
+		M_Print      (QUIT_CENTER(l0), y,      l0);
+		M_Print      (QUIT_CENTER(l1), y + 8,  l1);
+		M_PrintWhite (QUIT_CENTER(l2), y + 16, l2);
+		M_PrintWhite (QUIT_CENTER(l3), y + 24, l3);
+		M_PrintWhite (QUIT_CENTER(l4), y + 32, l4);
+		M_PrintWhite (QUIT_CENTER(l5), y + 40, l5);
+	}
+#undef QUIT_CENTER
+	y += 56;
 
 	if (LinePos > 55 && !SoundPlayed && LineTxt2)
 	{
@@ -3582,473 +4101,10 @@ static void M_Quit_Draw (void)
 	}
 
 	y += (QUIT_SIZE * 8) + 8;
-	M_PrintWhite (16 + (10 * 8), y,  "Press y to exit");
+	M_PrintWhite ((320 - 15 * 8) / 2, y,  "Press y to exit");
 }
 
 //=============================================================================
-
-/* SERIAL CONFIG MENU */
-
-#if defined(NET_USE_SERIAL)
-
-static int	serialConfig_cursor;
-static const int	serialConfig_cursor_table[] = { 80, 96, 112, 128, 144, 164 };	// { 48, 64, 80, 96, 112, 132 }
-#define	NUM_SERIALCONFIG_CMDS		6
-
-static const int	ISA_uarts[4]	= { 0x3f8, 0x2f8, 0x3e8, 0x2e8};
-static const int	ISA_IRQs[4]	= { 4, 3, 4, 3 };
-static const int	serialConfig_baudrate[6] = { 9600, 14400, 19200, 28800, 38400, 57600 };
-
-static int	serialConfig_comport;
-static int	serialConfig_irq ;
-static int	serialConfig_baud;
-static char	serialConfig_phone[16];
-
-static void M_Menu_SerialConfig_f (void)
-{
-	int		n;
-	int		port;
-	int		baudrate;
-	qboolean	useModem;
-
-	Key_SetDest (key_menu);
-	m_state = m_serialconfig;
-	m_entersound = true;
-	if (JoiningGame && SerialConfig)
-		serialConfig_cursor = 4;
-	else
-		serialConfig_cursor = 5;
-
-	(*GetComPortConfig) (0, &port, &serialConfig_irq, &baudrate, &useModem);
-
-	// map uart's port to COMx
-	for (n = 0; n < 4; n++)
-	{
-		if (ISA_uarts[n] == port)
-			break;
-	}
-	if (n == 4)
-	{
-		n = 0;
-		serialConfig_irq = 4;
-	}
-	serialConfig_comport = n + 1;
-
-	// map baudrate to index
-	for (n = 0; n < 6; n++)
-	{
-		if (serialConfig_baudrate[n] == baudrate)
-			break;
-	}
-	if (n == 6)
-		n = 5;
-	serialConfig_baud = n;
-
-	m_return_onerror = false;
-	m_return_reason[0] = 0;
-}
-
-static void M_SerialConfig_Draw (void)
-{
-	qpic_t	*p;
-	int		basex;
-	const char	*startJoin;
-	const char	*directModem;
-
-	p = Draw_CachePic ("gfx/menu/title4.lmp");
-	basex = (320 - p->width) / 2;
-	ScrollTitle("gfx/menu/title4.lmp");
-
-	if (StartingGame)
-		startJoin = "New Game";
-	else
-		startJoin = "Join Game";
-	if (SerialConfig)
-		directModem = "Modem";
-	else
-		directModem = "Direct Connect";
-	M_Print (basex, serialConfig_cursor_table[0]-16, va ("%s - %s", startJoin, directModem));
-	basex += 8;
-
-	M_Print (basex, serialConfig_cursor_table[0], "Port");
-	M_DrawTextBox (168, serialConfig_cursor_table[0]-8, 4, 1);
-	M_Print (176, serialConfig_cursor_table[0], va("COM%u", serialConfig_comport));
-
-	M_Print (basex, serialConfig_cursor_table[1], "IRQ");
-	M_DrawTextBox (168, serialConfig_cursor_table[1]-8, 1, 1);
-	M_Print (176, serialConfig_cursor_table[1], va("%u", serialConfig_irq));
-
-	M_Print (basex, serialConfig_cursor_table[2], "Baud");
-	M_DrawTextBox (168, serialConfig_cursor_table[2]-8, 5, 1);
-	M_Print (176, serialConfig_cursor_table[2], va("%u", serialConfig_baudrate[serialConfig_baud]));
-
-	if (SerialConfig)
-	{
-		M_Print (basex, serialConfig_cursor_table[3], "Modem Setup...");
-		if (JoiningGame)
-		{
-			M_Print (basex, serialConfig_cursor_table[4], "Phone number");
-			M_DrawTextBox (168, serialConfig_cursor_table[4]-8, 16, 1);
-			M_Print (176, serialConfig_cursor_table[4], serialConfig_phone);
-		}
-	}
-
-	if (JoiningGame)
-	{
-		M_DrawTextBox (basex, serialConfig_cursor_table[5]-8, 7, 1);
-		M_Print (basex+8, serialConfig_cursor_table[5], "Connect");
-	}
-	else
-	{
-		M_DrawTextBox (basex, serialConfig_cursor_table[5]-8, 2, 1);
-		M_Print (basex+8, serialConfig_cursor_table[5], "OK");
-	}
-
-	M_DrawCharacter (basex-8, serialConfig_cursor_table [serialConfig_cursor], 12+((int)(realtime*4)&1));
-
-	if (serialConfig_cursor == 4)
-		M_DrawCharacter (176 + 8*strlen(serialConfig_phone), serialConfig_cursor_table [serialConfig_cursor], 10+((int)(realtime*4)&1));
-
-	if (*m_return_reason)
-		M_PrintWhite (basex, 148, m_return_reason);
-}
-
-static void M_SerialConfig_Key (int key)
-{
-	int		l;
-
-	switch (key)
-	{
-	case K_ESCAPE:
-		M_Menu_Net_f ();
-		break;
-
-	case K_UPARROW:
-		S_LocalSound ("raven/menu1.wav");
-		serialConfig_cursor--;
-		if (serialConfig_cursor < 0)
-			serialConfig_cursor = NUM_SERIALCONFIG_CMDS-1;
-		break;
-
-	case K_DOWNARROW:
-		S_LocalSound ("raven/menu1.wav");
-		serialConfig_cursor++;
-		if (serialConfig_cursor >= NUM_SERIALCONFIG_CMDS)
-			serialConfig_cursor = 0;
-		break;
-
-	case K_LEFTARROW:
-		if (serialConfig_cursor > 2)
-			break;
-		S_LocalSound ("raven/menu3.wav");
-
-		if (serialConfig_cursor == 0)
-		{
-			serialConfig_comport--;
-			if (serialConfig_comport == 0)
-				serialConfig_comport = 4;
-			serialConfig_irq = ISA_IRQs[serialConfig_comport-1];
-		}
-		else if (serialConfig_cursor == 1)
-		{
-			serialConfig_irq--;
-			if (serialConfig_irq == 6)
-				serialConfig_irq = 5;
-			if (serialConfig_irq == 1)
-				serialConfig_irq = 7;
-		}
-		else if (serialConfig_cursor == 2)
-		{
-			serialConfig_baud--;
-			if (serialConfig_baud < 0)
-				serialConfig_baud = 5;
-		}
-
-		break;
-
-	case K_RIGHTARROW:
-		if (serialConfig_cursor > 2)
-			break;
-forward:
-		S_LocalSound ("raven/menu3.wav");
-
-		if (serialConfig_cursor == 0)
-		{
-			serialConfig_comport++;
-			if (serialConfig_comport > 4)
-				serialConfig_comport = 1;
-			serialConfig_irq = ISA_IRQs[serialConfig_comport-1];
-		}
-		else if (serialConfig_cursor == 1)
-		{
-			serialConfig_irq++;
-			if (serialConfig_irq == 6)
-				serialConfig_irq = 7;
-			if (serialConfig_irq == 8)
-				serialConfig_irq = 2;
-		}
-		else if (serialConfig_cursor == 2)
-		{
-			serialConfig_baud++;
-			if (serialConfig_baud > 5)
-				serialConfig_baud = 0;
-		}
-
-		break;
-
-	case K_ENTER:
-		if (serialConfig_cursor < 3)
-			goto forward;
-
-		m_entersound = true;
-
-		if (serialConfig_cursor == 3)
-		{
-			(*SetComPortConfig) (0, ISA_uarts[serialConfig_comport-1], serialConfig_irq, serialConfig_baudrate[serialConfig_baud], SerialConfig);
-
-			M_Menu_ModemConfig_f ();
-			break;
-		}
-
-		if (serialConfig_cursor == 4)
-		{
-			serialConfig_cursor = 5;
-			break;
-		}
-
-		// serialConfig_cursor == 5 (OK/CONNECT)
-		(*SetComPortConfig) (0, ISA_uarts[serialConfig_comport-1], serialConfig_irq, serialConfig_baudrate[serialConfig_baud], SerialConfig);
-
-		M_ConfigureNetSubsystem ();
-
-		if (StartingGame)
-		{
-			M_Menu_GameOptions_f ();
-			break;
-		}
-
-		m_return_state = m_state;
-		m_return_onerror = true;
-		Key_SetDest (key_game);
-		m_state = m_none;
-
-		if (SerialConfig)
-			Cbuf_AddText (va ("connect \"%s\"\n", serialConfig_phone));
-		else
-			Cbuf_AddText ("connect\n");
-		break;
-
-	case K_BACKSPACE:
-		if (serialConfig_cursor == 4)
-		{
-			if (strlen(serialConfig_phone))
-				serialConfig_phone[strlen(serialConfig_phone)-1] = 0;
-		}
-		break;
-
-	default:
-		if (key < 32 || key > 127)
-			break;
-		if (serialConfig_cursor == 4)
-		{
-			l = strlen(serialConfig_phone);
-			if (l < 15)
-			{
-				serialConfig_phone[l+1] = 0;
-				serialConfig_phone[l] = key;
-			}
-		}
-	}
-
-	if (DirectConfig && (serialConfig_cursor == 3 || serialConfig_cursor == 4))
-	{
-		if (key == K_UPARROW)
-			serialConfig_cursor = 2;
-		else
-			serialConfig_cursor = 5;
-	}
-	if (SerialConfig && StartingGame && serialConfig_cursor == 4)
-	{
-		if (key == K_UPARROW)
-			serialConfig_cursor = 3;
-		else
-			serialConfig_cursor = 5;
-	}
-}
-
-//=============================================================================
-/* MODEM CONFIG MENU */
-
-static int	modemConfig_cursor;
-static const int	modemConfig_cursor_table[] = { 64, 78, 108, 138, 172 };	// { 40, 56, 88, 120, 156 }
-#define NUM_MODEMCONFIG_CMDS		5
-
-static char	modemConfig_dialing;
-static char	modemConfig_clear[16];
-static char	modemConfig_init[32];
-static char	modemConfig_hangup[16];
-
-static void M_Menu_ModemConfig_f (void)
-{
-	Key_SetDest (key_menu);
-	m_state = m_modemconfig;
-	m_entersound = true;
-	(*GetModemConfig) (0, &modemConfig_dialing, modemConfig_clear, modemConfig_init, modemConfig_hangup);
-}
-
-static void M_ModemConfig_Draw (void)
-{
-	qpic_t	*p;
-	int		basex;
-
-	p = Draw_CachePic ("gfx/menu/title4.lmp");
-	/* our p->width == 185: if we don't do the -8 here, drawing of
-	 * the init string textbox with 30 chars width shall fail with
-	 * a 'bad coordinates' message in Draw_TransPic() at 320x200.  */
-	basex = (320 - p->width) / 2 - 8;
-	ScrollTitle("gfx/menu/title4.lmp");
-
-	if (modemConfig_dialing == 'P')
-		M_Print (basex, modemConfig_cursor_table[0], "Pulse Dialing");
-	else
-		M_Print (basex, modemConfig_cursor_table[0], "Touch Tone Dialing");
-
-	M_Print (basex, modemConfig_cursor_table[1], "Clear");
-	M_DrawTextBox (basex, modemConfig_cursor_table[1]+4, 16, 1);
-	M_Print (basex+8, modemConfig_cursor_table[1]+12, modemConfig_clear);
-	if (modemConfig_cursor == 1)
-		M_DrawCharacter (basex+8 + 8*strlen(modemConfig_clear), modemConfig_cursor_table[1]+12, 10+((int)(realtime*4)&1));
-
-	M_Print (basex, modemConfig_cursor_table[2], "Init");
-	M_DrawTextBox (basex, modemConfig_cursor_table[2]+4, 30, 1);
-	M_Print (basex+8, modemConfig_cursor_table[2]+12, modemConfig_init);
-	if (modemConfig_cursor == 2)
-		M_DrawCharacter (basex+8 + 8*strlen(modemConfig_init), modemConfig_cursor_table[2]+12, 10+((int)(realtime*4)&1));
-
-	M_Print (basex, modemConfig_cursor_table[3], "Hangup");
-	M_DrawTextBox (basex, modemConfig_cursor_table[3]+4, 16, 1);
-	M_Print (basex+8, modemConfig_cursor_table[3]+12, modemConfig_hangup);
-	if (modemConfig_cursor == 3)
-		M_DrawCharacter (basex+8 + 8*strlen(modemConfig_hangup), modemConfig_cursor_table[3]+12, 10+((int)(realtime*4)&1));
-
-	M_DrawTextBox (basex, modemConfig_cursor_table[4]-8, 2, 1);
-	M_Print (basex+8, modemConfig_cursor_table[4], "OK");
-
-	M_DrawCharacter (basex-8, modemConfig_cursor_table [modemConfig_cursor], 12+((int)(realtime*4)&1));
-}
-
-static void M_ModemConfig_Key (int key)
-{
-	int		l;
-
-	switch (key)
-	{
-	case K_ESCAPE:
-		M_Menu_SerialConfig_f ();
-		break;
-
-	case K_UPARROW:
-		S_LocalSound ("raven/menu1.wav");
-		modemConfig_cursor--;
-		if (modemConfig_cursor < 0)
-			modemConfig_cursor = NUM_MODEMCONFIG_CMDS-1;
-		break;
-
-	case K_DOWNARROW:
-		S_LocalSound ("raven/menu1.wav");
-		modemConfig_cursor++;
-		if (modemConfig_cursor >= NUM_MODEMCONFIG_CMDS)
-			modemConfig_cursor = 0;
-		break;
-
-	case K_LEFTARROW:
-	case K_RIGHTARROW:
-		if (modemConfig_cursor == 0)
-		{
-			if (modemConfig_dialing == 'P')
-				modemConfig_dialing = 'T';
-			else
-				modemConfig_dialing = 'P';
-			S_LocalSound ("raven/menu1.wav");
-		}
-		break;
-
-	case K_ENTER:
-		if (modemConfig_cursor == 0)
-		{
-			if (modemConfig_dialing == 'P')
-				modemConfig_dialing = 'T';
-			else
-				modemConfig_dialing = 'P';
-			m_entersound = true;
-		}
-		else if (modemConfig_cursor == 4)
-		{
-			(*SetModemConfig) (0, va ("%c", modemConfig_dialing), modemConfig_clear, modemConfig_init, modemConfig_hangup);
-			m_entersound = true;
-			M_Menu_SerialConfig_f ();
-		}
-		break;
-
-	case K_BACKSPACE:
-		if (modemConfig_cursor == 1)
-		{
-			l = strlen(modemConfig_clear);
-			if (l)
-				modemConfig_clear[l-1] = 0;
-		}
-		else if (modemConfig_cursor == 2)
-		{
-			l = strlen(modemConfig_init);
-			if (l)
-				modemConfig_init[l-1] = 0;
-		}
-		else if (modemConfig_cursor == 3)
-		{
-			l = strlen(modemConfig_hangup);
-			if (l)
-				modemConfig_hangup[l-1] = 0;
-		}
-		break;
-
-	default:
-		if (key < 32 || key > 127)
-			break;
-
-		if (modemConfig_cursor == 1)
-		{
-			l = strlen(modemConfig_clear);
-			if (l < 15)
-			{
-				modemConfig_clear[l+1] = 0;
-				modemConfig_clear[l] = key;
-			}
-		}
-		else if (modemConfig_cursor == 2)
-		{
-			l = strlen(modemConfig_init);
-			if (l < 29)
-			{
-				modemConfig_init[l+1] = 0;
-				modemConfig_init[l] = key;
-			}
-		}
-		else if (modemConfig_cursor == 3)
-		{
-			l = strlen(modemConfig_hangup);
-			if (l < 15)
-			{
-				modemConfig_hangup[l+1] = 0;
-				modemConfig_hangup[l] = key;
-			}
-		}
-	}
-}
-#endif	/* NET_USE_SERIAL */
-
-//=============================================================================
-
-/* LAN CONFIG MENU */
 
 static int	lanConfig_cursor = -1;
 static const int	lanConfig_cursor_table[] = {100, 120, 140, 172};
@@ -4111,18 +4167,12 @@ static void M_LanConfig_Draw (void)
 		startJoin = "New Game";
 	else
 		startJoin = "Join Game";
-	if (IPXConfig)
-		protocol = "IPX";
-	else
-		protocol = "TCP/IP";
+	protocol = "TCP/IP";
 	M_Print (basex, 60, va ("%s - %s", startJoin, protocol));
 	basex += 8;
 
 	M_Print (basex, 80, "Address:");
-	if (IPXConfig)
-		M_Print (basex+9*8, 80, my_ipx_address);
-	else
-		M_Print (basex+9*8, 80, my_tcpip_address);
+	M_Print (basex+9*8, 80, my_tcpip_address);
 
 	M_Print (basex, lanConfig_cursor_table[0], "Port");
 	M_DrawTextBox (basex+8*8, lanConfig_cursor_table[0]-8, 6, 1);
@@ -4994,6 +5044,7 @@ void M_Init (void)
 	Cmd_AddCommand ("menu_keys", M_Menu_Keys_f);
 	Cmd_AddCommand ("menu_video", M_Menu_Video_f);
 	Cmd_AddCommand ("help", M_Menu_Help_f);
+	Cmd_AddCommand ("menu_mods", M_Menu_Mods_f);
 	Cmd_AddCommand ("menu_quit", M_Menu_Quit_f);
 	Cmd_AddCommand ("menu_class", M_Menu_Class2_f);
 
@@ -5019,7 +5070,10 @@ void M_Draw (void)
 		}
 		else
 		{
-			Draw_FadeScreen ();
+			/* skip the amber fade in display menus so
+			 * settings preview against a clean game view */
+			if (m_state != m_display && m_state != m_video)
+				Draw_FadeScreen ();
 			if (scr_viewsize.integer < 110)
 				scr_fullupdate = 0;
 		}
@@ -5076,11 +5130,15 @@ void M_Draw (void)
 		M_Options_Draw ();
 		break;
 
-#ifdef GLQUAKE
-	case m_opengl:
-		M_OpenGL_Draw ();
+	case m_display:
+		M_Display_Draw ();
 		break;
-#endif
+	case m_sound:
+		M_Sound_Draw ();
+		break;
+	case m_game:
+		M_Game_Draw ();
+		break;
 
 	case m_keys:
 		M_Keys_Draw ();
@@ -5088,6 +5146,13 @@ void M_Draw (void)
 
 	case m_video:
 		M_Video_Draw ();
+		break;
+	case m_gamepad:
+		M_Gamepad_Draw ();
+		break;
+
+	case m_mods:
+		M_Mods_Draw ();
 		break;
 
 	case m_help:
@@ -5097,16 +5162,6 @@ void M_Draw (void)
 	case m_quit:
 		M_Quit_Draw ();
 		break;
-
-#if defined(NET_USE_SERIAL)
-	case m_serialconfig:
-		M_SerialConfig_Draw ();
-		break;
-
-	case m_modemconfig:
-		M_ModemConfig_Draw ();
-		break;
-#endif
 
 	case m_lanconfig:
 		M_LanConfig_Draw ();
@@ -5206,11 +5261,15 @@ void M_Keydown (int key)
 		M_Options_Key (key);
 		return;
 
-#ifdef GLQUAKE
-	case m_opengl:
-		M_OpenGL_Key (key);
-		break;
-#endif
+	case m_display:
+		M_Display_Key (key);
+		return;
+	case m_sound:
+		M_Sound_Key (key);
+		return;
+	case m_game:
+		M_Game_Key (key);
+		return;
 
 	case m_keys:
 		M_Keys_Key (key);
@@ -5220,6 +5279,14 @@ void M_Keydown (int key)
 		M_Video_Key (key);
 		return;
 
+	case m_gamepad:
+		M_Gamepad_Key (key);
+		return;
+
+	case m_mods:
+		M_Mods_Key (key);
+		return;
+
 	case m_help:
 		M_Help_Key (key);
 		return;
@@ -5227,16 +5294,6 @@ void M_Keydown (int key)
 	case m_quit:
 		M_Quit_Key (key);
 		return;
-
-#if defined(NET_USE_SERIAL)
-	case m_serialconfig:
-		M_SerialConfig_Key (key);
-		return;
-
-	case m_modemconfig:
-		M_ModemConfig_Key (key);
-		return;
-#endif
 
 	case m_lanconfig:
 		M_LanConfig_Key (key);
@@ -5263,13 +5320,7 @@ static void M_ConfigureNetSubsystem(void)
 
 	Cbuf_AddText ("stopdemo\n");
 
-#if defined(NET_USE_SERIAL)
-	if (SerialConfig || DirectConfig)
-	{
-		Cbuf_AddText ("com1 enable\n");
-	}
-#endif
-	if (IPXConfig || TCPIPConfig)
+	if (TCPIPConfig)
 		net_hostport = lanConfig_port;
 }
 

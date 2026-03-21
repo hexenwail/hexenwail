@@ -91,6 +91,19 @@ void Cbuf_Init (void)
 
 /*
 ============
+Cbuf_Clear
+
+Empties the command buffer, discarding all pending commands.
+============
+*/
+void Cbuf_Clear (void)
+{
+	SZ_Clear (&cmd_text);
+}
+
+
+/*
+============
 Cbuf_AddText
 
 Adds command text at the end of the buffer
@@ -733,7 +746,26 @@ void Cmd_ExecuteString (const char *text, cmd_source_t src)
 
 // check cvars
 	if (!Cvar_Command())
+	{
+		/* silently ignore removed legacy commands (from old configs) */
+		static const char *legacy_cmds[] = {
+			"gl_ztrick", "gl_max_size",
+			"sys_delay", "r_transwater",
+			"_windowed_mouse", "vid_stretch_by_2",
+			"vid_config_y", "vid_config_x",
+			"_vid_default_mode_win", "_vid_default_mode",
+			"_vid_wait_override", "vid_nopageflip",
+			"sys_quake2",
+			NULL
+		};
+		const char **lc;
+		for (lc = legacy_cmds; *lc; lc++)
+		{
+			if (!q_strcasecmp(cmd_argv[0], *lc))
+				return;
+		}
 		Con_Printf ("Unknown command \"%s\"\n", Cmd_Argv(0));
+	}
 }
 
 /*

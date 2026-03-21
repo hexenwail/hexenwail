@@ -24,16 +24,7 @@
 
 /* drivers' headers: */
 #include "snd_alsa.h"
-#include "snd_oss.h"
 #include "snd_sdl.h"
-#include "snd_sun.h"
-#include "snd_win.h"
-#include "snd_dsound.h"
-#include "snd_sb.h"
-#include "snd_gus.h"
-#include "snd_pci.h"
-#include "snd_ahi.h"
-#include "snd_paula.h"
 
 static qboolean	snd_sys_inited = false;
 
@@ -111,38 +102,6 @@ void S_DriversInit (void)
 #if HAVE_ALSA_SOUND
 	S_RegisterDriver(&snddrv_alsa);
 	if (COM_CheckParm ("-sndalsa"))
-		snd_drivers->userpreferred = true;
-#endif
-#if HAVE_OSS_SOUND
-	S_RegisterDriver(&snddrv_oss);
-	if (COM_CheckParm ("-sndoss"))
-		snd_drivers->userpreferred = true;
-#endif
-#if HAVE_WIN_SOUND
-	S_RegisterDriver(&snddrv_win);
-	if (COM_CheckParm ("-wavonly"))
-		snd_drivers->userpreferred = true;
-#endif
-#if HAVE_WIN_DX_SOUND
-	S_RegisterDriver(&snddrv_dsound);
-#endif
-#if HAVE_DOS_SB_SOUND
-	S_RegisterDriver(&snddrv_blaster);
-#endif
-#if HAVE_DOS_GUS_SOUND
-	S_RegisterDriver(&snddrv_gus);
-#endif
-#if HAVE_DOS_PCI_SOUND
-	S_RegisterDriver(&snddrv_pci);
-#endif
-#if HAVE_AHI_SOUND
-	S_RegisterDriver(&snddrv_ahi);
-	if (COM_CheckParm ("-sndahi"))
-		snd_drivers->userpreferred = true;
-#endif
-#if HAVE_PAULA_SOUND
-	S_RegisterDriver(&snddrv_paula);
-	if (COM_CheckParm ("-sndpaula"))
 		snd_drivers->userpreferred = true;
 #endif
 /* if sdl audio is compiled for any supported platform, then

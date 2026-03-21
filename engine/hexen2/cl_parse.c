@@ -23,7 +23,9 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
-#include "r_shared.h"
+
+/* gl_fog.c */
+void Fog_ParseServerMessage (void);
 
 static const char *svc_strings[] =
 {
@@ -89,7 +91,8 @@ static const char *svc_strings[] =
 	"svc_toggle_statbar",
 	"svc_sound_update_pos",
 	"svc_mod_name",	// UQE v1.13 by Korax, music file name
-	"svc_skybox"	// UQE v1.13 by Korax, skybox name
+	"svc_skybox",	// UQE v1.13 by Korax, skybox name
+	"svc_fog"
 };
 #define	NUM_SVC_STRINGS	(sizeof(svc_strings) / sizeof(svc_strings[0]))
 
@@ -249,13 +252,19 @@ CL_ParseServerInfo
 static void CL_ParseServerInfo (void)
 {
 	const char	*str;
-	int		i;
-	int		nummodels, numsounds;
+	int		i, j;
+	int		nummodels, numsounds, numfx, numitems;
 	char	model_precache[MAX_MODELS][MAX_QPATH];
 	char	sound_precache[MAX_SOUNDS][MAX_QPATH];
+
+	// Initialize arrays to prevent crashes on bad data
+	memset(model_precache, 0, sizeof(model_precache));
+	memset(sound_precache, 0, sizeof(sound_precache));
 // rjr	edict_t		*ent;
 
 	Con_DPrintf ("Serverinfo packet received.\n");
+	Con_DPrintf("CL_ParseServerInfo: Message size=%d, readcount=%d\n",
+		net_message.cursize, msg_readcount);
 
 // bring up loading plaque for map changes within a demo.
 // it will be hidden in CL_SignonReply() -- ericw
@@ -274,11 +283,12 @@ static void CL_ParseServerInfo (void)
 	case PROTOCOL_RAVEN_111:
 	case PROTOCOL_RAVEN_112:
 	case PROTOCOL_UQE_113:
+	case PROTOCOL_UH2_114:
 		Con_DPrintf ("\nServer using protocol %i\n", cl_protocol);
 		break;
 	default:
-		Con_Printf ("\nServer returned version %i, not %i or %i\n",
-				cl_protocol, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113);
+		Con_Printf ("\nServer returned version %i, not %i, %i, or %i\n",
+				cl_protocol, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113, PROTOCOL_UH2_114);
 		return;
 	}
 
@@ -291,19 +301,105 @@ static void CL_ParseServerInfo (void)
 	}
 	cl.scores = (scoreboard_t *) Hunk_AllocName (cl.maxclients*sizeof(*cl.scores), "scores");
 
-// parse gametype
-	cl.gametype = MSG_ReadByte ();
+// parse gametype (but first check if this byte looks valid)
+	{
+		int peek_byte = MSG_ReadByte ();
+		qboolean old_format = false;
+		unsigned char *maps_ptr = NULL;
+		int search_start;
 
-	if (cl.gametype == GAME_DEATHMATCH && cl_protocol > PROTOCOL_RAVEN_111)
-		sv_kingofhill = MSG_ReadShort ();
+		// If the byte is not a valid gametype (0=COOP, 1=DEATHMATCH),
+		// it might be old demo format OR the start of levelname
+		if (peek_byte != GAME_COOP && peek_byte != GAME_DEATHMATCH)
+		{
+			// Put the byte back
+			msg_readcount--;
 
-// parse signon message
-	str = MSG_ReadString ();
-	q_strlcpy (cl.levelname, str, sizeof(cl.levelname));
+			// Search for "maps/" pattern in the message buffer
+			search_start = msg_readcount;
+			for (i = search_start; i < net_message.cursize - 5; i++)
+			{
+				if (net_message.data[i] == 'm' &&
+				    net_message.data[i+1] == 'a' &&
+				    net_message.data[i+2] == 'p' &&
+				    net_message.data[i+3] == 's' &&
+				    net_message.data[i+4] == '/')
+				{
+					maps_ptr = &net_message.data[i];
+					break;
+				}
+			}
+
+			if (maps_ptr)
+			{
+				// Found it! Work backwards to find the start of levelname
+				// The levelname is before "maps/", may have null bytes between
+				unsigned char *name_end = maps_ptr - 2;  // Skip back past ".bsp" if present
+
+				// Skip null bytes to find end of levelname
+				while (name_end > &net_message.data[msg_readcount] && *name_end == 0)
+					name_end--;
+
+				// Now find the start (preceded by null or non-printable)
+				unsigned char *name_start = name_end;
+				while (name_start > &net_message.data[msg_readcount])
+				{
+					// Check the character BEFORE name_start
+					unsigned char prev = name_start[-1];
+					// Stop at null, maxclients value (small), or control characters
+					if (prev == 0 || prev < 32 || prev >= 127)
+						break;
+					name_start--;
+				}
+
+				// Extract name
+				int name_len = name_end - (unsigned char*)name_start + 1;
+				if (name_len > 0 && name_len < sizeof(cl.levelname))
+				{
+					memcpy(cl.levelname, name_start, name_len);
+					cl.levelname[name_len] = 0;
+				}
+				else
+				{
+					q_strlcpy(cl.levelname, "keep_demo", sizeof(cl.levelname));  // Fallback
+				}
+
+				// Advance msg_readcount to "maps/" for model precache reading
+				msg_readcount = maps_ptr - net_message.data;
+
+				cl.gametype = GAME_COOP;
+				old_format = true;
+			}
+			else
+			{
+				cl.gametype = GAME_COOP;
+				str = MSG_ReadString ();
+				q_strlcpy(cl.levelname, str, sizeof(cl.levelname));
+				old_format = true;
+			}
+		}
+		else
+		{
+			// New format - this byte is the gametype
+			cl.gametype = peek_byte;
+		}
+
+		// Skip reading levelname below if we already read it
+		if (!old_format)
+		{
+			// Need to read kingofhill first, then levelname
+			if (cl.gametype == GAME_DEATHMATCH && cl_protocol > PROTOCOL_RAVEN_111)
+				sv_kingofhill = MSG_ReadShort ();
+
+			// parse signon message (levelname)
+			str = MSG_ReadString ();
+			q_strlcpy (cl.levelname, str, sizeof(cl.levelname));
+		}
+	}
 
 // seperate the printfs so the server message can have a color
 	Con_Printf("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
-	Con_Printf ("%c%s\n", 2, str);
+	Con_Printf ("%c%s\n", 2, cl.levelname);
 
 //
 // first we go through and touch all of the precache data that still
@@ -313,6 +409,7 @@ static void CL_ParseServerInfo (void)
 
 // precache models
 	memset (cl.model_precache, 0, sizeof(cl.model_precache));
+
 	for (nummodels = 1 ; ; nummodels++)
 	{
 		str = MSG_ReadString ();
@@ -326,6 +423,8 @@ static void CL_ParseServerInfo (void)
 		q_strlcpy (model_precache[nummodels], str, MAX_QPATH);
 		Mod_TouchModel (str);
 	}
+	Con_DPrintf("CL_ParseServerInfo: Model precache done: nummodels=%d, model[1]='%s'\n",
+		nummodels, model_precache[1]);
 
 // precache sounds
 	memset (cl.sound_precache, 0, sizeof(cl.sound_precache));
@@ -358,9 +457,32 @@ static void CL_ParseServerInfo (void)
 	COM_FileBase (model_precache[1], cl.mapname, sizeof(cl.mapname));
 
 	//always precache the world!!!
+	if (developer.integer >= 2)
+		Con_DPrintf("About to load world model: '%s'\n", model_precache[1]);
+	if (!model_precache[1][0])
+	{
+		// Demo file has corrupt/missing model data - this can happen with
+		// old demos recorded with different engine versions or mod setups
+		if (cls.demoplayback)
+		{
+			Con_Printf("Warning: Demo has corrupt model list, skipping to next demo\n");
+			CL_StopPlayback();  // Stop this demo
+			CL_NextDemo();      // Try next demo
+			return;
+		}
+		Con_Printf("ERROR: World model name is empty! Cannot load map.\n");
+		return;
+	}
 	cl.model_precache[1] = Mod_ForName (model_precache[1], false);
 	for (i = 2; i < nummodels; i++)
 	{
+		// Skip empty model names to prevent Mod_FindName crashes
+		if (!model_precache[i][0])
+		{
+			Con_DPrintf("Warning: Empty model name at index %d, skipping\n", i);
+			continue;
+		}
+
 		if (precache.integer)
 		{
 			cl.model_precache[i] = Mod_ForName (model_precache[i], false);
@@ -383,6 +505,76 @@ static void CL_ParseServerInfo (void)
 	player_models[2] = !(gameflags & GAME_OLD_DEMO) ? (qmodel_t *)Mod_FindName ("models/necro.mdl") : NULL;
 	player_models[3] = (qmodel_t *)Mod_FindName ("models/assassin.mdl");
 	player_models[4] = (gameflags & GAME_PORTALS) ? (qmodel_t *)Mod_FindName ("models/succubus.mdl") : NULL;
+
+	if (cl_protocol == PROTOCOL_UH2_114)
+	{
+		// load model fx from server
+		for (numfx = 1; ; numfx++)
+		{
+			str = MSG_ReadString();
+			if (!str[0])
+				break;
+			if (numfx == MAX_MODELS)
+			{
+				Con_Printf("Server sent too many model effects\n");
+				return;
+			}
+			for (j = 2; j < nummodels; j++)
+			{
+				if (!strcmp(cl.model_precache[j]->name, str))
+				{
+					#ifdef GLQUAKE
+					cl.model_precache[j]->ex_flags = MSG_ReadShort();
+					cl.model_precache[j]->glow_settings[COLOR_R] = MSG_ReadFloat();
+					cl.model_precache[j]->glow_settings[COLOR_G] = MSG_ReadFloat();
+					cl.model_precache[j]->glow_settings[COLOR_B] = MSG_ReadFloat();
+					cl.model_precache[j]->glow_settings[COLOR_A] = MSG_ReadFloat();
+					#endif
+				}
+			}
+		}
+
+		if (cl.ex_items == NULL)
+		{
+			cl.ex_items = (ex_item_t *)Hunk_AllocName(MAX_ITEMS_EX * sizeof(ex_item_t), "ex_items_cl");
+			cl.num_ex_items = 0;
+			for (i = 0; i < 15; i++)
+			{
+				cl.num_ex_items += 1;
+				cl.ex_items[i].id = (int)(i + 1);
+				q_strlcpy(cl.ex_items[i].icon, va("gfx/arti%02d.lmp", i), MAX_QPATH);
+			}
+		}
+		//shan check with no ex_items received?
+		for (numitems = 0; ; numitems++)
+		{
+			j = MSG_ReadByte();
+
+			if (j == 0)
+				break;
+
+			str = MSG_ReadString();
+			for (i = 0; i < MAX_ITEMS_EX; i++)
+			{
+				if ((cl.ex_items[i].id == 0) || (cl.ex_items[i].id == j))
+					break;
+			}
+
+			if (i >= MAX_ITEMS_EX)
+			{
+				Con_Printf("Server sent too many item defs\n");
+				return;
+			}
+			cl.ex_items[i].id = j;
+			q_strlcpy(cl.ex_items[i].icon, str, MAX_QPATH);
+			cl.num_ex_items += 1;
+		}
+
+		if (precache.integer)
+		{
+			total_loading_size = nummodels + numsounds + numfx + numitems;
+		}
+	}
 
 	S_BeginPrecaching ();
 	for (i = 1; i < numsounds; i++)
@@ -761,7 +953,7 @@ static void CL_ParseClientdata (int bits)
 		Sbar_Changed();
 		for (j = 0; j < 32; j++)
 			if ((i & (1<<j)) && !(cl.items & (1<<j)))
-				cl.item_gettime[j] = cl.time;
+				cl.ex_inventory[0].item_gettime[j] = cl.time;
 		cl.items = i;
 	}
 
@@ -1125,7 +1317,7 @@ void CL_ParseServerMessage (void)
 	static		double lasttime;
 	static		qboolean packet_loss = false;
 	entity_t	*ent;
-	int		sc1, sc2;
+	int		sc1, sc2, sc3 = 0;
 	byte		test;
 	float		compangles[2][3];
 	vec3_t		deltaangles;
@@ -1135,6 +1327,7 @@ void CL_ParseServerMessage (void)
 	{
 		LastServerMessageSize = net_message.cursize;
 	}
+
 	if (cl_shownet.integer == 1)
 	{
 		Con_Printf ("Time: %2.2f Pck: %i ", realtime - lasttime, net_message.cursize);
@@ -1156,6 +1349,7 @@ void CL_ParseServerMessage (void)
 			Host_Error ("%s: Bad server message", __thisfunc__);
 
 		cmd = MSG_ReadByte ();
+
 		if (cmd == -1)
 		{
 			if (cl_shownet.integer == 1)
@@ -1187,6 +1381,18 @@ void CL_ParseServerMessage (void)
 		{
 		default:
 		//	CL_DumpPacket ();
+			// FIXME: SoT mod uses custom protocol messages (0, 33, 80, 84, 89, 97-101, 105, 108, 110, 115-117, 121)
+			// Try to handle unknown messages gracefully
+			if (cmd == 0 || cmd == 33 || cmd >= 80)
+			{
+				// Try reading 1 byte - many simple messages have just a byte parameter
+				// If this is wrong, the stream will desync, but it's better than crashing
+				byte skip_byte = MSG_ReadByte();
+				Con_Printf("[DEMO] WARNING: Unknown server message %d at readcount=%d, skipped byte 0x%02x\n",
+					cmd, msg_readcount-2, skip_byte);
+				break;
+			}
+			Con_Printf("[DEMO] ERROR: Illegible server message %d at readcount=%d\n", cmd, msg_readcount);
 			Host_Error ("%s: Illegible server message %d", __thisfunc__, cmd);
 			break;
 
@@ -1211,12 +1417,13 @@ void CL_ParseServerMessage (void)
 			case PROTOCOL_RAVEN_111:
 			case PROTOCOL_RAVEN_112:
 			case PROTOCOL_UQE_113:
+			case PROTOCOL_UH2_114:
 				Con_Printf ("Server using protocol %i\n", cl_protocol);
 				break;
 			default:
-				Host_Error ("%s: Server is protocol %i instead of %i or %i",
+				Host_Error ("%s: Server is protocol %i instead of %i, %i, or %i",
 						__thisfunc__, cl_protocol,
-						PROTOCOL_RAVEN_112, PROTOCOL_UQE_113);
+						PROTOCOL_RAVEN_112, PROTOCOL_UQE_113, PROTOCOL_UH2_114);
 			}
 			break;
 
@@ -1229,7 +1436,11 @@ void CL_ParseServerMessage (void)
 				MSG_ReadString ();
 				break;
 			}
-			Con_Printf ("%s", MSG_ReadString ());
+			// Only print server messages at developer level 2+ (suppresses "pain" spam)
+			if (developer.integer >= 2)
+				Con_Printf ("%s", MSG_ReadString ());
+			else
+				MSG_ReadString ();  // Still need to read the string to advance message
 			break;
 
 		case svc_centerprint:
@@ -1606,6 +1817,8 @@ void CL_ParseServerMessage (void)
 				k = MSG_ReadShort();
 				if (cl.need_build)
 					cl.RemoveList[i] = k;
+				if (k >= MAX_EDICTS)
+					Host_Error("%s: Entity %d exceeds MAX_EDICTS (%d)", __thisfunc__, k, MAX_EDICTS);
 				ent = CL_EntityNum (k);
 				ent->baseline.flags &= ~BE_ON;
 			}
@@ -1653,35 +1866,35 @@ void CL_ParseServerMessage (void)
 			if (sc1 & SC1_EXPERIENCE)
 				cl.v.experience = MSG_ReadLong();
 			if (sc1 & SC1_CNT_TORCH)
-				cl.v.cnt_torch = MSG_ReadByte();
+				cl.v.cnt_torch = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 1, (int)cl.v.cnt_torch, false);
 			if (sc1 & SC1_CNT_H_BOOST)
-				cl.v.cnt_h_boost = MSG_ReadByte();
+				cl.v.cnt_h_boost = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 2, (int)cl.v.cnt_h_boost, false);
 			if (sc1 & SC1_CNT_SH_BOOST)
-				cl.v.cnt_sh_boost = MSG_ReadByte();
+				cl.v.cnt_sh_boost = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 3, (int)cl.v.cnt_sh_boost, false);
 			if (sc1 & SC1_CNT_MANA_BOOST)
-				cl.v.cnt_mana_boost = MSG_ReadByte();
+				cl.v.cnt_mana_boost = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 4, (int)cl.v.cnt_mana_boost, false);
 			if (sc1 & SC1_CNT_TELEPORT)
-				cl.v.cnt_teleport = MSG_ReadByte();
+				cl.v.cnt_teleport = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 5, (int)cl.v.cnt_teleport, false);
 			if (sc1 & SC1_CNT_TOME)
-				cl.v.cnt_tome = MSG_ReadByte();
+				cl.v.cnt_tome = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 6, (int)cl.v.cnt_tome, false);
 			if (sc1 & SC1_CNT_SUMMON)
-				cl.v.cnt_summon = MSG_ReadByte();
+				cl.v.cnt_summon = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 7, (int)cl.v.cnt_summon, false);
 			if (sc1 & SC1_CNT_INVISIBILITY)
-				cl.v.cnt_invisibility = MSG_ReadByte();
+				cl.v.cnt_invisibility = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 8, (int)cl.v.cnt_invisibility, false);
 			if (sc1 & SC1_CNT_GLYPH)
-				cl.v.cnt_glyph = MSG_ReadByte();
+				cl.v.cnt_glyph = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 9, (int)cl.v.cnt_glyph, false);
 			if (sc1 & SC1_CNT_HASTE)
-				cl.v.cnt_haste = MSG_ReadByte();
+				cl.v.cnt_haste = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 10, (int)cl.v.cnt_haste, false);
 			if (sc1 & SC1_CNT_BLAST)
-				cl.v.cnt_blast = MSG_ReadByte();
+				cl.v.cnt_blast = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 11, (int)cl.v.cnt_blast, false);
 			if (sc1 & SC1_CNT_POLYMORPH)
-				cl.v.cnt_polymorph = MSG_ReadByte();
+				cl.v.cnt_polymorph = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 12, (int)cl.v.cnt_polymorph, false);
 			if (sc1 & SC1_CNT_FLIGHT)
-				cl.v.cnt_flight = MSG_ReadByte();
+				cl.v.cnt_flight = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 13, (int)cl.v.cnt_flight, false);
 			if (sc1 & SC1_CNT_CUBEOFFORCE)
-				cl.v.cnt_cubeofforce = MSG_ReadByte();
+				cl.v.cnt_cubeofforce = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 14, (int)cl.v.cnt_cubeofforce, false);
 			if (sc1 & SC1_CNT_INVINCIBILITY)
-				cl.v.cnt_invincibility = MSG_ReadByte();
+				cl.v.cnt_invincibility = MSG_ReadByte(), INV_UpdateExItem(cl.ex_inventory, 15, (int)cl.v.cnt_invincibility, false);
 			if (sc1 & SC1_ARTIFACT_ACTIVE)
 				cl.v.artifact_active = MSG_ReadFloat();
 			if (sc1 & SC1_ARTIFACT_LOW)
@@ -1753,10 +1966,83 @@ void CL_ParseServerMessage (void)
 					cl.info_mask2 = MSG_ReadLong();
 			}
 
+			// extended inventory
+			// NOTE: Skip extended inventory during demo playback - demos were likely
+			// recorded before extended inventory was added to protocol 21
+			if (cl_protocol == PROTOCOL_UH2_114 && !cls.demoplayback)
+			{
+				ex_inventory_page_t *page = cl.ex_inventory;
+				qboolean bContinue = true;
+
+				// Read all test bytes the server sends, even if we don't have pages
+				// to store them. Must consume all bytes to stay synchronized.
+				while (bContinue)
+				{
+					sc3 = 0;
+					test = MSG_ReadByte();
+					if (test & 1)
+						sc3 |= ((int)MSG_ReadByte());
+					if (test & 2)
+						sc3 |= ((int)MSG_ReadByte()) << 8;
+					if (test & 4)
+						sc3 |= ((int)MSG_ReadByte()) << 16;
+					if (test & 8)
+						sc3 |= ((int)MSG_ReadByte()) << 24;
+					if (test & 16)
+						bContinue = true;
+					else
+						bContinue = false;
+
+					// Read inventory item bytes
+					if (sc3)
+					{
+						for (i = 0; i < MAX_INVENTORY_EX; i++)
+						{
+							if (sc3 & (1 << i))
+							{
+								int item_cnt = MSG_ReadByte();
+								if (item_cnt & 128)
+								{
+									int item_id = MSG_ReadByte();
+									if (page)
+									{
+										page->item_id[i] = item_id;
+										page->item_cnt[i] = item_cnt & 127;
+									}
+								}
+								else if (page)
+								{
+									page->item_cnt[i] = item_cnt;
+								}
+							}
+						}
+					}
+
+					if (page && bContinue)
+					{
+						if (page->next == NULL)
+						{
+							// Find first empty inventory page AFTER the current page
+							// to avoid creating a self-loop
+							int current_idx = page - cl.ex_inventory;
+							for (j = current_idx + 1; ((j < MAX_INVENTORY_EX_PAGES) && (cl.ex_inventory[j].id != 0)); j++);
+							if (j < MAX_INVENTORY_EX_PAGES)
+								page->next = &cl.ex_inventory[j];
+						}
+					}
+
+					if (page && page->id == 0)
+						page->id = ++cl.next_page_id;
+
+					if (page)
+						page = page->next;
+				}
+			}
+
 			if ((sc1 & SC1_STAT_BAR) || (sc2 & SC2_STAT_BAR))
 				Sbar_Changed();
 
-			if ((sc1 & SC1_INV) || (sc2 & SC2_INV))
+			if ((sc1 & SC1_INV) || (sc2 & SC2_INV) || (sc3))
 				SB_InvChanged();
 			break;
 
@@ -1764,6 +2050,10 @@ void CL_ParseServerMessage (void)
 		case svc_skybox:
 			MSG_ReadString();
 			Con_DPrintf ("Ignored server msg %d (%s)\n", cmd, svc_strings[cmd]);
+			break;
+
+		case svc_fog:
+			Fog_ParseServerMessage();
 			break;
 		}
 	}

@@ -26,7 +26,7 @@
    COMMON DEFINITIONS
    ================================================================== */
 
-#define MAX_GLTEXTURES		2048
+#define MAX_GLTEXTURES		8192
 #define MAX_EXTRA_TEXTURES	156	/* 255-100+1 */
 #define	MAX_CACHED_PICS		256
 #define	MAX_LIGHTMAPS		128
@@ -56,7 +56,7 @@
 #define ALIAS_BASE_SIZE_RATIO		(1.0 / 11.0)
 					// normalizing factor so player model works
 					// out to about 1 pixel per triangle
-#define MAX_SKIN_HEIGHT		480
+#define MAX_SKIN_HEIGHT		2048
 
 #define BACKFACE_EPSILON	0.01
 
@@ -183,10 +183,6 @@ extern	glmode_t	gl_texmodes[NUM_GL_FILTERS];
 /* hardware-caps related globals */
 extern	GLint		gl_max_size;
 extern	GLfloat		gl_max_anisotropy;
-extern	qboolean	gl_tex_NPOT;
-extern	qboolean	is_3dfx;
-extern	qboolean	is8bit;
-extern	qboolean	gl_mtexable;
 extern	qboolean	have_stencil;
 
 /* view origin */
@@ -245,7 +241,6 @@ extern	cvar_t	gl_playermip;
 extern	cvar_t	gl_clear;
 extern	cvar_t	gl_cull;
 extern	cvar_t	gl_poly;
-extern	cvar_t	gl_ztrick;
 extern	cvar_t	gl_zfix;
 extern	cvar_t	gl_purge_maptex;
 extern	cvar_t	gl_smoothmodels;
@@ -306,6 +301,7 @@ GLuint GL_LoadTexture (const char *identifier, byte *data,
 /* duplicated EF_ values from gl_model.h: */
 #define	TEX_TRANSPARENT		(1 << 12)	/* Transparent sprite				*/
 #define	TEX_HOLEY		(1 << 14)	/* Solid model with color 0			*/
+#define	TEX_FENCE		(1 << 16)	/* Fence texture (binary transparency)		*/
 #define	TEX_SPECIAL_TRANS	(1 << 15)	/* Translucency through the particle table	*/
 
 GLuint GL_LoadPicTexture (qpic_t *pic);
@@ -328,6 +324,8 @@ void EmitWaterPolys (msurface_t *fa);
 void EmitBothSkyLayers (msurface_t *fa);
 void R_DrawSkyChain (msurface_t *s);
 void R_DrawWaterSurfaces (void);
+
+int R_GetPimpFlags (entity_t *e, float **gsettings_out);
 
 void R_RenderDlights (void);
 void R_MarkLights (dlight_t *light, int bit, mnode_t *node);

@@ -91,6 +91,7 @@ typedef struct texture_s
 #define SURF_DRAWBLACK		0x100
 #define SURF_UNDERWATER		0x200
 #define SURF_DONTWARP		0x400
+#define SURF_DRAWFENCE		0x800
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
 typedef struct
@@ -414,6 +415,34 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
 #define	EF_MIP_MAP_FAR		(1 << 24)	/* Set per frame, this model will use the far mip map	*/
 
+#define	EF_SPIN			(1 << 4)	/* Inky: Rotate without floating upside down */
+#define	EF_FLOAT			(1 << 5)	/* Inky: Float upside down without rotating */
+#define	EF_GLOW				(1 << 6)	/* Inky: Feature a custom glowing orb around the model, override the various XF_*GLOW presets */
+#define	EF_ILLUMINATE		(1 << 7)	/* Inky: Cast light dynamically around */
+
+// slots for qmodel_t->glow_settings
+#define	GLOW_SETTINGS_COUNT 10
+#define	COLOR_R 0
+#define	COLOR_G 1
+#define	COLOR_B 2
+#define	COLOR_A 3
+#define	ORB_OFFSET_X 4
+#define	ORB_OFFSET_Y 5
+#define	ORB_OFFSET_Z 6
+#define	ORB_RADIUS 7
+#define	LIGHT_STYLE 8
+#define	LIGHT_RADIUS 9
+
+// Per-entity PimpModel overrides
+typedef struct {
+	qboolean	active;
+	int		ex_flags;
+	float		glow_settings[GLOW_SETTINGS_COUNT];
+} pimp_override_t;
+
+void R_ClearPimpOverrides (void);
+pimp_override_t *R_GetPimpOverride (int entnum);
+
 // XF_ Extra model effects set by engine: qmodel_t->ex_flags
 // effects are model name dependent
 #define XF_TORCH_GLOW		(1 << 0 )	/* glowing torches				*/
@@ -491,9 +520,9 @@ typedef struct qmodel_s
 //
 // additional model data
 //
+	float		glow_settings[GLOW_SETTINGS_COUNT];
+	float		glow_color[4];		// RGBA color for glow effect
 	cache_user_t	cache;		// only access through Mod_Extradata
-
-	float		glow_color[4];
 } qmodel_t;
 
 // values for qmodel_t->needload

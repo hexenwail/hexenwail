@@ -70,9 +70,6 @@ typedef struct
 	int		maxwarpheight;
 	pixel_t		*direct;	// direct drawing to framebuffer,
 					// if not NULL
-#if defined(PLATFORM_AMIGAOS3) && !defined(GLQUAKE)
-	qboolean	noadapt;	// no fov_adapt for Amiga native chipset modes
-#endif
 } viddef_t;
 
 extern	byte		globalcolormap[VID_GRADES*256];
@@ -134,6 +131,7 @@ extern void (*vid_menukeyfn)(int key);
 #if defined(SDLQUAKE)
 qboolean VID_HasMouseOrInputFocus (void);
 qboolean VID_IsMinimized (void);
+struct SDL_Window *VID_GetWindow (void);
 #endif
 #if !defined(PLATFORM_WINDOWS)
 #define	msg_suppress_1		false

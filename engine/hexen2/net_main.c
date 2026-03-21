@@ -30,14 +30,11 @@ qsocket_t	*net_activeSockets = NULL;
 qsocket_t	*net_freeSockets = NULL;
 int		net_numsockets = 0;
 
-qboolean	serialAvailable = false;
-qboolean	ipxAvailable = false;
 qboolean	tcpipAvailable = false;
 
 int		net_hostport;
 int		DEFAULTnet_hostport = 26900;
 
-char		my_ipx_address[NET_NAMELEN];
 char		my_tcpip_address[NET_NAMELEN];
 
 #if defined(SERVERONLY)
@@ -70,24 +67,6 @@ static	cvar_t	net_messagetimeout = {"net_messagetimeout", "300", CVAR_NONE};
 cvar_t	hostname = {"hostname", "UNNAMED", CVAR_NONE};
 
 cvar_t	net_allowmultiple = {"net_allowmultiple", "0", CVAR_ARCHIVE};
-
-#if defined(NET_USE_SERIAL)
-static qboolean	configRestored = false;
-
-void (*GetComPortConfig) (int portNumber, int *port, int *irq, int *baud, qboolean *useModem);
-void (*SetComPortConfig) (int portNumber, int port, int irq, int baud, qboolean useModem);
-void (*GetModemConfig) (int portNumber, char *dialType, char *clear, char *init, char *hangup);
-void (*SetModemConfig) (int portNumber, const char *dialType, const char *clear, const char *init, const char *hangup);
-
-cvar_t	config_com_port = {"_config_com_port", "0x3f8", CVAR_ARCHIVE};
-cvar_t	config_com_irq = {"_config_com_irq", "4", CVAR_ARCHIVE};
-cvar_t	config_com_baud = {"_config_com_baud", "57600", CVAR_ARCHIVE};
-cvar_t	config_com_modem = {"_config_com_modem", "1", CVAR_ARCHIVE};
-cvar_t	config_modem_dialtype = {"_config_modem_dialtype", "T", CVAR_ARCHIVE};
-cvar_t	config_modem_clear = {"_config_modem_clear", "ATZ", CVAR_ARCHIVE};
-cvar_t	config_modem_init = {"_config_modem_init", "", CVAR_ARCHIVE};
-cvar_t	config_modem_hangup = {"_config_modem_hangup", "AT H", CVAR_ARCHIVE};
-#endif	/* NET_USE_SERIAL */
 
 // these two macros are to make the code more readable
 #define sfunc	net_drivers[sock->driver]
@@ -795,8 +774,6 @@ void NET_Init (void)
 	i = COM_CheckParm ("-port");
 	if (!i)
 		i = COM_CheckParm ("-udpport");
-	if (!i)
-		i = COM_CheckParm ("-ipxport");
 
 	if (i)
 	{
@@ -832,16 +809,6 @@ void NET_Init (void)
 	Cvar_RegisterVariable (&net_messagetimeout);
 	Cvar_RegisterVariable (&hostname);
 	Cvar_RegisterVariable (&net_allowmultiple);
-#if defined(NET_USE_SERIAL)
-	Cvar_RegisterVariable (&config_com_port);
-	Cvar_RegisterVariable (&config_com_irq);
-	Cvar_RegisterVariable (&config_com_baud);
-	Cvar_RegisterVariable (&config_com_modem);
-	Cvar_RegisterVariable (&config_modem_dialtype);
-	Cvar_RegisterVariable (&config_modem_clear);
-	Cvar_RegisterVariable (&config_modem_init);
-	Cvar_RegisterVariable (&config_modem_hangup);
-#endif	/* NET_USE_SERIAL */
 
 #if !defined(SERVERONLY)
 	Cmd_AddCommand ("slist", NET_Slist_f);
@@ -872,10 +839,6 @@ void NET_Init (void)
 		Sys_Error("Network not available!");
 	}
 
-	if (*my_ipx_address)
-	{
-		Con_DPrintf("IPX address %s\n", my_ipx_address);
-	}
 	if (*my_tcpip_address)
 	{
 		Con_DPrintf("TCP/IP address %s\n", my_tcpip_address);
@@ -916,23 +879,6 @@ static PollProcedure *pollProcedureList = NULL;
 void NET_Poll(void)
 {
 	PollProcedure *pp;
-
-#if defined(NET_USE_SERIAL)
-	if (!configRestored)
-	{
-		if (serialAvailable)
-		{
-			qboolean	useModem;
-			if (config_com_modem.value == 1.0)
-				useModem = true;
-			else
-				useModem = false;
-			SetComPortConfig (0, config_com_port.integer, config_com_irq.integer, config_com_baud.integer, useModem);
-			SetModemConfig (0, config_modem_dialtype.string, config_modem_clear.string, config_modem_init.string, config_modem_hangup.string);
-		}
-		configRestored = true;
-	}
-#endif	/* NET_USE_SERIAL */
 
 	SetNetTime();
 

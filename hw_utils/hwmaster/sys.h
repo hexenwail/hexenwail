@@ -38,8 +38,7 @@ char *Sys_ConsoleInput (void);
 
 /* disable user directories on platforms where they
  * aren't necessary or not possible. */
-#if defined(PLATFORM_DOS) || defined(PLATFORM_AMIGA) || \
-    defined(PLATFORM_WINDOWS) || defined(PLATFORM_OS2)
+#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_OS2)
 #undef	DO_USERDIRS
 #define	DO_USERDIRS	0
 #endif	/* DO_USERDIRS  */
