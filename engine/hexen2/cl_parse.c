@@ -1669,8 +1669,8 @@ void CL_ParseServerMessage (void)
 				CDAudio_Stop ();
 			else if ((cls.demoplayback || cls.demorecording) &&
 						cls.forcetrack != -1)
-				CDAudio_Play ((byte)cls.forcetrack, true);
-			else	CDAudio_Play ((byte)cl.cdtrack, true);
+				BGM_PlayCDtrack ((byte)cls.forcetrack, true);
+			else	BGM_PlayCDtrack ((byte)cl.cdtrack, true);
 			break;
 
 		case svc_midi_name:

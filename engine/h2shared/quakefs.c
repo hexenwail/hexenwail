@@ -1467,6 +1467,10 @@ void FS_Init (void)
 		if (!q_strcasecmp(com_argv[i+1], "portals"))
 			check_portals = true;
 	}
+	/* -mod implies -game + portals */
+	i = COM_CheckParm ("-mod");
+	if (i && i < com_argc-1)
+		check_portals = true;
 	if (check_portals && !(gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)))
 		Sys_Error ("Portal of Praevus requires registered version of Hexen II");
 #endif
@@ -1529,9 +1533,11 @@ void FS_Init (void)
 	fs_base_searchpaths = fs_searchpaths;
 
 	i = COM_CheckParm ("-game");
+	if (i == 0)
+		i = COM_CheckParm ("-mod");
 	if (i != 0)
 	{
-		/* only registered versions can do -game */
+		/* only registered versions can do -game/-mod */
 		if (! (gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)))
 			Sys_Error ("You must have the full version of Hexen II to play modified games");
 		/* add basedir/gamedir as an override game */
