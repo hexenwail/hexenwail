@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Hexen II: Hexenwail
+Comment=Modernized Hexen II engine with SDL3 and GL 4.3 shaders
+Exec=glhexen2
+Icon=com.github.bobberb.hexenwail
+StartupNotify=true
+PrefersNonDefaultGPU=true
+Terminal=false
+Type=Application
+Categories=Game;ActionGame;
+Keywords=hexen;hexen2;fps;retro;quake;

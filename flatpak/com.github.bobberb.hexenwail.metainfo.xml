@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.bobberb.hexenwail</id>
+  <name>Hexen II: Hexenwail</name>
+  <summary>Modernized Hexen II engine</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+
+  <description>
+    <p>
+      Hexenwail is a modernized Hexen II engine forked from Hammer of Thyrion (uHexen2).
+      It features an SDL3 platform layer, GLSL 4.30 shader pipeline, gamepad support,
+      render scale with retro dithering effects, and runtime mod switching.
+    </p>
+    <p>
+      Requires original Hexen II game data files (data1/pak0.pak, data1/pak1.pak).
+      Place game data in ~/.hexen2/data1/ or alongside the executable.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.github.bobberb.hexenwail.desktop</launchable>
+
+  <url type="homepage">https://github.com/bobberb/hexenwail</url>
+  <url type="bugtracker">https://github.com/bobberb/hexenwail/issues</url>
+  <url type="vcs-browser">https://github.com/bobberb/hexenwail</url>
+
+  <developer id="com.github.bobberb">
+    <name>bobberb</name>
+  </developer>
+
+  <provides>
+    <binary>glhexen2</binary>
+  </provides>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-fantasy">intense</content_attribute>
+    <content_attribute id="violence-bloodshed">moderate</content_attribute>
+  </content_rating>
+
+  <releases>
+    <release version="0.1.0-alpha" date="2026-03-21">
+      <description>
+        <p>First alpha release. SDL3 + GL 4.3 shader pipeline.</p>
+      </description>
+    </release>
+  </releases>
+
+  <categories>
+    <category>Game</category>
+    <category>ActionGame</category>
+  </categories>
+</component>
