@@ -1,7 +1,7 @@
 # Hexen II: Hexenwail
 
 ![Screenshot](docs/screenshot1.png)
-*New worlds await!* (Storm over Thyrion)
+*New worlds await!* ([Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey))
 
 A modernized Hexen II engine for Windows and Linux, forked from [uHexen2 / Hammer of Thyrion](http://uhexen2.sourceforge.net/).
 
