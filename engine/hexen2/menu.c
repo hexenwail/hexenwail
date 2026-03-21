@@ -1920,7 +1920,7 @@ static void M_Options_Key (int k)
 			Con_ToggleConsole_f ();
 			break;
 		case OPT_DEFAULTS:
-			Cbuf_AddText ("exec default.cfg\n");
+			Cbuf_AddText ("unbindall\nexec default.cfg\n");
 			break;
 		}
 		return;
@@ -2006,6 +2006,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 2.0f);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_flashblend", 1);
 		}
 		else if (preset == 2)	/* Retro */
 		{
@@ -2014,6 +2015,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 1.0f);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_flashblend", 1);
 		}
 		else if (preset == 3)	/* Modern */
 		{
@@ -2022,6 +2024,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 1.0f);
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
+			Cvar_SetValue ("gl_flashblend", 0);
 		}
 		break;
 	}
@@ -2129,9 +2132,9 @@ static void M_Display_Draw (void)
 	M_Print (76, 92 + 8*DISP_PRESET,	"Preset        :");
 	{
 		/* detect current preset */
-		qboolean is_crunchy = (r_scale.value <= 0.25f && (int)r_softemu.value >= 2 && gl_filter_idx == 0);
-		qboolean is_retro = (r_scale.value > 0.25f && r_scale.value <= 0.5f && (int)r_softemu.value > 0 && gl_filter_idx <= 2);
-		qboolean is_modern = (r_scale.value >= 1.0f && (int)r_softemu.value == 0 && gl_filter_idx > 2);
+		qboolean is_crunchy = (r_scale.value <= 0.25f && (int)r_softemu.value >= 2 && gl_filter_idx == 0 && gl_flashblend.integer);
+		qboolean is_retro = (r_scale.value > 0.25f && r_scale.value <= 0.5f && (int)r_softemu.value > 0 && gl_filter_idx <= 2 && gl_flashblend.integer);
+		qboolean is_modern = (r_scale.value >= 1.0f && (int)r_softemu.value == 0 && gl_filter_idx > 2 && !gl_flashblend.integer);
 		if (is_crunchy)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
 		else if (is_retro)
