@@ -302,15 +302,20 @@ static const char ssky_frag[] =
 	"uniform sampler2D u_texture1;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_fog_density;\n"
+	"uniform float u_alpha_threshold;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
 	"    vec4 solid = texture(u_texture0, v_texcoord);\n"
-	"    vec4 alpha = texture(u_texture1, v_lmcoord);\n"
-	"    vec3 color = mix(solid.rgb, alpha.rgb, alpha.a);\n"
-	"    fragColor = vec4(color, 1.0) * v_color;\n"
+	"    if (u_alpha_threshold > 0.5) {\n"
+	"        fragColor = solid * v_color;\n"
+	"    } else {\n"
+	"        vec4 alpha = texture(u_texture1, v_lmcoord);\n"
+	"        vec3 color = mix(solid.rgb, alpha.rgb, alpha.a);\n"
+	"        fragColor = vec4(color, 1.0) * v_color;\n"
+	"    }\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */

@@ -943,6 +943,8 @@ void Sky_DrawSkyBox (void)
 	// Disable face culling so faces are visible from inside
 	glDisable_fp(GL_CULL_FACE);
 
+	GL_SetAlphaThreshold (1.0f);	/* single-layer skybox mode */
+
 	for (i=0 ; i<6 ; i++)
 	{
 		if (!skybox_texnums[skytexorder[i]])
