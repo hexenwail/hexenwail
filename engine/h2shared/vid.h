@@ -128,6 +128,32 @@ extern void (*vid_menudrawfn)(void);
 extern void (*vid_menukeyfn)(int key);
 // video menu function pointers
 
+#if defined(GLQUAKE)
+/* Video menu helpers for combined Display menu */
+void VID_MenuInit (void);		/* call on menu enter */
+qboolean VID_MenuNeedApply (void);	/* true if settings changed */
+void VID_MenuApply (void);		/* apply pending changes */
+void VID_MenuReset (void);		/* revert pending changes */
+
+/* video menu state accessors */
+const char *VID_MenuGetResolution (qboolean *is_current);
+const char *VID_MenuGetAspect (void);
+qboolean VID_MenuGetFullscreen (qboolean *want_toggle);
+int VID_MenuGetMultisample (qboolean *is_current, qboolean *available);
+int VID_MenuGetVSync (void);
+qboolean VID_MenuGetTexFilter (void);	/* true = smooth */
+int VID_MenuGetAnisotropy (qboolean *available);
+
+/* video menu adjusters (dir = -1 or +1) */
+void VID_MenuAdjustFullscreen (void);
+void VID_MenuAdjustAspect (int dir);
+void VID_MenuAdjustResolution (int dir);
+void VID_MenuAdjustMultisample (int dir);
+void VID_MenuAdjustVSync (int dir);
+void VID_MenuAdjustTexFilter (void);
+void VID_MenuAdjustAnisotropy (int dir);
+#endif
+
 #if defined(SDLQUAKE)
 qboolean VID_HasMouseOrInputFocus (void);
 qboolean VID_IsMinimized (void);

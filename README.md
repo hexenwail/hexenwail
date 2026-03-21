@@ -30,7 +30,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Full GLSL 4.30 shader pipeline — zero immediate mode, zero fixed-function
 - [x] Render scale for crunchy pixel upscaling (25%-100%)
 - [x] Retro mode: Bayer dithering + 256-color palette quantization (Ironwail-style)
-- [x] Retro/Modern display presets — one toggle for full aesthetic switch
+- [x] Display presets: Crunchy (25% scale, point-sampled), Retro, Modern, Custom
 - [x] Classic/Smooth texture filtering toggle
 - [x] MSAA anti-aliasing (via multisampled FBO)
 - [x] Borderless windowed and fullscreen modes
@@ -45,7 +45,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] FOV slider (60-130)
 - [x] FPS limiter (24/30/60/72/90/120/144/Unlimited)
 - [x] Show FPS toggle
-- [x] HUD layout modes (Full/Mini/Off)
+- [x] HUD layout modes (Full/Mini/Off/Clean — Clean also hides weapon)
 - [ ] Bloom
 - [ ] Lightmapped liquid surfaces
 - [ ] Underwater warp effect
@@ -62,7 +62,11 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Higher audio quality (44.1 kHz default)
 - [x] Mods menu — browse and switch mods without restarting, with active mod indicator
 - [x] Portal of Praevus and base game selectable from Mods menu
+- [x] Portals data toggle — include mission pack assets when launching custom mods
+- [x] Full engine reset on mod switch (filesystem, textures, lightmaps, command buffer)
+- [x] Config saved per-mod before switching — no bind bleed between mods
 - [x] `game <modname>` console command for runtime mod switching
+- [x] Intro cinematic link in main menu (opens in browser)
 
 ### Music and sound
 - [x] OGG, MP3, FLAC, WAV music playback (built-in decoders, zero dependencies)
@@ -106,7 +110,7 @@ nix build .#release    # All platforms
 
 ## Game data
 
-You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pak`). For Portal of Praevus, add `portals/pak3.pak`.
+You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pak`). For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
 
 ## License
 
