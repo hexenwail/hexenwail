@@ -93,6 +93,10 @@ long FS_OpenFile (const char *filename, FILE **file, unsigned int *path_id);
 	 * returns fs_filesize on success or (-1) on failure.  If path_id is not NULL,
 	 * the id number of the opened file's gamedir is stored in path_id.  */
 
+long FS_OpenFile_Silent (const char *filename, FILE **file, unsigned int *path_id);
+	/* Same as FS_OpenFile but does not print error messages for missing files.
+	 * Use for optional file checks (e.g., external textures).  */
+
 qboolean FS_FileExists (const char *filename, unsigned int *path_id);
 	/* Returns whether the file is found in the hexen2 filesystem.  if path_id is
 	 * not NULL, the id number of the found file's gamedir is stored in path_id. */

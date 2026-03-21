@@ -43,14 +43,20 @@ void IN_DeactivateMouse (void);
 void IN_ShowMouse (void);
 void IN_HideMouse (void);
 
-#if defined(PLATFORM_WINDOWS)
-#undef IN_Accumulate
-void IN_Accumulate (void);	/* accumulate winmouse movements during frame updates */
-void IN_UpdateClipCursor (void);	/* clip the mouse cursor to the window rectangle */
-void IN_MouseEvent (int mstate);		/* called from the window procedure */
-void IN_SetQuakeMouseState (void);		/* used by Scitech MGL video driver */
-void IN_RestoreOriginalMouseState (void);	/* used by Scitech MGL video driver */
-#endif	/* PLATFORM_WINDOWS */
+/* gamepad */
+qboolean IN_HasGamepad (void);
+void IN_GPRumble (float low_freq, float high_freq, unsigned int duration_ms);
+
+extern cvar_t	joy_deadzone_look;
+extern cvar_t	joy_deadzone_move;
+extern cvar_t	joy_deadzone_trigger;
+extern cvar_t	joy_sensitivity_yaw;
+extern cvar_t	joy_sensitivity_pitch;
+extern cvar_t	joy_exponent;
+extern cvar_t	joy_exponent_move;
+extern cvar_t	joy_invert;
+extern cvar_t	joy_swapmovelook;
+extern cvar_t	joy_rumble;
 
 #endif	/* __HX2_INPUT_H */
 

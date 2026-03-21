@@ -23,15 +23,6 @@
 #elif defined(__amigaos4__)
 #include <GL/gl.h>
 
-#elif defined(PLATFORM_AMIGAOS3)
-#if defined(REFGL_MINIGL)  /* Hyperion's MiniGL 1.2 */
-#include <mgl/gl.h>
-#elif defined(REFGL_AMESA) /* StormMesa */
-#include <GL/gl.h>
-#else
-#error Which Amiga GL API to use not specified
-#endif
-
 #else	/* other unix */
 #include <GL/gl.h>
 #endif
@@ -43,12 +34,13 @@
 /* include our function pointers */
 #include "gl_func.h"
 
-#ifndef	GLX_3DFX_WINDOW_MODE_MESA
-#define	GLX_3DFX_WINDOW_MODE_MESA		0x1
-#endif
-
-#ifndef	GLX_3DFX_FULLSCREEN_MODE_MESA
-#define	GLX_3DFX_FULLSCREEN_MODE_MESA		0x2
+/* VBO/VAO constants (GL 1.5+ / GL 2.0+) */
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER				0x8892
+#define GL_ELEMENT_ARRAY_BUFFER			0x8893
+#define GL_STREAM_DRAW				0x88E0
+#define GL_STATIC_DRAW				0x88E4
+#define GL_DYNAMIC_DRAW				0x88E8
 #endif
 
 #ifndef	GL_TEXTURE0_ARB
@@ -68,17 +60,66 @@
 #define	GL_MULTISAMPLE_ARB			0x809D
 #endif
 
-#ifndef	GL_SHARED_TEXTURE_PALETTE_EXT
-#define	GL_SHARED_TEXTURE_PALETTE_EXT		0x81FB
-#endif
-
-#ifndef	GL_COLOR_INDEX8_EXT
-#define	GL_COLOR_INDEX8_EXT			0x80E5
-#endif
-
 #ifndef	GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
 #define	GL_TEXTURE_MAX_ANISOTROPY_EXT		0x84FE
 #define	GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT	0x84FF
+#endif
+
+/* FBO (framebuffer object) enums */
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER				0x8D40
+#endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER			0x8CA8
+#define GL_DRAW_FRAMEBUFFER			0x8CA9
+#endif
+#ifndef GL_RGBA8
+#define GL_RGBA8				0x8058
+#endif
+#ifndef GL_RENDERBUFFER
+#define GL_RENDERBUFFER				0x8D41
+#endif
+#ifndef GL_COLOR_ATTACHMENT0
+#define GL_COLOR_ATTACHMENT0			0x8CE0
+#endif
+#ifndef GL_DEPTH_ATTACHMENT
+#define GL_DEPTH_ATTACHMENT			0x8CE1
+#endif
+#ifndef GL_FRAMEBUFFER_COMPLETE
+#define GL_FRAMEBUFFER_COMPLETE			0x8CD5
+#endif
+#ifndef GL_DEPTH_COMPONENT24
+#define GL_DEPTH_COMPONENT24			0x81A6
+#endif
+#ifndef GL_VERTEX_SHADER
+#define GL_VERTEX_SHADER			0x8B31
+#endif
+#ifndef GL_FRAGMENT_SHADER
+#define GL_FRAGMENT_SHADER			0x8B30
+#endif
+#ifndef GL_COMPILE_STATUS
+#define GL_COMPILE_STATUS			0x8B81
+#endif
+#ifndef GL_LINK_STATUS
+#define GL_LINK_STATUS				0x8B82
+#endif
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE			0x812F
+#endif
+#ifndef GL_TEXTURE_3D
+#define GL_TEXTURE_3D				0x806F
+#endif
+#ifndef GL_TEXTURE_WRAP_R
+#define GL_TEXTURE_WRAP_R			0x8072
+#endif
+#ifndef GL_R8
+#define GL_R8					0x8229
+#endif
+#ifndef GL_RED
+#define GL_RED					0x1903
+#endif
+#ifndef GL_INFO_LOG_LENGTH
+#define GL_INFO_LOG_LENGTH			0x8B84
 #endif
 
 #endif	/* __GLHEADER_H */

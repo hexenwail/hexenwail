@@ -273,9 +273,14 @@ void Draw_Init (void)
 		Z_Free (draw_chars);
 	draw_chars = FS_LoadZoneFile ("gfx/menu/conchars.lmp", Z_SECZONE, NULL);
 	Draw_PicCheckError (draw_chars, "gfx/menu/conchars.lmp");
-	if (fs_filesize != 256*128) {
-		Sys_Error ("gfx/menu/conchars.lmp: bad size.");
+
+	// SoT/karma2 mods have larger charset but it's raw data, NOT a qpic with header
+	// Accept both standard 32768 and larger sizes as raw character data
+	if (fs_filesize < 256*128) {
+		Sys_Error ("gfx/menu/conchars.lmp: bad size (%d bytes, expected at least %d).",
+			fs_filesize, 256*128);
 	}
+	Con_DPrintf("conchars.lmp: loaded %d bytes (raw charset data)\n", fs_filesize);
 
 	draw_smallchars = (byte *) W_GetLumpName("tinyfont");
 

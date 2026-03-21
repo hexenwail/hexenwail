@@ -341,7 +341,7 @@ loc0:
 		*sv_globals.self = EDICT_TO_PROG(touch);
 		*sv_globals.other = EDICT_TO_PROG(ent);
 		*sv_globals.time = sv.time;
-		PR_ExecuteProgram (touch->v.touch);
+		PR_ExecuteProgram (touch->v.touch, "touch");
 
 		*sv_globals.self = old_self;
 		*sv_globals.other = old_other;

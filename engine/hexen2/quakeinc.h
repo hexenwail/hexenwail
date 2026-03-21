@@ -84,9 +84,6 @@
 #include "glheader.h"
 #include "gl_model.h"
 #include "glquake.h"
-#else	/* sw client */
-#include "model.h"
-#include "d_iface.h"
 #endif
 #include "world.h"
 

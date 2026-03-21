@@ -87,7 +87,7 @@ extern	qboolean	is_progs_v6;
 
 void PR_Init (void);
 
-void PR_ExecuteProgram (func_t fnum);
+void PR_ExecuteProgram (func_t fnum, const char *funcname);
 void PR_LoadProgs (void);
 
 const char *PR_GetString (int num);
@@ -102,6 +102,7 @@ void ED_Free (edict_t *ed);
 void ED_ClearEdict (edict_t *e);
 
 void ED_Print (edict_t *ed);
+const char *ED_GetProperty (edict_t *ed, char *propname);
 void ED_Write (FILE *f, edict_t *ed);
 const char *ED_ParseEdict (const char *data, edict_t *ent);
 

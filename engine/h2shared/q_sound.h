@@ -124,8 +124,8 @@ void S_RawSamples(int samples, int rate, int width, int channels, byte * data, f
  * ====================================================================
  */
 
-#define	MAX_CHANNELS		128
-#define	MAX_DYNAMIC_CHANNELS	8
+#define	MAX_CHANNELS		2048
+#define	MAX_DYNAMIC_CHANNELS	128
 
 extern	channel_t	snd_channels[MAX_CHANNELS];
 /* 0 to MAX_DYNAMIC_CHANNELS-1	= normal entity sounds

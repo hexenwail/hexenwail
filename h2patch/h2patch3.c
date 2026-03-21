@@ -33,11 +33,6 @@
 #include <unistd.h>
 #include <dir.h>
 #include <fcntl.h>
-#elif defined(PLATFORM_AMIGA)
-#include <proto/exec.h>
-#include <proto/dos.h>
-#include <proto/timer.h>
-#include <time.h>
 #elif defined(PLATFORM_OS2)
 #define INCL_DOS
 #define INCL_DOSERRORS
@@ -371,139 +366,6 @@ static long get_millisecs (void)
 	return (long)(tb.time * 1000 + tb.millitm);
 }
 
-#elif defined(PLATFORM_AMIGA)
-static struct timerequest *timerio;
-static struct MsgPort   *timerport;
-#if defined(__MORPHOS__) || defined(__VBCC__)
-struct Library *TimerBase = NULL;
-#else
-struct Device  *TimerBase = NULL;
-#endif
-static void Sys_TimerCleanup (void)
-{
-	if (TimerBase)
-	{
-		WaitIO((struct IORequest *) timerio);
-		CloseDevice((struct IORequest *) timerio);
-		DeleteIORequest((struct IORequest *) timerio);
-		DeleteMsgPort(timerport);
-		TimerBase = NULL;
-	}
-}
-
-static void Sys_TimerInit (void)
-{
-	if ((timerport = CreateMsgPort()) != NULL)
-	{
-		if ((timerio = (struct timerequest *)CreateIORequest(timerport, sizeof(struct timerequest))) != NULL)
-		{
-			if (OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ,
-					(struct IORequest *) timerio, 0) == 0)
-			{
-#if defined(__MORPHOS__) || defined(__VBCC__)
-				TimerBase = (struct Library *)timerio->tr_node.io_Device;
-#else
-				TimerBase = timerio->tr_node.io_Device;
-#endif
-			}
-			else
-			{
-				DeleteIORequest((struct IORequest *)timerio);
-				DeleteMsgPort(timerport);
-			}
-		}
-		else
-		{
-			DeleteMsgPort(timerport);
-		}
-	}
-
-	if (!TimerBase)
-	{
-		fprintf(stderr, "Can't open timer.device\n");
-		exit(-1);
-	}
-
-	atexit (Sys_TimerCleanup);
-	/* 1us wait, for timer cleanup success */
-	timerio->tr_node.io_Command = TR_ADDREQUEST;
-	timerio->tr_time.tv_secs = 0;
-	timerio->tr_time.tv_micro = 1;
-	SendIO((struct IORequest *) timerio);
-	WaitIO((struct IORequest *) timerio);
-}
-
-static int Sys_unlink (const char *path)
-{
-	if (DeleteFile((const STRPTR) path) != 0)
-		return 0;
-	return -1;
-}
-
-static int Sys_rename (const char *oldp, const char *newp)
-{
-	if (Rename((const STRPTR) oldp, (const STRPTR) newp) != 0)
-		return 0;
-	return -1;
-}
-
-static long Sys_filesize (const char *path)
-{
-	long size = -1;
-	BPTR lock = Lock((const STRPTR) path, ACCESS_READ);
-	if (lock)
-	{
-		struct FileInfoBlock *fib = (struct FileInfoBlock*)
-					AllocDosObject(DOS_FIB, NULL);
-		if (fib != NULL)
-		{
-			if (Examine(lock, fib)) {
-				size = fib->fib_Size;
-			}
-			FreeDosObject(DOS_FIB, fib);
-		}
-		UnLock(lock);
-	}
-	return size;
-}
-
-static int Sys_FileType (const char *path)
-{
-	int type = FS_ENT_NONE;
-	BPTR lock = Lock((const STRPTR) path, ACCESS_READ);
-	if (lock)
-	{
-		struct FileInfoBlock *fib = (struct FileInfoBlock*)
-					AllocDosObject(DOS_FIB, NULL);
-		if (fib != NULL)
-		{
-			if (Examine(lock, fib)) {
-				if (fib->fib_DirEntryType >= 0)
-					type = FS_ENT_DIRECTORY;
-				else	type = FS_ENT_FILE;
-			}
-			FreeDosObject(DOS_FIB, fib);
-		}
-		UnLock(lock);
-	}
-	return type;
-}
-
-static int check_access (const char *name)
-{
-	if (Sys_FileType(name) != FS_ENT_FILE)
-		return ACCESS_NOFILE;
-
-	return ACCESS_FILEOK;
-}
-
-static long get_millisecs (void)
-{
-	struct timeval t;
-	GetSysTime(&t);
-	return (t.tv_secs * 1000 + t.tv_micro / 1000);
-}
-
 #else /* POSIX */
 
 static int Sys_unlink (const char *path)
@@ -687,10 +549,6 @@ int main (int argc, char **argv)
 			return 1;
 		}
 	}
-
-#if defined(PLATFORM_AMIGA)
-	Sys_TimerInit ();
-#endif
 
 	memset (&h2patch_progress, 0, sizeof(xd3_progress_t));
 	num_patched = 0;

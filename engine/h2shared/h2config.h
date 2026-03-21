@@ -116,7 +116,7 @@
    undef to a define :  in that case, player must use the -noportals
    command line argument to disable mission pack support.
    ================================================================== */
-#define	H2MP 1
+#undef	H2MP
 /* When building HexenWorld or demo-specific, H2MP mustn't be defined */
 #if defined(H2W) || defined(DEMOBUILD)
 #undef	H2MP
@@ -173,31 +173,12 @@
    ========================  MEMORY SETUP:  ===========================
    ================================================================== */
 
-/* ====================================================================
-   The amount of memory needed by Watt-32 (WatTCP) for DOS:
-   - Hexen II server opens a socket for each client, plus it needs its
-     accept socket and broadcast socket, so (MAX_PLAYERS + 3) * 11K is
-     normally the maximum needed memory.
-   - HexenWorld opens one socket, but it sends two large data, i.e. the
-     soundlist and the modellist, in a single chunk, therefore WatTCP
-     needs to allocate some additional memory (~ 2*64K?) to reassemble
-     the fragmented data.
-   Affects:	sys_dos.c.
-   ================================================================== */
-
-#define	WATT32_NEEDMEM	0x30000	/* 192 K */
 
 /* ====================================================================
-   If CODECS_USE_ZONE is defined (see the Makefile), then mp3 (libmad)
-   and ogg/vorbis codecs will allocate on the zone instead of system
-   memory.  Remember that this requires recompiling the decoder library
-   with proper memory allocator changes to it.  DOS builds are example
-   for this case.  The memory requirements for individual decoders are
-   defined below.
+   If CODECS_USE_ZONE is defined, then audio codecs will allocate on
+   the zone instead of system memory.
    Affects:	zone.c.
    ================================================================== */
-
-#define	LIBMAD_NEEDMEM	0x10000	/* 64K is fairly enough for libmad */
 #if defined(VORBIS_USE_TREMOR)
 #define	VORBIS_NEEDMEM	0x10000	/* 64K is fairly enough for vorbis */
 		/* with libvorbisidec (tremor) from the lowmem branch. */

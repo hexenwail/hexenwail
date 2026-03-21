@@ -142,7 +142,7 @@ static int	scr_erase_lines;
 
 #define	MAXLINES	27
 static int	lines;
-static int	StartC[MAXLINES], EndC[MAXLINES];
+static int	StartC[MAXLINES], EndC[MAXLINES], CorrectionC[MAXLINES];
 
 #if !defined(H2W)
 /* mission pack objectives: */
@@ -194,7 +194,9 @@ static void FindTextBreaks (const char *message, int Width)
 
 	while (1)
 	{
-		if (pos-start >= Width || message[pos] == '@' || message[pos] == 0)
+		if (message[pos] == '\\' && (message[pos + 1] == '1' || message[pos + 1] == '2' || message[pos + 1] == '3' || message[pos + 1] == '4')) CorrectionC[lines] -= 2; 
+		
+		if (pos - start + CorrectionC[lines] >= Width || message[pos] == '@' || message[pos] == 0)
 		{
 			oldlast = lastspace;
 			if (message[pos] == '@' || lastspace == -1 || message[pos] == 0)
@@ -203,6 +205,7 @@ static void FindTextBreaks (const char *message, int Width)
 			StartC[lines] = start;
 			EndC[lines] = lastspace;
 			lines++;
+			CorrectionC[lines] = 0;
 			if (lines == MAXLINES)
 				return;
 			if (message[pos] == '@')
@@ -278,7 +281,7 @@ static void SCR_DrawCenterString (void)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &scr_centerstring[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -330,14 +333,6 @@ static float AdaptFovx (float fov_x, float width, float height)
 	if (fov_x < 1 || fov_x > 179)
 		Sys_Error ("Bad fov: %f", fov_x);
 
-#if defined(PLATFORM_DOS) || defined(SVGAQUAKE)
-	if (vid.aspect > 1.10f)
-		return fov_x;		/* no fov_adapt for weird VGA modes */
-#endif
-#ifdef PLATFORM_AMIGAOS3
-	if (vid.noadapt)
-		return fov_x;		/* not for Amiga native chipset modes */
-#endif
 	if (!scr_fov_adapt.integer)
 		return fov_x;
 	if ((x = height / width) == 0.75)
@@ -382,14 +377,14 @@ static void SCR_CalcRefdef (void)
 // bound viewsize
 	if (scr_viewsize.integer < 30)
 		Cvar_SetQuick (&scr_viewsize, "30");
-	else if (scr_viewsize.integer > 130)
-		Cvar_SetQuick (&scr_viewsize, "130");
+	else if (scr_viewsize.integer > 140)
+		Cvar_SetQuick (&scr_viewsize, "140");
 
 // bound field of view
 	if (scr_fov.integer < 10)
 		Cvar_SetQuick (&scr_fov, "10");
-	else if (scr_fov.integer > 110)
-		Cvar_SetQuick (&scr_fov, "110");
+	else if (scr_fov.integer > 130)
+		Cvar_SetQuick (&scr_fov, "130");
 
 	vid.recalc_refdef = 0;
 
@@ -1071,7 +1066,7 @@ static void Plaque_Draw (const char *message, qboolean AlwaysDraw)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &message[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -1107,7 +1102,7 @@ static void Info_Plaque_Draw (const char *message)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &message[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -1133,7 +1128,7 @@ static void Bottom_Plaque_Draw (const char *message)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &message[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -1240,7 +1235,7 @@ static void SB_IntermissionOverlay (void)
 			size = elapsed;
 		temp[size] = 0;
 
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		I_Print (bx, by, temp, cl.intermission_flags);
 
 		elapsed -= size;
@@ -1274,11 +1269,9 @@ void SCR_UpdateScreen (void)
 	if (scr_skipupdate || block_drawing)
 		return;
 
-#ifdef PLATFORM_WINDOWS
-	// don't suck up any cpu if minimized
-	if (Minimized)
+	// don't draw if minimized (VID_IsMinimized is SDL3)
+	if (VID_IsMinimized())
 		return;
-#endif
 
 	scr_copytop = 0;
 	scr_copyeverything = 0;
@@ -1400,7 +1393,8 @@ void SCR_UpdateScreen (void)
 		SCR_DrawTurtle();
 		SCR_DrawPause();
 		SCR_CheckDrawCenterString();
-		Sbar_Draw();
+		if (!cls.demoplayback)
+			Sbar_Draw();
 		SCR_DrawFPS();
 
 		Plaque_Draw(plaquemessage, false);

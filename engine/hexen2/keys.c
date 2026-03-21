@@ -20,6 +20,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#include "sdl_inc.h"
 #include "quakedef.h"
 
 char	key_lines[32][MAXCMDLINE];
@@ -151,6 +152,19 @@ static keyname_t keynames[] =
 	{"AUX30", K_AUX30},
 	{"AUX31", K_AUX31},
 	{"AUX32", K_AUX32},
+
+	{"GP_A", K_GP_A},
+	{"GP_B", K_GP_B},
+	{"GP_X", K_GP_X},
+	{"GP_Y", K_GP_Y},
+	{"GP_LSHOULDER", K_GP_LSHOULDER},
+	{"GP_RSHOULDER", K_GP_RSHOULDER},
+	{"GP_LTRIGGER", K_GP_LTRIGGER},
+	{"GP_RTRIGGER", K_GP_RTRIGGER},
+	{"GP_LTHUMB", K_GP_LTHUMB},
+	{"GP_RTHUMB", K_GP_RTHUMB},
+	{"GP_BACK", K_GP_BACK},
+	{"GP_START", K_GP_START},
 
 	{"PAUSE", K_PAUSE},
 
@@ -529,31 +543,7 @@ static void Key_Console (int key)
 		break;
 	}
 
-	if (key < 32 || key > 127)
-		return;	// non printable
-
-	if (key_linepos < MAXCMDLINE - 1)
-	{
-		qboolean endpos = !workline[key_linepos];
-		// if inserting, move the text to the right
-		if (key_insert && !endpos)
-		{
-			workline[MAXCMDLINE - 2] = 0;
-			workline += key_linepos;
-			len = strlen(workline) + 1;
-			memmove (workline + 1, workline, len);
-			*workline = key;
-		}
-		else
-		{
-			workline += key_linepos;
-			*workline = key;
-			// null terminate if at the end
-			if (endpos)
-				workline[1] = 0;
-		}
-		key_linepos++;
-	}
+	/* printable characters now arrive via Key_CharEvent / SDL_TextInputEvent */
 }
 
 //============================================================================
@@ -607,14 +597,7 @@ static void Key_Message (int key)
 		return;
 	}
 
-	if (key < 32 || key > 127)
-		return; // non printable
-
-	if (chat_bufferlen == sizeof(chat_buffer) - 1)
-		return; // all full
-
-	chat_buffer[chat_bufferlen++] = key;
-	chat_buffer[chat_bufferlen] = 0;
+	/* printable characters now arrive via Key_CharEvent / SDL_TextInputEvent */
 }
 
 //============================================================================
@@ -887,6 +870,19 @@ void Key_Init (void)
 	keyreserved[K_KP_NUMLOCK] = true;
 	keyreserved[K_PAUSE] = true;
 
+// default gamepad bindings
+	Key_SetBinding (K_GP_RTRIGGER, "+attack");
+	Key_SetBinding (K_GP_LTRIGGER, "+jump");
+	Key_SetBinding (K_GP_RSHOULDER, "impulse 10");	/* next weapon */
+	Key_SetBinding (K_GP_LSHOULDER, "impulse 12");	/* prev weapon */
+	Key_SetBinding (K_GP_A, "+jump");
+	Key_SetBinding (K_GP_B, "impulse 13");		/* lift object */
+	Key_SetBinding (K_GP_X, "impulse 23");		/* use artifact */
+	Key_SetBinding (K_GP_Y, "impulse 10");		/* next weapon */
+	Key_SetBinding (K_GP_LTHUMB, "+crouch");
+	Key_SetBinding (K_GP_START, "togglemenu");
+	Key_SetBinding (K_GP_BACK, "toggleconsole");
+
 // register our functions
 	Cmd_AddCommand ("bind",Key_Bind_f);
 	Cmd_AddCommand ("unbind",Key_Unbind_f);
@@ -1001,7 +997,18 @@ void Key_Event (int key, qboolean down)
 
 	if (cl.intermission == 12 && down)
 	{
-		Cbuf_AddText ("map keep1\n");
+		//Launch the new mission (on a custom map if so specificied in the command line)
+		int i = COM_CheckParm("-startnew");
+		if (i && i < com_argc - 1)
+		{
+			Cbuf_AddText("map ");
+			Cbuf_AddText(com_argv[i + 1]);
+			Cbuf_AddText("\n");
+		}
+		else
+		{
+			Cbuf_AddText("map keep1\n");
+		}
 	}
 
 // if not a consolekey, send to the interpreter no matter what mode is
@@ -1054,6 +1061,87 @@ void Key_Event (int key, qboolean down)
 
 /*
 ===================
+Key_CharEvent
+
+Called from SDL_EVENT_TEXT_INPUT handler.  Feeds printable characters
+into the console or chat input buffer, replacing the old keyshift[]
+path for text entry.  Only processes ASCII (the engine font only
+supports code page 437 / ASCII printable range).
+===================
+*/
+void Key_CharEvent (const char *text)
+{
+	int		i;
+	char		*workline;
+	size_t		len;
+
+	if (!text)
+		return;
+
+	for (i = 0; text[i]; i++)
+	{
+		int ch = (unsigned char)text[i];
+
+		/* skip non-ASCII and control characters */
+		if (ch < 32 || ch > 127)
+			continue;
+
+		if (key_dest == key_console)
+		{
+			workline = key_lines[edit_line];
+			if (key_linepos < MAXCMDLINE - 1)
+			{
+				qboolean endpos = !workline[key_linepos];
+				if (key_insert && !endpos)
+				{
+					workline[MAXCMDLINE - 2] = 0;
+					workline += key_linepos;
+					len = strlen(workline) + 1;
+					memmove(workline + 1, workline, len);
+					*workline = ch;
+				}
+				else
+				{
+					workline += key_linepos;
+					*workline = ch;
+					if (endpos)
+						workline[1] = 0;
+				}
+				key_linepos++;
+			}
+		}
+		else if (key_dest == key_message)
+		{
+			if (chat_bufferlen < (int)sizeof(chat_buffer) - 1)
+			{
+				chat_buffer[chat_bufferlen++] = ch;
+				chat_buffer[chat_bufferlen] = 0;
+			}
+		}
+	}
+}
+
+/*
+===================
+Key_SetTextInputMode
+
+Enable or disable SDL text input events.  Called when key_dest
+changes to/from console or message mode.
+===================
+*/
+void Key_SetTextInputMode (qboolean on)
+{
+	SDL_Window *w = VID_GetWindow();
+	if (!w)
+		return;
+	if (on)
+		SDL_StartTextInput(w);
+	else
+		SDL_StopTextInput(w);
+}
+
+/*
+===================
 Key_ClearStates
 ===================
 */
@@ -1081,6 +1169,13 @@ keydest_t Key_GetDest (void)
 void Key_SetDest (keydest_t dest)
 {
 	key_dest = dest;
+
+	/* enable SDL text input for console and chat, disable otherwise */
+	if (dest == key_console || dest == key_message)
+		Key_SetTextInputMode(true);
+	else
+		Key_SetTextInputMode(false);
+
 	if ((key_gamekey = Key_IsGameKey()) != prev_gamekey)
 	{
 		prev_gamekey = key_gamekey;

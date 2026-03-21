@@ -20,11 +20,14 @@
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *
  */
 
 #include "quakedef.h"
 #include "hashindex.h"
 #include "hwal.h"
+#include "img_load.h"
+#include "gl_sky.h"
 
 static qmodel_t*	loadmodel;
 static char	loadname[MAX_QPATH];	/* for hunk tags */
@@ -508,7 +511,37 @@ bsp_tex_internal:
 		if (!strncmp(mt->name,"sky",3))
 			R_InitSky (tx);
 		else
-			tx->gl_texturenum = GL_LoadTexture (mt->name, (byte *)(tx+1), tx->width, tx->height, TEX_MIPMAP);
+		{
+			// Try external texture file (PNG, TGA, PCX) first
+			byte	*external_data;
+			int		ext_width, ext_height;
+			qboolean	has_alpha;
+			int		tex_flags;
+
+			external_data = IMG_LoadExternalTexture(mt->name, &ext_width, &ext_height, &has_alpha);
+			if (external_data)
+			{
+				// External texture loaded successfully
+				tex_flags = TEX_MIPMAP | TEX_RGBA;
+				if (has_alpha)
+					tex_flags |= TEX_ALPHA;
+				// Check for fence texture (name starts with '{')
+				if (mt->name[0] == '{')
+					tex_flags |= (TEX_ALPHA | TEX_FENCE);  // Need TEX_ALPHA for alpha channel!
+				tx->gl_texturenum = GL_LoadTexture(mt->name, external_data, ext_width, ext_height, tex_flags);
+				free(external_data);
+			}
+			else
+			{
+				// Fall back to internal BSP texture
+				int tex_flags = TEX_MIPMAP;
+				// Check for fence texture (name starts with '{')
+				// Per Spoike: index 255 is alpha=0, glhexen2 also uses index 0
+				if (mt->name[0] == '{')
+					tex_flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);  // Enable alpha testing and binary transparency
+				tx->gl_texturenum = GL_LoadTexture(mt->name, (byte *)(tx+1), tx->width, tx->height, tex_flags);
+			}
+		}
 	}
 
 //
@@ -632,9 +665,16 @@ void Mod_ReloadTextures (void)
 			if (tx)
 			{
 				if (!strncmp(tx->name, "sky", 3))
+				{
 					R_InitSky(tx);
+				}
 				else
-					tx->gl_texturenum = GL_LoadTexture (tx->name, (byte *)(tx+1), tx->width, tx->height, TEX_MIPMAP);
+				{
+					int flags = TEX_MIPMAP;
+					if (tx->name[0] == '{')
+						flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);
+					tx->gl_texturenum = GL_LoadTexture (tx->name, (byte *)(tx+1), tx->width, tx->height, flags);
+				}
 			}
 		}
 	}
@@ -1292,6 +1332,9 @@ static void Mod_SetDrawingFlags(msurface_t *out)
 
 		return;
 	}
+
+	if (out->texinfo->texture->name[0] == '{')
+		out->flags |= SURF_DRAWFENCE;
 }
 
 
@@ -2258,7 +2301,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 	if (mdl_flags & EF_TRANSPARENT)
 		tex_mode |= TEX_TRANSPARENT;
 	else if (mdl_flags & EF_HOLEY)
-		tex_mode |= TEX_HOLEY;
+		tex_mode |= (TEX_ALPHA | TEX_HOLEY);
 	else if (mdl_flags & EF_SPECIAL_TRANS)
 		tex_mode |= TEX_SPECIAL_TRANS;
 
@@ -2308,12 +2351,45 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		}
 #endif
 
-		q_snprintf (name, sizeof(name), "%s_%i", loadmodel->name, i);
-		pheader->gl_texturenum[i][0] =
-		pheader->gl_texturenum[i][1] =
-		pheader->gl_texturenum[i][2] =
-		pheader->gl_texturenum[i][3] = GL_LoadTexture (name, (byte *)(pskintype + 1),
-						pheader->skinwidth, pheader->skinheight, tex_mode);
+		// Build skin name without .mdl extension
+		char skinname[MAX_QPATH];
+		char *dot;
+		q_strlcpy (skinname, loadmodel->name, sizeof(skinname));
+		dot = strrchr(skinname, '.');
+		if (dot)
+			*dot = '\0';  // strip .mdl extension
+		q_snprintf (name, sizeof(name), "%s_%i", skinname, i);
+
+		// Try external skin file first (PNG, TGA, PCX)
+		byte	*external_skin;
+		int		ext_width, ext_height;
+		qboolean	has_alpha;
+
+		external_skin = IMG_LoadExternalTexture(name, &ext_width, &ext_height, &has_alpha);
+		if (external_skin)
+		{
+			// External skin loaded successfully
+			int skin_tex_mode = TEX_MIPMAP | TEX_RGBA;
+			if (has_alpha || (mdl_flags & EF_HOLEY))
+				skin_tex_mode |= TEX_ALPHA;
+			if (mdl_flags & EF_HOLEY)
+				skin_tex_mode |= TEX_HOLEY;
+			pheader->gl_texturenum[i][0] =
+			pheader->gl_texturenum[i][1] =
+			pheader->gl_texturenum[i][2] =
+			pheader->gl_texturenum[i][3] = GL_LoadTexture (name, external_skin,
+							ext_width, ext_height, skin_tex_mode);
+			free(external_skin);
+		}
+		else
+		{
+			// Fall back to embedded skin from MDL file
+			pheader->gl_texturenum[i][0] =
+			pheader->gl_texturenum[i][1] =
+			pheader->gl_texturenum[i][2] =
+			pheader->gl_texturenum[i][3] = GL_LoadTexture (name, (byte *)(pskintype + 1),
+							pheader->skinwidth, pheader->skinheight, tex_mode);
+		}
 		pskintype = (daliasskintype_t *)((byte *)(pskintype+1) + s);
 
 	    } else /*if (k == ALIAS_SKIN_GROUP)*/
@@ -2328,8 +2404,31 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		{
 			Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 			q_snprintf (name, sizeof(name), "%s_%i_%i", loadmodel->name, i, j);
-			pheader->gl_texturenum[i][j&3] = GL_LoadTexture (name, (byte *)(pskintype),
-						pheader->skinwidth, pheader->skinheight, tex_mode);
+
+			// Try external skin file first (PNG, TGA, PCX)
+			byte	*external_skin;
+			int		ext_width, ext_height;
+			qboolean	has_alpha;
+
+			external_skin = IMG_LoadExternalTexture(name, &ext_width, &ext_height, &has_alpha);
+			if (external_skin)
+			{
+				// External skin loaded successfully
+				int skin_tex_mode = TEX_MIPMAP | TEX_RGBA;
+				if (has_alpha || (mdl_flags & EF_HOLEY))
+					skin_tex_mode |= TEX_ALPHA;
+				if (mdl_flags & EF_HOLEY)
+					skin_tex_mode |= TEX_HOLEY;
+				pheader->gl_texturenum[i][j&3] = GL_LoadTexture (name, external_skin,
+							ext_width, ext_height, skin_tex_mode);
+				free(external_skin);
+			}
+			else
+			{
+				// Fall back to embedded skin from MDL file
+				pheader->gl_texturenum[i][j&3] = GL_LoadTexture (name, (byte *)(pskintype),
+							pheader->skinwidth, pheader->skinheight, tex_mode);
+			}
 			pskintype = (daliasskintype_t *)((byte *)(pskintype) + s);
 		}
 		for (k = j; j < 4; j++)
@@ -2353,235 +2452,263 @@ static void Mod_SetAliasModelExtraFlags (qmodel_t *mod)
 	// Torch glows
 	if (!q_strncasecmp (mod->name, "models/rflmtrch",15) ||
 	    !q_strncasecmp (mod->name, "models/cflmtrch",15) ||
-	    !q_strncasecmp (mod->name, "models/castrch",15)  ||
+	    !q_strncasecmp (mod->name, "models/castrch",14)  ||
 	    !q_strncasecmp (mod->name, "models/rometrch",15) ||
 	    !q_strncasecmp (mod->name, "models/egtorch",14)  ||
 	    !q_strncasecmp (mod->name, "models/flame",12))
 	{
 		mod->ex_flags |= XF_TORCH_GLOW;
 		// set yellow color
-		mod->glow_color[0] = 0.8f;
-		mod->glow_color[1] = 0.4f;
-		mod->glow_color[2] = 0.1f;
-		mod->glow_color[3] = 1.0f;
+		mod->glow_settings[COLOR_R] = 0.8f;
+		mod->glow_settings[COLOR_G] = 0.4f;
+		mod->glow_settings[COLOR_B] = 0.1f;
+		mod->glow_settings[COLOR_A] = 1.0f;
+		mod->glow_settings[LIGHT_STYLE] = 1; //TORCH_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/eflmtrch",15))
 	{
 		mod->ex_flags |= (XF_TORCH_GLOW | XF_TORCH_GLOW_EGYPT);
-		mod->glow_color[0] = 0.8f;
-		mod->glow_color[1] = 0.4f;
-		mod->glow_color[2] = 0.1f;
-		mod->glow_color[3] = 1.0f;
+		mod->glow_settings[COLOR_R] = 0.8f;
+		mod->glow_settings[COLOR_G] = 0.4f;
+		mod->glow_settings[COLOR_B] = 0.1f;
+		mod->glow_settings[COLOR_A] = 1.0f;
+		mod->glow_settings[LIGHT_STYLE] = 1; //TORCH_STYLE
 	}
 	// Mana glows
 	else if (!q_strncasecmp (mod->name, "models/i_bmana",14))
 	{
 		mod->ex_flags |= XF_GLOW;
-		mod->glow_color[0] = 0.25f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 1.0f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.25f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 1.0f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 11; //PULSE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/i_gmana",14))
 	{
 		mod->ex_flags |= XF_GLOW;
-		mod->glow_color[0] = 0.25f;
-		mod->glow_color[1] = 1.0f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.25f;
+		mod->glow_settings[COLOR_G] = 1.0f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 11; //PULSE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/i_btmana",15))
 	{
 		mod->ex_flags |= XF_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 11; //PULSE_STYLE
 	}
 	// Missile glows
 	else if (!q_strncasecmp (mod->name, "models/drgnball",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/eidoball",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.55f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.55f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/lavaball",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/glowball",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/fireball",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/famshot",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.2f;
-		mod->glow_color[1] = 0.8f;
-		mod->glow_color[2] = 0.2f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.2f;
+		mod->glow_settings[COLOR_G] = 0.8f;
+		mod->glow_settings[COLOR_B] = 0.2f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/pestshot",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.2f;
-		mod->glow_color[1] = 0.2f;
-		mod->glow_color[2] = 0.2f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.2f;
+		mod->glow_settings[COLOR_G] = 0.2f;
+		mod->glow_settings[COLOR_B] = 0.2f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/mumshot",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/scrbstp1",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.05f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.05f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/scrbpbody",16))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.05f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.05f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/iceshot2",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.25f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 1.0f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.25f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 1.0f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/iceshot",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.25f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 1.0f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.25f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 1.0f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/flaming",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.55f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.55f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/sucwp1p",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 8.0f;
-		mod->glow_color[1] = 0.2f;
-		mod->glow_color[2] = 0.2f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 8.0f;
+		mod->glow_settings[COLOR_G] = 0.2f;
+		mod->glow_settings[COLOR_B] = 0.2f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/sucwp2p",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.2f;
-		mod->glow_color[1] = 0.8f;
-		mod->glow_color[2] = 0.2f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.2f;
+		mod->glow_settings[COLOR_G] = 0.8f;
+		mod->glow_settings[COLOR_B] = 0.2f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/goop",11))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.8f;
-		mod->glow_color[2] = 0.2f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.8f;
+		mod->glow_settings[COLOR_B] = 0.2f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/purfir1",14))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.75f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.75f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/golemmis",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/shard",12) && strlen(mod->name) == 12)
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/shardice",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.25f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 1.0f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.25f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 1.0f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/snakearr",15))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 0.25f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 0.25f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/spit",11))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 0.25f;
-		mod->glow_color[1] = 1.0f;
-		mod->glow_color[2] = 0.25f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 0.25f;
+		mod->glow_settings[COLOR_G] = 1.0f;
+		mod->glow_settings[COLOR_B] = 0.25f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 	else if (!q_strncasecmp (mod->name, "models/spike",12))
 	{
 		mod->ex_flags |= XF_MISSILE_GLOW;
-		mod->glow_color[0] = 1.0f;
-		mod->glow_color[1] = 1.0f;
-		mod->glow_color[2] = 1.0f;
-		mod->glow_color[3] = 0.5f;
+		mod->glow_settings[COLOR_R] = 1.0f;
+		mod->glow_settings[COLOR_G] = 1.0f;
+		mod->glow_settings[COLOR_B] = 1.0f;
+		mod->glow_settings[COLOR_A] = 0.5f;
+		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
 }
 

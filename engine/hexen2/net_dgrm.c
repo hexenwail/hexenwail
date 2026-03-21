@@ -29,10 +29,6 @@
 
 #define BAN_TEST
 
-#if defined(PLATFORM_DOS) && !defined(USE_WATT32)
-#undef  BAN_TEST
-#endif
-
 // these two macros are to make the code more readable
 #define sfunc	net_landrivers[sock->landriver]
 #define dfunc	net_landrivers[net_landriverlevel]

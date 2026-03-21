@@ -1648,7 +1648,11 @@ void DropBackpack(void)
 		}
 		else
 		{
-			dprint("Bad backpack!");
+			dprint("Bad backpack! From entity: ");
+			dprint(old_self.classname);
+			dprint(" at ");
+			dprint(vtos(old_self.origin));
+			dprint("\n");
 			remove(item);
 			self = old_self;
 			return;

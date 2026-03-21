@@ -255,11 +255,17 @@ void CL_NextDemo (void)
 {
 	char	str[1024];
 
+	Con_DPrintf("CL_NextDemo: demonum=%d\n", cls.demonum);
+
 	if (cls.demonum == -1)
+	{
+		Con_DPrintf("CL_NextDemo: demonum == -1, not playing demos\n");
 		return;		// don't play demos
+	}
 
 	if (!cls.demos[cls.demonum][0] || cls.demonum == MAX_DEMOS)
 	{
+		Con_DPrintf("CL_NextDemo: Reached end of demo list, wrapping to start\n");
 		cls.demonum = 0;
 		if (!cls.demos[cls.demonum][0])
 		{
@@ -270,9 +276,12 @@ void CL_NextDemo (void)
 		}
 	}
 
+	Con_DPrintf("CL_NextDemo: Playing demo #%d: '%s'\n", cls.demonum, cls.demos[cls.demonum]);
+
 	SCR_BeginLoadingPlaque ();
 
-	q_snprintf (str, sizeof(str),"playdemo %s\n", cls.demos[cls.demonum]);
+	/* brief delay so the menu renders before the demo starts loading */
+	q_snprintf (str, sizeof(str),"wait\nwait\nwait\nplaydemo %s\n", cls.demos[cls.demonum]);
 	Cbuf_InsertText (str);
 	cls.demonum++;
 }
@@ -683,6 +692,47 @@ static void CL_RelinkEntities (void)
 				dl->color[3] = 0.7;
 			}
 #		endif
+		}
+
+		/* Inky: misc_modelpimp cast light */
+		{
+			float *gs;
+			int pflags = R_GetPimpFlags(ent, &gs);
+			if (pflags & EF_ILLUMINATE)
+			{
+				int k, l;
+				float intensity;
+
+				dl = CL_AllocDlight (i);
+				VectorCopy (ent->origin, dl->origin);
+				dl->origin[0] += gs[ORB_OFFSET_X];
+				dl->origin[1] += gs[ORB_OFFSET_Y];
+				dl->origin[2] += gs[ORB_OFFSET_Z];
+				dl->radius = (gs[LIGHT_RADIUS] >= 1.0f) ? gs[LIGHT_RADIUS] : 200;
+				dl->die = cl.time + 0.001;
+#			ifdef GLQUAKE
+				if (gl_colored_dynamic_lights.integer)
+				{
+					dl->color[0] = (gs[COLOR_R] != 0.0f) ? gs[COLOR_R] : 1.0f;
+					dl->color[1] = (gs[COLOR_G] != 0.0f) ? gs[COLOR_G] : 1.0f;
+					dl->color[2] = (gs[COLOR_B] != 0.0f) ? gs[COLOR_B] : 1.0f;
+					dl->color[3] = (gs[COLOR_A] != 0.0f) ? gs[COLOR_A] : 1.0f;
+				}
+#			endif
+				/* Apply light style flicker */
+				k = (int)(cl.time * 10);
+				l = (int)gs[LIGHT_STYLE];
+				if (l <= 0 || !cl_lightstyle[l].length)
+					intensity = 1.0f;
+				else
+				{
+					l = cl_lightstyle[(int)gs[LIGHT_STYLE]].map[k % cl_lightstyle[(int)gs[LIGHT_STYLE]].length] - 'a';
+					intensity = (float)(l * 22) / 255.0f;
+				}
+				dl->color[0] *= intensity;
+				dl->color[1] *= intensity;
+				dl->color[2] *= intensity;
+			}
 		}
 
 		if (ent->model->flags & EF_GIB)

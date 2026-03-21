@@ -79,8 +79,6 @@ static void Host_Status_f (void)
 	print_fn (_PRINT_NORMAL, "version: %4.2f\n", ENGINE_VERSION);
 	if (tcpipAvailable)
 		print_fn (_PRINT_NORMAL, "tcp/ip:  %s\n", my_tcpip_address);
-	if (ipxAvailable)
-		print_fn (_PRINT_NORMAL, "ipx:     %s\n", my_ipx_address);
 	print_fn (_PRINT_NORMAL, "map:     %s\n", sv.name);
 	print_fn (_PRINT_NORMAL, "players: %i active (%i max)\n\n",
 					net_activeconnections, svs.maxclients);
@@ -782,9 +780,12 @@ int SaveGamestate (qboolean ClientsOnly)
 				fprintf (f, "m\n");
 		}
 		SV_SaveEffects (f);
+		INV_SavePages(f);
 		fprintf (f, "-1\n");
 		ED_WriteGlobals (f);
 	}
+	else
+		INV_SavePages(f);
 
 	host_client = svs.clients;
 
@@ -857,7 +858,16 @@ static void RestoreClients (int ClientsMode)
 			*sv_globals.time = sv.time;
 			*sv_globals.self = EDICT_TO_PROG(ent);
 			G_FLOAT(OFS_PARM0) = time_diff;
-			PR_ExecuteProgram (*sv_globals.ClientReEnter);
+			PR_ExecuteProgram (*sv_globals.ClientReEnter, "ClientReEnter");
+
+			//find matching or first empty inventory page
+			for (j = 0; ((j < svs.maxclients) && (sv.ex_inventory_pages[j].id != 0) && (sv.ex_inventory_pages[j].client_id != i)); j++);
+			if (j < svs.maxclients)
+			{
+				host_client->ex_inventory = &sv.ex_inventory_pages[j];
+				if (host_client->ex_inventory->id == 0)
+					host_client->ex_inventory->id = ++sv.next_page_id;
+			}
 		}
 	}
 
@@ -949,6 +959,7 @@ static int LoadGamestate (const char *level, const char *startspot, int ClientsM
 			sv.lightstyles[i] = (const char *)Hunk_Strdup (str, "lightstyles");
 		}
 		SV_LoadEffects (f);
+		SV_LoadInventory(f);
 	}
 
 // load the edicts out of the savegame file
@@ -1168,7 +1179,7 @@ static void Host_Class_f (void)
 
 	// Change the weapon model used
 	*sv_globals.self = EDICT_TO_PROG(host_client->edict);
-	PR_ExecuteProgram (*sv_globals.ClassChangeWeapon);
+	PR_ExecuteProgram (*sv_globals.ClassChangeWeapon, "ClassChangeWeapon");
 
 // send notification to all clients
 	MSG_WriteByte (&sv.reliable_datagram, svc_updateclass);
@@ -1379,7 +1390,7 @@ static void Host_Kill_f (void)
 
 	*sv_globals.time = sv.time;
 	*sv_globals.self = EDICT_TO_PROG(sv_player);
-	PR_ExecuteProgram (*sv_globals.ClientKill);
+	PR_ExecuteProgram (*sv_globals.ClientKill, "ClientKill");
 }
 
 
@@ -1495,12 +1506,12 @@ static void Host_Spawn_f (void)
 			// call the spawn function
 			*sv_globals.time = sv.time;
 			*sv_globals.self = EDICT_TO_PROG(sv_player);
-			PR_ExecuteProgram (*sv_globals.ClientConnect);
+			PR_ExecuteProgram (*sv_globals.ClientConnect, "ClientConnect");
 
 			if ((Sys_DoubleTime() - NET_QSocketGetTime(host_client->netconnection)) <= sv.time)
 				Sys_Printf ("%s entered the game\n", host_client->name);
 
-			PR_ExecuteProgram (*sv_globals.PutClientInServer);
+			PR_ExecuteProgram (*sv_globals.PutClientInServer, "PutClientInServer");
 		}
 	}
 

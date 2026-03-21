@@ -28,17 +28,10 @@
 #include "snd_codeci.h"
 
 /* headers for individual codecs */
-#include "snd_timidity.h"
-#include "snd_wildmidi.h"
-#include "snd_mikmod.h"
-#include "snd_modplug.h"
-#include "snd_xmp.h"
-#include "snd_umx.h"
 #include "snd_wave.h"
 #include "snd_flac.h"
 #include "snd_mp3.h"
 #include "snd_vorbis.h"
-#include "snd_opus.h"
 
 
 static snd_codec_t *codecs;
@@ -66,27 +59,7 @@ void S_CodecInit (void)
 
 	/* Register in the inverse order
 	 * of codec choice preference: */
-#ifdef USE_CODEC_WILDMIDI
-	S_CodecRegister(&wildmidi_codec);
-#endif
-#ifdef USE_CODEC_TIMIDITY
-	S_CodecRegister(&timidity_codec);
-#endif
-#ifdef USE_CODEC_UMX
-	S_CodecRegister(&umx_codec);
-#endif
-#ifdef USE_CODEC_MODPLUG
-	S_CodecRegister(&modplug_codec);
-#endif
-#ifdef USE_CODEC_MIKMOD
-	S_CodecRegister(&mikmod_codec);
-#endif
-#ifdef USE_CODEC_XMP
-	S_CodecRegister(&xmp_codec);
-#endif
-#ifdef USE_CODEC_WAVE
 	S_CodecRegister(&wav_codec);
-#endif
 #ifdef USE_CODEC_FLAC
 	S_CodecRegister(&flac_codec);
 #endif
@@ -95,9 +68,6 @@ void S_CodecInit (void)
 #endif
 #ifdef USE_CODEC_VORBIS
 	S_CodecRegister(&vorbis_codec);
-#endif
-#ifdef USE_CODEC_OPUS
-	S_CodecRegister(&opus_codec);
 #endif
 
 	codec = codecs;

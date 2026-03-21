@@ -40,7 +40,7 @@
  * they end.
  */
 
-static void Host_WriteConfiguration (const char *fname);
+void Host_WriteConfiguration (const char *fname);
 
 quakeparms_t	*host_parms;
 
@@ -63,6 +63,7 @@ byte		*host_colormap;
 cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};
 static	cvar_t	sys_adaptive = {"sys_adaptive", "1", CVAR_ARCHIVE};
 static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for slow motion
+cvar_t		host_maxfps = {"host_maxfps", "72", CVAR_ARCHIVE};		// cap client framerate
 static	cvar_t	host_speeds = {"host_speeds", "0", CVAR_NONE};		// set for running times
 
 static	cvar_t	serverprofile = {"serverprofile", "0", CVAR_NONE};
@@ -370,6 +371,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_adaptive);
 
 	Cvar_RegisterVariable (&host_framerate);
+	Cvar_RegisterVariable (&host_maxfps);
 	Cvar_RegisterVariable (&host_speeds);
 
 	Cvar_RegisterVariable (&serverprofile);
@@ -402,7 +404,7 @@ Host_WriteConfiguration
 Writes key bindings and archived cvars to config.cfg
 ===============
 */
-static void Host_WriteConfiguration (const char *fname)
+void Host_WriteConfiguration (const char *fname)
 {
 	FILE	*f;
 
@@ -525,7 +527,7 @@ void SV_DropClient (qboolean crash)
 		// this will set the body to a dead frame, among other things
 			saveSelf = *sv_globals.self;
 			*sv_globals.self = EDICT_TO_PROG(host_client->edict);
-			PR_ExecuteProgram (*sv_globals.ClientDisconnect);
+			PR_ExecuteProgram (*sv_globals.ClientDisconnect, "ClientDisconnect");
 			*sv_globals.self = saveSelf;
 		}
 

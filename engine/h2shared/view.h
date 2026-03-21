@@ -22,6 +22,7 @@
 #define __HX2_VIEW_H
 
 extern	cvar_t		v_gamma;
+extern	cvar_t		v_contrast;
 extern	cvar_t		crosshair;
 extern	cvar_t		cl_crossx, cl_crossy;
 extern	cvar_t		crosshaircolor;

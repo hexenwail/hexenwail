@@ -36,10 +36,10 @@ qboolean SV_CheckBottom (edict_t *ent)
 {
 	// By this point, ent has been moved to its new position after the
 	// move, and adjusted for steps
-/*	qmodel_t	*model;
+	qmodel_t	*model;
 	hull_t	*wclip_hull;
 	int	index;
-	vec3_t	check, size; */
+	vec3_t	check, size; 
 	vec3_t	mins, maxs, start, stop;
 	trace_t	trace;
 	int	x, y;
@@ -49,7 +49,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 	VectorAdd (ent->v.origin, ent->v.mins, mins);
 	VectorAdd (ent->v.origin, ent->v.maxs, maxs);
 
-/*	// Make it use the clipping hull's size, not their bounding box...
+	// Make it use the clipping hull's size, not their bounding box...
 	model = sv.models[ (int)sv.edicts->v.modelindex ];
 	VectorSubtract (ent->v.maxs, ent->v.mins, size);
 	if (ent->v.hull)
@@ -77,7 +77,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 	}
 	VectorAdd (ent->v.origin, wclip_hull->clip_mins, mins);
 	VectorAdd (ent->v.origin, wclip_hull->clip_maxs, maxs);
-*/
+
 	// if all of the points under the corners are solid world, don't bother
 	// with the tougher checks
 	// the corners must be within 16 of the midpoint

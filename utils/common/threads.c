@@ -139,12 +139,6 @@ int Thread_GetNumCPUS (void)
 	return (numcpus < 1) ? 1 : numcpus;
 }
 
-#elif defined(PLATFORM_DOS)
-int Thread_GetNumCPUS (void)
-{
-	return 1;
-}
-
 #else /* unknown OS */
 int Thread_GetNumCPUS (void)
 {

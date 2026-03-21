@@ -66,10 +66,6 @@ typedef float		FxFloat;
 #endif
 #include "fx_gamma.h"
 
-#ifdef __DJGPP__
-#define DLSYM_NEEDS_UNDERSCORE
-#endif
-
 #ifdef DLSYM_NEEDS_UNDERSCORE
 #define DLSYM_NAME(symname) "_"#symname
 #else

@@ -59,6 +59,8 @@ void CL_StopPlayback (void)
 	if (!cls.demoplayback)
 		return;
 
+	Con_DPrintf("CL_StopPlayback: Stopping demo playback (timedemo=%d)\n", cls.timedemo);
+
 	if (intro_playing)
 		M_ToggleMenu_f();
 
@@ -111,6 +113,7 @@ static int CL_GetDemoMessage (void)
 {
 	int	r, i;
 	float	f;
+	static int demo_msg_count = 0;
 
 	// decide if it is time to grab the next message
 	if (cls.signon == SIGNONS)	// always grab until fully connected
@@ -126,9 +129,7 @@ static int CL_GetDemoMessage (void)
 				cls.td_starttime = realtime;
 		}
 		else if (/* cl.time > 0 && */ cl.time <= cl.mtime[0])
-		{
 			return 0;	// don't need another message yet
-		}
 	}
 
 // get the next message
@@ -172,6 +173,19 @@ static int CL_GetDemoMessage (void)
 	}
 	*/
 	fread (&net_message.cursize, 4, 1, cls.demofile);
+	if (ferror(cls.demofile))
+	{
+		Con_DPrintf("CL_GetDemoMessage: Error reading message size\n");
+		CL_StopPlayback();
+		return 0;
+	}
+	if (feof(cls.demofile))
+	{
+		Con_DPrintf("CL_GetDemoMessage: EOF reached after %d messages\n", demo_msg_count);
+		CL_StopPlayback();
+		return 0;
+	}
+
 	VectorCopy (cl.mviewangles[0], cl.mviewangles[1]);
 	for (i = 0 ; i < 3 ; i++)
 	{
@@ -183,12 +197,15 @@ static int CL_GetDemoMessage (void)
 //	num_intro_msg++;
 	if (net_message.cursize > MAX_MSGLEN)
 		Sys_Error ("Demo message > MAX_MSGLEN");
+
 	r = fread (net_message.data, net_message.cursize, 1, cls.demofile);
 	if (r != 1)
 	{
 		CL_StopPlayback ();
 		return 0;
 	}
+
+	demo_msg_count++;
 
 	/*
   skipit:
@@ -391,6 +408,7 @@ void CL_PlayDemo_f (void)
 
 	COM_AddExtension (name, ".dem", sizeof(name));
 
+	Con_DPrintf("CL_PlayDemo_f: Opening demo '%s' (intro=%d)\n", name, intro_playing);
 	Con_Printf ("Playing demo from %s.\n", name);
 
 	/*
@@ -409,6 +427,8 @@ void CL_PlayDemo_f (void)
 		return;
 	}
 
+	Con_DPrintf("CL_PlayDemo_f: Demo file opened successfully\n");
+
 // ZOID, fscanf is evil
 // O.S.: if a space character e.g. 0x20 (' ') follows '\n',
 // fscanf skips that byte too and screws up further reads.
@@ -422,8 +442,12 @@ void CL_PlayDemo_f (void)
 		return;
 	}
 
+	Con_DPrintf("CL_PlayDemo_f: CD track = %d\n", cls.forcetrack);
+
 	cls.demoplayback = true;
 	cls.state = ca_connected;
+
+	Con_DPrintf("CL_PlayDemo_f: Demo playback started, state=%d\n", cls.state);
 
 // get rid of the menu and/or console
 	Key_SetDest (key_game);
@@ -439,6 +463,8 @@ static void CL_FinishTimeDemo (void)
 {
 	int	frames;
 	float	time;
+
+	Con_DPrintf("CL_FinishTimeDemo: Finishing timedemo\n");
 
 	cls.timedemo = false;
 
@@ -468,6 +494,8 @@ void CL_TimeDemo_f (void)
 		return;
 	}
 
+	Con_DPrintf("CL_TimeDemo_f: Starting timedemo '%s'\n", Cmd_Argv(1));
+
 	CL_PlayDemo_f ();
 	if (!cls.demofile)
 		return;
@@ -478,5 +506,7 @@ void CL_TimeDemo_f (void)
 	cls.timedemo = true;
 	cls.td_startframe = host_framecount;
 	cls.td_lastframe = -1;	// get a new message this frame
+
+	Con_DPrintf("CL_TimeDemo_f: Timedemo initialized (startframe=%d)\n", cls.td_startframe);
 }
 

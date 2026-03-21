@@ -64,6 +64,7 @@
 =============================================================================*/
 
 #include "quakedef.h"
+#include "gl_postprocess.h"
 #ifdef PLATFORM_WINDOWS
 #include "winquake.h"
 #endif
@@ -97,7 +98,7 @@ static	cvar_t	scr_centertime = {"scr_centertime", "4", CVAR_NONE};
 static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
-static	cvar_t	scr_showfps = {"showfps", "0", CVAR_NONE};
+static	cvar_t	scr_showfps = {"showfps", "0", CVAR_ARCHIVE};
 //static	cvar_t	gl_triplebuffer = {"gl_triplebuffer", "0", CVAR_ARCHIVE};
 
 #if !defined(H2W)
@@ -140,7 +141,7 @@ static int	scr_erase_lines;
 
 #define	MAXLINES	27
 static int	lines;
-static int	StartC[MAXLINES], EndC[MAXLINES];
+static int	StartC[MAXLINES], EndC[MAXLINES], CorrectionC[MAXLINES];
 
 #if !defined(H2W)
 /* mission pack objectives: */
@@ -189,10 +190,13 @@ static void FindTextBreaks (const char *message, int Width)
 
 	lines = pos = start = 0;
 	lastspace = -1;
+	CorrectionC[lines] = 0;
 
 	while (1)
 	{
-		if (pos-start >= Width || message[pos] == '@' || message[pos] == 0)
+		if (message[pos] == '\\' && (message[pos + 1] == '1' || message[pos + 1] == '2' || message[pos + 1] == '3' || message[pos + 1] == '4')) CorrectionC[lines] -= 2; 
+		
+		if (pos - start + CorrectionC[lines] >= Width || message[pos] == '@' || message[pos] == 0)
 		{
 			oldlast = lastspace;
 			if (message[pos] == '@' || lastspace == -1 || message[pos] == 0)
@@ -201,6 +205,7 @@ static void FindTextBreaks (const char *message, int Width)
 			StartC[lines] = start;
 			EndC[lines] = lastspace;
 			lines++;
+			CorrectionC[lines] = 0;
 			if (lines == MAXLINES)
 				return;
 			if (message[pos] == '@')
@@ -254,7 +259,7 @@ static void SCR_DrawCenterString (void)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &scr_centerstring[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -343,8 +348,8 @@ static void SCR_CalcRefdef (void)
 // bound viewsize
 	if (scr_viewsize.integer < 30)
 		Cvar_SetQuick (&scr_viewsize, "30");
-	else if (scr_viewsize.integer > 130)
-		Cvar_SetQuick (&scr_viewsize, "130");
+	else if (scr_viewsize.integer > 140)
+		Cvar_SetQuick (&scr_viewsize, "140");
 
 // bound field of view
 	if (scr_fov.integer < 10)
@@ -984,7 +989,7 @@ static void Plaque_Draw (const char *message, qboolean AlwaysDraw)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &message[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -1018,7 +1023,7 @@ static void Info_Plaque_Draw (const char *message)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &message[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -1042,7 +1047,7 @@ static void Bottom_Plaque_Draw (const char *message)
 		cnt = EndC[i] - StartC[i];
 		strncpy (temp, &message[StartC[i]], cnt);
 		temp[cnt] = 0;
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		M_Print (bx, by, temp);
 	}
 }
@@ -1149,7 +1154,7 @@ static void SB_IntermissionOverlay (void)
 			size = elapsed;
 		temp[size] = 0;
 
-		bx = (40-strlen(temp)) * 8 / 2;
+		bx = (40-strlen(temp) - CorrectionC[i]) * 8 / 2;
 		I_Print (bx, by, temp, cl.intermission_flags);
 
 		elapsed -= size;
@@ -1265,6 +1270,7 @@ void SCR_UpdateScreen (void)
 		return;		// not initialized yet
 
 	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
+	GL_PostProcess_BeginFrame ();
 
 //
 // check for vid changes
@@ -1286,6 +1292,7 @@ void SCR_UpdateScreen (void)
 #endif
 		V_RenderView ();
 
+	GL_PostProcess_End3D ();
 	GL_Set2D ();
 	SCR_TileClear ();	// draw any areas not covered by the refresh
 
@@ -1332,7 +1339,8 @@ void SCR_UpdateScreen (void)
 		SCR_DrawTurtle();
 		SCR_DrawPause();
 		SCR_CheckDrawCenterString();
-		Sbar_Draw();
+		if (!cls.demoplayback)
+			Sbar_Draw();
 		SCR_DrawFPS();
 
 		Plaque_Draw(plaquemessage, false);
@@ -1349,6 +1357,8 @@ void SCR_UpdateScreen (void)
 	}
 
 	V_UpdatePalette ();
+
+	GL_PostProcess_EndFrame ();
 
 	GL_EndRendering ();
 }

@@ -118,8 +118,7 @@ static void MIDI_SetVolume (void **handle, float value)
 	}
 	else
 	{
-	//	MIDI_SetAllChannelVolumes((DWORD) (value * 1000.0f));
-		PostMessage(mainwindow, WM_MSTREAM_UPDATEVOLUMES, (DWORD) (value * 1000.0f), 0);
+		MIDI_SetAllChannelVolumes((DWORD) (value * 1000.0f));
 	}
 }
 
@@ -174,22 +173,11 @@ qboolean MIDI_Init(void)
 		{
 			if (COM_CheckParm("-nohwmidivol"))
 				Con_Printf("Hardware MIDI volume disabled by user\n");
-			else if (WinVista)
-			/*
-			http://msdn.microsoft.com/en-us/library/dd798480(VS.85).aspx#1
-			"This [midiOutSetVolume] function does not set the MIDI device
-			volume when using a software synthesizer under Windows Vista
-			or Windows 7, but instead alters the application-specific volume
-			level in the system mixer. This means that if your application
-			also outputs digital audio, the volume level of that audio will
-			be reduced or increased by the same amount."
-			*/
-				Con_Printf("Hardware MIDI volume ignored (Vista/7)\n");
 			else
-			{
-				hw_vol_capable = true;
-				Con_Printf("Using hardware MIDI volume adjustment\n");
-			}
+			/* midiOutSetVolume on Vista+ alters the app-specific
+			 * volume in the system mixer rather than the device
+			 * volume, so hardware MIDI volume is not usable. */
+				Con_Printf("Hardware MIDI volume ignored (Vista+)\n");
 		}
 	}
 
@@ -567,7 +555,7 @@ static void CALLBACK MidiProc(HMIDIIN hMidi, UINT uMsg, DWORD_PTR dwInstance, DW
 			/* mask off the channel number and cache the volume data byte */
 			volume_cache[MIDIEVENT_CHANNEL(me->dwEvent)] = MIDIEVENT_VOLUME(me->dwEvent);
 			if (hw_vol_capable) break;
-			PostMessage(mainwindow, WM_MSTREAM_UPDATEVOLUME, MIDIEVENT_CHANNEL(me->dwEvent),
+			MIDI_SetChannelVolume(MIDIEVENT_CHANNEL(me->dwEvent),
 					(DWORD) (bgmvolume.value * 1000.0f));
 		}
 		break;

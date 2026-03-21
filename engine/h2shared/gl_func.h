@@ -28,6 +28,12 @@
 #define __GL_FUNC_EXTERN extern
 #endif
 
+/* GL types that may be missing from older/minimal GL headers (e.g. MinGW) */
+#ifndef GL_VERSION_1_5
+typedef ptrdiff_t GLsizeiptr;
+typedef ptrdiff_t GLintptr;
+#endif
+
 /* core gl functions
  */
 #if defined(GL_DLSYM)
@@ -68,7 +74,11 @@ GL_FUNCTION(void, glColor4ub, (GLubyte,GLubyte,GLubyte,GLubyte))
 GL_FUNCTION(void, glColor4ubv, (const GLubyte *))
 GL_FUNCTION(void, glColor3ubv, (const GLubyte *))
 GL_FUNCTION(void, glColor3f, (GLfloat,GLfloat,GLfloat))
+GL_FUNCTION(void, glColor3fv, (const GLfloat *))
 GL_FUNCTION(void, glClearColor, (GLclampf,GLclampf,GLclampf,GLclampf))
+GL_FUNCTION(void, glFogf, (GLenum,GLfloat))
+GL_FUNCTION(void, glFogfv, (GLenum,const GLfloat *))
+GL_FUNCTION(void, glFogi, (GLenum,GLint))
 
 GL_FUNCTION(void, glAlphaFunc, (GLenum,GLclampf))
 GL_FUNCTION(void, glBlendFunc, (GLenum,GLenum))
@@ -143,7 +153,11 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glColor4ubv_fp		glColor4ubv
 #define glColor3ubv_fp		glColor3ubv
 #define glColor3f_fp		glColor3f
+#define glColor3fv_fp		glColor3fv
 #define glClearColor_fp		glClearColor
+#define glFogf_fp		glFogf
+#define glFogfv_fp		glFogfv
+#define glFogi_fp		glFogi
 
 #define glAlphaFunc_fp		glAlphaFunc
 #define glBlendFunc_fp		glBlendFunc
@@ -198,6 +212,62 @@ __GL_FUNC_EXTERN func##_f func##_fp;
 /* GL_ARB_multitexture */
 GL_FUNCTION_OPT(void, glActiveTextureARB, (GLenum))
 GL_FUNCTION_OPT(void, glMultiTexCoord2fARB, (GLenum,GLfloat,GLfloat))
+
+/* FBO functions (OpenGL 3.0 / GL_ARB_framebuffer_object) */
+GL_FUNCTION_OPT(void, glGenFramebuffers, (GLsizei, GLuint *))
+GL_FUNCTION_OPT(void, glDeleteFramebuffers, (GLsizei, const GLuint *))
+GL_FUNCTION_OPT(void, glBindFramebuffer, (GLenum, GLuint))
+GL_FUNCTION_OPT(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))
+GL_FUNCTION_OPT(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint))
+GL_FUNCTION_OPT(GLenum, glCheckFramebufferStatus, (GLenum))
+GL_FUNCTION_OPT(void, glGenRenderbuffers, (GLsizei, GLuint *))
+GL_FUNCTION_OPT(void, glDeleteRenderbuffers, (GLsizei, const GLuint *))
+GL_FUNCTION_OPT(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
+GL_FUNCTION_OPT(void, glBlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum))
+GL_FUNCTION_OPT(void, glBindRenderbuffer, (GLenum, GLuint))
+GL_FUNCTION_OPT(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei))
+
+/* GLSL shader functions (OpenGL 2.0+) */
+GL_FUNCTION_OPT(GLuint, glCreateShader, (GLenum))
+GL_FUNCTION_OPT(void, glDeleteShader, (GLuint))
+GL_FUNCTION_OPT(void, glShaderSource, (GLuint, GLsizei, const char **, const GLint *))
+GL_FUNCTION_OPT(void, glCompileShader, (GLuint))
+GL_FUNCTION_OPT(void, glGetShaderiv, (GLuint, GLenum, GLint *))
+GL_FUNCTION_OPT(void, glGetShaderInfoLog, (GLuint, GLsizei, GLsizei *, char *))
+GL_FUNCTION_OPT(GLuint, glCreateProgram, (void))
+GL_FUNCTION_OPT(void, glDeleteProgram, (GLuint))
+GL_FUNCTION_OPT(void, glAttachShader, (GLuint, GLuint))
+GL_FUNCTION_OPT(void, glLinkProgram, (GLuint))
+GL_FUNCTION_OPT(void, glUseProgram, (GLuint))
+GL_FUNCTION_OPT(void, glGetProgramiv, (GLuint, GLenum, GLint *))
+GL_FUNCTION_OPT(void, glGetProgramInfoLog, (GLuint, GLsizei, GLsizei *, char *))
+GL_FUNCTION_OPT(GLint, glGetUniformLocation, (GLuint, const char *))
+GL_FUNCTION_OPT(void, glUniform1i, (GLint, GLint))
+GL_FUNCTION_OPT(void, glUniform1f, (GLint, GLfloat))
+GL_FUNCTION_OPT(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat))
+GL_FUNCTION_OPT(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat))
+GL_FUNCTION_OPT(void, glUniformMatrix4fv, (GLint, GLsizei, GLboolean, const GLfloat *))
+GL_FUNCTION_OPT(void, glBindAttribLocation, (GLuint, GLuint, const char *))
+
+/* VBO/VAO functions (OpenGL 2.0+ / 3.0+) */
+GL_FUNCTION_OPT(void, glGenBuffers, (GLsizei, GLuint *))
+GL_FUNCTION_OPT(void, glDeleteBuffers, (GLsizei, const GLuint *))
+GL_FUNCTION_OPT(void, glBindBuffer, (GLenum, GLuint))
+GL_FUNCTION_OPT(void, glBufferData, (GLenum, GLsizeiptr, const void *, GLenum))
+GL_FUNCTION_OPT(void, glBufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *))
+GL_FUNCTION_OPT(void, glGenVertexArrays, (GLsizei, GLuint *))
+GL_FUNCTION_OPT(void, glDeleteVertexArrays, (GLsizei, const GLuint *))
+GL_FUNCTION_OPT(void, glBindVertexArray, (GLuint))
+GL_FUNCTION_OPT(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *))
+GL_FUNCTION_OPT(void, glEnableVertexAttribArray, (GLuint))
+GL_FUNCTION_OPT(void, glDrawArrays, (GLenum, GLint, GLsizei))
+GL_FUNCTION_OPT(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
+
+/* 3D texture (OpenGL 1.2+) */
+GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
+
+/* Additional uniform functions */
+GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 
 #undef GL_FUNCTION_OPT
 

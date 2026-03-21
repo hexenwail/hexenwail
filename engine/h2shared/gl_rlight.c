@@ -21,6 +21,8 @@
  */
 
 #include "quakedef.h"
+#include "gl_shader.h"
+#include "gl_vbo.h"
 
 static int	r_dlightframecount;
 
@@ -126,26 +128,26 @@ static void R_RenderDlight (dlight_t *light)
 		return;
 	}
 
-	glBegin_fp (GL_TRIANGLE_FAN);
+	GL_ImmBegin();
 
 	if (light->color[0] || light->color[1] || light->color[2])
 	{
-		glColor4fv_fp (light->color);
+		GL_ImmColor4f(light->color[0], light->color[1], light->color[2], light->color[3]);
 	}
 	else
 	{
 #ifndef H2W
-		glColor3f_fp (0.2,0.1,0.0);
+		GL_ImmColor3f(0.2, 0.1, 0.0);
 #else
-		glColor3f_fp (0.2,0.1,0.05); // changed dimlight effect
+		GL_ImmColor3f(0.2, 0.1, 0.05);
 #endif
 	}
 
 	for (i = 0; i < 3; i++)
 		v[i] = light->origin[i] - vpn[i]*rad;
 
-	glVertex3fv_fp (v);
-	glColor3f_fp (0,0,0);
+	GL_ImmVertex3f(v[0], v[1], v[2]);
+	GL_ImmColor3f(0, 0, 0);
 
 	for (i = DLIGHT_BUBBLE_WEDGES; i >= 0; i--)
 	{
@@ -155,9 +157,9 @@ static void R_RenderDlight (dlight_t *light)
 		bub_sin++;
 		bub_cos++;
 
-		glVertex3fv_fp (v);
+		GL_ImmVertex3f(v[0], v[1], v[2]);
 	}
-	glEnd_fp ();
+	GL_ImmEnd(GL_TRIANGLE_FAN, &gl_shader_flat);
 }
 
 /*
@@ -176,9 +178,8 @@ void R_RenderDlights (void)
 	r_dlightframecount = r_framecount + 1;	// because the count hasn't
 						//  advanced yet for this frame
 	glDepthMask_fp (0);
-	glDisable_fp (GL_TEXTURE_2D);
-	glShadeModel_fp (GL_SMOOTH);
 	glEnable_fp (GL_BLEND);
+	GL_SetAlphaThreshold(0.0f);
 	glBlendFunc_fp (GL_ONE, GL_ONE);
 
 	l = cl_dlights;
@@ -189,9 +190,8 @@ void R_RenderDlights (void)
 		R_RenderDlight (l);
 	}
 
-	glColor3f_fp (1,1,1);
+	GL_SetAlphaThreshold(0.01f);
 	glDisable_fp (GL_BLEND);
-	glEnable_fp (GL_TEXTURE_2D);
 	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthMask_fp (1);
 }

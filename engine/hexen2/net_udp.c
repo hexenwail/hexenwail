@@ -44,10 +44,6 @@ static struct in_addr	myAddr,		// the local address returned by the OS.
 
 #include "net_udp.h"
 
-#if defined(PLATFORM_AMIGA)
-struct Library	*SocketBase;
-#endif
-
 //=============================================================================
 
 static int udp_scan_iface (sys_socket_t socketfd)
@@ -106,14 +102,6 @@ sys_socket_t UDP_Init (void)
 
 	if (COM_CheckParm ("-noudp"))
 		return INVALID_SOCKET;
-#if defined(PLATFORM_AMIGA)
-	SocketBase = OpenLibrary("bsdsocket.library", 0);
-	if (!SocketBase)
-	{
-		Con_SafePrintf("%s: Can't open bsdsocket.library\n", __thisfunc__);
-		return INVALID_SOCKET;
-	}
-#endif	/* PLATFORM_AMIGA */
 #if defined(PLATFORM_OS2) && !defined(__EMX__)
 	if (sock_init() < 0)
 	{
@@ -121,26 +109,6 @@ sys_socket_t UDP_Init (void)
 		return INVALID_SOCKET;
 	}
 #endif	/* PLATFORM_OS2 */
-#if defined(PLATFORM_DOS)
-#if defined(USE_WATT32)
-	if (ipxAvailable) /* IPX + PktDrvr don't get along */
-	{
-		Con_Printf("Skipping WATTCP (IPX present)\n");
-		return INVALID_SOCKET;
-	}
-
-/*	dbug_init();*/
-	i = _watt_do_exit;
-	_watt_do_exit = 0;
-	err = sock_init();
-	_watt_do_exit = i;
-	if (err != 0)
-	{
-		Con_Printf("WATTCP initialization failed (%s)\n", sock_init_err(err));
-		return INVALID_SOCKET;
-	}
-#endif
-#endif	/* PLATFORM_DOS */
 
 	// determine my name & address
 	myAddr.s_addr = htonl(INADDR_LOOPBACK);
@@ -262,13 +230,6 @@ void UDP_Shutdown (void)
 {
 	UDP_Listen (false);
 	UDP_CloseSocket (net_controlsocket);
-#if defined(PLATFORM_AMIGA)
-	if (SocketBase)
-	{
-		CloseLibrary(SocketBase);
-		SocketBase = NULL;
-	}
-#endif	/* PLATFORM_AMIGA */
 }
 
 //=============================================================================
@@ -298,7 +259,7 @@ sys_socket_t UDP_OpenSocket (int port)
 {
 	sys_socket_t newsocket;
 	struct sockaddr_in address;
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_DOS)
+#if defined(PLATFORM_WINDOWS)
 	u_long _true = 1;
 #else
 	int _true = 1;
@@ -408,20 +369,7 @@ int UDP_Connect (sys_socket_t socketid, struct qsockaddr *addr)
 
 sys_socket_t UDP_CheckNewConnections (void)
 {
-#if defined(PLATFORM_AMIGA)
-	char		buf[4096];
-
-	if (net_acceptsocket == INVALID_SOCKET)
-		return INVALID_SOCKET;
-
-	if (recvfrom (net_acceptsocket, buf, sizeof(buf), MSG_PEEK, NULL, NULL)
-								!= SOCKET_ERROR)
-	{
-		return net_acceptsocket;
-	}
-	return INVALID_SOCKET;
-#else
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_DOS)
+#if defined(PLATFORM_WINDOWS)
 	u_long		available;
 #else
 	int		available;
@@ -443,7 +391,6 @@ sys_socket_t UDP_CheckNewConnections (void)
 	// quietly absorb empty packets
 	recvfrom (net_acceptsocket, buff, 0, 0, (struct sockaddr *) &from, &fromlen);
 	return INVALID_SOCKET;
-#endif
 }
 
 //=============================================================================

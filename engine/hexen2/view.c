@@ -290,6 +290,9 @@ cshift_t	cshift_slime = { {0,25,5}, 150 };
 cshift_t	cshift_lava = { {255,80,0}, 150 };
 
 cvar_t		v_gamma = {"gamma", "1", CVAR_ARCHIVE};
+cvar_t		v_contrast = {"contrast", "1", CVAR_ARCHIVE};
+static cvar_t	r_watercolor = {"r_watercolor", "0", CVAR_ARCHIVE};
+/* 0=classic brown, 1=blue, 2=green, 3=clear */
 
 byte		gammatable[256];	// palette is sent through this
 
@@ -452,7 +455,30 @@ void V_SetContentsColor (int contents)
 		cl.cshifts[CSHIFT_CONTENTS] = cshift_slime;
 		break;
 	default:
-		cl.cshifts[CSHIFT_CONTENTS] = cshift_water;
+		switch ((int)r_watercolor.value)
+		{
+		case 1: /* blue */
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 30;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 60;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 120;
+			cl.cshifts[CSHIFT_CONTENTS].percent = 128;
+			break;
+		case 2: /* green */
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 20;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 100;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 50;
+			cl.cshifts[CSHIFT_CONTENTS].percent = 128;
+			break;
+		case 3: /* clear (no tint) */
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 0;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 0;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 0;
+			cl.cshifts[CSHIFT_CONTENTS].percent = 0;
+			break;
+		default: /* classic brown */
+			cl.cshifts[CSHIFT_CONTENTS] = cshift_water;
+			break;
+		}
 	}
 }
 
@@ -1117,6 +1143,8 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_kickpitch);
 
 	Cvar_RegisterVariable (&v_gamma);
+	Cvar_RegisterVariable (&v_contrast);
+	Cvar_RegisterVariable (&r_watercolor);
 
 /* no gamma yet */
 	for (i = 0; i < 256; i++)

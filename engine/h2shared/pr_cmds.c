@@ -315,20 +315,19 @@ static void PF_setmodel (void)
 
 	if (i >= MAX_MODELS || !*check)
 	{
-		PR_RunError ("no precache: %s", m);
+		Con_Printf ("no precache: %s\n", m);
+		return;
 	}
+
+	e->v.model = PR_SetEngineString(*check);
+	e->v.modelindex = i; //SV_ModelIndex (m);
+
+	mod = sv.models[ (int)e->v.modelindex];	// Mod_ForName (m, true);
+
+	if (mod)
+		SetMinMaxSize (e, mod->mins, mod->maxs, true);
 	else
-	{
-		e->v.model = PR_SetEngineString(*check);
-		e->v.modelindex = i; //SV_ModelIndex (m);
-
-		mod = sv.models[ (int)e->v.modelindex];	// Mod_ForName (m, true);
-
-		if (mod)
-			SetMinMaxSize (e, mod->mins, mod->maxs, true);
-		else
-			SetMinMaxSize (e, vec3_origin, vec3_origin, true);
-	}
+		SetMinMaxSize (e, vec3_origin, vec3_origin, true);
 }
 
 static void PF_setpuzzlemodel (void)
@@ -381,6 +380,124 @@ static void PF_setpuzzlemodel (void)
 			SetMinMaxSize (e, vec3_origin, vec3_origin, true);
 	}
 }
+
+/*
+=================
+PF_pimpmodel
+
+Modify model properties at runtime (Inky's extension)
+pimpmodel(entity reference, vector glow_color)
+
+Returns: float (1 on success, 0 on failure)
+=================
+*/
+#ifndef H2W
+static void PF_pimpmodel (void)
+{
+	edict_t	*ref_ent;
+	qmodel_t	*mod;
+	const char	*model_name;
+	float	*glow_color;
+	float	abslight, health, max_health;
+	float	*view_ofs;
+	int		new_flags;
+	int		spawnflags;
+	int		entnum;
+	pimp_override_t	*pimp;
+
+	ref_ent = G_EDICT(OFS_PARM0);
+	glow_color = G_VECTOR(OFS_PARM1);
+
+	/* Get model name from the entity */
+	if (ref_ent->v.model == 0)
+	{
+		G_INT(OFS_RETURN) = 0;
+		return;
+	}
+	model_name = PR_GetString(ref_ent->v.model);
+
+	/* Find the model */
+	mod = Mod_FindName(model_name);
+	if (!mod)
+	{
+		Con_Printf("%s: model %s not found\n", __thisfunc__, model_name);
+		G_INT(OFS_RETURN) = 0;
+		return;
+	}
+
+	/* Store per-entity overrides instead of modifying the shared model */
+	entnum = NUM_FOR_EDICT(ref_ent);
+	pimp = R_GetPimpOverride(entnum);
+	if (!pimp)
+	{
+		G_INT(OFS_RETURN) = 0;
+		return;
+	}
+	pimp->active = true;
+
+	/* Start with model defaults */
+	pimp->ex_flags = mod->ex_flags;
+	memcpy(pimp->glow_settings, mod->glow_settings, sizeof(pimp->glow_settings));
+
+	/* Get entity properties */
+	new_flags = (int)ref_ent->v.flags;	/* preset effects to override mdl flags */
+	abslight = ref_ent->v.abslight;		/* glow alpha */
+	health = ref_ent->v.health;		/* glow radius */
+	max_health = ref_ent->v.max_health;	/* light radius */
+	view_ofs = ref_ent->v.view_ofs;		/* glow offset (x y z) */
+	spawnflags = (int)ref_ent->v.spawnflags;
+
+	/* Apply spawnflags to per-entity ex_flags */
+	if (spawnflags & 1)	/* Spin */
+		pimp->ex_flags |= EF_SPIN;
+	if (spawnflags & 2)	/* Float */
+		pimp->ex_flags |= EF_FLOAT;
+	if (spawnflags & 4)	/* Glow orb */
+		pimp->ex_flags |= EF_GLOW;
+	if (spawnflags & 8)	/* Cast light */
+		pimp->ex_flags |= EF_ILLUMINATE;
+
+	/* Apply custom model flags (trails etc.) - still per-model since
+	 * trails are checked against model->flags in cl_main.c */
+	if (new_flags != 0)
+	{
+		mod->flags &= ~(EF_ROCKET | EF_GRENADE | EF_GIB | EF_ROTATE |
+				EF_TRACER | EF_ZOMGIB | EF_TRACER2 | EF_TRACER3 |
+				EF_FIREBALL | EF_ICE | EF_MIP_MAP | EF_SPIT |
+				EF_TRANSPARENT | EF_SPELL | EF_HOLEY |
+				EF_SPECIAL_TRANS | EF_FACE_VIEW | EF_VORP_MISSILE |
+				EF_SET_STAFF | EF_MAGICMISSILE | EF_BONESHARD |
+				EF_SCARAB | EF_ACIDBALL | EF_BLOODSHOT |
+				EF_MIP_MAP_FAR);
+		mod->flags |= (new_flags & 0x01ffffff);
+	}
+
+	/* Apply glow settings to per-entity override */
+	if (glow_color[0] > 1 || glow_color[1] > 1 || glow_color[2] > 1)
+	{
+		pimp->glow_settings[COLOR_R] = glow_color[0] / 255.0f;
+		pimp->glow_settings[COLOR_G] = glow_color[1] / 255.0f;
+		pimp->glow_settings[COLOR_B] = glow_color[2] / 255.0f;
+	}
+	else if (glow_color[0] != 0 || glow_color[1] != 0 || glow_color[2] != 0)
+	{
+		pimp->glow_settings[COLOR_R] = glow_color[0];
+		pimp->glow_settings[COLOR_G] = glow_color[1];
+		pimp->glow_settings[COLOR_B] = glow_color[2];
+	}
+	/* else: keep model defaults */
+
+	pimp->glow_settings[COLOR_A] = (abslight != 0.0f) ? abslight : 0.75f;
+	pimp->glow_settings[ORB_OFFSET_X] = view_ofs[0];
+	pimp->glow_settings[ORB_OFFSET_Y] = view_ofs[1];
+	pimp->glow_settings[ORB_OFFSET_Z] = view_ofs[2];
+	pimp->glow_settings[ORB_RADIUS] = health;
+	pimp->glow_settings[LIGHT_RADIUS] = max_health;
+	pimp->glow_settings[LIGHT_STYLE] = atoi(ED_GetProperty(ref_ent, "style"));
+
+	G_INT(OFS_RETURN) = 1;
+}
+#endif
 
 /*
 =================
@@ -3845,6 +3962,169 @@ static void PF_weapon_sound(void)
 }
 #endif /* H2W */
 
+/*
+=================
+PF_set_extra_flags
+
+set_extra_flags(string model, int flags)
+=================
+*/
+static void PF_set_extra_flags(void)
+{
+	const char	*s;
+	int		flags;
+	int		i;
+
+	if (sv.state != ss_loading && !ignore_precache)
+		PR_RunError("%s: Model Extra Flags can only be changed in spawn functions", __thisfunc__);
+
+	s = G_STRING(OFS_PARM0);
+	flags = (int)G_FLOAT(OFS_PARM1);
+	PR_CheckEmptyString(s);
+
+	for (i = 0; i < MAX_MODELS; i++)
+	{
+		if (sv.model_precache[i])
+		{
+			if (!strcmp(sv.model_precache[i], s))
+			{
+#if !defined(SERVERONLY) && defined(GLQUAKE)
+				sv.models[i]->ex_flags = flags;
+#endif	/* SERVERONLY */
+				return;
+			}
+		}
+		else
+			return;
+	}
+}
+
+/*
+=================
+PF_set_fx_color
+
+set_fx_color(string model, float r, float g, float b, float a)
+=================
+*/
+static void PF_set_fx_color(void)
+{
+	const char	*s;
+	int		i;
+	float j, k, l, m;
+
+	if (sv.state != ss_loading && !ignore_precache)
+		PR_RunError("%s: Model Effect Color can only be set in spawn functions", __thisfunc__);
+
+	s = G_STRING(OFS_PARM0);
+	j = G_FLOAT(OFS_PARM1);
+	k = G_FLOAT(OFS_PARM2);
+	l = G_FLOAT(OFS_PARM3);
+	m = G_FLOAT(OFS_PARM4);
+	PR_CheckEmptyString(s);
+
+	for (i = 0; i < MAX_MODELS; i++)
+	{
+		if (sv.model_precache[i])
+		{
+			if (!strcmp(sv.model_precache[i], s))
+			{
+				#if !defined(SERVERONLY) && defined(GLQUAKE)
+				sv.models[i]->glow_settings[COLOR_R] = j;
+				sv.models[i]->glow_settings[COLOR_G] = k;
+				sv.models[i]->glow_settings[COLOR_B] = l;
+				sv.models[i]->glow_settings[COLOR_A] = m;
+				#endif	/* SERVERONLY */
+				return;
+			}
+		}
+		else
+			return;
+	}
+}
+
+/*
+=================
+PF_strhash
+
+float(string s) strhash
+=================
+*/
+static void PF_strhash(void)
+{
+	const char	*s;
+	unsigned long hash = 5381;
+	int c;
+
+	s = G_STRING(OFS_PARM0);
+	PR_CheckEmptyString(s);
+
+	//djb2
+	while ((c = *s++))
+		hash = ((hash << 5) + hash) + c;	/* hash * 33 + c */
+
+	G_FLOAT(OFS_RETURN) = (float)hash;
+}
+
+static void PF_register_ex_item(void)
+{
+	const char	*item_img;
+	float item_id;
+	int i;
+
+	if (sv.state != ss_loading && !ignore_precache)
+		PR_RunError("%s: Extended Inventory Items can only be registered in spawn functions", __thisfunc__);
+
+	item_img = G_STRING(OFS_PARM0);
+	item_id = G_FLOAT(OFS_PARM1);
+	PR_CheckEmptyString(item_img);
+
+	for (i = 0; i < MAX_ITEMS_EX; i++)
+	{
+		if (sv.ex_items[i].id != 0)
+		{
+			if (sv.ex_items[i].id == (int)item_id)
+			{
+				q_strlcpy(sv.ex_items[i].icon, item_img, MAX_QPATH);
+				break;
+			}
+		}
+		else
+		{
+			sv.ex_items[i].id = (int)item_id;
+			q_strlcpy(sv.ex_items[i].icon, item_img, MAX_QPATH);
+			sv.num_ex_items += 1;
+			break;
+		}
+	}
+
+	//PR_RunError("%s: overflow", __thisfunc__);
+}
+
+static void PF_update_ex_item(void)
+{
+	edict_t	*ent;
+	client_t	*client;
+	int i;
+
+	float item_id;
+	float item_count;
+	float result = 0.0f;
+
+	ent = G_EDICT(OFS_PARM0);
+	item_id = G_FLOAT(OFS_PARM1);
+	item_count = G_FLOAT(OFS_PARM2);
+
+	i = NUM_FOR_EDICT(ent);
+	if (i < 1 || i > svs.maxclients)
+		PR_RunError("Entity is not a client");
+
+	client = svs.clients + (i - 1);
+	result = INV_UpdateExItem(client->ex_inventory, item_id, item_count, true);
+
+	G_FLOAT(OFS_RETURN) = result;
+	//PR_RunError("%s: overflow", __thisfunc__);
+}
+
 
 static builtin_t pr_builtin[] =
 {
@@ -3979,21 +4259,30 @@ static builtin_t pr_builtin[] =
 	PF_StopSound,		// 106
 
 #ifdef QUAKE2
-	PF_sin,
-	PF_cos,
-	PF_sqrt,
-	PF_changepitch,
-	PF_TraceToss,
-	PF_etos,
-	PF_WaterMove,
+	PF_Fixme,		// 107
+	PF_Fixme,		// 108
+	PF_Fixme,		// 109
+	PF_Fixme,		// 110
+	PF_pimpmodel,		// 111
+	PF_sin,			// 112
+	PF_cos,			// 113
+	PF_sqrt,		// 114
+	PF_changepitch,		// 115
+	PF_TraceToss,		// 116
+	PF_etos,		// 117
+	PF_WaterMove,		// 118
 #else
-	PF_Fixme,
-	PF_Fixme,
-	PF_Fixme,
-	PF_Fixme,
-	PF_Fixme,
-	PF_Fixme,
-	PF_Fixme,
+	PF_set_extra_flags,	// void(string model, int flags) set_extra_flags	= #107
+	PF_set_fx_color,	// void(string model, float r, float g, float b, float a) set_fx_color	= #108
+	PF_strhash,		// float(string s1) strhash = #109
+	PF_register_ex_item,	// void (string img, float id)	= #110
+#if !defined(SERVERONLY)
+	PF_pimpmodel,		// float(entity e, vector glow_color) pimpmodel = #111
+#else
+	PF_Fixme,		// 111
+#endif
+	PF_update_ex_item,	// float (entity forent, float id, float amount)	= #112
+	PF_Fixme,		// 113
 #endif
 
 #else  /* H2W: */

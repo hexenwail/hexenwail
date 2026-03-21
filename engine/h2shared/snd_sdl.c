@@ -36,17 +36,32 @@ static char s_sdl_driver[] = "SDLAudio";
 
 static int	buffersize;
 
+static SDL_AudioStream	*audio_stream = NULL;
 
-static void SDLCALL paint_audio (void *unused, Uint8 *stream, int len)
+
+static void SDLCALL paint_audio (void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount)
 {
 	int	pos, tobufend;
 	int	len1, len2;
+	int	len = additional_amount;
+	Uint8	*tmpbuf;
+
+	(void)userdata;
+	(void)total_amount;
 
 	if (!shm)
 	{	/* shouldn't happen, but just in case */
-		memset(stream, 0, len);
+		/* Put silence into the stream */
+		tmpbuf = (Uint8 *) calloc(1, len);
+		if (tmpbuf) {
+			SDL_PutAudioStreamData(stream, tmpbuf, len);
+			free(tmpbuf);
+		}
 		return;
 	}
+
+	tmpbuf = (Uint8 *) malloc(len);
+	if (!tmpbuf) return;
 
 	pos = (shm->samplepos * (shm->samplebits / 8));
 	if (pos >= buffersize)
@@ -62,7 +77,7 @@ static void SDLCALL paint_audio (void *unused, Uint8 *stream, int len)
 		len2 = len - len1;
 	}
 
-	memcpy(stream, shm->buffer + pos, len1);
+	memcpy(tmpbuf, shm->buffer + pos, len1);
 
 	if (len2 <= 0)
 	{
@@ -70,77 +85,112 @@ static void SDLCALL paint_audio (void *unused, Uint8 *stream, int len)
 	}
 	else
 	{	/* wraparound? */
-		memcpy(stream + len1, shm->buffer, len2);
+		memcpy(tmpbuf + len1, shm->buffer, len2);
 		shm->samplepos = (len2 / (shm->samplebits / 8));
 	}
 
 	if (shm->samplepos >= buffersize)
 		shm->samplepos = 0;
+
+	SDL_PutAudioStreamData(stream, tmpbuf, len);
+	free(tmpbuf);
 }
 
 static qboolean S_SDL_Init (dma_t *dma)
 {
-	SDL_AudioSpec desired, obtained;
+	SDL_AudioSpec spec;
 	int		tmp, val;
+	int		obtained_freq, obtained_channels, obtained_bits;
 	char	drivername[128];
 
-	if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
+	if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
 	{
 		Con_Printf("Couldn't init SDL audio: %s\n", SDL_GetError());
 		return false;
 	}
 
 	/* Set up the desired format */
-	desired.freq = desired_speed;
-	desired.format = (desired_bits == 16) ? AUDIO_S16SYS : AUDIO_U8;
-	desired.channels = desired_channels;
-	if (desired.freq <= 11025)
-		desired.samples = 256;
-	else if (desired.freq <= 22050)
-		desired.samples = 512;
-	else if (desired.freq <= 44100)
-		desired.samples = 1024;
-	else if (desired.freq <= 56000)
-		desired.samples = 2048; /* for 48 kHz */
-	else
-		desired.samples = 4096; /* for 96 kHz */
-	desired.callback = paint_audio;
-	desired.userdata = NULL;
+	spec.freq = desired_speed;
+	spec.format = (desired_bits == 16) ? SDL_AUDIO_S16 : SDL_AUDIO_U8;
+	spec.channels = desired_channels;
 
-	/* Open the audio device */
-	if (SDL_OpenAudio(&desired, &obtained) == -1)
+	/* Open the audio device with a stream callback */
+	audio_stream = SDL_OpenAudioDeviceStream(
+		SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+		&spec,
+		paint_audio,
+		NULL
+	);
+
+	if (!audio_stream)
 	{
 		Con_Printf("Couldn't open SDL audio: %s\n", SDL_GetError());
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 		return false;
 	}
 
-	/* Make sure we can support the audio format */
-	switch (obtained.format)
+	/* Query what we actually got */
 	{
-	case AUDIO_S8:		/* maybe needed by AHI */
-	case AUDIO_U8:
-	case AUDIO_S16SYS:
-		/* Supported */
-		break;
-	default:
-		Con_Printf ("Unsupported audio format received (%u)\n", obtained.format);
-		SDL_CloseAudio();
-		SDL_QuitSubSystem(SDL_INIT_AUDIO);
-		return false;
+		int src_format_tmp;
+		SDL_AudioFormat fmt;
+		if (!SDL_GetAudioStreamFormat(audio_stream, &spec, NULL))
+		{
+			Con_Printf("Couldn't query audio stream format: %s\n", SDL_GetError());
+			SDL_DestroyAudioStream(audio_stream);
+			audio_stream = NULL;
+			SDL_QuitSubSystem(SDL_INIT_AUDIO);
+			return false;
+		}
+		obtained_freq = spec.freq;
+		obtained_channels = spec.channels;
+		fmt = spec.format;
+
+		/* Determine bits from format */
+		switch (fmt)
+		{
+		case SDL_AUDIO_S8:
+		case SDL_AUDIO_U8:
+			obtained_bits = 8;
+			break;
+		case SDL_AUDIO_S16:
+			obtained_bits = 16;
+			break;
+		default:
+			Con_Printf ("Unsupported audio format received (%u)\n", (unsigned)fmt);
+			SDL_DestroyAudioStream(audio_stream);
+			audio_stream = NULL;
+			SDL_QuitSubSystem(SDL_INIT_AUDIO);
+			return false;
+		}
 	}
 
 	memset ((void *) dma, 0, sizeof(dma_t));
 	shm = dma;
 
 	/* Fill the audio DMA information block */
-	shm->samplebits = (obtained.format & 0xFF); /* first byte of format is bits */
-	shm->signed8 = (obtained.format == AUDIO_S8);
-	if (obtained.freq != desired_speed)
-		Con_Printf ("Warning: Rate set (%d) didn't match requested rate (%d)!\n", obtained.freq, desired_speed);
-	shm->speed = obtained.freq;
-	shm->channels = obtained.channels;
-	tmp = (obtained.samples * obtained.channels) * 10;
+	shm->samplebits = obtained_bits;
+	shm->signed8 = (spec.format == SDL_AUDIO_S8);
+	if (obtained_freq != desired_speed)
+		Con_Printf ("Warning: Rate set (%d) didn't match requested rate (%d)!\n", obtained_freq, desired_speed);
+	shm->speed = obtained_freq;
+	shm->channels = obtained_channels;
+
+	/* Calculate samples: use a reasonable buffer size based on frequency */
+	{
+		int samples_per_callback;
+		if (obtained_freq <= 11025)
+			samples_per_callback = 256;
+		else if (obtained_freq <= 22050)
+			samples_per_callback = 512;
+		else if (obtained_freq <= 44100)
+			samples_per_callback = 1024;
+		else if (obtained_freq <= 56000)
+			samples_per_callback = 2048;
+		else
+			samples_per_callback = 4096;
+
+		tmp = (samples_per_callback * obtained_channels) * 10;
+	}
 	if (tmp & (tmp - 1))
 	{	/* make it a power of two */
 		val = 1;
@@ -153,10 +203,15 @@ static qboolean S_SDL_Init (dma_t *dma)
 	shm->samplepos = 0;
 	shm->submission_chunk = 1;
 
-	Con_Printf ("SDL audio spec  : %d Hz, %d samples, %d channels\n",
-			obtained.freq, obtained.samples, obtained.channels);
-	if (SDL_AudioDriverName(drivername, sizeof(drivername)) == NULL)
-		strcpy(drivername, "(UNKNOWN)");
+	Con_Printf ("SDL audio spec  : %d Hz, %d bits, %d channels\n",
+			obtained_freq, obtained_bits, obtained_channels);
+	{
+		const char *driver = SDL_GetCurrentAudioDriver();
+		if (driver)
+			q_strlcpy(drivername, driver, sizeof(drivername));
+		else
+			strcpy(drivername, "(UNKNOWN)");
+	}
 	buffersize = shm->samples * (shm->samplebits / 8);
 	Con_Printf ("SDL audio driver: %s, %d bytes buffer\n", drivername, buffersize);
 
@@ -166,7 +221,8 @@ static qboolean S_SDL_Init (dma_t *dma)
 	shm->buffer = (unsigned char *) calloc (1, buffersize);
 	if (!shm->buffer)
 	{
-		SDL_CloseAudio();
+		SDL_DestroyAudioStream(audio_stream);
+		audio_stream = NULL;
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 		shm = NULL;
 		Con_Printf ("Failed allocating memory for SDL audio\n");
@@ -174,7 +230,8 @@ static qboolean S_SDL_Init (dma_t *dma)
 	}
 #endif
 
-	SDL_PauseAudio(0);
+	/* Start playback */
+	SDL_ResumeAudioStreamDevice(audio_stream);
 
 	return true;
 }
@@ -189,7 +246,11 @@ static void S_SDL_Shutdown (void)
 	if (shm)
 	{
 		Con_Printf ("Shutting down SDL sound\n");
-		SDL_CloseAudio();
+		if (audio_stream)
+		{
+			SDL_DestroyAudioStream(audio_stream);
+			audio_stream = NULL;
+		}
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 #if !USE_HUNK_ALLOC
 		if (shm->buffer)
@@ -202,22 +263,26 @@ static void S_SDL_Shutdown (void)
 
 static void S_SDL_LockBuffer (void)
 {
-	SDL_LockAudio ();
+	if (audio_stream)
+		SDL_LockAudioStream (audio_stream);
 }
 
 static void S_SDL_Submit (void)
 {
-	SDL_UnlockAudio();
+	if (audio_stream)
+		SDL_UnlockAudioStream(audio_stream);
 }
 
 static void S_SDL_BlockSound (void)
 {
-	SDL_PauseAudio(1);
+	if (audio_stream)
+		SDL_PauseAudioStreamDevice(audio_stream);
 }
 
 static void S_SDL_UnblockSound (void)
 {
-	SDL_PauseAudio(0);
+	if (audio_stream)
+		SDL_ResumeAudioStreamDevice(audio_stream);
 }
 
 snd_driver_t snddrv_sdl =
@@ -236,4 +301,3 @@ snd_driver_t snddrv_sdl =
 };
 
 #endif	/* HAVE_SDL_SOUND */
-

@@ -21,6 +21,12 @@
 
 #include "quakedef.h"
 #include "hashindex.h"
+#include "img_load.h"
+#include "gl_sky.h"
+
+/* gl_fog.c */
+void Fog_Init (void);
+void Fog_NewMap (void);
 
 byte			*playerTranslation;
 const int	color_offsets[MAX_PLAYER_CLASS] =
@@ -36,9 +42,7 @@ const int	color_offsets[MAX_PLAYER_CLASS] =
 #endif
 };
 
-cvar_t			gl_purge_maptex = {"gl_purge_maptex", "1", CVAR_ARCHIVE};
-				// whether or not map-specific OGL textures
-				// are purged on map change. default == yes
+cvar_t			gl_purge_maptex = {"gl_purge_maptex", "1", CVAR_NONE};
 
 qboolean		flush_textures;
 int			gl_texlevel;
@@ -125,23 +129,41 @@ void R_InitParticleTexture (void)
 {
 	int		x, y;
 	byte	data[TEXSIZE][TEXSIZE][4];
+	byte	*external_data;
+	int		ext_width, ext_height;
+	qboolean	has_alpha;
 
-	//
-	// particle texture
-	//
-	for (x = 0; x < TEXSIZE; x++)
+	// Try external particle texture first
+	// Check common particle texture names
+	external_data = IMG_LoadExternalTexture("particle", &ext_width, &ext_height, &has_alpha);
+	if (!external_data)
+		external_data = IMG_LoadExternalTexture("particles/particle", &ext_width, &ext_height, &has_alpha);
+	if (!external_data)
+		external_data = IMG_LoadExternalTexture("particles/blood", &ext_width, &ext_height, &has_alpha);
+
+	if (external_data)
 	{
-		for (y = 0; y < TEXSIZE; y++)
-		{
-			data[y][x][0] = 255;
-			data[y][x][1] = 255;
-			data[y][x][2] = 255;
-			data[y][x][3] = dottexture[x][y]*255;
-		}
+		Con_Printf ("Loaded external particle texture\n");
+		particletexture = GL_LoadTexture("particle", external_data, ext_width, ext_height,
+					TEX_ALPHA | TEX_RGBA | TEX_LINEAR);
+		free(external_data);
 	}
+	else
+	{
+		// Fall back to procedurally generated particle texture
+		for (x = 0; x < TEXSIZE; x++)
+		{
+			for (y = 0; y < TEXSIZE; y++)
+			{
+				data[y][x][0] = 255;
+				data[y][x][1] = 255;
+				data[y][x][2] = 255;
+				data[y][x][3] = dottexture[x][y]*255;
+			}
+		}
 
-	particletexture = GL_LoadTexture("", (byte *)data, TEXSIZE, TEXSIZE, TEX_ALPHA | TEX_RGBA | TEX_LINEAR);
-	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+		particletexture = GL_LoadTexture("", (byte *)data, TEXSIZE, TEXSIZE, TEX_ALPHA | TEX_RGBA | TEX_LINEAR);
+	}
 }
 
 void R_InitExtraTextures (void)
@@ -231,14 +253,12 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_clear);
 	Cvar_RegisterVariable (&gl_cull);
 	Cvar_RegisterVariable (&gl_smoothmodels);
-	Cvar_RegisterVariable (&gl_affinemodels);
 	Cvar_RegisterVariable (&gl_polyblend);
 	Cvar_RegisterVariable (&gl_flashblend);
 	Cvar_RegisterVariable (&gl_playermip);
 	Cvar_RegisterVariable (&gl_nocolors);
 	Cvar_RegisterVariable (&gl_waterripple);
 
-	Cvar_RegisterVariable (&gl_ztrick);
 	Cvar_RegisterVariable (&gl_zfix);
 	Cvar_RegisterVariable (&gl_purge_maptex);
 
@@ -258,6 +278,8 @@ void R_Init (void)
 	R_InitParticles ();
 	R_InitParticleTexture ();
 	R_InitExtraTextures ();
+	Sky_Init ();
+	Fog_Init ();
 
 	R_SetClearColor_f (&r_clearcolor);
 
@@ -374,7 +396,6 @@ void R_TranslatePlayerSkin (int playernum)
 //	playertextures[playernum] = GL_LoadTexture(texname, (byte *)pixels, scaled_width, scaled_height, TEX_RGBA|TEX_LINEAR);
 	GL_Bind(playertextures[playernum]);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, gl_solid_format, scaled_width, scaled_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
@@ -391,6 +412,8 @@ void R_NewMap (void)
 	for (i = 0; i < 256; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
 
+	R_ClearPimpOverrides ();
+
 	memset (&r_worldentity, 0, sizeof(r_worldentity));
 	r_worldentity.model = cl.worldmodel;
 
@@ -406,6 +429,8 @@ void R_NewMap (void)
 
 	// identify sky texture
 	skytexturenum = -1;
+	Sky_NewMap ();
+	Fog_NewMap ();
 	mirrortexturenum = -1;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{

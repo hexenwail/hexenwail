@@ -19,6 +19,16 @@
  */
 
 #include "quakedef.h"
+#include "gl_sky.h"
+#include "gl_shader.h"
+#include "gl_vbo.h"
+#include "gl_matrix.h"
+
+/* gl_fog.c */
+void Fog_SetupFrame (void);
+void Fog_EnableGFog (void);
+float Fog_GetDensity (void);
+void Fog_DisableGFog (void);
 
 entity_t	r_worldentity;
 vec3_t		modelorg, r_entorigin;
@@ -90,10 +100,8 @@ cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
 
 cvar_t	gl_clear = {"gl_clear", "1", CVAR_NONE};
 cvar_t	gl_cull = {"gl_cull", "1", CVAR_NONE};
-cvar_t	gl_ztrick = {"gl_ztrick", "0", CVAR_ARCHIVE};
 cvar_t	gl_zfix = {"gl_zfix", "1", CVAR_ARCHIVE};
 cvar_t	gl_smoothmodels = {"gl_smoothmodels", "1", CVAR_NONE};
-cvar_t	gl_affinemodels = {"gl_affinemodels", "0", CVAR_NONE};
 cvar_t	gl_polyblend = {"gl_polyblend", "1", CVAR_NONE};
 cvar_t	gl_flashblend = {"gl_flashblend", "0", CVAR_NONE};
 cvar_t	gl_playermip = {"gl_playermip", "0", CVAR_NONE};
@@ -101,13 +109,13 @@ cvar_t	gl_nocolors = {"gl_nocolors", "0", CVAR_NONE};
 cvar_t	gl_keeptjunctions = {"gl_keeptjunctions", "1", CVAR_ARCHIVE};
 cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
-cvar_t	gl_glows = {"gl_glows", "0", CVAR_ARCHIVE};	// torch glows
-cvar_t	gl_other_glows = {"gl_other_glows", "0", CVAR_ARCHIVE};
-cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
+cvar_t	gl_glows = {"gl_glows", "1", CVAR_NONE};
+cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_NONE};
+cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_NONE};
 
-cvar_t	gl_coloredlight = {"gl_coloredlight", "0", CVAR_ARCHIVE};
-cvar_t	gl_colored_dynamic_lights = {"gl_colored_dynamic_lights", "0", CVAR_ARCHIVE};
-cvar_t	gl_extra_dynamic_lights = {"gl_extra_dynamic_lights", "0", CVAR_ARCHIVE};
+cvar_t	gl_coloredlight = {"gl_coloredlight", "1", CVAR_NONE};
+cvar_t	gl_colored_dynamic_lights = {"gl_colored_dynamic_lights", "1", CVAR_NONE};
+cvar_t	gl_extra_dynamic_lights = {"gl_extra_dynamic_lights", "1", CVAR_NONE};
 
 //=============================================================================
 
@@ -139,11 +147,10 @@ R_RotateForEntity
 */
 void R_RotateForEntity (entity_t *e)
 {
-	glTranslatef_fp (e->origin[0], e->origin[1], e->origin[2]);
-
-	glRotatef_fp (e->angles[1], 0, 0, 1);
-	glRotatef_fp (-e->angles[0], 0, 1, 0);
-	glRotatef_fp (-e->angles[2], 1, 0, 0);
+	GL_Translatef (e->origin[0], e->origin[1], e->origin[2]);
+	GL_Rotatef (e->angles[1], 0, 0, 1);
+	GL_Rotatef (-e->angles[0], 0, 1, 0);
+	GL_Rotatef (-e->angles[2], 1, 0, 0);
 }
 
 /*
@@ -159,7 +166,7 @@ static void R_RotateForEntity2 (entity_t *e)
 	float	forward, yaw, pitch;
 	vec3_t			angles;
 
-	glTranslatef_fp(e->origin[0], e->origin[1], e->origin[2]);
+	GL_Translatef(e->origin[0], e->origin[1], e->origin[2]);
 
 	if (e->model->flags & EF_FACE_VIEW)
 	{
@@ -191,26 +198,26 @@ static void R_RotateForEntity2 (entity_t *e)
 		angles[1] = yaw;
 		angles[2] = 0;
 
-		glRotatef_fp (-angles[0], 0, 1, 0);
-		glRotatef_fp (angles[1], 0, 0, 1);
-//		glRotatef_fp (-angles[2], 1, 0, 0);
-		glRotatef_fp (-e->angles[2], 1, 0, 0);
+		GL_Rotatef (-angles[0], 0, 1, 0);
+		GL_Rotatef (angles[1], 0, 0, 1);
+		GL_Rotatef (-e->angles[2], 1, 0, 0);
 	}
 	else
 	{
-		if (e->model->flags & EF_ROTATE)
+		if ((e->model->flags & EF_ROTATE) ||
+		    (R_GetPimpFlags(e, NULL) & EF_SPIN))
 		{
-			glRotatef_fp (anglemod((e->origin[0] + e->origin[1])*0.8
+			GL_Rotatef (anglemod((e->origin[0] + e->origin[1])*0.8
 								+ (108*cl.time)),
 						    0, 0, 1);
 		}
 		else
 		{
-			glRotatef_fp (e->angles[1], 0, 0, 1);
+			GL_Rotatef (e->angles[1], 0, 0, 1);
 		}
 
-		glRotatef_fp (-e->angles[0], 0, 1, 0);
-		glRotatef_fp (-e->angles[2], 1, 0, 0);
+		GL_Rotatef (-e->angles[0], 0, 1, 0);
+		GL_Rotatef (-e->angles[2], 1, 0, 0);
 	}
 }
 
@@ -240,7 +247,7 @@ static mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 
 	if ((frame >= psprite->numframes) || (frame < 0))
 	{
-		Con_DPrintf ("%s: no such frame %d\n", __thisfunc__, frame);
+		Con_DPrintf ("%s: no such frame %d for %s\n", __thisfunc__, frame, e->model->name);
 		frame = 0;
 	}
 
@@ -397,43 +404,14 @@ static void R_DrawSpriteModel (entity_t *e)
 		Sys_Error ("%s: Bad sprite type %d", __thisfunc__, psprite->type);
 	}
 
-/* Pa3PyX: new translucency code below
-	if (e->drawflags & DRF_TRANSLUCENT)
-	{
-		glEnable_fp (GL_BLEND);
-		glColor4f_fp (1,1,1,r_wateralpha.value);
-	}
-	else if (e->model->flags & EF_TRANSPARENT)
-	{
-		glEnable_fp (GL_BLEND);
-		glColor3f_fp (1,1,1);
-	}
-	else
-	{
-		glEnable_fp (GL_BLEND);
-		glColor3f_fp (1,1,1);
-	}
-*/
-	/* Pa3PyX: new translucency mechanism (doesn't look
-	   as good, should work with non 3Dfx MiniGL drivers */
+	/* translucency handling */
 	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
 	{
-		glDisable_fp (GL_ALPHA_TEST);
 		glEnable_fp (GL_BLEND);
-		glTexEnvf_fp (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-		glColor4f_fp (1.0f, 1.0f, 1.0f, r_wateralpha.value);
 	}
 	else
 	{
-	/* pa3pyx's alpha code looks rather ugly, use the original one.
 		glDisable_fp (GL_BLEND);
-		glEnable_fp (GL_ALPHA_TEST);
-		glAlphaFunc_fp (GL_GREATER, 0.632);
-		glColor4f_fp (1.0f, 1.0f, 1.0f, 1.0f);
-	*/
-	/* here, we use the original alpha code	*/
-		glEnable_fp (GL_BLEND);
-		glColor3f_fp (1,1,1);
 	}
 
 	GL_Bind(frame->gl_texturenum);
@@ -441,49 +419,41 @@ static void R_DrawSpriteModel (entity_t *e)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 
-	glBegin_fp (GL_QUADS);
+	GL_ImmBegin ();
 
-	glTexCoord2f_fp (0, 1);
+	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
+		GL_ImmColor4f (1.0f, 1.0f, 1.0f, r_wateralpha.value);
+	else
+		GL_ImmColor4f (1.0f, 1.0f, 1.0f, 1.0f);
+
+	GL_ImmTexCoord2f (0, 1);
 	VectorMA (e->origin, frame->down, r_spritedesc.vup, point);
 	VectorMA (point, frame->left, r_spritedesc.vright, point);
-	glVertex3fv_fp (point);
+	GL_ImmVertex3f (point[0], point[1], point[2]);
 
-	glTexCoord2f_fp (0, 0);
+	GL_ImmTexCoord2f (0, 0);
 	VectorMA (e->origin, frame->up, r_spritedesc.vup, point);
 	VectorMA (point, frame->left, r_spritedesc.vright, point);
-	glVertex3fv_fp (point);
+	GL_ImmVertex3f (point[0], point[1], point[2]);
 
-	glTexCoord2f_fp (1, 0);
+	GL_ImmTexCoord2f (1, 0);
 	VectorMA (e->origin, frame->up, r_spritedesc.vup, point);
 	VectorMA (point, frame->right, r_spritedesc.vright, point);
-	glVertex3fv_fp (point);
+	GL_ImmVertex3f (point[0], point[1], point[2]);
 
-	glTexCoord2f_fp (1, 1);
+	GL_ImmTexCoord2f (1, 1);
 	VectorMA (e->origin, frame->down, r_spritedesc.vup, point);
 	VectorMA (point, frame->right, r_spritedesc.vright, point);
-	glVertex3fv_fp (point);
+	GL_ImmVertex3f (point[0], point[1], point[2]);
 
-	glEnd_fp ();
+	GL_ImmEnd (GL_QUADS, &gl_shader_alias);
 
 // restore tex parms
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-/* for pa3pyx's translucency code changes above
+	GL_SetAlphaThreshold(0.01f);
 	glDisable_fp (GL_BLEND);
-*/
-	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
-	{
-		glDisable_fp (GL_BLEND);
-		glTexEnvf_fp (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-	}
-	else
-	{
-	/* not using pa3pyx's alpha code (see above)
-		glDisable_fp (GL_ALPHA_TEST);
-	*/
-		glDisable_fp (GL_BLEND);
-	}
 }
 
 
@@ -542,6 +512,8 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum)
 
 	while (1)
 	{
+		GLenum prim;
+
 		// get the vertex count and primitive type
 		count = *order++;
 		if (!count)
@@ -549,15 +521,17 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum)
 		if (count < 0)
 		{
 			count = -count;
-			glBegin_fp (GL_TRIANGLE_FAN);
+			prim = GL_TRIANGLE_FAN;
 		}
 		else
-			glBegin_fp (GL_TRIANGLE_STRIP);
+			prim = GL_TRIANGLE_STRIP;
+
+		GL_ImmBegin ();
 
 		do
 		{
 			// texture coordinates come from the draw list
-			glTexCoord2f_fp (((float *)order)[0], ((float *)order)[1]);
+			GL_ImmTexCoord2f (((float *)order)[0], ((float *)order)[1]);
 			order += 2;
 
 			// normals and vertexes come from the frame list
@@ -565,19 +539,19 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum)
 			if (gl_lightmap_format == GL_RGBA)
 			{
 				l = shadedots[verts->lightnormalindex];
-				glColor4f_fp (l * lightcolor[0], l * lightcolor[1], l * lightcolor[2], model_constant_alpha);
+				GL_ImmColor4f (l * lightcolor[0], l * lightcolor[1], l * lightcolor[2], model_constant_alpha);
 			}
 			else
 			{
 				l = shadedots[verts->lightnormalindex] * shadelight;
-				glColor4f_fp (r*l, g*l, b*l, model_constant_alpha);
+				GL_ImmColor4f (r*l, g*l, b*l, model_constant_alpha);
 			}
 
-			glVertex3f_fp (verts->v[0], verts->v[1], verts->v[2]);
+			GL_ImmVertex3f (verts->v[0], verts->v[1], verts->v[2]);
 			verts++;
 		} while (--count);
 
-		glEnd_fp ();
+		GL_ImmEnd (prim, &gl_shader_alias);
 	}
 }
 
@@ -613,6 +587,8 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 
 	while (1)
 	{
+		GLenum prim;
+
 		// get the vertex count and primitive type
 		count = *order++;
 		if (!count)
@@ -620,15 +596,18 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 		if (count < 0)
 		{
 			count = -count;
-			glBegin_fp (GL_TRIANGLE_FAN);
+			prim = GL_TRIANGLE_FAN;
 		}
 		else
-			glBegin_fp (GL_TRIANGLE_STRIP);
+			prim = GL_TRIANGLE_STRIP;
+
+		GL_ImmBegin ();
+		GL_ImmColor4f (0, 0, 0, 0.5);
 
 		do
 		{
 			// texture coordinates come from the draw list
-			// (skipped for shadows) glTexCoord2fv_fp ((float *)order);
+			// (skipped for shadows)
 			order += 2;
 
 			// normals and vertexes come from the frame list
@@ -640,12 +619,12 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 			point[1] -= shadevector[1]*(point[2]+lheight);
 			point[2] = height;
 //			height -= 0.001;
-			glVertex3fv_fp (point);
+			GL_ImmVertex3f (point[0], point[1], point[2]);
 
 			verts++;
 		} while (--count);
 
-		glEnd_fp ();
+		GL_ImmEnd (prim, &gl_shader_flat);
 	}
 
 	if (have_stencil)
@@ -667,7 +646,7 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 	frame = e->frame;
 	if ((frame >= paliashdr->numframes) || (frame < 0))
 	{
-		Con_DPrintf ("%s: no such frame %d\n", __thisfunc__, frame);
+		Con_DPrintf ("%s: no such frame %d for %s\n", __thisfunc__, frame, e->model->name);
 		frame = 0;
 	}
 
@@ -736,7 +715,8 @@ static void R_DrawAliasModel (entity_t *e)
 		AliasModelGetLightInfo (e);
 
 	mls = e->drawflags & MLS_MASKIN;
-	if (e->model->flags & EF_ROTATE)
+	if ((e->model->flags & EF_ROTATE) ||
+	    (R_GetPimpFlags(e, NULL) & (EF_SPIN | EF_FLOAT)))
 	{
 		ambientlight = shadelight =
 		lightcolor[0] =
@@ -776,10 +756,28 @@ static void R_DrawAliasModel (entity_t *e)
 				add = cl_dlights[lnum].radius - VectorLengthFast(dist);
 				if (add > 0)
 				{
-					ambientlight += add;
-					lightcolor[0] += (cl_dlights[lnum].color[0] * add);
-					lightcolor[1] += (cl_dlights[lnum].color[1] * add);
-					lightcolor[2] += (cl_dlights[lnum].color[2] * add);
+					if (cl_dlights[lnum].dark)
+					{
+						ambientlight -= add;
+						if (ambientlight < 0)
+							ambientlight = 0;
+						lightcolor[0] -= (cl_dlights[lnum].color[0] * add);
+						if (lightcolor[0] < 0)
+							lightcolor[0] = 0;
+						lightcolor[1] -= (cl_dlights[lnum].color[1] * add);
+						if (lightcolor[1] < 0)
+							lightcolor[1] = 0;
+						lightcolor[2] -= (cl_dlights[lnum].color[2] * add);
+						if (lightcolor[2] < 0)
+							lightcolor[2] = 0;
+					}
+					else
+					{
+						ambientlight += add;
+						lightcolor[0] += (cl_dlights[lnum].color[0] * add);
+						lightcolor[1] += (cl_dlights[lnum].color[1] * add);
+						lightcolor[2] += (cl_dlights[lnum].color[2] * add);
+					}
 				}
 			}
 		}
@@ -811,7 +809,7 @@ static void R_DrawAliasModel (entity_t *e)
 	//
 	// draw all the triangles
 	//
-	glPushMatrix_fp ();
+	GL_PushMatrix();
 	R_RotateForEntity2(e);
 
 	if (e->scale != 0 && e->scale != 100)
@@ -870,7 +868,8 @@ static void R_DrawAliasModel (entity_t *e)
 		tmatrix[2][3] = paliashdr->scale_origin[2];
 	}
 
-	if (clmodel->flags & EF_ROTATE)
+	if ((clmodel->flags & EF_ROTATE) ||
+	    (R_GetPimpFlags(e, NULL) & EF_FLOAT))
 	{
 		// Floating motion
 		tmatrix[2][3] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
@@ -879,44 +878,40 @@ static void R_DrawAliasModel (entity_t *e)
 	if (e == &cl.viewent && scr_fov.integer > 90) /* compensate viewmodel distortion at fov>90 */
 	{
 		float fovscale = tan(scr_fov.value * (0.5 * M_PI / 180));
-		glTranslatef_fp (tmatrix[0][3], tmatrix[1][3] * fovscale, tmatrix[2][3] * fovscale);	// paliashdr->scale_origin[0..2]
-		glScalef_fp (tmatrix[0][0], tmatrix[1][1] * fovscale, tmatrix[2][2] * fovscale);	// paliashdr->scale[0..2]
+		GL_Translatef (tmatrix[0][3], tmatrix[1][3] * fovscale, tmatrix[2][3] * fovscale);	// paliashdr->scale_origin[0..2]
+		GL_Scalef (tmatrix[0][0], tmatrix[1][1] * fovscale, tmatrix[2][2] * fovscale);	// paliashdr->scale[0..2]
 	}
 	else
 	{
-		glTranslatef_fp (tmatrix[0][3], tmatrix[1][3], tmatrix[2][3]);	// paliashdr->scale_origin[0..2]
-		glScalef_fp (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);	// paliashdr->scale[0..2]
+		GL_Translatef (tmatrix[0][3], tmatrix[1][3], tmatrix[2][3]);	// paliashdr->scale_origin[0..2]
+		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);	// paliashdr->scale[0..2]
 	}
 
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		glEnable_fp (GL_BLEND);
 		glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-	//	glColor3f_fp (1,1,1);
 		model_constant_alpha = 1.0f;
 		glDisable_fp (GL_CULL_FACE);
 	}
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
-	//	glColor4f_fp (1,1,1,r_wateralpha.value);
 		model_constant_alpha = r_wateralpha.value;
 	}
 	else if (e->model->flags & EF_TRANSPARENT)
 	{
 		glEnable_fp (GL_BLEND);
-	//	glColor3f_fp (1,1,1);
 		model_constant_alpha = 1.0f;
 	}
 	else if (e->model->flags & EF_HOLEY)
 	{
-		glEnable_fp (GL_BLEND);
-	//	glColor3f_fp (1,1,1);
+		glDisable_fp (GL_BLEND);
+		GL_SetAlphaThreshold(0.666f);	/* alpha test for see-through cutouts */
 		model_constant_alpha = 1.0f;
 	}
 	else
 	{
-		glColor3f_fp (1,1,1);
 		model_constant_alpha = 1.0f;
 	}
 
@@ -970,25 +965,13 @@ static void R_DrawAliasModel (entity_t *e)
 		}
 	}
 
-	if (gl_smoothmodels.integer)
-		glShadeModel_fp (GL_SMOOTH);
-	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-
-#if defined(__AMIGA__) && defined(REFGL_MINIGL)
-	if (gl_affinemodels.integer)
-		glDisable_fp (MGL_PERSPECTIVE_MAPPING);
-#else
-	if (gl_affinemodels.integer)
-		glHint_fp (GL_PERSPECTIVE_CORRECTION_HINT, GL_FASTEST);
-#endif
-
 	R_SetupAliasFrame (e, paliashdr);
 
 // restore params
+
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
 	    (e->model->flags & EF_SPECIAL_TRANS) ||
-	    (e->model->flags & EF_TRANSPARENT) ||
-	    (e->model->flags & EF_HOLEY) )
+	    (e->model->flags & EF_TRANSPARENT))
 	{
 		glDisable_fp (GL_BLEND);
 	}
@@ -999,33 +982,21 @@ static void R_DrawAliasModel (entity_t *e)
 		glEnable_fp (GL_CULL_FACE);
 	}
 
-	glTexEnvf_fp (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+	if (e->model->flags & EF_HOLEY)
+		GL_SetAlphaThreshold(0.01f);	/* restore default */
 
-	glShadeModel_fp (GL_FLAT);
-#if defined(__AMIGA__) && defined(REFGL_MINIGL)
-	if (gl_affinemodels.integer)
-		glEnable_fp (MGL_PERSPECTIVE_MAPPING);
-#else
-	if (gl_affinemodels.integer)
-		glHint_fp (GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
-#endif
-
-	glPopMatrix_fp ();
+	GL_PopMatrix();
 
 	if (r_shadows.integer)
 	{
-		glPushMatrix_fp ();
+		GL_PushMatrix();
 		R_RotateForEntity2 (e);
-		glDisable_fp (GL_TEXTURE_2D);
 		glEnable_fp (GL_BLEND);
-		glColor4f_fp (0,0,0,0.5);
 		glDepthMask_fp (0);	// prevent Z fighting
 		GL_DrawAliasShadow (e, paliashdr, lastposenum);
 		glDepthMask_fp (1);
-		glEnable_fp (GL_TEXTURE_2D);
 		glDisable_fp (GL_BLEND);
-		glColor4f_fp (1,1,1,1);
-		glPopMatrix_fp ();
+		GL_PopMatrix();
 	}
 }
 
@@ -1189,16 +1160,50 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 #define	MISSILE_STYLE	6	/* Flicker	*/
 #define	PULSE_STYLE	11	/* Slow pulse	*/
 
+// Per-entity PimpModel overrides, keyed by entity number
+static pimp_override_t	pimp_overrides[MAX_EDICTS];
+
+void R_ClearPimpOverrides (void)
+{
+	memset(pimp_overrides, 0, sizeof(pimp_overrides));
+}
+
+pimp_override_t *R_GetPimpOverride (int entnum)
+{
+	if (entnum < 0 || entnum >= MAX_EDICTS)
+		return NULL;
+	return &pimp_overrides[entnum];
+}
+
+// Returns combined ex_flags for an entity (pimp override | model defaults)
+// and sets *gsettings_out to the active glow settings
+int R_GetPimpFlags (entity_t *e, float **gsettings_out)
+{
+	int entnum = (int)(e - cl_entities);
+	if (entnum >= 0 && entnum < MAX_EDICTS && pimp_overrides[entnum].active)
+	{
+		if (gsettings_out)
+			*gsettings_out = pimp_overrides[entnum].glow_settings;
+		return pimp_overrides[entnum].ex_flags | e->model->ex_flags;
+	}
+	if (gsettings_out)
+		*gsettings_out = e->model->glow_settings;
+	return e->model->ex_flags;
+}
+
 static void R_DrawGlow (entity_t *e)
 {
 	qmodel_t	*clmodel;
 
 	clmodel = e->model;
 
+	float *gsettings;
+	int glow_flags = R_GetPimpFlags(e, &gsettings);
+
 	// Torches & Flames
-	if ((gl_glows.integer && (clmodel->ex_flags & XF_TORCH_GLOW)) ||
-	    (gl_missile_glows.integer && (clmodel->ex_flags & XF_MISSILE_GLOW)) ||
-	    (gl_other_glows.integer && (clmodel->ex_flags & XF_GLOW)) )
+	if ((gl_glows.integer && (glow_flags & XF_TORCH_GLOW)) ||
+	    (gl_missile_glows.integer && (glow_flags & XF_MISSILE_GLOW)) ||
+	    (gl_other_glows.integer && (glow_flags & (XF_GLOW | EF_GLOW))) )
 	{
 		// NOTE: It would be better if we batched these up.
 		//	 All those state changes are not nice. KH
@@ -1219,6 +1224,10 @@ static void R_DrawGlow (entity_t *e)
 		if ( !q_strncasecmp(clmodel->name, "models/i_btmana", 15))
 			radius += 5.0f;
 
+		// Use custom radius if set
+		if (gsettings[ORB_RADIUS] > 1)
+			radius = gsettings[ORB_RADIUS];
+
 		VectorSubtract(lightorigin, r_origin, vp2);
 
 		// See if view is outside the light.
@@ -1227,21 +1236,20 @@ static void R_DrawGlow (entity_t *e)
 		if (distance > radius)
 		{
 			VectorNormalizeFast(vp2);
-			glPushMatrix_fp();
+			GL_PushMatrix();
 
 			// Translate the glow to coincide with the flame. KH
-			if (clmodel->ex_flags & XF_TORCH_GLOW)
+			if (glow_flags & XF_TORCH_GLOW)
 			{
-				if (clmodel->ex_flags & XF_TORCH_GLOW_EGYPT)	// egypt torch fix
-					glTranslatef_fp (cos(e->angles[1]/180*M_PI)*8.0f, sin(e->angles[1]/180*M_PI)*8.0f, 16.0f);
-				else	glTranslatef_fp (0.0f, 0.0f, 8.0f);
+				if (glow_flags & XF_TORCH_GLOW_EGYPT)	// egypt torch fix
+					GL_Translatef (cos(e->angles[1]/180*M_PI)*8.0f + gsettings[ORB_OFFSET_X], sin(e->angles[1]/180*M_PI)*8.0f + gsettings[ORB_OFFSET_Y], 16.0f + gsettings[ORB_OFFSET_Z]);
+				else	GL_Translatef (gsettings[ORB_OFFSET_X], gsettings[ORB_OFFSET_Y], 8.0f + gsettings[ORB_OFFSET_Z]);
 			}
 
 			// 'floating' movement
-			if (clmodel->flags & EF_ROTATE)
-				glTranslatef_fp (0, 0, sin(e->origin[0] + e->origin[1] + (cl.time*3))*5.5);
+			if (clmodel->flags & EF_ROTATE || glow_flags & EF_FLOAT)
+				GL_Translatef (gsettings[ORB_OFFSET_X], gsettings[ORB_OFFSET_Y], sin(e->origin[0] + e->origin[1] + (cl.time*3))*5.5 + gsettings[ORB_OFFSET_Z]);
 
-			glBegin_fp(GL_TRIANGLE_FAN);
 			// Diminish torch flare inversely with distance.
 			intensity = (1024.0f - distance) / 1024.0f;
 
@@ -1254,60 +1262,49 @@ static void R_DrawGlow (entity_t *e)
 			else if (intensity < 0.0f)
 				intensity = 0.0f;
 
-			// Now modulate with flicker.
+			// Now modulate with flicker using LIGHT_STYLE from glow_settings
 			j = 0;	// avoid compiler warning
-			if (clmodel->ex_flags & XF_TORCH_GLOW)
 			{
+				int style = (int)gsettings[LIGHT_STYLE];
 				i = (int)(cl.time*10);
-				if (!cl_lightstyle[TORCH_STYLE].length) {
+				if (style <= 0 || !cl_lightstyle[style].length) {
 					j = 256;
 				}
 				else
 				{
-					j = i % cl_lightstyle[TORCH_STYLE].length;
-					j = cl_lightstyle[TORCH_STYLE].map[j] - 'a';
-					j = j * 22;
-				}
-			}
-			else if (clmodel->ex_flags & XF_MISSILE_GLOW)
-			{
-				i = (int)(cl.time*10);
-				if (!cl_lightstyle[MISSILE_STYLE].length) {
-					j = 256;
-				}
-				else
-				{
-					j = i % cl_lightstyle[MISSILE_STYLE].length;
-					j = cl_lightstyle[MISSILE_STYLE].map[j] - 'a';
-					j = j * 22;
-				}
-			}
-			else if (clmodel->ex_flags & XF_GLOW)
-			{
-				i = (int)(cl.time*10);
-				if (!cl_lightstyle[PULSE_STYLE].length) {
-					j = 256;
-				}
-				else
-				{
-					j = i % cl_lightstyle[PULSE_STYLE].length;
-					j = cl_lightstyle[PULSE_STYLE].map[j] - 'a';
+					j = i % cl_lightstyle[style].length;
+					j = cl_lightstyle[style].map[j] - 'a';
 					j = j * 22;
 				}
 			}
 
 			intensity *= ((float)j / 255.0f);
-			glColor4f_fp (clmodel->glow_color[0]*intensity,
-					clmodel->glow_color[1]*intensity,
-					clmodel->glow_color[2]*intensity,
-					clmodel->glow_color[3]);
+
+			// Attenuate glow by fog so it doesn't shine through
+			{
+				float fogdensity = Fog_GetDensity();
+				if (fogdensity > 0)
+				{
+					float fogfactor = exp(-fogdensity * fogdensity * distance * distance / (64.0f * 64.0f));
+					if (fogfactor < 0) fogfactor = 0;
+					if (fogfactor > 1) fogfactor = 1;
+					intensity *= fogfactor;
+				}
+			}
+
+			GL_ImmBegin ();
+
+			GL_ImmColor4f (gsettings[COLOR_R]*intensity,
+					gsettings[COLOR_G]*intensity,
+					gsettings[COLOR_B]*intensity,
+					gsettings[COLOR_A]);
 
 			for (i = 0; i < 3; i++)
 				glow_vect[i] = lightorigin[i] - vp2[i]*radius;
 
-			glVertex3fv_fp(glow_vect);
+			GL_ImmVertex3f (glow_vect[0], glow_vect[1], glow_vect[2]);
 
-			glColor4f_fp(0.0f, 0.0f, 0.0f, 1.0f);
+			GL_ImmColor4f (0.0f, 0.0f, 0.0f, 1.0f);
 
 			for (i = 16; i >= 0; i--)
 			{
@@ -1316,13 +1313,12 @@ static void R_DrawGlow (entity_t *e)
 				for (j = 0; j < 3; j++)
 					glow_vect[j] = lightorigin[j] + vright[j]*cos(a)*radius + vup[j]*sin(a)*radius;
 
-				glVertex3fv_fp(glow_vect);
+				GL_ImmVertex3f (glow_vect[0], glow_vect[1], glow_vect[2]);
 			}
 
-			glEnd_fp();
-			glColor4f_fp (0.0f, 0.0f, 0.0f, 1.0f);
+			GL_ImmEnd (GL_TRIANGLE_FAN, &gl_shader_flat);
 			// Restore previous matrix
-			glPopMatrix_fp();
+			GL_PopMatrix();
 		}
 	}
 }
@@ -1339,8 +1335,6 @@ static void R_DrawAllGlows (void)
 		return;
 
 	glDepthMask_fp (0);
-	glDisable_fp (GL_TEXTURE_2D);
-	glShadeModel_fp (GL_SMOOTH);
 	glEnable_fp (GL_BLEND);
 	glBlendFunc_fp (GL_ONE, GL_ONE);
 
@@ -1353,10 +1347,8 @@ static void R_DrawAllGlows (void)
 	}
 
 	glDisable_fp (GL_BLEND);
-	glEnable_fp (GL_TEXTURE_2D);
 	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthMask_fp (1);
-	glShadeModel_fp (GL_FLAT);
 }
 
 //=============================================================================
@@ -1433,7 +1425,8 @@ static void R_DrawViewModel (void)
 	    (chase_active.integer) ||
 //rjr	    (cl.items & IT_INVISIBILITY) ||
 	    (!r_drawviewmodel.integer) ||
-	    (!r_drawentities.integer))
+	    (!r_drawentities.integer) ||
+	    (scr_viewsize.integer >= 140))
 	{
 		return;
 	}
@@ -1508,12 +1501,12 @@ correction. To be called from R_PolyBlend().
 */
 static void GL_DrawBlendPoly (void)
 {
-	glBegin_fp (GL_QUADS);
-	glVertex3f_fp (10, 100, 100);
-	glVertex3f_fp (10, -100, 100);
-	glVertex3f_fp (10, -100, -100);
-	glVertex3f_fp (10, 100, -100);
-	glEnd_fp ();
+	GL_ImmBegin ();
+	GL_ImmVertex3f (10, 100, 100);
+	GL_ImmVertex3f (10, -100, 100);
+	GL_ImmVertex3f (10, -100, -100);
+	GL_ImmVertex3f (10, 100, -100);
+	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 }
 
 /*
@@ -1536,9 +1529,14 @@ static void GL_DoGamma (void)
 		return;
 
 	glBlendFunc_fp (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-	glColor4f_fp (1, 1, 1, v_gamma.value);
 
-	GL_DrawBlendPoly ();
+	GL_ImmBegin ();
+	GL_ImmColor4f (1, 1, 1, v_gamma.value);
+	GL_ImmVertex3f (10, 100, 100);
+	GL_ImmVertex3f (10, -100, 100);
+	GL_ImmVertex3f (10, -100, -100);
+	GL_ImmVertex3f (10, 100, -100);
+	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 
 	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -1554,26 +1552,29 @@ static void R_PolyBlend (void)
 	if (!gl_polyblend.integer)
 		return;
 
+
 	glEnable_fp (GL_BLEND);
 	glDisable_fp (GL_DEPTH_TEST);
-	glDisable_fp (GL_TEXTURE_2D);
+	GL_SetAlphaThreshold(0.0f);
 
-	glLoadIdentity_fp ();
-
-	glRotatef_fp (-90,  1, 0, 0);	// put Z going up
-	glRotatef_fp (90,  0, 0, 1);	// put Z going up
+	GL_LoadIdentity();
+	GL_Rotatef(-90, 1, 0, 0);
+	GL_Rotatef(90, 0, 0, 1);
 
 	if (v_blend[3])
 	{
-		glColor4fv_fp (v_blend);
-		GL_DrawBlendPoly ();
+		GL_ImmBegin ();
+		GL_ImmColor4f (v_blend[0], v_blend[1], v_blend[2], v_blend[3]);
+		GL_ImmVertex3f (10, 100, 100);
+		GL_ImmVertex3f (10, -100, 100);
+		GL_ImmVertex3f (10, -100, -100);
+		GL_ImmVertex3f (10, 100, -100);
+		GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 	}
 
 	/*GL_DoGamma ();*/
 
 	glDisable_fp (GL_BLEND);
-	glEnable_fp (GL_TEXTURE_2D);
-	glEnable_fp (GL_ALPHA_TEST);
 }
 
 //=============================================================================
@@ -1681,13 +1682,6 @@ static void R_SetupFrame (void)
 
 #define NEARCLIP	4
 #define FARCLIP		4096
-static void GL_SetFrustum (GLdouble fovx, GLdouble fovy)
-{
-	GLdouble	xmax, ymax;
-	xmax = NEARCLIP * tan(fovx * M_PI / 360.0);
-	ymax = NEARCLIP * tan(fovy * M_PI / 360.0);
-	glFrustum_fp (-xmax, xmax, -ymax, ymax, NEARCLIP, FARCLIP);
-}
 
 /*
 =============
@@ -1698,12 +1692,13 @@ static void R_SetupGL (void)
 {
 	int	x, x2, y2, y, w, h;
 
+	/* default: discard fully transparent pixels (alpha=0) but keep
+	 * semi-transparent ones. Fence/holey textures set 0.666 where needed. */
+	GL_SetAlphaThreshold(0.01f);
+
 	//
 	// set up viewpoint
 	//
-	glMatrixMode_fp(GL_PROJECTION);
-	glLoadIdentity_fp ();
-
 	x  =  r_refdef.vrect.x * glwidth/vid.width;
 	x2 = (r_refdef.vrect.x + r_refdef.vrect.width) * glwidth/vid.width;
 	y  = (vid.height - r_refdef.vrect.y) * glheight/vid.height;
@@ -1723,30 +1718,36 @@ static void R_SetupGL (void)
 	h = y - y2;
 
 	glViewport_fp (glx + x, gly + y2, w, h);
-	GL_SetFrustum (r_refdef.fov_x, r_refdef.fov_y);
+
+	{
+		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);
+		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, FARCLIP);
+	}
 
 	if (mirror)
 	{
 		if (mirror_plane->normal[2])
-			glScalef_fp (1, -1, 1);
+			GL_Scalef(1, -1, 1);
 		else
-			glScalef_fp (-1, 1, 1);
+			GL_Scalef(-1, 1, 1);
 		glCullFace_fp(GL_BACK);
 	}
 	else
 		glCullFace_fp(GL_FRONT);
 
-	glMatrixMode_fp(GL_MODELVIEW);
-	glLoadIdentity_fp ();
+	GL_MatrixMode(GL_MAT_MODELVIEW);
+	GL_LoadIdentity();
+	GL_Rotatef(-90, 1, 0, 0);
+	GL_Rotatef(90, 0, 0, 1);
+	GL_Rotatef(-r_refdef.viewangles[2], 1, 0, 0);
+	GL_Rotatef(-r_refdef.viewangles[0], 0, 1, 0);
+	GL_Rotatef(-r_refdef.viewangles[1], 0, 0, 1);
+	GL_Translatef(-r_refdef.vieworg[0], -r_refdef.vieworg[1], -r_refdef.vieworg[2]);
 
-	glRotatef_fp (-90,  1, 0, 0);	// put Z going up
-	glRotatef_fp (90,  0, 0, 1);	// put Z going up
-	glRotatef_fp (-r_refdef.viewangles[2],  1, 0, 0);
-	glRotatef_fp (-r_refdef.viewangles[0],  0, 1, 0);
-	glRotatef_fp (-r_refdef.viewangles[1],  0, 0, 1);
-	glTranslatef_fp (-r_refdef.vieworg[0],  -r_refdef.vieworg[1],  -r_refdef.vieworg[2]);
-
-	glGetFloatv_fp (GL_MODELVIEW_MATRIX, r_world_matrix);
+	GL_GetModelview(r_world_matrix);
 
 	//
 	// set drawing parms
@@ -1757,7 +1758,6 @@ static void R_SetupGL (void)
 		glDisable_fp(GL_CULL_FACE);
 
 	glDisable_fp(GL_BLEND);
-	glDisable_fp(GL_ALPHA_TEST);
 	glEnable_fp(GL_DEPTH_TEST);
 }
 
@@ -1776,15 +1776,23 @@ static void R_RenderScene (void)
 
 	R_SetupGL ();
 
+	Fog_SetupFrame ();
+
 	R_MarkLeaves ();	// done here so we know if we're in water
 
+	Fog_EnableGFog ();
+
 	R_DrawWorld ();		// adds static entities to the list
+
+	Sky_DrawSky ();		// render skybox
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
 	R_DrawEntitiesOnList ();
 
 	R_DrawAllGlows();
+
+	Fog_DisableGFog ();
 
 	R_RenderDlights ();
 }
@@ -1806,27 +1814,6 @@ static void R_Clear (void)
 		gldepthmin = 0;
 		gldepthmax = 0.5;
 		glDepthFunc_fp (GL_LEQUAL);
-	}
-	else if (gl_ztrick.integer)
-	{
-		static int trickframe;
-
-		if (gl_clear.integer)
-			glClear_fp (GL_COLOR_BUFFER_BIT);
-
-		trickframe++;
-		if (trickframe & 1)
-		{
-			gldepthmin = 0;
-			gldepthmax = 0.49999;
-			glDepthFunc_fp (GL_LEQUAL);
-		}
-		else
-		{
-			gldepthmin = 1;
-			gldepthmax = 0.5;
-			glDepthFunc_fp (GL_GEQUAL);
-		}
 	}
 	else
 	{
@@ -1909,23 +1896,21 @@ static void R_Mirror (void)
 
 	// blend on top
 	glEnable_fp (GL_BLEND);
-	glMatrixMode_fp(GL_PROJECTION);
+	GL_MatrixMode(GL_MAT_PROJECTION);
 	if (mirror_plane->normal[2])
-		glScalef_fp (1,-1,1);
+		GL_Scalef (1,-1,1);
 	else
-		glScalef_fp (-1,1,1);
+		GL_Scalef (-1,1,1);
 	glCullFace_fp(GL_FRONT);
-	glMatrixMode_fp(GL_MODELVIEW);
+	GL_MatrixMode(GL_MAT_MODELVIEW);
 
-	glLoadMatrixf_fp (r_base_world_matrix);
+	GL_LoadMatrixf (r_base_world_matrix);
 
-	glColor4f_fp (1,1,1,r_mirroralpha.value);
 	s = cl.worldmodel->textures[mirrortexturenum]->texturechain;
 	for ( ; s ; s = s->texturechain)
 		R_RenderBrushPoly (&r_worldentity, s, true);
 	cl.worldmodel->textures[mirrortexturenum]->texturechain = NULL;
 	glDisable_fp (GL_BLEND);
-	glColor4f_fp (1,1,1,1);
 }
 
 
