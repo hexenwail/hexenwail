@@ -242,6 +242,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	vec3_t		dir;
 	float		length;
 
+	GL_SetAlphaThreshold (0.0f);	/* two-layer sky mode */
 	GL_Bind (solidskytexture);
 
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
