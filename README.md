@@ -31,14 +31,14 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Full GLSL 4.30 shader pipeline — zero immediate mode, zero fixed-function
 - [x] Render scale for crunchy pixel upscaling (25%-100%)
 - [x] Retro mode: Bayer dithering + 256-color palette quantization (Ironwail-style)
-- [x] Display presets: Crunchy (25% scale, point-sampled), Retro, Modern, Custom
+- [x] Display presets: Crunchy (25% scale, point-sampled), Retro, Modern, User
 - [x] Classic/Smooth texture filtering toggle
 - [x] MSAA anti-aliasing (via multisampled FBO)
 - [x] Borderless windowed and fullscreen modes
 - [x] VSync toggle
 - [x] Anisotropic texture filtering
 - [x] Brightness and contrast sliders (GLSL post-process shader)
-- [x] Skybox rendering
+- [x] Two-layer scrolling sky (solid + transparent) and skybox rendering
 - [x] Shader-based fog
 - [x] Fence/chain texture transparency
 - [x] Glow effects with fog attenuation
@@ -47,15 +47,18 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] FPS limiter (24/30/60/72/90/120/144/Unlimited)
 - [x] Show FPS toggle
 - [x] HUD layout modes (Full/Mini/Off/Clean — Clean also hides weapon)
-- [ ] Bloom
+- [ ] Model animation interpolation (lerping)
+- [ ] Physics/render decoupling with entity interpolation
 - [ ] Lightmapped liquid surfaces
 - [ ] Underwater warp effect
 - [ ] Lightstyle interpolation
-- [ ] Physics/render decoupling with entity interpolation
+- [ ] FXAA post-process
+- [ ] HDR rendering pipeline
+- [ ] Square particle toggle (software renderer style)
 
 ### Plays nicely with mods
-- [x] Protocol auto-detection (classic protocol 15 / extended protocol 19)
-- [ ] Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box
+- [x] Protocol auto-detection — default protocol 19 for base game, auto-upgrades to 21 for mods with extended builtins
+- [x] Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box
 - [x] [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) per-entity model overrides (glow, spin, float, color)
 - [x] Extended QuakeC builtins for mod developers
 - [x] 8192 max entities (up from 2048)
@@ -71,7 +74,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Intro cinematic link in main menu (opens in browser)
 
 ### Music and sound
-- [x] OGG, MP3, FLAC, WAV music playback (built-in decoders, zero dependencies)
+- [x] OGG, MP3, FLAC, WAV music playback (all codecs enabled by default)
 - [x] MIDI music via FluidSynth on Linux, native Windows MIDI
 - [x] Soundfont auto-detection (`snd_soundfont` cvar or `data1/soundfont.sf2`)
 - [x] 2048 sound channels — no more effects cutting out in busy scenes
@@ -82,13 +85,14 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Nix flake for reproducible builds and Windows cross-compilation
 - [x] NixOS: FluidSynth soundfont bundled — MIDI works out of the box
 - [x] HiDPI display support
-- [x] Options organized into Display/Sound/Game submenus
-- [x] Display menus show live preview — no screen tint or fade overlay
+- [x] Combined Display menu — rendering and video settings in one place (Ironwail-style)
+- [x] Display menu shows live preview — no screen tint or fade overlay
 - [x] Unified platform layer — shared code in `sys_sdl.c`, minimal OS-specific code
 - [x] Cleaned out legacy platform code (DOS, OS/2, Amiga, macOS, HexenWorld)
 - [x] Cleaned out legacy GL capability detection — assumes GL 4.3
 - [x] Flatpak packaging support
 - [ ] Mouse-driven UI navigation
+- [ ] AppImage packaging
 
 ## Building
 
