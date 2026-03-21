@@ -506,6 +506,20 @@ static void CL_ParseServerInfo (void)
 	player_models[3] = (qmodel_t *)Mod_FindName ("models/assassin.mdl");
 	player_models[4] = (gameflags & GAME_PORTALS) ? (qmodel_t *)Mod_FindName ("models/succubus.mdl") : NULL;
 
+	/* Always init the 15 standard inventory items — needed for
+	 * the ex_inventory-based HUD regardless of protocol version */
+	if (cl.ex_items == NULL)
+	{
+		cl.ex_items = (ex_item_t *)Hunk_AllocName(MAX_ITEMS_EX * sizeof(ex_item_t), "ex_items_cl");
+		cl.num_ex_items = 0;
+		for (i = 0; i < 15; i++)
+		{
+			cl.num_ex_items += 1;
+			cl.ex_items[i].id = (int)(i + 1);
+			q_strlcpy(cl.ex_items[i].icon, va("gfx/arti%02d.lmp", i), MAX_QPATH);
+		}
+	}
+
 	if (cl_protocol == PROTOCOL_UH2_114)
 	{
 		// load model fx from server
@@ -534,18 +548,7 @@ static void CL_ParseServerInfo (void)
 			}
 		}
 
-		if (cl.ex_items == NULL)
-		{
-			cl.ex_items = (ex_item_t *)Hunk_AllocName(MAX_ITEMS_EX * sizeof(ex_item_t), "ex_items_cl");
-			cl.num_ex_items = 0;
-			for (i = 0; i < 15; i++)
-			{
-				cl.num_ex_items += 1;
-				cl.ex_items[i].id = (int)(i + 1);
-				q_strlcpy(cl.ex_items[i].icon, va("gfx/arti%02d.lmp", i), MAX_QPATH);
-			}
-		}
-		//shan check with no ex_items received?
+		// read extended item icon overrides from server
 		for (numitems = 0; ; numitems++)
 		{
 			j = MSG_ReadByte();

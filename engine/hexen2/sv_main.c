@@ -2284,6 +2284,30 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	D_ShowLoadingSize();
 #endif
 	PR_LoadProgs ();
+
+	/* Auto-detect protocol: scan progs for extended builtins (107-112)
+	 * that require protocol 21 (UH2_114). If none found, use the
+	 * default protocol (19/RAVEN_112) for maximum compatibility. */
+	if (sv_protocol == PROTOCOL_VERSION && PROTOCOL_VERSION < PROTOCOL_UH2_114)
+	{
+		int fi;
+		qboolean needs_114 = false;
+		for (fi = 0; fi < progs->numfunctions; fi++)
+		{
+			int bi = -pr_functions[fi].first_statement;
+			if (pr_functions[fi].first_statement < 0 && bi >= 107 && bi <= 112)
+			{
+				needs_114 = true;
+				break;
+			}
+		}
+		if (needs_114)
+		{
+			sv_protocol = PROTOCOL_UH2_114;
+			Con_Printf ("Progs uses extended builtins — auto-upgraded to protocol %d\n", sv_protocol);
+		}
+	}
+
 #if !defined(SERVERONLY)
 	current_loading_size += 10;
 	D_ShowLoadingSize();
