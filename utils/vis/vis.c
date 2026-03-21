@@ -754,7 +754,7 @@ static void LoadPortals (char *name)
 					&w->points[j][0], &w->points[j][1], &w->points[j][2]) != 3)
 				COM_Error ("%s: reading portal %i", __thisfunc__, i);
 		}
-		j += fscanf (f, "\n");  /* dummy assigmnent to j to silence -Wunused-result. */
+		fscanf (f, "\n");
 
 	// calc plane
 		PlaneFromWinding (w, &plane);

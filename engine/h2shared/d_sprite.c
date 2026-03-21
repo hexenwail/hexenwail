@@ -28,7 +28,7 @@ static int		sprite_height;
 static int		minindex, maxindex;
 static sspan_t	*sprite_spans;
 
-#if	!id386
+#if	!id386 && !id68k
 
 /*
 =====================
@@ -766,6 +766,4 @@ void D_DrawSprite (void)
 		D_SpriteDrawSpansT2 (sprite_spans);
 	else
 		D_SpriteDrawSpans (sprite_spans);
-
-	sprite_spans = NULL; /* silence -Wdangling-pointer warnings */
 }

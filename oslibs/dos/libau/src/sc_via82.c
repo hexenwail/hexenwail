@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2008 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
+//*                  email: mpxplay@freemail.hu                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -104,7 +104,7 @@ struct via82xx_card
  int pcmout_pages;
 };
 
-static struct via82xx_card	via;
+struct	via82xx_card	via;
 
 static void via82xx_AC97Codec_ready(unsigned int baseport);
 static void via82xx_ac97_write(unsigned int baseport,unsigned int reg, unsigned int value);
@@ -117,7 +117,7 @@ static void via82xx_channel_reset(struct via82xx_card *card)
 {
  unsigned int baseport = card->iobase;
 
- outb(baseport+VIA_REG_OFFSET_CONTROL, VIA_REG_CTRL_PAUSE|VIA_REG_CTRL_TERMINATE);
+ outb(baseport+VIA_REG_OFFSET_CONTROL, VIA_REG_CTRL_PAUSE|VIA_REG_CTRL_TERMINATE|VIA_REG_CTRL_RESET);
  pds_delay_10us(5);
  outb(baseport + VIA_REG_OFFSET_CONTROL, 0x00);
  outb(baseport + VIA_REG_OFFSET_STATUS, 0xFF);
@@ -225,7 +225,7 @@ static int VIA82XX_adetect(struct mpxplay_audioout_info_s *aui)
  aui->card_private_data=card;
  card->pci_dev=&libau_pci;
 
- if(pcibios_search_devices(&via_devices[0],card->pci_dev)!=PCI_SUCCESSFUL)
+ if(pcibios_search_devices(via_devices,card->pci_dev)!=PCI_SUCCESSFUL)
   goto err_adetect;
 
  pcibios_set_master(card->pci_dev);
@@ -243,8 +243,7 @@ static int VIA82XX_adetect(struct mpxplay_audioout_info_s *aui)
  card->dm=pds_dpmi_dos_allocmem( VIRTUALPAGETABLESIZE   // virtualpagetable
 			    +card->pcmout_bufsize   // pcm output
 			    +4096 );                // to round
- if(!card->dm) goto err_adetect;
-
+if(!card->dm) goto err_adetect;
  card->virtualpagetable=(unsigned long *)(((uint32_t)card->dm->linearptr+4095)&(~4095));
  card->pcmout_buffer=(char *)card->virtualpagetable+VIRTUALPAGETABLESIZE;
 
@@ -267,8 +266,7 @@ static void VIA82XX_close(struct mpxplay_audioout_info_s *aui)
 {
  struct via82xx_card *card=(struct via82xx_card *)aui->card_private_data;
  if(card){
-  if(card->iobase)
-   via82xx_chip_close(card);
+  if(card->iobase)   via82xx_chip_close(card);
   pds_dpmi_dos_freemem();
   aui->card_private_data=NULL;
  }
@@ -327,10 +325,7 @@ _farnspokel((unsigned int)&card->virtualpagetable[pagecount*2+1],VIA_TBL_BIT_EOL
 #endif
 
  // ac97 config
- if(card->pci_dev->device_id==PCI_DEVICE_ID_VT82C686) { // VT8233 set in rbits
-  via82xx_ac97_write(card->iobase,AC97_EXTENDED_STATUS,AC97_EA_VRA);
-  via82xx_ac97_write(card->iobase,AC97_PCM_FRONT_DAC_RATE, aui->freq_card);
- }
+ via82xx_ac97_write(card->iobase,AC97_PCM_FRONT_DAC_RATE, aui->freq_card);
 
  switch(aui->freq_card){
   case 32000:spdif_rate=AC97_SC_SPSR_32K;break;
@@ -409,8 +404,7 @@ static long VIA82XX_getbufpos(struct mpxplay_audioout_info_s *aui)
 
   bufpos = (idx * PCMBUFFERPAGESIZE) + PCMBUFFERPAGESIZE - count;
 
-  if(bufpos<aui->card_dmasize)
-   aui->card_dma_lastgoodpos=bufpos;
+  if(bufpos<aui->card_dmasize)   aui->card_dma_lastgoodpos=bufpos;
  }
 
  return aui->card_dma_lastgoodpos;

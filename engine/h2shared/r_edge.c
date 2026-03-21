@@ -69,7 +69,7 @@ int	r_currentkey;
 static void (*pdrawfunc)(void);
 static void (*pdrawTfunc)(void);
 
-#if	!id386
+#if	!id386 && !id68k
 static void R_GenerateSpans (void);
 static void R_GenerateTSpans (void);
 #endif
@@ -78,6 +78,51 @@ static void R_TrailingEdge (surf_t *surf, edge_t *edge);
 static void R_LeadingEdgeBackwards (edge_t *edge);
 
 //=============================================================================
+
+
+#if 0
+/*
+==============
+R_DrawCulledPolys
+==============
+*/
+static void R_DrawCulledPolys (void)
+{
+	surf_t			*s;
+	msurface_t		*pface;
+
+	currententity = &r_worldentity;
+
+	if (r_worldpolysbacktofront)
+	{
+		for (s = surface_p-1 ; s > &surfaces[1] ; s--)
+		{
+			if (!s->spans)
+				continue;
+
+			if (!(s->flags & SURF_DRAWBACKGROUND))
+			{
+				pface = (msurface_t *)s->data;
+				R_RenderPoly (pface, 15);
+			}
+		}
+	}
+	else
+	{
+		for (s = &surfaces[1] ; s < surface_p ; s++)
+		{
+			if (!s->spans)
+				continue;
+
+			if (!(s->flags & SURF_DRAWBACKGROUND))
+			{
+				pface = (msurface_t *)s->data;
+				R_RenderPoly (pface, 15);
+			}
+		}
+	}
+}
+#endif
 
 
 /*
@@ -122,7 +167,7 @@ void R_BeginEdgeFrame (void)
 }
 
 
-#if	!id386
+#if	!id386 && !id68k
 
 /*
 ==============
@@ -252,7 +297,7 @@ pushback:
 	}
 }
 
-#endif	/* !id386 */
+#endif	/* !id386 && !id68k */
 
 
 /*
@@ -288,7 +333,7 @@ static void R_CleanupSpan (void)
 	} while (surf != &surfaces[1]);
 }
 
-#if	!id386
+#if	!id386 && !id68k
 
 static void R_CleanupSpanT (void)
 {
@@ -318,7 +363,7 @@ static void R_CleanupSpanT (void)
 	} while (surf != &surfaces[1]);
 }
 
-#endif	/* !id386 */
+#endif	/* !id386 && !id68k */
 
 
 /*
@@ -450,7 +495,7 @@ static void R_TrailingEdge (surf_t *surf, edge_t *edge)
 	}
 }
 
-#if	!id386
+#if	!id386 && !id68k
 
 static void R_TrailingEdgeT (surf_t *surf, edge_t *edge)
 {
@@ -799,8 +844,9 @@ static void R_GenerateSpans (void)
 	R_CleanupSpan ();
 
 #if 0
-/* also disabled in x86 asm: see commented out
- *  cmp / jne (under LPatch4) in r_edgea.asm */
+/* also disabled in asm code: see the commented
+ * out cmp / jne (under LPatch4) in r_edgea.asm
+ */
 	if (!FoundTrans)
 		return;
 
@@ -867,7 +913,7 @@ static void R_GenerateTSpans (void)
 	R_CleanupSpanT ();
 }
 
-#endif	/* !id386 */
+#endif	/* !id386 && !id68k */
 
 
 /*
@@ -997,7 +1043,16 @@ void R_ScanEdges (qboolean Translucent)
 			S_ExtraUpdate ();	// don't let sound get messed up if going slow
 			VID_LockBuffer ();
 
-			D_DrawSurfaces (Translucent);
+#if 0
+			if (r_drawculledpolys)
+			{
+				R_DrawCulledPolys ();
+			}
+			else
+#endif
+			{
+				D_DrawSurfaces (Translucent);
+			}
 
 		// clear the surface span pointers
 			for (s = &surfaces[1] ; s < surface_p ; s++)
@@ -1033,6 +1088,13 @@ void R_ScanEdges (qboolean Translucent)
 		(*pdrawTfunc) ();
 
 	// draw whatever's left in the span list
-	D_DrawSurfaces (Translucent);
+#if 0
+	if (r_drawculledpolys)
+		R_DrawCulledPolys ();
+	else
+#endif
+	{
+		D_DrawSurfaces (Translucent);
+	}
 }
 

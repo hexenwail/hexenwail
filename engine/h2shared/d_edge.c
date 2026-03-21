@@ -31,9 +31,22 @@ int		vstartscan;
 
 // FIXME: should go away
 extern void	R_RotateBmodel (void);
-extern void	R_TransformFrustum (void);
 
 vec3_t		transformed_modelorg;
+
+
+#if 0
+/*
+==============
+D_DrawPoly
+
+==============
+*/
+void D_DrawPoly (void)
+{
+// this driver takes spans, not polygons
+}
+#endif
 
 
 /*
@@ -288,11 +301,11 @@ void D_DrawSurfaces (qboolean Translucent)
 			//	if (!strncmp(pface->texinfo->texture->name,"*BLACK",6))
 				if (s->flags & SURF_DRAWBLACK)	// black vis-breaker, no turb
 				{
-					#if defined (H2W)
+#	if defined (H2W)
 					if (cl_siege)
 						D_DrawSolidSurface (s, SiegeFlatSkyFadeTable[(int)floor(d_lightstylevalue[0]/22)]);
 					else
-					#endif
+#	endif	/* H2W */
 						D_DrawSolidSurface (s, 0);
 					D_DrawZSpans (s->spans);
 					continue;
@@ -450,11 +463,11 @@ void D_DrawSurfaces (qboolean Translucent)
 			//	if (!strncmp(pface->texinfo->texture->name, "*BLACK", 6))
 				if (s->flags & SURF_DRAWBLACK)	// black vis-breaker, no turb
 				{
-					#if defined (H2W)
+#	if defined (H2W)
 					if (cl_siege)
 						D_DrawSolidSurface (s, SiegeFlatSkyFadeTable[(int)floor(d_lightstylevalue[0]/22)]);
 					else
-					#endif
+#	endif	/* H2W */
 						D_DrawSolidSurface (s, 0);
 					D_DrawZSpans (s->spans);
 					continue;
@@ -550,7 +563,7 @@ void D_DrawSurfaces (qboolean Translucent)
 						D_CalcGradients (pface);
 
 					//	(*d_drawspans) (s->spans);
-#if id386
+#if id386 || id68k
 						D_DrawSpans16T(s->spans);
 #else
 						D_DrawSpans8T(s->spans);

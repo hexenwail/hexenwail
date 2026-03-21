@@ -23,7 +23,7 @@ void pds_delay_10us(unsigned int ticks) // each tick is 10us
   _enable();
 }
 
-int64_t pds_gettimeu(void)
+mpxp_uint64_t pds_gettimeu(void)
 {
-  return (int64_t)clock() * (int64_t)1000000 / (int64_t)CLOCKS_PER_SEC; // clock time in usec
+  return ((mpxp_uint64_t)clock() * 1000000 / CLOCKS_PER_SEC); // 1ms precision
 }

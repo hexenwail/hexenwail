@@ -17,8 +17,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#define CINTERFACE 1 /* for dsound.h */
-
 #include "quakedef.h"
 #include "snd_sys.h"
 
@@ -27,7 +25,6 @@
 #include "winquake.h"
 #include "snd_dsound.h"
 #include <mmsystem.h>
-#define DIRECTSOUND_VERSION 0x0300
 #include <dsound.h>
 
 static char s_ds_driver[] = "DirectSound";
@@ -44,8 +41,8 @@ static LPDIRECTSOUND		pDS;
 static LPDIRECTSOUNDBUFFER	pDSBuf, pDSPBuf;
 
 #if defined(DX_DLSYM)	/* dynamic loading of dsound symbols */
-static HMODULE	hInstDS;
-static HRESULT (WINAPI *pDirectSoundCreate)(LPGUID,LPDIRECTSOUND*,LPUNKNOWN);
+static HINSTANCE	hInstDS;
+static HRESULT (WINAPI *pDirectSoundCreate)(GUID FAR *lpGUID, LPDIRECTSOUND FAR *lplpDS, IUnknown FAR *pUnkOuter);
 #else	/* ! DX_DLSYM : we're linked to dsound */
 #define	pDirectSoundCreate		DirectSoundCreate
 #endif	/* DX_DLSYM */
@@ -132,14 +129,15 @@ static qboolean S_DS_Init (dma_t *dma)
 #if defined(DX_DLSYM)
 	if (!hInstDS)
 	{
-		hInstDS = LoadLibraryA("dsound.dll");
+		hInstDS = LoadLibrary("dsound.dll");
+
 		if (hInstDS == NULL)
 		{
 			Con_SafePrintf ("Couldn't load dsound.dll\n");
 			return false;
 		}
 
-		pDirectSoundCreate = (HRESULT (WINAPI *)(LPGUID,LPDIRECTSOUND*,LPUNKNOWN))
+		pDirectSoundCreate = (HRESULT (WINAPI *)(GUID FAR *, LPDIRECTSOUND FAR *, IUnknown FAR *))
 								GetProcAddress(hInstDS,"DirectSoundCreate");
 
 		if (!pDirectSoundCreate)

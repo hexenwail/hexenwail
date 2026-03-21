@@ -58,7 +58,7 @@ char		com_token[1024];
 #ifdef PLATFORM_AMIGA
 struct timerequest	*timerio;
 struct MsgPort		*timerport;
-#if defined(__MORPHOS__)
+#if defined(__MORPHOS__) || defined(__VBCC__)
 struct Library		*TimerBase;
 #else
 struct Device		*TimerBase;
@@ -241,11 +241,11 @@ static void AMIGA_TimerInit (void)
 			if (OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ,
 					(struct IORequest *) timerio, 0) == 0)
 			{
-				#if defined(__MORPHOS__)
+#if defined(__MORPHOS__) || defined(__VBCC__)
 				TimerBase = (struct Library *)timerio->tr_node.io_Device;
-				#else
+#else
 				TimerBase = timerio->tr_node.io_Device;
-				#endif
+#endif
 			}
 			else
 			{
@@ -348,20 +348,16 @@ skipwhite:
 				com_token[len] = 0;
 				return data;
 			}
-			if (len < Q_COUNTOF(com_token) - 1)
-				com_token[len++] = c;
-			else /* overflow: */
-				return NULL;
+			com_token[len] = c;
+			len++;
 		}
 	}
 
 // parse single characters
 	if (c == '{' || c == '}' || c == '(' || c == ')' || c == '\'' || c == ':')
 	{
-		if (len < Q_COUNTOF(com_token) - 1)
-			com_token[len++] = c;
-		else /* overflow: */
-			return NULL;
+		com_token[len] = c;
+		len++;
 		com_token[len] = 0;
 		return data+1;
 	}
@@ -369,11 +365,9 @@ skipwhite:
 // parse a regular word
 	do
 	{
-		if (len < Q_COUNTOF(com_token) - 1)
-			com_token[len++] = c;
-		else /* overflow: */
-			return NULL;
+		com_token[len] = c;
 		data++;
+		len++;
 		c = *data;
 		if (c == '{' || c == '}' || c == '(' || c == ')' || c == '\'' || c == ':')
 			break;

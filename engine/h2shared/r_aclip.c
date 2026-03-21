@@ -27,7 +27,7 @@
 static finalvert_t		fv[2][8];
 static auxvert_t		av[8];
 
-#if !id386
+#if !id386 && !id68k
 static void R_Alias_clip_top (finalvert_t *pfv0, finalvert_t *pfv1, finalvert_t *out);
 static void R_Alias_clip_bottom (finalvert_t *pfv0, finalvert_t *pfv1, finalvert_t *out);
 static void R_Alias_clip_left (finalvert_t *pfv0, finalvert_t *pfv1, finalvert_t *out);
@@ -88,14 +88,14 @@ static void R_Alias_clip_z (finalvert_t *pfv0, finalvert_t *pfv1, finalvert_t *o
 }
 
 
-#if	!id386
+#if	!id386 && !id68k
 
 static void R_Alias_clip_left (finalvert_t *pfv0, finalvert_t *pfv1, finalvert_t *out)
 {
 	float		scale;
 	int			i;
 
-	if (pfv0->v[0] >= pfv1->v[0])
+	if (pfv0->v[1] >= pfv1->v[1])
 	{
 		scale = (float)(r_refdef.aliasvrect.x - pfv0->v[0]) / (pfv1->v[0] - pfv0->v[0]);
 		for (i = 0; i < 6; i++)
@@ -114,7 +114,7 @@ static void R_Alias_clip_right (finalvert_t *pfv0, finalvert_t *pfv1, finalvert_
 	float		scale;
 	int			i;
 
-	if (pfv0->v[0] >= pfv1->v[0])
+	if (pfv0->v[1] >= pfv1->v[1])
 	{
 		scale = (float)(r_refdef.aliasvrectright - pfv0->v[0]) / (pfv1->v[0] - pfv0->v[0]);
 		for (i = 0; i < 6; i++)

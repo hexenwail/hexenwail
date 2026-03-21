@@ -127,10 +127,9 @@ Compiling for Windows:
 
 uHexen2 developers usually cross-compile to windows using MinGW-w64 and
 MinGW.  The project can be built using Microsoft Visual Studio 2005 and
-newer versions, too -- Visual Studio 2010 and newer recommended.  (Note
-that older MSVC versions eg. Visual Studio 6 aren't supported: parts of
-our code make use of a few C99 features, such as variadic macros, which
-require Visual Studio 2005 or newer versions.)
+newer versions, too. (Note that older MSVC versions eg. Visual Studio 6
+aren't supported: parts of our code make use of a few C99 features such
+as variadic macros which require Visual Studio 2005 or newer versions.)
 
 
 Compiling for Mac OS X:
@@ -182,6 +181,12 @@ For AROS, only ABIv0 is tested: we build against AROS snapshot from
 2014-07-26, i.e. the ABI_V0 branch at aros svn:
 https://trac.aros.org/trac/browser/AROS/branches/ABI_V0
 or https://github.com/sezero/AROS-mirror.git
+
+For AmigaOS 3.x (m68k-amigaos), we use either bebbo's gcc6/libnix-based
+toolchain from https://github.com/bebbo/amiga-gcc, or the gcc2.95-based
+toolchain from https://github.com/sezero/amigaos-cross-toolchain.git
+vasm is needed to build m68k assembler sources. vasm-1.8l is tested to
+work.
 
 
 Links:

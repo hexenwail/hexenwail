@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2008 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
+//*                  email: mpxplay@freemail.hu                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -358,6 +358,9 @@ struct cmi8x38_card
 
 static struct cmi8x38_card	cmi;
 
+//static void cmi8x38_ac97_write(unsigned int baseport,unsigned int reg, unsigned int value);
+//static unsigned int cmi8x38_ac97_read(unsigned int baseport, unsigned int reg);
+
 //-------------------------------------------------------------------------
 // low level write & read
 
@@ -522,8 +525,8 @@ static void cmi8x38_chip_init(struct cmi8x38_card *cm)
   case PCI_DEVICE_ID_CMEDIA_CM8738:
   case PCI_DEVICE_ID_CMEDIA_CM8738B:
        /* PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437VX */
-       if(pcibios_FindDevice(0x8086, 0x7030,NULL)!=PCI_SUCCESSFUL)
-        snd_cmipci_set_bit(cm, CM_REG_MISC_CTRL, CM_TXVX); //bit set means TX
+       if(pcibios_FindDevice(0x8086, 0x7030,NULL)==PCI_SUCCESSFUL)
+        snd_cmipci_set_bit(cm, CM_REG_MISC_CTRL, CM_TXVX);
        break;
  }
 
@@ -576,7 +579,7 @@ static int CMI8X38_adetect(struct mpxplay_audioout_info_s *aui)
  aui->card_private_data=card;
  card->pci_dev=&libau_pci;
 
- if(pcibios_search_devices(&cmi_devices[0],card->pci_dev)!=PCI_SUCCESSFUL)
+ if(pcibios_search_devices(cmi_devices,card->pci_dev)!=PCI_SUCCESSFUL)
   goto err_adetect;
 
  pcibios_set_master(card->pci_dev);
@@ -597,6 +600,7 @@ static int CMI8X38_adetect(struct mpxplay_audioout_info_s *aui)
  card->pcmout_buffer=(char *)(((uint32_t)card->dm->linearptr+PCMBUFFERPAGESIZE-1)&(~(PCMBUFFERPAGESIZE-1))); // buffer begins on page (4096 bytes) boundary
 
  aui->card_DMABUFF=card->pcmout_buffer;
+
 #ifdef __DJGPP__
  aui->card_DMABUFF=(char *)((unsigned int)aui->card_DMABUFF + __djgpp_conventional_base);
 #endif
@@ -615,8 +619,7 @@ static void CMI8X38_close(struct mpxplay_audioout_info_s *aui)
 {
  struct cmi8x38_card *card=(struct cmi8x38_card *)aui->card_private_data;
  if(card){
-  if(card->iobase)
-   cmi8x38_chip_close(card);
+  if(card->iobase)   cmi8x38_chip_close(card);
   pds_dpmi_dos_freemem();
   aui->card_private_data=NULL;
  }
@@ -731,10 +734,8 @@ static long CMI8X38_getbufpos(struct mpxplay_audioout_info_s *aui)
   //if(aui->chan_card > 2)
   // bufpos = (bufpos * 2) / aui->chan_card;
 
-  if(bufpos<aui->card_dmasize)
-   aui->card_dma_lastgoodpos=bufpos;
+  if(bufpos<aui->card_dmasize)   aui->card_dma_lastgoodpos=bufpos;
  }
-
  return aui->card_dma_lastgoodpos;
 }
 

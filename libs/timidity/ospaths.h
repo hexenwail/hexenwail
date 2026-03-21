@@ -25,8 +25,8 @@
 #ifndef __cplusplus
 /* FIXME: What about C:FOO ? */
 static inline char *get_last_dirsep (const char *p) {
-    char *p1 = (char *) strrchr(p, '/');
-    char *p2 = (char *) strrchr(p, '\\');
+    char *p1 = strrchr(p, '/');
+    char *p2 = strrchr(p, '\\');
     if (!p1) return p2;
     if (!p2) return p1;
     return (p1 > p2)? p1 : p2;
@@ -59,9 +59,9 @@ static inline const char *get_last_dirsep (const char *p) {
 
 #ifndef __cplusplus
 static inline char *get_last_dirsep (const char *p) {
-    char *p1 = (char *) strrchr(p, '/');
+    char *p1 = strrchr(p, '/');
     if (p1) return p1;
-    return  (char *) strchr(p, ':');
+    return  strchr(p, ':');
 }
 #else
 static inline char *get_last_dirsep (char *p) {
@@ -85,7 +85,7 @@ static inline const char *get_last_dirsep (const char *p) {
 
 #ifndef __cplusplus
 static inline char *get_last_dirsep (const char *p) {
-    return (char *) strrchr(p, '/');
+    return strrchr(p, '/');
 }
 #else
 static inline char *get_last_dirsep (char *p) {

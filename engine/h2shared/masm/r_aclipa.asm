@@ -119,14 +119,17 @@ _R_Alias_clip_right:
  mov edi,ds:dword ptr[8+8+esp]
  mov eax,ds:dword ptr[_r_refdef+48]
 LRightLeftEntry:
+ mov edx,ds:dword ptr[0+4+esi]
+ mov ecx,ds:dword ptr[0+4+edi]
+ cmp edx,ecx
  mov edx,ds:dword ptr[0+0+esi]
  mov ecx,ds:dword ptr[0+0+edi]
- cmp edx,ecx
- jl LDoForward
+ jl LDoForward2
  mov ecx,ds:dword ptr[0+0+esi]
  mov edx,ds:dword ptr[0+0+edi]
  mov edi,ds:dword ptr[8+4+esp]
  mov esi,ds:dword ptr[8+8+esp]
+LDoForward2:
  jmp LDoForward
  public _R_Alias_clip_left
 _R_Alias_clip_left:

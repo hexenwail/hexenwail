@@ -91,7 +91,7 @@ static const char *svc_strings[] =
 	"svc_mod_name",	// UQE v1.13 by Korax, music file name
 	"svc_skybox"	// UQE v1.13 by Korax, skybox name
 };
-#define NUM_SVC_STRINGS Q_COUNTOF(svc_strings)
+#define	NUM_SVC_STRINGS	(sizeof(svc_strings) / sizeof(svc_strings[0]))
 
 int		cl_protocol;	/* protocol version used by the server */
 int		LastServerMessageSize;

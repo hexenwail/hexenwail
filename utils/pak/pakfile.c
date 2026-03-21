@@ -44,9 +44,10 @@ pack_t *LoadPackFile (const char *packfile)
 	if (!packhandle)
 		return NULL;
 
-	if (!fread(&header, sizeof(header), 1, packhandle) ||
-	    header.id[0] != 'P' || header.id[1] != 'A' ||
-	    header.id[2] != 'C' || header.id[3] != 'K') {
+	fread (&header, 1, sizeof(header), packhandle);
+	if (header.id[0] != 'P' || header.id[1] != 'A' ||
+	    header.id[2] != 'C' || header.id[3] != 'K')
+	{
 		COM_Error ("%s is not a packfile.", packfile);
 	}
 
@@ -75,8 +76,7 @@ pack_t *LoadPackFile (const char *packfile)
 	newfiles = (pakfiles_t *) SafeMalloc (numpackfiles * sizeof(pakfiles_t));
 
 	fseek (packhandle, header.dirofs, SEEK_SET);
-	if (!fread(info, header.dirlen, 1, packhandle))
-		COM_Error ("Error reading %s", packfile);
+	fread (info, 1, header.dirlen, packhandle);
 
 // crc the directory
 	CRC_Init (&pack->crc);

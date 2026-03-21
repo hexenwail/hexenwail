@@ -36,6 +36,12 @@
 
 #include <SDI/SDI_compiler.h> /* IPTR */
 
+/* WriteLUTPixelArray not included in vbcc_target_m68k-amigaos.lha */
+#if defined(__VBCC__) && defined(__M68K__) && !defined(WriteLUTPixelArray)
+ULONG __WriteLUTPixelArray(__reg("a6") void *, __reg("a0") APTR srcRect, __reg("d0") UWORD SrcX, __reg("d1") UWORD SrcY, __reg("d2") UWORD SrcMod, __reg("a1") struct RastPort * a1arg, __reg("a2") APTR a2arg, __reg("d3") UWORD DestX, __reg("d4") UWORD DestY, __reg("d5") UWORD SizeX, __reg("d6") UWORD SizeY, __reg("d7") UBYTE CTFormat)="\tjsr\t-198(a6)";
+#define WriteLUTPixelArray(srcRect, SrcX, SrcY, SrcMod, a1arg, a2arg, DestX, DestY, SizeX, SizeY, CTFormat) __WriteLUTPixelArray(CyberGfxBase, (srcRect), (SrcX), (SrcY), (SrcMod), (a1arg), (a2arg), (DestX), (DestY), (SizeX), (SizeY), (CTFormat))
+#endif
+
 #include "quakedef.h"
 #include "d_local.h"
 #include "cfgfile.h"
@@ -54,6 +60,29 @@ static ULONG spal[1 + (256 * 3) + 1];
 static unsigned char ppal[256 * 4];
 static pixel_t *buffer = NULL;
 static byte *directbitmap = NULL;
+#ifdef __CLIB2__
+struct GfxBase *GfxBase = NULL;
+#endif
+#ifdef PLATFORM_AMIGAOS3
+struct Library *CyberGfxBase = NULL;
+#ifdef USE_C2P
+static qboolean use_c2p = false;
+static int currentBitMap;
+static struct ScreenBuffer *sbuf[2];
+
+typedef void (*c2p_write_bm_func)(REG(d0, WORD chunkyx), REG(d1, WORD chunkyy), REG(d2, WORD offsx), REG(d3, WORD offsy), REG(a0, APTR chunkyscreen), REG(a1, struct BitMap *bitmap));
+static c2p_write_bm_func c2p_write_bm;
+
+ASM_LINKAGE_BEGIN
+extern void c2p1x1_8_c5_030_smcinit(REG(d0, WORD chunkyx), REG(d1, WORD chunkyy), REG(d3, WORD scroffsy), REG(d5, LONG bplsize));
+extern void c2p1x1_8_c5_030(REG(a0, APTR c2pscreen), REG(a1, APTR bitplanes));
+extern void c2p1x1_8_c5_040_init(REG(d0, WORD chunkyx), REG(d1, WORD chunkyy), REG(d3, WORD scroffsy), REG(d5, LONG bplsize));
+extern void c2p1x1_8_c5_040(REG(a0, APTR c2pscreen), REG(a1, APTR bitplanes));
+extern void c2p1x1_8_c5_bm(REG(d0, WORD chunkyx), REG(d1, WORD chunkyy), REG(d2, WORD offsx), REG(d3, WORD offsy), REG(a0, APTR chunkyscreen), REG(a1, struct BitMap *bitmap));
+extern void c2p1x1_8_c5_bm_040(REG(d0, WORD chunkyx), REG(d1, WORD chunkyy), REG(d2, WORD offsx), REG(d3, WORD offsy), REG(a0, APTR chunkyscreen), REG(a1, struct BitMap *bitmap));
+ASM_LINKAGE_END
+#endif /* USE_C2P */
+#endif /* PLATFORM_AMIGAOS3 */
 
 /* ----------------------------------------- */
 
@@ -81,7 +110,11 @@ static cvar_t	vid_config_glx = {"vid_config_glx", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_ARCHIVE};
 static cvar_t	vid_config_swx = {"vid_config_swx", "320", CVAR_ARCHIVE};
 static cvar_t	vid_config_swy = {"vid_config_swy", "240", CVAR_ARCHIVE};
+#ifdef PLATFORM_AMIGAOS3
+static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};
+#else
 static cvar_t	vid_config_fscr= {"vid_config_fscr", "0", CVAR_ARCHIVE};
+#endif
 static cvar_t	vid_config_mon = {"vid_config_mon", "0", CVAR_ARCHIVE};
 
 static cvar_t	vid_showload = {"vid_showload", "1", CVAR_NONE};
@@ -106,6 +139,9 @@ typedef struct {
 	int			bpp;
 /*	int			halfscreen;*/
 	ULONG		modeid;
+#ifdef PLATFORM_AMIGAOS3
+	qboolean	noadapt;
+#endif
 	char		modedesc[MAX_DESC];
 } vmode_t;
 
@@ -129,7 +165,7 @@ static const stdmode_t	std_modes[] = {
 };
 
 #define MAX_MODE_LIST	64
-#define MAX_STDMODES	Q_COUNTOF(std_modes)
+#define MAX_STDMODES	(sizeof(std_modes) / sizeof(std_modes[0]))
 #define NUM_LOWRESMODES	(RES_640X480)
 static vmode_t	fmodelist[MAX_MODE_LIST+1];	// list of enumerated fullscreen modes
 static vmode_t	wmodelist[MAX_STDMODES +1];	// list of standart 4:3 windowed modes
@@ -259,6 +295,11 @@ static void VID_PrepareModes (void)
 	unsigned int i;
 	APTR handle;
 	struct DimensionInfo diminfo;
+#ifdef PLATFORM_AMIGAOS3
+	ULONG monitorid;
+	struct DisplayInfo dispinfo;
+	struct NameInfo nameinfo;
+#endif
 
 	num_fmodes = 0;
 	num_wmodes = 0;
@@ -274,6 +315,9 @@ static void VID_PrepareModes (void)
 		wmodelist[num_wmodes].fullscreen = 0;
 		wmodelist[num_wmodes].bpp = 8;
 		wmodelist[num_wmodes].modeid = INVALID_ID;
+#ifdef PLATFORM_AMIGAOS3
+		wmodelist[num_wmodes].noadapt = false;
+#endif
 		q_snprintf (wmodelist[num_wmodes].modedesc, MAX_DESC,
 				"%d x %d", std_modes[i].width, std_modes[i].height);
 		num_wmodes++;
@@ -283,9 +327,25 @@ static void VID_PrepareModes (void)
 	id = INVALID_ID;
 	while((id = NextDisplayInfo(id)) != INVALID_ID)
 	{
+#ifdef PLATFORM_AMIGAOS3
+		//if (!IsCyberModeID(id))	continue;
+		monitorid = id & MONITOR_ID_MASK;
+		if (monitorid == DEFAULT_MONITOR_ID || monitorid == A2024_MONITOR_ID)
+			continue;
+#endif
+
 		handle = FindDisplayInfo(id);
 		if (!handle)
 			continue;
+
+#ifdef PLATFORM_AMIGAOS3
+		if (!GetDisplayInfoData(handle, (UBYTE *)&dispinfo, sizeof(dispinfo), DTAG_DISP, 0))
+			continue;
+		// this is a good way to filter out HAM, EHB, DPF modes
+		if (!GetDisplayInfoData(handle, (UBYTE *)&nameinfo, sizeof(nameinfo), DTAG_NAME, 0))
+			continue;
+		//Con_SafePrintf ("modeid %08x name %s\n", id, nameinfo.Name);
+#endif
 
 		if (!GetDisplayInfoData(handle, (UBYTE *)&diminfo, sizeof(diminfo), DTAG_DIMS, 0))
 			continue;
@@ -298,10 +358,39 @@ static void VID_PrepareModes (void)
 
 		fmodelist[num_fmodes].width = diminfo.Nominal.MaxX + 1;
 		fmodelist[num_fmodes].height = diminfo.Nominal.MaxY + 1;
+#ifdef PLATFORM_AMIGAOS3
+		// round down PAL resolutions to the nearest multiple of 240
+		if (fmodelist[num_fmodes].height % 256 == 0)
+			fmodelist[num_fmodes].height -= fmodelist[num_fmodes].height % MIN_HEIGHT;
+#endif
 		fmodelist[num_fmodes].fullscreen = 1;
 		fmodelist[num_fmodes].bpp = 8; // diminfo.MaxDepth
 		fmodelist[num_fmodes].modeid = id;
 		q_snprintf (fmodelist[num_fmodes].modedesc, MAX_DESC, "%d x %d", (fmodelist[num_fmodes].width), (fmodelist[num_fmodes].height));
+#ifdef PLATFORM_AMIGAOS3
+		if (dispinfo.PropertyFlags & DIPF_IS_LACE)
+			q_strlcat(fmodelist[num_fmodes].modedesc, "i", MAX_DESC);
+		if (monitorid == PAL_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " PAL", MAX_DESC);
+		else if (monitorid == NTSC_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " NTSC", MAX_DESC);
+		else if (monitorid == DBLPAL_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " DblPAL", MAX_DESC);
+		else if (monitorid == DBLNTSC_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " DblNTSC", MAX_DESC);
+		else if (monitorid == EURO36_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " Euro36", MAX_DESC);
+		else if (monitorid == EURO72_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " Euro72", MAX_DESC);
+		else if (monitorid == SUPER72_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " Super72", MAX_DESC);
+		else if (monitorid == VGA_MONITOR_ID)
+			q_strlcat(fmodelist[num_fmodes].modedesc, " VGA", MAX_DESC);
+		else
+			q_strlcat(fmodelist[num_fmodes].modedesc, " RTG", MAX_DESC);
+
+		fmodelist[num_fmodes].noadapt = (!CyberGfxBase || !IsCyberModeID(id));
+#endif
 		//Con_SafePrintf ("fmodelist[%d].modedesc = %s maxdepth %d id %08x\n", num_fmodes, fmodelist[num_fmodes].modedesc, diminfo.MaxDepth, id);
 
 		if (++num_fmodes == MAX_MODE_LIST)
@@ -419,6 +508,22 @@ static void VID_DestroyWindow (void)
 		pointermem = NULL;
 	}*/
 
+#if defined(PLATFORM_AMIGAOS3) && defined(USE_C2P)
+	use_c2p = false;
+
+	if (sbuf[0])
+	{
+		FreeScreenBuffer(screen, sbuf[0]);
+		sbuf[0] = NULL;
+	}
+
+	if (sbuf[1])
+	{
+		FreeScreenBuffer(screen, sbuf[1]);
+		sbuf[1] = NULL;
+	}
+#endif
+
 	if (screen)
 	{
 		CloseScreen(screen);
@@ -462,6 +567,9 @@ static qboolean VID_SetMode (int modenum, const unsigned char *palette)
 	if (vid_config_fscr.integer)
 	{
 		ULONG ModeID;
+		#if defined(PLATFORM_AMIGAOS3) && defined(USE_C2P)
+		struct BitMap *bm;
+		#endif
 		struct TagItem vctl[] =
 		{
 			{VTAG_BORDERBLANK_SET, TRUE},
@@ -486,6 +594,21 @@ static qboolean VID_SetMode (int modenum, const unsigned char *palette)
 			SA_Type, CUSTOMSCREEN,
 			SA_VideoControl, (IPTR)vctl,
 			TAG_DONE);
+
+		#if defined(PLATFORM_AMIGAOS3) && defined(USE_C2P)
+		currentBitMap = 0;
+		bm = screen->RastPort.BitMap;
+
+		if ((GetBitMapAttr(bm, BMA_FLAGS) & BMF_STANDARD) && (modelist[modenum].width % 32) == 0)
+		{
+			if ((sbuf[0] = AllocScreenBuffer(screen, 0, SB_SCREEN_BITMAP)) && (sbuf[1] = AllocScreenBuffer(screen, 0, 0)))
+			{
+				use_c2p = true;
+				// this fixes some RTG modes which would otherwise display garbage on the 1st buffer swap
+				//VID_Update(NULL);
+			}
+		}
+		#endif
 	}
 
 	if (screen)
@@ -543,6 +666,9 @@ static qboolean VID_SetMode (int modenum, const unsigned char *palette)
 
 					Con_SafePrintf ("Video Mode: %ux%ux%d\n", vid.width, vid.height, modelist[modenum].bpp);
 
+					#ifdef PLATFORM_AMIGAOS3
+					vid.noadapt = modelist[modenum].noadapt;
+					#endif
 					in_mode_set = false;
 					vid.recalc_refdef = 1;
 
@@ -681,7 +807,26 @@ void VID_Init (const unsigned char *palette)
 				"vid_config_mon",
 				"vid_config_swx",
 				"vid_config_swy" };
-#define num_readvars	Q_COUNTOF(read_vars)
+#define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
+
+#ifdef __CLIB2__
+	GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 0);
+	if (!GfxBase)
+		Sys_Error ("Cannot open graphics.library!");
+#endif
+
+#ifdef PLATFORM_AMIGAOS3
+	CyberGfxBase = OpenLibrary("cybergraphics.library", 41);
+	/*if (!CyberGfxBase)
+		Sys_Error ("Cannot open cybergraphics.library!");*/
+
+#ifdef USE_C2P
+	if (SysBase->AttnFlags & AFF_68040)
+		c2p_write_bm = c2p1x1_8_c5_bm_040;
+	else
+		c2p_write_bm = c2p1x1_8_c5_bm;
+#endif
+#endif
 
 	temp = scr_disabled_for_loading;
 	scr_disabled_for_loading = true;
@@ -793,6 +938,9 @@ void VID_Init (const unsigned char *palette)
 		modelist[*nummodes].fullscreen = 1;
 		modelist[*nummodes].bpp = 8;
 		modelist[*nummodes].modeid = INVALID_ID;
+#ifdef PLATFORM_AMIGAOS3
+		modelist[*nummodes].noadapt = false;
+#endif
 		q_snprintf (modelist[*nummodes].modedesc, MAX_DESC, "%d x %d (user mode)", width, height);
 		Cvar_SetValueQuick (&vid_mode, *nummodes);
 		(*nummodes)++;
@@ -835,13 +983,49 @@ void VID_Init (const unsigned char *palette)
 void VID_Shutdown (void)
 {
 	VID_DestroyWindow ();
+
+#ifdef PLATFORM_AMIGAOS3
+	if (CyberGfxBase) {
+		CloseLibrary(CyberGfxBase);
+		CyberGfxBase = NULL;
+	}
+#endif
+#ifdef __CLIB2__
+	if (GfxBase) {
+		CloseLibrary((struct Library *)GfxBase);
+		GfxBase = NULL;
+	}
+#endif
 }
 
 
 static void FlipScreen (vrect_t *rects)
 {
+#ifdef USE_C2P
+	if (use_c2p)
+	{
+		currentBitMap ^= 1;
+		c2p_write_bm(vid.width, vid.height, 0, 0, vid.buffer, sbuf[currentBitMap]->sb_BitMap);
+		ChangeScreenBuffer(screen, sbuf[currentBitMap]);
+		return;
+	}
+#endif
+
 	while (rects)
 	{
+#ifdef PLATFORM_AMIGAOS3
+		if (!CyberGfxBase)
+		{
+			WriteChunkyPixels(window->RPort,
+							rects->x,
+							rects->y,
+							rects->width,
+							rects->height,
+							vid.buffer,
+							vid.rowbytes);
+		}
+		else
+#endif
 		if (screen)
 		{
 			WritePixelArray(vid.buffer,
@@ -938,12 +1122,13 @@ void D_EndDirectRect (int x, int y, int width, int height)
 	directbitmap = NULL;
 }
 
-#ifndef H2W /* not used in hexenworld */
+#ifndef H2W
+// unused in hexenworld
 void D_ShowLoadingSize (void)
 {
-	#ifdef DRAW_PROGRESSBARS
-	#error NOT IMPLEMENTED
-	#endif
+#if defined(DRAW_PROGRESSBARS)
+#error NOT IMPLEMENTED
+#endif
 }
 #endif
 
@@ -1204,3 +1389,4 @@ static void VID_MenuKey (int key)
 		return;
 	}
 }
+

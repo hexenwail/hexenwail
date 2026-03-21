@@ -790,7 +790,7 @@ void R_RunQuakeEffect (vec3_t org, float distance)
 		num = rand() * (1.0 / RAND_MAX);
 		num2 = distance * num;
 		num = rand() * (1.0 / RAND_MAX);
-		q_sincosrad(num * 2 * M_PI, &p->org[1], &p->org[0]);
+		q_sincosrad(num * 2 * M_PI, &p->org[0], &p->org[1]);
 		p->org[0] *= num2;
 		p->org[1] *= num2;
 		p->org[0] += org[0];
@@ -1386,10 +1386,6 @@ void R_DrawParticles (void)
 	particle_t	*p;
 	float		scale;
 #define	SCALE_BASE	((p->type == pt_snow) ? p->count/10 : 1)
-
-	//ericw -- avoid empty glBegin/glEnd pair below.
-	if (!active_particles)
-		return;
 
 	GL_Bind(particletexture);
 	glEnable_fp (GL_BLEND);

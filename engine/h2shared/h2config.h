@@ -116,7 +116,7 @@
    undef to a define :  in that case, player must use the -noportals
    command line argument to disable mission pack support.
    ================================================================== */
-#undef	H2MP
+#define	H2MP 1
 /* When building HexenWorld or demo-specific, H2MP mustn't be defined */
 #if defined(H2W) || defined(DEMOBUILD)
 #undef	H2MP

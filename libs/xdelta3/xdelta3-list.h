@@ -115,7 +115,7 @@ static inline usize_t                                                   \
 LTYPE ## _length (LTYPE *l)                                             \
 {                                                                       \
   LTYPE *p;                                                             \
-  usize_t c = 0;                                                        \
+  int c = 0;                                                            \
                                                                         \
   for (p = l->next; p != l; p = p->next)                                \
     {                                                                   \

@@ -36,6 +36,7 @@ int		r_skymade;
 
 // TODO: clean up these routines
 
+// these are global for amiga m68k asm
 ASM_LINKAGE_BEGIN
 byte	bottomsky[128*131];
 byte	bottommask[128*131];
@@ -90,6 +91,7 @@ void R_InitSky (texture_t *mt)
 }
 
 
+#if !id68k
 /*
 =================
 R_MakeSky
@@ -152,6 +154,7 @@ void R_MakeSky (void)
 
 	r_skymade = 1;
 }
+#endif /* !id68k */
 
 
 #if 0

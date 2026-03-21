@@ -1011,15 +1011,15 @@ static void M_ScanSaves (void)
 		loadable[i] = false;
 		FS_MakePath_VABUF (FS_USERDIR, NULL, name, sizeof(name), "s%i/info.dat", i);
 		f = fopen (name, "r");
-		if (!f) {
+		if (!f)
 			continue;
-		}
-		if (fscanf(f, "%i\n", &version) != 1 ||
-		    fscanf(f, "%79s\n", name)   != 1 ||
-		    version != SAVEGAME_VERSION) {
+		fscanf (f, "%i\n", &version);
+		if (version != SAVEGAME_VERSION)
+		{
 			fclose (f);
 			continue;
 		}
+		fscanf (f, "%79s\n", name);
 		q_strlcpy (m_filenames[i], name, SAVEGAME_COMMENT_LENGTH+1);
 
 	// change _ back to space
@@ -1201,15 +1201,15 @@ static void M_ScanMSaves (void)
 		loadable[i] = false;
 		FS_MakePath_VABUF (FS_USERDIR, NULL, name, sizeof(name), "ms%i/info.dat", i);
 		f = fopen (name, "r");
-		if (!f) {
+		if (!f)
 			continue;
-		}
-		if (fscanf(f, "%i\n",&version) != 1 ||
-		    fscanf(f, "%79s\n", name)  != 1 ||
-		    version != SAVEGAME_VERSION) {
+		fscanf (f, "%i\n", &version);
+		if (version != SAVEGAME_VERSION)
+		{
 			fclose (f);
 			continue;
 		}
+		fscanf (f, "%79s\n", name);
 		q_strlcpy (m_filenames[i], name, SAVEGAME_COMMENT_LENGTH+1);
 
 	// change _ back to space
@@ -2215,7 +2215,7 @@ static const struct
 	{ " ",			"Unknown value (?)",	0		}
 };
 
-#define	MAX_LMFORMATS	Q_COUNTOF(lm_formats)
+#define	MAX_LMFORMATS	(sizeof(lm_formats) / sizeof(lm_formats[0]))
 
 static int	tex_mode;
 static int	lm_format;
@@ -2490,7 +2490,7 @@ static const char *bindnames[][2] =
 	{"+movedown",		"swim down"},
 	{"impulse 13",		"lift object"},
 	{"invuse",		"use inv item"},
-	{"invdrop",		"drop inv item"},
+	{"impulse 44",		"drop inv item"},
 	{"+showinfo",		"full inventory"},
 	{"+showdm",		"info / frags"},
 	{"toggle_dm",		"toggle frags"},
@@ -2514,7 +2514,7 @@ static const char *bindnames[][2] =
 	{"impulse 114",		"inv:icon defn"}
 };
 
-#define	NUMCOMMANDS	Q_COUNTOF(bindnames)
+#define	NUMCOMMANDS	(sizeof(bindnames)/sizeof(bindnames[0]))
 
 #define KEYS_SIZE 14
 

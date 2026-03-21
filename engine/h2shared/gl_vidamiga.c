@@ -42,6 +42,10 @@
 #include <intuition/intuitionbase.h>
 #elif defined __amigaos4__
 #error AmigaOS4 support not yet available
+#elif defined(__AMIGA__) && defined(REFGL_MINIGL)
+#include <mgl/gl.h>
+#elif defined(__AMIGA__) && defined(REFGL_AMESA)
+#include <GL/Amigamesa.h>
 #else
 #error Unknown / Unsupported AmigaOS variant.
 #endif
@@ -104,7 +108,7 @@ static const stdmode_t	std_modes[] = {
 };
 
 #define MAX_MODE_LIST	128
-#define MAX_STDMODES	Q_COUNTOF(std_modes)
+#define MAX_STDMODES	(sizeof(std_modes) / sizeof(std_modes[0]))
 #define NUM_LOWRESMODES	(RES_640X480)
 static vmode_t	fmodelist[MAX_MODE_LIST+1];	// list of enumerated fullscreen modes
 static vmode_t	wmodelist[MAX_STDMODES +1];	// list of standart 4:3 windowed modes
@@ -143,6 +147,18 @@ static AROSMesaContext context = NULL;
 #elif defined __MORPHOS__
 GLContext *__tglContext = NULL;
 static qboolean contextinit = false;
+#elif defined(__AMIGA__) && defined(REFGL_MINIGL)
+#ifdef __CLIB2__
+struct GfxBase *GfxBase = NULL;
+#endif
+static int lockmode = MGL_LOCK_MANUAL;
+static cvar_t	gl_lockmode = {"gl_lockmode", "manual", CVAR_ARCHIVE};
+#elif defined(__AMIGA__) && defined(REFGL_AMESA)
+#ifdef __CLIB2__
+struct GfxBase *GfxBase = NULL;
+#endif
+struct Library *CyberGfxBase = NULL;
+static AmigaMesaContext context = NULL;
 #endif
 static qboolean	vid_menu_fs;
 static qboolean	fs_toggle_works = false;
@@ -165,7 +181,11 @@ static cvar_t	vid_mode = {"vid_mode", "0", CVAR_NONE};
 static cvar_t	vid_config_consize = {"vid_config_consize", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_glx = {"vid_config_glx", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_ARCHIVE};
+#ifdef PLATFORM_AMIGAOS3
+static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};
+#else
 static cvar_t	vid_config_fscr= {"vid_config_fscr", "0", CVAR_ARCHIVE};
+#endif
 // cvars for compatibility with the software version
 static cvar_t	vid_config_swx = {"vid_config_swx", "320", CVAR_ARCHIVE};
 static cvar_t	vid_config_swy = {"vid_config_swy", "240", CVAR_ARCHIVE};
@@ -368,6 +388,13 @@ static qboolean VID_SetMode (int modenum)
 
 	Con_SafePrintf ("Requested mode %d: %dx%dx%d\n", modenum, modelist[modenum].width, modelist[modenum].height, bpp);
 
+#if defined(REFGL_MINIGL)
+	/* Hyperion's MiniGL 1.2 handles window creation within itself. */
+	if (vid_config_fscr.integer)
+		mglChooseWindowMode(GL_FALSE);
+	else	mglChooseWindowMode(GL_TRUE );
+
+#else /* ! REFGL_MINIGL */
 	if (vid_config_fscr.integer)
 	{
 	    ULONG ModeID;
@@ -419,6 +446,7 @@ static qboolean VID_SetMode (int modenum)
 		TAG_DONE);
 
 	if (!window) goto fail;
+#endif /* ! REFGL_MINIGL */
 
 	WRWidth = vid.width = vid.conwidth = modelist[modenum].width;
 	WRHeight = vid.height = vid.conheight = modelist[modenum].height;
@@ -465,6 +493,29 @@ static qboolean VID_SetMode (int modenum)
 		if (!(contextinit = glAInitializeContextWindowed(window)))
 			goto fail;
 	}
+
+#elif defined(__AMIGA__) && defined(REFGL_MINIGL)
+	if (!mglCreateContext(0,0,vid.width,vid.height))
+		goto fail;
+	mglLockMode(lockmode);
+	window = MGLGetWindowHandle(mini_CurrentContext);
+	ModifyIDCMP(window, IDCMP_CLOSEWINDOW | IDCMP_ACTIVEWINDOW | IDCMP_INACTIVEWINDOW);
+
+#elif defined(__AMIGA__) && defined(REFGL_AMESA)
+	context = AmigaMesaCreateContextTags(
+			AMA_Window, window,
+			AMA_Left, screen ? 0 : window->BorderLeft,
+			AMA_Bottom, screen ? 0 : window->BorderBottom,
+			AMA_Width, vid.width,
+			AMA_Height, vid.height,
+			screen ? AMA_Screen : TAG_IGNORE, screen,
+			AMA_DoubleBuf, GL_TRUE,
+			AMA_RGBMode, GL_TRUE,
+			AMA_NoAccum, GL_TRUE,
+			TAG_DONE);
+
+	if (!context) goto fail;
+	AmigaMesaMakeCurrent(context, context->buffer);
 #endif
 
 	vid.height = vid.conheight = modelist[modenum].height;
@@ -527,6 +578,64 @@ static AMIGAGL_Proc AMIGAGL_GetProcAddress (const char *s)
 		return (AMIGAGL_Proc)MY_glMultiTexCoord2fARB;
 	if (strcmp(s, "glActiveTextureARB") == 0)
 		return (AMIGAGL_Proc)MY_glActiveTextureARB;
+
+	return NULL;
+}
+
+#elif defined(__AMIGA__) && defined(REFGL_MINIGL)
+static void MY_glMultiTexCoord2fARB (GLenum unit, GLfloat s, GLfloat t)
+{
+	GLMultiTexCoord2fARB(mini_CurrentContext, unit, s, t);
+}
+
+static void MY_glActiveTextureARB (GLenum unit)
+{
+	GLActiveTextureARB(mini_CurrentContext, unit);
+}
+
+static AMIGAGL_Proc AMIGAGL_GetProcAddress (const char *s)
+{
+	if (strcmp(s, "glMultiTexCoord2fARB") == 0)
+		return (AMIGAGL_Proc)MY_glMultiTexCoord2fARB;
+	if (strcmp(s, "glActiveTextureARB") == 0)
+		return (AMIGAGL_Proc)MY_glActiveTextureARB;
+
+	return NULL;
+}
+
+#elif defined(__AMIGA__) && defined(REFGL_AMESA)
+/* NOTE: StormMesa 3.0 has EXT_multitexture, not ARB_multitexture.. */
+/*                     250 == ( GL_TEXTURE0_ARB - GL_TEXTURE0_EXT ) */
+static void MY_glMultiTexCoord2fARB (GLenum unit, GLfloat s, GLfloat t)
+{
+	glMultiTexCoord2fEXT (unit - 250, s, t);
+}
+
+static void MY_glActiveTextureARB (GLenum unit)
+{
+	glSelectTextureEXT (unit - 250);
+}
+
+static void MY_glColorTableEXT (GLenum target, GLenum internalfmt, GLsizei width, GLenum format, GLenum type, const GLvoid *table)
+{
+	glColorTableEXT (target, internalfmt, width, format, type, table);
+}
+
+static void MY_glGetTexParameterfv (GLenum target, GLenum pname, GLfloat *params)
+{
+	glGetTexParameterfv (target, pname, params);
+}
+
+static AMIGAGL_Proc AMIGAGL_GetProcAddress (const char *s)
+{
+	if (strcmp(s, "glMultiTexCoord2fARB") == 0)
+		return (AMIGAGL_Proc)MY_glMultiTexCoord2fARB;
+	if (strcmp(s, "glActiveTextureARB") == 0)
+		return (AMIGAGL_Proc)MY_glActiveTextureARB;
+	if (strcmp(s, "glColorTableEXT") == 0)
+		return (AMIGAGL_Proc)MY_glColorTableEXT;
+	if (strcmp(s, "glGetTexParameterfv") == 0)
+		return (AMIGAGL_Proc)MY_glGetTexParameterfv;
 
 	return NULL;
 }
@@ -674,11 +783,19 @@ static void CheckMultiTextureExtensions (void)
 	{
 		Con_SafePrintf("Multitexture extensions disabled\n");
 	}
+	#if defined (REFGL_AMESA) /* StormMesa 3.0 has EXT_multitexture .. */
+	else if (GL_ParseExtensionList(gl_extensions, "GL_EXT_multitexture"))
+	#else
 	else if (GL_ParseExtensionList(gl_extensions, "GL_ARB_multitexture"))
+	#endif
 	{
 		Con_SafePrintf("ARB Multitexture extensions found\n");
 
+		#if defined (REFGL_AMESA)
+		glGetIntegerv_fp(GL_MAX_TEXTURES_EXT, &num_tmus);
+		#else
 		glGetIntegerv_fp(GL_MAX_TEXTURE_UNITS_ARB, &num_tmus);
+		#endif
 		if (num_tmus < 2)
 		{
 			Con_SafePrintf("ignoring multitexture (%i TMUs)\n", (int) num_tmus);
@@ -856,7 +973,11 @@ static void GL_Init (void)
 	 * drawing of entity models compared to normal polygons.
 	 * (See: R_DrawBrushModel.)
 	 * (Only works if gl_ztrick is turned off) */
+	#if defined(__AMIGA__) && defined(REFGL_MINIGL)
+	#error port to use mglSetZOffset() instead of glPolygonOffset()
+	#else
 	glPolygonOffset_fp(0.05f, 25.0f);
+	#endif
 #endif /* #if 0 */
 	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
 	glShadeModel_fp (GL_FLAT);
@@ -871,6 +992,10 @@ static void GL_Init (void)
 
 //	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 	glTexEnvf_fp(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+
+#if defined(__AMIGA__) && defined(REFGL_MINIGL)
+	glHint_fp (GL_PERSPECTIVE_CORRECTION_HINT, GL_FASTEST);
+#endif
 }
 
 /*
@@ -885,6 +1010,9 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 	*height = WRHeight;
 
 //	glViewport_fp (*x, *y, *width, *height);
+#if defined(__AMIGA__) && defined(REFGL_MINIGL)
+	mglLockDisplay();
+#endif
 }
 
 
@@ -898,6 +1026,10 @@ void GL_EndRendering (void)
 #elif defined __MORPHOS__
 		glASwapBuffers();
 		//GLASwapBuffers(__tglContext);
+#elif defined(__AMIGA__) && defined(REFGL_MINIGL)
+		mglSwitchDisplay(); //performs unlock
+#elif defined(__AMIGA__) && defined(REFGL_AMESA)
+		AmigaMesaSwapBuffers(context);
 #endif
 
 // handle the mouse state when windowed if that's changed
@@ -1353,6 +1485,27 @@ static void VID_NumModes_f (void)
 	Con_Printf ("%d video modes in current list\n", *nummodes);
 }
 
+#if defined(__AMIGA__) && defined(REFGL_MINIGL)
+static void gl_lockmode_f (cvar_t *var)
+{
+	if (!q_strcasecmp(var->string, "smart"))
+		lockmode = MGL_LOCK_SMART;
+	else if (!q_strcasecmp(var->string, "auto"))
+		lockmode = MGL_LOCK_AUTOMATIC;
+	else if (!q_strcasecmp(var->string, "manual"))
+		lockmode = MGL_LOCK_MANUAL;
+	else {
+		Con_Printf("Bad lock mode %s, setting to manual\n", var->string);
+		lockmode = MGL_LOCK_MANUAL;
+		Cvar_SetQuick(var, "manual");
+		return;
+	}
+	if (mini_CurrentContext) {
+		mglLockMode(lockmode);
+	}
+}
+#endif
+
 /*
 ===================
 VID_Init
@@ -1367,10 +1520,13 @@ void	VID_Init (const unsigned char *palette)
 				"vid_config_glx",
 				"vid_config_gly",
 				"vid_config_consize",
+#if defined(__AMIGA__) && defined(REFGL_MINIGL)
+				"gl_lockmode",
+#endif
 				"gl_texture_NPOT",
 				"gl_multitexture",
 				"gl_lightmapfmt" };
-#define num_readvars	Q_COUNTOF(read_vars)
+#define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
 	Cvar_RegisterVariable (&vid_config_gl8bit);
 	Cvar_RegisterVariable (&vid_config_fscr);
@@ -1393,6 +1549,36 @@ void	VID_Init (const unsigned char *palette)
 	VID_InitPalette (palette);
 
 	vid.numpages = 2;
+
+#if defined(REFGL_MINIGL)
+	#ifdef __CLIB2__
+	GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 0);
+	if (!GfxBase)
+		Sys_Error ("Cannot open graphics.library!");
+	#endif
+	mini_CurrentContext = NULL;/* should I do this? */
+	Cvar_RegisterVariable (&gl_lockmode);
+	Cvar_SetCallback (&gl_lockmode, gl_lockmode_f);
+	if (MGLInit() == GL_FALSE) {
+		Sys_Error ("Couldn't initialize MiniGL");
+	}
+	mglChoosePixelDepth (16);/* set pixel depth to 16 */
+	mglChooseVertexBufferSize (3000); /* default 30 not enough */
+	if (COM_CheckParm("-guardband"))
+		mglChooseGuardBand (GL_TRUE);/* helps with Voodoo3 */
+	else
+		mglChooseGuardBand (GL_FALSE);
+#endif
+#if defined(REFGL_AMESA)
+	#ifdef __CLIB2__
+	GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 0);
+	if (!GfxBase)
+		Sys_Error ("Cannot open graphics.library!");
+	#endif
+	CyberGfxBase = OpenLibrary("cybergraphics.library", 0);
+	if (!CyberGfxBase)
+		Sys_Error ("Cannot open cybergraphics.library!");
+#endif
 
 	// prepare the modelists, find the actual modenum for vid_default
 	VID_PrepareModes();
@@ -1532,6 +1718,27 @@ void	VID_Init (const unsigned char *palette)
 void	VID_Shutdown (void)
 {
 	VID_KillContext();
+#ifdef REFGL_MINIGL
+	MGLTerm();
+	#ifdef __CLIB2__
+	if (GfxBase) {
+		CloseLibrary((struct Library *)GfxBase);
+		GfxBase = NULL;
+	}
+	#endif
+#endif
+#ifdef REFGL_AMESA
+	if (CyberGfxBase) {
+		CloseLibrary(CyberGfxBase);
+		CyberGfxBase = NULL;
+	}
+	#ifdef __CLIB2__
+	if (GfxBase) {
+		CloseLibrary((struct Library *)GfxBase);
+		GfxBase = NULL;
+	}
+	#endif
+#endif
 }
 
 
@@ -1563,6 +1770,34 @@ static void VID_KillContext (void)
 		GLClose(__tglContext);
 		__tglContext = NULL;
 	}
+#elif defined(__AMIGA__) && defined(REFGL_MINIGL)
+	if (mini_CurrentContext)
+	{
+		mglDeleteContext();
+		window = NULL;
+		screen = NULL;
+		mini_CurrentContext = NULL;
+	}
+#elif defined(__AMIGA__) && defined(REFGL_AMESA)
+	if (context)
+	{
+		AmigaMesaDestroyContext(context);
+		context = NULL;
+	}
+#endif
+
+#ifndef REFGL_MINIGL
+	if (window)
+	{
+		CloseWindow(window);
+		window = NULL;
+	}
+
+	if (screen)
+	{
+		CloseScreen(screen);
+		screen = NULL;
+	}
 #endif
 }
 
@@ -1581,10 +1816,10 @@ void VID_ToggleFullscreen (void)
 }
 
 
-#ifndef H2W /* not used in hexenworld */
+#ifndef H2W /* unused in hexenworld */
 void D_ShowLoadingSize (void)
 {
-	#ifdef DRAW_PROGRESSBARS
+#if defined(DRAW_PROGRESSBARS)
 	int cur_perc;
 	static int prev_perc;
 
@@ -1605,7 +1840,7 @@ void D_ShowLoadingSize (void)
 	glFlush_fp();
 
 	glDrawBuffer_fp (GL_BACK);
-	#endif
+#endif	/* DRAW_PROGRESSBARS */
 }
 #endif
 

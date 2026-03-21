@@ -76,7 +76,7 @@ static const stdmode_t	std_modes[] = {
 };
 
 #define MAX_MODE_LIST	128
-#define MAX_STDMODES	Q_COUNTOF(std_modes)
+#define MAX_STDMODES	(sizeof(std_modes) / sizeof(std_modes[0]))
 #define NUM_LOWRESMODES	(RES_640X480)
 static vmode_t	fmodelist[MAX_MODE_LIST+1];	// list of enumerated fullscreen modes
 static vmode_t	wmodelist[MAX_STDMODES +1];	// list of standart 4:3 windowed modes
@@ -188,7 +188,7 @@ unsigned char	*inverse_pal;
 // gl stuff
 static void GL_Init (void);
 
-static HMODULE		hInstGL;
+static HINSTANCE	hInstGL;
 #ifdef GL_DLSYM
 static const char	*gl_library;
 #endif
@@ -904,8 +904,7 @@ static qboolean GL_OpenLibrary (const char *name)
 	Con_SafePrintf("Loading OpenGL library %s\n", name);
 
 	// open the library
-	hInstGL = LoadLibraryA(name);
-	if (hInstGL == NULL)
+	if (!(hInstGL = LoadLibrary(name)))
 	{
 		Con_SafePrintf("Unable to LoadLibrary %s\n", name);
 		return false;
@@ -2302,7 +2301,7 @@ void	VID_Init (const unsigned char *palette)
 				"gl_texture_NPOT",
 				"gl_multitexture",
 				"gl_lightmapfmt" };
-#define num_readvars	Q_COUNTOF(read_vars)
+#define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
 	Cvar_RegisterVariable (&vid_config_gl8bit);
 	Cvar_RegisterVariable (&vid_config_fscr);
@@ -2721,10 +2720,10 @@ void VID_ToggleFullscreen (void)
 }
 
 
-#ifndef H2W /* not used in hexenworld */
+#ifndef H2W /* unused in hexenworld */
 void D_ShowLoadingSize (void)
 {
-	#ifdef DRAW_PROGRESSBARS
+#if defined(DRAW_PROGRESSBARS)
 	int cur_perc;
 	static int prev_perc;
 
@@ -2745,7 +2744,7 @@ void D_ShowLoadingSize (void)
 	glFlush_fp();
 
 	glDrawBuffer_fp (GL_BACK);
-	#endif
+#endif	/* DRAW_PROGRESSBARS */
 }
 #endif
 

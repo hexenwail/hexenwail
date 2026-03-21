@@ -24,6 +24,15 @@
 /* include windows.h here, because we need the data types */
 #include <windows.h>
 
+/* required compatibility versions for directx components */
+#define	DIRECTDRAW_VERSION	0x0300
+#define	DIRECTSOUND_VERSION	0x0300
+#define	DIRECTINPUT_VERSION	0x0300
+
+#if !defined(__cplusplus) && !defined(CINTERFACE)
+#define	CINTERFACE	/* for directx macros. */
+#endif
+
 extern	HINSTANCE	global_hInstance;
 extern	int		global_nCmdShow;
 

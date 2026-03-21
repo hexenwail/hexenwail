@@ -58,6 +58,10 @@ SDL_LIBS   = $(shell $(SDL_CONFIG) --libs 2> /dev/null)
 # any other cpu.)
 USE_X86_ASM=yes
 
+# use optimized m68k assembly for amiga
+# requires vasm from http://sun.hasenbraten.de/vasm/
+USE_M68K_ASM=yes
+
 # link to the opengl libraries at compile time? (defaults
 # to no, so the binaries will dynamically load the necessary
 # libraries and functions at runtime.)
@@ -183,6 +187,11 @@ CPPFLAGS+= -DH2W
 # disable x86 assembly if it is not an x86.
 ifneq ($(MACH_TYPE),x86)
 USE_X86_ASM=no
+endif
+
+# disable m68k assembly if it is not a m68k.
+ifneq ($(MACH_TYPE),m68k)
+USE_M68K_ASM=no
 endif
 
 ifdef DEMO
@@ -954,6 +963,122 @@ endif
 
 
 #############################################################
+# AmigaOS flags/settings and overrides:
+#############################################################
+ifeq ($(TARGET_OS),amigaos)
+
+# use Bebbo's GCC6 toolchain
+BEBBO_TOOLCHAIN=yes
+
+# crt: libnix or clib2:
+USE_CLIB2=yes
+ifeq ($(BEBBO_TOOLCHAIN),yes)
+USE_CLIB2=no
+endif
+
+# Don't use SDL on AmigaOS
+USE_SDL=no
+ifneq ($(USE_SDL),yes)
+USE_SDLCD=no
+USE_SDLAUDIO=no
+endif
+
+ifndef DEBUG
+ifneq ($(BEBBO_TOOLCHAIN),yes)
+# -fomit-frame-pointer / -ffast-math causes trouble with gcc2.95
+CFLAGS  += -fno-omit-frame-pointer
+else
+# these break the game with bebbo's gcc-6.x:
+CFLAGS  += -fbbb=- -fno-tree-forwprop -fno-tree-ter -fno-tree-fre -fno-tree-sra -fno-move-loop-invariants -fno-inline-functions-called-once
+endif
+endif
+ifeq ($(USE_CLIB2),yes)
+CRT_FLAGS=-mcrt=clib2
+else
+CRT_FLAGS=-noixemul
+endif
+CFLAGS  += $(CRT_FLAGS) -m68060 -m68881
+LDFLAGS += $(CRT_FLAGS) -m68060 -m68881
+SYSLIBS += -lm
+
+# for M68K assembly:
+AS=vasm
+ASFLAGS = -Faout -m68060 -phxass -quiet
+ifeq ($(USE_M68K_ASM),yes)
+CPPFLAGS+= -DUSE_M68K_ASM
+endif
+
+# for extra missing headers
+INCLUDES += -I$(OSLIBS)/amigaos/include
+ifneq ($(BEBBO_TOOLCHAIN),yes)
+# Roadshow SDK
+NET_INC   = -I$(OSLIBS)/amigaos/netinclude
+endif
+
+# Build for which Amiga GL implementation:
+# Either amesa (StormMesa), or minigl (Hyperion's MiniGL 1.2)
+AMIGA_GLIMP=minigl
+ifeq ($(AMIGA_GLIMP),minigl)
+GL_DEFS+= -DREFGL_MINIGL
+#GL_DEFS+= -DUSE_MGLAPI=1
+GL_DEFS+= -I$(OSLIBS)/amigaos/MiniGL/include
+GL_LINK = -L$(OSLIBS)/amigaos/MiniGL/lib -lmgl
+endif
+ifeq ($(AMIGA_GLIMP),amesa)
+GL_DEFS+= -DREFGL_AMESA
+GL_DEFS+= -I$(OSLIBS)/amigaos/StormMesa/include
+GL_LINK = -L$(OSLIBS)/amigaos/StormMesa/lib -lgl
+endif
+# dynamic loading of ogl functions doesn't work
+LINK_GL_LIBS=yes
+
+USE_CODEC_TIMIDITY=no
+USE_CODEC_FLAC=no
+USE_CODEC_MP3=no
+USE_CODEC_VORBIS=no
+USE_CODEC_OPUS=no
+USE_CODEC_MIKMOD=no
+USE_CODEC_MODPLUG=no
+USE_CODEC_UMX=no
+#use integer-only Tremor as Vorbis decoder for m68k-amigaos
+VORBISLIB=tremor
+
+ifeq ($(USE_CODEC_MP3),yes)
+CODEC_INC = -I$(OSLIBS)/amigaos/codecs/include
+CODEC_LINK= -L$(OSLIBS)/amigaos/codecs/lib
+endif
+ifeq ($(USE_CODEC_VORBIS),yes)
+CODEC_INC = -I$(OSLIBS)/amigaos/codecs/include
+CODEC_LINK= -L$(OSLIBS)/amigaos/codecs/lib
+endif
+INCLUDES += $(CODEC_INC)
+LDFLAGS += $(CODEC_LINK)
+
+ifeq ($(USE_SOUND),yes)
+ifneq ($(USE_SDLAUDIO),yes)
+CPPFLAGS+= -DNO_SDL_AUDIO
+endif
+endif
+
+ifeq ($(USE_CDAUDIO),yes)
+ifeq ($(USE_SDLCD),yes)
+CPPFLAGS+= -DWITH_SDLCD
+endif
+endif
+
+ifeq ($(USE_SDL),yes)
+# SDLQUAKE must be defined for all SDL using platforms/targets
+CPPFLAGS+= -DSDLQUAKE
+CFLAGS  += $(SDL_CFLAGS)
+LDFLAGS += $(SDL_LIBS)
+endif
+
+endif
+# End of AmigaOS settings
+#############################################################
+
+
+#############################################################
 # Streaming music settings
 #############################################################
 ifeq ($(MP3LIB),mad)
@@ -1082,6 +1207,14 @@ endif
 	$(WINDRES) $(RC_DEFS) $(RC_INC) $(RCFLAGS) -o $@ $<
 %.res: $(COMMONDIR)/%.rc
 	$(WINDRES) $(RC_DEFS) $(RC_INC) $(RCFLAGS) -o $@ $<
+ifeq ($(TARGET_OS),amigaos)
+#%.o: %.s
+#	$(AS) $(ASFLAGS) -o $@ $<
+%.o: $(COMMONDIR)/%.s
+	$(AS) $(ASFLAGS) -o $@ $<
+%.o: $(UHEXEN2_SHARED)/%.s
+	$(AS) $(ASFLAGS) -o $@ $<
+endif
 
 # Objects
 
@@ -1119,10 +1252,32 @@ SOUND_ASM = snd_mixa.o
 
 else
 
+# M68K asm objects
+ifeq ($(USE_M68K_ASM),yes)
+SOFT_ASM = \
+	amiga_r_68k.o \
+	d_part68k.o \
+	d_polyse68k.o \
+	d_scan68k.o \
+	d_sky68k.o \
+	d_sprite68k.o \
+	r_aclip68k.o \
+	r_alias68k.o \
+	r_bsp68k.o \
+	r_edge68k.o \
+	r_sky68k.o \
+	r_surf68k.o
+
+COMMON_ASM = swap_68k.o
+SOUND_ASM = snd_mixamiga68k.o
+
+else
+
 SOFT_ASM =
 COMMON_ASM =
 SOUND_ASM =
 
+endif
 endif
 
 # Sound objects
@@ -1172,6 +1327,9 @@ endif
 ifeq ($(TARGET_OS),morphos)
 SYSOBJ_SND := snd_ahi.o snd_sdl.o
 endif
+ifeq ($(TARGET_OS),amigaos)
+SYSOBJ_SND := snd_ahi.o snd_paula.o snd_sdl.o
+endif
 # end of Sound objects
 endif
 
@@ -1208,6 +1366,9 @@ endif
 ifeq ($(TARGET_OS),morphos)
 SYSOBJ_MIDI:= midi_camd.o
 endif
+ifeq ($(TARGET_OS),amigaos)
+SYSOBJ_MIDI:= midi_camd.o
+endif
 # end of MIDI objects
 endif
 
@@ -1239,6 +1400,9 @@ SYSOBJ_CDA := cd_sdl.o
 endif
 ifeq ($(TARGET_OS),morphos)
 SYSOBJ_CDA := cd_sdl.o
+endif
+ifeq ($(TARGET_OS),amigaos)
+SYSOBJ_CDA := cd_amiga.o
 endif
 # end of CDAudio objects
 endif
@@ -1327,6 +1491,23 @@ else
 SYSOBJ_INPUT := in_amiga.o
 SYSOBJ_GL_VID:= gl_vidamiga.o
 SYSOBJ_SOFT_VID:= vid_cgx.o
+endif
+SYSOBJ_SYS := sys_amiga.o
+endif
+ifeq ($(TARGET_OS),amigaos)
+ifeq ($(USE_SDL),yes)
+SYSOBJ_INPUT := in_sdl.o
+SYSOBJ_GL_VID:= gl_vidsdl.o
+SYSOBJ_SOFT_VID:= vid_sdl.o
+else
+SYSOBJ_INPUT := in_amiga.o
+SYSOBJ_GL_VID:= gl_vidamiga.o
+SYSOBJ_SOFT_VID:= vid_cgx.o
+ifeq ($(USE_M68K_ASM),yes)
+CPPFLAGS+= -DUSE_C2P
+SYSOBJ_SOFT_VID+= c2p1x1_8_c5_bm.o c2p1x1_8_c5_bm_040.o
+## c2p1x1_8_c5_030.o c2p1x1_8_c5_040.o
+endif
 endif
 SYSOBJ_SYS := sys_amiga.o
 endif
@@ -1450,6 +1631,11 @@ hw: $(SW_BINARY)
 glhw: $(GL_BINARY)
 
 $(GL_BINARY): CPPFLAGS+= $(GL_DEFS)
+
+ifeq ($(TARGET_OS),amigaos)
+# workaround stupid AmiTCP SDK mess for old aos3
+net_udp.o: INCLUDES+= $(NET_INC)
+endif
 
 # extra rule for snd_timidity.c because of timidity.h and libtimidity.a
 snd_timidity.o: $(COMMONDIR)/snd_timidity.c

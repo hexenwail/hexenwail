@@ -25,8 +25,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#ifndef QSTDINC_H
-#define QSTDINC_H
+#ifndef __QSTDINC_H
+#define __QSTDINC_H
 
 #include <sys/types.h>
 #include <stddef.h>
@@ -80,20 +80,14 @@
 #define	Q_MINLONG	((int)0x80000000)
 #define	Q_MINFLOAT	((int)0x7fffffff)
 
-#ifndef COMPILE_TIME_ASSERT
-#if defined(__cplusplus)
-/* Keep C++ case alone: Some versions of gcc will define __STDC_VERSION__ even when compiling in C++ mode. */
-#if (__cplusplus >= 201103L)
-#define COMPILE_TIME_ASSERT(name, x)  static_assert(x, #x)
-#endif
-#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 202311L)
-#define COMPILE_TIME_ASSERT(name, x)  static_assert(x, #x)
-#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+/* Make sure the types really have the right
+ * sizes: These macros are from SDL headers.
+ */
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
 #define COMPILE_TIME_ASSERT(name, x) _Static_assert(x, #x)
-#endif
-#endif /**/
-#ifndef COMPILE_TIME_ASSERT
-/* universal, but may trigger -Wunused-local-typedefs */
+#elif defined(__cplusplus) && (__cplusplus >= 201103L)
+#define COMPILE_TIME_ASSERT(name, x)  static_assert(x, #x)
+#else /* universal, but may trigger -Wunused-local-typedefs */
 #define COMPILE_TIME_ASSERT(name, x) \
 	typedef int dummy_ ## name[(x) * 2 - 1]
 #endif
@@ -111,9 +105,6 @@ typedef enum {
 COMPILE_TIME_ASSERT(enum, sizeof(THE_DUMMY_ENUM) == sizeof(int));
 
 
-/* for array size: */
-#define Q_COUNTOF(x) (sizeof(x) / sizeof((x)[0]))
-
 /* Provide a substitute for offsetof() if we don't have one.
  * This variant works on most (but not *all*) systems...
  */
@@ -126,29 +117,23 @@ COMPILE_TIME_ASSERT(enum, sizeof(THE_DUMMY_ENUM) == sizeof(int));
 
 typedef unsigned char		byte;
 
+#undef true
+#undef false
+#if defined(__cplusplus)
 /* some structures have qboolean members and the x86 asm code expect
- * those members to be 4 bytes long.  i.e.: qboolean must be 32 bits.  */
+ * those members to be 4 bytes long. therefore, qboolean must be 32
+ * bits and it can NOT be binary compatible with the 8 bit C++ bool.  */
 typedef int	qboolean;
-#if !defined(__cplusplus)
-/* include stdbool.h for C99 or better, or with GCC >= 3 which has a
- * standarts-compliant header.  */
-#if (defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)) || \
-    (defined(__GNUC__) && (__GNUC__ >= 3))                       || \
-    (defined(_MSC_VER) && (_MSC_VER >= 1910 /* VS2017 */))
-#include <stdbool.h>
-#elif !defined(__bool_true_false_are_defined)
-#define false 0
-#define true  1
-#if defined(__APPLE__) && (defined(__POWERPC__) || defined(__ppc__))
-#define bool  int
+COMPILE_TIME_ASSERT(falsehood, (0 == false));
+COMPILE_TIME_ASSERT(truth, (1  == true));
 #else
-#define bool  unsigned char
-#endif
-#define __bool_true_false_are_defined 1
-#endif
-#endif /* */
+typedef enum {
+	false = 0,
+	true  = 1
+} qboolean;
 COMPILE_TIME_ASSERT(falsehood, ((1 != 1) == false));
 COMPILE_TIME_ASSERT(truth, ((1 == 1) == true));
+#endif
 COMPILE_TIME_ASSERT(qboolean, sizeof(qboolean) == 4);
 
 /*==========================================================================*/
@@ -210,4 +195,5 @@ typedef ptrdiff_t	ssize_t;
 
 /*==========================================================================*/
 
-#endif	/* QSTDINC_H */
+
+#endif	/* __QSTDINC_H */

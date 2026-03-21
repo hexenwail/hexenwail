@@ -25,7 +25,6 @@
 #include "compiler.h"
 #include "arch_def.h"
 #include "cmdlib.h"
-#include "util_io.h"
 #include "pathutil.h"
 #include "mathlib.h"
 #include "loadtri.h"
@@ -111,6 +110,7 @@ static void ByteSwapTri(tf_triangle *tri);
 
 #if 0	/* unused 3DS stuff */
 static void Load3DS(FILE *input, triangle_t **triList, int *triangleCount);
+static void _3DSError(char *message);
 
 static float ReadFloat(void);
 static unsigned long ReadLong(void);
@@ -629,12 +629,12 @@ static void Load3DS(FILE *input, triangle_t **triList, int *triangleCount)
 	InputFile = input;
 	if (ReadShort() != _3DS_MAIN3DS)
 	{
-		COM_Error("Missing 3DS main chunk header.\n");
+		_3DSError("Missing 3DS main chunk header.\n");
 	}
 	SeekTo(16);
 	if (ReadShort() != _3DS_EDIT3DS)
 	{
-		COM_Error("Missing 3DS edit chunk header.\n");
+		_3DSError("Missing 3DS edit chunk header.\n");
 	}
 
 	editChunkSize = ReadLong();
@@ -672,7 +672,7 @@ static void Load3DS(FILE *input, triangle_t **triList, int *triangleCount)
 		}
 		if (FilePosition()-editChunkPos >= editChunkSize)
 		{
-			COM_Error("Couldn't find OBJECT chunk.\n");
+			_3DSError("Couldn't find OBJECT chunk.\n");
 		}
 	}
 
@@ -699,7 +699,7 @@ static void Load3DS(FILE *input, triangle_t **triList, int *triangleCount)
 		}
 		if (FilePosition()-objectChunkPos >= objectChunkSize)
 		{
-			COM_Error("Couldn't find TRIMESH chunk.\n");
+			_3DSError("Couldn't find TRIMESH chunk.\n");
 		}
 	}
 
@@ -761,45 +761,50 @@ static void Load3DS(FILE *input, triangle_t **triList, int *triangleCount)
 		{
 			if (foundVertexList == false)
 			{
-				COM_Error("Couldn't find TRI_VERTEXL chunk.\n");
+				_3DSError("Couldn't find TRI_VERTEXL chunk.\n");
 			}
 			else
 			{
-				COM_Error("Couldn't find TRI_FACEL1 chunk.\n");
+				_3DSError("Couldn't find TRI_FACEL1 chunk.\n");
 			}
 		}
 	}
 }
 
+static void _3DSError(char *message)
+{
+	COM_Error(message);
+}
+
 static float ReadFloat(void)
 {
 	float	t;
-	if (!fread(&t, sizeof(float), 1, InputFile))
-		COM_Error("3DS:(%s): Read error.", __thisfunc__);
+
+	fread(&t, sizeof(float), 1, InputFile);
 	return t;
 }
 
 static unsigned long ReadLong(void)
 {
-	uint32_t	t;
-	if (!fread(&t, sizeof(uint32_t), 1, InputFile))
-		COM_Error("3DS:(%s): Read error.", __thisfunc__);
+	unsigned long	t;
+
+	fread(&t, sizeof(unsigned long), 1, InputFile);
 	return t;
 }
 
 static unsigned short ReadShort(void)
 {
 	unsigned short	t;
-	if (!fread(&t, sizeof(unsigned short), 1, InputFile))
-		COM_Error("3DS:(%s): Read error.", __thisfunc__);
+
+	fread(&t, sizeof(unsigned short), 1, InputFile);
 	return t;
 }
 
 static unsigned char ReadByte(void)
 {
 	unsigned char	t;
-	if (!fread(&t, sizeof(unsigned char), 1, InputFile))
-		COM_Error("3DS:(%s): Read error.", __thisfunc__);
+
+	fread(&t, sizeof(unsigned char), 1, InputFile);
 	return t;
 }
 
@@ -852,7 +857,7 @@ static void LoadTRI(FILE *input, triangle_t **triList, int *triangleCount)
 	*((unsigned char *)&exitpattern + 2) = *((unsigned char *)&t + 1);
 	*((unsigned char *)&exitpattern + 3) = *((unsigned char *)&t + 0);
 
-	SafeRead(input, &magic, sizeof(int));
+	fread(&magic, sizeof(int), 1, input);
 	if (BigLong(magic) != TRI_MAGIC)
 	{
 		COM_Error("Bad .TRI file: %s\n", InputFileName);
@@ -864,7 +869,7 @@ static void LoadTRI(FILE *input, triangle_t **triList, int *triangleCount)
 	count = 0; // make static analyzers happy
 	while (feof(input) == 0)
 	{
-		SafeRead(input, &start._f, sizeof(float));
+		fread(&start._f, sizeof(float), 1, input);
 		start._i = BigLong(start._i);
 
 		if (start._i != exitpattern)
@@ -875,11 +880,11 @@ static void LoadTRI(FILE *input, triangle_t **triList, int *triangleCount)
 				do
 				{
 					++i;
-					SafeRead(input, &(text[i]), sizeof(char));
+					fread(&(text[i]), sizeof(char), 1, input);
 				} while (text[i] != '\0');
 				//fprintf(stdout,"OBJECT START: %s\n", text);
 
-				SafeRead(input, &count, sizeof(int));
+				fread(&count, sizeof(int), 1, input);
 				count = BigLong(count);
 				if (count != 0)
 				{
@@ -888,7 +893,7 @@ static void LoadTRI(FILE *input, triangle_t **triList, int *triangleCount)
 					do
 					{
 						++i;
-						SafeRead(input, &(text[i]), sizeof(char));
+						fread(&(text[i]), sizeof( char ), 1, input);
 					} while (text[i] != '\0');
 					//fprintf(stdout,"  Object texture name: '%s'\n", text);
 				}
@@ -899,7 +904,7 @@ static void LoadTRI(FILE *input, triangle_t **triList, int *triangleCount)
 				do
 				{
 					++i;
-					SafeRead(input, &(text[i]), sizeof(char));
+					fread(&(text[i]), sizeof(char), 1, input);
 				} while (text[i] != '\0');
 				//fprintf(stdout,"OBJECT END: %s\n", text);
 				continue;
@@ -909,7 +914,7 @@ static void LoadTRI(FILE *input, triangle_t **triList, int *triangleCount)
 		// Read the triangles
 		for (i = 0; i < count; ++i)
 		{
-			SafeRead(input, &tri, sizeof(tf_triangle));
+			fread(&tri, sizeof(tf_triangle), 1, input);
 			ByteSwapTri(&tri);
 			for (j = 0; j < 3; j++)
 			{
@@ -956,3 +961,4 @@ static void ByteSwapTri(tf_triangle *tri)
 		((int *)tri)[i] = BigLong(((int *)tri)[i]);
 	}
 }
+

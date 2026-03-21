@@ -1,4 +1,4 @@
-# GNU Makefile for the H2PATCH tool - AROS and MorphOS.
+# GNU Makefile for the H2PATCH tool - AmigaOS and MorphOS.
 #
 # To build a debug version:		make DEBUG=yes
 #
@@ -28,9 +28,27 @@ endif
 
 NOIXEMUL= 1
 
-ifeq ($(AROS_X64),1)
-CFLAGS += -fno-common
+ifeq ($(AOS3),1)
+# use Bebbo's GCC6 toolchain
+BEBBO_TOOLCHAIN=yes
+# crt: libnix or clib2:
+USE_CLIB2=yes
+ifeq ($(BEBBO_TOOLCHAIN),yes)
+USE_CLIB2=no
 endif
+ifeq ($(USE_CLIB2),yes)
+NOIXEMUL= 0
+CFLAGS += -mcrt=clib2
+LDFLAGS+= -mcrt=clib2
+endif
+CFLAGS  += -I$(OSLIBS)/amigaos/include
+CPUFLAGS = -m68020-60
+LDFLAGS += -m68020
+ifndef DEBUG
+CFLAGS += -fno-omit-frame-pointer
+endif
+endif
+
 ifeq ($(NOIXEMUL),1)
 CFLAGS += -noixemul
 LDFLAGS+= -noixemul
@@ -38,9 +56,10 @@ endif
 
 XDELTA_DIR:= $(LIBS_DIR)/xdelta3
 XDFLAGS:= -DXD3_DEBUG=0
-ifeq ($(AROS_X64),1)
+# when XD3_USE_LARGEFILE64 is not defined, xdelta3 defaults
+# to 64 bit xoff_t.
+# define XD3_USE_LARGEFILE64 as 0 or 1.
 XDFLAGS+= -DXD3_USE_LARGEFILE64=0
-endif
 # make xdelta3 to use Amiga file I/O:
 XDFLAGS+= -DXD3_AMIGA=1
 XDFLAGS+= -I$(XDELTA_DIR) -I$(UHEXEN2_SHARED)

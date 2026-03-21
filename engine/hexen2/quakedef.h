@@ -28,7 +28,7 @@
 #define	HOT_VERSION_MAJ		1
 #define	HOT_VERSION_MID		5
 #define	HOT_VERSION_MIN		10
-#define	HOT_VERSION_REL_DATE	"2025-06-20"
+#define	HOT_VERSION_REL_DATE	"2022-10-25"
 #define	HOT_VERSION_STR		STRINGIFY(HOT_VERSION_MAJ) "." STRINGIFY(HOT_VERSION_MID) "." STRINGIFY(HOT_VERSION_MIN)
 #define	GLQUAKE_VERSION		1.00
 #define	ENGINE_VERSION		1.29
@@ -76,8 +76,8 @@
 //#define	MAX_MSGLEN	16000		// max length of a reliable message
 #define	MAX_MSGLEN	20000		// for mission pack tibet2
 
-//#define	MAX_DATAGRAM	2048		// max length of unreliable message  TEMP: This only for E3
-#define	MAX_DATAGRAM	1024		// max length of unreliable message
+#define	MAX_DATAGRAM	2048		// max length of unreliable message  TEMP: This only for E3
+//#define	MAX_DATAGRAM	1024		// max length of unreliable message
 
 #define MAX_PRINTMSG	4096		// maximum allowed print message length
 

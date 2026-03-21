@@ -38,6 +38,11 @@ float		r_lasttime1 = 0;
 
 int		r_numallocatededges;
 
+#if 0
+qboolean	r_drawpolys;
+qboolean	r_drawculledpolys;
+qboolean	r_worldpolysbacktofront;
+#endif
 qboolean	r_recursiveaffinetriangles = true;
 
 int		r_pixbytes = 1;
@@ -63,6 +68,8 @@ const int	color_offsets[MAX_PLAYER_CLASS] =
 
 qboolean	r_dowarp, r_dowarpold, r_viewchanged;
 
+int		numbtofpolys;
+btofpoly_t	*pbtofpolys;
 mvertex_t	*r_pcurrentvertbase;
 
 int		c_surf;
@@ -441,6 +448,8 @@ Guaranteed to be called before the first refresh
 */
 #if defined(PLATFORM_DOS) || defined(SVGAQUAKE)
 #define NOT_VGA_MODE (vid.aspect <= 1.10f)	/* no Hor+ for weirdass VGA modes */
+#elif defined(PLATFORM_AMIGAOS3)
+#define NOT_VGA_MODE (!vid.noadapt)	/* no Hor+ for Amiga native chipset modes */
 #else
 #define NOT_VGA_MODE true
 #endif
@@ -546,7 +555,10 @@ void R_ViewChanged (float aspect)
 	r_aliastransition = r_aliastransbase.value * res_scale;
 	r_resfudge = r_aliastransadj.value * res_scale;
 
-	r_fov_greater_than_90 = scr_fov.integer > 90;
+	if (scr_fov.integer <= 90.0)
+		r_fov_greater_than_90 = false;
+	else
+		r_fov_greater_than_90 = true;
 
 // TODO: collect 386-specific code in one place
 #if	id386
@@ -838,21 +850,13 @@ static void R_DrawViewModel (void)
 	if ((cl.v.health <= 0)		 ||
 	    (chase_active.integer)	 ||
 //rjr	    (cl.items & IT_INVISIBILITY) ||
+//O.S.	    (r_fov_greater_than_90)	 ||
 	    (!r_drawviewmodel.integer))
 	{
 		return;
 	}
 
-	/* If FOV > 90, just draw the model with a 90 degree FOV. */
-	if (r_fov_greater_than_90)
-		SCR_CalcFOV(90.0f);
-
 	R_AliasDrawModel (&r_viewlighting);
-
-	if (r_fov_greater_than_90)
-		SCR_CalcFOV(scr_fov.value);
-
-	r_viewlighting.plightvec = NULL; /* silence -Wdangling-pointer warnings */
 }
 
 
@@ -1046,34 +1050,46 @@ static void R_DrawBEntitiesOnList (void)
 					}
 				}
 
-				r_pefragtopnode = NULL;
-
-				for (j = 0; j < 3; j++)
+#if 0
+				// if the driver wants polygons, deliver those. Z-buffering is on
+				// at this point, so no clipping to the world tree is needed, just
+				// frustum clipping
+				if (r_drawpolys | r_drawculledpolys)
 				{
-					r_emins[j] = minmaxs[j];
-					r_emaxs[j] = minmaxs[3+j];
+					R_ZDrawSubmodelPolys (clmodel);
 				}
-
-				R_SplitEntityOnNode2 (cl.worldmodel->nodes);
-				if (r_pefragtopnode)
+				else
+#endif
 				{
-					currententity->topnode = r_pefragtopnode;
+					r_pefragtopnode = NULL;
 
-					if (r_pefragtopnode->contents >= 0)
+					for (j = 0; j < 3; j++)
 					{
-						// not a leaf; has to be clipped to the world BSP
-						r_clipflags = clipflags;
-						R_DrawSolidClippedSubmodelPolygons (clmodel);
+						r_emins[j] = minmaxs[j];
+						r_emaxs[j] = minmaxs[3+j];
 					}
-					else
-					{
-						// falls entirely in one leaf, so we just put all the
-						// edges in the edge list and let 1/z sorting handle
-						// drawing order
 
-						R_DrawSubmodelPolygons (clmodel, clipflags);
+					R_SplitEntityOnNode2 (cl.worldmodel->nodes);
+					if (r_pefragtopnode)
+					{
+						currententity->topnode = r_pefragtopnode;
+
+						if (r_pefragtopnode->contents >= 0)
+						{
+							// not a leaf; has to be clipped to the world BSP
+							r_clipflags = clipflags;
+							R_DrawSolidClippedSubmodelPolygons (clmodel);
+						}
+						else
+						{
+							// falls entirely in one leaf, so we just put all the
+							// edges in the edge list and let 1/z sorting handle
+							// drawing order
+
+							R_DrawSubmodelPolygons (clmodel, clipflags);
+						}
+						currententity->topnode = NULL;
 					}
-					currententity->topnode = NULL;
 				}
 
 				// put back world rotation and frustum clipping
@@ -1101,24 +1117,30 @@ static void R_DrawBEntitiesOnList (void)
 R_EdgeDrawing
 ================
 */
-FUNC_NOINLINE
 static void R_EdgeDrawing (qboolean Translucent)
 {
-/* R_EdgeDrawing() is called twice by R_RenderView_(): First with
- * Translucent as false, where the three pointers r_edges, surfaces
- * and surf_max are set to the ledges[] and lsurfs[] arrays,  and
- * then with Translucent as true in which case the code assumes
- * those pointers to be still valid, but they pointed to variables
- * which went out of scope by that time. The x86 asm code actually
- * handles that, i.e. see: R_SurfacePatch() -> R_SurfacePatchT(),
- * but the C-only code surely does not..  */
-#if !id386
-static edge_t	ledges[NUMSTACKEDGES + ((CACHE_SIZE - 1) / sizeof(edge_t)) + 1];
-static surf_t	lsurfs[NUMSTACKSURFACES + ((CACHE_SIZE - 1) / sizeof(surf_t)) + 1];
+#if id386
+# define static_in_C_ /* nothing */
 #else
-	edge_t	ledges[NUMSTACKEDGES + ((CACHE_SIZE - 1) / sizeof(edge_t)) + 1];
-	surf_t	lsurfs[NUMSTACKSURFACES + ((CACHE_SIZE - 1) / sizeof(surf_t)) + 1];
+# define static_in_C_ static
 #endif
+/* R_EdgeDrawing() is called twice by R_RenderView_():
+ * First with Translucent as false, where the three pointers r_edges,
+ * surfaces and surf_max are set to the ledges[] and lsurfs[] arrays,
+ * and then with Translucent as true in which case R_EdgeDrawing()
+ * does *not* set the pointers and the code assumes them to be still
+ * valid, but they pointed to variables which went out of scope by
+ * that time.
+ * The x86 assembler code actually handles that (R_SurfacePatch() ->
+ * R_SurfacePatchT(), I think) and if you make those arrays static,
+ * then you may as well get a segmentation fault.
+ * For C-only code, however, the ledges[] and lsurfs[] arrays *must*
+ * be static in order to keep r_edges, surfaces and surf_max pointers
+ * valid during the second call of R_EdgeDrawing(true).  */
+	static_in_C_ edge_t
+		ledges[NUMSTACKEDGES + ((CACHE_SIZE - 1) / sizeof(edge_t)) + 1];
+	static_in_C_ surf_t
+		lsurfs[NUMSTACKSURFACES + ((CACHE_SIZE - 1) / sizeof(surf_t)) + 1];
 	int	EdgesSize, SurfacesSize;
 
 	if (!Translucent)
@@ -1158,6 +1180,11 @@ static surf_t	lsurfs[NUMSTACKSURFACES + ((CACHE_SIZE - 1) / sizeof(surf_t)) + 1]
 		memcpy(r_edges,SaveEdges,SaveEdgesCount * sizeof(edge_t));
 		memcpy(surfaces,SaveSurfaces,SaveSurfacesCount * sizeof(surf_t));
 	}
+
+#if 0
+	if (r_drawculledpolys)
+		R_ScanEdges (Translucent);
+#endif
 
 // only the world can be drawn back to front with no z reads or compares, just
 // z writes, so have the driver turn z compares on now
@@ -1204,7 +1231,10 @@ static surf_t	lsurfs[NUMSTACKSURFACES + ((CACHE_SIZE - 1) / sizeof(surf_t)) + 1]
 		}
 	}
 
-	R_ScanEdges (Translucent);
+#if 0
+	if (!(r_drawpolys | r_drawculledpolys))
+#endif
+		R_ScanEdges (Translucent);
 }
 
 

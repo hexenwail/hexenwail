@@ -156,7 +156,9 @@ static qboolean S_AHI_Init(dma_t *dma)
 						if (r - buffer_size >= buffer_size >> 1)
 							buffer_size *= 2;
 						buffer_size *= channels;
+						#ifndef PLATFORM_AMIGAOS3
 						buffer_size *= 4; /* for no stutters with crappy drivers -- bszili. */
+						#endif
 						samples = buffer_size;
 						buffer_size *= (bits / 8);
 

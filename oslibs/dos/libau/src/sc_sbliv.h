@@ -1,18 +1,3 @@
-//**************************************************************************
-//*                     This file is part of the                           *
-//*                      Mpxplay - audio player.                           *
-//*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
-//*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
-//**************************************************************************
-//*  This program is distributed in the hope that it will be useful,       *
-//*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
-//*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                  *
-//*  Please contact with the author (with me) if you want to use           *
-//*  or modify this source.                                                *
-//**************************************************************************
-//function: definitions for SB Live card handling under DOS
 
 #ifndef SC_SBLIV_H
 #define SC_SBLIV_H
@@ -36,7 +21,31 @@ typedef struct emu_card_version_s{
  uint8_t  max_channels;
 }emu_card_version_s;
 
-struct emu10k1_card;
+typedef struct emu10k1_card
+{
+ unsigned long   iobase;
+ unsigned int    irq;
+ unsigned short	 model;
+ unsigned char   chiprev;
+ unsigned long   serial;
+ unsigned char   chips;
+ unsigned char   chip_select;
+ struct pci_config_s  *pci_dev;
+ struct emu_card_version_s *card_capabilities;
+ struct emu_driver_func_s *driver_funcs;
+
+ struct dosmem_t *dm;                     // now it's ca. 72k only
+ //char *cardbuf_mem;              // but later we should use DPMI memory
+ uint32_t *virtualpagetable;
+ void *silentpage;
+ unsigned long period_size;
+ char *pcmout_buffer;
+ long pcmout_bufsize;
+ //unsigned long pcmout_dmasize;
+
+ unsigned int voice_initial_pitch;
+ unsigned int voice_pitch_target;
+}emu10k1_card;
 
 typedef struct emu_driver_func_s{
  unsigned int (*selector)(struct emu10k1_card *card,struct mpxplay_audioout_info_s *aui);
@@ -52,31 +61,5 @@ typedef struct emu_driver_func_s{
  void (*mixer_write)(struct emu10k1_card *card,unsigned int reg,unsigned int value);
  aucards_allmixerchan_s *mixerset;
 }emu_driver_func_s;
-
-typedef struct emu10k1_card
-{
- unsigned long   iobase;
- unsigned int    irq;
- unsigned short	 model;
- unsigned char   chiprev;
- unsigned long   serial;
- unsigned char   chips;
- unsigned char   chip_select;
- struct pci_config_s  *pci_dev;
- struct emu_card_version_s *card_capabilities;
- struct emu_driver_func_s *driver_funcs;
-
- struct dosmem_t *dm;              // now it's ca. 72k only
- //char *cardbuf_mem;              // but later we should use DPMI memory
- uint32_t *virtualpagetable;
- void *silentpage;
- unsigned long period_size;
- char *pcmout_buffer;
- long pcmout_bufsize;
- //unsigned long pcmout_dmasize;
-
- unsigned int voice_initial_pitch;
- unsigned int voice_pitch_target;
-}emu10k1_card;
 
 #endif // SC_SBLIV_H

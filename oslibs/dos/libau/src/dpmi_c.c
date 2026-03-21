@@ -11,11 +11,10 @@ void pds_dpmi_dos_freemem(void)
   unsigned short sel = dm->selector;
 
 #ifdef __DJGPP__
-  __asm__("movw %0, %%dx	\n"
-          "movw $0x101,%%ax	\n"
-          "int $0x31		\n"
-         : : "m"(sel) : "ax","dx"
-  );
+  __asm__("movw %0,%%dx"::"m"(sel));
+  __asm__("movw $0x101,%ax");
+  __asm__("int $0x31");
+
 #else /* WATCOM */
   _asm {
    mov ax,101h
@@ -37,21 +36,19 @@ struct dosmem_t *pds_dpmi_dos_allocmem(unsigned int size)
     return NULL;
   #endif
 
-  __asm__("movl %2,%%ebx	\n"
-          "movw $0x100,%%ax	\n"
-          "addl $16,%%ebx	\n"
-          "shrl $4,%%ebx	\n"
+  __asm__("movl %0,%%ebx"::"m"(size));
+  __asm__("movw $0x100,%ax	\n"
+          "addl $16,%ebx	\n"
+          "shrl $4,%ebx		\n"
           "int $0x31		\n"
-          "jnc	1f		\n"
-          "xorl %%edx,%%edx	\n"
-       "1:			\n"
-          "movzx %%ax,%%eax	\n"
-          "shll $4,%%eax	\n"
-          "movl %%eax,%0	\n"
-          "movw %%dx, %1	\n"
-          :"=m"(lin),"=m"(sel)
-          : "m"(size) : "eax","ebx","edx"
-  );
+          "jnc go		\n"
+          "xorl %edx,%edx	\n"
+       "go:			\n"
+          "movzx %ax,%eax	\n"
+          "shll $4,%eax");
+  __asm__("movl %%eax,%0":"=m"(lin));
+  __asm__("movw %%dx,%0":"=m"(sel));
+
 #else /*WATCOM*/
   _asm {
    mov ax,100h

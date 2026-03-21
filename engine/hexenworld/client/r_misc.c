@@ -433,6 +433,7 @@ void R_PrintAliasStats (void)
 }
 
 
+#if	!id68k
 /*
 ===================
 R_TransformFrustum
@@ -458,8 +459,11 @@ void R_TransformFrustum (void)
 		view_clipplanes[i].dist = DotProduct (modelorg, v2);
 	}
 }
+#endif
 
-#if	!id386
+
+#if	!id386 && !id68k
+
 /*
 ================
 TransformVector
@@ -471,6 +475,7 @@ void TransformVector (vec3_t in, vec3_t out)
 	out[1] = DotProduct(in,vup);
 	out[2] = DotProduct(in,vpn);
 }
+
 #endif
 
 
@@ -574,6 +579,8 @@ void R_SetupFrame (void)
 	R_AnimateLight ();
 
 	r_framecount++;
+
+	numbtofpolys = 0;
 
 #if 0
 // debugging

@@ -257,7 +257,11 @@ static UBYTE AllSoundsOff[] =
 };
 
 struct Library *CamdBase;
+#ifdef PLATFORM_AMIGAOS3
+struct RealTimeBase *RealTimeBase;
+#else
 struct Library *RealTimeBase;
+#endif
 static qboolean	midi_playing, midi_paused;
 static UBYTE *smfdata;
 static struct Global *glob;
@@ -344,7 +348,11 @@ qboolean MIDI_Init(void)
 		return false;
 	}
 
+#ifdef PLATFORM_AMIGAOS3
+	RealTimeBase = (struct RealTimeBase *) OpenLibrary("realtime.library", 37);
+#else
 	RealTimeBase = OpenLibrary("realtime.library", 37);
+#endif
 	if (!RealTimeBase)
 	{
 		Con_Printf ("Can't open realtime.library\n");

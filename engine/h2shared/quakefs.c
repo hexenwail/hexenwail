@@ -111,10 +111,11 @@ static pakdata_t old_pakdata[] =
 	{ 701,	20870,	23537707, "data1"	},	/* pak0.pak, original demo v0.42 from Aug. 1997
 							 *	(h2.exe -> console -> version says 1.07!)
 							 *	MD5: 208643a09193dafbca4b851762479438	*/
-	{ 697,	43990,	22719295, "data1"	},	/* pak0.pak, original oem (Matrox m3D) v1.08
-							 *	MD5: 0477d62752fb6164a1761fa65b4dc384	*/
-	{ 183,	43596,	17739969, "data1"	},	/* pak2.pak, original oem (Matrox m3D) v1.08
-							 *	MD5: 404a93061049d09a82f609323f2695ae	*/
+/* !!! FIXME:  I don't have the original v1.08 of Continent of Blackmarsh. I only know the file sizes.	*/
+	{ -1,	0,	22719295, "data1"	},	/* pak0.pak, original oem (Matrox m3D) v1.08
+							 *	MD5: ????????????????????????????????	*/
+	{ -1,	0,	17739969, "data1"	},	/* pak2.pak, original oem (Matrox m3D) v1.08
+							 *	MD5: ????????????????????????????????	*/
 	{  98,	25864,	10678369, "hw"	},		/* pak4.pak, Hexen2World v0.11 (ugh..)
 							 *	MD5: c311a30ac8ee1f112019723b4fe42268	*/
 	{  40,	48258,	 3357888, "hw"	},		/* pak4.pak, Hexen2World v0.09 (ugh ugh ugh!)
@@ -178,7 +179,7 @@ static unsigned int check_known_paks (int paknum, int numfiles, unsigned short c
 	if (strcmp(fs_gamedir_nopath, pakdata[paknum].dirname) != 0)
 		return GAME_MODIFIED;	/* Raven didn't ship like that */
 
-	if (numfiles != pakdata[paknum].numfiles || crc != pakdata[paknum].crc)
+	if (numfiles != pakdata[paknum].numfiles)
 	{
 		switch (paknum)
 		{
@@ -269,8 +270,8 @@ static pack_t *FS_LoadPackFile (const char *packfile, int paknum, qboolean base_
 	if (!packhandle)
 		return NULL;
 
-	if (!fread(&header, sizeof(header), 1, packhandle) ||
-	    header.id[0] != 'P' || header.id[1] != 'A' ||
+	fread (&header, 1, sizeof(header), packhandle);
+	if (header.id[0] != 'P' || header.id[1] != 'A' ||
 	    header.id[2] != 'C' || header.id[3] != 'K')
 	{
 		Sys_Printf ("WARNING: %s is not a packfile, ignored\n", packfile);
@@ -302,8 +303,7 @@ static pack_t *FS_LoadPackFile (const char *packfile, int paknum, qboolean base_
 	newfiles = (pakfiles_t *) Z_Malloc (numpackfiles * sizeof(pakfiles_t), Z_MAINZONE);
 
 	fseek (packhandle, header.dirofs, SEEK_SET);
-	if (!fread(info, header.dirlen,  1, packhandle))
-		Sys_Error ("Error reading %s", packfile);
+	fread (info,  1, header.dirlen, packhandle);
 
 	/* crc the directory */
 	CRC_Init (&crc);
@@ -339,7 +339,7 @@ static pack_t *FS_LoadPackFile (const char *packfile, int paknum, qboolean base_
 	pack->numfiles = numpackfiles;
 	pack->files = newfiles;
 
-	Sys_Printf ("Added packfile %s (%i files, %i crc)\n", packfile, numpackfiles, crc);
+	Sys_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
 	return pack;
 pak_error:
 	fclose (packhandle);
@@ -932,8 +932,7 @@ static byte *FS_LoadFile (const char *path, int usehunk, unsigned int *path_id)
 	((byte *)buf)[len] = 0;
 
 	Draw_BeginDisc ();
-	if (!fread(buf, (size_t)len, 1, h))
-		Sys_Error ("%s: Error reading %s", __thisfunc__, path);
+	fread (buf, 1, (size_t)len, h);
 	fclose (h);
 	Draw_EndDisc ();
 
@@ -1162,14 +1161,13 @@ static int CheckRegistered (void)
 	if (!h)
 		return -1;
 
-	i = (int) fread(check, sizeof(check), 1, h);
+	fread (check, 1, sizeof(check), h);
 	fclose (h);
-	if (!i) goto corrupt;
 
 	for (i = 0; i < 128; i++)
 	{
 		if (pop[i] != (unsigned short)BigShort(check[i]))
-		{  corrupt:
+		{
 			Sys_Printf ("Corrupted data file\n");
 			return -1;
 		}
@@ -1248,7 +1246,7 @@ void FS_Init (void)
 		Cvar_SetROM ("registered", "1");
 		Sys_Printf ("Playing the registered version.\n");
 	}
-	else if (gameflags & (GAME_OEM|GAME_OLD_OEM))
+	else if (gameflags & GAME_OEM)
 	{
 		Cvar_SetROM ("oem", "1");
 		Sys_Printf ("Playing the oem (Matrox m3D bundle) version \"Continent of Blackmarsh\"\n");
@@ -1304,20 +1302,17 @@ void FS_Init (void)
 
 	if (check_portals)
 	{
-#if defined(H2W)
 		searchpath_t	*mark = fs_searchpaths;
-#endif
 		FS_AddGameDirectory ("portals", true);
 		if (! (gameflags & GAME_PORTALS))
 		{
-#if !defined(H2W)
-			Sys_Error ("Missing or invalid mission pack installation\n");
-#else
 			/* back out searchpaths from invalid mission pack
 			 * installations because the portals directory is
 			 * reserved for the mission pack */
 			searchpath_t	*next;
 			Sys_Printf ("Missing or invalid mission pack installation\n");
+			Con_Printf("Missing or invalid mission pack installation\n");
+
 			while (fs_searchpaths != mark)
 			{
 				if (fs_searchpaths->pack)
@@ -1340,7 +1335,6 @@ void FS_Init (void)
 			/* back to data1 */
 			FS_MakePath_BUF (FS_BASEDIR, NULL, fs_gamedir, sizeof(fs_gamedir), "data1");
 			FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
-#endif	/* H2W */
 		}
 	}
 

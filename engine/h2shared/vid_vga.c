@@ -37,7 +37,7 @@ static int	VGA_numpages;
 static int	VGA_buffersize;
 
 static int	VGA_highhunkmark;
-/* these two are shared with vid_ext.c */
+/* these two are shared with vid_ext.c: */
 void		*vid_surfcache;
 int		vid_surfcachesize;
 
@@ -49,7 +49,8 @@ static void VGA_SwapBuffers (viddef_t *lvid, vmode_t *pcurrentmode, vrect_t *rec
 static void VGA_SwapBuffersCopy (viddef_t *lvid, vmode_t *pcurrentmode, vrect_t *rects);
 
 #include "vgamodes.h"
-#define NUMVIDMODES		Q_COUNTOF(vgavidmodes)
+
+#define NUMVIDMODES		(sizeof(vgavidmodes) / sizeof(vgavidmodes[0]))
 
 
 /*

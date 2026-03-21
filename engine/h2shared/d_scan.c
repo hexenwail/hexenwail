@@ -97,7 +97,7 @@ void D_WarpScreen (void)
 }
 
 
-#if	!id386
+#if	!id386 && !id68k
 /*
 =============
 D_DrawTurbulent8Span
@@ -158,9 +158,10 @@ static void D_DrawTurbulent8TQuickSpan (void)
 	} while (--r_turb_spancount > 0);
 }
 
-#endif	/* !id386 */
+#endif	/* !id386 && !id68k */
 
 
+#if !id68k
 static void D_DrawTurbulent8 (espan_t *pspan)
 {
 	int				count;
@@ -424,6 +425,7 @@ static void D_DrawTurbulent8T (espan_t *pspan)
 
 	} while ((pspan = pspan->pnext) != NULL);
 }
+#endif /* !id68k */
 
 
 /*
@@ -442,7 +444,7 @@ void Turbulent8 (surf_t *s)
 }
 
 
-#if	!id386
+#if	!id386 && !id68k
 
 /*
 =============
@@ -829,5 +831,5 @@ void D_DrawSingleZSpans (espan_t *pspan)
 	}
 }
 
-#endif	/* !id386 */
+#endif	/* !id386 && !id68k */
 

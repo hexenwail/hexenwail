@@ -49,7 +49,6 @@ cvar_t		sys_nostdout = {"sys_nostdout", "0", CVAR_NONE};
 qboolean		isDedicated = true;	/* compatibility */
 static double		starttime;
 static qboolean		first = true;
-static qboolean		stdinIsATTY;	/* from ioquake3 source */
 
 
 /*
@@ -384,15 +383,11 @@ Sys_ConsoleInput
 */
 const char *Sys_ConsoleInput (void)
 {
-	static qboolean	con_eof = false;
 	static char	con_text[256];
 	static int	textlen;
 	char		c;
 	fd_set		set;
 	struct timeval	timeout;
-
-	if (!stdinIsATTY || con_eof)
-		return NULL;
 
 	FD_ZERO (&set);
 	FD_SET (0, &set);	// stdin
@@ -401,13 +396,7 @@ const char *Sys_ConsoleInput (void)
 
 	while (select (1, &set, NULL, NULL, &timeout))
 	{
-		if (read(0, &c, 1) <= 0)
-		{
-			// Finish processing whatever is already in the
-			// buffer (if anything), then stop reading
-			con_eof = true;
-			c = '\n';
-		}
+		read (0, &c, 1);
 		if (c == '\n' || c == '\r')
 		{
 			con_text[textlen] = '\0';
@@ -445,15 +434,6 @@ void Sys_Sleep (unsigned long msecs)
 	usleep (msecs * 1000);
 }
 
-static void Sys_Init (void)
-{
-	const char* term = getenv("TERM");
-	stdinIsATTY = isatty(STDIN_FILENO) &&
-		!(term && (!strcmp(term, "raw") || !strcmp(term, "dumb")));
-	if (!stdinIsATTY)
-		Sys_Printf("Terminal input not available.\n");
-}
-
 static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 {
 	char	*tmp;
@@ -475,43 +455,11 @@ static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 }
 
 #if DO_USERDIRS
-static qboolean Sys_GetUserdirArgs (int argc, char **argv, char *dst, size_t dstsize)
-{
-	int i = 1;
-	for (; i < argc - 1; ++i)
-	{
-		if (strcmp(argv[i], "-userdir") == 0)
-		{
-			char *p = dst;
-			const char * arg = argv[i + 1];
-			const int n = (int)strlen(arg);
-			if (n < 1) Sys_Error("Bad argument to -userdir");
-			if (q_strlcpy(dst, arg, dstsize) >= dstsize)
-				Sys_Error ("Insufficient array size for userspace directory");
-			if (dst[n - 1] == '/') dst[n - 1] = 0;
-			if (*p == '/') p++;
-			for (; *p; p++) {
-				const char c = *p;
-				if (c == '/') {
-					*p = 0;
-					Sys_mkdir (dst, true);
-					*p = c;
-				}
-			}
-			return true;
-		}
-	}
-	return false;
-}
-
-static int Sys_GetUserdir (int argc, char **argv, char *dst, size_t dstsize)
+static int Sys_GetUserdir (char *dst, size_t dstsize)
 {
 	size_t		n;
 	const char	*home_dir = NULL;
 	struct passwd	*pwent;
-
-	if (Sys_GetUserdirArgs(argc, argv, dst, dstsize))
-		return 0;
 
 	pwent = getpwuid(getuid());
 	if (pwent == NULL)
@@ -625,7 +573,7 @@ int main (int argc, char **argv)
 
 #if DO_USERDIRS
 	memset (userdir, 0, sizeof(userdir));
-	if (Sys_GetUserdir(argc, argv, userdir, sizeof(userdir)) != 0)
+	if (Sys_GetUserdir(userdir, sizeof(userdir)) != 0)
 		Sys_Error ("Couldn't determine userspace directory");
 	Sys_mkdir(userdir, true);
 	parms.userdir = userdir;
@@ -646,8 +594,6 @@ int main (int argc, char **argv)
 	parms.membase = malloc (parms.memsize);
 	if (!parms.membase)
 		Sys_Error ("Insufficient memory.");
-
-	Sys_Init ();
 
 	Host_Init();
 

@@ -214,40 +214,44 @@ qmodel_t *Mod_FindName (const char *name)
 	{
 		mod = &mod_known[i];
 		if (!strcmp (mod->name, name) )
-			return mod;
+			break;
 	}
 
-	if (mod_numknown == MAX_MOD_KNOWN)
+	if (i == -1)
 	{
-		for (i = 0; i < mod_numknown; i++)
+		if (mod_numknown == MAX_MOD_KNOWN)
 		{
-			mod = &mod_known[i];
-			if (mod->needload == NL_UNREFERENCED && mod->type != mod_alias)
-				break;
-		}
-		if (i < mod_numknown)
-		{
-			Hash_Add (&hash_mod, key, i);
-			if (mod->type == mod_alias)
+			for (i = 0; i < mod_numknown; i++)
 			{
-				if (Cache_Check (&mod->cache))
-					Cache_Free (&mod->cache);
+				mod = &mod_known[i];
+				if (mod->needload == NL_UNREFERENCED && mod->type != mod_alias)
+					break;
 			}
-			else if (mod->type == mod_sprite)
-				mod->cache.data = NULL;
+			if (i < mod_numknown)
+			{
+				Hash_Add (&hash_mod, key, i);
+				mod = &mod_known[i];
+				if (mod->type == mod_alias)
+				{
+					if (Cache_Check (&mod->cache))
+						Cache_Free (&mod->cache);
+				}
+				else if (mod->type == mod_sprite)
+					mod->cache.data = NULL;
+			}
+			else
+				Sys_Error ("mod_numknown == MAX_MOD_KNOWN");
 		}
 		else
-			Sys_Error ("mod_numknown == MAX_MOD_KNOWN");
-	}
-	else
-	{
-		Hash_Add (&hash_mod, key, mod_numknown);
-		mod = &mod_known[mod_numknown];
-		mod_numknown++;
+		{
+			Hash_Add (&hash_mod, key, mod_numknown);
+			mod = &mod_known[mod_numknown];
+			mod_numknown++;
+		}
+		q_strlcpy (mod->name, name, MAX_QPATH);
+		mod->needload = NL_NEEDS_LOADED;
 	}
 
-	q_strlcpy (mod->name, name, MAX_QPATH);
-	mod->needload = NL_NEEDS_LOADED;
 	return mod;
 }
 
@@ -1778,11 +1782,12 @@ static void *Mod_LoadAliasFrame (void *pin, int *pframeindex, int numv,
 
 	pdaliasframe = (daliasframe_t *)pin;
 
-	q_strlcpy (name, pdaliasframe->name, sizeof(pheader->frames[0].name));
+	strcpy (name, pdaliasframe->name);
 
 	for (i = 0; i < 3; i++)
 	{
-	// these are byte values, we don't have to worry about endianness.
+	// these are byte values, so we don't have to worry about
+	// endianness
 		pbboxmin->v[i] = pdaliasframe->bboxmin.v[i];
 		pbboxmax->v[i] = pdaliasframe->bboxmax.v[i];
 	}
@@ -1801,6 +1806,8 @@ static void *Mod_LoadAliasFrame (void *pin, int *pframeindex, int numv,
 
 	for (j = 0; j < numv; j++)
 	{
+		int		k;
+
 		in[0] = pinframe[j].v[0];
 		in[1] = pinframe[j].v[1];
 		in[2] = pinframe[j].v[2];
@@ -1809,14 +1816,14 @@ static void *Mod_LoadAliasFrame (void *pin, int *pframeindex, int numv,
 	// these are all byte values, so no need to deal with endianness
 		pframe[j].lightnormalindex = pinframe[j].lightnormalindex;
 
-		for (i = 0; i < 3; i++)
+		for (k = 0; k < 3; k++)
 		{
-			pframe[j].v[i] = pinframe[j].v[i];
+			pframe[j].v[k] = pinframe[j].v[k];
 
-			if (aliasmins[i] > out[i])
-				aliasmins[i] = out[i];
-			if (aliasmaxs[i] < out[i])
-				aliasmaxs[i] = out[i];
+			if (aliasmins[k] > out[k])
+				aliasmins[k] = out[k];
+			if (aliasmaxs[k] < out[k])
+				aliasmaxs[k] = out[k];
 		}
 	}
 

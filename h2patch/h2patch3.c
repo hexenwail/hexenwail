@@ -1,5 +1,5 @@
 /* h2patch3 -- hexen2 pak patch application using xdelta3
- * Copyright (C) 2007-2023  O.Sezer <sezero@users.sourceforge.net>
+ * Copyright (C) 2007-2017  O.Sezer <sezero@users.sourceforge.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,119 +53,94 @@
 #include "qsnprint.h"
 #include "filenames.h"
 
-#include "xdelta3-iface.h"
+
+#include "xdelta3-mainopt.h"
 
 
 struct other_pak
 {
-	long			patched; /* -1: can not */
-	long			size, newsize;
-	uint32_t		sum, newsum; /* adler32 */
+	long			size;
+	unsigned long		sum;	/* adler32 */
 	const char		*desc;
-	const char		*deltaname;
-	/* next same-named pak: */
 	struct other_pak const	*next;
 };
 
-static const struct other_pak pak_bad = {
-	-1, -1, -1, 0x0, 0x0,
-	"An unknown pak file",
-	NULL, NULL
-};
-
-static const struct other_pak pak0_demo1 = {
-	-1, 27750257, 27750257,
-	0xED96172E, 0xED96172E,
-	"Demo (Nov. 1997, v1.11)",
-	NULL,
-	&pak_bad
-};
-
-static const struct other_pak pak0_demo0 = {
-	-1, 23537707, 23537707,
-	0x88A46443, 0x88A46443,
-	"Demo (Aug. 1997, v0.42)",
-	NULL,
-	&pak0_demo1
-};
-
 static const struct other_pak pak0_oem1 = {
-	1,  22720659, 22720659,
-	0xE9D25D16, 0xE9D25D16,
-	"OEM, Continent of Blackmarsh (m3D, v1.10)",
-	NULL,
-	&pak0_demo0
+	22720659,	0xE9D25D16,
+	"Continent of Blackmarsh (m3D, v1.10)",
+	NULL
 };
 
 static const struct other_pak pak0_oem0 = {
-	0,  22719295, 22720659,
-	0x5EA1736D, 0xE9D25D16,
-	"OEM, Continent of Blackmarsh (m3D, v1.08)",
-	"oem08pk0.xd3",
+	/* don't have this myself, therefore no patch. */
+	22719295,	/**/ ~0UL,
+	"Continent of Blackmarsh (m3D, v1.08)",
 	&pak0_oem1
 };
 
-static const struct other_pak pak0_retail1 = {
-	1,  22704056, 22704056,
-	0xDCF2218F, 0xDCF2218F,
-	"Retail v1.11",
-	NULL,
+static const struct other_pak pak0_demo1 = {
+	27750257,	0xED96172E,
+	"Demo (Nov. 1997, v1.11)",
 	&pak0_oem0
 };
 
-static const struct other_pak pak0_retail0 = {
-	0,  21714275, 22704056,
-	0xCFF397B9, 0xDCF2218F,
-	"Retail, from Hexen II cdrom (v1.03)",
-	"data1pk0.xd3",
-	&pak0_retail1
+static const struct other_pak pak0_demo0 = {
+	23537707,	0x88A46443,
+	"Demo (Aug. 1997, v0.42)",
+	&pak0_demo1
 };
 
-static const struct other_pak pak1_retail1 = {
-	1,  75601170, 75601170,
-	0xD56A2FE8, 0xD56A2FE8,
-	"Retail v1.11",
-	NULL,
-	&pak_bad
-};
-
-static const struct other_pak pak1_retail0 = {
-	0,  76958474, 75601170,
-	0x8C787960, 0xD56A2FE8,
-	"Retail, from Hexen II cdrom (v1.03)",
-	"data1pk1.xd3",
-	&pak1_retail1
-};
-
+#if 0
 static const struct other_pak pak2_oem1 = {
-	1,  17742721, 17742721,
-	0x5595110E, 0x5595110E,
-	"OEM, Continent of Blackmarsh (m3D, v1.10)",
-	NULL,
-	&pak_bad
+	17742721,	0x5595110E,
+	"Continent of Blackmarsh (m3D, v1.10)",
+	NULL
 };
 
 static const struct other_pak pak2_oem0 = {
-	0,  17739969, 17742721,
-	0x523C6E88, 0x5595110E,
-	"OEM, Continent of Blackmarsh (m3D, v1.08)",
-	"oem08pk2.xd3",
+	/* don't have this myself, therefore no patch. */
+	17739969,	/**/ ~0UL,
+	"Continent of Blackmarsh (m3D, v1.08)",
 	&pak2_oem1
 };
+#endif
+
+#define NUM_PATCHES	2
 
 struct patch_pak
 {
 	const char	*dir_name;	/* where the file is	*/
 	const char	*filename;	/* file to patch	*/
-	struct other_pak const	*pakdata;
+	const char	*deltaname;	/* delta file to use	*/
+	const char	*old_desc;
+	const char	*new_desc;
+
+	struct other_pak const	*other_data;
+			/* possible descriptions of same-named pak
+			 * versions not supported by this program. */
+
+	unsigned long	old_sum, new_sum;	/* adler32	*/
+	long	old_size, new_size;
 };
 
-#define NUM_PATCHES	3
 static const struct patch_pak patch_data[NUM_PATCHES] =
 {
-	{ "data1", "pak0.pak", &pak0_retail0 },
-	{ "data1", "pak1.pak", &pak1_retail0 },
-	{ "data1", "pak2.pak", &pak2_oem0 }
+	{  "data1", "pak0.pak",
+	   "data1pk0.xd3",
+	   "retail, from Hexen II cdrom (v1.03)",
+	   "retail, already patched (v1.11)",
+	   &pak0_demo0,
+	   0xCFF397B9, 0xDCF2218F,
+	   21714275, 22704056
+	},
+	{  "data1", "pak1.pak",
+	   "data1pk1.xd3",
+	   "retail, from Hexen II cdrom (v1.03)",
+	   "retail, already patched (v1.11)",
+	   NULL,
+	   0x8C787960, 0xD56A2FE8,
+	   76958474, 75601170
+	}
 };
 
 static	char	dst[MAX_OSPATH],
@@ -196,8 +171,10 @@ static void progress_print (void);
 
 static xd3_options_t h2patch_options =
 {
+	XD3_DEFAULT_IOPT_SIZE,	/* iopt_size */
 	XD3_DEFAULT_WINSIZE,	/* winsize */
 	H2PATCH_SRCWINSZ,	/* srcwinsz */
+	XD3_DEFAULT_SPREVSZ,	/* sprevsz */
 
 	1,			/* force overwrite */
 	0,			/* verbose */
@@ -397,7 +374,7 @@ static long get_millisecs (void)
 #elif defined(PLATFORM_AMIGA)
 static struct timerequest *timerio;
 static struct MsgPort   *timerport;
-#if defined(__MORPHOS__)
+#if defined(__MORPHOS__) || defined(__VBCC__)
 struct Library *TimerBase = NULL;
 #else
 struct Device  *TimerBase = NULL;
@@ -423,11 +400,11 @@ static void Sys_TimerInit (void)
 			if (OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ,
 					(struct IORequest *) timerio, 0) == 0)
 			{
-				#if defined(__MORPHOS__)
+#if defined(__MORPHOS__) || defined(__VBCC__)
 				TimerBase = (struct Library *)timerio->tr_node.io_Device;
-				#else
+#else
 				TimerBase = timerio->tr_node.io_Device;
-				#endif
+#endif
 			}
 			else
 			{
@@ -594,7 +571,7 @@ static void print_version (void)
 {
 	fprintf (stdout, "Hexen II 1.11 pak patch / Hammer of Thyrion (uHexen2) %d.%d.%d\n",
 			 HOT_VERSION_MAJ, HOT_VERSION_MID, HOT_VERSION_MIN);
-	fprintf (stdout, "based on Xdelta v3.1.0 backend by Joshua MacDonald.\n\n");
+	fprintf (stdout, "Xdelta v3.0.0 backend (C) 2007-2011 by Joshua MacDonald\n");
 }
 
 static void print_help (void)
@@ -655,13 +632,37 @@ static void log_print (const char *fmt, ...)
 	va_end (argptr);
 }
 
+static const char *request_m3d_feedback (const char *desc)
+{
+	static const char msg[] = "Please report this pak to the uHexen2 developers!";
+	static char txt[256];
+	q_snprintf (txt, sizeof(txt), "%s\n... %s", desc, msg);
+	return txt;
+}
+
+static const char *other_pak_desc (int num, long len)
+{
+	const struct other_pak *p = patch_data[num].other_data;
+
+	for ( ; p != NULL; p = p->next)
+	{
+		if (len == p->size)
+		{
+			if (p->sum == ~0UL) /* v1.08: wanna hear it */
+				return request_m3d_feedback (p->desc);
+			return p->desc;
+		}
+	}
+
+	return "an unknown pak file";
+}
+
 
 int main (int argc, char **argv)
 {
-	const struct other_pak	*pakdata;
 	int	i, num_patched, ret;
 	long		len;
-	uint32_t	csum;
+	unsigned long	csum;
 
 	print_version ();
 	for (i = 1; i < argc; ++i)
@@ -696,23 +697,7 @@ int main (int argc, char **argv)
 
 	for (i = 0; i < NUM_PATCHES; i++)
 	{
-		q_snprintf (dst, sizeof(dst), "%s%c%s", patch_data[i].dir_name,
-					DIR_SEPARATOR_CHAR, patch_data[i].filename);
-		ret = check_access(dst);
-		if (!(ret & (ACCESS_NOFILE|ACCESS_NOPERM)))
-		{
-			len = Sys_filesize (dst);
-			pakdata = patch_data[i].pakdata;
-			while (pakdata)
-			{
-				if (!pakdata->patched && pakdata->size == len)
-				{
-					h2patch_progress.total_bytes += pakdata->newsize;
-					break;
-				}
-				pakdata = pakdata->next;
-			}
-		}
+		h2patch_progress.total_bytes += patch_data[i].new_size;
 		/* delete our temp files from possible previous runs */
 		q_snprintf (out, sizeof(out), "%s%c%s", patch_data[i].dir_name,
 						DIR_SEPARATOR_CHAR, patch_tmpname);
@@ -733,10 +718,10 @@ int main (int argc, char **argv)
 		switch (ret)
 		{
 		case ACCESS_NOFILE:
-			fprintf (stderr, "... Not found (ignoring.)\n\n");
-			continue;
+			fprintf (stderr, "... Error: cannot find!\n");
+			return 1;
 		case ACCESS_NOPERM:
-			fprintf (stderr, "... Error: cannot access. Check permissions!\n");
+			fprintf (stderr, "... Error: cannot access, check permissions!\n");
 			return 1;
 		case ACCESS_FILEOK:
 		default:
@@ -744,74 +729,62 @@ int main (int argc, char **argv)
 		}
 
 		len = Sys_filesize (dst);
-		pakdata = patch_data[i].pakdata;
-		while (pakdata)
-		{
-			if (pakdata->size == len)
-				break;
-			if (pakdata->size < 0)
-				break;
-			pakdata = pakdata->next;
-		}
 
-		fprintf (stdout, "... Looks like: %s\n", pakdata->desc);
-		if (pakdata->size < 0)
+		if (len == patch_data[i].new_size)
 		{
-			fprintf (stderr, "... Error: not supported by h2patch!\n");
-			return 1;
-		}
-		else if (pakdata->patched < 0)
-		{
-			fprintf (stderr, "... Not supported by h2patch, ignoring.\n\n");
-		}
-		else if (pakdata->patched)
-		{
+			fprintf (stdout, "... looks like %s\n", patch_data[i].new_desc);
 			fprintf (stdout, "... checksumming...");
 			fflush (stdout);
 			csum = xd3_calc_adler32(dst);
-			if (csum == pakdata->sum)
+			if (csum == patch_data[i].new_sum)
 				fprintf (stdout, " OK ");
 			else	fprintf (stdout, "\n... WARNING: checksum mismatch! file corrupted?\n");
 			fprintf (stdout, "... skipped.\n\n");
-			h2patch_progress.current_written += pakdata->size;
+			h2patch_progress.current_written += patch_data[i].new_size;
+			continue;
 		}
-		else
+		if (len != patch_data[i].old_size)
 		{
-			/* found something to patch */
-			q_snprintf (pat, sizeof(pat), "%s%c%s%c%s", DELTA_DIR, DIR_SEPARATOR_CHAR,
-							patch_data[i].dir_name, DIR_SEPARATOR_CHAR,
-									pakdata->deltaname);
-			if (Sys_FileType(pat) != FS_ENT_FILE)
-			{
-				fprintf (stderr, "... Error: delta file %s not found!\n", pat);
-				return 1;
-			}
-
-			q_snprintf (out, sizeof(out), "%s%c%s", patch_data[i].dir_name,
-							DIR_SEPARATOR_CHAR, patch_tmpname);
-			fprintf (stdout, "... applying patch...\n");
-
-			start_file_progress (pakdata->newsize);
-			ret = xd3_main_patcher(&h2patch_options, dst, pat, out);
-			finish_file_progress ();
-			if (ret != 0)
-			{
-				Sys_unlink (out);
-				fprintf (stderr, "... Error: patch failed! file corrupted?\n");
-				return 2;
-			}
-
-			Sys_unlink (dst);
-			if (Sys_rename(out, dst) != 0)
-			{
-				Sys_unlink (out);
-				fprintf (stderr, "... Error: failed renaming patched file\n");
-				return 2;
-			}
-
-			num_patched++;
-			fprintf (stdout, "... OK. Patch successful.\n\n");
+			fprintf (stderr, "... looks like %s\n", other_pak_desc(i, len));
+			fprintf (stderr, "... Error: not supported by h2patch!\n");
+			return 1;
 		}
+
+		fprintf (stdout, "... looks like %s\n", patch_data[i].old_desc);
+
+		q_snprintf (pat, sizeof(pat), "%s%c%s%c%s", DELTA_DIR, DIR_SEPARATOR_CHAR,
+						patch_data[i].dir_name, DIR_SEPARATOR_CHAR,
+								patch_data[i].deltaname);
+		if (Sys_FileType(pat) != FS_ENT_FILE)
+		{
+			fprintf (stderr, "... Error: delta file not found!\n");
+			return 1;
+		}
+
+		q_snprintf (out, sizeof(out), "%s%c%s", patch_data[i].dir_name,
+						DIR_SEPARATOR_CHAR, patch_tmpname);
+		fprintf (stdout, "... applying patch...\n");
+
+		start_file_progress (patch_data[i].new_size);
+		ret = xd3_main_patcher(&h2patch_options, dst, pat, out);
+		finish_file_progress ();
+		if (ret != 0)
+		{
+			Sys_unlink (out);
+			fprintf (stderr, "... Error: patch failed! file corrupted?\n");
+			return 2;
+		}
+
+		Sys_unlink (dst);
+		if (Sys_rename(out, dst) != 0)
+		{
+			Sys_unlink (out);
+			fprintf (stderr, "... Error: failed renaming patched file\n");
+			return 2;
+		}
+
+		num_patched++;
+		fprintf (stdout, "... OK. Patch successful.\n\n");
 	}
 
 	fprintf (stdout, "%d file(s) patched.\n", num_patched);

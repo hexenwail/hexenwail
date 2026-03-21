@@ -240,25 +240,28 @@ qmodel_t *Mod_FindName (const char *name)
 		}
 	}
 
-	if (mod_numknown == MAX_MOD_KNOWN)
+	if (i == -1)
 	{
-		for (i = 0; i < mod_numknown; i++)
+		if (mod_numknown == MAX_MOD_KNOWN)
 		{
-			if (mod_known[i].needload == NL_UNREFERENCED)
-				break;
-		}
-		if (i < mod_numknown)
-		{
-			Hash_Add (&hash_mod, key, i);
-			mod = &(mod_known[i]);
+			for (i = 0; i < mod_numknown; i++)
+			{
+				if (mod_known[i].needload == NL_UNREFERENCED)
+					break;
+			}
+			if (i < mod_numknown)
+			{
+				Hash_Add (&hash_mod, key, i);
+				mod = &(mod_known[i]);
+			}
+			else // No free model handle
+				Sys_Error ("mod_numknown == MAX_MOD_KNOWN");
 		}
 		else
-			Sys_Error ("mod_numknown == MAX_MOD_KNOWN");
-	}
-	else
-	{
-		Hash_Add (&hash_mod, key, mod_numknown);
-		mod = &(mod_known[mod_numknown++]);
+		{
+			Hash_Add (&hash_mod, key, mod_numknown);
+			mod = &(mod_known[mod_numknown++]);
+		}
 	}
 	q_strlcpy (mod->name, name, MAX_QPATH);
 	mod->needload = NL_NEEDS_LOADED;
@@ -2024,13 +2027,14 @@ static void *Mod_LoadAliasFrame (void *pin, maliasframedesc_t *frame)
 
 	pdaliasframe = (daliasframe_t *)pin;
 
-	q_strlcpy (frame->name, pdaliasframe->name, sizeof (frame->name));
+	strcpy (frame->name, pdaliasframe->name);
 	frame->firstpose = posenum;
 	frame->numposes = 1;
 
 	for (i = 0; i < 3; i++)
 	{
-	// these are byte values, we don't have to worry about endianness.
+	// these are byte values, so we don't have to worry about
+	// endianness
 		frame->bboxmin.v[i] = pdaliasframe->bboxmin.v[i];
 		frame->bboxmax.v[i] = pdaliasframe->bboxmax.v[i];
 	}

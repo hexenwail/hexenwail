@@ -1,7 +1,7 @@
 Hammer of Thyrion (uHexen2) release notes:
 
 ========================================================================
-Changes in v1.5.10: (Jun. 20, 2025.)
+Changes in v1.5.10: (Oct. 25, 2022.)
 ========================================================================
 
 This is a minor bug fix and maintenance release:
@@ -13,29 +13,21 @@ This is a minor bug fix and maintenance release:
 - Fixed getting stuck with loading plaque upon attempting to load a
   bad save from the menu.
 
-- Support for -userdir command line argument to override the hardcoded
-  user directory in unix builds
-
-- OpenGL: Fixed dark dynamic lights, e.g. when Necromancer uses
+- OpenGL: Fixed dark dynamic lights -- e.g. when Necromancer uses
   invulnerability. (thanks to Shanjaq Astraljam, sf.net bug 48.)
 
 - OpenGL: Fixed graphical artifacts with scaled UI (sf.net bug 59.)
 
 - OpenGL: gl_clear now defaults to 1 and glClearColor is black. The
   new cvar r_clearcolor (palette index from 0 to 255, default is 0)
-  can be used to change the clear color. (from fitzquake.)
+  can be used to change the clear color (from fitzquake.)
 
-- Render: Compensate viewmodel distortion at fov > 90.
+- OpenGL: compensate viewmodel distortion at fov > 90.
 
-- Software renderer: fixed a left/right alias edge clipping bug.
+- Software renderer: replaced client sin/cos calls with precomputed
+  table lookups for better performance especially on old hardware.
 
-- Multiple performance tweaks mostly targeting the software renderer
-  especially when running on old hardware (thanks to Szilard Biro.)
-
-- Fixed hexen2 inventory item drop to take effect immediately: New
-  command 'invdrop' which was actually present in hexenworld. Users
-  must bind their key again in the menu system in order for that to
-  work. (sf.net bug 58.)
+- More performance tweaks mostly targeting the software renderer.
 
 - Windows, midi: Fixed volume reseting after loop (sf.net bug 66.)
 
@@ -50,16 +42,19 @@ This is a minor bug fix and maintenance release:
 - Utils: light, vis, and jsh2color now default to auto-detecting the
   max number of threads.
 
-- Support for the oem (Matrox m3D bundle) old 1.08 version: h2patch
-  can now detect and patch it.
-
 - Windows: removed the long-obsoleted Scitech MGL video driver.
 
 - DOS: removed the long-obsoleted MPATH and BW-TCP network drivers.
 
-- AROS: initial x86_64 support.
+- Amiga (m68k): multiple updates/optimizations thanks to Szilard Biro.
 
-- Dropped support for m68k-amigaos
+- Amiga (m68k): support for PSX controller, cdplayer.library and Paula
+  audio support, thanks to Szilard Biro.
+
+- Amiga (m68k): added support for Bebbo's gcc6/libnix based toolchain,
+  dropped support for VBCC compiler.
+
+- AROS: initial x86_64 support.
 
 - All platforms: Several HexenC (hcode) tweaks and clean-ups.
 

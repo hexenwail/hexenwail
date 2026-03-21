@@ -194,11 +194,9 @@ void BspModels (void)
 		name[strlen(m) - 4] = '\0';
 
 		q_snprintf (cmd, sizeof(cmd), "qbsp %s%s",gamedir, name);
-		if (system (cmd) != 0)
-			COM_Error ("%s failed", cmd);
+		system (cmd);
 		q_snprintf (cmd, sizeof(cmd), "light -extra %s%s", gamedir, name);
-		if (system (cmd) != 0)
-			COM_Error ("%s failed", cmd);
+		system (cmd);
 	}
 }
 
@@ -210,27 +208,23 @@ ReadFiles
 void ReadFiles (void)
 {
 	FILE	*f;
-	int		err = 0;
 	int		i;
 
 	f = SafeOpenRead ("files.dat");
 
-	err += fscanf (f, "%i\n", &numsounds) != 1;
+	fscanf (f, "%i\n", &numsounds);
 	for (i = 0 ; i < numsounds ; i++)
-		err += fscanf (f, "%i %s\n", &precache_sounds_block[i], precache_sounds[i]) != 2;
+		fscanf (f, "%i %s\n", &precache_sounds_block[i], precache_sounds[i]);
 
-	err += fscanf (f, "%i\n", &nummodels) != 1;
+	fscanf (f, "%i\n", &nummodels);
 	for (i = 0 ; i < nummodels ; i++)
-		err += fscanf (f, "%i %s\n", &precache_models_block[i], precache_models[i]) != 2;
+		fscanf (f, "%i %s\n", &precache_models_block[i], precache_models[i]);
 
-	err += fscanf (f, "%i\n", &numfiles) != 1;
+	fscanf (f, "%i\n", &numfiles);
 	for (i = 0 ; i < numfiles ; i++)
-		err += fscanf (f, "%i %s\n", &precache_files_block[i], precache_files[i]) != 2;
+		fscanf (f, "%i %s\n", &precache_files_block[i], precache_files[i]);
 
 	fclose (f);
-
-	if (err)
-		COM_Error ("Error parsing files.dat");
 
 	printf ("%3i sounds\n", numsounds);
 	printf ("%3i models\n", nummodels);

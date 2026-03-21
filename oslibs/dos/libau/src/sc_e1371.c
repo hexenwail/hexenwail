@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2009 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
+//*                  email: mpxplay@freemail.hu                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -317,6 +317,7 @@ static unsigned int snd_es1371_buffer_init(struct ensoniq_card_s *card,struct mp
  if(!card->dm)	return 0;
  card->pcmout_buffer=(char *)card->dm->linearptr;
  aui->card_DMABUFF=card->pcmout_buffer;
+
 #ifdef __DJGPP__
  aui->card_DMABUFF=(char*)((unsigned int)aui->card_DMABUFF + __djgpp_conventional_base);
 #endif
@@ -448,7 +449,7 @@ static int ES1371_adetect(struct mpxplay_audioout_info_s *aui)
  aui->card_private_data=card;
  card->pci_dev=&libau_pci;
 
- if(pcibios_search_devices(&ensoniq_devices[0],card->pci_dev)!=PCI_SUCCESSFUL)
+ if(pcibios_search_devices(ensoniq_devices,card->pci_dev)!=PCI_SUCCESSFUL)
   goto err_adetect;
 
  mpxplay_debugf(ENS_DEBUG_OUTPUT,"chip init : enable PCI io and busmaster");
@@ -470,7 +471,7 @@ static int ES1371_adetect(struct mpxplay_audioout_info_s *aui)
   funcbit_enable(card->sctrl,ES_1371_ST_AC97_RST);
  }
 
- if(pcibios_search_devices(&amplifier_hack_devices[0],NULL)==PCI_SUCCESSFUL)
+ if(pcibios_search_devices(amplifier_hack_devices,NULL)==PCI_SUCCESSFUL)
   funcbit_enable(card->ctrl,ES_1371_GPIO_OUT(1)); // turn on amplifier
 
  mpxplay_debugf(ENS_DEBUG_OUTPUT,"vend_id:%4.4X dev_id:%4.4X port:%8.8X irq:%d rev:%2.2X info:%8.8X",
@@ -543,8 +544,7 @@ static long ES1371_getbufpos(struct mpxplay_audioout_info_s *aui)
  if(inl(card->port + ES_REG_CONTROL) & ES_DAC1_EN) {
   outl((card->port + ES_REG_MEM_PAGE), ES_MEM_PAGEO(ES_PAGE_DAC));
   bufpos = ES_REG_FCURR_COUNTI(inl(card->port + ES_REG_DAC1_SIZE));
-  if(bufpos<aui->card_dmasize)
-   aui->card_dma_lastgoodpos=bufpos;
+  if(bufpos<aui->card_dmasize)    aui->card_dma_lastgoodpos=bufpos;
  }
  mpxplay_debugf(ENS_DEBUG_OUTPUT,"bufpos:%5d gpos:%5d dmasize:%5d",bufpos,aui->card_dma_lastgoodpos,aui->card_dmasize);
 

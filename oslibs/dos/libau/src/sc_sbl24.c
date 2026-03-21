@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2008 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
+//*                  email: mpxplay@freemail.hu                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -16,7 +16,7 @@
 //based on the ALSA (http://www.alsa-project.org)
 
 //#define MPXPLAY_USE_DEBUGF
-//#define SBL_DEBUG_OUTPUT stdout
+#define SBL_DEBUG_OUTPUT stdout
 
 #include "libaudef.h"
 #include "pcibios.h"

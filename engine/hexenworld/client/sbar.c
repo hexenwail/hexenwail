@@ -381,6 +381,7 @@ void Sbar_Draw(void)
 	if (sb_updates >= vid.numpages)
 		return;
 #endif
+
 //	if (BarHeight == BarTargetHeight)
 //		return;
 
@@ -1188,7 +1189,7 @@ static void Sbar_SmallDeathmatchOverlay(void)
 	int		i, k, l;
 	int		top, bottom;
 	int		x, y, f;
-//	int		def_frags, att_frags;
+	int		def_frags, att_frags;
 	char		num[40];
 	player_info_t	*s;
 
@@ -1251,7 +1252,7 @@ static void Sbar_SmallDeathmatchOverlay(void)
 		}
 	}
 
-//	def_frags = att_frags = 0;
+	def_frags = att_frags = 0;
 	for (i = 0; i < l; i++)
 	{
 		k = fragsort[i];
@@ -1261,7 +1262,6 @@ static void Sbar_SmallDeathmatchOverlay(void)
 
 		if (cl_siege)
 		{
-			/*
 			if (s->siege_team == 1)
 			{//defender
 				if (s->frags > 0)
@@ -1276,7 +1276,6 @@ static void Sbar_SmallDeathmatchOverlay(void)
 				else
 					def_frags -= s->frags;
 			}
-			*/
 		}
 		else
 		{
@@ -1756,6 +1755,8 @@ static void InvDrop_f(void)
 {
 	if (!cl.inv_count || cl.intermission)
 		return;
+	S_LocalSound("misc/invuse.wav");
+	//Inv_Update(false);
 	Inv_Update(true);
 	inv_flg = false;
 	if (scr_viewsize.integer < 100)
@@ -1957,3 +1958,4 @@ static void DrawBarArtifactNumber(int x, int y, int number)
 	artiNumName[11] = '0'+number%10;
 	Sbar_DrawTransPic(x, y, Draw_CachePic(artiNumName));
 }
+

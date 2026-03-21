@@ -125,6 +125,9 @@ ASM_LINKAGE_END
 
 //===================================================================
 
+extern	vec3_t	sxformaxis[4];	// s axis transformed into viewspace
+extern	vec3_t	txformaxis[4];	// t axis transformed into viewspac
+
 ASM_LINKAGE_BEGIN
 extern	vec3_t	modelorg, base_modelorg;
 
@@ -138,15 +141,16 @@ extern	int	d_lightstylevalue[256];	// 8.8 frac of base light value
 
 ASM_LINKAGE_BEGIN
 extern	int	ubasestep, errorterm, erroradjustup, erroradjustdown;
-ASM_LINKAGE_END
 
+// m68k asm references this one.
 extern	int	r_skymade;
 
-ASM_LINKAGE_BEGIN
 void TransformVector (vec3_t in, vec3_t out);
-ASM_LINKAGE_END
+void R_TransformFrustum (void);
 
+// this is in asm for m68k amiga
 void R_MakeSky (void);
+ASM_LINKAGE_END
 
 
 // flags in finalvert_t.flags
@@ -177,7 +181,7 @@ extern	byte	*mainTransTable;
 extern	byte	*transTable;	/* the particle table */
 
 #define NUMVERTEXNORMALS 162
-extern const float	r_avertexnormals[NUMVERTEXNORMALS][3];
+extern float	r_avertexnormals[NUMVERTEXNORMALS][3];
 ASM_LINKAGE_END
 
 extern	byte	*playerTranslation;

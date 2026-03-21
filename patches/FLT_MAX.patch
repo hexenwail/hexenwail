@@ -3,7 +3,7 @@ implementation defined type limits:  Similar changes are in quakespasm,
 tyr-quake, and tyr-utils.
 
 diff --git a/engine/h2shared/d_sprite.c b/engine/h2shared/d_sprite.c
-index b146c8d..a946c78 100644
+index e89b60d..e508ba1 100644
 --- a/engine/h2shared/d_sprite.c
 +++ b/engine/h2shared/d_sprite.c
 @@ -707,8 +707,8 @@ void D_DrawSprite (void)
@@ -18,10 +18,10 @@ index b146c8d..a946c78 100644
  
  	for (i = 0; i < r_spritedesc.nump; i++)
 diff --git a/engine/h2shared/gl_model.c b/engine/h2shared/gl_model.c
-index 32be778..ef5e8d2 100644
+index 4a33c89..c0dd3bf 100644
 --- a/engine/h2shared/gl_model.c
 +++ b/engine/h2shared/gl_model.c
-@@ -1088,8 +1088,8 @@ static void CalcSurfaceExtents (msurface_t *s)
+@@ -1091,8 +1091,8 @@ static void CalcSurfaceExtents (msurface_t *s)
  	mtexinfo_t	*tex;
  	int		bmins[2], bmaxs[2];
  
@@ -33,7 +33,7 @@ index 32be778..ef5e8d2 100644
  	tex = s->texinfo;
  
 diff --git a/engine/h2shared/gl_warp.c b/engine/h2shared/gl_warp.c
-index f323ba5..c1ec72a 100644
+index 58f95f5..f442046 100644
 --- a/engine/h2shared/gl_warp.c
 +++ b/engine/h2shared/gl_warp.c
 @@ -34,8 +34,8 @@ static void BoundPoly (int numverts, float *verts, vec3_t mins, vec3_t maxs)
@@ -47,7 +47,7 @@ index f323ba5..c1ec72a 100644
  	v = verts;
  	for (i = 0; i < numverts; i++)
  	{
-@@ -1006,8 +1006,8 @@ void R_ClearSkyBox (void)
+@@ -1007,8 +1007,8 @@ void R_ClearSkyBox (void)
  
  	for (i = 0; i < 6; i++)
  	{
@@ -71,10 +71,10 @@ index ab2a64b..3d3395d 100644
  
  #ifndef M_PI
 diff --git a/engine/h2shared/model.c b/engine/h2shared/model.c
-index 1200352..bfff6f5 100644
+index 34f0c04..fb58eb0 100644
 --- a/engine/h2shared/model.c
 +++ b/engine/h2shared/model.c
-@@ -877,8 +877,8 @@ static void CalcSurfaceExtents (msurface_t *s)
+@@ -881,8 +881,8 @@ static void CalcSurfaceExtents (msurface_t *s)
  	mtexinfo_t	*tex;
  	int		bmins[2], bmaxs[2];
  
@@ -86,7 +86,7 @@ index 1200352..bfff6f5 100644
  	tex = s->texinfo;
  
 diff --git a/engine/h2shared/pr_cmds.c b/engine/h2shared/pr_cmds.c
-index 59c8cc3..ff8bbe2 100644
+index 8f8f46f..1c9e23c 100644
 --- a/engine/h2shared/pr_cmds.c
 +++ b/engine/h2shared/pr_cmds.c
 @@ -229,8 +229,8 @@ static void SetMinMaxSize (edict_t *e, float *minvec, float *maxvec, qboolean ro
@@ -116,10 +116,10 @@ index 40d818e..36c7695 100644
  	tex = s->texinfo;
  
 diff --git a/engine/hexen2/r_main.c b/engine/hexen2/r_main.c
-index 8d6a7f9..8065b90 100644
+index 246ca0b..257194b 100644
 --- a/engine/hexen2/r_main.c
 +++ b/engine/hexen2/r_main.c
-@@ -943,8 +943,8 @@ static void RotatedBBox (vec3_t mins, vec3_t maxs, vec3_t angles, vec3_t tmins,
+@@ -947,8 +947,8 @@ static void RotatedBBox (vec3_t mins, vec3_t maxs, vec3_t angles, vec3_t tmins,
  
  	for (i = 0; i < 3; i++)
  	{
@@ -146,10 +146,10 @@ index c95439a..779f23d 100644
  	int		i;
  
 diff --git a/engine/hexenworld/client/r_main.c b/engine/hexenworld/client/r_main.c
-index f752577..52d8aba 100644
+index 3134e9d..0852e43 100644
 --- a/engine/hexenworld/client/r_main.c
 +++ b/engine/hexenworld/client/r_main.c
-@@ -969,8 +969,8 @@ static void RotatedBBox (vec3_t mins, vec3_t maxs, vec3_t angles, vec3_t tmins,
+@@ -976,8 +976,8 @@ static void RotatedBBox (vec3_t mins, vec3_t maxs, vec3_t angles, vec3_t tmins,
  
  	for (i = 0; i < 3; i++)
  	{
@@ -477,7 +477,7 @@ index fd46948..0d7a720 100644
  ====================
  CalcAmbientSounds
 diff --git a/utils/vis/vis.c b/utils/vis/vis.c
-index 05864ab..7a7269b 100644
+index 2a72e96..3355dc4 100644
 --- a/utils/vis/vis.c
 +++ b/utils/vis/vis.c
 @@ -323,7 +323,7 @@ static portal_t *GetNextPortal (void)

@@ -137,15 +137,14 @@ CL_GetDemoMessage -- FIXME..
 */
 static qboolean CL_GetDemoMessage (void)
 {
-	int	i, j;
+	int	r, i, j;
 	float	f;
 	float	demotime;
 	byte	c;
 	usercmd_t *pcmd;
 
 	// read the time from the packet
-	if (!fread(&demotime, sizeof(demotime), 1, cls.demofile))
-		goto corrupt;
+	fread(&demotime, sizeof(demotime), 1, cls.demofile);
 	demotime = LittleFloat(demotime);
 
 	// decide if it is time to grab the next message
@@ -196,8 +195,7 @@ static qboolean CL_GetDemoMessage (void)
 		Host_Error ("%s: cls.state != ca_active", __thisfunc__);
 
 	// get the msg type
-	if (!fread(&c, sizeof(c), 1, cls.demofile))
-		goto corrupt;
+	fread (&c, sizeof(c), 1, cls.demofile);
 
 	switch (c)
 	{
@@ -205,8 +203,12 @@ static qboolean CL_GetDemoMessage (void)
 		// user sent input
 		i = cls.netchan.outgoing_sequence & UPDATE_MASK;
 		pcmd = &cl.frames[i].cmd;
-		if (!fread(pcmd, sizeof(*pcmd), 1, cls.demofile))
-			goto corrupt;
+		r = fread (pcmd, sizeof(*pcmd), 1, cls.demofile);
+		if (r != 1)
+		{
+			CL_StopPlayback ();
+			return 0;
+		}
 		// byte order stuff
 		for (j = 0; j < 3; j++)
 			pcmd->angles[j] = LittleFloat(pcmd->angles[j]);
@@ -218,26 +220,27 @@ static qboolean CL_GetDemoMessage (void)
 		cls.netchan.outgoing_sequence++;
 		for (i = 0; i < 3; i++)
 		{
-			if (!fread(&f, 4, 1, cls.demofile))
-				goto corrupt;
+			r = fread (&f, 4, 1, cls.demofile);
 			cl.viewangles[i] = LittleFloat (f);
 		}
 		break;
 
 	case dem_read:
 		// get the next message
-		if (!fread(&net_message.cursize, 4, 1, cls.demofile))
-			goto corrupt;
+		fread (&net_message.cursize, 4, 1, cls.demofile);
 		net_message.cursize = LittleLong (net_message.cursize);
 		//Con_Printf("read: %ld bytes\n", net_message.cursize);
 		if (net_message.cursize > MAX_MSGLEN)
 			Sys_Error ("Demo message > MAX_MSGLEN");
-		if (!fread(net_message.data, net_message.cursize, 1, cls.demofile))
-			goto corrupt;
+		r = fread (net_message.data, net_message.cursize, 1, cls.demofile);
+		if (r != 1)
+		{
+			CL_StopPlayback ();
+			return 0;
+		}
 		break;
 
 	default :
-	corrupt:
 		Con_Printf("Corrupted demo.\n");
 		CL_StopPlayback ();
 		return 0;

@@ -174,7 +174,8 @@ void GL_SubdivideSurface (qmodel_t *mod, msurface_t *fa)
 
 
 // speed up sin calculations - Ed
-static const float	turbsin[] = {
+static float	turbsin[] =
+{
 #include "gl_warp_sin.h"
 };
 #define TURBSCALE (256.0 / (2 * M_PI))

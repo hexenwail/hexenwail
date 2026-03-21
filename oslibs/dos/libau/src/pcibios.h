@@ -1,26 +1,21 @@
-//**************************************************************************
-//*                     This file is part of the                           *
-//*                      Mpxplay - audio player.                           *
-//*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
-//*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
-//**************************************************************************
-//*  This program is distributed in the hope that it will be useful,       *
-//*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
-//*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.                  *
-//*  Please contact with the author (with me) if you want to use           *
-//*  or modify this source.                                                *
-//**************************************************************************
-//function: definitions for PCI bios handling
-
 #ifndef pcibios_h
 #define pcibios_h
 
+#if defined(HAVE_STDINT_H) || (defined(__WATCOMC__) && __WATCOMC__ >= 1240) /* OW 1.4 */
+
 #include <stdint.h>
 
-#define	LoW(dw)	(uint16_t)((uint32_t)dw & 0xFFFF)
+#else
+
+typedef unsigned char	uint8_t;
+typedef unsigned short	uint16_t;
+typedef long            int32_t;
+typedef unsigned long	uint32_t;
+
+#endif
+
 #define	HiW(dw)	(uint16_t)((uint32_t)dw >> 16)
+#define	LoW(dw)	(uint16_t)((uint32_t)dw & 0xFFFF)
 
 #define PCI_FUNCTION_ID		0xB1
 #define PCI_BIOS_PRESENT	0x01

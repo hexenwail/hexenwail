@@ -168,11 +168,7 @@ is defined in VA_NUM_BUFFS.
 ============
 */
 #define	VA_NUM_BUFFS	4
-#if (MAX_OSPATH >= 1024)
-#define	VA_BUFFERLEN	MAX_OSPATH
-#else
 #define	VA_BUFFERLEN	1024
-#endif
 
 static char *get_va_buffer(void)
 {
@@ -358,16 +354,12 @@ char		com_token[1024];
 
 /*
 ==============
-COM_ParseEx
+COM_Parse
 
 Parse a token out of a string
-
-The mode argument controls how overflow is handled:
-- CPE_NOTRUNC:		return NULL (abort parsing)
-- CPE_ALLOWTRUNC:	truncate com_token (ignore the extra characters in this token)
 ==============
 */
-const char *COM_ParseEx (const char *data, cpe_mode mode)
+const char *COM_Parse (const char *data)
 {
 	int		c;
 	int		len;
@@ -419,10 +411,8 @@ skipwhite:
 				com_token[len] = 0;
 				return data;
 			}
-			if (len < Q_COUNTOF(com_token) - 1)
-				com_token[len++] = c;
-			else if (mode == CPE_NOTRUNC)
-				return NULL;
+			com_token[len] = c;
+			len++;
 		}
 	}
 
@@ -430,10 +420,8 @@ skipwhite:
 // parse single characters
 	if (c == '{' || c == '}' || c == '(' || c == ')' || c == '\'' || c == ':')
 	{
-		if (len < Q_COUNTOF(com_token) - 1)
-			com_token[len++] = c;
-		else if (mode == CPE_NOTRUNC)
-			return NULL;
+		com_token[len] = c;
+		len++;
 		com_token[len] = 0;
 		return data+1;
 	}
@@ -442,11 +430,9 @@ skipwhite:
 // parse a regular word
 	do
 	{
-		if (len < Q_COUNTOF(com_token) - 1)
-			com_token[len++] = c;
-		else if (mode == CPE_NOTRUNC)
-			return NULL;
+		com_token[len] = c;
 		data++;
+		len++;
 		c = *data;
 #if 0
 		if (c == '{' || c == '}' || c == '(' || c == ')' || c == '\'' || c == ':')
@@ -456,20 +442,6 @@ skipwhite:
 
 	com_token[len] = 0;
 	return data;
-}
-
-/*
-==============
-COM_Parse
-
-Parse a token out of a string
-
-Return NULL in case of overflow
-==============
-*/
-const char *COM_Parse (const char *data)
-{
-	return COM_ParseEx (data, CPE_NOTRUNC);
 }
 
 

@@ -28,6 +28,8 @@
 
 #if defined(__LP64__)
 #define MIN_STACK_SIZE 0x200000 /* 2 MB stack */
+#elif defined(PLATFORM_AMIGAOS3)
+#define MIN_STACK_SIZE 0x40000 /* 256 KB stack */
 #else
 #define MIN_STACK_SIZE 0x100000 /* 1 MB stack */
 #endif
@@ -36,6 +38,13 @@
 int __stack_size = MIN_STACK_SIZE;
 #else
 int __stack = MIN_STACK_SIZE;
+#if defined(PLATFORM_AMIGAOS3) && defined(__libnix__)
+/* this pulls in swapstack.o */
+/* NOTE: swapstack.o was a stray object in old versions
+ *       of libnix, need manually adding to libnix20.a */
+extern void __stkinit(void);
+void * __x = __stkinit;
+#endif
 #endif
 #ifdef __AROS__
 #include "incstack.h"
@@ -65,7 +74,7 @@ static BPTR		amiga_stdin, amiga_stdout;
 
 struct timerequest	*timerio;
 struct MsgPort		*timerport;
-#if defined(__MORPHOS__)
+#if defined(__MORPHOS__) || defined(__VBCC__)
 struct Library		*TimerBase;
 #else
 struct Device		*TimerBase;
@@ -354,7 +363,7 @@ static void Sys_Init (void)
 			if (OpenDevice((STRPTR) TIMERNAME, UNIT_MICROHZ,
 					(struct IORequest *) timerio, 0) == 0)
 			{
-#if defined(__MORPHOS__)
+#if defined(__MORPHOS__) || defined(__VBCC__)
 				TimerBase = (struct Library *)timerio->tr_node.io_Device;
 #else
 				TimerBase = timerio->tr_node.io_Device;

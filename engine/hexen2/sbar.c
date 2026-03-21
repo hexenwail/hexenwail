@@ -86,7 +86,6 @@ static void ToggleDM_f(void);
 static void InvLeft_f(void);
 static void InvRight_f(void);
 static void InvUse_f(void);
-static void InvDrop_f(void);
 static void InvOff_f(void);
 
 static void DrawArtifactInventory(void);
@@ -190,7 +189,6 @@ void Sbar_Init(void)
 	Cmd_AddCommand("invleft", InvLeft_f);
 	Cmd_AddCommand("invright", InvRight_f);
 	Cmd_AddCommand("invuse", InvUse_f);
-	Cmd_AddCommand("invdrop", InvDrop_f);
 	Cmd_AddCommand("invoff", InvOff_f);
 	Cmd_AddCommand("toggle_dm", ToggleDM_f);
 
@@ -281,6 +279,7 @@ void Sbar_Draw(void)
 	if (sb_updates >= vid.numpages)
 		return;
 #endif
+
 //	if (BarHeight == BarTargetHeight)
 //		return;
 
@@ -1399,23 +1398,6 @@ static void InvUse_f(void)
 
 //==========================================================================
 //
-// InvDrop_f
-//
-//==========================================================================
-
-static void InvDrop_f(void)
-{
-	if (!cl.inv_count || cl.intermission)
-		return;
-	Inv_Update(true);
-	inv_flg = false;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
-	in_impulse = 44;
-}
-
-//==========================================================================
-//
 // InvOff_f
 //
 //==========================================================================
@@ -1593,3 +1575,4 @@ static void DrawBarArtifactNumber(int x, int y, int number)
 	artiNumName[11] = '0'+number%10;
 	Sbar_DrawTransPic(x, y, Draw_CachePic(artiNumName));
 }
+

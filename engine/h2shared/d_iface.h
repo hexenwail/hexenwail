@@ -100,6 +100,13 @@ ASM_LINKAGE_BEGIN
 extern int		r_framecount;	// sequence # of current frame since Quake
 					//  started
 ASM_LINKAGE_END
+extern qboolean	r_drawpolys;		// 1 if driver wants clipped polygons
+					//  rather than a span list
+extern qboolean	r_drawculledpolys;	// 1 if driver wants clipped polygons that
+					//  have been culled by the edge list
+extern qboolean	r_worldpolysbacktofront;	// 1 if driver wants polygons
+						//  delivered back to front rather
+						//  than front to back
 extern qboolean	r_recursiveaffinetriangles;	// true if a driver wants to use
 						//  recursive triangular subdivison
 						//  and vertex drawing via
@@ -127,6 +134,7 @@ extern vec3_t	r_pright, r_pup, r_ppn;
 ASM_LINKAGE_END
 
 
+void D_DrawPoly (void);
 void D_DrawSprite (void);
 void D_DrawSurfaces (qboolean Translucent);
 
@@ -161,6 +169,17 @@ void D_PolysetScanLeftEdgeT5 (int height);
 void D_DrawParticle1x1b (particle_t *pparticle);
 #endif
 
+#if id68k
+void D_DrawNonSubdiv (void);
+void D_PolysetCalcGradients (int skinwidth);
+void D_PolysetRecursiveTriangle (int *p1, int *p2, int *p3);
+void D_PolysetRecursiveTriangleT (int *p1, int *p2, int *p3);
+void D_PolysetRecursiveTriangleT2 (int *p1, int *p2, int *p3);
+void D_PolysetRecursiveTriangleT3 (int *p1, int *p2, int *p3);
+void D_PolysetRecursiveTriangleT5 (int *p1, int *p2, int *p3);
+//void D_PolysetScanLeftEdge (int height);
+#endif
+
 void D_DrawParticle (particle_t *pparticle);
 
 ASM_LINKAGE_END
@@ -191,12 +210,13 @@ void D_EndParticles (void);
 void D_PolysetUpdateTables (void);
 
 // these are currently for internal use only, and should not be used by drivers
+// FIXME: amiga m68k asm references this.
+ASM_LINKAGE_BEGIN
 extern byte				*r_skysource;
 
 // !!! must be kept the same as in quakeasm.h !!!
 #define TRANSPARENT_COLOR	0xFF
 
-ASM_LINKAGE_BEGIN
 extern void *acolormap;	// FIXME: should go away
 ASM_LINKAGE_END
 
@@ -235,8 +255,11 @@ void R_GenTile (msurface_t *psurf, void *pdest);
 #define	SKYSIZE		(1 << SKYSHIFT)
 #define SKYMASK		(SKYSIZE - 1)
 
+ASM_LINKAGE_BEGIN
+// amiga m68k asm references these :
 extern float	skyspeed, skyspeed2;
 extern float	skytime;
+ASM_LINKAGE_END
 
 extern int	c_surf;
 extern vrect_t	scr_vrect;

@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2008 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
+//*                  email: mpxplay@freemail.hu                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -16,19 +16,11 @@
 //based on: ALSA (http://www.alsa-project.org) and ICH-DOS wav player from Jeff Leyda
 
 //#define MPXPLAY_USE_DEBUGF
-//#define ICH_DEBUG_OUTPUT stdout
+#define ICH_DEBUG_OUTPUT stdout
 
 #include "libaudef.h"
 #include "pcibios.h"
 #include "ac97_def.h"
-
-// https://www.analog.com/media/en/technical-documentation/data-sheets/AD1980.pdf
-#define AC97_VENDOR_ID1_AD 0x4144 /* 'A' 'D' */
-#define AC97_VENDOR_ID2_AD1980 0x5370 /* 'S' + 0x70 for AD1980 */
-#define AC97_AD_MISC 0x76    /* Misc Control Bits */
-#define AC97_AD_MISC_AC97NC 0x4000 /* AC'97 No Compatibility Mode (aka ADI compatibility mode) */
-#define AC97_AD_MISC_HPSEL 0x0400 /* Headphone Amplifier Input Select */
-#define AC97_AD_MISC_LOSEL 0x0020 /* LINE_OUT Amplifiers Input Select */
 
 #define ICH_PO_CR_REG     0x1b  // PCM out Control Register
 #define ICH_PO_CR_START   0x01  // start codec
@@ -54,7 +46,7 @@
 #define ICH_PO_BDBAR_REG  0x10  // PCM out buffer descriptor BAR
 #define ICH_PO_LVI_REG    0x15  // PCM out Last Valid Index (set it)
 #define ICH_PO_CIV_REG    0x14  // PCM out current Index value (RO?)
-#define ICH_PO_PICB_REG   0x18  // PCM out position in current buffer(RO) (remaining, not processed pos)
+#define ICH_PO_PICB_REG   0x18  // PCM out position in current buffer(RO)
 
 #define ICH_ACC_SEMA_REG  0x34  // codec write semiphore register
 #define ICH_CODEC_BUSY    0x01  // codec register I/O is happening self clearing
@@ -88,7 +80,7 @@ struct intel_card_s
  float ac97_clock_corrector;
 };
 
-static struct intel_card_s	ich;
+struct	intel_card_s	ich;
 
 enum { DEVICE_INTEL, DEVICE_INTEL_ICH4, DEVICE_NFORCE };
 static const char *ich_devnames[3]={"ICH","ICH4","NForce"};
@@ -175,6 +167,7 @@ static unsigned int snd_intel_buffer_init(struct intel_card_s *card,struct mpxpl
  card->virtualpagetable=(uint32_t *)card->dm->linearptr; // pagetable requires 8 byte align, but dos-allocmem gives 16 byte align (so we don't need alignment correction)
  card->pcmout_buffer=((char *)card->virtualpagetable)+ICH_DMABUF_PERIODS*2*sizeof(uint32_t);
  aui->card_DMABUFF=card->pcmout_buffer;
+
 #ifdef __DJGPP__
  aui->card_DMABUFF=(char *)((unsigned int)aui->card_DMABUFF + __djgpp_conventional_base);
 #endif
@@ -246,7 +239,6 @@ static void snd_intel_prepare_playback(struct intel_card_s *card,struct mpxplay_
 {
  uint32_t *table_base;
  unsigned int i,cmd,retry,spdif_rate,period_size_samples;
- uint16_t vid1,vid2;
 
  mpxplay_debugf(ICH_DEBUG_OUTPUT,"prepare playback: period_size_bytes:%d",card->period_size_bytes);
  // wait until DMA stopped ???
@@ -259,7 +251,7 @@ static void snd_intel_prepare_playback(struct intel_card_s *card,struct mpxplay_
  mpxplay_debugf(ICH_DEBUG_OUTPUT,"dma stop timeout: %d",retry);
 
  // reset codec
- snd_intel_write_8(card,ICH_PO_CR_REG, snd_intel_read_8(card, ICH_PO_CR_REG) | ICH_PO_CR_RESET);
+ snd_intel_write_8(card,ICH_PO_CR_REG,ICH_PO_CR_RESET);
 
  // set channels (2) and bits (16/32)
  cmd=snd_intel_read_32(card,ICH_GLOB_CNT_REG);
@@ -284,17 +276,6 @@ static void snd_intel_prepare_playback(struct intel_card_s *card,struct mpxplay_
  snd_intel_codec_write(card,AC97_SPDIF_CONTROL,cmd);
  pds_delay_10us(10);
 
- // Analog Devices AD1980: Fix audio routing (set AC97NC, HPSEL and LOSEL bits)
- // Thanks to dr.zeissler on the Vogons forum for providing register dumps + testing
- // https://www.analog.com/media/en/technical-documentation/data-sheets/AD1980.pdf
- // https://cgit.freebsd.org/src/tree/sys/dev/sound/pcm/ac97_patch.c#n49
- // https://github.com/torvalds/linux/blob/master/sound/soc/codecs/ad1980.c#L133
- vid1 = snd_intel_codec_read(card, AC97_VENDOR_ID1);
- vid2 = snd_intel_codec_read(card, AC97_VENDOR_ID2);
- if (vid1 == AC97_VENDOR_ID1_AD && vid2 == AC97_VENDOR_ID2_AD1980) {
-   snd_intel_codec_write(card, AC97_AD_MISC, AC97_AD_MISC_AC97NC | AC97_AD_MISC_HPSEL | AC97_AD_MISC_LOSEL);
- }
-
  //set analog ac97 freq
  mpxplay_debugf(ICH_DEBUG_OUTPUT,"AC97 front dac freq:%d ",aui->freq_card);
  if(card->ac97_clock_corrector){
@@ -308,6 +289,7 @@ static void snd_intel_prepare_playback(struct intel_card_s *card,struct mpxplay_
 
  //set period table
  table_base=card->virtualpagetable;
+
 #ifdef __DJGPP__
  table_base=(uint32_t *)((unsigned int)table_base + __djgpp_conventional_base);
 #endif
@@ -372,41 +354,22 @@ static void INTELICH_card_info(struct mpxplay_audioout_info_s *aui)
 
 static int INTELICH_adetect(struct mpxplay_audioout_info_s *aui)
 {
- int iobase = 0xF000; // 0xFFFF didn't work
  struct intel_card_s *card=&ich;
  aui->card_private_data=card;
  card->pci_dev=&libau_pci;
 
- if(pcibios_search_devices(&ich_devices[0],card->pci_dev)!=PCI_SUCCESSFUL)
+ if(pcibios_search_devices(ich_devices,card->pci_dev)!=PCI_SUCCESSFUL)
   goto err_adetect;
 
- if(card->pci_dev->device_type == DEVICE_INTEL_ICH4)
- { //enable leagcy IO space, must be set before setting PCI CMD's IO space bit.
-  mpxplay_debugf(ICH_DEBUG_OUTPUT,"Eanble legacy io space for ICH4");
-  pcibios_WriteConfig_Byte(card->pci_dev, 0x41, 1); //IOSE:enable IO space
- }
  mpxplay_debugf(ICH_DEBUG_OUTPUT,"chip init : enable PCI io and busmaster");
  pcibios_set_master(card->pci_dev);
 
  card->baseport_bm = pcibios_ReadConfig_Dword(card->pci_dev, PCIR_NABMBAR)&0xfff0;
- //some BIOSes don't set NAMBAR/NABMBAR at all. assign manually
- if(!card->baseport_bm) {
-  pcibios_WriteConfig_Dword(card->pci_dev, PCIR_NABMBAR, iobase);
-  card->baseport_bm = pcibios_ReadConfig_Dword(card->pci_dev, PCIR_NABMBAR)&0xfff0;
-  if(!card->baseport_bm)
-   goto err_adetect;
- }
-
+ if(!card->baseport_bm)
+  goto err_adetect;
  card->baseport_codec = pcibios_ReadConfig_Dword(card->pci_dev, PCIR_NAMBAR)&0xfff0;
- if(!card->baseport_codec) {
-  iobase -= 256;
-  iobase &= ~0xFF;
-  pcibios_WriteConfig_Dword(card->pci_dev, PCIR_NAMBAR, iobase);
-  card->baseport_codec = pcibios_ReadConfig_Dword(card->pci_dev, PCIR_NAMBAR)&0xfff0;
-  if(!card->baseport_codec)
-   goto err_adetect;
- }
-
+ if(!card->baseport_codec)
+  goto err_adetect;
  card->irq = pcibios_ReadConfig_Byte(card->pci_dev, PCIR_INTR_LN);
 
  card->device_type=card->pci_dev->device_type;
@@ -490,7 +453,7 @@ static void INTELICH_stop(struct mpxplay_audioout_info_s *aui)
 static void snd_intel_measure_ac97_clock(struct mpxplay_audioout_info_s *aui)
 {
  struct intel_card_s *card=(struct intel_card_s *)aui->card_private_data;
- int64_t starttime,endtime,timelen; // in usecs
+ mpxp_int64_t starttime,endtime,timelen; // in usecs
  long freq_save=aui->freq_card,dmabufsize;
 
  aui->freq_card=48000;
@@ -552,24 +515,23 @@ static long INTELICH_getbufpos(struct mpxplay_audioout_info_s *aui)
   index=snd_intel_read_8(card,ICH_PO_CIV_REG);    // number of current period
   //mpxplay_debugf(ICH_DEBUG_OUTPUT,"index1: %d",index);
   if(index>=ICH_DMABUF_PERIODS){
-   if(retry>1)
-    continue;
+   if(retry>1)    continue;
    MDma_clearbuf(aui);
    snd_intel_write_8(card,ICH_PO_LVI_REG,(ICH_DMABUF_PERIODS-1));
-   //snd_intel_write_8(card,ICH_PO_CIV_REG,0); // RO
+   snd_intel_write_8(card,ICH_PO_CIV_REG,0);
    funcbit_enable(aui->card_infobits,AUINFOS_CARDINFOBIT_DMAUNDERRUN);
    continue;
   }
 
-  pcmpos=snd_intel_read_16(card,ICH_PO_PICB_REG); // position in the current period (remaining unprocessed in SAMPLEs)
+  pcmpos=snd_intel_read_16(card,ICH_PO_PICB_REG); // position in the current period (in samples)
   pcmpos*=aui->bits_card>>3;
-  //pcmpos*=aui->chan_card;
+  pcmpos*=aui->chan_card;
   //mpxplay_debugf(ICH_DEBUG_OUTPUT,"pcmpos: %d",pcmpos);
   if(!pcmpos || (pcmpos>card->period_size_bytes)){
    if(snd_intel_read_8(card,ICH_PO_LVI_REG)==index){
     MDma_clearbuf(aui);
     snd_intel_write_8(card,ICH_PO_LVI_REG,(index-1)%ICH_DMABUF_PERIODS); // to keep playing in an endless loop
-    //snd_intel_write_8(card,ICH_PO_CIV_REG,index); // ??? -RO
+    snd_intel_write_8(card,ICH_PO_CIV_REG,index); // ???
     funcbit_enable(aui->card_infobits,AUINFOS_CARDINFOBIT_DMAUNDERRUN);
    }
    continue;

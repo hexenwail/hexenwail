@@ -83,7 +83,7 @@
 
 static HANDLE findhandle = INVALID_HANDLE_VALUE;
 static WIN32_FIND_DATA finddata;
-static char		findstr[MAX_OSPATH];
+static char		findstr[256];
 
 const char *Q_FindFirstFile (const char *path, const char *pattern)
 {
@@ -203,7 +203,7 @@ int Q_FileType (const char *path)
 
 static HDIR findhandle = HDIR_CREATE;
 static FILEFINDBUF3 findbuffer;
-static char	findstr[MAX_OSPATH];
+static char	findstr[256];
 
 const char *Q_FindFirstFile (const char *path, const char *pattern)
 {
@@ -327,7 +327,7 @@ int Q_FileType (const char *path)
 
 static struct ffblk	finddata;
 static int		findhandle = -1;
-static char	findstr[MAX_OSPATH];
+static char		findstr[256];
 
 const char *Q_FindFirstFile (const char *path, const char *pattern)
 {
@@ -620,7 +620,7 @@ int Q_FileType (const char *path)
 static DIR		*finddir;
 static struct dirent	*finddata;
 static char		*findpath, *findpattern;
-static char		matchpath[MAX_OSPATH];
+static char		matchpath[256];
 
 const char *Q_FindFirstFile (const char *path, const char *pattern)
 {
@@ -957,10 +957,12 @@ int Q_WriteFileFromHandle (FILE *fromfile, const char *topath, size_t size)
 {
 	char	buf[COPY_READ_BUFSIZE];
 	FILE	*out;
-	size_t	remaining, count; /* off_t */
+/*	off_t	remaining, count;*/
+	size_t	remaining, count;
+	char	temp[1024];
 
-	strcpy (buf, topath);
-	CreatePath (buf);
+	strcpy (temp, topath);
+	CreatePath (temp);
 
 	out = fopen (topath, "wb");
 	if (!out)

@@ -334,6 +334,10 @@ static float AdaptFovx (float fov_x, float width, float height)
 	if (vid.aspect > 1.10f)
 		return fov_x;		/* no fov_adapt for weird VGA modes */
 #endif
+#ifdef PLATFORM_AMIGAOS3
+	if (vid.noadapt)
+		return fov_x;		/* not for Amiga native chipset modes */
+#endif
 	if (!scr_fov_adapt.integer)
 		return fov_x;
 	if ((x = height / width) == 0.75)
@@ -417,13 +421,6 @@ static void SCR_CalcRefdef (void)
 		scr_con_current = vid.height;
 
 // notify the refresh of the change
-	R_ViewChanged (vid.aspect);
-}
-
-void SCR_CalcFOV (float fov)
-{
-	r_refdef.fov_x = AdaptFovx (fov, r_refdef.vrect.width, r_refdef.vrect.height);
-	r_refdef.fov_y = CalcFovy (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
 	R_ViewChanged (vid.aspect);
 }
 

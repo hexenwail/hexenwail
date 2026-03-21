@@ -2,9 +2,9 @@
 //*                     This file is part of the                           *
 //*                      Mpxplay - audio player.                           *
 //*                  The source code of Mpxplay is                         *
-//*        (C) copyright 1998-2025 by PDSoft (Attila Padar)                *
+//*        (C) copyright 1998-2009 by PDSoft (Attila Padar)                *
 //*                http://mpxplay.sourceforge.net                          *
-//*                  email: mpxplay@hotmail.com                            *
+//*                  email: mpxplay@freemail.hu                            *
 //**************************************************************************
 //*  This program is distributed in the hope that it will be useful,       *
 //*  but WITHOUT ANY WARRANTY; without even the implied warranty of        *
@@ -17,7 +17,7 @@
 // doesn't work yet
 
 //#define MPXPLAY_USE_DEBUGF
-//#define XFI_DEBUG_OUTPUT stdout
+#define XFI_DEBUG_OUTPUT stdout
 
 #include "libaudef.h"
 #include "pcibios.h"
@@ -197,7 +197,7 @@ struct emu20kx_card_s
 
 };
 
-static struct emu20kx_card_s	xfi;
+struct	emu20kx_card_s	xfi;
 
 //-------------------------------------------------------------------------
 static inline uint32_t hw_read_20kx(struct emu20kx_card_s *card,uint32_t reg)
@@ -294,7 +294,7 @@ static int snd_emu20kx_select_rom(unsigned int pitch)
 }
 
 // Map integer value ranging from 0 to 65535 to 14-bit float value ranging from 2^-6 to (1+1023/1024)
-#if 0
+/*
 static unsigned int uint16_to_float14(unsigned int x)
 {
  unsigned int i;
@@ -331,7 +331,7 @@ static unsigned int float14_to_uint16(unsigned int x)
 
  return x;
 }
-#endif
+*/
 
 //-------------------------------------------------------------------------
 static int hw_pll_init(struct emu20kx_card_s *card)
@@ -790,7 +790,7 @@ static int EMU20KX_adetect(struct mpxplay_audioout_info_s *aui)
  aui->card_private_data=card;
  card->pci_dev=&libau_pci;
 
- if(pcibios_search_devices(&emu20kx_devices[0],card->pci_dev)!=PCI_SUCCESSFUL)
+ if(pcibios_search_devices(emu20kx_devices,card->pci_dev)!=PCI_SUCCESSFUL)
   goto err_adetect;
 
  pcibios_set_master(card->pci_dev);
