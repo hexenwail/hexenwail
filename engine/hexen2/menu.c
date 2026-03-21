@@ -593,10 +593,9 @@ static char	old_bgmtype[20];	// S.A
 
 void M_Menu_Main_f (void)
 {
-	// Deactivate the mouse when the menus are drawn - S.A.
+	// Deactivate the mouse when the menus are drawn
 	menu_disabled_mouse = true;
-	if (modestate == MS_WINDOWED)
-		IN_DeactivateMouse ();
+	IN_DeactivateMouse ();
 
 	if (!(Key_GetDest() & key_menu))
 	{
@@ -3173,7 +3172,7 @@ static void M_Menu_Mods_f (void)
 	}
 
 	/* default portals toggle to current state */
-	mods_portals_toggle = (gameflags & GAME_PORTALS) ? true : false;
+	mods_portals_toggle = mods_have_portals;
 }
 
 static void M_Mods_Draw (void)
