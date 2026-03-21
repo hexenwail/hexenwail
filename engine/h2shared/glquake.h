@@ -29,7 +29,7 @@
 #define MAX_GLTEXTURES		8192
 #define MAX_EXTRA_TEXTURES	156	/* 255-100+1 */
 #define	MAX_CACHED_PICS		256
-#define	MAX_LIGHTMAPS		128
+#define	MAX_LIGHTMAPS		256
 
 /* maximum allowed size of a surface
  * vanilla limit was 16+1 (for linear sampling),

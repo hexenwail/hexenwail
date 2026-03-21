@@ -2018,3 +2018,158 @@ static void VID_MenuKey (int key)
 	}
 }
 
+
+/*
+================
+Video menu helper functions for combined Display menu
+================
+*/
+void VID_MenuInit (void)
+{
+	vid_menunum = vid_modenum;
+	vid_menu_fs = (modestate != MS_WINDOWED);
+	vid_menu_aspect = 0;
+	multisample = vid_config_fsaa.integer;
+}
+
+qboolean VID_MenuNeedApply (void)
+{
+	qboolean want_fs = ( ((modestate == MS_WINDOWED) && vid_menu_fs) || ((modestate != MS_WINDOWED) && !vid_menu_fs) );
+	return (vid_menunum != vid_modenum) || want_fs || (multisample != vid_config_fsaa.integer);
+}
+
+void VID_MenuApply (void)
+{
+	Cvar_SetValueQuick(&vid_mode, vid_menunum);
+	Cvar_SetValueQuick(&vid_config_fscr, vid_menu_fs);
+	VID_Restart_f();
+}
+
+void VID_MenuReset (void)
+{
+	vid_menu_fs = (modestate != MS_WINDOWED);
+	vid_menunum = vid_modenum;
+	multisample = vid_config_fsaa.integer;
+}
+
+const char *VID_MenuGetResolution (qboolean *is_current)
+{
+	*is_current = (vid_menunum == vid_modenum);
+	return modelist[vid_menunum].modedesc;
+}
+
+const char *VID_MenuGetAspect (void)
+{
+	return vid_aspects[vid_menu_aspect].name;
+}
+
+qboolean VID_MenuGetFullscreen (qboolean *want_toggle)
+{
+	*want_toggle = ( ((modestate == MS_WINDOWED) && vid_menu_fs) || ((modestate != MS_WINDOWED) && !vid_menu_fs) );
+	return vid_menu_fs;
+}
+
+int VID_MenuGetMultisample (qboolean *is_current, qboolean *available)
+{
+	*available = sdl_has_multisample;
+	*is_current = (multisample == vid_config_fsaa.integer);
+	return multisample;
+}
+
+int VID_MenuGetVSync (void)
+{
+	return vid_vsync.integer;
+}
+
+qboolean VID_MenuGetTexFilter (void)
+{
+	return (gl_filter_idx > 2);
+}
+
+int VID_MenuGetAnisotropy (qboolean *available)
+{
+	*available = (gl_max_anisotropy >= 2);
+	return (int)gl_texture_anisotropy.value;
+}
+
+void VID_MenuAdjustFullscreen (void)
+{
+	vid_menu_fs = !vid_menu_fs;
+	if (fs_toggle_works)
+		VID_ToggleFullscreen();
+}
+
+void VID_MenuAdjustAspect (int dir)
+{
+	vid_menu_aspect += dir;
+	if (vid_menu_aspect < 0)
+		vid_menu_aspect = NUM_ASPECTS - 1;
+	if (vid_menu_aspect >= NUM_ASPECTS)
+		vid_menu_aspect = 0;
+	VID_SnapToFilteredMode();
+}
+
+void VID_MenuAdjustResolution (int dir)
+{
+	int next = VID_FindNextFilteredMode(vid_menunum, dir);
+	if (next >= 0)
+		vid_menunum = next;
+}
+
+void VID_MenuAdjustMultisample (int dir)
+{
+	if (!sdl_has_multisample)
+		return;
+	if (dir < 0)
+	{
+		if (multisample <= 2) multisample = 0;
+		else if (multisample <= 4) multisample = 2;
+		else multisample = 4;
+	}
+	else
+	{
+		if (multisample < 2) multisample = 2;
+		else if (multisample < 4) multisample = 4;
+		else if (multisample < 8) multisample = 8;
+	}
+}
+
+void VID_MenuAdjustVSync (int dir)
+{
+	if (dir < 0)
+	{
+		if (vid_vsync.integer == 1) Cvar_SetQuick(&vid_vsync, "0");
+		else if (vid_vsync.integer == 0) Cvar_SetQuick(&vid_vsync, "-1");
+		else Cvar_SetQuick(&vid_vsync, "1");
+	}
+	else
+	{
+		if (vid_vsync.integer == 0) Cvar_SetQuick(&vid_vsync, "1");
+		else if (vid_vsync.integer == 1) Cvar_SetQuick(&vid_vsync, "-1");
+		else Cvar_SetQuick(&vid_vsync, "0");
+	}
+	SDL_GL_SetSwapInterval(vid_vsync.integer);
+}
+
+void VID_MenuAdjustTexFilter (void)
+{
+	Cvar_Set ("gl_texturemode", (gl_filter_idx <= 2) ?
+		"GL_LINEAR_MIPMAP_LINEAR" : "GL_NEAREST_MIPMAP_LINEAR");
+}
+
+void VID_MenuAdjustAnisotropy (int dir)
+{
+	int av;
+	if (gl_max_anisotropy < 2) return;
+	av = (int)gl_texture_anisotropy.value;
+	if (dir < 0)
+		av = (av <= 1) ? (int)gl_max_anisotropy : av / 2;
+	else
+	{
+		av = av * 2;
+		if (av > (int)gl_max_anisotropy) av = 1;
+		if (av < 1) av = 2;
+	}
+	Cvar_SetValueQuick(&gl_texture_anisotropy, av);
+}
+

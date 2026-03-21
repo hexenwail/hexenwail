@@ -1958,7 +1958,15 @@ enum
 	DISP_SOFTEMU,
 	DISP_DITHER,
 	DISP_WATERCOLOR,
-	DISP_VIDEO,
+	DISP_SEP,		/* separator between rendering and video */
+	DISP_FULLSCREEN,
+	DISP_RESOLUTION,
+	DISP_MSAA,
+	DISP_VSYNC,
+	DISP_TEXFILTER,
+	DISP_ANISOTROPY,
+	DISP_SEP2,		/* separator before apply */
+	DISP_APPLY,
 	DISP_ITEMS
 };
 
@@ -1969,6 +1977,9 @@ static void M_Menu_Display_f (void)
 	Key_SetDest (key_menu);
 	m_state = m_display;
 	m_entersound = true;
+#ifdef GLQUAKE
+	VID_MenuInit ();
+#endif
 }
 
 static void M_Display_AdjustSliders (int dir)
@@ -1981,11 +1992,12 @@ static void M_Display_AdjustSliders (int dir)
 	{
 	case DISP_PRESET:
 	{
-		/* 0=Custom, 1=Crunchy, 2=Retro, 3=Modern */
-		static int preset = 0;
+		/* Cycle through presets only (skip "User" — that's auto-detected).
+		 * 1=Crunchy, 2=Retro, 3=Modern */
+		static int preset = 3;
 		preset += dir;
-		if (preset < 0) preset = 3;
-		if (preset > 3) preset = 0;
+		if (preset < 1) preset = 3;
+		if (preset > 3) preset = 1;
 
 		if (preset == 1)	/* Crunchy */
 		{
@@ -2011,7 +2023,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
 		}
-		/* preset == 0: Custom — keep current user settings */
 		break;
 	}
 	case DISP_GAMMA:
@@ -2085,6 +2096,26 @@ static void M_Display_AdjustSliders (int dir)
 		Cvar_SetValue ("r_scale", scale_steps[i]);
 		break;
 	}
+#ifdef GLQUAKE
+	case DISP_FULLSCREEN:
+		VID_MenuAdjustFullscreen ();
+		break;
+	case DISP_RESOLUTION:
+		VID_MenuAdjustResolution (dir);
+		break;
+	case DISP_MSAA:
+		VID_MenuAdjustMultisample (dir);
+		break;
+	case DISP_VSYNC:
+		VID_MenuAdjustVSync (dir);
+		break;
+	case DISP_TEXFILTER:
+		VID_MenuAdjustTexFilter ();
+		break;
+	case DISP_ANISOTROPY:
+		VID_MenuAdjustAnisotropy (dir);
+		break;
+#endif
 	}
 }
 
@@ -2108,7 +2139,7 @@ static void M_Display_Draw (void)
 		else if (is_modern)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
 		else
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Custom");
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
 	}
 
 	M_Print (76, 92 + 8*DISP_GAMMA,	"Brightness    :");
@@ -2162,10 +2193,72 @@ static void M_Display_Draw (void)
 	default: M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Classic"); break;
 	}
 
-	if (vid_menudrawfn)
-		M_Print (76, 92 + 8*DISP_VIDEO,	"Video Modes...");
+	/* separator */
+
+#ifdef GLQUAKE
+	{
+		qboolean is_current, available, want_toggle;
+		const char *s;
+		int ms, vsync, aniso;
+
+		M_Print (76, 92 + 8*DISP_FULLSCREEN,	"Fullscreen    :");
+		{
+			qboolean fs = VID_MenuGetFullscreen (&want_toggle);
+			M_PrintWhite (220, 92 + 8*DISP_FULLSCREEN, fs ? "yes" : "no");
+		}
+
+		M_Print (76, 92 + 8*DISP_RESOLUTION,	"Resolution    :");
+		s = VID_MenuGetResolution (&is_current);
+		if (is_current)
+			M_PrintWhite (220, 92 + 8*DISP_RESOLUTION, s);
+		else
+			M_Print (220, 92 + 8*DISP_RESOLUTION, s);
+
+		M_Print (76, 92 + 8*DISP_MSAA,		"Antialiasing  :");
+		ms = VID_MenuGetMultisample (&is_current, &available);
+		if (available)
+		{
+			if (is_current)
+				M_PrintWhite (220, 92 + 8*DISP_MSAA, va("%d", ms));
+			else
+				M_Print (220, 92 + 8*DISP_MSAA, va("%d", ms));
+		}
+		else
+			M_PrintWhite (220, 92 + 8*DISP_MSAA, "N/A");
+
+		M_Print (76, 92 + 8*DISP_VSYNC,	"VSync         :");
+		vsync = VID_MenuGetVSync ();
+		M_PrintWhite (220, 92 + 8*DISP_VSYNC,
+			vsync == -1 ? "Adaptive" : vsync ? "On" : "Off");
+
+		M_Print (76, 92 + 8*DISP_TEXFILTER,	"Textures      :");
+		M_PrintWhite (220, 92 + 8*DISP_TEXFILTER,
+			VID_MenuGetTexFilter () ? "Smooth" : "Classic");
+
+		M_Print (76, 92 + 8*DISP_ANISOTROPY,	"Anisotropy    :");
+		aniso = VID_MenuGetAnisotropy (&available);
+		if (available)
+			M_PrintWhite (220, 92 + 8*DISP_ANISOTROPY, va("%dx", aniso));
+		else
+			M_PrintWhite (220, 92 + 8*DISP_ANISOTROPY, "N/A");
+
+		if (VID_MenuNeedApply ())
+			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
+	}
+#endif
 
 	M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
+}
+
+static qboolean M_Display_IsSkip (int cursor)
+{
+	if (cursor == DISP_SEP || cursor == DISP_SEP2)
+		return true;
+#ifdef GLQUAKE
+	if (cursor == DISP_APPLY && !VID_MenuNeedApply ())
+		return true;
+#endif
+	return false;
 }
 
 static void M_Display_Key (int k)
@@ -2177,22 +2270,30 @@ static void M_Display_Key (int k)
 		break;
 	case K_ENTER:
 		m_entersound = true;
-		if (display_cursor == DISP_VIDEO)
-			M_Menu_Video_f ();
-		else
-			M_Display_AdjustSliders (1);
+#ifdef GLQUAKE
+		if (display_cursor == DISP_APPLY && VID_MenuNeedApply ())
+		{
+			VID_MenuApply ();
+			return;
+		}
+#endif
+		M_Display_AdjustSliders (1);
 		return;
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		display_cursor--;
-		if (display_cursor < 0)
-			display_cursor = DISP_ITEMS-1;
+		do {
+			display_cursor--;
+			if (display_cursor < 0)
+				display_cursor = DISP_ITEMS-1;
+		} while (M_Display_IsSkip (display_cursor));
 		break;
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		display_cursor++;
-		if (display_cursor >= DISP_ITEMS)
-			display_cursor = 0;
+		do {
+			display_cursor++;
+			if (display_cursor >= DISP_ITEMS)
+				display_cursor = 0;
+		} while (M_Display_IsSkip (display_cursor));
 		break;
 	case K_LEFTARROW:
 		M_Display_AdjustSliders (-1);
@@ -2200,13 +2301,6 @@ static void M_Display_Key (int k)
 	case K_RIGHTARROW:
 		M_Display_AdjustSliders (1);
 		break;
-	}
-	if (display_cursor == DISP_VIDEO && vid_menudrawfn == NULL)
-	{
-		if (k == K_UPARROW)
-			display_cursor = DISP_VIDEO - 1;
-		else
-			display_cursor = 0;
 	}
 }
 
@@ -2944,9 +3038,8 @@ static void M_Keys_Key (int k)
 
 static void M_Menu_Video_f (void)
 {
-	Key_SetDest (key_menu);
-	m_state = m_video;
-	m_entersound = true;
+	/* redirect to combined Display menu */
+	M_Menu_Display_f ();
 }
 
 

@@ -26,7 +26,7 @@
 
 #define	NET_NAMELEN		64
 
-#define NET_MAXMESSAGE		16384
+#define NET_MAXMESSAGE		32768
 
 
 extern int		DEFAULTnet_hostport;
