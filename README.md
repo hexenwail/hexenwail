@@ -22,6 +22,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [ ] Rumble/haptic feedback on damage and weapon fire
 
 ### Keyboard input (Ironwail-style)
+- [x] Modern WASD + mouselook defaults out of the box
 - [x] Scancode-based key bindings — WASD works correctly on AZERTY, Dvorak, etc.
 - [x] Proper text input via SDL — keyboard layout, shift, dead keys handled by OS
 - [x] Console/menu uses layout-aware typing, game uses physical key positions
@@ -53,6 +54,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [ ] Physics/render decoupling with entity interpolation
 
 ### Plays nicely with mods
+- [x] Protocol auto-detection (classic protocol 15 / extended protocol 19)
 - [ ] Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box
 - [x] [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) per-entity model overrides (glow, spin, float, color)
 - [x] Extended QuakeC builtins for mod developers
@@ -85,7 +87,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Unified platform layer — shared code in `sys_sdl.c`, minimal OS-specific code
 - [x] Cleaned out legacy platform code (DOS, OS/2, Amiga, macOS, HexenWorld)
 - [x] Cleaned out legacy GL capability detection — assumes GL 4.3
-- [ ] AppImage / Flatpak packaging
+- [x] Flatpak packaging support
 - [ ] Mouse-driven UI navigation
 
 ## Building

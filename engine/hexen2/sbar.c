@@ -1156,9 +1156,13 @@ void Inv_Update(qboolean force)
 {
 	if (inv_flg || force)
 	{
-		// Just to be safe
 		if (cl.inv_selected >= 0 && cl.inv_count > 0)
-			cl.v.inventory = cl.ex_inventory->item_id[cl.ex_inventory->inv_order[cl.inv_selected]];
+		{
+			if (cl_protocol == PROTOCOL_UH2_114)
+				cl.v.inventory = cl.ex_inventory->item_id[cl.ex_inventory->inv_order[cl.inv_selected]];
+			else
+				cl.v.inventory = cl.inv_order[cl.inv_selected] + 1;
+		}
 		else
 			cl.v.inventory = 0;
 
@@ -1184,11 +1188,25 @@ void Inv_Update(qboolean force)
 static void DrawBarArtifactIcon(int x, int y, int position)
 {
 	int	j, i;
+
+	if (cl_protocol != PROTOCOL_UH2_114)
+	{
+		/* Standard path: position is index into inv_order,
+		 * inv_order[position] is the artifact number (0-14) */
+		int artifact = cl.inv_order[position];
+		if (artifact < 0 || artifact >= MAX_INVENTORY)
+			return;
+		Sbar_DrawTransPic(x, y, Draw_CachePic(va("gfx/arti%02d.lmp", artifact)));
+		DrawBarArtifactNumber(x + 20, y + 21, Inv_GetCount(artifact));
+		return;
+	}
+
+	/* Extended inventory path (protocol 21) */
+	{
 	ex_inventory_page_t *page_seq, *page_from;
 
 	if (position < 0 || position >= MAX_ITEMS_EX)
 		return;
-
 
 	j = NearestMultiple(position, MAX_INVENTORY_EX) / MAX_INVENTORY_EX;
 	page_seq = cl.ex_inventory;
@@ -1218,6 +1236,7 @@ static void DrawBarArtifactIcon(int x, int y, int position)
 			DrawBarArtifactNumber(x + 20, y + 21, page_from->item_cnt[position & 31]);
 			break;
 		}
+	}
 	}
 
 	/*
@@ -1476,11 +1495,75 @@ static void ToggleDM_f(void)
 
 void SB_InvChanged(void)
 {
-	int		counter, position, i, j;
+	int		counter, position;
+	qboolean	ForceUpdate = false;
+
+	if (cl_protocol != PROTOCOL_UH2_114)
+	{
+		/* Standard inventory path (protocols 18-20):
+		 * read item counts directly from cl.v.cnt_* */
+		qboolean examined[MAX_INVENTORY];
+		memset (examined, 0, sizeof(examined));
+
+		if (cl.inv_selected >= 0 && Inv_GetCount(cl.inv_order[cl.inv_selected]) == 0)
+			ForceUpdate = true;
+
+		for (counter = position = 0; counter < cl.inv_count; counter++)
+		{
+			if (Inv_GetCount(cl.inv_order[counter]) > 0)
+			{
+				cl.inv_order[position] = cl.inv_order[counter];
+				examined[cl.inv_order[position]] = true;
+				position++;
+			}
+		}
+
+		for (counter = 0; counter < MAX_INVENTORY; counter++)
+		{
+			if (!examined[counter])
+			{
+				if (Inv_GetCount(counter) > 0)
+				{
+					cl.inv_order[position] = counter;
+					position++;
+				}
+			}
+		}
+
+		cl.inv_count = position;
+		if (cl.inv_selected >= cl.inv_count)
+		{
+			cl.inv_selected = cl.inv_count - 1;
+			ForceUpdate = true;
+		}
+		if (cl.inv_count && cl.inv_selected < 0)
+		{
+			cl.inv_selected = 0;
+			ForceUpdate = true;
+		}
+		if (ForceUpdate)
+			Inv_Update(true);
+		if (cl.inv_count <= 1)
+			cl.inv_startpos = 0;
+		else if (cl.inv_startpos >= cl.inv_count)
+			cl.inv_startpos = cl.inv_selected;
+		else
+		{
+			position = cl.inv_selected - cl.inv_startpos;
+			if (position < 0)
+				position += cl.inv_count;
+			if (position >= INV_MAX_ICON)
+				cl.inv_startpos = cl.inv_selected;
+		}
+		return;
+	}
+
+	/* Extended inventory path (protocol 21): use ex_inventory pages */
+	{
+	int		i, j;
 	int page_from_id, page_to_id, page_seq_id = 0;
 	ex_inventory_page_t *page_from, *page_to, *page_seq = cl.ex_inventory;
 	qboolean	examined[MAX_ITEMS_EX];
-	qboolean	ForceUpdate = false;
 
 	memset (examined, 0, sizeof(examined));
 
@@ -1707,6 +1790,7 @@ void SB_InvChanged(void)
 		if (position >= INV_MAX_ICON/* || position < 0*/)
 			cl.inv_startpos = cl.inv_selected;
 	}
+	} /* end extended inventory block */
 }
 
 //==========================================================================
