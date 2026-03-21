@@ -278,17 +278,20 @@ static const char spart_frag[] =
 	"    fragColor = color;\n"
 	"}\n";
 
-/* --- shader_sky: textured skybox faces --- */
+/* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
 static const char ssky_vert[] =
 	"#version 430 core\n"
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
+	"in vec2 a_lmcoord;\n"
 	"in vec4 a_color;\n"
 	"uniform mat4 u_mvp;\n"
 	"out vec2 v_texcoord;\n"
+	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
+	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
@@ -296,14 +299,18 @@ static const char ssky_vert[] =
 static const char ssky_frag[] =
 	"#version 430 core\n"
 	"uniform sampler2D u_texture0;\n"
+	"uniform sampler2D u_texture1;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_fog_density;\n"
 	"in vec2 v_texcoord;\n"
+	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"    fragColor = tex * v_color;\n"
+	"    vec4 solid = texture(u_texture0, v_texcoord);\n"
+	"    vec4 alpha = texture(u_texture1, v_lmcoord);\n"
+	"    vec3 color = mix(solid.rgb, alpha.rgb, alpha.a);\n"
+	"    fragColor = vec4(color, 1.0) * v_color;\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */
