@@ -842,12 +842,11 @@ static void _Host_Frame (float time)
 	Host_GetConsoleCommands ();
 
 // sample input every render frame for smooth view angles
+// movement deltas accumulate into cl.pendingcmd (merged at physics tick)
 	if (cls.signon == SIGNONS)
 	{
-		usercmd_t	dummy;
-		memset (&dummy, 0, sizeof(dummy));
-		CL_AdjustAngles ();	// keyboard look (uses host_frametime)
-		IN_Move (&dummy);	// mouse/gamepad look
+		CL_AdjustAngles ();
+		IN_Move (&cl.pendingcmd);
 	}
 
 // fixed-timestep accumulator for server/physics

@@ -960,8 +960,11 @@ void CL_SendCmd (void)
 	// get basic movement from keyboard
 		CL_BaseMove (&cmd);
 
-	// allow mice or other external controllers to add to the move
-		IN_Move (&cmd);
+	// merge accumulated mouse/gamepad movement from render-rate sampling
+		cmd.forwardmove += cl.pendingcmd.forwardmove;
+		cmd.sidemove += cl.pendingcmd.sidemove;
+		cmd.upmove += cl.pendingcmd.upmove;
+		memset (&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
 
 	// send the unreliable message
 		CL_SendMove (&cmd);

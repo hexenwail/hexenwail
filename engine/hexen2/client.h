@@ -205,6 +205,8 @@ typedef struct
 	double		lerpfrac;		// fraction into current physics tick
 						// for render-time interpolation
 
+	usercmd_t	pendingcmd;		// accumulated movement between physics ticks
+
 	float		last_received_message;	// (realtime) for net trouble icon
 
 //
