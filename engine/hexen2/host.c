@@ -841,10 +841,15 @@ static void _Host_Frame (float time)
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
 
-// sample mouse input every render frame for smooth view angles
-	IN_UpdateViewAngles ();
+// sample mouse/gamepad every render frame for smooth view angles
+	if (cls.signon == SIGNONS)
+	{
+		usercmd_t	dummy;
+		memset (&dummy, 0, sizeof(dummy));
+		IN_Move (&dummy);
+	}
 
-// fixed-timestep accumulator for physics
+// fixed-timestep accumulator for server/physics
 	phys_interval = sys_ticrate.value;
 	if (phys_interval < 0.01)
 		phys_interval = 0.01;
@@ -869,19 +874,17 @@ static void _Host_Frame (float time)
 		if (!sv.active)
 			CL_SendCmd ();
 
-		if (cls.state == ca_connected)
-			CL_ReadFromServer ();
-
 		R_UpdateParticles ();
 		CL_UpdateEffects ();
 
 		phys_accum -= phys_interval;
 	}
 
-	// store the fraction into the current physics tick for render interpolation
-	cl.lerpfrac = phys_accum / phys_interval;
-
 	host_frametime = render_frametime;
+
+// read from server and interpolate entities every render frame
+	if (cls.state == ca_connected)
+		CL_ReadFromServer ();
 
 // update video
 	if (host_speeds.integer)
