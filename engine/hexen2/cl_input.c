@@ -477,7 +477,7 @@ void CL_BaseMove (usercmd_t *cmd)
 		return;
 	}
 
-	CL_AdjustAngles ();
+	// CL_AdjustAngles is now called every render frame from host.c
 
 	memset (cmd, 0, sizeof(*cmd));
 
