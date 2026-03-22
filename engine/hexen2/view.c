@@ -925,6 +925,7 @@ static void V_CalcRefdef (void)
 	vec3_t		angles;
 	float		bob;
 	static float oldz = 0;
+	vec3_t		lerped_origin, lerped_angles;
 
 	if (!cl.v.cameramode)
 	{
@@ -950,24 +951,8 @@ static void V_CalcRefdef (void)
 		bob = 1;
 
 	// refresh position — interpolate between physics ticks
-	{
-		float blend = cl.lerpfrac;
-		if (blend < 0) blend = 0;
-		if (blend > 1) blend = 1;
-
-		// detect origin change and track for interpolation
-		if (ent->origin[0] != ent->currentorigin[0] ||
-		    ent->origin[1] != ent->currentorigin[1] ||
-		    ent->origin[2] != ent->currentorigin[2])
-		{
-			VectorCopy (ent->currentorigin, ent->previousorigin);
-			VectorCopy (ent->origin, ent->currentorigin);
-		}
-
-		for (i = 0; i < 3; i++)
-			r_refdef.vieworg[i] = ent->previousorigin[i] +
-				blend * (ent->currentorigin[i] - ent->previousorigin[i]);
-	}
+	R_LerpEntity (ent, lerped_origin, lerped_angles);
+	VectorCopy (lerped_origin, r_refdef.vieworg);
 	r_refdef.vieworg[2] += cl.viewheight + bob;
 
 	// never let it sit exactly on a node line, because a water plane can
@@ -1002,7 +987,7 @@ static void V_CalcRefdef (void)
 
 	CalcGunAngle ();
 
-	VectorCopy (ent->origin, view->origin);
+	VectorCopy (lerped_origin, view->origin);
 	view->origin[2] += cl.viewheight;
 
 	for (i = 0; i < 3; i++)
@@ -1053,24 +1038,24 @@ static void V_CalcRefdef (void)
 	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 
 	// smooth out stair step ups
-	if (cl.onground && ent->origin[2] - oldz > 0)
+	if (cl.onground && lerped_origin[2] - oldz > 0)
 	{
 		float steptime;
 
-		steptime = cl.time - cl.oldtime;
-		if (steptime < 0) // FIXME
+		steptime = host_frametime;
+		if (steptime < 0)
 			steptime = 0;
 
 		oldz += steptime * 80;
-		if (oldz > ent->origin[2])
-			oldz = ent->origin[2];
-		if (ent->origin[2] - oldz > 12)
-			oldz = ent->origin[2] - 12;
-		r_refdef.vieworg[2] += oldz - ent->origin[2];
-		view->origin[2] += oldz - ent->origin[2];
+		if (oldz > lerped_origin[2])
+			oldz = lerped_origin[2];
+		if (lerped_origin[2] - oldz > 12)
+			oldz = lerped_origin[2] - 12;
+		r_refdef.vieworg[2] += oldz - lerped_origin[2];
+		view->origin[2] += oldz - lerped_origin[2];
 	}
 	else
-		oldz = ent->origin[2];
+		oldz = lerped_origin[2];
 
 	if (chase_active.integer)
 		Chase_Update ();

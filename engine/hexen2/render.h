@@ -172,6 +172,7 @@ void R_InitSky (struct texture_s *mt);	// called at level load
 void R_PushDlights (void);
 
 void R_AddEfrags (entity_t *ent);
+void R_LerpEntity (entity_t *e, vec3_t out_origin, vec3_t out_angles);
 void R_RemoveEfrags (entity_t *ent);
 
 
