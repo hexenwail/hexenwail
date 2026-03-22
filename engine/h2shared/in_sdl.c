@@ -529,74 +529,14 @@ static void IN_DiscardMove (void)
 	}
 }
 
-/*
-================
-IN_UpdateViewAngles
-
-Called every render frame (before physics loop) to sample mouse
-input and update cl.viewangles at render rate for smooth mouselook.
-Accumulates the raw delta so IN_Move can still use it for movement.
-================
-*/
-static int	accum_mouse_x, accum_mouse_y;
-
 void IN_UpdateViewAngles (void)
 {
-	float	fx, fy;
-	int	mx, my;
-
-	if (cl.v.cameramode || !mouseactive)
-		return;
-
-	SDL_GetRelativeMouseState(&fx, &fy);
-	mx = (int)fx;
-	my = (int)fy;
-
-	if (mx == 0 && my == 0)
-		return;
-
-	// accumulate for IN_Move's movement commands
-	accum_mouse_x += mx;
-	accum_mouse_y += my;
-
-	// apply viewangle changes immediately at render rate
-	{
-		float	smx, smy;
-
-		if (m_filter.integer)
-		{
-			smx = (mx + old_mouse_x) * 0.5;
-			smy = (my + old_mouse_y) * 0.5;
-		}
-		else
-		{
-			smx = mx;
-			smy = my;
-		}
-		old_mouse_x = mx;
-		old_mouse_y = my;
-
-		smx *= sensitivity.value;
-		smy *= sensitivity.value;
-
-		if (!((in_strafe.state & 1) || (lookstrafe.integer && (in_mlook.state & 1))))
-			cl.viewangles[YAW] -= m_yaw.value * smx;
-
-		if ((in_mlook.state & 1) && !(in_strafe.state & 1))
-		{
-			if (mx || my)
-				V_StopPitchDrift ();
-			cl.viewangles[PITCH] += m_pitch.value * smy;
-			if (cl.viewangles[PITCH] > 80)
-				cl.viewangles[PITCH] = 80;
-			if (cl.viewangles[PITCH] < -70)
-				cl.viewangles[PITCH] = -70;
-		}
-	}
+	// no-op: viewangles are updated by IN_Move called from host.c
 }
 
 void IN_Move (usercmd_t *cmd)
 {
+	float	fx, fy;
 	int	x, y;
 	qboolean app_active;
 
@@ -604,30 +544,21 @@ void IN_Move (usercmd_t *cmd)
 	{
 		memset (cmd, 0, sizeof(*cmd));
 		IN_DiscardMove ();
-		accum_mouse_x = accum_mouse_y = 0;
 		return;
 	}
 
 	app_active = !VID_IsMinimized();
+	x = 0;
+	y = 0;
 
-	// use accumulated mouse delta (already sampled by IN_UpdateViewAngles)
-	x = accum_mouse_x;
-	y = accum_mouse_y;
-	accum_mouse_x = accum_mouse_y = 0;
-
-	// viewangles already updated — just handle movement commands
-	if (x != 0 || y != 0)
+	if (mouseactive)
 	{
-		float	smx, smy;
-		smx = x * sensitivity.value;
-		smy = y * sensitivity.value;
-
-		if ((in_strafe.state & 1) || (lookstrafe.integer && (in_mlook.state & 1)))
-			cmd->sidemove += m_side.value * smx;
-
-		if (!((in_mlook.state & 1)) || (in_strafe.state & 1))
-			cmd->forwardmove -= m_forward.value * smy;
+		SDL_GetRelativeMouseState(&fx, &fy);
+		x = (int)fx;
+		y = (int)fy;
 	}
+	if (x != 0 || y != 0)
+		IN_MouseMove (cmd, x, y);
 
 	if (app_active)
 		IN_GPMove (cmd);
