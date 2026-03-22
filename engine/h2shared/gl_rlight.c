@@ -34,35 +34,57 @@ R_AnimateLight
 */
 void R_AnimateLight (void)
 {
-	int	i, c, v;
-	int	defaultLocus;
-	int	locusHz[3];
+	int	i, c, v, v_next, len;
+	float	time_scaled, frac;
+	int	light_curr, light_next;
+	float	rates[3];
+	int	locus[3];
+	float	fracs[3];
 
-	defaultLocus = locusHz[0] = (int)(cl.time*10);
-	locusHz[1] = (int)(cl.time*20);
-	locusHz[2] = (int)(cl.time*30);
+	/* Compute integer frame index and fractional part for each rate */
+	rates[0] = cl.time * 10;	/* 10 Hz */
+	rates[1] = cl.time * 20;	/* 20 Hz */
+	rates[2] = cl.time * 30;	/* 30 Hz */
+	for (i = 0; i < 3; i++)
+	{
+		locus[i] = (int)rates[i];
+		fracs[i] = rates[i] - locus[i];
+	}
+
 	for (i = 0; i < MAX_LIGHTSTYLES; i++)
 	{
 		if (!cl_lightstyle[i].length)
-		{ // No style def
+		{ /* No style def */
 			d_lightstylevalue[i] = 256;
 			continue;
 		}
 		c = cl_lightstyle[i].map[0];
 		if (c == '1' || c == '2' || c == '3')
-		{ // Explicit anim rate
+		{ /* Explicit anim rate */
+			int rate_idx = c - '1';
 			if (cl_lightstyle[i].length == 1)
-			{ // Bad style def
+			{ /* Bad style def */
 				d_lightstylevalue[i] = 256;
 				continue;
 			}
-			v = locusHz[c-'1'] % (cl_lightstyle[i].length-1);
-			d_lightstylevalue[i] = (cl_lightstyle[i].map[v+1]-'a')*22;
-			continue;
+			len = cl_lightstyle[i].length - 1;
+			v = locus[rate_idx] % len;
+			v_next = (v + 1) % len;
+			frac = fracs[rate_idx];
+			light_curr = (cl_lightstyle[i].map[v + 1] - 'a') * 22;
+			light_next = (cl_lightstyle[i].map[v_next + 1] - 'a') * 22;
 		}
-		// Default anim rate (10 Hz)
-		v = defaultLocus % cl_lightstyle[i].length;
-		d_lightstylevalue[i] = (cl_lightstyle[i].map[v]-'a')*22;
+		else
+		{ /* Default anim rate (10 Hz) */
+			len = cl_lightstyle[i].length;
+			v = locus[0] % len;
+			v_next = (v + 1) % len;
+			frac = fracs[0];
+			light_curr = (cl_lightstyle[i].map[v] - 'a') * 22;
+			light_next = (cl_lightstyle[i].map[v_next] - 'a') * 22;
+		}
+		/* Smoothly interpolate between current and next light level */
+		d_lightstylevalue[i] = (int)(light_curr + (light_next - light_curr) * frac);
 	}
 }
 
