@@ -491,29 +491,18 @@ static float CL_LerpPoint (void)
 		f = 0.1;
 	}
 	frac = (cl.time - cl.mtime[1]) / f;
-	//Con_Printf ("frac: %f\n",frac);
 	if (frac < 0)
 	{
 		if (frac < -0.01)
-		{
-			SetPal(1);
 			cl.time = cl.mtime[1];
-//			Con_Printf ("low frac\n");
-		}
 		frac = 0;
 	}
-	else if (frac > 1)
+	else if (frac > 2)
 	{
-		if (frac > 1.01)
-		{
-			SetPal(2);
-			cl.time = cl.mtime[0];
-//			Con_Printf ("high frac\n");
-		}
-		frac = 1;
+		// cap extrapolation to 1 tick ahead to prevent runaway
+		cl.time = cl.mtime[0] + f;
+		frac = 2;
 	}
-	else
-		SetPal(0);
 
 	return frac;
 }
