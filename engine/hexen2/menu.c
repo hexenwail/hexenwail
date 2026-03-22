@@ -2512,6 +2512,10 @@ enum
 	GAME_USEMOUSE,
 	GAME_CROSSHAIR,
 	GAME_CHASE,
+	GAME_VIEWBOB,
+	GAME_VIEWROLL,
+	GAME_CONTRANS,
+	GAME_DYNLIGHT,
 	GAME_ITEMS
 };
 
@@ -2574,6 +2578,27 @@ static void M_Game_AdjustSliders (int dir)
 	case GAME_CHASE:
 		Cvar_Set ("chase_active", chase_active.integer ? "0" : "1");
 		break;
+	case GAME_VIEWBOB:
+		f = Cvar_VariableValue("cl_bob") + dir * 0.005;
+		if (f < 0)	f = 0;
+		else if (f > 0.05)	f = 0.05;
+		Cvar_SetValue ("cl_bob", f);
+		break;
+	case GAME_VIEWROLL:
+		f = Cvar_VariableValue("cl_rollangle") + dir * 0.5;
+		if (f < 0)	f = 0;
+		else if (f > 5)	f = 5;
+		Cvar_SetValue ("cl_rollangle", f);
+		break;
+	case GAME_CONTRANS:
+		f = Cvar_VariableValue("contrans") + dir * 1;
+		if (f < 0)	f = 0;
+		else if (f > 2)	f = 2;
+		Cvar_SetValue ("contrans", f);
+		break;
+	case GAME_DYNLIGHT:
+		Cvar_Set ("r_dynamic", Cvar_VariableValue("r_dynamic") ? "0" : "1");
+		break;
 	}
 }
 
@@ -2609,6 +2634,24 @@ static void M_Game_Draw (void)
 
 	M_Print (76, 92 + 8*GAME_CHASE,	"Chase Mode    :");
 	M_DrawCheckbox (220, 92 + 8*GAME_CHASE, chase_active.integer);
+
+	M_Print (76, 92 + 8*GAME_VIEWBOB,	"View Bob      :");
+	r = Cvar_VariableValue("cl_bob") / 0.05;
+	M_DrawSlider (220, 92 + 8*GAME_VIEWBOB, r);
+
+	M_Print (76, 92 + 8*GAME_VIEWROLL,	"View Roll     :");
+	r = Cvar_VariableValue("cl_rollangle") / 5.0;
+	M_DrawSlider (220, 92 + 8*GAME_VIEWROLL, r);
+
+	M_Print (76, 92 + 8*GAME_CONTRANS,	"Console Alpha :");
+	{
+		int ct = (int)Cvar_VariableValue("contrans");
+		M_PrintWhite (220, 92 + 8*GAME_CONTRANS,
+			ct == 0 ? "Opaque" : ct == 1 ? "Light" : "Clear");
+	}
+
+	M_Print (76, 92 + 8*GAME_DYNLIGHT,	"Dynamic Light :");
+	M_DrawCheckbox (220, 92 + 8*GAME_DYNLIGHT, (int)Cvar_VariableValue("r_dynamic"));
 
 	M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
 }
