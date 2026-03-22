@@ -407,7 +407,7 @@ CL_AdjustAngles
 Moves the local angle positions
 ================
 */
-static void CL_AdjustAngles (void)
+void CL_AdjustAngles (void)
 {
 	float	speed;
 	float	up, down;

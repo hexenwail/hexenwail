@@ -348,6 +348,7 @@ extern	qboolean	info_up;
 
 void CL_InitInput (void);
 void CL_SendCmd (void);
+void CL_AdjustAngles (void);
 void CL_BaseMove (usercmd_t *cmd);
 void CL_SendMove (const usercmd_t *cmd);
 

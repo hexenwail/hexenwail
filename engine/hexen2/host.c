@@ -841,12 +841,13 @@ static void _Host_Frame (float time)
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
 
-// sample mouse/gamepad every render frame for smooth view angles
+// sample input every render frame for smooth view angles
 	if (cls.signon == SIGNONS)
 	{
 		usercmd_t	dummy;
 		memset (&dummy, 0, sizeof(dummy));
-		IN_Move (&dummy);
+		CL_AdjustAngles ();	// keyboard look (uses host_frametime)
+		IN_Move (&dummy);	// mouse/gamepad look
 	}
 
 // fixed-timestep accumulator for server/physics
