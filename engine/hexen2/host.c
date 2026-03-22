@@ -1058,6 +1058,18 @@ void Host_Init (void)
 		if (!sv.active)
 			Cbuf_AddText ("map demo1\n");
 	}
+	else
+	{
+	/* -map <name>: bypass menus and load directly into the given map.
+	 * Useful for TrenchBroom / mapping workflow. */
+		int i = COM_CheckParm ("-map");
+		if (i && i + 1 < com_argc)
+		{
+			char cmd[256];
+			q_snprintf (cmd, sizeof(cmd), "map %s\n", com_argv[i + 1]);
+			Cbuf_AddText (cmd);
+		}
+	}
 }
 
 /*

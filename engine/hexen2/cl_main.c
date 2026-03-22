@@ -573,7 +573,9 @@ static void CL_RelinkEntities (void)
 		}
 		else
 		{	// if the delta is large, assume a teleport and don't lerp
-			f = frac;
+			// don't extrapolate the viewentity — only interpolate (cap at 1)
+			// to prevent camera/weapon overshoot and snap-back
+			f = (i == cl.viewentity && frac > 1) ? 1 : frac;
 			for (j = 0; j < 3; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
