@@ -117,6 +117,58 @@ cvar_t	gl_coloredlight = {"gl_coloredlight", "1", CVAR_NONE};
 cvar_t	gl_colored_dynamic_lights = {"gl_colored_dynamic_lights", "1", CVAR_NONE};
 cvar_t	gl_extra_dynamic_lights = {"gl_extra_dynamic_lights", "1", CVAR_NONE};
 
+/*
+=================
+R_LerpEntity
+
+Computes interpolated origin/angles for render-time smoothing.
+Called before drawing each entity. Detects when the entity's
+physics origin changes (server tick) and blends between the
+previous and current positions using cl.lerpfrac.
+=================
+*/
+static void R_LerpEntity (entity_t *e, vec3_t out_origin, vec3_t out_angles)
+{
+	int	j;
+	float	blend;
+	float	d;
+
+	// detect origin change (new physics tick updated this entity)
+	if (e->lerpflags & LERP_RESETMOVE)
+	{
+		VectorCopy (e->origin, e->previousorigin);
+		VectorCopy (e->origin, e->currentorigin);
+		VectorCopy (e->angles, e->previousangles);
+		VectorCopy (e->angles, e->currentangles);
+		e->lerpflags &= ~LERP_RESETMOVE;
+		e->movelerpstart = cl.time;
+	}
+	else if (e->origin[0] != e->currentorigin[0] ||
+		 e->origin[1] != e->currentorigin[1] ||
+		 e->origin[2] != e->currentorigin[2])
+	{
+		VectorCopy (e->currentorigin, e->previousorigin);
+		VectorCopy (e->origin, e->currentorigin);
+		VectorCopy (e->currentangles, e->previousangles);
+		VectorCopy (e->angles, e->currentangles);
+		e->movelerpstart = cl.time;
+	}
+
+	blend = cl.lerpfrac;
+	if (blend < 0) blend = 0;
+	if (blend > 1) blend = 1;
+
+	for (j = 0; j < 3; j++)
+	{
+		out_origin[j] = e->previousorigin[j] + blend * (e->currentorigin[j] - e->previousorigin[j]);
+
+		d = e->currentangles[j] - e->previousangles[j];
+		if (d > 180) d -= 360;
+		else if (d < -180) d += 360;
+		out_angles[j] = e->previousangles[j] + blend * d;
+	}
+}
+
 //=============================================================================
 
 
@@ -1034,7 +1086,14 @@ static void R_DrawEntitiesOnList (void)
 	// draw sprites seperately, because of alpha blending
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
+		vec3_t	save_origin, save_angles;
+
 		e = cl_visedicts[i];
+
+		// render-time interpolation: smooth entity between physics ticks
+		VectorCopy (e->origin, save_origin);
+		VectorCopy (e->angles, save_angles);
+		R_LerpEntity (e, e->origin, e->angles);
 
 		// chase-cam pitch adj. by FrikaC
 		if (e == &cl_entities[cl.viewentity])
@@ -1073,6 +1132,10 @@ static void R_DrawEntitiesOnList (void)
 			else
 				cl_transwateredicts[cl_numtranswateredicts++].ent = e;
 		}
+
+		// restore physics origin/angles
+		VectorCopy (save_origin, e->origin);
+		VectorCopy (save_angles, e->angles);
 	}
 }
 

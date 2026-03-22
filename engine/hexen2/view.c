@@ -949,8 +949,25 @@ static void V_CalcRefdef (void)
 	else  // no bobbing when you fly
 		bob = 1;
 
-	// refresh position
-	VectorCopy (ent->origin, r_refdef.vieworg);
+	// refresh position — interpolate between physics ticks
+	{
+		float blend = cl.lerpfrac;
+		if (blend < 0) blend = 0;
+		if (blend > 1) blend = 1;
+
+		// detect origin change and track for interpolation
+		if (ent->origin[0] != ent->currentorigin[0] ||
+		    ent->origin[1] != ent->currentorigin[1] ||
+		    ent->origin[2] != ent->currentorigin[2])
+		{
+			VectorCopy (ent->currentorigin, ent->previousorigin);
+			VectorCopy (ent->origin, ent->currentorigin);
+		}
+
+		for (i = 0; i < 3; i++)
+			r_refdef.vieworg[i] = ent->previousorigin[i] +
+				blend * (ent->currentorigin[i] - ent->previousorigin[i]);
+	}
 	r_refdef.vieworg[2] += cl.viewheight + bob;
 
 	// never let it sit exactly on a node line, because a water plane can

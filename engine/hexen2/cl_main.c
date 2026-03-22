@@ -580,6 +580,7 @@ static void CL_RelinkEntities (void)
 			// so move to the final spot
 			VectorCopy (ent->msg_origins[0], ent->origin);
 			VectorCopy (ent->msg_angles[0], ent->angles);
+			ent->lerpflags |= LERP_RESETMOVE;
 		}
 		else
 		{	// if the delta is large, assume a teleport and don't lerp
@@ -589,7 +590,10 @@ static void CL_RelinkEntities (void)
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
 
 				if (delta[j] > 100 || delta[j] < -100)
+				{
 					f = 1;		// assume a teleportation, not a motion
+					ent->lerpflags |= LERP_RESETMOVE;
+				}
 			}
 
 		// interpolate the origin and angles
