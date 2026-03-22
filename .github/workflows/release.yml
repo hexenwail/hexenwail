@@ -25,10 +25,11 @@ jobs:
 
       - name: Package
         run: |
-          cd result/release
-          zip -r ../../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
+          cp -rL result/release staging
+          cd staging
+          zip -r ../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
             linux-x86_64/ licenses/ BUILD_INFO.txt
-          zip -r ../../hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
+          zip -r ../hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
             windows-x86_64/ licenses/ BUILD_INFO.txt
 
       - name: Generate changelog
