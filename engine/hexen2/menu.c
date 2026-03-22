@@ -1957,6 +1957,7 @@ enum
 	DISP_SOFTEMU,
 	DISP_DITHER,
 	DISP_WATERCOLOR,
+	DISP_PARTICLES,
 	DISP_SEP,		/* separator between rendering and video */
 	DISP_FULLSCREEN,
 	DISP_RESOLUTION,
@@ -2008,6 +2009,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
+			Cvar_SetValue ("gl_particles", 0);
 		}
 		else if (preset == 2)	/* Retro */
 		{
@@ -2017,6 +2019,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
+			Cvar_SetValue ("gl_particles", 0);
 		}
 		else if (preset == 3)	/* Modern */
 		{
@@ -2026,6 +2029,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
 			Cvar_SetValue ("gl_flashblend", 0);
+			Cvar_SetValue ("gl_particles", 1);
 		}
 		break;
 	}
@@ -2084,6 +2088,9 @@ static void M_Display_AdjustSliders (int dir)
 		Cvar_SetValue ("r_watercolor", v);
 		break;
 	}
+	case DISP_PARTICLES:
+		Cvar_SetValue ("gl_particles", !gl_particles.integer);
+		break;
 	case DISP_RENDERSCALE:
 	{
 		static const float scale_steps[] = { 0.25f, 0.33f, 0.50f, 0.67f, 0.75f, 1.0f };
@@ -2217,6 +2224,9 @@ static void M_Display_Draw (void)
 	case 3:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Clear"); break;
 	default: M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Classic"); break;
 	}
+
+	M_Print (76, 92 + 8*DISP_PARTICLES,	"Particles     :");
+	M_PrintWhite (220, 92 + 8*DISP_PARTICLES, gl_particles.integer ? "Round" : "Square");
 
 	/* separator */
 
@@ -4152,15 +4162,17 @@ static void M_Quit_Draw (void)
 		const char *l3 = "Source Port";
 		const char *l4 = "Shanjaq and Inky Additions";
 		const char *l5 = "for wabbit";
+		const char *l6 = "Hexenwail Engine";
 		M_Print      (QUIT_CENTER(l0), y,      l0);
 		M_Print      (QUIT_CENTER(l1), y + 8,  l1);
 		M_PrintWhite (QUIT_CENTER(l2), y + 16, l2);
 		M_PrintWhite (QUIT_CENTER(l3), y + 24, l3);
 		M_PrintWhite (QUIT_CENTER(l4), y + 32, l4);
 		M_PrintWhite (QUIT_CENTER(l5), y + 40, l5);
+		M_PrintWhite (QUIT_CENTER(l6), y + 52, l6);
 	}
 #undef QUIT_CENTER
-	y += 56;
+	y += 68;
 
 	if (LinePos > 55 && !SoundPlayed && LineTxt2)
 	{

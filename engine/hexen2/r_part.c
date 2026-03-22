@@ -1388,11 +1388,15 @@ void R_DrawParticles (void)
 	int		i, color;
 	particle_t	*p;
 	float		scale;
+	qboolean	square = !gl_particles.integer;
 #define	SCALE_BASE	((p->type == pt_snow) ? p->count/10 : 1)
 
 	GL_Bind(particletexture);
 	glEnable_fp (GL_BLEND);
 	GL_SetAlphaThreshold(0.0f);
+
+	if (square)
+		glPointSize(2.0f);
 
 	GL_ImmBegin();
 
@@ -1401,15 +1405,6 @@ void R_DrawParticles (void)
 
 	for (p = active_particles ; p ; p = p->next)
 	{
-		// hack a scale up to keep particles from disapearing
-		scale = (p->org[0] - r_origin[0])*vpn[0] +
-			(p->org[1] - r_origin[1])*vpn[1] +
-			(p->org[2] - r_origin[2])*vpn[2];
-		if (scale < 20)
-			scale = SCALE_BASE;
-		else
-			scale = SCALE_BASE + scale * 0.004;
-
 	/* clamp color to 0-511: particle->type 10 and 11 (pt_c_explode
 	 * and pt_c_explode2, e.g. Crusader's ice particles hitting a
 	 * wall) lead to negative values, because R_UpdateParticles ()
@@ -1420,27 +1415,44 @@ void R_DrawParticles (void)
 		else
 			GL_ImmColor4ubv ((byte *)&d_8to24TranslucentTable[color-256]);
 
-		// setup texture coordinates
-		i = 0;
-		if (p->type == pt_snow)
+		if (square)
 		{
-			if (p->count >= 69)
-				i = 3;	// happy snow!
-			else if (p->count >= 40)
-				i = 2;
-			else if (p->count >= 30)
-				i = 1;
+			GL_ImmTexCoord2f(0.5f, 0.5f);	/* center of particle texture (opaque) */
+			GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
 		}
+		else
+		{
+			// hack a scale up to keep particles from disapearing
+			scale = (p->org[0] - r_origin[0])*vpn[0] +
+				(p->org[1] - r_origin[1])*vpn[1] +
+				(p->org[2] - r_origin[2])*vpn[2];
+			if (scale < 20)
+				scale = SCALE_BASE;
+			else
+				scale = SCALE_BASE + scale * 0.004;
 
-		GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
-		GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
-		GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
-		GL_ImmVertex3f(p->org[0] + r_pup[0]*scale, p->org[1] + r_pup[1]*scale, p->org[2] + r_pup[2]*scale);
-		GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
-		GL_ImmVertex3f(p->org[0] + r_pright[0]*scale, p->org[1] + r_pright[1]*scale, p->org[2] + r_pright[2]*scale);
+			// setup texture coordinates
+			i = 0;
+			if (p->type == pt_snow)
+			{
+				if (p->count >= 69)
+					i = 3;	// happy snow!
+				else if (p->count >= 40)
+					i = 2;
+				else if (p->count >= 30)
+					i = 1;
+			}
+
+			GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
+			GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
+			GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
+			GL_ImmVertex3f(p->org[0] + r_pup[0]*scale, p->org[1] + r_pup[1]*scale, p->org[2] + r_pup[2]*scale);
+			GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
+			GL_ImmVertex3f(p->org[0] + r_pright[0]*scale, p->org[1] + r_pright[1]*scale, p->org[2] + r_pright[2]*scale);
+		}
 	}
 
-	GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+	GL_ImmEnd(square ? GL_POINTS : GL_TRIANGLES, &gl_shader_particle);
 	GL_SetAlphaThreshold(0.01f);
 	glDisable_fp (GL_BLEND);
 }
