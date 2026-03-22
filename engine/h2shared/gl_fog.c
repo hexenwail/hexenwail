@@ -299,11 +299,17 @@ called at the beginning of each frame — updates globals read by shaders
 */
 void Fog_SetupFrame (void)
 {
+	extern mleaf_t *r_viewleaf;
 	float *c = Fog_GetColor();
-	r_fog_density = Fog_GetDensity();
+	r_fog_density = Fog_GetDensity() / 512.0;
 	r_fog_color[0] = c[0];
 	r_fog_color[1] = c[1];
 	r_fog_color[2] = c[2];
+
+	/* Disable fog when underwater — liquid surfaces have their own
+	 * tinting and fog looks wrong submerged */
+	if (r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER)
+		r_fog_density = 0;
 }
 
 /*
