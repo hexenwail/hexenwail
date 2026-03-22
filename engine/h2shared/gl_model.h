@@ -321,6 +321,7 @@ typedef struct {
 	int		posedata;	// numposes*poseverts trivert_t
 	int		commands;	// gl command list with embedded s/t
 	GLuint		gl_texturenum[MAX_SKINS][4];
+	GLuint		gl_fb_texturenum[MAX_SKINS][4];	// fullbright mask textures
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 

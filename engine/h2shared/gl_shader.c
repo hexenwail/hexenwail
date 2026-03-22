@@ -198,7 +198,7 @@ static const char sworld_frag[] =
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    float fog = exp(-u_fog_density * u_fog_density * v_fogdist * v_fogdist);\n"
+	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	"    fragColor = color;\n"
 	"}\n";
@@ -236,7 +236,7 @@ static const char salias_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    float fog = exp(-u_fog_density * u_fog_density * v_fogdist * v_fogdist);\n"
+	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	"    fragColor = color;\n"
 	"}\n";
@@ -273,7 +273,7 @@ static const char spart_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
 	"    if (color.a < 0.01) discard;\n"
-	"    float fog = exp(-u_fog_density * u_fog_density * v_fogdist * v_fogdist);\n"
+	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	"    fragColor = color;\n"
 	"}\n";
