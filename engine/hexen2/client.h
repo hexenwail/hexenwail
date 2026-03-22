@@ -202,6 +202,9 @@ typedef struct
 	double		oldtime;		// previous cl.time, time-oldtime is used
 						// to decay light values and smooth step ups
 
+	double		lerpfrac;		// fraction into current physics tick
+						// for render-time interpolation
+
 	float		last_received_message;	// (realtime) for net trouble icon
 
 //

@@ -679,8 +679,8 @@ static qboolean Host_FilterTime (float time)
 		host_frametime = host_framerate.value;
 	else
 	{	// don't allow really long or short frames
-		if (host_frametime > 0.05 && !sys_adaptive.integer)
-			host_frametime = 0.05;
+		if (host_frametime > 0.1)
+			host_frametime = 0.1;
 		if (host_frametime < 0.001)
 			host_frametime = 0.001;
 	}
@@ -812,9 +812,9 @@ static void _Host_Frame (float time)
 	static double		time2 = 0;
 	static double		time3 = 0;
 	int			pass1, pass2, pass3;
-#if !defined(FPS_20)
-	double	save_host_frametime,total_host_frametime;
-#endif
+	static double		phys_accum = 0;
+	double			phys_interval;
+	double			render_frametime;
 
 	if (setjmp(host_abort))
 		return;			// something bad happened, or the server disconnected
@@ -837,88 +837,47 @@ static void _Host_Frame (float time)
 
 	NET_Poll();
 
-// if running the server locally, make intentions now
-	if (sv.active)
-		CL_SendCmd ();
-
-//-------------------
-//
-// server operations
-//
-//-------------------
-
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
 
-#ifdef FPS_20
-	if (sv.active)
-		Host_ServerFrame ();
+// fixed-timestep accumulator for physics
+	phys_interval = sys_ticrate.value;
+	if (phys_interval < 0.01)
+		phys_interval = 0.01;
 
-//-------------------
-//
-// client operations
-//
-//-------------------
+	render_frametime = host_frametime;
+	phys_accum += host_frametime;
 
-// if running the server remotely, send intentions now after
-// the incoming messages have been read
-	if (!sv.active)
-		CL_SendCmd ();
+	// cap accumulator to prevent spiral of death
+	if (phys_accum > phys_interval * 5)
+		phys_accum = phys_interval * 5;
 
-// fetch results from server
-	if (cls.state == ca_connected)
-		CL_ReadFromServer ();
-
-#else
-
-	save_host_frametime = total_host_frametime = host_frametime;
-	if (sys_adaptive.integer)
+	while (phys_accum >= phys_interval)
 	{
-		if (host_frametime > 0.05)
-			host_frametime = 0.05;
-	}
+		host_frametime = phys_interval;
 
-	if (total_host_frametime > 1.0)
-		total_host_frametime = 0.05;
+		if (sv.active)
+			CL_SendCmd ();
 
-	do
-	{
 		if (sv.active)
 			Host_ServerFrame ();
 
-	//-------------------
-	//
-	// client operations
-	//
-	//-------------------
-
-	// if running the server remotely, send intentions now after
-	// the incoming messages have been read
 		if (!sv.active)
 			CL_SendCmd ();
 
-	// fetch results from server
 		if (cls.state == ca_connected)
 			CL_ReadFromServer ();
 
 		R_UpdateParticles ();
 		CL_UpdateEffects ();
 
-		if (!sys_adaptive.integer)
-			break;
+		phys_accum -= phys_interval;
+	}
 
-		total_host_frametime -= 0.05;
-		if (total_host_frametime > 0 && total_host_frametime < 0.05)
-		{
-			save_host_frametime -= total_host_frametime;
-			oldrealtime -= total_host_frametime;
-			break;
-		}
+	// store the fraction into the current physics tick for render interpolation
+	cl.lerpfrac = phys_accum / phys_interval;
 
-	} while (total_host_frametime > 0);
-
-	host_frametime = save_host_frametime;
-#endif
+	host_frametime = render_frametime;
 
 // update video
 	if (host_speeds.integer)

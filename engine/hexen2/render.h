@@ -39,6 +39,11 @@ typedef struct efrag_s
 } efrag_t;
 
 
+// render-time interpolation flags
+#define LERP_MOVESTEP	(1<<0)	// entity uses step-based movement (monsters, doors)
+#define LERP_RESETMOVE	(1<<1)	// reset movement lerp (teleport, spawn)
+#define LERP_RESETANIM	(1<<2)	// reset animation lerp
+
 typedef struct entity_s
 {
 	qboolean		forcelink;	// model changed
@@ -74,6 +79,20 @@ typedef struct entity_s
 	struct mnode_s		*topnode;	// for bmodels, first world node
 						// that splits bmodel, or NULL if
 						// not split
+
+	// render-time movement interpolation
+	vec3_t			previousorigin;
+	vec3_t			currentorigin;
+	vec3_t			previousangles;
+	vec3_t			currentangles;
+	double			movelerpstart;	// time movement lerp began
+	int			lerpflags;
+
+	// animation interpolation
+	int			previouspose;
+	int			currentpose;
+	float			lerpstart;	// animation lerp start time
+	float			lerptime;	// animation lerp duration
 } entity_t;
 
 
