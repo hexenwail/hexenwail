@@ -925,7 +925,6 @@ static void V_CalcRefdef (void)
 	vec3_t		angles;
 	float		bob;
 	static float oldz = 0;
-	vec3_t		lerped_origin, lerped_angles;
 
 	if (!cl.v.cameramode)
 	{
@@ -950,9 +949,8 @@ static void V_CalcRefdef (void)
 	else  // no bobbing when you fly
 		bob = 1;
 
-	// refresh position — interpolate between physics ticks
-	R_LerpEntity (ent, lerped_origin, lerped_angles);
-	VectorCopy (lerped_origin, r_refdef.vieworg);
+	// refresh position (interpolated by CL_RelinkEntities every frame)
+	VectorCopy (ent->origin, r_refdef.vieworg);
 	r_refdef.vieworg[2] += cl.viewheight + bob;
 
 	// never let it sit exactly on a node line, because a water plane can
@@ -987,7 +985,7 @@ static void V_CalcRefdef (void)
 
 	CalcGunAngle ();
 
-	VectorCopy (lerped_origin, view->origin);
+	VectorCopy (ent->origin, view->origin);
 	view->origin[2] += cl.viewheight;
 
 	for (i = 0; i < 3; i++)
@@ -1038,7 +1036,7 @@ static void V_CalcRefdef (void)
 	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
 
 	// smooth out stair step ups
-	if (cl.onground && lerped_origin[2] - oldz > 0)
+	if (cl.onground && ent->origin[2] - oldz > 0)
 	{
 		float steptime;
 
@@ -1047,15 +1045,15 @@ static void V_CalcRefdef (void)
 			steptime = 0;
 
 		oldz += steptime * 80;
-		if (oldz > lerped_origin[2])
-			oldz = lerped_origin[2];
-		if (lerped_origin[2] - oldz > 12)
-			oldz = lerped_origin[2] - 12;
-		r_refdef.vieworg[2] += oldz - lerped_origin[2];
-		view->origin[2] += oldz - lerped_origin[2];
+		if (oldz > ent->origin[2])
+			oldz = ent->origin[2];
+		if (ent->origin[2] - oldz > 12)
+			oldz = ent->origin[2] - 12;
+		r_refdef.vieworg[2] += oldz - ent->origin[2];
+		view->origin[2] += oldz - ent->origin[2];
 	}
 	else
-		oldz = lerped_origin[2];
+		oldz = ent->origin[2];
 
 	if (chase_active.integer)
 		Chase_Update ();

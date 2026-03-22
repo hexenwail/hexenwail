@@ -479,7 +479,7 @@ static float CL_LerpPoint (void)
 
 	f = cl.mtime[0] - cl.mtime[1];
 
-	if (!f || cl_nolerp.integer || cls.timedemo || sv.active)
+	if (!f || cl_nolerp.integer || cls.timedemo)
 	{
 		cl.time = cl.mtime[0];
 		return 1;
