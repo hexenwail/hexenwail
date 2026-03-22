@@ -31,6 +31,9 @@ void IN_Commands (void);
 void IN_Move (usercmd_t *cmd);
 /* add additional movement on top of the keyboard move cmd */
 
+void IN_UpdateViewAngles (void);
+/* sample mouse and update cl.viewangles at render rate */
+
 void IN_SendKeyEvents (void);
 /* used as a callback for Sys_SendKeyEvents() by some drivers */
 
