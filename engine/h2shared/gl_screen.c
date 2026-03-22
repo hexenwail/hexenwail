@@ -65,6 +65,7 @@
 
 #include "quakedef.h"
 #include "gl_postprocess.h"
+#include <time.h>
 #ifdef PLATFORM_WINDOWS
 #include "winquake.h"
 #endif
@@ -99,6 +100,7 @@ static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
 static	cvar_t	scr_showfps = {"showfps", "0", CVAR_ARCHIVE};
+static	cvar_t	scr_showclock = {"showclock", "0", CVAR_ARCHIVE};
 //static	cvar_t	gl_triplebuffer = {"gl_triplebuffer", "0", CVAR_ARCHIVE};
 
 #if !defined(H2W)
@@ -461,6 +463,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showturtle);
 	Cvar_RegisterVariable (&scr_showpause);
 	Cvar_RegisterVariable (&scr_showfps);
+	Cvar_RegisterVariable (&scr_showclock);
 	Cvar_RegisterVariable (&scr_centertime);
 //	Cvar_RegisterVariable (&gl_triplebuffer);
 
@@ -571,6 +574,41 @@ static void SCR_DrawFPS (void)
 	x = vid.width - strlen(st) * 8 - 8;
 	y = vid.height - sb_lines - 8;
 //	Draw_TileClear(x, y, strlen(st) * 8, 8);
+	Draw_String(x, y, st);
+}
+
+static void SCR_DrawClock (void)
+{
+	char	st[16];
+	int	x, y;
+	int	minutes, seconds;
+
+	if (!scr_showclock.integer)
+		return;
+
+	if (scr_showclock.integer == 2)
+	{
+		/* Wall clock (real time) */
+		time_t	rawtime;
+		struct tm *ti;
+		time(&rawtime);
+		ti = localtime(&rawtime);
+		sprintf(st, "%02d:%02d", ti->tm_hour, ti->tm_min);
+	}
+	else
+	{
+		/* Game time (level elapsed) */
+		seconds = (int)cl.time;
+		minutes = seconds / 60;
+		seconds %= 60;
+		if (minutes >= 60)
+			sprintf(st, "%d:%02d:%02d", minutes / 60, minutes % 60, seconds);
+		else
+			sprintf(st, "%d:%02d", minutes, seconds);
+	}
+
+	x = vid.width - strlen(st) * 8 - 8;
+	y = vid.height - sb_lines - 16 - (scr_showfps.integer ? 8 : 0);
 	Draw_String(x, y, st);
 }
 
@@ -1345,6 +1383,7 @@ void SCR_UpdateScreen (void)
 		if (!cls.demoplayback)
 			Sbar_Draw();
 		SCR_DrawFPS();
+		SCR_DrawClock();
 
 		Plaque_Draw(plaquemessage, false);
 		SCR_DrawConsole();
