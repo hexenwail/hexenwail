@@ -841,6 +841,9 @@ static void _Host_Frame (float time)
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
 
+// sample mouse input every render frame for smooth view angles
+	IN_UpdateViewAngles ();
+
 // fixed-timestep accumulator for physics
 	phys_interval = sys_ticrate.value;
 	if (phys_interval < 0.01)
