@@ -127,7 +127,7 @@ physics origin changes (server tick) and blends between the
 previous and current positions using cl.lerpfrac.
 =================
 */
-static void R_LerpEntity (entity_t *e, vec3_t out_origin, vec3_t out_angles)
+void R_LerpEntity (entity_t *e, vec3_t out_origin, vec3_t out_angles)
 {
 	int	j;
 	float	blend;
@@ -1086,13 +1086,9 @@ static void R_DrawEntitiesOnList (void)
 	// draw sprites seperately, because of alpha blending
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
-		vec3_t	save_origin, save_angles;
-
 		e = cl_visedicts[i];
 
 		// render-time interpolation: smooth entity between physics ticks
-		VectorCopy (e->origin, save_origin);
-		VectorCopy (e->angles, save_angles);
 		R_LerpEntity (e, e->origin, e->angles);
 
 		// chase-cam pitch adj. by FrikaC
@@ -1132,10 +1128,6 @@ static void R_DrawEntitiesOnList (void)
 			else
 				cl_transwateredicts[cl_numtranswateredicts++].ent = e;
 		}
-
-		// restore physics origin/angles
-		VectorCopy (save_origin, e->origin);
-		VectorCopy (save_angles, e->angles);
 	}
 }
 

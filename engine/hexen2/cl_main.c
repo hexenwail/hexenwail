@@ -441,7 +441,7 @@ void CL_DecayLights (void)
 	float	time;
 	int	i;
 
-	time = cl.time - cl.oldtime;
+	time = host_frametime;	// use render frametime, not physics timestep
 
 	dl = cl_dlights;
 	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
