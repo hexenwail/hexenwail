@@ -318,7 +318,7 @@ void Use_Proximity_Mine ()
 UseTimebomb
 ============
 */
-void TimeBombBoom()
+void TimeBombExplode()
 {
 	sound(self,CHAN_AUTO,"misc/warning.wav",1,ATTN_NORM);
 	DarkExplosion();
@@ -326,19 +326,39 @@ void TimeBombBoom()
 
 void TimeBombTouch()
 {
-	if(!other.takedamage)
+	if((other == self.owner)||(other == world)||(!(other.takedamage)))
 		return;
-	other=self.enemy;
-	T_Damage(other,self,self.owner,50);
-	TimeBombBoom();
+
+	TimeBombExplode();
+}
+
+void TimeBombThink()
+{
+	vector	destination;
+
+	// orbit around spawn point, self.health stores spawn time
+	destination_x = self.o_angle_x + cos(time*200 + self.health*100) * 48;
+	destination_y = self.o_angle_y + sin(time*200 + self.health*100) * 48;
+	destination_z = self.o_angle_z + cos(time*300 + self.health*100) * 12;
+
+	self.origin = destination;
+
+	// explode after 5 seconds
+	if(time > self.health + 5.0)
+	{
+		TimeBombExplode();
+		return;
+	}
+	thinktime self : 0.05;
 }
 
 void Use_TimeBomb()
 {
+	makevectors(self.v_angle);
 	newmis=spawn();
 	newmis.owner=self;
-	newmis.enemy=world;
 	newmis.classname="timebomb";
+	newmis.movetype=MOVETYPE_FLYMISSILE;
 	newmis.solid=SOLID_BBOX;
 	newmis.dmg=50;
 	newmis.touch=TimeBombTouch;
@@ -349,9 +369,12 @@ void Use_TimeBomb()
 	newmis.abslight=0.5;
 	setmodel (newmis, "models/glyphwir.mdl");
 	setsize(newmis,'0 0 0','0 0 0');
-	setorigin(newmis,self.origin+self.proj_ofs);
-	newmis.think=TimeBombBoom;
-	thinktime newmis : 0.75;
+	// spawn in the air ahead of the player
+	newmis.o_angle=self.origin + v_forward*64 + '0 0 48';
+	setorigin(newmis,newmis.o_angle);
+	newmis.think=TimeBombThink;
+	thinktime newmis : 0.05;
+	newmis.health = time;
 }
 
 /*

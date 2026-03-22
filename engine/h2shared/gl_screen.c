@@ -240,7 +240,9 @@ void SCR_CenterPrint (const char *str)
 	strncpy (scr_centerstring, str, sizeof(scr_centerstring)-1);
 	scr_centertime_off = scr_centertime.value;
 
-	FindTextBreaks(scr_centerstring, 38);
+	/* skip leading _ for line count (bottom plaque prefix) */
+	FindTextBreaks(scr_centerstring[0] == '_' ?
+		       scr_centerstring + 1 : scr_centerstring, 38);
 	scr_center_lines = lines;
 }
 
