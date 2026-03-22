@@ -457,19 +457,20 @@ static void PF_pimpmodel (void)
 	if (spawnflags & 8)	/* Cast light */
 		pimp->ex_flags |= EF_ILLUMINATE;
 
-	/* Apply custom model flags (trails etc.) - still per-model since
-	 * trails are checked against model->flags in cl_main.c */
+	/* Apply custom model flags (trails etc.) per-entity.
+	 * Previously modified shared mod->flags which corrupted
+	 * all entities sharing the same model. */
 	if (new_flags != 0)
 	{
-		mod->flags &= ~(EF_ROCKET | EF_GRENADE | EF_GIB | EF_ROTATE |
+		pimp->trail_flags = (mod->flags & ~(EF_ROCKET | EF_GRENADE | EF_GIB | EF_ROTATE |
 				EF_TRACER | EF_ZOMGIB | EF_TRACER2 | EF_TRACER3 |
 				EF_FIREBALL | EF_ICE | EF_MIP_MAP | EF_SPIT |
 				EF_TRANSPARENT | EF_SPELL | EF_HOLEY |
 				EF_SPECIAL_TRANS | EF_FACE_VIEW | EF_VORP_MISSILE |
 				EF_SET_STAFF | EF_MAGICMISSILE | EF_BONESHARD |
 				EF_SCARAB | EF_ACIDBALL | EF_BLOODSHOT |
-				EF_MIP_MAP_FAR);
-		mod->flags |= (new_flags & 0x01ffffff);
+				EF_MIP_MAP_FAR)) | (new_flags & 0x01ffffff);
+		pimp->trail_override = true;
 	}
 
 	/* Apply glow settings to per-entity override */

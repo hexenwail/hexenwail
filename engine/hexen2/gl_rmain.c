@@ -1194,6 +1194,18 @@ pimp_override_t *R_GetPimpOverride (int entnum)
 	return &pimp_overrides[entnum];
 }
 
+// Returns model flags for an entity, with per-entity trail overrides
+int R_GetEntityModelFlags (entity_t *e)
+{
+	int entnum = (int)(e - cl_entities);
+	if (entnum >= 0 && entnum < MAX_EDICTS && pimp_overrides[entnum].active
+		&& pimp_overrides[entnum].trail_override)
+	{
+		return pimp_overrides[entnum].trail_flags;
+	}
+	return e->model->flags;
+}
+
 // Returns combined ex_flags for an entity (pimp override | model defaults)
 // and sets *gsettings_out to the active glow settings
 int R_GetPimpFlags (entity_t *e, float **gsettings_out)

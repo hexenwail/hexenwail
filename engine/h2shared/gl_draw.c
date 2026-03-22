@@ -541,6 +541,10 @@ void Draw_Init (void)
 			chars[i] = 255;	// proper transparent color
 	}
 	char_texture = GL_LoadTexture ("charset", chars, 256, 128, TEX_ALPHA|TEX_NEAREST);
+	/* Set CLAMP_TO_EDGE on charset atlas to prevent edge sampling artifacts */
+	GL_Bind (char_texture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	// load the small characters for status bar
 	chars = (byte *) W_GetLumpName("tinyfont");
@@ -550,6 +554,9 @@ void Draw_Init (void)
 			chars[i] = 255;	// proper transparent color
 	}
 	char_smalltexture = GL_LoadTexture ("smallcharset", chars, 128, 32, TEX_ALPHA|TEX_NEAREST);
+	GL_Bind (char_smalltexture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	// load the big menu font
 	// Note: old version of demo has bigfont.lmp, not bigfont2.lmp
@@ -563,6 +570,9 @@ void Draw_Init (void)
 			p->data[i] = 255;	// proper transparent color
 	}
 	char_menufonttexture = GL_LoadTexture ("menufont", p->data, p->width, p->height, TEX_ALPHA|TEX_LINEAR);
+	GL_Bind (char_menufonttexture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	// load the console background
 	p = (qpic_t *)FS_LoadTempFile ("gfx/menu/conback.lmp", NULL);
@@ -1106,6 +1116,9 @@ Draw_TransPic
 */
 void Draw_TransPic (int x, int y, qpic_t *pic)
 {
+	if (!pic)
+		return;
+
 	if (x < 0 || (x + pic->width) > vid.width ||
 	    y < 0 || (y + pic->height) > vid.height)
 	{

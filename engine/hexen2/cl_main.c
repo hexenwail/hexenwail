@@ -730,17 +730,21 @@ static void CL_RelinkEntities (void)
 			}
 		}
 
-		if (ent->model->flags & EF_GIB)
+		/* Use per-entity trail flags from PimpModel overrides if set,
+		 * otherwise fall back to the shared model flags */
+		{
+		int mflags = R_GetEntityModelFlags(ent);
+		if (mflags & EF_GIB)
 			R_RocketTrail (oldorg, ent->origin, 2);
-		else if (ent->model->flags & EF_ZOMGIB)
+		else if (mflags & EF_ZOMGIB)
 			R_RocketTrail (oldorg, ent->origin, 4);
-		else if (ent->model->flags & EF_BLOODSHOT)
+		else if (mflags & EF_BLOODSHOT)
 			R_RocketTrail (oldorg, ent->origin, 17);
-		else if (ent->model->flags & EF_TRACER)
+		else if (mflags & EF_TRACER)
 			R_RocketTrail (oldorg, ent->origin, 3);
-		else if (ent->model->flags & EF_TRACER2)
+		else if (mflags & EF_TRACER2)
 			R_RocketTrail (oldorg, ent->origin, 5);
-		else if (ent->model->flags & EF_ROCKET)
+		else if (mflags & EF_ROCKET)
 		{
 			R_RocketTrail (oldorg, ent->origin, 0);
 			/*
@@ -750,7 +754,7 @@ static void CL_RelinkEntities (void)
 			dl->die = cl.time + 0.01;
 			*/
 		}
-		else if (ent->model->flags & EF_FIREBALL)
+		else if (mflags & EF_FIREBALL)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_fireball);
 
@@ -768,7 +772,7 @@ static void CL_RelinkEntities (void)
 			}
 #		endif
 		}
-		else if (ent->model->flags & EF_ACIDBALL)
+		else if (mflags & EF_ACIDBALL)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_acidball);
 
@@ -786,11 +790,11 @@ static void CL_RelinkEntities (void)
 			}
 #		endif
 		}
-		else if (ent->model->flags & EF_ICE)
+		else if (mflags & EF_ICE)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_ice);
 		}
-		else if (ent->model->flags & EF_SPIT)
+		else if (mflags & EF_SPIT)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_spit);
 
@@ -808,15 +812,15 @@ static void CL_RelinkEntities (void)
 			}
 #		endif
 		}
-		else if (ent->model->flags & EF_SPELL)
+		else if (mflags & EF_SPELL)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_spell);
 		}
-		else if (ent->model->flags & EF_GRENADE)
+		else if (mflags & EF_GRENADE)
 			R_RocketTrail (oldorg, ent->origin, 1);
-		else if (ent->model->flags & EF_TRACER3)
+		else if (mflags & EF_TRACER3)
 			R_RocketTrail (oldorg, ent->origin, 6);
-		else if (ent->model->flags & EF_VORP_MISSILE)
+		else if (mflags & EF_VORP_MISSILE)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_vorpal);
 
@@ -838,11 +842,11 @@ static void CL_RelinkEntities (void)
 			}
 #		endif
 		}
-		else if (ent->model->flags & EF_SET_STAFF)
+		else if (mflags & EF_SET_STAFF)
 		{
 			R_RocketTrail (oldorg, ent->origin,rt_setstaff);
 		}
-		else if (ent->model->flags & EF_MAGICMISSILE)
+		else if (mflags & EF_MAGICMISSILE)
 		{
 			if ((rand() & 3) < 1)
 				R_RocketTrail (oldorg, ent->origin, rt_magicmissile);
@@ -864,11 +868,11 @@ static void CL_RelinkEntities (void)
 			}
 #		endif
 		}
-		else if (ent->model->flags & EF_BONESHARD)
+		else if (mflags & EF_BONESHARD)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_boneshard);
 		}
-		else if (ent->model->flags & EF_SCARAB)
+		else if (mflags & EF_SCARAB)
 		{
 			R_RocketTrail (oldorg, ent->origin, rt_scarab);
 #		ifdef GLQUAKE
@@ -889,6 +893,7 @@ static void CL_RelinkEntities (void)
 			}
 #		endif
 		}
+		} /* end mflags block */
 
 		ent->forcelink = false;
 
