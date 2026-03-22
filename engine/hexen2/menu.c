@@ -1962,6 +1962,8 @@ enum
 	DISP_RESOLUTION,
 	DISP_MSAA,
 	DISP_VSYNC,
+	DISP_MAXFPS,
+	DISP_SHOWFPS,
 	DISP_TEXFILTER,
 	DISP_ANISOTROPY,
 	DISP_SEP2,		/* separator before apply */
@@ -2111,6 +2113,27 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_VSYNC:
 		VID_MenuAdjustVSync (dir);
 		break;
+	case DISP_MAXFPS:
+	{
+		static const int fps_steps[] = { 24, 30, 60, 72, 90, 120, 144, 0 };
+		int i, cur = (int)host_maxfps.value;
+		int num_steps = sizeof(fps_steps) / sizeof(fps_steps[0]);
+
+		/* find current position */
+		for (i = 0; i < num_steps; i++)
+		{
+			if (fps_steps[i] >= cur || fps_steps[i] == 0)
+				break;
+		}
+		i += dir;
+		if (i < 0) i = 0;
+		if (i >= num_steps) i = num_steps - 1;
+		Cvar_SetValue ("host_maxfps", fps_steps[i]);
+		break;
+	}
+	case DISP_SHOWFPS:
+		Cvar_Set ("showfps", Cvar_VariableValue("showfps") ? "0" : "1");
+		break;
 	case DISP_TEXFILTER:
 		VID_MenuAdjustTexFilter ();
 		break;
@@ -2232,6 +2255,15 @@ static void M_Display_Draw (void)
 		vsync = VID_MenuGetVSync ();
 		M_PrintWhite (220, 92 + 8*DISP_VSYNC,
 			vsync == -1 ? "Adaptive" : vsync ? "On" : "Off");
+
+		M_Print (76, 92 + 8*DISP_MAXFPS,	"FPS Limit     :");
+		if ((int)host_maxfps.value <= 0)
+			M_PrintWhite (220, 92 + 8*DISP_MAXFPS, "Unlimited");
+		else
+			M_PrintWhite (220, 92 + 8*DISP_MAXFPS, va("%d", (int)host_maxfps.value));
+
+		M_Print (76, 92 + 8*DISP_SHOWFPS,	"Show FPS      :");
+		M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
 
 		M_Print (76, 92 + 8*DISP_TEXFILTER,	"Textures      :");
 		M_PrintWhite (220, 92 + 8*DISP_TEXFILTER,
@@ -2463,8 +2495,6 @@ static void M_Sound_Key (int k)
 enum
 {
 	GAME_FOV = 0,
-	GAME_MAXFPS,
-	GAME_SHOWFPS,
 	GAME_ALWAYRUN,
 	GAME_MOUSESPEED,
 	GAME_INVMOUSE,
@@ -2497,27 +2527,6 @@ static void M_Game_AdjustSliders (int dir)
 		if (f < 60)	f = 60;
 		else if (f > 130) f = 130;
 		Cvar_SetValue ("fov", f);
-		break;
-	case GAME_MAXFPS:
-	{
-		static const int fps_steps[] = { 24, 30, 60, 72, 90, 120, 144, 0 };
-		int i, cur = (int)host_maxfps.value;
-		int num_steps = sizeof(fps_steps) / sizeof(fps_steps[0]);
-
-		/* find current position */
-		for (i = 0; i < num_steps; i++)
-		{
-			if (fps_steps[i] >= cur || fps_steps[i] == 0)
-				break;
-		}
-		i += dir;
-		if (i < 0) i = 0;
-		if (i >= num_steps) i = num_steps - 1;
-		Cvar_SetValue ("host_maxfps", fps_steps[i]);
-		break;
-	}
-	case GAME_SHOWFPS:
-		Cvar_Set ("showfps", Cvar_VariableValue("showfps") ? "0" : "1");
 		break;
 	case GAME_ALWAYRUN:
 		if (cl_forwardspeed.value > 200)
@@ -2568,15 +2577,6 @@ static void M_Game_Draw (void)
 	M_Print (76, 92 + 8*GAME_FOV,		"Field of View :");
 	r = (scr_fov.value - 60) / (130 - 60);
 	M_DrawSlider (220, 92 + 8*GAME_FOV, r);
-
-	M_Print (76, 92 + 8*GAME_MAXFPS,	"FPS Limit     :");
-	if ((int)host_maxfps.value <= 0)
-		M_PrintWhite (220, 92 + 8*GAME_MAXFPS, "Unlimited");
-	else
-		M_PrintWhite (220, 92 + 8*GAME_MAXFPS, va("%d", (int)host_maxfps.value));
-
-	M_Print (76, 92 + 8*GAME_SHOWFPS,	"Show FPS      :");
-	M_DrawCheckbox (220, 92 + 8*GAME_SHOWFPS, (int)Cvar_VariableValue("showfps"));
 
 	M_Print (76, 92 + 8*GAME_ALWAYRUN,	"Always Run    :");
 	M_DrawCheckbox (220, 92 + 8*GAME_ALWAYRUN, (cl_forwardspeed.value > 200));

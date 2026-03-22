@@ -7,7 +7,7 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs { inherit system; };
         pkgsCross64 = import nixpkgs {
@@ -17,7 +17,7 @@
           };
         };
 
-        version = "1.5.10-unstable-${self.lastModifiedDate or "2025-02-03"}";
+        version = "1.5.10-unstable-${self.lastModifiedDate}";
 
       in
       {
@@ -65,7 +65,7 @@
                 Note: This package only provides the game engine. You need the original
                 game data files (pak0.pak, pak1.pak) from the commercial game to play.
               '';
-              homepage = "https://uhexen2.sourceforge.net/";
+              homepage = "https://github.com/bobberb/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
               maintainers = [ ];
@@ -187,7 +187,7 @@
 
             meta = with pkgs.lib; {
               description = "Hammer of Thyrion - Hexen II source port (OpenGL, Windows 64-bit)";
-              homepage = "https://uhexen2.sourceforge.net/";
+              homepage = "https://github.com/bobberb/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.windows;
               maintainers = [ ];
@@ -198,7 +198,7 @@
           release = pkgs.runCommand "glhexen2-release-${version}" {
             meta = with pkgs.lib; {
               description = "Hammer of Thyrion - Multi-platform release bundle";
-              homepage = "https://uhexen2.sourceforge.net/";
+              homepage = "https://github.com/bobberb/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
             };
