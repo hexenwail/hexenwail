@@ -15,7 +15,6 @@ help:
 	@echo ""
 	@echo "CMake builds:"
 	@echo "  make build          - Build Linux version with CMake"
-	@echo "  make release        - Build all platforms with CMake (requires mingw-w64)"
 	@echo ""
 	@echo "Utility:"
 	@echo "  make clean          - Clean all build artifacts"
@@ -29,7 +28,7 @@ nix-build:
 	nix build .#default --print-build-logs
 
 nix-release:
-	./build-release.sh nix
+	nix build .#release --print-build-logs
 
 nix-linux:
 	nix build .#default --print-build-logs
@@ -50,9 +49,10 @@ build:
 	@echo ""
 	@echo "Build complete: engine/build/bin/glhexen2"
 
-# Multi-platform release
+# Release (use ./release.sh for tagged releases)
 release:
-	./build-release.sh cmake
+	@echo "Use ./release.sh <version-tag> to create a tagged release."
+	@echo "GitHub Actions will build and publish the release artifacts."
 
 # Clean
 clean:
