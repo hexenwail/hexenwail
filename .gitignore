@@ -2,3 +2,6 @@ all_output.txt
 result
 .flatpak-builder/
 audit.md
+engine/build/
+*.o
+*.d

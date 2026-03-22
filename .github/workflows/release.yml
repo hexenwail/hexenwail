@@ -20,6 +20,8 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
       - name: Build release binaries
         run: nix build .#release --print-build-logs
 
@@ -34,7 +36,8 @@ jobs:
 
       - name: Generate changelog
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # Find previous tag (skip current tag)
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${{ github.ref_name }}$" | head -1 || echo "")
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
             HEADER="## What's changed since $PREV_TAG"
@@ -47,7 +50,7 @@ jobs:
             echo ""
             echo "### Commits"
             echo ""
-            git log "$RANGE" --no-merges --format="- %s (\`%h\`)" | grep -v "Sync beads"
+            git log "$RANGE" --no-merges --format="- %s (\`%h\`)" | grep -v "Sync beads" || true
             echo ""
             echo "## Downloads"
             echo ""
