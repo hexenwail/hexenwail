@@ -335,30 +335,52 @@ void TimeBombTouch()
 	TimeBombExplode();
 }
 
+void TimeBombThink()
+{
+	vector	destination;
+
+	// orbit around spawn point, self.health stores spawn time
+	destination_x = self.o_angle_x + cos(time*200 + self.health*100) * 48;
+	destination_y = self.o_angle_y + sin(time*200 + self.health*100) * 48;
+	destination_z = self.o_angle_z + cos(time*300 + self.health*100) * 12;
+
+	self.origin = destination;
+
+	// explode after 5 seconds
+	if(time > self.health + 5.0)
+	{
+		TimeBombExplode();
+		return;
+	}
+	thinktime self : 0.05;
+}
+
 void Use_TimeBomb()
 {
 	makevectors(self.v_angle);
 	newmis=spawn();
 	newmis.owner=self;
 	newmis.classname="timebomb";
-	newmis.movetype=MOVETYPE_BOUNCE;
+	newmis.movetype=MOVETYPE_FLYMISSILE;
 	newmis.solid=SOLID_BBOX;
 	if(deathmatch&&!coop)
 		newmis.dmg=100;
 	else
 		newmis.dmg=75;
 	newmis.touch=TimeBombTouch;
-	newmis.avelocity=RandomVector('300 300 300');
+	newmis.angles_x=90;
+	newmis.avelocity_y=100;
 	newmis.skin=1;
 	newmis.drawflags(+)DRF_TRANSLUCENT|MLS_ABSLIGHT;
 	newmis.abslight=0.5;
-	newmis.velocity=normalize(v_forward)*700 + v_up*200;
-	newmis.angles=vectoangles(newmis.velocity);
 	setmodel (newmis, "models/glyphwir.mdl");
 	setsize(newmis,'0 0 0','0 0 0');
-	setorigin(newmis,self.origin+self.proj_ofs+v_forward*16);
-	newmis.think=TimeBombExplode;
-	thinktime newmis : 10;
+	// spawn in the air ahead of the player
+	newmis.o_angle=self.origin + v_forward*64 + '0 0 48';
+	setorigin(newmis,newmis.o_angle);
+	newmis.think=TimeBombThink;
+	thinktime newmis : 0.05;
+	newmis.health = time;
 }
 
 /*
