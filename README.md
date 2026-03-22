@@ -57,8 +57,10 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [ ] Square particle toggle (software renderer style)
 
 ### Plays nicely with mods
-- [x] Protocol auto-detection — default protocol 19 for base game, auto-upgrades to 21 for mods with extended builtins
+- [x] Protocol auto-detection (classic 15 / extended 19 / mod 21)
+- [x] Case-insensitive file lookups — Windows-built mods work on Linux
 - [x] Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box
+- [x] Bottom plaque centerprint — messages prefixed with `_` display as subtitles
 - [x] [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) per-entity model overrides (glow, spin, float, color)
 - [x] Extended QuakeC builtins for mod developers
 - [x] 8192 max entities (up from 2048)
@@ -71,10 +73,11 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Full engine reset on mod switch (filesystem, textures, lightmaps, command buffer)
 - [x] Config saved per-mod before switching — no bind bleed between mods
 - [x] `game <modname>` console command for runtime mod switching
+- [x] `-mod <name>` launch flag — sets game directory with portals in search path
 - [x] Intro cinematic link in main menu (opens in browser)
 
 ### Music and sound
-- [x] OGG, MP3, FLAC, WAV music playback (all codecs enabled by default)
+- [x] OGG, MP3, FLAC, WAV music playback (CD track fallback to `music/trackNN.ogg`)
 - [x] MIDI music via FluidSynth on Linux, native Windows MIDI
 - [x] Soundfont auto-detection (`snd_soundfont` cvar or `data1/soundfont.sf2`)
 - [x] 2048 sound channels — no more effects cutting out in busy scenes
@@ -117,6 +120,8 @@ nix build .#release    # All platforms
 ## Game data
 
 You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pak`). For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
+
+To launch a mod with portals data included: `glhexen2 -mod <modname>`
 
 ## License
 
