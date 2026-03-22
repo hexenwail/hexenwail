@@ -134,8 +134,9 @@ void R_LerpEntity (entity_t *e, vec3_t out_origin, vec3_t out_angles)
 	float	d;
 
 	// detect origin change (new physics tick updated this entity)
-	if (e->lerpflags & LERP_RESETMOVE)
+	if ((e->lerpflags & LERP_RESETMOVE) || e->movelerpstart == 0)
 	{
+		// first time or teleport: snap to current position
 		VectorCopy (e->origin, e->previousorigin);
 		VectorCopy (e->origin, e->currentorigin);
 		VectorCopy (e->angles, e->previousangles);
@@ -152,6 +153,16 @@ void R_LerpEntity (entity_t *e, vec3_t out_origin, vec3_t out_angles)
 		VectorCopy (e->currentangles, e->previousangles);
 		VectorCopy (e->angles, e->currentangles);
 		e->movelerpstart = cl.time;
+	}
+
+	// if entity hasn't moved, just use its current origin (no interpolation needed)
+	if (e->previousorigin[0] == e->currentorigin[0] &&
+	    e->previousorigin[1] == e->currentorigin[1] &&
+	    e->previousorigin[2] == e->currentorigin[2])
+	{
+		VectorCopy (e->origin, out_origin);
+		VectorCopy (e->angles, out_angles);
+		return;
 	}
 
 	blend = cl.lerpfrac;
