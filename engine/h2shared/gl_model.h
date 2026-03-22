@@ -437,11 +437,14 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 typedef struct {
 	qboolean	active;
 	int		ex_flags;
+	int		trail_flags;	// per-entity model flags (EF_ROCKET, EF_GIB, etc.)
+	qboolean	trail_override;	// true if trail_flags should replace model->flags
 	float		glow_settings[GLOW_SETTINGS_COUNT];
 } pimp_override_t;
 
 void R_ClearPimpOverrides (void);
 pimp_override_t *R_GetPimpOverride (int entnum);
+int R_GetEntityModelFlags (entity_t *e);
 
 // XF_ Extra model effects set by engine: qmodel_t->ex_flags
 // effects are model name dependent

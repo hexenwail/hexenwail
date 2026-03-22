@@ -622,7 +622,7 @@ static void M_Main_Draw (void)
 	M_DrawBigString (72, 60 + (6 * 20), "QUIT");
 
 	f = (int)(realtime * 10)%8;
-	M_DrawTransPic (43, 54 + m_main_cursor * 20,Draw_CachePic( va("gfx/menu/menudot%i.lmp", f+1 ) ) );
+	M_DrawTransPicCropped (43, 54 + m_main_cursor * 20, Draw_CachePic( va("gfx/menu/menudot%i.lmp", f+1 ) ) );
 }
 
 

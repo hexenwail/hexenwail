@@ -1086,6 +1086,10 @@ void Key_CharEvent (const char *text)
 		if (ch < 32 || ch > 127)
 			continue;
 
+		/* don't insert the console toggle key as text input */
+		if ((ch == '`' || ch == '~') && key_dest == key_console)
+			continue;
+
 		if (key_dest == key_console)
 		{
 			workline = key_lines[edit_line];

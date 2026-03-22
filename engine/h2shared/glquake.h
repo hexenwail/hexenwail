@@ -326,6 +326,7 @@ void R_DrawSkyChain (msurface_t *s);
 void R_DrawWaterSurfaces (void);
 
 int R_GetPimpFlags (entity_t *e, float **gsettings_out);
+int R_GetEntityModelFlags (entity_t *e);
 
 void R_RenderDlights (void);
 void R_MarkLights (dlight_t *light, int bit, mnode_t *node);

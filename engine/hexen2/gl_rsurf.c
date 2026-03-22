@@ -410,7 +410,7 @@ static void DrawGLWaterPoly (glpoly_t *p)
 	vec3_t	nv;
 
 	GL_ImmBegin ();
-	GL_ImmColor4f (1, 1, 1, 1);
+	/* color inherited from caller (R_RenderBrushPoly sets intensity/alpha) */
 	v = p->verts[0];
 	for (i = 0; i < p->numverts; i++, v+= VERTEXSIZE)
 	{
@@ -438,7 +438,7 @@ static void DrawGLWaterPolyMTexLM (glpoly_t *p)
 	vec3_t	nv;
 
 	GL_ImmBegin ();
-	GL_ImmColor4f (1, 1, 1, 1);
+	/* color inherited from caller (R_RenderBrushPoly sets intensity/alpha) */
 	v = p->verts[0];
 	for (i = 0; i < p->numverts; i++, v+= VERTEXSIZE)
 	{
@@ -471,7 +471,7 @@ static void DrawGLPoly (glpoly_t *p)
 	float	*v;
 
 	GL_ImmBegin ();
-	GL_ImmColor4f (1, 1, 1, 1);
+	/* color inherited from caller (R_RenderBrushPoly sets intensity/alpha) */
 	v = p->verts[0];
 	for (i = 0; i < p->numverts; i++, v+= VERTEXSIZE)
 	{
@@ -487,7 +487,7 @@ static void DrawGLPolyMTex (glpoly_t *p)
 	float	*v;
 
 	GL_ImmBegin ();
-	GL_ImmColor4f (1, 1, 1, 1);
+	/* color inherited from caller (R_RenderBrushPoly sets intensity/alpha) */
 	v = p->verts[0];
 	for (i = 0; i < p->numverts; i++, v+= VERTEXSIZE)
 	{
@@ -1430,6 +1430,8 @@ void GL_BuildLightmaps (void)
 	qmodel_t	*m;
 
 	memset (allocated, 0, sizeof(allocated));
+	memset (lightmap_modified, 0, sizeof(lightmap_modified));
+	memset (lightmap_polys, 0, sizeof(lightmap_polys));
 
 	r_framecount = 1;		// no dlightcache
 
