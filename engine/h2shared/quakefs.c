@@ -26,6 +26,9 @@
 #ifdef PLATFORM_WINDOWS
 #include <io.h>
 #endif
+#ifndef PLATFORM_WINDOWS
+#include <dirent.h>
+#endif
 #include "filenames.h"
 #include "hashindex.h"
 
@@ -330,7 +333,7 @@ static pack_t *FS_LoadPackFile (const char *packfile, int paknum, qboolean base_
 		qerr_strlcpy(__thisfunc__, __LINE__, newfiles[i].name, info[i].name, MAX_QPATH);
 		newfiles[i].filepos = LittleLong(info[i].filepos);
 		newfiles[i].filelen = LittleLong(info[i].filelen);
-		key = Hash_GenerateKeyString (&pack->hash, newfiles[i].name, true);
+		key = Hash_GenerateKeyString (&pack->hash, newfiles[i].name, false);
 		Hash_Add (&pack->hash, key, i);
 	}
 
@@ -755,6 +758,73 @@ int FS_CreatePath (char *path)
 
 /*
 ===========
+FS_ResolveCasePath
+
+On case-sensitive filesystems (Linux), resolve a path with case-insensitive
+matching. Walks each component of relpath under basedir, scanning directories
+for case-insensitive matches. Returns true and writes result to resolved
+(size MAX_OSPATH) on success.
+===========
+*/
+#ifndef PLATFORM_WINDOWS
+static qboolean FS_ResolveCasePath (const char *basedir, const char *relpath, char *resolved)
+{
+	char		buf[MAX_OSPATH];
+	const char	*p, *end;
+	DIR		*dir;
+	struct dirent	*ent;
+
+	q_strlcpy (buf, basedir, sizeof(buf));
+
+	p = relpath;
+	while (*p)
+	{
+		/* extract next path component */
+		end = p;
+		while (*end && *end != '/')
+			end++;
+
+		dir = opendir (buf);
+		if (!dir)
+			return false;
+
+		{
+			char component[MAX_QPATH];
+			size_t len = end - p;
+			qboolean found = false;
+
+			if (len >= sizeof(component))
+				len = sizeof(component) - 1;
+			memcpy (component, p, len);
+			component[len] = '\0';
+
+			while ((ent = readdir(dir)) != NULL)
+			{
+				if (!q_strcasecmp(ent->d_name, component))
+				{
+					q_strlcat (buf, "/", sizeof(buf));
+					q_strlcat (buf, ent->d_name, sizeof(buf));
+					found = true;
+					break;
+				}
+			}
+			closedir (dir);
+			if (!found)
+				return false;
+		}
+
+		p = end;
+		if (*p == '/')
+			p++;
+	}
+
+	q_strlcpy (resolved, buf, MAX_OSPATH);
+	return true;
+}
+#endif
+
+/*
+===========
 FS_OpenFile_Internal
 
 Internal function - finds the file in the search path, returns fs_filesize.
@@ -776,10 +846,10 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 		if (search->pack)	/* look through all the pak file elements */
 		{
 			pak = search->pack;
-			key = Hash_GenerateKeyString (&pak->hash, filename, true);
+			key = Hash_GenerateKeyString (&pak->hash, filename, false);
 			for (i = Hash_First(&pak->hash, key); i != -1; i = Hash_Next(&pak->hash, i))
 			{
-				if (strcmp(pak->files[i].name, filename) != 0)
+				if (q_strcasecmp(pak->files[i].name, filename) != 0)
 					continue;
 				/* found it! */
 				fs_filesize = pak->files[i].filelen;
@@ -800,6 +870,13 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 		{
 			q_snprintf (ospath, sizeof(ospath), "%s/%s",search->filename, filename);
 			fs_filesize = Sys_filesize (ospath);
+#ifndef PLATFORM_WINDOWS
+			if (fs_filesize < 0)
+			{	/* case-insensitive fallback for loose files */
+				if (FS_ResolveCasePath (search->filename, filename, ospath))
+					fs_filesize = Sys_filesize (ospath);
+			}
+#endif
 			if (fs_filesize < 0)
 				continue;
 			if (path_id)
