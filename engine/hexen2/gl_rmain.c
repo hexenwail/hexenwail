@@ -110,6 +110,7 @@ cvar_t	gl_nocolors = {"gl_nocolors", "0", CVAR_NONE};
 cvar_t	gl_keeptjunctions = {"gl_keeptjunctions", "1", CVAR_ARCHIVE};
 cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
+cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_NONE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_NONE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_NONE};
