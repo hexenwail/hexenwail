@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Build release binaries
+        run: nix build .#release --print-build-logs
+
+      - name: Package
+        run: |
+          cd result/release
+          zip -r ../../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
+            linux-x86_64/ licenses/ BUILD_INFO.txt
+          zip -r ../../hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
+            windows-x86_64/ licenses/ BUILD_INFO.txt
+
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+            HEADER="## What's changed since $PREV_TAG"
+          else
+            RANGE="HEAD"
+            HEADER="## Initial release"
+          fi
+          {
+            echo "$HEADER"
+            echo ""
+            echo "### Commits"
+            echo ""
+            git log "$RANGE" --no-merges --format="- %s (\`%h\`)" | grep -v "Sync beads"
+            echo ""
+            echo "## Downloads"
+            echo ""
+            echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
+            echo "- **Windows x86_64** — extract all files to your Hexen II directory, run \`glh2.exe\`"
+            echo ""
+            echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
+            echo ""
+            echo "**Requirements:** OpenGL 4.3 capable GPU (2012+)"
+          } > release_notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --prerelease \
+            --title "${{ github.ref_name }}" \
+            --notes-file release_notes.md \
+            hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
+            hexenwail-${{ github.ref_name }}-windows-x86_64.zip
