@@ -742,7 +742,16 @@ static void CL_ParseUpdate (int bits)
 	}
 
 	if (bits & U_FRAME)
-		set_ent->frame = ent->frame = MSG_ReadByte ();
+	{
+		int newframe = MSG_ReadByte ();
+		if (newframe != ent->frame)
+		{
+			ent->previouspose = ent->frame;
+			ent->lerpstart = cl.time;
+			ent->lerptime = 0.1f;
+		}
+		set_ent->frame = ent->frame = newframe;
+	}
 	else	ent->frame = ref_ent->frame;
 
 	if (bits & U_COLORMAP)

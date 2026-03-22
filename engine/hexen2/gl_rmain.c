@@ -53,6 +53,7 @@ qboolean	mirror;
 mplane_t	*mirror_plane;
 
 static float	model_constant_alpha;
+static qboolean	model_fullbright_pass;	// true during fullbright overlay pass
 
 static float	r_time1;
 static float	r_lasttime1 = 0;
@@ -502,19 +503,30 @@ static int	lastposenum;
 GL_DrawAliasFrame
 =============
 */
-static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum)
+static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, int prevposenum, float lerpfrac)
 {
 	float		l;
-	trivertx_t	*verts;
+	trivertx_t	*verts, *verts_prev;
 	int		*order;
 	int		count;
 	float		r, g, b;
 	byte		ColorShade;
+	qboolean	do_lerp;
 
 	lastposenum = posenum;
 
 	verts = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
 	verts += posenum * paliashdr->poseverts;
+
+	do_lerp = (lerpfrac > 0.0f && lerpfrac < 1.0f && prevposenum != posenum);
+	if (do_lerp)
+	{
+		verts_prev = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+		verts_prev += prevposenum * paliashdr->poseverts;
+	}
+	else
+		verts_prev = NULL;
+
 	order = (int *)((byte *)paliashdr + paliashdr->commands);
 
 	ColorShade = e->colorshade;
@@ -554,7 +566,11 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum)
 
 			// normals and vertexes come from the frame list
 
-			if (gl_lightmap_format == GL_RGBA)
+			if (model_fullbright_pass)
+			{
+				GL_ImmColor4f (1, 1, 1, 1);
+			}
+			else if (gl_lightmap_format == GL_RGBA)
 			{
 				l = shadedots[verts->lightnormalindex];
 				GL_ImmColor4f (l * lightcolor[0], l * lightcolor[1], l * lightcolor[2], model_constant_alpha);
@@ -565,7 +581,18 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum)
 				GL_ImmColor4f (r*l, g*l, b*l, model_constant_alpha);
 			}
 
-			GL_ImmVertex3f (verts->v[0], verts->v[1], verts->v[2]);
+			if (do_lerp)
+			{
+				GL_ImmVertex3f (
+					verts_prev->v[0] + (verts->v[0] - verts_prev->v[0]) * lerpfrac,
+					verts_prev->v[1] + (verts->v[1] - verts_prev->v[1]) * lerpfrac,
+					verts_prev->v[2] + (verts->v[2] - verts_prev->v[2]) * lerpfrac);
+				verts_prev++;
+			}
+			else
+			{
+				GL_ImmVertex3f (verts->v[0], verts->v[1], verts->v[2]);
+			}
 			verts++;
 		} while (--count);
 
@@ -658,8 +685,8 @@ R_SetupAliasFrame
 */
 static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 {
-	int	pose, numposes, frame;
-	float		interval;
+	int	pose, prevpose, numposes, frame, prevframe;
+	float	interval, lerpfrac;
 
 	frame = e->frame;
 	if ((frame >= paliashdr->numframes) || (frame < 0))
@@ -677,7 +704,45 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 		pose += (int)(cl.time / interval) % numposes;
 	}
 
-	GL_DrawAliasFrame (e, paliashdr, pose);
+	/* Calculate animation interpolation */
+	prevframe = e->previouspose;
+	lerpfrac = 0.0f;
+
+	if ((e->lerpflags & LERP_RESETANIM) || model_fullbright_pass)
+	{
+		/* Skip animation lerp after teleport or during fullbright pass */
+		if (e->lerpflags & LERP_RESETANIM)
+		{
+			e->lerpflags &= ~LERP_RESETANIM;
+			e->lerptime = 0;
+		}
+	}
+	else if (e->lerptime > 0 && prevframe != frame &&
+	    prevframe >= 0 && prevframe < paliashdr->numframes)
+	{
+		float elapsed = cl.time - e->lerpstart;
+		lerpfrac = elapsed / e->lerptime;
+		if (lerpfrac >= 1.0f)
+			lerpfrac = 0.0f;	/* lerp complete, use current frame */
+		else
+			lerpfrac = 1.0f - lerpfrac; /* invert: 1=prev, 0=current */
+	}
+
+	if (lerpfrac > 0.0f)
+	{
+		prevpose = paliashdr->frames[prevframe].firstpose;
+		numposes = paliashdr->frames[prevframe].numposes;
+		if (numposes > 1)
+		{
+			interval = paliashdr->frames[prevframe].interval;
+			prevpose += (int)(e->lerpstart / interval) % numposes;
+		}
+		GL_DrawAliasFrame (e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
+	}
+	else
+	{
+		GL_DrawAliasFrame (e, paliashdr, pose, pose, 0.0f);
+	}
 }
 
 
@@ -984,6 +1049,34 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 
 	R_SetupAliasFrame (e, paliashdr);
+
+	// Fullbright pass: render fullbright pixels with additive blending
+	if (skinnum < 100)	// only for standard model skins
+	{
+		int anim_fb = (int)(cl.time*10) & 3;
+		GLuint fb_tex;
+
+		if (skinnum >= paliashdr->numskins || skinnum < 0)
+			skinnum = 0;
+		fb_tex = paliashdr->gl_fb_texturenum[skinnum][anim_fb];
+
+		if (fb_tex && !r_fullbright.integer)
+		{
+			GL_Bind(fb_tex);
+			glEnable_fp (GL_BLEND);
+			glBlendFunc_fp (GL_ONE, GL_ONE);	// additive
+			glDepthMask_fp (0);
+			GL_SetAlphaThreshold(0.01f);
+
+			model_fullbright_pass = true;
+			R_SetupAliasFrame (e, paliashdr);
+			model_fullbright_pass = false;
+
+			glDepthMask_fp (1);
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDisable_fp (GL_BLEND);
+		}
+	}
 
 // restore params
 

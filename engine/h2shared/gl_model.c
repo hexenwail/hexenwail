@@ -2276,6 +2276,52 @@ static void Mod_FloodFillSkin (byte *skin, int skinwidth, int skinheight)
 
 /*
 ===============
+Mod_LoadFullbrightTexture
+
+Creates a fullbright mask texture from indexed skin data.
+Pixels with palette index >= vid.fullbright (typically 224) are kept,
+all others become transparent. Returns 0 if no fullbright pixels found.
+===============
+*/
+static GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width, int height)
+{
+	int	i, j, s;
+	byte	*fbdata;
+	qboolean has_fb = false;
+
+	s = width * height;
+
+	/* Quick scan: any fullbright pixels? */
+	for (i = 0; i < s; i++)
+	{
+		if (data[i] >= vid.fullbright && data[i] < 255)
+		{
+			has_fb = true;
+			break;
+		}
+	}
+
+	if (!has_fb)
+		return 0;
+
+	/* Build fullbright mask: keep fullbright pixels, make others index 255 (transparent) */
+	j = Hunk_LowMark();
+	fbdata = (byte *) Hunk_AllocName(s, "fb_skin");
+	for (i = 0; i < s; i++)
+	{
+		if (data[i] >= vid.fullbright && data[i] < 255)
+			fbdata[i] = data[i];
+		else
+			fbdata[i] = 255;	/* transparent */
+	}
+
+	i = GL_LoadTexture (name, fbdata, width, height, TEX_MIPMAP | TEX_ALPHA);
+	Hunk_FreeToLowMark(j);
+	return i;
+}
+
+/*
+===============
 Mod_LoadAllSkins
 ===============
 */
@@ -2379,6 +2425,10 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			pheader->gl_texturenum[i][2] =
 			pheader->gl_texturenum[i][3] = GL_LoadTexture (name, external_skin,
 							ext_width, ext_height, skin_tex_mode);
+			pheader->gl_fb_texturenum[i][0] =
+			pheader->gl_fb_texturenum[i][1] =
+			pheader->gl_fb_texturenum[i][2] =
+			pheader->gl_fb_texturenum[i][3] = 0;
 			free(external_skin);
 		}
 		else
@@ -2389,6 +2439,18 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			pheader->gl_texturenum[i][2] =
 			pheader->gl_texturenum[i][3] = GL_LoadTexture (name, (byte *)(pskintype + 1),
 							pheader->skinwidth, pheader->skinheight, tex_mode);
+
+			// Load fullbright mask texture for glow pixels (palette 224-255)
+			{
+				char fbname[MAX_QPATH];
+				q_snprintf (fbname, sizeof(fbname), "%s_fb", name);
+				pheader->gl_fb_texturenum[i][0] =
+				pheader->gl_fb_texturenum[i][1] =
+				pheader->gl_fb_texturenum[i][2] =
+				pheader->gl_fb_texturenum[i][3] = Mod_LoadFullbrightTexture (fbname,
+								(byte *)(pskintype + 1),
+								pheader->skinwidth, pheader->skinheight);
+			}
 		}
 		pskintype = (daliasskintype_t *)((byte *)(pskintype+1) + s);
 

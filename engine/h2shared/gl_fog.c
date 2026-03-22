@@ -300,7 +300,7 @@ called at the beginning of each frame — updates globals read by shaders
 void Fog_SetupFrame (void)
 {
 	float *c = Fog_GetColor();
-	r_fog_density = Fog_GetDensity() / 64.0;
+	r_fog_density = Fog_GetDensity();
 	r_fog_color[0] = c[0];
 	r_fog_color[1] = c[1];
 	r_fog_color[2] = c[2];
