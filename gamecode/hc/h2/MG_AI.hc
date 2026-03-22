@@ -127,10 +127,11 @@ float okay;
 	{
 		if(found!=self)
 			if(found.flags2&FL_ALIVE)
-				if(visible(found))
-					if(found!=self.controller)
-						if(found.controller!=self.controller)
-						{
+				if(!(found.flags & FL_NOTARGET))
+					if(visible(found))
+						if(found!=self.controller)
+							if(found.controller!=self.controller)
+							{
 							if(coop)
 							{
 								if(found.classname!="player")

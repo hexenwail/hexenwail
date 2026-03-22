@@ -129,7 +129,7 @@ void artifact_touch()
 	}
 	else if(self.classname == "art_sword_and_crown"&&other.team==2)
 	{
-		sound(self,CHAN_AUTO,"crusader/Lghtn2.mdl",1,ATTN_NONE);
+		sound(self,CHAN_AUTO,"crusader/lghtn2.wav",1,ATTN_NONE);
 		centerprint(other,"You are victorious!\n");
 		bprint(other.netname);
 		bprint(" has captured the Crown!\n");

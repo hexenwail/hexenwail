@@ -241,6 +241,7 @@ entity missile;
 	missile.movetype=MOVETYPE_FLYMISSILE;
 	missile.solid=SOLID_BBOX;
 	missile.health=25;
+	missile.dmg=50;
 	missile.takedamage=DAMAGE_YES;
 
 	missile.th_die=TripDie;

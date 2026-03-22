@@ -74,6 +74,8 @@ float move_cnt;
 		sound (newmis, CHAN_VOICE, "imp/upbig.wav", 1, ATTN_NORM);
 		setorigin(self,self.origin-'0 0 42');
 		BecomeExplosion(CE_FLOOR_EXPLOSION);
+		newmis.hull=HULL_HYDRA;
+		newmis.solid=SOLID_SLIDEBOX;
 	}
 	else
 	{
@@ -319,7 +321,7 @@ void Use_Proximity_Mine ()
 UseTimebomb
 ============
 */
-void TimeBombBoom()
+void TimeBombExplode()
 {
 	sound(self,CHAN_AUTO,"misc/warning.wav",1,ATTN_NORM);
 	DarkExplosion();
@@ -327,34 +329,36 @@ void TimeBombBoom()
 
 void TimeBombTouch()
 {
-	if(!other.takedamage)
+	if((other == self.owner)||(other == world)||(!(other.takedamage)))
 		return;
-	self.dmg/=2;
-	T_Damage(other,self,self.owner,self.dmg);
-	TimeBombBoom();
+
+	TimeBombExplode();
 }
 
 void Use_TimeBomb()
 {
+	makevectors(self.v_angle);
 	newmis=spawn();
 	newmis.owner=self;
 	newmis.classname="timebomb";
+	newmis.movetype=MOVETYPE_BOUNCE;
 	newmis.solid=SOLID_BBOX;
 	if(deathmatch&&!coop)
 		newmis.dmg=100;
 	else
 		newmis.dmg=75;
 	newmis.touch=TimeBombTouch;
-	newmis.angles_x=90;
-	newmis.avelocity_y=100;
+	newmis.avelocity=RandomVector('300 300 300');
 	newmis.skin=1;
 	newmis.drawflags(+)DRF_TRANSLUCENT|MLS_ABSLIGHT;
 	newmis.abslight=0.5;
+	newmis.velocity=normalize(v_forward)*700 + v_up*200;
+	newmis.angles=vectoangles(newmis.velocity);
 	setmodel (newmis, "models/glyphwir.mdl");
 	setsize(newmis,'0 0 0','0 0 0');
-	setorigin(newmis,self.origin+self.proj_ofs);
-	newmis.think=TimeBombBoom;
-	thinktime newmis : 0.75;
+	setorigin(newmis,self.origin+self.proj_ofs+v_forward*16);
+	newmis.think=TimeBombExplode;
+	thinktime newmis : 10;
 }
 
 /*
@@ -368,6 +372,8 @@ void UseBlast (void)
 	entity  victim;
 	float v_length,push,percent,points,inertia;
 	
+	// decrement first - doing damage can trigger explosion and kill us
+	self.cnt_blast -= 1;
 	victim = findradius( self.origin, BLAST_RADIUS*2);
 	self.safe_time=time+7;
 
@@ -487,7 +493,6 @@ void UseBlast (void)
 		victim = victim.chain;
 	}
 
-	self.cnt_blast -= 1;
 }
 
 void UseInvincibility (void)

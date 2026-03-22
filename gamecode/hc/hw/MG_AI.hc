@@ -130,11 +130,12 @@ float okay;
 	while(found!=world)
 	{
 		if(found.flags2&FL_ALIVE)
-			if(found!=self)
-				if(found!=self.controller)
-					if(found.controller!=self.controller)
-						if(visible(found))
-						{
+			if(!(found.flags & FL_NOTARGET))
+				if(found!=self)
+					if(found!=self.controller)
+						if(found.controller!=self.controller)
+							if(visible(found))
+							{
 							if(coop)
 							{
 								if(found.classname!="player")

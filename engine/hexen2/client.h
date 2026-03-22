@@ -73,7 +73,7 @@ typedef struct
 	char		map[MAX_STYLESTRING];
 } lightstyle_t;
 
-#define	MAX_EFRAGS		8192
+#define	MAX_EFRAGS		32768
 
 #define	MAX_MAPSTRING		2048
 #define	MAX_DEMOS		8
@@ -285,7 +285,7 @@ extern	cvar_t	m_forward;
 extern	cvar_t	m_side;
 
 
-#define	MAX_STATIC_ENTITIES	256		// torches, etc
+#define	MAX_STATIC_ENTITIES	2048		// torches, etc
 
 extern	client_state_t	cl;
 
