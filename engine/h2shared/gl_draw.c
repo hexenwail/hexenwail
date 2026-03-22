@@ -818,8 +818,8 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 	gl = (glpic_t *)pic->data;
 	GL_Bind (gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
@@ -936,8 +936,8 @@ void Draw_IntermissionPic (qpic_t *pic)
 	gl = (glpic_t *)pic->data;
 	GL_Bind (gl->texnum);
 
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
