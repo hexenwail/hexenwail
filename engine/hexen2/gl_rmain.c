@@ -1086,9 +1086,14 @@ static void R_DrawEntitiesOnList (void)
 	// draw sprites seperately, because of alpha blending
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
+		vec3_t	save_origin, save_angles;
+
 		e = cl_visedicts[i];
 
 		// render-time interpolation: smooth entity between physics ticks
+		// save physics origin so R_LerpEntity change detection isn't corrupted
+		VectorCopy (e->origin, save_origin);
+		VectorCopy (e->angles, save_angles);
 		R_LerpEntity (e, e->origin, e->angles);
 
 		// chase-cam pitch adj. by FrikaC
@@ -1128,6 +1133,10 @@ static void R_DrawEntitiesOnList (void)
 			else
 				cl_transwateredicts[cl_numtranswateredicts++].ent = e;
 		}
+
+		// restore physics origin so interpolation detection works next frame
+		VectorCopy (save_origin, e->origin);
+		VectorCopy (save_angles, e->angles);
 	}
 }
 
@@ -1172,7 +1181,14 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 	glDepthMask_fp(0);
 	for (i = 0; i < numents; i++)
 	{
+		vec3_t	save_origin, save_angles;
+
 		e = theents[i].ent;
+
+		// render-time interpolation for transparent entities
+		VectorCopy (e->origin, save_origin);
+		VectorCopy (e->angles, save_angles);
+		R_LerpEntity (e, e->origin, e->angles);
 
 		switch (e->model->type)
 		{
@@ -1201,6 +1217,9 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 			R_DrawSpriteModel (e);
 			break;
 		}
+
+		VectorCopy (save_origin, e->origin);
+		VectorCopy (save_angles, e->angles);
 	}
 
 	if (!depthMaskWrite)
