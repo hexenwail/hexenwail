@@ -879,60 +879,47 @@ SCR_ScreenShot_f
 ==================
 */
 #if !defined(H2W)
-static const char scr_shotbase[] = "shots/hexen00.tga";
-#define SHOTNUM_POS 11
+static const char scr_shotprefix[] = "shots/hexen";
 #else
-static const char scr_shotbase[] = "shots/hw00.tga";
-#define SHOTNUM_POS 8
+static const char scr_shotprefix[] = "shots/hw";
 #endif
+
 static void SCR_ScreenShot_f (void)
 {
-	char	pcxname[80];
-	char	checkname[MAX_OSPATH];
+	char	filename[80];
+	char	fullpath[MAX_OSPATH];
 	int	i, size, temp;
-	qboolean	freebuf = false;
 	byte	*buffer;
 
-	FS_MakePath_BUF (FS_USERDIR, NULL, checkname, sizeof(checkname), "shots");
-	Sys_mkdir (checkname, false);
-	// find a slot to save it to
-	q_strlcpy (pcxname, scr_shotbase, sizeof(pcxname));
-	for (i = 0; i <= 99; i++)
+	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), "shots");
+	Sys_mkdir (fullpath, false);
+
+	/* Find next available slot (0-9999, up from old limit of 99) */
+	for (i = 0; i <= 9999; i++)
 	{
-		pcxname[SHOTNUM_POS+0] = i/10 + '0';
-		pcxname[SHOTNUM_POS+1] = i%10 + '0';
-		FS_MakePath_BUF (FS_USERDIR, NULL, checkname, sizeof(checkname), pcxname);
-		if (Sys_FileType(checkname) == FS_ENT_NONE)
-			break;	// file doesn't exist
+		q_snprintf (filename, sizeof(filename), "%s%04d.tga", scr_shotprefix, i);
+		FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
+		if (Sys_FileType(fullpath) == FS_ENT_NONE)
+			break;
 	}
-	if (i == 100)
-	{
-		Con_Printf ("%s: Couldn't create a TGA file\n", __thisfunc__);
-		return;
-	}
+	if (i > 9999) { Con_Printf ("Screenshot: too many files\n"); return; }
 
 	size = glwidth * glheight * 3 + 18;
-	buffer = (byte *) Hunk_TempAlloc(size);
-	if (!buffer) {
-		buffer = (byte *) malloc(size);
-		if (!buffer) {
-			Con_Printf("%s: not enough memory\n", __thisfunc__);
-			return;
-		}
-		freebuf = true;
-	}
+	buffer = (byte *) malloc(size);
+	if (!buffer) { Con_Printf("Screenshot: out of memory\n"); return; }
+
 	memset (buffer, 0, 18);
-	buffer[2] = 2;		// uncompressed type
+	buffer[2] = 2;		/* uncompressed type */
 	buffer[12] = glwidth & 255;
 	buffer[13] = glwidth >> 8;
 	buffer[14] = glheight & 255;
 	buffer[15] = glheight >> 8;
-	buffer[16] = 24;	// pixel size
+	buffer[16] = 24;	/* pixel size */
 
-	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);/* for widths that aren't a multiple of 4 */
+	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
 	glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer+18);
 
-	// swap rgb to bgr
+	/* swap rgb to bgr */
 	for (i = 18; i < size; i += 3)
 	{
 		temp = buffer[i];
@@ -940,12 +927,12 @@ static void SCR_ScreenShot_f (void)
 		buffer[i+2] = temp;
 	}
 
-	i = FS_WriteFile (pcxname, buffer, size);
-
-	if (freebuf) free(buffer);
+	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
+	i = FS_WriteFile (filename, buffer, size);
+	free(buffer);
 
 	if (i == 0)
-		Con_Printf ("Wrote %s\n", pcxname);
+		Con_Printf ("Wrote %s\n", filename);
 }
 
 //=============================================================================

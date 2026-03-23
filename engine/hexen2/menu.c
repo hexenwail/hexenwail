@@ -3111,6 +3111,10 @@ static const char *bindnames[][2] =
 	{"+attack",		"attack"},
 	{"impulse 10",		"next weapon"},
 	{"impulse 12",		"prev.weapon"},
+	{"impulse 1",		"weapon 1"},
+	{"impulse 2",		"weapon 2"},
+	{"impulse 3",		"weapon 3"},
+	{"impulse 4",		"weapon 4"},
 	{"+jump",		"jump / swim up"},
 	{"+forward",		"walk forward"},
 	{"+back",		"backpedal"},
@@ -3228,6 +3232,25 @@ static void M_Keys_Draw (void)
 		M_DrawCharacter (6, 80, 128);
 	if (keys_top + KEYS_SIZE < (int)NUMCOMMANDS)
 		M_DrawCharacter (6, 80 + ((KEYS_SIZE-1)*8), 129);
+
+	/* Proportional scrollbar on right edge */
+	if ((int)NUMCOMMANDS > KEYS_SIZE)
+	{
+		int track_y = 80;
+		int track_h = KEYS_SIZE * 8;
+		int thumb_h = (KEYS_SIZE * track_h) / (int)NUMCOMMANDS;
+		int thumb_y = track_y + (keys_top * track_h) / (int)NUMCOMMANDS;
+		int j;
+		if (thumb_h < 8) thumb_h = 8;
+		for (j = 0; j < track_h; j += 8)
+		{
+			int cy = track_y + j;
+			if (cy >= thumb_y && cy < thumb_y + thumb_h)
+				M_DrawCharacter (308, cy, 11);	/* solid block */
+			else
+				M_DrawCharacter (308, cy, '-');	/* track dash */
+		}
+	}
 
 // search for known bindings
 	for (i = 0; i < KEYS_SIZE; i++)
