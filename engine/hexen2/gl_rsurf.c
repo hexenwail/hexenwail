@@ -1089,9 +1089,12 @@ static void DrawTextureChains (entity_t *e)
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
 						/* Flush batch before falling back */
-						if (ndraw > 0 && glMultiDrawArrays_fp)
+						if (ndraw > 0)
 						{
-							glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
+							if (glMultiDrawArrays_fp)
+								glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
+							else for (i = 0; i < ndraw; i++)
+								glDrawArrays_fp(GL_TRIANGLES, multidraw_first[i], multidraw_count[i]);
 							ndraw = 0;
 						}
 						glBindVertexArray_fp(0);
@@ -1122,17 +1125,23 @@ static void DrawTextureChains (entity_t *e)
 				}
 
 				/* Flush remaining batch */
-				if (ndraw > 0 && glMultiDrawArrays_fp)
-					glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
+				if (ndraw > 0)
+				{
+					if (glMultiDrawArrays_fp)
+						glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
+					else for (i = 0; i < ndraw; i++)
+						glDrawArrays_fp(GL_TRIANGLES, multidraw_first[i], multidraw_count[i]);
+				}
 				}
 
 				glBindVertexArray_fp(0);
 				glUseProgram_fp(0);
 
-				/* Restore normal 2D texture target on unit 1 */
+				/* Restore GL state for subsequent rendering */
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+				currenttexture = GL_UNUSED_TEXTURE; /* force rebind */
 			}
 		}
 
