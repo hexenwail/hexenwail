@@ -96,6 +96,10 @@ cvar_t	r_wateralpha = {"r_wateralpha", "0.33", CVAR_ARCHIVE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};
 cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};
+cvar_t	r_viewmodel_fov = {"r_viewmodel_fov", "0", CVAR_ARCHIVE};
+cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
+cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
+cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
@@ -1657,9 +1661,35 @@ static void R_DrawViewModel (void)
 
 	// hack the depth range to prevent view model from poking into walls
 	glDepthRange_fp (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
+
+	/* override projection for weapon FOV if set */
+	if (r_viewmodel_fov.value > 0)
+	{
+		float fov = r_viewmodel_fov.value;
+		float aspect = (float)r_refdef.vrect.width / (float)r_refdef.vrect.height;
+		GLdouble xmax, ymax;
+		if (fov < 30) fov = 30;
+		if (fov > 170) fov = 170;
+		ymax = 4.0 * tan(fov * M_PI / 360.0);
+		xmax = ymax * aspect;
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_PushMatrix();
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, 4.0, 16384);
+		GL_MatrixMode(GL_MAT_MODELVIEW);
+	}
+
 	AlwaysDrawModel = true;
 	R_DrawAliasModel (e);
 	AlwaysDrawModel = false;
+
+	if (r_viewmodel_fov.value > 0)
+	{
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_PopMatrix();
+		GL_MatrixMode(GL_MAT_MODELVIEW);
+	}
+
 	glDepthRange_fp (gldepthmin, gldepthmax);
 }
 

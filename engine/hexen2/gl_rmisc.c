@@ -244,6 +244,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_farclip);
+	Cvar_RegisterVariable (&r_viewmodel_fov);
+	Cvar_RegisterVariable (&r_lavaalpha);
+	Cvar_RegisterVariable (&r_slimealpha);
+	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_wholeframe);
