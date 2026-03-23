@@ -34,6 +34,7 @@ enum m_state_e
 	m_net,
 	m_options,
 	m_display,
+	m_rendering,
 	m_sound,
 	m_game,
 	m_video,

@@ -1829,6 +1829,11 @@ static void M_Menu_Game_f (void);
 static void M_Game_Draw (void);
 static void M_Game_Key (int k);
 
+// prototypes for the rendering submenu
+static void M_Menu_Rendering_f (void);
+static void M_Rendering_Draw (void);
+static void M_Rendering_Key (int k);
+
 // prototypes for the gamepad menu
 static void M_Menu_Gamepad_f (void);
 static void M_Gamepad_Draw (void);
@@ -1953,11 +1958,7 @@ enum
 	DISP_SCALE,
 #endif
 	DISP_SCRSIZE,
-	DISP_RENDERSCALE,
-	DISP_SOFTEMU,
-	DISP_DITHER,
-	DISP_WATERCOLOR,
-	DISP_PARTICLES,
+	DISP_RENDERING,	/* enters rendering submenu */
 	DISP_SEP,		/* separator between rendering and video */
 	DISP_FULLSCREEN,
 	DISP_RESOLUTION,
@@ -1965,8 +1966,6 @@ enum
 	DISP_VSYNC,
 	DISP_MAXFPS,
 	DISP_SHOWFPS,
-	DISP_TEXFILTER,
-	DISP_ANISOTROPY,
 	DISP_SEP2,		/* separator before apply */
 	DISP_APPLY,
 	DISP_ITEMS
@@ -1994,14 +1993,31 @@ static void M_Display_AdjustSliders (int dir)
 	{
 	case DISP_PRESET:
 	{
-		/* Cycle through presets only (skip "User" — that's auto-detected).
-		 * 1=Crunchy, 2=Retro, 3=Modern */
-		static int preset = 3;
+		/* Cycle through presets (skip "User" — that's auto-detected).
+		 * 1=Faithful, 2=Crunchy, 3=Retro, 4=Clean, 5=Modern, 6=Ultra */
+		static int preset = 5;
 		preset += dir;
-		if (preset < 1) preset = 3;
-		if (preset > 3) preset = 1;
+		if (preset < 1) preset = 6;
+		if (preset > 6) preset = 1;
 
-		if (preset == 1)	/* Crunchy */
+		if (preset == 1)	/* Faithful — original software look */
+		{
+			Cvar_SetValue ("r_scale", 0.5f);
+			Cvar_SetValue ("r_softemu", 0);
+			Cvar_SetValue ("r_dither", 0);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_flashblend", 1);
+			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 1.0f);
+			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_dynamic", 1);
+
+		}
+		else if (preset == 2)	/* Crunchy — extreme pixel art */
 		{
 			Cvar_SetValue ("r_scale", 0.25f);
 			Cvar_SetValue ("r_softemu", 2);
@@ -2010,8 +2026,15 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
 			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 1.0f);
+			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_dynamic", 1);
+
 		}
-		else if (preset == 2)	/* Retro */
+		else if (preset == 3)	/* Retro — nostalgic with polish */
 		{
 			Cvar_SetValue ("r_scale", 0.5f);
 			Cvar_SetValue ("r_softemu", 1);
@@ -2020,16 +2043,64 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
 			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 0.5f);
+			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_dynamic", 1);
+
 		}
-		else if (preset == 3)	/* Modern */
+		else if (preset == 4)	/* Clean — sharp native, no post-fx */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
-			Cvar_SetValue ("r_dither", 1.0f);
+			Cvar_SetValue ("r_dither", 0);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_flashblend", 0);
+			Cvar_SetValue ("gl_particles", 1);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 0.33f);
+			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_dynamic", 1);
+
+		}
+		else if (preset == 5)	/* Modern — smooth, full effects */
+		{
+			Cvar_SetValue ("r_scale", 1.0f);
+			Cvar_SetValue ("r_softemu", 0);
+			Cvar_SetValue ("r_dither", 0);
+			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
+			Cvar_SetValue ("gl_flashblend", 0);
+			Cvar_SetValue ("gl_particles", 1);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("r_watercolor", 1);
+			Cvar_SetValue ("r_wateralpha", 0.33f);
+			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_shadows", 1);
+			Cvar_SetValue ("r_dynamic", 1);
+
+		}
+		else if (preset == 6)	/* Ultra — everything maxed */
+		{
+			Cvar_SetValue ("r_scale", 1.0f);
+			Cvar_SetValue ("r_softemu", 0);
+			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
 			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("r_watercolor", 1);
+			Cvar_SetValue ("r_wateralpha", 0.33f);
+			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_shadows", 1);
+			Cvar_SetValue ("r_dynamic", 1);
+
 		}
 		break;
 	}
@@ -2062,49 +2133,6 @@ static void M_Display_AdjustSliders (int dir)
 		if (cur < 0) cur = 3;
 		if (cur > 3) cur = 0;
 		Cvar_SetValue ("viewsize", hud_sizes[cur]);
-		break;
-	}
-	case DISP_SOFTEMU:
-	{
-		int v = (int)r_softemu.value + dir;
-		if (v < 0) v = 2;
-		if (v > 2) v = 0;
-		Cvar_SetValue ("r_softemu", v);
-		break;
-	}
-	case DISP_DITHER:
-	{
-		float f = r_dither.value + dir * 0.25;
-		if (f < 0) f = 0;
-		if (f > 2) f = 2;
-		Cvar_SetValue ("r_dither", f);
-		break;
-	}
-	case DISP_WATERCOLOR:
-	{
-		int v = (int)Cvar_VariableValue("r_watercolor") + dir;
-		if (v < 0) v = 3;
-		if (v > 3) v = 0;
-		Cvar_SetValue ("r_watercolor", v);
-		break;
-	}
-	case DISP_PARTICLES:
-		Cvar_SetValue ("gl_particles", !gl_particles.integer);
-		break;
-	case DISP_RENDERSCALE:
-	{
-		static const float scale_steps[] = { 0.25f, 0.33f, 0.50f, 0.67f, 0.75f, 1.0f };
-		int i, num = sizeof(scale_steps) / sizeof(scale_steps[0]);
-		float cur = r_scale.value;
-		for (i = 0; i < num; i++)
-		{
-			if (scale_steps[i] >= cur - 0.01f)
-				break;
-		}
-		i += dir;
-		if (i < 0) i = 0;
-		if (i >= num) i = num - 1;
-		Cvar_SetValue ("r_scale", scale_steps[i]);
 		break;
 	}
 #ifdef GLQUAKE
@@ -2141,12 +2169,6 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_SHOWFPS:
 		Cvar_Set ("showfps", Cvar_VariableValue("showfps") ? "0" : "1");
 		break;
-	case DISP_TEXFILTER:
-		VID_MenuAdjustTexFilter ();
-		break;
-	case DISP_ANISOTROPY:
-		VID_MenuAdjustAnisotropy (dir);
-		break;
 #endif
 	}
 }
@@ -2160,16 +2182,31 @@ static void M_Display_Draw (void)
 
 	M_Print (76, 92 + 8*DISP_PRESET,	"Preset        :");
 	{
-		/* detect current preset */
-		qboolean is_crunchy = (r_scale.value <= 0.25f && (int)r_softemu.value >= 2 && gl_filter_idx == 0 && gl_flashblend.integer);
-		qboolean is_retro = (r_scale.value > 0.25f && r_scale.value <= 0.5f && (int)r_softemu.value > 0 && gl_filter_idx <= 2 && gl_flashblend.integer);
-		qboolean is_modern = (r_scale.value >= 1.0f && (int)r_softemu.value == 0 && gl_filter_idx > 2 && !gl_flashblend.integer);
-		if (is_crunchy)
+		/* detect current preset by matching key cvars */
+		int se = (int)r_softemu.value;
+		int fb = gl_flashblend.integer;
+		int sh = r_shadows.integer;
+		float sc = r_scale.value;
+
+		qboolean is_faithful = (sc <= 0.5f && sc > 0.25f && se == 0 && gl_filter_idx == 0 && fb && !sh);
+		qboolean is_crunchy  = (sc <= 0.25f && se >= 2 && gl_filter_idx == 0 && fb && !sh);
+		qboolean is_retro    = (sc <= 0.5f && sc > 0.25f && se == 1 && gl_filter_idx <= 2 && fb && !sh);
+		qboolean is_clean    = (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && !fb && !sh);
+		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && !fb && sh);
+		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && !fb && sh);
+
+		if (is_faithful)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
+		else if (is_crunchy)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
 		else if (is_retro)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
+		else if (is_clean)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
 		else if (is_modern)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
+		else if (is_ultra)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Ultra");
 		else
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
 	}
@@ -2198,35 +2235,7 @@ static void M_Display_Draw (void)
 	else
 		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
 
-	M_Print (76, 92 + 8*DISP_RENDERSCALE,	"Render Scale  :");
-	if (r_scale.value >= 1.0f)
-		M_PrintWhite (220, 92 + 8*DISP_RENDERSCALE, "Native");
-	else
-		M_PrintWhite (220, 92 + 8*DISP_RENDERSCALE, va("%d%%", (int)(r_scale.value * 100)));
-
-	M_Print (76, 92 + 8*DISP_SOFTEMU,	"Retro Mode    :");
-	if ((int)r_softemu.value == 1)
-		M_PrintWhite (220, 92 + 8*DISP_SOFTEMU, "Dithered");
-	else if ((int)r_softemu.value == 2)
-		M_PrintWhite (220, 92 + 8*DISP_SOFTEMU, "Banded");
-	else
-		M_PrintWhite (220, 92 + 8*DISP_SOFTEMU, "Off");
-
-	M_Print (76, 92 + 8*DISP_DITHER,	"Dither Amount :");
-	r = r_dither.value / 2.0;
-	M_DrawSlider (220, 92 + 8*DISP_DITHER, r);
-
-	M_Print (76, 92 + 8*DISP_WATERCOLOR,	"Water Tint    :");
-	switch ((int)Cvar_VariableValue("r_watercolor"))
-	{
-	case 1:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Blue"); break;
-	case 2:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Green"); break;
-	case 3:  M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Clear"); break;
-	default: M_PrintWhite (220, 92 + 8*DISP_WATERCOLOR, "Classic"); break;
-	}
-
-	M_Print (76, 92 + 8*DISP_PARTICLES,	"Particles     :");
-	M_PrintWhite (220, 92 + 8*DISP_PARTICLES, gl_particles.integer ? "Round" : "Square");
+	M_Print (76, 92 + 8*DISP_RENDERING,	"Rendering...");
 
 	/* separator */
 
@@ -2234,7 +2243,7 @@ static void M_Display_Draw (void)
 	{
 		qboolean is_current, available, want_toggle;
 		const char *s;
-		int ms, vsync, aniso;
+		int ms, vsync;
 
 		M_Print (76, 92 + 8*DISP_FULLSCREEN,	"Fullscreen    :");
 		{
@@ -2275,17 +2284,6 @@ static void M_Display_Draw (void)
 		M_Print (76, 92 + 8*DISP_SHOWFPS,	"Show FPS      :");
 		M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
 
-		M_Print (76, 92 + 8*DISP_TEXFILTER,	"Textures      :");
-		M_PrintWhite (220, 92 + 8*DISP_TEXFILTER,
-			VID_MenuGetTexFilter () ? "Smooth" : "Classic");
-
-		M_Print (76, 92 + 8*DISP_ANISOTROPY,	"Anisotropy    :");
-		aniso = VID_MenuGetAnisotropy (&available);
-		if (available)
-			M_PrintWhite (220, 92 + 8*DISP_ANISOTROPY, va("%dx", aniso));
-		else
-			M_PrintWhite (220, 92 + 8*DISP_ANISOTROPY, "N/A");
-
 		if (VID_MenuNeedApply ())
 			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
 	}
@@ -2314,6 +2312,11 @@ static void M_Display_Key (int k)
 		break;
 	case K_ENTER:
 		m_entersound = true;
+		if (display_cursor == DISP_RENDERING)
+		{
+			M_Menu_Rendering_f ();
+			return;
+		}
 #ifdef GLQUAKE
 		if (display_cursor == DISP_APPLY && VID_MenuNeedApply ())
 		{
@@ -2344,6 +2347,215 @@ static void M_Display_Key (int k)
 		break;
 	case K_RIGHTARROW:
 		M_Display_AdjustSliders (1);
+		break;
+	}
+}
+
+
+//=============================================================================
+/* RENDERING SUBMENU */
+
+enum
+{
+	REND_RENDERSCALE = 0,
+	REND_SOFTEMU,
+	REND_DITHER,
+	REND_TEXFILTER,
+	REND_ANISOTROPY,
+	REND_PARTICLES,
+	REND_FULLBRIGHTS,
+	REND_SHADOWS,
+	REND_DYNLIGHT,
+	REND_WATERCOLOR,
+	REND_WATERALPHA,
+	REND_WATERWARP,
+	REND_ITEMS
+};
+
+static int	rendering_cursor;
+
+static void M_Menu_Rendering_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_rendering;
+	m_entersound = true;
+}
+
+static void M_Rendering_AdjustSliders (int dir)
+{
+	S_LocalSound ("raven/menu3.wav");
+
+	switch (rendering_cursor)
+	{
+	case REND_RENDERSCALE:
+	{
+		static const float scale_steps[] = { 0.25f, 0.33f, 0.50f, 0.67f, 0.75f, 1.0f };
+		int i, num = sizeof(scale_steps) / sizeof(scale_steps[0]);
+		float cur = r_scale.value;
+		for (i = 0; i < num; i++)
+		{
+			if (scale_steps[i] >= cur - 0.01f)
+				break;
+		}
+		i += dir;
+		if (i < 0) i = 0;
+		if (i >= num) i = num - 1;
+		Cvar_SetValue ("r_scale", scale_steps[i]);
+		break;
+	}
+	case REND_SOFTEMU:
+	{
+		int v = (int)r_softemu.value + dir;
+		if (v < 0) v = 2;
+		if (v > 2) v = 0;
+		Cvar_SetValue ("r_softemu", v);
+		break;
+	}
+	case REND_DITHER:
+	{
+		float f = r_dither.value + dir * 0.25;
+		if (f < 0) f = 0;
+		if (f > 2) f = 2;
+		Cvar_SetValue ("r_dither", f);
+		break;
+	}
+	case REND_TEXFILTER:
+		VID_MenuAdjustTexFilter ();
+		break;
+	case REND_ANISOTROPY:
+		VID_MenuAdjustAnisotropy (dir);
+		break;
+	case REND_PARTICLES:
+		Cvar_SetValue ("gl_particles", !gl_particles.integer);
+		break;
+	case REND_FULLBRIGHTS:
+		Cvar_SetValue ("gl_fullbrights", !gl_fullbrights.integer);
+		break;
+	case REND_SHADOWS:
+		Cvar_SetValue ("r_shadows", !r_shadows.integer);
+		break;
+	case REND_DYNLIGHT:
+		Cvar_SetValue ("r_dynamic", r_dynamic.integer ? 0 : 1);
+		break;
+	case REND_WATERCOLOR:
+	{
+		int v = (int)Cvar_VariableValue("r_watercolor") + dir;
+		if (v < 0) v = 3;
+		if (v > 3) v = 0;
+		Cvar_SetValue ("r_watercolor", v);
+		break;
+	}
+	case REND_WATERALPHA:
+	{
+		float f = r_wateralpha.value + dir * 0.1f;
+		if (f < 0) f = 0;
+		if (f > 1) f = 1;
+		Cvar_SetValue ("r_wateralpha", f);
+		break;
+	}
+	case REND_WATERWARP:
+		Cvar_SetValue ("r_waterwarp", !r_waterwarp.integer);
+		break;
+	}
+}
+
+static void M_Rendering_Draw (void)
+{
+	float	r;
+	qboolean available;
+	int	aniso;
+
+	ScrollTitle("gfx/menu/title3.lmp");
+	M_PrintWhite (96, 72, "Rendering");
+
+	M_Print (76, 92 + 8*REND_RENDERSCALE,	"Render Scale  :");
+	if (r_scale.value >= 1.0f)
+		M_PrintWhite (220, 92 + 8*REND_RENDERSCALE, "Native");
+	else
+		M_PrintWhite (220, 92 + 8*REND_RENDERSCALE, va("%d%%", (int)(r_scale.value * 100)));
+
+	M_Print (76, 92 + 8*REND_SOFTEMU,	"Retro Mode    :");
+	if ((int)r_softemu.value == 1)
+		M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Dithered");
+	else if ((int)r_softemu.value == 2)
+		M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Banded");
+	else
+		M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Off");
+
+	M_Print (76, 92 + 8*REND_DITHER,	"Dither Amount :");
+	r = r_dither.value / 2.0;
+	M_DrawSlider (220, 92 + 8*REND_DITHER, r);
+
+	M_Print (76, 92 + 8*REND_TEXFILTER,	"Textures      :");
+	M_PrintWhite (220, 92 + 8*REND_TEXFILTER,
+		VID_MenuGetTexFilter () ? "Smooth" : "Classic");
+
+	M_Print (76, 92 + 8*REND_ANISOTROPY,	"Anisotropy    :");
+	aniso = VID_MenuGetAnisotropy (&available);
+	if (available)
+		M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, va("%dx", aniso));
+	else
+		M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, "N/A");
+
+	M_Print (76, 92 + 8*REND_PARTICLES,	"Particles     :");
+	M_PrintWhite (220, 92 + 8*REND_PARTICLES, gl_particles.integer ? "Round" : "Square");
+
+	M_Print (76, 92 + 8*REND_FULLBRIGHTS,	"Fullbrights   :");
+	M_DrawCheckbox (220, 92 + 8*REND_FULLBRIGHTS, gl_fullbrights.integer);
+
+	M_Print (76, 92 + 8*REND_SHADOWS,	"Shadows       :");
+	M_DrawCheckbox (220, 92 + 8*REND_SHADOWS, r_shadows.integer);
+
+	M_Print (76, 92 + 8*REND_DYNLIGHT,	"Dynamic Light :");
+	M_DrawCheckbox (220, 92 + 8*REND_DYNLIGHT, r_dynamic.integer);
+
+	M_Print (76, 92 + 8*REND_WATERCOLOR,	"Water Tint    :");
+	switch ((int)Cvar_VariableValue("r_watercolor"))
+	{
+	case 1:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Blue"); break;
+	case 2:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Green"); break;
+	case 3:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Clear"); break;
+	default: M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Classic"); break;
+	}
+
+	M_Print (76, 92 + 8*REND_WATERALPHA,	"Water Alpha   :");
+	r = r_wateralpha.value;
+	M_DrawSlider (220, 92 + 8*REND_WATERALPHA, r);
+
+	M_Print (76, 92 + 8*REND_WATERWARP,	"Water Warp    :");
+	M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
+
+	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
+}
+
+static void M_Rendering_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+		M_Menu_Display_f ();
+		break;
+	case K_ENTER:
+		m_entersound = true;
+		M_Rendering_AdjustSliders (1);
+		return;
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		rendering_cursor--;
+		if (rendering_cursor < 0)
+			rendering_cursor = REND_ITEMS-1;
+		break;
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		rendering_cursor++;
+		if (rendering_cursor >= REND_ITEMS)
+			rendering_cursor = 0;
+		break;
+	case K_LEFTARROW:
+		M_Rendering_AdjustSliders (-1);
+		break;
+	case K_RIGHTARROW:
+		M_Rendering_AdjustSliders (1);
 		break;
 	}
 }
@@ -2515,7 +2727,6 @@ enum
 	GAME_VIEWBOB,
 	GAME_VIEWROLL,
 	GAME_CONTRANS,
-	GAME_DYNLIGHT,
 	GAME_ITEMS
 };
 
@@ -2596,9 +2807,6 @@ static void M_Game_AdjustSliders (int dir)
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrans", f);
 		break;
-	case GAME_DYNLIGHT:
-		Cvar_Set ("r_dynamic", Cvar_VariableValue("r_dynamic") ? "0" : "1");
-		break;
 	}
 }
 
@@ -2649,9 +2857,6 @@ static void M_Game_Draw (void)
 		M_PrintWhite (220, 92 + 8*GAME_CONTRANS,
 			ct == 0 ? "Opaque" : ct == 1 ? "Light" : "Clear");
 	}
-
-	M_Print (76, 92 + 8*GAME_DYNLIGHT,	"Dynamic Light :");
-	M_DrawCheckbox (220, 92 + 8*GAME_DYNLIGHT, (int)Cvar_VariableValue("r_dynamic"));
 
 	M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
 }
@@ -5280,6 +5485,9 @@ void M_Draw (void)
 	case m_display:
 		M_Display_Draw ();
 		break;
+	case m_rendering:
+		M_Rendering_Draw ();
+		break;
 	case m_sound:
 		M_Sound_Draw ();
 		break;
@@ -5410,6 +5618,9 @@ void M_Keydown (int key)
 
 	case m_display:
 		M_Display_Key (key);
+		return;
+	case m_rendering:
+		M_Rendering_Key (key);
 		return;
 	case m_sound:
 		M_Sound_Key (key);
