@@ -1195,99 +1195,76 @@ WORLD MODEL
 R_RecursiveWorldNode
 ================
 */
-/* Iterative BSP traversal with explicit stack — eliminates recursive
- * function call overhead and improves cache locality. */
-#define BSP_STACK_SIZE 256
-static void R_RecursiveWorldNode (mnode_t *start_node)
+static void R_RecursiveWorldNode (mnode_t *node)
 {
-	mnode_t		*stack[BSP_STACK_SIZE];
-	int		sp = 0;
-	mnode_t		*node;
 	int		c, side;
 	mplane_t	*plane;
 	msurface_t	*surf, **mark;
 	mleaf_t		*pleaf;
 	double		dot;
 
-	node = start_node;
+	if (node->contents == CONTENTS_SOLID)
+		return;
 
-	while (1)
+	if (node->visframe != r_visframecount)
+		return;
+	if (R_CullBox (node->minmaxs, node->minmaxs+3))
+		return;
+
+	if (node->contents < 0)
 	{
-		if (node->contents == CONTENTS_SOLID)
-			goto pop;
-
-		if (node->visframe != r_visframecount)
-			goto pop;
-		if (R_CullBox (node->minmaxs, node->minmaxs+3))
-			goto pop;
-
-		/* leaf node — mark surfaces */
-		if (node->contents < 0)
-		{
-			pleaf = (mleaf_t *)node;
-			mark = pleaf->firstmarksurface;
-			c = pleaf->nummarksurfaces;
-			if (c)
-			{
-				do
-				{
-					(*mark)->visframe = r_framecount;
-					mark++;
-				} while (--c);
-			}
-			if (pleaf->efrags)
-				R_StoreEfrags (&pleaf->efrags);
-			goto pop;
-		}
-
-		/* decision node — classify and traverse */
-		plane = node->plane;
-		switch (plane->type)
-		{
-		case PLANE_X: dot = modelorg[0] - plane->dist; break;
-		case PLANE_Y: dot = modelorg[1] - plane->dist; break;
-		case PLANE_Z: dot = modelorg[2] - plane->dist; break;
-		default: dot = DotProduct(modelorg, plane->normal) - plane->dist; break;
-		}
-		side = (dot < 0) ? 1 : 0;
-
-		/* push back side for later, descend front side */
-		if (sp < BSP_STACK_SIZE)
-			stack[sp++] = node->children[!side];
-
-		/* draw surfaces at this node */
-		c = node->numsurfaces;
+		pleaf = (mleaf_t *)node;
+		mark = pleaf->firstmarksurface;
+		c = pleaf->nummarksurfaces;
 		if (c)
 		{
-			surf = cl.worldmodel->surfaces + node->firstsurface;
-			if (dot < 0 - BACKFACE_EPSILON)
-				side = SURF_PLANEBACK;
-			else if (dot > BACKFACE_EPSILON)
-				side = 0;
-
-			for ( ; c ; c--, surf++)
+			do
 			{
-				if (surf->visframe != r_framecount)
-					continue;
-				if (!(surf->flags & SURF_UNDERWATER) && ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)))
-					continue;
-				if (!mirror || surf->texinfo->texture != cl.worldmodel->textures[mirrortexturenum])
-				{
-					surf->texturechain = surf->texinfo->texture->texturechain;
-					surf->texinfo->texture->texturechain = surf;
-				}
+				(*mark)->visframe = r_framecount;
+				mark++;
+			} while (--c);
+		}
+		if (pleaf->efrags)
+			R_StoreEfrags (&pleaf->efrags);
+		return;
+	}
+
+	plane = node->plane;
+	switch (plane->type)
+	{
+	case PLANE_X: dot = modelorg[0] - plane->dist; break;
+	case PLANE_Y: dot = modelorg[1] - plane->dist; break;
+	case PLANE_Z: dot = modelorg[2] - plane->dist; break;
+	default: dot = DotProduct(modelorg, plane->normal) - plane->dist; break;
+	}
+	side = (dot >= 0) ? 0 : 1;
+
+	R_RecursiveWorldNode (node->children[side]);
+
+	c = node->numsurfaces;
+	if (c)
+	{
+		surf = cl.worldmodel->surfaces + node->firstsurface;
+		if (dot < 0 -BACKFACE_EPSILON)
+			side = SURF_PLANEBACK;
+		else if (dot > BACKFACE_EPSILON)
+			side = 0;
+
+		for ( ; c ; c--, surf++)
+		{
+			if (surf->visframe != r_framecount)
+				continue;
+			if (!(surf->flags & SURF_UNDERWATER) && ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)))
+				continue;
+			if (!mirror || surf->texinfo->texture != cl.worldmodel->textures[mirrortexturenum])
+			{
+				surf->texturechain = surf->texinfo->texture->texturechain;
+				surf->texinfo->texture->texturechain = surf;
 			}
 		}
-
-		/* descend front child */
-		node = node->children[(dot < 0) ? 1 : 0];
-		continue;
-
-	pop:
-		if (sp <= 0)
-			break;
-		node = stack[--sp];
 	}
+
+	R_RecursiveWorldNode (node->children[!side]);
 }
 
 /*
