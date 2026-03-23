@@ -872,6 +872,13 @@ static void R_DrawAliasModel (entity_t *e)
 			ambientlight = 128;
 		if (ambientlight + shadelight > 192)
 			shadelight = 192 - ambientlight;
+
+		// clamp lightcolor channels to match shade clamping
+		for (i = 0; i < 3; i++)
+		{
+			if (lightcolor[i] > 192)
+				lightcolor[i] = 192;
+		}
 	}
 
 	shadedots = r_avertexnormal_dots[((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1)];
