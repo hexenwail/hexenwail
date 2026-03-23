@@ -2009,7 +2009,24 @@ static void R_RenderScene (void)
 
 	R_DrawWorld ();		// adds static entities to the list
 
+	/* Push far clip to max for skybox so draw distance never clips sky */
+	if (r_farclip.value < 16384)
+	{
+		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);
+		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, 16384);
+	}
 	Sky_DrawSky ();		// render skybox
+	if (r_farclip.value < 16384)
+	{
+		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);
+		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, r_farclip.value);
+	}
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
