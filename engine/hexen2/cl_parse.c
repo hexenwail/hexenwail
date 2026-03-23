@@ -934,7 +934,13 @@ static void CL_ParseClientdata (int bits)
 	int	i, j;
 
 	if (bits & SU_VIEWHEIGHT)
+	{
+		float oldheight = cl.viewheight;
 		cl.viewheight = MSG_ReadChar ();
+		/* Initialize smooth crouch on first set */
+		if (oldheight == 0 && cl.crouch == 0)
+			cl.crouch = cl.viewheight;
+	}
 //rjr	else	cl.viewheight = DEFAULT_VIEWHEIGHT;
 
 	if (bits & SU_IDEALPITCH)

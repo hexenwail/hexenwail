@@ -46,6 +46,8 @@ static GLint	pp_loc_dither;
 static GLint	pp_loc_paletteLUT;
 static GLint	pp_loc_palette;
 static GLint	pp_loc_scale;
+static GLint	pp_loc_waterwarp;
+static GLint	pp_loc_time;
 
 /* Palette LUT state */
 static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
@@ -262,6 +264,8 @@ static const char pp_frag_src[] =
 	"uniform sampler3D paletteLUT;\n"
 	"uniform vec3 palette[256];\n"
 	"uniform float scale;\n"
+	"uniform float waterwarp;\n"
+	"uniform float time;\n"
 	"in vec2 v_texcoord;\n"
 	"out vec4 fragColor;\n"
 	"\n"
@@ -277,7 +281,12 @@ static const char pp_frag_src[] =
 	"}\n"
 	"\n"
 	"void main() {\n"
-	"    vec4 color = texture(scene, v_texcoord);\n"
+	"    vec2 uv = v_texcoord;\n"
+	"    if (waterwarp > 0.0) {\n"
+	"        uv.x += sin(uv.y * 10.0 + time * 1.5) * 0.015 * waterwarp;\n"
+	"        uv.y += sin(uv.x * 10.0 + time * 2.0) * 0.015 * waterwarp;\n"
+	"    }\n"
+	"    vec4 color = texture(scene, uv);\n"
 	"    color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
 	/* gamma cvar: 1.0 = no change, <1.0 = brighter (matches
 	 * the original Hexen2 brightness slider convention where
@@ -366,6 +375,8 @@ static qboolean PP_InitShader (void)
 	pp_loc_paletteLUT = glGetUniformLocation_fp(pp_program, "paletteLUT");
 	pp_loc_palette = glGetUniformLocation_fp(pp_program, "palette");
 	pp_loc_scale = glGetUniformLocation_fp(pp_program, "scale");
+	pp_loc_waterwarp = glGetUniformLocation_fp(pp_program, "waterwarp");
+	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
 
 	/* bind samplers once */
 	glUseProgram_fp(pp_program);
@@ -729,6 +740,19 @@ void GL_PostProcess_EndFrame (void)
 		}
 		glUniform3fv_fp(pp_loc_palette, 256, pal);
 	}
+
+	/* Underwater warp */
+	if (pp_loc_waterwarp >= 0)
+	{
+		extern mleaf_t *r_viewleaf;
+		float warp = 0;
+		if (r_waterwarp.value && r_viewleaf &&
+		    r_viewleaf->contents <= CONTENTS_WATER)
+			warp = r_waterwarp.value;
+		glUniform1f_fp(pp_loc_waterwarp, warp);
+	}
+	if (pp_loc_time >= 0)
+		glUniform1f_fp(pp_loc_time, (float)realtime);
 
 	/* draw full-screen quad using streaming VBO (shader already active) */
 	GL_ImmBegin();
