@@ -330,6 +330,12 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glDrawArrays_fp(mode, 0, imm_count);
 	}
+
+	/* Always ensure texture unit 0 is active after draw —
+	 * callers expect GL_Bind to operate on unit 0 */
+	if (glActiveTextureARB_fp)
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+
 	imm_count = 0;
 }
 
