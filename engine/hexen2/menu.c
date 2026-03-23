@@ -2486,8 +2486,8 @@ static void M_Rendering_AdjustSliders (int dir)
 	}
 	case REND_FARCLIP:
 	{
-		static const int clip_steps[] = { 1024, 2048, 4096, 8192, 16384 };
-		int i, cur = (int)r_farclip.value, num = 5;
+		static const int clip_steps[] = { 4096, 8192, 16384 };
+		int i, cur = (int)r_farclip.value, num = 3;
 		for (i = 0; i < num; i++)
 			if (clip_steps[i] >= cur) break;
 		i += dir;
@@ -2580,11 +2580,7 @@ static void M_Rendering_Draw (void)
 	M_Print (76, 92 + 8*REND_FARCLIP,	"Draw Distance :");
 	{
 		int fc = (int)r_farclip.value;
-		if (fc <= 1024)
-			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Very Short");
-		else if (fc <= 2048)
-			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Short");
-		else if (fc <= 4096)
+		if (fc <= 4096)
 			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Normal");
 		else if (fc <= 8192)
 			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Far");

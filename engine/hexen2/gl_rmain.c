@@ -1449,9 +1449,9 @@ static void R_DrawGlow (entity_t *e)
 
 			GL_ImmColor4f (0.0f, 0.0f, 0.0f, 1.0f);
 
-			for (i = 16; i >= 0; i--)
+			for (i = 8; i >= 0; i--)
 			{
-				float a = i / 16.0f * M_PI * 2;
+				float a = i / 8.0f * M_PI * 2;
 
 				for (j = 0; j < 3; j++)
 					glow_vect[j] = lightorigin[j] + vright[j]*cos(a)*radius + vup[j]*sin(a)*radius;
@@ -1926,7 +1926,25 @@ static void R_RenderScene (void)
 
 	R_DrawWorld ();		// adds static entities to the list
 
+	/* Render skybox with maximum far clip so draw distance
+	 * never cuts off the sky */
+	if (r_farclip.value < 16384)
+	{
+		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);
+		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, 16384);
+	}
 	Sky_DrawSky ();		// render skybox
+	if (r_farclip.value < 16384)
+	{
+		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);
+		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, r_farclip.value);
+	}
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
