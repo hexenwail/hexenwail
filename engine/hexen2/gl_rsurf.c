@@ -31,6 +31,8 @@ cvar_t		gl_lightmapfmt = {"gl_lightmapfmt", "GL_RGBA", CVAR_NONE};
 int		lightmap_bytes = 4;		// 1, 2, or 4. default is 4 for GL_RGBA
 static int	lightmap_internalformat = 0x8058;	// GL_RGBA8: sized internal format for glTexImage2D
 GLuint		lightmap_textures[MAX_LIGHTMAPS];
+GLuint		lightmap_array_texture;		/* GL_TEXTURE_2D_ARRAY for all lightmaps */
+int		lightmap_array_layers;		/* number of layers allocated */
 
 static unsigned int	blocklights[18*18];
 static unsigned int	blocklightscolor[18*18*3];	// colored light support. *3 for RGB to the definitions at the top
@@ -526,15 +528,25 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 		if (lightmap_modified[i])
 		{
-			// if current lightmap was changed reload it
-			// and mark as not changed. Don't skip pages
-			// without visible polys — brush entity surfaces
-			// may have marked them dirty.
 			lightmap_modified[i] = false;
+
+			/* Update individual 2D texture (for brush entity path) */
 			GL_Bind(lightmap_textures[i]);
 			glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
 					BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
 					lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+
+			/* Update corresponding layer in the texture array */
+			if (lightmap_array_texture && glTexSubImage3D_fp)
+			{
+				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+				glTexSubImage3D_fp(GL_TEXTURE_2D_ARRAY, 0,
+						0, 0, i,
+						BLOCK_WIDTH, BLOCK_HEIGHT, 1,
+						gl_lightmap_format, GL_UNSIGNED_BYTE,
+						lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
+			}
 		}
 	}
 
@@ -608,13 +620,16 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 
-		GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
+		/* Use lightmap texture array with per-vertex layer */
+		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+		GL_ImmLMLayer ((float)fa->lightmaptexturenum);
 
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPolyMTexLM (fa->polys);
 		else
 			DrawGLPolyMTex (fa->polys);
 
+		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
 		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	}
 
@@ -729,7 +744,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		else
 		{
 			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-			GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
+			glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+			GL_ImmLMLayer ((float)fa->lightmaptexturenum);
 
 			if (fa->flags & SURF_UNDERWATER)
 				DrawGLWaterPolyMTexLM (fa->polys);
@@ -867,13 +883,13 @@ current immediate-mode batch. Flushes and restarts if the batch
 is nearly full. Handles lightmap dirty checks inline.
 ================
 */
-static void R_BatchEmitSurface (msurface_t *fa, int cur_lightmap)
+static void R_BatchEmitSurface (msurface_t *fa)
 {
 	glpoly_t	*p = fa->polys;
-	float		*v;
 	int		j, nverts;
 	byte		*base;
 	int		maps;
+	float		layer = (float)fa->lightmaptexturenum;
 
 	nverts = p->numverts;
 	if (nverts < 3)
@@ -883,23 +899,15 @@ static void R_BatchEmitSurface (msurface_t *fa, int cur_lightmap)
 	 * Each polygon of N verts produces (N-2)*3 triangle verts. */
 	if (GL_ImmCount() + (nverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 	{
-		/* Flush current batch */
 		GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 		GL_ImmBegin ();
 	}
 
-	/* If lightmap changed, flush and rebind */
-	if (fa->lightmaptexturenum != cur_lightmap)
-	{
-		GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
-		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-		GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-		GL_ImmBegin ();
-	}
+	/* Set lightmap layer for this surface — no texture rebind needed
+	 * since we use GL_TEXTURE_2D_ARRAY bound once for all layers */
+	GL_ImmLMLayer (layer);
 
 	/* Emit as triangles (fan → triangles: v0-v1-v2, v0-v2-v3, ...) */
-	v = p->verts[0];
 	for (j = 2; j < nverts; j++)
 	{
 		float *v0 = p->verts[0];
@@ -991,10 +999,9 @@ static void DrawTextureChains (entity_t *e)
 			}
 			else
 			{
-				/* Batched path: accumulate surfaces as triangles,
-				 * flush on lightmap or buffer-full boundaries.
-				 * Reduces draw calls from thousands to tens. */
-				int cur_lightmap = -1;
+				/* Batched path: bind lightmap array once, accumulate
+				 * all surfaces as triangles with per-vertex layer.
+				 * One draw call per texture, no lightmap rebinds. */
 
 				GL_ImmColor4f (1, 1, 1, 1);
 
@@ -1005,10 +1012,9 @@ static void DrawTextureChains (entity_t *e)
 					GL_Bind (tt->gl_texturenum);
 				}
 
-				/* Bind first surface's lightmap on unit 1 */
+				/* Bind lightmap array on unit 1 — single bind for ALL pages */
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-				GL_Bind (lightmap_textures[s->lightmaptexturenum]);
-				cur_lightmap = s->lightmaptexturenum;
+				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 				GL_ImmBegin ();
@@ -1018,26 +1024,30 @@ static void DrawTextureChains (entity_t *e)
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						/* These need special handling — flush
-						 * batch and fall back to per-surface */
 						GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 						R_RenderBrushPolyMTex (e, s, false);
-						/* Restart batch — rebind textures */
+						/* Restart — rebind array */
+						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 							GL_Bind (tt->gl_texturenum);
 						}
-						cur_lightmap = -1;
+						glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+						glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 						GL_ImmBegin ();
 						continue;
 					}
 
-					R_BatchEmitSurface (s, cur_lightmap);
-					cur_lightmap = s->lightmaptexturenum;
+					R_BatchEmitSurface (s);
 				}
 
 				GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+
+				/* Restore normal 2D texture target on unit 1 */
+				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 			}
 		}
 
@@ -1590,13 +1600,17 @@ void GL_BuildLightmaps (void)
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
 
 	//
-	// upload all lightmaps that were filled
+	// Count used lightmap layers and upload all that were filled
 	//
+	lightmap_array_layers = 0;
 	for (i = 0; i < MAX_LIGHTMAPS; i++)
 	{
 		if (!allocated[i][0])
 			break;		// no more used
 		lightmap_modified[i] = false;
+		lightmap_array_layers++;
+
+		/* Keep individual textures for legacy brush entity path */
 		GL_Bind(lightmap_textures[i]);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1604,6 +1618,22 @@ void GL_BuildLightmaps (void)
 				BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
 				lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 	}
+
+	/* Create GL_TEXTURE_2D_ARRAY for batched world rendering */
+	if (!lightmap_array_texture)
+		glGenTextures_fp(1, &lightmap_array_texture);
+	glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage3D_fp(GL_TEXTURE_2D_ARRAY, 0, lightmap_internalformat,
+			BLOCK_WIDTH, BLOCK_HEIGHT, lightmap_array_layers, 0,
+			gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps);
+	glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
+
+	Con_SafePrintf("Lightmaps: %d pages (%dx%d) in texture array\n",
+		       lightmap_array_layers, BLOCK_WIDTH, BLOCK_HEIGHT);
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 }

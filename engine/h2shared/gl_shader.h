@@ -42,6 +42,7 @@ extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 #define ATTR_TEXCOORD	1
 #define ATTR_LMCOORD	2
 #define ATTR_COLOR	3
+#define ATTR_LMLAYER	4
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);

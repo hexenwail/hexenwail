@@ -58,6 +58,7 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 	glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
 	glBindAttribLocation_fp(prog, ATTR_LMCOORD,  "a_lmcoord");
 	glBindAttribLocation_fp(prog, ATTR_COLOR,    "a_color");
+	glBindAttribLocation_fp(prog, ATTR_LMLAYER,  "a_lmlayer");
 
 	glLinkProgram_fp(prog);
 	glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
@@ -159,22 +160,23 @@ static const char sflat_frag[] =
 	"    fragColor = v_color;\n"
 	"}\n";
 
-/* --- shader_world: textured + lightmap multitexture, with fog --- */
+/* --- shader_world: textured + lightmap array, with fog --- */
 static const char sworld_vert[] =
 	"#version 430 core\n"
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
 	"in vec4 a_color;\n"
+	"in float a_lmlayer;\n"
 	"uniform mat4 u_mvp;\n"
 	"uniform mat4 u_modelview;\n"
 	"out vec2 v_texcoord;\n"
-	"out vec2 v_lmcoord;\n"
+	"out vec3 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
-	"    v_lmcoord = a_lmcoord;\n"
+	"    v_lmcoord = vec3(a_lmcoord, a_lmlayer);\n"
 	"    v_color = a_color;\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
@@ -184,12 +186,12 @@ static const char sworld_vert[] =
 static const char sworld_frag[] =
 	"#version 430 core\n"
 	"uniform sampler2D u_texture0;\n"
-	"uniform sampler2D u_texture1;\n"
+	"uniform sampler2DArray u_texture1;\n"
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
 	"in vec2 v_texcoord;\n"
-	"in vec2 v_lmcoord;\n"
+	"in vec3 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"

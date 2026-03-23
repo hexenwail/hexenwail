@@ -30,6 +30,7 @@ void	GL_ImmVertex3f (float x, float y, float z);
 void	GL_ImmVertex2f (float x, float y);
 void	GL_ImmTexCoord2f (float s, float t);
 void	GL_ImmLMCoord2f (float s, float t);
+void	GL_ImmLMLayer (float layer);
 void	GL_ImmColor4f (float r, float g, float b, float a);
 void	GL_ImmColor3f (float r, float g, float b);
 void	GL_ImmColor4ubv (const unsigned char *c);
