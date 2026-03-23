@@ -737,6 +737,9 @@ static void _Host_ServerFrame (void)
 	if (!sv.paused && (svs.maxclients > 1 || Key_GetDest() == key_game))
 	{
 		SV_Physics ();
+
+		R_UpdateParticles ();
+		CL_UpdateEffects ();
 	}
 }
 
@@ -875,10 +878,6 @@ static void _Host_Frame (float time)
 	}
 
 	host_frametime = render_frametime;
-
-// update particles and effects every render frame for smooth animation
-	R_UpdateParticles ();
-	CL_UpdateEffects ();
 
 // read from server and interpolate entities every render frame
 	if (cls.state == ca_connected)
