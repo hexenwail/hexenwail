@@ -1391,12 +1391,8 @@ void R_DrawParticles (void)
 	qboolean	square = !gl_particles.integer;
 #define	SCALE_BASE	((p->type == pt_snow) ? p->count/10 : 1)
 
-	GL_ImmResetState();	/* force clean GL state — shader/uniform cache
-				 * from world rendering must not leak into particles */
 	GL_Bind(particletexture);
 	glEnable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthMask_fp (0);	/* particles don't write depth */
 	GL_SetAlphaThreshold(0.0f);
 
 	if (square)
@@ -1458,7 +1454,6 @@ void R_DrawParticles (void)
 
 	GL_ImmEnd(square ? GL_POINTS : GL_TRIANGLES, &gl_shader_particle);
 	GL_SetAlphaThreshold(0.01f);
-	glDepthMask_fp (1);
 	glDisable_fp (GL_BLEND);
 }
 

@@ -227,21 +227,9 @@ void GL_ImmVertex2f (float x, float y)
 #define GL_POLYGON 0x0009
 #endif
 
-/* Cached GL state to avoid redundant binds */
-static GLuint		imm_active_program;
-static qboolean		imm_vao_bound;
-static float		imm_cached_fog_density = -1;
-static float		imm_cached_fog_color[3] = {-1, -1, -1};
-static float		imm_cached_mvp[16];
-static float		imm_cached_mv[16];
-static qboolean		imm_mvp_dirty = true;
-
 void GL_ImmResetState (void)
 {
-	imm_active_program = 0;
-	imm_vao_bound = false;
-	imm_cached_fog_density = -1;
-	imm_mvp_dirty = true;
+	/* no-op — kept for API compat */
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -251,67 +239,35 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	if (imm_count == 0)
 		return;
 
-	/* bind VAO once, keep bound across draws */
-	if (!imm_vao_bound)
-	{
-		glBindVertexArray_fp(imm_vao);
-		glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
-		imm_vao_bound = true;
-	}
-
-	/* upload vertex data — orphan previous contents */
+	/* bind VAO and upload vertex data */
+	glBindVertexArray_fp(imm_vao);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
 	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
 			 imm_buffer, GL_STREAM_DRAW);
 
-	/* activate shader only if changed */
-	if (imm_active_program != shader->program)
-	{
-		glUseProgram_fp(shader->program);
-		imm_active_program = shader->program;
-		/* force uniform re-upload on shader change */
-		imm_cached_fog_density = -1;
-	}
-
-	/* MVP — skip upload if matrix unchanged (world surfaces share identity MV) */
+	/* activate shader and set MVP */
+	glUseProgram_fp(shader->program);
 	GL_GetMVP(mvp);
 	if (shader->u_mvp >= 0)
-	{
-		if (imm_mvp_dirty || memcmp(mvp, imm_cached_mvp, sizeof(imm_cached_mvp)) != 0)
-		{
-			glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
-			memcpy(imm_cached_mvp, mvp, sizeof(imm_cached_mvp));
+		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
 
-			/* MV changes whenever MVP changes */
-			if (shader->u_modelview >= 0)
-			{
-				float mv[16];
-				GL_GetModelview(mv);
-				glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
-			}
-			imm_mvp_dirty = false;
-		}
+	/* set modelview if the shader needs it (for fog distance) */
+	if (shader->u_modelview >= 0)
+	{
+		float mv[16];
+		GL_GetModelview(mv);
+		glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
 	}
 
-	/* alpha threshold — only upload if set */
+	/* override alpha threshold if set */
 	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0)
 		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
 
-	/* fog uniforms — skip if unchanged since last upload */
-	if (shader->u_fog_density >= 0 && r_fog_density != imm_cached_fog_density)
-	{
+	/* set fog uniforms from globals */
+	if (shader->u_fog_density >= 0)
 		glUniform1f_fp(shader->u_fog_density, r_fog_density);
-		imm_cached_fog_density = r_fog_density;
-	}
-	if (shader->u_fog_color >= 0 &&
-	    (r_fog_color[0] != imm_cached_fog_color[0] ||
-	     r_fog_color[1] != imm_cached_fog_color[1] ||
-	     r_fog_color[2] != imm_cached_fog_color[2]))
-	{
+	if (shader->u_fog_color >= 0)
 		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		imm_cached_fog_color[0] = r_fog_color[0];
-		imm_cached_fog_color[1] = r_fog_color[1];
-		imm_cached_fog_color[2] = r_fog_color[2];
-	}
 
 	/* draw */
 	if (mode == GL_QUADS)
@@ -331,8 +287,11 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		glDrawArrays_fp(mode, 0, imm_count);
 	}
 
-	/* Always ensure texture unit 0 is active after draw —
-	 * callers expect GL_Bind to operate on unit 0 */
+	glBindVertexArray_fp(0);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+	glUseProgram_fp(0);
+
+	/* ensure texture unit 0 is active after draw */
 	if (glActiveTextureARB_fp)
 		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
