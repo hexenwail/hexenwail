@@ -415,7 +415,6 @@ void R_NewMap (void)
 {
 	int		i;
 
-	fprintf(stderr, "[TRACE] R_NewMap: enter, worldmodel=%p\n", (void*)cl.worldmodel);
 
 	for (i = 0; i < 256; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
@@ -426,8 +425,17 @@ void R_NewMap (void)
 	r_worldentity.model = cl.worldmodel;
 
 	if (!cl.worldmodel) {
-		fprintf(stderr, "[TRACE] R_NewMap: NULL worldmodel, aborting\n");
 		return;
+	}
+
+	/* Set draw distance based on protocol — mod maps (protocol 21)
+	 * tend to be larger and need more draw distance */
+	{
+		extern int sv_protocol;
+		if (sv_protocol >= 21)
+			Cvar_SetValue ("r_farclip", 16384);
+		else
+			Cvar_SetValue ("r_farclip", 8192);
 	}
 
 // clear out efrags in case the level hasn't been reloaded
@@ -438,9 +446,7 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 
-	fprintf(stderr, "[TRACE] R_NewMap: calling GL_BuildLightmaps\n");
 	GL_BuildLightmaps ();
-	fprintf(stderr, "[TRACE] R_NewMap: GL_BuildLightmaps done\n");
 
 	// identify sky texture
 	skytexturenum = -1;

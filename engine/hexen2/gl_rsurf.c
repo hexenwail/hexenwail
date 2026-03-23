@@ -593,7 +593,20 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	GL_Bind (t->gl_texturenum);
 
 	if (fa->flags & SURF_DRAWTURB)
-	{	// warp texture, no lightmaps
+	{	// warp texture — sample light at surface center for tinting
+		if (fa->polys && !r_fullbright.integer && intensity >= 1.0f)
+		{
+			extern vec3_t lightcolor;
+			float *v = fa->polys->verts[0];
+			vec3_t mid;
+			float lv;
+			mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
+			R_LightPointColor(mid);
+			lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
+			if (lv > 1.0f) lv = 1.0f;
+			if (lv < 0.15f) lv = 0.15f;
+			GL_ImmColor4f(lv, lv, lv, alpha_val);
+		}
 		EmitWaterPolys (fa);
 		return;
 	}
@@ -848,7 +861,22 @@ void R_DrawWaterSurfaces (void)
 
 		//if ((s->flags & SURF_DRAWTURB) && (s->flags & SURF_TRANSLUCENT))
 		if (s->flags & SURF_TRANSLUCENT)
-			GL_ImmColor4f (1,1,1,r_wateralpha.value);
+		{
+			/* Sample light at first vertex for water tinting */
+			float lv = 1.0f;
+			if (s->polys && !r_fullbright.integer)
+			{
+				extern vec3_t lightcolor;
+				float *v = s->polys->verts[0];
+				vec3_t mid;
+				mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
+				R_LightPointColor(mid);
+				lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
+				if (lv > 1.0f) lv = 1.0f;
+				if (lv < 0.15f) lv = 0.15f;
+			}
+			GL_ImmColor4f (lv, lv, lv, r_wateralpha.value);
+		}
 		else
 			GL_ImmColor4f (1,1,1,1);
 

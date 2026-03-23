@@ -178,6 +178,25 @@ static const char *DiffNames[MAX_PLAYER_CLASS][NUM_DIFFLEVELS] =
 
 
 //=============================================================================
+/* Mouse cursor support for menus */
+
+extern int	menu_mouse_x, menu_mouse_y;
+extern qboolean	menu_mouse_moved;
+
+/* Convert screen mouse position to menu-local coordinates.
+ * Menu items are drawn at (76 + offset, 92 + cursor*8) in a
+ * 320-wide virtual viewport centered on screen. */
+static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int num_items)
+{
+	/* Map screen Y to virtual Y (menus use 1:1 at default scale) */
+	int vy = screen_y;
+	int idx = (vy - first_y) / item_height;
+	if (idx < 0) idx = -1;
+	if (idx >= num_items) idx = -1;
+	return idx;
+}
+
+//=============================================================================
 /* Support Routines */
 
 /*
@@ -621,6 +640,13 @@ static void M_Main_Draw (void)
 	M_DrawBigString (72, 60 + (5 * 20), "INTRO");
 	M_DrawBigString (72, 60 + (6 * 20), "QUIT");
 
+	/* Mouse hover — update cursor position from mouse */
+	{
+		int hover = M_MouseToMenuItem(menu_mouse_y, 60, 20, MAIN_ITEMS);
+		if (hover >= 0)
+			m_main_cursor = hover;
+	}
+
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPicCropped (43, 54 + m_main_cursor * 20, Draw_CachePic( va("gfx/menu/menudot%i.lmp", f+1 ) ) );
 }
@@ -726,6 +752,7 @@ static void M_Difficulty_Draw (void)
 	for (i = 0; i < NUM_DIFFLEVELS; ++i)
 		M_DrawBigString (72, 60 + (i * 20), DiffNames[setup_class][i]);
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 20, DIFF_ITEMS); if (h >= 0) m_diff_cursor = h; }
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPic (43, 54 + m_diff_cursor * 20, Draw_CachePic(va("gfx/menu/menudot%i.lmp", f+1)) );
 }
@@ -839,6 +866,7 @@ static void M_Class_Draw (void)
 	for (i = 0; i < f; ++i)
 		M_DrawBigString (72, 60 + (i * 20), ClassNamesU[i]);
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 20, f); if (h >= 0) m_class_cursor = h; }
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPic (43, 54 + m_class_cursor * 20, Draw_CachePic(va("gfx/menu/menudot%i.lmp", f+1)) );
 
@@ -942,6 +970,14 @@ static void M_SinglePlayer_Draw (void)
 	{
 		M_DrawBigString (72, 60 + (3 * 20), "OLD MISSION");
 		M_DrawBigString (72, 60 + (4 * 20), "PORTALS INTRO");
+	}
+
+	/* Mouse hover */
+	{
+		int items = (gameflags & GAME_PORTALS) ? SINGLEPLAYER_ITEMS + SP_PORTALS_ITEMS : SINGLEPLAYER_ITEMS;
+		int hover = M_MouseToMenuItem(menu_mouse_y, 60, 20, items);
+		if (hover >= 0)
+			m_singleplayer_cursor = hover;
 	}
 
 	f = (int)(realtime * 10)%8;
@@ -1096,6 +1132,7 @@ static void M_Load_Draw (void)
 	for (i = 0; i < MAX_SAVEGAMES; i++)
 		M_Print (16, 60 + 8*i, m_filenames[i]);
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 8, MAX_SAVEGAMES); if (h >= 0) load_cursor = h; }
 // line cursor
 	M_DrawCharacter (8, 60 + load_cursor*8, 12+((int)(realtime*4)&1));
 }
@@ -1110,6 +1147,7 @@ static void M_Save_Draw (void)
 	for (i = 0; i < MAX_SAVEGAMES; i++)
 		M_Print (16, 60 + 8*i, m_filenames[i]);
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 8, MAX_SAVEGAMES); if (h >= 0) load_cursor = h; }
 // line cursor
 	M_DrawCharacter (8, 60 + load_cursor*8, 12+((int)(realtime*4)&1));
 }
@@ -1411,6 +1449,7 @@ static void M_MultiPlayer_Draw (void)
 	M_DrawBigString (72, 60 + (3 * 20), "LOAD");
 	M_DrawBigString (72, 60 + (4 * 20), "SAVE");
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 20, MULTIPLAYER_ITEMS); if (h >= 0) m_multiplayer_cursor = h; }
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPic (43, 54 + m_multiplayer_cursor * 20,Draw_CachePic( va("gfx/menu/menudot%i.lmp", f+1 ) ) );
 
@@ -1822,6 +1861,7 @@ enum
 static void M_Menu_Display_f (void);
 static void M_Display_Draw (void);
 static void M_Display_Key (int k);
+static qboolean M_Display_IsSkip (int cursor);
 static void M_Menu_Sound_f (void);
 static void M_Sound_Draw (void);
 static void M_Sound_Key (int k);
@@ -1886,6 +1926,13 @@ static void M_Options_Draw (void)
 	M_Print (76, 92 + 8*OPT_GAMEPAD,	"Controller");
 	M_Print (76, 92 + 8*OPT_CONSOLE,	"Go to Console");
 	M_Print (76, 92 + 8*OPT_DEFAULTS,	"Reset to Defaults");
+
+	/* Mouse hover */
+	{
+		int hover = M_MouseToMenuItem(menu_mouse_y, 92, 8, OPTIONS_ITEMS);
+		if (hover >= 0)
+			options_cursor = hover;
+	}
 
 	// cursor
 	M_DrawCharacter (64, 92 + 8*options_cursor, 12 + ((int)(realtime*4) & 1));
@@ -2017,7 +2064,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-			Cvar_SetValue ("r_farclip", 4096);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
 		{
@@ -2036,7 +2082,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-			Cvar_SetValue ("r_farclip", 2048);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
 		{
@@ -2055,7 +2100,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-			Cvar_SetValue ("r_farclip", 4096);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
 		{
@@ -2074,7 +2118,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-			Cvar_SetValue ("r_farclip", 4096);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
 		{
@@ -2093,7 +2136,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
-			Cvar_SetValue ("r_farclip", 8192);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
 		{
@@ -2112,14 +2154,13 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0.25f);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
-			Cvar_SetValue ("r_farclip", 16384);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
 	}
 	case DISP_GAMMA:
 		f = v_gamma.value - dir * 0.05;
-		if (f < 0.5)	f = 0.5;
+		if (f < 0.3)	f = 0.3;
 		else if (f > 1)	f = 1;
 		Cvar_SetValue ("gamma", f);
 		break;
@@ -2225,7 +2266,7 @@ static void M_Display_Draw (void)
 	}
 
 	M_Print (76, 92 + 8*DISP_GAMMA,	"Brightness    :");
-	r = (1.0 - v_gamma.value) / 0.5;
+	r = (1.0 - v_gamma.value) / 0.7;
 	M_DrawSlider (220, 92 + 8*DISP_GAMMA, r);
 
 	M_Print (76, 92 + 8*DISP_CONTRAST,	"Contrast      :");
@@ -2302,6 +2343,13 @@ static void M_Display_Draw (void)
 			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
 	}
 #endif
+
+	/* Mouse hover */
+	{
+		int hover = M_MouseToMenuItem(menu_mouse_y, 92, 8, DISP_ITEMS);
+		if (hover >= 0 && !M_Display_IsSkip(hover))
+			display_cursor = hover;
+	}
 
 	M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
 }
@@ -2385,7 +2433,6 @@ enum
 	REND_WATERWARP,
 	REND_FXAA,
 	REND_MOTIONBLUR,
-	REND_FARCLIP,
 	REND_ITEMS
 };
 
@@ -2484,18 +2531,6 @@ static void M_Rendering_AdjustSliders (int dir)
 		Cvar_SetValue ("r_motionblur", f);
 		break;
 	}
-	case REND_FARCLIP:
-	{
-		static const int clip_steps[] = { 4096, 8192, 16384 };
-		int i, cur = (int)r_farclip.value, num = 3;
-		for (i = 0; i < num; i++)
-			if (clip_steps[i] >= cur) break;
-		i += dir;
-		if (i < 0) i = 0;
-		if (i >= num) i = num - 1;
-		Cvar_SetValue ("r_farclip", clip_steps[i]);
-		break;
-	}
 	}
 }
 
@@ -2577,17 +2612,7 @@ static void M_Rendering_Draw (void)
 			M_DrawSlider (220, 92 + 8*REND_MOTIONBLUR, mb);
 	}
 
-	M_Print (76, 92 + 8*REND_FARCLIP,	"Draw Distance :");
-	{
-		int fc = (int)r_farclip.value;
-		if (fc <= 4096)
-			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Normal");
-		else if (fc <= 8192)
-			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Far");
-		else
-			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Very Far");
-	}
-
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, REND_ITEMS); if (h >= 0) rendering_cursor = h; }
 	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
 }
 
@@ -2738,6 +2763,7 @@ static void M_Sound_Draw (void)
 	r = sfxvolume.value;
 	M_DrawSlider (220, 92 + 8*SND_SFXVOL, r);
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, SND_ITEMS); if (h >= 0) sound_cursor = h; }
 	M_DrawCharacter (64, 92 + sound_cursor*8, 12+((int)(realtime*4)&1));
 }
 
@@ -2921,6 +2947,7 @@ static void M_Game_Draw (void)
 			ct == 0 ? "Opaque" : ct == 1 ? "Light" : "Clear");
 	}
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GAME_ITEMS); if (h >= 0) game_cursor = h; }
 	M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
 }
 
@@ -3037,6 +3064,7 @@ static void M_Gamepad_Draw (void)
 	r = joy_rumble.value;
 	M_DrawSlider (220, y + 8*GPAD_RUMBLE, r);
 
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 90, 8, GPAD_ITEMS); if (h >= 0) gamepad_cursor = h; }
 	M_DrawCharacter (208, y + gamepad_cursor*8, 12 + ((int)(realtime*4) & 1));
 }
 
@@ -3316,6 +3344,14 @@ static void M_Keys_Draw (void)
 		}
 	}
 
+	/* Mouse hover — map visible row to absolute key index */
+	if (!(Key_GetDest() & key_bindbit))
+	{
+		int h = M_MouseToMenuItem(menu_mouse_y, 80, 8, KEYS_SIZE);
+		if (h >= 0)
+			keys_cursor = keys_top + h;
+	}
+
 	if (Key_GetDest() & key_bindbit)
 	{
 		M_Print (12, 64, "Press a key or button for this action");
@@ -3367,6 +3403,28 @@ static void M_Keys_Key (int k)
 	case K_DEL:		// delete bindings
 		S_LocalSound ("raven/menu2.wav");
 		M_UnbindCommand (bindnames[keys_cursor][0]);
+		break;
+
+	default:
+		/* Type-to-search: jump to next binding matching typed char */
+		if (k >= 32 && k < 128 && !(Key_GetDest() & key_bindbit))
+		{
+			int j, start = keys_cursor + 1;
+			char ch = (k >= 'A' && k <= 'Z') ? k + 32 : k;
+			for (j = 0; j < (int)NUMCOMMANDS; j++)
+			{
+				int idx = (start + j) % (int)NUMCOMMANDS;
+				const char *name = bindnames[idx][1];
+				int n;
+				for (n = 0; name[n]; n++)
+				{
+					char c = name[n];
+					if (c >= 'A' && c <= 'Z') c += 32;
+					if (c == ch) { keys_cursor = idx; goto found; }
+				}
+			}
+		found: ;
+		}
 		break;
 	}
 
@@ -5649,6 +5707,14 @@ void M_Keybind (int key)
 
 void M_Keydown (int key)
 {
+	/* Mouse support: click=Enter, wheel=Up/Down */
+	if (key == K_MOUSE1)
+		key = K_ENTER;
+	else if (key == K_MWHEELUP)
+		key = K_UPARROW;
+	else if (key == K_MWHEELDOWN)
+		key = K_DOWNARROW;
+
 	switch (m_state)
 	{
 	case m_none:

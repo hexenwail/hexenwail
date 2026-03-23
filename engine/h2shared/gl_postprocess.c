@@ -28,6 +28,7 @@ static GLuint	pp_resolve_fbo;	/* resolve target (non-multisampled, for shader bl
 static GLuint	pp_color_tex;	/* resolved color texture */
 static int	pp_width, pp_height;
 static int	pp_samples;	/* MSAA sample count (0 or 1 = no MSAA) */
+static qboolean	pp_fbo_failed;	/* true if FBO creation failed — don't retry every frame */
 
 /* FBO state — native res for 2D composite */
 static GLuint	pp_native_fbo;
@@ -188,7 +189,11 @@ static qboolean PP_CreateFBO (int width, int height)
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
 			Con_Printf("PostProcess: MSAA FBO incomplete (status 0x%x), falling back\n", status);
-			PP_DeleteFBO();
+			/* clean up only MSAA resources, keep pp_color_tex for non-MSAA fallback */
+			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+			if (pp_fbo)       { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
+			if (pp_color_rb)  { glDeleteRenderbuffers_fp(1, &pp_color_rb); pp_color_rb = 0; }
+			if (pp_depth_rb)  { glDeleteRenderbuffers_fp(1, &pp_depth_rb); pp_depth_rb = 0; }
 			samples = 0;
 			/* fall through to non-MSAA path below */
 		}
@@ -207,6 +212,7 @@ static qboolean PP_CreateFBO (int width, int height)
 			{
 				Con_Printf("PostProcess: resolve FBO incomplete\n");
 				PP_DeleteFBO();
+				pp_fbo_failed = true;
 				return false;
 			}
 
@@ -238,6 +244,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	{
 		Con_Printf("PostProcess: FBO incomplete (status 0x%x)\n", status);
 		PP_DeleteFBO();
+		pp_fbo_failed = true;
 		return false;
 	}
 
@@ -585,6 +592,7 @@ void GL_PostProcess_Shutdown (void)
 	pp_lut_built = false;
 	pp_initialized = false;
 	pp_active = false;
+	pp_fbo_failed = false;
 }
 
 void GL_PostProcess_BeginFrame (void)
@@ -610,6 +618,8 @@ void GL_PostProcess_BeginFrame (void)
 
 	/* (re)create FBO if size changed — MSAA changes go through
 	 * vid_restart which destroys and recreates everything */
+	if (pp_fbo_failed)
+		return;
 	if (w != pp_width || h != pp_height)
 	{
 		if (!PP_CreateFBO(w, h))
