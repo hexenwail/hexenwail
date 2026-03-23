@@ -2453,6 +2453,7 @@ enum
 	REND_WATERALPHA,
 	REND_WATERWARP,
 	REND_GLOWS,
+	REND_FLASHINTENSITY,
 	REND_FXAA,
 	REND_MOTIONBLUR,
 	REND_ITEMS
@@ -2562,6 +2563,14 @@ static void M_Rendering_AdjustSliders (int dir)
 		Cvar_SetValue ("gl_glow_intensity", cur >= 3 ? 1.0f : 0.4f);
 		break;
 	}
+	case REND_FLASHINTENSITY:
+	{
+		float f = gl_flashintensity.value + dir * 0.25f;
+		if (f < 0) f = 0;
+		if (f > 2) f = 2;
+		Cvar_SetValue ("gl_flashintensity", f);
+		break;
+	}
 	case REND_FXAA:
 		Cvar_SetValue ("gl_fxaa", !gl_fxaa.integer);
 		break;
@@ -2651,6 +2660,12 @@ static void M_Rendering_Draw (void)
 		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Reduced");
 	else
 		M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
+
+	M_Print (76, 92 + 8*REND_FLASHINTENSITY,"Flash         :");
+	if (gl_flashintensity.value <= 0)
+		M_PrintWhite (220, 92 + 8*REND_FLASHINTENSITY, "Off");
+	else
+		M_DrawSlider (220, 92 + 8*REND_FLASHINTENSITY, gl_flashintensity.value / 2.0f);
 
 	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
 	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
