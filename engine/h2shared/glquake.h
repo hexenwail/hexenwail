@@ -256,6 +256,7 @@ extern	cvar_t	gl_waterripple;
 extern	cvar_t	gl_particles;
 extern	cvar_t	gl_fullbrights;
 extern	cvar_t	gl_fxaa;
+extern	cvar_t	gl_lmatlas;
 extern	cvar_t	gl_glows;
 extern	cvar_t	gl_other_glows;
 extern	cvar_t	gl_missile_glows;
