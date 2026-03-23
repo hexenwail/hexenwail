@@ -27,6 +27,7 @@
  */
 
 #include "quakedef.h"
+#include "input.h"
 
 static	float	v_dmg_time, v_dmg_roll, v_dmg_pitch;
 
@@ -387,6 +388,13 @@ void V_ParseDamage (void)
 	v_dmg_pitch = count*side*v_kickpitch.value;
 
 	v_dmg_time = v_kicktime.value;
+
+	/* Gamepad rumble on damage — scale intensity by damage amount */
+	{
+		float intensity = count / 80.0f;
+		if (intensity > 1.0f) intensity = 1.0f;
+		IN_GPRumble (intensity, intensity * 0.6f, (unsigned int)(100 + count * 2));
+	}
 }
 
 /*
@@ -951,7 +959,25 @@ static void V_CalcRefdef (void)
 
 	// refresh position (interpolated by CL_RelinkEntities every frame)
 	VectorCopy (ent->origin, r_refdef.vieworg);
-	r_refdef.vieworg[2] += cl.viewheight + bob;
+
+	// smooth viewheight transitions (crouch/uncrouch)
+	if (cl.crouch != cl.viewheight)
+	{
+		float step = host_frametime * 150;	// 150 units/sec
+		if (cl.crouch > cl.viewheight)
+		{
+			cl.crouch -= step;
+			if (cl.crouch < cl.viewheight)
+				cl.crouch = cl.viewheight;
+		}
+		else
+		{
+			cl.crouch += step;
+			if (cl.crouch > cl.viewheight)
+				cl.crouch = cl.viewheight;
+		}
+	}
+	r_refdef.vieworg[2] += cl.crouch + bob;
 
 	// never let it sit exactly on a node line, because a water plane can
 	// dissapear when viewed with the eye exactly on it.
