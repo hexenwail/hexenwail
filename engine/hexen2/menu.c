@@ -2385,6 +2385,7 @@ enum
 	REND_WATERWARP,
 	REND_FXAA,
 	REND_MOTIONBLUR,
+	REND_FARCLIP,
 	REND_ITEMS
 };
 
@@ -2483,6 +2484,18 @@ static void M_Rendering_AdjustSliders (int dir)
 		Cvar_SetValue ("r_motionblur", f);
 		break;
 	}
+	case REND_FARCLIP:
+	{
+		static const int clip_steps[] = { 1024, 2048, 4096, 8192, 16384 };
+		int i, cur = (int)r_farclip.value, num = 5;
+		for (i = 0; i < num; i++)
+			if (clip_steps[i] >= cur) break;
+		i += dir;
+		if (i < 0) i = 0;
+		if (i >= num) i = num - 1;
+		Cvar_SetValue ("r_farclip", clip_steps[i]);
+		break;
+	}
 	}
 }
 
@@ -2562,6 +2575,21 @@ static void M_Rendering_Draw (void)
 			M_PrintWhite (220, 92 + 8*REND_MOTIONBLUR, "Off");
 		else
 			M_DrawSlider (220, 92 + 8*REND_MOTIONBLUR, mb);
+	}
+
+	M_Print (76, 92 + 8*REND_FARCLIP,	"Draw Distance :");
+	{
+		int fc = (int)r_farclip.value;
+		if (fc <= 1024)
+			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Very Short");
+		else if (fc <= 2048)
+			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Short");
+		else if (fc <= 4096)
+			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Normal");
+		else if (fc <= 8192)
+			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Far");
+		else
+			M_PrintWhite (220, 92 + 8*REND_FARCLIP, "Very Far");
 	}
 
 	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
