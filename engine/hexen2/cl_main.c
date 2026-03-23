@@ -942,6 +942,7 @@ int CL_ReadFromServer (void)
 		Con_Printf ("\n");
 
 	CL_RelinkEntities ();
+	CL_UpdateEffects ();
 	CL_UpdateTEnts ();
 
 // bring the links up to date
