@@ -1588,6 +1588,9 @@ void GL_BuildLightmaps (void)
 		glGenTextures_fp(MAX_LIGHTMAPS, lightmap_textures);
 	}
 
+	/* Decide atlas mode BEFORE building surfaces (UVs depend on it) */
+	lm_atlas_enabled = (Cvar_VariableValue("gl_lmatlas") != 0);
+
 	for (j = 1; j < MAX_MODELS; j++)
 	{
 		m = cl.model_precache[j];
@@ -1638,7 +1641,6 @@ void GL_BuildLightmaps (void)
 	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
 	 * One bind for ALL world surfaces, zero lightmap rebinds.
 	 * Disabled on Intel GPUs due to driver timeout issues. */
-	lm_atlas_enabled = (Cvar_VariableValue("gl_lmatlas") != 0);
 	{
 		byte *atlas = NULL;
 		int page, row, col, y;
