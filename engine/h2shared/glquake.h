@@ -225,6 +225,7 @@ extern	cvar_t	r_mirroralpha;
 extern	cvar_t	r_wateralpha;
 extern	cvar_t	r_skyalpha;
 extern	cvar_t	r_dynamic;
+extern	cvar_t	r_farclip;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
