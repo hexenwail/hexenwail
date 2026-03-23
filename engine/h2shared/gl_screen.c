@@ -586,14 +586,17 @@ static void SCR_DrawClock (void)
 	if (!scr_showclock.integer)
 		return;
 
-	if (scr_showclock.integer == 2)
+	if (scr_showclock.integer >= 2)
 	{
 		/* Wall clock (real time) */
 		time_t	rawtime;
 		struct tm *ti;
 		time(&rawtime);
 		ti = localtime(&rawtime);
-		sprintf(st, "%02d:%02d", ti->tm_hour, ti->tm_min);
+		if (scr_showclock.integer == 3)
+			sprintf(st, "%02d:%02d:%02d", ti->tm_hour, ti->tm_min, ti->tm_sec);
+		else
+			sprintf(st, "%02d:%02d", ti->tm_hour, ti->tm_min);
 	}
 	else
 	{
@@ -610,6 +613,21 @@ static void SCR_DrawClock (void)
 	x = vid.width - strlen(st) * 8 - 8;
 	y = vid.height - sb_lines - 16 - (scr_showfps.integer ? 8 : 0);
 	Draw_String(x, y, st);
+
+	/* Also show host uptime below the clock */
+	if (scr_showclock.integer >= 2)
+	{
+		seconds = (int)realtime;
+		minutes = seconds / 60;
+		seconds %= 60;
+		if (minutes >= 60)
+			sprintf(st, "%dh%02dm", minutes / 60, minutes % 60);
+		else
+			sprintf(st, "%dm%02ds", minutes, seconds);
+		x = vid.width - strlen(st) * 8 - 8;
+		y -= 8;
+		Draw_String(x, y, st);
+	}
 }
 
 /*
