@@ -577,8 +577,10 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 
-	/* Build static VBO for world surfaces */
-	GL_BuildWorldVBO ();
+	/* Build static VBO for world surfaces (skip on video reinit
+	 * since surface polys aren't rebuilt — they remain valid) */
+	if (!draw_reinit)
+		GL_BuildWorldVBO ();
 }
 
 
@@ -1040,7 +1042,7 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
-			else if (world_vao)
+			else if (world_vao && lightmap_array_texture)
 			{
 				/* Static VBO path: vertices pre-uploaded at level load.
 				 * Bind lightmap array + diffuse texture, then draw
@@ -1654,6 +1656,8 @@ static void GL_BuildWorldVBO (void)
 	if (total_verts == 0)
 		return;
 
+	Con_SafePrintf("World VBO: building %d triangles...\n", total_verts / 3);
+
 	/* Allocate and fill vertex buffer */
 	verts = (worldvert_t *) malloc(total_verts * sizeof(worldvert_t));
 	if (!verts)
@@ -1841,17 +1845,22 @@ void GL_BuildLightmaps (void)
 	}
 
 	/* Create GL_TEXTURE_2D_ARRAY for batched world rendering */
-	if (!lightmap_array_texture)
-		glGenTextures_fp(1, &lightmap_array_texture);
-	glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
-	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage3D_fp(GL_TEXTURE_2D_ARRAY, 0, lightmap_internalformat,
-			BLOCK_WIDTH, BLOCK_HEIGHT, lightmap_array_layers, 0,
-			gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps);
-	glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
+	if (glTexImage3D_fp && lightmap_array_layers > 0)
+	{
+		if (!lightmap_array_texture)
+			glGenTextures_fp(1, &lightmap_array_texture);
+		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage3D_fp(GL_TEXTURE_2D_ARRAY, 0, lightmap_internalformat,
+				BLOCK_WIDTH, BLOCK_HEIGHT, lightmap_array_layers, 0,
+				gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps);
+		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
+	}
+	else
+		lightmap_array_texture = 0;
 
 	Con_SafePrintf("Lightmaps: %d pages (%dx%d) in texture array\n",
 		       lightmap_array_layers, BLOCK_WIDTH, BLOCK_HEIGHT);
