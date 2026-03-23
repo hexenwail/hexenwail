@@ -252,6 +252,7 @@ extern	cvar_t	gl_flashblend;
 extern	cvar_t	gl_nocolors;
 extern	cvar_t	gl_waterripple;
 extern	cvar_t	gl_particles;
+extern	cvar_t	gl_fullbrights;
 extern	cvar_t	gl_glows;
 extern	cvar_t	gl_other_glows;
 extern	cvar_t	gl_missile_glows;

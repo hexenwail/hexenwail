@@ -111,6 +111,7 @@ cvar_t	gl_keeptjunctions = {"gl_keeptjunctions", "1", CVAR_ARCHIVE};
 cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
+cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pixel overlay on models
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_NONE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_NONE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_NONE};
@@ -1053,7 +1054,7 @@ static void R_DrawAliasModel (entity_t *e)
 
 	// Fullbright pass: render fullbright pixels with additive blending
 	// Skip for translucent models — additive blend over transparency looks wrong
-	if (skinnum < 100 &&
+	if (gl_fullbrights.integer && skinnum < 100 &&
 	    !((e->drawflags & DRF_TRANSLUCENT) ||
 	      (e->model->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS))))
 	{
