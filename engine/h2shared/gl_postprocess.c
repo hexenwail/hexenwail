@@ -546,9 +546,11 @@ void GL_PostProcess_Init (void)
 		return;
 	}
 
-	/* 3D texture and uniform functions for softemu */
+	/* GL functions loaded at runtime */
 	glTexImage3D_fp = (glTexImage3D_f) SDL_GL_GetProcAddress("glTexImage3D");
 	glUniform3fv_fp = (glUniform3fv_f) SDL_GL_GetProcAddress("glUniform3fv");
+	if (!glUniform2f_fp)
+		glUniform2f_fp = (glUniform2f_f) SDL_GL_GetProcAddress("glUniform2f");
 
 	if (!PP_InitShader())
 	{
@@ -802,7 +804,7 @@ void GL_PostProcess_EndFrame (void)
 		glUniform1f_fp(pp_loc_time, (float)realtime);
 	if (pp_loc_fxaa >= 0)
 		glUniform1f_fp(pp_loc_fxaa, Cvar_VariableValue("gl_fxaa"));
-	if (pp_loc_rcpframe >= 0)
+	if (pp_loc_rcpframe >= 0 && glUniform2f_fp)
 		glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
 	if (pp_loc_motionblur >= 0)
 	{
@@ -815,7 +817,7 @@ void GL_PostProcess_EndFrame (void)
 		if (dy > 0.03f) dy = 0.03f; else if (dy < -0.03f) dy = -0.03f;
 		if (dp > 0.03f) dp = 0.03f; else if (dp < -0.03f) dp = -0.03f;
 		glUniform1f_fp(pp_loc_motionblur, Cvar_VariableValue("r_motionblur"));
-		if (pp_loc_viewdelta >= 0)
+		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
 			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
 		prev_yaw = yaw;
 		prev_pitch = pitch;
