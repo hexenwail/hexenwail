@@ -42,6 +42,11 @@ static immvert_t	imm_buffer[GL_IMM_MAX_VERTS];
 static int		imm_count;
 static float	imm_alpha_threshold = -1.0f;	/* -1 = use shader default */
 
+/* Ring buffer for streaming VBO — suballocate within a large GPU buffer
+ * instead of orphaning with glBufferData every draw call. */
+#define IMM_RING_SIZE		(GL_IMM_MAX_VERTS * 4)	/* 4x the batch size */
+static int		imm_ring_offset;	/* next write position in verts */
+
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
 static float	imm_cur_lm[2];
@@ -69,10 +74,11 @@ void GL_VBO_Init (void)
 	glGenVertexArrays_fp(1, &imm_vao);
 	glBindVertexArray_fp(imm_vao);
 
-	/* create streaming VBO */
+	/* create streaming VBO — large ring buffer for suballocation */
 	glGenBuffers_fp(1, &imm_vbo);
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
-	glBufferData_fp(GL_ARRAY_BUFFER, sizeof(imm_buffer), NULL, GL_STREAM_DRAW);
+	glBufferData_fp(GL_ARRAY_BUFFER, IMM_RING_SIZE * sizeof(immvert_t), NULL, GL_STREAM_DRAW);
+	imm_ring_offset = 0;
 
 	/* set up vertex attributes */
 	glEnableVertexAttribArray_fp(ATTR_POSITION);
@@ -242,6 +248,14 @@ void GL_ImmResetState (void)
 	imm_vao_bound = false;
 	imm_cached_fog_density = -1;
 	imm_mvp_dirty = true;
+	/* Orphan and reset ring buffer at frame start */
+	if (imm_vbo)
+	{
+		glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
+		glBufferData_fp(GL_ARRAY_BUFFER, IMM_RING_SIZE * sizeof(immvert_t),
+				 NULL, GL_STREAM_DRAW);
+	}
+	imm_ring_offset = 0;
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -259,9 +273,21 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_vao_bound = true;
 	}
 
-	/* upload vertex data (always needed — streaming buffer) */
-	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
-			 imm_buffer, GL_STREAM_DRAW);
+	/* Upload vertex data into ring buffer. If we'd overflow,
+	 * orphan the buffer and reset to start (one alloc per frame
+	 * instead of per draw call). */
+	if (imm_ring_offset + imm_count > IMM_RING_SIZE)
+	{
+		/* Orphan: tell driver we don't need old data */
+		glBufferData_fp(GL_ARRAY_BUFFER, IMM_RING_SIZE * sizeof(immvert_t),
+				 NULL, GL_STREAM_DRAW);
+		imm_ring_offset = 0;
+		imm_mvp_dirty = true;	/* offsets changed, may need re-setup */
+	}
+	glBufferSubData_fp(GL_ARRAY_BUFFER,
+			    imm_ring_offset * sizeof(immvert_t),
+			    imm_count * sizeof(immvert_t),
+			    imm_buffer);
 
 	/* activate shader only if changed */
 	if (imm_active_program != shader->program)
@@ -313,25 +339,35 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cached_fog_color[2] = r_fog_color[2];
 	}
 
-	/* draw */
+	/* draw from ring buffer offset */
 	if (mode == GL_QUADS)
 	{
-		int num_quads = imm_count / 4;
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
-		glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
-				   GL_UNSIGNED_SHORT, NULL);
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
+		/* Quads use index buffer that references verts 0-3, so they
+		 * need to be at offset 0. Orphan for this rare case (2D only). */
+		glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
+				 imm_buffer, GL_STREAM_DRAW);
+		imm_ring_offset = 0;
+		{
+			int num_quads = imm_count / 4;
+			glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
+			glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
+					   GL_UNSIGNED_SHORT, NULL);
+			glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
+		}
+		imm_count = 0;
+		return;
 	}
 	else if (mode == GL_POLYGON)
 	{
-		glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
+		glDrawArrays_fp(GL_TRIANGLE_FAN, imm_ring_offset, imm_count);
 	}
 	else
 	{
-		glDrawArrays_fp(mode, 0, imm_count);
+		glDrawArrays_fp(mode, imm_ring_offset, imm_count);
 	}
 
-	/* DON'T unbind VAO/shader — keep them hot for next draw */
+	/* Advance ring offset, keep VAO/shader hot for next draw */
+	imm_ring_offset += imm_count;
 	imm_count = 0;
 }
 
