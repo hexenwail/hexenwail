@@ -368,7 +368,15 @@ void R_PushDlights (void)
 
 	for (i = 0; i < MAX_DLIGHTS; i++, l++)
 	{
+		float dx, dy, dz, dist_sq;
 		if (l->die < cl.time || !l->radius)
+			continue;
+		/* Skip lights too far from view to see */
+		dx = l->origin[0] - r_origin[0];
+		dy = l->origin[1] - r_origin[1];
+		dz = l->origin[2] - r_origin[2];
+		dist_sq = dx*dx + dy*dy + dz*dz;
+		if (dist_sq > (l->radius + 1024) * (l->radius + 1024))
 			continue;
 		R_MarkLights ( l, 1<<i, cl.worldmodel->nodes );
 	}
