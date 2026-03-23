@@ -132,7 +132,6 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glScalef_fp		glScalef
 #define glTexImage2D_fp		glTexImage2D
 #define glTexSubImage2D_fp	glTexSubImage2D
-#define glBufferSubData_fp	glBufferSubData
 
 #define glBegin_fp		glBegin
 #define glEnd_fp		glEnd
