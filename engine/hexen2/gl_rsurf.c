@@ -577,13 +577,7 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 
-	/* Build static VBO only once per map — GL_BuildLightmaps is
-	 * called from multiple places during level load */
-	if (!world_vao)
-	{
-		Con_DPrintf("[GL] Building world VBO\n");
-		GL_BuildWorldVBO ();
-	}
+	GL_BuildWorldVBO ();	/* no-ops if already built */
 
 	Con_DPrintf("[GL] BuildLightmaps: complete\n");
 }
@@ -1641,6 +1635,10 @@ static void GL_BuildWorldVBO (void)
 	msurface_t	*surf;
 	worldvert_t	*verts, *v;
 	glpoly_t	*p;
+
+	/* Already built? Skip. */
+	if (world_vao)
+		return;
 
 	world_num_verts = 0;
 
