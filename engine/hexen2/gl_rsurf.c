@@ -69,6 +69,11 @@ static GLuint	world_vao;
 static int	world_num_verts;
 static int	world_max_verts;
 
+/* Scratch arrays for glMultiDrawArrays — collected per texture chain */
+#define MAX_MULTIDRAW	4096
+static GLint	multidraw_first[MAX_MULTIDRAW];
+static GLsizei	multidraw_count[MAX_MULTIDRAW];
+
 
 /*
 ===============
@@ -1075,16 +1080,23 @@ static void DrawTextureChains (entity_t *e)
 
 				glBindVertexArray_fp(world_vao);
 
+				{
+				int ndraw = 0;
+
 				for ( ; s ; s = s->texturechain)
 				{
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						/* Fall back to immediate mode for special surfaces */
+						/* Flush batch before falling back */
+						if (ndraw > 0 && glMultiDrawArrays_fp)
+						{
+							glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
+							ndraw = 0;
+						}
 						glBindVertexArray_fp(0);
 						glUseProgram_fp(0);
 						R_RenderBrushPolyMTex (e, s, false);
-						/* Re-enter static VBO path */
 						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
@@ -1098,14 +1110,20 @@ static void DrawTextureChains (entity_t *e)
 						continue;
 					}
 
-					if (s->vbo_num_verts > 0)
+					if (s->vbo_num_verts > 0 && ndraw < MAX_MULTIDRAW)
 					{
-						glDrawArrays_fp(GL_TRIANGLES, s->vbo_first_vert, s->vbo_num_verts);
+						multidraw_first[ndraw] = s->vbo_first_vert;
+						multidraw_count[ndraw] = s->vbo_num_verts;
+						ndraw++;
 						c_brush_polys++;
 					}
 
-					/* Track lightmap dirty state (no vertex work) */
 					R_CheckSurfaceLightmap (s);
+				}
+
+				/* Flush remaining batch */
+				if (ndraw > 0 && glMultiDrawArrays_fp)
+					glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
 				}
 
 				glBindVertexArray_fp(0);
@@ -1714,7 +1732,7 @@ static void GL_BuildWorldVBO (void)
 
 	free(verts);
 
-	Con_SafePrintf("World VBO: %d triangles (%d KB)\n",
+	Con_DPrintf("World VBO: %d triangles (%d KB)\n",
 		       total_verts / 3,
 		       (int)(total_verts * sizeof(worldvert_t) / 1024));
 }
