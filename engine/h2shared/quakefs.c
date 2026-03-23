@@ -1617,9 +1617,19 @@ void FS_Init (void)
 		/* only registered versions can do -game/-mod */
 		if (! (gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)))
 			Sys_Error ("You must have the full version of Hexen II to play modified games");
-		/* add basedir/gamedir as an override game */
+		/* add basedir/gamedir as an override game.
+		 * FS_Gamedir resets the search path above fs_base_searchpaths,
+		 * so we need to re-add portals if -mod was used (portals has
+		 * shared models like sucwp2p.mdl that mods depend on). */
 		if (i < com_argc - 1)
+		{
+			if (check_portals && q_strcasecmp(com_argv[i+1], "portals"))
+			{
+				FS_AddGameDirectory ("portals", true);
+				fs_base_searchpaths = fs_searchpaths;
+			}
 			FS_Gamedir (com_argv[i+1]);
+		}
 	}
 }
 

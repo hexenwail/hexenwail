@@ -567,7 +567,7 @@ static void VID_InitGamma (void)
 	 * For now, hw-gamma via SDL is not supported. */
 
 	if (!gammaworks)
-		Con_SafePrintf("gamma adjustment not available\n");
+		Con_DPrintf("hardware gamma not available (using GLSL post-process)\n");
 }
 
 static void VID_ShutdownGamma (void)
@@ -1504,9 +1504,7 @@ void	VID_Init (const unsigned char *palette)
 	vid.maxwarpheight = WARP_HEIGHT;
 	vid.colormap = host_colormap;
 	vid.fullbright = 256 - LittleLong (*((int *)(vid.colormap + 256 * 64)));
-	Con_SafePrintf ("Fullbright start index: %d (raw colormap value: %d)\n",
-			vid.fullbright,
-			LittleLong (*((int *)(vid.colormap + 256 * 64))));
+	Con_DPrintf ("Fullbright start index: %d\n", vid.fullbright);
 	if (vid.fullbright < 1 || vid.fullbright > 256)
 		vid.fullbright = 224;	/* fallback: standard Quake/Hexen II value */
 

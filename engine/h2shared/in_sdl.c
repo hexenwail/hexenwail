@@ -38,6 +38,10 @@ static cvar_t	m_filter = {"m_filter", "0", CVAR_NONE};
 
 static int	mouse_x, mouse_y, old_mouse_x, old_mouse_y;
 
+/* Menu cursor position (screen coordinates) */
+int		menu_mouse_x, menu_mouse_y;
+qboolean	menu_mouse_moved;
+
 static qboolean	mouseactive = false;
 static qboolean	mouseinitialized = false;
 static qboolean	mouseactivatetoggle = false;
@@ -870,6 +874,17 @@ void IN_SendKeyEvents (void)
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
+			/* In menu mode, allow mouse clicks even when mouse is "inactive" */
+			if (Key_GetDest() & key_menu)
+			{
+				float mx, my;
+				SDL_GetMouseState(&mx, &my);
+				menu_mouse_x = (int)mx;
+				menu_mouse_y = (int)my;
+				if (event.button.button == 1)  /* left click */
+					Key_Event(K_MOUSE1, event.button.down);
+				break;
+			}
 			if (!mouseactive || in_mode_set)
 				break;
 			if (event.button.button < 1 ||
@@ -881,8 +896,9 @@ void IN_SendKeyEvents (void)
 			break;
 
 		case SDL_EVENT_MOUSE_WHEEL:
-			if (!mouseactive || in_mode_set)
+			if (in_mode_set)
 				break;
+			/* Allow wheel in menus even when mouse is deactivated */
 			if (event.wheel.y > 0)
 			{
 				Key_Event(K_MWHEELUP, true);
