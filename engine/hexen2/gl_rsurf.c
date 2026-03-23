@@ -54,6 +54,7 @@ static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 #define LM_ATLAS_HEIGHT	(LM_ATLAS_ROWS * BLOCK_HEIGHT)	/* 2048 */
 static GLuint	lm_atlas_texture;
 static int	lm_atlas_layers;	/* number of pages in the atlas */
+static qboolean	lm_atlas_enabled;	/* false = fall back to per-surface binds */
 
 
 /*
@@ -543,7 +544,7 @@ static void R_UpdateLightmaps (qboolean Translucent)
 					lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 
 			/* Patch the dirty page in the atlas */
-			if (lm_atlas_texture)
+			if (lm_atlas_enabled && lm_atlas_texture)
 			{
 				int col = i % LM_ATLAS_COLS;
 				int row = i / LM_ATLAS_COLS;
@@ -1490,7 +1491,8 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 		t += 8;
 		t /= BLOCK_HEIGHT*16;
 
-		/* Remap page-local UV to atlas position */
+		/* Remap page-local UV to atlas position (if atlas enabled) */
+		if (lm_atlas_enabled)
 		{
 			int col = fa->lightmaptexturenum % LM_ATLAS_COLS;
 			int row = fa->lightmaptexturenum / LM_ATLAS_COLS;
@@ -1637,14 +1639,17 @@ void GL_BuildLightmaps (void)
 
 	/* Build lightmap atlas — all pages in one 2D texture.
 	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
-	 * One bind for ALL world surfaces, zero lightmap rebinds. */
+	 * One bind for ALL world surfaces, zero lightmap rebinds.
+	 * Disabled on Intel GPUs due to driver timeout issues. */
+	lm_atlas_enabled = (Cvar_VariableValue("gl_lmatlas") != 0);
 	{
-		byte *atlas;
+		byte *atlas = NULL;
 		int page, row, col, y;
 		int page_stride = BLOCK_WIDTH * lightmap_bytes;
 		int atlas_stride = LM_ATLAS_WIDTH * lightmap_bytes;
 
-		atlas = (byte *) calloc(1, LM_ATLAS_WIDTH * LM_ATLAS_HEIGHT * lightmap_bytes);
+		if (lm_atlas_enabled)
+			atlas = (byte *) calloc(1, LM_ATLAS_WIDTH * LM_ATLAS_HEIGHT * lightmap_bytes);
 		if (atlas)
 		{
 			for (page = 0; page < lm_atlas_layers; page++)
