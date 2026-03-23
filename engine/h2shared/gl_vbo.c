@@ -23,20 +23,18 @@ extern float r_fog_color[3];
 /*   pos[3] + texcoord[2] + lmcoord[2] + color[4] = 11 floats         */
 /* ------------------------------------------------------------------ */
 
-#define IMM_FLOATS_PER_VERT	12
+#define IMM_FLOATS_PER_VERT	11
 #define IMM_STRIDE		(IMM_FLOATS_PER_VERT * sizeof(float))
 
 #define IMM_OFF_POS		0
 #define IMM_OFF_TEXCOORD	(3 * sizeof(float))
 #define IMM_OFF_LMCOORD		(5 * sizeof(float))
-#define IMM_OFF_LMLAYER		(7 * sizeof(float))
-#define IMM_OFF_COLOR		(8 * sizeof(float))
+#define IMM_OFF_COLOR		(7 * sizeof(float))
 
 typedef struct {
 	float	pos[3];
 	float	texcoord[2];
 	float	lmcoord[2];
-	float	lmlayer;
 	float	color[4];
 } immvert_t;
 
@@ -47,7 +45,6 @@ static float	imm_alpha_threshold = -1.0f;	/* -1 = use shader default */
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
 static float	imm_cur_lm[2];
-static float	imm_cur_lmlayer;
 static float	imm_cur_color[4] = { 1, 1, 1, 1 };
 
 /* GPU objects */
@@ -89,10 +86,6 @@ void GL_VBO_Init (void)
 	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
 	glVertexAttribPointer_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
 				  IMM_STRIDE, (void *)(size_t)IMM_OFF_LMCOORD);
-
-	glEnableVertexAttribArray_fp(ATTR_LMLAYER);
-	glVertexAttribPointer_fp(ATTR_LMLAYER, 1, GL_FLOAT, GL_FALSE,
-				  IMM_STRIDE, (void *)(size_t)IMM_OFF_LMLAYER);
 
 	glEnableVertexAttribArray_fp(ATTR_COLOR);
 	glVertexAttribPointer_fp(ATTR_COLOR, 4, GL_FLOAT, GL_FALSE,
@@ -157,11 +150,6 @@ void GL_ImmLMCoord2f (float s, float t)
 	imm_cur_lm[1] = t;
 }
 
-void GL_ImmLMLayer (float layer)
-{
-	imm_cur_lmlayer = layer;
-}
-
 void GL_SetAlphaThreshold (float threshold)
 {
 	imm_alpha_threshold = threshold;
@@ -214,7 +202,6 @@ void GL_ImmVertex3f (float x, float y, float z)
 	v->texcoord[1] = imm_cur_tc[1];
 	v->lmcoord[0] = imm_cur_lm[0];
 	v->lmcoord[1] = imm_cur_lm[1];
-	v->lmlayer = imm_cur_lmlayer;
 	v->color[0] = imm_cur_color[0];
 	v->color[1] = imm_cur_color[1];
 	v->color[2] = imm_cur_color[2];

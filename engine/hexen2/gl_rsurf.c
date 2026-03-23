@@ -26,18 +26,11 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
-extern float r_fog_density;
-extern float r_fog_color[3];
-
-static void GL_BuildWorldVBO (void);
-
 int		gl_lightmap_format = GL_RGBA;
 cvar_t		gl_lightmapfmt = {"gl_lightmapfmt", "GL_RGBA", CVAR_NONE};
 int		lightmap_bytes = 4;		// 1, 2, or 4. default is 4 for GL_RGBA
 static int	lightmap_internalformat = 0x8058;	// GL_RGBA8: sized internal format for glTexImage2D
 GLuint		lightmap_textures[MAX_LIGHTMAPS];
-GLuint		lightmap_array_texture;		/* GL_TEXTURE_2D_ARRAY for all lightmaps */
-int		lightmap_array_layers;		/* number of layers allocated */
 
 static unsigned int	blocklights[18*18];
 static unsigned int	blocklightscolor[18*18*3];	// colored light support. *3 for RGB to the definitions at the top
@@ -54,25 +47,13 @@ static int	allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 // main memory so texsubimage can update properly
 static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 
-/* Static world VBO — all world surface triangles uploaded once at level load */
-typedef struct {
-	float	pos[3];
-	float	texcoord[2];
-	float	lmcoord[2];
-	float	lmlayer;
-	float	color[4];
-} worldvert_t;
-#define WORLD_STRIDE	(12 * sizeof(float))
-
-GLuint		world_vbo;
-GLuint		world_vao;
-int		world_num_verts;
-static int	world_max_verts;
-
-/* Scratch arrays for glMultiDrawArrays — collected per texture chain */
-#define MAX_MULTIDRAW	4096
-static GLint	multidraw_first[MAX_MULTIDRAW];
-static GLsizei	multidraw_count[MAX_MULTIDRAW];
+/* Lightmap atlas — all pages in one 2D texture (16x16 grid of 128x128 pages = 2048x2048) */
+#define LM_ATLAS_COLS	16
+#define LM_ATLAS_ROWS	16
+#define LM_ATLAS_WIDTH	(LM_ATLAS_COLS * BLOCK_WIDTH)	/* 2048 */
+#define LM_ATLAS_HEIGHT	(LM_ATLAS_ROWS * BLOCK_HEIGHT)	/* 2048 */
+static GLuint	lm_atlas_texture;
+static int	lm_atlas_layers;	/* number of pages in the atlas */
 
 
 /*
@@ -555,29 +536,28 @@ static void R_UpdateLightmaps (qboolean Translucent)
 		{
 			lightmap_modified[i] = false;
 
-			/* Update individual 2D texture (for brush entity path) */
+			/* Update individual lightmap (kept for compatibility) */
 			GL_Bind(lightmap_textures[i]);
 			glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
 					BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
 					lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 
-			/* Update corresponding layer in the texture array */
-			if (lightmap_array_texture && glTexSubImage3D_fp)
+			/* Patch the dirty page in the atlas */
+			if (lm_atlas_texture)
 			{
-				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
-				glTexSubImage3D_fp(GL_TEXTURE_2D_ARRAY, 0,
-						0, 0, i,
-						BLOCK_WIDTH, BLOCK_HEIGHT, 1,
+				int col = i % LM_ATLAS_COLS;
+				int row = i / LM_ATLAS_COLS;
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
+						col * BLOCK_WIDTH, row * BLOCK_HEIGHT,
+						BLOCK_WIDTH, BLOCK_HEIGHT,
 						gl_lightmap_format, GL_UNSIGNED_BYTE,
 						lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
-				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
 			}
 		}
 	}
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
-
-	GL_BuildWorldVBO ();	/* no-ops if already built */
 }
 
 
@@ -647,16 +627,13 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 
-		/* Use lightmap texture array with per-vertex layer */
-		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
-		GL_ImmLMLayer ((float)fa->lightmaptexturenum);
+		GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
 
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPolyMTexLM (fa->polys);
 		else
 			DrawGLPolyMTex (fa->polys);
 
-		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
 		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	}
 
@@ -771,8 +748,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		else
 		{
 			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-			glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
-			GL_ImmLMLayer ((float)fa->lightmaptexturenum);
+			GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
 
 			if (fa->flags & SURF_UNDERWATER)
 				DrawGLWaterPolyMTexLM (fa->polys);
@@ -903,40 +879,6 @@ DrawTextureChains
 */
 /*
 ================
-R_CheckSurfaceLightmap
-
-Track lightmap chain and check for dynamic updates on a surface.
-Used by both the immediate-mode batch path and static VBO path.
-================
-*/
-static void R_CheckSurfaceLightmap (msurface_t *fa)
-{
-	byte	*base;
-	int	maps;
-
-	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
-	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
-
-	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
-	{
-		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
-			goto dynamic_check;
-	}
-	if (fa->dlightframe == r_framecount || fa->cached_dlight)
-	{
-dynamic_check:
-		if (r_dynamic.integer)
-		{
-			lightmap_modified[fa->lightmaptexturenum] = true;
-			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-		}
-	}
-}
-
-/*
-================
 R_BatchEmitSurface
 
 Convert a polygon (triangle fan) to triangles and add to the
@@ -947,10 +889,10 @@ is nearly full. Handles lightmap dirty checks inline.
 static void R_BatchEmitSurface (msurface_t *fa)
 {
 	glpoly_t	*p = fa->polys;
+	float		*v;
 	int		j, nverts;
 	byte		*base;
 	int		maps;
-	float		layer = (float)fa->lightmaptexturenum;
 
 	nverts = p->numverts;
 	if (nverts < 3)
@@ -960,15 +902,16 @@ static void R_BatchEmitSurface (msurface_t *fa)
 	 * Each polygon of N verts produces (N-2)*3 triangle verts. */
 	if (GL_ImmCount() + (nverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 	{
+		/* Flush current batch */
 		GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 		GL_ImmBegin ();
 	}
 
-	/* Set lightmap layer for this surface — no texture rebind needed
-	 * since we use GL_TEXTURE_2D_ARRAY bound once for all layers */
-	GL_ImmLMLayer (layer);
+	/* No lightmap rebind needed — atlas UVs already point to the
+	 * correct page within the single atlas texture */
 
 	/* Emit as triangles (fan → triangles: v0-v1-v2, v0-v2-v3, ...) */
+	v = p->verts[0];
 	for (j = 2; j < nverts; j++)
 	{
 		float *v0 = p->verts[0];
@@ -990,7 +933,26 @@ static void R_BatchEmitSurface (msurface_t *fa)
 
 	c_brush_polys++;
 
-	R_CheckSurfaceLightmap (fa);
+	/* Add to lightmap chain and check for dynamic updates */
+	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
+	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
+
+	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
+	{
+		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
+			goto dynamic_batch;
+	}
+	if (fa->dlightframe == r_framecount || fa->cached_dlight)
+	{
+dynamic_batch:
+		if (r_dynamic.integer)
+		{
+			lightmap_modified[fa->lightmaptexturenum] = true;
+			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
+			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
+		}
+	}
 }
 
 static void DrawTextureChains (entity_t *e)
@@ -1039,14 +1001,14 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
-			else if (world_vao && lightmap_array_texture && r_fastworld.integer)
+			else
 			{
-				/* Static VBO path: vertices pre-uploaded at level load.
-				 * Bind lightmap array + diffuse texture, then draw
-				 * visible surfaces from static VBO. Zero per-frame
-				 * vertex streaming. */
-				float mvp[16];
-				float mv[16];
+				/* Batched path: bind lightmap atlas once on unit 1,
+				 * accumulate all surfaces as triangles. Surface UVs
+				 * are already remapped to atlas coordinates. One draw
+				 * call per diffuse texture, zero lightmap rebinds. */
+
+				GL_ImmColor4f (1, 1, 1, 1);
 
 				/* Bind diffuse texture on unit 0 */
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
@@ -1055,98 +1017,39 @@ static void DrawTextureChains (entity_t *e)
 					GL_Bind (tt->gl_texturenum);
 				}
 
-				/* Bind lightmap array on unit 1 */
+				/* Bind lightmap atlas on unit 1 — single bind for ALL */
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
+				if (lm_atlas_texture)
+					glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				else
+					GL_Bind (lightmap_textures[s->lightmaptexturenum]);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
-				/* Activate shader and set uniforms */
-				glUseProgram_fp(gl_shader_world.program);
-				GL_GetMVP(mvp);
-				if (gl_shader_world.u_mvp >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-				if (gl_shader_world.u_modelview >= 0)
-				{
-					GL_GetModelview(mv);
-					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-				}
-				if (gl_shader_world.u_fog_density >= 0)
-					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-				if (gl_shader_world.u_fog_color >= 0)
-					glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-				if (gl_shader_world.u_alpha_threshold >= 0)
-					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
-
-				glBindVertexArray_fp(world_vao);
-
-				{
-				int ndraw = 0;
+				GL_ImmBegin ();
 
 				for ( ; s ; s = s->texturechain)
 				{
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						/* Flush batch before falling back */
-						if (ndraw > 0)
-						{
-							if (glMultiDrawArrays_fp)
-								glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
-							else for (i = 0; i < ndraw; i++)
-								glDrawArrays_fp(GL_TRIANGLES, multidraw_first[i], multidraw_count[i]);
-							ndraw = 0;
-						}
-						glBindVertexArray_fp(0);
-						glUseProgram_fp(0);
+						/* These need special handling — flush
+						 * batch and fall back to per-surface */
+						GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 						R_RenderBrushPolyMTex (e, s, false);
-						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+						/* Restart batch — rebind textures */
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 							GL_Bind (tt->gl_texturenum);
 						}
-						glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-						glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
-						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-						glUseProgram_fp(gl_shader_world.program);
-						glBindVertexArray_fp(world_vao);
+						GL_ImmBegin ();
 						continue;
 					}
 
-					if (s->vbo_num_verts > 0 && ndraw < MAX_MULTIDRAW)
-					{
-						multidraw_first[ndraw] = s->vbo_first_vert;
-						multidraw_count[ndraw] = s->vbo_num_verts;
-						ndraw++;
-						c_brush_polys++;
-					}
-
-					R_CheckSurfaceLightmap (s);
+					R_BatchEmitSurface (s);
 				}
 
-				/* Flush remaining batch */
-				if (ndraw > 0)
-				{
-					if (glMultiDrawArrays_fp)
-						glMultiDrawArrays_fp(GL_TRIANGLES, multidraw_first, multidraw_count, ndraw);
-					else for (i = 0; i < ndraw; i++)
-						glDrawArrays_fp(GL_TRIANGLES, multidraw_first[i], multidraw_count[i]);
-				}
-				}
-
-				glBindVertexArray_fp(0);
-				glUseProgram_fp(0);
-
-				/* Restore GL state for subsequent rendering */
-				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
-				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-				currenttexture = GL_UNUSED_TEXTURE; /* force rebind */
-			}
-			else
-			{
-				/* Fallback: old immediate-mode path */
-				for ( ; s ; s = s->texturechain)
-					R_RenderBrushPolyMTex (e, s, false);
+				GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 			}
 		}
 
@@ -1566,19 +1469,27 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 		poly->verts[i][4] = t;
 
 		//
-		// lightmap texture coordinates
+		// lightmap texture coordinates — mapped into atlas
 		//
 		s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
 		s -= fa->texturemins[0];
 		s += fa->light_s*16;
 		s += 8;
-		s /= BLOCK_WIDTH*16; //fa->texinfo->texture->width;
+		s /= BLOCK_WIDTH*16;
 
 		t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
 		t -= fa->texturemins[1];
 		t += fa->light_t*16;
 		t += 8;
-		t /= BLOCK_HEIGHT*16; //fa->texinfo->texture->height;
+		t /= BLOCK_HEIGHT*16;
+
+		/* Remap page-local UV to atlas position */
+		{
+			int col = fa->lightmaptexturenum % LM_ATLAS_COLS;
+			int row = fa->lightmaptexturenum / LM_ATLAS_COLS;
+			s = (col + s) / (float)LM_ATLAS_COLS;
+			t = (row + t) / (float)LM_ATLAS_ROWS;
+		}
 
 		poly->verts[i][5] = s;
 		poly->verts[i][6] = t;
@@ -1626,137 +1537,6 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 
 /*
 ========================
-GL_BuildWorldVBO
-
-Triangulate all world surfaces and upload to a static VBO.
-Called after GL_BuildLightmaps when all surface polys are built.
-========================
-*/
-static void GL_BuildWorldVBO (void)
-{
-	int		i, j, total_verts;
-	qmodel_t	*m;
-	msurface_t	*surf;
-	worldvert_t	*verts, *v;
-	glpoly_t	*p;
-
-	/* Already built? Skip. */
-	if (world_vao)
-		return;
-
-	world_num_verts = 0;
-
-	/* Count total triangle vertices needed */
-	total_verts = 0;
-	m = cl.model_precache[1];	/* worldmodel */
-	if (!m) return;
-	for (i = 0; i < m->numsurfaces; i++)
-	{
-		surf = m->surfaces + i;
-		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
-			continue;
-		p = surf->polys;
-		if (!p || p->numverts < 3)
-			continue;
-		total_verts += (p->numverts - 2) * 3;
-	}
-
-	if (total_verts == 0)
-		return;
-
-	Con_DPrintf("World VBO: %d tris, %d KB\n", total_verts / 3,
-		   (int)(total_verts * sizeof(worldvert_t) / 1024));
-
-	/* Allocate and fill vertex buffer */
-	verts = (worldvert_t *) malloc(total_verts * sizeof(worldvert_t));
-	if (!verts)
-	{
-		Con_Printf("GL_BuildWorldVBO: out of memory for %d verts\n", total_verts);
-		return;
-	}
-
-	v = verts;
-	for (i = 0; i < m->numsurfaces; i++)
-	{
-		surf = m->surfaces + i;
-		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
-		{
-			surf->vbo_first_vert = 0;
-			surf->vbo_num_verts = 0;
-			continue;
-		}
-		p = surf->polys;
-		if (!p || p->numverts < 3)
-		{
-			surf->vbo_first_vert = 0;
-			surf->vbo_num_verts = 0;
-			continue;
-		}
-
-		surf->vbo_first_vert = (int)(v - verts);
-		surf->vbo_num_verts = (p->numverts - 2) * 3;
-
-		/* Triangulate fan → triangles */
-		for (j = 2; j < p->numverts; j++)
-		{
-			float *v0 = p->verts[0];
-			float *v1 = p->verts[j - 1];
-			float *v2 = p->verts[j];
-
-#define FILL_VERT(dst, src) do { \
-	(dst)->pos[0] = (src)[0]; (dst)->pos[1] = (src)[1]; (dst)->pos[2] = (src)[2]; \
-	(dst)->texcoord[0] = (src)[3]; (dst)->texcoord[1] = (src)[4]; \
-	(dst)->lmcoord[0] = (src)[5]; (dst)->lmcoord[1] = (src)[6]; \
-	(dst)->lmlayer = (float)surf->lightmaptexturenum; \
-	(dst)->color[0] = 1; (dst)->color[1] = 1; (dst)->color[2] = 1; (dst)->color[3] = 1; \
-} while(0)
-
-			FILL_VERT(v, v0); v++;
-			FILL_VERT(v, v1); v++;
-			FILL_VERT(v, v2); v++;
-#undef FILL_VERT
-		}
-	}
-
-	world_num_verts = total_verts;
-	world_max_verts = total_verts;
-
-	/* Create VAO + VBO */
-	if (!world_vao)
-		glGenVertexArrays_fp(1, &world_vao);
-	glBindVertexArray_fp(world_vao);
-
-	if (!world_vbo)
-		glGenBuffers_fp(1, &world_vbo);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, world_vbo);
-	glBufferData_fp(GL_ARRAY_BUFFER, total_verts * sizeof(worldvert_t),
-			 verts, GL_STATIC_DRAW);
-
-	/* Vertex attributes — same layout as immvert_t */
-	glEnableVertexAttribArray_fp(ATTR_POSITION);
-	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
-				  WORLD_STRIDE, (void *)0);
-	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
-	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE,
-				  WORLD_STRIDE, (void *)(3 * sizeof(float)));
-	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
-	glVertexAttribPointer_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
-				  WORLD_STRIDE, (void *)(5 * sizeof(float)));
-	glEnableVertexAttribArray_fp(ATTR_LMLAYER);
-	glVertexAttribPointer_fp(ATTR_LMLAYER, 1, GL_FLOAT, GL_FALSE,
-				  WORLD_STRIDE, (void *)(7 * sizeof(float)));
-	glEnableVertexAttribArray_fp(ATTR_COLOR);
-	glVertexAttribPointer_fp(ATTR_COLOR, 4, GL_FLOAT, GL_FALSE,
-				  WORLD_STRIDE, (void *)(8 * sizeof(float)));
-
-	glBindVertexArray_fp(0);
-	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
-
-	free(verts);
-}
-
-/*
-========================
 GL_CreateSurfaceLightmap
 ========================
 */
@@ -1786,32 +1566,21 @@ Builds the lightmap texture
 with all the surfaces from all brush models
 ==================
 */
-static qboolean lightmaps_built;
-
-void GL_InvalidateLightmaps (void)
-{
-	lightmaps_built = false;
-	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
-	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
-	world_num_verts = 0;
-}
-
 void GL_BuildLightmaps (void)
 {
 	int		i, j;
 	qmodel_t	*m;
 
-	if (lightmaps_built)
-		return;		/* already built for this map */
-
 	memset (allocated, 0, sizeof(allocated));
 	memset (lightmap_modified, 0, sizeof(lightmap_modified));
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
 
-	r_framecount = 1;
+	r_framecount = 1;		// no dlightcache
 
 	if (! lightmap_textures[0])
+	{
 		glGenTextures_fp(MAX_LIGHTMAPS, lightmap_textures);
+	}
 
 	for (j = 1; j < MAX_MODELS; j++)
 	{
@@ -1840,13 +1609,16 @@ void GL_BuildLightmaps (void)
 
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
 
-	lightmap_array_layers = 0;
+	//
+	// upload all lightmaps that were filled
+	//
+	lm_atlas_layers = 0;
 	for (i = 0; i < MAX_LIGHTMAPS; i++)
 	{
 		if (!allocated[i][0])
-			break;
+			break;		// no more used
 		lightmap_modified[i] = false;
-		lightmap_array_layers++;
+		lm_atlas_layers++;
 
 		GL_Bind(lightmap_textures[i]);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1856,29 +1628,49 @@ void GL_BuildLightmaps (void)
 				lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 	}
 
-	if (glTexImage3D_fp && lightmap_array_layers > 0)
+	/* Build lightmap atlas — all pages in one 2D texture.
+	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
+	 * One bind for ALL world surfaces, zero lightmap rebinds. */
 	{
-		if (!lightmap_array_texture)
-			glGenTextures_fp(1, &lightmap_array_texture);
-		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
-		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameterf_fp(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage3D_fp(GL_TEXTURE_2D_ARRAY, 0, lightmap_internalformat,
-				BLOCK_WIDTH, BLOCK_HEIGHT, lightmap_array_layers, 0,
-				gl_lightmap_format, GL_UNSIGNED_BYTE, lightmaps);
-		glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
+		byte *atlas;
+		int page, row, col, y;
+		int page_stride = BLOCK_WIDTH * lightmap_bytes;
+		int atlas_stride = LM_ATLAS_WIDTH * lightmap_bytes;
+
+		atlas = (byte *) calloc(1, LM_ATLAS_WIDTH * LM_ATLAS_HEIGHT * lightmap_bytes);
+		if (atlas)
+		{
+			for (page = 0; page < lm_atlas_layers; page++)
+			{
+				col = page % LM_ATLAS_COLS;
+				row = page / LM_ATLAS_COLS;
+				for (y = 0; y < BLOCK_HEIGHT; y++)
+				{
+					byte *src = lightmaps + page * BLOCK_WIDTH * BLOCK_HEIGHT * lightmap_bytes
+							     + y * page_stride;
+					byte *dst = atlas + (row * BLOCK_HEIGHT + y) * atlas_stride
+							  + col * page_stride;
+					memcpy(dst, src, page_stride);
+				}
+			}
+
+			if (!lm_atlas_texture)
+				glGenTextures_fp(1, &lm_atlas_texture);
+			glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexImage2D_fp(GL_TEXTURE_2D, 0, lightmap_internalformat,
+					LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT, 0,
+					gl_lightmap_format, GL_UNSIGNED_BYTE, atlas);
+			free(atlas);
+
+			Con_SafePrintf("Lightmap atlas: %d pages in %dx%d texture\n",
+				       lm_atlas_layers, LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT);
+		}
 	}
-	else
-		lightmap_array_texture = 0;
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
-
-	GL_BuildWorldVBO ();
-
-	lightmaps_built = true;
-	Con_SafePrintf("Lightmaps: %d pages, World VBO: %d tris\n",
-		       lightmap_array_layers, world_num_verts / 3);
 }
 

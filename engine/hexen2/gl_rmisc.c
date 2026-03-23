@@ -244,7 +244,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_farclip);
-	Cvar_RegisterVariable (&r_fastworld);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_wholeframe);
@@ -429,7 +428,6 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 
-	GL_InvalidateLightmaps ();
 	GL_BuildLightmaps ();
 
 	// identify sky texture
