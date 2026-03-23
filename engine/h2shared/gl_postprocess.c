@@ -77,6 +77,14 @@ static qboolean PP_NeedsPostProcess (void)
 		return true;
 	if (r_softemu.value > 0)
 		return true;
+	if (Cvar_VariableValue("gl_fxaa") > 0)
+		return true;
+	if (Cvar_VariableValue("r_motionblur") > 0)
+		return true;
+	/* waterwarp only needs postprocess when actually underwater,
+	 * but we enable the FBO when the cvar is set so it's ready */
+	if (r_waterwarp.value > 0)
+		return true;
 	return false;
 }
 
