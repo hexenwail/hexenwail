@@ -463,14 +463,23 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 	music_handler_t *handler;
 
 	BGM_Stop();
+	Con_DPrintf("BGM: PlayCDtrack %d (loop=%d)\n", (int)track, (int)looping);
 	if (CDAudio_Play(track, looping) == 0)
 		return;			/* success */
+	Con_DPrintf("BGM: CD audio failed, trying file fallback\n");
 
 	if (music_handlers == NULL)
+	{
+		Con_Printf("BGM: no music handlers registered\n");
 		return;
+	}
 
 	if (no_extmusic || !bgm_extmusic.value)
+	{
+		Con_Printf("BGM: external music disabled (bgm_extmusic=%g, no_extmusic=%d)\n",
+			   bgm_extmusic.value, (int)no_extmusic);
 		return;
+	}
 
 	prev_id = 0;
 	type = 0;
@@ -496,14 +505,18 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 		handler = handler->next;
 	}
 	if (ext == NULL)
-		Con_Printf("Couldn't find a cdrip for track %d\n", (int)track);
+		Con_Printf("BGM: no music file for track %d (looked in %s/ for track%02d.{ogg,mp3,flac,wav,...})\n",
+			   (int)track, MUSIC_DIRNAME, (int)track);
 	else
 	{
 		q_snprintf(tmp, sizeof(tmp), "%s/track%02d.%s",
 				MUSIC_DIRNAME, (int)track, ext);
+		Con_DPrintf("BGM: opening %s\n", tmp);
 		bgmstream = S_CodecOpenStreamType(tmp, type, bgmloop);
 		if (! bgmstream)
-			Con_Printf("Couldn't handle music file %s\n", tmp);
+			Con_Printf("BGM: couldn't decode %s\n", tmp);
+		else
+			Con_DPrintf("BGM: playing %s\n", tmp);
 	}
 }
 
