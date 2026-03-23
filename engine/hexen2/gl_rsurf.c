@@ -627,7 +627,10 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 
-		GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
+		if (lm_atlas_texture)
+			glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+		else
+			GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
 
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPolyMTexLM (fa->polys);
@@ -748,7 +751,10 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		else
 		{
 			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-			GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
+			if (lm_atlas_texture)
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+			else
+				GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
 
 			if (fa->flags & SURF_UNDERWATER)
 				DrawGLWaterPolyMTexLM (fa->polys);
