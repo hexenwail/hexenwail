@@ -874,6 +874,9 @@ static void _Host_Frame (float time)
 		if (!sv.active)
 			CL_SendCmd ();
 
+		R_UpdateParticles ();
+		CL_UpdateEffects ();
+
 		phys_accum -= phys_interval;
 	}
 
