@@ -29,6 +29,8 @@ static GLuint	pp_color_tex;	/* resolved color texture */
 static int	pp_width, pp_height;
 static int	pp_samples;	/* MSAA sample count (0 or 1 = no MSAA) */
 static qboolean	pp_fbo_failed;	/* true if FBO creation failed — don't retry every frame */
+static GLuint	pp_copyback_tex;/* fallback texture for copyback mode (no FBO) */
+static int	pp_copyback_w, pp_copyback_h;
 
 /* FBO state — native res for 2D composite */
 static GLuint	pp_native_fbo;
@@ -242,7 +244,8 @@ static qboolean PP_CreateFBO (int width, int height)
 
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
-		Con_Printf("PostProcess: FBO incomplete (status 0x%x)\n", status);
+		Con_Printf("PostProcess: FBO incomplete (status 0x%x, %dx%d, tex=%u, depth_rb=%u)\n",
+			   status, width, height, pp_color_tex, pp_depth_rb);
 		PP_DeleteFBO();
 		pp_fbo_failed = true;
 		return false;
@@ -593,6 +596,8 @@ void GL_PostProcess_Shutdown (void)
 	pp_initialized = false;
 	pp_active = false;
 	pp_fbo_failed = false;
+	if (pp_copyback_tex) { glDeleteTextures_fp(1, &pp_copyback_tex); pp_copyback_tex = 0; }
+	pp_copyback_w = pp_copyback_h = 0;
 }
 
 void GL_PostProcess_BeginFrame (void)
@@ -619,7 +624,20 @@ void GL_PostProcess_BeginFrame (void)
 	/* (re)create FBO if size changed — MSAA changes go through
 	 * vid_restart which destroys and recreates everything */
 	if (pp_fbo_failed)
+	{
+		static qboolean warned;
+		if (!warned)
+		{
+			Con_Printf("PostProcess: FBO failed, using copyback fallback for gamma/contrast\n");
+			warned = true;
+		}
+		/* No FBO — scene renders to default framebuffer.
+		 * EndFrame will copy backbuffer to texture and apply shader. */
+		pp_active = true;
+		pp_saved_glwidth = glwidth;
+		pp_saved_glheight = glheight;
 		return;
+	}
 	if (w != pp_width || h != pp_height)
 	{
 		if (!PP_CreateFBO(w, h))
@@ -700,6 +718,32 @@ void GL_PostProcess_EndFrame (void)
 
 	pp_active = false;
 
+	/* Copyback fallback: no FBO, copy backbuffer to texture */
+	if (pp_fbo_failed)
+	{
+		int w = pp_saved_glwidth;
+		int h = pp_saved_glheight;
+		if (!pp_copyback_tex || w != pp_copyback_w || h != pp_copyback_h)
+		{
+			if (pp_copyback_tex)
+				glDeleteTextures_fp(1, &pp_copyback_tex);
+			glGenTextures_fp(1, &pp_copyback_tex);
+			glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+			glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+					GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			pp_copyback_w = w;
+			pp_copyback_h = h;
+		}
+		glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+		glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+		blit_tex = pp_copyback_tex;
+		blit_w = w;
+		blit_h = h;
+		goto apply_shader;
+	}
+
 	/* determine which texture has the composited scene */
 	if (pp_native_fbo && r_scale.value < 1.0f)
 	{
@@ -734,6 +778,7 @@ void GL_PostProcess_EndFrame (void)
 	/* unbind scene FBO -- render to default framebuffer */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
 
+apply_shader:
 	/* set full viewport for the blit */
 	glViewport_fp(0, 0, glwidth, glheight);
 
