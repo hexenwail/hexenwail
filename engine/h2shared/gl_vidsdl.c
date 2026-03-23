@@ -1477,6 +1477,9 @@ void	VID_Init (const unsigned char *palette)
 	vid.maxwarpheight = WARP_HEIGHT;
 	vid.colormap = host_colormap;
 	vid.fullbright = 256 - LittleLong (*((int *)(vid.colormap + 256 * 64)));
+	Con_SafePrintf ("Fullbright start index: %d (raw colormap value: %d)\n",
+			vid.fullbright,
+			LittleLong (*((int *)(vid.colormap + 256 * 64))));
 	if (vid.fullbright < 1 || vid.fullbright > 256)
 		vid.fullbright = 224;	/* fallback: standard Quake/Hexen II value */
 
