@@ -1039,7 +1039,7 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
-			else if (world_vao && lightmap_array_texture)
+			else if (world_vao && lightmap_array_texture && r_fastworld.integer)
 			{
 				/* Static VBO path: vertices pre-uploaded at level load.
 				 * Bind lightmap array + diffuse texture, then draw
@@ -1141,6 +1141,12 @@ static void DrawTextureChains (entity_t *e)
 				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, 0);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				currenttexture = GL_UNUSED_TEXTURE; /* force rebind */
+			}
+			else
+			{
+				/* Fallback: old immediate-mode path */
+				for ( ; s ; s = s->texturechain)
+					R_RenderBrushPolyMTex (e, s, false);
 			}
 		}
 
