@@ -240,15 +240,10 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 	}
 
 // clear to no light
-	for (i = 0; i < size; i++)
-	{
-		if (gl_lightmap_format == GL_RGBA)
-			blocklightscolor[i*3+0] =
-			blocklightscolor[i*3+1] =
-			blocklightscolor[i*3+2] = 0;
-		else
-			blocklights[i] = 0;
-	}
+	if (gl_lightmap_format == GL_RGBA)
+		memset(blocklightscolor, 0, size * 3 * sizeof(unsigned int));
+	else
+		memset(blocklights, 0, size * sizeof(unsigned int));
 
 // add all the lightmaps
 	if (lightmap)
@@ -291,51 +286,43 @@ store:
 		stride -= (smax<<2);
 
 		blcr = &blocklightscolor[0];
-		blcg = &blocklightscolor[1];
-		blcb = &blocklightscolor[2];
 
-		for (i = 0; i < tmax; i++, dest += stride)
+		if (gl_coloredlight.integer)
 		{
-			for (j = 0; j < smax; j++)
+			for (i = 0; i < tmax; i++, dest += stride)
 			{
-				q = *blcr;
-				q >>= 7;
-				r = *blcg;
-				r >>= 7;
-				s = *blcb;
-				s >>= 7;
-
-				if (q > 255)
-					q = 255;
-				if (r > 255)
-					r = 255;
-				if (s > 255)
-					s = 255;
-
-				if (gl_coloredlight.integer)
+				for (j = 0; j < smax; j++)
 				{
-					dest[0] = q; //255 - q;
-					dest[1] = r; //255 - r;
-					dest[2] = s; //255 - s;
-					dest[3] = 255; //(q+r+s)/3;
+					q = blcr[0] >> 7; if (q > 255) q = 255;
+					r = blcr[1] >> 7; if (r > 255) r = 255;
+					s = blcr[2] >> 7; if (s > 255) s = 255;
+					dest[0] = q;
+					dest[1] = r;
+					dest[2] = s;
+					dest[3] = 255;
+					dest += 4;
+					blcr += 3;
 				}
-				else
+			}
+		}
+		else
+		{
+			for (i = 0; i < tmax; i++, dest += stride)
+			{
+				for (j = 0; j < smax; j++)
 				{
-					t = (int) ((float)q * 0.33f + (float)s * 0.33f + (float)r * 0.33f);
-
-					if (t > 255)
-						t = 255;
+					q = blcr[0] >> 7; if (q > 255) q = 255;
+					r = blcr[1] >> 7; if (r > 255) r = 255;
+					s = blcr[2] >> 7; if (s > 255) s = 255;
+					t = (q + r + s) / 3;
+					if (t > 255) t = 255;
 					dest[0] = t;
 					dest[1] = t;
 					dest[2] = t;
-					dest[3] = 255; //t;
+					dest[3] = 255;
+					dest += 4;
+					blcr += 3;
 				}
-
-				dest += 4;
-
-				blcr += 3;
-				blcg += 3;
-				blcb += 3;
 			}
 		}
 		break;

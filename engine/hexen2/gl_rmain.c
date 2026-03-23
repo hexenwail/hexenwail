@@ -1178,16 +1178,23 @@ static void R_DrawAliasModel (entity_t *e)
 
 	GL_PopMatrix();
 
-	if (r_shadows.integer)
+	if (r_shadows.integer && e != &cl.viewent)
 	{
-		GL_PushMatrix();
-		R_RotateForEntity2 (e);
-		glEnable_fp (GL_BLEND);
-		glDepthMask_fp (0);	// prevent Z fighting
-		GL_DrawAliasShadow (e, paliashdr, lastposenum);
-		glDepthMask_fp (1);
-		glDisable_fp (GL_BLEND);
-		GL_PopMatrix();
+		/* Skip shadows for distant entities */
+		float sdx = e->origin[0] - r_origin[0];
+		float sdy = e->origin[1] - r_origin[1];
+		float sdz = e->origin[2] - r_origin[2];
+		if (sdx*sdx + sdy*sdy + sdz*sdz < 512*512)
+		{
+			GL_PushMatrix();
+			R_RotateForEntity2 (e);
+			glEnable_fp (GL_BLEND);
+			glDepthMask_fp (0);
+			GL_DrawAliasShadow (e, paliashdr, lastposenum);
+			glDepthMask_fp (1);
+			glDisable_fp (GL_BLEND);
+			GL_PopMatrix();
+		}
 	}
 }
 

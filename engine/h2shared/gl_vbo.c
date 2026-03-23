@@ -232,12 +232,16 @@ static GLuint		imm_active_program;
 static qboolean		imm_vao_bound;
 static float		imm_cached_fog_density = -1;
 static float		imm_cached_fog_color[3] = {-1, -1, -1};
+static float		imm_cached_mvp[16];
+static float		imm_cached_mv[16];
+static qboolean		imm_mvp_dirty = true;
 
 void GL_ImmResetState (void)
 {
 	imm_active_program = 0;
 	imm_vao_bound = false;
 	imm_cached_fog_density = -1;
+	imm_mvp_dirty = true;
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -268,17 +272,24 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cached_fog_density = -1;
 	}
 
-	/* MVP always changes (per-entity transforms) */
+	/* MVP — skip upload if matrix unchanged (world surfaces share identity MV) */
 	GL_GetMVP(mvp);
 	if (shader->u_mvp >= 0)
-		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
-
-	/* modelview for fog distance */
-	if (shader->u_modelview >= 0)
 	{
-		float mv[16];
-		GL_GetModelview(mv);
-		glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
+		if (imm_mvp_dirty || memcmp(mvp, imm_cached_mvp, sizeof(imm_cached_mvp)) != 0)
+		{
+			glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
+			memcpy(imm_cached_mvp, mvp, sizeof(imm_cached_mvp));
+
+			/* MV changes whenever MVP changes */
+			if (shader->u_modelview >= 0)
+			{
+				float mv[16];
+				GL_GetModelview(mv);
+				glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
+			}
+			imm_mvp_dirty = false;
+		}
 	}
 
 	/* alpha threshold — only upload if set */
