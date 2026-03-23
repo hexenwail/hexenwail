@@ -266,6 +266,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_keeptjunctions);
 	Cvar_RegisterVariable (&gl_reporttjunctions);
 
+	Cvar_RegisterVariable (&gl_fullbrights);
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_other_glows);
