@@ -21,6 +21,12 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Default bindings: triggers for attack/jump, shoulders for weapon cycle
 - [ ] Rumble/haptic feedback on damage and weapon fire
 
+### Comfort & accessibility
+- [x] View bob intensity slider (reduce or disable head bob)
+- [x] View roll intensity slider (strafe roll)
+- [x] Console transparency (Opaque/Light/Clear)
+- [x] Dynamic lighting toggle
+
 ### Keyboard input (Ironwail-style)
 - [x] Modern WASD + mouselook defaults out of the box
 - [x] Scancode-based key bindings — WASD works correctly on AZERTY, Dvorak, etc.
@@ -29,32 +35,37 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 
 ### Modern rendering (GL 4.3 shader pipeline)
 - [x] Full GLSL 4.30 shader pipeline — zero immediate mode, zero fixed-function
+- [x] Lightmap atlas — all lightmap pages packed into one 2048x2048 texture, zero per-surface rebinds
+- [x] Batched world rendering — surfaces accumulated as triangles, one draw call per texture
 - [x] Render scale for crunchy pixel upscaling (25%-100%)
 - [x] Retro mode: Bayer dithering + 256-color palette quantization (Ironwail-style)
 - [x] Display presets: Crunchy (25% scale, point-sampled), Retro, Modern, User
 - [x] Classic/Smooth texture filtering toggle
 - [x] MSAA anti-aliasing (via multisampled FBO)
 - [x] Borderless windowed and fullscreen modes
-- [x] VSync toggle
+- [x] VSync toggle (default off)
 - [x] Anisotropic texture filtering
 - [x] Brightness and contrast sliders (GLSL post-process shader)
 - [x] Two-layer scrolling sky (solid + transparent) and skybox rendering
-- [x] Shader-based fog
+- [x] Shader-based fog (standard exp formula, smooth underwater fade)
 - [x] Fence/chain texture transparency
 - [x] Glow effects with fog attenuation
 - [x] Water tint color options (Classic/Blue/Green/Clear)
 - [x] FOV slider (60-130)
+- [x] Adjustable draw distance (`r_farclip`)
 - [x] FPS limiter (24/30/60/72/90/120/144/Unlimited)
 - [x] Show FPS toggle
+- [x] In-game clock/timer display (`showclock 1`=game time, `2`=wall clock)
 - [x] HUD layout modes (Full/Mini/Off/Clean — Clean also hides weapon)
-- [ ] Model animation interpolation (lerping)
-- [ ] Physics/render decoupling with entity interpolation
+- [x] Model animation interpolation (lerping between keyframes)
+- [x] Physics/render decoupling with entity interpolation (Ironwail-style)
+- [x] Lightstyle interpolation (smooth flickering lights)
+- [x] Fullbright pixel support for alias model skins (eye glow, torch flames)
+- [x] Square particle toggle (`gl_particles 0` for classic software look)
 - [ ] Lightmapped liquid surfaces
 - [ ] Underwater warp effect
-- [ ] Lightstyle interpolation
 - [ ] FXAA post-process
 - [ ] HDR rendering pipeline
-- [ ] Square particle toggle (software renderer style)
 
 ### Plays nicely with mods
 - [x] Protocol auto-detection (classic 15 / extended 19 / mod 21)
@@ -97,6 +108,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Cleaned out legacy platform code (DOS, OS/2, Amiga, macOS, HexenWorld)
 - [x] Cleaned out legacy GL capability detection — assumes GL 4.3
 - [x] Flatpak packaging support
+- [x] Game Options menu — view bob/roll, console alpha, dynamic light toggle
 - [ ] Mouse-driven UI navigation
 - [ ] AppImage packaging
 
