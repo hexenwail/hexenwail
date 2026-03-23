@@ -138,14 +138,14 @@ void VID_MenuReset (void);		/* revert pending changes */
 /* video menu state accessors */
 const char *VID_MenuGetResolution (qboolean *is_current);
 const char *VID_MenuGetAspect (void);
-qboolean VID_MenuGetFullscreen (qboolean *want_toggle);
+int VID_MenuGetWindowMode (void);	/* 0=windowed, 1=borderless, 2=fullscreen */
 int VID_MenuGetMultisample (qboolean *is_current, qboolean *available);
 int VID_MenuGetVSync (void);
 qboolean VID_MenuGetTexFilter (void);	/* true = smooth */
 int VID_MenuGetAnisotropy (qboolean *available);
 
 /* video menu adjusters (dir = -1 or +1) */
-void VID_MenuAdjustFullscreen (void);
+void VID_MenuAdjustWindowMode (int dir);
 void VID_MenuAdjustAspect (int dir);
 void VID_MenuAdjustResolution (int dir);
 void VID_MenuAdjustMultisample (int dir);

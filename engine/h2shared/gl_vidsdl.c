@@ -121,7 +121,7 @@ static attributes_t	vid_attribs;
 
 static SDL_Window	*window;
 static SDL_GLContext	glcontext;
-static qboolean	vid_menu_fs;
+static int	vid_menu_fs;	/* 0=windowed, 1=borderless, 2=fullscreen */
 static qboolean	fs_toggle_works = true;
 
 // vars for vid state
@@ -142,7 +142,7 @@ static cvar_t	vid_mode = {"vid_mode", "0", CVAR_NONE};
 static cvar_t	vid_config_consize = {"vid_config_consize", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_glx = {"vid_config_glx", "640", CVAR_ARCHIVE};
 static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_ARCHIVE};
-static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};
+static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};	/* 0=windowed, 1=borderless, 2=fullscreen */
 static cvar_t	vid_window_x = {"vid_window_x", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_window_y = {"vid_window_y", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_vsync = {"vid_vsync", "0", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
@@ -426,7 +426,7 @@ static qboolean VID_SetMode (int modenum)
 	// SDL3: SDL_CreateWindow no longer takes x,y position params
 	{
 		Uint32 wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-		if (vid_borderless.integer && !vid_config_fscr.integer)
+		if (vid_borderless.integer && vid_config_fscr.integer == 0)
 			wflags |= SDL_WINDOW_BORDERLESS;
 		window = SDL_CreateWindow("",
 					  modelist[modenum].width, modelist[modenum].height,
@@ -452,7 +452,7 @@ static qboolean VID_SetMode (int modenum)
 	}
 
 	// Restore saved window position, or center on first run
-	if (!vid_config_fscr.integer && vid_window_x.integer >= 0 && vid_window_y.integer >= 0)
+	if (vid_config_fscr.integer == 0 && vid_window_x.integer >= 0 && vid_window_y.integer >= 0)
 		SDL_SetWindowPosition(window, vid_window_x.integer, vid_window_y.integer);
 	else
 		SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -464,17 +464,41 @@ static qboolean VID_SetMode (int modenum)
 	if (scaling_factor != 100)
 		Con_Printf ("High DPI scaling in effect! (%d%%)\n", scaling_factor);
 
-	// Handle fullscreen after window creation
-	if (vid_config_fscr.integer)
+	// Handle fullscreen modes after window creation
+	if (vid_config_fscr.integer == 2)
 	{
-		// Check if resolution matches desktop
-		// (SDL3 fullscreen uses borderless by default when matching desktop res)
+		// Exclusive fullscreen: find matching SDL display mode
 		display_id = SDL_GetDisplayForWindow(window);
-		desktop_mode = SDL_GetDesktopDisplayMode(display_id);
-		if (desktop_mode && screen_w == desktop_mode->w && screen_h == desktop_mode->h)
-			Con_Printf ("Fullscreen res matches desktop\n");
-
-		// SDL3: just use SDL_WINDOW_FULLSCREEN, no more FULLSCREEN_DESKTOP
+		{
+			int num_modes = 0;
+			SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(display_id, &num_modes);
+			SDL_DisplayMode *best = NULL;
+			if (modes)
+			{
+				int j;
+				for (j = 0; j < num_modes; j++)
+				{
+					if (modes[j]->w == modelist[modenum].width &&
+					    modes[j]->h == modelist[modenum].height)
+					{
+						best = modes[j];
+						break;
+					}
+				}
+				if (best)
+					SDL_SetWindowFullscreenMode(window, best);
+				else
+					SDL_SetWindowFullscreenMode(window, NULL); /* fallback to borderless */
+				SDL_free(modes);
+			}
+		}
+		SDL_SetWindowFullscreen(window, true);
+		SDL_SyncWindow(window);
+	}
+	else if (vid_config_fscr.integer == 1)
+	{
+		// Borderless fullscreen: desktop resolution
+		SDL_SetWindowFullscreenMode(window, NULL);
 		SDL_SetWindowFullscreen(window, true);
 		SDL_SyncWindow(window);
 	}
@@ -497,7 +521,6 @@ static qboolean VID_SetMode (int modenum)
 			SDL_GL_SetSwapInterval(1);
 	}
 
-	// SDL3: only SDL_WINDOW_FULLSCREEN, no FULLSCREEN_DESKTOP
 	is_fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? 1 : 0;
 
 	/* Use drawable pixel size for rendering dimensions.
@@ -1376,6 +1399,10 @@ void	VID_Init (const unsigned char *palette)
 	// see if the user wants fullscreen
 	if (COM_CheckParm("-fullscreen") || COM_CheckParm("-f"))
 	{
+		Cvar_SetQuick (&vid_config_fscr, "2");	/* exclusive fullscreen */
+	}
+	else if (COM_CheckParm("-borderless"))
+	{
 		Cvar_SetQuick (&vid_config_fscr, "1");
 	}
 	else if (COM_CheckParm("-window") || COM_CheckParm("-w"))
@@ -1383,14 +1410,14 @@ void	VID_Init (const unsigned char *palette)
 		Cvar_SetQuick (&vid_config_fscr, "0");
 	}
 
-	if (vid_config_fscr.integer && !num_fmodes) // FIXME: see below, as well
+	if (vid_config_fscr.integer == 2 && !num_fmodes) // FIXME: see below, as well
 		Sys_Error ("No fullscreen modes available at this color depth");
 
 	width = vid_config_glx.integer;
 	height = vid_config_gly.integer;
 
-	/* Default to desktop resolution for fullscreen on first run (640x480 = no saved config) */
-	if (vid_config_fscr.integer && width == 640 && height == 480)
+	/* Default to desktop resolution for fullscreen/borderless on first run (640x480 = no saved config) */
+	if (vid_config_fscr.integer > 0 && width == 640 && height == 480)
 	{
 		const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
 		if (dm)
@@ -1544,31 +1571,32 @@ and brings the mouse to a proper state afterwards
 extern qboolean menu_disabled_mouse;
 void VID_ToggleFullscreen (void)
 {
-	int	is_fullscreen;
+	/* This is now only used for instant borderless toggle from the menu.
+	 * Full mode changes (windowed/borderless/exclusive) go through VID_Restart_f. */
 
 	if (!window) return;
 	if (!fs_toggle_works)
 		return;
-	if (!num_fmodes)
-		return;
 
 	S_ClearBuffer ();
 
-	// SDL3: only SDL_WINDOW_FULLSCREEN, no FULLSCREEN_DESKTOP
-	is_fullscreen = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+	if (vid_menu_fs == 1)	/* borderless */
+	{
+		SDL_SetWindowFullscreenMode(window, NULL);
+		fs_toggle_works = SDL_SetWindowFullscreen(window, true);
+	}
+	else	/* windowed */
+	{
+		fs_toggle_works = SDL_SetWindowFullscreen(window, false);
+	}
 
-	// SDL3: SDL_SetWindowFullscreen takes bool: true for fullscreen, false for windowed
-	fs_toggle_works = SDL_SetWindowFullscreen(window, !is_fullscreen);
 	if (fs_toggle_works)
 	{
 		int dw, dh;
-
-		is_fullscreen = !is_fullscreen;
 		SDL_SyncWindow(window);
 
-		if (!is_fullscreen)
+		if (vid_menu_fs == 0)
 		{
-			// Restore window to the mode's logical size
 			SDL_SetWindowSize(window, modelist[vid_modenum].width,
 						 modelist[vid_modenum].height);
 			SDL_SyncWindow(window);
@@ -1581,27 +1609,21 @@ void VID_ToggleFullscreen (void)
 		vid.height = vid.conheight = WRHeight;
 		Cvar_SetValueQuick (&vid_config_glx, WRWidth);
 		Cvar_SetValueQuick (&vid_config_gly, WRHeight);
-		Cvar_SetValueQuick(&vid_config_fscr, is_fullscreen);
-		modestate = (is_fullscreen) ? MS_FULLDIB : MS_WINDOWED;
+		Cvar_SetValueQuick(&vid_config_fscr, vid_menu_fs);
+		modestate = (vid_menu_fs > 0) ? MS_FULLDIB : MS_WINDOWED;
 		vid.recalc_refdef = 1;
 		glViewport_fp(0, 0, WRWidth, WRHeight);
-		if (is_fullscreen)
+
+		if (vid_menu_fs > 0)
 		{
-		//	if (!_enable_mouse.integer)
-		//		Cvar_SetQuick (&_enable_mouse, "1");
-			// activate mouse in fullscreen mode
-			// in_sdl.c handles other non-moused cases
 			if (menu_disabled_mouse)
 				IN_ActivateMouse();
 		}
 		else
-		{	// windowed mode:
-			// deactivate mouse if we are in menus
+		{
 			if (menu_disabled_mouse)
 				IN_DeactivateMouse();
 		}
-		// update the video menu option
-		vid_menu_fs = (modestate != MS_WINDOWED);
 	}
 	else
 	{
@@ -1767,19 +1789,19 @@ static void VID_MenuDraw (void)
 	if (vid_menu_firsttime)
 	{	// settings for entering the menu first time
 		vid_menunum = vid_modenum;
-		vid_menu_fs = (modestate != MS_WINDOWED);
+		vid_menu_fs = vid_config_fscr.integer;
 		vid_menu_aspect = 0;	// "All"
 		vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
 		vid_menu_firsttime = false;
 	}
 
-	want_fstoggle = ( ((modestate == MS_WINDOWED) && vid_menu_fs) || ((modestate != MS_WINDOWED) && !vid_menu_fs) );
-
-	need_apply = (vid_menunum != vid_modenum) || want_fstoggle ||
+	need_apply = (vid_menunum != vid_modenum) ||
+			(vid_menu_fs != vid_config_fscr.integer) ||
 			(multisample != vid_config_fsaa.integer);
 
-	M_Print (76, 92 + 8*VID_FULLSCREEN, "Fullscreen    :");
-	M_DrawYesNo (76+16*8, 92 + 8*VID_FULLSCREEN, vid_menu_fs, !want_fstoggle);
+	M_Print (76, 92 + 8*VID_FULLSCREEN, "Window Mode   :");
+	M_PrintWhite (76+16*8, 92 + 8*VID_FULLSCREEN,
+		vid_menu_fs == 2 ? "Fullscreen" : vid_menu_fs == 1 ? "Borderless" : "Windowed");
 
 	M_Print (76, 92 + 8*VID_ASPECT, "Aspect Ratio  :");
 	M_PrintWhite (76+16*8, 92 + 8*VID_ASPECT, vid_aspects[vid_menu_aspect].name);
@@ -1881,7 +1903,7 @@ static void VID_MenuKey (int key)
 		switch (vid_cursor)
 		{
 		case VID_RESET:
-			vid_menu_fs = (modestate != MS_WINDOWED);
+			vid_menu_fs = vid_config_fscr.integer;
 			vid_menunum = vid_modenum;
 			multisample = vid_config_fsaa.integer;
 			vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
@@ -1902,9 +1924,7 @@ static void VID_MenuKey (int key)
 		switch (vid_cursor)
 		{
 		case VID_FULLSCREEN:
-			vid_menu_fs = !vid_menu_fs;
-			if (fs_toggle_works)
-				VID_ToggleFullscreen();
+			VID_MenuAdjustWindowMode(-1);
 			break;
 		case VID_ASPECT:
 			S_LocalSound ("raven/menu1.wav");
@@ -1962,9 +1982,7 @@ static void VID_MenuKey (int key)
 		switch (vid_cursor)
 		{
 		case VID_FULLSCREEN:
-			vid_menu_fs = !vid_menu_fs;
-			if (fs_toggle_works)
-				VID_ToggleFullscreen();
+			VID_MenuAdjustWindowMode(1);
 			break;
 		case VID_ASPECT:
 			S_LocalSound ("raven/menu1.wav");
@@ -2032,15 +2050,22 @@ Video menu helper functions for combined Display menu
 void VID_MenuInit (void)
 {
 	vid_menunum = vid_modenum;
-	vid_menu_fs = (modestate != MS_WINDOWED);
+	vid_menu_fs = vid_config_fscr.integer;
 	vid_menu_aspect = 0;
 	multisample = vid_config_fsaa.integer;
 }
 
 qboolean VID_MenuNeedApply (void)
 {
-	qboolean want_fs = ( ((modestate == MS_WINDOWED) && vid_menu_fs) || ((modestate != MS_WINDOWED) && !vid_menu_fs) );
-	return (vid_menunum != vid_modenum) || want_fs || (multisample != vid_config_fsaa.integer);
+	qboolean fs_changed = (vid_menu_fs != vid_config_fscr.integer);
+	/* exclusive fullscreen mode change or resolution change needs restart */
+	if (vid_menu_fs == 2 && vid_menunum != vid_modenum)
+		return true;
+	if (fs_changed && (vid_menu_fs == 2 || vid_config_fscr.integer == 2))
+		return true;	/* switching to/from exclusive needs restart */
+	if (multisample != vid_config_fsaa.integer)
+		return true;
+	return false;
 }
 
 void VID_MenuApply (void)
@@ -2052,7 +2077,7 @@ void VID_MenuApply (void)
 
 void VID_MenuReset (void)
 {
-	vid_menu_fs = (modestate != MS_WINDOWED);
+	vid_menu_fs = vid_config_fscr.integer;
 	vid_menunum = vid_modenum;
 	multisample = vid_config_fsaa.integer;
 }
@@ -2068,10 +2093,9 @@ const char *VID_MenuGetAspect (void)
 	return vid_aspects[vid_menu_aspect].name;
 }
 
-qboolean VID_MenuGetFullscreen (qboolean *want_toggle)
+int VID_MenuGetWindowMode (void)
 {
-	*want_toggle = ( ((modestate == MS_WINDOWED) && vid_menu_fs) || ((modestate != MS_WINDOWED) && !vid_menu_fs) );
-	return vid_menu_fs;
+	return vid_menu_fs;	/* 0=windowed, 1=borderless, 2=fullscreen */
 }
 
 int VID_MenuGetMultisample (qboolean *is_current, qboolean *available)
@@ -2097,11 +2121,17 @@ int VID_MenuGetAnisotropy (qboolean *available)
 	return (int)gl_texture_anisotropy.value;
 }
 
-void VID_MenuAdjustFullscreen (void)
+void VID_MenuAdjustWindowMode (int dir)
 {
-	vid_menu_fs = !vid_menu_fs;
-	if (fs_toggle_works)
+	int old_fs = vid_menu_fs;
+	vid_menu_fs += dir;
+	if (vid_menu_fs < 0) vid_menu_fs = 2;
+	if (vid_menu_fs > 2) vid_menu_fs = 0;
+
+	/* instant toggle between windowed and borderless */
+	if ((old_fs <= 1 && vid_menu_fs <= 1) && fs_toggle_works)
 		VID_ToggleFullscreen();
+	/* switching to/from exclusive fullscreen requires Apply */
 }
 
 void VID_MenuAdjustAspect (int dir)
