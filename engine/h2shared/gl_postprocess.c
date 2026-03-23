@@ -803,12 +803,7 @@ void GL_PostProcess_EndFrame (void)
 	if (pp_loc_fxaa >= 0)
 		glUniform1f_fp(pp_loc_fxaa, Cvar_VariableValue("gl_fxaa"));
 	if (pp_loc_rcpframe >= 0)
-	{
-		if (!glUniform2f_fp)
-			fprintf(stderr, "FATAL: glUniform2f_fp is NULL!\n");
-		else
-			glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
-	}
+		glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
 	if (pp_loc_motionblur >= 0)
 	{
 		static float prev_yaw, prev_pitch;
@@ -820,7 +815,7 @@ void GL_PostProcess_EndFrame (void)
 		if (dy > 0.03f) dy = 0.03f; else if (dy < -0.03f) dy = -0.03f;
 		if (dp > 0.03f) dp = 0.03f; else if (dp < -0.03f) dp = -0.03f;
 		glUniform1f_fp(pp_loc_motionblur, Cvar_VariableValue("r_motionblur"));
-		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
+		if (pp_loc_viewdelta >= 0)
 			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
 		prev_yaw = yaw;
 		prev_pitch = pitch;

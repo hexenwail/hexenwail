@@ -132,6 +132,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glScalef_fp		glScalef
 #define glTexImage2D_fp		glTexImage2D
 #define glTexSubImage2D_fp	glTexSubImage2D
+#define glUniform2f_fp		glUniform2f
 
 #define glBegin_fp		glBegin
 #define glEnd_fp		glEnd
@@ -244,7 +245,6 @@ GL_FUNCTION_OPT(void, glGetProgramInfoLog, (GLuint, GLsizei, GLsizei *, char *))
 GL_FUNCTION_OPT(GLint, glGetUniformLocation, (GLuint, const char *))
 GL_FUNCTION_OPT(void, glUniform1i, (GLint, GLint))
 GL_FUNCTION_OPT(void, glUniform1f, (GLint, GLfloat))
-GL_FUNCTION_OPT(void, glUniform2f, (GLint, GLfloat, GLfloat))
 GL_FUNCTION_OPT(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat))
 GL_FUNCTION_OPT(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat))
 GL_FUNCTION_OPT(void, glUniformMatrix4fv, (GLint, GLsizei, GLboolean, const GLfloat *))
