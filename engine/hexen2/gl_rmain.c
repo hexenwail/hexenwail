@@ -116,9 +116,9 @@ cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round 
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pixel overlay on models
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};		// FXAA post-process anti-aliasing
 cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to disable)
-cvar_t	gl_glows = {"gl_glows", "1", CVAR_NONE};
-cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_NONE};
-cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_NONE};
+cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
+cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
+cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
 
 cvar_t	gl_coloredlight = {"gl_coloredlight", "1", CVAR_NONE};
 cvar_t	gl_colored_dynamic_lights = {"gl_colored_dynamic_lights", "1", CVAR_NONE};

@@ -2431,6 +2431,7 @@ enum
 	REND_WATERCOLOR,
 	REND_WATERALPHA,
 	REND_WATERWARP,
+	REND_GLOWS,
 	REND_FXAA,
 	REND_MOTIONBLUR,
 	REND_ITEMS
@@ -2520,6 +2521,17 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_WATERWARP:
 		Cvar_SetValue ("r_waterwarp", !r_waterwarp.integer);
 		break;
+	case REND_GLOWS:
+	{
+		/* cycle: All -> Torch Only -> Off */
+		int cur = (gl_missile_glows.integer ? 2 : 0) + (gl_glows.integer ? 1 : 0);
+		if (dir > 0) { if (++cur > 2) cur = 0; }
+		else         { if (--cur < 0) cur = 2; }
+		Cvar_SetValue ("gl_glows", cur >= 1 ? 1 : 0);
+		Cvar_SetValue ("gl_missile_glows", cur >= 2 ? 1 : 0);
+		Cvar_SetValue ("gl_other_glows", cur >= 2 ? 1 : 0);
+		break;
+	}
 	case REND_FXAA:
 		Cvar_SetValue ("gl_fxaa", !gl_fxaa.integer);
 		break;
@@ -2599,6 +2611,14 @@ static void M_Rendering_Draw (void)
 
 	M_Print (76, 92 + 8*REND_WATERWARP,	"Water Warp    :");
 	M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
+
+	M_Print (76, 92 + 8*REND_GLOWS,		"Glows         :");
+	if (gl_missile_glows.integer)
+		M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
+	else if (gl_glows.integer)
+		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Torch Only");
+	else
+		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Off");
 
 	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
 	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
