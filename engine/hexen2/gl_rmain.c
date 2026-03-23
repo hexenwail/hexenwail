@@ -123,6 +123,7 @@ cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to d
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
+cvar_t	gl_glow_intensity = {"gl_glow_intensity", "1", CVAR_ARCHIVE};
 
 cvar_t	gl_coloredlight = {"gl_coloredlight", "1", CVAR_NONE};
 cvar_t	gl_colored_dynamic_lights = {"gl_colored_dynamic_lights", "1", CVAR_NONE};
@@ -1507,6 +1508,10 @@ static void R_DrawGlow (entity_t *e)
 			}
 
 			intensity *= ((float)j / 255.0f);
+
+			// Scale non-torch glows by gl_glow_intensity
+			if (!(glow_flags & XF_TORCH_GLOW) && gl_glow_intensity.value < 1.0f)
+				intensity *= gl_glow_intensity.value;
 
 			// Attenuate glow by fog so it doesn't shine through
 			{

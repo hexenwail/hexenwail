@@ -2064,6 +2064,9 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("gl_glows", 1);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
 		{
@@ -2082,6 +2085,9 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("gl_glows", 0);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
 		{
@@ -2100,6 +2106,9 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("gl_glows", 1);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
 		{
@@ -2118,6 +2127,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("gl_glows", 1);
+			Cvar_SetValue ("gl_missile_glows", 1);
+			Cvar_SetValue ("gl_other_glows", 1);
+			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
 		{
@@ -2136,6 +2149,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("gl_glows", 1);
+			Cvar_SetValue ("gl_missile_glows", 1);
+			Cvar_SetValue ("gl_other_glows", 1);
+			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
 		{
@@ -2154,6 +2171,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_motionblur", 0.25f);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("gl_glows", 1);
+			Cvar_SetValue ("gl_missile_glows", 1);
+			Cvar_SetValue ("gl_other_glows", 1);
+			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
@@ -2523,13 +2544,22 @@ static void M_Rendering_AdjustSliders (int dir)
 		break;
 	case REND_GLOWS:
 	{
-		/* cycle: All -> Torch Only -> Off */
-		int cur = (gl_missile_glows.integer ? 2 : 0) + (gl_glows.integer ? 1 : 0);
-		if (dir > 0) { if (++cur > 2) cur = 0; }
-		else         { if (--cur < 0) cur = 2; }
+		/* cycle: Off(0) -> Torch Only(1) -> Reduced(2) -> All(3) */
+		int cur;
+		if (!gl_glows.integer)
+			cur = 0;
+		else if (!gl_missile_glows.integer)
+			cur = 1;
+		else if (gl_glow_intensity.value < 0.9f)
+			cur = 2;
+		else
+			cur = 3;
+		if (dir > 0) { if (++cur > 3) cur = 0; }
+		else         { if (--cur < 0) cur = 3; }
 		Cvar_SetValue ("gl_glows", cur >= 1 ? 1 : 0);
 		Cvar_SetValue ("gl_missile_glows", cur >= 2 ? 1 : 0);
 		Cvar_SetValue ("gl_other_glows", cur >= 2 ? 1 : 0);
+		Cvar_SetValue ("gl_glow_intensity", cur >= 3 ? 1.0f : 0.4f);
 		break;
 	}
 	case REND_FXAA:
@@ -2613,12 +2643,14 @@ static void M_Rendering_Draw (void)
 	M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
 
 	M_Print (76, 92 + 8*REND_GLOWS,		"Glows         :");
-	if (gl_missile_glows.integer)
-		M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
-	else if (gl_glows.integer)
-		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Torch Only");
-	else
+	if (!gl_glows.integer)
 		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Off");
+	else if (!gl_missile_glows.integer)
+		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Torch Only");
+	else if (gl_glow_intensity.value < 0.9f)
+		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Reduced");
+	else
+		M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
 
 	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
 	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
