@@ -553,6 +553,7 @@ static void R_UpdateLightmaps (qboolean Translucent)
 						BLOCK_WIDTH, BLOCK_HEIGHT,
 						gl_lightmap_format, GL_UNSIGNED_BYTE,
 						lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+				currenttexture = GL_UNUSED_TEXTURE;
 			}
 		}
 	}
