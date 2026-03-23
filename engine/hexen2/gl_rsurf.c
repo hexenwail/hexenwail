@@ -1780,24 +1780,32 @@ Builds the lightmap texture
 with all the surfaces from all brush models
 ==================
 */
+static qboolean lightmaps_built;
+
+void GL_InvalidateLightmaps (void)
+{
+	lightmaps_built = false;
+	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
+	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	world_num_verts = 0;
+}
+
 void GL_BuildLightmaps (void)
 {
 	int		i, j;
 	qmodel_t	*m;
 
-	/* GL_BuildLightmaps is called multiple times during level load
-	 * (R_NewMap, Draw_ReInit, VID_Init). This is normal. */
+	if (lightmaps_built)
+		return;		/* already built for this map */
 
 	memset (allocated, 0, sizeof(allocated));
 	memset (lightmap_modified, 0, sizeof(lightmap_modified));
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
 
-	r_framecount = 1;		// no dlightcache
+	r_framecount = 1;
 
 	if (! lightmap_textures[0])
-	{
 		glGenTextures_fp(MAX_LIGHTMAPS, lightmap_textures);
-	}
 
 	for (j = 1; j < MAX_MODELS; j++)
 	{
@@ -1826,18 +1834,14 @@ void GL_BuildLightmaps (void)
 
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
 
-	//
-	// Count used lightmap layers and upload all that were filled
-	//
 	lightmap_array_layers = 0;
 	for (i = 0; i < MAX_LIGHTMAPS; i++)
 	{
 		if (!allocated[i][0])
-			break;		// no more used
+			break;
 		lightmap_modified[i] = false;
 		lightmap_array_layers++;
 
-		/* Keep individual textures for legacy brush entity path */
 		GL_Bind(lightmap_textures[i]);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1846,7 +1850,6 @@ void GL_BuildLightmaps (void)
 				lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 	}
 
-	/* Create GL_TEXTURE_2D_ARRAY for batched world rendering */
 	if (glTexImage3D_fp && lightmap_array_layers > 0)
 	{
 		if (!lightmap_array_texture)
@@ -1864,9 +1867,12 @@ void GL_BuildLightmaps (void)
 	else
 		lightmap_array_texture = 0;
 
-	Con_SafePrintf("Lightmaps: %d pages (%dx%d) in texture array\n",
-		       lightmap_array_layers, BLOCK_WIDTH, BLOCK_HEIGHT);
-
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
+
+	GL_BuildWorldVBO ();
+
+	lightmaps_built = true;
+	Con_SafePrintf("Lightmaps: %d pages, World VBO: %d tris\n",
+		       lightmap_array_layers, world_num_verts / 3);
 }
 

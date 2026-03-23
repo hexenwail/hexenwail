@@ -336,6 +336,7 @@ void R_MarkLights (dlight_t *light, int bit, mnode_t *node);
 void R_AnimateLight(void);
 int R_LightPoint (vec3_t p);
 float R_LightPointColor (vec3_t p);
+void GL_InvalidateLightmaps (void);
 void GL_BuildLightmaps (void);
 void GL_SetupLightmapFmt (void);
 void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr);
