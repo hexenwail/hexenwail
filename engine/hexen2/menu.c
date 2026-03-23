@@ -2370,6 +2370,7 @@ enum
 	REND_WATERALPHA,
 	REND_WATERWARP,
 	REND_FXAA,
+	REND_MOTIONBLUR,
 	REND_ITEMS
 };
 
@@ -2460,6 +2461,14 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_FXAA:
 		Cvar_SetValue ("gl_fxaa", !gl_fxaa.integer);
 		break;
+	case REND_MOTIONBLUR:
+	{
+		float f = Cvar_VariableValue("r_motionblur") + dir * 0.25f;
+		if (f < 0) f = 0;
+		if (f > 1) f = 1;
+		Cvar_SetValue ("r_motionblur", f);
+		break;
+	}
 	}
 }
 
@@ -2531,6 +2540,15 @@ static void M_Rendering_Draw (void)
 
 	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
 	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
+
+	M_Print (76, 92 + 8*REND_MOTIONBLUR,	"Motion Blur   :");
+	{
+		float mb = Cvar_VariableValue("r_motionblur");
+		if (mb <= 0)
+			M_PrintWhite (220, 92 + 8*REND_MOTIONBLUR, "Off");
+		else
+			M_DrawSlider (220, 92 + 8*REND_MOTIONBLUR, mb);
+	}
 
 	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
 }

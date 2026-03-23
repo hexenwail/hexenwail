@@ -50,6 +50,8 @@ static GLint	pp_loc_waterwarp;
 static GLint	pp_loc_time;
 static GLint	pp_loc_fxaa;
 static GLint	pp_loc_rcpframe;
+static GLint	pp_loc_motionblur;
+static GLint	pp_loc_viewdelta;
 
 /* Palette LUT state */
 static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
@@ -270,6 +272,8 @@ static const char pp_frag_src[] =
 	"uniform float time;\n"
 	"uniform float fxaa_on;\n"
 	"uniform vec2 rcpFrame;\n"
+	"uniform float motionblur;\n"
+	"uniform vec2 viewdelta;\n"
 	"in vec2 v_texcoord;\n"
 	"out vec4 fragColor;\n"
 	"\n"
@@ -318,6 +322,14 @@ static const char pp_frag_src[] =
 	"        uv.y += sin(uv.x * 10.0 + time * 2.0) * 0.015 * waterwarp;\n"
 	"    }\n"
 	"    vec4 color = (fxaa_on > 0.0) ? fxaa(scene, uv, rcpFrame) : texture(scene, uv);\n"
+	"    if (motionblur > 0.0) {\n"
+	"        vec2 vel = viewdelta * motionblur;\n"
+	"        color.rgb = color.rgb * 0.4;\n"
+	"        color.rgb += texture(scene, uv + vel * 0.25).rgb * 0.2;\n"
+	"        color.rgb += texture(scene, uv + vel * 0.50).rgb * 0.15;\n"
+	"        color.rgb += texture(scene, uv + vel * 0.75).rgb * 0.125;\n"
+	"        color.rgb += texture(scene, uv + vel * 1.00).rgb * 0.125;\n"
+	"    }\n"
 	"    color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
 	/* gamma cvar: 1.0 = no change, <1.0 = brighter (matches
 	 * the original Hexen2 brightness slider convention where
@@ -410,6 +422,8 @@ static qboolean PP_InitShader (void)
 	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
 	pp_loc_fxaa = glGetUniformLocation_fp(pp_program, "fxaa_on");
 	pp_loc_rcpframe = glGetUniformLocation_fp(pp_program, "rcpFrame");
+	pp_loc_motionblur = glGetUniformLocation_fp(pp_program, "motionblur");
+	pp_loc_viewdelta = glGetUniformLocation_fp(pp_program, "viewdelta");
 
 	/* bind samplers once */
 	glUseProgram_fp(pp_program);
@@ -790,6 +804,22 @@ void GL_PostProcess_EndFrame (void)
 		glUniform1f_fp(pp_loc_fxaa, Cvar_VariableValue("gl_fxaa"));
 	if (pp_loc_rcpframe >= 0)
 		glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
+	if (pp_loc_motionblur >= 0)
+	{
+		static float prev_yaw, prev_pitch;
+		float yaw = cl.viewangles[1];
+		float pitch = cl.viewangles[0];
+		float dy = (yaw - prev_yaw) * 0.0005f;
+		float dp = (pitch - prev_pitch) * 0.0005f;
+		/* Clamp to avoid huge blur on teleport/spawn */
+		if (dy > 0.03f) dy = 0.03f; else if (dy < -0.03f) dy = -0.03f;
+		if (dp > 0.03f) dp = 0.03f; else if (dp < -0.03f) dp = -0.03f;
+		glUniform1f_fp(pp_loc_motionblur, Cvar_VariableValue("r_motionblur"));
+		if (pp_loc_viewdelta >= 0)
+			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
+		prev_yaw = yaw;
+		prev_pitch = pitch;
+	}
 
 	/* draw full-screen quad using streaming VBO (shader already active) */
 	GL_ImmBegin();
