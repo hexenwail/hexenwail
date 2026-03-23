@@ -1132,12 +1132,15 @@ void CL_UpdateEffects (void)
 				cl.Effects[idx].ef.Smoke.time_amount -= smoketime;
 			}
 
-			if (ent->frame >= ent->model->numframes)
+			if (!ent->model || ent->frame >= ent->model->numframes)
 			{
 				CL_FreeEffect(idx);
 			}
 			else
 			{
+				/* suppress muzzle flash sprite when glows are off */
+				if (cl.Effects[idx].type == CE_ACID_MUZZFL && !gl_missile_glows.integer)
+					break;
 				CL_LinkEntity(ent);
 			}
 
@@ -1195,7 +1198,7 @@ void CL_UpdateEffects (void)
 					cl.Effects[idx].ef.Smoke.time_amount -= HX_FRAME_TIME * 2;
 				}
 			}
-			if (ent->frame >= ent->model->numframes)
+			if (!ent->model || ent->frame >= ent->model->numframes)
 			{
 				CL_FreeEffect(idx);
 			}
@@ -1230,7 +1233,7 @@ void CL_UpdateEffects (void)
 			cl.Effects[idx].ef.Flash.time_amount += frametime;
 			ent = &EffectEntities[cl.Effects[idx].ef.Flash.entity_index];
 
-			while (cl.Effects[idx].ef.Flash.time_amount >= HX_FRAME_TIME)
+			while (ent->model && cl.Effects[idx].ef.Flash.time_amount >= HX_FRAME_TIME)
 			{
 				if (!cl.Effects[idx].ef.Flash.reverse)
 				{
@@ -1332,7 +1335,7 @@ void CL_UpdateEffects (void)
 			}
 			cur_frame = ent->frame;
 
-			if (cur_frame >= ent->model->numframes)
+			if (!ent->model || cur_frame >= ent->model->numframes)
 			{
 				CL_FreeEffect(idx);
 				break;

@@ -608,7 +608,7 @@ static void CL_RelinkEntities (void)
 		if (ent->effects & EF_DARKFIELD)
 			R_DarkFieldParticles (ent);
 
-		if (ent->effects & EF_MUZZLEFLASH)
+		if ((ent->effects & EF_MUZZLEFLASH) && gl_missile_glows.integer)
 		{
 			vec3_t		fv, rv, uv;
 
