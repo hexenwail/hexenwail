@@ -26,6 +26,11 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
+extern float r_fog_density;
+extern float r_fog_color[3];
+
+static void GL_BuildWorldVBO (void);
+
 int		gl_lightmap_format = GL_RGBA;
 cvar_t		gl_lightmapfmt = {"gl_lightmapfmt", "GL_RGBA", CVAR_NONE};
 int		lightmap_bytes = 4;		// 1, 2, or 4. default is 4 for GL_RGBA
@@ -48,6 +53,21 @@ static int	allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 // the lightmap texture data needs to be kept in
 // main memory so texsubimage can update properly
 static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
+
+/* Static world VBO — all world surface triangles uploaded once at level load */
+typedef struct {
+	float	pos[3];
+	float	texcoord[2];
+	float	lmcoord[2];
+	float	lmlayer;
+	float	color[4];
+} worldvert_t;
+#define WORLD_STRIDE	(12 * sizeof(float))
+
+static GLuint	world_vbo;
+static GLuint	world_vao;
+static int	world_num_verts;
+static int	world_max_verts;
 
 
 /*
@@ -551,6 +571,9 @@ static void R_UpdateLightmaps (qboolean Translucent)
 	}
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
+
+	/* Build static VBO for world surfaces */
+	GL_BuildWorldVBO ();
 }
 
 
@@ -876,6 +899,40 @@ DrawTextureChains
 */
 /*
 ================
+R_CheckSurfaceLightmap
+
+Track lightmap chain and check for dynamic updates on a surface.
+Used by both the immediate-mode batch path and static VBO path.
+================
+*/
+static void R_CheckSurfaceLightmap (msurface_t *fa)
+{
+	byte	*base;
+	int	maps;
+
+	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
+	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
+
+	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
+	{
+		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
+			goto dynamic_check;
+	}
+	if (fa->dlightframe == r_framecount || fa->cached_dlight)
+	{
+dynamic_check:
+		if (r_dynamic.integer)
+		{
+			lightmap_modified[fa->lightmaptexturenum] = true;
+			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
+			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
+		}
+	}
+}
+
+/*
+================
 R_BatchEmitSurface
 
 Convert a polygon (triangle fan) to triangles and add to the
@@ -929,26 +986,7 @@ static void R_BatchEmitSurface (msurface_t *fa)
 
 	c_brush_polys++;
 
-	/* Add to lightmap chain and check for dynamic updates */
-	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
-	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
-
-	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
-	{
-		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
-			goto dynamic_batch;
-	}
-	if (fa->dlightframe == r_framecount || fa->cached_dlight)
-	{
-dynamic_batch:
-		if (r_dynamic.integer)
-		{
-			lightmap_modified[fa->lightmaptexturenum] = true;
-			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-		}
-	}
+	R_CheckSurfaceLightmap (fa);
 }
 
 static void DrawTextureChains (entity_t *e)
@@ -997,13 +1035,14 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
-			else
+			else if (world_vao)
 			{
-				/* Batched path: bind lightmap array once, accumulate
-				 * all surfaces as triangles with per-vertex layer.
-				 * One draw call per texture, no lightmap rebinds. */
-
-				GL_ImmColor4f (1, 1, 1, 1);
+				/* Static VBO path: vertices pre-uploaded at level load.
+				 * Bind lightmap array + diffuse texture, then draw
+				 * visible surfaces from static VBO. Zero per-frame
+				 * vertex streaming. */
+				float mvp[16];
+				float mv[16];
 
 				/* Bind diffuse texture on unit 0 */
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
@@ -1012,21 +1051,40 @@ static void DrawTextureChains (entity_t *e)
 					GL_Bind (tt->gl_texturenum);
 				}
 
-				/* Bind lightmap array on unit 1 — single bind for ALL pages */
+				/* Bind lightmap array on unit 1 */
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 				glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
-				GL_ImmBegin ();
+				/* Activate shader and set uniforms */
+				glUseProgram_fp(gl_shader_world.program);
+				GL_GetMVP(mvp);
+				if (gl_shader_world.u_mvp >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+				if (gl_shader_world.u_modelview >= 0)
+				{
+					GL_GetModelview(mv);
+					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+				}
+				if (gl_shader_world.u_fog_density >= 0)
+					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+				if (gl_shader_world.u_fog_color >= 0)
+					glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+				if (gl_shader_world.u_alpha_threshold >= 0)
+					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+
+				glBindVertexArray_fp(world_vao);
 
 				for ( ; s ; s = s->texturechain)
 				{
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+						/* Fall back to immediate mode for special surfaces */
+						glBindVertexArray_fp(0);
+						glUseProgram_fp(0);
 						R_RenderBrushPolyMTex (e, s, false);
-						/* Restart — rebind array */
+						/* Re-enter static VBO path */
 						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
@@ -1035,14 +1093,23 @@ static void DrawTextureChains (entity_t *e)
 						glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 						glBindTexture_fp(GL_TEXTURE_2D_ARRAY, lightmap_array_texture);
 						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-						GL_ImmBegin ();
+						glUseProgram_fp(gl_shader_world.program);
+						glBindVertexArray_fp(world_vao);
 						continue;
 					}
 
-					R_BatchEmitSurface (s);
+					if (s->vbo_num_verts > 0)
+					{
+						glDrawArrays_fp(GL_TRIANGLES, s->vbo_first_vert, s->vbo_num_verts);
+						c_brush_polys++;
+					}
+
+					/* Track lightmap dirty state (no vertex work) */
+					R_CheckSurfaceLightmap (s);
 				}
 
-				GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
 
 				/* Restore normal 2D texture target on unit 1 */
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
@@ -1523,6 +1590,133 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 	}
 
 	poly->numverts = lnumverts;
+}
+
+/*
+========================
+GL_BuildWorldVBO
+
+Triangulate all world surfaces and upload to a static VBO.
+Called after GL_BuildLightmaps when all surface polys are built.
+========================
+*/
+static void GL_BuildWorldVBO (void)
+{
+	int		i, j, total_verts;
+	qmodel_t	*m;
+	msurface_t	*surf;
+	worldvert_t	*verts, *v;
+	glpoly_t	*p;
+	float		*pv;
+
+	/* Count total triangle vertices needed */
+	total_verts = 0;
+	m = cl.model_precache[1];	/* worldmodel */
+	if (!m) return;
+	for (i = 0; i < m->numsurfaces; i++)
+	{
+		surf = m->surfaces + i;
+		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+			continue;
+		p = surf->polys;
+		if (!p || p->numverts < 3)
+			continue;
+		total_verts += (p->numverts - 2) * 3;
+	}
+
+	if (total_verts == 0)
+		return;
+
+	/* Allocate and fill vertex buffer */
+	verts = (worldvert_t *) malloc(total_verts * sizeof(worldvert_t));
+	if (!verts)
+	{
+		Con_Printf("GL_BuildWorldVBO: out of memory for %d verts\n", total_verts);
+		return;
+	}
+
+	v = verts;
+	for (i = 0; i < m->numsurfaces; i++)
+	{
+		surf = m->surfaces + i;
+		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+		{
+			surf->vbo_first_vert = 0;
+			surf->vbo_num_verts = 0;
+			continue;
+		}
+		p = surf->polys;
+		if (!p || p->numverts < 3)
+		{
+			surf->vbo_first_vert = 0;
+			surf->vbo_num_verts = 0;
+			continue;
+		}
+
+		surf->vbo_first_vert = (int)(v - verts);
+		surf->vbo_num_verts = (p->numverts - 2) * 3;
+
+		/* Triangulate fan → triangles */
+		for (j = 2; j < p->numverts; j++)
+		{
+			float *v0 = p->verts[0];
+			float *v1 = p->verts[j - 1];
+			float *v2 = p->verts[j];
+
+#define FILL_VERT(dst, src) do { \
+	(dst)->pos[0] = (src)[0]; (dst)->pos[1] = (src)[1]; (dst)->pos[2] = (src)[2]; \
+	(dst)->texcoord[0] = (src)[3]; (dst)->texcoord[1] = (src)[4]; \
+	(dst)->lmcoord[0] = (src)[5]; (dst)->lmcoord[1] = (src)[6]; \
+	(dst)->lmlayer = (float)surf->lightmaptexturenum; \
+	(dst)->color[0] = 1; (dst)->color[1] = 1; (dst)->color[2] = 1; (dst)->color[3] = 1; \
+} while(0)
+
+			FILL_VERT(v, v0); v++;
+			FILL_VERT(v, v1); v++;
+			FILL_VERT(v, v2); v++;
+#undef FILL_VERT
+		}
+	}
+
+	world_num_verts = total_verts;
+	world_max_verts = total_verts;
+
+	/* Create VAO + VBO */
+	if (!world_vao)
+		glGenVertexArrays_fp(1, &world_vao);
+	glBindVertexArray_fp(world_vao);
+
+	if (!world_vbo)
+		glGenBuffers_fp(1, &world_vbo);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, world_vbo);
+	glBufferData_fp(GL_ARRAY_BUFFER, total_verts * sizeof(worldvert_t),
+			 verts, GL_STATIC_DRAW);
+
+	/* Vertex attributes — same layout as immvert_t */
+	glEnableVertexAttribArray_fp(ATTR_POSITION);
+	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
+				  WORLD_STRIDE, (void *)0);
+	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
+	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE,
+				  WORLD_STRIDE, (void *)(3 * sizeof(float)));
+	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
+	glVertexAttribPointer_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
+				  WORLD_STRIDE, (void *)(5 * sizeof(float)));
+	glEnableVertexAttribArray_fp(ATTR_LMLAYER);
+	glVertexAttribPointer_fp(ATTR_LMLAYER, 1, GL_FLOAT, GL_FALSE,
+				  WORLD_STRIDE, (void *)(7 * sizeof(float)));
+	glEnableVertexAttribArray_fp(ATTR_COLOR);
+	glVertexAttribPointer_fp(ATTR_COLOR, 4, GL_FLOAT, GL_FALSE,
+				  WORLD_STRIDE, (void *)(8 * sizeof(float)));
+
+	glBindVertexArray_fp(0);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+
+	free(verts);
+
+	Con_SafePrintf("World VBO: %d triangles (%d KB)\n",
+		       total_verts / 3,
+		       (int)(total_verts * sizeof(worldvert_t) / 1024));
 }
 
 /*
