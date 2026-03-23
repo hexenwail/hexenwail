@@ -577,10 +577,12 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 
-	/* Build static VBO for world surfaces (skip on video reinit
-	 * since surface polys aren't rebuilt — they remain valid) */
-	if (!draw_reinit)
-		GL_BuildWorldVBO ();
+	Con_DPrintf("[GL] BuildLightmaps: lightmaps done, building world VBO\n");
+
+	/* Build static VBO for world surfaces */
+	GL_BuildWorldVBO ();
+
+	Con_DPrintf("[GL] BuildLightmaps: complete\n");
 }
 
 
@@ -1636,7 +1638,19 @@ static void GL_BuildWorldVBO (void)
 	msurface_t	*surf;
 	worldvert_t	*verts, *v;
 	glpoly_t	*p;
-	float		*pv;
+
+	/* Delete old VBO if rebuilding */
+	if (world_vbo)
+	{
+		glDeleteBuffers_fp(1, &world_vbo);
+		world_vbo = 0;
+	}
+	if (world_vao)
+	{
+		glDeleteVertexArrays_fp(1, &world_vao);
+		world_vao = 0;
+	}
+	world_num_verts = 0;
 
 	/* Count total triangle vertices needed */
 	total_verts = 0;
@@ -1656,7 +1670,8 @@ static void GL_BuildWorldVBO (void)
 	if (total_verts == 0)
 		return;
 
-	Con_SafePrintf("World VBO: building %d triangles...\n", total_verts / 3);
+	Con_DPrintf("World VBO: %d tris, %d KB\n", total_verts / 3,
+		   (int)(total_verts * sizeof(worldvert_t) / 1024));
 
 	/* Allocate and fill vertex buffer */
 	verts = (worldvert_t *) malloc(total_verts * sizeof(worldvert_t));
@@ -1785,6 +1800,8 @@ void GL_BuildLightmaps (void)
 {
 	int		i, j;
 	qmodel_t	*m;
+
+	Con_DPrintf("[GL] BuildLightmaps: start (reinit=%d)\n", draw_reinit);
 
 	memset (allocated, 0, sizeof(allocated));
 	memset (lightmap_modified, 0, sizeof(lightmap_modified));
