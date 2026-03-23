@@ -1211,6 +1211,19 @@ static void R_RecursiveWorldNode (mnode_t *node)
 	if (R_CullBox (node->minmaxs, node->minmaxs+3))
 		return;
 
+	/* CPU-side draw distance — skip subtrees beyond r_farclip.
+	 * This replaces the old GPU far clip plane, avoiding artifacts
+	 * with sky, entities, and scrolling sky at the clip boundary. */
+	{
+		float dx = ((node->minmaxs[0] + node->minmaxs[3]) * 0.5f) - r_origin[0];
+		float dy = ((node->minmaxs[1] + node->minmaxs[4]) * 0.5f) - r_origin[1];
+		float dz = ((node->minmaxs[2] + node->minmaxs[5]) * 0.5f) - r_origin[2];
+		float dist_sq = dx*dx + dy*dy + dz*dz;
+		float clip = r_farclip.value;
+		if (dist_sq > clip * clip)
+			return;
+	}
+
 	if (node->contents < 0)
 	{
 		pleaf = (mleaf_t *)node;
