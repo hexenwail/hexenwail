@@ -874,13 +874,14 @@ static void _Host_Frame (float time)
 		if (!sv.active)
 			CL_SendCmd ();
 
-		R_UpdateParticles ();
-		CL_UpdateEffects ();
-
 		phys_accum -= phys_interval;
 	}
 
 	host_frametime = render_frametime;
+
+// update particles and effects every render frame for smooth animation
+	R_UpdateParticles ();
+	CL_UpdateEffects ();
 
 // read from server and interpolate entities every render frame
 	if (cls.state == ca_connected)
