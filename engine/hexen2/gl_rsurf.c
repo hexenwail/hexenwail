@@ -824,6 +824,22 @@ static void R_MirrorChain (msurface_t *s)
 R_DrawWaterSurfaces
 ================
 */
+/* Per-liquid alpha: returns the appropriate alpha for a turb texture.
+ * r_lavaalpha/r_slimealpha/r_telealpha override r_wateralpha when > 0. */
+static float R_LiquidAlpha (const texture_t *t)
+{
+	if (t->name[0] == '*')
+	{
+		if (!q_strncasecmp(t->name + 1, "lava", 4) && r_lavaalpha.value > 0)
+		{	float a = r_lavaalpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+		if (!q_strncasecmp(t->name + 1, "slime", 5) && r_slimealpha.value > 0)
+		{	float a = r_slimealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+		if (!q_strncasecmp(t->name + 1, "tele", 4) && r_telealpha.value > 0)
+		{	float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+	}
+	{	float a = r_wateralpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+}
+
 void R_DrawWaterSurfaces (void)
 {
 	int			i;
@@ -862,6 +878,7 @@ void R_DrawWaterSurfaces (void)
 		//if ((s->flags & SURF_DRAWTURB) && (s->flags & SURF_TRANSLUCENT))
 		if (s->flags & SURF_TRANSLUCENT)
 		{
+			float alpha = R_LiquidAlpha(t);
 			/* Sample light at first vertex for water tinting */
 			float lv = 1.0f;
 			if (s->polys && !r_fullbright.integer)
@@ -875,7 +892,7 @@ void R_DrawWaterSurfaces (void)
 				if (lv > 1.0f) lv = 1.0f;
 				if (lv < 0.15f) lv = 0.15f;
 			}
-			GL_ImmColor4f (lv, lv, lv, r_wateralpha.value);
+			GL_ImmColor4f (lv, lv, lv, alpha);
 		}
 		else
 			GL_ImmColor4f (1,1,1,1);

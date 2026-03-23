@@ -1065,5 +1065,6 @@ void CL_Init (void)
 	Cmd_AddCommand ("sensitivity_save", CL_Sensitivity_save_f);
 
 	Cmd_AddCommand ("viewpos", CL_Viewpos_f);
+	Cmd_AddCommand ("r_pos", CL_Viewpos_f);
 }
 

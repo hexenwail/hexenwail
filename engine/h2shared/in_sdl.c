@@ -35,6 +35,8 @@ static qboolean	prev_gamekey;
    ================================================================ */
 
 static cvar_t	m_filter = {"m_filter", "0", CVAR_NONE};
+static cvar_t	m_rawinput = {"m_rawinput", "1", CVAR_ARCHIVE};
+static qboolean	rawinput_active;
 
 static int	mouse_x, mouse_y, old_mouse_x, old_mouse_y;
 
@@ -364,6 +366,16 @@ void IN_HideMouse (void)
      such cases
 */
 
+static void IN_ApplyRawInput (void)
+{
+	qboolean want = m_rawinput.integer ? true : false;
+	if (want != rawinput_active)
+	{
+		SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, want ? "0" : "1");
+		rawinput_active = want;
+	}
+}
+
 void IN_ActivateMouse (void)
 {
 	if (mouseinitialized) {
@@ -372,6 +384,7 @@ void IN_ActivateMouse (void)
 		{
 			mouseactivatetoggle = true;
 			mouseactive = true;
+			IN_ApplyRawInput();
 			SDL_SetWindowRelativeMouseMode(VID_GetWindow(), true);
 			/* discard any stale relative motion */
 			SDL_GetRelativeMouseState (NULL, NULL);
@@ -401,6 +414,7 @@ static void IN_StartupMouse (void)
 
 	old_mouse_x = old_mouse_y = 0;
 	mouseinitialized = true;
+	IN_ApplyRawInput();
 	if (_enable_mouse.integer)
 	{
 		mouseactivatetoggle = true;
@@ -428,6 +442,7 @@ void IN_Init (void)
 {
 	/* mouse */
 	Cvar_RegisterVariable (&m_filter);
+	Cvar_RegisterVariable (&m_rawinput);
 
 	/* gamepad */
 	Cvar_RegisterVariable (&in_gamepad);
@@ -554,6 +569,8 @@ void IN_Move (usercmd_t *cmd)
 	app_active = !VID_IsMinimized();
 	x = 0;
 	y = 0;
+
+	IN_ApplyRawInput();
 
 	if (mouseactive)
 	{

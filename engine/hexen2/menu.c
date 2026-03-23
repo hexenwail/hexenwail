@@ -2826,11 +2826,13 @@ static void M_Sound_Key (int k)
 enum
 {
 	GAME_FOV = 0,
+	GAME_VIEWMODEL_FOV,
 	GAME_ALWAYRUN,
 	GAME_MOUSESPEED,
 	GAME_INVMOUSE,
 	GAME_MLOOK,
 	GAME_USEMOUSE,
+	GAME_RAWINPUT,
 	GAME_CROSSHAIR,
 	GAME_CHASE,
 	GAME_VIEWBOB,
@@ -2862,6 +2864,17 @@ static void M_Game_AdjustSliders (int dir)
 		else if (f > 130) f = 130;
 		Cvar_SetValue ("fov", f);
 		break;
+	case GAME_VIEWMODEL_FOV:
+	{
+		float f = Cvar_VariableValue("r_viewmodel_fov") + dir * 5;
+		if (f < 0)	f = 0;
+		else if (f < 30) f = 30;
+		else if (f > 130) f = 130;
+		/* 0 = match world FOV (default) */
+		if (dir < 0 && f <= 30) f = 0;
+		Cvar_SetValue ("r_viewmodel_fov", f);
+		break;
+	}
 	case GAME_ALWAYRUN:
 		if (cl_forwardspeed.value > 200)
 		{
@@ -2891,6 +2904,9 @@ static void M_Game_AdjustSliders (int dir)
 		break;
 	case GAME_USEMOUSE:
 		Cvar_Set ("_enable_mouse", _enable_mouse.integer ? "0" : "1");
+		break;
+	case GAME_RAWINPUT:
+		Cvar_SetValue ("m_rawinput", !Cvar_VariableValue("m_rawinput"));
 		break;
 	case GAME_CROSSHAIR:
 		Cvar_Set ("crosshair", crosshair.integer ? "0" : "1");
@@ -2930,6 +2946,18 @@ static void M_Game_Draw (void)
 	r = (scr_fov.value - 60) / (130 - 60);
 	M_DrawSlider (220, 92 + 8*GAME_FOV, r);
 
+	M_Print (76, 92 + 8*GAME_VIEWMODEL_FOV,	"Weapon FOV    :");
+	{
+		float wfov = Cvar_VariableValue("r_viewmodel_fov");
+		if (wfov <= 0)
+			M_PrintWhite (220, 92 + 8*GAME_VIEWMODEL_FOV, "Match");
+		else
+		{
+			r = (wfov - 30) / (130 - 30);
+			M_DrawSlider (220, 92 + 8*GAME_VIEWMODEL_FOV, r);
+		}
+	}
+
 	M_Print (76, 92 + 8*GAME_ALWAYRUN,	"Always Run    :");
 	M_DrawCheckbox (220, 92 + 8*GAME_ALWAYRUN, (cl_forwardspeed.value > 200));
 
@@ -2945,6 +2973,9 @@ static void M_Game_Draw (void)
 
 	M_Print (76, 92 + 8*GAME_USEMOUSE,	"Use Mouse     :");
 	M_DrawCheckbox (220, 92 + 8*GAME_USEMOUSE, _enable_mouse.integer);
+
+	M_Print (76, 92 + 8*GAME_RAWINPUT,	"Raw Input     :");
+	M_DrawCheckbox (220, 92 + 8*GAME_RAWINPUT, (int)Cvar_VariableValue("m_rawinput"));
 
 	M_Print (76, 92 + 8*GAME_CROSSHAIR,	"Crosshair     :");
 	M_DrawCheckbox (220, 92 + 8*GAME_CROSSHAIR, crosshair.integer);
