@@ -577,10 +577,13 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 
-	Con_DPrintf("[GL] BuildLightmaps: lightmaps done, building world VBO\n");
-
-	/* Build static VBO for world surfaces */
-	GL_BuildWorldVBO ();
+	/* Build static VBO for world surfaces (only on first load,
+	 * not on video reinit — surface polys don't change) */
+	if (!draw_reinit)
+	{
+		Con_DPrintf("[GL] Building world VBO\n");
+		GL_BuildWorldVBO ();
+	}
 
 	Con_DPrintf("[GL] BuildLightmaps: complete\n");
 }
@@ -1759,10 +1762,6 @@ static void GL_BuildWorldVBO (void)
 	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
 
 	free(verts);
-
-	Con_DPrintf("World VBO: %d triangles (%d KB)\n",
-		       total_verts / 3,
-		       (int)(total_verts * sizeof(worldvert_t) / 1024));
 }
 
 /*
