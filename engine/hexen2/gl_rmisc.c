@@ -414,6 +414,8 @@ void R_NewMap (void)
 {
 	int		i;
 
+	fprintf(stderr, "[TRACE] R_NewMap: enter, worldmodel=%p\n", (void*)cl.worldmodel);
+
 	for (i = 0; i < 256; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
 
@@ -421,6 +423,11 @@ void R_NewMap (void)
 
 	memset (&r_worldentity, 0, sizeof(r_worldentity));
 	r_worldentity.model = cl.worldmodel;
+
+	if (!cl.worldmodel) {
+		fprintf(stderr, "[TRACE] R_NewMap: NULL worldmodel, aborting\n");
+		return;
+	}
 
 // clear out efrags in case the level hasn't been reloaded
 // FIXME: is this one short?
@@ -430,7 +437,9 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 
+	fprintf(stderr, "[TRACE] R_NewMap: calling GL_BuildLightmaps\n");
 	GL_BuildLightmaps ();
+	fprintf(stderr, "[TRACE] R_NewMap: GL_BuildLightmaps done\n");
 
 	// identify sky texture
 	skytexturenum = -1;

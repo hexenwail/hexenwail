@@ -593,6 +593,7 @@ static void SCR_DrawClock (void)
 		struct tm *ti;
 		time(&rawtime);
 		ti = localtime(&rawtime);
+		if (!ti) return;
 		if (scr_showclock.integer == 3)
 			sprintf(st, "%02d:%02d:%02d", ti->tm_hour, ti->tm_min, ti->tm_sec);
 		else
