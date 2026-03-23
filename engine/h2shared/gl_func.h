@@ -267,6 +267,9 @@ GL_FUNCTION_OPT(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 GL_FUNCTION_OPT(void, glTexSubImage3D, (GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void *))
 
+/* Batched draw (OpenGL 1.4+) */
+GL_FUNCTION_OPT(void, glMultiDrawArrays, (GLenum, const GLint *, const GLsizei *, GLsizei))
+
 /* Additional uniform functions */
 GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 
