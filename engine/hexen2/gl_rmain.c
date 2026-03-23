@@ -760,7 +760,7 @@ static void AliasModelGetLightInfo (entity_t *e)
 	VectorCopy(e->origin, adjust_origin);
 	adjust_origin[2] += (e->model->mins[2] + e->model->maxs[2]) / 2;
 	if (gl_lightmap_format == GL_RGBA)
-		ambientlight = R_LightPointColor (adjust_origin);
+		ambientlight = shadelight = R_LightPointColor (adjust_origin);
 	else
 		ambientlight = shadelight = R_LightPoint (adjust_origin);
 }
