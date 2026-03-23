@@ -25,6 +25,8 @@
 
 #include "quakedef.h"
 
+static cvar_t	cl_truelightning = {"cl_truelightning", "1", CVAR_ARCHIVE};
+
 // MACROS ------------------------------------------------------------------
 
 #define MAX_STREAMS			32
@@ -114,6 +116,7 @@ static sfx_t *cl_sfx_rail;
 
 void CL_InitTEnts(void)
 {
+	Cvar_RegisterVariable (&cl_truelightning);
 	cl_sfx_tink1 = S_PrecacheSound ("weapons/tink1.wav");
 	cl_sfx_ric1 = S_PrecacheSound ("weapons/ric1.wav");
 	cl_sfx_ric2 = S_PrecacheSound ("weapons/ric2.wav");
@@ -470,6 +473,22 @@ void CL_UpdateTEnts(void)
 		}
 
 		VectorSubtract(stream->dest, stream->source, dist);
+
+		/* TrueLightning: override beam endpoint with current aim direction
+		 * for the player's own lightning beams. Eliminates the visual lag
+		 * between where you're aiming and where the beam renders. */
+		if (cl_truelightning.value && stream->entity == cl.viewentity &&
+		    stream->endTime >= cl.time &&
+		    (stream->type == TE_STREAM_LIGHTNING || stream->type == TE_STREAM_LIGHTNING_SMALL))
+		{
+			vec3_t	fwd;
+			float	len = VectorLength(dist);
+			if (len < 1) len = 600;
+
+			AngleVectors (cl.viewangles, fwd, NULL, NULL);
+			VectorMA (stream->source, len, fwd, stream->dest);
+			VectorSubtract(stream->dest, stream->source, dist);
+		}
 		if (dist[1] == 0 && dist[0] == 0)
 		{
 			yaw = 0;
