@@ -1009,7 +1009,7 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
-			else
+			else if (lm_atlas_enabled && lm_atlas_texture)
 			{
 				/* Batched path: bind lightmap atlas once on unit 1,
 				 * accumulate all surfaces as triangles. Surface UVs
@@ -1018,19 +1018,13 @@ static void DrawTextureChains (entity_t *e)
 
 				GL_ImmColor4f (1, 1, 1, 1);
 
-				/* Bind diffuse texture on unit 0 */
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
 				}
-
-				/* Bind lightmap atlas on unit 1 — single bind for ALL */
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-				if (lm_atlas_texture)
-					glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-				else
-					GL_Bind (lightmap_textures[s->lightmaptexturenum]);
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 				GL_ImmBegin ();
@@ -1040,11 +1034,8 @@ static void DrawTextureChains (entity_t *e)
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						/* These need special handling — flush
-						 * batch and fall back to per-surface */
 						GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 						R_RenderBrushPolyMTex (e, s, false);
-						/* Restart batch — rebind textures */
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
@@ -1058,6 +1049,12 @@ static void DrawTextureChains (entity_t *e)
 				}
 
 				GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+			}
+			else
+			{
+				/* No atlas — per-surface lightmap binds */
+				for ( ; s ; s = s->texturechain)
+					R_RenderBrushPolyMTex (e, s, false);
 			}
 		}
 
