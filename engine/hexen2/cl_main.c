@@ -617,7 +617,7 @@ static void CL_RelinkEntities (void)
 			dl->origin[2] += 16;
 			AngleVectors (ent->angles, fv, rv, uv);
 			VectorMA (dl->origin, 18, fv, dl->origin);
-			dl->radius = 200 + (rand() & 31);
+			dl->radius = (200 + (rand() & 31)) * gl_flashintensity.value;
 			dl->minlight = 32;
 			dl->die = cl.time + 0.1;
 #		ifdef GLQUAKE
@@ -635,7 +635,7 @@ static void CL_RelinkEntities (void)
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
 			dl->origin[2] += 16;
-			dl->radius = 400 + (rand() & 31);
+			dl->radius = (400 + (rand() & 31)) * gl_flashintensity.value;
 			dl->die = cl.time + 0.001;
 #		ifdef GLQUAKE
 			if (gl_colored_dynamic_lights.integer)
@@ -651,7 +651,7 @@ static void CL_RelinkEntities (void)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 + (rand() & 31);
+			dl->radius = (200 + (rand() & 31)) * gl_flashintensity.value;
 			dl->die = cl.time + 0.001;
 #		ifdef GLQUAKE
 			if (gl_colored_dynamic_lights.integer)
@@ -676,7 +676,7 @@ static void CL_RelinkEntities (void)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200;
+			dl->radius = 200 * gl_flashintensity.value;
 			dl->die = cl.time + 0.001;
 #		ifdef GLQUAKE
 			if (gl_colored_dynamic_lights.integer)
