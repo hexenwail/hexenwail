@@ -2114,6 +2114,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dynamic", 1);
 			Cvar_SetValue ("r_farclip", 16384);
 		}
+		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
 	}
 	case DISP_GAMMA:
@@ -2149,7 +2150,7 @@ static void M_Display_AdjustSliders (int dir)
 	}
 #ifdef GLQUAKE
 	case DISP_FULLSCREEN:
-		VID_MenuAdjustFullscreen ();
+		VID_MenuAdjustWindowMode (dir);
 		break;
 	case DISP_RESOLUTION:
 		VID_MenuAdjustResolution (dir);
@@ -2253,14 +2254,15 @@ static void M_Display_Draw (void)
 
 #ifdef GLQUAKE
 	{
-		qboolean is_current, available, want_toggle;
+		qboolean is_current, available;
 		const char *s;
 		int ms, vsync;
 
-		M_Print (76, 92 + 8*DISP_FULLSCREEN,	"Fullscreen    :");
+		M_Print (76, 92 + 8*DISP_FULLSCREEN,	"Window Mode   :");
 		{
-			qboolean fs = VID_MenuGetFullscreen (&want_toggle);
-			M_PrintWhite (220, 92 + 8*DISP_FULLSCREEN, fs ? "yes" : "no");
+			int wmode = VID_MenuGetWindowMode ();
+			M_PrintWhite (220, 92 + 8*DISP_FULLSCREEN,
+				wmode == 2 ? "Fullscreen" : wmode == 1 ? "Borderless" : "Windowed");
 		}
 
 		M_Print (76, 92 + 8*DISP_RESOLUTION,	"Resolution    :");
