@@ -124,6 +124,7 @@ cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_glow_intensity = {"gl_glow_intensity", "1", CVAR_ARCHIVE};
+cvar_t	gl_flashintensity = {"gl_flashintensity", "1", CVAR_ARCHIVE};
 
 cvar_t	gl_coloredlight = {"gl_coloredlight", "1", CVAR_NONE};
 cvar_t	gl_colored_dynamic_lights = {"gl_colored_dynamic_lights", "1", CVAR_NONE};
@@ -1239,6 +1240,9 @@ static void R_DrawEntitiesOnList (void)
 	{
 		e = cl_visedicts[i];
 
+		if (!e->model)
+			continue;
+
 		// chase-cam pitch adj. by FrikaC
 		if (e == &cl_entities[cl.viewentity])
 			e->angles[0] *= 0.3;
@@ -1336,6 +1340,9 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 	{
 		e = theents[i].ent;
 
+		if (!e->model)
+			continue;
+
 		switch (e->model->type)
 		{
 		case mod_alias:
@@ -1401,11 +1408,12 @@ int R_GetEntityModelFlags (entity_t *e)
 	{
 		return pimp_overrides[entnum].trail_flags;
 	}
-	return e->model->flags;
+	return e->model ? e->model->flags : 0;
 }
 
 // Returns combined ex_flags for an entity (pimp override | model defaults)
 // and sets *gsettings_out to the active glow settings
+static float null_glow_settings[GLOW_SETTINGS_COUNT];
 int R_GetPimpFlags (entity_t *e, float **gsettings_out)
 {
 	int entnum = (int)(e - cl_entities);
@@ -1413,11 +1421,11 @@ int R_GetPimpFlags (entity_t *e, float **gsettings_out)
 	{
 		if (gsettings_out)
 			*gsettings_out = pimp_overrides[entnum].glow_settings;
-		return pimp_overrides[entnum].ex_flags | e->model->ex_flags;
+		return pimp_overrides[entnum].ex_flags | (e->model ? e->model->ex_flags : 0);
 	}
 	if (gsettings_out)
-		*gsettings_out = e->model->glow_settings;
-	return e->model->ex_flags;
+		*gsettings_out = e->model ? e->model->glow_settings : null_glow_settings;
+	return e->model ? e->model->ex_flags : 0;
 }
 
 static void R_DrawGlow (entity_t *e)

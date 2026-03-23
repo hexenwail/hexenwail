@@ -278,6 +278,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_glow_intensity);
+	Cvar_RegisterVariable (&gl_flashintensity);
 	Cvar_RegisterVariable (&gl_other_glows);
 
 	Cvar_RegisterVariable (&gl_coloredlight);
