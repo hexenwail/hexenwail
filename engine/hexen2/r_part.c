@@ -1572,7 +1572,7 @@ void R_UpdateParticles (void)
 	if (cls.state == ca_disconnected)
 		return;
 
-	frametime = cl.time - cl.oldtime;
+	frametime = host_frametime;
 //	Con_Printf("%10.5f\n", frametime);
 	time4 = frametime * 20;
 	time3 = frametime * 15;
