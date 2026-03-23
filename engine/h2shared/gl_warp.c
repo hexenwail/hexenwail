@@ -195,36 +195,52 @@ void EmitWaterPolys (msurface_t *fa)
 	float		*v;
 	int			i;
 	float		s, t, os, ot;
-	vec3_t		nv;	// waterripple
+	float		nz;
+	float		ripple = gl_waterripple.value;
 
-	if (gl_waterripple.value < 0)
-		gl_waterripple.value = 0;
-	else if (gl_waterripple.value > 10)
-		gl_waterripple.value = 10;
+	if (ripple < 0) ripple = 0;
+	else if (ripple > 10) ripple = 10;
 
+	/* Batch all polygons as triangles in one draw call */
+	GL_ImmBegin ();
 	for (p = fa->polys ; p ; p = p->next)
 	{
-		GL_ImmBegin ();
-		for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+		if (p->numverts < 3)
+			continue;
+
+		/* Check buffer space: (numverts-2)*3 triangle verts */
+		if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			os = v[3];
-			ot = v[4];
-
-			nv[0] = v[0];
-			nv[1] = v[1];
-			nv[2] = v[2] + gl_waterripple.value*sin(v[0]*0.05 + realtime)*sin(v[2]*0.05 + realtime);
-
-			s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
-			s *= (1.0/64);
-
-			t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
-			t *= (1.0/64);
-
-			GL_ImmTexCoord2f (s, t);
-			GL_ImmVertex3f (nv[0], nv[1], nv[2]);
+			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+			GL_ImmBegin ();
 		}
-		GL_ImmEnd (GL_POLYGON, &gl_shader_alias);
+
+		/* Fan → triangles */
+		for (i = 2; i < p->numverts; i++)
+		{
+			int vi;
+			for (vi = 0; vi < 3; vi++)
+			{
+				int idx = (vi == 0) ? 0 : (vi == 1) ? i - 1 : i;
+				v = p->verts[idx];
+				os = v[3];
+				ot = v[4];
+
+				nz = v[2];
+				if (ripple > 0)
+					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[2]*0.05 + realtime);
+
+				s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
+				s *= (1.0/64);
+				t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
+				t *= (1.0/64);
+
+				GL_ImmTexCoord2f (s, t);
+				GL_ImmVertex3f (v[0], v[1], nz);
+			}
+		}
 	}
+	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
 }
 
 

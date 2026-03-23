@@ -546,63 +546,124 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 	else
 		r = g = b = 1;
 
+	/* Batch all strips/fans as triangles in one draw call.
+	 * Converts strips and fans to explicit triangles to avoid
+	 * per-primitive GL_ImmBegin/End overhead (5-15x fewer draws). */
+	{
+	/* Temp arrays for current strip/fan vertices */
+	static float tmp_tc[128][2];
+	static float tmp_color[128][4];
+	static float tmp_pos[128][3];
+	int vi;
+
+	GL_ImmBegin ();
+
 	while (1)
 	{
-		GLenum prim;
+		qboolean is_fan;
 
-		// get the vertex count and primitive type
 		count = *order++;
 		if (!count)
-			break;		// done
+			break;
 		if (count < 0)
 		{
 			count = -count;
-			prim = GL_TRIANGLE_FAN;
+			is_fan = true;
 		}
 		else
-			prim = GL_TRIANGLE_STRIP;
+			is_fan = false;
 
-		GL_ImmBegin ();
+		if (count > 128) count = 128;
 
-		do
+		/* Collect strip/fan vertices into temp arrays */
+		for (vi = 0; vi < count; vi++)
 		{
-			// texture coordinates come from the draw list
-			GL_ImmTexCoord2f (((float *)order)[0], ((float *)order)[1]);
+			tmp_tc[vi][0] = ((float *)order)[0];
+			tmp_tc[vi][1] = ((float *)order)[1];
 			order += 2;
-
-			// normals and vertexes come from the frame list
 
 			if (model_fullbright_pass)
 			{
-				GL_ImmColor4f (1, 1, 1, 1);
+				tmp_color[vi][0] = tmp_color[vi][1] = tmp_color[vi][2] = tmp_color[vi][3] = 1;
 			}
 			else if (gl_lightmap_format == GL_RGBA)
 			{
 				l = shadedots[verts->lightnormalindex];
-				GL_ImmColor4f (l * lightcolor[0], l * lightcolor[1], l * lightcolor[2], model_constant_alpha);
+				tmp_color[vi][0] = l * lightcolor[0];
+				tmp_color[vi][1] = l * lightcolor[1];
+				tmp_color[vi][2] = l * lightcolor[2];
+				tmp_color[vi][3] = model_constant_alpha;
 			}
 			else
 			{
 				l = shadedots[verts->lightnormalindex] * shadelight;
-				GL_ImmColor4f (r*l, g*l, b*l, model_constant_alpha);
+				tmp_color[vi][0] = r*l;
+				tmp_color[vi][1] = g*l;
+				tmp_color[vi][2] = b*l;
+				tmp_color[vi][3] = model_constant_alpha;
 			}
 
 			if (do_lerp)
 			{
-				GL_ImmVertex3f (
-					verts_prev->v[0] + (verts->v[0] - verts_prev->v[0]) * lerpfrac,
-					verts_prev->v[1] + (verts->v[1] - verts_prev->v[1]) * lerpfrac,
-					verts_prev->v[2] + (verts->v[2] - verts_prev->v[2]) * lerpfrac);
+				tmp_pos[vi][0] = verts_prev->v[0] + (verts->v[0] - verts_prev->v[0]) * lerpfrac;
+				tmp_pos[vi][1] = verts_prev->v[1] + (verts->v[1] - verts_prev->v[1]) * lerpfrac;
+				tmp_pos[vi][2] = verts_prev->v[2] + (verts->v[2] - verts_prev->v[2]) * lerpfrac;
 				verts_prev++;
 			}
 			else
 			{
-				GL_ImmVertex3f (verts->v[0], verts->v[1], verts->v[2]);
+				tmp_pos[vi][0] = verts->v[0];
+				tmp_pos[vi][1] = verts->v[1];
+				tmp_pos[vi][2] = verts->v[2];
 			}
 			verts++;
-		} while (--count);
+		}
 
-		GL_ImmEnd (prim, &gl_shader_alias);
+		/* Check buffer space */
+		if (GL_ImmCount() + (count - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+		{
+			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+			GL_ImmBegin ();
+		}
+
+		/* Convert to triangles and emit */
+		if (is_fan)
+		{
+			for (vi = 2; vi < count; vi++)
+			{
+#define EMIT_VERT(idx) do { \
+	GL_ImmTexCoord2f(tmp_tc[idx][0], tmp_tc[idx][1]); \
+	GL_ImmColor4f(tmp_color[idx][0], tmp_color[idx][1], tmp_color[idx][2], tmp_color[idx][3]); \
+	GL_ImmVertex3f(tmp_pos[idx][0], tmp_pos[idx][1], tmp_pos[idx][2]); \
+} while(0)
+				EMIT_VERT(0);
+				EMIT_VERT(vi - 1);
+				EMIT_VERT(vi);
+			}
+		}
+		else
+		{
+			/* triangle strip → triangles */
+			for (vi = 2; vi < count; vi++)
+			{
+				if (vi & 1)
+				{
+					EMIT_VERT(vi);
+					EMIT_VERT(vi - 1);
+					EMIT_VERT(vi - 2);
+				}
+				else
+				{
+					EMIT_VERT(vi - 2);
+					EMIT_VERT(vi - 1);
+					EMIT_VERT(vi);
+				}
+			}
+#undef EMIT_VERT
+		}
+	}
+
+	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
 	}
 }
 
