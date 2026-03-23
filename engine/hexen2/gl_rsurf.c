@@ -578,8 +578,6 @@ static void R_UpdateLightmaps (qboolean Translucent)
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 
 	GL_BuildWorldVBO ();	/* no-ops if already built */
-
-	Con_DPrintf("[GL] BuildLightmaps: complete\n");
 }
 
 
@@ -1787,7 +1785,8 @@ void GL_BuildLightmaps (void)
 	int		i, j;
 	qmodel_t	*m;
 
-	Con_DPrintf("[GL] BuildLightmaps: start (reinit=%d)\n", draw_reinit);
+	/* GL_BuildLightmaps is called multiple times during level load
+	 * (R_NewMap, Draw_ReInit, VID_Init). This is normal. */
 
 	memset (allocated, 0, sizeof(allocated));
 	memset (lightmap_modified, 0, sizeof(lightmap_modified));
