@@ -1052,7 +1052,10 @@ static void R_DrawAliasModel (entity_t *e)
 	R_SetupAliasFrame (e, paliashdr);
 
 	// Fullbright pass: render fullbright pixels with additive blending
-	if (skinnum < 100)	// only for standard model skins
+	// Skip for translucent models — additive blend over transparency looks wrong
+	if (skinnum < 100 &&
+	    !((e->drawflags & DRF_TRANSLUCENT) ||
+	      (e->model->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS))))
 	{
 		int anim_fb = (int)(cl.time*10) & 3;
 		GLuint fb_tex;
@@ -1076,10 +1079,13 @@ static void R_DrawAliasModel (entity_t *e)
 			glDepthMask_fp (1);
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDisable_fp (GL_BLEND);
+			GL_SetAlphaThreshold(0.01f);	/* restore default */
 		}
 	}
 
 // restore params
+
+	model_constant_alpha = 1.0f;
 
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
 	    (e->model->flags & EF_SPECIAL_TRANS) ||
@@ -1407,10 +1413,10 @@ static void R_DrawGlow (entity_t *e)
 
 			// Attenuate glow by fog so it doesn't shine through
 			{
-				float fogdensity = Fog_GetDensity();
+				float fogdensity = Fog_GetDensity() / 512.0f;
 				if (fogdensity > 0)
 				{
-					float fogfactor = exp(-fogdensity * fogdensity * distance * distance / (64.0f * 64.0f));
+					float fogfactor = exp(-fogdensity * distance);
 					if (fogfactor < 0) fogfactor = 0;
 					if (fogfactor > 1) fogfactor = 1;
 					intensity *= fogfactor;

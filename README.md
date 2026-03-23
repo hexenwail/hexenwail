@@ -86,6 +86,9 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] SDL3 for video, input, and audio — Linux and Windows
 - [x] CMake build system — pull the source and `cmake && make`
 - [x] Nix flake for reproducible builds and Windows cross-compilation
+- [x] CI pipeline — GitHub Actions builds Linux + Windows on every push, with Nix store caching for fast rebuilds
+- [x] One-command releases — `./release.sh v0.x.x` tags, pushes, and GitHub Actions builds + publishes release zips automatically
+- [x] Reproducible builds — Nix flake lockfile pins exact dependency versions; `nixos-unstable` channel for latest SDL3
 - [x] NixOS: FluidSynth soundfont bundled — MIDI works out of the box
 - [x] HiDPI display support
 - [x] Combined Display menu — rendering and video settings in one place (Ironwail-style)
