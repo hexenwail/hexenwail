@@ -910,7 +910,7 @@ static void V_CalcIntermissionRefdef (void)
 	VectorCopy (ent->origin, r_refdef.vieworg);
 	VectorCopy (ent->angles, r_refdef.viewangles);
 	view->model = NULL;
-	r_refdef.vieworg[2] += cl.viewheight;
+	r_refdef.vieworg[2] += cl.crouch;
 
 	// always idle in intermission
 	old = v_idlescale.value;
@@ -1012,7 +1012,7 @@ static void V_CalcRefdef (void)
 	CalcGunAngle ();
 
 	VectorCopy (ent->origin, view->origin);
-	view->origin[2] += cl.viewheight;
+	view->origin[2] += cl.crouch;
 
 	for (i = 0; i < 3; i++)
 	{
