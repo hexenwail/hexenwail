@@ -428,6 +428,15 @@ void R_NewMap (void)
 	r_viewleaf = NULL;
 	R_ClearParticles ();
 
+	/* Invalidate world VBO so it gets rebuilt for the new map */
+	{
+		extern GLuint world_vao, world_vbo;
+		extern int world_num_verts;
+		if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
+		if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+		world_num_verts = 0;
+	}
+
 	GL_BuildLightmaps ();
 
 	// identify sky texture

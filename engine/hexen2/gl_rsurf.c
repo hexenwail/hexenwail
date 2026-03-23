@@ -64,9 +64,9 @@ typedef struct {
 } worldvert_t;
 #define WORLD_STRIDE	(12 * sizeof(float))
 
-static GLuint	world_vbo;
-static GLuint	world_vao;
-static int	world_num_verts;
+GLuint		world_vbo;
+GLuint		world_vao;
+int		world_num_verts;
 static int	world_max_verts;
 
 /* Scratch arrays for glMultiDrawArrays — collected per texture chain */
@@ -577,9 +577,9 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
 
-	/* Build static VBO for world surfaces (only on first load,
-	 * not on video reinit — surface polys don't change) */
-	if (!draw_reinit)
+	/* Build static VBO only once per map — GL_BuildLightmaps is
+	 * called from multiple places during level load */
+	if (!world_vao)
 	{
 		Con_DPrintf("[GL] Building world VBO\n");
 		GL_BuildWorldVBO ();
@@ -1642,17 +1642,6 @@ static void GL_BuildWorldVBO (void)
 	worldvert_t	*verts, *v;
 	glpoly_t	*p;
 
-	/* Delete old VBO if rebuilding */
-	if (world_vbo)
-	{
-		glDeleteBuffers_fp(1, &world_vbo);
-		world_vbo = 0;
-	}
-	if (world_vao)
-	{
-		glDeleteVertexArrays_fp(1, &world_vao);
-		world_vao = 0;
-	}
 	world_num_verts = 0;
 
 	/* Count total triangle vertices needed */
