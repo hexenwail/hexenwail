@@ -17,6 +17,9 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
 
       - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
+          use-gha-cache: true
 
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
