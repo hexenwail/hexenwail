@@ -737,9 +737,6 @@ static void _Host_ServerFrame (void)
 	if (!sv.paused && (svs.maxclients > 1 || Key_GetDest() == key_game))
 	{
 		SV_Physics ();
-
-		R_UpdateParticles ();
-		CL_UpdateEffects ();
 	}
 }
 
