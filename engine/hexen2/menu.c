@@ -2045,7 +2045,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("r_watercolor", 0);
-			Cvar_SetValue ("r_wateralpha", 0.5f);
+			Cvar_SetValue ("r_wateralpha", 1.0f);
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
@@ -2369,6 +2369,7 @@ enum
 	REND_WATERCOLOR,
 	REND_WATERALPHA,
 	REND_WATERWARP,
+	REND_FXAA,
 	REND_ITEMS
 };
 
@@ -2456,6 +2457,9 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_WATERWARP:
 		Cvar_SetValue ("r_waterwarp", !r_waterwarp.integer);
 		break;
+	case REND_FXAA:
+		Cvar_SetValue ("gl_fxaa", !gl_fxaa.integer);
+		break;
 	}
 }
 
@@ -2524,6 +2528,9 @@ static void M_Rendering_Draw (void)
 
 	M_Print (76, 92 + 8*REND_WATERWARP,	"Water Warp    :");
 	M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
+
+	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
+	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
 
 	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
 }
