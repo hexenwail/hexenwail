@@ -1173,11 +1173,24 @@ static void R_DrawEntitiesOnList (void)
 		switch (e->model->type)
 		{
 		case mod_alias:
+		{
+			/* Distance-based LOD: skip tiny alias models at distance */
+			float dx = e->origin[0] - r_origin[0];
+			float dy = e->origin[1] - r_origin[1];
+			float dz = e->origin[2] - r_origin[2];
+			float dist_sq = dx*dx + dy*dy + dz*dz;
+			float radius = e->model->radius;
+			/* Skip if model would be < ~4 pixels on screen */
+			if (radius > 0 && dist_sq > radius * radius * 40000 &&
+			    e != &cl_entities[cl.viewentity])
+				break;
+
 			item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
 					(e->model->flags & (EF_TRANSPARENT|EF_HOLEY|EF_SPECIAL_TRANS))) != 0;
 			if (!item_trans)
 				R_DrawAliasModel (e);
 			break;
+		}
 
 		case mod_brush:
 			item_trans = (e->drawflags & DRF_TRANSLUCENT) != 0;
