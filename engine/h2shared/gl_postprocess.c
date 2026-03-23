@@ -48,6 +48,8 @@ static GLint	pp_loc_palette;
 static GLint	pp_loc_scale;
 static GLint	pp_loc_waterwarp;
 static GLint	pp_loc_time;
+static GLint	pp_loc_fxaa;
+static GLint	pp_loc_rcpframe;
 
 /* Palette LUT state */
 static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
@@ -266,8 +268,37 @@ static const char pp_frag_src[] =
 	"uniform float scale;\n"
 	"uniform float waterwarp;\n"
 	"uniform float time;\n"
+	"uniform float fxaa_on;\n"
+	"uniform vec2 rcpFrame;\n"
 	"in vec2 v_texcoord;\n"
 	"out vec4 fragColor;\n"
+	"\n"
+	"vec4 fxaa(sampler2D tex, vec2 uv, vec2 rcp) {\n"
+	"    #define LM(c) ((c).g)\n"
+	"    vec3 rN=texture(tex,uv+vec2(0,-1)*rcp).rgb,rS=texture(tex,uv+vec2(0,1)*rcp).rgb;\n"
+	"    vec3 rE=texture(tex,uv+vec2(1,0)*rcp).rgb,rW=texture(tex,uv+vec2(-1,0)*rcp).rgb;\n"
+	"    vec3 rM=texture(tex,uv).rgb;\n"
+	"    float lN=LM(rN),lS=LM(rS),lE=LM(rE),lW=LM(rW),lM=LM(rM);\n"
+	"    float mn=min(lM,min(min(lN,lS),min(lW,lE)));\n"
+	"    float mx=max(lM,max(max(lN,lS),max(lW,lE)));\n"
+	"    float rng=mx-mn;\n"
+	"    if(rng<max(0.0625,mx*0.166)) return vec4(rM,1.0);\n"
+	"    float lNW=LM(texture(tex,uv+vec2(-1,-1)*rcp).rgb);\n"
+	"    float lNE=LM(texture(tex,uv+vec2(1,-1)*rcp).rgb);\n"
+	"    float lSW=LM(texture(tex,uv+vec2(-1,1)*rcp).rgb);\n"
+	"    float lSE=LM(texture(tex,uv+vec2(1,1)*rcp).rgb);\n"
+	"    float eH=abs(lNW+lNE-2.0*lN)+abs(lW+lE-2.0*lM)*2.0+abs(lSW+lSE-2.0*lS);\n"
+	"    float eV=abs(lNW+lSW-2.0*lW)+abs(lN+lS-2.0*lM)*2.0+abs(lNE+lSE-2.0*lE);\n"
+	"    bool hz=(eH>=eV);\n"
+	"    float l1=hz?lS:lE,l2=hz?lN:lW;\n"
+	"    float st=hz?rcp.y:rcp.x;\n"
+	"    if(abs(l1-lM)<abs(l2-lM))st=-st;\n"
+	"    float avg=(lN+lS+lE+lW)*0.25;\n"
+	"    float sp=clamp(abs(avg-lM)/rng,0.0,0.75);\n"
+	"    vec2 p=uv;if(hz)p.y+=st*0.5;else p.x+=st*0.5;\n"
+	"    return vec4(mix(texture(tex,p).rgb,rM,1.0-sp),1.0);\n"
+	"    #undef LM\n"
+	"}\n"
 	"\n"
 	"float bayer16(ivec2 c) {\n"
 	"    c &= 15;\n"
@@ -286,7 +317,7 @@ static const char pp_frag_src[] =
 	"        uv.x += sin(uv.y * 10.0 + time * 1.5) * 0.015 * waterwarp;\n"
 	"        uv.y += sin(uv.x * 10.0 + time * 2.0) * 0.015 * waterwarp;\n"
 	"    }\n"
-	"    vec4 color = texture(scene, uv);\n"
+	"    vec4 color = (fxaa_on > 0.0) ? fxaa(scene, uv, rcpFrame) : texture(scene, uv);\n"
 	"    color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
 	/* gamma cvar: 1.0 = no change, <1.0 = brighter (matches
 	 * the original Hexen2 brightness slider convention where
@@ -377,6 +408,8 @@ static qboolean PP_InitShader (void)
 	pp_loc_scale = glGetUniformLocation_fp(pp_program, "scale");
 	pp_loc_waterwarp = glGetUniformLocation_fp(pp_program, "waterwarp");
 	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
+	pp_loc_fxaa = glGetUniformLocation_fp(pp_program, "fxaa_on");
+	pp_loc_rcpframe = glGetUniformLocation_fp(pp_program, "rcpFrame");
 
 	/* bind samplers once */
 	glUseProgram_fp(pp_program);
@@ -753,6 +786,10 @@ void GL_PostProcess_EndFrame (void)
 	}
 	if (pp_loc_time >= 0)
 		glUniform1f_fp(pp_loc_time, (float)realtime);
+	if (pp_loc_fxaa >= 0)
+		glUniform1f_fp(pp_loc_fxaa, Cvar_VariableValue("gl_fxaa"));
+	if (pp_loc_rcpframe >= 0)
+		glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
 
 	/* draw full-screen quad using streaming VBO (shader already active) */
 	GL_ImmBegin();
