@@ -2010,12 +2010,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_flashblend", 1);
 			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_wateralpha", 1.0f);
 			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-
+			Cvar_SetValue ("r_farclip", 4096);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
 		{
@@ -2027,12 +2029,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_flashblend", 1);
 			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_wateralpha", 1.0f);
 			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-
+			Cvar_SetValue ("r_farclip", 2048);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
 		{
@@ -2044,12 +2048,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_flashblend", 1);
 			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_wateralpha", 1.0f);
 			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-
+			Cvar_SetValue ("r_farclip", 4096);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
 		{
@@ -2061,12 +2067,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_wateralpha", 0.33f);
 			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("r_dynamic", 1);
-
+			Cvar_SetValue ("r_farclip", 4096);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
 		{
@@ -2078,12 +2086,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_wateralpha", 0.33f);
 			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
-
+			Cvar_SetValue ("r_farclip", 8192);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
 		{
@@ -2095,12 +2105,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_wateralpha", 0.33f);
 			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_motionblur", 0.25f);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
-
+			Cvar_SetValue ("r_farclip", 16384);
 		}
 		break;
 	}
