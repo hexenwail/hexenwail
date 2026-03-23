@@ -94,6 +94,7 @@ cvar_t	r_mirroralpha = {"r_mirroralpha", "1", CVAR_NONE};
 cvar_t	r_wateralpha = {"r_wateralpha", "0.33", CVAR_ARCHIVE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_NONE};
+cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
@@ -1820,7 +1821,6 @@ static void R_SetupFrame (void)
 
 
 #define NEARCLIP	4
-#define FARCLIP		4096
 
 /*
 =============
@@ -1863,7 +1863,7 @@ static void R_SetupGL (void)
 		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
 		GL_MatrixMode(GL_MAT_PROJECTION);
 		GL_LoadIdentity();
-		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, FARCLIP);
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, r_farclip.value);
 	}
 
 	if (mirror)
