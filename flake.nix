@@ -1,6 +1,11 @@
 {
   description = "Hexenwail - modernized Hexen II engine (fork of Hammer of Thyrion / uHexen2)";
 
+  nixConfig = {
+    extra-substituters = [ "https://hexenwail.cachix.org" ];
+    extra-trusted-public-keys = [ "hexenwail.cachix.org-1:8p4Jk7hUQz7PC4eqiqBl0RtorLGO9QosIaKfRa2EgPE=" ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
