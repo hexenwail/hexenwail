@@ -334,11 +334,10 @@ static const char pp_frag_src[] =
 	"        color.rgb += texture(scene, uv + vel * 0.75).rgb * 0.125;\n"
 	"        color.rgb += texture(scene, uv + vel * 1.00).rgb * 0.125;\n"
 	"    }\n"
-	"    color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
-	/* gamma cvar: 1.0 = no change, <1.0 = brighter (matches
-	 * the original Hexen2 brightness slider convention where
-	 * lower gamma values mean a brighter picture). */
-	"    color.rgb = pow(max(color.rgb, vec3(0.0)), vec3(gamma));\n"
+	"    if (contrast != 1.0)\n"
+	"        color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
+	"    if (gamma != 1.0)\n"
+	"        color.rgb = pow(max(color.rgb, vec3(0.0)), vec3(gamma));\n"
 	"    color.rgb = clamp(color.rgb, 0.0, 1.0);\n"
 	"\n"
 	"    if (softemu > 0) {\n"
