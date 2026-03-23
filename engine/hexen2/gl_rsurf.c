@@ -858,6 +858,91 @@ void R_DrawWaterSurfaces (void)
 DrawTextureChains
 ================
 */
+/*
+================
+R_BatchEmitSurface
+
+Convert a polygon (triangle fan) to triangles and add to the
+current immediate-mode batch. Flushes and restarts if the batch
+is nearly full. Handles lightmap dirty checks inline.
+================
+*/
+static void R_BatchEmitSurface (msurface_t *fa, int cur_lightmap)
+{
+	glpoly_t	*p = fa->polys;
+	float		*v;
+	int		j, nverts;
+	byte		*base;
+	int		maps;
+
+	nverts = p->numverts;
+	if (nverts < 3)
+		return;
+
+	/* Check if we need to flush before adding this surface.
+	 * Each polygon of N verts produces (N-2)*3 triangle verts. */
+	if (GL_ImmCount() + (nverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+	{
+		/* Flush current batch */
+		GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+		GL_ImmBegin ();
+	}
+
+	/* If lightmap changed, flush and rebind */
+	if (fa->lightmaptexturenum != cur_lightmap)
+	{
+		GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+		GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		GL_ImmBegin ();
+	}
+
+	/* Emit as triangles (fan → triangles: v0-v1-v2, v0-v2-v3, ...) */
+	v = p->verts[0];
+	for (j = 2; j < nverts; j++)
+	{
+		float *v0 = p->verts[0];
+		float *v1 = p->verts[j - 1];
+		float *v2 = p->verts[j];
+
+		GL_ImmTexCoord2f (v0[3], v0[4]);
+		GL_ImmLMCoord2f (v0[5], v0[6]);
+		GL_ImmVertex3f (v0[0], v0[1], v0[2]);
+
+		GL_ImmTexCoord2f (v1[3], v1[4]);
+		GL_ImmLMCoord2f (v1[5], v1[6]);
+		GL_ImmVertex3f (v1[0], v1[1], v1[2]);
+
+		GL_ImmTexCoord2f (v2[3], v2[4]);
+		GL_ImmLMCoord2f (v2[5], v2[6]);
+		GL_ImmVertex3f (v2[0], v2[1], v2[2]);
+	}
+
+	c_brush_polys++;
+
+	/* Add to lightmap chain and check for dynamic updates */
+	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
+	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
+
+	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
+	{
+		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
+			goto dynamic_batch;
+	}
+	if (fa->dlightframe == r_framecount || fa->cached_dlight)
+	{
+dynamic_batch:
+		if (r_dynamic.integer)
+		{
+			lightmap_modified[fa->lightmaptexturenum] = true;
+			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
+			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
+		}
+	}
+}
+
 static void DrawTextureChains (entity_t *e)
 {
 	int		i;
@@ -906,16 +991,53 @@ static void DrawTextureChains (entity_t *e)
 			}
 			else
 			{
-				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+				/* Batched path: accumulate surfaces as triangles,
+				 * flush on lightmap or buffer-full boundaries.
+				 * Reduces draw calls from thousands to tens. */
+				int cur_lightmap = -1;
 
-				glEnable_fp (GL_BLEND);
+				GL_ImmColor4f (1, 1, 1, 1);
+
+				/* Bind diffuse texture on unit 0 */
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+				{
+					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+					GL_Bind (tt->gl_texturenum);
+				}
+
+				/* Bind first surface's lightmap on unit 1 */
+				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+				GL_Bind (lightmap_textures[s->lightmaptexturenum]);
+				cur_lightmap = s->lightmaptexturenum;
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+
+				GL_ImmBegin ();
 
 				for ( ; s ; s = s->texturechain)
-					R_RenderBrushPolyMTex (e, s, false);
+				{
+					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
+							SURF_DRAWFENCE | SURF_UNDERWATER))
+					{
+						/* These need special handling — flush
+						 * batch and fall back to per-surface */
+						GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
+						R_RenderBrushPolyMTex (e, s, false);
+						/* Restart batch — rebind textures */
+						{
+							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+							GL_Bind (tt->gl_texturenum);
+						}
+						cur_lightmap = -1;
+						GL_ImmBegin ();
+						continue;
+					}
 
-				glDisable_fp (GL_BLEND);
-				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+					R_BatchEmitSurface (s, cur_lightmap);
+					cur_lightmap = s->lightmaptexturenum;
+				}
+
+				GL_ImmEnd (GL_TRIANGLES, &gl_shader_world);
 			}
 		}
 

@@ -24,6 +24,7 @@
  *   GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
  */
 
+int	GL_ImmCount (void);
 void	GL_ImmBegin (void);
 void	GL_ImmVertex3f (float x, float y, float z);
 void	GL_ImmVertex2f (float x, float y);

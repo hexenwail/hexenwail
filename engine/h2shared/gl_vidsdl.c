@@ -145,7 +145,7 @@ static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_ARCHIVE};
 static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};
 static cvar_t	vid_window_x = {"vid_window_x", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_window_y = {"vid_window_y", "-1", CVAR_ARCHIVE};
-static cvar_t	vid_vsync = {"vid_vsync", "1", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
+static cvar_t	vid_vsync = {"vid_vsync", "0", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
 extern cvar_t	gl_texture_anisotropy;	/* defined in gl_draw.c */
 static cvar_t	vid_borderless = {"vid_borderless", "0", CVAR_ARCHIVE};
 // cvars for compatibility with the software version

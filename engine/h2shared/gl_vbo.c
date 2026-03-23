@@ -128,6 +128,11 @@ void GL_VBO_Shutdown (void)
 /* Immediate-mode replacement API                                      */
 /* ------------------------------------------------------------------ */
 
+int GL_ImmCount (void)
+{
+	return imm_count;
+}
+
 void GL_ImmBegin (void)
 {
 	imm_count = 0;
