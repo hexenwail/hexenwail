@@ -1078,6 +1078,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	qboolean	rotated;
 
 	currenttexture = GL_UNUSED_TEXTURE;
+	GL_ImmResetState();
 
 	clmodel = e->model;
 
