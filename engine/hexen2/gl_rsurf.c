@@ -521,17 +521,17 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 	for (i = 0; i < MAX_LIGHTMAPS; i++)
 	{
-		p = lightmap_polys[i];
-		if (!p)
-			continue;	// skip if no lightmap
-
-		GL_Bind(lightmap_textures[i]);
+		if (!lightmap_textures[i])
+			break;		// no more used
 
 		if (lightmap_modified[i])
 		{
 			// if current lightmap was changed reload it
-			// and mark as not changed.
+			// and mark as not changed. Don't skip pages
+			// without visible polys — brush entity surfaces
+			// may have marked them dirty.
 			lightmap_modified[i] = false;
+			GL_Bind(lightmap_textures[i]);
 			glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
 					BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
 					lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
