@@ -2289,6 +2289,10 @@ static GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width
 	byte	*fbdata;
 	qboolean has_fb = false;
 
+	/* Safety: vid.fullbright must be valid (224-255 range) */
+	if (vid.fullbright < 1 || vid.fullbright > 255 || !gl_fullbrights.integer)
+		return 0;
+
 	s = width * height;
 
 	/* Quick scan: any fullbright pixels? */
