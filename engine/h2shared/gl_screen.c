@@ -621,9 +621,9 @@ static void SCR_DrawClock (void)
 		minutes = seconds / 60;
 		seconds %= 60;
 		if (minutes >= 60)
-			sprintf(st, "up %d:%02d:%02d", minutes / 60, minutes % 60, seconds);
+			sprintf(st, "%d:%02d:%02d", minutes / 60, minutes % 60, seconds);
 		else
-			sprintf(st, "up %d:%02d", minutes, seconds);
+			sprintf(st, "%d:%02d", minutes, seconds);
 		x = vid.width - strlen(st) * 8 - 8;
 		y -= 8;
 		Draw_String(x, y, st);
