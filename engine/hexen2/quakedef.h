@@ -25,14 +25,11 @@
 #define __STRINGIFY(x) #x
 #define STRINGIFY(x) __STRINGIFY(x)
 
-#define	HOT_VERSION_MAJ		1
-#define	HOT_VERSION_MID		5
-#define	HOT_VERSION_MIN		10
-#define	HOT_VERSION_REL_DATE	"2022-10-25"
-#define	HOT_VERSION_STR		STRINGIFY(HOT_VERSION_MAJ) "." STRINGIFY(HOT_VERSION_MID) "." STRINGIFY(HOT_VERSION_MIN)
+/* Hexenwail fork — based on Hammer of Thyrion 1.5.10, Hexen II engine 1.29 */
+#define	HW_VERSION		"v6304"
 #define	GLQUAKE_VERSION		1.00
-#define	ENGINE_VERSION		1.2901
-#define	ENGINE_NAME		"Hexen2"
+#define	ENGINE_VERSION		1.29
+#define	ENGINE_NAME		"Hexenwail"
 
 #define	MAX_QPATH	64	// max length of a quake game pathname
 

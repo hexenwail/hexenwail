@@ -5,11 +5,11 @@
 
 A modernized Hexen II engine for Windows and Linux, forked from [uHexen2 / Hammer of Thyrion](http://uhexen2.sourceforge.net/).
 
-Modernizes the engine in the spirit of [Ironwail](https://github.com/andrei-drexler/ironwail) (for Quake), providing a stable, clean platform for both the original game and modern mods that rely on extended engine features.
+Ports [Ironwail](https://github.com/andrei-drexler/ironwail)'s rendering and engine improvements from Quake to Hexen II — SDL3, GL 4.3 shaders, gamepad support, and a clean codebase targeting Linux and Windows only.
 
 ## Why this fork?
 
-This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shanjaq's mod-support additions](https://github.com/Shanjaq/uhexen2), then modernizes the engine in the spirit of what [Ironwail](https://github.com/andrei-drexler/ironwail) did for Quake — SDL3, gamepad support, GLSL shaders, and a clean codebase targeting Linux and Windows only. Upstream Hammer of Thyrion updates are pulled in as they become available.
+This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shanjaq's mod-support additions](https://github.com/Shanjaq/uhexen2), then ports [Ironwail](https://github.com/andrei-drexler/ironwail)'s improvements from Quake to Hexen II — SDL3, gamepad support, GLSL shaders, and a clean codebase targeting Linux and Windows only. Upstream Hammer of Thyrion updates are pulled in as they become available.
 
 ## Features
 
@@ -19,7 +19,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Controller options menu (sensitivity, deadzone, acceleration)
 - [x] Hot-plug — just plug in and play
 - [x] Default bindings: triggers for attack/jump, shoulders for weapon cycle
-- [ ] Rumble/haptic feedback on damage and weapon fire
+- [x] Rumble/haptic feedback on damage and weapon fire
 
 ### Comfort & accessibility
 - [x] View bob intensity slider (reduce or disable head bob)
@@ -39,7 +39,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Batched world rendering — surfaces accumulated as triangles, one draw call per texture
 - [x] Render scale for crunchy pixel upscaling (25%-100%)
 - [x] Retro mode: Bayer dithering + 256-color palette quantization (Ironwail-style)
-- [x] Display presets: Crunchy (25% scale, point-sampled), Retro, Modern, User
+- [x] Display presets: Faithful, Crunchy, Retro, Clean, Modern, Ultra (User when custom)
 - [x] Classic/Smooth texture filtering toggle
 - [x] MSAA anti-aliasing (via multisampled FBO)
 - [x] Borderless windowed and fullscreen modes
@@ -49,7 +49,6 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Two-layer scrolling sky (solid + transparent) and skybox rendering
 - [x] Shader-based fog (standard exp formula, smooth underwater fade)
 - [x] Fence/chain texture transparency
-- [x] Glow effects with fog attenuation
 - [x] Water tint color options (Classic/Blue/Green/Clear)
 - [x] FOV slider (60-130)
 - [x] Adjustable draw distance (`r_farclip`)
@@ -62,9 +61,12 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Lightstyle interpolation (smooth flickering lights)
 - [x] Fullbright pixel support for alias model skins (eye glow, torch flames)
 - [x] Square particle toggle (`gl_particles 0` for classic software look)
-- [ ] Lightmapped liquid surfaces
-- [ ] Underwater warp effect
-- [ ] FXAA post-process
+- [x] Lightmapped liquid surfaces
+- [x] Underwater warp effect
+- [x] FXAA post-process
+- [x] Glow effects toggle (All/Torch Only/Off) with fog attenuation
+- [x] Muzzle flash dynamic light radius scaling (`gl_flashintensity`)
+- [x] Translucent brush entity rendering (teleport beams, etc.)
 - [ ] HDR rendering pipeline
 
 ### Plays nicely with mods
@@ -110,6 +112,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Flatpak packaging support
 - [x] Game Options menu — view bob/roll, console alpha, dynamic light toggle
 - [ ] Mouse-driven UI navigation
+- [x] Raw mouse input toggle (`m_rawinput`)
 - [ ] AppImage packaging
 
 ## Building

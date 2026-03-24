@@ -4646,20 +4646,12 @@ static void M_Quit_Draw (void)
 
 #define QUIT_CENTER(str)	((320 - (int)strlen(str) * 8) / 2)
 	{
-		const char *l0 = "Hexen II version " STRINGIFY(ENGINE_VERSION);
-		const char *l1 = "by Raven Software";
-		const char *l2 = "Hammer of Thyrion " HOT_VERSION_STR;
-		const char *l3 = "Source Port";
-		const char *l4 = "Shanjaq and Inky Additions";
-		const char *l5 = "for wabbit";
-		const char *l6 = "Hexenwail Engine";
+		const char *l0 = "Hexenwail " HW_VERSION;
+		const char *l1 = "Hammer of Thyrion 1.5.10 by sezero";
+		const char *l2 = "Hexen II 1.29 by Raven Software";
 		M_Print      (QUIT_CENTER(l0), y,      l0);
-		M_Print      (QUIT_CENTER(l1), y + 8,  l1);
-		M_PrintWhite (QUIT_CENTER(l2), y + 16, l2);
-		M_PrintWhite (QUIT_CENTER(l3), y + 24, l3);
-		M_PrintWhite (QUIT_CENTER(l4), y + 32, l4);
-		M_PrintWhite (QUIT_CENTER(l5), y + 40, l5);
-		M_PrintWhite (QUIT_CENTER(l6), y + 52, l6);
+		M_PrintWhite (QUIT_CENTER(l1), y + 12, l1);
+		M_PrintWhite (QUIT_CENTER(l2), y + 20, l2);
 	}
 #undef QUIT_CENTER
 	y += 68;

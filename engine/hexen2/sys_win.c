@@ -382,9 +382,8 @@ static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 
 static void PrintVersion (void)
 {
-	Sys_Printf ("Hammer of Thyrion, release %s (%s)\n", HOT_VERSION_STR, HOT_VERSION_REL_DATE);
-	Sys_Printf ("running on %s engine %4.2f (%s)\n", ENGINE_NAME, ENGINE_VERSION, PLATFORM_STRING);
-	Sys_Printf ("More info / sending bug reports:  http://uhexen2.sourceforge.net\n");
+	Sys_Printf ("Hexenwail %s (%s)\n", HW_VERSION, PLATFORM_STRING);
+	Sys_Printf ("based on Hexen II engine %4.2f / Hammer of Thyrion 1.5.10\n", ENGINE_VERSION);
 }
 
 /*
