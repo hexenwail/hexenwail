@@ -53,7 +53,9 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Adjustable draw distance (`r_farclip`)
 - [x] FPS limiter (24/30/60/72/90/120/144/Unlimited)
 - [x] Show FPS toggle
+- [x] Speed display (`scr_showspeed` — horizontal speed readout)
 - [x] In-game clock/timer display (`showclock 1`=game time, `2`=wall clock)
+- [x] Centered console notify messages (`con_notifycenter`)
 - [x] HUD layout modes (Full/Mini/Off/Clean — Clean also hides weapon)
 - [x] Model animation interpolation (lerping between keyframes)
 - [x] Physics/render decoupling with entity interpolation (Ironwail-style)

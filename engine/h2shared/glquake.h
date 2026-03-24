@@ -255,6 +255,7 @@ extern	cvar_t	gl_purge_maptex;
 extern	cvar_t	gl_smoothmodels;
 extern	cvar_t	gl_affinemodels;
 extern	cvar_t	gl_polyblend;
+extern	cvar_t	gl_cshiftpercent;
 extern	cvar_t	gl_keeptjunctions;
 extern	cvar_t	gl_reporttjunctions;
 extern	cvar_t	gl_flashblend;
