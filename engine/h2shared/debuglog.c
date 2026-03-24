@@ -79,22 +79,17 @@ void LOG_Init (quakeparms_t *parms)
 	int			i, j;
 	char		session[24];
 
-	if (COM_CheckParm("-condebug") || COM_CheckParm("-debuglog"))
-	{
-		con_debuglog |= LOG_NORMAL;
-	}
-	if (COM_CheckParm("-devlog"))	/* always log Con_DPrintf and Sys_DPrintf */
-	{
+	/* always log — makes crash/bug reporting easy without extra flags */
+	con_debuglog |= LOG_NORMAL;
+
+	if (COM_CheckParm("-devlog"))	/* also log Con_DPrintf and Sys_DPrintf */
 		con_debuglog |= LOG_DEVEL;
-	}
 
-	if (con_debuglog == LOG_NONE)
-		return;
-
+	/* write to userdir/qconsole.log — predictable, writable, easy to find */
 	j = q_strlcpy (logfilename, parms->userdir, sizeof(logfilename));
 	if (j && !IS_DIR_SEPARATOR(logfilename[j - 1]))
 		q_strlcat(logfilename, DIR_SEPARATOR_STR, sizeof(logfilename));
-	q_strlcat(logfilename, DEBUGLOG_FILENAME, sizeof(logfilename));
+	q_strlcat(logfilename, "qconsole.log", sizeof(logfilename));
 	Sys_DateTimeString (session);
 
 	/*
