@@ -1039,6 +1039,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_backspeed);
 	Cvar_RegisterVariable (&cl_sidespeed);
 	Cvar_RegisterVariable (&cl_movespeedkey);
+	Cvar_RegisterVariable (&cl_alwaysrun);
 	Cvar_RegisterVariable (&cl_yawspeed);
 	Cvar_RegisterVariable (&cl_pitchspeed);
 	Cvar_RegisterVariable (&cl_anglespeedkey);

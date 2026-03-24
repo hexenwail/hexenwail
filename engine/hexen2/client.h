@@ -271,6 +271,7 @@ extern	cvar_t	cl_backspeed;
 extern	cvar_t	cl_sidespeed;
 
 extern	cvar_t	cl_movespeedkey;
+extern	cvar_t	cl_alwaysrun;
 
 extern	cvar_t	cl_yawspeed;
 extern	cvar_t	cl_pitchspeed;
