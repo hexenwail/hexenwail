@@ -870,7 +870,7 @@ static void M_Class_Draw (void)
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPic (43, 54 + m_class_cursor * 20, Draw_CachePic(va("gfx/menu/menudot%i.lmp", f+1)) );
 
-	M_DrawPic (251, 54 + 21, Draw_CachePic (va("gfx/cport%d.lmp", m_class_cursor + 1)));
+	M_DrawPic (251, 54 + 21, Draw_CachePicNoTrans (va("gfx/cport%d.lmp", m_class_cursor + 1)));
 	M_DrawTransPic (242, 54, Draw_CachePic ("gfx/menu/frame.lmp"));
 }
 
