@@ -226,6 +226,7 @@ extern	cvar_t	r_mirroralpha;
 extern	cvar_t	r_wateralpha;
 extern	cvar_t	r_skyalpha;
 extern	cvar_t	r_dynamic;
+extern	cvar_t	r_lerplightstyles;
 extern	cvar_t	r_farclip;
 extern	cvar_t	r_viewmodel_fov;
 extern	cvar_t	r_lavaalpha;

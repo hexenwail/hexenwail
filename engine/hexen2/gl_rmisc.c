@@ -244,6 +244,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
+	Cvar_RegisterVariable (&r_lerplightstyles);
 	Cvar_RegisterVariable (&r_farclip);
 	Cvar_RegisterVariable (&r_viewmodel_fov);
 	Cvar_RegisterVariable (&r_lavaalpha);
