@@ -131,7 +131,6 @@ static qboolean S_SDL_Init (dma_t *dma)
 
 	/* Query what we actually got */
 	{
-		int src_format_tmp;
 		SDL_AudioFormat fmt;
 		if (!SDL_GetAudioStreamFormat(audio_stream, &spec, NULL))
 		{
