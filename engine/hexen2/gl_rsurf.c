@@ -614,6 +614,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glDisable_fp(GL_BLEND);
 		GL_SetAlphaThreshold(0.666f);
+		if (r_alphatocoverage.integer)
+			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
 
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
@@ -672,7 +674,11 @@ dynamic:
 	}
 
 	if (fa->flags & SURF_DRAWFENCE)
+	{
 		GL_SetAlphaThreshold(0.01f);
+		if (r_alphatocoverage.integer)
+			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+	}
 }
 
 void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
@@ -731,6 +737,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glDisable_fp(GL_BLEND);
 		GL_SetAlphaThreshold(0.666f);
+		if (r_alphatocoverage.integer)
+			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
 
 	if (fa->flags & SURF_DRAWTURB)
@@ -796,7 +804,11 @@ dynamic1:
 	}
 
 	if (fa->flags & SURF_DRAWFENCE)
+	{
 		GL_SetAlphaThreshold(0.01f);
+		if (r_alphatocoverage.integer)
+			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+	}
 
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 }

@@ -128,6 +128,8 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
 
 	glGenRenderbuffers_fp(1, &pp_native_depth_rb);
@@ -170,6 +172,8 @@ static qboolean PP_CreateFBO (int width, int height)
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
 
 	if (samples > 1 && glRenderbufferStorageMultisample_fp && glBlitFramebuffer_fp)
@@ -703,8 +707,8 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	{
 		float yaw   = cl.viewangles[1];
 		float pitch = cl.viewangles[0];
-		float dy = (yaw   - pp_prev_yaw)   * 0.0005f;
-		float dp = (pitch - pp_prev_pitch) * 0.0005f;
+		float dy = (yaw   - pp_prev_yaw)   * 0.002f;
+		float dp = (pitch - pp_prev_pitch) * 0.002f;
 		if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
 		if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
 		glUniform1f_fp(pp_loc_motionblur, blur);
@@ -766,6 +770,8 @@ void GL_PostProcess_End3D (void)
 						GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 				pp_copyback_w = w;
 				pp_copyback_h = h;
 			}
@@ -872,6 +878,8 @@ void GL_PostProcess_EndFrame (void)
 					GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			pp_copyback_w = w;
 			pp_copyback_h = h;
 		}

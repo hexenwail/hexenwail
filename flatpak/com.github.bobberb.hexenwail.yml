@@ -76,9 +76,10 @@ modules:
   - name: libxmp
     buildsystem: autotools
     sources:
-      - type: archive
-        url: https://github.com/libxmp/libxmp/releases/download/libxmp-4.6.3/libxmp-4.6.3.tar.gz
-        sha256: 33b8a9a27e832f8ab6e3116c93d5f6ca89b5a9e7f69a0f84d0e6de6fcb6b1f15
+      - type: git
+        url: https://github.com/libxmp/libxmp.git
+        tag: libxmp-4.6.3
+        commit: bed660f8e530d399c38f27a5a7732f4e79740585
 
   - name: hexenwail
     buildsystem: cmake-ninja
