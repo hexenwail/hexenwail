@@ -3,15 +3,11 @@
 ![Screenshot](docs/screenshot1.png)
 *New worlds await!* ([Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey))
 
-A modernized Hexen II engine for Windows and Linux, forked from [uHexen2 / Hammer of Thyrion](http://uhexen2.sourceforge.net/).
+The Quake community took sezero's [QuakeSpasm](https://github.com/sezero/quakespasm) and pushed its OpenGL rendering into the modern era with [Ironwail](https://github.com/andrei-drexler/ironwail). Hexenwail does the same for Hexen II.
 
-Built on sezero's Hammer of Thyrion (Raven's Hexen II) with additions from Shanjaq, Inky, and many more. Just as Ironwail did for Quake, Hexenwail continues that work for Hexen II — a modern GL 4.3 fork.
+Built on sezero's [Hammer of Thyrion](https://github.com/sezero/uhexen2) — the definitive Hexen II engine — with contributions from Shanjaq, Inky, and many more.
 
-Ports [Ironwail](https://github.com/andrei-drexler/ironwail)'s rendering and engine improvements from Quake to Hexen II — SDL3, GL 4.3 shaders, gamepad support, and a clean codebase targeting Linux and Windows only.
-
-## Why this fork?
-
-This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shanjaq's mod-support additions](https://github.com/Shanjaq/uhexen2), then ports [Ironwail](https://github.com/andrei-drexler/ironwail)'s improvements from Quake to Hexen II — SDL3, gamepad support, GLSL shaders, and a clean codebase targeting Linux and Windows only. Upstream Hammer of Thyrion updates are pulled in as they become available.
+A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support, and a clean codebase.
 
 ## Features
 
