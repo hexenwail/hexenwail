@@ -5,6 +5,8 @@
 
 A modernized Hexen II engine for Windows and Linux, forked from [uHexen2 / Hammer of Thyrion](http://uhexen2.sourceforge.net/).
 
+Built on sezero's Hammer of Thyrion (Raven's Hexen II) with additions from Shanjaq, Inky, and many more. Just as Ironwail did for Quake, Hexenwail continues that work for Hexen II — a modern GL 4.3 fork.
+
 Ports [Ironwail](https://github.com/andrei-drexler/ironwail)'s rendering and engine improvements from Quake to Hexen II — SDL3, GL 4.3 shaders, gamepad support, and a clean codebase targeting Linux and Windows only.
 
 ## Why this fork?

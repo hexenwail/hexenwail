@@ -892,7 +892,7 @@ void R_DrawWaterSurfaces (void)
 			GL_ImmColor4f (lv, lv, lv, alpha);
 		}
 		else
-			GL_ImmColor4f (1,1,1,1);
+			GL_ImmColor4f (1,1,1, R_LiquidAlpha(t));
 
 		// set modulate mode explicitly
 		GL_Bind (t->gl_texturenum);
