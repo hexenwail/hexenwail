@@ -3805,7 +3805,7 @@ static void M_Mods_Key (int key)
 		m_entersound = true;
 		Key_SetDest (key_game);
 		m_state = m_none;
-		Cbuf_AddText (va("game %s %d\n", mods_list[mods_cursor],
+		Cbuf_AddText (va("game \"%s\" %d\n", mods_list[mods_cursor],
 				mods_portals_toggle ? 1 : 0));
 		break;
 	}
@@ -5816,7 +5816,7 @@ void M_Keybind (int key)
 	Key_SetDest (key_menu);
 }
 
-void M_Keydown (int key)
+void M_Keydown (int key, qboolean repeat)
 {
 	/* Mouse support: click=Enter, wheel=Up/Down */
 	if (key == K_MOUSE1)
@@ -5825,6 +5825,20 @@ void M_Keydown (int key)
 		key = K_UPARROW;
 	else if (key == K_MWHEELDOWN)
 		key = K_DOWNARROW;
+
+	/* Suppress key repeat for everything except navigation/escape */
+	if (repeat)
+	{
+		switch (key)
+		{
+		case K_UPARROW: case K_DOWNARROW:
+		case K_LEFTARROW: case K_RIGHTARROW:
+		case K_ESCAPE:
+			break;
+		default:
+			return;
+		}
+	}
 
 	switch (m_state)
 	{

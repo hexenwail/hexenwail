@@ -35,6 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define TEXPREF_WARPIMAGE		0x0800	// resize this texture when warpimagesize changes
 #define	TEXPREF_RGBA			0x1000	// texture is 32 bit RGBA, not 8 bit
 #define	TEXPREF_TRANSPARENT		0x2000	// Transparent sprite
+#define	TEXPREF_UNCOMPRESSED		0x4000	// never compress (HUD/2D textures)
 
 
 enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA, SRC_EXTERNAL};
