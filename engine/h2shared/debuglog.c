@@ -70,12 +70,8 @@ void LOG_Printf (const char *fmt, ...)
 static void LOG_PrintVersion (void)
 {
 /* repeating the PrintVersion() messages from main() here */
-	LOG_Printf("Hammer of Thyrion, release %s (%s)\n", HOT_VERSION_STR, HOT_VERSION_REL_DATE);
-#if defined(SERVERONLY) && !defined(H2W)
-	LOG_Printf("Hexen II dedicated server %4.2f (%s)\n", ENGINE_VERSION, PLATFORM_STRING);
-#else
-	LOG_Printf("running on %s engine %4.2f (%s)\n", ENGINE_NAME, ENGINE_VERSION, PLATFORM_STRING);
-#endif
+	LOG_Printf("Hexenwail %s (%s)\n", HW_VERSION, PLATFORM_STRING);
+	LOG_Printf("based on Hexen II engine %4.2f / Hammer of Thyrion 1.5.10\n", ENGINE_VERSION);
 }
 
 void LOG_Init (quakeparms_t *parms)

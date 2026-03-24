@@ -388,9 +388,8 @@ static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 
 static void PrintVersion (void)
 {
-	Sys_Printf ("Hammer of Thyrion, release %s (%s)\n", HOT_VERSION_STR, HOT_VERSION_REL_DATE);
-	Sys_Printf ("Hexen II dedicated server %4.2f (%s)\n", ENGINE_VERSION, PLATFORM_STRING);
-	Sys_Printf ("More info / sending bug reports:  http://uhexen2.sourceforge.net\n");
+	Sys_Printf ("Hexenwail %s (%s)\n", HW_VERSION, PLATFORM_STRING);
+	Sys_Printf ("Hexen II dedicated server %4.2f\n", ENGINE_VERSION);
 }
 
 static const char *help_strings[] = {

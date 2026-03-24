@@ -92,7 +92,7 @@ void Draw_BigCharacter (int x, int y, int num);
 
 /* game/engine name to draw on the console */
 #define GAME_MOD_NAME		ENGINE_NAME
-#define ENGINE_WATERMARK	GAME_MOD_NAME " " STRINGIFY(ENGINE_VERSION) " (" PLATFORM_STRING ")"
+#define ENGINE_WATERMARK	GAME_MOD_NAME " " HW_VERSION " (" PLATFORM_STRING ")"
 
 #endif	/* __HX2_DRAW_H */
 
