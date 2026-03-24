@@ -20,6 +20,9 @@ jobs:
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
+      - name: Smoke test
+        run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 
