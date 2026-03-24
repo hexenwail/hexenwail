@@ -396,6 +396,8 @@ cvar_t	cl_backspeed = {"cl_backspeed", "200", CVAR_ARCHIVE};
 cvar_t	cl_sidespeed = {"cl_sidespeed", "225", CVAR_NONE};
 cvar_t	cl_movespeedkey = {"cl_movespeedkey", "2.0", CVAR_NONE};
 cvar_t	cl_alwaysrun = {"cl_alwaysrun", "0", CVAR_ARCHIVE};	/* 1 = always run; +speed acts as slow key */
+cvar_t	cl_maxpitch = {"cl_maxpitch", "80", CVAR_ARCHIVE};	/* max look-down pitch (degrees) */
+cvar_t	cl_minpitch = {"cl_minpitch", "-70", CVAR_ARCHIVE};	/* min look-up pitch (degrees) */
 cvar_t	cl_yawspeed = {"cl_yawspeed", "140", CVAR_NONE};
 cvar_t	cl_pitchspeed = {"cl_pitchspeed", "150", CVAR_NONE};
 cvar_t	cl_anglespeedkey = {"cl_anglespeedkey", "1.5", CVAR_NONE};
@@ -450,10 +452,10 @@ void CL_AdjustAngles (void)
 	if (up || down)
 		V_StopPitchDrift ();
 
-	if (cl.viewangles[PITCH] > 80)
-		cl.viewangles[PITCH] = 80;
-	if (cl.viewangles[PITCH] < -70)
-		cl.viewangles[PITCH] = -70;
+	if (cl.viewangles[PITCH] > cl_maxpitch.value)
+		cl.viewangles[PITCH] = cl_maxpitch.value;
+	if (cl.viewangles[PITCH] < cl_minpitch.value)
+		cl.viewangles[PITCH] = cl_minpitch.value;
 
 	if (cl.viewangles[ROLL] > 50)
 		cl.viewangles[ROLL] = 50;
