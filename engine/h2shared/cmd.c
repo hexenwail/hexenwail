@@ -885,7 +885,21 @@ int ListCvars (const char *prefix, const char **buf, int pos)
 static void Cmd_ListCvar_f(void)
 {
 	if ( Cmd_Argc() > 1 )
-		ListCvars (Cmd_Argv(1), NULL, 0);
+	{
+		const char *filter = Cmd_Argv(1);
+		cvar_t *var;
+		int count = 0;
+		var = Cvar_FindVarAfter ("", CVAR_NONE);
+		for ( ; var ; var = var->next)
+		{
+			if (strstr(var->name, filter))
+			{
+				Con_Printf (" %s : %s\n", var->name, var->string);
+				count++;
+			}
+		}
+		Con_Printf ("%d cvar(s) matching \"%s\"\n", count, filter);
+	}
 	else
 		ListCvars (NULL, NULL, 0);
 }

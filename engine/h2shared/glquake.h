@@ -233,6 +233,7 @@ extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_motionblur;
+extern	cvar_t	r_alphatocoverage;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_lerpmodels;
 extern	cvar_t	r_showbboxes;

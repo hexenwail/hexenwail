@@ -88,6 +88,7 @@ cvar_t	r_drawviewmodel = {"r_drawviewmodel", "1", CVAR_NONE};
 cvar_t	r_speeds = {"r_speeds", "0", CVAR_NONE};
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
+cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
@@ -1090,6 +1091,8 @@ static void R_DrawAliasModel (entity_t *e)
 	{
 		glDisable_fp (GL_BLEND);
 		GL_SetAlphaThreshold(0.666f);	/* alpha test for see-through cutouts */
+		if (r_alphatocoverage.integer)
+			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 		model_constant_alpha = 1.0f;
 	}
 	else if (e->alpha != ENTALPHA_DEFAULT)
@@ -1206,7 +1209,11 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 
 	if (e->model->flags & EF_HOLEY)
+	{
 		GL_SetAlphaThreshold(0.01f);	/* restore default */
+		if (r_alphatocoverage.integer)
+			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+	}
 
 	GL_PopMatrix();
 
