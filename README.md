@@ -49,6 +49,7 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Fence/chain texture transparency
 - [x] Water tint color options (Classic/Blue/Green/Clear)
 - [x] FOV slider (60-130)
+- [x] Zoom (`+zoom`/`togglezoom` — smooth FOV transition to `zoom_fov`, bindable)
 - [x] Adjustable draw distance (`r_farclip`)
 - [x] FPS limiter (24/30/60/72/90/120/144/Unlimited)
 - [x] Show FPS toggle
@@ -66,6 +67,7 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Glow effects toggle (All/Torch Only/Off) with fog attenuation
 - [x] Muzzle flash dynamic light radius scaling (`gl_flashintensity`)
 - [x] Translucent brush entity rendering (teleport beams, etc.)
+- [x] Model overbright toggle (`gl_overbright_models`)
 - [ ] HDR rendering pipeline
 
 ### Plays nicely with mods

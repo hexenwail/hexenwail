@@ -93,9 +93,12 @@ int		trans_level = 0;
 cvar_t		scr_viewsize = {"viewsize", "110", CVAR_ARCHIVE};
 cvar_t		scr_fov = {"fov", "90", CVAR_NONE};	// 10 - 170
 cvar_t		scr_fov_adapt = {"fov_adapt", "1", CVAR_ARCHIVE};	// "Hor+" scaling
+static	cvar_t	scr_zoomfov = {"zoom_fov", "30", CVAR_ARCHIVE};
+static	cvar_t	scr_zoomspeed = {"zoom_speed", "8", CVAR_ARCHIVE};
 cvar_t		scr_contrans = {"contrans", "0", CVAR_ARCHIVE};
 static	cvar_t	scr_conspeed = {"scr_conspeed", "300", CVAR_NONE};
 static	cvar_t	scr_centertime = {"scr_centertime", "4", CVAR_NONE};
+static	cvar_t	con_logcenterprint = {"con_logcenterprint", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
@@ -247,6 +250,9 @@ void SCR_CenterPrint (const char *str)
 	FindTextBreaks(scr_centerstring[0] == '_' ?
 		       scr_centerstring + 1 : scr_centerstring, 38);
 	scr_center_lines = lines;
+
+	if (con_logcenterprint.integer && str[0] != '_')
+		Con_Printf ("%s\n", str);
 }
 
 static void SCR_DrawCenterString (void)
@@ -362,6 +368,10 @@ static void SCR_CalcRefdef (void)
 		Cvar_SetQuick (&scr_fov, "10");
 	else if (scr_fov.integer > 170)
 		Cvar_SetQuick (&scr_fov, "170");
+	if (scr_zoomfov.integer < 10)
+		Cvar_SetQuick (&scr_zoomfov, "10");
+	else if (scr_zoomfov.integer > 170)
+		Cvar_SetQuick (&scr_zoomfov, "170");
 
 	vid.recalc_refdef = 0;
 
@@ -397,8 +407,14 @@ static void SCR_CalcRefdef (void)
 	r_refdef.vrect.x = (vid.width - r_refdef.vrect.width)/2;
 	r_refdef.vrect.y = (h - r_refdef.vrect.height)/2;
 
-	r_refdef.fov_x = AdaptFovx (scr_fov.value, r_refdef.vrect.width, r_refdef.vrect.height);
-	r_refdef.fov_y = CalcFovy (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
+	{
+		float fov, zoom;
+		zoom = cl.zoom;
+		zoom = zoom * zoom * (3.f - 2.f * zoom);	/* smoothstep */
+		fov = scr_fov.value + (scr_zoomfov.value - scr_fov.value) * zoom;
+		r_refdef.fov_x = AdaptFovx (fov, r_refdef.vrect.width, r_refdef.vrect.height);
+		r_refdef.fov_y = CalcFovy (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
+	}
 
 	scr_vrect = r_refdef.vrect;
 }
@@ -435,6 +451,47 @@ static void SCR_Callback_refdef (cvar_t *var)
 	vid.recalc_refdef = 1;
 }
 
+static void SCR_ToggleZoom_f (void)
+{
+	if (cl.zoomdir)
+		cl.zoomdir = -cl.zoomdir;
+	else
+		cl.zoomdir = cl.zoom > 0.5f ? -1.f : 1.f;
+}
+
+static void SCR_ZoomDown_f (void)
+{
+	cl.zoomdir = 1.f;
+}
+
+static void SCR_ZoomUp_f (void)
+{
+	cl.zoomdir = -1.f;
+}
+
+static void SCR_UpdateZoom (void)
+{
+	float speed, delta;
+
+	if (!cl.zoomdir)
+		return;
+
+	speed = scr_zoomspeed.value > 0.f ? scr_zoomspeed.value : 1e6f;
+	delta = cl.zoomdir * speed * (float)(cl.time - cl.oldtime);
+	cl.zoom += delta;
+	if (cl.zoom >= 1.f)
+	{
+		cl.zoom = 1.f;
+		cl.zoomdir = 0.f;
+	}
+	else if (cl.zoom <= 0.f)
+	{
+		cl.zoom = 0.f;
+		cl.zoomdir = 0.f;
+	}
+	vid.recalc_refdef = 1;
+}
+
 //=============================================================================
 
 
@@ -458,6 +515,9 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_fov);
 	Cvar_RegisterVariable (&scr_fov_adapt);
 	Cvar_RegisterVariable (&scr_viewsize);
+	Cvar_RegisterVariable (&scr_zoomfov);
+	Cvar_RegisterVariable (&scr_zoomspeed);
+	Cvar_RegisterVariable (&con_logcenterprint);
 	Cvar_RegisterVariable (&scr_contrans);
 	Cvar_RegisterVariable (&scr_conspeed);
 	Cvar_RegisterVariable (&scr_showram);
@@ -472,6 +532,9 @@ void SCR_Init (void)
 	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f);
 	Cmd_AddCommand ("sizeup",SCR_SizeUp_f);
 	Cmd_AddCommand ("sizedown",SCR_SizeDown_f);
+	Cmd_AddCommand ("+zoom", SCR_ZoomDown_f);
+	Cmd_AddCommand ("-zoom", SCR_ZoomUp_f);
+	Cmd_AddCommand ("togglezoom", SCR_ToggleZoom_f);
 
 	scr_initialized = true;
 	con_forcedup = true;	// we're just initialized and not connected yet
@@ -1320,6 +1383,8 @@ void SCR_UpdateScreen (void)
 
 	GL_BeginRendering (&glx, &gly, &glwidth, &glheight);
 	GL_PostProcess_BeginFrame ();
+
+	SCR_UpdateZoom ();
 
 //
 // check for vid changes

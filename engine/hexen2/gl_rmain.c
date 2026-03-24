@@ -118,6 +118,7 @@ cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pixel overlay on models
+cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};	// clamp alias model lighting
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};		// FXAA post-process anti-aliasing
 cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to disable)
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
@@ -939,16 +940,19 @@ static void R_DrawAliasModel (entity_t *e)
 		}
 
 		// clamp lighting so it doesn't overbright as much
-		if (ambientlight > 128)
-			ambientlight = 128;
-		if (ambientlight + shadelight > 192)
-			shadelight = 192 - ambientlight;
-
-		// clamp lightcolor channels to match shade clamping
-		for (i = 0; i < 3; i++)
+		if (gl_overbright_models.integer)
 		{
-			if (lightcolor[i] > 192)
-				lightcolor[i] = 192;
+			if (ambientlight > 128)
+				ambientlight = 128;
+			if (ambientlight + shadelight > 192)
+				shadelight = 192 - ambientlight;
+
+			// clamp lightcolor channels to match shade clamping
+			for (i = 0; i < 3; i++)
+			{
+				if (lightcolor[i] > 192)
+					lightcolor[i] = 192;
+			}
 		}
 	}
 

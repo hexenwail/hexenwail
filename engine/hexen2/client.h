@@ -207,6 +207,9 @@ typedef struct
 
 	usercmd_t	pendingcmd;		// accumulated movement between physics ticks
 
+	float		zoom;		/* 0=normal FOV, 1=fully zoomed to zoom_fov */
+	float		zoomdir;	/* +1=zooming in, -1=zooming out, 0=stopped */
+
 	float		last_received_message;	// (realtime) for net trouble icon
 
 //
