@@ -274,8 +274,8 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 		}
 	}
 
-// add all the dynamic lights
-	if (surf->dlightframe == r_framecount)
+// add all the dynamic lights (only when r_dynamic is enabled)
+	if (r_dynamic.integer && surf->dlightframe == r_framecount)
 		R_AddDynamicLights (surf);
 
 // bound, invert, and shift
@@ -656,13 +656,14 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		|| fa->cached_dlight)		// dynamic previously
 	{
 dynamic:
-		if (r_dynamic.integer)
-		{
-			lightmap_modified[fa->lightmaptexturenum] = true;
-			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-		}
+		/* Always rebuild: r_dynamic only gates new dlight addition
+		 * (inside R_BuildLightMap via dlightframe check), not cleanup.
+		 * Skipping the rebuild leaves stale bright squares when r_dynamic
+		 * is toggled off after a light was applied. */
+		lightmap_modified[fa->lightmaptexturenum] = true;
+		base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+		base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
+		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
 	}
 
 	if (e->drawflags & DRF_TRANSLUCENT)
@@ -780,13 +781,10 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		    || fa->cached_dlight)		// dynamic previously
 		{
 dynamic1:
-			if (r_dynamic.integer)
-			{
-				lightmap_modified[fa->lightmaptexturenum] = true;
-				base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-				base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-				R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-			}
+			lightmap_modified[fa->lightmaptexturenum] = true;
+			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
+			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
 		}
 	}
 
@@ -984,13 +982,10 @@ static void R_BatchEmitSurface (msurface_t *fa)
 	if (fa->dlightframe == r_framecount || fa->cached_dlight)
 	{
 dynamic_batch:
-		if (r_dynamic.integer)
-		{
-			lightmap_modified[fa->lightmaptexturenum] = true;
-			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-		}
+		lightmap_modified[fa->lightmaptexturenum] = true;
+		base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+		base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
+		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
 	}
 }
 
