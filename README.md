@@ -22,14 +22,17 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 ### Comfort & accessibility
 - [x] View bob intensity slider (reduce or disable head bob)
 - [x] View roll intensity slider (strafe roll)
+- [x] Crouch smoothing (no camera snap on duck/unduck)
 - [x] Console transparency (Opaque/Light/Clear)
 - [x] Dynamic lighting toggle
 
-### Keyboard input (Ironwail-style)
+### Input (Ironwail-style)
 - [x] Modern WASD + mouselook defaults out of the box
 - [x] Scancode-based key bindings — WASD works correctly on AZERTY, Dvorak, etc.
 - [x] Proper text input via SDL — keyboard layout, shift, dead keys handled by OS
 - [x] Console/menu uses layout-aware typing, game uses physical key positions
+- [x] Mouse-driven menus — hover highlight, click, and scroll wheel navigation
+- [x] Weapon keybinds menu with type-to-search filtering
 - [x] Always-run toggle (`cl_alwaysrun`)
 - [x] Configurable pitch clamp range (`cl_maxpitch`/`cl_minpitch`)
 
@@ -46,13 +49,13 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] VSync toggle (default off)
 - [x] Anisotropic texture filtering
 - [x] Brightness and contrast sliders (GLSL post-process shader)
-- [x] Two-layer scrolling sky (solid + transparent) and skybox rendering
+- [x] Two-layer scrolling sky (solid + transparent) and skybox rendering (`r_skybox_speed`)
 - [x] Shader-based fog (standard exp formula, smooth underwater fade)
 - [x] Fence/chain texture transparency
 - [x] Water tint color options (Classic/Blue/Green/Clear)
 - [x] FOV slider (60-130)
 - [x] Zoom (`+zoom`/`togglezoom` — smooth FOV transition to `zoom_fov`, bindable)
-- [x] Adjustable draw distance (`r_farclip`)
+- [x] Auto draw distance by network protocol, adjustable (`r_farclip`)
 - [x] FPS limiter (24/30/60/72/90/120/144/Unlimited)
 - [x] Show FPS toggle
 - [x] Speed display (`scr_showspeed` — horizontal speed readout)
@@ -75,6 +78,7 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Entity bounding box debug visualization (`r_showbboxes`)
 - [x] Polyblend intensity scale (`gl_cshiftpercent`, 0-100%)
 - [x] Translucent brush entity rendering (teleport beams, etc.)
+- [x] Per-entity alpha transparency (ENTALPHA protocol extension)
 - [x] Model overbright toggle (`gl_overbright_models`)
 - [ ] HDR rendering pipeline
 
@@ -84,9 +88,10 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box
 - [x] Bottom plaque centerprint — messages prefixed with `_` display as subtitles
 - [x] [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) per-entity model overrides (glow, spin, float, color)
-- [x] Extended QuakeC builtins for mod developers
+- [x] Extended QuakeC builtins for mod developers (`SOLID_GHOST`, entity alpha)
 - [x] 8192 max entities (up from 2048)
 - [x] 2048 sound channels (up from 128) — no more sounds cutting out
+- [x] TrueLightning — smooth Crusader lightning beam tracking (`cl_truelightning`)
 - [x] Missing model precache is a warning, not a crash
 - [x] Higher audio quality (44.1 kHz default)
 - [x] Mods menu — browse and switch mods without restarting, with active mod indicator
@@ -99,7 +104,8 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Intro cinematic link in main menu (opens in browser)
 
 ### Music and sound
-- [x] OGG, MP3, FLAC, WAV music playback (CD track fallback to `music/trackNN.ogg`)
+- [x] OGG Vorbis, Opus, MP3, FLAC, WAV music playback (CD track fallback to `music/trackNN.ogg`)
+- [x] Tracker music via libxmp (MOD, S3M, XM, IT) and Unreal UMX containers
 - [x] MIDI music via FluidSynth on Linux, native Windows MIDI
 - [x] Soundfont auto-detection (`snd_soundfont` cvar or `data1/soundfont.sf2`)
 - [x] 2048 sound channels — no more effects cutting out in busy scenes
@@ -108,7 +114,7 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] SDL3 for video, input, and audio — Linux and Windows
 - [x] CMake build system — pull the source and `cmake && make`
 - [x] Nix flake for reproducible builds and Windows cross-compilation
-- [x] CI pipeline — GitHub Actions builds Linux + Windows on every push, with Nix store caching for fast rebuilds
+- [x] CI pipeline — GitHub Actions builds Linux + Windows on every push, smoke tests, shellcheck lint, Nix store caching
 - [x] One-command releases — `./release.sh v0.x.x` tags, pushes, and GitHub Actions builds + publishes release zips automatically
 - [x] Reproducible builds — Nix flake lockfile pins exact dependency versions; `nixos-unstable` channel for latest SDL3
 - [x] NixOS: FluidSynth soundfont bundled — MIDI works out of the box
@@ -118,9 +124,10 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Unified platform layer — shared code in `sys_sdl.c`, minimal OS-specific code
 - [x] Cleaned out legacy platform code (DOS, OS/2, Amiga, macOS, HexenWorld)
 - [x] Cleaned out legacy GL capability detection — assumes GL 4.3
-- [x] Flatpak packaging support
+- [x] Flatpak packaging support (bundled in releases)
 - [x] Game Options menu — view bob/roll, console alpha, dynamic light toggle
-- [ ] Mouse-driven UI navigation
+- [x] Console log always written to disk (`qconsole.log`)
+- [x] GL_KHR_debug callback for GPU driver diagnostics
 - [x] Raw mouse input toggle (`m_rawinput`)
 - [ ] AppImage packaging
 
@@ -134,7 +141,7 @@ cd engine && mkdir build && cd build
 cmake .. && make -j$(nproc)
 ```
 
-**Requirements:** OpenGL 4.3 (2012+), SDL3, libvorbis, libogg, ALSA (optional), FluidSynth (optional)
+**Requirements:** OpenGL 4.3 (2012+), SDL3, libvorbis, libogg, libopus, opusfile, libxmp, ALSA (optional), FluidSynth (optional)
 
 **Nix:**
 ```bash
@@ -148,6 +155,8 @@ nix build .#release    # All platforms
 
 You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pak`). For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
 
+**Flatpak:** Drop your game data into `~/.var/app/com.github.bobberb.hexenwail/.hexen2/`
+
 To launch a mod with portals data included: `glhexen2 -mod <modname>`
 
 ## License
@@ -157,7 +166,10 @@ GPL-2.0-or-later. See [COPYING](COPYING).
 Bundled third-party libraries:
 - [dr_libs](https://github.com/mackron/dr_libs) (public domain / MIT-0) — MP3, FLAC, WAV decoders
 - [SDL3](https://www.libsdl.org/) (Zlib) — platform abstraction
-- [libogg/libvorbis](https://xiph.org/) (BSD-3) — OGG audio
+- [libogg/libvorbis](https://xiph.org/) (BSD-3) — OGG Vorbis audio
+- [libopus/opusfile](https://opus-codec.org/) (BSD-3) — Opus audio
+- [libxmp](https://github.com/libxmp/libxmp) (MIT) — tracker music (MOD, S3M, XM, IT)
+- [FluidSynth](https://www.fluidsynth.org/) (LGPL-2.1) — MIDI synthesis
 
 ## Credits
 
