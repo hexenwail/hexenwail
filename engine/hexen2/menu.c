@@ -2013,6 +2013,7 @@ enum
 	DISP_VSYNC,
 	DISP_MAXFPS,
 	DISP_SHOWFPS,
+	DISP_MENUFADE,
 	DISP_SEP2,		/* separator before apply */
 	DISP_APPLY,
 	DISP_ITEMS
@@ -2244,6 +2245,9 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_SHOWFPS:
 		Cvar_Set ("showfps", Cvar_VariableValue("showfps") ? "0" : "1");
 		break;
+	case DISP_MENUFADE:
+		Cvar_Set ("scr_menufade", Cvar_VariableValue("scr_menufade") ? "0" : "1");
+		break;
 #endif
 	}
 }
@@ -2359,6 +2363,9 @@ static void M_Display_Draw (void)
 
 		M_Print (76, 92 + 8*DISP_SHOWFPS,	"Show FPS      :");
 		M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
+
+		M_Print (76, 92 + 8*DISP_MENUFADE,	"Menu Fade     :");
+		M_DrawCheckbox (220, 92 + 8*DISP_MENUFADE, (int)Cvar_VariableValue("scr_menufade"));
 
 		if (VID_MenuNeedApply ())
 			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
@@ -5658,7 +5665,8 @@ void M_Draw (void)
 		{
 			/* skip the amber fade in display menus so
 			 * settings preview against a clean game view */
-			if (m_state != m_display && m_state != m_video)
+			if (m_state != m_display && m_state != m_video
+			    && Cvar_VariableValue("scr_menufade"))
 				Draw_FadeScreen ();
 			if (scr_viewsize.integer < 110)
 				scr_fullupdate = 0;
