@@ -102,30 +102,15 @@
           default = self.packages.${system}.nixos;
 
           # OpenGL version for standard FHS Linux systems (non-NixOS)
-          # Produces a portable binary with no Nix store rpaths
-          linux-fhs = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
-            pname = "glhexen2-linux-fhs";
-
-            nativeBuildInputs = linuxBuildAttrs.nativeBuildInputs ++ [ pkgs.patchelf ];
-
-            # Prevent Nix from patching ELF with nix-store rpaths
-            dontPatchELF = true;
-
-            installPhase = ''
-              runHook preInstall
-
-              mkdir -p $out/bin
-              mkdir -p $out/share/uhexen2
-
-              install -Dm755 bin/glhexen2 $out/bin/glhexen2
-
-              # Strip nix store rpaths and set standard FHS dynamic linker
-              patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath $out/bin/glhexen2
-
-
-              runHook postInstall
-            '';
-          });
+          # Repackages the nixos build with FHS paths instead of recompiling
+          linux-fhs = pkgs.runCommand "glhexen2-linux-fhs-${self.packages.${system}.nixos.version}" {
+            nativeBuildInputs = [ pkgs.patchelf ];
+          } ''
+            mkdir -p $out/bin
+            cp ${self.packages.${system}.nixos}/bin/glhexen2 $out/bin/glhexen2
+            chmod +w $out/bin/glhexen2
+            patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath $out/bin/glhexen2
+          '';
 
           # Windows 64-bit build
           win64 = pkgsCross64.stdenv.mkDerivation {
