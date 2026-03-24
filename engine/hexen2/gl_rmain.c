@@ -91,6 +91,7 @@ cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
+cvar_t	r_shadow_flat = {"r_shadow_flat", "1", CVAR_ARCHIVE};
 cvar_t	r_mirroralpha = {"r_mirroralpha", "1", CVAR_NONE};
 cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
@@ -102,6 +103,8 @@ cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
+cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
+cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
 
@@ -1197,7 +1200,17 @@ static void R_DrawAliasModel (entity_t *e)
 		if (sdx*sdx + sdy*sdy + sdz*sdz < 512*512)
 		{
 			GL_PushMatrix();
-			R_RotateForEntity2 (e);
+			if (r_shadow_flat.integer)
+			{
+				/* Flat shadow: translate to entity origin only, no rotation.
+				 * Model-space vertices are projected straight down onto the
+				 * floor plane, so the shadow blob never spins with the entity. */
+				GL_Translatef(e->origin[0], e->origin[1], e->origin[2]);
+			}
+			else
+			{
+				R_RotateForEntity2 (e);
+			}
 			glEnable_fp (GL_BLEND);
 			glDepthMask_fp (0);
 			GL_DrawAliasShadow (e, paliashdr, lastposenum);
@@ -1336,8 +1349,8 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		theents[i].len = (result[0] * result[0]) + (result[1] * result[1]) + (result[2] * result[2]);
 	}
 
-	qsort((void *) theents, numents, sizeof(sortedent_t), transCompare);
-	// Add in BETTER sorting here
+	if (r_alphasort.integer)
+		qsort((void *) theents, numents, sizeof(sortedent_t), transCompare);
 
 	glDepthMask_fp(0);
 	for (i = 0; i < numents; i++)
@@ -2187,6 +2200,132 @@ static void R_Mirror (void)
 
 
 /*
+================
+R_ShowBoundingBoxes
+
+Draw wireframe axis-aligned bounding boxes around all server entities.
+Color-coded by model type: yellow=brush, purple=alias, cyan=sprite, white=other.
+
+r_showbboxes 1 = all entities
+r_showbboxes 2 = entities in PVS only (not yet filtered; same as 1 for now)
+================
+*/
+static void R_DrawWireBox (vec3_t mins, vec3_t maxs)
+{
+	/* Bottom face */
+	GL_ImmVertex3f (mins[0], mins[1], mins[2]);
+	GL_ImmVertex3f (maxs[0], mins[1], mins[2]);
+
+	GL_ImmVertex3f (maxs[0], mins[1], mins[2]);
+	GL_ImmVertex3f (maxs[0], maxs[1], mins[2]);
+
+	GL_ImmVertex3f (maxs[0], maxs[1], mins[2]);
+	GL_ImmVertex3f (mins[0], maxs[1], mins[2]);
+
+	GL_ImmVertex3f (mins[0], maxs[1], mins[2]);
+	GL_ImmVertex3f (mins[0], mins[1], mins[2]);
+
+	/* Top face */
+	GL_ImmVertex3f (mins[0], mins[1], maxs[2]);
+	GL_ImmVertex3f (maxs[0], mins[1], maxs[2]);
+
+	GL_ImmVertex3f (maxs[0], mins[1], maxs[2]);
+	GL_ImmVertex3f (maxs[0], maxs[1], maxs[2]);
+
+	GL_ImmVertex3f (maxs[0], maxs[1], maxs[2]);
+	GL_ImmVertex3f (mins[0], maxs[1], maxs[2]);
+
+	GL_ImmVertex3f (mins[0], maxs[1], maxs[2]);
+	GL_ImmVertex3f (mins[0], mins[1], maxs[2]);
+
+	/* Vertical edges */
+	GL_ImmVertex3f (mins[0], mins[1], mins[2]);
+	GL_ImmVertex3f (mins[0], mins[1], maxs[2]);
+
+	GL_ImmVertex3f (maxs[0], mins[1], mins[2]);
+	GL_ImmVertex3f (maxs[0], mins[1], maxs[2]);
+
+	GL_ImmVertex3f (maxs[0], maxs[1], mins[2]);
+	GL_ImmVertex3f (maxs[0], maxs[1], maxs[2]);
+
+	GL_ImmVertex3f (mins[0], maxs[1], mins[2]);
+	GL_ImmVertex3f (mins[0], maxs[1], maxs[2]);
+}
+
+static void R_ShowBoundingBoxes (void)
+{
+	edict_t		*ed;
+	vec3_t		mins, maxs;
+	int		i;
+	int		modelindex;
+	float		r, g, b, a;
+
+	if (!r_showbboxes.integer)
+		return;
+
+	if (cls.state != ca_active)
+		return;
+
+	if (!sv.active)
+		return;
+
+	/* Save and disable depth test so boxes show through walls */
+	glDisable_fp (GL_DEPTH_TEST);
+	glEnable_fp (GL_BLEND);
+	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	for (i = 1; i < sv.num_edicts; i++)
+	{
+		ed = EDICT_NUM(i);
+
+		if (!ed || ed->free)
+			continue;
+
+		VectorAdd (ed->v.origin, ed->v.mins, mins);
+		VectorAdd (ed->v.origin, ed->v.maxs, maxs);
+
+		/* Skip point entities (zero-size bbox) */
+		if (VectorCompare (mins, maxs))
+			continue;
+
+		/* Determine color by model type */
+		modelindex = (int)ed->v.modelindex;
+		if (modelindex > 0 && modelindex < MAX_MODELS && sv.models[modelindex])
+		{
+			switch (sv.models[modelindex]->type)
+			{
+				case mod_brush:		/* yellow */
+					r = 1.0f; g = 1.0f; b = 0.0f; a = 0.5f;
+					break;
+				case mod_alias:		/* purple */
+					r = 0.5f; g = 0.25f; b = 1.0f; a = 0.5f;
+					break;
+				case mod_sprite:	/* cyan */
+					r = 0.0f; g = 1.0f; b = 1.0f; a = 0.5f;
+					break;
+				default:		/* white */
+					r = 1.0f; g = 1.0f; b = 1.0f; a = 0.3f;
+					break;
+			}
+		}
+		else
+		{
+			/* No model — white */
+			r = 1.0f; g = 1.0f; b = 1.0f; a = 0.3f;
+		}
+
+		GL_ImmBegin ();
+		GL_ImmColor4f (r, g, b, a);
+		R_DrawWireBox (mins, maxs);
+		GL_ImmEnd (GL_LINES, &gl_shader_flat);
+	}
+
+	glEnable_fp (GL_DEPTH_TEST);
+	glDisable_fp (GL_BLEND);
+}
+
+
+/*
 =============
 R_PrintTimes
 =============
@@ -2252,6 +2391,8 @@ void R_RenderView (void)
 	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
 
 	R_DrawViewModel();
+
+	R_ShowBoundingBoxes ();
 
 	// render mirror view
 	R_Mirror ();

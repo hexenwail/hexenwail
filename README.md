@@ -66,6 +66,7 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] FXAA post-process
 - [x] Glow effects toggle (All/Torch Only/Off) with fog attenuation
 - [x] Muzzle flash dynamic light radius scaling (`gl_flashintensity`)
+- [x] Non-rotating floor-projected shadows for spinning items (`r_shadow_flat`, default on)
 - [x] Translucent brush entity rendering (teleport beams, etc.)
 - [x] Model overbright toggle (`gl_overbright_models`)
 - [ ] HDR rendering pipeline
