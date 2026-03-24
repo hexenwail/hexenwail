@@ -221,6 +221,7 @@ extern	cvar_t	r_waterwarp;
 extern	cvar_t	r_fullbright;
 extern	cvar_t	r_lightmap;
 extern	cvar_t	r_shadows;
+extern	cvar_t	r_shadow_flat;
 extern	cvar_t	r_mirroralpha;
 extern	cvar_t	r_wateralpha;
 extern	cvar_t	r_skyalpha;
@@ -232,8 +233,10 @@ extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_motionblur;
 extern	cvar_t	r_novis;
+extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
+extern	cvar_t	r_alphasort;
 extern	cvar_t	r_texture_external;
 
 #if defined(H2W)

@@ -239,6 +239,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawentities);
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_shadows);
+	Cvar_RegisterVariable (&r_shadow_flat);
 	Cvar_RegisterVariable (&r_mirroralpha);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_RegisterVariable (&r_skyalpha);
@@ -249,8 +250,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_novis);
+	Cvar_RegisterVariable (&r_showbboxes);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_wholeframe);
+	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_SetCallback (&r_clearcolor, R_SetClearColor_f);
 	Cvar_RegisterVariable (&r_texture_external);
