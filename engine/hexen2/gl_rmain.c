@@ -113,6 +113,7 @@ cvar_t	gl_cull = {"gl_cull", "1", CVAR_NONE};
 cvar_t	gl_zfix = {"gl_zfix", "1", CVAR_ARCHIVE};
 cvar_t	gl_smoothmodels = {"gl_smoothmodels", "1", CVAR_NONE};
 cvar_t	gl_polyblend = {"gl_polyblend", "1", CVAR_NONE};
+cvar_t	gl_cshiftpercent = {"gl_cshiftpercent", "100", CVAR_ARCHIVE};	/* global polyblend intensity 0-100 */
 cvar_t	gl_flashblend = {"gl_flashblend", "0", CVAR_ARCHIVE};
 cvar_t	gl_playermip = {"gl_playermip", "0", CVAR_NONE};
 cvar_t	gl_nocolors = {"gl_nocolors", "0", CVAR_NONE};
@@ -1833,9 +1834,11 @@ R_PolyBlend
 */
 static void R_PolyBlend (void)
 {
-	if (!gl_polyblend.integer)
+	if (!gl_polyblend.integer || gl_cshiftpercent.value <= 0)
 		return;
 
+	if (!v_blend[3])
+		return;
 
 	glEnable_fp (GL_BLEND);
 	glDisable_fp (GL_DEPTH_TEST);
@@ -1845,10 +1848,11 @@ static void R_PolyBlend (void)
 	GL_Rotatef(-90, 1, 0, 0);
 	GL_Rotatef(90, 0, 0, 1);
 
-	if (v_blend[3])
 	{
+		float alpha = v_blend[3] * (gl_cshiftpercent.value / 100.0f);
+		if (alpha > 1) alpha = 1;
 		GL_ImmBegin ();
-		GL_ImmColor4f (v_blend[0], v_blend[1], v_blend[2], v_blend[3]);
+		GL_ImmColor4f (v_blend[0], v_blend[1], v_blend[2], alpha);
 		GL_ImmVertex3f (10, 100, 100);
 		GL_ImmVertex3f (10, -100, 100);
 		GL_ImmVertex3f (10, -100, -100);
