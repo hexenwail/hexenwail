@@ -255,6 +255,11 @@ EOF
 
             alsa-lib
             fluidsynth
+            libsndfile
+            flac
+            libxmp
+            opusfile
+            soundfont-fluid
             pkg-config
             gcc
             gnumake
