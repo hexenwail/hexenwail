@@ -120,6 +120,8 @@ extern cvar_t r_skyalpha; /* defined in gl_rmain.c */
 cvar_t r_fastsky = {"r_fastsky", "0", CVAR_NONE};
 cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};
+cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_NONE};
+cvar_t r_skyspeed_front = {"r_skyspeed_front", "16", CVAR_NONE};
 
 int		skytexorder[6] = {0,2,1,3,4,5}; //for skybox
 
@@ -536,6 +538,8 @@ void Sky_Init (void)
 	Cvar_RegisterVariable (&r_sky_quality);
 	Cvar_RegisterVariable (&r_skyfog);
 	Cvar_SetCallback (&r_skyfog, R_SetSkyfog_f);
+	Cvar_RegisterVariable (&r_skyspeed_back);
+	Cvar_RegisterVariable (&r_skyspeed_front);
 
 	Cmd_AddCommand ("sky",Sky_SkyCommand_f);
 
@@ -1074,9 +1078,9 @@ void Sky_DrawFaceQuad (glpoly_t *p)
 		GL_ImmBegin();
 		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
 		{
-			Sky_GetTexCoord (v, 8, &s, &t);
+			Sky_GetTexCoord (v, r_skyspeed_back.value, &s, &t);
 			GL_ImmTexCoord2f (s, t);
-			Sky_GetTexCoord (v, 16, &s, &t);
+			Sky_GetTexCoord (v, r_skyspeed_front.value, &s, &t);
 			GL_ImmLMCoord2f (s, t);
 			GL_ImmVertex3f (v[0], v[1], v[2]);
 		}
@@ -1096,7 +1100,7 @@ void Sky_DrawFaceQuad (glpoly_t *p)
 		GL_ImmBegin();
 		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
 		{
-			Sky_GetTexCoord (v, 8, &s, &t);
+			Sky_GetTexCoord (v, r_skyspeed_back.value, &s, &t);
 			GL_ImmTexCoord2f (s, t);
 			GL_ImmVertex3f(v[0], v[1], v[2]);
 		}
@@ -1110,7 +1114,7 @@ void Sky_DrawFaceQuad (glpoly_t *p)
 		GL_ImmBegin();
 		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
 		{
-			Sky_GetTexCoord (v, 16, &s, &t);
+			Sky_GetTexCoord (v, r_skyspeed_front.value, &s, &t);
 			GL_ImmTexCoord2f (s, t);
 			GL_ImmVertex3f(v[0], v[1], v[2]);
 		}
