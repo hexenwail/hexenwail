@@ -61,7 +61,9 @@ static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
 static qboolean	pp_lut_built;
 
 static qboolean	pp_initialized;
-static qboolean	pp_active;	/* true when scene is being rendered to FBO this frame */
+static qboolean	pp_active;		/* true when scene is being rendered to FBO this frame */
+static qboolean	pp_native_active;	/* true when End3D transferred 3D → composite FBO; EndFrame skips warp/blur */
+static float	pp_prev_yaw, pp_prev_pitch;	/* view angle tracking for motionblur delta */
 static int	pp_saved_glwidth, pp_saved_glheight;	/* original viewport dims */
 
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
@@ -83,6 +85,8 @@ static qboolean PP_NeedsPostProcess (void)
 	if (gl_fxaa.value > 0)
 		return true;
 	if (r_waterwarp.value > 0)
+		return true;
+	if (Cvar_VariableValue("r_motionblur") > 0)
 		return true;
 	return false;
 }
@@ -595,6 +599,8 @@ void GL_PostProcess_Shutdown (void)
 	pp_lut_built = false;
 	pp_initialized = false;
 	pp_active = false;
+	pp_native_active = false;
+	pp_prev_yaw = pp_prev_pitch = 0.0f;
 	pp_fbo_failed = false;
 	if (pp_copyback_tex) { glDeleteTextures_fp(1, &pp_copyback_tex); pp_copyback_tex = 0; }
 	pp_copyback_w = pp_copyback_h = 0;
@@ -606,6 +612,7 @@ void GL_PostProcess_BeginFrame (void)
 	float scale;
 
 	pp_active = false;
+	pp_native_active = false;
 
 	if (!PP_NeedsPostProcess())
 		return;
@@ -658,36 +665,29 @@ void GL_PostProcess_BeginFrame (void)
 void GL_PostProcess_End3D (void)
 {
 	int native_w, native_h;
-	GLuint read_fbo;
+	float warp, blur, scale;
+	extern mleaf_t *r_viewleaf;
 
-	if (!pp_active)
-		return;
-	if (r_scale.value >= 1.0f)
-		return;	/* no scaling, nothing to do */
+	if (!pp_active || pp_fbo_failed)
+		return;	/* copyback: End3D is a no-op, warp/blur handled in EndFrame */
 
-	/* determine which FBO to read from */
+	/* Resolve MSAA render buffer → pp_color_tex so the shader can sample it */
 	if (pp_samples > 1)
 	{
-		/* resolve multisampled FBO first */
 		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, pp_fbo);
 		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_resolve_fbo);
 		glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
 				      0, 0, pp_width, pp_height,
 				      GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		read_fbo = pp_resolve_fbo;
-	}
-	else
-	{
-		read_fbo = pp_fbo;
 	}
 
-	/* restore native resolution */
+	/* Restore native viewport */
 	glwidth = pp_saved_glwidth;
 	glheight = pp_saved_glheight;
 	native_w = glwidth;
 	native_h = glheight;
 
-	/* ensure native FBO exists */
+	/* Ensure composite FBO exists at native resolution */
 	if (!PP_CreateNativeFBO(native_w, native_h))
 	{
 		pp_active = false;
@@ -695,17 +695,103 @@ void GL_PostProcess_End3D (void)
 		return;
 	}
 
-	/* blit scaled 3D scene to native FBO with nearest filtering (crunchy upscale) */
-	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, read_fbo);
-	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_native_fbo);
-	glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
-			      0, 0, native_w, native_h,
-			      GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-	/* switch to native FBO for 2D draws */
+	/* Bind composite FBO — 2D will draw into this after we return */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_native_fbo);
 	glViewport_fp(0, 0, native_w, native_h);
-	glEnable_fp(GL_DEPTH_TEST);
+
+	/* Compute 3D-only effect strengths */
+	warp = 0.0f;
+	if (r_waterwarp.value && r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER)
+		warp = r_waterwarp.value;
+	blur = Cvar_VariableValue("r_motionblur");
+	scale = r_scale.value;
+	if (scale < 0.25f) scale = 0.25f;
+	if (scale > 1.0f)  scale = 1.0f;
+
+	if (warp > 0.0f || blur > 0.0f)
+	{
+		/* Shader blit: apply warp + motionblur, upscale to native res.
+		 * Identity gamma/contrast/fxaa so only 3D effects are baked in. */
+		glDisable_fp(GL_DEPTH_TEST);
+		glDisable_fp(GL_BLEND);
+		glDisable_fp(GL_CULL_FACE);
+
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_PushMatrix();
+		GL_LoadIdentity();
+		GL_Ortho(0, 1, 0, 1, -1, 1);
+		GL_MatrixMode(GL_MAT_MODELVIEW);
+		GL_PushMatrix();
+		GL_LoadIdentity();
+
+		glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+		glUseProgram_fp(pp_program);
+		if (pp_loc_mvp >= 0)
+		{
+			float mvp[16];
+			GL_GetMVP(mvp);
+			glUniformMatrix4fv_fp(pp_loc_mvp, 1, GL_FALSE, mvp);
+		}
+		if (pp_loc_gamma >= 0)     glUniform1f_fp(pp_loc_gamma,    1.0f);
+		if (pp_loc_contrast >= 0)  glUniform1f_fp(pp_loc_contrast, 1.0f);
+		if (pp_loc_softemu >= 0)   glUniform1i_fp(pp_loc_softemu,  0);
+		if (pp_loc_dither >= 0)    glUniform1f_fp(pp_loc_dither,   0.0f);
+		if (pp_loc_fxaa >= 0)      glUniform1f_fp(pp_loc_fxaa,     0.0f);
+		if (pp_loc_scale >= 0)     glUniform1f_fp(pp_loc_scale,    scale);
+		if (pp_loc_waterwarp >= 0) glUniform1f_fp(pp_loc_waterwarp, warp);
+		if (pp_loc_time >= 0)      glUniform1f_fp(pp_loc_time,     (float)realtime);
+		if (pp_loc_rcpframe >= 0 && glUniform2f_fp)
+			glUniform2f_fp(pp_loc_rcpframe, 1.0f / native_w, 1.0f / native_h);
+		if (pp_loc_motionblur >= 0)
+		{
+			float yaw   = cl.viewangles[1];
+			float pitch = cl.viewangles[0];
+			float dy = (yaw   - pp_prev_yaw)   * 0.0005f;
+			float dp = (pitch - pp_prev_pitch) * 0.0005f;
+			if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
+			if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
+			glUniform1f_fp(pp_loc_motionblur, blur);
+			if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
+				glUniform2f_fp(pp_loc_viewdelta, dy, dp);
+			pp_prev_yaw   = yaw;
+			pp_prev_pitch = pitch;
+		}
+
+		GL_ImmBegin();
+		GL_ImmColor4f(1, 1, 1, 1);
+		GL_ImmTexCoord2f(0, 0); GL_ImmVertex2f(0, 0);
+		GL_ImmTexCoord2f(1, 0); GL_ImmVertex2f(1, 0);
+		GL_ImmTexCoord2f(1, 1); GL_ImmVertex2f(1, 1);
+		GL_ImmTexCoord2f(0, 1); GL_ImmVertex2f(0, 1);
+		GL_ImmDraw(GL_QUADS);
+
+		glUseProgram_fp(0);
+
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_PopMatrix();
+		GL_MatrixMode(GL_MAT_MODELVIEW);
+		GL_PopMatrix();
+
+		glEnable_fp(GL_DEPTH_TEST);
+	}
+	else
+	{
+		/* Simple blit: upscale (or same-size copy) with no shader overhead */
+		GLuint src = (pp_samples > 1) ? pp_resolve_fbo : pp_fbo;
+		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, src);
+		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_native_fbo);
+		glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
+				      0, 0, native_w, native_h,
+				      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_native_fbo);
+	}
+
+	/* pp_native_fbo is now bound; 2D draws will composite on top of the 3D scene.
+	 * EndFrame will read pp_native_color_tex and apply gamma/contrast/FXAA only. */
+	pp_native_active = true;
 }
 
 void GL_PostProcess_EndFrame (void)
@@ -745,9 +831,10 @@ void GL_PostProcess_EndFrame (void)
 	}
 
 	/* determine which texture has the composited scene */
-	if (pp_native_fbo && r_scale.value < 1.0f)
+	if (pp_native_active)
 	{
-		/* End3D blitted 3D to native FBO, then 2D drew into it */
+		/* End3D transferred 3D → composite FBO (with warp/blur already applied);
+		 * 2D then drew on top — read the composite from here. */
 		blit_tex = pp_native_color_tex;
 		blit_w = pp_native_w;
 		blit_h = pp_native_h;
@@ -848,14 +935,18 @@ apply_shader:
 		glUniform3fv_fp(pp_loc_palette, 256, pal);
 	}
 
-	/* Underwater warp */
+	/* Warp and blur: already baked into pp_native_color_tex when pp_native_active.
+	 * Apply here only for the copyback fallback path (pp_native_active=false). */
 	if (pp_loc_waterwarp >= 0)
 	{
-		extern mleaf_t *r_viewleaf;
 		float warp = 0;
-		if (r_waterwarp.value && r_viewleaf &&
-		    r_viewleaf->contents <= CONTENTS_WATER)
-			warp = r_waterwarp.value;
+		if (!pp_native_active)
+		{
+			extern mleaf_t *r_viewleaf;
+			if (r_waterwarp.value && r_viewleaf &&
+			    r_viewleaf->contents <= CONTENTS_WATER)
+				warp = r_waterwarp.value;
+		}
 		glUniform1f_fp(pp_loc_waterwarp, warp);
 	}
 	if (pp_loc_time >= 0)
@@ -866,19 +957,22 @@ apply_shader:
 		glUniform2f_fp(pp_loc_rcpframe, 1.0f / glwidth, 1.0f / glheight);
 	if (pp_loc_motionblur >= 0)
 	{
-		static float prev_yaw, prev_pitch;
-		float yaw = cl.viewangles[1];
-		float pitch = cl.viewangles[0];
-		float dy = (yaw - prev_yaw) * 0.0005f;
-		float dp = (pitch - prev_pitch) * 0.0005f;
-		/* Clamp to avoid huge blur on teleport/spawn */
-		if (dy > 0.03f) dy = 0.03f; else if (dy < -0.03f) dy = -0.03f;
-		if (dp > 0.03f) dp = 0.03f; else if (dp < -0.03f) dp = -0.03f;
-		glUniform1f_fp(pp_loc_motionblur, Cvar_VariableValue("r_motionblur"));
+		float blur = 0, dy = 0, dp = 0;
+		if (!pp_native_active)
+		{
+			float yaw   = cl.viewangles[1];
+			float pitch = cl.viewangles[0];
+			blur = Cvar_VariableValue("r_motionblur");
+			dy = (yaw   - pp_prev_yaw)   * 0.0005f;
+			dp = (pitch - pp_prev_pitch) * 0.0005f;
+			if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
+			if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
+			pp_prev_yaw   = yaw;
+			pp_prev_pitch = pitch;
+		}
+		glUniform1f_fp(pp_loc_motionblur, blur);
 		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
 			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
-		prev_yaw = yaw;
-		prev_pitch = pitch;
 	}
 
 	/* draw full-screen quad using streaming VBO (shader already active) */
