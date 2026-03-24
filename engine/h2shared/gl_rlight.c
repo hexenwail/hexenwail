@@ -26,6 +26,8 @@
 
 static int	r_dlightframecount;
 
+cvar_t	r_lerplightstyles = {"r_lerplightstyles", "1", CVAR_ARCHIVE};	/* smooth lightstyle interpolation */
+
 
 /*
 ==================
@@ -84,7 +86,10 @@ void R_AnimateLight (void)
 			light_next = (cl_lightstyle[i].map[v_next] - 'a') * 22;
 		}
 		/* Smoothly interpolate between current and next light level */
-		d_lightstylevalue[i] = (int)(light_curr + (light_next - light_curr) * frac);
+		if (r_lerplightstyles.integer)
+			d_lightstylevalue[i] = (int)(light_curr + (light_next - light_curr) * frac);
+		else
+			d_lightstylevalue[i] = light_curr;
 	}
 }
 
