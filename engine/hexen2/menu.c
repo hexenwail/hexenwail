@@ -2068,6 +2068,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
 		{
@@ -2089,6 +2090,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glows", 0);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
 		{
@@ -2110,6 +2112,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
 		{
@@ -2132,6 +2135,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
+			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
 		{
@@ -2154,6 +2158,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
+			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
 		{
@@ -2176,6 +2181,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
+			Cvar_SetValue ("scr_menufade", 0);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
