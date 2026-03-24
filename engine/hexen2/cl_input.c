@@ -395,6 +395,7 @@ cvar_t	cl_forwardspeed = {"cl_forwardspeed", "200", CVAR_ARCHIVE};
 cvar_t	cl_backspeed = {"cl_backspeed", "200", CVAR_ARCHIVE};
 cvar_t	cl_sidespeed = {"cl_sidespeed", "225", CVAR_NONE};
 cvar_t	cl_movespeedkey = {"cl_movespeedkey", "2.0", CVAR_NONE};
+cvar_t	cl_alwaysrun = {"cl_alwaysrun", "0", CVAR_ARCHIVE};	/* 1 = always run; +speed acts as slow key */
 cvar_t	cl_yawspeed = {"cl_yawspeed", "140", CVAR_NONE};
 cvar_t	cl_pitchspeed = {"cl_pitchspeed", "150", CVAR_NONE};
 cvar_t	cl_anglespeedkey = {"cl_anglespeedkey", "1.5", CVAR_NONE};
@@ -505,10 +506,8 @@ void CL_BaseMove (usercmd_t *cmd)
 		cmd->forwardmove -= 200 * CL_KeyState (&in_back);
 	}
 
-// adjust for speed key, but not if "always run" has been chosen
-// speed key now acts as slow key when always run is chosen - OS
-//	if ( ((cl_forwardspeed.value > 200) ||(in_speed.state & 1))
-	if ( ((cl_forwardspeed.value > 200) ^ (in_speed.state & 1))
+// adjust for speed key; with cl_alwaysrun enabled, +speed acts as slow key
+	if ( ((in_speed.state & 1) ^ cl_alwaysrun.integer)
 					     && (cl.v.hasted <= 1) )
 	{
 		cmd->forwardmove *= cl_movespeedkey.value;
