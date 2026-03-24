@@ -45,6 +45,48 @@
 #include "filenames.h"
 
 
+/* GL 4.3 debug message callback */
+#ifndef GL_DEBUG_OUTPUT
+#define GL_DEBUG_OUTPUT				0x92E0
+#define GL_DEBUG_OUTPUT_SYNCHRONOUS		0x8242
+#define GL_DEBUG_SEVERITY_HIGH			0x9146
+#define GL_DEBUG_SEVERITY_MEDIUM		0x9147
+#define GL_DEBUG_SEVERITY_LOW			0x9148
+#define GL_DEBUG_SEVERITY_NOTIFICATION		0x826B
+#define GL_DEBUG_SOURCE_API			0x8246
+#define GL_DEBUG_TYPE_ERROR			0x824C
+#define GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR	0x824D
+#define GL_DEBUG_TYPE_PERFORMANCE		0x8250
+#define GL_DEBUG_TYPE_OTHER			0x8251
+#endif
+typedef void (APIENTRY *GLDEBUGPROC)(GLenum source, GLenum type, GLuint id,
+	GLenum severity, GLsizei length, const char *message, const void *userParam);
+typedef void (APIENTRY *glDebugMessageCallback_f)(GLDEBUGPROC callback, const void *userParam);
+static glDebugMessageCallback_f glDebugMessageCallback_fp;
+
+static const char *GL_DebugSeverityStr (GLenum severity)
+{
+	switch (severity)
+	{
+	case GL_DEBUG_SEVERITY_HIGH:		return "HIGH";
+	case GL_DEBUG_SEVERITY_MEDIUM:		return "MEDIUM";
+	case GL_DEBUG_SEVERITY_LOW:		return "LOW";
+	case GL_DEBUG_SEVERITY_NOTIFICATION:	return "NOTE";
+	default:				return "?";
+	}
+}
+
+static void APIENTRY GL_DebugCallback (GLenum source, GLenum type, GLuint id,
+	GLenum severity, GLsizei length, const char *message, const void *userParam)
+{
+	(void)source; (void)id; (void)length; (void)userParam;
+	if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
+		return;  /* skip noise */
+	Con_Printf ("GL [%s]: %s\n", GL_DebugSeverityStr(severity), message);
+	if (type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
+		Con_Printf ("GL: fatal error type — check qconsole.log\n");
+}
+
 #define WARP_WIDTH		320
 #define WARP_HEIGHT		200
 #define MAXWIDTH		10000
@@ -764,6 +806,18 @@ static void GL_Init (void)
 
 	/* load shader and VBO function pointers */
 	GL_LoadFunctionPointers();
+
+	/* GL 4.3 debug output — logs errors to console/qconsole.log before GPU hang */
+	glDebugMessageCallback_fp = (glDebugMessageCallback_f)
+		SDL_GL_GetProcAddress("glDebugMessageCallback");
+	if (glDebugMessageCallback_fp)
+	{
+		glEnable_fp(GL_DEBUG_OUTPUT);
+		glEnable_fp(GL_DEBUG_OUTPUT_SYNCHRONOUS);  /* callback fires before bad call returns */
+		glDebugMessageCallback_fp(GL_DebugCallback, NULL);
+		Con_SafePrintf("GL debug output enabled\n");
+	}
+
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();

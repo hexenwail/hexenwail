@@ -149,6 +149,7 @@
 #define	U_EFFECTS	(1<<17)
 #define	U_SCALE		(1<<18)
 #define	U_COLORMAP	(1<<19)
+#define	U_ALPHA		(1<<20)
 
 #define	BE_ON		(1<<0)
 
@@ -250,10 +251,15 @@
 #define DEFAULT_SOUND_PACKET_VOLUME		255
 #define DEFAULT_SOUND_PACKET_ATTENUATION	1.0
 
+#ifndef CLAMP
+#define CLAMP(minval,x,maxval) ((x) < (minval) ? (minval) : ((x) > (maxval) ? (maxval) : (x)))
+#endif
+
 //johnfitz -- PROTOCOL_FITZQUAKE -- alpha encoding
 #define ENTALPHA_DEFAULT	0	//entity's alpha is "default" (i.e. water obeys r_wateralpha) -- must be zero so zeroed out memory works
 #define ENTALPHA_ZERO		1	//entity is invisible (lowest possible alpha)
 #define ENTALPHA_ONE		255 //entity is fully opaque (highest possible alpha)
+#define ENTALPHA_OPAQUE(a)	((byte)((a)-1) >= 254) //true if alpha is fully opaque or default
 #define ENTALPHA_ENCODE(a)	(((a)==0)?ENTALPHA_DEFAULT:Q_rint(CLAMP(1,(a)*254.0f+1,255))) //server convert to byte to send to client
 #define ENTALPHA_DECODE(a)	(((a)==ENTALPHA_DEFAULT)?1.0f:((float)(a)-1)/(254)) //client convert to float for rendering
 #define ENTALPHA_TOSAVE(a)	(((a)==ENTALPHA_DEFAULT)?0.0f:(((a)==ENTALPHA_ZERO)?-1.0f:((float)(a)-1)/(254))) //server convert to float for savegame
@@ -292,6 +298,7 @@ typedef struct
 	byte	scale;
 	byte	drawflags;
 	byte	abslight;
+	byte	alpha;
 	byte	ClearCount[32];
 } entity_state_t;
 
@@ -310,6 +317,7 @@ typedef struct
 	byte	scale;
 	byte	drawflags;
 	byte	abslight;
+	byte	alpha;
 } entity_state2_t;
 
 typedef struct
@@ -326,6 +334,7 @@ typedef struct
 	byte	scale;
 	byte	drawflags;
 	byte	abslight;
+	byte	alpha;
 } entity_state3_t;
 
 #define MAX_CLIENT_STATES	512

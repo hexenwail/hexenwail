@@ -58,7 +58,7 @@ extern	enum m_state_e	m_return_state;
 
 /* menus */
 void M_Init (void);
-void M_Keydown (int key);
+void M_Keydown (int key, qboolean repeat);
 void M_Keybind (int key);
 void M_ToggleMenu_f (void);
 

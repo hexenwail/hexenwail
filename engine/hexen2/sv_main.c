@@ -1027,6 +1027,7 @@ skipA:
 			build_ent.scale = ent->baseline.scale;
 			build_ent.drawflags = ent->baseline.drawflags;
 			build_ent.abslight = ent->baseline.abslight;
+			build_ent.alpha = ent->baseline.alpha;
 			build_ent.flags = 0;
 
 			FoundInList = false;
@@ -1131,6 +1132,17 @@ skipA:
 			set_ent->abslight = (int)(ent->v.abslight * 255.0) & 255;
 		}
 
+		{
+			byte newalpha;
+			eval_t *val = GetEdictFieldValue(ent, "alpha");
+			newalpha = val ? ENTALPHA_ENCODE(val->_float) : ENTALPHA_DEFAULT;
+			if (ref_ent->alpha != newalpha)
+			{
+				bits |= U_ALPHA;
+				set_ent->alpha = newalpha;
+			}
+		}
+
 		if (ent->baseline.ClearCount[client_num] < CLEAR_LIMIT)
 		{
 			bits |= U_CLEAR_ENT;
@@ -1199,6 +1211,8 @@ skipA:
 			MSG_WriteByte (msg, (int)(ent->v.scale * 100.0) & 255);
 			MSG_WriteByte (msg, (int)(ent->v.abslight * 255.0) & 255);
 		}
+		if (bits & U_ALPHA)
+			MSG_WriteByte (msg, set_ent->alpha);
 
 		if (build->count >= MAX_CLIENT_STATES)
 			break;
@@ -2015,6 +2029,10 @@ static void SV_CreateBaseline (void)
 		svent->baseline.scale = (int)(svent->v.scale*100.0)&255;
 		svent->baseline.drawflags = svent->v.drawflags;
 		svent->baseline.abslight = (int)(svent->v.abslight*255.0)&255;
+		{
+			eval_t *val = GetEdictFieldValue(svent, "alpha");
+			svent->baseline.alpha = val ? ENTALPHA_ENCODE(val->_float) : ENTALPHA_DEFAULT;
+		}
 		if (entnum > 0	&& entnum <= svs.maxclients)
 		{
 			svent->baseline.colormap = entnum;

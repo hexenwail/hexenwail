@@ -68,6 +68,7 @@ typedef struct entity_s
 	int			scale;		// for Alias models
 	int			drawflags;	// for Alias models
 	int			abslight;	// for Alias models
+	byte			alpha;		// per-entity alpha (ENTALPHA encoding)
 	int			visframe;	// last frame this entity was
 						// found in an active leaf
 

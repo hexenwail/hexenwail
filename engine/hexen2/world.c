@@ -957,6 +957,17 @@ loc0: // optimized recursion
 				continue;	// don't clip against owner
 		}
 
+		// SOLID_GHOST: only clipped by projectiles with .ghost_damage set
+		if (touch->v.solid == SOLID_GHOST)
+		{
+			eval_t *val;
+			if (!clip->passedict || clip->type != MOVE_MISSILE)
+				continue;
+			val = GetEdictFieldValue(clip->passedict, "ghost_damage");
+			if (!val || !val->_float)
+				continue;
+		}
+
 		if ((int)touch->v.flags & FL_MONSTER)
 			trace = SV_ClipMoveToEntity (touch, clip->start, clip->mins2, clip->maxs2, clip->end, touch);
 		else
