@@ -2936,17 +2936,34 @@ static void M_Game_AdjustSliders (int dir)
 		break;
 	}
 	case GAME_ALWAYRUN:
-		if (cl_forwardspeed.value > 200)
-		{
+	{	/* cycle: off -> vanilla -> quakespasm -> off */
+		int mode; /* 0=off, 1=vanilla, 2=quakespasm */
+		if (cl_alwaysrun.integer)
+			mode = 2;
+		else if (cl_forwardspeed.value > 200)
+			mode = 1;
+		else
+			mode = 0;
+		mode = (mode + 1) % 3;
+		switch (mode) {
+		case 0: /* off: walk by default */
+			Cvar_SetValue ("cl_alwaysrun", 0);
 			Cvar_Set ("cl_forwardspeed", "200");
 			Cvar_Set ("cl_backspeed", "200");
-		}
-		else
-		{
+			break;
+		case 1: /* vanilla: run by default (old method) */
+			Cvar_SetValue ("cl_alwaysrun", 0);
 			Cvar_Set ("cl_forwardspeed", "400");
 			Cvar_Set ("cl_backspeed", "400");
+			break;
+		case 2: /* quakespasm: run via cvar, +speed = walk */
+			Cvar_SetValue ("cl_alwaysrun", 1);
+			Cvar_Set ("cl_forwardspeed", "200");
+			Cvar_Set ("cl_backspeed", "200");
+			break;
 		}
 		break;
+	}
 	case GAME_MOUSESPEED:
 		f = sensitivity.value + dir * 0.5;
 		if (f > 11)	f = 11;
@@ -3019,7 +3036,12 @@ static void M_Game_Draw (void)
 	}
 
 	M_Print (76, 92 + 8*GAME_ALWAYRUN,	"Always Run    :");
-	M_DrawCheckbox (220, 92 + 8*GAME_ALWAYRUN, (cl_forwardspeed.value > 200));
+	if (cl_alwaysrun.integer)
+		M_Print (220, 92 + 8*GAME_ALWAYRUN, "QuakeSpasm");
+	else if (cl_forwardspeed.value > 200)
+		M_Print (220, 92 + 8*GAME_ALWAYRUN, "Vanilla");
+	else
+		M_PrintWhite (220, 92 + 8*GAME_ALWAYRUN, "Off");
 
 	M_Print (76, 92 + 8*GAME_MOUSESPEED,	"Mouse Speed   :");
 	r = (sensitivity.value - 1) / 10;
