@@ -662,14 +662,130 @@ void GL_PostProcess_BeginFrame (void)
 	pp_active = true;
 }
 
+/* Apply warp+blur shader to src_tex into the currently-bound framebuffer.
+ * Uses identity gamma/contrast/fxaa — 3D-scene effects only. */
+static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, float blur, float scale)
+{
+	glDisable_fp(GL_DEPTH_TEST);
+	glDisable_fp(GL_BLEND);
+	glDisable_fp(GL_CULL_FACE);
+
+	GL_MatrixMode(GL_MAT_PROJECTION);
+	GL_PushMatrix();
+	GL_LoadIdentity();
+	GL_Ortho(0, 1, 0, 1, -1, 1);
+	GL_MatrixMode(GL_MAT_MODELVIEW);
+	GL_PushMatrix();
+	GL_LoadIdentity();
+
+	glBindTexture_fp(GL_TEXTURE_2D, src_tex);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glUseProgram_fp(pp_program);
+	if (pp_loc_mvp >= 0)
+	{
+		float mvp[16];
+		GL_GetMVP(mvp);
+		glUniformMatrix4fv_fp(pp_loc_mvp, 1, GL_FALSE, mvp);
+	}
+	if (pp_loc_gamma >= 0)     glUniform1f_fp(pp_loc_gamma,    1.0f);
+	if (pp_loc_contrast >= 0)  glUniform1f_fp(pp_loc_contrast, 1.0f);
+	if (pp_loc_softemu >= 0)   glUniform1i_fp(pp_loc_softemu,  0);
+	if (pp_loc_dither >= 0)    glUniform1f_fp(pp_loc_dither,   0.0f);
+	if (pp_loc_fxaa >= 0)      glUniform1f_fp(pp_loc_fxaa,     0.0f);
+	if (pp_loc_scale >= 0)     glUniform1f_fp(pp_loc_scale,    scale);
+	if (pp_loc_waterwarp >= 0) glUniform1f_fp(pp_loc_waterwarp, warp);
+	if (pp_loc_time >= 0)      glUniform1f_fp(pp_loc_time,     (float)realtime);
+	if (pp_loc_rcpframe >= 0 && glUniform2f_fp)
+		glUniform2f_fp(pp_loc_rcpframe, 1.0f / w, 1.0f / h);
+	if (pp_loc_motionblur >= 0)
+	{
+		float yaw   = cl.viewangles[1];
+		float pitch = cl.viewangles[0];
+		float dy = (yaw   - pp_prev_yaw)   * 0.0005f;
+		float dp = (pitch - pp_prev_pitch) * 0.0005f;
+		if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
+		if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
+		glUniform1f_fp(pp_loc_motionblur, blur);
+		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
+			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
+		pp_prev_yaw   = yaw;
+		pp_prev_pitch = pitch;
+	}
+
+	GL_ImmBegin();
+	GL_ImmColor4f(1, 1, 1, 1);
+	GL_ImmTexCoord2f(0, 0); GL_ImmVertex2f(0, 0);
+	GL_ImmTexCoord2f(1, 0); GL_ImmVertex2f(1, 0);
+	GL_ImmTexCoord2f(1, 1); GL_ImmVertex2f(1, 1);
+	GL_ImmTexCoord2f(0, 1); GL_ImmVertex2f(0, 1);
+	GL_ImmDraw(GL_QUADS);
+
+	glUseProgram_fp(0);
+
+	GL_MatrixMode(GL_MAT_PROJECTION);
+	GL_PopMatrix();
+	GL_MatrixMode(GL_MAT_MODELVIEW);
+	GL_PopMatrix();
+
+	glEnable_fp(GL_DEPTH_TEST);
+}
+
 void GL_PostProcess_End3D (void)
 {
 	int native_w, native_h;
 	float warp, blur, scale;
 	extern mleaf_t *r_viewleaf;
 
-	if (!pp_active || pp_fbo_failed)
-		return;	/* copyback: End3D is a no-op, warp/blur handled in EndFrame */
+	if (!pp_active)
+		return;
+
+	if (pp_fbo_failed)
+	{
+		/* Copyback path: 3D scene is in the default framebuffer.
+		 * Apply warp/blur now so 2D draws on top of the processed scene. */
+		int w = pp_saved_glwidth;
+		int h = pp_saved_glheight;
+
+		warp = 0.0f;
+		if (r_waterwarp.value && r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER)
+			warp = r_waterwarp.value;
+		blur = Cvar_VariableValue("r_motionblur");
+
+		if (warp > 0.0f || blur > 0.0f)
+		{
+			/* Grab the 3D scene from the backbuffer */
+			if (!pp_copyback_tex || w != pp_copyback_w || h != pp_copyback_h)
+			{
+				if (pp_copyback_tex)
+					glDeleteTextures_fp(1, &pp_copyback_tex);
+				glGenTextures_fp(1, &pp_copyback_tex);
+				glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+				glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+						GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+				pp_copyback_w = w;
+				pp_copyback_h = h;
+			}
+			glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
+			glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+
+			/* Apply warp+blur, writing the processed 3D back into the default framebuffer */
+			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+			glViewport_fp(0, 0, w, h);
+			scale = r_scale.value;
+			if (scale < 0.25f) scale = 0.25f;
+			if (scale > 1.0f)  scale = 1.0f;
+			PP_BlitWith3DEffects(pp_copyback_tex, w, h, warp, blur, scale);
+
+			/* 2D will now draw on top of the already-warped 3D scene.
+			 * Tell EndFrame to skip warp/blur and only apply gamma/FXAA. */
+			pp_native_active = true;
+		}
+		return;
+	}
 
 	/* Resolve MSAA render buffer → pp_color_tex so the shader can sample it */
 	if (pp_samples > 1)
@@ -710,72 +826,9 @@ void GL_PostProcess_End3D (void)
 
 	if (warp > 0.0f || blur > 0.0f)
 	{
-		/* Shader blit: apply warp + motionblur, upscale to native res.
+		/* Shader blit: apply warp+blur, upscale to native res.
 		 * Identity gamma/contrast/fxaa so only 3D effects are baked in. */
-		glDisable_fp(GL_DEPTH_TEST);
-		glDisable_fp(GL_BLEND);
-		glDisable_fp(GL_CULL_FACE);
-
-		GL_MatrixMode(GL_MAT_PROJECTION);
-		GL_PushMatrix();
-		GL_LoadIdentity();
-		GL_Ortho(0, 1, 0, 1, -1, 1);
-		GL_MatrixMode(GL_MAT_MODELVIEW);
-		GL_PushMatrix();
-		GL_LoadIdentity();
-
-		glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-		glUseProgram_fp(pp_program);
-		if (pp_loc_mvp >= 0)
-		{
-			float mvp[16];
-			GL_GetMVP(mvp);
-			glUniformMatrix4fv_fp(pp_loc_mvp, 1, GL_FALSE, mvp);
-		}
-		if (pp_loc_gamma >= 0)     glUniform1f_fp(pp_loc_gamma,    1.0f);
-		if (pp_loc_contrast >= 0)  glUniform1f_fp(pp_loc_contrast, 1.0f);
-		if (pp_loc_softemu >= 0)   glUniform1i_fp(pp_loc_softemu,  0);
-		if (pp_loc_dither >= 0)    glUniform1f_fp(pp_loc_dither,   0.0f);
-		if (pp_loc_fxaa >= 0)      glUniform1f_fp(pp_loc_fxaa,     0.0f);
-		if (pp_loc_scale >= 0)     glUniform1f_fp(pp_loc_scale,    scale);
-		if (pp_loc_waterwarp >= 0) glUniform1f_fp(pp_loc_waterwarp, warp);
-		if (pp_loc_time >= 0)      glUniform1f_fp(pp_loc_time,     (float)realtime);
-		if (pp_loc_rcpframe >= 0 && glUniform2f_fp)
-			glUniform2f_fp(pp_loc_rcpframe, 1.0f / native_w, 1.0f / native_h);
-		if (pp_loc_motionblur >= 0)
-		{
-			float yaw   = cl.viewangles[1];
-			float pitch = cl.viewangles[0];
-			float dy = (yaw   - pp_prev_yaw)   * 0.0005f;
-			float dp = (pitch - pp_prev_pitch) * 0.0005f;
-			if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
-			if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
-			glUniform1f_fp(pp_loc_motionblur, blur);
-			if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
-				glUniform2f_fp(pp_loc_viewdelta, dy, dp);
-			pp_prev_yaw   = yaw;
-			pp_prev_pitch = pitch;
-		}
-
-		GL_ImmBegin();
-		GL_ImmColor4f(1, 1, 1, 1);
-		GL_ImmTexCoord2f(0, 0); GL_ImmVertex2f(0, 0);
-		GL_ImmTexCoord2f(1, 0); GL_ImmVertex2f(1, 0);
-		GL_ImmTexCoord2f(1, 1); GL_ImmVertex2f(1, 1);
-		GL_ImmTexCoord2f(0, 1); GL_ImmVertex2f(0, 1);
-		GL_ImmDraw(GL_QUADS);
-
-		glUseProgram_fp(0);
-
-		GL_MatrixMode(GL_MAT_PROJECTION);
-		GL_PopMatrix();
-		GL_MatrixMode(GL_MAT_MODELVIEW);
-		GL_PopMatrix();
-
-		glEnable_fp(GL_DEPTH_TEST);
+		PP_BlitWith3DEffects(pp_color_tex, native_w, native_h, warp, blur, scale);
 	}
 	else
 	{
