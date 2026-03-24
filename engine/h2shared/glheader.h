@@ -31,6 +31,12 @@
 #define	APIENTRY
 #endif
 
+/* GL types that may be missing from older/minimal GL headers (e.g. MinGW) */
+#ifndef GL_VERSION_1_5
+typedef ptrdiff_t GLsizeiptr;
+typedef ptrdiff_t GLintptr;
+#endif
+
 /* include our function pointers */
 #include "gl_func.h"
 

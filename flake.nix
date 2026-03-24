@@ -46,6 +46,10 @@
               libogg
               alsa-lib       # ALSA audio support
               fluidsynth     # MIDI synthesis
+              libsndfile     # transitive dep of fluidsynth pkg-config
+              flac           # transitive dep of libsndfile pkg-config
+              libxmp         # XMP tracker music codec
+              opusfile       # Opus codec support
               soundfont-fluid # GM soundfont for FluidSynth
             ];
 
@@ -146,6 +150,8 @@
 
             cmakeFlags = [
               "-DUSE_CODEC_VORBIS=ON"
+              "-DUSE_CODEC_OPUS=OFF"  # opusfile cross-compile not supported via nix
+              "-DUSE_CODEC_XMP=OFF"   # libxmp has a nixpkgs cycle bug in mingw cross-build
             ];
 
             installPhase = ''

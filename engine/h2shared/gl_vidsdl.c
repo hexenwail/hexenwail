@@ -384,7 +384,6 @@ static qboolean VID_SetMode (int modenum)
 {
 	int	i, is_fullscreen;
 	SDL_DisplayID	display_id;
-	const SDL_DisplayMode	*desktop_mode;
 	int	screen_w, screen_h, drawable_w, drawable_h;
 	int	scaling_factor = 100;
 
@@ -1666,7 +1665,7 @@ void D_ShowLoadingSize (void)
 
 static int	vid_menunum;
 static int	vid_cursor;
-static qboolean	want_fstoggle, need_apply;
+static qboolean	need_apply;
 static qboolean	vid_menu_firsttime = true;
 
 // Aspect ratio filter for the video menu
@@ -1757,24 +1756,6 @@ enum {
 	VID_APPLY,
 	VID_ITEMS
 };
-
-static void M_DrawYesNo (int x, int y, int on, int white)
-{
-	if (on)
-	{
-		if (white)
-			M_PrintWhite (x, y, "yes");
-		else
-			M_Print (x, y, "yes");
-	}
-	else
-	{
-		if (white)
-			M_PrintWhite (x, y, "no");
-		else
-			M_Print (x, y, "no");
-	}
-}
 
 /*
 ================
