@@ -5,6 +5,7 @@ DATADIR="${HOME}/.hexen2/data1"
 PAK="${DATADIR}/pak0.pak"
 
 # Show the real host path when running inside Flatpak
+# shellcheck disable=SC2088  # tilde is intentional: displayed to user, not used as a path
 if [ -n "${FLATPAK_ID}" ]; then
     DISPLAY_PATH="~/.var/app/${FLATPAK_ID}/.hexen2/data1/"
 else

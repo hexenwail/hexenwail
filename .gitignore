@@ -5,3 +5,6 @@ audit.md
 engine/build/
 *.o
 *.d
+
+# bv (beads viewer) local config and caches
+.bv/
