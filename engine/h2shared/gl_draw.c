@@ -1163,8 +1163,12 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 	{
 		for (j = 0; j < PLAYER_PIC_HEIGHT; j++)
 		{
-			trans[j * PLAYER_DEST_WIDTH + i] =
-			 d_8to24table[translation[menuplyr_pixels[p_class-1][j * PLAYER_PIC_WIDTH + i]]];
+			int p = menuplyr_pixels[p_class-1][j * PLAYER_PIC_WIDTH + i];
+			/* Index 255 is the transparent colorkey globally, but portrait
+			 * images use it for dark background pixels that must be opaque. */
+			trans[j * PLAYER_DEST_WIDTH + i] = (p == 255)
+				? (d_8to24table[255] | MASK_a)
+				: d_8to24table[translation[p]];
 		}
 	}
 
