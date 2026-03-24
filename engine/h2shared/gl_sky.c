@@ -122,6 +122,9 @@ cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};
 cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_NONE};
 cvar_t r_skyspeed_front = {"r_skyspeed_front", "16", CVAR_NONE};
+cvar_t r_skybox_speed = {"r_skybox_speed", "0", CVAR_NONE};
+
+static float sky_box_scroll; // UV scroll offset applied each frame in Sky_DrawSkyBox
 
 int		skytexorder[6] = {0,2,1,3,4,5}; //for skybox
 
@@ -540,6 +543,7 @@ void Sky_Init (void)
 	Cvar_SetCallback (&r_skyfog, R_SetSkyfog_f);
 	Cvar_RegisterVariable (&r_skyspeed_back);
 	Cvar_RegisterVariable (&r_skyspeed_front);
+	Cvar_RegisterVariable (&r_skybox_speed);
 
 	Cmd_AddCommand ("sky",Sky_SkyCommand_f);
 
@@ -925,6 +929,9 @@ void Sky_EmitSkyBoxVertex (float s, float t, int axis)
 	s = s * (w-1)/w + 0.5/w;
 	t = t * (h-1)/h + 0.5/h;
 
+	// apply horizontal scroll (GL_REPEAT handles wrapping)
+	s += sky_box_scroll;
+
 	t = 1.0 - t;
 	GL_ImmTexCoord2f (s, t);
 	GL_ImmVertex3f(v[0], v[1], v[2]);
@@ -940,6 +947,9 @@ FIXME: eliminate cracks by adding an extra vert on tjuncs
 void Sky_DrawSkyBox (void)
 {
 	int		i;
+
+	// update UV scroll offset (same unit as r_skyspeed_*: scroll units/sec, 128 = full texture)
+	sky_box_scroll = (float)fmod(cl.time * r_skybox_speed.value * (1.0 / 128.0), 1.0);
 
 	// Force skybox to render at maximum depth (always behind everything)
 	glDepthRange_fp(1.0, 1.0);
