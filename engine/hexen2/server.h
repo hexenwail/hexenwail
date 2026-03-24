@@ -189,6 +189,7 @@ typedef struct client_s
 #define	SOLID_SLIDEBOX		3		// touch on edge, but not an onground
 #define	SOLID_BSP		4		// bsp clip, touch on edge, block
 #define	SOLID_PHASE		5		// won't slow down when hitting entities flagged as FL_MONSTER
+#define	SOLID_GHOST		6		// non-solid except to projectiles with .ghost_damage set
 
 //
 // edict->deadflag values

@@ -442,7 +442,8 @@ static void R_DrawSpriteModel (entity_t *e)
 	}
 
 	/* translucency handling */
-	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
+	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT) ||
+	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		glEnable_fp (GL_BLEND);
 	}
@@ -458,10 +459,16 @@ static void R_DrawSpriteModel (entity_t *e)
 
 	GL_ImmBegin ();
 
-	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
-		GL_ImmColor4f (1.0f, 1.0f, 1.0f, r_wateralpha.value);
-	else
-		GL_ImmColor4f (1.0f, 1.0f, 1.0f, 1.0f);
+	{
+		float sprite_alpha;
+		if (e->alpha != ENTALPHA_DEFAULT)
+			sprite_alpha = ENTALPHA_DECODE(e->alpha);
+		else if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
+			sprite_alpha = r_wateralpha.value;
+		else
+			sprite_alpha = 1.0f;
+		GL_ImmColor4f (1.0f, 1.0f, 1.0f, sprite_alpha);
+	}
 
 	GL_ImmTexCoord2f (0, 1);
 	VectorMA (e->origin, frame->down, r_spritedesc.vup, point);
@@ -1069,7 +1076,10 @@ static void R_DrawAliasModel (entity_t *e)
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
-		model_constant_alpha = r_wateralpha.value;
+		if (e->alpha != ENTALPHA_DEFAULT)
+			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
+		else
+			model_constant_alpha = r_wateralpha.value;
 	}
 	else if (e->model->flags & EF_TRANSPARENT)
 	{
@@ -1081,6 +1091,11 @@ static void R_DrawAliasModel (entity_t *e)
 		glDisable_fp (GL_BLEND);
 		GL_SetAlphaThreshold(0.666f);	/* alpha test for see-through cutouts */
 		model_constant_alpha = 1.0f;
+	}
+	else if (e->alpha != ENTALPHA_DEFAULT)
+	{
+		glEnable_fp (GL_BLEND);
+		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 	}
 	else
 	{
@@ -1143,7 +1158,8 @@ static void R_DrawAliasModel (entity_t *e)
 	// Skip for translucent models — additive blend over transparency looks wrong
 	if (gl_fullbrights.integer && skinnum < 100 &&
 	    !((e->drawflags & DRF_TRANSLUCENT) ||
-	      (e->model->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS))))
+	      (e->model->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS)) ||
+	      (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))))
 	{
 		int anim_fb = (int)(cl.time*10) & 3;
 		GLuint fb_tex;
@@ -1177,7 +1193,8 @@ static void R_DrawAliasModel (entity_t *e)
 
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
 	    (e->model->flags & EF_SPECIAL_TRANS) ||
-	    (e->model->flags & EF_TRANSPARENT))
+	    (e->model->flags & EF_TRANSPARENT) ||
+	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		glDisable_fp (GL_BLEND);
 	}
@@ -1282,14 +1299,16 @@ static void R_DrawEntitiesOnList (void)
 				break;
 
 			item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
-					(e->model->flags & (EF_TRANSPARENT|EF_HOLEY|EF_SPECIAL_TRANS))) != 0;
+					(e->model->flags & (EF_TRANSPARENT|EF_HOLEY|EF_SPECIAL_TRANS)) ||
+					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
 				R_DrawAliasModel (e);
 			break;
 		}
 
 		case mod_brush:
-			item_trans = (e->drawflags & DRF_TRANSLUCENT) != 0;
+			item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
+					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
 				R_DrawBrushModel (e,false);
 			break;

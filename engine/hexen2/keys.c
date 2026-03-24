@@ -948,7 +948,7 @@ void Key_Event (int key, qboolean down)
 			Key_Message (key);
 			break;
 		case key_menu:
-			M_Keydown (key);
+			M_Keydown (key, key_repeats[key] > 1);
 			break;
 		case key_menubind:
 			M_Keybind (key);
@@ -1045,7 +1045,7 @@ void Key_Event (int key, qboolean down)
 		Key_Message (key);
 		break;
 	case key_menu:
-		M_Keydown (key);
+		M_Keydown (key, key_repeats[key] > 1);
 		break;
 	case key_menubind:
 		M_Keybind (key);
