@@ -204,6 +204,9 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 	float		angle;
 	float		sr, sp, sy, cr, cp, cy;
 
+	if (!angles || !forward)
+		return;
+
 	angle = angles[YAW] * (M_PI*2 / 360);
 	sy = sin(angle);
 	cy = cos(angle);
@@ -217,12 +220,18 @@ void AngleVectors (vec3_t angles, vec3_t forward, vec3_t right, vec3_t up)
 	forward[0] = cp*cy;
 	forward[1] = cp*sy;
 	forward[2] = -sp;
+	if (right)
+	{
 	right[0] = -1 * (sr * sp * cy + cr * -sy);
 	right[1] = -1 * (sr * sp * sy + cr * cy);
 	right[2] = -1 * (sr * cp);
+	}
+	if (up)
+	{
 	up[0] = (cr * sp * cy + -sr * -sy);
 	up[1] = (cr * sp * sy + -sr * cy);
 	up[2] = cr * cp;
+	}
 }
 
 
