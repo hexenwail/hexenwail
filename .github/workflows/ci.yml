@@ -22,3 +22,32 @@ jobs:
 
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
+
+  flatpak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Cache Flatpak runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-25.08-${{ runner.os }}
+
+      - name: Install SDK and runtime
+        run: |
+          flatpak install --user -y flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder --user --force-clean --disable-rofiles-fuse \
+            build-dir flatpak/com.github.bobberb.hexenwail.yml
