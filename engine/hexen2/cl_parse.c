@@ -688,6 +688,7 @@ static void CL_ParseUpdate (int bits)
 		build_ent.scale = ent->baseline.scale;
 		build_ent.drawflags = ent->baseline.drawflags;
 		build_ent.abslight = ent->baseline.abslight;
+		build_ent.alpha = ent->baseline.alpha;
 	}
 
 	if (cl.need_build)
@@ -836,6 +837,11 @@ static void CL_ParseUpdate (int bits)
 		ent->abslight = ref_ent->abslight;
 	}
 
+	if (bits & U_ALPHA)
+		set_ent->alpha = ent->alpha = MSG_ReadByte();
+	else
+		ent->alpha = ref_ent->alpha;
+
 	if (bits & U_NOLERP)
 		ent->forcelink = true;
 
@@ -914,6 +920,7 @@ static void CL_ParseBaseline (entity_t *ent)
 	ent->baseline.scale = MSG_ReadByte();
 	ent->baseline.drawflags = MSG_ReadByte();
 	ent->baseline.abslight = MSG_ReadByte();
+	ent->baseline.alpha = MSG_ReadByte();
 	for (i = 0; i < 3; i++)
 	{
 		ent->baseline.origin[i] = MSG_ReadCoord ();
@@ -1207,6 +1214,7 @@ static void CL_ParseStatic (void)
 	ent->effects = ent->baseline.effects;
 	ent->drawflags = ent->baseline.drawflags;
 	ent->abslight = ent->baseline.abslight;
+	ent->alpha = ent->baseline.alpha;
 
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
