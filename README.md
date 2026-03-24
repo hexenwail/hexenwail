@@ -30,6 +30,8 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Scancode-based key bindings — WASD works correctly on AZERTY, Dvorak, etc.
 - [x] Proper text input via SDL — keyboard layout, shift, dead keys handled by OS
 - [x] Console/menu uses layout-aware typing, game uses physical key positions
+- [x] Always-run toggle (`cl_alwaysrun`)
+- [x] Configurable pitch clamp range (`cl_maxpitch`/`cl_minpitch`)
 
 ### Modern rendering (GL 4.3 shader pipeline)
 - [x] Full GLSL 4.30 shader pipeline — zero immediate mode, zero fixed-function
@@ -57,9 +59,9 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] In-game clock/timer display (`showclock 1`=game time, `2`=wall clock)
 - [x] Centered console notify messages (`con_notifycenter`)
 - [x] HUD layout modes (Full/Mini/Off/Clean — Clean also hides weapon)
-- [x] Model animation interpolation (lerping between keyframes)
+- [x] Model animation interpolation (lerping between keyframes, `r_lerpmodels`)
 - [x] Physics/render decoupling with entity interpolation (Ironwail-style)
-- [x] Lightstyle interpolation (smooth flickering lights)
+- [x] Lightstyle interpolation (smooth flickering lights, `r_lerplightstyles`)
 - [x] Fullbright pixel support for alias model skins (eye glow, torch flames)
 - [x] Square particle toggle (`gl_particles 0` for classic software look)
 - [x] Lightmapped liquid surfaces
@@ -69,6 +71,9 @@ A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support,
 - [x] Glow effects toggle (All/Torch Only/Off) with fog attenuation
 - [x] Muzzle flash dynamic light radius scaling (`gl_flashintensity`)
 - [x] Non-rotating floor-projected shadows for spinning items (`r_shadow_flat`, default on)
+- [x] Back-to-front transparent entity sorting (`r_alphasort`)
+- [x] Entity bounding box debug visualization (`r_showbboxes`)
+- [x] Polyblend intensity scale (`gl_cshiftpercent`, 0-100%)
 - [x] Translucent brush entity rendering (teleport beams, etc.)
 - [x] Model overbright toggle (`gl_overbright_models`)
 - [ ] HDR rendering pipeline
