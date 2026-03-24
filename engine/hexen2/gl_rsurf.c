@@ -580,8 +580,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		intensity = (float)e->abslight / 255.0f;
 	}
 
-	if (!override)
-		GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
+	GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 
 	if (fa->flags & SURF_DRAWSKY)
 	{	// warp texture, no lightmaps
