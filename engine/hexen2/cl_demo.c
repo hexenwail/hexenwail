@@ -63,6 +63,8 @@ void CL_StopPlayback (void)
 
 	if (intro_playing)
 		M_ToggleMenu_f();
+	else
+		Key_SetDest (key_game);
 
 	intro_playing = false;
 //	num_intro_msg = 0;

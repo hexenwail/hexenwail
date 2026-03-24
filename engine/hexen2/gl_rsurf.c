@@ -827,12 +827,15 @@ static float R_LiquidAlpha (const texture_t *t)
 {
 	if (t->name[0] == '*')
 	{
-		if (!q_strncasecmp(t->name + 1, "lava", 4) && r_lavaalpha.value > 0)
-		{	float a = r_lavaalpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
-		if (!q_strncasecmp(t->name + 1, "slime", 5) && r_slimealpha.value > 0)
-		{	float a = r_slimealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
-		if (!q_strncasecmp(t->name + 1, "tele", 4) && r_telealpha.value > 0)
-		{	float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+		if (!q_strncasecmp(t->name + 1, "lava", 4))
+		{	if (r_lavaalpha.value <= 0) return 1.0f;
+			float a = r_lavaalpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+		if (!q_strncasecmp(t->name + 1, "slime", 5))
+		{	if (r_slimealpha.value <= 0) return 1.0f;
+			float a = r_slimealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+		if (!q_strncasecmp(t->name + 1, "tele", 4))
+		{	if (r_telealpha.value <= 0) return 1.0f;
+			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
 	{	float a = r_wateralpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 }
