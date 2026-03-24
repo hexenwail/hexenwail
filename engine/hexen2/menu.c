@@ -5672,6 +5672,7 @@ void M_Draw (void)
 			/* skip the amber fade in display menus so
 			 * settings preview against a clean game view */
 			if (m_state != m_display && m_state != m_video
+			    && m_state != m_rendering
 			    && Cvar_VariableValue("scr_menufade"))
 				Draw_FadeScreen ();
 			if (scr_viewsize.integer < 110)

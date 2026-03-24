@@ -64,7 +64,8 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] Fullbright pixel support for alias model skins (eye glow, torch flames)
 - [x] Square particle toggle (`gl_particles 0` for classic software look)
 - [x] Lightmapped liquid surfaces
-- [x] Underwater warp effect
+- [x] Underwater screen warp
+- [x] Motion blur post-process
 - [x] FXAA post-process
 - [x] Glow effects toggle (All/Torch Only/Off) with fog attenuation
 - [x] Muzzle flash dynamic light radius scaling (`gl_flashintensity`)
@@ -107,7 +108,7 @@ This fork merges [Hammer of Thyrion](http://uhexen2.sourceforge.net/) with [Shan
 - [x] NixOS: FluidSynth soundfont bundled — MIDI works out of the box
 - [x] HiDPI display support
 - [x] Combined Display menu — rendering and video settings in one place (Ironwail-style)
-- [x] Display menu shows live preview — no screen tint or fade overlay
+- [x] Menu fade toggle — amber overlay on menu open; auto-suppressed in Display/Rendering submenus for clean settings preview
 - [x] Unified platform layer — shared code in `sys_sdl.c`, minimal OS-specific code
 - [x] Cleaned out legacy platform code (DOS, OS/2, Amiga, macOS, HexenWorld)
 - [x] Cleaned out legacy GL capability detection — assumes GL 4.3
