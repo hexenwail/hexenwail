@@ -1318,7 +1318,8 @@ void	VID_Init (const unsigned char *palette)
 				"vid_config_glx",
 				"vid_config_gly",
 				"vid_config_consize",
-				"gl_lightmapfmt" };
+				"gl_lightmapfmt",
+				"vid_vsync" };
 #define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
 	Cvar_RegisterVariable (&vid_config_fsaa);
