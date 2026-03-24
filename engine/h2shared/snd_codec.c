@@ -32,6 +32,9 @@
 #include "snd_flac.h"
 #include "snd_mp3.h"
 #include "snd_vorbis.h"
+#include "snd_xmp.h"
+#include "snd_umx.h"
+#include "snd_opus.h"
 
 
 static snd_codec_t *codecs;
@@ -68,6 +71,15 @@ void S_CodecInit (void)
 #endif
 #ifdef USE_CODEC_VORBIS
 	S_CodecRegister(&vorbis_codec);
+#endif
+#ifdef USE_CODEC_OPUS
+	S_CodecRegister(&opus_codec);
+#endif
+#ifdef USE_CODEC_UMX
+	S_CodecRegister(&umx_codec);
+#endif
+#ifdef USE_CODEC_XMP
+	S_CodecRegister(&xmp_codec);
 #endif
 
 	codec = codecs;
