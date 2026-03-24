@@ -182,8 +182,10 @@ void Sys_MainLoop (void)
 		newtime = Sys_DoubleTime ();
 		time = newtime - oldtime;
 
-		/* cap framerate to host_maxfps */
-		if (host_maxfps.value > 0)
+		/* cap framerate to host_maxfps (skip when VSync is on — VSync
+		 * already rate-limits the frame; the SDL_Delay polling loop
+		 * can overshoot the vblank window and cause double-frame stutters) */
+		if (host_maxfps.value > 0 && VID_MenuGetVSync() == 0)
 		{
 			double mintime = 1.0 / host_maxfps.value;
 			while (time < mintime)
