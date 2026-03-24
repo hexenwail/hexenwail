@@ -36,6 +36,7 @@ qboolean 	con_forcedup;		// because no entities to refresh
 int		con_ormask;
 
 static	cvar_t	con_notifytime = {"con_notifytime", "3", CVAR_NONE};	//seconds
+static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* center notify text horizontally */
 
 #define	NUM_CON_TIMES 4
 static float	con_times[NUM_CON_TIMES];	// realtime time the line was generated
@@ -210,6 +211,7 @@ void Con_Init (void)
 	Con_Printf ("Console initialized.\n");
 
 	Cvar_RegisterVariable (&con_notifytime);
+	Cvar_RegisterVariable (&con_notifycenter);
 
 	Cmd_AddCommand ("toggleconsole", Con_ToggleConsole_f);
 	Cmd_AddCommand ("messagemode", Con_MessageMode_f);
@@ -531,8 +533,20 @@ void Con_DrawNotify (void)
 			clearnotify = 0;
 		scr_copytop = 1;
 
-		for (x = 0; x < con_linewidth; x++)
-			Draw_Character ((x+1)<<3, v, text[x]);
+		if (con_notifycenter.integer)
+		{
+			/* find actual text length (trim trailing spaces) */
+			int len = con_linewidth;
+			while (len > 0 && (text[len-1] & 0xFF) == ' ')
+				--len;
+			for (x = 0; x < len; x++)
+				Draw_Character ((vid.width - len*8)/2 + x*8, v, text[x]);
+		}
+		else
+		{
+			for (x = 0; x < con_linewidth; x++)
+				Draw_Character ((x+1)<<3, v, text[x]);
+		}
 
 		v += 8;
 	}
