@@ -840,7 +840,7 @@ static void _Host_Frame (float time)
 
 // sample input every render frame for smooth view angles
 // movement deltas accumulate into cl.pendingcmd (merged at physics tick)
-	if (cls.signon == SIGNONS)
+	if (cls.signon == SIGNONS && Key_GetDest() == key_game)
 	{
 		CL_AdjustAngles ();
 		IN_Move (&cl.pendingcmd);
