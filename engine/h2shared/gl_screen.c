@@ -253,7 +253,7 @@ void SCR_CenterPrint (const char *str)
 	scr_center_lines = lines;
 
 	if (con_logcenterprint.integer && str[0] != '_')
-		Con_Printf ("%s\n", str);
+		CON_Printf (_PRINT_NONOTIFY, "%s\n", str);
 }
 
 static void SCR_DrawCenterString (void)

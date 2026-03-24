@@ -41,6 +41,7 @@ static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* cen
 #define	NUM_CON_TIMES 4
 static float	con_times[NUM_CON_TIMES];	// realtime time the line was generated
 						// for transparent notify lines
+static qboolean	con_suppress_notify;		// when true, Con_Print skips notify timestamps
 
 extern qboolean		menu_disabled_mouse;
 
@@ -305,7 +306,7 @@ static void Con_Print (const char *txt)
 		{
 			Con_Linefeed ();
 		// mark time for transparent overlay
-			if (con->current >= 0)
+			if (con->current >= 0 && !con_suppress_notify)
 				con_times[con->current % NUM_CON_TIMES] = realtime;
 		}
 
@@ -372,7 +373,10 @@ void CON_Printf (unsigned int flags, const char *fmt, ...)
 		return;		// no graphics mode
 
 // write it to the scrollable buffer
+	if (flags & _PRINT_NONOTIFY)
+		con_suppress_notify = true;
 	Con_Print (msg);
+	con_suppress_notify = false;
 
 	if (flags & _PRINT_SAFE)
 		return;	// safe: doesn't update the screen

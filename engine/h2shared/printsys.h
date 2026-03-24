@@ -39,6 +39,7 @@ void CON_Printf (unsigned int flags, const char *fmt, ...) FUNC_PRINTF(2,3);
 #define	_PRINT_TERMONLY			1	/* print to the terminal only: formerly Sys_Printf */
 #define	_PRINT_DEVEL			2	/* print only if the developer cvar is set */
 #define	_PRINT_SAFE			4	/* okay to call even when the screen can't be updated */
+#define	_PRINT_NONOTIFY			8	/* log to console buffer but suppress notify overlay */
 
 /* macros for compatibility with quake api */
 #if defined(__GNUC__) && !(defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L)
