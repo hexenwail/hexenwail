@@ -683,6 +683,9 @@ void Draw_Crosshair (void)
 
 		GL_Bind (cs_texture);
 
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 		// Our crosshair is now 32x32, but we're drawing 16x16 here
 		// to have a smaller pic. If, in the pixmap, the pixels are
 		// not drawn in doubles, the final image on the screen may
@@ -860,6 +863,10 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	glEnable_fp (GL_BLEND);
 	glCullFace_fp(GL_FRONT);
 	GL_Bind (gl->texnum);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, alpha);
 	GL_ImmTexCoord2f (gl->sl, gl->tl);
@@ -872,6 +879,9 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	GL_ImmVertex2f (x, y+pic->height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	glDisable_fp (GL_BLEND);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
 #if FULLSCREEN_INTERMISSIONS
@@ -985,6 +995,10 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	newth = newtl + (height*oldglheight)/pic->height;
 
 	GL_Bind (gl->texnum);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
 	GL_ImmTexCoord2f (newsl, newtl);
@@ -996,6 +1010,9 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	GL_ImmTexCoord2f (newsl, newth);
 	GL_ImmVertex2f (x, y+height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
 void Draw_PicCropped (int x, int y, qpic_t *pic)
@@ -1038,6 +1055,10 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 	}
 
 	GL_Bind (gl->texnum);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
 	GL_ImmTexCoord2f (gl->sl, tl);
@@ -1049,6 +1070,9 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 	GL_ImmTexCoord2f (gl->sl, th);
 	GL_ImmVertex2f (x, y+height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
 void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
@@ -1096,6 +1120,10 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 	}
 
 	GL_Bind (gl->texnum);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
 	GL_ImmTexCoord2f (gl->sl, tl);
@@ -1107,6 +1135,9 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 	GL_ImmTexCoord2f (gl->sl, th);
 	GL_ImmVertex2f (x, y+height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
 /*
@@ -1176,6 +1207,8 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 			 0, GL_RGBA, GL_UNSIGNED_BYTE, trans);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor3f (1, 1, 1);
@@ -1203,6 +1236,9 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	glCullFace_fp(GL_FRONT);
 	GL_Bind (num);
 
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, alpha);
 	GL_ImmTexCoord2f (0, 0 + ofs);
@@ -1216,6 +1252,9 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
 	glDisable_fp (GL_BLEND);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
 static void Draw_ConsoleVersionInfo (int lines)
