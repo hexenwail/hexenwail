@@ -1628,7 +1628,7 @@ static void R_DrawAllGlows (void)
 	{
 		e = cl_visedicts[i];
 
-		if (e->model->type == mod_alias)
+		if (e->model && e->model->type == mod_alias)
 			R_DrawGlow (e);
 	}
 
