@@ -251,6 +251,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_novis);
+	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_showbboxes);
 	Cvar_RegisterVariable (&r_speeds);
 	Cvar_RegisterVariable (&r_wholeframe);

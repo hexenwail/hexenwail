@@ -103,6 +103,7 @@ cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
+cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
@@ -795,7 +796,7 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 			e->lerptime = 0;
 		}
 	}
-	else if (e->lerptime > 0 && prevframe != frame &&
+	else if (r_lerpmodels.integer && e->lerptime > 0 && prevframe != frame &&
 	    prevframe >= 0 && prevframe < paliashdr->numframes)
 	{
 		float elapsed = cl.time - e->lerpstart;
