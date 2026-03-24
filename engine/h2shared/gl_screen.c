@@ -103,6 +103,7 @@ static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
 static	cvar_t	scr_showfps = {"showfps", "0", CVAR_ARCHIVE};
+static	cvar_t	scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
 static	cvar_t	scr_menufade = {"scr_menufade", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showclock = {"showclock", "0", CVAR_ARCHIVE};
 //static	cvar_t	gl_triplebuffer = {"gl_triplebuffer", "0", CVAR_ARCHIVE};
@@ -524,6 +525,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showturtle);
 	Cvar_RegisterVariable (&scr_showpause);
 	Cvar_RegisterVariable (&scr_showfps);
+	Cvar_RegisterVariable (&scr_showspeed);
 	Cvar_RegisterVariable (&scr_menufade);
 	Cvar_RegisterVariable (&scr_showclock);
 	Cvar_RegisterVariable (&scr_centertime);
@@ -695,6 +697,55 @@ static void SCR_DrawClock (void)
 		Draw_String(x, y, st);
 	}
 }
+
+/*
+==============
+SCR_DrawSpeed -- Ironwail
+==============
+*/
+static void SCR_DrawSpeed (void)
+{
+	static float	display_speed = -1;
+	static float	maxspeed = 0;
+	static double	lasttime = 0;
+	vec3_t		vel;
+	float		speed;
+	char		st[12];
+	int		x, y;
+
+	if (!scr_showspeed.integer)
+		return;
+	if (cls.state != ca_active)
+		return;
+
+	/* horizontal speed only (no vertical component) */
+	vel[0] = cl.velocity[0];
+	vel[1] = cl.velocity[1];
+	vel[2] = 0;
+	speed = VectorLength (vel);
+	if (speed > maxspeed)
+		maxspeed = speed;
+
+	/* update display value every 0.1 seconds */
+	if (realtime - lasttime >= 0.1)
+	{
+		display_speed = maxspeed;
+		maxspeed = 0;
+		lasttime = realtime;
+	}
+	if (display_speed < 0)
+		return;
+
+	sprintf (st, "%d", (int)display_speed);
+	x = vid.width - strlen(st) * 8 - 8;
+	y = vid.height - sb_lines - 8;
+	if (scr_showfps.integer)
+		y -= 8;
+	if (scr_showclock.integer)
+		y -= 8;
+	Draw_String (x, y, st);
+}
+
 
 /*
 ==============
@@ -1456,6 +1507,7 @@ void SCR_UpdateScreen (void)
 		Sbar_Draw();
 		SCR_DrawFPS();
 		SCR_DrawClock();
+		SCR_DrawSpeed();
 
 		Plaque_Draw(plaquemessage, false);
 		SCR_DrawConsole();
