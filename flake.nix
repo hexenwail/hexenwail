@@ -177,6 +177,8 @@
 
             buildInputs = with pkgsCross64; [
               windows.pthreads
+              libxmp         # XMP tracker music codec
+              opusfile       # Opus codec support
             ];
 
             # CMake is in engine subdirectory
@@ -186,8 +188,8 @@
 
             cmakeFlags = [
               "-DUSE_CODEC_VORBIS=ON"
-              "-DUSE_CODEC_OPUS=OFF"  # opusfile cross-compile not supported via nix
-              "-DUSE_CODEC_XMP=OFF"   # libxmp has a nixpkgs cycle bug in mingw cross-build
+              "-DUSE_CODEC_OPUS=ON"
+              "-DUSE_CODEC_XMP=ON"
             ];
 
             installPhase = ''
@@ -210,6 +212,13 @@
               for dll in ../../oslibs/windows/codecs/x64/*.dll; do
                 install -Dm755 "$dll" $out/bin/
               done
+
+              # Bundle Opus codec DLLs (opusfile + libopus, skip libopusurl/openssl)
+              install -Dm755 ${pkgsCross64.opusfile}/bin/libopusfile-0.dll $out/bin/
+              install -Dm755 ${pkgsCross64.libopus}/bin/libopus-0.dll $out/bin/
+
+              # Bundle XMP tracker music codec DLL
+              install -Dm755 ${pkgsCross64.libxmp}/bin/libxmp.dll $out/bin/
 
               # Bundle MinGW runtime DLLs if present
               for dll in libgcc_s_seh-1.dll libwinpthread-1.dll libstdc++-6.dll; do
