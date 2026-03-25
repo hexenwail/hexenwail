@@ -519,6 +519,7 @@ static float	r_avertexnormal_dots[SHADEDOT_QUANT][256] =
 };
 
 static float	*shadedots = r_avertexnormal_dots[0];
+static vec3_t	shadevector;
 
 static int	lastposenum;
 
@@ -767,80 +768,23 @@ static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
 
 /*
 =============
-Blob shadow — soft circle texture projected onto the ground plane
+GL_DrawAliasShadow -- sezero projected mesh shadow
 =============
 */
-#define SHADOW_TEX_SIZE	64
-
-static GLuint	shadow_texture;
-
-void R_InitShadowTexture (void)
+static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 {
-	byte	data[SHADOW_TEX_SIZE * SHADOW_TEX_SIZE * 4];
-	int	x, y;
-	float	cx, cy, dist, alpha;
-
-	cx = cy = (SHADOW_TEX_SIZE - 1) * 0.5f;
-
-	for (y = 0; y < SHADOW_TEX_SIZE; y++)
-	{
-		for (x = 0; x < SHADOW_TEX_SIZE; x++)
-		{
-			float dx = (x - cx) / cx;
-			float dy = (y - cy) / cy;
-			dist = sqrtf(dx * dx + dy * dy);
-
-			/* smooth falloff: solid center, fades to transparent edge */
-			if (dist >= 1.0f)
-				alpha = 0.0f;
-			else
-				alpha = (1.0f - dist * dist) * 255.0f;
-
-			byte *p = &data[(y * SHADOW_TEX_SIZE + x) * 4];
-			p[0] = 0;		/* R */
-			p[1] = 0;		/* G */
-			p[2] = 0;		/* B */
-			p[3] = (byte)alpha;	/* A */
-		}
-	}
-
-	glGenTextures_fp(1, &shadow_texture);
-	GL_Bind(shadow_texture);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, SHADOW_TEX_SIZE, SHADOW_TEX_SIZE,
-			 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-}
-
-static void GL_DrawBlobShadow (entity_t *e)
-{
-	float	lheight, height, radius, alpha;
-	float	x1, y1, x2, y2;
-	qmodel_t *model = e->model;
+	trivertx_t	*verts;
+	int		*order;
+	vec3_t		point;
+	float		height, lheight;
+	int		count;
 
 	lheight = e->origin[2] - lightspot[2];
 
-	/* fade out as entity rises above ground — gone by 64 units */
-	if (lheight > 64.0f)
-		return;
-	alpha = 0.5f * (1.0f - lheight / 64.0f);
-	if (alpha <= 0.0f)
-		return;
-
-	/* shadow sits just above the ground plane */
-	height = lightspot[2] + 0.1f;
-
-	/* radius from model XY bounding box */
-	radius = (model->maxs[0] - model->mins[0] + model->maxs[1] - model->mins[1]) * 0.25f;
-	if (radius < 4.0f)
-		radius = 4.0f;
-
-	x1 = e->origin[0] - radius;
-	y1 = e->origin[1] - radius;
-	x2 = e->origin[0] + radius;
-	y2 = e->origin[1] + radius;
+	height = -lheight + 1.0;
+	verts = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts += posenum * paliashdr->poseverts;
+	order = (int *)((byte *)paliashdr + paliashdr->commands);
 
 	if (have_stencil)
 	{
@@ -849,19 +793,41 @@ static void GL_DrawBlobShadow (entity_t *e)
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_INCR);
 	}
 
-	GL_Bind(shadow_texture);
+	while (1)
+	{
+		GLenum mode;
 
-	GL_ImmBegin();
-	GL_ImmColor4f(1, 1, 1, alpha);
-	GL_ImmTexCoord2f(0, 0);
-	GL_ImmVertex3f(x1, y1, height);
-	GL_ImmTexCoord2f(1, 0);
-	GL_ImmVertex3f(x2, y1, height);
-	GL_ImmTexCoord2f(1, 1);
-	GL_ImmVertex3f(x2, y2, height);
-	GL_ImmTexCoord2f(0, 1);
-	GL_ImmVertex3f(x1, y2, height);
-	GL_ImmEnd(GL_QUADS, &gl_shader_2d);
+		count = *order++;
+		if (!count)
+			break;
+		if (count < 0)
+		{
+			count = -count;
+			mode = GL_TRIANGLE_FAN;
+		}
+		else
+			mode = GL_TRIANGLE_STRIP;
+
+		GL_ImmBegin();
+		GL_ImmColor4f(0, 0, 0, 0.5f);
+		do
+		{
+			order += 2;	/* skip texture coordinates */
+
+			point[0] = verts->v[0] * paliashdr->scale[0] + paliashdr->scale_origin[0];
+			point[1] = verts->v[1] * paliashdr->scale[1] + paliashdr->scale_origin[1];
+			point[2] = verts->v[2] * paliashdr->scale[2] + paliashdr->scale_origin[2];
+
+			point[0] -= shadevector[0] * (point[2] + lheight);
+			point[1] -= shadevector[1] * (point[2] + lheight);
+			point[2] = height;
+
+			GL_ImmVertex3f(point[0], point[1], point[2]);
+
+			verts++;
+		} while (--count);
+		GL_ImmEnd(mode, &gl_shader_flat);
+	}
 
 	if (have_stencil)
 		glDisable_fp(GL_STENCIL_TEST);
@@ -971,7 +937,7 @@ static void R_DrawAliasModel (entity_t *e)
 	vec3_t		mins, maxs;
 	aliashdr_t	*paliashdr;
 	static float	tmatrix[3][4];
-	float		entScale;
+	float		an, entScale;
 	float		xyfact = 1.0, zfact = 1.0; // avoid compiler warning
 	int		skinnum;
 	int		mls;
@@ -1081,6 +1047,12 @@ static void R_DrawAliasModel (entity_t *e)
 	shadedots = r_avertexnormal_dots[((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1)];
 	shadelight = shadelight / 200.0;
 	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
+
+	an = e->angles[1] / 180 * M_PI;
+	shadevector[0] = cos(-an);
+	shadevector[1] = sin(-an);
+	shadevector[2] = 1;
+	VectorNormalize (shadevector);
 
 	//
 	// locate the proper data
@@ -1322,18 +1294,14 @@ static void R_DrawAliasModel (entity_t *e)
 
 	if (r_shadows.integer && e != &cl.viewent)
 	{
-		/* Skip shadows for distant entities */
-		float sdx = e->origin[0] - r_origin[0];
-		float sdy = e->origin[1] - r_origin[1];
-		float sdz = e->origin[2] - r_origin[2];
-		if (sdx*sdx + sdy*sdy + sdz*sdz < 512*512)
-		{
-			glEnable_fp (GL_BLEND);
-			glDepthMask_fp (0);
-			GL_DrawBlobShadow (e);
-			glDepthMask_fp (1);
-			glDisable_fp (GL_BLEND);
-		}
+		GL_PushMatrix();
+		R_RotateForEntity2(e);
+		glEnable_fp (GL_BLEND);
+		glDepthMask_fp (0);
+		GL_DrawAliasShadow (e, paliashdr, lastposenum);
+		glDepthMask_fp (1);
+		glDisable_fp (GL_BLEND);
+		GL_PopMatrix();
 	}
 }
 
