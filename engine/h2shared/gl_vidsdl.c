@@ -667,6 +667,9 @@ static void GL_LoadFunctionPointers (void)
 	glDrawArrays_fp = (glDrawArrays_f) SDL_GL_GetProcAddress("glDrawArrays");
 	glDrawElements_fp = (glDrawElements_f) SDL_GL_GetProcAddress("glDrawElements");
 
+	/* SSBO functions (GL 4.3 core) */
+	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
+
 	if (!glCreateShader_fp || !glShaderSource_fp || !glCompileShader_fp ||
 	    !glCreateProgram_fp || !glAttachShader_fp || !glLinkProgram_fp ||
 	    !glUseProgram_fp || !glGetUniformLocation_fp || !glUniform1i_fp ||

@@ -466,13 +466,13 @@ void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 	if (prog->base.u_fog_color >= 0)
 		glUniform3f_fp(prog->base.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	if (prog->u_pup >= 0)
-		glUniform3fv_fp(prog->u_pup,    1, pup);
+		glUniform3f_fp(prog->u_pup,    pup[0],    pup[1],    pup[2]);
 	if (prog->u_pright >= 0)
-		glUniform3fv_fp(prog->u_pright, 1, pright);
+		glUniform3f_fp(prog->u_pright, pright[0], pright[1], pright[2]);
 	if (prog->u_vpn >= 0)
-		glUniform3fv_fp(prog->u_vpn,    1, vpn);
+		glUniform3f_fp(prog->u_vpn,    vpn[0],    vpn[1],    vpn[2]);
 	if (prog->u_origin >= 0)
-		glUniform3fv_fp(prog->u_origin, 1, origin);
+		glUniform3f_fp(prog->u_origin, origin[0], origin[1], origin[2]);
 	if (prog->u_ctime >= 0)
 		glUniform1f_fp(prog->u_ctime, ctime);
 }
