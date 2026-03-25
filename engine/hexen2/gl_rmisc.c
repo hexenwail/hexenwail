@@ -52,7 +52,6 @@ extern hashindex_t	hash_gltextures;
 extern hashindex_t	hash_cachepics;
 
 extern void R_InitBubble (void);
-extern void R_InitShadowTexture (void);
 
 /*
 ==================
@@ -298,7 +297,6 @@ void R_Init (void)
 
 	R_InitParticles ();
 	R_InitParticleTexture ();
-	R_InitShadowTexture ();
 	R_InitExtraTextures ();
 	Sky_Init ();
 	Fog_Init ();
