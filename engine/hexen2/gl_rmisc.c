@@ -52,6 +52,7 @@ extern hashindex_t	hash_gltextures;
 extern hashindex_t	hash_cachepics;
 
 extern void R_InitBubble (void);
+extern void R_InitShadowTexture (void);
 
 /*
 ==================
@@ -239,7 +240,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_drawentities);
 	Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_shadows);
-	Cvar_RegisterVariable (&r_shadow_flat);
 	Cvar_RegisterVariable (&r_mirroralpha);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_RegisterVariable (&r_skyalpha);
@@ -297,6 +297,7 @@ void R_Init (void)
 
 	R_InitParticles ();
 	R_InitParticleTexture ();
+	R_InitShadowTexture ();
 	R_InitExtraTextures ();
 	Sky_Init ();
 	Fog_Init ();
