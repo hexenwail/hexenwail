@@ -191,6 +191,8 @@ void Mod_ClearAll (void)
 	int		i, key;
 	qmodel_t	*mod;
 
+	GL_FreeAliasGPUMeshes();
+
 	for (i = 0, mod = mod_known; i < mod_numknown; i++, mod++)
 	{	// clear alias models only if textures were flushed (Pa3PyX)
 		if (mod->type == mod_alias)

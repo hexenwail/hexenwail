@@ -282,6 +282,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_fxaa);
 	Cvar_RegisterVariable (&gl_lmatlas);
 	Cvar_RegisterVariable (&r_motionblur);
+	Cvar_RegisterVariable (&r_alias_gpu);
 	Cvar_RegisterVariable (&r_alphatocoverage);
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
