@@ -997,8 +997,8 @@ void CL_UpdateEffects (void)
 	if (cls.state == ca_disconnected)
 		return;
 
-	frametime = cl.time - cl.oldtime;
-	if (!frametime)
+	frametime = host_frametime;
+	if (frametime <= 0)
 		return;
 //	Con_Printf("Here at %f\n",cl.time);
 
