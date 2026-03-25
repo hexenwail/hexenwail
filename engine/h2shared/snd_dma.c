@@ -679,6 +679,8 @@ void S_ClearBuffer (void)
 	if (!sound_started || !shm)
 		return;
 
+	IN_GPRumble(0.0f, 0.0f, 0);	/* stop controller rumble on level change / disconnect */
+
 	qsnd_driver->LockBuffer ();
 	if (! shm->buffer)
 		return;
