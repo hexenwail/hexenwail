@@ -19,6 +19,10 @@
  */
 
 #include "quakedef.h"
+#include "gl_shader.h"
+#include "gl_vbo.h"
+
+static void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 
 /*
 =================================================================
@@ -345,5 +349,203 @@ void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr)
 		for (j = 0; j < numorder; j++)
 			*verts++ = poseverts[i][vertexorder[j]];
 	}
+
+	/* Build GPU-resident data for AZDO rendering */
+	GL_MakeAliasGPUMesh(hdr);
+}
+
+/* ------------------------------------------------------------------ */
+/* GPU-resident alias model data (AZDO Phase 1)                        */
+/* ------------------------------------------------------------------ */
+
+alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];
+int num_alias_gpu_meshes;
+
+/* Map an aliashdr_t to its GPU mesh.  Searches by pointer-derived key. */
+static int alias_gpu_keys[MAX_ALIAS_MODELS]; /* hdr address hash for lookup */
+
+alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr)
+{
+	int i, key = (int)((size_t)hdr & 0x7fffffff);
+	for (i = 0; i < num_alias_gpu_meshes; i++)
+	{
+		if (alias_gpu_keys[i] == key && alias_gpu_meshes[i].valid)
+			return &alias_gpu_meshes[i];
+	}
+	return NULL;
+}
+
+void GL_FreeAliasGPUMeshes (void)
+{
+	int i;
+	for (i = 0; i < num_alias_gpu_meshes; i++)
+	{
+		alias_gpu_mesh_t *gm = &alias_gpu_meshes[i];
+		if (gm->vao)       { glDeleteVertexArrays_fp(1, &gm->vao); }
+		if (gm->vbo_tc)    { glDeleteBuffers_fp(1, &gm->vbo_tc); }
+		if (gm->ibo)       { glDeleteBuffers_fp(1, &gm->ibo); }
+		if (gm->ssbo_pose) { glDeleteBuffers_fp(1, &gm->ssbo_pose); }
+	}
+	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
+	memset(alias_gpu_keys, 0, sizeof(alias_gpu_keys));
+	num_alias_gpu_meshes = 0;
+}
+
+/*
+================
+GL_MakeAliasGPUMesh
+
+Triangulate the command list, extract static texcoords, and upload
+all pose vertex data to an SSBO.  Called from GL_MakeAliasModelDisplayLists.
+================
+*/
+static void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
+{
+	int		*order, count;
+	int		num_tris, vi, vert_idx;
+	unsigned short	*indices;
+	float		*texcoords;
+	unsigned int	*pose_packed;
+	trivertx_t	*pv;
+	alias_gpu_mesh_t *gm;
+	int		mark, i, j;
+
+	if (num_alias_gpu_meshes >= MAX_ALIAS_MODELS)
+		return;
+
+	/* First pass: count triangles from command list */
+	order = (int *)((byte *)hdr + hdr->commands);
+	num_tris = 0;
+	while (1)
+	{
+		count = *order++;
+		if (!count)
+			break;
+		if (count < 0)
+			count = -count;
+		order += count * 2; /* skip s/t pairs */
+		num_tris += count - 2;
+	}
+
+	if (num_tris <= 0)
+		return;
+
+	mark = Hunk_LowMark();
+	indices = (unsigned short *) Hunk_AllocName(num_tris * 3 * sizeof(unsigned short), "gpuidx");
+	texcoords = (float *) Hunk_AllocName(hdr->poseverts * 2 * sizeof(float), "gputc");
+
+	/* Second pass: triangulate and extract texcoords */
+	order = (int *)((byte *)hdr + hdr->commands);
+	vert_idx = 0;
+	vi = 0; /* index into indices array */
+
+	while (1)
+	{
+		qboolean is_fan;
+		int first_vert, prev_vert;
+
+		count = *order++;
+		if (!count)
+			break;
+		if (count < 0)
+		{
+			count = -count;
+			is_fan = true;
+		}
+		else
+			is_fan = false;
+
+		first_vert = vert_idx;
+		for (i = 0; i < count; i++)
+		{
+			texcoords[(vert_idx + i) * 2 + 0] = ((float *)order)[0];
+			texcoords[(vert_idx + i) * 2 + 1] = ((float *)order)[1];
+			order += 2;
+		}
+
+		/* Convert to triangles */
+		if (is_fan)
+		{
+			for (i = 2; i < count; i++)
+			{
+				indices[vi++] = (unsigned short)first_vert;
+				indices[vi++] = (unsigned short)(first_vert + i - 1);
+				indices[vi++] = (unsigned short)(first_vert + i);
+			}
+		}
+		else
+		{
+			for (i = 2; i < count; i++)
+			{
+				if (i & 1)
+				{
+					indices[vi++] = (unsigned short)(first_vert + i);
+					indices[vi++] = (unsigned short)(first_vert + i - 1);
+					indices[vi++] = (unsigned short)(first_vert + i - 2);
+				}
+				else
+				{
+					indices[vi++] = (unsigned short)(first_vert + i - 2);
+					indices[vi++] = (unsigned short)(first_vert + i - 1);
+					indices[vi++] = (unsigned short)(first_vert + i);
+				}
+			}
+		}
+
+		vert_idx += count;
+	}
+
+	/* Pack all pose vertex data: trivertx_t → uint (v[0] | v[1]<<8 | v[2]<<16 | ni<<24) */
+	pose_packed = (unsigned int *) Hunk_AllocName(
+		hdr->numposes * hdr->poseverts * sizeof(unsigned int), "gpupose");
+	pv = (trivertx_t *)((byte *)hdr + hdr->posedata);
+	for (i = 0; i < hdr->numposes * hdr->poseverts; i++)
+	{
+		pose_packed[i] = (unsigned int)pv[i].v[0]
+			       | ((unsigned int)pv[i].v[1] << 8)
+			       | ((unsigned int)pv[i].v[2] << 16)
+			       | ((unsigned int)pv[i].lightnormalindex << 24);
+	}
+
+	/* Create GPU objects */
+	gm = &alias_gpu_meshes[num_alias_gpu_meshes];
+	memset(gm, 0, sizeof(*gm));
+
+	glGenVertexArrays_fp(1, &gm->vao);
+	glBindVertexArray_fp(gm->vao);
+
+	/* Texcoord VBO — bound to ATTR_TEXCOORD (location 1) */
+	glGenBuffers_fp(1, &gm->vbo_tc);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_tc);
+	glBufferData_fp(GL_ARRAY_BUFFER, hdr->poseverts * 2 * sizeof(float),
+			texcoords, GL_STATIC_DRAW);
+	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
+	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+
+	/* Index buffer */
+	glGenBuffers_fp(1, &gm->ibo);
+	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
+	glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, vi * sizeof(unsigned short),
+			indices, GL_STATIC_DRAW);
+
+	glBindVertexArray_fp(0);
+
+	/* Pose SSBO */
+	glGenBuffers_fp(1, &gm->ssbo_pose);
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
+	glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+			hdr->numposes * hdr->poseverts * sizeof(unsigned int),
+			pose_packed, GL_STATIC_DRAW);
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+
+	gm->num_indices = vi;
+	gm->poseverts = hdr->poseverts;
+	gm->numposes = hdr->numposes;
+	gm->valid = true;
+
+	alias_gpu_keys[num_alias_gpu_meshes] = (int)((size_t)hdr & 0x7fffffff);
+	num_alias_gpu_meshes++;
+
+	Hunk_FreeToLowMark(mark);
 }
 

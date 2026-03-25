@@ -688,6 +688,67 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 
 /*
 =============
+GL_DrawAliasFrameGPU — AZDO path using static VBO/IBO + SSBO pose data
+=============
+*/
+static GLuint	gpu_shadedots_ssbo;
+cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
+
+static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
+				   int posenum, int prevposenum, float lerpfrac)
+{
+	alias_gpu_mesh_t *gm;
+	float shade;
+
+	gm = GL_GetAliasGPUMesh(paliashdr);
+	if (!gm)
+	{
+		/* Fallback to streaming path */
+		GL_DrawAliasFrame(e, paliashdr, posenum, prevposenum, lerpfrac);
+		return;
+	}
+
+	lastposenum = posenum;
+
+	/* Create shadedots SSBO on first use */
+	if (!gpu_shadedots_ssbo)
+	{
+		glGenBuffers_fp(1, &gpu_shadedots_ssbo);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_shadedots_ssbo);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(float),
+				NULL, GL_DYNAMIC_DRAW);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+	}
+
+	/* Upload current entity's shadedots row */
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_shadedots_ssbo);
+	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof(float), shadedots);
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+
+	/* Compute shade_light: for fullbright pass use 1.0, otherwise use shadelight */
+	shade = model_fullbright_pass ? 5.0f : shadelight;
+
+	glUseProgram_fp(gl_shader_alias_gpu.base.program);
+	GL_AliasGPU_SetUniforms(&gl_shader_alias_gpu,
+				 posenum, prevposenum, lerpfrac,
+				 paliashdr->scale, paliashdr->scale_origin,
+				 paliashdr->poseverts, shade,
+				 lightcolor, model_constant_alpha);
+
+	/* Bind model VAO + SSBOs */
+	glBindVertexArray_fp(gm->vao);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, gpu_shadedots_ssbo);
+
+	glDrawElements_fp(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
+
+	/* Restore default VAO */
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
+}
+
+/*
+=============
 Blob shadow — soft circle texture projected onto the ground plane
 =============
 */
@@ -849,11 +910,17 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 			interval = paliashdr->frames[prevframe].interval;
 			prevpose += (int)(e->lerpstart / interval) % numposes;
 		}
-		GL_DrawAliasFrame (e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
+		if (r_alias_gpu.integer)
+			GL_DrawAliasFrameGPU(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
+		else
+			GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
 	}
 	else
 	{
-		GL_DrawAliasFrame (e, paliashdr, pose, pose, 0.0f);
+		if (r_alias_gpu.integer)
+			GL_DrawAliasFrameGPU(e, paliashdr, pose, pose, 0.0f);
+		else
+			GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
 	}
 }
 
