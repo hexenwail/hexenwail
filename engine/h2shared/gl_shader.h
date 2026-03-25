@@ -30,12 +30,28 @@ typedef struct glprogram_s {
 	GLint	u_time;
 } glprogram_t;
 
+/* Extended program for GPU particle SSBO rendering */
+typedef struct {
+	glprogram_t base;       /* standard uniforms (u_mvp, u_modelview, u_fog_density, u_fog_color) */
+	GLint   u_pup;          /* r_pup billboard-up vector */
+	GLint   u_pright;       /* r_pright billboard-right vector */
+	GLint   u_vpn;          /* view forward vector (for distance-based scale) */
+	GLint   u_origin;       /* camera origin (for distance-based scale) */
+	GLint   u_ctime;        /* current cl.time (for dead particle culling) */
+} gl_particle_gpu_prog_t;
+
 extern glprogram_t	gl_shader_world;	/* textured + lightmap, fog */
 extern glprogram_t	gl_shader_alias;	/* vertex-colored, textured, fog */
 extern glprogram_t	gl_shader_2d;		/* orthographic textured quads */
 extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color */
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
+extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
+
+void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
+				     const float *pup, const float *pright,
+				     const float *vpn, const float *origin,
+				     float ctime);
 
 /* Vertex attribute locations (fixed, shared across all programs) */
 #define ATTR_POSITION	0

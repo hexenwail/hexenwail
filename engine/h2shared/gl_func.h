@@ -258,6 +258,7 @@ GL_FUNCTION_OPT(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, 
 GL_FUNCTION_OPT(void, glEnableVertexAttribArray, (GLuint))
 GL_FUNCTION_OPT(void, glDrawArrays, (GLenum, GLint, GLsizei))
 GL_FUNCTION_OPT(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
+GL_FUNCTION_OPT(void, glBindBufferBase, (GLenum, GLuint, GLuint))
 
 /* 3D texture (OpenGL 1.2+) */
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))

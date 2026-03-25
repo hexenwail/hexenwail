@@ -132,4 +132,9 @@ typedef ptrdiff_t GLintptr;
 #define GL_INFO_LOG_LENGTH			0x8B84
 #endif
 
+/* SSBO (Shader Storage Buffer Object) — OpenGL 4.3 */
+#ifndef GL_SHADER_STORAGE_BUFFER
+#define GL_SHADER_STORAGE_BUFFER		0x90D2
+#endif
+
 #endif	/* __GLHEADER_H */

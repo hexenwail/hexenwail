@@ -10,7 +10,11 @@
 
 #include "quakedef.h"
 #include "sdl_inc.h"
+#include "gl_matrix.h"
 #include "gl_shader.h"
+
+extern float	r_fog_density;
+extern float	r_fog_color[3];
 
 glprogram_t	gl_shader_world;
 glprogram_t	gl_shader_alias;
@@ -18,6 +22,7 @@ glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
 glprogram_t	gl_shader_sky;
+gl_particle_gpu_prog_t	gl_shader_particle_gpu;
 
 /* ------------------------------------------------------------------ */
 /* Shader compilation helpers                                          */
@@ -278,6 +283,76 @@ static const char spart_frag[] =
 	"    fragColor = color;\n"
 	"}\n";
 
+/* --- shader_particle_gpu: SSBO-driven billboard particles ---
+ * Vertex shader reads particle state from an SSBO (binding=0).
+ * Each particle uses 3 vertices (gl_VertexID/3 = particle index).
+ * Dead particles (die < u_ctime) become zero-area triangles. */
+static const char spart_gpu_vert[] =
+	"#version 430 core\n"
+	"\n"
+	"struct GpuParticle {\n"
+	"    vec4 pos_die;  /* xyz=position, w=die_time */\n"
+	"    vec4 color;    /* rgba, pre-converted from palette */\n"
+	"};\n"
+	"\n"
+	"layout(std430, binding = 0) readonly buffer GpuParticleBuffer {\n"
+	"    GpuParticle particles[];\n"
+	"};\n"
+	"\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform mat4 u_modelview;\n"
+	"uniform vec3 u_pup;\n"
+	"uniform vec3 u_pright;\n"
+	"uniform vec3 u_vpn;\n"
+	"uniform vec3 u_origin;\n"
+	"uniform float u_ctime;\n"
+	"uniform float u_fog_density;\n"
+	"uniform vec3 u_fog_color;\n"
+	"\n"
+	"out vec2 v_texcoord;\n"
+	"out vec4 v_color;\n"
+	"out float v_fogdist;\n"
+	"\n"
+	"/* Default particle texcoords (ptex_coord[0] from r_part.c) */\n"
+	"const vec2 ptc[3] = vec2[3](\n"
+	"    vec2(1.0, 0.0),\n"
+	"    vec2(1.0, 0.5),\n"
+	"    vec2(0.5, 0.0)\n"
+	");\n"
+	"\n"
+	"void main() {\n"
+	"    int pidx  = gl_VertexID / 3;\n"
+	"    int corner = gl_VertexID % 3;\n"
+	"    GpuParticle p = particles[pidx];\n"
+	"\n"
+	"    /* Dead particle -> degenerate (zero-area) triangle */\n"
+	"    if (p.pos_die.w < u_ctime) {\n"
+	"        gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n"
+	"        v_color     = vec4(0.0);\n"
+	"        v_texcoord  = vec2(0.0);\n"
+	"        v_fogdist   = 0.0;\n"
+	"        return;\n"
+	"    }\n"
+	"\n"
+	"    vec3 base = p.pos_die.xyz;\n"
+	"\n"
+	"    /* Distance-based scale (mirrors the CPU hack in r_part.c) */\n"
+	"    float depth = dot(base - u_origin, u_vpn);\n"
+	"    float scale = (depth < 20.0) ? 1.0 : 1.0 + depth * 0.004;\n"
+	"\n"
+	"    vec3 pos;\n"
+	"    if (corner == 0)      pos = base;\n"
+	"    else if (corner == 1) pos = base + u_pup    * scale;\n"
+	"    else                  pos = base + u_pright * scale;\n"
+	"\n"
+	"    v_texcoord = ptc[corner];\n"
+	"    v_color    = p.color;\n"
+	"\n"
+	"    vec4 eyepos = u_modelview * vec4(pos, 1.0);\n"
+	"    v_fogdist   = length(eyepos.xyz);\n"
+	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
+	"}\n";
+
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
 static const char ssky_vert[] =
 	"#version 430 core\n"
@@ -345,6 +420,63 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	return true;
 }
 
+static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
+{
+	p->base.program = GL_LoadProgram(spart_gpu_vert, spart_frag);
+	if (!p->base.program)
+	{
+		Con_Printf("Failed to load shader: particle_gpu\n");
+		return false;
+	}
+	GL_InitProgramUniforms(&p->base);
+
+	/* Look up extra uniforms */
+	p->u_pup    = glGetUniformLocation_fp(p->base.program, "u_pup");
+	p->u_pright = glGetUniformLocation_fp(p->base.program, "u_pright");
+	p->u_vpn    = glGetUniformLocation_fp(p->base.program, "u_vpn");
+	p->u_origin = glGetUniformLocation_fp(p->base.program, "u_origin");
+	p->u_ctime  = glGetUniformLocation_fp(p->base.program, "u_ctime");
+
+	/* Bind texture unit defaults */
+	glUseProgram_fp(p->base.program);
+	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
+	if (p->base.u_fog_density >= 0) glUniform1f_fp(p->base.u_fog_density, 0.0f);
+	glUseProgram_fp(0);
+
+	Con_SafePrintf("  shader 'particle_gpu' loaded (program %u)\n", p->base.program);
+	return true;
+}
+
+void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
+				  const float *pup, const float *pright,
+				  const float *vpn, const float *origin,
+				  float ctime)
+{
+	float mvp[16], mv[16];
+
+	GL_GetMVP(mvp);
+	GL_GetModelview(mv);
+
+	if (prog->base.u_mvp >= 0)
+		glUniformMatrix4fv_fp(prog->base.u_mvp, 1, GL_FALSE, mvp);
+	if (prog->base.u_modelview >= 0)
+		glUniformMatrix4fv_fp(prog->base.u_modelview, 1, GL_FALSE, mv);
+	if (prog->base.u_fog_density >= 0)
+		glUniform1f_fp(prog->base.u_fog_density, r_fog_density);
+	if (prog->base.u_fog_color >= 0)
+		glUniform3f_fp(prog->base.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (prog->u_pup >= 0)
+		glUniform3fv_fp(prog->u_pup,    1, pup);
+	if (prog->u_pright >= 0)
+		glUniform3fv_fp(prog->u_pright, 1, pright);
+	if (prog->u_vpn >= 0)
+		glUniform3fv_fp(prog->u_vpn,    1, vpn);
+	if (prog->u_origin >= 0)
+		glUniform3fv_fp(prog->u_origin, 1, origin);
+	if (prog->u_ctime >= 0)
+		glUniform1f_fp(prog->u_ctime, ctime);
+}
+
 void GL_Shaders_Init (void)
 {
 	Con_SafePrintf("Initializing shaders...\n");
@@ -355,6 +487,7 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
+	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
 
 }
 
@@ -362,11 +495,12 @@ void GL_Shaders_Shutdown (void)
 {
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
-		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky
+		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
+		&gl_shader_particle_gpu.base
 	};
 	int i;
 
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 7; i++)
 	{
 		if (progs[i]->program)
 		{

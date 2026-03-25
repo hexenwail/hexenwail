@@ -25,6 +25,9 @@
 void R_DrawParticles (void);
 void R_InitParticles (void);
 void R_ClearParticles (void);
+#ifdef GLQUAKE
+void R_GPU_Particles_Shutdown (void);
+#endif
 void R_UpdateParticles (void);
 
 void R_ParseParticleEffect (void);
