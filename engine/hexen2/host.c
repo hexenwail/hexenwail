@@ -669,6 +669,11 @@ static qboolean Host_FilterTime (float time)
 {
 	realtime += time;
 
+	// enforce minimum frame time — skip sub-millisecond frames
+	// instead of clamping, which would inflate the physics accumulator
+	if (realtime - oldrealtime < 0.001)
+		return false;
+
 	if (!cls.timedemo && host_maxfps.value > 0 &&
 	    realtime - oldrealtime < 1.0/host_maxfps.value)
 		return false;		// framerate is too high
@@ -679,11 +684,9 @@ static qboolean Host_FilterTime (float time)
 	if (host_framerate.value > 0)
 		host_frametime = host_framerate.value;
 	else
-	{	// don't allow really long or short frames
+	{	// don't allow really long frames
 		if (host_frametime > 0.1)
 			host_frametime = 0.1;
-		if (host_frametime < 0.001)
-			host_frametime = 0.001;
 	}
 
 	return true;
