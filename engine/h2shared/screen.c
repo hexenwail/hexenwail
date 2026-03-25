@@ -1391,13 +1391,15 @@ void SCR_UpdateScreen (void)
 		if (crosshair.integer && !cls.demoplayback)
 			Draw_Crosshair();
 
-		SCR_DrawRam();
-		SCR_DrawNet();
-		SCR_DrawTurtle();
-		SCR_DrawPause();
-		SCR_CheckDrawCenterString();
 		if (!cls.demoplayback)
+		{
+			SCR_DrawRam();
+			SCR_DrawNet();
+			SCR_DrawTurtle();
+			SCR_DrawPause();
 			Sbar_Draw();
+		}
+		SCR_CheckDrawCenterString();
 		SCR_DrawFPS();
 
 		Plaque_Draw(plaquemessage, false);

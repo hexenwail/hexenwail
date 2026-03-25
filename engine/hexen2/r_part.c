@@ -1468,76 +1468,12 @@ void R_DrawParticles (void)
     }
     else
     {
-        /* Billboard mode:
-         * - Standard particles  -> GPU SSBO path (no CPU billboard build)
-         * - pt_snow / pt_rain   -> ImmBegin path (special texcoords) */
-
-        /* Build GPU buffer */
-        int gpu_count = 0;
-        for (p = active_particles; p && gpu_count < GPU_MAX_PARTICLES; p = p->next)
-        {
-            gpu_particle_t *gp;
-            byte *c;
-
-            if (p->type == pt_snow || p->type == pt_rain)
-                continue;
-
-            gp = &gpu_particle_buf[gpu_count++];
-            gp->pos[0] = p->org[0];
-            gp->pos[1] = p->org[1];
-            gp->pos[2] = p->org[2];
-            gp->die    = p->die;
-
-            color = ((int)p->color) & 0x01ff;
-            if (color < 256)
-            {
-                c = (byte *)&d_8to24table[color];
-                gp->r = c[0] * (1.0f/255.0f);
-                gp->g = c[1] * (1.0f/255.0f);
-                gp->b = c[2] * (1.0f/255.0f);
-                gp->a = 1.0f;
-            }
-            else
-            {
-                c = (byte *)&d_8to24TranslucentTable[color-256];
-                gp->r = c[0] * (1.0f/255.0f);
-                gp->g = c[1] * (1.0f/255.0f);
-                gp->b = c[2] * (1.0f/255.0f);
-                gp->a = c[3] * (1.0f/255.0f);
-            }
-        }
-
-        /* GPU draw for standard particles */
-        if (gpu_count > 0 && gpu_particle_ssbo)
-        {
-            glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_particle_ssbo);
-            glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
-                               gpu_count * sizeof(gpu_particle_t), gpu_particle_buf);
-            glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
-            glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, gpu_particle_ssbo);
-
-            glUseProgram_fp(gl_shader_particle_gpu.base.program);
-            GL_ParticleGPU_SetUniforms(&gl_shader_particle_gpu,
-                                       r_pup, r_pright, vpn, r_origin,
-                                       (float)cl.time);
-
-            glBindVertexArray_fp(gpu_particle_vao);
-            glDrawArrays_fp(GL_TRIANGLES, 0, gpu_count * 3);
-            glBindVertexArray_fp(0);
-            glUseProgram_fp(0);
-
-            glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
-        }
-
-        /* ImmBegin path for snow and rain (special texcoords) */
+        /* Billboard mode: CPU-built triangles via ImmBegin */
         GL_ImmBegin();
         for (p = active_particles; p; p = p->next)
         {
             float scale;
             int i;
-
-            if (p->type != pt_snow && p->type != pt_rain)
-                continue;
 
             color = ((int)p->color) & 0x01ff;
             if (color < 256)
@@ -1572,10 +1508,7 @@ void R_DrawParticles (void)
                            p->org[1] + r_pright[1]*scale,
                            p->org[2] + r_pright[2]*scale);
         }
-        if (GL_ImmCount() > 0)
-            GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
-        else
-            GL_ImmBegin(); /* reset count if nothing drawn */
+        GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
     }
 
     GL_SetAlphaThreshold(0.01f);

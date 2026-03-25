@@ -863,8 +863,8 @@ void R_DrawWaterSurfaces (void)
 		r_wateralpha.value = 0.1;
 	if (r_wateralpha.value > 1)
 		r_wateralpha.value = 1;
-	/* Don't early-return: SURF_TRANSLUCENT liquids (e.g. *lowlight)
-	 * must always render with transparency regardless of r_wateralpha */
+	if (r_wateralpha.value == 1.0)
+		return;
 
 	glDepthMask_fp(0);
 
@@ -899,7 +899,7 @@ void R_DrawWaterSurfaces (void)
 		{
 			float alpha = R_LiquidAlpha(t);
 			if (alpha >= 1.0f)
-				alpha = 0.5f;	/* map-marked translucent: use default */
+				alpha = 0.65f;	/* map-marked translucent: slight see-through */
 			/* Sample light at first vertex for water tinting */
 			float lv = 1.0f;
 			if (s->polys && !r_fullbright.integer)
@@ -1050,9 +1050,9 @@ static void DrawTextureChains (entity_t *e)
 		}
 		else
 		{
-			if ((s->flags & SURF_DRAWTURB) &&
-			    ((s->flags & SURF_TRANSLUCENT) ||
-			     R_LiquidAlpha(t) < 1.0f))
+			if ((s->flags & SURF_DRAWTURB) && r_wateralpha.value != 1.0
+			    && ((s->flags & SURF_TRANSLUCENT) ||
+			        R_LiquidAlpha(t) < 1.0f))
 				continue;	// draw translucent water later
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||
