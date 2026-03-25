@@ -464,11 +464,18 @@ static qboolean VID_SetMode (int modenum)
 	}
 	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
 
+#ifdef __EMSCRIPTEN__
+	/* WebGL2 = OpenGL ES 3.0 */
+	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
+	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
+	SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES );
+#else
 	/* request OpenGL 4.3 compatibility profile — still have some
 	 * legacy GL state/enum usage that doesn't work in core profile */
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY );
+#endif
 
 	if (multisample)
 	{
@@ -816,7 +823,8 @@ static void GL_Init (void)
 	/* stencil buffer */
 	have_stencil = !!vid_attribs.stencil;
 
-	/* load shader and VBO function pointers */
+#ifndef __EMSCRIPTEN__
+	/* load shader and VBO function pointers (Emscripten uses direct calls) */
 	GL_LoadFunctionPointers();
 
 	/* GL 4.3 debug output — logs errors to console/qconsole.log before GPU hang */
@@ -829,6 +837,7 @@ static void GL_Init (void)
 		glDebugMessageCallback_fp(GL_DebugCallback, NULL);
 		Con_SafePrintf("GL debug output enabled\n");
 	}
+#endif
 
 	GL_Shaders_Init();
 	GL_VBO_Init();
