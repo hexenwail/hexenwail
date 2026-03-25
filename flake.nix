@@ -177,6 +177,8 @@
 
             buildInputs = with pkgsCross64; [
               windows.pthreads
+              libvorbis      # Ogg Vorbis codec
+              libogg         # Ogg container (shared by vorbis + opus)
               libxmp         # XMP tracker music codec
               opusfile       # Opus codec support
             ];
@@ -208,16 +210,13 @@
               # Bundle SDL3
               install -Dm755 ../../oslibs/windows/SDL3/lib64/SDL3.dll $out/bin/SDL3.dll
 
-              # Bundle OGG/Vorbis codec DLLs
-              for dll in ../../oslibs/windows/codecs/x64/*.dll; do
-                install -Dm755 "$dll" $out/bin/
-              done
-
-              # Bundle Opus codec DLLs (opusfile + libopus, skip libopusurl/openssl)
+              # Bundle codec DLLs from nix cross-compiled packages
+              # libogg exports as "ogg.dll" in nix meson builds
+              install -Dm755 ${pkgsCross64.libogg}/bin/libogg.dll $out/bin/ogg.dll
+              install -Dm755 ${pkgsCross64.libvorbis}/bin/libvorbis-0.dll $out/bin/
+              install -Dm755 ${pkgsCross64.libvorbis}/bin/libvorbisfile-3.dll $out/bin/
               install -Dm755 ${pkgsCross64.opusfile}/bin/libopusfile-0.dll $out/bin/
               install -Dm755 ${pkgsCross64.libopus}/bin/libopus-0.dll $out/bin/
-
-              # Bundle XMP tracker music codec DLL
               install -Dm755 ${pkgsCross64.libxmp}/bin/libxmp.dll $out/bin/
 
               # Bundle MinGW runtime DLLs if present
