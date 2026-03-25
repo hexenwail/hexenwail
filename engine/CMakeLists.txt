@@ -33,7 +33,9 @@ option(USE_CODEC_OPUS "Enable Opus codec" ON)
 #============================================================================
 # Platform Detection
 #============================================================================
-if(WIN32)
+if(EMSCRIPTEN)
+    set(TARGET_OS "web")
+elseif(WIN32)
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(TARGET_OS "win64")
         set(ARCH_DIR "x64")
@@ -60,7 +62,13 @@ else()
 endif()
 
 # Platform-specific defines
-if(WIN32)
+if(EMSCRIPTEN)
+    add_definitions(-DGLQUAKE -DSDLQUAKE -DNO_SPLASHES)
+    set(USE_ALSA OFF)
+    set(USE_CODEC_FLAC OFF)
+    set(USE_CODEC_OPUS OFF)
+    set(USE_CODEC_XMP OFF)
+elseif(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN -DGLQUAKE -DSDLQUAKE -DGL_DLSYM -DNO_SPLASHES)
     set(USE_ALSA OFF)
 elseif(UNIX)
@@ -315,7 +323,27 @@ endif()
 #============================================================================
 # Platform-Specific Sources
 #============================================================================
-if(WIN32)
+if(EMSCRIPTEN)
+    # Video / Input / System — same SDL3 backends as Unix
+    list(APPEND PLATFORM_SOURCES
+        ${COMMONDIR}/gl_vidsdl.c
+        ${COMMONDIR}/in_sdl.c
+        ${ENGINE_TOP}/hexen2/sys_unix.c
+        ${COMMONDIR}/sys_sdl.c
+    )
+
+    # Network — loopback only (no raw sockets in WASM)
+    list(APPEND PLATFORM_SOURCES
+        ${ENGINE_TOP}/hexen2/net_bsd.c
+        ${ENGINE_TOP}/hexen2/net_udp.c
+    )
+
+    # No MIDI, no CD audio
+    list(APPEND PLATFORM_SOURCES ${COMMONDIR}/midi_nul.c)
+    add_definitions(-D_NO_MIDIDRV)
+    list(APPEND PLATFORM_SOURCES ${COMMONDIR}/cd_sdl.c)
+
+elseif(WIN32)
     # Video (SDL3 backend, same as Unix)
     list(APPEND PLATFORM_SOURCES ${COMMONDIR}/gl_vidsdl.c)
 
@@ -403,7 +431,26 @@ set(ALL_SOURCES
 )
 
 # Create the executable
-if(WIN32)
+if(EMSCRIPTEN)
+    set(EXECUTABLE_NAME hexenwail)
+    add_executable(${EXECUTABLE_NAME} ${ALL_SOURCES})
+    # Emscripten link flags: WebGL2, memory growth, shell template
+    target_link_options(${EXECUTABLE_NAME} PRIVATE
+        -sFULL_ES3=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=67108864
+        -sSTACK_SIZE=1048576
+        -sUSE_SDL=3
+        --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
+    )
+    # Preload game data if specified
+    if(GAME_DATA_DIR)
+        target_link_options(${EXECUTABLE_NAME} PRIVATE
+            --preload-file=${GAME_DATA_DIR}@/data1
+        )
+    endif()
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES SUFFIX ".html")
+elseif(WIN32)
     set(EXECUTABLE_NAME glh2)
     add_executable(${EXECUTABLE_NAME} WIN32 ${ALL_SOURCES} ${RESOURCES})
 else()
@@ -419,7 +466,10 @@ target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${SDL_LIBRARY})
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL_INCLUDE_DIR})
 
 # Platform-specific linking
-if(WIN32)
+if(EMSCRIPTEN)
+    # Emscripten links GL/SDL statically — no extra libraries needed
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE m)
+elseif(WIN32)
     # Windows libraries
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE
         opengl32
