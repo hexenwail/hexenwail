@@ -1,12 +1,13 @@
 # Hexen II: Hexenwail
 
-![New worlds await! (Wheel of Karma, by Inky)](docs/screenshot1.png)
+![Screenshot](docs/screenshot1.png)
+*New worlds await!* ([Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey), by Inky)
 
-The Quake community took sezero's [QuakeSpasm](https://github.com/sezero/quakespasm) and pushed its OpenGL rendering into the modern era with [Ironwail](https://github.com/andrei-drexler/ironwail). Hexenwail does the same for Hexen II.
+Just as [Ironwail](https://github.com/andrei-drexler/ironwail) took sezero's [QuakeSpasm](https://github.com/sezero/quakespasm) and modernized its renderer, Hexenwail does the same for Hexen II.
 
-Built on sezero's [Hammer of Thyrion](https://github.com/sezero/uhexen2) — the definitive Hexen II engine — with contributions from Shanjaq, Inky, and many more.
+Raven Software released the Hexen II source code in 2000. [Hammer of Thyrion](http://uhexen2.sourceforge.net/) (2004–2018) by O. Sezer became the definitive cross-platform engine. [uHexen2](https://github.com/sezero/uhexen2) continued the work with graphical enhancements and mod support — notably Shanjaq and Inky's contributions. Hexenwail (2025) began when [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) shipped without a buildable Linux client, and grew into a full GL 4.3 modernization.
 
-A modern GL 4.3 fork for Windows and Linux: SDL3, GLSL shaders, gamepad support, and a clean codebase.
+A modern fork for Windows and Linux: SDL3, GLSL shaders, gamepad support, and a clean codebase.
 
 ## Features
 
