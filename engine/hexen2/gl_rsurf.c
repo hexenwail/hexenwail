@@ -895,28 +895,7 @@ void R_DrawWaterSurfaces (void)
 			continue;
 		}
 
-		if (s->flags & SURF_TRANSLUCENT)
-		{
-			float alpha = R_LiquidAlpha(t);
-			if (alpha >= 1.0f)
-				alpha = 0.65f;	/* map-marked translucent: slight see-through */
-			/* Sample light at first vertex for water tinting */
-			float lv = 1.0f;
-			if (s->polys && !r_fullbright.integer)
-			{
-				extern vec3_t lightcolor;
-				float *v = s->polys->verts[0];
-				vec3_t mid;
-				mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
-				R_LightPointColor(mid);
-				lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
-				if (lv > 1.0f) lv = 1.0f;
-				if (lv < 0.15f) lv = 0.15f;
-			}
-			GL_ImmColor4f (lv, lv, lv, alpha);
-		}
-		else
-			GL_ImmColor4f (1,1,1, R_LiquidAlpha(t));
+		GL_ImmColor4f (1,1,1, R_LiquidAlpha(t));
 
 		// set modulate mode explicitly
 		GL_Bind (t->gl_texturenum);
