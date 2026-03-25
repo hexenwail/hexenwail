@@ -164,7 +164,7 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 
 	if (!fnum || fnum >= progs->numfunctions)
 	{
-		if (*sv_globals.self)
+		if (sv_globals.self && *sv_globals.self)
 		{
 			ED_Print(PROG_TO_EDICT(*sv_globals.self));
 		}
@@ -575,6 +575,10 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 	  }	break;
 
 	case OP_STATE:
+		if (!sv_globals.self)
+		{	pr_xstatement = st - pr_statements;
+			PR_RunError("OP_STATE in client progs");
+		}
 		ed = PROG_TO_EDICT(*sv_globals.self);
 /* Id 1.07 changes
 #ifdef FPS_20
@@ -590,6 +594,10 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 
 	case OP_CSTATE:	// Cycle state
 	  {	int startFrame, endFrame;
+		if (!sv_globals.self)
+		{	pr_xstatement = st - pr_statements;
+			PR_RunError("OP_CSTATE in client progs");
+		}
 		ed = PROG_TO_EDICT(*sv_globals.self);
 		ed->v.nextthink = *sv_globals.time + HX_FRAME_TIME;
 		ed->v.think = pr_xfunction - pr_functions;
@@ -632,6 +640,10 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 
 	case OP_CWSTATE:	// Cycle weapon state
 	  {	int startFrame, endFrame;
+		if (!sv_globals.self)
+		{	pr_xstatement = st - pr_statements;
+			PR_RunError("OP_CWSTATE in client progs");
+		}
 		ed = PROG_TO_EDICT(*sv_globals.self);
 		ed->v.nextthink = *sv_globals.time + HX_FRAME_TIME;
 		ed->v.think = pr_xfunction - pr_functions;
@@ -675,6 +687,10 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 	  }	break;
 
 	case OP_THINKTIME:
+		if (!sv_globals.time)
+		{	pr_xstatement = st - pr_statements;
+			PR_RunError("OP_THINKTIME in client progs");
+		}
 		ed = PROG_TO_EDICT(a->edict);
 #ifdef PARANOID
 		NUM_FOR_EDICT(ed);	// Make sure it's in range

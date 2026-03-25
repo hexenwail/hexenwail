@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#include "cl_csqc.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -72,6 +73,8 @@ CL_ClearState
 void CL_ClearState (void)
 {
 	int	i;
+
+	CL_ShutdownCSProgs ();
 
 	if (!sv.active)
 		Host_ClearMemory ();
@@ -242,6 +245,7 @@ void CL_SignonReply (void)
 
 	case 4:
 		SCR_EndLoadingPlaque ();	// allow normal screen updates
+		CL_LoadCSProgs ();
 		break;
 	}
 }
@@ -1029,6 +1033,8 @@ void CL_Init (void)
 	CL_InitInput ();
 	CL_InitTEnts ();
 	CL_InitEffects();
+	CSQC_RegisterCvars ();
+	CSQC_InitBuiltins ();
 
 //
 // register our commands

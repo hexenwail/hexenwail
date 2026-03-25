@@ -57,6 +57,8 @@ typedef struct edict_s
 
 //============================================================================
 
+typedef void (*builtin_t) (void);
+
 extern	dprograms_t	*progs;
 extern	dfunction_t	*pr_functions;
 extern	dstatement_t	*pr_statements;
@@ -66,6 +68,40 @@ extern	float		*pr_globals;	/* same as sv_globals */
 extern	int		pr_edict_size;	/* in bytes */
 
 extern	qboolean	is_progs_v6;
+
+
+/* ---- VM state snapshot (for CSQC VM switching) ---- */
+typedef struct pr_vmstate_s
+{
+	dprograms_t	*progs;
+	dfunction_t	*functions;
+	dstatement_t	*statements;
+	float		*globals;
+	sv_globals_t	sv_globals;
+	int		edict_size;
+	qboolean	is_v6;
+	unsigned short	crc;
+	/* string table */
+	char		*strings;
+	int		stringssize;
+	const char	**knownstrings;
+	int		maxknownstrings;
+	int		numknownstrings;
+	/* defs */
+	ddef_t		*fielddefs;
+	ddef_t		*globaldefs;
+	/* builtins */
+	const builtin_t	*builtins;
+	int		numbuiltins;
+	/* execution context */
+	dfunction_t	*xfunction;
+	int		xstatement;
+	int		argc;
+	qboolean	trace;
+} pr_vmstate_t;
+
+void PR_SaveVMState (pr_vmstate_t *state);
+void PR_RestoreVMState (const pr_vmstate_t *state);
 
 
 /* If USE_MULTIPLE_PROGS is defined as 1, Hexen II will look for a file
@@ -136,9 +172,8 @@ int NUM_FOR_EDICT(edict_t*);
 #define	E_VECTOR(e,o)		(&((float*)&e->v)[o])
 #define	E_STRING(e,o)		(PR_GetString(*(string_t *)&((float*)&e->v)[o]))
 
-typedef void (*builtin_t) (void);
 extern const builtin_t *pr_builtins;
-extern const int pr_numbuiltins;
+extern int pr_numbuiltins;
 
 extern	int		pr_argc;
 

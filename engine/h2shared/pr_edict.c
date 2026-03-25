@@ -2225,6 +2225,64 @@ void PR_Init (void)
 #endif
 }
 
+/*
+==================
+PR_SaveVMState / PR_RestoreVMState
+
+Save and restore all progs VM state for CSQC VM switching.
+This allows a second QC VM to run without disturbing the server VM.
+==================
+*/
+void PR_SaveVMState (pr_vmstate_t *state)
+{
+	state->progs = progs;
+	state->functions = pr_functions;
+	state->statements = pr_statements;
+	state->globals = pr_globals;
+	state->sv_globals = sv_globals;
+	state->edict_size = pr_edict_size;
+	state->is_v6 = is_progs_v6;
+	state->crc = pr_crc;
+	state->strings = pr_strings;
+	state->stringssize = pr_stringssize;
+	state->knownstrings = pr_knownstrings;
+	state->maxknownstrings = pr_maxknownstrings;
+	state->numknownstrings = pr_numknownstrings;
+	state->fielddefs = pr_fielddefs;
+	state->globaldefs = pr_globaldefs;
+	state->builtins = pr_builtins;
+	state->numbuiltins = pr_numbuiltins;
+	state->xfunction = pr_xfunction;
+	state->xstatement = pr_xstatement;
+	state->argc = pr_argc;
+	state->trace = pr_trace;
+}
+
+void PR_RestoreVMState (const pr_vmstate_t *state)
+{
+	progs = state->progs;
+	pr_functions = state->functions;
+	pr_statements = state->statements;
+	pr_globals = state->globals;
+	sv_globals = state->sv_globals;
+	pr_edict_size = state->edict_size;
+	is_progs_v6 = state->is_v6;
+	pr_crc = state->crc;
+	pr_strings = state->strings;
+	pr_stringssize = state->stringssize;
+	pr_knownstrings = state->knownstrings;
+	pr_maxknownstrings = state->maxknownstrings;
+	pr_numknownstrings = state->numknownstrings;
+	pr_fielddefs = state->fielddefs;
+	pr_globaldefs = state->globaldefs;
+	pr_builtins = state->builtins;
+	pr_numbuiltins = state->numbuiltins;
+	pr_xfunction = state->xfunction;
+	pr_xstatement = state->xstatement;
+	pr_argc = state->argc;
+	pr_trace = state->trace;
+}
+
 //===========================================================================
 
 

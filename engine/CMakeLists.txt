@@ -198,6 +198,8 @@ set(CLIENT_SOURCES
     ${ENGINE_TOP}/hexen2/sbar.c
     ${ENGINE_TOP}/hexen2/view.c
     ${ENGINE_TOP}/hexen2/chase.c
+    ${ENGINE_TOP}/hexen2/cl_csqc.c
+    ${COMMONDIR}/pr_csqc.c
 )
 
 # Server and common sources
