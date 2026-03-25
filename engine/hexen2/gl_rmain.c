@@ -728,12 +728,26 @@ static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
 	/* Compute shade_light: for fullbright pass use 1.0, otherwise use shadelight */
 	shade = model_fullbright_pass ? 5.0f : shadelight;
 
-	glUseProgram_fp(gl_shader_alias_gpu.base.program);
-	GL_AliasGPU_SetUniforms(&gl_shader_alias_gpu,
-				 posenum, prevposenum, lerpfrac,
-				 paliashdr->scale, paliashdr->scale_origin,
-				 paliashdr->poseverts, shade,
-				 lightcolor, model_constant_alpha);
+	/* Apply ColorShade tint (freeze = ice-blue, etc.) */
+	{
+		vec3_t tinted_color;
+		byte cs = e->colorshade;
+		if (cs)
+		{
+			tinted_color[0] = lightcolor[0] * RTint[cs];
+			tinted_color[1] = lightcolor[1] * GTint[cs];
+			tinted_color[2] = lightcolor[2] * BTint[cs];
+		}
+		else
+			VectorCopy(lightcolor, tinted_color);
+
+		glUseProgram_fp(gl_shader_alias_gpu.base.program);
+		GL_AliasGPU_SetUniforms(&gl_shader_alias_gpu,
+					 posenum, prevposenum, lerpfrac,
+					 paliashdr->scale, paliashdr->scale_origin,
+					 paliashdr->poseverts, shade,
+					 tinted_color, model_constant_alpha);
+	}
 
 	/* Bind model VAO + SSBOs */
 	glBindVertexArray_fp(gm->vao);
