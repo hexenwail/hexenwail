@@ -25,6 +25,7 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
+#include "gl_postprocess.h"
 
 int		gl_lightmap_format = GL_RGBA;
 cvar_t		gl_lightmapfmt = {"gl_lightmapfmt", "GL_RGBA", CVAR_NONE};
@@ -412,7 +413,7 @@ static void DrawGLWaterPoly (glpoly_t *p)
 	{
 		GL_ImmTexCoord2f (v[3], v[4]);
 
-		if (r_waterwarp.integer)
+		if (r_waterwarp.integer && !GL_PostProcess_Active())
 		{
 			nv[0] = v[0] + 8*sin(v[1]*0.05+realtime)*sin(v[2]*0.05+realtime);
 			nv[1] = v[1] + 8*sin(v[0]*0.05+realtime)*sin(v[2]*0.05+realtime);
@@ -441,7 +442,7 @@ static void DrawGLWaterPolyMTexLM (glpoly_t *p)
 		GL_ImmTexCoord2f (v[3], v[4]);
 		GL_ImmLMCoord2f (v[5], v[6]);
 
-		if (r_waterwarp.integer)
+		if (r_waterwarp.integer && !GL_PostProcess_Active())
 		{
 			nv[0] = v[0] + 8*sin(v[1]*0.05+realtime)*sin(v[2]*0.05+realtime);
 			nv[1] = v[1] + 8*sin(v[0]*0.05+realtime)*sin(v[2]*0.05+realtime);

@@ -64,6 +64,7 @@ static qboolean	pp_initialized;
 static qboolean	pp_active;		/* true when scene is being rendered to FBO this frame */
 static qboolean	pp_native_active;	/* true when End3D transferred 3D → composite FBO; EndFrame skips warp/blur */
 static float	pp_prev_yaw, pp_prev_pitch;	/* view angle tracking for motionblur delta */
+static vec3_t	pp_prev_origin;			/* position tracking for motionblur delta */
 static int	pp_saved_glwidth, pp_saved_glheight;	/* original viewport dims */
 
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
@@ -709,6 +710,19 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 		float pitch = cl.viewangles[0];
 		float dy = (yaw   - pp_prev_yaw)   * 0.002f;
 		float dp = (pitch - pp_prev_pitch) * 0.002f;
+
+		/* position-based velocity: project movement onto screen axes */
+		{
+			vec3_t delta;
+			float move_h, move_v;
+			VectorSubtract(r_origin, pp_prev_origin, delta);
+			move_h = DotProduct(delta, vright) * 0.0004f;
+			move_v = DotProduct(delta, vup)    * 0.0004f;
+			dy += move_h;
+			dp += move_v;
+			VectorCopy(r_origin, pp_prev_origin);
+		}
+
 		if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
 		if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
 		glUniform1f_fp(pp_loc_motionblur, blur);
@@ -1026,6 +1040,19 @@ apply_shader:
 			blur = Cvar_VariableValue("r_motionblur");
 			dy = (yaw   - pp_prev_yaw)   * 0.0005f;
 			dp = (pitch - pp_prev_pitch) * 0.0005f;
+
+			/* position-based velocity: project movement onto screen axes */
+			{
+				vec3_t delta;
+				float move_h, move_v;
+				VectorSubtract(r_origin, pp_prev_origin, delta);
+				move_h = DotProduct(delta, vright) * 0.0001f;
+				move_v = DotProduct(delta, vup)    * 0.0001f;
+				dy += move_h;
+				dp += move_v;
+				VectorCopy(r_origin, pp_prev_origin);
+			}
+
 			if (dy >  0.03f) dy =  0.03f; else if (dy < -0.03f) dy = -0.03f;
 			if (dp >  0.03f) dp =  0.03f; else if (dp < -0.03f) dp = -0.03f;
 			pp_prev_yaw   = yaw;
