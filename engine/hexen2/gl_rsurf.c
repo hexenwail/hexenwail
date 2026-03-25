@@ -888,7 +888,13 @@ void R_DrawWaterSurfaces (void)
 		if (!(s->flags & SURF_DRAWTURB))
 			continue;
 
-		//if ((s->flags & SURF_DRAWTURB) && (s->flags & SURF_TRANSLUCENT))
+		/* skip liquids that were drawn opaque in the main pass */
+		if (R_LiquidAlpha(t) >= 1.0f)
+		{
+			t->texturechain = NULL;
+			continue;
+		}
+
 		if (s->flags & SURF_TRANSLUCENT)
 		{
 			float alpha = R_LiquidAlpha(t);
@@ -1042,7 +1048,8 @@ static void DrawTextureChains (entity_t *e)
 		}
 		else
 		{
-			if ((s->flags & SURF_DRAWTURB) && r_wateralpha.value != 1.0)
+			if ((s->flags & SURF_DRAWTURB) && r_wateralpha.value != 1.0
+			    && R_LiquidAlpha(t) < 1.0f)
 				continue;	// draw translucent water later
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||

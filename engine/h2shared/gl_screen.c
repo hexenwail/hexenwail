@@ -99,6 +99,7 @@ cvar_t		scr_contrans = {"contrans", "0", CVAR_ARCHIVE};
 static	cvar_t	scr_conspeed = {"scr_conspeed", "300", CVAR_NONE};
 static	cvar_t	scr_centertime = {"scr_centertime", "4", CVAR_NONE};
 static	cvar_t	con_logcenterprint = {"con_logcenterprint", "1", CVAR_ARCHIVE};
+static	cvar_t	cl_showcrouchmsg = {"cl_showcrouchmsg", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
@@ -244,6 +245,9 @@ for a few moments
 */
 void SCR_CenterPrint (const char *str)
 {
+	if (!cl_showcrouchmsg.integer && strstr(str, "No room to stand up here"))
+		return;
+
 	strncpy (scr_centerstring, str, sizeof(scr_centerstring)-1);
 	scr_centertime_off = scr_centertime.value;
 
@@ -519,6 +523,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_zoomfov);
 	Cvar_RegisterVariable (&scr_zoomspeed);
 	Cvar_RegisterVariable (&con_logcenterprint);
+	Cvar_RegisterVariable (&cl_showcrouchmsg);
 	Cvar_RegisterVariable (&scr_contrans);
 	Cvar_RegisterVariable (&scr_conspeed);
 	Cvar_RegisterVariable (&scr_showram);
