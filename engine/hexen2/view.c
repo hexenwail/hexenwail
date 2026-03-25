@@ -477,11 +477,11 @@ void V_SetContentsColor (int contents)
 			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 50;
 			cl.cshifts[CSHIFT_CONTENTS].percent = 128;
 			break;
-		case 3: /* clear (no tint) */
-			cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 0;
-			cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 0;
-			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 0;
-			cl.cshifts[CSHIFT_CONTENTS].percent = 0;
+		case 3: /* clear (minimal tint) */
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 1;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 1;
+			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 1;
+			cl.cshifts[CSHIFT_CONTENTS].percent = 1;
 			break;
 		default: /* classic brown */
 			cl.cshifts[CSHIFT_CONTENTS] = cshift_water;
