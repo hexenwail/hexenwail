@@ -159,6 +159,8 @@ You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pa
 
 To launch a mod with portals data included: `glhexen2 -mod <modname>`
 
+**Steam Deck:** Add Hexenwail to Steam, then right-click it → Properties → Controller → set the override to **Gamepad** (or "Gamepad with Joystick Trackpad"). The default Desktop layout emulates keyboard input instead of passing the controller through to SDL.
+
 ## License
 
 GPL-2.0-or-later. See [COPYING](COPYING).
