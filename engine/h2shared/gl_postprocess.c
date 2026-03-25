@@ -686,6 +686,8 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	glBindTexture_fp(GL_TEXTURE_2D, src_tex);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	glUseProgram_fp(pp_program);
 	if (pp_loc_mvp >= 0)
@@ -962,6 +964,8 @@ apply_shader:
 	glBindTexture_fp(GL_TEXTURE_2D, blit_tex);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	/* bind palette LUT on texture unit 1 if softemu is active */
 	if ((int)r_softemu.value > 0 && pp_lut_built)
