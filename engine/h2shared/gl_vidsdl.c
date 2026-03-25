@@ -1093,6 +1093,7 @@ static void VID_ChangeVideoMode (int newmode)
 	// Shut down GPU resources before destroying GL context
 	GL_PostProcess_Shutdown();
 	GL_VBO_Shutdown();
+	R_GPU_Particles_Shutdown();
 	GL_Shaders_Shutdown();
 
 	// Unload all textures and reset texture counts

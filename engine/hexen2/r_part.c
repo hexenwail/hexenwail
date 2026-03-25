@@ -23,6 +23,52 @@
 #ifdef GLQUAKE
 #include "gl_shader.h"
 #include "gl_vbo.h"
+#include "gl_matrix.h"
+
+/* ------------------------------------------------------------------ */
+/* GPU particle SSBO rendering                                         */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    float   pos[3];
+    float   die;
+    float   r, g, b, a;
+} gpu_particle_t;
+
+#define GPU_MAX_PARTICLES   32768
+
+static gpu_particle_t   gpu_particle_buf[GPU_MAX_PARTICLES];
+static GLuint           gpu_particle_ssbo;
+static GLuint           gpu_particle_vao;
+
+static void R_GPU_Particles_Init (void)
+{
+    glGenBuffers_fp(1, &gpu_particle_ssbo);
+    glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_particle_ssbo);
+    glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+                    GPU_MAX_PARTICLES * sizeof(gpu_particle_t),
+                    NULL, GL_DYNAMIC_DRAW);
+    glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+
+    /* Empty VAO -- vertex shader reads from SSBO, no vertex attributes */
+    glGenVertexArrays_fp(1, &gpu_particle_vao);
+
+    Con_SafePrintf("GPU particles: SSBO ready (%d slots, %u KB)\n",
+                   GPU_MAX_PARTICLES,
+                   (unsigned)(GPU_MAX_PARTICLES * sizeof(gpu_particle_t) / 1024));
+}
+
+void R_GPU_Particles_Shutdown (void)
+{
+    if (gpu_particle_ssbo) {
+        glDeleteBuffers_fp(1, &gpu_particle_ssbo);
+        gpu_particle_ssbo = 0;
+    }
+    if (gpu_particle_vao) {
+        glDeleteVertexArrays_fp(1, &gpu_particle_vao);
+        gpu_particle_vao = 0;
+    }
+}
 #endif
 
 
@@ -35,7 +81,7 @@
 #define	SFL_64			64
 #define	SFL_128			128
 
-#define	MAX_PARTICLES		7000	// default max # of particles at one time
+#define	MAX_PARTICLES		32768	// default max # of particles at one time
 #define	ABSOLUTE_MIN_PARTICLES	512	// no fewer than this no matter what's
 					// on the command line
 
@@ -107,6 +153,9 @@ void R_InitParticles (void)
 	//JFM: snow test
 	Cvar_RegisterVariable (&snow_flurry);
 	Cvar_RegisterVariable (&snow_active);
+#ifdef GLQUAKE
+	R_GPU_Particles_Init();
+#endif
 }
 
 
@@ -1385,76 +1434,152 @@ static const float ptex_coord[4][3][2] =
 
 void R_DrawParticles (void)
 {
-	int		i, color;
-	particle_t	*p;
-	float		scale;
-	qboolean	square = !gl_particles.integer;
-#define	SCALE_BASE	((p->type == pt_snow) ? p->count/10 : 1)
+    particle_t      *p;
+    int             color;
+    qboolean        square = !gl_particles.integer;
+#define SCALE_BASE  ((p->type == pt_snow) ? p->count/10 : 1)
 
-	GL_Bind(particletexture);
-	glEnable_fp (GL_BLEND);
-	GL_SetAlphaThreshold(0.0f);
+    if (!active_particles)
+        return;
 
-	if (square)
-		glPointSize(2.0f);
+    GL_Bind(particletexture);
+    glEnable_fp(GL_BLEND);
+    GL_SetAlphaThreshold(0.0f);
 
-	GL_ImmBegin();
+    VectorScale(vup, 1.5, r_pup);
+    VectorScale(vright, 1.5, r_pright);
 
-	VectorScale (vup, 1.5, r_pup);
-	VectorScale (vright, 1.5, r_pright);
+    if (square)
+    {
+        /* Square/point mode: use ImmBegin for all particles */
+        glPointSize(2.0f);
+        GL_ImmBegin();
+        for (p = active_particles; p; p = p->next)
+        {
+            color = ((int)p->color) & 0x01ff;
+            if (color < 256)
+                GL_ImmColor3ubv((byte *)&d_8to24table[color]);
+            else
+                GL_ImmColor4ubv((byte *)&d_8to24TranslucentTable[color-256]);
+            GL_ImmTexCoord2f(0.5f, 0.5f);
+            GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
+        }
+        GL_ImmEnd(GL_POINTS, &gl_shader_particle);
+    }
+    else
+    {
+        /* Billboard mode:
+         * - Standard particles  -> GPU SSBO path (no CPU billboard build)
+         * - pt_snow / pt_rain   -> ImmBegin path (special texcoords) */
 
-	for (p = active_particles ; p ; p = p->next)
-	{
-	/* clamp color to 0-511: particle->type 10 and 11 (pt_c_explode
-	 * and pt_c_explode2, e.g. Crusader's ice particles hitting a
-	 * wall) lead to negative values, because R_UpdateParticles ()
-	 * decrements their color against time. */
-		color = ((int)p->color) & 0x01ff;
-		if (color < 256)
-			GL_ImmColor3ubv ((byte *)&d_8to24table[color]);
-		else
-			GL_ImmColor4ubv ((byte *)&d_8to24TranslucentTable[color-256]);
+        /* Build GPU buffer */
+        int gpu_count = 0;
+        for (p = active_particles; p && gpu_count < GPU_MAX_PARTICLES; p = p->next)
+        {
+            gpu_particle_t *gp;
+            byte *c;
 
-		if (square)
-		{
-			GL_ImmTexCoord2f(0.5f, 0.5f);	/* center of particle texture (opaque) */
-			GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
-		}
-		else
-		{
-			// hack a scale up to keep particles from disapearing
-			scale = (p->org[0] - r_origin[0])*vpn[0] +
-				(p->org[1] - r_origin[1])*vpn[1] +
-				(p->org[2] - r_origin[2])*vpn[2];
-			if (scale < 20)
-				scale = SCALE_BASE;
-			else
-				scale = SCALE_BASE + scale * 0.004;
+            if (p->type == pt_snow || p->type == pt_rain)
+                continue;
 
-			// setup texture coordinates
-			i = 0;
-			if (p->type == pt_snow)
-			{
-				if (p->count >= 69)
-					i = 3;	// happy snow!
-				else if (p->count >= 40)
-					i = 2;
-				else if (p->count >= 30)
-					i = 1;
-			}
+            gp = &gpu_particle_buf[gpu_count++];
+            gp->pos[0] = p->org[0];
+            gp->pos[1] = p->org[1];
+            gp->pos[2] = p->org[2];
+            gp->die    = p->die;
 
-			GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
-			GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
-			GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
-			GL_ImmVertex3f(p->org[0] + r_pup[0]*scale, p->org[1] + r_pup[1]*scale, p->org[2] + r_pup[2]*scale);
-			GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
-			GL_ImmVertex3f(p->org[0] + r_pright[0]*scale, p->org[1] + r_pright[1]*scale, p->org[2] + r_pright[2]*scale);
-		}
-	}
+            color = ((int)p->color) & 0x01ff;
+            if (color < 256)
+            {
+                c = (byte *)&d_8to24table[color];
+                gp->r = c[0] * (1.0f/255.0f);
+                gp->g = c[1] * (1.0f/255.0f);
+                gp->b = c[2] * (1.0f/255.0f);
+                gp->a = 1.0f;
+            }
+            else
+            {
+                c = (byte *)&d_8to24TranslucentTable[color-256];
+                gp->r = c[0] * (1.0f/255.0f);
+                gp->g = c[1] * (1.0f/255.0f);
+                gp->b = c[2] * (1.0f/255.0f);
+                gp->a = c[3] * (1.0f/255.0f);
+            }
+        }
 
-	GL_ImmEnd(square ? GL_POINTS : GL_TRIANGLES, &gl_shader_particle);
-	GL_SetAlphaThreshold(0.01f);
-	glDisable_fp (GL_BLEND);
+        /* GPU draw for standard particles */
+        if (gpu_count > 0)
+        {
+            glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_particle_ssbo);
+            glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
+                               gpu_count * sizeof(gpu_particle_t), gpu_particle_buf);
+            glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+            glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, gpu_particle_ssbo);
+
+            glUseProgram_fp(gl_shader_particle_gpu.base.program);
+            GL_ParticleGPU_SetUniforms(&gl_shader_particle_gpu,
+                                       r_pup, r_pright, vpn, r_origin,
+                                       (float)cl.time);
+
+            glBindVertexArray_fp(gpu_particle_vao);
+            glDrawArrays_fp(GL_TRIANGLES, 0, gpu_count * 3);
+            glBindVertexArray_fp(0);
+            glUseProgram_fp(0);
+
+            glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
+        }
+
+        /* ImmBegin path for snow and rain (special texcoords) */
+        GL_ImmBegin();
+        for (p = active_particles; p; p = p->next)
+        {
+            float scale;
+            int i;
+
+            if (p->type != pt_snow && p->type != pt_rain)
+                continue;
+
+            color = ((int)p->color) & 0x01ff;
+            if (color < 256)
+                GL_ImmColor3ubv((byte *)&d_8to24table[color]);
+            else
+                GL_ImmColor4ubv((byte *)&d_8to24TranslucentTable[color-256]);
+
+            scale = (p->org[0] - r_origin[0])*vpn[0] +
+                    (p->org[1] - r_origin[1])*vpn[1] +
+                    (p->org[2] - r_origin[2])*vpn[2];
+            if (scale < 20)
+                scale = SCALE_BASE;
+            else
+                scale = SCALE_BASE + scale * 0.004;
+
+            i = 0;
+            if (p->type == pt_snow)
+            {
+                if (p->count >= 69)      i = 3;
+                else if (p->count >= 40) i = 2;
+                else if (p->count >= 30) i = 1;
+            }
+
+            GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
+            GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
+            GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
+            GL_ImmVertex3f(p->org[0] + r_pup[0]*scale,
+                           p->org[1] + r_pup[1]*scale,
+                           p->org[2] + r_pup[2]*scale);
+            GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
+            GL_ImmVertex3f(p->org[0] + r_pright[0]*scale,
+                           p->org[1] + r_pright[1]*scale,
+                           p->org[2] + r_pright[2]*scale);
+        }
+        if (GL_ImmCount() > 0)
+            GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+        else
+            GL_ImmBegin(); /* reset count if nothing drawn */
+    }
+
+    GL_SetAlphaThreshold(0.01f);
+    glDisable_fp(GL_BLEND);
 }
 
 #else	/* !GLQUAKE */
