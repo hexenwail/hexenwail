@@ -43,6 +43,7 @@ unsigned int	SHIFT_a;
 qboolean	draw_reinit = false;
 
 static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
+static cvar_t	r_embeddedmipmaps = {"r_embeddedmipmaps", "0", CVAR_ARCHIVE};
 static cvar_t	gl_constretch = {"gl_constretch", "0", CVAR_ARCHIVE};
 static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
 cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
@@ -510,6 +511,7 @@ void Draw_Init (void)
 	if (!draw_reinit)
 	{
 		Cvar_RegisterVariable (&gl_picmip);
+		Cvar_RegisterVariable (&r_embeddedmipmaps);
 		Cvar_RegisterVariable (&gl_constretch);
 		gl_texturemode.string = gl_texmodes[gl_filter_idx].name;
 		Cvar_RegisterVariable (&gl_texturemode);
@@ -1741,6 +1743,80 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 
 /*
 ===============
+GL_Upload8_EmbeddedMips
+
+Upload a BSP texture using its embedded mip levels (mip0-mip3) instead
+of regenerating mipmaps via box filter.  Only used for simple (non-alpha)
+indexed textures.  Remaining levels below mip3 are box-filtered as usual.
+===============
+*/
+static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
+{
+	int		samples, m, i, ms, gl_level, start_mip;
+	int		cur_w, cur_h;
+	byte		*mip_ptr;
+	unsigned int	*conv;
+	int		mark;
+
+	samples = (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format;
+	start_mip = gl_picmip.integer;
+	if (start_mip < 0) start_mip = 0;
+	if (start_mip > 3) start_mip = 3;
+
+	/* walk to starting mip data pointer and dimensions */
+	mip_ptr = data;
+	cur_w = glt->width;
+	cur_h = glt->height;
+	for (m = 0; m < start_mip; m++)
+	{
+		mip_ptr += cur_w * cur_h;
+		if (cur_w > 1) cur_w >>= 1;
+		if (cur_h > 1) cur_h >>= 1;
+	}
+
+	mark = Hunk_LowMark();
+	conv = (unsigned int *) Hunk_AllocName(cur_w * cur_h * sizeof(unsigned int), "emip");
+	gl_level = 0;
+
+	/* upload embedded BSP mip levels */
+	for (m = start_mip; m < MIPLEVELS; m++)
+	{
+		ms = cur_w * cur_h;
+		for (i = 0; i < ms; i++)
+			conv[i] = d_8to24table[mip_ptr[i]];
+
+		glTexImage2D_fp(GL_TEXTURE_2D, gl_level, samples, cur_w, cur_h, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, conv);
+		gl_level++;
+
+		if (cur_w == 1 && cur_h == 1)
+			break;
+
+		mip_ptr += ms;
+		if (cur_w > 1) cur_w >>= 1;
+		if (cur_h > 1) cur_h >>= 1;
+	}
+
+	/* generate remaining levels below mip3 using box filter */
+	while (cur_w > 1 || cur_h > 1)
+	{
+		GL_MipMap((byte *)conv, (byte *)conv, &cur_w, &cur_h, 1, 1);
+		glTexImage2D_fp(GL_TEXTURE_2D, gl_level, samples, cur_w, cur_h, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, conv);
+		gl_level++;
+	}
+
+	/* set mipmap filtering */
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
+	if (gl_max_anisotropy >= 2)
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+
+	Hunk_FreeToLowMark(mark);
+}
+
+/*
+===============
 GL_Upload8
 
 modes:
@@ -1856,6 +1932,19 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 		{
 			trans[i] = d_8to24table[data[i]];
 		}
+	}
+
+	/* Use embedded BSP mipmaps for simple textures when enabled.
+	 * Alpha/fence/transparent textures need special per-pixel processing
+	 * that the embedded mip path doesn't handle, so they fall through. */
+	if (r_embeddedmipmaps.integer
+	    && (glt->flags & TEX_EMBEDDED_MIPS)
+	    && (glt->flags & TEX_MIPMAP)
+	    && !(glt->flags & (TEX_ALPHA|TEX_TRANSPARENT|TEX_HOLEY|TEX_SPECIAL_TRANS|TEX_FENCE)))
+	{
+		Hunk_FreeToLowMark(mark);
+		GL_Upload8_EmbeddedMips(data, glt);
+		return;
 	}
 
 	GL_Upload32 (trans, glt);

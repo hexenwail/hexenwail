@@ -534,7 +534,7 @@ bsp_tex_internal:
 			else
 			{
 				// Fall back to internal BSP texture
-				int tex_flags = TEX_MIPMAP;
+				int tex_flags = TEX_MIPMAP | TEX_EMBEDDED_MIPS;
 				// Check for fence texture (name starts with '{')
 				// Per Spoike: index 255 is alpha=0, glhexen2 also uses index 0
 				if (mt->name[0] == '{')
