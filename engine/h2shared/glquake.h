@@ -322,6 +322,7 @@ GLuint GL_LoadTexture (const char *identifier, byte *data,
 #define	TEX_HOLEY		(1 << 14)	/* Solid model with color 0			*/
 #define	TEX_FENCE		(1 << 16)	/* Fence texture (binary transparency)		*/
 #define	TEX_SPECIAL_TRANS	(1 << 15)	/* Translucency through the particle table	*/
+#define	TEX_EMBEDDED_MIPS	(1 << 17)	/* Data contains all 4 BSP mip levels		*/
 
 GLuint GL_LoadPicTexture (qpic_t *pic);
 void D_ClearOpenGLTextures (int last_tex);
