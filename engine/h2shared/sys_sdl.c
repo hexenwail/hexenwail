@@ -134,31 +134,31 @@ void Sys_SDLShutdown (void)
 Sys_MainLoop — shared client/server frame loop
 ================
 */
-void Sys_MainLoop (void)
+static double	mainloop_oldtime;
+
+static void Sys_MainFrame (void)
 {
-	double	time, oldtime, newtime;
+	double	time, newtime;
 
-	oldtime = Sys_DoubleTime ();
-
-	while (1)
+	if (isDedicated)
 	{
-	    if (isDedicated)
-	    {
 		newtime = Sys_DoubleTime ();
-		time = newtime - oldtime;
+		time = newtime - mainloop_oldtime;
 
+#ifndef __EMSCRIPTEN__
 		while (time < sys_ticrate.value)
 		{
 			SDL_Delay (1);
 			newtime = Sys_DoubleTime ();
-			time = newtime - oldtime;
+			time = newtime - mainloop_oldtime;
 		}
+#endif
 
 		Host_Frame (time);
-		oldtime = newtime;
-	    }
-	    else
-	    {
+		mainloop_oldtime = newtime;
+	}
+	else
+	{
 		qboolean focused, minimized;
 
 		/* pump SDL events first so window flags are current */
@@ -170,18 +170,23 @@ void Sys_MainLoop (void)
 		/* yield the CPU when minimized or blocked — skip drawing */
 		if (minimized || block_drawing)
 		{
+#ifndef __EMSCRIPTEN__
 			SDL_Delay (PAUSE_SLEEP);
+#endif
 			scr_skipupdate = 1;
 		}
+#ifndef __EMSCRIPTEN__
 		else if (!focused)
 		{
 			/* unfocused but visible — keep drawing, just throttle */
 			SDL_Delay (NOT_FOCUS_SLEEP);
 		}
+#endif
 
 		newtime = Sys_DoubleTime ();
-		time = newtime - oldtime;
+		time = newtime - mainloop_oldtime;
 
+#ifndef __EMSCRIPTEN__
 		/* cap framerate to host_maxfps (skip when VSync is on — VSync
 		 * already rate-limits the frame; the SDL_Delay polling loop
 		 * can overshoot the vblank window and cause double-frame stutters) */
@@ -192,13 +197,26 @@ void Sys_MainLoop (void)
 			{
 				SDL_Delay (1);
 				newtime = Sys_DoubleTime ();
-				time = newtime - oldtime;
+				time = newtime - mainloop_oldtime;
 			}
 		}
+#endif
 
 		Host_Frame (time);
 
-		oldtime = newtime;
-	    }
+		mainloop_oldtime = newtime;
 	}
+}
+
+void Sys_MainLoop (void)
+{
+	mainloop_oldtime = Sys_DoubleTime ();
+
+#ifdef __EMSCRIPTEN__
+	/* Emscripten: use requestAnimationFrame (fps=0), simulate infinite loop */
+	emscripten_set_main_loop(Sys_MainFrame, 0, 1);
+#else
+	while (1)
+		Sys_MainFrame();
+#endif
 }

@@ -113,7 +113,86 @@ GL_FUNCTION(void, glStencilFunc, (GLenum,GLint,GLuint))
 GL_FUNCTION(void, glStencilOp, (GLenum,GLenum,GLenum))
 GL_FUNCTION(void, glClearStencil, (GLint))
 
-#else
+#elif defined(__EMSCRIPTEN__)
+
+/* Emscripten / WebGL2: GLES3 functions linked statically.
+ * Legacy GL1 functions (glBegin, glVertex, glMatrixMode, etc.)
+ * do not exist — the engine uses VBO/shader paths instead.
+ * We define stubs for the _fp names that are still referenced. */
+#ifndef GL_FUNC_H
+#define GL_FUNC_H
+
+/* Core GLES3 functions */
+#define glBindTexture_fp	glBindTexture
+#define glDeleteTextures_fp	glDeleteTextures
+#define glGenTextures_fp	glGenTextures
+#define glTexParameterf_fp	glTexParameterf
+#define glTexImage2D_fp		glTexImage2D
+#define glTexSubImage2D_fp	glTexSubImage2D
+#define glCopyTexSubImage2D_fp	glCopyTexSubImage2D
+#define glEnable_fp		glEnable
+#define glDisable_fp		glDisable
+#define glIsEnabled_fp		glIsEnabled
+#define glFinish_fp		glFinish
+#define glFlush_fp		glFlush
+#define glClear_fp		glClear
+#define glClearColor_fp		glClearColor
+#define glBlendFunc_fp		glBlendFunc
+#define glDepthMask_fp		glDepthMask
+#define glDepthFunc_fp		glDepthFunc
+#define glDepthRange_fp		glDepthRangef	/* ES3 uses float version */
+#define glReadPixels_fp		glReadPixels
+#define glPixelStorei_fp	glPixelStorei
+#define glHint_fp		glHint
+#define glCullFace_fp		glCullFace
+#define glViewport_fp		glViewport
+#define glPolygonOffset_fp	glPolygonOffset
+#define glGetString_fp		glGetString
+#define glGetFloatv_fp		glGetFloatv
+#define glGetIntegerv_fp	glGetIntegerv
+#define glStencilFunc_fp	glStencilFunc
+#define glStencilOp_fp		glStencilOp
+#define glClearStencil_fp	glClearStencil
+
+/* Legacy GL1 functions — not available in GLES3, stub as no-ops.
+ * The engine's VBO/shader pipeline doesn't call these at runtime,
+ * but some code paths still reference the _fp names. */
+#define glBegin_fp(m)		((void)0)
+#define glEnd_fp()		((void)0)
+#define glVertex2f_fp(x,y)	((void)0)
+#define glVertex3f_fp(x,y,z)	((void)0)
+#define glVertex3fv_fp(v)	((void)0)
+#define glTexCoord2f_fp(s,t)	((void)0)
+#define glTexCoord2fv_fp(v)	((void)0)
+#define glColor4f_fp(r,g,b,a)	((void)0)
+#define glColor4fv_fp(v)	((void)0)
+#define glColor4ub_fp(r,g,b,a)	((void)0)
+#define glColor4ubv_fp(v)	((void)0)
+#define glColor3ubv_fp(v)	((void)0)
+#define glColor3f_fp(r,g,b)	((void)0)
+#define glColor3fv_fp(v)	((void)0)
+#define glTexEnvf_fp(a,b,c)	((void)0)
+#define glScalef_fp(x,y,z)	((void)0)
+#define glFogf_fp(p,v)		((void)0)
+#define glFogfv_fp(p,v)		((void)0)
+#define glFogi_fp(p,v)		((void)0)
+#define glAlphaFunc_fp(f,r)	((void)0)
+#define glShadeModel_fp(m)	((void)0)
+#define glPolygonMode_fp(f,m)	((void)0)
+#define glDrawBuffer_fp(m)	((void)0)
+#define glRotatef_fp(a,x,y,z)	((void)0)
+#define glTranslatef_fp(x,y,z)	((void)0)
+#define glOrtho_fp(l,r,b,t,n,f)		((void)0)
+#define glFrustum_fp(l,r,b,t,n,f)	((void)0)
+#define glPushMatrix_fp()	((void)0)
+#define glPopMatrix_fp()	((void)0)
+#define glLoadIdentity_fp()	((void)0)
+#define glMatrixMode_fp(m)	((void)0)
+#define glLoadMatrixf_fp(m)	((void)0)
+
+#endif	/* GL_FUNC_H */
+
+#else	/* desktop GL without dlsym */
 
 #ifndef GL_FUNC_H
 #define GL_FUNC_H
@@ -198,10 +277,17 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 
 /* global gl functions link to at runtime
  */
+#if defined(__EMSCRIPTEN__)
+/* Emscripten: all GL functions are statically linked */
+#ifndef GL_FUNCTION_OPT
+#define GL_FUNCTION_OPT(ret, func, params)	/* nothing — use direct defines below */
+#endif
+#else
 #ifndef GL_FUNCTION_OPT
 #define GL_FUNCTION_OPT(ret, func, params) \
 typedef ret (APIENTRY *func##_f) params; \
 __GL_FUNC_EXTERN func##_f func##_fp;
+#endif
 #endif
 
 /* GL_ARB_multitexture */
@@ -267,6 +353,60 @@ GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLs
 GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 
 #undef GL_FUNCTION_OPT
+
+#if defined(__EMSCRIPTEN__)
+/* Direct-call defines for GLES3 functions on Emscripten */
+#define glActiveTextureARB_fp		glActiveTexture
+#define glMultiTexCoord2fARB_fp(t,s,u)	((void)0)	/* unused */
+#define glGenFramebuffers_fp		glGenFramebuffers
+#define glDeleteFramebuffers_fp		glDeleteFramebuffers
+#define glBindFramebuffer_fp		glBindFramebuffer
+#define glFramebufferTexture2D_fp	glFramebufferTexture2D
+#define glFramebufferRenderbuffer_fp	glFramebufferRenderbuffer
+#define glCheckFramebufferStatus_fp	glCheckFramebufferStatus
+#define glGenRenderbuffers_fp		glGenRenderbuffers
+#define glDeleteRenderbuffers_fp	glDeleteRenderbuffers
+#define glRenderbufferStorageMultisample_fp glRenderbufferStorageMultisample
+#define glBlitFramebuffer_fp		glBlitFramebuffer
+#define glBindRenderbuffer_fp		glBindRenderbuffer
+#define glRenderbufferStorage_fp	glRenderbufferStorage
+#define glCreateShader_fp		glCreateShader
+#define glDeleteShader_fp		glDeleteShader
+#define glShaderSource_fp		glShaderSource
+#define glCompileShader_fp		glCompileShader
+#define glGetShaderiv_fp		glGetShaderiv
+#define glGetShaderInfoLog_fp		glGetShaderInfoLog
+#define glCreateProgram_fp		glCreateProgram
+#define glDeleteProgram_fp		glDeleteProgram
+#define glAttachShader_fp		glAttachShader
+#define glLinkProgram_fp		glLinkProgram
+#define glUseProgram_fp			glUseProgram
+#define glGetProgramiv_fp		glGetProgramiv
+#define glGetProgramInfoLog_fp		glGetProgramInfoLog
+#define glGetUniformLocation_fp		glGetUniformLocation
+#define glUniform1i_fp			glUniform1i
+#define glUniform1f_fp			glUniform1f
+#define glUniform2f_fp			glUniform2f
+#define glUniform3f_fp			glUniform3f
+#define glUniform4f_fp			glUniform4f
+#define glUniformMatrix4fv_fp		glUniformMatrix4fv
+#define glBindAttribLocation_fp		glBindAttribLocation
+#define glGenBuffers_fp			glGenBuffers
+#define glDeleteBuffers_fp		glDeleteBuffers
+#define glBindBuffer_fp			glBindBuffer
+#define glBufferData_fp			glBufferData
+#define glBufferSubData_fp		glBufferSubData
+#define glGenVertexArrays_fp		glGenVertexArrays
+#define glDeleteVertexArrays_fp		glDeleteVertexArrays
+#define glBindVertexArray_fp		glBindVertexArray
+#define glVertexAttribPointer_fp	glVertexAttribPointer
+#define glEnableVertexAttribArray_fp	glEnableVertexAttribArray
+#define glDrawArrays_fp			glDrawArrays
+#define glDrawElements_fp		glDrawElements
+#define glBindBufferBase_fp		glBindBufferBase
+#define glTexImage3D_fp			glTexImage3D
+#define glUniform3fv_fp			glUniform3fv
+#endif /* __EMSCRIPTEN__ */
 
 
 /* typedefs for functions linked to locally at runtime

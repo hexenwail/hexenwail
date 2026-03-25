@@ -3,7 +3,11 @@
 #ifndef __GLHEADER_H
 #define __GLHEADER_H
 
-#if defined(PLATFORM_WINDOWS)
+#if defined(__EMSCRIPTEN__)
+#include <GLES3/gl3.h>
+#include <emscripten.h>
+
+#elif defined(PLATFORM_WINDOWS)
 #include <windows.h>
 #include <GL/gl.h>
 

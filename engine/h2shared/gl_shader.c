@@ -113,12 +113,18 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 /* Shader sources                                                      */
 /* ------------------------------------------------------------------ */
 
-/* Use GLSL 1.50 core for desktop GL 3.2+.  GLES 3.2 would use
- * #version 320 es — we can switch when we drop desktop GL. */
+/* GLSL version header: desktop GL 4.3 vs WebGL2 (ES 3.0) */
+#ifdef __EMSCRIPTEN__
+#define GLSL_VERT_HEADER	"#version 300 es\nprecision highp float;\n"
+#define GLSL_FRAG_HEADER	"#version 300 es\nprecision mediump float;\n"
+#else
+#define GLSL_VERT_HEADER	"#version 430 core\n"
+#define GLSL_FRAG_HEADER	"#version 430 core\n"
+#endif
 
 /* --- shader_2d: orthographic HUD/text rendering --- */
 static const char s2d_vert[] =
-	"#version 430 core\n"
+	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
@@ -132,7 +138,7 @@ static const char s2d_vert[] =
 	"}\n";
 
 static const char s2d_frag[] =
-	"#version 430 core\n"
+	GLSL_FRAG_HEADER
 	"uniform sampler2D u_texture0;\n"
 	"uniform float u_alpha_threshold;\n"
 	"in vec2 v_texcoord;\n"
@@ -147,7 +153,7 @@ static const char s2d_frag[] =
 
 /* --- shader_flat: untextured, vertex-colored (dlights, blendpoly) --- */
 static const char sflat_vert[] =
-	"#version 430 core\n"
+	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec4 a_color;\n"
 	"uniform mat4 u_mvp;\n"
@@ -158,7 +164,7 @@ static const char sflat_vert[] =
 	"}\n";
 
 static const char sflat_frag[] =
-	"#version 430 core\n"
+	GLSL_FRAG_HEADER
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
@@ -167,7 +173,7 @@ static const char sflat_frag[] =
 
 /* --- shader_world: textured + lightmap multitexture, with fog --- */
 static const char sworld_vert[] =
-	"#version 430 core\n"
+	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
@@ -188,7 +194,7 @@ static const char sworld_vert[] =
 	"}\n";
 
 static const char sworld_frag[] =
-	"#version 430 core\n"
+	GLSL_FRAG_HEADER
 	"uniform sampler2D u_texture0;\n"
 	"uniform sampler2D u_texture1;\n"
 	"uniform float u_fog_density;\n"
@@ -211,7 +217,7 @@ static const char sworld_frag[] =
 
 /* --- shader_alias: vertex-colored, textured, fog (models) --- */
 static const char salias_vert[] =
-	"#version 430 core\n"
+	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
@@ -229,7 +235,7 @@ static const char salias_vert[] =
 	"}\n";
 
 static const char salias_frag[] =
-	"#version 430 core\n"
+	GLSL_FRAG_HEADER
 	"uniform sampler2D u_texture0;\n"
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
@@ -247,6 +253,7 @@ static const char salias_frag[] =
 	"    fragColor = color;\n"
 	"}\n";
 
+#ifndef __EMSCRIPTEN__  /* SSBO shaders require GL 4.3 — not available in WebGL2 */
 /* --- shader_alias_gpu: SSBO-driven alias models with GPU pose lerp --- */
 static const char salias_gpu_vert[] =
 	"#version 430 core\n"
@@ -307,7 +314,7 @@ static const char salias_gpu_vert[] =
 
 /* --- shader_particle: textured triangles with per-vertex color --- */
 static const char spart_vert[] =
-	"#version 430 core\n"
+	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
@@ -325,7 +332,7 @@ static const char spart_vert[] =
 	"}\n";
 
 static const char spart_frag[] =
-	"#version 430 core\n"
+	GLSL_FRAG_HEADER
 	"uniform sampler2D u_texture0;\n"
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
@@ -411,10 +418,11 @@ static const char spart_gpu_vert[] =
 	"    v_fogdist   = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
 	"}\n";
+#endif /* !__EMSCRIPTEN__ */
 
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
 static const char ssky_vert[] =
-	"#version 430 core\n"
+	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
@@ -431,7 +439,7 @@ static const char ssky_vert[] =
 	"}\n";
 
 static const char ssky_frag[] =
-	"#version 430 core\n"
+	GLSL_FRAG_HEADER
 	"uniform sampler2D u_texture0;\n"
 	"uniform sampler2D u_texture1;\n"
 	"uniform vec3 u_fog_color;\n"
@@ -479,6 +487,7 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	return true;
 }
 
+#ifndef __EMSCRIPTEN__
 static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 {
 	p->base.program = GL_LoadProgram(spart_gpu_vert, spart_frag);
@@ -604,6 +613,7 @@ void GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
 	if (prog->u_ent_alpha >= 0)
 		glUniform1f_fp(prog->u_ent_alpha, alpha);
 }
+#endif /* !__EMSCRIPTEN__ */
 
 void GL_Shaders_Init (void)
 {
@@ -615,8 +625,10 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
+#ifndef __EMSCRIPTEN__
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
 	GL_InitAliasGPUProgram(&gl_shader_alias_gpu);
+#endif
 
 }
 

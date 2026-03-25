@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hexenwail</title>
+<style>
+  body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; margin: 0 auto; }
+  #status { color: #fff; font-family: monospace; text-align: center; padding: 10px; }
+</style>
+</head>
+<body>
+<div id="status">Loading...</div>
+<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<script>
+  var Module = {
+    canvas: (function() { return document.getElementById('canvas'); })(),
+    print: function(text) { console.log(text); },
+    printErr: function(text) { console.error(text); },
+    setStatus: function(text) {
+      document.getElementById('status').innerText = text;
+      if (!text) document.getElementById('status').style.display = 'none';
+    },
+    monitorRunDependencies: function(left) {
+      if (left) Module.setStatus('Loading... (' + left + ' files remaining)');
+      else Module.setStatus('');
+    }
+  };
+  window.onerror = function() {
+    Module.setStatus('Exception thrown, see JavaScript console');
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
