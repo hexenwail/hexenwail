@@ -22,7 +22,27 @@
           };
         };
 
-        version = "1.5.10-unstable-${self.lastModifiedDate}";
+        version = "26.03-unstable-${self.lastModifiedDate}";
+
+        # Source filter: exclude non-build files to improve cache hits
+        filteredSrc = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            let baseName = baseNameOf (toString path);
+            in !(
+              baseName == ".beads" ||
+              baseName == ".github" ||
+              baseName == "history" ||
+              baseName == "docs" ||
+              baseName == "flatpak" ||
+              baseName == "gamecode" ||
+              (type == "regular" && (
+                pkgs.lib.hasSuffix ".md" baseName ||
+                baseName == "release.sh" ||
+                baseName == ".gitignore"
+              ))
+            );
+        };
 
       in
       {
@@ -32,7 +52,7 @@
             pname = "glhexen2";
             inherit version;
 
-            src = ./.;
+            src = filteredSrc;
 
             nativeBuildInputs = with pkgs; [
               cmake
@@ -65,11 +85,11 @@
             ];
 
             meta = with pkgs.lib; {
-              description = "Hammer of Thyrion - Hexen II source port (OpenGL version)";
+              description = "Hexenwail - modernized Hexen II engine (OpenGL 4.3)";
               longDescription = ''
-                Hexen II: Hammer of Thyrion (uHexen2) is a cross-platform port of
-                Raven Software's Hexen II source. It is based on an older linux port,
-                Anvil of Thyrion.
+                Hexenwail is a modern GL 4.3 fork of Hammer of Thyrion / uHexen2,
+                the definitive Hexen II engine. SDL3, GLSL shaders, gamepad support,
+                and a clean codebase for Linux and Windows.
 
                 Note: This package only provides the game engine. You need the original
                 game data files (pak0.pak, pak1.pak) from the commercial game to play.
@@ -102,14 +122,45 @@
           default = self.packages.${system}.nixos;
 
           # OpenGL version for standard FHS Linux systems (non-NixOS)
-          # Repackages the nixos build with FHS paths instead of recompiling
-          linux-fhs = pkgs.runCommand "glhexen2-linux-fhs-${self.packages.${system}.nixos.version}" {
+          # Bundles shared libraries so it runs on any distro without nix
+          linux-fhs = let
+            nixosPkg = self.packages.${system}.nixos;
+            runtimeLibs = with pkgs; [
+              sdl3
+              libvorbis
+              libogg
+              fluidsynth
+              libsndfile
+              flac
+              libxmp
+              opusfile
+              libopus
+              alsa-lib
+            ];
+          in pkgs.runCommand "glhexen2-linux-fhs-${nixosPkg.version}" {
             nativeBuildInputs = [ pkgs.patchelf ];
           } ''
-            mkdir -p $out/bin
-            cp ${self.packages.${system}.nixos}/bin/glhexen2 $out/bin/glhexen2
+            mkdir -p $out/bin $out/lib
+
+            cp ${nixosPkg}/bin/glhexen2 $out/bin/glhexen2
             chmod +w $out/bin/glhexen2
-            patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath $out/bin/glhexen2
+
+            # Bundle shared libraries
+            for lib in ${pkgs.lib.concatMapStringsSep " " (l: "${l}/lib") runtimeLibs}; do
+              for so in "$lib"/*.so "$lib"/*.so.*; do
+                [ -e "$so" ] && cp -nL "$so" $out/lib/ 2>/dev/null || true
+              done
+            done
+            chmod +w $out/lib/*
+
+            # Set FHS interpreter and relative rpaths
+            patchelf \
+              --set-interpreter /lib64/ld-linux-x86-64.so.2 \
+              --set-rpath "\$ORIGIN/../lib" \
+              $out/bin/glhexen2
+            for so in $out/lib/*.so $out/lib/*.so.*; do
+              [ -f "$so" ] && patchelf --set-rpath "\$ORIGIN" "$so" 2>/dev/null || true
+            done
           '';
 
           # Windows 64-bit build
@@ -117,7 +168,7 @@
             pname = "glhexen2-win64";
             inherit version;
 
-            src = ./.;
+            src = filteredSrc;
 
             nativeBuildInputs = with pkgs; [
               cmake
@@ -182,7 +233,7 @@
             '';
 
             meta = with pkgs.lib; {
-              description = "Hammer of Thyrion - Hexen II source port (OpenGL, Windows 64-bit)";
+              description = "Hexenwail - modernized Hexen II engine (OpenGL 4.3, Windows 64-bit)";
               homepage = "https://github.com/bobberb/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.windows;
@@ -193,7 +244,7 @@
           # Release package - builds all platforms together
           release = pkgs.runCommand "glhexen2-release-${version}" {
             meta = with pkgs.lib; {
-              description = "Hammer of Thyrion - Multi-platform release bundle";
+              description = "Hexenwail - Multi-platform release bundle";
               homepage = "https://github.com/bobberb/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
