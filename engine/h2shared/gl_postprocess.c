@@ -125,7 +125,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 
 	glGenTextures_fp(1, &pp_native_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_native_color_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGB10_A2, width, height, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -169,7 +169,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	/* resolve texture (always non-multisampled — this is what the shader reads) */
 	glGenTextures_fp(1, &pp_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGB10_A2, width, height, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -182,7 +182,7 @@ static qboolean PP_CreateFBO (int width, int height)
 		/* multisampled render FBO */
 		glGenRenderbuffers_fp(1, &pp_color_rb);
 		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_color_rb);
-		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
+		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_RGB10_A2, width, height);
 
 		glGenRenderbuffers_fp(1, &pp_depth_rb);
 		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
@@ -780,7 +780,7 @@ void GL_PostProcess_End3D (void)
 					glDeleteTextures_fp(1, &pp_copyback_tex);
 				glGenTextures_fp(1, &pp_copyback_tex);
 				glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
-				glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+				glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGB10_A2, w, h, 0,
 						GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
