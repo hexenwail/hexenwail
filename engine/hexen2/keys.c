@@ -876,10 +876,10 @@ void Key_Init (void)
 	Key_SetBinding (K_GP_RSHOULDER, "impulse 10");	/* next weapon */
 	Key_SetBinding (K_GP_LSHOULDER, "impulse 12");	/* prev weapon */
 	Key_SetBinding (K_GP_A, "+jump");
-	Key_SetBinding (K_GP_B, "impulse 13");		/* lift object */
+	Key_SetBinding (K_GP_B, "+crouch");
 	Key_SetBinding (K_GP_X, "impulse 23");		/* use artifact */
 	Key_SetBinding (K_GP_Y, "impulse 10");		/* next weapon */
-	Key_SetBinding (K_GP_LTHUMB, "+crouch");
+	Key_SetBinding (K_GP_LTHUMB, "impulse 13");	/* lift object */
 	Key_SetBinding (K_GP_START, "togglemenu");
 	Key_SetBinding (K_GP_BACK, "toggleconsole");
 
