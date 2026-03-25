@@ -1508,7 +1508,7 @@ void R_DrawParticles (void)
         }
 
         /* GPU draw for standard particles */
-        if (gpu_count > 0)
+        if (gpu_count > 0 && gpu_particle_ssbo)
         {
             glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_particle_ssbo);
             glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
