@@ -77,7 +77,7 @@ cvar_t	joy_exponent = {"joy_exponent", "2", CVAR_ARCHIVE};
 cvar_t	joy_exponent_move = {"joy_exponent_move", "2", CVAR_ARCHIVE};
 cvar_t	joy_invert = {"joy_invert", "0", CVAR_ARCHIVE};
 cvar_t	joy_swapmovelook = {"joy_swapmovelook", "0", CVAR_ARCHIVE};
-cvar_t	joy_rumble = {"joy_rumble", "0.5", CVAR_ARCHIVE};
+cvar_t	joy_rumble = {"joy_rumble", "0", CVAR_ARCHIVE};
 
 /* axis state for edge-detected trigger/stick key events */
 typedef struct {
