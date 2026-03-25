@@ -257,41 +257,111 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	float	s, ss, t, tt;
 	vec3_t		dir;
 	float		length;
+	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 
-	GL_SetAlphaThreshold (0.0f);	/* two-layer sky mode */
-	GL_Bind (solidskytexture);
-
-	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
-	GL_Bind (alphaskytexture);
-	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
-
-	for (p = fa->polys ; p ; p = p->next)
+	if (alpha >= 1.0f)
 	{
-		GL_ImmBegin ();
-		GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-		for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+		/* single-pass multitexture: blend both layers in the shader */
+		GL_SetAlphaThreshold (0.0f);	/* two-layer sky mode */
+		GL_Bind (solidskytexture);
+
+		glActiveTextureARB_fp (GL_TEXTURE1_ARB);
+		GL_Bind (alphaskytexture);
+		glActiveTextureARB_fp (GL_TEXTURE0_ARB);
+
+		for (p = fa->polys ; p ; p = p->next)
 		{
-			VectorSubtract (v, r_origin, dir);
-			dir[2] *= 3;	// flatten the sphere
+			GL_ImmBegin ();
+			GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+			for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			{
+				VectorSubtract (v, r_origin, dir);
+				dir[2] *= 3;
 
-			length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
-			length = sqrt (length);
-			length = 6*63/length;
+				length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+				length = sqrt (length);
+				length = 6*63/length;
 
-			dir[0] *= length;
-			dir[1] *= length;
+				dir[0] *= length;
+				dir[1] *= length;
 
-			s = (realtime*8 + dir[0]) * (1.0/128);
-			t = (realtime*8 + dir[1]) * (1.0/128);
+				s = (realtime*8 + dir[0]) * (1.0/128);
+				t = (realtime*8 + dir[1]) * (1.0/128);
 
-			ss = (realtime*16 + dir[0]) * (1.0/128);
-			tt = (realtime*16 + dir[1]) * (1.0/128);
+				ss = (realtime*16 + dir[0]) * (1.0/128);
+				tt = (realtime*16 + dir[1]) * (1.0/128);
 
-			GL_ImmTexCoord2f (s, t);
-			GL_ImmLMCoord2f (ss, tt);
-			GL_ImmVertex3f (v[0], v[1], v[2]);
+				GL_ImmTexCoord2f (s, t);
+				GL_ImmLMCoord2f (ss, tt);
+				GL_ImmVertex3f (v[0], v[1], v[2]);
+			}
+			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 		}
-		GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
+	}
+	else
+	{
+		/* two-pass: draw back layer opaque, then front layer blended
+		 * with r_skyalpha controlling the front layer's opacity */
+		GL_SetAlphaThreshold (1.0f);	/* single-texture mode */
+
+		/* pass 1: solid (back) layer, fully opaque */
+		GL_Bind (solidskytexture);
+
+		for (p = fa->polys ; p ; p = p->next)
+		{
+			GL_ImmBegin ();
+			GL_ImmColor3f(1.0f, 1.0f, 1.0f);
+			for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			{
+				VectorSubtract (v, r_origin, dir);
+				dir[2] *= 3;
+
+				length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+				length = sqrt (length);
+				length = 6*63/length;
+
+				dir[0] *= length;
+				dir[1] *= length;
+
+				s = (realtime*8 + dir[0]) * (1.0/128);
+				t = (realtime*8 + dir[1]) * (1.0/128);
+
+				GL_ImmTexCoord2f (s, t);
+				GL_ImmVertex3f (v[0], v[1], v[2]);
+			}
+			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
+		}
+
+		/* pass 2: alpha (front) layer, blended at r_skyalpha */
+		GL_Bind (alphaskytexture);
+		glEnable_fp(GL_BLEND);
+
+		for (p = fa->polys ; p ; p = p->next)
+		{
+			GL_ImmBegin ();
+			GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha);
+			for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			{
+				VectorSubtract (v, r_origin, dir);
+				dir[2] *= 3;
+
+				length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+				length = sqrt (length);
+				length = 6*63/length;
+
+				dir[0] *= length;
+				dir[1] *= length;
+
+				ss = (realtime*16 + dir[0]) * (1.0/128);
+				tt = (realtime*16 + dir[1]) * (1.0/128);
+
+				GL_ImmTexCoord2f (ss, tt);
+				GL_ImmVertex3f (v[0], v[1], v[2]);
+			}
+			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
+		}
+
+		glDisable_fp(GL_BLEND);
 	}
 }
 

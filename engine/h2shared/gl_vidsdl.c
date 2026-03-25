@@ -422,6 +422,20 @@ float VID_ReportConsize(void)
 }
 
 
+/* Apply vsync setting, falling back from adaptive to normal if needed */
+static void VID_ApplyVSync (void)
+{
+	if (!SDL_GL_SetSwapInterval(vid_vsync.integer))
+	{
+		if (vid_vsync.integer == -1)
+		{
+			Con_Printf ("Adaptive vsync not supported, falling back to vsync on\n");
+			Cvar_SetQuick(&vid_vsync, "1");
+			SDL_GL_SetSwapInterval(1);
+		}
+	}
+}
+
 static qboolean VID_SetMode (int modenum)
 {
 	int	i, is_fullscreen;
@@ -555,12 +569,7 @@ static qboolean VID_SetMode (int modenum)
 	VID_SetIcon();
 	SDL_SetWindowTitle(window, WM_TITLEBAR_TEXT);
 
-	// Apply vsync: 0=off, 1=on, -1=adaptive
-	if (!SDL_GL_SetSwapInterval(vid_vsync.integer))
-	{
-		if (vid_vsync.integer == -1)	// adaptive failed, try normal
-			SDL_GL_SetSwapInterval(1);
-	}
+	VID_ApplyVSync();
 
 	is_fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? 1 : 0;
 
@@ -1998,7 +2007,7 @@ static void VID_MenuKey (int key)
 				Cvar_SetQuick (&vid_vsync, "-1");
 			else
 				Cvar_SetQuick (&vid_vsync, "1");
-			SDL_GL_SetSwapInterval(vid_vsync.integer);
+			VID_ApplyVSync();
 			break;
 		case VID_TEXFILTER:
 			/* toggle between Classic (nearest+mipmap) and Smooth (trilinear) */
@@ -2056,7 +2065,7 @@ static void VID_MenuKey (int key)
 				Cvar_SetQuick (&vid_vsync, "-1");
 			else
 				Cvar_SetQuick (&vid_vsync, "0");
-			SDL_GL_SetSwapInterval(vid_vsync.integer);
+			VID_ApplyVSync();
 			break;
 		case VID_TEXFILTER:
 			Cvar_Set ("gl_texturemode", (gl_filter_idx <= 2) ?
@@ -2221,7 +2230,7 @@ void VID_MenuAdjustVSync (int dir)
 		else if (vid_vsync.integer == 1) Cvar_SetQuick(&vid_vsync, "-1");
 		else Cvar_SetQuick(&vid_vsync, "0");
 	}
-	SDL_GL_SetSwapInterval(vid_vsync.integer);
+	VID_ApplyVSync();
 }
 
 void VID_MenuAdjustTexFilter (void)

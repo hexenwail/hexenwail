@@ -36,8 +36,8 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
 static unsigned int	blocklights[18*18];
 static unsigned int	blocklightscolor[18*18*3];	// colored light support. *3 for RGB to the definitions at the top
 
-#define	BLOCK_WIDTH	128
-#define	BLOCK_HEIGHT	128
+#define	BLOCK_WIDTH	256
+#define	BLOCK_HEIGHT	256
 
 static glpoly_t	*lightmap_polys[MAX_LIGHTMAPS];
 static qboolean	lightmap_modified[MAX_LIGHTMAPS];
@@ -48,7 +48,7 @@ static int	allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 // main memory so texsubimage can update properly
 static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 
-/* Lightmap atlas — all pages in one 2D texture (16x16 grid of 128x128 pages = 2048x2048) */
+/* Lightmap atlas — all pages in one 2D texture (16x16 grid of 256x256 pages = 4096x4096) */
 #define LM_ATLAS_COLS	16
 #define LM_ATLAS_ROWS	16
 #define LM_ATLAS_WIDTH	(LM_ATLAS_COLS * BLOCK_WIDTH)	/* 2048 */
@@ -1052,7 +1052,7 @@ static void DrawTextureChains (entity_t *e)
 		{
 			if ((s->flags & SURF_DRAWTURB) &&
 			    ((s->flags & SURF_TRANSLUCENT) ||
-			     (r_wateralpha.value != 1.0 && R_LiquidAlpha(t) < 1.0f)))
+			     R_LiquidAlpha(t) < 1.0f))
 				continue;	// draw translucent water later
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||

@@ -1007,7 +1007,11 @@ void Key_Event (int key, qboolean down)
 		}
 		else
 		{
-			Cbuf_AddText("map keep1\n");
+			/* mods can set "startmap" in autoexec.cfg */
+			if (startmap.string[0])
+				Cbuf_AddText(va("map %s\n", startmap.string));
+			else
+				Cbuf_AddText("map keep1\n");
 		}
 	}
 
