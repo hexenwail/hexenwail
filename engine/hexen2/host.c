@@ -78,6 +78,7 @@ cvar_t	noexit = {"noexit", "0", CVAR_NOTIFY|CVAR_SERVERINFO};
 cvar_t	developer = {"developer", "0", CVAR_ARCHIVE};
 
 cvar_t	skill = {"skill", "1", CVAR_NONE};		// 0 - 3
+cvar_t	startmap = {"startmap", "", CVAR_NONE};	// mods can override in autoexec.cfg
 cvar_t	coop = {"coop", "0", CVAR_NONE};		// 0 or 1
 cvar_t	deathmatch = {"deathmatch", "0", CVAR_NONE};	// 0, 1, or 2
 cvar_t	randomclass = {"randomclass", "0", CVAR_NONE};	// 0, 1, or 2
@@ -386,6 +387,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&noexit);
 	Cvar_SetCallback (&noexit, Host_Callback_Notify);
 	Cvar_RegisterVariable (&skill);
+	Cvar_RegisterVariable (&startmap);
 	Cvar_RegisterVariable (&coop);
 	Cvar_RegisterVariable (&deathmatch);
 	Cvar_RegisterVariable (&randomclass);

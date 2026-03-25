@@ -814,7 +814,11 @@ static void M_Difficulty_Key (int key)
 		}
 		else
 		{
-			Cbuf_AddText("map demo1\n");
+			/* mods can set "startmap" in autoexec.cfg */
+			if (startmap.string[0])
+				Cbuf_AddText(va("map %s\n", startmap.string));
+			else
+				Cbuf_AddText("map demo1\n");
 		}
 
 		break;
