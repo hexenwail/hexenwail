@@ -128,13 +128,7 @@ if(UNIX)
         set(USE_ALSA_FOUND ON)
     endif()
 
-    # Audio codecs (use system libraries on Linux)
-    if(USE_CODEC_VORBIS)
-        pkg_check_modules(VORBIS REQUIRED vorbisfile vorbis ogg)
-    endif()
-
     # MP3: uses built-in dr_mp3 (no external library needed)
-
     # FLAC: uses built-in dr_flac (no external library needed)
 
     # m and dl
@@ -143,23 +137,26 @@ if(UNIX)
 endif()
 
 
-if(WIN32)
-    # For Windows, use prebuilt codecs from oslibs
-    set(CODEC_INCLUDE_DIR ${OSLIBS}/windows/codecs/include)
-    set(CODEC_LIB_DIR ${OSLIBS}/windows/codecs/${ARCH_DIR})
-    include_directories(${CODEC_INCLUDE_DIR})
-    link_directories(${CODEC_LIB_DIR})
-endif()
-
-# XMP and Opus codec discovery via pkg-config (works on all platforms)
+# Codec discovery via pkg-config (works on all platforms including cross-compile)
 find_package(PkgConfig QUIET)
 if(PKG_CONFIG_FOUND)
+    if(USE_CODEC_VORBIS)
+        pkg_check_modules(VORBIS vorbisfile vorbis ogg)
+    endif()
     if(USE_CODEC_XMP)
         pkg_check_modules(XMP libxmp)
     endif()
     if(USE_CODEC_OPUS)
         pkg_check_modules(OPUS opusfile)
     endif()
+endif()
+
+if(WIN32 AND NOT VORBIS_FOUND)
+    # Fallback: use prebuilt codecs from oslibs for Windows
+    set(CODEC_INCLUDE_DIR ${OSLIBS}/windows/codecs/include)
+    set(CODEC_LIB_DIR ${OSLIBS}/windows/codecs/${ARCH_DIR})
+    include_directories(${CODEC_INCLUDE_DIR})
+    link_directories(${CODEC_LIB_DIR})
 endif()
 
 #============================================================================
@@ -430,9 +427,14 @@ if(WIN32)
         winmm
     )
 
-    # Codec libraries for Windows
+    # Codec libraries for Windows (pkg-config or oslibs fallback)
     if(USE_CODEC_VORBIS)
-        target_link_libraries(${EXECUTABLE_NAME} PRIVATE vorbisfile vorbis ogg)
+        if(VORBIS_FOUND)
+            target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${VORBIS_LIBRARIES})
+            target_include_directories(${EXECUTABLE_NAME} PRIVATE ${VORBIS_INCLUDE_DIRS})
+        else()
+            target_link_libraries(${EXECUTABLE_NAME} PRIVATE vorbisfile vorbis ogg)
+        endif()
     endif()
     if(USE_CODEC_XMP AND XMP_FOUND)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${XMP_LIBRARIES})
@@ -459,11 +461,10 @@ elseif(UNIX)
     endif()
 
     # Codec libraries for Linux
-    if(USE_CODEC_VORBIS)
+    if(USE_CODEC_VORBIS AND VORBIS_FOUND)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${VORBIS_LIBRARIES})
         target_include_directories(${EXECUTABLE_NAME} PRIVATE ${VORBIS_INCLUDE_DIRS})
     endif()
-    # MP3: dr_mp3 is built-in, no external library to link
     # FLAC/MP3: dr_flac/dr_mp3 are built-in, no external libraries to link
     if(USE_CODEC_XMP AND XMP_FOUND)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${XMP_LIBRARIES})

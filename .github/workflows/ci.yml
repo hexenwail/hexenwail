@@ -18,7 +18,7 @@ jobs:
         run: sudo apt-get install -y shellcheck
 
       - name: Shellcheck
-        run: shellcheck release.sh flatpak/hexenwail.sh
+        run: shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh
 
   build:
     runs-on: ubuntu-latest

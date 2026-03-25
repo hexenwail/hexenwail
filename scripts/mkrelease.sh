@@ -2,7 +2,7 @@
 
 # the script I use to prepare a release tree from the uhexen2 svn snapshot
 
-if echo `pwd` | grep "\/scripts" > /dev/null 2>&1 ; then
+if pwd | grep "/scripts" > /dev/null 2>&1 ; then
    cd ..
 fi
 # this relies on the name of this script file being "mkrelease.sh"
