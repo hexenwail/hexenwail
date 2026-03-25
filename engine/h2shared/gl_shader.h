@@ -48,6 +48,28 @@ extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 
+/* Extended program for GPU alias model SSBO rendering */
+typedef struct {
+	glprogram_t base;	/* standard uniforms */
+	GLint	u_pose0;	/* current pose index */
+	GLint	u_pose1;	/* previous pose index */
+	GLint	u_lerp;		/* interpolation factor */
+	GLint	u_scale;	/* aliashdr->scale */
+	GLint	u_scale_origin;	/* aliashdr->scale_origin */
+	GLint	u_poseverts;	/* verts per pose */
+	GLint	u_shade_light;	/* shading intensity */
+	GLint	u_light_color;	/* RGB light color */
+	GLint	u_ent_alpha;	/* entity alpha */
+} gl_alias_gpu_prog_t;
+
+extern gl_alias_gpu_prog_t gl_shader_alias_gpu;
+
+void	GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
+				  int pose0, int pose1, float lerp,
+				  const float *scale, const float *scale_origin,
+				  int poseverts, float shade_light,
+				  const float *light_color, float alpha);
+
 void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *pup, const float *pright,
 				     const float *vpn, const float *origin,

@@ -328,6 +328,25 @@ typedef struct {
 #define	MAXALIASVERTS	2000
 #define	MAXALIASFRAMES	256
 #define	MAXALIASTRIS	2048
+
+/* GPU-resident alias model data for AZDO rendering */
+typedef struct {
+	GLuint	vao;		/* VAO for this model */
+	GLuint	vbo_tc;		/* static texcoord VBO */
+	GLuint	ibo;		/* index buffer (triangulated) */
+	GLuint	ssbo_pose;	/* all poses' trivertx_t data */
+	int	num_indices;	/* total triangle indices */
+	int	poseverts;	/* verts per pose (for shader indexing) */
+	int	numposes;	/* total pose count */
+	qboolean valid;		/* true if GPU data was created successfully */
+} alias_gpu_mesh_t;
+
+#define MAX_ALIAS_MODELS 256
+extern alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];
+extern int num_alias_gpu_meshes;
+
+alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr);
+void GL_FreeAliasGPUMeshes (void);
 extern	aliashdr_t	*pheader;
 extern	stvert_t	stverts[MAXALIASVERTS];
 extern	mtriangle_t	triangles[MAXALIASTRIS];
