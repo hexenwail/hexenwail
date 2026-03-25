@@ -1466,11 +1466,7 @@ void CL_ParseServerMessage (void)
 				MSG_ReadString ();
 				break;
 			}
-			// Only print server messages at developer level 2+ (suppresses "pain" spam)
-			if (developer.integer >= 2)
-				Con_Printf ("%s", MSG_ReadString ());
-			else
-				MSG_ReadString ();  // Still need to read the string to advance message
+			Con_Printf ("%s", MSG_ReadString ());
 			break;
 
 		case svc_centerprint:
