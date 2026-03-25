@@ -2056,7 +2056,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
-			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
@@ -2078,7 +2078,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
-			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
@@ -2100,7 +2100,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_flashblend", 1);
-			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);

@@ -64,6 +64,8 @@ nix build .#release    # All platforms
 
 You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pak`). For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
 
+**Buy Hexen II:** [GOG](https://www.gog.com/en/game/hexen_ii)
+
 **Flatpak:** Drop your game data into `~/.var/app/com.github.bobberb.hexenwail/.hexen2/`
 
 To launch a mod with portals data included: `glhexen2 -mod <modname>`
