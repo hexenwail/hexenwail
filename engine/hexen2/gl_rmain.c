@@ -1336,6 +1336,7 @@ static int		num_alias_instances;
 static alias_batch_t	alias_batches[MAX_ALIAS_BATCHES];
 static int		num_alias_batches;
 static GLuint		inst_vbo;	/* per-instance data VBO */
+static GLuint		inst_vao;	/* dedicated VAO for instanced drawing */
 
 /* Per-entity bookkeeping for shadow/fullbright passes after instanced draw */
 typedef struct {
@@ -1778,7 +1779,7 @@ static void R_DrawAliasInstanced (void)
 	if (num_alias_instances == 0 || !prog->base.program)
 		return;
 
-	/* Create instance VBO on first use */
+	/* Create instance VBO and VAO on first use */
 	if (!inst_vbo)
 	{
 		glGenBuffers_fp(1, &inst_vbo);
@@ -1787,6 +1788,8 @@ static void R_DrawAliasInstanced (void)
 				MAX_ALIAS_INSTANCES * sizeof(alias_instance_t),
 				NULL, GL_DYNAMIC_DRAW);
 		glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+
+		glGenVertexArrays_fp(1, &inst_vao);
 	}
 
 	/* Upload instance data */
@@ -1835,8 +1838,16 @@ static void R_DrawAliasInstanced (void)
 		glActiveTextureARB_fp(GL_TEXTURE1);
 		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
 
-		/* Bind model VAO (has texcoord VBO + IBO) */
-		glBindVertexArray_fp(gm->vao);
+		/* Use dedicated instancing VAO — don't corrupt model's VAO */
+		glBindVertexArray_fp(inst_vao);
+
+		/* Set up per-vertex texcoords from model's VBO */
+		glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_tc);
+		glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
+		glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+
+		/* Bind model's IBO */
+		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
 
 		/* Set up per-instance vertex attributes from inst_vbo */
 		glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
@@ -1985,7 +1996,12 @@ static void R_DrawAliasInstanced (void)
 				GL_Bind(batch->fb_tex);
 				glActiveTextureARB_fp(GL_TEXTURE1);
 				glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
-				glBindVertexArray_fp(gm->vao);
+
+				glBindVertexArray_fp(inst_vao);
+				glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_tc);
+				glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
+				glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+				glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
 				glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
 
 				for (loc = 0; loc < 4; loc++)
