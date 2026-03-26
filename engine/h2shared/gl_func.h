@@ -360,11 +360,20 @@ GL_FUNCTION_OPT(GLuint, glGetUniformBlockIndex, (GLuint, const char *))
 GL_FUNCTION_OPT(void, glUniformBlockBinding, (GLuint, GLuint, GLuint))
 GL_FUNCTION_OPT(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr))
 
+/* Compute shader (OpenGL 4.3) */
+GL_FUNCTION_OPT(void, glDispatchCompute, (GLuint, GLuint, GLuint))
+GL_FUNCTION_OPT(void, glMemoryBarrier, (GLbitfield))
+
+/* Indirect draw (OpenGL 4.0 / GL_ARB_draw_indirect) */
+GL_FUNCTION_OPT(void, glMultiDrawElementsIndirect, (GLenum, GLenum, const void *, GLsizei, GLsizei))
+GL_FUNCTION_OPT(void, glDrawElementsIndirect, (GLenum, GLenum, const void *))
+
 /* 3D texture (OpenGL 1.2+) */
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 
 /* Additional uniform functions */
 GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
+GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 
 #undef GL_FUNCTION_OPT
 
@@ -420,6 +429,10 @@ GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 #define glDrawArrays_fp			glDrawArrays
 #define glDrawElements_fp		glDrawElements
 #define glBindBufferBase_fp		glBindBufferBase
+#define glDispatchCompute_fp(x,y,z)	((void)0)
+#define glMemoryBarrier_fp(b)		((void)0)
+#define glMultiDrawElementsIndirect_fp(m,t,i,c,s) ((void)0)
+#define glDrawElementsIndirect_fp(m,t,i)	((void)0)
 #define glDrawElementsInstanced_fp	glDrawElementsInstanced
 #define glVertexAttribDivisor_fp	glVertexAttribDivisor
 #define glVertexAttribIPointer_fp	glVertexAttribIPointer
@@ -428,6 +441,7 @@ GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 #define glBindBufferRange_fp		glBindBufferRange
 #define glTexImage3D_fp			glTexImage3D
 #define glUniform3fv_fp			glUniform3fv
+#define glUniform4fv_fp			glUniform4fv
 #endif /* __EMSCRIPTEN__ */
 
 

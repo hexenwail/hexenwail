@@ -697,6 +697,14 @@ static void GL_LoadFunctionPointers (void)
 	glUniformBlockBinding_fp = (glUniformBlockBinding_f) SDL_GL_GetProcAddress("glUniformBlockBinding");
 	glBindBufferRange_fp = (glBindBufferRange_f) SDL_GL_GetProcAddress("glBindBufferRange");
 
+	glUniform4fv_fp = (glUniform4fv_f) SDL_GL_GetProcAddress("glUniform4fv");
+
+	/* Compute shader + indirect draw (GL 4.3) */
+	glDispatchCompute_fp = (glDispatchCompute_f) SDL_GL_GetProcAddress("glDispatchCompute");
+	glMemoryBarrier_fp = (glMemoryBarrier_f) SDL_GL_GetProcAddress("glMemoryBarrier");
+	glMultiDrawElementsIndirect_fp = (glMultiDrawElementsIndirect_f) SDL_GL_GetProcAddress("glMultiDrawElementsIndirect");
+	glDrawElementsIndirect_fp = (glDrawElementsIndirect_f) SDL_GL_GetProcAddress("glDrawElementsIndirect");
+
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
 
