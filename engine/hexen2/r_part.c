@@ -1451,11 +1451,16 @@ void R_DrawParticles (void)
 
     if (square)
     {
-        /* Square/point mode: use ImmBegin for all particles */
+        /* Square/point mode: batch points, flush when buffer nears full */
         glPointSize(2.0f);
         GL_ImmBegin();
         for (p = active_particles; p; p = p->next)
         {
+            if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 1)
+            {
+                GL_ImmEnd(GL_POINTS, &gl_shader_particle);
+                GL_ImmBegin();
+            }
             color = ((int)p->color) & 0x01ff;
             if (color < 256)
                 GL_ImmColor3ubv((byte *)&d_8to24table[color]);
@@ -1465,15 +1470,23 @@ void R_DrawParticles (void)
             GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
         }
         GL_ImmEnd(GL_POINTS, &gl_shader_particle);
+        glPointSize(1.0f);
     }
     else
     {
-        /* Billboard mode: CPU-built triangles via ImmBegin */
+        /* Billboard mode: CPU-built triangles, flush in batches */
         GL_ImmBegin();
         for (p = active_particles; p; p = p->next)
         {
             float scale;
             int i;
+
+            /* Flush batch before overflow (3 verts per particle) */
+            if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 3)
+            {
+                GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+                GL_ImmBegin();
+            }
 
             color = ((int)p->color) & 0x01ff;
             if (color < 256)
