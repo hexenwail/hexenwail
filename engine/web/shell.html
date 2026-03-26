@@ -32,9 +32,9 @@
     <h2>Hexen II Game Data Required</h2>
     <p>Upload your Hexen II <code>data1</code> folder to play (pak0.pak, pak1.pak)</p>
     <input type="file" id="fileInput" multiple accept=".pak,.dat,.cfg,.rc,.txt" />
-    <button id="selectButton">Select PAK Files</button>
-    <p style="font-size: 12px; color: #aaa;">or drag and drop pak files here</p>
-    <button id="clearCacheButton" style="display:none;">Clear Cached Data</button>
+    <button id="selectButton">Select Game Files</button>
+    <p style="font-size: 12px; color: #aaa;">or drag and drop files here</p>
+    <button id="clearCacheButton">Clear Cached Data</button>
     <div id="uploadStatus" style="font-size: 12px; color: #aaa;"></div>
   </div>
   <div id="status">Loading engine...</div>
@@ -246,15 +246,12 @@
     }
   });
 
-  // Restore from cache on startup
+  // Restore from cache on startup (but don't auto-start)
   (async () => {
     const cached = await loadFromCache();
     if (cached) {
-      await mountGameData(cached);
-      // Start game if cache had data
-      if (typeof Module !== 'undefined' && Module.callMain) {
-        Module.callMain();
-      }
+      console.log('Cached game data found. Click "Start Game" to begin.');
+      // Don't auto-start - let user control when game starts
     }
   })();
 
