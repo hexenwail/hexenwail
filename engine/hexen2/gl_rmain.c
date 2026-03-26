@@ -108,6 +108,7 @@ cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
+cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
 
 cvar_t	gl_clear = {"gl_clear", "1", CVAR_NONE};
 cvar_t	gl_cull = {"gl_cull", "1", CVAR_NONE};

@@ -437,7 +437,35 @@ byte *IMG_LoadExternalTexture (const char *name, int *width, int *height, qboole
 			return data;
 		}
 	}
-	// For world textures and particles, try textures/ and particles/ directories
+	// For GFX/HUD pics (names starting with "gfx/"), try direct path
+	else if (!strncmp(safename, "gfx/", 4))
+	{
+		q_snprintf (path, sizeof(path), "%s.png", safename);
+		data = IMG_LoadPNG (path, width, height, &alpha);
+		if (data)
+		{
+			*has_alpha = alpha;
+			if (developer.value >= 2)
+				Con_Printf ("Loaded external gfx: %s\n", path);
+			return data;
+		}
+
+		q_snprintf (path, sizeof(path), "%s.tga", safename);
+		data = IMG_LoadTGA (path, width, height, &alpha);
+		if (data)
+		{
+			*has_alpha = alpha;
+			return data;
+		}
+
+		q_snprintf (path, sizeof(path), "%s.pcx", safename);
+		data = IMG_LoadPCX (path, width, height);
+		if (data)
+		{
+			*has_alpha = true;
+			return data;
+		}
+	}
 	// For particles/ directory (e.g., "particles/blood")
 	else if (!strncmp(safename, "particles/", 10))
 	{
