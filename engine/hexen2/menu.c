@@ -1908,6 +1908,15 @@ static void M_DrawSlider (int x, int y, float range)
 	M_DrawCharacter (x + (SLIDER_RANGE-1)*8 * range, y, 259);
 }
 
+static void M_DrawSliderValue (int x, int y, float range, const char *fmt, float value)
+{
+	char	buf[32];
+
+	M_DrawSlider (x, y, range);
+	snprintf(buf, sizeof(buf), fmt, value);
+	M_PrintWhite (x + 100, y, buf);
+}
+
 void M_DrawCheckbox (int x, int y, int on)
 {
 	if (on)
@@ -2308,16 +2317,16 @@ static void M_Display_Draw (void)
 
 	M_Print (76, 92 + 8*DISP_GAMMA,	"Brightness    :");
 	r = (1.0 - v_gamma.value) / 0.7;
-	M_DrawSlider (220, 92 + 8*DISP_GAMMA, r);
+	M_DrawSliderValue (220, 92 + 8*DISP_GAMMA, r, "%.2f", v_gamma.value);
 
 	M_Print (76, 92 + 8*DISP_CONTRAST,	"Contrast      :");
 	r = (v_contrast.value - 0.5) / 1.5;
-	M_DrawSlider (220, 92 + 8*DISP_CONTRAST, r);
+	M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
 
 #ifdef GLQUAKE
 	M_Print (76, 92 + 8*DISP_SCALE,	"UI Scale      :");
 	r = VID_ReportConsize();
-	M_DrawSlider (220, 92 + 8*DISP_SCALE, (r-1)/2);
+	M_DrawSliderValue (220, 92 + 8*DISP_SCALE, (r-1)/2, "%.2fx", r);
 #endif
 
 	M_Print (76, 92 + 8*DISP_SCRSIZE,	"HUD Layout    :");
@@ -2633,7 +2642,7 @@ static void M_Rendering_Draw (void)
 
 	M_Print (76, 92 + 8*REND_DITHER,	"Dither Amount :");
 	r = r_dither.value / 2.0;
-	M_DrawSlider (220, 92 + 8*REND_DITHER, r);
+	M_DrawSliderValue (220, 92 + 8*REND_DITHER, r, "%.0f%%", r_dither.value * 50);
 
 	M_Print (76, 92 + 8*REND_TEXFILTER,	"Textures      :");
 	M_PrintWhite (220, 92 + 8*REND_TEXFILTER,
@@ -2669,7 +2678,7 @@ static void M_Rendering_Draw (void)
 
 	M_Print (76, 92 + 8*REND_WATERALPHA,	"Water Alpha   :");
 	r = r_wateralpha.value;
-	M_DrawSlider (220, 92 + 8*REND_WATERALPHA, r);
+	M_DrawSliderValue (220, 92 + 8*REND_WATERALPHA, r, "%.0f%%", r * 100);
 
 	M_Print (76, 92 + 8*REND_WATERWARP,	"Water Warp    :");
 	M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
@@ -2688,7 +2697,7 @@ static void M_Rendering_Draw (void)
 	if (gl_flashintensity.value <= 0)
 		M_PrintWhite (220, 92 + 8*REND_FLASHINTENSITY, "Off");
 	else
-		M_DrawSlider (220, 92 + 8*REND_FLASHINTENSITY, gl_flashintensity.value / 2.0f);
+		M_DrawSliderValue (220, 92 + 8*REND_FLASHINTENSITY, gl_flashintensity.value / 2.0f, "%.2f", gl_flashintensity.value);
 
 	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
 	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
@@ -2699,7 +2708,7 @@ static void M_Rendering_Draw (void)
 		if (mb <= 0)
 			M_PrintWhite (220, 92 + 8*REND_MOTIONBLUR, "Off");
 		else
-			M_DrawSlider (220, 92 + 8*REND_MOTIONBLUR, mb);
+			M_DrawSliderValue (220, 92 + 8*REND_MOTIONBLUR, mb, "%.0f%%", mb * 100);
 	}
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, REND_ITEMS); if (h >= 0) rendering_cursor = h; }
@@ -2847,11 +2856,11 @@ static void M_Sound_Draw (void)
 
 	M_Print (76, 92 + 8*SND_MUSICVOL,	"Music Volume  :");
 	r = bgmvolume.value;
-	M_DrawSlider (220, 92 + 8*SND_MUSICVOL, r);
+	M_DrawSliderValue (220, 92 + 8*SND_MUSICVOL, r, "%.0f%%", r * 100);
 
 	M_Print (76, 92 + 8*SND_SFXVOL,	"Sound Volume  :");
 	r = sfxvolume.value;
-	M_DrawSlider (220, 92 + 8*SND_SFXVOL, r);
+	M_DrawSliderValue (220, 92 + 8*SND_SFXVOL, r, "%.0f%%", r * 100);
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, SND_ITEMS); if (h >= 0) sound_cursor = h; }
 	M_DrawCharacter (64, 92 + sound_cursor*8, 12+((int)(realtime*4)&1));
@@ -3007,7 +3016,7 @@ static void M_Game_Draw (void)
 
 	M_Print (76, 92 + 8*GAME_FOV,		"Field of View :");
 	r = (scr_fov.value - 60) / (130 - 60);
-	M_DrawSlider (220, 92 + 8*GAME_FOV, r);
+	M_DrawSliderValue (220, 92 + 8*GAME_FOV, r, "%.0f°", scr_fov.value);
 
 	M_Print (76, 92 + 8*GAME_VIEWMODEL_FOV,	"Weapon FOV    :");
 	{
@@ -3017,7 +3026,7 @@ static void M_Game_Draw (void)
 		else
 		{
 			r = (wfov - 30) / (130 - 30);
-			M_DrawSlider (220, 92 + 8*GAME_VIEWMODEL_FOV, r);
+			M_DrawSliderValue (220, 92 + 8*GAME_VIEWMODEL_FOV, r, "%.0f°", wfov);
 		}
 	}
 
@@ -3026,7 +3035,7 @@ static void M_Game_Draw (void)
 
 	M_Print (76, 92 + 8*GAME_MOUSESPEED,	"Mouse Speed   :");
 	r = (sensitivity.value - 1) / 10;
-	M_DrawSlider (220, 92 + 8*GAME_MOUSESPEED, r);
+	M_DrawSliderValue (220, 92 + 8*GAME_MOUSESPEED, r, "%.2f", sensitivity.value);
 
 	M_Print (76, 92 + 8*GAME_INVMOUSE,	"Invert Mouse  :");
 	M_DrawCheckbox (220, 92 + 8*GAME_INVMOUSE, m_pitch.value < 0);
@@ -3048,11 +3057,11 @@ static void M_Game_Draw (void)
 
 	M_Print (76, 92 + 8*GAME_VIEWBOB,	"View Bob      :");
 	r = Cvar_VariableValue("cl_bob") / 0.05;
-	M_DrawSlider (220, 92 + 8*GAME_VIEWBOB, r);
+	M_DrawSliderValue (220, 92 + 8*GAME_VIEWBOB, r, "%.0f%%", Cvar_VariableValue("cl_bob") * 100);
 
 	M_Print (76, 92 + 8*GAME_VIEWROLL,	"View Roll     :");
 	r = Cvar_VariableValue("cl_rollangle") / 5.0;
-	M_DrawSlider (220, 92 + 8*GAME_VIEWROLL, r);
+	M_DrawSliderValue (220, 92 + 8*GAME_VIEWROLL, r, "%.0f%%", Cvar_VariableValue("cl_rollangle") * 20);
 
 	M_Print (76, 92 + 8*GAME_CONTRANS,	"Console Alpha :");
 	{

@@ -55,6 +55,7 @@ static GLint	pp_loc_fxaa;
 static GLint	pp_loc_rcpframe;
 static GLint	pp_loc_motionblur;
 static GLint	pp_loc_viewdelta;
+static GLint	pp_loc_hdr_exposure;
 
 /* Palette LUT state */
 static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
@@ -70,6 +71,8 @@ static int	pp_saved_glwidth, pp_saved_glheight;	/* original viewport dims */
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
 cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "1.0", CVAR_ARCHIVE};	/* dither strength (0-2) */
+cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
+cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
 
 /* ------------------------------------------------------------------ */
 
@@ -88,6 +91,8 @@ static qboolean PP_NeedsPostProcess (void)
 	if (r_waterwarp.value > 0)
 		return true;
 	if (Cvar_VariableValue("r_motionblur") > 0)
+		return true;
+	if (r_hdr.integer)
 		return true;
 	return false;
 }
@@ -123,10 +128,13 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 
 	PP_DeleteNativeFBO();
 
+	{
+	GLenum native_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGB10_A2;
+	GLenum native_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_native_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_native_color_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGB10_A2, width, height, 0,
-			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, native_fmt, width, height, 0,
+			GL_RGBA, native_type, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -156,6 +164,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 
 	pp_native_w = width;
 	pp_native_h = height;
+	}  /* end native_fmt scope */
 	return true;
 }
 
@@ -167,10 +176,13 @@ static qboolean PP_CreateFBO (int width, int height)
 	PP_DeleteFBO();
 
 	/* resolve texture (always non-multisampled — this is what the shader reads) */
+	{
+		GLenum color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGB10_A2;
+		GLenum color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGB10_A2, width, height, 0,
-			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, width, height, 0,
+			GL_RGBA, color_type, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -182,7 +194,7 @@ static qboolean PP_CreateFBO (int width, int height)
 		/* multisampled render FBO */
 		glGenRenderbuffers_fp(1, &pp_color_rb);
 		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_color_rb);
-		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_RGB10_A2, width, height);
+		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, color_fmt, width, height);
 
 		glGenRenderbuffers_fp(1, &pp_depth_rb);
 		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
@@ -263,6 +275,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	pp_samples = 0;
 	pp_width = width;
 	pp_height = height;
+	}  /* end color_fmt scope */
 	return true;
 }
 
@@ -296,6 +309,7 @@ static const char pp_frag_src[] =
 	"uniform float fxaa_on;\n"
 	"uniform vec2 rcpFrame;\n"
 	"uniform float motionblur;\n"
+	"uniform float hdr_exposure;\n"
 	"uniform vec2 viewdelta;\n"
 	"in vec2 v_texcoord;\n"
 	"out vec4 fragColor;\n"
@@ -352,6 +366,12 @@ static const char pp_frag_src[] =
 	"        color.rgb += texture(scene, uv + vel * 0.50).rgb * 0.15;\n"
 	"        color.rgb += texture(scene, uv + vel * 0.75).rgb * 0.125;\n"
 	"        color.rgb += texture(scene, uv + vel * 1.00).rgb * 0.125;\n"
+	"    }\n"
+	"    /* HDR tonemapping (ACES filmic) */\n"
+	"    if (hdr_exposure > 0.0) {\n"
+	"        color.rgb *= hdr_exposure;\n"
+	"        vec3 x = color.rgb;\n"
+	"        color.rgb = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);\n"
 	"    }\n"
 	"    if (contrast != 1.0)\n"
 	"        color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
@@ -446,6 +466,7 @@ static qboolean PP_InitShader (void)
 	pp_loc_rcpframe = glGetUniformLocation_fp(pp_program, "rcpFrame");
 	pp_loc_motionblur = glGetUniformLocation_fp(pp_program, "motionblur");
 	pp_loc_viewdelta = glGetUniformLocation_fp(pp_program, "viewdelta");
+	pp_loc_hdr_exposure = glGetUniformLocation_fp(pp_program, "hdr_exposure");
 
 	/* bind samplers once */
 	glUseProgram_fp(pp_program);
@@ -698,6 +719,7 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	}
 	if (pp_loc_gamma >= 0)     glUniform1f_fp(pp_loc_gamma,    1.0f);
 	if (pp_loc_contrast >= 0)  glUniform1f_fp(pp_loc_contrast, 1.0f);
+	if (pp_loc_hdr_exposure >= 0) glUniform1f_fp(pp_loc_hdr_exposure, 0.0f);
 	if (pp_loc_softemu >= 0)   glUniform1i_fp(pp_loc_softemu,  0);
 	if (pp_loc_dither >= 0)    glUniform1f_fp(pp_loc_dither,   0.0f);
 	if (pp_loc_fxaa >= 0)      glUniform1f_fp(pp_loc_fxaa,     0.0f);
@@ -987,6 +1009,8 @@ apply_shader:
 		glUniform1f_fp(pp_loc_gamma, v_gamma.value);
 	if (pp_loc_contrast >= 0)
 		glUniform1f_fp(pp_loc_contrast, v_contrast.value);
+	if (pp_loc_hdr_exposure >= 0)
+		glUniform1f_fp(pp_loc_hdr_exposure, r_hdr.integer ? r_hdr_exposure.value : 0.0f);
 
 	/* softemu uniforms */
 	if (pp_loc_softemu >= 0)
