@@ -363,6 +363,7 @@ void R_FreeWorldVBO (void);
 void R_BuildWorldCull (void);
 void R_FreeWorldCull (void);
 void R_DispatchWorldCull (void);
+void R_DrawWorldCulled (void);
 qboolean R_WorldCullAvailable (void);
 void GL_SetupLightmapFmt (void);
 void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr);

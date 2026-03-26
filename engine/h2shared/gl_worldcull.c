@@ -64,6 +64,9 @@ static GLuint	cull_surf_ssbo;		/* binding 0: gpu_surface_t[] */
 static GLuint	cull_marksurf_ssbo;	/* binding 1: gpu_marksurf_t[] */
 static GLuint	cull_vis_ssbo;		/* binding 2: PVS bitvector (uint[]) */
 static GLuint	cull_indirect_buf;	/* binding 3: gpu_indirect_cmd_t[] */
+static GLuint	cull_src_ibo;		/* binding 4: source indices (read-only copy) */
+static GLuint	cull_dst_ibo;		/* binding 5: dest indices (compute writes, draw reads) */
+static int	cull_total_indices;	/* total index count across all buckets */
 
 static GLuint	cull_clear_prog;	/* clear_indirect compute shader */
 static GLuint	cull_mark_prog;		/* cull_mark compute shader */
@@ -153,10 +156,15 @@ static const char cull_mark_src[] =
 	"layout(std430, binding = 3) buffer IndirectBuffer {\n"
 	"    IndirectCmd cmds[];\n"
 	"};\n"
+	"layout(std430, binding = 4) readonly buffer SrcIndexBuffer {\n"
+	"    uint src_indices[];\n"
+	"};\n"
+	"layout(std430, binding = 5) writeonly buffer DstIndexBuffer {\n"
+	"    uint dst_indices[];\n"
+	"};\n"
 	"\n"
 	"uniform vec3 u_vieworg;\n"
-	"uniform vec4 u_frustum[4];\n"  /* 4 frustum planes (normal.xyz + dist) */
-	"uniform int u_framecount;\n"
+	"uniform vec4 u_frustum[4];\n"
 	"uniform int u_num_marksurfs;\n"
 	"\n"
 	"void main() {\n"
@@ -167,36 +175,43 @@ static const char cull_mark_src[] =
 	"    int leaf = ms.leaf_idx;\n"
 	"    int si = ms.surf_idx;\n"
 	"\n"
-	"    /* PVS test: check if leaf is visible */\n"
+	"    /* PVS test */\n"
 	"    if ((vis[leaf >> 5] & (1u << (leaf & 31))) == 0u)\n"
 	"        return;\n"
 	"\n"
 	"    Surface s = surfaces[si];\n"
 	"\n"
-	"    /* Skip sky and liquid surfaces — handled separately */\n"
-	"    if ((s.flags & 0x15) != 0) return;\n"  /* SURF_DRAWSKY|SURF_DRAWTURB|SURF_UNDERWATER */
+	"    /* Skip sky, liquid, fence, underwater */\n"
+	"    if ((s.flags & 0x35) != 0) return;\n"
+	"\n"
+	"    /* Skip surfaces with no VBO data */\n"
+	"    if (s.numindices <= 0) return;\n"
 	"\n"
 	"    /* Backface cull */\n"
-	"    float dot = dot(s.plane.xyz, u_vieworg) - s.plane.w;\n"
-	"    bool planeback = (s.flags & 2) != 0;\n"  /* SURF_PLANEBACK */
-	"    if (planeback && dot > 0.01) return;\n"
-	"    if (!planeback && dot < -0.01) return;\n"
+	"    float d = dot(s.plane.xyz, u_vieworg) - s.plane.w;\n"
+	"    bool planeback = (s.flags & 2) != 0;\n"
+	"    if (planeback && d > 0.01) return;\n"
+	"    if (!planeback && d < -0.01) return;\n"
 	"\n"
-	"    /* Frustum cull (4 planes, test AABB) */\n"
+	"    /* Frustum cull (4 planes) */\n"
 	"    for (int p = 0; p < 4; p++) {\n"
 	"        vec3 n = u_frustum[p].xyz;\n"
-	"        float d = u_frustum[p].w;\n"
-	"        /* Find the AABB corner most in the direction of the plane normal */\n"
+	"        float fd = u_frustum[p].w;\n"
 	"        vec3 pvert = vec3(\n"
 	"            n.x > 0.0 ? s.maxs.x : s.mins.x,\n"
 	"            n.y > 0.0 ? s.maxs.y : s.mins.y,\n"
 	"            n.z > 0.0 ? s.maxs.z : s.mins.z\n"
 	"        );\n"
-	"        if (dot(n, pvert) + d < 0.0) return;\n"
+	"        if (dot(n, pvert) + fd < 0.0) return;\n"
 	"    }\n"
 	"\n"
-	"    /* Surface passed all tests — add to its texture bucket */\n"
-	"    atomicAdd(cmds[s.tex_bucket].count, uint(s.numindices));\n"
+	"    /* Claim index slots in the texture bucket's indirect command */\n"
+	"    uint slot = atomicAdd(cmds[s.tex_bucket].count, uint(s.numindices));\n"
+	"    uint dst_base = cmds[s.tex_bucket].firstIndex + slot;\n"
+	"\n"
+	"    /* Copy indices from source to destination */\n"
+	"    for (int i = 0; i < s.numindices; i++)\n"
+	"        dst_indices[dst_base + uint(i)] = src_indices[s.firstindex + i];\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */
@@ -374,18 +389,39 @@ void R_BuildWorldCull (void)
 				NULL, GL_DYNAMIC_DRAW);
 	}
 
-	/* Indirect draw buffer (one command per texture bucket) */
+	/* Count max indices per texture bucket for firstIndex allocation */
 	{
-		gpu_indirect_cmd_t *cmds = (gpu_indirect_cmd_t *)
-			calloc(cull_num_buckets, sizeof(gpu_indirect_cmd_t));
+		int *bucket_max = (int *) calloc(cull_num_buckets, sizeof(int));
+		gpu_indirect_cmd_t *cmds;
+		int offset;
+
+		for (i = 0; i < cull_num_surfs; i++)
+		{
+			surf = &m->surfaces[i];
+			if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB | SURF_UNDERWATER))
+				continue;
+			if (surf->vbo_numtris <= 0)
+				continue;
+			int bucket = cull_bucket_map[i];
+			if (bucket >= 0 && bucket < cull_num_buckets)
+				bucket_max[bucket] += surf->vbo_numtris * 3;
+		}
+
+		/* Allocate contiguous regions in the dest IBO per bucket */
+		cmds = (gpu_indirect_cmd_t *) calloc(cull_num_buckets, sizeof(gpu_indirect_cmd_t));
+		offset = 0;
 		for (i = 0; i < cull_num_buckets; i++)
 		{
-			cmds[i].count = 0;
+			cmds[i].count = 0;		/* filled by compute each frame */
 			cmds[i].instanceCount = 1;
-			cmds[i].firstIndex = 0;
+			cmds[i].firstIndex = offset;	/* fixed region start */
 			cmds[i].baseVertex = 0;
 			cmds[i].baseInstance = 0;
+			offset += bucket_max[i];
 		}
+		cull_total_indices = offset;
+		free(bucket_max);
+
 		glGenBuffers_fp(1, &cull_indirect_buf);
 		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
 		glBufferData_fp(GL_DRAW_INDIRECT_BUFFER,
@@ -394,11 +430,63 @@ void R_BuildWorldCull (void)
 		free(cmds);
 	}
 
+	/* Source index SSBO: read-only copy of world IBO for compute to read from.
+	 * We read the data back from the existing world IBO (built by R_BuildWorldVBO). */
+	{
+		extern GLuint world_ibo;
+		extern int world_num_indices;
+		unsigned int *idx_data;
+
+		if (world_ibo && world_num_indices > 0)
+		{
+			idx_data = (unsigned int *) malloc(world_num_indices * sizeof(unsigned int));
+			/* Rebuild index data from surface polys (same as R_BuildWorldVBO) */
+			{
+				int idx_pos = 0;
+				for (i = 0; i < m->numsurfaces; i++)
+				{
+					glpoly_t *p;
+					surf = &m->surfaces[i];
+					p = surf->polys;
+					if (!p || p->numverts < 3)
+						continue;
+					if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+						continue;
+					for (j = 2; j < p->numverts; j++)
+					{
+						idx_data[idx_pos++] = surf->vbo_firstvert;
+						idx_data[idx_pos++] = surf->vbo_firstvert + j - 1;
+						idx_data[idx_pos++] = surf->vbo_firstvert + j;
+					}
+				}
+			}
+
+			glGenBuffers_fp(1, &cull_src_ibo);
+			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_src_ibo);
+			glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+					world_num_indices * sizeof(unsigned int),
+					idx_data, GL_STATIC_DRAW);
+			free(idx_data);
+		}
+	}
+
+	/* Dest index buffer: written by compute, read as GL_ELEMENT_ARRAY_BUFFER.
+	 * Sized to hold the worst case (all surfaces visible). */
+	if (cull_total_indices > 0)
+	{
+		glGenBuffers_fp(1, &cull_dst_ibo);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_dst_ibo);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				cull_total_indices * sizeof(unsigned int),
+				NULL, GL_DYNAMIC_DRAW);
+	}
+
 	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
 	cull_initialized = true;
 
-	Con_SafePrintf("GPU world cull: %d surfaces, %d marksurfs, %d tex buckets\n",
-		       cull_num_surfs, cull_num_marksurfs, cull_num_buckets);
+	Con_SafePrintf("GPU world cull: %d surfs, %d marksurfs, %d buckets, %d max indices\n",
+		       cull_num_surfs, cull_num_marksurfs, cull_num_buckets, cull_total_indices);
 }
 
 void R_FreeWorldCull (void)
@@ -407,10 +495,13 @@ void R_FreeWorldCull (void)
 	if (cull_marksurf_ssbo) { glDeleteBuffers_fp(1, &cull_marksurf_ssbo); cull_marksurf_ssbo = 0; }
 	if (cull_vis_ssbo) { glDeleteBuffers_fp(1, &cull_vis_ssbo); cull_vis_ssbo = 0; }
 	if (cull_indirect_buf) { glDeleteBuffers_fp(1, &cull_indirect_buf); cull_indirect_buf = 0; }
+	if (cull_src_ibo) { glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
+	if (cull_dst_ibo) { glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
 	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
 	cull_initialized = false;
+	cull_total_indices = 0;
 }
 
 qboolean R_WorldCullAvailable (void)
@@ -463,7 +554,6 @@ void R_DispatchWorldCull (void)
 	/* Pass 2: cull + mark surfaces */
 	glUseProgram_fp(cull_mark_prog);
 	glUniform3f_fp(cull_mark_u_vieworg, r_origin[0], r_origin[1], r_origin[2]);
-	glUniform1i_fp(cull_mark_u_framecount, framecount);
 	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
 
 	/* Upload frustum planes */
@@ -484,6 +574,8 @@ void R_DispatchWorldCull (void)
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, cull_marksurf_ssbo);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, cull_vis_ssbo);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 4, cull_src_ibo);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 5, cull_dst_ibo);
 
 	glDispatchCompute_fp((cull_num_marksurfs + 63) / 64, 1, 1);
 	glMemoryBarrier_fp(GL_COMMAND_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT |
@@ -491,6 +583,72 @@ void R_DispatchWorldCull (void)
 
 	glUseProgram_fp(0);
 }
+
+/* ------------------------------------------------------------------ */
+/* Draw with indirect commands after compute cull                      */
+/* ------------------------------------------------------------------ */
+
+void R_DrawWorldCulled (void)
+{
+	int		i;
+	float		mvp[16], mv[16];
+	extern GLuint	world_vao;
+	extern float	r_fog_density;
+	extern float	r_fog_color[3];
+	extern GLuint	lm_atlas_texture;
+	extern entity_t	r_worldentity;
+
+	if (!cull_initialized || !cull_dst_ibo || cull_total_indices <= 0)
+		return;
+
+	/* Bind world VAO but replace its IBO with the compute-written dest IBO */
+	glBindVertexArray_fp(world_vao);
+	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, cull_dst_ibo);
+	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+
+	/* Set up world shader */
+	glUseProgram_fp(gl_shader_world.program);
+	GL_GetMVP(mvp);
+	GL_GetModelview(mv);
+	if (gl_shader_world.u_mvp >= 0)
+		glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+	if (gl_shader_world.u_modelview >= 0)
+		glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+	if (gl_shader_world.u_fog_density >= 0)
+		glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+	if (gl_shader_world.u_fog_color >= 0)
+		glUniform3f_fp(gl_shader_world.u_fog_color,
+			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (gl_shader_world.u_alpha_threshold >= 0)
+		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+
+	/* Bind lightmap atlas on unit 1 */
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+
+	/* Draw each texture bucket via indirect commands */
+	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
+
+	for (i = 0; i < cull_num_buckets; i++)
+	{
+		texture_t *t = cl.worldmodel->textures[i];
+		if (!t)
+			continue;
+
+		/* Bind diffuse texture */
+		GL_Bind(t->gl_texturenum);
+
+		/* Issue indirect draw for this bucket */
+		glDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,
+					  (void *)((size_t)i * sizeof(gpu_indirect_cmd_t)));
+	}
+
+	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
+}
+
 
 #endif /* !__EMSCRIPTEN__ */
 #endif /* GLQUAKE */
