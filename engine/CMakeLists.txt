@@ -464,31 +464,15 @@ if(EMSCRIPTEN)
     set(EXECUTABLE_NAME hexenwail)
     add_executable(${EXECUTABLE_NAME} ${ALL_SOURCES})
     # Emscripten link flags: WebGL2, memory growth, shell template
-    # Note: -sUSE_SDL=3 requires network access to download SDL3 port.
-    # For offline builds, set CMAKE_WASM_NO_SDL_PORT=1 or use shell-wasm.nix
-    if(DEFINED CMAKE_WASM_NO_SDL_PORT)
-      # Offline mode: skip SDL3 port, use minimal stubs
-      target_link_options(${EXECUTABLE_NAME} PRIVATE
-          -sFULL_ES3=1
-          -sALLOW_MEMORY_GROWTH=1
-          -sINITIAL_MEMORY=134217728
-          -sSTACK_SIZE=2097152
-          # -sUSE_SDL=3 disabled to avoid network requirement
-          --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
-      )
-      # Define WASM_OFFLINE_MODE for source code
-      add_compile_definitions(WASM_OFFLINE_MODE=1)
-    else()
-      # Normal mode with SDL3 port support
-      target_link_options(${EXECUTABLE_NAME} PRIVATE
-          -sFULL_ES3=1
-          -sALLOW_MEMORY_GROWTH=1
-          -sINITIAL_MEMORY=134217728
-          -sSTACK_SIZE=2097152
-          -sUSE_SDL=3
-          --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
-      )
-    endif()
+    # For pure Nix builds, use: nix develop -f shell-wasm.nix
+    target_link_options(${EXECUTABLE_NAME} PRIVATE
+        -sFULL_ES3=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=134217728
+        -sSTACK_SIZE=2097152
+        -sUSE_SDL=3
+        --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
+    )
     # Preload game data if specified
     if(GAME_DATA_DIR)
         target_link_options(${EXECUTABLE_NAME} PRIVATE
