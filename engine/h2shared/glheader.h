@@ -136,6 +136,22 @@ typedef ptrdiff_t GLintptr;
 #define GL_INFO_LOG_LENGTH			0x8B84
 #endif
 
+/* Integer texture formats (OpenGL 3.0 / ES 3.0) */
+#ifndef GL_R32UI
+#define GL_R32UI				0x8236
+#endif
+#ifndef GL_RED_INTEGER
+#define GL_RED_INTEGER				0x8D94
+#endif
+
+/* UBO (Uniform Buffer Object) — OpenGL 3.1 / ES 3.0 */
+#ifndef GL_UNIFORM_BUFFER
+#define GL_UNIFORM_BUFFER			0x8A11
+#endif
+#ifndef GL_INVALID_INDEX
+#define GL_INVALID_INDEX			0xFFFFFFFFu
+#endif
+
 /* SSBO (Shader Storage Buffer Object) — OpenGL 4.3 */
 #ifndef GL_SHADER_STORAGE_BUFFER
 #define GL_SHADER_STORAGE_BUFFER		0x90D2

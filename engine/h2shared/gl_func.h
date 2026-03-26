@@ -342,9 +342,20 @@ GL_FUNCTION_OPT(void, glDeleteVertexArrays, (GLsizei, const GLuint *))
 GL_FUNCTION_OPT(void, glBindVertexArray, (GLuint))
 GL_FUNCTION_OPT(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *))
 GL_FUNCTION_OPT(void, glEnableVertexAttribArray, (GLuint))
+GL_FUNCTION_OPT(void, glDisableVertexAttribArray, (GLuint))
 GL_FUNCTION_OPT(void, glDrawArrays, (GLenum, GLint, GLsizei))
 GL_FUNCTION_OPT(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
 GL_FUNCTION_OPT(void, glBindBufferBase, (GLenum, GLuint, GLuint))
+
+/* Instancing (OpenGL 3.1 / ES 3.0) */
+GL_FUNCTION_OPT(void, glDrawElementsInstanced, (GLenum, GLsizei, GLenum, const void *, GLsizei))
+GL_FUNCTION_OPT(void, glVertexAttribDivisor, (GLuint, GLuint))
+GL_FUNCTION_OPT(void, glVertexAttribIPointer, (GLuint, GLint, GLenum, GLsizei, const void *))
+
+/* UBO (OpenGL 3.1 / ES 3.0) */
+GL_FUNCTION_OPT(GLuint, glGetUniformBlockIndex, (GLuint, const char *))
+GL_FUNCTION_OPT(void, glUniformBlockBinding, (GLuint, GLuint, GLuint))
+GL_FUNCTION_OPT(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr))
 
 /* 3D texture (OpenGL 1.2+) */
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
@@ -401,9 +412,16 @@ GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 #define glBindVertexArray_fp		glBindVertexArray
 #define glVertexAttribPointer_fp	glVertexAttribPointer
 #define glEnableVertexAttribArray_fp	glEnableVertexAttribArray
+#define glDisableVertexAttribArray_fp	glDisableVertexAttribArray
 #define glDrawArrays_fp			glDrawArrays
 #define glDrawElements_fp		glDrawElements
 #define glBindBufferBase_fp		glBindBufferBase
+#define glDrawElementsInstanced_fp	glDrawElementsInstanced
+#define glVertexAttribDivisor_fp	glVertexAttribDivisor
+#define glVertexAttribIPointer_fp	glVertexAttribIPointer
+#define glGetUniformBlockIndex_fp	glGetUniformBlockIndex
+#define glUniformBlockBinding_fp	glUniformBlockBinding
+#define glBindBufferRange_fp		glBindBufferRange
 #define glTexImage3D_fp			glTexImage3D
 #define glUniform3fv_fp			glUniform3fv
 #endif /* __EMSCRIPTEN__ */
