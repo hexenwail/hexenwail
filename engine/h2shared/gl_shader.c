@@ -438,7 +438,9 @@ static const char spart_gpu_vert[] =
  */
 static const char salias_inst_vert[] =
 	GLSL_VERT_HEADER
+#ifdef __EMSCRIPTEN__
 	"precision highp usampler2D;\n"
+#endif
 	"\n"
 	"in vec2 a_texcoord;\n"
 	"\n"

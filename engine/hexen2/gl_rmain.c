@@ -1818,6 +1818,10 @@ static void R_DrawAliasInstanced (void)
 	/* Set alpha test state for index-0 transparency */
 	GL_SetAlphaThreshold(0.666f);
 
+	if (developer.value)
+		Con_DPrintf("AliasInst: %d instances, %d batches\n",
+			    num_alias_instances, num_alias_batches);
+
 	/* Draw each batch */
 	for (b = 0; b < num_alias_batches; b++)
 	{
