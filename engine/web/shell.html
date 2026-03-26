@@ -161,26 +161,19 @@
 
     gameDataReady = true;
     document.getElementById('gameContainer').classList.add('playing');
-    console.log('Game data ready! Starting engine...');
+    console.log('Game data ready!');
 
-    // Wait for Module to be fully initialized
-    let attempts = 0;
-    while ((typeof Module === 'undefined' || !Module.callMain) && attempts < 100) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-      attempts++;
-    }
-
-    // Start the engine if not already running
-    if (typeof Module !== 'undefined' && Module.callMain) {
+    // Try to start the engine if Module is already initialized
+    if (typeof Module !== 'undefined' && Module.callMain && Module.runtimeInitialized) {
       try {
-        console.log('Calling Module.callMain()...');
+        console.log('Module already initialized, calling callMain...');
         Module.callMain();
-        console.log('Module.callMain() returned');
       } catch (e) {
         console.error('callMain error:', e);
       }
     } else {
-      console.error('Module or callMain not available after waiting!');
+      console.log('Waiting for Module to initialize...');
+      // onRuntimeInitialized callback will call callMain when ready
     }
 
     return true;
@@ -273,6 +266,18 @@
         return;  // Don't log this error
       }
       console.error('[ENGINE ERROR]', text);
+    },
+    onRuntimeInitialized: function() {
+      console.log('✓ Emscripten runtime initialized');
+      // If game data is already loaded, start the game now
+      if (gameDataReady && Module.callMain) {
+        console.log('Game data ready, starting engine...');
+        try {
+          Module.callMain();
+        } catch (e) {
+          console.error('callMain error:', e);
+        }
+      }
     },
     setStatus: function(text) {
       if (gameDataReady || !text) {
