@@ -22,6 +22,7 @@
 
 #include "quakedef.h"
 #include "pakfile.h"
+#include "bgmusic.h"
 #include <errno.h>
 #ifdef PLATFORM_WINDOWS
 #include <io.h>
@@ -1419,6 +1420,7 @@ static void Host_Game_f (void)
 	{ extern void TexMgr_NewGame (void); TexMgr_NewGame (); }
 #endif
 	Draw_ReInit ();
+	BGM_Stop ();	/* stop music from previous game */
 
 	/* clean slate: reload binds, aliases, and configs from new mod */
 	Cbuf_AddText ("unbindall\nunaliasall\nexec hexen.rc\n");
