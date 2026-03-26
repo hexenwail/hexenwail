@@ -63,7 +63,7 @@ endif()
 
 # Platform-specific defines
 if(EMSCRIPTEN)
-    add_definitions(-DGLQUAKE -DSDLQUAKE -DNO_SPLASHES)
+    add_definitions(-DGLQUAKE -DSDLQUAKE -DNO_SPLASHES -D__EMSCRIPTEN__)
     set(USE_ALSA OFF)
     set(USE_CODEC_FLAC OFF)
     set(USE_CODEC_OPUS OFF)
@@ -108,9 +108,19 @@ if(WIN32)
     set(SDL_FOUND TRUE)
 else()
     if(EMSCRIPTEN)
-        # Emscripten provides SDL3 via -sUSE_SDL=3 link flag, no library needed
-        set(SDL_LIBRARY "")  # Link flag is set in target_link_options
-        set(SDL_INCLUDE_DIR "")  # Emscripten provides headers
+        # Emscripten: find SDL3 headers via pkg-config
+        find_package(PkgConfig QUIET)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(SDL3 QUIET sdl3)
+            if(SDL3_FOUND)
+                set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
+            else()
+                set(SDL_INCLUDE_DIR "")
+            endif()
+        else()
+            set(SDL_INCLUDE_DIR "")
+        endif()
+        set(SDL_LIBRARY "")  # Link flag is set in target_link_options (-sUSE_SDL=3)
     else()
         find_package(SDL3 QUIET)
         if(SDL3_FOUND)
