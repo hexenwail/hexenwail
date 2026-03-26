@@ -1702,18 +1702,22 @@ static void R_CollectAndBatchAliasInstances (void)
 		if (e == &cl_entities[cl.viewentity])
 			e->angles[0] *= 0.3;
 
+		int old_count = num_alias_instances;
 		if (R_CollectAliasInstance(e))
 		{
-			/* Record sort key */
-			aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata(e->model);
-			int skinnum = e->skinnum;
-			int anim = (int)(cl.time * 10) & 3;
-			if (skinnum >= hdr->numskins || skinnum < 0) skinnum = 0;
+			/* Record sort key only if instance was actually collected */
+			if (num_alias_instances > old_count)
+			{
+				aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata(e->model);
+				int skinnum = e->skinnum;
+				int anim = (int)(cl.time * 10) & 3;
+				if (skinnum >= hdr->numskins || skinnum < 0) skinnum = 0;
 
-			inst_sort_keys[num_alias_instances - 1].instance_idx = num_alias_instances - 1;
-			inst_sort_keys[num_alias_instances - 1].model_key = (size_t)hdr;
-			inst_sort_keys[num_alias_instances - 1].skin_tex = hdr->gl_texturenum[skinnum][anim];
-			inst_sort_keys[num_alias_instances - 1].fb_tex = hdr->gl_fb_texturenum[skinnum][anim];
+				inst_sort_keys[num_alias_instances - 1].instance_idx = num_alias_instances - 1;
+				inst_sort_keys[num_alias_instances - 1].model_key = (size_t)hdr;
+				inst_sort_keys[num_alias_instances - 1].skin_tex = hdr->gl_texturenum[skinnum][anim];
+				inst_sort_keys[num_alias_instances - 1].fb_tex = hdr->gl_fb_texturenum[skinnum][anim];
+			}
 		}
 	}
 
