@@ -114,8 +114,31 @@
   }
 
   async function mountGameData(fileList) {
+    // Wait for FS to be available (WASM module must be initialized)
+    let attempts = 0;
+    while (typeof FS === 'undefined' && attempts < 100) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      attempts++;
+    }
+
+    if (typeof FS === 'undefined') {
+      console.error('Emscripten FS timeout - WASM module failed to initialize');
+      return false;
+    }
+
+    console.log('FS available, mounting pak files...');
+
     // Mount files to Emscripten VFS at /data1/
-    FS.mkdir('/data1');
+    try {
+      try {
+        FS.mkdir('/data1');
+      } catch (e) {
+        // Directory may already exist
+      }
+    } catch (e) {
+      console.warn('Could not set up /data1:', e);
+    }
+
     for (const f of fileList) {
       let buf;
       if (f.data instanceof ArrayBuffer) {
@@ -128,12 +151,28 @@
         console.warn('Unknown file type:', f);
         continue;
       }
-      FS.writeFile('/data1/' + f.name, buf);
+      try {
+        FS.writeFile('/data1/' + f.name, buf);
+        console.log('Mounted:', f.name);
+      } catch (e) {
+        console.error('Failed to write', f.name, ':', e);
+      }
     }
+
     gameDataReady = true;
-    wasmLoadingBlocked = false;  // Allow WASM to load now
     document.getElementById('gameContainer').classList.add('playing');
-    Module.setStatus('');
+    console.log('Game data ready! Starting engine...');
+
+    // Start the engine if not already running
+    if (typeof Module !== 'undefined' && Module.callMain) {
+      try {
+        Module.callMain();
+      } catch (e) {
+        console.error('callMain error:', e);
+      }
+    }
+
+    return true;
   }
 
   // File upload handlers
@@ -211,21 +250,16 @@
     }
   })();
 
-  // Delay WASM loading until pak files are ready
-  let wasmLoadingBlocked = !gameDataReady;
-
   var Module = {
     noInitialRun: true,
     canvas: (function() { return document.getElementById('canvas'); })(),
     print: function(text) { console.log(text); },
-    printErr: function(text) { console.error(text); },
-    locateFile: function(filename) {
-      // Block .wasm file loading until game data is ready
-      if (filename.endsWith('.wasm') && wasmLoadingBlocked) {
-        document.getElementById('status').innerText = 'Please upload pak files to continue...';
-        throw new Error('Waiting for game data');
+    printErr: function(text) {
+      // Suppress "Unable to find Hexen II installation" if game data not loaded yet
+      if (!gameDataReady && text.includes('Unable to find')) {
+        return;  // Don't log this error
       }
-      return filename;
+      console.error(text);
     },
     setStatus: function(text) {
       if (gameDataReady || !text) {
