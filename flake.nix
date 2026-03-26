@@ -284,8 +284,7 @@
             '';
 
             buildPhase = ''
-              cd build
-              emmake make -j$(nproc)
+              emmake make -j$(nproc) -C build
             '';
 
             installPhase = ''
