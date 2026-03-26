@@ -345,6 +345,7 @@ GL_FUNCTION_OPT(void, glBindVertexArray, (GLuint))
 GL_FUNCTION_OPT(void, glVertexAttribPointer, (GLuint, GLint, GLenum, GLboolean, GLsizei, const void *))
 GL_FUNCTION_OPT(void, glEnableVertexAttribArray, (GLuint))
 GL_FUNCTION_OPT(void, glDisableVertexAttribArray, (GLuint))
+GL_FUNCTION_OPT(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat))
 GL_FUNCTION_OPT(void, glDrawArrays, (GLenum, GLint, GLsizei))
 GL_FUNCTION_OPT(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
 GL_FUNCTION_OPT(void, glBindBufferBase, (GLenum, GLuint, GLuint))
@@ -415,6 +416,7 @@ GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 #define glVertexAttribPointer_fp	glVertexAttribPointer
 #define glEnableVertexAttribArray_fp	glEnableVertexAttribArray
 #define glDisableVertexAttribArray_fp	glDisableVertexAttribArray
+#define glVertexAttrib4f_fp		glVertexAttrib4f
 #define glDrawArrays_fp			glDrawArrays
 #define glDrawElements_fp		glDrawElements
 #define glBindBufferBase_fp		glBindBufferBase

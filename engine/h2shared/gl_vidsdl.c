@@ -683,6 +683,7 @@ static void GL_LoadFunctionPointers (void)
 	glVertexAttribPointer_fp = (glVertexAttribPointer_f) SDL_GL_GetProcAddress("glVertexAttribPointer");
 	glEnableVertexAttribArray_fp = (glEnableVertexAttribArray_f) SDL_GL_GetProcAddress("glEnableVertexAttribArray");
 	glDisableVertexAttribArray_fp = (glDisableVertexAttribArray_f) SDL_GL_GetProcAddress("glDisableVertexAttribArray");
+	glVertexAttrib4f_fp = (glVertexAttrib4f_f) SDL_GL_GetProcAddress("glVertexAttrib4f");
 	glDrawArrays_fp = (glDrawArrays_f) SDL_GL_GetProcAddress("glDrawArrays");
 	glDrawElements_fp = (glDrawElements_f) SDL_GL_GetProcAddress("glDrawElements");
 
