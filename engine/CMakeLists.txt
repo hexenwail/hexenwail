@@ -108,8 +108,8 @@ if(WIN32)
     set(SDL_FOUND TRUE)
 else()
     if(EMSCRIPTEN)
-        # Emscripten provides SDL3 via -sUSE_SDL=3 link flag
-        set(SDL_LIBRARY SDL3::SDL3)
+        # Emscripten provides SDL3 via -sUSE_SDL=3 link flag, no library needed
+        set(SDL_LIBRARY "")  # Link flag is set in target_link_options
         set(SDL_INCLUDE_DIR "")  # Emscripten provides headers
     else()
         find_package(SDL3 QUIET)
