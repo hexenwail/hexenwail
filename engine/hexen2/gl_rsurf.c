@@ -1070,6 +1070,11 @@ static void DrawTextureChains (entity_t *e)
 
 				glBindVertexArray_fp(world_vao);
 
+				/* ATTR_COLOR is not in the world VBO — set default to white.
+				 * When a vertex attrib array is disabled, the generic
+				 * attribute value is used (GL 2.0 spec). */
+				glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+
 				glUseProgram_fp(gl_shader_world.program);
 				GL_GetMVP(mvp);
 				GL_GetModelview(mv);
