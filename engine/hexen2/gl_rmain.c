@@ -129,6 +129,7 @@ cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to d
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
+cvar_t	gl_torch_dlight = {"gl_torch_dlight", "0", CVAR_ARCHIVE};
 cvar_t	gl_glow_intensity = {"gl_glow_intensity", "1", CVAR_ARCHIVE};
 cvar_t	gl_flashintensity = {"gl_flashintensity", "1", CVAR_ARCHIVE};
 
