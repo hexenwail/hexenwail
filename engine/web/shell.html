@@ -166,10 +166,14 @@
     // Start the engine if not already running
     if (typeof Module !== 'undefined' && Module.callMain) {
       try {
+        console.log('Calling Module.callMain()...');
         Module.callMain();
+        console.log('Module.callMain() returned');
       } catch (e) {
         console.error('callMain error:', e);
       }
+    } else {
+      console.error('Module or callMain not available!');
     }
 
     return true;
@@ -253,13 +257,15 @@
   var Module = {
     noInitialRun: true,
     canvas: (function() { return document.getElementById('canvas'); })(),
-    print: function(text) { console.log(text); },
+    print: function(text) {
+      console.log('[ENGINE]', text);
+    },
     printErr: function(text) {
       // Suppress "Unable to find Hexen II installation" if game data not loaded yet
       if (!gameDataReady && text.includes('Unable to find')) {
         return;  // Don't log this error
       }
-      console.error(text);
+      console.error('[ENGINE ERROR]', text);
     },
     setStatus: function(text) {
       if (gameDataReady || !text) {
