@@ -81,25 +81,32 @@
         req.onerror = () => reject(req.error);
       });
 
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-
-      // Read all buffers first, then write in a single transaction
+      // Read all buffers first
       const filesToWrite = [];
       for (const f of files) {
         const buf = await f.arrayBuffer();
         filesToWrite.push({ name: f.name, data: buf });
       }
 
-      // Write all files in the same transaction
-      for (const item of filesToWrite) {
-        store.put(item);
-      }
-
-      // Wait for transaction to complete
+      // Write all in a single transaction
       await new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+
+        let pending = filesToWrite.length;
+        for (const item of filesToWrite) {
+          const req = store.put(item);
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            pending--;
+            if (pending === 0) resolve();
+          };
+        }
+
         tx.onerror = () => reject(tx.error);
+        tx.oncomplete = () => {
+          if (pending === 0) resolve();
+        };
       });
     } catch (e) {
       console.warn('Cache save failed:', e);
