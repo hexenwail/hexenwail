@@ -38,11 +38,18 @@ void GL_PostProcess_EndFrame (void);
 /* Returns true if post-processing is currently active. */
 qboolean GL_PostProcess_Active (void);
 
+/* Request a brief waterwarp preview animation (duration in seconds). */
+void GL_PostProcess_RequestWaterwarpPreview (float duration);
+
 /* Render scale cvar (0.25 - 1.0, lower = chunkier pixels) */
 extern cvar_t r_scale;
 
 /* Software rendering emulation (0=off, 1=dithered, 2=banded) */
 extern cvar_t r_softemu;
 extern cvar_t r_dither;
+
+/* HDR rendering (0=off, 1=ACES tonemapping) */
+extern cvar_t r_hdr;
+extern cvar_t r_hdr_exposure;
 
 #endif	/* __GL_POSTPROCESS_H */
