@@ -255,6 +255,43 @@ static const char salias_frag[] =
 	"    fragColor = color;\n"
 	"}\n";
 
+/* --- shader_particle: textured triangles with per-vertex color --- */
+static const char spart_vert[] =
+	GLSL_VERT_HEADER
+	"in vec3 a_position;\n"
+	"in vec2 a_texcoord;\n"
+	"in vec4 a_color;\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform mat4 u_modelview;\n"
+	"out vec2 v_texcoord;\n"
+	"out vec4 v_color;\n"
+	"out float v_fogdist;\n"
+	"void main() {\n"
+	"    v_texcoord = a_texcoord;\n"
+	"    v_color = a_color;\n"
+	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
+	"    v_fogdist = length(eyepos.xyz);\n"
+	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
+	"}\n";
+
+static const char spart_frag[] =
+	GLSL_FRAG_HEADER
+	"uniform sampler2D u_texture0;\n"
+	"uniform float u_fog_density;\n"
+	"uniform vec3 u_fog_color;\n"
+	"in vec2 v_texcoord;\n"
+	"in vec4 v_color;\n"
+	"in float v_fogdist;\n"
+	"out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"    vec4 color = tex * v_color;\n"
+	"    if (color.a < 0.01) discard;\n"
+	"    float fog = exp(-u_fog_density * v_fogdist);\n"
+	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	"    fragColor = color;\n"
+	"}\n";
+
 #ifndef __EMSCRIPTEN__  /* SSBO shaders require GL 4.3 — not available in WebGL2 */
 /* --- shader_alias_gpu: SSBO-driven alias models with GPU pose lerp --- */
 static const char salias_gpu_vert[] =
@@ -312,43 +349,6 @@ static const char salias_gpu_vert[] =
 	"    vec4 eyepos = u_modelview * vec4(pos, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
-	"}\n";
-
-/* --- shader_particle: textured triangles with per-vertex color --- */
-static const char spart_vert[] =
-	GLSL_VERT_HEADER
-	"in vec3 a_position;\n"
-	"in vec2 a_texcoord;\n"
-	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	"out vec2 v_texcoord;\n"
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	"void main() {\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    v_color = a_color;\n"
-	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
-	"    v_fogdist = length(eyepos.xyz);\n"
-	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-	"}\n";
-
-static const char spart_frag[] =
-	GLSL_FRAG_HEADER
-	"uniform sampler2D u_texture0;\n"
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
-	"in vec2 v_texcoord;\n"
-	"in vec4 v_color;\n"
-	"in float v_fogdist;\n"
-	"out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"    vec4 color = tex * v_color;\n"
-	"    if (color.a < 0.01) discard;\n"
-	"    float fog = exp(-u_fog_density * v_fogdist);\n"
-	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	"    fragColor = color;\n"
 	"}\n";
 
 /* --- shader_particle_gpu: SSBO-driven billboard particles ---

@@ -1193,9 +1193,6 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else
 	{
-		// All model skins have index 0 uploaded as alpha=0 — enable
-		// alpha testing so the transparent background is discarded.
-		GL_SetAlphaThreshold(0.666f);
 		model_constant_alpha = 1.0f;
 	}
 
