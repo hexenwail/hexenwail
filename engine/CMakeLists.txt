@@ -107,52 +107,61 @@ if(WIN32)
     endif()
     set(SDL_FOUND TRUE)
 else()
-    find_package(SDL3 QUIET)
-    if(SDL3_FOUND)
-        set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
+    if(EMSCRIPTEN)
+        # Emscripten provides SDL3 via -sUSE_SDL=3 link flag
         set(SDL_LIBRARY SDL3::SDL3)
+        set(SDL_INCLUDE_DIR "")  # Emscripten provides headers
     else()
-        # Fallback to pkg-config
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(SDL3 REQUIRED sdl3)
-        set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
-        set(SDL_LIBRARY ${SDL3_LIBRARIES})
+        find_package(SDL3 QUIET)
+        if(SDL3_FOUND)
+            set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
+            set(SDL_LIBRARY SDL3::SDL3)
+        else()
+            # Fallback to pkg-config
+            find_package(PkgConfig REQUIRED)
+            pkg_check_modules(SDL3 REQUIRED sdl3)
+            set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
+            set(SDL_LIBRARY ${SDL3_LIBRARIES})
+        endif()
     endif()
 endif()
 
-if(UNIX)
-    # OpenGL
-    find_package(OpenGL REQUIRED)
+if(NOT EMSCRIPTEN)
+    if(UNIX)
+        # OpenGL
+        find_package(OpenGL REQUIRED)
 
-    # Find packages using pkg-config
+        # Find packages using pkg-config
+        find_package(PkgConfig QUIET)
+        if(NOT PKG_CONFIG_FOUND)
+            message(FATAL_ERROR "pkg-config is required for Linux builds")
+        endif()
+
+        # ALSA
+        if(USE_ALSA)
+            pkg_check_modules(ALSA REQUIRED alsa)
+            set(USE_ALSA_FOUND ON)
+        endif()
+
+        # MP3: uses built-in dr_mp3 (no external library needed)
+        # FLAC: uses built-in dr_flac (no external library needed)
+
+        # m and dl
+        find_library(M_LIBRARY m)
+        find_library(DL_LIBRARY dl)
+    endif()
+endif()
+
+
+# Codec discovery via pkg-config (skip on Emscripten)
+if(NOT EMSCRIPTEN)
     find_package(PkgConfig QUIET)
-    if(NOT PKG_CONFIG_FOUND)
-        message(FATAL_ERROR "pkg-config is required for Linux builds")
-    endif()
-
-    # ALSA
-    if(USE_ALSA)
-        pkg_check_modules(ALSA REQUIRED alsa)
-        set(USE_ALSA_FOUND ON)
-    endif()
-
-    # MP3: uses built-in dr_mp3 (no external library needed)
-    # FLAC: uses built-in dr_flac (no external library needed)
-
-    # m and dl
-    find_library(M_LIBRARY m)
-    find_library(DL_LIBRARY dl)
-endif()
-
-
-# Codec discovery via pkg-config (works on all platforms including cross-compile)
-find_package(PkgConfig QUIET)
-if(PKG_CONFIG_FOUND)
-    if(USE_CODEC_VORBIS)
-        pkg_check_modules(VORBIS vorbisfile vorbis ogg)
-    endif()
-    if(USE_CODEC_XMP)
-        pkg_check_modules(XMP libxmp)
+    if(PKG_CONFIG_FOUND)
+        if(USE_CODEC_VORBIS)
+            pkg_check_modules(VORBIS vorbisfile vorbis ogg)
+        endif()
+        if(USE_CODEC_XMP)
+            pkg_check_modules(XMP libxmp)
     endif()
     if(USE_CODEC_OPUS)
         pkg_check_modules(OPUS opusfile)
