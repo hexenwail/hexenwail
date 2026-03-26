@@ -1818,9 +1818,12 @@ static void R_DrawAliasInstanced (void)
 	/* Set alpha test state for index-0 transparency */
 	GL_SetAlphaThreshold(0.666f);
 
-	if (developer.value)
-		Con_DPrintf("AliasInst: %d instances, %d batches\n",
-			    num_alias_instances, num_alias_batches);
+	{
+		static int inst_frame_count;
+		if (++inst_frame_count <= 3)  /* print first 3 frames */
+			Sys_Printf("AliasInst: %d instances, %d batches (frame %d)\n",
+				   num_alias_instances, num_alias_batches, inst_frame_count);
+	}
 
 	/* Draw each batch */
 	for (b = 0; b < num_alias_batches; b++)
@@ -2083,7 +2086,8 @@ static void R_DrawEntitiesOnList (void)
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
 	 * models before the per-entity loop. Requires r_alias_gpu >= 2. */
-	use_instancing = (r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program);
+	/* TODO: instanced path (mode 2) has rendering issues — disable until fixed */
+	use_instancing = false; /*(r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program)*/
 	if (use_instancing)
 	{
 		R_CollectAndBatchAliasInstances();
