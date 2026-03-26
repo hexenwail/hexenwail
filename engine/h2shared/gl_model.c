@@ -2352,10 +2352,16 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 	tex_mode = TEX_DEFAULT | TEX_MIPMAP;
 	if (mdl_flags & EF_TRANSPARENT)
 		tex_mode |= TEX_TRANSPARENT;
-	else if (mdl_flags & EF_HOLEY)
-		tex_mode |= (TEX_ALPHA | TEX_HOLEY);
 	else if (mdl_flags & EF_SPECIAL_TRANS)
 		tex_mode |= TEX_SPECIAL_TRANS;
+	else
+	{
+		// Hexen II models universally use palette index 0 as transparent
+		// background. The original software renderer always alpha-tested
+		// index 0, but most MDL files lack EF_HOLEY. Force it for all
+		// model skins so index 0 uploads with alpha=0.
+		tex_mode |= (TEX_ALPHA | TEX_HOLEY);
+	}
 
 	for (i = 0; i < numskins; i++)
 	{
