@@ -334,12 +334,42 @@ typedef struct {
 	GLuint	vao;		/* VAO for this model */
 	GLuint	vbo_tc;		/* static texcoord VBO */
 	GLuint	ibo;		/* index buffer (triangulated) */
-	GLuint	ssbo_pose;	/* all poses' trivertx_t data */
+	GLuint	ssbo_pose;	/* all poses' trivertx_t data (GL 4.3 only) */
+	GLuint	tex_pose;	/* pose data as R32UI texture (ES 3.0 compatible) */
 	int	num_indices;	/* total triangle indices */
 	int	poseverts;	/* verts per pose (for shader indexing) */
 	int	numposes;	/* total pose count */
 	qboolean valid;		/* true if GPU data was created successfully */
 } alias_gpu_mesh_t;
+
+/* Per-instance data for instanced alias model drawing.
+ * Passed via vertex attribute divisors (ES 3.0 compatible).
+ * Must match the attribute layout in the instanced shader. */
+typedef struct {
+	float	mvp[16];	/* precomputed model-view-projection */
+	float	modelview[16];	/* for fog distance calculation */
+	float	scale[3];	/* aliashdr->scale */
+	float	shade_light;	/* shading intensity */
+	float	scale_origin[3]; /* aliashdr->scale_origin */
+	float	ent_alpha;	/* entity alpha */
+	float	light_color[3];	/* RGB tinted light color */
+	float	lerp;		/* pose interpolation (0=pose0, 1=pose1) */
+	int	pose0;		/* current pose index */
+	int	pose1;		/* previous pose index */
+	int	shadedot_row;	/* index into shadedots table (0-15) */
+	int	_pad;		/* align to 16 bytes */
+} alias_instance_t;		/* 176 bytes */
+
+#define MAX_ALIAS_INSTANCES	512
+#define MAX_ALIAS_BATCHES	128
+
+typedef struct {
+	aliashdr_t	*hdr;		/* model -- determines VAO + pose texture */
+	GLuint		skin_tex;	/* resolved skin texture */
+	GLuint		fb_tex;		/* fullbright texture (0 if none) */
+	int		first;		/* first instance index */
+	int		count;		/* number of instances */
+} alias_batch_t;
 
 #define MAX_ALIAS_MODELS 256
 extern alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];

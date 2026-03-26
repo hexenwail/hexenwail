@@ -28,6 +28,7 @@
 void Fog_SetupFrame (void);
 void Fog_EnableGFog (void);
 float Fog_GetDensity (void);
+float *Fog_GetColor (void);
 void Fog_DisableGFog (void);
 
 entity_t	r_worldentity;
@@ -515,7 +516,7 @@ static float	shadelight, ambientlight;
 
 // precalculated dot products for quantized angles
 #define SHADEDOT_QUANT		16
-static float	r_avertexnormal_dots[SHADEDOT_QUANT][256] =
+float	r_avertexnormal_dots[SHADEDOT_QUANT][256] =
 {
 #include "anorm_dots.h"
 };
@@ -1326,6 +1327,725 @@ static int			cl_numtranswateredicts;
 
 /*
 =============
+Instanced alias model rendering (ES 3.0 compatible)
+=============
+*/
+
+static alias_instance_t	alias_instances[MAX_ALIAS_INSTANCES];
+static int		num_alias_instances;
+static alias_batch_t	alias_batches[MAX_ALIAS_BATCHES];
+static int		num_alias_batches;
+static GLuint		inst_vbo;	/* per-instance data VBO */
+
+/* Per-entity bookkeeping for shadow/fullbright passes after instanced draw */
+typedef struct {
+	entity_t	*ent;
+	aliashdr_t	*hdr;
+	int		pose;
+} inst_entity_t;
+static inst_entity_t	inst_entities[MAX_ALIAS_INSTANCES];
+static int		num_inst_entities;
+
+/* Sort key for batch grouping */
+typedef struct {
+	int	instance_idx;
+	size_t	model_key;	/* aliashdr_t pointer as integer */
+	GLuint	skin_tex;
+	GLuint	fb_tex;
+} inst_sort_t;
+
+static int inst_sort_cmp (const void *a, const void *b)
+{
+	const inst_sort_t *sa = (const inst_sort_t *)a;
+	const inst_sort_t *sb = (const inst_sort_t *)b;
+	if (sa->model_key != sb->model_key)
+		return (sa->model_key < sb->model_key) ? -1 : 1;
+	if (sa->skin_tex != sb->skin_tex)
+		return (sa->skin_tex < sb->skin_tex) ? -1 : 1;
+	return 0;
+}
+
+/*
+=============
+R_CollectAliasInstance
+
+Compute per-entity data and add to the instance list.
+Returns true if the entity was collected, false if it should
+be drawn the traditional way (translucent, special, etc.)
+=============
+*/
+static qboolean R_CollectAliasInstance (entity_t *e)
+{
+	alias_instance_t *inst;
+	aliashdr_t	*paliashdr;
+	qmodel_t	*clmodel;
+	vec3_t		mins, maxs;
+	int		mls, lnum, skinnum, anim, frame, prevframe;
+	int		pose, prevpose, numposes;
+	float		interval, lerpfrac, add, entScale;
+	float		xyfact = 1.0, zfact = 1.0;
+	float		tscale[3], torigin[3];
+	float		mvp[16], mv[16];
+	vec3_t		dist;
+	byte		cs;
+
+	if (num_alias_instances >= MAX_ALIAS_INSTANCES)
+		return false;
+
+	clmodel = e->model;
+	if (!clmodel)
+		return false;
+
+	/* Skip translucent / special blend entities — drawn separately */
+	if ((e->drawflags & DRF_TRANSLUCENT) ||
+	    (clmodel->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS)) ||
+	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
+		return false;
+
+	/* Skip viewmodel — drawn separately with FOV compensation */
+	if (e == &cl.viewent)
+		return false;
+
+	/* Frustum cull */
+	VectorAdd(e->origin, clmodel->mins, mins);
+	VectorAdd(e->origin, clmodel->maxs, maxs);
+	if (R_CullBox(mins, maxs))
+		return true;	/* culled, but don't fall back to non-instanced */
+
+	/* LOD cull */
+	{
+		float dx = e->origin[0] - r_origin[0];
+		float dy = e->origin[1] - r_origin[1];
+		float dz = e->origin[2] - r_origin[2];
+		float dist_sq = dx*dx + dy*dy + dz*dz;
+		float radius = clmodel->radius;
+		if (radius > 0 && dist_sq > radius * radius * 40000 &&
+		    e != &cl_entities[cl.viewentity])
+			return true;
+	}
+
+	paliashdr = (aliashdr_t *)Mod_Extradata(clmodel);
+	if (!GL_GetAliasGPUMesh(paliashdr))
+		return false;	/* no GPU mesh, fall back */
+
+	/* --- Lighting (same as R_DrawAliasModel) --- */
+	VectorCopy(e->origin, r_entorigin);
+	VectorSubtract(r_origin, r_entorigin, modelorg);
+
+	if (r_shadows.integer)
+		AliasModelGetLightInfo(e);
+
+	mls = e->drawflags & MLS_MASKIN;
+	if ((clmodel->flags & EF_ROTATE) ||
+	    (R_GetPimpFlags(e, NULL) & (EF_SPIN | EF_FLOAT)))
+	{
+		ambientlight = shadelight =
+		lightcolor[0] = lightcolor[1] = lightcolor[2] =
+			60 + 34 + sin(e->origin[0] + e->origin[1] + (cl.time*3.8)) * 34;
+	}
+	else if (mls == MLS_ABSLIGHT)
+	{
+		lightcolor[0] = lightcolor[1] = lightcolor[2] =
+		ambientlight = shadelight = e->abslight;
+	}
+	else if (mls != MLS_NONE)
+	{
+		lightcolor[0] = lightcolor[1] = lightcolor[2] =
+		ambientlight = shadelight = d_lightstylevalue[24+mls]/2;
+	}
+	else
+	{
+		if (!r_shadows.integer)
+			AliasModelGetLightInfo(e);
+
+		for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
+		{
+			if (cl_dlights[lnum].die >= cl.time)
+			{
+				VectorSubtract(e->origin, cl_dlights[lnum].origin, dist);
+				add = cl_dlights[lnum].radius - VectorLengthFast(dist);
+				if (add > 0)
+				{
+					if (cl_dlights[lnum].dark)
+					{
+						ambientlight -= add;
+						if (ambientlight < 0) ambientlight = 0;
+						lightcolor[0] -= cl_dlights[lnum].color[0] * add;
+						if (lightcolor[0] < 0) lightcolor[0] = 0;
+						lightcolor[1] -= cl_dlights[lnum].color[1] * add;
+						if (lightcolor[1] < 0) lightcolor[1] = 0;
+						lightcolor[2] -= cl_dlights[lnum].color[2] * add;
+						if (lightcolor[2] < 0) lightcolor[2] = 0;
+					}
+					else
+					{
+						ambientlight += add;
+						lightcolor[0] += cl_dlights[lnum].color[0] * add;
+						lightcolor[1] += cl_dlights[lnum].color[1] * add;
+						lightcolor[2] += cl_dlights[lnum].color[2] * add;
+					}
+				}
+			}
+		}
+
+		if (gl_overbright_models.integer)
+		{
+			int i;
+			if (ambientlight > 128) ambientlight = 128;
+			if (ambientlight + shadelight > 192)
+				shadelight = 192 - ambientlight;
+			for (i = 0; i < 3; i++)
+				if (lightcolor[i] > 192) lightcolor[i] = 192;
+		}
+	}
+
+	shadelight = shadelight / 200.0;
+	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
+
+	/* --- Compute transform matrices --- */
+	/* Push matrix, apply entity origin+rotation only (no scale/origin),
+	 * grab MVP/MV, pop. Scale/origin go as per-instance data. */
+	GL_PushMatrix();
+	R_RotateForEntity2(e);
+
+	/* Compute per-entity scale/origin (handles entity scaling) */
+	if (e->scale != 0 && e->scale != 100)
+	{
+		entScale = (float)e->scale / 100.0f;
+		switch (e->drawflags & SCALE_TYPE_MASKIN)
+		{
+		case SCALE_TYPE_UNIFORM:
+			tscale[0] = paliashdr->scale[0]*entScale;
+			tscale[1] = paliashdr->scale[1]*entScale;
+			tscale[2] = paliashdr->scale[2]*entScale;
+			xyfact = zfact = (entScale-1.0)*127.95;
+			break;
+		case SCALE_TYPE_XYONLY:
+			tscale[0] = paliashdr->scale[0]*entScale;
+			tscale[1] = paliashdr->scale[1]*entScale;
+			tscale[2] = paliashdr->scale[2];
+			xyfact = (entScale-1.0)*127.95;
+			zfact = 1.0;
+			break;
+		case SCALE_TYPE_ZONLY:
+			tscale[0] = paliashdr->scale[0];
+			tscale[1] = paliashdr->scale[1];
+			tscale[2] = paliashdr->scale[2]*entScale;
+			xyfact = 1.0;
+			zfact = (entScale-1.0)*127.95;
+			break;
+		}
+		switch (e->drawflags & SCALE_ORIGIN_MASKIN)
+		{
+		case SCALE_ORIGIN_CENTER:
+			torigin[0] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
+			torigin[1] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
+			torigin[2] = paliashdr->scale_origin[2]-paliashdr->scale[2]*zfact;
+			break;
+		case SCALE_ORIGIN_BOTTOM:
+			torigin[0] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
+			torigin[1] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
+			torigin[2] = paliashdr->scale_origin[2];
+			break;
+		case SCALE_ORIGIN_TOP:
+			torigin[0] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
+			torigin[1] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
+			torigin[2] = paliashdr->scale_origin[2]-paliashdr->scale[2]*zfact*2.0;
+			break;
+		}
+	}
+	else
+	{
+		VectorCopy(paliashdr->scale, tscale);
+		VectorCopy(paliashdr->scale_origin, torigin);
+	}
+
+	/* Floating motion */
+	if ((clmodel->flags & EF_ROTATE) ||
+	    (R_GetPimpFlags(e, NULL) & EF_FLOAT))
+		torigin[2] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
+
+	/* Bake scale/origin into the matrix for the instanced shader */
+	GL_Translatef(torigin[0], torigin[1], torigin[2]);
+	GL_Scalef(tscale[0], tscale[1], tscale[2]);
+
+	GL_GetMVP(mvp);
+	GL_GetModelview(mv);
+	GL_PopMatrix();
+
+	/* --- Resolve pose and lerp --- */
+	frame = e->frame;
+	if (frame >= paliashdr->numframes || frame < 0)
+		frame = 0;
+	pose = paliashdr->frames[frame].firstpose;
+	numposes = paliashdr->frames[frame].numposes;
+	if (numposes > 1)
+	{
+		interval = paliashdr->frames[frame].interval;
+		pose += (int)(cl.time / interval) % numposes;
+	}
+
+	prevframe = e->previouspose;
+	lerpfrac = 0.0f;
+	if (r_lerpmodels.integer && e->lerptime > 0 && prevframe != frame &&
+	    prevframe >= 0 && prevframe < paliashdr->numframes &&
+	    !(e->lerpflags & LERP_RESETANIM))
+	{
+		float elapsed = cl.time - e->lerpstart;
+		lerpfrac = elapsed / e->lerptime;
+		if (lerpfrac >= 1.0f)
+			lerpfrac = 0.0f;
+		else
+			lerpfrac = 1.0f - lerpfrac;
+	}
+
+	if (lerpfrac > 0.0f)
+	{
+		prevpose = paliashdr->frames[prevframe].firstpose;
+		numposes = paliashdr->frames[prevframe].numposes;
+		if (numposes > 1)
+		{
+			interval = paliashdr->frames[prevframe].interval;
+			prevpose += (int)(e->lerpstart / interval) % numposes;
+		}
+	}
+	else
+	{
+		prevpose = pose;
+	}
+
+	/* --- Resolve skin texture --- */
+	skinnum = e->skinnum;
+	if (skinnum >= paliashdr->numskins || skinnum < 0)
+		skinnum = 0;
+	anim = (int)(cl.time * 10) & 3;
+
+	/* --- Fill instance data --- */
+	inst = &alias_instances[num_alias_instances];
+	memcpy(inst->mvp, mvp, sizeof(float) * 16);
+	memcpy(inst->modelview, mv, sizeof(float) * 16);
+
+	/* For the instanced shader, scale/origin are baked into the MVP.
+	 * Pass 1.0/0.0 so the shader's decompress is identity. */
+	inst->scale[0] = 1.0f;
+	inst->scale[1] = 1.0f;
+	inst->scale[2] = 1.0f;
+	inst->scale_origin[0] = 0.0f;
+	inst->scale_origin[1] = 0.0f;
+	inst->scale_origin[2] = 0.0f;
+
+	inst->shade_light = shadelight;
+	inst->ent_alpha = 1.0f;
+	inst->lerp = 1.0f - lerpfrac;  /* shader: mix(v1, v0, lerp), 1.0 = use v0 */
+	inst->pose0 = pose;
+	inst->pose1 = prevpose;
+
+	/* Shadedot row from entity yaw angle */
+	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
+
+	/* ColorShade tint */
+	cs = e->colorshade;
+	if (cs)
+	{
+		inst->light_color[0] = lightcolor[0] * RTint[cs];
+		inst->light_color[1] = lightcolor[1] * GTint[cs];
+		inst->light_color[2] = lightcolor[2] * BTint[cs];
+	}
+	else
+	{
+		VectorCopy(lightcolor, inst->light_color);
+	}
+
+	inst->_pad = 0;
+
+	/* Save entity info for shadow/fullbright passes */
+	inst_entities[num_alias_instances].ent = e;
+	inst_entities[num_alias_instances].hdr = paliashdr;
+	inst_entities[num_alias_instances].pose = pose;
+
+	c_alias_polys += paliashdr->numtris;
+	num_alias_instances++;
+	return true;
+}
+
+/*
+=============
+R_BuildAliasBatches
+
+Sort collected instances by (model, skin) and build batch list.
+=============
+*/
+static inst_sort_t inst_sort_keys[MAX_ALIAS_INSTANCES];
+
+static void R_CollectAndBatchAliasInstances (void)
+{
+	int	i, j;
+	entity_t *e;
+
+	num_alias_instances = 0;
+	num_alias_batches = 0;
+	num_inst_entities = 0;
+
+	if (!r_drawentities.integer)
+		return;
+	if (!gl_shader_alias_inst.base.program)
+		return;
+
+	/* Collect all eligible opaque alias entities */
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		e = cl_visedicts[i];
+		if (!e->model || e->model->type != mod_alias)
+			continue;
+
+		/* chase-cam pitch adj. by FrikaC */
+		if (e == &cl_entities[cl.viewentity])
+			e->angles[0] *= 0.3;
+
+		if (R_CollectAliasInstance(e))
+		{
+			/* Record sort key */
+			aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata(e->model);
+			int skinnum = e->skinnum;
+			int anim = (int)(cl.time * 10) & 3;
+			if (skinnum >= hdr->numskins || skinnum < 0) skinnum = 0;
+
+			inst_sort_keys[num_alias_instances - 1].instance_idx = num_alias_instances - 1;
+			inst_sort_keys[num_alias_instances - 1].model_key = (size_t)hdr;
+			inst_sort_keys[num_alias_instances - 1].skin_tex = hdr->gl_texturenum[skinnum][anim];
+			inst_sort_keys[num_alias_instances - 1].fb_tex = hdr->gl_fb_texturenum[skinnum][anim];
+		}
+	}
+
+	if (num_alias_instances == 0)
+		return;
+
+	/* Sort by (model, skin) for batching */
+	qsort(inst_sort_keys, num_alias_instances, sizeof(inst_sort_t), inst_sort_cmp);
+
+	/* Reorder instance data to match sort order */
+	{
+		static alias_instance_t sorted[MAX_ALIAS_INSTANCES];
+		for (i = 0; i < num_alias_instances; i++)
+			sorted[i] = alias_instances[inst_sort_keys[i].instance_idx];
+		memcpy(alias_instances, sorted, num_alias_instances * sizeof(alias_instance_t));
+	}
+
+	/* Build batch list */
+	{
+		alias_batch_t *batch = &alias_batches[0];
+		aliashdr_t *hdr = (aliashdr_t *)(size_t)inst_sort_keys[0].model_key;
+
+		batch->hdr = hdr;
+		batch->skin_tex = inst_sort_keys[0].skin_tex;
+		batch->fb_tex = inst_sort_keys[0].fb_tex;
+		batch->first = 0;
+		batch->count = 1;
+		num_alias_batches = 1;
+
+		for (i = 1; i < num_alias_instances; i++)
+		{
+			if (inst_sort_keys[i].model_key == inst_sort_keys[i-1].model_key &&
+			    inst_sort_keys[i].skin_tex == inst_sort_keys[i-1].skin_tex)
+			{
+				batch->count++;
+			}
+			else
+			{
+				if (num_alias_batches >= MAX_ALIAS_BATCHES)
+					break;
+				batch = &alias_batches[num_alias_batches++];
+				batch->hdr = (aliashdr_t *)(size_t)inst_sort_keys[i].model_key;
+				batch->skin_tex = inst_sort_keys[i].skin_tex;
+				batch->fb_tex = inst_sort_keys[i].fb_tex;
+				batch->first = i;
+				batch->count = 1;
+			}
+		}
+	}
+}
+
+/*
+=============
+R_DrawAliasInstanced
+
+Draw all collected alias instances in batches.
+=============
+*/
+static void R_DrawAliasInstanced (void)
+{
+	int	b, i;
+	gl_alias_inst_prog_t *prog = &gl_shader_alias_inst;
+
+	if (num_alias_instances == 0 || !prog->base.program)
+		return;
+
+	/* Create instance VBO on first use */
+	if (!inst_vbo)
+	{
+		glGenBuffers_fp(1, &inst_vbo);
+		glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
+		glBufferData_fp(GL_ARRAY_BUFFER,
+				MAX_ALIAS_INSTANCES * sizeof(alias_instance_t),
+				NULL, GL_DYNAMIC_DRAW);
+		glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
+	}
+
+	/* Upload instance data */
+	glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
+	glBufferSubData_fp(GL_ARRAY_BUFFER, 0,
+			   num_alias_instances * sizeof(alias_instance_t),
+			   alias_instances);
+
+	/* Activate instanced shader */
+	glUseProgram_fp(prog->base.program);
+
+	/* Set frame-global uniforms */
+	if (prog->base.u_fog_density >= 0)
+		glUniform1f_fp(prog->base.u_fog_density, Fog_GetDensity());
+	if (prog->base.u_fog_color >= 0)
+	{
+		const float *fc = Fog_GetColor();
+		glUniform3f_fp(prog->base.u_fog_color, fc[0], fc[1], fc[2]);
+	}
+	if (prog->base.u_alpha_threshold >= 0)
+		glUniform1f_fp(prog->base.u_alpha_threshold, 0.666f);
+
+	/* Bind shadedots UBO to binding point 0 */
+	glBindBufferBase_fp(GL_UNIFORM_BUFFER, 0, prog->ubo_shadedots);
+
+	/* Set alpha test state for index-0 transparency */
+	GL_SetAlphaThreshold(0.666f);
+
+	/* Draw each batch */
+	for (b = 0; b < num_alias_batches; b++)
+	{
+		alias_batch_t	*batch = &alias_batches[b];
+		alias_gpu_mesh_t *gm = GL_GetAliasGPUMesh(batch->hdr);
+		int		stride = sizeof(alias_instance_t);
+		size_t		base = batch->first * stride;
+		int		loc;
+
+		if (!gm || !gm->valid)
+			continue;
+
+		/* Bind skin texture to unit 0 */
+		glActiveTextureARB_fp(GL_TEXTURE0);
+		GL_Bind(batch->skin_tex);
+
+		/* Bind pose texture to unit 1 */
+		glActiveTextureARB_fp(GL_TEXTURE1);
+		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
+
+		/* Bind model VAO (has texcoord VBO + IBO) */
+		glBindVertexArray_fp(gm->vao);
+
+		/* Set up per-instance vertex attributes from inst_vbo */
+		glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
+
+		/* mat4 a_inst_mvp (locations 2-5) */
+		for (loc = 0; loc < 4; loc++)
+		{
+			glEnableVertexAttribArray_fp(ATTR_INST_MVP0 + loc);
+			glVertexAttribPointer_fp(ATTR_INST_MVP0 + loc, 4, GL_FLOAT, GL_FALSE,
+						 stride, (void *)(base + loc * 16));
+			glVertexAttribDivisor_fp(ATTR_INST_MVP0 + loc, 1);
+		}
+
+		/* mat4 a_inst_mv (locations 6-9) */
+		for (loc = 0; loc < 4; loc++)
+		{
+			glEnableVertexAttribArray_fp(ATTR_INST_MV0 + loc);
+			glVertexAttribPointer_fp(ATTR_INST_MV0 + loc, 4, GL_FLOAT, GL_FALSE,
+						 stride, (void *)(base + 64 + loc * 16));
+			glVertexAttribDivisor_fp(ATTR_INST_MV0 + loc, 1);
+		}
+
+		/* vec4 a_inst_scale_shade (location 10) */
+		glEnableVertexAttribArray_fp(ATTR_INST_SCALE_SHADE);
+		glVertexAttribPointer_fp(ATTR_INST_SCALE_SHADE, 4, GL_FLOAT, GL_FALSE,
+					 stride, (void *)(base + 128));
+		glVertexAttribDivisor_fp(ATTR_INST_SCALE_SHADE, 1);
+
+		/* vec4 a_inst_origin_alpha (location 11) */
+		glEnableVertexAttribArray_fp(ATTR_INST_ORIGIN_ALPHA);
+		glVertexAttribPointer_fp(ATTR_INST_ORIGIN_ALPHA, 4, GL_FLOAT, GL_FALSE,
+					 stride, (void *)(base + 144));
+		glVertexAttribDivisor_fp(ATTR_INST_ORIGIN_ALPHA, 1);
+
+		/* vec4 a_inst_light_lerp (location 12) */
+		glEnableVertexAttribArray_fp(ATTR_INST_LIGHT_LERP);
+		glVertexAttribPointer_fp(ATTR_INST_LIGHT_LERP, 4, GL_FLOAT, GL_FALSE,
+					 stride, (void *)(base + 160));
+		glVertexAttribDivisor_fp(ATTR_INST_LIGHT_LERP, 1);
+
+		/* ivec4 a_inst_poses (location 13) */
+		glEnableVertexAttribArray_fp(ATTR_INST_POSES);
+		glVertexAttribIPointer_fp(ATTR_INST_POSES, 4, GL_INT,
+					  stride, (void *)(base + 176));
+		glVertexAttribDivisor_fp(ATTR_INST_POSES, 1);
+
+		/* Draw! */
+		glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
+					   GL_UNSIGNED_SHORT, NULL, batch->count);
+
+		/* Disable per-instance attributes */
+		for (loc = ATTR_INST_MVP0; loc <= ATTR_INST_POSES; loc++)
+		{
+			glVertexAttribDivisor_fp(loc, 0);
+			glDisableVertexAttribArray_fp(loc);
+		}
+
+		/* Disable vertex attrib arrays manually for locations used by mat4 */
+	}
+
+	/* Restore state */
+	glActiveTextureARB_fp(GL_TEXTURE1);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	glActiveTextureARB_fp(GL_TEXTURE0);
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
+	GL_SetAlphaThreshold(0.01f);
+
+	/* Shadow pass — drawn individually per entity (immediate mode) */
+	if (r_shadows.integer)
+	{
+		for (i = 0; i < num_inst_entities; i++)
+		{
+			entity_t *se = inst_entities[i].ent;
+			aliashdr_t *shdr = inst_entities[i].hdr;
+			int spose = inst_entities[i].pose;
+
+			GL_PushMatrix();
+			R_RotateForEntity2(se);
+			glEnable_fp(GL_BLEND);
+			glDepthMask_fp(0);
+			GL_DrawAliasShadow(se, shdr, spose);
+			glDepthMask_fp(1);
+			glDisable_fp(GL_BLEND);
+			GL_PopMatrix();
+		}
+	}
+
+	/* Fullbright pass — re-draw instances that have fullbright textures
+	 * using the same instanced shader with additive blending */
+	if (gl_fullbrights.integer && !r_fullbright.integer)
+	{
+		qboolean has_fb = false;
+		for (b = 0; b < num_alias_batches && !has_fb; b++)
+			if (alias_batches[b].fb_tex)
+				has_fb = true;
+
+		if (has_fb)
+		{
+			glUseProgram_fp(prog->base.program);
+			if (prog->base.u_fog_density >= 0)
+				glUniform1f_fp(prog->base.u_fog_density, Fog_GetDensity());
+			if (prog->base.u_fog_color >= 0)
+			{
+				const float *fc = Fog_GetColor();
+				glUniform3f_fp(prog->base.u_fog_color, fc[0], fc[1], fc[2]);
+			}
+			if (prog->base.u_alpha_threshold >= 0)
+				glUniform1f_fp(prog->base.u_alpha_threshold, 0.01f);
+
+			glBindBufferBase_fp(GL_UNIFORM_BUFFER, 0, prog->ubo_shadedots);
+			glEnable_fp(GL_BLEND);
+			glBlendFunc_fp(GL_ONE, GL_ONE);	/* additive */
+			glDepthMask_fp(0);
+			GL_SetAlphaThreshold(0.01f);
+
+			/* Override shade_light to 5.0 for fullbright.
+			 * We need to patch the instance data — modify in-place
+			 * and re-upload. */
+			for (i = 0; i < num_alias_instances; i++)
+				alias_instances[i].shade_light = 5.0f;
+
+			glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
+			glBufferSubData_fp(GL_ARRAY_BUFFER, 0,
+					   num_alias_instances * sizeof(alias_instance_t),
+					   alias_instances);
+
+			for (b = 0; b < num_alias_batches; b++)
+			{
+				alias_batch_t *batch = &alias_batches[b];
+				alias_gpu_mesh_t *gm;
+				int stride, loc;
+				size_t base;
+
+				if (!batch->fb_tex)
+					continue;
+
+				gm = GL_GetAliasGPUMesh(batch->hdr);
+				if (!gm || !gm->valid)
+					continue;
+
+				stride = sizeof(alias_instance_t);
+				base = batch->first * stride;
+
+				glActiveTextureARB_fp(GL_TEXTURE0);
+				GL_Bind(batch->fb_tex);
+				glActiveTextureARB_fp(GL_TEXTURE1);
+				glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
+				glBindVertexArray_fp(gm->vao);
+				glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
+
+				for (loc = 0; loc < 4; loc++)
+				{
+					glEnableVertexAttribArray_fp(ATTR_INST_MVP0 + loc);
+					glVertexAttribPointer_fp(ATTR_INST_MVP0 + loc, 4, GL_FLOAT, GL_FALSE,
+								 stride, (void *)(base + loc * 16));
+					glVertexAttribDivisor_fp(ATTR_INST_MVP0 + loc, 1);
+				}
+				for (loc = 0; loc < 4; loc++)
+				{
+					glEnableVertexAttribArray_fp(ATTR_INST_MV0 + loc);
+					glVertexAttribPointer_fp(ATTR_INST_MV0 + loc, 4, GL_FLOAT, GL_FALSE,
+								 stride, (void *)(base + 64 + loc * 16));
+					glVertexAttribDivisor_fp(ATTR_INST_MV0 + loc, 1);
+				}
+				glEnableVertexAttribArray_fp(ATTR_INST_SCALE_SHADE);
+				glVertexAttribPointer_fp(ATTR_INST_SCALE_SHADE, 4, GL_FLOAT, GL_FALSE,
+							 stride, (void *)(base + 128));
+				glVertexAttribDivisor_fp(ATTR_INST_SCALE_SHADE, 1);
+				glEnableVertexAttribArray_fp(ATTR_INST_ORIGIN_ALPHA);
+				glVertexAttribPointer_fp(ATTR_INST_ORIGIN_ALPHA, 4, GL_FLOAT, GL_FALSE,
+							 stride, (void *)(base + 144));
+				glVertexAttribDivisor_fp(ATTR_INST_ORIGIN_ALPHA, 1);
+				glEnableVertexAttribArray_fp(ATTR_INST_LIGHT_LERP);
+				glVertexAttribPointer_fp(ATTR_INST_LIGHT_LERP, 4, GL_FLOAT, GL_FALSE,
+							 stride, (void *)(base + 160));
+				glVertexAttribDivisor_fp(ATTR_INST_LIGHT_LERP, 1);
+				glEnableVertexAttribArray_fp(ATTR_INST_POSES);
+				glVertexAttribIPointer_fp(ATTR_INST_POSES, 4, GL_INT,
+							  stride, (void *)(base + 176));
+				glVertexAttribDivisor_fp(ATTR_INST_POSES, 1);
+
+				glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
+							   GL_UNSIGNED_SHORT, NULL, batch->count);
+
+				for (loc = ATTR_INST_MVP0; loc <= ATTR_INST_POSES; loc++)
+				{
+					glVertexAttribDivisor_fp(loc, 0);
+					glDisableVertexAttribArray_fp(loc);
+				}
+			}
+
+			glDepthMask_fp(1);
+			glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDisable_fp(GL_BLEND);
+
+			glActiveTextureARB_fp(GL_TEXTURE1);
+			glBindTexture_fp(GL_TEXTURE_2D, 0);
+			glActiveTextureARB_fp(GL_TEXTURE0);
+			glBindVertexArray_fp(0);
+			glUseProgram_fp(0);
+		}
+	}
+}
+
+/*
+=============
 R_DrawEntitiesOnList
 =============
 */
@@ -1333,6 +2053,7 @@ static void R_DrawEntitiesOnList (void)
 {
 	int			i;
 	qboolean	item_trans;
+	qboolean	use_instancing;
 	mleaf_t		*pLeaf;
 	entity_t	*e;
 
@@ -1341,6 +2062,15 @@ static void R_DrawEntitiesOnList (void)
 
 	if (!r_drawentities.integer)
 		return;
+
+	/* Instanced alias rendering: collect and batch-draw opaque alias
+	 * models before the per-entity loop. Requires r_alias_gpu >= 2. */
+	use_instancing = (r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program);
+	if (use_instancing)
+	{
+		R_CollectAndBatchAliasInstances();
+		R_DrawAliasInstanced();
+	}
 
 	// draw sprites seperately, because of alpha blending
 	for (i = 0; i < cl_numvisedicts; i++)
@@ -1373,7 +2103,11 @@ static void R_DrawEntitiesOnList (void)
 					(e->model->flags & (EF_TRANSPARENT|EF_HOLEY|EF_SPECIAL_TRANS)) ||
 					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
-				R_DrawAliasModel (e);
+			{
+				/* Skip if already drawn by instanced path */
+				if (!use_instancing)
+					R_DrawAliasModel (e);
+			}
 			break;
 		}
 

@@ -385,6 +385,7 @@ void GL_FreeAliasGPUMeshes (void)
 		if (gm->vbo_tc)    { glDeleteBuffers_fp(1, &gm->vbo_tc); }
 		if (gm->ibo)       { glDeleteBuffers_fp(1, &gm->ibo); }
 		if (gm->ssbo_pose) { glDeleteBuffers_fp(1, &gm->ssbo_pose); }
+		if (gm->tex_pose)  { glDeleteTextures_fp(1, &gm->tex_pose); }
 	}
 	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
 	memset(alias_gpu_keys, 0, sizeof(alias_gpu_keys));
@@ -530,13 +531,28 @@ static void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 
 	glBindVertexArray_fp(0);
 
-	/* Pose SSBO */
+#ifndef __EMSCRIPTEN__
+	/* Pose SSBO (GL 4.3 path) */
 	glGenBuffers_fp(1, &gm->ssbo_pose);
 	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
 	glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
 			hdr->numposes * hdr->poseverts * sizeof(unsigned int),
 			pose_packed, GL_STATIC_DRAW);
 	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+#endif
+
+	/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.
+	 * Each texel packs one trivertx_t as: v[0] | v[1]<<8 | v[2]<<16 | ni<<24 */
+	glGenTextures_fp(1, &gm->tex_pose);
+	glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R32UI,
+			hdr->poseverts, hdr->numposes, 0,
+			GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
 
 	gm->num_indices = vi;
 	gm->poseverts = hdr->poseverts;
