@@ -57,7 +57,7 @@
 
       const tx = db.transaction(STORE_NAME);
       const files = await new Promise((resolve, reject) => {
-        const req = tx.getAll();
+        const req = tx.objectStore(STORE_NAME).getAll();
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });
@@ -95,12 +95,21 @@
     }
   }
 
-  function mountGameData(fileList) {
+  async function mountGameData(fileList) {
     // Mount files to Emscripten VFS at /data1/
     FS.mkdir('/data1');
     for (const f of fileList) {
-      const buf = new Uint8Array(f.data || (f instanceof File ?
-        new DataView(f) : new DataView(f.data)));
+      let buf;
+      if (f.data instanceof ArrayBuffer) {
+        // Cached file from IndexedDB
+        buf = new Uint8Array(f.data);
+      } else if (f instanceof File) {
+        // File from file picker
+        buf = new Uint8Array(await f.arrayBuffer());
+      } else {
+        console.warn('Unknown file type:', f);
+        continue;
+      }
       FS.writeFile('/data1/' + f.name, buf);
     }
     gameDataReady = true;
@@ -119,7 +128,7 @@
 
     document.getElementById('uploadStatus').innerText = `Uploading ${files.length} files...`;
     await saveToCache(files);
-    mountGameData(files);
+    await mountGameData(files);
     document.getElementById('uploadStatus').innerText = '';
   });
 
@@ -156,7 +165,7 @@
     if (pakFiles.length > 0) {
       document.getElementById('uploadStatus').innerText = `Uploading ${pakFiles.length} files...`;
       await saveToCache(pakFiles);
-      mountGameData(pakFiles);
+      await mountGameData(pakFiles);
       document.getElementById('uploadStatus').innerText = '';
     }
   });
@@ -164,7 +173,7 @@
   // Restore from cache on startup
   (async () => {
     const cached = await loadFromCache();
-    if (cached) mountGameData(cached);
+    if (cached) await mountGameData(cached);
   })();
 
   var Module = {
