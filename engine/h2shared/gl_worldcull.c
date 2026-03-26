@@ -66,6 +66,7 @@ static GLuint	cull_vis_ssbo;		/* binding 2: PVS bitvector (uint[]) */
 static GLuint	cull_indirect_buf;	/* binding 3: gpu_indirect_cmd_t[] */
 static GLuint	cull_src_ibo;		/* binding 4: source indices (read-only copy) */
 static GLuint	cull_dst_ibo;		/* binding 5: dest indices (compute writes, draw reads) */
+static GLuint	cull_dedup_ssbo;	/* binding 6: per-surface framecount for dedup */
 static int	cull_total_indices;	/* total index count across all buckets */
 
 /* (Hi-Z occlusion culling planned as future work — uhexen2-xd87) */
@@ -164,9 +165,13 @@ static const char cull_mark_src[] =
 	"layout(std430, binding = 5) writeonly buffer DstIndexBuffer {\n"
 	"    uint dst_indices[];\n"
 	"};\n"
+	"layout(std430, binding = 6) buffer DedupBuffer {\n"
+	"    int dedup[];\n"  /* per-surface framecount for dedup */
+	"};\n"
 	"\n"
 	"uniform vec3 u_vieworg;\n"
 	"uniform vec4 u_frustum[4];\n"
+	"uniform int u_framecount;\n"
 	"uniform int u_num_marksurfs;\n"
 	"\n"
 	"void main() {\n"
@@ -206,6 +211,12 @@ static const char cull_mark_src[] =
 	"        );\n"
 	"        if (dot(n, pvert) + fd < 0.0) return;\n"
 	"    }\n"
+	"\n"
+	"    /* Dedup: same surface can appear in multiple leaves.\n"
+	"     * atomicExchange the framecount — if it was already this\n"
+	"     * frame's value, another thread already emitted it. */\n"
+	"    int old = atomicExchange(dedup[si], u_framecount);\n"
+	"    if (old == u_framecount) return;\n"
 	"\n"
 	"    /* Claim index slots in the texture bucket's indirect command */\n"
 	"    uint slot = atomicAdd(cmds[s.tex_bucket].count, uint(s.numindices));\n"
@@ -331,13 +342,19 @@ void R_BuildWorldCull (void)
 		gpu_surfs[i].mins[3] = 0;
 		gpu_surfs[i].maxs[3] = 0;
 
-		/* Texture bucket = texture index in the model */
-		gpu_surfs[i].tex_bucket = surf->texinfo->texture
-			? (int)(surf->texinfo->texture - m->textures[0])
-			: 0;
-		/* Clamp to valid range */
-		if (gpu_surfs[i].tex_bucket < 0 || gpu_surfs[i].tex_bucket >= cull_num_buckets)
-			gpu_surfs[i].tex_bucket = 0;
+		/* Texture bucket = find texture index in model's texture array */
+		gpu_surfs[i].tex_bucket = 0;
+		if (surf->texinfo->texture)
+		{
+			for (j = 0; j < m->numtextures; j++)
+			{
+				if (m->textures[j] == surf->texinfo->texture)
+				{
+					gpu_surfs[i].tex_bucket = j;
+					break;
+				}
+			}
+		}
 
 		gpu_surfs[i].firstindex = surf->vbo_firstindex;
 		gpu_surfs[i].numindices = surf->vbo_numtris * 3;
@@ -483,6 +500,17 @@ void R_BuildWorldCull (void)
 				NULL, GL_DYNAMIC_DRAW);
 	}
 
+	/* Dedup buffer: one int per surface, atomicExchange'd with framecount */
+	{
+		int *zeros = (int *) calloc(cull_num_surfs, sizeof(int));
+		glGenBuffers_fp(1, &cull_dedup_ssbo);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_dedup_ssbo);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				cull_num_surfs * sizeof(int),
+				zeros, GL_DYNAMIC_DRAW);
+		free(zeros);
+	}
+
 	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
 	cull_initialized = true;
@@ -499,6 +527,7 @@ void R_FreeWorldCull (void)
 	if (cull_indirect_buf) { glDeleteBuffers_fp(1, &cull_indirect_buf); cull_indirect_buf = 0; }
 	if (cull_src_ibo) { glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
 	if (cull_dst_ibo) { glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
+	if (cull_dedup_ssbo) { glDeleteBuffers_fp(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
 	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
@@ -556,6 +585,7 @@ void R_DispatchWorldCull (void)
 	/* Pass 2: cull + mark surfaces */
 	glUseProgram_fp(cull_mark_prog);
 	glUniform3f_fp(cull_mark_u_vieworg, r_origin[0], r_origin[1], r_origin[2]);
+	glUniform1i_fp(cull_mark_u_framecount, framecount);
 	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
 
 	/* Upload frustum planes */
@@ -578,6 +608,7 @@ void R_DispatchWorldCull (void)
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 4, cull_src_ibo);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 5, cull_dst_ibo);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 6, cull_dedup_ssbo);
 
 	glDispatchCompute_fp((cull_num_marksurfs + 63) / 64, 1, 1);
 	glMemoryBarrier_fp(GL_COMMAND_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT |

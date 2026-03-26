@@ -1685,9 +1685,7 @@ void R_DrawWorld (void)
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
 
 #ifndef __EMSCRIPTEN__
-	/* GPU compute cull disabled — rendering issues with index writing.
-	 * TODO: debug texture bucket mapping and indirect draw (uhexen2-6qj.3) */
-	gpu_cull_active = false; /* R_WorldCullAvailable(); */
+	gpu_cull_active = R_WorldCullAvailable();
 	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.
