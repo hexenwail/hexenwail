@@ -27,6 +27,16 @@
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
 
+/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
+#ifdef EMSCRIPTEN
+#ifndef GL_QUADS
+#define GL_QUADS 0
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON 0
+#endif
+#endif
+
 int		gl_lightmap_format = GL_RGBA;
 cvar_t		gl_lightmapfmt = {"gl_lightmapfmt", "GL_RGBA", CVAR_NONE};
 int		lightmap_bytes = 4;		// 1, 2, or 4. default is 4 for GL_RGBA

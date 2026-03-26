@@ -20,6 +20,16 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 
+/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
+#ifdef EMSCRIPTEN
+#ifndef GL_QUADS
+#define GL_QUADS 0
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON 0
+#endif
+#endif
+
 /* FBO state — scaled 3D scene */
 static GLuint	pp_fbo;		/* render target (may be multisampled) */
 static GLuint	pp_color_rb;	/* multisampled color renderbuffer (0 if no MSAA) */
@@ -569,6 +579,8 @@ void GL_PostProcess_Init (void)
 	/* GL 4.3: shaders always available */
 
 	/* check for FBO function pointers */
+#ifndef EMSCRIPTEN
+	/* On desktop GL, dynamically load function pointers */
 	glGenFramebuffers_fp = (glGenFramebuffers_f) SDL_GL_GetProcAddress("glGenFramebuffers");
 	glDeleteFramebuffers_fp = (glDeleteFramebuffers_f) SDL_GL_GetProcAddress("glDeleteFramebuffers");
 	glBindFramebuffer_fp = (glBindFramebuffer_f) SDL_GL_GetProcAddress("glBindFramebuffer");
@@ -597,6 +609,7 @@ void GL_PostProcess_Init (void)
 	glUniform3fv_fp = (glUniform3fv_f) SDL_GL_GetProcAddress("glUniform3fv");
 	if (!glUniform2f_fp)
 		glUniform2f_fp = (glUniform2f_f) SDL_GL_GetProcAddress("glUniform2f");
+#endif /* !EMSCRIPTEN */
 
 	if (!PP_InitShader())
 	{

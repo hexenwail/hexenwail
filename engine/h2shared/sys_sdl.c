@@ -226,7 +226,12 @@ static void Sys_MainFrame (void)
 				double mintime = 1.0 / cap;
 				while (time < mintime)
 				{
-					SDL_Delay (1);
+					/* Coarse sleep when >2ms remains, busy-wait
+					 * for the last stretch. SDL_Delay(1) on Windows
+					 * can sleep 10-15ms, destroying frame pacing. */
+					double remaining = mintime - time;
+					if (remaining > 0.002)
+						SDL_Delay (1);
 					newtime = Sys_DoubleTime ();
 					time = newtime - mainloop_oldtime;
 				}

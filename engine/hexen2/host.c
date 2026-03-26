@@ -676,7 +676,12 @@ static qboolean Host_FilterTime (float time)
 	if (realtime - oldrealtime < 0.001)
 		return false;
 
+	/* Skip the host_maxfps filter when VSync is active — the frame
+	 * pacer in sys_sdl.c already handles rate limiting, and this
+	 * secondary filter causes frame drops when vsync delivers a
+	 * frame slightly early. */
 	if (!cls.timedemo && host_maxfps.value > 0 &&
+	    VID_MenuGetVSync() == 0 &&
 	    realtime - oldrealtime < 1.0/host_maxfps.value)
 		return false;		// framerate is too high
 

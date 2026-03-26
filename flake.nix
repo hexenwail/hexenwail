@@ -281,7 +281,6 @@
                 -DUSE_ALSA=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
-                -DPKG_CONFIG_EXECUTABLE=/dev/null \
                 ../engine
             '';
 
