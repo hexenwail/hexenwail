@@ -163,6 +163,13 @@
     document.getElementById('gameContainer').classList.add('playing');
     console.log('Game data ready! Starting engine...');
 
+    // Wait for Module to be fully initialized
+    let attempts = 0;
+    while ((typeof Module === 'undefined' || !Module.callMain) && attempts < 100) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      attempts++;
+    }
+
     // Start the engine if not already running
     if (typeof Module !== 'undefined' && Module.callMain) {
       try {
@@ -173,7 +180,7 @@
         console.error('callMain error:', e);
       }
     } else {
-      console.error('Module or callMain not available!');
+      console.error('Module or callMain not available after waiting!');
     }
 
     return true;
