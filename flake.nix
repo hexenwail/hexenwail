@@ -249,6 +249,62 @@
             };
           };
 
+          # WebAssembly / Emscripten build
+          wasm = pkgs.stdenv.mkDerivation {
+            pname = "glhexen2-wasm";
+            inherit version;
+
+            src = filteredSrc;
+
+            nativeBuildInputs = with pkgs; [
+              emscripten
+              cmake
+              pkg-config
+            ];
+
+            # Emscripten-specific setup
+            preConfigure = ''
+              cd engine
+              export EM_CACHE="''${EM_CACHE:-.emcache}"
+              export EM_CONFIG="''${EM_CONFIG:-.emscripten}"
+            '';
+
+            # Use Emscripten's CMake toolchain
+            configurePhase = ''
+              mkdir -p build
+              cd build
+              emcmake cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DUSE_CODEC_VORBIS=OFF \
+                -DUSE_ALSA=OFF \
+                ..
+            '';
+
+            buildPhase = ''
+              cd build
+              emmake make -j$(nproc)
+            '';
+
+            installPhase = ''
+              mkdir -p $out
+              cp glhexen2.html $out/index.html
+              cp glhexen2.js $out/
+              cp glhexen2.wasm $out/
+              cp glhexen2.worker.js $out/ 2>/dev/null || true
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Hexenwail - WebAssembly browser build (GL ES 3.0)";
+              longDescription = ''
+                Hexenwail WebAssembly / Emscripten build for browser gameplay.
+                Requires users to provide game data files (pak0.pak, pak1.pak).
+              '';
+              homepage = "https://github.com/bobberb/hexenwail";
+              license = licenses.gpl2Plus;
+              platforms = platforms.linux;
+            };
+          };
+
           # Release package - builds all platforms together
           release = pkgs.runCommand "glhexen2-release-${version}" {
             meta = with pkgs.lib; {
