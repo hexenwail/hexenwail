@@ -680,8 +680,19 @@ static void GL_LoadFunctionPointers (void)
 	glBindVertexArray_fp = (glBindVertexArray_f) SDL_GL_GetProcAddress("glBindVertexArray");
 	glVertexAttribPointer_fp = (glVertexAttribPointer_f) SDL_GL_GetProcAddress("glVertexAttribPointer");
 	glEnableVertexAttribArray_fp = (glEnableVertexAttribArray_f) SDL_GL_GetProcAddress("glEnableVertexAttribArray");
+	glDisableVertexAttribArray_fp = (glDisableVertexAttribArray_f) SDL_GL_GetProcAddress("glDisableVertexAttribArray");
 	glDrawArrays_fp = (glDrawArrays_f) SDL_GL_GetProcAddress("glDrawArrays");
 	glDrawElements_fp = (glDrawElements_f) SDL_GL_GetProcAddress("glDrawElements");
+
+	/* Instancing functions (GL 3.1 / ES 3.0) */
+	glDrawElementsInstanced_fp = (glDrawElementsInstanced_f) SDL_GL_GetProcAddress("glDrawElementsInstanced");
+	glVertexAttribDivisor_fp = (glVertexAttribDivisor_f) SDL_GL_GetProcAddress("glVertexAttribDivisor");
+	glVertexAttribIPointer_fp = (glVertexAttribIPointer_f) SDL_GL_GetProcAddress("glVertexAttribIPointer");
+
+	/* UBO functions (GL 3.1 / ES 3.0) */
+	glGetUniformBlockIndex_fp = (glGetUniformBlockIndex_f) SDL_GL_GetProcAddress("glGetUniformBlockIndex");
+	glUniformBlockBinding_fp = (glUniformBlockBinding_f) SDL_GL_GetProcAddress("glUniformBlockBinding");
+	glBindBufferRange_fp = (glBindBufferRange_f) SDL_GL_GetProcAddress("glBindBufferRange");
 
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
