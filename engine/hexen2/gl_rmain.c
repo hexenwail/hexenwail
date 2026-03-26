@@ -29,6 +29,12 @@
 #ifndef GLdouble
 #define GLdouble double
 #endif
+#ifndef GL_QUADS
+#define GL_QUADS 0
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON 0
+#endif
 #endif
 
 /* gl_fog.c */
@@ -1845,11 +1851,11 @@ static void R_DrawAliasInstanced (void)
 			continue;
 
 		/* Bind skin texture to unit 0 */
-		glActiveTextureARB_fp(GL_TEXTURE0);
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 		GL_Bind(batch->skin_tex);
 
 		/* Bind pose texture to unit 1 */
-		glActiveTextureARB_fp(GL_TEXTURE1);
+		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
 
 		/* Use dedicated instancing VAO — don't corrupt model's VAO */
@@ -1923,9 +1929,9 @@ static void R_DrawAliasInstanced (void)
 	}
 
 	/* Restore state */
-	glActiveTextureARB_fp(GL_TEXTURE1);
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
-	glActiveTextureARB_fp(GL_TEXTURE0);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
 	GL_SetAlphaThreshold(0.01f);
@@ -2006,9 +2012,9 @@ static void R_DrawAliasInstanced (void)
 				stride = sizeof(alias_instance_t);
 				base = batch->first * stride;
 
-				glActiveTextureARB_fp(GL_TEXTURE0);
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				GL_Bind(batch->fb_tex);
-				glActiveTextureARB_fp(GL_TEXTURE1);
+				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 				glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
 
 				glBindVertexArray_fp(inst_vao);
@@ -2063,9 +2069,9 @@ static void R_DrawAliasInstanced (void)
 			glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDisable_fp(GL_BLEND);
 
-			glActiveTextureARB_fp(GL_TEXTURE1);
+			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 			glBindTexture_fp(GL_TEXTURE_2D, 0);
-			glActiveTextureARB_fp(GL_TEXTURE0);
+			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 			glBindVertexArray_fp(0);
 			glUseProgram_fp(0);
 		}
