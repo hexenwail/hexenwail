@@ -163,17 +163,17 @@
     document.getElementById('gameContainer').classList.add('playing');
     console.log('Game data ready!');
 
-    // Try to start the engine if Module is already initialized
-    if (typeof Module !== 'undefined' && Module.callMain && Module.runtimeInitialized) {
+    // Start the engine if runtime is initialized
+    if (typeof Module !== 'undefined' && Module.callMain) {
       try {
-        console.log('Module already initialized, calling callMain...');
+        console.log('Calling Module.callMain()...');
         Module.callMain();
+        console.log('Module.callMain() completed');
       } catch (e) {
         console.error('callMain error:', e);
       }
     } else {
-      console.log('Waiting for Module to initialize...');
-      // onRuntimeInitialized callback will call callMain when ready
+      console.error('Module.callMain still not available!');
     }
 
     return true;
