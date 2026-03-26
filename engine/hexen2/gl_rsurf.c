@@ -1006,6 +1006,9 @@ dynamic_batch:
 	}
 }
 
+/* Set true when GPU compute cull handles solid surfaces this frame */
+static qboolean gpu_cull_active;
+
 /* World VBO state (non-static — accessed by gl_worldcull.c) */
 GLuint	world_vbo;
 GLuint	world_ibo;
@@ -1060,6 +1063,31 @@ static void DrawTextureChains (entity_t *e)
 			{
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
+			}
+			else if (gpu_cull_active && e == &r_worldentity &&
+				 !(s->flags & (SURF_DRAWSKY | SURF_DRAWTURB | SURF_DRAWFENCE | SURF_UNDERWATER)))
+			{
+				/* GPU compute cull already drew solid surfaces.
+				 * Just walk chain for lightmap dynamic updates. */
+				for ( ; s ; s = s->texturechain)
+				{
+					if (s->polys)
+					{
+						int maps;
+						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
+						lightmap_polys[s->lightmaptexturenum] = s->polys;
+						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
+						{
+							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
+							{
+								lightmap_modified[s->lightmaptexturenum] = true;
+								break;
+							}
+						}
+						if (s->dlightframe == r_framecount || s->cached_dlight)
+							lightmap_modified[s->lightmaptexturenum] = true;
+					}
+				}
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
 			{
@@ -1657,21 +1685,20 @@ void R_DrawWorld (void)
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
 
 #ifndef __EMSCRIPTEN__
-	if (R_WorldCullAvailable())
+	gpu_cull_active = R_WorldCullAvailable();
+	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.
-		 * DrawTextureChains still handles sky, water, fence. */
+		 * DrawTextureChains handles sky, water, fence + lightmap updates. */
 		R_DispatchWorldCull();
 		R_DrawWorldCulled();
-
-		/* Let DrawTextureChains handle only non-solid surfaces */
-		DrawTextureChains (&r_worldentity);
 	}
-	else
+#else
+	gpu_cull_active = false;
 #endif
-	{
-		DrawTextureChains (&r_worldentity);
-	}
+
+	DrawTextureChains (&r_worldentity);
+	gpu_cull_active = false;
 
 	// reset to texture unit 0
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
