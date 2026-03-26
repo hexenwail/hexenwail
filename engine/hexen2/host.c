@@ -26,6 +26,8 @@
 #include "cfgfile.h"
 #include "debuglog.h"
 #include "bgmusic.h"
+
+extern int VID_MenuGetVSync (void);
 #include "cdaudio.h"
 #include <setjmp.h>
 
