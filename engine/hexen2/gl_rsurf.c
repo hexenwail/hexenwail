@@ -1008,7 +1008,7 @@ dynamic_batch:
 
 /* Set true when GPU compute cull handles solid surfaces this frame */
 static qboolean gpu_cull_active;
-cvar_t r_gpucull = {"r_gpucull", "1", CVAR_ARCHIVE};
+cvar_t r_gpucull = {"r_gpucull", "0", CVAR_ARCHIVE};	/* GPU compute cull — opt-in, water popping WIP */
 
 /* World VBO state (non-static — accessed by gl_worldcull.c) */
 GLuint	world_vbo;
