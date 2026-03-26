@@ -251,6 +251,9 @@
           };
 
           # WebAssembly / Emscripten build
+          # NOTE: WASM builds require network access for Emscripten SDL3 port
+          # Quick fix (temporary): Use shell-wasm.nix for interactive dev builds
+          # Long-term: See issue uhexen2-1z31 for reproducible solution
           wasm = pkgs.stdenv.mkDerivation {
             pname = "glhexen2-wasm";
             inherit version;
@@ -281,7 +284,6 @@
                 -DUSE_ALSA=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
-                -DCMAKE_WASM_NO_SDL_PORT=1 \
                 ../engine
             '';
 
@@ -302,6 +304,10 @@
               longDescription = ''
                 Hexenwail WebAssembly / Emscripten build for browser gameplay.
                 Requires users to provide game data files (pak0.pak, pak1.pak).
+
+                Note: Pure Nix flake builds cannot fetch Emscripten ports due to
+                sandbox restrictions. For WASM development, use:
+                  nix develop -f shell-wasm.nix
               '';
               homepage = "https://github.com/bobberb/hexenwail";
               license = licenses.gpl2Plus;
