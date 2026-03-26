@@ -23,6 +23,7 @@
 
 #include "quakedef.h"
 #include "hashindex.h"
+#include "img_load.h"
 #include "gl_shader.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
@@ -144,6 +145,38 @@ qpic_t *Draw_PicFromFile (const char *name)
 
 	SwapPic (p);
 
+	// Try external texture override — keep original LMP dimensions
+	if (r_texture_external_hud.integer)
+	{
+		char	extname[MAX_QPATH];
+		int		ext_w, ext_h, len;
+		qboolean has_alpha;
+		byte	*ext_data;
+
+		q_strlcpy (extname, name, sizeof(extname));
+		len = (int)strlen(extname);
+		if (len > 4 && !strcmp(extname + len - 4, ".lmp"))
+			extname[len - 4] = '\0';
+
+		ext_data = IMG_LoadExternalTexture (extname, &ext_w, &ext_h, &has_alpha);
+		if (ext_data)
+		{
+			unsigned int flags = TEX_RGBA | TEX_NEAREST;
+			if (has_alpha)
+				flags |= TEX_ALPHA;
+
+			gl.texnum = GL_LoadTexture (extname, ext_data, ext_w, ext_h, flags);
+			gl.sl = 0;
+			gl.sh = 1;
+			gl.tl = 0;
+			gl.th = 1;
+			memcpy (p->data, &gl, sizeof(glpic_t));
+
+			free (ext_data);
+			return p;
+		}
+	}
+
 	gl.texnum = GL_LoadPicTexture (p);
 	gl.sl = 0;
 	gl.sh = 1;
@@ -200,11 +233,55 @@ qpic_t	*Draw_CachePic (const char *path)
 	q_strlcpy (pic->name, path, MAX_QPATH);
 
 //
-// load the pic from disk
+// load the pic from disk first to get original dimensions
 //
 	dat = (qpic_t *)FS_LoadTempFile (path, NULL);
 	Draw_PicCheckError (dat, path);
 	SwapPic (dat);
+
+//
+// try external texture override (e.g. gfx/menu/conback.tga)
+// keep original LMP dimensions for layout, use hi-res for GL texture
+//
+	if (r_texture_external_hud.integer)
+	{
+		char	extname[MAX_QPATH];
+		int		ext_w, ext_h;
+		qboolean has_alpha;
+		byte	*ext_data;
+
+		// Strip .lmp extension if present
+		q_strlcpy (extname, path, sizeof(extname));
+		i = (int)strlen(extname);
+		if (i > 4 && !strcmp(extname + i - 4, ".lmp"))
+			extname[i - 4] = '\0';
+
+		ext_data = IMG_LoadExternalTexture (extname, &ext_w, &ext_h, &has_alpha);
+		if (ext_data)
+		{
+			unsigned int flags = TEX_RGBA | TEX_NEAREST;
+			if (has_alpha)
+				flags |= TEX_ALPHA;
+
+			// Use original LMP dimensions for layout
+			pic->pic.width = dat->width;
+			pic->pic.height = dat->height;
+
+			gl.texnum = GL_LoadTexture (extname, ext_data, ext_w, ext_h, flags);
+			gl.sl = 0;
+			gl.sh = 1;
+			gl.tl = 0;
+			gl.th = 1;
+			memcpy (pic->pic.data, &gl, sizeof(glpic_t));
+
+			free (ext_data);
+
+			if (developer.value >= 2)
+				Con_Printf ("Loaded external pic: %s (%dx%d)\n", extname, ext_w, ext_h);
+
+			return &pic->pic;
+		}
+	}
 
 	// HACK HACK HACK --- we need to keep the bytes for
 	// the translatable player picture just for the menu

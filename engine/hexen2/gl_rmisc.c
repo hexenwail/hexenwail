@@ -258,6 +258,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_SetCallback (&r_clearcolor, R_SetClearColor_f);
 	Cvar_RegisterVariable (&r_texture_external);
+	Cvar_RegisterVariable (&r_texture_external_hud);
 
 	Cvar_RegisterVariable (&gl_clear);
 	Cvar_RegisterVariable (&gl_cull);

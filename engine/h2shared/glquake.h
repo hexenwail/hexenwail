@@ -241,6 +241,7 @@ extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
 extern	cvar_t	r_alphasort;
 extern	cvar_t	r_texture_external;
+extern	cvar_t	r_texture_external_hud;
 
 #if defined(H2W)
 extern	cvar_t	r_netgraph;
