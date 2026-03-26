@@ -3226,8 +3226,8 @@ r_refdef must be set before the first call
 */
 void R_RenderView (void)
 {
-	double	t_world, t_entities, t_particles, t_trans, t_water, t_vm, t_mirror;
-	double	t_start, t_now;
+	double	t_world = 0, t_particles = 0, t_trans = 0, t_water = 0, t_vm = 0, t_mirror = 0;
+	double	t_start = 0, t_now;
 
 	if (r_norefresh.integer)
 		return;

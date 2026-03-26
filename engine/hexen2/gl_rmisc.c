@@ -464,6 +464,7 @@ void R_NewMap (void)
 	R_ClearParticles ();
 
 	GL_BuildLightmaps ();
+	R_BuildWorldVBO ();
 
 	// identify sky texture
 	skytexturenum = -1;

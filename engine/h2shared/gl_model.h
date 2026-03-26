@@ -147,6 +147,10 @@ typedef struct msurface_s
 	int		cached_light[MAXLIGHTMAPS];	// values currently used in lightmap
 	qboolean	cached_dlight;			// true if dynamic light in cache
 	byte		*samples;		// [numstyles*surfsize]
+
+	int		vbo_firstvert;		// first vertex in static world VBO
+	int		vbo_firstindex;		// first index in static world IBO
+	int		vbo_numtris;		// triangle count for this surface
 } msurface_t;
 
 typedef struct mnode_s

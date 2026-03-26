@@ -27,6 +27,10 @@
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
 
+/* fog globals from gl_fog.c */
+extern float r_fog_density;
+extern float r_fog_color[3];
+
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
 #ifndef GL_QUADS
@@ -1002,6 +1006,13 @@ dynamic_batch:
 	}
 }
 
+/* Forward declarations for static world VBO (defined below R_DrawWorld) */
+static GLuint	world_vbo;
+static GLuint	world_ibo;
+static GLuint	world_vao;
+static int	world_num_verts;
+static int	world_num_indices;
+
 static void DrawTextureChains (entity_t *e)
 {
 	int		i;
@@ -1050,13 +1061,93 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
+			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
+			{
+				/* Static VBO path: world geometry is pre-uploaded.
+				 * Just issue glDrawElements per visible surface
+				 * using the pre-built IBO. Avoids per-vertex CPU work. */
+				float mvp[16], mv[16];
+
+				glBindVertexArray_fp(world_vao);
+
+				glUseProgram_fp(gl_shader_world.program);
+				GL_GetMVP(mvp);
+				GL_GetModelview(mv);
+				if (gl_shader_world.u_mvp >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+				if (gl_shader_world.u_modelview >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+				if (gl_shader_world.u_fog_density >= 0)
+					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+				if (gl_shader_world.u_fog_color >= 0)
+					glUniform3f_fp(gl_shader_world.u_fog_color,
+						       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+				if (gl_shader_world.u_alpha_threshold >= 0)
+					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+				{
+					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+					GL_Bind (tt->gl_texturenum);
+				}
+				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+
+				for ( ; s ; s = s->texturechain)
+				{
+					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
+							SURF_DRAWFENCE | SURF_UNDERWATER))
+					{
+						/* Fall back to per-surface for special surfaces */
+						glBindVertexArray_fp(0);
+						glUseProgram_fp(0);
+						R_RenderBrushPolyMTex (e, s, false);
+						glBindVertexArray_fp(world_vao);
+						glUseProgram_fp(gl_shader_world.program);
+						{
+							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+							GL_Bind (tt->gl_texturenum);
+						}
+						continue;
+					}
+
+					/* Draw this surface from the static VBO */
+					if (s->vbo_numtris > 0)
+					{
+						glDrawElements_fp(GL_TRIANGLES,
+								  s->vbo_numtris * 3,
+								  GL_UNSIGNED_INT,
+								  (void *)((size_t)s->vbo_firstindex * sizeof(unsigned int)));
+						c_brush_polys++;
+					}
+
+					/* Still need to track lightmap polys for dynamic updates */
+					if (s->polys)
+					{
+						int maps;
+						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
+						lightmap_polys[s->lightmaptexturenum] = s->polys;
+						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
+						{
+							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
+							{
+								lightmap_modified[s->lightmaptexturenum] = true;
+								break;
+							}
+						}
+						if (s->dlightframe == r_framecount || s->cached_dlight)
+							lightmap_modified[s->lightmaptexturenum] = true;
+					}
+				}
+
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
+			}
 			else if (lm_atlas_enabled && lm_atlas_texture)
 			{
-				/* Batched path: bind lightmap atlas once on unit 1,
-				 * accumulate all surfaces as triangles. Surface UVs
-				 * are already remapped to atlas coordinates. One draw
-				 * call per diffuse texture, zero lightmap rebinds. */
-
+				/* ImmBegin fallback for non-world brush entities */
 				GL_ImmColor4f (1, 1, 1, 1);
 
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
@@ -1332,6 +1423,148 @@ static void R_RecursiveWorldNode (mnode_t *node)
 	}
 
 	R_RecursiveWorldNode (node->children[!side]);
+}
+
+/* ------------------------------------------------------------------ */
+/* Static world VBO — upload all world BSP surfaces at map load time   */
+/* ------------------------------------------------------------------ */
+
+/* Vertex: pos(3) + texcoord(2) + lmcoord(2) = 7 floats */
+typedef struct {
+	float	pos[3];
+	float	st[2];		/* diffuse texture coords */
+	float	lm[2];		/* lightmap atlas coords */
+} worldvert_t;
+
+void R_BuildWorldVBO (void)
+{
+	qmodel_t	*m = cl.worldmodel;
+	msurface_t	*surf;
+	glpoly_t	*p;
+	worldvert_t	*verts;
+	unsigned int	*indices;
+	int		i, j, v_pos, idx_pos;
+	int		total_verts = 0, total_tris = 0;
+
+	if (!m)
+		return;
+
+	/* Free old VBO if reloading */
+	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
+	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
+	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+
+	/* Pass 1: count vertices and triangles */
+	for (i = 0; i < m->numsurfaces; i++)
+	{
+		surf = &m->surfaces[i];
+		p = surf->polys;
+		if (!p || p->numverts < 3)
+			continue;
+		/* Skip sky and warped surfaces — they have special rendering */
+		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+			continue;
+		total_verts += p->numverts;
+		total_tris += p->numverts - 2;
+	}
+
+	if (total_verts == 0)
+		return;
+
+	verts = (worldvert_t *) malloc(total_verts * sizeof(worldvert_t));
+	indices = (unsigned int *) malloc(total_tris * 3 * sizeof(unsigned int));
+	if (!verts || !indices)
+	{
+		free(verts);
+		free(indices);
+		return;
+	}
+
+	/* Pass 2: fill vertex and index data */
+	v_pos = 0;
+	idx_pos = 0;
+	for (i = 0; i < m->numsurfaces; i++)
+	{
+		surf = &m->surfaces[i];
+		p = surf->polys;
+		if (!p || p->numverts < 3)
+			continue;
+		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+			continue;
+
+		surf->vbo_firstvert = v_pos;
+		surf->vbo_firstindex = idx_pos;
+		surf->vbo_numtris = p->numverts - 2;
+
+		/* Emit vertices */
+		for (j = 0; j < p->numverts; j++)
+		{
+			float *v = p->verts[j];
+			verts[v_pos].pos[0] = v[0];
+			verts[v_pos].pos[1] = v[1];
+			verts[v_pos].pos[2] = v[2];
+			verts[v_pos].st[0] = v[3];
+			verts[v_pos].st[1] = v[4];
+			verts[v_pos].lm[0] = v[5];
+			verts[v_pos].lm[1] = v[6];
+			v_pos++;
+		}
+
+		/* Emit triangle fan indices */
+		for (j = 2; j < p->numverts; j++)
+		{
+			indices[idx_pos++] = surf->vbo_firstvert;
+			indices[idx_pos++] = surf->vbo_firstvert + j - 1;
+			indices[idx_pos++] = surf->vbo_firstvert + j;
+		}
+	}
+
+	/* Create GPU objects */
+	glGenVertexArrays_fp(1, &world_vao);
+	glBindVertexArray_fp(world_vao);
+
+	glGenBuffers_fp(1, &world_vbo);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, world_vbo);
+	glBufferData_fp(GL_ARRAY_BUFFER, v_pos * sizeof(worldvert_t),
+			verts, GL_STATIC_DRAW);
+
+	/* pos = location 0 */
+	glEnableVertexAttribArray_fp(ATTR_POSITION);
+	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
+				 sizeof(worldvert_t), (void *)0);
+	/* texcoord = location 1 */
+	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
+	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE,
+				 sizeof(worldvert_t), (void *)(3 * sizeof(float)));
+	/* lmcoord = location 2 */
+	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
+	glVertexAttribPointer_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
+				 sizeof(worldvert_t), (void *)(5 * sizeof(float)));
+
+	glGenBuffers_fp(1, &world_ibo);
+	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, world_ibo);
+	glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, idx_pos * sizeof(unsigned int),
+			indices, GL_STATIC_DRAW);
+
+	glBindVertexArray_fp(0);
+
+	world_num_verts = v_pos;
+	world_num_indices = idx_pos;
+
+	free(verts);
+	free(indices);
+
+	Con_SafePrintf("World VBO: %d verts, %d tris in static buffer\n",
+		       world_num_verts, world_num_indices / 3);
+}
+
+void R_FreeWorldVBO (void)
+{
+	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
+	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
+	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	world_num_verts = 0;
+	world_num_indices = 0;
 }
 
 /*

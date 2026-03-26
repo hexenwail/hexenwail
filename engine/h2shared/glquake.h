@@ -358,6 +358,8 @@ void R_AnimateLight(void);
 int R_LightPoint (vec3_t p);
 float R_LightPointColor (vec3_t p);
 void GL_BuildLightmaps (void);
+void R_BuildWorldVBO (void);
+void R_FreeWorldVBO (void);
 void GL_SetupLightmapFmt (void);
 void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr);
 
