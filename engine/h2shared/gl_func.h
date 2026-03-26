@@ -189,6 +189,8 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glLoadIdentity_fp()	((void)0)
 #define glMatrixMode_fp(m)	((void)0)
 #define glLoadMatrixf_fp(m)	((void)0)
+#define glPointSize_fp(s)	((void)0)
+#define glPointSize(s)		((void)0)	/* Direct function call, not _fp variant */
 
 #endif	/* GL_FUNC_H */
 

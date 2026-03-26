@@ -261,6 +261,7 @@
               cmake
               pkg-config
               nodejs
+              sdl3
             ];
 
             # Emscripten-specific setup
