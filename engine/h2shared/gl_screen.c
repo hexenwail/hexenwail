@@ -1553,7 +1553,8 @@ void SCR_UpdateScreen (void)
 #if !defined(SERVERONLY) && !defined(H2W)
 		if (!CSQC_DrawHud ())
 #endif
-			Sbar_Draw();
+			if (!cls.demoplayback)
+				Sbar_Draw();
 		SCR_DrawFPS();
 		SCR_DrawClock();
 		SCR_DrawSpeed();
