@@ -647,6 +647,8 @@ void VID_ShiftPalette (const unsigned char *palette)
 
 static void GL_LoadFunctionPointers (void)
 {
+#ifndef EMSCRIPTEN
+	/* On desktop GL, dynamically load function pointers */
 	/* load shader function pointers */
 	glCreateShader_fp = (glCreateShader_f) SDL_GL_GetProcAddress("glCreateShader");
 	glDeleteShader_fp = (glDeleteShader_f) SDL_GL_GetProcAddress("glDeleteShader");
@@ -704,6 +706,7 @@ static void GL_LoadFunctionPointers (void)
 	{
 		Sys_Error("Required GL 4.3 shader functions not found");
 	}
+#endif /* !EMSCRIPTEN */
 }
 
 
@@ -767,6 +770,7 @@ static void GL_Init_Functions (void)
 }
 #endif	/* GL_DLSYM */
 
+#ifndef EMSCRIPTEN
 static void GL_ResetFunctions (void)
 {
 #ifdef	GL_DLSYM
@@ -779,6 +783,10 @@ static void GL_ResetFunctions (void)
 
 	have_stencil = false;
 }
+#else
+/* Emscripten: functions are statically linked, no reset needed */
+static inline void GL_ResetFunctions (void) { }
+#endif
 
 /*
 ===============
@@ -818,10 +826,15 @@ static void GL_Init (void)
 	Con_SafePrintf("OpenGL max.texture size: %i\n", (int) gl_max_size);
 
 	/* GL 4.3: multitexture is always available */
+#ifndef EMSCRIPTEN
 	glActiveTextureARB_fp = (glActiveTextureARB_f) SDL_GL_GetProcAddress("glActiveTexture");
 	if (!glActiveTextureARB_fp)
 		Sys_Error("glActiveTexture not found");
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+#else
+	/* Emscripten: use direct function call */
+	glActiveTexture(GL_TEXTURE0_ARB);
+#endif
 
 	/* GL 4.3: anisotropic filtering is always available */
 	gl_max_anisotropy = 1;
