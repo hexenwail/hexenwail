@@ -2059,7 +2059,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_flashblend", 1);
+			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
@@ -2072,6 +2072,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_torch_dlight", 0);
 			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
@@ -2081,7 +2082,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 2.0f);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_flashblend", 1);
+			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
@@ -2094,6 +2095,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glows", 0);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_torch_dlight", 0);
 			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
@@ -2103,7 +2105,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 1.0f);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_flashblend", 1);
+			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
@@ -2116,6 +2118,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_torch_dlight", 0);
 			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
@@ -2139,6 +2142,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
+			Cvar_SetValue ("gl_torch_dlight", 0);
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
@@ -2162,6 +2166,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
+			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
@@ -2185,6 +2190,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
+			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
@@ -2277,12 +2283,12 @@ static void M_Display_Draw (void)
 		int sh = r_shadows.integer;
 		float sc = r_scale.value;
 
-		qboolean is_faithful = (sc <= 0.5f && sc > 0.25f && se == 0 && gl_filter_idx == 0 && fb && !sh);
-		qboolean is_crunchy  = (sc <= 0.25f && se >= 2 && gl_filter_idx == 0 && fb && !sh);
-		qboolean is_retro    = (sc <= 0.5f && sc > 0.25f && se == 1 && gl_filter_idx <= 2 && fb && !sh);
-		qboolean is_clean    = (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && !fb && !sh);
-		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && !fb && sh);
-		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && !fb && sh);
+		qboolean is_faithful = (sc <= 0.5f && sc > 0.25f && se == 0 && gl_filter_idx == 0 && !sh);
+		qboolean is_crunchy  = (sc <= 0.25f && se >= 2 && gl_filter_idx == 0 && !sh);
+		qboolean is_retro    = (sc <= 0.5f && sc > 0.25f && se == 1 && gl_filter_idx <= 2 && !sh);
+		qboolean is_clean    = (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && !sh);
+		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && sh);
+		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && sh);
 
 		if (is_faithful)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");

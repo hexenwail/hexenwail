@@ -272,6 +272,7 @@ extern	cvar_t	gl_lmatlas;
 extern	cvar_t	gl_glows;
 extern	cvar_t	gl_other_glows;
 extern	cvar_t	gl_missile_glows;
+extern	cvar_t	gl_torch_dlight;
 extern	cvar_t	gl_glow_intensity;
 extern	cvar_t	gl_flashintensity;
 

@@ -682,7 +682,7 @@ static void CL_RelinkEntities (void)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
-			dl->radius = 200 * gl_flashintensity.value;
+			dl->radius = 200;	/* torch: fixed radius, not scaled by gl_flashintensity */
 			dl->die = cl.time + 0.001;
 #		ifdef GLQUAKE
 			if (gl_colored_dynamic_lights.integer)
@@ -693,6 +693,30 @@ static void CL_RelinkEntities (void)
 				dl->color[3] = 0.7;
 			}
 #		endif
+		}
+
+		/* Wall torch dynamic lights — cast small dlight for
+		 * torch-flagged models so they illuminate nearby entities */
+		{
+			float *gs;
+			int pflags = R_GetPimpFlags(ent, &gs);
+			if (gl_torch_dlight.integer && (pflags & XF_TORCH_GLOW))
+			{
+				dl = CL_AllocDlight (i);
+				VectorCopy (ent->origin, dl->origin);
+				dl->origin[2] += 8;
+				dl->radius = 150;
+				dl->die = cl.time + 0.001;
+#			ifdef GLQUAKE
+				if (gl_colored_dynamic_lights.integer)
+				{
+					dl->color[0] = gs[COLOR_R];
+					dl->color[1] = gs[COLOR_G];
+					dl->color[2] = gs[COLOR_B];
+					dl->color[3] = 0.7f;
+				}
+#			endif
+			}
 		}
 
 		/* Inky: misc_modelpimp cast light */
