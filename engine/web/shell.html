@@ -31,7 +31,7 @@
   <div id="uploadPanel">
     <h2>Hexen II Game Data Required</h2>
     <p>Upload your Hexen II <code>data1</code> folder to play (pak0.pak, pak1.pak)</p>
-    <input type="file" id="fileInput" multiple accept=".pak" />
+    <input type="file" id="fileInput" multiple accept=".pak,.dat,.cfg,.rc,.txt" />
     <button id="selectButton">Select PAK Files</button>
     <p style="font-size: 12px; color: #aaa;">or drag and drop pak files here</p>
     <button id="clearCacheButton" style="display:none;">Clear Cached Data</button>
@@ -229,11 +229,14 @@
   panel.addEventListener('drop', async (e) => {
     panel.classList.remove('drag-over');
     const files = Array.from(e.dataTransfer.files);
-    const pakFiles = files.filter(f => f.name.endsWith('.pak'));
-    if (pakFiles.length > 0) {
-      document.getElementById('uploadStatus').innerText = `Uploading ${pakFiles.length} files...`;
-      await saveToCache(pakFiles);
-      await mountGameData(pakFiles);
+    const gameFiles = files.filter(f => {
+      const ext = f.name.toLowerCase();
+      return ext.endsWith('.pak') || ext.endsWith('.dat');
+    });
+    if (gameFiles.length > 0) {
+      document.getElementById('uploadStatus').innerText = `Uploading ${gameFiles.length} files...`;
+      await saveToCache(gameFiles);
+      await mountGameData(gameFiles);
       document.getElementById('uploadStatus').innerText = '';
 
       // Start game after files are mounted
