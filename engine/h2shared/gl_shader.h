@@ -28,6 +28,8 @@ typedef struct glprogram_s {
 	GLint	u_alpha_threshold;
 	GLint	u_modelview;
 	GLint	u_time;
+	GLint	u_skyfog;
+	GLint	u_eyepos;
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */

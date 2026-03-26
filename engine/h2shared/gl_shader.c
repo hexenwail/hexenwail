@@ -107,6 +107,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_alpha_threshold = glGetUniformLocation_fp(p->program, "u_alpha_threshold");
 	p->u_modelview       = glGetUniformLocation_fp(p->program, "u_modelview");
 	p->u_time            = glGetUniformLocation_fp(p->program, "u_time");
+	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
+	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
 }
 
 /* ------------------------------------------------------------------ */
@@ -428,10 +430,15 @@ static const char ssky_vert[] =
 	"in vec2 a_lmcoord;\n"
 	"in vec4 a_color;\n"
 	"uniform mat4 u_mvp;\n"
+	"uniform vec3 u_eyepos;\n"
+	"out vec3 v_dir;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"void main() {\n"
+	"    vec3 dir = a_position - u_eyepos;\n"
+	"    dir.z *= 3.0;\n"
+	"    v_dir = dir;\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
@@ -444,18 +451,24 @@ static const char ssky_frag[] =
 	"uniform sampler2D u_texture1;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_fog_density;\n"
+	"uniform vec4 u_skyfog;\n"
+	"uniform float u_time;\n"
 	"uniform float u_alpha_threshold;\n"
+	"in vec3 v_dir;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
-	"    vec4 solid = texture(u_texture0, v_texcoord);\n"
 	"    if (u_alpha_threshold > 0.5) {\n"
+	"        vec4 solid = texture(u_texture0, v_texcoord);\n"
 	"        fragColor = solid * v_color;\n"
 	"    } else {\n"
-	"        vec4 alpha = texture(u_texture1, v_lmcoord);\n"
-	"        vec3 color = mix(solid.rgb, alpha.rgb, alpha.a);\n"
+	"        vec2 uv = normalize(v_dir).xy * (189.0 / 64.0);\n"
+	"        vec4 solid = texture(u_texture0, uv + u_time / 16.0);\n"
+	"        vec4 layer = texture(u_texture1, uv + u_time / 8.0);\n"
+	"        vec3 color = mix(solid.rgb, layer.rgb, layer.a);\n"
+	"        color = mix(color, u_skyfog.rgb, u_skyfog.a);\n"
 	"        fragColor = vec4(color, 1.0) * v_color;\n"
 	"    }\n"
 	"}\n";

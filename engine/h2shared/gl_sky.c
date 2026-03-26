@@ -1075,85 +1075,42 @@ Sky_DrawFaceQuad
 */
 void Sky_DrawFaceQuad (glpoly_t *p)
 {
-	float	s, t;
 	float	*v;
 	int		i;
+	float	skyfog_alpha;
+	float	*fog_color;
 
-	if (r_skyalpha.value >= 1.0)
+	GL_Bind (solidskytexture);
+	GL_EnableMultitexture();
+	GL_Bind (alphaskytexture);
+
+	GL_ImmColor3f(1, 1, 1);
+
+	GL_ImmBegin();
+	for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
 	{
-		GL_Bind (solidskytexture);
-		GL_EnableMultitexture();
-		GL_Bind (alphaskytexture);
+		GL_ImmVertex3f (v[0], v[1], v[2]);
+	}
 
-		GL_ImmBegin();
-		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
-		{
-			Sky_GetTexCoord (v, r_skyspeed_back.value, &s, &t);
-			GL_ImmTexCoord2f (s, t);
-			Sky_GetTexCoord (v, r_skyspeed_front.value, &s, &t);
-			GL_ImmLMCoord2f (s, t);
-			GL_ImmVertex3f (v[0], v[1], v[2]);
-		}
-		GL_ImmEnd(GL_QUADS, &gl_shader_sky);
-
-		GL_DisableMultitexture();
-
-		rs_skypolys++;
-		rs_skypasses++;
+	/* Set sky fog uniform for the shader */
+	skyfog_alpha = 0.0;
+	if (Fog_GetDensity() > 0 && skyfog > 0)
+	{
+		fog_color = Fog_GetColor();
+		skyfog_alpha = CLAMP(0.0, skyfog, 1.0);
+		glUniform4f_fp(gl_shader_sky.u_skyfog, fog_color[0], fog_color[1], fog_color[2], skyfog_alpha);
 	}
 	else
 	{
-		GL_Bind (solidskytexture);
-
-		GL_ImmColor3f(1, 1, 1);
-
-		GL_ImmBegin();
-		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
-		{
-			Sky_GetTexCoord (v, r_skyspeed_back.value, &s, &t);
-			GL_ImmTexCoord2f (s, t);
-			GL_ImmVertex3f(v[0], v[1], v[2]);
-		}
-		GL_ImmEnd(GL_QUADS, &gl_shader_sky);
-
-		GL_Bind (alphaskytexture);
-		glEnable_fp(GL_BLEND);
-
-		GL_ImmColor4f(1, 1, 1, r_skyalpha.value);
-
-		GL_ImmBegin();
-		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
-		{
-			Sky_GetTexCoord (v, r_skyspeed_front.value, &s, &t);
-			GL_ImmTexCoord2f (s, t);
-			GL_ImmVertex3f(v[0], v[1], v[2]);
-		}
-		GL_ImmEnd(GL_QUADS, &gl_shader_sky);
-
-		glDisable_fp(GL_BLEND);
-
-		rs_skypolys++;
-		rs_skypasses += 2;
+		glUniform4f_fp(gl_shader_sky.u_skyfog, 0.0, 0.0, 0.0, 0.0);
 	}
 
-	if (Fog_GetDensity() > 0 && skyfog > 0)
-	{
-		float *c;
+	GL_ImmEnd(GL_QUADS, &gl_shader_sky);
 
-		c = Fog_GetColor();
-		glEnable_fp(GL_BLEND);
-		GL_ImmColor4f(c[0],c[1],c[2], CLAMP(0.0,skyfog,1.0));
+	GL_DisableMultitexture();
 
-		GL_ImmBegin();
-		for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
-			GL_ImmVertex3f(v[0], v[1], v[2]);
-		GL_ImmEnd(GL_QUADS, &gl_shader_flat);
-
-		GL_ImmColor3f (1, 1, 1);
-		glDisable_fp(GL_BLEND);
-
-		rs_skypasses++;
-	}
+	rs_skypolys++;
+	rs_skypasses++;
 }
 
 /*

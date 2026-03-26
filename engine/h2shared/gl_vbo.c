@@ -269,6 +269,14 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	if (shader->u_fog_color >= 0)
 		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 
+	/* set time uniform for animated effects (scrolling skies, etc) */
+	if (shader->u_time >= 0)
+		glUniform1f_fp(shader->u_time, cl.time);
+
+	/* set eye position for sky shader direction vector computation */
+	if (shader->u_eyepos >= 0)
+		glUniform3f_fp(shader->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
+
 	/* draw */
 	if (mode == GL_QUADS)
 	{
