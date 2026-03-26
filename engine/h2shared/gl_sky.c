@@ -28,6 +28,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_shader.h"
 #include "gl_vbo.h"
 
+/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
+#ifdef EMSCRIPTEN
+#ifndef GL_QUADS
+#define GL_QUADS 0
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON 0
+#endif
+#endif
+
 // Don't include gl_texmgr.h because GL_Bind macro in glquake.h conflicts
 // Just declare what we need from it
 extern gltexture_t *notexture;

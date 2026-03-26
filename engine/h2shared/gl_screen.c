@@ -75,6 +75,15 @@
 #include "winquake.h"
 #endif
 
+/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
+#ifdef EMSCRIPTEN
+#ifndef GL_QUADS
+#define GL_QUADS 0
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON 0
+#endif
+#endif
 
 static qboolean	scr_initialized;	// ready to draw
 
