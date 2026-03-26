@@ -24,6 +24,13 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
+/* ES 3.0 compatibility */
+#ifdef EMSCRIPTEN
+#ifndef GLdouble
+#define GLdouble double
+#endif
+#endif
+
 /* gl_fog.c */
 void Fog_SetupFrame (void);
 void Fog_EnableGFog (void);
