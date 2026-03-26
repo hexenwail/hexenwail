@@ -131,6 +131,7 @@
       FS.writeFile('/data1/' + f.name, buf);
     }
     gameDataReady = true;
+    wasmLoadingBlocked = false;  // Allow WASM to load now
     document.getElementById('gameContainer').classList.add('playing');
     Module.setStatus('');
   }
@@ -210,11 +211,22 @@
     }
   })();
 
+  // Delay WASM loading until pak files are ready
+  let wasmLoadingBlocked = !gameDataReady;
+
   var Module = {
-    noInitialRun: true,  // Don't auto-start; wait for user to upload pak files
+    noInitialRun: true,
     canvas: (function() { return document.getElementById('canvas'); })(),
     print: function(text) { console.log(text); },
     printErr: function(text) { console.error(text); },
+    locateFile: function(filename) {
+      // Block .wasm file loading until game data is ready
+      if (filename.endsWith('.wasm') && wasmLoadingBlocked) {
+        document.getElementById('status').innerText = 'Please upload pak files to continue...';
+        throw new Error('Waiting for game data');
+      }
+      return filename;
+    },
     setStatus: function(text) {
       if (gameDataReady || !text) {
         document.getElementById('status').innerText = text;
@@ -231,7 +243,25 @@
   window.onerror = function() {
     Module.setStatus('Exception thrown, see JavaScript console');
   };
+
+  // Wrapper to prevent auto-execution if gameDataReady is false
+  window.startGame = function() {
+    if (typeof Module !== 'undefined' && Module.callMain) {
+      try {
+        Module.callMain();
+      } catch (e) {
+        console.error('Game startup error:', e);
+      }
+    }
+  };
 </script>
 {{{ SCRIPT }}}
+<script>
+  // If game data was in cache, start now; otherwise wait for upload
+  if (!gameDataReady) {
+    // Emscripten tried to start, suppress the error
+    console.info('Waiting for pak files...');
+  }
+</script>
 </body>
 </html>
