@@ -163,8 +163,16 @@
     document.getElementById('gameContainer').classList.add('playing');
     console.log('Game data ready!');
 
+    // Debug: check Module state
+    console.log('Module exists?', typeof Module !== 'undefined');
+    console.log('Module.callMain exists?', typeof Module !== 'undefined' && typeof Module.callMain !== 'undefined');
+    if (typeof Module !== 'undefined') {
+      console.log('Module.callMain type:', typeof Module.callMain);
+      console.log('Module keys:', Object.keys(Module).slice(0, 10));
+    }
+
     // Start the engine if runtime is initialized
-    if (typeof Module !== 'undefined' && Module.callMain) {
+    if (typeof Module !== 'undefined' && typeof Module.callMain !== 'undefined') {
       try {
         console.log('Calling Module.callMain()...');
         Module.callMain();
@@ -174,6 +182,7 @@
       }
     } else {
       console.error('Module.callMain still not available!');
+      console.error('Module:', Module);
     }
 
     return true;
