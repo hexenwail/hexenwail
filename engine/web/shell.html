@@ -148,6 +148,11 @@
     await saveToCache(files);
     await mountGameData(files);
     document.getElementById('uploadStatus').innerText = '';
+
+    // Start game after files are mounted
+    if (typeof Module !== 'undefined' && Module.callMain && !gameDataReady) {
+      Module.callMain();
+    }
   });
 
   document.getElementById('clearCacheButton').addEventListener('click', async () => {
@@ -185,16 +190,28 @@
       await saveToCache(pakFiles);
       await mountGameData(pakFiles);
       document.getElementById('uploadStatus').innerText = '';
+
+      // Start game after files are mounted
+      if (typeof Module !== 'undefined' && Module.callMain && !gameDataReady) {
+        Module.callMain();
+      }
     }
   });
 
   // Restore from cache on startup
   (async () => {
     const cached = await loadFromCache();
-    if (cached) await mountGameData(cached);
+    if (cached) {
+      await mountGameData(cached);
+      // Start game if cache had data
+      if (typeof Module !== 'undefined' && Module.callMain) {
+        Module.callMain();
+      }
+    }
   })();
 
   var Module = {
+    noInitialRun: true,  // Don't auto-start; wait for user to upload pak files
     canvas: (function() { return document.getElementById('canvas'); })(),
     print: function(text) { console.log(text); },
     printErr: function(text) { console.error(text); },
