@@ -25,6 +25,11 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
+/* ES 3.0 compatibility: glPointSize stub for WASM */
+#ifdef EMSCRIPTEN
+#define glPointSize(x)
+#endif
+
 /* ------------------------------------------------------------------ */
 /* GPU particle SSBO rendering                                         */
 /* ------------------------------------------------------------------ */
