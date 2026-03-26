@@ -1179,6 +1179,9 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else
 	{
+		// All model skins have index 0 uploaded as alpha=0 — enable
+		// alpha testing so the transparent background is discarded.
+		GL_SetAlphaThreshold(0.666f);
 		model_constant_alpha = 1.0f;
 	}
 
@@ -1287,10 +1290,11 @@ static void R_DrawAliasModel (entity_t *e)
 
 	if (e->model->flags & EF_HOLEY)
 	{
-		GL_SetAlphaThreshold(0.01f);	/* restore default */
 		if (r_alphatocoverage.integer)
 			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
+
+	GL_SetAlphaThreshold(0.01f);	/* restore default */
 
 	GL_PopMatrix();
 
