@@ -2439,30 +2439,12 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		}
 		else
 		{
-			// Fall back to embedded skin from MDL file.
-			// Auto-detect index-0 transparency: if >20% of skin
-			// pixels are index 0, treat them as transparent. This
-			// fixes black-background projectiles and weapons without
-			// penalizing models that don't use index 0 for transparency
-			// (alpha test / discard is expensive on Intel iGPUs).
-			int skin_tex_mode = tex_mode;
-			if (!(skin_tex_mode & (TEX_HOLEY | TEX_TRANSPARENT | TEX_SPECIAL_TRANS)))
-			{
-				byte *skin_pixels = (byte *)(pskintype + 1);
-				int idx0_count = 0, px;
-				for (px = 0; px < s; px++)
-				{
-					if (skin_pixels[px] == 0)
-						idx0_count++;
-				}
-				if (idx0_count > s / 5)  /* >20% index 0 */
-					skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
-			}
+			// Fall back to embedded skin from MDL file
 			pheader->gl_texturenum[i][0] =
 			pheader->gl_texturenum[i][1] =
 			pheader->gl_texturenum[i][2] =
 			pheader->gl_texturenum[i][3] = GL_LoadTexture (name, (byte *)(pskintype + 1),
-							pheader->skinwidth, pheader->skinheight, skin_tex_mode);
+							pheader->skinwidth, pheader->skinheight, tex_mode);
 
 			// Load fullbright mask texture for glow pixels (palette 224-255)
 			{

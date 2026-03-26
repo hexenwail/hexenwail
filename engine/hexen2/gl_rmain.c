@@ -3218,6 +3218,9 @@ r_refdef must be set before the first call
 */
 void R_RenderView (void)
 {
+	double	t_world, t_entities, t_particles, t_trans, t_water, t_vm, t_mirror;
+	double	t_start, t_now;
+
 	if (r_norefresh.integer)
 		return;
 
@@ -3235,35 +3238,61 @@ void R_RenderView (void)
 		c_alias_polys = 0;
 	}
 
-	mirror = false;
+	t_start = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 
-//	glFinish_fp ();
+	mirror = false;
 
 	R_Clear ();
 
 	// render normal view
 	R_RenderScene ();
 
+	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_world = t_now - t_start; t_start = t_now; }
+
 	glDepthMask_fp(0);
 
 	R_DrawParticles ();
+
+	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_particles = t_now - t_start; t_start = t_now; }
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
 	R_DrawWaterSurfaces ();
 
+	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_water = t_now - t_start; t_start = t_now; }
+
 	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
 
+	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_trans = t_now - t_start; t_start = t_now; }
+
 	R_DrawViewModel();
+
+	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_vm = t_now - t_start; t_start = t_now; }
 
 	R_ShowBoundingBoxes ();
 
 	// render mirror view
 	R_Mirror ();
 
+	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_mirror = t_now - t_start; }
+
 	R_PolyBlend ();
 
-	if (r_speeds.integer)
+	if (r_speeds.integer >= 2)
+	{
+		double total = t_world + t_particles + t_water + t_trans + t_vm + t_mirror;
+		/* Only log when frame is slow (>20ms = <50 FPS) */
+		if (total > 0.020)
+		{
+			Con_Printf("SLOW %.0fms: world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
+				   "  %4i wpoly  %4i epoly\n",
+				   total*1000,
+				   t_world*1000, t_particles*1000, t_water*1000,
+				   t_trans*1000, t_vm*1000, t_mirror*1000,
+				   c_brush_polys, c_alias_polys);
+		}
+	}
+	else if (r_speeds.integer)
 		R_PrintTimes ();
 }
 
