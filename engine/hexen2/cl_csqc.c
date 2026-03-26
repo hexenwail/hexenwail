@@ -99,10 +99,17 @@ void CL_LoadCSProgs (void)
 		return;
 	}
 
+	/* Check silently first to avoid printing "can't find" message for optional file */
+	if (!FS_FileExists("csprogs.dat", NULL))
+	{
+		Con_DPrintf ("CSQC: csprogs.dat not found\n");
+		return;
+	}
+
 	buf = (byte *)FS_LoadHunkFile ("csprogs.dat", NULL);
 	if (!buf)
 	{
-		Con_DPrintf ("CSQC: csprogs.dat not found\n");
+		Con_DPrintf ("CSQC: failed to load csprogs.dat\n");
 		return;
 	}
 
