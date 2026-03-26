@@ -600,6 +600,7 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 	Con_SafePrintf("  shader 'particle_gpu' loaded (program %u)\n", p->base.program);
 	return true;
 }
+#endif /* !__EMSCRIPTEN__ */
 
 void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				  const float *pup, const float *pright,
@@ -631,6 +632,7 @@ void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 		glUniform1f_fp(prog->u_ctime, ctime);
 }
 
+#ifndef __EMSCRIPTEN__
 static qboolean GL_InitAliasGPUProgram (gl_alias_gpu_prog_t *p)
 {
 	/* Reuse the existing alias fragment shader */
@@ -660,6 +662,7 @@ static qboolean GL_InitAliasGPUProgram (gl_alias_gpu_prog_t *p)
 	Con_SafePrintf("  shader 'alias_gpu' loaded (program %u)\n", p->base.program);
 	return true;
 }
+#endif /* !__EMSCRIPTEN__ */
 
 void GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
 			       int pose0, int pose1, float lerp,
@@ -699,7 +702,6 @@ void GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
 	if (prog->u_ent_alpha >= 0)
 		glUniform1f_fp(prog->u_ent_alpha, alpha);
 }
-#endif /* !__EMSCRIPTEN__ */
 
 gl_alias_inst_prog_t gl_shader_alias_inst;
 
