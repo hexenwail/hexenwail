@@ -68,6 +68,8 @@ static GLuint	cull_src_ibo;		/* binding 4: source indices (read-only copy) */
 static GLuint	cull_dst_ibo;		/* binding 5: dest indices (compute writes, draw reads) */
 static int	cull_total_indices;	/* total index count across all buckets */
 
+/* (Hi-Z occlusion culling planned as future work — uhexen2-xd87) */
+
 static GLuint	cull_clear_prog;	/* clear_indirect compute shader */
 static GLuint	cull_mark_prog;		/* cull_mark compute shader */
 
