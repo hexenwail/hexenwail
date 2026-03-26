@@ -136,6 +136,14 @@ typedef ptrdiff_t GLintptr;
 #define GL_INFO_LOG_LENGTH			0x8B84
 #endif
 
+/* FP16 texture format (OpenGL 3.0 / ES 3.0) — HDR rendering */
+#ifndef GL_RGBA16F
+#define GL_RGBA16F				0x881A
+#endif
+#ifndef GL_RGB10_A2
+#define GL_RGB10_A2				0x8059
+#endif
+
 /* Integer texture formats (OpenGL 3.0 / ES 3.0) */
 #ifndef GL_R32UI
 #define GL_R32UI				0x8236

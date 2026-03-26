@@ -67,6 +67,7 @@ static qboolean	pp_native_active;	/* true when End3D transferred 3D → composit
 static float	pp_prev_yaw, pp_prev_pitch;	/* view angle tracking for motionblur delta */
 static vec3_t	pp_prev_origin;			/* position tracking for motionblur delta */
 static int	pp_saved_glwidth, pp_saved_glheight;	/* original viewport dims */
+static float	pp_waterwarp_preview_end;	/* cl.time when waterwarp preview should end */
 
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
 cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
@@ -554,6 +555,8 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_scale);
 	Cvar_RegisterVariable(&r_softemu);
 	Cvar_RegisterVariable(&r_dither);
+	Cvar_RegisterVariable(&r_hdr);
+	Cvar_RegisterVariable(&r_hdr_exposure);
 
 	pp_initialized = false;
 	pp_active = false;
@@ -793,6 +796,8 @@ void GL_PostProcess_End3D (void)
 		warp = 0.0f;
 		if (r_waterwarp.value && r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER)
 			warp = r_waterwarp.value;
+		else if (cl.time < pp_waterwarp_preview_end)
+			warp = r_waterwarp.value;	/* show preview even if not in water */
 		blur = Cvar_VariableValue("r_motionblur");
 
 		if (warp > 0.0f || blur > 0.0f)
@@ -863,6 +868,8 @@ void GL_PostProcess_End3D (void)
 	warp = 0.0f;
 	if (r_waterwarp.value && r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER)
 		warp = r_waterwarp.value;
+	else if (cl.time < pp_waterwarp_preview_end)
+		warp = r_waterwarp.value;	/* show preview even if not in water */
 	blur = Cvar_VariableValue("r_motionblur");
 	scale = r_scale.value;
 	if (scale < 0.25f) scale = 0.25f;
@@ -1049,6 +1056,8 @@ apply_shader:
 			if (r_waterwarp.value && r_viewleaf &&
 			    r_viewleaf->contents <= CONTENTS_WATER)
 				warp = r_waterwarp.value;
+			else if (cl.time < pp_waterwarp_preview_end)
+				warp = r_waterwarp.value;	/* show preview even if not in water */
 		}
 		glUniform1f_fp(pp_loc_waterwarp, warp);
 	}
@@ -1123,4 +1132,9 @@ apply_shader:
 qboolean GL_PostProcess_Active (void)
 {
 	return pp_active;
+}
+
+void GL_PostProcess_RequestWaterwarpPreview (float duration)
+{
+	pp_waterwarp_preview_end = cl.time + duration;
 }
