@@ -467,8 +467,8 @@ if(EMSCRIPTEN)
     target_link_options(${EXECUTABLE_NAME} PRIVATE
         -sFULL_ES3=1
         -sALLOW_MEMORY_GROWTH=1
-        -sINITIAL_MEMORY=67108864
-        -sSTACK_SIZE=1048576
+        -sINITIAL_MEMORY=134217728
+        -sSTACK_SIZE=2097152
         -sUSE_SDL=3
         --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
     )

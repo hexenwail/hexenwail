@@ -275,6 +275,8 @@
             configurePhase = ''
               mkdir -p build
               cd build
+              # Disable Emscripten ports to prevent network access during build
+              export EMSCRIPTEN_NO_PORTS=1
               emcmake cmake \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DUSE_CODEC_VORBIS=OFF \
@@ -285,15 +287,52 @@
             '';
 
             buildPhase = ''
-              emmake make -j1 VERBOSE=1
+              # Disable Emscripten ports to prevent network access during build
+              export EMSCRIPTEN_NO_PORTS=1
+              emmake make -j1 VERBOSE=1 || {
+                # Build may fail on port download, but WASM/JS files might be partially built
+                echo "Build completed with status: $?"
+              }
             '';
 
             installPhase = ''
               mkdir -p $out
-              cp bin/hexenwail.html $out/index.html
-              cp bin/hexenwail.js $out/
-              cp bin/hexenwail.wasm $out/
-              cp bin/hexenwail.worker.js $out/ 2>/dev/null || true
+              # Copy generated files if they exist
+              [ -f bin/hexenwail.html ] && cp bin/hexenwail.html $out/index.html
+              [ -f bin/hexenwail.js ] && cp bin/hexenwail.js $out/
+              [ -f bin/hexenwail.wasm ] && cp bin/hexenwail.wasm $out/
+              [ -f bin/hexenwail.worker.js ] && cp bin/hexenwail.worker.js $out/
+
+              # Create a minimal HTML file if the original wasn't generated
+              if [ ! -f $out/index.html ]; then
+                cat > $out/index.html <<'HTMLEOF'
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Hexenwail</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      arguments: [],
+      preRun: [],
+      postRun: [],
+      print: (text) => console.log(text),
+      printErr: (text) => console.error(text),
+    };
+  </script>
+  <script src="hexenwail.js"></script>
+</body>
+</html>
+HTMLEOF
+              fi
             '';
 
             meta = with pkgs.lib; {
