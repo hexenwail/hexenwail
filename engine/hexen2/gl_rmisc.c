@@ -262,6 +262,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_texture_external_hud);
 
 	Cvar_RegisterVariable (&gl_clear);
+	{
+		extern cvar_t r_gpucull;
+		Cvar_RegisterVariable (&r_gpucull);
+	}
 	Cvar_RegisterVariable (&gl_cull);
 	Cvar_RegisterVariable (&gl_smoothmodels);
 	Cvar_RegisterVariable (&gl_polyblend);
