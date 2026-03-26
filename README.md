@@ -12,7 +12,7 @@ A modern fork for Windows and Linux: SDL3, GLSL shaders, gamepad support, and a 
 ## Features
 
 ### Rendering
-Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function. Lightmap atlas, batched world draws, MSAA, FXAA, anisotropic filtering. Render scale (25–100%), retro dithering mode, display presets (Faithful/Crunchy/Retro/Clean/Modern/Ultra). Brightness/contrast via post-process shader. Scrolling two-layer sky and skybox support. Shader-based fog, lightmapped liquids, underwater warp, motion blur. Fence textures, water tint options, glow effects with fog attenuation. Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins. Physics/render decoupling with entity and lightstyle interpolation. FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean).
+Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function. Lightmap atlas, batched world draws, MSAA, FXAA, anisotropic filtering. Render scale (25–100%), retro dithering mode, display presets (Faithful/Crunchy/Retro/Clean/Modern/Ultra). Brightness/contrast via post-process shader. Scrolling two-layer sky and skybox support. Shader-based fog, lightmapped liquids, underwater warp, motion blur. Fence textures, water tint options, glow effects with fog attenuation. Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins. Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items). External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX). Physics/render decoupling with entity and lightstyle interpolation. FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean).
 
 ### Input
 WASD + mouselook defaults. Scancode-based bindings (works on AZERTY, Dvorak, etc.). Mouse-driven menus with hover, click, and scroll wheel. Weapon keybinds menu with type-to-search. Xbox/PlayStation/Nintendo gamepad with circular deadzone, power-curve easing, rumble, hot-plug. Always-run, raw mouse input, configurable pitch clamp.
@@ -59,6 +59,31 @@ nix build .#linux-fhs  # Portable Linux binary
 nix build .#win64      # Windows 64-bit (cross-compiled)
 nix build .#release    # All platforms
 ```
+
+## External textures
+
+Hexenwail supports external texture overrides — drop hi-res TGA/PNG/PCX files into the game directory to replace internal assets:
+
+| Asset type | Override path | Cvar |
+|------------|--------------|------|
+| BSP textures | `textures/<name>.tga` | `r_texture_external 1` |
+| Model skins | `models/<model>_<skin>.tga` | `r_texture_external 1` |
+| HUD/menu graphics | `gfx/<name>.tga` | `r_texture_external_hud 1` |
+
+**AI upscale tool:** Use `tools/upscale-pak.sh` to extract and upscale all assets from a PAK file (requires nix):
+
+```bash
+# Base game
+./tools/upscale-pak.sh ~/hexen2/data1/pak0.pak ~/hexen2/data1
+
+# Full game (palette from pak0)
+./tools/upscale-pak.sh ~/hexen2/data1/pak1.pak ~/hexen2/data1 --palette ~/hexen2/data1/pak0.pak
+
+# Portal of Praevus
+./tools/upscale-pak.sh ~/hexen2/portals/pak3.pak ~/hexen2/portals --palette ~/hexen2/data1/pak0.pak
+```
+
+Options: `--scale 2|3|4` (default 4), `--upscaler realcugan|realesrgan` (default realcugan), `--denoise -1|0|1|2|3`.
 
 ## Game data
 
