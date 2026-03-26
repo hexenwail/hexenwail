@@ -2084,7 +2084,7 @@ R_DrawEntitiesOnList
 static void R_DrawEntitiesOnList (void)
 {
 	int			i;
-	qboolean	item_trans;
+	qboolean	item_trans = false;
 	qboolean	use_instancing;
 	mleaf_t		*pLeaf;
 	entity_t	*e;

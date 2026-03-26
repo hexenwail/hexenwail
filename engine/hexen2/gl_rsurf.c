@@ -67,7 +67,7 @@ static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 #define LM_ATLAS_ROWS	16
 #define LM_ATLAS_WIDTH	(LM_ATLAS_COLS * BLOCK_WIDTH)	/* 2048 */
 #define LM_ATLAS_HEIGHT	(LM_ATLAS_ROWS * BLOCK_HEIGHT)	/* 2048 */
-static GLuint	lm_atlas_texture;
+GLuint	lm_atlas_texture;	/* non-static — accessed by gl_worldcull.c */
 static int	lm_atlas_layers;	/* number of pages in the atlas */
 static qboolean	lm_atlas_enabled;	/* false = fall back to per-surface binds */
 
@@ -1006,12 +1006,12 @@ dynamic_batch:
 	}
 }
 
-/* Forward declarations for static world VBO (defined below R_DrawWorld) */
-static GLuint	world_vbo;
-static GLuint	world_ibo;
-static GLuint	world_vao;
-static int	world_num_verts;
-static int	world_num_indices;
+/* World VBO state (non-static — accessed by gl_worldcull.c) */
+GLuint	world_vbo;
+GLuint	world_ibo;
+GLuint	world_vao;
+int	world_num_verts;
+int	world_num_indices;
 
 static void DrawTextureChains (entity_t *e)
 {
@@ -1652,9 +1652,26 @@ void R_DrawWorld (void)
 		}
 	}
 
+	/* Always run CPU BSP walk — needed for sky polys, water surfaces,
+	 * lightmap updates, and entity efrags regardless of GPU culling */
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
 
-	DrawTextureChains (&r_worldentity);
+#ifndef __EMSCRIPTEN__
+	if (R_WorldCullAvailable())
+	{
+		/* GPU compute culling draws solid world surfaces.
+		 * DrawTextureChains still handles sky, water, fence. */
+		R_DispatchWorldCull();
+		R_DrawWorldCulled();
+
+		/* Let DrawTextureChains handle only non-solid surfaces */
+		DrawTextureChains (&r_worldentity);
+	}
+	else
+#endif
+	{
+		DrawTextureChains (&r_worldentity);
+	}
 
 	// reset to texture unit 0
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
