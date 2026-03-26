@@ -1008,6 +1008,7 @@ dynamic_batch:
 
 /* Set true when GPU compute cull handles solid surfaces this frame */
 static qboolean gpu_cull_active;
+cvar_t r_gpucull = {"r_gpucull", "1", CVAR_ARCHIVE};
 
 /* World VBO state (non-static — accessed by gl_worldcull.c) */
 GLuint	world_vbo;
@@ -1685,7 +1686,7 @@ void R_DrawWorld (void)
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
 
 #ifndef __EMSCRIPTEN__
-	gpu_cull_active = R_WorldCullAvailable();
+	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer;
 	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.
