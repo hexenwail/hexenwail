@@ -1099,16 +1099,24 @@ static void DrawTextureChains (entity_t *e)
 				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
+				/* Collect visible surfaces, then batch-draw.
+			 * Merge contiguous IBO ranges into single draw calls. */
+			{
+				/* First pass: collect into temp array */
+				#define MAX_BATCH_SURFS 4096
+				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
+				int batch_count = 0;
+
 				for ( ; s ; s = s->texturechain)
 				{
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 							SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						/* Fall back to per-surface for special surfaces */
 						glBindVertexArray_fp(0);
 						glUseProgram_fp(0);
 						R_RenderBrushPolyMTex (e, s, false);
 						glBindVertexArray_fp(world_vao);
+						glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 						glUseProgram_fp(gl_shader_world.program);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
@@ -1118,17 +1126,10 @@ static void DrawTextureChains (entity_t *e)
 						continue;
 					}
 
-					/* Draw this surface from the static VBO */
-					if (s->vbo_numtris > 0)
-					{
-						glDrawElements_fp(GL_TRIANGLES,
-								  s->vbo_numtris * 3,
-								  GL_UNSIGNED_INT,
-								  (void *)((size_t)s->vbo_firstindex * sizeof(unsigned int)));
-						c_brush_polys++;
-					}
+					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
+						batch_surfs[batch_count++] = s;
 
-					/* Still need to track lightmap polys for dynamic updates */
+					/* Track lightmap polys for dynamic updates */
 					if (s->polys)
 					{
 						int maps;
@@ -1146,6 +1147,44 @@ static void DrawTextureChains (entity_t *e)
 							lightmap_modified[s->lightmaptexturenum] = true;
 					}
 				}
+
+				/* Second pass: merge contiguous IBO ranges and draw */
+				if (batch_count > 0)
+				{
+					int run_start = 0;
+					int run_first_idx = batch_surfs[0]->vbo_firstindex;
+					int run_total_idx = batch_surfs[0]->vbo_numtris * 3;
+					int k;
+
+					for (k = 1; k < batch_count; k++)
+					{
+						int expected = run_first_idx + run_total_idx;
+						if (batch_surfs[k]->vbo_firstindex == expected)
+						{
+							/* Contiguous — extend the run */
+							run_total_idx += batch_surfs[k]->vbo_numtris * 3;
+						}
+						else
+						{
+							/* Gap — flush the run */
+							glDrawElements_fp(GL_TRIANGLES,
+									  run_total_idx,
+									  GL_UNSIGNED_INT,
+									  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
+							c_brush_polys += (k - run_start);
+							run_start = k;
+							run_first_idx = batch_surfs[k]->vbo_firstindex;
+							run_total_idx = batch_surfs[k]->vbo_numtris * 3;
+						}
+					}
+					/* Flush final run */
+					glDrawElements_fp(GL_TRIANGLES,
+							  run_total_idx,
+							  GL_UNSIGNED_INT,
+							  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
+					c_brush_polys += (batch_count - run_start);
+				}
+			}
 
 				glBindVertexArray_fp(0);
 				glUseProgram_fp(0);
