@@ -5,26 +5,183 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hexenwail</title>
 <style>
-  body { margin: 0; background: #000; overflow: hidden; }
+  body { margin: 0; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
   canvas { display: block; margin: 0 auto; }
   #status { color: #fff; font-family: monospace; text-align: center; padding: 10px; }
+  #gameContainer { width: 100%; height: 100vh; display: flex; flex-direction: column; }
+  #uploadPanel {
+    background: #1a1a1a; color: #fff; padding: 20px; text-align: center;
+    border: 2px dashed #666; margin: 20px; border-radius: 8px;
+    display: flex; flex-direction: column; gap: 10px; align-items: center;
+  }
+  #uploadPanel.hidden { display: none; }
+  #uploadPanel.drag-over { border-color: #0f0; background: #0a1a0a; }
+  #fileInput { display: none; }
+  #selectButton, #clearCacheButton {
+    background: #0066cc; color: #fff; border: none; padding: 10px 20px;
+    border-radius: 4px; cursor: pointer; font-size: 14px;
+  }
+  #selectButton:hover, #clearCacheButton:hover { background: #0052a3; }
+  #gameContainer.playing #uploadPanel { display: none; }
+  canvas { flex: 1; }
 </style>
 </head>
 <body>
-<div id="status">Loading...</div>
-<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<div id="gameContainer">
+  <div id="uploadPanel">
+    <h2>Hexen II Game Data Required</h2>
+    <p>Upload your Hexen II <code>data1</code> folder to play (pak0.pak, pak1.pak)</p>
+    <input type="file" id="fileInput" multiple accept=".pak" />
+    <button id="selectButton">Select PAK Files</button>
+    <p style="font-size: 12px; color: #aaa;">or drag and drop pak files here</p>
+    <button id="clearCacheButton" style="display:none;">Clear Cached Data</button>
+    <div id="uploadStatus" style="font-size: 12px; color: #aaa;"></div>
+  </div>
+  <div id="status">Loading engine...</div>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+</div>
 <script>
+  // Game data management (IndexedDB cache + VFS mounting)
+  const DB_NAME = 'HexenwailGameData';
+  const STORE_NAME = 'pak_files';
+  let gameDataReady = false;
+
+  async function loadFromCache() {
+    try {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+        req.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME, { keyPath: 'name' });
+      });
+
+      const tx = db.transaction(STORE_NAME);
+      const files = await new Promise((resolve, reject) => {
+        const req = tx.getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+
+      if (files.length > 0) {
+        document.getElementById('uploadStatus').innerText = `Loaded ${files.length} cached PAK files`;
+        document.getElementById('clearCacheButton').style.display = 'block';
+        return files;
+      }
+    } catch (e) {
+      console.warn('Cache unavailable:', e);
+    }
+    return null;
+  }
+
+  async function saveToCache(files) {
+    try {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      for (const f of files) {
+        const buf = await f.arrayBuffer();
+        await new Promise((resolve, reject) => {
+          const req = tx.objectStore(STORE_NAME).put({ name: f.name, data: buf });
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
+      }
+    } catch (e) {
+      console.warn('Cache save failed:', e);
+    }
+  }
+
+  function mountGameData(fileList) {
+    // Mount files to Emscripten VFS at /data1/
+    FS.mkdir('/data1');
+    for (const f of fileList) {
+      const buf = new Uint8Array(f.data || (f instanceof File ?
+        new DataView(f) : new DataView(f.data)));
+      FS.writeFile('/data1/' + f.name, buf);
+    }
+    gameDataReady = true;
+    document.getElementById('gameContainer').classList.add('playing');
+    Module.setStatus('');
+  }
+
+  // File upload handlers
+  document.getElementById('selectButton').addEventListener('click', () => {
+    document.getElementById('fileInput').click();
+  });
+
+  document.getElementById('fileInput').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    document.getElementById('uploadStatus').innerText = `Uploading ${files.length} files...`;
+    await saveToCache(files);
+    mountGameData(files);
+    document.getElementById('uploadStatus').innerText = '';
+  });
+
+  document.getElementById('clearCacheButton').addEventListener('click', async () => {
+    try {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise((resolve, reject) => {
+        const req = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+      document.getElementById('uploadStatus').innerText = 'Cache cleared. Reload page.';
+      document.getElementById('clearCacheButton').style.display = 'none';
+    } catch (e) {
+      document.getElementById('uploadStatus').innerText = 'Failed to clear cache';
+    }
+  });
+
+  // Drag and drop
+  const panel = document.getElementById('uploadPanel');
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
+    panel.addEventListener(evt, (e) => e.preventDefault());
+  });
+  panel.addEventListener('dragover', () => panel.classList.add('drag-over'));
+  panel.addEventListener('dragleave', () => panel.classList.remove('drag-over'));
+  panel.addEventListener('drop', async (e) => {
+    panel.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files);
+    const pakFiles = files.filter(f => f.name.endsWith('.pak'));
+    if (pakFiles.length > 0) {
+      document.getElementById('uploadStatus').innerText = `Uploading ${pakFiles.length} files...`;
+      await saveToCache(pakFiles);
+      mountGameData(pakFiles);
+      document.getElementById('uploadStatus').innerText = '';
+    }
+  });
+
+  // Restore from cache on startup
+  (async () => {
+    const cached = await loadFromCache();
+    if (cached) mountGameData(cached);
+  })();
+
   var Module = {
     canvas: (function() { return document.getElementById('canvas'); })(),
     print: function(text) { console.log(text); },
     printErr: function(text) { console.error(text); },
     setStatus: function(text) {
-      document.getElementById('status').innerText = text;
-      if (!text) document.getElementById('status').style.display = 'none';
+      if (gameDataReady || !text) {
+        document.getElementById('status').innerText = text;
+        if (!text) document.getElementById('status').style.display = 'none';
+      }
     },
     monitorRunDependencies: function(left) {
-      if (left) Module.setStatus('Loading... (' + left + ' files remaining)');
-      else Module.setStatus('');
+      if (gameDataReady || !left) {
+        if (left) Module.setStatus('Loading... (' + left + ' files remaining)');
+        else Module.setStatus('');
+      }
     }
   };
   window.onerror = function() {
