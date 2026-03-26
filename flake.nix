@@ -22,7 +22,8 @@
           };
         };
 
-        version = "26.03-unstable-${self.lastModifiedDate}";
+        # Version: update this after each git tag
+        version = "26.03-alpha.6i";
 
         # Source filter: exclude non-build files to improve cache hits
         filteredSrc = pkgs.lib.cleanSourceWith {
@@ -285,7 +286,7 @@
             '';
 
             buildPhase = ''
-              emmake make -j$(nproc)
+              emmake make -j1 VERBOSE=1
             '';
 
             installPhase = ''
