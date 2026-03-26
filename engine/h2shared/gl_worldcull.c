@@ -597,7 +597,7 @@ void R_DispatchWorldCull (void)
 			frust[i*4+0] = frustum[i].normal[0];
 			frust[i*4+1] = frustum[i].normal[1];
 			frust[i*4+2] = frustum[i].normal[2];
-			frust[i*4+3] = frustum[i].dist;
+			frust[i*4+3] = -frustum[i].dist;  /* negate: shader uses dot(n,p)+d, engine uses dot(n,p)-dist */
 		}
 		glUniform4fv_fp(cull_mark_u_frustum, 4, frust);
 	}
