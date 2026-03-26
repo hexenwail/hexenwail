@@ -161,28 +161,20 @@
 
     gameDataReady = true;
     document.getElementById('gameContainer').classList.add('playing');
-    console.log('Game data ready!');
+    console.log('Game data ready! Calling _main()...');
 
-    // Debug: check Module state
-    console.log('Module exists?', typeof Module !== 'undefined');
-    console.log('Module.callMain exists?', typeof Module !== 'undefined' && typeof Module.callMain !== 'undefined');
-    if (typeof Module !== 'undefined') {
-      console.log('Module.callMain type:', typeof Module.callMain);
-      console.log('Module keys:', Object.keys(Module).slice(0, 10));
-    }
-
-    // Start the engine if runtime is initialized
-    if (typeof Module !== 'undefined' && typeof Module.callMain !== 'undefined') {
+    // Call the C main function directly
+    if (typeof Module !== 'undefined' && typeof Module._main === 'function') {
       try {
-        console.log('Calling Module.callMain()...');
-        Module.callMain();
-        console.log('Module.callMain() completed');
+        console.log('Calling Module._main()...');
+        Module._main();
+        console.log('Module._main() completed');
       } catch (e) {
-        console.error('callMain error:', e);
+        console.error('_main error:', e);
       }
     } else {
-      console.error('Module.callMain still not available!');
-      console.error('Module:', Module);
+      console.error('Module._main not available!');
+      console.error('Module._main type:', typeof Module !== 'undefined' ? typeof Module._main : 'Module undefined');
     }
 
     return true;
@@ -264,7 +256,6 @@
   })();
 
   var Module = {
-    noInitialRun: true,
     canvas: (function() { return document.getElementById('canvas'); })(),
     print: function(text) {
       console.log('[ENGINE]', text);
