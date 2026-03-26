@@ -187,17 +187,49 @@ static void Sys_MainFrame (void)
 		time = newtime - mainloop_oldtime;
 
 #ifndef __EMSCRIPTEN__
-		/* cap framerate to host_maxfps (skip when VSync is on — VSync
-		 * already rate-limits the frame; the SDL_Delay polling loop
-		 * can overshoot the vblank window and cause double-frame stutters) */
-		if (host_maxfps.value > 0 && VID_MenuGetVSync() == 0)
+		/* Frame rate limiting.
+		 *
+		 * When VSync is off, use host_maxfps as a software cap.
+		 * When VSync is on, it should rate-limit frames to the
+		 * display refresh. However, VSync can silently fail (driver
+		 * thermal throttle, Windows compositor interference), causing
+		 * uncapped frame rates and inconsistent frame pacing.
+		 *
+		 * Safety net: if VSync is on but frames are consistently
+		 * too fast (>2x expected refresh), fall back to a software
+		 * cap at ~500 FPS to prevent runaway CPU/GPU usage.
+		 */
 		{
-			double mintime = 1.0 / host_maxfps.value;
-			while (time < mintime)
+			static int vsync_fast_frames;
+			int vsync = VID_MenuGetVSync();
+			double cap = 0;
+
+			if (vsync == 0 && host_maxfps.value > 0)
 			{
-				SDL_Delay (1);
-				newtime = Sys_DoubleTime ();
-				time = newtime - mainloop_oldtime;
+				cap = host_maxfps.value;
+			}
+			else if (vsync != 0)
+			{
+				/* Detect broken vsync: if 32 consecutive frames
+				 * complete in under 2ms each, vsync isn't working */
+				if (time < 0.002 && time > 0.0)
+					vsync_fast_frames++;
+				else
+					vsync_fast_frames = 0;
+
+				if (vsync_fast_frames > 32)
+					cap = 500.0;	/* safety net */
+			}
+
+			if (cap > 0)
+			{
+				double mintime = 1.0 / cap;
+				while (time < mintime)
+				{
+					SDL_Delay (1);
+					newtime = Sys_DoubleTime ();
+					time = newtime - mainloop_oldtime;
+				}
 			}
 		}
 #endif
