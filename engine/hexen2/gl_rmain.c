@@ -1565,10 +1565,8 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	    (R_GetPimpFlags(e, NULL) & EF_FLOAT))
 		torigin[2] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
 
-	/* Bake scale/origin into the matrix for the instanced shader */
-	GL_Translatef(torigin[0], torigin[1], torigin[2]);
-	GL_Scalef(tscale[0], tscale[1], tscale[2]);
-
+	/* Grab MVP/MV WITHOUT scale/origin — the shader will apply them
+	 * to decompress the raw byte vertices (0-255) to model space. */
 	GL_GetMVP(mvp);
 	GL_GetModelview(mv);
 	GL_PopMatrix();
@@ -1625,14 +1623,10 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	memcpy(inst->mvp, mvp, sizeof(float) * 16);
 	memcpy(inst->modelview, mv, sizeof(float) * 16);
 
-	/* For the instanced shader, scale/origin are baked into the MVP.
-	 * Pass 1.0/0.0 so the shader's decompress is identity. */
-	inst->scale[0] = 1.0f;
-	inst->scale[1] = 1.0f;
-	inst->scale[2] = 1.0f;
-	inst->scale_origin[0] = 0.0f;
-	inst->scale_origin[1] = 0.0f;
-	inst->scale_origin[2] = 0.0f;
+	/* Pass per-entity scale/origin for vertex decompression in shader.
+	 * The MVP contains only entity origin+rotation, NOT scale/origin. */
+	VectorCopy(tscale, inst->scale);
+	VectorCopy(torigin, inst->scale_origin);
 
 	inst->shade_light = shadelight;
 	inst->ent_alpha = 1.0f;
