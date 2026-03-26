@@ -737,12 +737,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 		/* Bind per-vertex attributes */
 		glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
 
-		/* Bind per-instance attributes (mat4 = 4 locations each) */
-		for (i = 0; i < 4; i++) {
-			char name[32];
-			q_snprintf(name, sizeof(name), "a_inst_mvp");
-			/* GLSL mat4 attributes occupy consecutive locations */
-		}
+		/* Bind per-instance attributes (mat4 occupies 4 consecutive locations) */
 		glBindAttribLocation_fp(prog, ATTR_INST_MVP0, "a_inst_mvp");
 		glBindAttribLocation_fp(prog, ATTR_INST_MV0, "a_inst_mv");
 		glBindAttribLocation_fp(prog, ATTR_INST_SCALE_SHADE, "a_inst_scale_shade");
@@ -760,7 +755,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 			if (!status) {
 				char log[1024];
 				glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-				Con_Printf("alias_instanced link failed: %s\n", log);
+				Sys_Printf("alias_instanced link failed: %s\n", log);
 				glDeleteProgram_fp(prog);
 				return false;
 			}
@@ -795,14 +790,14 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 			r_avertexnormal_dots, GL_STATIC_DRAW);
 	glBindBuffer_fp(GL_UNIFORM_BUFFER, 0);
 
-	Con_SafePrintf("  alias_instanced: OK (prog=%u, ubo=%u)\n", prog, p->ubo_shadedots);
+	Sys_Printf("  alias_instanced: OK (prog=%u, ubo=%u)\n", prog, p->ubo_shadedots);
 	return true;
 }
 
 void GL_AliasInst_Init (void)
 {
 	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst))
-		Con_Printf("WARNING: instanced alias shader failed to init\n");
+		Sys_Printf("WARNING: instanced alias shader failed to init\n");
 }
 
 void GL_AliasInst_Shutdown (void)
