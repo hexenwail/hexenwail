@@ -264,7 +264,6 @@
 
             # Emscripten-specific setup
             preConfigure = ''
-              cd engine
               export EM_CACHE="''${EM_CACHE:-.emcache}"
               export EM_CONFIG="''${EM_CONFIG:-.emscripten}"
             '';
@@ -277,7 +276,7 @@
                 -DCMAKE_BUILD_TYPE=Release \
                 -DUSE_CODEC_VORBIS=OFF \
                 -DUSE_ALSA=OFF \
-                ..
+                ../engine
             '';
 
             buildPhase = ''
@@ -287,10 +286,10 @@
 
             installPhase = ''
               mkdir -p $out
-              cp glhexen2.html $out/index.html
-              cp glhexen2.js $out/
-              cp glhexen2.wasm $out/
-              cp glhexen2.worker.js $out/ 2>/dev/null || true
+              cp bin/hexenwail.html $out/index.html
+              cp bin/hexenwail.js $out/
+              cp bin/hexenwail.wasm $out/
+              cp bin/hexenwail.worker.js $out/ 2>/dev/null || true
             '';
 
             meta = with pkgs.lib; {
