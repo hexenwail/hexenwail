@@ -2678,7 +2678,7 @@ static void M_Rendering_Draw (void)
 	else
 		M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
 
-	M_Print (76, 92 + 8*REND_FLASHINTENSITY,"Flash         :");
+	M_Print (76, 92 + 8*REND_FLASHINTENSITY,"Dyn Light Str :");
 	if (gl_flashintensity.value <= 0)
 		M_PrintWhite (220, 92 + 8*REND_FLASHINTENSITY, "Off");
 	else

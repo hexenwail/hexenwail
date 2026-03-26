@@ -1736,6 +1736,8 @@ static void R_DrawViewModel (void)
 	}
 
 // add dynamic lights
+	if (!r_dynamic.integer)
+		goto skip_dlights;
 	for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 	{
 		dl = &cl_dlights[lnum];
@@ -1762,6 +1764,7 @@ static void R_DrawViewModel (void)
 			ambientlight += add;
 		}
 	}
+skip_dlights:
 
 	cl.light_level = ambientlight;
 
