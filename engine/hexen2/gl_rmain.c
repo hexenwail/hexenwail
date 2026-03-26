@@ -111,6 +111,7 @@ cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};
 cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};
+cvar_t	r_entdist = {"r_entdist", "0", CVAR_ARCHIVE};	/* entity draw distance (0=unlimited) */
 cvar_t	r_viewmodel_fov = {"r_viewmodel_fov", "0", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
@@ -2120,13 +2121,20 @@ static void R_DrawEntitiesOnList (void)
 		{
 		case mod_alias:
 		{
-			/* Distance-based LOD: skip tiny alias models at distance */
+			/* Distance-based culling for alias models */
 			float dx = e->origin[0] - r_origin[0];
 			float dy = e->origin[1] - r_origin[1];
 			float dz = e->origin[2] - r_origin[2];
 			float dist_sq = dx*dx + dy*dy + dz*dz;
 			float radius = e->model->radius;
-			/* Skip if model would be < ~4 pixels on screen */
+
+			/* Hard entity draw distance (r_entdist, 0=unlimited) */
+			if (r_entdist.value > 0 &&
+			    dist_sq > r_entdist.value * r_entdist.value &&
+			    e != &cl_entities[cl.viewentity])
+				break;
+
+			/* LOD cull: skip if model would be < ~4 pixels on screen */
 			if (radius > 0 && dist_sq > radius * radius * 40000 &&
 			    e != &cl_entities[cl.viewentity])
 				break;
