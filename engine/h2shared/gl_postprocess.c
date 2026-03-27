@@ -189,7 +189,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	/* resolve texture (always non-multisampled — this is what the shader reads) */
 	{
 		GLenum color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGB10_A2;
-		GLenum color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
+		GLenum color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_INT_10_10_10_2;
 	glGenTextures_fp(1, &pp_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, width, height, 0,
