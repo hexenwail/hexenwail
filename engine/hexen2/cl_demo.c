@@ -34,6 +34,9 @@ qboolean	skip_start = false;
 int		num_intro_msg = 0;
 #endif
 
+/* demo config file support */
+static char current_demo_name[MAX_DEMONAME] = "";
+
 /*
 ==============================================================================
 
@@ -73,6 +76,16 @@ void CL_StopPlayback (void)
 	cls.demoplayback = false;
 	cls.demofile = NULL;
 	cls.state = ca_disconnected;
+
+	// Execute end config if one exists for this demo
+	if (current_demo_name[0])
+	{
+		char cfg[MAX_OSPATH];
+		q_snprintf(cfg, sizeof(cfg), "%send.cfg", current_demo_name);
+		Con_DPrintf("CL_StopPlayback: Executing demo end config '%s' if it exists\n", cfg);
+		Cbuf_InsertText(va("exec %s\n", cfg));
+		current_demo_name[0] = '\0';
+	}
 
 	if (cls.timedemo)
 		CL_FinishTimeDemo ();
@@ -450,6 +463,20 @@ void CL_PlayDemo_f (void)
 	cls.state = ca_connected;
 
 	Con_DPrintf("CL_PlayDemo_f: Demo playback started, state=%d\n", cls.state);
+
+	// Store demo name and execute start config if it exists
+	{
+		char	base[MAX_DEMONAME];
+		char	cfg[MAX_OSPATH];
+
+		q_strlcpy(base, Cmd_Argv(1), sizeof(base));
+		COM_StripExtension(base, base, sizeof(base));
+		q_strlcpy(current_demo_name, base, sizeof(current_demo_name));
+
+		q_snprintf(cfg, sizeof(cfg), "%sstart.cfg", base);
+		Con_DPrintf("CL_PlayDemo_f: Executing demo config '%s' if it exists\n", cfg);
+		Cbuf_InsertText(va("exec %s\n", cfg));
+	}
 
 // get rid of the menu and/or console
 	Key_SetDest (key_game);
