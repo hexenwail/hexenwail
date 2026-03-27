@@ -1397,8 +1397,7 @@ void SCR_UpdateScreen (void)
 			SCR_DrawNet();
 			SCR_DrawTurtle();
 			SCR_DrawPause();
-			if (!cls.demoplayback)
-				Sbar_Draw();
+			Sbar_Draw();
 		}
 		SCR_CheckDrawCenterString();
 		SCR_DrawFPS();
