@@ -350,7 +350,7 @@ void R_BuildWorldCull (void)
 
 		/* Texture bucket = find texture index in model's texture array */
 		gpu_surfs[i].tex_bucket = 0;
-		if (surf->texinfo->texture)
+		if (surf->texinfo->texture && m->textures)
 		{
 			for (j = 0; j < m->numtextures; j++)
 			{
