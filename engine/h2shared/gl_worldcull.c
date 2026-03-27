@@ -683,7 +683,7 @@ void R_DrawWorldCulled (void)
 
 	for (i = 0; i < cull_num_buckets; i++)
 	{
-		texture_t *t = cl.worldmodel->textures[i];
+		texture_t *t = (cl.worldmodel->textures) ? cl.worldmodel->textures[i] : NULL;
 		if (!t)
 			continue;
 
