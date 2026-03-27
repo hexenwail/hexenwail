@@ -314,6 +314,12 @@ void R_BuildWorldCull (void)
 	/* Build per-surface GPU data */
 	gpu_surfs = (gpu_surface_t *) malloc(cull_num_surfs * sizeof(gpu_surface_t));
 	cull_bucket_map = (int *) malloc(cull_num_surfs * sizeof(int));
+	if (!gpu_surfs || !cull_bucket_map)
+	{
+		Con_Printf("GPU world culling: malloc failed for surface data\n");
+		R_FreeWorldCull();
+		return;
+	}
 	for (i = 0; i < cull_num_surfs; i++)
 	{
 		surf = &m->surfaces[i];
@@ -383,6 +389,12 @@ void R_BuildWorldCull (void)
 		ms_count += m->leafs[i].nummarksurfaces;
 
 	gpu_marks = (gpu_marksurf_t *) malloc(ms_count * sizeof(gpu_marksurf_t));
+	if (!gpu_marks)
+	{
+		Con_Printf("GPU world culling: malloc failed for marksurface data\n");
+		R_FreeWorldCull();
+		return;
+	}
 	ms_count = 0;
 	for (i = 1; i < cull_num_leaves; i++)
 	{
