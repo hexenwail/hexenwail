@@ -88,6 +88,7 @@ static GLint	cull_mark_u_vieworg;
 static GLint	cull_mark_u_frustum;
 static GLint	cull_mark_u_framecount;
 static GLint	cull_mark_u_num_marksurfs;
+static GLint	cull_mark_u_num_buckets;
 
 static GLint	cull_clear_u_num_buckets;
 
@@ -310,6 +311,7 @@ void R_BuildWorldCull (void)
 	cull_mark_u_frustum = glGetUniformLocation_fp(cull_mark_prog, "u_frustum");
 	cull_mark_u_framecount = glGetUniformLocation_fp(cull_mark_prog, "u_framecount");
 	cull_mark_u_num_marksurfs = glGetUniformLocation_fp(cull_mark_prog, "u_num_marksurfs");
+	cull_mark_u_num_buckets = glGetUniformLocation_fp(cull_mark_prog, "u_num_buckets");
 
 	cull_num_surfs = m->numsurfaces;
 	cull_num_leaves = m->numleafs;
@@ -609,7 +611,8 @@ void R_DispatchWorldCull (void)
 	glUniform3f_fp(cull_mark_u_vieworg, r_origin[0], r_origin[1], r_origin[2]);
 	glUniform1i_fp(cull_mark_u_framecount, framecount);
 	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
-	glUniform1i_fp(glGetUniformLocation_fp(cull_mark_prog, "u_num_buckets"), cull_num_buckets);
+	if (cull_mark_u_num_buckets >= 0)
+		glUniform1i_fp(cull_mark_u_num_buckets, cull_num_buckets);
 
 	/* Upload frustum planes */
 	{
