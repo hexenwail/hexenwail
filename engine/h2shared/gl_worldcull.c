@@ -173,6 +173,7 @@ static const char cull_mark_src[] =
 	"uniform vec4 u_frustum[4];\n"
 	"uniform int u_framecount;\n"
 	"uniform int u_num_marksurfs;\n"
+	"uniform int u_num_buckets;\n"
 	"\n"
 	"void main() {\n"
 	"    uint id = gl_GlobalInvocationID.x;\n"
@@ -223,6 +224,9 @@ static const char cull_mark_src[] =
 	"     * frame's value, another thread already emitted it. */\n"
 	"    int old = atomicExchange(dedup[si], u_framecount);\n"
 	"    if (old == u_framecount) return;\n"
+	"\n"
+	"    /* Bounds check texture bucket to prevent out-of-bounds writes */\n"
+	"    if (s.tex_bucket >= uint(u_num_buckets)) return;\n"
 	"\n"
 	"    /* Claim index slots in the texture bucket's indirect command */\n"
 	"    uint slot = atomicAdd(cmds[s.tex_bucket].count, uint(s.numindices));\n"
@@ -605,6 +609,7 @@ void R_DispatchWorldCull (void)
 	glUniform3f_fp(cull_mark_u_vieworg, r_origin[0], r_origin[1], r_origin[2]);
 	glUniform1i_fp(cull_mark_u_framecount, framecount);
 	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
+	glUniform1i_fp(glGetUniformLocation_fp(cull_mark_prog, "u_num_buckets"), cull_num_buckets);
 
 	/* Upload frustum planes */
 	{
