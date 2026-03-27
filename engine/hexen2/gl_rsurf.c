@@ -1056,6 +1056,12 @@ static void DrawTextureChains (entity_t *e)
 		vbo_active = true;
 	}
 
+	/* Validate world model before iterating textures */
+	if (!cl.worldmodel || !cl.worldmodel->textures) {
+		Con_SafePrintf("ERROR: DrawTextureChains - null worldmodel or textures\n");
+		return;
+	}
+
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
 		t = cl.worldmodel->textures[i];
@@ -1585,6 +1591,12 @@ void R_BuildWorldVBO (void)
 		for (j = 0; j < p->numverts; j++)
 		{
 			float *v = p->verts[j];
+			if (!v) {
+				Con_SafePrintf("ERROR: null vertex pointer in surf %d vert %d\n", i, j);
+				free(verts);
+				free(indices);
+				return;
+			}
 			verts[v_pos].pos[0] = v[0];
 			verts[v_pos].pos[1] = v[1];
 			verts[v_pos].pos[2] = v[2];
