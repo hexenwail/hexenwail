@@ -1143,9 +1143,15 @@ void Key_SetTextInputMode (qboolean on)
 	if (!w)
 		return;
 	if (on)
+	{
+		/* Ensure window has input focus and is capable of receiving text input */
+		SDL_RaiseWindow(w);
 		SDL_StartTextInput(w);
+	}
 	else
+	{
 		SDL_StopTextInput(w);
+	}
 }
 
 /*
