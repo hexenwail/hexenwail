@@ -104,6 +104,7 @@ static cvar_t BarSpeed = {"barspeed", "5", CVAR_NONE};
 static cvar_t DMMode = {"dm_mode", "1", CVAR_ARCHIVE};
 static cvar_t sbtrans = {"sbtrans", "0", CVAR_ARCHIVE};
 static cvar_t dmtrans = {"dmtrans", "0", CVAR_ARCHIVE};
+static cvar_t hide_hud = {"hide_hud", "0", CVAR_NONE};
 
 static qpic_t *sb_nums[11];
 static qpic_t *sb_colon, *sb_slash;
@@ -196,6 +197,7 @@ void Sbar_Init(void)
 	Cvar_RegisterVariable(&sbtrans);
 	Cvar_RegisterVariable(&dmtrans);
 	Cvar_RegisterVariable(&BarSpeed);
+	Cvar_RegisterVariable(&hide_hud);
 
 	BarHeight = BarTargetHeight = BAR_TOP_HEIGHT;
 }
@@ -218,6 +220,9 @@ void Sbar_Draw(void)
 		scr_copyeverything = 1;
 		return;
 	}
+
+	if ((int)Cvar_VariableValue("hide_hud"))
+		return;
 
 	if (scr_con_current == vid.height)	// console is full screen
 		return;
