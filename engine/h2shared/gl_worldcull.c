@@ -671,6 +671,14 @@ void R_DrawWorldCulled (void)
 	}
 
 	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
+
+	/* Restore original world IBO in the VAO so later code that
+	 * binds world_vao gets the correct element buffer */
+	{
+		extern GLuint world_ibo;
+		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, world_ibo);
+	}
+
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
 }
