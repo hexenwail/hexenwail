@@ -1210,22 +1210,38 @@ static void DrawTextureChains (entity_t *e)
 						else
 						{
 							/* Gap — flush the run */
-							glDrawElements_fp(GL_TRIANGLES,
-									  run_total_idx,
-									  GL_UNSIGNED_INT,
-									  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
-							c_brush_polys += (k - run_start);
+							if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
+							{
+								glDrawElements_fp(GL_TRIANGLES,
+										  run_total_idx,
+										  GL_UNSIGNED_INT,
+										  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
+								c_brush_polys += (k - run_start);
+							}
+							else
+							{
+								Con_SafePrintf("SKIP batch draw: idx=%d total=%d (max=%d)\n",
+									       run_first_idx, run_total_idx, world_num_indices);
+							}
 							run_start = k;
 							run_first_idx = batch_surfs[k]->vbo_firstindex;
 							run_total_idx = batch_surfs[k]->vbo_numtris * 3;
 						}
 					}
 					/* Flush final run */
-					glDrawElements_fp(GL_TRIANGLES,
-							  run_total_idx,
-							  GL_UNSIGNED_INT,
-							  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
-					c_brush_polys += (batch_count - run_start);
+					if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
+					{
+						glDrawElements_fp(GL_TRIANGLES,
+								  run_total_idx,
+								  GL_UNSIGNED_INT,
+								  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
+						c_brush_polys += (batch_count - run_start);
+					}
+					else
+					{
+						Con_SafePrintf("SKIP final batch draw: idx=%d total=%d (max=%d)\n",
+							       run_first_idx, run_total_idx, world_num_indices);
+					}
 				}
 			}
 			}
