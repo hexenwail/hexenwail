@@ -539,9 +539,15 @@ static void R_UpdateLightmaps (qboolean Translucent)
 		{
 			lightmap_modified[i] = false;
 
+			/* Update individual lightmap (kept for compatibility) */
+			GL_Bind(lightmap_textures[i]);
+			glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
+					BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
+					lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+
+			/* Patch the dirty page in the atlas */
 			if (lm_atlas_enabled && lm_atlas_texture)
 			{
-				/* Atlas path: only update the atlas sub-image */
 				int col = i % LM_ATLAS_COLS;
 				int row = i / LM_ATLAS_COLS;
 				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
@@ -551,14 +557,6 @@ static void R_UpdateLightmaps (qboolean Translucent)
 						gl_lightmap_format, GL_UNSIGNED_BYTE,
 						lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 				currenttexture = GL_UNUSED_TEXTURE;
-			}
-			else
-			{
-				/* Fallback: update individual lightmap texture */
-				GL_Bind(lightmap_textures[i]);
-				glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
-						BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
-						lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 			}
 		}
 	}
@@ -1024,37 +1022,6 @@ static void DrawTextureChains (entity_t *e)
 	int		i;
 	msurface_t	*s;
 	texture_t	*t;
-	qboolean	vbo_active = false;
-
-	/* Pre-loop: set up VBO/shader state once for all texture chains */
-	if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
-	{
-		float mvp[16], mv[16];
-
-		glBindVertexArray_fp(world_vao);
-		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-		glUseProgram_fp(gl_shader_world.program);
-
-		GL_GetMVP(mvp);
-		GL_GetModelview(mv);
-		if (gl_shader_world.u_mvp >= 0)
-			glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-		if (gl_shader_world.u_modelview >= 0)
-			glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-		if (gl_shader_world.u_fog_density >= 0)
-			glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-		if (gl_shader_world.u_fog_color >= 0)
-			glUniform3f_fp(gl_shader_world.u_fog_color,
-				       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (gl_shader_world.u_alpha_threshold >= 0)
-			glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
-
-		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-
-		vbo_active = true;
-	}
 
 	/* Validate world model before iterating textures */
 	if (!cl.worldmodel || !cl.worldmodel->textures) {
@@ -1129,15 +1096,43 @@ static void DrawTextureChains (entity_t *e)
 					}
 				}
 			}
-			else if (vbo_active)
+			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
 			{
 				/* Static VBO path: world geometry is pre-uploaded.
-				 * VAO/shader/uniforms already set before the loop.
-				 * Just bind the diffuse texture and batch-draw. */
+				 * Just issue glDrawElements per visible surface
+				 * using the pre-built IBO. Avoids per-vertex CPU work. */
+				float mvp[16], mv[16];
+
+				glBindVertexArray_fp(world_vao);
+
+				/* ATTR_COLOR is not in the world VBO — set default to white.
+				 * When a vertex attrib array is disabled, the generic
+				 * attribute value is used (GL 2.0 spec). */
+				glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+
+				glUseProgram_fp(gl_shader_world.program);
+				GL_GetMVP(mvp);
+				GL_GetModelview(mv);
+				if (gl_shader_world.u_mvp >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+				if (gl_shader_world.u_modelview >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+				if (gl_shader_world.u_fog_density >= 0)
+					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+				if (gl_shader_world.u_fog_color >= 0)
+					glUniform3f_fp(gl_shader_world.u_fog_color,
+						       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+				if (gl_shader_world.u_alpha_threshold >= 0)
+					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
 				}
+				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 				/* Collect visible surfaces, then batch-draw.
 			 * Merge contiguous IBO ranges into single draw calls. */
@@ -1155,15 +1150,12 @@ static void DrawTextureChains (entity_t *e)
 						glBindVertexArray_fp(0);
 						glUseProgram_fp(0);
 						R_RenderBrushPolyMTex (e, s, false);
-						/* Restore VBO state (uniforms persist across program rebind) */
 						glBindVertexArray_fp(world_vao);
 						glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 						glUseProgram_fp(gl_shader_world.program);
-						glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-						glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-						glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 							GL_Bind (tt->gl_texturenum);
 						}
 						continue;
@@ -1244,6 +1236,9 @@ static void DrawTextureChains (entity_t *e)
 					}
 				}
 			}
+
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture)
 			{
@@ -1291,13 +1286,6 @@ static void DrawTextureChains (entity_t *e)
 		}
 
 		t->texturechain = NULL;
-	}
-
-	/* Post-loop: tear down VBO state once */
-	if (vbo_active)
-	{
-		glBindVertexArray_fp(0);
-		glUseProgram_fp(0);
 	}
 }
 
