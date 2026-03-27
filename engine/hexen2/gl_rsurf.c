@@ -1648,6 +1648,8 @@ void R_FreeWorldVBO (void)
 	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
 	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	if (lm_atlas_texture) { glDeleteTextures_fp(1, &lm_atlas_texture); lm_atlas_texture = 0; }
+	lm_atlas_enabled = false;
 	world_num_verts = 0;
 	world_num_indices = 0;
 }
