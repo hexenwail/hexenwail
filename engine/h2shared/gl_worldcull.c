@@ -89,6 +89,7 @@ static GLint	cull_mark_u_frustum;
 static GLint	cull_mark_u_framecount;
 static GLint	cull_mark_u_num_marksurfs;
 static GLint	cull_mark_u_num_buckets;
+static GLint	cull_mark_u_max_dst_indices;
 
 static GLint	cull_clear_u_num_buckets;
 
@@ -175,6 +176,7 @@ static const char cull_mark_src[] =
 	"uniform int u_framecount;\n"
 	"uniform int u_num_marksurfs;\n"
 	"uniform int u_num_buckets;\n"
+	"uniform int u_max_dst_indices;\n"
 	"\n"
 	"void main() {\n"
 	"    uint id = gl_GlobalInvocationID.x;\n"
@@ -232,6 +234,13 @@ static const char cull_mark_src[] =
 	"    /* Claim index slots in the texture bucket's indirect command */\n"
 	"    uint slot = atomicAdd(cmds[s.tex_bucket].count, uint(s.numindices));\n"
 	"    uint dst_base = cmds[s.tex_bucket].firstIndex + slot;\n"
+	"\n"
+	"    /* Bounds check destination buffer writes */\n"
+	"    if (dst_base + uint(s.numindices) > uint(u_max_dst_indices)) {\n"
+	"        /* Buffer overflow would occur - abort write */\n"
+	"        atomicAdd(cmds[s.tex_bucket].count, -int(s.numindices));\n"
+	"        return;\n"
+	"    }\n"
 	"\n"
 	"    /* Copy indices from source to destination */\n"
 	"    for (int i = 0; i < s.numindices; i++)\n"
@@ -312,6 +321,7 @@ void R_BuildWorldCull (void)
 	cull_mark_u_framecount = glGetUniformLocation_fp(cull_mark_prog, "u_framecount");
 	cull_mark_u_num_marksurfs = glGetUniformLocation_fp(cull_mark_prog, "u_num_marksurfs");
 	cull_mark_u_num_buckets = glGetUniformLocation_fp(cull_mark_prog, "u_num_buckets");
+	cull_mark_u_max_dst_indices = glGetUniformLocation_fp(cull_mark_prog, "u_max_dst_indices");
 
 	cull_num_surfs = m->numsurfaces;
 	cull_num_leaves = m->numleafs;
@@ -613,6 +623,8 @@ void R_DispatchWorldCull (void)
 	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
 	if (cull_mark_u_num_buckets >= 0)
 		glUniform1i_fp(cull_mark_u_num_buckets, cull_num_buckets);
+	if (cull_mark_u_max_dst_indices >= 0)
+		glUniform1i_fp(cull_mark_u_max_dst_indices, cull_total_indices);
 
 	/* Upload frustum planes */
 	{
