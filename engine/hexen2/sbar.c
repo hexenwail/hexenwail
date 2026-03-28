@@ -344,8 +344,8 @@ void Sbar_Draw(void)
 		Sbar_DrawNum(58, 14, cl.v.health, 3);
 	if (SetChainPosition(cl.v.health, cl.v.max_health, false))
 		sb_updates = 0;
-	Sbar_DrawTransPic(45+((int)ChainPosition&7), 38, Draw_CachePic("gfx/hpchain.lmp"));
-	Sbar_DrawTransPic(45+(int)ChainPosition, 36, Draw_CachePic("gfx/hpgem.lmp"));
+	Sbar_DrawTransPic(41+((int)ChainPosition&7), 38, Draw_CachePic("gfx/hpchain.lmp"));
+	Sbar_DrawTransPic(41+(int)ChainPosition, 36, Draw_CachePic("gfx/hpgem.lmp"));
 	Sbar_DrawPic(43, 36, Draw_CachePic("gfx/chnlcov.lmp"));
 	Sbar_DrawPic(267, 36, Draw_CachePic("gfx/chnrcov.lmp"));
 
