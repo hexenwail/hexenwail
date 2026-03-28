@@ -2284,7 +2284,7 @@ static void M_Display_Draw (void)
 	ScrollTitle("gfx/menu/title3.lmp");
 	M_PrintWhite (96, 72, "Display Options");
 
-	M_Print (76, 92 + 8*DISP_PRESET,	"Preset        :");
+	M_Print (76, 80 + 8*DISP_PRESET,	"Preset        :");
 	{
 		/* detect current preset by matching key cvars */
 		int se = (int)r_softemu.value;
@@ -2300,46 +2300,46 @@ static void M_Display_Draw (void)
 		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && sh);
 
 		if (is_faithful)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "Faithful");
 		else if (is_crunchy)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "Crunchy");
 		else if (is_retro)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "Retro");
 		else if (is_clean)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "Clean");
 		else if (is_modern)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "Modern");
 		else if (is_ultra)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Ultra");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "Ultra");
 		else
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
+			M_PrintWhite (220, 80 + 8*DISP_PRESET, "User");
 	}
 
-	M_Print (76, 92 + 8*DISP_GAMMA,	"Brightness    :");
+	M_Print (76, 80 + 8*DISP_GAMMA,	"Brightness    :");
 	r = (1.0 - v_gamma.value) / 0.7;
-	M_DrawSliderValue (220, 92 + 8*DISP_GAMMA, r, "%.2f", v_gamma.value);
+	M_DrawSliderValue (220, 80 + 8*DISP_GAMMA, r, "%.2f", v_gamma.value);
 
-	M_Print (76, 92 + 8*DISP_CONTRAST,	"Contrast      :");
+	M_Print (76, 80 + 8*DISP_CONTRAST,	"Contrast      :");
 	r = (v_contrast.value - 0.5) / 1.5;
-	M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
+	M_DrawSliderValue (220, 80 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
 
 #ifdef GLQUAKE
-	M_Print (76, 92 + 8*DISP_SCALE,	"UI Scale      :");
+	M_Print (76, 80 + 8*DISP_SCALE,	"UI Scale      :");
 	r = VID_ReportConsize();
-	M_DrawSliderValue (220, 92 + 8*DISP_SCALE, (r-1)/2, "%.2fx", r);
+	M_DrawSliderValue (220, 80 + 8*DISP_SCALE, (r-1)/2, "%.2fx", r);
 #endif
 
-	M_Print (76, 92 + 8*DISP_SCRSIZE,	"HUD Layout    :");
+	M_Print (76, 80 + 8*DISP_SCRSIZE,	"HUD Layout    :");
 	if (scr_viewsize.integer >= 140)
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Clean");
+		M_PrintWhite (220, 80 + 8*DISP_SCRSIZE, "Clean");
 	else if (scr_viewsize.integer >= 130)
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Off");
+		M_PrintWhite (220, 80 + 8*DISP_SCRSIZE, "Off");
 	else if (scr_viewsize.integer >= 120)
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Mini");
+		M_PrintWhite (220, 80 + 8*DISP_SCRSIZE, "Mini");
 	else
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
+		M_PrintWhite (220, 80 + 8*DISP_SCRSIZE, "Full");
 
-	M_Print (76, 92 + 8*DISP_RENDERING,	"Rendering...");
+	M_Print (76, 80 + 8*DISP_RENDERING,	"Rendering...");
 
 	/* separator */
 
@@ -2349,62 +2349,62 @@ static void M_Display_Draw (void)
 		const char *s;
 		int ms, vsync;
 
-		M_Print (76, 92 + 8*DISP_FULLSCREEN,	"Window Mode   :");
+		M_Print (76, 80 + 8*DISP_FULLSCREEN,	"Window Mode   :");
 		{
 			int wmode = VID_MenuGetWindowMode ();
-			M_PrintWhite (220, 92 + 8*DISP_FULLSCREEN,
+			M_PrintWhite (220, 80 + 8*DISP_FULLSCREEN,
 				wmode == 2 ? "Fullscreen" : wmode == 1 ? "Borderless" : "Windowed");
 		}
 
-		M_Print (76, 92 + 8*DISP_RESOLUTION,	"Resolution    :");
+		M_Print (76, 80 + 8*DISP_RESOLUTION,	"Resolution    :");
 		s = VID_MenuGetResolution (&is_current);
 		if (is_current)
-			M_PrintWhite (220, 92 + 8*DISP_RESOLUTION, s);
+			M_PrintWhite (220, 80 + 8*DISP_RESOLUTION, s);
 		else
-			M_Print (220, 92 + 8*DISP_RESOLUTION, s);
+			M_Print (220, 80 + 8*DISP_RESOLUTION, s);
 
-		M_Print (76, 92 + 8*DISP_MSAA,		"Antialiasing  :");
+		M_Print (76, 80 + 8*DISP_MSAA,		"Antialiasing  :");
 		ms = VID_MenuGetMultisample (&is_current, &available);
 		if (available)
 		{
 			if (is_current)
-				M_PrintWhite (220, 92 + 8*DISP_MSAA, va("%d", ms));
+				M_PrintWhite (220, 80 + 8*DISP_MSAA, va("%d", ms));
 			else
-				M_Print (220, 92 + 8*DISP_MSAA, va("%d", ms));
+				M_Print (220, 80 + 8*DISP_MSAA, va("%d", ms));
 		}
 		else
-			M_PrintWhite (220, 92 + 8*DISP_MSAA, "N/A");
+			M_PrintWhite (220, 80 + 8*DISP_MSAA, "N/A");
 
-		M_Print (76, 92 + 8*DISP_VSYNC,	"VSync         :");
+		M_Print (76, 80 + 8*DISP_VSYNC,	"VSync         :");
 		vsync = VID_MenuGetVSync ();
-		M_PrintWhite (220, 92 + 8*DISP_VSYNC,
+		M_PrintWhite (220, 80 + 8*DISP_VSYNC,
 			vsync == -1 ? "Adaptive" : vsync ? "On" : "Off");
 
-		M_Print (76, 92 + 8*DISP_MAXFPS,	"FPS Limit     :");
+		M_Print (76, 80 + 8*DISP_MAXFPS,	"FPS Limit     :");
 		if ((int)host_maxfps.value <= 0)
-			M_PrintWhite (220, 92 + 8*DISP_MAXFPS, "Unlimited");
+			M_PrintWhite (220, 80 + 8*DISP_MAXFPS, "Unlimited");
 		else
-			M_PrintWhite (220, 92 + 8*DISP_MAXFPS, va("%d", (int)host_maxfps.value));
+			M_PrintWhite (220, 80 + 8*DISP_MAXFPS, va("%d", (int)host_maxfps.value));
 
-		M_Print (76, 92 + 8*DISP_SHOWFPS,	"Show FPS      :");
-		M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
+		M_Print (76, 80 + 8*DISP_SHOWFPS,	"Show FPS      :");
+		M_DrawCheckbox (220, 80 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
 
-		M_Print (76, 92 + 8*DISP_MENUFADE,	"Menu Fade     :");
-		M_DrawCheckbox (220, 92 + 8*DISP_MENUFADE, (int)Cvar_VariableValue("scr_menufade"));
+		M_Print (76, 80 + 8*DISP_MENUFADE,	"Menu Fade     :");
+		M_DrawCheckbox (220, 80 + 8*DISP_MENUFADE, (int)Cvar_VariableValue("scr_menufade"));
 
 		if (VID_MenuNeedApply ())
-			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
+			M_Print (76, 80 + 8*DISP_APPLY, "APPLY CHANGES");
 	}
 #endif
 
 	/* Mouse hover */
 	{
-		int hover = M_MouseToMenuItem(menu_mouse_y, 92, 8, DISP_ITEMS);
+		int hover = M_MouseToMenuItem(menu_mouse_y, 80, 8, DISP_ITEMS);
 		if (hover >= 0 && !M_Display_IsSkip(hover))
 			display_cursor = hover;
 	}
 
-	M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
+	M_DrawCharacter (64, 80 + display_cursor*8, 12+((int)(realtime*4)&1));
 }
 
 static qboolean M_Display_IsSkip (int cursor)
