@@ -863,9 +863,6 @@ static float R_LiquidAlpha (const texture_t *t)
 		if (!q_strncasecmp(t->name + 1, "tele", 4))
 		{	if (r_telealpha.value <= 0) return 1.0f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
-		/* Gray/murky liquids are opaque */
-		if (!q_strncasecmp(t->name + 1, "gray", 4) || !q_strncasecmp(t->name + 1, "mud", 3))
-			return 1.0f;
 	}
 	{	float a = r_wateralpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 }
