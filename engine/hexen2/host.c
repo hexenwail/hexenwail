@@ -683,7 +683,7 @@ static qboolean Host_FilterTime (float time)
 	 * secondary filter causes frame drops when vsync delivers a
 	 * frame slightly early. */
 	if (!cls.timedemo && host_maxfps.value > 0 &&
-	    VID_MenuGetVSync() == 0 &&
+	    VID_MenuGetVSync() != 0 &&
 	    realtime - oldrealtime < 1.0/host_maxfps.value)
 		return false;		// framerate is too high
 
