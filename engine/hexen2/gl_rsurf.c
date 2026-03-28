@@ -1209,28 +1209,35 @@ static void DrawTextureChains (entity_t *e)
 
 					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
 						batch_surfs[batch_count++] = s;
-					/* Apply dlights to lightmap for this surface */
-					if (r_dynamic.integer && s->dlightframe == r_framecount)
-						R_AddDynamicLights(s);
 
-					/* Track lightmap polys for dynamic updates */
+					/* Track lightmap polys and rebuild if needed */
 					if (s->polys)
 					{
 						int maps;
+						qboolean need_rebuild = false;
+						byte *base;
+
 						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
 						lightmap_polys[s->lightmaptexturenum] = s->polys;
 						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
 						{
 							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
 							{
-								LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-										   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+								need_rebuild = true;
 								break;
 							}
 						}
 						if (s->dlightframe == r_framecount || s->cached_dlight)
+							need_rebuild = true;
+
+						if (need_rebuild)
+						{
 							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
 									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+							base = lightmaps + s->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+							base += s->light_t * BLOCK_WIDTH * lightmap_bytes + s->light_s * lightmap_bytes;
+							R_BuildLightMap (s, base, BLOCK_WIDTH*lightmap_bytes);
+						}
 					}
 				}
 
