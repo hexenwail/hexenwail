@@ -714,6 +714,8 @@ void Draw_Character (int x, int y, unsigned int num)
 	frow = row*ysize;
 
 	GL_Bind (char_texture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
@@ -843,6 +845,8 @@ void Draw_SmallCharacter (int x, int y, int num)
 	frow = row*ysize;
 
 	GL_Bind (char_smalltexture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
@@ -893,6 +897,8 @@ void Draw_BigCharacter (int x, int y, int num)
 	frow = row*ysize;
 
 	GL_Bind (char_menufonttexture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (1, 1, 1, 1);
