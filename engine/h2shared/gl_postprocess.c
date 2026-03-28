@@ -98,7 +98,7 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
-cvar_t	r_oit = {"r_oit", "1", CVAR_ARCHIVE};		/* weighted blended OIT */
+cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};		/* weighted blended OIT (WIP) */
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
@@ -112,6 +112,7 @@ static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
+static qboolean	oit_rendering;		/* true only inside Begin/End scope */
 
 /* OIT resolve shaders */
 static const char oit_resolve_vert[] =
@@ -783,11 +784,14 @@ void OIT_BeginTranslucency (void)
 
 	/* Translucent geometry reads depth but doesn't write it */
 	glDepthMask_fp(0);
+	oit_rendering = true;
 }
 
 /* Call after all translucent geometry — resolves OIT onto scene FBO */
 void OIT_EndTranslucency (GLuint scene_fbo)
 {
+	oit_rendering = false;
+
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
 
@@ -832,7 +836,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 qboolean OIT_Active (void)
 {
-	return oit_available && r_oit.integer && glBlendFunci_fp != NULL;
+	return oit_rendering;
 }
 
 GLuint GL_GetSceneFBO (void)

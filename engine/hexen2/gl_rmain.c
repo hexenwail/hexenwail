@@ -1155,7 +1155,22 @@ static void R_DrawAliasModel (entity_t *e)
 		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);	// paliashdr->scale[0..2]
 	}
 
-	if (e->model->flags & EF_SPECIAL_TRANS)
+	if (OIT_Active())
+	{
+		/* OIT: blend state is managed by OIT begin/end.
+		 * Just set model_constant_alpha for the shader. */
+		if (e->drawflags & DRF_TRANSLUCENT)
+			model_constant_alpha = (e->alpha != ENTALPHA_DEFAULT) ?
+				ENTALPHA_DECODE(e->alpha) : r_wateralpha.value;
+		else if (e->alpha != ENTALPHA_DEFAULT)
+			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
+		else
+			model_constant_alpha = 1.0f;
+
+		if (e->model->flags & EF_SPECIAL_TRANS)
+			glDisable_fp (GL_CULL_FACE);
+	}
+	else if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		glEnable_fp (GL_BLEND);
 		glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
@@ -1259,7 +1274,9 @@ static void R_DrawAliasModel (entity_t *e)
 			skinnum = 0;
 		fb_tex = paliashdr->gl_fb_texturenum[skinnum][anim_fb];
 
-		if (fb_tex && !r_fullbright.integer)
+		/* Skip fullbright additive pass during OIT — additive blend
+		 * would stomp the per-buffer OIT blend equations */
+		if (fb_tex && !r_fullbright.integer && !OIT_Active())
 		{
 			GL_Bind(fb_tex);
 			glEnable_fp (GL_BLEND);
@@ -1282,17 +1299,24 @@ static void R_DrawAliasModel (entity_t *e)
 
 	model_constant_alpha = 1.0f;
 
-	if ((e->drawflags & DRF_TRANSLUCENT) ||
-	    (e->model->flags & EF_SPECIAL_TRANS) ||
-	    (e->model->flags & EF_TRANSPARENT) ||
-	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
+	if (!OIT_Active())
 	{
-		glDisable_fp (GL_BLEND);
+		if ((e->drawflags & DRF_TRANSLUCENT) ||
+		    (e->model->flags & EF_SPECIAL_TRANS) ||
+		    (e->model->flags & EF_TRANSPARENT) ||
+		    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
+		{
+			glDisable_fp (GL_BLEND);
+		}
+
+		if (e->model->flags & EF_SPECIAL_TRANS)
+		{
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		}
 	}
 
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glEnable_fp (GL_CULL_FACE);
 	}
 
