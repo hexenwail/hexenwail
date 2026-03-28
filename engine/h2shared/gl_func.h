@@ -365,11 +365,20 @@ GL_FUNCTION_OPT(void, glDispatchCompute, (GLuint, GLuint, GLuint))
 GL_FUNCTION_OPT(void, glMemoryBarrier, (GLbitfield))
 
 /* Timer queries (GL 3.3 / GL_ARB_timer_query) */
+#ifndef HEXENWAIL_GLUINT64
+#define HEXENWAIL_GLUINT64
+typedef unsigned long long HWGLuint64;
+#endif
 GL_FUNCTION_OPT(void, glGenQueries, (GLsizei, GLuint *))
 GL_FUNCTION_OPT(void, glDeleteQueries, (GLsizei, const GLuint *))
 GL_FUNCTION_OPT(void, glQueryCounter, (GLuint, GLenum))
-GL_FUNCTION_OPT(void, glGetQueryObjectui64v, (GLuint, GLenum, GLuint64 *))
+GL_FUNCTION_OPT(void, glGetQueryObjectui64v, (GLuint, GLenum, HWGLuint64 *))
 GL_FUNCTION_OPT(void, glGetQueryObjectiv, (GLuint, GLenum, GLint *))
+
+/* Per-buffer blending + MRT (GL 4.0 / GL_ARB_draw_buffers_blend) */
+GL_FUNCTION_OPT(void, glBlendFunci, (GLuint, GLenum, GLenum))
+GL_FUNCTION_OPT(void, glDrawBuffers, (GLsizei, const GLenum *))
+GL_FUNCTION_OPT(void, glClearBufferfv, (GLenum, GLint, const GLfloat *))
 
 /* Indirect draw (OpenGL 4.0 / GL_ARB_draw_indirect) */
 GL_FUNCTION_OPT(void, glMultiDrawElementsIndirect, (GLenum, GLenum, const void *, GLsizei, GLsizei))
@@ -443,6 +452,9 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glQueryCounter_fp(id,t)		((void)0)
 #define glGetQueryObjectui64v_fp(id,p,v) ((void)0)
 #define glGetQueryObjectiv_fp(id,p,v)	((void)0)
+#define glBlendFunci_fp(b,s,d)		((void)0)
+#define glDrawBuffers_fp		glDrawBuffers
+#define glClearBufferfv_fp		glClearBufferfv
 #define glMultiDrawElementsIndirect_fp(m,t,i,c,s) ((void)0)
 #define glDrawElementsIndirect_fp(m,t,i)	((void)0)
 #define glDrawElementsInstanced_fp	glDrawElementsInstanced

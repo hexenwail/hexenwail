@@ -50,6 +50,11 @@ extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 
+/* OIT variants — same shaders but output to MRT accum+revealage */
+extern glprogram_t	gl_shader_world_oit;
+extern glprogram_t	gl_shader_alias_oit;
+extern glprogram_t	gl_shader_particle_oit;
+
 /* Extended program for GPU alias model SSBO rendering */
 typedef struct {
 	glprogram_t base;	/* standard uniforms */
