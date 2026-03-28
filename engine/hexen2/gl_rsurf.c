@@ -1140,7 +1140,9 @@ static void DrawTextureChains (entity_t *e)
 				/* First pass: collect into temp array */
 				#define MAX_BATCH_SURFS 4096
 				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
+t		static msurface_t *deferred_surfs[MAX_BATCH_SURFS];
 				int batch_count = 0;
+t		int deferred_count = 0;
 
 				for ( ; s ; s = s->texturechain)
 				{
@@ -1236,6 +1238,14 @@ static void DrawTextureChains (entity_t *e)
 						Con_SafePrintf("SKIP final batch draw: idx=%d total=%d (max=%d)\n",
 							       run_first_idx, run_total_idx, world_num_indices);
 					}
+n			/* Deferred pass: render fence/underwater surfaces */
+			if (deferred_count > 0)
+			{
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
+				for (int d = 0; d < deferred_count; d++)
+					R_RenderBrushPolyMTex (e, deferred_surfs[d], false);
+			}
 				}
 			}
 
