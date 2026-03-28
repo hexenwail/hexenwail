@@ -2436,6 +2436,12 @@ static void M_Display_Key (int k)
 		if (display_cursor == DISP_APPLY && VID_MenuNeedApply ())
 		{
 			VID_MenuApply ();
+			/* Reset cursor to first valid item after apply, since some items may now be skipped */
+			display_cursor = 0;
+			while (display_cursor < DISP_ITEMS && M_Display_IsSkip(display_cursor))
+				display_cursor++;
+			if (display_cursor >= DISP_ITEMS)
+				display_cursor = 0;
 			return;
 		}
 #endif
