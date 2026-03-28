@@ -2096,8 +2096,8 @@ static void R_DrawEntitiesOnList (void)
 		return;
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
-	 * models before the per-entity loop. Requires r_alias_gpu >= 2. */
-	/* TODO: instanced path (mode 2) has rendering issues — disable until fixed */
+	 * models before the per-entity loop. Requires r_alias_gpu >= 2.
+	 * NOTE: disabled — instanced entities render invisible (shader bug) */
 	use_instancing = false; /*(r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program)*/
 	if (use_instancing)
 	{
@@ -3224,11 +3224,81 @@ R_RenderView
 r_refdef must be set before the first call
 ================
 */
+/* GPU timer query profiler — no glFinish stalls */
+#ifndef GL_TIMESTAMP
+#define GL_TIMESTAMP		0x8E28
+#endif
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT		0x8866
+#endif
+#ifndef GL_QUERY_RESULT_AVAILABLE
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
+
+#define RPROF_WORLD	0
+#define RPROF_PARTICLES	1
+#define RPROF_WATER	2
+#define RPROF_TRANS	3
+#define RPROF_VM	4
+#define RPROF_MIRROR	5
+#define RPROF_COUNT	6	/* 6 passes = 7 timestamp queries */
+
+static GLuint	rprof_queries[RPROF_COUNT + 1];
+static qboolean	rprof_pending;		/* results from previous frame waiting */
+static qboolean	rprof_available;	/* queries have been allocated */
+static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
+static int	rprof_wpoly, rprof_epoly; /* saved from previous frame */
+
+static void R_ProfileInit (void)
+{
+	if (rprof_available || !glGenQueries_fp)
+		return;
+	glGenQueries_fp(RPROF_COUNT + 1, rprof_queries);
+	rprof_available = true;
+	rprof_pending = false;
+}
+
+static void R_ProfileTimestamp (int idx)
+{
+	if (rprof_available)
+		glQueryCounter_fp(rprof_queries[idx], GL_TIMESTAMP);
+}
+
+static void R_ProfileReport (void)
+{
+	GLuint64 ts[RPROF_COUNT + 1];
+	GLint ready = 0;
+	int i;
+	double ms[RPROF_COUNT], total;
+
+	if (!rprof_available || !rprof_pending)
+		return;
+
+	/* Check if last timestamp is ready (implies all earlier ones are too) */
+	glGetQueryObjectiv_fp(rprof_queries[RPROF_COUNT], GL_QUERY_RESULT_AVAILABLE, &ready);
+	if (!ready)
+		return;
+
+	for (i = 0; i <= RPROF_COUNT; i++)
+		glGetQueryObjectui64v_fp(rprof_queries[i], GL_QUERY_RESULT, &ts[i]);
+
+	for (i = 0; i < RPROF_COUNT; i++)
+		ms[i] = (double)(ts[i + 1] - ts[i]) / 1000000.0;
+
+	total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
+
+	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
+		   "  %4i wpoly  %4i epoly\n",
+		   total, rprof_cpu_world * 1000.0,
+		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
+		   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR],
+		   rprof_wpoly, rprof_epoly);
+
+	rprof_pending = false;
+}
+
 void R_RenderView (void)
 {
-	double	t_world = 0, t_particles = 0, t_trans = 0, t_water = 0, t_vm = 0, t_mirror = 0;
-	double	t_start = 0, t_now;
-
 	if (r_norefresh.integer)
 		return;
 
@@ -3237,70 +3307,62 @@ void R_RenderView (void)
 
 	if (r_speeds.integer)
 	{
-		glFinish_fp ();
 		if (r_wholeframe.integer)
 			r_time1 = r_lasttime1;
 		else
 			r_time1 = Sys_DoubleTime ();
+		/* Save counters before reset — GPU profiler reports 1 frame delayed */
+		rprof_wpoly = c_brush_polys;
+		rprof_epoly = c_alias_polys;
 		c_brush_polys = 0;
 		c_alias_polys = 0;
 	}
 
-	t_start = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
+	if (r_speeds.integer >= 2)
+	{
+		R_ProfileInit();
+		/* Report previous frame's results (non-blocking) */
+		R_ProfileReport();
+	}
 
 	mirror = false;
 
 	R_Clear ();
 
 	// render normal view
-	R_RenderScene ();
-
-	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_world = t_now - t_start; t_start = t_now; }
+	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_WORLD);
+	{
+		double cpu_start = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
+		R_RenderScene ();
+		if (r_speeds.integer >= 2) rprof_cpu_world = Sys_DoubleTime() - cpu_start;
+	}
+	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_PARTICLES);
 
 	glDepthMask_fp(0);
 
 	R_DrawParticles ();
-
-	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_particles = t_now - t_start; t_start = t_now; }
+	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_WATER);
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
 	R_DrawWaterSurfaces ();
-
-	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_water = t_now - t_start; t_start = t_now; }
+	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
-
-	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_trans = t_now - t_start; t_start = t_now; }
+	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_VM);
 
 	R_DrawViewModel();
-
-	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_vm = t_now - t_start; t_start = t_now; }
+	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_MIRROR);
 
 	R_ShowBoundingBoxes ();
 
 	// render mirror view
 	R_Mirror ();
-
-	if (r_speeds.integer >= 2) { glFinish_fp(); t_now = Sys_DoubleTime(); t_mirror = t_now - t_start; }
+	if (r_speeds.integer >= 2) { R_ProfileTimestamp(RPROF_COUNT); rprof_pending = true; }
 
 	R_PolyBlend ();
 
-	if (r_speeds.integer >= 2)
-	{
-		double total = t_world + t_particles + t_water + t_trans + t_vm + t_mirror;
-		/* Only log when frame is slow (>20ms = <50 FPS) */
-		if (total > 0.020)
-		{
-			Con_Printf("SLOW %.0fms: world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
-				   "  %4i wpoly  %4i epoly\n",
-				   total*1000,
-				   t_world*1000, t_particles*1000, t_water*1000,
-				   t_trans*1000, t_vm*1000, t_mirror*1000,
-				   c_brush_polys, c_alias_polys);
-		}
-	}
-	else if (r_speeds.integer)
+	if (r_speeds.integer == 1)
 		R_PrintTimes ();
 }
 
