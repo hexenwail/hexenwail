@@ -20,6 +20,20 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 
+/* GL defines that may be missing on some platforms (MinGW, ES3) */
+#ifndef GL_RGBA16F
+#define GL_RGBA16F 0x881A
+#endif
+#ifndef GL_DEPTH24_STENCIL8
+#define GL_DEPTH24_STENCIL8 0x88F0
+#endif
+#ifndef GL_DEPTH_STENCIL_ATTACHMENT
+#define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
+#endif
+#ifndef GL_COLOR_ATTACHMENT1
+#define GL_COLOR_ATTACHMENT1 0x8CE1
+#endif
+
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
 #ifndef GL_QUADS
@@ -84,6 +98,66 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
+cvar_t	r_oit = {"r_oit", "1", CVAR_ARCHIVE};		/* weighted blended OIT */
+
+/* ------------------------------------------------------------------ */
+/* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
+/* ------------------------------------------------------------------ */
+
+static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
+static GLuint	oit_revealage_tex;	/* R8 revealage */
+static GLuint	oit_fbo;		/* MRT FBO sharing scene depth/stencil */
+static GLuint	oit_resolve_prog;	/* fullscreen resolve shader */
+static GLint	oit_resolve_loc_accum;
+static GLint	oit_resolve_loc_reveal;
+static int	oit_width, oit_height;
+static qboolean	oit_available;		/* true if FBO + shader created OK */
+
+/* OIT resolve shaders */
+static const char oit_resolve_vert[] =
+	"#version 430 core\n"
+	"void main() {\n"
+	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
+	"    gl_Position = vec4(vec2(v) * 4.0 - 1.0, 0.0, 1.0);\n"
+	"}\n";
+
+static const char oit_resolve_frag[] =
+	"#version 430 core\n"
+	"layout(early_fragment_tests) in;\n"
+	"layout(binding=0) uniform sampler2D TexAccum;\n"
+	"layout(binding=1) uniform sampler2D TexReveal;\n"
+	"layout(location=0) out vec4 out_fragcolor;\n"
+	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
+	"void main() {\n"
+	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
+	"    float revealage = texelFetch(TexReveal, coords, 0).r;\n"
+	"    vec4 accumulation = texelFetch(TexAccum, coords, 0);\n"
+	"    if (isinf(max3(abs(accumulation.rgb))))\n"
+	"        accumulation.rgb = vec3(accumulation.a);\n"
+	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
+	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
+	"}\n";
+
+/* OIT_OUTPUT macro — injected into translucent fragment shaders.
+ * Wraps main() as main_body(), adds MRT outputs, computes WBOIT weight. */
+#define OIT_OUTPUT_GLSL \
+	"#if OIT\n" \
+	"   vec4 fragColor;\n" \
+	"   layout(location=0) out vec4 out_accum;\n" \
+	"   layout(location=1) out float out_reveal;\n" \
+	"   void main_body();\n" \
+	"   void main() {\n" \
+	"       main_body();\n" \
+	"       fragColor = clamp(fragColor, 0.0, 1.0);\n" \
+	"       float z = 1.0 / gl_FragCoord.w;\n" \
+	"       float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n" \
+	"       out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n" \
+	"       out_reveal = fragColor.a;\n" \
+	"   }\n" \
+	"   #define main main_body\n" \
+	"#else\n" \
+	"   layout(location=0) out vec4 fragColor;\n" \
+	"#endif\n"
 
 /* ------------------------------------------------------------------ */
 
@@ -154,14 +228,14 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 
 	glGenRenderbuffers_fp(1, &pp_native_depth_rb);
 	glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_native_depth_rb);
-	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
 	glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
 
 	glGenFramebuffers_fp(1, &pp_native_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_native_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 				  GL_TEXTURE_2D, pp_native_color_tex, 0);
-	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
 				     GL_RENDERBUFFER, pp_native_depth_rb);
 
 	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
@@ -178,6 +252,10 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 	}  /* end native_fmt scope */
 	return true;
 }
+
+/* Forward declaration — OIT FBO created after scene FBO */
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb);
+static void OIT_DeleteFBO (void);
 
 static qboolean PP_CreateFBO (int width, int height)
 {
@@ -209,14 +287,14 @@ static qboolean PP_CreateFBO (int width, int height)
 
 		glGenRenderbuffers_fp(1, &pp_depth_rb);
 		glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
-		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, width, height);
+		glRenderbufferStorageMultisample_fp(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, width, height);
 		glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
 
 		glGenFramebuffers_fp(1, &pp_fbo);
 		glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
 		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 					     GL_RENDERBUFFER, pp_color_rb);
-		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
 					     GL_RENDERBUFFER, pp_depth_rb);
 
 		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
@@ -254,6 +332,7 @@ static qboolean PP_CreateFBO (int width, int height)
 			pp_width = width;
 			pp_height = height;
 			Con_DPrintf("PostProcess: %dx%d FBO with %dx MSAA\n", width, height, samples);
+			OIT_CreateFBO(width, height, pp_depth_rb);
 			return true;
 		}
 	}
@@ -261,14 +340,14 @@ static qboolean PP_CreateFBO (int width, int height)
 	/* non-MSAA path */
 	glGenRenderbuffers_fp(1, &pp_depth_rb);
 	glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
-	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
 	glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
 
 	glGenFramebuffers_fp(1, &pp_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 				  GL_TEXTURE_2D, pp_color_tex, 0);
-	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
 				     GL_RENDERBUFFER, pp_depth_rb);
 
 	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
@@ -287,6 +366,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	pp_width = width;
 	pp_height = height;
 	}  /* end color_fmt scope */
+	OIT_CreateFBO(width, height, pp_depth_rb);
 	return true;
 }
 
@@ -557,6 +637,208 @@ static void PP_BuildPaletteLUT (void)
 }
 
 /* ------------------------------------------------------------------ */
+/* OIT FBO + resolve                                                   */
+/* ------------------------------------------------------------------ */
+
+static GLuint	oit_depth_stencil_rb;	/* own non-MSAA depth/stencil rb */
+
+static void OIT_DeleteFBO (void)
+{
+	if (oit_accum_tex) { glDeleteTextures_fp(1, &oit_accum_tex); oit_accum_tex = 0; }
+	if (oit_revealage_tex) { glDeleteTextures_fp(1, &oit_revealage_tex); oit_revealage_tex = 0; }
+	if (oit_depth_stencil_rb) { glDeleteRenderbuffers_fp(1, &oit_depth_stencil_rb); oit_depth_stencil_rb = 0; }
+	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
+	oit_available = false;
+}
+
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
+{
+	GLenum status;
+	GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+
+	(void)depth_stencil_rb; /* no longer shared — create our own */
+	OIT_DeleteFBO();
+
+	/* Accumulation texture (RGBA16F) */
+	glGenTextures_fp(1, &oit_accum_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, oit_accum_tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
+			GL_RGBA, GL_FLOAT, NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	/* Revealage texture (R8) */
+	glGenTextures_fp(1, &oit_revealage_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R8, width, height, 0,
+			GL_RED, GL_UNSIGNED_BYTE, NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	/* Own non-MSAA depth/stencil renderbuffer (avoids MSAA mismatch) */
+	glGenRenderbuffers_fp(1, &oit_depth_stencil_rb);
+	glBindRenderbuffer_fp(GL_RENDERBUFFER, oit_depth_stencil_rb);
+	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+	glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
+
+	/* FBO with both color attachments + own depth/stencil */
+	glGenFramebuffers_fp(1, &oit_fbo);
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
+	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				  GL_TEXTURE_2D, oit_accum_tex, 0);
+	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+				  GL_TEXTURE_2D, oit_revealage_tex, 0);
+	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				     GL_RENDERBUFFER, oit_depth_stencil_rb);
+	glDrawBuffers_fp(2, drawbufs);
+
+	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_SafePrintf("OIT: FBO incomplete (status 0x%x)\n", status);
+		OIT_DeleteFBO();
+		return false;
+	}
+
+	oit_width = width;
+	oit_height = height;
+	oit_available = true;
+	Con_SafePrintf("OIT: %dx%d FBO ready\n", width, height);
+	return true;
+}
+
+static qboolean OIT_InitShader (void)
+{
+	GLuint vs, fs, prog;
+	GLint linked;
+
+	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+	if (!vs) return false;
+	fs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag);
+	if (!fs) { glDeleteShader_fp(vs); return false; }
+
+	prog = glCreateProgram_fp();
+	glAttachShader_fp(prog, vs);
+	glAttachShader_fp(prog, fs);
+	glLinkProgram_fp(prog);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+
+	glGetProgramiv_fp(prog, GL_LINK_STATUS, &linked);
+	if (!linked)
+	{
+		char log[512];
+		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
+		Con_SafePrintf("OIT resolve link failed: %s\n", log);
+		glDeleteProgram_fp(prog);
+		return false;
+	}
+
+	oit_resolve_prog = prog;
+	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
+	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+	Con_SafePrintf("OIT: resolve shader OK\n");
+	return true;
+}
+
+/* Call before drawing any translucent geometry */
+void OIT_BeginTranslucency (void)
+{
+	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
+	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
+
+	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
+		return;
+
+	/* Blit scene depth into OIT's own depth buffer so translucent
+	 * geometry is properly occluded by opaque geometry */
+	{
+		GLuint scene = pp_fbo ? pp_fbo : 0;
+		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, scene);
+		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, oit_fbo);
+		glBlitFramebuffer_fp(0, 0, oit_width, oit_height,
+				     0, 0, oit_width, oit_height,
+				     GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+				     GL_NEAREST);
+	}
+
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
+	glClearBufferfv_fp(GL_COLOR, 0, zeroes);	/* accum = (0,0,0,0) */
+	glClearBufferfv_fp(GL_COLOR, 1, ones);		/* revealage = 1.0 */
+
+	/* Stencil: mark pixels touched by translucent geometry (bit 1) */
+	glEnable_fp(GL_STENCIL_TEST);
+	glStencilMask(2);
+	glStencilFunc_fp(GL_ALWAYS, 2, 2);
+	glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
+
+	/* Per-buffer blending for WBOIT */
+	glEnable_fp(GL_BLEND);
+	glBlendFunci_fp(0, GL_ONE, GL_ONE);			/* accum: additive */
+	glBlendFunci_fp(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR);	/* revealage: multiplicative */
+
+	/* Translucent geometry reads depth but doesn't write it */
+	glDepthMask_fp(0);
+}
+
+/* Call after all translucent geometry — resolves OIT onto scene FBO */
+void OIT_EndTranslucency (GLuint scene_fbo)
+{
+	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
+		return;
+
+	/* Resolve: composite OIT result over the scene */
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
+
+	/* Only touch pixels that received translucent fragments */
+	glStencilFunc_fp(GL_EQUAL, 2, 2);
+	glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
+	glStencilMask(0);
+
+	glUseProgram_fp(oit_resolve_prog);
+
+	/* Standard alpha blending for the resolve composite */
+	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable_fp(GL_BLEND);
+	glDepthMask_fp(0);
+	glDisable_fp(GL_DEPTH_TEST);
+
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, oit_accum_tex);
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
+
+	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
+	if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
+
+	/* Fullscreen triangle via gl_VertexID */
+	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+
+	/* Restore state */
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glUseProgram_fp(0);
+	glDisable_fp(GL_STENCIL_TEST);
+	glStencilMask(0xFF);
+	glEnable_fp(GL_DEPTH_TEST);
+	glDepthMask_fp(1);
+	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+qboolean OIT_Active (void)
+{
+	return oit_available && r_oit.integer && glBlendFunci_fp != NULL;
+}
+
+GLuint GL_GetSceneFBO (void)
+{
+	return pp_fbo;	/* 0 if no postprocess FBO active */
+}
+
+/* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -567,6 +849,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_dither);
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
+	Cvar_RegisterVariable(&r_oit);
 
 	pp_initialized = false;
 	pp_active = false;
@@ -622,10 +905,16 @@ void GL_PostProcess_Init (void)
 
 	pp_initialized = true;
 	Con_SafePrintf("PostProcess: gamma/contrast shader ready\n");
+
+	/* Init OIT resolve shader (FBO created lazily when scene FBO is ready) */
+	if (glBlendFunci_fp && glDrawBuffers_fp && glClearBufferfv_fp)
+		OIT_InitShader();
 }
 
 void GL_PostProcess_Shutdown (void)
 {
+	OIT_DeleteFBO();
+	if (oit_resolve_prog) { glDeleteProgram_fp(oit_resolve_prog); oit_resolve_prog = 0; }
 	PP_DeleteFBO();
 	PP_DeleteNativeFBO();
 	if (pp_program)
