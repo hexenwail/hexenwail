@@ -23,7 +23,7 @@
         };
 
         # Version: update this after each git tag
-        version = "26.03-alpha.6i";
+        version = "26.03-alpha.6o";
 
         # Source filter: exclude non-build files to improve cache hits
         filteredSrc = pkgs.lib.cleanSourceWith {
