@@ -62,6 +62,7 @@ typedef struct {
 	GLint	u_shade_light;	/* shading intensity */
 	GLint	u_light_color;	/* RGB light color */
 	GLint	u_ent_alpha;	/* entity alpha */
+	GLint	u_shadedot_row;	/* row index into 16x256 shadedots table */
 } gl_alias_gpu_prog_t;
 
 extern gl_alias_gpu_prog_t gl_shader_alias_gpu;
@@ -83,7 +84,8 @@ void	GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
 				  int pose0, int pose1, float lerp,
 				  const float *scale, const float *scale_origin,
 				  int poseverts, float shade_light,
-				  const float *light_color, float alpha);
+				  const float *light_color, float alpha,
+				  int shadedot_row);
 
 void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *pup, const float *pright,
