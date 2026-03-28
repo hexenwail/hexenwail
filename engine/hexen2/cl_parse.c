@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#include "gl_postprocess.h"
 
 /* gl_fog.c */
 void Fog_ParseServerMessage (void);
@@ -1484,6 +1485,7 @@ void CL_ParseServerMessage (void)
 		case svc_serverinfo:
 			CL_ParseServerInfo ();
 			vid.recalc_refdef = true;	// leave intermission full screen
+			GL_PostProcess_ResetWaterwarpPreview();	// clear waterwarp preview on level change
 			break;
 
 		case svc_setangle:

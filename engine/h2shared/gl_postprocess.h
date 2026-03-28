@@ -40,6 +40,7 @@ qboolean GL_PostProcess_Active (void);
 
 /* Request a brief waterwarp preview animation (duration in seconds). */
 void GL_PostProcess_RequestWaterwarpPreview (float duration);
+void GL_PostProcess_ResetWaterwarpPreview (void);
 
 /* Render scale cvar (0.25 - 1.0, lower = chunkier pixels) */
 extern cvar_t r_scale;
