@@ -1163,6 +1163,8 @@ static void DrawTextureChains (entity_t *e)
 
 					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
 						batch_surfs[batch_count++] = s;
+					/* Apply dlights to lightmap for this surface */
+					R_AddDynamicLights(s);
 
 					/* Track lightmap polys for dynamic updates */
 					if (s->polys)
