@@ -708,6 +708,11 @@ static void GL_LoadFunctionPointers (void)
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
 
+	/* Per-buffer blending + MRT (GL 4.0) */
+	glBlendFunci_fp = (glBlendFunci_f) SDL_GL_GetProcAddress("glBlendFunci");
+	glDrawBuffers_fp = (glDrawBuffers_f) SDL_GL_GetProcAddress("glDrawBuffers");
+	glClearBufferfv_fp = (glClearBufferfv_f) SDL_GL_GetProcAddress("glClearBufferfv");
+
 	/* Timer queries (GL 3.3 / GL_ARB_timer_query) */
 	glGenQueries_fp = (glGenQueries_f) SDL_GL_GetProcAddress("glGenQueries");
 	glDeleteQueries_fp = (glDeleteQueries_f) SDL_GL_GetProcAddress("glDeleteQueries");

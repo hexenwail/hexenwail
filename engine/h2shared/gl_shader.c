@@ -22,8 +22,16 @@ glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
 glprogram_t	gl_shader_sky;
+
+/* OIT variants of translucent shaders */
+glprogram_t	gl_shader_world_oit;
+glprogram_t	gl_shader_alias_oit;
+glprogram_t	gl_shader_particle_oit;
 gl_particle_gpu_prog_t	gl_shader_particle_gpu;
 gl_alias_gpu_prog_t	gl_shader_alias_gpu;
+
+/* Forward declarations */
+static void GL_InitProgramUniforms (glprogram_t *p);
 
 /* ------------------------------------------------------------------ */
 /* Shader compilation helpers                                          */
@@ -75,6 +83,90 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 		return 0;
 	}
 	return prog;
+}
+
+/* Compile an OIT variant of a fragment shader.
+ * Injects `#define OIT 1` and OIT MRT outputs after the #version line,
+ * replacing the `out vec4 fragColor;` declaration. */
+static GLuint GL_CompileOITFragShader (const char *frag_src)
+{
+	/* The OIT output block (inserted after #version, before the rest).
+	 * Uses the main→main_body rename trick from Ironwail. */
+	static const char oit_preamble[] =
+		"#define OIT 1\n"
+		"vec4 fragColor;\n"
+		"layout(location=0) out vec4 out_accum;\n"
+		"layout(location=1) out float out_reveal;\n"
+		"void main_body();\n"
+		"void main() {\n"
+		"    main_body();\n"
+		"    fragColor = clamp(fragColor, 0.0, 1.0);\n"
+		"    float z = 1.0 / gl_FragCoord.w;\n"
+		"    float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n"
+		"    out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n"
+		"    out_reveal = fragColor.a;\n"
+		"}\n"
+		"#define main main_body\n";
+
+	/* Find end of #version line */
+	const char *rest = strchr(frag_src, '\n');
+	if (!rest) return 0;
+	rest++; /* skip past newline */
+
+	/* Build modified source: version line + OIT preamble + rest (minus `out vec4 fragColor;\n`) */
+	{
+		/* Skip the `out vec4 fragColor;\n` line in the rest */
+		const char *skip = strstr(rest, "out vec4 fragColor;\n");
+		if (!skip) return 0;
+		skip += strlen("out vec4 fragColor;\n");
+
+		/* Allocate buffer: version + preamble + (rest before fragColor) + (rest after fragColor) */
+		size_t ver_len = rest - frag_src;
+		size_t before_len = skip - strlen("out vec4 fragColor;\n") - rest;
+		size_t after_start = skip - frag_src;
+		size_t total = ver_len + strlen(oit_preamble) + before_len + strlen(skip) + 1;
+		char *buf = (char *)malloc(total);
+		GLuint shader;
+
+		memcpy(buf, frag_src, ver_len);
+		memcpy(buf + ver_len, oit_preamble, strlen(oit_preamble));
+		/* Copy everything between version line and "out vec4 fragColor;\n" */
+		memcpy(buf + ver_len + strlen(oit_preamble), rest, before_len);
+		/* Copy everything after "out vec4 fragColor;\n" */
+		strcpy(buf + ver_len + strlen(oit_preamble) + before_len, skip);
+
+		shader = GL_CompileShader(GL_FRAGMENT_SHADER, buf);
+		free(buf);
+		return shader;
+	}
+}
+
+static GLuint GL_LoadOITProgram (const char *vert_src, const char *frag_src)
+{
+	GLuint vs, fs, prog;
+
+	vs = GL_CompileShader(GL_VERTEX_SHADER, vert_src);
+	if (!vs) return 0;
+	fs = GL_CompileOITFragShader(frag_src);
+	if (!fs) { glDeleteShader_fp(vs); return 0; }
+
+	prog = GL_LinkProgram(vs, fs);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+	return prog;
+}
+
+static void GL_InitOITProgram (glprogram_t *p, const char *name,
+			       const char *vert_src, const char *frag_src)
+{
+	p->program = GL_LoadOITProgram(vert_src, frag_src);
+	if (p->program)
+	{
+		GL_InitProgramUniforms(p);
+		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
+	}
+	else
+		Con_SafePrintf("  %s_oit: FAILED\n", name);
 }
 
 GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
@@ -827,6 +919,12 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
+
+	/* OIT variants for translucent rendering */
+	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
+	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
+	GL_InitOITProgram(&gl_shader_particle_oit, "particle", spart_vert,  spart_frag);
+
 #ifndef __EMSCRIPTEN__
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
 	GL_InitAliasGPUProgram(&gl_shader_alias_gpu);
@@ -839,11 +937,12 @@ void GL_Shaders_Shutdown (void)
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
-		&gl_shader_particle_gpu.base, &gl_shader_alias_gpu.base
+		&gl_shader_particle_gpu.base, &gl_shader_alias_gpu.base,
+		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit
 	};
 	int i;
 
-	for (i = 0; i < 8; i++)
+	for (i = 0; i < 11; i++)
 	{
 		if (progs[i]->program)
 		{
