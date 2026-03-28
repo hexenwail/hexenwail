@@ -1,220 +1,59 @@
-Hexen II: Hammer of Thyrion (uHexen2) - v1.5.10
+Hexenwail - Compiling from source
+=================================
 
-Instructions for Compiling:
-===========================
-
-To compile the your own binaries, you need a unix build environment.
-The makefiles also present several build options, please read them.
-Makefiles rely on some scripts residing in the scripts directory. You
-may be able to modify them to meet your needs, if necessary, but the
-defaults should work just fine.
-
-By editing the makefiles, you can change some compile time options.
-Other than the makefiles, we have gathered most, if not all, of our
-compile time options in the header file named "h2config.h".  You can
-edit it with care too, if necessary.
-
-Here is the recommended software for building:
+Hexenwail uses CMake and builds on Linux and Windows.
+The recommended way to build on NixOS/Nix is with the provided flake.
 
 
-Tools needed:
-========================================
+Building with Nix (recommended):
+================================
 
-Make	:	The GNU make utility.
-		Versions 3.79.1 and newer are recommended.  The minimum
-		version required is 3.78.
+    nix build
 
-binutils:	A GNU collection of binary utilities.
-		Tested with versions 2.11.9x and newer. Recent versions
-		are recommended.
-
-NASM	:	Netwide Assembler. An x86 assembler.
-		Minimum version required is 0.98.38 or 0.98.39 from the
-		old series. Versions 2.09.10 or 2.13.02 from the new 2.x
-		series are recommended.
-
-		YASM, a re-write of NASM, is also supported:  yasm-0.5.0
-		and newer can compile our asm.  Versions 1.1.0, 1.2.0 or
-		1.3.0 are recommended.
-
-		The assemblers nasm or yasm are required for compiling
-		hexen2 and hexenworld clients for 32 bit x86 machines.
-		The makefiles present an option to not use x86 assembly,
-		in that case nasm or yasm will not be necessary.
-
-GCC	:	GNU C Compiler.
-
-		Minimum version required is GCC 2.95.  GCC versions in
-		the 2.95/2.96, 3.x and 4.x series up to 7.x are tested
-		and work fine.
-
-		As for archaic gcc versions:  gcc-2.91.66 (egcs-1.1.2),
-		gcc-2.7.2, and gcc-2.8.1 still do work.
-		NOTE THOUGH:  The gcc-2.xx series may need tweaking the
-		CFLAGS: -fomit-frame-pointer, in particular, can result
-		in a broken build, especially in combination with some
-		other switches such as -ffast-math.
-
-		Avoid buggy versions: for example, gcc-4.1.0/4.1.1 has a
-		nasty bug which is fixed in gcc-4.1.2 and later:
-		http://gcc.gnu.org/bugzilla/show_bug.cgi?id=26719
-		Although those buggy versions seem to compile our source
-		correctly, avoiding them would be safer.
-
-CLANG	:	a C language family frontend for LLVM
-
-		As an alternative to gcc, clang versions 3.0 to 4.0 are
-		tested to compile all uhexen2 sources correctly.
+This produces the binary in result/bin/.
 
 
-Libraries needed for various platforms:
-========================================
+Building with CMake:
+====================
 
-General Unix requirements:
---------------------------
+Prerequisites:
+  - CMake 3.20+
+  - A C compiler with C11 support (GCC 10+, Clang 12+)
+  - SDL3 development libraries
+  - OpenGL 4.3 capable driver
 
-SDL	:	Simple DirectMedia Layer libraries.
-		Required for compiling hexen2 and hexenworld clients on
-		most unix platforms. Minimum version required is 1.2.4.
-		As of this writing, the latest version is 1.2.15, which
-		is recommended.
+Optional libraries for music playback:
+  - libogg and libvorbis (or libtremor) for OGG Vorbis
+  - libmad or libmpg123 for MP3
+  - libogg, opus, and opusfile for Opus
+  - libFLAC for FLAC
+  - libxmp or libmikmod for tracker music (MOD/S3M/XM/IT)
 
-Linux requirements	:
--------------------------
+Build steps:
 
-GLIBC	:	C libraries. Any glibc >= 2.1 should be fine. Not tested
-		with anything older.
+    mkdir build && cd build
+    cmake ..
+    make
 
-ALSA	:	Advanced Linux Sound Architecture libraries.
-		Necessary, if you want to support ALSA sound on Linux.
-		Minimum version required is 1.0.1. (v0.9.8 might work,
-		but not tested.)  v1.0.7 or newer are recommended at
-		runtime.
-		The makefiles present an option for disabling ALSA audio
-		support, in that case this library won't be necessary.
-
-Windows requirements	:
--------------------------
-
-MSVCRT.DLL:	Windows exe files depend on msvcrt.dll, the microsoft C
-		runtime library. Any sane windows installation already
-		has it unless it's a very ancient windows version, e.g.
-		win95.  In case you need, here is a download link from
-		the MS site:  http://support.microsoft.com/kb/259403
-		or:  http://support.microsoft.com/?scid=kb;en-us;259403
-
-Mac OS X requirements	:
--------------------------
-
-Xcode, SDKs:	Install the free Xcode suite from developer.apple.com.
-
-Additional requirements	:
--------------------------
-
-libogg and either of libvorbis or libtremor:
-		Required if you want Ogg/Vorbis music playback.
-libmad or libmpg123:
-		Required if you want MP3 music playback.
-libogg, opus, and opusfile:
-		Required if you want Opus music playback.
-libFLAC :	Required if you want FLAC music playback.
-libxmp or libmikmod:
-		Required if you want tracker music playback.
+The binary will be named glhexen2 (Linux) or glh2.exe (Windows).
 
 
-Compiling for Windows:
-========================================
+Cross-compiling for Windows:
+============================
 
-uHexen2 developers usually cross-compile to windows using MinGW-w64 and
-MinGW.  The project can be built using Microsoft Visual Studio 2005 and
-newer versions, too. (Note that older MSVC versions eg. Visual Studio 6
-aren't supported: parts of our code make use of a few C99 features such
-as variadic macros which require Visual Studio 2005 or newer versions.)
+Use MinGW-w64 with CMake:
 
-
-Compiling for Mac OS X:
-========================================
-
-The Xcode project file is in source tarball: look at the hexen2/MacOSX
-folder.
-
-Cross compiling for OSX on linux is also possible:  build_cross_osx.sh
-scripts should give clues about it.
-
-
-Compiling for DOS:
-========================================
-
-You need DJGPP. Tested cross-compilation and functionality using djgpp
-v2.05 with gcc-3.3.6 and 3.4.6.
-
-Compiling in a native DOS/DJGPP environment is possible, *if* you have
-long file names (LFN) support. (Remember to set DOSBUILD=1 environment
-variable.)
-
-CWSDPMI.EXE is needed at runtime: use the "0.90+ r5" or a newer version.
-I have been successfully using the R7 (07 Jan. 2010), as well as the R5
-"2008 refresh" (21 Aug. 2008) versions for quite some time.
-
-Compilers other than djgpp such as Open Watcom shall not work, and need
-specifically porting to.
-
-
-Compiling for OS/2:
-========================================
-
-You need Open Watcom: The latest official release is 1.9.0 which is the
-version I used myself.  Newer watcom snapshots or the unofficial V2 fork
-work just as well.  You also need nasm in order to build the x86 asm
-sources (yasm won't work.)  Change into the relevant directory and run:
-	wmake -f Makefile.os2
-
-The source builds and runs with EMX/GCC too.
-
-
-Compiling for Amiga variants:
-========================================
-
-For MorphOS, any SDK should work.
-
-For AROS, only ABIv0 is tested: we build against AROS snapshot from
-2014-07-26, i.e. the ABI_V0 branch at aros svn:
-https://trac.aros.org/trac/browser/AROS/branches/ABI_V0
-or https://github.com/sezero/AROS-mirror.git
-
-For AmigaOS 3.x (m68k-amigaos), we use either bebbo's gcc6/libnix-based
-toolchain from https://github.com/bebbo/amiga-gcc, or the gcc2.95-based
-toolchain from https://github.com/sezero/amigaos-cross-toolchain.git
-vasm is needed to build m68k assembler sources. vasm-1.8l is tested to
-work.
+    mkdir build-win && cd build-win
+    cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-w64.cmake ..
+    make
 
 
 Links:
 ------
-SDL homepage		: https://libsdl.org/
-			  https://github.com/libsdl-org/
-Ogg/Vorbis homepage	: https://xiph.org/
-Opus homepage		: https://opus-codec.org/
-libmad homepage		: http://www.underbit.com/products/mad/
-mpg123 homepage		: http://mpg123.org/
-FLAC homepage		: https://xiph.org/flac/
-			  https://sourceforge.net/projects/flac/
-MikMod homepage		: http://mikmod.sourceforge.net/
-libxmp homepage		: https://github.com/libxmp/libxmp
-			  http://xmp.sourceforge.net/
-ALSA homepage		: http://www.alsa-project.org/
-GCC homepage		: http://gcc.gnu.org/
-Binutils homepage	: http://sourceware.org/binutils/
-clang homepage		: http://clang.llvm.org/
-VASM homepage		: http://sun.hasenbraten.de/vasm/
-NASM homepage		: https://nasm.us/
-YASM homepage		: http://yasm.tortall.net/
-			  https://github.com/yasm/yasm
-DJGPP homepage		: http://www.delorie.com/djgpp/
-WATT-32 homepage	: http://www.watt-32.net/
-MSYS homepage		: https://www.msys2.org/
-MinGW-w64 homepage	: https://sourceforge.net/projects/mingw-w64/
-MinGW homepage		: https://osdn.net/projects/mingw/
-Open Watcom		: http://www.openwatcom.org/
-			  https://github.com/open-watcom/
-
+SDL homepage        : https://libsdl.org/
+Ogg/Vorbis homepage : https://xiph.org/
+Opus homepage       : https://opus-codec.org/
+libmad homepage     : http://www.underbit.com/products/mad/
+mpg123 homepage     : http://mpg123.org/
+FLAC homepage       : https://xiph.org/flac/
+libxmp homepage     : https://github.com/libxmp/libxmp

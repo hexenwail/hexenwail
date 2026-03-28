@@ -1,9 +1,13 @@
-Hexen II: Hammer of Thyrion (uHexen2)
-  http://uhexen2.sourceforge.net/
-  http://sourceforge.net/projects/uhexen2/
+Hexenwail - a Hexen II source port
+  https://github.com/hexenwail/hexenwail
+  Based on Hammer of Thyrion (uHexen2) by O. Sezer
 
-Maintainers / Coding:
+Hexenwail Maintainer:
 ---------------------
+  Bob Bobber
+
+Hammer of Thyrion Maintainer:
+-----------------------------
   O. Sezer <sezero@users.sourceforge.net>
 
 Original Engine:

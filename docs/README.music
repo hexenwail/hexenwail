@@ -1,7 +1,7 @@
-Hexen II: Hammer of Thyrion (uHexen2) - Music support
------------------------------------------------------
+Hexenwail - Music support
+-------------------------
 
-Hammer of Thyrion supports OGG, MP3 and WAV external music files to be
+Hexenwail supports OGG, MP3, Opus, FLAC, WAV and tracker external music files to be
 played instead of the original midi files, so you can enjoy the hexen2
 music in good quality like they are from the hexen2 cdrom audio tracks.
 
