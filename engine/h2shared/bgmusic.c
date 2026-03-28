@@ -402,8 +402,6 @@ void BGM_PlayMIDIorMusic (const char *filename)
 			   handler->dir, filename, handler->ext);
 		if (! FS_FileExists(tmp, &path_id))
 		{
-			if (handler->type == MIDIDRIVER_MID)
-				break;
 			goto _next;
 		}
 		if (path_id > prev_id)
