@@ -2854,10 +2854,15 @@ static void M_Sound_Draw (void)
 	M_Print (76, 92 + 8*SND_MUSICTYPE,	"Music Type    :");
 	if (q_strcasecmp(bgmtype.string, "none") == 0)
 		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "None");
-	else if (bgm_extmusic.integer)
-		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "ALL CODECS");
 	else if (q_strcasecmp(bgmtype.string, "cd") == 0)
 		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "CD ONLY");
+	else if (q_strcasecmp(bgmtype.string, "midi") == 0)
+	{
+		if (bgm_extmusic.integer)
+			M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "ALL CODECS");
+		else
+			M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "MIDI ONLY");
+	}
 	else
 		M_PrintWhite (76+16*8, 92 + 8*SND_MUSICTYPE, "MIDI ONLY");
 
