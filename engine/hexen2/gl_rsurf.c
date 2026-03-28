@@ -1731,14 +1731,14 @@ void R_DrawWorld (void)
 	gpu_cull_active = false;
 #endif
 
+	R_UpdateLightmaps (false);
+
 	DrawTextureChains (&r_worldentity);
 	gpu_cull_active = false;
 
 	// reset to texture unit 0
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
 	glActiveTextureARB_fp (GL_TEXTURE0_ARB);
-
-	R_UpdateLightmaps (false);
 
 #ifdef QUAKE2
 	R_DrawSkyBox ();
