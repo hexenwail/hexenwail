@@ -1151,3 +1151,8 @@ void GL_PostProcess_RequestWaterwarpPreview (float duration)
 {
 	pp_waterwarp_preview_end = cl.time + duration;
 }
+
+void GL_PostProcess_ResetWaterwarpPreview (void)
+{
+	pp_waterwarp_preview_end = -1.0f;  /* Clear preview timer on level change */
+}
