@@ -2502,7 +2502,7 @@ static void M_Rendering_AdjustSliders (int dir)
 	}
 	case REND_WATERWARP:
 		Cvar_SetValue ("r_waterwarp", !r_waterwarp.integer);
-		GL_PostProcess_RequestWaterwarpPreview(3.0f);	/* 3s preview */
+		GL_PostProcess_RequestWaterwarpPreview(0.5f);	/* 500ms preview */
 		break;
 	case REND_GLOWS:
 	{
