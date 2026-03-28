@@ -79,6 +79,8 @@ extern void GL_DisableMultitexture (void);
 // Forward declaration of GL_Bind function from gl_texmgr
 extern void GL_Bind (gltexture_t *texture);
 
+extern qboolean have_stencil;
+
 #define	MAX_CLIP_VERTS 64
 
 // Local repo doesn't have ENTALPHA_ZERO
@@ -974,8 +976,7 @@ void Sky_DrawSkyBox (void)
 		if (!skybox_texnums[skytexorder[i]])
 			continue;
 
-		// Bind the actual skybox texture
-		glBindTexture_fp(GL_TEXTURE_2D, skybox_texnums[skytexorder[i]]);
+		GL_Bind(skybox_textures[skytexorder[i]]);
 
 		skymins[0][i] = -1;
 		skymins[1][i] = -1;
@@ -1234,13 +1235,27 @@ void Sky_DrawSky (void)
 	{
 		glDisable_fp(GL_BLEND);
 		GL_ImmColor4f(1, 1, 1, 1);
-		glDepthFunc_fp(GL_LEQUAL);
-		glDepthMask_fp(0);
+		if (have_stencil)
+		{
+			// Draw skybox only where stencil=1 (sky surface pixels)
+			glEnable_fp(GL_STENCIL_TEST);
+			glStencilFunc_fp(GL_EQUAL, 1, 0xFF);
+			glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
+			glDepthFunc_fp(GL_ALWAYS);
+			glDepthMask_fp(0);
+		}
+		else
+		{
+			glDepthFunc_fp(GL_LEQUAL);
+			glDepthMask_fp(0);
+		}
 
 		Sky_DrawSkyBox ();
 
 		glDepthMask_fp(1);
 		glDepthFunc_fp(GL_LEQUAL);
+		if (have_stencil)
+			glDisable_fp(GL_STENCIL_TEST);
 	}
 
 	Fog_EnableGFog ();

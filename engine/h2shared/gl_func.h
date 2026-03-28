@@ -78,6 +78,7 @@ GL_FUNCTION(void, glAlphaFunc, (GLenum,GLclampf))
 GL_FUNCTION(void, glBlendFunc, (GLenum,GLenum))
 GL_FUNCTION(void, glShadeModel, (GLenum))
 GL_FUNCTION(void, glPolygonMode, (GLenum,GLenum))
+GL_FUNCTION(void, glColorMask, (GLboolean,GLboolean,GLboolean,GLboolean))
 GL_FUNCTION(void, glDepthMask, (GLboolean))
 GL_FUNCTION(void, glDepthRange, (GLclampd,GLclampd))
 GL_FUNCTION(void, glDepthFunc, (GLenum))
@@ -138,6 +139,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glClear_fp		glClear
 #define glClearColor_fp		glClearColor
 #define glBlendFunc_fp		glBlendFunc
+#define glColorMask_fp		glColorMask
 #define glDepthMask_fp		glDepthMask
 #define glDepthFunc_fp		glDepthFunc
 #define glDepthRange_fp		glDepthRangef	/* ES3 uses float version */
@@ -239,6 +241,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glBlendFunc_fp		glBlendFunc
 #define glShadeModel_fp		glShadeModel
 #define glPolygonMode_fp	glPolygonMode
+#define glColorMask_fp		glColorMask
 #define glDepthMask_fp		glDepthMask
 #define glDepthRange_fp		glDepthRange
 #define glDepthFunc_fp		glDepthFunc
