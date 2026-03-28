@@ -38,12 +38,15 @@ static qboolean		key_gamekey, prev_gamekey;
 int		key_count;		// incremented every key event
 
 char		*keybindings[256];
+char		*doublebindings[256];	// double-tap bindings, parallel to keybindings[]
 static qboolean	consolekeys[256];	// if true, can't be rebound while in console
 static qboolean	menubound[256];		// if true, can't be rebound while in menu
 static int	keyshift[256];		// key to map to if shift held down in console
 static int	key_repeats[256];	// if > 1, it is autorepeating
 static qboolean	keyreserved[256];	// hardcoded, can't be rebound by the user
 static qboolean	keydown[256];
+static double	key_lastdown[256];	// realtime timestamp of last key-down for each key
+static cvar_t	key_doubletap_time = {"key_doubletap_time", "0.4", CVAR_ARCHIVE};
 
 typedef struct
 {
@@ -766,10 +769,97 @@ static void Key_Bind_f (void)
 }
 
 /*
+===================
+Key_Unbind2_f
+
+Remove double-tap command from a key
+===================
+*/
+static void Key_Unbind2_f (void)
+{
+	int	b;
+
+	if (Cmd_Argc() != 2)
+	{
+		Con_Printf ("unbind2 <key> : remove double-tap command from a key\n");
+		return;
+	}
+
+	b = Key_StringToKeynum (Cmd_Argv(1));
+	if (b == -1)
+	{
+		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv(1));
+		return;
+	}
+
+	if (doublebindings[b])
+	{
+		Z_Free (doublebindings[b]);
+		doublebindings[b] = NULL;
+	}
+}
+
+/*
+===================
+Key_Bind2_f
+
+Set double-tap command for a key
+===================
+*/
+static void Key_Bind2_f (void)
+{
+	int	i, c, b;
+	char	cmd[1024];
+
+	c = Cmd_Argc();
+
+	if (c != 2 && c != 3)
+	{
+		Con_Printf ("bind2 <key> [command] : attach a double-tap command to a key\n");
+		return;
+	}
+	b = Key_StringToKeynum (Cmd_Argv(1));
+	if (b == -1)
+	{
+		Con_Printf ("\"%s\" isn't a valid key\n", Cmd_Argv(1));
+		return;
+	}
+
+	if (c == 2)
+	{
+		if (doublebindings[b])
+			Con_Printf ("\"%s\" double-tap = \"%s\"\n", Cmd_Argv(1), doublebindings[b] );
+		else
+			Con_Printf ("\"%s\" double-tap is not bound\n", Cmd_Argv(1) );
+		return;
+	}
+
+// copy the rest of the command line
+	cmd[0] = 0;
+	for (i = 2; i < c; i++)
+	{
+		q_strlcat (cmd, Cmd_Argv(i), sizeof(cmd));
+		if (i != (c-1))
+			q_strlcat (cmd, " ", sizeof(cmd));
+	}
+
+// free old binding
+	if (doublebindings[b])
+	{
+		Z_Free (doublebindings[b]);
+		doublebindings[b] = NULL;
+	}
+
+// allocate memory for new binding
+	if (cmd[0])
+		doublebindings[b] = Z_Strdup(cmd);
+}
+
+/*
 ============
 Key_WriteBindings
 
-Writes lines containing "bind key value"
+Writes lines containing "bind key value" and "bind2 key value"
 ============
 */
 void Key_WriteBindings (FILE *f)
@@ -783,6 +873,11 @@ void Key_WriteBindings (FILE *f)
 	{
 		if (keybindings[i] && *keybindings[i])
 			fprintf (f, "bind \"%s\" \"%s\"\n", Key_KeynumToString(i), keybindings[i]);
+	}
+	for (i = 0; i < 256; i++)
+	{
+		if (doublebindings[i] && *doublebindings[i])
+			fprintf (f, "bind2 \"%s\" \"%s\"\n", Key_KeynumToString(i), doublebindings[i]);
 	}
 }
 
@@ -887,6 +982,11 @@ void Key_Init (void)
 	Cmd_AddCommand ("bind",Key_Bind_f);
 	Cmd_AddCommand ("unbind",Key_Unbind_f);
 	Cmd_AddCommand ("unbindall",Key_Unbindall_f);
+	Cmd_AddCommand ("bind2",Key_Bind2_f);
+	Cmd_AddCommand ("unbind2",Key_Unbind2_f);
+
+// register double-tap cvar
+	Cvar_RegisterVariable (&key_doubletap_time);
 }
 
 /*
@@ -1020,6 +1120,33 @@ void Key_Event (int key, qboolean down)
 	    (key_dest == key_console && !consolekeys[key]) ||
 	    (key_dest == key_game && (!con_forcedup || !consolekeys[key])))
 	{
+		// Double-tap detection (only on first press, not autorepeat)
+		if (down && key_repeats[key] == 1 && doublebindings[key] && key_doubletap_time.value > 0)
+		{
+			double now = realtime;
+			if ((now - key_lastdown[key]) <= key_doubletap_time.value)
+			{
+				// Execute double-tap binding
+				const char *dkb = doublebindings[key];
+				if (dkb[0] == '+')
+				{
+					sprintf (cmd, "%s %i\n", dkb, key);
+					Cbuf_AddText (cmd);
+				}
+				else
+				{
+					Cbuf_AddText (dkb);
+					Cbuf_AddText ("\n");
+				}
+				key_lastdown[key] = 0;	// reset to avoid triple-tap
+				return;
+			}
+		}
+
+		// Update last-down time on first press
+		if (down && key_repeats[key] == 1)
+			key_lastdown[key] = realtime;
+
 		kb = keybindings[key];
 		if (kb)
 		{
