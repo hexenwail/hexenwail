@@ -2123,7 +2123,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_wateralpha", 0.5f);
 			Cvar_SetValue ("r_waterwarp", 1);
-			Cvar_SetValue ("r_motionblur", 0.25f);
+			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 1);
 			Cvar_SetValue ("r_dynamic", 1);
 			Cvar_SetValue ("gl_glows", 1);
