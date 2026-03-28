@@ -1370,8 +1370,28 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 			if ((cl_dlights[k].die < cl.time) || (!cl_dlights[k].radius))
 				continue;
 
-			R_MarkLights (&cl_dlights[k], 1<<k,
-					clmodel->nodes + clmodel->hulls[0].firstclipnode);
+			if (rotated)
+			{
+				// Transform light origin from world space to model space
+				dlight_t	transformedlight;
+				vec3_t		temp;
+				vec3_t		forward, right, up;
+
+				transformedlight = cl_dlights[k];
+				VectorSubtract(cl_dlights[k].origin, e->origin, temp);
+				AngleVectors(e->angles, forward, right, up);
+				transformedlight.origin[0] = DotProduct(temp, forward);
+				transformedlight.origin[1] = -DotProduct(temp, right);
+				transformedlight.origin[2] = DotProduct(temp, up);
+
+				R_MarkLights(&transformedlight, 1<<k,
+						clmodel->nodes + clmodel->hulls[0].firstclipnode);
+			}
+			else
+			{
+				R_MarkLights(&cl_dlights[k], 1<<k,
+						clmodel->nodes + clmodel->hulls[0].firstclipnode);
+			}
 		}
 	}
 
