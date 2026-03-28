@@ -23,6 +23,7 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
+#include "gl_postprocess.h"
 
 /* ES 3.0 compatibility */
 #ifdef EMSCRIPTEN
@@ -659,7 +660,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		/* Check buffer space */
 		if (GL_ImmCount() + (count - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, OIT_Active() ? &gl_shader_alias_oit : &gl_shader_alias);
 			GL_ImmBegin ();
 		}
 
@@ -700,7 +701,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		}
 	}
 
-	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, OIT_Active() ? &gl_shader_alias_oit : &gl_shader_alias);
 	}
 }
 
@@ -3269,7 +3270,7 @@ static void R_ProfileTimestamp (int idx)
 
 static void R_ProfileReport (void)
 {
-	GLuint64 ts[RPROF_COUNT + 1];
+	HWGLuint64 ts[RPROF_COUNT + 1];
 	GLint ready = 0;
 	int i;
 	double ms[RPROF_COUNT], total;
@@ -3346,12 +3347,16 @@ void R_RenderView (void)
 	R_DrawParticles ();
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_WATER);
 
+	OIT_BeginTranslucency();
+
 	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
 	R_DrawWaterSurfaces ();
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
+
+	OIT_EndTranslucency(GL_GetSceneFBO());
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_VM);
 
 	R_DrawViewModel();
