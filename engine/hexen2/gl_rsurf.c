@@ -1239,6 +1239,9 @@ static void DrawTextureChains (entity_t *e)
 
 				glBindVertexArray_fp(0);
 				glUseProgram_fp(0);
+		/* Reset color attribute to default (0,0,0,1) to avoid
+		 * interfering with subsequent dlight rendering */
+		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture)
 			{
