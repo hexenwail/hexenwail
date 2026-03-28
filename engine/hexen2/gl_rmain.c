@@ -3013,9 +3013,9 @@ static void R_Clear (void)
 
 	glDepthRange_fp (gldepthmin, gldepthmax);
 
-	if (have_stencil && r_shadows.integer)
+	if (have_stencil)
 	{
-		glClearStencil_fp(1);
+		glClearStencil_fp(0);
 		glClear_fp(GL_STENCIL_BUFFER_BIT);
 	}
 }
