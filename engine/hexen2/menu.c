@@ -2292,20 +2292,11 @@ static void M_Display_Draw (void)
 		int sh = r_shadows.integer;
 		float sc = r_scale.value;
 
-		qboolean is_faithful = (sc <= 0.5f && sc > 0.25f && se == 0 && gl_filter_idx == 0 && !sh);
-		qboolean is_crunchy  = (sc <= 0.25f && se >= 2 && gl_filter_idx == 0 && !sh);
-		qboolean is_retro    = (sc <= 0.5f && sc > 0.25f && se == 1 && gl_filter_idx <= 2 && !sh);
 		qboolean is_clean    = (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && !sh);
 		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && sh);
 		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && sh);
 
-		if (is_faithful)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
-		else if (is_crunchy)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
-		else if (is_retro)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
-		else if (is_clean)
+		if (is_clean)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
 		else if (is_modern)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
