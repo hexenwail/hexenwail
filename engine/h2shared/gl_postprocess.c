@@ -81,7 +81,7 @@ static float	pp_waterwarp_preview_end;	/* cl.time when waterwarp preview should 
 
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
 cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
-cvar_t	r_dither = {"r_dither", "1.0", CVAR_ARCHIVE};	/* dither strength (0-2) */
+cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
 
