@@ -86,8 +86,8 @@ int		desired_channels = 2;
 const int	tryrates[] = { 44100, 48000, 22050, 11025, 96000, 24000, 16000, 8000 };
 const int	MAX_TRYRATES = sizeof(tryrates)/sizeof(tryrates[0]);
 
-cvar_t		bgmvolume = {"bgmvolume", "1", CVAR_ARCHIVE};
-cvar_t		bgmtype = {"bgmtype", "cd", CVAR_ARCHIVE};	// cd or midi
+cvar_t		bgmvolume = {"bgmvolume", "0.7", CVAR_ARCHIVE};
+cvar_t		bgmtype = {"bgmtype", "midi", CVAR_ARCHIVE};	// cd or midi
 cvar_t		sfxvolume = {"volume", "0.7", CVAR_ARCHIVE};
 
 cvar_t		precache = {"precache", "1", CVAR_NONE};
@@ -286,8 +286,8 @@ void S_Init (void)
 		Cvar_SetQuick(&sfxvolume, "0");
 	else if (sfxvolume.value > 1)
 		Cvar_SetQuick(&sfxvolume, "1");
-	if (bgmvolume.value <= 0)
-		Cvar_SetQuick(&bgmvolume, "0.7");
+	if (bgmvolume.value < 0)
+		Cvar_SetQuick(&bgmvolume, "0");
 	else if (bgmvolume.value > 1)
 		Cvar_SetQuick(&bgmvolume, "1");
 
