@@ -364,6 +364,13 @@ GL_FUNCTION_OPT(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsi
 GL_FUNCTION_OPT(void, glDispatchCompute, (GLuint, GLuint, GLuint))
 GL_FUNCTION_OPT(void, glMemoryBarrier, (GLbitfield))
 
+/* Timer queries (GL 3.3 / GL_ARB_timer_query) */
+GL_FUNCTION_OPT(void, glGenQueries, (GLsizei, GLuint *))
+GL_FUNCTION_OPT(void, glDeleteQueries, (GLsizei, const GLuint *))
+GL_FUNCTION_OPT(void, glQueryCounter, (GLuint, GLenum))
+GL_FUNCTION_OPT(void, glGetQueryObjectui64v, (GLuint, GLenum, GLuint64 *))
+GL_FUNCTION_OPT(void, glGetQueryObjectiv, (GLuint, GLenum, GLint *))
+
 /* Indirect draw (OpenGL 4.0 / GL_ARB_draw_indirect) */
 GL_FUNCTION_OPT(void, glMultiDrawElementsIndirect, (GLenum, GLenum, const void *, GLsizei, GLsizei))
 GL_FUNCTION_OPT(void, glDrawElementsIndirect, (GLenum, GLenum, const void *))
@@ -431,6 +438,11 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glBindBufferBase_fp		glBindBufferBase
 #define glDispatchCompute_fp(x,y,z)	((void)0)
 #define glMemoryBarrier_fp(b)		((void)0)
+#define glGenQueries_fp(n,ids)		((void)0)
+#define glDeleteQueries_fp(n,ids)	((void)0)
+#define glQueryCounter_fp(id,t)		((void)0)
+#define glGetQueryObjectui64v_fp(id,p,v) ((void)0)
+#define glGetQueryObjectiv_fp(id,p,v)	((void)0)
 #define glMultiDrawElementsIndirect_fp(m,t,i,c,s) ((void)0)
 #define glDrawElementsIndirect_fp(m,t,i)	((void)0)
 #define glDrawElementsInstanced_fp	glDrawElementsInstanced

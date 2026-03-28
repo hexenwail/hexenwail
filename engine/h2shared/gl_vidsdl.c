@@ -708,6 +708,13 @@ static void GL_LoadFunctionPointers (void)
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
 
+	/* Timer queries (GL 3.3 / GL_ARB_timer_query) */
+	glGenQueries_fp = (glGenQueries_f) SDL_GL_GetProcAddress("glGenQueries");
+	glDeleteQueries_fp = (glDeleteQueries_f) SDL_GL_GetProcAddress("glDeleteQueries");
+	glQueryCounter_fp = (glQueryCounter_f) SDL_GL_GetProcAddress("glQueryCounter");
+	glGetQueryObjectui64v_fp = (glGetQueryObjectui64v_f) SDL_GL_GetProcAddress("glGetQueryObjectui64v");
+	glGetQueryObjectiv_fp = (glGetQueryObjectiv_f) SDL_GL_GetProcAddress("glGetQueryObjectiv");
+
 	if (!glCreateShader_fp || !glShaderSource_fp || !glCompileShader_fp ||
 	    !glCreateProgram_fp || !glAttachShader_fp || !glLinkProgram_fp ||
 	    !glUseProgram_fp || !glGetUniformLocation_fp || !glUniform1i_fp ||
