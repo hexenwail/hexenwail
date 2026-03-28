@@ -224,6 +224,10 @@ void Sbar_Draw(void)
 	if ((int)Cvar_VariableValue("hide_hud"))
 		return;
 
+	/* Protocol 21 demos: hide HUD for cinematic playback */
+	if (cls.demoplayback && cl_protocol == PROTOCOL_UH2_114)
+		return;
+
 	if (scr_con_current == vid.height)	// console is full screen
 		return;
 
