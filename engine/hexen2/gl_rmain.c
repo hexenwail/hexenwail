@@ -536,6 +536,7 @@ float	r_avertexnormal_dots[SHADEDOT_QUANT][256] =
 };
 
 static float	*shadedots = r_avertexnormal_dots[0];
+static int	shadedot_row_index;	/* row index for GPU path (0-15) */
 static vec3_t	shadevector;
 
 static int	lastposenum;
@@ -732,20 +733,16 @@ static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
 
 	lastposenum = posenum;
 
-	/* Create shadedots SSBO on first use */
+	/* Upload all 16 shadedots rows once (static data from anorm_dots.h) */
 	if (!gpu_shadedots_ssbo)
 	{
 		glGenBuffers_fp(1, &gpu_shadedots_ssbo);
 		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_shadedots_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER, 256 * sizeof(float),
-				NULL, GL_DYNAMIC_DRAW);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				SHADEDOT_QUANT * 256 * sizeof(float),
+				r_avertexnormal_dots, GL_STATIC_DRAW);
 		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 	}
-
-	/* Upload current entity's shadedots row */
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_shadedots_ssbo);
-	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, 256 * sizeof(float), shadedots);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 
 	/* Compute shade_light: for fullbright pass use 1.0, otherwise use shadelight */
 	shade = model_fullbright_pass ? 5.0f : shadelight;
@@ -768,7 +765,8 @@ static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
 					 posenum, prevposenum, lerpfrac,
 					 paliashdr->scale, paliashdr->scale_origin,
 					 paliashdr->poseverts, shade,
-					 tinted_color, model_constant_alpha);
+					 tinted_color, model_constant_alpha,
+					 shadedot_row_index);
 	}
 
 	/* Bind model VAO + SSBOs */
@@ -777,10 +775,6 @@ static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, gpu_shadedots_ssbo);
 
 	glDrawElements_fp(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
-
-	/* Restore default VAO */
-	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
 }
 
 /*
@@ -1061,7 +1055,8 @@ static void R_DrawAliasModel (entity_t *e)
 		}
 	}
 
-	shadedots = r_avertexnormal_dots[((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1)];
+	shadedot_row_index = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
+	shadedots = r_avertexnormal_dots[shadedot_row_index];
 	shadelight = shadelight / 200.0;
 	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
 
@@ -2178,6 +2173,10 @@ static void R_DrawEntitiesOnList (void)
 		}
 
 	}
+
+	/* Clean up GPU alias state left bound across entities */
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
 }
 
 
@@ -2257,6 +2256,10 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 
 	if (!depthMaskWrite)
 		glDepthMask_fp(1);
+
+	/* Clean up GPU alias state left bound across entities */
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
 }
 
 //=============================================================================

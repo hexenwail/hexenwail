@@ -317,15 +317,16 @@ static const char salias_gpu_vert[] =
 	"uniform float u_shade_light;\n"
 	"uniform vec3 u_light_color;\n"
 	"uniform float u_ent_alpha;\n"
+	"uniform int u_shadedot_row;\n"
 	"uniform float u_fog_density;\n"
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"\n"
-	"/* Quantized normal dot products (SHADEDOT_QUANT=16, 256 normals) */\n"
+	"/* All 16 rotation rows of normal dot products (16x256 = 4096 floats, static) */\n"
 	"layout(std430, binding = 2) readonly buffer ShadeDots {\n"
-	"    float shadedots[256];\n"
+	"    float shadedots[4096];\n"
 	"};\n"
 	"\n"
 	"void main() {\n"
@@ -342,7 +343,7 @@ static const char salias_gpu_vert[] =
 	"    vec3 pos = mix(v1, v0, u_lerp) * u_scale + u_scale_origin;\n"
 	"\n"
 	"    /* Lighting from shadedots table */\n"
-	"    float l = shadedots[ni0] * u_shade_light;\n"
+	"    float l = shadedots[u_shadedot_row * 256 + ni0] * u_shade_light;\n"
 	"    v_color = vec4(u_light_color * l, u_ent_alpha);\n"
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
@@ -653,6 +654,7 @@ static qboolean GL_InitAliasGPUProgram (gl_alias_gpu_prog_t *p)
 	p->u_shade_light  = glGetUniformLocation_fp(p->base.program, "u_shade_light");
 	p->u_light_color  = glGetUniformLocation_fp(p->base.program, "u_light_color");
 	p->u_ent_alpha    = glGetUniformLocation_fp(p->base.program, "u_ent_alpha");
+	p->u_shadedot_row = glGetUniformLocation_fp(p->base.program, "u_shadedot_row");
 
 	glUseProgram_fp(p->base.program);
 	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
@@ -668,7 +670,8 @@ void GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
 			       int pose0, int pose1, float lerp,
 			       const float *scale, const float *scale_origin,
 			       int poseverts, float shade_light,
-			       const float *light_color, float alpha)
+			       const float *light_color, float alpha,
+			       int shadedot_row)
 {
 	float mvp[16], mv[16];
 
@@ -701,6 +704,8 @@ void GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
 		glUniform3f_fp(prog->u_light_color, light_color[0], light_color[1], light_color[2]);
 	if (prog->u_ent_alpha >= 0)
 		glUniform1f_fp(prog->u_ent_alpha, alpha);
+	if (prog->u_shadedot_row >= 0)
+		glUniform1i_fp(prog->u_shadedot_row, shadedot_row);
 }
 
 gl_alias_inst_prog_t gl_shader_alias_inst;
