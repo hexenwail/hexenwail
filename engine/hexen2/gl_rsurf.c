@@ -56,6 +56,33 @@ static unsigned int	blocklightscolor[18*18*3];	// colored light support. *3 for 
 static glpoly_t	*lightmap_polys[MAX_LIGHTMAPS];
 static qboolean	lightmap_modified[MAX_LIGHTMAPS];
 
+/* Dirty rect per lightmap page for sub-image uploads */
+static int	lightmap_rectmin[MAX_LIGHTMAPS][2]; /* x, y */
+static int	lightmap_rectmax[MAX_LIGHTMAPS][2]; /* x, y */
+
+static void LM_ExpandDirtyRect (int page, int x, int y, int w, int h)
+{
+	if (!lightmap_modified[page])
+	{
+		lightmap_modified[page] = true;
+		lightmap_rectmin[page][0] = x;
+		lightmap_rectmin[page][1] = y;
+		lightmap_rectmax[page][0] = x + w;
+		lightmap_rectmax[page][1] = y + h;
+	}
+	else
+	{
+		if (x < lightmap_rectmin[page][0])
+			lightmap_rectmin[page][0] = x;
+		if (y < lightmap_rectmin[page][1])
+			lightmap_rectmin[page][1] = y;
+		if (x + w > lightmap_rectmax[page][0])
+			lightmap_rectmax[page][0] = x + w;
+		if (y + h > lightmap_rectmax[page][1])
+			lightmap_rectmax[page][1] = y + h;
+	}
+}
+
 static int	allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 
 // the lightmap texture data needs to be kept in
@@ -537,27 +564,46 @@ static void R_UpdateLightmaps (qboolean Translucent)
 
 		if (lightmap_modified[i])
 		{
+			int rx = lightmap_rectmin[i][0];
+			int ry = lightmap_rectmin[i][1];
+			int rw = lightmap_rectmax[i][0] - rx;
+			int rh = lightmap_rectmax[i][1] - ry;
+			byte *src;
+
+			/* Clamp to page bounds */
+			if (rx < 0) rx = 0;
+			if (ry < 0) ry = 0;
+			if (rx + rw > BLOCK_WIDTH)  rw = BLOCK_WIDTH - rx;
+			if (ry + rh > BLOCK_HEIGHT) rh = BLOCK_HEIGHT - ry;
+
 			lightmap_modified[i] = false;
 
-			/* Update individual lightmap (kept for compatibility) */
-			GL_Bind(lightmap_textures[i]);
-			glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat, BLOCK_WIDTH,
-					BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
-					lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+			src = lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes
+			    + ry * BLOCK_WIDTH * lightmap_bytes
+			    + rx * lightmap_bytes;
 
-			/* Patch the dirty page in the atlas */
+			/* Upload only the dirty rect of the individual lightmap */
+			GL_Bind(lightmap_textures[i]);
+			glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
+			glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
+					rx, ry, rw, rh,
+					gl_lightmap_format, GL_UNSIGNED_BYTE, src);
+
+			/* Patch the dirty rect in the atlas */
 			if (lm_atlas_enabled && lm_atlas_texture)
 			{
 				int col = i % LM_ATLAS_COLS;
 				int row = i / LM_ATLAS_COLS;
 				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 				glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
-						col * BLOCK_WIDTH, row * BLOCK_HEIGHT,
-						BLOCK_WIDTH, BLOCK_HEIGHT,
-						gl_lightmap_format, GL_UNSIGNED_BYTE,
-						lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
+						col * BLOCK_WIDTH + rx,
+						row * BLOCK_HEIGHT + ry,
+						rw, rh,
+						gl_lightmap_format, GL_UNSIGNED_BYTE, src);
 				currenttexture = GL_UNUSED_TEXTURE;
 			}
+
+			glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
 		}
 	}
 
@@ -677,7 +723,8 @@ dynamic:
 		 * (inside R_BuildLightMap via dlightframe check), not cleanup.
 		 * Skipping the rebuild leaves stale bright squares when r_dynamic
 		 * is toggled off after a light was applied. */
-		lightmap_modified[fa->lightmaptexturenum] = true;
+		LM_ExpandDirtyRect(fa->lightmaptexturenum, fa->light_s, fa->light_t,
+				   (fa->extents[0] >> 4) + 1, (fa->extents[1] >> 4) + 1);
 		base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
 		base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
 		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
@@ -804,7 +851,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		    || fa->cached_dlight)		// dynamic previously
 		{
 dynamic1:
-			lightmap_modified[fa->lightmaptexturenum] = true;
+			LM_ExpandDirtyRect(fa->lightmaptexturenum, fa->light_s, fa->light_t,
+					   (fa->extents[0] >> 4) + 1, (fa->extents[1] >> 4) + 1);
 			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
 			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
 			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
@@ -999,7 +1047,8 @@ static void R_BatchEmitSurface (msurface_t *fa)
 	if (fa->dlightframe == r_framecount || fa->cached_dlight)
 	{
 dynamic_batch:
-		lightmap_modified[fa->lightmaptexturenum] = true;
+		LM_ExpandDirtyRect(fa->lightmaptexturenum, fa->light_s, fa->light_t,
+				   (fa->extents[0] >> 4) + 1, (fa->extents[1] >> 4) + 1);
 		base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
 		base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
 		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
@@ -1087,12 +1136,14 @@ static void DrawTextureChains (entity_t *e)
 						{
 							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
 							{
-								lightmap_modified[s->lightmaptexturenum] = true;
+								LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
+										   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
 								break;
 							}
 						}
 						if (s->dlightframe == r_framecount || s->cached_dlight)
-							lightmap_modified[s->lightmaptexturenum] = true;
+							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
+									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
 					}
 				}
 			}
@@ -1159,7 +1210,8 @@ static void DrawTextureChains (entity_t *e)
 					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
 						batch_surfs[batch_count++] = s;
 					/* Apply dlights to lightmap for this surface */
-					R_AddDynamicLights(s);
+					if (r_dynamic.integer && s->dlightframe == r_framecount)
+						R_AddDynamicLights(s);
 
 					/* Track lightmap polys for dynamic updates */
 					if (s->polys)
@@ -1171,12 +1223,14 @@ static void DrawTextureChains (entity_t *e)
 						{
 							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
 							{
-								lightmap_modified[s->lightmaptexturenum] = true;
+								LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
+										   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
 								break;
 							}
 						}
 						if (s->dlightframe == r_framecount || s->cached_dlight)
-							lightmap_modified[s->lightmaptexturenum] = true;
+							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
+									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
 					}
 				}
 
