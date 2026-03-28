@@ -50,8 +50,8 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
 static unsigned int	blocklights[18*18];
 static unsigned int	blocklightscolor[18*18*3];	// colored light support. *3 for RGB to the definitions at the top
 
-#define	BLOCK_WIDTH	256
-#define	BLOCK_HEIGHT	256
+#define	BLOCK_WIDTH	128
+#define	BLOCK_HEIGHT	128
 
 static glpoly_t	*lightmap_polys[MAX_LIGHTMAPS];
 static qboolean	lightmap_modified[MAX_LIGHTMAPS];
@@ -62,7 +62,7 @@ static int	allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 // main memory so texsubimage can update properly
 static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 
-/* Lightmap atlas — all pages in one 2D texture (16x16 grid of 256x256 pages = 4096x4096) */
+/* Lightmap atlas — all pages in one 2D texture (16x16 grid of 128x128 pages = 2048x2048) */
 #define LM_ATLAS_COLS	16
 #define LM_ATLAS_ROWS	16
 #define LM_ATLAS_WIDTH	(LM_ATLAS_COLS * BLOCK_WIDTH)	/* 2048 */
@@ -1140,26 +1140,19 @@ static void DrawTextureChains (entity_t *e)
 				/* First pass: collect into temp array */
 				#define MAX_BATCH_SURFS 4096
 				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
-t		static msurface_t *deferred_surfs[MAX_BATCH_SURFS];
+				static msurface_t *deferred_surfs[MAX_BATCH_SURFS];
 				int batch_count = 0;
-t		int deferred_count = 0;
+				int deferred_count = 0;
 
 				for ( ; s ; s = s->texturechain)
 				{
-					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
-							SURF_DRAWFENCE | SURF_UNDERWATER))
+					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+						continue;
+
+					if (s->flags & (SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						glBindVertexArray_fp(0);
-						glUseProgram_fp(0);
-						R_RenderBrushPolyMTex (e, s, false);
-						glBindVertexArray_fp(world_vao);
-						glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-						glUseProgram_fp(gl_shader_world.program);
-						{
-							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-							glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-							GL_Bind (tt->gl_texturenum);
-						}
+						if (deferred_count < MAX_BATCH_SURFS)
+							deferred_surfs[deferred_count++] = s;
 						continue;
 					}
 
@@ -1238,14 +1231,16 @@ t		int deferred_count = 0;
 						Con_SafePrintf("SKIP final batch draw: idx=%d total=%d (max=%d)\n",
 							       run_first_idx, run_total_idx, world_num_indices);
 					}
-n			/* Deferred pass: render fence/underwater surfaces */
-			if (deferred_count > 0)
-			{
-				glBindVertexArray_fp(0);
-				glUseProgram_fp(0);
-				for (int d = 0; d < deferred_count; d++)
-					R_RenderBrushPolyMTex (e, deferred_surfs[d], false);
-			}
+				}
+
+				/* Deferred pass: render fence/underwater surfaces
+				 * after batch draw to avoid per-surface VAO thrashing */
+				if (deferred_count > 0)
+				{
+					glBindVertexArray_fp(0);
+					glUseProgram_fp(0);
+					for (int d = 0; d < deferred_count; d++)
+						R_RenderBrushPolyMTex (e, deferred_surfs[d], false);
 				}
 			}
 
