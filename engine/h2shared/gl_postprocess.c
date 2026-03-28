@@ -98,7 +98,7 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
-cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};		/* weighted blended OIT (WIP) */
+cvar_t	r_oit = {"r_oit", "1", CVAR_ARCHIVE};		/* weighted blended OIT */
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */

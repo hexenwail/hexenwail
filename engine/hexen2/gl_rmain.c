@@ -715,7 +715,7 @@ static GLuint	gpu_shadedots_ssbo;
 #ifdef __EMSCRIPTEN__
 cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 #else
-cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
+cvar_t	r_alias_gpu = {"r_alias_gpu", "2", CVAR_ARCHIVE};
 #endif
 
 static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
@@ -2116,9 +2116,8 @@ static void R_DrawEntitiesOnList (void)
 		return;
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
-	 * models before the per-entity loop. Requires r_alias_gpu >= 2.
-	 * NOTE: disabled — instanced entities render invisible (shader bug) */
-	use_instancing = false; /*(r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program)*/
+	 * models before the per-entity loop. Requires r_alias_gpu >= 2. */
+	use_instancing = (r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program);
 	if (use_instancing)
 	{
 		R_CollectAndBatchAliasInstances();
