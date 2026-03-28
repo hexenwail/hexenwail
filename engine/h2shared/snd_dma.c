@@ -286,8 +286,8 @@ void S_Init (void)
 		Cvar_SetQuick(&sfxvolume, "0");
 	else if (sfxvolume.value > 1)
 		Cvar_SetQuick(&sfxvolume, "1");
-	if (bgmvolume.value < 0)
-		Cvar_SetQuick(&bgmvolume, "0");
+	if (bgmvolume.value <= 0)
+		Cvar_SetQuick(&bgmvolume, "0.7");
 	else if (bgmvolume.value > 1)
 		Cvar_SetQuick(&bgmvolume, "1");
 
