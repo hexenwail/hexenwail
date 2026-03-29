@@ -597,7 +597,7 @@ void SV_ParseEffect (sizebuf_t *sb)
 		sv.Effects[idx].ef.Chunk.type = G_FLOAT(OFS_PARM2);
 		VectorCopy(G_VECTOR(OFS_PARM3), sv.Effects[idx].ef.Chunk.srcVel);
 		sv.Effects[idx].ef.Chunk.numChunks = G_FLOAT(OFS_PARM4);
-		sv.Effects[idx].expire_time = sv.time + 3;
+		sv.Effects[idx].expire_time = sv.time + 12;
 		break;
 
 	default:
