@@ -50,6 +50,24 @@ else()
 endif()
 
 #============================================================================
+# Git Version
+#============================================================================
+# Append git describe suffix for dev builds (e.g. "26.03-alpha.7k-3-gabcdef")
+# Tagged commits get the exact tag; the hardcoded HW_VERSION is the fallback.
+execute_process(
+    COMMAND git describe --tags --always
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE GIT_RESULT
+)
+if(GIT_RESULT EQUAL 0 AND GIT_VERSION)
+    add_definitions(-DHW_GIT_VERSION="${GIT_VERSION}")
+    message(STATUS "Git version: ${GIT_VERSION}")
+endif()
+
+#============================================================================
 # Compiler Flags
 #============================================================================
 # Common flags
