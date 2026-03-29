@@ -1474,54 +1474,112 @@ void R_DrawParticles (void)
     }
     else
     {
-        /* Billboard mode: CPU-built triangles, flush in batches */
-        GL_ImmBegin();
-        for (p = active_particles; p; p = p->next)
+#ifndef __EMSCRIPTEN__
+        /* GPU billboard path: upload particle data to SSBO, draw in one call */
+        if (gpu_particle_ssbo && gl_shader_particle_gpu.base.program)
         {
-            float scale;
-            int i;
-
-            /* Flush batch before overflow (3 verts per particle) */
-            if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 3)
+            int n = 0;
+            for (p = active_particles; p && n < GPU_MAX_PARTICLES; p = p->next)
             {
-                GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
-                GL_ImmBegin();
+                gpu_particle_t *gp = &gpu_particle_buf[n];
+                byte *c;
+
+                gp->pos[0] = p->org[0];
+                gp->pos[1] = p->org[1];
+                gp->pos[2] = p->org[2];
+                gp->die    = p->die;
+
+                color = ((int)p->color) & 0x01ff;
+                if (color < 256) {
+                    c = (byte *)&d_8to24table[color];
+                    gp->r = c[0] / 255.0f;
+                    gp->g = c[1] / 255.0f;
+                    gp->b = c[2] / 255.0f;
+                    gp->a = 1.0f;
+                } else {
+                    c = (byte *)&d_8to24TranslucentTable[color - 256];
+                    gp->r = c[0] / 255.0f;
+                    gp->g = c[1] / 255.0f;
+                    gp->b = c[2] / 255.0f;
+                    gp->a = c[3] / 255.0f;
+                }
+                n++;
             }
 
-            color = ((int)p->color) & 0x01ff;
-            if (color < 256)
-                GL_ImmColor3ubv((byte *)&d_8to24table[color]);
-            else
-                GL_ImmColor4ubv((byte *)&d_8to24TranslucentTable[color-256]);
+            /* Upload particle data */
+            glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_particle_ssbo);
+            glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
+                               n * sizeof(gpu_particle_t), gpu_particle_buf);
 
-            scale = (p->org[0] - r_origin[0])*vpn[0] +
-                    (p->org[1] - r_origin[1])*vpn[1] +
-                    (p->org[2] - r_origin[2])*vpn[2];
-            if (scale < 20)
-                scale = SCALE_BASE;
-            else
-                scale = SCALE_BASE + scale * 0.004;
+            /* Bind SSBO to binding point 0 */
+            glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, gpu_particle_ssbo);
 
-            i = 0;
-            if (p->type == pt_snow)
-            {
-                if (p->count >= 69)      i = 3;
-                else if (p->count >= 40) i = 2;
-                else if (p->count >= 30) i = 1;
-            }
+            /* Activate shader and set uniforms */
+            glUseProgram_fp(gl_shader_particle_gpu.base.program);
+            GL_ParticleGPU_SetUniforms(&gl_shader_particle_gpu,
+                                       r_pup, r_pright, vpn, r_origin,
+                                       cl.time);
 
-            GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
-            GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
-            GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
-            GL_ImmVertex3f(p->org[0] + r_pup[0]*scale,
-                           p->org[1] + r_pup[1]*scale,
-                           p->org[2] + r_pup[2]*scale);
-            GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
-            GL_ImmVertex3f(p->org[0] + r_pright[0]*scale,
-                           p->org[1] + r_pright[1]*scale,
-                           p->org[2] + r_pright[2]*scale);
+            /* Draw all particles: 3 vertices per particle, billboarded in shader */
+            glBindVertexArray_fp(gpu_particle_vao);
+            glDrawArrays_fp(GL_TRIANGLES, 0, n * 3);
+            glBindVertexArray_fp(0);
+
+            glUseProgram_fp(0);
+            glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
         }
-        GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+        else
+#endif /* !__EMSCRIPTEN__ */
+        {
+            /* CPU billboard fallback (WASM/ES3 or missing GPU program) */
+            GL_ImmBegin();
+            for (p = active_particles; p; p = p->next)
+            {
+                float scale;
+                int i;
+
+                /* Flush batch before overflow (3 verts per particle) */
+                if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 3)
+                {
+                    GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+                    GL_ImmBegin();
+                }
+
+                color = ((int)p->color) & 0x01ff;
+                if (color < 256)
+                    GL_ImmColor3ubv((byte *)&d_8to24table[color]);
+                else
+                    GL_ImmColor4ubv((byte *)&d_8to24TranslucentTable[color-256]);
+
+                scale = (p->org[0] - r_origin[0])*vpn[0] +
+                        (p->org[1] - r_origin[1])*vpn[1] +
+                        (p->org[2] - r_origin[2])*vpn[2];
+                if (scale < 20)
+                    scale = SCALE_BASE;
+                else
+                    scale = SCALE_BASE + scale * 0.004;
+
+                i = 0;
+                if (p->type == pt_snow)
+                {
+                    if (p->count >= 69)      i = 3;
+                    else if (p->count >= 40) i = 2;
+                    else if (p->count >= 30) i = 1;
+                }
+
+                GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
+                GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
+                GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
+                GL_ImmVertex3f(p->org[0] + r_pup[0]*scale,
+                               p->org[1] + r_pup[1]*scale,
+                               p->org[2] + r_pup[2]*scale);
+                GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
+                GL_ImmVertex3f(p->org[0] + r_pright[0]*scale,
+                               p->org[1] + r_pright[1]*scale,
+                               p->org[2] + r_pright[2]*scale);
+            }
+            GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+        }
     }
 
     GL_SetAlphaThreshold(0.01f);
