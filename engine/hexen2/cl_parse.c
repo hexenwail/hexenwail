@@ -844,7 +844,7 @@ static void CL_ParseUpdate (int bits)
 		ent->alpha = ref_ent->alpha;
 
 	if (bits & U_NOLERP)
-		ent->forcelink = true;
+		ent->lerpflags |= LERP_MOVESTEP;
 
 	if (forcelink)
 	{	// didn't have an update last message
