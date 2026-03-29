@@ -22,11 +22,13 @@ glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
 glprogram_t	gl_shader_sky;
+glprogram_t	gl_shader_water;
 
 /* OIT variants of translucent shaders */
 glprogram_t	gl_shader_world_oit;
 glprogram_t	gl_shader_alias_oit;
 glprogram_t	gl_shader_particle_oit;
+glprogram_t	gl_shader_water_oit;
 gl_particle_gpu_prog_t	gl_shader_particle_gpu;
 gl_alias_gpu_prog_t	gl_shader_alias_gpu;
 
@@ -201,6 +203,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_time            = glGetUniformLocation_fp(p->program, "u_time");
 	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
 	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
+	p->u_ripple          = glGetUniformLocation_fp(p->program, "u_ripple");
 }
 
 /* ------------------------------------------------------------------ */
@@ -346,6 +349,35 @@ static const char salias_frag[] =
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	"    fragColor = color;\n"
 	"}\n";
+
+/* --- shader_water: water warp with GPU sin() computation --- */
+static const char swater_vert[] =
+	GLSL_VERT_HEADER
+	"in vec3 a_position;\n"
+	"in vec2 a_texcoord;\n"   /* original (unwarped) texture coords */
+	"in vec4 a_color;\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform mat4 u_modelview;\n"
+	"uniform float u_time;\n"
+	"uniform float u_ripple;\n"
+	"out vec2 v_texcoord;\n"
+	"out vec4 v_color;\n"
+	"out float v_fogdist;\n"
+	"void main() {\n"
+	"    float os = a_texcoord.x;\n"
+	"    float ot = a_texcoord.y;\n"
+	"    v_texcoord.x = (os + 8.0 * sin(ot * 0.125 + u_time)) / 64.0;\n"
+	"    v_texcoord.y = (ot + 8.0 * sin(os * 0.125 + u_time)) / 64.0;\n"
+	"    v_color = a_color;\n"
+	"    vec3 pos = a_position;\n"
+	"    if (u_ripple > 0.0)\n"
+	"        pos.z += u_ripple * sin(pos.x * 0.05 + u_time) * sin(pos.z * 0.05 + u_time);\n"
+	"    vec4 eyepos = u_modelview * vec4(pos, 1.0);\n"
+	"    v_fogdist = length(eyepos.xyz);\n"
+	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
+	"}\n";
+
+/* water uses the same fragment shader as alias (salias_frag) */
 
 /* --- shader_particle: textured triangles with per-vertex color --- */
 static const char spart_vert[] =
@@ -919,11 +951,13 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
+	GL_InitProgram(&gl_shader_water,    "water",    swater_vert, salias_frag);
 
 	/* OIT variants for translucent rendering */
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
 	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
 	GL_InitOITProgram(&gl_shader_particle_oit, "particle", spart_vert,  spart_frag);
+	GL_InitOITProgram(&gl_shader_water_oit,    "water",    swater_vert, salias_frag);
 
 #ifndef __EMSCRIPTEN__
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
@@ -937,12 +971,14 @@ void GL_Shaders_Shutdown (void)
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
+		&gl_shader_water,
 		&gl_shader_particle_gpu.base, &gl_shader_alias_gpu.base,
-		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit
+		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit,
+		&gl_shader_water_oit
 	};
 	int i;
 
-	for (i = 0; i < 11; i++)
+	for (i = 0; i < (int)(sizeof(progs)/sizeof(progs[0])); i++)
 	{
 		if (progs[i]->program)
 		{
