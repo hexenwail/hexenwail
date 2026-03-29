@@ -221,6 +221,8 @@ static void EmitWaterPolys_SetupShader (float ripple)
 		glUniform1f_fp(shader->u_fog_density, r_fog_density);
 	if (shader->u_fog_color >= 0)
 		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (shader->u_alpha_threshold >= 0)
+		glUniform1f_fp(shader->u_alpha_threshold, 0.0f);
 }
 
 void EmitWaterPolys (msurface_t *fa)
