@@ -40,7 +40,7 @@ extern float r_fog_color[3];
 int		skytexturenum;
 
 static GLuint	solidskytexture, alphaskytexture;
-
+static float	speedscale;	// for top sky and bottom sky
 
 static msurface_t	*warpface;
 
@@ -279,11 +279,10 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	glpoly_t	*p;
 	float		*v;
 	int		i;
+	float	s, ss, t, tt;
+	vec3_t		dir;
+	float		length;
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
-
-	/* UV generation is done entirely in the sky shader using
-	 * vertex position, u_eyepos, and u_time.  We only need to
-	 * submit raw vertex positions here. */
 
 	if (alpha >= 1.0f)
 	{
@@ -300,7 +299,27 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 			GL_ImmBegin ();
 			GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 			for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			{
+				VectorSubtract (v, r_origin, dir);
+				dir[2] *= 3;
+
+				length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+				length = sqrt (length);
+				length = 6*63/length;
+
+				dir[0] *= length;
+				dir[1] *= length;
+
+				s = (realtime*8 + dir[0]) * (1.0/128);
+				t = (realtime*8 + dir[1]) * (1.0/128);
+
+				ss = (realtime*16 + dir[0]) * (1.0/128);
+				tt = (realtime*16 + dir[1]) * (1.0/128);
+
+				GL_ImmTexCoord2f (s, t);
+				GL_ImmLMCoord2f (ss, tt);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
+			}
 			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 		}
 	}
@@ -318,12 +337,27 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 			GL_ImmBegin ();
 			GL_ImmColor3f(1.0f, 1.0f, 1.0f);
 			for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			{
+				VectorSubtract (v, r_origin, dir);
+				dir[2] *= 3;
+
+				length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+				length = sqrt (length);
+				length = 6*63/length;
+
+				dir[0] *= length;
+				dir[1] *= length;
+
+				s = (realtime*8 + dir[0]) * (1.0/128);
+				t = (realtime*8 + dir[1]) * (1.0/128);
+
+				GL_ImmTexCoord2f (s, t);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
+			}
 			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 		}
 
 		/* pass 2: alpha (front) layer, blended at r_skyalpha */
-		GL_SetAlphaThreshold (2.0f);	/* cloud-layer scroll speed */
 		GL_Bind (alphaskytexture);
 		glEnable_fp(GL_BLEND);
 
@@ -332,7 +366,23 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 			GL_ImmBegin ();
 			GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha);
 			for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			{
+				VectorSubtract (v, r_origin, dir);
+				dir[2] *= 3;
+
+				length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+				length = sqrt (length);
+				length = 6*63/length;
+
+				dir[0] *= length;
+				dir[1] *= length;
+
+				ss = (realtime*16 + dir[0]) * (1.0/128);
+				tt = (realtime*16 + dir[1]) * (1.0/128);
+
+				GL_ImmTexCoord2f (ss, tt);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
+			}
 			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 		}
 
@@ -345,12 +395,31 @@ static void EmitSkyPolys (msurface_t *fa)
 	glpoly_t	*p;
 	float		*v;
 	int		i;
+	float		s, t;
+	vec3_t		dir;
+	float		length;
 
 	for (p = fa->polys ; p ; p = p->next)
 	{
 		GL_ImmBegin ();
 		for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+		{
+			VectorSubtract (v, r_origin, dir);
+			dir[2] *= 3;	// flatten the sphere
+
+			length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
+			length = sqrt (length);
+			length = 6*63/length;
+
+			dir[0] *= length;
+			dir[1] *= length;
+
+			s = (speedscale + dir[0]) * (1.0/128);
+			t = (speedscale + dir[1]) * (1.0/128);
+
+			GL_ImmTexCoord2f (s, t);
 			GL_ImmVertex3f (v[0], v[1], v[2]);
+		}
 		GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 	}
 }
