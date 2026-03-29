@@ -1062,6 +1062,14 @@ static void R_DrawAliasModel (entity_t *e)
 	shadelight = shadelight / 200.0;
 	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
 
+	/* Apply shadow mapping: darken entity if in shadow */
+	if (GL_Shadow_Active())
+	{
+		float sf = GL_Shadow_PointFactor(e->origin);
+		shadelight *= sf;
+		VectorScale(lightcolor, sf, lightcolor);
+	}
+
 	an = e->angles[1] / 180 * M_PI;
 	shadevector[0] = cos(-an);
 	shadevector[1] = sin(-an);
