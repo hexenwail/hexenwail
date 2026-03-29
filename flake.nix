@@ -22,8 +22,15 @@
           };
         };
 
-        # Version: update this after each git tag
-        version = "26.03-alpha.6o";
+        # Version: extracted from engine/hexen2/quakedef.h HW_BASE_VERSION
+        version = let
+          lines = builtins.split "\n" (builtins.readFile ./engine/hexen2/quakedef.h);
+          matches = builtins.filter (x: builtins.isString x &&
+            builtins.match ".*HW_BASE_VERSION.*" x != null) lines;
+          line = builtins.head matches;
+          parts = builtins.split "\"" line;
+          strs = builtins.filter builtins.isString parts;
+        in builtins.elemAt strs 1;
 
         # Source filter: exclude non-build files to improve cache hits
         filteredSrc = pkgs.lib.cleanSourceWith {
@@ -50,7 +57,7 @@
         packages = let
           # Shared build configuration for Linux builds
           linuxBuildAttrs = {
-            pname = "glhexen2";
+            pname = "hexenwail";
             inherit version;
 
             src = filteredSrc;
@@ -110,7 +117,7 @@
               runHook preInstall
 
               mkdir -p $out/bin
-              mkdir -p $out/share/uhexen2
+              mkdir -p $out/share/hexenwail
 
               # Install the OpenGL binary from CMake build directory
               install -Dm755 bin/glhexen2 $out/bin/glhexen2
@@ -138,7 +145,7 @@
               libopus
               alsa-lib
             ];
-          in pkgs.runCommand "glhexen2-linux-fhs-${nixosPkg.version}" {
+          in pkgs.runCommand "hexenwail-linux-fhs-${nixosPkg.version}" {
             nativeBuildInputs = [ pkgs.patchelf ];
           } ''
             mkdir -p $out/bin $out/lib
@@ -166,7 +173,7 @@
 
           # Windows 64-bit build
           win64 = pkgsCross64.stdenv.mkDerivation {
-            pname = "glhexen2-win64";
+            pname = "hexenwail-win64";
             inherit version;
 
             src = filteredSrc;
@@ -255,7 +262,7 @@
           # Quick fix (temporary): Use shell-wasm.nix for interactive dev builds
           # Long-term: See issue uhexen2-1z31 for reproducible solution
           wasm = pkgs.stdenv.mkDerivation {
-            pname = "glhexen2-wasm";
+            pname = "hexenwail-wasm";
             inherit version;
 
             src = filteredSrc;
@@ -309,17 +316,17 @@
                 sandbox restrictions. For WASM development, use:
                   nix develop -f shell-wasm.nix
               '';
-              homepage = "https://github.com/bobberb/hexenwail";
+              homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
             };
           };
 
           # Release package - builds all platforms together
-          release = pkgs.runCommand "glhexen2-release-${version}" {
+          release = pkgs.runCommand "hexenwail-release-${version}" {
             meta = with pkgs.lib; {
               description = "Hexenwail - Multi-platform release bundle";
-              homepage = "https://github.com/bobberb/hexenwail";
+              homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
             };
