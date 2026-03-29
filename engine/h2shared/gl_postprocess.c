@@ -50,7 +50,9 @@
 /* FBO state — scaled 3D scene */
 static GLuint	pp_fbo;		/* render target (may be multisampled) */
 static GLuint	pp_color_rb;	/* multisampled color renderbuffer (0 if no MSAA) */
-static GLuint	pp_depth_rb;
+static GLuint	pp_depth_rb;	/* MSAA depth renderbuffer (0 if no MSAA) */
+static GLuint	pp_depth_tex;	/* non-MSAA scene depth texture (for soft particles) */
+static GLuint	pp_depth_fbo;	/* FBO for MSAA depth resolve blit target */
 static GLuint	pp_resolve_fbo;	/* resolve target (non-multisampled, for shader blit) */
 static GLuint	pp_color_tex;	/* resolved color texture */
 static int	pp_width, pp_height;
@@ -217,6 +219,8 @@ static void PP_DeleteFBO (void)
 	if (pp_color_tex)   { glDeleteTextures_fp(1, &pp_color_tex); pp_color_tex = 0; }
 	if (pp_color_rb)    { glDeleteRenderbuffers_fp(1, &pp_color_rb); pp_color_rb = 0; }
 	if (pp_depth_rb)    { glDeleteRenderbuffers_fp(1, &pp_depth_rb); pp_depth_rb = 0; }
+	if (pp_depth_tex)   { glDeleteTextures_fp(1, &pp_depth_tex); pp_depth_tex = 0; }
+	if (pp_depth_fbo)   { glDeleteFramebuffers_fp(1, &pp_depth_fbo); pp_depth_fbo = 0; }
 	if (pp_resolve_fbo) { glDeleteFramebuffers_fp(1, &pp_resolve_fbo); pp_resolve_fbo = 0; }
 	if (pp_fbo)         { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
 	pp_width = pp_height = pp_samples = 0;
@@ -358,31 +362,56 @@ static qboolean PP_CreateFBO (int width, int height)
 			pp_width = width;
 			pp_height = height;
 			Con_DPrintf("PostProcess: %dx%d FBO with %dx MSAA\n", width, height, samples);
+
+			/* depth texture for soft particles (MSAA resolve target) */
+			glGenTextures_fp(1, &pp_depth_tex);
+			glBindTexture_fp(GL_TEXTURE_2D, pp_depth_tex);
+			glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
+					GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glBindTexture_fp(GL_TEXTURE_2D, 0);
+
+			glGenFramebuffers_fp(1, &pp_depth_fbo);
+			glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_depth_fbo);
+			glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+						  GL_TEXTURE_2D, pp_depth_tex, 0);
+			glDrawBuffer_fp(GL_NONE);
+			glReadBuffer_fp(GL_NONE);
+			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+
 			OIT_CreateFBO(width, height, pp_depth_rb);
 			return true;
 		}
 	}
 
-	/* non-MSAA path */
-	glGenRenderbuffers_fp(1, &pp_depth_rb);
-	glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
-	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-	glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
+	/* non-MSAA path: use depth texture directly (enables soft particles) */
+	glGenTextures_fp(1, &pp_depth_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, pp_depth_tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0,
+			GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
 
 	glGenFramebuffers_fp(1, &pp_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 				  GL_TEXTURE_2D, pp_color_tex, 0);
-	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-				     GL_RENDERBUFFER, pp_depth_rb);
+	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				  GL_TEXTURE_2D, pp_depth_tex, 0);
 
 	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
 
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
-		Con_Printf("PostProcess: FBO incomplete (status 0x%x, %dx%d, tex=%u, depth_rb=%u)\n",
-			   status, width, height, pp_color_tex, pp_depth_rb);
+		Con_Printf("PostProcess: FBO incomplete (status 0x%x, %dx%d, tex=%u, depth_tex=%u)\n",
+			   status, width, height, pp_color_tex, pp_depth_tex);
 		PP_DeleteFBO();
 		pp_fbo_failed = true;
 		return false;
@@ -869,6 +898,25 @@ GLuint GL_GetSceneFBO (void)
 	return pp_fbo;	/* 0 if no postprocess FBO active */
 }
 
+GLuint GL_GetSceneDepthTex (void)
+{
+	return pp_depth_tex;
+}
+
+void GL_ResolveSceneDepth (void)
+{
+	if (!pp_depth_tex || !pp_samples)
+		return;	/* non-MSAA: depth texture is already the FBO attachment */
+
+	/* Blit MSAA depth to non-MSAA depth texture */
+	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, pp_fbo);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, pp_depth_fbo);
+	glBlitFramebuffer_fp(0, 0, pp_width, pp_height,
+			     0, 0, pp_width, pp_height,
+			     GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
+}
+
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
@@ -887,6 +935,8 @@ void GL_PostProcess_Init (void)
 	pp_fbo = 0;
 	pp_color_tex = 0;
 	pp_depth_rb = 0;
+	pp_depth_tex = 0;
+	pp_depth_fbo = 0;
 	pp_program = 0;
 	pp_width = pp_height = 0;
 

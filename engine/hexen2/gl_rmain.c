@@ -483,6 +483,18 @@ static void R_DrawSpriteModel (entity_t *e)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+	/* bind scene depth texture to unit 1 for soft particle fade */
+	{
+		GLuint depth_tex = GL_GetSceneDepthTex();
+		qboolean soft = (depth_tex != 0);
+		if (soft)
+		{
+			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+			glBindTexture_fp(GL_TEXTURE_2D, depth_tex);
+			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+			glDepthFunc_fp(GL_ALWAYS); /* shader does its own depth test */
+		}
+
 	GL_ImmBegin ();
 
 	{
@@ -516,7 +528,16 @@ static void R_DrawSpriteModel (entity_t *e)
 	VectorMA (point, frame->right, r_spritedesc.vright, point);
 	GL_ImmVertex3f (point[0], point[1], point[2]);
 
-	GL_ImmEnd (GL_QUADS, &gl_shader_alias);
+	GL_ImmEnd (GL_QUADS, soft ? &gl_shader_sprite : &gl_shader_alias);
+
+		if (soft)
+		{
+			glDepthFunc_fp(GL_LEQUAL);
+			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+			glBindTexture_fp(GL_TEXTURE_2D, 0);
+			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		}
+	}
 
 // restore tex parms
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -1076,13 +1097,8 @@ static void R_DrawAliasModel (entity_t *e)
 	shadelight = shadelight / 200.0;
 	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
 
-	/* Apply shadow mapping: darken entity if in shadow */
-	if (GL_Shadow_Active())
-	{
-		float sf = GL_Shadow_PointFactor(e->origin);
-		shadelight *= sf;
-		VectorScale(lightcolor, sf, lightcolor);
-	}
+	/* Per-pixel shadow mapping handles shadows on world surfaces.
+	 * Don't darken entities themselves — they aren't self-shadowed. */
 
 	an = e->angles[1] / 180 * M_PI;
 	shadevector[0] = cos(-an);
@@ -3009,6 +3025,8 @@ static void R_RenderScene (void)
 	rs_sky = t1 - t0;
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
+
+	GL_ResolveSceneDepth ();	/* make depth available as texture for soft sprites */
 
 	t0 = Sys_DoubleTime();
 	R_DrawEntitiesOnList ();

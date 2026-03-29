@@ -50,6 +50,7 @@ extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color *
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 extern glprogram_t	gl_shader_water;	/* water warp (GPU sin) */
+extern glprogram_t	gl_shader_sprite;	/* soft particles (depth-fade) */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 
 /* OIT variants — same shaders but output to MRT accum+revealage */

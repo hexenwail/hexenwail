@@ -59,6 +59,8 @@ void OIT_BeginTranslucency (void);
 void OIT_EndTranslucency (GLuint scene_fbo);
 qboolean OIT_Active (void);
 GLuint GL_GetSceneFBO (void);
+GLuint GL_GetSceneDepthTex (void);
+void GL_ResolveSceneDepth (void);
 
 /* OIT_OUTPUT macro for injection into translucent fragment shaders.
  * Replaces `out vec4 fragColor` with MRT outputs when OIT==1. */

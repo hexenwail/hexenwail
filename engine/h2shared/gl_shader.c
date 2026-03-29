@@ -23,6 +23,7 @@ glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
 glprogram_t	gl_shader_sky;
 glprogram_t	gl_shader_water;
+glprogram_t	gl_shader_sprite;
 
 /* OIT variants of translucent shaders */
 glprogram_t	gl_shader_world_oit;
@@ -301,8 +302,6 @@ static const char sworld_frag[] =
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
 	"uniform int u_shadow_count;\n"
-	"uniform int u_shadow_filter;\n"
-	"uniform float u_shadow_texel;\n"
 	"uniform mat4 u_shadow_matrix[MAX_SHADOW_LIGHTS];\n"
 	"uniform sampler2D u_shadow_tex[MAX_SHADOW_LIGHTS];\n"
 	"uniform vec3 u_shadow_origin[MAX_SHADOW_LIGHTS];\n"
@@ -314,36 +313,23 @@ static const char sworld_frag[] =
 	"in vec3 v_worldpos;\n"
 	"out vec4 fragColor;\n"
 	"\n"
-	"float sample_shadow(int idx, vec3 ndc) {\n"
-	"    float bias = 0.005;\n"
-	"    float ref = ndc.z - bias;\n"
-	"    if (u_shadow_filter == 0) {\n"
-	"        float d = texture(u_shadow_tex[idx], ndc.xy).r;\n"
-	"        return (ref > d) ? 0.4 : 1.0;\n"
-	"    }\n"
-	"    /* 4-tap PCF */\n"
-	"    float t = u_shadow_texel * 0.5;\n"
-	"    float sum = 0.0;\n"
-	"    sum += (ref > texture(u_shadow_tex[idx], ndc.xy + vec2(-t, -t)).r) ? 0.0 : 1.0;\n"
-	"    sum += (ref > texture(u_shadow_tex[idx], ndc.xy + vec2( t, -t)).r) ? 0.0 : 1.0;\n"
-	"    sum += (ref > texture(u_shadow_tex[idx], ndc.xy + vec2(-t,  t)).r) ? 0.0 : 1.0;\n"
-	"    sum += (ref > texture(u_shadow_tex[idx], ndc.xy + vec2( t,  t)).r) ? 0.0 : 1.0;\n"
-	"    return mix(0.4, 1.0, sum * 0.25);\n"
-	"}\n"
-	"\n"
 	"float shadow_factor() {\n"
 	"    float factor = 1.0;\n"
 	"    for (int i = 0; i < u_shadow_count; i++) {\n"
-	"        vec3 d = v_worldpos - u_shadow_origin[i];\n"
-	"        float dist = length(d);\n"
-	"        if (dist > u_shadow_radius[i]) continue;\n"
 	"        vec4 lpos = u_shadow_matrix[i] * vec4(v_worldpos, 1.0);\n"
 	"        if (lpos.w <= 0.0) continue;\n"
 	"        vec3 ndc = lpos.xyz / lpos.w * 0.5 + 0.5;\n"
-	"        if (ndc.x < 0.0 || ndc.x > 1.0 || ndc.y < 0.0 || ndc.y > 1.0) continue;\n"
-	"        float shadow = sample_shadow(i, ndc);\n"
-	"        float atten = 1.0 - dist / u_shadow_radius[i];\n"
-	"        factor *= mix(1.0, shadow, atten);\n"
+	"        if (ndc.x < 0.01 || ndc.x > 0.99 || ndc.y < 0.01 || ndc.y > 0.99) continue;\n"
+	"        if (ndc.z < 0.0 || ndc.z > 1.0) continue;\n"
+	"        float stored = texture(u_shadow_tex[i], ndc.xy).r;\n"
+	"        if (stored > 0.99) continue;\n"
+	"        if (ndc.z > stored) {\n"
+	"            /* Fade shadow near frustum edges for soft border */\n"
+	"            float ex = min(ndc.x, 1.0 - ndc.x) * 10.0;\n"
+	"            float ey = min(ndc.y, 1.0 - ndc.y) * 10.0;\n"
+	"            float edge = clamp(min(ex, ey), 0.0, 1.0);\n"
+	"            factor *= mix(1.0, 0.25, edge);\n"
+	"        }\n"
 	"    }\n"
 	"    return factor;\n"
 	"}\n"
@@ -393,6 +379,59 @@ static const char salias_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
+	"    float fog = exp(-u_fog_density * v_fogdist);\n"
+	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	"    fragColor = color;\n"
+	"}\n";
+
+/* --- shader_sprite: soft particles (depth-fade near surfaces) --- */
+static const char ssprite_vert[] =
+	GLSL_VERT_HEADER
+	"in vec3 a_position;\n"
+	"in vec2 a_texcoord;\n"
+	"in vec4 a_color;\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform mat4 u_modelview;\n"
+	"out vec2 v_texcoord;\n"
+	"out vec4 v_color;\n"
+	"out float v_fogdist;\n"
+	"out vec4 v_clippos;\n"
+	"void main() {\n"
+	"    v_texcoord = a_texcoord;\n"
+	"    v_color = a_color;\n"
+	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
+	"    v_fogdist = length(eyepos.xyz);\n"
+	"    v_clippos = u_mvp * vec4(a_position, 1.0);\n"
+	"    gl_Position = v_clippos;\n"
+	"}\n";
+
+static const char ssprite_frag[] =
+	GLSL_FRAG_HEADER
+	"uniform sampler2D u_texture0;\n"
+	"uniform sampler2D u_texture1;\n"  /* scene depth texture */
+	"uniform float u_fog_density;\n"
+	"uniform vec3 u_fog_color;\n"
+	"uniform float u_alpha_threshold;\n"
+	"in vec2 v_texcoord;\n"
+	"in vec4 v_color;\n"
+	"in float v_fogdist;\n"
+	"in vec4 v_clippos;\n"
+	"out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"    vec4 color = tex * v_color;\n"
+	"    if (color.a < u_alpha_threshold) discard;\n"
+	"    /* soft particle: depth test in shader so we can fade instead of clip */\n"
+	"    vec2 screenUV = (v_clippos.xy / v_clippos.w) * 0.5 + 0.5;\n"
+	"    float sceneDepth = texture(u_texture1, screenUV).r;\n"
+	"    float fragDepth = gl_FragCoord.z;\n"
+	"    float depthDiff = sceneDepth - fragDepth;\n"
+	"    /* behind surface: fade in the soft zone, discard if fully occluded */\n"
+	"    if (depthDiff < -0.001) discard;\n"
+	"    float fade = clamp(depthDiff / 0.001 + 1.0, 0.0, 1.0);\n"
+	"    color.a *= fade;\n"
+	"    if (color.a < 0.01) discard;\n"
+	"    /* fog */\n"
 	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	"    fragColor = color;\n"
@@ -1000,6 +1039,7 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
 	GL_InitProgram(&gl_shader_water,    "water",    swater_vert, salias_frag);
+	GL_InitProgram(&gl_shader_sprite,   "sprite",   ssprite_vert, ssprite_frag);
 
 	/* OIT variants for translucent rendering */
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
@@ -1019,7 +1059,7 @@ void GL_Shaders_Shutdown (void)
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
-		&gl_shader_water,
+		&gl_shader_water, &gl_shader_sprite,
 		&gl_shader_particle_gpu.base, &gl_shader_alias_gpu.base,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit,
 		&gl_shader_water_oit
