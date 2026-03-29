@@ -729,7 +729,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
 
-	if (e->drawflags & DRF_TRANSLUCENT)
+	if ((e->drawflags & DRF_TRANSLUCENT) ||
+	    (e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPoly (fa->polys);
@@ -835,6 +836,16 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	}
 	else
 	{
+		if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
+		{
+			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+
+			if (fa->flags & SURF_UNDERWATER)
+				DrawGLWaterPoly (fa->polys);
+			else
+				DrawGLPoly (fa->polys);
+		}
+		else
 		{
 			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 			if (lm_atlas_texture)
