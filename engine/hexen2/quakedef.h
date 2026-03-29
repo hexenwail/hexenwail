@@ -26,7 +26,12 @@
 #define STRINGIFY(x) __STRINGIFY(x)
 
 /* Hexenwail fork — based on Hammer of Thyrion 1.5.10, Hexen II engine 1.29 */
-#define	HW_VERSION		"26.03-alpha.6"
+#define	HW_BASE_VERSION		"0.7.0-alpha"
+#ifdef HW_GIT_VERSION
+#define	HW_VERSION		HW_GIT_VERSION
+#else
+#define	HW_VERSION		HW_BASE_VERSION
+#endif
 #define	GLQUAKE_VERSION		1.00
 #define	ENGINE_VERSION		1.29
 #define	ENGINE_NAME		"Hexenwail"

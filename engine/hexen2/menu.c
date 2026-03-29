@@ -1873,8 +1873,7 @@ static void M_Menu_Game_f (void);
 static void M_Game_Draw (void);
 static void M_Game_Key (int k);
 
-// prototypes for the rendering submenu
-static void M_Menu_Rendering_f (void);
+// prototypes for the rendering submenu\nstatic void M_Menu_Rendering_f (void);
 static void M_Rendering_Draw (void);
 static void M_Rendering_Key (int k);
 
@@ -2018,7 +2017,7 @@ enum
 	DISP_SCALE,
 #endif
 	DISP_SCRSIZE,
-	DISP_RENDERING,	/* enters rendering submenu */
+\tDISP_RENDERING,\t/* enters rendering submenu */\n\tDISP_GRAPHICS,\t\t/* enters graphics/misc submenu */
 	DISP_SEP,		/* separator between rendering and video */
 	DISP_FULLSCREEN,
 	DISP_RESOLUTION,
