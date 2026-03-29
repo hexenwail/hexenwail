@@ -244,9 +244,14 @@ quake -nosound +cmd amlev1
 */
 void Cmd_StuffCmds_f (void)
 {
+	static qboolean	done = false;
 	int		i;
 	int		s;
 	char		*text;
+
+	if (done)
+		return;
+	done = true;
 
 	s = 0;
 	for (i = 1; i < com_argc; i++)
