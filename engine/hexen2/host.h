@@ -56,6 +56,7 @@ extern	cvar_t		pausable;
 
 extern	qboolean	host_initialized;	// true if into command execution
 extern	double		host_frametime;
+extern	double		sv_frametime;
 extern	byte		*host_basepal;
 extern	byte		*host_colormap;
 extern	int		host_framecount;	// incremented every frame, never reset

@@ -51,6 +51,7 @@ qboolean	host_initialized;		// true if into command execution
 static jmp_buf	host_abort;
 
 double		host_frametime;
+double		sv_frametime;
 double		realtime;			// without any filtering or bounding
 static double	oldrealtime;			// last frame run
 int		host_framecount;
@@ -872,13 +873,16 @@ static void _Host_Frame (float time)
 
 	while (phys_accum >= phys_interval)
 	{
+		double sv_start;
 		host_frametime = phys_interval;
 
 		if (sv.active)
 			CL_SendCmd ();
 
+		sv_start = Sys_DoubleTime();
 		if (sv.active)
 			Host_ServerFrame ();
+		sv_frametime = Sys_DoubleTime() - sv_start;
 
 		if (!sv.active)
 			CL_SendCmd ();

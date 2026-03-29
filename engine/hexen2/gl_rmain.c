@@ -3315,9 +3315,9 @@ static void R_ProfileReport (void)
 
 	total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
 
-	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
+	Con_Printf("GPU %.1f  CPU %.1f  SV %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
 		   "  %4i wpoly  %4i epoly\n",
-		   total, rprof_cpu_world * 1000.0,
+		   total, rprof_cpu_world * 1000.0, sv_frametime * 1000.0,
 		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
 		   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR],
 		   rprof_wpoly, rprof_epoly);
