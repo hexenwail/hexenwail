@@ -1429,15 +1429,14 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	if (R_CullBox (mins, maxs))
 		return;
 
-#if 0 /* causes side effects in 16 bpp. alternative down below */
 	/* Get rid of Z-fighting for textures by offsetting the
-	 * drawing of entity models compared to normal polygons. */
-	if (gl_zfix.integer)
+	 * drawing of entity models compared to normal polygons.
+	 * gl_zfix 2 = proper polygon offset (test for NVIDIA fuzz) */
+	if (gl_zfix.integer >= 2)
 	{
 		glEnable_fp(GL_POLYGON_OFFSET_FILL);
-		glEnable_fp(GL_POLYGON_OFFSET_LINE);
+		glPolygonOffset_fp(1.0f, 1.0f);
 	}
-#endif /* #if 0 */
 
 	GL_ImmColor3f (1,1,1);
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
@@ -1533,13 +1532,10 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 
 	/* Lightmaps applied via multitexture in R_RenderBrushPoly */
 	GL_PopMatrix();
-#if 0 /* see above... */
-	if (gl_zfix.integer)
+	if (gl_zfix.integer >= 2)
 	{
 		glDisable_fp(GL_POLYGON_OFFSET_FILL);
-		glDisable_fp(GL_POLYGON_OFFSET_LINE);
 	}
-#endif /* #if 0 */
 }
 
 

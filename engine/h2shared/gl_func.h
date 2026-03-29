@@ -102,9 +102,7 @@ GL_FUNCTION(void, glPopMatrix, (void))
 GL_FUNCTION(void, glLoadIdentity, (void))
 GL_FUNCTION(void, glMatrixMode, (GLenum))
 GL_FUNCTION(void, glLoadMatrixf, (const GLfloat *))
-/*
 GL_FUNCTION(void, glPolygonOffset, (GLfloat,GLfloat))
-*/
 
 GL_FUNCTION(const GLubyte*, glGetString, (GLenum))
 GL_FUNCTION(void, glGetFloatv, (GLenum,GLfloat *))
