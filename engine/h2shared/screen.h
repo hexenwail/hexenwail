@@ -61,6 +61,7 @@ extern	cvar_t		scr_fov;
 extern	cvar_t		scr_fov_adapt;
 extern	cvar_t		scr_viewsize;
 extern	cvar_t		scr_contrans;
+extern	cvar_t		scr_centerprintbg;
 extern	int		trans_level;
 
 // only the refresh window will be updated unless these variables are flagged 

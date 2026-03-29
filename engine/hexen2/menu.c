@@ -2352,7 +2352,7 @@ static void M_Display_Draw (void)
 		M_PrintWhite (220, 80 + 8*DISP_SCRSIZE, "Full");
 
 	M_Print (76, 80 + 8*DISP_RENDERING,	"Rendering...");
-	M_Print (76, 80 + 8*DISP_GRAPHICS,	"Graphics...");
+	M_Print (76, 80 + 8*DISP_GRAPHICS,	"Misc...");
 
 	/* separator */
 
@@ -2799,7 +2799,7 @@ static void M_Graphics_AdjustSliders (int dir)
 static void M_Graphics_Draw (void)
 {
 	ScrollTitle("gfx/menu/title3.lmp");
-	M_PrintWhite (96, 72, "Graphics");
+	M_PrintWhite (96, 72, "Misc");
 
 	M_Print (76, 92 + 8*GFX_CENTERPRINTBG,	"Message Backdrop:");
 	M_DrawCheckbox (220, 92 + 8*GFX_CENTERPRINTBG, scr_centerprintbg.integer);
