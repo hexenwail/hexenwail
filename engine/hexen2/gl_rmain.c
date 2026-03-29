@@ -465,10 +465,17 @@ static void R_DrawSpriteModel (entity_t *e)
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		glEnable_fp (GL_BLEND);
+		glDepthMask_fp (GL_FALSE);
 	}
 	else
 	{
 		glDisable_fp (GL_BLEND);
+	}
+
+	if (psprite->type == SPR_ORIENTED)
+	{
+		glEnable_fp (GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset_fp (-1.0f, -1.0f);
 	}
 
 	GL_Bind(frame->gl_texturenum);
@@ -515,7 +522,14 @@ static void R_DrawSpriteModel (entity_t *e)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
+	if (psprite->type == SPR_ORIENTED)
+	{
+		glDisable_fp (GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset_fp (0.0f, 0.0f);
+	}
+
 	GL_SetAlphaThreshold(0.01f);
+	glDepthMask_fp (GL_TRUE);
 	glDisable_fp (GL_BLEND);
 }
 
