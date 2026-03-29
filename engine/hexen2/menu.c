@@ -2104,8 +2104,8 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_wateralpha", 0.5f);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
-			Cvar_SetValue ("r_shadows", 1);
-			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("r_shadows", 0);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
@@ -2128,8 +2128,8 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_wateralpha", 0.5f);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
-			Cvar_SetValue ("r_shadows", 1);
-			Cvar_SetValue ("r_dynamic", 1);
+			Cvar_SetValue ("r_shadows", 0);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
@@ -2228,8 +2228,8 @@ static void M_Display_Draw (void)
 		float sc = r_scale.value;
 
 		qboolean is_clean    = (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && !sh);
-		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && sh);
-		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && sh);
+		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && !sh);
+		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && !sh);
 
 		if (is_clean)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
@@ -3384,9 +3384,11 @@ static const char *bindnames[][2] =
 
 static int		keys_cursor;
 static int		keys_top = 0;
+static qboolean		keys_tap = false;	// TAB toggles tap binding mode
 
 static void M_Menu_Keys_f (void)
 {
+	keys_tap = false;
 	Key_SetDest (key_menu);
 	m_state = m_keys;
 	m_entersound = true;
@@ -3441,6 +3443,58 @@ static void M_UnbindCommand (const char *command)
 	}
 }
 
+static void M_FindDoubleKeysForCommand (const char *command, int *twokeys)
+{
+	int		count;
+	int		j;
+	int		l, l2;
+	char	*b;
+
+	twokeys[0] = twokeys[1] = -1;
+	l = strlen(command);
+	count = 0;
+
+	for (j = 0; j < 256; j++)
+	{
+		b = doublebindings[j];
+		if (!b)
+			continue;
+		if (!strncmp (b, command, l))
+		{
+			l2 = strlen(b);
+			if (l == l2)
+			{
+				twokeys[count] = j;
+				count++;
+				if (count == 2)
+					break;
+			}
+		}
+	}
+}
+
+static void M_UnbindDoubleCommand (const char *command)
+{
+	int		j;
+	int		l;
+	char	*b;
+	char	cmd[80];
+
+	l = strlen(command);
+
+	for (j = 0; j < 256; j++)
+	{
+		b = doublebindings[j];
+		if (!b)
+			continue;
+		if (!strncmp (b, command, l))
+		{
+			q_snprintf (cmd, sizeof(cmd), "unbind2 \"%s\"\n", Key_KeynumToString(j));
+			Cbuf_InsertText (cmd);
+		}
+	}
+}
+
 
 static void M_Keys_Draw (void)
 {
@@ -3449,6 +3503,12 @@ static void M_Keys_Draw (void)
 	const char	*name;
 
 	ScrollTitle("gfx/menu/title6.lmp");
+
+	/* Mode indicator */
+	if (keys_tap)
+		M_Print (96, 56, "TAP  (TAB: normal)");
+	else
+		M_Print (92, 56, "NORMAL  (TAB: tap)");
 
 	if (keys_top)
 		M_DrawCharacter (6, 80, 128);
@@ -3481,7 +3541,10 @@ static void M_Keys_Draw (void)
 
 		M_Print (16, y, bindnames[i+keys_top][1]);
 
-		M_FindKeysForCommand (bindnames[i+keys_top][0], keys);
+		if (keys_tap)
+			M_FindDoubleKeysForCommand (bindnames[i+keys_top][0], keys);
+		else
+			M_FindKeysForCommand (bindnames[i+keys_top][0], keys);
 
 		if (keys[0] == -1)
 		{
@@ -3510,7 +3573,10 @@ static void M_Keys_Draw (void)
 
 	if (Key_GetDest() & key_bindbit)
 	{
-		M_Print (12, 64, "Press a key or button for this action");
+		if (keys_tap)
+			M_Print (12, 64, "Press a key or button for TAP action");
+		else
+			M_Print (12, 64, "Press a key or button for this action");
 		M_DrawCharacter (130, 80 + (keys_cursor-keys_top)*8, '=');
 	}
 	else
@@ -3547,18 +3613,34 @@ static void M_Keys_Key (int k)
 			keys_cursor = 0;
 		break;
 
+	case K_TAB:		// toggle normal / double-tap mode
+		keys_tap = !keys_tap;
+		S_LocalSound ("raven/menu1.wav");
+		break;
+
 	case K_ENTER:		// go into bind mode
-		M_FindKeysForCommand (bindnames[keys_cursor][0], keys);
+		if (keys_tap)
+			M_FindDoubleKeysForCommand (bindnames[keys_cursor][0], keys);
+		else
+			M_FindKeysForCommand (bindnames[keys_cursor][0], keys);
 		S_LocalSound ("raven/menu2.wav");
 		if (keys[1] != -1)
-			M_UnbindCommand (bindnames[keys_cursor][0]);
+		{
+			if (keys_tap)
+				M_UnbindDoubleCommand (bindnames[keys_cursor][0]);
+			else
+				M_UnbindCommand (bindnames[keys_cursor][0]);
+		}
 		Key_SetDest (key_menubind);
 		break;
 
 	case K_BACKSPACE:	// delete bindings
 	case K_DEL:		// delete bindings
 		S_LocalSound ("raven/menu2.wav");
-		M_UnbindCommand (bindnames[keys_cursor][0]);
+		if (keys_tap)
+			M_UnbindDoubleCommand (bindnames[keys_cursor][0]);
+		else
+			M_UnbindCommand (bindnames[keys_cursor][0]);
 		break;
 
 	default:
@@ -5856,7 +5938,8 @@ void M_Keybind (int key)
 	S_LocalSound ("raven/menu1.wav");
 	if (key != K_ESCAPE && key != '`')
 	{
-		q_snprintf (cmd, sizeof(cmd), "bind \"%s\" \"%s\"\n",
+		q_snprintf (cmd, sizeof(cmd), "%s \"%s\" \"%s\"\n",
+			    keys_tap ? "bind2" : "bind",
 			    Key_KeynumToString (key), bindnames[keys_cursor][0]);
 		Cbuf_InsertText (cmd);
 	}

@@ -165,6 +165,7 @@
 typedef int keydest_t;
 
 extern	char	*keybindings[256];
+extern	char	*doublebindings[256];
 extern	int		key_count;			/* incremented every key event */
 extern	int		key_lastpress;
 
