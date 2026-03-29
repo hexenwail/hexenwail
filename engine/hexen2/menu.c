@@ -24,6 +24,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "gl_postprocess.h"
+#include "gl_shadow.h"
 #include "sdl_inc.h"
 
 void (*vid_menudrawfn)(void);
@@ -2504,6 +2505,7 @@ enum
 	REND_PARTICLES,
 	REND_FULLBRIGHTS,
 	REND_SHADOWS,
+	REND_SHADOWMAP,
 	REND_WATERCOLOR,
 	REND_WATERALPHA,
 	REND_WATERWARP,
@@ -2576,6 +2578,19 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_SHADOWS:
 		Cvar_SetValue ("r_shadows", !r_shadows.integer);
 		break;
+	case REND_SHADOWMAP:
+	{
+		int v = (int)r_shadow_resolution.value;
+		if (!r_shadow.integer) { Cvar_SetValue("r_shadow", 1); Cvar_SetValue("r_shadow_resolution", 256); }
+		else if (dir > 0) {
+			if (v < 64) v = 64; else if (v < 128) v = 128; else if (v < 256) v = 256; else if (v < 512) v = 512; else { Cvar_SetValue("r_shadow", 0); break; }
+			Cvar_SetValue("r_shadow_resolution", v);
+		} else {
+			if (v > 256) v = 256; else if (v > 128) v = 128; else if (v > 64) v = 64; else { Cvar_SetValue("r_shadow", 0); break; }
+			Cvar_SetValue("r_shadow_resolution", v);
+		}
+		break;
+	}
 	case REND_WATERCOLOR:
 	{
 		int v = (int)Cvar_VariableValue("r_watercolor") + dir;
@@ -2682,8 +2697,18 @@ static void M_Rendering_Draw (void)
 	M_Print (76, 92 + 8*REND_FULLBRIGHTS,	"Fullbrights   :");
 	M_DrawCheckbox (220, 92 + 8*REND_FULLBRIGHTS, gl_fullbrights.integer);
 
-	M_Print (76, 92 + 8*REND_SHADOWS,	"Shadows       :");
+	M_Print (76, 92 + 8*REND_SHADOWS,	"Flat Shadows  :");
 	M_DrawCheckbox (220, 92 + 8*REND_SHADOWS, r_shadows.integer);
+
+	M_Print (76, 92 + 8*REND_SHADOWMAP,	"Shadow Maps   :");
+	if (!r_shadow.integer)
+		M_PrintWhite (220, 92 + 8*REND_SHADOWMAP, "Off");
+	else
+	{
+		char buf[16];
+		q_snprintf(buf, sizeof(buf), "%d px", (int)r_shadow_resolution.value);
+		M_PrintWhite (220, 92 + 8*REND_SHADOWMAP, buf);
+	}
 
 	M_Print (76, 92 + 8*REND_WATERCOLOR,	"Water Tint    :");
 	switch ((int)Cvar_VariableValue("r_watercolor"))
