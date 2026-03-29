@@ -751,7 +751,7 @@ static GLuint	gpu_shadedots_ssbo;
 #ifdef __EMSCRIPTEN__
 cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 #else
-cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
+cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_ARCHIVE};
 #endif
 
 static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
@@ -1219,6 +1219,7 @@ static void R_DrawAliasModel (entity_t *e)
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		else
@@ -1227,6 +1228,7 @@ static void R_DrawAliasModel (entity_t *e)
 	else if (e->model->flags & EF_TRANSPARENT)
 	{
 		glEnable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		model_constant_alpha = 1.0f;
 	}
 	else if (e->model->flags & EF_HOLEY)
@@ -1240,6 +1242,7 @@ static void R_DrawAliasModel (entity_t *e)
 	else if (e->alpha != ENTALPHA_DEFAULT)
 	{
 		glEnable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 	}
 	else

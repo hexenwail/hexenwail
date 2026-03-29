@@ -684,6 +684,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		alpha_val = r_wateralpha.value;
 	}
 	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
@@ -785,6 +786,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		alpha_val = r_wateralpha.value;
 	}
 	else
@@ -932,6 +934,7 @@ void R_DrawWaterSurfaces (void)
 	GL_LoadMatrixf (r_world_matrix);
 
 	glEnable_fp (GL_BLEND);
+	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	GL_SetAlphaThreshold(0.0f);	/* don't discard translucent water */
 	GL_ImmColor4f (1,1,1,r_wateralpha.value);
 
