@@ -83,9 +83,8 @@ GL_FUNCTION(void, glDepthMask, (GLboolean))
 GL_FUNCTION(void, glDepthRange, (GLclampd,GLclampd))
 GL_FUNCTION(void, glDepthFunc, (GLenum))
 
-#if defined(DRAW_PROGRESSBARS) /* D_ShowLoadingSize() */
 GL_FUNCTION(void, glDrawBuffer, (GLenum))
-#endif
+GL_FUNCTION(void, glReadBuffer, (GLenum))
 GL_FUNCTION(void, glReadPixels, (GLint,GLint,GLsizei,GLsizei,GLenum,GLenum, GLvoid *))
 GL_FUNCTION(void, glPixelStorei, (GLenum,GLint))
 GL_FUNCTION(void, glHint, (GLenum,GLenum))
@@ -180,6 +179,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glShadeModel_fp(m)	((void)0)
 #define glPolygonMode_fp(f,m)	((void)0)
 #define glDrawBuffer_fp(m)	((void)0)
+#define glReadBuffer_fp(m)	((void)0)
 #define glRotatef_fp(a,x,y,z)	((void)0)
 #define glTranslatef_fp(x,y,z)	((void)0)
 #define glOrtho_fp(l,r,b,t,n,f)		((void)0)
@@ -245,6 +245,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glDepthFunc_fp		glDepthFunc
 
 #define glDrawBuffer_fp		glDrawBuffer
+#define glReadBuffer_fp		glReadBuffer
 #define glReadPixels_fp		glReadPixels
 #define glPixelStorei_fp	glPixelStorei
 #define glHint_fp		glHint
