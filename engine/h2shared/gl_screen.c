@@ -112,6 +112,7 @@ static	cvar_t	scr_zoomspeed = {"zoom_speed", "8", CVAR_ARCHIVE};
 cvar_t		scr_contrans = {"contrans", "0", CVAR_ARCHIVE};
 static	cvar_t	scr_conspeed = {"scr_conspeed", "300", CVAR_NONE};
 static	cvar_t	scr_centertime = {"scr_centertime", "4", CVAR_NONE};
+cvar_t		scr_centerprintbg = {"scr_centerprintbg", "1", CVAR_ARCHIVE};
 static	cvar_t	con_logcenterprint = {"con_logcenterprint", "1", CVAR_ARCHIVE};
 static	cvar_t	cl_showcrouchmsg = {"cl_showcrouchmsg", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
@@ -283,6 +284,26 @@ static void SCR_DrawCenterString (void)
 	FindTextBreaks(scr_centerstring, 38);
 
 	by = (25-lines) * 8 / 2 + ((vid.height - 200)>>1);
+
+	/* draw semi-transparent background behind centerprint text */
+	if (scr_centerprintbg.integer && lines > 0)
+	{
+		int pad = 8;
+		int bg_y = by - pad;
+		int bg_h = lines * 8 + pad * 2;
+		int bg_w = 38 * 8 + pad * 2;
+		int bg_x = (vid.width - bg_w) / 2;
+
+		glEnable_fp(GL_BLEND);
+		GL_ImmBegin();
+		GL_ImmColor4f(0.0f, 0.0f, 0.0f, 0.5f);
+		GL_ImmVertex2f(bg_x, bg_y);
+		GL_ImmVertex2f(bg_x + bg_w, bg_y);
+		GL_ImmVertex2f(bg_x + bg_w, bg_y + bg_h);
+		GL_ImmVertex2f(bg_x, bg_y + bg_h);
+		GL_ImmEnd(GL_QUADS, &gl_shader_flat);
+		glDisable_fp(GL_BLEND);
+	}
 
 	for (i = 0; i < lines; i++, by += 8)
 	{
@@ -542,6 +563,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_zoomfov);
 	Cvar_RegisterVariable (&scr_zoomspeed);
 	Cvar_RegisterVariable (&con_logcenterprint);
+	Cvar_RegisterVariable (&scr_centerprintbg);
 	Cvar_RegisterVariable (&cl_showcrouchmsg);
 	Cvar_RegisterVariable (&scr_contrans);
 	Cvar_RegisterVariable (&scr_conspeed);

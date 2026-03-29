@@ -2261,7 +2261,8 @@ static void M_Display_Draw (void)
 	else
 		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
 
-	M_Print (76, 92 + 8*DISP_RENDERING,	"Rendering...");
+	M_Print (76, 80 + 8*DISP_RENDERING,	"Rendering...");
+	M_Print (76, 80 + 8*DISP_GRAPHICS,	"Misc...");
 
 	/* separator */
 
@@ -2672,6 +2673,81 @@ static void M_Rendering_Key (int k)
 		break;
 	case K_RIGHTARROW:
 		M_Rendering_AdjustSliders (1);
+		break;
+	}
+}
+
+
+//=============================================================================
+/* GRAPHICS MENU */
+
+enum
+{
+	GFX_CENTERPRINTBG = 0,
+	GFX_ITEMS
+};
+
+static int	graphics_cursor;
+
+static void M_Menu_Graphics_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_graphics;
+	m_entersound = true;
+}
+
+static void M_Graphics_AdjustSliders (int dir)
+{
+	S_LocalSound ("raven/menu3.wav");
+
+	switch (graphics_cursor)
+	{
+	case GFX_CENTERPRINTBG:
+		Cvar_SetValue ("scr_centerprintbg", !scr_centerprintbg.integer);
+		break;
+	}
+}
+
+static void M_Graphics_Draw (void)
+{
+	ScrollTitle("gfx/menu/title3.lmp");
+	M_PrintWhite (96, 72, "Misc");
+
+	M_Print (76, 92 + 8*GFX_CENTERPRINTBG,	"Message Backdrop:");
+	M_DrawCheckbox (220, 92 + 8*GFX_CENTERPRINTBG, scr_centerprintbg.integer);
+
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
+	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
+}
+
+static void M_Graphics_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+		M_Menu_Display_f ();
+		break;
+	case K_ENTER:
+		m_entersound = true;
+		M_Graphics_AdjustSliders (1);
+		return;
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		graphics_cursor--;
+		if (graphics_cursor < 0)
+			graphics_cursor = GFX_ITEMS-1;
+		break;
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		graphics_cursor++;
+		if (graphics_cursor >= GFX_ITEMS)
+			graphics_cursor = 0;
+		break;
+	case K_LEFTARROW:
+		M_Graphics_AdjustSliders (-1);
+		break;
+	case K_RIGHTARROW:
+		M_Graphics_AdjustSliders (1);
 		break;
 	}
 }
