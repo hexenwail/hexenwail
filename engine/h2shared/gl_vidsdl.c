@@ -40,6 +40,7 @@
 #include "cdaudio.h"
 #include "sdl_inc.h"
 #include "gl_postprocess.h"
+#include "gl_shadow.h"
 #include "gl_shader.h"
 #include "gl_vbo.h"
 #include "filenames.h"
@@ -887,6 +888,7 @@ static void GL_Init (void)
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
+	GL_Shadow_Init();
 
 //	glClearColor_fp(1,0,0,0);
 	glCullFace_fp(GL_FRONT);
@@ -1157,6 +1159,7 @@ static void VID_ChangeVideoMode (int newmode)
 	S_ClearBuffer ();
 
 	// Shut down GPU resources before destroying GL context
+	GL_Shadow_Shutdown();
 	GL_PostProcess_Shutdown();
 	R_FreeWorldVBO();
 	GL_VBO_Shutdown();

@@ -64,6 +64,7 @@ typedef struct
 	float		minlight;	// don't add when contributing less
 	int		key;
 	qboolean	dark;		// subtracts light instead of adding
+	qboolean	torch;		// persistent torch light (ignores r_dynamic)
 	float		color[4];	// LordHavoc: colored lights support
 } dlight_t;
 

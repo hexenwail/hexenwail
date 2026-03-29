@@ -376,6 +376,9 @@ void R_PushDlights (void)
 		float dx, dy, dz, dist_sq;
 		if (l->die < cl.time || !l->radius)
 			continue;
+		/* r_dynamic 0: only push torch dlights */
+		if (!r_dynamic.integer && !l->torch)
+			continue;
 		/* Skip lights too far from view to see */
 		dx = l->origin[0] - r_origin[0];
 		dy = l->origin[1] - r_origin[1];

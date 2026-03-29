@@ -126,6 +126,9 @@ static void R_AddDynamicLights (msurface_t *surf)
 	{
 		if ( !(surf->dlightbits & (1<<lnum)) )
 			continue;		// not lit by this light
+		/* r_dynamic 0: only process torch dlights */
+		if (!r_dynamic.integer && !cl_dlights[lnum].torch)
+			continue;
 
 		rad = cl_dlights[lnum].radius;
 		dist = DotProduct (cl_dlights[lnum].origin, surf->plane->normal) - surf->plane->dist;
@@ -316,8 +319,8 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 		}
 	}
 
-// add all the dynamic lights (only when r_dynamic is enabled)
-	if (r_dynamic.integer && surf->dlightframe == r_framecount)
+// add all the dynamic lights
+	if (surf->dlightframe == r_framecount)
 		R_AddDynamicLights (surf);
 
 // bound, invert, and shift

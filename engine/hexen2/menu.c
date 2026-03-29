@@ -2077,11 +2077,11 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
-			Cvar_SetValue ("gl_torch_dlight", 0);
+			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
@@ -2100,11 +2100,11 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 0);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
-			Cvar_SetValue ("gl_torch_dlight", 0);
+			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
@@ -2123,11 +2123,11 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
-			Cvar_SetValue ("gl_torch_dlight", 0);
+			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 1);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
@@ -2146,12 +2146,12 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
-			Cvar_SetValue ("gl_torch_dlight", 0);
+			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
@@ -2170,12 +2170,12 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 1);
-			Cvar_SetValue ("r_dynamic", 1);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
-			Cvar_SetValue ("gl_torch_dlight", 1);
+			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
@@ -2194,12 +2194,12 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 1);
-			Cvar_SetValue ("r_dynamic", 1);
+			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
-			Cvar_SetValue ("gl_torch_dlight", 1);
+			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
@@ -2486,7 +2486,6 @@ enum
 	REND_PARTICLES,
 	REND_FULLBRIGHTS,
 	REND_SHADOWS,
-	REND_DYNLIGHT,
 	REND_WATERCOLOR,
 	REND_WATERALPHA,
 	REND_WATERWARP,
@@ -2558,9 +2557,6 @@ static void M_Rendering_AdjustSliders (int dir)
 		break;
 	case REND_SHADOWS:
 		Cvar_SetValue ("r_shadows", !r_shadows.integer);
-		break;
-	case REND_DYNLIGHT:
-		Cvar_SetValue ("r_dynamic", r_dynamic.integer ? 0 : 1);
 		break;
 	case REND_WATERCOLOR:
 	{
@@ -2670,9 +2666,6 @@ static void M_Rendering_Draw (void)
 
 	M_Print (76, 92 + 8*REND_SHADOWS,	"Shadows       :");
 	M_DrawCheckbox (220, 92 + 8*REND_SHADOWS, r_shadows.integer);
-
-	M_Print (76, 92 + 8*REND_DYNLIGHT,	"Dynamic Light :");
-	M_DrawCheckbox (220, 92 + 8*REND_DYNLIGHT, r_dynamic.integer);
 
 	M_Print (76, 92 + 8*REND_WATERCOLOR,	"Water Tint    :");
 	switch ((int)Cvar_VariableValue("r_watercolor"))

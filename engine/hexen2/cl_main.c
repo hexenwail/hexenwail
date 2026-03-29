@@ -684,6 +684,7 @@ static void CL_RelinkEntities (void)
 			VectorCopy (ent->origin,  dl->origin);
 			dl->radius = 200;	/* torch: fixed radius, not scaled by gl_flashintensity */
 			dl->die = cl.time + 0.001;
+			dl->torch = true;
 #		ifdef GLQUAKE
 			if (gl_colored_dynamic_lights.integer)
 			{
@@ -700,13 +701,14 @@ static void CL_RelinkEntities (void)
 		{
 			float *gs;
 			int pflags = R_GetPimpFlags(ent, &gs);
-			if (gl_torch_dlight.integer && (pflags & XF_TORCH_GLOW))
+			if (pflags & XF_TORCH_GLOW)
 			{
 				dl = CL_AllocDlight (i);
 				VectorCopy (ent->origin, dl->origin);
 				dl->origin[2] += 8;
 				dl->radius = 150;
 				dl->die = cl.time + 0.001;
+				dl->torch = true;
 #			ifdef GLQUAKE
 				if (gl_colored_dynamic_lights.integer)
 				{

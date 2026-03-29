@@ -24,6 +24,7 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
+#include "gl_shadow.h"
 
 /* ES 3.0 compatibility */
 #ifdef EMSCRIPTEN
@@ -146,7 +147,7 @@ cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to d
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
-cvar_t	gl_torch_dlight = {"gl_torch_dlight", "0", CVAR_ARCHIVE};
+cvar_t	gl_torch_dlight = {"gl_torch_dlight", "1", CVAR_ARCHIVE};
 cvar_t	gl_glow_intensity = {"gl_glow_intensity", "1", CVAR_ARCHIVE};
 cvar_t	gl_flashintensity = {"gl_flashintensity", "1", CVAR_ARCHIVE};
 
@@ -2544,14 +2545,15 @@ static void R_DrawViewModel (void)
 	}
 
 // add dynamic lights
-	if (!r_dynamic.integer)
-		goto skip_dlights;
 	for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 	{
 		dl = &cl_dlights[lnum];
 		if (!dl->radius)
 			continue;
 		if (dl->die < cl.time)
+			continue;
+		/* r_dynamic 0 skips transient dlights but keeps torches */
+		if (!r_dynamic.integer && !dl->torch)
 			continue;
 
 		VectorSubtract (e->origin, dl->origin, dist);
@@ -3375,6 +3377,8 @@ void R_RenderView (void)
 	}
 
 	mirror = false;
+
+	GL_Shadow_RenderMaps();
 
 	R_Clear ();
 
