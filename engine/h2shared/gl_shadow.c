@@ -413,10 +413,20 @@ void GL_Shadow_RenderMaps (void)
 	for (i = 0; i < shadow_count; i++)
 		Shadow_RenderOne(&shadow_lights[i], res);
 
-	/* Restore state */
+	/* Restore all GL state touched by shadow passes */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, saved_fbo);
 	glViewport_fp(saved_viewport[0], saved_viewport[1],
 		      saved_viewport[2], saved_viewport[3]);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glCullFace_fp(GL_FRONT);	/* scene default */
+	glDepthFunc_fp(GL_LEQUAL);	/* scene default */
+	glUseProgram_fp(0);
+	glBindVertexArray_fp(0);
+	{
+		GLenum buf = GL_COLOR_ATTACHMENT0;
+		if (saved_fbo)
+			glDrawBuffers_fp(1, &buf);
+	}
 }
 
 void GL_Shadow_BindForScene (GLuint program)
