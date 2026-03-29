@@ -15,6 +15,11 @@
 #include "gl_shadow.h"
 #include "gl_shader.h"
 #include "gl_matrix.h"
+#include "gl_vbo.h"
+
+/* World VBO (defined in gl_rsurf.c) */
+extern GLuint	world_vao;
+extern int	world_num_indices;
 
 #ifndef GL_DEPTH_COMPONENT16
 #define GL_DEPTH_COMPONENT16	0x81A5
@@ -261,12 +266,67 @@ static void Shadow_RenderOne (shadow_light_t *sl, int res)
 
 	glUseProgram_fp(shadow_depth_prog);
 	glUniformMatrix4fv_fp(shadow_depth_u_mvp, 1, GL_FALSE, sl->matrix);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
-	/* TODO: render world BSP + alias models visible from this light.
-	 * For now, this is a stub — the shadow map will be empty (all-far).
-	 * Phase 2 (uhexen2-q3gh.2) will add the actual geometry rendering. */
+	/* Render world BSP from static VBO */
+	if (world_vao && world_num_indices > 0)
+	{
+		glBindVertexArray_fp(world_vao);
+		glDrawElements_fp(GL_TRIANGLES, world_num_indices, GL_UNSIGNED_INT, NULL);
+		glBindVertexArray_fp(0);
+	}
+
+	/* Render alias models (enemies, pickups) within light radius */
+	{
+		int j;
+		extern int cl_numvisedicts;
+		extern entity_t *cl_visedicts[];
+
+		for (j = 0; j < cl_numvisedicts; j++)
+		{
+			entity_t *e = cl_visedicts[j];
+			float dx, dy, dz, dist_sq;
+			alias_gpu_mesh_t *gm;
+			aliashdr_t *hdr;
+
+			if (!e->model || e->model->type != mod_alias)
+				continue;
+
+			dx = e->origin[0] - sl->origin[0];
+			dy = e->origin[1] - sl->origin[1];
+			dz = e->origin[2] - sl->origin[2];
+			dist_sq = dx*dx + dy*dy + dz*dz;
+			if (dist_sq > sl->radius * sl->radius)
+				continue;
+
+			hdr = (aliashdr_t *)Mod_Extradata(e->model);
+			gm = GL_GetAliasGPUMesh(hdr);
+			if (!gm || !gm->valid)
+				continue;
+
+			/* Build entity world transform * light MVP */
+			{
+				float ent_mat[16], translate[16];
+				memset(translate, 0, sizeof(translate));
+				translate[0] = hdr->scale[0];
+				translate[5] = hdr->scale[1];
+				translate[10] = hdr->scale[2];
+				translate[12] = e->origin[0] + hdr->scale_origin[0];
+				translate[13] = e->origin[1] + hdr->scale_origin[1];
+				translate[14] = e->origin[2] + hdr->scale_origin[2];
+				translate[15] = 1.0f;
+				Mat4_Multiply(sl->matrix, translate, ent_mat);
+				glUniformMatrix4fv_fp(shadow_depth_u_mvp, 1, GL_FALSE, ent_mat);
+			}
+
+			glBindVertexArray_fp(gm->vao);
+			glDrawElements_fp(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
+		}
+		glBindVertexArray_fp(0);
+	}
 
 	/* Restore state */
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glCullFace_fp(GL_BACK);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
 }
