@@ -393,6 +393,55 @@ store:
 
 
 /*
+================
+R_UpdateSurfaceLightmap
+
+Checks if a surface's lightmap is dirty (lightstyle changed or
+dynamic light) and if so, expands the dirty rect and optionally
+rebuilds the lightmap.  Also chains the surface poly into
+lightmap_polys[].  Returns true if the lightmap was dirty.
+================
+*/
+static qboolean R_UpdateSurfaceLightmap (msurface_t *s, qboolean rebuild)
+{
+	int		maps;
+	qboolean	dirty = false;
+
+	/* Chain into lightmap poly list */
+	s->polys->chain = lightmap_polys[s->lightmaptexturenum];
+	lightmap_polys[s->lightmaptexturenum] = s->polys;
+
+	/* Check lightstyle changes */
+	for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
+	{
+		if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
+		{
+			dirty = true;
+			break;
+		}
+	}
+
+	/* Check dynamic lights */
+	if (!dirty && (s->dlightframe == r_framecount || s->cached_dlight))
+		dirty = true;
+
+	if (dirty)
+	{
+		LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
+				   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+		if (rebuild)
+		{
+			byte *base = lightmaps + s->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+			base += s->light_t * BLOCK_WIDTH * lightmap_bytes + s->light_s * lightmap_bytes;
+			R_BuildLightMap (s, base, BLOCK_WIDTH*lightmap_bytes);
+		}
+	}
+
+	return dirty;
+}
+
+
+/*
 ===============
 R_TextureAnimation
 
@@ -622,8 +671,6 @@ R_RenderBrushPoly
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 {
 	texture_t	*t;
-	byte		*base;
-	int		maps;
 	float		intensity, alpha_val;
 
 	c_brush_polys++;
@@ -707,31 +754,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	}
 
-	// add the poly to the proper lightmap chain
-	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
-	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
-
-	// check for lightmap modification
-	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
-	{
-		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
-			goto dynamic;
-	}
-
-	if (fa->dlightframe == r_framecount	// dynamic this frame
-		|| fa->cached_dlight)		// dynamic previously
-	{
-dynamic:
-		/* Always rebuild: r_dynamic only gates new dlight addition
-		 * (inside R_BuildLightMap via dlightframe check), not cleanup.
-		 * Skipping the rebuild leaves stale bright squares when r_dynamic
-		 * is toggled off after a light was applied. */
-		LM_ExpandDirtyRect(fa->lightmaptexturenum, fa->light_s, fa->light_t,
-				   (fa->extents[0] >> 4) + 1, (fa->extents[1] >> 4) + 1);
-		base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-		base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-	}
+	// check for lightmap modification and rebuild if needed
+	R_UpdateSurfaceLightmap (fa, true);
 
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
@@ -749,8 +773,6 @@ dynamic:
 void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 {
 	texture_t	*t;
-	byte		*base;
-	int		maps;
 	float		intensity, alpha_val;
 
 	c_brush_polys++;
@@ -839,27 +861,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 
-		// add the poly to the proper lightmap chain
-		fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
-		lightmap_polys[fa->lightmaptexturenum] = fa->polys;
-
-		// check for lightmap modification
-		for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
-		{
-			if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
-				goto dynamic1;
-		}
-
-		if (fa->dlightframe == r_framecount	// dynamic this frame
-		    || fa->cached_dlight)		// dynamic previously
-		{
-dynamic1:
-			LM_ExpandDirtyRect(fa->lightmaptexturenum, fa->light_s, fa->light_t,
-					   (fa->extents[0] >> 4) + 1, (fa->extents[1] >> 4) + 1);
-			base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-			base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-		}
+		// check for lightmap modification and rebuild if needed
+		R_UpdateSurfaceLightmap (fa, true);
 	}
 
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
@@ -996,8 +999,6 @@ static void R_BatchEmitSurface (msurface_t *fa)
 	glpoly_t	*p = fa->polys;
 	float		*v;
 	int		j, nverts;
-	byte		*base;
-	int		maps;
 
 	nverts = p->numverts;
 	if (nverts < 3)
@@ -1038,24 +1039,8 @@ static void R_BatchEmitSurface (msurface_t *fa)
 
 	c_brush_polys++;
 
-	/* Add to lightmap chain and check for dynamic updates */
-	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
-	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
-
-	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
-	{
-		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
-			goto dynamic_batch;
-	}
-	if (fa->dlightframe == r_framecount || fa->cached_dlight)
-	{
-dynamic_batch:
-		LM_ExpandDirtyRect(fa->lightmaptexturenum, fa->light_s, fa->light_t,
-				   (fa->extents[0] >> 4) + 1, (fa->extents[1] >> 4) + 1);
-		base = lightmaps + fa->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-		base += fa->light_t * BLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
-	}
+	/* Check for lightmap modification and rebuild if needed */
+	R_UpdateSurfaceLightmap (fa, true);
 }
 
 /* Set true when GPU compute cull handles solid surfaces this frame */
@@ -1165,23 +1150,7 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 				{
 					if (s->polys)
-					{
-						int maps;
-						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
-						lightmap_polys[s->lightmaptexturenum] = s->polys;
-						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
-						{
-							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
-							{
-								LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-										   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
-								break;
-							}
-						}
-						if (s->dlightframe == r_framecount || s->cached_dlight)
-							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
-					}
+						R_UpdateSurfaceLightmap (s, false);
 				}
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
@@ -1258,33 +1227,7 @@ static void DrawTextureChains (entity_t *e)
 
 					/* Track lightmap polys and rebuild if needed */
 					if (s->polys)
-					{
-						int maps;
-						qboolean need_rebuild = false;
-						byte *base;
-
-						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
-						lightmap_polys[s->lightmaptexturenum] = s->polys;
-						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
-						{
-							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
-							{
-								need_rebuild = true;
-								break;
-							}
-						}
-						if (s->dlightframe == r_framecount || s->cached_dlight)
-							need_rebuild = true;
-
-						if (need_rebuild)
-						{
-							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
-							base = lightmaps + s->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
-							base += s->light_t * BLOCK_WIDTH * lightmap_bytes + s->light_s * lightmap_bytes;
-							R_BuildLightMap (s, base, BLOCK_WIDTH*lightmap_bytes);
-						}
-					}
+						R_UpdateSurfaceLightmap (s, true);
 				}
 
 				/* Second pass: merge contiguous IBO ranges and draw */
