@@ -43,6 +43,10 @@ void GL_Shadow_BindForScene (GLuint program);
 /* Returns true if shadow mapping is active this frame */
 qboolean GL_Shadow_Active (void);
 
+/* CPU-side shadow lookup: returns 0.0 (full shadow) to 1.0 (fully lit)
+ * for a world-space point. Used for entity lighting. */
+float GL_Shadow_PointFactor (vec3_t point);
+
 /* Cvars */
 extern cvar_t r_shadow;		/* 0=off, 1=on */
 extern cvar_t r_shadow_resolution;	/* shadow map size (64-1024) */

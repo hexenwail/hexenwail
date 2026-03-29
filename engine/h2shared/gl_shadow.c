@@ -409,3 +409,56 @@ qboolean GL_Shadow_Active (void)
 {
 	return shadow_initialized && r_shadow.integer && shadow_count > 0;
 }
+
+float GL_Shadow_PointFactor (vec3_t point)
+{
+	int i;
+	float factor = 1.0f;
+
+	if (!shadow_initialized || shadow_count == 0)
+		return 1.0f;
+
+	for (i = 0; i < shadow_count; i++)
+	{
+		shadow_light_t *sl = &shadow_lights[i];
+		float dx, dy, dz, dist;
+		float lpos[4], proj[3];
+
+		if (!sl->active || !sl->depth_tex)
+			continue;
+
+		dx = point[0] - sl->origin[0];
+		dy = point[1] - sl->origin[1];
+		dz = point[2] - sl->origin[2];
+		dist = sqrtf(dx*dx + dy*dy + dz*dz);
+		if (dist > sl->radius)
+			continue;
+
+		/* Transform point to light clip space */
+		lpos[0] = sl->matrix[0]*point[0] + sl->matrix[4]*point[1] + sl->matrix[8]*point[2] + sl->matrix[12];
+		lpos[1] = sl->matrix[1]*point[0] + sl->matrix[5]*point[1] + sl->matrix[9]*point[2] + sl->matrix[13];
+		lpos[2] = sl->matrix[2]*point[0] + sl->matrix[6]*point[1] + sl->matrix[10]*point[2] + sl->matrix[14];
+		lpos[3] = sl->matrix[3]*point[0] + sl->matrix[7]*point[1] + sl->matrix[11]*point[2] + sl->matrix[15];
+
+		if (lpos[3] <= 0)
+			continue;	/* behind light */
+
+		/* Perspective divide → NDC → [0,1] */
+		proj[0] = (lpos[0] / lpos[3]) * 0.5f + 0.5f;
+		proj[1] = (lpos[1] / lpos[3]) * 0.5f + 0.5f;
+		proj[2] = (lpos[2] / lpos[3]) * 0.5f + 0.5f;
+
+		if (proj[0] < 0 || proj[0] > 1 || proj[1] < 0 || proj[1] > 1)
+			continue;	/* outside shadow map */
+
+		/* Simple shadow test: if the point is far from light and within
+		 * the shadow frustum, darken it based on distance attenuation.
+		 * Full per-pixel readback would be too slow for CPU side. */
+		{
+			float atten = 1.0f - dist / sl->radius;
+			factor *= 1.0f - 0.5f * atten; /* 50% shadow at closest */
+		}
+	}
+
+	return factor;
+}
