@@ -577,11 +577,61 @@ static void CL_RelinkEntities (void)
 			VectorCopy (ent->msg_angles[0], ent->angles);
 			ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
 		}
+		else if (ent->lerpflags & LERP_MOVESTEP)
+		{
+		// MOVESTEP entities (monsters): smooth per-entity interpolation.
+		// The server sends U_NOLERP for MOVETYPE_STEP entities, which
+		// classically disabled lerping causing choppy 20Hz movement.
+		// Instead, we track per-entity origin transitions and blend
+		// smoothly over the tick interval.
+			if (ent->lerpflags & LERP_RESETMOVE)
+			{
+			// teleport/spawn: snap immediately
+				VectorCopy (ent->msg_origins[0], ent->previousorigin);
+				VectorCopy (ent->msg_origins[0], ent->currentorigin);
+				VectorCopy (ent->msg_angles[0], ent->previousangles);
+				VectorCopy (ent->msg_angles[0], ent->currentangles);
+				ent->movelerpstart = 0;
+				ent->lerpflags &= ~LERP_RESETMOVE;
+			}
+			else if (!VectorCompare (ent->msg_origins[0], ent->currentorigin))
+			{
+			// server sent a new position — start a new lerp
+				VectorCopy (ent->currentorigin, ent->previousorigin);
+				VectorCopy (ent->msg_origins[0], ent->currentorigin);
+				VectorCopy (ent->currentangles, ent->previousangles);
+				VectorCopy (ent->msg_angles[0], ent->currentangles);
+				ent->movelerpstart = cl.mtime[0];
+			}
+
+		// compute smooth interpolation fraction
+			if (ent->movelerpstart > 0)
+			{
+				float	tickduration = cl.mtime[0] - cl.mtime[1];
+				if (tickduration < 0.001)
+					tickduration = 0.1;
+				f = (cl.time - ent->movelerpstart) / tickduration;
+				f = CLAMP(0, f, 1);
+			}
+			else
+				f = 1;
+
+			for (j = 0; j < 3; j++)
+			{
+				ent->origin[j] = ent->previousorigin[j] + f * (ent->currentorigin[j] - ent->previousorigin[j]);
+
+				d = ent->currentangles[j] - ent->previousangles[j];
+				if (d > 180)
+					d -= 360;
+				else if (d < -180)
+					d += 360;
+				ent->angles[j] = ent->previousangles[j] + f * d;
+			}
+		}
 		else
 		{	// if the delta is large, assume a teleport and don't lerp
-			// don't extrapolate the viewentity — only interpolate (cap at 1)
-			// to prevent camera/weapon overshoot and snap-back
-			f = (i == cl.viewentity && frac > 1) ? 1 : frac;
+			// never extrapolate — cap at 1 to prevent overshoot/snap-back
+			f = (frac > 1) ? 1 : frac;
 			for (j = 0; j < 3; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
