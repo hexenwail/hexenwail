@@ -77,30 +77,36 @@ static const char *GL_DebugSeverityStr (GLenum severity)
 	}
 }
 
-static int gl_debug_error_count;	/* total HIGH/UNDEFINED errors this session */
-#define GL_DEBUG_ERROR_LIMIT	20	/* print first N, then suppress */
+static double gl_debug_last_time;	/* last error print time */
+static int gl_debug_suppressed;		/* errors suppressed since last print */
+#define GL_DEBUG_MIN_INTERVAL	1.0	/* seconds between error prints */
 
 static void APIENTRY GL_DebugCallback (GLenum source, GLenum type, GLuint id,
 	GLenum severity, GLsizei length, const char *message, const void *userParam)
 {
+	double	now;
+
 	(void)source; (void)id; (void)length; (void)userParam;
 	if (severity == GL_DEBUG_SEVERITY_NOTIFICATION)
 		return;  /* skip noise */
 
 	if (type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
 	{
-		gl_debug_error_count++;
-		if (gl_debug_error_count == GL_DEBUG_ERROR_LIMIT)
+		now = Sys_DoubleTime();
+		if (now - gl_debug_last_time < GL_DEBUG_MIN_INTERVAL)
 		{
-			Con_Printf ("GL [%s]: %s\n", GL_DebugSeverityStr(severity), message);
-			Con_Printf ("GL: suppressing further errors (hit %d limit)\n", GL_DEBUG_ERROR_LIMIT);
+			gl_debug_suppressed++;
 			return;
 		}
-		if (gl_debug_error_count > GL_DEBUG_ERROR_LIMIT)
-			return;  /* suppressed */
+		if (gl_debug_suppressed > 0)
+		{
+			Con_DPrintf ("GL: (%d errors suppressed)\n", gl_debug_suppressed);
+			gl_debug_suppressed = 0;
+		}
+		gl_debug_last_time = now;
 	}
 
-	Con_Printf ("GL [%s]: %s\n", GL_DebugSeverityStr(severity), message);
+	Con_DPrintf ("GL [%s]: %s\n", GL_DebugSeverityStr(severity), message);
 }
 
 #define WARP_WIDTH		320
