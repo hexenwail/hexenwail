@@ -50,6 +50,7 @@ void IN_HideMouse (void);
 qboolean IN_HasGamepad (void);
 void IN_GPRumble (float low_freq, float high_freq, unsigned int duration_ms);
 
+extern cvar_t	in_gamepad;
 extern cvar_t	joy_deadzone_look;
 extern cvar_t	joy_deadzone_move;
 extern cvar_t	joy_deadzone_trigger;
