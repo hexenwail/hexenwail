@@ -1181,7 +1181,7 @@ static void DrawTextureChains (entity_t *e)
 					}
 				}
 			}
-			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity && !(r_dynamic.integer && cl_dlights[0].radius > 0))
+			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
 			{
 				/* Static VBO path: world geometry is pre-uploaded.
 				 * Just issue glDrawElements per visible surface

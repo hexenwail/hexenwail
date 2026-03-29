@@ -2951,12 +2951,17 @@ R_RenderScene
 r_refdef must be set before the first call
 ================
 */
+static double rs_setup, rs_world, rs_sky, rs_ents, rs_glows;
+
 static void R_RenderScene (void)
 {
+	double t0, t1;
+
 	R_SetupFrame ();
 
 	R_SetFrustum ();
 
+	t0 = Sys_DoubleTime();
 	R_SetupGL ();
 
 	GL_ImmResetState ();	/* reset cached GL state for new frame */
@@ -2966,16 +2971,30 @@ static void R_RenderScene (void)
 	R_MarkLeaves ();	// done here so we know if we're in water
 
 	Fog_EnableGFog ();
+	t1 = Sys_DoubleTime();
+	rs_setup = t1 - t0;
 
+	t0 = t1;
 	R_DrawWorld ();		// adds static entities to the list
+	t1 = Sys_DoubleTime();
+	rs_world = t1 - t0;
 
+	t0 = t1;
 	Sky_DrawSky ();		// render skybox
+	t1 = Sys_DoubleTime();
+	rs_sky = t1 - t0;
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
+	t0 = Sys_DoubleTime();
 	R_DrawEntitiesOnList ();
+	t1 = Sys_DoubleTime();
+	rs_ents = t1 - t0;
 
+	t0 = t1;
 	R_DrawAllGlows();
+	t1 = Sys_DoubleTime();
+	rs_glows = t1 - t0;
 
 	Fog_DisableGFog ();
 
@@ -3316,11 +3335,13 @@ static void R_ProfileReport (void)
 	total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
 
 	Con_Printf("GPU %.1f  CPU %.1f  SV %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
-		   "  %4i wpoly  %4i epoly\n",
+		   "  %4i wpoly  %4i epoly  setup %.1f  bsp %.1f  sky %.1f  ent %.1f  glow %.1f\n",
 		   total, rprof_cpu_world * 1000.0, sv_frametime * 1000.0,
 		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
 		   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR],
-		   rprof_wpoly, rprof_epoly);
+		   rprof_wpoly, rprof_epoly,
+		   rs_setup * 1000.0, rs_world * 1000.0, rs_sky * 1000.0,
+		   rs_ents * 1000.0, rs_glows * 1000.0);
 
 	rprof_pending = false;
 }
