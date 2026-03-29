@@ -1176,6 +1176,12 @@ void Key_Event (int key, qboolean down)
 		Key_Message (key);
 		break;
 	case key_menu:
+		/* Allow backtick/tilde to open console from menu */
+		if (key == '`' || key == '~')
+		{
+			Con_ToggleConsole_f();
+			break;
+		}
 		M_Keydown (key, key_repeats[key] > 1);
 		break;
 	case key_menubind:
