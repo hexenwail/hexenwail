@@ -261,8 +261,9 @@ static void Shadow_RenderOne (shadow_light_t *sl, int res)
 	glDepthFunc_fp(GL_LESS);
 	glDepthMask_fp(1);
 
-	/* Cull front faces to reduce shadow acne */
-	glCullFace_fp(GL_FRONT);
+	/* Disable face culling for shadow pass — front-face cull was
+	 * corrupting scene state and hiding thin/single-sided geometry */
+	glDisable_fp(GL_CULL_FACE);
 
 	glUseProgram_fp(shadow_depth_prog);
 	glUniformMatrix4fv_fp(shadow_depth_u_mvp, 1, GL_FALSE, sl->matrix);
@@ -327,7 +328,8 @@ static void Shadow_RenderOne (shadow_light_t *sl, int res)
 
 	/* Restore state */
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glCullFace_fp(GL_BACK);
+	glEnable_fp(GL_CULL_FACE);
+	glCullFace_fp(GL_FRONT);	/* scene default for Quake */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
 }
 
