@@ -46,6 +46,7 @@ static int	key_repeats[256];	// if > 1, it is autorepeating
 static qboolean	keyreserved[256];	// hardcoded, can't be rebound by the user
 static qboolean	keydown[256];
 static double	key_lastdown[256];	// realtime timestamp of last key-down for each key
+static qboolean	key_doubletap_active[256]; // true if doublebinding +cmd is currently active
 static cvar_t	key_doubletap_time = {"key_doubletap_time", "0.4", CVAR_ARCHIVE};
 
 typedef struct
@@ -1085,6 +1086,17 @@ void Key_Event (int key, qboolean down)
 				Cbuf_AddText (cmd);
 			}
 		}
+		// Release active double-tap +commands
+		if (key_doubletap_active[key])
+		{
+			kb = doublebindings[key];
+			if (kb && kb[0] == '+')
+			{
+				sprintf (cmd, "-%s %i\n", kb+1, key);
+				Cbuf_AddText (cmd);
+			}
+			key_doubletap_active[key] = false;
+		}
 		return;
 	}
 
@@ -1132,6 +1144,7 @@ void Key_Event (int key, qboolean down)
 				{
 					sprintf (cmd, "%s %i\n", dkb, key);
 					Cbuf_AddText (cmd);
+					key_doubletap_active[key] = true;
 				}
 				else
 				{
