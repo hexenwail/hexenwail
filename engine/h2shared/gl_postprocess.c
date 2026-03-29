@@ -33,6 +33,9 @@
 #ifndef GL_COLOR_ATTACHMENT1
 #define GL_COLOR_ATTACHMENT1 0x8CE1
 #endif
+#ifndef GL_FRAMEBUFFER_BINDING
+#define GL_FRAMEBUFFER_BINDING 0x8CA6
+#endif
 
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
@@ -237,7 +240,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 	PP_DeleteNativeFBO();
 
 	{
-	GLenum native_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGB10_A2;
+	GLenum native_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
 	GLenum native_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_native_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_native_color_tex);
@@ -289,8 +292,8 @@ static qboolean PP_CreateFBO (int width, int height)
 
 	/* resolve texture (always non-multisampled — this is what the shader reads) */
 	{
-		GLenum color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGB10_A2;
-		GLenum color_type = r_hdr.integer ? GL_FLOAT : 0x8036; /* GL_UNSIGNED_INT_10_10_10_2 */
+		GLenum color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
+		GLenum color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, width, height, 0,
