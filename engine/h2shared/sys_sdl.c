@@ -186,6 +186,11 @@ static void Sys_MainFrame (void)
 		newtime = Sys_DoubleTime ();
 		time = newtime - mainloop_oldtime;
 
+		/* Clamp frame time after focus loss to prevent physics
+		 * backlog — avoids sound accumulation on alt-tab */
+		if (time > 0.5)
+			time = 0.1;
+
 #ifndef __EMSCRIPTEN__
 		/* Frame rate limiting.
 		 *
