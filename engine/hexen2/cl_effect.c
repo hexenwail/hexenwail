@@ -646,7 +646,7 @@ void CL_ParseEffect (void)
 
 		cl.Effects[idx].ef.Chunk.numChunks = MSG_ReadByte ();
 
-		cl.Effects[idx].ef.Chunk.time_amount = 4.0;
+		cl.Effects[idx].ef.Chunk.time_amount = 12.0;
 
 		cl.Effects[idx].ef.Chunk.aveScale =
 					30 + 100 * (cl.Effects[idx].ef.Chunk.numChunks / 40.0);
