@@ -12,7 +12,7 @@ A modern fork for Windows and Linux: SDL3, GLSL shaders, gamepad support, and a 
 ## Features
 
 ### Rendering
-Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function. Lightmap atlas, batched world draws, MSAA, FXAA, anisotropic filtering. Render scale (25–100%), retro dithering mode, display presets (Faithful/Crunchy/Retro/Clean/Modern/Ultra). Brightness/contrast via post-process shader. Scrolling two-layer sky and skybox support. Shader-based fog, light-tinted liquids, underwater warp, motion blur. Fence textures, water tint options, glow effects with fog attenuation. Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins. Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items). External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX). Hardware-instanced alias models. Physics/render decoupling with entity and lightstyle interpolation. FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean).
+Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function. Lightmap atlas, batched world draws, MSAA, FXAA, anisotropic filtering. Render scale (25–100%), retro dithering mode, display presets (Faithful/Crunchy/Retro/Clean/Modern/Ultra). Brightness/contrast via post-process shader. Scrolling two-layer sky and skybox support. Shader-based fog, underwater color tint, underwater warp, motion blur. Fence textures, water tint options, glow effects with fog attenuation. Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins. Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items). External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX). Hardware-instanced alias models. Physics/render decoupling with entity and lightstyle interpolation. FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean).
 
 ### Input
 WASD + mouselook defaults. Scancode-based bindings (works on AZERTY, Dvorak, etc.). Mouse-driven menus with hover, click, and scroll wheel. Key bindings menu with type-to-search (includes weapon impulses). Xbox/PlayStation/Nintendo gamepad with circular deadzone, power-curve easing, rumble, hot-plug. Always-run, raw mouse input, configurable pitch clamp.
@@ -37,7 +37,7 @@ Planned:
 
 | Platform | Renderer | Status |
 |----------|----------|--------|
-| Flatpak on Flathub | OpenGL 4.3 | Not started |
+| Flathub listing | OpenGL 4.3 | Not started |
 | AppImage | OpenGL 4.3 | Not started |
 
 ## Building
