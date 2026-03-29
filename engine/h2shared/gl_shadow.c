@@ -55,8 +55,16 @@ shadow_light_t	shadow_lights[MAX_SHADOW_LIGHTS];
 int		shadow_count;
 
 static GLuint	shadow_fbo;		/* shared FBO, swap depth attachment per light */
-static GLuint	shadow_depth_prog;	/* depth-only shader for shadow pass */
+static GLuint	shadow_depth_prog;	/* depth-only shader for world shadow pass */
 static GLint	shadow_depth_u_mvp;
+static GLuint	shadow_alias_prog;	/* depth-only shader for alias model shadow pass */
+static GLint	shadow_alias_u_mvp;
+static GLint	shadow_alias_u_pose0;
+static GLint	shadow_alias_u_pose1;
+static GLint	shadow_alias_u_lerp;
+static GLint	shadow_alias_u_scale;
+static GLint	shadow_alias_u_scale_origin;
+static GLint	shadow_alias_u_poseverts;
 static qboolean	shadow_initialized;
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +83,36 @@ static const char shadow_depth_frag[] =
 	"#version 430 core\n"
 	"void main() {\n"
 	"    /* depth-only pass — no color output */\n"
+	"}\n";
+
+/* Depth-only vertex shader for alias models (SSBO pose data) */
+static const char shadow_alias_vert[] =
+	"#version 430 core\n"
+	"\n"
+	"struct PoseVert {\n"
+	"    uint data;  /* byte v[3] + byte lightnormalindex */\n"
+	"};\n"
+	"\n"
+	"layout(std430, binding = 1) readonly buffer PoseBuffer {\n"
+	"    PoseVert poses[];\n"
+	"};\n"
+	"\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform int u_pose0;\n"
+	"uniform int u_pose1;\n"
+	"uniform float u_lerp;\n"
+	"uniform vec3 u_scale;\n"
+	"uniform vec3 u_scale_origin;\n"
+	"uniform int u_poseverts;\n"
+	"\n"
+	"void main() {\n"
+	"    int vid = gl_VertexID;\n"
+	"    uint p0 = poses[u_pose0 * u_poseverts + vid].data;\n"
+	"    uint p1 = poses[u_pose1 * u_poseverts + vid].data;\n"
+	"    vec3 v0 = vec3(float(p0 & 0xFFu), float((p0 >> 8) & 0xFFu), float((p0 >> 16) & 0xFFu));\n"
+	"    vec3 v1 = vec3(float(p1 & 0xFFu), float((p1 >> 8) & 0xFFu), float((p1 >> 16) & 0xFFu));\n"
+	"    vec3 pos = mix(v1, v0, u_lerp) * u_scale + u_scale_origin;\n"
+	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */
@@ -216,18 +254,17 @@ static void Shadow_EnsureTexture (shadow_light_t *sl, int res)
 
 	if (r_shadow_filter.integer)
 	{
-		/* PCF: hardware comparison + linear filter */
+		/* PCF: linear filter, manual comparison in shader */
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
 	}
 	else
 	{
-		/* Retro: nearest, no comparison (manual in shader) */
+		/* Retro: nearest, manual comparison in shader */
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	}
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -277,11 +314,15 @@ static void Shadow_RenderOne (shadow_light_t *sl, int res)
 		glBindVertexArray_fp(0);
 	}
 
-	/* Render alias models (enemies, pickups) within light radius */
+	/* Render alias models (enemies, pickups) within light radius.
+	 * Uses SSBO-based alias shadow shader for correct pose unpacking. */
+	if (shadow_alias_prog)
 	{
 		int j;
 		extern int cl_numvisedicts;
 		extern entity_t *cl_visedicts[];
+
+		glUseProgram_fp(shadow_alias_prog);
 
 		for (j = 0; j < cl_numvisedicts; j++)
 		{
@@ -289,6 +330,7 @@ static void Shadow_RenderOne (shadow_light_t *sl, int res)
 			float dx, dy, dz, dist_sq;
 			alias_gpu_mesh_t *gm;
 			aliashdr_t *hdr;
+			int frame, pose;
 
 			if (!e->model || e->model->type != mod_alias)
 				continue;
@@ -305,25 +347,57 @@ static void Shadow_RenderOne (shadow_light_t *sl, int res)
 			if (!gm || !gm->valid)
 				continue;
 
-			/* Build entity world transform * light MVP */
+			/* Get current pose */
+			frame = e->frame;
+			if (frame >= hdr->numframes || frame < 0)
+				frame = 0;
+			pose = hdr->frames[frame].firstpose;
+			if (hdr->frames[frame].numposes > 1)
 			{
-				float ent_mat[16], translate[16];
-				memset(translate, 0, sizeof(translate));
-				translate[0] = hdr->scale[0];
-				translate[5] = hdr->scale[1];
-				translate[10] = hdr->scale[2];
-				translate[12] = e->origin[0] + hdr->scale_origin[0];
-				translate[13] = e->origin[1] + hdr->scale_origin[1];
-				translate[14] = e->origin[2] + hdr->scale_origin[2];
-				translate[15] = 1.0f;
-				Mat4_Multiply(sl->matrix, translate, ent_mat);
-				glUniformMatrix4fv_fp(shadow_depth_u_mvp, 1, GL_FALSE, ent_mat);
+				float interval = hdr->frames[frame].interval;
+				pose += (int)(cl.time / interval) % hdr->frames[frame].numposes;
 			}
 
+			/* Build entity transform: translate to origin, apply
+			 * rotation, then multiply by light projection.
+			 * scale/scale_origin are handled by the shader. */
+			{
+				float ent_world[16], mvp[16];
+				float a = e->angles[1] * (float)M_PI / 180.0f;
+				float ca = cosf(a), sa = sinf(a);
+
+				/* Yaw rotation + translation to entity origin */
+				memset(ent_world, 0, sizeof(ent_world));
+				ent_world[0] = ca;
+				ent_world[1] = sa;
+				ent_world[4] = -sa;
+				ent_world[5] = ca;
+				ent_world[10] = 1.0f;
+				ent_world[12] = e->origin[0];
+				ent_world[13] = e->origin[1];
+				ent_world[14] = e->origin[2];
+				ent_world[15] = 1.0f;
+				Mat4_Multiply(sl->matrix, ent_world, mvp);
+				glUniformMatrix4fv_fp(shadow_alias_u_mvp, 1, GL_FALSE, mvp);
+			}
+
+			glUniform1i_fp(shadow_alias_u_pose0, pose);
+			glUniform1i_fp(shadow_alias_u_pose1, pose);
+			glUniform1f_fp(shadow_alias_u_lerp, 0.0f);
+			glUniform3f_fp(shadow_alias_u_scale,
+				       hdr->scale[0], hdr->scale[1], hdr->scale[2]);
+			glUniform3f_fp(shadow_alias_u_scale_origin,
+				       hdr->scale_origin[0], hdr->scale_origin[1], hdr->scale_origin[2]);
+			glUniform1i_fp(shadow_alias_u_poseverts, hdr->poseverts);
+
 			glBindVertexArray_fp(gm->vao);
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
 			glDrawElements_fp(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
 		}
 		glBindVertexArray_fp(0);
+
+		/* Switch back to world depth shader for next light */
+		glUseProgram_fp(shadow_depth_prog);
 	}
 
 	/* Restore state */
@@ -370,8 +444,31 @@ void GL_Shadow_Init (void)
 
 	shadow_depth_u_mvp = glGetUniformLocation_fp(shadow_depth_prog, "u_mvp");
 
+	/* Compile alias depth shader (SSBO-based pose unpacking) */
+	vs = GL_CompileShader(GL_VERTEX_SHADER, shadow_alias_vert);
+	if (!vs) goto done;
+	fs = GL_CompileShader(GL_FRAGMENT_SHADER, shadow_depth_frag);
+	if (!fs) { glDeleteShader_fp(vs); goto done; }
+
+	shadow_alias_prog = GL_LinkProgram(vs, fs);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+
+	if (shadow_alias_prog)
+	{
+		shadow_alias_u_mvp = glGetUniformLocation_fp(shadow_alias_prog, "u_mvp");
+		shadow_alias_u_pose0 = glGetUniformLocation_fp(shadow_alias_prog, "u_pose0");
+		shadow_alias_u_pose1 = glGetUniformLocation_fp(shadow_alias_prog, "u_pose1");
+		shadow_alias_u_lerp = glGetUniformLocation_fp(shadow_alias_prog, "u_lerp");
+		shadow_alias_u_scale = glGetUniformLocation_fp(shadow_alias_prog, "u_scale");
+		shadow_alias_u_scale_origin = glGetUniformLocation_fp(shadow_alias_prog, "u_scale_origin");
+		shadow_alias_u_poseverts = glGetUniformLocation_fp(shadow_alias_prog, "u_poseverts");
+	}
+
+done:
 	shadow_initialized = true;
-	Con_SafePrintf("Shadow: initialized (depth prog=%u)\n", shadow_depth_prog);
+	Con_SafePrintf("Shadow: initialized (depth prog=%u, alias prog=%u)\n",
+		       shadow_depth_prog, shadow_alias_prog);
 }
 
 void GL_Shadow_Shutdown (void)
@@ -387,6 +484,7 @@ void GL_Shadow_Shutdown (void)
 
 	if (shadow_fbo) { glDeleteFramebuffers_fp(1, &shadow_fbo); shadow_fbo = 0; }
 	if (shadow_depth_prog) { glDeleteProgram_fp(shadow_depth_prog); shadow_depth_prog = 0; }
+	if (shadow_alias_prog) { glDeleteProgram_fp(shadow_alias_prog); shadow_alias_prog = 0; }
 	shadow_initialized = false;
 }
 
@@ -475,6 +573,22 @@ void GL_Shadow_BindForScene (GLuint program)
 		if (loc >= 0)
 			glUniform1i_fp(loc, shadow_count);
 	}
+	{
+		GLint loc = glGetUniformLocation_fp(program, "u_shadow_filter");
+		if (loc >= 0)
+			glUniform1i_fp(loc, r_shadow_filter.integer);
+	}
+	{
+		GLint loc = glGetUniformLocation_fp(program, "u_shadow_texel");
+		if (loc >= 0)
+		{
+			int res = (int)r_shadow_resolution.value;
+			if (res < 64) res = 64;
+			glUniform1f_fp(loc, 1.0f / (float)res);
+		}
+	}
+
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 }
 
 qboolean GL_Shadow_Active (void)

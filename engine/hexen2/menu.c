@@ -2084,6 +2084,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_shadow", 0);
 			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
@@ -2108,6 +2109,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_shadow", 0);
 			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 0);
 			Cvar_SetValue ("gl_missile_glows", 0);
@@ -2132,6 +2134,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_shadow", 1);
+			Cvar_SetValue ("r_shadow_resolution", 64);
+			Cvar_SetValue ("r_shadow_filter", 0);
+			Cvar_SetValue ("r_shadow_maxlights", 2);
 			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 0);
@@ -2156,6 +2162,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_shadow", 1);
+			Cvar_SetValue ("r_shadow_resolution", 128);
+			Cvar_SetValue ("r_shadow_filter", 0);
+			Cvar_SetValue ("r_shadow_maxlights", 2);
 			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
@@ -2181,6 +2191,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_shadow", 1);
+			Cvar_SetValue ("r_shadow_resolution", 256);
+			Cvar_SetValue ("r_shadow_filter", 1);
+			Cvar_SetValue ("r_shadow_maxlights", 3);
 			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
@@ -2206,6 +2220,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("r_shadow", 1);
+			Cvar_SetValue ("r_shadow_resolution", 512);
+			Cvar_SetValue ("r_shadow_filter", 1);
+			Cvar_SetValue ("r_shadow_maxlights", 4);
 			/* r_dynamic always on */
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);

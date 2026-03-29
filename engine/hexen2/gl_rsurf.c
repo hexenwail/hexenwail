@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "gl_sky.h"
 #include "gl_shader.h"
+#include "gl_shadow.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -1170,6 +1171,8 @@ static void DrawTextureChains (entity_t *e)
 						       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 				if (gl_shader_world.u_alpha_threshold >= 0)
 					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+
+				GL_Shadow_BindForScene(gl_shader_world.program);
 
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				{
