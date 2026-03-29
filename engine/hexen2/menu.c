@@ -1878,6 +1878,11 @@ static void M_Menu_Rendering_f (void);
 static void M_Rendering_Draw (void);
 static void M_Rendering_Key (int k);
 
+// prototypes for the graphics submenu
+static void M_Menu_Graphics_f (void);
+static void M_Graphics_Draw (void);
+static void M_Graphics_Key (int k);
+
 // prototypes for the gamepad menu
 static void M_Menu_Gamepad_f (void);
 static void M_Gamepad_Draw (void);
@@ -2019,6 +2024,7 @@ enum
 #endif
 	DISP_SCRSIZE,
 	DISP_RENDERING,	/* enters rendering submenu */
+	DISP_GRAPHICS,	/* enters graphics submenu */
 	DISP_SEP,		/* separator between rendering and video */
 	DISP_FULLSCREEN,
 	DISP_RESOLUTION,
@@ -2083,6 +2089,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 0);
 			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 1);
+			Cvar_SetValue ("scr_centerprintbg", 0);
 		}
 		else if (preset == 2)	/* Crunchy — extreme pixel art */
 		{
@@ -2106,6 +2113,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 0);
 			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 1);
+			Cvar_SetValue ("scr_centerprintbg", 0);
 		}
 		else if (preset == 3)	/* Retro — nostalgic with polish */
 		{
@@ -2129,6 +2137,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 0);
 			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 1);
+			Cvar_SetValue ("scr_centerprintbg", 0);
 		}
 		else if (preset == 4)	/* Clean — sharp native, no post-fx */
 		{
@@ -2153,6 +2162,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 0);
+			Cvar_SetValue ("scr_centerprintbg", 1);
 		}
 		else if (preset == 5)	/* Modern — smooth, full effects */
 		{
@@ -2177,6 +2187,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 0);
+			Cvar_SetValue ("scr_centerprintbg", 1);
 		}
 		else if (preset == 6)	/* Ultra — everything maxed */
 		{
@@ -2201,6 +2212,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			/* gl_torch_dlight always on */
 			Cvar_SetValue ("scr_menufade", 0);
+			Cvar_SetValue ("scr_centerprintbg", 1);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
@@ -2340,6 +2352,7 @@ static void M_Display_Draw (void)
 		M_PrintWhite (220, 80 + 8*DISP_SCRSIZE, "Full");
 
 	M_Print (76, 80 + 8*DISP_RENDERING,	"Rendering...");
+	M_Print (76, 80 + 8*DISP_GRAPHICS,	"Graphics...");
 
 	/* separator */
 
@@ -2430,6 +2443,11 @@ static void M_Display_Key (int k)
 		if (display_cursor == DISP_RENDERING)
 		{
 			M_Menu_Rendering_f ();
+			return;
+		}
+		if (display_cursor == DISP_GRAPHICS)
+		{
+			M_Menu_Graphics_f ();
 			return;
 		}
 #ifdef GLQUAKE
@@ -2743,6 +2761,81 @@ static void M_Rendering_Key (int k)
 		break;
 	case K_RIGHTARROW:
 		M_Rendering_AdjustSliders (1);
+		break;
+	}
+}
+
+
+//=============================================================================
+/* GRAPHICS MENU */
+
+enum
+{
+	GFX_CENTERPRINTBG = 0,
+	GFX_ITEMS
+};
+
+static int	graphics_cursor;
+
+static void M_Menu_Graphics_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_graphics;
+	m_entersound = true;
+}
+
+static void M_Graphics_AdjustSliders (int dir)
+{
+	S_LocalSound ("raven/menu3.wav");
+
+	switch (graphics_cursor)
+	{
+	case GFX_CENTERPRINTBG:
+		Cvar_SetValue ("scr_centerprintbg", !scr_centerprintbg.integer);
+		break;
+	}
+}
+
+static void M_Graphics_Draw (void)
+{
+	ScrollTitle("gfx/menu/title3.lmp");
+	M_PrintWhite (96, 72, "Graphics");
+
+	M_Print (76, 92 + 8*GFX_CENTERPRINTBG,	"Message Backdrop:");
+	M_DrawCheckbox (220, 92 + 8*GFX_CENTERPRINTBG, scr_centerprintbg.integer);
+
+	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
+	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
+}
+
+static void M_Graphics_Key (int k)
+{
+	switch (k)
+	{
+	case K_ESCAPE:
+		M_Menu_Display_f ();
+		break;
+	case K_ENTER:
+		m_entersound = true;
+		M_Graphics_AdjustSliders (1);
+		return;
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		graphics_cursor--;
+		if (graphics_cursor < 0)
+			graphics_cursor = GFX_ITEMS-1;
+		break;
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		graphics_cursor++;
+		if (graphics_cursor >= GFX_ITEMS)
+			graphics_cursor = 0;
+		break;
+	case K_LEFTARROW:
+		M_Graphics_AdjustSliders (-1);
+		break;
+	case K_RIGHTARROW:
+		M_Graphics_AdjustSliders (1);
 		break;
 	}
 }
@@ -5695,7 +5788,7 @@ void M_Draw (void)
 			/* skip the amber fade in display menus so
 			 * settings preview against a clean game view */
 			if (m_state != m_display && m_state != m_video
-			    && m_state != m_rendering
+			    && m_state != m_rendering && m_state != m_graphics
 			    && Cvar_VariableValue("scr_menufade"))
 				Draw_FadeScreen ();
 			if (scr_viewsize.integer < 110)
@@ -5759,6 +5852,9 @@ void M_Draw (void)
 		break;
 	case m_rendering:
 		M_Rendering_Draw ();
+		break;
+	case m_graphics:
+		M_Graphics_Draw ();
 		break;
 	case m_sound:
 		M_Sound_Draw ();
@@ -5915,6 +6011,9 @@ void M_Keydown (int key, qboolean repeat)
 		return;
 	case m_rendering:
 		M_Rendering_Key (key);
+		return;
+	case m_graphics:
+		M_Graphics_Key (key);
 		return;
 	case m_sound:
 		M_Sound_Key (key);
