@@ -1709,7 +1709,6 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 		}
 	}
 
-ex_inv:	
 // extended inventory
 	if (sv_protocol == PROTOCOL_UH2_114)
 	{
