@@ -483,17 +483,10 @@ static void R_DrawSpriteModel (entity_t *e)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	/* bind scene depth texture to unit 1 for soft particle fade */
+	/* Soft sprites disabled — impact sprites clip against surfaces.
+	 * TODO: re-enable with a larger depth bias tolerance. */
 	{
-		GLuint depth_tex = GL_GetSceneDepthTex();
-		qboolean soft = (depth_tex != 0);
-		if (soft)
-		{
-			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-			glBindTexture_fp(GL_TEXTURE_2D, depth_tex);
-			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-			glDepthFunc_fp(GL_ALWAYS); /* shader does its own depth test */
-		}
+		qboolean soft = false;
 
 	GL_ImmBegin ();
 
