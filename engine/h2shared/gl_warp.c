@@ -189,57 +189,34 @@ void GL_SubdivideSurface (qmodel_t *mod, msurface_t *fa)
 
 //=========================================================
 
+static float	turbsin[] =
+{
+#include "gl_warp_sin.h"
+};
+#define TURBSCALE (256.0 / (2 * M_PI))
+
 
 /*
 =============
 EmitWaterPolys
 
 Does a water warp on the pre-fragmented glpoly_t chain.
-UV warp and Z ripple are computed in the vertex shader (gl_shader_water).
+CPU-side warp for maximum driver compatibility.
 =============
 */
-static void EmitWaterPolys_SetupShader (float ripple)
-{
-	float mvp[16], mv[16];
-	const glprogram_t *shader = &gl_shader_water;
-
-	glUseProgram_fp(shader->program);
-
-	GL_GetMVP(mvp);
-	if (shader->u_mvp >= 0)
-		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
-	if (shader->u_modelview >= 0)
-	{
-		GL_GetModelview(mv);
-		glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
-	}
-	if (shader->u_time >= 0)
-		glUniform1f_fp(shader->u_time, realtime);
-	if (shader->u_ripple >= 0)
-		glUniform1f_fp(shader->u_ripple, ripple);
-	if (shader->u_fog_density >= 0)
-		glUniform1f_fp(shader->u_fog_density, r_fog_density);
-	if (shader->u_fog_color >= 0)
-		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (shader->u_alpha_threshold >= 0)
-		glUniform1f_fp(shader->u_alpha_threshold, 0.0f);
-}
-
 void EmitWaterPolys (msurface_t *fa)
 {
 	glpoly_t	*p;
 	float		*v;
 	int		i;
+	float		s, t, os, ot;
+	float		nz;
 	float		ripple = gl_waterripple.value;
 
 	if (ripple < 0) ripple = 0;
 	else if (ripple > 10) ripple = 10;
 
-	/* Set up water shader once — GL_ImmDraw will draw without changing it */
-	EmitWaterPolys_SetupShader(ripple);
-
-	/* Batch all polygons as triangles in one draw call.
-	 * Pass original (unwarped) UV coords — the vertex shader does the warp. */
+	/* Batch all polygons as triangles in one draw call */
 	GL_ImmBegin ();
 	for (p = fa->polys ; p ; p = p->next)
 	{
@@ -249,7 +226,7 @@ void EmitWaterPolys (msurface_t *fa)
 		/* Check buffer space: (numverts-2)*3 triangle verts */
 		if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmDraw (GL_TRIANGLES);
+			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
 			GL_ImmBegin ();
 		}
 
@@ -261,13 +238,24 @@ void EmitWaterPolys (msurface_t *fa)
 			{
 				int idx = (vi == 0) ? 0 : (vi == 1) ? i - 1 : i;
 				v = p->verts[idx];
-				GL_ImmTexCoord2f (v[3], v[4]);
-				GL_ImmVertex3f (v[0], v[1], v[2]);
+				os = v[3];
+				ot = v[4];
+
+				nz = v[2];
+				if (ripple > 0)
+					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[2]*0.05 + realtime);
+
+				s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
+				s *= (1.0/64);
+				t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
+				t *= (1.0/64);
+
+				GL_ImmTexCoord2f (s, t);
+				GL_ImmVertex3f (v[0], v[1], nz);
 			}
 		}
 	}
-	GL_ImmDraw (GL_TRIANGLES);
-	glUseProgram_fp(0);
+	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
 }
 
 
