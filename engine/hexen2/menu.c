@@ -2703,8 +2703,13 @@ static void M_Graphics_AdjustSliders (int dir)
 	switch (graphics_cursor)
 	{
 	case GFX_CENTERPRINTBG:
-		Cvar_SetValue ("scr_centerprintbg", !scr_centerprintbg.integer);
+	{
+		int val = scr_centerprintbg.integer + dir;
+		if (val > 2) val = 0;
+		if (val < 0) val = 2;
+		Cvar_SetValue ("scr_centerprintbg", val);
 		break;
+	}
 	}
 }
 
@@ -2714,7 +2719,9 @@ static void M_Graphics_Draw (void)
 	M_PrintWhite (96, 72, "Misc");
 
 	M_Print (76, 92 + 8*GFX_CENTERPRINTBG,	"Message Backdrop:");
-	M_DrawCheckbox (220, 92 + 8*GFX_CENTERPRINTBG, scr_centerprintbg.integer);
+	M_PrintWhite (220, 92 + 8*GFX_CENTERPRINTBG,
+		scr_centerprintbg.integer == 2 ? "Menu Box" :
+		scr_centerprintbg.integer == 1 ? "Simple" : "Off");
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
 	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
