@@ -39,7 +39,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 	qmodel_t	*model;
 	hull_t	*wclip_hull;
 	int	index;
-	vec3_t	check, size; 
+	vec3_t	size;
 	vec3_t	mins, maxs, start, stop;
 	trace_t	trace;
 	int	x, y;
@@ -58,7 +58,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 		wclip_hull = &model->hulls[index];
 		if (!wclip_hull) // Invalid hull
 		{
-			Con_Printf ("ERROR: hull %d is null.\n",wclip_hull);
+			Con_Printf ("ERROR: hull %d is null.\n",index);
 			wclip_hull = &model->hulls[0];
 		}
 	}
