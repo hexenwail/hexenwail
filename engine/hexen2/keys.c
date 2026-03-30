@@ -1244,8 +1244,10 @@ void Key_CharEvent (const char *text)
 				{
 					workline[MAXCMDLINE - 2] = 0;
 					workline += key_linepos;
-					len = strlen(workline) + 1;
-					memmove(workline + 1, workline, len);
+					len = strlen(workline);
+					if (len > 0)
+						memmove(workline + 1, workline, len);
+					workline[len + 1] = 0;
 					*workline = ch;
 				}
 				else

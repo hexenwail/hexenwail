@@ -71,7 +71,7 @@ endif()
 # Compiler Flags
 #============================================================================
 # Common flags
-add_compile_options(-Wall)
+add_compile_options(-Wall -Wno-error=unused-result -Wno-error=array-bounds)
 
 if(USE_DEBUG)
     add_compile_options(-g -DDEBUG=1 -DDEBUG_BUILD=1)

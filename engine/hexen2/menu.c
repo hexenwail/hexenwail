@@ -1083,13 +1083,13 @@ static void M_ScanSaves (void)
 		f = fopen (name, "r");
 		if (!f)
 			continue;
-		fscanf (f, "%i\n", &version);
+		(void) fscanf (f, "%i\n", &version);
 		if (version != SAVEGAME_VERSION)
 		{
 			fclose (f);
 			continue;
 		}
-		fscanf (f, "%79s\n", name);
+		(void) fscanf (f, "%79s\n", name);
 		q_strlcpy (m_filenames[i], name, SAVEGAME_COMMENT_LENGTH+1);
 
 	// change _ back to space
@@ -1275,13 +1275,13 @@ static void M_ScanMSaves (void)
 		f = fopen (name, "r");
 		if (!f)
 			continue;
-		fscanf (f, "%i\n", &version);
+		(void) fscanf (f, "%i\n", &version);
 		if (version != SAVEGAME_VERSION)
 		{
 			fclose (f);
 			continue;
 		}
-		fscanf (f, "%79s\n", name);
+		(void) fscanf (f, "%79s\n", name);
 		q_strlcpy (m_filenames[i], name, SAVEGAME_COMMENT_LENGTH+1);
 
 	// change _ back to space
@@ -1873,9 +1873,13 @@ static void M_Menu_Game_f (void);
 static void M_Game_Draw (void);
 static void M_Game_Key (int k);
 
-// prototypes for the rendering submenu\nstatic void M_Menu_Rendering_f (void);
+// prototypes for the rendering and graphics submenus
+static void M_Menu_Rendering_f (void);
 static void M_Rendering_Draw (void);
 static void M_Rendering_Key (int k);
+static void M_Menu_Graphics_f (void);
+static void M_Graphics_Draw (void);
+static void M_Graphics_Key (int k);
 
 // prototypes for the gamepad menu
 static void M_Menu_Gamepad_f (void);
@@ -2017,7 +2021,8 @@ enum
 	DISP_SCALE,
 #endif
 	DISP_SCRSIZE,
-\tDISP_RENDERING,\t/* enters rendering submenu */\n\tDISP_GRAPHICS,\t\t/* enters graphics/misc submenu */
+	DISP_RENDERING,	/* enters rendering submenu */
+	DISP_GRAPHICS,		/* enters graphics/misc submenu */
 	DISP_SEP,		/* separator between rendering and video */
 	DISP_FULLSCREEN,
 	DISP_RESOLUTION,
@@ -2352,6 +2357,11 @@ static void M_Display_Key (int k)
 		if (display_cursor == DISP_RENDERING)
 		{
 			M_Menu_Rendering_f ();
+			return;
+		}
+		if (display_cursor == DISP_GRAPHICS)
+		{
+			M_Menu_Graphics_f ();
 			return;
 		}
 #ifdef GLQUAKE
@@ -5713,7 +5723,7 @@ void M_Draw (void)
 			/* skip the amber fade in display menus so
 			 * settings preview against a clean game view */
 			if (m_state != m_display && m_state != m_video
-			    && m_state != m_rendering
+			    && m_state != m_rendering && m_state != m_graphics
 			    && Cvar_VariableValue("scr_menufade"))
 				Draw_FadeScreen ();
 			if (scr_viewsize.integer < 110)
@@ -5777,6 +5787,9 @@ void M_Draw (void)
 		break;
 	case m_rendering:
 		M_Rendering_Draw ();
+		break;
+	case m_graphics:
+		M_Graphics_Draw ();
 		break;
 	case m_sound:
 		M_Sound_Draw ();
@@ -5933,6 +5946,9 @@ void M_Keydown (int key, qboolean repeat)
 		return;
 	case m_rendering:
 		M_Rendering_Key (key);
+		return;
+	case m_graphics:
+		M_Graphics_Key (key);
 		return;
 	case m_sound:
 		M_Sound_Key (key);
