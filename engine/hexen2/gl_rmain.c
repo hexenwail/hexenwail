@@ -3309,8 +3309,8 @@ void R_RenderView (void)
 	if (r_norefresh.integer)
 		return;
 
-	/* clamp alpha cvars — values > 1 or < 0 from console can crash */
-	if (r_wateralpha.value < 0.0f) r_wateralpha.value = 0.0f;
+	/* clamp alpha cvars — match gl_rsurf.c floor of 0.1 to prevent invisible water */
+	if (r_wateralpha.value < 0.1f) r_wateralpha.value = 0.1f;
 	if (r_wateralpha.value > 1.0f) r_wateralpha.value = 1.0f;
 
 	if (!r_worldentity.model || !cl.worldmodel)
