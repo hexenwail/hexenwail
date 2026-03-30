@@ -3022,7 +3022,7 @@ static void R_RenderScene (void)
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
-	GL_ResolveSceneDepth ();	/* make depth available as texture for soft sprites */
+	/* GL_ResolveSceneDepth (); — disabled: soft sprites off */
 
 	t0 = Sys_DoubleTime();
 	R_DrawEntitiesOnList ();
@@ -3414,7 +3414,7 @@ void R_RenderView (void)
 
 	mirror = false;
 
-	GL_Shadow_RenderMaps();
+	/* GL_Shadow_RenderMaps(); — disabled: new shadow pipeline under testing */
 
 	R_Clear ();
 

@@ -694,7 +694,7 @@ void R_DrawWorldCulled (void)
 	if (gl_shader_world.u_alpha_threshold >= 0)
 		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
 
-	GL_Shadow_BindForScene(gl_shader_world.program);
+	/* GL_Shadow_BindForScene(gl_shader_world.program); — disabled */
 
 	/* Bind lightmap atlas on unit 1 */
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);

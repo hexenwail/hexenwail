@@ -1175,7 +1175,7 @@ static void DrawTextureChains (entity_t *e)
 				if (gl_shader_world.u_alpha_threshold >= 0)
 					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
 
-				GL_Shadow_BindForScene(gl_shader_world.program);
+				/* GL_Shadow_BindForScene(gl_shader_world.program); — disabled */
 
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				{
