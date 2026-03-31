@@ -459,17 +459,14 @@ static void R_DrawSpriteModel (entity_t *e)
 		Sys_Error ("%s: Bad sprite type %d", __thisfunc__, psprite->type);
 	}
 
-	/* translucency handling */
-	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT) ||
-	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
-	{
-		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	}
-	else
-	{
-		glDisable_fp (GL_BLEND);
-	}
+	/* All sprites use blend — sprite textures have alpha for transparency */
+	glEnable_fp (GL_BLEND);
+	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	GL_SetAlphaThreshold(0.0f);
+
+	/* polygon offset to prevent z-fighting with surfaces behind sprites */
+	glEnable_fp (GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset_fp (-1, -1);
 
 	GL_Bind(frame->gl_texturenum);
 
@@ -482,8 +479,6 @@ static void R_DrawSpriteModel (entity_t *e)
 		float sprite_alpha;
 		if (e->alpha != ENTALPHA_DEFAULT)
 			sprite_alpha = ENTALPHA_DECODE(e->alpha);
-		else if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT))
-			sprite_alpha = r_wateralpha.value;
 		else
 			sprite_alpha = 1.0f;
 		GL_ImmColor4f (1.0f, 1.0f, 1.0f, sprite_alpha);
@@ -515,6 +510,7 @@ static void R_DrawSpriteModel (entity_t *e)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
+	glDisable_fp (GL_POLYGON_OFFSET_FILL);
 	GL_SetAlphaThreshold(0.01f);
 	glDisable_fp (GL_BLEND);
 }
