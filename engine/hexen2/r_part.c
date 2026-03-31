@@ -1444,6 +1444,7 @@ void R_DrawParticles (void)
 
     GL_Bind(particletexture);
     glEnable_fp(GL_BLEND);
+    glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL_SetAlphaThreshold(0.0f);
 
     VectorScale(vup, 1.5, r_pup);
