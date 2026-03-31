@@ -916,20 +916,13 @@ void R_DrawWaterSurfaces (void)
 		r_wateralpha.value = 0.1;
 	if (r_wateralpha.value > 1)
 		r_wateralpha.value = 1;
-	if (r_wateralpha.value == 1.0)
-		return;
-
-	glDepthMask_fp(0);
 
 	//
 	// go back to the world matrix
 	//
 	GL_LoadMatrixf (r_world_matrix);
 
-	glEnable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	GL_SetAlphaThreshold(0.0f);	/* don't discard translucent water */
-	GL_ImmColor4f (1,1,1,r_wateralpha.value);
 
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
@@ -942,14 +935,24 @@ void R_DrawWaterSurfaces (void)
 		if (!(s->flags & SURF_DRAWTURB))
 			continue;
 
-		/* skip liquids that were drawn opaque in the main pass */
-		if (R_LiquidAlpha(t) >= 1.0f && !(s->flags & SURF_TRANSLUCENT))
 		{
-			t->texturechain = NULL;
-			continue;
+			float a = R_LiquidAlpha(t);
+			if (a >= 1.0f)
+			{
+				/* opaque liquid (e.g. lava): draw without blend */
+				glDisable_fp (GL_BLEND);
+				glDepthMask_fp(1);
+				GL_ImmColor4f (1,1,1,1);
+			}
+			else
+			{
+				/* translucent liquid: draw with blend, no depth write */
+				glEnable_fp (GL_BLEND);
+				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				glDepthMask_fp(0);
+				GL_ImmColor4f (1,1,1, a);
+			}
 		}
-
-		GL_ImmColor4f (1,1,1, R_LiquidAlpha(t));
 
 		// set modulate mode explicitly
 		GL_Bind (t->gl_texturenum);
@@ -1101,10 +1104,8 @@ static void DrawTextureChains (entity_t *e)
 		}
 		else
 		{
-			if ((s->flags & SURF_DRAWTURB) && r_wateralpha.value != 1.0
-			    && ((s->flags & SURF_TRANSLUCENT) ||
-			        R_LiquidAlpha(t) < 1.0f))
-				continue;	// draw translucent water later
+			if (s->flags & SURF_DRAWTURB)
+				continue;	// all turb surfaces drawn in R_DrawWaterSurfaces
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||
 				(e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT))

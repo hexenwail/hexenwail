@@ -952,6 +952,8 @@ void Key_Init (void)
 	keyshift['\\'] = '|';
 
 	menubound[K_ESCAPE] = true;
+	menubound['`'] = true;
+	menubound['~'] = true;
 	for (i = 0; i < 12; i++)
 		menubound[K_F1+i] = true;
 

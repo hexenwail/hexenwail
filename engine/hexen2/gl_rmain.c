@@ -464,6 +464,7 @@ static void R_DrawSpriteModel (entity_t *e)
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		glEnable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 	else
 	{
