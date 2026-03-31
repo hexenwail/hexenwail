@@ -2265,8 +2265,8 @@ static void M_Display_Draw (void)
 	else
 		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
 
-	M_Print (76, 80 + 8*DISP_RENDERING,	"Rendering...");
-	M_Print (76, 80 + 8*DISP_GRAPHICS,	"Misc...");
+	M_Print (76, 92 + 8*DISP_RENDERING,	"Rendering...");
+	M_Print (76, 92 + 8*DISP_GRAPHICS,	"Misc...");
 
 	/* separator */
 
