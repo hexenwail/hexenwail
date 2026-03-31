@@ -2077,7 +2077,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-			Cvar_SetValue ("r_wateralpha", 0.5f);
+			Cvar_SetValue ("r_wateralpha", 0.99f);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2101,7 +2101,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
-			Cvar_SetValue ("r_wateralpha", 0.5f);
+			Cvar_SetValue ("r_wateralpha", 0.99f);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2125,7 +2125,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
-			Cvar_SetValue ("r_wateralpha", 0.5f);
+			Cvar_SetValue ("r_wateralpha", 0.99f);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2505,8 +2505,8 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_WATERALPHA:
 	{
 		float f = r_wateralpha.value + dir * 0.1f;
-		if (f < 0) f = 0;
-		if (f > 1) f = 1;
+		if (f < 0.7f) f = 0.7f;
+		if (f > 1.0f) f = 1.0f;
 		Cvar_SetValue ("r_wateralpha", f);
 		break;
 	}

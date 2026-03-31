@@ -81,6 +81,7 @@ GL_FUNCTION(void, glPolygonMode, (GLenum,GLenum))
 GL_FUNCTION(void, glDepthMask, (GLboolean))
 GL_FUNCTION(void, glDepthRange, (GLclampd,GLclampd))
 GL_FUNCTION(void, glDepthFunc, (GLenum))
+GL_FUNCTION(void, glPolygonOffset, (GLfloat,GLfloat))
 
 #if defined(DRAW_PROGRESSBARS) /* D_ShowLoadingSize() */
 GL_FUNCTION(void, glDrawBuffer, (GLenum))
