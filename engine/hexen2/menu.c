@@ -2086,7 +2086,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
-			Cvar_SetValue ("gl_torch_dlight", 0);
+			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("scr_menufade", 0);
 		}
 		else if (preset == 2)	/* Modern — smooth, full effects */
