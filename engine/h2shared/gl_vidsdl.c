@@ -138,7 +138,7 @@ static vmode_t	*modelist;	// modelist in use, points to one of the above lists
 static int	num_fmodes;
 static int	num_wmodes;
 static int	*nummodes;
-static int	bpp = 16;
+static int	bpp = 32;
 
 #if defined(H2W)
 #	define WM_TITLEBAR_TEXT	"HexenWorld"
@@ -445,23 +445,13 @@ static qboolean VID_SetMode (int modenum)
 
 	in_mode_set = true;
 
-	// setup the attributes
-	if (bpp >= 32)
-	{
-		SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8 );
-		SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8 );
-		SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
-		SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8 );
-		SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24 );
-		SDL_GL_SetAttribute( SDL_GL_STENCIL_SIZE, 8 );
-	}
-	else
-	{
-		SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 5 );
-		SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 5 );
-		SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 5 );
-		SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 16 );
-	}
+	// setup the attributes — always 32bpp RGBA8 + D24S8
+	SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8 );
+	SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8 );
+	SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
+	SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 8 );
+	SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24 );
+	SDL_GL_SetAttribute( SDL_GL_STENCIL_SIZE, 8 );
 	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
 
 #ifdef __EMSCRIPTEN__
@@ -1276,7 +1266,7 @@ static void VID_PrepareModes (void)
 		wmodelist[num_wmodes].height = std_modes[i].height;
 		wmodelist[num_wmodes].halfscreen = 0;
 		wmodelist[num_wmodes].fullscreen = 0;
-		wmodelist[num_wmodes].bpp = 16;
+		wmodelist[num_wmodes].bpp = 32;
 		q_snprintf (wmodelist[num_wmodes].modedesc, MAX_DESC,
 				"%d x %d", std_modes[i].width, std_modes[i].height);
 		num_wmodes++;
@@ -1320,7 +1310,7 @@ static void VID_PrepareModes (void)
 						fmodelist[num_fmodes].height = mode->h;
 						fmodelist[num_fmodes].halfscreen = 0;
 						fmodelist[num_fmodes].fullscreen = 1;
-						fmodelist[num_fmodes].bpp = 16;
+						fmodelist[num_fmodes].bpp = 32;
 						q_snprintf (fmodelist[num_fmodes].modedesc, MAX_DESC, "%d x %d", mode->w, mode->h);
 						num_fmodes++;
 					}
@@ -1592,7 +1582,7 @@ void	VID_Init (const unsigned char *palette)
 		modelist[*nummodes].height = height;
 		modelist[*nummodes].halfscreen = 0;
 		modelist[*nummodes].fullscreen = 1;
-		modelist[*nummodes].bpp = 16;
+		modelist[*nummodes].bpp = 32;
 		q_snprintf (modelist[*nummodes].modedesc, MAX_DESC, "%d x %d (user mode)", width, height);
 		Cvar_SetValueQuick (&vid_mode, *nummodes);
 		(*nummodes)++;
