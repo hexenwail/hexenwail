@@ -1492,11 +1492,7 @@ void	VID_Init (const unsigned char *palette)
 		Sys_Error ("Unable to load GL library %s", (gl_library != NULL) ? gl_library : SDL_GetError());
 #endif
 
-	i = COM_CheckParm("-bpp");
-	if (i && i < com_argc-1)
-	{
-		bpp = atoi(com_argv[i+1]);
-	}
+	/* bpp is always 32 — GL 4.3 requires RGBA8 + D24S8 */
 
 	// prepare the modelists, find the actual modenum for vid_default
 	VID_PrepareModes();
