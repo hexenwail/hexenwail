@@ -916,6 +916,10 @@ void R_DrawWaterSurfaces (void)
 		r_wateralpha.value = 0.1;
 	if (r_wateralpha.value > 1)
 		r_wateralpha.value = 1;
+	/* If all liquid alphas are 1.0, everything was drawn in main pass */
+	if (r_wateralpha.value == 1.0 && r_lavaalpha.value <= 0 &&
+	    r_slimealpha.value <= 0 && r_telealpha.value <= 0)
+		return;
 
 	//
 	// go back to the world matrix
@@ -1073,6 +1077,36 @@ static void DrawTextureChains (entity_t *e)
 		return;
 	}
 
+	/* Sky depth+stencil pre-pass: write sky surface polys to depth buffer
+	 * (occludes geometry behind sky walls) and mark stencil=1 so skybox
+	 * only draws in sky areas. */
+	if (have_stencil && skybox_name[0] && skytexturenum >= 0 &&
+	    skytexturenum < cl.worldmodel->numtextures &&
+	    cl.worldmodel->textures[skytexturenum] &&
+	    cl.worldmodel->textures[skytexturenum]->texturechain)
+	{
+		msurface_t *sky;
+		glEnable_fp(GL_STENCIL_TEST);
+		glStencilFunc_fp(GL_ALWAYS, 1, 0xFF);
+		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		glColorMask_fp(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
+		     sky; sky = sky->texturechain)
+		{
+			glpoly_t *p;
+			for (p = sky->polys; p; p = p->next)
+			{
+				int j;
+				GL_ImmBegin();
+				for (j = 0; j < p->numverts; j++)
+					GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
+				GL_ImmEnd(GL_POLYGON, &gl_shader_flat);
+			}
+		}
+		glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glDisable_fp(GL_STENCIL_TEST);
+	}
+
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
 		t = cl.worldmodel->textures[i];
@@ -1104,8 +1138,9 @@ static void DrawTextureChains (entity_t *e)
 		}
 		else
 		{
-			if (s->flags & SURF_DRAWTURB)
-				continue;	// all turb surfaces drawn in R_DrawWaterSurfaces
+			if ((s->flags & SURF_DRAWTURB) &&
+			    R_LiquidAlpha(t) < 1.0f)
+				continue;	// translucent turb drawn later in R_DrawWaterSurfaces
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||
 				(e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT))
