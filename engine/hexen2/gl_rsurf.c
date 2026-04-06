@@ -888,11 +888,15 @@ R_DrawWaterSurfaces
 ================
 */
 /* Per-liquid alpha: returns the appropriate alpha for a turb texture.
- * r_lavaalpha/r_slimealpha/r_telealpha override r_wateralpha when > 0. */
+ * r_lavaalpha/r_slimealpha/r_telealpha override r_wateralpha when > 0.
+ * Only textures starting with *water use r_wateralpha; everything else
+ * (lava, slime, teleporters, portals, unknown H2 liquids) defaults opaque. */
 static float R_LiquidAlpha (const texture_t *t)
 {
 	if (t->name[0] == '*')
 	{
+		if (!q_strncasecmp(t->name + 1, "water", 5))
+		{	float a = r_wateralpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 		if (!q_strncasecmp(t->name + 1, "lava", 4))
 		{	if (r_lavaalpha.value <= 0) return 1.0f;
 			float a = r_lavaalpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
@@ -903,7 +907,8 @@ static float R_LiquidAlpha (const texture_t *t)
 		{	if (r_telealpha.value <= 0) return 1.0f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
-	{	float a = r_wateralpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+	/* Unknown turb textures (H2 portals, etc.) — default opaque */
+	return 1.0f;
 }
 
 void R_DrawWaterSurfaces (void)
@@ -1080,7 +1085,7 @@ static void DrawTextureChains (entity_t *e)
 	/* Sky depth+stencil pre-pass: write sky surface polys to depth buffer
 	 * (occludes geometry behind sky walls) and mark stencil=1 so skybox
 	 * only draws in sky areas. */
-	if (have_stencil && skybox_name[0] && skytexturenum >= 0 &&
+	if (have_stencil && skytexturenum >= 0 &&
 	    skytexturenum < cl.worldmodel->numtextures &&
 	    cl.worldmodel->textures[skytexturenum] &&
 	    cl.worldmodel->textures[skytexturenum]->texturechain)
@@ -1089,6 +1094,7 @@ static void DrawTextureChains (entity_t *e)
 		glEnable_fp(GL_STENCIL_TEST);
 		glStencilFunc_fp(GL_ALWAYS, 1, 0xFF);
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		glDepthMask_fp(1);	/* ensure depth writes are on */
 		glColorMask_fp(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 		for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
 		     sky; sky = sky->texturechain)
