@@ -707,77 +707,12 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 }
 
 
-/*
-=============
-GL_DrawAliasFrameGPU — AZDO path using static VBO/IBO + SSBO pose data
-=============
-*/
-static GLuint	gpu_shadedots_ssbo;
+/* r_alias_gpu: 0 = CPU streaming, 1 = SSBO instanced batching */
 #ifdef __EMSCRIPTEN__
 cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 #else
 cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_ARCHIVE};
 #endif
-
-static void GL_DrawAliasFrameGPU (entity_t *e, aliashdr_t *paliashdr,
-				   int posenum, int prevposenum, float lerpfrac)
-{
-	alias_gpu_mesh_t *gm;
-	float shade;
-
-	gm = GL_GetAliasGPUMesh(paliashdr);
-	if (!gm)
-	{
-		/* Fallback to streaming path */
-		GL_DrawAliasFrame(e, paliashdr, posenum, prevposenum, lerpfrac);
-		return;
-	}
-
-	lastposenum = posenum;
-
-	/* Upload all 16 shadedots rows once (static data from anorm_dots.h) */
-	if (!gpu_shadedots_ssbo)
-	{
-		glGenBuffers_fp(1, &gpu_shadedots_ssbo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gpu_shadedots_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
-				SHADEDOT_QUANT * 256 * sizeof(float),
-				r_avertexnormal_dots, GL_STATIC_DRAW);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
-	}
-
-	/* Compute shade_light: for fullbright pass use 1.0, otherwise use shadelight */
-	shade = model_fullbright_pass ? 5.0f : shadelight;
-
-	/* Apply ColorShade tint (freeze = ice-blue, etc.) */
-	{
-		vec3_t tinted_color;
-		byte cs = e->colorshade;
-		if (cs)
-		{
-			tinted_color[0] = lightcolor[0] * RTint[cs];
-			tinted_color[1] = lightcolor[1] * GTint[cs];
-			tinted_color[2] = lightcolor[2] * BTint[cs];
-		}
-		else
-			VectorCopy(lightcolor, tinted_color);
-
-		glUseProgram_fp(gl_shader_alias_gpu.base.program);
-		GL_AliasGPU_SetUniforms(&gl_shader_alias_gpu,
-					 posenum, prevposenum, lerpfrac,
-					 paliashdr->scale, paliashdr->scale_origin,
-					 paliashdr->poseverts, shade,
-					 tinted_color, model_constant_alpha,
-					 shadedot_row_index);
-	}
-
-	/* Bind model VAO + SSBOs */
-	glBindVertexArray_fp(gm->vao);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, gpu_shadedots_ssbo);
-
-	glDrawElements_fp(GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
-}
 
 /*
 =============
@@ -898,33 +833,20 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 			lerpfrac = 1.0f - lerpfrac; /* invert: 1=prev, 0=current */
 	}
 
-	/* The GPU SSBO path (r_alias_gpu 1) has positioning issues.
-	 * When instancing is active (r_alias_gpu 2), fallback entities
-	 * and the viewmodel use the CPU path for correctness. */
+	if (lerpfrac > 0.0f)
 	{
-		qboolean use_gpu = (r_alias_gpu.integer == 1);
-
-		if (lerpfrac > 0.0f)
+		prevpose = paliashdr->frames[prevframe].firstpose;
+		numposes = paliashdr->frames[prevframe].numposes;
+		if (numposes > 1)
 		{
-			prevpose = paliashdr->frames[prevframe].firstpose;
-			numposes = paliashdr->frames[prevframe].numposes;
-			if (numposes > 1)
-			{
-				interval = paliashdr->frames[prevframe].interval;
-				prevpose += (int)(e->lerpstart / interval) % numposes;
-			}
-			if (use_gpu)
-				GL_DrawAliasFrameGPU(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
-			else
-				GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
+			interval = paliashdr->frames[prevframe].interval;
+			prevpose += (int)(e->lerpstart / interval) % numposes;
 		}
-		else
-		{
-			if (use_gpu)
-				GL_DrawAliasFrameGPU(e, paliashdr, pose, pose, 0.0f);
-			else
-				GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
-		}
+		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
+	}
+	else
+	{
+		GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
 	}
 }
 
@@ -2053,8 +1975,8 @@ static void R_DrawEntitiesOnList (void)
 		return;
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
-	 * models via SSBO before the per-entity loop. Requires r_alias_gpu >= 2. */
-	use_instancing = (r_alias_gpu.integer >= 2 && gl_shader_alias_inst.program);
+	 * models via SSBO before the per-entity loop. */
+	use_instancing = (r_alias_gpu.integer >= 1 && gl_shader_alias_inst.program);
 	if (use_instancing)
 	{
 		R_CollectAndBatchAliasInstances();
