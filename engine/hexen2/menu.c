@@ -2088,8 +2088,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("scr_menufade", 0);
-			Cvar_SetValue ("r_gpucull", 0);
-			Cvar_SetValue ("r_alias_gpu", 0);
 		}
 		else if (preset == 2)	/* Modern — smooth, full effects */
 		{
@@ -2114,8 +2112,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("scr_menufade", 0);
-			Cvar_SetValue ("r_gpucull", 1);
-			Cvar_SetValue ("r_alias_gpu", 1);
 		}
 		else if (preset == 3)	/* Ultra — everything maxed */
 		{
@@ -2140,8 +2136,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			Cvar_SetValue ("scr_menufade", 0);
-			Cvar_SetValue ("r_gpucull", 1);
-			Cvar_SetValue ("r_alias_gpu", 1);
 		}
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
