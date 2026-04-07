@@ -102,7 +102,7 @@ void CL_LoadCSProgs (void)
 	/* Check silently first to avoid printing "can't find" message for optional file */
 	if (!FS_FileExists("csprogs.dat", NULL))
 	{
-		Con_DPrintf ("CSQC: csprogs.dat not found\n");
+		/* csprogs.dat is optional — fail silently */
 		return;
 	}
 

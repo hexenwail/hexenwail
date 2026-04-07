@@ -530,8 +530,7 @@ static const char salias_inst_vert[] =
 	"    vec4 WorldMatrix0;\n"
 	"    vec4 WorldMatrix1;\n"
 	"    vec4 WorldMatrix2;\n"
-	"    vec3 LightColor;\n"
-	"    float Alpha;\n"
+	"    vec4 LightAlpha;\n"      /* rgb = light_color, a = alpha */
 	"    int Pose0;\n"
 	"    int Pose1;\n"
 	"    float Blend;\n"
@@ -548,8 +547,8 @@ static const char salias_inst_vert[] =
 	"    uint pose_data[];\n"
 	"};\n"
 	"\n"
-	"layout(std140, binding=0) uniform ShadeDots {\n"
-	"    vec4 shadedots[1024];\n"
+	"layout(std430, binding=2) restrict readonly buffer ShadeDots {\n"
+	"    float shadedots[4096];\n"
 	"};\n"
 	"\n"
 	"in vec2 a_texcoord;\n"
@@ -577,9 +576,9 @@ static const char salias_inst_vert[] =
 	"    vec3 world_pos = world * vec4(local_pos, 1.0);\n"
 	"\n"
 	"    int sdot_idx = inst.ShadedotRow * 256 + int(ni);\n"
-	"    float sdot = shadedots[sdot_idx / 4][sdot_idx % 4];\n"
+	"    float sdot = shadedots[sdot_idx];\n"
 	"    sdot = max(sdot, 0.0);\n"
-	"    v_color = vec4(inst.LightColor * sdot, inst.Alpha);\n"
+	"    v_color = vec4(inst.LightAlpha.rgb * sdot, inst.LightAlpha.a);\n"
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    vec4 eye_pos = View * vec4(world_pos, 1.0);\n"
@@ -857,18 +856,13 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	}
 	glUseProgram_fp(0);
 
-	/* Shadedots UBO — binding=0 is set in the shader via layout qualifier,
-	 * but we also bind the block index for robustness */
-	ubo_block_idx = glGetUniformBlockIndex_fp(prog, "ShadeDots");
-	if (ubo_block_idx != GL_INVALID_INDEX)
-		glUniformBlockBinding_fp(prog, ubo_block_idx, 0);
-
-	/* Create and fill shadedots UBO (static data, upload once) */
+	/* Create and fill shadedots SSBO (static data, upload once).
+	 * Uses binding=2 to match the non-instanced GPU alias shader. */
 	glGenBuffers_fp(1, &p->ubo_shadedots);
-	glBindBuffer_fp(GL_UNIFORM_BUFFER, p->ubo_shadedots);
-	glBufferData_fp(GL_UNIFORM_BUFFER, 16 * 256 * sizeof(float),
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, p->ubo_shadedots);
+	glBufferData_fp(GL_SHADER_STORAGE_BUFFER, 16 * 256 * sizeof(float),
 			r_avertexnormal_dots, GL_STATIC_DRAW);
-	glBindBuffer_fp(GL_UNIFORM_BUFFER, 0);
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 
 	Sys_Printf("  alias_instanced: OK (prog=%u, ubo=%u)\n", prog, p->ubo_shadedots);
 	return true;

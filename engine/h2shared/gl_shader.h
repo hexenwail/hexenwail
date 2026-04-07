@@ -75,7 +75,7 @@ extern gl_alias_gpu_prog_t gl_shader_alias_gpu;
 /* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs) */
 typedef struct {
 	GLuint	program;	/* shader program handle */
-	GLuint	ubo_shadedots;	/* UBO handle for shadedots table */
+	GLuint	ubo_shadedots;	/* SSBO handle for shadedots table */
 	GLint	u_fog_density;	/* fragment fog uniforms */
 	GLint	u_fog_color;
 	GLint	u_alpha_threshold;

@@ -382,6 +382,7 @@ extern alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];
 extern int num_alias_gpu_meshes;
 
 alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr);
+void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 void GL_FreeAliasGPUMeshes (void);
 extern	aliashdr_t	*pheader;
 extern	stvert_t	stverts[MAXALIASVERTS];
