@@ -1353,6 +1353,7 @@ static int		num_alias_instances;
 static alias_batch_t	alias_batches[MAX_ALIAS_BATCHES];
 static int		num_alias_batches;
 static GLuint		inst_ssbo;	/* SSBO: header + instance array */
+static qboolean		inst_collected[MAX_VISEDICTS]; /* true if visedict was instanced */
 
 /* Per-entity bookkeeping for shadow pass after instanced draw */
 typedef struct {
@@ -1422,6 +1423,12 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 
 	/* Skip viewmodel — drawn separately with FOV compensation */
 	if (e == &cl.viewent)
+		return false;
+
+	/* Skip entities with special skin handling (extra textures,
+	 * player colormaps) — drawn via R_DrawAliasModel instead. */
+	if (e->skinnum >= 100 ||
+	    (e->colormap != vid.colormap && !gl_nocolors.integer))
 		return false;
 
 	/* Frustum cull */
@@ -1711,6 +1718,7 @@ static void R_CollectAndBatchAliasInstances (void)
 	num_alias_instances = 0;
 	num_alias_batches = 0;
 	num_inst_entities = 0;
+	memset(inst_collected, 0, sizeof(inst_collected));
 
 	if (!r_drawentities.integer)
 		return;
@@ -1734,6 +1742,7 @@ static void R_CollectAndBatchAliasInstances (void)
 			/* Record sort key only if instance was actually collected */
 			if (num_alias_instances > old_count)
 			{
+				inst_collected[i] = true;
 				aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata(e->model);
 				int skinnum = e->skinnum;
 				int anim = (int)(cl.time * 10) & 3;
@@ -2064,10 +2073,10 @@ static void R_DrawEntitiesOnList (void)
 					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
 			{
-				/* Skip if already drawn by instanced path.
-				 * Viewmodel is excluded from instancing (needs
-				 * FOV compensation) so always draw it here. */
-				if (!use_instancing || e == &cl.viewent)
+				/* Skip only if this entity was drawn by the
+				 * instanced path.  Rejected entities (special
+				 * skins, colormaps, etc.) fall through here. */
+				if (!use_instancing || !inst_collected[i])
 					R_DrawAliasModel (e);
 			}
 			break;
