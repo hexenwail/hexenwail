@@ -898,26 +898,32 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 			lerpfrac = 1.0f - lerpfrac; /* invert: 1=prev, 0=current */
 	}
 
-	if (lerpfrac > 0.0f)
+	/* Viewmodel always uses CPU path — the GPU SSBO path has matrix
+	 * issues with the depth-range/FOV hacks in R_DrawViewModel. */
 	{
-		prevpose = paliashdr->frames[prevframe].firstpose;
-		numposes = paliashdr->frames[prevframe].numposes;
-		if (numposes > 1)
+		qboolean use_gpu = (r_alias_gpu.integer && e != &cl.viewent);
+
+		if (lerpfrac > 0.0f)
 		{
-			interval = paliashdr->frames[prevframe].interval;
-			prevpose += (int)(e->lerpstart / interval) % numposes;
+			prevpose = paliashdr->frames[prevframe].firstpose;
+			numposes = paliashdr->frames[prevframe].numposes;
+			if (numposes > 1)
+			{
+				interval = paliashdr->frames[prevframe].interval;
+				prevpose += (int)(e->lerpstart / interval) % numposes;
+			}
+			if (use_gpu)
+				GL_DrawAliasFrameGPU(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
+			else
+				GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
 		}
-		if (r_alias_gpu.integer)
-			GL_DrawAliasFrameGPU(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
 		else
-			GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
-	}
-	else
-	{
-		if (r_alias_gpu.integer)
-			GL_DrawAliasFrameGPU(e, paliashdr, pose, pose, 0.0f);
-		else
-			GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
+		{
+			if (use_gpu)
+				GL_DrawAliasFrameGPU(e, paliashdr, pose, pose, 0.0f);
+			else
+				GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
+		}
 	}
 }
 
