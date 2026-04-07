@@ -711,7 +711,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 #ifdef __EMSCRIPTEN__
 cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 #else
-cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_ARCHIVE};
+cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
 #endif
 
 /*
