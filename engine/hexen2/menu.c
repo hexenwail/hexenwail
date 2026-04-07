@@ -1988,6 +1988,7 @@ static void M_Options_Key (int k)
 			break;
 		case OPT_DEFAULTS:
 			Cbuf_AddText ("unbindall\nexec default.cfg\n");
+			vid.recalc_refdef = 1;
 			break;
 		}
 		return;

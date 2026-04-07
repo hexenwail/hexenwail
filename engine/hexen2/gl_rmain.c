@@ -1617,18 +1617,6 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst->pose1 = prevpose * gm->poseverts;
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 
-	{
-		static int dbg_mdl;
-		if (dbg_mdl < 20)
-		{
-			GLuint stex = paliashdr->gl_texturenum[skinnum][anim];
-			dbg_mdl++;
-			Sys_Printf("INST-MODEL: %s skin=%d tex=%u anim=%d flags=0x%x df=0x%x pv=%d\n",
-				   clmodel->name, e->skinnum, stex, anim,
-				   clmodel->flags, e->drawflags, gm->poseverts);
-		}
-	}
-
 	/* Save entity info + resolved skin for shadow/batch passes.
 	 * Resolve skin HERE while paliashdr is valid — a second
 	 * Mod_Extradata call later might return a different pointer
@@ -1855,6 +1843,7 @@ static void R_DrawAliasInstanced (void)
 	glUseProgram_fp(0);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, 0);
 	GL_SetAlphaThreshold(0.01f);
 
 	/* Shadow pass — drawn individually per entity */
@@ -1914,7 +1903,7 @@ static void R_DrawAliasInstanced (void)
 			if (prog->u_alpha_threshold >= 0)
 				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 
-			glBindBufferBase_fp(GL_UNIFORM_BUFFER, 0, prog->ubo_shadedots);
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);
 			glBlendFunc_fp(GL_ONE, GL_ONE);	/* additive */
 			glDepthMask_fp(0);
@@ -1951,6 +1940,7 @@ static void R_DrawAliasInstanced (void)
 			glUseProgram_fp(0);
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, 0);
 		}
 	}
 }
