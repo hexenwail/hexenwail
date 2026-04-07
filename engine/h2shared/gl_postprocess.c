@@ -115,12 +115,14 @@ cvar_t	r_oit = {"r_oit", "1", CVAR_ARCHIVE};		/* weighted blended OIT */
 
 static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
 static GLuint	oit_revealage_tex;	/* R8 revealage */
+static GLuint	oit_depth_rb;		/* own depth RB (non-MSAA) when scene uses MSAA */
 static GLuint	oit_fbo;		/* MRT FBO sharing scene depth/stencil */
 static GLuint	oit_resolve_prog;	/* fullscreen resolve shader */
 static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
+static qboolean	oit_needs_depth_blit;	/* true when MSAA: blit depth before OIT */
 
 /* OIT resolve shaders */
 static const char oit_resolve_vert[] =
@@ -263,7 +265,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 }
 
 /* Forward declaration — OIT FBO created after scene FBO */
-static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb);
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, int msaa_samples);
 static void OIT_DeleteFBO (void);
 
 static qboolean PP_CreateFBO (int width, int height)
@@ -341,7 +343,7 @@ static qboolean PP_CreateFBO (int width, int height)
 			pp_width = width;
 			pp_height = height;
 			Con_DPrintf("PostProcess: %dx%d FBO with %dx MSAA\n", width, height, samples);
-			OIT_CreateFBO(width, height, pp_depth_rb);
+			OIT_CreateFBO(width, height, pp_depth_rb, samples);
 			return true;
 		}
 	}
@@ -375,7 +377,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	pp_width = width;
 	pp_height = height;
 	}  /* end color_fmt scope */
-	OIT_CreateFBO(width, height, pp_depth_rb);
+	OIT_CreateFBO(width, height, pp_depth_rb, 0);
 	return true;
 }
 
@@ -653,16 +655,38 @@ static void OIT_DeleteFBO (void)
 {
 	if (oit_accum_tex) { glDeleteTextures_fp(1, &oit_accum_tex); oit_accum_tex = 0; }
 	if (oit_revealage_tex) { glDeleteTextures_fp(1, &oit_revealage_tex); oit_revealage_tex = 0; }
+	if (oit_depth_rb) { glDeleteRenderbuffers_fp(1, &oit_depth_rb); oit_depth_rb = 0; }
 	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
 	oit_available = false;
+	oit_needs_depth_blit = false;
 }
 
-static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, int msaa_samples)
 {
 	GLenum status;
 	GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	GLuint depth_for_oit;
 
 	OIT_DeleteFBO();
+
+	/* When MSAA is active, the scene depth RB is multisampled but OIT
+	 * textures are non-MSAA.  GL requires consistent sample counts, so
+	 * create a dedicated non-MSAA depth/stencil RB for OIT and blit
+	 * the resolved scene depth into it before each OIT pass. */
+	if (msaa_samples > 1)
+	{
+		glGenRenderbuffers_fp(1, &oit_depth_rb);
+		glBindRenderbuffer_fp(GL_RENDERBUFFER, oit_depth_rb);
+		glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+		glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
+		depth_for_oit = oit_depth_rb;
+		oit_needs_depth_blit = true;
+	}
+	else
+	{
+		depth_for_oit = depth_stencil_rb;
+		oit_needs_depth_blit = false;
+	}
 
 	/* Accumulation texture (RGBA16F) */
 	glGenTextures_fp(1, &oit_accum_tex);
@@ -680,7 +704,7 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	/* FBO with both color attachments + shared depth/stencil */
+	/* FBO with both color attachments + depth/stencil */
 	glGenFramebuffers_fp(1, &oit_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
@@ -688,7 +712,7 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
 				  GL_TEXTURE_2D, oit_revealage_tex, 0);
 	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-				     GL_RENDERBUFFER, depth_stencil_rb);
+				     GL_RENDERBUFFER, depth_for_oit);
 	glDrawBuffers_fp(2, drawbufs);
 
 	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
@@ -704,7 +728,8 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
 	oit_width = width;
 	oit_height = height;
 	oit_available = true;
-	Con_SafePrintf("OIT: %dx%d FBO ready\n", width, height);
+	Con_SafePrintf("OIT: %dx%d FBO ready%s\n", width, height,
+		       oit_needs_depth_blit ? " (MSAA depth blit)" : "");
 	return true;
 }
 
@@ -750,6 +775,19 @@ void OIT_BeginTranslucency (void)
 
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
+
+	/* When MSAA is active, blit the resolved scene depth into OIT's
+	 * own non-MSAA depth RB so translucent fragments are correctly
+	 * occluded by opaque geometry. */
+	if (oit_needs_depth_blit && pp_fbo && glBlitFramebuffer_fp)
+	{
+		glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, pp_fbo);
+		glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, oit_fbo);
+		glBlitFramebuffer_fp(0, 0, oit_width, oit_height,
+				     0, 0, oit_width, oit_height,
+				     GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+				     GL_NEAREST);
+	}
 
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);	/* accum = (0,0,0,0) */
