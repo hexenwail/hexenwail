@@ -515,78 +515,78 @@ static const char spart_gpu_vert[] =
 	"}\n";
 #endif /* !__EMSCRIPTEN__ */
 
-/* --- shader_alias_instanced: ES 3.0 compatible instanced alias models ---
- * Pose data in a R32UI texture (texelFetch).
- * Shadedots in a UBO (16 rows × 256 floats = 16KB).
- * Per-instance data via vertex attribute divisors.
- * Attribute layout:
- *   0: (unused, vertex ID implicit)
- *   1: a_texcoord (vec2, per-vertex)
- *   2-5: a_inst_mvp (mat4, per-instance, divisor=1)
- *   6-9: a_inst_mv (mat4, per-instance, divisor=1)
- *   10: a_inst_scale_shade (vec4: scale.xyz + shade_light, per-instance)
- *   11: a_inst_origin_alpha (vec4: scale_origin.xyz + ent_alpha, per-instance)
- *   12: a_inst_light_lerp (vec4: light_color.xyz + lerp, per-instance)
- *   13: a_inst_poses (ivec4: pose0, pose1, shadedot_row, pad, per-instance)
+/* --- shader_alias_instanced: GL 4.3 SSBO-based instanced alias models ---
+ * Instance data and frame globals in SSBO binding 0.
+ * Pose data in SSBO binding 1 (per-batch, from model's ssbo_pose).
+ * Shadedots in UBO binding 0.
+ * Scale/origin baked into the world matrix CPU-side.
+ * 80-byte instance struct matching Ironwail's compact layout.
  */
+#ifndef __EMSCRIPTEN__
 static const char salias_inst_vert[] =
-	GLSL_VERT_HEADER
-#ifdef __EMSCRIPTEN__
-	"precision highp usampler2D;\n"
-#endif
+	"#version 430 core\n"
+	"\n"
+	"struct InstanceData {\n"
+	"    vec4 WorldMatrix0;\n"
+	"    vec4 WorldMatrix1;\n"
+	"    vec4 WorldMatrix2;\n"
+	"    vec3 LightColor;\n"
+	"    float Alpha;\n"
+	"    int Pose0;\n"
+	"    int Pose1;\n"
+	"    float Blend;\n"
+	"    int ShadedotRow;\n"
+	"};\n"
+	"\n"
+	"layout(std430, binding=0) restrict readonly buffer InstanceBuffer {\n"
+	"    mat4 ViewProj;\n"
+	"    mat4 View;\n"
+	"    InstanceData instances[];\n"
+	"};\n"
+	"\n"
+	"layout(std430, binding=1) restrict readonly buffer PoseBuffer {\n"
+	"    uint pose_data[];\n"
+	"};\n"
+	"\n"
+	"layout(std140, binding=0) uniform ShadeDots {\n"
+	"    vec4 shadedots[1024];\n"
+	"};\n"
 	"\n"
 	"in vec2 a_texcoord;\n"
 	"\n"
-	"/* per-instance attributes (divisor=1) */\n"
-	"in mat4 a_inst_mvp;\n"        /* locations 2-5 */
-	"in mat4 a_inst_mv;\n"         /* locations 6-9 */
-	"in vec4 a_inst_scale_shade;\n" /* location 10 */
-	"in vec4 a_inst_origin_alpha;\n" /* location 11 */
-	"in vec4 a_inst_light_lerp;\n" /* location 12 */
-	"in ivec4 a_inst_poses;\n"     /* location 13 */
-	"\n"
-	"uniform usampler2D u_pose_tex;\n"  /* R32UI: width=poseverts, height=numposes */
-	"\n"
-	"/* Shadedots UBO: 16 quantized rows × 256 normal dot products */\n"
-	"layout(std140) uniform ShadeDots {\n"
-	"    vec4 shadedots[1024];\n"  /* 16*256/4 = 1024 vec4s = 16KB */
-	"};\n"
+	"uniform int u_inst_base;\n"
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"\n"
 	"void main() {\n"
-	"    int vid = gl_VertexID;\n"
-	"    int pose0 = a_inst_poses.x;\n"
-	"    int pose1 = a_inst_poses.y;\n"
-	"    int sdot_row = a_inst_poses.z;\n"
-	"    float lerp = a_inst_light_lerp.w;\n"
+	"    InstanceData inst = instances[u_inst_base + gl_InstanceID];\n"
 	"\n"
-	"    /* Fetch packed pose vertices from texture */\n"
-	"    uint p0 = texelFetch(u_pose_tex, ivec2(vid, pose0), 0).r;\n"
-	"    uint p1 = texelFetch(u_pose_tex, ivec2(vid, pose1), 0).r;\n"
+	"    uint p0 = pose_data[inst.Pose0 + gl_VertexID];\n"
+	"    uint p1 = pose_data[inst.Pose1 + gl_VertexID];\n"
 	"\n"
-	"    /* Unpack: v[0..2] as bytes, lightnormalindex in top byte */\n"
 	"    vec3 v0 = vec3(float(p0 & 0xFFu), float((p0>>8)&0xFFu), float((p0>>16)&0xFFu));\n"
 	"    vec3 v1 = vec3(float(p1 & 0xFFu), float((p1>>8)&0xFFu), float((p1>>16)&0xFFu));\n"
 	"    uint ni = (p0 >> 24) & 0xFFu;\n"
 	"\n"
-	"    /* Lerp between poses and decompress */\n"
-	"    vec3 pos = mix(v1, v0, lerp) * a_inst_scale_shade.xyz + a_inst_origin_alpha.xyz;\n"
+	"    vec3 local_pos = mix(v1, v0, inst.Blend);\n"
 	"\n"
-	"    /* Lighting: look up shadedot from UBO */\n"
-	"    int sdot_idx = sdot_row * 256 + int(ni);\n"
+	"    mat4x3 world = transpose(mat3x4(\n"
+	"        inst.WorldMatrix0, inst.WorldMatrix1, inst.WorldMatrix2));\n"
+	"    vec3 world_pos = world * vec4(local_pos, 1.0);\n"
+	"\n"
+	"    int sdot_idx = inst.ShadedotRow * 256 + int(ni);\n"
 	"    float sdot = shadedots[sdot_idx / 4][sdot_idx % 4];\n"
-	"    float l = sdot * a_inst_scale_shade.w;\n"
-	"    l = max(l, 0.2);\n"  /* DEBUG: ensure minimum visibility */
-	"    v_color = vec4(a_inst_light_lerp.xyz * l, a_inst_origin_alpha.w);\n"
+	"    sdot = max(sdot, 0.0);\n"
+	"    v_color = vec4(inst.LightColor * sdot, inst.Alpha);\n"
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
-	"    vec4 eyepos = a_inst_mv * vec4(pos, 1.0);\n"
-	"    v_fogdist = length(eyepos.xyz);\n"
-	"    gl_Position = a_inst_mvp * vec4(pos, 1.0);\n"
+	"    vec4 eye_pos = View * vec4(world_pos, 1.0);\n"
+	"    v_fogdist = length(eye_pos.xyz);\n"
+	"    gl_Position = ViewProj * vec4(world_pos, 1.0);\n"
 	"}\n";
+#endif /* !__EMSCRIPTEN__ */
 
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
 static const char ssky_vert[] =
@@ -805,87 +805,67 @@ gl_alias_inst_prog_t gl_shader_alias_inst;
 /* Shadedots table — defined in gl_rmain.c */
 extern float r_avertexnormal_dots[16][256];
 
+#ifndef __EMSCRIPTEN__
 static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 {
-	GLuint prog;
-	int i;
+	GLuint vs, fs, prog;
+	GLuint ubo_block_idx;
 
-	prog = GL_LoadProgram(salias_inst_vert, salias_frag);
-	if (!prog)
+	vs = GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
+	fs = GL_CompileShader(GL_FRAGMENT_SHADER, salias_frag);
+	if (!vs || !fs) {
+		if (vs) glDeleteShader_fp(vs);
+		if (fs) glDeleteShader_fp(fs);
 		return false;
+	}
+	prog = glCreateProgram_fp();
+	glAttachShader_fp(prog, vs);
+	glAttachShader_fp(prog, fs);
 
-	/* Bind attribute locations before linking won't work (already linked).
-	 * Instead, query and verify locations match our layout. Use
-	 * glBindAttribLocation before link in a custom path. */
-	/* Actually, we need to set attrib locations before linking.
-	 * Re-do with explicit binding: */
-	glDeleteProgram_fp(prog);
+	/* Only per-vertex attribute is texcoord */
+	glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
+
+	glLinkProgram_fp(prog);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
 
 	{
-		GLuint vs, fs;
-		vs = GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
-		fs = GL_CompileShader(GL_FRAGMENT_SHADER, salias_frag);
-		if (!vs || !fs) {
-			if (vs) glDeleteShader_fp(vs);
-			if (fs) glDeleteShader_fp(fs);
+		GLint status;
+		glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
+		if (!status) {
+			char log[1024];
+			glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
+			Sys_Printf("alias_instanced link failed: %s\n", log);
+			glDeleteProgram_fp(prog);
 			return false;
-		}
-		prog = glCreateProgram_fp();
-		glAttachShader_fp(prog, vs);
-		glAttachShader_fp(prog, fs);
-
-		/* Bind per-vertex attributes */
-		glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
-
-		/* Bind per-instance attributes (mat4 occupies 4 consecutive locations) */
-		glBindAttribLocation_fp(prog, ATTR_INST_MVP0, "a_inst_mvp");
-		glBindAttribLocation_fp(prog, ATTR_INST_MV0, "a_inst_mv");
-		glBindAttribLocation_fp(prog, ATTR_INST_SCALE_SHADE, "a_inst_scale_shade");
-		glBindAttribLocation_fp(prog, ATTR_INST_ORIGIN_ALPHA, "a_inst_origin_alpha");
-		glBindAttribLocation_fp(prog, ATTR_INST_LIGHT_LERP, "a_inst_light_lerp");
-		glBindAttribLocation_fp(prog, ATTR_INST_POSES, "a_inst_poses");
-
-		glLinkProgram_fp(prog);
-		glDeleteShader_fp(vs);
-		glDeleteShader_fp(fs);
-
-		{
-			GLint status;
-			glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-			if (!status) {
-				char log[1024];
-				glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-				Sys_Printf("alias_instanced link failed: %s\n", log);
-				glDeleteProgram_fp(prog);
-				return false;
-			}
 		}
 	}
 
 	memset(p, 0, sizeof(*p));
-	p->base.program = prog;
-	p->base.u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
-	p->base.u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
-	p->base.u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
-	p->base.u_texture0 = glGetUniformLocation_fp(prog, "u_texture0");
-	p->u_pose_tex = glGetUniformLocation_fp(prog, "u_pose_tex");
+	p->program = prog;
+	p->u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
+	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
+	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
+	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
 
-	/* Set texture unit defaults */
+	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);
-	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
-	if (p->u_pose_tex >= 0) glUniform1i_fp(p->u_pose_tex, 1);
+	{
+		GLint u_tex = glGetUniformLocation_fp(prog, "u_texture0");
+		if (u_tex >= 0)
+			glUniform1i_fp(u_tex, 0);
+	}
 	glUseProgram_fp(0);
 
-	/* UBO for shadedots */
-	p->ubo_block_idx = glGetUniformBlockIndex_fp(prog, "ShadeDots");
-	if (p->ubo_block_idx != GL_INVALID_INDEX)
-		glUniformBlockBinding_fp(prog, p->ubo_block_idx, 0);
+	/* Shadedots UBO — binding=0 is set in the shader via layout qualifier,
+	 * but we also bind the block index for robustness */
+	ubo_block_idx = glGetUniformBlockIndex_fp(prog, "ShadeDots");
+	if (ubo_block_idx != GL_INVALID_INDEX)
+		glUniformBlockBinding_fp(prog, ubo_block_idx, 0);
 
 	/* Create and fill shadedots UBO (static data, upload once) */
 	glGenBuffers_fp(1, &p->ubo_shadedots);
 	glBindBuffer_fp(GL_UNIFORM_BUFFER, p->ubo_shadedots);
-	/* std140 requires vec4 alignment — the float[16][256] data is already
-	 * tightly packed, and we read it as shadedots[idx/4][idx%4] in the shader */
 	glBufferData_fp(GL_UNIFORM_BUFFER, 16 * 256 * sizeof(float),
 			r_avertexnormal_dots, GL_STATIC_DRAW);
 	glBindBuffer_fp(GL_UNIFORM_BUFFER, 0);
@@ -893,17 +873,20 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	Sys_Printf("  alias_instanced: OK (prog=%u, ubo=%u)\n", prog, p->ubo_shadedots);
 	return true;
 }
+#endif /* !__EMSCRIPTEN__ */
 
 void GL_AliasInst_Init (void)
 {
+#ifndef __EMSCRIPTEN__
 	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst))
 		Sys_Printf("WARNING: instanced alias shader failed to init\n");
+#endif
 }
 
 void GL_AliasInst_Shutdown (void)
 {
-	if (gl_shader_alias_inst.base.program)
-		glDeleteProgram_fp(gl_shader_alias_inst.base.program);
+	if (gl_shader_alias_inst.program)
+		glDeleteProgram_fp(gl_shader_alias_inst.program);
 	if (gl_shader_alias_inst.ubo_shadedots)
 		glDeleteBuffers_fp(1, &gl_shader_alias_inst.ubo_shadedots);
 	memset(&gl_shader_alias_inst, 0, sizeof(gl_shader_alias_inst));

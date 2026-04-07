@@ -37,4 +37,14 @@ void	Mat4_Identity (float *out);
 void	Mat4_Multiply (const float *a, const float *b, float *out);
 void	Mat4_Copy (const float *src, float *dst);
 
+/* In-place post-multiply: m = m * Translate(x,y,z) */
+void	Mat4_ApplyTranslation (float *m, float x, float y, float z);
+
+/* In-place post-multiply: m = m * Scale(sx,sy,sz) */
+void	Mat4_ApplyScale (float *m, float sx, float sy, float sz);
+
+/* Extract transposed 4x3 from column-major 4x4 into 12 floats (3 rows of 4).
+ * Drops the implicit w=1 row for compact affine storage. */
+void	Mat4_Transpose4x3 (const float *m, float *out);
+
 #endif /* GL_MATRIX_H */

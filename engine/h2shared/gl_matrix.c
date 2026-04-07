@@ -237,3 +237,33 @@ void GL_GetMVP (float *out)
 {
 	Mat4_Multiply(mat_projection[mat_proj_depth], mat_modelview[mat_mv_depth], out);
 }
+
+/* ------------------------------------------------------------------ */
+/* Utility: in-place post-multiply transforms                          */
+/* ------------------------------------------------------------------ */
+
+void Mat4_ApplyTranslation (float *m, float x, float y, float z)
+{
+	/* m = m * T, where T is an identity with translation in col 3.
+	 * Only the translation column changes: col3 += col0*x + col1*y + col2*z */
+	m[12] += m[0]*x + m[4]*y + m[8]*z;
+	m[13] += m[1]*x + m[5]*y + m[9]*z;
+	m[14] += m[2]*x + m[6]*y + m[10]*z;
+}
+
+void Mat4_ApplyScale (float *m, float sx, float sy, float sz)
+{
+	/* m = m * S — scale the first three columns */
+	m[0] *= sx;  m[1] *= sx;  m[2] *= sx;
+	m[4] *= sy;  m[5] *= sy;  m[6] *= sy;
+	m[8] *= sz;  m[9] *= sz;  m[10] *= sz;
+}
+
+void Mat4_Transpose4x3 (const float *m, float *out)
+{
+	/* Store the top 3 rows of a column-major 4x4 as 3 vec4s.
+	 * Row i = (m[0*4+i], m[1*4+i], m[2*4+i], m[3*4+i]) */
+	out[0] = m[0];  out[1] = m[4];  out[2]  = m[8];   out[3]  = m[12];
+	out[4] = m[1];  out[5] = m[5];  out[6]  = m[9];   out[7]  = m[13];
+	out[8] = m[2];  out[9] = m[6];  out[10] = m[10];  out[11] = m[14];
+}
