@@ -3,30 +3,17 @@
 ![Screenshot](docs/screenshot1.png)
 *New worlds await!* ([Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey), by Inky)
 
+## [Latest Release](https://github.com/bobberb/hexenwail/releases) | [Report a Bug](https://github.com/bobberb/hexenwail/issues)
+
 Just as [Ironwail](https://github.com/andrei-drexler/ironwail) took sezero's [QuakeSpasm](https://github.com/sezero/quakespasm) and modernized its renderer, Hexenwail does the same for Hexen II.
 
 Raven Software released the Hexen II source code in 2000. [Hammer of Thyrion](http://uhexen2.sourceforge.net/) (2004–2018) by O. Sezer became the definitive cross-platform engine. [uHexen2](https://github.com/sezero/uhexen2) continued the work with graphical enhancements and mod support — notably Shanjaq and Inky's contributions. Hexenwail (2025) began when [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) shipped without a buildable Linux client, and grew into a full GL 4.3 modernization.
 
-A modern fork for Windows and Linux: SDL3, GLSL shaders, gamepad support, and a clean codebase.
+Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
 
-## Features
+See [USAGE.md](USAGE.md) for external textures, Steam Deck setup, and mod configuration.
 
-### Rendering
-Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function. Lightmap atlas, batched world draws, MSAA, FXAA, anisotropic filtering. Render scale (25–100%), retro dithering mode, display presets (Faithful/Crunchy/Retro/Clean/Modern/Ultra). Brightness/contrast via post-process shader. Scrolling two-layer sky and skybox support. Shader-based fog, underwater color tint, underwater warp, motion blur. Fence textures, water tint options, glow effects with fog attenuation. Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins. Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items). External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX). Hardware-instanced alias models. Physics/render decoupling with entity and lightstyle interpolation. FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean).
-
-### Input
-WASD + mouselook defaults. Scancode-based bindings (works on AZERTY, Dvorak, etc.). Mouse-driven menus with hover, click, and scroll wheel. Key bindings menu with type-to-search (includes weapon impulses). Xbox/PlayStation/Nintendo gamepad with circular deadzone, power-curve easing, rumble, hot-plug. Always-run, raw mouse input, configurable pitch clamp.
-
-### Mod support
-Protocol support (18/19/20/21), auto-detection and upgrade between 19–21. Case-insensitive file lookups. Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box. [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) entity overrides. Extended QuakeC builtins (`SOLID_GHOST`, entity alpha). 8192 max entities, 2048 sound channels. Mods menu with runtime switching, per-mod config, portals data toggle. TrueLightning (`cl_truelightning`).
-
-### Audio
-OGG Vorbis, Opus, MP3, FLAC, WAV music (CD track fallback). Tracker music via libxmp (MOD/S3M/XM/IT) and UMX containers. MIDI via FluidSynth (Linux) or native Windows MIDI, with soundfont auto-detection. 2048 sound channels, 44.1 kHz default.
-
-### Platform
-SDL3 on Linux and Windows. CMake build, Nix flake (reproducible builds + Windows cross-compilation), Flatpak. GitHub Actions CI with smoke tests, shellcheck, and Nix caching. One-command releases. HiDPI, GL_KHR_debug diagnostics, console log to disk.
-
-## Supported platforms
+## Platforms
 
 | Platform | Renderer | Packaging | Status |
 |----------|----------|-----------|--------|
@@ -39,6 +26,55 @@ Planned:
 |----------|----------|--------|
 | Flathub listing | OpenGL 4.3 | Not started |
 | AppImage | OpenGL 4.3 | Not started |
+
+## Features
+
+### Rendering
+- Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function
+- Lightmap atlas, batched world draws, hardware-instanced alias models
+- MSAA, FXAA, anisotropic filtering
+- Render scale (25–100%), retro dithering mode
+- Display presets: Faithful / Crunchy / Retro / Clean / Modern / Ultra
+- Brightness/contrast via post-process shader
+- Scrolling two-layer sky and skybox support
+- Shader-based fog, underwater color tint, underwater warp, motion blur
+- Fence textures, water tint options, glow effects with fog attenuation
+- Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins
+- Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items)
+- External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
+- Physics/render decoupling with entity and lightstyle interpolation
+- FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean)
+
+### Input
+- WASD + mouselook defaults
+- Scancode-based bindings (works on AZERTY, Dvorak, etc.)
+- Mouse-driven menus with hover, click, and scroll wheel
+- Key bindings menu with type-to-search (includes weapon impulses)
+- Xbox/PlayStation/Nintendo gamepad with circular deadzone, power-curve easing, rumble, hot-plug
+- Always-run, raw mouse input, configurable pitch clamp
+
+### Mod support
+- Protocol support (18/19/20/21), auto-detection and upgrade between 19–21
+- Case-insensitive file lookups
+- Runs [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey) and [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) out of the box
+- [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) entity overrides
+- Extended QuakeC builtins (`SOLID_GHOST`, entity alpha)
+- 8192 max entities, 2048 sound channels
+- Mods menu with runtime switching, per-mod config, portals data toggle
+- TrueLightning (`cl_truelightning`)
+
+### Audio
+- OGG Vorbis, Opus, MP3, FLAC, WAV music (CD track fallback)
+- Tracker music via libxmp (MOD/S3M/XM/IT) and UMX containers
+- MIDI via FluidSynth (Linux) or native Windows MIDI, with soundfont auto-detection
+- 2048 sound channels, 44.1 kHz default
+
+### Platform
+- SDL3 on Linux and Windows
+- CMake build, Nix flake (reproducible builds + Windows cross-compilation), Flatpak
+- GitHub Actions CI with smoke tests, shellcheck, and Nix caching
+- One-command releases
+- HiDPI, GL_KHR_debug diagnostics, console log to disk
 
 ## Building
 
@@ -60,42 +96,9 @@ nix build .#win64      # Windows 64-bit (cross-compiled)
 nix build .#release    # All platforms
 ```
 
-## External textures
+## Contributing
 
-Hexenwail supports external texture overrides — drop hi-res TGA/PNG/PCX files into the game directory to replace internal assets:
-
-| Asset type | Override path | Cvar |
-|------------|--------------|------|
-| BSP textures | `textures/<name>.tga` | `r_texture_external 1` |
-| Model skins | `models/<model>_<skin>.tga` | `r_texture_external 1` |
-| HUD/menu graphics | `gfx/<name>.tga` | `r_texture_external_hud 1` |
-
-**AI upscale tool:** Use `tools/upscale-pak.sh` to extract and upscale all assets from a PAK file (requires nix):
-
-```bash
-# Base game
-./tools/upscale-pak.sh ~/hexen2/data1/pak0.pak ~/hexen2/data1
-
-# Full game (palette from pak0)
-./tools/upscale-pak.sh ~/hexen2/data1/pak1.pak ~/hexen2/data1 --palette ~/hexen2/data1/pak0.pak
-
-# Portal of Praevus
-./tools/upscale-pak.sh ~/hexen2/portals/pak3.pak ~/hexen2/portals --palette ~/hexen2/data1/pak0.pak
-```
-
-Options: `--scale 2|3|4` (default 4), `--upscaler realcugan|realesrgan` (default realcugan), `--denoise -1|0|1|2|3`.
-
-## Game data
-
-You need the original Hexen II game data files (`data1/pak0.pak`, `data1/pak1.pak`). For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
-
-**Buy Hexen II:** [GOG](https://www.gog.com/en/game/hexen_ii)
-
-**Flatpak:** Drop your game data into `~/.var/app/com.github.bobberb.hexenwail/.hexen2/`
-
-To launch a mod with portals data included: `glhexen2 -mod <modname>`
-
-**Steam Deck:** Add Hexenwail to Steam, then right-click it → Properties → Controller → set the override to **Gamepad** (or "Gamepad with Joystick Trackpad"). The default Desktop layout emulates keyboard input instead of passing the controller through to SDL.
+Contributions are welcome — bug reports, code cleanup, and documentation are all appreciated. Please file issues and pull requests on [GitHub](https://github.com/bobberb/hexenwail/issues).
 
 ## License
 
