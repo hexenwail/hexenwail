@@ -28,7 +28,6 @@ glprogram_t	gl_shader_world_oit;
 glprogram_t	gl_shader_alias_oit;
 glprogram_t	gl_shader_particle_oit;
 gl_particle_gpu_prog_t	gl_shader_particle_gpu;
-gl_alias_gpu_prog_t	gl_shader_alias_gpu;
 
 /* Forward declarations */
 static void GL_InitProgramUniforms (glprogram_t *p);
@@ -385,65 +384,6 @@ static const char spart_frag[] =
 	"}\n";
 
 #ifndef __EMSCRIPTEN__  /* SSBO shaders require GL 4.3 — not available in WebGL2 */
-/* --- shader_alias_gpu: SSBO-driven alias models with GPU pose lerp --- */
-static const char salias_gpu_vert[] =
-	"#version 430 core\n"
-	"\n"
-	"struct PoseVert {\n"
-	"    uint data;  /* byte v[3] + byte lightnormalindex */\n"
-	"};\n"
-	"\n"
-	"layout(std430, binding = 1) readonly buffer PoseBuffer {\n"
-	"    PoseVert poses[];\n"
-	"};\n"
-	"\n"
-	"in vec2 a_texcoord;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	"uniform int u_pose0;\n"
-	"uniform int u_pose1;\n"
-	"uniform float u_lerp;\n"
-	"uniform vec3 u_scale;\n"
-	"uniform vec3 u_scale_origin;\n"
-	"uniform int u_poseverts;\n"
-	"uniform float u_shade_light;\n"
-	"uniform vec3 u_light_color;\n"
-	"uniform float u_ent_alpha;\n"
-	"uniform int u_shadedot_row;\n"
-	"uniform float u_fog_density;\n"
-	"\n"
-	"out vec2 v_texcoord;\n"
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	"\n"
-	"/* All 16 rotation rows of normal dot products (16x256 = 4096 floats, static) */\n"
-	"layout(std430, binding = 2) readonly buffer ShadeDots {\n"
-	"    float shadedots[4096];\n"
-	"};\n"
-	"\n"
-	"void main() {\n"
-	"    int vid = gl_VertexID;\n"
-	"    uint p0 = poses[u_pose0 * u_poseverts + vid].data;\n"
-	"    uint p1 = poses[u_pose1 * u_poseverts + vid].data;\n"
-	"\n"
-	"    /* Unpack trivertx_t: byte v[3] + byte lightnormalindex */\n"
-	"    vec3 v0 = vec3(float(p0 & 0xFFu), float((p0 >> 8) & 0xFFu), float((p0 >> 16) & 0xFFu));\n"
-	"    vec3 v1 = vec3(float(p1 & 0xFFu), float((p1 >> 8) & 0xFFu), float((p1 >> 16) & 0xFFu));\n"
-	"    uint ni0 = (p0 >> 24) & 0xFFu;\n"
-	"\n"
-	"    /* Lerp between poses and decompress */\n"
-	"    vec3 pos = mix(v1, v0, u_lerp) * u_scale + u_scale_origin;\n"
-	"\n"
-	"    /* Lighting from shadedots table */\n"
-	"    float l = shadedots[u_shadedot_row * 256 + ni0] * u_shade_light;\n"
-	"    v_color = vec4(u_light_color * l, u_ent_alpha);\n"
-	"\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    vec4 eyepos = u_modelview * vec4(pos, 1.0);\n"
-	"    v_fogdist = length(eyepos.xyz);\n"
-	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
-	"}\n";
-
 /* --- shader_particle_gpu: SSBO-driven billboard particles ---
  * Vertex shader reads particle state from an SSBO (binding=0).
  * Each particle uses 3 vertices (gl_VertexID/3 = particle index).
@@ -723,81 +663,6 @@ void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 		glUniform1f_fp(prog->u_ctime, ctime);
 }
 
-#ifndef __EMSCRIPTEN__
-static qboolean GL_InitAliasGPUProgram (gl_alias_gpu_prog_t *p)
-{
-	/* Reuse the existing alias fragment shader */
-	p->base.program = GL_LoadProgram(salias_gpu_vert, salias_frag);
-	if (!p->base.program)
-	{
-		Con_Printf("Failed to load shader: alias_gpu\n");
-		return false;
-	}
-	GL_InitProgramUniforms(&p->base);
-
-	p->u_pose0        = glGetUniformLocation_fp(p->base.program, "u_pose0");
-	p->u_pose1        = glGetUniformLocation_fp(p->base.program, "u_pose1");
-	p->u_lerp         = glGetUniformLocation_fp(p->base.program, "u_lerp");
-	p->u_scale        = glGetUniformLocation_fp(p->base.program, "u_scale");
-	p->u_scale_origin = glGetUniformLocation_fp(p->base.program, "u_scale_origin");
-	p->u_poseverts    = glGetUniformLocation_fp(p->base.program, "u_poseverts");
-	p->u_shade_light  = glGetUniformLocation_fp(p->base.program, "u_shade_light");
-	p->u_light_color  = glGetUniformLocation_fp(p->base.program, "u_light_color");
-	p->u_ent_alpha    = glGetUniformLocation_fp(p->base.program, "u_ent_alpha");
-	p->u_shadedot_row = glGetUniformLocation_fp(p->base.program, "u_shadedot_row");
-
-	glUseProgram_fp(p->base.program);
-	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
-	if (p->base.u_fog_density >= 0) glUniform1f_fp(p->base.u_fog_density, 0.0f);
-	glUseProgram_fp(0);
-
-	Con_SafePrintf("  shader 'alias_gpu' loaded (program %u)\n", p->base.program);
-	return true;
-}
-#endif /* !__EMSCRIPTEN__ */
-
-void GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
-			       int pose0, int pose1, float lerp,
-			       const float *scale, const float *scale_origin,
-			       int poseverts, float shade_light,
-			       const float *light_color, float alpha,
-			       int shadedot_row)
-{
-	float mvp[16], mv[16];
-
-	GL_GetMVP(mvp);
-	GL_GetModelview(mv);
-
-	if (prog->base.u_mvp >= 0)
-		glUniformMatrix4fv_fp(prog->base.u_mvp, 1, GL_FALSE, mvp);
-	if (prog->base.u_modelview >= 0)
-		glUniformMatrix4fv_fp(prog->base.u_modelview, 1, GL_FALSE, mv);
-	if (prog->base.u_fog_density >= 0)
-		glUniform1f_fp(prog->base.u_fog_density, r_fog_density);
-	if (prog->base.u_fog_color >= 0)
-		glUniform3f_fp(prog->base.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (prog->u_pose0 >= 0)
-		glUniform1i_fp(prog->u_pose0, pose0);
-	if (prog->u_pose1 >= 0)
-		glUniform1i_fp(prog->u_pose1, pose1);
-	if (prog->u_lerp >= 0)
-		glUniform1f_fp(prog->u_lerp, lerp);
-	if (prog->u_scale >= 0)
-		glUniform3f_fp(prog->u_scale, scale[0], scale[1], scale[2]);
-	if (prog->u_scale_origin >= 0)
-		glUniform3f_fp(prog->u_scale_origin, scale_origin[0], scale_origin[1], scale_origin[2]);
-	if (prog->u_poseverts >= 0)
-		glUniform1i_fp(prog->u_poseverts, poseverts);
-	if (prog->u_shade_light >= 0)
-		glUniform1f_fp(prog->u_shade_light, shade_light);
-	if (prog->u_light_color >= 0)
-		glUniform3f_fp(prog->u_light_color, light_color[0], light_color[1], light_color[2]);
-	if (prog->u_ent_alpha >= 0)
-		glUniform1f_fp(prog->u_ent_alpha, alpha);
-	if (prog->u_shadedot_row >= 0)
-		glUniform1i_fp(prog->u_shadedot_row, shadedot_row);
-}
-
 gl_alias_inst_prog_t gl_shader_alias_inst;
 
 /* Shadedots table — defined in gl_rmain.c */
@@ -904,7 +769,6 @@ void GL_Shaders_Init (void)
 
 #ifndef __EMSCRIPTEN__
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
-	GL_InitAliasGPUProgram(&gl_shader_alias_gpu);
 #endif
 	GL_AliasInst_Init();
 }
@@ -914,12 +778,12 @@ void GL_Shaders_Shutdown (void)
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
-		&gl_shader_particle_gpu.base, &gl_shader_alias_gpu.base,
+		&gl_shader_particle_gpu.base,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit
 	};
 	int i;
 
-	for (i = 0; i < 11; i++)
+	for (i = 0; i < 10; i++)
 	{
 		if (progs[i]->program)
 		{

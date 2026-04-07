@@ -55,23 +55,6 @@ extern glprogram_t	gl_shader_world_oit;
 extern glprogram_t	gl_shader_alias_oit;
 extern glprogram_t	gl_shader_particle_oit;
 
-/* Extended program for GPU alias model SSBO rendering */
-typedef struct {
-	glprogram_t base;	/* standard uniforms */
-	GLint	u_pose0;	/* current pose index */
-	GLint	u_pose1;	/* previous pose index */
-	GLint	u_lerp;		/* interpolation factor */
-	GLint	u_scale;	/* aliashdr->scale */
-	GLint	u_scale_origin;	/* aliashdr->scale_origin */
-	GLint	u_poseverts;	/* verts per pose */
-	GLint	u_shade_light;	/* shading intensity */
-	GLint	u_light_color;	/* RGB light color */
-	GLint	u_ent_alpha;	/* entity alpha */
-	GLint	u_shadedot_row;	/* row index into 16x256 shadedots table */
-} gl_alias_gpu_prog_t;
-
-extern gl_alias_gpu_prog_t gl_shader_alias_gpu;
-
 /* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs) */
 typedef struct {
 	GLuint	program;	/* shader program handle */
@@ -87,13 +70,6 @@ extern gl_alias_inst_prog_t gl_shader_alias_inst;
 
 void	GL_AliasInst_Init (void);
 void	GL_AliasInst_Shutdown (void);
-
-void	GL_AliasGPU_SetUniforms (const gl_alias_gpu_prog_t *prog,
-				  int pose0, int pose1, float lerp,
-				  const float *scale, const float *scale_origin,
-				  int poseverts, float shade_light,
-				  const float *light_color, float alpha,
-				  int shadedot_row);
 
 void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *pup, const float *pright,
