@@ -363,8 +363,7 @@ typedef struct {
  * Prepended to the instance array in SSBO binding 0. */
 typedef struct {
 	float	viewproj[16];	/* projection * view */
-	float	view[16];	/* view matrix (for fog distance) */
-} alias_inst_header_t;		/* 128 bytes */
+} alias_inst_header_t;		/* 64 bytes */
 
 #define MAX_ALIAS_INSTANCES	512
 #define MAX_ALIAS_BATCHES	128

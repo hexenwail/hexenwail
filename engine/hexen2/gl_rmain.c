@@ -898,10 +898,11 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 			lerpfrac = 1.0f - lerpfrac; /* invert: 1=prev, 0=current */
 	}
 
-	/* Viewmodel always uses CPU path — the GPU SSBO path has matrix
-	 * issues with the depth-range/FOV hacks in R_DrawViewModel. */
+	/* The GPU SSBO path (r_alias_gpu 1) has positioning issues.
+	 * When instancing is active (r_alias_gpu 2), fallback entities
+	 * and the viewmodel use the CPU path for correctness. */
 	{
-		qboolean use_gpu = (r_alias_gpu.integer && e != &cl.viewent);
+		qboolean use_gpu = (r_alias_gpu.integer == 1);
 
 		if (lerpfrac > 0.0f)
 		{
@@ -1355,11 +1356,13 @@ static int		num_alias_batches;
 static GLuint		inst_ssbo;	/* SSBO: header + instance array */
 static qboolean		inst_collected[MAX_VISEDICTS]; /* true if visedict was instanced */
 
-/* Per-entity bookkeeping for shadow pass after instanced draw */
+/* Per-entity bookkeeping for shadow/batch passes after instanced draw */
 typedef struct {
 	entity_t	*ent;
 	aliashdr_t	*hdr;
 	int		pose;
+	GLuint		skin_tex;	/* resolved skin texture */
+	GLuint		fb_tex;		/* fullbright texture (0 if none) */
 } inst_entity_t;
 static inst_entity_t	inst_entities[MAX_ALIAS_INSTANCES];
 static int		num_inst_entities;
@@ -1415,9 +1418,10 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	if (!clmodel)
 		return false;
 
-	/* Skip translucent / special blend entities — drawn separately */
+	/* Skip translucent / special blend entities — drawn separately.
+	 * Must match the item_trans check in R_DrawEntitiesOnList. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
-	    (clmodel->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS)) ||
+	    (clmodel->flags & (EF_TRANSPARENT | EF_HOLEY | EF_SPECIAL_TRANS)) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 		return false;
 
@@ -1691,7 +1695,30 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst->pose1 = prevpose * gm->poseverts;
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 
-	/* Save entity info for shadow pass */
+	{
+		static int dbg_mdl;
+		if (dbg_mdl < 20)
+		{
+			GLuint stex = paliashdr->gl_texturenum[skinnum][anim];
+			dbg_mdl++;
+			Sys_Printf("INST-MODEL: %s skin=%d tex=%u anim=%d flags=0x%x df=0x%x pv=%d\n",
+				   clmodel->name, e->skinnum, stex, anim,
+				   clmodel->flags, e->drawflags, gm->poseverts);
+		}
+	}
+
+	/* Save entity info + resolved skin for shadow/batch passes.
+	 * Resolve skin HERE while paliashdr is valid — a second
+	 * Mod_Extradata call later might return a different pointer
+	 * if cache pressure caused the model to be reloaded. */
+	{
+		GLuint stex = paliashdr->gl_texturenum[skinnum][anim];
+		GLuint ftex = paliashdr->gl_fb_texturenum[skinnum][anim];
+		if (!stex) stex = paliashdr->gl_texturenum[skinnum][0];
+		if (!ftex) ftex = paliashdr->gl_fb_texturenum[skinnum][0];
+		inst_entities[num_alias_instances].skin_tex = stex;
+		inst_entities[num_alias_instances].fb_tex = ftex;
+	}
 	inst_entities[num_alias_instances].ent = e;
 	inst_entities[num_alias_instances].hdr = paliashdr;
 	inst_entities[num_alias_instances].pose = pose;
@@ -1742,16 +1769,15 @@ static void R_CollectAndBatchAliasInstances (void)
 			/* Record sort key only if instance was actually collected */
 			if (num_alias_instances > old_count)
 			{
+				int idx = num_alias_instances - 1;
 				inst_collected[i] = true;
-				aliashdr_t *hdr = (aliashdr_t *)Mod_Extradata(e->model);
-				int skinnum = e->skinnum;
-				int anim = (int)(cl.time * 10) & 3;
-				if (skinnum >= hdr->numskins || skinnum < 0) skinnum = 0;
-
-				inst_sort_keys[num_alias_instances - 1].instance_idx = num_alias_instances - 1;
-				inst_sort_keys[num_alias_instances - 1].model_key = (size_t)hdr;
-				inst_sort_keys[num_alias_instances - 1].skin_tex = hdr->gl_texturenum[skinnum][anim];
-				inst_sort_keys[num_alias_instances - 1].fb_tex = hdr->gl_fb_texturenum[skinnum][anim];
+				/* Use skin/hdr already resolved in R_CollectAliasInstance
+				 * — avoids a second Mod_Extradata that could return a
+				 * different pointer after cache eviction. */
+				inst_sort_keys[idx].instance_idx = idx;
+				inst_sort_keys[idx].model_key = (size_t)inst_entities[idx].hdr;
+				inst_sort_keys[idx].skin_tex = inst_entities[idx].skin_tex;
+				inst_sort_keys[idx].fb_tex = inst_entities[idx].fb_tex;
 			}
 		}
 	}
@@ -1820,6 +1846,8 @@ static void R_DrawAliasInstanced (void)
 	gl_alias_inst_prog_t *prog = &gl_shader_alias_inst;
 	alias_inst_header_t header;
 	size_t	inst_offset = sizeof(alias_inst_header_t);
+	extern float r_fog_density;
+	extern float r_fog_color[3];
 	size_t	upload_size;
 
 	if (num_alias_instances == 0 || !prog->program)
@@ -1840,7 +1868,6 @@ static void R_DrawAliasInstanced (void)
 	/* Fill SSBO header with frame-global data.
 	 * The matrix stack currently has just VIEW, so GetMVP = Proj * View. */
 	GL_GetMVP(header.viewproj);
-	GL_GetModelview(header.view);
 
 	/* Upload header + instance data */
 	upload_size = inst_offset + num_alias_instances * sizeof(alias_instance_t);
@@ -1857,14 +1884,14 @@ static void R_DrawAliasInstanced (void)
 	/* Activate instanced shader */
 	glUseProgram_fp(prog->program);
 
-	/* Set fragment uniforms (fog, alpha threshold) */
+	/* Set uniforms (fog, alpha threshold, eye position) */
+	/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw Fog_GetDensity() */
 	if (prog->u_fog_density >= 0)
-		glUniform1f_fp(prog->u_fog_density, Fog_GetDensity());
+		glUniform1f_fp(prog->u_fog_density, r_fog_density);
+	if (prog->u_eyepos >= 0)
+		glUniform3f_fp(prog->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
 	if (prog->u_fog_color >= 0)
-	{
-		const float *fc = Fog_GetColor();
-		glUniform3f_fp(prog->u_fog_color, fc[0], fc[1], fc[2]);
-	}
+		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	if (prog->u_alpha_threshold >= 0)
 		glUniform1f_fp(prog->u_alpha_threshold, 0.666f);
 

@@ -539,7 +539,6 @@ static const char salias_inst_vert[] =
 	"\n"
 	"layout(std430, binding=0) restrict readonly buffer InstanceBuffer {\n"
 	"    mat4 ViewProj;\n"
-	"    mat4 View;\n"
 	"    InstanceData instances[];\n"
 	"};\n"
 	"\n"
@@ -554,6 +553,7 @@ static const char salias_inst_vert[] =
 	"in vec2 a_texcoord;\n"
 	"\n"
 	"uniform int u_inst_base;\n"
+	"uniform vec3 u_eyepos;\n"
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
@@ -581,8 +581,7 @@ static const char salias_inst_vert[] =
 	"    v_color = vec4(inst.LightAlpha.rgb * sdot, inst.LightAlpha.a);\n"
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
-	"    vec4 eye_pos = View * vec4(world_pos, 1.0);\n"
-	"    v_fogdist = length(eye_pos.xyz);\n"
+	"    v_fogdist = distance(world_pos, u_eyepos);\n"
 	"    gl_Position = ViewProj * vec4(world_pos, 1.0);\n"
 	"}\n";
 #endif /* !__EMSCRIPTEN__ */
@@ -846,6 +845,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
 	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
 	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
+	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
 
 	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);

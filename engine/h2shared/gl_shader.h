@@ -80,6 +80,7 @@ typedef struct {
 	GLint	u_fog_color;
 	GLint	u_alpha_threshold;
 	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
+	GLint	u_eyepos;	/* camera position for fog distance */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
