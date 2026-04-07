@@ -904,7 +904,7 @@ static float R_LiquidAlpha (const texture_t *t)
 		{	if (r_slimealpha.value <= 0) return 1.0f;
 			float a = r_slimealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 		if (!q_strncasecmp(t->name + 1, "tele", 4))
-		{	if (r_telealpha.value <= 0) return 1.0f;
+		{	if (r_telealpha.value <= 0) return 0.7f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
 	/* Unknown turb textures (H2 portals, etc.) — default opaque */
@@ -1061,7 +1061,7 @@ dynamic_batch:
 
 /* Set true when GPU compute cull handles solid surfaces this frame */
 static qboolean gpu_cull_active;
-cvar_t r_gpucull = {"r_gpucull", "0", CVAR_ARCHIVE};	/* GPU compute cull — opt-in, water popping WIP */
+cvar_t r_gpucull = {"r_gpucull", "1", CVAR_ARCHIVE};	/* GPU compute world surface culling */
 
 /* World VBO state (non-static — accessed by gl_worldcull.c) */
 GLuint	world_vbo;
