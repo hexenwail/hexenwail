@@ -22,7 +22,7 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 
-static void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
+void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 
 /*
 =================================================================
@@ -372,6 +372,16 @@ alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr)
 		if (alias_gpu_keys[i] == key && alias_gpu_meshes[i].valid)
 			return &alias_gpu_meshes[i];
 	}
+	/* Lazily create GPU mesh if missing (e.g., after Mod_ClearAll
+	 * freed GPU resources but models stayed in cache). */
+	GL_MakeAliasGPUMesh(hdr);
+	/* Retry lookup — MakeAliasGPUMesh appends at num_alias_gpu_meshes-1 */
+	if (num_alias_gpu_meshes > 0)
+	{
+		i = num_alias_gpu_meshes - 1;
+		if (alias_gpu_keys[i] == key && alias_gpu_meshes[i].valid)
+			return &alias_gpu_meshes[i];
+	}
 	return NULL;
 }
 
@@ -400,7 +410,7 @@ Triangulate the command list, extract static texcoords, and upload
 all pose vertex data to an SSBO.  Called from GL_MakeAliasModelDisplayLists.
 ================
 */
-static void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
+void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 {
 	int		*order, count;
 	int		num_tris, vi, vert_idx;

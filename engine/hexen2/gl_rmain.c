@@ -1439,7 +1439,7 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	paliashdr = (aliashdr_t *)Mod_Extradata(clmodel);
 	gm = GL_GetAliasGPUMesh(paliashdr);
 	if (!gm || !gm->ssbo_pose)
-		return false;	/* no GPU mesh or no pose SSBO, fall back */
+		return false;
 
 	/* --- Lighting (same as R_DrawAliasModel) --- */
 	VectorCopy(e->origin, r_entorigin);
@@ -1639,19 +1639,37 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst = &alias_instances[num_alias_instances];
 	Mat4_Transpose4x3(world, inst->worldmatrix);
 
-	/* Fold shade_light into light_color */
+	/* Store light color.  In RGBA lightmap mode, lightcolor already has
+	 * full intensity from R_LightPointColor — don't multiply by shadelight
+	 * (the CPU path also skips shadelight in RGBA mode). */
 	cs = e->colorshade;
-	if (cs)
+	if (gl_lightmap_format == GL_RGBA)
 	{
-		inst->light_color[0] = lightcolor[0] * RTint[cs] * shadelight;
-		inst->light_color[1] = lightcolor[1] * GTint[cs] * shadelight;
-		inst->light_color[2] = lightcolor[2] * BTint[cs] * shadelight;
+		if (cs)
+		{
+			inst->light_color[0] = lightcolor[0] * RTint[cs];
+			inst->light_color[1] = lightcolor[1] * GTint[cs];
+			inst->light_color[2] = lightcolor[2] * BTint[cs];
+		}
+		else
+		{
+			VectorCopy(lightcolor, inst->light_color);
+		}
 	}
 	else
 	{
-		inst->light_color[0] = lightcolor[0] * shadelight;
-		inst->light_color[1] = lightcolor[1] * shadelight;
-		inst->light_color[2] = lightcolor[2] * shadelight;
+		if (cs)
+		{
+			inst->light_color[0] = lightcolor[0] * RTint[cs] * shadelight;
+			inst->light_color[1] = lightcolor[1] * GTint[cs] * shadelight;
+			inst->light_color[2] = lightcolor[2] * BTint[cs] * shadelight;
+		}
+		else
+		{
+			inst->light_color[0] = lightcolor[0] * shadelight;
+			inst->light_color[1] = lightcolor[1] * shadelight;
+			inst->light_color[2] = lightcolor[2] * shadelight;
+		}
 	}
 
 	inst->alpha = 1.0f;
@@ -1835,8 +1853,8 @@ static void R_DrawAliasInstanced (void)
 	if (prog->u_alpha_threshold >= 0)
 		glUniform1f_fp(prog->u_alpha_threshold, 0.666f);
 
-	/* Bind shadedots UBO at binding 0 (UBO namespace, separate from SSBO) */
-	glBindBufferBase_fp(GL_UNIFORM_BUFFER, 0, prog->ubo_shadedots);
+	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 
 	GL_SetAlphaThreshold(0.666f);
 
@@ -2040,8 +2058,10 @@ static void R_DrawEntitiesOnList (void)
 					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
 			{
-				/* Skip if already drawn by instanced path */
-				if (!use_instancing)
+				/* Skip if already drawn by instanced path.
+				 * Viewmodel is excluded from instancing (needs
+				 * FOV compensation) so always draw it here. */
+				if (!use_instancing || e == &cl.viewent)
 					R_DrawAliasModel (e);
 			}
 			break;

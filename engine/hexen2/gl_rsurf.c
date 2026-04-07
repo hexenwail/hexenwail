@@ -1852,6 +1852,10 @@ void R_DrawWorld (void)
 	 * lightmap updates, and entity efrags regardless of GPU culling */
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
 
+	/* Upload any dirty lightmap rects BEFORE drawing — the GPU cull path
+	 * and VBO batch path both read the atlas texture directly. */
+	R_UpdateLightmaps (false);
+
 #ifndef __EMSCRIPTEN__
 	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer;
 	if (gpu_cull_active)
@@ -1864,8 +1868,6 @@ void R_DrawWorld (void)
 #else
 	gpu_cull_active = false;
 #endif
-
-	R_UpdateLightmaps (false);
 
 	DrawTextureChains (&r_worldentity);
 	gpu_cull_active = false;
