@@ -2059,20 +2059,90 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_PRESET:
 	{
 		/* Cycle through presets (skip "User" — that's auto-detected).
-		 * 1=Clean, 2=Modern, 3=Ultra */
-		static int preset = 2;
+		 * 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra */
+		static int preset = 5;
 		preset += dir;
-		if (preset < 1) preset = 3;
-		if (preset > 3) preset = 1;
+		if (preset < 1) preset = 6;
+		if (preset > 6) preset = 1;
 
-		if (preset == 1)	/* Clean — sharp native, no post-fx */
+#define PRESET_COMMON \
+	Cvar_SetValue ("gl_flashblend", 0); \
+	Cvar_SetValue ("r_dynamic", 1); \
+	Cvar_SetValue ("scr_menufade", 0);
+
+		if (preset == 1)	/* Crunchy — 25% scale, maximum lo-fi */
+		{
+			Cvar_SetValue ("r_scale", 0.25f);
+			Cvar_SetValue ("r_softemu", 1);
+			Cvar_SetValue ("r_dither", 1.0f);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 1.0f);
+			Cvar_SetValue ("r_waterwarp", 0);
+			Cvar_SetValue ("r_motionblur", 0);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("gl_glows", 0);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_glow_intensity", 0.4f);
+			Cvar_SetValue ("gl_torch_dlight", 1);
+			PRESET_COMMON
+		}
+		else if (preset == 2)	/* Retro — half res, banded, old-school */
+		{
+			Cvar_SetValue ("r_scale", 0.5f);
+			Cvar_SetValue ("r_softemu", 2);
+			Cvar_SetValue ("r_dither", 0.5f);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 1.0f);
+			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_motionblur", 0);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("gl_glows", 0);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_glow_intensity", 0.4f);
+			Cvar_SetValue ("gl_torch_dlight", 1);
+			PRESET_COMMON
+		}
+		else if (preset == 3)	/* Faithful — native res, OG textures, minimal fx */
+		{
+			Cvar_SetValue ("r_scale", 1.0f);
+			Cvar_SetValue ("r_softemu", 0);
+			Cvar_SetValue ("r_dither", 0);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_particles", 0);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_wateralpha", 1.0f);
+			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_motionblur", 0);
+			Cvar_SetValue ("r_shadows", 0);
+			Cvar_SetValue ("gl_glows", 0);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_glow_intensity", 0.4f);
+			Cvar_SetValue ("gl_torch_dlight", 1);
+			PRESET_COMMON
+		}
+		else if (preset == 4)	/* Clean — sharp native, mild effects */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
@@ -2081,22 +2151,20 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
-			Cvar_SetValue ("scr_menufade", 0);
+			PRESET_COMMON
 		}
-		else if (preset == 2)	/* Modern — smooth, full effects */
+		else if (preset == 5)	/* Modern — smooth, full effects */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
-			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
@@ -2105,22 +2173,20 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
-			Cvar_SetValue ("scr_menufade", 0);
+			PRESET_COMMON
 		}
-		else if (preset == 3)	/* Ultra — everything maxed */
+		else if (preset == 6)	/* Ultra — everything maxed */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
-			Cvar_SetValue ("gl_flashblend", 0);
 			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
@@ -2129,14 +2195,14 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("r_dynamic", 1);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 1.0f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
-			Cvar_SetValue ("scr_menufade", 0);
+			PRESET_COMMON
 		}
+#undef PRESET_COMMON
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
 		break;
 	}
@@ -2223,19 +2289,21 @@ static void M_Display_Draw (void)
 	{
 		/* detect current preset by matching key cvars */
 		int se = (int)r_softemu.value;
-		int fb = gl_flashblend.integer;
-		int sh = r_shadows.integer;
 		float sc = r_scale.value;
+		int glow = (int)Cvar_VariableValue("gl_glows");
+		float mb = Cvar_VariableValue("r_motionblur");
 
-		qboolean is_clean    = (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && !sh);
-		qboolean is_modern   = (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && gl_filter_idx <= 4 && !sh);
-		qboolean is_ultra    = (sc >= 1.0f && se == 0 && gl_filter_idx == 5 && !sh);
-
-		if (is_clean)
+		if (sc <= 0.25f && se == 1)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
+		else if (sc <= 0.5f && se == 2)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && !glow)
+			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && glow)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
-		else if (is_modern)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
-		else if (is_ultra)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb > 0)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Ultra");
 		else
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
