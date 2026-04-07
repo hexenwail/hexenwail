@@ -346,23 +346,25 @@ typedef struct {
 	qboolean valid;		/* true if GPU data was created successfully */
 } alias_gpu_mesh_t;
 
-/* Per-instance data for instanced alias model drawing.
- * Passed via vertex attribute divisors (ES 3.0 compatible).
- * Must match the attribute layout in the instanced shader. */
+/* Per-instance data for SSBO-based instanced alias model drawing.
+ * Scale/origin baked into the world matrix CPU-side (Ironwail approach).
+ * Must match the std430 SSBO layout in the instanced shader. */
 typedef struct {
-	float	mvp[16];	/* precomputed model-view-projection */
-	float	modelview[16];	/* for fog distance calculation */
-	float	scale[3];	/* aliashdr->scale */
-	float	shade_light;	/* shading intensity */
-	float	scale_origin[3]; /* aliashdr->scale_origin */
-	float	ent_alpha;	/* entity alpha */
-	float	light_color[3];	/* RGB tinted light color */
-	float	lerp;		/* pose interpolation (0=pose0, 1=pose1) */
-	int	pose0;		/* current pose index */
-	int	pose1;		/* previous pose index */
+	float	worldmatrix[12]; /* transposed 4x3 model→world (rows) */
+	float	light_color[3];	/* RGB tinted light (shade_light folded in) */
+	float	alpha;		/* entity alpha */
+	int	pose0;		/* current pose * poseverts */
+	int	pose1;		/* previous pose * poseverts */
+	float	blend;		/* pose interpolation (1=pose0, 0=pose1) */
 	int	shadedot_row;	/* index into shadedots table (0-15) */
-	int	_pad;		/* align to 16 bytes */
-} alias_instance_t;		/* 176 bytes */
+} alias_instance_t;		/* 80 bytes */
+
+/* SSBO header — frame-global data shared across all instances.
+ * Prepended to the instance array in SSBO binding 0. */
+typedef struct {
+	float	viewproj[16];	/* projection * view */
+	float	view[16];	/* view matrix (for fog distance) */
+} alias_inst_header_t;		/* 128 bytes */
 
 #define MAX_ALIAS_INSTANCES	512
 #define MAX_ALIAS_BATCHES	128

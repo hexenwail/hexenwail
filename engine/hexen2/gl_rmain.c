@@ -1346,10 +1346,9 @@ static alias_instance_t	alias_instances[MAX_ALIAS_INSTANCES];
 static int		num_alias_instances;
 static alias_batch_t	alias_batches[MAX_ALIAS_BATCHES];
 static int		num_alias_batches;
-static GLuint		inst_vbo;	/* per-instance data VBO */
-static GLuint		inst_vao;	/* dedicated VAO for instanced drawing */
+static GLuint		inst_ssbo;	/* SSBO: header + instance array */
 
-/* Per-entity bookkeeping for shadow/fullbright passes after instanced draw */
+/* Per-entity bookkeeping for shadow pass after instanced draw */
 typedef struct {
 	entity_t	*ent;
 	aliashdr_t	*hdr;
@@ -1389,6 +1388,7 @@ be drawn the traditional way (translucent, special, etc.)
 static qboolean R_CollectAliasInstance (entity_t *e)
 {
 	alias_instance_t *inst;
+	alias_gpu_mesh_t *gm;
 	aliashdr_t	*paliashdr;
 	qmodel_t	*clmodel;
 	vec3_t		mins, maxs;
@@ -1397,7 +1397,7 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	float		interval, lerpfrac, add, entScale;
 	float		xyfact = 1.0, zfact = 1.0;
 	float		tscale[3], torigin[3];
-	float		mvp[16], mv[16];
+	float		world[16], saved_mv[16];
 	vec3_t		dist;
 	byte		cs;
 
@@ -1437,8 +1437,9 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	}
 
 	paliashdr = (aliashdr_t *)Mod_Extradata(clmodel);
-	if (!GL_GetAliasGPUMesh(paliashdr))
-		return false;	/* no GPU mesh, fall back */
+	gm = GL_GetAliasGPUMesh(paliashdr);
+	if (!gm || !gm->ssbo_pose)
+		return false;	/* no GPU mesh or no pose SSBO, fall back */
 
 	/* --- Lighting (same as R_DrawAliasModel) --- */
 	VectorCopy(e->origin, r_entorigin);
@@ -1514,13 +1515,14 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	shadelight = shadelight / 200.0;
 	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
 
-	/* --- Compute transform matrices --- */
-	/* Push matrix, apply entity origin+rotation only (no scale/origin),
-	 * grab MVP/MV, pop. Scale/origin go as per-instance data. */
-	GL_PushMatrix();
+	/* --- Build world matrix with scale/origin baked in --- */
+	/* Save current modelview (which is the VIEW matrix), load identity,
+	 * apply entity rotation, bake in scale_origin + scale, read result. */
+	GL_GetModelview(saved_mv);
+	GL_LoadIdentity();
 	R_RotateForEntity2(e);
 
-	/* Compute per-entity scale/origin (handles entity scaling) */
+	/* Compute per-entity scale/origin (handles Hexen II entity scaling) */
 	if (e->scale != 0 && e->scale != 100)
 	{
 		entScale = (float)e->scale / 100.0f;
@@ -1577,11 +1579,14 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	    (R_GetPimpFlags(e, NULL) & EF_FLOAT))
 		torigin[2] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
 
-	/* Grab MVP/MV WITHOUT scale/origin — the shader will apply them
-	 * to decompress the raw byte vertices (0-255) to model space. */
-	GL_GetMVP(mvp);
-	GL_GetModelview(mv);
-	GL_PopMatrix();
+	/* Bake scale_origin and scale into the world matrix:
+	 * world = EntityRot * Translate(torigin) * Scale(tscale) */
+	GL_Translatef(torigin[0], torigin[1], torigin[2]);
+	GL_Scalef(tscale[0], tscale[1], tscale[2]);
+	GL_GetModelview(world);
+
+	/* Restore the VIEW matrix */
+	GL_LoadMatrixf(saved_mv);
 
 	/* --- Resolve pose and lerp --- */
 	frame = e->frame;
@@ -1630,41 +1635,32 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		skinnum = 0;
 	anim = (int)(cl.time * 10) & 3;
 
-	/* --- Fill instance data --- */
+	/* --- Fill instance data (80 bytes) --- */
 	inst = &alias_instances[num_alias_instances];
-	memcpy(inst->mvp, mvp, sizeof(float) * 16);
-	memcpy(inst->modelview, mv, sizeof(float) * 16);
+	Mat4_Transpose4x3(world, inst->worldmatrix);
 
-	/* Pass per-entity scale/origin for vertex decompression in shader.
-	 * The MVP contains only entity origin+rotation, NOT scale/origin. */
-	VectorCopy(tscale, inst->scale);
-	VectorCopy(torigin, inst->scale_origin);
-
-	inst->shade_light = shadelight;
-	inst->ent_alpha = 1.0f;
-	inst->lerp = 1.0f - lerpfrac;  /* shader: mix(v1, v0, lerp), 1.0 = use v0 */
-	inst->pose0 = pose;
-	inst->pose1 = prevpose;
-
-	/* Shadedot row from entity yaw angle */
-	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
-
-	/* ColorShade tint */
+	/* Fold shade_light into light_color */
 	cs = e->colorshade;
 	if (cs)
 	{
-		inst->light_color[0] = lightcolor[0] * RTint[cs];
-		inst->light_color[1] = lightcolor[1] * GTint[cs];
-		inst->light_color[2] = lightcolor[2] * BTint[cs];
+		inst->light_color[0] = lightcolor[0] * RTint[cs] * shadelight;
+		inst->light_color[1] = lightcolor[1] * GTint[cs] * shadelight;
+		inst->light_color[2] = lightcolor[2] * BTint[cs] * shadelight;
 	}
 	else
 	{
-		VectorCopy(lightcolor, inst->light_color);
+		inst->light_color[0] = lightcolor[0] * shadelight;
+		inst->light_color[1] = lightcolor[1] * shadelight;
+		inst->light_color[2] = lightcolor[2] * shadelight;
 	}
 
-	inst->_pad = 0;
+	inst->alpha = 1.0f;
+	inst->blend = 1.0f - lerpfrac;  /* shader: mix(v1, v0, blend), 1.0 = use v0 */
+	inst->pose0 = pose * gm->poseverts;	/* pre-multiply for direct SSBO indexing */
+	inst->pose1 = prevpose * gm->poseverts;
+	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 
-	/* Save entity info for shadow/fullbright passes */
+	/* Save entity info for shadow pass */
 	inst_entities[num_alias_instances].ent = e;
 	inst_entities[num_alias_instances].hdr = paliashdr;
 	inst_entities[num_alias_instances].pose = pose;
@@ -1694,7 +1690,7 @@ static void R_CollectAndBatchAliasInstances (void)
 
 	if (!r_drawentities.integer)
 		return;
-	if (!gl_shader_alias_inst.base.program)
+	if (!gl_shader_alias_inst.program)
 		return;
 
 	/* Collect all eligible opaque alias entities */
@@ -1729,6 +1725,9 @@ static void R_CollectAndBatchAliasInstances (void)
 
 	if (num_alias_instances == 0)
 		return;
+
+	/* Save entity count for shadow pass (before sort reorders instances) */
+	num_inst_entities = num_alias_instances;
 
 	/* Sort by (model, skin) for batching */
 	qsort(inst_sort_keys, num_alias_instances, sizeof(inst_sort_t), inst_sort_cmp);
@@ -1786,155 +1785,97 @@ static void R_DrawAliasInstanced (void)
 {
 	int	b, i;
 	gl_alias_inst_prog_t *prog = &gl_shader_alias_inst;
+	alias_inst_header_t header;
+	size_t	inst_offset = sizeof(alias_inst_header_t);
+	size_t	upload_size;
 
-	if (num_alias_instances == 0 || !prog->base.program)
+	if (num_alias_instances == 0 || !prog->program)
 		return;
 
-	/* Create instance VBO and VAO on first use */
-	if (!inst_vbo)
+	/* Create instance SSBO on first use */
+	if (!inst_ssbo)
 	{
-		glGenBuffers_fp(1, &inst_vbo);
-		glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
-		glBufferData_fp(GL_ARRAY_BUFFER,
+		glGenBuffers_fp(1, &inst_ssbo);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, inst_ssbo);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				sizeof(alias_inst_header_t) +
 				MAX_ALIAS_INSTANCES * sizeof(alias_instance_t),
 				NULL, GL_DYNAMIC_DRAW);
-		glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
-
-		glGenVertexArrays_fp(1, &inst_vao);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 	}
 
-	/* Upload instance data */
-	glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
-	glBufferSubData_fp(GL_ARRAY_BUFFER, 0,
+	/* Fill SSBO header with frame-global data.
+	 * The matrix stack currently has just VIEW, so GetMVP = Proj * View. */
+	GL_GetMVP(header.viewproj);
+	GL_GetModelview(header.view);
+
+	/* Upload header + instance data */
+	upload_size = inst_offset + num_alias_instances * sizeof(alias_instance_t);
+	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, inst_ssbo);
+	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
+			   sizeof(alias_inst_header_t), &header);
+	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, inst_offset,
 			   num_alias_instances * sizeof(alias_instance_t),
 			   alias_instances);
 
-	/* Activate instanced shader */
-	glUseProgram_fp(prog->base.program);
+	/* Bind instance SSBO at binding 0 */
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, inst_ssbo);
 
-	/* Set frame-global uniforms */
-	if (prog->base.u_fog_density >= 0)
-		glUniform1f_fp(prog->base.u_fog_density, Fog_GetDensity());
-	if (prog->base.u_fog_color >= 0)
+	/* Activate instanced shader */
+	glUseProgram_fp(prog->program);
+
+	/* Set fragment uniforms (fog, alpha threshold) */
+	if (prog->u_fog_density >= 0)
+		glUniform1f_fp(prog->u_fog_density, Fog_GetDensity());
+	if (prog->u_fog_color >= 0)
 	{
 		const float *fc = Fog_GetColor();
-		glUniform3f_fp(prog->base.u_fog_color, fc[0], fc[1], fc[2]);
+		glUniform3f_fp(prog->u_fog_color, fc[0], fc[1], fc[2]);
 	}
-	if (prog->base.u_alpha_threshold >= 0)
-		glUniform1f_fp(prog->base.u_alpha_threshold, 0.666f);
+	if (prog->u_alpha_threshold >= 0)
+		glUniform1f_fp(prog->u_alpha_threshold, 0.666f);
 
-	/* Bind shadedots UBO to binding point 0 */
+	/* Bind shadedots UBO at binding 0 (UBO namespace, separate from SSBO) */
 	glBindBufferBase_fp(GL_UNIFORM_BUFFER, 0, prog->ubo_shadedots);
 
-	/* Set alpha test state for index-0 transparency */
 	GL_SetAlphaThreshold(0.666f);
-
-	{
-		static int inst_frame_count;
-		if (++inst_frame_count <= 3)  /* print first 3 frames */
-			Sys_Printf("AliasInst: %d instances, %d batches (frame %d)\n",
-				   num_alias_instances, num_alias_batches, inst_frame_count);
-	}
 
 	/* Draw each batch */
 	for (b = 0; b < num_alias_batches; b++)
 	{
 		alias_batch_t	*batch = &alias_batches[b];
 		alias_gpu_mesh_t *gm = GL_GetAliasGPUMesh(batch->hdr);
-		int		stride = sizeof(alias_instance_t);
-		size_t		base = batch->first * stride;
-		int		loc;
 
-		if (!gm || !gm->valid)
+		if (!gm || !gm->valid || !gm->ssbo_pose)
 			continue;
 
 		/* Bind skin texture to unit 0 */
 		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 		GL_Bind(batch->skin_tex);
 
-		/* Bind pose texture to unit 1 */
-		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
+		/* Bind pose SSBO at binding 1 */
+		glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
 
-		/* Use dedicated instancing VAO — don't corrupt model's VAO */
-		glBindVertexArray_fp(inst_vao);
+		/* Set base instance offset for this batch */
+		if (prog->u_inst_base >= 0)
+			glUniform1i_fp(prog->u_inst_base, batch->first);
 
-		/* Set up per-vertex texcoords from model's VBO */
-		glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_tc);
-		glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
-		glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-
-		/* Bind model's IBO */
-		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
-
-		/* Set up per-instance vertex attributes from inst_vbo */
-		glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
-
-		/* mat4 a_inst_mvp (locations 2-5) */
-		for (loc = 0; loc < 4; loc++)
-		{
-			glEnableVertexAttribArray_fp(ATTR_INST_MVP0 + loc);
-			glVertexAttribPointer_fp(ATTR_INST_MVP0 + loc, 4, GL_FLOAT, GL_FALSE,
-						 stride, (void *)(base + loc * 16));
-			glVertexAttribDivisor_fp(ATTR_INST_MVP0 + loc, 1);
-		}
-
-		/* mat4 a_inst_mv (locations 6-9) */
-		for (loc = 0; loc < 4; loc++)
-		{
-			glEnableVertexAttribArray_fp(ATTR_INST_MV0 + loc);
-			glVertexAttribPointer_fp(ATTR_INST_MV0 + loc, 4, GL_FLOAT, GL_FALSE,
-						 stride, (void *)(base + 64 + loc * 16));
-			glVertexAttribDivisor_fp(ATTR_INST_MV0 + loc, 1);
-		}
-
-		/* vec4 a_inst_scale_shade (location 10) */
-		glEnableVertexAttribArray_fp(ATTR_INST_SCALE_SHADE);
-		glVertexAttribPointer_fp(ATTR_INST_SCALE_SHADE, 4, GL_FLOAT, GL_FALSE,
-					 stride, (void *)(base + 128));
-		glVertexAttribDivisor_fp(ATTR_INST_SCALE_SHADE, 1);
-
-		/* vec4 a_inst_origin_alpha (location 11) */
-		glEnableVertexAttribArray_fp(ATTR_INST_ORIGIN_ALPHA);
-		glVertexAttribPointer_fp(ATTR_INST_ORIGIN_ALPHA, 4, GL_FLOAT, GL_FALSE,
-					 stride, (void *)(base + 144));
-		glVertexAttribDivisor_fp(ATTR_INST_ORIGIN_ALPHA, 1);
-
-		/* vec4 a_inst_light_lerp (location 12) */
-		glEnableVertexAttribArray_fp(ATTR_INST_LIGHT_LERP);
-		glVertexAttribPointer_fp(ATTR_INST_LIGHT_LERP, 4, GL_FLOAT, GL_FALSE,
-					 stride, (void *)(base + 160));
-		glVertexAttribDivisor_fp(ATTR_INST_LIGHT_LERP, 1);
-
-		/* ivec4 a_inst_poses (location 13) */
-		glEnableVertexAttribArray_fp(ATTR_INST_POSES);
-		glVertexAttribIPointer_fp(ATTR_INST_POSES, 4, GL_INT,
-					  stride, (void *)(base + 176));
-		glVertexAttribDivisor_fp(ATTR_INST_POSES, 1);
+		/* Use model's VAO (texcoords + IBO already set up) */
+		glBindVertexArray_fp(gm->vao);
 
 		/* Draw! */
 		glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
 					   GL_UNSIGNED_SHORT, NULL, batch->count);
-
-		/* Disable per-instance attributes */
-		for (loc = ATTR_INST_MVP0; loc <= ATTR_INST_POSES; loc++)
-		{
-			glVertexAttribDivisor_fp(loc, 0);
-			glDisableVertexAttribArray_fp(loc);
-		}
-
-		/* Disable vertex attrib arrays manually for locations used by mat4 */
 	}
 
 	/* Restore state */
-	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
 	GL_SetAlphaThreshold(0.01f);
 
-	/* Shadow pass — drawn individually per entity (immediate mode) */
+	/* Shadow pass — drawn individually per entity */
 	if (r_shadows.integer)
 	{
 		for (i = 0; i < num_inst_entities; i++)
@@ -1954,8 +1895,8 @@ static void R_DrawAliasInstanced (void)
 		}
 	}
 
-	/* Fullbright pass — re-draw instances that have fullbright textures
-	 * using the same instanced shader with additive blending */
+	/* Fullbright pass — re-draw instances with fullbright textures,
+	 * additive blending, uniform brightness */
 	if (gl_fullbrights.integer && !r_fullbright.integer)
 	{
 		qboolean has_fb = false;
@@ -1965,16 +1906,31 @@ static void R_DrawAliasInstanced (void)
 
 		if (has_fb)
 		{
-			glUseProgram_fp(prog->base.program);
-			if (prog->base.u_fog_density >= 0)
-				glUniform1f_fp(prog->base.u_fog_density, Fog_GetDensity());
-			if (prog->base.u_fog_color >= 0)
+			/* Override light_color to uniform brightness for fullbright */
+			for (i = 0; i < num_alias_instances; i++)
+			{
+				alias_instances[i].light_color[0] = 1.0f;
+				alias_instances[i].light_color[1] = 1.0f;
+				alias_instances[i].light_color[2] = 1.0f;
+			}
+
+			/* Re-upload modified instance data */
+			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, inst_ssbo);
+			glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, inst_offset,
+					   num_alias_instances * sizeof(alias_instance_t),
+					   alias_instances);
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, inst_ssbo);
+
+			glUseProgram_fp(prog->program);
+			if (prog->u_fog_density >= 0)
+				glUniform1f_fp(prog->u_fog_density, Fog_GetDensity());
+			if (prog->u_fog_color >= 0)
 			{
 				const float *fc = Fog_GetColor();
-				glUniform3f_fp(prog->base.u_fog_color, fc[0], fc[1], fc[2]);
+				glUniform3f_fp(prog->u_fog_color, fc[0], fc[1], fc[2]);
 			}
-			if (prog->base.u_alpha_threshold >= 0)
-				glUniform1f_fp(prog->base.u_alpha_threshold, 0.01f);
+			if (prog->u_alpha_threshold >= 0)
+				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 
 			glBindBufferBase_fp(GL_UNIFORM_BUFFER, 0, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);
@@ -1982,96 +1938,37 @@ static void R_DrawAliasInstanced (void)
 			glDepthMask_fp(0);
 			GL_SetAlphaThreshold(0.01f);
 
-			/* Override shade_light to 5.0 for fullbright.
-			 * We need to patch the instance data — modify in-place
-			 * and re-upload. */
-			for (i = 0; i < num_alias_instances; i++)
-				alias_instances[i].shade_light = 5.0f;
-
-			glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
-			glBufferSubData_fp(GL_ARRAY_BUFFER, 0,
-					   num_alias_instances * sizeof(alias_instance_t),
-					   alias_instances);
-
 			for (b = 0; b < num_alias_batches; b++)
 			{
 				alias_batch_t *batch = &alias_batches[b];
 				alias_gpu_mesh_t *gm;
-				int stride, loc;
-				size_t base;
 
 				if (!batch->fb_tex)
 					continue;
 
 				gm = GL_GetAliasGPUMesh(batch->hdr);
-				if (!gm || !gm->valid)
+				if (!gm || !gm->valid || !gm->ssbo_pose)
 					continue;
-
-				stride = sizeof(alias_instance_t);
-				base = batch->first * stride;
 
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				GL_Bind(batch->fb_tex);
-				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-				glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
-
-				glBindVertexArray_fp(inst_vao);
-				glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_tc);
-				glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
-				glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-				glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
-				glBindBuffer_fp(GL_ARRAY_BUFFER, inst_vbo);
-
-				for (loc = 0; loc < 4; loc++)
-				{
-					glEnableVertexAttribArray_fp(ATTR_INST_MVP0 + loc);
-					glVertexAttribPointer_fp(ATTR_INST_MVP0 + loc, 4, GL_FLOAT, GL_FALSE,
-								 stride, (void *)(base + loc * 16));
-					glVertexAttribDivisor_fp(ATTR_INST_MVP0 + loc, 1);
-				}
-				for (loc = 0; loc < 4; loc++)
-				{
-					glEnableVertexAttribArray_fp(ATTR_INST_MV0 + loc);
-					glVertexAttribPointer_fp(ATTR_INST_MV0 + loc, 4, GL_FLOAT, GL_FALSE,
-								 stride, (void *)(base + 64 + loc * 16));
-					glVertexAttribDivisor_fp(ATTR_INST_MV0 + loc, 1);
-				}
-				glEnableVertexAttribArray_fp(ATTR_INST_SCALE_SHADE);
-				glVertexAttribPointer_fp(ATTR_INST_SCALE_SHADE, 4, GL_FLOAT, GL_FALSE,
-							 stride, (void *)(base + 128));
-				glVertexAttribDivisor_fp(ATTR_INST_SCALE_SHADE, 1);
-				glEnableVertexAttribArray_fp(ATTR_INST_ORIGIN_ALPHA);
-				glVertexAttribPointer_fp(ATTR_INST_ORIGIN_ALPHA, 4, GL_FLOAT, GL_FALSE,
-							 stride, (void *)(base + 144));
-				glVertexAttribDivisor_fp(ATTR_INST_ORIGIN_ALPHA, 1);
-				glEnableVertexAttribArray_fp(ATTR_INST_LIGHT_LERP);
-				glVertexAttribPointer_fp(ATTR_INST_LIGHT_LERP, 4, GL_FLOAT, GL_FALSE,
-							 stride, (void *)(base + 160));
-				glVertexAttribDivisor_fp(ATTR_INST_LIGHT_LERP, 1);
-				glEnableVertexAttribArray_fp(ATTR_INST_POSES);
-				glVertexAttribIPointer_fp(ATTR_INST_POSES, 4, GL_INT,
-							  stride, (void *)(base + 176));
-				glVertexAttribDivisor_fp(ATTR_INST_POSES, 1);
+				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
+				if (prog->u_inst_base >= 0)
+					glUniform1i_fp(prog->u_inst_base, batch->first);
+				glBindVertexArray_fp(gm->vao);
 
 				glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
 							   GL_UNSIGNED_SHORT, NULL, batch->count);
-
-				for (loc = ATTR_INST_MVP0; loc <= ATTR_INST_POSES; loc++)
-				{
-					glVertexAttribDivisor_fp(loc, 0);
-					glDisableVertexAttribArray_fp(loc);
-				}
 			}
 
 			glDepthMask_fp(1);
 			glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDisable_fp(GL_BLEND);
 
-			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-			glBindTexture_fp(GL_TEXTURE_2D, 0);
-			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 			glBindVertexArray_fp(0);
 			glUseProgram_fp(0);
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
 		}
 	}
 }
@@ -2096,9 +1993,8 @@ static void R_DrawEntitiesOnList (void)
 		return;
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
-	 * models before the per-entity loop. Requires r_alias_gpu >= 2.
-	 * NOTE: disabled — instanced entities render invisible (shader bug) */
-	use_instancing = false; /*(r_alias_gpu.integer >= 2 && gl_shader_alias_inst.base.program)*/
+	 * models via SSBO before the per-entity loop. Requires r_alias_gpu >= 2. */
+	use_instancing = (r_alias_gpu.integer >= 2 && gl_shader_alias_inst.program);
 	if (use_instancing)
 	{
 		R_CollectAndBatchAliasInstances();

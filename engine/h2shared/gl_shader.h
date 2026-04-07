@@ -72,12 +72,14 @@ typedef struct {
 
 extern gl_alias_gpu_prog_t gl_shader_alias_gpu;
 
-/* Instanced alias program (ES 3.0 compatible — texture pose, UBO shadedots) */
+/* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs) */
 typedef struct {
-	glprogram_t base;	/* standard uniforms (fog only) */
-	GLint	u_pose_tex;	/* R32UI pose data texture */
+	GLuint	program;	/* shader program handle */
 	GLuint	ubo_shadedots;	/* UBO handle for shadedots table */
-	GLuint	ubo_block_idx;	/* UBO block index in the program */
+	GLint	u_fog_density;	/* fragment fog uniforms */
+	GLint	u_fog_color;
+	GLint	u_alpha_threshold;
+	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
@@ -102,14 +104,6 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 #define ATTR_TEXCOORD	1
 #define ATTR_LMCOORD	2
 #define ATTR_COLOR	3
-
-/* Instanced alias model attribute locations (divisor=1) */
-#define ATTR_INST_MVP0		2	/* mat4 = 4 consecutive locations (2-5) */
-#define ATTR_INST_MV0		6	/* mat4 = 4 consecutive locations (6-9) */
-#define ATTR_INST_SCALE_SHADE	10	/* vec4 */
-#define ATTR_INST_ORIGIN_ALPHA	11	/* vec4 */
-#define ATTR_INST_LIGHT_LERP	12	/* vec4 */
-#define ATTR_INST_POSES		13	/* ivec4 */
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);

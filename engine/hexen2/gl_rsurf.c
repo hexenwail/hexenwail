@@ -1162,26 +1162,38 @@ static void DrawTextureChains (entity_t *e)
 				 !(s->flags & (SURF_DRAWSKY | SURF_DRAWTURB | SURF_DRAWFENCE | SURF_UNDERWATER)))
 			{
 				/* GPU compute cull already drew solid surfaces.
-				 * Just walk chain for lightmap dynamic updates. */
+				 * Walk chain for lightmap dynamic updates — must
+				 * rebuild pixel data, not just mark dirty. */
 				for ( ; s ; s = s->texturechain)
 				{
 					if (s->polys)
 					{
 						int maps;
+						qboolean needs_rebuild = false;
+						byte *base;
+
 						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
 						lightmap_polys[s->lightmaptexturenum] = s->polys;
+
 						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
 						{
 							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
 							{
-								LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-										   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+								needs_rebuild = true;
 								break;
 							}
 						}
 						if (s->dlightframe == r_framecount || s->cached_dlight)
+							needs_rebuild = true;
+
+						if (needs_rebuild)
+						{
 							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
 									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+							base = lightmaps + s->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+							base += s->light_t * BLOCK_WIDTH * lightmap_bytes + s->light_s * lightmap_bytes;
+							R_BuildLightMap (s, base, BLOCK_WIDTH*lightmap_bytes);
+						}
 					}
 				}
 			}
