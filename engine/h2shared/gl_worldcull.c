@@ -192,8 +192,10 @@ static const char cull_mark_src[] =
 	"\n"
 	"    Surface s = surfaces[si];\n"
 	"\n"
-	"    /* Skip sky (0x4), turb/liquid (0x10), underwater (0x200), fence (0x800) */\n"
-	"    if ((s.flags & 0xA14) != 0) return;\n"
+	"    /* Skip non-lightmapped and special surfaces:\n"
+	"     * sky(0x4) turb(0x10) drawtiled(0x20) drawblack(0x100)\n"
+	"     * underwater(0x200) fence(0x800) */\n"
+	"    if ((s.flags & 0xB34) != 0) return;\n"
 	"\n"
 	"    /* Skip surfaces with no VBO data */\n"
 	"    if (s.numindices <= 0) return;\n"
@@ -386,7 +388,12 @@ void R_BuildWorldCull (void)
 
 		gpu_surfs[i].firstindex = surf->vbo_firstindex;
 		gpu_surfs[i].numindices = surf->vbo_numtris * 3;
+		/* Propagate surface flags; mark lightmap-less surfaces as
+		 * DRAWTILED so the compute shader skips them (they'd sample
+		 * black from the atlas since they have no lightmap data). */
 		gpu_surfs[i].flags = surf->flags;
+		if (!surf->samples)
+			gpu_surfs[i].flags |= SURF_DRAWTILED;
 
 		cull_bucket_map[i] = gpu_surfs[i].tex_bucket;
 	}
