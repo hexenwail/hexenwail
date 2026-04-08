@@ -616,6 +616,8 @@ static void R_UpdateLightmaps (qboolean Translucent)
 R_RenderBrushPoly
 ================
 */
+static float R_LiquidAlpha (const texture_t *t); /* forward decl */
+
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 {
 	texture_t	*t;
@@ -654,21 +656,39 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	GL_Bind (t->gl_texturenum);
 
 	if (fa->flags & SURF_DRAWTURB)
-	{	// warp texture — sample light at surface center for tinting
+	{	// warp texture — apply per-liquid alpha + light tinting
+		float turb_alpha = R_LiquidAlpha(fa->texinfo->texture);
+		if (turb_alpha < 1.0f && alpha_val >= 1.0f)
+		{
+			glEnable_fp (GL_BLEND);
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask_fp(0);
+			alpha_val = turb_alpha;
+		}
 		if (fa->polys && !r_fullbright.integer && intensity >= 1.0f)
 		{
 			extern vec3_t lightcolor;
+			vec3_t saved_lc;
 			float *v = fa->polys->verts[0];
 			vec3_t mid;
 			float lv;
+			VectorCopy(lightcolor, saved_lc);
 			mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
 			R_LightPointColor(mid);
 			lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
 			if (lv > 1.0f) lv = 1.0f;
 			if (lv < 0.15f) lv = 0.15f;
 			GL_ImmColor4f(lv, lv, lv, alpha_val);
+			VectorCopy(saved_lc, lightcolor);
 		}
+		else
+			GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 		EmitWaterPolys (fa);
+		if (turb_alpha < 1.0f)
+		{
+			glDepthMask_fp(1);
+			glDisable_fp(GL_BLEND);
+		}
 		return;
 	}
 
@@ -806,8 +826,20 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWTURB)
 	{
-		GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+		float turb_alpha = R_LiquidAlpha(fa->texinfo->texture);
+		if (turb_alpha < 1.0f && alpha_val >= 1.0f)
+		{
+			glEnable_fp (GL_BLEND);
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask_fp(0);
+		}
+		GL_ImmColor4f(1.0f, 1.0f, 1.0f, turb_alpha < 1.0f ? turb_alpha : alpha_val);
 		EmitWaterPolys (fa);
+		if (turb_alpha < 1.0f)
+		{
+			glDepthMask_fp(1);
+			glDisable_fp(GL_BLEND);
+		}
 		//return;
 	}
 	else
