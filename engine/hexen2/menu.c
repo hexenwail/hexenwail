@@ -3000,7 +3000,7 @@ static void M_Sound_Key (int k)
 enum
 {
 	GAME_FOV = 0,
-	GAME_VIEWMODEL_FOV,
+	GAME_GUN_FOVSCALE,
 	GAME_ALWAYRUN,
 	GAME_MOUSESPEED,
 	GAME_INVMOUSE,
@@ -3038,15 +3038,12 @@ static void M_Game_AdjustSliders (int dir)
 		else if (f > 130) f = 130;
 		Cvar_SetValue ("fov", f);
 		break;
-	case GAME_VIEWMODEL_FOV:
+	case GAME_GUN_FOVSCALE:
 	{
-		float f = Cvar_VariableValue("r_viewmodel_fov") + dir * 5;
+		float f = Cvar_VariableValue("cl_gun_fovscale") + dir * 0.1f;
 		if (f < 0)	f = 0;
-		else if (f < 30) f = 30;
-		else if (f > 130) f = 130;
-		/* 0 = match world FOV (default) */
-		if (dir < 0 && f <= 30) f = 0;
-		Cvar_SetValue ("r_viewmodel_fov", f);
+		else if (f > 1)	f = 1;
+		Cvar_SetValue ("cl_gun_fovscale", f);
 		break;
 	}
 	case GAME_ALWAYRUN:
@@ -3113,16 +3110,13 @@ static void M_Game_Draw (void)
 	r = (scr_fov.value - 60) / (130 - 60);
 	M_DrawSliderValue (220, 92 + 8*GAME_FOV, r, "%.0f°", scr_fov.value);
 
-	M_Print (76, 92 + 8*GAME_VIEWMODEL_FOV,	"Weapon FOV    :");
+	M_Print (76, 92 + 8*GAME_GUN_FOVSCALE,	"Gun FOV Scale :");
 	{
-		float wfov = Cvar_VariableValue("r_viewmodel_fov");
-		if (wfov <= 0)
-			M_PrintWhite (220, 92 + 8*GAME_VIEWMODEL_FOV, "Match");
+		float s = Cvar_VariableValue("cl_gun_fovscale");
+		if (s <= 0)
+			M_PrintWhite (220, 92 + 8*GAME_GUN_FOVSCALE, "Off");
 		else
-		{
-			r = (wfov - 30) / (130 - 30);
-			M_DrawSliderValue (220, 92 + 8*GAME_VIEWMODEL_FOV, r, "%.0f°", wfov);
-		}
+			M_DrawSliderValue (220, 92 + 8*GAME_GUN_FOVSCALE, s, "%.0f%%", s * 100);
 	}
 
 	M_Print (76, 92 + 8*GAME_ALWAYRUN,	"Always Run    :");
