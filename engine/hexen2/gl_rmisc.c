@@ -247,6 +247,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_farclip);
 	Cvar_RegisterVariable (&r_entdist);
 	Cvar_RegisterVariable (&r_viewmodel_fov);
+	Cvar_RegisterVariable (&cl_gun_fovscale);
 	Cvar_RegisterVariable (&r_lavaalpha);
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_telealpha);

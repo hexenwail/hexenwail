@@ -114,6 +114,7 @@ cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};
 cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};
 cvar_t	r_entdist = {"r_entdist", "0", CVAR_ARCHIVE};	/* entity draw distance (0=unlimited) */
 cvar_t	r_viewmodel_fov = {"r_viewmodel_fov", "0", CVAR_ARCHIVE};
+cvar_t	cl_gun_fovscale = {"cl_gun_fovscale", "1", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
@@ -1073,16 +1074,20 @@ static void R_DrawAliasModel (entity_t *e)
 		tmatrix[2][3] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
 	}
 
-	if (e == &cl.viewent && scr_fov.integer > 90) /* compensate viewmodel distortion at fov>90 */
+	if (e == &cl.viewent && scr_fov.value > 90.f && cl_gun_fovscale.value)
 	{
-		float fovscale = tan(scr_fov.value * (0.5 * M_PI / 180));
-		GL_Translatef (tmatrix[0][3], tmatrix[1][3] * fovscale, tmatrix[2][3] * fovscale);	// paliashdr->scale_origin[0..2]
-		GL_Scalef (tmatrix[0][0], tmatrix[1][1] * fovscale, tmatrix[2][2] * fovscale);	// paliashdr->scale[0..2]
+		/* Ironwail-style viewmodel distortion correction: blend factor
+		 * 0 = no correction (gun stretches with FOV), 1 = full correction
+		 * (gun stays same apparent size as at 90 FOV). */
+		float fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
+		fovscale = 1.f + (fovscale - 1.f) * cl_gun_fovscale.value;
+		GL_Translatef (tmatrix[0][3], tmatrix[1][3] * fovscale, tmatrix[2][3] * fovscale);
+		GL_Scalef (tmatrix[0][0], tmatrix[1][1] * fovscale, tmatrix[2][2] * fovscale);
 	}
 	else
 	{
-		GL_Translatef (tmatrix[0][3], tmatrix[1][3], tmatrix[2][3]);	// paliashdr->scale_origin[0..2]
-		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);	// paliashdr->scale[0..2]
+		GL_Translatef (tmatrix[0][3], tmatrix[1][3], tmatrix[2][3]);
+		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);
 	}
 
 	if (e->model->flags & EF_SPECIAL_TRANS)
