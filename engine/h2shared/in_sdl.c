@@ -428,6 +428,10 @@ void IN_ClearStates (void)
 {
 }
 
+qboolean joy_altmodifier_pressed = false;
+static void IN_JoyAltModifierDown (void) { joy_altmodifier_pressed = true; }
+static void IN_JoyAltModifierUp (void) { joy_altmodifier_pressed = false; }
+
 static void Force_CenterView_f (void)
 {
 	cl.viewangles[PITCH] = 0;
@@ -458,6 +462,8 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&joy_rumble);
 
 	Cmd_AddCommand ("force_centerview", Force_CenterView_f);
+	Cmd_AddCommand ("+altmodifier", IN_JoyAltModifierDown);
+	Cmd_AddCommand ("-altmodifier", IN_JoyAltModifierUp);
 
 	IN_StartupMouse ();
 	IN_StartupGamepad ();

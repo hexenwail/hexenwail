@@ -98,6 +98,24 @@
 #define K_PAUSE			255
 
 //
+// gamepad ALT-modifier second layer (hold +altmodifier to access)
+//
+#define	K_GP_A_ALT		256
+#define	K_GP_B_ALT		257
+#define	K_GP_X_ALT		258
+#define	K_GP_Y_ALT		259
+#define	K_GP_LSHOULDER_ALT	260
+#define	K_GP_RSHOULDER_ALT	261
+#define	K_GP_LTRIGGER_ALT	262
+#define	K_GP_RTRIGGER_ALT	263
+#define	K_GP_LTHUMB_ALT	264
+#define	K_GP_RTHUMB_ALT	265
+#define	K_GP_BACK_ALT		266
+#define	K_GP_START_ALT		267
+
+#define	K_GP_ALT_OFFSET		(K_GP_A_ALT - K_GP_A)	/* = 13 */
+
+//
 // mouse buttons generate virtual keys
 //
 #define	K_MOUSE1		200
@@ -164,8 +182,14 @@
 
 typedef int keydest_t;
 
-extern	char	*keybindings[256];
-extern	char	*doublebindings[256];
+#define	MAX_KEYS		268	/* K_GP_START_ALT + 1 */
+
+extern	char	*keybindings[MAX_KEYS];
+extern	char	*doublebindings[MAX_KEYS];
+
+extern	qboolean	joy_altmodifier_pressed;
+qboolean Key_IsGamepadAltModifier (int keynum);
+qboolean Key_GetGamepadAltModifierState (void);
 extern	int		key_count;			/* incremented every key event */
 extern	int		key_lastpress;
 

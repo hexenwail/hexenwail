@@ -37,16 +37,16 @@ static qboolean		key_gamekey, prev_gamekey;
 
 int		key_count;		// incremented every key event
 
-char		*keybindings[256];
-char		*doublebindings[256];	// double-tap bindings, parallel to keybindings[]
-static qboolean	consolekeys[256];	// if true, can't be rebound while in console
-static qboolean	menubound[256];		// if true, can't be rebound while in menu
-static int	keyshift[256];		// key to map to if shift held down in console
-static int	key_repeats[256];	// if > 1, it is autorepeating
-static qboolean	keyreserved[256];	// hardcoded, can't be rebound by the user
-static qboolean	keydown[256];
-static double	key_lastdown[256];	// realtime timestamp of last key-down for each key
-static qboolean	key_doubletap_active[256]; // true if doublebinding +cmd is currently active
+char		*keybindings[MAX_KEYS];
+char		*doublebindings[MAX_KEYS];	// double-tap bindings, parallel to keybindings[]
+static qboolean	consolekeys[MAX_KEYS];	// if true, can't be rebound while in console
+static qboolean	menubound[MAX_KEYS];		// if true, can't be rebound while in menu
+static int	keyshift[MAX_KEYS];		// key to map to if shift held down in console
+static int	key_repeats[MAX_KEYS];	// if > 1, it is autorepeating
+static qboolean	keyreserved[MAX_KEYS];	// hardcoded, can't be rebound by the user
+static qboolean	keydown[MAX_KEYS];
+static double	key_lastdown[MAX_KEYS];	// realtime timestamp of last key-down for each key
+static qboolean	key_doubletap_active[MAX_KEYS]; // true if doublebinding +cmd is currently active
 static cvar_t	key_doubletap_time = {"key_doubletap_time", "0.4", CVAR_ARCHIVE};
 
 typedef struct
@@ -169,6 +169,19 @@ static keyname_t keynames[] =
 	{"GP_RTHUMB", K_GP_RTHUMB},
 	{"GP_BACK", K_GP_BACK},
 	{"GP_START", K_GP_START},
+
+	{"GP_A_ALT", K_GP_A_ALT},
+	{"GP_B_ALT", K_GP_B_ALT},
+	{"GP_X_ALT", K_GP_X_ALT},
+	{"GP_Y_ALT", K_GP_Y_ALT},
+	{"GP_LSHOULDER_ALT", K_GP_LSHOULDER_ALT},
+	{"GP_RSHOULDER_ALT", K_GP_RSHOULDER_ALT},
+	{"GP_LTRIGGER_ALT", K_GP_LTRIGGER_ALT},
+	{"GP_RTRIGGER_ALT", K_GP_RTRIGGER_ALT},
+	{"GP_LTHUMB_ALT", K_GP_LTHUMB_ALT},
+	{"GP_RTHUMB_ALT", K_GP_RTHUMB_ALT},
+	{"GP_BACK_ALT", K_GP_BACK_ALT},
+	{"GP_START_ALT", K_GP_START_ALT},
 
 	{"PAUSE", K_PAUSE},
 
@@ -719,7 +732,7 @@ static void Key_Unbindall_f (void)
 {
 	int	i;
 
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < MAX_KEYS; i++)
 		Key_SetBinding(i, NULL);
 }
 
@@ -860,6 +873,25 @@ static void Key_Bind2_f (void)
 ============
 Key_WriteBindings
 
+Key_IsGamepadAltModifier / Key_GetGamepadAltModifierState
+============
+*/
+qboolean Key_IsGamepadAltModifier (int keynum)
+{
+	return keybindings[keynum] && !strcmp(keybindings[keynum], "+altmodifier");
+}
+
+qboolean Key_GetGamepadAltModifierState (void)
+{
+	int k;
+	for (k = 0; k < MAX_KEYS; k++)
+		if (keydown[k] && Key_IsGamepadAltModifier(k))
+			return true;
+	return false;
+}
+
+/*
+============
 Writes lines containing "bind key value" and "bind2 key value"
 ============
 */
@@ -870,12 +902,12 @@ void Key_WriteBindings (FILE *f)
 	// unbindall before loading stored bindings:
 	if (cfg_unbindall.integer)
 		fprintf (f, "unbindall\n");
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < MAX_KEYS; i++)
 	{
 		if (keybindings[i] && *keybindings[i])
 			fprintf (f, "bind \"%s\" \"%s\"\n", Key_KeynumToString(i), keybindings[i]);
 	}
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < MAX_KEYS; i++)
 	{
 		if (doublebindings[i] && *doublebindings[i])
 			fprintf (f, "bind2 \"%s\" \"%s\"\n", Key_KeynumToString(i), doublebindings[i]);
@@ -925,7 +957,7 @@ void Key_Init (void)
 	consolekeys['`'] = false;
 	consolekeys['~'] = false;
 
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < MAX_KEYS; i++)
 		keyshift[i] = i;
 	for (i = 'a'; i <= 'z'; i++)
 		keyshift[i] = i - 'a' + 'A';
@@ -978,6 +1010,7 @@ void Key_Init (void)
 	Key_SetBinding (K_GP_X, "impulse 23");		/* use artifact */
 	Key_SetBinding (K_GP_Y, "impulse 10");		/* next weapon */
 	Key_SetBinding (K_GP_LTHUMB, "impulse 13");	/* lift object */
+	Key_SetBinding (K_GP_RTHUMB, "+altmodifier");	/* hold for second layer */
 	Key_SetBinding (K_GP_START, "togglemenu");
 	Key_SetBinding (K_GP_BACK, "toggleconsole");
 
@@ -1006,6 +1039,18 @@ void Key_Event (int key, qboolean down)
 	char	cmd[1024];
 
 	keydown[key] = down;
+
+	/* Gamepad alt-modifier: remap to _ALT variant when held.
+	 * Fallback to base binding if ALT slot is unbound. */
+	if (joy_altmodifier_pressed && key >= K_GP_A && key <= K_GP_START)
+	{
+		if (!Key_IsGamepadAltModifier(key))
+		{
+			int altkey = key + K_GP_ALT_OFFSET;
+			if (keybindings[altkey] != NULL || keybindings[key] == NULL)
+				key = altkey;
+		}
+	}
 
 	if (!down)
 		key_repeats[key] = 0;
@@ -1307,7 +1352,7 @@ void Key_ClearStates (void)
 {
 	int	i;
 
-	for (i = 0; i < 256; i++)
+	for (i = 0; i < MAX_KEYS; i++)
 	{
 		if (keydown[i])
 			Key_Event (i, false);
