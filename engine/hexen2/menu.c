@@ -398,7 +398,13 @@ void M_ToggleMenu_f (void)
 	else
 	{
 		LogoTargetPercent = TitleTargetPercent = 1;
-		LogoPercent = TitlePercent = 0;
+		/* Only reset scroll if menu wasn't already showing —
+		 * avoids a one-frame flash when title is already visible
+		 * (e.g., pressing escape during boot demo). */
+		if (m_state == m_none)
+		{
+			LogoPercent = TitlePercent = 0;
+		}
 		M_Menu_Main_f ();
 	}
 }
@@ -2082,7 +2088,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2104,7 +2109,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2126,7 +2130,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2148,7 +2151,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2170,7 +2172,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
-
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2192,7 +2193,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
-
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 0);
