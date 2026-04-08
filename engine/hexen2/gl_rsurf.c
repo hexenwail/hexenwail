@@ -921,9 +921,11 @@ void R_DrawWaterSurfaces (void)
 		r_wateralpha.value = 0.1;
 	if (r_wateralpha.value > 1)
 		r_wateralpha.value = 1;
-	/* If all liquid alphas are 1.0, everything was drawn in main pass */
+	/* If all liquid alphas are 1.0, everything was drawn in main pass.
+	 * Teleporters default to 0.7 when r_telealpha <= 0, so they
+	 * still need the translucent pass. */
 	if (r_wateralpha.value == 1.0 && r_lavaalpha.value <= 0 &&
-	    r_slimealpha.value <= 0 && r_telealpha.value <= 0)
+	    r_slimealpha.value <= 0 && r_telealpha.value == 1.0)
 		return;
 
 	//
