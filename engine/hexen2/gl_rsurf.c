@@ -907,8 +907,10 @@ static float R_LiquidAlpha (const texture_t *t)
 		{	if (r_telealpha.value <= 0) return 0.7f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
-	/* Unknown turb textures (H2 portals, etc.) — default opaque */
-	return 1.0f;
+	/* Unknown turb textures (H2 portals, *rtex*, etc.) —
+	 * use teleporter alpha (default 0.7) as fallback. */
+	if (r_telealpha.value <= 0) return 0.7f;
+	{	float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 }
 
 void R_DrawWaterSurfaces (void)
