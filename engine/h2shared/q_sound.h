@@ -108,6 +108,9 @@ void S_BeginPrecaching (void);
 void S_EndPrecaching (void);
 void S_PaintChannels (int endtime);
 void S_InitPaintChannels (void);
+void S_SetUnderwaterIntensity (float target);
+
+extern cvar_t snd_waterfx;
 
 /* picks a channel based on priorities, empty slots, number of channels */
 channel_t *SND_PickChannel (int entnum, int entchannel);

@@ -2846,6 +2846,7 @@ enum
 	SND_MUSICTYPE = 0,
 	SND_MUSICVOL,
 	SND_SFXVOL,
+	SND_WATERFX,
 	SND_ITEMS
 };
 
@@ -2924,6 +2925,12 @@ static void M_Sound_AdjustSliders (int dir)
 		else if (f > 1)	f = 1;
 		Cvar_SetValue ("volume", f);
 		break;
+	case SND_WATERFX:
+		f = snd_waterfx.value + dir * 0.1;
+		if (f < 0)	f = 0;
+		else if (f > 2)	f = 2;
+		Cvar_SetValue ("snd_waterfx", f);
+		break;
 	}
 }
 
@@ -2956,6 +2963,10 @@ static void M_Sound_Draw (void)
 	M_Print (76, 92 + 8*SND_SFXVOL,	"Sound Volume  :");
 	r = sfxvolume.value;
 	M_DrawSliderValue (220, 92 + 8*SND_SFXVOL, r, "%.0f%%", r * 100);
+
+	M_Print (76, 92 + 8*SND_WATERFX,	"Water Muffle  :");
+	r = snd_waterfx.value;
+	M_DrawSliderValue (220, 92 + 8*SND_WATERFX, r / 2, "%.0f%%", r * 50);
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, SND_ITEMS); if (h >= 0) sound_cursor = h; }
 	M_DrawCharacter (64, 92 + sound_cursor*8, 12+((int)(realtime*4)&1));

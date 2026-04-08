@@ -31,6 +31,50 @@ ASM_LINKAGE_END
 
 static int	snd_vol;
 
+/* Underwater low-pass filter state (ported from Ironwail) */
+static struct {
+	float	intensity;	/* 0 = dry, 1 = fully submerged */
+	float	alpha;		/* IIR coefficient, derived from intensity */
+	float	accum[2];	/* persistent left/right filter state */
+} underwater = {0.f, 1.f, {0.f, 0.f}};
+
+void S_SetUnderwaterIntensity (float target)
+{
+	target *= CLAMP (0.f, snd_waterfx.value, 2.f);
+	if (underwater.intensity < target)
+	{
+		underwater.intensity += host_frametime * 4.f;
+		underwater.intensity = q_min (underwater.intensity, target);
+	}
+	else if (underwater.intensity > target)
+	{
+		underwater.intensity -= host_frametime * 4.f;
+		underwater.intensity = q_max (underwater.intensity, target);
+	}
+	underwater.alpha = exp (-underwater.intensity * log (12.f));
+}
+
+static void S_UnderwaterFilter (int count)
+{
+	int i;
+	if (!underwater.intensity)
+	{
+		if (count > 0)
+		{
+			underwater.accum[0] = paintbuffer[count-1].left;
+			underwater.accum[1] = paintbuffer[count-1].right;
+		}
+		return;
+	}
+	for (i = 0; i < count; i++)
+	{
+		underwater.accum[0] += underwater.alpha * (paintbuffer[i].left  - underwater.accum[0]);
+		underwater.accum[1] += underwater.alpha * (paintbuffer[i].right - underwater.accum[1]);
+		paintbuffer[i].left  = (int) underwater.accum[0];
+		paintbuffer[i].right = (int) underwater.accum[1];
+	}
+}
+
 #if	!id386
 static void Snd_WriteLinearBlastStereo16 (void)
 {
@@ -265,6 +309,9 @@ void S_PaintChannels (int endtime)
 				}
 			}
 		}
+
+	// underwater low-pass filter
+		S_UnderwaterFilter(end - paintedtime);
 
 	// transfer out according to DMA format
 		S_TransferPaintBuffer(end);

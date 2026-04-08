@@ -99,6 +99,7 @@ static	cvar_t	bgm_mutedvol = {"bgm_mutedvol", "0", CVAR_ARCHIVE};
 static	cvar_t	nosound = {"nosound", "0", CVAR_NONE};
 static	cvar_t	ambient_level = {"ambient_level", "0.3", CVAR_NONE};
 static	cvar_t	ambient_fade = {"ambient_fade", "100", CVAR_NONE};
+	cvar_t	snd_waterfx = {"snd_waterfx", "1", CVAR_ARCHIVE};
 static	cvar_t	snd_noextraupdate = {"snd_noextraupdate", "0", CVAR_NONE};
 static	cvar_t	snd_show = {"snd_show", "0", CVAR_NONE};
 static	cvar_t	_snd_mixahead = {"_snd_mixahead", "0.1", CVAR_ARCHIVE};
@@ -253,6 +254,7 @@ void S_Init (void)
 	Cvar_RegisterVariable(&bgm_mutedvol);
 	Cvar_RegisterVariable(&ambient_level);
 	Cvar_RegisterVariable(&ambient_fade);
+	Cvar_RegisterVariable(&snd_waterfx);
 	Cvar_RegisterVariable(&snd_noextraupdate);
 	Cvar_RegisterVariable(&snd_show);
 	Cvar_RegisterVariable(&_snd_mixahead);
@@ -790,6 +792,23 @@ static void S_UpdateAmbientSounds (void)
 		}
 
 		chan->leftvol = chan->rightvol = chan->master_vol;
+	}
+
+	/* Underwater audio filter: ramp intensity based on leaf contents */
+	{
+		float uw = 0.f;
+		if (l)
+		{
+			switch (l->contents)
+			{
+			case CONTENTS_WATER:
+			case CONTENTS_SLIME:
+			case CONTENTS_LAVA:
+				uw = 1.f;
+				break;
+			}
+		}
+		S_SetUnderwaterIntensity(uw);
 	}
 }
 
