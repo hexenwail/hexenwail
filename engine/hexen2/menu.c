@@ -2082,7 +2082,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-			Cvar_SetValue ("r_wateralpha", 1.0f);
+
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2104,7 +2104,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-			Cvar_SetValue ("r_wateralpha", 1.0f);
+
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2126,7 +2126,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-			Cvar_SetValue ("r_wateralpha", 1.0f);
+
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2148,7 +2148,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
-			Cvar_SetValue ("r_wateralpha", 1.0f);
+
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2170,7 +2170,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
-			Cvar_SetValue ("r_wateralpha", 1.0f);
+
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
@@ -2192,7 +2192,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
-			Cvar_SetValue ("r_wateralpha", 1.0f);
+
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
 			Cvar_SetValue ("r_shadows", 0);
