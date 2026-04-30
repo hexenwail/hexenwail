@@ -1037,7 +1037,12 @@ static void V_CalcRefdef (void)
 	else if (scr_viewsize.integer == 80)
 		view->origin[2] += 0.5;
 
-	view->model = cl.model_precache[cl.stats[STAT_WEAPON]];
+	{
+		struct qmodel_s *newmodel = cl.model_precache[cl.stats[STAT_WEAPON]];
+		if (view->model != newmodel)
+			view->lerpflags |= LERP_RESETANIM | LERP_RESETANIM2;
+		view->model = newmodel;
+	}
 	view->frame = cl.stats[STAT_WEAPONFRAME];
 	if (!view->colorshade)
 	{

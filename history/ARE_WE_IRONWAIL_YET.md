@@ -49,7 +49,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 |---|---|---|
 | Shader-based fog | ✅ | `gl_fog.c`, density/RGB/fade |
 | Lightstyle interpolation | ✅ | `r_lerplightstyles` |
-| Model frame interpolation | ✅ | `r_lerpmodels`, `r_lerpmove` |
+| Model frame interpolation | ✅ | `r_lerpmodels` (frame), `r_lerpmove` (origin) — both default on, two-stage RESETANIM/RESETANIM2 reset |
 | Overbright model lighting | ✅ | `gl_overbright_models` |
 | Fast sky | ✅ | `r_fastsky` |
 | Skybox support | ✅ | `svc_skybox`, cubemap loading |
