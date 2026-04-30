@@ -42,7 +42,8 @@ typedef struct efrag_s
 // render-time interpolation flags
 #define LERP_MOVESTEP	(1<<0)	// entity uses step-based movement (monsters, doors)
 #define LERP_RESETMOVE	(1<<1)	// reset movement lerp (teleport, spawn)
-#define LERP_RESETANIM	(1<<2)	// reset animation lerp
+#define LERP_RESETANIM	(1<<2)	// reset animation lerp for one frame
+#define LERP_RESETANIM2	(1<<3)	// reset animation lerp for one more frame (clean baseline)
 
 typedef struct entity_s
 {

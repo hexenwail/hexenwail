@@ -121,6 +121,7 @@ cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
+cvar_t	r_lerpmove = {"r_lerpmove", "1", CVAR_ARCHIVE};	/* smooth step-mover position interpolation */
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
@@ -785,70 +786,100 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 
 /*
 =================
+R_AliasResolveLerp
+
+Resolves the current/previous pose indices and lerp blend factor for an
+alias entity, managing animation lerp state via LERP_RESETANIM and
+LERP_RESETANIM2 (Ironwail's two-stage reset protocol). The blend output
+is in natural form: 0.0 = full previous pose, 1.0 = full current pose.
+
+Both the immediate-mode and SSBO-instanced alias paths call through here
+so the lerp behavior stays in lockstep.
+=================
+*/
+static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
+                                int *out_pose, int *out_prevpose,
+                                float *out_blend)
+{
+	int	frame, posenum, numposes;
+
+	frame = e->frame;
+	if ((frame >= paliashdr->numframes) || (frame < 0))
+	{
+		Con_DPrintf ("R_AliasResolveLerp: no such frame %d for %s\n",
+			     frame, e->model->name);
+		frame = 0;
+	}
+
+	posenum = paliashdr->frames[frame].firstpose;
+	numposes = paliashdr->frames[frame].numposes;
+
+	if (numposes > 1)
+	{
+		e->lerptime = paliashdr->frames[frame].interval;
+		posenum += (int)(cl.time / e->lerptime) % numposes;
+	}
+	else
+	{
+		e->lerptime = 0.1f;
+	}
+
+	/* Two-stage reset: RESETANIM snaps both poses to current and clears
+	 * the flag; RESETANIM2 defers one more pose change so the next real
+	 * transition lerps from a clean baseline rather than stale state. */
+	if (e->lerpflags & LERP_RESETANIM)
+	{
+		e->lerpstart = 0.0f;
+		e->previouspose = posenum;
+		e->currentpose = posenum;
+		e->lerpflags &= ~LERP_RESETANIM;
+	}
+	else if (e->currentpose != posenum)
+	{
+		if (e->lerpflags & LERP_RESETANIM2)
+		{
+			e->lerpstart = 0.0f;
+			e->previouspose = posenum;
+			e->currentpose = posenum;
+			e->lerpflags &= ~LERP_RESETANIM2;
+		}
+		else
+		{
+			e->lerpstart = (float)cl.time;
+			e->previouspose = e->currentpose;
+			e->currentpose = posenum;
+		}
+	}
+
+	if (r_lerpmodels.integer && !model_fullbright_pass)
+	{
+		float blend = ((float)cl.time - e->lerpstart) / e->lerptime;
+		if (blend < 0.0f) blend = 0.0f;
+		else if (blend > 1.0f) blend = 1.0f;
+		*out_blend = blend;
+	}
+	else
+	{
+		*out_blend = 1.0f;
+	}
+
+	*out_pose = e->currentpose;
+	*out_prevpose = e->previouspose;
+}
+
+/*
+=================
 R_SetupAliasFrame
 
 =================
 */
 static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 {
-	int	pose, prevpose, numposes, frame, prevframe;
-	float	interval, lerpfrac;
+	int	pose, prevpose;
+	float	blend;
 
-	frame = e->frame;
-	if ((frame >= paliashdr->numframes) || (frame < 0))
-	{
-		Con_DPrintf ("%s: no such frame %d for %s\n", __thisfunc__, frame, e->model->name);
-		frame = 0;
-	}
-
-	pose = paliashdr->frames[frame].firstpose;
-	numposes = paliashdr->frames[frame].numposes;
-
-	if (numposes > 1)
-	{
-		interval = paliashdr->frames[frame].interval;
-		pose += (int)(cl.time / interval) % numposes;
-	}
-
-	/* Calculate animation interpolation */
-	prevframe = e->previouspose;
-	lerpfrac = 0.0f;
-
-	if ((e->lerpflags & LERP_RESETANIM) || model_fullbright_pass)
-	{
-		/* Skip animation lerp after teleport or during fullbright pass */
-		if (e->lerpflags & LERP_RESETANIM)
-		{
-			e->lerpflags &= ~LERP_RESETANIM;
-			e->lerptime = 0;
-		}
-	}
-	else if (r_lerpmodels.integer && e->lerptime > 0 && prevframe != frame &&
-	    prevframe >= 0 && prevframe < paliashdr->numframes)
-	{
-		float elapsed = cl.time - e->lerpstart;
-		lerpfrac = elapsed / e->lerptime;
-		if (lerpfrac >= 1.0f)
-			lerpfrac = 0.0f;	/* lerp complete, use current frame */
-		else
-			lerpfrac = 1.0f - lerpfrac; /* invert: 1=prev, 0=current */
-	}
-
-	if (lerpfrac > 0.0f)
-	{
-		prevpose = paliashdr->frames[prevframe].firstpose;
-		numposes = paliashdr->frames[prevframe].numposes;
-		if (numposes > 1)
-		{
-			interval = paliashdr->frames[prevframe].interval;
-			prevpose += (int)(e->lerpstart / interval) % numposes;
-		}
-		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
-	}
-	else
-	{
-		GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
-	}
+	R_AliasResolveLerp (e, paliashdr, &pose, &prevpose, &blend);
+	GL_DrawAliasFrame (e, paliashdr, pose, prevpose, blend);
 }
 
 
@@ -1329,9 +1360,9 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	aliashdr_t	*paliashdr;
 	qmodel_t	*clmodel;
 	vec3_t		mins, maxs;
-	int		mls, lnum, skinnum, anim, frame, prevframe;
-	int		pose, prevpose, numposes;
-	float		interval, lerpfrac, add, entScale;
+	int		mls, lnum, skinnum, anim;
+	int		pose, prevpose;
+	float		lerpfrac, add, entScale;
 	float		xyfact = 1.0, zfact = 1.0;
 	float		tscale[3], torigin[3];
 	float		world[16], saved_mv[16];
@@ -1532,45 +1563,11 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	/* Restore the VIEW matrix */
 	GL_LoadMatrixf(saved_mv);
 
-	/* --- Resolve pose and lerp --- */
-	frame = e->frame;
-	if (frame >= paliashdr->numframes || frame < 0)
-		frame = 0;
-	pose = paliashdr->frames[frame].firstpose;
-	numposes = paliashdr->frames[frame].numposes;
-	if (numposes > 1)
+	/* --- Resolve pose and lerp (shared with R_SetupAliasFrame) --- */
 	{
-		interval = paliashdr->frames[frame].interval;
-		pose += (int)(cl.time / interval) % numposes;
-	}
-
-	prevframe = e->previouspose;
-	lerpfrac = 0.0f;
-	if (r_lerpmodels.integer && e->lerptime > 0 && prevframe != frame &&
-	    prevframe >= 0 && prevframe < paliashdr->numframes &&
-	    !(e->lerpflags & LERP_RESETANIM))
-	{
-		float elapsed = cl.time - e->lerpstart;
-		lerpfrac = elapsed / e->lerptime;
-		if (lerpfrac >= 1.0f)
-			lerpfrac = 0.0f;
-		else
-			lerpfrac = 1.0f - lerpfrac;
-	}
-
-	if (lerpfrac > 0.0f)
-	{
-		prevpose = paliashdr->frames[prevframe].firstpose;
-		numposes = paliashdr->frames[prevframe].numposes;
-		if (numposes > 1)
-		{
-			interval = paliashdr->frames[prevframe].interval;
-			prevpose += (int)(e->lerpstart / interval) % numposes;
-		}
-	}
-	else
-	{
-		prevpose = pose;
+		float blend;
+		R_AliasResolveLerp (e, paliashdr, &pose, &prevpose, &blend);
+		lerpfrac = 1.0f - blend;	/* legacy convention: 1=prev, 0=current */
 	}
 
 	/* --- Resolve skin texture --- */
