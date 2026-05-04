@@ -49,9 +49,15 @@ jobs:
 
       - name: Install Flatpak tools
         run: |
-          sudo add-apt-repository -y ppa:flatpak/stable
-          sudo apt-get update -q
-          sudo apt-get install -y flatpak flatpak-builder
+          # Retry the apt path — Canonical's PPA serves transient 503s
+          # often enough to break CI on its own (we just hit one).
+          for i in 1 2 3; do
+            sudo add-apt-repository -y ppa:flatpak/stable && \
+            sudo apt-get update -q && \
+            sudo apt-get install -y flatpak flatpak-builder && break
+            echo "apt attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
           flatpak remote-add --user --if-not-exists flathub \
             https://flathub.org/repo/flathub.flatpakrepo
 
