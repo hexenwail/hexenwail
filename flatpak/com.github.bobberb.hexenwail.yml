@@ -11,8 +11,10 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
-  # Gamepads/joysticks
-  - --device=input
+  # Gamepads/joysticks (--device=input was removed in Freedesktop 25.08;
+  # --device=all is the de-facto Flathub convention for games needing
+  # controller access via /dev/input/event*).
+  - --device=all
   # Audio (PulseAudio/PipeWire)
   - --socket=pulseaudio
   # Network (LAN multiplayer)
