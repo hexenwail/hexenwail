@@ -67,7 +67,31 @@ Planned:
 - OGG Vorbis, Opus, MP3, FLAC, WAV music (CD track fallback)
 - Tracker music via libxmp (MOD/S3M/XM/IT) and UMX containers
 - MIDI via FluidSynth (Linux) or native Windows MIDI, with soundfont auto-detection
+- Per-mod music subdirs (`<gamedir>/music/<author>/`)
+- `bgm_remap NN <name>` — map a CD track number to a named music file
+- Underwater audio low-pass (`snd_waterfx`)
 - 2048 sound channels, 44.1 kHz default
+
+### Custom music for mappers
+Two ways to attach music to a custom map:
+
+1. **Named music (recommended)** — set worldspawn keys in your BSP:
+   ```
+   "MIDI" "arena"
+   "CD"   "10"          // numeric fallback for engines without MIDI-key support
+   ```
+   Ship `<gamedir>/music/arena.ogg` (or `.opus`/`.mp3`/`.flac`/`.wav`/`.mid`/etc.).
+   Hexenwail also looks under `<gamedir>/music/<subdir>/arena.ogg` so multiple
+   authors can keep their tracks in separate folders without colliding.
+
+2. **Numeric track + remap** — keep the legacy `track%02d.ogg` layout but use
+   `bgm_remap` from the console (or autoexec.cfg) to point a numeric track at
+   any named file:
+   ```
+   bgm_remap 18 myambient
+   bgm_remap list
+   bgm_remap 18 -            // clear
+   ```
 
 ### Platform
 - SDL3 on Linux and Windows

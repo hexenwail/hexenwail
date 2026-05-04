@@ -1100,6 +1100,55 @@ MISC CONSOLE COMMANDS
 
 /*
 ============
+FS_ListSearchSubdirs
+
+Enumerates subdirectories of <relpath> across all loose (non-pak)
+searchpath gamedirs.  Higher-priority gamedirs are scanned first;
+duplicate names (case-insensitive) are skipped.  Pak entries are ignored.
+============
+*/
+int FS_ListSearchSubdirs (const char *relpath, char dirs[][64], int maxdirs)
+{
+	searchpath_t	*search;
+	char		path[MAX_OSPATH];
+	char		buf[64][64];
+	int		count = 0;
+	int		i, n, j;
+
+	if (!relpath || !dirs || maxdirs <= 0)
+		return 0;
+
+	for (search = fs_searchpaths; search && count < maxdirs; search = search->next)
+	{
+		if (search->pack)
+			continue;
+		q_snprintf (path, sizeof(path), "%s/%s", search->filename, relpath);
+		n = Sys_ListDirectories (path, buf, 64);
+		for (i = 0; i < n && count < maxdirs; i++)
+		{
+			qboolean dup = false;
+			for (j = 0; j < count; j++)
+			{
+				if (!q_strcasecmp(dirs[j], buf[i]))
+				{
+					dup = true;
+					break;
+				}
+			}
+			if (!dup)
+			{
+				q_strlcpy (dirs[count], buf[i], 64);
+				count++;
+			}
+		}
+	}
+
+	return count;
+}
+
+
+/*
+============
 FS_Path_f
 Prints the search path to the console
 ============
