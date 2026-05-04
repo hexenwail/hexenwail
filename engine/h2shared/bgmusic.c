@@ -94,6 +94,12 @@ typedef struct midi_handle_s
 static midi_handle_t midi_handle;
 static snd_stream_t *bgmstream = NULL;
 
+/* bgm_remap: maps a numeric CD track to a named music file.  Lets mappers
+ * escape the 8-bit track ceiling and lets users override individual tracks
+ * via the console.  Empty string = no remap, fall through to track%02d.<ext>. */
+#define BGM_NUM_REMAPS 256
+static char bgm_remap_names[BGM_NUM_REMAPS][32];
+
 static void BGM_Play_f (void)
 {
 	if (Cmd_Argc() == 2) {
@@ -153,6 +159,63 @@ static void BGM_Jump_f (void)
 	}
 }
 
+static void BGM_Remap_f (void)
+{
+	int track, argc = Cmd_Argc();
+
+	if (argc < 2)
+	{
+		Con_Printf("usage: bgm_remap <track> <name|->\n");
+		Con_Printf("       bgm_remap reset    (clears all remaps)\n");
+		Con_Printf("       bgm_remap list     (show active remaps)\n");
+		return;
+	}
+	if (argc == 2)
+	{
+		const char *arg = Cmd_Argv(1);
+		if (!q_strcasecmp(arg, "reset"))
+		{
+			memset(bgm_remap_names, 0, sizeof(bgm_remap_names));
+			Con_Printf("bgm_remap: cleared\n");
+		}
+		else if (!q_strcasecmp(arg, "list"))
+		{
+			int i, count = 0;
+			for (i = 0; i < BGM_NUM_REMAPS; i++)
+			{
+				if (bgm_remap_names[i][0])
+				{
+					Con_Printf("  %3d -> %s\n", i, bgm_remap_names[i]);
+					count++;
+				}
+			}
+			if (count == 0)
+				Con_Printf("(no remaps)\n");
+		}
+		else
+		{
+			Con_Printf("bgm_remap: unknown subcommand '%s'\n", arg);
+		}
+		return;
+	}
+	track = atoi(Cmd_Argv(1));
+	if (track < 0 || track >= BGM_NUM_REMAPS)
+	{
+		Con_Printf("bgm_remap: track must be 0-%d\n", BGM_NUM_REMAPS - 1);
+		return;
+	}
+	if (!strcmp(Cmd_Argv(2), "-"))
+	{
+		bgm_remap_names[track][0] = '\0';
+		Con_Printf("bgm_remap: %d cleared\n", track);
+	}
+	else
+	{
+		q_strlcpy(bgm_remap_names[track], Cmd_Argv(2), sizeof(bgm_remap_names[0]));
+		Con_Printf("bgm_remap: %d -> %s\n", track, bgm_remap_names[track]);
+	}
+}
+
 void BGM_RegisterMidiDRV (void *drv)
 {
 	midi_driver_t *driver = (midi_driver_t *) drv;
@@ -174,6 +237,7 @@ qboolean BGM_Init (void)
 	Cmd_AddCommand("music_loop", BGM_Loop_f);
 	Cmd_AddCommand("music_stop", BGM_Stop_f);
 	Cmd_AddCommand("music_jump", BGM_Jump_f);
+	Cmd_AddCommand("bgm_remap", BGM_Remap_f);
 
 	if (COM_CheckParm("-noextmusic") != 0)
 		no_extmusic = true;
@@ -386,11 +450,21 @@ void BGM_PlayMIDIorMusic (const char *filename)
 		return;
 	}
 
+	{
+	char subdirs[8][64];
+	char chosen_sub[64];
+	int num_subdirs, s;
+	qboolean midi_won;
+
+	num_subdirs = FS_ListSearchSubdirs(MUSIC_DIRNAME, subdirs, 8);
+	chosen_sub[0] = '\0';
+
 	prev_id = 0;
 	type = 0;
 	dir = ext = NULL;
 	handler = music_handlers;
 	try_midi_stream = false;
+	midi_won = false;
 	while (handler)
 	{
 		if (! handler->is_available)
@@ -398,26 +472,37 @@ void BGM_PlayMIDIorMusic (const char *filename)
 		if (! MIDITYPE(handler->type) &&
 		     (no_extmusic || !bgm_extmusic.value))
 			goto _next;
-		q_snprintf(tmp, sizeof(tmp), "%s/%s.%s",
-			   handler->dir, filename, handler->ext);
-		if (! FS_FileExists(tmp, &path_id))
+		/* Probe flat handler->dir/<file>.<ext> first (s = -1), then
+		 * each music subdir.  Highest path_id across all candidates wins. */
+		for (s = -1; s < num_subdirs; s++)
 		{
-			goto _next;
-		}
-		if (path_id > prev_id)
-		{
-			prev_id = path_id;
-			type = handler->type;
-			ext = handler->ext;
-			dir = handler->dir;
-			if (handler->type == MIDIDRIVER_MID)
+			const char *sub = (s < 0) ? "" : subdirs[s];
+			if (*sub)
+				q_snprintf(tmp, sizeof(tmp), "%s/%s/%s.%s",
+					   handler->dir, sub, filename, handler->ext);
+			else
+				q_snprintf(tmp, sizeof(tmp), "%s/%s.%s",
+					   handler->dir, filename, handler->ext);
+			if (! FS_FileExists(tmp, &path_id))
+				continue;
+			if (path_id > prev_id)
 			{
-				if (handler->next &&
-				    handler->next->is_available)
-					try_midi_stream = true;
-				break;
+				prev_id = path_id;
+				type = handler->type;
+				ext = handler->ext;
+				dir = handler->dir;
+				q_strlcpy(chosen_sub, sub, sizeof(chosen_sub));
+				if (handler->type == MIDIDRIVER_MID)
+				{
+					if (handler->next &&
+					    handler->next->is_available)
+						try_midi_stream = true;
+					midi_won = true;
+				}
 			}
 		}
+		if (midi_won)
+			break;
 	_next:
 		handler = handler->next;
 	}
@@ -425,7 +510,10 @@ void BGM_PlayMIDIorMusic (const char *filename)
 		Con_Printf("Couldn't handle music file %s\n", filename);
 	else
 	{
-		q_snprintf(tmp, sizeof(tmp), "%s/%s.%s", dir, filename, ext);
+		if (*chosen_sub)
+			q_snprintf(tmp, sizeof(tmp), "%s/%s/%s.%s", dir, chosen_sub, filename, ext);
+		else
+			q_snprintf(tmp, sizeof(tmp), "%s/%s.%s", dir, filename, ext);
 		switch (type)
 		{
 		case MIDIDRIVER_MID:
@@ -444,6 +532,7 @@ void BGM_PlayMIDIorMusic (const char *filename)
 		}
 		Con_Printf("Couldn't handle music file %s\n", tmp);
 	}
+	}
 }
 
 void BGM_PlayCDtrack (byte track, qboolean looping)
@@ -459,9 +548,23 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 	const char *ext;
 	unsigned int path_id, prev_id, type;
 	music_handler_t *handler;
+	char subdirs[8][64];
+	char chosen_sub[64];
+	int num_subdirs, s;
 
 	BGM_Stop();
 	Con_DPrintf("BGM: PlayCDtrack %d (loop=%d)\n", (int)track, (int)looping);
+
+	/* If a filename remap is set, route through the named-music path. */
+	if (track < BGM_NUM_REMAPS && bgm_remap_names[track][0])
+	{
+		const char *name = bgm_remap_names[track];
+		Con_DPrintf("BGM: remap track %d -> %s\n", (int)track, name);
+		bgmloop = looping;
+		BGM_PlayMIDIorMusic(name);
+		return;
+	}
+
 	if (CDAudio_Play(track, looping) == 0)
 		return;			/* success */
 	Con_DPrintf("BGM: CD audio failed, trying file fallback\n");
@@ -479,6 +582,9 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 		return;
 	}
 
+	num_subdirs = FS_ListSearchSubdirs(MUSIC_DIRNAME, subdirs, 8);
+	chosen_sub[0] = '\0';
+
 	prev_id = 0;
 	type = 0;
 	ext  = NULL;
@@ -489,15 +595,25 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 			goto _next;
 		if (! CDRIPTYPE(handler->type))
 			goto _next;
-		q_snprintf(tmp, sizeof(tmp), "%s/track%02d.%s",
-				MUSIC_DIRNAME, (int)track, handler->ext);
-		if (! FS_FileExists(tmp, &path_id))
-			goto _next;
-		if (path_id > prev_id)
+		/* Probe flat MUSIC_DIRNAME/trackNN.ext, then each subdir. */
+		for (s = -1; s < num_subdirs; s++)
 		{
-			prev_id = path_id;
-			type = handler->type;
-			ext = handler->ext;
+			const char *sub = (s < 0) ? "" : subdirs[s];
+			if (*sub)
+				q_snprintf(tmp, sizeof(tmp), "%s/%s/track%02d.%s",
+					   MUSIC_DIRNAME, sub, (int)track, handler->ext);
+			else
+				q_snprintf(tmp, sizeof(tmp), "%s/track%02d.%s",
+					   MUSIC_DIRNAME, (int)track, handler->ext);
+			if (! FS_FileExists(tmp, &path_id))
+				continue;
+			if (path_id > prev_id)
+			{
+				prev_id = path_id;
+				type = handler->type;
+				ext = handler->ext;
+				q_strlcpy(chosen_sub, sub, sizeof(chosen_sub));
+			}
 		}
 	_next:
 		handler = handler->next;
@@ -507,8 +623,12 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 			   (int)track, MUSIC_DIRNAME, (int)track);
 	else
 	{
-		q_snprintf(tmp, sizeof(tmp), "%s/track%02d.%s",
-				MUSIC_DIRNAME, (int)track, ext);
+		if (*chosen_sub)
+			q_snprintf(tmp, sizeof(tmp), "%s/%s/track%02d.%s",
+					MUSIC_DIRNAME, chosen_sub, (int)track, ext);
+		else
+			q_snprintf(tmp, sizeof(tmp), "%s/track%02d.%s",
+					MUSIC_DIRNAME, (int)track, ext);
 		Con_DPrintf("BGM: opening %s\n", tmp);
 		bgmstream = S_CodecOpenStreamType(tmp, type, bgmloop);
 		if (! bgmstream)
