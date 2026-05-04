@@ -105,6 +105,13 @@ qboolean FS_FileInGamedir (const char *filename);
 	/* Reports the existance of a file with read permissions in
 	 * fs_gamedir or fs_userdir. *NOT* for files in pakfiles!  */
 
+int FS_ListSearchSubdirs (const char *relpath, char dirs[][64], int maxdirs);
+	/* Enumerates subdirectories of relpath (e.g. "music") across all loose
+	 * (non-pak) searchpath gamedirs.  Names are deduped case-insensitively;
+	 * higher-priority gamedirs are scanned first.  Returns count, capped at
+	 * maxdirs.  Pak entries are skipped — pak-packed mods will not contribute
+	 * subdir names here.  */
+
 /* these procedures open a file using FS_OpenFile and loads it into a proper
  * buffer. the buffer is allocated with a total size of fs_filesize + 1. the
  * procedures differ by their buffer allocation method.  */
