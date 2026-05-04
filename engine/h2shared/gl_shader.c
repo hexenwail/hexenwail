@@ -305,7 +305,16 @@ static const char sworld_frag[] =
 	"    if (color.a < u_alpha_threshold) discard;\n"
 	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* Force fragments that survived the alpha-test to be fully opaque.\n"
+	 * Without this, A2C dithers their coverage based on the multiplied\n"
+	 * alpha (lightmap.a × texture.a × vertex.a), which is undefined for\n"
+	 * lightmap atlas textures and produces spray-paint splotches on\n"
+	 * fence/cutout surfaces under MSAA.  OIT path keeps actual alpha. */
+	"#ifdef OIT\n"
 	"    fragColor = color;\n"
+	"#else\n"
+	"    fragColor = vec4(color.rgb, 1.0);\n"
+	"#endif\n"
 	"}\n";
 
 /* --- shader_alias: vertex-colored, textured, fog (models) --- */
@@ -343,7 +352,12 @@ static const char salias_frag[] =
 	"    if (color.a < u_alpha_threshold) discard;\n"
 	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* Surviving fragments are opaque — see sworld_frag for rationale. */
+	"#ifdef OIT\n"
 	"    fragColor = color;\n"
+	"#else\n"
+	"    fragColor = vec4(color.rgb, 1.0);\n"
+	"#endif\n"
 	"}\n";
 
 /* --- shader_particle: textured triangles with per-vertex color --- */
