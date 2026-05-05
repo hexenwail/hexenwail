@@ -4,7 +4,7 @@ Feature parity tracker: **Hexenwail** vs **Ironwail**
 
 Last updated: 2026-05-05
 
-Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
+Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
 ---
 
@@ -14,15 +14,15 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
 | Rendering — Visual/Shading | 17 | 0 | 5 | 0 |
-| Performance / Engine | 3 | 1 | 3 | 1 |
-| UX / Menus / HUD | 8 | 1 | 13 | 0 |
+| Performance / Engine | 5 | 1 | 1 | 1 |
+| UX / Menus / HUD | 9 | 1 | 12 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **42** | **3** | **31** | **7** |
+| **TOTAL** | **45** | **3** | **28** | **8** |
 
-**Parity: 55% ported, 4% partial, 41% missing** (excluding N/A)
+**Parity: 59% ported, 4% partial, 37% missing** (excluding N/A)
 
 ---
 
@@ -61,12 +61,12 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | Fullbright texture support | ✅ | `gl_fullbrights` |
 | Render scale | ✅ | `r_scale`, FBO pipeline |
 | Software rendering emulation | ✅ | `r_softemu` (dithered, banded, palette LUT) |
-| Post-process pipeline | ✅ | Gamma, contrast, palette, dither, FXAA, HDR |
+| Post-process pipeline | ✅ | Gamma, contrast, palette, dither, HDR |
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
+| Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
 | Animated sky wind system | ❌ | `r_skywind`, per-skybox wind direction/amplitude |
-| Bounding box debug visualization | ❌ | `r_showbboxes` with filter modes |
-| MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding |
-| Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend (Ironwail-style) |
+| Bounding box debug visualization | ❌ | `r_showbboxes` with filter modes (`r_showbboxes_think`, `r_showbboxes_health`, etc.) |
+| MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 |
 | LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level |
 | Entity alpha radix sort | ❌ | `r_alphasort` — Hexenwail has OIT but not the radix sort path |
 
@@ -77,11 +77,12 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | Reduced heap usage / auto-grow | ✅ | Large maps load without `-heapsize` |
 | FPS cap with menu slider | ✅ | `host_maxfps` in Display menu |
 | CSQC (client-side QuakeC) | ✅ | `cl_csqc.c` |
+| bmodel buffer rebuilt correctly on map change | ✅ | Ironwail fix `3ccbcda` (2026-02): `GL_DeleteBModelBuffers()` was missing before `GL_BuildBModelVertexBuffer()` in `R_NewMap`, causing GPU memory leak on map changes. We also call `GL_DeleteBModelBuffers` before rebuild. Verify `gl_rmisc.c:R_NewMap`. |
+| Alias model GPU data layout | ✅ | Ironwail refactored `a65a88e` (2026-01): SSBO alignment removed per-surface, IQM bind-pose separated. Our alias pipeline layout matches conceptually — no separate SSBO alignment loop needed given our model format. |
 | Faster map loading | 🔶 | Lightmap atlas yes; VBO build optimizations partial |
 | Async main-thread task queue | ❌ | Non-blocking parallel work dispatch |
-| Intelligent autosave system | ❌ | Save on health change/secret/teleport/rest |
+| Intelligent autosave system | ➖ | Hexen II saves do not map cleanly to Ironwail's health/secret/teleport trigger heuristics |
 | Unicode path support | ❌ | Non-ASCII directory names |
-| Server profiling | ➖ | `serverprofile` — stock Quake feature |
 
 ## UX / Menus / HUD
 
@@ -95,6 +96,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | FPS counter | ✅ | `scr_showfps` |
 | Borderless window | ✅ | `vid_borderless` |
 | Desktop fullscreen | ✅ | `vid_config_fscr` |
+| Menu key auto-repeat (navigational only) | ✅ | Ironwail commit `6a9610f` (2026-01): `M_Keydown` gains `repeat` bool arg; only arrow keys pass repeat. Hexenwail already has `M_Keydown (key, key_repeats[key] > 1)` with identical arrow-key-only filter — `menu.c:6024`, `keys.c:1099`. |
+| Mods menu dirs-with-spaces | ✅ | Ironwail commit `51a911b` (2026-03): added quotes around dir name in `game` command. Hexenwail already uses `game \"%s\"` at `menu.c:4009`. |
 | FSAA mode selection in menu | 🔶 | `vid_fsaa` integer only, no mode picker |
 | HUD / statusbar scaling | ❌ | `scr_sbarscale` — Ironwail multi-canvas system |
 | Menu scaling | ❌ | `scr_menuscale` |
@@ -102,13 +105,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | Console alpha | ❌ | `scr_conalpha` |
 | Console brightness | ❌ | `scr_conbrightness` |
 | Menu background style | ❌ | `scr_menubgstyle` |
-| Center-print background | ❌ | `scr_centerprintbg` |
+| Center-print background | ❌ | `scr_centerprintbg` — Ironwail changed default to 2 (menu box) in `df5219c` (2026-01). We have the cvar and the option in menu (`menu.c:2785`) but confirm default value matches. |
 | Console mouse support | ❌ | Clickable links, text selection, clipboard |
 | Console notification fade | ❌ | `con_notifyfade` |
 | Console max columns | ❌ | `con_maxcols` |
 | Menu search with filtering | ❌ | Live filter + match highlighting |
 | Menu live preview | ❌ | `ui_live_preview` fade-in/hold/fade-out |
 | Show speed / show time overlays | ❌ | Speed + time HUD elements |
+| Map-editor auto-check on launch | ➖ | Ironwail commit `5a983620` (2026-05): `Sys_IsStartedFromMapEditor` detects Qrucible parent process, triggers map check. Hexenwail has no equivalent function and no TrenchBroom workflow integration. Could be ported but low priority for Hexen II mapping scene. |
 
 ## Input / Controller
 
@@ -117,10 +121,10 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | Full gamepad support | ✅ | SDL game controller API |
 | Controller rumble | ✅ | `joy_rumble` |
 | Analog stick deadzone/easing | ✅ | Basic form; Ironwail has inner/outer/exponent |
-| Advanced deadzone curves | 🔶 | Missing inner/outer threshold, exponent curves |
-| Flick stick | ❌ | `joy_flick` |
-| Gyroscope aiming | ❌ | `gyro_enable`, calibration, noise filtering |
 | Second gamepad binding layer | ✅ | `+altmodifier` modifier button for alternate bindings |
+| Advanced deadzone curves | 🔶 | Missing inner/outer threshold, exponent curves |
+| Flick stick | ❌ | `joy_flick`, `joy_flick_time`, `joy_flick_deadzone`, `joy_flick_noise_thresh` |
+| Gyroscope aiming | ❌ | `gyro_enable`, `gyro_mode`, `gyro_yawsensitivity`, calibration, noise filtering |
 | Controller type detection | ❌ | Xbox/PS/Nintendo button label auto-switch |
 | Controller LED color | ❌ | Orange for branding |
 | Steam Deck OSK detection | ➖ | Steam-specific |
@@ -131,7 +135,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 |---|---|---|
 | Multi-codec music | ✅ | OGG, FLAC, Opus, MP3, XMP, WAV, UMX |
 | Spatial audio / stereo separation | ✅ | Standard 3D positioning |
-| Underwater audio filter | ✅ | `snd_waterfx` — IIR low-pass on the paint buffer |
+| Underwater audio filter | ✅ | `snd_waterfx` — IIR low-pass on the paint buffer. Note: Ironwail also has `snd_waterfx` (`snd_dma.c:84`) — this is NOT a Hexenwail exclusive. Both implementations are independently convergent. |
 | Sound filter quality | ➖ | `snd_filterquality` cleans up Ironwail's paint-time zero-stuff upsample. Our pipeline resamples at load (`snd_mem.c:30 ResampleSfx`), so the filter has no equivalent precondition here. |
 
 ## Network / Protocol
@@ -151,19 +155,39 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 
 ---
 
+## Bug Fixes from Ironwail (applicable to Hexenwail)
+
+Recent Ironwail bug fixes assessed for Hexenwail applicability:
+
+| Ironwail commit | Fix | Hexenwail status |
+|---|---|---|
+| `3ccbcda` 2026-02 | bmodel VBO leak on map change: `GL_DeleteBModelBuffers()` missing before rebuild in `R_NewMap` | ✅ We call delete before rebuild |
+| `6a9610f` 2026-01 | Menu key auto-repeat: only navigational keys pass repeat events | ✅ Already ported |
+| `51a911b` 2026-03 | Mods menu: game command not quoted, breaks dirs with spaces | ✅ Already quoted |
+| `0a6084a` 2026-04 | Pitch drift during cutscenes: `V_StopPitchDrift()` not called when `CL_InCutscene()` | ❌ Hexen II has `svc_cutscene` (sets `cl.intermission=3`) but `CL_AdjustAngles` has no intermission guard. Pitch drift during Hexen II intermission screens is plausible bug. Low effort fix: add `if (cl.intermission) { V_StopPitchDrift(); return; }` at top of `cl_input.c:CL_AdjustAngles`. |
+| `017fdd2` 2026-01 | Dark outlines on fence textures with dynamic lights: compute plane before `discard` | ➖ N/A — Hexenwail has no clustered per-tile dynamic lighting. Our world shader (`h2shared/gl_shader.c:sworld_frag`) does not compute a plane variable at all. |
+| `1011ff8` 2026-01 | Disable GL texture compression for alpha-tested surfaces | ➖ N/A — Hexenwail does not have a `gl_compress_textures` system. |
+| `74d8e74` 2026-01 | Disable GL texture compression for 2D textures (HUD, conchars) | ➖ N/A — same reason as above. |
+| `80387f1` 2026-01 | Crash toggling `gl_compress_textures`: cubemap textures stored pointers to stack data | ➖ N/A — no compression system. |
+| `78ad272` 2026-01 | Stop controller rumble when sound buffer is cleared (e.g. modal message) | ❌ May be relevant if we have `joy_rumble`. Check `in_sdl.c:S_ClearBuffer` interaction. |
+
+---
+
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P1 — High
-1. **HUD/menu/crosshair scaling** (`scr_sbarscale`, `scr_menuscale`, `scr_crosshairscale`)
+1. **HUD/menu/crosshair scaling** (`scr_sbarscale`, `scr_menuscale`, `scr_crosshairscale`) — critical for high-DPI
 2. **Persistent mapped buffers** — lock-free GPU upload, big perf win
 3. **Reversed-Z depth** — eliminates z-fighting on large maps
+4. **Pitch drift during intermission** — `cl_input.c:CL_AdjustAngles` needs `cl.intermission` guard + `V_StopPitchDrift()` call (Ironwail `0a6084a`; effort: 5 lines)
 
 ### P2 — Medium
-6. **Console alpha/brightness** (`scr_conalpha`, `scr_conbrightness`) — low effort
-7. **Sky wind system** (`r_skywind`) — visual polish
-8. **Triple-buffering / frames in flight** — smoother frame pacing
-9. **Gyroscope aiming** — Steam Deck users
-10. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
+5. **Console alpha/brightness** (`scr_conalpha`, `scr_conbrightness`) — low effort
+6. **Sky wind system** (`r_skywind`) — visual polish
+7. **Triple-buffering / frames in flight** — smoother frame pacing
+8. **Gyroscope aiming** — Steam Deck users
+9. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
+10. **Controller rumble on sound buffer clear** — correctness fix (Ironwail `78ad272`)
 
 ### P3 — Low
 11. **Menu search** — nice UX for large option sets
@@ -176,22 +200,28 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 
 ## Hexenwail Exclusives (not in Ironwail)
 
-Features Hexenwail has that Ironwail does NOT:
+Features Hexenwail has that Ironwail does NOT. Verified against Ironwail origin/master as of 2026-05-01.
+
+| Feature | Notes | Confirmed absent in Ironwail |
+|---|---|---|
+| HDR tone mapping (ACES) | `r_hdr` with exposure control | Yes — no tonemapping pipeline |
+| Motion blur | `r_motionblur` with view delta tracking | Yes |
+| FXAA | `gl_fxaa` toggle | Yes — Ironwail has no FXAA |
+| Alpha-to-coverage cutout antialiasing | `r_alphatocoverage` — MSAA-based fence edge smoothing | Yes — no `GL_SAMPLE_ALPHA_TO_COVERAGE` usage |
+| WebGL2 / WASM build | Emscripten + ES3 fallback, 1.4 MB binary | Yes |
+| Hexen II class system | 5 player classes with unique HUD/inventory | Yes — Quake-only engine |
+| Per-mod music subdirs | `<gamedir>/music/<author>/<file>.<ext>` lookup so multiple authors can ship tracks without colliding | Yes |
+| Track-name remap | `bgm_remap NN <name>` console command — points a numeric CD track at a named music file | Yes |
+| Graphics presets | Crunchy/Retro/Faithful/Clean/Modern/Ultra | Yes |
+| FluidSynth MIDI | Native MIDI playback | Yes |
+
+**Removed from exclusives (present in both):**
 
 | Feature | Notes |
 |---|---|
-| HDR tone mapping (ACES) | `r_hdr` with exposure control |
-| Motion blur | `r_motionblur` with view delta tracking |
-| FXAA | `gl_fxaa` toggle |
-| Alpha-to-coverage | `r_alphatocoverage` |
-| WebGL2 / WASM build | Emscripten + ES3 fallback, 1.4 MB binary |
-| Hexen II class system | 5 player classes with unique HUD/inventory |
-| Viewmodel FOV | `r_viewmodel_fov` (separate from main FOV) |
-| Zoom system | `scr_zoomfov`, `scr_zoomspeed` |
-| Graphics presets | Crunchy/Retro/Faithful/Clean/Modern/Ultra |
-| Glow system | Per-type glow rendering with intensity control |
-| Water ripple shader | `gl_waterripple` 0–3 modes |
-| External texture overrides | `r_texture_external` hires replacement |
-| FluidSynth MIDI | Native MIDI playback |
-| Per-mod music subdirs | `<gamedir>/music/<author>/<file>.<ext>` lookup so multiple authors can ship tracks without colliding |
-| Track-name remap | `bgm_remap NN <name>` console command — points a numeric CD track at a named music file |
+| Underwater audio filter | Both have `snd_waterfx`. Ironwail: `snd_dma.c:84`. Independently implemented but same cvar name and concept. |
+| Zoom system | Both have `zoom_fov` / `zoom_speed`. Ironwail: `gl_screen.c:108-109`. Our codebase has a `cl.zoom` field (`client.h:210`) but no registered cvars — **the zoom system is incomplete/stub in Hexenwail and should NOT be listed as an exclusive.** |
+| Gun FOV scale | `cl_gun_fovscale` exists in Ironwail (`gl_screen.c:117`). This is a shared feature Hexenwail ported from Ironwail. |
+| Water ripple shader | `gl_waterripple` exists in Ironwail (`gl_rmain.c:133`). Not a Hexenwail exclusive. |
+| External texture overrides | `r_texture_external` exists in Ironwail (`gl_rmain.c:134`). Not a Hexenwail exclusive. |
+| Glow system | `gl_glows`, `gl_other_glows`, `gl_missile_glows` exist in Ironwail (`gl_rmain.c:127-129`). Hexenwail's glow variables are more Hexen II-specific in usage but the cvar names are shared. |
