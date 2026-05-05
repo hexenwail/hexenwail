@@ -25,6 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
       - uses: cachix/cachix-action@v17
         # Cachix outages (e.g. 502 from cachix.org) shouldn't fail the build —
         # we just lose the cache for that run.
