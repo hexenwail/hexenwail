@@ -1302,13 +1302,23 @@ static void DrawTextureChains (entity_t *e)
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
-			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity && !(r_dynamic.integer && cl_dlights[0].radius > 0))
+			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity)
 			{
 				if (e == &r_worldentity) rprof_chains_n_fast++;
 				/* Static VBO path: world state was hoisted before the loop;
 				 * if a sibling branch invalidated it, rebind now. Per-chain
 				 * we only update the diffuse texture and emit merged
-				 * glDrawElements runs. */
+				 * glDrawElements runs.
+				 *
+				 * Previously this branch was guarded by
+				 *   !(r_dynamic.integer && cl_dlights[0].radius > 0)
+				 * so any active dlight forced the entire world onto the
+				 * 10x slower per-vertex ImmBegin fallback. The guard was
+				 * load-bearing because the fast path didn't call
+				 * R_BuildLightMap, so dlight contributions never made it
+                                 * into the atlas. Now that the loop below rebuilds the
+                                 * atlas pixels for any dirty surface, the guard is
+                                 * gone and dlight-heavy boss fights stay batched. */
 				#define MAX_BATCH_SURFS 4096
 				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
 				int batch_count = 0;
@@ -1340,7 +1350,8 @@ static void DrawTextureChains (entity_t *e)
 
 					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
 						batch_surfs[batch_count++] = s;
-					/* Apply dlights to lightmap for this surface */
+
+					/* Apply dlights to blocklights for this surface */
 					if (r_dynamic.integer && s->dlightframe == r_framecount)
 						R_AddDynamicLights(s);
 
@@ -1348,20 +1359,40 @@ static void DrawTextureChains (entity_t *e)
 					if (s->polys)
 					{
 						int maps;
+						qboolean style_changed = false;
 						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
 						lightmap_polys[s->lightmaptexturenum] = s->polys;
 						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
 						{
 							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
 							{
-								LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-										   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+								style_changed = true;
 								break;
 							}
 						}
-						if (s->dlightframe == r_framecount || s->cached_dlight)
-							LM_ExpandDirtyRect(s->lightmaptexturenum, s->light_s, s->light_t,
-									   (s->extents[0] >> 4) + 1, (s->extents[1] >> 4) + 1);
+						/* If lightstyles or dlights touched this surface,
+						 * rebuild the CPU-side atlas pixels via the same
+						 * path the slow ImmBegin fallback uses, then mark
+						 * the rect dirty for upload. Without R_BuildLightMap
+						 * the atlas would be uploaded with stale pixels and
+						 * dlights would either flicker or paint surfaces
+						 * with corrupt UVs. */
+						if (style_changed ||
+						    s->dlightframe == r_framecount ||
+						    s->cached_dlight)
+						{
+							byte *base = lightmaps +
+								s->lightmaptexturenum *
+								lightmap_bytes *
+								BLOCK_WIDTH * BLOCK_HEIGHT;
+							base += s->light_t * BLOCK_WIDTH * lightmap_bytes
+								+ s->light_s * lightmap_bytes;
+							R_BuildLightMap (s, base, BLOCK_WIDTH * lightmap_bytes);
+							LM_ExpandDirtyRect(s->lightmaptexturenum,
+									   s->light_s, s->light_t,
+									   (s->extents[0] >> 4) + 1,
+									   (s->extents[1] >> 4) + 1);
+						}
 					}
 				}
 
