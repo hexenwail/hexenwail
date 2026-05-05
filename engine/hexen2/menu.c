@@ -6167,7 +6167,14 @@ void M_Draw (void)
 		break;
 
 	case m_help:
+		/* Help pics are full-screen sized — render in CANVAS_DEFAULT,
+		 * then put the menu canvas back so the post-switch teardown
+		 * matches state. */
+		m_canvas_active = false;
+		GL_SetCanvas (CANVAS_DEFAULT);
 		M_Help_Draw ();
+		GL_SetCanvas (CANVAS_MENU);
+		m_canvas_active = true;
 		break;
 
 	case m_quit:
