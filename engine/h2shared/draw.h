@@ -94,5 +94,23 @@ void Draw_BigCharacter (int x, int y, int num);
 #define GAME_MOD_NAME		ENGINE_NAME
 #define ENGINE_WATERMARK	GAME_MOD_NAME " " HW_VERSION " (" PLATFORM_STRING ")"
 
+#if defined(GLQUAKE)
+/* Multi-canvas 2D scaling (Ironwail-parity).
+   Each canvas has its own ortho projection and viewport so HUD,
+   menu and crosshair can be scaled independently for high-DPI. */
+typedef enum {
+	CANVAS_NONE,
+	CANVAS_DEFAULT,
+	CANVAS_CROSSHAIR,
+	CANVAS_INVALID = -1
+} canvastype;
+
+void GL_SetCanvas (canvastype newcanvas);
+
+extern cvar_t scr_crosshairscale;
+
+float SCR_CalcUIScale (cvar_t *user);
+#endif	/* GLQUAKE */
+
 #endif	/* __HX2_DRAW_H */
 
