@@ -1852,12 +1852,20 @@ void SB_ViewSizeChanged(void)
 // Sbar_Draw**Pic
 // Relative to the current status bar location. Each helper switches to
 // CANVAS_SBAR (Ironwail-parity scaling) and translates the caller's
-// sbar-relative y by (BAR_TOP_HEIGHT - BarHeight) so the slide animation
-// and lower-info-bar extension still work without touching call sites.
+// sbar-relative y so the slide animation and lower-info-bar extension
+// still work without touching call sites.
+//
+// CANVAS_SBAR has an all-positive logical y range [0, total_h]. Mapping
+// the original sbar coords (where 0 is top of main bar, -BAR_BUMP_HEIGHT
+// is top of bumps) into that range while preserving the BarHeight slide
+// gives:  canvas_y = y + (total_h - BarHeight)
+// — fully extended (BarHeight = BAR_TOP_HEIGHT) puts top of main bar at
+// canvas y = total_h - BAR_TOP_HEIGHT (just above the lower-bar region).
 //
 //==========================================================================
 
-#define SBAR_Y(y)	((y) + (int)(BAR_TOP_HEIGHT - BarHeight))
+#define SBAR_TOTAL_HEIGHT	(BAR_BUMP_HEIGHT + BAR_TOP_HEIGHT + BAR_BOTTOM_HEIGHT)
+#define SBAR_Y(y)		((y) + (int)(SBAR_TOTAL_HEIGHT - BarHeight))
 
 static void Sbar_DrawPic(int x, int y, qpic_t *pic)
 {
