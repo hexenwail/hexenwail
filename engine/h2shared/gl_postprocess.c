@@ -107,7 +107,14 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
-cvar_t	r_oit = {"r_oit", "1", CVAR_ARCHIVE};		/* weighted blended OIT */
+/* r_oit default off: WBOIT requires every translucent draw path
+ * (alias, sprites, brushmodel, water, particles) to use an OIT-aware
+ * shader writing both accum + revealage MRT outputs. Today only the
+ * alias path has that shader, so sprites/projectiles/etc. drawn during
+ * an OIT pass write to accum but leave revealage = 1.0 → the resolve
+ * treats the pixel as "no translucent fragment" and discards the color.
+ * Re-enable when all translucent paths are converted. */
+cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
@@ -121,6 +128,7 @@ static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
+static qboolean	oit_in_pass;		/* true between Begin/EndTranslucency */
 
 /* OIT resolve shaders */
 static const char oit_resolve_vert[] =
@@ -269,7 +277,19 @@ static void OIT_DeleteFBO (void);
 static qboolean PP_CreateFBO (int width, int height)
 {
 	GLenum status;
-	int samples = (int)Cvar_VariableValue("vid_config_fsaa");
+	/* MSAA on the main FBO is force-disabled here, regardless of vid_fsaa.
+	 * Two reasons:
+	 *   1. OIT_CreateFBO shares pp_depth_rb across its accum/revealage
+	 *      textures. Non-multisampled color + multisampled depth/stencil
+	 *      is GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE → translucent
+	 *      rendering silently broken on every MSAA-enabled boot.
+	 *   2. At 1920x1200 the per-sample fragment shader (lightmap +
+	 *      diffuse + fog + alphatest) eats ~50% of GPU world-pass time.
+	 *      FXAA in the post-process chain handles screen-space aliasing
+	 *      adequately for far less cost.
+	 * Re-enable when OIT is reworked to either use multisampled color
+	 * attachments or its own non-multisampled depth/stencil. */
+	int samples = 0;
 
 	PP_DeleteFBO();
 
@@ -751,6 +771,7 @@ void OIT_BeginTranslucency (void)
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
 
+	oit_in_pass = true;
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);	/* accum = (0,0,0,0) */
 	glClearBufferfv_fp(GL_COLOR, 1, ones);		/* revealage = 1.0 */
@@ -775,6 +796,8 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 {
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
+
+	oit_in_pass = false;
 
 	/* Resolve: composite OIT result over the scene */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
@@ -820,6 +843,11 @@ qboolean OIT_Active (void)
 	return oit_available && r_oit.integer && glBlendFunci_fp != NULL;
 }
 
+qboolean OIT_InPass (void)
+{
+	return oit_in_pass;
+}
+
 GLuint GL_GetSceneFBO (void)
 {
 	return pp_fbo;	/* 0 if no postprocess FBO active */
@@ -837,6 +865,13 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
+	/* Force-override any saved r_oit=1 from previous configs. The OIT
+	 * path needs every translucent draw (sprites, particles, brushmodel,
+	 * water) to use an OIT-aware shader; only the alias path has one
+	 * today, so a saved r_oit=1 makes projectiles/sprites invisible.
+	 * Drop this once all translucent paths are converted. */
+	if (r_oit.integer)
+		Cvar_Set("r_oit", "0");
 
 	pp_initialized = false;
 	pp_active = false;
