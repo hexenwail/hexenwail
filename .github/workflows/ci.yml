@@ -44,42 +44,15 @@ jobs:
 
   flatpak:
     runs-on: ubuntu-latest
+    # Run inside the Flathub-blessed image — flatpak / flatpak-builder /
+    # SDK already preloaded.  Bypasses the flaky Canonical PPA path.
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Flatpak tools
-        run: |
-          # Retry — Canonical's PPA (ppa.launchpadcontent.net) serves
-          # transient 503s and connection-refused errors that have
-          # outlasted shorter retry windows.  5×60s = ~5min total.
-          for i in 1 2 3 4 5; do
-            sudo add-apt-repository -y ppa:flatpak/stable && \
-            sudo apt-get update -q && \
-            sudo apt-get install -y flatpak flatpak-builder && break
-            echo "apt attempt $i failed, retrying in 60s..."
-            sleep 60
-          done
-          flatpak remote-add --user --if-not-exists flathub \
-            https://flathub.org/repo/flathub.flatpakrepo
-
-      - name: Cache Flatpak runtime and build
-        uses: actions/cache@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          path: |
-            ~/.local/share/flatpak
-            .flatpak-builder/downloads
-            .flatpak-builder/git
-          key: flatpak-25.08-${{ runner.os }}-${{ hashFiles('flatpak/com.github.bobberb.hexenwail.yml') }}
-          restore-keys: |
-            flatpak-25.08-${{ runner.os }}-
-
-      - name: Install SDK and runtime
-        run: |
-          flatpak install --user -y flathub \
-            org.freedesktop.Platform//25.08 \
-            org.freedesktop.Sdk//25.08
-
-      - name: Build Flatpak
-        run: |
-          flatpak-builder --user --force-clean --disable-rofiles-fuse \
-            build-dir flatpak/com.github.bobberb.hexenwail.yml
+          bundle: hexenwail.flatpak
+          manifest-path: flatpak/com.github.bobberb.hexenwail.yml
+          cache-key: flatpak-builder-${{ github.sha }}
