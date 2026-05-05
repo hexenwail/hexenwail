@@ -110,6 +110,8 @@ void GL_SetCanvas (canvastype newcanvas);
 
 extern cvar_t scr_sbarscale;
 extern cvar_t scr_crosshairscale;
+extern cvar_t scr_conalpha;
+extern cvar_t scr_conbrightness;
 
 float SCR_CalcUIScale (cvar_t *user);
 #endif	/* GLQUAKE */
