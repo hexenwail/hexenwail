@@ -261,6 +261,7 @@ EmitSkyPolys
 */
 static void EmitSkyPolysMulti (msurface_t *fa)
 {
+	extern cvar_t r_skyspeed_back, r_skyspeed_front;
 	glpoly_t	*p;
 	float		*v;
 	int		i;
@@ -268,6 +269,8 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	vec3_t		dir;
 	float		length;
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
+	float		bspeed = r_skyspeed_back.value;
+	float		fspeed = r_skyspeed_front.value;
 
 	if (alpha >= 1.0f)
 	{
@@ -295,11 +298,11 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 				dir[0] *= length;
 				dir[1] *= length;
 
-				s = (realtime*8 + dir[0]) * (1.0/128);
-				t = (realtime*8 + dir[1]) * (1.0/128);
+				s = (realtime*bspeed + dir[0]) * (1.0/128);
+				t = (realtime*bspeed + dir[1]) * (1.0/128);
 
-				ss = (realtime*16 + dir[0]) * (1.0/128);
-				tt = (realtime*16 + dir[1]) * (1.0/128);
+				ss = (realtime*fspeed + dir[0]) * (1.0/128);
+				tt = (realtime*fspeed + dir[1]) * (1.0/128);
 
 				GL_ImmTexCoord2f (s, t);
 				GL_ImmLMCoord2f (ss, tt);
@@ -333,8 +336,8 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 				dir[0] *= length;
 				dir[1] *= length;
 
-				s = (realtime*8 + dir[0]) * (1.0/128);
-				t = (realtime*8 + dir[1]) * (1.0/128);
+				s = (realtime*bspeed + dir[0]) * (1.0/128);
+				t = (realtime*bspeed + dir[1]) * (1.0/128);
 
 				GL_ImmTexCoord2f (s, t);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
@@ -362,8 +365,8 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 				dir[0] *= length;
 				dir[1] *= length;
 
-				ss = (realtime*16 + dir[0]) * (1.0/128);
-				tt = (realtime*16 + dir[1]) * (1.0/128);
+				ss = (realtime*fspeed + dir[0]) * (1.0/128);
+				tt = (realtime*fspeed + dir[1]) * (1.0/128);
 
 				GL_ImmTexCoord2f (ss, tt);
 				GL_ImmVertex3f (v[0], v[1], v[2]);

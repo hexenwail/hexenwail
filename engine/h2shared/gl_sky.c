@@ -131,8 +131,8 @@ extern cvar_t r_skyalpha; /* defined in gl_rmain.c */
 cvar_t r_fastsky = {"r_fastsky", "0", CVAR_NONE};
 cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};
-cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_NONE};
-cvar_t r_skyspeed_front = {"r_skyspeed_front", "16", CVAR_NONE};
+cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_ARCHIVE};	/* back/solid sky scroll speed (0 = frozen) */
+cvar_t r_skyspeed_front = {"r_skyspeed_front", "16", CVAR_ARCHIVE};	/* front/alpha sky scroll speed */
 cvar_t r_skybox_speed = {"r_skybox_speed", "0", CVAR_NONE};
 
 static float sky_box_scroll; // UV scroll offset applied each frame in Sky_DrawSkyBox
