@@ -26,9 +26,7 @@ jobs:
           bundle: hexenwail-${{ github.ref_name }}.flatpak
           manifest-path: flatpak/com.github.bobberb.hexenwail.yml
           cache-key: flatpak-builder-${{ github.sha }}
-          # Match the artifact name expected by the publish job below.
           upload-artifact: true
-          artifact-name: flatpak-bundle
 
   build:
     runs-on: ubuntu-latest
@@ -121,4 +119,4 @@ jobs:
             --notes-file release-notes/release_notes.md \
             linux-bundle/hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
             windows-bundle/hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
-            flatpak-bundle/hexenwail-${{ github.ref_name }}.flatpak
+            hexenwail-${{ github.ref_name }}-x86_64.flatpak/hexenwail-${{ github.ref_name }}.flatpak
