@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     # Run inside the Flathub-blessed image — see ci.yml for rationale.
     container:
-      image: bilelmoussaoui/flatpak-github-actions:freedesktop-25.08
+      image: bilelmoussaoui/flatpak-github-actions:freedesktop-24.08
       options: --privileged
     steps:
       - uses: actions/checkout@v6
