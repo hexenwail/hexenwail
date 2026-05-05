@@ -374,6 +374,8 @@ void R_PushDlights (void)
 	for (i = 0; i < MAX_DLIGHTS; i++, l++)
 	{
 		float dx, dy, dz, dist_sq;
+		int side;
+		qboolean culled;
 		if (l->die < cl.time || !l->radius)
 			continue;
 		/* Skip lights too far from view to see */
@@ -382,6 +384,23 @@ void R_PushDlights (void)
 		dz = l->origin[2] - r_origin[2];
 		dist_sq = dx*dx + dy*dy + dz*dz;
 		if (dist_sq > (l->radius + 1024) * (l->radius + 1024))
+			continue;
+		/* Frustum cull: skip lights whose illumination sphere
+		 * (radius = max range) is fully outside any view plane.
+		 * Saves the BSP walk + lightmap-dirty work for off-screen
+		 * spell dlights during boss fights. */
+		culled = false;
+		for (side = 0; side < 4; side++)
+		{
+			float d = DotProduct(l->origin, frustum[side].normal)
+				- frustum[side].dist;
+			if (d < -l->radius)
+			{
+				culled = true;
+				break;
+			}
+		}
+		if (culled)
 			continue;
 		R_MarkLights ( l, 1<<i, cl.worldmodel->nodes );
 	}
