@@ -184,13 +184,16 @@ static const char *DiffNames[MAX_PLAYER_CLASS][NUM_DIFFLEVELS] =
 extern int	menu_mouse_x, menu_mouse_y;
 extern qboolean	menu_mouse_moved;
 
+/* Convert a screen pixel Y to the menu canvas (0..200 logical) Y when
+ * CANVAS_MENU is active, accounting for centering offset and scale. */
+static int M_ScreenYToCanvasY (int screen_y);
+
 /* Convert screen mouse position to menu-local coordinates.
  * Menu items are drawn at (76 + offset, 92 + cursor*8) in a
- * 320-wide virtual viewport centered on screen. */
+ * 320x200 virtual viewport centered on screen. */
 static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int num_items)
 {
-	/* Map screen Y to virtual Y (menus use 1:1 at default scale) */
-	int vy = screen_y;
+	int vy = M_ScreenYToCanvasY (screen_y);
 	int idx = (vy - first_y) / item_height;
 	if (idx < 0) idx = -1;
 	if (idx >= num_items) idx = -1;
@@ -199,6 +202,31 @@ static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int nu
 
 //=============================================================================
 /* Support Routines */
+
+/* When CANVAS_MENU is active in M_Draw, the viewport is a 320x200 logical
+ * canvas already centered on the screen. The legacy `(vid.width - 320)>>1`
+ * centering offset must be skipped or the menu draws off the canvas. */
+static qboolean m_canvas_active;
+static int M_CenterOfs (void)
+{
+	return m_canvas_active ? 0 : ((vid.width - 320) >> 1);
+}
+
+/* Mouse comes in as raw screen pixels. Convert to the 320x200 menu
+ * canvas Y so M_MouseToMenuItem's hit test works under scaling. */
+static int M_ScreenYToCanvasY (int screen_y)
+{
+	float s;
+	int viewport_top;
+	if (!m_canvas_active)
+		return screen_y;
+	s = SCR_CalcUIScale (&scr_menuscale);
+	if (s > (float)glwidth / 320.0f) s = (float)glwidth / 320.0f;
+	if (s > (float)glheight / 200.0f) s = (float)glheight / 200.0f;
+	viewport_top = (glheight - (int)(200.0f * s)) / 2;
+	if (s < 0.0001f) s = 1.0f;
+	return (int)((screen_y - viewport_top) / s);
+}
 
 /*
 ================
@@ -209,7 +237,7 @@ Draws one solid graphics character, centered, on line
 */
 void M_DrawCharacter (int cx, int line, int num)
 {
-	Draw_Character ( cx + ((vid.width - 320)>>1), line, num);
+	Draw_Character (cx + M_CenterOfs(), line, num);
 }
 
 void M_Print (int cx, int cy, const char *str)
@@ -259,17 +287,17 @@ void M_PrintWhite (int cx, int cy, const char *str)
 
 void M_DrawTransPic (int x, int y, qpic_t *pic)
 {
-	Draw_TransPic (x + ((vid.width - 320)>>1), y, pic);
+	Draw_TransPic (x + M_CenterOfs(), y, pic);
 }
 
 void M_DrawPic (int x, int y, qpic_t *pic)
 {
-	Draw_Pic (x + ((vid.width - 320)>>1), y, pic);
+	Draw_Pic (x + M_CenterOfs(), y, pic);
 }
 
 static void M_DrawTransPicCropped (int x, int y, qpic_t *pic)
 {
-	Draw_TransPicCropped (x + ((vid.width - 320)>>1), y, pic);
+	Draw_TransPicCropped (x + M_CenterOfs(), y, pic);
 }
 
 static byte identityTable[256];
@@ -527,7 +555,7 @@ static int M_DrawBigCharacter (int x, int y, int num, int numNext)
 
 static void M_DrawBigString(int x, int y, const char *string)
 {
-	x += ((vid.width - 320)>>1);
+	x += M_CenterOfs();
 
 	while (*string)
 	{
@@ -1572,7 +1600,7 @@ static void M_Menu_Setup_f (void)
 
 static void M_DrawTransPicTranslate (int x, int y, qpic_t *pic, int p_class)
 {
-	Draw_TransPicTranslate (x + ((vid.width - 320)>>1), y, pic, translationTable, p_class);
+	Draw_TransPicTranslate (x + M_CenterOfs(), y, pic, translationTable, p_class);
 }
 
 static void M_Setup_Draw (void)
@@ -2789,6 +2817,7 @@ enum
 	GFX_CENTERPRINTBG = 0,
 	GFX_HUDSCALE,
 	GFX_HUDTRANS,
+	GFX_MENUSCALE,
 	GFX_CROSSHAIRSCALE,
 	GFX_CONALPHA,
 	GFX_CONBRIGHT,
@@ -2828,6 +2857,14 @@ static void M_Graphics_AdjustSliders (int dir)
 		if (val < 0) val = 4;
 		if (val > 4) val = 0;
 		Cvar_SetValue ("scr_sbarscale", val);
+		break;
+	}
+	case GFX_MENUSCALE:
+	{
+		int val = (int)scr_menuscale.value + dir;
+		if (val < 0) val = 4;
+		if (val > 4) val = 0;
+		Cvar_SetValue ("scr_menuscale", val);
 		break;
 	}
 	case GFX_CROSSHAIRSCALE:
@@ -2900,6 +2937,16 @@ static void M_Graphics_Draw (void)
 		char buf[8];
 		snprintf(buf, sizeof(buf), "%dx", (int)scr_sbarscale.value);
 		M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, buf);
+	}
+
+	M_Print (76, 92 + 8*GFX_MENUSCALE,	"Menu Scale      :");
+	if ((int)scr_menuscale.value == 0)
+		M_PrintWhite (220, 92 + 8*GFX_MENUSCALE, "Auto");
+	else
+	{
+		char buf[8];
+		snprintf(buf, sizeof(buf), "%dx", (int)scr_menuscale.value);
+		M_PrintWhite (220, 92 + 8*GFX_MENUSCALE, buf);
 	}
 
 	M_Print (76, 92 + 8*GFX_CROSSHAIRSCALE,	"Crosshair Scale :");
@@ -4193,7 +4240,7 @@ static void M_Menu_Help_f (void)
 
 static void M_Help_Draw (void)
 {
-		Draw_HelpPic_FN ((vid.width - 320)>>1, 0, Load_HelpPic_FN(va("gfx/menu/help%02i.lmp", help_page+1), vid.width, vid.height));
+		Draw_HelpPic_FN (M_CenterOfs(), 0, Load_HelpPic_FN(va("gfx/menu/help%02i.lmp", help_page+1), vid.width, vid.height));
 }
 
 
@@ -6035,6 +6082,12 @@ void M_Draw (void)
 		m_recursiveDraw = false;
 	}
 
+	/* All menu draws happen inside the 320x200 CANVAS_MENU. Backgrounds
+	 * (fade, console) above this line stay in CANVAS_DEFAULT so they
+	 * fill the whole screen. */
+	GL_SetCanvas (CANVAS_MENU);
+	m_canvas_active = true;
+
 	switch (m_state)
 	{
 	case m_none:
@@ -6137,6 +6190,9 @@ void M_Draw (void)
 		M_ServerList_Draw ();
 		break;
 	}
+
+	m_canvas_active = false;
+	GL_SetCanvas (CANVAS_DEFAULT);
 
 	if (m_entersound)
 	{

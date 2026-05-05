@@ -102,6 +102,7 @@ typedef enum {
 	CANVAS_NONE,
 	CANVAS_DEFAULT,
 	CANVAS_SBAR,
+	CANVAS_MENU,
 	CANVAS_CROSSHAIR,
 	CANVAS_INVALID = -1
 } canvastype;
@@ -109,6 +110,7 @@ typedef enum {
 void GL_SetCanvas (canvastype newcanvas);
 
 extern cvar_t scr_sbarscale;
+extern cvar_t scr_menuscale;
 extern cvar_t scr_crosshairscale;
 extern cvar_t scr_conalpha;
 extern cvar_t scr_conbrightness;
