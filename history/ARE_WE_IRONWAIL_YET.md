@@ -13,16 +13,16 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
-| Rendering — Visual/Shading | 17 | 0 | 5 | 0 |
+| Rendering — Visual/Shading | 17 | 1 | 4 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
 | UX / Menus / HUD | 14 | 1 | 7 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **50** | **3** | **23** | **8** |
+| **TOTAL** | **50** | **4** | **22** | **8** |
 
-**Parity: 66% ported, 4% partial, 30% missing** (excluding N/A)
+**Parity: 66% ported, 5% partial, 29% missing** (excluding N/A)
 
 ---
 
@@ -64,7 +64,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Post-process pipeline | ✅ | Gamma, contrast, palette, dither, HDR |
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
-| Animated sky wind system | ❌ | `r_skywind`, per-skybox wind direction/amplitude |
+| Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported. |
 | Bounding box debug visualization | ❌ | `r_showbboxes` with filter modes (`r_showbboxes_think`, `r_showbboxes_health`, etc.) |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 |
 | LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level |
@@ -180,8 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 2. **Reversed-Z depth** — eliminates z-fighting on large maps
 
 ### P2 — Medium
-5. **Sky wind system** (`r_skywind`) — visual polish
-6. **Triple-buffering / frames in flight** — smoother frame pacing
+5. **Triple-buffering / frames in flight** — smoother frame pacing
 7. **Gyroscope aiming** — Steam Deck users
 8. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
 9. **Controller rumble on sound buffer clear** — correctness fix (Ironwail `78ad272`)
