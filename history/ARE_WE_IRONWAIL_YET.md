@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
 | Rendering — Visual/Shading | 17 | 0 | 5 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
-| UX / Menus / HUD | 13 | 1 | 8 | 1 |
+| UX / Menus / HUD | 14 | 1 | 7 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **49** | **3** | **24** | **8** |
+| **TOTAL** | **50** | **3** | **23** | **8** |
 
-**Parity: 64% ported, 4% partial, 32% missing** (excluding N/A)
+**Parity: 66% ported, 4% partial, 30% missing** (excluding N/A)
 
 ---
 
@@ -100,7 +100,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Mods menu dirs-with-spaces | ✅ | Ironwail commit `51a911b` (2026-03): added quotes around dir name in `game` command. Hexenwail already uses `game \"%s\"` at `menu.c:4009`. |
 | FSAA mode selection in menu | 🔶 | `vid_fsaa` integer only, no mode picker |
 | HUD / statusbar scaling | ✅ | `scr_sbarscale` — `CANVAS_SBAR` in `gl_draw.c`, slider in Misc/HUD submenu (`menu.c`) |
-| Menu scaling | ❌ | `scr_menuscale` — needs `CANVAS_MENU` plumbing through `M_Draw*` helpers |
+| Menu scaling | ✅ | `scr_menuscale` — `CANVAS_MENU`, M_CenterOfs() helper, M_ScreenYToCanvasY for mouse hit-test |
 | Crosshair scaling | ✅ | `scr_crosshairscale` — `CANVAS_CROSSHAIR`, slider in Misc/HUD submenu |
 | Console alpha | ✅ | `scr_conalpha` — caps `Draw_ConsoleBackground` alpha, slider in Misc/HUD submenu |
 | Console brightness | ✅ | `scr_conbrightness` — multiplies conback RGB, slider in Misc/HUD submenu |
@@ -176,9 +176,8 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P1 — High
-1. **Menu scaling** (`scr_menuscale`) — CANVAS_MENU plumbing through `M_Draw*` helpers (HUD + crosshair shipped 2026-05-05)
-2. **Persistent mapped buffers** — lock-free GPU upload, big perf win
-3. **Reversed-Z depth** — eliminates z-fighting on large maps
+1. **Persistent mapped buffers** — lock-free GPU upload, big perf win
+2. **Reversed-Z depth** — eliminates z-fighting on large maps
 
 ### P2 — Medium
 5. **Sky wind system** (`r_skywind`) — visual polish
