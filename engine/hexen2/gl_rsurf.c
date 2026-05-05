@@ -1106,11 +1106,35 @@ GLuint	world_vao;
 int	world_num_verts;
 int	world_num_indices;
 
+/* CPU sub-pass timers + counters for r_speeds >= 2.
+ * Defined here so DrawTextureChains and R_DrawWorld can both write to them;
+ * read by R_ProfileReport in gl_rmain.c via extern. */
+double	rprof_cpu_bsp;
+double	rprof_cpu_lmupload;
+double	rprof_cpu_gpucull;
+double	rprof_cpu_chains;
+double	rprof_cpu_chains_skystencil;
+int	rprof_chains_n_fast;
+int	rprof_chains_n_imm;
+int	rprof_chains_n_slow;
+int	rprof_chains_n_skypoly;
+
 static void DrawTextureChains (entity_t *e)
 {
 	int		i;
 	msurface_t	*s;
 	texture_t	*t;
+	double		_t0;
+
+	/* Reset per-frame path counters for r_speeds */
+	if (e == &r_worldentity)
+	{
+		rprof_chains_n_fast = 0;
+		rprof_chains_n_imm = 0;
+		rprof_chains_n_slow = 0;
+		rprof_chains_n_skypoly = 0;
+		rprof_cpu_chains_skystencil = 0;
+	}
 
 	/* Validate world model before iterating textures */
 	if (!cl.worldmodel || !cl.worldmodel->textures) {
@@ -1127,6 +1151,7 @@ static void DrawTextureChains (entity_t *e)
 	    cl.worldmodel->textures[skytexturenum]->texturechain)
 	{
 		msurface_t *sky;
+		_t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 		glEnable_fp(GL_STENCIL_TEST);
 		glStencilFunc_fp(GL_ALWAYS, 1, 0xFF);
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
@@ -1143,6 +1168,7 @@ static void DrawTextureChains (entity_t *e)
 				for (j = 0; j < p->numverts; j++)
 					GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
 				GL_ImmEnd(GL_POLYGON, &gl_shader_flat);
+				if (e == &r_worldentity) rprof_chains_n_skypoly++;
 			}
 		}
 		glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1151,6 +1177,8 @@ static void DrawTextureChains (entity_t *e)
 		 * so the skybox only fills truly visible sky pixels. */
 		glStencilFunc_fp(GL_ALWAYS, 0, 0xFF);
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		if (r_speeds.integer >= 2 && e == &r_worldentity)
+			rprof_cpu_chains_skystencil = Sys_DoubleTime() - _t0;
 	}
 
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
@@ -1196,6 +1224,7 @@ static void DrawTextureChains (entity_t *e)
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity && !(r_dynamic.integer && cl_dlights[0].radius > 0))
 			{
+				if (e == &r_worldentity) rprof_chains_n_fast++;
 				/* Static VBO path: world geometry is pre-uploaded.
 				 * Just issue glDrawElements per visible surface
 				 * using the pre-built IBO. Avoids per-vertex CPU work. */
@@ -1353,6 +1382,7 @@ static void DrawTextureChains (entity_t *e)
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture)
 			{
+				if (e == &r_worldentity) rprof_chains_n_imm++;
 				/* ImmBegin fallback for non-world brush entities */
 				GL_ImmColor4f (1, 1, 1, 1);
 
@@ -1390,6 +1420,7 @@ static void DrawTextureChains (entity_t *e)
 			}
 			else
 			{
+				if (e == &r_worldentity) rprof_chains_n_slow++;
 				/* No atlas — per-surface lightmap binds */
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPolyMTex (e, s, false);
@@ -1811,6 +1842,10 @@ R_DrawWorld
 */
 void R_DrawWorld (void)
 {
+	double t0;
+#define DW_BEGIN()	(t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0)
+#define DW_END(slot)	do { if (r_speeds.integer >= 2) (slot) = Sys_DoubleTime() - t0; } while (0)
+
 	VectorCopy (r_refdef.vieworg, modelorg);
 
 	currenttexture = GL_UNUSED_TEXTURE;
@@ -1847,12 +1882,17 @@ void R_DrawWorld (void)
 
 	/* Always run CPU BSP walk — needed for sky polys, water surfaces,
 	 * lightmap updates, and entity efrags regardless of GPU culling */
+	DW_BEGIN();
 	R_RecursiveWorldNode (cl.worldmodel->nodes);
+	DW_END(rprof_cpu_bsp);
 
 	/* Upload any dirty lightmap rects BEFORE drawing — the GPU cull path
 	 * and VBO batch path both read the atlas texture directly. */
+	DW_BEGIN();
 	R_UpdateLightmaps (false);
+	DW_END(rprof_cpu_lmupload);
 
+	DW_BEGIN();
 #ifndef __EMSCRIPTEN__
 	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer;
 	if (gpu_cull_active)
@@ -1865,9 +1905,14 @@ void R_DrawWorld (void)
 #else
 	gpu_cull_active = false;
 #endif
+	DW_END(rprof_cpu_gpucull);
 
+	DW_BEGIN();
 	DrawTextureChains (&r_worldentity);
+	DW_END(rprof_cpu_chains);
 	gpu_cull_active = false;
+#undef DW_BEGIN
+#undef DW_END
 
 	// reset to texture unit 0
 	glActiveTextureARB_fp (GL_TEXTURE1_ARB);
