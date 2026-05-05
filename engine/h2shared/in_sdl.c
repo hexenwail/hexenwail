@@ -34,7 +34,7 @@ static qboolean	prev_gamekey;
    Mouse
    ================================================================ */
 
-static cvar_t	m_filter = {"m_filter", "0", CVAR_NONE};
+cvar_t		m_filter = {"m_filter", "0", CVAR_ARCHIVE};
 static cvar_t	m_rawinput = {"m_rawinput", "1", CVAR_ARCHIVE};
 static qboolean	rawinput_active;
 

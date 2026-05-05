@@ -3155,6 +3155,7 @@ enum
 	GAME_MLOOK,
 	GAME_USEMOUSE,
 	GAME_RAWINPUT,
+	GAME_MFILTER,
 	GAME_CROSSHAIR,
 	GAME_CHASE,
 	GAME_VIEWBOB,
@@ -3219,6 +3220,9 @@ static void M_Game_AdjustSliders (int dir)
 		break;
 	case GAME_RAWINPUT:
 		Cvar_SetValue ("m_rawinput", !Cvar_VariableValue("m_rawinput"));
+		break;
+	case GAME_MFILTER:
+		Cvar_SetValue ("m_filter", !m_filter.integer);
 		break;
 	case GAME_CROSSHAIR:
 		Cvar_Set ("crosshair", crosshair.integer ? "0" : "1");
@@ -3285,6 +3289,9 @@ static void M_Game_Draw (void)
 
 	M_Print (76, 92 + 8*GAME_RAWINPUT,	"Raw Input     :");
 	M_DrawCheckbox (220, 92 + 8*GAME_RAWINPUT, (int)Cvar_VariableValue("m_rawinput"));
+
+	M_Print (76, 92 + 8*GAME_MFILTER,	"Mouse Filter  :");
+	M_DrawCheckbox (220, 92 + 8*GAME_MFILTER, m_filter.integer);
 
 	M_Print (76, 92 + 8*GAME_CROSSHAIR,	"Crosshair     :");
 	M_DrawCheckbox (220, 92 + 8*GAME_CROSSHAIR, crosshair.integer);
