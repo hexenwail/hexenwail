@@ -62,6 +62,12 @@ cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
 /* 0 = auto (1x at 480p, 2x at 960p, ...). Non-zero overrides. */
 cvar_t	scr_sbarscale       = {"scr_sbarscale",       "0", CVAR_ARCHIVE};
 cvar_t	scr_crosshairscale  = {"scr_crosshairscale",  "0", CVAR_ARCHIVE};
+/* Console background tweaks (Ironwail parity).
+ * scr_conalpha caps the fully-down console alpha (1.0 = opaque,
+ * 0.5 = semi-transparent), scr_conbrightness multiplies the conback
+ * RGB so users can darken or lighten it independent of alpha. */
+cvar_t	scr_conalpha        = {"scr_conalpha",        "1", CVAR_ARCHIVE};
+cvar_t	scr_conbrightness   = {"scr_conbrightness",   "1", CVAR_ARCHIVE};
 
 /* Hexen II statusbar logical dimensions (see sbar.c).
    The CANVAS_SBAR canvas reserves room for the top bumps above the
@@ -617,6 +623,8 @@ void Draw_Init (void)
 		Cvar_RegisterVariable (&gl_texture_anisotropy);
 		Cvar_RegisterVariable (&scr_sbarscale);
 		Cvar_RegisterVariable (&scr_crosshairscale);
+		Cvar_RegisterVariable (&scr_conalpha);
+		Cvar_RegisterVariable (&scr_conbrightness);
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
 		Cvar_SetCallback (&gl_texture_anisotropy, Draw_Anisotropy_f);
 		Hash_Allocate (&hash_cachepics, MAX_CACHED_PICS);
@@ -1359,6 +1367,10 @@ Draw_ConsoleBackground
 */
 static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 {
+	float bright = scr_conbrightness.value;
+	if (bright < 0.0f) bright = 0.0f;
+	if (bright > 4.0f) bright = 4.0f;	/* sane upper bound */
+
 	glEnable_fp (GL_BLEND);
 	glCullFace_fp(GL_FRONT);
 	GL_Bind (num);
@@ -1367,7 +1379,7 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, alpha);
+	GL_ImmColor4f (bright, bright, bright, alpha);
 	GL_ImmTexCoord2f (0, 0 + ofs);
 	GL_ImmVertex2f (0, 0);
 	GL_ImmTexCoord2f (1, 0 + ofs);
@@ -1397,11 +1409,18 @@ static void Draw_ConsoleVersionInfo (int lines)
 void Draw_ConsoleBackground (int lines)
 {
 	int	y;
-	float	ofs, alpha;
+	float	ofs, alpha, cap;
 
 	y = (vid.height * 3) >> 2;
 	ofs = (gl_constretch.integer) ? 0.0f : (vid.conheight - lines) / (float) vid.conheight;
 	alpha = (lines > y) ? 1.0f : 1.1f * lines / y;
+
+	/* User-configurable cap on fully-down alpha. Clamp to a sane range
+	 * so the console is at least faintly visible. */
+	cap = scr_conalpha.value;
+	if (cap < 0.0f) cap = 0.0f;
+	if (cap > 1.0f) cap = 1.0f;
+	alpha *= cap;
 
 	Draw_ConsolePic (lines, ofs, conback, alpha);
 
