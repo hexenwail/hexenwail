@@ -578,10 +578,15 @@ static void CL_RelinkEntities (void)
 			ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
 		}
 		else
-		{	// if the delta is large, assume a teleport and don't lerp
-			// don't extrapolate the viewentity — only interpolate (cap at 1)
-			// to prevent camera/weapon overshoot and snap-back
-			f = (i == cl.viewentity && frac > 1) ? 1 : frac;
+		{	// if the delta is large, assume a teleport and don't lerp.
+			// Cap extrapolation (frac>1) for the viewentity AND step movers.
+			// Step movers (MOVETYPE_STEP — monsters, doors, plats; flagged
+			// LERP_MOVESTEP from U_NOLERP in cl_parse) are stationary
+			// between server ticks; extrapolating past frac=1 makes them
+			// overshoot their target and then snap back when the next
+			// packet arrives.  That's the visible step-mover stutter.
+			qboolean nostepextrap = (ent->lerpflags & LERP_MOVESTEP) != 0;
+			f = ((i == cl.viewentity || nostepextrap) && frac > 1) ? 1 : frac;
 			for (j = 0; j < 3; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
