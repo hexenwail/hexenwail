@@ -577,73 +577,16 @@ static void CL_RelinkEntities (void)
 			VectorCopy (ent->msg_angles[0], ent->angles);
 			ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
 		}
-		else if (r_lerpmove.integer && (ent->lerpflags & LERP_MOVESTEP) && i != cl.viewentity)
-		{	// Step-mover (MOVETYPE_STEP — monsters, doors, plats).  These
-			// only think every 0.1s but the server tick runs at 0.05s, so
-			// the per-tick msg_origins lerp produces a "move-pause-move-
-			// pause" stutter as the entity sits idle every other tick.
-			// Use Ironwail's render-time fixed-window approach: detect
-			// origin changes here and lerp over 0.1s, which naturally
-			// covers the entity's actual think period regardless of how
-			// many server ticks elapsed.
-			//
-			// Teleport detection still applies (large delta = snap).
-			qboolean teleport = false;
-			for (j = 0; j < 3; j++)
-			{
-				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
-				if (delta[j] > 100 || delta[j] < -100)
-					teleport = true;
-			}
-			if (teleport)
-			{
-				ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
-			}
-
-			if (ent->lerpflags & LERP_RESETMOVE)
-			{
-				ent->movelerpstart = 0;
-				VectorCopy (ent->msg_origins[0], ent->previousorigin);
-				VectorCopy (ent->msg_origins[0], ent->currentorigin);
-				VectorCopy (ent->msg_angles[0], ent->previousangles);
-				VectorCopy (ent->msg_angles[0], ent->currentangles);
-				ent->lerpflags &= ~LERP_RESETMOVE;
-			}
-			else if (!VectorCompare(ent->msg_origins[0], ent->currentorigin) ||
-				 !VectorCompare(ent->msg_angles[0],  ent->currentangles))
-			{	// Server pushed a new step — start a new lerp window.
-				ent->movelerpstart = cl.time;
-				VectorCopy (ent->currentorigin, ent->previousorigin);
-				VectorCopy (ent->msg_origins[0], ent->currentorigin);
-				VectorCopy (ent->currentangles, ent->previousangles);
-				VectorCopy (ent->msg_angles[0],  ent->currentangles);
-			}
-
-			{
-				float blend = (cl.time - ent->movelerpstart) / 0.1f;
-				vec3_t dorg, dang;
-				if (blend < 0) blend = 0;
-				else if (blend > 1) blend = 1;
-
-				VectorSubtract (ent->currentorigin, ent->previousorigin, dorg);
-				VectorSubtract (ent->currentangles, ent->previousangles, dang);
-				for (j = 0; j < 3; j++)
-				{
-					if (dang[j] >  180) dang[j] -= 360;
-					if (dang[j] < -180) dang[j] += 360;
-				}
-				for (j = 0; j < 3; j++)
-				{
-					ent->origin[j] = ent->previousorigin[j] + dorg[j] * blend;
-					ent->angles[j] = ent->previousangles[j] + dang[j] * blend;
-				}
-			}
-		}
 		else
 		{	// if the delta is large, assume a teleport and don't lerp.
-			// Cap extrapolation (frac>1) for the viewentity (camera/weapon
-			// must not overshoot) — step movers handled in the branch above.
-			f = (i == cl.viewentity && frac > 1) ? 1 : frac;
+			// Cap extrapolation (frac>1) for the viewentity AND step movers.
+			// Step movers (MOVETYPE_STEP — monsters, doors, plats; flagged
+			// LERP_MOVESTEP from U_NOLERP in cl_parse) are stationary
+			// between server ticks; extrapolating past frac=1 makes them
+			// overshoot their target and then snap back when the next
+			// packet arrives.  That's the visible step-mover stutter.
+			qboolean nostepextrap = (ent->lerpflags & LERP_MOVESTEP) != 0;
+			f = ((i == cl.viewentity || nostepextrap) && frac > 1) ? 1 : frac;
 			for (j = 0; j < 3; j++)
 			{
 				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
