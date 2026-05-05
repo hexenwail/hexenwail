@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
 | Rendering — Visual/Shading | 17 | 0 | 5 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
-| UX / Menus / HUD | 9 | 1 | 12 | 1 |
+| UX / Menus / HUD | 13 | 1 | 8 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **45** | **3** | **28** | **8** |
+| **TOTAL** | **49** | **3** | **24** | **8** |
 
-**Parity: 59% ported, 4% partial, 37% missing** (excluding N/A)
+**Parity: 64% ported, 4% partial, 32% missing** (excluding N/A)
 
 ---
 
@@ -99,11 +99,11 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Menu key auto-repeat (navigational only) | ✅ | Ironwail commit `6a9610f` (2026-01): `M_Keydown` gains `repeat` bool arg; only arrow keys pass repeat. Hexenwail already has `M_Keydown (key, key_repeats[key] > 1)` with identical arrow-key-only filter — `menu.c:6024`, `keys.c:1099`. |
 | Mods menu dirs-with-spaces | ✅ | Ironwail commit `51a911b` (2026-03): added quotes around dir name in `game` command. Hexenwail already uses `game \"%s\"` at `menu.c:4009`. |
 | FSAA mode selection in menu | 🔶 | `vid_fsaa` integer only, no mode picker |
-| HUD / statusbar scaling | ❌ | `scr_sbarscale` — Ironwail multi-canvas system |
-| Menu scaling | ❌ | `scr_menuscale` |
-| Crosshair scaling | ❌ | `scr_crosshairscale` |
-| Console alpha | ❌ | `scr_conalpha` |
-| Console brightness | ❌ | `scr_conbrightness` |
+| HUD / statusbar scaling | ✅ | `scr_sbarscale` — `CANVAS_SBAR` in `gl_draw.c`, slider in Misc/HUD submenu (`menu.c`) |
+| Menu scaling | ❌ | `scr_menuscale` — needs `CANVAS_MENU` plumbing through `M_Draw*` helpers |
+| Crosshair scaling | ✅ | `scr_crosshairscale` — `CANVAS_CROSSHAIR`, slider in Misc/HUD submenu |
+| Console alpha | ✅ | `scr_conalpha` — caps `Draw_ConsoleBackground` alpha, slider in Misc/HUD submenu |
+| Console brightness | ✅ | `scr_conbrightness` — multiplies conback RGB, slider in Misc/HUD submenu |
 | Menu background style | ❌ | `scr_menubgstyle` |
 | Center-print background | ❌ | `scr_centerprintbg` — Ironwail changed default to 2 (menu box) in `df5219c` (2026-01). We have the cvar and the option in menu (`menu.c:2785`) but confirm default value matches. |
 | Console mouse support | ❌ | Clickable links, text selection, clipboard |
@@ -176,18 +176,17 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P1 — High
-1. **HUD/menu/crosshair scaling** (`scr_sbarscale`, `scr_menuscale`, `scr_crosshairscale`) — critical for high-DPI
+1. **Menu scaling** (`scr_menuscale`) — CANVAS_MENU plumbing through `M_Draw*` helpers (HUD + crosshair shipped 2026-05-05)
 2. **Persistent mapped buffers** — lock-free GPU upload, big perf win
 3. **Reversed-Z depth** — eliminates z-fighting on large maps
 4. **Pitch drift during intermission** — `cl_input.c:CL_AdjustAngles` needs `cl.intermission` guard + `V_StopPitchDrift()` call (Ironwail `0a6084a`; effort: 5 lines)
 
 ### P2 — Medium
-5. **Console alpha/brightness** (`scr_conalpha`, `scr_conbrightness`) — low effort
-6. **Sky wind system** (`r_skywind`) — visual polish
-7. **Triple-buffering / frames in flight** — smoother frame pacing
-8. **Gyroscope aiming** — Steam Deck users
-9. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
-10. **Controller rumble on sound buffer clear** — correctness fix (Ironwail `78ad272`)
+5. **Sky wind system** (`r_skywind`) — visual polish
+6. **Triple-buffering / frames in flight** — smoother frame pacing
+7. **Gyroscope aiming** — Steam Deck users
+8. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
+9. **Controller rumble on sound buffer clear** — correctness fix (Ironwail `78ad272`)
 
 ### P3 — Low
 11. **Menu search** — nice UX for large option sets
