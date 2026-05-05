@@ -47,7 +47,10 @@ jobs:
     # Run inside the Flathub-blessed image — flatpak / flatpak-builder /
     # SDK already preloaded.  Bypasses the flaky Canonical PPA path.
     container:
-      image: bilelmoussaoui/flatpak-github-actions:freedesktop-25.08
+      # Image tagged after the SDK preloaded inside it.  freedesktop-24.08
+      # is the newest available; our manifest uses 25.08 which is pulled
+      # from Flathub on first build and cached by the action thereafter.
+      image: bilelmoussaoui/flatpak-github-actions:freedesktop-24.08
       options: --privileged
     steps:
       - uses: actions/checkout@v6
