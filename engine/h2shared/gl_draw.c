@@ -61,6 +61,7 @@ cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
 
 /* 0 = auto (1x at 480p, 2x at 960p, ...). Non-zero overrides. */
 cvar_t	scr_sbarscale       = {"scr_sbarscale",       "0", CVAR_ARCHIVE};
+cvar_t	scr_menuscale       = {"scr_menuscale",       "0", CVAR_ARCHIVE};
 cvar_t	scr_crosshairscale  = {"scr_crosshairscale",  "0", CVAR_ARCHIVE};
 /* Console background tweaks (Ironwail parity).
  * scr_conalpha caps the fully-down console alpha (1.0 = opaque,
@@ -622,6 +623,7 @@ void Draw_Init (void)
 		Cvar_RegisterVariable (&gl_texturemode);
 		Cvar_RegisterVariable (&gl_texture_anisotropy);
 		Cvar_RegisterVariable (&scr_sbarscale);
+		Cvar_RegisterVariable (&scr_menuscale);
 		Cvar_RegisterVariable (&scr_crosshairscale);
 		Cvar_RegisterVariable (&scr_conalpha);
 		Cvar_RegisterVariable (&scr_conbrightness);
@@ -1598,6 +1600,18 @@ void GL_SetCanvas (canvastype newcanvas)
 		GL_Ortho (0, SBAR_CANVAS_W,
 			  SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H,
 			  0, -99999, 99999);
+		break;
+	case CANVAS_MENU:
+		s = SCR_CalcUIScale (&scr_menuscale);
+		/* clamp so the canvas fits the screen */
+		s = q_min (s, (float)glwidth / 320.0f);
+		s = q_min (s, (float)glheight / 200.0f);
+		w = (int)(320.0f * s);
+		h = (int)(200.0f * s);
+		/* viewport centered on screen */
+		glViewport_fp (glx + (glwidth - w) / 2,
+			       gly + (glheight - h) / 2, w, h);
+		GL_Ortho (0, 320, 200, 0, -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
 		s = SCR_CalcUIScale (&scr_crosshairscale);
