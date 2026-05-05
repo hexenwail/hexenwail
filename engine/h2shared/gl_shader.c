@@ -210,9 +210,16 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #ifdef __EMSCRIPTEN__
 #define GLSL_VERT_HEADER	"#version 300 es\nprecision highp float;\n"
 #define GLSL_FRAG_HEADER	"#version 300 es\nprecision mediump float;\n"
+/* GLSL ES 3.00 doesn't support early_fragment_tests */
+#define GLSL_EARLY_Z		""
 #else
 #define GLSL_VERT_HEADER	"#version 430 core\n"
 #define GLSL_FRAG_HEADER	"#version 430 core\n"
+/* Force depth test BEFORE fragment shader runs even when shader uses
+ * `discard`. Lets the GPU exploit the front-to-back BSP traversal's
+ * Hi-Z without `discard` defeating early-Z. GLSL 4.20+. No measured
+ * benefit on flat coliseum scenes (BSP gives Hi-Z already), no harm. */
+#define GLSL_EARLY_Z		"layout(early_fragment_tests) in;\n"
 #endif
 
 /* --- shader_2d: orthographic HUD/text rendering --- */
@@ -288,6 +295,7 @@ static const char sworld_vert[] =
 
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
+	GLSL_EARLY_Z
 	"uniform sampler2D u_texture0;\n"
 	"uniform sampler2D u_texture1;\n"
 	"uniform float u_fog_density;\n"
