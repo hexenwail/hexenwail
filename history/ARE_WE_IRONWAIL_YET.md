@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-04-08
+Last updated: 2026-05-05
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 
@@ -16,13 +16,13 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | Rendering — Visual/Shading | 17 | 0 | 5 | 0 |
 | Performance / Engine | 3 | 1 | 3 | 1 |
 | UX / Menus / HUD | 8 | 1 | 13 | 0 |
-| Input / Controller | 3 | 1 | 5 | 1 |
-| Audio | 2 | 0 | 2 | 0 |
+| Input / Controller | 4 | 1 | 4 | 1 |
+| Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **40** | **3** | **34** | **6** |
+| **TOTAL** | **42** | **3** | **31** | **7** |
 
-**Parity: 52% ported, 4% partial, 44% missing** (excluding N/A)
+**Parity: 55% ported, 4% partial, 41% missing** (excluding N/A)
 
 ---
 
@@ -120,7 +120,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 | Advanced deadzone curves | 🔶 | Missing inner/outer threshold, exponent curves |
 | Flick stick | ❌ | `joy_flick` |
 | Gyroscope aiming | ❌ | `gyro_enable`, calibration, noise filtering |
-| Second gamepad binding layer | ❌ | Modifier button for alternate actions |
+| Second gamepad binding layer | ✅ | `+altmodifier` modifier button for alternate bindings |
 | Controller type detection | ❌ | Xbox/PS/Nintendo button label auto-switch |
 | Controller LED color | ❌ | Orange for branding |
 | Steam Deck OSK detection | ➖ | Steam-specific |
@@ -131,8 +131,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 |---|---|---|
 | Multi-codec music | ✅ | OGG, FLAC, Opus, MP3, XMP, WAV, UMX |
 | Spatial audio / stereo separation | ✅ | Standard 3D positioning |
-| Underwater audio filter | ❌ | `snd_waterfx` |
-| Sound filter quality | ❌ | `snd_filterquality` |
+| Underwater audio filter | ✅ | `snd_waterfx` — IIR low-pass on the paint buffer |
+| Sound filter quality | ➖ | `snd_filterquality` cleans up Ironwail's paint-time zero-stuff upsample. Our pipeline resamples at load (`snd_mem.c:30 ResampleSfx`), so the filter has no equivalent precondition here. |
 
 ## Network / Protocol
 
@@ -161,9 +161,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific)
 ### P2 — Medium
 6. **Console alpha/brightness** (`scr_conalpha`, `scr_conbrightness`) — low effort
 7. **Sky wind system** (`r_skywind`) — visual polish
-8. **Underwater audio filter** (`snd_waterfx`) — immersion
-9. **Triple-buffering / frames in flight** — smoother frame pacing
-10. **Gyroscope aiming** — Steam Deck users
+8. **Triple-buffering / frames in flight** — smoother frame pacing
+9. **Gyroscope aiming** — Steam Deck users
+10. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
 
 ### P3 — Low
 11. **Menu search** — nice UX for large option sets
@@ -193,3 +193,5 @@ Features Hexenwail has that Ironwail does NOT:
 | Water ripple shader | `gl_waterripple` 0–3 modes |
 | External texture overrides | `r_texture_external` hires replacement |
 | FluidSynth MIDI | Native MIDI playback |
+| Per-mod music subdirs | `<gamedir>/music/<author>/<file>.<ext>` lookup so multiple authors can ship tracks without colliding |
+| Track-name remap | `bgm_remap NN <name>` console command — points a numeric CD track at a named music file |
