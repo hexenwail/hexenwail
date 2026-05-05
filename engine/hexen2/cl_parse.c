@@ -728,10 +728,6 @@ static void CL_ParseUpdate (int bits)
 	if (model != ent->model)
 	{
 		ent->model = model;
-		// model changed — reset animation lerp for two frames so the renderer
-		// establishes a clean baseline before interpolating across the new
-		// model's pose space (matches Ironwail's RESETANIM/RESETANIM2 protocol).
-		ent->lerpflags |= LERP_RESETANIM | LERP_RESETANIM2;
 		// automatic animation (torches, etc) can
 		// be either all together or randomized
 		if (model)
@@ -748,7 +744,16 @@ static void CL_ParseUpdate (int bits)
 	}
 
 	if (bits & U_FRAME)
-		set_ent->frame = ent->frame = MSG_ReadByte ();
+	{
+		int newframe = MSG_ReadByte ();
+		if (newframe != ent->frame)
+		{
+			ent->previouspose = ent->frame;
+			ent->lerpstart = cl.time;
+			ent->lerptime = 0.1f;
+		}
+		set_ent->frame = ent->frame = newframe;
+	}
 	else	ent->frame = ref_ent->frame;
 
 	if (bits & U_COLORMAP)
@@ -839,17 +844,7 @@ static void CL_ParseUpdate (int bits)
 		ent->alpha = ref_ent->alpha;
 
 	if (bits & U_NOLERP)
-	{
-		// U_NOLERP marks MOVETYPE_STEP entities (monsters, doors, plats).
-		// Pre-r_lerpmove behavior was to snap on every update, which
-		// produces visible 20 Hz stutter. With r_lerpmove on, let the
-		// standard msg_origins lerp smooth the step over the tick.
-		ent->lerpflags |= LERP_MOVESTEP;
-		if (!r_lerpmove.integer)
-			ent->forcelink = true;
-	}
-	else
-		ent->lerpflags &= ~LERP_MOVESTEP;
+		ent->forcelink = true;
 
 	if (forcelink)
 	{	// didn't have an update last message
