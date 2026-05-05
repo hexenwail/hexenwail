@@ -24,6 +24,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "gl_postprocess.h"
+#include "sbar.h"
 #include "sdl_inc.h"
 
 void (*vid_menudrawfn)(void);
@@ -2763,9 +2764,14 @@ enum
 {
 	GFX_CENTERPRINTBG = 0,
 	GFX_HUDSCALE,
+	GFX_HUDTRANS,
 	GFX_CROSSHAIRSCALE,
 	GFX_CONALPHA,
 	GFX_CONBRIGHT,
+	GFX_OVERBRIGHT,
+	GFX_COLORED_LM,
+	GFX_TORCH_DLIGHT,
+	GFX_GLOW_INTENSITY,
 	GFX_ITEMS
 };
 
@@ -2824,6 +2830,31 @@ static void M_Graphics_AdjustSliders (int dir)
 		Cvar_SetValue ("scr_conbrightness", v);
 		break;
 	}
+	case GFX_HUDTRANS:
+	{
+		int v = sbtrans.integer + dir;
+		if (v < 0) v = 2;
+		if (v > 2) v = 0;
+		Cvar_SetValue ("sbtrans", v);
+		break;
+	}
+	case GFX_OVERBRIGHT:
+		Cvar_SetValue ("gl_overbright_models", !gl_overbright_models.integer);
+		break;
+	case GFX_COLORED_LM:
+		Cvar_SetValue ("gl_coloredlight", !gl_coloredlight.integer);
+		break;
+	case GFX_TORCH_DLIGHT:
+		Cvar_SetValue ("gl_torch_dlight", !gl_torch_dlight.integer);
+		break;
+	case GFX_GLOW_INTENSITY:
+	{
+		float v = gl_glow_intensity.value + dir * 0.1f;
+		if (v < 0.0f) v = 0.0f;
+		if (v > 1.0f) v = 1.0f;
+		Cvar_SetValue ("gl_glow_intensity", v);
+		break;
+	}
 	}
 }
 
@@ -2864,6 +2895,24 @@ static void M_Graphics_Draw (void)
 	M_Print (76, 92 + 8*GFX_CONBRIGHT,	"Console Bright  :");
 	M_DrawSliderValue (220, 92 + 8*GFX_CONBRIGHT,
 		scr_conbrightness.value * 0.5f, "%.2f", scr_conbrightness.value);
+
+	M_Print (76, 92 + 8*GFX_HUDTRANS,	"HUD Transparency:");
+	M_PrintWhite (220, 92 + 8*GFX_HUDTRANS,
+		sbtrans.integer == 2 ? "Heavy" :
+		sbtrans.integer == 1 ? "Light" : "Off");
+
+	M_Print (76, 92 + 8*GFX_OVERBRIGHT,	"Overbright Mdls :");
+	M_DrawCheckbox (220, 92 + 8*GFX_OVERBRIGHT, gl_overbright_models.integer);
+
+	M_Print (76, 92 + 8*GFX_COLORED_LM,	"Colored Lighting:");
+	M_DrawCheckbox (220, 92 + 8*GFX_COLORED_LM, gl_coloredlight.integer);
+
+	M_Print (76, 92 + 8*GFX_TORCH_DLIGHT,	"Wall Torch DLs  :");
+	M_DrawCheckbox (220, 92 + 8*GFX_TORCH_DLIGHT, gl_torch_dlight.integer);
+
+	M_Print (76, 92 + 8*GFX_GLOW_INTENSITY,	"Glow Intensity  :");
+	M_DrawSliderValue (220, 92 + 8*GFX_GLOW_INTENSITY,
+		gl_glow_intensity.value, "%.2f", gl_glow_intensity.value);
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
 	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));

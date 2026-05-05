@@ -102,7 +102,7 @@ static float BarHeight;
 static float BarTargetHeight;
 static cvar_t BarSpeed = {"barspeed", "5", CVAR_NONE};
 static cvar_t DMMode = {"dm_mode", "1", CVAR_ARCHIVE};
-static cvar_t sbtrans = {"sbtrans", "0", CVAR_ARCHIVE};
+cvar_t sbtrans = {"sbtrans", "0", CVAR_ARCHIVE};
 static cvar_t dmtrans = {"dmtrans", "0", CVAR_ARCHIVE};
 static cvar_t hide_hud = {"hide_hud", "0", CVAR_NONE};
 
