@@ -212,20 +212,19 @@ static int M_CenterOfs (void)
 	return m_canvas_active ? 0 : ((vid.width - 320) >> 1);
 }
 
-/* Mouse comes in as raw screen pixels. Convert to the 320x200 menu
- * canvas Y so M_MouseToMenuItem's hit test works under scaling. */
+/* Mouse comes in as raw screen pixels (top-left origin). Convert to the
+ * 320x200 menu canvas Y. Canvas is top-anchored, horizontally centered,
+ * so canvas Y = screen Y / scale. */
 static int M_ScreenYToCanvasY (int screen_y)
 {
 	float s;
-	int viewport_top;
 	if (!m_canvas_active)
 		return screen_y;
 	s = SCR_CalcUIScale (&scr_menuscale);
 	if (s > (float)glwidth / 320.0f) s = (float)glwidth / 320.0f;
 	if (s > (float)glheight / 200.0f) s = (float)glheight / 200.0f;
-	viewport_top = (glheight - (int)(200.0f * s)) / 2;
 	if (s < 0.0001f) s = 1.0f;
-	return (int)((screen_y - viewport_top) / s);
+	return (int)(screen_y / s);
 }
 
 /*
