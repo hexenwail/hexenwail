@@ -1119,12 +1119,44 @@ int	rprof_chains_n_imm;
 int	rprof_chains_n_slow;
 int	rprof_chains_n_skypoly;
 
+/* Bind the per-frame world-VBO render state (VAO, shader, MVP/MV/fog/alpha
+ * uniforms, lightmap atlas on TU1, color attribute white, TU0 sticky). Called
+ * once before the texture loop and again from inside the fast-path branch if
+ * a sibling branch (mirror/translucent/sky-no-skybox) invalidated state. */
+static void DrawTextureChains_BindWorldState (void)
+{
+	float mvp[16], mv[16];
+	glBindVertexArray_fp(world_vao);
+	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	glUseProgram_fp(gl_shader_world.program);
+	GL_GetMVP(mvp);
+	GL_GetModelview(mv);
+	if (gl_shader_world.u_mvp >= 0)
+		glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+	if (gl_shader_world.u_modelview >= 0)
+		glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+	if (gl_shader_world.u_fog_density >= 0)
+		glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+	if (gl_shader_world.u_fog_color >= 0)
+		glUniform3f_fp(gl_shader_world.u_fog_color,
+			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (gl_shader_world.u_alpha_threshold >= 0)
+		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);	/* leave TU0 sticky for diffuse */
+}
+
 static void DrawTextureChains (entity_t *e)
 {
 	int		i;
 	msurface_t	*s;
 	texture_t	*t;
 	double		_t0;
+	qboolean	world_state_set = false;
+	qboolean	world_color_dirty = false;
+	static msurface_t *world_deferred[4096];
+	int		world_deferred_count = 0;
 
 	/* Reset per-frame path counters for r_speeds */
 	if (e == &r_worldentity)
@@ -1198,6 +1230,19 @@ static void DrawTextureChains (entity_t *e)
 			rprof_cpu_chains_skystencil = Sys_DoubleTime() - _t0;
 	}
 
+	/* Hoist world VBO state out of the per-chain loop. Each visible
+	 * texture chain previously did glUseProgram + 5 uniform uploads +
+	 * VAO bind + lightmap bind on its own. Bind once here; the fast-path
+	 * branch reuses the bound state. Mirror / translucent / non-skybox
+	 * sky chains invalidate it via world_state_set=false and the fast
+	 * path then re-binds via DrawTextureChains_BindWorldState. */
+	if (e == &r_worldentity && lm_atlas_enabled && lm_atlas_texture && world_vao)
+	{
+		DrawTextureChains_BindWorldState();
+		world_state_set = true;
+		world_color_dirty = true;
+	}
+
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
 		t = cl.worldmodel->textures[i];
@@ -1210,13 +1255,19 @@ static void DrawTextureChains (entity_t *e)
 		{
 			if (skybox_name[0])
 			{
-				// Process sky polys to build bounds for Sky_DrawSkyBox
+				/* Sky_ProcessPoly is data-only; world state stays valid. */
 				msurface_t *sky;
 				for (sky = s; sky; sky = sky->texturechain)
 					Sky_ProcessPoly (sky->polys);
 			}
 			else
 			{
+				if (world_state_set)
+				{
+					glBindVertexArray_fp(0);
+					glUseProgram_fp(0);
+					world_state_set = false;
+				}
 				R_DrawSkyChain (s);
 			}
 			t->texturechain = NULL;
@@ -1224,6 +1275,12 @@ static void DrawTextureChains (entity_t *e)
 		}
 		else if (i == mirrortexturenum && r_mirroralpha.value != 1.0)
 		{
+			if (world_state_set)
+			{
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
+				world_state_set = false;
+			}
 			R_MirrorChain (s);
 			continue;
 		}
@@ -1236,57 +1293,38 @@ static void DrawTextureChains (entity_t *e)
 			if (((e->drawflags & DRF_TRANSLUCENT) ||
 				(e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT))
 			{
+				if (world_state_set)
+				{
+					glBindVertexArray_fp(0);
+					glUseProgram_fp(0);
+					world_state_set = false;
+				}
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPoly (e, s, false);
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture && world_vao && e == &r_worldentity && !(r_dynamic.integer && cl_dlights[0].radius > 0))
 			{
 				if (e == &r_worldentity) rprof_chains_n_fast++;
-				/* Static VBO path: world geometry is pre-uploaded.
-				 * Just issue glDrawElements per visible surface
-				 * using the pre-built IBO. Avoids per-vertex CPU work. */
-				float mvp[16], mv[16];
+				/* Static VBO path: world state was hoisted before the loop;
+				 * if a sibling branch invalidated it, rebind now. Per-chain
+				 * we only update the diffuse texture and emit merged
+				 * glDrawElements runs. */
+				#define MAX_BATCH_SURFS 4096
+				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
+				int batch_count = 0;
 
-				glBindVertexArray_fp(world_vao);
+				if (!world_state_set)
+				{
+					DrawTextureChains_BindWorldState();
+					world_state_set = true;
+					world_color_dirty = true;
+				}
 
-				/* ATTR_COLOR is not in the world VBO — set default to white.
-				 * When a vertex attrib array is disabled, the generic
-				 * attribute value is used (GL 2.0 spec). */
-				glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-
-				glUseProgram_fp(gl_shader_world.program);
-				GL_GetMVP(mvp);
-				GL_GetModelview(mv);
-				if (gl_shader_world.u_mvp >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-				if (gl_shader_world.u_modelview >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-				if (gl_shader_world.u_fog_density >= 0)
-					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-				if (gl_shader_world.u_fog_color >= 0)
-					glUniform3f_fp(gl_shader_world.u_fog_color,
-						       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-				if (gl_shader_world.u_alpha_threshold >= 0)
-					glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
-
-				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+				/* Diffuse texture (TU0 is sticky from the hoisted setup). */
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
 				}
-				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-
-				/* Collect visible surfaces, then batch-draw.
-			 * Merge contiguous IBO ranges into single draw calls. */
-			{
-				/* First pass: collect into temp array */
-				#define MAX_BATCH_SURFS 4096
-				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
-				static msurface_t *deferred_surfs[MAX_BATCH_SURFS];
-				int batch_count = 0;
-				int deferred_count = 0;
 
 				for ( ; s ; s = s->texturechain)
 				{
@@ -1295,8 +1333,8 @@ static void DrawTextureChains (entity_t *e)
 
 					if (s->flags & (SURF_DRAWFENCE | SURF_UNDERWATER))
 					{
-						if (deferred_count < MAX_BATCH_SURFS)
-							deferred_surfs[deferred_count++] = s;
+						if (world_deferred_count < (int)(sizeof(world_deferred)/sizeof(world_deferred[0])))
+							world_deferred[world_deferred_count++] = s;
 						continue;
 					}
 
@@ -1327,7 +1365,7 @@ static void DrawTextureChains (entity_t *e)
 					}
 				}
 
-				/* Second pass: merge contiguous IBO ranges and draw */
+				/* Merge contiguous IBO ranges and draw */
 				if (batch_count > 0)
 				{
 					int run_start = 0;
@@ -1340,12 +1378,10 @@ static void DrawTextureChains (entity_t *e)
 						int expected = run_first_idx + run_total_idx;
 						if (batch_surfs[k]->vbo_firstindex == expected)
 						{
-							/* Contiguous — extend the run */
 							run_total_idx += batch_surfs[k]->vbo_numtris * 3;
 						}
 						else
 						{
-							/* Gap — flush the run */
 							if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 							{
 								glDrawElements_fp(GL_TRIANGLES,
@@ -1354,17 +1390,11 @@ static void DrawTextureChains (entity_t *e)
 										  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
 								c_brush_polys += (k - run_start);
 							}
-							else
-							{
-								Con_SafePrintf("SKIP batch draw: idx=%d total=%d (max=%d)\n",
-									       run_first_idx, run_total_idx, world_num_indices);
-							}
 							run_start = k;
 							run_first_idx = batch_surfs[k]->vbo_firstindex;
 							run_total_idx = batch_surfs[k]->vbo_numtris * 3;
 						}
 					}
-					/* Flush final run */
 					if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 					{
 						glDrawElements_fp(GL_TRIANGLES,
@@ -1373,33 +1403,19 @@ static void DrawTextureChains (entity_t *e)
 								  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
 						c_brush_polys += (batch_count - run_start);
 					}
-					else
-					{
-						Con_SafePrintf("SKIP final batch draw: idx=%d total=%d (max=%d)\n",
-							       run_first_idx, run_total_idx, world_num_indices);
-					}
 				}
-
-				/* Deferred pass: render fence/underwater surfaces
-				 * after batch draw to avoid per-surface VAO thrashing */
-				if (deferred_count > 0)
-				{
-					glBindVertexArray_fp(0);
-					glUseProgram_fp(0);
-					for (int d = 0; d < deferred_count; d++)
-						R_RenderBrushPolyMTex (e, deferred_surfs[d], false);
-				}
-			}
-
-				glBindVertexArray_fp(0);
-				glUseProgram_fp(0);
-		/* Reset color attribute to default (0,0,0,1) to avoid
-		 * interfering with subsequent dlight rendering */
-		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
+				/* No per-chain teardown — state is reused by the next
+				 * fast-path chain and torn down once after the loop. */
 			}
 			else if (lm_atlas_enabled && lm_atlas_texture)
 			{
 				if (e == &r_worldentity) rprof_chains_n_imm++;
+				if (world_state_set)
+				{
+					glBindVertexArray_fp(0);
+					glUseProgram_fp(0);
+					world_state_set = false;
+				}
 				/* ImmBegin fallback for non-world brush entities */
 				GL_ImmColor4f (1, 1, 1, 1);
 
@@ -1438,6 +1454,12 @@ static void DrawTextureChains (entity_t *e)
 			else
 			{
 				if (e == &r_worldentity) rprof_chains_n_slow++;
+				if (world_state_set)
+				{
+					glBindVertexArray_fp(0);
+					glUseProgram_fp(0);
+					world_state_set = false;
+				}
 				/* No atlas — per-surface lightmap binds */
 				for ( ; s ; s = s->texturechain)
 					R_RenderBrushPolyMTex (e, s, false);
@@ -1445,6 +1467,35 @@ static void DrawTextureChains (entity_t *e)
 		}
 
 		t->texturechain = NULL;
+	}
+
+	/* Render fence/underwater surfs collected from every fast-path chain.
+	 * R_RenderBrushPolyMTex expects no VAO/program bound. */
+	if (world_deferred_count > 0)
+	{
+		int d;
+		if (world_state_set)
+		{
+			glBindVertexArray_fp(0);
+			glUseProgram_fp(0);
+			world_state_set = false;
+		}
+		for (d = 0; d < world_deferred_count; d++)
+			R_RenderBrushPolyMTex (e, world_deferred[d], false);
+	}
+
+	/* Final teardown of hoisted world state. */
+	if (world_state_set)
+	{
+		glBindVertexArray_fp(0);
+		glUseProgram_fp(0);
+		world_state_set = false;
+	}
+	if (world_color_dirty)
+	{
+		/* Reset color attribute to default (0,0,0,1) so subsequent
+		 * dlight/sprite rendering doesn't inherit white. */
+		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 	}
 
 	if (have_stencil)
