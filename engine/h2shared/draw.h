@@ -101,12 +101,14 @@ void Draw_BigCharacter (int x, int y, int num);
 typedef enum {
 	CANVAS_NONE,
 	CANVAS_DEFAULT,
+	CANVAS_SBAR,
 	CANVAS_CROSSHAIR,
 	CANVAS_INVALID = -1
 } canvastype;
 
 void GL_SetCanvas (canvastype newcanvas);
 
+extern cvar_t scr_sbarscale;
 extern cvar_t scr_crosshairscale;
 
 float SCR_CalcUIScale (cvar_t *user);
