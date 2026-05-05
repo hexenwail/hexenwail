@@ -57,7 +57,8 @@ extern cvar_t r_hdr_exposure;
 extern cvar_t r_oit;
 void OIT_BeginTranslucency (void);
 void OIT_EndTranslucency (GLuint scene_fbo);
-qboolean OIT_Active (void);
+qboolean OIT_Active (void);	/* OIT is built and r_oit is on */
+qboolean OIT_InPass (void);	/* currently between Begin/EndTranslucency */
 GLuint GL_GetSceneFBO (void);
 
 /* OIT_OUTPUT macro for injection into translucent fragment shaders.

@@ -662,7 +662,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		/* Check buffer space */
 		if (GL_ImmCount() + (count - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, OIT_Active() ? &gl_shader_alias_oit : &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 			GL_ImmBegin ();
 		}
 
@@ -703,7 +703,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		}
 	}
 
-	GL_ImmEnd (GL_TRIANGLES, OIT_Active() ? &gl_shader_alias_oit : &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 	}
 }
 
