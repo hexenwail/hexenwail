@@ -59,6 +59,9 @@ static cvar_t	gl_constretch = {"gl_constretch", "0", CVAR_ARCHIVE};
 static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
 cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
 
+/* 0 = auto (1x at 480p, 2x at 960p, ...). Non-zero overrides. */
+cvar_t	scr_crosshairscale = {"scr_crosshairscale", "0", CVAR_ARCHIVE};
+
 static GLuint		menuplyr_textures[MAX_PLAYER_CLASS];	// player textures in multiplayer config screens
 static GLuint		draw_backtile;
 static GLuint		conback;
@@ -603,6 +606,7 @@ void Draw_Init (void)
 		gl_texturemode.string = gl_texmodes[gl_filter_idx].name;
 		Cvar_RegisterVariable (&gl_texturemode);
 		Cvar_RegisterVariable (&gl_texture_anisotropy);
+		Cvar_RegisterVariable (&scr_crosshairscale);
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
 		Cvar_SetCallback (&gl_texture_anisotropy, Draw_Anisotropy_f);
 		Hash_Allocate (&hash_cachepics, MAX_CACHED_PICS);
@@ -758,15 +762,31 @@ void Draw_RedString (int x, int y, const char *str)
 /*
 ================
 Draw_Crosshair
+
+Drawn inside CANVAS_CROSSHAIR so scr_crosshairscale enlarges it
+on high-DPI displays without affecting the rest of the HUD.
 ================
 */
 void Draw_Crosshair (void)
 {
 	int		x, y;
 	unsigned char	*pColor;
+	float		s;
+	int		canvas_w, canvas_h;
 
-	x = scr_vrect.x + scr_vrect.width/2 + cl_crossx.value;
-	y = scr_vrect.y + scr_vrect.height/2 + cl_crossy.value;
+	GL_SetCanvas (CANVAS_CROSSHAIR);
+
+	/* The CROSSHAIR canvas uses framebuffer-aligned coords scaled by
+	 * scr_crosshairscale, so map scr_vrect from vid space into the
+	 * canvas's logical pixels. */
+	s = SCR_CalcUIScale (&scr_crosshairscale);
+	s = q_min (s, (float)glwidth / 32.0f);
+	s = q_min (s, (float)glheight / 32.0f);
+	canvas_w = (int)(glwidth / s);
+	canvas_h = (int)(glheight / s);
+
+	x = (scr_vrect.x + scr_vrect.width/2)  * canvas_w / vid.width  + (int)cl_crossx.value;
+	y = (scr_vrect.y + scr_vrect.height/2) * canvas_h / vid.height + (int)cl_crossy.value;
 
 	if (crosshair.integer == 2)
 	{
@@ -797,6 +817,8 @@ void Draw_Crosshair (void)
 	{
 		Draw_Character (x - 4, y - 4, '+');
 	}
+
+	GL_SetCanvas (CANVAS_DEFAULT);
 }
 
 
@@ -1483,6 +1505,79 @@ void Draw_FadeScreen (void)
 
 /*
 ================
+SCR_CalcUIScale
+
+Resolves a UI scale cvar. Zero (default) means "auto" — picks an
+integer multiple based on framebuffer height so the UI stays a
+reasonable size on high-DPI displays. Non-zero is taken verbatim
+but clamped to keep the canvas on-screen.
+================
+*/
+float SCR_CalcUIScale (cvar_t *user)
+{
+	float s = (user) ? user->value : 0.0f;
+	if (s <= 0.0f)
+	{
+		/* auto: 1x up to 480p, 2x at 960p, 3x at 1440p, ... */
+		s = floorf ((float)glheight / 480.0f);
+		if (s < 1.0f) s = 1.0f;
+	}
+	return s;
+}
+
+/*
+================
+GL_SetCanvas
+
+Switches the active 2D canvas. Each canvas owns its ortho
+projection and viewport. CANVAS_DEFAULT is the legacy full-screen
+1:1 canvas used by everything that hasn't been ported yet.
+================
+*/
+static canvastype currentcanvas = CANVAS_INVALID;
+
+void GL_SetCanvas (canvastype newcanvas)
+{
+	float	s;
+	int	w, h;
+
+	if (newcanvas == currentcanvas)
+		return;
+	currentcanvas = newcanvas;
+
+	GL_MatrixMode(GL_MAT_PROJECTION);
+	GL_LoadIdentity();
+
+	switch (newcanvas)
+	{
+	case CANVAS_DEFAULT:
+		glViewport_fp (glx, gly, glwidth, glheight);
+		GL_Ortho (0, vid.width, vid.height, 0, -99999, 99999);
+		break;
+	case CANVAS_CROSSHAIR:
+		s = SCR_CalcUIScale (&scr_crosshairscale);
+		s = q_min (s, (float)glwidth / 32.0f);
+		s = q_min (s, (float)glheight / 32.0f);
+		w = (int)(glwidth / s);
+		h = (int)(glheight / s);
+		glViewport_fp (glx, gly, glwidth, glheight);
+		/* keep crosshair coords aligned with vrect (3D viewport) */
+		GL_Ortho (0, w, h, 0, -99999, 99999);
+		break;
+	case CANVAS_NONE:
+	case CANVAS_INVALID:
+	default:
+		glViewport_fp (glx, gly, glwidth, glheight);
+		GL_Ortho (0, vid.width, vid.height, 0, -99999, 99999);
+		break;
+	}
+
+	GL_MatrixMode(GL_MAT_MODELVIEW);
+	GL_LoadIdentity();
+}
+
+/*
+================
 GL_Set2D
 
 Setup as if the screen was 320*200
@@ -1490,13 +1585,8 @@ Setup as if the screen was 320*200
 */
 void GL_Set2D (void)
 {
-	glViewport_fp (glx, gly, glwidth, glheight);
-
-	GL_MatrixMode(GL_MAT_PROJECTION);
-	GL_LoadIdentity();
-	GL_Ortho(0, vid.width, vid.height, 0, -99999, 99999);
-	GL_MatrixMode(GL_MAT_MODELVIEW);
-	GL_LoadIdentity();
+	currentcanvas = CANVAS_INVALID;	/* force re-set */
+	GL_SetCanvas (CANVAS_DEFAULT);
 
 	glDisable_fp (GL_DEPTH_TEST);
 	glDisable_fp (GL_CULL_FACE);
