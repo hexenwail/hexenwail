@@ -238,7 +238,6 @@ extern	cvar_t	r_alias_gpu;
 extern	cvar_t	r_alphatocoverage;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_lerpmodels;
-extern	cvar_t	r_lerpmove;
 extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
