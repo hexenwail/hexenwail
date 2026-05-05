@@ -164,7 +164,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 | `3ccbcda` 2026-02 | bmodel VBO leak on map change: `GL_DeleteBModelBuffers()` missing before rebuild in `R_NewMap` | ✅ We call delete before rebuild |
 | `6a9610f` 2026-01 | Menu key auto-repeat: only navigational keys pass repeat events | ✅ Already ported |
 | `51a911b` 2026-03 | Mods menu: game command not quoted, breaks dirs with spaces | ✅ Already quoted |
-| `0a6084a` 2026-04 | Pitch drift during cutscenes: `V_StopPitchDrift()` not called when `CL_InCutscene()` | ❌ Hexen II has `svc_cutscene` (sets `cl.intermission=3`) but `CL_AdjustAngles` has no intermission guard. Pitch drift during Hexen II intermission screens is plausible bug. Low effort fix: add `if (cl.intermission) { V_StopPitchDrift(); return; }` at top of `cl_input.c:CL_AdjustAngles`. |
+| `0a6084a` 2026-04 | Pitch drift during cutscenes: `V_StopPitchDrift()` not called when `CL_InCutscene()` | ✅ Ported 2026-05-05: `cl_input.c:CL_AdjustAngles` early-returns with `V_StopPitchDrift()` when `cl.intermission` is set. |
 | `017fdd2` 2026-01 | Dark outlines on fence textures with dynamic lights: compute plane before `discard` | ➖ N/A — Hexenwail has no clustered per-tile dynamic lighting. Our world shader (`h2shared/gl_shader.c:sworld_frag`) does not compute a plane variable at all. |
 | `1011ff8` 2026-01 | Disable GL texture compression for alpha-tested surfaces | ➖ N/A — Hexenwail does not have a `gl_compress_textures` system. |
 | `74d8e74` 2026-01 | Disable GL texture compression for 2D textures (HUD, conchars) | ➖ N/A — same reason as above. |
@@ -179,7 +179,6 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 1. **Menu scaling** (`scr_menuscale`) — CANVAS_MENU plumbing through `M_Draw*` helpers (HUD + crosshair shipped 2026-05-05)
 2. **Persistent mapped buffers** — lock-free GPU upload, big perf win
 3. **Reversed-Z depth** — eliminates z-fighting on large maps
-4. **Pitch drift during intermission** — `cl_input.c:CL_AdjustAngles` needs `cl.intermission` guard + `V_StopPitchDrift()` call (Ironwail `0a6084a`; effort: 5 lines)
 
 ### P2 — Medium
 5. **Sky wind system** (`r_skywind`) — visual polish
