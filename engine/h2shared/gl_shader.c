@@ -305,15 +305,17 @@ static const char sworld_frag[] =
 	"    if (color.a < u_alpha_threshold) discard;\n"
 	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	/* Force fragments that survived the alpha-test to be fully opaque.\n"
-	 * Without this, A2C dithers their coverage based on the multiplied\n"
-	 * alpha (lightmap.a × texture.a × vertex.a), which is undefined for\n"
-	 * lightmap atlas textures and produces spray-paint splotches on\n"
-	 * fence/cutout surfaces under MSAA.  OIT path keeps actual alpha. */
+	/* For cutout alpha-test (threshold > 0.5 = fence/holey, A2C enabled):
+	 * surviving fragments are by definition opaque, so force alpha=1 to
+	 * stop A2C from dithering their coverage based on the noisy
+	 * lightmap.a × tex.a × v_color.a multiply.
+	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
+	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
+	 * OIT path always preserves alpha for weighted blending. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
-	"    fragColor = vec4(color.rgb, 1.0);\n"
+	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
 	"#endif\n"
 	"}\n";
 
@@ -352,11 +354,13 @@ static const char salias_frag[] =
 	"    if (color.a < u_alpha_threshold) discard;\n"
 	"    float fog = exp(-u_fog_density * v_fogdist);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	/* Surviving fragments are opaque — see sworld_frag for rationale. */
+	/* See sworld_frag — force alpha=1 only on the cutout path so A2C
+	 * doesn't dither.  Translucent draws (sprites, EF_TRANSPARENT alias
+	 * models, ENTALPHA, etc.) keep actual alpha for blend. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
-	"    fragColor = vec4(color.rgb, 1.0);\n"
+	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
 	"#endif\n"
 	"}\n";
 
