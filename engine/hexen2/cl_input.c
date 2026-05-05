@@ -415,6 +415,16 @@ void CL_AdjustAngles (void)
 	float	speed;
 	float	up, down;
 
+	/* During intermission / cutscene the player has no control over
+	 * the camera. Stop any in-flight pitch drift and skip all the
+	 * +look* / +mlook bindings so the cinematic camera stays put.
+	 * (Ironwail commit 0a6084a applies the same guard for Quake.) */
+	if (cl.intermission)
+	{
+		V_StopPitchDrift ();
+		return;
+	}
+
 	if ((in_speed.state & 1) ^ cl_alwaysrun.integer)
 		speed = host_frametime * cl_anglespeedkey.value;
 	else	speed = host_frametime;
