@@ -2806,8 +2806,31 @@ R_RenderScene
 r_refdef must be set before the first call
 ================
 */
+/* CPU sub-pass timers for r_speeds >= 2 — used by R_RenderScene below
+ * and reported in R_ProfileReport above. */
+static double	rprof_cpu_marklv;
+static double	rprof_cpu_drawworld;
+static double	rprof_cpu_sky;
+static double	rprof_cpu_ents;
+static double	rprof_cpu_glows;
+static double	rprof_cpu_dlights;
+/* Defined in gl_rsurf.c — finer breakdown of R_DrawWorld */
+extern double	rprof_cpu_bsp;
+extern double	rprof_cpu_lmupload;
+extern double	rprof_cpu_gpucull;
+extern double	rprof_cpu_chains;
+extern double	rprof_cpu_chains_skystencil;
+extern int	rprof_chains_n_fast;
+extern int	rprof_chains_n_imm;
+extern int	rprof_chains_n_slow;
+extern int	rprof_chains_n_skypoly;
+
 static void R_RenderScene (void)
 {
+	double t0;
+#define RPROF_CPU_BEGIN()	(t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0)
+#define RPROF_CPU_END(slot)	do { if (r_speeds.integer >= 2) (slot) = Sys_DoubleTime() - t0; } while (0)
+
 	R_SetupFrame ();
 
 	R_SetFrustum ();
@@ -2818,23 +2841,38 @@ static void R_RenderScene (void)
 
 	Fog_SetupFrame ();
 
+	RPROF_CPU_BEGIN();
 	R_MarkLeaves ();	// done here so we know if we're in water
+	RPROF_CPU_END(rprof_cpu_marklv);
 
 	Fog_EnableGFog ();
 
+	RPROF_CPU_BEGIN();
 	R_DrawWorld ();		// adds static entities to the list
+	RPROF_CPU_END(rprof_cpu_drawworld);
 
+	RPROF_CPU_BEGIN();
 	Sky_DrawSky ();		// render skybox
+	RPROF_CPU_END(rprof_cpu_sky);
 
 	S_ExtraUpdate ();	// don't let sound get messed up if going slow
 
+	RPROF_CPU_BEGIN();
 	R_DrawEntitiesOnList ();
+	RPROF_CPU_END(rprof_cpu_ents);
 
+	RPROF_CPU_BEGIN();
 	R_DrawAllGlows();
+	RPROF_CPU_END(rprof_cpu_glows);
 
 	Fog_DisableGFog ();
 
+	RPROF_CPU_BEGIN();
 	R_RenderDlights ();
+	RPROF_CPU_END(rprof_cpu_dlights);
+
+#undef RPROF_CPU_BEGIN
+#undef RPROF_CPU_END
 }
 
 
@@ -3130,6 +3168,7 @@ static GLuint	rprof_queries[RPROF_COUNT + 1];
 static qboolean	rprof_pending;		/* results from previous frame waiting */
 static qboolean	rprof_available;	/* queries have been allocated */
 static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
+/* sub-pass breakdown — declarations hoisted above R_RenderScene */
 static int	rprof_wpoly, rprof_epoly; /* saved from previous frame */
 
 static void R_ProfileInit (void)
@@ -3171,10 +3210,28 @@ static void R_ProfileReport (void)
 	total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
 
 	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
+		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f  glows %.1f  dlt %.1f\n"
+		   "  draw: bsp %.1f  lmup %.1f  gcull %.1f  chains %.1f (sky-stencil %.1f)\n"
+		   "  chains: fast=%d imm=%d slow=%d skypolys=%d\n"
 		   "  %4i wpoly  %4i epoly\n",
 		   total, rprof_cpu_world * 1000.0,
 		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
 		   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR],
+		   rprof_cpu_marklv * 1000.0,
+		   rprof_cpu_drawworld * 1000.0,
+		   rprof_cpu_sky * 1000.0,
+		   rprof_cpu_ents * 1000.0,
+		   rprof_cpu_glows * 1000.0,
+		   rprof_cpu_dlights * 1000.0,
+		   rprof_cpu_bsp * 1000.0,
+		   rprof_cpu_lmupload * 1000.0,
+		   rprof_cpu_gpucull * 1000.0,
+		   rprof_cpu_chains * 1000.0,
+		   rprof_cpu_chains_skystencil * 1000.0,
+		   rprof_chains_n_fast,
+		   rprof_chains_n_imm,
+		   rprof_chains_n_slow,
+		   rprof_chains_n_skypoly,
 		   rprof_wpoly, rprof_epoly);
 
 	rprof_pending = false;
