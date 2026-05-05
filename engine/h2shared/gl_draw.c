@@ -1608,9 +1608,12 @@ void GL_SetCanvas (canvastype newcanvas)
 		s = q_min (s, (float)glheight / 200.0f);
 		w = (int)(320.0f * s);
 		h = (int)(200.0f * s);
-		/* viewport centered on screen */
+		/* Anchor canvas top-left to screen top, horizontally centered.
+		 * Matches legacy menu behavior where logical y=0 sits at the
+		 * top of the screen and y grows downward. In GL viewport coords
+		 * (origin bottom-left), top-anchor = gly+glheight-h. */
 		glViewport_fp (glx + (glwidth - w) / 2,
-			       gly + (glheight - h) / 2, w, h);
+			       gly + glheight - h, w, h);
 		GL_Ortho (0, 320, 200, 0, -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
