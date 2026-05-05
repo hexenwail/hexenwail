@@ -1603,18 +1603,19 @@ void GL_SetCanvas (canvastype newcanvas)
 		break;
 	case CANVAS_MENU:
 		s = SCR_CalcUIScale (&scr_menuscale);
-		/* clamp so the canvas fits the screen */
+		/* Clamp horizontally so the 320-wide canvas fits the screen. */
 		s = q_min (s, (float)glwidth / 320.0f);
-		s = q_min (s, (float)glheight / 200.0f);
 		w = (int)(320.0f * s);
-		h = (int)(200.0f * s);
-		/* Anchor canvas top-left to screen top, horizontally centered.
-		 * Matches legacy menu behavior where logical y=0 sits at the
-		 * top of the screen and y grows downward. In GL viewport coords
-		 * (origin bottom-left), top-anchor = gly+glheight-h. */
-		glViewport_fp (glx + (glwidth - w) / 2,
-			       gly + glheight - h, w, h);
-		GL_Ortho (0, 320, 200, 0, -99999, 99999);
+		/* Canvas fills the screen vertically — same convention as the
+		 * pre-canvas menu (logical y maps 1:1 onto pixel y at scale=1,
+		 * grows with scale). Logical height = glheight / s so items
+		 * at any y < glheight/s stay visible.
+		 *
+		 * Horizontally centered. In GL viewport coords (origin bottom-
+		 * left) the canvas covers the full screen height. */
+		h = glheight;
+		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
+		GL_Ortho (0, 320, (float)glheight / s, 0, -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
 		s = SCR_CalcUIScale (&scr_crosshairscale);
