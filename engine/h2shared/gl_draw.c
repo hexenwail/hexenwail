@@ -1572,11 +1572,13 @@ void GL_SetCanvas (canvastype newcanvas)
 		h = (int)((float)(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H) * s);
 		/* viewport anchored to the bottom of the screen, centered horizontally */
 		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
-		/* logical y: 0 is top of main bar, +SBAR_CANVAS_TOP_H is screen bottom
-		   when fully extended, negative reaches up into bumps and (further up)
-		   into the lower info bar shown via +showinfo. */
-		GL_Ortho (0, SBAR_CANVAS_W, SBAR_CANVAS_TOP_H,
-			  -(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_BOT_H), -99999, 99999);
+		/* logical y: [0, total_h]. y=0 is the top of the canvas (top of bumps
+		   when the lower info bar is fully extended), y=total_h is the screen
+		   bottom. All-positive coords keep Draw_PicCropped's "y < 0 means
+		   off-screen-top" cropping path from triggering on the top bumps. */
+		GL_Ortho (0, SBAR_CANVAS_W,
+			  SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H,
+			  0, -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
 		s = SCR_CalcUIScale (&scr_crosshairscale);
