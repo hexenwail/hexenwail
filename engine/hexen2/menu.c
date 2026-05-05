@@ -2496,6 +2496,8 @@ enum
 	REND_FLASHINTENSITY,
 	REND_FXAA,
 	REND_MOTIONBLUR,
+	REND_HDR,
+	REND_HDR_EXPOSURE,
 	REND_ITEMS
 };
 
@@ -2623,6 +2625,17 @@ static void M_Rendering_AdjustSliders (int dir)
 		Cvar_SetValue ("r_motionblur", f);
 		break;
 	}
+	case REND_HDR:
+		Cvar_SetValue ("r_hdr", r_hdr.integer ? 0 : 1);
+		break;
+	case REND_HDR_EXPOSURE:
+	{
+		float f = r_hdr_exposure.value + dir * 0.1f;
+		if (f < 0.1f) f = 0.1f;
+		if (f > 4.0f) f = 4.0f;
+		Cvar_SetValue ("r_hdr_exposure", f);
+		break;
+	}
 	}
 }
 
@@ -2719,6 +2732,17 @@ static void M_Rendering_Draw (void)
 		else
 			M_DrawSliderValue (220, 92 + 8*REND_MOTIONBLUR, mb, "%.0f%%", mb * 100);
 	}
+
+	M_Print (76, 92 + 8*REND_HDR,		"HDR Tonemap   :");
+	M_DrawCheckbox (220, 92 + 8*REND_HDR, r_hdr.integer);
+
+	M_Print (76, 92 + 8*REND_HDR_EXPOSURE,	"HDR Exposure  :");
+	if (!r_hdr.integer)
+		M_PrintWhite (220, 92 + 8*REND_HDR_EXPOSURE, "(HDR off)");
+	else
+		M_DrawSliderValue (220, 92 + 8*REND_HDR_EXPOSURE,
+			(r_hdr_exposure.value - 0.1f) / 3.9f,
+			"%.2f", r_hdr_exposure.value);
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, REND_ITEMS); if (h >= 0) rendering_cursor = h; }
 	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
