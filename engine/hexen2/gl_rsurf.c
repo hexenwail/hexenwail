@@ -1144,7 +1144,12 @@ static void DrawTextureChains (entity_t *e)
 
 	/* Sky depth+stencil pre-pass: write sky surface polys to depth buffer
 	 * (occludes geometry behind sky walls) and mark stencil=1 so skybox
-	 * only draws in sky areas. */
+	 * only draws in sky areas.
+	 *
+	 * All visible sky fan polys are triangulated into one (or few) batched
+	 * GL_TRIANGLES draws — the per-poly GL_POLYGON path was costing ~10ms
+	 * on big maps because each fan triggered its own glBufferData +
+	 * glUseProgram + draw call (driver round-trip per poly). */
 	if (have_stencil && skytexturenum >= 0 &&
 	    skytexturenum < cl.worldmodel->numtextures &&
 	    cl.worldmodel->textures[skytexturenum] &&
@@ -1157,6 +1162,7 @@ static void DrawTextureChains (entity_t *e)
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
 		glDepthMask_fp(1);	/* ensure depth writes are on */
 		glColorMask_fp(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		GL_ImmBegin();
 		for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
 		     sky; sky = sky->texturechain)
 		{
@@ -1164,13 +1170,24 @@ static void DrawTextureChains (entity_t *e)
 			for (p = sky->polys; p; p = p->next)
 			{
 				int j;
-				GL_ImmBegin();
-				for (j = 0; j < p->numverts; j++)
+				if (p->numverts < 3)
+					continue;
+				if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+				{
+					GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
+					GL_ImmBegin();
+				}
+				/* fan -> triangles: (0, j-1, j) */
+				for (j = 2; j < p->numverts; j++)
+				{
+					GL_ImmVertex3f(p->verts[0][0], p->verts[0][1], p->verts[0][2]);
+					GL_ImmVertex3f(p->verts[j-1][0], p->verts[j-1][1], p->verts[j-1][2]);
 					GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
-				GL_ImmEnd(GL_POLYGON, &gl_shader_flat);
+				}
 				if (e == &r_worldentity) rprof_chains_n_skypoly++;
 			}
 		}
+		GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
 		glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		/* Leave stencil test ON: any world geometry that draws
 		 * closer than the sky surface resets stencil to 0,
