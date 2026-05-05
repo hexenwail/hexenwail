@@ -843,6 +843,9 @@ void Sbar_DeathmatchOverlay(void)
 	if (scr_viewsize.integer < 100)
 		scr_fullupdate = 0;
 
+	/* Full-screen scoreboard, not part of CANVAS_SBAR. */
+	GL_SetCanvas (CANVAS_DEFAULT);
+
 	pic = Draw_CachePic ("gfx/menu/title8.lmp");
 	M_DrawTransPic ((320-pic->width)/2, 0, pic);
 
@@ -914,6 +917,9 @@ static void Sbar_PuzzlePieceOverlay(void)
 	if (scr_viewsize.integer < 100)
 		scr_fullupdate = 0;
 
+	/* Full-screen overlay using menu coords, not CANVAS_SBAR. */
+	GL_SetCanvas (CANVAS_DEFAULT);
+
 	piece = 0;
 	y = 40;
 	for (i = 0; i < 8; i++)
@@ -971,6 +977,9 @@ static void Sbar_SmallDeathmatchOverlay(void)
 	scr_copyeverything = 1;
 	if (scr_viewsize.integer < 100)
 		scr_fullupdate = 0;
+
+	/* Frag list drawn in screen-relative coords. */
+	GL_SetCanvas (CANVAS_DEFAULT);
 
 	// scores
 	Sbar_SortFrags ();
@@ -1053,6 +1062,9 @@ static void DrawActiveRings(void)
 	if (scr_con_current == vid.height)
 		return;		// console is full screen
 
+	/* Right-edge HUD overlay drawn in screen-relative coords. */
+	GL_SetCanvas (CANVAS_DEFAULT);
+
 	ring_row = 1;
 
 	flag = (int)cl.v.rings_active;
@@ -1106,6 +1118,9 @@ static void DrawActiveArtifacts(void)
 
 	if (scr_con_current == vid.height)
 		return;
+
+	/* Right-edge HUD overlay drawn in screen-relative coords. */
+	GL_SetCanvas (CANVAS_DEFAULT);
 
 	art_col = 50;
 
@@ -1835,40 +1850,51 @@ void SB_ViewSizeChanged(void)
 //==========================================================================
 //
 // Sbar_Draw**Pic
-// Relative to the current status bar location.
+// Relative to the current status bar location. Each helper switches to
+// CANVAS_SBAR (Ironwail-parity scaling) and translates the caller's
+// sbar-relative y by (BAR_TOP_HEIGHT - BarHeight) so the slide animation
+// and lower-info-bar extension still work without touching call sites.
 //
 //==========================================================================
 
+#define SBAR_Y(y)	((y) + (int)(BAR_TOP_HEIGHT - BarHeight))
+
 static void Sbar_DrawPic(int x, int y, qpic_t *pic)
 {
-	Draw_PicCropped (x+((vid.width-320)>>1), y+(vid.height-(int)BarHeight), pic);
+	GL_SetCanvas (CANVAS_SBAR);
+	Draw_PicCropped (x, SBAR_Y(y), pic);
 }
 
 static void Sbar_DrawTransPic(int x, int y, qpic_t *pic)
 {
-	Draw_TransPicCropped (x+((vid.width-320)>>1), y+(vid.height-(int)BarHeight), pic);
+	GL_SetCanvas (CANVAS_SBAR);
+	Draw_TransPicCropped (x, SBAR_Y(y), pic);
 }
 
 #if 0	/* no callers */
 static void Sbar_DrawCharacter(int x, int y, int num)
 {
-	Draw_Character (x+((vid.width-320)>>1)+4, y+vid.height-(int)BarHeight, num);
+	GL_SetCanvas (CANVAS_SBAR);
+	Draw_Character (x + 4, SBAR_Y(y), num);
 }
 
 static void Sbar_DrawString(int x, int y, const char *str)
 {
-	Draw_String (x+((vid.width-320)>>1), y+vid.height-(int)BarHeight, str);
+	GL_SetCanvas (CANVAS_SBAR);
+	Draw_String (x, SBAR_Y(y), str);
 }
 
 static void Sbar_DrawSmallCharacter(int x, int y, int num)
 {
-	Draw_SmallCharacter (x+((vid.width-320)>>1)+4, y+vid.height-(int)BarHeight, num);
+	GL_SetCanvas (CANVAS_SBAR);
+	Draw_SmallCharacter (x + 4, SBAR_Y(y), num);
 }
 #endif
 
 static void Sbar_DrawSmallString(int x, int y, const char *str)
 {
-	Draw_SmallString (x+((vid.width-320)>>1), y+vid.height-(int)BarHeight, str);
+	GL_SetCanvas (CANVAS_SBAR);
+	Draw_SmallString (x, SBAR_Y(y), str);
 }
 
 static void DrawBarArtifactNumber(int x, int y, int number)

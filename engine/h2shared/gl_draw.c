@@ -60,7 +60,16 @@ static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
 cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
 
 /* 0 = auto (1x at 480p, 2x at 960p, ...). Non-zero overrides. */
-cvar_t	scr_crosshairscale = {"scr_crosshairscale", "0", CVAR_ARCHIVE};
+cvar_t	scr_sbarscale       = {"scr_sbarscale",       "0", CVAR_ARCHIVE};
+cvar_t	scr_crosshairscale  = {"scr_crosshairscale",  "0", CVAR_ARCHIVE};
+
+/* Hexen II statusbar logical dimensions (see sbar.c).
+   The CANVAS_SBAR canvas reserves room for the top bumps above the
+   main bar and for the lower info bar that drops down on showinfo. */
+#define SBAR_CANVAS_W		320
+#define SBAR_CANVAS_TOP_H	46		/* main bar height (BAR_TOP_HEIGHT) */
+#define SBAR_CANVAS_BUMP_H	23		/* bumps above the main bar */
+#define SBAR_CANVAS_BOT_H	98		/* lower bar height (BAR_BOTTOM_HEIGHT) */
 
 static GLuint		menuplyr_textures[MAX_PLAYER_CLASS];	// player textures in multiplayer config screens
 static GLuint		draw_backtile;
@@ -606,6 +615,7 @@ void Draw_Init (void)
 		gl_texturemode.string = gl_texmodes[gl_filter_idx].name;
 		Cvar_RegisterVariable (&gl_texturemode);
 		Cvar_RegisterVariable (&gl_texture_anisotropy);
+		Cvar_RegisterVariable (&scr_sbarscale);
 		Cvar_RegisterVariable (&scr_crosshairscale);
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
 		Cvar_SetCallback (&gl_texture_anisotropy, Draw_Anisotropy_f);
@@ -1553,6 +1563,20 @@ void GL_SetCanvas (canvastype newcanvas)
 	case CANVAS_DEFAULT:
 		glViewport_fp (glx, gly, glwidth, glheight);
 		GL_Ortho (0, vid.width, vid.height, 0, -99999, 99999);
+		break;
+	case CANVAS_SBAR:
+		s = SCR_CalcUIScale (&scr_sbarscale);
+		/* clamp so the canvas always fits horizontally */
+		s = q_min (s, (float)glwidth / (float)SBAR_CANVAS_W);
+		w = (int)((float)SBAR_CANVAS_W * s);
+		h = (int)((float)(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H) * s);
+		/* viewport anchored to the bottom of the screen, centered horizontally */
+		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
+		/* logical y: 0 is top of main bar, +SBAR_CANVAS_TOP_H is screen bottom
+		   when fully extended, negative reaches up into bumps and (further up)
+		   into the lower info bar shown via +showinfo. */
+		GL_Ortho (0, SBAR_CANVAS_W, SBAR_CANVAS_TOP_H,
+			  -(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_BOT_H), -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
 		s = SCR_CalcUIScale (&scr_crosshairscale);
