@@ -2762,6 +2762,10 @@ static void M_Rendering_Key (int k)
 enum
 {
 	GFX_CENTERPRINTBG = 0,
+	GFX_HUDSCALE,
+	GFX_CROSSHAIRSCALE,
+	GFX_CONALPHA,
+	GFX_CONBRIGHT,
 	GFX_ITEMS
 };
 
@@ -2788,18 +2792,78 @@ static void M_Graphics_AdjustSliders (int dir)
 		Cvar_SetValue ("scr_centerprintbg", val);
 		break;
 	}
+	case GFX_HUDSCALE:
+	{
+		int val = (int)scr_sbarscale.value + dir;
+		if (val < 0) val = 4;
+		if (val > 4) val = 0;
+		Cvar_SetValue ("scr_sbarscale", val);
+		break;
+	}
+	case GFX_CROSSHAIRSCALE:
+	{
+		int val = (int)scr_crosshairscale.value + dir;
+		if (val < 0) val = 4;
+		if (val > 4) val = 0;
+		Cvar_SetValue ("scr_crosshairscale", val);
+		break;
+	}
+	case GFX_CONALPHA:
+	{
+		float v = scr_conalpha.value + dir * 0.1f;
+		if (v < 0.0f) v = 0.0f;
+		if (v > 1.0f) v = 1.0f;
+		Cvar_SetValue ("scr_conalpha", v);
+		break;
+	}
+	case GFX_CONBRIGHT:
+	{
+		float v = scr_conbrightness.value + dir * 0.1f;
+		if (v < 0.0f) v = 0.0f;
+		if (v > 2.0f) v = 2.0f;
+		Cvar_SetValue ("scr_conbrightness", v);
+		break;
+	}
 	}
 }
 
 static void M_Graphics_Draw (void)
 {
 	ScrollTitle("gfx/menu/title3.lmp");
-	M_PrintWhite (96, 72, "Misc");
+	M_PrintWhite (96, 72, "Misc / HUD");
 
 	M_Print (76, 92 + 8*GFX_CENTERPRINTBG,	"Message Backdrop:");
 	M_PrintWhite (220, 92 + 8*GFX_CENTERPRINTBG,
 		scr_centerprintbg.integer == 2 ? "Menu Box" :
 		scr_centerprintbg.integer == 1 ? "Simple" : "Off");
+
+	M_Print (76, 92 + 8*GFX_HUDSCALE,	"HUD Scale       :");
+	if ((int)scr_sbarscale.value == 0)
+		M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, "Auto");
+	else
+	{
+		char buf[8];
+		snprintf(buf, sizeof(buf), "%dx", (int)scr_sbarscale.value);
+		M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, buf);
+	}
+
+	M_Print (76, 92 + 8*GFX_CROSSHAIRSCALE,	"Crosshair Scale :");
+	if ((int)scr_crosshairscale.value == 0)
+		M_PrintWhite (220, 92 + 8*GFX_CROSSHAIRSCALE, "Auto");
+	else
+	{
+		char buf[8];
+		snprintf(buf, sizeof(buf), "%dx", (int)scr_crosshairscale.value);
+		M_PrintWhite (220, 92 + 8*GFX_CROSSHAIRSCALE, buf);
+	}
+
+	M_Print (76, 92 + 8*GFX_CONALPHA,	"Console Alpha   :");
+	M_DrawSliderValue (220, 92 + 8*GFX_CONALPHA,
+		scr_conalpha.value, "%.2f", scr_conalpha.value);
+
+	M_Print (76, 92 + 8*GFX_CONBRIGHT,	"Console Bright  :");
+	M_DrawSliderValue (220, 92 + 8*GFX_CONBRIGHT,
+		scr_conbrightness.value * 0.5f, "%.2f", scr_conbrightness.value);
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
 	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
