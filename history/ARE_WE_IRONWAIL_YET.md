@@ -13,16 +13,16 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
-| Rendering — Visual/Shading | 17 | 2 | 3 | 0 |
+| Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
 | UX / Menus / HUD | 15 | 1 | 6 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **51** | **5** | **20** | **8** |
+| **TOTAL** | **51** | **6** | **19** | **8** |
 
-**Parity: 67% ported, 7% partial, 26% missing** (excluding N/A)
+**Parity: 67% ported, 8% partial, 25% missing** (excluding N/A)
 
 ---
 
@@ -65,7 +65,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
 | Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported. |
-| Bounding box debug visualization | ❌ | `r_showbboxes` with filter modes (`r_showbboxes_think`, `r_showbboxes_health`, etc.) |
+| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 wired (gl_rmain.c:3056). Ironwail's filter sub-cvars (`r_showbboxes_think`, `_health`, etc.) not ported — easy to add when needed. |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 |
 | LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level |
 | Entity alpha radix sort | 🔶 | `r_alphasort` cvar is wired and uses `qsort` (gl_rmain.c:2097). Ironwail's radix sort would be faster but the count is small (≤dozens of translucent entities per frame) — qsort is microseconds either way. |
