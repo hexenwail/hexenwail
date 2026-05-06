@@ -90,6 +90,15 @@ void Draw_SmallString (int x, int y, const char *str);
 void Draw_RedString (int x, int y, const char *str);
 void Draw_BigCharacter (int x, int y, int num);
 
+#if defined(GLQUAKE)
+/* Flush any pending batched glyph quads. Called automatically by every
+ * other Draw_* function and at the 2D-phase boundary; rarely needed
+ * directly. */
+void Draw_FlushCharBatch (void);
+#else
+#define Draw_FlushCharBatch()
+#endif
+
 /* game/engine name to draw on the console */
 #define GAME_MOD_NAME		ENGINE_NAME
 #define ENGINE_WATERMARK	GAME_MOD_NAME " " HW_VERSION " (" PLATFORM_STRING ")"

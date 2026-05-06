@@ -19,6 +19,7 @@
 #include "gl_matrix.h"
 #include "gl_shader.h"
 #include "gl_vbo.h"
+#include "draw.h"
 
 /* GL defines that may be missing on some platforms (MinGW, ES3) */
 #ifndef GL_RGBA16F
@@ -1226,6 +1227,9 @@ void GL_PostProcess_EndFrame (void)
 {
 	GLuint blit_tex;
 	int blit_w, blit_h;
+
+	/* Drain any pending HUD glyph quads before we touch FBOs and shaders. */
+	Draw_FlushCharBatch ();
 
 	if (!pp_active)
 		return;
