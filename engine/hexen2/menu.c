@@ -2824,6 +2824,8 @@ enum
 	GFX_COLORED_LM,
 	GFX_TORCH_DLIGHT,
 	GFX_GLOW_INTENSITY,
+	GFX_SHOWSPEED,
+	GFX_SHOWCLOCK,
 	GFX_ITEMS
 };
 
@@ -2915,6 +2917,18 @@ static void M_Graphics_AdjustSliders (int dir)
 		Cvar_SetValue ("gl_glow_intensity", v);
 		break;
 	}
+	case GFX_SHOWSPEED:
+		Cvar_SetValue ("scr_showspeed",
+			Cvar_VariableValue("scr_showspeed") ? 0 : 1);
+		break;
+	case GFX_SHOWCLOCK:
+	{
+		int v = (int)Cvar_VariableValue("showclock") + dir;
+		if (v < 0) v = 3;
+		if (v > 3) v = 0;
+		Cvar_SetValue ("showclock", v);
+		break;
+	}
 	}
 }
 
@@ -2983,6 +2997,19 @@ static void M_Graphics_Draw (void)
 	M_Print (76, 92 + 8*GFX_GLOW_INTENSITY,	"Glow Intensity  :");
 	M_DrawSliderValue (220, 92 + 8*GFX_GLOW_INTENSITY,
 		gl_glow_intensity.value, "%.2f", gl_glow_intensity.value);
+
+	M_Print (76, 92 + 8*GFX_SHOWSPEED,	"Show Speed      :");
+	M_DrawCheckbox (220, 92 + 8*GFX_SHOWSPEED,
+		(int)Cvar_VariableValue("scr_showspeed"));
+
+	M_Print (76, 92 + 8*GFX_SHOWCLOCK,	"Show Clock      :");
+	{
+		int v = (int)Cvar_VariableValue("showclock");
+		M_PrintWhite (220, 92 + 8*GFX_SHOWCLOCK,
+			v == 3 ? "Wall HH:MM:SS" :
+			v == 2 ? "Wall HH:MM" :
+			v == 1 ? "Game Time" : "Off");
+	}
 
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
 	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
