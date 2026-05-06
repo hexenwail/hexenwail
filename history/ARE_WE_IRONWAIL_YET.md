@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
 | Rendering — Visual/Shading | 17 | 1 | 4 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
-| UX / Menus / HUD | 14 | 1 | 7 | 1 |
+| UX / Menus / HUD | 15 | 1 | 6 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **50** | **4** | **22** | **8** |
+| **TOTAL** | **51** | **4** | **21** | **8** |
 
-**Parity: 66% ported, 5% partial, 29% missing** (excluding N/A)
+**Parity: 67% ported, 5% partial, 28% missing** (excluding N/A)
 
 ---
 
@@ -111,7 +111,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Console max columns | ❌ | `con_maxcols` |
 | Menu search with filtering | ❌ | Live filter + match highlighting |
 | Menu live preview | ❌ | `ui_live_preview` fade-in/hold/fade-out |
-| Show speed / show time overlays | ❌ | Speed + time HUD elements |
+| Show speed / show time overlays | ✅ | `scr_showspeed`, `showclock` (4-state: off / game-time / wall HH:MM / wall HH:MM:SS); both toggleable from Misc/HUD submenu |
 | Map-editor auto-check on launch | ➖ | Ironwail commit `5a983620` (2026-05): `Sys_IsStartedFromMapEditor` detects Qrucible parent process, triggers map check. Hexenwail has no equivalent function and no TrenchBroom workflow integration. Could be ported but low priority for Hexen II mapping scene. |
 
 ## Input / Controller
