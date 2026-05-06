@@ -86,6 +86,15 @@ static GLuint		cs_texture;	// crosshair texture
 static GLuint		char_smalltexture;
 static GLuint		char_menufonttexture;
 
+/* Glyph batcher: consecutive Draw_*Character calls with the same font
+ * texture (and identical state — color, no blend toggle, same canvas)
+ * accumulate quads in the GL_Imm buffer and flush as a single draw. A
+ * full HUD frame can issue 100+ glyphs; immediate-mode emitted one
+ * draw per glyph, which dominated 2D cost on the GL 4.3 pipeline. */
+#define MAX_CHAR_BATCH_QUADS	((GL_IMM_MAX_VERTS / 4) - 2)
+static int		char_batch_count;
+static GLuint		char_batch_tex;
+
 // Crosshair texture is a 32x32 alpha map with 8 levels of alpha.
 // The format is similar to an X11 pixmap, but not the same.
 // 7 is 100% solid, 0 and any other characters are transparent.
@@ -709,6 +718,51 @@ void Draw_Init (void)
 
 /*
 ================
+Draw_FlushCharBatch
+
+Emit any pending glyph quads as a single draw. Called automatically by
+every non-glyph Draw_* function, by GL_SetCanvas, and at the 2D-phase
+boundary in GL_PostProcess_EndFrame.
+================
+*/
+void Draw_FlushCharBatch (void)
+{
+	if (char_batch_count == 0)
+		return;
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	char_batch_count = 0;
+	char_batch_tex = 0;
+}
+
+/* Append one glyph quad to the batch. (Re)binds the font texture and
+ * starts a new batch on texture change or buffer-fill. */
+static void Draw_AddCharQuad (GLuint tex, int x, int y, int w, int h,
+			      float fcol, float frow, float xsize, float ysize)
+{
+	if (char_batch_tex != tex || char_batch_count >= MAX_CHAR_BATCH_QUADS)
+	{
+		Draw_FlushCharBatch ();
+		GL_Bind (tex);
+		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		GL_ImmBegin ();
+		char_batch_tex = tex;
+	}
+
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (fcol, frow);
+	GL_ImmVertex2f (x, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow);
+	GL_ImmVertex2f (x + w, y);
+	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
+	GL_ImmVertex2f (x + w, y + h);
+	GL_ImmTexCoord2f (fcol, frow + ysize);
+	GL_ImmVertex2f (x, y + h);
+	char_batch_count++;
+}
+
+/*
+================
 Draw_Character
 
 Draws one 8*8 graphics character with 0 being transparent.
@@ -737,21 +791,7 @@ void Draw_Character (int x, int y, unsigned int num)
 	fcol = col*xsize;
 	frow = row*ysize;
 
-	GL_Bind (char_texture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, 1);
-	GL_ImmTexCoord2f (fcol, frow);
-	GL_ImmVertex2f (x, y);
-	GL_ImmTexCoord2f (fcol + xsize, frow);
-	GL_ImmVertex2f (x+8, y);
-	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
-	GL_ImmVertex2f (x+8, y+8);
-	GL_ImmTexCoord2f (fcol, frow + ysize);
-	GL_ImmVertex2f (x, y+8);
-	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	Draw_AddCharQuad (char_texture, x, y, 8, 8, fcol, frow, xsize, ysize);
 }
 
 /*
@@ -886,21 +926,7 @@ void Draw_SmallCharacter (int x, int y, int num)
 	fcol = col*xsize;
 	frow = row*ysize;
 
-	GL_Bind (char_smalltexture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, 1);
-	GL_ImmTexCoord2f (fcol, frow);
-	GL_ImmVertex2f (x, y);
-	GL_ImmTexCoord2f (fcol + xsize, frow);
-	GL_ImmVertex2f (x+8, y);
-	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
-	GL_ImmVertex2f (x+8, y+8);
-	GL_ImmTexCoord2f (fcol, frow + ysize);
-	GL_ImmVertex2f (x, y+8);
-	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	Draw_AddCharQuad (char_smalltexture, x, y, 8, 8, fcol, frow, xsize, ysize);
 }
 
 //==========================================================================
@@ -938,21 +964,7 @@ void Draw_BigCharacter (int x, int y, int num)
 	fcol = col*xsize;
 	frow = row*ysize;
 
-	GL_Bind (char_menufonttexture);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, 1);
-	GL_ImmTexCoord2f (fcol, frow);
-	GL_ImmVertex2f (x, y);
-	GL_ImmTexCoord2f (fcol + xsize, frow);
-	GL_ImmVertex2f (x+20, y);
-	GL_ImmTexCoord2f (fcol + xsize, frow + ysize);
-	GL_ImmVertex2f (x+20, y+20);
-	GL_ImmTexCoord2f (fcol, frow + ysize);
-	GL_ImmVertex2f (x, y+20);
-	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	Draw_AddCharQuad (char_menufonttexture, x, y, 20, 20, fcol, frow, xsize, ysize);
 }
 
 
@@ -965,6 +977,7 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	glpic_t			*gl;
 
+	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
 	GL_Bind (gl->texnum);
 
@@ -996,6 +1009,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 {
 	glpic_t			*gl;
 
+	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
 	glEnable_fp (GL_BLEND);
 	glCullFace_fp(GL_FRONT);
@@ -1090,6 +1104,7 @@ void Draw_IntermissionPic (qpic_t *pic)
 {
 	glpic_t			*gl;
 
+	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
 	GL_Bind (gl->texnum);
 
@@ -1120,6 +1135,7 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	float	newsl, newtl, newsh, newth;
 	float	oldglwidth, oldglheight;
 
+	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
 
 	oldglwidth = gl->sh - gl->sl;
@@ -1166,6 +1182,7 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 	if (y >= vid.height || y+pic->height < 0)
 		return;		// totally off screen
 
+	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
 
 	// rjr	tl/th need to be computed based upon pic->tl and pic->th
@@ -1226,6 +1243,7 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 	if (y >= vid.height || y+h < 0)
 		return;		// totally off screen
 
+	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
 
 	// rjr	tl/th need to be computed based upon pic->tl and pic->th
@@ -1315,6 +1333,7 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 	byte		*src;
 	int		p;
 
+	Draw_FlushCharBatch ();
 	GL_Bind(menuplyr_textures[p_class-1]);
 	dest = trans;
 	for (v = 0; v < 64; v++, dest += 64)
@@ -1373,6 +1392,7 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	if (bright < 0.0f) bright = 0.0f;
 	if (bright > 4.0f) bright = 4.0f;	/* sane upper bound */
 
+	Draw_FlushCharBatch ();
 	glEnable_fp (GL_BLEND);
 	glCullFace_fp(GL_FRONT);
 	GL_Bind (num);
@@ -1445,6 +1465,7 @@ refresh window.
 */
 void Draw_TileClear (int x, int y, int w, int h)
 {
+	Draw_FlushCharBatch ();
 	GL_Bind (draw_backtile);
 	GL_ImmBegin();
 	GL_ImmColor3f (1, 1, 1);
@@ -1469,6 +1490,7 @@ Fills a box of pixels with a single color
 */
 void Draw_Fill (int x, int y, int w, int h, int c)
 {
+	Draw_FlushCharBatch ();
 	GL_ImmBegin();
 	GL_ImmColor3f (host_basepal[c*3]/255.0,
 				host_basepal[c*3+1]/255.0,
@@ -1493,6 +1515,7 @@ void Draw_FadeScreen (void)
 	int		bx, by, ex, ey;
 	int		c;
 
+	Draw_FlushCharBatch ();
 	glEnable_fp (GL_BLEND);
 
 	GL_ImmBegin();
@@ -1574,6 +1597,11 @@ void GL_SetCanvas (canvastype newcanvas)
 
 	if (newcanvas == currentcanvas)
 		return;
+
+	/* Flush any pending glyph quads under the OLD projection before
+	 * we reload the matrices for the new canvas. */
+	Draw_FlushCharBatch ();
+
 	currentcanvas = newcanvas;
 
 	GL_MatrixMode(GL_MAT_PROJECTION);
