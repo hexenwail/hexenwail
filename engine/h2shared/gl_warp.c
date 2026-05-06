@@ -35,7 +35,6 @@
 int		skytexturenum;
 
 static GLuint	solidskytexture, alphaskytexture;
-static float	speedscale;	// for top sky and bottom sky
 
 static msurface_t	*warpface;
 
@@ -375,40 +374,6 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 		}
 
 		glDisable_fp(GL_BLEND);
-	}
-}
-
-static void EmitSkyPolys (msurface_t *fa)
-{
-	glpoly_t	*p;
-	float		*v;
-	int		i;
-	float		s, t;
-	vec3_t		dir;
-	float		length;
-
-	for (p = fa->polys ; p ; p = p->next)
-	{
-		GL_ImmBegin ();
-		for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
-		{
-			VectorSubtract (v, r_origin, dir);
-			dir[2] *= 3;	// flatten the sphere
-
-			length = dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2];
-			length = sqrt (length);
-			length = 6*63/length;
-
-			dir[0] *= length;
-			dir[1] *= length;
-
-			s = (speedscale + dir[0]) * (1.0/128);
-			t = (speedscale + dir[1]) * (1.0/128);
-
-			GL_ImmTexCoord2f (s, t);
-			GL_ImmVertex3f (v[0], v[1], v[2]);
-		}
-		GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 	}
 }
 
