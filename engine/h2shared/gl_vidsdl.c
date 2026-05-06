@@ -2146,9 +2146,8 @@ void VID_MenuInit (void)
 qboolean VID_MenuNeedApply (void)
 {
 	qboolean fs_changed = (vid_menu_fs != vid_config_fscr.integer);
-	/* exclusive fullscreen mode change or resolution change needs restart */
-	if (vid_menu_fs == 2 && vid_menunum != vid_modenum)
-		return true;
+	if (vid_menunum != vid_modenum)
+		return true;	/* any resolution change needs restart */
 	if (fs_changed && (vid_menu_fs == 2 || vid_config_fscr.integer == 2))
 		return true;	/* switching to/from exclusive needs restart */
 	if (multisample != vid_config_fsaa.integer)
