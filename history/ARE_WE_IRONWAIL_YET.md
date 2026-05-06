@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
-| UX / Menus / HUD | 15 | 1 | 6 | 1 |
+| UX / Menus / HUD | 16 | 1 | 5 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **51** | **6** | **19** | **8** |
+| **TOTAL** | **52** | **6** | **18** | **8** |
 
-**Parity: 67% ported, 8% partial, 25% missing** (excluding N/A)
+**Parity: 68% ported, 8% partial, 24% missing** (excluding N/A)
 
 ---
 
@@ -105,7 +105,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Console alpha | ✅ | `scr_conalpha` — caps `Draw_ConsoleBackground` alpha, slider in Misc/HUD submenu |
 | Console brightness | ✅ | `scr_conbrightness` — multiplies conback RGB, slider in Misc/HUD submenu |
 | Menu background style | ❌ | `scr_menubgstyle` |
-| Center-print background | ❌ | `scr_centerprintbg` — Ironwail changed default to 2 (menu box) in `df5219c` (2026-01). We have the cvar and the option in menu (`menu.c:2785`) but confirm default value matches. |
+| Center-print background | ✅ | `scr_centerprintbg` (gl_screen.c:115) with menu cycle Off / Simple / Menu Box (`menu.c:2849`). Default 0 (Ironwail uses 2 since `df5219c`); Hexenwail keeps 0 to preserve stock-faithful look. |
 | Console mouse support | ❌ | Clickable links, text selection, clipboard |
 | Console notification fade | ❌ | `con_notifyfade` |
 | Console max columns | ❌ | `con_maxcols` |
