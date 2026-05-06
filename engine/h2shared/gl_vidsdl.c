@@ -1149,6 +1149,7 @@ static void VID_ChangeVideoMode (int newmode)
 	// Shut down GPU resources before destroying GL context
 	GL_PostProcess_Shutdown();
 	R_FreeWorldVBO();
+	R_FreeWorldCull();
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
 	GL_Shaders_Shutdown();
@@ -1212,6 +1213,16 @@ static void VID_ChangeVideoMode (int newmode)
 	Mod_ReloadTextures();
 	// rebuild the lightmaps
 	GL_BuildLightmaps();
+	/* If a level is loaded, rebuild world VBO and GPU cull state — the
+	 * old GL handles died with the context. Without this, cull dispatch
+	 * fires every frame against stale buffers/programs. */
+	if (cl.worldmodel)
+	{
+		R_BuildWorldVBO ();
+#ifndef __EMSCRIPTEN__
+		R_BuildWorldCull ();
+#endif
+	}
 	// finished reloading all images
 	draw_reinit = false;
 	scr_disabled_for_loading = temp;
