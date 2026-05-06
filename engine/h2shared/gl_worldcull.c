@@ -733,6 +733,9 @@ void R_DrawWorldCulled (void)
 
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
+	/* External upload to gl_shader_world; clear GL_ImmEnd's uniform
+	 * cache so a later ImmEnd reusing the same shader uploads fresh. */
+	GL_ImmInvalidateState();
 }
 
 

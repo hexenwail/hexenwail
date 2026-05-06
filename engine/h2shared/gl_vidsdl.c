@@ -1150,6 +1150,7 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_PostProcess_Shutdown();
 	R_FreeWorldVBO();
 	R_FreeWorldCull();
+	GL_ImmInvalidateState();
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
 	GL_Shaders_Shutdown();

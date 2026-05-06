@@ -1145,6 +1145,10 @@ static void DrawTextureChains_BindWorldState (void)
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);	/* leave TU0 sticky for diffuse */
+	/* These uploads bypass GL_ImmEnd's uniform cache. If the next
+	 * GL_ImmEnd reuses gl_shader_world (e.g. fallback brush path),
+	 * its cache must miss so it re-uploads the right values. */
+	GL_ImmInvalidateState();
 }
 
 static void DrawTextureChains (entity_t *e)

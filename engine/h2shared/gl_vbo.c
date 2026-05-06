@@ -227,9 +227,42 @@ void GL_ImmVertex2f (float x, float y)
 #define GL_POLYGON 0x0009
 #endif
 
+/* Per-shader uniform cache: most HUD/2D draws share identical fog,
+ * alpha threshold, and MVP. Driver-side glUniform calls aren't free —
+ * skipping the redundant uploads cuts ~100 calls/frame on a typical
+ * scene with HUD + center print + several pic draws. The cache is
+ * invalidated when the shader changes (different uniform locations)
+ * and via GL_ImmInvalidateState() at context boundaries. */
+static const glprogram_t *imm_cache_shader;
+static float	imm_cache_mvp[16];
+static float	imm_cache_mv[16];
+static float	imm_cache_alpha = -2.0f;
+static float	imm_cache_fog_density = -1.0f;
+static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
+static float	imm_cache_time = -1.0f;
+static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
+static qboolean	imm_cache_mvp_set;
+static qboolean	imm_cache_mv_set;
+
 void GL_ImmResetState (void)
 {
 	/* no-op — kept for API compat */
+}
+
+/* Force the cache to miss on the next GL_ImmEnd. Call after any
+ * external glUseProgram / glUniform / matrix manipulation that
+ * GL_ImmEnd doesn't see, or after a vid_restart that invalidates
+ * shader handles. */
+void GL_ImmInvalidateState (void)
+{
+	imm_cache_shader = NULL;
+	imm_cache_alpha = -2.0f;
+	imm_cache_fog_density = -1.0f;
+	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
+	imm_cache_time = -1.0f;
+	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
+	imm_cache_mvp_set = false;
+	imm_cache_mv_set = false;
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -245,37 +278,81 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
 			 imm_buffer, GL_STREAM_DRAW);
 
-	/* activate shader and set MVP */
+	/* activate shader; reset uniform cache when the program changes
+	 * because uniform locations are per-program */
 	glUseProgram_fp(shader->program);
-	GL_GetMVP(mvp);
-	if (shader->u_mvp >= 0)
-		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
+	if (shader != imm_cache_shader)
+	{
+		imm_cache_shader = shader;
+		imm_cache_alpha = -2.0f;
+		imm_cache_fog_density = -1.0f;
+		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
+		imm_cache_time = -1.0f;
+		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
+		imm_cache_mvp_set = false;
+		imm_cache_mv_set = false;
+	}
 
-	/* set modelview if the shader needs it (for fog distance) */
+	GL_GetMVP(mvp);
+	if (shader->u_mvp >= 0 &&
+	    (!imm_cache_mvp_set || memcmp(mvp, imm_cache_mvp, sizeof(mvp)) != 0))
+	{
+		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
+		memcpy(imm_cache_mvp, mvp, sizeof(mvp));
+		imm_cache_mvp_set = true;
+	}
+
 	if (shader->u_modelview >= 0)
 	{
 		float mv[16];
 		GL_GetModelview(mv);
-		glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
+		if (!imm_cache_mv_set || memcmp(mv, imm_cache_mv, sizeof(mv)) != 0)
+		{
+			glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
+			memcpy(imm_cache_mv, mv, sizeof(mv));
+			imm_cache_mv_set = true;
+		}
 	}
 
-	/* override alpha threshold if set */
-	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0)
+	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0 &&
+	    imm_alpha_threshold != imm_cache_alpha)
+	{
 		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
+		imm_cache_alpha = imm_alpha_threshold;
+	}
 
-	/* set fog uniforms from globals */
-	if (shader->u_fog_density >= 0)
+	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
+	{
 		glUniform1f_fp(shader->u_fog_density, r_fog_density);
-	if (shader->u_fog_color >= 0)
+		imm_cache_fog_density = r_fog_density;
+	}
+	if (shader->u_fog_color >= 0 &&
+	    (r_fog_color[0] != imm_cache_fog_color[0] ||
+	     r_fog_color[1] != imm_cache_fog_color[1] ||
+	     r_fog_color[2] != imm_cache_fog_color[2]))
+	{
 		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		imm_cache_fog_color[0] = r_fog_color[0];
+		imm_cache_fog_color[1] = r_fog_color[1];
+		imm_cache_fog_color[2] = r_fog_color[2];
+	}
 
-	/* set time uniform for animated effects (scrolling skies, etc) */
-	if (shader->u_time >= 0)
+	if (shader->u_time >= 0 && cl.time != imm_cache_time)
+	{
 		glUniform1f_fp(shader->u_time, cl.time);
+		imm_cache_time = cl.time;
+	}
 
-	/* set eye position for sky shader direction vector computation */
-	if (shader->u_eyepos >= 0)
+	if (shader->u_eyepos >= 0 &&
+	    (r_origin[0] != imm_cache_eyepos[0] ||
+	     r_origin[1] != imm_cache_eyepos[1] ||
+	     r_origin[2] != imm_cache_eyepos[2]))
+	{
 		glUniform3f_fp(shader->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
+		imm_cache_eyepos[0] = r_origin[0];
+		imm_cache_eyepos[1] = r_origin[1];
+		imm_cache_eyepos[2] = r_origin[2];
+	}
 
 	/* draw */
 	if (mode == GL_QUADS)

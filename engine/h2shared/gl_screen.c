@@ -67,6 +67,7 @@
 #include "gl_postprocess.h"
 #include "gl_shader.h"
 #include "gl_vbo.h"
+#include "draw.h"
 #if !defined(SERVERONLY) && !defined(H2W)
 #include "cl_csqc.h"
 #endif
@@ -294,6 +295,7 @@ static void SCR_DrawCenterString (void)
 		int bg_w = 38 * 8 + pad * 2;
 		int bg_x = (vid.width - bg_w) / 2;
 
+		Draw_FlushCharBatch();	/* GL_ImmBegin reuses the imm buffer; flush queued glyphs first */
 		glEnable_fp(GL_BLEND);
 		GL_ImmBegin();
 		GL_ImmColor4f(0.0f, 0.0f, 0.0f, 0.5f);

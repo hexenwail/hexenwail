@@ -735,7 +735,9 @@ void Draw_FlushCharBatch (void)
 }
 
 /* Append one glyph quad to the batch. (Re)binds the font texture and
- * starts a new batch on texture change or buffer-fill. */
+ * starts a new batch on texture change or buffer-fill. Font textures
+ * have CLAMP_TO_EDGE set once at Draw_Init and nothing else mutates
+ * their wrap state, so we don't need to re-set it here. */
 static void Draw_AddCharQuad (GLuint tex, int x, int y, int w, int h,
 			      float fcol, float frow, float xsize, float ysize)
 {
@@ -743,8 +745,6 @@ static void Draw_AddCharQuad (GLuint tex, int x, int y, int w, int h,
 	{
 		Draw_FlushCharBatch ();
 		GL_Bind (tex);
-		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		GL_ImmBegin ();
 		char_batch_tex = tex;
 	}
