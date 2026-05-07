@@ -1545,18 +1545,28 @@ void SCR_UpdateScreen (void)
 #endif	/* H2W */
 	else
 	{
-		if (crosshair.integer && !cls.demoplayback)
-			Draw_Crosshair();
+		/* In-game HUD overlays (crosshair, net/ram/turtle/pause icons,
+		 * status bar) only make sense when a world is actually loaded.
+		 * Skipping them when we're sitting at the main menu pre-game
+		 * stops the disconnect-net icon from drawing on top of the
+		 * menu backdrop. */
+		qboolean have_world = (cl.worldmodel && cls.signon == SIGNONS);
 
-		SCR_DrawRam();
-		SCR_DrawNet();
-		SCR_DrawTurtle();
-		SCR_DrawPause();
-		SCR_CheckDrawCenterString();
+		if (have_world)
+		{
+			if (crosshair.integer && !cls.demoplayback)
+				Draw_Crosshair();
+
+			SCR_DrawRam();
+			SCR_DrawNet();
+			SCR_DrawTurtle();
+			SCR_DrawPause();
+			SCR_CheckDrawCenterString();
 #if !defined(SERVERONLY) && !defined(H2W)
-		if (!CSQC_DrawHud ())
+			if (!CSQC_DrawHud ())
 #endif
-			Sbar_Draw();
+				Sbar_Draw();
+		}
 		GL_SetCanvas (CANVAS_DEFAULT);
 		SCR_DrawFPS();
 		SCR_DrawClock();

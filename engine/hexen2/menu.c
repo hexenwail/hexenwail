@@ -6084,12 +6084,22 @@ void M_Draw (void)
 	{
 		scr_copyeverything = 1;
 
-		/* skip the amber fade in display menus so
-		 * settings preview against a clean game view */
-		if (m_state != m_display && m_state != m_video
-		    && m_state != m_rendering && m_state != m_graphics
-		    && Cvar_VariableValue("scr_menufade"))
+		if (!cl.worldmodel || cls.signon != SIGNONS)
+		{
+			/* No demo or game running — paint the conback as the
+			 * Hexen II splash backdrop. SCR_DrawConsole still skips
+			 * its half so we don't see the console text overlay. */
+			Draw_ConsoleBackground (vid.height);
+		}
+		else if (m_state != m_display && m_state != m_video
+		         && m_state != m_rendering && m_state != m_graphics
+		         && Cvar_VariableValue("scr_menufade"))
+		{
+			/* Demo/game world is behind — dim it with the amber fade.
+			 * Display submenus skip the fade so settings preview
+			 * against a clean game view. */
 			Draw_FadeScreen ();
+		}
 		if (scr_viewsize.integer < 110)
 			scr_fullupdate = 0;
 	}
