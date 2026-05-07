@@ -262,8 +262,6 @@ void Sbar_Draw(void)
 		BarHeight += delta;
 		if (BarHeight > BarTargetHeight)
 			BarHeight = BarTargetHeight;
-		if (scr_viewsize.integer < 100)
-			scr_fullupdate = 0;
 	}
 	else if (BarHeight > BarTargetHeight)
 	{
@@ -273,8 +271,6 @@ void Sbar_Draw(void)
 		BarHeight -= delta;
 		if (BarHeight < BarTargetHeight)
 			BarHeight = BarTargetHeight;
-		if (scr_viewsize.integer < 100)
-			scr_fullupdate = 0;
 	}
 
 	Sbar_DrawTransPic(0, -23, Draw_CachePic("gfx/topbumpl.lmp"));
@@ -840,8 +836,6 @@ void Sbar_DeathmatchOverlay(void)
 	scoreboard_t	*s;
 
 	scr_copyeverything = 1;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
 
 	/* Full-screen scoreboard, not part of CANVAS_SBAR. */
 	GL_SetCanvas (CANVAS_DEFAULT);
@@ -914,8 +908,6 @@ static void Sbar_PuzzlePieceOverlay(void)
 	char		Name[40];
 
 	scr_copyeverything = 1;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
 
 	/* Full-screen overlay using menu coords, not CANVAS_SBAR. */
 	GL_SetCanvas (CANVAS_DEFAULT);
@@ -975,8 +967,6 @@ static void Sbar_SmallDeathmatchOverlay(void)
 		trans_level = 0;
 
 	scr_copyeverything = 1;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
 
 	/* Frag list drawn in screen-relative coords. */
 	GL_SetCanvas (CANVAS_DEFAULT);
@@ -1167,8 +1157,7 @@ static void DrawActiveArtifacts(void)
 		scr_topupdate = 0;
 	}
 
-	if (scr_viewsize.integer >= 100)
-		scr_topupdate = vid.numpages;
+	scr_topupdate = vid.numpages;
 
 	oldflags = flag;
 }
@@ -1192,8 +1181,6 @@ void Inv_Update(qboolean force)
 
 		if (!force)
 		{
-			if (scr_viewsize.integer < 100)
-				scr_fullupdate = 0;
 			inv_flg = false;	// Toggle menu off
 		}
 
@@ -1417,9 +1404,6 @@ static void InvLeft_f(void)
 		{
 			cl.inv_selected = (cl.inv_selected - 1 + cl.inv_count) % cl.inv_count;
 		}
-
-		if (scr_viewsize.integer < 100)
-			scr_fullupdate = 0;
 	}
 	else
 	{
@@ -1454,9 +1438,6 @@ static void InvRight_f(void)
 			cl.inv_startpos = (cl.inv_startpos + 1) % cl.inv_count;
 
 		cl.inv_selected = (cl.inv_selected + 1) % cl.inv_count;
-
-		if (scr_viewsize.integer < 100)
-			scr_fullupdate = 0;
 	}
 	else
 	{
@@ -1480,8 +1461,6 @@ static void InvUse_f(void)
 	//Inv_Update(false);
 	Inv_Update(true);
 	inv_flg = false;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
 	in_impulse = 23;
 }
 
@@ -1494,8 +1473,6 @@ static void InvUse_f(void)
 static void InvOff_f(void)
 {
 	inv_flg = false;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
 }
 
 //==========================================================================
@@ -1828,8 +1805,6 @@ void SB_InvReset(void)
 	cl.inv_count = cl.inv_startpos = 0;
 	cl.inv_selected = -1;
 	inv_flg = false;
-	if (scr_viewsize.integer < 100)
-		scr_fullupdate = 0;
 }
 
 //==========================================================================

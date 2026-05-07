@@ -394,9 +394,6 @@ Internal use only
 */
 static void SCR_CalcRefdef (void)
 {
-	float	size;
-	int	h;
-
 	scr_fullupdate = 0;		// force a background redraw
 
 // bound viewsize. The legacy <100 path shrunk the 3D vrect inside a
@@ -435,28 +432,15 @@ static void SCR_CalcRefdef (void)
 		sb_lines = 0;		// CSQC draws its own HUD
 #endif
 
-	size = scr_viewsize.integer > 100 ? 100.0 : scr_viewsize.integer;
 	if (cl.intermission)
-	{
-		size = 100.0;		// intermission is always full screen
-		sb_lines = 0;
-	}
-	size /= 100.0;
+		sb_lines = 0;		// intermission is always full screen
 
-	h = vid.height - sb_lines;
-	r_refdef.vrect.width = vid.width * size;
-	if (r_refdef.vrect.width < 96)
-	{
-		size = 96.0 / vid.width;
-		r_refdef.vrect.width = 96;	// min for icons
-	}
-
-	r_refdef.vrect.height = vid.height * size;
-	if (r_refdef.vrect.height > vid.height - sb_lines)
-		r_refdef.vrect.height = vid.height - sb_lines;
-
-	r_refdef.vrect.x = (vid.width - r_refdef.vrect.width)/2;
-	r_refdef.vrect.y = (h - r_refdef.vrect.height)/2;
+	/* 3D viewport always fills the screen above the HUD strip. The
+	 * legacy <100 viewsize letterbox is gone (clamped above). */
+	r_refdef.vrect.x = 0;
+	r_refdef.vrect.y = 0;
+	r_refdef.vrect.width = vid.width;
+	r_refdef.vrect.height = vid.height - sb_lines;
 
 	{
 		float fov, zoom;
