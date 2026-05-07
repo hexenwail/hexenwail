@@ -399,9 +399,13 @@ static void SCR_CalcRefdef (void)
 
 	scr_fullupdate = 0;		// force a background redraw
 
-// bound viewsize
-	if (scr_viewsize.integer < 30)
-		Cvar_SetQuick (&scr_viewsize, "30");
+// bound viewsize. The legacy <100 path shrunk the 3D vrect inside a
+// letterbox — a Pentium-era perf knob no modern Quake-family engine
+// uses. We clamp at 100 so the 3D viewport is always full-screen and
+// viewsize purely controls Hexen status-bar visibility (110+ hides
+// progressively more of the bar; see sbar.c).
+	if (scr_viewsize.integer < 100)
+		Cvar_SetQuick (&scr_viewsize, "100");
 	else if (scr_viewsize.integer > 140)
 		Cvar_SetQuick (&scr_viewsize, "140");
 
@@ -478,7 +482,9 @@ Keybinding command
 */
 static void SCR_SizeUp_f (void)
 {
-	Cvar_SetValueQuick (&scr_viewsize, scr_viewsize.integer + 10);
+	int v = scr_viewsize.integer + 10;
+	if (v > 140) v = 140;
+	Cvar_SetValueQuick (&scr_viewsize, v);
 }
 
 /*
@@ -490,7 +496,9 @@ Keybinding command
 */
 static void SCR_SizeDown_f (void)
 {
-	Cvar_SetValueQuick (&scr_viewsize, scr_viewsize.integer - 10);
+	int v = scr_viewsize.integer - 10;
+	if (v < 100) v = 100;
+	Cvar_SetValueQuick (&scr_viewsize, v);
 }
 
 static void SCR_Callback_refdef (cvar_t *var)
