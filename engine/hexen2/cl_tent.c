@@ -232,15 +232,11 @@ void CL_ParseTEnt(void)
 		dl->radius = 350;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
-#	ifdef GLQUAKE
-		if (gl_colored_dynamic_lights.integer)
-		{	// Make the dynamic light red
-			dl->color[0] = 0.8;
-			dl->color[1] = 0.2;
-			dl->color[2] = 0.2;
-			dl->color[3] = 0.7;
-		}
-#	endif
+		// Make the dynamic light red
+		dl->color[0] = 0.8;
+		dl->color[1] = 0.2;
+		dl->color[2] = 0.2;
+		dl->color[3] = 0.7;
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
 
@@ -291,8 +287,7 @@ void CL_ParseTEnt(void)
 		dl->radius = 250;
 		dl->die = cl.time + 0.5;
 		dl->decay = 300;
-#	ifdef GLQUAKE
-		if ((gl_colored_dynamic_lights.integer) && (tent->model))
+		if (tent->model)
 		{
 			float *gs;
 			R_GetPimpFlags(tent, &gs);
@@ -301,7 +296,6 @@ void CL_ParseTEnt(void)
 			dl->color[2] = gs[COLOR_B];
 			dl->color[3] = gs[COLOR_A];
 		}
-#	endif
 		break;
 	}
 

@@ -280,7 +280,6 @@ extern	cvar_t	gl_glow_intensity;
 extern	cvar_t	gl_flashintensity;
 
 extern	cvar_t	gl_coloredlight;
-extern	cvar_t	gl_colored_dynamic_lights;
 extern	cvar_t	gl_extra_dynamic_lights;
 extern	cvar_t	gl_lightmapfmt;
 
