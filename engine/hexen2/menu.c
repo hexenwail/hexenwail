@@ -2052,9 +2052,6 @@ enum
 	DISP_PRESET = 0,
 	DISP_GAMMA,
 	DISP_CONTRAST,
-#ifdef GLQUAKE
-	DISP_SCALE,
-#endif
 	DISP_SCRSIZE,
 	DISP_RENDERING,	/* enters rendering submenu */
 	DISP_GRAPHICS,		/* enters graphics/misc submenu */
@@ -2247,11 +2244,6 @@ static void M_Display_AdjustSliders (int dir)
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrast", f);
 		break;
-#ifdef GLQUAKE
-	case DISP_SCALE:
-		VID_ChangeConsize(dir);
-		break;
-#endif
 	case DISP_SCRSIZE:
 	{
 		/* cycle between Full(110), Mini(120), Off(130), Clean(140) */
@@ -2345,12 +2337,6 @@ static void M_Display_Draw (void)
 	M_Print (76, 92 + 8*DISP_CONTRAST,	"Contrast      :");
 	r = (v_contrast.value - 0.5) / 1.5;
 	M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
-
-#ifdef GLQUAKE
-	M_Print (76, 92 + 8*DISP_SCALE,	"UI Scale      :");
-	r = VID_ReportConsize();
-	M_DrawSliderValue (220, 92 + 8*DISP_SCALE, (r-1)/2, "%.2fx", r);
-#endif
 
 	M_Print (76, 92 + 8*DISP_SCRSIZE,	"HUD Layout    :");
 	if (scr_viewsize.integer >= 140)
