@@ -6084,24 +6084,14 @@ void M_Draw (void)
 	{
 		scr_copyeverything = 1;
 
-		if (scr_con_current)
-		{
-			Draw_ConsoleBackground (vid.height);
-			VID_UnlockBuffer ();
-			S_ExtraUpdate ();
-			VID_LockBuffer ();
-		}
-		else
-		{
-			/* skip the amber fade in display menus so
-			 * settings preview against a clean game view */
-			if (m_state != m_display && m_state != m_video
-			    && m_state != m_rendering && m_state != m_graphics
-			    && Cvar_VariableValue("scr_menufade"))
-				Draw_FadeScreen ();
-			if (scr_viewsize.integer < 110)
-				scr_fullupdate = 0;
-		}
+		/* skip the amber fade in display menus so
+		 * settings preview against a clean game view */
+		if (m_state != m_display && m_state != m_video
+		    && m_state != m_rendering && m_state != m_graphics
+		    && Cvar_VariableValue("scr_menufade"))
+			Draw_FadeScreen ();
+		if (scr_viewsize.integer < 110)
+			scr_fullupdate = 0;
 	}
 	else
 	{

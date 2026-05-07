@@ -1096,7 +1096,14 @@ the entity origin, so any view position inside that will be valid
 void V_RenderView (void)
 {
 	if (con_forcedup)
+	{
+		/* No world to render. Clear to black so 2D overlays (menu, the
+		 * conback when the user actually opened the console) paint
+		 * onto a clean frame instead of last frame's stale pixels. */
+		glClearColor_fp (0.0f, 0.0f, 0.0f, 1.0f);
+		glClear_fp (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		return;
+	}
 
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)

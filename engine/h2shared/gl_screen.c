@@ -1000,6 +1000,14 @@ static void SCR_DrawConsole (void)
 {
 	if (scr_con_current)
 	{
+		/* The console is "forced up" when no world is loaded
+		 * (cl.worldmodel == NULL or cls.signon != SIGNONS). When the
+		 * user is sitting in the menu, the menu provides its own
+		 * backdrop — don't paint the conback under it. The con_forcedup
+		 * gate in V_RenderView still skips 3D rendering when no world
+		 * is loaded, which is the load-bearing part of the flag. */
+		if (con_forcedup && (Key_GetDest() & key_menu))
+			return;
 		scr_copyeverything = 1;
 		Con_DrawConsole (scr_con_current);
 		clearconsole = 0;
