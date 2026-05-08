@@ -2005,24 +2005,49 @@ static void R_DrawEntitiesOnList (void)
 
 	double _t0loop = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 
-	/* Open a brush-batch session so R_DrawBrushModel calls share one
-	 * world-VBO/shader/atlas bind across every brush entity instead
-	 * of paying for ~7 GL state calls per call.  Alias-fallback and
-	 * sprite handling between brush entities don't disturb the world
-	 * VAO state — they restore it before any further brush draws. */
-	{ extern void R_BeginBrushBatch(void); R_BeginBrushBatch(); }
+	/* Two-phase split: brush models first, then alias-fallback +
+	 * sprite handling.  This keeps the world-VBO/shader/atlas state
+	 * stable across the entire brush phase so R_DrawBrushModel can
+	 * skip per-entity rebinds altogether.  The chase-cam pitch
+	 * adjustment for cl.viewentity fires exactly once per entity
+	 * since each entity belongs to one phase only. */
 
-	// draw sprites seperately, because of alpha blending
+	/* Phase 1: brush models */
+	{ extern void R_BeginBrushBatch(void); R_BeginBrushBatch(); }
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
 		e = cl_visedicts[i];
-
-		if (!e->model)
+		if (!e->model || e->model->type != mod_brush)
 			continue;
-
-		// chase-cam pitch adj. by FrikaC
 		if (e == &cl_entities[cl.viewentity])
-			e->angles[0] *= 0.3;
+			e->angles[0] *= 0.3;	// chase-cam pitch adj. by FrikaC
+
+		item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
+				(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
+		if (!item_trans)
+		{
+			if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;
+			R_DrawBrushModel (e, false);
+		}
+		else
+		{
+			pLeaf = Mod_PointInLeaf (e->origin, cl.worldmodel);
+			if (pLeaf->contents != CONTENTS_WATER)
+				cl_transvisedicts[cl_numtransvisedicts++].ent = e;
+			else
+				cl_transwateredicts[cl_numtranswateredicts++].ent = e;
+		}
+	}
+	{ extern void R_EndBrushBatch(void); R_EndBrushBatch(); }
+
+	/* Phase 2: alias-fallback + sprite (latter deferred to trans pass) */
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		e = cl_visedicts[i];
+		if (!e->model || e->model->type == mod_brush)
+			continue;
+		if (e == &cl_entities[cl.viewentity])
+			e->angles[0] *= 0.3;	// chase-cam pitch adj. by FrikaC
 
 		switch (e->model->type)
 		{
@@ -2051,9 +2076,6 @@ static void R_DrawEntitiesOnList (void)
 					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
 			{
-				/* Skip only if this entity was drawn by the
-				 * instanced path.  Rejected entities (special
-				 * skins, colormaps, etc.) fall through here. */
 				if (!use_instancing || !inst_collected[i])
 				{
 					if (r_speeds.integer >= 2) rprof_ents_n_alias_loop++;
@@ -2062,16 +2084,6 @@ static void R_DrawEntitiesOnList (void)
 			}
 			break;
 		}
-
-		case mod_brush:
-			item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
-					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
-			if (!item_trans)
-			{
-				if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;
-				R_DrawBrushModel (e,false);
-			}
-			break;
 
 		case mod_sprite:
 			item_trans = true;
@@ -2085,16 +2097,12 @@ static void R_DrawEntitiesOnList (void)
 		if (item_trans)
 		{
 			pLeaf = Mod_PointInLeaf (e->origin, cl.worldmodel);
-		//	if (pLeaf->contents == CONTENTS_EMPTY)
 			if (pLeaf->contents != CONTENTS_WATER)
 				cl_transvisedicts[cl_numtransvisedicts++].ent = e;
 			else
 				cl_transwateredicts[cl_numtranswateredicts++].ent = e;
 		}
-
 	}
-
-	{ extern void R_EndBrushBatch(void); R_EndBrushBatch(); }
 
 	if (r_speeds.integer >= 2)
 		rprof_cpu_ents_loop = Sys_DoubleTime() - _t0loop;
