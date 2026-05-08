@@ -1613,21 +1613,185 @@ static void DrawTextureChains (entity_t *e)
 		rprof_cpu_chains_loop = Sys_DoubleTime() - _t0loop;
 	}
 
-	/* Render fence/underwater surfs collected from every fast-path chain.
-	 * R_RenderBrushPolyMTex expects no VAO/program bound. */
+	/* Render fence / underwater surfs collected from every fast-path
+	 * chain.  Batched VBO path: partition by alpha-cutout vs opaque
+	 * underwater, sort by texture, emit one glDrawElements per
+	 * (group, texture) instead of one GL_ImmBegin/End per surface.
+	 * Legacy R_RenderBrushPolyMTex still handles the rare warp-active
+	 * underwater case (r_waterwarp && !GL_PostProcess_Active). */
 	{
 	double _t0def = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
 	if (world_deferred_count > 0)
 	{
+		extern qboolean GL_PostProcess_Active(void);
+		extern float r_fog_density;
+		extern float r_fog_color[3];
+		qboolean warp_active = (r_waterwarp.integer && !GL_PostProcess_Active());
 		int d;
+
 		if (world_state_set)
 		{
 			glBindVertexArray_fp(0);
 			glUseProgram_fp(0);
 			world_state_set = false;
 		}
-		for (d = 0; d < world_deferred_count; d++)
-			R_RenderBrushPolyMTex (e, world_deferred[d], false);
+
+		if (e == &r_worldentity && lm_atlas_enabled && lm_atlas_texture && world_vao && world_ibo)
+		{
+			static msurface_t *fence_buf[4096];
+			static msurface_t *water_buf[4096];
+			int fence_n = 0, water_n = 0, legacy_n = 0;
+
+			/* Partition.  A surface that's both fence and underwater
+			 * with active warp goes legacy (rare). */
+			for (d = 0; d < world_deferred_count; d++)
+			{
+				msurface_t *ds = world_deferred[d];
+				if (!ds->polys || ds->vbo_numtris <= 0)
+				{
+					R_RenderBrushPolyMTex (e, ds, false);
+					legacy_n++;
+					continue;
+				}
+				if (warp_active && (ds->flags & SURF_UNDERWATER))
+				{
+					/* CPU vertex warp — only the legacy path
+					 * does that. */
+					R_RenderBrushPolyMTex (e, ds, false);
+					legacy_n++;
+					continue;
+				}
+				if (ds->flags & SURF_DRAWFENCE)
+				{
+					if (fence_n < (int)(sizeof(fence_buf)/sizeof(fence_buf[0])))
+						fence_buf[fence_n++] = ds;
+				}
+				else
+				{
+					/* SURF_UNDERWATER without warp = treat as
+					 * a regular world surface. */
+					if (water_n < (int)(sizeof(water_buf)/sizeof(water_buf[0])))
+						water_buf[water_n++] = ds;
+				}
+			}
+
+			if (fence_n > 0 || water_n > 0)
+			{
+				/* Sort each group by vbo_firstindex so contiguous
+				 * runs collapse into single glDrawElements calls. */
+#define DEF_LESS(a,b) ((a)->vbo_firstindex < (b)->vbo_firstindex)
+				/* tiny insertion sort — N is small (typ. <300) */
+				int j;
+				for (j = 1; j < fence_n; j++)
+				{
+					msurface_t *key = fence_buf[j];
+					int i2 = j - 1;
+					while (i2 >= 0 && DEF_LESS(key, fence_buf[i2]))
+					{
+						fence_buf[i2+1] = fence_buf[i2];
+						i2--;
+					}
+					fence_buf[i2+1] = key;
+				}
+				for (j = 1; j < water_n; j++)
+				{
+					msurface_t *key = water_buf[j];
+					int i2 = j - 1;
+					while (i2 >= 0 && DEF_LESS(key, water_buf[i2]))
+					{
+						water_buf[i2+1] = water_buf[i2];
+						i2--;
+					}
+					water_buf[i2+1] = key;
+				}
+#undef DEF_LESS
+
+				/* Bind world VBO + shader once. */
+				glBindVertexArray_fp(world_vao);
+				glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+				glUseProgram_fp(gl_shader_world.program);
+				{
+					float mvp[16], mv[16];
+					GL_GetMVP(mvp);
+					GL_GetModelview(mv);
+					if (gl_shader_world.u_mvp >= 0)
+						glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+					if (gl_shader_world.u_modelview >= 0)
+						glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+				}
+				if (gl_shader_world.u_fog_density >= 0)
+					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+				if (gl_shader_world.u_fog_color >= 0)
+					glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+				GL_ImmInvalidateState();
+
+				/* Emit one batched draw per texture run.  When the
+				 * texture changes we flush the running glDrawElements
+				 * coalescing of contiguous IBO ranges. */
+#define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
+		if ((N) <= 0) break; \
+		if (gl_shader_world.u_alpha_threshold >= 0) \
+			glUniform1f_fp(gl_shader_world.u_alpha_threshold, (ALPHA_T)); \
+		if (A2C_ON) \
+			glEnable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE); \
+		else \
+			glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE); \
+		texture_t *cur_tex_ = NULL; \
+		int run_first_ = 0, run_total_ = 0, count_run_ = 0; \
+		int kk_; \
+		for (kk_ = 0; kk_ < (N); kk_++) \
+		{ \
+			msurface_t *_s = (BUF)[kk_]; \
+			texture_t *_t = R_TextureAnimation(e, _s->texinfo->texture); \
+			int _next = _s->vbo_firstindex; \
+			int _len  = _s->vbo_numtris * 3; \
+			if (cur_tex_ == _t && (run_first_ + run_total_) == _next) \
+			{ \
+				run_total_ += _len; \
+				count_run_++; \
+				continue; \
+			} \
+			if (cur_tex_ && run_total_ > 0) \
+			{ \
+				GL_Bind(cur_tex_->gl_texturenum); \
+				glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+				    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
+				c_brush_polys += count_run_; \
+			} \
+			cur_tex_   = _t; \
+			run_first_ = _next; \
+			run_total_ = _len; \
+			count_run_ = 1; \
+		} \
+		if (cur_tex_ && run_total_ > 0) \
+		{ \
+			GL_Bind(cur_tex_->gl_texturenum); \
+			glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+			    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
+			c_brush_polys += count_run_; \
+		} \
+	} while (0)
+
+				EMIT_BATCH(fence_buf, fence_n, 0.666f, r_alphatocoverage.integer);
+				EMIT_BATCH(water_buf, water_n, 0.01f,  false);
+#undef EMIT_BATCH
+
+				/* Tear down */
+				glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
+				glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
+			}
+		}
+		else
+		{
+			/* Legacy per-surface fallback */
+			for (d = 0; d < world_deferred_count; d++)
+				R_RenderBrushPolyMTex (e, world_deferred[d], false);
+		}
 	}
 	if (r_speeds.integer >= 2 && e == &r_worldentity)
 		rprof_cpu_chains_deferred = Sys_DoubleTime() - _t0def;
