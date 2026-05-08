@@ -860,6 +860,12 @@ void Sky_ProcessEntities (void)
 		if (e->model->type != mod_brush)
 			continue;
 
+		/* Cached at load time — most brush submodels (doors,
+		 * platforms, decorative props) have zero sky surfaces.
+		 * Skip the full nummodelsurfaces walk for them. */
+		if (!e->model->has_sky_surf)
+			continue;
+
 		if (R_CullModelForEntity(e))
 			continue;
 

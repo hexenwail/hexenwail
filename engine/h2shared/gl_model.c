@@ -2009,6 +2009,22 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		mod->firstmodelsurface = bm->firstface;
 		mod->nummodelsurfaces = bm->numfaces;
 
+		/* Cache "any sky surface" so Sky_ProcessEntities can skip
+		 * the full submodel scan for the (typical) case of doors /
+		 * platforms / decorative brushes that have no sky. */
+		{
+			int sj;
+			mod->has_sky_surf = false;
+			for (sj = 0; sj < bm->numfaces; sj++)
+			{
+				if (mod->surfaces[bm->firstface + sj].flags & SURF_DRAWSKY)
+				{
+					mod->has_sky_surf = true;
+					break;
+				}
+			}
+		}
+
 		VectorCopy (bm->maxs, mod->maxs);
 		VectorCopy (bm->mins, mod->mins);
 

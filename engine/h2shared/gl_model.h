@@ -522,6 +522,7 @@ typedef struct qmodel_s
 
 	int		flags;
 	int		ex_flags;
+	qboolean	has_sky_surf;	/* cached at load: any surface in this submodel has SURF_DRAWSKY */
 
 //
 // volume occupied by the model graphics
