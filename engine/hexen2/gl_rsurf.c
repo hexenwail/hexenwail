@@ -1958,12 +1958,14 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		extern float r_fog_density;
 		extern float r_fog_color[3];
 
-		/* Always re-bind VAO + shader + lightmap atlas: alias-model
-		 * fallback or other interleaved entity types may have
-		 * clobbered them between brush calls.  When a brush batch
-		 * is active we still skip the 5 fog/alpha/color uniform
-		 * uploads — those are program-resident state and persist
-		 * even when we glUseProgram away and back. */
+		/* Always re-bind VAO + shader + lightmap atlas: the legacy
+		 * fall-through pass for special surfaces (sky / turb /
+		 * fence / underwater) inside this very function may bind
+		 * gl_shader_sky and leave it active when it returns.  Mesa
+		 * fast-paths redundant binds to the same object so this is
+		 * cheap when nothing changed.  When a brush batch is active
+		 * we still skip the program-resident fog/alpha/color uniform
+		 * uploads — those persist across glUseProgram cycles. */
 		glBindVertexArray_fp(world_vao);
 		glUseProgram_fp(gl_shader_world.program);
 		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
