@@ -1950,6 +1950,15 @@ static void R_DrawAliasInstanced (void)
 	}
 }
 
+/* Sub-timers for R_DrawEntitiesOnList -- declared here so they are
+ * visible before the function body; the rprof block below holds the
+ * rest of the profiling variables. */
+static double	rprof_cpu_ents_collect;
+static double	rprof_cpu_ents_inst;
+static double	rprof_cpu_ents_loop;
+static int	rprof_ents_n_alias_loop;
+static int	rprof_ents_n_brush_loop;
+
 /*
 =============
 R_DrawEntitiesOnList
@@ -1966,6 +1975,15 @@ static void R_DrawEntitiesOnList (void)
 	cl_numtransvisedicts = 0;
 	cl_numtranswateredicts = 0;
 
+	if (r_speeds.integer >= 2)
+	{
+		rprof_cpu_ents_collect = 0;
+		rprof_cpu_ents_inst = 0;
+		rprof_cpu_ents_loop = 0;
+		rprof_ents_n_alias_loop = 0;
+		rprof_ents_n_brush_loop = 0;
+	}
+
 	if (!r_drawentities.integer)
 		return;
 
@@ -1974,10 +1992,18 @@ static void R_DrawEntitiesOnList (void)
 	use_instancing = (r_alias_gpu.integer >= 1 && gl_shader_alias_inst.program);
 	if (use_instancing)
 	{
+		double _t0c = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 		R_CollectAndBatchAliasInstances();
+		if (r_speeds.integer >= 2)
+			rprof_cpu_ents_collect = Sys_DoubleTime() - _t0c;
+
+		double _t0d = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 		R_DrawAliasInstanced();
+		if (r_speeds.integer >= 2)
+			rprof_cpu_ents_inst = Sys_DoubleTime() - _t0d;
 	}
 
+	double _t0loop = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 	// draw sprites seperately, because of alpha blending
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
@@ -2021,7 +2047,10 @@ static void R_DrawEntitiesOnList (void)
 				 * instanced path.  Rejected entities (special
 				 * skins, colormaps, etc.) fall through here. */
 				if (!use_instancing || !inst_collected[i])
+				{
+					if (r_speeds.integer >= 2) rprof_ents_n_alias_loop++;
 					R_DrawAliasModel (e);
+				}
 			}
 			break;
 		}
@@ -2030,7 +2059,10 @@ static void R_DrawEntitiesOnList (void)
 			item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
 					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 			if (!item_trans)
+			{
+				if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;
 				R_DrawBrushModel (e,false);
+			}
 			break;
 
 		case mod_sprite:
@@ -2053,6 +2085,8 @@ static void R_DrawEntitiesOnList (void)
 		}
 
 	}
+	if (r_speeds.integer >= 2)
+		rprof_cpu_ents_loop = Sys_DoubleTime() - _t0loop;
 
 	/* Clean up GPU alias state left bound across entities */
 	glBindVertexArray_fp(0);
@@ -3218,7 +3252,7 @@ static void R_ProfileReport (void)
 	total = (double)(ts[RPROF_COUNT] - ts[0]) / 1000000.0;
 
 	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
-		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f  glows %.1f  dlt %.1f\n"
+		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f a=%d b=%d)  glows %.1f  dlt %.1f\n"
 		   "  draw: bsp %.1f  lmup %.1f  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
 		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
 		   "  %4i wpoly  %4i epoly\n",
@@ -3229,6 +3263,11 @@ static void R_ProfileReport (void)
 		   rprof_cpu_drawworld * 1000.0,
 		   rprof_cpu_sky * 1000.0,
 		   rprof_cpu_ents * 1000.0,
+		   rprof_cpu_ents_collect * 1000.0,
+		   rprof_cpu_ents_inst * 1000.0,
+		   rprof_cpu_ents_loop * 1000.0,
+		   rprof_ents_n_alias_loop,
+		   rprof_ents_n_brush_loop,
 		   rprof_cpu_glows * 1000.0,
 		   rprof_cpu_dlights * 1000.0,
 		   rprof_cpu_bsp * 1000.0,

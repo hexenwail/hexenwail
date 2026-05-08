@@ -1734,21 +1734,212 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	e->angles[0] = -e->angles[0];	// stupid quake bug
 	e->angles[2] = -e->angles[2];	// stupid quake bug
 
-	//
-	// draw texture
-	//
-	for (i = 0; i < clmodel->nummodelsurfaces; i++, psurf++)
+	/* Fast path: VBO-batched submodel rendering.  Group visible non-
+	 * special surfaces by texture, emit one glDrawElements per group
+	 * via the shared world VBO/IBO.  Special surfaces (sky / turb /
+	 * fence / underwater / translucent) fall through to the legacy
+	 * per-surface R_RenderBrushPoly path which handles them. */
+	if (world_vao && lm_atlas_enabled && lm_atlas_texture && world_ibo &&
+	    !Translucent && !(e->drawflags & DRF_TRANSLUCENT) &&
+	    (e->drawflags & MLS_MASKIN) != MLS_ABSLIGHT &&
+	    !(e->model->flags & EF_TRANSPARENT))
 	{
-	// find which side of the node we are on
-		pplane = psurf->plane;
+		#define MAX_BMODEL_BATCH 4096
+		static msurface_t *batch_surfs[MAX_BMODEL_BATCH];
+		int batch_count = 0;
+		int n_special = 0;
+		float mvp[16], mv[16];
+		int s_idx;
+		texture_t *cur_tex = NULL;
 
-		dot = DotProduct (modelorg, pplane->normal) - pplane->dist;
+		/* Bind world VBO state with the entity-transformed modelview. */
+		glBindVertexArray_fp(world_vao);
+		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+		glUseProgram_fp(gl_shader_world.program);
+		GL_GetMVP(mvp);
+		GL_GetModelview(mv);
+		if (gl_shader_world.u_mvp >= 0)
+			glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+		if (gl_shader_world.u_modelview >= 0)
+			glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+		extern float r_fog_density;
+		extern float r_fog_color[3];
+		if (gl_shader_world.u_fog_density >= 0)
+			glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+		if (gl_shader_world.u_fog_color >= 0)
+			glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		if (gl_shader_world.u_alpha_threshold >= 0)
+			glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		GL_ImmInvalidateState();
 
-	// draw the polygon
-		if (((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
-			(!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+		/* Build texture chains by walking surfaces in texturechain
+		 * order via the model's textures.  Each chain is processed,
+		 * issuing a single batched glDrawElements per texture. */
+		for (s_idx = 0; s_idx < clmodel->nummodelsurfaces; s_idx++)
 		{
-			R_RenderBrushPoly (e, psurf, false);
+			msurface_t *surf = &clmodel->surfaces[clmodel->firstmodelsurface + s_idx];
+			pplane = surf->plane;
+			dot = DotProduct (modelorg, pplane->normal) - pplane->dist;
+
+			/* Backface cull */
+			if (!(((surf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+			      (!(surf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON))))
+				continue;
+
+			/* Special surfaces fall to legacy path */
+			if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
+					   SURF_DRAWFENCE | SURF_UNDERWATER))
+			{
+				surf->visframe = -1;	/* mark for legacy pass */
+				n_special++;
+				continue;
+			}
+			if (surf->vbo_numtris <= 0)
+				continue;
+
+			surf->visframe = r_framecount;	/* mark drawn here */
+
+			/* Texture-grouped batching: when texture changes,
+			 * flush current batch then start new one. */
+			texture_t *t = R_TextureAnimation(e, surf->texinfo->texture);
+			if (cur_tex != t && batch_count > 0)
+			{
+				/* Flush previous group */
+				int run_start = 0;
+				int run_first = batch_surfs[0]->vbo_firstindex;
+				int run_total = batch_surfs[0]->vbo_numtris * 3;
+				int kk;
+				GL_Bind(cur_tex->gl_texturenum);
+				for (kk = 1; kk < batch_count; kk++)
+				{
+					int expected = run_first + run_total;
+					if (batch_surfs[kk]->vbo_firstindex == expected)
+						run_total += batch_surfs[kk]->vbo_numtris * 3;
+					else
+					{
+						glDrawElements_fp(GL_TRIANGLES, run_total,
+						    GL_UNSIGNED_INT,
+						    (void *)((size_t)run_first * sizeof(unsigned int)));
+						c_brush_polys += (kk - run_start);
+						run_start = kk;
+						run_first = batch_surfs[kk]->vbo_firstindex;
+						run_total = batch_surfs[kk]->vbo_numtris * 3;
+					}
+				}
+				glDrawElements_fp(GL_TRIANGLES, run_total,
+				    GL_UNSIGNED_INT,
+				    (void *)((size_t)run_first * sizeof(unsigned int)));
+				c_brush_polys += (batch_count - run_start);
+				batch_count = 0;
+			}
+			cur_tex = t;
+
+			/* Lightmap rebuild for surfaces touched by lightstyle
+			 * change or dynamic light. */
+			if (surf->polys)
+			{
+				int maps;
+				qboolean style_changed = false;
+				surf->polys->chain = lightmap_polys[surf->lightmaptexturenum];
+				lightmap_polys[surf->lightmaptexturenum] = surf->polys;
+				for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+				{
+					if (d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps])
+					{
+						style_changed = true;
+						break;
+					}
+				}
+				if (style_changed ||
+				    surf->dlightframe == r_framecount ||
+				    surf->cached_dlight)
+				{
+					byte *base = lightmaps +
+					    surf->lightmaptexturenum *
+					    lightmap_bytes * BLOCK_WIDTH * BLOCK_HEIGHT;
+					base += surf->light_t * BLOCK_WIDTH * lightmap_bytes
+					    + surf->light_s * lightmap_bytes;
+					R_BuildLightMap (surf, base, BLOCK_WIDTH * lightmap_bytes);
+					LM_ExpandDirtyRect(surf->lightmaptexturenum,
+					    surf->light_s, surf->light_t,
+					    (surf->extents[0] >> 4) + 1,
+					    (surf->extents[1] >> 4) + 1);
+				}
+			}
+
+			if (batch_count < MAX_BMODEL_BATCH)
+				batch_surfs[batch_count++] = surf;
+		}
+
+		/* Flush final batch */
+		if (batch_count > 0 && cur_tex)
+		{
+			int run_start = 0;
+			int run_first = batch_surfs[0]->vbo_firstindex;
+			int run_total = batch_surfs[0]->vbo_numtris * 3;
+			int kk;
+			GL_Bind(cur_tex->gl_texturenum);
+			for (kk = 1; kk < batch_count; kk++)
+			{
+				int expected = run_first + run_total;
+				if (batch_surfs[kk]->vbo_firstindex == expected)
+					run_total += batch_surfs[kk]->vbo_numtris * 3;
+				else
+				{
+					glDrawElements_fp(GL_TRIANGLES, run_total,
+					    GL_UNSIGNED_INT,
+					    (void *)((size_t)run_first * sizeof(unsigned int)));
+					c_brush_polys += (kk - run_start);
+					run_start = kk;
+					run_first = batch_surfs[kk]->vbo_firstindex;
+					run_total = batch_surfs[kk]->vbo_numtris * 3;
+				}
+			}
+			glDrawElements_fp(GL_TRIANGLES, run_total,
+			    GL_UNSIGNED_INT,
+			    (void *)((size_t)run_first * sizeof(unsigned int)));
+			c_brush_polys += (batch_count - run_start);
+		}
+
+		/* Tear down VBO state and reset to default attribute */
+		glBindVertexArray_fp(0);
+		glUseProgram_fp(0);
+		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
+
+		/* Legacy path for any special surfaces marked above */
+		if (n_special > 0)
+		{
+			psurf = &clmodel->surfaces[clmodel->firstmodelsurface];
+			for (i = 0; i < clmodel->nummodelsurfaces; i++, psurf++)
+			{
+				if (psurf->visframe != -1)
+					continue;
+				R_RenderBrushPoly (e, psurf, false);
+			}
+		}
+		#undef MAX_BMODEL_BATCH
+	}
+	else
+	{
+		//
+		// draw texture (legacy per-surface path for translucent / abslight / etc.)
+		//
+		for (i = 0; i < clmodel->nummodelsurfaces; i++, psurf++)
+		{
+		// find which side of the node we are on
+			pplane = psurf->plane;
+
+			dot = DotProduct (modelorg, pplane->normal) - pplane->dist;
+
+		// draw the polygon
+			if (((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+				(!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+			{
+				R_RenderBrushPoly (e, psurf, false);
+			}
 		}
 	}
 
