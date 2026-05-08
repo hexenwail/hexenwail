@@ -1418,6 +1418,41 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
+/*
+================
+Draw_MenuBackdrop
+
+Full-screen conback as the main-menu backdrop when no demo / game
+world is loaded. Bypasses Draw_ConsoleBackground's alpha cap, console-
+height stretch math, and version-watermark overlay so the splash
+always paints, opaque, edge to edge. Caller must be in CANVAS_DEFAULT.
+================
+*/
+void Draw_MenuBackdrop (void)
+{
+	Draw_FlushCharBatch ();
+	glDisable_fp (GL_BLEND);
+	GL_Bind (conback);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	GL_ImmBegin();
+	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmTexCoord2f (0, 0);
+	GL_ImmVertex2f (0, 0);
+	GL_ImmTexCoord2f (1, 0);
+	GL_ImmVertex2f (vid.width, 0);
+	GL_ImmTexCoord2f (1, 1);
+	GL_ImmVertex2f (vid.width, vid.height);
+	GL_ImmTexCoord2f (0, 1);
+	GL_ImmVertex2f (0, vid.height);
+	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+}
+
 static void Draw_ConsoleVersionInfo (int lines)
 {
 	static const char ver[] = ENGINE_WATERMARK;

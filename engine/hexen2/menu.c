@@ -6087,9 +6087,9 @@ void M_Draw (void)
 		if (!cl.worldmodel || cls.signon != SIGNONS)
 		{
 			/* No demo or game running — paint the conback as the
-			 * Hexen II splash backdrop. SCR_DrawConsole still skips
-			 * its half so we don't see the console text overlay. */
-			Draw_ConsoleBackground (vid.height);
+			 * Hexen II splash backdrop. Dedicated backdrop draw
+			 * (no version watermark, full opacity, full screen). */
+			Draw_MenuBackdrop ();
 		}
 		else if (m_state != m_display && m_state != m_video
 		         && m_state != m_rendering && m_state != m_graphics

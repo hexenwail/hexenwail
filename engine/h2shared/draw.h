@@ -82,6 +82,11 @@ void Draw_EndDisc (void);
 void Draw_TileClear (int x, int y, int w, int h);
 void Draw_Fill (int x, int y, int w, int h, int c);
 void Draw_FadeScreen (void);
+#if defined(GLQUAKE)
+void Draw_MenuBackdrop (void);	/* full-screen conback for main-menu backdrop */
+#else
+#define Draw_MenuBackdrop()
+#endif
 
 void Draw_Character (int x, int y, unsigned int num);
 void Draw_String (int x, int y, const char *str);
