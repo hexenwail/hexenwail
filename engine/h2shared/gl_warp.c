@@ -392,18 +392,180 @@ void EmitBothSkyLayers (msurface_t *fa)
 }
 
 #ifndef QUAKE2
+extern qboolean R_CullBox (vec3_t mins, vec3_t maxs);
+
 /*
 =================
 R_DrawSkyChain
+
+Batched sky-chain renderer.  Walks every visible sky surface and
+triangulates each glpoly_t fan into a single shared GL_TRIANGLES
+batch.  This replaces the old per-poly GL_ImmBegin/GL_ImmEnd loop
+which was costing ~12us per cycle on Mesa Iris Xe — with 2256 sky
+polys on Coliseum-scale arenas that path was burning ~28ms per
+frame just on driver state validation.
+
+The warp UVs are computed inline (same formula as the legacy
+EmitSkyPolysMulti); fan vertex 0 is recomputed for each emitted
+triangle, but the math is a sqrt + a few multiplies and is dwarfed
+by the GL submission savings.
+
+For r_skyalpha < 1 we still take the two-pass legacy path because
+batching across two render passes with different blend states is
+not a clean refactor and r_skyalpha defaults to 1.
+=================
+*/
+/* Inline sky-warp UV computation.  The macro form is used because we
+ * fan-triangulate inline (vertex 0 of each poly is recomputed per
+ * triangle) and the math is cheap enough that 3x redundancy is
+ * dwarfed by what we save in GL submission overhead. */
+#define SKYWARP_DIR(_vp, _dir) do { \
+		(_dir)[0] = (_vp)[0] - r_origin[0]; \
+		(_dir)[1] = (_vp)[1] - r_origin[1]; \
+		(_dir)[2] = ((_vp)[2] - r_origin[2]) * 3.0f; \
+		float _len = sqrt((_dir)[0]*(_dir)[0] + (_dir)[1]*(_dir)[1] + (_dir)[2]*(_dir)[2]); \
+		_len = 6.0f * 63.0f / _len; \
+		(_dir)[0] *= _len; \
+		(_dir)[1] *= _len; \
+	} while (0)
+
+#define SKYWARP_VERT_MULTI(_v) do { \
+		float *_vp = (_v); \
+		float _dir[3]; \
+		SKYWARP_DIR(_vp, _dir); \
+		GL_ImmTexCoord2f((realtime*bspeed + _dir[0]) * (1.0f/128.0f), \
+				 (realtime*bspeed + _dir[1]) * (1.0f/128.0f)); \
+		GL_ImmLMCoord2f ((realtime*fspeed + _dir[0]) * (1.0f/128.0f), \
+				 (realtime*fspeed + _dir[1]) * (1.0f/128.0f)); \
+		GL_ImmVertex3f  (_vp[0], _vp[1], _vp[2]); \
+	} while (0)
+
+#define SKYWARP_VERT_BACK(_v) do { \
+		float *_vp = (_v); \
+		float _dir[3]; \
+		SKYWARP_DIR(_vp, _dir); \
+		GL_ImmTexCoord2f((realtime*bspeed + _dir[0]) * (1.0f/128.0f), \
+				 (realtime*bspeed + _dir[1]) * (1.0f/128.0f)); \
+		GL_ImmVertex3f  (_vp[0], _vp[1], _vp[2]); \
+	} while (0)
+
+#define SKYWARP_VERT_FRONT(_v) do { \
+		float *_vp = (_v); \
+		float _dir[3]; \
+		SKYWARP_DIR(_vp, _dir); \
+		GL_ImmTexCoord2f((realtime*fspeed + _dir[0]) * (1.0f/128.0f), \
+				 (realtime*fspeed + _dir[1]) * (1.0f/128.0f)); \
+		GL_ImmVertex3f  (_vp[0], _vp[1], _vp[2]); \
+	} while (0)
+
+/*
+=================
+R_DrawSkyChain
+
+Batched sky-chain renderer.  Walks every visible sky surface and
+triangulates each glpoly_t fan into one shared GL_TRIANGLES batch
+per pass — replaces the old per-poly GL_ImmBegin/GL_ImmEnd loop
+which cost ~12us per cycle on Mesa Iris Xe (with 2256 sky polys
+on Coliseum-scale arenas, that path was burning ~28ms per frame
+on driver state validation alone).
+
+For r_skyalpha >= 1: single multitexture pass (back+front blended
+in shader).  For r_skyalpha < 1 (default 0.67): two passes — solid
+back layer then alpha-blended front layer.  Both modes batch the
+whole chain into 1 (or 2 with overflow) GL_TRIANGLES draws per
+pass.
 =================
 */
 void R_DrawSkyChain (msurface_t *s)
 {
+	extern cvar_t r_skyspeed_back, r_skyspeed_front;
 	msurface_t	*fa;
+	glpoly_t	*p;
+	int		j;
+	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
+	float		bspeed = r_skyspeed_back.value;
+	float		fspeed = r_skyspeed_front.value;
 
-	for (fa = s ; fa ; fa = fa->texturechain)
-		EmitSkyPolysMulti (fa);
+	/* Per-surface bbox cull: skip surfaces fully outside the view. */
+#define EMIT_LOOP(VERT_MACRO, COLOR_SETUP) \
+	do { \
+		GL_ImmBegin (); \
+		COLOR_SETUP; \
+		for (fa = s ; fa ; fa = fa->texturechain) \
+		{ \
+			vec3_t _mins, _maxs; \
+			int _has_bbox = 0; \
+			for (p = fa->polys ; p ; p = p->next) \
+			{ \
+				int _i; \
+				if (p->numverts < 3) continue; \
+				if (!_has_bbox) { \
+					VectorCopy (p->verts[0], _mins); \
+					VectorCopy (p->verts[0], _maxs); \
+					_has_bbox = 1; \
+				} \
+				for (_i = 0; _i < p->numverts; _i++) { \
+					float *_v = p->verts[_i]; \
+					int _k; \
+					for (_k = 0; _k < 3; _k++) { \
+						if (_v[_k] < _mins[_k]) _mins[_k] = _v[_k]; \
+						if (_v[_k] > _maxs[_k]) _maxs[_k] = _v[_k]; \
+					} \
+				} \
+			} \
+			if (_has_bbox && R_CullBox (_mins, _maxs)) \
+				continue; \
+			for (p = fa->polys ; p ; p = p->next) \
+			{ \
+				if (p->numverts < 3) continue; \
+				if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6) { \
+					GL_ImmEnd (GL_TRIANGLES, &gl_shader_sky); \
+					GL_ImmBegin (); \
+					COLOR_SETUP; \
+				} \
+				for (j = 2; j < p->numverts; j++) { \
+					VERT_MACRO (p->verts[0]); \
+					VERT_MACRO (p->verts[j - 1]); \
+					VERT_MACRO (p->verts[j]); \
+				} \
+			} \
+		} \
+		GL_ImmEnd (GL_TRIANGLES, &gl_shader_sky); \
+	} while (0)
+
+	if (alpha >= 1.0f)
+	{
+		/* single-pass: shader blends both layers using TU0/TU1 */
+		GL_SetAlphaThreshold (0.0f);
+		GL_Bind (solidskytexture);
+		glActiveTextureARB_fp (GL_TEXTURE1_ARB);
+		GL_Bind (alphaskytexture);
+		glActiveTextureARB_fp (GL_TEXTURE0_ARB);
+		EMIT_LOOP (SKYWARP_VERT_MULTI, GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f));
+	}
+	else
+	{
+		/* two-pass: opaque back, then alpha-blended front */
+		GL_SetAlphaThreshold (1.0f);
+
+		/* pass 1: back layer, opaque */
+		GL_Bind (solidskytexture);
+		EMIT_LOOP (SKYWARP_VERT_BACK, GL_ImmColor3f(1.0f, 1.0f, 1.0f));
+
+		/* pass 2: front layer, blended at r_skyalpha */
+		GL_Bind (alphaskytexture);
+		glEnable_fp (GL_BLEND);
+		EMIT_LOOP (SKYWARP_VERT_FRONT, GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
+		glDisable_fp (GL_BLEND);
+	}
+
+#undef EMIT_LOOP
 }
+
+#undef SKYWARP_VERT_MULTI
+#undef SKYWARP_VERT_BACK
+#undef SKYWARP_VERT_FRONT
+#undef SKYWARP_DIR
 
 #endif
 
@@ -985,12 +1147,16 @@ static void ClipSkyPolygon (int nump, vec3_t vecs, int stage)
 R_DrawSkyChain
 =================
 */
+extern qboolean R_CullBox (vec3_t mins, vec3_t maxs);
+
 void R_DrawSkyChain (msurface_t *s)
 {
 	msurface_t	*fa;
-	int		i;
+	int		i, j;
 	vec3_t	verts[MAX_CLIP_VERTS];
+	vec3_t	mins, maxs;
 	glpoly_t	*p;
+	float		*v0;
 
 //	c_sky = 0;
 	GL_Bind(solidskytexture);
@@ -1000,6 +1166,30 @@ void R_DrawSkyChain (msurface_t *s)
 	{
 		for (p = fa->polys ; p ; p = p->next)
 		{
+			if (p->numverts < 3)
+				continue;
+
+			/* Frustum-cull the poly's world-space bbox before
+			 * the recursive 6-plane ClipSkyPolygon walk. On big
+			 * arena maps with thousands of sky polys (Coliseum
+			 * of War: 2256), most are off-screen each frame and
+			 * don't contribute to skybox face bounds — same
+			 * optimization as Sky_ProcessPoly in gl_sky.c. */
+			v0 = p->verts[0];
+			VectorCopy (v0, mins);
+			VectorCopy (v0, maxs);
+			for (i = 1; i < p->numverts; i++)
+			{
+				float *v = p->verts[i];
+				for (j = 0; j < 3; j++)
+				{
+					if (v[j] < mins[j]) mins[j] = v[j];
+					if (v[j] > maxs[j]) maxs[j] = v[j];
+				}
+			}
+			if (R_CullBox (mins, maxs))
+				continue;
+
 			for (i = 0; i < p->numverts; i++)
 			{
 				VectorSubtract (p->verts[i], r_origin, verts[i]);

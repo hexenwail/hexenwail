@@ -1114,6 +1114,14 @@ double	rprof_cpu_lmupload;
 double	rprof_cpu_gpucull;
 double	rprof_cpu_chains;
 double	rprof_cpu_chains_skystencil;
+double	rprof_cpu_chains_skyproc;
+double	rprof_cpu_chains_loop;
+double	rprof_cpu_chains_deferred;
+int	rprof_chains_n_surfwalk;
+int	rprof_chains_n_lmrebuilt;
+double	rprof_cpu_chains_lmbuild;
+double	rprof_cpu_chains_surfwalk;
+double	rprof_cpu_chains_gpufinish;
 int	rprof_chains_n_fast;
 int	rprof_chains_n_imm;
 int	rprof_chains_n_slow;
@@ -1170,12 +1178,35 @@ static void DrawTextureChains (entity_t *e)
 		rprof_chains_n_slow = 0;
 		rprof_chains_n_skypoly = 0;
 		rprof_cpu_chains_skystencil = 0;
+		rprof_cpu_chains_skyproc = 0;
+		rprof_cpu_chains_loop = 0;
+		rprof_cpu_chains_deferred = 0;
+		rprof_chains_n_surfwalk = 0;
+		rprof_chains_n_lmrebuilt = 0;
+		rprof_cpu_chains_lmbuild = 0;
+		rprof_cpu_chains_surfwalk = 0;
+		rprof_cpu_chains_gpufinish = 0;
 	}
 
 	/* Validate world model before iterating textures */
 	if (!cl.worldmodel || !cl.worldmodel->textures) {
 		Con_SafePrintf("ERROR: DrawTextureChains - null worldmodel or textures\n");
 		return;
+	}
+
+	/* Diagnostic: drain GPU before any chain work. If `gpufinish` time
+	 * eats most of `chains`, the CPU was waiting on GPU prior work
+	 * (compute cull / indirect draws / sky stencil pre-pass) before we
+	 * could submit anything else. Toggleable via cvar so it stays cheap
+	 * in non-profiling runs. */
+	{
+		extern cvar_t r_speeds_gpufinish;
+		if (r_speeds.integer >= 2 && e == &r_worldentity && r_speeds_gpufinish.integer)
+		{
+			double _t0gf = Sys_DoubleTime();
+			glFinish_fp();
+			rprof_cpu_chains_gpufinish = Sys_DoubleTime() - _t0gf;
+		}
 	}
 
 	/* Sky depth+stencil pre-pass: write sky surface polys to depth buffer
@@ -1240,13 +1271,20 @@ static void DrawTextureChains (entity_t *e)
 	 * branch reuses the bound state. Mirror / translucent / non-skybox
 	 * sky chains invalidate it via world_state_set=false and the fast
 	 * path then re-binds via DrawTextureChains_BindWorldState. */
-	if (e == &r_worldentity && lm_atlas_enabled && lm_atlas_texture && world_vao)
+	/* Hoisted world VBO bind feeds the fast-path glDrawElements runs.
+	 * With gpu_cull_active, the fast path skips drawing solid surfaces
+	 * (R_DrawWorldCulled already drew them), so the hoisted bind would
+	 * just be wasted GL state changes that the driver may validate. */
+	if (e == &r_worldentity && lm_atlas_enabled && lm_atlas_texture && world_vao
+	    && !gpu_cull_active)
 	{
 		DrawTextureChains_BindWorldState();
 		world_state_set = true;
 		world_color_dirty = true;
 	}
 
+	{
+	double _t0loop = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
 		t = cl.worldmodel->textures[i];
@@ -1257,6 +1295,8 @@ static void DrawTextureChains (entity_t *e)
 			continue;
 		if (i == skytexturenum)
 		{
+			{
+			double _t0sp = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
 			if (skybox_name[0])
 			{
 				/* Sky_ProcessPoly is data-only; world state stays valid. */
@@ -1273,6 +1313,9 @@ static void DrawTextureChains (entity_t *e)
 					world_state_set = false;
 				}
 				R_DrawSkyChain (s);
+			}
+			if (r_speeds.integer >= 2 && e == &r_worldentity)
+				rprof_cpu_chains_skyproc = Sys_DoubleTime() - _t0sp;
 			}
 			t->texturechain = NULL;
 			continue;
@@ -1327,7 +1370,16 @@ static void DrawTextureChains (entity_t *e)
 				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
 				int batch_count = 0;
 
-				if (!world_state_set)
+				/* When the GPU compute cull path already drew solid +
+				 * fence surfaces (filter at gl_worldcull.c excludes only
+				 * SKY|TURB|UNDERWATER), skip the redundant glDrawElements
+				 * submission here. We still walk the chain to rebuild
+				 * dirty lightmap rects and to defer underwater surfaces
+				 * — fence is left deferred too so its alpha-cutout draw
+				 * uses the correct threshold. */
+				const qboolean skip_solid = gpu_cull_active;
+
+				if (!skip_solid && !world_state_set)
 				{
 					DrawTextureChains_BindWorldState();
 					world_state_set = true;
@@ -1335,13 +1387,17 @@ static void DrawTextureChains (entity_t *e)
 				}
 
 				/* Diffuse texture (TU0 is sticky from the hoisted setup). */
+				if (!skip_solid)
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
 				}
 
+				{
+				double _t0sw = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
 				for ( ; s ; s = s->texturechain)
 				{
+					if (e == &r_worldentity) rprof_chains_n_surfwalk++;
 					if (s->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
 						continue;
 
@@ -1352,7 +1408,7 @@ static void DrawTextureChains (entity_t *e)
 						continue;
 					}
 
-					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
+					if (!skip_solid && s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
 						batch_surfs[batch_count++] = s;
 
 					/* Apply dlights to blocklights for this surface */
@@ -1385,6 +1441,7 @@ static void DrawTextureChains (entity_t *e)
 						    s->dlightframe == r_framecount ||
 						    s->cached_dlight)
 						{
+							double _t0lm = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
 							byte *base = lightmaps +
 								s->lightmaptexturenum *
 								lightmap_bytes *
@@ -1396,8 +1453,17 @@ static void DrawTextureChains (entity_t *e)
 									   s->light_s, s->light_t,
 									   (s->extents[0] >> 4) + 1,
 									   (s->extents[1] >> 4) + 1);
+							if (e == &r_worldentity)
+							{
+								rprof_chains_n_lmrebuilt++;
+								if (r_speeds.integer >= 2)
+									rprof_cpu_chains_lmbuild += Sys_DoubleTime() - _t0lm;
+							}
 						}
 					}
+				}
+				if (r_speeds.integer >= 2 && e == &r_worldentity)
+					rprof_cpu_chains_surfwalk += Sys_DoubleTime() - _t0sw;
 				}
 
 				/* Merge contiguous IBO ranges and draw */
@@ -1503,9 +1569,14 @@ static void DrawTextureChains (entity_t *e)
 
 		t->texturechain = NULL;
 	}
+	if (r_speeds.integer >= 2 && e == &r_worldentity)
+		rprof_cpu_chains_loop = Sys_DoubleTime() - _t0loop;
+	}
 
 	/* Render fence/underwater surfs collected from every fast-path chain.
 	 * R_RenderBrushPolyMTex expects no VAO/program bound. */
+	{
+	double _t0def = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
 	if (world_deferred_count > 0)
 	{
 		int d;
@@ -1517,6 +1588,9 @@ static void DrawTextureChains (entity_t *e)
 		}
 		for (d = 0; d < world_deferred_count; d++)
 			R_RenderBrushPolyMTex (e, world_deferred[d], false);
+	}
+	if (r_speeds.integer >= 2 && e == &r_worldentity)
+		rprof_cpu_chains_deferred = Sys_DoubleTime() - _t0def;
 	}
 
 	/* Final teardown of hoisted world state. */

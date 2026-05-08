@@ -101,6 +101,7 @@ cvar_t	r_norefresh = {"r_norefresh", "0", CVAR_NONE};
 cvar_t	r_drawentities = {"r_drawentities", "1", CVAR_NONE};
 cvar_t	r_drawviewmodel = {"r_drawviewmodel", "1", CVAR_NONE};
 cvar_t	r_speeds = {"r_speeds", "0", CVAR_NONE};
+cvar_t	r_speeds_gpufinish = {"r_speeds_gpufinish", "0", CVAR_NONE};	/* diagnostic: glFinish() at start of chains to attribute GPU sync */
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
@@ -2819,6 +2820,14 @@ extern double	rprof_cpu_lmupload;
 extern double	rprof_cpu_gpucull;
 extern double	rprof_cpu_chains;
 extern double	rprof_cpu_chains_skystencil;
+extern double	rprof_cpu_chains_skyproc;
+extern double	rprof_cpu_chains_loop;
+extern double	rprof_cpu_chains_deferred;
+extern int	rprof_chains_n_surfwalk;
+extern int	rprof_chains_n_lmrebuilt;
+extern double	rprof_cpu_chains_lmbuild;
+extern double	rprof_cpu_chains_surfwalk;
+extern double	rprof_cpu_chains_gpufinish;
 extern int	rprof_chains_n_fast;
 extern int	rprof_chains_n_imm;
 extern int	rprof_chains_n_slow;
@@ -3210,8 +3219,8 @@ static void R_ProfileReport (void)
 
 	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
 		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f  glows %.1f  dlt %.1f\n"
-		   "  draw: bsp %.1f  lmup %.1f  gcull %.1f  chains %.1f (sky-stencil %.1f)\n"
-		   "  chains: fast=%d imm=%d slow=%d skypolys=%d\n"
+		   "  draw: bsp %.1f  lmup %.1f  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
+		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
 		   "  %4i wpoly  %4i epoly\n",
 		   total, rprof_cpu_world * 1000.0,
 		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
@@ -3226,11 +3235,19 @@ static void R_ProfileReport (void)
 		   rprof_cpu_lmupload * 1000.0,
 		   rprof_cpu_gpucull * 1000.0,
 		   rprof_cpu_chains * 1000.0,
+		   rprof_cpu_chains_gpufinish * 1000.0,
 		   rprof_cpu_chains_skystencil * 1000.0,
+		   rprof_cpu_chains_skyproc * 1000.0,
+		   rprof_cpu_chains_loop * 1000.0,
+		   rprof_cpu_chains_deferred * 1000.0,
 		   rprof_chains_n_fast,
 		   rprof_chains_n_imm,
 		   rprof_chains_n_slow,
 		   rprof_chains_n_skypoly,
+		   rprof_chains_n_surfwalk,
+		   rprof_cpu_chains_surfwalk * 1000.0,
+		   rprof_chains_n_lmrebuilt,
+		   rprof_cpu_chains_lmbuild * 1000.0,
 		   rprof_wpoly, rprof_epoly);
 
 	rprof_pending = false;
