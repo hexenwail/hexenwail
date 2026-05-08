@@ -1106,6 +1106,46 @@ GLuint	world_vao;
 int	world_num_verts;
 int	world_num_indices;
 
+/* Brush-batch session: when active, R_DrawBrushModel skips its
+ * per-entity world-VBO state setup and uses the shared bind set
+ * up by R_BeginBrushBatch.  R_DrawEntitiesOnList brackets the
+ * brush-model loop with these calls so 100+ entities share one
+ * shader/VAO/atlas/fog/alpha_threshold bind. */
+qboolean brush_batch_active = false;
+
+void R_BeginBrushBatch (void)
+{
+	extern float r_fog_density;
+	extern float r_fog_color[3];
+
+	if (!world_vao || !lm_atlas_enabled || !lm_atlas_texture || !world_ibo)
+		return;
+	glBindVertexArray_fp(world_vao);
+	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+	glUseProgram_fp(gl_shader_world.program);
+	if (gl_shader_world.u_fog_density >= 0)
+		glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+	if (gl_shader_world.u_fog_color >= 0)
+		glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (gl_shader_world.u_alpha_threshold >= 0)
+		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	GL_ImmInvalidateState();
+	brush_batch_active = true;
+}
+
+void R_EndBrushBatch (void)
+{
+	if (!brush_batch_active)
+		return;
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
+	glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
+	brush_batch_active = false;
+}
+
 /* CPU sub-pass timers + counters for r_speeds >= 2.
  * Defined here so DrawTextureChains and R_DrawWorld can both write to them;
  * read by R_ProfileReport in gl_rmain.c via extern. */
@@ -1751,29 +1791,37 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		float mvp[16], mv[16];
 		int s_idx;
 		texture_t *cur_tex = NULL;
+		extern float r_fog_density;
+		extern float r_fog_color[3];
 
-		/* Bind world VBO state with the entity-transformed modelview. */
+		/* Always re-bind VAO + shader + lightmap atlas: alias-model
+		 * fallback or other interleaved entity types may have
+		 * clobbered them between brush calls.  When a brush batch
+		 * is active we still skip the 5 fog/alpha/color uniform
+		 * uploads — those are program-resident state and persist
+		 * even when we glUseProgram away and back. */
 		glBindVertexArray_fp(world_vao);
-		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 		glUseProgram_fp(gl_shader_world.program);
+		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		if (!brush_batch_active)
+		{
+			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+			if (gl_shader_world.u_fog_density >= 0)
+				glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+			if (gl_shader_world.u_fog_color >= 0)
+				glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+			if (gl_shader_world.u_alpha_threshold >= 0)
+				glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+			GL_ImmInvalidateState();
+		}
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
 		if (gl_shader_world.u_mvp >= 0)
 			glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
 		if (gl_shader_world.u_modelview >= 0)
 			glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-		extern float r_fog_density;
-		extern float r_fog_color[3];
-		if (gl_shader_world.u_fog_density >= 0)
-			glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-		if (gl_shader_world.u_fog_color >= 0)
-			glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (gl_shader_world.u_alpha_threshold >= 0)
-			glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
-		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
-		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-		GL_ImmInvalidateState();
 
 		/* Build texture chains by walking surfaces in texturechain
 		 * order via the model's textures.  Each chain is processed,
@@ -1904,10 +1952,14 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 			c_brush_polys += (batch_count - run_start);
 		}
 
-		/* Tear down VBO state and reset to default attribute */
-		glBindVertexArray_fp(0);
-		glUseProgram_fp(0);
-		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
+		/* Tear down VBO state only when no batch session is open;
+		 * otherwise R_EndBrushBatch handles it after the loop. */
+		if (!brush_batch_active)
+		{
+			glBindVertexArray_fp(0);
+			glUseProgram_fp(0);
+			glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
+		}
 
 		/* Legacy path for any special surfaces marked above */
 		if (n_special > 0)

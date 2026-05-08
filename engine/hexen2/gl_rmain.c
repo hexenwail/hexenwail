@@ -2004,6 +2004,14 @@ static void R_DrawEntitiesOnList (void)
 	}
 
 	double _t0loop = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
+
+	/* Open a brush-batch session so R_DrawBrushModel calls share one
+	 * world-VBO/shader/atlas bind across every brush entity instead
+	 * of paying for ~7 GL state calls per call.  Alias-fallback and
+	 * sprite handling between brush entities don't disturb the world
+	 * VAO state — they restore it before any further brush draws. */
+	{ extern void R_BeginBrushBatch(void); R_BeginBrushBatch(); }
+
 	// draw sprites seperately, because of alpha blending
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
@@ -2085,6 +2093,9 @@ static void R_DrawEntitiesOnList (void)
 		}
 
 	}
+
+	{ extern void R_EndBrushBatch(void); R_EndBrushBatch(); }
+
 	if (r_speeds.integer >= 2)
 		rprof_cpu_ents_loop = Sys_DoubleTime() - _t0loop;
 
