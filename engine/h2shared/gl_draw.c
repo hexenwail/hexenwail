@@ -729,6 +729,9 @@ void Draw_FlushCharBatch (void)
 {
 	if (char_batch_count == 0)
 		return;
+	/* Draw_CachePic may GL_LoadTexture mid-batch and leave the new pic
+	 * bound; re-bind the atlas so the flush samples the right one. */
+	GL_Bind (char_batch_tex);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 	char_batch_count = 0;
 	char_batch_tex = 0;
