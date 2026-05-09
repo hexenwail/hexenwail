@@ -493,24 +493,23 @@ void R_DrawSkyChain (msurface_t *s)
 		COLOR_SETUP; \
 		for (fa = s ; fa ; fa = fa->texturechain) \
 		{ \
+			/* Per-surface bbox = union of cached per-poly bboxes
+			 * (computed once in BuildSurfaceDisplayList). */ \
 			vec3_t _mins, _maxs; \
 			int _has_bbox = 0; \
 			for (p = fa->polys ; p ; p = p->next) \
 			{ \
-				int _i; \
+				int _k; \
 				if (p->numverts < 3) continue; \
 				if (!_has_bbox) { \
-					VectorCopy (p->verts[0], _mins); \
-					VectorCopy (p->verts[0], _maxs); \
+					VectorCopy (p->mins, _mins); \
+					VectorCopy (p->maxs, _maxs); \
 					_has_bbox = 1; \
+					continue; \
 				} \
-				for (_i = 0; _i < p->numverts; _i++) { \
-					float *_v = p->verts[_i]; \
-					int _k; \
-					for (_k = 0; _k < 3; _k++) { \
-						if (_v[_k] < _mins[_k]) _mins[_k] = _v[_k]; \
-						if (_v[_k] > _maxs[_k]) _maxs[_k] = _v[_k]; \
-					} \
+				for (_k = 0; _k < 3; _k++) { \
+					if (p->mins[_k] < _mins[_k]) _mins[_k] = p->mins[_k]; \
+					if (p->maxs[_k] > _maxs[_k]) _maxs[_k] = p->maxs[_k]; \
 				} \
 			} \
 			if (_has_bbox && R_CullBox (_mins, _maxs)) \

@@ -2772,6 +2772,25 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 	}
 
 	poly->numverts = lnumverts;
+
+	/* Cache the world-space bbox for downstream culling
+	 * (Sky_ProcessPoly / R_DrawSkyChain frustum reject). */
+	if (lnumverts > 0)
+	{
+		float *v0 = poly->verts[0];
+		int j, k;
+		VectorCopy (v0, poly->mins);
+		VectorCopy (v0, poly->maxs);
+		for (j = 1; j < lnumverts; j++)
+		{
+			float *v = poly->verts[j];
+			for (k = 0; k < 3; k++)
+			{
+				if (v[k] < poly->mins[k]) poly->mins[k] = v[k];
+				if (v[k] > poly->maxs[k]) poly->maxs[k] = v[k];
+			}
+		}
+	}
 }
 
 /*
