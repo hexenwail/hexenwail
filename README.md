@@ -36,7 +36,8 @@ Planned:
 - Render scale (25–100%), retro dithering mode
 - Display presets: Faithful / Crunchy / Retro / Clean / Modern / Ultra
 - Brightness/contrast via post-process shader
-- Scrolling two-layer sky and skybox support
+- HDR tonemap with exposure slider
+- Scrolling two-layer sky (configurable speed) and skybox support
 - Shader-based fog, underwater color tint, underwater warp, motion blur
 - Fence textures, water tint options, glow effects with fog attenuation
 - Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins
@@ -44,6 +45,8 @@ Planned:
 - External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
 - Physics/render decoupling with entity and lightstyle interpolation
 - FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean)
+- HUD / menu / crosshair / console scale sliders (auto by framebuffer height)
+- Console alpha + brightness sliders
 
 ### Input
 - WASD + mouselook defaults
@@ -51,7 +54,7 @@ Planned:
 - Mouse-driven menus with hover, click, and scroll wheel
 - Key bindings menu with type-to-search (includes weapon impulses)
 - Xbox/PlayStation/Nintendo gamepad with circular deadzone, power-curve easing, rumble, hot-plug
-- Always-run, raw mouse input, configurable pitch clamp
+- Always-run, raw mouse input, configurable pitch clamp, smooth-mouse filter (`m_filter`)
 
 ### Mod support
 - Protocol support (18/19/20/21), auto-detection and upgrade between 19–21
