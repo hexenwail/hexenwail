@@ -3023,6 +3023,26 @@ static void R_DrawGlow (entity_t *e)
 	float *gsettings;
 	int glow_flags = R_GetPimpFlags(e, &gsettings);
 
+	// If the orb is firing because of an engine-set XF_*GLOW flag on the
+	// model and the per-entity override didn't explicitly request the orb
+	// (no EF_GLOW in the override's own ex_flags), use the model's
+	// canonical glow color rather than the override's. The override's
+	// color was set by the QC for a different effect (e.g. EF_ILLUMINATE
+	// dlight color on demo1's misc_modelpimp artifacts) and should not
+	// recolor an engine-known orb (red mana, orange torch, etc.).
+	if (clmodel)
+	{
+		int entnum = (int)(e - cl_entities);
+		int pimp_ex = (entnum >= 0 && entnum < MAX_EDICTS &&
+		               R_GetPimpOverride(entnum)->active)
+		              ? R_GetPimpOverride(entnum)->ex_flags : 0;
+		if (!(pimp_ex & EF_GLOW) &&
+		    (clmodel->ex_flags & (XF_TORCH_GLOW | XF_GLOW | XF_MISSILE_GLOW)))
+		{
+			gsettings = clmodel->glow_settings;
+		}
+	}
+
 	// Torches & Flames
 	if ((gl_glows.integer && (glow_flags & XF_TORCH_GLOW)) ||
 	    (gl_missile_glows.integer && (glow_flags & XF_MISSILE_GLOW)) ||
