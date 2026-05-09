@@ -1105,6 +1105,12 @@ GLuint	world_vao;
 int	world_num_verts;
 int	world_num_indices;
 
+/* Sky stencil VBO — defined later, but referenced from DrawTextureChains. */
+extern GLuint	sky_stencil_vbo;
+extern GLuint	sky_stencil_ibo;
+extern GLuint	sky_stencil_vao;
+extern int	sky_stencil_total_indices;
+
 /* Brush-batch session: when active, R_DrawBrushModel skips its
  * per-entity world-VBO state setup and uses the shared bind set
  * up by R_BeginBrushBatch.  R_DrawEntitiesOnList brackets the
@@ -1338,10 +1344,13 @@ static void DrawTextureChains (entity_t *e)
 	 * (occludes geometry behind sky walls) and mark stencil=1 so skybox
 	 * only draws in sky areas.
 	 *
-	 * All visible sky fan polys are triangulated into one (or few) batched
-	 * GL_TRIANGLES draws — the per-poly GL_POLYGON path was costing ~10ms
-	 * on big maps because each fan triggered its own glBufferData +
-	 * glUseProgram + draw call (driver round-trip per poly). */
+	 * Indices for every world sky surface are pre-baked into a static
+	 * VBO/IBO at map load (R_BuildSkyStencilVBO).  Per frame we walk the
+	 * visible sky chain, sort by index offset, and collapse contiguous
+	 * runs into a single glDrawElements call each.  No triangulation, no
+	 * buffer upload — this used to be the dominant CPU cost on large
+	 * maps.  Falls back to the imm path when the VBO isn't available
+	 * (e.g. WebGL2 init failure). */
 	if (have_stencil && skytexturenum >= 0 &&
 	    skytexturenum < cl.worldmodel->numtextures &&
 	    cl.worldmodel->textures[skytexturenum] &&
@@ -1354,32 +1363,114 @@ static void DrawTextureChains (entity_t *e)
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
 		glDepthMask_fp(1);	/* ensure depth writes are on */
 		glColorMask_fp(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-		GL_ImmBegin();
-		for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
-		     sky; sky = sky->texturechain)
+
+		if (sky_stencil_vao && sky_stencil_ibo && sky_stencil_total_indices > 0)
 		{
-			glpoly_t *p;
-			for (p = sky->polys; p; p = p->next)
+			/* Fast path: collect (firstindex, numindices) for every
+			 * visible sky surface, sort, collapse contiguous runs,
+			 * issue one glDrawElements per run. */
+			static struct { int first; int count; } sky_runs[8192];
+			int n_runs = 0;
+			float mvp[16];
+
+			for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
+			     sky; sky = sky->texturechain)
 			{
-				int j;
-				if (p->numverts < 3)
-					continue;
-				if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+				if (sky->sky_numindices <= 0) continue;
+				if (n_runs < (int)(sizeof(sky_runs)/sizeof(sky_runs[0])))
 				{
-					GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
-					GL_ImmBegin();
-				}
-				/* fan -> triangles: (0, j-1, j) */
-				for (j = 2; j < p->numverts; j++)
-				{
-					GL_ImmVertex3f(p->verts[0][0], p->verts[0][1], p->verts[0][2]);
-					GL_ImmVertex3f(p->verts[j-1][0], p->verts[j-1][1], p->verts[j-1][2]);
-					GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
+					sky_runs[n_runs].first = sky->sky_firstindex;
+					sky_runs[n_runs].count = sky->sky_numindices;
+					n_runs++;
 				}
 				if (e == &r_worldentity) rprof_chains_n_skypoly++;
 			}
+
+			if (n_runs > 0)
+			{
+				int j;
+				/* tiny insertion sort by firstindex */
+				for (j = 1; j < n_runs; j++)
+				{
+					int kf = sky_runs[j].first;
+					int kc = sky_runs[j].count;
+					int i2 = j - 1;
+					while (i2 >= 0 && sky_runs[i2].first > kf)
+					{
+						sky_runs[i2+1] = sky_runs[i2];
+						i2--;
+					}
+					sky_runs[i2+1].first = kf;
+					sky_runs[i2+1].count = kc;
+				}
+
+				glBindVertexArray_fp(sky_stencil_vao);
+				glUseProgram_fp(gl_shader_flat.program);
+				GL_GetMVP(mvp);
+				if (gl_shader_flat.u_mvp >= 0)
+					glUniformMatrix4fv_fp(gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+				/* a_color attribute disabled in this VAO -> uses generic value */
+				glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+
+				/* Collapse contiguous runs and emit. */
+				{
+					int run_first = sky_runs[0].first;
+					int run_count = sky_runs[0].count;
+					for (j = 1; j < n_runs; j++)
+					{
+						if (sky_runs[j].first == run_first + run_count)
+						{
+							run_count += sky_runs[j].count;
+							continue;
+						}
+						glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+								  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
+						run_first = sky_runs[j].first;
+						run_count = sky_runs[j].count;
+					}
+					glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+							  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
+				}
+
+				glBindVertexArray_fp(0);
+				glUseProgram_fp(0);
+				GL_ImmInvalidateState();
+				/* Force the chain loop's hoisted world-state bind to redo
+				 * itself; we just stomped on VAO + program. */
+				world_state_set = false;
+				world_color_dirty = true;
+			}
 		}
-		GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
+		else
+		{
+			/* Fallback: original per-frame triangulation through imm batcher. */
+			GL_ImmBegin();
+			for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
+			     sky; sky = sky->texturechain)
+			{
+				glpoly_t *p;
+				for (p = sky->polys; p; p = p->next)
+				{
+					int j;
+					if (p->numverts < 3)
+						continue;
+					if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+					{
+						GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
+						GL_ImmBegin();
+					}
+					for (j = 2; j < p->numverts; j++)
+					{
+						GL_ImmVertex3f(p->verts[0][0], p->verts[0][1], p->verts[0][2]);
+						GL_ImmVertex3f(p->verts[j-1][0], p->verts[j-1][1], p->verts[j-1][2]);
+						GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
+					}
+					if (e == &r_worldentity) rprof_chains_n_skypoly++;
+				}
+			}
+			GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
+		}
+
 		glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		/* Leave stencil test ON: any world geometry that draws
 		 * closer than the sky surface resets stencil to 0,
@@ -2510,6 +2601,134 @@ void R_FreeWorldVBO (void)
 	lm_atlas_enabled = false;
 	world_num_verts = 0;
 	world_num_indices = 0;
+}
+
+/*
+=============
+Sky stencil VBO — pre-baked fan triangulation of every world sky surface.
+The depth/stencil pre-pass walks the visible sky chain and issues a
+glDrawElements per surface (or per merged contiguous run); no per-frame
+triangulation, no per-frame buffer upload.  Replaces ~0.9ms of GL_ImmBegin
+work on big maps.
+=============
+*/
+GLuint	sky_stencil_vbo;
+GLuint	sky_stencil_ibo;
+GLuint	sky_stencil_vao;
+int	sky_stencil_total_indices;
+
+void R_FreeSkyStencilVBO (void)
+{
+	if (sky_stencil_vbo) { glDeleteBuffers_fp(1, &sky_stencil_vbo); sky_stencil_vbo = 0; }
+	if (sky_stencil_ibo) { glDeleteBuffers_fp(1, &sky_stencil_ibo); sky_stencil_ibo = 0; }
+	if (sky_stencil_vao) { glDeleteVertexArrays_fp(1, &sky_stencil_vao); sky_stencil_vao = 0; }
+	sky_stencil_total_indices = 0;
+}
+
+void R_BuildSkyStencilVBO (void)
+{
+	qmodel_t	*m;
+	msurface_t	*surf;
+	glpoly_t	*p;
+	float		*verts;
+	unsigned int	*indices;
+	int		i, j, v_pos, idx_pos;
+	int		total_verts = 0, total_idx = 0;
+
+	R_FreeSkyStencilVBO();
+
+	if (!cl.worldmodel)
+		return;
+
+	/* Only the worldmodel renders through the texture-chain sky pre-pass.
+	 * Brush submodel sky goes through Sky_ProcessEntities (drawn at
+	 * a different point in the frame), and we don't optimize that here. */
+	m = cl.worldmodel;
+	for (i = 0; i < m->numsurfaces; i++)
+	{
+		surf = &m->surfaces[i];
+		surf->sky_firstindex = -1;
+		surf->sky_numindices = 0;
+		if (!(surf->flags & SURF_DRAWSKY)) continue;
+		for (p = surf->polys; p; p = p->next)
+		{
+			if (p->numverts < 3) continue;
+			total_verts += p->numverts;
+			total_idx += (p->numverts - 2) * 3;
+		}
+	}
+
+	if (total_verts == 0 || total_idx == 0)
+		return;
+
+	verts = (float *) malloc(total_verts * 3 * sizeof(float));
+	indices = (unsigned int *) malloc(total_idx * sizeof(unsigned int));
+	if (!verts || !indices)
+	{
+		free(verts);
+		free(indices);
+		return;
+	}
+
+	/* Pass 2: emit verts + per-surface fan-triangulated index runs */
+	v_pos = 0;
+	idx_pos = 0;
+	for (i = 0; i < m->numsurfaces; i++)
+	{
+		int surf_start_idx;
+		surf = &m->surfaces[i];
+		if (!(surf->flags & SURF_DRAWSKY)) continue;
+		surf_start_idx = idx_pos;
+		for (p = surf->polys; p; p = p->next)
+		{
+			int p_first_vert = v_pos;
+			if (p->numverts < 3) continue;
+			for (j = 0; j < p->numverts; j++)
+			{
+				verts[v_pos*3 + 0] = p->verts[j][0];
+				verts[v_pos*3 + 1] = p->verts[j][1];
+				verts[v_pos*3 + 2] = p->verts[j][2];
+				v_pos++;
+			}
+			for (j = 2; j < p->numverts; j++)
+			{
+				indices[idx_pos++] = p_first_vert;
+				indices[idx_pos++] = p_first_vert + j - 1;
+				indices[idx_pos++] = p_first_vert + j;
+			}
+		}
+		if (idx_pos > surf_start_idx)
+		{
+			surf->sky_firstindex = surf_start_idx;
+			surf->sky_numindices = idx_pos - surf_start_idx;
+		}
+	}
+
+	glGenVertexArrays_fp(1, &sky_stencil_vao);
+	glBindVertexArray_fp(sky_stencil_vao);
+
+	glGenBuffers_fp(1, &sky_stencil_vbo);
+	glBindBuffer_fp(GL_ARRAY_BUFFER, sky_stencil_vbo);
+	glBufferData_fp(GL_ARRAY_BUFFER, v_pos * 3 * sizeof(float),
+			verts, GL_STATIC_DRAW);
+
+	glEnableVertexAttribArray_fp(ATTR_POSITION);
+	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
+				 3 * sizeof(float), (void *)0);
+
+	glGenBuffers_fp(1, &sky_stencil_ibo);
+	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, sky_stencil_ibo);
+	glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, idx_pos * sizeof(unsigned int),
+			indices, GL_STATIC_DRAW);
+
+	glBindVertexArray_fp(0);
+	sky_stencil_total_indices = idx_pos;
+
+	free(verts);
+	free(indices);
+
+	Con_SafePrintf("Sky stencil VBO: %d verts, %d tris\n",
+		       v_pos, idx_pos / 3);
 }
 
 /*

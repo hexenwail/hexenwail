@@ -471,6 +471,7 @@ void R_NewMap (void)
 
 	GL_BuildLightmaps ();
 	R_BuildWorldVBO ();
+	R_BuildSkyStencilVBO ();
 #ifndef __EMSCRIPTEN__
 	R_BuildWorldCull ();
 #endif

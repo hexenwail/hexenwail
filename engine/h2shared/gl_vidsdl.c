@@ -1149,6 +1149,7 @@ static void VID_ChangeVideoMode (int newmode)
 	// Shut down GPU resources before destroying GL context
 	GL_PostProcess_Shutdown();
 	R_FreeWorldVBO();
+	R_FreeSkyStencilVBO();
 	R_FreeWorldCull();
 	GL_ImmInvalidateState();
 	GL_VBO_Shutdown();
@@ -1220,6 +1221,7 @@ static void VID_ChangeVideoMode (int newmode)
 	if (cl.worldmodel)
 	{
 		R_BuildWorldVBO ();
+		R_BuildSkyStencilVBO ();
 #ifndef __EMSCRIPTEN__
 		R_BuildWorldCull ();
 #endif

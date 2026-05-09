@@ -152,6 +152,12 @@ typedef struct msurface_s
 	int		vbo_firstvert;		// first vertex in static world VBO
 	int		vbo_firstindex;		// first index in static world IBO
 	int		vbo_numtris;		// triangle count for this surface
+
+	/* Sky stencil pre-pass: pre-baked fan-triangulated indices
+	 * into a separate static sky VBO/IBO (positions only).  Used
+	 * to skip per-frame triangulation + glBufferData. */
+	int		sky_firstindex;		// first index in sky stencil IBO (-1 if none)
+	int		sky_numindices;		// triangle index count
 } msurface_t;
 
 typedef struct mnode_s

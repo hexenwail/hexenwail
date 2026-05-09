@@ -360,6 +360,8 @@ float R_LightPointColor (vec3_t p);
 void GL_BuildLightmaps (void);
 void R_BuildWorldVBO (void);
 void R_FreeWorldVBO (void);
+void R_BuildSkyStencilVBO (void);
+void R_FreeSkyStencilVBO (void);
 void R_BuildWorldCull (void);
 void R_FreeWorldCull (void);
 void R_DispatchWorldCull (void);
