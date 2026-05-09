@@ -141,6 +141,28 @@ static void SubdividePolygon (int numverts, float *verts)
 		poly->verts[i][3] = s;
 		poly->verts[i][4] = t;
 	}
+
+	/* Cache the world-space bbox so Sky_ProcessPoly /
+	 * R_DrawSkyChain can frustum-cull this poly without re-walking
+	 * verts every frame.  Without this, Hunk_AllocName's zero-init
+	 * leaves mins == maxs == (0,0,0), and R_CullBox then rejects
+	 * the poly whenever the camera isn't at the world origin —
+	 * causing the skybox to disappear at most positions. */
+	if (numverts > 0)
+	{
+		int j, k;
+		VectorCopy (poly->verts[0], poly->mins);
+		VectorCopy (poly->verts[0], poly->maxs);
+		for (j = 1; j < numverts; j++)
+		{
+			float *v = poly->verts[j];
+			for (k = 0; k < 3; k++)
+			{
+				if (v[k] < poly->mins[k]) poly->mins[k] = v[k];
+				if (v[k] > poly->maxs[k]) poly->maxs[k] = v[k];
+			}
+		}
+	}
 }
 
 /*
