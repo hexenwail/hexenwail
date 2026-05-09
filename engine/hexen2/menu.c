@@ -4975,7 +4975,7 @@ static const char *Credit2TextMP[MAX_LINES2_MP] =
    ""
 };
 
-#define QUIT_SIZE 16	/* was 18. stole 2 for the two uHexen2 lines. */
+#define QUIT_SIZE 12	/* visible credit-scroll lines */
 
 void M_Menu_Quit_f (void)
 {
@@ -5120,7 +5120,7 @@ static void M_Quit_Draw (void)
 	for (i = 4; i < 38; i++, x += 8)
 	{
 		M_DrawPic(x, y, p);	// background at top for smooth scroll out
-		M_DrawPic(x, y + (QUIT_SIZE*8), p);	// draw at bottom for smooth scroll in
+		M_DrawPic(x, y + (QUIT_SIZE*8) + 8, p);	// draw at bottom for smooth scroll in
 	}
 
 	y += (QUIT_SIZE * 8) + 8;
