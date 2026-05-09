@@ -2982,8 +2982,13 @@ skip_dlights:
 		return;
 	}
 
-	// hack the depth range to prevent view model from poking into walls
-	glDepthRange_fp (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
+	// hack the depth range to prevent view model from poking into walls.
+	// Reversed-Z: near is gldepthmax (1.0), so the viewmodel slice sits
+	// at the upper 30% of the range instead of the lower 30%.
+	if (gl_clipcontrol_able)
+		glDepthRange_fp (gldepthmax - 0.3*(gldepthmax-gldepthmin), gldepthmax);
+	else
+		glDepthRange_fp (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
 
 	/* override projection for weapon FOV if set */
 	if (r_viewmodel_fov.value > 0)
@@ -3432,15 +3437,28 @@ R_Clear
 */
 static void R_Clear (void)
 {
+	const GLenum dfunc = gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
+
 	if (r_mirroralpha.value != 1.0)
 	{
 		if (gl_clear.integer)
 			glClear_fp (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		else
 			glClear_fp (GL_DEPTH_BUFFER_BIT);
-		gldepthmin = 0;
-		gldepthmax = 0.5;
-		glDepthFunc_fp (GL_LEQUAL);
+		/* Mirror split: primary view occupies the "near" half of the
+		 * window-Z range, mirror reflection the "far" half. Reversed-Z
+		 * inverts which half is near (1.0 is near), so the splits flip. */
+		if (gl_clipcontrol_able)
+		{
+			gldepthmin = 0.5f;
+			gldepthmax = 1.0f;
+		}
+		else
+		{
+			gldepthmin = 0.0f;
+			gldepthmax = 0.5f;
+		}
+		glDepthFunc_fp (dfunc);
 	}
 	else
 	{
@@ -3450,7 +3468,7 @@ static void R_Clear (void)
 			glClear_fp (GL_DEPTH_BUFFER_BIT);
 		gldepthmin = 0;
 		gldepthmax = 1;
-		glDepthFunc_fp (GL_LEQUAL);
+		glDepthFunc_fp (dfunc);
 	}
 
 	glDepthRange_fp (gldepthmin, gldepthmax);
@@ -3498,10 +3516,18 @@ static void R_Mirror (void)
 		cl_numvisedicts++;
 	}
 
-	gldepthmin = 0.5;
-	gldepthmax = 1;
+	if (gl_clipcontrol_able)
+	{
+		gldepthmin = 0.0f;
+		gldepthmax = 0.5f;
+	}
+	else
+	{
+		gldepthmin = 0.5f;
+		gldepthmax = 1.0f;
+	}
 	glDepthRange_fp (gldepthmin, gldepthmax);
-	glDepthFunc_fp (GL_LEQUAL);
+	glDepthFunc_fp (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	R_RenderScene ();
 
@@ -3516,10 +3542,18 @@ static void R_Mirror (void)
 
 	R_DrawTransEntitiesOnList (false);
 
-	gldepthmin = 0;
-	gldepthmax = 0.5;
+	if (gl_clipcontrol_able)
+	{
+		gldepthmin = 0.5f;
+		gldepthmax = 1.0f;
+	}
+	else
+	{
+		gldepthmin = 0.0f;
+		gldepthmax = 0.5f;
+	}
 	glDepthRange_fp (gldepthmin, gldepthmax);
-	glDepthFunc_fp (GL_LEQUAL);
+	glDepthFunc_fp (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	// blend on top
 	glEnable_fp (GL_BLEND);

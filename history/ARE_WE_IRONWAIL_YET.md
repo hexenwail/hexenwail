@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-05
+Last updated: 2026-05-09
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 6 | 0 | 6 | 0 |
+| Rendering — GPU Pipeline | 7 | 0 | 5 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
 | UX / Menus / HUD | 16 | 1 | 5 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **52** | **6** | **18** | **8** |
+| **TOTAL** | **53** | **6** | **17** | **8** |
 
-**Parity: 68% ported, 8% partial, 24% missing** (excluding N/A)
+**Parity: 70% ported, 8% partial, 22% missing** (excluding N/A)
 
 ---
 
@@ -39,7 +39,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Triple-buffering / frames in flight | ❌ | Ironwail uses `FRAMES_IN_FLIGHT=3` with GPU fence sync |
 | Persistent mapped buffers | ❌ | `ARB_buffer_storage`, `GL_MAP_PERSISTENT_BIT` |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
-| Reversed-Z depth buffer | ❌ | `ARB_clip_control` — eliminates z-fighting |
+| Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ❌ | SSE2 fast-path downsample |
 | IQM skeletal model support | ❌ | Runtime skeletal animation |
 
@@ -177,7 +177,6 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ### P1 — High
 1. **Persistent mapped buffers** — lock-free GPU upload, big perf win
-2. **Reversed-Z depth** — eliminates z-fighting on large maps
 
 ### P2 — Medium
 5. **Triple-buffering / frames in flight** — smoother frame pacing

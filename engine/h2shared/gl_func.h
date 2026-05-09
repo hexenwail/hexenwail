@@ -379,6 +379,11 @@ GL_FUNCTION_OPT(void, glQueryCounter, (GLuint, GLenum))
 GL_FUNCTION_OPT(void, glGetQueryObjectui64v, (GLuint, GLenum, HWGLuint64 *))
 GL_FUNCTION_OPT(void, glGetQueryObjectiv, (GLuint, GLenum, GLint *))
 
+/* GL_ARB_clip_control (core 4.5) — reversed-Z depth buffer. Optional;
+ * gl_clipcontrol_able is set true at init when both the entry point and
+ * the extension are present. */
+GL_FUNCTION_OPT(void, glClipControl, (GLenum, GLenum))
+
 /* Per-buffer blending + MRT (GL 4.0 / GL_ARB_draw_buffers_blend) */
 GL_FUNCTION_OPT(void, glBlendFunci, (GLuint, GLenum, GLenum))
 GL_FUNCTION_OPT(void, glDrawBuffers, (GLsizei, const GLenum *))
@@ -457,6 +462,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glGetQueryObjectui64v_fp(id,p,v) ((void)0)
 #define glGetQueryObjectiv_fp(id,p,v)	((void)0)
 #define glBlendFunci_fp(b,s,d)		((void)0)
+#define glClipControl_fp(o,d)		((void)0)
 #define glDrawBuffers_fp		glDrawBuffers
 #define glClearBufferfv_fp		glClearBufferfv
 #define glMultiDrawElementsIndirect_fp(m,t,i,c,s) ((void)0)

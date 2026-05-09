@@ -973,8 +973,10 @@ void Sky_DrawSkyBox (void)
 	// update UV scroll offset (same unit as r_skyspeed_*: scroll units/sec, 128 = full texture)
 	sky_box_scroll = (float)fmod(cl.time * r_skybox_speed.value * (1.0 / 128.0), 1.0);
 
-	// Force skybox to render at maximum depth (always behind everything)
-	glDepthRange_fp(1.0, 1.0);
+	// Force skybox to render at maximum depth (always behind everything).
+	// Reversed-Z: max-depth is 0.0; standard: 1.0.
+	glDepthRange_fp(gl_clipcontrol_able ? 0.0f : 1.0f,
+	                gl_clipcontrol_able ? 0.0f : 1.0f);
 
 	// Disable face culling so faces are visible from inside
 	glDisable_fp(GL_CULL_FACE);
@@ -1028,7 +1030,7 @@ void Sky_DrawSkyBox (void)
 		}
 	}
 
-	// Restore GL state
+	// Restore GL state — full window-Z range is symmetric, no flip needed
 	glDepthRange_fp(0.0, 1.0);
 	glEnable_fp(GL_CULL_FACE);
 }
@@ -1257,14 +1259,14 @@ void Sky_DrawSky (void)
 		}
 		else
 		{
-			glDepthFunc_fp(GL_LEQUAL);
+			glDepthFunc_fp(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 			glDepthMask_fp(0);
 		}
 
 		Sky_DrawSkyBox ();
 
 		glDepthMask_fp(1);
-		glDepthFunc_fp(GL_LEQUAL);
+		glDepthFunc_fp(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 		if (have_stencil)
 			glDisable_fp(GL_STENCIL_TEST);
 	}

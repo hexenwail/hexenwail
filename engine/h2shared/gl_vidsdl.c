@@ -215,6 +215,7 @@ static const char	*gl_version;
 GLint		gl_max_size = 256;
 GLfloat		gl_max_anisotropy;
 float		gldepthmin, gldepthmax;
+qboolean	gl_clipcontrol_able = false;
 
 /* Gamma stuff */
 #define	USE_GAMMA_RAMPS			0
@@ -703,6 +704,11 @@ static void GL_LoadFunctionPointers (void)
 	glDrawBuffers_fp = (glDrawBuffers_f) SDL_GL_GetProcAddress("glDrawBuffers");
 	glClearBufferfv_fp = (glClearBufferfv_f) SDL_GL_GetProcAddress("glClearBufferfv");
 
+	/* GL_ARB_clip_control (core 4.5) — reversed-Z. Optional; null on
+	 * older drivers, in which case GL_Init keeps the standard depth
+	 * pipeline. */
+	glClipControl_fp = (glClipControl_f) SDL_GL_GetProcAddress("glClipControl");
+
 	/* Timer queries (GL 3.3 / GL_ARB_timer_query) */
 	glGenQueries_fp = (glGenQueries_f) SDL_GL_GetProcAddress("glGenQueries");
 	glDeleteQueries_fp = (glDeleteQueries_f) SDL_GL_GetProcAddress("glDeleteQueries");
@@ -877,6 +883,22 @@ static void GL_Init (void)
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
+
+	/* Reversed-Z depth (Ironwail-parity). Detect by entry-point load:
+	 * if the driver exposes glClipControl, switch the clip space to
+	 * [0,1] and flip depth defaults so far=0, near=1, depth-test=GEQUAL.
+	 * Per-call-site flips for sky / mirror / viewmodel are gated on
+	 * gl_clipcontrol_able elsewhere. */
+#ifndef __EMSCRIPTEN__
+	gl_clipcontrol_able = (glClipControl_fp != NULL);
+	if (gl_clipcontrol_able)
+	{
+		glClipControl_fp (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+		glDepthFunc_fp (GL_GEQUAL);
+		glClearDepth (0.0);
+		Con_SafePrintf ("Reversed-Z depth buffer enabled (ARB_clip_control)\n");
+	}
+#endif
 
 //	glClearColor_fp(1,0,0,0);
 	glCullFace_fp(GL_FRONT);

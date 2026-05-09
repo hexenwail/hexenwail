@@ -184,6 +184,14 @@ extern	glmode_t	gl_texmodes[NUM_GL_FILTERS];
 extern	GLint		gl_max_size;
 extern	GLfloat		gl_max_anisotropy;
 extern	qboolean	have_stencil;
+extern	qboolean	gl_clipcontrol_able;	/* reversed-Z when true */
+
+#ifndef GL_ZERO_TO_ONE
+#define GL_ZERO_TO_ONE			0x935F
+#endif
+#ifndef GL_LOWER_LEFT
+#define GL_LOWER_LEFT			0x8CA1
+#endif
 
 /* view origin */
 extern	vec3_t		vup;
