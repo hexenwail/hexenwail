@@ -500,11 +500,18 @@ static void PF_pimpmodel (void)
 	pimp->glow_settings[LIGHT_RADIUS] = max_health;
 	pimp->glow_settings[LIGHT_STYLE] = atoi(ED_GetProperty(ref_ent, "style"));
 
-	/* Plan B: propagate glow state to the shared model so non-pimped
-	   instances inherit (Shanjaq behavior). Trail flags stay per-entity
-	   because they depend on entity-specific movement. */
-	mod->ex_flags |= (pimp->ex_flags & (EF_SPIN | EF_FLOAT | EF_GLOW | EF_ILLUMINATE));
-	memcpy(mod->glow_settings, pimp->glow_settings, sizeof(mod->glow_settings));
+	/* Plan B (narrowed): propagate ONLY the EF_GLOW orb-enable flag to
+	   the shared model so non-pimped instances of the same model start
+	   showing their orb (Shanjaq behavior — fixes missing glows on mods
+	   that pimp a single prototype expecting model-wide effect).
+	   - Color/radius/style NOT copied: each instance keeps its own
+	     engine-set or per-entity values; a single pimp can't recolor
+	     every instance of the model.
+	   - SPIN/FLOAT NOT copied: visual animation should stay per-entity.
+	   - ILLUMINATE NOT copied: cl_main.c allocates a dlight per frame
+	     for every entity with this flag — propagating made multi-entity
+	     effects (e.g. lightning) stack dlights. */
+	mod->ex_flags |= (pimp->ex_flags & EF_GLOW);
 
 	G_INT(OFS_RETURN) = 1;
 }
