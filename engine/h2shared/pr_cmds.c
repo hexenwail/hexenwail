@@ -473,23 +473,33 @@ static void PF_pimpmodel (void)
 		pimp->trail_override = true;
 	}
 
-	/* Apply glow settings to per-entity override.
-	 * The orb is gated purely by spawnflag 4 (Shanjaq behavior).
-	 * The color value here is ALSO consumed by EF_ILLUMINATE for the
-	 * cast dlight, so non-zero color does NOT imply an orb. */
-	if (glow_color[0] > 1 || glow_color[1] > 1 || glow_color[2] > 1)
+	/* Apply glow settings to per-entity override. */
 	{
-		pimp->glow_settings[COLOR_R] = glow_color[0] / 255.0f;
-		pimp->glow_settings[COLOR_G] = glow_color[1] / 255.0f;
-		pimp->glow_settings[COLOR_B] = glow_color[2] / 255.0f;
+		qboolean color_set = false;
+		if (glow_color[0] > 1 || glow_color[1] > 1 || glow_color[2] > 1)
+		{
+			pimp->glow_settings[COLOR_R] = glow_color[0] / 255.0f;
+			pimp->glow_settings[COLOR_G] = glow_color[1] / 255.0f;
+			pimp->glow_settings[COLOR_B] = glow_color[2] / 255.0f;
+			color_set = true;
+		}
+		else if (glow_color[0] != 0 || glow_color[1] != 0 || glow_color[2] != 0)
+		{
+			pimp->glow_settings[COLOR_R] = glow_color[0];
+			pimp->glow_settings[COLOR_G] = glow_color[1];
+			pimp->glow_settings[COLOR_B] = glow_color[2];
+			color_set = true;
+		}
+		/* else (color '0 0 0'): keep model defaults */
+
+		/* If a color was given but no glow/illuminate effect was selected
+		 * via spawnflags, auto-enable the orb. Old QC patterns (e.g. SoT
+		 * obj_evileyes) call pimpmodel with just a color expecting an orb,
+		 * without setting spawnflag 4. Don't fire when the QC explicitly
+		 * chose EF_ILLUMINATE (8) — that color is for the dlight. */
+		if (color_set && !(spawnflags & (4 | 8)))
+			pimp->ex_flags |= EF_GLOW;
 	}
-	else if (glow_color[0] != 0 || glow_color[1] != 0 || glow_color[2] != 0)
-	{
-		pimp->glow_settings[COLOR_R] = glow_color[0];
-		pimp->glow_settings[COLOR_G] = glow_color[1];
-		pimp->glow_settings[COLOR_B] = glow_color[2];
-	}
-	/* else (color '0 0 0'): keep model defaults */
 
 	pimp->glow_settings[COLOR_A] = (abslight != 0.0f) ? abslight : 0.75f;
 	pimp->glow_settings[ORB_OFFSET_X] = view_ofs[0];
