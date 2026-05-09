@@ -700,7 +700,15 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
 
-	if (e->drawflags & DRF_TRANSLUCENT)
+	/* MLS_ABSLIGHT skip restored from pre-90265f406. Brush entities with
+	 * an absolute-light value (typically have no baked lightmap samples)
+	 * must use the single-pass path: lightmap_atlas × abslight would be
+	 * 0 × abslight = 0 (black) for any surface without samples, which is
+	 * what bit pillars on romeric6 and similar maps. Vanilla Hexen II
+	 * behavior — uniform abslight intensity, no per-texel variation.
+	 * uhexen2-mxkm. */
+	if ((e->drawflags & DRF_TRANSLUCENT) ||
+	    (e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPoly (fa->polys);
@@ -844,6 +852,18 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	}
 	else
 	{
+		/* MLS_ABSLIGHT skip restored from pre-90265f406 — see
+		 * R_RenderBrushPoly for the full reasoning. uhexen2-mxkm. */
+		if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
+		{
+			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+
+			if (fa->flags & SURF_UNDERWATER)
+				DrawGLWaterPoly (fa->polys);
+			else
+				DrawGLPoly (fa->polys);
+		}
+		else
 		{
 			glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 			if (lm_atlas_texture)
