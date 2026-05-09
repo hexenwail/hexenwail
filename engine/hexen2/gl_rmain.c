@@ -1765,7 +1765,10 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	int		pose, prevpose, numposes;
 	float		interval, lerpfrac, add, entScale;
 	float		xyfact = 1.0, zfact = 1.0;
-	float		tscale[3], torigin[3];
+	/* Switch fall-throughs below leave these uninitialized when
+	 * drawflags has unrecognized bits — gcc -Wmaybe-uninitialized
+	 * warns under aggressive inlining. */
+	float		tscale[3] = {0,0,0}, torigin[3] = {0,0,0};
 	float		world[16], saved_mv[16];
 	vec3_t		dist;
 	byte		cs;
