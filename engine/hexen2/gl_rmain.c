@@ -2235,7 +2235,19 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	}
 
 	inst->alpha = 1.0f;
-	inst->blend = 1.0f - lerpfrac;  /* shader: mix(v1, v0, blend), 1.0 = use v0 */
+	{
+		/* Clamp blend to [0,1] — GLSL mix() extrapolates outside this
+		 * range, so any bogus lerpfrac (e.g. e->lerpstart from a stale
+		 * time reference after map change / demo seek / save-load) would
+		 * fling vertices outward from the entity origin.  Legacy CPU path
+		 * has the same risk but is guarded by 'do_lerp = lerpfrac in (0,1)'
+		 * inside GL_DrawAliasFrame; the SSBO path needs the clamp here.
+		 * uhexen2-iir3. */
+		float blend = 1.0f - lerpfrac;
+		if (blend < 0.0f) blend = 0.0f;
+		else if (blend > 1.0f) blend = 1.0f;
+		inst->blend = blend;	/* shader: mix(v1, v0, blend), 1.0 = use v0 */
+	}
 	inst->pose0 = pose * gm->poseverts;	/* pre-multiply for direct SSBO indexing */
 	inst->pose1 = prevpose * gm->poseverts;
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
