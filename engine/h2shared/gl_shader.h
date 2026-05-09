@@ -71,6 +71,21 @@ extern gl_alias_inst_prog_t gl_shader_alias_inst;
 void	GL_AliasInst_Init (void);
 void	GL_AliasInst_Shutdown (void);
 
+/* Instanced world program for batched brush-submodel rendering.
+ * Uses gl_BaseInstance + per-instance worldmatrix in an SSBO so
+ * that one glMultiDrawElementsIndirect call covers many entities. */
+typedef struct {
+	GLuint	program;
+	GLint	u_fog_density;
+	GLint	u_fog_color;
+	GLint	u_alpha_threshold;
+} gl_world_inst_prog_t;
+
+extern gl_world_inst_prog_t gl_shader_world_inst;
+
+void	GL_WorldInst_Init (void);
+void	GL_WorldInst_Shutdown (void);
+
 void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *pup, const float *pright,
 				     const float *vpn, const float *origin,

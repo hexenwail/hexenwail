@@ -715,6 +715,12 @@ cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
 #endif
 
+/* r_brush_inst: 0 = legacy per-entity path, 1 = MDI instanced batched.
+ * Default off — the instanced path has a known bug (dragging /
+ * popping on some moving brush entities) that needs debugging
+ * before it can be made the default. */
+cvar_t	r_brush_inst = {"r_brush_inst", "0", CVAR_ARCHIVE};
+
 /*
 =============
 GL_DrawAliasShadow -- sezero projected mesh shadow
@@ -1301,6 +1307,432 @@ typedef struct {
 	GLuint	skin_tex;
 	GLuint	fb_tex;
 } inst_sort_t;
+
+/*
+=============
+Instanced brush submodel rendering (GL 4.6 + ARB_shader_draw_parameters)
+
+One glMultiDrawElementsIndirect per visible texture covers every brush
+entity sharing that texture.  Each indirect command's baseInstance
+points to the entity's per-frame matrix in world_inst_ssbo, which the
+vertex shader (sworld_inst_vert) reads via gl_BaseInstance.
+
+Special surfaces (sky / turb / fence / underwater-with-warp) on a
+brush entity fall back to the legacy per-surface R_RenderBrushPoly
+path; R_DrawBrushModel still handles them when called from
+R_DrawTransEntitiesOnList.
+=============
+*/
+
+#define MAX_WORLD_INSTANCES	1024
+#define MAX_WORLD_INDIRECT	8192
+
+typedef struct {
+	float	wm0[4];		/* worldmatrix transposed mat3x4 row 0 */
+	float	wm1[4];		/* row 1 */
+	float	wm2[4];		/* row 2 */
+	float	misc[4];	/* x = alpha, yzw = padding */
+} world_instance_t;
+
+typedef struct {
+	float	viewproj[16];
+} world_inst_header_t;
+
+typedef struct {
+	GLuint	count;		/* index count */
+	GLuint	instanceCount;	/* always 1 */
+	GLuint	firstIndex;	/* surf->vbo_firstindex */
+	GLuint	baseVertex;	/* always 0 */
+	GLuint	baseInstance;	/* world_instances[] index */
+} world_indirect_cmd_t;
+
+typedef struct {
+	GLuint	tex;		/* gl_texturenum */
+	int	first_cmd;	/* index into world_indirect_cmds[] */
+	int	cmd_count;
+} world_tex_batch_t;
+
+static world_instance_t	world_instances[MAX_WORLD_INSTANCES];
+static int		num_world_instances;
+static world_indirect_cmd_t world_indirect_cmds[MAX_WORLD_INDIRECT];
+static int		num_world_indirect;
+/* per-(texture, instance) sort: 8 bytes per surface, max 8192 */
+typedef struct {
+	GLuint		tex;
+	GLuint		instance;
+	GLuint		first;
+	GLuint		count;
+} world_surf_key_t;
+static world_surf_key_t	world_surf_keys[MAX_WORLD_INDIRECT];
+static int		num_world_surf_keys;
+static world_tex_batch_t world_tex_batches[256];
+static int		num_world_tex_batches;
+static GLuint		world_inst_ssbo;
+static GLuint		world_indirect_buffer;
+/* Track which brush entities still need legacy R_DrawBrushModel for
+ * special (sky/fence/turb/underwater-warp) surfaces. */
+static qboolean		world_inst_collected[MAX_VISEDICTS];
+static qboolean		world_inst_needs_legacy[MAX_VISEDICTS];
+
+extern qboolean		R_CullBox (vec3_t mins, vec3_t maxs);
+extern void		R_MarkLights (dlight_t *light, int bit, mnode_t *node);
+extern int		c_brush_polys;
+extern GLuint		world_vao;
+extern GLuint		world_ibo;
+extern int		world_num_indices;
+extern GLuint		lm_atlas_texture;
+extern qboolean		lm_atlas_enabled;
+extern int		lightmap_bytes;
+#define LM_BLOCK_WIDTH	128
+#define LM_BLOCK_HEIGHT	128
+extern unsigned char	*lightmaps;
+extern int		d_lightstylevalue[256];
+extern int		r_framecount;
+extern void		R_BuildLightMap_Public (msurface_t *surf, byte *dest, int stride);
+extern void		LM_ExpandDirtyRect (int lmnum, int x, int y, int w, int h);
+/* The above two have static linkage in gl_rsurf.c; we'll wire them
+ * via a small "do lightmap rebuild" helper added there. */
+extern void		R_LightmapRebuildIfDirty (msurface_t *s);
+extern texture_t	*R_TextureAnimation (entity_t *e, texture_t *base);
+
+static int world_surf_key_cmp (const void *a, const void *b)
+{
+	const world_surf_key_t *sa = (const world_surf_key_t *)a;
+	const world_surf_key_t *sb = (const world_surf_key_t *)b;
+	if (sa->tex != sb->tex)
+		return (sa->tex < sb->tex) ? -1 : 1;
+	if (sa->instance != sb->instance)
+		return (sa->instance < sb->instance) ? -1 : 1;
+	if (sa->first != sb->first)
+		return (sa->first < sb->first) ? -1 : 1;
+	return 0;
+}
+
+extern cvar_t r_brush_inst;
+
+qboolean R_BrushInst_Available (void)
+{
+	return r_brush_inst.integer != 0 &&
+	       gl_shader_world_inst.program != 0 &&
+	       world_vao && world_ibo && lm_atlas_enabled && lm_atlas_texture;
+}
+
+void R_CollectBrushInstances (void)
+{
+	int		i, k, s_idx;
+	entity_t	*e;
+	qmodel_t	*clmodel;
+	vec3_t		mins, maxs;
+	float		modelorg_local[3];
+	qboolean	rotated;
+
+	num_world_instances = 0;
+	num_world_indirect  = 0;
+	num_world_surf_keys = 0;
+	num_world_tex_batches = 0;
+	memset(world_inst_collected, 0, sizeof(world_inst_collected));
+	memset(world_inst_needs_legacy, 0, sizeof(world_inst_needs_legacy));
+
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		float fwd[3], rt[3], up[3];
+		entity_t *eview;
+		qboolean translucent;
+
+		e = cl_visedicts[i];
+		if (!e->model || e->model->type != mod_brush)
+			continue;
+
+		/* Skip translucent/abslight/transparent — handled via legacy
+		 * trans-edicts pass. */
+		translucent = ((e->drawflags & DRF_TRANSLUCENT) ||
+			(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
+		if (translucent)
+			continue;
+		if ((e->drawflags & MLS_MASKIN) == MLS_ABSLIGHT)
+			continue;
+		if (e->model->flags & EF_TRANSPARENT)
+			continue;
+
+		clmodel = e->model;
+		if (e->angles[0] || e->angles[1] || e->angles[2])
+		{
+			rotated = true;
+			for (k = 0; k < 3; k++)
+			{
+				mins[k] = e->origin[k] - clmodel->radius;
+				maxs[k] = e->origin[k] + clmodel->radius;
+			}
+		}
+		else
+		{
+			rotated = false;
+			VectorAdd (e->origin, clmodel->mins, mins);
+			VectorAdd (e->origin, clmodel->maxs, maxs);
+		}
+		if (R_CullBox (mins, maxs))
+			continue;
+
+		/* Compute model-space view origin for backface culling */
+		VectorSubtract (r_refdef.vieworg, e->origin, modelorg_local);
+		if (rotated)
+		{
+			vec3_t tmp;
+			VectorCopy (modelorg_local, tmp);
+			AngleVectors (e->angles, fwd, rt, up);
+			modelorg_local[0] =  DotProduct (tmp, fwd);
+			modelorg_local[1] = -DotProduct (tmp, rt);
+			modelorg_local[2] =  DotProduct (tmp, up);
+		}
+
+		/* Mark dlights against this submodel's BSP — only when
+		 * a dlight is actually live this frame. */
+		if (clmodel->firstmodelsurface != 0)
+		{
+			for (k = 0; k < MAX_DLIGHTS; k++)
+			{
+				dlight_t *dl = &cl_dlights[k];
+				if (dl->die < cl.time || !dl->radius)
+					continue;
+				if (rotated)
+				{
+					dlight_t tdl = *dl;
+					vec3_t tmp;
+					VectorSubtract (dl->origin, e->origin, tmp);
+					tdl.origin[0] =  DotProduct (tmp, fwd);
+					tdl.origin[1] = -DotProduct (tmp, rt);
+					tdl.origin[2] =  DotProduct (tmp, up);
+					R_MarkLights (&tdl, 1<<k,
+					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
+				}
+				else
+				{
+					R_MarkLights (dl, 1<<k,
+					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
+				}
+			}
+		}
+
+		/* Compute the world matrix.  R_RotateForEntity does:
+		 *   T(origin) * Rz(yaw) * Ry(-pitch) * Rx(-roll)
+		 * Bake that into a 3x4 (transposed mat3x4) row-major. */
+		if (num_world_instances >= MAX_WORLD_INSTANCES)
+			break;
+		eview = e;
+		{
+			float saved_pitch = e->angles[0];
+			float saved_roll  = e->angles[2];
+			float mv_save[16], mv_ent[16];
+			world_instance_t *winst = &world_instances[num_world_instances];
+
+			GL_GetModelview (mv_save);
+			GL_LoadIdentity ();
+			eview->angles[0] = -saved_pitch;
+			eview->angles[2] = -saved_roll;
+			R_RotateForEntity (eview);
+			eview->angles[0] = saved_pitch;
+			eview->angles[2] = saved_roll;
+			GL_GetModelview (mv_ent);
+			GL_LoadMatrixf (mv_save);
+
+			/* mv_ent is column-major mat4.  Pack as transposed
+			 * mat3x4 (3 vec4 rows): row j col c = mv_ent[c*4+j]. */
+			winst->wm0[0] = mv_ent[0];
+			winst->wm0[1] = mv_ent[4];
+			winst->wm0[2] = mv_ent[8];
+			winst->wm0[3] = mv_ent[12];
+			winst->wm1[0] = mv_ent[1];
+			winst->wm1[1] = mv_ent[5];
+			winst->wm1[2] = mv_ent[9];
+			winst->wm1[3] = mv_ent[13];
+			winst->wm2[0] = mv_ent[2];
+			winst->wm2[1] = mv_ent[6];
+			winst->wm2[2] = mv_ent[10];
+			winst->wm2[3] = mv_ent[14];
+			winst->misc[0] = 1.0f;	/* alpha */
+			winst->misc[1] = winst->misc[2] = winst->misc[3] = 0.0f;
+		}
+		int instance_idx = num_world_instances++;
+		world_inst_collected[i] = true;
+
+		/* Walk surfaces: backface cull, accept non-special, mark
+		 * special so legacy pass renders them. */
+		{
+			msurface_t *psurf = &clmodel->surfaces[clmodel->firstmodelsurface];
+			for (s_idx = 0; s_idx < clmodel->nummodelsurfaces; s_idx++, psurf++)
+			{
+				float dot;
+				mplane_t *pp = psurf->plane;
+
+				if (psurf->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
+						    SURF_DRAWFENCE | SURF_UNDERWATER))
+				{
+					world_inst_needs_legacy[i] = true;
+					continue;
+				}
+				if (psurf->vbo_numtris <= 0)
+					continue;
+
+				dot = DotProduct (modelorg_local, pp->normal) - pp->dist;
+				if (!(((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+				      (!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON))))
+					continue;
+
+				R_LightmapRebuildIfDirty (psurf);
+
+				if (num_world_surf_keys >= MAX_WORLD_INDIRECT)
+					break;
+				{
+					texture_t *t = R_TextureAnimation (e, psurf->texinfo->texture);
+					world_surf_key_t *wsk = &world_surf_keys[num_world_surf_keys++];
+					wsk->tex      = t->gl_texturenum;
+					wsk->instance = instance_idx;
+					wsk->first    = psurf->vbo_firstindex;
+					wsk->count    = psurf->vbo_numtris * 3;
+				}
+			}
+		}
+	}
+}
+
+void R_DrawBrushInstanced (void)
+{
+#ifndef __EMSCRIPTEN__
+	gl_world_inst_prog_t *prog = &gl_shader_world_inst;
+	int i, b;
+	extern float r_fog_density;
+	extern float r_fog_color[3];
+
+	if (!prog->program || num_world_instances == 0 || num_world_surf_keys == 0)
+		return;
+
+	/* Sort surfaces by (texture, instance, firstIndex) so we can
+	 * collapse contiguous IBO ranges and group by texture. */
+	qsort (world_surf_keys, num_world_surf_keys, sizeof(world_surf_keys[0]),
+	       world_surf_key_cmp);
+
+	/* Build per-texture batches and indirect command buffer. */
+	for (i = 0; i < num_world_surf_keys && num_world_tex_batches < (int)(sizeof(world_tex_batches)/sizeof(world_tex_batches[0])); )
+	{
+		GLuint cur_tex = world_surf_keys[i].tex;
+		world_tex_batch_t *batch = &world_tex_batches[num_world_tex_batches++];
+		batch->tex = cur_tex;
+		batch->first_cmd = num_world_indirect;
+		batch->cmd_count = 0;
+
+		while (i < num_world_surf_keys && world_surf_keys[i].tex == cur_tex
+		    && num_world_indirect < MAX_WORLD_INDIRECT)
+		{
+			world_surf_key_t *k = &world_surf_keys[i];
+			world_indirect_cmd_t *cmd;
+			GLuint inst = k->instance;
+			GLuint first = k->first;
+			GLuint count = k->count;
+			i++;
+			/* Coalesce contiguous ranges with the same instance */
+			while (i < num_world_surf_keys && world_surf_keys[i].tex == cur_tex
+			    && world_surf_keys[i].instance == inst
+			    && world_surf_keys[i].first == first + count)
+			{
+				count += world_surf_keys[i].count;
+				i++;
+			}
+			cmd = &world_indirect_cmds[num_world_indirect++];
+			cmd->count         = count;
+			cmd->instanceCount = 1;
+			cmd->firstIndex    = first;
+			cmd->baseVertex    = 0;
+			cmd->baseInstance  = inst;
+			batch->cmd_count++;
+			c_brush_polys++;
+		}
+	}
+
+	/* Lazy-create SSBO + indirect buffer */
+	if (!world_inst_ssbo)
+	{
+		glGenBuffers_fp(1, &world_inst_ssbo);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, world_inst_ssbo);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				sizeof(world_inst_header_t) +
+				MAX_WORLD_INSTANCES * sizeof(world_instance_t),
+				NULL, GL_DYNAMIC_DRAW);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+	}
+	if (!world_indirect_buffer)
+	{
+		glGenBuffers_fp(1, &world_indirect_buffer);
+		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, world_indirect_buffer);
+		glBufferData_fp(GL_DRAW_INDIRECT_BUFFER,
+				MAX_WORLD_INDIRECT * sizeof(world_indirect_cmd_t),
+				NULL, GL_DYNAMIC_DRAW);
+		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
+	}
+
+	/* Fill header (ViewProj) and upload */
+	{
+		world_inst_header_t header;
+		GL_GetMVP (header.viewproj);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, world_inst_ssbo);
+		glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, sizeof(header), &header);
+		glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, sizeof(header),
+				   num_world_instances * sizeof(world_instance_t),
+				   world_instances);
+	}
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, world_inst_ssbo);
+
+	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, world_indirect_buffer);
+	glBufferSubData_fp(GL_DRAW_INDIRECT_BUFFER, 0,
+			   num_world_indirect * sizeof(world_indirect_cmd_t),
+			   world_indirect_cmds);
+
+	/* Bind world VAO + instanced shader + lightmap atlas + uniforms */
+	glBindVertexArray_fp(world_vao);
+	glUseProgram_fp(prog->program);
+	if (prog->u_fog_density >= 0)
+		glUniform1f_fp(prog->u_fog_density, r_fog_density);
+	if (prog->u_fog_color >= 0)
+		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (prog->u_alpha_threshold >= 0)
+		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	GL_ImmInvalidateState();
+
+	/* Dispatch one MDI per texture batch */
+	for (b = 0; b < num_world_tex_batches; b++)
+	{
+		world_tex_batch_t *bt = &world_tex_batches[b];
+		if (bt->cmd_count <= 0)
+			continue;
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		glBindTexture_fp(GL_TEXTURE_2D, bt->tex);
+		glMultiDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,
+		    (void *)((size_t)bt->first_cmd * sizeof(world_indirect_cmd_t)),
+		    bt->cmd_count, sizeof(world_indirect_cmd_t));
+	}
+
+	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	glBindVertexArray_fp(0);
+	glUseProgram_fp(0);
+#endif /* !__EMSCRIPTEN__ */
+}
+
+qboolean R_BrushInst_WasCollected (int visedict_idx)
+{
+	if (visedict_idx < 0 || visedict_idx >= MAX_VISEDICTS)
+		return false;
+	return world_inst_collected[visedict_idx];
+}
+
+qboolean R_BrushInst_NeedsLegacy (int visedict_idx)
+{
+	if (visedict_idx < 0 || visedict_idx >= MAX_VISEDICTS)
+		return false;
+	return world_inst_needs_legacy[visedict_idx];
+}
 
 static int inst_sort_cmp (const void *a, const void *b)
 {
@@ -2012,33 +2444,86 @@ static void R_DrawEntitiesOnList (void)
 	 * adjustment for cl.viewentity fires exactly once per entity
 	 * since each entity belongs to one phase only. */
 
-	/* Phase 1: brush models */
-	{ extern void R_BeginBrushBatch(void); R_BeginBrushBatch(); }
-	for (i = 0; i < cl_numvisedicts; i++)
+	/* Phase 1: brush models.  Prefer the GL 4.6 multi-draw indirect
+	 * instanced path (gl_shader_world_inst); fall back to the per-
+	 * entity R_DrawBrushModel pattern when unavailable (no
+	 * ARB_shader_draw_parameters, WebGL2, etc.). */
 	{
-		e = cl_visedicts[i];
-		if (!e->model || e->model->type != mod_brush)
-			continue;
-		if (e == &cl_entities[cl.viewentity])
-			e->angles[0] *= 0.3;	// chase-cam pitch adj. by FrikaC
+		extern qboolean R_BrushInst_Available(void);
+		extern void	R_CollectBrushInstances(void);
+		extern void	R_DrawBrushInstanced(void);
+		extern qboolean	R_BrushInst_NeedsLegacy(int);
+		extern void	R_DrawBrushModelSpecialOnly(entity_t *e);
+		extern void	R_BeginBrushBatch(void);
+		extern void	R_EndBrushBatch(void);
 
-		item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
-				(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
-		if (!item_trans)
+		/* Apply chase-cam pitch adjustment for cl.viewentity if it's
+		 * a brush model (rare — viewentity is normally alias). */
+		if (cl_entities[cl.viewentity].model &&
+		    cl_entities[cl.viewentity].model->type == mod_brush)
+			cl_entities[cl.viewentity].angles[0] *= 0.3;
+
+		if (R_BrushInst_Available())
 		{
-			if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;
-			R_DrawBrushModel (e, false);
+			/* Single instanced dispatch covers every opaque
+			 * brush entity's regular surfaces. */
+			R_CollectBrushInstances();
+			R_DrawBrushInstanced();
+
+			/* Legacy fall-through for special surfaces (sky /
+			 * turb / fence / underwater) on collected entities,
+			 * plus translucent deferral for non-collected. */
+			for (i = 0; i < cl_numvisedicts; i++)
+			{
+				e = cl_visedicts[i];
+				if (!e->model || e->model->type != mod_brush)
+					continue;
+
+				item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
+					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
+				if (item_trans)
+				{
+					pLeaf = Mod_PointInLeaf (e->origin, cl.worldmodel);
+					if (pLeaf->contents != CONTENTS_WATER)
+						cl_transvisedicts[cl_numtransvisedicts++].ent = e;
+					else
+						cl_transwateredicts[cl_numtranswateredicts++].ent = e;
+					continue;
+				}
+				if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;
+				if (R_BrushInst_NeedsLegacy(i))
+					R_DrawBrushModelSpecialOnly(e);
+			}
 		}
 		else
 		{
-			pLeaf = Mod_PointInLeaf (e->origin, cl.worldmodel);
-			if (pLeaf->contents != CONTENTS_WATER)
-				cl_transvisedicts[cl_numtransvisedicts++].ent = e;
-			else
-				cl_transwateredicts[cl_numtranswateredicts++].ent = e;
+			/* Fallback: legacy per-entity path inside a brush
+			 * batch session for shared GL state. */
+			R_BeginBrushBatch();
+			for (i = 0; i < cl_numvisedicts; i++)
+			{
+				e = cl_visedicts[i];
+				if (!e->model || e->model->type != mod_brush)
+					continue;
+				item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
+					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
+				if (!item_trans)
+				{
+					if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;
+					R_DrawBrushModel (e, false);
+				}
+				else
+				{
+					pLeaf = Mod_PointInLeaf (e->origin, cl.worldmodel);
+					if (pLeaf->contents != CONTENTS_WATER)
+						cl_transvisedicts[cl_numtransvisedicts++].ent = e;
+					else
+						cl_transwateredicts[cl_numtranswateredicts++].ent = e;
+				}
+			}
+			R_EndBrushBatch();
 		}
 	}
-	{ extern void R_EndBrushBatch(void); R_EndBrushBatch(); }
 
 	/* Phase 2: alias-fallback + sprite (latter deferred to trans pass) */
 	for (i = 0; i < cl_numvisedicts; i++)

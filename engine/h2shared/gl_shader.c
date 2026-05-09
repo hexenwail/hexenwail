@@ -777,6 +777,115 @@ void GL_AliasInst_Shutdown (void)
 	memset(&gl_shader_alias_inst, 0, sizeof(gl_shader_alias_inst));
 }
 
+/* --- shader_world_instanced: GL 4.6 + ARB_shader_draw_parameters
+ *  reads per-draw worldmatrix from an SSBO indexed by gl_BaseInstance.
+ *  Vertex stream comes from the shared world VAO (a_position,
+ *  a_texcoord, a_lmcoord); fragment shader is the regular world frag
+ *  (texture * lightmap * vertex_color, fog, alpha-threshold discard). */
+#ifndef __EMSCRIPTEN__
+gl_world_inst_prog_t gl_shader_world_inst;
+
+static const char sworld_inst_vert[] =
+	"#version 460 core\n"
+	"\n"
+	"struct WorldInstance {\n"
+	"    vec4 wm0;\n"        /* world matrix rows 0..2 (transposed mat3x4) */
+	"    vec4 wm1;\n"
+	"    vec4 wm2;\n"
+	"    vec4 misc;\n"       /* x = alpha, yzw padding */
+	"};\n"
+	"\n"
+	"layout(std430, binding=0) restrict readonly buffer WorldInstBuf {\n"
+	"    mat4 ViewProj;\n"
+	"    WorldInstance instances[];\n"
+	"};\n"
+	"\n"
+	"in vec3 a_position;\n"
+	"in vec2 a_texcoord;\n"
+	"in vec2 a_lmcoord;\n"
+	"\n"
+	"out vec2 v_texcoord;\n"
+	"out vec2 v_lmcoord;\n"
+	"out vec4 v_color;\n"
+	"out float v_fogdist;\n"
+	"\n"
+	"void main() {\n"
+	"    WorldInstance inst = instances[gl_BaseInstance];\n"
+	"    mat4x3 world = transpose(mat3x4(inst.wm0, inst.wm1, inst.wm2));\n"
+	"    vec3 world_pos = world * vec4(a_position, 1.0);\n"
+	"    v_texcoord = a_texcoord;\n"
+	"    v_lmcoord  = a_lmcoord;\n"
+	"    v_color    = vec4(1.0, 1.0, 1.0, inst.misc.x);\n"
+	"    v_fogdist  = length((ViewProj * vec4(world_pos, 1.0)).xyz);\n"
+	"    gl_Position = ViewProj * vec4(world_pos, 1.0);\n"
+	"}\n";
+
+static qboolean GL_InitWorldInstProgram (gl_world_inst_prog_t *p)
+{
+	GLuint vs, fs, prog;
+
+	vs = GL_CompileShader(GL_VERTEX_SHADER, sworld_inst_vert);
+	fs = GL_CompileShader(GL_FRAGMENT_SHADER, sworld_frag);
+	if (!vs || !fs) {
+		if (vs) glDeleteShader_fp(vs);
+		if (fs) glDeleteShader_fp(fs);
+		return false;
+	}
+	prog = glCreateProgram_fp();
+	glAttachShader_fp(prog, vs);
+	glAttachShader_fp(prog, fs);
+	glBindAttribLocation_fp(prog, ATTR_POSITION, "a_position");
+	glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
+	glBindAttribLocation_fp(prog, ATTR_LMCOORD,  "a_lmcoord");
+	glLinkProgram_fp(prog);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+	{
+		GLint status;
+		glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
+		if (!status) {
+			char log[1024];
+			glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
+			Sys_Printf("world_instanced link failed: %s\n", log);
+			glDeleteProgram_fp(prog);
+			return false;
+		}
+	}
+	memset(p, 0, sizeof(*p));
+	p->program = prog;
+	p->u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
+	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
+	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
+	glUseProgram_fp(prog);
+	{
+		GLint u_tex0 = glGetUniformLocation_fp(prog, "u_texture0");
+		GLint u_tex1 = glGetUniformLocation_fp(prog, "u_texture1");
+		if (u_tex0 >= 0) glUniform1i_fp(u_tex0, 0);
+		if (u_tex1 >= 0) glUniform1i_fp(u_tex1, 1);
+	}
+	glUseProgram_fp(0);
+	Sys_Printf("  world_instanced: OK (prog=%u)\n", prog);
+	return true;
+}
+#else
+gl_world_inst_prog_t gl_shader_world_inst;
+#endif
+
+void GL_WorldInst_Init (void)
+{
+#ifndef __EMSCRIPTEN__
+	if (!GL_InitWorldInstProgram(&gl_shader_world_inst))
+		Sys_Printf("WARNING: instanced world shader failed to init\n");
+#endif
+}
+
+void GL_WorldInst_Shutdown (void)
+{
+	if (gl_shader_world_inst.program)
+		glDeleteProgram_fp(gl_shader_world_inst.program);
+	memset(&gl_shader_world_inst, 0, sizeof(gl_shader_world_inst));
+}
+
 void GL_Shaders_Init (void)
 {
 	Con_SafePrintf("Initializing shaders...\n");
@@ -797,6 +906,7 @@ void GL_Shaders_Init (void)
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
 #endif
 	GL_AliasInst_Init();
+	GL_WorldInst_Init();
 }
 
 void GL_Shaders_Shutdown (void)
@@ -818,4 +928,5 @@ void GL_Shaders_Shutdown (void)
 		}
 	}
 	GL_AliasInst_Shutdown();
+	GL_WorldInst_Shutdown();
 }
