@@ -96,7 +96,7 @@ static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
 #define LM_ATLAS_HEIGHT	(LM_ATLAS_ROWS * BLOCK_HEIGHT)	/* 2048 */
 GLuint	lm_atlas_texture;	/* non-static — accessed by gl_worldcull.c */
 static int	lm_atlas_layers;	/* number of pages in the atlas */
-static qboolean	lm_atlas_enabled;	/* false = fall back to per-surface binds */
+qboolean	lm_atlas_enabled;	/* false = fall back to per-surface binds */
 
 
 /*
@@ -396,7 +396,7 @@ R_TextureAnimation
 Returns the proper texture for a given time and base texture
 ===============
 */
-static texture_t *R_TextureAnimation (entity_t *e, texture_t *base)
+texture_t *R_TextureAnimation (entity_t *e, texture_t *base)
 {
 	int		reletive;
 	int		count;
@@ -1113,6 +1113,92 @@ int	world_num_indices;
  * shader/VAO/atlas/fog/alpha_threshold bind. */
 qboolean brush_batch_active = false;
 
+/* Walk a brush submodel's surfaces and render only the special ones
+ * (sky / turb / fence / underwater) via the legacy R_RenderBrushPoly.
+ * Used when the brush-instance collector has already drawn this
+ * submodel's regular surfaces via R_DrawBrushInstanced. */
+void R_DrawBrushModelSpecialOnly (entity_t *e)
+{
+	int i;
+	msurface_t *psurf;
+	float dot;
+	qmodel_t *clmodel = e->model;
+	vec3_t modelorg_local;
+	qboolean rotated;
+
+	if (!clmodel)
+		return;
+	rotated = (e->angles[0] || e->angles[1] || e->angles[2]) ? true : false;
+
+	VectorSubtract (r_refdef.vieworg, e->origin, modelorg_local);
+	if (rotated)
+	{
+		vec3_t fwd, rt, up, tmp;
+		VectorCopy (modelorg_local, tmp);
+		AngleVectors (e->angles, fwd, rt, up);
+		modelorg_local[0] =  DotProduct (tmp, fwd);
+		modelorg_local[1] = -DotProduct (tmp, rt);
+		modelorg_local[2] =  DotProduct (tmp, up);
+	}
+
+	GL_PushMatrix ();
+	e->angles[0] = -e->angles[0];
+	e->angles[2] = -e->angles[2];
+	R_RotateForEntity (e);
+	e->angles[0] = -e->angles[0];
+	e->angles[2] = -e->angles[2];
+
+	psurf = &clmodel->surfaces[clmodel->firstmodelsurface];
+	for (i = 0; i < clmodel->nummodelsurfaces; i++, psurf++)
+	{
+		mplane_t *pp;
+		if (!(psurf->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
+				      SURF_DRAWFENCE | SURF_UNDERWATER)))
+			continue;
+		pp = psurf->plane;
+		dot = DotProduct (modelorg_local, pp->normal) - pp->dist;
+		if (((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+		    (!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
+		{
+			R_RenderBrushPoly (e, psurf, false);
+		}
+	}
+
+	GL_PopMatrix ();
+}
+
+/* Rebuild a single surface's lightmap atlas tile if its lightstyles
+ * changed or a dlight touched it.  Exposed for the brush-instance
+ * collector in gl_rmain.c which walks surfaces directly without going
+ * through DrawTextureChains' normal path. */
+void R_LightmapRebuildIfDirty (msurface_t *surf)
+{
+	int maps;
+	qboolean style_changed = false;
+	if (!surf || !surf->polys)
+		return;
+	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+	{
+		if (d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps])
+		{
+			style_changed = true;
+			break;
+		}
+	}
+	if (!(style_changed || surf->dlightframe == r_framecount || surf->cached_dlight))
+		return;
+	{
+		byte *base = lightmaps +
+		    surf->lightmaptexturenum * lightmap_bytes * BLOCK_WIDTH * BLOCK_HEIGHT;
+		base += surf->light_t * BLOCK_WIDTH * lightmap_bytes
+		    + surf->light_s * lightmap_bytes;
+		R_BuildLightMap (surf, base, BLOCK_WIDTH * lightmap_bytes);
+		LM_ExpandDirtyRect (surf->lightmaptexturenum,
+		    surf->light_s, surf->light_t,
+		    (surf->extents[0] >> 4) + 1, (surf->extents[1] >> 4) + 1);
+	}
+}
+
 void R_BeginBrushBatch (void)
 {
 	extern float r_fog_density;
@@ -1312,11 +1398,13 @@ static void DrawTextureChains (entity_t *e)
 	 * sky chains invalidate it via world_state_set=false and the fast
 	 * path then re-binds via DrawTextureChains_BindWorldState. */
 	/* Hoisted world VBO bind feeds the fast-path glDrawElements runs.
-	 * With gpu_cull_active, the fast path skips drawing solid surfaces
-	 * (R_DrawWorldCulled already drew them), so the hoisted bind would
-	 * just be wasted GL state changes that the driver may validate. */
-	if (e == &r_worldentity && lm_atlas_enabled && lm_atlas_texture && world_vao
-	    && !gpu_cull_active)
+	 * Always run even when gpu_cull_active: GPU cull's compute filter
+	 * skips a number of surface classes (DRAWTILED, DRAWBLACK, FENCE,
+	 * UNDERWATER, etc.) and any surface not referenced by a marksurf
+	 * in the BSP — those still need the chain pass to draw them.
+	 * Depth test eliminates overdraw at negligible cost.  See
+	 * commit f1e0fb378 for the original fix. */
+	if (e == &r_worldentity && lm_atlas_enabled && lm_atlas_texture && world_vao)
 	{
 		DrawTextureChains_BindWorldState();
 		world_state_set = true;
@@ -1410,24 +1498,22 @@ static void DrawTextureChains (entity_t *e)
 				static msurface_t *batch_surfs[MAX_BATCH_SURFS];
 				int batch_count = 0;
 
-				/* When the GPU compute cull path already drew solid +
-				 * fence surfaces (filter at gl_worldcull.c excludes only
-				 * SKY|TURB|UNDERWATER), skip the redundant glDrawElements
-				 * submission here. We still walk the chain to rebuild
-				 * dirty lightmap rects and to defer underwater surfaces
-				 * — fence is left deferred too so its alpha-cutout draw
-				 * uses the correct threshold. */
-				const qboolean skip_solid = gpu_cull_active;
+				/* Always draw via this fast path even when
+				 * gpu_cull_active.  GPU cull's compute filter skips
+				 * several surface classes (DRAWTILED, DRAWBLACK,
+				 * FENCE, UNDERWATER, ...) and any surface not in a
+				 * BSP marksurf list — those still need the chain
+				 * pass.  The earlier skip_solid optimization saved
+				 * ~0.1ms but reintroduced the regression that commit
+				 * f1e0fb378 had already fixed.  Depth test
+				 * eliminates the overdraw at negligible GPU cost. */
 
-				if (!skip_solid && !world_state_set)
+				if (!world_state_set)
 				{
 					DrawTextureChains_BindWorldState();
 					world_state_set = true;
 					world_color_dirty = true;
 				}
-
-				/* Diffuse texture (TU0 is sticky from the hoisted setup). */
-				if (!skip_solid)
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
@@ -1448,7 +1534,7 @@ static void DrawTextureChains (entity_t *e)
 						continue;
 					}
 
-					if (!skip_solid && s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
+					if (s->vbo_numtris > 0 && batch_count < MAX_BATCH_SURFS)
 						batch_surfs[batch_count++] = s;
 
 					/* Apply dlights to blocklights for this surface */
