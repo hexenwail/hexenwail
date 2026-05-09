@@ -3085,12 +3085,16 @@ static void R_DrawGlow (entity_t *e)
 			else if (intensity < 0.0f)
 				intensity = 0.0f;
 
-			// Now modulate with flicker using LIGHT_STYLE from glow_settings
+			// Now modulate with flicker using LIGHT_STYLE from glow_settings.
+			// Match Shanjaq: only gate on cl_lightstyle[].length (style 0 plays
+			// its ramp normally if present).
 			j = 0;	// avoid compiler warning
 			{
 				int style = (int)gsettings[LIGHT_STYLE];
+				if (style < 0 || style >= MAX_LIGHTSTYLES)
+					style = 0;
 				i = (int)(cl.time*10);
-				if (style <= 0 || !cl_lightstyle[style].length) {
+				if (!cl_lightstyle[style].length) {
 					j = 256;
 				}
 				else
@@ -3135,9 +3139,9 @@ static void R_DrawGlow (entity_t *e)
 
 			GL_ImmColor4f (0.0f, 0.0f, 0.0f, 1.0f);
 
-			for (i = 8; i >= 0; i--)
+			for (i = 16; i >= 0; i--)
 			{
-				float a = i / 8.0f * M_PI * 2;
+				float a = i / 16.0f * M_PI * 2;
 
 				for (j = 0; j < 3; j++)
 					glow_vect[j] = lightorigin[j] + vright[j]*cos(a)*radius + vup[j]*sin(a)*radius;
