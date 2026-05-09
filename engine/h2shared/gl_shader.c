@@ -789,14 +789,13 @@ static const char sworld_inst_vert[] =
 	"#version 460 core\n"
 	"\n"
 	"struct WorldInstance {\n"
-	"    vec4 wm0;\n"        /* world matrix rows 0..2 (transposed mat3x4) */
-	"    vec4 wm1;\n"
-	"    vec4 wm2;\n"
+	"    mat4 mvp;\n"        /* projection * view * entity_transform */
+	"    mat4 mv;\n"         /* view * entity_transform (eye space) */
 	"    vec4 misc;\n"       /* x = alpha, yzw padding */
 	"};\n"
 	"\n"
 	"layout(std430, binding=0) restrict readonly buffer WorldInstBuf {\n"
-	"    mat4 ViewProj;\n"
+	"    mat4 _pad;\n"        /* unused header retained for offset compat */
 	"    WorldInstance instances[];\n"
 	"};\n"
 	"\n"
@@ -811,13 +810,12 @@ static const char sworld_inst_vert[] =
 	"\n"
 	"void main() {\n"
 	"    WorldInstance inst = instances[gl_BaseInstance];\n"
-	"    mat4x3 world = transpose(mat3x4(inst.wm0, inst.wm1, inst.wm2));\n"
-	"    vec3 world_pos = world * vec4(a_position, 1.0);\n"
+	"    vec4 eyepos = inst.mv * vec4(a_position, 1.0);\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_lmcoord  = a_lmcoord;\n"
 	"    v_color    = vec4(1.0, 1.0, 1.0, inst.misc.x);\n"
-	"    v_fogdist  = length((ViewProj * vec4(world_pos, 1.0)).xyz);\n"
-	"    gl_Position = ViewProj * vec4(world_pos, 1.0);\n"
+	"    v_fogdist  = length(eyepos.xyz);\n"
+	"    gl_Position = inst.mvp * vec4(a_position, 1.0);\n"
 	"}\n";
 
 static qboolean GL_InitWorldInstProgram (gl_world_inst_prog_t *p)

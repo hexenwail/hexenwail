@@ -1177,8 +1177,13 @@ void R_DrawBrushModelSpecialOnly (entity_t *e)
 	for (i = 0; i < clmodel->nummodelsurfaces; i++, psurf++)
 	{
 		mplane_t *pp;
-		if (!(psurf->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
-				      SURF_DRAWFENCE | SURF_UNDERWATER)))
+		int spec = psurf->flags &
+			(SURF_DRAWSKY | SURF_DRAWTURB |
+			 SURF_DRAWFENCE | SURF_UNDERWATER);
+		/* Pure-fence surfaces are handled by R_DrawBrushInstanced's
+		 * fence pass, not here.  Skip them unless paired with another
+		 * special flag (sky/turb/underwater) that needs legacy emit. */
+		if (spec == 0 || spec == SURF_DRAWFENCE)
 			continue;
 		pp = psurf->plane;
 		dot = DotProduct (modelorg_local, pp->normal) - pp->dist;
