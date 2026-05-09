@@ -1603,15 +1603,18 @@ void R_CollectBrushInstances (void)
 		int instance_idx = num_world_instances++;
 		world_inst_collected[i] = true;
 
-		/* Walk surfaces: backface cull, accept opaque + fence, mark
-		 * remaining special flags (sky/turb/underwater) so the
-		 * legacy pass renders them. */
+		/* Walk surfaces: accept opaque + fence, mark remaining
+		 * special flags (sky/turb/underwater) so the legacy pass
+		 * renders them.  No CPU backface test — for rotating brush
+		 * ents (drawbridges, pendulums) the dot-vs-BACKFACE_EPSILON
+		 * test flips frame-to-frame on near-tangent surfaces, which
+		 * read as texture popping when those surfaces wink in/out
+		 * of the MDI dispatch.  Backface triangles waste rasterizer
+		 * work but the cost is negligible compared to the popping. */
 		{
 			msurface_t *psurf = &clmodel->surfaces[clmodel->firstmodelsurface];
 			for (s_idx = 0; s_idx < clmodel->nummodelsurfaces; s_idx++, psurf++)
 			{
-				float dot;
-				mplane_t *pp = psurf->plane;
 				int spec = psurf->flags &
 					(SURF_DRAWSKY | SURF_DRAWTURB |
 					 SURF_DRAWFENCE | SURF_UNDERWATER);
@@ -1626,11 +1629,6 @@ void R_CollectBrushInstances (void)
 				is_fence = (spec & SURF_DRAWFENCE) != 0;
 
 				if (psurf->vbo_numtris <= 0)
-					continue;
-
-				dot = DotProduct (modelorg_local, pp->normal) - pp->dist;
-				if (!(((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
-				      (!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON))))
 					continue;
 
 				R_LightmapRebuildIfDirty (psurf);

@@ -539,7 +539,11 @@ static void DrawGLPolyMTex (glpoly_t *p)
 
 
 
-static void R_UpdateLightmaps (qboolean Translucent)
+/* Public so R_DrawBrushInstanced can flush dirty rects produced by
+ * R_CollectBrushInstances *this frame* before the MDI dispatch — without
+ * a second upload, brush-ent surfaces sample the previous frame's atlas
+ * and, on rotating ents (drawbridge / pendulum), shimmer. */
+void R_UpdateLightmaps (qboolean Translucent)
 {
 	unsigned int		i;
 	glpoly_t	*p;
