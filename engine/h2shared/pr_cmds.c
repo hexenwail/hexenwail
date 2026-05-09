@@ -500,6 +500,12 @@ static void PF_pimpmodel (void)
 	pimp->glow_settings[LIGHT_RADIUS] = max_health;
 	pimp->glow_settings[LIGHT_STYLE] = atoi(ED_GetProperty(ref_ent, "style"));
 
+	/* Plan B: propagate glow state to the shared model so non-pimped
+	   instances inherit (Shanjaq behavior). Trail flags stay per-entity
+	   because they depend on entity-specific movement. */
+	mod->ex_flags |= (pimp->ex_flags & (EF_SPIN | EF_FLOAT | EF_GLOW | EF_ILLUMINATE));
+	memcpy(mod->glow_settings, pimp->glow_settings, sizeof(mod->glow_settings));
+
 	G_INT(OFS_RETURN) = 1;
 }
 #endif
