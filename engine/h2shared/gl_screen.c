@@ -900,10 +900,13 @@ void SCR_BeginLoadingPlaque (void)
 {
 	S_StopAllSounds (true);
 
-	if (cls.state != ca_connected)
-		return;
-	if (cls.signon != SIGNONS)
-		return;
+	/* Vanilla Quake/uHexen2 bailed here when (cls.state != ca_connected
+	 * || cls.signon != SIGNONS). That made the plaque a no-op for the
+	 * common case — Host_Map_f calls CL_Disconnect (which clears state
+	 * and signon) immediately before this — so scr_disabled_for_loading
+	 * was never set and the screen kept ticking through signon, giving
+	 * the user a flash of conback instead of a held "Loading" frame.
+	 * Callers know when they want a plaque; trust them. */
 
 // redraw with no console and the loading plaque
 	Con_ClearNotify ();
@@ -1531,7 +1534,15 @@ void SCR_UpdateScreen (void)
 #if !defined(H2W)
 	else if (scr_drawloading)
 	{
-		Draw_FadeScreen ();
+		/* No world (initial map load from main menu): paint the
+		 * Hexen logo backdrop so the user sees the splash + LOADING
+		 * plaque instead of black, since the back buffer is undefined
+		 * after the previous SwapBuffers. Mid-game level transitions
+		 * keep the vanilla "darken previous frame" feel. */
+		if (!cl.worldmodel || cls.signon != SIGNONS)
+			Draw_MenuBackdrop ();
+		else
+			Draw_FadeScreen ();
 		SCR_DrawLoading ();
 	}
 #endif	/* H2W */
