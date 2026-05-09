@@ -31,7 +31,9 @@ Planned:
 
 ### Rendering
 - Full GLSL 4.30 core pipeline — zero immediate mode, zero fixed-function
+- Reversed-Z depth buffer via `ARB_clip_control` (`gl_reversed_z`) for precision at distance
 - Lightmap atlas, batched world draws, hardware-instanced alias models
+- Brush entity instancing via multi-draw indirect (`r_brush_inst`, opt-in)
 - MSAA, FXAA, anisotropic filtering
 - Render scale (25–100%), retro dithering mode
 - Display presets: Faithful / Crunchy / Retro / Clean / Modern / Ultra

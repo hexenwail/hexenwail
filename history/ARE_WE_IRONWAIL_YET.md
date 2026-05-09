@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 7 | 0 | 5 | 0 |
+| Rendering — GPU Pipeline | 7 | 1 | 5 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 5 | 1 | 1 | 1 |
 | UX / Menus / HUD | 16 | 1 | 5 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **53** | **6** | **17** | **8** |
+| **TOTAL** | **53** | **7** | **17** | **8** |
 
-**Parity: 70% ported, 8% partial, 22% missing** (excluding N/A)
+**Parity: 69% ported, 9% partial, 22% missing** (excluding N/A)
 
 ---
 
@@ -32,6 +32,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|
 | GPU frustum culling (compute shader) | ✅ | `gl_worldcull.c` |
 | Indirect multi-draw for world surfaces | ✅ | `glMultiDrawElementsIndirect` per texture bucket |
+| Indirect multi-draw for brush entities | 🔶 | `r_brush_inst` (default 0, opt-in) — SSBO + MDI path in `R_DrawBrushInstanced`. Two known regressions on moving brushes (corrupted-white-flash on drawbridge, clipping artifacts) keep it off by default. |
 | SSBO alias model instanced batching | ✅ | `gl_rmain.c` |
 | SSBO GPU particles | ✅ | `r_part.c` |
 | Order-Independent Transparency (OIT) | ✅ | Weighted blended, dual MRT |
@@ -47,7 +48,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Feature | Status | Notes |
 |---|---|---|
-| Shader-based fog | ✅ | `gl_fog.c`, density/RGB/fade |
+| Shader-based fog | ✅ | `gl_fog.c`, density/RGB/fade — EXP2 falloff with /64 density divisor (matches Ironwail) |
 | Lightstyle interpolation | ✅ | `r_lerplightstyles` |
 | Model frame interpolation | ✅ | `r_lerpmodels`, `r_lerpmove` |
 | Overbright model lighting | ✅ | `gl_overbright_models` |
