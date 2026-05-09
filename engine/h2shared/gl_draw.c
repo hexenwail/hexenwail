@@ -1421,14 +1421,19 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
+static void Draw_ConsoleVersionInfo (int lines);	/* forward */
+
 /*
 ================
 Draw_MenuBackdrop
 
 Full-screen conback as the main-menu backdrop when no demo / game
-world is loaded. Bypasses Draw_ConsoleBackground's alpha cap, console-
-height stretch math, and version-watermark overlay so the splash
-always paints, opaque, edge to edge. Caller must be in CANVAS_DEFAULT.
+world is loaded. Bypasses Draw_ConsoleBackground's alpha cap and
+console-height stretch math so the splash always paints, opaque, edge
+to edge. Caller must be in CANVAS_DEFAULT.
+
+Renders the version watermark at the bottom-right after the splash so
+boot-time identification still works on the main menu.
 ================
 */
 void Draw_MenuBackdrop (void)
@@ -1454,6 +1459,9 @@ void Draw_MenuBackdrop (void)
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	/* Pin watermark to the bottom-right of the visible canvas. */
+	Draw_ConsoleVersionInfo (vid.conheight);
 }
 
 static void Draw_ConsoleVersionInfo (int lines)
