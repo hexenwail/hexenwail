@@ -473,24 +473,23 @@ static void PF_pimpmodel (void)
 		pimp->trail_override = true;
 	}
 
-	/* Apply glow settings to per-entity override */
+	/* Apply glow settings to per-entity override.
+	 * The orb is gated purely by spawnflag 4 (Shanjaq behavior).
+	 * The color value here is ALSO consumed by EF_ILLUMINATE for the
+	 * cast dlight, so non-zero color does NOT imply an orb. */
 	if (glow_color[0] > 1 || glow_color[1] > 1 || glow_color[2] > 1)
 	{
 		pimp->glow_settings[COLOR_R] = glow_color[0] / 255.0f;
 		pimp->glow_settings[COLOR_G] = glow_color[1] / 255.0f;
 		pimp->glow_settings[COLOR_B] = glow_color[2] / 255.0f;
-		/* non-zero color always enables the glow orb, even on models
-		 * with no existing glow ex_flags (e.g. pimp_model targeting props) */
-		pimp->ex_flags |= EF_GLOW;
 	}
 	else if (glow_color[0] != 0 || glow_color[1] != 0 || glow_color[2] != 0)
 	{
 		pimp->glow_settings[COLOR_R] = glow_color[0];
 		pimp->glow_settings[COLOR_G] = glow_color[1];
 		pimp->glow_settings[COLOR_B] = glow_color[2];
-		pimp->ex_flags |= EF_GLOW;
 	}
-	/* else (color '0 0 0'): keep model defaults, no forced glow */
+	/* else (color '0 0 0'): keep model defaults */
 
 	pimp->glow_settings[COLOR_A] = (abslight != 0.0f) ? abslight : 0.75f;
 	pimp->glow_settings[ORB_OFFSET_X] = view_ofs[0];
