@@ -1788,6 +1788,16 @@ void R_DrawBrushInstanced (void)
 	}
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, world_inst_ssbo);
 
+	/* Flush lightmap dirty rects produced by R_CollectBrushInstances —
+	 * R_LightmapRebuildIfDirty marks them but R_UpdateLightmaps already
+	 * ran before the world phase.  Without this second upload, brush
+	 * ents sample last frame's atlas, which manifests as a one-frame
+	 * lighting flash on planks the player's dlight just swept across. */
+	{
+		extern void R_UpdateLightmaps (qboolean Translucent);
+		R_UpdateLightmaps (false);
+	}
+
 	/* Bind world VAO + instanced shader + lightmap atlas + uniforms */
 	glBindVertexArray_fp(world_vao);
 	glUseProgram_fp(prog->program);
