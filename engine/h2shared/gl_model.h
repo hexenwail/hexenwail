@@ -115,6 +115,7 @@ typedef struct glpoly_s
 	struct	glpoly_s	*chain;
 	int		numverts;
 	int		flags;		// for SURF_UNDERWATER
+	vec3_t	mins, maxs;	// world-space bbox, computed once at load
 	float	verts[4][VERTEXSIZE];	// variable sized (xyz s1t1 s2t2)
 } glpoly_t;
 

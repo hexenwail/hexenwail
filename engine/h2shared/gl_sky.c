@@ -753,39 +753,20 @@ extern qboolean R_CullBox (vec3_t mins, vec3_t maxs);
 
 void Sky_ProcessPoly (glpoly_t	*p)
 {
-	int			i, j;
+	int			i;
 	vec3_t		verts[MAX_CLIP_VERTS];
-	vec3_t		mins, maxs;
-	float		*v0;
 
 	if (!p || p->numverts <= 0 || p->numverts >= MAX_CLIP_VERTS)
 		return;
 
-	// Don't draw the polygon here - just update bounds
-	// The actual sky rendering happens in Sky_DrawSky()
-
-	//update sky bounds
 	if (r_fastsky.value)
 		return;
 
-	/* Frustum-cull the poly's world-space bbox: a sky poly outside
-	 * the view doesn't contribute to which skybox faces are visible.
-	 * Avoids the recursive 6-plane Sky_ClipPoly walk for the bulk of
-	 * sky polys in arena maps (e.g. Coliseum of War: 2256 sky polys
-	 * but only a handful in front of the camera at any time). */
-	v0 = p->verts[0];
-	VectorCopy (v0, mins);
-	VectorCopy (v0, maxs);
-	for (i = 1; i < p->numverts; i++)
-	{
-		float *v = p->verts[i];
-		for (j = 0; j < 3; j++)
-		{
-			if (v[j] < mins[j]) mins[j] = v[j];
-			if (v[j] > maxs[j]) maxs[j] = v[j];
-		}
-	}
-	if (R_CullBox (mins, maxs))
+	/* World-space bbox is cached on the poly at load time
+	 * (BuildSurfaceDisplayList).  Frustum-reject early so the
+	 * recursive Sky_ClipPoly walk only runs for polys actually
+	 * in front of the camera. */
+	if (R_CullBox (p->mins, p->maxs))
 		return;
 
 	for (i=0 ; i<p->numverts ; i++)
