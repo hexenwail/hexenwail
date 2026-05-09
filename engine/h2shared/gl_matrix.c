@@ -216,9 +216,21 @@ void GL_Frustum (double left, double right, double bottom, double top, double zn
 	f[5]  = (float)(2.0 * znear / (top - bottom));
 	f[8]  = (float)((right + left) / (right - left));
 	f[9]  = (float)((top + bottom) / (top - bottom));
-	f[10] = (float)(-(zfar + znear) / (zfar - znear));
 	f[11] = -1.0f;
-	f[14] = (float)(-2.0 * zfar * znear / (zfar - znear));
+	if (gl_clipcontrol_able)
+	{
+		/* Reversed-Z, [0,1] clip space: near maps to NDC z=1, far to
+		 * z=0. Eliminates float precision starvation at distance — the
+		 * combination of GL_ZERO_TO_ONE and reversed depth makes
+		 * far-plane z-fighting effectively disappear on Hexen II vistas. */
+		f[10] = (float)(znear / (zfar - znear));
+		f[14] = (float)(zfar * znear / (zfar - znear));
+	}
+	else
+	{
+		f[10] = (float)(-(zfar + znear) / (zfar - znear));
+		f[14] = (float)(-2.0 * zfar * znear / (zfar - znear));
+	}
 
 	Mat4_Multiply(current_matrix(), f, current_matrix());
 }
