@@ -3107,12 +3107,14 @@ static void R_DrawGlow (entity_t *e)
 			if (!(glow_flags & XF_TORCH_GLOW) && gl_glow_intensity.value < 1.0f)
 				intensity *= gl_glow_intensity.value;
 
-			// Attenuate glow by fog so it doesn't shine through
+			// Attenuate glow by fog so it doesn't shine through.
+			// EXP2 form (matches the shader path in gl_shader.c).
 			{
-				float fogdensity = Fog_GetDensity() / 512.0f;
+				float fogdensity = Fog_GetDensity() / 64.0f;
 				if (fogdensity > 0)
 				{
-					float fogfactor = exp(-fogdensity * distance);
+					float fogfac = fogdensity * distance;
+					float fogfactor = exp(-fogfac * fogfac);
 					if (fogfactor < 0) fogfactor = 0;
 					if (fogfactor > 1) fogfactor = 1;
 					intensity *= fogfactor;

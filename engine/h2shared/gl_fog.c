@@ -321,7 +321,10 @@ void Fog_SetupFrame (void)
 		if (fog_lerp < target) fog_lerp = target;
 	}
 
-	r_fog_density = (Fog_GetDensity() / 512.0) * fog_lerp;
+	/* /64 + EXP2 (squared in shader) matches QuakeSpasm/Shanjaq's
+	 * GL_FOG_DENSITY scaling so console `fog <d>` values land at the
+	 * same visual thickness as in those engines. */
+	r_fog_density = (Fog_GetDensity() / 64.0) * fog_lerp;
 }
 
 /*

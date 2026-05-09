@@ -318,7 +318,8 @@ static const char sworld_frag[] =
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    float fog = exp(-u_fog_density * v_fogdist);\n"
+	"    float fogfac = u_fog_density * v_fogdist;\n"
+	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	/* For cutout alpha-test (threshold > 0.5 = fence/holey, A2C enabled):
 	 * surviving fragments are by definition opaque, so force alpha=1 to
@@ -375,7 +376,8 @@ static const char salias_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    float fog = exp(-u_fog_density * v_fogdist);\n"
+	"    float fogfac = u_fog_density * v_fogdist;\n"
+	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	/* See sworld_frag — force alpha=1 only on the cutout path so A2C
 	 * doesn't dither.  Translucent draws (sprites, EF_TRANSPARENT alias
@@ -419,7 +421,8 @@ static const char spart_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
 	"    if (color.a < 0.01) discard;\n"
-	"    float fog = exp(-u_fog_density * v_fogdist);\n"
+	"    float fogfac = u_fog_density * v_fogdist;\n"
+	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	"    fragColor = color;\n"
 	"}\n";
