@@ -1789,7 +1789,14 @@ void R_DrawBrushInstanced (void)
 	}
 
 	/* Upload per-instance mvp/mv/misc.  Header is padding kept for
-	 * SSBO offset compatibility with the older shader struct layout. */
+	 * SSBO offset compatibility with the older shader struct layout.
+	 * Memory barrier afterwards: the GPU world-cull (gl_worldcull.c)
+	 * earlier in the frame writes via SSBO binding 3 and issues its
+	 * own glMemoryBarrier; a separate compute path can leave the
+	 * driver in a state where subsequent SSBO reads in our shader
+	 * see partial / stale data without an explicit barrier on this
+	 * upload too.  Targets the intermittent flash on moving brush
+	 * ents (uhexen2-a0t2). */
 	{
 		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, world_inst_ssbo);
 		glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER,
@@ -1798,6 +1805,7 @@ void R_DrawBrushInstanced (void)
 				   world_instances);
 	}
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, world_inst_ssbo);
+	glMemoryBarrier_fp(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	/* Flush lightmap dirty rects produced by R_CollectBrushInstances —
 	 * R_LightmapRebuildIfDirty marks them but R_UpdateLightmaps already
