@@ -955,12 +955,11 @@ void R_DrawWaterSurfaces (void)
 		r_wateralpha.value = 0.1;
 	if (r_wateralpha.value > 1)
 		r_wateralpha.value = 1;
-	/* If all liquid alphas are 1.0, everything was drawn in main pass.
-	 * Teleporters default to 0.7 when r_telealpha <= 0, so they
-	 * still need the translucent pass. */
-	if (r_wateralpha.value == 1.0 && r_lavaalpha.value <= 0 &&
-	    r_slimealpha.value <= 0 && r_telealpha.value == 1.0)
-		return;
+	/* The previous early-return ("all liquid alphas == 1, drawn in
+	 * main pass") was wrong — DrawTextureChains' fast path skips
+	 * SURF_DRAWTURB and nulls the chain, so opaque turb (default
+	 * lava) was never drawn anywhere.  Always run; the per-texture
+	 * branch below handles both opaque and translucent liquids. */
 
 	//
 	// go back to the world matrix
@@ -1461,9 +1460,15 @@ static void DrawTextureChains (entity_t *e)
 		}
 		else
 		{
-			if ((s->flags & SURF_DRAWTURB) &&
-			    R_LiquidAlpha(t) < 1.0f)
-				continue;	// translucent turb drawn later in R_DrawWaterSurfaces
+			if (s->flags & SURF_DRAWTURB)
+				continue;	/* turb (water/lava/slime/teleport)
+						 * always drawn by R_DrawWaterSurfaces;
+						 * the fast/imm/slow paths below skip
+						 * DRAWTURB anyway and would null the
+						 * texturechain before R_DrawWaterSurfaces
+						 * sees it.  Opaque liquids (default
+						 * r_wateralpha=1, r_lavaalpha=0) need
+						 * EmitWaterPolys for the warp UVs. */
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||
 				(e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT))
