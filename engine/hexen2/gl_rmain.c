@@ -1205,16 +1205,27 @@ static void R_DrawAliasModel (entity_t *e)
 
 		if (fb_tex && !r_fullbright.integer)
 		{
+			/* Push fullbright pass toward the camera in NDC so its
+			 * depth always wins against the base pass even when the
+			 * GLSL compiler reorders gl_Position math (Mesa ignores
+			 * the invariant qualifier). Sign flips with reversed-Z:
+			 * forward-Z wants smaller Z, reversed-Z wants larger Z.
+			 * uhexen2-iir3. */
+			float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
 			GL_Bind(fb_tex);
 			glEnable_fp (GL_BLEND);
 			glBlendFunc_fp (GL_ONE, GL_ONE);	// additive
 			glDepthMask_fp (0);
+			glEnable_fp (GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset_fp (fb_offset, fb_offset);
 			GL_SetAlphaThreshold(0.01f);
 
 			model_fullbright_pass = true;
 			R_SetupAliasFrame (e, paliashdr);
 			model_fullbright_pass = false;
 
+			glDisable_fp (GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset_fp (0.0f, 0.0f);
 			glDepthMask_fp (1);
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDisable_fp (GL_BLEND);
@@ -1810,6 +1821,22 @@ void R_DrawBrushInstanced (void)
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	GL_ImmInvalidateState();
 
+	/* Polygon-offset backstop for the gl_Position non-invariance
+	 * z-fight between gl_shader_world (world surfaces) and
+	 * gl_shader_world_inst (brush-ent surfaces).  Even with bit-
+	 * identical CPU-baked mvp matrices, Mesa's GLSL compiler reorders
+	 * the mat4×vec4 multiply differently in the two shader contexts,
+	 * producing 1-ULP depth differences.  The portcullis briefly
+	 * z-loses to its surrounding doorway/wall surfaces, reading as a
+	 * flash at the BSP-authored (raised) position of the entity.
+	 * Sign flips with reversed-Z — same pattern as the alias-fullbright
+	 * z-fight workaround in R_DrawAliasModel.  uhexen2-a0t2. */
+	{
+		float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
+		glEnable_fp(GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset_fp(fb_offset, fb_offset);
+	}
+
 	/* Opaque pass: alpha threshold near zero, no A2C. */
 	if (num_world_indirect > 0)
 	{
@@ -1859,6 +1886,8 @@ void R_DrawBrushInstanced (void)
 			glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
 
+	glDisable_fp(GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset_fp(0.0f, 0.0f);
 	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
 	glBindVertexArray_fp(0);
@@ -2493,6 +2522,13 @@ static void R_DrawAliasInstanced (void)
 			glEnable_fp(GL_BLEND);
 			glBlendFunc_fp(GL_ONE, GL_ONE);	/* additive */
 			glDepthMask_fp(0);
+			/* Polygon-offset backstop for the gl_Position non-invariance
+			 * z-fight. See R_DrawAliasModel fullbright pass. uhexen2-iir3. */
+			{
+				float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
+				glEnable_fp(GL_POLYGON_OFFSET_FILL);
+				glPolygonOffset_fp(fb_offset, fb_offset);
+			}
 			GL_SetAlphaThreshold(0.01f);
 
 			for (b = 0; b < num_alias_batches; b++)
@@ -2518,6 +2554,8 @@ static void R_DrawAliasInstanced (void)
 							   GL_UNSIGNED_SHORT, NULL, batch->count);
 			}
 
+			glDisable_fp(GL_POLYGON_OFFSET_FILL);
+			glPolygonOffset_fp(0.0f, 0.0f);
 			glDepthMask_fp(1);
 			glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDisable_fp(GL_BLEND);

@@ -284,6 +284,13 @@ static const char sworld_vert[] =
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	/* invariant gl_Position: pin position math so brush-ent surfaces
+	 * (rendered via the instanced shader gl_shader_world_inst with a
+	 * matching `invariant` qualifier) don't z-fight against world
+	 * surfaces that share the same plane.  Without this, the GLSL
+	 * compiler can reorder the mat4×vec4 multiply between the two
+	 * shaders and produce 1-ULP depth divergence (uhexen2-a0t2). */
+	"invariant gl_Position;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_lmcoord = a_lmcoord;\n"
@@ -327,7 +334,14 @@ static const char sworld_frag[] =
 	"#endif\n"
 	"}\n";
 
-/* --- shader_alias: vertex-colored, textured, fog (models) --- */
+/* --- shader_alias: vertex-colored, textured, fog (models) ---
+ * invariant gl_Position pins the position math across draws so the
+ * additive fullbright re-draw lands on the exact depth the base pass
+ * wrote. Without it the GLSL compiler may reorder the matrix multiply
+ * and produce slightly different Z, so fullbright fragments fail the
+ * GL_LEQUAL/GL_GEQUAL test polygon-by-polygon and the model develops
+ * blocky chunks (uhexen2-iir3). Mesa sometimes ignores the qualifier;
+ * the fullbright pass also enables polygon offset as a backstop. */
 static const char salias_vert[] =
 	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
@@ -338,6 +352,7 @@ static const char salias_vert[] =
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	"invariant gl_Position;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_color = a_color;\n"
@@ -524,6 +539,8 @@ static const char salias_inst_vert[] =
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	"\n"
+	"invariant gl_Position;\n"
 	"\n"
 	"void main() {\n"
 	"    InstanceData inst = instances[u_inst_base + gl_InstanceID];\n"
@@ -807,6 +824,10 @@ static const char sworld_inst_vert[] =
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	"\n"
+	/* Pin gl_Position so brush-ent surfaces don't z-fight the world's
+	 * matching surfaces — sworld_vert declares the same.  uhexen2-a0t2. */
+	"invariant gl_Position;\n"
 	"\n"
 	"void main() {\n"
 	"    WorldInstance inst = instances[gl_BaseInstance];\n"
