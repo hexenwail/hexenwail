@@ -216,6 +216,9 @@ GLint		gl_max_size = 256;
 GLfloat		gl_max_anisotropy;
 float		gldepthmin, gldepthmax;
 qboolean	gl_clipcontrol_able = false;
+/* User toggle: gl_reversed_z 0 + vid_restart forces forward-Z for
+ * debugging regressions in the reversed-Z path. Default on. */
+cvar_t		gl_reversed_z = {"gl_reversed_z", "1", CVAR_ARCHIVE};
 
 /* Gamma stuff */
 #define	USE_GAMMA_RAMPS			0
@@ -890,7 +893,7 @@ static void GL_Init (void)
 	 * Per-call-site flips for sky / mirror / viewmodel are gated on
 	 * gl_clipcontrol_able elsewhere. */
 #ifndef __EMSCRIPTEN__
-	gl_clipcontrol_able = (glClipControl_fp != NULL);
+	gl_clipcontrol_able = (glClipControl_fp != NULL) && (gl_reversed_z.value != 0.0f);
 	if (gl_clipcontrol_able)
 	{
 		glClipControl_fp (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
@@ -1466,6 +1469,7 @@ void	VID_Init (const unsigned char *palette)
 				"vid_config_gly",
 				"vid_config_consize",
 				"gl_lightmapfmt",
+				"gl_reversed_z",
 				"vid_vsync" };
 #define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
@@ -1483,6 +1487,7 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&vid_mode);
 	Cvar_RegisterVariable (&_enable_mouse);
 	Cvar_RegisterVariable (&gl_lightmapfmt);
+	Cvar_RegisterVariable (&gl_reversed_z);
 
 	Cmd_AddCommand ("vid_listmodes", VID_ListModes_f);
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
