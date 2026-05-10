@@ -276,7 +276,6 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_playermip);
 	Cvar_RegisterVariable (&gl_nocolors);
 	Cvar_RegisterVariable (&gl_waterripple);
-	Cvar_RegisterVariable (&r_water_pixel_warp);
 	Cvar_RegisterVariable (&gl_particles);
 
 	Cvar_RegisterVariable (&gl_zfix);
