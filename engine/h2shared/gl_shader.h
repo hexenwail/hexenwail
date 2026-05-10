@@ -22,6 +22,7 @@ typedef struct glprogram_s {
 	GLint	u_mvp;
 	GLint	u_texture0;
 	GLint	u_texture1;
+	GLint	u_texture2;	/* fullbright mask sampler for world (uhexen2-sjvf) */
 	GLint	u_color;
 	GLint	u_fog_density;
 	GLint	u_fog_color;
@@ -48,6 +49,8 @@ extern glprogram_t	gl_shader_2d;		/* orthographic textured quads */
 extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color */
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
+
+extern GLuint		gl_null_fb_texture;	/* 1x1 black sentinel for u_texture2 (uhexen2-sjvf) */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 
 /* OIT variants — same shaders but output to MRT accum+revealage */
@@ -70,21 +73,6 @@ extern gl_alias_inst_prog_t gl_shader_alias_inst;
 
 void	GL_AliasInst_Init (void);
 void	GL_AliasInst_Shutdown (void);
-
-/* Instanced world program for batched brush-submodel rendering.
- * Uses gl_BaseInstance + per-instance worldmatrix in an SSBO so
- * that one glMultiDrawElementsIndirect call covers many entities. */
-typedef struct {
-	GLuint	program;
-	GLint	u_fog_density;
-	GLint	u_fog_color;
-	GLint	u_alpha_threshold;
-} gl_world_inst_prog_t;
-
-extern gl_world_inst_prog_t gl_shader_world_inst;
-
-void	GL_WorldInst_Init (void);
-void	GL_WorldInst_Shutdown (void);
 
 void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *pup, const float *pright,

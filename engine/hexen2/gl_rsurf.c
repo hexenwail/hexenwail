@@ -841,6 +841,12 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	int		maps;
 	float		intensity, alpha_val;
 
+	/* DRF_TRANSLUCENT entities are routed through R_RenderBrushPoly
+	 * (the non-MTex sibling) by DrawTextureChains' branch on
+	 * (DRF_TRANSLUCENT || ABSLIGHT); this MTex path is the else.  Dead
+	 * DRF_TRANSLUCENT prelude + cleanup blocks (which had the same
+	 * depth-state leak the j001 fix repaired in R_RenderBrushPoly) were
+	 * removed in uhexen2-a5es. */
 	c_brush_polys++;
 
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
@@ -848,18 +854,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	intensity = 1.0f;
 	alpha_val = 1.0f;
 
-	if (e->drawflags & DRF_TRANSLUCENT)
-	{
-		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glDepthMask_fp(0);	/* uhexen2-t4kt — see R_RenderBrushPoly */
-		alpha_val = r_wateralpha.value;
-	}
-	else
-	{
-		/* KIERO: Seems it's enabled when we enter here. */
-		glDisable_fp (GL_BLEND);
-	}
+	/* KIERO: Seems it's enabled when we enter here. */
+	glDisable_fp (GL_BLEND);
 
 	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
@@ -881,13 +877,6 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWSKY)
 	{	// warp texture, no lightmaps
 		EmitBothSkyLayers (fa);
-		/* Restore the DRF_TRANSLUCENT prelude state — see the matching
-		 * comment in R_RenderBrushPoly.  uhexen2-j001. */
-		if (e->drawflags & DRF_TRANSLUCENT)
-		{
-			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
-		}
 		return;
 	}
 
@@ -975,12 +964,6 @@ dynamic1:
 	}
 
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-
-	if (e->drawflags & DRF_TRANSLUCENT)
-	{
-		glDepthMask_fp(1);
-		glDisable_fp (GL_BLEND);
-	}
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
@@ -1320,6 +1303,8 @@ void R_BeginBrushBatch (void)
 		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);	/* sjvf: default fb */
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	GL_ImmInvalidateState();
 	brush_batch_active = true;
@@ -1381,6 +1366,13 @@ static void DrawTextureChains_BindWorldState (void)
 		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	/* TU2 is the fullbright mask sampled by sworld_frag.  Default to the
+	 * 1x1 black sentinel so unit 2 always has SOMETHING bound when the
+	 * shader samples; per-texture transitions in DrawTextureChains will
+	 * override with the real fullbright mask when the diffuse has fb
+	 * pixels.  uhexen2-sjvf. */
+	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);	/* leave TU0 sticky for diffuse */
 	/* These uploads bypass GL_ImmEnd's uniform cache. If the next
 	 * GL_ImmEnd reuses gl_shader_world (e.g. fallback brush path),
@@ -1711,6 +1703,12 @@ static void DrawTextureChains (entity_t *e)
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
+					/* Bind fullbright mask at TU2 — null sentinel if no
+					 * fullbright pixels in this miptex.  uhexen2-sjvf. */
+					glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+					glBindTexture_fp(GL_TEXTURE_2D,
+						tt->gl_fb_texturenum ? tt->gl_fb_texturenum : gl_null_fb_texture);
+					glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				}
 
 				{
@@ -2005,12 +2003,22 @@ static void DrawTextureChains (entity_t *e)
 					glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 				glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+				glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);	/* sjvf: default fb */
 				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 				GL_ImmInvalidateState();
 
 				/* Emit one batched draw per texture run.  When the
 				 * texture changes we flush the running glDrawElements
-				 * coalescing of contiguous IBO ranges. */
+				 * coalescing of contiguous IBO ranges.  Also rebind
+				 * fullbright mask at TU2.  uhexen2-sjvf. */
+#define BIND_TEX_WITH_FB(_T_) do { \
+		GL_Bind((_T_)->gl_texturenum); \
+		glActiveTextureARB_fp(GL_TEXTURE2_ARB); \
+		glBindTexture_fp(GL_TEXTURE_2D, \
+			(_T_)->gl_fb_texturenum ? (_T_)->gl_fb_texturenum : gl_null_fb_texture); \
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB); \
+	} while (0)
 #define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
 		if ((N) <= 0) break; \
 		if (gl_shader_world.u_alpha_threshold >= 0) \
@@ -2036,7 +2044,7 @@ static void DrawTextureChains (entity_t *e)
 			} \
 			if (cur_tex_ && run_total_ > 0) \
 			{ \
-				GL_Bind(cur_tex_->gl_texturenum); \
+				BIND_TEX_WITH_FB(cur_tex_); \
 				glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 				    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 				c_brush_polys += count_run_; \
@@ -2048,7 +2056,7 @@ static void DrawTextureChains (entity_t *e)
 		} \
 		if (cur_tex_ && run_total_ > 0) \
 		{ \
-			GL_Bind(cur_tex_->gl_texturenum); \
+			BIND_TEX_WITH_FB(cur_tex_); \
 			glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 			    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 			c_brush_polys += count_run_; \
@@ -2090,6 +2098,14 @@ static void DrawTextureChains (entity_t *e)
 		 * dlight/sprite rendering doesn't inherit white. */
 		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 	}
+
+	/* Reset TU2 fullbright sampler to the null sentinel.  Subsequent
+	 * paths that reuse gl_shader_world (brush-ent legacy R_RenderBrushPoly,
+	 * sky stencil pre-pass) won't pick up a stale per-texture fb mask
+	 * from the chain we just finished.  uhexen2-sjvf. */
+	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 	if (have_stencil)
 		glDisable_fp(GL_STENCIL_TEST);
@@ -2250,6 +2266,11 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		glUseProgram_fp(gl_shader_world.program);
 		glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+		/* Default fb to null sentinel — brush ent fast path doesn't
+		 * carry per-texture fb info, so brush ents render without fb
+		 * additive contribution.  uhexen2-sjvf. */
+		glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+		glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 		if (!brush_batch_active)
 		{

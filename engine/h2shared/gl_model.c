@@ -37,6 +37,7 @@ static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer);
+/* Mod_LoadFullbrightTexture: prototype now in gl_model.h (uhexen2-sjvf) */
 
 static void Mod_Print (void);
 
@@ -542,6 +543,20 @@ bsp_tex_internal:
 				if (mt->name[0] == '{')
 					tex_flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);  // Enable alpha testing and binary transparency
 				tx->gl_texturenum = GL_LoadTexture(mt->name, (byte *)(tx+1), tx->width, tx->height, tex_flags);
+
+				/* Extract fullbright pixel mask (palette index >= vid.fullbright,
+				 * typically 224).  Used for the additive fullbright pass that
+				 * makes torches / lava / glow details look bright regardless of
+				 * lightmap.  Skip for sky/turb/fence — they don't get the
+				 * additive pass anyway.  uhexen2-sjvf. */
+				if (mt->name[0] != '*' && mt->name[0] != '{' &&
+				    strncmp(mt->name, "sky", 3) != 0)
+				{
+					char fbname[32];
+					q_snprintf(fbname, sizeof(fbname), "%s_glow", mt->name);
+					tx->gl_fb_texturenum = Mod_LoadFullbrightTexture(
+						fbname, (byte *)(tx+1), tx->width, tx->height);
+				}
 			}
 		}
 	}
@@ -2301,7 +2316,7 @@ Pixels with palette index >= vid.fullbright (typically 224) are kept,
 all others become transparent. Returns 0 if no fullbright pixels found.
 ===============
 */
-static GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width, int height)
+GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width, int height)
 {
 	int	i, j, s;
 	byte	*fbdata;
