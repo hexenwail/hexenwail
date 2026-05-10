@@ -640,6 +640,11 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glEnable_fp (GL_BLEND);
 		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		/* Translucent surfaces must not write depth — otherwise the
+		 * alpha-blended brush ent occludes anything drawn after it
+		 * (e.g. world lava in the R_DrawWaterSurfaces pass behind a
+		 * func_illusionary).  uhexen2-t4kt. */
+		glDepthMask_fp(0);
 		alpha_val = r_wateralpha.value;
 	}
 	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
@@ -711,6 +716,10 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWFENCE)
 	{
 		glDisable_fp(GL_BLEND);
+		/* Alpha-tested cutout — surviving pixels are fully opaque, so
+		 * write depth normally even when the entity is DRF_TRANSLUCENT
+		 * (which set DepthMask=0 above).  uhexen2-t4kt. */
+		glDepthMask_fp(1);
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -776,6 +785,7 @@ dynamic:
 
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
+		glDepthMask_fp(1);
 		glDisable_fp (GL_BLEND);
 	}
 
@@ -805,6 +815,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		glEnable_fp (GL_BLEND);
 		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glDepthMask_fp(0);	/* uhexen2-t4kt — see R_RenderBrushPoly */
 		alpha_val = r_wateralpha.value;
 	}
 	else
@@ -843,6 +854,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWFENCE)
 	{
 		glDisable_fp(GL_BLEND);
+		glDepthMask_fp(1);	/* uhexen2-t4kt — see R_RenderBrushPoly */
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -922,6 +934,7 @@ dynamic1:
 
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
+		glDepthMask_fp(1);
 		glDisable_fp (GL_BLEND);
 	}
 
