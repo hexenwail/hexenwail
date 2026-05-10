@@ -715,11 +715,39 @@ cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
 #endif
 
-/* r_brush_inst: 0 = legacy per-entity path, 1 = MDI instanced batched.
- * Default off — the instanced path has a known bug (dragging /
- * popping on some moving brush entities) that needs debugging
- * before it can be made the default. */
-cvar_t	r_brush_inst = {"r_brush_inst", "0", CVAR_ARCHIVE};
+/* r_brush_inst: 0 = legacy per-entity R_DrawBrushModel path,
+ * 1 = unified-shader collected dispatch via R_DrawBrushInstanced.
+ * The 1 path runs through gl_shader_world (same compiled program as
+ * world surfaces), so within-shader gl_Position invariance covers
+ * coplanar joins between brush ents and the world.  Default on. */
+cvar_t	r_brush_inst = {"r_brush_inst", "1", CVAR_ARCHIVE};
+
+/* r_brush_inst_offset: tune the polygon-offset magnitude used by the
+ * MDI dispatch.  Cross-shader z-fight between gl_shader_world (world)
+ * and gl_shader_world_inst (brush ents) leaks 1-ULP depth differences;
+ * polygon offset masks it but the magnitude may need tuning.  The sign
+ * is auto-flipped for reversed-Z. */
+cvar_t	r_brush_inst_offset = {"r_brush_inst_offset", "0.0", 0};
+
+/* r_brush_inst_backface: A/B test for the residual flash.
+ * 1 = re-enable per-surface CPU backface cull in the collector.
+ *     Mirrors legacy R_DrawBrushModel exactly; if the flash goes away
+ *     the cause is back-face fragments z-fighting with front faces at
+ *     shared edges.  Note: the original drop (054c8b454) was to stop
+ *     rotation popping on near-tangent surfaces, so re-enabling this
+ *     may bring that back. */
+cvar_t	r_brush_inst_backface = {"r_brush_inst_backface", "0", 0};
+
+/* r_brush_inst_diff: diagnostic for uhexen2-a0t2 residual flash.
+ * 1 = after MDI dispatch, redraw the same surf_keys via gl_shader_flat
+ *     with semi-transparent yellow tint using world_instances[].mvp.
+ *     Yellow overlay flickering with the textured flash → bug is in
+ *     collect/dispatch (matrix or surf_key) not shader-frag.
+ *     Yellow stays steady while texture flashes → bug is texture/lightmap.
+ * 2 = same, but use gl_PushMatrix + R_RotateForEntity (legacy MV path)
+ *     to recompute MVP, drawing in cyan.  Misalignment between cyan and
+ *     yellow → matrix divergence between baked and freshly-computed. */
+cvar_t	r_brush_inst_diff = {"r_brush_inst_diff", "0", 0};
 
 /*
 =============
@@ -1411,6 +1439,10 @@ int			rprof_brush_inst_fence;
  * special (sky/fence/turb/underwater-warp) surfaces. */
 static qboolean		world_inst_collected[MAX_VISEDICTS];
 static qboolean		world_inst_needs_legacy[MAX_VISEDICTS];
+/* Diagnostic (uhexen2-a0t2): which gate excluded each visedict this
+ * frame.  Set by R_CollectBrushInstances on every continue/break path
+ * and read by the transition log to identify which input flipped. */
+static const char	*world_inst_skip_reason[MAX_VISEDICTS];
 
 extern qboolean		R_CullBox (vec3_t mins, vec3_t maxs);
 extern void		R_MarkLights (dlight_t *light, int bit, mnode_t *node);
@@ -1437,10 +1469,16 @@ static int world_surf_key_cmp (const void *a, const void *b)
 {
 	const world_surf_key_t *sa = (const world_surf_key_t *)a;
 	const world_surf_key_t *sb = (const world_surf_key_t *)b;
-	if (sa->tex != sb->tex)
-		return (sa->tex < sb->tex) ? -1 : 1;
+	/* Sort by (instance, texture, firstIndex).  Iterating per-instance
+	 * lets us upload mvp/modelview uniforms once per entity, then walk
+	 * its surfaces grouped by texture.  Critical: brush ents now run
+	 * through gl_shader_world (not _inst) so within-shader gl_Position
+	 * invariance covers BOTH world surfaces and brush-ent surfaces at
+	 * coplanar joins (uhexen2-mf45). */
 	if (sa->instance != sb->instance)
 		return (sa->instance < sb->instance) ? -1 : 1;
+	if (sa->tex != sb->tex)
+		return (sa->tex < sb->tex) ? -1 : 1;
 	if (sa->first != sb->first)
 		return (sa->first < sb->first) ? -1 : 1;
 	return 0;
@@ -1451,7 +1489,7 @@ extern cvar_t r_brush_inst;
 qboolean R_BrushInst_Available (void)
 {
 	return r_brush_inst.integer != 0 &&
-	       gl_shader_world_inst.program != 0 &&
+	       gl_shader_world.program != 0 &&
 	       world_vao && world_ibo && lm_atlas_enabled && lm_atlas_texture;
 }
 
@@ -1473,6 +1511,7 @@ void R_CollectBrushInstances (void)
 	num_world_tex_batches_fence = 0;
 	memset(world_inst_collected, 0, sizeof(world_inst_collected));
 	memset(world_inst_needs_legacy, 0, sizeof(world_inst_needs_legacy));
+	memset(world_inst_skip_reason, 0, sizeof(world_inst_skip_reason));
 
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
@@ -1482,7 +1521,7 @@ void R_CollectBrushInstances (void)
 
 		e = cl_visedicts[i];
 		if (!e->model || e->model->type != mod_brush)
-			continue;
+			{ world_inst_skip_reason[i] = "not-brush"; continue; }
 
 		/* Skip ents the instanced path can't handle: translucent
 		 * (drawn via R_DrawTransEntitiesOnList), abslight (uniform
@@ -1495,11 +1534,11 @@ void R_CollectBrushInstances (void)
 		translucent = ((e->drawflags & DRF_TRANSLUCENT) ||
 			(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 		if (translucent)
-			continue;
+			{ world_inst_skip_reason[i] = "translucent"; continue; }
 		if ((e->drawflags & MLS_MASKIN) == MLS_ABSLIGHT)
-			continue;
+			{ world_inst_skip_reason[i] = "abslight"; continue; }
 		if (e->model->flags & EF_TRANSPARENT)
-			continue;
+			{ world_inst_skip_reason[i] = "ef_transparent"; continue; }
 
 		clmodel = e->model;
 		if (e->angles[0] || e->angles[1] || e->angles[2])
@@ -1518,7 +1557,7 @@ void R_CollectBrushInstances (void)
 			VectorAdd (e->origin, clmodel->maxs, maxs);
 		}
 		if (R_CullBox (mins, maxs))
-			continue;
+			{ world_inst_skip_reason[i] = rotated ? "cull-rot" : "cull-tight"; continue; }
 
 		/* Compute model-space view origin for backface culling */
 		VectorSubtract (r_refdef.vieworg, e->origin, modelorg_local);
@@ -1564,7 +1603,7 @@ void R_CollectBrushInstances (void)
 		 *   T(origin) * Rz(yaw) * Ry(-pitch) * Rx(-roll)
 		 * Bake that into a 3x4 (transposed mat3x4) row-major. */
 		if (num_world_instances >= MAX_WORLD_INSTANCES)
-			break;
+			{ world_inst_skip_reason[i] = "instcap"; break; }
 		eview = e;
 		{
 			float saved_pitch = e->angles[0];
@@ -1640,7 +1679,26 @@ void R_CollectBrushInstances (void)
 				is_fence = (spec & SURF_DRAWFENCE) != 0;
 
 				if (psurf->vbo_numtris <= 0)
+				{
+					if (r_brush_inst_diff.integer >= 3)
+						Con_DPrintf("  reject ent=%p surf#%d: vbo_numtris<=0 flags=0x%x firstidx=%d\n",
+							(void*)e, s_idx, psurf->flags, psurf->vbo_firstindex);
 					continue;
+				}
+
+				/* Optional CPU backface cull — A/B test for
+				 * uhexen2-a0t2 residual flash.  Mirrors legacy
+				 * R_DrawBrushModel's per-surface check exactly. */
+				if (r_brush_inst_backface.integer)
+				{
+					mplane_t *pp = psurf->plane;
+					float dot = DotProduct (modelorg_local, pp->normal) - pp->dist;
+					qboolean visible =
+						((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
+						(!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON));
+					if (!visible)
+						continue;
+				}
 
 				R_LightmapRebuildIfDirty (psurf);
 
@@ -1660,7 +1718,12 @@ void R_CollectBrushInstances (void)
 				else
 				{
 					if (num_world_surf_keys >= MAX_WORLD_INDIRECT)
+					{
+						if (r_brush_inst_diff.integer >= 3)
+							Con_DPrintf("  reject ent=%p surf#%d: opaque cap (%d)\n",
+								(void*)e, s_idx, num_world_surf_keys);
 						break;
+					}
 					{
 						texture_t *t = R_TextureAnimation (e, psurf->texinfo->texture);
 						world_surf_key_t *wsk = &world_surf_keys[num_world_surf_keys++];
@@ -1672,6 +1735,81 @@ void R_CollectBrushInstances (void)
 				}
 			}
 		}
+	}
+
+	/* Per-frame transition diagnostic for uhexen2-a0t2.  Tracks each
+	 * brush ent's (collected, opaque-surfs, fence-surfs) by pointer
+	 * across frames; logs when the count drops vs the prior frame for
+	 * the same ent.  A drop on a rotating ent during the flash window
+	 * pinpoints which input changed. */
+	if (r_brush_inst_diff.integer >= 3)
+	{
+		#define DIFF_HASH_SIZE 256
+		typedef struct { void *ent; int opq, fen; qboolean coll; int seen_frame; } diff_slot_t;
+		static diff_slot_t diff_hash[DIFF_HASH_SIZE];
+		static int diff_frame;
+		int j;
+
+		diff_frame++;
+		for (j = 0; j < cl_numvisedicts; j++)
+		{
+			entity_t *eu = cl_visedicts[j];
+			int opq = 0, fen = 0, slot, probes;
+			diff_slot_t *s = NULL;
+			if (!eu->model || eu->model->type != mod_brush)
+				continue;
+			if (world_inst_collected[j])
+			{
+				int kk;
+				int my_inst = -1;
+				/* find this ent's instance index */
+				for (kk = 0; kk < num_world_instances; kk++)
+				{
+					/* matrix is 1:1 with collected order; just count */
+				}
+				/* Instead use j-index ordinal among collected to map */
+				{
+					int cc = 0, jj;
+					for (jj = 0; jj < j; jj++)
+						if (world_inst_collected[jj]) cc++;
+					my_inst = cc;
+				}
+				for (kk = 0; kk < num_world_surf_keys; kk++)
+					if ((int)world_surf_keys[kk].instance == my_inst) opq++;
+				for (kk = 0; kk < num_world_surf_keys_fence; kk++)
+					if ((int)world_surf_keys_fence[kk].instance == my_inst) fen++;
+			}
+			slot = (int)(((size_t)eu >> 4) & (DIFF_HASH_SIZE-1));
+			for (probes = 0; probes < DIFF_HASH_SIZE; probes++)
+			{
+				diff_slot_t *cand = &diff_hash[(slot+probes) & (DIFF_HASH_SIZE-1)];
+				if (cand->ent == eu || cand->ent == NULL) { s = cand; break; }
+			}
+			if (!s) continue;
+			if (s->ent == eu)
+			{
+				qboolean drop = (s->coll && !world_inst_collected[j]) ||
+				                (s->opq > opq) || (s->fen > fen);
+				if (drop)
+					Con_DPrintf("brush_inst F=%d ent=%p mdl=%s ang=%.1f,%.1f,%.1f org=%.0f,%.0f,%.0f col %d->%d opq %d->%d fen %d->%d why=%s\n",
+						diff_frame, (void*)eu,
+						eu->model->name ? eu->model->name : "?",
+						eu->angles[0], eu->angles[1], eu->angles[2],
+						eu->origin[0], eu->origin[1], eu->origin[2],
+						s->coll, world_inst_collected[j],
+						s->opq, opq, s->fen, fen,
+						world_inst_skip_reason[j] ? world_inst_skip_reason[j] : "(none)");
+			}
+			s->ent = eu;
+			s->coll = world_inst_collected[j];
+			s->opq = opq;
+			s->fen = fen;
+			s->seen_frame = diff_frame;
+		}
+		/* Decay stale slots so freed entities don't pin probes */
+		for (j = 0; j < DIFF_HASH_SIZE; j++)
+			if (diff_hash[j].ent && diff_frame - diff_hash[j].seen_frame > 60)
+				diff_hash[j].ent = NULL;
 	}
 }
 
@@ -1722,11 +1860,57 @@ static void R_BuildBrushInstBatches (
 	*out_num_batches = num_batches;
 }
 
+/* Walk a sorted-by-(instance, texture, first) key array, uploading the
+ * per-instance mvp/mv uniforms once per entity, binding each texture
+ * once per (instance, texture) group, and run-coalescing contiguous
+ * (firstIndex, count) ranges into single glDrawElements calls.  Used
+ * twice — once for the opaque pass, once for the fence pass.  Reuses
+ * gl_shader_world (the same shader as world surfaces) so within-shader
+ * invariant gl_Position covers both world and brush-ent draws — no
+ * cross-shader z-fight, no polygon-offset backstop needed. */
+static void R_DispatchBrushInstancedPass (
+	const world_surf_key_t *keys, int num_keys, glprogram_t *prog)
+{
+	int i = 0;
+	while (i < num_keys)
+	{
+		GLuint inst = keys[i].instance;
+		if (prog->u_mvp >= 0)
+			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE,
+					      world_instances[inst].mvp);
+		if (prog->u_modelview >= 0)
+			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE,
+					      world_instances[inst].mv);
+		while (i < num_keys && keys[i].instance == inst)
+		{
+			GLuint cur_tex = keys[i].tex;
+			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
+			while (i < num_keys && keys[i].instance == inst &&
+			       keys[i].tex == cur_tex)
+			{
+				GLuint run_first = keys[i].first;
+				GLuint run_count = keys[i].count;
+				i++;
+				while (i < num_keys && keys[i].instance == inst &&
+				       keys[i].tex == cur_tex &&
+				       keys[i].first == run_first + run_count)
+				{
+					run_count += keys[i].count;
+					i++;
+				}
+				glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+				    (void *)((size_t)run_first * sizeof(unsigned int)));
+				c_brush_polys++;
+			}
+		}
+	}
+}
+
 void R_DrawBrushInstanced (void)
 {
 #ifndef __EMSCRIPTEN__
-	gl_world_inst_prog_t *prog = &gl_shader_world_inst;
-	int b;
+	glprogram_t *prog = &gl_shader_world;
 	extern float r_fog_density;
 	extern float r_fog_color[3];
 
@@ -1734,8 +1918,7 @@ void R_DrawBrushInstanced (void)
 	    (num_world_surf_keys == 0 && num_world_surf_keys_fence == 0))
 		return;
 
-	/* Sort opaque + fence keys by (texture, instance, firstIndex) so we
-	 * can collapse contiguous IBO ranges and group by texture. */
+	/* Sort by (instance, texture, firstIndex) — see world_surf_key_cmp. */
 	if (num_world_surf_keys > 0)
 		qsort (world_surf_keys, num_world_surf_keys,
 		       sizeof(world_surf_keys[0]), world_surf_key_cmp);
@@ -1743,83 +1926,27 @@ void R_DrawBrushInstanced (void)
 		qsort (world_surf_keys_fence, num_world_surf_keys_fence,
 		       sizeof(world_surf_keys_fence[0]), world_surf_key_cmp);
 
-	R_BuildBrushInstBatches (
-		world_surf_keys, num_world_surf_keys,
-		world_indirect_cmds, &num_world_indirect, MAX_WORLD_INDIRECT,
-		world_tex_batches, &num_world_tex_batches,
-		(int)(sizeof(world_tex_batches)/sizeof(world_tex_batches[0])));
-
-	R_BuildBrushInstBatches (
-		world_surf_keys_fence, num_world_surf_keys_fence,
-		world_indirect_cmds_fence, &num_world_indirect_fence, MAX_WORLD_INDIRECT_FENCE,
-		world_tex_batches_fence, &num_world_tex_batches_fence,
-		(int)(sizeof(world_tex_batches_fence)/sizeof(world_tex_batches_fence[0])));
-
 	rprof_brush_inst_opaque = num_world_surf_keys;
 	rprof_brush_inst_fence  = num_world_surf_keys_fence;
-
-	/* Lazy-create SSBO + indirect buffers */
-	if (!world_inst_ssbo)
-	{
-		glGenBuffers_fp(1, &world_inst_ssbo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, world_inst_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
-				sizeof(world_inst_header_t) +
-				MAX_WORLD_INSTANCES * sizeof(world_instance_t),
-				NULL, GL_DYNAMIC_DRAW);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
-	}
-	if (!world_indirect_buffer)
-	{
-		glGenBuffers_fp(1, &world_indirect_buffer);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, world_indirect_buffer);
-		glBufferData_fp(GL_DRAW_INDIRECT_BUFFER,
-				MAX_WORLD_INDIRECT * sizeof(world_indirect_cmd_t),
-				NULL, GL_DYNAMIC_DRAW);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
-	}
-	if (!world_indirect_buffer_fence)
-	{
-		glGenBuffers_fp(1, &world_indirect_buffer_fence);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, world_indirect_buffer_fence);
-		glBufferData_fp(GL_DRAW_INDIRECT_BUFFER,
-				MAX_WORLD_INDIRECT_FENCE * sizeof(world_indirect_cmd_t),
-				NULL, GL_DYNAMIC_DRAW);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
-	}
-
-	/* Upload per-instance mvp/mv/misc.  Header is padding kept for
-	 * SSBO offset compatibility with the older shader struct layout.
-	 * Memory barrier afterwards: the GPU world-cull (gl_worldcull.c)
-	 * earlier in the frame writes via SSBO binding 3 and issues its
-	 * own glMemoryBarrier; a separate compute path can leave the
-	 * driver in a state where subsequent SSBO reads in our shader
-	 * see partial / stale data without an explicit barrier on this
-	 * upload too.  Targets the intermittent flash on moving brush
-	 * ents (uhexen2-a0t2). */
-	{
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, world_inst_ssbo);
-		glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER,
-				   sizeof(world_inst_header_t),
-				   num_world_instances * sizeof(world_instance_t),
-				   world_instances);
-	}
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, world_inst_ssbo);
-	glMemoryBarrier_fp(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	/* Flush lightmap dirty rects produced by R_CollectBrushInstances —
 	 * R_LightmapRebuildIfDirty marks them but R_UpdateLightmaps already
 	 * ran before the world phase.  Without this second upload, brush
-	 * ents sample last frame's atlas, which manifests as a one-frame
-	 * lighting flash on planks the player's dlight just swept across. */
+	 * ents sample last frame's atlas. */
 	{
 		extern void R_UpdateLightmaps (qboolean Translucent);
 		R_UpdateLightmaps (false);
 	}
 
-	/* Bind world VAO + instanced shader + lightmap atlas + uniforms */
+	/* Bind world VAO + WORLD shader (not _inst!) + lightmap atlas +
+	 * fog uniforms.  Using gl_shader_world here is the entire point
+	 * of uhexen2-mf45: same compiled program for world and brush ents
+	 * means the GLSL compiler emits identical instructions for both,
+	 * and within-shader invariant gl_Position covers coplanar joins
+	 * (drawbridge plank vs. ground, portcullis vs. wall pocket). */
 	glBindVertexArray_fp(world_vao);
 	glUseProgram_fp(prog->program);
+	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	if (prog->u_fog_density >= 0)
 		glUniform1f_fp(prog->u_fog_density, r_fog_density);
 	if (prog->u_fog_color >= 0)
@@ -1829,75 +1956,131 @@ void R_DrawBrushInstanced (void)
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	GL_ImmInvalidateState();
 
-	/* Polygon-offset backstop for the gl_Position non-invariance
-	 * z-fight between gl_shader_world (world surfaces) and
-	 * gl_shader_world_inst (brush-ent surfaces).  Even with bit-
-	 * identical CPU-baked mvp matrices, Mesa's GLSL compiler reorders
-	 * the mat4×vec4 multiply differently in the two shader contexts,
-	 * producing 1-ULP depth differences.  The portcullis briefly
-	 * z-loses to its surrounding doorway/wall surfaces, reading as a
-	 * flash at the BSP-authored (raised) position of the entity.
-	 * Sign flips with reversed-Z — same pattern as the alias-fullbright
-	 * z-fight workaround in R_DrawAliasModel.  uhexen2-a0t2. */
+	/* Optional polygon offset — kept as a tunable safety net (default 0).
+	 * With the shader unified, no offset should be needed; bumping the
+	 * cvar lets us A/B verify if any residual z-fight remains. */
+	if (r_brush_inst_offset.value != 0.0f)
 	{
-		float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
+		float mag = r_brush_inst_offset.value;
+		float fb_offset = gl_clipcontrol_able ? mag : -mag;
 		glEnable_fp(GL_POLYGON_OFFSET_FILL);
 		glPolygonOffset_fp(fb_offset, fb_offset);
 	}
 
 	/* Opaque pass: alpha threshold near zero, no A2C. */
-	if (num_world_indirect > 0)
+	if (num_world_surf_keys > 0)
 	{
 		if (prog->u_alpha_threshold >= 0)
 			glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, world_indirect_buffer);
-		glBufferSubData_fp(GL_DRAW_INDIRECT_BUFFER, 0,
-				   num_world_indirect * sizeof(world_indirect_cmd_t),
-				   world_indirect_cmds);
-		for (b = 0; b < num_world_tex_batches; b++)
-		{
-			world_tex_batch_t *bt = &world_tex_batches[b];
-			if (bt->cmd_count <= 0)
-				continue;
-			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-			glBindTexture_fp(GL_TEXTURE_2D, bt->tex);
-			glMultiDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,
-			    (void *)((size_t)bt->first_cmd * sizeof(world_indirect_cmd_t)),
-			    bt->cmd_count, sizeof(world_indirect_cmd_t));
-		}
+		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog);
 	}
 
-	/* Fence pass: alpha cutout @0.666, optional A2C — same shader,
-	 * separate indirect buffer to keep the opaque cmd buffer intact. */
-	if (num_world_indirect_fence > 0)
+	/* Fence pass: alpha cutout @0.666, optional A2C. */
+	if (num_world_surf_keys_fence > 0)
 	{
 		if (prog->u_alpha_threshold >= 0)
 			glUniform1f_fp(prog->u_alpha_threshold, 0.666f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
-		glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, world_indirect_buffer_fence);
-		glBufferSubData_fp(GL_DRAW_INDIRECT_BUFFER, 0,
-				   num_world_indirect_fence * sizeof(world_indirect_cmd_t),
-				   world_indirect_cmds_fence);
-		for (b = 0; b < num_world_tex_batches_fence; b++)
-		{
-			world_tex_batch_t *bt = &world_tex_batches_fence[b];
-			if (bt->cmd_count <= 0)
-				continue;
-			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
-			glBindTexture_fp(GL_TEXTURE_2D, bt->tex);
-			glMultiDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,
-			    (void *)((size_t)bt->first_cmd * sizeof(world_indirect_cmd_t)),
-			    bt->cmd_count, sizeof(world_indirect_cmd_t));
-		}
+		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog);
 		if (r_alphatocoverage.integer)
 			glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
 
-	glDisable_fp(GL_POLYGON_OFFSET_FILL);
-	glPolygonOffset_fp(0.0f, 0.0f);
-	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, 0);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	if (r_brush_inst_offset.value != 0.0f)
+	{
+		glDisable_fp(GL_POLYGON_OFFSET_FILL);
+		glPolygonOffset_fp(0.0f, 0.0f);
+	}
+
+	/* Diagnostic overlay (uhexen2-a0t2 residual flash).  Redraws the same
+	 * surf_keys with gl_shader_flat using the SAME baked mvp.  Yellow
+	 * blinking together with the textured flash → bug is in collect/
+	 * dispatch (matrix or surf_key drift); yellow steady through the
+	 * flash → bug is in texture/lightmap.  Reuses world_vao (still bound)
+	 * and runs in the same depth state so the overlay matches MDI's
+	 * fragments exactly. */
+	if (r_brush_inst_diff.integer && num_world_instances > 0 &&
+	    gl_shader_flat.program)
+	{
+		int inst_idx, k;
+		float r = 1.0f, g = 1.0f, blu = 0.0f;	/* yellow for mode 1 */
+		if (r_brush_inst_diff.integer == 2) {
+			r = 0.0f; g = 1.0f; blu = 1.0f;	/* cyan for mode 2 */
+		}
+		glUseProgram_fp(gl_shader_flat.program);
+		glDisableVertexAttribArray_fp(ATTR_COLOR);
+		glVertexAttrib4f_fp(ATTR_COLOR, r, g, blu, 0.5f);
+		glDepthMask_fp(0);
+		glEnable_fp(GL_BLEND);
+		glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		for (inst_idx = 0; inst_idx < num_world_instances; inst_idx++)
+		{
+			float mvp[16];
+			if (r_brush_inst_diff.integer == 2)
+			{
+				/* Recompute mvp via the same R_RotateForEntity
+				 * path the collector used, but freshly — to spot
+				 * any drift between the baked snapshot and a
+				 * fresh recompute. */
+				entity_t *e = NULL;
+				int vi;
+				for (vi = 0; vi < cl_numvisedicts; vi++)
+				{
+					int seen = 0, vj;
+					if (!world_inst_collected[vi])
+						continue;
+					for (vj = 0; vj < vi; vj++)
+						if (world_inst_collected[vj])
+							seen++;
+					if (seen == inst_idx) {
+						e = cl_visedicts[vi];
+						break;
+					}
+				}
+				if (!e) continue;
+				{
+					float saved_pitch = e->angles[0];
+					float saved_roll  = e->angles[2];
+					float mv_save[16];
+					GL_GetModelview (mv_save);
+					e->angles[0] = -saved_pitch;
+					e->angles[2] = -saved_roll;
+					R_RotateForEntity (e);
+					e->angles[0] = saved_pitch;
+					e->angles[2] = saved_roll;
+					GL_GetMVP (mvp);
+					GL_LoadMatrixf (mv_save);
+				}
+			}
+			else
+			{
+				memcpy(mvp, world_instances[inst_idx].mvp, sizeof(mvp));
+			}
+			glUniformMatrix4fv_fp(gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+			for (k = 0; k < num_world_surf_keys; k++)
+			{
+				if (world_surf_keys[k].instance != (GLuint)inst_idx)
+					continue;
+				glDrawElements_fp(GL_TRIANGLES, world_surf_keys[k].count,
+				    GL_UNSIGNED_INT,
+				    (void *)((size_t)world_surf_keys[k].first *
+					     sizeof(unsigned int)));
+			}
+			for (k = 0; k < num_world_surf_keys_fence; k++)
+			{
+				if (world_surf_keys_fence[k].instance != (GLuint)inst_idx)
+					continue;
+				glDrawElements_fp(GL_TRIANGLES, world_surf_keys_fence[k].count,
+				    GL_UNSIGNED_INT,
+				    (void *)((size_t)world_surf_keys_fence[k].first *
+					     sizeof(unsigned int)));
+			}
+		}
+		glDisable_fp(GL_BLEND);
+		glDepthMask_fp(1);
+	}
+
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
 #endif /* !__EMSCRIPTEN__ */

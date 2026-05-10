@@ -291,6 +291,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_motionblur);
 	Cvar_RegisterVariable (&r_alias_gpu);
 	{ extern cvar_t r_brush_inst; Cvar_RegisterVariable (&r_brush_inst); }
+	{ extern cvar_t r_brush_inst_diff; Cvar_RegisterVariable (&r_brush_inst_diff); }
+	{ extern cvar_t r_brush_inst_backface; Cvar_RegisterVariable (&r_brush_inst_backface); }
+	{ extern cvar_t r_brush_inst_offset; Cvar_RegisterVariable (&r_brush_inst_offset); }
 	Cvar_RegisterVariable (&r_alphatocoverage);
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
