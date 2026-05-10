@@ -2103,6 +2103,7 @@ static void M_Display_AdjustSliders (int dir)
 #define PRESET_COMMON \
 	Cvar_SetValue ("gl_flashblend", 0); \
 	Cvar_SetValue ("r_dynamic", 1); \
+	Cvar_SetValue ("gl_torch_dlight", 1); \
 	Cvar_SetValue ("scr_menufade", 0);
 
 		if (preset == 1)	/* Crunchy — 25% scale, maximum lo-fi */
