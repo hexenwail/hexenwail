@@ -215,11 +215,15 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #else
 #define GLSL_VERT_HEADER	"#version 430 core\n"
 #define GLSL_FRAG_HEADER	"#version 430 core\n"
-/* Force depth test BEFORE fragment shader runs even when shader uses
- * `discard`. Lets the GPU exploit the front-to-back BSP traversal's
- * Hi-Z without `discard` defeating early-Z. GLSL 4.20+. No measured
- * benefit on flat coliseum scenes (BSP gives Hi-Z already), no harm. */
-#define GLSL_EARLY_Z		"layout(early_fragment_tests) in;\n"
+/* Do NOT force early_fragment_tests on shaders that use `discard` for
+ * alpha-tested cutouts.  Early tests run depth+stencil — and write them —
+ * BEFORE the fragment shader executes; a later `discard` cannot undo the
+ * depth write that already happened.  For an alpha-tested fence (e.g. a
+ * func_illusionary bush), every cutout pixel still wrote the bush's
+ * depth, occluding any entity drawn after at that pixel even though no
+ * color was written there.  Visible on mill.bsp (SoT): bush silhouette
+ * z-rejected the tree behind it.  uhexen2-238u. */
+#define GLSL_EARLY_Z		""
 #endif
 
 /* --- shader_2d: orthographic HUD/text rendering --- */
