@@ -224,26 +224,15 @@ void EmitWaterPolys (msurface_t *fa)
 {
 	glpoly_t	*p;
 	float		*v;
-	int		i;
+	int			i;
 	float		s, t, os, ot;
 	float		nz;
 	float		ripple = gl_waterripple.value;
-	qboolean	use_pixel_warp = (r_water_pixel_warp.integer != 0);
-	const glprogram_t *shader = use_pixel_warp ? &gl_shader_turb : &gl_shader_alias;
 
 	if (ripple < 0) ripple = 0;
 	else if (ripple > 10) ripple = 10;
 
-	/* When using the per-pixel warp shader, push u_ripple now (not
-	 * cached by GL_ImmEnd); u_time is uploaded by the imm path's
-	 * uniform cache.  uhexen2-9o7u. */
-	if (use_pixel_warp && gl_shader_turb.u_ripple >= 0)
-	{
-		glUseProgram_fp(gl_shader_turb.program);
-		glUniform1f_fp(gl_shader_turb.u_ripple, ripple);
-		GL_ImmInvalidateState();
-	}
-
+	/* Batch all polygons as triangles in one draw call */
 	GL_ImmBegin ();
 	for (p = fa->polys ; p ; p = p->next)
 	{
@@ -253,7 +242,7 @@ void EmitWaterPolys (msurface_t *fa)
 		/* Check buffer space: (numverts-2)*3 triangle verts */
 		if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, shader);
+			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
 			GL_ImmBegin ();
 		}
 
@@ -265,39 +254,24 @@ void EmitWaterPolys (msurface_t *fa)
 			{
 				int idx = (vi == 0) ? 0 : (vi == 1) ? i - 1 : i;
 				v = p->verts[idx];
+				os = v[3];
+				ot = v[4];
 
-				if (use_pixel_warp)
-				{
-					/* Send raw texel-space UV (v[3]=os, v[4]=ot)
-					 * and unwarped position — gl_shader_turb does
-					 * the warp + Z ripple in the shader. */
-					GL_ImmTexCoord2f (v[3], v[4]);
-					GL_ImmVertex3f (v[0], v[1], v[2]);
-				}
-				else
-				{
-					/* Legacy CPU per-vertex warp: shift UV via
-					 * 256-entry sin lookup and displace Z by the
-					 * ripple sin. */
-					os = v[3];
-					ot = v[4];
+				nz = v[2];
+				if (ripple > 0)
+					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[2]*0.05 + realtime);
 
-					nz = v[2];
-					if (ripple > 0)
-						nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[2]*0.05 + realtime);
+				s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
+				s *= (1.0/64);
+				t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
+				t *= (1.0/64);
 
-					s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
-					s *= (1.0/64);
-					t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
-					t *= (1.0/64);
-
-					GL_ImmTexCoord2f (s, t);
-					GL_ImmVertex3f (v[0], v[1], nz);
-				}
+				GL_ImmTexCoord2f (s, t);
+				GL_ImmVertex3f (v[0], v[1], nz);
 			}
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLES, shader);
+	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
 }
 
 
