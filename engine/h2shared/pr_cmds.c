@@ -509,18 +509,28 @@ static void PF_pimpmodel (void)
 	pimp->glow_settings[LIGHT_RADIUS] = max_health;
 	pimp->glow_settings[LIGHT_STYLE] = atoi(ED_GetProperty(ref_ent, "style"));
 
-	/* Plan B (narrowed): propagate ONLY the EF_GLOW orb-enable flag to
-	   the shared model so non-pimped instances of the same model start
-	   showing their orb (Shanjaq behavior — fixes missing glows on mods
-	   that pimp a single prototype expecting model-wide effect).
-	   - Color/radius/style NOT copied: each instance keeps its own
-	     engine-set or per-entity values; a single pimp can't recolor
-	     every instance of the model.
-	   - SPIN/FLOAT NOT copied: visual animation should stay per-entity.
-	   - ILLUMINATE NOT copied: cl_main.c allocates a dlight per frame
-	     for every entity with this flag — propagating made multi-entity
-	     effects (e.g. lightning) stack dlights. */
+	/* Plan B: propagate EF_GLOW (and the orb glow_settings) to the
+	 * shared model so non-pimped instances of the same model inherit
+	 * the orb. Required by SoT-style mods where modelpimp_think calls
+	 * pimpmodel(self, self.glow_color) on a hidden misc_modelpimp
+	 * entity, expecting all map-placed misc_models with the same model
+	 * to glow.
+	 * - SPIN/FLOAT not copied: visual animation stays per-entity.
+	 * - ILLUMINATE not copied: cl_main.c allocates a dlight per frame
+	 *   for every visedict with the flag; propagating across all
+	 *   instances would stack dlights on multi-entity effects.
+	 * - glow_settings only copied when the model has no engine-set
+	 *   color defaults (all-zero RGB). Engine-known models like
+	 *   i_btmana keep their canonical color. */
 	mod->ex_flags |= (pimp->ex_flags & EF_GLOW);
+	if ((pimp->ex_flags & EF_GLOW) &&
+	    mod->glow_settings[COLOR_R] == 0.0f &&
+	    mod->glow_settings[COLOR_G] == 0.0f &&
+	    mod->glow_settings[COLOR_B] == 0.0f)
+	{
+		memcpy(mod->glow_settings, pimp->glow_settings,
+		       sizeof(mod->glow_settings));
+	}
 
 	G_INT(OFS_RETURN) = 1;
 }
