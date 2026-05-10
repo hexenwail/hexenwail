@@ -677,15 +677,33 @@ static const char sturb_frag[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
+	"const float TWO_PI = 6.28318530718;\n"
+	/* Warp frequency in the legacy formula is 0.125 cycles/texel,
+	 * i.e. one sine period spans 2pi/0.125 = ~50.27 texel units.
+	 * If a single screen pixel covers more than ~half that (Nyquist
+	 * limit), the per-pixel sin aliases violently — broken under
+	 * sub-pixel projection at glancing angles, producing horizontal/
+	 * vertical banding that consumes the entire surface.  Detect via
+	 * fwidth() and attenuate the warp amplitude smoothly to zero in
+	 * those pixels.  Without this damping the per-pixel approach
+	 * looks worse than the legacy per-vertex path the moment the
+	 * camera tilts. */
+	"const float HALF_PERIOD = 25.13274;\n"  /* pi / 0.125 */
 	"void main() {\n"
-	/* Per-pixel sin warp — analytical equivalent of legacy turbsin
-	 * lookup (256 entries of 8 * sin(i*2pi/256), indexed via
-	 * (val * 256/(2pi)) & 255).  Amplitude 8 in texel units, then
-	 * scaled to UV by /64 (water textures are 64 wide). */
 	"    vec2 raw = v_raw_uv;\n"
+	"    float fdx = fwidth(raw.x);\n"
+	"    float fdy = fwidth(raw.y);\n"
+	"    float damp_x = clamp(HALF_PERIOD / max(fdy, 0.001), 0.0, 1.0);\n"
+	"    float damp_y = clamp(HALF_PERIOD / max(fdx, 0.001), 0.0, 1.0);\n"
+	/* Bound the sin argument to [-2pi, 2pi] before evaluation —
+	 * GLSL sin() argument reduction loses precision for arguments
+	 * larger than ~1000, and raw UVs on a big lava floor easily
+	 * exceed that with cl.time accumulating on top. */
+	"    float ax = mod(raw.y * 0.125 + u_time, TWO_PI);\n"
+	"    float ay = mod(raw.x * 0.125 + u_time, TWO_PI);\n"
 	"    vec2 warp;\n"
-	"    warp.x = raw.x + 8.0 * sin(raw.y * 0.125 + u_time);\n"
-	"    warp.y = raw.y + 8.0 * sin(raw.x * 0.125 + u_time);\n"
+	"    warp.x = raw.x + 8.0 * sin(ax) * damp_x;\n"
+	"    warp.y = raw.y + 8.0 * sin(ay) * damp_y;\n"
 	"    vec2 uv = warp * (1.0/64.0);\n"
 	"    vec4 tex = texture(u_texture0, uv);\n"
 	"    vec4 color = tex * v_color;\n"
