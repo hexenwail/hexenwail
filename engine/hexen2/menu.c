@@ -5081,7 +5081,7 @@ static void M_Quit_Draw (void)
 		const char *l1 = "Hammer of Thyrion 1.5.10 by sezero";
 		const char *l2 = "Hexen II 1.29 by Raven Software";
 		const char *l3 = "with Shanjaq & Inky additions,";
-		const char *l4 = "along with many more contributors";
+		const char *l4 = "& many more contributors";
 		const char *l5 = "for Wabbit";
 		M_Print      (QUIT_CENTER(l0), y,      l0);
 		M_PrintWhite (QUIT_CENTER(l1), y + 12, l1);
