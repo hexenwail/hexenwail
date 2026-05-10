@@ -658,6 +658,15 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWSKY)
 	{	// warp texture, no lightmaps
 		EmitBothSkyLayers (fa);
+		/* Restore the DRF_TRANSLUCENT prelude state — the cleanup at
+		 * the bottom of this function is bypassed by this early return
+		 * and a leaked DepthMask=0 / BLEND-on would corrupt the next
+		 * draw call.  uhexen2-j001. */
+		if (e->drawflags & DRF_TRANSLUCENT)
+		{
+			glDepthMask_fp(1);
+			glDisable_fp(GL_BLEND);
+		}
 		return;
 	}
 
@@ -683,7 +692,13 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		}
 		else
 		{
+			/* Opaque turb (default lava) writes depth normally even
+			 * on a DRF_TRANSLUCENT brush — the prelude set DepthMask
+			 * to 0 assuming a translucent surface, but the per-liquid
+			 * alpha override means this surface is actually opaque
+			 * and must occlude geometry behind it.  uhexen2-j001. */
 			glDisable_fp (GL_BLEND);
+			glDepthMask_fp(1);
 		}
 		alpha_val = turb_alpha;
 		if (fa->polys && !r_fullbright.integer && intensity >= 1.0f)
@@ -705,11 +720,13 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		else
 			GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 		EmitWaterPolys (fa);
-		if (turb_blend)
-		{
-			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
-		}
+		/* Restore default state on every return path — the cleanup at
+		 * the bottom of this function is bypassed by this early return,
+		 * so any DepthMask=0 / BLEND-on left by the prelude or the
+		 * turb_blend branch above would leak into the next draw.
+		 * uhexen2-j001. */
+		glDepthMask_fp(1);
+		glDisable_fp(GL_BLEND);
 		return;
 	}
 
@@ -844,6 +861,13 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWSKY)
 	{	// warp texture, no lightmaps
 		EmitBothSkyLayers (fa);
+		/* Restore the DRF_TRANSLUCENT prelude state — see the matching
+		 * comment in R_RenderBrushPoly.  uhexen2-j001. */
+		if (e->drawflags & DRF_TRANSLUCENT)
+		{
+			glDepthMask_fp(1);
+			glDisable_fp(GL_BLEND);
+		}
 		return;
 	}
 
