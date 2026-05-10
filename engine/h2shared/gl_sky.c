@@ -1250,12 +1250,20 @@ void Sky_DrawSky (void)
 		GL_ImmColor4f(1, 1, 1, 1);
 		if (have_stencil)
 		{
-			/* Draw skybox only where stencil=1 (sky surface pixels) */
+			/* Draw skybox only where stencil=1 (sky surface pixels).
+			 * depth-mask ON: glDepthRange(0,0) inside Sky_DrawSkyBox
+			 * pins fragment depth to the far plane, so writing it
+			 * replaces the sky-brush wall depth the pre-pass laid down.
+			 * Entities drawn afterwards z-test against far instead of
+			 * wall depth, so enemies / sprites outside sky-windowed
+			 * openings render correctly (uhexen2-4h32).  World pixels
+			 * remain untouched: stencil=0 there since the world chain
+			 * resets it. */
 			glEnable_fp(GL_STENCIL_TEST);
 			glStencilFunc_fp(GL_EQUAL, 1, 0xFF);
 			glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
 			glDepthFunc_fp(GL_ALWAYS);
-			glDepthMask_fp(0);
+			glDepthMask_fp(1);
 		}
 		else
 		{
