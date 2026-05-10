@@ -224,15 +224,26 @@ void EmitWaterPolys (msurface_t *fa)
 {
 	glpoly_t	*p;
 	float		*v;
-	int			i;
-	float		s, t, os, ot;
-	float		nz;
+	int		i;
 	float		ripple = gl_waterripple.value;
 
 	if (ripple < 0) ripple = 0;
 	else if (ripple > 10) ripple = 10;
 
-	/* Batch all polygons as triangles in one draw call */
+	/* gl_shader_turb computes the sin warp per-pixel from raw texel-
+	 * space UVs and applies the optional Z ripple per-vertex.  Set
+	 * u_ripple now (not cached by GL_ImmEnd); u_time is uploaded by
+	 * the imm path's uniform cache.  uhexen2-9o7u. */
+	if (gl_shader_turb.u_ripple >= 0)
+	{
+		glUseProgram_fp(gl_shader_turb.program);
+		glUniform1f_fp(gl_shader_turb.u_ripple, ripple);
+		GL_ImmInvalidateState();
+	}
+
+	/* Batch all polygons as triangles in one draw call.  Vertex stream
+	 * carries unmodified position + raw texel-space UV; the shader
+	 * does the warp. */
 	GL_ImmBegin ();
 	for (p = fa->polys ; p ; p = p->next)
 	{
@@ -242,7 +253,7 @@ void EmitWaterPolys (msurface_t *fa)
 		/* Check buffer space: (numverts-2)*3 triangle verts */
 		if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, &gl_shader_turb);
 			GL_ImmBegin ();
 		}
 
@@ -254,24 +265,14 @@ void EmitWaterPolys (msurface_t *fa)
 			{
 				int idx = (vi == 0) ? 0 : (vi == 1) ? i - 1 : i;
 				v = p->verts[idx];
-				os = v[3];
-				ot = v[4];
-
-				nz = v[2];
-				if (ripple > 0)
-					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[2]*0.05 + realtime);
-
-				s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
-				s *= (1.0/64);
-				t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
-				t *= (1.0/64);
-
-				GL_ImmTexCoord2f (s, t);
-				GL_ImmVertex3f (v[0], v[1], nz);
+				/* Send raw texel-space UV (v[3]=os, v[4]=ot) — the
+				 * fragment shader applies the sin warp per-pixel. */
+				GL_ImmTexCoord2f (v[3], v[4]);
+				GL_ImmVertex3f (v[0], v[1], v[2]);
 			}
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, &gl_shader_turb);
 }
 
 

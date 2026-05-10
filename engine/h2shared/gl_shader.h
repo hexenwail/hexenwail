@@ -30,6 +30,7 @@ typedef struct glprogram_s {
 	GLint	u_time;
 	GLint	u_skyfog;
 	GLint	u_eyepos;
+	GLint	u_ripple;	/* turb shader Z-displacement amount */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */
@@ -48,6 +49,7 @@ extern glprogram_t	gl_shader_2d;		/* orthographic textured quads */
 extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color */
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
+extern glprogram_t	gl_shader_turb;		/* per-pixel water/lava warp */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 
 /* OIT variants — same shaders but output to MRT accum+revealage */
