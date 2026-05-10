@@ -662,13 +662,25 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWTURB)
 	{	// warp texture — apply per-liquid alpha + light tinting
 		float turb_alpha = R_LiquidAlpha(fa->texinfo->texture);
-		if (turb_alpha < 1.0f && alpha_val >= 1.0f)
+		qboolean turb_blend = (turb_alpha < 1.0f);
+		/* R_LiquidAlpha is authoritative for turb surfaces.  The
+		 * DRF_TRANSLUCENT block above set alpha_val = r_wateralpha and
+		 * enabled BLEND assuming a regular surface; for a turb surface
+		 * (e.g. func_illusionary over a lava pit) we override with the
+		 * per-liquid alpha so default lava stays opaque even though
+		 * the brush ent is flagged translucent.  uhexen2-gbmv,
+		 * continuation of 479f1304f. */
+		if (turb_blend)
 		{
 			glEnable_fp (GL_BLEND);
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDepthMask_fp(0);
-			alpha_val = turb_alpha;
 		}
+		else
+		{
+			glDisable_fp (GL_BLEND);
+		}
+		alpha_val = turb_alpha;
 		if (fa->polys && !r_fullbright.integer && intensity >= 1.0f)
 		{
 			extern vec3_t lightcolor;
@@ -688,7 +700,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		else
 			GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 		EmitWaterPolys (fa);
-		if (turb_alpha < 1.0f)
+		if (turb_blend)
 		{
 			glDepthMask_fp(1);
 			glDisable_fp(GL_BLEND);
