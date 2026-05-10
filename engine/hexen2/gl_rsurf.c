@@ -712,23 +712,28 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			glDepthMask_fp(1);
 		}
 		alpha_val = turb_alpha;
-		/* Self-emissive turb textures (lava, teleporters) ignore the
-		 * surrounding lightmap — they are their own light source.
-		 * Without this, a func_illusionary lava brush in a dim pit
-		 * gets multiplied by ambient lightmap brightness and reads
-		 * as a brown smear instead of bright orange.  World lava
-		 * (drawn via R_DrawWaterSurfaces) already uses (1,1,1,1)
-		 * unconditionally — this restores parity for the brush-ent
-		 * path, which Mathuzzz needs because SoT mod authors wrap
-		 * lava as func_illusionary to escape the legacy warp
-		 * artifact (uhexen2-9o7u).  Water keeps the existing dim
+		/* Self-emissive turb textures (lava, teleporters, custom mod
+		 * liquids) ignore the surrounding lightmap — they are their
+		 * own light source.  Without this a func_illusionary lava
+		 * brush in a dim pit gets multiplied by ambient lightmap
+		 * brightness and reads as a brown smear instead of bright
+		 * orange.  World turbs (drawn via R_DrawWaterSurfaces) already
+		 * use (1,1,1,1) unconditionally — this restores parity for
+		 * the brush-ent path.
+		 *
+		 * Original 086x scope was *lava/*tele only; uhexen2-6697
+		 * widens to "anything starting with *, except *water*" so SoT
+		 * mod content (*magic*, *lightnings, *skulls, *lowlight*, plus
+		 * any other custom turb name) gets the same treatment without
+		 * a per-name allowlist.  *water keeps the existing dim
 		 * behavior since real water IS lit by its surroundings. */
 		{
 			texture_t *_t = fa->texinfo->texture;
-			qboolean self_emissive =
+			qboolean is_water =
 				(_t->name[0] == '*' &&
-				 (!q_strncasecmp(_t->name + 1, "lava", 4) ||
-				  !q_strncasecmp(_t->name + 1, "tele", 4)));
+				 !q_strncasecmp(_t->name + 1, "water", 5));
+			qboolean self_emissive =
+				(_t->name[0] == '*' && !is_water);
 
 			if (fa->polys && !r_fullbright.integer &&
 			    intensity >= 1.0f && !self_emissive)
@@ -1032,10 +1037,16 @@ static float R_LiquidAlpha (const texture_t *t)
 		{	if (r_telealpha.value <= 0) return 0.7f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
-	/* Unknown turb textures (H2 portals, *rtex*, etc.) —
-	 * use teleporter alpha (default 0.7) as fallback. */
-	if (r_telealpha.value <= 0) return 0.7f;
-	{	float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+	/* Unknown turb textures (custom mod liquids like *magic, *skulls,
+	 * *lightnings, *lowlight, *magma, *acid, ...) — default to OPAQUE.
+	 * Previously this fell back to teleporter alpha (default 0.7),
+	 * which made every unrecognised turb in mod content translucent
+	 * and let players see geometry below the liquid surface.  Vanilla
+	 * teleporters use *tele* names and are handled by the explicit
+	 * branch above, so this catch-all only catches modded content,
+	 * which almost always wants opaque self-emissive behavior.
+	 * uhexen2-6697. */
+	return 1.0f;
 }
 
 void R_DrawWaterSurfaces (void)
