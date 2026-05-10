@@ -700,9 +700,11 @@ void R_DrawWorldCulled (void)
 	if (gl_shader_world.u_alpha_threshold >= 0)
 		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
 
-	/* Bind lightmap atlas on unit 1 */
+	/* Bind lightmap atlas on unit 1, default fb null at unit 2 */
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 	/* Draw each texture bucket via indirect commands */
@@ -714,8 +716,12 @@ void R_DrawWorldCulled (void)
 		if (!t)
 			continue;
 
-		/* Bind diffuse texture */
+		/* Bind diffuse texture + matching fullbright mask (uhexen2-sjvf) */
 		GL_Bind(t->gl_texturenum);
+		glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+		glBindTexture_fp(GL_TEXTURE_2D,
+			t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 		/* Issue indirect draw for this bucket */
 		glDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,

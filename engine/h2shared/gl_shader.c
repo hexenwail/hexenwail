@@ -23,6 +23,12 @@ glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
 glprogram_t	gl_shader_sky;
 
+/* null fullbright texture: 1x1 black RGBA bound at unit 2 for world
+ * surfaces whose diffuse texture has no fullbright pixels.  Lets
+ * sworld_frag unconditionally sample u_texture2 and add the result
+ * (zero contribution) instead of branching per-fragment.  uhexen2-sjvf. */
+GLuint		gl_null_fb_texture;
+
 /* OIT variants of translucent shaders */
 glprogram_t	gl_shader_world_oit;
 glprogram_t	gl_shader_alias_oit;
@@ -192,6 +198,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_mvp             = glGetUniformLocation_fp(p->program, "u_mvp");
 	p->u_texture0        = glGetUniformLocation_fp(p->program, "u_texture0");
 	p->u_texture1        = glGetUniformLocation_fp(p->program, "u_texture1");
+	p->u_texture2        = glGetUniformLocation_fp(p->program, "u_texture2");
 	p->u_color           = glGetUniformLocation_fp(p->program, "u_color");
 	p->u_fog_density     = glGetUniformLocation_fp(p->program, "u_fog_density");
 	p->u_fog_color       = glGetUniformLocation_fp(p->program, "u_fog_color");
@@ -288,12 +295,11 @@ static const char sworld_vert[] =
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
-	/* invariant gl_Position: pin position math so brush-ent surfaces
-	 * (rendered via the instanced shader gl_shader_world_inst with a
-	 * matching `invariant` qualifier) don't z-fight against world
-	 * surfaces that share the same plane.  Without this, the GLSL
-	 * compiler can reorder the mat4×vec4 multiply between the two
-	 * shaders and produce 1-ULP depth divergence (uhexen2-a0t2). */
+	/* invariant gl_Position: pin position math so within-shader vertex
+	 * transforms produce stable depth across draw calls.  Brush ents
+	 * share this same compiled program (uhexen2-mf45), so the
+	 * within-shader guarantee covers coplanar joins between brush ents
+	 * and world surfaces — no cross-shader 1-ULP drift. */
 	"invariant gl_Position;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
@@ -307,8 +313,9 @@ static const char sworld_vert[] =
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z
-	"uniform sampler2D u_texture0;\n"
-	"uniform sampler2D u_texture1;\n"
+	"uniform sampler2D u_texture0;\n"	/* diffuse */
+	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
+	"uniform sampler2D u_texture2;\n"	/* fullbright mask (uhexen2-sjvf) */
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
@@ -322,6 +329,14 @@ static const char sworld_frag[] =
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
+	/* Add fullbright contribution: palette-index >= vid.fullbright
+	 * pixels in the diffuse texture get rendered at full intensity
+	 * regardless of lightmap.  Mod_LoadFullbrightTexture extracts a
+	 * mask texture per miptex (transparent everywhere else); for
+	 * surfaces with no fullbright pixels the engine binds a 1x1
+	 * black sentinel at unit 2 so the sample contributes 0. */
+	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"    color.rgb += fb;\n"
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
@@ -646,6 +661,7 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	glUseProgram_fp(p->program);
 	if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 	if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
+	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
 	glUseProgram_fp(0);
@@ -801,117 +817,6 @@ void GL_AliasInst_Shutdown (void)
 	memset(&gl_shader_alias_inst, 0, sizeof(gl_shader_alias_inst));
 }
 
-/* --- shader_world_instanced: GL 4.6 + ARB_shader_draw_parameters
- *  reads per-draw worldmatrix from an SSBO indexed by gl_BaseInstance.
- *  Vertex stream comes from the shared world VAO (a_position,
- *  a_texcoord, a_lmcoord); fragment shader is the regular world frag
- *  (texture * lightmap * vertex_color, fog, alpha-threshold discard). */
-#ifndef __EMSCRIPTEN__
-gl_world_inst_prog_t gl_shader_world_inst;
-
-static const char sworld_inst_vert[] =
-	"#version 460 core\n"
-	"\n"
-	"struct WorldInstance {\n"
-	"    mat4 mvp;\n"        /* projection * view * entity_transform */
-	"    mat4 mv;\n"         /* view * entity_transform (eye space) */
-	"    vec4 misc;\n"       /* x = alpha, yzw padding */
-	"};\n"
-	"\n"
-	"layout(std430, binding=0) restrict readonly buffer WorldInstBuf {\n"
-	"    mat4 _pad;\n"        /* unused header retained for offset compat */
-	"    WorldInstance instances[];\n"
-	"};\n"
-	"\n"
-	"in vec3 a_position;\n"
-	"in vec2 a_texcoord;\n"
-	"in vec2 a_lmcoord;\n"
-	"\n"
-	"out vec2 v_texcoord;\n"
-	"out vec2 v_lmcoord;\n"
-	"out vec4 v_color;\n"
-	"out float v_fogdist;\n"
-	"\n"
-	/* Pin gl_Position so brush-ent surfaces don't z-fight the world's
-	 * matching surfaces — sworld_vert declares the same.  uhexen2-a0t2. */
-	"invariant gl_Position;\n"
-	"\n"
-	"void main() {\n"
-	"    WorldInstance inst = instances[gl_BaseInstance];\n"
-	"    vec4 eyepos = inst.mv * vec4(a_position, 1.0);\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    v_lmcoord  = a_lmcoord;\n"
-	"    v_color    = vec4(1.0, 1.0, 1.0, inst.misc.x);\n"
-	"    v_fogdist  = length(eyepos.xyz);\n"
-	"    gl_Position = inst.mvp * vec4(a_position, 1.0);\n"
-	"}\n";
-
-static qboolean GL_InitWorldInstProgram (gl_world_inst_prog_t *p)
-{
-	GLuint vs, fs, prog;
-
-	vs = GL_CompileShader(GL_VERTEX_SHADER, sworld_inst_vert);
-	fs = GL_CompileShader(GL_FRAGMENT_SHADER, sworld_frag);
-	if (!vs || !fs) {
-		if (vs) glDeleteShader_fp(vs);
-		if (fs) glDeleteShader_fp(fs);
-		return false;
-	}
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, vs);
-	glAttachShader_fp(prog, fs);
-	glBindAttribLocation_fp(prog, ATTR_POSITION, "a_position");
-	glBindAttribLocation_fp(prog, ATTR_TEXCOORD, "a_texcoord");
-	glBindAttribLocation_fp(prog, ATTR_LMCOORD,  "a_lmcoord");
-	glLinkProgram_fp(prog);
-	glDeleteShader_fp(vs);
-	glDeleteShader_fp(fs);
-	{
-		GLint status;
-		glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-		if (!status) {
-			char log[1024];
-			glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-			Sys_Printf("world_instanced link failed: %s\n", log);
-			glDeleteProgram_fp(prog);
-			return false;
-		}
-	}
-	memset(p, 0, sizeof(*p));
-	p->program = prog;
-	p->u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
-	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
-	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
-	glUseProgram_fp(prog);
-	{
-		GLint u_tex0 = glGetUniformLocation_fp(prog, "u_texture0");
-		GLint u_tex1 = glGetUniformLocation_fp(prog, "u_texture1");
-		if (u_tex0 >= 0) glUniform1i_fp(u_tex0, 0);
-		if (u_tex1 >= 0) glUniform1i_fp(u_tex1, 1);
-	}
-	glUseProgram_fp(0);
-	Sys_Printf("  world_instanced: OK (prog=%u)\n", prog);
-	return true;
-}
-#else
-gl_world_inst_prog_t gl_shader_world_inst;
-#endif
-
-void GL_WorldInst_Init (void)
-{
-#ifndef __EMSCRIPTEN__
-	if (!GL_InitWorldInstProgram(&gl_shader_world_inst))
-		Sys_Printf("WARNING: instanced world shader failed to init\n");
-#endif
-}
-
-void GL_WorldInst_Shutdown (void)
-{
-	if (gl_shader_world_inst.program)
-		glDeleteProgram_fp(gl_shader_world_inst.program);
-	memset(&gl_shader_world_inst, 0, sizeof(gl_shader_world_inst));
-}
-
 void GL_Shaders_Init (void)
 {
 	Con_SafePrintf("Initializing shaders...\n");
@@ -923,6 +828,22 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
 
+	/* Create the 1x1 black sentinel texture used as u_texture2 in
+	 * gl_shader_world for surfaces with no fullbright pixels.  Sampled
+	 * unconditionally; black contributes 0 to the additive sum.
+	 * uhexen2-sjvf. */
+	{
+		static const unsigned char black_pixel[4] = {0, 0, 0, 255};
+		glGenTextures_fp(1, &gl_null_fb_texture);
+		glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
+
 	/* OIT variants for translucent rendering */
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
 	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
@@ -932,7 +853,6 @@ void GL_Shaders_Init (void)
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
 #endif
 	GL_AliasInst_Init();
-	GL_WorldInst_Init();
 }
 
 void GL_Shaders_Shutdown (void)
@@ -954,5 +874,4 @@ void GL_Shaders_Shutdown (void)
 		}
 	}
 	GL_AliasInst_Shutdown();
-	GL_WorldInst_Shutdown();
 }

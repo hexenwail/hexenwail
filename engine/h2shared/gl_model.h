@@ -67,11 +67,18 @@ typedef struct mplane_s
 	byte	pad[2];
 } mplane_t;
 
+/* Build a fullbright mask texture from indexed (palette) pixel data.
+ * Pixels with index >= vid.fullbright (typically 224) are kept; others
+ * become transparent.  Returns 0 if no fullbright pixels.  Used by
+ * both alias-skin loading and BSP miptex loading.  uhexen2-sjvf. */
+GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width, int height);
+
 typedef struct texture_s
 {
 	char		name[16];
 	unsigned int	width, height;
 	GLuint			gl_texturenum;
+	GLuint			gl_fb_texturenum;	// fullbright mask, 0 if no fullbright pixels (uhexen2-sjvf)
 	struct msurface_s	*texturechain;	// for gl_texsort drawing
 	int		anim_total;		// total tenths in sequence ( 0 = no)
 	int		anim_min, anim_max;	// time for this frame min <=time< max
