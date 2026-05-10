@@ -672,6 +672,17 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	t = R_TextureAnimation (e, fa->texinfo->texture);
 	GL_Bind (t->gl_texturenum);
+	/* Bind per-miptex fullbright mask at TU2.  R_RenderBrushPoly runs
+	 * through gl_shader_world, so without this brush-ent surfaces inherit
+	 * whatever TU2 the previous caller left (DrawTextureChains' teardown
+	 * resets to null_fb, so brush ents otherwise render dim — missing the
+	 * additive contribution that world surfaces of the same miptex get).
+	 * Harmless on the turb early-return below (EmitWaterPolys uses
+	 * gl_shader_alias, which doesn't sample u_texture2).  uhexen2-61bb. */
+	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 	if (fa->flags & SURF_DRAWTURB)
 	{	// warp texture — apply per-liquid alpha + light tinting
@@ -883,6 +894,12 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 	t = R_TextureAnimation (e, fa->texinfo->texture);
 	GL_Bind (t->gl_texturenum);
+	/* Bind per-miptex fullbright mask at TU2 — same rationale as the
+	 * sibling in R_RenderBrushPoly.  uhexen2-61bb. */
+	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
@@ -1430,9 +1447,15 @@ static void DrawTextureChains (entity_t *e)
 		}
 	}
 
-	/* Sky depth+stencil pre-pass: write sky surface polys to depth buffer
-	 * (occludes geometry behind sky walls) and mark stencil=1 so skybox
-	 * only draws in sky areas.
+	/* Sky stencil pre-pass: mark stencil=1 at every visible sky surface
+	 * polygon so Sky_DrawSkyBox paints only those pixels.  Depth-mask
+	 * is OFF — the sky brush does not occlude anything behind it.
+	 * Sky_DrawSkyBox forces fragments to the far plane via glDepthRange,
+	 * which paints sky colour wherever nothing closer drew, and entities
+	 * drawn afterwards z-test against the real depth buffer (cleared,
+	 * or world-geometry depth) instead of the fake wall depth a
+	 * depth-write would have laid down.  This makes enemies / sprites
+	 * outside sky-windowed openings render correctly (uhexen2-4h32).
 	 *
 	 * Indices for every world sky surface are pre-baked into a static
 	 * VBO/IBO at map load (R_BuildSkyStencilVBO).  Per frame we walk the
@@ -1451,7 +1474,7 @@ static void DrawTextureChains (entity_t *e)
 		glEnable_fp(GL_STENCIL_TEST);
 		glStencilFunc_fp(GL_ALWAYS, 1, 0xFF);
 		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		glDepthMask_fp(1);	/* ensure depth writes are on */
+		glDepthMask_fp(0);	/* uhexen2-4h32: stencil only, no depth */
 		glColorMask_fp(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 		if (sky_stencil_vao && sky_stencil_ibo && sky_stencil_total_indices > 0)
@@ -1562,6 +1585,7 @@ static void DrawTextureChains (entity_t *e)
 		}
 
 		glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		glDepthMask_fp(1);	/* restore depth write for subsequent draws */
 		/* Leave stencil test ON: any world geometry that draws
 		 * closer than the sky surface resets stencil to 0,
 		 * so the skybox only fills truly visible sky pixels. */

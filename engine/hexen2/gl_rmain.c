@@ -1374,6 +1374,7 @@ static int		num_world_instances;
 
 typedef struct {
 	GLuint		tex;		/* gl_texturenum */
+	GLuint		fb_tex;		/* gl_fb_texturenum or gl_null_fb_texture — uhexen2-61bb */
 	GLuint		instance;	/* world_instances[] index */
 	GLuint		first;		/* surf->vbo_firstindex */
 	GLuint		count;		/* surf->vbo_numtris * 3 */
@@ -1632,6 +1633,7 @@ void R_CollectBrushInstances (void)
 						texture_t *t = R_TextureAnimation (e, psurf->texinfo->texture);
 						world_surf_key_t *wsk = &world_surf_keys_fence[num_world_surf_keys_fence++];
 						wsk->tex      = t->gl_texturenum;
+						wsk->fb_tex   = t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture;
 						wsk->instance = instance_idx;
 						wsk->first    = psurf->vbo_firstindex;
 						wsk->count    = psurf->vbo_numtris * 3;
@@ -1645,6 +1647,7 @@ void R_CollectBrushInstances (void)
 						texture_t *t = R_TextureAnimation (e, psurf->texinfo->texture);
 						world_surf_key_t *wsk = &world_surf_keys[num_world_surf_keys++];
 						wsk->tex      = t->gl_texturenum;
+						wsk->fb_tex   = t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture;
 						wsk->instance = instance_idx;
 						wsk->first    = psurf->vbo_firstindex;
 						wsk->count    = psurf->vbo_numtris * 3;
@@ -1680,6 +1683,13 @@ static void R_DispatchBrushInstancedPass (
 		while (i < num_keys && keys[i].instance == inst)
 		{
 			GLuint cur_tex = keys[i].tex;
+			GLuint cur_fb  = keys[i].fb_tex;
+			/* Bind the fullbright mask at TU2 first so the matching
+			 * sworld_frag sample picks it up for this (instance, tex)
+			 * group.  Leave TU0 sticky for the diffuse bind below.
+			 * uhexen2-61bb. */
+			glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+			glBindTexture_fp(GL_TEXTURE_2D, cur_fb);
 			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
 			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
 			while (i < num_keys && keys[i].instance == inst &&
@@ -1749,12 +1759,11 @@ void R_DrawBrushInstanced (void)
 		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-	/* Bind null fullbright at TU2 — brush instanced path doesn't carry
-	 * per-texture fb info in the surf_key, so brush ents render without
-	 * the fb additive contribution.  Most brush ents (doors, platforms)
-	 * don't have fullbright pixels anyway; the visible win from sjvf
-	 * is on world surfaces (lava, torches), which go through
-	 * DrawTextureChains.  uhexen2-sjvf. */
+	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
+	 * rebinds per (instance, texture) group using the per-key fb_tex stored
+	 * by R_CollectBrushInstances, so any brush ent that wraps a miptex with
+	 * fullbright pixels (e.g. a torch tex on a func_train) gets the same
+	 * additive contribution as the matching world surface.  uhexen2-61bb. */
 	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
