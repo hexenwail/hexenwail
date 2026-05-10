@@ -701,24 +701,44 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			glDepthMask_fp(1);
 		}
 		alpha_val = turb_alpha;
-		if (fa->polys && !r_fullbright.integer && intensity >= 1.0f)
+		/* Self-emissive turb textures (lava, teleporters) ignore the
+		 * surrounding lightmap — they are their own light source.
+		 * Without this, a func_illusionary lava brush in a dim pit
+		 * gets multiplied by ambient lightmap brightness and reads
+		 * as a brown smear instead of bright orange.  World lava
+		 * (drawn via R_DrawWaterSurfaces) already uses (1,1,1,1)
+		 * unconditionally — this restores parity for the brush-ent
+		 * path, which Mathuzzz needs because SoT mod authors wrap
+		 * lava as func_illusionary to escape the legacy warp
+		 * artifact (uhexen2-9o7u).  Water keeps the existing dim
+		 * behavior since real water IS lit by its surroundings. */
 		{
-			extern vec3_t lightcolor;
-			vec3_t saved_lc;
-			float *v = fa->polys->verts[0];
-			vec3_t mid;
-			float lv;
-			VectorCopy(lightcolor, saved_lc);
-			mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
-			R_LightPointColor(mid);
-			lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
-			if (lv > 1.0f) lv = 1.0f;
-			if (lv < 0.15f) lv = 0.15f;
-			GL_ImmColor4f(lv, lv, lv, alpha_val);
-			VectorCopy(saved_lc, lightcolor);
+			texture_t *_t = fa->texinfo->texture;
+			qboolean self_emissive =
+				(_t->name[0] == '*' &&
+				 (!q_strncasecmp(_t->name + 1, "lava", 4) ||
+				  !q_strncasecmp(_t->name + 1, "tele", 4)));
+
+			if (fa->polys && !r_fullbright.integer &&
+			    intensity >= 1.0f && !self_emissive)
+			{
+				extern vec3_t lightcolor;
+				vec3_t saved_lc;
+				float *v = fa->polys->verts[0];
+				vec3_t mid;
+				float lv;
+				VectorCopy(lightcolor, saved_lc);
+				mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
+				R_LightPointColor(mid);
+				lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
+				if (lv > 1.0f) lv = 1.0f;
+				if (lv < 0.15f) lv = 0.15f;
+				GL_ImmColor4f(lv, lv, lv, alpha_val);
+				VectorCopy(saved_lc, lightcolor);
+			}
+			else
+				GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 		}
-		else
-			GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 		EmitWaterPolys (fa);
 		/* Restore default state on every return path — the cleanup at
 		 * the bottom of this function is bypassed by this early return,
