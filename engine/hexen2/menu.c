@@ -2148,7 +2148,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			PRESET_COMMON
 		}
-		else if (preset == 3)	/* Faithful — native res, OG textures, minimal fx */
+		else if (preset == 3)	/* Faithful — native res, OG textures, glows reduced */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
@@ -2162,11 +2162,10 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
 			Cvar_SetValue ("r_shadows", 0);
-			Cvar_SetValue ("gl_glows", 0);
-			Cvar_SetValue ("gl_missile_glows", 0);
-			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_glows", 1);
+			Cvar_SetValue ("gl_missile_glows", 1);
+			Cvar_SetValue ("gl_other_glows", 1);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
-			Cvar_SetValue ("gl_torch_dlight", 1);
 			PRESET_COMMON
 		}
 		else if (preset == 4)	/* Clean — sharp native, mild effects */
@@ -2327,9 +2326,9 @@ static void M_Display_Draw (void)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
 		else if (sc <= 0.5f && se == 2)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && !glow)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && glow)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 2 && glow)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx == 2 && glow)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
 		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
