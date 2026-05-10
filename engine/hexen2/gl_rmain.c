@@ -140,6 +140,14 @@ cvar_t	gl_nocolors = {"gl_nocolors", "0", CVAR_NONE};
 cvar_t	gl_keeptjunctions = {"gl_keeptjunctions", "1", CVAR_ARCHIVE};
 cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
+/* r_water_pixel_warp: experimental per-pixel water/lava warp shader.
+ * Default 0 = legacy CPU per-vertex sin warp (works on world brushes,
+ * looks bad on heavily-subdivided brush ent lava — original
+ * func_illusionary workaround motivation).
+ * 1 = gl_shader_turb per-pixel warp (uhexen2-9o7u/tlsh).  Subdivision-
+ * independent in principle but currently has visible aliasing /
+ * darkening artifacts on certain views — under investigation. */
+cvar_t	r_water_pixel_warp = {"r_water_pixel_warp", "0", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pixel overlay on models
 cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};	// clamp alias model lighting
