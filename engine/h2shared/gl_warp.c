@@ -299,9 +299,9 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 		GL_SetAlphaThreshold (0.0f);	/* two-layer sky mode */
 		GL_Bind (solidskytexture);
 
-		glActiveTextureARB_fp (GL_TEXTURE1_ARB);
+		glActiveTexture_fp (GL_TEXTURE1);
 		GL_Bind (alphaskytexture);
-		glActiveTextureARB_fp (GL_TEXTURE0_ARB);
+		glActiveTexture_fp (GL_TEXTURE0);
 
 		for (p = fa->polys ; p ; p = p->next)
 		{
@@ -559,9 +559,9 @@ void R_DrawSkyChain (msurface_t *s)
 		/* single-pass: shader blends both layers using TU0/TU1 */
 		GL_SetAlphaThreshold (0.0f);
 		GL_Bind (solidskytexture);
-		glActiveTextureARB_fp (GL_TEXTURE1_ARB);
+		glActiveTexture_fp (GL_TEXTURE1);
 		GL_Bind (alphaskytexture);
-		glActiveTextureARB_fp (GL_TEXTURE0_ARB);
+		glActiveTexture_fp (GL_TEXTURE0);
 		EMIT_LOOP (SKYWARP_VERT_MULTI, GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f));
 	}
 	else

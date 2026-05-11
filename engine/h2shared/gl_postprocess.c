@@ -650,7 +650,7 @@ static void PP_BuildPaletteLUT (void)
 	}
 
 	glGenTextures_fp(1, &pp_palette_lut);
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB + 1);
+	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, pp_palette_lut);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_R8, 32, 32, 32, 0,
 			GL_RED, GL_UNSIGNED_BYTE, lut);
@@ -660,7 +660,7 @@ static void PP_BuildPaletteLUT (void)
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 	glBindTexture_fp(GL_TEXTURE_3D, 0);
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	pp_lut_built = true;
 	Con_SafePrintf("PostProcess: palette LUT built\n");
@@ -816,9 +816,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glDepthMask_fp(0);
 	glDisable_fp(GL_DEPTH_TEST);
 
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, oit_accum_tex);
-	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
 
 	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
@@ -828,9 +828,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 
 	/* Restore state */
-	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glActiveTexture_fp(GL_TEXTURE0);
 	glUseProgram_fp(0);
 	glDisable_fp(GL_STENCIL_TEST);
 	glStencilMask(0xFF);
@@ -1327,9 +1327,9 @@ apply_shader:
 	/* bind palette LUT on texture unit 1 if softemu is active */
 	if ((int)r_softemu.value > 0 && pp_lut_built)
 	{
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB + 1);
+		glActiveTexture_fp(GL_TEXTURE0 + 1);
 		glBindTexture_fp(GL_TEXTURE_3D, pp_palette_lut);
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		glActiveTexture_fp(GL_TEXTURE0);
 	}
 
 	/* activate shader and set all uniforms before drawing */
@@ -1442,9 +1442,9 @@ apply_shader:
 	/* unbind palette LUT from unit 1 to avoid interfering with lightmap binds */
 	if ((int)r_softemu.value > 0 && pp_lut_built)
 	{
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB + 1);
+		glActiveTexture_fp(GL_TEXTURE0 + 1);
 		glBindTexture_fp(GL_TEXTURE_3D, 0);
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		glActiveTexture_fp(GL_TEXTURE0);
 	}
 
 	/* restore matrices */

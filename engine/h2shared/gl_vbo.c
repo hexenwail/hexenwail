@@ -377,8 +377,8 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	glUseProgram_fp(0);
 
 	/* ensure texture unit 0 is active after draw */
-	if (glActiveTextureARB_fp)
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	if (glActiveTexture_fp)
+		glActiveTexture_fp(GL_TEXTURE0);
 
 	imm_count = 0;
 }

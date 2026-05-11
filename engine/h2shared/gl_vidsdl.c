@@ -861,13 +861,13 @@ static void GL_Init (void)
 
 	/* GL 4.3: multitexture is always available */
 #ifndef EMSCRIPTEN
-	glActiveTextureARB_fp = (glActiveTextureARB_f) SDL_GL_GetProcAddress("glActiveTexture");
-	if (!glActiveTextureARB_fp)
+	glActiveTexture_fp = (glActiveTexture_f) SDL_GL_GetProcAddress("glActiveTexture");
+	if (!glActiveTexture_fp)
 		Sys_Error("glActiveTexture not found");
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glActiveTexture_fp(GL_TEXTURE0);
 #else
 	/* Emscripten: use direct function call */
-	glActiveTexture(GL_TEXTURE0_ARB);
+	glActiveTexture(GL_TEXTURE0);
 #endif
 
 	/* GL 4.3: anisotropic filtering is always available */

@@ -246,7 +246,7 @@ GL_EnableMultitexture
 */
 void GL_EnableMultitexture(void)
 {
-	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glActiveTexture_fp(GL_TEXTURE1);
 }
 
 /*
@@ -256,5 +256,5 @@ GL_DisableMultitexture
 */
 void GL_DisableMultitexture(void)
 {
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glActiveTexture_fp(GL_TEXTURE0);
 }
