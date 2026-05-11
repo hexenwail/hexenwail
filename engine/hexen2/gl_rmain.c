@@ -1709,9 +1709,9 @@ static void R_DispatchBrushInstancedPass (
 			 * sworld_frag sample picks it up for this (instance, tex)
 			 * group.  Leave TU0 sticky for the diffuse bind below.
 			 * uhexen2-61bb. */
-			glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+			glActiveTexture_fp(GL_TEXTURE2);
 			glBindTexture_fp(GL_TEXTURE_2D, cur_fb);
-			glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
 			while (i < num_keys && keys[i].instance == inst &&
 			       keys[i].tex == cur_tex)
@@ -1778,16 +1778,16 @@ void R_DrawBrushInstanced (void)
 		glUniform1f_fp(prog->u_fog_density, r_fog_density);
 	if (prog->u_fog_color >= 0)
 		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	glActiveTextureARB_fp(GL_TEXTURE1_ARB);
+	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
 	 * rebinds per (instance, texture) group using the per-key fb_tex stored
 	 * by R_CollectBrushInstances, so any brush ent that wraps a miptex with
 	 * fullbright pixels (e.g. a torch tex on a func_train) gets the same
 	 * additive contribution as the matching world surface.  uhexen2-61bb. */
-	glActiveTextureARB_fp(GL_TEXTURE2_ARB);
+	glActiveTexture_fp(GL_TEXTURE2);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
-	glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+	glActiveTexture_fp(GL_TEXTURE0);
 	GL_ImmInvalidateState();
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
@@ -2365,7 +2365,7 @@ static void R_DrawAliasInstanced (void)
 			continue;
 
 		/* Bind skin texture to unit 0 */
-		glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+		glActiveTexture_fp(GL_TEXTURE0);
 		GL_Bind(batch->skin_tex);
 
 		/* Bind pose SSBO at binding 1 */
@@ -2486,7 +2486,7 @@ static void R_DrawAliasInstanced (void)
 				if (!gm || !gm->valid || !gm->ssbo_pose)
 					continue;
 
-				glActiveTextureARB_fp(GL_TEXTURE0_ARB);
+				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
 				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
 				if (prog->u_inst_base >= 0)

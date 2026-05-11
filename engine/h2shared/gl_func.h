@@ -296,8 +296,8 @@ __GL_FUNC_EXTERN func##_f func##_fp;
 #endif
 #endif
 
-/* GL_ARB_multitexture */
-GL_FUNCTION_OPT(void, glActiveTextureARB, (GLenum))
+/* Multitexture (core since GL 1.3) */
+GL_FUNCTION_OPT(void, glActiveTexture, (GLenum))
 GL_FUNCTION_OPT(void, glMultiTexCoord2fARB, (GLenum,GLfloat,GLfloat))
 
 /* FBO functions (OpenGL 3.0 / GL_ARB_framebuffer_object) */
@@ -423,7 +423,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 
 #if defined(__EMSCRIPTEN__)
 /* Direct-call defines for GLES3 functions on Emscripten */
-#define glActiveTextureARB_fp		glActiveTexture
+#define glActiveTexture_fp		glActiveTexture
 #define glMultiTexCoord2fARB_fp(t,s,u)	((void)0)	/* unused */
 #define glGenFramebuffers_fp		glGenFramebuffers
 #define glDeleteFramebuffers_fp		glDeleteFramebuffers
