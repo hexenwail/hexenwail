@@ -241,6 +241,7 @@ extern	cvar_t	cl_gun_fovscale;
 extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_telealpha;
+extern	cvar_t	r_turbalpha;	/* default alpha for unknown turb names (uhexen2-6697 fallback) */
 extern	cvar_t	r_motionblur;
 extern	cvar_t	r_alias_gpu;
 extern	cvar_t	r_alphatocoverage;
@@ -355,7 +356,13 @@ void GL_SubdivideSurface (qmodel_t *m, msurface_t *fa);
 void EmitWaterPolys (msurface_t *fa);
 void EmitBothSkyLayers (msurface_t *fa);
 void R_DrawSkyChain (msurface_t *s);
-void R_DrawWaterSurfaces (void);
+/* phase: ALL = both (mirror path), OPAQUE = opaque liquids only,
+ * TRANSLUCENT = translucent liquids only.  Opaque liquids must draw
+ * before OIT_BeginTranslucency or they're eaten by the WBOIT resolve. */
+#define WATER_PHASE_ALL		0
+#define WATER_PHASE_OPAQUE	1
+#define WATER_PHASE_TRANSLUCENT	2
+void R_DrawWaterSurfaces (int phase);
 
 int R_GetPimpFlags (entity_t *e, float **gsettings_out);
 int R_GetEntityModelFlags (entity_t *e);

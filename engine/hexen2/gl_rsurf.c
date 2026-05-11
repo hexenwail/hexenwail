@@ -1045,31 +1045,41 @@ static float R_LiquidAlpha (const texture_t *t)
 {
 	if (t->name[0] == '*')
 	{
-		if (!q_strncasecmp(t->name + 1, "water", 5))
-		{	float a = r_wateralpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
-		if (!q_strncasecmp(t->name + 1, "lava", 4))
+		const char *n = t->name + 1;
+		/* Substring "water" / "ice" / "glass" — match anywhere in the
+		 * name so custom mod conventions (*winwater, *coldwater,
+		 * *04mwater, *ice_2, ...) are still recognised as water-like
+		 * and pick up r_wateralpha.  Mathuzzz's winter.bsp uses such
+		 * a name and was rendering opaque because the old strncasecmp
+		 * required a strict prefix match. */
+		/* BSP texture names are lowercase in Hexen 2 — plain strstr
+		 * is sufficient for substring matching. */
+		if (strstr(n, "water") || strstr(n, "ice") ||
+		    strstr(n, "glass"))
+		{	float a = r_wateralpha.value;
+			if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+		if (!q_strncasecmp(n, "lava", 4))
 		{	if (r_lavaalpha.value <= 0) return 1.0f;
 			float a = r_lavaalpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
-		if (!q_strncasecmp(t->name + 1, "slime", 5))
+		if (!q_strncasecmp(n, "slime", 5))
 		{	if (r_slimealpha.value <= 0) return 1.0f;
 			float a = r_slimealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
-		if (!q_strncasecmp(t->name + 1, "tele", 4))
+		if (!q_strncasecmp(n, "tele", 4))
 		{	if (r_telealpha.value <= 0) return 0.7f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
-	/* Unknown turb textures (custom mod liquids like *magic, *skulls,
-	 * *lightnings, *lowlight, *magma, *acid, ...) — default to OPAQUE.
-	 * Previously this fell back to teleporter alpha (default 0.7),
-	 * which made every unrecognised turb in mod content translucent
-	 * and let players see geometry below the liquid surface.  Vanilla
-	 * teleporters use *tele* names and are handled by the explicit
-	 * branch above, so this catch-all only catches modded content,
-	 * which almost always wants opaque self-emissive behavior.
-	 * uhexen2-6697. */
-	return 1.0f;
+	/* Unknown turb textures (*magic, *skulls, *lightnings, *lowlight,
+	 * *magma, *acid, ...) — controlled by r_turbalpha (default 1.0 =
+	 * opaque per uhexen2-6697).  Modders who want a custom-named liquid
+	 * translucent can set r_turbalpha 0.7 in their autoexec or rename
+	 * the texture to include "water"/"ice"/"glass". */
+	{
+		float a = r_turbalpha.value;
+		if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a;
+	}
 }
 
-void R_DrawWaterSurfaces (void)
+void R_DrawWaterSurfaces (int phase)
 {
 	int			i;
 	msurface_t	*s;
@@ -1094,6 +1104,9 @@ void R_DrawWaterSurfaces (void)
 
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
 	{
+		float		a;
+		qboolean	is_opaque;
+
 		t = cl.worldmodel->textures[i];
 		if (!t)
 			continue;
@@ -1103,23 +1116,36 @@ void R_DrawWaterSurfaces (void)
 		if (!(s->flags & SURF_DRAWTURB))
 			continue;
 
+		a = R_LiquidAlpha(t);
+		is_opaque = (a >= 1.0f);
+
+		/* Phase gate: opaque liquids draw BEFORE OIT_BeginTranslucency
+		 * (writes depth, no blend, scene FBO).  Translucent liquids
+		 * draw INSIDE the OIT pass.  Mixing them puts opaque lava in
+		 * the WBOIT accum buffer with BLEND disabled — the resolve
+		 * formula treats it as zero-alpha and the lava vanishes.
+		 *
+		 * WATER_PHASE_ALL keeps the legacy "do both" behavior for the
+		 * mirror code path, which doesn't run inside OIT. */
+		if (phase == WATER_PHASE_OPAQUE && !is_opaque)
+			continue;
+		if (phase == WATER_PHASE_TRANSLUCENT && is_opaque)
+			continue;
+
+		if (is_opaque)
 		{
-			float a = R_LiquidAlpha(t);
-			if (a >= 1.0f)
-			{
-				/* opaque liquid (e.g. lava): draw without blend */
-				glDisable_fp (GL_BLEND);
-				glDepthMask_fp(1);
-				GL_ImmColor4f (1,1,1,1);
-			}
-			else
-			{
-				/* translucent liquid: draw with blend, no depth write */
-				glEnable_fp (GL_BLEND);
-				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-				glDepthMask_fp(0);
-				GL_ImmColor4f (1,1,1, a);
-			}
+			/* opaque liquid (e.g. lava): draw without blend */
+			glDisable_fp (GL_BLEND);
+			glDepthMask_fp(1);
+			GL_ImmColor4f (1,1,1,1);
+		}
+		else
+		{
+			/* translucent liquid: draw with blend, no depth write */
+			glEnable_fp (GL_BLEND);
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask_fp(0);
+			GL_ImmColor4f (1,1,1, a);
 		}
 
 		// set modulate mode explicitly
@@ -1128,6 +1154,9 @@ void R_DrawWaterSurfaces (void)
 		for ( ; s ; s = s->texturechain)
 			EmitWaterPolys (s);
 
+		/* Only NULL the chain for textures we actually drained — the
+		 * phase-gated skips above leave their chains intact for the
+		 * companion phase to process. */
 		t->texturechain = NULL;
 	}
 
@@ -2607,7 +2636,17 @@ static void R_RecursiveWorldNode (mnode_t *node)
 		{
 			if (surf->visframe != r_framecount)
 				continue;
-			if (!(surf->flags & SURF_UNDERWATER) && ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)))
+			/* Skip the BSP-side backface cull for SURF_DRAWTURB
+			 * (water / lava / slime / teleporter) and SURF_UNDERWATER —
+			 * these are always added to the texturechain regardless of
+			 * which side the camera is on.  Bare `dot < 0` flips sign
+			 * frame-to-frame when the camera is co-planar with the
+			 * surface (player standing at lava waterline / head-bob),
+			 * which used to drop the entire liquid chain for one frame
+			 * and showed straight through to the lake bottom.
+			 * uhexen2-w01k. */
+			if (!(surf->flags & (SURF_UNDERWATER | SURF_DRAWTURB)) &&
+			    ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)))
 				continue;
 			if (!mirror || surf->texinfo->texture != cl.worldmodel->textures[mirrortexturenum])
 			{
