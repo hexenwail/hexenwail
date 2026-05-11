@@ -3255,7 +3255,7 @@ static void M_Game_AdjustSliders (int dir)
 	switch (game_cursor)
 	{
 	case GAME_FOV:
-		f = scr_fov.value + dir * 5;
+		f = scr_fov.value + dir * 2;
 		if (f < 60)	f = 60;
 		else if (f > 130) f = 130;
 		Cvar_SetValue ("fov", f);
