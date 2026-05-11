@@ -647,10 +647,24 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		glDepthMask_fp(0);
 		alpha_val = r_wateralpha.value;
 	}
-	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
-		// ent->abslight   0 - 255
-		intensity = (float)e->abslight / 255.0f;
+		int mls = e->drawflags & MLS_MASKIN;
+		if (mls == MLS_ABSLIGHT)
+		{
+			// ent->abslight   0 - 255
+			intensity = (float)e->abslight / 255.0f;
+		}
+		else if (mls != MLS_NONE)
+		{
+			/* MLS_FULLBRIGHT (1) / POWERMODE (2) / TORCH (3) /
+			 * TOTALDARK (4): same dispatch as R_DrawAliasModel
+			 * (gl_rmain.c:919-947) — sample the corresponding
+			 * pre-baked lightstyle slot.  Without this brush ents
+			 * with MLS_TORCH wouldn't flicker, MLS_FULLBRIGHT
+			 * surfaces rendered as ordinary lightmap-lit, etc.
+			 * uhexen2-j7rp. */
+			intensity = (float)d_lightstylevalue[24 + mls] / 255.0f;
+		}
 	}
 
 	GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
@@ -784,9 +798,15 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	 * 0 × abslight = 0 (black) for any surface without samples, which is
 	 * what bit pillars on romeric6 and similar maps. Vanilla Hexen II
 	 * behavior — uniform abslight intensity, no per-texel variation.
-	 * uhexen2-mxkm. */
+	 * uhexen2-mxkm.
+	 *
+	 * Extended to any MLS_MASKIN != MLS_NONE (FULLBRIGHT / POWERMODE /
+	 * TORCH / TOTALDARK) so the intensity computed above is what the
+	 * surface actually renders — going through the MTex lightmap path
+	 * would multiply intensity by the baked lightmap and the effect
+	 * would be lost.  uhexen2-j7rp. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
-	    (e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
+	    (e->drawflags & MLS_MASKIN) != MLS_NONE)
 	{
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPoly (fa->polys);
@@ -1680,7 +1700,7 @@ static void DrawTextureChains (entity_t *e)
 						 * EmitWaterPolys for the warp UVs. */
 
 			if (((e->drawflags & DRF_TRANSLUCENT) ||
-				(e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT))
+				(e->drawflags & MLS_MASKIN) != MLS_NONE))
 			{
 				if (world_state_set)
 				{
@@ -2269,7 +2289,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	 * per-surface R_RenderBrushPoly path which handles them. */
 	if (world_vao && lm_atlas_enabled && lm_atlas_texture && world_ibo &&
 	    !Translucent && !(e->drawflags & DRF_TRANSLUCENT) &&
-	    (e->drawflags & MLS_MASKIN) != MLS_ABSLIGHT &&
+	    (e->drawflags & MLS_MASKIN) == MLS_NONE &&
 	    !(e->model->flags & EF_TRANSPARENT))
 	{
 		#define MAX_BMODEL_BATCH 4096

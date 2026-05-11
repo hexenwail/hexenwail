@@ -1480,8 +1480,11 @@ void R_CollectBrushInstances (void)
 			(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
 		if (translucent)
 			continue;
-		if ((e->drawflags & MLS_MASKIN) == MLS_ABSLIGHT)
-			continue;
+		if ((e->drawflags & MLS_MASKIN) != MLS_NONE)
+			continue;	/* MLS_ABSLIGHT/FULLBRIGHT/POWERMODE/TORCH/TOTALDARK
+					 * all need the per-surface intensity treatment that
+					 * R_RenderBrushPoly provides — fast path would multiply
+					 * the lightmap atlas instead.  uhexen2-j7rp. */
 		if (e->model->flags & EF_TRANSPARENT)
 			continue;
 
