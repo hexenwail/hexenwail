@@ -596,6 +596,18 @@ typedef struct qmodel_s
 //
 	float		glow_settings[GLOW_SETTINGS_COUNT];
 	float		glow_color[4];		// RGBA color for glow effect
+
+	/* Snapshot of the model's load-time flags / ex_flags / glow_settings,
+	 * captured at the end of Mod_LoadAliasModel{,New}.  PimpModel writes
+	 * through to mod->flags etc. so misc_modelpimp can change rendering
+	 * for every entity sharing this model on the current map; on map
+	 * change Mod_RestoreAliasModelDefaults walks mod_known[] and resets
+	 * to these snapshots so the next map starts from MDL defaults.
+	 * uhexen2-oq0a. */
+	int		orig_flags;
+	int		orig_ex_flags;
+	float		orig_glow_settings[GLOW_SETTINGS_COUNT];
+	qboolean	orig_state_saved;
 	cache_user_t	cache;		// only access through Mod_Extradata
 } qmodel_t;
 
@@ -608,6 +620,8 @@ typedef struct qmodel_s
 
 void	Mod_Init (void);
 void	Mod_ClearAll (void);
+void	Mod_SaveAliasModelDefaults (qmodel_t *mod);	/* uhexen2-oq0a */
+void	Mod_RestoreAliasModelDefaults (void);		/* uhexen2-oq0a */
 qmodel_t *Mod_ForName (const char *name, qboolean crash);
 qmodel_t *Mod_FindName (const char *name);
 void	*Mod_Extradata (qmodel_t *mod);	// handles caching

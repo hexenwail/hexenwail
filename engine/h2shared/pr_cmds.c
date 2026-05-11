@@ -457,9 +457,26 @@ static void PF_pimpmodel (void)
 	if (spawnflags & 8)	/* Cast light */
 		pimp->ex_flags |= EF_ILLUMINATE;
 
-	/* Apply custom model flags (trails etc.) per-entity.
-	 * Previously modified shared mod->flags which corrupted
-	 * all entities sharing the same model. */
+	/* Per-map shared write to mod->flags so every entity using this
+	 * model on the current map sees the override (Komi / Shanjaq
+	 * design — modder confirmed misc_modelpimp is per-map).  Safe
+	 * against cross-map bleed because R_NewMap calls
+	 * Mod_RestoreAliasModelDefaults to roll back to the load-time
+	 * snapshot before any new pimpmodel calls fire.
+	 *
+	 * QC `flags` field on misc_modelpimp uses MDL-style trail bit
+	 * positions (Inky convention; see misc_modelpimp.hc FlagFriendlyNames).
+	 * Writing `new_flags` directly — including 0 — is intentional:
+	 * flags=0 in the BSP is the modder's "make this static" signal
+	 * (e.g. SoT demo1 display items wrapped by misc_modelpimp).
+	 * uhexen2-oq0a. */
+	mod->flags = new_flags;
+
+	/* Keep the per-entity trail_flags override too as a more-specific
+	 * layer on top of the shared mod->flags write.  R_GetEntityModelFlags
+	 * prefers this when present, so a single entity can deviate from
+	 * the model-wide override.  Only set when explicit (new_flags != 0)
+	 * — flags=0 is captured by the shared write above. */
 	if (new_flags != 0)
 	{
 		pimp->trail_flags = (mod->flags & ~(EF_ROCKET | EF_GRENADE | EF_GIB | EF_ROTATE |
@@ -509,24 +526,25 @@ static void PF_pimpmodel (void)
 	pimp->glow_settings[LIGHT_RADIUS] = max_health;
 	pimp->glow_settings[LIGHT_STYLE] = atoi(ED_GetProperty(ref_ent, "style"));
 
-	/* Plan B: propagate EF_GLOW (and the orb glow_settings) to the
-	 * shared model so non-pimped instances of the same model inherit
-	 * the orb. Required by SoT-style mods where modelpimp_think calls
-	 * pimpmodel(self, self.glow_color) on a hidden misc_modelpimp
-	 * entity, expecting all map-placed misc_models with the same model
-	 * to glow.
-	 * - SPIN/FLOAT not copied: visual animation stays per-entity.
+	/* Propagate EF_GLOW + glow_settings to the shared model so every
+	 * entity using this model on the current map sees the same orb.
+	 * Required by SoT-style mods where a hidden misc_modelpimp drives
+	 * a glow on all map-placed misc_models sharing the model.
+	 *
+	 * - SPIN/FLOAT not copied: those are per-entity animation hints
+	 *   for the misc_modelpimp itself, not the things it affects.
 	 * - ILLUMINATE not copied: cl_main.c allocates a dlight per frame
-	 *   for every visedict with the flag; propagating across all
-	 *   instances would stack dlights on multi-entity effects.
-	 * - glow_settings only copied when the model has no engine-set
-	 *   color defaults (all-zero RGB). Engine-known models like
-	 *   i_btmana keep their canonical color. */
+	 *   per visedict carrying it; propagation would stack dlights
+	 *   for multi-entity effects.
+	 * - glow_settings overwritten unconditionally when the QC supplied
+	 *   a color (color_set == true).  Was previously gated on "model
+	 *   has no engine defaults" to avoid clobbering canonical orb
+	 *   colors (i_btmana red, torch orange) — no longer needed because
+	 *   Mod_RestoreAliasModelDefaults rolls back on map change.
+	 *   Engine defaults are preserved across maps via the snapshot.
+	 *   uhexen2-oq0a. */
 	mod->ex_flags |= (pimp->ex_flags & EF_GLOW);
-	if ((pimp->ex_flags & EF_GLOW) &&
-	    mod->glow_settings[COLOR_R] == 0.0f &&
-	    mod->glow_settings[COLOR_G] == 0.0f &&
-	    mod->glow_settings[COLOR_B] == 0.0f)
+	if (pimp->ex_flags & EF_GLOW)
 	{
 		memcpy(mod->glow_settings, pimp->glow_settings,
 		       sizeof(mod->glow_settings));

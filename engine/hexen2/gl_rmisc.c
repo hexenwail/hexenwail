@@ -443,6 +443,11 @@ void R_NewMap (void)
 	for (i = 0; i < 256; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
 
+	/* Restore alias model defaults BEFORE clearing per-entity overrides:
+	 * the next map's misc_modelpimp entities will re-pimp from clean
+	 * MDL state, and any flag/glow mutation from the previous map's
+	 * pimpmodel calls is rolled back here.  uhexen2-oq0a. */
+	Mod_RestoreAliasModelDefaults ();
 	R_ClearPimpOverrides ();
 
 	memset (&r_worldentity, 0, sizeof(r_worldentity));

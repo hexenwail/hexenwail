@@ -2544,6 +2544,55 @@ skin_too_large:
 
 //=========================================================================
 
+/*
+=================
+Mod_SaveAliasModelDefaults
+
+Snapshot the model's flags / ex_flags / glow_settings as the load-time
+defaults.  Called from the end of Mod_LoadAliasModel{,New}, after
+Mod_SetAliasModelExtraFlags and the MDL header flag read.  PimpModel
+writes through to the live fields; this snapshot is what
+Mod_RestoreAliasModelDefaults rolls back to on map change.
+
+uhexen2-oq0a.
+=================
+*/
+void Mod_SaveAliasModelDefaults (qmodel_t *mod)
+{
+	mod->orig_flags = mod->flags;
+	mod->orig_ex_flags = mod->ex_flags;
+	memcpy(mod->orig_glow_settings, mod->glow_settings, sizeof(mod->orig_glow_settings));
+	mod->orig_state_saved = true;
+}
+
+/*
+=================
+Mod_RestoreAliasModelDefaults
+
+Walk every loaded alias model and restore the snapshot taken at load
+time.  Called from R_NewMap before the renderer's pimp_overrides[]
+table is cleared.  Removes any cross-map bleed of misc_modelpimp's
+shared-state mutations (e.g. demo1 stripping EF_ROTATE for a model
+that's a real pickup on later maps).
+
+uhexen2-oq0a.
+=================
+*/
+void Mod_RestoreAliasModelDefaults (void)
+{
+	int		i;
+
+	for (i = 0; i < mod_numknown; i++)
+	{
+		qmodel_t *mod = &mod_known[i];
+		if (mod->type != mod_alias || !mod->orig_state_saved)
+			continue;
+		mod->flags = mod->orig_flags;
+		mod->ex_flags = mod->orig_ex_flags;
+		memcpy(mod->glow_settings, mod->orig_glow_settings, sizeof(mod->glow_settings));
+	}
+}
+
 static void Mod_SetAliasModelExtraFlags (qmodel_t *mod)
 {
 	mod->ex_flags = 0;
@@ -2990,6 +3039,9 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 	memcpy (mod->cache.data, pheader, total);
 
 	Hunk_FreeToLowMark (start);
+
+	/* Snapshot defaults for PimpModel restore-on-map-change. uhexen2-oq0a. */
+	Mod_SaveAliasModelDefaults (mod);
 }
 
 /*
@@ -3169,6 +3221,9 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	memcpy (mod->cache.data, pheader, total);
 
 	Hunk_FreeToLowMark (start);
+
+	/* Snapshot defaults for PimpModel restore-on-map-change. uhexen2-oq0a. */
+	Mod_SaveAliasModelDefaults (mod);
 }
 
 //=============================================================================
