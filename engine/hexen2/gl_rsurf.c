@@ -1397,7 +1397,6 @@ void R_EndBrushBatch (void)
 		return;
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
-	glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 	brush_batch_active = false;
 }
 
@@ -1468,7 +1467,6 @@ static void DrawTextureChains (entity_t *e)
 	texture_t	*t;
 	double		_t0;
 	qboolean	world_state_set = false;
-	qboolean	world_color_dirty = false;
 	static msurface_t *world_deferred[4096];
 	int		world_deferred_count = 0;
 
@@ -1609,7 +1607,6 @@ static void DrawTextureChains (entity_t *e)
 				/* Force the chain loop's hoisted world-state bind to redo
 				 * itself; we just stomped on VAO + program. */
 				world_state_set = false;
-				world_color_dirty = true;
 			}
 		}
 		else
@@ -1669,7 +1666,6 @@ static void DrawTextureChains (entity_t *e)
 	{
 		DrawTextureChains_BindWorldState();
 		world_state_set = true;
-		world_color_dirty = true;
 	}
 
 	{
@@ -1779,7 +1775,6 @@ static void DrawTextureChains (entity_t *e)
 				{
 					DrawTextureChains_BindWorldState();
 					world_state_set = true;
-					world_color_dirty = true;
 				}
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
@@ -2152,7 +2147,6 @@ static void DrawTextureChains (entity_t *e)
 				glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
 				glBindVertexArray_fp(0);
 				glUseProgram_fp(0);
-				glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 			}
 		}
 		else
@@ -2172,12 +2166,6 @@ static void DrawTextureChains (entity_t *e)
 		glBindVertexArray_fp(0);
 		glUseProgram_fp(0);
 		world_state_set = false;
-	}
-	if (world_color_dirty)
-	{
-		/* Reset color attribute to default (0,0,0,1) so subsequent
-		 * dlight/sprite rendering doesn't inherit white. */
-		glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 	}
 
 	/* Reset TU2 fullbright sampler to the null sentinel.  Subsequent
@@ -2506,7 +2494,6 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		{
 			glBindVertexArray_fp(0);
 			glUseProgram_fp(0);
-			glVertexAttrib4f_fp(ATTR_COLOR, 0.0f, 0.0f, 0.0f, 1.0f);
 		}
 
 		/* Legacy path for any special surfaces marked above */
