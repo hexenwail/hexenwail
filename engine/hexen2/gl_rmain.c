@@ -119,6 +119,12 @@ cvar_t	cl_gun_fovscale = {"cl_gun_fovscale", "1", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
+/* Catch-all turb alpha for custom mod liquid names not matched by the
+ * water/ice/glass/lava/slime/tele branches in R_LiquidAlpha.  Default 1
+ * (opaque) preserves the uhexen2-6697 fix for Arena.bsp double-layer
+ * turbs.  Modders with translucent custom liquids that don't match the
+ * substring heuristics can set this to 0.7 in autoexec. */
+cvar_t	r_turbalpha = {"r_turbalpha", "1", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
@@ -1171,7 +1177,10 @@ static void R_DrawAliasModel (entity_t *e)
 
 		if ((skinnum >= paliashdr->numskins) || (skinnum < 0))
 		{
-			Con_DPrintf ("%s: no such skin # %d\n", __thisfunc__, skinnum);
+			Con_DPrintf ("%s: no such skin # %d on %s (has %d)\n",
+				     __thisfunc__, skinnum,
+				     e->model ? e->model->name : "<null>",
+				     paliashdr->numskins);
 			skinnum = 0;
 		}
 		GL_Bind(paliashdr->gl_texturenum[skinnum][anim]);
@@ -3749,7 +3758,7 @@ static void R_Mirror (void)
 // THIS IS THE F*S*D(KCING MIRROR ROUTINE!  Go down!!!
 	R_DrawTransEntitiesOnList (true); // This restores the depth mask
 
-	R_DrawWaterSurfaces ();
+	R_DrawWaterSurfaces (WATER_PHASE_ALL);	/* mirror path runs outside OIT — do both */
 
 	R_DrawTransEntitiesOnList (false);
 
@@ -4098,6 +4107,13 @@ void R_RenderView (void)
 	}
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_PARTICLES);
 
+	/* Opaque liquids (lava, opaque slime/custom turbs) must draw BEFORE
+	 * OIT_BeginTranslucency binds the WBOIT FBO — they need plain depth
+	 * writes against the scene depth buffer.  Inside the OIT pass they'd
+	 * land in the accum buffer with BLEND disabled and be eaten by the
+	 * resolve.  Translucent water/ice runs inside OIT below. */
+	R_DrawWaterSurfaces (WATER_PHASE_OPAQUE);
+
 	glDepthMask_fp(0);
 
 	R_DrawParticles ();
@@ -4107,7 +4123,7 @@ void R_RenderView (void)
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
-	R_DrawWaterSurfaces ();
+	R_DrawWaterSurfaces (WATER_PHASE_TRANSLUCENT);
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
