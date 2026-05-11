@@ -1354,12 +1354,14 @@ or R_DrawTransEntitiesOnList.
 =============
 */
 
-#define MAX_WORLD_INSTANCES	1024
+/* Cap matches MAX_VISEDICTS so dense maps don't silently truncate the
+ * brush-entity instance list.  uhexen2-l0ac. */
+#define MAX_WORLD_INSTANCES	MAX_VISEDICTS
 /* Soft caps on per-frame surf-key arrays.  Sized large vs. observed
  * counts (a few hundred opaque, ~1k fence in dense maps); a hit on
  * either is silently dropped. */
-#define MAX_WORLD_SURF_KEYS	8192
-#define MAX_WORLD_SURF_KEYS_FENCE	2048
+#define MAX_WORLD_SURF_KEYS	32768
+#define MAX_WORLD_SURF_KEYS_FENCE	8192
 
 typedef struct {
 	float	mvp[16];	/* projection * view * entity_transform —
@@ -1897,17 +1899,10 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	if (R_CullBox(mins, maxs))
 		return true;	/* culled, but don't fall back to non-instanced */
 
-	/* LOD cull */
-	{
-		float dx = e->origin[0] - r_origin[0];
-		float dy = e->origin[1] - r_origin[1];
-		float dz = e->origin[2] - r_origin[2];
-		float dist_sq = dx*dx + dy*dy + dz*dz;
-		float radius = clmodel->radius;
-		if (radius > 0 && dist_sq > radius * radius * 40000 &&
-		    e != &cl_entities[cl.viewentity])
-			return true;
-	}
+	/* Legacy LOD cull (radius * radius * 40000) removed — see the
+	 * matching note in the phase-2 alias loop.  Ironwail doesn't
+	 * have one and the threshold was too aggressive on dense maps.
+	 * uhexen2-l0ac. */
 
 	paliashdr = (aliashdr_t *)Mod_Extradata(clmodel);
 	gm = GL_GetAliasGPUMesh(paliashdr);
@@ -2723,23 +2718,23 @@ static void R_DrawEntitiesOnList (void)
 		{
 		case mod_alias:
 		{
-			/* Distance-based culling for alias models */
-			float dx = e->origin[0] - r_origin[0];
-			float dy = e->origin[1] - r_origin[1];
-			float dz = e->origin[2] - r_origin[2];
-			float dist_sq = dx*dx + dy*dy + dz*dz;
-			float radius = e->model->radius;
-
-			/* Hard entity draw distance (r_entdist, 0=unlimited) */
-			if (r_entdist.value > 0 &&
-			    dist_sq > r_entdist.value * r_entdist.value &&
-			    e != &cl_entities[cl.viewentity])
-				break;
-
-			/* LOD cull: skip if model would be < ~4 pixels on screen */
-			if (radius > 0 && dist_sq > radius * radius * 40000 &&
-			    e != &cl_entities[cl.viewentity])
-				break;
+			/* Optional hard entity draw distance (r_entdist).
+			 *
+			 * The legacy "< 4 px screen size" LOD cull
+			 * (radius * radius * 40000) was removed — Ironwail
+			 * doesn't have one, and the threshold was too
+			 * aggressive for small-radius models (popped in/out as
+			 * the player moved on dense maps).  uhexen2-l0ac. */
+			if (r_entdist.value > 0)
+			{
+				float dx = e->origin[0] - r_origin[0];
+				float dy = e->origin[1] - r_origin[1];
+				float dz = e->origin[2] - r_origin[2];
+				float dist_sq = dx*dx + dy*dy + dz*dz;
+				if (dist_sq > r_entdist.value * r_entdist.value &&
+				    e != &cl_entities[cl.viewentity])
+					break;
+			}
 
 			item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
 					(e->model->flags & (EF_TRANSPARENT|EF_HOLEY|EF_SPECIAL_TRANS)) ||

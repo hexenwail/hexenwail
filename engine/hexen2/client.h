@@ -331,7 +331,12 @@ void CL_Disconnect (void);
 void CL_Disconnect_f (void);
 void CL_NextDemo (void);
 
-#define	MAX_VISEDICTS		256
+/* Raised from the legacy 256 to match Ironwail.  At 256, dense maps
+ * (SoT, large coliseum levels) silently drop entities once the per-frame
+ * PVS count exceeds the cap — manifests as models/brush ents flickering
+ * in and out as the player moves, since which 256 win depends on
+ * insertion order.  Multi-reporter regression: uhexen2-l0ac. */
+#define	MAX_VISEDICTS		16384
 extern	int		cl_numvisedicts;
 extern	entity_t	*cl_visedicts[MAX_VISEDICTS];
 

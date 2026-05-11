@@ -379,8 +379,11 @@ typedef struct {
 	float	viewproj[16];	/* projection * view */
 } alias_inst_header_t;		/* 64 bytes */
 
-#define MAX_ALIAS_INSTANCES	512
-#define MAX_ALIAS_BATCHES	128
+/* Cap matches MAX_VISEDICTS — every visedict could in principle be an
+ * alias model.  Smaller caps silently truncate the instanced draw on
+ * dense maps. */
+#define MAX_ALIAS_INSTANCES	16384
+#define MAX_ALIAS_BATCHES	256
 
 typedef struct {
 	aliashdr_t	*hdr;		/* model -- determines VAO + pose texture */
