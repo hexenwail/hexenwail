@@ -62,7 +62,8 @@ typedef struct {
 
 static GLuint	cull_surf_ssbo;		/* binding 0: gpu_surface_t[] */
 static GLuint	cull_marksurf_ssbo;	/* binding 1: gpu_marksurf_t[] */
-static GLuint	cull_vis_ssbo;		/* binding 2: PVS bitvector (uint[]) */
+/* binding 2 (PVS bitvector) streams from the frame ring via GL_Upload —
+ * no dedicated SSBO; see R_DispatchWorldCull. uhexen2-o35n. */
 static GLuint	cull_indirect_buf;	/* binding 3: gpu_indirect_cmd_t[] */
 static GLuint	cull_src_ibo;		/* binding 4: source indices (read-only copy) */
 static GLuint	cull_dst_ibo;		/* binding 5: dest indices (compute writes, draw reads) */
@@ -439,15 +440,8 @@ void R_BuildWorldCull (void)
 			gpu_marks, GL_STATIC_DRAW);
 	free(gpu_marks);
 
-	/* PVS buffer (uploaded per-frame) */
-	{
-		int vis_size = (cull_num_leaves + 31) / 32;
-		glGenBuffers_fp(1, &cull_vis_ssbo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_vis_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
-				vis_size * sizeof(unsigned int),
-				NULL, GL_DYNAMIC_DRAW);
-	}
+	/* PVS buffer is streamed per-frame via GL_Upload (uhexen2-o35n) —
+	 * no static allocation needed. */
 
 	/* Count max indices per texture bucket for firstIndex allocation */
 	{
@@ -564,7 +558,6 @@ void R_FreeWorldCull (void)
 {
 	if (cull_surf_ssbo) { glDeleteBuffers_fp(1, &cull_surf_ssbo); cull_surf_ssbo = 0; }
 	if (cull_marksurf_ssbo) { glDeleteBuffers_fp(1, &cull_marksurf_ssbo); cull_marksurf_ssbo = 0; }
-	if (cull_vis_ssbo) { glDeleteBuffers_fp(1, &cull_vis_ssbo); cull_vis_ssbo = 0; }
 	if (cull_indirect_buf) { glDeleteBuffers_fp(1, &cull_indirect_buf); cull_indirect_buf = 0; }
 	if (cull_src_ibo) { glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
 	if (cull_dst_ibo) { glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
@@ -611,10 +604,17 @@ void R_DispatchWorldCull (void)
 			vis_bits[(i + 1) >> 5] |= (1u << ((i + 1) & 31));
 	}
 
-	/* Upload PVS */
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_vis_ssbo);
-	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
-			   vis_size * sizeof(unsigned int), vis_bits);
+	/* Stream PVS into this frame's host ring slot (uhexen2-o35n).
+	 * Persistent-mapped when available, falls back to BufferSubData. */
+	{
+		GLuint		vis_buf;
+		GLintptr	vis_ofs;
+		GLsizeiptr	vis_bytes = vis_size * sizeof(unsigned int);
+		GL_Upload(GL_SHADER_STORAGE_BUFFER, vis_bits, vis_bytes,
+			  &vis_buf, &vis_ofs);
+		GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER, 2,
+				   vis_buf, vis_ofs, vis_bytes);
+	}
 
 	/* Pass 1: clear indirect buffer */
 	glUseProgram_fp(cull_clear_prog);
@@ -649,7 +649,7 @@ void R_DispatchWorldCull (void)
 
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, cull_surf_ssbo);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, cull_marksurf_ssbo);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, cull_vis_ssbo);
+	/* binding 2 already bound via GL_BindBufferRange above (PVS upload). */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 4, cull_src_ibo);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 5, cull_dst_ibo);

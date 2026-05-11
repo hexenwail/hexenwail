@@ -37,8 +37,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | SSBO GPU particles | ✅ | `r_part.c` |
 | Order-Independent Transparency (OIT) | ✅ | Weighted blended, dual MRT |
 | Decoupled renderer from server physics | ✅ | Fixed-timestep accumulator in `host.c:861` — physics at `sys_ticrate` (20 Hz), render uncapped |
-| Triple-buffering / frames in flight | 🔶 | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` infrastructure landed (uhexen2-8pc2, commit `32bdbea5`). Used by alias instance SSBO upload; particles / VBO / brush dynamic paths still on legacy single-buffer. |
-| Persistent mapped buffers | 🔶 | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Only the alias instance ring uses it; remaining dynamic uploads still go through `glBufferData`/`SubData`. |
+| Triple-buffering / frames in flight | 🔶 | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` infrastructure landed (uhexen2-8pc2, commit `32bdbea5`). Used by alias instance SSBO upload and worldcull PVS upload (uhexen2-o35n); `gl_vbo.c` immediate-mode VBO still on `glBufferData(GL_STREAM_DRAW)` pending separate-binding VAO refactor. |
+| Persistent mapped buffers | 🔶 | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes) and GPU world-cull PVS bitvector (uhexen2-o35n). Immediate-mode VBO (`gl_vbo.c`) still single-buffer pending VAO restructure to separate vertex attribute bindings. |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ❌ | SSE2 fast-path downsample |
@@ -188,7 +188,7 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P1 — High
-1. **Persistent mapped buffers** — lock-free GPU upload, big perf win
+1. **Persistent mapped buffers** — 🔶 ring + alias instances + worldcull PVS migrated (uhexen2-o35n); `gl_vbo.c` immediate-mode upload still on `glBufferData` (needs VAO refactor to separate attribute bindings).
 
 ### P2 — Medium
 5. **Triple-buffering / frames in flight** — smoother frame pacing
