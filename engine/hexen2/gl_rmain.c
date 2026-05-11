@@ -2338,6 +2338,11 @@ static void R_DrawAliasInstanced (void)
 			   num_alias_instances * sizeof(alias_instance_t),
 			   alias_instances);
 
+	/* Order the two SubData uploads above against the shader read on the
+	 * draw call below. Spec promises implicit sync but driver quality on
+	 * this exact pattern varies — uhexen2-c5xe diagnostic. */
+	glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
+
 	/* Bind instance SSBO at binding 0 */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, inst_ssbo);
 
@@ -2440,6 +2445,7 @@ static void R_DrawAliasInstanced (void)
 			glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, inst_offset,
 					   num_alias_instances * sizeof(alias_instance_t),
 					   alias_instances);
+			glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, inst_ssbo);
 
 			glUseProgram_fp(prog->program);
