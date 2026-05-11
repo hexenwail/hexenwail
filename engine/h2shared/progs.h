@@ -35,17 +35,21 @@ typedef union eval_s
 	int		edict;
 } eval_t;
 
-/* Bumped from the legacy 16 to match Ironwail (which inherited it from
- * ericw's Quakespasm work).  At 16, long brush ents (lifts, rotators,
- * fences) that straddle more than 16 BSP leaves had their leaf list
- * truncated; SV_WriteEntitiesToClient's PVS cull would then think the
- * entity wasn't in any visible leaf and drop it on the server side as
- * the player moved.  Manifests as brush ents flickering in/out at
- * distance even after the MAX_VISEDICTS=16384 client-side bump.
+/* Bumped from the legacy 16 to handle long brush ents (lifts, rotators,
+ * fences) that straddle many BSP leaves: at the original cap the leaf
+ * list silently truncated and SV_WriteEntitiesToClient's PVS cull would
+ * drop the ent from the visedict stream as the player moved across PVS
+ * boundaries, even though the ent was still on-screen.
  * SV_WriteEntitiesToClient additionally skips the PVS cull when an
- * entity hit the cap (always sends), since we can't reliably know what
- * the rest of its leaf list would have been. */
-#define	MAX_ENT_LEAFS	32
+ * entity hits the cap (always sends), since we can't reliably know
+ * what the rest of its leaf list would have been.
+ *
+ * History: 16 (vanilla) → 32 (ericw/Quakespasm/Ironwail) → 64.  Bumped
+ * to 64 after Keep.bsp re-reported popping at 32 (uhexen2-l0ac).  The
+ * always-send cap-overflow path stays as a safety net for the truly
+ * absurd cases.  Memory cost is 64 ints (256 B) per edict beyond the
+ * 32-cap baseline, negligible at MAX_EDICTS. */
+#define	MAX_ENT_LEAFS	64
 typedef struct edict_s
 {
 	qboolean	free;
