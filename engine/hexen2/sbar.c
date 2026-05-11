@@ -1504,7 +1504,17 @@ void SB_InvChanged(void)
 		/* Standard inventory path (protocols 18-20):
 		 * read item counts directly from cl.v.cnt_* */
 		qboolean examined[MAX_INVENTORY];
+		int prev_artifact = -1;
 		memset (examined, 0, sizeof(examined));
+
+		/* Remember the artifact id (not slot index) of the selected item
+		 * before compaction. After compaction shifts other artifacts left
+		 * into vacated slots, re-find this artifact and keep selection on
+		 * it — fixes "display loses track of item" on rapid InvUse when a
+		 * stack is depleted and the next artifact slides into its slot.
+		 * uhexen2-o0n2. */
+		if (cl.inv_selected >= 0 && cl.inv_selected < cl.inv_count)
+			prev_artifact = cl.inv_order[cl.inv_selected];
 
 		if (cl.inv_selected >= 0 && Inv_GetCount(cl.inv_order[cl.inv_selected]) == 0)
 			ForceUpdate = true;
@@ -1532,6 +1542,29 @@ void SB_InvChanged(void)
 		}
 
 		cl.inv_count = position;
+
+		/* Re-find the originally-selected artifact in the compacted order.
+		 * If it survived (count still > 0), pin selection to it so the HUD
+		 * keeps showing what the user was using. If it was the depleted
+		 * stack, fall through to the bounds clamp below — that picks a
+		 * neighbor slot rather than silently switching to whichever
+		 * artifact happened to shift into the vacated index. */
+		if (prev_artifact >= 0)
+		{
+			for (counter = 0; counter < cl.inv_count; counter++)
+			{
+				if (cl.inv_order[counter] == prev_artifact)
+				{
+					if (cl.inv_selected != counter)
+					{
+						cl.inv_selected = counter;
+						ForceUpdate = true;
+					}
+					break;
+				}
+			}
+		}
+
 		if (cl.inv_selected >= cl.inv_count)
 		{
 			cl.inv_selected = cl.inv_count - 1;
