@@ -338,16 +338,18 @@ typedef struct
 } entity_state3_t;
 
 /* Per-client per-frame entity state cap for the Hexen II reference-frame
- * delta protocol.  Bumped 512→2048 to match the client-side MAX_VISEDICTS
- * bump (uhexen2-l0ac follow-up): on dense maps (Keep.bsp with SoT content,
- * etc.) SV_PrepareClientEntities was hitting build->count >= MAX_CLIENT_STATES
- * and breaking out of the loop silently, dropping the tail of the entity
- * list.  As entities entered/left the "changed since baseline" set across
- * ticks, the dropped tail shifted, producing the multi-reporter pop-in/out
- * symptom for alias models AND brush ents.  Memory: per-client server state
- * = MAX_FRAMES+2 * MAX_CLIENT_STATES * sizeof(entity_state2_t) ≈ 7*2048*40
- * ≈ 560KB; ×16 clients ≈ 9MB total.  Trivial on 2026 hardware. */
-#define MAX_CLIENT_STATES	2048
+ * delta protocol.  Each delta entry indexes an edict (0..MAX_EDICTS-1), so
+ * the true upper bound is MAX_EDICTS (quakedef.h, currently 8192) — anything
+ * smaller risks SV_PrepareClientEntities hitting build->count >= cap and
+ * breaking out of the loop silently, dropping the tail of the entity list.
+ * As entities enter/leave the "changed since baseline" set across ticks the
+ * dropped tail shifts, producing pop-in/out for alias models AND brush ents
+ * (originally observed on Keep.bsp + SoT content at the old 512 cap).
+ * Sized to MAX_EDICTS so the cap can never be hit in normal play.  Memory:
+ * per-client server state = (MAX_FRAMES+2) * MAX_CLIENT_STATES * sizeof
+ * (entity_state2_t) ≈ 7*8192*40 ≈ 2.2MB; ×16 clients ≈ 35MB total.  Trivial
+ * on 2026 hardware. */
+#define MAX_CLIENT_STATES	8192
 #define MAX_FRAMES		5
 #define CLEAR_LIMIT		2
 
