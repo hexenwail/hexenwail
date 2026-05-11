@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 7 | 1 | 5 | 0 |
+| Rendering — GPU Pipeline | 7 | 3 | 3 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 16 | 1 | 5 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **55** | **7** | **18** | **8** |
+| **TOTAL** | **55** | **9** | **16** | **8** |
 
-**Parity: 69% ported, 9% partial, 22% missing** (excluding N/A)
+**Parity: 69% ported, 11% partial, 20% missing** (excluding N/A)
 
 ---
 
@@ -37,8 +37,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | SSBO GPU particles | ✅ | `r_part.c` |
 | Order-Independent Transparency (OIT) | ✅ | Weighted blended, dual MRT |
 | Decoupled renderer from server physics | ✅ | Fixed-timestep accumulator in `host.c:861` — physics at `sys_ticrate` (20 Hz), render uncapped |
-| Triple-buffering / frames in flight | ❌ | Ironwail uses `FRAMES_IN_FLIGHT=3` with GPU fence sync |
-| Persistent mapped buffers | ❌ | `ARB_buffer_storage`, `GL_MAP_PERSISTENT_BIT` |
+| Triple-buffering / frames in flight | 🔶 | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` infrastructure landed (uhexen2-8pc2, commit `32bdbea5`). Used by alias instance SSBO upload; particles / VBO / brush dynamic paths still on legacy single-buffer. |
+| Persistent mapped buffers | 🔶 | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Only the alias instance ring uses it; remaining dynamic uploads still go through `glBufferData`/`SubData`. |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ❌ | SSE2 fast-path downsample |
