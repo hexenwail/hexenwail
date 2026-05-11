@@ -72,7 +72,12 @@ jobs:
 
       - name: Generate changelog
         run: |
-          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${{ github.ref_name }}$" | head -1 || echo "")
+          # Pick the most recently CREATED tag, not the lex-highest version
+          # name.  Three legacy tag schemes linger in this repo (uhexen2-*,
+          # 26.03-*, v0.7.1-alpha.r3) and lex-sort above the current
+          # 0.7.x-beta.rN scheme, so version:refname kept comparing every
+          # release against v0.7.1-alpha.r3.
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ github.ref_name }}$" | head -1 || echo "")
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
             HEADER="## What's changed since $PREV_TAG"
