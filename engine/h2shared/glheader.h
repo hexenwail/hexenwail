@@ -41,6 +41,17 @@ typedef ptrdiff_t GLsizeiptr;
 typedef ptrdiff_t GLintptr;
 #endif
 
+/* GLsync / GLuint64 — required for GL_ARB_sync (core 3.2).  Minimal GL
+ * headers (MinGW, some older system headers) miss these.  uhexen2-8pc2. */
+#ifndef GL_ARB_sync
+typedef struct __GLsync *GLsync;
+#endif
+#ifndef GL_VERSION_3_2
+#include <stdint.h>
+typedef uint64_t GLuint64;
+typedef int64_t  GLint64;
+#endif
+
 /* include our function pointers */
 #include "gl_func.h"
 
@@ -183,6 +194,59 @@ typedef ptrdiff_t GLintptr;
 #endif
 #ifndef GL_DRAW_INDIRECT_BUFFER
 #define GL_DRAW_INDIRECT_BUFFER			0x8F3F
+#endif
+
+/* GL_ARB_buffer_storage (core 4.4) — persistent-mapped buffers.
+ * Used by gl_buffer.c streaming ring (uhexen2-8pc2). */
+#ifndef GL_MAP_PERSISTENT_BIT
+#define GL_MAP_PERSISTENT_BIT			0x0040
+#endif
+#ifndef GL_MAP_COHERENT_BIT
+#define GL_MAP_COHERENT_BIT			0x0080
+#endif
+#ifndef GL_DYNAMIC_STORAGE_BIT
+#define GL_DYNAMIC_STORAGE_BIT			0x0100
+#endif
+
+/* GL_ARB_map_buffer_range (core 3.0) */
+#ifndef GL_MAP_READ_BIT
+#define GL_MAP_READ_BIT				0x0001
+#define GL_MAP_WRITE_BIT			0x0002
+#define GL_MAP_INVALIDATE_RANGE_BIT		0x0004
+#define GL_MAP_INVALIDATE_BUFFER_BIT		0x0008
+#define GL_MAP_FLUSH_EXPLICIT_BIT		0x0010
+#define GL_MAP_UNSYNCHRONIZED_BIT		0x0020
+#endif
+
+/* GL_ARB_sync (core 3.2) — fence sync */
+#ifndef GL_SYNC_GPU_COMMANDS_COMPLETE
+#define GL_SYNC_GPU_COMMANDS_COMPLETE		0x9117
+#endif
+#ifndef GL_SYNC_FLUSH_COMMANDS_BIT
+#define GL_SYNC_FLUSH_COMMANDS_BIT		0x00000001
+#endif
+#ifndef GL_TIMEOUT_EXPIRED
+#define GL_TIMEOUT_EXPIRED			0x911B
+#endif
+#ifndef GL_CONDITION_SATISFIED
+#define GL_CONDITION_SATISFIED			0x911C
+#endif
+#ifndef GL_ALREADY_SIGNALED
+#define GL_ALREADY_SIGNALED			0x911A
+#endif
+#ifndef GL_WAIT_FAILED
+#define GL_WAIT_FAILED				0x911D
+#endif
+#ifndef GL_TIMEOUT_IGNORED
+#define GL_TIMEOUT_IGNORED			0xFFFFFFFFFFFFFFFFull
+#endif
+
+/* Buffer alignment queries for SSBO/UBO sub-ranges */
+#ifndef GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT
+#define GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT	0x90DF
+#endif
+#ifndef GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT
+#define GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT		0x8A34
 #endif
 
 #endif	/* __GLHEADER_H */

@@ -373,11 +373,9 @@ typedef struct {
 	int	shadedot_row;	/* index into shadedots table (0-15) */
 } alias_instance_t;		/* 80 bytes */
 
-/* SSBO header — frame-global data shared across all instances.
- * Prepended to the instance array in SSBO binding 0. */
-typedef struct {
-	float	viewproj[16];	/* projection * view */
-} alias_inst_header_t;		/* 64 bytes */
+/* alias_inst_header_t removed in uhexen2-8pc2: the view-projection
+ * matrix moved out of the instance SSBO into a uniform mat4 so the
+ * streaming ring (gl_buffer.c) uploads only the instance array. */
 
 /* Cap matches MAX_VISEDICTS — every visedict could in principle be an
  * alias model.  Smaller caps silently truncate the instanced draw on

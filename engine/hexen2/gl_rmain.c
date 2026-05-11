@@ -1312,9 +1312,16 @@ Instanced alias model rendering (ES 3.0 compatible)
 
 static alias_instance_t	alias_instances[MAX_ALIAS_INSTANCES];
 static int		num_alias_instances;
+/* alias_inst_view_proj — staging for the per-frame view-projection
+ * uniform.  Was an SSBO header in the inst_ssbo prefix until uhexen2-8pc2
+ * moved it out to a plain uniform mat4 (cleaner GL_Upload migration). */
+static float		alias_inst_view_proj[16];
 static alias_batch_t	alias_batches[MAX_ALIAS_BATCHES];
 static int		num_alias_batches;
-static GLuint		inst_ssbo;	/* SSBO: header + instance array */
+/* inst_ssbo removed in uhexen2-8pc2 — the streaming ring (gl_buffer.c)
+ * provides per-frame storage with fence-guarded reuse, eliminating the
+ * driver-implicit-sync hazard of the old static SSBO + glBufferSubData
+ * pattern. */
 static qboolean		inst_collected[MAX_VISEDICTS]; /* true if visedict was instanced */
 
 /* Per-entity bookkeeping for shadow/batch passes after instanced draw */
@@ -2304,52 +2311,35 @@ static void R_DrawAliasInstanced (void)
 {
 	int	b, i;
 	gl_alias_inst_prog_t *prog = &gl_shader_alias_inst;
-	alias_inst_header_t header;
-	size_t	inst_offset = sizeof(alias_inst_header_t);
 	extern float r_fog_density;
 	extern float r_fog_color[3];
-	size_t	upload_size;
+	GLuint		inst_buf;
+	GLintptr	inst_ofs;
+	size_t		inst_bytes;
 
 	if (num_alias_instances == 0 || !prog->program)
 		return;
 
-	/* Create instance SSBO on first use */
-	if (!inst_ssbo)
-	{
-		glGenBuffers_fp(1, &inst_ssbo);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, inst_ssbo);
-		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
-				sizeof(alias_inst_header_t) +
-				MAX_ALIAS_INSTANCES * sizeof(alias_instance_t),
-				NULL, GL_DYNAMIC_DRAW);
-		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
-	}
-
-	/* Fill SSBO header with frame-global data.
+	/* View-projection: written into a uniform mat4 (uhexen2-8pc2).
 	 * The matrix stack currently has just VIEW, so GetMVP = Proj * View. */
-	GL_GetMVP(header.viewproj);
+	GL_GetMVP(alias_inst_view_proj);
 
-	/* Upload header + instance data */
-	upload_size = inst_offset + num_alias_instances * sizeof(alias_instance_t);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, inst_ssbo);
-	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
-			   sizeof(alias_inst_header_t), &header);
-	glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, inst_offset,
-			   num_alias_instances * sizeof(alias_instance_t),
-			   alias_instances);
-
-	/* Order the two SubData uploads above against the shader read on the
-	 * draw call below. Spec promises implicit sync but driver quality on
-	 * this exact pattern varies — uhexen2-c5xe diagnostic. */
-	glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
-
-	/* Bind instance SSBO at binding 0 */
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, inst_ssbo);
+	/* Stream the instance array into this frame's host ring slot.
+	 * Returns (buf, offset) suitable for GL_BindBufferRange at binding 0.
+	 * uhexen2-8pc2: replaces glBufferSubData on a long-lived SSBO. */
+	inst_bytes = (size_t) num_alias_instances * sizeof(alias_instance_t);
+	GL_Upload(GL_SHADER_STORAGE_BUFFER, alias_instances, inst_bytes,
+		  &inst_buf, &inst_ofs);
+	GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER, 0,
+			   inst_buf, inst_ofs, inst_bytes);
 
 	/* Activate instanced shader */
 	glUseProgram_fp(prog->program);
 
-	/* Set uniforms (fog, alpha threshold, eye position) */
+	/* Set uniforms (view-proj, fog, alpha threshold, eye position) */
+	if (prog->u_viewproj >= 0)
+		glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
+				      alias_inst_view_proj);
 	/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw Fog_GetDensity() */
 	if (prog->u_fog_density >= 0)
 		glUniform1f_fp(prog->u_fog_density, r_fog_density);
@@ -2440,15 +2430,27 @@ static void R_DrawAliasInstanced (void)
 				alias_instances[i].light_color[2] = 1.0f;
 			}
 
-			/* Re-upload modified instance data */
-			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, inst_ssbo);
-			glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, inst_offset,
-					   num_alias_instances * sizeof(alias_instance_t),
-					   alias_instances);
-			glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, inst_ssbo);
+			/* Re-stream the modified instance data into a fresh
+			 * region of the ring; old region is still bound on
+			 * the main-pass draw commands which haven't executed
+			 * yet — independent allocations keep them safe.
+			 * uhexen2-8pc2. */
+			{
+				size_t fb_bytes = (size_t) num_alias_instances
+					* sizeof(alias_instance_t);
+				GLuint   fb_buf;
+				GLintptr fb_ofs;
+				GL_Upload(GL_SHADER_STORAGE_BUFFER,
+					  alias_instances, fb_bytes,
+					  &fb_buf, &fb_ofs);
+				GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER, 0,
+						   fb_buf, fb_ofs, fb_bytes);
+			}
 
 			glUseProgram_fp(prog->program);
+			if (prog->u_viewproj >= 0)
+				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
+						      alias_inst_view_proj);
 			if (prog->u_fog_density >= 0)
 				glUniform1f_fp(prog->u_fog_density, Fog_GetDensity());
 			if (prog->u_fog_color >= 0)

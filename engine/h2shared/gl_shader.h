@@ -65,6 +65,7 @@ typedef struct {
 	GLint	u_fog_density;	/* fragment fog uniforms */
 	GLint	u_fog_color;
 	GLint	u_alpha_threshold;
+	GLint	u_viewproj;	/* view-projection matrix (uhexen2-8pc2) */
 	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
 	GLint	u_eyepos;	/* camera position for fog distance */
 } gl_alias_inst_prog_t;

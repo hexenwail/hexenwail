@@ -368,6 +368,25 @@ GL_FUNCTION_OPT(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsi
 GL_FUNCTION_OPT(void, glDispatchCompute, (GLuint, GLuint, GLuint))
 GL_FUNCTION_OPT(void, glMemoryBarrier, (GLbitfield))
 
+/* GL_ARB_buffer_storage (core 4.4) — persistent-mapped buffers.
+ * gl_buffer_storage_able is set true at init when the entry point is
+ * present; the streaming ring (gl_buffer.c) maps coherent + persistent
+ * when available, falls back to BufferData STREAM_DRAW + SubData. */
+GL_FUNCTION_OPT(void, glBufferStorage, (GLenum, GLsizeiptr, const void *, GLbitfield))
+
+/* GL_ARB_map_buffer_range (core 3.0) */
+GL_FUNCTION_OPT(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield))
+GL_FUNCTION_OPT(GLboolean, glUnmapBuffer, (GLenum))
+
+/* GL_ARB_sync (core 3.2) — fence sync used by the streaming ring */
+GL_FUNCTION_OPT(GLsync, glFenceSync, (GLenum, GLbitfield))
+GL_FUNCTION_OPT(void, glDeleteSync, (GLsync))
+GL_FUNCTION_OPT(GLenum, glClientWaitSync, (GLsync, GLbitfield, GLuint64))
+GL_FUNCTION_OPT(void, glWaitSync, (GLsync, GLbitfield, GLuint64))
+
+/* GL_ARB_multi_bind (core 4.4) — atomic multi-SSBO bind */
+GL_FUNCTION_OPT(void, glBindBuffersRange, (GLenum, GLuint, GLsizei, const GLuint *, const GLintptr *, const GLsizeiptr *))
+
 /* Timer queries (GL 3.3 / GL_ARB_timer_query) */
 #ifndef HEXENWAIL_GLUINT64
 #define HEXENWAIL_GLUINT64
@@ -476,6 +495,17 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glTexImage3D_fp			glTexImage3D
 #define glUniform3fv_fp			glUniform3fv
 #define glUniform4fv_fp			glUniform4fv
+/* GL 4.3+ buffer streaming: not in WebGL2.  The streaming ring
+ * (gl_buffer.c) is compiled out under __EMSCRIPTEN__ — these stubs
+ * exist so call sites still link. */
+#define glBufferStorage_fp(t,sz,d,fl)		((void)0)
+#define glMapBufferRange_fp(t,o,l,fl)		((void *)0)
+#define glUnmapBuffer_fp(t)			((GLboolean)0)
+#define glFenceSync_fp(c,fl)			((GLsync)0)
+#define glDeleteSync_fp(s)			((void)0)
+#define glClientWaitSync_fp(s,fl,t)		((GLenum)0)
+#define glWaitSync_fp(s,fl,t)			((void)0)
+#define glBindBuffersRange_fp(t,f,c,b,o,sz)	((void)0)
 #endif /* __EMSCRIPTEN__ */
 
 

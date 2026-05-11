@@ -186,6 +186,31 @@ extern	GLfloat		gl_max_anisotropy;
 extern	qboolean	have_stencil;
 extern	qboolean	gl_clipcontrol_able;	/* reversed-Z when true */
 
+/* Frame-resources streaming buffer ring (engine/h2shared/gl_buffer.c).
+ * uhexen2-8pc2: Ironwail-parity replacement for raw glBufferSubData → bind
+ * → draw uploads.  See gl_buffer.c for the full architecture. */
+extern	qboolean	gl_buffer_storage_able;	/* ARB_buffer_storage present */
+extern	qboolean	gl_multi_bind_able;	/* ARB_multi_bind present */
+extern	qboolean	gl_sync_able;		/* ARB_sync present */
+extern	GLint		gl_ssbo_align;
+extern	GLint		gl_ubo_align;
+
+void GL_CreateFrameResources (void);
+void GL_DeleteFrameResources (void);
+void GL_AcquireFrameResources (void);
+void GL_ReleaseFrameResources (void);
+void GL_ClearBufferBindings (void);
+void GL_AddGarbageBuffer (GLuint handle);
+
+void GL_Upload (GLenum target, const void *data, size_t numbytes,
+		GLuint *outbuf, GLintptr *outofs);
+void GL_BindBufferRange (GLenum target, GLuint index,
+			 GLuint buffer, GLintptr offset, GLsizeiptr size);
+void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
+			  const GLuint *buffers,
+			  const GLintptr *offsets,
+			  const GLsizeiptr *sizes);
+
 #ifndef GL_ZERO_TO_ONE
 #define GL_ZERO_TO_ONE			0x935F
 #endif

@@ -519,9 +519,11 @@ static const char spart_gpu_vert[] =
 #endif /* !__EMSCRIPTEN__ */
 
 /* --- shader_alias_instanced: GL 4.3 SSBO-based instanced alias models ---
- * Instance data and frame globals in SSBO binding 0.
+ * Instance data in SSBO binding 0 (streamed via gl_buffer.c each frame).
  * Pose data in SSBO binding 1 (per-batch, from model's ssbo_pose).
- * Shadedots in UBO binding 0.
+ * Shadedots in SSBO binding 2 (static lighting cosine table).
+ * View-projection passed as a uniform — uhexen2-8pc2 moved it out of the
+ * SSBO so the streaming ring uploads only the instance array.
  * Scale/origin baked into the world matrix CPU-side.
  * 80-byte instance struct matching Ironwail's compact layout.
  */
@@ -541,7 +543,6 @@ static const char salias_inst_vert[] =
 	"};\n"
 	"\n"
 	"layout(std430, binding=0) restrict readonly buffer InstanceBuffer {\n"
-	"    mat4 ViewProj;\n"
 	"    InstanceData instances[];\n"
 	"};\n"
 	"\n"
@@ -555,6 +556,7 @@ static const char salias_inst_vert[] =
 	"\n"
 	"in vec2 a_texcoord;\n"
 	"\n"
+	"uniform mat4 u_viewproj;\n"
 	"uniform int u_inst_base;\n"
 	"uniform vec3 u_eyepos;\n"
 	"\n"
@@ -587,7 +589,7 @@ static const char salias_inst_vert[] =
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_fogdist = distance(world_pos, u_eyepos);\n"
-	"    gl_Position = ViewProj * vec4(world_pos, 1.0);\n"
+	"    gl_Position = u_viewproj * vec4(world_pos, 1.0);\n"
 	"}\n";
 #endif /* !__EMSCRIPTEN__ */
 
@@ -775,6 +777,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
 	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
 	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
+	p->u_viewproj = glGetUniformLocation_fp(prog, "u_viewproj");
 	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
 	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
 

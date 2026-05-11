@@ -719,6 +719,20 @@ static void GL_LoadFunctionPointers (void)
 	glGetQueryObjectui64v_fp = (glGetQueryObjectui64v_f) SDL_GL_GetProcAddress("glGetQueryObjectui64v");
 	glGetQueryObjectiv_fp = (glGetQueryObjectiv_f) SDL_GL_GetProcAddress("glGetQueryObjectiv");
 
+	/* Streaming buffer ring (gl_buffer.c) — uhexen2-8pc2.
+	 * GL_ARB_buffer_storage (4.4) for persistent-mapped host buffers,
+	 * GL_ARB_sync (3.2) for fence-based ring sync, GL_ARB_multi_bind
+	 * (4.4) for atomic multi-SSBO bind.  Each is optional; the ring
+	 * adapts based on which entry points resolved (probed in GL_Init). */
+	glBufferStorage_fp = (glBufferStorage_f) SDL_GL_GetProcAddress("glBufferStorage");
+	glMapBufferRange_fp = (glMapBufferRange_f) SDL_GL_GetProcAddress("glMapBufferRange");
+	glUnmapBuffer_fp = (glUnmapBuffer_f) SDL_GL_GetProcAddress("glUnmapBuffer");
+	glFenceSync_fp = (glFenceSync_f) SDL_GL_GetProcAddress("glFenceSync");
+	glDeleteSync_fp = (glDeleteSync_f) SDL_GL_GetProcAddress("glDeleteSync");
+	glClientWaitSync_fp = (glClientWaitSync_f) SDL_GL_GetProcAddress("glClientWaitSync");
+	glWaitSync_fp = (glWaitSync_f) SDL_GL_GetProcAddress("glWaitSync");
+	glBindBuffersRange_fp = (glBindBuffersRange_f) SDL_GL_GetProcAddress("glBindBuffersRange");
+
 	if (!glCreateShader_fp || !glShaderSource_fp || !glCompileShader_fp ||
 	    !glCreateProgram_fp || !glAttachShader_fp || !glLinkProgram_fp ||
 	    !glUseProgram_fp || !glGetUniformLocation_fp || !glUniform1i_fp ||
@@ -887,6 +901,33 @@ static void GL_Init (void)
 	GL_VBO_Init();
 	GL_PostProcess_Init();
 
+	/* Streaming buffer ring (gl_buffer.c) — uhexen2-8pc2.
+	 * Probe extension availability by entry-point load, query offset
+	 * alignments, then allocate FRAMES_IN_FLIGHT host buffers. */
+#ifndef __EMSCRIPTEN__
+	gl_buffer_storage_able = (glBufferStorage_fp != NULL) &&
+				 (glMapBufferRange_fp != NULL) &&
+				 (glUnmapBuffer_fp != NULL);
+	gl_sync_able = (glFenceSync_fp != NULL) &&
+		       (glClientWaitSync_fp != NULL) &&
+		       (glDeleteSync_fp != NULL);
+	gl_multi_bind_able = (glBindBuffersRange_fp != NULL);
+
+	glGetIntegerv_fp (GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT,
+			  &gl_ssbo_align);
+	glGetIntegerv_fp (GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
+			  &gl_ubo_align);
+	if (gl_ssbo_align < 1) gl_ssbo_align = 256;
+	if (gl_ubo_align < 1)  gl_ubo_align  = 256;
+
+	GL_CreateFrameResources ();
+
+	Con_SafePrintf ("Streaming buffer ring: %s, %s, %s\n",
+			gl_buffer_storage_able ? "persistent-mapped" : "BufferSubData fallback",
+			gl_sync_able ? "fence sync" : "no sync",
+			gl_multi_bind_able ? "multi-bind" : "per-slot bind");
+#endif
+
 	/* Reversed-Z depth (Ironwail-parity). Detect by entry-point load:
 	 * if the driver exposes glClipControl, switch the clip space to
 	 * [0,1] and flip depth defaults so far=0, near=1, depth-test=GEQUAL.
@@ -939,11 +980,24 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 	*height = WRHeight;
 
 //	glViewport_fp (*x, *y, *width, *height);
+
+#ifndef __EMSCRIPTEN__
+	/* Wait on the slot we're about to reuse (and drain its garbage),
+	 * then advance the ring writes to that slot.  uhexen2-8pc2. */
+	GL_AcquireFrameResources ();
+#endif
 }
 
 
 void GL_EndRendering (void)
 {
+#ifndef __EMSCRIPTEN__
+	/* Insert a GPU fence on the current slot so the next Acquire can
+	 * tell when its work has retired, advance ring index.  Must precede
+	 * SwapWindow so the fence covers all of this frame's GPU work. */
+	GL_ReleaseFrameResources ();
+#endif
+
 	if (!scr_skipupdate)
 		SDL_GL_SwapWindow(window);
 
@@ -1180,6 +1234,9 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
 	GL_Shaders_Shutdown();
+#ifndef __EMSCRIPTEN__
+	GL_DeleteFrameResources ();
+#endif
 
 	// Unload all textures and reset texture counts
 	D_ClearOpenGLTextures(0);
