@@ -9,7 +9,7 @@ Just as [Ironwail](https://github.com/andrei-drexler/ironwail) took sezero's [Qu
 
 Raven Software released the Hexen II source code in 2000. [Hammer of Thyrion](http://uhexen2.sourceforge.net/) (2004–2018) by O. Sezer became the definitive cross-platform engine. [uHexen2](https://github.com/sezero/uhexen2) continued the work with graphical enhancements and mod support — notably Shanjaq and Inky's contributions. Hexenwail (2025) began when [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) shipped without a buildable Linux client, and grew into a full GL 4.3 modernization.
 
-Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak` and select it from the Mods menu (or launch with `-portals`).
+Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak`; it is auto-included when you launch with `-game modname` / `-mod modname` (use `-noportals` to opt out), and is toggleable from the Mods menu.
 
 See [USAGE.md](USAGE.md) for external textures, Steam Deck setup, and mod configuration.
 
@@ -65,7 +65,8 @@ Planned:
 - [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) entity overrides
 - Extended QuakeC builtins (`SOLID_GHOST`, entity alpha)
 - 8192 max entities, 2048 sound channels
-- Mods menu with runtime switching, per-mod config, portals data toggle
+- Mods menu (up to 128 entries, scrollable with PgUp/PgDn/Home/End/mousewheel), per-mod config, portals data toggle
+- Per-liquid alpha (`r_wateralpha`, `r_lavaalpha`, `r_slimealpha`, `r_telealpha`) + `r_turbalpha` catch-all for custom-named mod liquids
 - TrueLightning (`cl_truelightning`)
 
 ### Audio

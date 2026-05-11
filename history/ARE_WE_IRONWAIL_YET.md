@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-09
+Last updated: 2026-05-11
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -14,13 +14,13 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 7 | 1 | 5 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
-| Performance / Engine | 5 | 1 | 1 | 1 |
+| Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 16 | 1 | 5 | 1 |
 | Input / Controller | 4 | 1 | 4 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **53** | **7** | **17** | **8** |
+| **TOTAL** | **55** | **7** | **18** | **8** |
 
 **Parity: 69% ported, 9% partial, 22% missing** (excluding N/A)
 
@@ -76,6 +76,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Feature | Status | Notes |
 |---|---|---|
 | Reduced heap usage / auto-grow | ✅ | Large maps load without `-heapsize` |
+| Visible-entity cap (MAX_VISEDICTS) | ✅ | Bumped 256 → 16384 in `client.h` to match Ironwail.  At 256, dense maps silently dropped entities past the cap; manifested as multi-reporter "models and brush ents pop at distance" (uhexen2-l0ac).  Companion caps (MAX_ALIAS_INSTANCES, MAX_WORLD_INSTANCES, MAX_WORLD_SURF_KEYS) also scaled. |
+| Per-entity leaf cap (MAX_ENT_LEAFS) | ✅ | Bumped 16 → 32 in `progs.h` (ericw/Ironwail parity), and `SV_WriteEntitiesToClient` skips the PVS cull when an entity hit the cap (always sends).  Long brush ents that touched more than 16 BSP leaves had their leaf list truncated; the PVS cull then dropped them from the client write stream as the player moved. |
 | FPS cap with menu slider | ✅ | `host_maxfps` in Display menu |
 | CSQC (client-side QuakeC) | ✅ | `cl_csqc.c` |
 | bmodel buffer rebuilt correctly on map change | ✅ | Ironwail fix `3ccbcda` (2026-02): `GL_DeleteBModelBuffers()` was missing before `GL_BuildBModelVertexBuffer()` in `R_NewMap`, causing GPU memory leak on map changes. We also call `GL_DeleteBModelBuffers` before rebuild. Verify `gl_rmisc.c:R_NewMap`. |
@@ -171,6 +173,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 | `74d8e74` 2026-01 | Disable GL texture compression for 2D textures (HUD, conchars) | ➖ N/A — same reason as above. |
 | `80387f1` 2026-01 | Crash toggling `gl_compress_textures`: cubemap textures stored pointers to stack data | ➖ N/A — no compression system. |
 | `78ad272` 2026-01 | Stop controller rumble when sound buffer is cleared (e.g. modal message) | ❌ May be relevant if we have `joy_rumble`. Check `in_sdl.c:S_ClearBuffer` interaction. |
+| ericw (pre-Ironwail) | MAX_ENT_LEAFS 16→32 + always-send on cap overflow in `SV_WriteEntitiesToClient` | ✅ Ported 2026-05-11 (uhexen2-l0ac follow-up): long brush ents (lifts, rotators) flickered out at distance because their leaf list overflowed and the PVS cull dropped them. |
 
 ---
 
