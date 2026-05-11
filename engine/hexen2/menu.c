@@ -3987,12 +3987,30 @@ static void M_Video_Key (int key)
 //=============================================================================
 /* MODS MENU */
 
-#define	MODS_MAX	32
+#define	MODS_MAX		128
+#define	MODS_LIST_TOP		60
+#define	MODS_LIST_X		64
+#define	MODS_CURSOR_X		56
+#define	MODS_ACTIVE_X		232
+#define	MODS_SCROLLBAR_X	252
+#define	MODS_FOOTER_RESERVE	24	/* px reserved below the list for the portals toggle */
 
 static char	mods_list[MODS_MAX][MAX_QPATH];
 static int	mods_count;
 static int	mods_cursor;
+static int	mods_top;		/* first visible item — scroll offset */
 static qboolean	mods_portals_toggle;	/* "with Portals" for custom mods */
+
+/* Visible rows fit between MODS_LIST_TOP and (200 - MODS_FOOTER_RESERVE) on the
+ * 320x200 menu canvas. When the separator is drawn (between fixed and custom
+ * entries) it eats one extra row, so reserve one slot. */
+static int M_Mods_VisibleRows (void)
+{
+	int avail = 200 - MODS_LIST_TOP - MODS_FOOTER_RESERVE;
+	int rows = avail / 8 - 1;	/* minus 1 for potential separator */
+	if (rows < 4) rows = 4;
+	return rows;
+}
 
 static int mods_strcmp (const void *a, const void *b)
 {
@@ -4078,6 +4096,25 @@ static qboolean M_Mods_IsActive (int idx)
 	return !q_strcasecmp(fs_gamedir_nopath, mods_list[idx]);
 }
 
+/* Keep mods_cursor within the visible window by adjusting mods_top. */
+static void M_Mods_EnsureVisible (void)
+{
+	int visible = M_Mods_VisibleRows ();
+	if (mods_count <= visible)
+	{
+		mods_top = 0;
+		return;
+	}
+	if (mods_cursor < mods_top)
+		mods_top = mods_cursor;
+	else if (mods_cursor >= mods_top + visible)
+		mods_top = mods_cursor - visible + 1;
+	if (mods_top < 0)
+		mods_top = 0;
+	if (mods_top > mods_count - visible)
+		mods_top = mods_count - visible;
+}
+
 static void M_Menu_Mods_f (void)
 {
 	int	i;
@@ -4099,21 +4136,37 @@ static void M_Menu_Mods_f (void)
 		}
 	}
 
+	/* scroll the active entry into view */
+	mods_top = 0;
+	M_Mods_EnsureVisible ();
+
 	/* default portals toggle to current state */
 	mods_portals_toggle = mods_have_portals;
 }
 
 static void M_Mods_Draw (void)
 {
-	int		i, y;
+	int		i, y, cursor_y;
+	int		visible, last_visible;
 	const char	*label;
 	qboolean	active;
 
 	ScrollTitle("gfx/menu/title0.lmp");
 
-	y = 60;
-	for (i = 0; i < mods_count; i++)
+	visible = M_Mods_VisibleRows ();
+	M_Mods_EnsureVisible ();
+
+	last_visible = mods_top + visible;
+	if (last_visible > mods_count)
+		last_visible = mods_count;
+
+	cursor_y = -1;
+	y = MODS_LIST_TOP;
+	for (i = mods_top; i < last_visible; i++)
 	{
+		if (i == mods_cursor)
+			cursor_y = y;
+
 		active = M_Mods_IsActive(i);
 
 		/* display names for fixed entries */
@@ -4125,56 +4178,79 @@ static void M_Mods_Draw (void)
 			label = mods_list[i];
 
 		if (i == mods_cursor)
-			M_PrintWhite (64, y, label);
+			M_PrintWhite (MODS_LIST_X, y, label);
 		else
-			M_Print (64, y, label);
+			M_Print (MODS_LIST_X, y, label);
 
-		/* active indicator */
 		if (active)
-			M_PrintWhite (232, y, "<-");
+			M_PrintWhite (MODS_ACTIVE_X, y, "<-");
 
 		/* dim the portals entry if not installed */
 		if (i == MODS_FIXED_PORTALS && !mods_have_portals)
 		{
-			/* overwrite with dim text */
-			M_Print (64, y, "Portal of Praevus");
-			M_Print (232, y, "(not found)");
-		}
-
-		/* separator between fixed and custom entries */
-		if (i == MODS_FIXED_COUNT - 1 && mods_count > MODS_FIXED_COUNT)
-		{
-			y += 4;
-			M_DrawCharacter (64, y, '-' + 128);
-			M_DrawCharacter (72, y, '-' + 128);
-			M_DrawCharacter (80, y, '-' + 128);
-			y += 4;
+			M_Print (MODS_LIST_X, y, "Portal of Praevus");
+			M_Print (MODS_ACTIVE_X, y, "(not found)");
 		}
 
 		y += 8;
+
+		/* separator between fixed and custom — draw only when both
+		 * sides of the divide are within the visible window. */
+		if (i == MODS_FIXED_COUNT - 1 && i + 1 < last_visible)
+		{
+			y += 4;
+			M_DrawCharacter (MODS_LIST_X, y, '-' + 128);
+			M_DrawCharacter (MODS_LIST_X + 8, y, '-' + 128);
+			M_DrawCharacter (MODS_LIST_X + 16, y, '-' + 128);
+			y += 4;
+		}
+	}
+
+	/* up/down scroll indicators */
+	if (mods_top > 0)
+		M_DrawCharacter (MODS_LIST_X - 16, MODS_LIST_TOP, 128);
+	if (last_visible < mods_count)
+		M_DrawCharacter (MODS_LIST_X - 16, MODS_LIST_TOP + (visible - 1) * 8, 129);
+
+	/* proportional scrollbar on right edge */
+	if (mods_count > visible)
+	{
+		int track_y = MODS_LIST_TOP;
+		int track_h = visible * 8;
+		int thumb_h = (visible * track_h) / mods_count;
+		int thumb_y = track_y + (mods_top * track_h) / mods_count;
+		int j;
+		if (thumb_h < 8) thumb_h = 8;
+		for (j = 0; j < track_h; j += 8)
+		{
+			int cy = track_y + j;
+			if (cy >= thumb_y && cy < thumb_y + thumb_h)
+				M_DrawCharacter (MODS_SCROLLBAR_X, cy, 11);
+			else
+				M_DrawCharacter (MODS_SCROLLBAR_X, cy, '-');
+		}
 	}
 
 	/* portals toggle — only show for custom mods when portals is installed */
 	if (mods_have_portals && mods_cursor >= MODS_FIXED_COUNT)
 	{
-		M_Print (64, y + 4, "Portals data:");
+		int yf = MODS_LIST_TOP + visible * 8 + 12;
+		M_Print (MODS_LIST_X, yf, "Portals data:");
 		if (mods_portals_toggle)
-			M_PrintWhite (176, y + 4, "ON");
+			M_PrintWhite (176, yf, "ON");
 		else
-			M_Print (176, y + 4, "off");
+			M_Print (176, yf, "off");
 	}
 
-	/* draw cursor — account for separator offset */
-	{
-		int cy = 60 + mods_cursor * 8;
-		if (mods_cursor >= MODS_FIXED_COUNT && mods_count > MODS_FIXED_COUNT)
-			cy += 8;	/* separator height */
-		M_DrawCharacter (56, cy, 12 + ((int)(realtime * 4) & 1));
-	}
+	/* blinking cursor on the active row */
+	if (cursor_y >= 0)
+		M_DrawCharacter (MODS_CURSOR_X, cursor_y, 12 + ((int)(realtime * 4) & 1));
 }
 
 static void M_Mods_Key (int key)
 {
+	int visible = M_Mods_VisibleRows ();
+
 	switch (key)
 	{
 	case K_ESCAPE:
@@ -4190,6 +4266,7 @@ static void M_Mods_Key (int key)
 		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
 			if (++mods_cursor >= mods_count)
 				mods_cursor = 0;
+		M_Mods_EnsureVisible ();
 		break;
 
 	case K_UPARROW:
@@ -4200,6 +4277,37 @@ static void M_Mods_Key (int key)
 		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
 			if (--mods_cursor < 0)
 				mods_cursor = mods_count - 1;
+		M_Mods_EnsureVisible ();
+		break;
+
+	case K_PGUP:
+		S_LocalSound ("raven/menu1.wav");
+		mods_cursor -= visible;
+		if (mods_cursor < 0) mods_cursor = 0;
+		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
+			mods_cursor = MODS_FIXED_HEXEN2;
+		M_Mods_EnsureVisible ();
+		break;
+
+	case K_PGDN:
+		S_LocalSound ("raven/menu1.wav");
+		mods_cursor += visible;
+		if (mods_cursor >= mods_count) mods_cursor = mods_count - 1;
+		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
+			mods_cursor = MODS_FIXED_PORTALS + 1;
+		M_Mods_EnsureVisible ();
+		break;
+
+	case K_HOME:
+		S_LocalSound ("raven/menu1.wav");
+		mods_cursor = MODS_FIXED_HEXEN2;
+		M_Mods_EnsureVisible ();
+		break;
+
+	case K_END:
+		S_LocalSound ("raven/menu1.wav");
+		mods_cursor = mods_count - 1;
+		M_Mods_EnsureVisible ();
 		break;
 
 	case K_LEFTARROW:
