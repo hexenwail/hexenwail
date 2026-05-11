@@ -177,6 +177,14 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ---
 
+## Bead Coverage
+
+As of 2026-05-11, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.
+
+When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
+
+---
+
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P1 — High
