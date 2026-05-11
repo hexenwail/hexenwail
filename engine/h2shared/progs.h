@@ -35,7 +35,17 @@ typedef union eval_s
 	int		edict;
 } eval_t;
 
-#define	MAX_ENT_LEAFS	16
+/* Bumped from the legacy 16 to match Ironwail (which inherited it from
+ * ericw's Quakespasm work).  At 16, long brush ents (lifts, rotators,
+ * fences) that straddle more than 16 BSP leaves had their leaf list
+ * truncated; SV_WriteEntitiesToClient's PVS cull would then think the
+ * entity wasn't in any visible leaf and drop it on the server side as
+ * the player moved.  Manifests as brush ents flickering in/out at
+ * distance even after the MAX_VISEDICTS=16384 client-side bump.
+ * SV_WriteEntitiesToClient additionally skips the PVS cull when an
+ * entity hit the cap (always sends), since we can't reliably know what
+ * the rest of its leaf list would have been. */
+#define	MAX_ENT_LEAFS	32
 typedef struct edict_s
 {
 	qboolean	free;

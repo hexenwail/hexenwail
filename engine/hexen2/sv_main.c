@@ -949,7 +949,12 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 					break;
 			}
 
-			if (i == ent->num_leafs)
+			/* If num_leafs == MAX_ENT_LEAFS the leaf list overflowed —
+			 * we don't know what the rest of the entity's leaves are,
+			 * so we can't safely PVS-cull.  Always send.  Common with
+			 * long lifts, rotators, and big brush ents that span many
+			 * leaves.  Matches ericw/Ironwail behaviour. */
+			if (i == ent->num_leafs && ent->num_leafs < MAX_ENT_LEAFS)
 			{
 				DoRemove = true;
 				goto skipA;

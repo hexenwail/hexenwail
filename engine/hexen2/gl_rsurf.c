@@ -1053,7 +1053,11 @@ static float R_LiquidAlpha (const texture_t *t)
 		 * a name and was rendering opaque because the old strncasecmp
 		 * required a strict prefix match. */
 		/* BSP texture names are lowercase in Hexen 2 — plain strstr
-		 * is sufficient for substring matching. */
+		 * is sufficient for substring matching.  NB: "lowlight" is
+		 * deliberately NOT in this list — same name is used both as
+		 * a brush-ent illusionary (Arena.bsp, must be opaque per
+		 * uhexen2-6697) and as a world water surface (Keep.bsp, want
+		 * translucent).  Users in the latter case set r_turbalpha. */
 		if (strstr(n, "water") || strstr(n, "ice") ||
 		    strstr(n, "glass"))
 		{	float a = r_wateralpha.value;
