@@ -2347,13 +2347,19 @@ static void R_DrawAliasInstanced (void)
 		glUniform3f_fp(prog->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
 	if (prog->u_fog_color >= 0)
 		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	/* R_CollectAliasInstance filters out EF_HOLEY/EF_TRANSPARENT/translucent
+	 * entities, so every batch here is opaque. Use the inert 0.01 threshold
+	 * (matches Ironwail's ALPHATEST=0 shader variant for non-holey alias) —
+	 * a global 0.666 would discard skin pixels whose alpha dips below 2/3 due
+	 * to bilinear filtering of palette index 255 or PNG alpha edges, even on
+	 * models that were never tagged as cutouts. uhexen2-6eab. */
 	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp(prog->u_alpha_threshold, 0.666f);
+		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 
-	GL_SetAlphaThreshold(0.666f);
+	GL_SetAlphaThreshold(0.01f);
 
 	/* Draw each batch */
 	for (b = 0; b < num_alias_batches; b++)
