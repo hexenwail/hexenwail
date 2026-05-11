@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 7 | 3 | 3 | 0 |
+| Rendering — GPU Pipeline | 8 | 2 | 3 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 16 | 1 | 5 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **55** | **9** | **16** | **8** |
+| **TOTAL** | **56** | **8** | **16** | **8** |
 
-**Parity: 69% ported, 11% partial, 20% missing** (excluding N/A)
+**Parity: 70% ported, 10% partial, 20% missing** (excluding N/A)
 
 ---
 
@@ -37,7 +37,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | SSBO GPU particles | ✅ | `r_part.c` |
 | Order-Independent Transparency (OIT) | ✅ | Weighted blended, dual MRT |
 | Decoupled renderer from server physics | ✅ | Fixed-timestep accumulator in `host.c:861` — physics at `sys_ticrate` (20 Hz), render uncapped |
-| Triple-buffering / frames in flight | 🔶 | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` infrastructure landed (uhexen2-8pc2, commit `32bdbea5`). Used by alias instance SSBO upload and worldcull PVS upload (uhexen2-o35n); `gl_vbo.c` immediate-mode VBO still on `glBufferData(GL_STREAM_DRAW)` pending separate-binding VAO refactor. |
+| Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. Dominant per-frame uploads (alias entity instances, worldcull PVS) stream through the ring. Residual `gl_vbo.c` immediate-mode VBO migration tracked in uhexen2-y1v5 but does not gate frame-pipelining benefit. (uhexen2-2fmy closed.) |
 | Persistent mapped buffers | 🔶 | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes) and GPU world-cull PVS bitvector (uhexen2-o35n). Immediate-mode VBO (`gl_vbo.c`) still single-buffer pending VAO restructure to separate vertex attribute bindings. |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
@@ -191,7 +191,6 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 1. **Persistent mapped buffers** — 🔶 ring + alias instances + worldcull PVS migrated (uhexen2-o35n); `gl_vbo.c` immediate-mode upload still on `glBufferData` (needs VAO refactor to separate attribute bindings).
 
 ### P2 — Medium
-5. **Triple-buffering / frames in flight** — smoother frame pacing
 7. **Gyroscope aiming** — Steam Deck users
 8. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
 9. **Controller rumble on sound buffer clear** — correctness fix (Ironwail `78ad272`)
