@@ -85,6 +85,7 @@ typedef struct texture_s
 	struct texture_s *anim_next;		// in the animation sequence
 	struct texture_s *alternate_anims;	// bmodels in frmae 1 use these
 	unsigned int	offsets[MIPLEVELS];	// four mip maps stored
+	int		content_class;	// CONTENTS_WATER/LAVA/SLIME, 0=unknown (uhexen2-8nvj)
 } texture_t;
 
 

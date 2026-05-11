@@ -1038,26 +1038,39 @@ R_DrawWaterSurfaces
 ================
 */
 /* Per-liquid alpha: returns the appropriate alpha for a turb texture.
- * r_lavaalpha/r_slimealpha/r_telealpha override r_wateralpha when > 0.
- * Only textures starting with *water use r_wateralpha; everything else
- * (lava, slime, teleporters, portals, unknown H2 liquids) defaults opaque. */
+ *
+ * Primary signal: texture->content_class, set at BSP load from the
+ * CONTENTS of the brush volume(s) that use this texture (uhexen2-8nvj).
+ * Disambiguates same-named textures across maps (e.g. *lowlight =
+ * translucent water in Keep.bsp vs. opaque illusionary in Arena.bsp).
+ *
+ * Fallback: name substring match.  Used for brush-entity submodels
+ * (which don't have BSP leaf assignment, so content_class stays 0)
+ * and for unclassified turb textures sitting in CONTENTS_EMPTY/SOLID
+ * volumes (illusionary brushes). */
 static float R_LiquidAlpha (const texture_t *t)
 {
+	switch (t->content_class)
+	{
+	case CONTENTS_WATER:
+		{ float a = r_wateralpha.value;
+		  if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+	case CONTENTS_LAVA:
+		if (r_lavaalpha.value <= 0) return 1.0f;
+		{ float a = r_lavaalpha.value;
+		  if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+	case CONTENTS_SLIME:
+		if (r_slimealpha.value <= 0) return 1.0f;
+		{ float a = r_slimealpha.value;
+		  if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
+	}
+
 	if (t->name[0] == '*')
 	{
 		const char *n = t->name + 1;
-		/* Substring "water" / "ice" / "glass" — match anywhere in the
-		 * name so custom mod conventions (*winwater, *coldwater,
-		 * *04mwater, *ice_2, ...) are still recognised as water-like
-		 * and pick up r_wateralpha.  Mathuzzz's winter.bsp uses such
-		 * a name and was rendering opaque because the old strncasecmp
-		 * required a strict prefix match. */
-		/* BSP texture names are lowercase in Hexen 2 — plain strstr
-		 * is sufficient for substring matching.  NB: "lowlight" is
-		 * deliberately NOT in this list — same name is used both as
-		 * a brush-ent illusionary (Arena.bsp, must be opaque per
-		 * uhexen2-6697) and as a world water surface (Keep.bsp, want
-		 * translucent).  Users in the latter case set r_turbalpha. */
+		/* Substring "water" / "ice" / "glass" for water-named brush-ent
+		 * submodels (Mathuzzz's winter.bsp: *coldwater on a brush ent,
+		 * no leaf assignment, content_class stays 0). */
 		if (strstr(n, "water") || strstr(n, "ice") ||
 		    strstr(n, "glass"))
 		{	float a = r_wateralpha.value;
@@ -1072,11 +1085,9 @@ static float R_LiquidAlpha (const texture_t *t)
 		{	if (r_telealpha.value <= 0) return 0.7f;
 			float a = r_telealpha.value; if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	}
-	/* Unknown turb textures (*magic, *skulls, *lightnings, *lowlight,
-	 * *magma, *acid, ...) — controlled by r_turbalpha (default 1.0 =
-	 * opaque per uhexen2-6697).  Modders who want a custom-named liquid
-	 * translucent can set r_turbalpha 0.7 in their autoexec or rename
-	 * the texture to include "water"/"ice"/"glass". */
+	/* Truly unclassified — illusionary turb brush in solid/empty space,
+	 * non-prefixed name, no liquid CONTENTS.  r_turbalpha controls.
+	 * Default 1.0 = opaque (preserves uhexen2-6697 Arena fix). */
 	{
 		float a = r_turbalpha.value;
 		if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a;

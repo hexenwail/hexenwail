@@ -1998,6 +1998,40 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
 	Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
 	Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+
+	/* Classify turb textures by liquid CONTENTS of the leaves that use
+	 * them.  Lets R_LiquidAlpha disambiguate textures whose names alone
+	 * are ambiguous across maps (e.g. *lowlight: opaque illusionary in
+	 * Arena.bsp vs. translucent water in Keep.bsp).  uhexen2-8nvj. */
+	{
+		int li, mi;
+		for (li = 0; li < loadmodel->numleafs; li++)
+		{
+			mleaf_t *leaf = &loadmodel->leafs[li];
+			int c = leaf->contents;
+			if (c != CONTENTS_WATER &&
+			    c != CONTENTS_LAVA &&
+			    c != CONTENTS_SLIME)
+				continue;
+			for (mi = 0; mi < leaf->nummarksurfaces; mi++)
+			{
+				msurface_t *s = leaf->firstmarksurface[mi];
+				texture_t *t;
+				if (!(s->flags & SURF_DRAWTURB))
+					continue;
+				t = s->texinfo->texture;
+				if (!t)
+					continue;
+				/* First non-empty leaf wins.  Pathological maps
+				 * with the same texture in two liquid types
+				 * keep the first classification — name fallback
+				 * never re-checked, so behavior is stable. */
+				if (t->content_class == 0)
+					t->content_class = c;
+			}
+		}
+	}
+
 	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
 	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
 	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
