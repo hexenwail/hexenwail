@@ -1585,20 +1585,44 @@ void FS_Init (void)
 	if (! COM_CheckParm ("-noportals") && gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD))
 		check_portals = true;
 #else
-	/* see if the user wants mission pack support */
-	check_portals = (COM_CheckParm ("-portals")) ||
-			(COM_CheckParm ("-missionpack")) ||
-			(COM_CheckParm ("-h2mp"));
-	i = COM_CheckParm ("-game");
-	if (i && i < com_argc-1)
+	/* see if the user wants mission pack support.
+	 *
+	 * Default behavior: when -game/-mod selects a custom directory and a
+	 * "portals" directory exists in the basedir, fold portals into the
+	 * searchpath automatically — mods commonly depend on shared mission
+	 * pack assets (sucwp2p.mdl etc.). Pass -noportals to opt out. */
+	if (COM_CheckParm ("-noportals"))
 	{
-		if (!q_strcasecmp(com_argv[i+1], "portals"))
-			check_portals = true;
+		check_portals = false;
 	}
-	/* -mod implies -game + portals */
-	i = COM_CheckParm ("-mod");
-	if (i && i < com_argc-1)
-		check_portals = true;
+	else
+	{
+		check_portals = (COM_CheckParm ("-portals")) ||
+				(COM_CheckParm ("-missionpack")) ||
+				(COM_CheckParm ("-h2mp"));
+		i = COM_CheckParm ("-game");
+		if (i && i < com_argc-1)
+			check_portals = true;
+		i = COM_CheckParm ("-mod");
+		if (i && i < com_argc-1)
+			check_portals = true;
+		/* only auto-include when the directory is actually present —
+		 * avoids the "missing mission pack" warning for users without
+		 * the Portal of Praevus data. Explicit -portals/-missionpack
+		 * still triggers the warning so the user knows the request
+		 * couldn't be honored. */
+		if (check_portals &&
+		    !COM_CheckParm ("-portals") &&
+		    !COM_CheckParm ("-missionpack") &&
+		    !COM_CheckParm ("-h2mp"))
+		{
+			char	portals_path[MAX_OSPATH];
+			q_snprintf (portals_path, sizeof(portals_path), "%s/portals",
+				    host_parms->basedir);
+			if (Sys_FileType(portals_path) != FS_ENT_DIRECTORY)
+				check_portals = false;
+		}
+	}
 	if (check_portals && !(gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)))
 		Sys_Error ("Portal of Praevus requires registered version of Hexen II");
 #endif
