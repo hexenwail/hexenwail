@@ -144,6 +144,7 @@ cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thinkers only, <0 = non-thinkers only (Ironwail parity) */
 cvar_t	r_showbboxes_health = {"r_showbboxes_health", "0", CVAR_NONE};	/* >0 = health>0 only, <0 = health<=0 only (Ironwail parity) */
 cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "0", CVAR_NONE};	/* 1 = highlight target/targetname matches of the focused entity (Ironwail parity) */
+cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw line segments from the focused edict's entity-typed QC fields to their targets, and from edicts referencing the focused one back to it (uhexen2-4ej9) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
@@ -4108,6 +4109,104 @@ static void R_ShowBoundingBoxes (void)
 		GL_ImmBegin ();
 		GL_ImmColor4f (r, g, b, a);
 		R_DrawWireBox (mins, maxs);
+		GL_ImmEnd (GL_LINES, &gl_shader_flat);
+	}
+
+	/* uhexen2-4ej9: link visualization.  Walk QC entity-typed fields to
+	 * find directed references involving the focused edict, and emit a
+	 * line segment between their centers.  Outgoing links (focused → X)
+	 * use green; incoming links (X → focused) use red.  Cyan when both
+	 * directions exist between the same pair, drawn once.  Skips the
+	 * `chain` field, which QC uses as a transient findradius/find linked
+	 * list and would produce many spurious lines. */
+	if (focused && r_showbboxes_links.integer)
+	{
+		vec3_t	fmin, fmax, fc;
+		int	nfd = ED_NumFieldDefs ();
+		int	j;
+		edict_t	*ed_iter;
+
+		VectorAdd (focused->v.origin, focused->v.mins, fmin);
+		VectorAdd (focused->v.origin, focused->v.maxs, fmax);
+		fc[0] = 0.5f * (fmin[0] + fmax[0]);
+		fc[1] = 0.5f * (fmin[1] + fmax[1]);
+		fc[2] = 0.5f * (fmin[2] + fmax[2]);
+
+		GL_ImmBegin ();
+
+		/* Outgoing: walk focused's entity-typed fields. */
+		for (j = 0; j < nfd; j++)
+		{
+			ddef_t		*d = ED_FieldDefAt (j);
+			const char	*fname;
+			int		progofs;
+			edict_t		*tgt;
+			vec3_t		tmin, tmax, tc;
+
+			if (!d || (d->type & ~DEF_SAVEGLOBAL) != ev_entity)
+				continue;
+			fname = PR_GetString (d->s_name);
+			if (!fname || !strcmp (fname, "chain"))
+				continue;
+			progofs = E_INT (focused, d->ofs);
+			if (progofs == 0)
+				continue;
+			tgt = PROG_TO_EDICT (progofs);
+			if (!tgt || tgt == focused || tgt->free)
+				continue;
+			if (NUM_FOR_EDICT (tgt) >= sv.num_edicts)
+				continue;
+
+			VectorAdd (tgt->v.origin, tgt->v.mins, tmin);
+			VectorAdd (tgt->v.origin, tgt->v.maxs, tmax);
+			tc[0] = 0.5f * (tmin[0] + tmax[0]);
+			tc[1] = 0.5f * (tmin[1] + tmax[1]);
+			tc[2] = 0.5f * (tmin[2] + tmax[2]);
+
+			GL_ImmColor4f (0.4f, 1.0f, 0.4f, 0.85f);	/* green: focused → X */
+			GL_ImmVertex3f (fc[0], fc[1], fc[2]);
+			GL_ImmVertex3f (tc[0], tc[1], tc[2]);
+		}
+
+		/* Incoming: for each other edict, scan its entity fields for a
+		 * pointer back to `focused`.  O(num_edicts * numfielddefs); fine
+		 * for debug viz, ed counts are small. */
+		for (i = 1; i < sv.num_edicts; i++)
+		{
+			ed_iter = EDICT_NUM (i);
+			if (!ed_iter || ed_iter == focused || ed_iter->free)
+				continue;
+			for (j = 0; j < nfd; j++)
+			{
+				ddef_t		*d = ED_FieldDefAt (j);
+				const char	*fname;
+				int		progofs;
+				vec3_t		omin, omax, oc;
+
+				if (!d || (d->type & ~DEF_SAVEGLOBAL) != ev_entity)
+					continue;
+				fname = PR_GetString (d->s_name);
+				if (!fname || !strcmp (fname, "chain"))
+					continue;
+				progofs = E_INT (ed_iter, d->ofs);
+				if (progofs == 0)
+					continue;
+				if (PROG_TO_EDICT (progofs) != focused)
+					continue;
+
+				VectorAdd (ed_iter->v.origin, ed_iter->v.mins, omin);
+				VectorAdd (ed_iter->v.origin, ed_iter->v.maxs, omax);
+				oc[0] = 0.5f * (omin[0] + omax[0]);
+				oc[1] = 0.5f * (omin[1] + omax[1]);
+				oc[2] = 0.5f * (omin[2] + omax[2]);
+
+				GL_ImmColor4f (1.0f, 0.4f, 0.4f, 0.85f);	/* red: X → focused */
+				GL_ImmVertex3f (oc[0], oc[1], oc[2]);
+				GL_ImmVertex3f (fc[0], fc[1], fc[2]);
+				break;	/* one line per source edict is enough */
+			}
+		}
+
 		GL_ImmEnd (GL_LINES, &gl_shader_flat);
 	}
 

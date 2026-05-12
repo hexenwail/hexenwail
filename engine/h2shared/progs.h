@@ -151,6 +151,12 @@ edict_t *ED_Alloc_Temp (void);
 void ED_Free (edict_t *ed);
 void ED_ClearEdict (edict_t *e);
 
+/* Field-table reflection for debug viz (uhexen2-4ej9).  ddef_t.type may
+ * carry the DEF_SAVEGLOBAL bit — mask with ~DEF_SAVEGLOBAL before
+ * comparing against ev_* values from pr_comp.h. */
+int ED_NumFieldDefs (void);
+ddef_t *ED_FieldDefAt (int i);
+
 void ED_Print (edict_t *ed);
 const char *ED_GetProperty (edict_t *ed, char *propname);
 void ED_Write (FILE *f, edict_t *ed);

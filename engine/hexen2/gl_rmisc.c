@@ -268,6 +268,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_showbboxes_think);
 	Cvar_RegisterVariable (&r_showbboxes_health);
 	Cvar_RegisterVariable (&r_showbboxes_targets);
+	Cvar_RegisterVariable (&r_showbboxes_links);
 	Cvar_RegisterVariable (&r_speeds);
 	{ extern cvar_t r_speeds_gpufinish; Cvar_RegisterVariable (&r_speeds_gpufinish); }
 	Cvar_RegisterVariable (&r_wholeframe);
