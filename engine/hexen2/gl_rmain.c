@@ -4419,10 +4419,15 @@ void R_RenderView (void)
 
 	glDepthMask_fp(0);
 
-	R_DrawParticles ();
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_WATER);
 
 	OIT_BeginTranslucency();
+
+	/* Particles use src-alpha blend — drawn before OIT_End they would be
+	 * dimmed by the resolve's (1 - revealage) factor wherever a
+	 * translucent fragment lands.  Route through gl_shader_particle_oit
+	 * so they participate in WBOIT accumulation instead.  uhexen2-a0hp. */
+	R_DrawParticles ();
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
