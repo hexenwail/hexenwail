@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-12
+Last updated: 2026-05-12 (bead-coverage re-sync)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -13,16 +13,16 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
-| Rendering — Visual/Shading | 18 | 2 | 2 | 0 |
+| Rendering — Visual/Shading | 19 | 2 | 1 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 21 | 0 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **70** | **4** | **6** | **8** |
+| **TOTAL** | **71** | **4** | **5** | **8** |
 
-**Parity: 88% ported, 5% partial, 8% missing** (excluding N/A)
+**Parity: 89% ported, 5% partial, 6% missing** (excluding N/A)
 
 ---
 
@@ -69,7 +69,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported (uhexen2-typa). |
 | Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters + `r_showbboxes_targets` target/targetname highlighting. Center-ray pick → focused entity drawn in white; `health > 0` entities tint red. Ironwail's `r_showbboxes_links` (QC entity-field reference lines) deferred — needs qcvm field-offset reflection that Hexenwail's progs API doesn't expose yet. |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 (uhexen2-kaa6). |
-| LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level (uhexen2-dax2). |
+| LOD bias auto-scaling | ✅ | `gl_lodbias` with `"auto"` mode — derives bias from active MSAA sample count (uhexen2-dax2, `e40a74d6c`). |
 | Entity alpha radix sort | ✅ | `r_alphasort` uses a 4-pass LSD radix sort over the IEEE-754 bit pattern of the squared distance (`R_AlphaSortRadix` in `gl_rmain.c`). Bits are inverted so the ascending unsigned sort yields descending output directly. Stable, O(n); matches Ironwail. |
 
 ## Performance / Engine
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).
+As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
