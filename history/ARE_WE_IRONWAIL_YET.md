@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 10 | 1 | 2 | 0 |
+| Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
 | Rendering — Visual/Shading | 18 | 2 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 20 | 0 | 2 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **68** | **4** | **8** | **8** |
+| **TOTAL** | **69** | **4** | **7** | **8** |
 
-**Parity: 85% ported, 5% partial, 10% missing** (excluding N/A)
+**Parity: 86% ported, 5% partial, 9% missing** (excluding N/A)
 
 ---
 
@@ -42,7 +42,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`). Currently behind `gl_hiz_cull 0` pending the acceptance sweep (uhexen2-8pzr). `gl_hiz_stats` exposes a 7-counter SSBO (uhexen2-cyu0) for cull-rate validation against the ≥10% post-frustum gate. |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
-| SIMD mipmap generation | ❌ | SSE2 fast-path downsample |
+| SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
 | IQM skeletal model support | ❌ | Runtime skeletal animation |
 
 ## Rendering — Visual/Shading
