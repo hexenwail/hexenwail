@@ -65,6 +65,7 @@ static int buttonremap[] =
 
 static SDL_Gamepad	*gp_active = NULL;
 static SDL_JoystickID	gp_active_id = 0;
+static gamepad_type_t	gp_type = GAMEPAD_TYPE_UNKNOWN;
 
 /* cvars (non-static so menu.c can read them) */
 cvar_t	in_gamepad = {"gamepad", "1", CVAR_ARCHIVE};
@@ -181,6 +182,36 @@ static void IN_GPMenuMove (stickpair_t old_s, stickpair_t new_s)
 
 static void IN_ApplyGamepadLED (void);
 
+static gamepad_type_t IN_ClassifyGamepad (SDL_Gamepad *gp)
+{
+	SDL_GamepadType t;
+	if (!gp)
+		return GAMEPAD_TYPE_UNKNOWN;
+	t = SDL_GetGamepadType(gp);
+	switch (t)
+	{
+	case SDL_GAMEPAD_TYPE_XBOX360:
+	case SDL_GAMEPAD_TYPE_XBOXONE:
+		return GAMEPAD_TYPE_XBOX;
+	case SDL_GAMEPAD_TYPE_PS3:
+	case SDL_GAMEPAD_TYPE_PS4:
+	case SDL_GAMEPAD_TYPE_PS5:
+		return GAMEPAD_TYPE_PLAYSTATION;
+	case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+	case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+	case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+	case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+		return GAMEPAD_TYPE_NINTENDO_SWITCH;
+	default:
+		return GAMEPAD_TYPE_UNKNOWN;
+	}
+}
+
+gamepad_type_t IN_GetGamepadType (void)
+{
+	return gp_type;
+}
+
 static void IN_StartupGamepad (void)
 {
 	int	count;
@@ -212,8 +243,13 @@ static void IN_StartupGamepad (void)
 		gp_active = SDL_OpenGamepad(pads[0]);
 		if (gp_active)
 		{
+			static const char *type_names[] = {
+				"unknown", "Xbox", "PlayStation", "Nintendo Switch"
+			};
 			gp_active_id = pads[0];
-			Con_Printf("Gamepad opened: \"%s\"\n", SDL_GetGamepadName(gp_active));
+			gp_type = IN_ClassifyGamepad(gp_active);
+			Con_Printf("Gamepad opened: \"%s\" (%s)\n",
+				SDL_GetGamepadName(gp_active), type_names[gp_type]);
 			IN_ApplyGamepadLED();
 		}
 		else
@@ -235,6 +271,7 @@ static void IN_ShutdownGamepad (void)
 		SDL_CloseGamepad(gp_active);
 		gp_active = NULL;
 		gp_active_id = 0;
+		gp_type = GAMEPAD_TYPE_UNKNOWN;
 	}
 	if (SDL_WasInit(SDL_INIT_GAMEPAD))
 		SDL_QuitSubSystem(SDL_INIT_GAMEPAD);

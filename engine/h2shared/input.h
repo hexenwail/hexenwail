@@ -50,6 +50,18 @@ void IN_HideMouse (void);
 qboolean IN_HasGamepad (void);
 void IN_GPRumble (float low_freq, float high_freq, unsigned int duration_ms);
 
+/* Detected controller brand, used by display layers (menu binding view)
+ * to render brand-correct button labels.  Independent of SDL's internal
+ * SDL_GamepadType enum so non-SDL callers don't have to include SDL
+ * headers.  uhexen2-asln. */
+typedef enum {
+	GAMEPAD_TYPE_UNKNOWN = 0,
+	GAMEPAD_TYPE_XBOX,
+	GAMEPAD_TYPE_PLAYSTATION,
+	GAMEPAD_TYPE_NINTENDO_SWITCH
+} gamepad_type_t;
+gamepad_type_t IN_GetGamepadType (void);
+
 extern cvar_t	in_gamepad;
 extern cvar_t	joy_deadzone_look;
 extern cvar_t	joy_deadzone_move;

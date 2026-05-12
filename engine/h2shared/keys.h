@@ -211,6 +211,7 @@ void Key_SetDest (keydest_t dest);
 
 void Key_SetBinding (int keynum, const char *binding);
 const char *Key_KeynumToString (int keynum);
+const char *Key_KeynumToDisplayString (int keynum);	/* brand-aware gamepad labels (uhexen2-asln) */
 void Key_WriteBindings (FILE *f);
 
 void Key_EndChat (void);

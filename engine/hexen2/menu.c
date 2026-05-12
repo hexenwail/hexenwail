@@ -3843,13 +3843,13 @@ static void M_Keys_Draw (void)
 		}
 		else
 		{
-			name = Key_KeynumToString (keys[0]);
+			name = Key_KeynumToDisplayString (keys[0]);
 			M_Print (140, y, name);
 			x = strlen(name) * 8;
 			if (keys[1] != -1)
 			{
 				M_Print (140 + x + 8, y, "or");
-				M_Print (140 + x + 32, y, Key_KeynumToString (keys[1]));
+				M_Print (140 + x + 32, y, Key_KeynumToDisplayString (keys[1]));
 			}
 		}
 	}

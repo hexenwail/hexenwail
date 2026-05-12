@@ -22,6 +22,7 @@
 
 #include "sdl_inc.h"
 #include "quakedef.h"
+#include "input.h"	/* IN_GetGamepadType for brand-aware glyphs */
 
 char	key_lines[32][MAXCMDLINE];
 int		key_linepos;
@@ -644,6 +645,62 @@ static int Key_StringToKeynum (const char *str)
 			return kn->keynum;
 	}
 	return -1;
+}
+
+/*
+===================
+Key_KeynumToDisplayString  (uhexen2-asln)
+
+Returns the brand-correct short label for gamepad keys (face buttons,
+shoulders, triggers, sticks, back/start), based on the currently-open
+controller's reported type.  Falls back to Key_KeynumToString for
+non-gamepad keys.
+
+ALT-layer keys (K_GP_*_ALT) get the same base label with a "*" suffix
+to denote the modifier — the suffix is brand-agnostic.
+
+Note: Switch's SOUTH face button (which we map to K_GP_A because that's
+what SDL calls SDL_GAMEPAD_BUTTON_SOUTH) is physically labeled "B" on
+the controller, so a Switch user binding "K_GP_A" sees "B" in the menu.
+That matches the controller's own face print and is the convention
+Ironwail uses.
+===================
+*/
+const char *Key_KeynumToDisplayString (int keynum)
+{
+	static const char *labels[4][12] = {
+		/* Order: A, B, X, Y, LSHOULDER, RSHOULDER, LTRIGGER, RTRIGGER,
+		 *        LTHUMB, RTHUMB, BACK, START
+		 * Indexed by gamepad_type_t */
+		/* UNKNOWN  */ { "A","B","X","Y","LB","RB","LT","RT","LS","RS","Back","Start" },
+		/* XBOX     */ { "A","B","X","Y","LB","RB","LT","RT","LS","RS","Back","Start" },
+		/* PS       */ { "Cross","Circle","Square","Triangle","L1","R1","L2","R2","L3","R3","Share","Options" },
+		/* SWITCH   */ { "B","A","Y","X","L","R","ZL","ZR","LS","RS","-","+" }
+	};
+	static char altbuf[24];
+	gamepad_type_t gt;
+	int base;
+	int is_alt = 0;
+
+	if (keynum >= K_GP_A && keynum <= K_GP_START)
+		base = keynum - K_GP_A;
+	else if (keynum >= K_GP_A_ALT && keynum <= K_GP_START_ALT)
+	{
+		base = keynum - K_GP_A_ALT;
+		is_alt = 1;
+	}
+	else
+		return Key_KeynumToString(keynum);
+
+	gt = IN_GetGamepadType();
+	if ((int)gt < 0 || (int)gt > 3)
+		gt = GAMEPAD_TYPE_UNKNOWN;
+
+	if (!is_alt)
+		return labels[gt][base];
+
+	q_snprintf(altbuf, sizeof(altbuf), "%s*", labels[gt][base]);
+	return altbuf;
 }
 
 /*
