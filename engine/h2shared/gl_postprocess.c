@@ -166,6 +166,18 @@ static const char oit_resolve_frag[] =
 	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
 	"}\n";
 
+/* Debug mode 4 resolve: hardcoded red output, no texture sampling.
+ * If mode 4 produces red and mode 2 doesn't, the bug is in texture
+ * sampling or the resolve math.  If mode 4 also produces no red,
+ * the draw infrastructure itself is broken. */
+static const char oit_resolve_debug_frag[] =
+	"#version 430 core\n"
+	"layout(location=0) out vec4 out_fragcolor;\n"
+	"void main() {\n"
+	"    out_fragcolor = vec4(1.0, 0.0, 0.0, 0.5);\n"
+	"}\n";
+static GLuint	oit_resolve_debug_prog;
+
 /* OIT_OUTPUT macro — injected into translucent fragment shaders.
  * Wraps main() as main_body(), adds MRT outputs, computes WBOIT weight. */
 #define OIT_OUTPUT_GLSL \
@@ -804,6 +816,25 @@ static qboolean OIT_InitShader (void)
 	 * every fragment that went through WBOIT. */
 	glGenVertexArrays_fp(1, &oit_resolve_vao);
 
+	/* Debug-mode "always red" resolve.  Used when
+	 * r_oit_debug_no_stencil >= 4 to isolate texture-sampling issues
+	 * from the draw-call infrastructure. */
+	{
+		GLuint dvs, dfs, dprog;
+		dvs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+		dfs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_debug_frag);
+		if (dvs && dfs)
+		{
+			dprog = glCreateProgram_fp();
+			glAttachShader_fp(dprog, dvs);
+			glAttachShader_fp(dprog, dfs);
+			glLinkProgram_fp(dprog);
+			oit_resolve_debug_prog = dprog;
+			glDeleteShader_fp(dvs);
+			glDeleteShader_fp(dfs);
+		}
+	}
+
 	Con_SafePrintf("OIT: resolve shader OK\n");
 	return true;
 }
@@ -886,7 +917,10 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		glStencilMask(0);
 	}
 
-	glUseProgram_fp(oit_resolve_prog);
+	if (r_oit_debug_no_stencil.integer >= 4 && oit_resolve_debug_prog)
+		glUseProgram_fp(oit_resolve_debug_prog);
+	else
+		glUseProgram_fp(oit_resolve_prog);
 
 	/* Standard alpha blending for the resolve composite */
 	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
