@@ -39,7 +39,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Decoupled renderer from server physics | ✅ | Fixed-timestep accumulator in `host.c:861` — physics at `sys_ticrate` (20 Hz), render uncapped |
 | Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. All per-frame uploads stream through the ring. |
 | Persistent mapped buffers | ✅ | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes), GPU world-cull PVS bitvector (uhexen2-o35n), and the immediate-mode emulator (uhexen2-y1v5: `GL_ImmEnd`/`GL_ImmDraw` route through `GL_Upload` + `glBindVertexBuffer` via ARB_vertex_attrib_binding). |
-| Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`). Currently behind `gl_hiz_cull 0` pending the acceptance sweep (uhexen2-8pzr). `gl_hiz_stats` exposes a 7-counter SSBO (uhexen2-cyu0) for cull-rate validation against the ≥10% post-frustum gate. |
+| Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`).  Decoupled from the postprocess pipeline 2026-05-12 (uhexen2-9912, `bddc22128`) — standalone depth resolve in `gl_worldcull.c` works whether or not FXAA/HDR/etc. are on.  `gl_hiz_cull` flipped to default **1** after the acceptance sweep (uhexen2-8pzr) measured 44-58% cull rate on demo1 vistas, well above the ≥10% gate. |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
@@ -188,14 +188,11 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
-### P1 — High
-1. **Hi-Z acceptance sweep + default flip** — Hi-Z implementation is in (uhexen2-xd87) and the stats counter exists (uhexen2-cyu0). Sweep is uhexen2-8pzr: validate ≥10% post-frustum cull rate on heavy outdoor maps, ≤1% slowdown on closets, no visual regression, then flip `gl_hiz_cull` default from 0 to 1.
-
 ### P3 — Low
-2. **Menu search** — nice UX for large option sets
-3. **Console mouse support** — clickable links, selection
-4. **IQM skeletal models** — future mod support
-5. **MD3 model support** — future mod support
+1. **Menu search** — nice UX for large option sets
+2. **Console mouse support** — clickable links, selection
+3. **IQM skeletal models** — future mod support
+4. **MD3 model support** — future mod support
 
 ---
 

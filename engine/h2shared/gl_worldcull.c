@@ -77,7 +77,7 @@ static int	cull_total_indices;	/* total index count across all buckets */
  * R32F mip chain copied/reduced from the scene depth texture at end of
  * the 3D pass; the cull dispatch samples it via binding 7.
  */
-cvar_t	gl_hiz_cull = {"gl_hiz_cull", "0", CVAR_ARCHIVE};
+cvar_t	gl_hiz_cull = {"gl_hiz_cull", "1", CVAR_ARCHIVE};
 /* Hi-Z cull-rate stats (uhexen2-cyu0).  N = print every N frames; 0 = off.
  * Enables 7 atomicAdd counters inside cull_mark + glGetBufferSubData
  * readback.  Used to validate the "≥10% post-frustum cull rate" gate
