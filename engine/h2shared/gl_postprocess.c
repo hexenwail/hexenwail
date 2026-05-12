@@ -817,6 +817,13 @@ void OIT_BeginTranslucency (void)
 	glDepthMask_fp(0);
 }
 
+/* Debug: bypass the stencil gate in the resolve.  When 1, the resolve
+ * composites every pixel of the OIT FBO onto the scene without
+ * filtering on stencil bit 1.  Useful for diagnosing "particles
+ * invisible under r_oit" — if setting this to 1 brings them back, the
+ * bug is that translucent fragments are not writing stencil=2. */
+static cvar_t r_oit_debug_no_stencil = {"r_oit_debug_no_stencil", "0", CVAR_NONE};
+
 /* Call after all translucent geometry — resolves OIT onto scene FBO */
 void OIT_EndTranslucency (GLuint scene_fbo)
 {
@@ -828,10 +835,21 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	/* Resolve: composite OIT result over the scene */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
 
-	/* Only touch pixels that received translucent fragments */
-	glStencilFunc_fp(GL_EQUAL, 2, 2);
-	glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
-	glStencilMask(0);
+	if (r_oit_debug_no_stencil.integer)
+	{
+		/* Diagnostic: drop the stencil gate so every pixel of the
+		 * OIT FBO composites onto the scene.  If particles come back
+		 * under this mode, the bug is missing stencil=2 writes during
+		 * the OIT pass. */
+		glDisable_fp(GL_STENCIL_TEST);
+	}
+	else
+	{
+		/* Only touch pixels that received translucent fragments */
+		glStencilFunc_fp(GL_EQUAL, 2, 2);
+		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
+		glStencilMask(0);
+	}
 
 	glUseProgram_fp(oit_resolve_prog);
 
@@ -942,6 +960,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
+	Cvar_RegisterVariable(&r_oit_debug_no_stencil);
 	Cmd_AddCommand("r_oit_status", OIT_Status_f);
 	/* Force-override any saved r_oit=1 from previous configs. The OIT
 	 * path needs every translucent draw (sprites, particles, brushmodel,
