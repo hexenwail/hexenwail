@@ -1319,7 +1319,16 @@ static void R_DrawAliasModel (entity_t *e)
 
 	GL_PopMatrix();
 
-	if (r_shadows.integer && e != &cl.viewent)
+	/* Projected mesh shadow — skipped inside the OIT pass.
+	 * GL_DrawAliasShadow toggles GL_STENCIL_TEST off at its tail, which
+	 * permanently disables WBOIT's stencil=2 write for every translucent
+	 * fragment drawn afterward — the resolve (which composites only where
+	 * stencil==2) then silently drops them.  The caller also re-enables
+	 * glDepthMask and disables GL_BLEND on exit, both of which corrupt the
+	 * WBOIT MRT blend funcs.  Manifests as "still missing particles" on
+	 * maps with translucent alias entities.  Shadows on translucent ents
+	 * have no well-defined look anyway (uhexen2-a0hp). */
+	if (r_shadows.integer && e != &cl.viewent && !OIT_InPass())
 	{
 		GL_PushMatrix();
 		R_RotateForEntity2(e);
