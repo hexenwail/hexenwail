@@ -128,6 +128,7 @@ cvar_t	r_turbalpha = {"r_turbalpha", "1", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
+cvar_t	r_lerpanim_observed = {"r_lerpanim_observed", "0", CVAR_ARCHIVE};	/* lerp over observed inter-frame interval instead of fixed 0.1s — Ironwail LERP_FINISH approximation (uhexen2-wax3) */
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
