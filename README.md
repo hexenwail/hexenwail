@@ -46,7 +46,7 @@ Planned:
 - Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items)
 - External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
 - Physics/render decoupling with entity and lightstyle interpolation
-- FOV slider, zoom, FPS limiter, HUD modes (Full/Mini/Off/Clean)
+- FOV slider, FPS limiter, HUD modes (Full/Mini/Off/Clean)
 - HUD / menu / crosshair / console scale sliders (auto by framebuffer height)
 - Console alpha + brightness sliders
 
@@ -55,6 +55,7 @@ Planned:
 - Scancode-based bindings (works on AZERTY, Dvorak, etc.)
 - Mouse-driven menus with hover, click, and scroll wheel
 - Key bindings menu with type-to-search (includes weapon impulses)
+- Live substring filter in Display/Rendering/Graphics/Game option submenus
 - Xbox/PlayStation/Nintendo gamepad with circular deadzone, power-curve easing, rumble, hot-plug
 - Always-run, raw mouse input, configurable pitch clamp, smooth-mouse filter (`m_filter`)
 
