@@ -178,6 +178,24 @@ static const char oit_resolve_debug_frag[] =
 	"}\n";
 static GLuint	oit_resolve_debug_prog;
 
+/* Debug mode 5 resolve: sample accum directly, output its RGB.
+ * If mode 5 shows a red tint (we cleared accum to (0.5,0,0,0.5) in
+ * mode 2+), texelFetch on oit_accum_tex returns the cleared content.
+ * If mode 5 produces nothing, texelFetch is returning zeros — the
+ * texture isn't sampleable from the resolve shader. */
+static const char oit_resolve_debug_sample_frag[] =
+	"#version 430 core\n"
+	"layout(binding=0) uniform sampler2D TexAccum;\n"
+	"layout(location=0) out vec4 out_fragcolor;\n"
+	"void main() {\n"
+	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
+	"    vec4 a = texelFetch(TexAccum, coords, 0);\n"
+	/* Output accum's rgb at full alpha, with a bias so even tiny
+	 * sample values produce visible color. */
+	"    out_fragcolor = vec4(a.rgb * 2.0 + vec3(0.0, 0.0, 0.2), 1.0);\n"
+	"}\n";
+static GLuint	oit_resolve_debug_sample_prog;
+
 /* OIT_OUTPUT macro — injected into translucent fragment shaders.
  * Wraps main() as main_body(), adds MRT outputs, computes WBOIT weight. */
 #define OIT_OUTPUT_GLSL \
