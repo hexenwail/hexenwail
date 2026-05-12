@@ -78,6 +78,18 @@ cvar_t	joy_exponent_move = {"joy_exponent_move", "2", CVAR_ARCHIVE};
 cvar_t	joy_invert = {"joy_invert", "0", CVAR_ARCHIVE};
 cvar_t	joy_swapmovelook = {"joy_swapmovelook", "0", CVAR_ARCHIVE};
 cvar_t	joy_rumble = {"joy_rumble", "0", CVAR_ARCHIVE};
+/* Outer-edge saturation thresholds: any magnitude within `outer` of 1.0
+ * snaps to full deflection.  Compensates for sticks that can't reliably
+ * reach 32767/-32768 in the corners.  Per-stick because cheap pads often
+ * have looser tolerance on whichever stick gets more use (Ironwail
+ * parity, uhexen2-0g4t). */
+cvar_t	joy_outer_threshold_look = {"joy_outer_threshold_look", "0.02", CVAR_ARCHIVE};
+cvar_t	joy_outer_threshold_move = {"joy_outer_threshold_move", "0.02", CVAR_ARCHIVE};
+/* RGB color for the controller LED (PS4/PS5/Steam Deck etc.).  Format:
+ * "r g b" 0-255.  Empty string = don't override (whatever SDL/OS set).
+ * Applied on gamepad open and whenever the cvar changes.  Pure aesthetic
+ * (Ironwail parity, uhexen2-3fpt). */
+cvar_t	joy_led = {"joy_led", "", CVAR_ARCHIVE};
 
 /* axis state for edge-detected trigger/stick key events */
 typedef struct {
@@ -110,15 +122,17 @@ static int IN_GPButtonToKey (SDL_GamepadButton btn)
 	}
 }
 
-/* circular deadzone: returns rescaled vector with magnitude [0,1] */
-static stickpair_t IN_ApplyDeadzone (float x, float y, float deadzone)
+/* circular deadzone: returns rescaled vector with magnitude [0,1].
+ * `outer` saturates the upper edge so worn sticks still reach 1.0. */
+static stickpair_t IN_ApplyDeadzone (float x, float y, float deadzone, float outer)
 {
 	stickpair_t	result = {0, 0};
 	float		mag = sqrtf(x*x + y*y);
-	float		outer = 0.02f;
 
 	if (mag <= deadzone)
 		return result;
+	if (outer < 0.0f) outer = 0.0f;
+	if (outer > 0.5f) outer = 0.5f;	/* don't let a misconfig zero the denominator */
 
 	float scale = fminf(1.0f, (mag - deadzone) / (1.0f - deadzone - outer)) / mag;
 	result.x = x * scale;
@@ -165,6 +179,8 @@ static void IN_GPMenuMove (stickpair_t old_s, stickpair_t new_s)
 	IN_GPKeyEvent(old_s.y >  threshold, new_s.y >  threshold, K_DOWNARROW);
 }
 
+static void IN_ApplyGamepadLED (void);
+
 static void IN_StartupGamepad (void)
 {
 	int	count;
@@ -198,6 +214,7 @@ static void IN_StartupGamepad (void)
 		{
 			gp_active_id = pads[0];
 			Con_Printf("Gamepad opened: \"%s\"\n", SDL_GetGamepadName(gp_active));
+			IN_ApplyGamepadLED();
 		}
 		else
 			Con_Printf("Gamepad open failed: %s\n", SDL_GetError());
@@ -261,9 +278,11 @@ static void IN_GPMove (usercmd_t *cmd)
 	}
 
 	/* apply circular deadzone + easing */
-	move = IN_ApplyDeadzone(move_raw.x, move_raw.y, joy_deadzone_move.value);
+	move = IN_ApplyDeadzone(move_raw.x, move_raw.y,
+				joy_deadzone_move.value, joy_outer_threshold_move.value);
 	move = IN_ApplyEasing(move, joy_exponent_move.value);
-	look = IN_ApplyDeadzone(look_raw.x, look_raw.y, joy_deadzone_look.value);
+	look = IN_ApplyDeadzone(look_raw.x, look_raw.y,
+				joy_deadzone_look.value, joy_outer_threshold_look.value);
 	look = IN_ApplyEasing(look, joy_exponent.value);
 
 	/* triggers */
@@ -309,6 +328,36 @@ static void IN_GPMove (usercmd_t *cmd)
 		cl.viewangles[PITCH] = 80.0f;
 	if (cl.viewangles[PITCH] < -70.0f)
 		cl.viewangles[PITCH] = -70.0f;
+}
+
+/*
+===========
+IN_ApplyGamepadLED -- parse joy_led "r g b" (0-255) and set LED.
+Empty / unparseable string leaves the LED untouched.
+===========
+*/
+static void IN_ApplyGamepadLED (void)
+{
+	int	r, g, b;
+	const char *s;
+
+	if (!gp_active)
+		return;
+	s = joy_led.string;
+	if (!s || !*s)
+		return;
+	if (sscanf(s, "%d %d %d", &r, &g, &b) != 3)
+		return;
+	if (r < 0) r = 0; else if (r > 255) r = 255;
+	if (g < 0) g = 0; else if (g > 255) g = 255;
+	if (b < 0) b = 0; else if (b > 255) b = 255;
+	SDL_SetGamepadLED(gp_active, (Uint8)r, (Uint8)g, (Uint8)b);
+}
+
+static void IN_JoyLEDChanged (cvar_t *var)
+{
+	(void)var;
+	IN_ApplyGamepadLED();
 }
 
 /*
@@ -460,6 +509,10 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&joy_invert);
 	Cvar_RegisterVariable (&joy_swapmovelook);
 	Cvar_RegisterVariable (&joy_rumble);
+	Cvar_RegisterVariable (&joy_outer_threshold_look);
+	Cvar_RegisterVariable (&joy_outer_threshold_move);
+	Cvar_RegisterVariable (&joy_led);
+	Cvar_SetCallback (&joy_led, IN_JoyLEDChanged);
 
 	Cmd_AddCommand ("force_centerview", Force_CenterView_f);
 	Cmd_AddCommand ("+altmodifier", IN_JoyAltModifierDown);
