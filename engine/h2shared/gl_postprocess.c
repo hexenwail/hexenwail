@@ -986,14 +986,28 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		glStencilMask(0);
 	}
 
+	{
+	qboolean using_debug_shader = false;
 	if (r_oit_debug_no_stencil.integer == 6 && oit_resolve_debug_reveal_prog)
+	{
 		glUseProgram_fp(oit_resolve_debug_reveal_prog);
+		using_debug_shader = true;
+	}
 	else if (r_oit_debug_no_stencil.integer >= 5 && oit_resolve_debug_sample_prog)
+	{
 		glUseProgram_fp(oit_resolve_debug_sample_prog);
+		using_debug_shader = true;
+	}
 	else if (r_oit_debug_no_stencil.integer >= 4 && oit_resolve_debug_prog)
+	{
 		glUseProgram_fp(oit_resolve_debug_prog);
+		using_debug_shader = true;
+	}
 	else
+	{
 		glUseProgram_fp(oit_resolve_prog);
+	}
+	(void)using_debug_shader;
 
 	/* Standard alpha blending for the resolve composite */
 	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1006,8 +1020,16 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
 
-	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
-	if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
+	/* Sampler-unit binding: only set on the real resolve program.
+	 * The debug variants don't share its uniform layout, so a
+	 * glUniform1i on the leftover location index from oit_resolve_prog
+	 * would fire GL_INVALID_OPERATION every frame in debug modes. */
+	if (!using_debug_shader)
+	{
+		if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
+		if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
+	}
+	}  /* end using_debug_shader scope */
 
 	/* Ensure the viewport covers the whole scene FBO.  Anything earlier
 	 * in the frame (mirror split, sky stencil, etc.) might have left
