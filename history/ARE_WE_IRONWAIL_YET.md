@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-12 (Unicode path support added to scorecard)
+Last updated: 2026-05-12 (Console mouse support Phase 1 complete)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 12 | 0 | 1 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
 | Performance / Engine | 7 | 1 | 1 | 1 |
-| UX / Menus / HUD | 23 | 0 | 1 | 1 |
+| UX / Menus / HUD | 23 | 1 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **78** | **1** | **4** | **8** |
+| **TOTAL** | **78** | **2** | **3** | **8** |
 
-**Parity: 95% ported, 1% partial, 4% missing** (excluding N/A)
+**Parity: 94% ported, 2% partial, 3% missing** (excluding N/A)
 
 ---
 
@@ -110,7 +110,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Console brightness | ✅ | `scr_conbrightness` — multiplies conback RGB, slider in Misc/HUD submenu |
 | Menu background style | ✅ | `scr_menubgstyle` (default 1) — 0=off / 1=simple dim (Draw_FadeScreen) / 2=dim+translucent backdrop quad over the menu-item area in CANVAS_MENU. Display submenu cycles Off/Simple/Menu Box. Replaces legacy `scr_menufade`. |
 | Center-print background | ✅ | `scr_centerprintbg` (gl_screen.c:116) with menu cycle Off / Simple / Menu Box (`menu.c:2849`). Default 2 (Ironwail parity, `df5219c`). Mode 1 = full-width thin dim strip (alpha 0.30), mode 2 = text-width box (alpha 0.50). |
-| Console mouse support | ❌ | Clickable links, text selection, clipboard |
+| Console mouse support | 🔶 | **Phase 1 complete** (2026-05-12: commit e091812e7): text selection via drag with visual blue highlight, clipboard copy (Ctrl+C with fallback to abort), select-all (Ctrl+A), cursor shape feedback (I-beam/pointer). State machine (NOTPRESSED→PRESSED→DRAGGING), ring buffer aware, selection persists after release. **Phase 2 pending**: URL detection, hover hand cursor, SDL_OpenURL on click. |
 | Console notification fade | ✅ | `con_notifyfade` (default 1) — alpha ramps 1→0 over the last 1 s of `con_notifytime`. Per-quad alpha threaded through `Draw_AddCharQuad` via new `Draw_SetCharacterAlpha` setter (gl_draw.c). |
 | Console max columns | ✅ | `con_maxcols` (default 0 = no cap), menu slider in Misc/HUD submenu (`menu.c`, commit `ab108d760`) |
 | Menu search with filtering | ✅ | Shared `M_Filter_*` facility — type printable chars in Display/Rendering/Graphics/Game submenus to live-filter rows by case-insensitive substring; backspace edits, ESC clears (then exits on second press), up/down skip filtered rows, cursor snaps to first match on filter change. Sound (4 rows) and Gamepad (controller-driven) intentionally not wired (uhexen2-rawq). |
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).  Third re-sync 2026-05-12 (evening): closed `f2d3` (MD3 import, Phase 1–5 complete: commits 2fcb66eb2 through 9186fa700) and `kaa6` (duplicate tracking). Scorecard updated: 77/1/5/8 (MD3 moved from ❌ to ✅, category Rendering—Visual/Shading now 22✅/0🔶/0❌). Parity bumped to 94%.  Fourth re-sync 2026-05-12 (late): discovered Unicode path support already completed (commit 0aa7d3595, bead `ogmq` closed). Row updated from ❌ to ✅. Scorecard corrected: 78/1/4/8 (Performance/Engine now 7✅/1🔶/1❌). Parity bumped to 95%.
+As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).  Third re-sync 2026-05-12 (evening): closed `f2d3` (MD3 import, Phase 1–5 complete: commits 2fcb66eb2 through 9186fa700) and `kaa6` (duplicate tracking). Scorecard updated: 77/1/5/8 (MD3 moved from ❌ to ✅, category Rendering—Visual/Shading now 22✅/0🔶/0❌). Parity bumped to 94%.  Fourth re-sync 2026-05-12 (late): discovered Unicode path support already completed (commit 0aa7d3595, bead `ogmq` closed). Row updated from ❌ to ✅. Scorecard corrected: 78/1/4/8 (Performance/Engine now 7✅/1🔶/1❌). Parity bumped to 95%.  Fifth re-sync 2026-05-12 (completion): closed `uhexen2-8vw0` (console mouse support Phase 1: text selection, clipboard, Ctrl+A/C, cursor shapes; commit e091812e7). Row moved from ❌ to 🔶 (Phase 2 URL detection pending). Scorecard corrected: 78/2/3/8 (UX/Menus/HUD now 23✅/1🔶/0❌). Parity adjusted to 94% (2% partial).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -189,10 +189,11 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P3 — Low
-1. **Console mouse support** — clickable links, selection
+1. **Console mouse support** — 🔶 Phase 1 complete (text selection, clipboard); Phase 2 pending (URL detection, browser launch)
 2. **IQM skeletal models** — future mod support
 
 *MD3 model support completed 2026-05-12 (uhexen2-f2d3, uhexen2-kaa6).*
+*Console mouse Phase 1 completed 2026-05-12 (uhexen2-8vw0, commit e091812e7).*
 
 ---
 
