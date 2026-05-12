@@ -2035,6 +2035,8 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 	pmodel = (newmdl_t *) ((byte *)&pheader[1] +
 			(LittleLong (pinmodel->numframes) - 1) * sizeof (pheader->frames[0]));
 
+	pheader->poseverttype = PV_QUAKE1;	/* Hexen II native format */
+
 //	mod->cache.data = pheader;
 	mod->flags = LittleLong (pinmodel->flags);
 
@@ -2299,6 +2301,8 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
 	pmodel = (newmdl_t *) ((byte *)&pheader[1] +
 			(LittleLong (pinmodel->numframes) - 1) * sizeof (pheader->frames[0]));
+
+	pheader->poseverttype = PV_QUAKE1;	/* Hexen II native format */
 
 //	mod->cache.data = pheader;
 	mod->flags = LittleLong (pinmodel->flags);
