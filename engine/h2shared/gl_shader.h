@@ -69,6 +69,7 @@ typedef struct {
 	GLint	u_viewproj;	/* view-projection matrix (uhexen2-8pc2) */
 	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
 	GLint	u_eyepos;	/* camera position for fog distance */
+	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;

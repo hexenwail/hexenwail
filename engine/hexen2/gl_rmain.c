@@ -2417,15 +2417,32 @@ static void R_DrawAliasInstanced (void)
 		alias_batch_t	*batch = &alias_batches[b];
 		alias_gpu_mesh_t *gm = GL_GetAliasGPUMesh(batch->hdr);
 
-		if (!gm || !gm->valid || !gm->ssbo_pose)
+		if (!gm || !gm->valid)
+			continue;
+
+		/* Check pose SSBO based on vertex format */
+		GLuint pose_ssbo = 0;
+		if (gm->poseverttype == PV_MD3)
+			pose_ssbo = gm->ssbo_pose_md3;
+		else
+			pose_ssbo = gm->ssbo_pose;
+
+		if (!pose_ssbo)
 			continue;
 
 		/* Bind skin texture to unit 0 */
 		glActiveTexture_fp(GL_TEXTURE0);
 		GL_Bind(batch->skin_tex);
 
-		/* Bind pose SSBO at binding 1 */
-		glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
+		/* Bind pose SSBO at appropriate binding based on format */
+		if (gm->poseverttype == PV_MD3)
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, pose_ssbo);
+		else
+			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, pose_ssbo);
+
+		/* Set poseverttype uniform */
+		if (prog->u_poseverttype >= 0)
+			glUniform1i_fp(prog->u_poseverttype, gm->poseverttype);
 
 		/* Set base instance offset for this batch */
 		if (prog->u_inst_base >= 0)
@@ -2445,6 +2462,7 @@ static void R_DrawAliasInstanced (void)
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, 0);
+	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, 0);
 	GL_SetAlphaThreshold(0.01f);
 
 	/* Shadow pass — drawn individually per entity */
