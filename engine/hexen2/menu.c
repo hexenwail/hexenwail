@@ -2306,7 +2306,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
 			Cvar_SetValue ("r_dither", 0);
-			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
