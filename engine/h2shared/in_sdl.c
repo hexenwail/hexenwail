@@ -91,6 +91,18 @@ cvar_t	joy_outer_threshold_move = {"joy_outer_threshold_move", "0.02", CVAR_ARCH
  * Applied on gamepad open and whenever the cvar changes.  Pure aesthetic
  * (Ironwail parity, uhexen2-3fpt). */
 cvar_t	joy_led = {"joy_led", "", CVAR_ARCHIVE};
+/* Flick stick: right-stick gesture aim (Jibb Smart's GDC technique,
+ * popular on Steam Deck).  When enabled, a fast deflection of the look
+ * stick past joy_flick_deadzone captures the stick's angle as the target
+ * world direction, then animates yaw to that target over joy_flick_time
+ * seconds.  After the flick completes, further rotation of the deflected
+ * stick maps directly to fine-grain yaw (1:1 angle delta).  Releasing
+ * the stick (mag < deadzone) returns to idle.  Ironwail parity,
+ * uhexen2-98oo.  Pitch is left on the conventional analog path. */
+cvar_t	joy_flick              = {"joy_flick",              "0",     CVAR_ARCHIVE};
+cvar_t	joy_flick_time         = {"joy_flick_time",         "0.125", CVAR_ARCHIVE};
+cvar_t	joy_flick_deadzone     = {"joy_flick_deadzone",     "0.9",   CVAR_ARCHIVE};
+cvar_t	joy_flick_noise_thresh = {"joy_flick_noise_thresh", "2.0",   CVAR_ARCHIVE};
 
 /* axis state for edge-detected trigger/stick key events */
 typedef struct {
@@ -99,6 +111,18 @@ typedef struct {
 
 static stickpair_t	gp_old_move, gp_old_look;
 static qboolean		gp_old_ltrigger, gp_old_rtrigger;
+
+/* Flick stick state (uhexen2-98oo) */
+typedef enum {
+	FLICK_IDLE,		/* stick below deadzone */
+	FLICK_ROTATING,		/* animating yaw toward captured target */
+	FLICK_TRACKING		/* animation done; delta-tracking stick angle */
+} flick_state_t;
+static flick_state_t	flick_state = FLICK_IDLE;
+static float		flick_total_deg;	/* signed target rotation */
+static float		flick_progress;		/* eased 0..1 — fraction applied */
+static float		flick_elapsed;		/* seconds since flick start */
+static float		flick_prev_angle_rad;	/* last frame's stick angle */
 
 /* map SDL3 gamepad buttons to engine keycodes */
 static int IN_GPButtonToKey (SDL_GamepadButton btn)
@@ -181,6 +205,7 @@ static void IN_GPMenuMove (stickpair_t old_s, stickpair_t new_s)
 }
 
 static void IN_ApplyGamepadLED (void);
+static qboolean IN_FlickStickUpdate (float lx, float ly, float dt);
 
 static gamepad_type_t IN_ClassifyGamepad (SDL_Gamepad *gp)
 {
@@ -353,18 +378,122 @@ static void IN_GPMove (usercmd_t *cmd)
 	cmd->sidemove += move.x * speed * 225;
 	cmd->forwardmove -= move.y * speed * 200;
 
-	/* look */
-	cl.viewangles[YAW] -= look.x * joy_sensitivity_yaw.value * host_frametime;
+	/* look — yaw via flick stick if enabled, else conventional analog.
+	 * Pitch always uses the conventional path. */
+	if (joy_flick.integer)
+	{
+		/* Feed raw (pre-deadzone) look stick to the flick state
+		 * machine — it has its own deadzone (joy_flick_deadzone)
+		 * tuned much higher than the analog one. */
+		IN_FlickStickUpdate(look_raw.x, look_raw.y, host_frametime);
+	}
+	else
+	{
+		cl.viewangles[YAW] -= look.x * joy_sensitivity_yaw.value * host_frametime;
+		if (look.x != 0 || look.y != 0)
+			V_StopPitchDrift();
+	}
 	cl.viewangles[PITCH] += look.y * joy_sensitivity_pitch.value * host_frametime *
 				(joy_invert.integer ? -1.0f : 1.0f);
-	if (look.x != 0 || look.y != 0)
-		V_StopPitchDrift();
 
 	/* bounds check pitch */
 	if (cl.viewangles[PITCH] > 80.0f)
 		cl.viewangles[PITCH] = 80.0f;
 	if (cl.viewangles[PITCH] < -70.0f)
 		cl.viewangles[PITCH] = -70.0f;
+}
+
+/*
+===========
+IN_FlickStickUpdate  (uhexen2-98oo)
+
+Drives the flick-stick yaw state machine.  Takes raw (pre-deadzone)
+look-stick deflection and frame dt; updates cl.viewangles[YAW] directly.
+Returns true if flick consumed the look stick this frame, signalling
+the caller to skip the conventional analog yaw path.
+===========
+*/
+static qboolean IN_FlickStickUpdate (float lx, float ly, float dt)
+{
+	float mag = sqrtf(lx*lx + ly*ly);
+	float dz  = joy_flick_deadzone.value;
+	float duration, t, new_p, delta_deg;
+	float angle_rad, ddeg, dvel, gate;
+
+	if (dz < 0.1f) dz = 0.1f;	/* must be well above noise floor */
+
+	if (flick_state == FLICK_IDLE)
+	{
+		if (mag >= dz)
+		{
+			/* Capture stick angle (atan2(x, -y): stick up = 0,
+			 * stick right = +pi/2, matches Quake yaw convention
+			 * where + yaw = left turn). */
+			float a = atan2f(lx, -ly);
+			flick_total_deg      = a * (180.0f / (float)M_PI);
+			flick_progress       = 0;
+			flick_elapsed        = 0;
+			flick_prev_angle_rad = a;
+			flick_state          = FLICK_ROTATING;
+		}
+		else
+			return false;
+	}
+
+	if (flick_state == FLICK_ROTATING)
+	{
+		duration = joy_flick_time.value;
+		if (duration < 0.01f) duration = 0.01f;
+		flick_elapsed += dt;
+		t = flick_elapsed / duration;
+		if (t > 1.0f) t = 1.0f;
+		/* Ease-out cubic for snappy start, soft end. */
+		new_p = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+		delta_deg = (new_p - flick_progress) * flick_total_deg;
+		flick_progress = new_p;
+		cl.viewangles[YAW] -= delta_deg;
+
+		if (t >= 1.0f)
+		{
+			float a = atan2f(lx, -ly);
+			flick_prev_angle_rad = a;
+			flick_state = FLICK_TRACKING;
+		}
+		if (lx != 0 || ly != 0)
+			V_StopPitchDrift();
+		return true;
+	}
+
+	/* FLICK_TRACKING */
+	if (mag < dz)
+	{
+		flick_state    = FLICK_IDLE;
+		flick_progress = 0;
+		return true;
+	}
+	angle_rad = atan2f(lx, -ly);
+	ddeg = (angle_rad - flick_prev_angle_rad) * (180.0f / (float)M_PI);
+	/* wrap to [-180, 180] */
+	while (ddeg > 180.0f)  ddeg -= 360.0f;
+	while (ddeg < -180.0f) ddeg += 360.0f;
+	flick_prev_angle_rad = angle_rad;
+	/* Noise gate: degrees-per-second threshold with a linear ramp
+	 * up to 2× threshold for smooth attenuation. */
+	if (dt > 0.0f && joy_flick_noise_thresh.value > 0.0f)
+	{
+		dvel = fabsf(ddeg) / dt;
+		if (dvel < joy_flick_noise_thresh.value)
+			gate = 0.0f;
+		else if (dvel < 2.0f * joy_flick_noise_thresh.value)
+			gate = (dvel - joy_flick_noise_thresh.value) / joy_flick_noise_thresh.value;
+		else
+			gate = 1.0f;
+		ddeg *= gate;
+	}
+	cl.viewangles[YAW] -= ddeg;
+	if (lx != 0 || ly != 0)
+		V_StopPitchDrift();
+	return true;
 }
 
 /*
@@ -550,6 +679,10 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&joy_outer_threshold_move);
 	Cvar_RegisterVariable (&joy_led);
 	Cvar_SetCallback (&joy_led, IN_JoyLEDChanged);
+	Cvar_RegisterVariable (&joy_flick);
+	Cvar_RegisterVariable (&joy_flick_time);
+	Cvar_RegisterVariable (&joy_flick_deadzone);
+	Cvar_RegisterVariable (&joy_flick_noise_thresh);
 
 	Cmd_AddCommand ("force_centerview", Force_CenterView_f);
 	Cmd_AddCommand ("+altmodifier", IN_JoyAltModifierDown);
