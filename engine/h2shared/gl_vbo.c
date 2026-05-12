@@ -47,9 +47,15 @@ static float	imm_cur_tc[2];
 static float	imm_cur_lm[2];
 static float	imm_cur_color[4] = { 1, 1, 1, 1 };
 
-/* GPU objects */
+/* GPU objects.  On desktop GL the VBO is gone — vertex data is streamed
+ * through GL_Upload's frame ring and bound per-draw via glBindVertexBuffer.
+ * On WebGL2 (no ARB_vertex_attrib_binding, no buffer_storage / ring) we
+ * keep the original per-draw glBufferData(STREAM_DRAW) path on a
+ * dedicated VBO.  uhexen2-y1v5. */
 static GLuint	imm_vao;
+#ifdef __EMSCRIPTEN__
 static GLuint	imm_vbo;
+#endif
 
 /* Index buffer for quad-to-triangle conversion */
 #define IMM_MAX_QUADS		(GL_IMM_MAX_VERTS / 4)
@@ -69,27 +75,44 @@ void GL_VBO_Init (void)
 	glGenVertexArrays_fp(1, &imm_vao);
 	glBindVertexArray_fp(imm_vao);
 
-	/* create streaming VBO */
+#ifdef __EMSCRIPTEN__
+	/* WebGL2: dedicated VBO; attributes baked to it via VertexAttribPointer. */
 	glGenBuffers_fp(1, &imm_vbo);
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
 	glBufferData_fp(GL_ARRAY_BUFFER, sizeof(imm_buffer), NULL, GL_STREAM_DRAW);
 
-	/* set up vertex attributes */
 	glEnableVertexAttribArray_fp(ATTR_POSITION);
 	glVertexAttribPointer_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE,
 				  IMM_STRIDE, (void *)(size_t)IMM_OFF_POS);
-
 	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
 	glVertexAttribPointer_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE,
 				  IMM_STRIDE, (void *)(size_t)IMM_OFF_TEXCOORD);
-
 	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
 	glVertexAttribPointer_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE,
 				  IMM_STRIDE, (void *)(size_t)IMM_OFF_LMCOORD);
-
 	glEnableVertexAttribArray_fp(ATTR_COLOR);
 	glVertexAttribPointer_fp(ATTR_COLOR, 4, GL_FLOAT, GL_FALSE,
 				  IMM_STRIDE, (void *)(size_t)IMM_OFF_COLOR);
+#else
+	/* Desktop GL 4.3: separate vertex attribute bindings.  Format is
+	 * recorded in the VAO once; the source buffer + offset is rebound
+	 * per draw via glBindVertexBuffer(0, ring_buf, ring_ofs, stride). */
+	glEnableVertexAttribArray_fp(ATTR_POSITION);
+	glVertexAttribFormat_fp(ATTR_POSITION, 3, GL_FLOAT, GL_FALSE, IMM_OFF_POS);
+	glVertexAttribBinding_fp(ATTR_POSITION, 0);
+
+	glEnableVertexAttribArray_fp(ATTR_TEXCOORD);
+	glVertexAttribFormat_fp(ATTR_TEXCOORD, 2, GL_FLOAT, GL_FALSE, IMM_OFF_TEXCOORD);
+	glVertexAttribBinding_fp(ATTR_TEXCOORD, 0);
+
+	glEnableVertexAttribArray_fp(ATTR_LMCOORD);
+	glVertexAttribFormat_fp(ATTR_LMCOORD, 2, GL_FLOAT, GL_FALSE, IMM_OFF_LMCOORD);
+	glVertexAttribBinding_fp(ATTR_LMCOORD, 0);
+
+	glEnableVertexAttribArray_fp(ATTR_COLOR);
+	glVertexAttribFormat_fp(ATTR_COLOR, 4, GL_FLOAT, GL_FALSE, IMM_OFF_COLOR);
+	glVertexAttribBinding_fp(ATTR_COLOR, 0);
+#endif
 
 	/* create index buffer for quad-to-triangle conversion */
 	glGenBuffers_fp(1, &imm_quad_ibo);
@@ -120,7 +143,9 @@ void GL_VBO_Init (void)
 void GL_VBO_Shutdown (void)
 {
 	if (imm_quad_ibo) { glDeleteBuffers_fp(1, &imm_quad_ibo); imm_quad_ibo = 0; }
+#ifdef __EMSCRIPTEN__
 	if (imm_vbo)      { glDeleteBuffers_fp(1, &imm_vbo); imm_vbo = 0; }
+#endif
 	if (imm_vao)      { glDeleteVertexArrays_fp(1, &imm_vao); imm_vao = 0; }
 }
 
@@ -272,11 +297,24 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	if (imm_count == 0)
 		return;
 
-	/* bind VAO and upload vertex data */
+	/* Bind VAO and stream vertex data.  Desktop GL 4.3 routes through the
+	 * frame ring (GL_Upload returns buf+offset); WebGL2 falls back to a
+	 * dedicated VBO orphaned each frame via glBufferData(STREAM_DRAW). */
 	glBindVertexArray_fp(imm_vao);
+#ifdef __EMSCRIPTEN__
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
 	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
 			 imm_buffer, GL_STREAM_DRAW);
+#else
+	{
+		GLuint   _imm_buf;
+		GLintptr _imm_ofs;
+		GL_Upload (GL_ARRAY_BUFFER, imm_buffer,
+			   imm_count * sizeof(immvert_t),
+			   &_imm_buf, &_imm_ofs);
+		glBindVertexBuffer_fp(0, _imm_buf, _imm_ofs, IMM_STRIDE);
+	}
+#endif
 
 	/* activate shader; reset uniform cache when the program changes
 	 * because uniform locations are per-program */
@@ -391,9 +429,20 @@ void GL_ImmDraw (GLenum mode)
 		return;
 
 	glBindVertexArray_fp(imm_vao);
+#ifdef __EMSCRIPTEN__
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
 	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
 			 imm_buffer, GL_STREAM_DRAW);
+#else
+	{
+		GLuint   _imm_buf;
+		GLintptr _imm_ofs;
+		GL_Upload (GL_ARRAY_BUFFER, imm_buffer,
+			   imm_count * sizeof(immvert_t),
+			   &_imm_buf, &_imm_ofs);
+		glBindVertexBuffer_fp(0, _imm_buf, _imm_ofs, IMM_STRIDE);
+	}
+#endif
 
 	if (mode == GL_QUADS)
 	{
