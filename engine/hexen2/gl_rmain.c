@@ -143,6 +143,7 @@ cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thinkers only, <0 = non-thinkers only (Ironwail parity) */
 cvar_t	r_showbboxes_health = {"r_showbboxes_health", "0", CVAR_NONE};	/* >0 = health>0 only, <0 = health<=0 only (Ironwail parity) */
+cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "0", CVAR_NONE};	/* 1 = highlight target/targetname matches of the focused entity (Ironwail parity) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
@@ -3929,72 +3930,167 @@ static void R_DrawWireBox (vec3_t mins, vec3_t maxs)
 	GL_ImmVertex3f (mins[0], maxs[1], maxs[2]);
 }
 
+/*
+================
+RayVsAABB
+
+Standard slab test.  Returns true with `*out_t` set to the entry
+distance along the ray if the ray (origin + dir*t, t>0) first enters
+the box at some t>0.  Returns false if no intersection or if the
+camera origin lies inside the box.
+================
+*/
+static qboolean RayVsAABB (const vec3_t origin, const vec3_t dir,
+			   const vec3_t mins, const vec3_t maxs, float *out_t)
+{
+	float	t_near = -1e30f, t_far = 1e30f;
+	int	i;
+
+	for (i = 0; i < 3; i++)
+	{
+		if (fabsf (dir[i]) < 1e-6f)
+		{
+			if (origin[i] < mins[i] || origin[i] > maxs[i])
+				return false;
+		}
+		else
+		{
+			float	inv = 1.0f / dir[i];
+			float	t1 = (mins[i] - origin[i]) * inv;
+			float	t2 = (maxs[i] - origin[i]) * inv;
+			if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
+			if (t1 > t_near) t_near = t1;
+			if (t2 < t_far) t_far = t2;
+			if (t_near > t_far)
+				return false;
+		}
+	}
+	if (t_near <= 0.0f)
+		return false;	/* origin inside or behind box — skip */
+	*out_t = t_near;
+	return true;
+}
+
+/* Pass kind for ShowBBoxes_GetColor — first pass surveys, second draws. */
+static qboolean ShowBBoxes_EdictPasses (edict_t *ed, vec3_t mins, vec3_t maxs)
+{
+	if (!ed || ed->free)
+		return false;
+	if (r_showbboxes_think.value && (ed->v.nextthink <= 0) == (r_showbboxes_think.value > 0))
+		return false;
+	if (r_showbboxes_health.value && (ed->v.health <= 0) == (r_showbboxes_health.value > 0))
+		return false;
+
+	VectorAdd (ed->v.origin, ed->v.mins, mins);
+	VectorAdd (ed->v.origin, ed->v.maxs, maxs);
+	if (VectorCompare (mins, maxs))
+		return false;	/* zero-size bbox (point ent) */
+
+	return true;
+}
+
 static void R_ShowBoundingBoxes (void)
 {
-	edict_t		*ed;
+	edict_t		*ed, *focused = NULL;
 	vec3_t		mins, maxs;
 	int		i;
 	int		modelindex;
 	float		r, g, b, a;
+	float		bestdist = 1e30f;
+	const char	*focus_target = "", *focus_targetname = "";
 
 	if (!r_showbboxes.integer)
 		return;
-
 	if (cls.state != ca_active)
 		return;
-
 	if (!sv.active)
 		return;
+
+	/* Pass 1: ray-cast through the screen center to pick the focused
+	 * entity (closest AABB hit along vpn from r_origin). */
+	for (i = 1; i < sv.num_edicts; i++)
+	{
+		float	dist;
+
+		ed = EDICT_NUM (i);
+		if (!ShowBBoxes_EdictPasses (ed, mins, maxs))
+			continue;
+		if (RayVsAABB (r_origin, vpn, mins, maxs, &dist) && dist < bestdist)
+		{
+			bestdist = dist;
+			focused = ed;
+		}
+	}
+
+	if (focused && r_showbboxes_targets.integer)
+	{
+		focus_target     = PR_GetString (focused->v.target);
+		focus_targetname = PR_GetString (focused->v.targetname);
+		if (!focus_target)     focus_target = "";
+		if (!focus_targetname) focus_targetname = "";
+	}
 
 	/* Save and disable depth test so boxes show through walls */
 	glDisable_fp (GL_DEPTH_TEST);
 	glEnable_fp (GL_BLEND);
 	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+	/* Pass 2: draw, with color overrides for focused / target-linked
+	 * entities and a reddish tint for entities with health. */
 	for (i = 1; i < sv.num_edicts; i++)
 	{
-		ed = EDICT_NUM(i);
+		qboolean is_focused, is_linked;
 
-		if (!ed || ed->free)
+		ed = EDICT_NUM (i);
+		if (!ShowBBoxes_EdictPasses (ed, mins, maxs))
 			continue;
 
-		if (r_showbboxes_think.value && (ed->v.nextthink <= 0) == (r_showbboxes_think.value > 0))
-			continue;
-
-		if (r_showbboxes_health.value && (ed->v.health <= 0) == (r_showbboxes_health.value > 0))
-			continue;
-
-		VectorAdd (ed->v.origin, ed->v.mins, mins);
-		VectorAdd (ed->v.origin, ed->v.maxs, maxs);
-
-		/* Skip point entities (zero-size bbox) */
-		if (VectorCompare (mins, maxs))
-			continue;
-
-		/* Determine color by model type */
-		modelindex = (int)ed->v.modelindex;
-		if (modelindex > 0 && modelindex < MAX_MODELS && sv.models[modelindex])
+		is_focused = (ed == focused);
+		is_linked = false;
+		if (focused && ed != focused && r_showbboxes_targets.integer)
 		{
-			switch (sv.models[modelindex]->type)
-			{
-				case mod_brush:		/* yellow */
-					r = 1.0f; g = 1.0f; b = 0.0f; a = 0.5f;
-					break;
-				case mod_alias:		/* purple */
-					r = 0.5f; g = 0.25f; b = 1.0f; a = 0.5f;
-					break;
-				case mod_sprite:	/* cyan */
-					r = 0.0f; g = 1.0f; b = 1.0f; a = 0.5f;
-					break;
-				default:		/* white */
-					r = 1.0f; g = 1.0f; b = 1.0f; a = 0.3f;
-					break;
-			}
+			const char *ent_target     = PR_GetString (ed->v.target);
+			const char *ent_targetname = PR_GetString (ed->v.targetname);
+			if (!ent_target)     ent_target = "";
+			if (!ent_targetname) ent_targetname = "";
+			if ((*focus_targetname && !strcmp (focus_targetname, ent_target)) ||
+			    (*focus_target     && !strcmp (focus_target,     ent_targetname)))
+				is_linked = true;
+		}
+
+		if (is_focused)
+		{
+			r = 1.0f; g = 1.0f; b = 1.0f; a = 0.85f;	/* white */
+		}
+		else if (is_linked)
+		{
+			r = 0.7f; g = 0.7f; b = 0.7f; a = 0.6f;		/* light grey */
 		}
 		else
 		{
-			/* No model — white */
-			r = 1.0f; g = 1.0f; b = 1.0f; a = 0.3f;
+			modelindex = (int)ed->v.modelindex;
+			if (modelindex > 0 && modelindex < MAX_MODELS && sv.models[modelindex])
+			{
+				switch (sv.models[modelindex]->type)
+				{
+					case mod_brush:		r = 1.0f; g = 1.0f; b = 0.0f; a = 0.5f; break;
+					case mod_alias:		r = 0.5f; g = 0.25f; b = 1.0f; a = 0.5f; break;
+					case mod_sprite:	r = 0.0f; g = 1.0f; b = 1.0f; a = 0.5f; break;
+					default:		r = 1.0f; g = 1.0f; b = 1.0f; a = 0.3f; break;
+				}
+			}
+			else
+			{
+				r = 1.0f; g = 1.0f; b = 1.0f; a = 0.3f;
+			}
+			/* Health tint: bias toward red for damageable entities
+			 * (matches Ironwail's `if (ed->v.health > 0) color = red`). */
+			if (ed->v.health > 0)
+			{
+				r = 1.0f;
+				g *= 0.4f;
+				b *= 0.4f;
+			}
 		}
 
 		GL_ImmBegin ();

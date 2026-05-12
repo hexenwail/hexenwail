@@ -67,7 +67,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
 | Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported (uhexen2-typa). |
-| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters (>0 = match only, <0 = non-match only). Ironwail's link/target visualization (`r_showbboxes_links`, `r_showbboxes_targets`, focused-entity ray-cast highlight) not yet ported (uhexen2-ykr2). |
+| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters + `r_showbboxes_targets` target/targetname highlighting. Center-ray pick → focused entity drawn in white; `health > 0` entities tint red. Ironwail's `r_showbboxes_links` (QC entity-field reference lines) deferred — needs qcvm field-offset reflection that Hexenwail's progs API doesn't expose yet. |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 (uhexen2-kaa6). |
 | LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level (uhexen2-dax2). |
 | Entity alpha radix sort | ✅ | `r_alphasort` uses a 4-pass LSD radix sort over the IEEE-754 bit pattern of the squared distance (`R_AlphaSortRadix` in `gl_rmain.c`). Bits are inverted so the ascending unsigned sort yields descending output directly. Stable, O(n); matches Ironwail. |
