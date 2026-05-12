@@ -2264,7 +2264,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 1.0f);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
@@ -2285,7 +2284,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 0.5f);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
@@ -2306,7 +2304,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_particles", 0);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
@@ -2326,7 +2323,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
-			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
 			Cvar_SetValue ("r_watercolor", 0);
@@ -2347,7 +2343,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_NEAREST");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
-			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
@@ -2368,7 +2363,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_dither", 0);
 			Cvar_Set ("gl_texturemode", "GL_LINEAR_MIPMAP_LINEAR");
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
-			Cvar_SetValue ("gl_particles", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
 			Cvar_SetValue ("r_watercolor", 1);
