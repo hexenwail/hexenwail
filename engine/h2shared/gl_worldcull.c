@@ -1050,7 +1050,7 @@ void R_DispatchWorldCull (void)
 	/* Gated stats readback: only every gl_hiz_stats frames, so the
 	 * implied glGetBufferSubData stall amortizes.  Print to console;
 	 * caller decides whether to leave running or set 0 after reading. */
-	if (gl_hiz_stats.integer > 0 && cull_stats_ssbo)
+	if (gl_hiz_stats.integer > 0 && cull_stats_ssbo && glGetBufferSubData_fp)
 	{
 		hiz_stats_frame_counter++;
 		if (hiz_stats_frame_counter >= gl_hiz_stats.integer)
