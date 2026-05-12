@@ -948,6 +948,13 @@ static void OIT_Status_f (void)
 	Con_Printf("  particle_oit prog: %u\n", gl_shader_particle_oit.program);
 	Con_Printf("  world_oit prog:    %u\n", gl_shader_world_oit.program);
 	Con_Printf("  alias_oit prog:    %u\n", gl_shader_alias_oit.program);
+	Con_Printf("  oit_resolve_vao:   %u  %s\n", oit_resolve_vao,
+		   oit_resolve_vao ? "" : "<-- NOT CREATED, resolve glDrawArrays will fail");
+	{
+		GLenum err;
+		while ((err = glGetError()) != GL_NO_ERROR)
+			Con_Printf("  GL error queue:    0x%04x\n", err);
+	}
 	/* Current GL pipeline state at call time. */
 	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
