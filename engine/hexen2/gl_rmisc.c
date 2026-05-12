@@ -265,6 +265,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_animsmoothing);
 	Cvar_RegisterVariable (&r_showbboxes);
+	Cvar_RegisterVariable (&r_showbboxes_think);
+	Cvar_RegisterVariable (&r_showbboxes_health);
 	Cvar_RegisterVariable (&r_speeds);
 	{ extern cvar_t r_speeds_gpufinish; Cvar_RegisterVariable (&r_speeds_gpufinish); }
 	Cvar_RegisterVariable (&r_wholeframe);

@@ -141,6 +141,8 @@ cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model anima
 cvar_t	r_animsmoothing = {"r_animsmoothing", "0", CVAR_ARCHIVE};	/* smooth long server-timed animations by lerping over the observed inter-frame interval instead of a fixed 0.1s (Ironwail LERP_FINISH approximation, uhexen2-wax3) */
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
+cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thinkers only, <0 = non-thinkers only (Ironwail parity) */
+cvar_t	r_showbboxes_health = {"r_showbboxes_health", "0", CVAR_NONE};	/* >0 = health>0 only, <0 = health<=0 only (Ironwail parity) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
@@ -3829,6 +3831,10 @@ Color-coded by model type: yellow=brush, purple=alias, cyan=sprite, white=other.
 
 r_showbboxes 1 = all entities
 r_showbboxes 2 = entities in PVS only (not yet filtered; same as 1 for now)
+
+Filter cvars (Ironwail parity):
+r_showbboxes_think  >0 = thinkers only,  <0 = non-thinkers only
+r_showbboxes_health >0 = health>0 only,  <0 = health<=0 only
 ================
 */
 static void R_DrawWireBox (vec3_t mins, vec3_t maxs)
@@ -3900,6 +3906,12 @@ static void R_ShowBoundingBoxes (void)
 		ed = EDICT_NUM(i);
 
 		if (!ed || ed->free)
+			continue;
+
+		if (r_showbboxes_think.value && (ed->v.nextthink <= 0) == (r_showbboxes_think.value > 0))
+			continue;
+
+		if (r_showbboxes_health.value && (ed->v.health <= 0) == (r_showbboxes_health.value > 0))
 			continue;
 
 		VectorAdd (ed->v.origin, ed->v.mins, mins);

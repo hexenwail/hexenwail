@@ -275,6 +275,8 @@ extern	cvar_t	r_novis;
 extern	cvar_t	r_lerpmodels;
 extern	cvar_t	r_animsmoothing;
 extern	cvar_t	r_showbboxes;
+extern	cvar_t	r_showbboxes_think;
+extern	cvar_t	r_showbboxes_health;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
 extern	cvar_t	r_alphasort;
