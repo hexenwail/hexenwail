@@ -1053,6 +1053,15 @@ static float R_LiquidAlpha (const texture_t *t)
 	switch (t->content_class)
 	{
 	case CONTENTS_WATER:
+		/* Vanilla H2 hardcoded SURF_TRANSLUCENT only for *lowlight +
+		 * *rtex078 (we extended to mod patterns water/ice/glass in
+		 * Mod_SetDrawingFlags).  Other '*' textures sharing a water leaf
+		 * — notably *rtex346 (Castle gold pool in demo1.bsp) — are meant
+		 * to be opaque regardless of r_wateralpha.  Lava/slime keep cvar
+		 * control because their cvars are a Hexenwail extension, not a
+		 * vanilla contract.  uhexen2-ft2q. */
+		if (t->name[0] == '*' && !t->translucent_turb)
+			return 1.0f;
 		{ float a = r_wateralpha.value;
 		  if (a < 0.1f) a = 0.1f; if (a > 1.0f) a = 1.0f; return a; }
 	case CONTENTS_LAVA:

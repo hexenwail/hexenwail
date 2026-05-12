@@ -1343,9 +1343,28 @@ static void Mod_SetDrawingFlags(msurface_t *out)
 
 		GL_SubdivideSurface (loadmodel, out);	// cut up polygon for warps
 
-		if (!q_strncasecmp(out->texinfo->texture->name,"*rtex078",8) ||
-		    !q_strncasecmp(out->texinfo->texture->name,"*lowlight",9) )
-			out->flags |= SURF_TRANSLUCENT;
+		/* Vanilla H2 hardcoded SURF_TRANSLUCENT for *lowlight + *rtex078
+		 * only; every other '*' turb texture (e.g. *rtex346 — Castle
+		 * gold pool) is meant to be opaque regardless of r_wateralpha
+		 * (uhexen2-ft2q).  Extend the allowlist to mod-friendly substrings
+		 * (water/ice/glass) so user maps with custom liquid names still
+		 * honor r_wateralpha; propagate to a texture-level flag so
+		 * R_LiquidAlpha can short-circuit non-allowlisted textures to
+		 * 1.0 even when their CONTENTS_WATER leaf would otherwise pull
+		 * them through the translucent path. */
+		{
+			const char *tname = out->texinfo->texture->name;
+			const char *n = tname + 1;
+			if (!q_strncasecmp(tname, "*lowlight", 9) ||
+			    !q_strncasecmp(tname, "*rtex078", 8)  ||
+			    strstr(n, "water") ||
+			    strstr(n, "ice")   ||
+			    strstr(n, "glass"))
+			{
+				out->flags |= SURF_TRANSLUCENT;
+				out->texinfo->texture->translucent_turb = true;
+			}
+		}
 
 		return;
 	}
