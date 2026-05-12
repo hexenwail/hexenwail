@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
 | Rendering — Visual/Shading | 20 | 1 | 1 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
-| UX / Menus / HUD | 21 | 0 | 1 | 1 |
+| UX / Menus / HUD | 22 | 0 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **72** | **3** | **5** | **8** |
+| **TOTAL** | **73** | **3** | **4** | **8** |
 
-**Parity: 90% ported, 4% partial, 6% missing** (excluding N/A)
+**Parity: 91% ported, 4% partial, 5% missing** (excluding N/A)
 
 ---
 
@@ -113,7 +113,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Console mouse support | ❌ | Clickable links, text selection, clipboard |
 | Console notification fade | ✅ | `con_notifyfade` (default 1) — alpha ramps 1→0 over the last 1 s of `con_notifytime`. Per-quad alpha threaded through `Draw_AddCharQuad` via new `Draw_SetCharacterAlpha` setter (gl_draw.c). |
 | Console max columns | ✅ | `con_maxcols` (default 0 = no cap), menu slider in Misc/HUD submenu (`menu.c`, commit `ab108d760`) |
-| Menu search with filtering | ❌ | Live filter + match highlighting |
+| Menu search with filtering | ✅ | Shared `M_Filter_*` facility — type printable chars in Display/Rendering/Graphics/Game submenus to live-filter rows by case-insensitive substring; backspace edits, ESC clears (then exits on second press), up/down skip filtered rows, cursor snaps to first match on filter change. Sound (4 rows) and Gamepad (controller-driven) intentionally not wired (uhexen2-rawq). |
 | Menu live preview | ✅ | `ui_live_preview` (default 1) — ←/→ in any menu fades glyphs out (1.5 s trapezoid: 0.125 s in / 1.25 s hold / 0.125 s out) and suppresses the backdrop dim, so postprocess sliders (gamma/contrast/brightness/fog/etc.) show their effect through the menu. |
 | Show speed / show time overlays | ✅ | `scr_showspeed`, `showclock` (4-state: off / game-time / wall HH:MM / wall HH:MM:SS); both toggleable from Misc/HUD submenu |
 | Map-editor auto-check on launch | ➖ | Ironwail commit `5a983620` (2026-05): `Sys_IsStartedFromMapEditor` detects Qrucible parent process, triggers map check. Hexenwail has no equivalent function and no TrenchBroom workflow integration. Could be ported but low priority for Hexen II mapping scene. |

@@ -21,6 +21,7 @@
  */
 
 #include "quakedef.h"
+#include "q_ctype.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "gl_postprocess.h"
@@ -1955,6 +1956,95 @@ static void M_Menu_Gamepad_f (void);
 static void M_Gamepad_Draw (void);
 static void M_Gamepad_Key (int k);
 
+/* -------------------------------------------------------------------------
+ * Menu search/filter (uhexen2-rawq)
+ *
+ * Shared substring filter for long option submenus.  Each integrating menu
+ * provides a `const char *labels[ITEMS]` table; while m_search_len > 0
+ * the menu's IsSkip helper hides rows whose label doesn't contain the
+ * (case-insensitive) search buffer.  Initial integration: Rendering
+ * submenu (REND_ITEMS == 18, biggest list).  Pattern propagates to other
+ * submenus by adding a labels table + IsSkip + search hooks in *_Key.
+ * ------------------------------------------------------------------------- */
+#define M_SEARCH_BUFLEN	24
+static char m_search_buf[M_SEARCH_BUFLEN];
+static int  m_search_len = 0;
+
+static qboolean M_Filter_Active (void)
+{
+	return m_search_len > 0;
+}
+
+static void M_Filter_Clear (void)
+{
+	m_search_buf[0] = 0;
+	m_search_len = 0;
+}
+
+/* Case-insensitive substring match.  Always-true when search inactive
+ * so callers can use a single gating predicate. */
+static qboolean M_Filter_Matches (const char *label)
+{
+	const char *p;
+	int n = m_search_len;
+	int i;
+
+	if (n <= 0 || !label)
+		return true;
+
+	for (p = label; *p; ++p)
+	{
+		for (i = 0; i < n; ++i)
+		{
+			char a = p[i];
+			char b = m_search_buf[i];
+			if (!a)
+				return false;
+			if (q_tolower((unsigned char)a) != q_tolower((unsigned char)b))
+				break;
+		}
+		if (i == n)
+			return true;
+	}
+	return false;
+}
+
+/* Returns true if the key was consumed by the search input.  Callers
+ * should treat this as "buffer changed — re-snap cursor to first match". */
+static qboolean M_Filter_HandleKey (int k)
+{
+	if (k == K_BACKSPACE)
+	{
+		if (m_search_len <= 0)
+			return false;	/* let ESC/etc. propagate when buffer empty */
+		m_search_buf[--m_search_len] = 0;
+		S_LocalSound ("raven/menu2.wav");
+		return true;
+	}
+	if (k >= 32 && k < K_BACKSPACE)
+	{
+		if (m_search_len < M_SEARCH_BUFLEN - 1)
+		{
+			m_search_buf[m_search_len++] = (char)k;
+			m_search_buf[m_search_len] = 0;
+			S_LocalSound ("raven/menu2.wav");
+		}
+		return true;
+	}
+	return false;
+}
+
+/* Render "Search: foo_" prompt — call at bottom of host menu draw. */
+static void M_Filter_Draw (int x, int y)
+{
+	if (!M_Filter_Active())
+		return;
+	M_Print (x, y, "Search:");
+	M_PrintWhite (x + 8*8, y, m_search_buf);
+	if (((int)(realtime * 4) & 1) == 0)
+		M_DrawCharacter (x + 8*8 + 8 * m_search_len, y, 11);
+}
+
 static int	options_cursor;
 
 void M_Menu_Options_f (void)
@@ -2108,11 +2198,37 @@ enum
 
 static int	display_cursor;
 
+/* Label table for substring search (uhexen2-rawq).  Mirrors DISP_* enum.
+ * Separators / dynamic-skip rows get NULL; they're already filtered out
+ * by the existing M_Display_IsSkip logic. */
+static const char *disp_labels[DISP_ITEMS] = {
+	"Preset        :",	/* DISP_PRESET */
+	"Brightness    :",	/* DISP_GAMMA */
+	"Contrast      :",	/* DISP_CONTRAST */
+#ifdef GLQUAKE
+	"Console Scale :",	/* DISP_CONSCALE */
+#endif
+	"HUD Layout    :",	/* DISP_SCRSIZE */
+	"Rendering",		/* DISP_RENDERING */
+	"Misc",			/* DISP_GRAPHICS */
+	NULL,			/* DISP_SEP */
+	"Window Mode   :",	/* DISP_FULLSCREEN */
+	"Resolution    :",	/* DISP_RESOLUTION */
+	"Antialiasing  :",	/* DISP_MSAA */
+	"VSync         :",	/* DISP_VSYNC */
+	"FPS Limit     :",	/* DISP_MAXFPS */
+	"Show FPS      :",	/* DISP_SHOWFPS */
+	"Menu Backdrop :",	/* DISP_MENUFADE */
+	NULL,			/* DISP_SEP2 */
+	"APPLY CHANGES",	/* DISP_APPLY */
+};
+
 static void M_Menu_Display_f (void)
 {
 	Key_SetDest (key_menu);
 	m_state = m_display;
 	m_entersound = true;
+	M_Filter_Clear ();
 #ifdef GLQUAKE
 	VID_MenuInit ();
 #endif
@@ -2354,7 +2470,7 @@ static void M_Display_Draw (void)
 	ScrollTitle("gfx/menu/title3.lmp");
 	M_PrintWhite (96, 72, "Display Options");
 
-	M_Print (76, 92 + 8*DISP_PRESET,	"Preset        :");
+	if (!M_Display_IsSkip(DISP_PRESET))
 	{
 		/* detect current preset by matching key cvars */
 		int se = (int)r_softemu.value;
@@ -2362,6 +2478,7 @@ static void M_Display_Draw (void)
 		int glow = (int)Cvar_VariableValue("gl_glows");
 		float mb = Cvar_VariableValue("r_motionblur");
 
+		M_Print (76, 92 + 8*DISP_PRESET, disp_labels[DISP_PRESET]);
 		if (sc <= 0.25f && se == 1)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
 		else if (sc <= 0.5f && se == 2)
@@ -2378,32 +2495,46 @@ static void M_Display_Draw (void)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
 	}
 
-	M_Print (76, 92 + 8*DISP_GAMMA,	"Brightness    :");
-	r = (1.0 - v_gamma.value) / 0.7;
-	M_DrawSliderValue (220, 92 + 8*DISP_GAMMA, r, "%.2f", v_gamma.value);
+	if (!M_Display_IsSkip(DISP_GAMMA))
+	{
+		M_Print (76, 92 + 8*DISP_GAMMA, disp_labels[DISP_GAMMA]);
+		r = (1.0 - v_gamma.value) / 0.7;
+		M_DrawSliderValue (220, 92 + 8*DISP_GAMMA, r, "%.2f", v_gamma.value);
+	}
 
-	M_Print (76, 92 + 8*DISP_CONTRAST,	"Contrast      :");
-	r = (v_contrast.value - 0.5) / 1.5;
-	M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
+	if (!M_Display_IsSkip(DISP_CONTRAST))
+	{
+		M_Print (76, 92 + 8*DISP_CONTRAST, disp_labels[DISP_CONTRAST]);
+		r = (v_contrast.value - 0.5) / 1.5;
+		M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
+	}
 
 #ifdef GLQUAKE
-	M_Print (76, 92 + 8*DISP_CONSCALE, "Console Scale :");
-	r = VID_ReportConsize();
-	M_DrawSliderValue (220, 92 + 8*DISP_CONSCALE, (r-1)/2, "%.2fx", r);
+	if (!M_Display_IsSkip(DISP_CONSCALE))
+	{
+		M_Print (76, 92 + 8*DISP_CONSCALE, disp_labels[DISP_CONSCALE]);
+		r = VID_ReportConsize();
+		M_DrawSliderValue (220, 92 + 8*DISP_CONSCALE, (r-1)/2, "%.2fx", r);
+	}
 #endif
 
-	M_Print (76, 92 + 8*DISP_SCRSIZE,	"HUD Layout    :");
-	if (scr_viewsize.integer >= 140)
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Clean");
-	else if (scr_viewsize.integer >= 130)
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Off");
-	else if (scr_viewsize.integer >= 120)
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Mini");
-	else
-		M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
+	if (!M_Display_IsSkip(DISP_SCRSIZE))
+	{
+		M_Print (76, 92 + 8*DISP_SCRSIZE, disp_labels[DISP_SCRSIZE]);
+		if (scr_viewsize.integer >= 140)
+			M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Clean");
+		else if (scr_viewsize.integer >= 130)
+			M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Off");
+		else if (scr_viewsize.integer >= 120)
+			M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Mini");
+		else
+			M_PrintWhite (220, 92 + 8*DISP_SCRSIZE, "Full");
+	}
 
-	M_Print (76, 92 + 8*DISP_RENDERING,	"Rendering...");
-	M_Print (76, 92 + 8*DISP_GRAPHICS,	"Misc...");
+	if (!M_Display_IsSkip(DISP_RENDERING))
+		M_Print (76, 92 + 8*DISP_RENDERING, "Rendering...");
+	if (!M_Display_IsSkip(DISP_GRAPHICS))
+		M_Print (76, 92 + 8*DISP_GRAPHICS, "Misc...");
 
 	/* separator */
 
@@ -2413,54 +2544,73 @@ static void M_Display_Draw (void)
 		const char *s;
 		int ms, vsync;
 
-		M_Print (76, 92 + 8*DISP_FULLSCREEN,	"Window Mode   :");
+		if (!M_Display_IsSkip(DISP_FULLSCREEN))
 		{
 			int wmode = VID_MenuGetWindowMode ();
+			M_Print (76, 92 + 8*DISP_FULLSCREEN, disp_labels[DISP_FULLSCREEN]);
 			M_PrintWhite (220, 92 + 8*DISP_FULLSCREEN,
 				wmode == 2 ? "Fullscreen" : wmode == 1 ? "Borderless" : "Windowed");
 		}
 
-		M_Print (76, 92 + 8*DISP_RESOLUTION,	"Resolution    :");
-		s = VID_MenuGetResolution (&is_current);
-		if (is_current)
-			M_PrintWhite (220, 92 + 8*DISP_RESOLUTION, s);
-		else
-			M_Print (220, 92 + 8*DISP_RESOLUTION, s);
-
-		M_Print (76, 92 + 8*DISP_MSAA,		"Antialiasing  :");
-		ms = VID_MenuGetMultisample (&is_current, &available);
-		if (available)
+		if (!M_Display_IsSkip(DISP_RESOLUTION))
 		{
-			const char *label = ms <= 0 ? "Off" : va("%dx", ms);
+			M_Print (76, 92 + 8*DISP_RESOLUTION, disp_labels[DISP_RESOLUTION]);
+			s = VID_MenuGetResolution (&is_current);
 			if (is_current)
-				M_PrintWhite (220, 92 + 8*DISP_MSAA, label);
+				M_PrintWhite (220, 92 + 8*DISP_RESOLUTION, s);
 			else
-				M_Print (220, 92 + 8*DISP_MSAA, label);
+				M_Print (220, 92 + 8*DISP_RESOLUTION, s);
 		}
-		else
-			M_PrintWhite (220, 92 + 8*DISP_MSAA, "N/A");
 
-		M_Print (76, 92 + 8*DISP_VSYNC,	"VSync         :");
-		vsync = VID_MenuGetVSync ();
-		M_PrintWhite (220, 92 + 8*DISP_VSYNC,
-			vsync == -1 ? "Adaptive" : vsync ? "On" : "Off");
+		if (!M_Display_IsSkip(DISP_MSAA))
+		{
+			M_Print (76, 92 + 8*DISP_MSAA, disp_labels[DISP_MSAA]);
+			ms = VID_MenuGetMultisample (&is_current, &available);
+			if (available)
+			{
+				const char *label = ms <= 0 ? "Off" : va("%dx", ms);
+				if (is_current)
+					M_PrintWhite (220, 92 + 8*DISP_MSAA, label);
+				else
+					M_Print (220, 92 + 8*DISP_MSAA, label);
+			}
+			else
+				M_PrintWhite (220, 92 + 8*DISP_MSAA, "N/A");
+		}
 
-		M_Print (76, 92 + 8*DISP_MAXFPS,	"FPS Limit     :");
-		if ((int)host_maxfps.value <= 0)
-			M_PrintWhite (220, 92 + 8*DISP_MAXFPS, "Unlimited");
-		else
-			M_PrintWhite (220, 92 + 8*DISP_MAXFPS, va("%d", (int)host_maxfps.value));
+		if (!M_Display_IsSkip(DISP_VSYNC))
+		{
+			M_Print (76, 92 + 8*DISP_VSYNC, disp_labels[DISP_VSYNC]);
+			vsync = VID_MenuGetVSync ();
+			M_PrintWhite (220, 92 + 8*DISP_VSYNC,
+				vsync == -1 ? "Adaptive" : vsync ? "On" : "Off");
+		}
 
-		M_Print (76, 92 + 8*DISP_SHOWFPS,	"Show FPS      :");
-		M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
+		if (!M_Display_IsSkip(DISP_MAXFPS))
+		{
+			M_Print (76, 92 + 8*DISP_MAXFPS, disp_labels[DISP_MAXFPS]);
+			if ((int)host_maxfps.value <= 0)
+				M_PrintWhite (220, 92 + 8*DISP_MAXFPS, "Unlimited");
+			else
+				M_PrintWhite (220, 92 + 8*DISP_MAXFPS, va("%d", (int)host_maxfps.value));
+		}
 
-		M_Print (76, 92 + 8*DISP_MENUFADE,	"Menu Backdrop :");
-		M_PrintWhite (220, 92 + 8*DISP_MENUFADE,
-			scr_menubgstyle.integer == 2 ? "Menu Box" :
-			scr_menubgstyle.integer == 1 ? "Simple" : "Off");
+		if (!M_Display_IsSkip(DISP_SHOWFPS))
+		{
+			M_Print (76, 92 + 8*DISP_SHOWFPS, disp_labels[DISP_SHOWFPS]);
+			M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
+		}
 
-		if (VID_MenuNeedApply ())
-			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
+		if (!M_Display_IsSkip(DISP_MENUFADE))
+		{
+			M_Print (76, 92 + 8*DISP_MENUFADE, disp_labels[DISP_MENUFADE]);
+			M_PrintWhite (220, 92 + 8*DISP_MENUFADE,
+				scr_menubgstyle.integer == 2 ? "Menu Box" :
+				scr_menubgstyle.integer == 1 ? "Simple" : "Off");
+		}
+
+		if (!M_Display_IsSkip(DISP_APPLY) && VID_MenuNeedApply ())
+			M_Print (76, 92 + 8*DISP_APPLY, disp_labels[DISP_APPLY]);
 	}
 #endif
 
@@ -2471,25 +2621,59 @@ static void M_Display_Draw (void)
 			display_cursor = hover;
 	}
 
-	M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
+	if (!M_Display_IsSkip(display_cursor))
+		M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
+
+	M_Filter_Draw (76, 92 + 8*(DISP_ITEMS + 1));
 }
 
 static qboolean M_Display_IsSkip (int cursor)
 {
+	if (cursor < 0 || cursor >= DISP_ITEMS)
+		return true;
 	if (cursor == DISP_SEP || cursor == DISP_SEP2)
 		return true;
 #ifdef GLQUAKE
 	if (cursor == DISP_APPLY && !VID_MenuNeedApply ())
 		return true;
 #endif
+	if (M_Filter_Active() && !M_Filter_Matches(disp_labels[cursor]))
+		return true;
 	return false;
 }
 
 static void M_Display_Key (int k)
 {
+	if (k != K_ESCAPE && k != K_ENTER &&
+	    k != K_UPARROW && k != K_DOWNARROW &&
+	    k != K_LEFTARROW && k != K_RIGHTARROW)
+	{
+		if (M_Filter_HandleKey (k))
+		{
+			int i;
+			if (M_Display_IsSkip (display_cursor))
+			{
+				for (i = 0; i < DISP_ITEMS; i++)
+				{
+					if (!M_Display_IsSkip (i))
+					{
+						display_cursor = i;
+						break;
+					}
+				}
+			}
+			return;
+		}
+	}
+
 	switch (k)
 	{
 	case K_ESCAPE:
+		if (M_Filter_Active ())
+		{
+			M_Filter_Clear ();
+			return;
+		}
 		M_Menu_Options_f ();
 		break;
 	case K_ENTER:
@@ -2573,11 +2757,42 @@ enum
 
 static int	rendering_cursor;
 
+/* Label table — single source of truth for both M_Print and search match.
+ * Order must mirror the REND_* enum.  Search is case-insensitive substring. */
+static const char *rend_labels[REND_ITEMS] = {
+	"Render Scale  :",	/* REND_RENDERSCALE */
+	"Retro Mode    :",	/* REND_SOFTEMU */
+	"Dither Amount :",	/* REND_DITHER */
+	"Textures      :",	/* REND_TEXFILTER */
+	"Anisotropy    :",	/* REND_ANISOTROPY */
+	"Particles     :",	/* REND_PARTICLES */
+	"Fullbrights   :",	/* REND_FULLBRIGHTS */
+	"Shadows       :",	/* REND_SHADOWS */
+	"Dynamic Light :",	/* REND_DYNLIGHT */
+	"Water Tint    :",	/* REND_WATERCOLOR */
+	"Water Alpha   :",	/* REND_WATERALPHA */
+	"Water Warp    :",	/* REND_WATERWARP */
+	"Glows         :",	/* REND_GLOWS */
+	"Dyn Light Str :",	/* REND_FLASHINTENSITY */
+	"FXAA          :",	/* REND_FXAA */
+	"Motion Blur   :",	/* REND_MOTIONBLUR */
+	"HDR Tonemap   :",	/* REND_HDR */
+	"HDR Exposure  :",	/* REND_HDR_EXPOSURE */
+};
+
+static qboolean M_Rendering_IsSkip (int i)
+{
+	if (i < 0 || i >= REND_ITEMS)
+		return true;
+	return M_Filter_Active() && !M_Filter_Matches(rend_labels[i]);
+}
+
 static void M_Menu_Rendering_f (void)
 {
 	Key_SetDest (key_menu);
 	m_state = m_rendering;
 	m_entersound = true;
+	M_Filter_Clear ();
 }
 
 static void M_Rendering_AdjustSliders (int dir)
@@ -2718,111 +2933,202 @@ static void M_Rendering_Draw (void)
 	ScrollTitle("gfx/menu/title3.lmp");
 	M_PrintWhite (96, 72, "Rendering");
 
-	M_Print (76, 92 + 8*REND_RENDERSCALE,	"Render Scale  :");
-	if (r_scale.value >= 1.0f)
-		M_PrintWhite (220, 92 + 8*REND_RENDERSCALE, "Native");
-	else
-		M_PrintWhite (220, 92 + 8*REND_RENDERSCALE, va("%d%%", (int)(r_scale.value * 100)));
-
-	M_Print (76, 92 + 8*REND_SOFTEMU,	"Retro Mode    :");
-	if ((int)r_softemu.value == 1)
-		M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Dithered");
-	else if ((int)r_softemu.value == 2)
-		M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Banded");
-	else
-		M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Off");
-
-	M_Print (76, 92 + 8*REND_DITHER,	"Dither Amount :");
-	r = r_dither.value / 2.0;
-	M_DrawSliderValue (220, 92 + 8*REND_DITHER, r, "%.0f%%", r_dither.value * 50);
-
-	M_Print (76, 92 + 8*REND_TEXFILTER,	"Textures      :");
-	M_PrintWhite (220, 92 + 8*REND_TEXFILTER,
-		VID_MenuGetTexFilter () ? "Smooth" : "Classic");
-
-	M_Print (76, 92 + 8*REND_ANISOTROPY,	"Anisotropy    :");
-	aniso = VID_MenuGetAnisotropy (&available);
-	if (available)
-		M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, va("%dx", aniso));
-	else
-		M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, "N/A");
-
-	M_Print (76, 92 + 8*REND_PARTICLES,	"Particles     :");
-	M_PrintWhite (220, 92 + 8*REND_PARTICLES, gl_particles.integer ? "Round" : "Square");
-
-	M_Print (76, 92 + 8*REND_FULLBRIGHTS,	"Fullbrights   :");
-	M_DrawCheckbox (220, 92 + 8*REND_FULLBRIGHTS, gl_fullbrights.integer);
-
-	M_Print (76, 92 + 8*REND_SHADOWS,	"Shadows       :");
-	M_DrawCheckbox (220, 92 + 8*REND_SHADOWS, r_shadows.integer);
-
-	M_Print (76, 92 + 8*REND_DYNLIGHT,	"Dynamic Light :");
-	M_DrawCheckbox (220, 92 + 8*REND_DYNLIGHT, r_dynamic.integer);
-
-	M_Print (76, 92 + 8*REND_WATERCOLOR,	"Water Tint    :");
-	switch ((int)Cvar_VariableValue("r_watercolor"))
+	if (!M_Rendering_IsSkip(REND_RENDERSCALE))
 	{
-	case 1:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Blue"); break;
-	case 2:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Green"); break;
-	case 3:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Clear"); break;
-	default: M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Classic"); break;
+		M_Print (76, 92 + 8*REND_RENDERSCALE, rend_labels[REND_RENDERSCALE]);
+		if (r_scale.value >= 1.0f)
+			M_PrintWhite (220, 92 + 8*REND_RENDERSCALE, "Native");
+		else
+			M_PrintWhite (220, 92 + 8*REND_RENDERSCALE, va("%d%%", (int)(r_scale.value * 100)));
 	}
 
-	M_Print (76, 92 + 8*REND_WATERALPHA,	"Water Alpha   :");
-	r = r_wateralpha.value;
-	M_DrawSliderValue (220, 92 + 8*REND_WATERALPHA, r, "%.0f%%", r * 100);
+	if (!M_Rendering_IsSkip(REND_SOFTEMU))
+	{
+		M_Print (76, 92 + 8*REND_SOFTEMU, rend_labels[REND_SOFTEMU]);
+		if ((int)r_softemu.value == 1)
+			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Dithered");
+		else if ((int)r_softemu.value == 2)
+			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Banded");
+		else
+			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Off");
+	}
 
-	M_Print (76, 92 + 8*REND_WATERWARP,	"Water Warp    :");
-	M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
+	if (!M_Rendering_IsSkip(REND_DITHER))
+	{
+		M_Print (76, 92 + 8*REND_DITHER, rend_labels[REND_DITHER]);
+		r = r_dither.value / 2.0;
+		M_DrawSliderValue (220, 92 + 8*REND_DITHER, r, "%.0f%%", r_dither.value * 50);
+	}
 
-	M_Print (76, 92 + 8*REND_GLOWS,		"Glows         :");
-	if (!gl_glows.integer)
-		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Off");
-	else if (!gl_missile_glows.integer)
-		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Torch Only");
-	else if (gl_glow_intensity.value < 0.9f)
-		M_PrintWhite (220, 92 + 8*REND_GLOWS, "Reduced");
-	else
-		M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
+	if (!M_Rendering_IsSkip(REND_TEXFILTER))
+	{
+		M_Print (76, 92 + 8*REND_TEXFILTER, rend_labels[REND_TEXFILTER]);
+		M_PrintWhite (220, 92 + 8*REND_TEXFILTER,
+			VID_MenuGetTexFilter () ? "Smooth" : "Classic");
+	}
 
-	M_Print (76, 92 + 8*REND_FLASHINTENSITY,"Dyn Light Str :");
-	if (gl_flashintensity.value <= 0)
-		M_PrintWhite (220, 92 + 8*REND_FLASHINTENSITY, "Off");
-	else
-		M_DrawSliderValue (220, 92 + 8*REND_FLASHINTENSITY, gl_flashintensity.value / 2.0f, "%.2f", gl_flashintensity.value);
+	if (!M_Rendering_IsSkip(REND_ANISOTROPY))
+	{
+		M_Print (76, 92 + 8*REND_ANISOTROPY, rend_labels[REND_ANISOTROPY]);
+		aniso = VID_MenuGetAnisotropy (&available);
+		if (available)
+			M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, va("%dx", aniso));
+		else
+			M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, "N/A");
+	}
 
-	M_Print (76, 92 + 8*REND_FXAA,		"FXAA          :");
-	M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
+	if (!M_Rendering_IsSkip(REND_PARTICLES))
+	{
+		M_Print (76, 92 + 8*REND_PARTICLES, rend_labels[REND_PARTICLES]);
+		M_PrintWhite (220, 92 + 8*REND_PARTICLES, gl_particles.integer ? "Round" : "Square");
+	}
 
-	M_Print (76, 92 + 8*REND_MOTIONBLUR,	"Motion Blur   :");
+	if (!M_Rendering_IsSkip(REND_FULLBRIGHTS))
+	{
+		M_Print (76, 92 + 8*REND_FULLBRIGHTS, rend_labels[REND_FULLBRIGHTS]);
+		M_DrawCheckbox (220, 92 + 8*REND_FULLBRIGHTS, gl_fullbrights.integer);
+	}
+
+	if (!M_Rendering_IsSkip(REND_SHADOWS))
+	{
+		M_Print (76, 92 + 8*REND_SHADOWS, rend_labels[REND_SHADOWS]);
+		M_DrawCheckbox (220, 92 + 8*REND_SHADOWS, r_shadows.integer);
+	}
+
+	if (!M_Rendering_IsSkip(REND_DYNLIGHT))
+	{
+		M_Print (76, 92 + 8*REND_DYNLIGHT, rend_labels[REND_DYNLIGHT]);
+		M_DrawCheckbox (220, 92 + 8*REND_DYNLIGHT, r_dynamic.integer);
+	}
+
+	if (!M_Rendering_IsSkip(REND_WATERCOLOR))
+	{
+		M_Print (76, 92 + 8*REND_WATERCOLOR, rend_labels[REND_WATERCOLOR]);
+		switch ((int)Cvar_VariableValue("r_watercolor"))
+		{
+		case 1:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Blue"); break;
+		case 2:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Green"); break;
+		case 3:  M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Clear"); break;
+		default: M_PrintWhite (220, 92 + 8*REND_WATERCOLOR, "Classic"); break;
+		}
+	}
+
+	if (!M_Rendering_IsSkip(REND_WATERALPHA))
+	{
+		M_Print (76, 92 + 8*REND_WATERALPHA, rend_labels[REND_WATERALPHA]);
+		r = r_wateralpha.value;
+		M_DrawSliderValue (220, 92 + 8*REND_WATERALPHA, r, "%.0f%%", r * 100);
+	}
+
+	if (!M_Rendering_IsSkip(REND_WATERWARP))
+	{
+		M_Print (76, 92 + 8*REND_WATERWARP, rend_labels[REND_WATERWARP]);
+		M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
+	}
+
+	if (!M_Rendering_IsSkip(REND_GLOWS))
+	{
+		M_Print (76, 92 + 8*REND_GLOWS, rend_labels[REND_GLOWS]);
+		if (!gl_glows.integer)
+			M_PrintWhite (220, 92 + 8*REND_GLOWS, "Off");
+		else if (!gl_missile_glows.integer)
+			M_PrintWhite (220, 92 + 8*REND_GLOWS, "Torch Only");
+		else if (gl_glow_intensity.value < 0.9f)
+			M_PrintWhite (220, 92 + 8*REND_GLOWS, "Reduced");
+		else
+			M_PrintWhite (220, 92 + 8*REND_GLOWS, "All");
+	}
+
+	if (!M_Rendering_IsSkip(REND_FLASHINTENSITY))
+	{
+		M_Print (76, 92 + 8*REND_FLASHINTENSITY, rend_labels[REND_FLASHINTENSITY]);
+		if (gl_flashintensity.value <= 0)
+			M_PrintWhite (220, 92 + 8*REND_FLASHINTENSITY, "Off");
+		else
+			M_DrawSliderValue (220, 92 + 8*REND_FLASHINTENSITY, gl_flashintensity.value / 2.0f, "%.2f", gl_flashintensity.value);
+	}
+
+	if (!M_Rendering_IsSkip(REND_FXAA))
+	{
+		M_Print (76, 92 + 8*REND_FXAA, rend_labels[REND_FXAA]);
+		M_DrawCheckbox (220, 92 + 8*REND_FXAA, gl_fxaa.integer);
+	}
+
+	if (!M_Rendering_IsSkip(REND_MOTIONBLUR))
 	{
 		float mb = Cvar_VariableValue("r_motionblur");
+		M_Print (76, 92 + 8*REND_MOTIONBLUR, rend_labels[REND_MOTIONBLUR]);
 		if (mb <= 0)
 			M_PrintWhite (220, 92 + 8*REND_MOTIONBLUR, "Off");
 		else
 			M_DrawSliderValue (220, 92 + 8*REND_MOTIONBLUR, mb, "%.0f%%", mb * 100);
 	}
 
-	M_Print (76, 92 + 8*REND_HDR,		"HDR Tonemap   :");
-	M_DrawCheckbox (220, 92 + 8*REND_HDR, r_hdr.integer);
+	if (!M_Rendering_IsSkip(REND_HDR))
+	{
+		M_Print (76, 92 + 8*REND_HDR, rend_labels[REND_HDR]);
+		M_DrawCheckbox (220, 92 + 8*REND_HDR, r_hdr.integer);
+	}
 
-	M_Print (76, 92 + 8*REND_HDR_EXPOSURE,	"HDR Exposure  :");
-	if (!r_hdr.integer)
-		M_PrintWhite (220, 92 + 8*REND_HDR_EXPOSURE, "(HDR off)");
-	else
-		M_DrawSliderValue (220, 92 + 8*REND_HDR_EXPOSURE,
-			(r_hdr_exposure.value - 0.1f) / 3.9f,
-			"%.2f", r_hdr_exposure.value);
+	if (!M_Rendering_IsSkip(REND_HDR_EXPOSURE))
+	{
+		M_Print (76, 92 + 8*REND_HDR_EXPOSURE, rend_labels[REND_HDR_EXPOSURE]);
+		if (!r_hdr.integer)
+			M_PrintWhite (220, 92 + 8*REND_HDR_EXPOSURE, "(HDR off)");
+		else
+			M_DrawSliderValue (220, 92 + 8*REND_HDR_EXPOSURE,
+				(r_hdr_exposure.value - 0.1f) / 3.9f,
+				"%.2f", r_hdr_exposure.value);
+	}
 
-	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, REND_ITEMS); if (h >= 0) rendering_cursor = h; }
-	M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
+	{
+		/* mouse hover only lands on visible rows */
+		int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, REND_ITEMS);
+		if (h >= 0 && !M_Rendering_IsSkip(h))
+			rendering_cursor = h;
+	}
+	if (!M_Rendering_IsSkip(rendering_cursor))
+		M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
+
+	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
+	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));
 }
 
 static void M_Rendering_Key (int k)
 {
+	/* Reserved keys must not feed the search buffer */
+	if (k != K_ESCAPE && k != K_ENTER &&
+	    k != K_UPARROW && k != K_DOWNARROW &&
+	    k != K_LEFTARROW && k != K_RIGHTARROW)
+	{
+		if (M_Filter_HandleKey (k))
+		{
+			/* snap cursor to first visible row after filter change */
+			int i;
+			if (M_Rendering_IsSkip (rendering_cursor))
+			{
+				for (i = 0; i < REND_ITEMS; i++)
+				{
+					if (!M_Rendering_IsSkip (i))
+					{
+						rendering_cursor = i;
+						break;
+					}
+				}
+			}
+			return;
+		}
+	}
+
 	switch (k)
 	{
 	case K_ESCAPE:
+		if (M_Filter_Active ())
+		{
+			/* first ESC clears the filter, second exits the menu */
+			M_Filter_Clear ();
+			return;
+		}
 		M_Menu_Display_f ();
 		break;
 	case K_ENTER:
@@ -2831,15 +3137,25 @@ static void M_Rendering_Key (int k)
 		return;
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		rendering_cursor--;
-		if (rendering_cursor < 0)
-			rendering_cursor = REND_ITEMS-1;
+		{
+			int guard = REND_ITEMS;
+			do {
+				rendering_cursor--;
+				if (rendering_cursor < 0)
+					rendering_cursor = REND_ITEMS-1;
+			} while (M_Rendering_IsSkip (rendering_cursor) && --guard > 0);
+		}
 		break;
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		rendering_cursor++;
-		if (rendering_cursor >= REND_ITEMS)
-			rendering_cursor = 0;
+		{
+			int guard = REND_ITEMS;
+			do {
+				rendering_cursor++;
+				if (rendering_cursor >= REND_ITEMS)
+					rendering_cursor = 0;
+			} while (M_Rendering_IsSkip (rendering_cursor) && --guard > 0);
+		}
 		break;
 	case K_LEFTARROW:
 		M_Rendering_AdjustSliders (-1);
@@ -2875,11 +3191,35 @@ enum
 
 static int	graphics_cursor;
 
+static const char *gfx_labels[GFX_ITEMS] = {
+	"Message Backdrop:",	/* GFX_CENTERPRINTBG */
+	"HUD Scale       :",	/* GFX_HUDSCALE */
+	"HUD Transparency:",	/* GFX_HUDTRANS */
+	"Menu Scale      :",	/* GFX_MENUSCALE */
+	"Crosshair Scale :",	/* GFX_CROSSHAIRSCALE */
+	"Console Alpha   :",	/* GFX_CONALPHA */
+	"Console Bright  :",	/* GFX_CONBRIGHT */
+	"Console Max Cols:",	/* GFX_CONMAXCOLS */
+	"Overbright Mdls :",	/* GFX_OVERBRIGHT */
+	"Colored Lighting:",	/* GFX_COLORED_LM */
+	"Wall Torch DLs  :",	/* GFX_TORCH_DLIGHT */
+	"Glow Intensity  :",	/* GFX_GLOW_INTENSITY */
+	"Show Speed      :",	/* GFX_SHOWSPEED */
+	"Show Clock      :",	/* GFX_SHOWCLOCK */
+};
+
+static qboolean M_Graphics_IsSkip (int i)
+{
+	if (i < 0 || i >= GFX_ITEMS) return true;
+	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
+}
+
 static void M_Menu_Graphics_f (void)
 {
 	Key_SetDest (key_menu);
 	m_state = m_graphics;
 	m_entersound = true;
+	M_Filter_Clear ();
 }
 
 static void M_Graphics_AdjustSliders (int dir)
@@ -2995,99 +3335,173 @@ static void M_Graphics_Draw (void)
 	ScrollTitle("gfx/menu/title3.lmp");
 	M_PrintWhite (96, 72, "Misc / HUD");
 
-	M_Print (76, 92 + 8*GFX_CENTERPRINTBG,	"Message Backdrop:");
-	M_PrintWhite (220, 92 + 8*GFX_CENTERPRINTBG,
-		scr_centerprintbg.integer == 2 ? "Menu Box" :
-		scr_centerprintbg.integer == 1 ? "Simple" : "Off");
-
-	M_Print (76, 92 + 8*GFX_HUDSCALE,	"HUD Scale       :");
-	if ((int)scr_sbarscale.value == 0)
-		M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, "Auto");
-	else
+	if (!M_Graphics_IsSkip(GFX_CENTERPRINTBG))
 	{
-		char buf[8];
-		snprintf(buf, sizeof(buf), "%dx", (int)scr_sbarscale.value);
-		M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, buf);
+		M_Print (76, 92 + 8*GFX_CENTERPRINTBG, gfx_labels[GFX_CENTERPRINTBG]);
+		M_PrintWhite (220, 92 + 8*GFX_CENTERPRINTBG,
+			scr_centerprintbg.integer == 2 ? "Menu Box" :
+			scr_centerprintbg.integer == 1 ? "Simple" : "Off");
 	}
 
-	M_Print (76, 92 + 8*GFX_MENUSCALE,	"Menu Scale      :");
-	if ((int)scr_menuscale.value == 0)
-		M_PrintWhite (220, 92 + 8*GFX_MENUSCALE, "Auto");
-	else
+	if (!M_Graphics_IsSkip(GFX_HUDSCALE))
 	{
-		char buf[8];
-		snprintf(buf, sizeof(buf), "%dx", (int)scr_menuscale.value);
-		M_PrintWhite (220, 92 + 8*GFX_MENUSCALE, buf);
+		M_Print (76, 92 + 8*GFX_HUDSCALE, gfx_labels[GFX_HUDSCALE]);
+		if ((int)scr_sbarscale.value == 0)
+			M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, "Auto");
+		else
+		{
+			char buf[8];
+			snprintf(buf, sizeof(buf), "%dx", (int)scr_sbarscale.value);
+			M_PrintWhite (220, 92 + 8*GFX_HUDSCALE, buf);
+		}
 	}
 
-	M_Print (76, 92 + 8*GFX_CROSSHAIRSCALE,	"Crosshair Scale :");
-	if ((int)scr_crosshairscale.value == 0)
-		M_PrintWhite (220, 92 + 8*GFX_CROSSHAIRSCALE, "Auto");
-	else
+	if (!M_Graphics_IsSkip(GFX_MENUSCALE))
 	{
-		char buf[8];
-		snprintf(buf, sizeof(buf), "%dx", (int)scr_crosshairscale.value);
-		M_PrintWhite (220, 92 + 8*GFX_CROSSHAIRSCALE, buf);
+		M_Print (76, 92 + 8*GFX_MENUSCALE, gfx_labels[GFX_MENUSCALE]);
+		if ((int)scr_menuscale.value == 0)
+			M_PrintWhite (220, 92 + 8*GFX_MENUSCALE, "Auto");
+		else
+		{
+			char buf[8];
+			snprintf(buf, sizeof(buf), "%dx", (int)scr_menuscale.value);
+			M_PrintWhite (220, 92 + 8*GFX_MENUSCALE, buf);
+		}
 	}
 
-	M_Print (76, 92 + 8*GFX_CONALPHA,	"Console Alpha   :");
-	M_DrawSliderValue (220, 92 + 8*GFX_CONALPHA,
-		scr_conalpha.value, "%.2f", scr_conalpha.value);
-
-	M_Print (76, 92 + 8*GFX_CONBRIGHT,	"Console Bright  :");
-	M_DrawSliderValue (220, 92 + 8*GFX_CONBRIGHT,
-		scr_conbrightness.value * 0.5f, "%.2f", scr_conbrightness.value);
-
-	M_Print (76, 92 + 8*GFX_CONMAXCOLS,	"Console Max Cols:");
-	if (con_maxcols.integer <= 0)
-		M_PrintWhite (220, 92 + 8*GFX_CONMAXCOLS, "Off");
-	else
+	if (!M_Graphics_IsSkip(GFX_CROSSHAIRSCALE))
 	{
-		char buf[8];
-		snprintf(buf, sizeof(buf), "%d", con_maxcols.integer);
-		M_PrintWhite (220, 92 + 8*GFX_CONMAXCOLS, buf);
+		M_Print (76, 92 + 8*GFX_CROSSHAIRSCALE, gfx_labels[GFX_CROSSHAIRSCALE]);
+		if ((int)scr_crosshairscale.value == 0)
+			M_PrintWhite (220, 92 + 8*GFX_CROSSHAIRSCALE, "Auto");
+		else
+		{
+			char buf[8];
+			snprintf(buf, sizeof(buf), "%dx", (int)scr_crosshairscale.value);
+			M_PrintWhite (220, 92 + 8*GFX_CROSSHAIRSCALE, buf);
+		}
 	}
 
-	M_Print (76, 92 + 8*GFX_HUDTRANS,	"HUD Transparency:");
-	M_PrintWhite (220, 92 + 8*GFX_HUDTRANS,
-		sbtrans.integer == 2 ? "Heavy" :
-		sbtrans.integer == 1 ? "Light" : "Off");
+	if (!M_Graphics_IsSkip(GFX_CONALPHA))
+	{
+		M_Print (76, 92 + 8*GFX_CONALPHA, gfx_labels[GFX_CONALPHA]);
+		M_DrawSliderValue (220, 92 + 8*GFX_CONALPHA,
+			scr_conalpha.value, "%.2f", scr_conalpha.value);
+	}
 
-	M_Print (76, 92 + 8*GFX_OVERBRIGHT,	"Overbright Mdls :");
-	M_DrawCheckbox (220, 92 + 8*GFX_OVERBRIGHT, gl_overbright_models.integer);
+	if (!M_Graphics_IsSkip(GFX_CONBRIGHT))
+	{
+		M_Print (76, 92 + 8*GFX_CONBRIGHT, gfx_labels[GFX_CONBRIGHT]);
+		M_DrawSliderValue (220, 92 + 8*GFX_CONBRIGHT,
+			scr_conbrightness.value * 0.5f, "%.2f", scr_conbrightness.value);
+	}
 
-	M_Print (76, 92 + 8*GFX_COLORED_LM,	"Colored Lighting:");
-	M_DrawCheckbox (220, 92 + 8*GFX_COLORED_LM, gl_coloredlight.integer);
+	if (!M_Graphics_IsSkip(GFX_CONMAXCOLS))
+	{
+		M_Print (76, 92 + 8*GFX_CONMAXCOLS, gfx_labels[GFX_CONMAXCOLS]);
+		if (con_maxcols.integer <= 0)
+			M_PrintWhite (220, 92 + 8*GFX_CONMAXCOLS, "Off");
+		else
+		{
+			char buf[8];
+			snprintf(buf, sizeof(buf), "%d", con_maxcols.integer);
+			M_PrintWhite (220, 92 + 8*GFX_CONMAXCOLS, buf);
+		}
+	}
 
-	M_Print (76, 92 + 8*GFX_TORCH_DLIGHT,	"Wall Torch DLs  :");
-	M_DrawCheckbox (220, 92 + 8*GFX_TORCH_DLIGHT, gl_torch_dlight.integer);
+	if (!M_Graphics_IsSkip(GFX_HUDTRANS))
+	{
+		M_Print (76, 92 + 8*GFX_HUDTRANS, gfx_labels[GFX_HUDTRANS]);
+		M_PrintWhite (220, 92 + 8*GFX_HUDTRANS,
+			sbtrans.integer == 2 ? "Heavy" :
+			sbtrans.integer == 1 ? "Light" : "Off");
+	}
 
-	M_Print (76, 92 + 8*GFX_GLOW_INTENSITY,	"Glow Intensity  :");
-	M_DrawSliderValue (220, 92 + 8*GFX_GLOW_INTENSITY,
-		gl_glow_intensity.value, "%.2f", gl_glow_intensity.value);
+	if (!M_Graphics_IsSkip(GFX_OVERBRIGHT))
+	{
+		M_Print (76, 92 + 8*GFX_OVERBRIGHT, gfx_labels[GFX_OVERBRIGHT]);
+		M_DrawCheckbox (220, 92 + 8*GFX_OVERBRIGHT, gl_overbright_models.integer);
+	}
 
-	M_Print (76, 92 + 8*GFX_SHOWSPEED,	"Show Speed      :");
-	M_DrawCheckbox (220, 92 + 8*GFX_SHOWSPEED,
-		(int)Cvar_VariableValue("scr_showspeed"));
+	if (!M_Graphics_IsSkip(GFX_COLORED_LM))
+	{
+		M_Print (76, 92 + 8*GFX_COLORED_LM, gfx_labels[GFX_COLORED_LM]);
+		M_DrawCheckbox (220, 92 + 8*GFX_COLORED_LM, gl_coloredlight.integer);
+	}
 
-	M_Print (76, 92 + 8*GFX_SHOWCLOCK,	"Show Clock      :");
+	if (!M_Graphics_IsSkip(GFX_TORCH_DLIGHT))
+	{
+		M_Print (76, 92 + 8*GFX_TORCH_DLIGHT, gfx_labels[GFX_TORCH_DLIGHT]);
+		M_DrawCheckbox (220, 92 + 8*GFX_TORCH_DLIGHT, gl_torch_dlight.integer);
+	}
+
+	if (!M_Graphics_IsSkip(GFX_GLOW_INTENSITY))
+	{
+		M_Print (76, 92 + 8*GFX_GLOW_INTENSITY, gfx_labels[GFX_GLOW_INTENSITY]);
+		M_DrawSliderValue (220, 92 + 8*GFX_GLOW_INTENSITY,
+			gl_glow_intensity.value, "%.2f", gl_glow_intensity.value);
+	}
+
+	if (!M_Graphics_IsSkip(GFX_SHOWSPEED))
+	{
+		M_Print (76, 92 + 8*GFX_SHOWSPEED, gfx_labels[GFX_SHOWSPEED]);
+		M_DrawCheckbox (220, 92 + 8*GFX_SHOWSPEED,
+			(int)Cvar_VariableValue("scr_showspeed"));
+	}
+
+	if (!M_Graphics_IsSkip(GFX_SHOWCLOCK))
 	{
 		int v = (int)Cvar_VariableValue("showclock");
+		M_Print (76, 92 + 8*GFX_SHOWCLOCK, gfx_labels[GFX_SHOWCLOCK]);
 		M_PrintWhite (220, 92 + 8*GFX_SHOWCLOCK,
 			v == 3 ? "Wall HH:MM:SS" :
 			v == 2 ? "Wall HH:MM" :
 			v == 1 ? "Game Time" : "Off");
 	}
 
-	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS); if (h >= 0) graphics_cursor = h; }
-	M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
+	{
+		int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GFX_ITEMS);
+		if (h >= 0 && !M_Graphics_IsSkip(h))
+			graphics_cursor = h;
+	}
+	if (!M_Graphics_IsSkip(graphics_cursor))
+		M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
+
+	M_Filter_Draw (76, 92 + 8*(GFX_ITEMS + 1));
 }
 
 static void M_Graphics_Key (int k)
 {
+	if (k != K_ESCAPE && k != K_ENTER &&
+	    k != K_UPARROW && k != K_DOWNARROW &&
+	    k != K_LEFTARROW && k != K_RIGHTARROW)
+	{
+		if (M_Filter_HandleKey (k))
+		{
+			int i;
+			if (M_Graphics_IsSkip (graphics_cursor))
+			{
+				for (i = 0; i < GFX_ITEMS; i++)
+				{
+					if (!M_Graphics_IsSkip (i))
+					{
+						graphics_cursor = i;
+						break;
+					}
+				}
+			}
+			return;
+		}
+	}
+
 	switch (k)
 	{
 	case K_ESCAPE:
+		if (M_Filter_Active ())
+		{
+			M_Filter_Clear ();
+			return;
+		}
 		M_Menu_Display_f ();
 		break;
 	case K_ENTER:
@@ -3096,15 +3510,25 @@ static void M_Graphics_Key (int k)
 		return;
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		graphics_cursor--;
-		if (graphics_cursor < 0)
-			graphics_cursor = GFX_ITEMS-1;
+		{
+			int guard = GFX_ITEMS;
+			do {
+				graphics_cursor--;
+				if (graphics_cursor < 0)
+					graphics_cursor = GFX_ITEMS-1;
+			} while (M_Graphics_IsSkip (graphics_cursor) && --guard > 0);
+		}
 		break;
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		graphics_cursor++;
-		if (graphics_cursor >= GFX_ITEMS)
-			graphics_cursor = 0;
+		{
+			int guard = GFX_ITEMS;
+			do {
+				graphics_cursor++;
+				if (graphics_cursor >= GFX_ITEMS)
+					graphics_cursor = 0;
+			} while (M_Graphics_IsSkip (graphics_cursor) && --guard > 0);
+		}
 		break;
 	case K_LEFTARROW:
 		M_Graphics_AdjustSliders (-1);
@@ -3307,11 +3731,35 @@ enum
 
 static int	game_cursor;
 
+static const char *game_labels[GAME_ITEMS] = {
+	"Field of View :",	/* GAME_FOV */
+	"Gun FOV Scale :",	/* GAME_GUN_FOVSCALE */
+	"Always Run    :",	/* GAME_ALWAYRUN */
+	"Mouse Speed   :",	/* GAME_MOUSESPEED */
+	"Invert Mouse  :",	/* GAME_INVMOUSE */
+	"Mouse Look    :",	/* GAME_MLOOK */
+	"Use Mouse     :",	/* GAME_USEMOUSE */
+	"Raw Input     :",	/* GAME_RAWINPUT */
+	"Mouse Filter  :",	/* GAME_MFILTER */
+	"Crosshair     :",	/* GAME_CROSSHAIR */
+	"Chase Mode    :",	/* GAME_CHASE */
+	"View Bob      :",	/* GAME_VIEWBOB */
+	"View Roll     :",	/* GAME_VIEWROLL */
+	"Console Alpha :",	/* GAME_CONTRANS */
+};
+
+static qboolean M_Game_IsSkip (int i)
+{
+	if (i < 0 || i >= GAME_ITEMS) return true;
+	return M_Filter_Active() && !M_Filter_Matches(game_labels[i]);
+}
+
 static void M_Menu_Game_f (void)
 {
 	Key_SetDest (key_menu);
 	m_state = m_game;
 	m_entersound = true;
+	M_Filter_Clear ();
 }
 
 static void M_Game_AdjustSliders (int dir)
@@ -3399,71 +3847,143 @@ static void M_Game_Draw (void)
 	ScrollTitle("gfx/menu/title3.lmp");
 	M_PrintWhite (96, 72, "Game Options");
 
-	M_Print (76, 92 + 8*GAME_FOV,		"Field of View :");
-	r = (scr_fov.value - 60) / (130 - 60);
-	M_DrawSliderValue (220, 92 + 8*GAME_FOV, r, "%.0f°", scr_fov.value);
+	if (!M_Game_IsSkip(GAME_FOV))
+	{
+		M_Print (76, 92 + 8*GAME_FOV, game_labels[GAME_FOV]);
+		r = (scr_fov.value - 60) / (130 - 60);
+		M_DrawSliderValue (220, 92 + 8*GAME_FOV, r, "%.0f°", scr_fov.value);
+	}
 
-	M_Print (76, 92 + 8*GAME_GUN_FOVSCALE,	"Gun FOV Scale :");
+	if (!M_Game_IsSkip(GAME_GUN_FOVSCALE))
 	{
 		float s = Cvar_VariableValue("cl_gun_fovscale");
+		M_Print (76, 92 + 8*GAME_GUN_FOVSCALE, game_labels[GAME_GUN_FOVSCALE]);
 		if (s <= 0)
 			M_PrintWhite (220, 92 + 8*GAME_GUN_FOVSCALE, "Off");
 		else
 			M_DrawSliderValue (220, 92 + 8*GAME_GUN_FOVSCALE, s, "%.0f%%", s * 100);
 	}
 
-	M_Print (76, 92 + 8*GAME_ALWAYRUN,	"Always Run    :");
-	M_DrawCheckbox (220, 92 + 8*GAME_ALWAYRUN, cl_alwaysrun.integer);
+	if (!M_Game_IsSkip(GAME_ALWAYRUN))
+	{
+		M_Print (76, 92 + 8*GAME_ALWAYRUN, game_labels[GAME_ALWAYRUN]);
+		M_DrawCheckbox (220, 92 + 8*GAME_ALWAYRUN, cl_alwaysrun.integer);
+	}
 
-	M_Print (76, 92 + 8*GAME_MOUSESPEED,	"Mouse Speed   :");
-	r = (sensitivity.value - 1) / 10;
-	M_DrawSliderValue (220, 92 + 8*GAME_MOUSESPEED, r, "%.2f", sensitivity.value);
+	if (!M_Game_IsSkip(GAME_MOUSESPEED))
+	{
+		M_Print (76, 92 + 8*GAME_MOUSESPEED, game_labels[GAME_MOUSESPEED]);
+		r = (sensitivity.value - 1) / 10;
+		M_DrawSliderValue (220, 92 + 8*GAME_MOUSESPEED, r, "%.2f", sensitivity.value);
+	}
 
-	M_Print (76, 92 + 8*GAME_INVMOUSE,	"Invert Mouse  :");
-	M_DrawCheckbox (220, 92 + 8*GAME_INVMOUSE, m_pitch.value < 0);
+	if (!M_Game_IsSkip(GAME_INVMOUSE))
+	{
+		M_Print (76, 92 + 8*GAME_INVMOUSE, game_labels[GAME_INVMOUSE]);
+		M_DrawCheckbox (220, 92 + 8*GAME_INVMOUSE, m_pitch.value < 0);
+	}
 
-	M_Print (76, 92 + 8*GAME_MLOOK,	"Mouse Look    :");
-	M_DrawCheckbox (220, 92 + 8*GAME_MLOOK, in_mlook.state & 1);
+	if (!M_Game_IsSkip(GAME_MLOOK))
+	{
+		M_Print (76, 92 + 8*GAME_MLOOK, game_labels[GAME_MLOOK]);
+		M_DrawCheckbox (220, 92 + 8*GAME_MLOOK, in_mlook.state & 1);
+	}
 
-	M_Print (76, 92 + 8*GAME_USEMOUSE,	"Use Mouse     :");
-	M_DrawCheckbox (220, 92 + 8*GAME_USEMOUSE, _enable_mouse.integer);
+	if (!M_Game_IsSkip(GAME_USEMOUSE))
+	{
+		M_Print (76, 92 + 8*GAME_USEMOUSE, game_labels[GAME_USEMOUSE]);
+		M_DrawCheckbox (220, 92 + 8*GAME_USEMOUSE, _enable_mouse.integer);
+	}
 
-	M_Print (76, 92 + 8*GAME_RAWINPUT,	"Raw Input     :");
-	M_DrawCheckbox (220, 92 + 8*GAME_RAWINPUT, (int)Cvar_VariableValue("m_rawinput"));
+	if (!M_Game_IsSkip(GAME_RAWINPUT))
+	{
+		M_Print (76, 92 + 8*GAME_RAWINPUT, game_labels[GAME_RAWINPUT]);
+		M_DrawCheckbox (220, 92 + 8*GAME_RAWINPUT, (int)Cvar_VariableValue("m_rawinput"));
+	}
 
-	M_Print (76, 92 + 8*GAME_MFILTER,	"Mouse Filter  :");
-	M_DrawCheckbox (220, 92 + 8*GAME_MFILTER, m_filter.integer);
+	if (!M_Game_IsSkip(GAME_MFILTER))
+	{
+		M_Print (76, 92 + 8*GAME_MFILTER, game_labels[GAME_MFILTER]);
+		M_DrawCheckbox (220, 92 + 8*GAME_MFILTER, m_filter.integer);
+	}
 
-	M_Print (76, 92 + 8*GAME_CROSSHAIR,	"Crosshair     :");
-	M_DrawCheckbox (220, 92 + 8*GAME_CROSSHAIR, crosshair.integer);
+	if (!M_Game_IsSkip(GAME_CROSSHAIR))
+	{
+		M_Print (76, 92 + 8*GAME_CROSSHAIR, game_labels[GAME_CROSSHAIR]);
+		M_DrawCheckbox (220, 92 + 8*GAME_CROSSHAIR, crosshair.integer);
+	}
 
-	M_Print (76, 92 + 8*GAME_CHASE,	"Chase Mode    :");
-	M_DrawCheckbox (220, 92 + 8*GAME_CHASE, chase_active.integer);
+	if (!M_Game_IsSkip(GAME_CHASE))
+	{
+		M_Print (76, 92 + 8*GAME_CHASE, game_labels[GAME_CHASE]);
+		M_DrawCheckbox (220, 92 + 8*GAME_CHASE, chase_active.integer);
+	}
 
-	M_Print (76, 92 + 8*GAME_VIEWBOB,	"View Bob      :");
-	r = Cvar_VariableValue("cl_bob") / 0.05;
-	M_DrawSliderValue (220, 92 + 8*GAME_VIEWBOB, r, "%.0f%%", Cvar_VariableValue("cl_bob") * 100);
+	if (!M_Game_IsSkip(GAME_VIEWBOB))
+	{
+		M_Print (76, 92 + 8*GAME_VIEWBOB, game_labels[GAME_VIEWBOB]);
+		r = Cvar_VariableValue("cl_bob") / 0.05;
+		M_DrawSliderValue (220, 92 + 8*GAME_VIEWBOB, r, "%.0f%%", Cvar_VariableValue("cl_bob") * 100);
+	}
 
-	M_Print (76, 92 + 8*GAME_VIEWROLL,	"View Roll     :");
-	r = Cvar_VariableValue("cl_rollangle") / 5.0;
-	M_DrawSliderValue (220, 92 + 8*GAME_VIEWROLL, r, "%.0f%%", Cvar_VariableValue("cl_rollangle") * 20);
+	if (!M_Game_IsSkip(GAME_VIEWROLL))
+	{
+		M_Print (76, 92 + 8*GAME_VIEWROLL, game_labels[GAME_VIEWROLL]);
+		r = Cvar_VariableValue("cl_rollangle") / 5.0;
+		M_DrawSliderValue (220, 92 + 8*GAME_VIEWROLL, r, "%.0f%%", Cvar_VariableValue("cl_rollangle") * 20);
+	}
 
-	M_Print (76, 92 + 8*GAME_CONTRANS,	"Console Alpha :");
+	if (!M_Game_IsSkip(GAME_CONTRANS))
 	{
 		int ct = (int)Cvar_VariableValue("contrans");
+		M_Print (76, 92 + 8*GAME_CONTRANS, game_labels[GAME_CONTRANS]);
 		M_PrintWhite (220, 92 + 8*GAME_CONTRANS,
 			ct == 0 ? "Opaque" : ct == 1 ? "Light" : "Clear");
 	}
 
-	{ int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GAME_ITEMS); if (h >= 0) game_cursor = h; }
-	M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
+	{
+		int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GAME_ITEMS);
+		if (h >= 0 && !M_Game_IsSkip(h))
+			game_cursor = h;
+	}
+	if (!M_Game_IsSkip(game_cursor))
+		M_DrawCharacter (64, 92 + game_cursor*8, 12+((int)(realtime*4)&1));
+
+	M_Filter_Draw (76, 92 + 8*(GAME_ITEMS + 1));
 }
 
 static void M_Game_Key (int k)
 {
+	if (k != K_ESCAPE && k != K_ENTER &&
+	    k != K_UPARROW && k != K_DOWNARROW &&
+	    k != K_LEFTARROW && k != K_RIGHTARROW)
+	{
+		if (M_Filter_HandleKey (k))
+		{
+			int i;
+			if (M_Game_IsSkip (game_cursor))
+			{
+				for (i = 0; i < GAME_ITEMS; i++)
+				{
+					if (!M_Game_IsSkip (i))
+					{
+						game_cursor = i;
+						break;
+					}
+				}
+			}
+			return;
+		}
+	}
+
 	switch (k)
 	{
 	case K_ESCAPE:
+		if (M_Filter_Active ())
+		{
+			M_Filter_Clear ();
+			return;
+		}
 		M_Menu_Options_f ();
 		break;
 	case K_ENTER:
@@ -3472,15 +3992,25 @@ static void M_Game_Key (int k)
 		return;
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		game_cursor--;
-		if (game_cursor < 0)
-			game_cursor = GAME_ITEMS-1;
+		{
+			int guard = GAME_ITEMS;
+			do {
+				game_cursor--;
+				if (game_cursor < 0)
+					game_cursor = GAME_ITEMS-1;
+			} while (M_Game_IsSkip (game_cursor) && --guard > 0);
+		}
 		break;
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		game_cursor++;
-		if (game_cursor >= GAME_ITEMS)
-			game_cursor = 0;
+		{
+			int guard = GAME_ITEMS;
+			do {
+				game_cursor++;
+				if (game_cursor >= GAME_ITEMS)
+					game_cursor = 0;
+			} while (M_Game_IsSkip (game_cursor) && --guard > 0);
+		}
 		break;
 	case K_LEFTARROW:
 		M_Game_AdjustSliders (-1);
