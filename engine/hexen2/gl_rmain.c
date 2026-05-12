@@ -125,6 +125,16 @@ cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
  * turbs.  Modders with translucent custom liquids that don't match the
  * substring heuristics can set this to 0.7 in autoexec. */
 cvar_t	r_turbalpha = {"r_turbalpha", "1", CVAR_ARCHIVE};
+/* Heal T-junctions between adjacent turb (water/lava/slime) surfaces at
+ * map load.  Mappers commonly build a lava pool out of many small brushes;
+ * each brush is subdivided independently, so adjacent surfaces don't share
+ * a common vertex on every shared edge.  The per-vertex sin warp +
+ * Z-ripple amplifies the gap at every T-junction into a visible crack.
+ * Fix: walk all turb polys after subdivision, find vertices that lie
+ * strictly inside another turb poly's edge, and insert them as Steiner
+ * points so the warp math produces a continuous output across the seam.
+ * uhexen2-9o7u. */
+cvar_t	r_turbtjunc = {"r_turbtjunc", "1", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */

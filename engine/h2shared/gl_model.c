@@ -2032,6 +2032,15 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		}
 	}
 
+	/* Heal T-junctions between adjacent turb surfaces (uhexen2-9o7u):
+	 * each turb surface was subdivided independently, so adjacent
+	 * brushes can have vertices on each other's edges that don't match,
+	 * producing visible cracks when the per-vertex warp displaces them.
+	 * Must run AFTER all turb surfaces have had GL_SubdivideSurface
+	 * applied (in Mod_LoadFaces) and BEFORE submodel partitioning so
+	 * every submodel sees the healed surfaces. */
+	GL_HealTurbTJunctions (loadmodel);
+
 	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
 	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
 	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);

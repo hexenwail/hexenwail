@@ -260,6 +260,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_turbalpha);
+	Cvar_RegisterVariable (&r_turbtjunc);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_animsmoothing);

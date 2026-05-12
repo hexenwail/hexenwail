@@ -267,6 +267,7 @@ extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_turbalpha;	/* default alpha for unknown turb names (uhexen2-6697 fallback) */
+extern	cvar_t	r_turbtjunc;	/* heal T-junctions between adjacent turb surfaces (uhexen2-9o7u) */
 extern	cvar_t	r_motionblur;
 extern	cvar_t	r_alias_gpu;
 extern	cvar_t	r_alphatocoverage;
@@ -380,6 +381,7 @@ void R_DrawSkyBox (void);
 void R_ClearSkyBox (void);
 #endif
 void GL_SubdivideSurface (qmodel_t *m, msurface_t *fa);
+void GL_HealTurbTJunctions (qmodel_t *mod);
 void EmitWaterPolys (msurface_t *fa);
 void EmitBothSkyLayers (msurface_t *fa);
 void R_DrawSkyChain (msurface_t *s);

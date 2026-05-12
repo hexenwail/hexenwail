@@ -277,6 +277,317 @@ void EmitWaterPolys (msurface_t *fa)
 
 /*
 =============
+GL_HealTurbTJunctions  (uhexen2-9o7u)
+
+Each turb surface is subdivided independently by GL_SubdivideSurface, so
+adjacent same-content brush surfaces routinely have T-junctions where one
+side has a vertex on a shared edge that the other side treats as a single
+straight segment.  The CPU per-vertex sin warp + Z-ripple then displaces
+the "vertex" side off the "straight" side's interpolated line, producing
+visible cracks/seams (Mathuzzz's small-brush-lava artifact).
+
+Fix: walk every turb poly, find any other turb vertex that lies strictly
+inside one of its edges, and insert it as a Steiner point.  After this
+pass, every shared world edge between turb surfaces has the same vertex
+set on both sides, so any deterministic per-vertex warp matches.
+
+Memory: replaced polys allocate a new glpoly_t on the hunk; the old poly
+becomes unreachable (hunk doesn't free, but this runs once at map load).
+=============
+*/
+#define TJ_CELL_BITS	6				/* 64 units = SUBDIVIDE_SIZE */
+#define TJ_CELL		(1 << TJ_CELL_BITS)
+#define TJ_HASH_BITS	14
+#define TJ_HASH_SIZE	(1 << TJ_HASH_BITS)
+#define TJ_HASH_MASK	(TJ_HASH_SIZE - 1)
+#define TJ_EPS		0.5f			/* endpoint coincidence */
+#define TJ_EPS_SQ	(TJ_EPS * TJ_EPS)
+#define TJ_PERP_EPS	0.5f			/* perpendicular distance to edge */
+#define TJ_PERP_EPS_SQ	(TJ_PERP_EPS * TJ_PERP_EPS)
+#define TJ_T_MIN	0.001f			/* min/max parametric t along edge */
+#define TJ_T_MAX	0.999f
+#define TJ_MAX_INSERTS_PER_EDGE	16
+#define TJ_MAX_EDGES_PER_POLY	64
+
+static int TJ_HashCell (int cx, int cy, int cz)
+{
+	unsigned h = ((unsigned)cx * 73856093u) ^
+		     ((unsigned)cy * 19349663u) ^
+		     ((unsigned)cz * 83492791u);
+	return (int)(h & TJ_HASH_MASK);
+}
+
+void GL_HealTurbTJunctions (qmodel_t *mod)
+{
+	msurface_t	*surf;
+	glpoly_t	*p, **prev_link;
+	int		i, si, vi, k;
+	int		total_verts = 0;
+	int		total_polys = 0;
+	int		nverts = 0;
+	int		healed_edges = 0;
+	int		healed_polys = 0;
+
+	vec3_t		*pts = NULL;
+	int		*pts_next = NULL;
+	int		*cell_head = NULL;
+
+	struct tj_insert {
+		float	t;
+		float	pos[3];
+	} edge_inserts[TJ_MAX_EDGES_PER_POLY][TJ_MAX_INSERTS_PER_EDGE];
+	int		n_edge_inserts[TJ_MAX_EDGES_PER_POLY];
+
+	if (!r_turbtjunc.integer)
+		return;
+	if (!mod || mod->numsurfaces <= 0 || !mod->surfaces)
+		return;
+
+	/* Count turb verts to size scratch */
+	for (si = 0; si < mod->numsurfaces; si++)
+	{
+		surf = &mod->surfaces[si];
+		if (!(surf->flags & SURF_DRAWTURB))
+			continue;
+		for (p = surf->polys; p; p = p->next)
+		{
+			total_verts += p->numverts;
+			total_polys++;
+		}
+	}
+	if (total_verts == 0)
+		return;
+
+	pts       = (vec3_t *) Z_Malloc (total_verts * sizeof(vec3_t), Z_MAINZONE);
+	pts_next  = (int *)    Z_Malloc (total_verts * sizeof(int),    Z_MAINZONE);
+	cell_head = (int *)    Z_Malloc (TJ_HASH_SIZE * sizeof(int),   Z_MAINZONE);
+	if (!pts || !pts_next || !cell_head)
+		goto cleanup;
+	for (i = 0; i < TJ_HASH_SIZE; i++)
+		cell_head[i] = -1;
+
+	/* Bucket every turb vertex */
+	for (si = 0; si < mod->numsurfaces; si++)
+	{
+		surf = &mod->surfaces[si];
+		if (!(surf->flags & SURF_DRAWTURB))
+			continue;
+		for (p = surf->polys; p; p = p->next)
+		{
+			for (i = 0; i < p->numverts; i++)
+			{
+				float *v = p->verts[i];
+				int cx = (int)floor(v[0] / TJ_CELL);
+				int cy = (int)floor(v[1] / TJ_CELL);
+				int cz = (int)floor(v[2] / TJ_CELL);
+				int h  = TJ_HashCell(cx, cy, cz);
+				VectorCopy (v, pts[nverts]);
+				pts_next[nverts] = cell_head[h];
+				cell_head[h]     = nverts;
+				nverts++;
+			}
+		}
+	}
+
+	/* Heal each turb surface's poly chain */
+	for (si = 0; si < mod->numsurfaces; si++)
+	{
+		surf = &mod->surfaces[si];
+		if (!(surf->flags & SURF_DRAWTURB))
+			continue;
+
+		prev_link = &surf->polys;
+		p = surf->polys;
+		while (p)
+		{
+			glpoly_t *next = p->next;
+			int nv = p->numverts;
+			int total_inserts = 0;
+			int new_nv;
+			glpoly_t *newp;
+			int dst;
+
+			if (nv < 3 || nv > TJ_MAX_EDGES_PER_POLY)
+			{
+				prev_link = &p->next;
+				p = next;
+				continue;
+			}
+
+			for (i = 0; i < nv; i++)
+				n_edge_inserts[i] = 0;
+
+			/* For each edge of this poly, query the spatial hash */
+			for (i = 0; i < nv; i++)
+			{
+				float *a, *b;
+				vec3_t ab, av, perp, proj;
+				float lensq, t, dsq;
+				int cxlo, cylo, czlo, cxhi, cyhi, czhi, cx, cy, cz;
+				float emins[3], emaxs[3];
+				int j = (i + 1) % nv;
+
+				a = p->verts[i];
+				b = p->verts[j];
+				VectorSubtract (b, a, ab);
+				lensq = DotProduct (ab, ab);
+				if (lensq < 0.001f)
+					continue;
+
+				for (k = 0; k < 3; k++)
+				{
+					emins[k] = (a[k] < b[k]) ? a[k] : b[k];
+					emaxs[k] = (a[k] > b[k]) ? a[k] : b[k];
+				}
+				/* Over-query by 1 cell to cover verts that hash
+				 * to a neighboring cell due to floor() rounding
+				 * at a cell boundary. */
+				cxlo = (int)floor(emins[0] / TJ_CELL) - 1;
+				cylo = (int)floor(emins[1] / TJ_CELL) - 1;
+				czlo = (int)floor(emins[2] / TJ_CELL) - 1;
+				cxhi = (int)floor(emaxs[0] / TJ_CELL) + 1;
+				cyhi = (int)floor(emaxs[1] / TJ_CELL) + 1;
+				czhi = (int)floor(emaxs[2] / TJ_CELL) + 1;
+
+				for (cz = czlo; cz <= czhi; cz++)
+				for (cy = cylo; cy <= cyhi; cy++)
+				for (cx = cxlo; cx <= cxhi; cx++)
+				{
+					int h = TJ_HashCell(cx, cy, cz);
+					int dup;
+					float *v;
+					for (vi = cell_head[h]; vi != -1; vi = pts_next[vi])
+					{
+						v = pts[vi];
+						VectorSubtract (v, a, av);
+						if (DotProduct (av, av) < TJ_EPS_SQ)
+							continue;
+						{
+							vec3_t bv;
+							VectorSubtract (v, b, bv);
+							if (DotProduct (bv, bv) < TJ_EPS_SQ)
+								continue;
+						}
+						t = DotProduct (av, ab) / lensq;
+						if (t < TJ_T_MIN || t > TJ_T_MAX)
+							continue;
+						proj[0] = a[0] + t * ab[0];
+						proj[1] = a[1] + t * ab[1];
+						proj[2] = a[2] + t * ab[2];
+						VectorSubtract (v, proj, perp);
+						dsq = DotProduct (perp, perp);
+						if (dsq > TJ_PERP_EPS_SQ)
+							continue;
+						/* Dedup against verts already
+						 * recorded on this edge (the
+						 * same world position may live
+						 * in many turb polys). */
+						dup = 0;
+						for (k = 0; k < n_edge_inserts[i]; k++)
+						{
+							if (fabs(edge_inserts[i][k].t - t) < TJ_T_MIN)
+							{
+								dup = 1;
+								break;
+							}
+						}
+						if (dup)
+							continue;
+						if (n_edge_inserts[i] >= TJ_MAX_INSERTS_PER_EDGE)
+							continue;
+						edge_inserts[i][n_edge_inserts[i]].t = t;
+						edge_inserts[i][n_edge_inserts[i]].pos[0] = v[0];
+						edge_inserts[i][n_edge_inserts[i]].pos[1] = v[1];
+						edge_inserts[i][n_edge_inserts[i]].pos[2] = v[2];
+						n_edge_inserts[i]++;
+						total_inserts++;
+					}
+				}
+			}
+
+			if (total_inserts == 0)
+			{
+				prev_link = &p->next;
+				p = next;
+				continue;
+			}
+
+			/* Sort each edge's inserts by t (small n, bubble sort) */
+			for (i = 0; i < nv; i++)
+			{
+				int a, c;
+				for (a = 0; a < n_edge_inserts[i]; a++)
+				for (c = a + 1; c < n_edge_inserts[i]; c++)
+				{
+					if (edge_inserts[i][c].t < edge_inserts[i][a].t)
+					{
+						struct tj_insert tmp = edge_inserts[i][a];
+						edge_inserts[i][a] = edge_inserts[i][c];
+						edge_inserts[i][c] = tmp;
+					}
+				}
+			}
+
+			new_nv = nv + total_inserts;
+			newp = (glpoly_t *) Hunk_AllocName (
+				sizeof(glpoly_t) + (new_nv - 4) * VERTEXSIZE * sizeof(float),
+				"tjheal");
+			newp->numverts = new_nv;
+			newp->flags    = p->flags;
+			VectorCopy (p->mins, newp->mins);
+			VectorCopy (p->maxs, newp->maxs);
+			newp->chain    = NULL;
+
+			dst = 0;
+			for (i = 0; i < nv; i++)
+			{
+				/* Copy original vertex */
+				for (k = 0; k < VERTEXSIZE; k++)
+					newp->verts[dst][k] = p->verts[i][k];
+				dst++;
+				/* Emit Steiner inserts on edge i */
+				for (k = 0; k < n_edge_inserts[i]; k++)
+				{
+					float *nv2 = newp->verts[dst];
+					float *pos = edge_inserts[i][k].pos;
+					float ts, tt;
+					nv2[0] = pos[0];
+					nv2[1] = pos[1];
+					nv2[2] = pos[2];
+					/* Texture coords from texinfo, same
+					 * formula as SubdividePolygon */
+					ts = DotProduct (pos, surf->texinfo->vecs[0]);
+					tt = DotProduct (pos, surf->texinfo->vecs[1]);
+					nv2[3] = ts;
+					nv2[4] = tt;
+					nv2[5] = 0.0f;
+					nv2[6] = 0.0f;
+					dst++;
+				}
+			}
+
+			newp->next = next;
+			*prev_link = newp;
+			prev_link  = &newp->next;
+			p          = next;
+			healed_edges += total_inserts;
+			healed_polys++;
+		}
+	}
+
+	Con_DPrintf ("GL_HealTurbTJunctions: %s — %d polys, %d inserts across %d healed polys\n",
+		mod->name ? mod->name : "(unnamed)",
+		total_polys, healed_edges, healed_polys);
+
+cleanup:
+	if (pts)       Z_Free (pts);
+	if (pts_next)  Z_Free (pts_next);
+	if (cell_head) Z_Free (cell_head);
+}
+
+
+/*
+=============
 EmitSkyPolys
 =============
 */
