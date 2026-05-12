@@ -37,6 +37,11 @@ int		con_ormask;
 
 static	cvar_t	con_notifytime = {"con_notifytime", "3", CVAR_NONE};	//seconds
 static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* center notify text horizontally */
+/* Optional cap on console line width.  0 = no cap (use full screen).
+ * At 4K the natural width is ~238 cols, which is unreadable; this lets
+ * the user pin a saner column count (e.g. 80, 100, 120) regardless of
+ * display resolution. */
+static	cvar_t	con_maxcols = {"con_maxcols", "0", CVAR_ARCHIVE};
 
 #define	NUM_CON_TIMES 4
 static float	con_times[NUM_CON_TIMES];	// realtime time the line was generated
@@ -152,6 +157,13 @@ void Con_CheckResize (void)
 
 	width = (vid.width >> 3) - 2;
 
+	/* User-imposed column cap (con_maxcols).  Clamp to >= 38 to keep
+	 * the same minimum the uninitialized-video fallback uses below. */
+	if (con_maxcols.integer > 0 && width > con_maxcols.integer)
+		width = con_maxcols.integer;
+	if (width < 38)
+		width = 38;
+
 	if (width == con_linewidth)
 		return;
 
@@ -213,6 +225,7 @@ void Con_Init (void)
 
 	Cvar_RegisterVariable (&con_notifytime);
 	Cvar_RegisterVariable (&con_notifycenter);
+	Cvar_RegisterVariable (&con_maxcols);
 
 	Cmd_AddCommand ("toggleconsole", Con_ToggleConsole_f);
 	Cmd_AddCommand ("messagemode", Con_MessageMode_f);
