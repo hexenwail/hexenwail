@@ -147,7 +147,11 @@ static const char oit_resolve_vert[] =
 
 static const char oit_resolve_frag[] =
 	"#version 430 core\n"
-	"layout(early_fragment_tests) in;\n"
+	/* early_fragment_tests removed: with both depth and stencil tests
+	 * disabled at OIT_End, the qualifier is a no-op on conformant
+	 * drivers but has been observed to cause silent fragment drops on
+	 * Mesa/AMD with non-default stencil mask state.  Letting the tests
+	 * run their natural (disabled) path is harmless. */
 	"layout(binding=0) uniform sampler2D TexAccum;\n"
 	"layout(binding=1) uniform sampler2D TexReveal;\n"
 	"layout(location=0) out vec4 out_fragcolor;\n"
@@ -904,6 +908,11 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	 * triangle only rasterizes inside that sub-rect and the rest of
 	 * the scene gets none of the OIT composite. */
 	glViewport_fp(0, 0, pp_width, pp_height);
+
+	/* Force all color components writable — a left-over glColorMask
+	 * (e.g. sky stencil pre-pass at gl_rsurf.c:1620 if it exited
+	 * early) would silently mask the resolve writes. */
+	glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	/* Fullscreen triangle via gl_VertexID — needs a VAO bound in GL 4.3
 	 * core profile or the draw is silently discarded. */

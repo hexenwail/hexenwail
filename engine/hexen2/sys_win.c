@@ -22,10 +22,12 @@
 #include "winquake.h"
 #include "sys_sdl.h"
 #include "debuglog.h"
-
+#include <wchar.h>
 
 #define MIN_MEM_ALLOC	0x4000000	/* 64 mb */
 #define STD_MEM_ALLOC	0x20000000	/* 512 mb */
+
+#define q_swprintf _snwprintf
 
 #define CONSOLE_ERROR_TIMEOUT	60.0
 
