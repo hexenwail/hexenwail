@@ -46,9 +46,36 @@ FILE IO
 ===============================================================================
 */
 
+/* Convert UTF-8 path to UTF-16 for Windows API calls */
+static wchar_t *Sys_UTF8ToWide (const char *utf8path)
+{
+	static wchar_t widepath[MAX_PATH];
+	int len = MultiByteToWideChar(CP_UTF8, 0, utf8path, -1, widepath, MAX_PATH);
+	if (len == 0)
+		return NULL;
+	return widepath;
+}
+
+/* Convert UTF-16 filename to UTF-8 for return to engine */
+static const char *Sys_WideToUTF8 (const wchar_t *widename)
+{
+	static char utf8name[MAX_OSPATH];
+	int len = WideCharToMultiByte(CP_UTF8, 0, widename, -1, utf8name, sizeof(utf8name), NULL, NULL);
+	if (len == 0)
+		return NULL;
+	return utf8name;
+}
+
 int Sys_mkdir (const char *path, qboolean crash)
 {
-	if (CreateDirectory(path, NULL) != 0)
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+	{
+		if (crash)
+			Sys_Error("Unable to convert path to UTF-16: %s", path);
+		return -1;
+	}
+	if (CreateDirectoryW(widepath, NULL) != 0)
 		return 0;
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
 		return 0;
@@ -59,21 +86,31 @@ int Sys_mkdir (const char *path, qboolean crash)
 
 int Sys_rmdir (const char *path)
 {
-	if (RemoveDirectory(path) != 0)
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+		return -1;
+	if (RemoveDirectoryW(widepath) != 0)
 		return 0;
 	return -1;
 }
 
 int Sys_unlink (const char *path)
 {
-	if (DeleteFile(path) != 0)
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+		return -1;
+	if (DeleteFileW(widepath) != 0)
 		return 0;
 	return -1;
 }
 
 int Sys_rename (const char *oldp, const char *newp)
 {
-	if (MoveFile(oldp, newp) != 0)
+	wchar_t *wideoldp = Sys_UTF8ToWide(oldp);
+	wchar_t *widenewp = Sys_UTF8ToWide(newp);
+	if (!wideoldp || !widenewp)
+		return -1;
+	if (MoveFileW(wideoldp, widenewp) != 0)
 		return 0;
 	return -1;
 }
@@ -81,10 +118,13 @@ int Sys_rename (const char *oldp, const char *newp)
 long Sys_filesize (const char *path)
 {
 	HANDLE fh;
-	WIN32_FIND_DATA data;
+	WIN32_FIND_DATAW data;
 	long size;
+	wchar_t *widepath = Sys_UTF8ToWide(path);
 
-	fh = FindFirstFile(path, &data);
+	if (!widepath)
+		return -1;
+	fh = FindFirstFileW(widepath, &data);
 	if (fh == INVALID_HANDLE_VALUE)
 		return -1;
 	FindClose(fh);
@@ -99,7 +139,12 @@ long Sys_filesize (const char *path)
 #endif
 int Sys_FileType (const char *path)
 {
-	DWORD result = GetFileAttributes(path);
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	DWORD result;
+
+	if (!widepath)
+		return FS_ENT_NONE;
+	result = GetFileAttributesW(widepath);
 
 	if (result == INVALID_FILE_ATTRIBUTES)
 		return FS_ENT_NONE;
@@ -111,7 +156,12 @@ int Sys_FileType (const char *path)
 
 int Sys_CopyFile (const char *frompath, const char *topath)
 {
-	if (CopyFile(frompath, topath, FALSE) != 0)
+	wchar_t *widefrom = Sys_UTF8ToWide(frompath);
+	wchar_t *wideto = Sys_UTF8ToWide(topath);
+
+	if (!widefrom || !wideto)
+		return -1;
+	if (CopyFileW(widefrom, wideto, FALSE) != 0)
 		return 0;
 	return -1;
 }
@@ -122,31 +172,34 @@ simplified findfirst/findnext implementation
 =================================================
 */
 static HANDLE findhandle = INVALID_HANDLE_VALUE;
-static WIN32_FIND_DATA finddata;
-static char	findstr[MAX_OSPATH];
+static WIN32_FIND_DATAW finddata;
+static wchar_t	findstr[MAX_OSPATH];
 
 const char *Sys_FindFirstFile (const char *path, const char *pattern)
 {
+	wchar_t *widepath = Sys_UTF8ToWide(path);
 	if (findhandle != INVALID_HANDLE_VALUE)
 		Sys_Error ("Sys_FindFirst without FindClose");
-	q_snprintf (findstr, sizeof(findstr), "%s/%s", path, pattern);
-	findhandle = FindFirstFile(findstr, &finddata);
+	if (!widepath)
+		return NULL;
+	q_swprintf (findstr, sizeof(findstr)/sizeof(wchar_t), L"%s/%hs", widepath, pattern);
+	findhandle = FindFirstFileW(findstr, &finddata);
 	if (findhandle == INVALID_HANDLE_VALUE)
 		return NULL;
 	if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 		return Sys_FindNextFile();
-	return finddata.cFileName;
+	return Sys_WideToUTF8(finddata.cFileName);
 }
 
 const char *Sys_FindNextFile (void)
 {
 	if (findhandle == INVALID_HANDLE_VALUE)
 		return NULL;
-	while (FindNextFile(findhandle, &finddata) != 0)
+	while (FindNextFileW(findhandle, &finddata) != 0)
 	{
 		if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
-		return finddata.cFileName;
+		return Sys_WideToUTF8(finddata.cFileName);
 	}
 	return NULL;
 }
@@ -163,13 +216,18 @@ void Sys_FindClose (void)
 
 int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
 {
-	WIN32_FIND_DATA	fdata;
+	WIN32_FIND_DATAW	fdata;
 	HANDLE		fh;
-	char		searchstr[MAX_OSPATH];
+	wchar_t		searchstr[MAX_OSPATH];
+	wchar_t		*widepath;
+	const char	*utf8name;
 	int		count = 0;
 
-	q_snprintf(searchstr, sizeof(searchstr), "%s/*", path);
-	fh = FindFirstFile(searchstr, &fdata);
+	widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+		return 0;
+	q_swprintf(searchstr, sizeof(searchstr)/sizeof(wchar_t), L"%s/*", widepath);
+	fh = FindFirstFileW(searchstr, &fdata);
 	if (fh == INVALID_HANDLE_VALUE)
 		return 0;
 
@@ -177,11 +235,13 @@ int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
 	{
 		if (!(fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
 			continue;
-		if (fdata.cFileName[0] == '.')
+		if (fdata.cFileName[0] == L'.')
 			continue;	/* skip ".", ".." and hidden dirs */
-		q_strlcpy(dirs[count], fdata.cFileName, 64);
+		utf8name = Sys_WideToUTF8(fdata.cFileName);
+		if (utf8name)
+			q_strlcpy(dirs[count], utf8name, 64);
 		count++;
-	} while (FindNextFile(fh, &fdata) != 0 && count < maxdirs);
+	} while (FindNextFileW(fh, &fdata) != 0 && count < maxdirs);
 
 	FindClose(fh);
 	return count;

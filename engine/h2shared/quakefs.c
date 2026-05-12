@@ -33,6 +33,26 @@
 #include "filenames.h"
 #include "hashindex.h"
 
+/* Open file with UTF-8 path support on Windows */
+static FILE *FS_FOpen (const char *path, const char *mode)
+{
+#ifdef PLATFORM_WINDOWS
+	wchar_t widepath[MAX_PATH];
+	wchar_t widemode[16];
+	int pathlen, modelen;
+
+	pathlen = MultiByteToWideChar(CP_UTF8, 0, path, -1, widepath, MAX_PATH);
+	modelen = MultiByteToWideChar(CP_UTF8, 0, mode, -1, widemode, 16);
+
+	if (pathlen == 0 || modelen == 0)
+		return NULL;
+
+	return _wfopen(widepath, widemode);
+#else
+	return fopen(path, mode);
+#endif
+}
+
 typedef struct
 {
 	char	name[MAX_QPATH];
@@ -270,7 +290,7 @@ static pack_t *FS_LoadPackFile (const char *packfile, int paknum, qboolean base_
 	dpackfile_t	info[MAX_FILES_IN_PACK];
 	unsigned short	crc;
 
-	packhandle = fopen (packfile, "rb");
+	packhandle = FS_FOpen (packfile, "rb");
 	if (!packhandle)
 		return NULL;
 
@@ -620,7 +640,7 @@ int FS_WriteFileFromHandle (FILE *fromfile, const char *topath, size_t size)
 		return err;
 	}
 
-	out = fopen (topath, "wb");
+	out = FS_FOpen (topath, "wb");
 	if (!out)
 	{
 		Con_Printf ("%s: unable to create %s\n", topath, __thisfunc__);
@@ -669,7 +689,7 @@ int FS_WriteFile (const char *filename, const void *data, size_t len)
 		return 1;
 	}
 
-	f = fopen (name, "wb");
+	f = FS_FOpen (name, "wb");
 	if (!f)
 	{
 		Con_Printf ("Error opening %s\n", filename);
@@ -860,7 +880,7 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 				if (!file) /* for FS_FileExists() */
 					return fs_filesize;
 				/* open a new file on the pakfile */
-				*file = fopen (pak->filename, "rb");
+				*file = FS_FOpen (pak->filename, "rb");
 				if (!*file)
 					Sys_Error ("Couldn't reopen %s", pak->filename);
 				fseek (*file, pak->files[i].filepos, SEEK_SET);
@@ -884,7 +904,7 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 				*path_id = search->path_id;
 			if (!file) /* for FS_FileExists() */
 				return fs_filesize;
-			*file = fopen (ospath, "rb");
+			*file = FS_FOpen (ospath, "rb");
 			if (!*file)
 				Sys_Error ("Couldn't reopen %s", ospath);
 			return fs_filesize;

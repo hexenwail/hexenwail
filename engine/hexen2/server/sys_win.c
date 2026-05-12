@@ -46,9 +46,36 @@ FILE IO
 ===============================================================================
 */
 
+/* Convert UTF-8 path to UTF-16 for Windows API calls */
+static wchar_t *Sys_UTF8ToWide (const char *utf8path)
+{
+	static wchar_t widepath[MAX_PATH];
+	int len = MultiByteToWideChar(CP_UTF8, 0, utf8path, -1, widepath, MAX_PATH);
+	if (len == 0)
+		return NULL;
+	return widepath;
+}
+
+/* Convert UTF-16 filename to UTF-8 for return to engine */
+static const char *Sys_WideToUTF8 (const wchar_t *widename)
+{
+	static char utf8name[MAX_OSPATH];
+	int len = WideCharToMultiByte(CP_UTF8, 0, widename, -1, utf8name, sizeof(utf8name), NULL, NULL);
+	if (len == 0)
+		return NULL;
+	return utf8name;
+}
+
 int Sys_mkdir (const char *path, qboolean crash)
 {
-	if (CreateDirectory(path, NULL) != 0)
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+	{
+		if (crash)
+			Sys_Error("Unable to convert path to UTF-16: %s", path);
+		return -1;
+	}
+	if (CreateDirectoryW(widepath, NULL) != 0)
 		return 0;
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
 		return 0;
@@ -59,21 +86,31 @@ int Sys_mkdir (const char *path, qboolean crash)
 
 int Sys_rmdir (const char *path)
 {
-	if (RemoveDirectory(path) != 0)
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+		return -1;
+	if (RemoveDirectoryW(widepath) != 0)
 		return 0;
 	return -1;
 }
 
 int Sys_unlink (const char *path)
 {
-	if (DeleteFile(path) != 0)
+	wchar_t *widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+		return -1;
+	if (DeleteFileW(widepath) != 0)
 		return 0;
 	return -1;
 }
 
 int Sys_rename (const char *oldp, const char *newp)
 {
-	if (MoveFile(oldp, newp) != 0)
+	wchar_t *wideoldp = Sys_UTF8ToWide(oldp);
+	wchar_t *widenewp = Sys_UTF8ToWide(newp);
+	if (!wideoldp || !widenewp)
+		return -1;
+	if (MoveFileW(wideoldp, widenewp) != 0)
 		return 0;
 	return -1;
 }
@@ -81,10 +118,13 @@ int Sys_rename (const char *oldp, const char *newp)
 long Sys_filesize (const char *path)
 {
 	HANDLE fh;
-	WIN32_FIND_DATA data;
+	WIN32_FIND_DATAW data;
 	long size;
+	wchar_t *widepath = Sys_UTF8ToWide(path);
 
-	fh = FindFirstFile(path, &data);
+	if (!widepath)
+		return -1;
+	fh = FindFirstFileW(widepath, &data);
 	if (fh == INVALID_HANDLE_VALUE)
 		return -1;
 	FindClose(fh);
