@@ -196,6 +196,21 @@ static const char oit_resolve_debug_sample_frag[] =
 	"}\n";
 static GLuint	oit_resolve_debug_sample_prog;
 
+/* Debug mode 6 resolve: visualize TexReveal sampling.
+ *  reveal=0.5 (mode-2 clear) → output vec4(0.5, 0, 0, 1)  → red haze
+ *  reveal=1.0                → output vec4(0.0, 0, 0, 1)  → black
+ *  reveal=0.0                → output vec4(1.0, 0, 0, 1)  → bright red */
+static const char oit_resolve_debug_reveal_frag[] =
+	"#version 430 core\n"
+	"layout(binding=1) uniform sampler2D TexReveal;\n"
+	"layout(location=0) out vec4 out_fragcolor;\n"
+	"void main() {\n"
+	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
+	"    float r = texelFetch(TexReveal, coords, 0).r;\n"
+	"    out_fragcolor = vec4(1.0 - r, 0.0, 0.0, 1.0);\n"
+	"}\n";
+static GLuint	oit_resolve_debug_reveal_prog;
+
 /* OIT_OUTPUT macro — injected into translucent fragment shaders.
  * Wraps main() as main_body(), adds MRT outputs, computes WBOIT weight. */
 #define OIT_OUTPUT_GLSL \
@@ -872,6 +887,23 @@ static qboolean OIT_InitShader (void)
 		}
 	}
 
+	/* Debug-mode "visualize revealage" resolve. */
+	{
+		GLuint rvs, rfs, rprog;
+		rvs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+		rfs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_debug_reveal_frag);
+		if (rvs && rfs)
+		{
+			rprog = glCreateProgram_fp();
+			glAttachShader_fp(rprog, rvs);
+			glAttachShader_fp(rprog, rfs);
+			glLinkProgram_fp(rprog);
+			oit_resolve_debug_reveal_prog = rprog;
+			glDeleteShader_fp(rvs);
+			glDeleteShader_fp(rfs);
+		}
+	}
+
 	Con_SafePrintf("OIT: resolve shader OK\n");
 	return true;
 }
@@ -954,7 +986,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		glStencilMask(0);
 	}
 
-	if (r_oit_debug_no_stencil.integer >= 5 && oit_resolve_debug_sample_prog)
+	if (r_oit_debug_no_stencil.integer == 6 && oit_resolve_debug_reveal_prog)
+		glUseProgram_fp(oit_resolve_debug_reveal_prog);
+	else if (r_oit_debug_no_stencil.integer >= 5 && oit_resolve_debug_sample_prog)
 		glUseProgram_fp(oit_resolve_debug_sample_prog);
 	else if (r_oit_debug_no_stencil.integer >= 4 && oit_resolve_debug_prog)
 		glUseProgram_fp(oit_resolve_debug_prog);
