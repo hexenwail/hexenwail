@@ -712,6 +712,10 @@ void R_BuildWorldCull (void)
 	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
 	cull_initialized = true;
 
+	/* Hi-Z reprojection lives across the map change only when the prior
+	 * map's last-frame MVP is meaningful here — it isn't, so reset. */
+	R_BuildHiZ();
+
 	Con_SafePrintf("GPU world cull: %d surfs, %d marksurfs, %d buckets, %d max indices\n",
 		       cull_num_surfs, cull_num_marksurfs, cull_num_buckets, cull_total_indices);
 }
