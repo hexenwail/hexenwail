@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "img_load.h"
 #include "gl_shader.h"
 #include "gl_vbo.h"
+#include "gl_sky.h"
 
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
@@ -134,8 +135,18 @@ cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};
 cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_ARCHIVE};	/* back/solid sky scroll speed (0 = frozen) */
 cvar_t r_skyspeed_front = {"r_skyspeed_front", "16", CVAR_ARCHIVE};	/* front/alpha sky scroll speed */
 cvar_t r_skybox_speed = {"r_skybox_speed", "0", CVAR_NONE};
+cvar_t r_skywind = {"r_skywind", "1", CVAR_ARCHIVE};			/* per-skybox wind speed multiplier (uhexen2-typa) */
 
 static float sky_box_scroll; // UV scroll offset applied each frame in Sky_DrawSkyBox
+
+/* Per-skybox wind state, set by Sky_LoadWindCfg from gfx/env/<name>wind.cfg.
+   Defaults disable wind (dist=0) so behavior matches pre-typa builds. */
+static float skywind_dist   = 0.0f;	/* amplitude, clamped to [-2, 2] (0 = wind off) */
+static float skywind_yaw    = 45.0f;	/* horizontal direction, degrees */
+static float skywind_period = 30.0f;	/* seconds per oscillation cycle */
+
+/* Per-frame wind UV offset, consumed by GL_ImmFlush -> u_wind on gl_shader_sky. */
+float sky_wind_uv[2] = { 0.0f, 0.0f };
 
 int		skytexorder[6] = {0,2,1,3,4,5}; //for skybox
 
@@ -308,6 +319,7 @@ void Sky_LoadSkyBox (const char *name)
 	if (name[0] == 0)
 	{
 		skybox_name[0] = 0;
+		Sky_LoadWindCfg ("");
 		return;
 	}
 
@@ -433,10 +445,95 @@ void Sky_LoadSkyBox (const char *name)
 			skybox_texnums[i] = 0;
 		}
 		skybox_name[0] = 0;
+		Sky_LoadWindCfg ("");
 		return;
 	}
 
 	strcpy(skybox_name, name);
+	Sky_LoadWindCfg (skybox_name);
+}
+
+/*
+==================
+Sky_LoadWindCfg
+
+Loads gfx/env/<name>wind.cfg if present (Ironwail format):
+    skywind <dist> <yaw> <period> <pitch>
+- dist:   amplitude, clamped to [-2, 2] (0 = wind off)
+- yaw:    horizontal angle, degrees
+- period: seconds per oscillation cycle (divided by r_skywind.value)
+- pitch:  parsed but ignored — sky scroll is 2D (no vertical component)
+Resets to wind-off defaults when no file is present or name is empty.
+==================
+*/
+void Sky_LoadWindCfg (const char *name)
+{
+	char	filename[MAX_OSPATH];
+	byte	*data;
+	const char *p;
+	int	mark;
+
+	/* defaults — wind disabled, matches pre-typa behavior */
+	skywind_dist   = 0.0f;
+	skywind_yaw    = 45.0f;
+	skywind_period = 30.0f;
+	sky_wind_uv[0] = sky_wind_uv[1] = 0.0f;
+
+	if (!name || !name[0])
+		return;
+
+	q_snprintf (filename, sizeof(filename), "gfx/env/%swind.cfg", name);
+	mark = Hunk_LowMark ();
+	data = FS_LoadHunkFile (filename, NULL);
+	if (!data)
+		return;
+
+	p = COM_Parse ((const char*)data);
+	if (p && q_strcasecmp(com_token, "skywind") == 0)
+	{
+		if ((p = COM_Parse(p)) != NULL) skywind_dist   = (float)atof(com_token);
+		if ((p = COM_Parse(p)) != NULL) skywind_yaw    = (float)atof(com_token);
+		if ((p = COM_Parse(p)) != NULL) skywind_period = (float)atof(com_token);
+		/* fourth token = pitch; consumed but ignored */
+		skywind_dist = CLAMP(-2.0f, skywind_dist, 2.0f);
+		Con_DPrintf ("Sky wind: dist=%g yaw=%g period=%g (from %s)\n",
+			     skywind_dist, skywind_yaw, skywind_period, filename);
+	}
+	else
+	{
+		Con_DPrintf ("Sky wind: %s missing 'skywind' keyword, ignoring\n", filename);
+	}
+	Hunk_FreeToLowMark (mark);
+}
+
+/*
+==================
+Sky_UpdateWind
+
+Computes the per-frame wind UV offset from the parsed per-skybox params
+and the global r_skywind scalar.  Phase oscillates as a triangle wave
+so wind blows one way, then reverses.  Result is stashed in sky_wind_uv
+for GL_ImmFlush to push to u_wind on gl_shader_sky.  Called once per
+frame from Sky_DrawSky (only path that uses skyboxes).
+==================
+*/
+void Sky_UpdateWind (void)
+{
+	float	dist, period;
+	double	phase;
+	float	yaw_rad, sy, cy;
+
+	dist = skywind_dist;
+	period = (skywind_period > 0.0f && r_skywind.value > 0.0f)
+		 ? skywind_period / r_skywind.value : 0.0f;
+	phase = (period > 0.0f) ? (cl.time * 0.5 / period) : 0.5;
+	phase -= floor (phase) + 0.5;	/* triangle wave: [-0.5, 0.5) */
+
+	yaw_rad = (float)(skywind_yaw * (M_PI / 180.0));
+	sy = sinf (yaw_rad);
+	cy = cosf (yaw_rad);
+	sky_wind_uv[0] = (float)(dist * cy * phase);
+	sky_wind_uv[1] = (float)(dist * sy * phase);
 }
 
 /*
@@ -555,6 +652,7 @@ void Sky_Init (void)
 	Cvar_RegisterVariable (&r_skyspeed_back);
 	Cvar_RegisterVariable (&r_skyspeed_front);
 	Cvar_RegisterVariable (&r_skybox_speed);
+	Cvar_RegisterVariable (&r_skywind);
 
 	Cmd_AddCommand ("sky",Sky_SkyCommand_f);
 
@@ -1225,6 +1323,9 @@ void Sky_DrawSky (void)
 	// If no skybox is loaded, scrolling sky is handled by R_DrawSkyChain
 	if (!skybox_name[0])
 		return;
+
+	// Recompute per-skybox wind UV offset before any sky draw this frame
+	Sky_UpdateWind ();
 
 	//
 	// process brush entities for sky

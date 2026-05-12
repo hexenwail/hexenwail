@@ -207,6 +207,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_time            = glGetUniformLocation_fp(p->program, "u_time");
 	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
 	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
+	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
 }
 
 /* ------------------------------------------------------------------ */
@@ -625,6 +626,7 @@ static const char ssky_frag[] =
 	"uniform vec4 u_skyfog;\n"
 	"uniform float u_time;\n"
 	"uniform float u_alpha_threshold;\n"
+	"uniform vec2 u_wind;\n"
 	"in vec3 v_dir;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
@@ -632,12 +634,12 @@ static const char ssky_frag[] =
 	"out vec4 fragColor;\n"
 	"void main() {\n"
 	"    if (u_alpha_threshold > 0.5) {\n"
-	"        vec4 solid = texture(u_texture0, v_texcoord);\n"
+	"        vec4 solid = texture(u_texture0, v_texcoord + u_wind);\n"
 	"        fragColor = solid * v_color;\n"
 	"    } else {\n"
 	"        vec2 uv = normalize(v_dir).xy * (189.0 / 64.0);\n"
-	"        vec4 solid = texture(u_texture0, uv + u_time / 16.0);\n"
-	"        vec4 layer = texture(u_texture1, uv + u_time / 8.0);\n"
+	"        vec4 solid = texture(u_texture0, uv + u_time / 16.0 + u_wind);\n"
+	"        vec4 layer = texture(u_texture1, uv + u_time / 8.0 + u_wind);\n"
 	"        vec3 color = mix(solid.rgb, layer.rgb, layer.a);\n"
 	"        color = mix(color, u_skyfog.rgb, u_skyfog.a);\n"
 	"        fragColor = vec4(color, 1.0) * v_color;\n"

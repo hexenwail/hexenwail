@@ -13,16 +13,16 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
-| Rendering — Visual/Shading | 19 | 2 | 1 | 0 |
+| Rendering — Visual/Shading | 20 | 1 | 1 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 21 | 0 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **71** | **4** | **5** | **8** |
+| **TOTAL** | **72** | **3** | **5** | **8** |
 
-**Parity: 89% ported, 5% partial, 6% missing** (excluding N/A)
+**Parity: 90% ported, 4% partial, 6% missing** (excluding N/A)
 
 ---
 
@@ -66,7 +66,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Post-process pipeline | ✅ | Gamma, contrast, palette, dither, HDR |
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
-| Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported (uhexen2-typa). |
+| Animated sky wind system | ✅ | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16) plus per-skybox wind via Ironwail-format `gfx/env/<name>wind.cfg` (`skywind dist yaw period pitch`) — parsed by `Sky_LoadWindCfg`, triangle-wave phase oscillation via `Sky_UpdateWind`, scaled by global `r_skywind` (default 1), pushed to `u_wind` on `gl_shader_sky` (uhexen2-typa). |
 | Bounding box debug visualization | ✅ | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters + `r_showbboxes_targets` target/targetname highlighting + `r_showbboxes_links` directed reference lines (green = focused → X via QC entity-typed field, red = X → focused).  Center-ray pick → focused entity drawn in white; `health > 0` entities tint red.  uhexen2-4ej9 added `ED_NumFieldDefs` / `ED_FieldDefAt` to `pr_edict.c` so the renderer can walk `pr_fielddefs` directly. |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 (uhexen2-kaa6). |
 | LOD bias auto-scaling | ✅ | `gl_lodbias` with `"auto"` mode — derives bias from active MSAA sample count (uhexen2-dax2, `e40a74d6c`). |

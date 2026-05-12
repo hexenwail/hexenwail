@@ -25,12 +25,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define GL_SKY_H
 
 extern char skybox_name[32];
+extern float sky_wind_uv[2];	/* per-skybox wind UV offset (uhexen2-typa) */
 
 void Sky_Init (void);
 void Sky_NewMap (void);
 void Sky_DrawSky (void);
 void Sky_LoadTexture (texture_t *mt);
 void Sky_LoadSkyBox (const char *name);
+void Sky_LoadWindCfg (const char *name);
+void Sky_UpdateWind (void);
 void Sky_ProcessPoly (glpoly_t *p);
 
 #endif /* GL_SKY_H */

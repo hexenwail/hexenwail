@@ -31,6 +31,7 @@ typedef struct glprogram_s {
 	GLint	u_time;
 	GLint	u_skyfog;
 	GLint	u_eyepos;
+	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */

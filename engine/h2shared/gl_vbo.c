@@ -13,6 +13,7 @@
 #include "gl_shader.h"
 #include "gl_matrix.h"
 #include "gl_vbo.h"
+#include "gl_sky.h"
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -266,6 +267,7 @@ static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
 static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
+static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
 static qboolean	imm_cache_mvp_set;
 static qboolean	imm_cache_mv_set;
 
@@ -286,6 +288,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
 	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
+	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
 	imm_cache_mvp_set = false;
 	imm_cache_mv_set = false;
 }
@@ -327,6 +330,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
 		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
+		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
 		imm_cache_mvp_set = false;
 		imm_cache_mv_set = false;
 	}
@@ -390,6 +394,15 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_eyepos[0] = r_origin[0];
 		imm_cache_eyepos[1] = r_origin[1];
 		imm_cache_eyepos[2] = r_origin[2];
+	}
+
+	if (shader->u_wind >= 0 &&
+	    (sky_wind_uv[0] != imm_cache_wind[0] ||
+	     sky_wind_uv[1] != imm_cache_wind[1]))
+	{
+		glUniform2f_fp(shader->u_wind, sky_wind_uv[0], sky_wind_uv[1]);
+		imm_cache_wind[0] = sky_wind_uv[0];
+		imm_cache_wind[1] = sky_wind_uv[1];
 	}
 
 	/* draw */
