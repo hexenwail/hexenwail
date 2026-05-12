@@ -40,8 +40,8 @@ static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* cen
 /* Optional cap on console line width.  0 = no cap (use full screen).
  * At 4K the natural width is ~238 cols, which is unreadable; this lets
  * the user pin a saner column count (e.g. 80, 100, 120) regardless of
- * display resolution. */
-static	cvar_t	con_maxcols = {"con_maxcols", "0", CVAR_ARCHIVE};
+ * display resolution.  Externally visible so the menu can surface it. */
+cvar_t	con_maxcols = {"con_maxcols", "0", CVAR_ARCHIVE};
 
 #define	NUM_CON_TIMES 4
 static float	con_times[NUM_CON_TIMES];	// realtime time the line was generated

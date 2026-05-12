@@ -2820,6 +2820,7 @@ enum
 	GFX_CROSSHAIRSCALE,
 	GFX_CONALPHA,
 	GFX_CONBRIGHT,
+	GFX_CONMAXCOLS,
 	GFX_OVERBRIGHT,
 	GFX_COLORED_LM,
 	GFX_TORCH_DLIGHT,
@@ -2890,6 +2891,20 @@ static void M_Graphics_AdjustSliders (int dir)
 		if (v < 0.0f) v = 0.0f;
 		if (v > 2.0f) v = 2.0f;
 		Cvar_SetValue ("scr_conbrightness", v);
+		break;
+	}
+	case GFX_CONMAXCOLS:
+	{
+		/* Discrete steps: Off, 80, 100, 120, 160, 200. */
+		static const int steps[] = { 0, 80, 100, 120, 160, 200 };
+		const int n = (int)(sizeof(steps) / sizeof(steps[0]));
+		int cur = con_maxcols.integer;
+		int i, idx = 0;
+		for (i = 0; i < n; i++) if (steps[i] == cur) { idx = i; break; }
+		idx += dir;
+		if (idx < 0) idx = n - 1;
+		if (idx >= n) idx = 0;
+		Cvar_SetValue ("con_maxcols", steps[idx]);
 		break;
 	}
 	case GFX_HUDTRANS:
@@ -2979,6 +2994,16 @@ static void M_Graphics_Draw (void)
 	M_Print (76, 92 + 8*GFX_CONBRIGHT,	"Console Bright  :");
 	M_DrawSliderValue (220, 92 + 8*GFX_CONBRIGHT,
 		scr_conbrightness.value * 0.5f, "%.2f", scr_conbrightness.value);
+
+	M_Print (76, 92 + 8*GFX_CONMAXCOLS,	"Console Max Cols:");
+	if (con_maxcols.integer <= 0)
+		M_PrintWhite (220, 92 + 8*GFX_CONMAXCOLS, "Off");
+	else
+	{
+		char buf[8];
+		snprintf(buf, sizeof(buf), "%d", con_maxcols.integer);
+		M_PrintWhite (220, 92 + 8*GFX_CONMAXCOLS, buf);
+	}
 
 	M_Print (76, 92 + 8*GFX_HUDTRANS,	"HUD Transparency:");
 	M_PrintWhite (220, 92 + 8*GFX_HUDTRANS,
