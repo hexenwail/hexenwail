@@ -466,7 +466,7 @@ static void DrawGLWaterPoly (glpoly_t *p)
 			GL_ImmVertex3f (v[0], v[1], v[2]);
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLE_FAN, &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLE_FAN, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 }
 
 static void DrawGLWaterPolyMTexLM (glpoly_t *p)
@@ -495,7 +495,7 @@ static void DrawGLWaterPolyMTexLM (glpoly_t *p)
 			GL_ImmVertex3f (v[0], v[1], v[2]);
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLE_FAN, &gl_shader_world);
+	GL_ImmEnd (GL_TRIANGLE_FAN, OIT_InPass() ? &gl_shader_world_oit : &gl_shader_world);
 }
 
 /*
@@ -516,7 +516,7 @@ static void DrawGLPoly (glpoly_t *p)
 		GL_ImmTexCoord2f (v[3], v[4]);
 		GL_ImmVertex3f (v[0], v[1], v[2]);
 	}
-	GL_ImmEnd (GL_POLYGON, &gl_shader_alias);
+	GL_ImmEnd (GL_POLYGON, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 }
 
 static void DrawGLPolyMTex (glpoly_t *p)
@@ -534,7 +534,7 @@ static void DrawGLPolyMTex (glpoly_t *p)
 
 		GL_ImmVertex3f (v[0], v[1], v[2]);
 	}
-	GL_ImmEnd (GL_POLYGON, &gl_shader_world);
+	GL_ImmEnd (GL_POLYGON, OIT_InPass() ? &gl_shader_world_oit : &gl_shader_world);
 }
 
 
@@ -1165,9 +1165,14 @@ void R_DrawWaterSurfaces (int phase)
 		}
 		else
 		{
-			/* translucent liquid: draw with blend, no depth write */
+			/* translucent liquid: draw with blend, no depth write.
+			 * Inside an OIT pass the per-buffer blend funcs set up by
+			 * OIT_BeginTranslucency are in effect — overriding them
+			 * with a global glBlendFunc would break the WBOIT MRT
+			 * accumulation, so skip it. */
 			glEnable_fp (GL_BLEND);
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			if (!OIT_InPass())
+				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDepthMask_fp(0);
 			GL_ImmColor4f (1,1,1, a);
 		}
@@ -1186,7 +1191,10 @@ void R_DrawWaterSurfaces (int phase)
 
 	GL_ImmColor4f (1,1,1,1);
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
-	glDisable_fp (GL_BLEND);
+	/* Leave GL_BLEND on inside the OIT pass so subsequent translucent
+	 * draws (sprites, brushmodels) keep the per-buffer blend funcs. */
+	if (!OIT_InPass())
+		glDisable_fp (GL_BLEND);
 	glDepthMask_fp (1);
 }
 

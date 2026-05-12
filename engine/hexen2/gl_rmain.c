@@ -480,14 +480,19 @@ static void R_DrawSpriteModel (entity_t *e)
 		Sys_Error ("%s: Bad sprite type %d", __thisfunc__, psprite->type);
 	}
 
-	/* translucency handling */
+	/* translucency handling.  Inside an OIT pass the FBO has two
+	 * blend-enabled MRT attachments configured by OIT_BeginTranslucency
+	 * (accum + revealage).  Disabling GL_BLEND there would clobber both
+	 * attachments with REPLACE writes — so opaque sprites must still
+	 * keep blend on and just contribute α=1.0 through the OIT formula. */
 	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
-	else
+	else if (!OIT_InPass())
 	{
 		glDisable_fp (GL_BLEND);
 	}
@@ -530,14 +535,18 @@ static void R_DrawSpriteModel (entity_t *e)
 	VectorMA (point, frame->right, r_spritedesc.vright, point);
 	GL_ImmVertex3f (point[0], point[1], point[2]);
 
-	GL_ImmEnd (GL_QUADS, &gl_shader_alias);
+	GL_ImmEnd (GL_QUADS, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 
 // restore tex parms
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
 	GL_SetAlphaThreshold(0.01f);
-	glDisable_fp (GL_BLEND);
+	/* During an OIT pass leave GL_BLEND on and let OIT_EndTranslucency
+	 * restore state — disabling it here would break a later draw in
+	 * the same OIT pass. */
+	if (!OIT_InPass())
+		glDisable_fp (GL_BLEND);
 }
 
 

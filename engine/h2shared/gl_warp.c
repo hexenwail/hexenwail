@@ -21,6 +21,7 @@
 #include "quakedef.h"
 #include "gl_shader.h"
 #include "gl_vbo.h"
+#include "gl_postprocess.h"
 
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
@@ -242,7 +243,7 @@ void EmitWaterPolys (msurface_t *fa)
 		/* Check buffer space: (numverts-2)*3 triangle verts */
 		if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 			GL_ImmBegin ();
 		}
 
@@ -271,7 +272,7 @@ void EmitWaterPolys (msurface_t *fa)
 			}
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLES, &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 }
 
 
