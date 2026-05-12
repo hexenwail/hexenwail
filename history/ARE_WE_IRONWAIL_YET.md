@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-12 (bead-coverage re-sync)
+Last updated: 2026-05-12 (scorecard header recount)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,17 +12,17 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
-| Rendering — Visual/Shading | 20 | 1 | 1 | 0 |
+| Rendering — GPU Pipeline | 12 | 0 | 2 | 0 |
+| Rendering — Visual/Shading | 21 | 0 | 1 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
-| UX / Menus / HUD | 22 | 0 | 0 | 1 |
+| UX / Menus / HUD | 23 | 0 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **73** | **3** | **4** | **8** |
+| **TOTAL** | **76** | **1** | **6** | **8** |
 
-**Parity: 91% ported, 4% partial, 5% missing** (excluding N/A)
+**Parity: 92% ported, 1% partial, 7% missing** (excluding N/A)
 
 ---
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.
+As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -189,10 +189,9 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P3 — Low
-1. **Menu search** — nice UX for large option sets
-2. **Console mouse support** — clickable links, selection
-3. **IQM skeletal models** — future mod support
-4. **MD3 model support** — future mod support
+1. **Console mouse support** — clickable links, selection
+2. **IQM skeletal models** — future mod support
+3. **MD3 model support** — future mod support
 
 ---
 
