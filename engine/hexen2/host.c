@@ -586,6 +586,8 @@ void Host_ShutdownServer(qboolean crash)
 	if (!sv.active)
 		return;
 
+	Host_WaitForSaveThread();
+
 	sv.active = false;
 
 // stop all client sounds immediately
@@ -846,6 +848,7 @@ static void _Host_Frame (float time)
 	Cbuf_Execute ();
 
 	NET_Poll();
+	AsyncQueue_Drain();
 
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
@@ -989,6 +992,8 @@ void Host_Init (void)
 	PR_Init ();
 	Mod_Init ();
 	NET_Init ();
+	AsyncQueue_Init();
+	Host_InitSave();
 
 	Con_Printf ("Exe: " __TIME__ " " __DATE__ "\n");
 	Con_Printf ("%4.1f megabyte heap\n", host_parms->memsize/(1024*1024.0));
@@ -1098,6 +1103,10 @@ void Host_Shutdown(void)
 		return;
 	}
 	isdown = true;
+
+	Host_WaitForSaveThread();
+	Host_ShutdownSave();
+	AsyncQueue_Destroy();
 
 // keep Con_Printf from trying to update the screen
 	scr_disabled_for_loading = true;

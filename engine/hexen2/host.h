@@ -95,4 +95,38 @@ extern	int		sv_kingofhill;		// mission pack king of the hill.
 
 extern	unsigned int	info_mask, info_mask2;	// mission pack objectives
 
+/* Snapshot of data needed by the background save worker.
+ * All fields are POD — no pointers into engine memory. */
+typedef struct {
+	int          version;
+	char         comment[SAVEGAME_COMMENT_LENGTH + 1];
+	float        spawn_parms[NUM_SPAWN_PARMS];
+	int          current_skill;
+	char         mapname[MAX_QPATH];
+	float        sv_time;
+	int          maxclients;
+	float        deathmatch_val;
+	float        coop_val;
+	float        teamplay_val;
+	float        randomclass_val;
+	float        playerclass_val;
+	unsigned int info_mask;
+	unsigned int info_mask2;
+	char         savedest[MAX_OSPATH];  /* destination save slot dir */
+	char         userdir[MAX_OSPATH];   /* FS_GetUserdir() snapshot */
+} savedata_t;
+
+/* APC queue */
+void AsyncQueue_Init(void);
+void AsyncQueue_Destroy(void);
+void AsyncQueue_Drain(void);
+void Host_InvokeOnMainThread(void (*func)(void *param), void *param);
+
+/* Background save */
+void Host_InitSave(void);
+void Host_ShutdownSave(void);
+void Host_WaitForSaveThread(void);
+qboolean Host_IsSaving(void);
+void Host_SubmitSave(const savedata_t *data);
+
 #endif	/* HX2_HOST_H */

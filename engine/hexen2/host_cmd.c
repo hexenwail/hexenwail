@@ -261,6 +261,7 @@ static void Host_Map_f (void)
 	cls.demonum = -1;		// stop demo loop in case this fails
 
 	CL_Disconnect ();
+	Host_WaitForSaveThread();
 	Host_ShutdownServer(false);
 
 	Key_SetDest (key_game);		// remove console or menu
@@ -333,6 +334,7 @@ static void Host_Changelevel_f (void)
 	}
 
 	SV_SaveSpawnparms ();
+	Host_WaitForSaveThread();
 	SV_SpawnServer (level, startspot);
 	if (!sv.active)
 		Host_Error ("%s: cannot run map %s", __thisfunc__, level);
@@ -537,9 +539,7 @@ Host_Savegame_f
 */
 static void Host_Savegame_f (void)
 {
-	FILE	*f;
 	int		i, error_state;
-	char		comment[SAVEGAME_COMMENT_LENGTH+1];
 	const char	*p;
 
 	if (cmd_source != src_command)
@@ -587,6 +587,11 @@ static void Host_Savegame_f (void)
 		}
 	}
 
+	if (Host_IsSaving()) {
+		Con_Printf ("Save: waiting for previous save to finish...\n");
+		Host_WaitForSaveThread();
+	}
+
 	error_state = SaveGamestate (false);
 	// don't bother doing more if SaveGamestate failed
 	if (error_state)
@@ -604,56 +609,38 @@ static void Host_Savegame_f (void)
 		return;
 	}
 
-	Host_RemoveGIPFiles(savename);
-
-	FS_MakePath_BUF (FS_USERDIR, NULL, savename, sizeof(savename), "clients.gip");
-	Sys_unlink(savename);
+	/* Unlink stale clients.gip before worker copies */
+	{
+		char tmppath[MAX_OSPATH];
+		FS_MakePath_BUF(FS_USERDIR, NULL, tmppath, sizeof(tmppath), "clients.gip");
+		Sys_unlink(tmppath);
+	}
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, savedest, sizeof(savedest), p);
 	Con_Printf ("Saving game to %s...\n", savedest);
 
-	error_state = Host_CopyFiles(FS_GetUserdir(), "*.gip", savedest);
-	if (error_state)
-		goto finish;
-
-	FS_MakePath_VABUF (FS_USERDIR, &error_state, savedest, sizeof(savedest), "%s/info.dat", p);
-	if (error_state)
 	{
-		Host_Error ("%s: %d: string buffer overflow!", __thisfunc__, __LINE__);
-		return;
+		savedata_t sd;
+		memset(&sd, 0, sizeof(sd));
+		sd.version        = SAVEGAME_VERSION;
+		Host_SavegameComment(sd.comment);
+		for (i = 0; i < NUM_SPAWN_PARMS; i++)
+			sd.spawn_parms[i] = svs.clients->spawn_parms[i];
+		sd.current_skill  = current_skill;
+		q_strlcpy(sd.mapname, sv.name, sizeof(sd.mapname));
+		sd.sv_time        = (float)sv.time;
+		sd.maxclients     = svs.maxclients;
+		sd.deathmatch_val = deathmatch.value;
+		sd.coop_val       = coop.value;
+		sd.teamplay_val   = teamplay.value;
+		sd.randomclass_val= randomclass.value;
+		sd.playerclass_val= cl_playerclass.value;
+		sd.info_mask      = info_mask;
+		sd.info_mask2     = info_mask2;
+		FS_MakePath_BUF(FS_USERDIR, NULL, sd.savedest, sizeof(sd.savedest), p);
+		q_strlcpy(sd.userdir, FS_GetUserdir(), sizeof(sd.userdir));
+		Host_SubmitSave(&sd);
 	}
-	f = fopen (savedest, "w");
-	if (!f)
-	{
-		error_state = 1;
-		Con_Printf ("%s: Unable to open %s for writing!\n", __thisfunc__, savedest);
-		goto finish;
-	}
-
-	fprintf (f, "%i\n", SAVEGAME_VERSION);
-	Host_SavegameComment (comment);
-	fprintf (f, "%s\n", comment);
-	for (i = 0; i < NUM_SPAWN_PARMS; i++)
-		fprintf (f, "%f\n", svs.clients->spawn_parms[i]);
-	fprintf (f, "%d\n", current_skill);
-	fprintf (f, "%s\n", sv.name);
-	fprintf (f, "%f\n", sv.time);
-	fprintf (f, "%d\n", svs.maxclients);
-	fprintf (f, "%f\n", deathmatch.value);
-	fprintf (f, "%f\n", coop.value);
-	fprintf (f, "%f\n", teamplay.value);
-	fprintf (f, "%f\n", randomclass.value);
-	fprintf (f, "%f\n", cl_playerclass.value);
-	// mission pack, objectives strings
-	fprintf (f, "%u\n", info_mask);
-	fprintf (f, "%u\n", info_mask2);
-
-	error_state = ferror(f);
-	fclose(f);
-
-finish:
-	if (error_state)
-		Host_Error ("%s: The game could not be saved properly!", __thisfunc__);
 }
 
 
@@ -718,6 +705,7 @@ static void Host_Loadgame_f (void)
 
 	cls.demonum = -1;		// stop demo loop in case this fails
 	CL_Disconnect();
+	Host_WaitForSaveThread();
 	Host_RemoveGIPFiles(NULL);
 	Key_SetDest (key_game);		// remove console or menu
 

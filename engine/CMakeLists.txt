@@ -272,6 +272,7 @@ set(COMMON_SOURCES
     # From hexen2
     ${ENGINE_TOP}/hexen2/host.c
     ${ENGINE_TOP}/hexen2/host_cmd.c
+    ${ENGINE_TOP}/hexen2/host_async.c
     ${ENGINE_TOP}/hexen2/sv_main.c
     ${ENGINE_TOP}/hexen2/sv_phys.c
     ${ENGINE_TOP}/hexen2/sv_user.c
