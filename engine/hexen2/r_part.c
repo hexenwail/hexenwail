@@ -24,6 +24,7 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
+#include "gl_postprocess.h"
 
 /* ------------------------------------------------------------------ */
 /* GPU particle SSBO rendering                                         */
@@ -1444,11 +1445,19 @@ void R_DrawParticles (void)
 
     GL_Bind(particletexture);
     glEnable_fp(GL_BLEND);
-    glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    /* Inside an OIT pass, OIT_BeginTranslucency already configured the
+     * per-buffer blend funcs (accum: ONE/ONE, reveal: ZERO/ONE_MINUS_SRC_COLOR).
+     * Overriding with a single-buffer glBlendFunc would break WBOIT. */
+    if (!OIT_InPass())
+        glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL_SetAlphaThreshold(0.0f);
 
     VectorScale(vup, 1.5, r_pup);
     VectorScale(vright, 1.5, r_pright);
+
+    {
+        glprogram_t *prog = OIT_InPass() ? &gl_shader_particle_oit
+                                         : &gl_shader_particle;
 
     if (square)
     {
@@ -1459,7 +1468,7 @@ void R_DrawParticles (void)
         {
             if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 1)
             {
-                GL_ImmEnd(GL_POINTS, &gl_shader_particle);
+                GL_ImmEnd(GL_POINTS, prog);
                 GL_ImmBegin();
             }
             color = ((int)p->color) & 0x01ff;
@@ -1470,7 +1479,7 @@ void R_DrawParticles (void)
             GL_ImmTexCoord2f(0.5f, 0.5f);
             GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
         }
-        GL_ImmEnd(GL_POINTS, &gl_shader_particle);
+        GL_ImmEnd(GL_POINTS, prog);
         glPointSize(1.0f);
     }
     else
@@ -1485,7 +1494,7 @@ void R_DrawParticles (void)
             /* Flush batch before overflow (3 verts per particle) */
             if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 3)
             {
-                GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+                GL_ImmEnd(GL_TRIANGLES, prog);
                 GL_ImmBegin();
             }
 
@@ -1522,11 +1531,15 @@ void R_DrawParticles (void)
                            p->org[1] + r_pright[1]*scale,
                            p->org[2] + r_pright[2]*scale);
         }
-        GL_ImmEnd(GL_TRIANGLES, &gl_shader_particle);
+        GL_ImmEnd(GL_TRIANGLES, prog);
+    }
     }
 
     GL_SetAlphaThreshold(0.01f);
-    glDisable_fp(GL_BLEND);
+    /* OIT_EndTranslucency will restore blend state; don't yank GL_BLEND
+     * mid-pass or subsequent OIT draws lose their MRT contribution. */
+    if (!OIT_InPass())
+        glDisable_fp(GL_BLEND);
 }
 
 #else	/* !GLQUAKE */
