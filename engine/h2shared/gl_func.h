@@ -355,6 +355,13 @@ GL_FUNCTION_OPT(void, glDrawArrays, (GLenum, GLint, GLsizei))
 GL_FUNCTION_OPT(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *))
 GL_FUNCTION_OPT(void, glBindBufferBase, (GLenum, GLuint, GLuint))
 
+/* Separate vertex attribute bindings (OpenGL 4.3 / ARB_vertex_attrib_binding)
+ * — lets the VBO change per draw without re-emitting attribute pointers.
+ * Used by the streaming immediate-mode emulator (uhexen2-y1v5). */
+GL_FUNCTION_OPT(void, glVertexAttribFormat, (GLuint, GLint, GLenum, GLboolean, GLuint))
+GL_FUNCTION_OPT(void, glVertexAttribBinding, (GLuint, GLuint))
+GL_FUNCTION_OPT(void, glBindVertexBuffer, (GLuint, GLuint, GLintptr, GLsizei))
+
 /* Instancing (OpenGL 3.1 / ES 3.0) */
 GL_FUNCTION_OPT(void, glDrawElementsInstanced, (GLenum, GLsizei, GLenum, const void *, GLsizei))
 GL_FUNCTION_OPT(void, glVertexAttribDivisor, (GLuint, GLuint))
@@ -484,6 +491,12 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glDrawArrays_fp			glDrawArrays
 #define glDrawElements_fp		glDrawElements
 #define glBindBufferBase_fp		glBindBufferBase
+/* Separate vertex attribute bindings — not available in WebGL2.  The
+ * streaming immediate-mode emulator uses the legacy glVertexAttribPointer
+ * path on emscripten (gl_vbo.c branches on __EMSCRIPTEN__). */
+#define glVertexAttribFormat_fp(a,s,t,n,o)	((void)0)
+#define glVertexAttribBinding_fp(a,i)		((void)0)
+#define glBindVertexBuffer_fp(i,b,o,s)		((void)0)
 #define glDispatchCompute_fp(x,y,z)	((void)0)
 #define glMemoryBarrier_fp(b)		((void)0)
 #define glBindImageTexture_fp(u,t,l,la,la2,a,f)	((void)0)
