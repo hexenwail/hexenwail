@@ -12,17 +12,17 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 8 | 2 | 3 | 0 |
+| Rendering — GPU Pipeline | 10 | 1 | 2 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 16 | 1 | 5 | 1 |
-| Input / Controller | 4 | 1 | 4 | 1 |
+| Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **56** | **8** | **16** | **8** |
+| **TOTAL** | **63** | **6** | **11** | **8** |
 
-**Parity: 70% ported, 10% partial, 20% missing** (excluding N/A)
+**Parity: 79% ported, 8% partial, 14% missing** (excluding N/A)
 
 ---
 
@@ -37,8 +37,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | SSBO GPU particles | ✅ | `r_part.c` |
 | Order-Independent Transparency (OIT) | ✅ | Weighted blended, dual MRT |
 | Decoupled renderer from server physics | ✅ | Fixed-timestep accumulator in `host.c:861` — physics at `sys_ticrate` (20 Hz), render uncapped |
-| Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. Dominant per-frame uploads (alias entity instances, worldcull PVS) stream through the ring. Residual `gl_vbo.c` immediate-mode VBO migration tracked in uhexen2-y1v5 but does not gate frame-pipelining benefit. (uhexen2-2fmy closed.) |
-| Persistent mapped buffers | 🔶 | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes) and GPU world-cull PVS bitvector (uhexen2-o35n). Immediate-mode VBO (`gl_vbo.c`) still single-buffer pending VAO restructure to separate vertex attribute bindings. |
+| Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. All per-frame uploads stream through the ring. |
+| Persistent mapped buffers | ✅ | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes), GPU world-cull PVS bitvector (uhexen2-o35n), and the immediate-mode emulator (uhexen2-y1v5: `GL_ImmEnd`/`GL_ImmDraw` route through `GL_Upload` + `glBindVertexBuffer` via ARB_vertex_attrib_binding). |
+| Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`). Currently behind `gl_hiz_cull 0` pending the acceptance sweep (uhexen2-8pzr). `gl_hiz_stats` exposes a 7-counter SSBO (uhexen2-cyu0) for cull-rate validation against the ≥10% post-frustum gate. |
 | Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ❌ | SSE2 fast-path downsample |
@@ -123,13 +124,13 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|
 | Full gamepad support | ✅ | SDL game controller API |
 | Controller rumble | ✅ | `joy_rumble` |
-| Analog stick deadzone/easing | ✅ | Basic form; Ironwail has inner/outer/exponent |
+| Analog stick deadzone/easing | ✅ | Inner deadzone + power-curve easing (`joy_deadzone_look/move`, `joy_exponent`/`_move`) |
 | Second gamepad binding layer | ✅ | `+altmodifier` modifier button for alternate bindings |
-| Advanced deadzone curves | 🔶 | Missing inner/outer threshold, exponent curves |
-| Flick stick | ❌ | `joy_flick`, `joy_flick_time`, `joy_flick_deadzone`, `joy_flick_noise_thresh` |
-| Gyroscope aiming | ❌ | `gyro_enable`, `gyro_mode`, `gyro_yawsensitivity`, calibration, noise filtering |
-| Controller type detection | ❌ | Xbox/PS/Nintendo button label auto-switch |
-| Controller LED color | ❌ | Orange for branding |
+| Outer-edge deadzone saturation | ✅ | `joy_outer_threshold_look/move` (uhexen2-0g4t) — per-stick saturation thresholds replace the hardcoded 0.02 in IN_ApplyDeadzone |
+| Flick stick | ✅ | `joy_flick`, `joy_flick_time`, `joy_flick_deadzone`, `joy_flick_noise_thresh`, `joy_flick_recenter`, `joy_flick_adjust_speed` (uhexen2-98oo / uhexen2-s2vv). Tri-state machine in `IN_FlickStickUpdate` (idle/rotating/tracking), smoothstep animation, noise-gated 1:1 tracking. |
+| Gyroscope aiming | ✅ | `gyro_enable`, `gyro_mode` (always / suppress-on-stick / +gyroactive / inverted), `gyro_turning_axis`, `gyro_yawsensitivity`, `gyro_pitchsensitivity`, `gyro_noise_thresh`, `gyro_calibration_x/y/z`, `gyro_calibrate` command, `+gyroactive`/`-gyroactive` binds (uhexen2-xpbi / uhexen2-s2vv). |
+| Controller type detection | ✅ | `IN_GetGamepadType` reads `SDL_GetGamepadType` on open; `Key_KeynumToDisplayString` renders brand-correct face-button labels in the bind menu (Xbox A/B/X/Y, PS Cross/Circle/Square/Triangle, Switch B/A/Y/X with physical-print swap). uhexen2-asln. |
+| Controller LED color | ✅ | `joy_led` "r g b" 0-255 string; applied via `SDL_SetGamepadLED` on gamepad open and on cvar change (uhexen2-3fpt). |
 | Steam Deck OSK detection | ➖ | Steam-specific |
 
 ## Audio
@@ -172,7 +173,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 | `1011ff8` 2026-01 | Disable GL texture compression for alpha-tested surfaces | ➖ N/A — Hexenwail does not have a `gl_compress_textures` system. |
 | `74d8e74` 2026-01 | Disable GL texture compression for 2D textures (HUD, conchars) | ➖ N/A — same reason as above. |
 | `80387f1` 2026-01 | Crash toggling `gl_compress_textures`: cubemap textures stored pointers to stack data | ➖ N/A — no compression system. |
-| `78ad272` 2026-01 | Stop controller rumble when sound buffer is cleared (e.g. modal message) | ❌ May be relevant if we have `joy_rumble`. Check `in_sdl.c:S_ClearBuffer` interaction. |
+| `78ad272` 2026-01 | Stop controller rumble when sound buffer is cleared (e.g. modal message) | ✅ Already present — `S_ClearBuffer` calls `IN_GPRumble(0, 0, 0)` at `snd_dma.c:684` (uhexen2-xq1c closed). |
 | ericw (pre-Ironwail) | MAX_ENT_LEAFS 16→32 + always-send on cap overflow in `SV_WriteEntitiesToClient` | ✅ Ported 2026-05-11 (uhexen2-l0ac follow-up): long brush ents (lifts, rotators) flickered out at distance because their leaf list overflowed and the PVS cull dropped them. |
 
 ---
@@ -188,19 +189,13 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P1 — High
-1. **Persistent mapped buffers** — 🔶 ring + alias instances + worldcull PVS migrated (uhexen2-o35n); `gl_vbo.c` immediate-mode upload still on `glBufferData` (needs VAO refactor to separate attribute bindings).
-
-### P2 — Medium
-7. **Gyroscope aiming** — Steam Deck users
-8. **Advanced gamepad deadzone curves** — inner/outer/exponent knobs
-9. **Controller rumble on sound buffer clear** — correctness fix (Ironwail `78ad272`)
+1. **Hi-Z acceptance sweep + default flip** — Hi-Z implementation is in (uhexen2-xd87) and the stats counter exists (uhexen2-cyu0). Sweep is uhexen2-8pzr: validate ≥10% post-frustum cull rate on heavy outdoor maps, ≤1% slowdown on closets, no visual regression, then flip `gl_hiz_cull` default from 0 to 1.
 
 ### P3 — Low
-11. **Menu search** — nice UX for large option sets
-12. **Console mouse support** — clickable links, selection
-13. **Flick stick** — niche but game-agnostic
-14. **IQM skeletal models** — future mod support
-15. **MD3 model support** — future mod support
+2. **Menu search** — nice UX for large option sets
+3. **Console mouse support** — clickable links, selection
+4. **IQM skeletal models** — future mod support
+5. **MD3 model support** — future mod support
 
 ---
 
