@@ -687,6 +687,12 @@ static void GL_LoadFunctionPointers (void)
 	glVertexAttribDivisor_fp = (glVertexAttribDivisor_f) SDL_GL_GetProcAddress("glVertexAttribDivisor");
 	glVertexAttribIPointer_fp = (glVertexAttribIPointer_f) SDL_GL_GetProcAddress("glVertexAttribIPointer");
 
+	/* Separate vertex attribute bindings (GL 4.3 / ARB_vertex_attrib_binding)
+	 * — used by the streaming immediate-mode emulator (uhexen2-y1v5). */
+	glVertexAttribFormat_fp = (glVertexAttribFormat_f) SDL_GL_GetProcAddress("glVertexAttribFormat");
+	glVertexAttribBinding_fp = (glVertexAttribBinding_f) SDL_GL_GetProcAddress("glVertexAttribBinding");
+	glBindVertexBuffer_fp = (glBindVertexBuffer_f) SDL_GL_GetProcAddress("glBindVertexBuffer");
+
 	/* UBO functions (GL 3.1 / ES 3.0) */
 	glGetUniformBlockIndex_fp = (glGetUniformBlockIndex_f) SDL_GL_GetProcAddress("glGetUniformBlockIndex");
 	glUniformBlockBinding_fp = (glUniformBlockBinding_f) SDL_GL_GetProcAddress("glUniformBlockBinding");
