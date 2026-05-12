@@ -4152,9 +4152,12 @@ static void R_ShowBoundingBoxes (void)
 			if (progofs == 0)
 				continue;
 			tgt = PROG_TO_EDICT (progofs);
-			if (!tgt || tgt == focused || tgt->free)
-				continue;
-			if (NUM_FOR_EDICT (tgt) >= sv.num_edicts)
+			{
+				int tgtnum = NUM_FOR_EDICT (tgt);
+				if (tgtnum <= 0 || tgtnum >= sv.num_edicts)
+					continue;	/* out-of-range progofs */
+			}
+			if (tgt == focused || tgt->free)
 				continue;
 
 			VectorAdd (tgt->v.origin, tgt->v.mins, tmin);
@@ -4191,8 +4194,14 @@ static void R_ShowBoundingBoxes (void)
 				progofs = E_INT (ed_iter, d->ofs);
 				if (progofs == 0)
 					continue;
-				if (PROG_TO_EDICT (progofs) != focused)
-					continue;
+				{
+					edict_t *ref = PROG_TO_EDICT (progofs);
+					int refnum = NUM_FOR_EDICT (ref);
+					if (refnum <= 0 || refnum >= sv.num_edicts)
+						continue;
+					if (ref != focused)
+						continue;
+				}
 
 				VectorAdd (ed_iter->v.origin, ed_iter->v.mins, omin);
 				VectorAdd (ed_iter->v.origin, ed_iter->v.maxs, omax);
