@@ -97,6 +97,16 @@ static int	hiz_mip_count;
 static float	hiz_prev_mvp[16];	/* world MVP captured at end of last 3D pass */
 static qboolean	hiz_prev_mvp_valid;
 
+/* Standalone depth resolve (uhexen2-9912): when the postprocess pipeline
+ * is inactive (no FXAA/HDR/etc.) we still need a sampler-readable depth
+ * to seed the Hi-Z pyramid.  Maintain a private depth texture + FBO and
+ * blit-resolve the default framebuffer's depth into it after the 3D pass.
+ * Allocated lazily — zero overhead when gl_hiz_cull is off. */
+static GLuint	hiz_resolve_fbo;
+static GLuint	hiz_resolve_depth_tex;
+static int	hiz_resolve_w;
+static int	hiz_resolve_h;
+
 static GLuint	cull_clear_prog;	/* clear_indirect compute shader */
 static GLuint	cull_mark_prog;		/* cull_mark compute shader */
 
@@ -850,8 +860,96 @@ void R_FreeHiZ (void)
 	if (hiz_pyramid_tex)   { glDeleteTextures_fp(1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
 	if (hiz_copy_prog)     { glDeleteProgram_fp(hiz_copy_prog);        hiz_copy_prog = 0; }
 	if (hiz_reduce_prog)   { glDeleteProgram_fp(hiz_reduce_prog);      hiz_reduce_prog = 0; }
+	if (hiz_resolve_fbo)       { glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);   hiz_resolve_fbo = 0; }
+	if (hiz_resolve_depth_tex) { glDeleteTextures_fp(1, &hiz_resolve_depth_tex); hiz_resolve_depth_tex = 0; }
+	hiz_resolve_w = hiz_resolve_h = 0;
 	hiz_width = hiz_height = hiz_mip_count = 0;
 	hiz_prev_mvp_valid = false;
+}
+
+/* uhexen2-9912: standalone depth resolve.  When the postprocess pipeline
+ * isn't active (no FXAA/HDR/gamma override/etc.), the scene is drawn
+ * straight into the default framebuffer and there is no sampler-readable
+ * depth texture for Hi-Z to seed from.  Maintain a private depth texture
+ * and blit-resolve the default fb's depth into it.  Returns the texture
+ * or 0 on failure. */
+static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
+{
+	GLenum status;
+
+	if (scene_w <= 0 || scene_h <= 0)
+		return 0;
+
+	if (hiz_resolve_depth_tex && hiz_resolve_fbo &&
+	    hiz_resolve_w == scene_w && hiz_resolve_h == scene_h)
+	{
+		/* existing texture matches — just refresh contents */
+		goto blit;
+	}
+
+	if (hiz_resolve_depth_tex)
+	{
+		glDeleteTextures_fp(1, &hiz_resolve_depth_tex);
+		hiz_resolve_depth_tex = 0;
+	}
+	if (hiz_resolve_fbo)
+	{
+		glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);
+		hiz_resolve_fbo = 0;
+	}
+
+	glGenTextures_fp(1, &hiz_resolve_depth_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, hiz_resolve_depth_tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
+			scene_w, scene_h, 0,
+			GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+
+	glGenFramebuffers_fp(1, &hiz_resolve_fbo);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
+	glFramebufferTexture2D_fp(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+				  GL_TEXTURE_2D, hiz_resolve_depth_tex, 0);
+	/* Depth-only FBO needs DRAW_BUFFER = NONE for completeness on strict
+	 * drivers.  READ_BUFFER state is irrelevant since we only ever bind
+	 * this fbo as the DRAW target of glBlitFramebuffer. */
+	{
+		GLenum none = GL_NONE;
+		glDrawBuffers_fp(1, &none);
+	}
+
+	status = glCheckFramebufferStatus_fp(GL_DRAW_FRAMEBUFFER);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, 0);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_DPrintf("Hi-Z standalone resolve FBO incomplete (0x%x)\n", status);
+		glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);
+		glDeleteTextures_fp(1, &hiz_resolve_depth_tex);
+		hiz_resolve_fbo = 0;
+		hiz_resolve_depth_tex = 0;
+		return 0;
+	}
+
+	hiz_resolve_w = scene_w;
+	hiz_resolve_h = scene_h;
+
+blit:
+	/* Resolve default framebuffer depth -> private depth texture.  Default
+	 * fb is the source (id 0), our private fbo is the destination.  Blit
+	 * is a no-op for non-MSAA → non-MSAA except that it copies the data;
+	 * GL_NEAREST is the only valid filter for depth blits. */
+	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, 0);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
+	glBlitFramebuffer_fp(0, 0, scene_w, scene_h,
+			     0, 0, scene_w, scene_h,
+			     GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, 0);
+	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, 0);
+
+	return hiz_resolve_depth_tex;
 }
 
 void R_BuildHiZForNextFrame (void)
@@ -864,11 +962,36 @@ void R_BuildHiZForNextFrame (void)
 		return;
 
 	scene_depth_tex = GL_PostProcess_GetSceneDepthTex();
-	if (!scene_depth_tex)
+	if (scene_depth_tex)
+	{
+		/* Postprocess is active with a sampler-readable depth (non-MSAA
+		 * pp path).  Use the scene size it actually rendered at — may
+		 * be scaled down by r_scale < 1. */
+		if (!GL_PostProcess_GetSceneSize(&scene_w, &scene_h))
+			return;
+	}
+	else if (!GL_PostProcess_Active())
+	{
+		/* uhexen2-9912: postprocess inactive (no FXAA/HDR/gamma/etc.) —
+		 * scene went straight to the default framebuffer.  Resolve its
+		 * depth to our private texture so the pyramid build still runs.
+		 * (When pp IS active but has no depth texture — MSAA pp path —
+		 * the scene is in pp_fbo, not the default fb; reading default
+		 * fb would give stale data, so skip silently.) */
+		extern int glwidth, glheight;
+		scene_w = glwidth;
+		scene_h = glheight;
+		scene_depth_tex = R_HiZ_ResolveStandaloneDepth(scene_w, scene_h);
+		if (!scene_depth_tex)
+			return;
+	}
+	else
+	{
+		/* pp_active && no depth texture — MSAA postprocess path.  No
+		 * sampler-readable depth available; cull-mark will run without
+		 * Hi-Z this frame. */
 		return;
-
-	if (!GL_PostProcess_GetSceneSize(&scene_w, &scene_h))
-		return;
+	}
 
 	if (!R_HiZ_EnsureResources(scene_w, scene_h))
 		return;

@@ -1532,6 +1532,15 @@ void SCR_UpdateScreen (void)
 		V_RenderView ();
 
 	GL_PostProcess_End3D ();
+#ifndef __EMSCRIPTEN__
+	/* Build Hi-Z pyramid for next frame's cull dispatch.  End3D already
+	 * calls this in the pp_active path (where pp_depth_tex is ready).
+	 * For the !pp_active path, drive the standalone depth resolve here
+	 * so gl_hiz_cull works without an unrelated postprocess effect
+	 * being enabled (uhexen2-9912). */
+	if (!GL_PostProcess_Active())
+		R_BuildHiZForNextFrame ();
+#endif
 	GL_Set2D ();
 	SCR_TileClear ();	// draw any areas not covered by the refresh
 
