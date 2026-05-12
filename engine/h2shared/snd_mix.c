@@ -23,9 +23,9 @@
 
 #define	PAINTBUFFER_SIZE	2048
 ASM_LINKAGE_BEGIN /* global vars referenced by asm */
-portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
-int		snd_scaletable[32][256];
-int		*snd_p, snd_linear_count;
+static portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
+static int		snd_scaletable[32][256];
+static int		*snd_p, snd_linear_count;
 short		*snd_out;
 ASM_LINKAGE_END
 
