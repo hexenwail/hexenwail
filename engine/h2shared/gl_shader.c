@@ -115,6 +115,13 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 		"layout(location=1) out vec4 out_reveal;\n"
 		"void main_body();\n"
 		"void main() {\n"
+		/* Initialize fragColor before calling main_body so Mesa's
+		 * static analysis doesn't flag the read in clamp() as
+		 * uninitialized.  Without this, Mesa Intel emits
+		 * "warning: `fragColor' used uninitialized" and aggressive
+		 * optimization can fold the entire chain to zero — which
+		 * silently kills all OIT writes. */
+		"    fragColor = vec4(0.0);\n"
 		"    main_body();\n"
 		"    fragColor = clamp(fragColor, 0.0, 1.0);\n"
 		"    float z = 1.0 / gl_FragCoord.w;\n"
