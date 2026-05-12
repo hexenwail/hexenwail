@@ -1916,12 +1916,20 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 
 	samples = (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format;
 
-	// Binarize alpha for alpha-tested textures: snap to 0 or 255.
-	// Many external TGAs have smooth/anti-aliased alpha meant for blending,
-	// but alpha-tested textures (fence brushes, EF_HOLEY models) need binary
-	// alpha for GL_ALPHA_TEST to work. After binarizing, flood RGB from opaque
-	// neighbors into transparent pixels to prevent black fringe artifacts.
-	if ((glt->flags & TEX_FENCE) || ((glt->flags & TEX_HOLEY) && (glt->flags & TEX_RGBA)))
+	// Alpha-bleed RGBA textures with transparency to prevent black fringes:
+	// bilinear filter blends RGB across alpha=0 pixels, so if their RGB is
+	// black (common in PNG cutouts) the fringe darkens. Flood RGB from
+	// opaque neighbors first. For cutout textures (TEX_FENCE / TEX_HOLEY +
+	// RGBA), also binarize alpha so alpha-test reads a clean 0/255 mask.
+	// TEX_ALPHA-only (translucent PNG alias skins) gets the bleed without
+	// binarization — keeps intermediate alpha intact. uhexen2-pcd1.
+	{
+		int is_cutout = (glt->flags & TEX_FENCE) ||
+				((glt->flags & TEX_HOLEY) && (glt->flags & TEX_RGBA));
+		int needs_bleed = is_cutout ||
+				((glt->flags & TEX_ALPHA) && (glt->flags & TEX_RGBA));
+
+	if (needs_bleed)
 	{
 		int i, s, pass;
 		byte *rgba;
@@ -1935,17 +1943,22 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		s = glt->width * glt->height;
 		rgba = (byte *)cleaned_data;
 
-		// Step 1: Binarize alpha at threshold 128
-		for (i = 0; i < s; i++)
+		// Step 1: Binarize alpha at threshold 128 (cutout textures only)
+		if (is_cutout)
 		{
-			int offset = i * 4;
-			rgba[offset + 3] = (rgba[offset + 3] >= 128) ? 255 : 0;
+			for (i = 0; i < s; i++)
+			{
+				int offset = i * 4;
+				rgba[offset + 3] = (rgba[offset + 3] >= 128) ? 255 : 0;
+			}
 		}
 
 		// Step 2: Flood RGB from opaque neighbors into transparent pixels.
 		// This prevents black fringes when texture filtering samples across
 		// the opaque/transparent boundary. Run multiple passes to propagate
-		// colors inward from edges.
+		// colors inward from edges. Donors are pixels with alpha==255;
+		// translucent skins with no fully-opaque pixels at all (rare) get
+		// no benefit — fine, since their fringe blend is already gentle.
 		for (pass = 0; pass < 4; pass++)
 		{
 			for (i = 0; i < s; i++)
@@ -1987,6 +2000,7 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		}
 
 		data = cleaned_data;
+	}
 	}
 
 	// Force GL_RGBA8 (0x8058) sized internal format for alpha-tested textures.
