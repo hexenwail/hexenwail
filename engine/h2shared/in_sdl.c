@@ -103,6 +103,31 @@ cvar_t	joy_flick              = {"joy_flick",              "0",     CVAR_ARCHIVE
 cvar_t	joy_flick_time         = {"joy_flick_time",         "0.125", CVAR_ARCHIVE};
 cvar_t	joy_flick_deadzone     = {"joy_flick_deadzone",     "0.9",   CVAR_ARCHIVE};
 cvar_t	joy_flick_noise_thresh = {"joy_flick_noise_thresh", "2.0",   CVAR_ARCHIVE};
+/* Gyroscope aiming (Ironwail parity, uhexen2-xpbi): SDL3 reads the
+ * controller's built-in gyro (PS4/PS5/Steam Deck/Switch Pro) and adds
+ * its yaw/pitch rates to viewangles.  Layers on top of analog/flick
+ * yaw — particularly useful as a fine-aim supplement to coarse stick.
+ *
+ * gyro_mode: 0=always, 2=while-no-stick (gyro suppressed when the
+ *            look stick is deflected past joy_deadzone_look).  Modes
+ *            1/3 (button-gated) need an explicit +gyroactive binding
+ *            and are not yet implemented — behave as mode 0.
+ * gyro_turning_axis: 0 = Y axis (rotate controller vertically), 1 = Z
+ *                    (roll axis, for users who hold the pad flat).
+ * gyro_noise_thresh: per-axis deg/sec threshold; rates below this are
+ *                    dropped as drift.
+ * gyro_calibration_x/y/z: per-axis static offsets, set by the
+ *                         `gyro_calibrate` command (sits the controller
+ *                         still, averages 300 samples). */
+cvar_t	gyro_enable            = {"gyro_enable",            "1",   CVAR_ARCHIVE};
+cvar_t	gyro_mode              = {"gyro_mode",              "2",   CVAR_ARCHIVE};
+cvar_t	gyro_turning_axis      = {"gyro_turning_axis",      "0",   CVAR_ARCHIVE};
+cvar_t	gyro_yawsensitivity    = {"gyro_yawsensitivity",    "2.5", CVAR_ARCHIVE};
+cvar_t	gyro_pitchsensitivity  = {"gyro_pitchsensitivity",  "2.5", CVAR_ARCHIVE};
+cvar_t	gyro_noise_thresh      = {"gyro_noise_thresh",      "1.5", CVAR_ARCHIVE};
+cvar_t	gyro_calibration_x     = {"gyro_calibration_x",     "0",   CVAR_ARCHIVE};
+cvar_t	gyro_calibration_y     = {"gyro_calibration_y",     "0",   CVAR_ARCHIVE};
+cvar_t	gyro_calibration_z     = {"gyro_calibration_z",     "0",   CVAR_ARCHIVE};
 
 /* axis state for edge-detected trigger/stick key events */
 typedef struct {
@@ -123,6 +148,13 @@ static float		flick_total_deg;	/* signed target rotation */
 static float		flick_progress;		/* eased 0..1 — fraction applied */
 static float		flick_elapsed;		/* seconds since flick start */
 static float		flick_prev_angle_rad;	/* last frame's stick angle */
+
+/* Gyro state (uhexen2-xpbi) */
+#define GYRO_CAL_SAMPLES	300	/* ~2.5s at 120 Hz sensor */
+static qboolean		gp_has_gyro = false;
+static qboolean		gyro_calibrating = false;
+static int		gyro_cal_count = 0;
+static float		gyro_cal_sum[3];
 
 /* map SDL3 gamepad buttons to engine keycodes */
 static int IN_GPButtonToKey (SDL_GamepadButton btn)
@@ -206,6 +238,7 @@ static void IN_GPMenuMove (stickpair_t old_s, stickpair_t new_s)
 
 static void IN_ApplyGamepadLED (void);
 static qboolean IN_FlickStickUpdate (float lx, float ly, float dt);
+static void IN_GyroMove (void);
 
 static gamepad_type_t IN_ClassifyGamepad (SDL_Gamepad *gp)
 {
@@ -276,6 +309,21 @@ static void IN_StartupGamepad (void)
 			Con_Printf("Gamepad opened: \"%s\" (%s)\n",
 				SDL_GetGamepadName(gp_active), type_names[gp_type]);
 			IN_ApplyGamepadLED();
+			/* Enable gyro sensor if the pad reports one (PS4/PS5/Switch
+			 * Pro/Steam Deck).  Failures are non-fatal; gp_has_gyro
+			 * stays false and IN_GyroMove becomes a no-op. */
+			if (SDL_GamepadHasSensor(gp_active, SDL_SENSOR_GYRO))
+			{
+				if (SDL_SetGamepadSensorEnabled(gp_active, SDL_SENSOR_GYRO, true))
+				{
+					gp_has_gyro = true;
+					Con_Printf("  gyro: enabled\n");
+				}
+				else
+				{
+					Con_Printf("  gyro: enable failed (%s)\n", SDL_GetError());
+				}
+			}
 		}
 		else
 			Con_Printf("Gamepad open failed: %s\n", SDL_GetError());
@@ -297,6 +345,7 @@ static void IN_ShutdownGamepad (void)
 		gp_active = NULL;
 		gp_active_id = 0;
 		gp_type = GAMEPAD_TYPE_UNKNOWN;
+		gp_has_gyro = false;
 	}
 	if (SDL_WasInit(SDL_INIT_GAMEPAD))
 		SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
@@ -396,6 +445,9 @@ static void IN_GPMove (usercmd_t *cmd)
 	cl.viewangles[PITCH] += look.y * joy_sensitivity_pitch.value * host_frametime *
 				(joy_invert.integer ? -1.0f : 1.0f);
 
+	/* Gyro contribution layered on top of analog/flick yaw + analog pitch. */
+	IN_GyroMove();
+
 	/* bounds check pitch */
 	if (cl.viewangles[PITCH] > 80.0f)
 		cl.viewangles[PITCH] = 80.0f;
@@ -494,6 +546,108 @@ static qboolean IN_FlickStickUpdate (float lx, float ly, float dt)
 	if (lx != 0 || ly != 0)
 		V_StopPitchDrift();
 	return true;
+}
+
+/*
+===========
+IN_GyroMove  (uhexen2-xpbi)
+
+Reads angular velocity from the controller's built-in gyro and writes
+the rates into cl.viewangles, scaled by per-axis sensitivity and gated
+by per-axis noise threshold.  Subtracts the user's calibration offsets
+to cancel constant drift.  Active when gyro_enable=1, the pad has a
+gyro, and mode logic allows it (always / suppressed-by-stick).
+===========
+*/
+static void IN_GyroMove (void)
+{
+	float	data[3];
+	float	ratex, ratey, ratez;
+	float	yawrate, pitchrate;
+	int	mode;
+
+	if (!gp_active || !gp_has_gyro || !gyro_enable.integer)
+		return;
+
+	if (!SDL_GetGamepadSensorData(gp_active, SDL_SENSOR_GYRO, data, 3))
+		return;
+
+	/* SDL returns rad/s; we work in deg/s throughout. */
+	ratex = data[0] * (180.0f / (float)M_PI);
+	ratey = data[1] * (180.0f / (float)M_PI);
+	ratez = data[2] * (180.0f / (float)M_PI);
+
+	/* Calibration capture takes priority: drop view input, accumulate. */
+	if (gyro_calibrating)
+	{
+		gyro_cal_sum[0] += ratex;
+		gyro_cal_sum[1] += ratey;
+		gyro_cal_sum[2] += ratez;
+		gyro_cal_count++;
+		if (gyro_cal_count >= GYRO_CAL_SAMPLES)
+		{
+			float n = (float)GYRO_CAL_SAMPLES;
+			Cvar_SetValueQuick(&gyro_calibration_x, gyro_cal_sum[0] / n);
+			Cvar_SetValueQuick(&gyro_calibration_y, gyro_cal_sum[1] / n);
+			Cvar_SetValueQuick(&gyro_calibration_z, gyro_cal_sum[2] / n);
+			Con_Printf("Gyro calibrated: x=%.3f y=%.3f z=%.3f deg/s\n",
+				gyro_calibration_x.value,
+				gyro_calibration_y.value,
+				gyro_calibration_z.value);
+			gyro_calibrating = false;
+		}
+		return;
+	}
+
+	ratex -= gyro_calibration_x.value;
+	ratey -= gyro_calibration_y.value;
+	ratez -= gyro_calibration_z.value;
+
+	/* Mode gating */
+	mode = gyro_mode.integer;
+	if (mode == 2)
+	{
+		/* Suppress gyro when the look stick is past its deadzone —
+		 * lets the user use stick for big sweeps and gyro for fine
+		 * adjustment, without them fighting each other. */
+		SDL_GamepadAxis ax_x = joy_swapmovelook.integer ?
+			SDL_GAMEPAD_AXIS_LEFTX : SDL_GAMEPAD_AXIS_RIGHTX;
+		SDL_GamepadAxis ax_y = joy_swapmovelook.integer ?
+			SDL_GAMEPAD_AXIS_LEFTY : SDL_GAMEPAD_AXIS_RIGHTY;
+		float lx = IN_GetAxis(ax_x);
+		float ly = IN_GetAxis(ax_y);
+		if (sqrtf(lx*lx + ly*ly) > joy_deadzone_look.value)
+			return;
+	}
+	/* modes 1/3 fall through to always-on for now */
+
+	yawrate   = gyro_turning_axis.integer ? ratez : ratey;
+	pitchrate = ratex;
+
+	if (fabsf(yawrate)   < gyro_noise_thresh.value) yawrate = 0;
+	if (fabsf(pitchrate) < gyro_noise_thresh.value) pitchrate = 0;
+
+	cl.viewangles[YAW]   -= yawrate   * gyro_yawsensitivity.value   * host_frametime;
+	cl.viewangles[PITCH] += pitchrate * gyro_pitchsensitivity.value * host_frametime *
+				(joy_invert.integer ? -1.0f : 1.0f);
+
+	if (yawrate != 0 || pitchrate != 0)
+		V_StopPitchDrift();
+	if (cl.viewangles[PITCH] >  80.0f) cl.viewangles[PITCH] =  80.0f;
+	if (cl.viewangles[PITCH] < -70.0f) cl.viewangles[PITCH] = -70.0f;
+}
+
+static void IN_GyroCalibrate_f (void)
+{
+	if (!gp_active || !gp_has_gyro)
+	{
+		Con_Printf("gyro_calibrate: no gyro-capable gamepad open\n");
+		return;
+	}
+	gyro_cal_sum[0] = gyro_cal_sum[1] = gyro_cal_sum[2] = 0;
+	gyro_cal_count  = 0;
+	gyro_calibrating = true;
+	Con_Printf("Calibrating gyro — hold controller still for ~3 seconds...\n");
 }
 
 /*
@@ -683,6 +837,16 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&joy_flick_time);
 	Cvar_RegisterVariable (&joy_flick_deadzone);
 	Cvar_RegisterVariable (&joy_flick_noise_thresh);
+	Cvar_RegisterVariable (&gyro_enable);
+	Cvar_RegisterVariable (&gyro_mode);
+	Cvar_RegisterVariable (&gyro_turning_axis);
+	Cvar_RegisterVariable (&gyro_yawsensitivity);
+	Cvar_RegisterVariable (&gyro_pitchsensitivity);
+	Cvar_RegisterVariable (&gyro_noise_thresh);
+	Cvar_RegisterVariable (&gyro_calibration_x);
+	Cvar_RegisterVariable (&gyro_calibration_y);
+	Cvar_RegisterVariable (&gyro_calibration_z);
+	Cmd_AddCommand ("gyro_calibrate", IN_GyroCalibrate_f);
 
 	Cmd_AddCommand ("force_centerview", Force_CenterView_f);
 	Cmd_AddCommand ("+altmodifier", IN_JoyAltModifierDown);
