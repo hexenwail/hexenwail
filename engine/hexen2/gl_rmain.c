@@ -2829,12 +2829,62 @@ Implemented by: jack
 ================
 */
 
-static int transCompare (const void *arg1, const void *arg2)
+/*
+ * R_AlphaSortRadix
+ *
+ * LSD radix sort over the 4 bytes of the IEEE 754 bit pattern of `len`.
+ * `len` is a squared distance (always >= 0), so the unsigned bit pattern
+ * compares in the same order as the float value.  Inverting the bits
+ * makes the natural ascending sort yield descending output (back-to-
+ * front) without an extra reverse pass.  Stable, O(n), matches Ironwail.
+ */
+static void R_AlphaSortRadix (sortedent_t *ents, int n)
 {
-	const sortedent_t *a1, *a2;
-	a1 = (sortedent_t *) arg1;
-	a2 = (sortedent_t *) arg2;
-	return (a2->len - a1->len); // Sorted in reverse order.  Neat, huh?
+	static sortedent_t	tmp[MAX_VISEDICTS];
+	uint32_t		hist[4][256];
+	int			i, b;
+	sortedent_t		*src, *dst, *swap;
+
+	if (n < 2)
+		return;
+
+	memset (hist, 0, sizeof (hist));
+	for (i = 0; i < n; i++)
+	{
+		uint32_t bits;
+		memcpy (&bits, &ents[i].len, 4);
+		bits = ~bits;
+		hist[0][(bits      ) & 0xFF]++;
+		hist[1][(bits >>  8) & 0xFF]++;
+		hist[2][(bits >> 16) & 0xFF]++;
+		hist[3][(bits >> 24) & 0xFF]++;
+	}
+
+	for (b = 0; b < 4; b++)
+	{
+		uint32_t s = 0;
+		for (i = 0; i < 256; i++)
+		{
+			uint32_t c = hist[b][i];
+			hist[b][i] = s;
+			s += c;
+		}
+	}
+
+	src = ents;
+	dst = tmp;
+	for (b = 0; b < 4; b++)
+	{
+		for (i = 0; i < n; i++)
+		{
+			uint32_t bits;
+			memcpy (&bits, &src[i].len, 4);
+			bits = ~bits;
+			dst[hist[b][(bits >> (b * 8)) & 0xFF]++] = src[i];
+		}
+		swap = src; src = dst; dst = swap;
+	}
+	/* 4 swaps -> src is back at `ents`, which holds the final result. */
 }
 
 static void R_DrawTransEntitiesOnList (qboolean inwater)
@@ -2857,7 +2907,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 	}
 
 	if (r_alphasort.integer)
-		qsort((void *) theents, numents, sizeof(sortedent_t), transCompare);
+		R_AlphaSortRadix (theents, numents);
 
 	glDepthMask_fp(0);
 	for (i = 0; i < numents; i++)

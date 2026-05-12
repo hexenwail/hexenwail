@@ -13,16 +13,16 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 10 | 1 | 2 | 0 |
-| Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
+| Rendering — Visual/Shading | 18 | 2 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 20 | 0 | 2 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **67** | **5** | **8** | **8** |
+| **TOTAL** | **68** | **4** | **8** | **8** |
 
-**Parity: 84% ported, 6% partial, 10% missing** (excluding N/A)
+**Parity: 85% ported, 5% partial, 10% missing** (excluding N/A)
 
 ---
 
@@ -70,7 +70,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters (>0 = match only, <0 = non-match only). Ironwail's link/target visualization (`r_showbboxes_links`, `r_showbboxes_targets`, focused-entity ray-cast highlight) not yet ported (uhexen2-ykr2). |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 (uhexen2-kaa6). |
 | LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level (uhexen2-dax2). |
-| Entity alpha radix sort | 🔶 | `r_alphasort` cvar is wired and uses `qsort` (gl_rmain.c:2097). Ironwail's radix sort would be faster but the count is small (≤dozens of translucent entities per frame) — qsort is microseconds either way (uhexen2-14ih). |
+| Entity alpha radix sort | ✅ | `r_alphasort` uses a 4-pass LSD radix sort over the IEEE-754 bit pattern of the squared distance (`R_AlphaSortRadix` in `gl_rmain.c`). Bits are inverted so the ascending unsigned sort yields descending output directly. Stable, O(n); matches Ironwail. |
 
 ## Performance / Engine
 
