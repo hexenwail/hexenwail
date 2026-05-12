@@ -141,6 +141,7 @@ static qpic_t	*scr_net;
 static qpic_t	*scr_turtle;
 
 static void SCR_ScreenShot_f (void);
+static void SCR_ScreenHash_f (void);
 
 static const char	*plaquemessage = "";	// pointer to current plaque message
 
@@ -574,6 +575,7 @@ void SCR_Init (void)
 //	Cvar_RegisterVariable (&gl_triplebuffer);
 
 	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f);
+	Cmd_AddCommand ("screenhash",SCR_ScreenHash_f);
 	Cmd_AddCommand ("sizeup",SCR_SizeUp_f);
 	Cmd_AddCommand ("sizedown",SCR_SizeDown_f);
 	Cmd_AddCommand ("+zoom", SCR_ZoomDown_f);
@@ -1095,6 +1097,33 @@ static void SCR_ScreenShot_f (void)
 
 	if (i == 0)
 		Con_Printf ("Wrote %s\n", filename);
+}
+
+/* uhexen2-8pzr: visual-regression gate for Hi-Z acceptance sweep.  FNV-1a
+ * over the post-tonemap framebuffer at the current camera.  Identical hash
+ * across `gl_hiz_cull 0` vs 1 proves no surface was wrongly culled at this
+ * vantage. */
+static void SCR_ScreenHash_f (void)
+{
+	int		i, size;
+	byte		*buffer;
+	uint32_t	hash = 2166136261u;	/* FNV-1a offset basis */
+
+	size = glwidth * glheight * 3;
+	buffer = (byte *) malloc(size);
+	if (!buffer) { Con_Printf("screenhash: out of memory\n"); return; }
+
+	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
+	glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+
+	for (i = 0; i < size; i++)
+	{
+		hash ^= buffer[i];
+		hash *= 16777619u;
+	}
+	free(buffer);
+
+	Con_Printf ("screenhash: %08x  (%dx%d)\n", hash, glwidth, glheight);
 }
 
 //=============================================================================
