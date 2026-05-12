@@ -853,6 +853,25 @@ static qboolean OIT_InitShader (void)
 		}
 	}
 
+	/* Debug-mode "sample accum directly" resolve.  Used when
+	 * r_oit_debug_no_stencil >= 5 to verify texelFetch returns the
+	 * cleared accum content. */
+	{
+		GLuint svs, sfs, sprog;
+		svs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+		sfs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_debug_sample_frag);
+		if (svs && sfs)
+		{
+			sprog = glCreateProgram_fp();
+			glAttachShader_fp(sprog, svs);
+			glAttachShader_fp(sprog, sfs);
+			glLinkProgram_fp(sprog);
+			oit_resolve_debug_sample_prog = sprog;
+			glDeleteShader_fp(svs);
+			glDeleteShader_fp(sfs);
+		}
+	}
+
 	Con_SafePrintf("OIT: resolve shader OK\n");
 	return true;
 }
@@ -935,7 +954,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 		glStencilMask(0);
 	}
 
-	if (r_oit_debug_no_stencil.integer >= 4 && oit_resolve_debug_prog)
+	if (r_oit_debug_no_stencil.integer >= 5 && oit_resolve_debug_sample_prog)
+		glUseProgram_fp(oit_resolve_debug_sample_prog);
+	else if (r_oit_debug_no_stencil.integer >= 4 && oit_resolve_debug_prog)
 		glUseProgram_fp(oit_resolve_debug_prog);
 	else
 		glUseProgram_fp(oit_resolve_prog);
