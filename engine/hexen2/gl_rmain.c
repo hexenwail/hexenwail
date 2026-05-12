@@ -1134,17 +1134,25 @@ static void R_DrawAliasModel (entity_t *e)
 		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);
 	}
 
+	/* Inside an OIT pass, OIT_BeginTranslucency has already configured
+	 * per-buffer blend funcs (glBlendFunci 0/1).  Overriding with plain
+	 * glBlendFunc or glDisable(GL_BLEND) would clobber both attachments
+	 * and break WBOIT for every translucent draw after this one in the
+	 * same pass (sprites, particles, water turb, brushmodels).  Skip
+	 * the state pokes and rely on the OIT setup. */
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
 		model_constant_alpha = 1.0f;
 		glDisable_fp (GL_CULL_FACE);
 	}
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		else
@@ -1153,12 +1161,14 @@ static void R_DrawAliasModel (entity_t *e)
 	else if (e->model->flags & EF_TRANSPARENT)
 	{
 		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		model_constant_alpha = 1.0f;
 	}
 	else if (e->model->flags & EF_HOLEY)
 	{
-		glDisable_fp (GL_BLEND);
+		if (!OIT_InPass())
+			glDisable_fp (GL_BLEND);
 		GL_SetAlphaThreshold(0.666f);	/* alpha test for see-through cutouts */
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -1167,7 +1177,8 @@ static void R_DrawAliasModel (entity_t *e)
 	else if (e->alpha != ENTALPHA_DEFAULT)
 	{
 		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 	}
 	else
@@ -1232,7 +1243,11 @@ static void R_DrawAliasModel (entity_t *e)
 
 	// Fullbright pass: render fullbright pixels with additive blending
 	// Skip for translucent models — additive blend over transparency looks wrong
-	if (gl_fullbrights.integer && skinnum < 100 &&
+	// Also skip inside an OIT pass: the additive blend can't coexist with
+	// the WBOIT MRT blend funcs, and rendering fullbright before OIT_End
+	// just gets dimmed by the resolve like the glow flares did
+	// (handled separately by R_DrawAllGlows after OIT_End).
+	if (gl_fullbrights.integer && skinnum < 100 && !OIT_InPass() &&
 	    !((e->drawflags & DRF_TRANSLUCENT) ||
 	      (e->model->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS)) ||
 	      (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))))
@@ -1283,12 +1298,14 @@ static void R_DrawAliasModel (entity_t *e)
 	    (e->model->flags & EF_TRANSPARENT) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
-		glDisable_fp (GL_BLEND);
+		if (!OIT_InPass())
+			glDisable_fp (GL_BLEND);
 	}
 
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glEnable_fp (GL_CULL_FACE);
 	}
 
