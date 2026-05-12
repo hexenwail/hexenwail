@@ -62,6 +62,17 @@ static cvar_t	r_embeddedmipmaps = {"r_embeddedmipmaps", "0", CVAR_ARCHIVE};
 static cvar_t	gl_constretch = {"gl_constretch", "0", CVAR_ARCHIVE};
 static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
 cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
+/* Per-texture LOD bias for mipmapped textures (uhexen2-dax2).  Numeric
+ * value applied directly; the special string "auto" scales by current
+ * MSAA sample count: 0/1 → 0, 2x → -0.25, 4x → -0.5, 8x → -0.75,
+ * 16x → -1.0 (each MSAA doubling shifts mipmap pickup -0.25 toward
+ * sharper levels, on the theory that MSAA's extra coverage samples
+ * can absorb the higher-frequency mip without aliasing). */
+cvar_t	gl_lodbias = {"gl_lodbias", "0", CVAR_ARCHIVE};
+
+#ifndef GL_TEXTURE_LOD_BIAS
+#define GL_TEXTURE_LOD_BIAS	0x8501
+#endif
 
 /* 0 = auto (1x at 480p, 2x at 960p, ...). Non-zero overrides. */
 cvar_t	scr_sbarscale       = {"scr_sbarscale",       "0", CVAR_ARCHIVE};
@@ -498,6 +509,42 @@ static void Draw_TouchMipmapFilterModes (void)
 	}
 }
 
+static float GL_ResolveLodBias (void)
+{
+	extern cvar_t vid_config_fsaa;
+	const char *s = gl_lodbias.string;
+	if (s && (s[0] == 'a' || s[0] == 'A') && q_strcasecmp(s, "auto") == 0)
+	{
+		int n = vid_config_fsaa.integer;
+		switch (n)
+		{
+		case 0: case 1:	return  0.0f;
+		case 2:		return -0.25f;
+		case 4:		return -0.5f;
+		case 8:		return -0.75f;
+		case 16:	return -1.0f;
+		default:	return  0.0f;
+		}
+	}
+	return gl_lodbias.value;
+}
+
+static void Draw_LodBias_f (cvar_t *var)
+{
+	gltexture_t	*glt;
+	int		i;
+	float		bias = GL_ResolveLodBias();
+	(void)var;
+	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
+	{
+		if (glt->flags & TEX_MIPMAP)
+		{
+			GL_Bind (glt->texnum);
+			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, bias);
+		}
+	}
+}
+
 static void Draw_Anisotropy_f (cvar_t *var)
 {
 	if (var->value < 1)
@@ -636,6 +683,7 @@ void Draw_Init (void)
 		gl_texturemode.string = gl_texmodes[gl_filter_idx].name;
 		Cvar_RegisterVariable (&gl_texturemode);
 		Cvar_RegisterVariable (&gl_texture_anisotropy);
+		Cvar_RegisterVariable (&gl_lodbias);
 		Cvar_RegisterVariable (&scr_sbarscale);
 		Cvar_RegisterVariable (&scr_menuscale);
 		Cvar_RegisterVariable (&scr_crosshairscale);
@@ -643,6 +691,7 @@ void Draw_Init (void)
 		Cvar_RegisterVariable (&scr_conbrightness);
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
 		Cvar_SetCallback (&gl_texture_anisotropy, Draw_Anisotropy_f);
+		Cvar_SetCallback (&gl_lodbias, Draw_LodBias_f);
 		Hash_Allocate (&hash_cachepics, MAX_CACHED_PICS);
 		Hash_Allocate (&hash_gltextures, MAX_GLTEXTURES);
 	}
@@ -2126,6 +2175,7 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 		if (gl_max_anisotropy >= 2)
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
 	}
 	else
 	{
@@ -2207,6 +2257,7 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 	if (gl_max_anisotropy >= 2)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
 
 	Hunk_FreeToLowMark(mark);
 }
