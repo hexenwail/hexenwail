@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -50,7 +50,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|
 | Shader-based fog | ✅ | `gl_fog.c`, density/RGB/fade — EXP2 falloff with /64 density divisor (matches Ironwail) |
 | Lightstyle interpolation | ✅ | `r_lerplightstyles` |
-| Model frame interpolation | ✅ | `r_lerpmodels`, `r_lerpmove` |
+| Model frame interpolation | ✅ | `r_lerpmodels`, `r_lerpmove`, `r_animsmoothing` (observed-interval heuristic — client-side substitute for Ironwail's `LERP_FINISH` server-timed ends, since Hexen II's entity update protocol has no spare bit for `U_LERPFINISH`) |
 | Overbright model lighting | ✅ | `gl_overbright_models` |
 | Fast sky | ✅ | `r_fastsky` |
 | Skybox support | ✅ | `svc_skybox`, cubemap loading |
