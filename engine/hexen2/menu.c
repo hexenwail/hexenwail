@@ -2245,7 +2245,11 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_PRESET:
 	{
 		/* Cycle through presets (skip "User" — that's auto-detected).
-		 * 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra */
+		 * 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra.
+		 * Presets are not live-previewable (they affect many settings at once),
+		 * so disable the menu fade that was triggered by left/right key. */
+		menu_live_edit_time = -10.0;
+
 		static int preset = 5;
 		preset += dir;
 		if (preset < 1) preset = 6;
