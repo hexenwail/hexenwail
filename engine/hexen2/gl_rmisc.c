@@ -44,6 +44,14 @@ const int	color_offsets[MAX_PLAYER_CLASS] =
 
 cvar_t			gl_purge_maptex = {"gl_purge_maptex", "1", CVAR_NONE};
 
+/* Developer diagnostic for stale texture-handle aliasing (uhexen2-0fsq):
+ * 0 = silent (default)
+ * 1 = log every GL_LoadTexture rebind (handle reissued via glDelete+glGen)
+ *     and every D_ClearOpenGLTextures batch.  Watch the console while
+ *     Mathuzzz reproes the random-corruption symptom; mid-map rebinds
+ *     of skins or world textures are the suspect path. */
+cvar_t			gl_log_texgen = {"gl_log_texgen", "0", CVAR_NONE};
+
 qboolean		flush_textures;
 int			gl_texlevel;
 extern int		menu_numcachepics;
@@ -254,6 +262,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_turbalpha);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_lerpmodels);
+	Cvar_RegisterVariable (&r_lerpanim_observed);
 	Cvar_RegisterVariable (&r_showbboxes);
 	Cvar_RegisterVariable (&r_speeds);
 	{ extern cvar_t r_speeds_gpufinish; Cvar_RegisterVariable (&r_speeds_gpufinish); }
@@ -281,6 +290,7 @@ void R_Init (void)
 
 	Cvar_RegisterVariable (&gl_zfix);
 	Cvar_RegisterVariable (&gl_purge_maptex);
+	Cvar_RegisterVariable (&gl_log_texgen);
 
 	Cvar_RegisterVariable (&gl_keeptjunctions);
 	Cvar_RegisterVariable (&gl_reporttjunctions);
@@ -517,9 +527,19 @@ void D_ClearOpenGLTextures (int last_tex)
 {
 	int		i, key;
 
+	if (gl_log_texgen.integer)
+		Con_Printf ("[texgen] f=%d D_ClearOpenGLTextures: freeing %d handles "
+			    "(keep first %d, total before %d)\n",
+			    host_framecount, numgltextures - last_tex,
+			    last_tex, numgltextures);
+
 	// Delete OpenGL textures
 	for (i = last_tex; i < numgltextures; i++)
 	{
+		if (gl_log_texgen.integer >= 2)
+			Con_Printf ("[texgen]    drop %lu '%s'\n",
+				    (unsigned long)gltextures[i].texnum,
+				    gltextures[i].identifier);
 		glDeleteTextures_fp(1, &(gltextures[i].texnum));
 		key = Hash_GenerateKeyString (&hash_gltextures, gltextures[i].identifier, true);
 		Hash_Remove(&hash_gltextures, key, i);

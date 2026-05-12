@@ -272,6 +272,7 @@ extern	cvar_t	r_alias_gpu;
 extern	cvar_t	r_alphatocoverage;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_lerpmodels;
+extern	cvar_t	r_lerpanim_observed;
 extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
@@ -292,6 +293,7 @@ extern	cvar_t	gl_cull;
 extern	cvar_t	gl_poly;
 extern	cvar_t	gl_zfix;
 extern	cvar_t	gl_purge_maptex;
+extern	cvar_t	gl_log_texgen;	/* uhexen2-0fsq diagnostic */
 extern	cvar_t	gl_smoothmodels;
 extern	cvar_t	gl_affinemodels;
 extern	cvar_t	gl_polyblend;

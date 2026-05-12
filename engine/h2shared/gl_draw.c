@@ -2320,10 +2320,23 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 				    (glt->flags & TEX_MIPMAP) != (flags & TEX_MIPMAP) ||
 				    (glt->flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) != (flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) ||
 				    width  != glt->width || height != glt->height)
-				{ /* not the same, delete and rebind to new image */
-					Con_DPrintf ("Texture cache mismatch: %lu, %s, reloading\n",
-							    (unsigned long)glt->texnum, identifier);
-					glDeleteTextures_fp (1, &glt->texnum);
+				{ /* not the same, delete and rebind to new image.
+				   * uhexen2-0fsq: this reissues glt->texnum but does
+				   * NOT update any caller who already cached the old
+				   * value (texture_t::gl_texturenum on world brushes,
+				   * alias skin slots, etc.).  Stale-handle hazard. */
+					GLuint old_texnum = glt->texnum;
+					if (gl_log_texgen.integer)
+						Con_Printf ("[texgen] f=%d rebind '%s' old=%lu (%dx%d crc=%u flags=0x%x) "
+							    "-> new (%dx%d crc=%u flags=0x%x)\n",
+							    host_framecount, identifier,
+							    (unsigned long)old_texnum,
+							    glt->width, glt->height, (unsigned)glt->crc, glt->flags,
+							    width, height, (unsigned)crc, flags);
+					else
+						Con_DPrintf ("Texture cache mismatch: %lu, %s, reloading\n",
+								    (unsigned long)old_texnum, identifier);
+					glDeleteTextures_fp (1, &old_texnum);
 					goto gl_rebind;
 				}
 				else	return glt->texnum;	/* the same is present. */
