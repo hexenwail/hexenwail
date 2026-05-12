@@ -639,11 +639,22 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glEnable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		/* Translucent surfaces must not write depth — otherwise the
 		 * alpha-blended brush ent occludes anything drawn after it
 		 * (e.g. world lava in the R_DrawWaterSurfaces pass behind a
-		 * func_illusionary).  uhexen2-t4kt. */
+		 * func_illusionary).  uhexen2-t4kt.
+		 *
+		 * Inside an OIT pass, OIT_BeginTranslucency installed per-buffer
+		 * blend funcs via glBlendFunci for MRT0 (accum: ONE/ONE) and
+		 * MRT1 (revealage: ZERO/ONE_MINUS_SRC_COLOR).  Calling
+		 * glBlendFunc here overrides BOTH at once and breaks WBOIT for
+		 * every translucent draw that follows in the same pass —
+		 * particles, sprites, water turb, later alias models.
+		 * Manifests as "weapon trails / blood trails stepped on"
+		 * whenever a translucent brush ent (func_illusionary, func_water
+		 * with alpha, etc.) draws inside OIT.  uhexen2-a0hp. */
+		if (!OIT_InPass())
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glDepthMask_fp(0);
 		alpha_val = r_wateralpha.value;
 	}
