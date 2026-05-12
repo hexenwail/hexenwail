@@ -198,6 +198,14 @@ static qboolean PP_NeedsPostProcess (void)
 		return true;
 	if (r_hdr.integer)
 		return true;
+	/* OIT's accum/revealage FBO is built as a sibling of the scene FBO
+	 * in PP_CreateFBO and shares its depth/stencil attachment, so the
+	 * postprocess pipeline must be up for any WBOIT to happen.  Without
+	 * this, setting r_oit 1 at runtime left OIT_Active() false because
+	 * oit_fbo was never created — and the user had to enable an
+	 * unrelated effect (FXAA, HDR, …) to "wake" the pipeline. */
+	if (r_oit.integer)
+		return true;
 	return false;
 }
 
