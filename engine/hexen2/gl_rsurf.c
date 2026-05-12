@@ -675,8 +675,11 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		/* Restore the DRF_TRANSLUCENT prelude state — the cleanup at
 		 * the bottom of this function is bypassed by this early return
 		 * and a leaked DepthMask=0 / BLEND-on would corrupt the next
-		 * draw call.  uhexen2-j001. */
-		if (e->drawflags & DRF_TRANSLUCENT)
+		 * draw call.  uhexen2-j001.
+		 * Inside an OIT pass keep DepthMask=0 and BLEND on so the
+		 * WBOIT per-buffer blend funcs survive into the next
+		 * translucent draw (uhexen2-a0hp). */
+		if ((e->drawflags & DRF_TRANSLUCENT) && !OIT_InPass())
 		{
 			glDepthMask_fp(1);
 			glDisable_fp(GL_BLEND);
@@ -712,16 +715,20 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		if (turb_blend)
 		{
 			glEnable_fp (GL_BLEND);
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			/* Inside OIT keep the WBOIT per-buffer blend funcs in place. */
+			if (!OIT_InPass())
+				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDepthMask_fp(0);
 		}
-		else
+		else if (!OIT_InPass())
 		{
 			/* Opaque turb (default lava) writes depth normally even
 			 * on a DRF_TRANSLUCENT brush — the prelude set DepthMask
 			 * to 0 assuming a translucent surface, but the per-liquid
 			 * alpha override means this surface is actually opaque
-			 * and must occlude geometry behind it.  uhexen2-j001. */
+			 * and must occlude geometry behind it.  uhexen2-j001.
+			 * Inside an OIT pass we must not touch BLEND / DepthMask —
+			 * WBOIT will weight the alpha=1 contribution correctly. */
 			glDisable_fp (GL_BLEND);
 			glDepthMask_fp(1);
 		}
@@ -774,19 +781,30 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		 * the bottom of this function is bypassed by this early return,
 		 * so any DepthMask=0 / BLEND-on left by the prelude or the
 		 * turb_blend branch above would leak into the next draw.
-		 * uhexen2-j001. */
-		glDepthMask_fp(1);
-		glDisable_fp(GL_BLEND);
+		 * uhexen2-j001.
+		 * Inside an OIT pass leave both alone — WBOIT depends on the
+		 * MRT blend funcs and depth writes off (uhexen2-a0hp). */
+		if (!OIT_InPass())
+		{
+			glDepthMask_fp(1);
+			glDisable_fp(GL_BLEND);
+		}
 		return;
 	}
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
-		glDisable_fp(GL_BLEND);
 		/* Alpha-tested cutout — surviving pixels are fully opaque, so
 		 * write depth normally even when the entity is DRF_TRANSLUCENT
-		 * (which set DepthMask=0 above).  uhexen2-t4kt. */
-		glDepthMask_fp(1);
+		 * (which set DepthMask=0 above).  uhexen2-t4kt.
+		 * Inside an OIT pass leave the WBOIT blend/depth state intact;
+		 * the alpha-tested fragments will route through the OIT shader
+		 * with full weight. */
+		if (!OIT_InPass())
+		{
+			glDisable_fp(GL_BLEND);
+			glDepthMask_fp(1);
+		}
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -858,12 +876,17 @@ dynamic:
 
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
-		glDepthMask_fp(1);
 		/* Inside an OIT pass the per-buffer blend funcs from
 		 * OIT_BeginTranslucency must persist across translucent draws —
-		 * OIT_EndTranslucency does its own restore. */
+		 * OIT_EndTranslucency does its own restore.  Same for depth
+		 * writes: re-enabling here would punch holes in WBOIT's shared
+		 * depth and z-cull every later translucent fragment
+		 * (uhexen2-a0hp). */
 		if (!OIT_InPass())
+		{
+			glDepthMask_fp(1);
 			glDisable_fp (GL_BLEND);
+		}
 	}
 
 	if (fa->flags & SURF_DRAWFENCE)
@@ -894,8 +917,12 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	intensity = 1.0f;
 	alpha_val = 1.0f;
 
-	/* KIERO: Seems it's enabled when we enter here. */
-	glDisable_fp (GL_BLEND);
+	/* KIERO: Seems it's enabled when we enter here.
+	 * Inside an OIT pass BLEND must stay on with the WBOIT per-buffer
+	 * blend funcs intact — disabling here clobbers them for every
+	 * translucent draw that follows (uhexen2-a0hp). */
+	if (!OIT_InPass())
+		glDisable_fp (GL_BLEND);
 
 	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
@@ -904,7 +931,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWTURB)
 	{
-		glDisable_fp (GL_BLEND);
+		if (!OIT_InPass())
+			glDisable_fp (GL_BLEND);
 		glActiveTexture_fp(GL_TEXTURE1);
 		glActiveTexture_fp(GL_TEXTURE0);
 
@@ -932,8 +960,13 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
-		glDisable_fp(GL_BLEND);
-		glDepthMask_fp(1);	/* uhexen2-t4kt — see R_RenderBrushPoly */
+		/* uhexen2-t4kt — see R_RenderBrushPoly.  Inside an OIT pass
+		 * keep WBOIT's BLEND + DepthMask=0 state (uhexen2-a0hp). */
+		if (!OIT_InPass())
+		{
+			glDisable_fp(GL_BLEND);
+			glDepthMask_fp(1);
+		}
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -952,14 +985,13 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		}
 		GL_ImmColor4f(1.0f, 1.0f, 1.0f, turb_alpha < 1.0f ? turb_alpha : alpha_val);
 		EmitWaterPolys (fa);
-		if (turb_alpha < 1.0f)
+		if (turb_alpha < 1.0f && !OIT_InPass())
 		{
+			/* See R_RenderBrushPoly's matching cleanup — both DepthMask
+			 * and BLEND must stay at WBOIT defaults inside an OIT pass
+			 * (uhexen2-a0hp). */
 			glDepthMask_fp(1);
-			/* See R_RenderBrushPoly's matching cleanup — leave BLEND
-			 * alone inside an OIT pass so the next translucent draw
-			 * still sees the WBOIT per-buffer blend funcs. */
-			if (!OIT_InPass())
-				glDisable_fp(GL_BLEND);
+			glDisable_fp(GL_BLEND);
 		}
 		//return;
 	}
@@ -1202,10 +1234,15 @@ void R_DrawWaterSurfaces (int phase)
 	GL_ImmColor4f (1,1,1,1);
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
 	/* Leave GL_BLEND on inside the OIT pass so subsequent translucent
-	 * draws (sprites, brushmodels) keep the per-buffer blend funcs. */
+	 * draws (sprites, brushmodels) keep the per-buffer blend funcs.
+	 * Same for depth writes — re-enabling DepthMask here would make
+	 * this water surface punch holes in the WBOIT depth buffer and
+	 * z-cull all later translucent fragments (uhexen2-a0hp). */
 	if (!OIT_InPass())
+	{
 		glDisable_fp (GL_BLEND);
-	glDepthMask_fp (1);
+		glDepthMask_fp (1);
+	}
 }
 
 /*

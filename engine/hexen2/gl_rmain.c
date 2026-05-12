@@ -2948,7 +2948,11 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		switch (e->model->type)
 		{
 		case mod_alias:
-			if (!depthMaskWrite)
+			/* WBOIT requires depth writes off — re-enabling here for
+			 * the legacy back-to-front sort path would punch holes in
+			 * the shared depth buffer and z-cull every translucent
+			 * fragment drawn after this entity (uhexen2-a0hp). */
+			if (!depthMaskWrite && !OIT_InPass())
 			{
 				depthMaskWrite = 1;
 				glDepthMask_fp(1);
@@ -2956,7 +2960,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 			R_DrawAliasModel (e);
 			break;
 		case mod_brush:
-			if (!depthMaskWrite)
+			if (!depthMaskWrite && !OIT_InPass())
 			{
 				depthMaskWrite = 1;
 				glDepthMask_fp(1);
@@ -2964,7 +2968,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 			R_DrawBrushModel (e, true);
 			break;
 		case mod_sprite:
-			if (depthMaskWrite)
+			if (depthMaskWrite && !OIT_InPass())
 			{
 				depthMaskWrite = 0;
 				glDepthMask_fp(0);
@@ -2974,7 +2978,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		}
 	}
 
-	if (!depthMaskWrite)
+	if (!depthMaskWrite && !OIT_InPass())
 		glDepthMask_fp(1);
 
 	/* Clean up GPU alias state left bound across entities */
