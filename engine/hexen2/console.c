@@ -21,19 +21,26 @@
 
 #include "quakedef.h"
 #include "debuglog.h"
+#include "sdl_inc.h"
 
 
 console_t	*con;
 
 qboolean	con_initialized;
 
-static int	con_linewidth;		// characters across screen
+int	con_linewidth;		// characters across screen
 static int	con_vislines;
 int		con_notifylines;	// scan lines to clear for notify lines
 int		con_totallines;		// total lines in console scrollback
 static float	con_cursorspeed = 4;
 qboolean 	con_forcedup;		// because no entities to refresh
 int		con_ormask;
+
+static conselection_t	con_selection;
+static conmousestate_t	con_mouse_state;
+static int		con_mouse_x, con_mouse_y;
+static conofs_t		con_press_ofs;
+qboolean		con_mouse_button_down;
 
 static	cvar_t	con_notifytime = {"con_notifytime", "3", CVAR_NONE};	//seconds
 static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* center notify text horizontally */
@@ -76,6 +83,7 @@ void Con_ToggleConsole_f (void)
 
 	if (dest == key_console || (dest == key_game && con_forcedup))
 	{
+		Con_ClearSelection ();
 		if (cls.state == ca_active)
 			Key_SetDest (key_game);
 		else
@@ -622,6 +630,283 @@ void Con_DrawNotify (void)
 		con_notifylines = v;
 }
 
+void Con_MouseMove (int x, int y)
+{
+	con_mouse_x = x;
+	con_mouse_y = y;
+}
+
+void Con_ClearSelection (void)
+{
+	con_selection.active = false;
+	con_selection.begin.line = 0;
+	con_selection.begin.col = 0;
+	con_selection.end.line = 0;
+	con_selection.end.col = 0;
+}
+
+void Con_SelectAll (void)
+{
+	con_selection.begin.line = 0;
+	con_selection.begin.col = 0;
+	con_selection.end.line = con->current;
+	con_selection.end.col = con_linewidth - 1;
+	con_selection.active = true;
+}
+
+static qboolean Con_ScreenToOffset (int sx, int sy, conofs_t *ofs);
+
+static qboolean Con_ScreenToOffset (int sx, int sy, conofs_t *ofs)
+{
+	int rows, y_top, y_bot, row_from_bottom;
+
+	// Calculate console display area dimensions
+	rows = (con_vislines - 22) >> 3;  // Exclude input line (~22 pixels)
+	y_bot = con_vislines - 30;        // Bottom of text area
+	y_top = y_bot - (rows - 1) * 8;   // Top of text area
+
+	// Reject if outside vertical bounds
+	if (sy < y_top || sy > y_bot + 8)
+		return false;
+
+	// Column from screen x (each char is 8 pixels wide)
+	ofs->col = (sx >> 3) - 1;
+	if (ofs->col < 0) ofs->col = 0;
+	if (ofs->col >= con_linewidth) ofs->col = con_linewidth - 1;
+
+	// Row from screen y (measured from bottom up)
+	row_from_bottom = (y_bot - sy) >> 3;
+	if (row_from_bottom < 0) row_from_bottom = 0;
+	if (row_from_bottom >= rows) row_from_bottom = rows - 1;
+
+	// Convert to console line number
+	ofs->line = con->display - row_from_bottom;
+
+	// Validate line is within ring buffer
+	if (con->current - ofs->line >= con_totallines)
+		return false;
+
+	return true;
+}
+
+void Con_UpdateMouseState (void)
+{
+	conofs_t cur_ofs;
+	qboolean on_text;
+
+	// Reset if not in console
+	if (Key_GetDest() != key_console)
+	{
+		con_mouse_state = CMS_NOTPRESSED;
+		con_mouse_button_down = false;
+		VID_SetMouseCursor(MCURSOR_DEFAULT);
+		return;
+	}
+
+	// Try to get current mouse position in console coordinates
+	on_text = Con_ScreenToOffset(con_mouse_x, con_mouse_y, &cur_ofs);
+
+	// Set cursor shape based on position
+	if (on_text)
+		VID_SetMouseCursor(MCURSOR_IBEAM);
+	else
+		VID_SetMouseCursor(MCURSOR_DEFAULT);
+
+	// State machine
+	switch (con_mouse_state)
+	{
+	case CMS_NOTPRESSED:
+		if (con_mouse_button_down && on_text)
+		{
+			// Button went down on text: transition to PRESSED
+			con_press_ofs = cur_ofs;
+			con_selection.active = false;
+			con_mouse_state = CMS_PRESSED;
+		}
+		break;
+
+	case CMS_PRESSED:
+		if (!con_mouse_button_down)
+		{
+			// Button released: go back to NOTPRESSED, keep selection
+			con_mouse_state = CMS_NOTPRESSED;
+		}
+		else if (on_text &&
+		    (cur_ofs.col != con_press_ofs.col || cur_ofs.line != con_press_ofs.line))
+		{
+			// Button held and moved: start drag
+			con_selection.begin = con_press_ofs;
+			con_selection.end = cur_ofs;
+			con_selection.active = true;
+			con_mouse_state = CMS_DRAGGING;
+		}
+		break;
+
+	case CMS_DRAGGING:
+		if (!con_mouse_button_down)
+		{
+			// Button released: go back to NOTPRESSED, keep selection
+			con_mouse_state = CMS_NOTPRESSED;
+		}
+		else if (on_text)
+		{
+			// Button held: update selection end
+			con_selection.end = cur_ofs;
+			// Normalize begin/end if needed
+			if (con_selection.begin.line > con_selection.end.line ||
+			    (con_selection.begin.line == con_selection.end.line &&
+			     con_selection.begin.col > con_selection.end.col))
+			{
+				conofs_t temp = con_selection.begin;
+				con_selection.begin = con_selection.end;
+				con_selection.end = temp;
+			}
+		}
+		break;
+	}
+}
+
+static void Con_DrawSelection (int lines)
+{
+	int y_bot, row_height, x1, x2, y, row_from_bottom;
+	int line_offset, col_start, col_end;
+	conofs_t b, e;
+
+	if (!con_selection.active)
+		return;
+
+	// Setup dimensions
+	y_bot = lines - 30;
+	row_height = 8;
+
+	// Get normalized begin/end
+	b = con_selection.begin;
+	e = con_selection.end;
+	if (b.line > e.line || (b.line == e.line && b.col > e.col))
+	{
+		conofs_t temp = b;
+		b = e;
+		e = temp;
+	}
+
+	// Draw highlight for each visible row in selection
+	for (int row = b.line; row <= e.line; row++)
+	{
+		// Check if row is visible
+		row_from_bottom = con->display - row;
+		if (row_from_bottom < 0 || row_from_bottom >= ((lines - 22) >> 3))
+			continue;
+
+		y = y_bot - (row_from_bottom << 3);
+		if (y < 0 || y > lines - 30)
+			continue;
+
+		// Determine column range for this row
+		if (row == b.line && row == e.line)
+		{
+			// Single-row selection
+			col_start = b.col;
+			col_end = e.col;
+		}
+		else if (row == b.line)
+		{
+			// First row: from begin.col to end of line
+			col_start = b.col;
+			col_end = con_linewidth - 1;
+		}
+		else if (row == e.line)
+		{
+			// Last row: from start of line to end.col
+			col_start = 0;
+			col_end = e.col;
+		}
+		else
+		{
+			// Middle rows: entire line
+			col_start = 0;
+			col_end = con_linewidth - 1;
+		}
+
+		// Draw highlight quad
+		x1 = (col_start + 1) << 3;
+		x2 = (col_end + 2) << 3;
+		Draw_FillAlpha(x1, y, x2 - x1, row_height, 0.2f, 0.4f, 1.0f, 0.35f);
+	}
+}
+
+qboolean Con_CopySelectionToClipboard (void)
+{
+	char buf[8192];
+	int buf_pos = 0;
+	int line, col, line_start, line_end;
+	conofs_t b, e;
+
+	if (!con_selection.active)
+		return false;
+
+	// Get normalized begin/end
+	b = con_selection.begin;
+	e = con_selection.end;
+	if (b.line > e.line || (b.line == e.line && b.col > e.col))
+	{
+		conofs_t temp = b;
+		b = e;
+		e = temp;
+	}
+
+	// Build text from selection
+	for (line = b.line; line <= e.line && buf_pos < (int)sizeof(buf) - 2; line++)
+	{
+		// Check if line is valid in ring buffer
+		if (con->current - line >= con_totallines)
+			continue;
+
+		// Determine column range for this line
+		if (line == b.line && line == e.line)
+		{
+			line_start = b.col;
+			line_end = e.col;
+		}
+		else if (line == b.line)
+		{
+			line_start = b.col;
+			line_end = con_linewidth - 1;
+		}
+		else if (line == e.line)
+		{
+			line_start = 0;
+			line_end = e.col;
+		}
+		else
+		{
+			line_start = 0;
+			line_end = con_linewidth - 1;
+		}
+
+		// Copy characters from this line
+		short *text_row = con->text + (line % con_totallines) * con_linewidth;
+		for (col = line_start; col <= line_end && buf_pos < (int)sizeof(buf) - 2; col++)
+		{
+			char c = text_row[col] & 0xFF;
+			// Replace non-printable with space
+			if (c < 32 && c != '\n')
+				c = ' ';
+			buf[buf_pos++] = c;
+		}
+
+		// Add newline between lines (but not after last line)
+		if (line < e.line && buf_pos < (int)sizeof(buf) - 2)
+			buf[buf_pos++] = '\n';
+	}
+
+	buf[buf_pos] = '\0';
+
+	// Copy to clipboard
+	SDL_SetClipboardText(buf);
+
+	return true;
+}
+
 /*
 ================
 Con_DrawConsole
@@ -643,6 +928,7 @@ void Con_DrawConsole (int lines)
 
 // draw the text
 	con_vislines = lines;
+	Con_UpdateMouseState();
 
 // changed to line things up better
 	rows = (lines-22)>>3;		// rows of text to draw
@@ -673,6 +959,8 @@ void Con_DrawConsole (int lines)
 		for (x = 0; x < con_linewidth; x++)
 			Draw_Character ( (x+1)<<3, y, text[x]);
 	}
+
+	Con_DrawSelection(lines);
 
 // draw the input prompt, user text, and cursor if desired
 	Con_DrawInput ();

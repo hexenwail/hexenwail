@@ -1527,6 +1527,28 @@ static void VID_NumModes_f (void)
 	Con_Printf ("%d video modes in current list\n", *nummodes);
 }
 
+static SDL_Cursor *vid_cursors[MCURSOR_COUNT];
+static mousecursor_t vid_cursor_current;
+
+void VID_InitMouseCursors (void)
+{
+	vid_cursors[MCURSOR_DEFAULT] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+	vid_cursors[MCURSOR_IBEAM] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
+	vid_cursors[MCURSOR_HAND] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
+	vid_cursor_current = MCURSOR_DEFAULT;
+	SDL_SetCursor(vid_cursors[MCURSOR_DEFAULT]);
+}
+
+void VID_SetMouseCursor (mousecursor_t cursor)
+{
+	if (cursor < 0 || cursor >= MCURSOR_COUNT)
+		return;
+	if (cursor == vid_cursor_current)
+		return;
+	vid_cursor_current = cursor;
+	SDL_SetCursor(vid_cursors[cursor]);
+}
+
 /*
 ===================
 VID_Init
@@ -1742,6 +1764,7 @@ void	VID_Init (const unsigned char *palette)
 	GL_SetupLightmapFmt();
 	GL_Init ();
 	VID_InitGamma();
+	VID_InitMouseCursors();
 
 	// lock the early-read cvars until Host_Init is finished
 	for (i = 0; i < (int)num_readvars; i++)
@@ -1777,6 +1800,14 @@ void	VID_Shutdown (void)
 
 	if (glcontext)
 		SDL_GL_DestroyContext(glcontext);
+
+	for (int i = 0; i < MCURSOR_COUNT; i++)
+	{
+		if (vid_cursors[i])
+			SDL_DestroyCursor(vid_cursors[i]);
+		vid_cursors[i] = NULL;
+	}
+
 	if (window)
 		SDL_DestroyWindow(window);
 

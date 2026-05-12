@@ -550,12 +550,23 @@ static void Key_Console (int key)
 
 	case 'c':
 	case 'C':
-		if (keydown[K_CTRL]) {		/* Ctrl+C: abort the line -- S.A */
+		if (keydown[K_CTRL]) {
+			/* Ctrl+C: copy selection if available, else abort the line */
+			if (Con_CopySelectionToClipboard())
+				return;
 			Con_Printf ("%s\n", workline);
 			workline[0] = ']';
 			workline[1] = 0;
 			key_linepos = 1;
 			history_line= edit_line;
+			return;
+		}
+		break;
+
+	case 'a':
+	case 'A':
+		if (keydown[K_CTRL]) {		/* Ctrl+A: select all */
+			Con_SelectAll();
 			return;
 		}
 		break;

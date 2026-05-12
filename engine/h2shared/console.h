@@ -31,7 +31,12 @@ typedef struct
 	int		display;		// bottom of console displays this line
 } console_t;
 
+typedef struct { int line; int col; } conofs_t;
+typedef struct { conofs_t begin; conofs_t end; qboolean active; } conselection_t;
+typedef enum { CMS_NOTPRESSED=0, CMS_PRESSED, CMS_DRAGGING } conmousestate_t;
+
 extern	console_t	*con;
+extern	int con_linewidth;
 
 extern	int		con_ormask;
 
@@ -55,5 +60,13 @@ void Con_ClearNotify (void);
 void Con_ToggleConsole_f (void);
 
 void Con_NotifyBox (const char *text);	// during startup for sound / cd warnings
+
+void Con_MouseMove (int x, int y);
+void Con_UpdateMouseState (void);
+void Con_ClearSelection (void);
+void Con_SelectAll (void);
+qboolean Con_CopySelectionToClipboard (void);
+
+extern qboolean con_mouse_button_down;
 
 #endif	/* __CONSOLE_H */
