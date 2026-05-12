@@ -96,13 +96,14 @@ extern	int		sv_kingofhill;		// mission pack king of the hill.
 extern	unsigned int	info_mask, info_mask2;	// mission pack objectives
 
 /* Snapshot of data needed by the background save worker.
- * All fields are POD — no pointers into engine memory. */
+ * All fields are POD — no pointers into engine memory.
+ * This must use hard-coded array sizes to avoid circular includes. */
 typedef struct {
 	int          version;
-	char         comment[SAVEGAME_COMMENT_LENGTH + 1];
-	float        spawn_parms[NUM_SPAWN_PARMS];
+	char         comment[40];  /* SAVEGAME_COMMENT_LENGTH + 1 */
+	float        spawn_parms[16];  /* NUM_SPAWN_PARMS */
 	int          current_skill;
-	char         mapname[MAX_QPATH];
+	char         mapname[64];  /* MAX_QPATH */
 	float        sv_time;
 	int          maxclients;
 	float        deathmatch_val;
@@ -112,8 +113,8 @@ typedef struct {
 	float        playerclass_val;
 	unsigned int info_mask;
 	unsigned int info_mask2;
-	char         savedest[MAX_OSPATH];  /* destination save slot dir */
-	char         userdir[MAX_OSPATH];   /* FS_GetUserdir() snapshot */
+	char         savedest[256];  /* MAX_OSPATH, destination save slot dir */
+	char         userdir[256];   /* MAX_OSPATH, FS_GetUserdir() snapshot */
 } savedata_t;
 
 /* APC queue */
