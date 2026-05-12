@@ -171,7 +171,15 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
 	else
-		Con_SafePrintf("  %s_oit: FAILED\n", name);
+	{
+		/* Loud, repeated warning so the failure isn't lost in the boot
+		 * spew.  Without the OIT variant linked, r_oit=1 renders the
+		 * geometry path as completely invisible (the resolve gates on
+		 * 1-revealage and revealage never moves off its cleared 1.0
+		 * when only MRT0 is written). */
+		Con_Printf("\x02WARNING\x02: %s_oit shader FAILED — r_oit will hide all %s\n",
+			   name, name);
+	}
 }
 
 GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
