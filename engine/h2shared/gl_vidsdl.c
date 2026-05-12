@@ -227,6 +227,7 @@ static qboolean	gammaworks = false;	// whether hw-gamma works
 // multisampling
 static int	multisample = 0; // do not set this if SDL cannot multisample
 static qboolean	sdl_has_multisample = false;
+static int	gl_max_samples = 0;	/* GL_MAX_SAMPLES query, populated post-context-init */
 static cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_ARCHIVE};
 
 // stencil buffer
@@ -863,6 +864,12 @@ static void GL_Init (void)
 	if (gl_max_size < 256)	// Refuse to work when less than 256
 		Sys_Error ("hardware capable of min. 256k opengl texture size needed");
 	Con_SafePrintf("OpenGL max.texture size: %i\n", (int) gl_max_size);
+
+	/* MSAA capability query — populated post-context for the menu picker.
+	 * Ironwail-parity: enumerate supported sample counts at runtime. */
+	glGetIntegerv_fp(GL_MAX_SAMPLES, &gl_max_samples);
+	if (gl_max_samples < 0) gl_max_samples = 0;
+	Con_SafePrintf("OpenGL max.MSAA samples: %d\n", gl_max_samples);
 
 	/* GL 4.3: multitexture is always available */
 #ifndef EMSCRIPTEN
@@ -2341,22 +2348,40 @@ void VID_MenuAdjustResolution (int dir)
 		vid_menunum = next;
 }
 
+/* Standard MSAA steps. Filtered against GL_MAX_SAMPLES at runtime so the
+ * menu cycle only exposes counts the driver can actually allocate. */
+static const int msaa_steps[] = { 0, 2, 4, 8, 16, 32 };
+#define NUM_MSAA_STEPS	(int)(sizeof(msaa_steps) / sizeof(msaa_steps[0]))
+
 void VID_MenuAdjustMultisample (int dir)
 {
+	int i, cur, max_step;
+
 	if (!sdl_has_multisample)
 		return;
-	if (dir < 0)
+
+	/* clamp the upper bound by what the GL implementation reports */
+	max_step = 0;
+	for (i = 0; i < NUM_MSAA_STEPS; i++)
 	{
-		if (multisample <= 2) multisample = 0;
-		else if (multisample <= 4) multisample = 2;
-		else multisample = 4;
+		if (msaa_steps[i] <= gl_max_samples)
+			max_step = i;
 	}
-	else
+
+	/* find current step (snap up to next supported value if multisample
+	 * isn't on a canonical step — handles arbitrary cfg values) */
+	cur = 0;
+	for (i = 0; i <= max_step; i++)
 	{
-		if (multisample < 2) multisample = 2;
-		else if (multisample < 4) multisample = 4;
-		else if (multisample < 8) multisample = 8;
+		if (msaa_steps[i] <= multisample)
+			cur = i;
 	}
+
+	cur += dir;
+	if (cur < 0) cur = 0;
+	if (cur > max_step) cur = max_step;
+
+	multisample = msaa_steps[cur];
 }
 
 void VID_MenuAdjustVSync (int dir)

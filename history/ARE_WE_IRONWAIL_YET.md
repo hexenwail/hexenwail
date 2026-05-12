@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 10 | 1 | 2 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
-| UX / Menus / HUD | 19 | 1 | 2 | 1 |
+| UX / Menus / HUD | 20 | 0 | 2 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **66** | **6** | **8** | **8** |
+| **TOTAL** | **67** | **5** | **8** | **8** |
 
-**Parity: 83% ported, 8% partial, 10% missing** (excluding N/A)
+**Parity: 84% ported, 6% partial, 10% missing** (excluding N/A)
 
 ---
 
@@ -102,7 +102,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Desktop fullscreen | ✅ | `vid_config_fscr` |
 | Menu key auto-repeat (navigational only) | ✅ | Ironwail commit `6a9610f` (2026-01): `M_Keydown` gains `repeat` bool arg; only arrow keys pass repeat. Hexenwail already has `M_Keydown (key, key_repeats[key] > 1)` with identical arrow-key-only filter — `menu.c:6024`, `keys.c:1099`. |
 | Mods menu dirs-with-spaces | ✅ | Ironwail commit `51a911b` (2026-03): added quotes around dir name in `game` command. Hexenwail already uses `game \"%s\"` at `menu.c:4009`. |
-| FSAA mode selection in menu | 🔶 | `vid_fsaa` integer only, no mode picker |
+| FSAA mode selection in menu | ✅ | `vid_config_fsaa` cycle in Display submenu walks `msaa_steps[]` (0/2/4/8/16/32) clamped to `GL_MAX_SAMPLES` queried at GL init. Labels render as "Off" / "Nx" instead of bare integers. |
 | HUD / statusbar scaling | ✅ | `scr_sbarscale` — `CANVAS_SBAR` in `gl_draw.c`, slider in Misc/HUD submenu (`menu.c`) |
 | Menu scaling | ✅ | `scr_menuscale` — `CANVAS_MENU`, M_CenterOfs() helper, M_ScreenYToCanvasY for mouse hit-test |
 | Crosshair scaling | ✅ | `scr_crosshairscale` — `CANVAS_CROSSHAIR`, slider in Misc/HUD submenu |

@@ -2398,10 +2398,11 @@ static void M_Display_Draw (void)
 		ms = VID_MenuGetMultisample (&is_current, &available);
 		if (available)
 		{
+			const char *label = ms <= 0 ? "Off" : va("%dx", ms);
 			if (is_current)
-				M_PrintWhite (220, 92 + 8*DISP_MSAA, va("%d", ms));
+				M_PrintWhite (220, 92 + 8*DISP_MSAA, label);
 			else
-				M_Print (220, 92 + 8*DISP_MSAA, va("%d", ms));
+				M_Print (220, 92 + 8*DISP_MSAA, label);
 		}
 		else
 			M_PrintWhite (220, 92 + 8*DISP_MSAA, "N/A");
