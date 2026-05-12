@@ -898,6 +898,13 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
 	if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
 
+	/* Ensure the viewport covers the whole scene FBO.  Anything earlier
+	 * in the frame (mirror split, sky stencil, etc.) might have left
+	 * the viewport at a sub-rectangle, in which case our fullscreen
+	 * triangle only rasterizes inside that sub-rect and the rest of
+	 * the scene gets none of the OIT composite. */
+	glViewport_fp(0, 0, pp_width, pp_height);
+
 	/* Fullscreen triangle via gl_VertexID — needs a VAO bound in GL 4.3
 	 * core profile or the draw is silently discarded. */
 	glBindVertexArray_fp(oit_resolve_vao);
@@ -969,6 +976,12 @@ static void OIT_Status_f (void)
 			Con_Printf("  GL error queue:    0x%04x\n", err);
 	}
 	/* Current GL pipeline state at call time. */
+#ifndef GL_DRAW_FRAMEBUFFER_BINDING
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#endif
 	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
 	glGetIntegerv_fp(GL_SCISSOR_TEST, &scissor);
