@@ -2705,19 +2705,25 @@ static void M_Display_Key (int k)
 		return;
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		do {
-			display_cursor--;
-			if (display_cursor < 0)
-				display_cursor = DISP_ITEMS-1;
-		} while (M_Display_IsSkip (display_cursor));
+		{
+			int guard = DISP_ITEMS;
+			do {
+				display_cursor--;
+				if (display_cursor < 0)
+					display_cursor = DISP_ITEMS-1;
+			} while (M_Display_IsSkip (display_cursor) && --guard > 0);
+		}
 		break;
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		do {
-			display_cursor++;
-			if (display_cursor >= DISP_ITEMS)
-				display_cursor = 0;
-		} while (M_Display_IsSkip (display_cursor));
+		{
+			int guard = DISP_ITEMS;
+			do {
+				display_cursor++;
+				if (display_cursor >= DISP_ITEMS)
+					display_cursor = 0;
+			} while (M_Display_IsSkip (display_cursor) && --guard > 0);
+		}
 		break;
 	case K_LEFTARROW:
 		M_Display_AdjustSliders (-1);
