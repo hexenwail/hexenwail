@@ -103,6 +103,16 @@ cvar_t	joy_flick              = {"joy_flick",              "0",     CVAR_ARCHIVE
 cvar_t	joy_flick_time         = {"joy_flick_time",         "0.125", CVAR_ARCHIVE};
 cvar_t	joy_flick_deadzone     = {"joy_flick_deadzone",     "0.9",   CVAR_ARCHIVE};
 cvar_t	joy_flick_noise_thresh = {"joy_flick_noise_thresh", "2.0",   CVAR_ARCHIVE};
+/* Pull pitch toward 0 during the flick rotation phase, at a fraction of
+ * the current pitch per second.  0 = disabled (default); 1.0 ≈ ~63% of
+ * pitch shed per second.  Useful if you flick around a lot and want the
+ * view to settle back to horizon. */
+cvar_t	joy_flick_recenter     = {"joy_flick_recenter",     "0",     CVAR_ARCHIVE};
+/* Tracking-phase gain on the 1:1 stick-angle delta after rotation
+ * completes.  1.0 = pure 1:1 (default).  Values >1 amplify fine
+ * adjustments; <1 slows them.  Independent of yaw sensitivity (which
+ * scales the analog stick path, not flick tracking). */
+cvar_t	joy_flick_adjust_speed = {"joy_flick_adjust_speed", "1.0",   CVAR_ARCHIVE};
 /* Gyroscope aiming (Ironwail parity, uhexen2-xpbi): SDL3 reads the
  * controller's built-in gyro (PS4/PS5/Steam Deck/Switch Pro) and adds
  * its yaw/pitch rates to viewangles.  Layers on top of analog/flick
@@ -155,6 +165,7 @@ static qboolean		gp_has_gyro = false;
 static qboolean		gyro_calibrating = false;
 static int		gyro_cal_count = 0;
 static float		gyro_cal_sum[3];
+static qboolean		gyro_button_held = false;	/* +gyroactive state */
 
 /* map SDL3 gamepad buttons to engine keycodes */
 static int IN_GPButtonToKey (SDL_GamepadButton btn)
@@ -499,11 +510,19 @@ static qboolean IN_FlickStickUpdate (float lx, float ly, float dt)
 		flick_elapsed += dt;
 		t = flick_elapsed / duration;
 		if (t > 1.0f) t = 1.0f;
-		/* Ease-out cubic for snappy start, soft end. */
-		new_p = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+		/* Smoothstep — same curve Ironwail uses. */
+		new_p = t * t * (3.0f - 2.0f * t);
 		delta_deg = (new_p - flick_progress) * flick_total_deg;
 		flick_progress = new_p;
 		cl.viewangles[YAW] -= delta_deg;
+
+		/* Optional pitch recenter during rotation. */
+		if (joy_flick_recenter.value > 0.0f)
+		{
+			float k = joy_flick_recenter.value * dt;
+			if (k > 1.0f) k = 1.0f;
+			cl.viewangles[PITCH] -= cl.viewangles[PITCH] * k;
+		}
 
 		if (t >= 1.0f)
 		{
@@ -542,6 +561,8 @@ static qboolean IN_FlickStickUpdate (float lx, float ly, float dt)
 			gate = 1.0f;
 		ddeg *= gate;
 	}
+	if (joy_flick_adjust_speed.value > 0.0f)
+		ddeg *= joy_flick_adjust_speed.value;
 	cl.viewangles[YAW] -= ddeg;
 	if (lx != 0 || ly != 0)
 		V_StopPitchDrift();
@@ -603,13 +624,16 @@ static void IN_GyroMove (void)
 	ratey -= gyro_calibration_y.value;
 	ratez -= gyro_calibration_z.value;
 
-	/* Mode gating */
+	/* Mode gating:
+	 *   0 = always on
+	 *   1 = on only while +gyroactive button is held
+	 *   2 = suppress when the look stick is past its deadzone
+	 *   3 = on except while +gyroactive button is held */
 	mode = gyro_mode.integer;
+	if (mode == 1 && !gyro_button_held) return;
+	if (mode == 3 &&  gyro_button_held) return;
 	if (mode == 2)
 	{
-		/* Suppress gyro when the look stick is past its deadzone —
-		 * lets the user use stick for big sweeps and gyro for fine
-		 * adjustment, without them fighting each other. */
 		SDL_GamepadAxis ax_x = joy_swapmovelook.integer ?
 			SDL_GAMEPAD_AXIS_LEFTX : SDL_GAMEPAD_AXIS_RIGHTX;
 		SDL_GamepadAxis ax_y = joy_swapmovelook.integer ?
@@ -619,13 +643,28 @@ static void IN_GyroMove (void)
 		if (sqrtf(lx*lx + ly*ly) > joy_deadzone_look.value)
 			return;
 	}
-	/* modes 1/3 fall through to always-on for now */
 
 	yawrate   = gyro_turning_axis.integer ? ratez : ratey;
 	pitchrate = ratex;
 
-	if (fabsf(yawrate)   < gyro_noise_thresh.value) yawrate = 0;
-	if (fabsf(pitchrate) < gyro_noise_thresh.value) pitchrate = 0;
+	/* Smooth noise gate: linear ramp from threshold to 2× threshold. */
+	{
+		float th = gyro_noise_thresh.value;
+		float ax, gy, gp;
+		if (th > 0.0f)
+		{
+			ax = fabsf(yawrate);
+			gy = (ax < th) ? 0.0f
+			   : (ax < 2.0f * th) ? (ax - th) / th
+			   : 1.0f;
+			yawrate *= gy;
+			ax = fabsf(pitchrate);
+			gp = (ax < th) ? 0.0f
+			   : (ax < 2.0f * th) ? (ax - th) / th
+			   : 1.0f;
+			pitchrate *= gp;
+		}
+	}
 
 	cl.viewangles[YAW]   -= yawrate   * gyro_yawsensitivity.value   * host_frametime;
 	cl.viewangles[PITCH] += pitchrate * gyro_pitchsensitivity.value * host_frametime *
@@ -636,6 +675,9 @@ static void IN_GyroMove (void)
 	if (cl.viewangles[PITCH] >  80.0f) cl.viewangles[PITCH] =  80.0f;
 	if (cl.viewangles[PITCH] < -70.0f) cl.viewangles[PITCH] = -70.0f;
 }
+
+static void IN_GyroActiveDown_f (void) { gyro_button_held = true;  }
+static void IN_GyroActiveUp_f   (void) { gyro_button_held = false; }
 
 static void IN_GyroCalibrate_f (void)
 {
@@ -837,6 +879,8 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&joy_flick_time);
 	Cvar_RegisterVariable (&joy_flick_deadzone);
 	Cvar_RegisterVariable (&joy_flick_noise_thresh);
+	Cvar_RegisterVariable (&joy_flick_recenter);
+	Cvar_RegisterVariable (&joy_flick_adjust_speed);
 	Cvar_RegisterVariable (&gyro_enable);
 	Cvar_RegisterVariable (&gyro_mode);
 	Cvar_RegisterVariable (&gyro_turning_axis);
@@ -847,6 +891,8 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&gyro_calibration_y);
 	Cvar_RegisterVariable (&gyro_calibration_z);
 	Cmd_AddCommand ("gyro_calibrate", IN_GyroCalibrate_f);
+	Cmd_AddCommand ("+gyroactive", IN_GyroActiveDown_f);
+	Cmd_AddCommand ("-gyroactive", IN_GyroActiveUp_f);
 
 	Cmd_AddCommand ("force_centerview", Force_CenterView_f);
 	Cmd_AddCommand ("+altmodifier", IN_JoyAltModifierDown);
