@@ -41,6 +41,8 @@ extern	qboolean con_initialized;
 extern	byte *con_chars;
 extern	int con_notifylines;	// scan lines to clear for notify lines
 
+extern	cvar_t con_maxcols;	// 0 = no cap; else clamp console line width
+
 void Con_DrawCharacter (int cx, int line, int num);
 
 void Con_CheckResize (void);
