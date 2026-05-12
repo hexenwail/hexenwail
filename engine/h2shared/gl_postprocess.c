@@ -788,19 +788,41 @@ static qboolean OIT_InitShader (void)
 	return true;
 }
 
+/* Debug: bypass the stencil gate in the resolve.
+ *   1 = resolve composites every pixel of the OIT FBO regardless of stencil.
+ *   2 = also clears the OIT accum buffer to half-red and revealage to 0.5
+ *       at OIT_Begin.  If you see a red tint over the scene, the resolve
+ *       composite works; if not, the resolve path itself is broken. */
+static cvar_t r_oit_debug_no_stencil = {"r_oit_debug_no_stencil", "0", CVAR_NONE};
+
 /* Call before drawing any translucent geometry */
 void OIT_BeginTranslucency (void)
 {
 	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
 	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
+	static const float red[4] = {0.5f, 0.f, 0.f, 0.5f};
+	static const float half[4] = {0.5f, 0.5f, 0.5f, 0.5f};
 
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
 
 	oit_in_pass = true;
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
-	glClearBufferfv_fp(GL_COLOR, 0, zeroes);	/* accum = (0,0,0,0) */
-	glClearBufferfv_fp(GL_COLOR, 1, ones);		/* revealage = 1.0 */
+	if (r_oit_debug_no_stencil.integer >= 2)
+	{
+		/* Debug mode 2: clear accum to half-red, revealage to 0.5.  The
+		 * resolve should then paint a red tint over the entire scene
+		 * (or every stencil=2 pixel if stencil gating is on).  If you
+		 * don't see red, the resolve composite itself is broken — not
+		 * the upstream particle/translucent draws. */
+		glClearBufferfv_fp(GL_COLOR, 0, red);
+		glClearBufferfv_fp(GL_COLOR, 1, half);
+	}
+	else
+	{
+		glClearBufferfv_fp(GL_COLOR, 0, zeroes);	/* accum = (0,0,0,0) */
+		glClearBufferfv_fp(GL_COLOR, 1, ones);		/* revealage = 1.0 */
+	}
 
 	/* Stencil: mark pixels touched by translucent geometry (bit 1) */
 	glEnable_fp(GL_STENCIL_TEST);
@@ -816,13 +838,6 @@ void OIT_BeginTranslucency (void)
 	/* Translucent geometry reads depth but doesn't write it */
 	glDepthMask_fp(0);
 }
-
-/* Debug: bypass the stencil gate in the resolve.  When 1, the resolve
- * composites every pixel of the OIT FBO onto the scene without
- * filtering on stencil bit 1.  Useful for diagnosing "particles
- * invisible under r_oit" — if setting this to 1 brings them back, the
- * bug is that translucent fragments are not writing stencil=2. */
-static cvar_t r_oit_debug_no_stencil = {"r_oit_debug_no_stencil", "0", CVAR_NONE};
 
 /* Call after all translucent geometry — resolves OIT onto scene FBO */
 void OIT_EndTranslucency (GLuint scene_fbo)
