@@ -113,7 +113,9 @@ static	cvar_t	scr_zoomspeed = {"zoom_speed", "8", CVAR_ARCHIVE};
 cvar_t		scr_contrans = {"contrans", "0", CVAR_ARCHIVE};
 static	cvar_t	scr_conspeed = {"scr_conspeed", "300", CVAR_NONE};
 static	cvar_t	scr_centertime = {"scr_centertime", "4", CVAR_NONE};
-cvar_t		scr_centerprintbg = {"scr_centerprintbg", "0", CVAR_ARCHIVE};
+/* scr_centerprintbg: 0 = off, 1 = full-width thin dim strip, 2 = text-width dim box (Ironwail parity).
+ * Default 2 matches Ironwail df5219c — Hexen II uses centerprint heavily for narrative text. */
+cvar_t		scr_centerprintbg = {"scr_centerprintbg", "2", CVAR_ARCHIVE};
 static	cvar_t	con_logcenterprint = {"con_logcenterprint", "1", CVAR_ARCHIVE};
 static	cvar_t	cl_showcrouchmsg = {"cl_showcrouchmsg", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
@@ -295,13 +297,29 @@ static void SCR_DrawCenterString (void)
 		int pad = 8;
 		int bg_y = by - pad;
 		int bg_h = lines * 8 + pad * 2;
-		int bg_w = 38 * 8 + pad * 2;
-		int bg_x = (vid.width - bg_w) / 2;
+		int bg_w, bg_x;
+		float alpha;
+
+		if (scr_centerprintbg.integer == 1)
+		{
+			/* Mode 1 (Simple): full-width thin dim strip — lighter alpha so
+			 * the world stays visible through the band. */
+			bg_w = vid.width;
+			bg_x = 0;
+			alpha = 0.30f;
+		}
+		else
+		{
+			/* Mode 2 (Menu Box): text-width dim box — darker for legibility. */
+			bg_w = 38 * 8 + pad * 2;
+			bg_x = (vid.width - bg_w) / 2;
+			alpha = 0.50f;
+		}
 
 		Draw_FlushCharBatch();	/* GL_ImmBegin reuses the imm buffer; flush queued glyphs first */
 		glEnable_fp(GL_BLEND);
 		GL_ImmBegin();
-		GL_ImmColor4f(0.0f, 0.0f, 0.0f, 0.5f);
+		GL_ImmColor4f(0.0f, 0.0f, 0.0f, alpha);
 		GL_ImmVertex2f(bg_x, bg_y);
 		GL_ImmVertex2f(bg_x + bg_w, bg_y);
 		GL_ImmVertex2f(bg_x + bg_w, bg_y + bg_h);
