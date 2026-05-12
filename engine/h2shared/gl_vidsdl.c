@@ -672,6 +672,7 @@ static void GL_LoadFunctionPointers (void)
 	glBindBuffer_fp = (glBindBuffer_f) SDL_GL_GetProcAddress("glBindBuffer");
 	glBufferData_fp = (glBufferData_f) SDL_GL_GetProcAddress("glBufferData");
 	glBufferSubData_fp = (glBufferSubData_f) SDL_GL_GetProcAddress("glBufferSubData");
+	glGetBufferSubData_fp = (glGetBufferSubData_f) SDL_GL_GetProcAddress("glGetBufferSubData");
 	glGenVertexArrays_fp = (glGenVertexArrays_f) SDL_GL_GetProcAddress("glGenVertexArrays");
 	glDeleteVertexArrays_fp = (glDeleteVertexArrays_f) SDL_GL_GetProcAddress("glDeleteVertexArrays");
 	glBindVertexArray_fp = (glBindVertexArray_f) SDL_GL_GetProcAddress("glBindVertexArray");
