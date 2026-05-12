@@ -749,14 +749,14 @@ static void CL_ParseUpdate (int bits)
 		if (newframe != ent->frame)
 		{
 			float lerpdur = 0.1f;
-			/* r_lerpanim_observed (uhexen2-wax3) — approximate
-			 * Ironwail's server-driven LERP_FINISH without a protocol
-			 * extension: use the time elapsed since the previous frame
-			 * change as the predicted hold duration for the next frame.
-			 * Works because Hexen II server tick is steady (20 Hz), so
-			 * the prior interval is a good estimate of the next.  First
+			/* r_animsmoothing (uhexen2-wax3) — approximate Ironwail's
+			 * server-driven LERP_FINISH without a protocol extension:
+			 * use the time elapsed since the previous frame change as
+			 * the predicted hold duration for the next frame.  Works
+			 * because Hexen II server tick is steady (20 Hz), so the
+			 * prior interval is a good estimate of the next.  First
 			 * change after spawn keeps the legacy 0.1s fallback. */
-			if (r_lerpanim_observed.integer && ent->lastframechange > 0.0)
+			if (r_animsmoothing.integer && ent->lastframechange > 0.0)
 			{
 				lerpdur = (float)(cl.time - ent->lastframechange);
 				if (lerpdur < 0.1f)

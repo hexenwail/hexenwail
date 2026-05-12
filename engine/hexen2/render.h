@@ -96,7 +96,7 @@ typedef struct entity_s
 	float			lerptime;	// animation lerp duration
 	double			lastframechange;// cl.time of last U_FRAME with a new
 						// frame value (0 = never). Drives the
-						// r_lerpanim_observed heuristic — the
+						// r_animsmoothing heuristic — the
 						// inter-change interval predicts how
 						// long the next frame will be held,
 						// approximating Ironwail's server-driven

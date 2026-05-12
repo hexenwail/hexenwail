@@ -262,7 +262,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_turbalpha);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_lerpmodels);
-	Cvar_RegisterVariable (&r_lerpanim_observed);
+	Cvar_RegisterVariable (&r_animsmoothing);
 	Cvar_RegisterVariable (&r_showbboxes);
 	Cvar_RegisterVariable (&r_speeds);
 	{ extern cvar_t r_speeds_gpufinish; Cvar_RegisterVariable (&r_speeds_gpufinish); }
