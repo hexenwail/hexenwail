@@ -25,6 +25,7 @@
 #include "gl_shader.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
+#include "gl_postprocess.h"
 
 /* ------------------------------------------------------------------ */
 /* Data structures matching GLSL std430 layout                         */
@@ -70,7 +71,22 @@ static GLuint	cull_dst_ibo;		/* binding 5: dest indices (compute writes, draw re
 static GLuint	cull_dedup_ssbo;	/* binding 6: per-surface framecount for dedup */
 static int	cull_total_indices;	/* total index count across all buckets */
 
-/* (Hi-Z occlusion culling planned as future work — uhexen2-xd87) */
+/* Hi-Z occlusion culling — uhexen2-xd87.
+ * Previous-frame depth pyramid (latency-1) drives a per-AABB rejection
+ * inside cull_mark, before the dedup atomic.  The pyramid lives in a
+ * R32F mip chain copied/reduced from the scene depth texture at end of
+ * the 3D pass; the cull dispatch samples it via binding 7.
+ */
+cvar_t	gl_hiz_cull = {"gl_hiz_cull", "0", CVAR_ARCHIVE};
+
+static GLuint	hiz_pyramid_tex;	/* binding 7 sampler in cull_mark */
+static GLuint	hiz_copy_prog;		/* copy scene depth -> mip 0 */
+static GLuint	hiz_reduce_prog;	/* min/max 2x2 reduction per mip */
+static int	hiz_width;		/* mip 0 size in pixels */
+static int	hiz_height;
+static int	hiz_mip_count;
+static float	hiz_prev_mvp[16];	/* world MVP captured at end of last 3D pass */
+static qboolean	hiz_prev_mvp_valid;
 
 static GLuint	cull_clear_prog;	/* clear_indirect compute shader */
 static GLuint	cull_mark_prog;		/* cull_mark compute shader */
@@ -91,6 +107,11 @@ static GLint	cull_mark_u_framecount;
 static GLint	cull_mark_u_num_marksurfs;
 static GLint	cull_mark_u_num_buckets;
 static GLint	cull_mark_u_max_dst_indices;
+static GLint	cull_mark_u_prev_mvp;
+static GLint	cull_mark_u_hiz_size;
+static GLint	cull_mark_u_hiz_mip_count;
+static GLint	cull_mark_u_hiz_enable;
+static GLint	cull_mark_u_reverse_z;
 
 static GLint	cull_clear_u_num_buckets;
 
@@ -172,12 +193,22 @@ static const char cull_mark_src[] =
 	"    int dedup[];\n"  /* per-surface framecount for dedup */
 	"};\n"
 	"\n"
+	"/* Hi-Z pyramid bound to texture unit 1.  Under reversed-Z the\n"
+	" * pyramid stores min(depth) per tile (= farthest fragment), under\n"
+	" * forward-Z max(depth). */\n"
+	"layout(binding = 1) uniform sampler2D u_hiz_pyramid;\n"
+	"\n"
 	"uniform vec3 u_vieworg;\n"
 	"uniform vec4 u_frustum[4];\n"
 	"uniform int u_framecount;\n"
 	"uniform int u_num_marksurfs;\n"
 	"uniform int u_num_buckets;\n"
 	"uniform int u_max_dst_indices;\n"
+	"uniform mat4 u_prev_mvp;\n"
+	"uniform vec2 u_hiz_size;\n"
+	"uniform int u_hiz_mip_count;\n"
+	"uniform int u_hiz_enable;\n"
+	"uniform int u_reverse_z;\n"
 	"\n"
 	"void main() {\n"
 	"    uint id = gl_GlobalInvocationID.x;\n"
@@ -225,6 +256,64 @@ static const char cull_mark_src[] =
 	"        if (dot(fn, pv) + fd < -FSLACK) return;\n"
 	"    }\n"
 	"\n"
+	"    /* Hi-Z occlusion test against previous-frame pyramid.\n"
+	"     * Project the 8 AABB corners through last frame's MVP and form\n"
+	"     * a conservative screen-space rect + nearest-to-camera depth.\n"
+	"     * Sample the pyramid at a mip whose texel size matches the rect,\n"
+	"     * compare; cull if the AABB sits entirely behind the occluder.\n"
+	"     * Any corner with w<=0 (behind near plane) disables the test. */\n"
+	"    if (u_hiz_enable != 0) {\n"
+	"        vec3 mn = s.mins.xyz;\n"
+	"        vec3 mx = s.maxs.xyz;\n"
+	"        float rx0 = 1.0, ry0 = 1.0, rx1 = -1.0, ry1 = -1.0;\n"
+	"        float dnear = (u_reverse_z != 0) ? 0.0 : 1.0;\n"
+	"        bool valid = true;\n"
+	"        for (int ci = 0; ci < 8; ci++) {\n"
+	"            vec3 c = vec3(\n"
+	"                ((ci & 1) != 0) ? mx.x : mn.x,\n"
+	"                ((ci & 2) != 0) ? mx.y : mn.y,\n"
+	"                ((ci & 4) != 0) ? mx.z : mn.z);\n"
+	"            vec4 clip = u_prev_mvp * vec4(c, 1.0);\n"
+	"            if (clip.w <= 0.0) { valid = false; break; }\n"
+	"            vec3 ndc = clip.xyz / clip.w;\n"
+	"            float dn = (u_reverse_z != 0) ? ndc.z : (ndc.z * 0.5 + 0.5);\n"
+	"            if (u_reverse_z != 0) dnear = max(dnear, dn);\n"
+	"            else                  dnear = min(dnear, dn);\n"
+	"            rx0 = min(rx0, ndc.x); ry0 = min(ry0, ndc.y);\n"
+	"            rx1 = max(rx1, ndc.x); ry1 = max(ry1, ndc.y);\n"
+	"        }\n"
+	"        if (valid) {\n"
+	"            /* Clip rect to NDC bounds [-1,1] before mapping to texels. */\n"
+	"            rx0 = clamp(rx0, -1.0, 1.0); ry0 = clamp(ry0, -1.0, 1.0);\n"
+	"            rx1 = clamp(rx1, -1.0, 1.0); ry1 = clamp(ry1, -1.0, 1.0);\n"
+	"            vec2 r0 = (vec2(rx0, ry0) * 0.5 + 0.5) * u_hiz_size;\n"
+	"            vec2 r1 = (vec2(rx1, ry1) * 0.5 + 0.5) * u_hiz_size;\n"
+	"            float dim = max(r1.x - r0.x, r1.y - r0.y);\n"
+	"            if (dim > 0.5) {\n"
+	"                int mip = int(ceil(log2(dim)));\n"
+	"                if (mip < 0) mip = 0;\n"
+	"                if (mip > u_hiz_mip_count - 1) mip = u_hiz_mip_count - 1;\n"
+	"                vec2 cuv = (r0 + r1) * 0.5 / u_hiz_size;\n"
+	"                /* 2x2 textureLod sample at the chosen mip, reduced\n"
+	"                 * the same way the pyramid was built. */\n"
+	"                float texel = exp2(float(mip)) / max(u_hiz_size.x, u_hiz_size.y);\n"
+	"                float occ;\n"
+	"                float s0 = textureLod(u_hiz_pyramid, cuv + vec2(-0.5,-0.5)*texel, float(mip)).r;\n"
+	"                float s1 = textureLod(u_hiz_pyramid, cuv + vec2( 0.5,-0.5)*texel, float(mip)).r;\n"
+	"                float s2 = textureLod(u_hiz_pyramid, cuv + vec2(-0.5, 0.5)*texel, float(mip)).r;\n"
+	"                float s3 = textureLod(u_hiz_pyramid, cuv + vec2( 0.5, 0.5)*texel, float(mip)).r;\n"
+	"                if (u_reverse_z != 0) {\n"
+	"                    occ = min(min(s0,s1), min(s2,s3));\n"
+	"                    /* AABB's nearest depth < occluder's min => fully behind */\n"
+	"                    if (dnear < occ) return;\n"
+	"                } else {\n"
+	"                    occ = max(max(s0,s1), max(s2,s3));\n"
+	"                    if (dnear > occ) return;\n"
+	"                }\n"
+	"            }\n"
+	"        }\n"
+	"    }\n"
+	"\n"
 	"    /* Dedup: same surface can appear in multiple leaves.\n"
 	"     * atomicExchange the framecount — if it was already this\n"
 	"     * frame's value, another thread already emitted it. */\n"
@@ -248,6 +337,74 @@ static const char cull_mark_src[] =
 	"    /* Copy indices from source to destination */\n"
 	"    for (int i = 0; i < s.numindices; i++)\n"
 	"        dst_indices[dst_base + uint(i)] = src_indices[s.firstindex + i];\n"
+	"}\n";
+
+/* ------------------------------------------------------------------ */
+/* Hi-Z compute shaders                                                */
+/* ------------------------------------------------------------------ */
+
+/* Copy the (sampled) scene depth into mip 0 of the R32F pyramid.
+ * Reads via sampler2D — DEPTH24_STENCIL8 with TEXTURE_COMPARE_MODE = NONE
+ * returns the raw depth value in [0,1] from the .r channel. */
+static const char hiz_copy_src[] =
+	"#version 430 core\n"
+	"layout(local_size_x = 8, local_size_y = 8) in;\n"
+	"layout(binding = 0) uniform sampler2D u_scene_depth;\n"
+	"layout(binding = 0, r32f) uniform writeonly image2D u_dst;\n"
+	"uniform ivec2 u_size;\n"
+	"void main() {\n"
+	"    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
+	"    if (p.x >= u_size.x || p.y >= u_size.y) return;\n"
+	"    float d = texelFetch(u_scene_depth, p, 0).r;\n"
+	"    imageStore(u_dst, p, vec4(d, 0.0, 0.0, 0.0));\n"
+	"}\n";
+
+/* 2x2 reduction from mip N -> mip N+1.  Under reversed-Z (u_reverse_z!=0)
+ * the conservative occluder (the farthest point in eye space) has the
+ * smallest stored value, so we take min; under forward-Z, max. */
+static const char hiz_reduce_src[] =
+	"#version 430 core\n"
+	"layout(local_size_x = 8, local_size_y = 8) in;\n"
+	"layout(binding = 0) uniform sampler2D u_src;\n"
+	"layout(binding = 0, r32f) uniform writeonly image2D u_dst;\n"
+	"uniform ivec2 u_src_size;\n"
+	"uniform ivec2 u_dst_size;\n"
+	"uniform int u_src_lod;\n"
+	"uniform int u_reverse_z;\n"
+	"void main() {\n"
+	"    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
+	"    if (p.x >= u_dst_size.x || p.y >= u_dst_size.y) return;\n"
+	"    ivec2 s = p * 2;\n"
+	"    ivec2 a = clamp(s + ivec2(0,0), ivec2(0), u_src_size - ivec2(1));\n"
+	"    ivec2 b = clamp(s + ivec2(1,0), ivec2(0), u_src_size - ivec2(1));\n"
+	"    ivec2 c = clamp(s + ivec2(0,1), ivec2(0), u_src_size - ivec2(1));\n"
+	"    ivec2 d = clamp(s + ivec2(1,1), ivec2(0), u_src_size - ivec2(1));\n"
+	"    float va = texelFetch(u_src, a, u_src_lod).r;\n"
+	"    float vb = texelFetch(u_src, b, u_src_lod).r;\n"
+	"    float vc = texelFetch(u_src, c, u_src_lod).r;\n"
+	"    float vd = texelFetch(u_src, d, u_src_lod).r;\n"
+	"    float r;\n"
+	"    if (u_reverse_z != 0) r = min(min(va,vb), min(vc,vd));\n"
+	"    else                  r = max(max(va,vb), max(vc,vd));\n"
+	"    /* odd-mip safety: if the parent dim is odd we also need to fold\n"
+	"     * in the dangling row/column so coverage stays conservative. */\n"
+	"    if (((u_src_size.x & 1) != 0) && (s.x + 2 < u_src_size.x)) {\n"
+	"        ivec2 e = ivec2(s.x + 2, s.y);\n"
+	"        ivec2 f = ivec2(s.x + 2, min(s.y + 1, u_src_size.y - 1));\n"
+	"        float ve = texelFetch(u_src, e, u_src_lod).r;\n"
+	"        float vf = texelFetch(u_src, f, u_src_lod).r;\n"
+	"        if (u_reverse_z != 0) r = min(r, min(ve, vf));\n"
+	"        else                  r = max(r, max(ve, vf));\n"
+	"    }\n"
+	"    if (((u_src_size.y & 1) != 0) && (s.y + 2 < u_src_size.y)) {\n"
+	"        ivec2 e = ivec2(s.x, s.y + 2);\n"
+	"        ivec2 f = ivec2(min(s.x + 1, u_src_size.x - 1), s.y + 2);\n"
+	"        float ve = texelFetch(u_src, e, u_src_lod).r;\n"
+	"        float vf = texelFetch(u_src, f, u_src_lod).r;\n"
+	"        if (u_reverse_z != 0) r = min(r, min(ve, vf));\n"
+	"        else                  r = max(r, max(ve, vf));\n"
+	"    }\n"
+	"    imageStore(u_dst, p, vec4(r, 0.0, 0.0, 0.0));\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */
@@ -325,6 +482,11 @@ void R_BuildWorldCull (void)
 	cull_mark_u_num_marksurfs = glGetUniformLocation_fp(cull_mark_prog, "u_num_marksurfs");
 	cull_mark_u_num_buckets = glGetUniformLocation_fp(cull_mark_prog, "u_num_buckets");
 	cull_mark_u_max_dst_indices = glGetUniformLocation_fp(cull_mark_prog, "u_max_dst_indices");
+	cull_mark_u_prev_mvp = glGetUniformLocation_fp(cull_mark_prog, "u_prev_mvp");
+	cull_mark_u_hiz_size = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_size");
+	cull_mark_u_hiz_mip_count = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_mip_count");
+	cull_mark_u_hiz_enable = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_enable");
+	cull_mark_u_reverse_z = glGetUniformLocation_fp(cull_mark_prog, "u_reverse_z");
 
 	cull_num_surfs = m->numsurfaces;
 	cull_num_leaves = m->numleafs;
@@ -565,8 +727,156 @@ void R_FreeWorldCull (void)
 	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
+	R_FreeHiZ();
 	cull_initialized = false;
 	cull_total_indices = 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hi-Z occlusion culling — uhexen2-xd87                               */
+/* ------------------------------------------------------------------ */
+
+extern qboolean	gl_clipcontrol_able;
+
+static int R_HiZ_MipCount (int w, int h)
+{
+	int d = (w > h) ? w : h;
+	int n = 1;
+	while (d > 1) { d >>= 1; n++; }
+	return n;
+}
+
+static qboolean R_HiZ_Available (void)
+{
+	return (gl_hiz_cull.integer != 0)
+	    && (glDispatchCompute_fp != NULL)
+	    && (glTexStorage2D_fp    != NULL)
+	    && (glBindImageTexture_fp != NULL)
+	    && (glMemoryBarrier_fp   != NULL);
+}
+
+static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
+{
+	if (scene_w <= 0 || scene_h <= 0)
+		return false;
+
+	if (hiz_pyramid_tex && hiz_width == scene_w && hiz_height == scene_h)
+		return true;
+
+	if (hiz_pyramid_tex)
+	{
+		glDeleteTextures_fp(1, &hiz_pyramid_tex);
+		hiz_pyramid_tex = 0;
+	}
+
+	hiz_width = scene_w;
+	hiz_height = scene_h;
+	hiz_mip_count = R_HiZ_MipCount(scene_w, scene_h);
+
+	glGenTextures_fp(1, &hiz_pyramid_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
+	glTexStorage2D_fp(GL_TEXTURE_2D, hiz_mip_count, GL_R32F, scene_w, scene_h);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+
+	if (!hiz_copy_prog)
+		hiz_copy_prog = R_CompileComputeProgram(hiz_copy_src, "hiz_copy");
+	if (!hiz_reduce_prog)
+		hiz_reduce_prog = R_CompileComputeProgram(hiz_reduce_src, "hiz_reduce");
+
+	if (!hiz_copy_prog || !hiz_reduce_prog)
+	{
+		Con_Printf("Hi-Z: compute shader failed, disabling\n");
+		R_FreeHiZ();
+		return false;
+	}
+
+	Con_DPrintf("Hi-Z: %dx%d pyramid, %d mips\n",
+		    hiz_width, hiz_height, hiz_mip_count);
+	return true;
+}
+
+void R_BuildHiZ (void)
+{
+	/* Allocation deferred to R_BuildHiZForNextFrame so we don't burn
+	 * GPU memory when gl_hiz_cull is off. */
+	memset(hiz_prev_mvp, 0, sizeof(hiz_prev_mvp));
+	hiz_prev_mvp_valid = false;
+}
+
+void R_FreeHiZ (void)
+{
+	if (hiz_pyramid_tex)   { glDeleteTextures_fp(1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
+	if (hiz_copy_prog)     { glDeleteProgram_fp(hiz_copy_prog);        hiz_copy_prog = 0; }
+	if (hiz_reduce_prog)   { glDeleteProgram_fp(hiz_reduce_prog);      hiz_reduce_prog = 0; }
+	hiz_width = hiz_height = hiz_mip_count = 0;
+	hiz_prev_mvp_valid = false;
+}
+
+void R_BuildHiZForNextFrame (void)
+{
+	GLuint	scene_depth_tex;
+	int	scene_w, scene_h;
+	int	mip;
+
+	if (!R_HiZ_Available())
+		return;
+
+	scene_depth_tex = GL_PostProcess_GetSceneDepthTex();
+	if (!scene_depth_tex)
+		return;
+
+	if (!GL_PostProcess_GetSceneSize(&scene_w, &scene_h))
+		return;
+
+	if (!R_HiZ_EnsureResources(scene_w, scene_h))
+		return;
+
+	/* Copy scene depth -> mip 0 */
+	glUseProgram_fp(hiz_copy_prog);
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, scene_depth_tex);
+	glBindImageTexture_fp(0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
+	{
+		GLint loc = glGetUniformLocation_fp(hiz_copy_prog, "u_size");
+		if (loc >= 0) glUniform2i_fp(loc, scene_w, scene_h);
+	}
+	glDispatchCompute_fp((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
+	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+	/* Reduce mip N -> mip N+1 */
+	glUseProgram_fp(hiz_reduce_prog);
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
+	{
+		GLint loc_src_size = glGetUniformLocation_fp(hiz_reduce_prog, "u_src_size");
+		GLint loc_dst_size = glGetUniformLocation_fp(hiz_reduce_prog, "u_dst_size");
+		GLint loc_src_lod  = glGetUniformLocation_fp(hiz_reduce_prog, "u_src_lod");
+		GLint loc_rev_z    = glGetUniformLocation_fp(hiz_reduce_prog, "u_reverse_z");
+		int src_w = scene_w, src_h = scene_h;
+		for (mip = 1; mip < hiz_mip_count; mip++)
+		{
+			int dst_w = src_w > 1 ? src_w >> 1 : 1;
+			int dst_h = src_h > 1 ? src_h >> 1 : 1;
+			glBindImageTexture_fp(0, hiz_pyramid_tex, mip, GL_FALSE, 0,
+					      GL_WRITE_ONLY, GL_R32F);
+			if (loc_src_size >= 0) glUniform2i_fp(loc_src_size, src_w, src_h);
+			if (loc_dst_size >= 0) glUniform2i_fp(loc_dst_size, dst_w, dst_h);
+			if (loc_src_lod  >= 0) glUniform1i_fp(loc_src_lod, mip - 1);
+			if (loc_rev_z    >= 0) glUniform1i_fp(loc_rev_z, gl_clipcontrol_able ? 1 : 0);
+			glDispatchCompute_fp((dst_w + 7) / 8, (dst_h + 7) / 8, 1);
+			glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+			src_w = dst_w;
+			src_h = dst_h;
+		}
+	}
+
+	glUseProgram_fp(0);
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
 }
 
 qboolean R_WorldCullAvailable (void)
@@ -632,6 +942,29 @@ void R_DispatchWorldCull (void)
 		glUniform1i_fp(cull_mark_u_num_buckets, cull_num_buckets);
 	if (cull_mark_u_max_dst_indices >= 0)
 		glUniform1i_fp(cull_mark_u_max_dst_indices, cull_total_indices);
+
+	/* Hi-Z occlusion (uhexen2-xd87).  Sampler binding 1 = pyramid; the
+	 * enable flag is also gated by gl_hiz_cull/prev_mvp_valid CPU-side
+	 * so shaders early-out cheaply when not in use. */
+	{
+		qboolean hiz_on = gl_hiz_cull.integer && hiz_pyramid_tex && hiz_prev_mvp_valid;
+		if (cull_mark_u_hiz_enable >= 0)
+			glUniform1i_fp(cull_mark_u_hiz_enable, hiz_on ? 1 : 0);
+		if (cull_mark_u_reverse_z >= 0)
+			glUniform1i_fp(cull_mark_u_reverse_z, gl_clipcontrol_able ? 1 : 0);
+		if (cull_mark_u_prev_mvp >= 0)
+			glUniformMatrix4fv_fp(cull_mark_u_prev_mvp, 1, GL_FALSE, hiz_prev_mvp);
+		if (cull_mark_u_hiz_size >= 0)
+			glUniform2f_fp(cull_mark_u_hiz_size, (float)hiz_width, (float)hiz_height);
+		if (cull_mark_u_hiz_mip_count >= 0)
+			glUniform1i_fp(cull_mark_u_hiz_mip_count, hiz_mip_count);
+		if (hiz_on)
+		{
+			glActiveTexture_fp(GL_TEXTURE1);
+			glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
+			glActiveTexture_fp(GL_TEXTURE0);
+		}
+	}
 
 	/* Upload frustum planes */
 	{
@@ -742,6 +1075,13 @@ void R_DrawWorldCulled (void)
 	/* External upload to gl_shader_world; clear GL_ImmEnd's uniform
 	 * cache so a later ImmEnd reusing the same shader uploads fresh. */
 	GL_ImmInvalidateState();
+
+	/* Capture this frame's world MVP for next-frame Hi-Z reprojection.
+	 * The pyramid will be built at end-of-3D (after every depth write
+	 * has landed), and the cull dispatch one frame from now consults
+	 * this matrix when reprojecting AABBs onto the pyramid. */
+	memcpy(hiz_prev_mvp, mvp, sizeof(hiz_prev_mvp));
+	hiz_prev_mvp_valid = true;
 }
 
 

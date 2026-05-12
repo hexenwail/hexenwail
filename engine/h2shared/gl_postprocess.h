@@ -61,6 +61,15 @@ qboolean OIT_Active (void);	/* OIT is built and r_oit is on */
 qboolean OIT_InPass (void);	/* currently between Begin/EndTranslucency */
 GLuint GL_GetSceneFBO (void);
 
+/* Sampler-readable depth/stencil texture from the scene FBO, or 0 if no
+ * FBO is active (or running in the dead MSAA branch). Used by Hi-Z
+ * occlusion culling — uhexen2-xd87. */
+GLuint GL_PostProcess_GetSceneDepthTex (void);
+
+/* Current scene FBO size in pixels (after r_scale).  Returns false if no
+ * FBO is active. */
+qboolean GL_PostProcess_GetSceneSize (int *w, int *h);
+
 /* OIT_OUTPUT macro for injection into translucent fragment shaders.
  * Replaces `out vec4 fragColor` with MRT outputs when OIT==1. */
 extern const char *OIT_OUTPUT_GLSL_STR;

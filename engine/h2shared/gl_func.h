@@ -368,6 +368,15 @@ GL_FUNCTION_OPT(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsi
 GL_FUNCTION_OPT(void, glDispatchCompute, (GLuint, GLuint, GLuint))
 GL_FUNCTION_OPT(void, glMemoryBarrier, (GLbitfield))
 
+/* Image load/store (OpenGL 4.2) — Hi-Z pyramid build (uhexen2-xd87) */
+GL_FUNCTION_OPT(void, glBindImageTexture, (GLuint, GLuint, GLint, GLboolean, GLint, GLenum, GLenum))
+
+/* Immutable texture storage (OpenGL 4.2) — Hi-Z pyramid mip chain */
+GL_FUNCTION_OPT(void, glTexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
+
+/* Integer uniform setters used by Hi-Z compute shaders */
+GL_FUNCTION_OPT(void, glUniform2i, (GLint, GLint, GLint))
+
 /* GL_ARB_buffer_storage (core 4.4) — persistent-mapped buffers.
  * gl_buffer_storage_able is set true at init when the entry point is
  * present; the streaming ring (gl_buffer.c) maps coherent + persistent
@@ -475,6 +484,9 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glBindBufferBase_fp		glBindBufferBase
 #define glDispatchCompute_fp(x,y,z)	((void)0)
 #define glMemoryBarrier_fp(b)		((void)0)
+#define glBindImageTexture_fp(u,t,l,la,la2,a,f)	((void)0)
+#define glTexStorage2D_fp(t,le,fmt,w,h)		((void)0)
+#define glUniform2i_fp(l,x,y)			((void)0)
 #define glGenQueries_fp(n,ids)		((void)0)
 #define glDeleteQueries_fp(n,ids)	((void)0)
 #define glQueryCounter_fp(id,t)		((void)0)
