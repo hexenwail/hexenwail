@@ -126,6 +126,11 @@ static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
 static GLuint	oit_revealage_tex;	/* R8 revealage */
 static GLuint	oit_fbo;		/* MRT FBO sharing scene depth/stencil */
 static GLuint	oit_resolve_prog;	/* fullscreen resolve shader */
+static GLuint	oit_resolve_vao;	/* dummy VAO required for glDrawArrays
+					 * in GL 4.3 core profile — without one
+					 * bound, the resolve draw was a silent
+					 * GL_INVALID_OPERATION and the entire OIT
+					 * composite was being discarded. */
 static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static int	oit_width, oit_height;
@@ -784,6 +789,17 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_prog = prog;
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+
+	/* GL 4.3 core profile requires a VAO bound for any draw call.  The
+	 * resolve uses glDrawArrays(GL_TRIANGLES, 0, 3) with a gl_VertexID-
+	 * driven fullscreen triangle (no vertex attributes), but it still
+	 * needs *some* VAO.  Without one bound, the draw silently fails as
+	 * GL_INVALID_OPERATION and the entire OIT composite is discarded —
+	 * the symptom: translucent draws accumulate to oit_fbo correctly,
+	 * but the resolve never reaches the scene FBO, so r_oit=1 hides
+	 * every fragment that went through WBOIT. */
+	glGenVertexArrays_fp(1, &oit_resolve_vao);
+
 	Con_SafePrintf("OIT: resolve shader OK\n");
 	return true;
 }
@@ -882,8 +898,11 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
 	if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
 
-	/* Fullscreen triangle via gl_VertexID */
+	/* Fullscreen triangle via gl_VertexID — needs a VAO bound in GL 4.3
+	 * core profile or the draw is silently discarded. */
+	glBindVertexArray_fp(oit_resolve_vao);
 	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+	glBindVertexArray_fp(0);
 
 	/* Restore state */
 	glActiveTexture_fp(GL_TEXTURE1);
