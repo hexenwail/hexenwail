@@ -317,6 +317,11 @@ typedef struct mtriangle_s {
 	unsigned short		stindex[3];
 } mtriangle_t;
 
+/* Pose vertex format type (for multi-format GPU upload) */
+typedef enum {
+	PV_QUAKE1 = 0,	/* 8-bit XYZ + lightnormal (Hexen II native) */
+	PV_MD3 = 1,	/* 16-bit XYZ + spherical normal (MD3 models) */
+} poseverttype_t;
 
 #define	MAX_SKINS	32
 typedef struct {
@@ -338,8 +343,9 @@ typedef struct {
 
 	int		numposes;
 	int		poseverts;
-	int		posedata;	// numposes*poseverts trivert_t
+	int		posedata;	// numposes*poseverts trivert_t (or md3pose_t for PV_MD3)
 	int		commands;	// gl command list with embedded s/t
+	poseverttype_t	poseverttype;	// PV_QUAKE1 or PV_MD3 (for multi-format GPU upload)
 	GLuint		gl_texturenum[MAX_SKINS][4];
 	GLuint		gl_fb_texturenum[MAX_SKINS][4];	// fullbright mask textures
 	maliasframedesc_t	frames[1];	// variable sized
