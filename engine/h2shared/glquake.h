@@ -202,6 +202,12 @@ void GL_ReleaseFrameResources (void);
 void GL_ClearBufferBindings (void);
 void GL_AddGarbageBuffer (GLuint handle);
 
+/* Generic-target buffer binder that keeps the binding cache in sync.
+ * Prefer over raw glBindBuffer_fp for ARRAY/ELEMENT_ARRAY/SHADER_STORAGE/
+ * UNIFORM/DRAW_INDIRECT targets — raw binds desync the cache and cause
+ * subsequent cached binds to short-circuit to the wrong buffer. */
+void GL_BindBuffer (GLenum target, GLuint buffer);
+
 void GL_Upload (GLenum target, const void *data, size_t numbytes,
 		GLuint *outbuf, GLintptr *outofs);
 void GL_BindBufferRange (GLenum target, GLuint index,

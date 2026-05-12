@@ -62,7 +62,7 @@ static bufferrange_t ubo_ranges[CACHED_BUFFER_RANGES];
  *  Buffer binding wrappers — drop redundant binds.
  * ---------------------------------------------------------------------- */
 
-static void GL_BindBufferCached (GLenum target, GLuint buffer)
+void GL_BindBuffer (GLenum target, GLuint buffer)
 {
 	GLuint *cache;
 
@@ -83,6 +83,7 @@ static void GL_BindBufferCached (GLenum target, GLuint buffer)
 	*cache = buffer;
 	glBindBuffer_fp (target, buffer);
 }
+#define GL_BindBufferCached GL_BindBuffer
 
 void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size)

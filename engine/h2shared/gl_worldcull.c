@@ -1035,7 +1035,7 @@ void R_DispatchWorldCull (void)
 		if (stats_on)
 		{
 			unsigned int zeros[8] = {0};
-			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+			GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
 			glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zeros), zeros);
 		}
 		if (cull_mark_u_stats_enable >= 0)
@@ -1058,7 +1058,7 @@ void R_DispatchWorldCull (void)
 			unsigned int counts[8] = {0};
 			unsigned int post;
 			hiz_stats_frame_counter = 0;
-			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+			GL_BindBuffer(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
 			glGetBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
 					      sizeof(counts), counts);
 			post = counts[4] + counts[5] + counts[6];
