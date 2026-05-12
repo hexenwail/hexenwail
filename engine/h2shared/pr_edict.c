@@ -859,6 +859,21 @@ static ddef_t *ED_FieldAtOfs (int ofs)
 	return NULL;
 }
 
+/* uhexen2-4ej9: public field-table reflection so renderer-side debug code
+ * (r_showbboxes_links) can iterate entity-typed fields without re-opening
+ * the static pr_fielddefs / progs->numfielddefs pair. */
+int ED_NumFieldDefs (void)
+{
+	return progs ? progs->numfielddefs : 0;
+}
+
+ddef_t *ED_FieldDefAt (int i)
+{
+	if (!progs || i < 0 || i >= progs->numfielddefs)
+		return NULL;
+	return &pr_fielddefs[i];
+}
+
 /*
 ============
 ED_FindField

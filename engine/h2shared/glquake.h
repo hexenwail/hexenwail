@@ -284,6 +284,7 @@ extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_showbboxes_think;
 extern	cvar_t	r_showbboxes_health;
 extern	cvar_t	r_showbboxes_targets;
+extern	cvar_t	r_showbboxes_links;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
 extern	cvar_t	r_alphasort;
