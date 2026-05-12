@@ -35,6 +35,7 @@ static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer);
+static void Mod_LoadMD3Model (qmodel_t *mod, void *buffer);
 
 static void Mod_Print (void);
 
@@ -333,6 +334,9 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		break;
 	case IDPOLYHEADER:
 		Mod_LoadAliasModel (mod, buf);
+		break;
+	case MD3_IDENT:
+		Mod_LoadMD3Model (mod, buf);
 		break;
 	case IDSPRITEHEADER:
 		Mod_LoadSpriteModel (mod, buf);
@@ -2494,6 +2498,40 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	memcpy (mod->cache.data, pheader, total);
 
 	Hunk_FreeToLowMark (start);
+}
+
+//=============================================================================
+
+/*
+=================
+Mod_LoadMD3Model
+
+MD3 model loader (Ironwail parity, Phase 2 stub)
+=================
+*/
+static void Mod_LoadMD3Model (qmodel_t *mod, void *buffer)
+{
+	md3Header_t		*header;
+	md3Frame_t		*frames;
+	md3Surface_t		*surfaces;
+	aliashdr_t		*pheader;
+	int			i, size;
+	int			start;
+
+	start = Hunk_LowMark();
+
+	header = (md3Header_t *)buffer;
+
+	/* TODO: Phase 2 implementation
+	 * 1. Validate MD3 header (ident, version)
+	 * 2. Load frames
+	 * 3. Load surfaces, shaders, triangles, vertices
+	 * 4. Convert to GPU format (separate SSBO for MD3 8-byte vertices)
+	 * 5. Set up poseverttype = PV_MD3
+	 *
+	 * For now, stub that prevents crashes and logs an error.
+	 */
+	Sys_Error("MD3 model loading not yet implemented: %s", mod->name);
 }
 
 //=============================================================================

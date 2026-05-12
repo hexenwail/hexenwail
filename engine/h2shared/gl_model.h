@@ -323,6 +323,71 @@ typedef enum {
 	PV_MD3 = 1,	/* 16-bit XYZ + spherical normal (MD3 models) */
 } poseverttype_t;
 
+/* MD3 model format constants */
+#define MD3_IDENT			(('3'<<24)+('D'<<16)+('M'<<8)+'M')	/* "MD3M" */
+#define MD3_VERSION			15
+#define MD3_XYZ_SCALE		(1.0f/64.0f)
+#define MD3_MAX_FRAMES		1024
+#define MD3_MAX_TAGS		16
+#define MD3_MAX_SURFACES	32
+#define MD3_MAX_SHADERS		256
+#define MD3_MAX_VERTS		4096
+#define MD3_MAX_TRIANGLES	8192
+
+/* MD3 binary format structures */
+typedef struct {
+	int		ident;		/* MD3_IDENT */
+	int		version;	/* MD3_VERSION */
+	int		name_len;	/* length of model name */
+	int		frameoffset;	/* byte offset of first frame */
+	int		num_tags;	/* number of tags per frame */
+	int		num_surfaces;	/* number of surfaces */
+	int		num_skins;	/* number of skins (unused, use surface skins) */
+	int		ofs_frames;	/* offset to frame data */
+	int		ofs_tags;	/* offset to tag data */
+	int		ofs_surfaces;	/* offset to surface data */
+	int		ofs_end;	/* end of file */
+} md3Header_t;
+
+typedef struct {
+	vec3_t		bounds[2];	/* bounding box */
+	vec3_t		localOrigin;	/* base origin for this frame */
+	float		radius;		/* radius */
+	char		name[16];	/* frame name */
+} md3Frame_t;
+
+typedef struct {
+	char		name[64];	/* surface name */
+	int		flags;		/* unused */
+	int		num_frames;	/* number of animation frames */
+	int		num_shaders;	/* number of shaders */
+	int		num_verts;	/* number of vertices */
+	int		num_triangles;	/* number of triangles */
+	int		ofs_triangles;	/* offset to triangle data */
+	int		ofs_shaders;	/* offset to shader data */
+	int		ofs_st;		/* offset to s/t coord data */
+	int		ofs_verts;	/* offset to vertex data */
+	int		ofs_next;	/* offset to next surface */
+} md3Surface_t;
+
+typedef struct {
+	char		name[64];	/* shader name */
+	int		shaderIndex;	/* shader index (unused in engine) */
+} md3Shader_t;
+
+typedef struct {
+	int		indexes[3];	/* vertex indices */
+} md3Triangle_t;
+
+typedef struct {
+	float		s, t;		/* texture coordinates */
+} md3St_t;
+
+typedef struct {
+	short		xyz[3];		/* position (XYZ_SCALE to get float) */
+	unsigned char	normal[2];	/* spherical normal (in 8 bits, x=lon, y=lat) */
+} md3Vertex_t;
+
 #define	MAX_SKINS	32
 typedef struct {
 	int		ident;
