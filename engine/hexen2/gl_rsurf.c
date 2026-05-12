@@ -859,7 +859,11 @@ dynamic:
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
 		glDepthMask_fp(1);
-		glDisable_fp (GL_BLEND);
+		/* Inside an OIT pass the per-buffer blend funcs from
+		 * OIT_BeginTranslucency must persist across translucent draws —
+		 * OIT_EndTranslucency does its own restore. */
+		if (!OIT_InPass())
+			glDisable_fp (GL_BLEND);
 	}
 
 	if (fa->flags & SURF_DRAWFENCE)
@@ -941,7 +945,9 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		if (turb_alpha < 1.0f && alpha_val >= 1.0f)
 		{
 			glEnable_fp (GL_BLEND);
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			/* Inside OIT, keep the WBOIT per-buffer blend funcs. */
+			if (!OIT_InPass())
+				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDepthMask_fp(0);
 		}
 		GL_ImmColor4f(1.0f, 1.0f, 1.0f, turb_alpha < 1.0f ? turb_alpha : alpha_val);
@@ -949,7 +955,11 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		if (turb_alpha < 1.0f)
 		{
 			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
+			/* See R_RenderBrushPoly's matching cleanup — leave BLEND
+			 * alone inside an OIT pass so the next translucent draw
+			 * still sees the WBOIT per-buffer blend funcs. */
+			if (!OIT_InPass())
+				glDisable_fp(GL_BLEND);
 		}
 		//return;
 	}

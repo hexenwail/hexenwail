@@ -3722,9 +3722,12 @@ static void R_RenderScene (void)
 	R_DrawEntitiesOnList ();
 	RPROF_CPU_END(rprof_cpu_ents);
 
-	RPROF_CPU_BEGIN();
-	R_DrawAllGlows();
-	RPROF_CPU_END(rprof_cpu_glows);
+	/* R_DrawAllGlows moved to R_RenderView, AFTER OIT_EndTranslucency:
+	 * glows blend additively (GL_ONE, GL_ONE) but the OIT resolve uses
+	 * src-alpha blending which multiplies dst by (1 - revealage), so a
+	 * glow drawn before OIT_End gets dimmed wherever a translucent
+	 * fragment sits over it.  Drawing after OIT_End lets the additive
+	 * contribution land on the resolved scene unimpeded.  uhexen2-a0hp. */
 
 	Fog_DisableGFog ();
 
@@ -4321,6 +4324,12 @@ void R_RenderView (void)
 	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
 
 	OIT_EndTranslucency(GL_GetSceneFBO());
+
+	/* Additive glow flares: render onto the resolved scene so the
+	 * WBOIT src-alpha resolve doesn't dim them under translucent
+	 * fragments.  Moved out of R_RenderScene for uhexen2-a0hp. */
+	R_DrawAllGlows();
+
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_VM);
 
 	R_DrawViewModel();
