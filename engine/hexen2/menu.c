@@ -30,6 +30,39 @@
 #include "sdl_inc.h"
 
 void (*vid_menudrawfn)(void);
+
+/* Live preview (Ironwail ui_live_preview parity): when the user
+ * adjusts a slider with ←/→, briefly fade the menu glyphs out so the
+ * game behind shows through.  Useful for post-process sliders
+ * (gamma/contrast/brightness/fog) whose effect is otherwise hidden by
+ * the menu.  Trapezoidal alpha curve: fade in, hold, fade out. */
+static cvar_t	ui_live_preview = {"ui_live_preview", "1", CVAR_ARCHIVE};
+static double	menu_live_edit_time = -10.0;	/* realtime of last edit; -10 = never */
+#define UI_PREVIEW_FADE_IN	0.125
+#define UI_PREVIEW_HOLD		1.25
+#define UI_PREVIEW_FADE_OUT	0.125
+#define UI_PREVIEW_TOTAL	(UI_PREVIEW_FADE_IN + UI_PREVIEW_HOLD + UI_PREVIEW_FADE_OUT)
+
+static float M_LivePreviewAlpha (void)
+{
+	double elapsed;
+	if (!ui_live_preview.integer)
+		return 0.0f;
+	elapsed = realtime - menu_live_edit_time;
+	if (elapsed < 0.0)              return 0.0f;
+	if (elapsed < UI_PREVIEW_FADE_IN)
+		return (float)(elapsed / UI_PREVIEW_FADE_IN);
+	if (elapsed < UI_PREVIEW_FADE_IN + UI_PREVIEW_HOLD)
+		return 1.0f;
+	if (elapsed < UI_PREVIEW_TOTAL)
+		return (float)((UI_PREVIEW_TOTAL - elapsed) / UI_PREVIEW_FADE_OUT);
+	return 0.0f;
+}
+
+static void M_FlagLiveEdit (void)
+{
+	menu_live_edit_time = realtime;
+}
 void (*vid_menukeyfn)(int key);
 
 enum m_state_e	m_state;
@@ -6198,6 +6231,8 @@ void M_Init (void)
 		}
 	}
 
+	Cvar_RegisterVariable (&ui_live_preview);
+
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
 	Cmd_AddCommand ("menu_main", M_Menu_Main_f);
@@ -6236,11 +6271,14 @@ void M_Draw (void)
 		}
 		else if (m_state != m_display && m_state != m_video
 		         && m_state != m_rendering && m_state != m_graphics
-		         && scr_menubgstyle.integer >= 1)
+		         && scr_menubgstyle.integer >= 1
+		         && M_LivePreviewAlpha () < 1.0f)
 		{
 			/* Demo/game world is behind — dim it with the amber fade.
 			 * Display submenus skip the fade so settings preview
-			 * against a clean game view. */
+			 * against a clean game view.  Live preview also skips the
+			 * dim at peak so the user can see the actual effect of the
+			 * slider they're adjusting. */
 			Draw_FadeScreen ();
 
 			/* Mode 2: also draw a translucent backdrop quad over the
@@ -6276,6 +6314,17 @@ void M_Draw (void)
 	 * fill the whole screen. */
 	GL_SetCanvas (CANVAS_MENU);
 	m_canvas_active = true;
+
+	/* Live preview: reduce menu glyph alpha so the postprocess effect
+	 * of the slider just adjusted becomes visible behind the menu.
+	 * Plaque images (Draw_Pic) keep their normal alpha — accepted as
+	 * a small visual quirk; the text glyphs are what mostly occlude
+	 * the screen. */
+	{
+		float preview_alpha = M_LivePreviewAlpha ();
+		if (preview_alpha > 0.0f)
+			Draw_SetCharacterAlpha (1.0f - preview_alpha);
+	}
 
 	switch (m_state)
 	{
@@ -6390,6 +6439,9 @@ void M_Draw (void)
 	m_canvas_active = false;
 	GL_SetCanvas (CANVAS_DEFAULT);
 
+	/* Restore default character alpha in case live preview reduced it. */
+	Draw_SetCharacterAlpha (1.0f);
+
 	if (m_entersound)
 	{
 		S_LocalSound ("raven/menu2.wav");
@@ -6440,6 +6492,11 @@ void M_Keydown (int key, qboolean repeat)
 			return;
 		}
 	}
+
+	/* Live preview: any ←/→ adjustment fades the menu so the game
+	 * shows through briefly (Ironwail ui_live_preview parity). */
+	if (key == K_LEFTARROW || key == K_RIGHTARROW)
+		M_FlagLiveEdit ();
 
 	switch (m_state)
 	{
