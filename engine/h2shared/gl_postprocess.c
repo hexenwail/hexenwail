@@ -878,24 +878,37 @@ qboolean OIT_InPass (void)
  * pipeline state without hunting through boot scrollback. */
 static void OIT_Status_f (void)
 {
+	GLint draw_fbo = -1, read_fbo = -1;
+	GLint cur_attach0 = 0, cur_attach1 = 0;
+	GLint scissor = 0, viewport[4] = {0,0,0,0};
 	Con_Printf("OIT status:\n");
 	Con_Printf("  r_oit cvar:        %d\n", r_oit.integer);
 	Con_Printf("  glBlendFunci_fp:   %s\n", glBlendFunci_fp ? "loaded" : "MISSING (driver lacks ARB_draw_buffers_blend)");
+	Con_Printf("  glClearBufferfv:   %s\n", glClearBufferfv_fp ? "loaded" : "MISSING — OIT buffers never get cleared");
+	Con_Printf("  glBindFramebuffer: %s\n", glBindFramebuffer_fp ? "loaded" : "MISSING");
+	Con_Printf("  glDrawBuffers:     %s\n", glDrawBuffers_fp ? "loaded" : "MISSING — MRT not configured");
 	Con_Printf("  oit_available:     %d (FBO + resolve shader)\n", (int)oit_available);
 	Con_Printf("  oit_fbo:           %u\n", oit_fbo);
-	Con_Printf("  oit_accum_tex:     %u\n", oit_accum_tex);
-	Con_Printf("  oit_revealage_tex: %u\n", oit_revealage_tex);
+	Con_Printf("  oit_accum_tex:     %u (RGBA16F)\n", oit_accum_tex);
+	Con_Printf("  oit_revealage_tex: %u (R8)\n", oit_revealage_tex);
 	Con_Printf("  oit_resolve_prog:  %u\n", oit_resolve_prog);
 	Con_Printf("  OIT_Active():      %d\n", (int)OIT_Active());
-	Con_Printf("  particle_oit prog: %u  %s\n",
-		   gl_shader_particle_oit.program,
-		   gl_shader_particle_oit.program ? "" : "<-- FAILED, particles hidden under r_oit=1");
-	Con_Printf("  world_oit prog:    %u  %s\n",
-		   gl_shader_world_oit.program,
-		   gl_shader_world_oit.program ? "" : "<-- FAILED");
-	Con_Printf("  alias_oit prog:    %u  %s\n",
-		   gl_shader_alias_oit.program,
-		   gl_shader_alias_oit.program ? "" : "<-- FAILED");
+	Con_Printf("  particle_oit prog: %u\n", gl_shader_particle_oit.program);
+	Con_Printf("  world_oit prog:    %u\n", gl_shader_world_oit.program);
+	Con_Printf("  alias_oit prog:    %u\n", gl_shader_alias_oit.program);
+	/* Current GL pipeline state at call time. */
+	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv_fp(GL_SCISSOR_TEST, &scissor);
+	glGetIntegerv_fp(GL_VIEWPORT, viewport);
+	Con_Printf("  draw fbo bound:    %d\n", draw_fbo);
+	Con_Printf("  read fbo bound:    %d\n", read_fbo);
+	Con_Printf("  GL_SCISSOR_TEST:   %d\n", scissor);
+	Con_Printf("  viewport:          %d,%d %dx%d\n", viewport[0], viewport[1], viewport[2], viewport[3]);
+	Con_Printf("  pp_fbo (scene):    %u\n", pp_fbo);
+	Con_Printf("  pp_width x height: %d x %d\n", pp_width, pp_height);
+	Con_Printf("  oit_width x height: %d x %d\n", oit_width, oit_height);
+	(void)cur_attach0; (void)cur_attach1;
 }
 
 GLuint GL_GetSceneFBO (void)
