@@ -904,6 +904,19 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 	glBindVertexArray_fp(0);
 
+	/* Debug mode 3: forcibly stamp pp_fbo to red AFTER the resolve.
+	 * Tests whether pp_fbo writes survive to the final display blit,
+	 * independent of the resolve shader.  If mode 3 makes red appear,
+	 * the resolve composite path works and the bug is in the resolve
+	 * shader's execution.  If mode 3 ALSO produces no red, something
+	 * after OIT_End is overwriting/clearing pp_fbo. */
+	if (r_oit_debug_no_stencil.integer >= 3)
+	{
+		glDisable_fp(GL_BLEND);
+		glClearColor_fp(1.0f, 0.0f, 0.0f, 1.0f);
+		glClear_fp(GL_COLOR_BUFFER_BIT);
+	}
+
 	/* Restore state */
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
