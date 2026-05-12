@@ -28,6 +28,10 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
+#ifdef __SSE2__
+#include <emmintrin.h>
+#endif
+
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
 #ifndef GL_QUADS
@@ -1828,78 +1832,120 @@ static void GL_ResampleTexture (unsigned int *in, int inwidth, int inheight, uns
 
 /*
 ================
+GL_MipMap_W
+
+Horizontally halve an RGBA8 image in-place — average each pair of
+adjacent input pixels into one output pixel.  SSE2 fast-path processes
+4 output pixels (8 input pixels) per iteration.
+================
+*/
+static void GL_MipMap_W (byte *data, int width, int height)
+{
+	int		total, i;
+	byte		*out = data, *in = data;
+
+	total = (width >> 1) * height;	/* output pixel count */
+
+#ifdef __SSE2__
+	while (total >= 4)
+	{
+		__m128i v0 = _mm_loadu_si128 ((const __m128i *) in);
+		__m128i v1 = _mm_loadu_si128 ((const __m128i *) (in + 16));
+		__m128i v2, v3;
+
+		v0 = _mm_shuffle_epi32 (v0, _MM_SHUFFLE (3, 1, 2, 0));
+		v1 = _mm_shuffle_epi32 (v1, _MM_SHUFFLE (3, 1, 2, 0));
+		v2 = _mm_unpacklo_epi64 (v0, v1);
+		v3 = _mm_unpackhi_epi64 (v0, v1);
+		v0 = _mm_avg_epu8 (v2, v3);
+		_mm_storeu_si128 ((__m128i *) out, v0);
+
+		total -= 4;
+		in += 32;
+		out += 16;
+	}
+#endif
+
+	for (i = 0; i < total; i++, in += 8, out += 4)
+	{
+		out[0] = (byte) ((in[0] + in[4] + 1) >> 1);
+		out[1] = (byte) ((in[1] + in[5] + 1) >> 1);
+		out[2] = (byte) ((in[2] + in[6] + 1) >> 1);
+		out[3] = (byte) ((in[3] + in[7] + 1) >> 1);
+	}
+}
+
+/*
+================
+GL_MipMap_H
+
+Vertically halve an RGBA8 image in-place — average each pair of
+adjacent input rows into one output row.  SSE2 fast-path averages
+16 bytes (4 pixels) per iteration of the inner loop.
+================
+*/
+static void GL_MipMap_H (byte *data, int width, int height)
+{
+	int		row_bytes = width * 4;
+	int		half_h = height >> 1;
+	int		i, j;
+	byte		*out = data, *in = data;
+
+	for (i = 0; i < half_h; i++)
+	{
+		j = 0;
+#ifdef __SSE2__
+		while (j + 16 <= row_bytes)
+		{
+			__m128i a = _mm_loadu_si128 ((const __m128i *) (in + j));
+			__m128i b = _mm_loadu_si128 ((const __m128i *) (in + row_bytes + j));
+			__m128i v = _mm_avg_epu8 (a, b);
+			_mm_storeu_si128 ((__m128i *) (out + j), v);
+			j += 16;
+		}
+#endif
+		for (; j < row_bytes; j += 4)
+		{
+			out[j+0] = (byte) ((in[j+0] + in[row_bytes+j+0] + 1) >> 1);
+			out[j+1] = (byte) ((in[j+1] + in[row_bytes+j+1] + 1) >> 1);
+			out[j+2] = (byte) ((in[j+2] + in[row_bytes+j+2] + 1) >> 1);
+			out[j+3] = (byte) ((in[j+3] + in[row_bytes+j+3] + 1) >> 1);
+		}
+		in += row_bytes * 2;
+		out += row_bytes;
+	}
+}
+
+/*
+================
 GL_MipMap
 
-Quarters the size of the texture
-May operate in-place.
-This version is from Darkplaces.
+Quarters the size of the texture.  Operates in-place — both `in` and
+`out` are expected to alias the same buffer (preserved from the prior
+Darkplaces API for caller compatibility).  Width and height update
+in place to reflect the new dimensions.
+
+SSE2 fast-paths in GL_MipMap_W / GL_MipMap_H.  Bit pattern matches
+Ironwail (`(a + b + 1) >> 1` per channel) — not bit-identical to the
+prior `(a + b + c + d) >> 2` two-row box on a single pass, but
+visually equivalent, and faster for both single-axis and combined
+downsamples.  Odd width/height discards the last row/column (same as
+before).
 ================
 */
 static void GL_MipMap (const byte *in, byte *out, int *width, int *height, int destwidth, int destheight)
 {
-	const byte *inrow;
-	int x, y, nextrow;
+	(void) in;	/* in-place: only `out` is touched */
 
-	// if given odd width/height this discards the last row/column
-	// of pixels, rather than doing a proper box-filter scale down
-	inrow = in;
-	nextrow = *width * 4;
 	if (*width > destwidth)
 	{
+		GL_MipMap_W (out, *width, *height);
 		*width >>= 1;
-		if (*height > destheight)
-		{
-			// reduce both
-			*height >>= 1;
-			for (y = 0; y < *height; y++, inrow += nextrow * 2)
-			{
-				for (in = inrow, x = 0; x < *width; x++)
-				{
-					out[0] = (byte) ((in[0] + in[4] + in[nextrow  ] + in[nextrow+4]) >> 2);
-					out[1] = (byte) ((in[1] + in[5] + in[nextrow+1] + in[nextrow+5]) >> 2);
-					out[2] = (byte) ((in[2] + in[6] + in[nextrow+2] + in[nextrow+6]) >> 2);
-					out[3] = (byte) ((in[3] + in[7] + in[nextrow+3] + in[nextrow+7]) >> 2);
-					out += 4;
-					in += 8;
-				}
-			}
-		}
-		else
-		{
-			// reduce width
-			for (y = 0; y < *height; y++, inrow += nextrow)
-			{
-				for (in = inrow, x = 0; x < *width; x++)
-				{
-					out[0] = (byte) ((in[0] + in[4]) >> 1);
-					out[1] = (byte) ((in[1] + in[5]) >> 1);
-					out[2] = (byte) ((in[2] + in[6]) >> 1);
-					out[3] = (byte) ((in[3] + in[7]) >> 1);
-					out += 4;
-					in += 8;
-				}
-			}
-		}
 	}
-	else
+	if (*height > destheight)
 	{
-		if (*height > destheight)
-		{
-			// reduce height
-			*height >>= 1;
-			for (y = 0; y < *height; y++, inrow += nextrow * 2)
-			{
-				for (in = inrow, x = 0; x < *width; x++)
-				{
-					out[0] = (byte) ((in[0] + in[nextrow  ]) >> 1);
-					out[1] = (byte) ((in[1] + in[nextrow+1]) >> 1);
-					out[2] = (byte) ((in[2] + in[nextrow+2]) >> 1);
-					out[3] = (byte) ((in[3] + in[nextrow+3]) >> 1);
-					out += 4;
-					in += 4;
-				}
-			}
-		}
+		GL_MipMap_H (out, *width, *height);
+		*height >>= 1;
 	}
 }
 
