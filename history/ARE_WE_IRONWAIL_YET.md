@@ -66,11 +66,11 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Post-process pipeline | ✅ | Gamma, contrast, palette, dither, HDR |
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
-| Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported. |
-| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters (>0 = match only, <0 = non-match only). Ironwail's link/target visualization (`r_showbboxes_links`, `r_showbboxes_targets`, focused-entity ray-cast highlight) not yet ported. |
-| MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 |
-| LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level |
-| Entity alpha radix sort | 🔶 | `r_alphasort` cvar is wired and uses `qsort` (gl_rmain.c:2097). Ironwail's radix sort would be faster but the count is small (≤dozens of translucent entities per frame) — qsort is microseconds either way. |
+| Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported (uhexen2-typa). |
+| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters (>0 = match only, <0 = non-match only). Ironwail's link/target visualization (`r_showbboxes_links`, `r_showbboxes_targets`, focused-entity ray-cast highlight) not yet ported (uhexen2-ykr2). |
+| MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 (uhexen2-kaa6). |
+| LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level (uhexen2-dax2). |
+| Entity alpha radix sort | 🔶 | `r_alphasort` cvar is wired and uses `qsort` (gl_rmain.c:2097). Ironwail's radix sort would be faster but the count is small (≤dozens of translucent entities per frame) — qsort is microseconds either way (uhexen2-14ih). |
 
 ## Performance / Engine
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-11, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.
+As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
