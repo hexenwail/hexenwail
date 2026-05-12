@@ -699,6 +699,11 @@ static void GL_LoadFunctionPointers (void)
 	glMultiDrawElementsIndirect_fp = (glMultiDrawElementsIndirect_f) SDL_GL_GetProcAddress("glMultiDrawElementsIndirect");
 	glDrawElementsIndirect_fp = (glDrawElementsIndirect_f) SDL_GL_GetProcAddress("glDrawElementsIndirect");
 
+	/* Image load/store + immutable storage (GL 4.2) — Hi-Z (uhexen2-xd87) */
+	glBindImageTexture_fp = (glBindImageTexture_f) SDL_GL_GetProcAddress("glBindImageTexture");
+	glTexStorage2D_fp = (glTexStorage2D_f) SDL_GL_GetProcAddress("glTexStorage2D");
+	glUniform2i_fp = (glUniform2i_f) SDL_GL_GetProcAddress("glUniform2i");
+
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
 

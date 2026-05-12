@@ -279,6 +279,12 @@ void R_Init (void)
 		extern cvar_t r_gpucull;
 		Cvar_RegisterVariable (&r_gpucull);
 	}
+#ifndef __EMSCRIPTEN__
+	{
+		extern cvar_t gl_hiz_cull;
+		Cvar_RegisterVariable (&gl_hiz_cull);
+	}
+#endif
 	Cvar_RegisterVariable (&gl_cull);
 	Cvar_RegisterVariable (&gl_smoothmodels);
 	Cvar_RegisterVariable (&gl_polyblend);

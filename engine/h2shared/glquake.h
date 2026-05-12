@@ -411,6 +411,9 @@ void R_FreeWorldCull (void);
 void R_DispatchWorldCull (void);
 void R_DrawWorldCulled (void);
 qboolean R_WorldCullAvailable (void);
+void R_BuildHiZ (void);
+void R_FreeHiZ (void);
+void R_BuildHiZForNextFrame (void);
 void GL_SetupLightmapFmt (void);
 void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr);
 

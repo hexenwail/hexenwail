@@ -57,7 +57,8 @@
 /* FBO state — scaled 3D scene */
 static GLuint	pp_fbo;		/* render target (may be multisampled) */
 static GLuint	pp_color_rb;	/* multisampled color renderbuffer (0 if no MSAA) */
-static GLuint	pp_depth_rb;
+static GLuint	pp_depth_rb;	/* multisampled depth/stencil renderbuffer (0 if no MSAA) */
+static GLuint	pp_depth_tex;	/* non-MSAA depth/stencil texture, sampler-readable for Hi-Z (uhexen2-xd87) */
 static GLuint	pp_resolve_fbo;	/* resolve target (non-multisampled, for shader blit) */
 static GLuint	pp_color_tex;	/* resolved color texture */
 static int	pp_width, pp_height;
@@ -209,6 +210,7 @@ static void PP_DeleteFBO (void)
 	if (pp_color_tex)   { glDeleteTextures_fp(1, &pp_color_tex); pp_color_tex = 0; }
 	if (pp_color_rb)    { glDeleteRenderbuffers_fp(1, &pp_color_rb); pp_color_rb = 0; }
 	if (pp_depth_rb)    { glDeleteRenderbuffers_fp(1, &pp_depth_rb); pp_depth_rb = 0; }
+	if (pp_depth_tex)   { glDeleteTextures_fp(1, &pp_depth_tex); pp_depth_tex = 0; }
 	if (pp_resolve_fbo) { glDeleteFramebuffers_fp(1, &pp_resolve_fbo); pp_resolve_fbo = 0; }
 	if (pp_fbo)         { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
 	pp_width = pp_height = pp_samples = 0;
@@ -272,7 +274,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 }
 
 /* Forward declaration — OIT FBO created after scene FBO */
-static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb);
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex);
 static void OIT_DeleteFBO (void);
 
 static qboolean PP_CreateFBO (int width, int height)
@@ -362,31 +364,39 @@ static qboolean PP_CreateFBO (int width, int height)
 			pp_width = width;
 			pp_height = height;
 			Con_DPrintf("PostProcess: %dx%d FBO with %dx MSAA\n", width, height, samples);
-			OIT_CreateFBO(width, height, pp_depth_rb);
+			OIT_CreateFBO(width, height, pp_depth_rb, 0);
 			return true;
 		}
 	}
 
-	/* non-MSAA path */
-	glGenRenderbuffers_fp(1, &pp_depth_rb);
-	glBindRenderbuffer_fp(GL_RENDERBUFFER, pp_depth_rb);
-	glRenderbufferStorage_fp(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-	glBindRenderbuffer_fp(GL_RENDERBUFFER, 0);
+	/* non-MSAA path — depth/stencil as a sampler-readable texture so the
+	 * Hi-Z compute pass (uhexen2-xd87) can read it. */
+	glGenTextures_fp(1, &pp_depth_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, pp_depth_tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0,
+			GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	/* GL_TEXTURE_COMPARE_MODE defaults to NONE so sampler2D returns the
+	 * raw depth value rather than a comparison result. */
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
 
 	glGenFramebuffers_fp(1, &pp_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 				  GL_TEXTURE_2D, pp_color_tex, 0);
-	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-				     GL_RENDERBUFFER, pp_depth_rb);
+	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+				  GL_TEXTURE_2D, pp_depth_tex, 0);
 
 	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
 
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
-		Con_Printf("PostProcess: FBO incomplete (status 0x%x, %dx%d, tex=%u, depth_rb=%u)\n",
-			   status, width, height, pp_color_tex, pp_depth_rb);
+		Con_Printf("PostProcess: FBO incomplete (status 0x%x, %dx%d, tex=%u, depth_tex=%u)\n",
+			   status, width, height, pp_color_tex, pp_depth_tex);
 		PP_DeleteFBO();
 		pp_fbo_failed = true;
 		return false;
@@ -396,7 +406,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	pp_width = width;
 	pp_height = height;
 	}  /* end color_fmt scope */
-	OIT_CreateFBO(width, height, pp_depth_rb);
+	OIT_CreateFBO(width, height, 0, pp_depth_tex);
 	return true;
 }
 
@@ -678,7 +688,7 @@ static void OIT_DeleteFBO (void)
 	oit_available = false;
 }
 
-static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex)
 {
 	GLenum status;
 	GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
@@ -701,15 +711,22 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	/* FBO with both color attachments + shared depth/stencil */
+	/* FBO with both color attachments + shared depth/stencil. The scene
+	 * FBO supplies depth as either a multisampled renderbuffer (MSAA
+	 * branch — currently dead) or a sampler-readable texture (non-MSAA,
+	 * lets Hi-Z compute read it). */
 	glGenFramebuffers_fp(1, &oit_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 				  GL_TEXTURE_2D, oit_accum_tex, 0);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
 				  GL_TEXTURE_2D, oit_revealage_tex, 0);
-	glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-				     GL_RENDERBUFFER, depth_stencil_rb);
+	if (depth_stencil_tex)
+		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+					  GL_TEXTURE_2D, depth_stencil_tex, 0);
+	else
+		glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+					     GL_RENDERBUFFER, depth_stencil_rb);
 	glDrawBuffers_fp(2, drawbufs);
 
 	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
@@ -854,6 +871,20 @@ GLuint GL_GetSceneFBO (void)
 	return pp_fbo;	/* 0 if no postprocess FBO active */
 }
 
+GLuint GL_PostProcess_GetSceneDepthTex (void)
+{
+	return pp_depth_tex;	/* 0 in the MSAA branch or when no FBO is up */
+}
+
+qboolean GL_PostProcess_GetSceneSize (int *w, int *h)
+{
+	if (!pp_initialized || !pp_fbo || pp_width <= 0 || pp_height <= 0)
+		return false;
+	if (w) *w = pp_width;
+	if (h) *h = pp_height;
+	return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
@@ -879,6 +910,7 @@ void GL_PostProcess_Init (void)
 	pp_fbo = 0;
 	pp_color_tex = 0;
 	pp_depth_rb = 0;
+	pp_depth_tex = 0;
 	pp_program = 0;
 	pp_width = pp_height = 0;
 
@@ -1170,6 +1202,12 @@ void GL_PostProcess_End3D (void)
 				      0, 0, pp_width, pp_height,
 				      GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
+
+	/* Scene depth is final and pp_depth_tex is sampler-readable: build the
+	 * Hi-Z pyramid that next frame's cull dispatch consumes (uhexen2-xd87). */
+#ifndef __EMSCRIPTEN__
+	R_BuildHiZForNextFrame();
+#endif
 
 	/* Restore native viewport */
 	glwidth = pp_saved_glwidth;
