@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 10 | 1 | 2 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
-| UX / Menus / HUD | 16 | 1 | 5 | 1 |
+| UX / Menus / HUD | 18 | 1 | 3 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **63** | **6** | **11** | **8** |
+| **TOTAL** | **65** | **6** | **9** | **8** |
 
-**Parity: 79% ported, 8% partial, 14% missing** (excluding N/A)
+**Parity: 81% ported, 8% partial, 11% missing** (excluding N/A)
 
 ---
 
@@ -111,8 +111,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Menu background style | ❌ | `scr_menubgstyle` |
 | Center-print background | ✅ | `scr_centerprintbg` (gl_screen.c:115) with menu cycle Off / Simple / Menu Box (`menu.c:2849`). Default 0 (Ironwail uses 2 since `df5219c`); Hexenwail keeps 0 to preserve stock-faithful look. |
 | Console mouse support | ❌ | Clickable links, text selection, clipboard |
-| Console notification fade | ❌ | `con_notifyfade` |
-| Console max columns | ❌ | `con_maxcols` |
+| Console notification fade | ✅ | `con_notifyfade` (default 1) — alpha ramps 1→0 over the last 1 s of `con_notifytime`. Per-quad alpha threaded through `Draw_AddCharQuad` via new `Draw_SetCharacterAlpha` setter (gl_draw.c). |
+| Console max columns | ✅ | `con_maxcols` (default 0 = no cap), menu slider in Misc/HUD submenu (`menu.c`, commit `ab108d760`) |
 | Menu search with filtering | ❌ | Live filter + match highlighting |
 | Menu live preview | ❌ | `ui_live_preview` fade-in/hold/fade-out |
 | Show speed / show time overlays | ✅ | `scr_showspeed`, `showclock` (4-state: off / game-time / wall HH:MM / wall HH:MM:SS); both toggleable from Misc/HUD submenu |

@@ -94,6 +94,7 @@ static GLuint		char_menufonttexture;
 #define MAX_CHAR_BATCH_QUADS	((GL_IMM_MAX_VERTS / 4) - 2)
 static int		char_batch_count;
 static GLuint		char_batch_tex;
+static float		char_batch_alpha = 1.0f;	/* per-quad alpha for the glyph batcher; see Draw_SetCharacterAlpha */
 
 // Crosshair texture is a 32x32 alpha map with 8 levels of alpha.
 // The format is similar to an X11 pixmap, but not the same.
@@ -752,7 +753,7 @@ static void Draw_AddCharQuad (GLuint tex, int x, int y, int w, int h,
 		char_batch_tex = tex;
 	}
 
-	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmColor4f (1, 1, 1, char_batch_alpha);
 	GL_ImmTexCoord2f (fcol, frow);
 	GL_ImmVertex2f (x, y);
 	GL_ImmTexCoord2f (fcol + xsize, frow);
@@ -762,6 +763,21 @@ static void Draw_AddCharQuad (GLuint tex, int x, int y, int w, int h,
 	GL_ImmTexCoord2f (fcol, frow + ysize);
 	GL_ImmVertex2f (x, y + h);
 	char_batch_count++;
+}
+
+/*
+================
+Draw_SetCharacterAlpha
+
+Set the per-quad alpha used by subsequent Draw_Character / Draw_String
+calls.  Callers must restore to 1.0 when done (no auto-reset).
+================
+*/
+void Draw_SetCharacterAlpha (float a)
+{
+	if (a < 0.0f) a = 0.0f;
+	else if (a > 1.0f) a = 1.0f;
+	char_batch_alpha = a;
 }
 
 /*

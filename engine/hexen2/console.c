@@ -37,6 +37,7 @@ int		con_ormask;
 
 static	cvar_t	con_notifytime = {"con_notifytime", "3", CVAR_NONE};	//seconds
 static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* center notify text horizontally */
+static	cvar_t	con_notifyfade = {"con_notifyfade", "1", CVAR_ARCHIVE};	/* fade notify lines over the last second instead of hard-cutting (Ironwail parity) */
 /* Optional cap on console line width.  0 = no cap (use full screen).
  * At 4K the natural width is ~238 cols, which is unreadable; this lets
  * the user pin a saner column count (e.g. 80, 100, 120) regardless of
@@ -225,6 +226,7 @@ void Con_Init (void)
 
 	Cvar_RegisterVariable (&con_notifytime);
 	Cvar_RegisterVariable (&con_notifycenter);
+	Cvar_RegisterVariable (&con_notifyfade);
 	Cvar_RegisterVariable (&con_maxcols);
 
 	Cmd_AddCommand ("toggleconsole", Con_ToggleConsole_f);
@@ -536,6 +538,8 @@ void Con_DrawNotify (void)
 	v = 0;
 	for (i = con->current-NUM_CON_TIMES+1; i <= con->current; i++)
 	{
+		float	alpha;
+
 		if (i < 0)
 			continue;
 		time = con_times[i % NUM_CON_TIMES];
@@ -549,6 +553,16 @@ void Con_DrawNotify (void)
 		if (scr_viewsize.integer < 100)
 			clearnotify = 0;
 		scr_copytop = 1;
+
+		/* fade out over the last second; cvar 0 disables (Ironwail parity) */
+		alpha = 1.0f;
+		if (con_notifyfade.integer)
+		{
+			float	remaining = con_notifytime.value - time;
+			if (remaining < 1.0f)
+				alpha = remaining < 0.0f ? 0.0f : remaining;
+		}
+		Draw_SetCharacterAlpha (alpha);
 
 		if (con_notifycenter.integer)
 		{
@@ -567,6 +581,7 @@ void Con_DrawNotify (void)
 
 		v += 8;
 	}
+	Draw_SetCharacterAlpha (1.0f);
 
 	if (Key_GetDest() == key_message)
 	{

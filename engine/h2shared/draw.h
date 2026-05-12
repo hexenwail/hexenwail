@@ -89,6 +89,7 @@ void Draw_MenuBackdrop (void);	/* full-screen conback for main-menu backdrop */
 #endif
 
 void Draw_Character (int x, int y, unsigned int num);
+void Draw_SetCharacterAlpha (float a);	/* per-quad alpha for Draw_Character/String; caller restores to 1 */
 void Draw_String (int x, int y, const char *str);
 void Draw_SmallCharacter (int x, int y, int num);
 void Draw_SmallString (int x, int y, const char *str);
