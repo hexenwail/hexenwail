@@ -196,6 +196,26 @@ typedef int64_t  GLint64;
 #define GL_DRAW_INDIRECT_BUFFER			0x8F3F
 #endif
 
+/* GL_ARB_shader_image_load_store (core 4.2) — image bindings used by the
+ * Hi-Z pyramid build (gl_worldcull.c).  MinGW's <GL/gl.h> ships only GL
+ * 1.1 constants, so the Windows cross-compile needs these explicitly. */
+#ifndef GL_R32F
+#define GL_R32F					0x822E
+#endif
+#ifndef GL_WRITE_ONLY
+#define GL_WRITE_ONLY				0x88B9
+#endif
+#ifndef GL_TEXTURE_FETCH_BARRIER_BIT
+#define GL_TEXTURE_FETCH_BARRIER_BIT		0x00000008
+#endif
+#ifndef GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
+#define GL_SHADER_IMAGE_ACCESS_BARRIER_BIT	0x00000020
+#endif
+
+#ifndef GL_MAX_SAMPLES
+#define GL_MAX_SAMPLES				0x8D57
+#endif
+
 /* GL_ARB_buffer_storage (core 4.4) — persistent-mapped buffers.
  * Used by gl_buffer.c streaming ring (uhexen2-8pc2). */
 #ifndef GL_MAP_PERSISTENT_BIT
