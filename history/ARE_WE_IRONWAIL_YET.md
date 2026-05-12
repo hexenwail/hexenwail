@@ -66,7 +66,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | MSAA with FBO resolve | ✅ | Multisampled scene FBO |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
 | Animated sky wind system | 🔶 | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16). Ironwail's per-skybox direction/amplitude not ported. |
-| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 wired (gl_rmain.c:3056). Ironwail's filter sub-cvars (`r_showbboxes_think`, `_health`, etc.) not ported — easy to add when needed. |
+| Bounding box debug visualization | 🔶 | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters (>0 = match only, <0 = non-match only). Ironwail's link/target visualization (`r_showbboxes_links`, `r_showbboxes_targets`, focused-entity ray-cast highlight) not yet ported. |
 | MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 |
 | LOD bias auto-scaling | ❌ | `gl_lodbias "auto"` based on FSAA level |
 | Entity alpha radix sort | 🔶 | `r_alphasort` cvar is wired and uses `qsort` (gl_rmain.c:2097). Ironwail's radix sort would be faster but the count is small (≤dozens of translucent entities per frame) — qsort is microseconds either way. |
