@@ -343,6 +343,7 @@ GL_FUNCTION_OPT(void, glDeleteBuffers, (GLsizei, const GLuint *))
 GL_FUNCTION_OPT(void, glBindBuffer, (GLenum, GLuint))
 GL_FUNCTION_OPT(void, glBufferData, (GLenum, GLsizeiptr, const void *, GLenum))
 GL_FUNCTION_OPT(void, glBufferSubData, (GLenum, GLintptr, GLsizeiptr, const void *))
+GL_FUNCTION_OPT(void, glGetBufferSubData, (GLenum, GLintptr, GLsizeiptr, void *))
 GL_FUNCTION_OPT(void, glGenVertexArrays, (GLsizei, GLuint *))
 GL_FUNCTION_OPT(void, glDeleteVertexArrays, (GLsizei, const GLuint *))
 GL_FUNCTION_OPT(void, glBindVertexArray, (GLuint))
@@ -472,6 +473,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glBindBuffer_fp			glBindBuffer
 #define glBufferData_fp			glBufferData
 #define glBufferSubData_fp		glBufferSubData
+#define glGetBufferSubData_fp		glGetBufferSubData
 #define glGenVertexArrays_fp		glGenVertexArrays
 #define glDeleteVertexArrays_fp		glDeleteVertexArrays
 #define glBindVertexArray_fp		glBindVertexArray

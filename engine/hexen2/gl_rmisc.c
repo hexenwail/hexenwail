@@ -282,7 +282,9 @@ void R_Init (void)
 #ifndef __EMSCRIPTEN__
 	{
 		extern cvar_t gl_hiz_cull;
+		extern cvar_t gl_hiz_stats;
 		Cvar_RegisterVariable (&gl_hiz_cull);
+		Cvar_RegisterVariable (&gl_hiz_stats);
 	}
 #endif
 	Cvar_RegisterVariable (&gl_cull);

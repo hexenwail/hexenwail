@@ -78,6 +78,15 @@ static int	cull_total_indices;	/* total index count across all buckets */
  * the 3D pass; the cull dispatch samples it via binding 7.
  */
 cvar_t	gl_hiz_cull = {"gl_hiz_cull", "0", CVAR_ARCHIVE};
+/* Hi-Z cull-rate stats (uhexen2-cyu0).  N = print every N frames; 0 = off.
+ * Enables 7 atomicAdd counters inside cull_mark + glGetBufferSubData
+ * readback.  Used to validate the "≥10% post-frustum cull rate" gate
+ * before flipping gl_hiz_cull default to 1.  Per-frame readback stalls
+ * the CPU — throttle with N >= 30 for normal use. */
+cvar_t	gl_hiz_stats = {"gl_hiz_stats", "0", CVAR_NONE};
+static GLuint	cull_stats_ssbo;	/* binding 7: stats[8] uints */
+static GLint	cull_mark_u_stats_enable;
+static int	hiz_stats_frame_counter;
 
 static GLuint	hiz_pyramid_tex;	/* binding 7 sampler in cull_mark */
 static GLuint	hiz_copy_prog;		/* copy scene depth -> mip 0 */
@@ -192,6 +201,13 @@ static const char cull_mark_src[] =
 	"layout(std430, binding = 6) buffer DedupBuffer {\n"
 	"    int dedup[];\n"  /* per-surface framecount for dedup */
 	"};\n"
+	"/* Stats counters for cull-rate validation (uhexen2-cyu0).  Indices:\n"
+	" * 0 total, 1 pvs_rej, 2 flags_rej, 3 frust_rej, 4 hiz_rej, 5 accepted,\n"
+	" * 6 dedup_rej, 7 reserved.  Writes gated by u_stats_enable to keep\n"
+	" * cost zero in production. */\n"
+	"layout(std430, binding = 7) buffer StatsBuffer {\n"
+	"    uint stats[8];\n"
+	"};\n"
 	"\n"
 	"/* Hi-Z pyramid bound to texture unit 1.  Under reversed-Z the\n"
 	" * pyramid stores min(depth) per tile (= farthest fragment), under\n"
@@ -209,28 +225,33 @@ static const char cull_mark_src[] =
 	"uniform int u_hiz_mip_count;\n"
 	"uniform int u_hiz_enable;\n"
 	"uniform int u_reverse_z;\n"
+	"uniform int u_stats_enable;\n"
+	"\n"
+	"#define STAT_INC(i) do { if (u_stats_enable != 0) atomicAdd(stats[i], 1u); } while(false)\n"
 	"\n"
 	"void main() {\n"
 	"    uint id = gl_GlobalInvocationID.x;\n"
 	"    if (id >= uint(u_num_marksurfs)) return;\n"
+	"    STAT_INC(0);\n"
 	"\n"
 	"    MarkSurf ms = marksurfs[id];\n"
 	"    int leaf = ms.leaf_idx;\n"
 	"    int si = ms.surf_idx;\n"
 	"\n"
 	"    /* PVS test */\n"
-	"    if ((vis[leaf >> 5] & (1u << (leaf & 31))) == 0u)\n"
-	"        return;\n"
+	"    if ((vis[leaf >> 5] & (1u << (leaf & 31))) == 0u) {\n"
+	"        STAT_INC(1); return;\n"
+	"    }\n"
 	"\n"
 	"    Surface s = surfaces[si];\n"
 	"\n"
 	"    /* Skip non-lightmapped and special surfaces:\n"
 	"     * sky(0x4) turb(0x10) drawtiled(0x20) drawblack(0x100)\n"
 	"     * underwater(0x200) fence(0x800) */\n"
-	"    if ((s.flags & 0xB34) != 0) return;\n"
+	"    if ((s.flags & 0xB34) != 0) { STAT_INC(2); return; }\n"
 	"\n"
 	"    /* Skip surfaces with no VBO data */\n"
-	"    if (s.numindices <= 0) return;\n"
+	"    if (s.numindices <= 0) { STAT_INC(2); return; }\n"
 	"\n"
 	"    /* Backface cull — disabled to avoid popping at grazing angles.\n"
 	"     * GPU rasterizer handles backfaces via winding order. */\n"
@@ -253,7 +274,7 @@ static const char cull_mark_src[] =
 	"            fn.x >= 0.0 ? s.maxs.x : s.mins.x,\n"
 	"            fn.y >= 0.0 ? s.maxs.y : s.mins.y,\n"
 	"            fn.z >= 0.0 ? s.maxs.z : s.mins.z);\n"
-	"        if (dot(fn, pv) + fd < -FSLACK) return;\n"
+	"        if (dot(fn, pv) + fd < -FSLACK) { STAT_INC(3); return; }\n"
 	"    }\n"
 	"\n"
 	"    /* Hi-Z occlusion test against previous-frame pyramid.\n"
@@ -305,10 +326,10 @@ static const char cull_mark_src[] =
 	"                if (u_reverse_z != 0) {\n"
 	"                    occ = min(min(s0,s1), min(s2,s3));\n"
 	"                    /* AABB's nearest depth < occluder's min => fully behind */\n"
-	"                    if (dnear < occ) return;\n"
+	"                    if (dnear < occ) { STAT_INC(4); return; }\n"
 	"                } else {\n"
 	"                    occ = max(max(s0,s1), max(s2,s3));\n"
-	"                    if (dnear > occ) return;\n"
+	"                    if (dnear > occ) { STAT_INC(4); return; }\n"
 	"                }\n"
 	"            }\n"
 	"        }\n"
@@ -318,7 +339,9 @@ static const char cull_mark_src[] =
 	"     * atomicExchange the framecount — if it was already this\n"
 	"     * frame's value, another thread already emitted it. */\n"
 	"    int old = atomicExchange(dedup[si], u_framecount);\n"
-	"    if (old == u_framecount) return;\n"
+	"    if (old == u_framecount) { STAT_INC(6); return; }\n"
+	"\n"
+	"    STAT_INC(5);\n"
 	"\n"
 	"    /* Bounds check texture bucket to prevent out-of-bounds writes */\n"
 	"    if (s.tex_bucket >= uint(u_num_buckets)) return;\n"
@@ -487,6 +510,7 @@ void R_BuildWorldCull (void)
 	cull_mark_u_hiz_mip_count = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_mip_count");
 	cull_mark_u_hiz_enable = glGetUniformLocation_fp(cull_mark_prog, "u_hiz_enable");
 	cull_mark_u_reverse_z = glGetUniformLocation_fp(cull_mark_prog, "u_reverse_z");
+	cull_mark_u_stats_enable = glGetUniformLocation_fp(cull_mark_prog, "u_stats_enable");
 
 	cull_num_surfs = m->numsurfaces;
 	cull_num_leaves = m->numleafs;
@@ -708,6 +732,15 @@ void R_BuildWorldCull (void)
 		free(zeros);
 	}
 
+	/* Stats buffer: 8 uints, zeroed each dispatch when stats enabled */
+	{
+		unsigned int zeros[8] = {0};
+		glGenBuffers_fp(1, &cull_stats_ssbo);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				sizeof(zeros), zeros, GL_DYNAMIC_DRAW);
+	}
+
 	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
 	cull_initialized = true;
@@ -728,6 +761,7 @@ void R_FreeWorldCull (void)
 	if (cull_src_ibo) { glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
 	if (cull_dst_ibo) { glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
 	if (cull_dedup_ssbo) { glDeleteBuffers_fp(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
+	if (cull_stats_ssbo) { glDeleteBuffers_fp(1, &cull_stats_ssbo); cull_stats_ssbo = 0; }
 	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
@@ -992,9 +1026,55 @@ void R_DispatchWorldCull (void)
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 5, cull_dst_ibo);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 6, cull_dedup_ssbo);
 
+	/* Stats counters (uhexen2-cyu0).  Bind always; gating happens via
+	 * u_stats_enable in the shader so we don't pay for atomicAdds when
+	 * gl_hiz_stats is 0.  When enabled, zero the buffer before dispatch
+	 * so the readback sees only this frame's contributions. */
+	{
+		qboolean stats_on = (gl_hiz_stats.integer > 0) && cull_stats_ssbo;
+		if (stats_on)
+		{
+			unsigned int zeros[8] = {0};
+			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+			glBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0, sizeof(zeros), zeros);
+		}
+		if (cull_mark_u_stats_enable >= 0)
+			glUniform1i_fp(cull_mark_u_stats_enable, stats_on ? 1 : 0);
+		glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 7, cull_stats_ssbo);
+	}
+
 	glDispatchCompute_fp((cull_num_marksurfs + 63) / 64, 1, 1);
 	glMemoryBarrier_fp(GL_COMMAND_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT |
 			   GL_SHADER_STORAGE_BARRIER_BIT);
+
+	/* Gated stats readback: only every gl_hiz_stats frames, so the
+	 * implied glGetBufferSubData stall amortizes.  Print to console;
+	 * caller decides whether to leave running or set 0 after reading. */
+	if (gl_hiz_stats.integer > 0 && cull_stats_ssbo)
+	{
+		hiz_stats_frame_counter++;
+		if (hiz_stats_frame_counter >= gl_hiz_stats.integer)
+		{
+			unsigned int counts[8] = {0};
+			unsigned int post;
+			hiz_stats_frame_counter = 0;
+			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_stats_ssbo);
+			glGetBufferSubData_fp(GL_SHADER_STORAGE_BUFFER, 0,
+					      sizeof(counts), counts);
+			post = counts[4] + counts[5] + counts[6];
+			Con_Printf("hiz_stats: total=%u pvs=%u flags=%u frust=%u "
+				   "hiz=%u accepted=%u dedup=%u\n",
+				   counts[0], counts[1], counts[2], counts[3],
+				   counts[4], counts[5], counts[6]);
+			if (post > 0)
+				Con_Printf("  hiz cull rate = %.1f%% of post-frustum "
+					   "(%u / %u; gate %.1f%%)\n",
+					   100.0 * counts[4] / (double)post,
+					   counts[4], post, 10.0);
+			else
+				Con_Printf("  hiz cull rate = (no post-frustum surfaces)\n");
+		}
+	}
 
 	glUseProgram_fp(0);
 }
