@@ -874,6 +874,30 @@ qboolean OIT_InPass (void)
 	return oit_in_pass;
 }
 
+/* Console diagnostic — type `r_oit_status` in-game to verify the OIT
+ * pipeline state without hunting through boot scrollback. */
+static void OIT_Status_f (void)
+{
+	Con_Printf("OIT status:\n");
+	Con_Printf("  r_oit cvar:        %d\n", r_oit.integer);
+	Con_Printf("  glBlendFunci_fp:   %s\n", glBlendFunci_fp ? "loaded" : "MISSING (driver lacks ARB_draw_buffers_blend)");
+	Con_Printf("  oit_available:     %d (FBO + resolve shader)\n", (int)oit_available);
+	Con_Printf("  oit_fbo:           %u\n", oit_fbo);
+	Con_Printf("  oit_accum_tex:     %u\n", oit_accum_tex);
+	Con_Printf("  oit_revealage_tex: %u\n", oit_revealage_tex);
+	Con_Printf("  oit_resolve_prog:  %u\n", oit_resolve_prog);
+	Con_Printf("  OIT_Active():      %d\n", (int)OIT_Active());
+	Con_Printf("  particle_oit prog: %u  %s\n",
+		   gl_shader_particle_oit.program,
+		   gl_shader_particle_oit.program ? "" : "<-- FAILED, particles hidden under r_oit=1");
+	Con_Printf("  world_oit prog:    %u  %s\n",
+		   gl_shader_world_oit.program,
+		   gl_shader_world_oit.program ? "" : "<-- FAILED");
+	Con_Printf("  alias_oit prog:    %u  %s\n",
+		   gl_shader_alias_oit.program,
+		   gl_shader_alias_oit.program ? "" : "<-- FAILED");
+}
+
 GLuint GL_GetSceneFBO (void)
 {
 	return pp_fbo;	/* 0 if no postprocess FBO active */
@@ -905,6 +929,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
+	Cmd_AddCommand("r_oit_status", OIT_Status_f);
 	/* Force-override any saved r_oit=1 from previous configs. The OIT
 	 * path needs every translucent draw (sprites, particles, brushmodel,
 	 * water) to use an OIT-aware shader; only the alias path has one
