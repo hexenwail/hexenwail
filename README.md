@@ -44,6 +44,7 @@ Planned:
 - Fence textures, water tint options, glow effects with fog attenuation
 - Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins
 - Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items)
+- MD3 model format support (Quake 3 models with GPU-compressed vertex decoding)
 - External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
 - Physics/render decoupling with entity and lightstyle interpolation
 - FOV slider, FPS limiter, HUD modes (Full/Mini/Off/Clean)

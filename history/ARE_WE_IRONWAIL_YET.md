@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-12 (scorecard header recount)
+Last updated: 2026-05-12 (MD3 implementation complete)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,17 +12,17 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 12 | 0 | 2 | 0 |
-| Rendering — Visual/Shading | 21 | 0 | 1 | 0 |
+| Rendering — GPU Pipeline | 12 | 0 | 1 | 0 |
+| Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
 | UX / Menus / HUD | 23 | 0 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **76** | **1** | **6** | **8** |
+| **TOTAL** | **77** | **1** | **5** | **8** |
 
-**Parity: 92% ported, 1% partial, 7% missing** (excluding N/A)
+**Parity: 94% ported, 1% partial, 5% missing** (excluding N/A)
 
 ---
 
@@ -68,7 +68,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
 | Animated sky wind system | ✅ | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16) plus per-skybox wind via Ironwail-format `gfx/env/<name>wind.cfg` (`skywind dist yaw period pitch`) — parsed by `Sky_LoadWindCfg`, triangle-wave phase oscillation via `Sky_UpdateWind`, scaled by global `r_skywind` (default 1), pushed to `u_wind` on `gl_shader_sky` (uhexen2-typa). |
 | Bounding box debug visualization | ✅ | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters + `r_showbboxes_targets` target/targetname highlighting + `r_showbboxes_links` directed reference lines (green = focused → X via QC entity-typed field, red = X → focused).  Center-ray pick → focused entity drawn in white; `health > 0` entities tint red.  uhexen2-4ej9 added `ED_NumFieldDefs` / `ED_FieldDefAt` to `pr_edict.c` so the renderer can walk `pr_fielddefs` directly. |
-| MD3 model support | ❌ | GPU-compressed 8-byte vertex decoding; Ironwail landed this in 2025-10 (commit `f63d787`) with continued refinements through 2026-01 (uhexen2-kaa6). |
+| MD3 model support | ✅ | GPU-compressed 8-byte vertex decoding (Ironwail parity, commits f63d787+a65a88e). Ported 2026-05-12: Phase 1–5 complete (loader, GPU upload path, shader decode). Supports MD3 animation frames and multiple surfaces per model. (uhexen2-f2d3, uhexen2-kaa6 closed). |
 | LOD bias auto-scaling | ✅ | `gl_lodbias` with `"auto"` mode — derives bias from active MSAA sample count (uhexen2-dax2, `e40a74d6c`). |
 | Entity alpha radix sort | ✅ | `r_alphasort` uses a 4-pass LSD radix sort over the IEEE-754 bit pattern of the squared distance (`R_AlphaSortRadix` in `gl_rmain.c`). Bits are inverted so the ascending unsigned sort yields descending output directly. Stable, O(n); matches Ironwail. |
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).
+As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).  Third re-sync 2026-05-12 (evening): closed `f2d3` (MD3 import, Phase 1–5 complete: commits 2fcb66eb2 through 9186fa700) and `kaa6` (duplicate tracking). Scorecard updated: 77/1/5/8 (MD3 moved from ❌ to ✅, category Rendering—Visual/Shading now 22✅/0🔶/0❌). Parity bumped to 94%.
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -191,7 +191,8 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ### P3 — Low
 1. **Console mouse support** — clickable links, selection
 2. **IQM skeletal models** — future mod support
-3. **MD3 model support** — future mod support
+
+*MD3 model support completed 2026-05-12 (uhexen2-f2d3, uhexen2-kaa6).*
 
 ---
 
