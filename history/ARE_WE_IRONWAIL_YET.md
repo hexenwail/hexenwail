@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-12 (MD3 implementation complete)
+Last updated: 2026-05-12 (Unicode path support added to scorecard)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -14,15 +14,15 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 12 | 0 | 1 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
-| Performance / Engine | 7 | 1 | 2 | 1 |
+| Performance / Engine | 7 | 1 | 1 | 1 |
 | UX / Menus / HUD | 23 | 0 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **77** | **1** | **5** | **8** |
+| **TOTAL** | **78** | **1** | **4** | **8** |
 
-**Parity: 94% ported, 1% partial, 5% missing** (excluding N/A)
+**Parity: 95% ported, 1% partial, 4% missing** (excluding N/A)
 
 ---
 
@@ -86,7 +86,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Faster map loading | 🔶 | Lightmap atlas yes; VBO build optimizations partial |
 | Async main-thread task queue | ❌ | Non-blocking parallel work dispatch |
 | Intelligent autosave system | ➖ | Hexen II saves do not map cleanly to Ironwail's health/secret/teleport trigger heuristics |
-| Unicode path support | ❌ | Non-ASCII directory names |
+| Unicode path support | ✅ | UTF-8 to UTF-16 conversion on Windows (0aa7d3595); POSIX unchanged on Linux. Supports cyrillic, accented Latin, CJK directory names. (uhexen2-ogmq closed). |
 
 ## UX / Menus / HUD
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).  Third re-sync 2026-05-12 (evening): closed `f2d3` (MD3 import, Phase 1–5 complete: commits 2fcb66eb2 through 9186fa700) and `kaa6` (duplicate tracking). Scorecard updated: 77/1/5/8 (MD3 moved from ❌ to ✅, category Rendering—Visual/Shading now 22✅/0🔶/0❌). Parity bumped to 94%.
+As of 2026-05-12, every Missing (❌) and Partial (🔶) item in the tables above has a tracking bead.  The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list.  Re-audited 2026-05-12 (commits `ec833c6ef` parity update, plus 4 new beads filling 2 missing rows and 2 partial-state follow-ups: uhexen2-dax2 LOD bias auto, uhexen2-14ih radix sort, uhexen2-typa per-skybox wind, uhexen2-ykr2 bbox link/target viz).  Re-synced same day: `dax2`/`14ih`/`ykr2`/`kcoq`/`hp6b`/`9s31`/`w169` closed; ykr2 spun off `uhexen2-4ej9` for the remaining `r_showbboxes_links` work (keeps row 🔶); umbrella description refreshed.  Second re-sync 2026-05-12 (scorecard header recount): closed `typa` (per-skybox wind, `4cc541f8f`), `4ej9` (bbox links, `3065ef0bb`), `rawq` (menu search, `ba91b2319`), `8pzr` (Hi-Z default flip, `f75965160`) — all four rows already ✅ in the body but the header counts and Priority Shortlist had not been updated.  Scorecard header corrected to match actual row tallies (76/1/6/8 replacing stale 73/3/4/8).  Third re-sync 2026-05-12 (evening): closed `f2d3` (MD3 import, Phase 1–5 complete: commits 2fcb66eb2 through 9186fa700) and `kaa6` (duplicate tracking). Scorecard updated: 77/1/5/8 (MD3 moved from ❌ to ✅, category Rendering—Visual/Shading now 22✅/0🔶/0❌). Parity bumped to 94%.  Fourth re-sync 2026-05-12 (late): discovered Unicode path support already completed (commit 0aa7d3595, bead `ogmq` closed). Row updated from ❌ to ✅. Scorecard corrected: 78/1/4/8 (Performance/Engine now 7✅/1🔶/1❌). Parity bumped to 95%.
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
