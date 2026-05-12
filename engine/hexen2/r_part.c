@@ -1456,8 +1456,14 @@ void R_DrawParticles (void)
     VectorScale(vright, 1.5, r_pright);
 
     {
-        glprogram_t *prog = OIT_InPass() ? &gl_shader_particle_oit
-                                         : &gl_shader_particle;
+        /* Fall back to the non-OIT shader if the OIT variant didn't link
+         * (compile/link errors print at startup as "particle_oit: FAILED").
+         * Without this, glUseProgram(0) executes per particle draw — the
+         * MRT WBOIT outputs never get written and trails are invisible
+         * even though the OIT pass is otherwise live (uhexen2-a0hp). */
+        glprogram_t *prog = (OIT_InPass() && gl_shader_particle_oit.program)
+                          ? &gl_shader_particle_oit
+                          : &gl_shader_particle;
 
     if (square)
     {
