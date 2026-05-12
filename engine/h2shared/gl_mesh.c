@@ -506,21 +506,32 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 		vert_idx += count;
 	}
 
-	/* Pack all pose vertex data: trivertx_t → uint (v[0] | v[1]<<8 | v[2]<<16 | ni<<24) */
-	pose_packed = (unsigned int *) Hunk_AllocName(
-		hdr->numposes * hdr->poseverts * sizeof(unsigned int), "gpupose");
-	pv = (trivertx_t *)((byte *)hdr + hdr->posedata);
-	for (i = 0; i < hdr->numposes * hdr->poseverts; i++)
+	/* Pack all pose vertex data: format depends on poseverttype */
+	if (hdr->poseverttype == PV_MD3)
 	{
-		pose_packed[i] = (unsigned int)pv[i].v[0]
-			       | ((unsigned int)pv[i].v[1] << 8)
-			       | ((unsigned int)pv[i].v[2] << 16)
-			       | ((unsigned int)pv[i].lightnormalindex << 24);
+		/* MD3: 8-byte format (uint16_t xyz[3] + uint8_t normal[2]) — no packing needed */
+		/* TODO: Phase 3 will handle MD3 vertex upload to separate SSBO */
+		pose_packed = NULL;
+	}
+	else
+	{
+		/* PV_QUAKE1: trivertx_t → uint (v[0] | v[1]<<8 | v[2]<<16 | ni<<24) */
+		pose_packed = (unsigned int *) Hunk_AllocName(
+			hdr->numposes * hdr->poseverts * sizeof(unsigned int), "gpupose");
+		pv = (trivertx_t *)((byte *)hdr + hdr->posedata);
+		for (i = 0; i < hdr->numposes * hdr->poseverts; i++)
+		{
+			pose_packed[i] = (unsigned int)pv[i].v[0]
+				       | ((unsigned int)pv[i].v[1] << 8)
+				       | ((unsigned int)pv[i].v[2] << 16)
+				       | ((unsigned int)pv[i].lightnormalindex << 24);
+		}
 	}
 
 	/* Create GPU objects */
 	gm = &alias_gpu_meshes[num_alias_gpu_meshes];
 	memset(gm, 0, sizeof(*gm));
+	gm->poseverttype = hdr->poseverttype;
 
 	glGenVertexArrays_fp(1, &gm->vao);
 	glBindVertexArray_fp(gm->vao);
@@ -541,28 +552,47 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 
 	glBindVertexArray_fp(0);
 
+	/* Pose data upload: format-dependent path */
+	if (hdr->poseverttype == PV_MD3)
+	{
+		/* TODO: Phase 3 MD3 SSBO upload
+		 * Upload md3Vertex_t data to separate SSBO (8 bytes per vertex)
+		 * MD3 data is in hdr->posedata, packs as short[3] + ubyte[2]
+		 */
 #ifndef __EMSCRIPTEN__
-	/* Pose SSBO (GL 4.3 path) */
-	glGenBuffers_fp(1, &gm->ssbo_pose);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
-	glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
-			hdr->numposes * hdr->poseverts * sizeof(unsigned int),
-			pose_packed, GL_STATIC_DRAW);
-	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+		glGenBuffers_fp(1, &gm->ssbo_pose_md3);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose_md3);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				hdr->numposes * hdr->poseverts * sizeof(md3Vertex_t),
+				(byte *)hdr + hdr->posedata, GL_STATIC_DRAW);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+#endif
+	}
+	else
+	{
+		/* PV_QUAKE1: standard path */
+#ifndef __EMSCRIPTEN__
+		glGenBuffers_fp(1, &gm->ssbo_pose);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				hdr->numposes * hdr->poseverts * sizeof(unsigned int),
+				pose_packed, GL_STATIC_DRAW);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 #endif
 
-	/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.
-	 * Each texel packs one trivertx_t as: v[0] | v[1]<<8 | v[2]<<16 | ni<<24 */
-	glGenTextures_fp(1, &gm->tex_pose);
-	glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R32UI,
-			hdr->poseverts, hdr->numposes, 0,
-			GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+		/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.
+		 * Each texel packs one trivertx_t as: v[0] | v[1]<<8 | v[2]<<16 | ni<<24 */
+		glGenTextures_fp(1, &gm->tex_pose);
+		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R32UI,
+				hdr->poseverts, hdr->numposes, 0,
+				GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
+		glBindTexture_fp(GL_TEXTURE_2D, 0);
+	}
 
 	gm->num_indices = vi;
 	gm->poseverts = hdr->poseverts;

@@ -425,11 +425,13 @@ typedef struct {
 	GLuint	vao;		/* VAO for this model */
 	GLuint	vbo_tc;		/* static texcoord VBO */
 	GLuint	ibo;		/* index buffer (triangulated) */
-	GLuint	ssbo_pose;	/* all poses' trivertx_t data (GL 4.3 only) */
-	GLuint	tex_pose;	/* pose data as R32UI texture (ES 3.0 compatible) */
+	GLuint	ssbo_pose;	/* all poses' trivertx_t data (GL 4.3, PV_QUAKE1) */
+	GLuint	ssbo_pose_md3;	/* all poses' md3Vertex_t data (GL 4.3, PV_MD3) */
+	GLuint	tex_pose;	/* pose data as R32UI texture (ES 3.0 compatible, PV_QUAKE1) */
 	int	num_indices;	/* total triangle indices */
 	int	poseverts;	/* verts per pose (for shader indexing) */
 	int	numposes;	/* total pose count */
+	poseverttype_t poseverttype;	/* PV_QUAKE1 or PV_MD3 */
 	qboolean valid;		/* true if GPU data was created successfully */
 } alias_gpu_mesh_t;
 
