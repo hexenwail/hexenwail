@@ -1341,6 +1341,15 @@ void IN_SendKeyEvents (void)
 					Key_Event(K_MOUSE1, event.button.down);
 				break;
 			}
+			/* In console mode, route mouse to console */
+			if (Key_GetDest() == key_console && event.button.button == 1)
+			{
+				float mx, my;
+				SDL_GetMouseState(&mx, &my);
+				Con_MouseMove((int)mx, (int)my);
+				con_mouse_button_down = event.button.down;
+				break;
+			}
 			if (!mouseactive || in_mode_set)
 				break;
 			if (event.button.button < 1 ||
@@ -1401,6 +1410,14 @@ void IN_SendKeyEvents (void)
 			break;
 
 		case SDL_EVENT_MOUSE_MOTION:
+			if (Key_GetDest() == key_console)
+			{
+				float mx, my;
+				SDL_GetMouseState(&mx, &my);
+				Con_MouseMove((int)mx, (int)my);
+			}
+			break;
+
 		case SDL_EVENT_GAMEPAD_AXIS_MOTION:
 			break;
 

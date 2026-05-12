@@ -1670,6 +1670,28 @@ void Draw_FadeScreen (void)
 	Sbar_Changed();
 }
 
+/*
+================
+Draw_FillAlpha
+Draws a filled rectangle with color and alpha
+================
+*/
+void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, float a)
+{
+	Draw_FlushCharBatch ();
+	glEnable_fp (GL_BLEND);
+
+	GL_ImmBegin();
+	GL_ImmColor4f (r, g, b, a);
+	GL_ImmVertex2f (x, y);
+	GL_ImmVertex2f (x + w, y);
+	GL_ImmVertex2f (x + w, y + h);
+	GL_ImmVertex2f (x, y + h);
+	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
+
+	glDisable_fp (GL_BLEND);
+}
+
 //=============================================================================
 
 /*

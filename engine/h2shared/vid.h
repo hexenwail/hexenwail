@@ -45,6 +45,14 @@ typedef enum
 	MS_UNINIT
 } modestate_t;
 
+typedef enum
+{
+	MCURSOR_DEFAULT = 0,
+	MCURSOR_IBEAM,
+	MCURSOR_HAND,
+	MCURSOR_COUNT
+} mousecursor_t;
+
 #define MODE_WINDOWED		0
 #define NO_MODE			(MODE_WINDOWED - 1)
 #define MODE_FULLSCREEN_DEFAULT	(MODE_WINDOWED + 3)
@@ -158,6 +166,8 @@ void VID_MenuAdjustAnisotropy (int dir);
 qboolean VID_HasMouseOrInputFocus (void);
 qboolean VID_IsMinimized (void);
 struct SDL_Window *VID_GetWindow (void);
+void VID_InitMouseCursors (void);
+void VID_SetMouseCursor (mousecursor_t cursor);
 #endif
 #if !defined(PLATFORM_WINDOWS)
 #define	msg_suppress_1		false

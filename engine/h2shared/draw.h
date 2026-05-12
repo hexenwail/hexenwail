@@ -83,6 +83,7 @@ void Draw_TileClear (int x, int y, int w, int h);
 void Draw_Fill (int x, int y, int w, int h, int c);
 void Draw_FadeScreen (void);
 #if defined(GLQUAKE)
+void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, float a);
 void Draw_MenuBackdrop (void);	/* full-screen conback for main-menu backdrop */
 #else
 #define Draw_MenuBackdrop()
