@@ -85,6 +85,28 @@ void GL_BindBuffer (GLenum target, GLuint buffer)
 }
 #define GL_BindBufferCached GL_BindBuffer
 
+/* Force a glBindBuffer even when the cache thinks it's already bound, and
+ * sync the cache afterward.  Use in correctness-critical paths (unmap,
+ * delete) where a desynced cache caused by a sibling code path's raw
+ * glBindBuffer_fp would otherwise route the next op to the wrong buffer.
+ *
+ * Many setup paths in worldcull/mesh/shader/particles still do raw binds
+ * outside this wrapper.  Until those are migrated, defensively re-bind
+ * here so we never glUnmapBuffer the wrong buffer.  uhexen2-of7g. */
+static void GL_BindBufferForce (GLenum target, GLuint buffer)
+{
+	switch (target)
+	{
+	case GL_ARRAY_BUFFER:		current_array_buffer		= buffer; break;
+	case GL_ELEMENT_ARRAY_BUFFER:	current_element_array_buffer	= buffer; break;
+	case GL_SHADER_STORAGE_BUFFER:	current_shader_storage_buffer	= buffer; break;
+	case GL_UNIFORM_BUFFER:		current_uniform_buffer		= buffer; break;
+	case GL_DRAW_INDIRECT_BUFFER:	current_draw_indirect_buffer	= buffer; break;
+	default: break;
+	}
+	glBindBuffer_fp (target, buffer);
+}
+
 void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size)
 {
@@ -235,8 +257,8 @@ static void GL_AllocFrameHostBuffers (void)
 		{
 			if (frame->host_ptr)
 			{
-				GL_BindBufferCached (GL_SHADER_STORAGE_BUFFER,
-						     frame->host_buffer);
+				GL_BindBufferForce (GL_SHADER_STORAGE_BUFFER,
+						    frame->host_buffer);
 				glUnmapBuffer_fp (GL_SHADER_STORAGE_BUFFER);
 				frame->host_ptr = NULL;
 			}
@@ -247,7 +269,7 @@ static void GL_AllocFrameHostBuffers (void)
 		}
 
 		glGenBuffers_fp (1, &frame->host_buffer);
-		GL_BindBufferCached (GL_SHADER_STORAGE_BUFFER, frame->host_buffer);
+		GL_BindBufferForce (GL_SHADER_STORAGE_BUFFER, frame->host_buffer);
 
 		if (gl_buffer_storage_able)
 		{
@@ -301,8 +323,8 @@ void GL_DeleteFrameResources (void)
 
 		if (frame->host_ptr)
 		{
-			GL_BindBufferCached (GL_SHADER_STORAGE_BUFFER,
-					     frame->host_buffer);
+			GL_BindBufferForce (GL_SHADER_STORAGE_BUFFER,
+					    frame->host_buffer);
 			glUnmapBuffer_fp (GL_SHADER_STORAGE_BUFFER);
 			frame->host_ptr = NULL;
 		}
