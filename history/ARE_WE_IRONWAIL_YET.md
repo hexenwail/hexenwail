@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 10 | 1 | 2 | 0 |
 | Rendering — Visual/Shading | 17 | 3 | 2 | 0 |
 | Performance / Engine | 7 | 1 | 2 | 1 |
-| UX / Menus / HUD | 18 | 1 | 3 | 1 |
+| UX / Menus / HUD | 19 | 1 | 2 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **65** | **6** | **9** | **8** |
+| **TOTAL** | **66** | **6** | **8** | **8** |
 
-**Parity: 81% ported, 8% partial, 11% missing** (excluding N/A)
+**Parity: 83% ported, 8% partial, 10% missing** (excluding N/A)
 
 ---
 
@@ -108,7 +108,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Crosshair scaling | ✅ | `scr_crosshairscale` — `CANVAS_CROSSHAIR`, slider in Misc/HUD submenu |
 | Console alpha | ✅ | `scr_conalpha` — caps `Draw_ConsoleBackground` alpha, slider in Misc/HUD submenu |
 | Console brightness | ✅ | `scr_conbrightness` — multiplies conback RGB, slider in Misc/HUD submenu |
-| Menu background style | ❌ | `scr_menubgstyle` |
+| Menu background style | ✅ | `scr_menubgstyle` (default 1) — 0=off / 1=simple dim (Draw_FadeScreen) / 2=dim+translucent backdrop quad over the menu-item area in CANVAS_MENU. Display submenu cycles Off/Simple/Menu Box. Replaces legacy `scr_menufade`. |
 | Center-print background | ✅ | `scr_centerprintbg` (gl_screen.c:115) with menu cycle Off / Simple / Menu Box (`menu.c:2849`). Default 0 (Ironwail uses 2 since `df5219c`); Hexenwail keeps 0 to preserve stock-faithful look. |
 | Console mouse support | ❌ | Clickable links, text selection, clipboard |
 | Console notification fade | ✅ | `con_notifyfade` (default 1) — alpha ramps 1→0 over the last 1 s of `con_notifytime`. Per-quad alpha threaded through `Draw_AddCharQuad` via new `Draw_SetCharacterAlpha` setter (gl_draw.c). |

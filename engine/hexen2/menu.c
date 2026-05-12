@@ -24,6 +24,8 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "gl_postprocess.h"
+#include "gl_vbo.h"
+#include "gl_shader.h"
 #include "sbar.h"
 #include "sdl_inc.h"
 
@@ -2104,7 +2106,7 @@ static void M_Display_AdjustSliders (int dir)
 	Cvar_SetValue ("gl_flashblend", 0); \
 	Cvar_SetValue ("r_dynamic", 1); \
 	Cvar_SetValue ("gl_torch_dlight", 1); \
-	Cvar_SetValue ("scr_menufade", 0);
+	Cvar_SetValue ("scr_menubgstyle", 0);
 
 		if (preset == 1)	/* Crunchy — 25% scale, maximum lo-fi */
 		{
@@ -2301,8 +2303,13 @@ static void M_Display_AdjustSliders (int dir)
 		Cvar_Set ("showfps", Cvar_VariableValue("showfps") ? "0" : "1");
 		break;
 	case DISP_MENUFADE:
-		Cvar_Set ("scr_menufade", Cvar_VariableValue("scr_menufade") ? "0" : "1");
+	{
+		int val = scr_menubgstyle.integer + dir;
+		if (val > 2) val = 0;
+		if (val < 0) val = 2;
+		Cvar_SetValue ("scr_menubgstyle", val);
 		break;
+	}
 #endif
 	}
 }
@@ -2413,8 +2420,10 @@ static void M_Display_Draw (void)
 		M_Print (76, 92 + 8*DISP_SHOWFPS,	"Show FPS      :");
 		M_DrawCheckbox (220, 92 + 8*DISP_SHOWFPS, (int)Cvar_VariableValue("showfps"));
 
-		M_Print (76, 92 + 8*DISP_MENUFADE,	"Menu Fade     :");
-		M_DrawCheckbox (220, 92 + 8*DISP_MENUFADE, (int)Cvar_VariableValue("scr_menufade"));
+		M_Print (76, 92 + 8*DISP_MENUFADE,	"Menu Backdrop :");
+		M_PrintWhite (220, 92 + 8*DISP_MENUFADE,
+			scr_menubgstyle.integer == 2 ? "Menu Box" :
+			scr_menubgstyle.integer == 1 ? "Simple" : "Off");
 
 		if (VID_MenuNeedApply ())
 			M_Print (76, 92 + 8*DISP_APPLY, "APPLY CHANGES");
@@ -6226,12 +6235,32 @@ void M_Draw (void)
 		}
 		else if (m_state != m_display && m_state != m_video
 		         && m_state != m_rendering && m_state != m_graphics
-		         && Cvar_VariableValue("scr_menufade"))
+		         && scr_menubgstyle.integer >= 1)
 		{
 			/* Demo/game world is behind — dim it with the amber fade.
 			 * Display submenus skip the fade so settings preview
 			 * against a clean game view. */
 			Draw_FadeScreen ();
+
+			/* Mode 2: also draw a translucent backdrop quad over the
+			 * typical menu-item area (CANVAS_MENU is 320x200 — most
+			 * menus draw items in roughly y=80..168). Ironwail parity. */
+			if (scr_menubgstyle.integer >= 2)
+			{
+				const float bg_x0 = 32, bg_y0 = 80;
+				const float bg_x1 = 288, bg_y1 = 168;
+				GL_SetCanvas (CANVAS_MENU);
+				Draw_FlushCharBatch ();
+				glEnable_fp (GL_BLEND);
+				GL_ImmBegin ();
+				GL_ImmColor4f (0.0f, 0.0f, 0.0f, 0.5f);
+				GL_ImmVertex2f (bg_x0, bg_y0);
+				GL_ImmVertex2f (bg_x1, bg_y0);
+				GL_ImmVertex2f (bg_x1, bg_y1);
+				GL_ImmVertex2f (bg_x0, bg_y1);
+				GL_ImmEnd (GL_QUADS, &gl_shader_flat);
+				glDisable_fp (GL_BLEND);
+			}
 		}
 		if (scr_viewsize.integer < 110)
 			scr_fullupdate = 0;

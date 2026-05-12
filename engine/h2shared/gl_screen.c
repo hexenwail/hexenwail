@@ -121,7 +121,9 @@ static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
 static	cvar_t	scr_showfps = {"showfps", "0", CVAR_ARCHIVE};
 static	cvar_t	scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
-static	cvar_t	scr_menufade = {"scr_menufade", "1", CVAR_ARCHIVE};
+/* scr_menubgstyle: 0 = no dim, 1 = simple dim (Draw_FadeScreen), 2 = dim + translucent menu-area box (Ironwail parity).
+ * Default 1 preserves the previous scr_menufade=1 default. */
+cvar_t		scr_menubgstyle = {"scr_menubgstyle", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showclock = {"showclock", "0", CVAR_ARCHIVE};
 //static	cvar_t	gl_triplebuffer = {"gl_triplebuffer", "0", CVAR_ARCHIVE};
 
@@ -566,7 +568,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showpause);
 	Cvar_RegisterVariable (&scr_showfps);
 	Cvar_RegisterVariable (&scr_showspeed);
-	Cvar_RegisterVariable (&scr_menufade);
+	Cvar_RegisterVariable (&scr_menubgstyle);
 	Cvar_RegisterVariable (&scr_showclock);
 	Cvar_RegisterVariable (&scr_centertime);
 //	Cvar_RegisterVariable (&gl_triplebuffer);
