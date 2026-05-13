@@ -35,5 +35,6 @@ void Sky_LoadSkyBox (const char *name);
 void Sky_LoadWindCfg (const char *name);
 void Sky_UpdateWind (void);
 void Sky_ProcessPoly (glpoly_t *p);
+void Sky_CacheFlush (void);
 
 #endif /* GL_SKY_H */

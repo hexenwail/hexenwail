@@ -148,6 +148,17 @@ static float skywind_period = 30.0f;	/* seconds per oscillation cycle */
 /* Per-frame wind UV offset, consumed by GL_ImmFlush -> u_wind on gl_shader_sky. */
 float sky_wind_uv[2] = { 0.0f, 0.0f };
 
+/* Skybox cache — Ironwail 0603c2bb — elimates stutter when maps precache skyboxes */
+typedef struct skybox_s {
+	struct skybox_s *next;
+	char name[32];
+	gltexture_t *textures[6];
+	GLuint texnums[6];
+} skybox_t;
+
+static skybox_t *skybox_cache = NULL;
+#define MAX_SKYBOX_CACHE 16
+
 int		skytexorder[6] = {0,2,1,3,4,5}; //for skybox
 
 vec3_t	skyclip[6] = {
@@ -292,6 +303,105 @@ void Sky_LoadTexture (texture_t *mt)
 
 /*
 ==================
+Sky_CacheLookup
+
+Search cache for a skybox by name. Returns ptr if found, NULL otherwise.
+==================
+*/
+static skybox_t *Sky_CacheLookup(const char *name)
+{
+	skybox_t *entry;
+	for (entry = skybox_cache; entry; entry = entry->next)
+		if (strcmp(entry->name, name) == 0)
+			return entry;
+	return NULL;
+}
+
+/*
+==================
+Sky_CacheAdd
+
+Add a skybox to cache. Evicts oldest entry if cache is full.
+==================
+*/
+static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *texnums)
+{
+	skybox_t *entry, *prev;
+	int count;
+
+	entry = (skybox_t *)malloc(sizeof(skybox_t));
+	if (!entry)
+		return NULL;
+
+	strcpy(entry->name, name);
+	memcpy(entry->textures, textures, sizeof(entry->textures));
+	memcpy(entry->texnums, texnums, sizeof(entry->texnums));
+	entry->next = NULL;
+
+	/* Prepend to list */
+	if (skybox_cache)
+		entry->next = skybox_cache;
+	skybox_cache = entry;
+
+	/* Count cache entries and evict oldest if over limit */
+	count = 0;
+	prev = NULL;
+	for (entry = skybox_cache; entry; entry = entry->next)
+	{
+		count++;
+		prev = entry;
+	}
+
+	if (count > MAX_SKYBOX_CACHE)
+	{
+		/* Remove oldest (last in list) */
+		if (prev && prev != skybox_cache)
+		{
+			skybox_t *iter, *iter_prev = NULL;
+			for (iter = skybox_cache; iter->next; iter_prev = iter, iter = iter->next)
+				;
+			if (iter_prev)
+				iter_prev->next = NULL;
+			else
+				skybox_cache = NULL;
+
+			for (int i = 0; i < 6; i++)
+			{
+				if (iter->textures[i] && iter->textures[i] != notexture)
+					TexMgr_FreeTexture(iter->textures[i]);
+			}
+			free(iter);
+		}
+	}
+
+	return skybox_cache;
+}
+
+/*
+==================
+Sky_CacheFlush
+
+Free entire skybox cache.
+==================
+*/
+void Sky_CacheFlush(void)
+{
+	skybox_t *entry, *next;
+	for (entry = skybox_cache; entry; entry = next)
+	{
+		next = entry->next;
+		for (int i = 0; i < 6; i++)
+		{
+			if (entry->textures[i] && entry->textures[i] != notexture)
+				TexMgr_FreeTexture(entry->textures[i]);
+		}
+		free(entry);
+	}
+	skybox_cache = NULL;
+}
+
+/*
+==================
 Sky_LoadSkyBox
 ==================
 */
@@ -302,9 +412,21 @@ void Sky_LoadSkyBox (const char *name)
 	char	filename[MAX_OSPATH];
 	byte	*data;
 	qboolean nonefound = true;
+	skybox_t *cached;
 
 	if (strcmp(skybox_name, name) == 0)
 		return; //no change
+
+	/* Check cache first */
+	cached = Sky_CacheLookup(name);
+	if (cached)
+	{
+		strcpy(skybox_name, cached->name);
+		memcpy(skybox_textures, cached->textures, sizeof(skybox_textures));
+		memcpy(skybox_texnums, cached->texnums, sizeof(skybox_texnums));
+		Sky_LoadWindCfg(name);
+		return;
+	}
 
 	//purge old textures
 	for (i=0; i<6; i++)
@@ -451,6 +573,9 @@ void Sky_LoadSkyBox (const char *name)
 
 	strcpy(skybox_name, name);
 	Sky_LoadWindCfg (skybox_name);
+
+	/* Add to cache for future loads */
+	Sky_CacheAdd(name, skybox_textures, skybox_texnums);
 }
 
 /*
