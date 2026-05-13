@@ -2050,21 +2050,10 @@ static void DrawTextureChains (entity_t *e)
 				/* Merge contiguous IBO ranges and draw */
 				if (batch_count > 0)
 				{
-					/* Populate single SSBO entry for batch texture (all surfs share same texture) */
-					if (gl_bindless_able && drawcall_cpu_buffer)
-					{
-						gltexture_t *tx = gltextures + batch_texture->gl_texturenum;
-						gltexture_t *fb = batch_texture->gl_fb_texturenum ? gltextures + batch_texture->gl_fb_texturenum : NULL;
-						drawcall_cpu_buffer[0].bindless.tx_handle = tx ? tx->bindless_handle : 0;
-						drawcall_cpu_buffer[0].bindless.fb_handle = fb ? fb->bindless_handle : 0;
-						drawcall_cpu_buffer[0].bindless.flags = 0;
-						drawcall_cpu_buffer[0].bindless.alpha = 1.0f;
-						GL_UploadDrawCallSSBO(1);
-
-						/* Bind SSBO for shader access */
-						if (drawcall_ssbo)
-							glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, drawcall_ssbo);
-					}
+					/* TODO: SSBO population disabled pending shader bindless support.
+					 * When shaders have BINDLESS support, populate here:
+					 * drawcall_cpu_buffer[0] with batch_texture handles,
+					 * GL_UploadDrawCallSSBO(1), glBindBufferBase SSBO. */
 
 					int run_start = 0;
 					int run_first_idx = batch_surfs[0]->vbo_firstindex;
