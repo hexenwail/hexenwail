@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-13 (Bindless textures completed)
+Last updated: 2026-05-13 (Bindless textures + faster map loading completed)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -14,15 +14,15 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 13 | 0 | 0 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
-| Performance / Engine | 7 | 1 | 1 | 1 |
+| Performance / Engine | 8 | 0 | 1 | 1 |
 | UX / Menus / HUD | 22 | 1 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **78** | **2** | **3** | **8** |
+| **TOTAL** | **79** | **1** | **2** | **8** |
 
-**Parity: 94% ported, 2% partial, 4% missing** (excluding N/A)
+**Parity: 96% ported, 1% partial, 2% missing** (excluding N/A)
 
 ---
 
@@ -83,7 +83,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | CSQC (client-side QuakeC) | ✅ | `cl_csqc.c` |
 | bmodel buffer rebuilt correctly on map change | ✅ | Ironwail fix `3ccbcda` (2026-02): `GL_DeleteBModelBuffers()` was missing before `GL_BuildBModelVertexBuffer()` in `R_NewMap`, causing GPU memory leak on map changes. We also call `GL_DeleteBModelBuffers` before rebuild. Verify `gl_rmisc.c:R_NewMap`. |
 | Alias model GPU data layout | ✅ | Ironwail refactored `a65a88e` (2026-01): SSBO alignment removed per-surface, IQM bind-pose separated. Our alias pipeline layout matches conceptually — no separate SSBO alignment loop needed given our model format. |
-| Faster map loading | 🔶 | Lightmap atlas yes; VBO build optimizations partial |
+| Faster map loading | ✅ | Lightmap atlas + BSP VBO packing optimized (uhexen2-3mbt, 2026-05-13) |
 | Async main-thread task queue | ❌ | Non-blocking parallel work dispatch |
 | Intelligent autosave system | ➖ | Hexen II saves do not map cleanly to Ironwail's health/secret/teleport trigger heuristics |
 | Unicode path support | ✅ | UTF-8 to UTF-16 conversion on Windows (0aa7d3595); POSIX unchanged on Linux. Supports cyrillic, accented Latin, CJK directory names. (uhexen2-ogmq closed). |
@@ -194,6 +194,7 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 
 *MD3 model support completed 2026-05-12 (uhexen2-f2d3, uhexen2-kaa6).*
 *Console mouse Phase 1 completed 2026-05-12 (uhexen2-8vw0, commit e091812e7).*
+*Faster map loading completed 2026-05-13 (uhexen2-3mbt).*
 
 ---
 
