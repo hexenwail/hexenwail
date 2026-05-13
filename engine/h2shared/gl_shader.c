@@ -48,28 +48,57 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	GLuint shader;
 	GLint status;
 	char log[2048];
-	const char *sources[2];
-	char preamble[256];
 	const char *type_name = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
+	const char *version_end;
+	char macro_def[256];
+	char *modified_source = NULL;
+	const char *sources[3];
+	int num_sources = 0;
 
 	shader = glCreateShader_fp(type);
 
-	/* Inject BINDLESS macro definition based on capability */
-	q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
-	Con_SafePrintf("[SHADER] Compiling %s shader with BINDLESS=%d\n", type_name, gl_bindless_able ? 1 : 0);
+	/* Find #version line and inject BINDLESS macro after it */
+	version_end = strchr(source, '\n');
+	if (version_end)
+	{
+		version_end++; /* skip newline */
+		q_snprintf(macro_def, sizeof(macro_def), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
+		Con_SafePrintf("[SHADER] Compiling %s shader with BINDLESS=%d\n", type_name, gl_bindless_able ? 1 : 0);
 
-	sources[0] = preamble;
-	sources[1] = source;
-	glShaderSource_fp(shader, 2, sources, NULL);
+		/* Source array: [version line] [macro def] [rest of source] */
+		size_t version_len = version_end - source;
+		size_t rest_len = strlen(version_end);
+		size_t total = version_len + strlen(macro_def) + rest_len + 1;
+
+		modified_source = (char *)malloc(total);
+		memcpy(modified_source, source, version_len);
+		memcpy(modified_source + version_len, macro_def, strlen(macro_def));
+		memcpy(modified_source + version_len + strlen(macro_def), version_end, rest_len + 1);
+
+		sources[0] = modified_source;
+		num_sources = 1;
+	}
+	else
+	{
+		/* No #version found, use source as-is (shouldn't happen with GLSL_VERT_HEADER) */
+		Con_SafePrintf("[SHADER] WARNING: No #version found in %s shader\n", type_name);
+		sources[0] = source;
+		num_sources = 1;
+	}
+
+	glShaderSource_fp(shader, num_sources, sources, NULL);
 
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
+
+	if (modified_source)
+		free(modified_source);
+
 	if (!status)
 	{
 		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
 		Con_Printf("[SHADER] %s COMPILE ERROR:\n%s\n", type_name, log);
-		Con_Printf("[SHADER] Preamble was: %s\n", preamble);
-		Con_Printf("[SHADER] First 500 chars of source:\n%.500s\n", source);
+		Con_Printf("[SHADER] First 300 chars of source:\n%.300s\n", source);
 		glDeleteShader_fp(shader);
 		return 0;
 	}
