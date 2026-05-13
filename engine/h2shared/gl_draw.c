@@ -2455,11 +2455,12 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 				    (glt->flags & TEX_MIPMAP) != (flags & TEX_MIPMAP) ||
 				    (glt->flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) != (flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) ||
 				    width  != glt->width || height != glt->height)
-				{ /* not the same, delete and rebind to new image.
-				   * uhexen2-0fsq: this reissues glt->texnum but does
-				   * NOT update any caller who already cached the old
-				   * value (texture_t::gl_texturenum on world brushes,
-				   * alias skin slots, etc.).  Stale-handle hazard. */
+				{ /* not the same, mark stale and create new entry.
+				   * uhexen2-0fsq: texture properties changed mid-session.
+				   * Instead of reusing the gltexture_t slot (which would
+				   * reissue an invalid handle to code that cached the old
+				   * value), mark this entry stale so lookups skip it and
+				   * fall through to create a fresh entry below. */
 					GLuint old_texnum = glt->texnum;
 					if (gl_log_texgen.integer)
 						Con_Printf ("[texgen] f=%d rebind '%s' old=%lu (%dx%d crc=%u flags=0x%x) "
@@ -2469,7 +2470,7 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 							    glt->width, glt->height, (unsigned)glt->crc, glt->flags,
 							    width, height, (unsigned)crc, flags);
 					else
-						Con_DPrintf ("Texture cache mismatch: %lu, %s, reloading\n",
+						Con_DPrintf ("Texture cache mismatch: %lu, %s, creating new entry\n",
 								    (unsigned long)old_texnum, identifier);
 					/* Make bindless handle non-resident before deleting texture */
 					if (glt->bindless_handle)
@@ -2478,7 +2479,8 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 						glt->bindless_handle = 0;
 					}
 					glDeleteTextures_fp (1, &old_texnum);
-					goto gl_rebind;
+					glt->identifier[0] = '\0';	/* mark entry stale */
+					break;	/* exit loop, continue to new-entry creation below */
 				}
 				else	return glt->texnum;	/* the same is present. */
 			}
@@ -2493,7 +2495,6 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 	numgltextures++;
 	q_strlcpy (glt->identifier, identifier, MAX_QPATH);
 
-gl_rebind:
 	glGenTextures_fp(1, &glt->texnum);
 	glt->width = width;
 	glt->height = height;
