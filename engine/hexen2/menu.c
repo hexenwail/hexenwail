@@ -2113,7 +2113,11 @@ static void M_Options_Key (int k)
 			Con_ToggleConsole_f ();
 			break;
 		case OPT_DEFAULTS:
-			Cbuf_AddText ("unbindall\nexec default.cfg\n");
+			/* Re-bind keys from default.cfg, then enable mouse-look —
+			 * default.cfg only sets bindings, not the mlook state, so
+			 * a fresh install hitting Reset Defaults still gets
+			 * classic mouse-turn-only without the +mlook here. */
+			Cbuf_AddText ("unbindall\nexec default.cfg\n+mlook\n");
 			vid.recalc_refdef = 1;
 			break;
 		}
