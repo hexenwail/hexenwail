@@ -168,7 +168,12 @@ cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pixel overlay on models
-cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};	// clamp alias model lighting
+/* gl_overbright_models: Ironwail semantics — 1 lets alias model lighting
+ * use its full natural range (overbright), 0 clamps it to the legacy
+ * Hexen II vanilla cap of 192.  Default 1 to match gl_overbright on the
+ * world.  (Polarity flipped from upstream uHexen2 in uhexen2-f29y.) */
+cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};
+cvar_t	gl_overbright = {"gl_overbright", "1", CVAR_ARCHIVE};	// world/brush lightmap overbright (Ironwail-style: build at >>(7+gl_overbright), shader multiplies by 1<<gl_overbright)
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};		// FXAA post-process anti-aliasing
 cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to disable)
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
@@ -1019,8 +1024,10 @@ static void R_DrawAliasModel (entity_t *e)
 			}
 		}
 
-		// clamp lighting so it doesn't overbright as much
-		if (gl_overbright_models.integer)
+		// Ironwail-style: only clamp when overbright is OFF.  When ON
+		// (default), let alias lighting use its full natural range to
+		// match the brighter world surfaces.  uhexen2-f29y.
+		if (!gl_overbright_models.integer)
 		{
 			if (ambientlight > 128)
 				ambientlight = 128;
@@ -2038,7 +2045,8 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 			}
 		}
 
-		if (gl_overbright_models.integer)
+		/* Ironwail-style: only clamp when overbright is OFF.  uhexen2-f29y. */
+		if (!gl_overbright_models.integer)
 		{
 			int i;
 			if (ambientlight > 128) ambientlight = 128;
@@ -3652,6 +3660,28 @@ static void R_SetupFrame (void)
 		{
 			glUseProgram_fp(gl_shader_world_opaque.program);
 			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
+		}
+		/* Per-frame world overbright (Ironwail-style).  Pushing it once
+		 * per frame here covers the OIT and brush-batch paths that don't
+		 * route through GL_ImmEnd or the per-binding-site uploads.
+		 * uhexen2-f29y. */
+		{
+			float ob = gl_overbright.integer ? 2.0f : 1.0f;
+			if (gl_shader_world.program && gl_shader_world.u_overbright >= 0)
+			{
+				glUseProgram_fp(gl_shader_world.program);
+				glUniform1f_fp(gl_shader_world.u_overbright, ob);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_overbright >= 0)
+			{
+				glUseProgram_fp(gl_shader_world_opaque.program);
+				glUniform1f_fp(gl_shader_world_opaque.u_overbright, ob);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_overbright >= 0)
+			{
+				glUseProgram_fp(gl_shader_world_oit.program);
+				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
+			}
 		}
 		glUseProgram_fp(0);
 	}

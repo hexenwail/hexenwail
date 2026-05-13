@@ -454,15 +454,22 @@ store:
 
 		blcr = &blocklightscolor[0];
 
+		/* Ironwail-style overbright: when gl_overbright is on, build the
+		 * lightmap at "1x" range (shift 8) so the fragment shader has
+		 * headroom to multiply tex*lm by 2.0 before clamping at the
+		 * framebuffer.  When off, fall back to the legacy "2x pre-baked"
+		 * shift 7 (which clamps at the atlas).  uhexen2-f29y. */
+		{
+		const int lmshift = 7 + (gl_overbright.integer ? 1 : 0);
 		if (gl_coloredlight.integer)
 		{
 			for (i = 0; i < tmax; i++, dest += stride)
 			{
 				for (j = 0; j < smax; j++)
 				{
-					q = blcr[0] >> 7; if (q > 255) q = 255;
-					r = blcr[1] >> 7; if (r > 255) r = 255;
-					s = blcr[2] >> 7; if (s > 255) s = 255;
+					q = blcr[0] >> lmshift; if (q > 255) q = 255;
+					r = blcr[1] >> lmshift; if (r > 255) r = 255;
+					s = blcr[2] >> lmshift; if (s > 255) s = 255;
 					dest[0] = q;
 					dest[1] = r;
 					dest[2] = s;
@@ -478,9 +485,9 @@ store:
 			{
 				for (j = 0; j < smax; j++)
 				{
-					q = blcr[0] >> 7; if (q > 255) q = 255;
-					r = blcr[1] >> 7; if (r > 255) r = 255;
-					s = blcr[2] >> 7; if (s > 255) s = 255;
+					q = blcr[0] >> lmshift; if (q > 255) q = 255;
+					r = blcr[1] >> lmshift; if (r > 255) r = 255;
+					s = blcr[2] >> lmshift; if (s > 255) s = 255;
 					t = (q + r + s) / 3;
 					if (t > 255) t = 255;
 					dest[0] = t;
@@ -492,20 +499,24 @@ store:
 				}
 			}
 		}
+		}
 		break;
 
 	case GL_LUMINANCE:
 		bl = blocklights;
+		{
+		const int lmshift = 7 + (gl_overbright.integer ? 1 : 0);
 		for (i = 0; i < tmax; i++, dest += stride)
 		{
 			for (j = 0; j < smax; j++)
 			{
 				t = *bl++;
-				t >>= 7;
+				t >>= lmshift;
 				if (t > 255)
 					t = 255;
 				dest[j] = 255-t;
 			}
+		}
 		}
 		break;
 	default:
@@ -1564,6 +1575,8 @@ void R_BeginBrushBatch (void)
 		glUniform3f_fp(gl_shader_world_opaque.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	if (gl_shader_world_opaque.u_alpha_threshold >= 0)
 		glUniform1f_fp(gl_shader_world_opaque.u_alpha_threshold, 0.01f);
+	if (gl_shader_world_opaque.u_overbright >= 0)
+		glUniform1f_fp(gl_shader_world_opaque.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	glActiveTexture_fp(GL_TEXTURE2);
@@ -1631,6 +1644,8 @@ static void DrawTextureChains_BindWorldState (void)
 			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	if (prog->u_alpha_threshold >= 0)
 		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+	if (prog->u_overbright >= 0)
+		glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* TU2 is the fullbright mask sampled by sworld_frag.  Default to the
@@ -2283,6 +2298,8 @@ static void DrawTextureChains (entity_t *e)
 					glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
 				if (gl_shader_world.u_fog_color >= 0)
 					glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+				if (gl_shader_world.u_overbright >= 0)
+					glUniform1f_fp(gl_shader_world.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 				glActiveTexture_fp(GL_TEXTURE1);
 				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 				glActiveTexture_fp(GL_TEXTURE2);
@@ -2565,6 +2582,8 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 			if (prog->u_alpha_threshold >= 0)
 				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+			if (prog->u_overbright >= 0)
+				glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 			GL_ImmInvalidateState();
 		}
 		GL_GetMVP(mvp);
@@ -3612,5 +3631,81 @@ void GL_BuildLightmaps (void)
 	}
 
 	glActiveTexture_fp (GL_TEXTURE0);
+}
+
+
+/*
+===============
+R_RebuildAllLightmaps
+
+Walk every brush surface that has a lightmap allocation and rebuild
+its samples at the current gl_overbright shift.  Marks every used
+lightmap page fully dirty so the next frame re-uploads the pixels.
+If gl_lmatlas is on, also schedule an atlas rebuild by clearing
+lm_atlas_texture so the next R_DrawWorld restitches.  uhexen2-f29y.
+===============
+*/
+void R_RebuildAllLightmaps (void)
+{
+	int		i, j;
+	qmodel_t	*m;
+
+	if (!cl.worldmodel)
+		return;
+
+	for (j = 1; j < MAX_MODELS; j++)
+	{
+		m = cl.model_precache[j];
+		if (!m)
+			break;
+		if (m->name[0] == '*')
+			continue;
+		if (m->type != mod_brush)
+			continue;
+
+		for (i = 0; i < m->numsurfaces; i++)
+		{
+			msurface_t *surf = m->surfaces + i;
+			byte *base;
+			if (surf->flags & (SURF_DRAWSKY|SURF_DRAWTURB))
+				continue;
+			base = lightmaps + surf->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
+			base += (surf->light_t * BLOCK_WIDTH + surf->light_s) * lightmap_bytes;
+			R_BuildLightMap (surf, base, BLOCK_WIDTH*lightmap_bytes);
+		}
+	}
+
+	for (i = 0; i < MAX_LIGHTMAPS; i++)
+	{
+		if (!lightmap_textures[i])
+			break;
+		lightmap_modified[i] = true;
+		lightmap_rectmin[i][0] = 0;
+		lightmap_rectmin[i][1] = 0;
+		lightmap_rectmax[i][0] = BLOCK_WIDTH;
+		lightmap_rectmax[i][1] = BLOCK_HEIGHT;
+	}
+
+	/* Force atlas restitch on next R_DrawWorld */
+	if (lm_atlas_texture)
+	{
+		glDeleteTextures_fp (1, &lm_atlas_texture);
+		lm_atlas_texture = 0;
+	}
+}
+
+
+/*
+===============
+R_OverbrightChanged
+
+Cvar callback for gl_overbright.  Rebuilds all lightmaps so they
+match the new shift on the next frame.  uhexen2-f29y.
+===============
+*/
+void R_OverbrightChanged (cvar_t *var)
+{
+	(void)var;
+	R_RebuildAllLightmaps ();
 }
 

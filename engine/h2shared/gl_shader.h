@@ -33,6 +33,7 @@ typedef struct glprogram_s {
 	GLint	u_eyepos;
 	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
+	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */

@@ -270,6 +270,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
 	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
+	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 }
 
 /* ------------------------------------------------------------------ */
@@ -423,6 +424,7 @@ static const char sworld_frag[] =
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
 	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
+	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -441,6 +443,7 @@ static const char sworld_frag[] =
 	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
+	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"    if (color.a < u_alpha_threshold) discard;\n"
 	/* Add fullbright contribution: palette-index >= vid.fullbright
 	 * pixels in the diffuse texture get rendered at full intensity
@@ -500,6 +503,7 @@ static const char sworld_frag_opaque[] =
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"	/* unused but kept for layout parity */
 	"uniform vec2 u_caustics;\n"		/* x=intensity, y=time (uhexen2-6bfm) */
+	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -518,6 +522,7 @@ static const char sworld_frag_opaque[] =
 	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
+	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"#if BINDLESS\n"
 	"    vec3 fb = texture(sampler2D(packUint2x32(v_texhandles.zw)), v_texcoord).rgb;\n"
 	"#else\n"
