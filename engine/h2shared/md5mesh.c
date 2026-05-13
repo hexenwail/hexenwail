@@ -5,6 +5,7 @@
  */
 
 #include "quakedef.h"
+#include "gl_model.h"
 
 /* Helper: skip to next line */
 static const char *MD5_SkipLine(const char *p)
