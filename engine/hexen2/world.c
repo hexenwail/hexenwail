@@ -479,6 +479,22 @@ void SV_LinkEdict (edict_t *ent, qboolean touch_triggers)
 		VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
 	}
 
+	// Workaround for puzzle_piece entities initialized with zero size.
+	// h2 progs bug: puzzle_piece() calls setsize(self, '0 0 0', '0 0 0') before
+	// calling StartItem->PlaceItem, resulting in uncollectable items.
+	if (ent->v.mins[0] == 0 && ent->v.mins[1] == 0 && ent->v.mins[2] == 0 &&
+	    ent->v.maxs[0] == 0 && ent->v.maxs[1] == 0 && ent->v.maxs[2] == 0)
+	{
+		const char *classname = PR_GetString(ent->v.classname);
+		if (classname && strstr(classname, "puzzle") != NULL)
+		{
+			ent->v.mins[0] = -8;  ent->v.mins[1] = -8;  ent->v.mins[2] = -28;
+			ent->v.maxs[0] = 8;   ent->v.maxs[1] = 8;   ent->v.maxs[2] = 8;
+			VectorAdd (ent->v.origin, ent->v.mins, ent->v.absmin);
+			VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
+		}
+	}
+
 //
 // to make items easier to pick up and allow them to be grabbed off
 // of shelves, the abs sizes are expanded
