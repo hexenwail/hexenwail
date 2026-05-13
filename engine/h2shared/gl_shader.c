@@ -47,14 +47,17 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 {
 	GLuint shader;
 	GLint status;
-	char log[1024];
+	char log[2048];
 	const char *sources[2];
 	char preamble[256];
+	const char *type_name = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
 
 	shader = glCreateShader_fp(type);
 
 	/* Inject BINDLESS macro definition based on capability */
 	q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
+	Con_SafePrintf("[SHADER] Compiling %s shader with BINDLESS=%d\n", type_name, gl_bindless_able ? 1 : 0);
+
 	sources[0] = preamble;
 	sources[1] = source;
 	glShaderSource_fp(shader, 2, sources, NULL);
@@ -64,10 +67,13 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	if (!status)
 	{
 		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
-		Con_Printf("Shader compile error: %s\n", log);
+		Con_Printf("[SHADER] %s COMPILE ERROR:\n%s\n", type_name, log);
+		Con_Printf("[SHADER] Preamble was: %s\n", preamble);
+		Con_Printf("[SHADER] First 500 chars of source:\n%.500s\n", source);
 		glDeleteShader_fp(shader);
 		return 0;
 	}
+	Con_SafePrintf("[SHADER] %s shader compiled OK (id=%u)\n", type_name, shader);
 	return shader;
 }
 
@@ -75,7 +81,15 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 {
 	GLuint prog;
 	GLint status;
-	char log[1024];
+	char log[2048];
+
+	Con_SafePrintf("[SHADER] Linking program (vert=%u, frag=%u)\n", vert, frag);
+
+	if (!vert || !frag)
+	{
+		Con_Printf("[SHADER] LINK ERROR: Invalid shader IDs (vert=%u, frag=%u)\n", vert, frag);
+		return 0;
+	}
 
 	prog = glCreateProgram_fp();
 	glAttachShader_fp(prog, vert);
@@ -92,10 +106,11 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 	if (!status)
 	{
 		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-		Con_Printf("Shader link error: %s\n", log);
+		Con_Printf("[SHADER] LINK ERROR:\n%s\n", log);
 		glDeleteProgram_fp(prog);
 		return 0;
 	}
+	Con_SafePrintf("[SHADER] Program linked OK (id=%u)\n", prog);
 	return prog;
 }
 
