@@ -134,6 +134,7 @@ typedef struct
 	int		width, height;
 	int		flags;
 	unsigned short	crc;
+	uint64_t	bindless_handle;
 } gltexture_t;
 
 /* texture filters */
@@ -384,6 +385,7 @@ GLuint GL_LoadTexture (const char *identifier, byte *data,
 #define	TEX_FENCE		(1 << 16)	/* Fence texture (binary transparency)		*/
 #define	TEX_SPECIAL_TRANS	(1 << 15)	/* Translucency through the particle table	*/
 #define	TEX_EMBEDDED_MIPS	(1 << 17)	/* Data contains all 4 BSP mip levels		*/
+#define	TEX_BINDLESS		(1 << 18)	/* Create bindless texture handle		*/
 
 GLuint GL_LoadPicTexture (qpic_t *pic);
 void D_ClearOpenGLTextures (int last_tex);
