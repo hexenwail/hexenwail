@@ -1771,11 +1771,16 @@ static void R_DispatchBrushInstancedPass (
 void R_DrawBrushInstanced (void)
 {
 #ifndef __EMSCRIPTEN__
-	glprogram_t *prog = &gl_shader_world;
+	/* Two programs, identical uniform layout: opaque variant carries
+	 * layout(early_fragment_tests) for Hi-Z, cutout variant carries
+	 * the discard for fence textures.  uhexen2-5c6r. */
+	glprogram_t *prog_opaque = &gl_shader_world_opaque;
+	glprogram_t *prog_cutout = &gl_shader_world;
 	extern float r_fog_density;
 	extern float r_fog_color[3];
 
-	if (!prog->program || num_world_instances == 0 ||
+	if (!prog_opaque->program || !prog_cutout->program ||
+	    num_world_instances == 0 ||
 	    (num_world_surf_keys == 0 && num_world_surf_keys_fence == 0))
 		return;
 
@@ -1804,14 +1809,11 @@ void R_DrawBrushInstanced (void)
 	 * of uhexen2-mf45: same compiled program for world and brush ents
 	 * means the GLSL compiler emits identical instructions for both,
 	 * and within-shader invariant gl_Position covers coplanar joins
-	 * (drawbridge plank vs. ground, portcullis vs. wall pocket). */
+	 * (drawbridge plank vs. ground, portcullis vs. wall pocket).
+	 * gl_shader_world_opaque shares vert+uniform layout with gl_shader_world
+	 * so the same invariance covers cross-program coplanar joins too. */
 	glBindVertexArray_fp(world_vao);
-	glUseProgram_fp(prog->program);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp(prog->u_fog_density, r_fog_density);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
@@ -1835,22 +1837,34 @@ void R_DrawBrushInstanced (void)
 		glPolygonOffset_fp(fb_offset, fb_offset);
 	}
 
-	/* Opaque pass: alpha threshold near zero, no A2C. */
+	/* Opaque pass: opaque program (early_fragment_tests), threshold near
+	 * zero (unused — shader has no discard, kept for uniform layout parity),
+	 * no A2C. */
 	if (num_world_surf_keys > 0)
 	{
-		if (prog->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog);
+		glUseProgram_fp(prog_opaque->program);
+		if (prog_opaque->u_fog_density >= 0)
+			glUniform1f_fp(prog_opaque->u_fog_density, r_fog_density);
+		if (prog_opaque->u_fog_color >= 0)
+			glUniform3f_fp(prog_opaque->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		if (prog_opaque->u_alpha_threshold >= 0)
+			glUniform1f_fp(prog_opaque->u_alpha_threshold, 0.01f);
+		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog_opaque);
 	}
 
-	/* Fence pass: alpha cutout @0.666, optional A2C. */
+	/* Fence pass: cutout program (has discard), threshold 0.666, optional A2C. */
 	if (num_world_surf_keys_fence > 0)
 	{
-		if (prog->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog->u_alpha_threshold, 0.666f);
+		glUseProgram_fp(prog_cutout->program);
+		if (prog_cutout->u_fog_density >= 0)
+			glUniform1f_fp(prog_cutout->u_fog_density, r_fog_density);
+		if (prog_cutout->u_fog_color >= 0)
+			glUniform3f_fp(prog_cutout->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		if (prog_cutout->u_alpha_threshold >= 0)
+			glUniform1f_fp(prog_cutout->u_alpha_threshold, 0.666f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
-		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog);
+		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog_cutout);
 		if (r_alphatocoverage.integer)
 			glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}

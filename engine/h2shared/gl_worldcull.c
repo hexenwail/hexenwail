@@ -1224,21 +1224,26 @@ void R_DrawWorldCulled (void)
 	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, cull_dst_ibo);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 
-	/* Set up world shader */
-	glUseProgram_fp(gl_shader_world.program);
-	GL_GetMVP(mvp);
-	GL_GetModelview(mv);
-	if (gl_shader_world.u_mvp >= 0)
-		glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-	if (gl_shader_world.u_modelview >= 0)
-		glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-	if (gl_shader_world.u_fog_density >= 0)
-		glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-	if (gl_shader_world.u_fog_color >= 0)
-		glUniform3f_fp(gl_shader_world.u_fog_color,
-			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (gl_shader_world.u_alpha_threshold >= 0)
-		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+	/* Set up world shader.  MDI cull path emits opaque world only — fence
+	 * surfaces flow through R_DrawBrushInstanced's fence sub-pass — so use
+	 * the early_fragment_tests variant for Hi-Z.  uhexen2-5c6r. */
+	{
+		glprogram_t *prog = &gl_shader_world_opaque;
+		glUseProgram_fp(prog->program);
+		GL_GetMVP(mvp);
+		GL_GetModelview(mv);
+		if (prog->u_mvp >= 0)
+			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
+		if (prog->u_modelview >= 0)
+			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+		if (prog->u_fog_density >= 0)
+			glUniform1f_fp(prog->u_fog_density, r_fog_density);
+		if (prog->u_fog_color >= 0)
+			glUniform3f_fp(prog->u_fog_color,
+				       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		if (prog->u_alpha_threshold >= 0)
+			glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+	}
 
 	/* Bind lightmap atlas on unit 1, default fb null at unit 2 */
 	glActiveTexture_fp(GL_TEXTURE1);

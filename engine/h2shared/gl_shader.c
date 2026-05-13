@@ -17,6 +17,7 @@ extern float	r_fog_density;
 extern float	r_fog_color[3];
 
 glprogram_t	gl_shader_world;
+glprogram_t	gl_shader_world_opaque;	/* uhexen2-5c6r: early_fragment_tests, no discard */
 glprogram_t	gl_shader_alias;
 glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
@@ -222,18 +223,23 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #define GLSL_FRAG_HEADER	"#version 300 es\nprecision mediump float;\n"
 /* GLSL ES 3.00 doesn't support early_fragment_tests */
 #define GLSL_EARLY_Z		""
+#define GLSL_EARLY_Z_OPAQUE	""
 #else
 #define GLSL_VERT_HEADER	"#version 430 core\n"
 #define GLSL_FRAG_HEADER	"#version 430 core\n"
-/* Do NOT force early_fragment_tests on shaders that use `discard` for
- * alpha-tested cutouts.  Early tests run depth+stencil — and write them —
- * BEFORE the fragment shader executes; a later `discard` cannot undo the
- * depth write that already happened.  For an alpha-tested fence (e.g. a
- * func_illusionary bush), every cutout pixel still wrote the bush's
- * depth, occluding any entity drawn after at that pixel even though no
- * color was written there.  Visible on mill.bsp (SoT): bush silhouette
- * z-rejected the tree behind it.  uhexen2-238u. */
+/* Cutout shaders that use `discard` MUST NOT force early_fragment_tests:
+ * early tests run depth+stencil — and write them — BEFORE the fragment
+ * shader executes; a later `discard` cannot undo the depth write that
+ * already happened.  For an alpha-tested fence (e.g. a func_illusionary
+ * bush), every cutout pixel still wrote the bush's depth, occluding any
+ * entity drawn after at that pixel even though no color was written there.
+ * Visible on mill.bsp (SoT): bush silhouette z-rejected the tree behind
+ * it.  uhexen2-238u. */
 #define GLSL_EARLY_Z		""
+/* Opaque-only variant has no discard, so early_fragment_tests is safe and
+ * recovers Hi-Z on the world bucket (+0.34ms regression measured in
+ * uhexen2-23a9).  Used by gl_shader_world_opaque (uhexen2-5c6r). */
+#define GLSL_EARLY_Z_OPAQUE	"layout(early_fragment_tests) in;\n"
 #endif
 
 /* --- shader_2d: orthographic HUD/text rendering --- */
@@ -355,6 +361,40 @@ static const char sworld_frag[] =
 	"#else\n"
 	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
 	"#endif\n"
+	"}\n";
+
+/* sworld_frag_opaque: opaque-only variant with early_fragment_tests and no
+ * discard.  Bound for batches that contain no fence/holey surfaces — i.e.
+ * the world MDI pass, brush-ent MDI opaque pass, the DrawTextureChains fast
+ * path, and the R_DrawBrushModel fast path.  Recovers the Hi-Z benefit that
+ * was lost in uhexen2-238u without re-introducing the fence-occludes-tree
+ * bug.  Keeps the full uniform layout of sworld_frag (same uniform names +
+ * types) so call sites can switch between the two programs by glUseProgram
+ * + re-upload, no shader-specific code paths required.  uhexen2-5c6r. */
+static const char sworld_frag_opaque[] =
+	GLSL_FRAG_HEADER
+	GLSL_EARLY_Z_OPAQUE
+	"uniform sampler2D u_texture0;\n"	/* diffuse */
+	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
+	"uniform sampler2D u_texture2;\n"	/* fullbright mask */
+	"uniform float u_fog_density;\n"
+	"uniform vec3 u_fog_color;\n"
+	"uniform float u_alpha_threshold;\n"	/* unused but kept for layout parity */
+	"in vec2 v_texcoord;\n"
+	"in vec2 v_lmcoord;\n"
+	"in vec4 v_color;\n"
+	"in float v_fogdist;\n"
+	"out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
+	"    vec4 color = tex * lm * v_color;\n"
+	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"    color.rgb += fb;\n"
+	"    float fogfac = u_fog_density * v_fogdist;\n"
+	"    float fog = exp(-fogfac * fogfac);\n"
+	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	"    fragColor = vec4(color.rgb, 1.0);\n"
 	"}\n";
 
 /* --- shader_alias: vertex-colored, textured, fog (models) ---
@@ -874,6 +914,7 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_2d,       "2d",       s2d_vert,    s2d_frag);
 	GL_InitProgram(&gl_shader_flat,     "flat",     sflat_vert,  sflat_frag);
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
+	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
@@ -909,6 +950,7 @@ void GL_Shaders_Shutdown (void)
 {
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
+		&gl_shader_world_opaque,
 		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
 		&gl_shader_particle_gpu.base,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit

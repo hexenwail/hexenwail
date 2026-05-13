@@ -1418,15 +1418,18 @@ void R_BeginBrushBatch (void)
 
 	if (!world_vao || !lm_atlas_enabled || !lm_atlas_texture || !world_ibo)
 		return;
+	/* Brush-batch fast path emits opaque non-special surfaces only — fence
+	 * and underwater fall through to legacy.  Bind the early_fragment_tests
+	 * variant for Hi-Z.  uhexen2-5c6r. */
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glUseProgram_fp(gl_shader_world.program);
-	if (gl_shader_world.u_fog_density >= 0)
-		glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-	if (gl_shader_world.u_fog_color >= 0)
-		glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (gl_shader_world.u_alpha_threshold >= 0)
-		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+	glUseProgram_fp(gl_shader_world_opaque.program);
+	if (gl_shader_world_opaque.u_fog_density >= 0)
+		glUniform1f_fp(gl_shader_world_opaque.u_fog_density, r_fog_density);
+	if (gl_shader_world_opaque.u_fog_color >= 0)
+		glUniform3f_fp(gl_shader_world_opaque.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (gl_shader_world_opaque.u_alpha_threshold >= 0)
+		glUniform1f_fp(gl_shader_world_opaque.u_alpha_threshold, 0.01f);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	glActiveTexture_fp(GL_TEXTURE2);
@@ -1473,22 +1476,27 @@ int	rprof_chains_n_skypoly;
 static void DrawTextureChains_BindWorldState (void)
 {
 	float mvp[16], mv[16];
+	/* Fast path emits opaque non-special surfaces (fence/water/sky/turb get
+	 * sorted into separate buffers and the deferred section rebinds the
+	 * cutout variant explicitly).  Use the early_fragment_tests variant
+	 * here.  uhexen2-5c6r. */
+	glprogram_t *prog = &gl_shader_world_opaque;
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glUseProgram_fp(gl_shader_world.program);
+	glUseProgram_fp(prog->program);
 	GL_GetMVP(mvp);
 	GL_GetModelview(mv);
-	if (gl_shader_world.u_mvp >= 0)
-		glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-	if (gl_shader_world.u_modelview >= 0)
-		glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
-	if (gl_shader_world.u_fog_density >= 0)
-		glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-	if (gl_shader_world.u_fog_color >= 0)
-		glUniform3f_fp(gl_shader_world.u_fog_color,
+	if (prog->u_mvp >= 0)
+		glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
+	if (prog->u_modelview >= 0)
+		glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+	if (prog->u_fog_density >= 0)
+		glUniform1f_fp(prog->u_fog_density, r_fog_density);
+	if (prog->u_fog_color >= 0)
+		glUniform3f_fp(prog->u_fog_color,
 			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (gl_shader_world.u_alpha_threshold >= 0)
-		glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+	if (prog->u_alpha_threshold >= 0)
+		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* TU2 is the fullbright mask sampled by sworld_frag.  Default to the
@@ -2375,9 +2383,12 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		 * fast-paths redundant binds to the same object so this is
 		 * cheap when nothing changed.  When a brush batch is active
 		 * we still skip the program-resident fog/alpha/color uniform
-		 * uploads — those persist across glUseProgram cycles. */
+		 * uploads — those persist across glUseProgram cycles.
+		 * Fast path emits opaque non-special surfaces only; bind the
+		 * early_fragment_tests variant.  uhexen2-5c6r. */
+		glprogram_t *prog = &gl_shader_world_opaque;
 		glBindVertexArray_fp(world_vao);
-		glUseProgram_fp(gl_shader_world.program);
+		glUseProgram_fp(prog->program);
 		glActiveTexture_fp(GL_TEXTURE1);
 		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 		/* Default fb to null sentinel — brush ent fast path doesn't
@@ -2389,20 +2400,20 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		if (!brush_batch_active)
 		{
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-			if (gl_shader_world.u_fog_density >= 0)
-				glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-			if (gl_shader_world.u_fog_color >= 0)
-				glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-			if (gl_shader_world.u_alpha_threshold >= 0)
-				glUniform1f_fp(gl_shader_world.u_alpha_threshold, 0.01f);
+			if (prog->u_fog_density >= 0)
+				glUniform1f_fp(prog->u_fog_density, r_fog_density);
+			if (prog->u_fog_color >= 0)
+				glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+			if (prog->u_alpha_threshold >= 0)
+				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 			GL_ImmInvalidateState();
 		}
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		if (gl_shader_world.u_mvp >= 0)
-			glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-		if (gl_shader_world.u_modelview >= 0)
-			glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+		if (prog->u_mvp >= 0)
+			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
+		if (prog->u_modelview >= 0)
+			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
 
 		/* Build texture chains by walking surfaces in texturechain
 		 * order via the model's textures.  Each chain is processed,

@@ -44,7 +44,8 @@ typedef struct {
 	GLint   u_ctime;        /* current cl.time (for dead particle culling) */
 } gl_particle_gpu_prog_t;
 
-extern glprogram_t	gl_shader_world;	/* textured + lightmap, fog */
+extern glprogram_t	gl_shader_world;	/* textured + lightmap, fog (cutout: has discard) */
+extern glprogram_t	gl_shader_world_opaque;	/* opaque variant: early_fragment_tests, no discard (uhexen2-5c6r) */
 extern glprogram_t	gl_shader_alias;	/* vertex-colored, textured, fog */
 extern glprogram_t	gl_shader_2d;		/* orthographic textured quads */
 extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color */
