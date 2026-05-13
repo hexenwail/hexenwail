@@ -196,6 +196,7 @@ extern	qboolean	gl_bindless_able;	/* ARB_bindless_texture present */
 extern	GLint		gl_ssbo_align;
 extern	GLint		gl_ubo_align;
 
+GLuint GL_GetSamplerForFilterMode (int mode);
 void GL_CreateFrameResources (void);
 void GL_DeleteFrameResources (void);
 void GL_AcquireFrameResources (void);

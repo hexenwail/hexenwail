@@ -216,9 +216,13 @@ GLint		gl_max_size = 256;
 GLfloat		gl_max_anisotropy;
 float		gldepthmin, gldepthmax;
 qboolean	gl_clipcontrol_able = false;
+qboolean	gl_bindless_able = false;
 /* User toggle: gl_reversed_z 0 + vid_restart forces forward-Z for
  * debugging regressions in the reversed-Z path. Default on. */
 cvar_t		gl_reversed_z = {"gl_reversed_z", "1", CVAR_ARCHIVE};
+
+/* Bindless texture samplers (GL_ARB_bindless_texture) */
+static GLuint	gl_samplers[NUM_GL_FILTERS];
 
 /* Gamma stuff */
 #define	USE_GAMMA_RAMPS			0
@@ -837,6 +841,66 @@ static inline void GL_ResetFunctions (void) { }
 
 /*
 ===============
+GL_CreateSamplers
+===============
+*/
+static void GL_CreateSamplers (void)
+{
+	int i;
+
+	if (!gl_bindless_able)
+		return;
+
+	glGenSamplers_fp(NUM_GL_FILTERS, gl_samplers);
+
+	for (i = 0; i < NUM_GL_FILTERS; i++)
+	{
+		GLint min_filter = gl_texmodes[i].minimize;
+		GLint mag_filter = gl_texmodes[i].maximize;
+
+		glSamplerParameteri_fp(gl_samplers[i], GL_TEXTURE_MIN_FILTER, min_filter);
+		glSamplerParameteri_fp(gl_samplers[i], GL_TEXTURE_MAG_FILTER, mag_filter);
+		glSamplerParameteri_fp(gl_samplers[i], GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glSamplerParameteri_fp(gl_samplers[i], GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+		if (gl_max_anisotropy > 1.0f)
+			glSamplerParameterf_fp(gl_samplers[i], GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_max_anisotropy);
+	}
+}
+
+/*
+===============
+GL_DeleteSamplers
+===============
+*/
+static void GL_DeleteSamplers (void)
+{
+	int i;
+
+	for (i = 0; i < NUM_GL_FILTERS; i++)
+	{
+		if (gl_samplers[i])
+		{
+			glDeleteSamplers_fp(1, &gl_samplers[i]);
+			gl_samplers[i] = 0;
+		}
+	}
+}
+
+/*
+===============
+GL_GetSamplerForFilterMode
+===============
+*/
+GLuint GL_GetSamplerForFilterMode (int mode)
+{
+	if (mode < 0 || mode >= NUM_GL_FILTERS)
+		return 0;
+	return gl_samplers[mode];
+}
+
+/*
+===============
 GL_Init
 ===============
 */
@@ -936,8 +1000,13 @@ static void GL_Init (void)
 			   (glGetTextureSamplerHandleARB_fp != NULL) &&
 			   (glMakeTextureHandleResidentARB_fp != NULL) &&
 			   (glMakeTextureHandleNonResidentARB_fp != NULL) &&
-			   GL_FindExtension("GL_ARB_bindless_texture") &&
-			   GL_FindExtension("GL_ARB_shader_draw_parameters");
+			   (glGenSamplers_fp != NULL) &&
+			   (glDeleteSamplers_fp != NULL) &&
+			   (glBindSampler_fp != NULL) &&
+			   (glSamplerParameteri_fp != NULL);
+
+	if (gl_bindless_able)
+		GL_CreateSamplers();
 
 	glGetIntegerv_fp (GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT,
 			  &gl_ssbo_align);
@@ -1794,6 +1863,7 @@ void	VID_Init (const unsigned char *palette)
 void	VID_Shutdown (void)
 {
 	GL_PostProcess_Shutdown();
+	GL_DeleteSamplers();
 	VID_ShutdownGamma();
 
 	/* Save window position for next session */
