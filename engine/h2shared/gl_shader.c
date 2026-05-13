@@ -53,11 +53,11 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 
 	shader = glCreateShader_fp(type);
 
-	/* Inject BINDLESS macro definition based on capability */
-	q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
-	sources[0] = preamble;
-	sources[1] = source;
-	glShaderSource_fp(shader, 2, sources, NULL);
+	/* TODO: BINDLESS macro injection disabled pending investigation of shader link failures.
+	 * When shader support is re-enabled, re-add:
+	 * q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
+	 * sources[0] = preamble; sources[1] = source; glShaderSource_fp(shader, 2, sources, NULL); */
+	glShaderSource_fp(shader, 1, (const char *const *)&source, NULL);
 
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
