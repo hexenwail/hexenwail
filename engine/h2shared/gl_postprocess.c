@@ -123,7 +123,7 @@ cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 /* ------------------------------------------------------------------ */
 
 static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
-static GLuint	oit_revealage_tex;	/* R8 revealage */
+static GLuint	oit_revealage_tex;	/* RGBA16F revealage (.r used) */
 static GLuint	oit_fbo;		/* MRT FBO sharing scene depth/stencil */
 static GLuint	oit_resolve_prog;	/* fullscreen resolve shader */
 static GLuint	oit_resolve_vao;	/* dummy VAO required for glDrawArrays
@@ -765,11 +765,17 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	/* Revealage texture (R8) */
+	/* Revealage texture (RGBA16F).  Originally R8 for memory savings,
+	 * but Mesa Intel exhibits inconsistent behavior writing vec4
+	 * fragment outputs to a single-channel R8 attachment in an MRT
+	 * FBO — destination read-back returns 0 for every fragment as
+	 * if writes go nowhere.  Switching to RGBA16F (matching accum's
+	 * format) makes the MRT layout uniform and avoids the issue.
+	 * Slight memory hit; resolve still reads only .r. */
 	glGenTextures_fp(1, &oit_revealage_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R8, width, height, 0,
-			GL_RED, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
+			GL_RGBA, GL_FLOAT, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -1100,7 +1106,7 @@ static void OIT_Status_f (void)
 	Con_Printf("  oit_available:     %d (FBO + resolve shader)\n", (int)oit_available);
 	Con_Printf("  oit_fbo:           %u\n", oit_fbo);
 	Con_Printf("  oit_accum_tex:     %u (RGBA16F)\n", oit_accum_tex);
-	Con_Printf("  oit_revealage_tex: %u (R8)\n", oit_revealage_tex);
+	Con_Printf("  oit_revealage_tex: %u (RGBA16F)\n", oit_revealage_tex);
 	Con_Printf("  oit_resolve_prog:  %u\n", oit_resolve_prog);
 	Con_Printf("  OIT_Active():      %d\n", (int)OIT_Active());
 	Con_Printf("  particle_oit prog: %u\n", gl_shader_particle_oit.program);
