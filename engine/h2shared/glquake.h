@@ -223,6 +223,12 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 #ifndef GL_LOWER_LEFT
 #define GL_LOWER_LEFT			0x8CA1
 #endif
+#ifndef GL_DRAW_FRAMEBUFFER_BINDING
+#define GL_DRAW_FRAMEBUFFER_BINDING	0x8CA6
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING	0x8CAA
+#endif
 
 /* view origin */
 extern	vec3_t		vup;
