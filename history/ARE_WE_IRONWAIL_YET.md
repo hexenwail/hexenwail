@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-13 (Live preview removed)
+Last updated: 2026-05-13 (Bindless textures completed)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 12 | 0 | 1 | 0 |
+| Rendering — GPU Pipeline | 13 | 0 | 0 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
 | Performance / Engine | 7 | 1 | 1 | 1 |
 | UX / Menus / HUD | 22 | 1 | 1 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **77** | **2** | **4** | **8** |
+| **TOTAL** | **78** | **2** | **3** | **8** |
 
-**Parity: 93% ported, 2% partial, 5% missing** (excluding N/A)
+**Parity: 94% ported, 2% partial, 4% missing** (excluding N/A)
 
 ---
 
@@ -40,7 +40,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. All per-frame uploads stream through the ring. |
 | Persistent mapped buffers | ✅ | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes), GPU world-cull PVS bitvector (uhexen2-o35n), and the immediate-mode emulator (uhexen2-y1v5: `GL_ImmEnd`/`GL_ImmDraw` route through `GL_Upload` + `glBindVertexBuffer` via ARB_vertex_attrib_binding). |
 | Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`).  Decoupled from the postprocess pipeline 2026-05-12 (uhexen2-9912, `bddc22128`) — standalone depth resolve in `gl_worldcull.c` works whether or not FXAA/HDR/etc. are on.  `gl_hiz_cull` flipped to default **1** after the acceptance sweep (uhexen2-8pzr) measured 44-58% cull rate on demo1 vistas, well above the ≥10% gate. |
-| Bindless textures | ❌ | `ARB_bindless_texture` — zero bind overhead |
+| Bindless textures | ✅ | `ARB_bindless_texture` + `ARB_gpu_shader_int64` — zero bind overhead. SSBO handles with sampler2D constructor sampling. Disabled by default (`+bindless` flag to enable), seamless fallback to uniform samplers on unsupported hardware (uhexen2-abyz, completed 2026-05-13). |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
 | IQM skeletal model support | ❌ | Runtime skeletal animation |
