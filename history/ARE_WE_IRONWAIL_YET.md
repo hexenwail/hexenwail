@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-13 (Console mouse support Phase 2 completed)
+Last updated: 2026-05-13 (Async task queue verified implemented; console mouse Phase 2 completed)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -14,15 +14,15 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 13 | 0 | 0 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
-| Performance / Engine | 8 | 0 | 1 | 1 |
+| Performance / Engine | 9 | 0 | 0 | 1 |
 | UX / Menus / HUD | 23 | 0 | 1 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **80** | **0** | **2** | **8** |
+| **TOTAL** | **81** | **0** | **1** | **8** |
 
-**Parity: 97% ported, 2% missing** (excluding N/A)
+**Parity: 98% ported, 1% missing** (excluding N/A)
 
 ---
 
@@ -84,7 +84,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | bmodel buffer rebuilt correctly on map change | ✅ | Ironwail fix `3ccbcda` (2026-02): `GL_DeleteBModelBuffers()` was missing before `GL_BuildBModelVertexBuffer()` in `R_NewMap`, causing GPU memory leak on map changes. We also call `GL_DeleteBModelBuffers` before rebuild. Verify `gl_rmisc.c:R_NewMap`. |
 | Alias model GPU data layout | ✅ | Ironwail refactored `a65a88e` (2026-01): SSBO alignment removed per-surface, IQM bind-pose separated. Our alias pipeline layout matches conceptually — no separate SSBO alignment loop needed given our model format. |
 | Faster map loading | ✅ | Lightmap atlas + BSP VBO packing optimized (uhexen2-3mbt, 2026-05-13) |
-| Async main-thread task queue | ❌ | Non-blocking parallel work dispatch |
+| Async main-thread task queue | ✅ | `Host_InvokeOnMainThread()` + `AsyncQueue_Drain()` in `host_async.c` — ring buffer with SDL mutex/condition, drained each frame in `Host_Frame`. Emscripten fallback (synchronous). Plus background save thread (uhexen2-9v0s closed). |
 | Intelligent autosave system | ➖ | Hexen II saves do not map cleanly to Ironwail's health/secret/teleport trigger heuristics |
 | Unicode path support | ✅ | UTF-8 to UTF-16 conversion on Windows (0aa7d3595); POSIX unchanged on Linux. Supports cyrillic, accented Latin, CJK directory names. (uhexen2-ogmq closed). |
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-13, every Missing (❌) item in the tables above has a tracking bead. No Partial (🔶) items remain. The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list. Sixth re-sync 2026-05-13 (completion): closed `uhexen2-ei9r` (console mouse support Phase 2: URL detection, hand cursor on hover, SDL_OpenURL on click; commit 77bb5727a). Row moved from 🔶 to ✅. Scorecard corrected: 80/0/2/8 (UX/Menus/HUD now 23✅/0🔶/1❌, Total now 80✅/0🔶/2❌). Parity bumped to 97% (0% partial).
+As of 2026-05-13, every Missing (❌) item except IQM skeletal models has a tracking bead or is now complete. No Partial (🔶) items remain. The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list. **Seventh re-sync 2026-05-13**: verified async main-thread task queue already fully implemented in `host_async.c` with `Host_InvokeOnMainThread()` + `AsyncQueue_Drain()`. Closed `uhexen2-9v0s`. Scorecard corrected: 81/0/1/8 (Performance now 9✅/0🔶/0❌, Total now 81✅/0🔶/1❌). Parity bumped to 98% (0% partial).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -191,6 +191,7 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ### P3 — Low
 1. **IQM skeletal models** — future mod support
 
+*Async main-thread task queue verified complete 2026-05-13 (uhexen2-9v0s closed — `host_async.c`).*
 *MD3 model support completed 2026-05-12 (uhexen2-f2d3, uhexen2-kaa6).*
 *Console mouse support (Phase 1+2) completed 2026-05-12–2026-05-13 (uhexen2-8vw0, uhexen2-ei9r, commits e091812e7, 77bb5727a).*
 *Faster map loading completed 2026-05-13 (uhexen2-3mbt).*
