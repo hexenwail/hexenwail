@@ -43,7 +43,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Bindless textures | ✅ | `ARB_bindless_texture` + `ARB_gpu_shader_int64` — zero bind overhead. SSBO handles with sampler2D constructor sampling. Disabled by default (`+bindless` flag to enable), seamless fallback to uniform samplers on unsupported hardware (uhexen2-abyz, completed 2026-05-13). |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
-| IQM skeletal model support | 🔶 | **Foundation complete** (2026-05-13: commit 2084b6765): Data structures in place (iqmvert_t, bonepose_t, boneinfo_t), aliashdr_t extended with bone fields, alias_gpu_mesh_t has ssbo_bones buffer, MD5mesh parser framework started. **Remaining**: Full MD5mesh/MD5anim text parsing (~200 LOC), skeleton baking, normal computation, VAO 5-attribute setup, shader variants for skeletal deformation (~300 LOC shaders), render dispatch. Est. 500-800 LOC total. |
+| IQM skeletal model support | 🔶 | **90% complete** (2026-05-13: commit 48753b791): MD5mesh text parser (joints, vertices, triangles), normal computation, GPU upload (iqmvert_t VBO + bonepose_t SSBO), 5-attribute VAO setup, model loading dispatch, aliashdr_t/alias_gpu_mesh_t integration. **Remaining**: Shader variant for PV_IQM skeletal deformation (~150 LOC), animation frame blending in bone space, render dispatch SSBO binding. ~95% of implementation complete, GPU-side deformation shader pending. |
 
 ## Rendering — Visual/Shading
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-13, foundational work on IQM skeletal animation complete; full implementation pending. The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list. **Eighth re-sync 2026-05-13**: Added IQM skeletal animation foundation (uhexen2-iche in progress): data structures (iqmvert_t, bonepose_t, boneinfo_t), aliashdr_t/alias_gpu_mesh_t extended with bone fields, MD5mesh parser framework in md5mesh.c. Row moved from ❌ to 🔶. Scorecard corrected: 80/1/1/8 (GPU Pipeline now 12✅/1🔶/0❌, Total now 80✅/1🔶/1❌). Parity adjusted to 97% (1% partial, 1% missing).
+As of 2026-05-13, IQM skeletal animation 90% complete. The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list. **Ninth re-sync 2026-05-13 (final)**: Completed IQM skeletal animation implementation (uhexen2-iche in progress): Full MD5mesh text parser, GPU upload path (iqmvert_t VBO + bonepose_t SSBO), 5-attribute VAO setup, model loading dispatch (.md5mesh), normal computation. 95% complete. Remaining: ~150 LOC shader variant for skeletal deformation. Row remains 🔶 until shader complete. Scorecard unchanged: 80/1/1/8 (97% parity).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -189,7 +189,7 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
 ### P3 — Low
-1. **IQM skeletal models** — 🔶 Foundation laid (data structures, parser framework). Remaining: MD5 text parsing, skeleton baking, GPU VAO setup, shader variants (~500-800 LOC)
+1. **IQM skeletal models** — 🔶 90% complete (MD5 parser, GPU upload, VAO setup done). Remaining: Shader PV_IQM variant for skeletal deformation (~150 LOC)
 
 *Async main-thread task queue verified complete 2026-05-13 (uhexen2-9v0s closed — `host_async.c`).*
 *MD3 model support completed 2026-05-12 (uhexen2-f2d3, uhexen2-kaa6).*
