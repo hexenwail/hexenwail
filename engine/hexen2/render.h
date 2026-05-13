@@ -43,6 +43,7 @@ typedef struct efrag_s
 #define LERP_MOVESTEP	(1<<0)	// entity uses step-based movement (monsters, doors)
 #define LERP_RESETMOVE	(1<<1)	// reset movement lerp (teleport, spawn)
 #define LERP_RESETANIM	(1<<2)	// reset animation lerp
+#define LERP_RESETANIM2	(1<<3)	// defer animation lerp one more pose change (Ironwail)
 
 typedef struct lightcache_s {
 	int			surfidx;	// < 0: black surface; == 0: no cache; > 0: 1+index of surface
@@ -96,18 +97,13 @@ typedef struct entity_s
 	double			movelerpstart;	// time movement lerp began
 	int			lerpflags;
 
-	// animation interpolation
+	// animation interpolation (Ironwail pose-driven: lerp tracked between
+	// previouspose and currentpose, advanced at render time when posenum
+	// changes — works for single-pose-per-frame and multi-pose anims alike).
 	int			previouspose;
 	int			currentpose;
 	float			lerpstart;	// animation lerp start time
 	float			lerptime;	// animation lerp duration
-	double			lastframechange;// cl.time of last U_FRAME with a new
-						// frame value (0 = never). Drives the
-						// r_animsmoothing heuristic — the
-						// inter-change interval predicts how
-						// long the next frame will be held,
-						// approximating Ironwail's server-driven
-						// LERP_FINISH without a protocol bit.
 
 	lightcache_t	lightcache;	// alias light trace cache
 } entity_t;

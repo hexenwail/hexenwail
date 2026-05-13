@@ -106,6 +106,7 @@ cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
 cvar_t	r_debug_alpha = {"r_debug_alpha", "0", CVAR_NONE};	/* diagnostic: log visedicts with spurious non-opaque alpha (uhexen2-c5xe) */
+qboolean	r_aliasinfo_request = false;	/* one-shot: dump visible alias ent flags */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
@@ -144,7 +145,30 @@ cvar_t	r_caustics_intensity = {"r_caustics_intensity", "0.35", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
-cvar_t	r_animsmoothing = {"r_animsmoothing", "0", CVAR_ARCHIVE};	/* smooth long server-timed animations by lerping over the observed inter-frame interval instead of a fixed 0.1s (Ironwail LERP_FINISH approximation, uhexen2-wax3) */
+/* Comma-separated list of model names that bypass animation lerp — torches
+ * and self-animating flames want discrete pose switching to keep the flame
+ * shape; v_weapons rely on snap-back on attack frames.  Ironwail johnfitz. */
+cvar_t	r_nolerp_list = {"r_nolerp_list",
+	"models/flame1.mdl,"
+	"models/flame2.mdl,"
+	"models/flame3.mdl,"
+	"models/flame4.mdl,"
+	"models/flame.mdl,"
+	"models/torch.mdl,"
+	"models/rflmtrch.mdl,"
+	"models/cflmtrch.mdl,"
+	"models/castrch.mdl,"
+	"models/rometrch.mdl,"
+	"models/egtorch.mdl,"
+	"models/eflmtrch.mdl,"
+	"models/newfire.mdl,"
+	"models/firewal.mdl,"
+	"models/candle.mdl,"
+	"models/firepot.mdl,"
+	"models/firepot2.mdl,"
+	"models/lavaball.mdl,"
+	"models/sm_expld.mdl",
+	CVAR_NONE};
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thinkers only, <0 = non-thinkers only (Ironwail parity) */
@@ -840,66 +864,123 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 
 /*
 =================
+R_AliasResolveLerp
+
+Ironwail-style pose-driven animation lerp.  Tracks currentpose and
+previouspose as actual pose indices and starts a new lerp whenever
+the pose changes — works for both single-pose-per-frame anims and
+multi-pose group cycles without needing a server-side LERP_FINISH
+protocol bit.
+
+Outputs:
+  *out_pose1 -- previous pose index (blend from)
+  *out_pose2 -- current pose index (blend to)
+  *out_blend -- 0.0 = full pose1, 1.0 = full pose2
+=================
+*/
+static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
+				int *out_pose1, int *out_pose2, float *out_blend)
+{
+	int	frame = e->frame;
+	int	posenum, numposes;
+
+	if (frame < 0 || frame >= paliashdr->numframes)
+	{
+		Con_DPrintf ("%s: no such frame %d for %s\n", __thisfunc__, frame, e->model->name);
+		frame = 0;
+	}
+
+	posenum  = paliashdr->frames[frame].firstpose;
+	numposes = paliashdr->frames[frame].numposes;
+
+	if (numposes > 1)
+	{
+		/* Multi-pose group anim (flames, torches): pose advances on the
+		 * cycle interval; lerp duration equals the interval. */
+		float interval = paliashdr->frames[frame].interval;
+		e->lerptime = interval;
+		posenum += (int)(cl.time / interval) % numposes;
+	}
+	else
+	{
+		/* Single pose per frame: lerp duration matches Hexen II's 20 Hz
+		 * server tick (0.05s).  At Quake's 10 Hz tick Ironwail uses
+		 * 0.1; using 0.1 here causes lerp to be only 50% complete when
+		 * the next U_FRAME arrives at 20 Hz, producing visible pops. */
+		e->lerptime = 0.05f;
+	}
+
+	if (e->lerpflags & LERP_RESETANIM)
+	{
+		/* Kill any lerp in progress: snap to current pose. */
+		e->lerpstart    = 0;
+		e->previouspose = posenum;
+		e->currentpose  = posenum;
+		e->lerpflags   &= ~LERP_RESETANIM;
+	}
+	else if (e->currentpose != posenum)
+	{
+		/* Pose changed -- start a new lerp from the (previously
+		 * "current") pose toward the new posenum. */
+		if (e->lerpflags & LERP_RESETANIM2)
+		{
+			/* Two-stage reset: skip lerp for one more pose change
+			 * (used by some spawn paths to avoid lerping from a
+			 * stale rest pose). */
+			e->lerpstart    = 0;
+			e->previouspose = posenum;
+			e->currentpose  = posenum;
+			e->lerpflags   &= ~LERP_RESETANIM2;
+		}
+		else
+		{
+			e->lerpstart    = cl.time;
+			e->previouspose = e->currentpose;
+			e->currentpose  = posenum;
+		}
+	}
+
+	if (r_lerpmodels.integer && !model_fullbright_pass &&
+	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f)
+	{
+		float blend = (float)(cl.time - e->lerpstart) / e->lerptime;
+		if (blend < 0.0f) blend = 0.0f;
+		else if (blend > 1.0f) blend = 1.0f;
+
+		/* Once the lerp finishes, fold the result into previouspose so
+		 * the next "currentpose != posenum" check picks up exactly one
+		 * pose-change of delta to lerp over. */
+		if (blend == 1.0f)
+			e->previouspose = e->currentpose;
+
+		*out_pose1 = e->previouspose;
+		*out_pose2 = e->currentpose;
+		*out_blend = blend;
+	}
+	else
+	{
+		/* No lerp: snap to the resolved pose. */
+		*out_pose1 = posenum;
+		*out_pose2 = posenum;
+		*out_blend = 1.0f;
+	}
+}
+
+/*
+=================
 R_SetupAliasFrame
 
 =================
 */
 static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 {
-	int	pose, prevpose, numposes, frame, prevframe;
-	float	interval, lerpfrac;
+	int	pose, prevpose;
+	float	blend;
 
-	frame = e->frame;
-	if ((frame >= paliashdr->numframes) || (frame < 0))
-	{
-		Con_DPrintf ("%s: no such frame %d for %s\n", __thisfunc__, frame, e->model->name);
-		frame = 0;
-	}
+	R_AliasResolveLerp (e, paliashdr, &prevpose, &pose, &blend);
 
-	pose = paliashdr->frames[frame].firstpose;
-	numposes = paliashdr->frames[frame].numposes;
-
-	if (numposes > 1)
-	{
-		interval = paliashdr->frames[frame].interval;
-		pose += (int)(cl.time / interval) % numposes;
-	}
-
-	/* Calculate animation interpolation */
-	prevframe = e->previouspose;
-	lerpfrac = 0.0f;
-
-	if ((e->lerpflags & LERP_RESETANIM) || model_fullbright_pass)
-	{
-		/* Skip animation lerp after teleport or during fullbright pass */
-		if (e->lerpflags & LERP_RESETANIM)
-		{
-			e->lerpflags &= ~LERP_RESETANIM;
-			e->lerptime = 0;
-		}
-	}
-	else if (r_lerpmodels.integer && e->lerptime > 0 && prevframe != frame &&
-	    prevframe >= 0 && prevframe < paliashdr->numframes)
-	{
-		float elapsed = cl.time - e->lerpstart;
-		lerpfrac = elapsed / e->lerptime;
-		if (lerpfrac >= 1.0f)
-			lerpfrac = 0.0f;	/* lerp complete, use current frame */
-		else
-			lerpfrac = 1.0f - lerpfrac; /* invert: 1=prev, 0=current */
-	}
-
-	if (lerpfrac > 0.0f)
-	{
-		prevpose = paliashdr->frames[prevframe].firstpose;
-		numposes = paliashdr->frames[prevframe].numposes;
-		if (numposes > 1)
-		{
-			interval = paliashdr->frames[prevframe].interval;
-			prevpose += (int)(e->lerpstart / interval) % numposes;
-		}
-		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, 1.0f - lerpfrac);
-	}
+	if (blend > 0.0f && blend < 1.0f && prevpose != pose)
+		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, blend);
 	else
 	{
 		GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
@@ -1934,9 +2015,9 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	aliashdr_t	*paliashdr;
 	qmodel_t	*clmodel;
 	vec3_t		mins, maxs;
-	int		mls, lnum, skinnum, anim, frame, prevframe;
-	int		pose, prevpose, numposes;
-	float		interval, lerpfrac, add, entScale;
+	int		mls, lnum, skinnum, anim;
+	int		pose, prevpose;
+	float		lerpfrac, add, entScale;
 	float		xyfact = 1.0, zfact = 1.0;
 	/* Switch fall-throughs below leave these uninitialized when
 	 * drawflags has unrecognized bits — gcc -Wmaybe-uninitialized
@@ -2135,44 +2216,10 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	GL_LoadMatrixf(saved_mv);
 
 	/* --- Resolve pose and lerp --- */
-	frame = e->frame;
-	if (frame >= paliashdr->numframes || frame < 0)
-		frame = 0;
-	pose = paliashdr->frames[frame].firstpose;
-	numposes = paliashdr->frames[frame].numposes;
-	if (numposes > 1)
 	{
-		interval = paliashdr->frames[frame].interval;
-		pose += (int)(cl.time / interval) % numposes;
-	}
-
-	prevframe = e->previouspose;
-	lerpfrac = 0.0f;
-	if (r_lerpmodels.integer && e->lerptime > 0 && prevframe != frame &&
-	    prevframe >= 0 && prevframe < paliashdr->numframes &&
-	    !(e->lerpflags & LERP_RESETANIM))
-	{
-		float elapsed = cl.time - e->lerpstart;
-		lerpfrac = elapsed / e->lerptime;
-		if (lerpfrac >= 1.0f)
-			lerpfrac = 0.0f;
-		else
-			lerpfrac = 1.0f - lerpfrac;
-	}
-
-	if (lerpfrac > 0.0f)
-	{
-		prevpose = paliashdr->frames[prevframe].firstpose;
-		numposes = paliashdr->frames[prevframe].numposes;
-		if (numposes > 1)
-		{
-			interval = paliashdr->frames[prevframe].interval;
-			prevpose += (int)(e->lerpstart / interval) % numposes;
-		}
-	}
-	else
-	{
-		prevpose = pose;
+		float blend_f;
+		R_AliasResolveLerp (e, paliashdr, &prevpose, &pose, &blend_f);
+		lerpfrac = blend_f;	/* 0 = prev, 1 = curr (semantic matches shader's mix(v1, v0, blend)) */
 	}
 
 	/* --- Resolve skin texture --- */
@@ -2219,19 +2266,12 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	}
 
 	inst->alpha = 1.0f;
-	{
-		/* Clamp blend to [0,1] — GLSL mix() extrapolates outside this
-		 * range, so any bogus lerpfrac (e.g. e->lerpstart from a stale
-		 * time reference after map change / demo seek / save-load) would
-		 * fling vertices outward from the entity origin.  Legacy CPU path
-		 * has the same risk but is guarded by 'do_lerp = lerpfrac in (0,1)'
-		 * inside GL_DrawAliasFrame; the SSBO path needs the clamp here.
-		 * uhexen2-iir3. */
-		float blend = 1.0f - lerpfrac;
-		if (blend < 0.0f) blend = 0.0f;
-		else if (blend > 1.0f) blend = 1.0f;
-		inst->blend = blend;	/* shader: mix(v1, v0, blend), 1.0 = use v0 */
-	}
+	/* R_AliasResolveLerp already clamps blend to [0, 1] — GLSL mix()
+	 * extrapolates outside this range and would fling vertices outward
+	 * from the entity origin (uhexen2-iir3).  Shader does mix(v1, v0, blend)
+	 * with v0 = pose0 (current) and v1 = pose1 (previous), so blend=1
+	 * yields the current pose. */
+	inst->blend = lerpfrac;
 	inst->pose0 = pose * gm->poseverts;	/* pre-multiply for direct SSBO indexing */
 	inst->pose1 = prevpose * gm->poseverts;
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
@@ -2644,6 +2684,52 @@ static double	rprof_cpu_phase2_loop;
 
 /*
 =============
+R_DumpAliasInfo
+
+One-shot console dump: walks cl_visedicts and prints model name, drawflags,
+e->alpha (raw + decoded), e->model->flags for every alias-typed entity.  Used
+to diagnose the per-entity translucency-stipple bug — type `r_aliasinfo` at
+the console and the next rendered frame prints one line per visible alias
+entity to the console.
+=============
+*/
+static void R_DumpAliasInfo (void)
+{
+	int		i;
+	entity_t	*e;
+	float		alpha_decoded;
+	const char	*name;
+	int		df, mf;
+
+	Con_Printf ("--- r_aliasinfo: %d visedicts at time %.2f ---\n",
+		cl_numvisedicts, cl.time);
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		e = cl_visedicts[i];
+		if (!e || !e->model || e->model->type != mod_alias)
+			continue;
+		name = e->model->name ? e->model->name : "<null>";
+		df = e->drawflags;
+		mf = e->model->flags;
+		alpha_decoded = ENTALPHA_DECODE(e->alpha);
+		Con_Printf ("  [%3d] %-32s df=0x%04x mf=0x%08x a=%3u(%.2f)%s%s%s%s\n",
+			i, name, df, mf, (unsigned)e->alpha, alpha_decoded,
+			(df & DRF_TRANSLUCENT)      ? " DRF_TRANS"   : "",
+			(mf & EF_HOLEY)             ? " EF_HOLEY"    : "",
+			(mf & EF_TRANSPARENT)       ? " EF_TRANSP"   : "",
+			(mf & EF_SPECIAL_TRANS)     ? " EF_SPECTR"   : "");
+	}
+	Con_Printf ("--- end r_aliasinfo ---\n");
+}
+
+void R_AliasInfo_f (void)
+{
+	r_aliasinfo_request = true;
+	Con_Printf ("r_aliasinfo armed — dumping alias entities on next frame.\n");
+}
+
+/*
+=============
 R_DrawEntitiesOnList
 =============
 */
@@ -2657,6 +2743,12 @@ static void R_DrawEntitiesOnList (void)
 
 	cl_numtransvisedicts = 0;
 	cl_numtranswateredicts = 0;
+
+	if (r_aliasinfo_request)
+	{
+		R_DumpAliasInfo ();
+		r_aliasinfo_request = false;
+	}
 
 	if (r_speeds.integer >= 2)
 	{
