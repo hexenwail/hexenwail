@@ -2721,11 +2721,15 @@ void R_BuildWorldVBO (void)
 {
 	qmodel_t	*m = cl.worldmodel;
 	msurface_t	*surf;
-	glpoly_t	*p;
 	worldvert_t	*verts;
 	unsigned int	*indices;
-	int		i, j, v_pos, idx_pos;
+	int		i, j, lindex, v_pos, idx_pos;
 	int		total_verts = 0, total_tris = 0;
+	int		lnumverts;
+	medge_t		*pedge;
+	mvertex_t	*pvert;
+	float		s, t;
+	vec3_t		vec;
 
 	if (!m)
 		return;
@@ -2735,18 +2739,18 @@ void R_BuildWorldVBO (void)
 	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
 
-	/* Pass 1: count vertices and triangles */
+	/* Pass 1: count vertices and triangles from BSP surfaces */
 	for (i = 0; i < m->numsurfaces; i++)
 	{
 		surf = &m->surfaces[i];
-		p = surf->polys;
-		if (!p || p->numverts < 3)
-			continue;
 		/* Skip sky and warped surfaces — they have special rendering */
 		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
 			continue;
-		total_verts += p->numverts;
-		total_tris += p->numverts - 2;
+		lnumverts = surf->numedges;
+		if (lnumverts < 3)
+			continue;
+		total_verts += lnumverts;
+		total_tris += lnumverts - 2;
 	}
 
 	if (total_verts == 0)
@@ -2761,44 +2765,78 @@ void R_BuildWorldVBO (void)
 		return;
 	}
 
-	/* Pass 2: fill vertex and index data */
+	/* Pass 2: reconstruct vertices directly from BSP data */
 	v_pos = 0;
 	idx_pos = 0;
 	for (i = 0; i < m->numsurfaces; i++)
 	{
 		surf = &m->surfaces[i];
-		p = surf->polys;
-		if (!p || p->numverts < 3)
-			continue;
 		if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
+			continue;
+		lnumverts = surf->numedges;
+		if (lnumverts < 3)
 			continue;
 
 		surf->vbo_firstvert = v_pos;
 		surf->vbo_firstindex = idx_pos;
-		surf->vbo_numtris = p->numverts - 2;
+		surf->vbo_numtris = lnumverts - 2;
 
-		/* Emit vertices */
-		for (j = 0; j < p->numverts; j++)
+		/* Reconstruct vertices from surfedges/edges/vertexes */
+		for (j = 0; j < lnumverts; j++)
 		{
-			float *v = p->verts[j];
-			if (!v) {
-				Con_SafePrintf("ERROR: null vertex pointer in surf %d vert %d\n", i, j);
-				free(verts);
-				free(indices);
-				return;
+			lindex = m->surfedges[surf->firstedge + j];
+
+			/* Get vertex position from edge lookup */
+			if (lindex > 0) {
+				pedge = &m->edges[lindex];
+				pvert = &m->vertexes[pedge->v[0]];
+			} else {
+				pedge = &m->edges[-lindex];
+				pvert = &m->vertexes[pedge->v[1]];
 			}
-			verts[v_pos].pos[0] = v[0];
-			verts[v_pos].pos[1] = v[1];
-			verts[v_pos].pos[2] = v[2];
-			verts[v_pos].st[0] = v[3];
-			verts[v_pos].st[1] = v[4];
-			verts[v_pos].lm[0] = v[5];
-			verts[v_pos].lm[1] = v[6];
+			VectorCopy(pvert->position, vec);
+
+			/* Compute diffuse texture coordinates */
+			s = DotProduct(vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
+			s /= surf->texinfo->texture->width;
+			t = DotProduct(vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
+			t /= surf->texinfo->texture->height;
+
+			verts[v_pos].pos[0] = vec[0];
+			verts[v_pos].pos[1] = vec[1];
+			verts[v_pos].pos[2] = vec[2];
+			verts[v_pos].st[0] = s;
+			verts[v_pos].st[1] = t;
+
+			/* Compute lightmap texture coordinates */
+			s = DotProduct(vec, surf->texinfo->vecs[0]) + surf->texinfo->vecs[0][3];
+			s -= surf->texturemins[0];
+			s += surf->light_s * 16;
+			s += 8;
+			s /= BLOCK_WIDTH * 16;
+
+			t = DotProduct(vec, surf->texinfo->vecs[1]) + surf->texinfo->vecs[1][3];
+			t -= surf->texturemins[1];
+			t += surf->light_t * 16;
+			t += 8;
+			t /= BLOCK_HEIGHT * 16;
+
+			/* Remap page-local UV to atlas position (if atlas enabled) */
+			if (lm_atlas_enabled)
+			{
+				int col = surf->lightmaptexturenum % LM_ATLAS_COLS;
+				int row = surf->lightmaptexturenum / LM_ATLAS_COLS;
+				s = (col + s) / (float)LM_ATLAS_COLS;
+				t = (row + t) / (float)LM_ATLAS_ROWS;
+			}
+
+			verts[v_pos].lm[0] = s;
+			verts[v_pos].lm[1] = t;
 			v_pos++;
 		}
 
 		/* Emit triangle fan indices */
-		for (j = 2; j < p->numverts; j++)
+		for (j = 2; j < lnumverts; j++)
 		{
 			indices[idx_pos++] = surf->vbo_firstvert;
 			indices[idx_pos++] = surf->vbo_firstvert + j - 1;
