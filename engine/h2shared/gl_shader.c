@@ -320,6 +320,14 @@ static const char sworld_vert[] =
 	 * local frame, which is acceptable for moving func_* ents (the effect
 	 * is subtle and rarely visible mid-motion).  uhexen2-6bfm. */
 	"out vec2 v_worldxy;\n"
+	/* Bindless texture handles: diffuse (xy), fullbright (zw). Only populated
+	 * when BINDLESS=1; otherwise varyings remain uninitialized (benign in
+	 * fallback path where uniform samplers are used instead). */
+	"#if BINDLESS\n"
+	"struct gl_draw_call_t { uint flags; uint _pad1; uint64_t tx_handle; uint64_t fb_handle; };\n"
+	"layout(binding=0, std430) buffer DrawCallBuffer { gl_draw_call_t calls[]; } u_draw_calls;\n"
+	"flat out uvec4 v_texhandles;\n"
+	"#endif\n"
 	/* invariant gl_Position: pin position math so within-shader vertex
 	 * transforms produce stable depth across draw calls.  Brush ents
 	 * share this same compiled program (uhexen2-mf45), so the
@@ -331,6 +339,10 @@ static const char sworld_vert[] =
 	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
 	"    v_worldxy = a_position.xy;\n"
+	"#if BINDLESS\n"
+	"    gl_draw_call_t call = u_draw_calls.calls[0];\n"
+	"    v_texhandles = uvec4(unpackUint2x32(call.tx_handle), unpackUint2x32(call.fb_handle));\n"
+	"#endif\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
@@ -365,10 +377,17 @@ static const char sworld_frag[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	"#if BINDLESS\n"
+	"flat in uvec4 v_texhandles;\n"
+	"#endif\n"
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
+	"#if BINDLESS\n"
+	"    vec4 tex = texture(sampler2D(v_texhandles.xy), v_texcoord);\n"
+	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
@@ -378,7 +397,11 @@ static const char sworld_frag[] =
 	 * mask texture per miptex (transparent everywhere else); for
 	 * surfaces with no fullbright pixels the engine binds a 1x1
 	 * black sentinel at unit 2 so the sample contributes 0. */
+	"#if BINDLESS\n"
+	"    vec3 fb = texture(sampler2D(v_texhandles.zw), v_texcoord).rgb;\n"
+	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"#endif\n"
 	"    color.rgb += fb;\n"
 	/* Underwater caustics: gated by u_caustics.x (set to 0 by C when the
 	 * view leaf is not CONTENTS_WATER or the cvar is off, otherwise to
@@ -428,13 +451,24 @@ static const char sworld_frag_opaque[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	"#if BINDLESS\n"
+	"flat in uvec4 v_texhandles;\n"
+	"#endif\n"
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
+	"#if BINDLESS\n"
+	"    vec4 tex = texture(sampler2D(v_texhandles.xy), v_texcoord);\n"
+	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
+	"#if BINDLESS\n"
+	"    vec3 fb = texture(sampler2D(v_texhandles.zw), v_texcoord).rgb;\n"
+	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"#endif\n"
 	"    color.rgb += fb;\n"
 	"    if (u_caustics.x > 0.0) {\n"
 	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
