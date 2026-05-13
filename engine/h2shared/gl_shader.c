@@ -64,7 +64,8 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	{
 		version_end++; /* skip newline */
 		q_snprintf(macro_def, sizeof(macro_def), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
-		Con_SafePrintf("[SHADER] Compiling %s shader with BINDLESS=%d\n", type_name, gl_bindless_able ? 1 : 0);
+		if (developer.integer)
+			Con_SafePrintf("[SHADER] Compiling %s shader with BINDLESS=%d\n", type_name, gl_bindless_able ? 1 : 0);
 
 		/* Source array: [version line] [macro def] [rest of source] */
 		size_t version_len = version_end - source;
@@ -82,7 +83,8 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	else
 	{
 		/* No #version found, use source as-is (shouldn't happen with GLSL_VERT_HEADER) */
-		Con_SafePrintf("[SHADER] WARNING: No #version found in %s shader\n", type_name);
+		if (developer.integer)
+			Con_SafePrintf("[SHADER] WARNING: No #version found in %s shader\n", type_name);
 		sources[0] = source;
 		num_sources = 1;
 	}
@@ -103,7 +105,8 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 		glDeleteShader_fp(shader);
 		return 0;
 	}
-	Con_SafePrintf("[SHADER] %s shader compiled OK (id=%u)\n", type_name, shader);
+	if (developer.integer)
+		Con_SafePrintf("[SHADER] %s shader compiled OK (id=%u)\n", type_name, shader);
 	return shader;
 }
 
@@ -113,7 +116,8 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 	GLint status;
 	char log[2048];
 
-	Con_SafePrintf("[SHADER] Linking program (vert=%u, frag=%u)\n", vert, frag);
+	if (developer.integer)
+		Con_SafePrintf("[SHADER] Linking program (vert=%u, frag=%u)\n", vert, frag);
 
 	if (!vert || !frag)
 	{
@@ -140,7 +144,8 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 		glDeleteProgram_fp(prog);
 		return 0;
 	}
-	Con_SafePrintf("[SHADER] Program linked OK (id=%u)\n", prog);
+	if (developer.integer)
+		Con_SafePrintf("[SHADER] Program linked OK (id=%u)\n", prog);
 	return prog;
 }
 
