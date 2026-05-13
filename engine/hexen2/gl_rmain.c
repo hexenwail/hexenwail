@@ -135,6 +135,11 @@ cvar_t	r_turbalpha = {"r_turbalpha", "1", CVAR_ARCHIVE};
  * points so the warp math produces a continuous output across the seam.
  * uhexen2-9o7u. */
 cvar_t	r_turbtjunc = {"r_turbtjunc", "1", CVAR_ARCHIVE};
+/* Underwater caustics overlay on world surfaces when r_viewleaf is in
+ * CONTENTS_WATER.  Cheap procedural sin-product pattern in the world
+ * fragment shader, gated by u_caustics.x.  uhexen2-6bfm. */
+cvar_t	r_caustics = {"r_caustics", "1", CVAR_ARCHIVE};
+cvar_t	r_caustics_intensity = {"r_caustics_intensity", "0.35", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
@@ -3608,6 +3613,30 @@ static void R_SetupFrame (void)
 
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
+
+	/* Upload caustics uniform on both world programs.  GL uniform state is
+	 * per-program and persists across glUseProgram cycles, so setting once
+	 * per frame (immediately after r_viewleaf updates) is enough — every
+	 * subsequent world-shader draw this frame picks up the right value
+	 * without per-bind plumbing.  uhexen2-6bfm. */
+	{
+		float intensity = 0.0f;
+		float t = (float)cl.time;
+		if (r_caustics.integer && r_viewleaf &&
+		    r_viewleaf->contents == CONTENTS_WATER)
+			intensity = r_caustics_intensity.value;
+		if (gl_shader_world.program && gl_shader_world.u_caustics >= 0)
+		{
+			glUseProgram_fp(gl_shader_world.program);
+			glUniform2f_fp(gl_shader_world.u_caustics, intensity, t);
+		}
+		if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_caustics >= 0)
+		{
+			glUseProgram_fp(gl_shader_world_opaque.program);
+			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
+		}
+		glUseProgram_fp(0);
+	}
 
 	r_cache_thrash = false;
 

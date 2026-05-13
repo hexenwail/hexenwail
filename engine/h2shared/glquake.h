@@ -280,6 +280,8 @@ extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_telealpha;
 extern	cvar_t	r_turbalpha;	/* default alpha for unknown turb names (uhexen2-6697 fallback) */
 extern	cvar_t	r_turbtjunc;	/* heal T-junctions between adjacent turb surfaces (uhexen2-9o7u) */
+extern	cvar_t	r_caustics;	/* underwater caustics on/off (uhexen2-6bfm) */
+extern	cvar_t	r_caustics_intensity;	/* caustics overlay strength */
 extern	cvar_t	r_motionblur;
 extern	cvar_t	r_alias_gpu;
 extern	cvar_t	r_alphatocoverage;

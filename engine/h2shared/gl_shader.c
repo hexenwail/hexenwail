@@ -211,6 +211,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
 	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
 	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
+	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 }
 
 /* ------------------------------------------------------------------ */
@@ -304,6 +305,13 @@ static const char sworld_vert[] =
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	/* World-space XY for caustics sampling.  For world surfaces a_position
+	 * IS world space.  For brush ents R_RotateForEntity multiplies into
+	 * u_modelview, not into a_position, so a_position here is still
+	 * model-local for brush ents — caustics will tile with the brush ent's
+	 * local frame, which is acceptable for moving func_* ents (the effect
+	 * is subtle and rarely visible mid-motion).  uhexen2-6bfm. */
+	"out vec2 v_worldxy;\n"
 	/* invariant gl_Position: pin position math so within-shader vertex
 	 * transforms produce stable depth across draw calls.  Brush ents
 	 * share this same compiled program (uhexen2-mf45), so the
@@ -314,10 +322,25 @@ static const char sworld_vert[] =
 	"    v_texcoord = a_texcoord;\n"
 	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
+	"    v_worldxy = a_position.xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
+
+/* Procedural underwater caustics — cheap 2-sin product, ~104 world-unit
+ * tiling (Hexen II uses 1 unit ≈ 1 inch).  Pow steepens the highlight so
+ * the additive contribution looks like crisp light caustics rather than a
+ * smooth modulation.  Time advances via u_caustics.y so the pattern flows.
+ * uhexen2-6bfm. */
+#define GLSL_CAUSTICS_FN \
+	"float Caustics(vec2 p, float t) {\n" \
+	"    vec2 q1 = p * 0.06 + vec2(t * 0.42, t * 0.31);\n" \
+	"    vec2 q2 = p * 0.05 - vec2(t * 0.27, t * 0.49);\n" \
+	"    float c1 = sin(q1.x + sin(q1.y + t));\n" \
+	"    float c2 = sin(q2.y * 1.3 + sin(q2.x * 0.9 + t * 1.1));\n" \
+	"    return pow(max(c1 * c2 * 0.5 + 0.5, 0.0), 4.0);\n" \
+	"}\n"
 
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
@@ -328,11 +351,14 @@ static const char sworld_frag[] =
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
+	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
+	"in vec2 v_worldxy;\n"
 	"out vec4 fragColor;\n"
+	GLSL_CAUSTICS_FN
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
@@ -346,6 +372,14 @@ static const char sworld_frag[] =
 	 * black sentinel at unit 2 so the sample contributes 0. */
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
 	"    color.rgb += fb;\n"
+	/* Underwater caustics: gated by u_caustics.x (set to 0 by C when the
+	 * view leaf is not CONTENTS_WATER or the cvar is off, otherwise to
+	 * r_caustics_intensity).  Applied as a brightness multiplier so dark
+	 * areas still receive a visible highlight band.  uhexen2-6bfm. */
+	"    if (u_caustics.x > 0.0) {\n"
+	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
+	"        color.rgb += color.rgb * c * u_caustics.x;\n"
+	"    }\n"
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
@@ -380,17 +414,24 @@ static const char sworld_frag_opaque[] =
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"	/* unused but kept for layout parity */
+	"uniform vec2 u_caustics;\n"		/* x=intensity, y=time (uhexen2-6bfm) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
+	"in vec2 v_worldxy;\n"
 	"out vec4 fragColor;\n"
+	GLSL_CAUSTICS_FN
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
 	"    color.rgb += fb;\n"
+	"    if (u_caustics.x > 0.0) {\n"
+	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
+	"        color.rgb += color.rgb * c * u_caustics.x;\n"
+	"    }\n"
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
