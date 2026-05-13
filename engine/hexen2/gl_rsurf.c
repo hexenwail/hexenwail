@@ -642,17 +642,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		/* Translucent surfaces must not write depth — otherwise the
 		 * alpha-blended brush ent occludes anything drawn after it
 		 * (e.g. world lava in the R_DrawWaterSurfaces pass behind a
-		 * func_illusionary).  uhexen2-t4kt.
-		 *
-		 * Inside an OIT pass, OIT_BeginTranslucency installed per-buffer
-		 * blend funcs via glBlendFunci for MRT0 (accum: ONE/ONE) and
-		 * MRT1 (revealage: ZERO/ONE_MINUS_SRC_COLOR).  Calling
-		 * glBlendFunc here overrides BOTH at once and breaks WBOIT for
-		 * every translucent draw that follows in the same pass —
-		 * particles, sprites, water turb, later alias models.
-		 * Manifests as "weapon trails / blood trails stepped on"
-		 * whenever a translucent brush ent (func_illusionary, func_water
-		 * with alpha, etc.) draws inside OIT.  uhexen2-a0hp. */
+		 * func_illusionary).  uhexen2-t4kt.  Blend func gated for OIT
+		 * pass. */
 		if (!OIT_InPass())
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glDepthMask_fp(0);
@@ -686,10 +677,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		/* Restore the DRF_TRANSLUCENT prelude state — the cleanup at
 		 * the bottom of this function is bypassed by this early return
 		 * and a leaked DepthMask=0 / BLEND-on would corrupt the next
-		 * draw call.  uhexen2-j001.
-		 * Inside an OIT pass keep DepthMask=0 and BLEND on so the
-		 * WBOIT per-buffer blend funcs survive into the next
-		 * translucent draw (uhexen2-a0hp). */
+		 * draw call.  uhexen2-j001.  Gated for OIT pass. */
 		if ((e->drawflags & DRF_TRANSLUCENT) && !OIT_InPass())
 		{
 			glDepthMask_fp(1);
@@ -726,7 +714,6 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		if (turb_blend)
 		{
 			glEnable_fp (GL_BLEND);
-			/* Inside OIT keep the WBOIT per-buffer blend funcs in place. */
 			if (!OIT_InPass())
 				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDepthMask_fp(0);
@@ -738,8 +725,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			 * to 0 assuming a translucent surface, but the per-liquid
 			 * alpha override means this surface is actually opaque
 			 * and must occlude geometry behind it.  uhexen2-j001.
-			 * Inside an OIT pass we must not touch BLEND / DepthMask —
-			 * WBOIT will weight the alpha=1 contribution correctly. */
+			 * Gated for OIT pass. */
 			glDisable_fp (GL_BLEND);
 			glDepthMask_fp(1);
 		}
@@ -792,9 +778,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		 * the bottom of this function is bypassed by this early return,
 		 * so any DepthMask=0 / BLEND-on left by the prelude or the
 		 * turb_blend branch above would leak into the next draw.
-		 * uhexen2-j001.
-		 * Inside an OIT pass leave both alone — WBOIT depends on the
-		 * MRT blend funcs and depth writes off (uhexen2-a0hp). */
+		 * uhexen2-j001.  Gated for OIT pass. */
 		if (!OIT_InPass())
 		{
 			glDepthMask_fp(1);
@@ -807,10 +791,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		/* Alpha-tested cutout — surviving pixels are fully opaque, so
 		 * write depth normally even when the entity is DRF_TRANSLUCENT
-		 * (which set DepthMask=0 above).  uhexen2-t4kt.
-		 * Inside an OIT pass leave the WBOIT blend/depth state intact;
-		 * the alpha-tested fragments will route through the OIT shader
-		 * with full weight. */
+		 * (which set DepthMask=0 above).  uhexen2-t4kt.  Gated for OIT
+		 * pass. */
 		if (!OIT_InPass())
 		{
 			glDisable_fp(GL_BLEND);
@@ -887,12 +869,7 @@ dynamic:
 
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
-		/* Inside an OIT pass the per-buffer blend funcs from
-		 * OIT_BeginTranslucency must persist across translucent draws —
-		 * OIT_EndTranslucency does its own restore.  Same for depth
-		 * writes: re-enabling here would punch holes in WBOIT's shared
-		 * depth and z-cull every later translucent fragment
-		 * (uhexen2-a0hp). */
+		/* gated for OIT pass */
 		if (!OIT_InPass())
 		{
 			glDepthMask_fp(1);
@@ -928,10 +905,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	intensity = 1.0f;
 	alpha_val = 1.0f;
 
-	/* KIERO: Seems it's enabled when we enter here.
-	 * Inside an OIT pass BLEND must stay on with the WBOIT per-buffer
-	 * blend funcs intact — disabling here clobbers them for every
-	 * translucent draw that follows (uhexen2-a0hp). */
+	/* KIERO: Seems it's enabled when we enter here.  Gated for OIT pass. */
 	if (!OIT_InPass())
 		glDisable_fp (GL_BLEND);
 
@@ -971,8 +945,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
-		/* uhexen2-t4kt — see R_RenderBrushPoly.  Inside an OIT pass
-		 * keep WBOIT's BLEND + DepthMask=0 state (uhexen2-a0hp). */
+		/* uhexen2-t4kt — see R_RenderBrushPoly.  Gated for OIT pass. */
 		if (!OIT_InPass())
 		{
 			glDisable_fp(GL_BLEND);
@@ -989,7 +962,6 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		if (turb_alpha < 1.0f && alpha_val >= 1.0f)
 		{
 			glEnable_fp (GL_BLEND);
-			/* Inside OIT, keep the WBOIT per-buffer blend funcs. */
 			if (!OIT_InPass())
 				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			glDepthMask_fp(0);
@@ -998,9 +970,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		EmitWaterPolys (fa);
 		if (turb_alpha < 1.0f && !OIT_InPass())
 		{
-			/* See R_RenderBrushPoly's matching cleanup — both DepthMask
-			 * and BLEND must stay at WBOIT defaults inside an OIT pass
-			 * (uhexen2-a0hp). */
+			/* See R_RenderBrushPoly's matching cleanup. */
 			glDepthMask_fp(1);
 			glDisable_fp(GL_BLEND);
 		}
@@ -1198,12 +1168,8 @@ void R_DrawWaterSurfaces (int phase)
 
 		/* Phase gate: opaque liquids draw BEFORE OIT_BeginTranslucency
 		 * (writes depth, no blend, scene FBO).  Translucent liquids
-		 * draw INSIDE the OIT pass.  Mixing them puts opaque lava in
-		 * the WBOIT accum buffer with BLEND disabled — the resolve
-		 * formula treats it as zero-alpha and the lava vanishes.
-		 *
-		 * WATER_PHASE_ALL keeps the legacy "do both" behavior for the
-		 * mirror code path, which doesn't run inside OIT. */
+		 * draw INSIDE the OIT pass.  WATER_PHASE_ALL keeps the legacy
+		 * "do both" behavior for the mirror code path. */
 		if (phase == WATER_PHASE_OPAQUE && !is_opaque)
 			continue;
 		if (phase == WATER_PHASE_TRANSLUCENT && is_opaque)
@@ -1219,10 +1185,7 @@ void R_DrawWaterSurfaces (int phase)
 		else
 		{
 			/* translucent liquid: draw with blend, no depth write.
-			 * Inside an OIT pass the per-buffer blend funcs set up by
-			 * OIT_BeginTranslucency are in effect — overriding them
-			 * with a global glBlendFunc would break the WBOIT MRT
-			 * accumulation, so skip it. */
+			 * Blend func gated for OIT pass. */
 			glEnable_fp (GL_BLEND);
 			if (!OIT_InPass())
 				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1244,11 +1207,7 @@ void R_DrawWaterSurfaces (int phase)
 
 	GL_ImmColor4f (1,1,1,1);
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
-	/* Leave GL_BLEND on inside the OIT pass so subsequent translucent
-	 * draws (sprites, brushmodels) keep the per-buffer blend funcs.
-	 * Same for depth writes — re-enabling DepthMask here would make
-	 * this water surface punch holes in the WBOIT depth buffer and
-	 * z-cull all later translucent fragments (uhexen2-a0hp). */
+	/* Blend/depth-mask cleanup gated for OIT pass. */
 	if (!OIT_InPass())
 	{
 		glDisable_fp (GL_BLEND);

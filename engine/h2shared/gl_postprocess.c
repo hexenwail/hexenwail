@@ -109,13 +109,6 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
-/* r_oit default off: WBOIT requires every translucent draw path
- * (alias, sprites, brushmodel, water, particles) to use an OIT-aware
- * shader writing both accum + revealage MRT outputs. Today only the
- * alias path has that shader, so sprites/projectiles/etc. drawn during
- * an OIT pass write to accum but leave revealage = 1.0 → the resolve
- * treats the pixel as "no translucent fragment" and discards the color.
- * Re-enable when all translucent paths are converted. */
 cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 
 /* ------------------------------------------------------------------ */
@@ -123,7 +116,7 @@ cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 /* ------------------------------------------------------------------ */
 
 static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
-static GLuint	oit_revealage_tex;	/* RGBA16F revealage (.r used) */
+static GLuint	oit_revealage_tex;	/* R8 revealage */
 static GLuint	oit_fbo;		/* MRT FBO sharing scene depth/stencil */
 static GLuint	oit_resolve_prog;	/* fullscreen resolve shader */
 static GLuint	oit_resolve_vao;	/* dummy VAO required for glDrawArrays
@@ -165,72 +158,6 @@ static const char oit_resolve_frag[] =
 	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
 	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
 	"}\n";
-
-/* Debug mode 4 resolve: hardcoded red output, no texture sampling.
- * If mode 4 produces red and mode 2 doesn't, the bug is in texture
- * sampling or the resolve math.  If mode 4 also produces no red,
- * the draw infrastructure itself is broken. */
-static const char oit_resolve_debug_frag[] =
-	"#version 430 core\n"
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"void main() {\n"
-	"    out_fragcolor = vec4(1.0, 0.0, 0.0, 0.5);\n"
-	"}\n";
-static GLuint	oit_resolve_debug_prog;
-
-/* Debug mode 5 resolve: sample accum directly, output its RGB.
- * If mode 5 shows a red tint (we cleared accum to (0.5,0,0,0.5) in
- * mode 2+), texelFetch on oit_accum_tex returns the cleared content.
- * If mode 5 produces nothing, texelFetch is returning zeros — the
- * texture isn't sampleable from the resolve shader. */
-static const char oit_resolve_debug_sample_frag[] =
-	"#version 430 core\n"
-	"layout(binding=0) uniform sampler2D TexAccum;\n"
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"void main() {\n"
-	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
-	"    vec4 a = texelFetch(TexAccum, coords, 0);\n"
-	/* Output accum's rgb at full alpha, with a bias so even tiny
-	 * sample values produce visible color. */
-	"    out_fragcolor = vec4(a.rgb * 2.0 + vec3(0.0, 0.0, 0.2), 1.0);\n"
-	"}\n";
-static GLuint	oit_resolve_debug_sample_prog;
-
-/* Debug mode 6 resolve: visualize TexReveal sampling.
- *  reveal=0.5 (mode-2 clear) → output vec4(0.5, 0, 0, 1)  → red haze
- *  reveal=1.0                → output vec4(0.0, 0, 0, 1)  → black
- *  reveal=0.0                → output vec4(1.0, 0, 0, 1)  → bright red */
-static const char oit_resolve_debug_reveal_frag[] =
-	"#version 430 core\n"
-	"layout(binding=1) uniform sampler2D TexReveal;\n"
-	"layout(location=0) out vec4 out_fragcolor;\n"
-	"void main() {\n"
-	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
-	"    float r = texelFetch(TexReveal, coords, 0).r;\n"
-	"    out_fragcolor = vec4(1.0 - r, 0.0, 0.0, 1.0);\n"
-	"}\n";
-static GLuint	oit_resolve_debug_reveal_prog;
-
-/* OIT_OUTPUT macro — injected into translucent fragment shaders.
- * Wraps main() as main_body(), adds MRT outputs, computes WBOIT weight. */
-#define OIT_OUTPUT_GLSL \
-	"#if OIT\n" \
-	"   vec4 fragColor;\n" \
-	"   layout(location=0) out vec4 out_accum;\n" \
-	"   layout(location=1) out float out_reveal;\n" \
-	"   void main_body();\n" \
-	"   void main() {\n" \
-	"       main_body();\n" \
-	"       fragColor = clamp(fragColor, 0.0, 1.0);\n" \
-	"       float z = 1.0 / gl_FragCoord.w;\n" \
-	"       float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n" \
-	"       out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n" \
-	"       out_reveal = fragColor.a;\n" \
-	"   }\n" \
-	"   #define main main_body\n" \
-	"#else\n" \
-	"   layout(location=0) out vec4 fragColor;\n" \
-	"#endif\n"
 
 /* ------------------------------------------------------------------ */
 
@@ -765,17 +692,10 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	/* Revealage texture (RGBA16F).  Originally R8 for memory savings,
-	 * but Mesa Intel exhibits inconsistent behavior writing vec4
-	 * fragment outputs to a single-channel R8 attachment in an MRT
-	 * FBO — destination read-back returns 0 for every fragment as
-	 * if writes go nowhere.  Switching to RGBA16F (matching accum's
-	 * format) makes the MRT layout uniform and avoids the issue.
-	 * Slight memory hit; resolve still reads only .r. */
 	glGenTextures_fp(1, &oit_revealage_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
-			GL_RGBA, GL_FLOAT, NULL);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R8, width, height, 0,
+			GL_RED, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -845,110 +765,25 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
 
-	/* GL 4.3 core profile requires a VAO bound for any draw call.  The
-	 * resolve uses glDrawArrays(GL_TRIANGLES, 0, 3) with a gl_VertexID-
-	 * driven fullscreen triangle (no vertex attributes), but it still
-	 * needs *some* VAO.  Without one bound, the draw silently fails as
-	 * GL_INVALID_OPERATION and the entire OIT composite is discarded —
-	 * the symptom: translucent draws accumulate to oit_fbo correctly,
-	 * but the resolve never reaches the scene FBO, so r_oit=1 hides
-	 * every fragment that went through WBOIT. */
+	/* GL 4.3 core profile requires a VAO bound for any draw call. */
 	glGenVertexArrays_fp(1, &oit_resolve_vao);
-
-	/* Debug-mode "always red" resolve.  Used when
-	 * r_oit_debug_no_stencil >= 4 to isolate texture-sampling issues
-	 * from the draw-call infrastructure. */
-	{
-		GLuint dvs, dfs, dprog;
-		dvs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
-		dfs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_debug_frag);
-		if (dvs && dfs)
-		{
-			dprog = glCreateProgram_fp();
-			glAttachShader_fp(dprog, dvs);
-			glAttachShader_fp(dprog, dfs);
-			glLinkProgram_fp(dprog);
-			oit_resolve_debug_prog = dprog;
-			glDeleteShader_fp(dvs);
-			glDeleteShader_fp(dfs);
-		}
-	}
-
-	/* Debug-mode "sample accum directly" resolve.  Used when
-	 * r_oit_debug_no_stencil >= 5 to verify texelFetch returns the
-	 * cleared accum content. */
-	{
-		GLuint svs, sfs, sprog;
-		svs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
-		sfs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_debug_sample_frag);
-		if (svs && sfs)
-		{
-			sprog = glCreateProgram_fp();
-			glAttachShader_fp(sprog, svs);
-			glAttachShader_fp(sprog, sfs);
-			glLinkProgram_fp(sprog);
-			oit_resolve_debug_sample_prog = sprog;
-			glDeleteShader_fp(svs);
-			glDeleteShader_fp(sfs);
-		}
-	}
-
-	/* Debug-mode "visualize revealage" resolve. */
-	{
-		GLuint rvs, rfs, rprog;
-		rvs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
-		rfs = GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_debug_reveal_frag);
-		if (rvs && rfs)
-		{
-			rprog = glCreateProgram_fp();
-			glAttachShader_fp(rprog, rvs);
-			glAttachShader_fp(rprog, rfs);
-			glLinkProgram_fp(rprog);
-			oit_resolve_debug_reveal_prog = rprog;
-			glDeleteShader_fp(rvs);
-			glDeleteShader_fp(rfs);
-		}
-	}
 
 	Con_SafePrintf("OIT: resolve shader OK\n");
 	return true;
 }
 
-/* Debug: bypass the stencil gate in the resolve.
- *   1 = resolve composites every pixel of the OIT FBO regardless of stencil.
- *   2 = also clears the OIT accum buffer to half-red and revealage to 0.5
- *       at OIT_Begin.  If you see a red tint over the scene, the resolve
- *       composite works; if not, the resolve path itself is broken. */
-static cvar_t r_oit_debug_no_stencil = {"r_oit_debug_no_stencil", "0", CVAR_NONE};
-
-/* Call before drawing any translucent geometry */
 void OIT_BeginTranslucency (void)
 {
 	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
 	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
-	static const float red[4] = {0.5f, 0.f, 0.f, 0.5f};
-	static const float half[4] = {0.5f, 0.5f, 0.5f, 0.5f};
 
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
 
 	oit_in_pass = true;
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
-	if (r_oit_debug_no_stencil.integer >= 2)
-	{
-		/* Debug mode 2: clear accum to half-red, revealage to 0.5.  The
-		 * resolve should then paint a red tint over the entire scene
-		 * (or every stencil=2 pixel if stencil gating is on).  If you
-		 * don't see red, the resolve composite itself is broken — not
-		 * the upstream particle/translucent draws. */
-		glClearBufferfv_fp(GL_COLOR, 0, red);
-		glClearBufferfv_fp(GL_COLOR, 1, half);
-	}
-	else
-	{
-		glClearBufferfv_fp(GL_COLOR, 0, zeroes);	/* accum = (0,0,0,0) */
-		glClearBufferfv_fp(GL_COLOR, 1, ones);		/* revealage = 1.0 */
-	}
+	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
+	glClearBufferfv_fp(GL_COLOR, 1, ones);
 
 	/* Stencil: mark pixels touched by translucent geometry (bit 1) */
 	glEnable_fp(GL_STENCIL_TEST);
@@ -965,7 +800,6 @@ void OIT_BeginTranslucency (void)
 	glDepthMask_fp(0);
 }
 
-/* Call after all translucent geometry — resolves OIT onto scene FBO */
 void OIT_EndTranslucency (GLuint scene_fbo)
 {
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
@@ -973,49 +807,14 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 	oit_in_pass = false;
 
-	/* Resolve: composite OIT result over the scene */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
 
-	if (r_oit_debug_no_stencil.integer)
-	{
-		/* Diagnostic: drop the stencil gate so every pixel of the
-		 * OIT FBO composites onto the scene.  If particles come back
-		 * under this mode, the bug is missing stencil=2 writes during
-		 * the OIT pass. */
-		glDisable_fp(GL_STENCIL_TEST);
-	}
-	else
-	{
-		/* Only touch pixels that received translucent fragments */
-		glStencilFunc_fp(GL_EQUAL, 2, 2);
-		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
-		glStencilMask(0);
-	}
+	glStencilFunc_fp(GL_EQUAL, 2, 2);
+	glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
+	glStencilMask(0);
 
-	{
-	qboolean using_debug_shader = false;
-	if (r_oit_debug_no_stencil.integer == 6 && oit_resolve_debug_reveal_prog)
-	{
-		glUseProgram_fp(oit_resolve_debug_reveal_prog);
-		using_debug_shader = true;
-	}
-	else if (r_oit_debug_no_stencil.integer >= 5 && oit_resolve_debug_sample_prog)
-	{
-		glUseProgram_fp(oit_resolve_debug_sample_prog);
-		using_debug_shader = true;
-	}
-	else if (r_oit_debug_no_stencil.integer >= 4 && oit_resolve_debug_prog)
-	{
-		glUseProgram_fp(oit_resolve_debug_prog);
-		using_debug_shader = true;
-	}
-	else
-	{
-		glUseProgram_fp(oit_resolve_prog);
-	}
-	(void)using_debug_shader;
+	glUseProgram_fp(oit_resolve_prog);
 
-	/* Standard alpha blending for the resolve composite */
 	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glEnable_fp(GL_BLEND);
 	glDepthMask_fp(0);
@@ -1026,49 +825,17 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
 
-	/* Sampler-unit binding: only set on the real resolve program.
-	 * The debug variants don't share its uniform layout, so a
-	 * glUniform1i on the leftover location index from oit_resolve_prog
-	 * would fire GL_INVALID_OPERATION every frame in debug modes. */
-	if (!using_debug_shader)
-	{
-		if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
-		if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
-	}
-	}  /* end using_debug_shader scope */
+	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
+	if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
 
-	/* Ensure the viewport covers the whole scene FBO.  Anything earlier
-	 * in the frame (mirror split, sky stencil, etc.) might have left
-	 * the viewport at a sub-rectangle, in which case our fullscreen
-	 * triangle only rasterizes inside that sub-rect and the rest of
-	 * the scene gets none of the OIT composite. */
 	glViewport_fp(0, 0, pp_width, pp_height);
-
-	/* Force all color components writable — a left-over glColorMask
-	 * (e.g. sky stencil pre-pass at gl_rsurf.c:1620 if it exited
-	 * early) would silently mask the resolve writes. */
 	glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-	/* Fullscreen triangle via gl_VertexID — needs a VAO bound in GL 4.3
-	 * core profile or the draw is silently discarded. */
+	/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
 	glBindVertexArray_fp(oit_resolve_vao);
 	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 	glBindVertexArray_fp(0);
 
-	/* Debug mode 3: forcibly stamp pp_fbo to red AFTER the resolve.
-	 * Tests whether pp_fbo writes survive to the final display blit,
-	 * independent of the resolve shader.  If mode 3 makes red appear,
-	 * the resolve composite path works and the bug is in the resolve
-	 * shader's execution.  If mode 3 ALSO produces no red, something
-	 * after OIT_End is overwriting/clearing pp_fbo. */
-	if (r_oit_debug_no_stencil.integer >= 3)
-	{
-		glDisable_fp(GL_BLEND);
-		glClearColor_fp(1.0f, 0.0f, 0.0f, 1.0f);
-		glClear_fp(GL_COLOR_BUFFER_BIT);
-	}
-
-	/* Restore state */
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
 	glActiveTexture_fp(GL_TEXTURE0);
@@ -1088,50 +855,6 @@ qboolean OIT_Active (void)
 qboolean OIT_InPass (void)
 {
 	return oit_in_pass;
-}
-
-/* Console diagnostic — type `r_oit_status` in-game to verify the OIT
- * pipeline state without hunting through boot scrollback. */
-static void OIT_Status_f (void)
-{
-	GLint draw_fbo = -1, read_fbo = -1;
-	GLint cur_attach0 = 0, cur_attach1 = 0;
-	GLint scissor = 0, viewport[4] = {0,0,0,0};
-	Con_Printf("OIT status:\n");
-	Con_Printf("  r_oit cvar:        %d\n", r_oit.integer);
-	Con_Printf("  glBlendFunci_fp:   %s\n", glBlendFunci_fp ? "loaded" : "MISSING (driver lacks ARB_draw_buffers_blend)");
-	Con_Printf("  glClearBufferfv:   %s\n", glClearBufferfv_fp ? "loaded" : "MISSING — OIT buffers never get cleared");
-	Con_Printf("  glBindFramebuffer: %s\n", glBindFramebuffer_fp ? "loaded" : "MISSING");
-	Con_Printf("  glDrawBuffers:     %s\n", glDrawBuffers_fp ? "loaded" : "MISSING — MRT not configured");
-	Con_Printf("  oit_available:     %d (FBO + resolve shader)\n", (int)oit_available);
-	Con_Printf("  oit_fbo:           %u\n", oit_fbo);
-	Con_Printf("  oit_accum_tex:     %u (RGBA16F)\n", oit_accum_tex);
-	Con_Printf("  oit_revealage_tex: %u (RGBA16F)\n", oit_revealage_tex);
-	Con_Printf("  oit_resolve_prog:  %u\n", oit_resolve_prog);
-	Con_Printf("  OIT_Active():      %d\n", (int)OIT_Active());
-	Con_Printf("  particle_oit prog: %u\n", gl_shader_particle_oit.program);
-	Con_Printf("  world_oit prog:    %u\n", gl_shader_world_oit.program);
-	Con_Printf("  alias_oit prog:    %u\n", gl_shader_alias_oit.program);
-	Con_Printf("  oit_resolve_vao:   %u  %s\n", oit_resolve_vao,
-		   oit_resolve_vao ? "" : "<-- NOT CREATED, resolve glDrawArrays will fail");
-	{
-		GLenum err;
-		while ((err = glGetError()) != GL_NO_ERROR)
-			Con_Printf("  GL error queue:    0x%04x\n", err);
-	}
-	/* Current GL pipeline state at call time. */
-	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	glGetIntegerv_fp(GL_SCISSOR_TEST, &scissor);
-	glGetIntegerv_fp(GL_VIEWPORT, viewport);
-	Con_Printf("  draw fbo bound:    %d\n", draw_fbo);
-	Con_Printf("  read fbo bound:    %d\n", read_fbo);
-	Con_Printf("  GL_SCISSOR_TEST:   %d\n", scissor);
-	Con_Printf("  viewport:          %d,%d %dx%d\n", viewport[0], viewport[1], viewport[2], viewport[3]);
-	Con_Printf("  pp_fbo (scene):    %u\n", pp_fbo);
-	Con_Printf("  pp_width x height: %d x %d\n", pp_width, pp_height);
-	Con_Printf("  oit_width x height: %d x %d\n", oit_width, oit_height);
-	(void)cur_attach0; (void)cur_attach1;
 }
 
 GLuint GL_GetSceneFBO (void)
@@ -1165,22 +888,6 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
-	Cvar_RegisterVariable(&r_oit_debug_no_stencil);
-	Cmd_AddCommand("r_oit_status", OIT_Status_f);
-	/* Force-override any saved r_oit=1 from previous configs.  Round 4-12
-	 * of the WBOIT debug effort (see bead uhexen2-a0hp) gated every
-	 * known state-poke and added all known conformance fixes (VAO
-	 * binding around resolve glDrawArrays, viewport set, colorMask
-	 * force-TRUE, early_fragment_tests removed, out_reveal as vec4 with
-	 * deterministic .gba components, fragColor explicitly initialized
-	 * in the OIT preamble, revealage texture promoted from R8 to
-	 * RGBA16F to match accum), but Mesa Intel Iris Xe still produces
-	 * texelFetch(TexReveal) == 0 everywhere after translucent draws —
-	 * the resolve composite collapses to alpha=0 and translucent
-	 * fragments render invisible (most visibly: frozen enemies become
-	 * 100% transparent, rocket-trail particles vanish).  Until the
-	 * Mesa Intel interaction is resolved (or testing on AMD/NVIDIA
-	 * confirms this is Intel-specific), keep r_oit off by default. */
 	if (r_oit.integer)
 		Cvar_Set("r_oit", "0");
 
