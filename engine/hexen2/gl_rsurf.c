@@ -74,6 +74,39 @@ typedef union {
 	gl_bound_call_t    bound;
 } gl_draw_call_t;
 
+/* ====================================================================
+ * BINDLESS TEXTURE BINDING HELPER
+ *
+ * When gl_bindless_able is true, texture binding is deferred to the
+ * shader via handle indexing.  For now, traditional per-draw binding
+ * is used as fallback.  Call this before issuing draw commands to
+ * ensure diffuse texture is available to the fragment shader.
+ * ==================================================================== */
+static inline void GL_BindDiffuse (GLuint texnum)
+{
+	if (!gl_bindless_able)
+	{
+		/* Fallback: traditional per-draw glBindTexture. */
+		glActiveTexture_fp(GL_TEXTURE0);
+		glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	}
+	/* Bindless: texture handle is indexed from SSBO in shader.
+	 * No bind needed; the vertex shader will have passed the handle
+	 * via flat uvec4 varying. */
+}
+
+static inline void GL_BindFullbright (GLuint texnum)
+{
+	if (!gl_bindless_able)
+	{
+		/* Fallback: bind fullbright mask at TU2. */
+		glActiveTexture_fp(GL_TEXTURE2);
+		glBindTexture_fp(GL_TEXTURE_2D, texnum);
+		glActiveTexture_fp(GL_TEXTURE0);
+	}
+	/* Bindless: fullbright handle is indexed from SSBO in shader. */
+}
+
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
 #ifndef GL_QUADS
@@ -1880,13 +1913,11 @@ static void DrawTextureChains (entity_t *e)
 				}
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-					GL_Bind (tt->gl_texturenum);
-					/* Bind fullbright mask at TU2 — null sentinel if no
-					 * fullbright pixels in this miptex.  uhexen2-sjvf. */
-					glActiveTexture_fp(GL_TEXTURE2);
-					glBindTexture_fp(GL_TEXTURE_2D,
-						tt->gl_fb_texturenum ? tt->gl_fb_texturenum : gl_null_fb_texture);
-					glActiveTexture_fp(GL_TEXTURE0);
+					/* Bindless-aware texture binding: use helper functions
+					 * that conditionally bind or defer to shader handle
+					 * indexing based on gl_bindless_able. */
+					GL_BindDiffuse(tt->gl_texturenum);
+					GL_BindFullbright(tt->gl_fb_texturenum ? tt->gl_fb_texturenum : gl_null_fb_texture);
 				}
 
 				{
