@@ -398,6 +398,10 @@ typedef struct {
 	uint8_t		idx[4];		/* bone indices (up to 4 influences) */
 } iqmvert_t;
 
+/* Alias model format constants */
+#define	ALIAS_IDENT		(('A') | (('L') << 8) | (('S') << 16) | (('2') << 24))
+#define	ALIAS_VERSION	8
+
 /* MD5mesh format constants and limits */
 #define MD5_MAX_BONES		128
 #define MD5_MAX_VERTS		4096

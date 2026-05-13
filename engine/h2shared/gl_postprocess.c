@@ -73,6 +73,22 @@ static GLuint	pp_native_color_tex;
 static GLuint	pp_native_depth_rb;
 static int	pp_native_w, pp_native_h;
 
+/* Bloom post-process FBO pyramid (1/2, 1/4, 1/8, 1/16 res) */
+#define BLOOM_LEVELS 4
+static GLuint	bloom_fbo[BLOOM_LEVELS];
+static GLuint	bloom_tex[BLOOM_LEVELS];
+static int	bloom_w[BLOOM_LEVELS], bloom_h[BLOOM_LEVELS];
+
+/* Bloom shader programs */
+static GLuint	bloom_bright_prog;	/* threshold extraction */
+static GLuint	bloom_down_prog;	/* downsample 4-tap box */
+static GLuint	bloom_up_prog;		/* upsample 3x3 tent + additive blend */
+
+/* Bloom shader uniform locations */
+static GLint	bloom_bright_loc_scene, bloom_bright_loc_threshold, bloom_bright_loc_rcpframe;
+static GLint	bloom_down_loc_scene, bloom_down_loc_rcpframe;
+static GLint	bloom_up_loc_scene, bloom_up_loc_prev, bloom_up_loc_rcpframe;
+
 /* Shader state */
 static GLuint	pp_program;
 static GLint	pp_loc_scene;
@@ -91,6 +107,8 @@ static GLint	pp_loc_rcpframe;
 static GLint	pp_loc_motionblur;
 static GLint	pp_loc_viewdelta;
 static GLint	pp_loc_hdr_exposure;
+static GLint	pp_loc_bloom_tex;
+static GLint	pp_loc_bloom_strength;
 
 /* Palette LUT state */
 static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
@@ -110,6 +128,9 @@ cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), r
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
 cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
+cvar_t	r_bloom = {"r_bloom", "0", CVAR_ARCHIVE};		/* bloom post-process */
+cvar_t	r_bloom_intensity = {"r_bloom_intensity", "1.0", CVAR_ARCHIVE};	/* bloom glow strength */
+cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};	/* luminance threshold */
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
@@ -160,6 +181,69 @@ static const char oit_resolve_frag[] =
 	"}\n";
 
 /* ------------------------------------------------------------------ */
+/* Bloom post-process shaders                                          */
+/* ------------------------------------------------------------------ */
+
+static const char bloom_vert_src[] =
+	"#version 430 core\n"
+	"layout(location=0) in vec2 a_pos;\n"
+	"out vec2 v_uv;\n"
+	"void main() {\n"
+	"    v_uv = a_pos * 0.5 + 0.5;\n"
+	"    gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+	"}\n";
+
+static const char bloom_bright_frag_src[] =
+	"#version 430 core\n"
+	"layout(binding=0) uniform sampler2D u_scene;\n"
+	"uniform float u_threshold;\n"
+	"uniform vec2 u_rcpframe;\n"
+	"in vec2 v_uv;\n"
+	"layout(location=0) out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec3 c = texture(u_scene, v_uv).rgb;\n"
+	"    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
+	"    float w = max(0.0, lum - u_threshold);\n"
+	"    fragColor = vec4(c * (w / max(lum, 0.001)), 1.0);\n"
+	"}\n";
+
+static const char bloom_down_frag_src[] =
+	"#version 430 core\n"
+	"layout(binding=0) uniform sampler2D u_scene;\n"
+	"uniform vec2 u_rcpframe;\n"
+	"in vec2 v_uv;\n"
+	"layout(location=0) out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec2 h = u_rcpframe * 0.5;\n"
+	"    vec4 s = texture(u_scene, v_uv + vec2(-h.x,-h.y))\n"
+	"           + texture(u_scene, v_uv + vec2( h.x,-h.y))\n"
+	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
+	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
+	"    fragColor = s * 0.25;\n"
+	"}\n";
+
+static const char bloom_up_frag_src[] =
+	"#version 430 core\n"
+	"layout(binding=0) uniform sampler2D u_scene;\n"
+	"layout(binding=1) uniform sampler2D u_prev;\n"
+	"uniform vec2 u_rcpframe;\n"
+	"in vec2 v_uv;\n"
+	"layout(location=0) out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec2 h = u_rcpframe;\n"
+	"    vec4 s = texture(u_scene, v_uv + vec2(-h.x, 0)) * 2.0\n"
+	"           + texture(u_scene, v_uv + vec2( h.x, 0)) * 2.0\n"
+	"           + texture(u_scene, v_uv + vec2(0, -h.y)) * 2.0\n"
+	"           + texture(u_scene, v_uv + vec2(0,  h.y)) * 2.0\n"
+	"           + texture(u_scene, v_uv + vec2(-h.x,-h.y))\n"
+	"           + texture(u_scene, v_uv + vec2( h.x,-h.y))\n"
+	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
+	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
+	"    s /= 12.0;\n"
+	"    fragColor = s + texture(u_prev, v_uv);\n"
+	"}\n";
+
+/* ------------------------------------------------------------------ */
 
 static qboolean PP_NeedsPostProcess (void)
 {
@@ -187,12 +271,16 @@ static qboolean PP_NeedsPostProcess (void)
 	 * unrelated effect (FXAA, HDR, …) to "wake" the pipeline. */
 	if (r_oit.integer)
 		return true;
+	if (r_bloom.integer)
+		return true;
 	return false;
 }
 
 /* ------------------------------------------------------------------ */
 /* FBO management                                                      */
 /* ------------------------------------------------------------------ */
+
+static void PP_DeleteBloomFBOs (void);	/* forward decl to avoid implicit declaration */
 
 static void PP_DeleteFBO (void)
 {
@@ -202,6 +290,7 @@ static void PP_DeleteFBO (void)
 	if (pp_depth_tex)   { glDeleteTextures_fp(1, &pp_depth_tex); pp_depth_tex = 0; }
 	if (pp_resolve_fbo) { glDeleteFramebuffers_fp(1, &pp_resolve_fbo); pp_resolve_fbo = 0; }
 	if (pp_fbo)         { glDeleteFramebuffers_fp(1, &pp_fbo); pp_fbo = 0; }
+	PP_DeleteBloomFBOs();
 	pp_width = pp_height = pp_samples = 0;
 }
 
@@ -211,6 +300,16 @@ static void PP_DeleteNativeFBO (void)
 	if (pp_native_depth_rb)  { glDeleteRenderbuffers_fp(1, &pp_native_depth_rb); pp_native_depth_rb = 0; }
 	if (pp_native_fbo)       { glDeleteFramebuffers_fp(1, &pp_native_fbo); pp_native_fbo = 0; }
 	pp_native_w = pp_native_h = 0;
+}
+
+static void PP_DeleteBloomFBOs (void)
+{
+	int i;
+	for (i = 0; i < BLOOM_LEVELS; i++) {
+		if (bloom_tex[i]) { glDeleteTextures_fp(1, &bloom_tex[i]); bloom_tex[i] = 0; }
+		if (bloom_fbo[i]) { glDeleteFramebuffers_fp(1, &bloom_fbo[i]); bloom_fbo[i] = 0; }
+		bloom_w[i] = bloom_h[i] = 0;
+	}
 }
 
 static qboolean PP_CreateNativeFBO (int width, int height)
@@ -265,6 +364,59 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 /* Forward declaration — OIT FBO created after scene FBO */
 static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex);
 static void OIT_DeleteFBO (void);
+
+/* Forward declaration — bloom pyramid FBOs */
+static qboolean PP_CreateBloomFBOs (int width, int height);
+
+static qboolean PP_CreateBloomFBOs (int width, int height)
+{
+	GLenum color_fmt, color_type, status;
+	int i;
+
+	if (!r_bloom.integer)
+		return true;	/* bloom disabled, skip allocation */
+
+	PP_DeleteBloomFBOs();
+
+	color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
+	color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
+
+	for (i = 0; i < BLOOM_LEVELS; i++)
+	{
+		bloom_w[i] = (width >> (i + 1)) > 1 ? (width >> (i + 1)) : 1;		/* /2, /4, /8, /16 */
+		bloom_h[i] = (height >> (i + 1)) > 1 ? (height >> (i + 1)) : 1;
+
+		/* Bloom texture */
+		glGenTextures_fp(1, &bloom_tex[i]);
+		glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i]);
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, bloom_w[i], bloom_h[i], 0,
+				GL_RGBA, color_type, NULL);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glBindTexture_fp(GL_TEXTURE_2D, 0);
+
+		/* Bloom FBO */
+		glGenFramebuffers_fp(1, &bloom_fbo[i]);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
+		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+					  GL_TEXTURE_2D, bloom_tex[i], 0);
+
+		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+
+		if (status != GL_FRAMEBUFFER_COMPLETE)
+		{
+			Con_DPrintf("Bloom: FBO %d incomplete (status 0x%x, %dx%d)\n",
+				    i, status, bloom_w[i], bloom_h[i]);
+			PP_DeleteBloomFBOs();
+			return false;
+		}
+	}
+
+	return true;
+}
 
 static qboolean PP_CreateFBO (int width, int height)
 {
@@ -396,6 +548,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	pp_height = height;
 	}  /* end color_fmt scope */
 	OIT_CreateFBO(width, height, 0, pp_depth_tex);
+	PP_CreateBloomFBOs(width, height);
 	return true;
 }
 
@@ -431,6 +584,8 @@ static const char pp_frag_src[] =
 	"uniform float motionblur;\n"
 	"uniform float hdr_exposure;\n"
 	"uniform vec2 viewdelta;\n"
+	"uniform sampler2D u_bloom;\n"
+	"uniform float u_bloom_strength;\n"
 	"in vec2 v_texcoord;\n"
 	"out vec4 fragColor;\n"
 	"\n"
@@ -486,6 +641,9 @@ static const char pp_frag_src[] =
 	"        color.rgb += texture(scene, uv + vel * 0.50).rgb * 0.15;\n"
 	"        color.rgb += texture(scene, uv + vel * 0.75).rgb * 0.125;\n"
 	"        color.rgb += texture(scene, uv + vel * 1.00).rgb * 0.125;\n"
+	"    }\n"
+	"    if (u_bloom_strength > 0.0) {\n"
+	"        color.rgb += texture(u_bloom, uv).rgb * u_bloom_strength;\n"
 	"    }\n"
 	"    /* HDR tonemapping (ACES filmic) */\n"
 	"    if (hdr_exposure > 0.0) {\n"
@@ -594,7 +752,50 @@ static qboolean PP_InitShader (void)
 	if (loc >= 0) glUniform1i_fp(loc, 0);	/* texture unit 0 */
 	loc = pp_loc_paletteLUT;
 	if (loc >= 0) glUniform1i_fp(loc, 1);	/* texture unit 1 */
+	pp_loc_bloom_tex = glGetUniformLocation_fp(pp_program, "u_bloom");
+	pp_loc_bloom_strength = glGetUniformLocation_fp(pp_program, "u_bloom_strength");
+	if (pp_loc_bloom_tex >= 0) glUniform1i_fp(pp_loc_bloom_tex, 2);	/* texture unit 2 */
 	glUseProgram_fp(0);
+
+	/* Bloom shaders */
+	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	if (!vs) return true;	/* bloom optional */
+
+	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_bright_frag_src);
+	if (!fs) { glDeleteShader_fp(vs); return true; }
+	bloom_bright_prog = PP_LinkProgram(vs, fs);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+	if (!bloom_bright_prog) return true;
+
+	bloom_bright_loc_scene = glGetUniformLocation_fp(bloom_bright_prog, "u_scene");
+	bloom_bright_loc_threshold = glGetUniformLocation_fp(bloom_bright_prog, "u_threshold");
+	bloom_bright_loc_rcpframe = glGetUniformLocation_fp(bloom_bright_prog, "u_rcpframe");
+
+	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	if (!vs) return true;
+	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_down_frag_src);
+	if (!fs) { glDeleteShader_fp(vs); return true; }
+	bloom_down_prog = PP_LinkProgram(vs, fs);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+	if (!bloom_down_prog) return true;
+
+	bloom_down_loc_scene = glGetUniformLocation_fp(bloom_down_prog, "u_scene");
+	bloom_down_loc_rcpframe = glGetUniformLocation_fp(bloom_down_prog, "u_rcpframe");
+
+	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
+	if (!vs) return true;
+	fs = PP_CompileShader(GL_FRAGMENT_SHADER, bloom_up_frag_src);
+	if (!fs) { glDeleteShader_fp(vs); return true; }
+	bloom_up_prog = PP_LinkProgram(vs, fs);
+	glDeleteShader_fp(vs);
+	glDeleteShader_fp(fs);
+	if (!bloom_up_prog) return true;
+
+	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
+	bloom_up_loc_prev = glGetUniformLocation_fp(bloom_up_prog, "u_prev");
+	bloom_up_loc_rcpframe = glGetUniformLocation_fp(bloom_up_prog, "u_rcpframe");
 
 	return true;
 }
@@ -888,6 +1089,9 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
+	Cvar_RegisterVariable(&r_bloom);
+	Cvar_RegisterVariable(&r_bloom_intensity);
+	Cvar_RegisterVariable(&r_bloom_threshold);
 	if (r_oit.integer)
 		Cvar_Set("r_oit", "0");
 
@@ -1320,6 +1524,56 @@ void GL_PostProcess_EndFrame (void)
 	glwidth = pp_saved_glwidth;
 	glheight = pp_saved_glheight;
 
+	/* Bloom post-process pass */
+	if (r_bloom.integer && bloom_fbo[0] && bloom_bright_prog)
+	{
+		GLuint bloom_src = pp_native_active ? pp_native_color_tex : pp_color_tex;
+		int bloom_src_w = pp_native_active ? pp_native_w : pp_width;
+		int bloom_src_h = pp_native_active ? pp_native_h : pp_height;
+		int i;
+
+		/* Bright pass: extract overbright pixels */
+		glViewport_fp(0, 0, bloom_w[0], bloom_h[0]);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[0]);
+		glUseProgram_fp(bloom_bright_prog);
+		glActiveTexture_fp(GL_TEXTURE0);
+		glBindTexture_fp(GL_TEXTURE_2D, bloom_src);
+		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
+		if (bloom_bright_loc_threshold >= 0) glUniform1f_fp(bloom_bright_loc_threshold, r_bloom_threshold.value);
+		if (bloom_bright_loc_rcpframe >= 0) glUniform2f_fp(bloom_bright_loc_rcpframe, 1.0f / bloom_src_w, 1.0f / bloom_src_h);
+		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+
+		/* Downsample chain: level 0 → 1 → 2 → 3 */
+		for (i = 1; i < BLOOM_LEVELS; i++)
+		{
+			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
+			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
+			glUseProgram_fp(bloom_down_prog);
+			glActiveTexture_fp(GL_TEXTURE0);
+			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i-1]);
+			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
+			if (bloom_down_loc_rcpframe >= 0) glUniform2f_fp(bloom_down_loc_rcpframe, 1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1]);
+			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+		}
+
+		/* Upsample + additive blend: level 3 → 2 → 1 → 0 */
+		for (i = BLOOM_LEVELS - 2; i >= 0; i--)
+		{
+			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
+			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
+			glUseProgram_fp(bloom_up_prog);
+			glActiveTexture_fp(GL_TEXTURE0);
+			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
+			glActiveTexture_fp(GL_TEXTURE1);
+			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i]);
+			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
+			if (bloom_up_loc_prev >= 0) glUniform1i_fp(bloom_up_loc_prev, 1);
+			if (bloom_up_loc_rcpframe >= 0) glUniform2f_fp(bloom_up_loc_rcpframe, 1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1]);
+			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+		}
+		/* bloom_tex[0] now contains the final bloom result at 1/2 scene res */
+	}
+
 	/* unbind scene FBO -- render to default framebuffer */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
 
@@ -1451,6 +1705,17 @@ apply_shader:
 		if (pp_loc_viewdelta >= 0 && glUniform2f_fp)
 			glUniform2f_fp(pp_loc_viewdelta, dy, dp);
 	}
+
+	/* bloom composite texture */
+	if (pp_loc_bloom_tex >= 0)
+	{
+		glActiveTexture_fp(GL_TEXTURE0 + 2);
+		glBindTexture_fp(GL_TEXTURE_2D, (r_bloom.integer && bloom_tex[0]) ? bloom_tex[0] : 0);
+		glUniform1i_fp(pp_loc_bloom_tex, 2);
+		glActiveTexture_fp(GL_TEXTURE0);
+	}
+	if (pp_loc_bloom_strength >= 0)
+		glUniform1f_fp(pp_loc_bloom_strength, r_bloom.integer ? r_bloom_intensity.value : 0.0f);
 
 	/* draw full-screen quad using streaming VBO (shader already active) */
 	GL_ImmBegin();

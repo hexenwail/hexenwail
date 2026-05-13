@@ -55,6 +55,11 @@ extern cvar_t r_hdr_exposure;
 
 /* Order-Independent Transparency (WBOIT) */
 extern cvar_t r_oit;
+
+/* Bloom post-process (bright-pass → downsample pyramid → upsample composite) */
+extern cvar_t r_bloom;
+extern cvar_t r_bloom_intensity;
+extern cvar_t r_bloom_threshold;
 void OIT_BeginTranslucency (void);
 void OIT_EndTranslucency (GLuint scene_fbo);
 qboolean OIT_Active (void);	/* OIT is built and r_oit is on */

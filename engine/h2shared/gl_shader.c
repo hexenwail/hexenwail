@@ -19,6 +19,7 @@ extern float	r_fog_color[3];
 glprogram_t	gl_shader_world;
 glprogram_t	gl_shader_world_opaque;	/* uhexen2-5c6r: early_fragment_tests, no discard */
 glprogram_t	gl_shader_alias;
+glprogram_t	gl_shader_skeletal;
 glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
@@ -582,6 +583,45 @@ static const char salias_frag[] =
 	"#endif\n"
 	"}\n";
 
+/* --- shader_skeletal: skeletal animation with bone-weighted deformation --- */
+static const char sskeletal_vert[] =
+	GLSL_VERT_HEADER
+	"in vec3 a_position;\n"
+	"in vec4 a_normal;\n"
+	"in vec2 a_texcoord;\n"
+	"in vec4 a_weights;\n"
+	"in uvec4 a_indices;\n"
+	"\n"
+	"layout(std430, binding=4) restrict readonly buffer BoneBuffer {\n"
+	"    mat3x4 bones[];\n"
+	"};\n"
+	"\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform mat4 u_modelview;\n"
+	"uniform int u_pose_base;\n"
+	"\n"
+	"out vec2 v_texcoord;\n"
+	"out vec4 v_color;\n"
+	"out float v_fogdist;\n"
+	"invariant gl_Position;\n"
+	"\n"
+	"void main() {\n"
+	"    mat3x4 blend = bones[u_pose_base + int(a_indices.x)] * a_weights.x;\n"
+	"    if (a_weights.y > 0.01) blend += bones[u_pose_base + int(a_indices.y)] * a_weights.y;\n"
+	"    if (a_weights.z > 0.01) blend += bones[u_pose_base + int(a_indices.z)] * a_weights.z;\n"
+	"    if (a_weights.w > 0.01) blend += bones[u_pose_base + int(a_indices.w)] * a_weights.w;\n"
+	"\n"
+	"    mat4x3 mat_3x4 = transpose(blend);\n"
+	"    vec3 skinned_pos = mat_3x4 * vec4(a_position, 1.0);\n"
+	"    vec3 skinned_normal = normalize(mat_3x4 * vec4(a_normal.xyz, 0.0));\n"
+	"\n"
+	"    v_texcoord = a_texcoord;\n"
+	"    v_color = vec4(skinned_normal * 0.5 + 0.5, 1.0);\n"
+	"    vec4 eyepos = u_modelview * vec4(skinned_pos, 1.0);\n"
+	"    v_fogdist = length(eyepos.xyz);\n"
+	"    gl_Position = u_mvp * vec4(skinned_pos, 1.0);\n"
+	"}\n";
+
 /* --- shader_particle: textured triangles with per-vertex color --- */
 static const char spart_vert[] =
 	GLSL_VERT_HEADER
@@ -1047,6 +1087,7 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
+	GL_InitProgram(&gl_shader_skeletal, "skeletal", sskeletal_vert, salias_frag);
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
 
