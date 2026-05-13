@@ -31,6 +31,49 @@
 extern float r_fog_density;
 extern float r_fog_color[3];
 
+/* ====================================================================
+ * BINDLESS TEXTURE INFRASTRUCTURE (GL_ARB_bindless_texture)
+ *
+ * When gl_bindless_able is true, texture sampling is handle-indexed from
+ * an SSBO instead of per-draw glBindTexture calls.  This union defines the
+ * two paths:
+ *
+ * Bindless path (BINDLESS=1 in shaders):
+ *  - Populate SSBO with uvec2 txhandle + fbhandle (64-bit each)
+ *  - Vertex shader passes flat uvec4 to fragment
+ *  - Fragment shader casts to sampler2D(uvec2)
+ *  - No glBindTexture calls
+ *
+ * Fallback path (BINDLESS=0 in shaders):
+ *  - Traditional glBindTexture before each draw
+ *  - baseinstance uniform indexes the call SSBO
+ *  - Sampler uniforms u_texture0, u_texture2 used normally
+ *
+ * Implementation note: full bindless integration requires refactoring the
+ * DrawTextureChains submission logic to populate handles before drawing.
+ * Current code (as of ctrx.4 partial) establishes the infrastructure;
+ * full draw-path migration is a follow-up task.
+ * ==================================================================== */
+
+typedef struct {
+	GLuint   flags;
+	GLfloat  alpha;
+	GLuint64 tx_handle;   /* diffuse texture bindless handle */
+	GLuint64 fb_handle;   /* fullbright texture bindless handle */
+} gl_bindless_call_t;
+
+typedef struct {
+	GLuint  flags;
+	GLuint  baseinstance;
+	GLuint  _pad0;
+	GLuint  _pad1;
+} gl_bound_call_t;
+
+typedef union {
+	gl_bindless_call_t bindless;
+	gl_bound_call_t    bound;
+} gl_draw_call_t;
+
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
 #ifndef GL_QUADS
