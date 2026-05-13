@@ -418,11 +418,36 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	float		*texcoords;
 	unsigned int	*pose_packed;
 	trivertx_t	*pv;
+	iqmvert_t	*iqmv;
 	alias_gpu_mesh_t *gm;
 	int		mark, i, j;
 
 	if (num_alias_gpu_meshes >= MAX_ALIAS_MODELS)
 		return;
+
+	/* For skeletal (PV_IQM) models, create simple vertex order */
+	if (hdr->poseverttype == PV_IQM)
+	{
+		mark = Hunk_LowMark();
+		num_tris = hdr->numtris;
+		indices = (unsigned short *) Hunk_AllocName(num_tris * 3 * sizeof(unsigned short), "gpuidx");
+		texcoords = (float *) Hunk_AllocName(hdr->poseverts * 2 * sizeof(float), "gputc");
+		iqmv = (iqmvert_t *)((byte *)hdr + hdr->posedata);
+
+		/* Extract texture coordinates */
+		for (i = 0; i < hdr->poseverts; i++)
+		{
+			texcoords[i*2 + 0] = iqmv[i].st[0];
+			texcoords[i*2 + 1] = iqmv[i].st[1];
+		}
+
+		/* For now, assume simple triangle list (no strips/fans) */
+		for (i = 0; i < num_tris * 3; i++)
+			indices[i] = (unsigned short)i;
+		vi = num_tris * 3;
+
+		goto iqm_gpu_setup;
+	}
 
 	/* First pass: count triangles from command list */
 	order = (int *)((byte *)hdr + hdr->commands);
@@ -553,7 +578,74 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	glBindVertexArray_fp(0);
 
 	/* Pose data upload: format-dependent path */
-	if (hdr->poseverttype == PV_MD3)
+	if (hdr->poseverttype == PV_IQM)
+	{
+iqm_gpu_setup:
+		/* Skeletal setup: upload iqmvert_t data + bone pose matrices */
+		gm = &alias_gpu_meshes[num_alias_gpu_meshes];
+		memset(gm, 0, sizeof(*gm));
+		gm->poseverttype = PV_IQM;
+		gm->numbones = hdr->numbones;
+
+		glGenVertexArrays_fp(1, &gm->vao);
+		glBindVertexArray_fp(gm->vao);
+
+		/* Upload vertex data (iqmvert_t: 32 bytes per vertex) */
+#ifndef __EMSCRIPTEN__
+		GLuint vbo_verts;
+		glGenBuffers_fp(1, &vbo_verts);
+		glBindBuffer_fp(GL_ARRAY_BUFFER, vbo_verts);
+		glBufferData_fp(GL_ARRAY_BUFFER, hdr->poseverts * sizeof(iqmvert_t),
+				(byte *)hdr + hdr->posedata, GL_STATIC_DRAW);
+
+		/* Vertex attributes for skeletal format */
+		glEnableVertexAttribArray_fp(0); /* position */
+		glVertexAttribPointer_fp(0, 3, GL_FLOAT, GL_FALSE, sizeof(iqmvert_t), (void *)0);
+
+		glEnableVertexAttribArray_fp(1); /* normal */
+		glVertexAttribPointer_fp(1, 4, GL_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)12);
+
+		glEnableVertexAttribArray_fp(2); /* texcoord */
+		glVertexAttribPointer_fp(2, 2, GL_FLOAT, GL_FALSE, sizeof(iqmvert_t), (void *)16);
+
+		glEnableVertexAttribArray_fp(3); /* bone weights */
+		glVertexAttribPointer_fp(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)24);
+
+		glEnableVertexAttribArray_fp(4); /* bone indices */
+		glVertexAttribPointer_fp(4, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(iqmvert_t), (void *)28);
+
+		/* Index buffer */
+		glGenBuffers_fp(1, &gm->ibo);
+		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, gm->ibo);
+		glBufferData_fp(GL_ELEMENT_ARRAY_BUFFER, vi * sizeof(unsigned short),
+				indices, GL_STATIC_DRAW);
+
+		glBindVertexArray_fp(0);
+
+		/* Upload bone pose matrices as SSBO */
+		glGenBuffers_fp(1, &gm->ssbo_bones);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_bones);
+		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
+				hdr->numposes * hdr->numbones * sizeof(bonepose_t),
+				(byte *)hdr + hdr->boneposedata, GL_DYNAMIC_DRAW);
+		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
+#endif
+
+		gm->num_indices = vi;
+		gm->poseverts = hdr->poseverts;
+		gm->numposes = hdr->numposes;
+		gm->valid = true;
+
+		alias_gpu_keys[num_alias_gpu_meshes] = (int)((size_t)hdr & 0x7fffffff);
+		num_alias_gpu_meshes++;
+
+		if (hdr->poseverttype == PV_IQM)
+		{
+			Hunk_FreeToLowMark(mark);
+			return;
+		}
+	}
+	else if (hdr->poseverttype == PV_MD3)
 	{
 		/* TODO: Phase 3 MD3 SSBO upload
 		 * Upload md3Vertex_t data to separate SSBO (8 bytes per vertex)

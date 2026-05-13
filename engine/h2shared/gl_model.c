@@ -345,6 +345,21 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 // call the apropriate loader
 	mod->needload = NL_PRESENT;
 
+	/* Check for MD5mesh skeletal format */
+	const char *ext = COM_FileGetExtension(mod->name);
+	if (ext && !strcmp(ext, "md5mesh"))
+	{
+		aliashdr_t *ahdr = MD5_LoadMesh(mod->name, (byte *)buf, 1024*1024);
+		if (!ahdr)
+		{
+			mod->type = mod_brush;
+			return mod;
+		}
+		mod->type = mod_alias;
+		loadmodel->cache.data = (void *)ahdr;
+		return mod;
+	}
+
 	mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
 	switch (mod_type)
 	{

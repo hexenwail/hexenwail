@@ -510,6 +510,9 @@ alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr);
 void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 void GL_FreeAliasGPUMeshes (void);
 extern	aliashdr_t	*pheader;
+
+/* MD5mesh skeletal model loader */
+aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size);
 extern	stvert_t	stverts[MAXALIASVERTS];
 extern	mtriangle_t	triangles[MAXALIASTRIS];
 extern	trivertx_t	*poseverts[MAXALIASFRAMES];
