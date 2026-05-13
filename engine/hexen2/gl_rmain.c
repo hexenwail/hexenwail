@@ -2369,9 +2369,16 @@ static void R_DrawAliasInstanced (void)
 	GLuint		inst_buf;
 	GLintptr	inst_ofs;
 	size_t		inst_bytes;
+	static GLuint last_pose_ssbo = 0;
+	static int last_poseverttype = -1;
 
 	if (num_alias_instances == 0 || !prog->program)
+	{
+		/* Reset SSBO cache on early exit */
+		last_pose_ssbo = 0;
+		last_poseverttype = -1;
 		return;
+	}
 
 	/* View-projection: written into a uniform mat4 (uhexen2-8pc2).
 	 * The matrix stack currently has just VIEW, so GetMVP = Proj * View. */
@@ -2437,15 +2444,22 @@ static void R_DrawAliasInstanced (void)
 		glActiveTexture_fp(GL_TEXTURE0);
 		GL_Bind(batch->skin_tex);
 
-		/* Bind pose SSBO at appropriate binding based on format */
-		if (gm->poseverttype == PV_MD3)
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, pose_ssbo);
-		else
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, pose_ssbo);
+		/* Bind pose SSBO only if changed from last batch */
+		if (pose_ssbo != last_pose_ssbo)
+		{
+			if (gm->poseverttype == PV_MD3)
+				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, pose_ssbo);
+			else
+				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, pose_ssbo);
+			last_pose_ssbo = pose_ssbo;
+		}
 
-		/* Set poseverttype uniform */
-		if (prog->u_poseverttype >= 0)
+		/* Set poseverttype uniform only if changed from last batch */
+		if (gm->poseverttype != last_poseverttype && prog->u_poseverttype >= 0)
+		{
 			glUniform1i_fp(prog->u_poseverttype, gm->poseverttype);
+			last_poseverttype = gm->poseverttype;
+		}
 
 		/* Set base instance offset for this batch */
 		if (prog->u_inst_base >= 0)
@@ -2467,6 +2481,10 @@ static void R_DrawAliasInstanced (void)
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, 0);
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, 0);
 	GL_SetAlphaThreshold(0.01f);
+
+	/* Reset SSBO cache for next frame */
+	last_pose_ssbo = 0;
+	last_poseverttype = -1;
 
 	/* Shadow pass — drawn individually per entity */
 	if (r_shadows.integer)
