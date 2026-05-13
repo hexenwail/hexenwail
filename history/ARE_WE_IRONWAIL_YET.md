@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-13 (IQM skeletal animation complete; 98% parity, 0% partial, 1% missing)
+Last updated: 2026-05-13 (Menu live preview restored; 100% parity, 0% partial, 0% missing)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 13 | 0 | 0 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
 | Performance / Engine | 9 | 0 | 0 | 1 |
-| UX / Menus / HUD | 23 | 0 | 1 | 1 |
+| UX / Menus / HUD | 24 | 0 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **81** | **0** | **1** | **8** |
+| **TOTAL** | **82** | **0** | **0** | **8** |
 
-**Parity: 98% ported, 0% partial, 1% missing** (excluding N/A)
+**Parity: 100% ported, 0% partial, 0% missing** (excluding N/A)
 
 ---
 
@@ -114,7 +114,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Console notification fade | ✅ | `con_notifyfade` (default 1) — alpha ramps 1→0 over the last 1 s of `con_notifytime`. Per-quad alpha threaded through `Draw_AddCharQuad` via new `Draw_SetCharacterAlpha` setter (gl_draw.c). |
 | Console max columns | ✅ | `con_maxcols` (default 0 = no cap), menu slider in Misc/HUD submenu (`menu.c`, commit `ab108d760`) |
 | Menu search with filtering | ✅ | Shared `M_Filter_*` facility — type printable chars in Display/Rendering/Graphics/Game submenus to live-filter rows by case-insensitive substring; backspace edits, ESC clears (then exits on second press), up/down skip filtered rows, cursor snaps to first match on filter change. Sound (4 rows) and Gamepad (controller-driven) intentionally not wired (uhexen2-rawq). |
-| Menu live preview | ❌ | Removed 2026-05-12 (commit 4939b7e7b) — feature caused text to flash invisible (alpha=0) when adjusting sliders; simpler to remove than fix. |
+| Menu live preview | ✅ | Restored 2026-05-13 (commit 290aacbfc) — menu text fades to 60% for 0.8s when adjusting Display/Rendering/Graphics sliders. Minimum alpha capped at 0.4 (was 0.0, causing invisible text). |
 | Show speed / show time overlays | ✅ | `scr_showspeed`, `showclock` (4-state: off / game-time / wall HH:MM / wall HH:MM:SS); both toggleable from Misc/HUD submenu |
 | Map-editor auto-check on launch | ➖ | Ironwail commit `5a983620` (2026-05): `Sys_IsStartedFromMapEditor` detects Qrucible parent process, triggers map check. Hexenwail has no equivalent function and no TrenchBroom workflow integration. Could be ported but low priority for Hexen II mapping scene. |
 
