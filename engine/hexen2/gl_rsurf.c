@@ -586,28 +586,34 @@ void R_UpdateLightmaps (qboolean Translucent)
 			    + ry * BLOCK_WIDTH * lightmap_bytes
 			    + rx * lightmap_bytes;
 
-			/* Upload only the dirty rect of the individual lightmap */
-			GL_Bind(lightmap_textures[i]);
-			glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
-			glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
-					rx, ry, rw, rh,
-					gl_lightmap_format, GL_UNSIGNED_BYTE, src);
-
-			/* Patch the dirty rect in the atlas */
-			if (lm_atlas_enabled && lm_atlas_texture)
+			if (lm_atlas_enabled)
 			{
-				int col = i % LM_ATLAS_COLS;
-				int row = i / LM_ATLAS_COLS;
-				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-				glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
-						col * BLOCK_WIDTH + rx,
-						row * BLOCK_HEIGHT + ry,
-						rw, rh,
-						gl_lightmap_format, GL_UNSIGNED_BYTE, src);
-				currenttexture = GL_UNUSED_TEXTURE;
+				/* Atlas mode: upload only to atlas, skip per-page texture */
+				if (lm_atlas_texture)
+				{
+					int col = i % LM_ATLAS_COLS;
+					int row = i / LM_ATLAS_COLS;
+					glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+					glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
+					glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
+							col * BLOCK_WIDTH + rx,
+							row * BLOCK_HEIGHT + ry,
+							rw, rh,
+							gl_lightmap_format, GL_UNSIGNED_BYTE, src);
+					glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
+					currenttexture = GL_UNUSED_TEXTURE;
+				}
 			}
-
-			glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
+			else
+			{
+				/* Per-page mode: upload to individual page texture */
+				GL_Bind(lightmap_textures[i]);
+				glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
+				glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
+						rx, ry, rw, rh,
+						gl_lightmap_format, GL_UNSIGNED_BYTE, src);
+				glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
+			}
 		}
 	}
 
