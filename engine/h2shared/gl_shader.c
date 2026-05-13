@@ -48,9 +48,17 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	GLuint shader;
 	GLint status;
 	char log[1024];
+	const char *sources[2];
+	char preamble[256];
 
 	shader = glCreateShader_fp(type);
-	glShaderSource_fp(shader, 1, &source, NULL);
+
+	/* Inject BINDLESS macro definition based on capability */
+	q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
+	sources[0] = preamble;
+	sources[1] = source;
+	glShaderSource_fp(shader, 2, sources, NULL);
+
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
 	if (!status)
