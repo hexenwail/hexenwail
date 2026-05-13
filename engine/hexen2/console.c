@@ -42,6 +42,17 @@ static int		con_mouse_x, con_mouse_y;
 static conofs_t		con_press_ofs;
 qboolean		con_mouse_button_down;
 
+typedef struct {
+	conofs_t begin;
+	conofs_t end;
+	char url[256];
+} con_url_t;
+
+#define MAX_CON_URLS 64
+static con_url_t con_urls[MAX_CON_URLS];
+static int con_url_count = 0;
+static int con_hover_url = -1;
+
 static	cvar_t	con_notifytime = {"con_notifytime", "3", CVAR_NONE};	//seconds
 static	cvar_t	con_notifycenter = {"con_notifycenter", "0", CVAR_ARCHIVE};	/* center notify text horizontally */
 static	cvar_t	con_notifyfade = {"con_notifyfade", "1", CVAR_ARCHIVE};	/* fade notify lines over the last second instead of hard-cutting (Ironwail parity) */
@@ -654,6 +665,139 @@ void Con_SelectAll (void)
 	con_selection.active = true;
 }
 
+static qboolean Con_IsURLChar (char c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+	       (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+	       c == '~' || c == ':' || c == '/' || c == '?' || c == '#' ||
+	       c == '[' || c == ']' || c == '@' || c == '!' || c == '$' ||
+	       c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
+	       c == '+' || c == ',' || c == ';' || c == '=' || c == '%';
+}
+
+static int Con_ExtractURL (int start_line, int start_col,
+                           char *url_out, int url_len, conofs_t *end_ofs)
+{
+	int pos = 0, line = start_line, col = start_col;
+	url_out[0] = '\0';
+
+	while (pos < url_len - 1 && line <= con->current)
+	{
+		if (con->current - line > con_totallines)
+			break;
+
+		short *text_row = con->text + (line % con_totallines) * con_linewidth;
+
+		while (col < con_linewidth && pos < url_len - 1)
+		{
+			char c = text_row[col] & 0xFF;
+			if (!Con_IsURLChar(c))
+				break;
+			url_out[pos++] = c;
+			col++;
+		}
+
+		if (col < con_linewidth)
+			break;
+
+		line++;
+		col = 0;
+	}
+
+	url_out[pos] = '\0';
+	if (end_ofs)
+	{
+		end_ofs->line = line;
+		end_ofs->col = col;
+	}
+	return pos;
+}
+
+static void Con_FindURLs (void)
+{
+	int line, col;
+	con_url_count = 0;
+
+	for (line = 0; line <= con->current && con_url_count < MAX_CON_URLS; line++)
+	{
+		if (con->current - line > con_totallines)
+			continue;
+
+		short *text_row = con->text + (line % con_totallines) * con_linewidth;
+
+		for (col = 0; col < con_linewidth - 7 && con_url_count < MAX_CON_URLS; col++)
+		{
+			char c0 = text_row[col] & 0xFF;
+			char c1 = text_row[col+1] & 0xFF;
+			char c2 = text_row[col+2] & 0xFF;
+			char c3 = text_row[col+3] & 0xFF;
+
+			qboolean is_http = (c0 == 'h' && c1 == 't' && c2 == 't' && c3 == 'p');
+			qboolean is_ftp = (c0 == 'f' && c1 == 't' && c2 == 'p');
+
+			int scheme_len = 0;
+			if (is_http)
+			{
+				if (col + 7 < con_linewidth)
+				{
+					char c4 = text_row[col+4] & 0xFF;
+					char c5 = text_row[col+5] & 0xFF;
+					char c6 = text_row[col+6] & 0xFF;
+
+					if (c4 == ':' && c5 == '/' && c6 == '/')
+						scheme_len = 7;
+					else if (col + 8 < con_linewidth)
+					{
+						char c7 = text_row[col+7] & 0xFF;
+						if (c4 == 's' && c5 == ':' && c6 == '/' && c7 == '/')
+							scheme_len = 8;
+					}
+				}
+			}
+			else if (is_ftp && col + 6 < con_linewidth)
+			{
+				char c3 = text_row[col+3] & 0xFF;
+				char c4 = text_row[col+4] & 0xFF;
+				char c5 = text_row[col+5] & 0xFF;
+
+				if (c3 == ':' && c4 == '/' && c5 == '/')
+					scheme_len = 6;
+			}
+
+			if (scheme_len > 0)
+			{
+				con_url_t *url = &con_urls[con_url_count];
+				url->begin.line = line;
+				url->begin.col = col;
+
+				Con_ExtractURL(line, col, url->url, sizeof(url->url), &url->end);
+
+				if (url->url[0] != '\0')
+				{
+					con_url_count++;
+					col += strlen(url->url) - 1;
+				}
+			}
+		}
+	}
+}
+
+static int Con_FindURLAtOffset (conofs_t ofs)
+{
+	for (int i = 0; i < con_url_count; i++)
+	{
+		con_url_t *url = &con_urls[i];
+
+		if (ofs.line == url->begin.line && ofs.col >= url->begin.col && ofs.col <= url->end.col)
+			return i;
+		if (ofs.line > url->begin.line && ofs.line < url->end.line)
+			return i;
+		if (ofs.line == url->end.line && ofs.col <= url->end.col && ofs.line > url->begin.line)
+			return i;
+	}
+	return -1;
+}
+
 static qboolean Con_ScreenToOffset (int sx, int sy, conofs_t *ofs);
 
 static qboolean Con_ScreenToOffset (int sx, int sy, conofs_t *ofs)
@@ -693,21 +837,35 @@ void Con_UpdateMouseState (void)
 {
 	conofs_t cur_ofs;
 	qboolean on_text;
+	int url_index;
 
 	// Reset if not in console
 	if (Key_GetDest() != key_console)
 	{
 		con_mouse_state = CMS_NOTPRESSED;
 		con_mouse_button_down = false;
+		con_hover_url = -1;
 		VID_SetMouseCursor(MCURSOR_DEFAULT);
 		return;
 	}
 
+	// Update URL cache
+	Con_FindURLs();
+
 	// Try to get current mouse position in console coordinates
 	on_text = Con_ScreenToOffset(con_mouse_x, con_mouse_y, &cur_ofs);
 
-	// Set cursor shape based on position
+	// Check if hovering over a URL
+	url_index = -1;
 	if (on_text)
+		url_index = Con_FindURLAtOffset(cur_ofs);
+
+	con_hover_url = url_index;
+
+	// Set cursor shape based on position
+	if (url_index >= 0)
+		VID_SetMouseCursor(MCURSOR_HAND);
+	else if (on_text)
 		VID_SetMouseCursor(MCURSOR_IBEAM);
 	else
 		VID_SetMouseCursor(MCURSOR_DEFAULT);
@@ -718,10 +876,19 @@ void Con_UpdateMouseState (void)
 	case CMS_NOTPRESSED:
 		if (con_mouse_button_down && on_text)
 		{
-			// Button went down on text: transition to PRESSED
-			con_press_ofs = cur_ofs;
-			con_selection.active = false;
-			con_mouse_state = CMS_PRESSED;
+			// Check if clicking on a URL
+			if (url_index >= 0)
+			{
+				SDL_OpenURL(con_urls[url_index].url);
+				con_mouse_state = CMS_PRESSED;
+			}
+			else
+			{
+				// Button went down on text: transition to PRESSED
+				con_press_ofs = cur_ofs;
+				con_selection.active = false;
+				con_mouse_state = CMS_PRESSED;
+			}
 		}
 		break;
 
@@ -907,6 +1074,56 @@ qboolean Con_CopySelectionToClipboard (void)
 	return true;
 }
 
+static void Con_DrawURLs (int lines)
+{
+	int y_bot, x1, x2, y, row_from_bottom;
+
+	for (int i = 0; i < con_url_count; i++)
+	{
+		con_url_t *url = &con_urls[i];
+		y_bot = lines - 30;
+
+		// Draw underline for each row of the URL
+		for (int row = url->begin.line; row <= url->end.line; row++)
+		{
+			row_from_bottom = con->display - row;
+			if (row_from_bottom < 0 || row_from_bottom >= ((lines - 22) >> 3))
+				continue;
+
+			y = y_bot - (row_from_bottom << 3);
+			if (y < 0 || y > lines - 30)
+				continue;
+
+			int col_start, col_end;
+			if (row == url->begin.line && row == url->end.line)
+			{
+				col_start = url->begin.col;
+				col_end = url->end.col;
+			}
+			else if (row == url->begin.line)
+			{
+				col_start = url->begin.col;
+				col_end = con_linewidth - 1;
+			}
+			else if (row == url->end.line)
+			{
+				col_start = 0;
+				col_end = url->end.col;
+			}
+			else
+			{
+				col_start = 0;
+				col_end = con_linewidth - 1;
+			}
+
+			x1 = (col_start + 1) << 3;
+			x2 = (col_end + 2) << 3;
+			float alpha = (i == con_hover_url) ? 0.8f : 0.4f;
+			Draw_FillAlpha(x1, y + 6, x2 - x1, 1, 0.2f, 0.6f, 1.0f, alpha);
+		}
+	}
+}
+
 /*
 ================
 Con_DrawConsole
@@ -960,6 +1177,7 @@ void Con_DrawConsole (int lines)
 			Draw_Character ( (x+1)<<3, y, text[x]);
 	}
 
+	Con_DrawURLs(lines);
 	Con_DrawSelection(lines);
 
 // draw the input prompt, user text, and cursor if desired
