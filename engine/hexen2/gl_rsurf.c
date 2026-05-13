@@ -3119,6 +3119,8 @@ LIGHTMAP ALLOCATION
 =============================================================================
 */
 
+static unsigned int last_lightmap_allocated = 0;
+
 // returns a texture number and the position inside it
 static unsigned int AllocBlock (int w, int h, int *x, int *y)
 {
@@ -3126,7 +3128,7 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 	int		best, best2;
 	unsigned int	texnum;
 
-	for (texnum = 0; texnum < MAX_LIGHTMAPS; texnum++)
+	for (texnum = last_lightmap_allocated; texnum < MAX_LIGHTMAPS; texnum++)
 	{
 		best = BLOCK_HEIGHT;
 
@@ -3154,6 +3156,7 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 		for (i = 0; i < w; i++)
 			allocated[texnum][*x + i] = best + h;
 
+		last_lightmap_allocated = texnum;
 		return texnum;
 	}
 
@@ -3342,6 +3345,7 @@ void GL_BuildLightmaps (void)
 	memset (allocated, 0, sizeof(allocated));
 	memset (lightmap_modified, 0, sizeof(lightmap_modified));
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
+	last_lightmap_allocated = 0;
 
 	r_framecount = 1;		// no dlightcache
 
