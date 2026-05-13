@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-13 (IQM skeletal animation foundation complete; 97% parity, 1% partial, 1% missing)
+Last updated: 2026-05-13 (IQM skeletal animation complete; 98% parity, 0% partial, 1% missing)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 12 | 1 | 0 | 0 |
+| Rendering — GPU Pipeline | 13 | 0 | 0 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
 | Performance / Engine | 9 | 0 | 0 | 1 |
 | UX / Menus / HUD | 23 | 0 | 1 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **80** | **1** | **1** | **8** |
+| **TOTAL** | **81** | **0** | **1** | **8** |
 
-**Parity: 97% ported, 1% partial, 1% missing** (excluding N/A)
+**Parity: 98% ported, 0% partial, 1% missing** (excluding N/A)
 
 ---
 
@@ -43,7 +43,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Bindless textures | ✅ | `ARB_bindless_texture` + `ARB_gpu_shader_int64` — zero bind overhead. SSBO handles with sampler2D constructor sampling. Disabled by default (`+bindless` flag to enable), seamless fallback to uniform samplers on unsupported hardware (uhexen2-abyz, completed 2026-05-13). |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
-| IQM skeletal model support | 🔶 | **90% complete** (2026-05-13: commit 48753b791): MD5mesh text parser (joints, vertices, triangles), normal computation, GPU upload (iqmvert_t VBO + bonepose_t SSBO), 5-attribute VAO setup, model loading dispatch, aliashdr_t/alias_gpu_mesh_t integration. **Remaining**: Shader variant for PV_IQM skeletal deformation (~150 LOC), animation frame blending in bone space, render dispatch SSBO binding. ~95% of implementation complete, GPU-side deformation shader pending. |
+| IQM skeletal model support | ✅ | MD5mesh parser, GPU upload (iqmvert_t VBO + bonepose_t SSBO), 5-attribute VAO, skeletal deformation shader (sskeletal_vert), SSBO bone matrix blending. Commits 48753b791 (foundation) + d18ca709c (shader completion). |
 
 ## Rendering — Visual/Shading
 
