@@ -1134,12 +1134,7 @@ static void R_DrawAliasModel (entity_t *e)
 		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);
 	}
 
-	/* Inside an OIT pass, OIT_BeginTranslucency has already configured
-	 * per-buffer blend funcs (glBlendFunci 0/1).  Overriding with plain
-	 * glBlendFunc or glDisable(GL_BLEND) would clobber both attachments
-	 * and break WBOIT for every translucent draw after this one in the
-	 * same pass (sprites, particles, water turb, brushmodels).  Skip
-	 * the state pokes and rely on the OIT setup. */
+	/* blend state pokes gated for OIT pass */
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		glEnable_fp (GL_BLEND);
@@ -1241,12 +1236,9 @@ static void R_DrawAliasModel (entity_t *e)
 
 	R_SetupAliasFrame (e, paliashdr);
 
-	// Fullbright pass: render fullbright pixels with additive blending
-	// Skip for translucent models — additive blend over transparency looks wrong
-	// Also skip inside an OIT pass: the additive blend can't coexist with
-	// the WBOIT MRT blend funcs, and rendering fullbright before OIT_End
-	// just gets dimmed by the resolve like the glow flares did
-	// (handled separately by R_DrawAllGlows after OIT_End).
+	// Fullbright pass: render fullbright pixels with additive blending.
+	// Skip for translucent models and inside the OIT pass (handled by
+	// R_DrawAllGlows after OIT_End).
 	if (gl_fullbrights.integer && skinnum < 100 && !OIT_InPass() &&
 	    !((e->drawflags & DRF_TRANSLUCENT) ||
 	      (e->model->flags & (EF_TRANSPARENT | EF_SPECIAL_TRANS)) ||
@@ -1319,15 +1311,7 @@ static void R_DrawAliasModel (entity_t *e)
 
 	GL_PopMatrix();
 
-	/* Projected mesh shadow — skipped inside the OIT pass.
-	 * GL_DrawAliasShadow toggles GL_STENCIL_TEST off at its tail, which
-	 * permanently disables WBOIT's stencil=2 write for every translucent
-	 * fragment drawn afterward — the resolve (which composites only where
-	 * stencil==2) then silently drops them.  The caller also re-enables
-	 * glDepthMask and disables GL_BLEND on exit, both of which corrupt the
-	 * WBOIT MRT blend funcs.  Manifests as "still missing particles" on
-	 * maps with translucent alias entities.  Shadows on translucent ents
-	 * have no well-defined look anyway (uhexen2-a0hp). */
+	/* Projected mesh shadow — skipped inside the OIT pass. */
 	if (r_shadows.integer && e != &cl.viewent && !OIT_InPass())
 	{
 		GL_PushMatrix();
@@ -2975,10 +2959,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		switch (e->model->type)
 		{
 		case mod_alias:
-			/* WBOIT requires depth writes off — re-enabling here for
-			 * the legacy back-to-front sort path would punch holes in
-			 * the shared depth buffer and z-cull every translucent
-			 * fragment drawn after this entity (uhexen2-a0hp). */
+			/* depth-write toggle gated for OIT pass */
 			if (!depthMaskWrite && !OIT_InPass())
 			{
 				depthMaskWrite = 1;
@@ -3771,12 +3752,7 @@ static void R_RenderScene (void)
 	R_DrawEntitiesOnList ();
 	RPROF_CPU_END(rprof_cpu_ents);
 
-	/* R_DrawAllGlows moved to R_RenderView, AFTER OIT_EndTranslucency:
-	 * glows blend additively (GL_ONE, GL_ONE) but the OIT resolve uses
-	 * src-alpha blending which multiplies dst by (1 - revealage), so a
-	 * glow drawn before OIT_End gets dimmed wherever a translucent
-	 * fragment sits over it.  Drawing after OIT_End lets the additive
-	 * contribution land on the resolved scene unimpeded.  uhexen2-a0hp. */
+	/* R_DrawAllGlows moved to R_RenderView, after OIT_EndTranslucency. */
 
 	Fog_DisableGFog ();
 
@@ -4458,11 +4434,8 @@ void R_RenderView (void)
 	}
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_PARTICLES);
 
-	/* Opaque liquids (lava, opaque slime/custom turbs) must draw BEFORE
-	 * OIT_BeginTranslucency binds the WBOIT FBO — they need plain depth
-	 * writes against the scene depth buffer.  Inside the OIT pass they'd
-	 * land in the accum buffer with BLEND disabled and be eaten by the
-	 * resolve.  Translucent water/ice runs inside OIT below. */
+	/* Opaque liquids draw before OIT_BeginTranslucency; translucent
+	 * water/ice runs inside OIT below. */
 	R_DrawWaterSurfaces (WATER_PHASE_OPAQUE);
 
 	glDepthMask_fp(0);
@@ -4471,10 +4444,6 @@ void R_RenderView (void)
 
 	OIT_BeginTranslucency();
 
-	/* Particles use src-alpha blend — drawn before OIT_End they would be
-	 * dimmed by the resolve's (1 - revealage) factor wherever a
-	 * translucent fragment lands.  Route through gl_shader_particle_oit
-	 * so they participate in WBOIT accumulation instead.  uhexen2-a0hp. */
 	R_DrawParticles ();
 
 	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
@@ -4486,9 +4455,7 @@ void R_RenderView (void)
 
 	OIT_EndTranslucency(GL_GetSceneFBO());
 
-	/* Additive glow flares: render onto the resolved scene so the
-	 * WBOIT src-alpha resolve doesn't dim them under translucent
-	 * fragments.  Moved out of R_RenderScene for uhexen2-a0hp. */
+	/* Additive glow flares render onto the resolved scene. */
 	R_DrawAllGlows();
 
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_VM);

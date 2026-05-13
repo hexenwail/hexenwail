@@ -101,33 +101,15 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 		"#define OIT 1\n"
 		"vec4 fragColor;\n"
 		"layout(location=0) out vec4 out_accum;\n"
-		/* out_reveal declared as vec4 (instead of float) so all four
-		 * components of the fragment's location-1 output are
-		 * deterministic.  Some drivers leave the unwritten components
-		 * undefined or set them to 1.0 when only `out float` is
-		 * declared, which then makes the blend func
-		 * (ZERO, ONE_MINUS_SRC_COLOR) treat src.gba as 1.0 — collapsing
-		 * the revealage texture to 0 on every translucent draw and
-		 * making the resolve composite produce src.a = 1 - 0 = 1
-		 * everywhere it touches.  Writing vec4(alpha, 0, 0, 0) keeps
-		 * the source color fully defined; only the R channel hits the
-		 * single-channel R8 texture. */
-		"layout(location=1) out vec4 out_reveal;\n"
+		"layout(location=1) out float out_reveal;\n"
 		"void main_body();\n"
 		"void main() {\n"
-		/* Initialize fragColor before calling main_body so Mesa's
-		 * static analysis doesn't flag the read in clamp() as
-		 * uninitialized.  Without this, Mesa Intel emits
-		 * "warning: `fragColor' used uninitialized" and aggressive
-		 * optimization can fold the entire chain to zero — which
-		 * silently kills all OIT writes. */
-		"    fragColor = vec4(0.0);\n"
 		"    main_body();\n"
 		"    fragColor = clamp(fragColor, 0.0, 1.0);\n"
 		"    float z = 1.0 / gl_FragCoord.w;\n"
 		"    float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n"
 		"    out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n"
-		"    out_reveal = vec4(fragColor.a, 0.0, 0.0, 0.0);\n"
+		"    out_reveal = fragColor.a;\n"
 		"}\n"
 		"#define main main_body\n";
 
@@ -190,13 +172,7 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 	}
 	else
 	{
-		/* Loud, repeated warning so the failure isn't lost in the boot
-		 * spew.  Without the OIT variant linked, r_oit=1 renders the
-		 * geometry path as completely invisible (the resolve gates on
-		 * 1-revealage and revealage never moves off its cleared 1.0
-		 * when only MRT0 is written). */
-		Con_Printf("\x02WARNING\x02: %s_oit shader FAILED — r_oit will hide all %s\n",
-			   name, name);
+		Con_SafePrintf("  %s_oit: FAILED\n", name);
 	}
 }
 
