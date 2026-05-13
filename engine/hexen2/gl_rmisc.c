@@ -235,6 +235,21 @@ static void R_SetClearColor_f (cvar_t *var)
 
 /*
 ===============
+R_Model_ExtraFlags_List_f -- Ironwail (johnfitz)
+
+Re-apply engine-set extra flags (MOD_NOLERP) to every cached model
+when r_nolerp_list changes at runtime.
+===============
+*/
+static void R_Model_ExtraFlags_List_f (cvar_t *var)
+{
+	int i;
+	for (i = 0; i < MAX_MODELS; i++)
+		Mod_SetExtraFlags (cl.model_precache[i]);
+}
+
+/*
+===============
 R_Init
 ===============
 */
@@ -242,6 +257,7 @@ void R_Init (void)
 {
 	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
 	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
+	Cmd_AddCommand ("r_aliasinfo", R_AliasInfo_f);
 
 	Cvar_RegisterVariable (&r_norefresh);
 	Cvar_RegisterVariable (&r_lightmap);
@@ -268,7 +284,8 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_caustics_intensity);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_lerpmodels);
-	Cvar_RegisterVariable (&r_animsmoothing);
+	Cvar_RegisterVariable (&r_nolerp_list);
+	Cvar_SetCallback (&r_nolerp_list, R_Model_ExtraFlags_List_f);
 	Cvar_RegisterVariable (&r_showbboxes);
 	Cvar_RegisterVariable (&r_showbboxes_think);
 	Cvar_RegisterVariable (&r_showbboxes_health);

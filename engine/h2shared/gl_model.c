@@ -2644,6 +2644,60 @@ void Mod_SaveAliasModelDefaults (qmodel_t *mod)
 
 /*
 =================
+nameInList -- Ironwail (johnfitz)
+
+Match a model name against a comma-separated list of model names.
+=================
+*/
+static qboolean nameInList (const char *list, const char *name)
+{
+	const char *s = list;
+	char tmp[MAX_QPATH];
+	int  i;
+
+	while (*s)
+	{
+		/* Copy up to the next comma or end of string. */
+		i = 0;
+		while (*s && *s != ',')
+		{
+			if (i < MAX_QPATH - 1)
+				tmp[i++] = *s;
+			s++;
+		}
+		tmp[i] = '\0';
+		if (!strcmp (name, tmp))
+			return true;
+		while (*s == ',')
+			s++;
+	}
+	return false;
+}
+
+/*
+=================
+Mod_SetExtraFlags -- Ironwail (johnfitz)
+
+Apply engine-side flags to an alias model from cvar-driven lists
+(currently r_nolerp_list).  Called at model load and on cvar change.
+=================
+*/
+void Mod_SetExtraFlags (qmodel_t *mod)
+{
+	extern cvar_t r_nolerp_list;
+
+	if (!mod || mod->type != mod_alias)
+		return;
+
+	/* Strip prior engine-set bits (preserve everything in the EF_* range). */
+	mod->flags &= ~MOD_NOLERP;
+
+	if (nameInList (r_nolerp_list.string, mod->name))
+		mod->flags |= MOD_NOLERP;
+}
+
+/*
+=================
 Mod_RestoreAliasModelDefaults
 
 Walk every loaded alias model and restore the snapshot taken at load
@@ -2667,6 +2721,9 @@ void Mod_RestoreAliasModelDefaults (void)
 		mod->flags = mod->orig_flags;
 		mod->ex_flags = mod->orig_ex_flags;
 		memcpy(mod->glow_settings, mod->orig_glow_settings, sizeof(mod->glow_settings));
+		/* Re-apply engine-set bits (MOD_NOLERP via r_nolerp_list) after
+		 * the rollback to orig_flags, in case the cvar changed mid-game. */
+		Mod_SetExtraFlags (mod);
 	}
 }
 
@@ -2977,6 +3034,7 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
 
 	mod->flags = LittleLong (pinmodel->flags);
+	Mod_SetExtraFlags (mod);	/* Ironwail r_nolerp_list */
 
 //
 // endian-adjust and copy the data, starting with the alias model header
@@ -3158,6 +3216,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
 
 	mod->flags = LittleLong (pinmodel->flags);
+	Mod_SetExtraFlags (mod);	/* Ironwail r_nolerp_list */
 
 //
 // endian-adjust and copy the data, starting with the alias model header
