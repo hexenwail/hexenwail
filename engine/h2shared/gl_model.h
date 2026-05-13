@@ -321,6 +321,7 @@ typedef struct mtriangle_s {
 typedef enum {
 	PV_QUAKE1 = 0,	/* 8-bit XYZ + lightnormal (Hexen II native) */
 	PV_MD3 = 1,	/* 16-bit XYZ + spherical normal (MD3 models) */
+	PV_IQM = 2,	/* Skeletal animation with bone indices/weights (MD5mesh) */
 } poseverttype_t;
 
 /* MD3 model format constants */
@@ -388,6 +389,33 @@ typedef struct {
 	unsigned char	normal[2];	/* spherical normal (in 8 bits, x=lon, y=lat) */
 } md3Vertex_t;
 
+/* IQM (skeletal) vertex and bone data structures */
+typedef struct {
+	float		xyz[3];		/* rest-pose position in bone-local space */
+	int8_t		norm[4];	/* compressed normal (xyz used, w padding) */
+	float		st[2];		/* UV coords */
+	uint8_t		weight[4];	/* normalized bone weights (sum = 255) */
+	uint8_t		idx[4];		/* bone indices (up to 4 influences) */
+} iqmvert_t;
+
+/* MD5mesh format constants and limits */
+#define MD5_MAX_BONES		128
+#define MD5_MAX_VERTS		4096
+#define MD5_MAX_TRIANGLES	8192
+#define MD5_MAX_FRAMES		1024
+
+typedef struct {
+	float		mat[12];	/* 3x4 row-major bone transform matrix */
+} bonepose_t;
+
+typedef struct {
+	char		name[32];	/* bone name */
+	int		parent;		/* parent bone index (-1 for root) */
+	float		translate[3];	/* rest-pose translation */
+	float		rotate[4];	/* rest-pose rotation (quaternion) */
+	float		scale[3];	/* rest-pose scale */
+} boneinfo_t;
+
 #define	MAX_SKINS	32
 typedef struct {
 	int		ident;
@@ -408,9 +436,15 @@ typedef struct {
 
 	int		numposes;
 	int		poseverts;
-	int		posedata;	// numposes*poseverts trivert_t (or md3pose_t for PV_MD3)
+	int		posedata;	// numposes*poseverts trivert_t (or md3pose_t for PV_MD3, or iqmvert_t for PV_IQM)
 	int		commands;	// gl command list with embedded s/t
-	poseverttype_t	poseverttype;	// PV_QUAKE1 or PV_MD3 (for multi-format GPU upload)
+	poseverttype_t	poseverttype;	// PV_QUAKE1, PV_MD3, or PV_IQM (for multi-format GPU upload)
+
+	/* Skeletal animation data (PV_IQM only) */
+	int		numbones;	// number of bones (0 if not skeletal)
+	int		boneinfo;	// offset to boneinfo_t array (numbones entries)
+	int		boneposedata;	// offset to bonepose_t array (numposes*numbones entries)
+
 	GLuint		gl_texturenum[MAX_SKINS][4];
 	GLuint		gl_fb_texturenum[MAX_SKINS][4];	// fullbright mask textures
 	maliasframedesc_t	frames[1];	// variable sized
@@ -427,11 +461,13 @@ typedef struct {
 	GLuint	ibo;		/* index buffer (triangulated) */
 	GLuint	ssbo_pose;	/* all poses' trivertx_t data (GL 4.3, PV_QUAKE1) */
 	GLuint	ssbo_pose_md3;	/* all poses' md3Vertex_t data (GL 4.3, PV_MD3) */
+	GLuint	ssbo_bones;	/* bone pose matrices (GL 4.3, PV_IQM) */
 	GLuint	tex_pose;	/* pose data as R32UI texture (ES 3.0 compatible, PV_QUAKE1) */
 	int	num_indices;	/* total triangle indices */
 	int	poseverts;	/* verts per pose (for shader indexing) */
 	int	numposes;	/* total pose count */
-	poseverttype_t poseverttype;	/* PV_QUAKE1 or PV_MD3 */
+	int	numbones;	/* number of bones (0 if not skeletal) */
+	poseverttype_t poseverttype;	/* PV_QUAKE1, PV_MD3, or PV_IQM */
 	qboolean valid;		/* true if GPU data was created successfully */
 } alias_gpu_mesh_t;
 
