@@ -2791,6 +2791,15 @@ static qboolean M_Rendering_IsSkip (int i)
 	return M_Filter_Active() && !M_Filter_Matches(rend_labels[i]);
 }
 
+static int M_Rendering_VisualRow (int i)
+{
+	int row = 0;
+	for (int j = 0; j < i; j++)
+		if (!M_Rendering_IsSkip(j))
+			row++;
+	return row;
+}
+
 static void M_Menu_Rendering_f (void)
 {
 	Key_SetDest (key_menu);
@@ -3092,7 +3101,7 @@ static void M_Rendering_Draw (void)
 			rendering_cursor = h;
 	}
 	if (!M_Rendering_IsSkip(rendering_cursor))
-		M_DrawCharacter (64, 92 + rendering_cursor*8, 12+((int)(realtime*4)&1));
+		M_DrawCharacter (64, 92 + M_Rendering_VisualRow(rendering_cursor)*8, 12+((int)(realtime*4)&1));
 
 	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
 	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));
@@ -3216,6 +3225,15 @@ static qboolean M_Graphics_IsSkip (int i)
 {
 	if (i < 0 || i >= GFX_ITEMS) return true;
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
+}
+
+static int M_Graphics_VisualRow (int i)
+{
+	int row = 0;
+	for (int j = 0; j < i; j++)
+		if (!M_Graphics_IsSkip(j))
+			row++;
+	return row;
 }
 
 static void M_Menu_Graphics_f (void)
@@ -3469,7 +3487,7 @@ static void M_Graphics_Draw (void)
 			graphics_cursor = h;
 	}
 	if (!M_Graphics_IsSkip(graphics_cursor))
-		M_DrawCharacter (64, 92 + graphics_cursor*8, 12+((int)(realtime*4)&1));
+		M_DrawCharacter (64, 92 + M_Graphics_VisualRow(graphics_cursor)*8, 12+((int)(realtime*4)&1));
 
 	M_Filter_Draw (76, 92 + 8*(GFX_ITEMS + 1));
 }
