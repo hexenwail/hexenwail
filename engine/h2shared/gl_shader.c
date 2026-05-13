@@ -53,11 +53,11 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 
 	shader = glCreateShader_fp(type);
 
-	/* TODO: BINDLESS macro injection disabled pending investigation of shader link failures.
-	 * When shader support is re-enabled, re-add:
-	 * q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
-	 * sources[0] = preamble; sources[1] = source; glShaderSource_fp(shader, 2, sources, NULL); */
-	glShaderSource_fp(shader, 1, (const char *const *)&source, NULL);
+	/* Inject BINDLESS macro definition based on capability */
+	q_snprintf(preamble, sizeof(preamble), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
+	sources[0] = preamble;
+	sources[1] = source;
+	glShaderSource_fp(shader, 2, sources, NULL);
 
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
@@ -303,6 +303,12 @@ static const char sflat_frag[] =
 /* --- shader_world: textured + lightmap multitexture, with fog --- */
 static const char sworld_vert[] =
 	GLSL_VERT_HEADER
+	"#if BINDLESS\n"
+	"#extension GL_ARB_gpu_shader_int64 : require\n"
+	"struct DrawCall { uint flags; uint _pad; uint64_t tx_handle; uint64_t fb_handle; };\n"
+	"layout(binding=0, std430) buffer DrawCallBuffer { DrawCall calls[]; } u_draw_calls;\n"
+	"flat out uvec4 v_texhandles;\n"
+	"#endif\n"
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
@@ -331,6 +337,10 @@ static const char sworld_vert[] =
 	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
 	"    v_worldxy = a_position.xy;\n"
+	"#if BINDLESS\n"
+	"    DrawCall call = u_draw_calls.calls[0];\n"
+	"    v_texhandles = uvec4(unpackUint2x32(call.tx_handle), unpackUint2x32(call.fb_handle));\n"
+	"#endif\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
@@ -353,6 +363,9 @@ static const char sworld_vert[] =
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z
+	"#if BINDLESS\n"
+	"#extension GL_ARB_gpu_shader_int64 : require\n"
+	"#endif\n"
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask (uhexen2-sjvf) */
@@ -365,10 +378,17 @@ static const char sworld_frag[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	"#if BINDLESS\n"
+	"flat in uvec4 v_texhandles;\n"
+	"#endif\n"
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
+	"#if BINDLESS\n"
+	"    vec4 tex = texture(sampler2D(packUint2x32(v_texhandles.xy)), v_texcoord);\n"
+	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    if (color.a < u_alpha_threshold) discard;\n"
@@ -378,7 +398,11 @@ static const char sworld_frag[] =
 	 * mask texture per miptex (transparent everywhere else); for
 	 * surfaces with no fullbright pixels the engine binds a 1x1
 	 * black sentinel at unit 2 so the sample contributes 0. */
+	"#if BINDLESS\n"
+	"    vec3 fb = texture(sampler2D(packUint2x32(v_texhandles.zw)), v_texcoord).rgb;\n"
+	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"#endif\n"
 	"    color.rgb += fb;\n"
 	/* Underwater caustics: gated by u_caustics.x (set to 0 by C when the
 	 * view leaf is not CONTENTS_WATER or the cvar is off, otherwise to
@@ -416,6 +440,9 @@ static const char sworld_frag[] =
 static const char sworld_frag_opaque[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z_OPAQUE
+	"#if BINDLESS\n"
+	"#extension GL_ARB_gpu_shader_int64 : require\n"
+	"#endif\n"
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask */
@@ -428,13 +455,24 @@ static const char sworld_frag_opaque[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	"#if BINDLESS\n"
+	"flat in uvec4 v_texhandles;\n"
+	"#endif\n"
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
+	"#if BINDLESS\n"
+	"    vec4 tex = texture(sampler2D(packUint2x32(v_texhandles.xy)), v_texcoord);\n"
+	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
+	"#if BINDLESS\n"
+	"    vec3 fb = texture(sampler2D(packUint2x32(v_texhandles.zw)), v_texcoord).rgb;\n"
+	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"#endif\n"
 	"    color.rgb += fb;\n"
 	"    if (u_caustics.x > 0.0) {\n"
 	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
