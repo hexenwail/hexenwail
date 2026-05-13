@@ -1114,12 +1114,6 @@ static void OIT_Status_f (void)
 			Con_Printf("  GL error queue:    0x%04x\n", err);
 	}
 	/* Current GL pipeline state at call time. */
-#ifndef GL_DRAW_FRAMEBUFFER_BINDING
-#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
-#endif
-#ifndef GL_READ_FRAMEBUFFER_BINDING
-#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
-#endif
 	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
 	glGetIntegerv_fp(GL_SCISSOR_TEST, &scissor);
