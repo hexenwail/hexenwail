@@ -1243,6 +1243,8 @@ void R_DrawWorldCulled (void)
 				       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 		if (prog->u_alpha_threshold >= 0)
 			glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+		if (prog->u_overbright >= 0)
+			glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 	}
 
 	/* Bind lightmap atlas on unit 1, default fb null at unit 2 */

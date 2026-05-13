@@ -28,6 +28,9 @@
 void Fog_Init (void);
 void Fog_NewMap (void);
 
+/* gl_rsurf.c */
+void R_OverbrightChanged (cvar_t *var);
+
 byte			*playerTranslation;
 const int	color_offsets[MAX_PLAYER_CLASS] =
 {
@@ -312,6 +315,8 @@ void R_Init (void)
 
 	Cvar_RegisterVariable (&gl_fullbrights);
 	Cvar_RegisterVariable (&gl_overbright_models);
+	Cvar_RegisterVariable (&gl_overbright);
+	Cvar_SetCallback (&gl_overbright, R_OverbrightChanged);
 	Cvar_RegisterVariable (&gl_fxaa);
 	Cvar_RegisterVariable (&gl_lmatlas);
 	Cvar_RegisterVariable (&r_motionblur);

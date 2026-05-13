@@ -19,6 +19,11 @@
 extern float r_fog_density;
 extern float r_fog_color[3];
 
+/* gl_overbright cvar (gl_rmain.c) — read directly for the u_overbright uniform.
+ * Kept here so GL_ImmEnd can push the value alongside other auto-uploaded
+ * uniforms.  uhexen2-f29y. */
+extern cvar_t gl_overbright;
+
 /* ------------------------------------------------------------------ */
 /* Vertex format for the streaming VBO:                                */
 /*   pos[3] + texcoord[2] + lmcoord[2] + color[4] = 11 floats         */
@@ -268,6 +273,7 @@ static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
 static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
 static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
+static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
 static qboolean	imm_cache_mvp_set;
 static qboolean	imm_cache_mv_set;
 
@@ -289,6 +295,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_time = -1.0f;
 	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
 	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
+	imm_cache_overbright = -1.0f;
 	imm_cache_mvp_set = false;
 	imm_cache_mv_set = false;
 }
@@ -331,6 +338,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_time = -1.0f;
 		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
 		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
+		imm_cache_overbright = -1.0f;
 		imm_cache_mvp_set = false;
 		imm_cache_mv_set = false;
 	}
@@ -403,6 +411,16 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		glUniform2f_fp(shader->u_wind, sky_wind_uv[0], sky_wind_uv[1]);
 		imm_cache_wind[0] = sky_wind_uv[0];
 		imm_cache_wind[1] = sky_wind_uv[1];
+	}
+
+	if (shader->u_overbright >= 0)
+	{
+		float ob = gl_overbright.integer ? 2.0f : 1.0f;
+		if (ob != imm_cache_overbright)
+		{
+			glUniform1f_fp(shader->u_overbright, ob);
+			imm_cache_overbright = ob;
+		}
 	}
 
 	/* draw */
