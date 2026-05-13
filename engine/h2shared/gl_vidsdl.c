@@ -995,7 +995,9 @@ static void GL_Init (void)
 		       (glClientWaitSync_fp != NULL) &&
 		       (glDeleteSync_fp != NULL);
 	gl_multi_bind_able = (glBindBuffersRange_fp != NULL);
-	gl_bindless_able = !COM_CheckParm("-nobindless") &&
+	/* Bindless disabled by default pending stability testing.
+	 * Require explicit +bindless to enable (in addition to hardware support). */
+	gl_bindless_able = COM_CheckParm("+bindless") &&
 			   (glGetTextureHandleARB_fp != NULL) &&
 			   (glGetTextureSamplerHandleARB_fp != NULL) &&
 			   (glMakeTextureHandleResidentARB_fp != NULL) &&
