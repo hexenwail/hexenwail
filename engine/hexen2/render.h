@@ -44,6 +44,13 @@ typedef struct efrag_s
 #define LERP_RESETMOVE	(1<<1)	// reset movement lerp (teleport, spawn)
 #define LERP_RESETANIM	(1<<2)	// reset animation lerp
 
+typedef struct lightcache_s {
+	int			surfidx;	// < 0: black surface; == 0: no cache; > 0: 1+index of surface
+	vec3_t		pos;
+	short		ds;
+	short		dt;
+} lightcache_t;
+
 typedef struct entity_s
 {
 	qboolean		forcelink;	// model changed
@@ -101,6 +108,8 @@ typedef struct entity_s
 						// long the next frame will be held,
 						// approximating Ironwail's server-driven
 						// LERP_FINISH without a protocol bit.
+
+	lightcache_t	lightcache;	// alias light trace cache
 } entity_t;
 
 
