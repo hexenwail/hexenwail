@@ -32,19 +32,15 @@
 
 void (*vid_menudrawfn)(void);
 
-/* Live preview (Ironwail ui_live_preview parity): when the user
- * adjusts a slider with ←/→ in graphics submenus, briefly fade the menu
- * glyphs to semi-transparent so the game effect behind shows through.
- * Useful for post-process sliders (gamma/contrast/brightness) whose effect
- * is otherwise hidden by the menu. Trapezoidal alpha curve: fade in, hold, fade out.
- * FIX: cap minimum alpha at 0.4 so text doesn't completely disappear. */
+/* Live preview: briefly dim the fade screen when presets are changed,
+ * so the user can see the effect of the preset without closing the menu.
+ * No text alpha manipulation — just backdrop dimming. */
 static cvar_t	ui_live_preview = {"ui_live_preview", "1", CVAR_ARCHIVE};
 static double	menu_live_edit_time = -10.0;	/* realtime of last edit; -10 = never */
 #define UI_PREVIEW_FADE_IN	0.1
 #define UI_PREVIEW_HOLD		0.6
 #define UI_PREVIEW_FADE_OUT	0.1
 #define UI_PREVIEW_TOTAL	(UI_PREVIEW_FADE_IN + UI_PREVIEW_HOLD + UI_PREVIEW_FADE_OUT)
-#define UI_PREVIEW_MIN_ALPHA	0.4f		/* keep text readable even at peak fade */
 
 static float M_LivePreviewAlpha (void)
 {
@@ -2386,6 +2382,7 @@ static void M_Display_AdjustSliders (int dir)
 		}
 #undef PRESET_COMMON
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
+		M_FlagLiveEdit ();
 		break;
 	}
 	case DISP_GAMMA:
@@ -6868,21 +6865,6 @@ void M_Draw (void)
 	GL_SetCanvas (CANVAS_MENU);
 	m_canvas_active = true;
 
-	/* Live preview: reduce menu glyph alpha so the postprocess effect
-	 * of the slider just adjusted becomes visible behind the menu.
-	 * Cap minimum alpha at 0.3 so text doesn't completely disappear.
-	 * Plaque images (Draw_Pic) keep their normal alpha. */
-	{
-		float preview_alpha = M_LivePreviewAlpha ();
-		if (preview_alpha > 0.0f)
-		{
-			float text_alpha = 1.0f - preview_alpha;
-			if (text_alpha < UI_PREVIEW_MIN_ALPHA)
-				text_alpha = UI_PREVIEW_MIN_ALPHA;
-			Draw_SetCharacterAlpha (text_alpha);
-		}
-	}
-
 	switch (m_state)
 	{
 	case m_none:
@@ -7049,12 +7031,6 @@ void M_Keydown (int key, qboolean repeat)
 			return;
 		}
 	}
-
-	/* Live preview: trigger only on arrow adjustments in graphics submenus */
-	if ((key == K_LEFTARROW || key == K_RIGHTARROW) &&
-	    (m_state == m_display || m_state == m_video ||
-	     m_state == m_rendering || m_state == m_graphics))
-		M_FlagLiveEdit ();
 
 	switch (m_state)
 	{
