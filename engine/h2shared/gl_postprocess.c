@@ -1167,11 +1167,20 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_oit);
 	Cvar_RegisterVariable(&r_oit_debug_no_stencil);
 	Cmd_AddCommand("r_oit_status", OIT_Status_f);
-	/* Force-override any saved r_oit=1 from previous configs. The OIT
-	 * path needs every translucent draw (sprites, particles, brushmodel,
-	 * water) to use an OIT-aware shader; only the alias path has one
-	 * today, so a saved r_oit=1 makes projectiles/sprites invisible.
-	 * Drop this once all translucent paths are converted. */
+	/* Force-override any saved r_oit=1 from previous configs.  Round 4-12
+	 * of the WBOIT debug effort (see bead uhexen2-a0hp) gated every
+	 * known state-poke and added all known conformance fixes (VAO
+	 * binding around resolve glDrawArrays, viewport set, colorMask
+	 * force-TRUE, early_fragment_tests removed, out_reveal as vec4 with
+	 * deterministic .gba components, fragColor explicitly initialized
+	 * in the OIT preamble, revealage texture promoted from R8 to
+	 * RGBA16F to match accum), but Mesa Intel Iris Xe still produces
+	 * texelFetch(TexReveal) == 0 everywhere after translucent draws —
+	 * the resolve composite collapses to alpha=0 and translucent
+	 * fragments render invisible (most visibly: frozen enemies become
+	 * 100% transparent, rocket-trail particles vanish).  Until the
+	 * Mesa Intel interaction is resolved (or testing on AMD/NVIDIA
+	 * confirms this is Intel-specific), keep r_oit off by default. */
 	if (r_oit.integer)
 		Cvar_Set("r_oit", "0");
 
