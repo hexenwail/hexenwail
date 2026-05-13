@@ -1466,6 +1466,9 @@ void R_DrawBrushModelSpecialOnly (entity_t *e)
 
 	if (!clmodel)
 		return;
+	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry (same fix as
+	 * R_DrawBrushModel). Prevent stale blending state from world rendering. */
+	glDisable_fp(GL_BLEND);
 	rotated = (e->angles[0] || e->angles[1] || e->angles[2]) ? true : false;
 
 	VectorSubtract (r_refdef.vieworg, e->origin, modelorg_local);
@@ -2400,6 +2403,12 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 
 	currenttexture = GL_UNUSED_TEXTURE;
 	GL_ImmResetState();
+	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry. Different
+	 * world surfaces leave GL_BLEND in different states depending on what's
+	 * visible from the current angle. Without this reset, brush entities
+	 * inherit stale blending state and render with view-dependent artifacts
+	 * (transparency changing as you rotate the camera). */
+	glDisable_fp(GL_BLEND);
 
 	clmodel = e->model;
 
