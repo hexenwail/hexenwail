@@ -299,32 +299,19 @@ called at the beginning of each frame — updates globals read by shaders
 */
 void Fog_SetupFrame (void)
 {
-	extern mleaf_t *r_viewleaf;
-	static float fog_lerp = 1.0f;	/* 1 = full fog, 0 = no fog */
-	float target, *c;
-
-	c = Fog_GetColor();
+	float *c = Fog_GetColor();
 	r_fog_color[0] = c[0];
 	r_fog_color[1] = c[1];
 	r_fog_color[2] = c[2];
 
-	/* Smoothly fade fog when entering/exiting water */
-	target = (r_viewleaf && r_viewleaf->contents <= CONTENTS_WATER) ? 0.0f : 1.0f;
-	if (fog_lerp < target)
-	{
-		fog_lerp += host_frametime * 4.0f;	/* fade in over ~0.25s */
-		if (fog_lerp > target) fog_lerp = target;
-	}
-	else if (fog_lerp > target)
-	{
-		fog_lerp -= host_frametime * 4.0f;	/* fade out over ~0.25s */
-		if (fog_lerp < target) fog_lerp = target;
-	}
-
 	/* /64 + EXP2 (squared in shader) matches QuakeSpasm/Shanjaq's
 	 * GL_FOG_DENSITY scaling so console `fog <d>` values land at the
-	 * same visual thickness as in those engines. */
-	r_fog_density = (Fog_GetDensity() / 64.0) * fog_lerp;
+	 * same visual thickness as in those engines.  Density is a global
+	 * uniform applied per-fragment, so it must stay independent of the
+	 * view leaf — otherwise the above-water world loses fog while the
+	 * eye is submerged, and vice versa.  Visible-across-the-waterline
+	 * is the correct look. */
+	r_fog_density = Fog_GetDensity() / 64.0;
 }
 
 /*
