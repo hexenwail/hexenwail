@@ -604,6 +604,11 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
 
 #define	EF_MIP_MAP_FAR		(1 << 24)	/* Set per frame, this model will use the far mip map	*/
 
+/* Engine-set model flags (placed above the H2 EF_* range to avoid aliasing
+ * the on-disk MDL flags read into qmodel_t->flags by Mod_LoadAliasModel*).
+ * Set by Mod_SetExtraFlags via the r_nolerp_list cvar; Ironwail port. */
+#define	MOD_NOLERP		(1 << 25)	/* don't lerp animation (torches, flames, v_weapons) */
+
 #define	EF_SPIN			(1 << 4)	/* Inky: Rotate without floating upside down */
 #define	EF_FLOAT			(1 << 5)	/* Inky: Float upside down without rotating */
 #define	EF_GLOW				(1 << 6)	/* Inky: Feature a custom glowing orb around the model, override the various XF_*GLOW presets */
@@ -741,6 +746,7 @@ void	Mod_Init (void);
 void	Mod_ClearAll (void);
 void	Mod_SaveAliasModelDefaults (qmodel_t *mod);	/* uhexen2-oq0a */
 void	Mod_RestoreAliasModelDefaults (void);		/* uhexen2-oq0a */
+void	Mod_SetExtraFlags (qmodel_t *mod);		/* Ironwail r_nolerp_list */
 qmodel_t *Mod_ForName (const char *name, qboolean crash);
 qmodel_t *Mod_FindName (const char *name);
 void	*Mod_Extradata (qmodel_t *mod);	// handles caching
