@@ -32,7 +32,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|
 | GPU frustum culling (compute shader) | ✅ | `gl_worldcull.c` |
 | Indirect multi-draw for world surfaces | ✅ | `glMultiDrawElementsIndirect` per texture bucket |
-| Brush-entity batched dispatch | ✅ | `r_brush_inst` (default 1) — collected by `R_CollectBrushInstances`, dispatched by `R_DrawBrushInstanced` via `gl_shader_world` (same shader as world surfaces) with per-entity `glUniformMatrix4fv` + per-(instance, texture) `glDrawElements`. Diverges from Ironwail's MDI: routing both world and brush-ent draws through one compiled program eliminates cross-shader 1-ULP `gl_Position` drift that was causing intermittent z-fight (uhexen2-a0t2 / uhexen2-mf45). |
+| Brush-entity batched dispatch | ✅ | `r_brush_inst` (default 1) — collected by `R_CollectBrushInstances`, dispatched by `R_DrawBrushInstanced` via `gl_shader_world` (same shader as world surfaces) with per-entity `glUniformMatrix4fv` + per-(instance, texture) `glDrawElements`. Diverges from Ironwail's MDI: routing both world and brush-ent draws through one compiled program eliminates cross-shader 1-ULP `gl_Position` drift that was causing intermittent z-fight (uhexen2-a0t2 / uhexen2-mf45). **Note:** Ironwail commit ebfdc662 optimizes the bindless fallback path for `DRAW_ID` uniform (MDI bmodel batching with `GL_ARB_shader_draw_parameters` fallback). This is not applicable to Hexenwail's architecture (uhexen2-6s0t marked not applicable). |
 | SSBO alias model instanced batching | ✅ | `gl_rmain.c` |
 | SSBO GPU particles | ✅ | `r_part.c` |
 | Order-Independent Transparency (OIT) | ✅ | Weighted blended, dual MRT |
