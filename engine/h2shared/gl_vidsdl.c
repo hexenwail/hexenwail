@@ -931,6 +931,13 @@ static void GL_Init (void)
 		       (glClientWaitSync_fp != NULL) &&
 		       (glDeleteSync_fp != NULL);
 	gl_multi_bind_able = (glBindBuffersRange_fp != NULL);
+	gl_bindless_able = !COM_CheckParm("-nobindless") &&
+			   (glGetTextureHandleARB_fp != NULL) &&
+			   (glGetTextureSamplerHandleARB_fp != NULL) &&
+			   (glMakeTextureHandleResidentARB_fp != NULL) &&
+			   (glMakeTextureHandleNonResidentARB_fp != NULL) &&
+			   GL_FindExtension("GL_ARB_bindless_texture") &&
+			   GL_FindExtension("GL_ARB_shader_draw_parameters");
 
 	glGetIntegerv_fp (GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT,
 			  &gl_ssbo_align);

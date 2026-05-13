@@ -192,6 +192,7 @@ extern	qboolean	gl_clipcontrol_able;	/* reversed-Z when true */
 extern	qboolean	gl_buffer_storage_able;	/* ARB_buffer_storage present */
 extern	qboolean	gl_multi_bind_able;	/* ARB_multi_bind present */
 extern	qboolean	gl_sync_able;		/* ARB_sync present */
+extern	qboolean	gl_bindless_able;	/* ARB_bindless_texture present */
 extern	GLint		gl_ssbo_align;
 extern	GLint		gl_ubo_align;
 

@@ -436,6 +436,19 @@ GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLs
 GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 
+/* GL_ARB_bindless_texture (core 4.4+) — 64-bit handle-based texture access */
+GL_FUNCTION_OPT(HWGLuint64, glGetTextureHandleARB, (GLuint))
+GL_FUNCTION_OPT(HWGLuint64, glGetTextureSamplerHandleARB, (GLuint, GLuint))
+GL_FUNCTION_OPT(void, glMakeTextureHandleResidentARB, (HWGLuint64))
+GL_FUNCTION_OPT(void, glMakeTextureHandleNonResidentARB, (HWGLuint64))
+
+/* Sampler objects (OpenGL 3.3 / GL_ARB_sampler_objects) */
+GL_FUNCTION_OPT(void, glGenSamplers, (GLsizei, GLuint *))
+GL_FUNCTION_OPT(void, glDeleteSamplers, (GLsizei, const GLuint *))
+GL_FUNCTION_OPT(void, glBindSampler, (GLuint, GLuint))
+GL_FUNCTION_OPT(void, glSamplerParameteri, (GLuint, GLenum, GLint))
+GL_FUNCTION_OPT(void, glSamplerParameterf, (GLuint, GLenum, GLfloat))
+
 #undef GL_FUNCTION_OPT
 
 #if defined(__EMSCRIPTEN__)
@@ -533,6 +546,15 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glClientWaitSync_fp(s,fl,t)		((GLenum)0)
 #define glWaitSync_fp(s,fl,t)			((void)0)
 #define glBindBuffersRange_fp(t,f,c,b,o,sz)	((void)0)
+#define glGetTextureHandleARB_fp(t)		((HWGLuint64)0)
+#define glGetTextureSamplerHandleARB_fp(t,s)	((HWGLuint64)0)
+#define glMakeTextureHandleResidentARB_fp(h)	((void)0)
+#define glMakeTextureHandleNonResidentARB_fp(h)	((void)0)
+#define glGenSamplers_fp(n,ids)		((void)0)
+#define glDeleteSamplers_fp(n,ids)	((void)0)
+#define glBindSampler_fp(u,s)		((void)0)
+#define glSamplerParameteri_fp(s,p,v)	((void)0)
+#define glSamplerParameterf_fp(s,p,v)	((void)0)
 #endif /* __EMSCRIPTEN__ */
 
 

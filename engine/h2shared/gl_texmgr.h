@@ -36,6 +36,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	TEXPREF_RGBA			0x1000	// texture is 32 bit RGBA, not 8 bit
 #define	TEXPREF_TRANSPARENT		0x2000	// Transparent sprite
 #define	TEXPREF_UNCOMPRESSED		0x4000	// never compress (HUD/2D textures)
+#define	TEXPREF_BINDLESS		0x8000	// create bindless texture handle
 
 
 enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA, SRC_EXTERNAL};
@@ -62,6 +63,7 @@ typedef struct gltexture_s {
 	char				pants; //0-13 pants color, or -1 if never colormapped
 //used for rendering
 	int					visframe; //matches r_framecount if texture was bound this frame
+	uint64_t			bindless_handle; //GL_ARB_bindless_texture handle, 0 if not resident
 } gltexture_t;
 
 extern gltexture_t* notexture;
