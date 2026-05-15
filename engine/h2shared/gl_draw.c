@@ -2479,6 +2479,9 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 						glt->bindless_handle = 0;
 					}
 					glDeleteTextures_fp (1, &old_texnum);
+					if (currenttexture == old_texnum)
+						currenttexture = GL_UNUSED_TEXTURE;
+					Hash_Remove (&hash_gltextures, key, i);
 					glt->identifier[0] = '\0';	/* mark entry stale */
 					break;	/* exit loop, continue to new-entry creation below */
 				}
