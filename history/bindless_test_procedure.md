@@ -1,5 +1,7 @@
 # Bindless Texture Testing Procedure
 
+> **STATUS 2026-05-15 (uhexen2-mxx5.5)**: This procedure is currently **non-functional**. The bindless code path is a skeleton: shaders compile with `BINDLESS=0` regardless of the `+bindless` flag (init-order bug — `GL_Shaders_Init()` runs before `gl_bindless_able` is set), `TEX_BINDLESS` has zero callers, every texture's `bindless_handle` is 0, and the SSBO upload writes zero handles. `+bindless` will produce indistinguishable output from the fallback path. Do not run this procedure as a parity test until the underlying bugs are fixed.
+
 Build: `nix build .#default` produces `/nix/store/.../bin/glhexen2` (~1.4 MB)
 
 ## Prerequisites
@@ -49,6 +51,6 @@ cd /home/josh/hexen2
 ## Known Implementation Details
 - SSBO at shader storage binding point 0
 - Macro injection: BINDLESS=1/0 injected after #version line
-- Texture handles made resident on load, non-resident on unload
+- Texture handles made resident on load, non-resident on unload (PLANNED — `TexMgr_LoadImage` currently ignores bindless entirely)
 - uint64_t handles packed into flat uvec4 varyings
 - Sampler2D constructor: sampler2D(uvec2) from packed handles

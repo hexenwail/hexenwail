@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-13 (Menu live preview restored; 100% parity, 0% partial, 0% missing)
+Last updated: 2026-05-15 (Bindless + IQM/MD5 audit revert (uhexen2-mxx5.5, mxx5.6) — bindless reclassified ❌ Missing, IQM 🔶 Partial; ~98% parity)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,7 +12,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 13 | 0 | 0 | 0 |
+| Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
 | Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
 | Performance / Engine | 9 | 0 | 0 | 1 |
 | UX / Menus / HUD | 24 | 0 | 0 | 1 |
@@ -20,9 +20,9 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **82** | **0** | **0** | **8** |
+| **TOTAL** | **80** | **1** | **1** | **8** |
 
-**Parity: 100% ported, 0% partial, 0% missing** (excluding N/A)
+**Parity: ~98% ported, 1% partial, 1% missing** (excluding N/A)
 
 ---
 
@@ -40,10 +40,10 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. All per-frame uploads stream through the ring. |
 | Persistent mapped buffers | ✅ | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes), GPU world-cull PVS bitvector (uhexen2-o35n), and the immediate-mode emulator (uhexen2-y1v5: `GL_ImmEnd`/`GL_ImmDraw` route through `GL_Upload` + `glBindVertexBuffer` via ARB_vertex_attrib_binding). |
 | Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`).  Decoupled from the postprocess pipeline 2026-05-12 (uhexen2-9912, `bddc22128`) — standalone depth resolve in `gl_worldcull.c` works whether or not FXAA/HDR/etc. are on.  `gl_hiz_cull` flipped to default **1** after the acceptance sweep (uhexen2-8pzr) measured 44-58% cull rate on demo1 vistas, well above the ≥10% gate. |
-| Bindless textures | ✅ | `ARB_bindless_texture` + `ARB_gpu_shader_int64` — zero bind overhead. SSBO handles with sampler2D constructor sampling. Disabled by default (`+bindless` flag to enable), seamless fallback to uniform samplers on unsupported hardware (uhexen2-abyz, completed 2026-05-13). |
+| Bindless textures | ❌ | **Skeleton only — non-functional (uhexen2-mxx5.5).** Shaders compile with `BINDLESS=0` unconditionally because `GL_Shaders_Init()` runs before `gl_bindless_able` is set in `gl_vidsdl.c`. `TEX_BINDLESS` flag has zero call sites: `TexMgr_LoadImage` and every other loader ignore it; `glt->bindless_handle` is always 0; the SSBO upload at `gl_rsurf.c:2061-2062` writes zero handles. `gltexture_t` is also defined twice (`glquake.h:130` vs `gl_texmgr.h:46`) — only one is on the draw path. Sampler objects created and never bound. No `ARB_gpu_shader_int64` capability check. The `+bindless` flag does nothing observable. |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
-| IQM skeletal model support | ✅ | MD5mesh parser, GPU upload (iqmvert_t VBO + bonepose_t SSBO), 5-attribute VAO, skeletal deformation shader (sskeletal_vert), SSBO bone matrix blending. Commits 48753b791 (foundation) + d18ca709c (shader completion). |
+| MD5mesh / IQM skeletal model support | 🔶 | **~30%, would crash on first real load (uhexen2-mxx5.6).** Title was misleading — there is no `.iqm` parser, no `iqm.h`; `iqmvert_t` is just an internal vertex struct name. MD5mesh parser exists (`md5mesh.c`) but: 96KB+128KB stack arrays SIGSEGV on first real load; stores stack-address into hunk pointer (use-after-stack); bone-pose data never allocated, SSBO uploads garbage; rest-pose XYZ zeroed (every vertex collapses to origin); bone weights not normalized. No `.md5anim` parser anywhere — no animation, hardcoded `numposes=1`. Skeletal shader is never invoked: zero `gl_shader_skeletal` draw-site references, no `PV_IQM` branch in `R_DrawAliasModel`. d18ca709c is mislabeled — 265 of 315 lines are unrelated Bloom code. |
 
 ## Rendering — Visual/Shading
 
@@ -180,7 +180,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-13, IQM skeletal animation 90% complete. The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models).  Run `bd show uhexen2-a5nn` for the current child list. **Ninth re-sync 2026-05-13 (final)**: Completed IQM skeletal animation implementation (uhexen2-iche in progress): Full MD5mesh text parser, GPU upload path (iqmvert_t VBO + bonepose_t SSBO), 5-attribute VAO setup, model loading dispatch (.md5mesh), normal computation. 95% complete. Remaining: ~150 LOC shader variant for skeletal deformation. Row remains 🔶 until shader complete. Scorecard unchanged: 80/1/1/8 (97% parity).
+As of 2026-05-15 (post-audit revert uhexen2-mxx5.5 / mxx5.6), bindless textures and MD5/IQM skeletal animation are downgraded: bindless ❌ Missing (skeleton only, never reached the draw path), MD5 🔶 Partial (~30%, parser only, would crash on first real load, no `.md5anim`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models). Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 80 ✅ / 1 🔶 / 1 ❌ / 8 ➖ (~98% parity).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -188,8 +188,11 @@ When porting a parity item, claim the bead with `bd update <id> --status=in_prog
 
 ## Priority Shortlist (highest impact, applicable to Hexen II)
 
+### P1 — High (regressions surfaced 2026-05-15)
+1. **Bindless textures** — ❌ Skeleton only (uhexen2-mxx5.5). Either complete the implementation (shader-init ordering fix, plumb `TEX_BINDLESS` through every loader, deduplicate `gltexture_t`, add `ARB_gpu_shader_int64` capability gate, remove unused sampler-object code) or revert the `+bindless` flag and the bindless code paths.
+
 ### P3 — Low
-1. **IQM skeletal models** — 🔶 90% complete (MD5 parser, GPU upload, VAO setup done). Remaining: Shader PV_IQM variant for skeletal deformation (~150 LOC)
+1. **MD5/IQM skeletal models** — 🔶 ~30% (uhexen2-mxx5.6). Fix critical bugs first (stack overflow, use-after-stack, missing bone-pose alloc, zeroed rest-pose XYZ, weight normalization), then add `.md5anim` parser, then add `PV_IQM` shader branch + draw-site dispatch.
 
 *Async main-thread task queue verified complete 2026-05-13 (uhexen2-9v0s closed — `host_async.c`).*
 *MD3 model support completed 2026-05-12 (uhexen2-f2d3, uhexen2-kaa6).*
