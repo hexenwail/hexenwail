@@ -32,37 +32,6 @@
 
 void (*vid_menudrawfn)(void);
 
-/* Live preview: briefly dim the fade screen when presets are changed,
- * so the user can see the effect of the preset without closing the menu.
- * No text alpha manipulation — just backdrop dimming. */
-static cvar_t	ui_live_preview = {"ui_live_preview", "1", CVAR_ARCHIVE};
-static double	menu_live_edit_time = -10.0;	/* realtime of last edit; -10 = never */
-#define UI_PREVIEW_FADE_IN	0.1
-#define UI_PREVIEW_HOLD		0.6
-#define UI_PREVIEW_FADE_OUT	0.1
-#define UI_PREVIEW_TOTAL	(UI_PREVIEW_FADE_IN + UI_PREVIEW_HOLD + UI_PREVIEW_FADE_OUT)
-
-static float M_LivePreviewAlpha (void)
-{
-	double elapsed;
-	if (!ui_live_preview.integer)
-		return 0.0f;
-	elapsed = realtime - menu_live_edit_time;
-	if (elapsed < 0.0)              return 0.0f;
-	if (elapsed < UI_PREVIEW_FADE_IN)
-		return (float)(elapsed / UI_PREVIEW_FADE_IN);
-	if (elapsed < UI_PREVIEW_FADE_IN + UI_PREVIEW_HOLD)
-		return 1.0f;
-	if (elapsed < UI_PREVIEW_TOTAL)
-		return (float)((UI_PREVIEW_TOTAL - elapsed) / UI_PREVIEW_FADE_OUT);
-	return 0.0f;
-}
-
-static void M_FlagLiveEdit (void)
-{
-	menu_live_edit_time = realtime;
-}
-
 void (*vid_menukeyfn)(int key);
 
 enum m_state_e	m_state;
@@ -2382,7 +2351,6 @@ static void M_Display_AdjustSliders (int dir)
 		}
 #undef PRESET_COMMON
 		Con_Printf ("Preset applied. Reload map for full effect.\n");
-		M_FlagLiveEdit ();
 		break;
 	}
 	case DISP_GAMMA:
@@ -6783,8 +6751,6 @@ void M_Init (void)
 			M_BuildBigCharWidth();
 		}
 	}
-
-	Cvar_RegisterVariable (&ui_live_preview);
 
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
