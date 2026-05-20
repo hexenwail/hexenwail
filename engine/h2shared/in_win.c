@@ -22,9 +22,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#ifndef __cplusplus
 #define CINTERFACE 1 /* for dinput.h */
-#endif
 
 #ifdef __cplusplus
 #define GUID_REF(X)  (X)
