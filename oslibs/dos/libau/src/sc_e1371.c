@@ -467,7 +467,7 @@ static int ES1371_adetect(struct mpxplay_audioout_info_s *aui)
   )
  ){
   funcbit_enable(card->infobits,ENSONIQ_CARD_INFOBIT_AC97RESETHACK);
-  funcbit_enable(card->sctrl,ES_1371_ST_AC97_RST);
+  funcbit_enable(card->cssr,ES_1371_ST_AC97_RST);
  }
 
  if(pcibios_search_devices(&amplifier_hack_devices[0],NULL)==PCI_SUCCESSFUL)
