@@ -2693,7 +2693,6 @@ static void R_DrawEntitiesOnList (void)
 		static double next_alpha_report = 0.0;
 		if (realtime >= next_alpha_report)
 		{
-			int n_bad = 0;
 			for (i = 0; i < cl_numvisedicts; i++)
 			{
 				entity_t *de = cl_visedicts[i];
@@ -2701,15 +2700,12 @@ static void R_DrawEntitiesOnList (void)
 					continue;
 				if (de->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(de->alpha))
 				{
-					n_bad++;
 					Con_Printf ("alpha: \"%s\" a=%d (%.3f) frame=%d org=%.0f %.0f %.0f\n",
 						de->model->name, de->alpha,
 						ENTALPHA_DECODE(de->alpha), de->frame,
 						de->origin[0], de->origin[1], de->origin[2]);
 				}
 			}
-			if (n_bad == 0)
-				Con_Printf ("alpha: no non-opaque visedicts this frame\n");
 			next_alpha_report = realtime + 1.0;
 		}
 	}
