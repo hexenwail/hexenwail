@@ -310,10 +310,26 @@ Search cache for a skybox by name. Returns ptr if found, NULL otherwise.
 */
 static skybox_t *Sky_CacheLookup(const char *name)
 {
-	skybox_t *entry;
-	for (entry = skybox_cache; entry; entry = entry->next)
+	skybox_t *entry, *prev = NULL;
+	for (entry = skybox_cache; entry; prev = entry, entry = entry->next)
+	{
 		if (strcmp(entry->name, name) == 0)
+		{
+			/* LRU-bump to head.  The currently-active skybox always
+			 * aliases the head entry's textures, so head can never be
+			 * Sky_CacheAdd's eviction tail.  Without this, the active
+			 * entry could be evicted while skybox_textures[] still
+			 * points into it — UAF on the next render frame.
+			 * uhexen2-mxx5.2. */
+			if (prev)
+			{
+				prev->next = entry->next;
+				entry->next = skybox_cache;
+				skybox_cache = entry;
+			}
 			return entry;
+		}
+	}
 	return NULL;
 }
 
@@ -333,7 +349,7 @@ static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *
 	if (!entry)
 		return NULL;
 
-	strcpy(entry->name, name);
+	q_strlcpy(entry->name, name, sizeof(entry->name));
 	memcpy(entry->textures, textures, sizeof(entry->textures));
 	memcpy(entry->texnums, texnums, sizeof(entry->texnums));
 	entry->next = NULL;
@@ -387,10 +403,12 @@ Free entire skybox cache.
 void Sky_CacheFlush(void)
 {
 	skybox_t *entry, *next;
+	int i;
+
 	for (entry = skybox_cache; entry; entry = next)
 	{
 		next = entry->next;
-		for (int i = 0; i < 6; i++)
+		for (i = 0; i < 6; i++)
 		{
 			if (entry->textures[i] && entry->textures[i] != notexture)
 				TexMgr_FreeTexture(entry->textures[i]);
@@ -398,6 +416,17 @@ void Sky_CacheFlush(void)
 		free(entry);
 	}
 	skybox_cache = NULL;
+
+	/* Reset the active view: skybox_textures[] aliased pointers we just
+	 * freed.  Without this, the next render frame derefs dangling memory
+	 * and the next Sky_LoadSkyBox(skybox_name) would early-return on the
+	 * name match without ever reloading.  uhexen2-mxx5.3. */
+	skybox_name[0] = 0;
+	for (i = 0; i < 6; i++)
+	{
+		skybox_textures[i] = NULL;
+		skybox_texnums[i] = 0;
+	}
 }
 
 /*
@@ -421,18 +450,23 @@ void Sky_LoadSkyBox (const char *name)
 	cached = Sky_CacheLookup(name);
 	if (cached)
 	{
-		strcpy(skybox_name, cached->name);
+		q_strlcpy(skybox_name, cached->name, sizeof(skybox_name));
 		memcpy(skybox_textures, cached->textures, sizeof(skybox_textures));
 		memcpy(skybox_texnums, cached->texnums, sizeof(skybox_texnums));
 		Sky_LoadWindCfg(name);
 		return;
 	}
 
-	//purge old textures
+	/* Clear the active view.  Do NOT free: skybox_textures[] either
+	 * aliases pointers owned by a cache entry (set by the Sky_CacheLookup
+	 * memcpy above on a hit, or by the prior load's Sky_CacheAdd) or is
+	 * already NULL/notexture.  The cache is the sole owner; freeing here
+	 * dangled the cache entry and produced UAF on the next cache hit and
+	 * a double-free on later eviction/flush.  Today this was latent only
+	 * because TexMgr_FreeTexture is a no-op stub — it goes live the
+	 * moment that stub is replaced.  uhexen2-mxx5.2. */
 	for (i=0; i<6; i++)
 	{
-		if (skybox_textures[i] && skybox_textures[i] != notexture)
-			TexMgr_FreeTexture (skybox_textures[i]);
 		skybox_textures[i] = NULL;
 		skybox_texnums[i] = 0;
 	}
@@ -571,7 +605,7 @@ void Sky_LoadSkyBox (const char *name)
 		return;
 	}
 
-	strcpy(skybox_name, name);
+	q_strlcpy(skybox_name, name, sizeof(skybox_name));
 	Sky_LoadWindCfg (skybox_name);
 
 	/* Add to cache for future loads */
