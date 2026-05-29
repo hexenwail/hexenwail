@@ -3513,6 +3513,69 @@ static void GL_CreateSurfaceLightmap (msurface_t *surf)
 
 /*
 ==================
+LM_StitchAtlas
+
+Copy every used lightmap page from the lightmaps[] CPU buffer into the
+single atlas texture, creating lm_atlas_texture if needed.  Shared by
+GL_BuildLightmaps (initial build) and R_RebuildAllLightmaps (gl_overbright
+toggle) — without a common path a runtime rebuild would zero the atlas
+and nothing would ever re-create it, leaving every atlas fast-path
+disabled until the next map load.  No-op when atlas mode is off.
+uhexen2-f29y.
+==================
+*/
+static void LM_StitchAtlas (void)
+{
+	byte	*atlas;
+	int	page, row, col, y;
+	int	page_stride = BLOCK_WIDTH * lightmap_bytes;
+	int	atlas_stride = LM_ATLAS_WIDTH * lightmap_bytes;
+
+	if (!lm_atlas_enabled)
+		return;
+
+	atlas = (byte *) calloc(1, LM_ATLAS_WIDTH * LM_ATLAS_HEIGHT * lightmap_bytes);
+	if (!atlas)
+		return;
+
+	for (page = 0; page < lm_atlas_layers; page++)
+	{
+		col = page % LM_ATLAS_COLS;
+		row = page / LM_ATLAS_COLS;
+		for (y = 0; y < BLOCK_HEIGHT; y++)
+		{
+			byte *src = lightmaps + page * BLOCK_WIDTH * BLOCK_HEIGHT * lightmap_bytes
+					     + y * page_stride;
+			byte *dst = atlas + (row * BLOCK_HEIGHT + y) * atlas_stride
+					  + col * page_stride;
+			memcpy(dst, src, page_stride);
+		}
+	}
+
+	if (!lm_atlas_texture)
+		glGenTextures_fp(1, &lm_atlas_texture);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, lightmap_internalformat,
+			LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT, 0,
+			gl_lightmap_format, GL_UNSIGNED_BYTE, atlas);
+	free(atlas);
+
+	/* The raw glBindTexture above leaves lm_atlas_texture bound on the
+	 * current unit without updating the GL_Bind cache.  The bare call from
+	 * R_RebuildAllLightmaps (live gl_overbright toggle) has no surrounding
+	 * glActiveTexture churn to mask it, so a stale currenttexture could let
+	 * the next frame's first GL_Bind skip its bind and draw a surface with
+	 * the atlas wrongly bound.  Invalidate the cache like R_UpdateLightmaps. */
+	currenttexture = GL_UNUSED_TEXTURE;
+}
+
+
+/*
+==================
 GL_BuildLightmaps
 
 Builds the lightmap texture
@@ -3589,46 +3652,10 @@ void GL_BuildLightmaps (void)
 	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
 	 * One bind for ALL world surfaces, zero lightmap rebinds.
 	 * Disabled on Intel GPUs due to driver timeout issues. */
-	{
-		byte *atlas = NULL;
-		int page, row, col, y;
-		int page_stride = BLOCK_WIDTH * lightmap_bytes;
-		int atlas_stride = LM_ATLAS_WIDTH * lightmap_bytes;
-
-		if (lm_atlas_enabled)
-			atlas = (byte *) calloc(1, LM_ATLAS_WIDTH * LM_ATLAS_HEIGHT * lightmap_bytes);
-		if (atlas)
-		{
-			for (page = 0; page < lm_atlas_layers; page++)
-			{
-				col = page % LM_ATLAS_COLS;
-				row = page / LM_ATLAS_COLS;
-				for (y = 0; y < BLOCK_HEIGHT; y++)
-				{
-					byte *src = lightmaps + page * BLOCK_WIDTH * BLOCK_HEIGHT * lightmap_bytes
-							     + y * page_stride;
-					byte *dst = atlas + (row * BLOCK_HEIGHT + y) * atlas_stride
-							  + col * page_stride;
-					memcpy(dst, src, page_stride);
-				}
-			}
-
-			if (!lm_atlas_texture)
-				glGenTextures_fp(1, &lm_atlas_texture);
-			glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			glTexImage2D_fp(GL_TEXTURE_2D, 0, lightmap_internalformat,
-					LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT, 0,
-					gl_lightmap_format, GL_UNSIGNED_BYTE, atlas);
-			free(atlas);
-
-			Con_SafePrintf("Lightmap atlas: %d pages in %dx%d texture\n",
-				       lm_atlas_layers, LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT);
-		}
-	}
+	LM_StitchAtlas ();
+	if (lm_atlas_enabled && lm_atlas_texture)
+		Con_SafePrintf("Lightmap atlas: %d pages in %dx%d texture\n",
+			       lm_atlas_layers, LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT);
 
 	glActiveTexture_fp (GL_TEXTURE0);
 }
@@ -3640,9 +3667,9 @@ R_RebuildAllLightmaps
 
 Walk every brush surface that has a lightmap allocation and rebuild
 its samples at the current gl_overbright shift.  Marks every used
-lightmap page fully dirty so the next frame re-uploads the pixels.
-If gl_lmatlas is on, also schedule an atlas rebuild by clearing
-lm_atlas_texture so the next R_DrawWorld restitches.  uhexen2-f29y.
+lightmap page fully dirty (for the atlas-disabled per-page path) and,
+if gl_lmatlas is on, re-stitches the atlas immediately via
+LM_StitchAtlas so it stays in sync with the new shift.  uhexen2-f29y.
 ===============
 */
 void R_RebuildAllLightmaps (void)
@@ -3686,12 +3713,15 @@ void R_RebuildAllLightmaps (void)
 		lightmap_rectmax[i][1] = BLOCK_HEIGHT;
 	}
 
-	/* Force atlas restitch on next R_DrawWorld */
-	if (lm_atlas_texture)
-	{
-		glDeleteTextures_fp (1, &lm_atlas_texture);
-		lm_atlas_texture = 0;
-	}
+	/* Re-stitch the atlas from the freshly rebuilt lightmaps[] buffer.
+	 * Nothing else recreates lm_atlas_texture outside of GL_BuildLightmaps,
+	 * so merely zeroing it (the old approach) left the atlas stale and
+	 * every atlas fast-path disabled until the next map load — the world
+	 * then rendered from stale per-page data against the new u_overbright
+	 * uniform, giving the "some surfaces darker, some lighter" toggle bug.
+	 * The lightmap_modified[] marking above still covers the atlas-disabled
+	 * per-page path via R_UpdateLightmaps. */
+	LM_StitchAtlas ();
 }
 
 
