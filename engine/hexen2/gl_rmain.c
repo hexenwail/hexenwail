@@ -105,6 +105,7 @@ cvar_t	r_speeds_gpufinish = {"r_speeds_gpufinish", "0", CVAR_NONE};	/* diagnosti
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
+cvar_t	r_debug_alpha = {"r_debug_alpha", "0", CVAR_NONE};	/* diagnostic: log visedicts with spurious non-opaque alpha (uhexen2-c5xe) */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
@@ -2677,6 +2678,41 @@ static void R_DrawEntitiesOnList (void)
 
 	if (!r_drawentities.integer)
 		return;
+
+	/* Diagnostic (uhexen2-c5xe): a random entity sometimes renders
+	 * translucent + A2C-dithered ('black gashes').  Root symptom is a
+	 * spurious non-default, non-opaque e->alpha on one of several
+	 * otherwise-identical entities.  When r_debug_alpha is set, walk
+	 * every visedict once and report offenders so the culprit model /
+	 * alpha byte / origin can be captured from the console.  Throttled
+	 * to once per second to keep the log readable.  Covers all entity
+	 * types since it runs before the alias/brush render-path split. */
+	if (r_debug_alpha.integer)
+	{
+		extern double realtime;
+		static double next_alpha_report = 0.0;
+		if (realtime >= next_alpha_report)
+		{
+			int n_bad = 0;
+			for (i = 0; i < cl_numvisedicts; i++)
+			{
+				entity_t *de = cl_visedicts[i];
+				if (!de || !de->model)
+					continue;
+				if (de->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(de->alpha))
+				{
+					n_bad++;
+					Con_Printf ("alpha: \"%s\" a=%d (%.3f) frame=%d org=%.0f %.0f %.0f\n",
+						de->model->name, de->alpha,
+						ENTALPHA_DECODE(de->alpha), de->frame,
+						de->origin[0], de->origin[1], de->origin[2]);
+				}
+			}
+			if (n_bad == 0)
+				Con_Printf ("alpha: no non-opaque visedicts this frame\n");
+			next_alpha_report = realtime + 1.0;
+		}
+	}
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
 	 * models via SSBO before the per-entity loop. */

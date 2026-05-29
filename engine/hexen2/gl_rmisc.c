@@ -324,6 +324,7 @@ void R_Init (void)
 	{ extern cvar_t r_brush_inst; Cvar_RegisterVariable (&r_brush_inst); }
 	{ extern cvar_t r_brush_inst_offset; Cvar_RegisterVariable (&r_brush_inst_offset); }
 	Cvar_RegisterVariable (&r_alphatocoverage);
+	Cvar_RegisterVariable (&r_debug_alpha);
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_torch_dlight);
