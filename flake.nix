@@ -44,15 +44,15 @@
           buildInputs = deps;
           dontConfigure = true;
           enableParallelBuilding = true;
+          # -fcommon: Shanjaq's era predates gcc 10's -fno-common default,
+          # so headers declare uninitialized globals without 'extern' and
+          # rely on the linker to merge them.  Restore via NIX_CFLAGS_COMPILE
+          # so it appends to (rather than replaces) the Makefile's own CFLAGS.
+          NIX_CFLAGS_COMPILE = "-fcommon";
           buildPhase = ''
             runHook preBuild
             cd ${srcSubdir}
-            # -fcommon: Shanjaq's era predates gcc 10's -fno-common default,
-            # so headers declare uninitialized globals without 'extern' and
-            # rely on the linker to merge them.  Restore the old behavior.
-            make ${makeTarget} USE_CODEC_TIMIDITY=no \
-              CFLAGS="-fcommon -O2 -DNDEBUG=1 -ffast-math -fomit-frame-pointer" \
-              -j$NIX_BUILD_CORES
+            make ${makeTarget} USE_CODEC_TIMIDITY=no -j$NIX_BUILD_CORES
             runHook postBuild
           '';
           installPhase = ''
