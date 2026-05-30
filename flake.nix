@@ -24,7 +24,7 @@
         SDL              # sdl12-compat — provides SDL 1.2 ABI
         libGL libGLU
         libvorbis libogg libopus opusfile libmikmod
-        flac libmad libtimidity
+        flac libmad
         alsa-lib
       ] ++ (with pkgs.xorg; [
         libX11 libXxf86vm libXxf86dga libXrandr libXext libXi
@@ -47,7 +47,7 @@
           buildPhase = ''
             runHook preBuild
             cd ${srcSubdir}
-            make ${makeTarget} -j$NIX_BUILD_CORES
+            make ${makeTarget} USE_CODEC_TIMIDITY=no -j$NIX_BUILD_CORES
             runHook postBuild
           '';
           installPhase = ''
