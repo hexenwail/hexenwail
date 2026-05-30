@@ -24,6 +24,7 @@
         SDL              # sdl12-compat — provides SDL 1.2 ABI
         libGL libGLU
         libvorbis libogg libopus opusfile libmikmod
+        flac libmad libtimidity
         alsa-lib
       ] ++ (with pkgs.xorg; [
         libX11 libXxf86vm libXxf86dga libXrandr libXext libXi
