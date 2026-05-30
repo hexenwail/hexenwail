@@ -47,7 +47,12 @@
           buildPhase = ''
             runHook preBuild
             cd ${srcSubdir}
-            make ${makeTarget} USE_CODEC_TIMIDITY=no -j$NIX_BUILD_CORES
+            # -fcommon: Shanjaq's era predates gcc 10's -fno-common default,
+            # so headers declare uninitialized globals without 'extern' and
+            # rely on the linker to merge them.  Restore the old behavior.
+            make ${makeTarget} USE_CODEC_TIMIDITY=no \
+              CFLAGS="-fcommon -O2 -DNDEBUG=1 -ffast-math -fomit-frame-pointer" \
+              -j$NIX_BUILD_CORES
             runHook postBuild
           '';
           installPhase = ''
