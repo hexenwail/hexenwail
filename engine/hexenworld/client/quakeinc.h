@@ -81,6 +81,12 @@
 #if defined(GLQUAKE)
 #include "glheader.h"
 #include "gl_model.h"
+/* uhexen2-id4i (neojanq build): glquake.h references gltexture_t and
+ * glpic_t, which are defined in gl_texmgr.h.  H2-side quakeinc.h includes
+ * gl_texmgr.h here; HW-side was missing it (and image.h, transitively
+ * needed). */
+#include "image.h"
+#include "gl_texmgr.h"
 #include "glquake.h"
 #else	/* sw client */
 #include "model.h"

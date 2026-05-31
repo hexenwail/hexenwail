@@ -196,7 +196,9 @@ void R_ReadPointFile_f (void)
 	color = (byte)Cvar_VariableValue("leak_color");
 	q_snprintf (name, sizeof(name), "maps/%s.pts", cl.mapname);
 
-	FS_OpenFile (name, &f, NULL);
+	/* uhexen2-id4i (neojanq build): h2shared FS_OpenFile gained a 4th
+	 * arg (dir_path_id) — H2-side r_part.c was updated, HW-side missed. */
+	FS_OpenFile (name, &f, NULL, NULL);
 	if (!f)
 	{
 		Con_Printf ("couldn't open %s\n", name);

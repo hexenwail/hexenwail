@@ -168,6 +168,16 @@ typedef struct
 	short		children[2];	// negative numbers are contents
 } dclipnode_t;
 
+/* uhexen2-id4i (neojanq build): h2shared/{gl,sv}_model.h reference
+ * dlclipnode_t (large-map extension, int children), but Shanjaq's HW
+ * bspfile.h only defines dclipnode_t.  Mirror the H2-side definition
+ * so HW client/server compile against the shared headers. */
+typedef struct
+{
+	int		planenum;
+	int		children[2];	// negative numbers are contents
+} dlclipnode_t;
+
 
 typedef struct texinfo_s
 {
