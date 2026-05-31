@@ -149,8 +149,12 @@ static const char *pr_opnames[] =
 #define OPC ((eval_t *)&pr_globals[st->c])
 #endif
 
-void PR_ExecuteProgram (func_t fnum)
+/* uhexen2-id4i (neojanq build): match h2shared/progs.h's 2-arg
+ * declaration to resolve the conflicting-types error.  The funcname
+ * arg is for diagnostics only; HW server never consumes it. */
+void PR_ExecuteProgram (func_t fnum, char *funcname)
 {
+	(void)funcname;
 	eval_t		*ptr, *a, *b, *c;
 	float		*vecptr;
 	dstatement_t	*st;
