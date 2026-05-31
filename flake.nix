@@ -74,12 +74,16 @@
           ];
           dontConfigure = true;
           enableParallelBuilding = true;
-          # nixpkgs mingw cross-gcc is gcc 15+ which defaults to C23, where
-          # 'false' is a reserved keyword.  Era code uses 'false' as an enum
-          # constant.  -std=gnu99 reverts to a standard where the keyword is
-          # available as an identifier.  -fcommon for the same global-merging
-          # reason as the Linux build.
-          NIX_CFLAGS_COMPILE = "-std=gnu99 -fcommon";
+          # nixpkgs mingw cross-gcc is gcc 15 which defaults to C23 (where
+          # 'false' is reserved) and promotes several historically-warning
+          # diagnostics to hard errors.  Era code:
+          #   - uses 'false' as an enum constant → -std=gnu99
+          #   - has the same uninitialized-global pattern → -fcommon
+          #   - has many int↔pointer/incompatible-pointer/implicit-decl
+          #     warnings that gcc 13 (Linux build) tolerates as warnings.
+          # Downgrade each promoted-to-error back to a warning so the build
+          # behaves like gcc 13.  No source-level changes implied.
+          NIX_CFLAGS_COMPILE = "-std=gnu99 -fcommon -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=incompatible-pointer-types -Wno-error=implicit-int";
           buildPhase = ''
             runHook preBuild
             export TARGET=x86_64-w64-mingw32
