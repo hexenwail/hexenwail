@@ -284,6 +284,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_caustics_intensity);
 	Cvar_RegisterVariable (&r_novis);
 	Cvar_RegisterVariable (&r_lerpmodels);
+	Cvar_RegisterVariable (&r_lerp_viewmodel);
 	Cvar_RegisterVariable (&r_nolerp_list);
 	Cvar_SetCallback (&r_nolerp_list, R_Model_ExtraFlags_List_f);
 	Cvar_RegisterVariable (&r_showbboxes);

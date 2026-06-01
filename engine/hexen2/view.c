@@ -1037,7 +1037,16 @@ static void V_CalcRefdef (void)
 	else if (scr_viewsize.integer == 80)
 		view->origin[2] += 0.5;
 
-	view->model = cl.model_precache[cl.stats[STAT_WEAPON]];
+	/* Reset alias-lerp state when the viewmodel changes — view->currentpose
+	 * is a pose index in the previous model and would otherwise be reused
+	 * to seed previouspose on the first frame after the swap, producing
+	 * one render frame of cross-model pose blending (uhexen2-43f8). */
+	{
+		struct qmodel_s *newmodel = cl.model_precache[cl.stats[STAT_WEAPON]];
+		if (view->model != newmodel)
+			view->lerpflags |= LERP_RESETANIM;
+		view->model = newmodel;
+	}
 	view->frame = cl.stats[STAT_WEAPONFRAME];
 	if (!view->colorshade)
 	{

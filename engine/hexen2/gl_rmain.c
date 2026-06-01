@@ -145,6 +145,12 @@ cvar_t	r_caustics_intensity = {"r_caustics_intensity", "0.35", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
+/* Off by default — vanilla Hexen II viewmodels have large pose-to-pose
+ * deltas (idle vs attack are very different meshes), so interpolation
+ * produces unnatural in-between shapes that read as a stuttery wobble.
+ * High-quality mod weapons with denser pose sets benefit from lerp and
+ * can opt in. */
+cvar_t	r_lerp_viewmodel = {"r_lerp_viewmodel", "0", CVAR_ARCHIVE};
 /* Comma-separated list of model names that bypass animation lerp — torches
  * and self-animating flames want discrete pose switching to keep the flame
  * shape; v_weapons rely on snap-back on attack frames.  Ironwail johnfitz. */
@@ -942,14 +948,12 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 		e->lerptime = interval;
 		posenum += (int)(cl.time / interval) % numposes;
 	}
-	else
-	{
-		/* Single pose per frame: lerp duration matches Hexen II's 20 Hz
-		 * server tick (0.05s).  At Quake's 10 Hz tick Ironwail uses
-		 * 0.1; using 0.1 here causes lerp to be only 50% complete when
-		 * the next U_FRAME arrives at 20 Hz, producing visible pops. */
-		e->lerptime = 0.05f;
-	}
+	/* For single-pose frames, e->lerptime is measured from the actual
+	 * elapsed time between pose changes (computed below on transition).
+	 * Updating it here every frame would corrupt an in-flight blend, so
+	 * keep the previous measurement until the next pose change.  Falls
+	 * back to 0.05f (Hexen II 20 Hz server tick) when no measurement
+	 * exists yet — set in the reset path. */
 
 	/* Treat stale lerp state as an implicit reset.  Entities that come
 	 * (back) into PVS after being hidden keep their old previouspose +
@@ -960,20 +964,25 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 	 * setting LERP_RESETANIM on entity (re-)allocation, but uHexen2's
 	 * cl_main.c only sets it on teleport/respawn — not on visibility
 	 * transitions.  Snap to the resolved pose whenever the gap since
-	 * the last lerp update exceeds one cycle interval (2*lerptime
-	 * leaves headroom for a single in-progress lerp without false
-	 * resets — a healthy in-PVS entity refreshes lerpstart on every
-	 * pose change, i.e. every lerptime seconds).  Sidestep can hide an
-	 * entity for hundreds of ms — well above a typical 0.1s interval. */
+	 * the last lerp update exceeds one cycle interval (2*lerptime,
+	 * with a 0.1s floor so adaptive single-pose intervals don't drop
+	 * the threshold under one normal server tick).  Sidestep can hide
+	 * an entity for hundreds of ms — well above the threshold. */
+	{
+	double stale_threshold = 2.0 * (double)e->lerptime;
+	if (stale_threshold < 0.1)
+		stale_threshold = 0.1;
 	if ((e->lerpflags & LERP_RESETANIM) ||
 	    e->lerpstart == 0.0f ||
-	    cl.time - e->lerpstart > 2.0 * (double)e->lerptime)
+	    cl.time - e->lerpstart > stale_threshold)
 	{
 		/* Kill any lerp in progress: snap to current pose. */
 		e->lerpstart    = (float)cl.time;
 		e->previouspose = posenum;
 		e->currentpose  = posenum;
 		e->lerpflags   &= ~LERP_RESETANIM;
+		if (numposes == 1)
+			e->lerptime = 0.05f;	/* default until we measure */
 	}
 	else if (e->currentpose != posenum)
 	{
@@ -991,16 +1000,44 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 		}
 		else
 		{
+			if (numposes == 1)
+			{
+				/* Adapt lerp duration to the entity's actual frame
+				 * rate.  Single-pose anims that change faster than
+				 * the 0.05s default produce stutter when the next
+				 * pose arrives mid-lerp; slower anims hold a static
+				 * pose with a brief blur tail.  Measuring the
+				 * interval keeps the lerp scoped to one inter-frame
+				 * gap.  Clamp [0.025, 0.5] to filter same-frame
+				 * ticks and pathological idle gaps; outside that
+				 * window we keep the prior measurement. */
+				float measured = (float)(cl.time - e->lerpstart);
+				if (measured >= 0.025f && measured <= 0.5f)
+					e->lerptime = measured;
+				else if (e->lerptime == 0.0f)
+					e->lerptime = 0.05f;
+			}
 			e->lerpstart    = cl.time;
 			e->previouspose = e->currentpose;
 			e->currentpose  = posenum;
 		}
 	}
+	}
 
 	if (r_lerpmodels.integer && !model_fullbright_pass &&
-	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f)
+	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f &&
+	    (e != &cl.viewent || r_lerp_viewmodel.integer))
 	{
-		float blend = (float)(cl.time - e->lerpstart) / e->lerptime;
+		/* Halve the effective lerp duration for the viewmodel so the
+		 * blend completes in the first half of the inter-pose gap; the
+		 * eye then sees the crisp target pose for the remainder.  At
+		 * full lerptime the viewmodel never escapes the in-between
+		 * mesh, which on vanilla H2's large pose-to-pose deltas reads
+		 * as a stuttery wobble (uhexen2-43f8). */
+		float effective_lerptime = (e == &cl.viewent)
+				? e->lerptime * 0.5f
+				: e->lerptime;
+		float blend = (float)(cl.time - e->lerpstart) / effective_lerptime;
 		if (blend < 0.0f) blend = 0.0f;
 		else if (blend > 1.0f) blend = 1.0f;
 
