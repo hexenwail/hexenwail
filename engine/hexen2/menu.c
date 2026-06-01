@@ -3716,6 +3716,8 @@ enum
 	GAME_CHASE,
 	GAME_VIEWBOB,
 	GAME_VIEWROLL,
+	GAME_ANIMSMOOTH,
+	GAME_LERPVIEWMDL,
 	GAME_CONTRANS,
 	GAME_ITEMS
 };
@@ -3736,6 +3738,8 @@ static const char *game_labels[GAME_ITEMS] = {
 	"Chase Mode    :",	/* GAME_CHASE */
 	"View Bob      :",	/* GAME_VIEWBOB */
 	"View Roll     :",	/* GAME_VIEWROLL */
+	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
+	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
 	"Console Alpha :",	/* GAME_CONTRANS */
 };
 
@@ -3821,6 +3825,12 @@ static void M_Game_AdjustSliders (int dir)
 		if (f < 0)	f = 0;
 		else if (f > 5)	f = 5;
 		Cvar_SetValue ("cl_rollangle", f);
+		break;
+	case GAME_ANIMSMOOTH:
+		Cvar_SetValue ("r_lerpmodels", !Cvar_VariableValue("r_lerpmodels"));
+		break;
+	case GAME_LERPVIEWMDL:
+		Cvar_SetValue ("r_lerp_viewmodel", !Cvar_VariableValue("r_lerp_viewmodel"));
 		break;
 	case GAME_CONTRANS:
 		f = Cvar_VariableValue("contrans") + dir * 1;
@@ -3922,6 +3932,18 @@ static void M_Game_Draw (void)
 		M_Print (76, 92 + 8*GAME_VIEWROLL, game_labels[GAME_VIEWROLL]);
 		r = Cvar_VariableValue("cl_rollangle") / 5.0;
 		M_DrawSliderValue (220, 92 + 8*GAME_VIEWROLL, r, "%.0f%%", Cvar_VariableValue("cl_rollangle") * 20);
+	}
+
+	if (!M_Game_IsSkip(GAME_ANIMSMOOTH))
+	{
+		M_Print (76, 92 + 8*GAME_ANIMSMOOTH, game_labels[GAME_ANIMSMOOTH]);
+		M_DrawCheckbox (220, 92 + 8*GAME_ANIMSMOOTH, (int)Cvar_VariableValue("r_lerpmodels"));
+	}
+
+	if (!M_Game_IsSkip(GAME_LERPVIEWMDL))
+	{
+		M_Print (76, 92 + 8*GAME_LERPVIEWMDL, game_labels[GAME_LERPVIEWMDL]);
+		M_DrawCheckbox (220, 92 + 8*GAME_LERPVIEWMDL, (int)Cvar_VariableValue("r_lerp_viewmodel"));
 	}
 
 	if (!M_Game_IsSkip(GAME_CONTRANS))
