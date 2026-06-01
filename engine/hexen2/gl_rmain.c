@@ -911,18 +911,22 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 	}
 
 	/* Treat stale lerp state as an implicit reset.  Entities that come
-	 * (back) into PVS after being hidden a while keep their old
-	 * previouspose/currentpose values; lerping from those to the
-	 * cycle-derived posenum produces ~0.1s of morphing through
-	 * non-adjacent poses ("flame zoom/flicker on approach", uhexen2-43f8).
-	 * Ironwail relies on the caller setting LERP_RESETANIM on entity
-	 * (re-)allocation, but uHexen2's cl_main.c only sets it on
-	 * teleport/respawn — not on visibility transitions.  Snap to the
-	 * resolved pose if lerpstart is unset (first ever render of this
-	 * entity slot) or older than 1 s (no recent render activity). */
+	 * (back) into PVS after being hidden keep their old previouspose +
+	 * currentpose; lerping from those to the cycle-derived posenum
+	 * produces ~lerptime seconds of morphing through non-adjacent poses
+	 * (uhexen2-43f8: flame zoom/flicker on approach, dlight-flame
+	 * stutter/disappear on sidestep).  Ironwail relies on the caller
+	 * setting LERP_RESETANIM on entity (re-)allocation, but uHexen2's
+	 * cl_main.c only sets it on teleport/respawn — not on visibility
+	 * transitions.  Snap to the resolved pose whenever the gap since
+	 * the last lerp update exceeds one cycle interval (2*lerptime
+	 * leaves headroom for a single in-progress lerp without false
+	 * resets — a healthy in-PVS entity refreshes lerpstart on every
+	 * pose change, i.e. every lerptime seconds).  Sidestep can hide an
+	 * entity for hundreds of ms — well above a typical 0.1s interval. */
 	if ((e->lerpflags & LERP_RESETANIM) ||
 	    e->lerpstart == 0.0f ||
-	    cl.time - e->lerpstart > 1.0)
+	    cl.time - e->lerpstart > 2.0 * (double)e->lerptime)
 	{
 		/* Kill any lerp in progress: snap to current pose. */
 		e->lerpstart    = (float)cl.time;
