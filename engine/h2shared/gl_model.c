@@ -2666,7 +2666,11 @@ static qboolean nameInList (const char *list, const char *name)
 			s++;
 		}
 		tmp[i] = '\0';
-		if (!strcmp (name, tmp))
+		/* Quake convention is case-insensitive paths.  uhexen2-43f8: a
+		 * flame model whose loaded name differs in case from the cvar
+		 * list entry would silently miss MOD_NOLERP and morph through
+		 * its (often non-topology-sharing) poses. */
+		if (!q_strcasecmp (name, tmp))
 			return true;
 		while (*s == ',')
 			s++;
