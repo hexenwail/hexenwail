@@ -149,21 +149,62 @@ cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model anima
  * and self-animating flames want discrete pose switching to keep the flame
  * shape; v_weapons rely on snap-back on attack frames.  Ironwail johnfitz. */
 cvar_t	r_nolerp_list = {"r_nolerp_list",
+	/* uhexen2-43f8: comprehensive list of flame/torch/candle/fire
+	 * variants across H2 + SoT + PoP + soc + later.  These models
+	 * cycle through poses whose vertex topology doesn't match,
+	 * so lerping between them produces extreme morphing ("big to
+	 * small zoom", flicker on movement).  Matched case-insensitively
+	 * via q_strcasecmp in nameInList. */
+	/* flames — generic + numbered + color/exotic variants */
+	"models/flame.mdl,"
 	"models/flame1.mdl,"
 	"models/flame2.mdl,"
 	"models/flame3.mdl,"
 	"models/flame4.mdl,"
-	"models/flame.mdl,"
+	"models/flame5.mdl,"
+	"models/flame6.mdl,"
+	"models/flame7.mdl,"
+	"models/flame7_red.mdl,"
+	"models/flame7_violet.mdl,"
+	"models/flame8.mdl,"
+	"models/flame9.mdl,"
+	"models/flame9_2.mdl,"
+	"models/flame10.mdl,"
+	"models/flame11.mdl,"
+	"models/flame12.mdl,"
+	"models/flame12a.mdl,"
+	"models/flame12_violet.mdl,"
+	"models/flame13.mdl,"
+	"models/iceshot_flame7.mdl,"
+	"models/blufire.mdl,"
+	"models/blufire_2.mdl,"
+	"models/blufire_3.mdl,"
+	"models/newflame.mdl,"
+	"models/newfire.mdl,"
+	"models/newfire2.mdl,"
+	"models/purplfire.mdl,"
+	"models/fireball.mdl,"
+	"models/fireball2.mdl,"
+	"models/puzzle/fire.mdl,"
+	/* torches */
 	"models/torch.mdl,"
+	"models/a_torch.mdl,"
 	"models/rflmtrch.mdl,"
 	"models/cflmtrch.mdl,"
 	"models/castrch.mdl,"
 	"models/rometrch.mdl,"
 	"models/egtorch.mdl,"
 	"models/eflmtrch.mdl,"
-	"models/newfire.mdl,"
-	"models/firewal.mdl,"
+	"models/spiked_torch2.mdl,"
+	/* candles */
 	"models/candle.mdl,"
+	"models/candle1.mdl,"
+	"models/candle1b.mdl,"
+	"models/candle1x.mdl,"
+	"models/candle2.mdl,"
+	"models/candle3.mdl,"
+	"models/skullcandle.mdl,"
+	"models/later/candle3fl.mdl,"
 	"models/firepot.mdl,"
 	"models/firepot2.mdl,"
 	"models/lavaball.mdl,"
