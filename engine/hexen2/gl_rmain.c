@@ -910,10 +910,22 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 		e->lerptime = 0.05f;
 	}
 
-	if (e->lerpflags & LERP_RESETANIM)
+	/* Treat stale lerp state as an implicit reset.  Entities that come
+	 * (back) into PVS after being hidden a while keep their old
+	 * previouspose/currentpose values; lerping from those to the
+	 * cycle-derived posenum produces ~0.1s of morphing through
+	 * non-adjacent poses ("flame zoom/flicker on approach", uhexen2-43f8).
+	 * Ironwail relies on the caller setting LERP_RESETANIM on entity
+	 * (re-)allocation, but uHexen2's cl_main.c only sets it on
+	 * teleport/respawn — not on visibility transitions.  Snap to the
+	 * resolved pose if lerpstart is unset (first ever render of this
+	 * entity slot) or older than 1 s (no recent render activity). */
+	if ((e->lerpflags & LERP_RESETANIM) ||
+	    e->lerpstart == 0.0f ||
+	    cl.time - e->lerpstart > 1.0)
 	{
 		/* Kill any lerp in progress: snap to current pose. */
-		e->lerpstart    = 0;
+		e->lerpstart    = (float)cl.time;
 		e->previouspose = posenum;
 		e->currentpose  = posenum;
 		e->lerpflags   &= ~LERP_RESETANIM;
