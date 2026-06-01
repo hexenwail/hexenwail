@@ -313,7 +313,10 @@ static skybox_t *Sky_CacheLookup(const char *name)
 	skybox_t *entry, *prev = NULL;
 	for (entry = skybox_cache; entry; prev = entry, entry = entry->next)
 	{
-		if (strcmp(entry->name, name) == 0)
+		/* Quake convention is case-insensitive paths; identical skyboxes
+		 * typed differently would otherwise cache twice and collide with
+		 * the 16-entry eviction.  uhexen2-mxx5.4. */
+		if (q_strcasecmp(entry->name, name) == 0)
 		{
 			/* LRU-bump to head.  The currently-active skybox always
 			 * aliases the head entry's textures, so head can never be
@@ -443,7 +446,8 @@ void Sky_LoadSkyBox (const char *name)
 	qboolean nonefound = true;
 	skybox_t *cached;
 
-	if (strcmp(skybox_name, name) == 0)
+	/* Quake-convention case-insensitive match — see uhexen2-mxx5.4. */
+	if (q_strcasecmp(skybox_name, name) == 0)
 		return; //no change
 
 	/* Check cache first */
