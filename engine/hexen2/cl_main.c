@@ -294,6 +294,47 @@ void CL_NextDemo (void)
 
 /*
 ==============
+CL_Dlightinfo_f -- dump active dynamic lights with their source entity.
+Diagnostic for sticky weapon dlights (uhexen2-43f8 follow-up).
+==============
+*/
+static void CL_Dlightinfo_f (void)
+{
+	dlight_t	*dl;
+	entity_t	*ent;
+	int	i, active = 0;
+
+	if (cls.state != ca_connected)
+		return;
+
+	Con_Printf ("--- r_dlightinfo: cl.time=%.2f ---\n", cl.time);
+	dl = cl_dlights;
+	for (i = 0; i < MAX_DLIGHTS; i++, dl++)
+	{
+		if (dl->die < cl.time || dl->radius == 0)
+			continue;
+		active++;
+		Con_Printf ("[%2d] key=%-4d r=%5.1f ttl=%6.3f col=(%.2f,%.2f,%.2f) org=(%.0f,%.0f,%.0f)",
+			i, dl->key, dl->radius, dl->die - (float)cl.time,
+			dl->color[0], dl->color[1], dl->color[2],
+			dl->origin[0], dl->origin[1], dl->origin[2]);
+		if (dl->key > 0 && dl->key < cl.num_entities)
+		{
+			ent = &cl_entities[dl->key];
+			if (ent->model)
+				Con_Printf (" ent=%s ef=%08x be=%02x",
+					ent->model->name, ent->effects,
+					ent->baseline.flags);
+			else
+				Con_Printf (" ent=<no model>");
+		}
+		Con_Printf ("\n");
+	}
+	Con_Printf ("--- %d active dlights ---\n", active);
+}
+
+/*
+==============
 CL_PrintEntities_f
 ==============
 */
@@ -1039,6 +1080,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_showunbound);
 
 	Cmd_AddCommand ("entities", CL_PrintEntities_f);
+	Cmd_AddCommand ("r_dlightinfo", CL_Dlightinfo_f);
 	Cmd_AddCommand ("disconnect", CL_Disconnect_f);
 	Cmd_AddCommand ("record", CL_Record_f);
 	Cmd_AddCommand ("stop", CL_Stop_f);
