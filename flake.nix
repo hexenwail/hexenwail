@@ -149,7 +149,80 @@
           binaryName = "hwsv.exe";
         };
 
-        default = self.packages.${system}.linux-glhexen2;
+        default = self.packages.${system}.release;
+
+        # Release package: produces two zips ready for GitHub release upload.
+        # linux-x86_64.zip: glhexen2, hwsv  (Linux dynamic loader resolves SDL/codecs from system)
+        # windows-x86_64.zip: glh2.exe, hwsv.exe, SDL.dll, codec DLLs
+        # glhwcl/glhwcl.exe are NOT included — the HW client at this Shanjaq
+        # tip needs substantial source porting to compile against modern
+        # toolchains and the evolved h2shared headers (tracked separately).
+        release = pkgs.stdenv.mkDerivation {
+          pname = "neojanq-release";
+          inherit version;
+          dontUnpack = true;
+          nativeBuildInputs = [ pkgs.zip ];
+          buildPhase = ''
+            mkdir -p linux-x86_64 windows-x86_64
+            cp ${self.packages.${system}.linux-glhexen2}/bin/glhexen2 linux-x86_64/
+            cp ${self.packages.${system}.linux-hwsv}/bin/hwsv         linux-x86_64/
+            chmod +w linux-x86_64/*
+
+            cp ${self.packages.${system}.win64-glhexen2}/bin/glh2.exe windows-x86_64/
+            cp ${self.packages.${system}.win64-hwsv}/bin/hwsv.exe     windows-x86_64/
+
+            # Era-accurate SDL.dll (bundled in oslibs)
+            cp ${self}/oslibs/windows/SDL/lib64/SDL.dll               windows-x86_64/
+            # Codec DLLs that glh2.exe imports
+            cp ${self}/oslibs/windows/codecs/x64/libFLAC-8.dll        windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libmad-0.dll         windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libmikmod-3.dll      windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libvorbisfile-3.dll  windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libvorbis-0.dll      windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libogg-0.dll         windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libopusfile-0.dll    windows-x86_64/
+            cp ${self}/oslibs/windows/codecs/x64/libopus-0.dll        windows-x86_64/
+            chmod +w windows-x86_64/*
+
+            cat > README.txt <<'EOF'
+            Shanjaq H2 fork archive builds (pre-2024 / SVN r6303-era).
+            Anchored at commit 800586575 of github.com/shanjaq/uhexen2 (2021-12-06).
+
+            Built from the unmodified Shanjaq source (a small number of
+            build-infrastructure patches were required for modern Linux
+            toolchains and the Win64 cross — see commit log on the
+            shanjaq-r6303-builds branch).
+
+            Linux x86_64:
+              glhexen2  — single-player H2 GL client
+              hwsv      — HexenWorld dedicated server
+              Requires: libSDL-1.2.so.0 (or sdl12-compat), libGL, libvorbis,
+                        libogg, libopus, opusfile, libmikmod, libFLAC, libmad,
+                        alsa-lib at runtime (typical distro packages).
+
+            Windows x86_64:
+              glh2.exe  — single-player H2 GL client
+              hwsv.exe  — HexenWorld dedicated server
+              SDL.dll + codec DLLs bundled in this directory; keep them
+              alongside the .exe.
+
+            NOT INCLUDED: glhwcl / glhwcl.exe (HexenWorld GL client).  The
+            HW client at this Shanjaq tip has structural divergence from
+            the evolved h2shared headers and needs substantial source
+            porting to build on modern toolchains.
+            EOF
+            cp README.txt linux-x86_64/
+            cp README.txt windows-x86_64/
+
+            zip -r9 shanjaq-r6303-archive-linux-x86_64.zip   linux-x86_64
+            zip -r9 shanjaq-r6303-archive-windows-x86_64.zip windows-x86_64
+          '';
+          installPhase = ''
+            mkdir -p $out
+            cp shanjaq-r6303-archive-linux-x86_64.zip   $out/
+            cp shanjaq-r6303-archive-windows-x86_64.zip $out/
+          '';
+        };
       };
 
       devShells.${system}.default = pkgs.mkShell {
