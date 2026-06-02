@@ -218,6 +218,21 @@ void Sky_LoadTexture (texture_t *mt)
 	//unsigned int	transpix;
 	unsigned	*rgba;
 
+	/* Release the previous map's scrolling-sky textures so their slots
+	 * in the managed_textures[] pool recycle (uhexen2-z7dj).  Without
+	 * this, every map load with a scrolling sky leaks two slots — a
+	 * long session through several maps would exhaust the pool. */
+	if (solidskytexture)
+	{
+		TexMgr_FreeTexture (solidskytexture);
+		solidskytexture = NULL;
+	}
+	if (alphaskytexture)
+	{
+		TexMgr_FreeTexture (alphaskytexture);
+		alphaskytexture = NULL;
+	}
+
 	src = (byte *)mt + mt->offsets[0];
 
 	// extract back layer and upload
