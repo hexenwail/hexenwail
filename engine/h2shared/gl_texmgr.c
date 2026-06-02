@@ -69,9 +69,32 @@ gltexture_t *TexMgr_NewTexture (void)
 	return NULL;
 }
 
+/* Forward declarations for the pool symbols TexMgr_FreeTexture references —
+ * defined a few lines below to keep storage adjacent to TexMgr_LoadImage. */
+#define MAX_MANAGED_TEXTURES 128
+static gltexture_t managed_textures[MAX_MANAGED_TEXTURES];
+static int num_managed_textures = 0;
+
 void TexMgr_FreeTexture (gltexture_t *kill)
 {
-	/* uhexen2 uses a different texture management approach */
+	if (!kill || kill == notexture || kill == nulltexture)
+		return;
+	/* Reject pointers that didn't come from our pool — callers may hold
+	 * the notexture/nulltexture placeholders or pointers from other
+	 * texture managers that route through gltexture_t. */
+	if (kill < managed_textures ||
+	    kill >= managed_textures + MAX_MANAGED_TEXTURES)
+		return;
+	if (kill->texnum)
+	{
+		glDeleteTextures_fp (1, &kill->texnum);
+		kill->texnum = 0;	/* sentinel: TexMgr_LoadImage recycles slots
+					 * with texnum == 0.  glGenTextures never
+					 * returns 0, so this can't collide with a
+					 * live texture. */
+	}
+	kill->width = 0;
+	kill->height = 0;
 }
 
 void TexMgr_FreeTextures (unsigned int flags, unsigned int mask)
@@ -111,11 +134,6 @@ void TexMgr_Init (void)
 	nulltexture->flags = 0;
 }
 
-/* Simple pool for gltexture_t structures returned by TexMgr_LoadImage */
-#define MAX_MANAGED_TEXTURES 32
-static gltexture_t managed_textures[MAX_MANAGED_TEXTURES];
-static int num_managed_textures = 0;
-
 /* TexMgr_LoadImage - simplified for uhexen2 compatibility */
 gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int height, enum srcformat format,
                                byte *data, char *source_file, src_offset_t source_offset, unsigned flags)
@@ -125,13 +143,29 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int heigh
 	unsigned int *rgba;
 	int i, pixels;
 
-	if (num_managed_textures >= MAX_MANAGED_TEXTURES)
+	/* Recycle a freed slot before growing the pool.  TexMgr_FreeTexture
+	 * marks slots with texnum == 0; without this scan the pool would
+	 * grow monotonically and the skybox cache (up to 16 entries × 6
+	 * faces = 96 textures) would exhaust it after a handful of unique
+	 * skies (uhexen2-z7dj). */
+	tex = NULL;
+	for (i = 0; i < num_managed_textures; i++)
 	{
-		Con_Printf("TexMgr_LoadImage: pool full\n");
-		return notexture;
+		if (managed_textures[i].texnum == 0)
+		{
+			tex = &managed_textures[i];
+			break;
+		}
 	}
-
-	tex = &managed_textures[num_managed_textures++];
+	if (!tex)
+	{
+		if (num_managed_textures >= MAX_MANAGED_TEXTURES)
+		{
+			Con_Printf("TexMgr_LoadImage: pool full\n");
+			return notexture;
+		}
+		tex = &managed_textures[num_managed_textures++];
+	}
 
 	/* Convert indexed data to RGBA through palette */
 	pixels = width * height;
