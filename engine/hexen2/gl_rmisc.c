@@ -268,6 +268,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_shadows);
 	Cvar_RegisterVariable (&r_mirroralpha);
 	Cvar_RegisterVariable (&r_wateralpha);
+	Cvar_RegisterVariable (&r_h2_palette_alpha);
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_lerplightstyles);

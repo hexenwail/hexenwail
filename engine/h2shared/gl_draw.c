@@ -2348,8 +2348,11 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 				{
 					trans[i] &= MASK_rgb;
 				}
-				else if (p & 1)
+				else if (r_h2_palette_alpha.integer && (p & 1))
 				{
+					/* Vanilla H2: odd palette indices = partial alpha.
+					 * Off by default (uhexen2-c5xe) -- modded mdls flagged
+					 * EF_TRANSPARENT get rendered as cutout, not stippled. */
 					p = (int)(255 * r_wateralpha.value) & 0xff;
 					trans[i] &= MASK_rgb;
 					trans[i] |= p << SHIFT_a;
