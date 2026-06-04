@@ -112,6 +112,14 @@ cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
 cvar_t	r_mirroralpha = {"r_mirroralpha", "1", CVAR_NONE};
 cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
+/* Vanilla H2 palette-encoded translucency on EF_TRANSPARENT alias models.
+ * 0 (default): odd palette indices render opaque -- prevents the per-texel
+ *   stipple corruption (uhexen2-c5xe) on mods that flag everyday models
+ *   (barrels, torches) with EF_TRANSPARENT.
+ * 1: vanilla H2 -- odd-index texels get alpha = r_wateralpha * 255 (force-
+ *   shield / glass-orb aesthetic). Alpha bakes at skin load, so reload the
+ *   map after toggling. */
+cvar_t	r_h2_palette_alpha = {"r_h2_palette_alpha", "0", CVAR_ARCHIVE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};
 cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};
