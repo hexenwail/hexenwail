@@ -7012,6 +7012,16 @@ void M_Keydown (int key, qboolean repeat)
 		key = K_ENTER;
 	else if (key == K_GP_B)
 		key = K_ESCAPE;
+	/* D-pad → arrows so menu nav works alongside the new K_GP_DPAD_*
+	 * keycodes that exist for in-game bindings. uhexen2-x552. */
+	else if (key == K_GP_DPAD_UP)
+		key = K_UPARROW;
+	else if (key == K_GP_DPAD_DOWN)
+		key = K_DOWNARROW;
+	else if (key == K_GP_DPAD_LEFT)
+		key = K_LEFTARROW;
+	else if (key == K_GP_DPAD_RIGHT)
+		key = K_RIGHTARROW;
 
 	/* Suppress key repeat for everything except navigation/escape */
 	if (repeat)

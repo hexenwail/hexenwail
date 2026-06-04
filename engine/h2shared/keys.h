@@ -116,6 +116,16 @@
 #define	K_GP_ALT_OFFSET		(K_GP_A_ALT - K_GP_A)	/* = 13 */
 
 //
+// gamepad D-pad (deliberately outside the ALT layer — used for in-game
+// inventory/nav bindings, while M_Keydown synonyms map them to arrow keys
+// for menu navigation). uhexen2-x552.
+//
+#define	K_GP_DPAD_UP		268
+#define	K_GP_DPAD_DOWN		269
+#define	K_GP_DPAD_LEFT		270
+#define	K_GP_DPAD_RIGHT		271
+
+//
 // mouse buttons generate virtual keys
 //
 #define	K_MOUSE1		200
@@ -182,7 +192,7 @@
 
 typedef int keydest_t;
 
-#define	MAX_KEYS		268	/* K_GP_START_ALT + 1 */
+#define	MAX_KEYS		272	/* K_GP_DPAD_RIGHT + 1 */
 
 extern	char	*keybindings[MAX_KEYS];
 extern	char	*doublebindings[MAX_KEYS];

@@ -182,10 +182,14 @@ static int IN_GPButtonToKey (SDL_GamepadButton btn)
 	case SDL_GAMEPAD_BUTTON_RIGHT_STICK:	return K_GP_RTHUMB;
 	case SDL_GAMEPAD_BUTTON_BACK:		return K_GP_BACK;
 	case SDL_GAMEPAD_BUTTON_START:		return K_GP_START;
-	case SDL_GAMEPAD_BUTTON_DPAD_UP:	return K_UPARROW;
-	case SDL_GAMEPAD_BUTTON_DPAD_DOWN:	return K_DOWNARROW;
-	case SDL_GAMEPAD_BUTTON_DPAD_LEFT:	return K_LEFTARROW;
-	case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:	return K_RIGHTARROW;
+	/* D-pad emits dedicated K_GP_DPAD_* codes so they can be bound to
+	 * in-game actions (inventory cycle by default). M_Keydown translates
+	 * them back to arrow keys when key_dest == key_menu so menu nav still
+	 * works. uhexen2-x552. */
+	case SDL_GAMEPAD_BUTTON_DPAD_UP:	return K_GP_DPAD_UP;
+	case SDL_GAMEPAD_BUTTON_DPAD_DOWN:	return K_GP_DPAD_DOWN;
+	case SDL_GAMEPAD_BUTTON_DPAD_LEFT:	return K_GP_DPAD_LEFT;
+	case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:	return K_GP_DPAD_RIGHT;
 	default:				return 0;
 	}
 }
