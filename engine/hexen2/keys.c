@@ -1081,6 +1081,12 @@ void Key_Init (void)
 	Key_SetBinding (K_GP_RTHUMB, "+altmodifier");	/* hold for second layer */
 	Key_SetBinding (K_GP_START, "togglemenu");
 	Key_SetBinding (K_GP_BACK, "toggleconsole");
+	Key_SetBinding (K_GP_DPAD_LEFT, "invleft");	/* prev inventory item */
+	Key_SetBinding (K_GP_DPAD_RIGHT, "invright");	/* next inventory item */
+
+// default keyboard bindings — inventory cycle on classic Doom/Heretic/Hexen keys
+	Key_SetBinding ('[', "invleft");
+	Key_SetBinding (']', "invright");
 
 // register our functions
 	Cmd_AddCommand ("bind",Key_Bind_f);
