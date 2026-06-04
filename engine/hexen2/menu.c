@@ -7005,6 +7005,13 @@ void M_Keydown (int key, qboolean repeat)
 		key = K_UPARROW;
 	else if (key == K_MWHEELDOWN)
 		key = K_DOWNARROW;
+	/* Gamepad menu navigation: A=Enter, B=Escape (Western/Xbox/Steam Deck
+	 * convention). Lets a gamepad-only player traverse menus without a
+	 * keyboard. uhexen2-x552. */
+	else if (key == K_GP_A)
+		key = K_ENTER;
+	else if (key == K_GP_B)
+		key = K_ESCAPE;
 
 	/* Suppress key repeat for everything except navigation/escape */
 	if (repeat)
