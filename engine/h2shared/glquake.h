@@ -294,7 +294,6 @@ extern	cvar_t	r_caustics_intensity;	/* caustics overlay strength */
 extern	cvar_t	r_motionblur;
 extern	cvar_t	r_alias_gpu;
 extern	cvar_t	r_alphatocoverage;
-extern	cvar_t	r_debug_alpha;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_lerpmodels;
 extern	cvar_t	r_lerp_viewmodel;
@@ -456,7 +455,6 @@ void R_InitNetgraphTexture (void);
 #endif
 
 void R_ReadPointFile_f (void);
-void R_AliasInfo_f (void);
 void R_TranslatePlayerSkin (int playernum);
 
 #endif	/* GLQUAKE_H */

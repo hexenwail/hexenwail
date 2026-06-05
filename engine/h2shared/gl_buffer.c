@@ -4,8 +4,7 @@
  * Replaces the raw glBufferSubData → glBindBufferBase → draw pattern used
  * for per-frame dynamic SSBO/UBO uploads.  That pattern relied on driver
  * implicit sync between CPU writes and shader reads; driver quality on it
- * varies, leading to random visual corruption on a subset of GPUs
- * (uhexen2-c5xe).
+ * varies, leading to random visual corruption on a subset of GPUs.
  *
  * This module mirrors Ironwail's gl_rmisc.c FRAMES_IN_FLIGHT ring:
  *   - 3 frame slots, each owns a host buffer + GPU fence.
