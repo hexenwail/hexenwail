@@ -105,8 +105,6 @@ cvar_t	r_speeds_gpufinish = {"r_speeds_gpufinish", "0", CVAR_NONE};	/* diagnosti
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
-cvar_t	r_debug_alpha = {"r_debug_alpha", "0", CVAR_NONE};	/* diagnostic: log visedicts with spurious non-opaque alpha (uhexen2-c5xe) */
-qboolean	r_aliasinfo_request = false;	/* one-shot: dump visible alias ent flags */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
@@ -2778,52 +2776,6 @@ static double	rprof_cpu_phase2_loop;
 
 /*
 =============
-R_DumpAliasInfo
-
-One-shot console dump: walks cl_visedicts and prints model name, drawflags,
-e->alpha (raw + decoded), e->model->flags for every alias-typed entity.  Used
-to diagnose the per-entity translucency-stipple bug — type `r_aliasinfo` at
-the console and the next rendered frame prints one line per visible alias
-entity to the console.
-=============
-*/
-static void R_DumpAliasInfo (void)
-{
-	int		i;
-	entity_t	*e;
-	float		alpha_decoded;
-	const char	*name;
-	int		df, mf;
-
-	Con_Printf ("--- r_aliasinfo: %d visedicts at time %.2f ---\n",
-		cl_numvisedicts, cl.time);
-	for (i = 0; i < cl_numvisedicts; i++)
-	{
-		e = cl_visedicts[i];
-		if (!e || !e->model || e->model->type != mod_alias)
-			continue;
-		name = e->model->name ? e->model->name : "<null>";
-		df = e->drawflags;
-		mf = e->model->flags;
-		alpha_decoded = ENTALPHA_DECODE(e->alpha);
-		Con_Printf ("  [%3d] %-32s df=0x%04x mf=0x%08x a=%3u(%.2f)%s%s%s%s\n",
-			i, name, df, mf, (unsigned)e->alpha, alpha_decoded,
-			(df & DRF_TRANSLUCENT)      ? " DRF_TRANS"   : "",
-			(mf & EF_HOLEY)             ? " EF_HOLEY"    : "",
-			(mf & EF_TRANSPARENT)       ? " EF_TRANSP"   : "",
-			(mf & EF_SPECIAL_TRANS)     ? " EF_SPECTR"   : "");
-	}
-	Con_Printf ("--- end r_aliasinfo ---\n");
-}
-
-void R_AliasInfo_f (void)
-{
-	r_aliasinfo_request = true;
-	Con_Printf ("r_aliasinfo armed — dumping alias entities on next frame.\n");
-}
-
-/*
-=============
 R_DrawEntitiesOnList
 =============
 */
@@ -2837,12 +2789,6 @@ static void R_DrawEntitiesOnList (void)
 
 	cl_numtransvisedicts = 0;
 	cl_numtranswateredicts = 0;
-
-	if (r_aliasinfo_request)
-	{
-		R_DumpAliasInfo ();
-		r_aliasinfo_request = false;
-	}
 
 	if (r_speeds.integer >= 2)
 	{
@@ -2864,37 +2810,6 @@ static void R_DrawEntitiesOnList (void)
 
 	if (!r_drawentities.integer)
 		return;
-
-	/* Diagnostic (uhexen2-c5xe): a random entity sometimes renders
-	 * translucent + A2C-dithered ('black gashes').  Root symptom is a
-	 * spurious non-default, non-opaque e->alpha on one of several
-	 * otherwise-identical entities.  When r_debug_alpha is set, walk
-	 * every visedict once and report offenders so the culprit model /
-	 * alpha byte / origin can be captured from the console.  Throttled
-	 * to once per second to keep the log readable.  Covers all entity
-	 * types since it runs before the alias/brush render-path split. */
-	if (r_debug_alpha.integer)
-	{
-		extern double realtime;
-		static double next_alpha_report = 0.0;
-		if (realtime >= next_alpha_report)
-		{
-			for (i = 0; i < cl_numvisedicts; i++)
-			{
-				entity_t *de = cl_visedicts[i];
-				if (!de || !de->model)
-					continue;
-				if (de->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(de->alpha))
-				{
-					Con_Printf ("alpha: \"%s\" a=%d (%.3f) frame=%d org=%.0f %.0f %.0f\n",
-						de->model->name, de->alpha,
-						ENTALPHA_DECODE(de->alpha), de->frame,
-						de->origin[0], de->origin[1], de->origin[2]);
-				}
-			}
-			next_alpha_report = realtime + 1.0;
-		}
-	}
 
 	/* Instanced alias rendering: collect and batch-draw opaque alias
 	 * models via SSBO before the per-entity loop. */

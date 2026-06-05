@@ -257,7 +257,6 @@ void R_Init (void)
 {
 	Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
 	Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
-	Cmd_AddCommand ("r_aliasinfo", R_AliasInfo_f);
 
 	Cvar_RegisterVariable (&r_norefresh);
 	Cvar_RegisterVariable (&r_lightmap);
@@ -342,7 +341,6 @@ void R_Init (void)
 	{ extern cvar_t r_brush_inst; Cvar_RegisterVariable (&r_brush_inst); }
 	{ extern cvar_t r_brush_inst_offset; Cvar_RegisterVariable (&r_brush_inst_offset); }
 	Cvar_RegisterVariable (&r_alphatocoverage);
-	Cvar_RegisterVariable (&r_debug_alpha);
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_torch_dlight);
