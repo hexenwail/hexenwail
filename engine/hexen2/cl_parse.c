@@ -842,7 +842,20 @@ static void CL_ParseUpdate (int bits)
 		ent->alpha = ref_ent->alpha;
 
 	if (bits & U_NOLERP)
-		ent->forcelink = true;
+	{
+		// U_NOLERP marks MOVETYPE_STEP entities (monsters, doors, plats).
+		// Hexen II's protocol uses U_NOLERP the way Quake uses U_STEP.
+		// Pre-r_lerpmove behavior was to forcelink (snap on every update),
+		// producing visible 20 Hz stutter on the entities the player
+		// looks at most.  With r_lerpmove on, hand them to the render-
+		// time fixed-window lerp branch in CL_RelinkEntities by raising
+		// LERP_MOVESTEP; the msg_origins per-tick path is bypassed.
+		ent->lerpflags |= LERP_MOVESTEP;
+		if (!r_lerpmove.integer)
+			ent->forcelink = true;
+	}
+	else
+		ent->lerpflags &= ~LERP_MOVESTEP;
 
 	if (forcelink)
 	{	// didn't have an update last message

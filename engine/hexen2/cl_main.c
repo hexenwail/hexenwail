@@ -35,6 +35,16 @@ cvar_t	cl_playerclass = {"_cl_playerclass", "1", CVAR_ARCHIVE};
 
 cvar_t	cl_shownet = {"cl_shownet", "0", CVAR_NONE};	// can be 0, 1, or 2
 cvar_t	cl_nolerp = {"cl_nolerp", "0", CVAR_NONE};
+/* Render-time movement lerp for step-movers (MOVETYPE_STEP monsters,
+ * doors, plats — flagged with U_NOLERP in the network protocol).  These
+ * entities think every 0.1s but the server tick runs at 0.05s, so the
+ * default per-tick msg_origins lerp leaves them idle every other tick
+ * (visible as "move-pause-move-pause" stutter, especially at 144 Hz).
+ * When enabled, those entities skip the cl_main msg_origins path and
+ * instead use a fixed 0.1s render-time lerp window that detects origin
+ * changes between server pushes and smooths over whatever multi-tick
+ * gap exists between them — Ironwail-style. */
+cvar_t	r_lerpmove = {"r_lerpmove", "1", CVAR_ARCHIVE};
 
 cvar_t	cl_showunbound = {"cl_showunbound", "0", CVAR_ARCHIVE};
 
@@ -618,10 +628,71 @@ static void CL_RelinkEntities (void)
 			VectorCopy (ent->msg_angles[0], ent->angles);
 			ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
 		}
+		else if (r_lerpmove.integer && (ent->lerpflags & LERP_MOVESTEP) && i != cl.viewentity)
+		{	// Step-mover (MOVETYPE_STEP — monsters, doors, plats).  These
+			// only think every 0.1s while the server tick runs at 0.05s,
+			// so the per-tick msg_origins lerp would sit idle every other
+			// tick and produce visible "move-pause-move-pause" stutter.
+			// Use a fixed-window render-time lerp (Ironwail's approach):
+			// detect msg_origins changes here, lerp over 0.1s.  Whatever
+			// multi-tick gap exists between actual server-side moves, the
+			// 0.1s window naturally covers it.
+			qboolean teleport = false;
+			for (j = 0; j < 3; j++)
+			{
+				delta[j] = ent->msg_origins[0][j] - ent->msg_origins[1][j];
+				if (delta[j] > 100 || delta[j] < -100)
+					teleport = true;
+			}
+			if (teleport)
+				ent->lerpflags |= LERP_RESETMOVE | LERP_RESETANIM;
+
+			if (ent->lerpflags & LERP_RESETMOVE)
+			{	// snap previous/current to latest server position so the
+				// next move can lerp cleanly without an initial jump
+				ent->movelerpstart = 0;
+				VectorCopy (ent->msg_origins[0], ent->previousorigin);
+				VectorCopy (ent->msg_origins[0], ent->currentorigin);
+				VectorCopy (ent->msg_angles[0], ent->previousangles);
+				VectorCopy (ent->msg_angles[0], ent->currentangles);
+				ent->lerpflags &= ~LERP_RESETMOVE;
+			}
+			else if (!VectorCompare(ent->msg_origins[0], ent->currentorigin) ||
+				 !VectorCompare(ent->msg_angles[0],  ent->currentangles))
+			{	// server pushed a new step — start a new lerp window
+				ent->movelerpstart = cl.time;
+				VectorCopy (ent->currentorigin, ent->previousorigin);
+				VectorCopy (ent->msg_origins[0], ent->currentorigin);
+				VectorCopy (ent->currentangles, ent->previousangles);
+				VectorCopy (ent->msg_angles[0],  ent->currentangles);
+			}
+
+			{
+				float blend = (float)((cl.time - ent->movelerpstart) / 0.1);
+				vec3_t dorg, dang;
+				if (blend < 0.0f) blend = 0.0f;
+				else if (blend > 1.0f) blend = 1.0f;
+
+				VectorSubtract (ent->currentorigin, ent->previousorigin, dorg);
+				VectorSubtract (ent->currentangles, ent->previousangles, dang);
+				for (j = 0; j < 3; j++)
+				{
+					if (dang[j] >  180) dang[j] -= 360;
+					if (dang[j] < -180) dang[j] += 360;
+				}
+				for (j = 0; j < 3; j++)
+				{
+					ent->origin[j] = ent->previousorigin[j] + dorg[j] * blend;
+					ent->angles[j] = ent->previousangles[j] + dang[j] * blend;
+				}
+			}
+		}
 		else
-		{	// if the delta is large, assume a teleport and don't lerp
-			// don't extrapolate the viewentity — only interpolate (cap at 1)
-			// to prevent camera/weapon overshoot and snap-back
+		{	// if the delta is large, assume a teleport and don't lerp.
+			// Cap viewentity extrapolation (frac>1) — camera/weapon must
+			// not overshoot then snap back.  Step-movers are handled by
+			// the LERP_MOVESTEP branch above; everything else (continuous
+			// movers, projectiles) keeps the per-tick msg_origins lerp.
 			f = (i == cl.viewentity && frac > 1) ? 1 : frac;
 			for (j = 0; j < 3; j++)
 			{
@@ -1066,6 +1137,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
+	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);
