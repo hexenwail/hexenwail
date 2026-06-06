@@ -455,6 +455,7 @@ void R_InitNetgraphTexture (void);
 #endif
 
 void R_ReadPointFile_f (void);
+void R_AliasInfo_f (void);	/* uhexen2-khsa diagnostic */
 void R_TranslatePlayerSkin (int playernum);
 
 #endif	/* GLQUAKE_H */

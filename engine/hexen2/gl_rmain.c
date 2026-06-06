@@ -105,6 +105,7 @@ cvar_t	r_speeds_gpufinish = {"r_speeds_gpufinish", "0", CVAR_NONE};	/* diagnosti
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
+static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_ARCHIVE};
@@ -2776,6 +2777,67 @@ static double	rprof_cpu_phase2_loop;
 
 /*
 =============
+R_AliasInfo_f / R_DumpAliasInfo  (uhexen2-khsa)
+
+Console: `r_aliasinfo` — one-shot dump of every visible alias entity's
+model name, model flags (EF_TRANSPARENT/EF_HOLEY/etc), e->alpha (raw
+byte + decoded float), drawflags, and origin. Also reports the global
+cvars that drive the alias alpha pipeline (r_wateralpha, r_softemu,
+r_alphatocoverage). Used to identify which entity Mathuzzz sees as
+screen-door-dithered so we know which render path to target.
+=============
+*/
+void R_AliasInfo_f (void)
+{
+	r_aliasinfo_request = true;
+	Con_Printf("r_aliasinfo: dump will print on the next rendered frame\n");
+}
+
+static void R_DumpAliasInfo (void)
+{
+	int		i, count = 0;
+	entity_t	*e;
+	unsigned int	mflags;
+	char		fbuf[160];
+
+	Con_Printf("\n=== r_aliasinfo (uhexen2-khsa) ===\n");
+	Con_Printf("r_wateralpha=%g  r_softemu=%d  r_alphatocoverage=%d\n",
+		   r_wateralpha.value, r_softemu.integer, r_alphatocoverage.integer);
+	Con_Printf("frame=%d  cl_numvisedicts=%d\n", r_framecount, cl_numvisedicts);
+	Con_Printf("idx slot model                          flags                              alpha       drawflags origin\n");
+
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		e = cl_visedicts[i];
+		if (!e || !e->model)
+			continue;
+		if (e->model->type != mod_alias)
+			continue;
+
+		mflags = e->model->flags;
+		fbuf[0] = '\0';
+		if (mflags & EF_TRANSPARENT)   q_strlcat(fbuf, "TRANSPARENT ", sizeof(fbuf));
+		if (mflags & EF_HOLEY)         q_strlcat(fbuf, "HOLEY ", sizeof(fbuf));
+		if (mflags & EF_SPECIAL_TRANS) q_strlcat(fbuf, "SPECIAL_TRANS ", sizeof(fbuf));
+		if (mflags & EF_FACE_VIEW)     q_strlcat(fbuf, "FACE_VIEW ", sizeof(fbuf));
+		if (mflags & EF_ROTATE)        q_strlcat(fbuf, "ROTATE ", sizeof(fbuf));
+		if (mflags & EF_NODRAW)        q_strlcat(fbuf, "NODRAW ", sizeof(fbuf));
+		if (!fbuf[0]) q_strlcpy(fbuf, "(none) ", sizeof(fbuf));
+
+		Con_Printf("%3d %4d %-30s %-34s a=%3u/%.3f df=%02x (%g %g %g)\n",
+			   i, (int)(e - cl_entities), e->model->name, fbuf,
+			   e->alpha, ENTALPHA_DECODE(e->alpha),
+			   e->drawflags,
+			   e->origin[0], e->origin[1], e->origin[2]);
+		count++;
+	}
+
+	Con_Printf("=== end r_aliasinfo (%d alias ents) ===\n\n", count);
+	r_aliasinfo_request = false;
+}
+
+/*
+=============
 R_DrawEntitiesOnList
 =============
 */
@@ -2786,6 +2848,9 @@ static void R_DrawEntitiesOnList (void)
 	qboolean	use_instancing;
 	mleaf_t		*pLeaf;
 	entity_t	*e;
+
+	if (r_aliasinfo_request)
+		R_DumpAliasInfo();
 
 	cl_numtransvisedicts = 0;
 	cl_numtranswateredicts = 0;
