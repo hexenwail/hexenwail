@@ -2873,6 +2873,16 @@ static void R_RecursiveWorldNode (mnode_t *node)
 			if (!(surf->flags & (SURF_UNDERWATER | SURF_DRAWTURB)) &&
 			    ((dot < 0) ^ !!(surf->flags & SURF_PLANEBACK)))
 				continue;
+			/* uhexen2-iihz: pre-rebuild here, BEFORE R_UpdateLightmaps
+			 * at the top of R_DrawWorld flushes dirty rects.  Without
+			 * this, dlight rebuilds happened during DrawTextureChains
+			 * AFTER R_DispatchWorldCull / R_DrawWorldCulled already drew
+			 * with stale atlas pixels — so the just-expired lightning
+			 * dlight was visible for one extra frame, and gl_overbright's
+			 * shader *2 amplified the latched-in clamp into a sticky
+			 * bright patch.  The gate is cheap and only does work when
+			 * the surf is dlight-dirty or had a lightstyle change. */
+			R_LightmapRebuildIfDirty (surf);
 			if (!mirror || surf->texinfo->texture != cl.worldmodel->textures[mirrortexturenum])
 			{
 				surf->texturechain = surf->texinfo->texture->texturechain;
