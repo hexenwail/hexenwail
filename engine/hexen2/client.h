@@ -282,6 +282,7 @@ extern	cvar_t	cl_anglespeedkey;
 
 extern	cvar_t	cl_shownet;
 extern	cvar_t	cl_nolerp;
+extern	cvar_t	r_lerpmove;
 
 extern	cvar_t	cl_showunbound;
 
