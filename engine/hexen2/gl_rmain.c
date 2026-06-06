@@ -1351,7 +1351,23 @@ static void R_DrawAliasModel (entity_t *e)
 	{
 		if (!OIT_InPass())
 			glDisable_fp (GL_BLEND);
-		GL_SetAlphaThreshold(0.666f);	/* alpha test for see-through cutouts */
+		/* uhexen2-khsa: 0.5 instead of legacy 0.666. Mathuzzz's
+		 * r_aliasinfo dump (build r3) confirmed CASTLE_TR.MDL is
+		 * EF_HOLEY and all visible entities have e->alpha=0/1.000,
+		 * ruling out the per-entity stale-alpha and c5xe palette-
+		 * encoded-alpha theories. MSAA is hard-disabled on the main
+		 * FBO (gl_postprocess.c:436), so GL_SAMPLE_ALPHA_TO_COVERAGE
+		 * below is a no-op — the discard is binary against the
+		 * 0.666 threshold. Bilinear/mip filtering of the TEX_HOLEY
+		 * alpha mask produces fractional alpha clustered around 0.5
+		 * at cutout boundaries; a 0.666 threshold puts the pass/fail
+		 * boundary right in the noisy zone, so sub-pixel and mip-
+		 * LOD shifts move texels across it under viewer motion —
+		 * the screen-door / bus-ad shimmer Mathuzzz reported.
+		 * gl_overbright doubles the visible difference. 0.5
+		 * centers the threshold on the natural filter midpoint and
+		 * matches what most engines use without working A2C. */
+		GL_SetAlphaThreshold(0.5f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 		model_constant_alpha = 1.0f;
