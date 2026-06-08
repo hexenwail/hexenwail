@@ -47,16 +47,18 @@ jobs:
 
   flatpak:
     runs-on: ubuntu-latest
-    # Run inside the Flathub-blessed image — flatpak / flatpak-builder /
-    # SDK already preloaded.  Bypasses the flaky Canonical PPA path.
-    container:
-      # Image tagged after the SDK preloaded inside it.  freedesktop-24.08
-      # is the newest available; our manifest uses 25.08 which is pulled
-      # from Flathub on first build and cached by the action thereafter.
-      image: bilelmoussaoui/flatpak-github-actions:freedesktop-24.08
-      options: --privileged
+    # flatpak + flatpak-builder are installed directly on the runner — the
+    # bilelmoussaoui/flatpak-github-actions container image worked until
+    # Docker Hub flaked (release run 27069188929, 2026-06-06) and tanked
+    # the whole release because the container couldn't be pulled.  Ubuntu
+    # 24.04 ships flatpak-builder in main, so no PPA is needed.  The 25.08
+    # runtime/SDK is still pulled from Flathub either way.
     steps:
       - uses: actions/checkout@v6
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail.flatpak

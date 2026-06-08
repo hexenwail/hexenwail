@@ -15,12 +15,13 @@ env:
 jobs:
   flatpak:
     runs-on: ubuntu-latest
-    # Run inside the Flathub-blessed image — see ci.yml for rationale.
-    container:
-      image: bilelmoussaoui/flatpak-github-actions:freedesktop-24.08
-      options: --privileged
+    # flatpak-builder installed directly on the runner — see ci.yml for rationale.
     steps:
       - uses: actions/checkout@v6
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail-${{ github.ref_name }}.flatpak
