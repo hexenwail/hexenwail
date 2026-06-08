@@ -2556,12 +2556,15 @@ static void R_DrawAliasInstanced (void)
 	 * The ring buffer + per-frame fence in gl_buffer.c protects against
 	 * stomping previously-bound regions, but does not order this frame's
 	 * write against this frame's read on drivers where COHERENT_BIT is
-	 * shaky.  Mathuzzz (Win64, NVIDIA 1060) showed exactly the symptom
-	 * the wiped 8c2229eab diagnostic targeted: one specific slot in
-	 * alias_instances[] consistently corrupt — static torch always bad,
-	 * one of N same-model entities bad as sort order rotates them
-	 * through the affected position.  Cheap defensive barrier. */
-	glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
+	 * shaky.  Cheap defensive barrier.
+	 *
+	 * Guard the call: glMemoryBarrier_fp is loaded via GetProcAddress at
+	 * context-create (gl_vidsdl.c:710) and is NULL on drivers / contexts
+	 * where the entry point is unavailable.  Without the guard the menu
+	 * cursor / startup demo's first alias draw nulldrefs on those boxes
+	 * — that was the r6 SoT-mod-menu crash. */
+	if (glMemoryBarrier_fp)
+		glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
 
 	/* Activate instanced shader */
 	glUseProgram_fp(prog->program);
@@ -2711,11 +2714,10 @@ static void R_DrawAliasInstanced (void)
 				GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER, 0,
 						   fb_buf, fb_ofs, fb_bytes);
 				/* uhexen2-khsa: see matching note above the main
-				 * pass barrier — the fb re-upload writes new
-				 * light_color values into a fresh ring region
-				 * while the main pass draw commands are still
-				 * in flight. */
-				glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
+				 * pass barrier — guard for the same null-fp
+				 * reason. */
+				if (glMemoryBarrier_fp)
+					glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
 			}
 
 			glUseProgram_fp(prog->program);
