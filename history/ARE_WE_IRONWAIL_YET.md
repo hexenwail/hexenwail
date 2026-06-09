@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-05-15 (Bindless + IQM/MD5 audit revert (uhexen2-mxx5.5, mxx5.6) — bindless reclassified ❌ Missing, IQM 🔶 Partial; ~98% parity)
+Last updated: 2026-06-03 (Scorecard recount; add Underwater caustics, World lightmap overbright, Skybox cache rows; fix Model frame interpolation cvar citations; ~98% parity)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,15 +12,15 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 11 | 1 | 1 | 0 |
-| Rendering — Visual/Shading | 22 | 0 | 0 | 0 |
-| Performance / Engine | 9 | 0 | 0 | 1 |
+| Rendering — GPU Pipeline | 12 | 1 | 1 | 0 |
+| Rendering — Visual/Shading | 24 | 0 | 0 | 0 |
+| Performance / Engine | 11 | 0 | 0 | 1 |
 | UX / Menus / HUD | 24 | 0 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **80** | **1** | **1** | **8** |
+| **TOTAL** | **84** | **1** | **1** | **8** |
 
 **Parity: ~98% ported, 1% partial, 1% missing** (excluding N/A)
 
@@ -51,13 +51,15 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 |---|---|---|
 | Shader-based fog | ✅ | `gl_fog.c`, density/RGB/fade — EXP2 falloff with /64 density divisor (matches Ironwail) |
 | Lightstyle interpolation | ✅ | `r_lerplightstyles` |
-| Model frame interpolation | ✅ | `r_lerpmodels`, `r_lerpmove`, `r_animsmoothing` (observed-interval heuristic — client-side substitute for Ironwail's `LERP_FINISH` server-timed ends, since Hexen II's entity update protocol has no spare bit for `U_LERPFINISH`) |
+| Model frame interpolation | ✅ | `r_lerpmodels` (master toggle), `r_lerp_viewmodel` (weapon-only, default off) — Ironwail pose-driven lerp ported (commits `e92a2f401`, `e3be2acce`): tracks `(previouspose, currentpose)` at render time instead of server-frame edges; measured-interval lerptime adapts to observed animation speed; stale-state threshold (`2×lerptime`) snaps to prevent zombie-pose blending. Both cvars toggleable from Options → Game ("Anim Smoothing" / "Smooth Weapon"). Client-side substitute for Ironwail's `LERP_FINISH` server protocol bit, which Hexen II's update protocol lacks. |
+| World lightmap overbright | ✅ | `gl_overbright` (default 1) — Ironwail-style: lightmap atlas built at `>>(7+1)` (true 1× range), world/brush fragment shaders multiply `tex*lm*2.0` so combined product can saturate to white. Live toggle re-stitches atlas via `R_RebuildAllLightmaps` callback. (commit `9bd137aef`, uhexen2-f29y) |
 | Overbright model lighting | ✅ | `gl_overbright_models` |
 | Fast sky | ✅ | `r_fastsky` |
 | Skybox support | ✅ | `svc_skybox`, cubemap loading |
 | Sky fog | ✅ | `r_skyfog` |
 | Sky alpha | ✅ | `r_skyalpha` |
 | Lightmapped liquid surfaces | ✅ | Per-type alpha (`r_wateralpha`, `r_lavaalpha`, etc.) |
+| Underwater caustics | ✅ | `r_caustics` (default 1), `r_caustics_intensity` — animated caustic texture projected onto world surfaces below the waterline. Registered in `gl_rmisc.c`, sampled in `sworld_frag`. (commit `7b82afce6`, uhexen2-6bfm closed) |
 | Water warp distortion | ✅ | `r_waterwarp` |
 | Projected mesh shadows | ✅ | `r_shadows`, stencil-projected |
 | Fullbright texture support | ✅ | `gl_fullbrights` |
@@ -83,6 +85,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | CSQC (client-side QuakeC) | ✅ | `cl_csqc.c` |
 | bmodel buffer rebuilt correctly on map change | ✅ | Ironwail fix `3ccbcda` (2026-02): `GL_DeleteBModelBuffers()` was missing before `GL_BuildBModelVertexBuffer()` in `R_NewMap`, causing GPU memory leak on map changes. We also call `GL_DeleteBModelBuffers` before rebuild. Verify `gl_rmisc.c:R_NewMap`. |
 | Alias model GPU data layout | ✅ | Ironwail refactored `a65a88e` (2026-01): SSBO alignment removed per-surface, IQM bind-pose separated. Our alias pipeline layout matches conceptually — no separate SSBO alignment loop needed given our model format. |
+| Skybox cache (precache stutter elimination) | ✅ | Ironwail `0603c2bb` port: `skybox_t` struct + LRU-eviction linked list caches up to 16 skyboxes so `precache_sky` commands at map start don't re-upload 6 faces each time. Safe flush on `VID_Restart` and map change. (commit `78933d173`, uhexen2-uqan closed) |
 | Faster map loading | ✅ | Lightmap atlas + BSP VBO packing optimized (uhexen2-3mbt, 2026-05-13) |
 | Async main-thread task queue | ✅ | `Host_InvokeOnMainThread()` + `AsyncQueue_Drain()` in `host_async.c` — ring buffer with SDL mutex/condition, drained each frame in `Host_Frame`. Emscripten fallback (synchronous). Plus background save thread (uhexen2-9v0s closed). |
 | Intelligent autosave system | ➖ | Hexen II saves do not map cleanly to Ironwail's health/secret/teleport trigger heuristics |
@@ -97,7 +100,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Key binding menu | ✅ | `M_Menu_Keys_f` |
 | Display/Sound/Game submenus | ✅ | Reorganized options |
 | FOV slider | ✅ | In options menu |
-| FPS counter | ✅ | `scr_showfps` |
+| FPS counter | ✅ | `showfps` (cvar name; menu label "Show FPS") |
 | Borderless window | ✅ | `vid_borderless` |
 | Desktop fullscreen | ✅ | `vid_config_fscr` |
 | Menu key auto-repeat (navigational only) | ✅ | Ironwail commit `6a9610f` (2026-01): `M_Keydown` gains `repeat` bool arg; only arrow keys pass repeat. Hexenwail already has `M_Keydown (key, key_repeats[key] > 1)` with identical arrow-key-only filter — `menu.c:6024`, `keys.c:1099`. |
@@ -180,7 +183,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-05-15 (post-audit revert uhexen2-mxx5.5 / mxx5.6), bindless textures and MD5/IQM skeletal animation are downgraded: bindless ❌ Missing (skeleton only, never reached the draw path), MD5 🔶 Partial (~30%, parser only, would crash on first real load, no `.md5anim`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models). Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 80 ✅ / 1 🔶 / 1 ❌ / 8 ➖ (~98% parity).
+As of 2026-06-03, bindless textures and MD5/IQM skeletal animation remain downgraded: bindless ❌ Missing (skeleton only, never reached the draw path — uhexen2-mxx5.5), MD5 🔶 Partial (~30%, parser only, would crash on first real load, no `.md5anim` — uhexen2-mxx5.6). New rows added this cycle: World lightmap overbright (gl_overbright, uhexen2-f29y), Underwater caustics (r_caustics, uhexen2-6bfm), Skybox cache (uhexen2-uqan). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category (Rendering, Performance, Menus, Input, Models). Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 84 ✅ / 1 🔶 / 1 ❌ / 8 ➖ (~98% parity).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
