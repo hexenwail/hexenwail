@@ -96,11 +96,19 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
 static GLuint		drawcall_ssbo = 0;
 static gl_draw_call_t	*drawcall_cpu_buffer = NULL;
 
-static unsigned int	blocklights[18*18];
-static unsigned int	blocklightscolor[18*18*3];	// colored light support. *3 for RGB to the definitions at the top
-
+/* uhexen2-iihz/SoT crash fix: blocklights/blocklightscolor are sized for
+ * the lightmap atlas page (BLOCK_WIDTH * BLOCK_HEIGHT), not the legacy
+ * 18*18 Quake surface cap.  AllocBlock won't place a single surface
+ * larger than one atlas page anyway, so this is a hard ceiling.  SoT
+ * has surfaces with extents > 256 world units (smax*tmax > 324) that
+ * overflowed the old buffer the moment my R_RecursiveWorldNode hook
+ * exposed them to R_BuildLightMap — caught by glibc fortified memset
+ * as a SIGABRT during SoT map load on r7. */
 #define	BLOCK_WIDTH	128
 #define	BLOCK_HEIGHT	128
+
+static unsigned int	blocklights[BLOCK_WIDTH*BLOCK_HEIGHT];
+static unsigned int	blocklightscolor[BLOCK_WIDTH*BLOCK_HEIGHT*3];	// colored light support. *3 for RGB to the definitions at the top
 
 static glpoly_t	*lightmap_polys[MAX_LIGHTMAPS];
 static qboolean	lightmap_modified[MAX_LIGHTMAPS];
