@@ -40,13 +40,13 @@ Planned:
 - Brightness/contrast via post-process shader
 - HDR tonemap with exposure slider
 - Scrolling two-layer sky (configurable speed) and skybox support
-- Shader-based fog, underwater color tint, underwater warp, motion blur
+- Shader-based fog, underwater color tint, underwater warp, underwater caustics (`r_caustics`), motion blur
 - Fence textures, water tint options, glow effects with fog attenuation
-- Per-entity alpha (ENTALPHA), translucent brush entities, model overbright, fullbright skins
+- Per-entity alpha (ENTALPHA), translucent brush entities, world lightmap overbright (`gl_overbright`), model overbright (`gl_overbright_models`), fullbright skins
 - Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items)
 - MD3 model format support (Quake 3 models with GPU-compressed vertex decoding)
 - External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
-- Physics/render decoupling with entity and lightstyle interpolation
+- Physics/render decoupling with entity and lightstyle interpolation; pose-driven alias animation lerp (`r_lerpmodels`, `r_lerp_viewmodel`)
 - FOV slider, FPS limiter, HUD modes (Full/Mini/Off/Clean)
 - HUD / menu / crosshair / console scale sliders (auto by framebuffer height)
 - Console alpha + brightness sliders
