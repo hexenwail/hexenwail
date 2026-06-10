@@ -45,13 +45,6 @@ typedef struct efrag_s
 #define LERP_RESETANIM	(1<<2)	// reset animation lerp
 #define LERP_RESETANIM2	(1<<3)	// defer animation lerp one more pose change (Ironwail)
 
-typedef struct lightcache_s {
-	int			surfidx;	// < 0: black surface; == 0: no cache; > 0: 1+index of surface
-	vec3_t		pos;
-	short		ds;
-	short		dt;
-} lightcache_t;
-
 typedef struct entity_s
 {
 	qboolean		forcelink;	// model changed
@@ -104,8 +97,6 @@ typedef struct entity_s
 	int			currentpose;
 	float			lerpstart;	// animation lerp start time
 	float			lerptime;	// animation lerp duration
-
-	lightcache_t	lightcache;	// alias light trace cache
 } entity_t;
 
 
