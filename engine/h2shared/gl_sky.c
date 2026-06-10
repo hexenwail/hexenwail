@@ -375,8 +375,8 @@ Add a skybox to cache. Evicts oldest entry if cache is full.
 */
 static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *texnums)
 {
-	skybox_t *entry, *prev;
-	int count;
+	skybox_t *entry, *keep, *kill;
+	int count, i;
 
 	entry = (skybox_t *)malloc(sizeof(skybox_t));
 	if (!entry)
@@ -385,42 +385,35 @@ static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *
 	q_strlcpy(entry->name, name, sizeof(entry->name));
 	memcpy(entry->textures, textures, sizeof(entry->textures));
 	memcpy(entry->texnums, texnums, sizeof(entry->texnums));
-	entry->next = NULL;
-
-	/* Prepend to list */
-	if (skybox_cache)
-		entry->next = skybox_cache;
+	entry->next = skybox_cache;
 	skybox_cache = entry;
 
-	/* Count cache entries and evict oldest if over limit */
-	count = 0;
-	prev = NULL;
-	for (entry = skybox_cache; entry; entry = entry->next)
+	/* Single-pass eviction: walk forward MAX_SKYBOX_CACHE - 1 steps from the
+	 * head we just prepended, then sever and free everything past that.
+	 * Replaces the prior two-pass count-then-find-tail with a fragile
+	 * 'if (prev && prev != skybox_cache)' guard that silently skipped
+	 * eviction when prev happened to match head (uhexen2-mxx5.9). */
+	count = 1;
+	keep = skybox_cache;
+	while (keep->next && count < MAX_SKYBOX_CACHE)
 	{
+		keep = keep->next;
 		count++;
-		prev = entry;
 	}
-
-	if (count > MAX_SKYBOX_CACHE)
+	kill = keep->next;
+	keep->next = NULL;
+	while (kill)
 	{
-		/* Remove oldest (last in list) */
-		if (prev && prev != skybox_cache)
+		skybox_t *next = kill->next;
+		/* notexture is a static placeholder, not ours to free.  Stable
+		 * for process lifetime, so this comparison is sound. */
+		for (i = 0; i < 6; i++)
 		{
-			skybox_t *iter, *iter_prev = NULL;
-			for (iter = skybox_cache; iter->next; iter_prev = iter, iter = iter->next)
-				;
-			if (iter_prev)
-				iter_prev->next = NULL;
-			else
-				skybox_cache = NULL;
-
-			for (int i = 0; i < 6; i++)
-			{
-				if (iter->textures[i] && iter->textures[i] != notexture)
-					TexMgr_FreeTexture(iter->textures[i]);
-			}
-			free(iter);
+			if (kill->textures[i] && kill->textures[i] != notexture)
+				TexMgr_FreeTexture(kill->textures[i]);
 		}
+		free(kill);
+		kill = next;
 	}
 
 	return skybox_cache;
