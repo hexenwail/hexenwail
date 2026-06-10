@@ -59,6 +59,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
+          # The container image came with Flathub pre-configured; a bare apt
+          # install does not, so --install-deps-from=flathub fails with
+          # "No remote refs found for 'flathub'".  Add the system remote.
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail.flatpak
