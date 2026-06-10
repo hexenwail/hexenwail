@@ -22,10 +22,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
-          # The container image came with Flathub pre-configured; a bare apt
-          # install does not, so --install-deps-from=flathub fails with
-          # "No remote refs found for 'flathub'".  Add the system remote.
+          # The container image came with Flathub pre-configured and ran as
+          # root; a bare apt install on the runner has neither.  Add the
+          # system remote, then pre-install the runtime + SDK as root (root
+          # bypasses polkit, which the unprivileged runner user lacks for
+          # system flatpak operations).  Without this the action's own
+          # `flatpak --system install` fails with "operation Deploy not
+          # allowed for user"; once the deps are present that install is a
+          # no-op.
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub \
+            org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail-${{ github.ref_name }}.flatpak
