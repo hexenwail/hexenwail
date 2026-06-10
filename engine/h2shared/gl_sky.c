@@ -159,6 +159,21 @@ typedef struct skybox_s {
 static skybox_t *skybox_cache = NULL;
 #define MAX_SKYBOX_CACHE 16
 
+/* Per-map skybox memory.  Mods often set the skybox once on first map
+ * entry via a non-BSP mechanism (stuffcmd, QC builtin, info command) that
+ * does not re-fire on hub-travel revisit.  On revisit the engine's only
+ * source of sky truth is the BSP worldspawn 'sky' key, which most mod
+ * maps don't have, so the skybox silently disappeared.  Persist the
+ * active skybox keyed on map name so we can re-apply it from Sky_NewMap
+ * when worldspawn doesn't supply one.  uhexen2-7gl5. */
+typedef struct skymap_s {
+	struct skymap_s	*next;
+	char	mapname[MAX_QPATH];
+	char	skyname[32];
+} skymap_t;
+
+static skymap_t	*skybox_per_map = NULL;
+
 int		skytexorder[6] = {0,2,1,3,4,5}; //for skybox
 
 vec3_t	skyclip[6] = {
@@ -449,6 +464,55 @@ void Sky_CacheFlush(void)
 
 /*
 ==================
+Sky_RememberForMap
+
+Record the active skybox name against the current map so a later
+Sky_NewMap revisit can re-apply it when worldspawn doesn't.  Records
+the empty string too, so a console `sky ""` disable persists.
+uhexen2-7gl5.
+==================
+*/
+static void Sky_RememberForMap (const char *skyname)
+{
+	skymap_t	*entry;
+	const char	*mapname;
+
+	if (!cl.worldmodel || !cl.worldmodel->name[0])
+		return;
+	mapname = cl.worldmodel->name;
+	for (entry = skybox_per_map; entry; entry = entry->next)
+	{
+		if (q_strcasecmp(entry->mapname, mapname) == 0)
+		{
+			q_strlcpy(entry->skyname, skyname ? skyname : "", sizeof(entry->skyname));
+			return;
+		}
+	}
+	entry = (skymap_t *)malloc(sizeof(skymap_t));
+	if (!entry)
+		return;
+	q_strlcpy(entry->mapname, mapname, sizeof(entry->mapname));
+	q_strlcpy(entry->skyname, skyname ? skyname : "", sizeof(entry->skyname));
+	entry->next = skybox_per_map;
+	skybox_per_map = entry;
+}
+
+static const char *Sky_RecallForMap (void)
+{
+	skymap_t	*entry;
+
+	if (!cl.worldmodel || !cl.worldmodel->name[0])
+		return NULL;
+	for (entry = skybox_per_map; entry; entry = entry->next)
+	{
+		if (q_strcasecmp(entry->mapname, cl.worldmodel->name) == 0)
+			return entry->skyname;
+	}
+	return NULL;
+}
+
+/*
+==================
 Sky_LoadSkyBox
 ==================
 */
@@ -473,6 +537,7 @@ void Sky_LoadSkyBox (const char *name)
 		memcpy(skybox_textures, cached->textures, sizeof(skybox_textures));
 		memcpy(skybox_texnums, cached->texnums, sizeof(skybox_texnums));
 		Sky_LoadWindCfg(name);
+		Sky_RememberForMap(name);
 		return;
 	}
 
@@ -495,6 +560,7 @@ void Sky_LoadSkyBox (const char *name)
 	{
 		skybox_name[0] = 0;
 		Sky_LoadWindCfg ("");
+		Sky_RememberForMap ("");
 		return;
 	}
 
@@ -629,6 +695,8 @@ void Sky_LoadSkyBox (const char *name)
 
 	/* Add to cache for future loads */
 	Sky_CacheAdd(name, skybox_textures, skybox_texnums);
+
+	Sky_RememberForMap(name);
 }
 
 /*
@@ -724,6 +792,8 @@ void Sky_NewMap (void)
 	char	key[128], value[4096];
 	const char	*data;
 	int		i;
+	qboolean	worldspawn_set_sky = false;
+	const char	*recalled;
 
 	//
 	// initially no sky
@@ -741,19 +811,19 @@ void Sky_NewMap (void)
 	//
 	data = cl.worldmodel->entities;
 	if (!data)
-		return; //FIXME: how could this possibly ever happen? -- if there's no
+		goto recall; //FIXME: how could this possibly ever happen? -- if there's no
 	// worldspawn then the sever wouldn't send the loadmap message to the client
 
 	data = COM_Parse(data);
 	if (!data) //should never happen
-		return; // error
+		goto recall;
 	if (com_token[0] != '{') //should never happen
-		return; // error
+		goto recall;
 	while (1)
 	{
 		data = COM_Parse(data);
 		if (!data)
-			return; // error
+			goto recall;
 		if (com_token[0] == '}')
 			break; // end of worldspawn
 		if (com_token[0] == '_')
@@ -764,21 +834,44 @@ void Sky_NewMap (void)
 			key[strlen(key)-1] = 0;
 		data = COM_Parse(data);
 		if (!data)
-			return; // error
+			goto recall;
 		strcpy(value, com_token);
 
 		if (!strcmp("sky", key))
+		{
 			Sky_LoadSkyBox(value);
+			worldspawn_set_sky = true;
+		}
 
 		if (!strcmp("skyfog", key))
 			skyfog = atof(value);
 
 #if 1 //also accept non-standard keys
 		else if (!strcmp("skyname", key)) //half-life
+		{
 			Sky_LoadSkyBox(value);
+			worldspawn_set_sky = true;
+		}
 		else if (!strcmp("qlsky", key)) //quake lives
+		{
 			Sky_LoadSkyBox(value);
+			worldspawn_set_sky = true;
+		}
 #endif
+	}
+
+recall:
+	/* If worldspawn didn't touch the sky key, restore from per-map
+	 * memory.  Handles hub-travel revisit on mod maps that set the sky
+	 * via a non-BSP mechanism (stuffcmd, QC builtin, info command) that
+	 * fires only on first map entry — Sky_NewMap unconditionally cleared
+	 * skybox_name above and the saved-state restore doesn't re-fire the
+	 * QC sky setup.  uhexen2-7gl5. */
+	if (!worldspawn_set_sky)
+	{
+		recalled = Sky_RecallForMap();
+		if (recalled)
+			Sky_LoadSkyBox(recalled);
 	}
 }
 
