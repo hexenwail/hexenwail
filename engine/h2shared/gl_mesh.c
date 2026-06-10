@@ -361,15 +361,15 @@ void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr)
 alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];
 int num_alias_gpu_meshes;
 
-/* Map an aliashdr_t to its GPU mesh.  Searches by pointer-derived key. */
-static int alias_gpu_keys[MAX_ALIAS_MODELS]; /* hdr address hash for lookup */
+/* Map an aliashdr_t to its GPU mesh.  Direct pointer comparison (uhexen2-njba). */
+static aliashdr_t *alias_gpu_owners[MAX_ALIAS_MODELS];
 
 alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr)
 {
-	int i, key = (int)((size_t)hdr & 0x7fffffff);
+	int i;
 	for (i = 0; i < num_alias_gpu_meshes; i++)
 	{
-		if (alias_gpu_keys[i] == key && alias_gpu_meshes[i].valid)
+		if (alias_gpu_owners[i] == hdr && alias_gpu_meshes[i].valid)
 			return &alias_gpu_meshes[i];
 	}
 	/* Lazily create GPU mesh if missing (e.g., after Mod_ClearAll
@@ -379,7 +379,7 @@ alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr)
 	if (num_alias_gpu_meshes > 0)
 	{
 		i = num_alias_gpu_meshes - 1;
-		if (alias_gpu_keys[i] == key && alias_gpu_meshes[i].valid)
+		if (alias_gpu_owners[i] == hdr && alias_gpu_meshes[i].valid)
 			return &alias_gpu_meshes[i];
 	}
 	return NULL;
@@ -398,7 +398,7 @@ void GL_FreeAliasGPUMeshes (void)
 		if (gm->tex_pose)  { glDeleteTextures_fp(1, &gm->tex_pose); }
 	}
 	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
-	memset(alias_gpu_keys, 0, sizeof(alias_gpu_keys));
+	memset(alias_gpu_owners, 0, sizeof(alias_gpu_owners));
 	num_alias_gpu_meshes = 0;
 }
 
@@ -636,7 +636,7 @@ iqm_gpu_setup:
 		gm->numposes = hdr->numposes;
 		gm->valid = true;
 
-		alias_gpu_keys[num_alias_gpu_meshes] = (int)((size_t)hdr & 0x7fffffff);
+		alias_gpu_owners[num_alias_gpu_meshes] = hdr;
 		num_alias_gpu_meshes++;
 
 		if (hdr->poseverttype == PV_IQM)
@@ -691,7 +691,7 @@ iqm_gpu_setup:
 	gm->numposes = hdr->numposes;
 	gm->valid = true;
 
-	alias_gpu_keys[num_alias_gpu_meshes] = (int)((size_t)hdr & 0x7fffffff);
+	alias_gpu_owners[num_alias_gpu_meshes] = hdr;
 	num_alias_gpu_meshes++;
 
 	Hunk_FreeToLowMark(mark);
