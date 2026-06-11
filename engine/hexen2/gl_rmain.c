@@ -2551,21 +2551,6 @@ static void R_DrawAliasInstanced (void)
 	GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER, 0,
 			   inst_buf, inst_ofs, inst_bytes);
 
-	/* uhexen2-khsa: order the CPU memcpy (persistent-mapped) / SubData
-	 * (fallback) write against the shader read on the draw calls below.
-	 * The ring buffer + per-frame fence in gl_buffer.c protects against
-	 * stomping previously-bound regions, but does not order this frame's
-	 * write against this frame's read on drivers where COHERENT_BIT is
-	 * shaky.  Cheap defensive barrier.
-	 *
-	 * Guard the call: glMemoryBarrier_fp is loaded via GetProcAddress at
-	 * context-create (gl_vidsdl.c:710) and is NULL on drivers / contexts
-	 * where the entry point is unavailable.  Without the guard the menu
-	 * cursor / startup demo's first alias draw nulldrefs on those boxes
-	 * — that was the r6 SoT-mod-menu crash. */
-	if (glMemoryBarrier_fp)
-		glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
-
 	/* Activate instanced shader */
 	glUseProgram_fp(prog->program);
 
@@ -2713,11 +2698,6 @@ static void R_DrawAliasInstanced (void)
 					  &fb_buf, &fb_ofs);
 				GL_BindBufferRange(GL_SHADER_STORAGE_BUFFER, 0,
 						   fb_buf, fb_ofs, fb_bytes);
-				/* uhexen2-khsa: see matching note above the main
-				 * pass barrier — guard for the same null-fp
-				 * reason. */
-				if (glMemoryBarrier_fp)
-					glMemoryBarrier_fp(GL_BUFFER_UPDATE_BARRIER_BIT);
 			}
 
 			glUseProgram_fp(prog->program);
