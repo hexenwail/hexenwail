@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-06-03 (Scorecard recount; add Underwater caustics, World lightmap overbright, Skybox cache rows; fix Model frame interpolation cvar citations; ~98% parity)
+Last updated: 2026-06-11 (Port Ironwail 7a2038a — gamepad alt-modifier layer now bindable from the Keys menu, plus the `<256`→`<MAX_KEYS` menu scan fix that un-hides ALT/D-pad bindings; uhexen2-qeyd)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -128,7 +128,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Full gamepad support | ✅ | SDL game controller API |
 | Controller rumble | ✅ | `joy_rumble` |
 | Analog stick deadzone/easing | ✅ | Inner deadzone + power-curve easing (`joy_deadzone_look/move`, `joy_exponent`/`_move`) |
-| Second gamepad binding layer | ✅ | `+altmodifier` modifier button for alternate bindings |
+| Second gamepad binding layer | ✅ | `+altmodifier` modifier button for alternate bindings. Bindable from the Keys menu (Ironwail `7a2038a`, uhexen2-qeyd): hold the alt-modifier while in bind mode and the row shows `Alt-???`, the prompt reads "Press a gamepad button for the ALT layer", and a base GP press is redirected to its `_ALT` variant. The menu find/unbind scans were also widened from `<256` to `<MAX_KEYS` so the `K_GP_*_ALT` (256–267) and `K_GP_DPAD_*` (268–271) bindings are finally visible and clearable in the menu. |
 | Outer-edge deadzone saturation | ✅ | `joy_outer_threshold_look/move` (uhexen2-0g4t) — per-stick saturation thresholds replace the hardcoded 0.02 in IN_ApplyDeadzone |
 | Flick stick | ✅ | `joy_flick`, `joy_flick_time`, `joy_flick_deadzone`, `joy_flick_noise_thresh`, `joy_flick_recenter`, `joy_flick_adjust_speed` (uhexen2-98oo / uhexen2-s2vv). Tri-state machine in `IN_FlickStickUpdate` (idle/rotating/tracking), smoothstep animation, noise-gated 1:1 tracking. |
 | Gyroscope aiming | ✅ | `gyro_enable`, `gyro_mode` (always / suppress-on-stick / +gyroactive / inverted), `gyro_turning_axis`, `gyro_yawsensitivity`, `gyro_pitchsensitivity`, `gyro_noise_thresh`, `gyro_calibration_x/y/z`, `gyro_calibrate` command, `+gyroactive`/`-gyroactive` binds (uhexen2-xpbi / uhexen2-s2vv). |
@@ -178,6 +178,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 | `80387f1` 2026-01 | Crash toggling `gl_compress_textures`: cubemap textures stored pointers to stack data | ➖ N/A — no compression system. |
 | `78ad272` 2026-01 | Stop controller rumble when sound buffer is cleared (e.g. modal message) | ✅ Already present — `S_ClearBuffer` calls `IN_GPRumble(0, 0, 0)` at `snd_dma.c:684` (uhexen2-xq1c closed). |
 | ericw (pre-Ironwail) | MAX_ENT_LEAFS 16→32 + always-send on cap overflow in `SV_WriteEntitiesToClient` | ✅ Ported 2026-05-11 (uhexen2-l0ac follow-up): long brush ents (lifts, rotators) flickered out at distance because their leaf list overflowed and the PVS cull dropped them. |
+| `7a2038a` 2026-01 | Menu support for binding the gamepad alt-modifier layer | ✅ Ported 2026-06-11 (uhexen2-qeyd): `M_Keybind` redirects a base GP press to its `_ALT` variant while the modifier is held (and ignores a press of the modifier key itself); `M_Keys_Draw` previews with `Alt-???` / an ALT-layer prompt. Also fixed the menu's `<256` find/unbind scan that hid all `K_GP_*_ALT` and `K_GP_DPAD_*` bindings. |
 
 ---
 
