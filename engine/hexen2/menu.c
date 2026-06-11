@@ -4308,7 +4308,7 @@ static void M_FindKeysForCommand (const char *command, int *twokeys)
 	l = strlen(command);
 	count = 0;
 
-	for (j = 0; j < 256; j++)
+	for (j = 0; j < MAX_KEYS; j++)
 	{
 		b = keybindings[j];
 		if (!b)
@@ -4335,7 +4335,7 @@ static void M_UnbindCommand (const char *command)
 
 	l = strlen(command);
 
-	for (j = 0; j < 256; j++)
+	for (j = 0; j < MAX_KEYS; j++)
 	{
 		b = keybindings[j];
 		if (!b)
@@ -4356,7 +4356,7 @@ static void M_FindDoubleKeysForCommand (const char *command, int *twokeys)
 	l = strlen(command);
 	count = 0;
 
-	for (j = 0; j < 256; j++)
+	for (j = 0; j < MAX_KEYS; j++)
 	{
 		b = doublebindings[j];
 		if (!b)
@@ -4384,7 +4384,7 @@ static void M_UnbindDoubleCommand (const char *command)
 
 	l = strlen(command);
 
-	for (j = 0; j < 256; j++)
+	for (j = 0; j < MAX_KEYS; j++)
 	{
 		b = doublebindings[j];
 		if (!b)
@@ -4450,7 +4450,13 @@ static void M_Keys_Draw (void)
 
 		if (keys[0] == -1)
 		{
-			M_Print (140, y, "???");
+			/* While grabbing a key for this row, preview that holding the
+			 * gamepad alt-modifier will bind the second (ALT) layer. */
+			if ((Key_GetDest() & key_bindbit) && (i + keys_top) == keys_cursor &&
+			    Key_GetGamepadAltModifierState())
+				M_Print (140, y, "Alt-???");
+			else
+				M_Print (140, y, "???");
 		}
 		else
 		{
@@ -4475,7 +4481,9 @@ static void M_Keys_Draw (void)
 
 	if (Key_GetDest() & key_bindbit)
 	{
-		if (keys_tap)
+		if (Key_GetGamepadAltModifierState())
+			M_Print (12, 64, "Press a gamepad button for the ALT layer");
+		else if (keys_tap)
 			M_Print (12, 64, "Press a key or button for TAP action");
 		else
 			M_Print (12, 64, "Press a key or button for this action");
@@ -6984,12 +6992,26 @@ void M_Draw (void)
 void M_Keybind (int key)
 {
 	char	cmd[80];
+	const char *command = bindnames[keys_cursor][0];
 	S_LocalSound ("raven/menu1.wav");
 	if (key != K_ESCAPE && key != '`')
 	{
+		/* Gamepad alt-modifier second layer (Ironwail 7a2038a):
+		 * unless we're binding the modifier command itself, ignore a press
+		 * of the modifier key (so the user can hold it without binding it),
+		 * and redirect a base gamepad button to its _ALT variant while the
+		 * modifier is held. */
+		if (strcmp (command, "+altmodifier") != 0)
+		{
+			if (Key_IsGamepadAltModifier (key))
+				return;		/* stay in bind mode, wait for the real button */
+			if (Key_GetGamepadAltModifierState () &&
+			    key >= K_GP_A && key <= K_GP_START)
+				key += K_GP_ALT_OFFSET;
+		}
 		q_snprintf (cmd, sizeof(cmd), "%s \"%s\" \"%s\"\n",
 			    keys_tap ? "bind2" : "bind",
-			    Key_KeynumToString (key), bindnames[keys_cursor][0]);
+			    Key_KeynumToString (key), command);
 		Cbuf_InsertText (cmd);
 	}
 
