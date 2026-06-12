@@ -458,7 +458,11 @@ static const char sworld_frag[] =
 	"#endif\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
-	"    if (color.a < u_alpha_threshold) discard;\n"
+	/* PROBE uhexen2-khsa r4: only run the discard on the cutout/fence path
+	 * (threshold > 0.5).  Opaque-entity path (threshold ~0.01) bypasses so
+	 * we can confirm whether the "models invisible" symptom is alpha-test
+	 * firing on broken tex.a.  Revert before any release. */
+	"    if (u_alpha_threshold > 0.5 && color.a < u_alpha_threshold) discard;\n"
 	"    color.rgb += fb;\n"
 	/* Underwater caustics: gated by u_caustics.x (set to 0 by C when the
 	 * view leaf is not CONTENTS_WATER or the cvar is off, otherwise to
@@ -478,10 +482,13 @@ static const char sworld_frag[] =
 	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
 	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
 	 * OIT path always preserves alpha for weighted blending. */
+	/* PROBE uhexen2-khsa r4: force alpha=1.0 on the opaque path so any
+	 * downstream blend/A2C cannot use a noisy tex.a value.  Cutout path
+	 * already forces 1.0; OIT path unchanged. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
-	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
+	"    fragColor = vec4(color.rgb, 1.0);\n"
 	"#endif\n"
 	"}\n";
 
@@ -582,17 +589,20 @@ static const char salias_frag[] =
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
-	"    if (color.a < u_alpha_threshold) discard;\n"
+	/* PROBE uhexen2-khsa r4: gate opaque-path discard so we can confirm
+	 * whether the "enemy mostly invisible" symptom in image2.png is the
+	 * alpha-test firing on broken tex.a.  Cutout path (threshold > 0.5)
+	 * still discards normally.  Revert before any release. */
+	"    if (u_alpha_threshold > 0.5 && color.a < u_alpha_threshold) discard;\n"
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	/* See sworld_frag — force alpha=1 only on the cutout path so A2C
-	 * doesn't dither.  Translucent draws (sprites, EF_TRANSPARENT alias
-	 * models, ENTALPHA, etc.) keep actual alpha for blend. */
+	/* PROBE uhexen2-khsa r4: force alpha=1.0 on the opaque path so any
+	 * downstream blend/A2C cannot use a noisy tex.a value. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
-	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
+	"    fragColor = vec4(color.rgb, 1.0);\n"
 	"#endif\n"
 	"}\n";
 
