@@ -64,11 +64,22 @@ jobs:
       - name: Package
         run: |
           cp -rL result/release staging
-          cd staging
-          zip -r ../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
-            linux-x86_64/ licenses/ BUILD_INFO.txt
-          zip -r ../hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
-            windows-x86_64/ licenses/ BUILD_INFO.txt
+
+          # Linux: keep the linux-x86_64/ tree as-is.
+          (cd staging && zip -r ../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
+            linux-x86_64/ licenses/ BUILD_INFO.txt)
+
+          # Windows: Hexen II-style flat layout — glh2.exe + DLLs at the zip
+          # root next to an empty data1/, so users extract straight into their
+          # Hexen II directory and drop pak0.pak/pak1.pak into data1/.
+          winpkg=hexenwail-windows
+          mkdir -p "$winpkg/data1"
+          cp staging/windows-x86_64/bin/* "$winpkg/"
+          cp -r staging/licenses "$winpkg/"
+          cp staging/BUILD_INFO.txt "$winpkg/"
+          echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
+            > "$winpkg/data1/README - put pak files here.txt"
+          (cd "$winpkg" && zip -r ../hexenwail-${{ github.ref_name }}-windows-x86_64.zip .)
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
@@ -108,7 +119,7 @@ jobs:
             echo ""
             echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
             echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/com.github.bobberb.hexenwail/.hexen2/data1/\`"
-            echo "- **Windows x86_64** — extract all files to your Hexen II directory, run \`glh2.exe\`"
+            echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`glh2.exe\`"
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
             echo ""

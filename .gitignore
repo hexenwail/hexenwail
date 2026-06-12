@@ -15,3 +15,4 @@ engine/build/
 .dolt/
 *.db
 .beads-credential-key
+/image4.png
