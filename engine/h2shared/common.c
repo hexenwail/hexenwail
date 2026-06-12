@@ -395,8 +395,8 @@ skipwhite:
 				com_token[len] = 0;
 				return data;
 			}
-			com_token[len] = c;
-			len++;
+			if (len < (int)sizeof(com_token) - 1)
+				com_token[len++] = c;
 		}
 	}
 
@@ -414,9 +414,9 @@ skipwhite:
 // parse a regular word
 	do
 	{
-		com_token[len] = c;
+		if (len < (int)sizeof(com_token) - 1)
+			com_token[len++] = c;
 		data++;
-		len++;
 		c = *data;
 #if 0
 		if (c == '{' || c == '}' || c == '(' || c == ')' || c == '\'' || c == ':')
