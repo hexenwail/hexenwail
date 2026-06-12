@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-06-12 (Demote "Alias model GPU data layout" ✅→🔶: bead uhexen2-48fx filed 2026-06-12 as open work to port Ironwail a65a88e frame-major SSBO layout — current code is per-aliashdr_t but not frame-major; doc was overclaiming)
+Last updated: 2026-06-12 (Promote Ironwail `017fdd2` ➖→✅: bead uhexen2-9a1l landed — fullbright sample in `sworld_frag` moved above the alpha-test `discard`, since `texture()`'s implicit dFdx/dFdy is undefined for surviving lanes in a 2×2 quad where peers discarded. Reframe zoom-system "Removed from exclusives" row: intentionally unimplemented for Hexen II, not pending work — bead uhexen2-mfbe demoted to P4.)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -172,7 +172,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 | `6a9610f` 2026-01 | Menu key auto-repeat: only navigational keys pass repeat events | ✅ Already ported |
 | `51a911b` 2026-03 | Mods menu: game command not quoted, breaks dirs with spaces | ✅ Already quoted |
 | `0a6084a` 2026-04 | Pitch drift during cutscenes: `V_StopPitchDrift()` not called when `CL_InCutscene()` | ✅ Ported 2026-05-05: `cl_input.c:CL_AdjustAngles` early-returns with `V_StopPitchDrift()` when `cl.intermission` is set. |
-| `017fdd2` 2026-01 | Dark outlines on fence textures with dynamic lights: compute plane before `discard` | ➖ N/A — Hexenwail has no clustered per-tile dynamic lighting. Our world shader (`h2shared/gl_shader.c:sworld_frag`) does not compute a plane variable at all. |
+| `017fdd2` 2026-01 | Dark outlines on fence textures with dynamic lights: compute plane before `discard` | ✅ Ported 2026-06-12 (uhexen2-9a1l): the same hazard hits us through `texture()`'s implicit dFdx/dFdy, not a hand-written plane equation. In `sworld_frag` the fullbright mask sample was the only post-`discard` texture fetch and was producing undefined mip selection for surviving lanes in a 2×2 quad where peers discarded — manifesting as dark fence-edge outlines. Sample now happens above the alpha-test `discard`. Other discard sites audited clean. |
 | `1011ff8` 2026-01 | Disable GL texture compression for alpha-tested surfaces | ➖ N/A — Hexenwail does not have a `gl_compress_textures` system. |
 | `74d8e74` 2026-01 | Disable GL texture compression for 2D textures (HUD, conchars) | ➖ N/A — same reason as above. |
 | `80387f1` 2026-01 | Crash toggling `gl_compress_textures`: cubemap textures stored pointers to stack data | ➖ N/A — no compression system. |
@@ -227,7 +227,7 @@ Features Hexenwail has that Ironwail does NOT. Verified against Ironwail origin/
 | Feature | Notes |
 |---|---|
 | Underwater audio filter | Both have `snd_waterfx`. Ironwail: `snd_dma.c:84`. Independently implemented but same cvar name and concept. |
-| Zoom system | Both have `zoom_fov` / `zoom_speed`. Ironwail: `gl_screen.c:108-109`. Our codebase has a `cl.zoom` field (`client.h:210`) but no registered cvars — **the zoom system is incomplete/stub in Hexenwail and should NOT be listed as an exclusive.** |
+| Zoom system | Ironwail has it (`gl_screen.c:108-109` — `zoom_fov` / `zoom_speed`); Hexen II has no scoped weapons or zoom-driven gameplay, so the `cl.zoom` field at `client.h:210` is an unused stub. Bead uhexen2-mfbe demoted to P4 — intentionally not pursuing parity. |
 | Gun FOV scale | `cl_gun_fovscale` exists in Ironwail (`gl_screen.c:117`). This is a shared feature Hexenwail ported from Ironwail. |
 | Water ripple shader | `gl_waterripple` exists in Ironwail (`gl_rmain.c:133`). Not a Hexenwail exclusive. |
 | External texture overrides | `r_texture_external` exists in Ironwail (`gl_rmain.c:134`). Not a Hexenwail exclusive. |
