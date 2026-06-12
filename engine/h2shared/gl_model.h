@@ -400,7 +400,11 @@ typedef struct {
 
 /* Alias model format constants */
 #define	ALIAS_IDENT		(('A') | (('L') << 8) | (('S') << 16) | (('2') << 24))
-#define	ALIAS_VERSION	8
+/* Hexen II native alias ("ALS2") format version. Distinct from genmodel.h's
+   ALIAS_VERSION (6) -- the legacy on-disk version the genmodel tool emits,
+   which the loaders still accept. Kept under a separate name so the genmodel.h
+   include (line 26) no longer collides with this engine-side constant. */
+#define	ALIAS_VERSION_H2	8
 
 /* MD5mesh format constants and limits */
 #define MD5_MAX_BONES		128
