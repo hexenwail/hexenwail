@@ -52,6 +52,8 @@ extern	cvar_t	sv_idealrollscale;
 extern	cvar_t	sv_aim;
 extern	cvar_t	sv_walkpitch;
 extern	cvar_t	sv_flypitch;
+extern	cvar_t	sv_debugmovestep;
+extern void SV_DebugMoveStep_Changed (cvar_t *var);
 
 int		current_skill;
 int		sv_protocol = PROTOCOL_VERSION;	/* protocol version to use */
@@ -92,6 +94,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_nostep);
 	Cvar_RegisterVariable (&sv_walkpitch);
 	Cvar_RegisterVariable (&sv_flypitch);
+	Cvar_RegisterVariable (&sv_debugmovestep);
+	Cvar_SetCallback (&sv_debugmovestep, SV_DebugMoveStep_Changed);
 	Cvar_RegisterVariable (&sv_sound_distance);
 	Cvar_RegisterVariable (&sv_update_player);
 	Cvar_RegisterVariable (&sv_update_monsters);
