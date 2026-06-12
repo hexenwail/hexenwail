@@ -10,3 +10,8 @@ engine/build/
 .bv/
 .beads/
 /capture.rdc
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
