@@ -178,12 +178,19 @@ static inline void GL_BindFullbright (GLuint texnum)
 	}
 }
 
+static void GL_DeleteDrawCallSSBO (void);
+
 static void GL_CreateDrawCallSSBO (void)
 {
 	size_t ssbo_size;
 
 	if (!gl_bindless_able)
 		return;
+
+	/* Free any prior allocation — R_BuildWorldVBO calls us on every map
+	 * load and video restart, so without this the old GPU buffer and CPU
+	 * mirror leak each time (VRAM + heap growth across hub travel). */
+	GL_DeleteDrawCallSSBO();
 
 	ssbo_size = MAX_SURFACE_DRAW_CALLS * sizeof(gl_draw_call_t);
 	drawcall_cpu_buffer = (gl_draw_call_t *)malloc(ssbo_size);
