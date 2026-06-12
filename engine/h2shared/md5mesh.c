@@ -494,7 +494,7 @@ aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size
 
 	memset(hdr, 0, sizeof(*hdr));
 	hdr->ident         = ALIAS_IDENT;
-	hdr->version       = ALIAS_VERSION;
+	hdr->version       = ALIAS_VERSION_H2;
 	hdr->numverts      = numverts;
 	hdr->numtris       = numtris;
 	hdr->numframes     = 1;
