@@ -587,15 +587,16 @@ static const char salias_frag[] =
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
-	/* PROBE uhexen2-khsa r5: write solid magenta unconditionally — no
-	 * texture sample, no discard, no blend math.  If affected alias
-	 * entities render fully magenta in image2.png's scene, the FS is
-	 * running on every pixel — the holes come from downstream (depth /
-	 * blend / output) or the fragment-write side.  If they're still
-	 * mostly invisible, the FS isn't running for those pixels and the
-	 * bug is upstream (vertex transform, VAO bind, rasterizer, or
-	 * early-z reject).  Revert before any release. */
-	"    fragColor = vec4(1.0, 0.0, 1.0, 1.0);\n"
+	/* PROBE uhexen2-khsa r6: raw texture sample, no v_color, no lighting,
+	 * no fog, no overbright, no fullbright add, no discard, alpha forced
+	 * to 1.0.  r5 confirmed the FS runs for every pixel on Mathuzzz's
+	 * box (fully magenta).  This probe isolates whether the normal-
+	 * shader near-black output is coming from tex.rgb or v_color.rgb.
+	 *   A. Enemy shows recognizable unlit skin → v_color / lighting bug.
+	 *   B. Enemy still mostly dark with sparse bright dots → texture
+	 *      upload corrupt OR fullbright mask bound at u_texture0.
+	 * Revert before any release. */
+	"    fragColor = vec4(texture(u_texture0, v_texcoord).rgb, 1.0);\n"
 	"}\n";
 
 /* --- shader_skeletal: skeletal animation with bone-weighted deformation --- */
