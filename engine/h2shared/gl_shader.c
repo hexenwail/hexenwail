@@ -442,20 +442,23 @@ static const char sworld_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"#endif\n"
 	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
-	"    vec4 color = tex * lm * v_color;\n"
-	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
-	"    if (color.a < u_alpha_threshold) discard;\n"
-	/* Add fullbright contribution: palette-index >= vid.fullbright
-	 * pixels in the diffuse texture get rendered at full intensity
-	 * regardless of lightmap.  Mod_LoadFullbrightTexture extracts a
-	 * mask texture per miptex (transparent everywhere else); for
-	 * surfaces with no fullbright pixels the engine binds a 1x1
-	 * black sentinel at unit 2 so the sample contributes 0. */
+	/* Sample the fullbright mask BEFORE the alpha-test discard.  texture()
+	 * uses implicit dFdx/dFdy to pick the mip level; derivatives are
+	 * undefined in a 2x2 quad where some lanes have already discarded, so
+	 * sampling after discard produces dark outlines along fence/holey
+	 * edges (Ironwail 017fdd2).  Add fullbright contribution: palette-
+	 * index >= vid.fullbright pixels in the diffuse texture get rendered
+	 * at full intensity regardless of lightmap.  For surfaces with no
+	 * fullbright pixels the engine binds a 1x1 black sentinel at unit 2
+	 * so the sample contributes 0.  uhexen2-9a1l. */
 	"#if BINDLESS\n"
 	"    vec3 fb = texture(sampler2D(packUint2x32(v_texhandles.zw)), v_texcoord).rgb;\n"
 	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
 	"#endif\n"
+	"    vec4 color = tex * lm * v_color;\n"
+	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
+	"    if (color.a < u_alpha_threshold) discard;\n"
 	"    color.rgb += fb;\n"
 	/* Underwater caustics: gated by u_caustics.x (set to 0 by C when the
 	 * view leaf is not CONTENTS_WATER or the cvar is off, otherwise to
