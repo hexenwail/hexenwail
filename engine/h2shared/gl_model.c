@@ -3207,9 +3207,9 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	pinmodel = (mdl_t *)buffer;
 
 	version = LittleLong (pinmodel->version);
-	if (version != ALIAS_VERSION && version != 6)
+	if (version != ALIAS_VERSION_H2 && version != 6)
 		Sys_Error ("%s has wrong version number (%i, expected %i or 6)",
-				 mod->name, version, ALIAS_VERSION);
+				 mod->name, version, ALIAS_VERSION_H2);
 
 //
 // allocate space for a working header, plus all the data except the frames,
