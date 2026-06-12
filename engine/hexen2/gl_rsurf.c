@@ -399,6 +399,15 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 	int		maps;
 	unsigned int	*bl, *blcr, *blcg, *blcb;
 
+	/* Sky/turb/tiled surfaces carry placeholder extents (16384, set in
+	 * Mod_SetDrawingFlags) and no lightmap samples.  A dynamic light marking
+	 * a water surface near the player can reach here and drive the memset
+	 * below past blocklights[] (smax*tmax = 1025*1025), aborting via
+	 * _FORTIFY_SOURCE.  Tiled surfaces never sample a lightmap, so skip.
+	 * (uhexen2-dcz8 / SoT crash) */
+	if (surf->flags & SURF_DRAWTILED)
+		return;
+
 	surf->cached_dlight = (surf->dlightframe == r_framecount);
 
 	smax = (surf->extents[0] >> 4) + 1;
@@ -1548,6 +1557,10 @@ void R_LightmapRebuildIfDirty (msurface_t *surf)
 	int maps;
 	qboolean style_changed = false;
 	if (!surf || !surf->polys)
+		return;
+	/* Tiled (sky/turb) surfaces have no lightmap and carry placeholder
+	 * extents — skip the rebuild + dirty-rect entirely.  See R_BuildLightMap. */
+	if (surf->flags & SURF_DRAWTILED)
 		return;
 	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
 	{
