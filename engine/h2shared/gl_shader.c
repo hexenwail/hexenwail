@@ -587,16 +587,20 @@ static const char salias_frag[] =
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
-	/* PROBE uhexen2-khsa r6: raw texture sample, no v_color, no lighting,
-	 * no fog, no overbright, no fullbright add, no discard, alpha forced
-	 * to 1.0.  r5 confirmed the FS runs for every pixel on Mathuzzz's
-	 * box (fully magenta).  This probe isolates whether the normal-
-	 * shader near-black output is coming from tex.rgb or v_color.rgb.
-	 *   A. Enemy shows recognizable unlit skin → v_color / lighting bug.
-	 *   B. Enemy still mostly dark with sparse bright dots → texture
-	 *      upload corrupt OR fullbright mask bound at u_texture0.
-	 * Revert before any release. */
-	"    fragColor = vec4(texture(u_texture0, v_texcoord).rgb, 1.0);\n"
+	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"    vec4 color = tex * v_color;\n"
+	"    if (color.a < u_alpha_threshold) discard;\n"
+	"    float fogfac = u_fog_density * v_fogdist;\n"
+	"    float fog = exp(-fogfac * fogfac);\n"
+	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* See sworld_frag — force alpha=1 only on the cutout path so A2C
+	 * doesn't dither.  Translucent draws (sprites, EF_TRANSPARENT alias
+	 * models, ENTALPHA, etc.) keep actual alpha for blend. */
+	"#ifdef OIT\n"
+	"    fragColor = color;\n"
+	"#else\n"
+	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
+	"#endif\n"
 	"}\n";
 
 /* --- shader_skeletal: skeletal animation with bone-weighted deformation --- */
