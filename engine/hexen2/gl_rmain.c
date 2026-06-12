@@ -150,6 +150,19 @@ cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model anima
  * High-quality mod weapons with denser pose sets benefit from lerp and
  * can opt in. */
 cvar_t	r_lerp_viewmodel = {"r_lerp_viewmodel", "0", CVAR_ARCHIVE};
+/* When 1 (default), world-model lerp uses a halved effective duration so
+ * the blend completes by the midpoint of the inter-pose interval — the
+ * eye then reads a crisp target pose for the remainder.  Matches the
+ * viewmodel's existing behavior (gl_rmain.c R_AliasResolveLerp).
+ *
+ * Why default-on: at 60 Hz vsync (clean 3:1 ratio against 20 Hz physics)
+ * with full-duration blends, the per-frame factor is 0.000 / 0.333 /
+ * 0.667 / next-pose → the lerp NEVER reaches 1.0 and the model never
+ * rests crisply on any keyframe (uhexen2-1bki).  Halving completes the
+ * blend in 1.5 frames at 30 Hz, 3.0 at 60, 4.5 at 90, 6.0 at 120, 7.2
+ * at 144 — pose lands at every refresh in the 30–144 Hz range.  Set
+ * 0 for the legacy buttery full-duration blend. */
+cvar_t	r_lerp_complete = {"r_lerp_complete", "1", CVAR_ARCHIVE};
 /* Comma-separated list of model names that bypass animation lerp — torches
  * and self-animating flames want discrete pose switching to keep the flame
  * shape; v_weapons rely on snap-back on attack frames.  Ironwail johnfitz. */
@@ -1027,13 +1040,16 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f &&
 	    (e != &cl.viewent || r_lerp_viewmodel.integer))
 	{
-		/* Halve the effective lerp duration for the viewmodel so the
-		 * blend completes in the first half of the inter-pose gap; the
-		 * eye then sees the crisp target pose for the remainder.  At
-		 * full lerptime the viewmodel never escapes the in-between
-		 * mesh, which on vanilla H2's large pose-to-pose deltas reads
-		 * as a stuttery wobble (uhexen2-43f8). */
-		float effective_lerptime = (e == &cl.viewent)
+		/* Halve the effective lerp duration so the blend completes in
+		 * the first half of the inter-pose gap; the eye then sees the
+		 * crisp target pose for the remainder.  Hardcoded for the
+		 * viewmodel (large pose-to-pose deltas read as a stuttery
+		 * wobble at full lerptime, uhexen2-43f8); driven by
+		 * r_lerp_complete for world entities, which at clean
+		 * render:physics ratios (notably 60 Hz vsync vs 20 Hz
+		 * physics) otherwise stop short of blend=1.0 and never land
+		 * on a keyframe (uhexen2-1bki). */
+		float effective_lerptime = (e == &cl.viewent || r_lerp_complete.integer)
 				? e->lerptime * 0.5f
 				: e->lerptime;
 		float blend = (float)(cl.time - e->lerpstart) / effective_lerptime;

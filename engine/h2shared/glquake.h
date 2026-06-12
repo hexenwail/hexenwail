@@ -297,6 +297,7 @@ extern	cvar_t	r_alphatocoverage;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_lerpmodels;
 extern	cvar_t	r_lerp_viewmodel;
+extern	cvar_t	r_lerp_complete;
 extern	cvar_t	r_nolerp_list;
 extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_showbboxes_think;
