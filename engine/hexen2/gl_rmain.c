@@ -2848,11 +2848,19 @@ static void R_DumpAliasInfo (void)
 	Con_Printf("\n=== r_aliasinfo (uhexen2-khsa) ===\n");
 	Con_Printf("r_wateralpha=%g  r_softemu=%d  r_alphatocoverage=%d\n",
 		   r_wateralpha.value, r_softemu.integer, r_alphatocoverage.integer);
+	Con_Printf("gl_lightmap_format=0x%x (RGBA=0x%x → %s path)  worldmodel->lightdata=%s\n",
+		   gl_lightmap_format, GL_RGBA,
+		   (gl_lightmap_format == GL_RGBA) ? "R_LightPointColor" : "R_LightPoint",
+		   (cl.worldmodel && cl.worldmodel->lightdata) ? "present" : "NULL (fullbright map)");
 	Con_Printf("frame=%d  cl_numvisedicts=%d\n", r_framecount, cl_numvisedicts);
-	Con_Printf("idx slot model                          flags                              alpha       drawflags origin\n");
+	Con_Printf("idx slot model                          flags                          origin                       ambient  lightcolor(r,g,b)\n");
 
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
+		vec3_t	adjust_origin;
+		float	amb;
+		float	saved_lc[3];
+
 		e = cl_visedicts[i];
 		if (!e || !e->model)
 			continue;
@@ -2869,11 +2877,31 @@ static void R_DumpAliasInfo (void)
 		if (mflags & EF_NODRAW)        q_strlcat(fbuf, "NODRAW ", sizeof(fbuf));
 		if (!fbuf[0]) q_strlcpy(fbuf, "(none) ", sizeof(fbuf));
 
-		Con_Printf("%3d %4d %-30s %-34s a=%3u/%.3f df=%02x (%g %g %g)\n",
+		/* Replicate AliasModelGetLightInfo's sample so we can dump the
+		 * raw lighting input that v_color is built from (uhexen2-khsa).
+		 * R_LightPointColor populates the global lightcolor[] as a side
+		 * effect; save and restore so we don't pollute real rendering
+		 * if the dump runs after some frame-prep but before draws. */
+		VectorCopy(lightcolor, saved_lc);
+		VectorCopy(e->origin, adjust_origin);
+		adjust_origin[2] += (e->model->mins[2] + e->model->maxs[2]) / 2;
+		if (gl_lightmap_format == GL_RGBA)
+		{
+			lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
+			amb = R_LightPointColor(adjust_origin);
+		}
+		else
+		{
+			amb = R_LightPoint(adjust_origin);
+		}
+
+		Con_Printf("%3d %4d %-30s %-30s (%7.1f %7.1f %7.1f) amb=%6.1f lc=(%6.1f %6.1f %6.1f)\n",
 			   i, (int)(e - cl_entities), e->model->name, fbuf,
-			   e->alpha, ENTALPHA_DECODE(e->alpha),
-			   e->drawflags,
-			   e->origin[0], e->origin[1], e->origin[2]);
+			   e->origin[0], e->origin[1], e->origin[2],
+			   amb,
+			   lightcolor[0], lightcolor[1], lightcolor[2]);
+
+		VectorCopy(saved_lc, lightcolor);
 		count++;
 	}
 
