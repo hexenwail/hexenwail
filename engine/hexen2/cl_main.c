@@ -659,11 +659,19 @@ static void CL_RelinkEntities (void)
 			}
 			else if (!VectorCompare(ent->msg_origins[0], ent->currentorigin) ||
 				 !VectorCompare(ent->msg_angles[0],  ent->currentangles))
-			{	// server pushed a new step — start a new lerp window
+			{	// server pushed a new step — start a new lerp window.
+				// Seed previousorigin from the last rendered position
+				// (oldorg / ent->angles), not from the prior window's
+				// destination.  If a move arrives before blend hits 1.0,
+				// the prior currentorigin was never actually drawn — the
+				// eye was midway from previous to current.  Resuming from
+				// that drawn midpoint keeps motion C0-continuous; resuming
+				// from currentorigin would snap forward to a point the
+				// entity never visited.
 				ent->movelerpstart = cl.time;
-				VectorCopy (ent->currentorigin, ent->previousorigin);
+				VectorCopy (oldorg,              ent->previousorigin);
 				VectorCopy (ent->msg_origins[0], ent->currentorigin);
-				VectorCopy (ent->currentangles, ent->previousangles);
+				VectorCopy (ent->angles,         ent->previousangles);
 				VectorCopy (ent->msg_angles[0],  ent->currentangles);
 			}
 
