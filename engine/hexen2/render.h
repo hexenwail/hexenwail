@@ -88,6 +88,8 @@ typedef struct entity_s
 	vec3_t			previousangles;
 	vec3_t			currentangles;
 	double			movelerpstart;	// time movement lerp began
+	float			movelerptime;	// adaptive window duration (measured
+						// interval between origin changes)
 	int			lerpflags;
 
 	// animation interpolation (Ironwail pose-driven: lerp tracked between

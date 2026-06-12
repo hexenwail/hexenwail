@@ -651,6 +651,7 @@ static void CL_RelinkEntities (void)
 			{	// snap previous/current to latest server position so the
 				// next move can lerp cleanly without an initial jump
 				ent->movelerpstart = 0;
+				ent->movelerptime  = 0.1f;	// default until measured
 				VectorCopy (ent->msg_origins[0], ent->previousorigin);
 				VectorCopy (ent->msg_origins[0], ent->currentorigin);
 				VectorCopy (ent->msg_angles[0], ent->previousangles);
@@ -668,6 +669,23 @@ static void CL_RelinkEntities (void)
 				// that drawn midpoint keeps motion C0-continuous; resuming
 				// from currentorigin would snap forward to a point the
 				// entity never visited.
+				//
+				// Adaptive window: measure the gap since the last move and
+				// use it as the next window duration.  Fixed 0.1s assumes
+				// monsters always think on a 0.1s cadence, but several H2
+				// monsters add random offsets to nextthink (newai.hc's
+				// "nextthink + random()*0.5") so the actual cadence
+				// fluctuates.  Bounds [0.04, 0.5] filter near-instant
+				// double-updates and entities returning after a long PVS
+				// dropout.  Outside the bounds we keep the prior measure.
+				if (ent->movelerpstart > 0.0)
+				{
+					float measured = (float)(cl.time - ent->movelerpstart);
+					if (measured >= 0.04f && measured <= 0.5f)
+						ent->movelerptime = measured;
+				}
+				if (ent->movelerptime <= 0.0f)
+					ent->movelerptime = 0.1f;
 				ent->movelerpstart = cl.time;
 				VectorCopy (oldorg,              ent->previousorigin);
 				VectorCopy (ent->msg_origins[0], ent->currentorigin);
@@ -676,7 +694,8 @@ static void CL_RelinkEntities (void)
 			}
 
 			{
-				float blend = (float)((cl.time - ent->movelerpstart) / 0.1);
+				float window = ent->movelerptime > 0.0f ? ent->movelerptime : 0.1f;
+				float blend  = (float)((cl.time - ent->movelerpstart) / window);
 				vec3_t dorg, dang;
 				if (blend < 0.0f) blend = 0.0f;
 				else if (blend > 1.0f) blend = 1.0f;
