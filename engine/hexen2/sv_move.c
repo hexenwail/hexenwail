@@ -24,6 +24,39 @@
 
 #define	STEPSIZE	18
 
+cvar_t	sv_debugmovestep = {"sv_debugmovestep", "0", CVAR_NONE};
+static int sv_debugmovestep_remaining;
+
+void SV_DebugMoveStep_Changed (cvar_t *var)
+{
+	sv_debugmovestep_remaining = (int)var->value;
+}
+
+static void SV_DebugMoveStep_Log (const edict_t *ent, const trace_t *trace, const char *fmt, ...)
+{
+	char	buf[256];
+	const char *touched = "";
+	va_list	argptr;
+
+	if (sv_debugmovestep_remaining <= 0)
+		return;
+	sv_debugmovestep_remaining--;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (buf, sizeof(buf), fmt, argptr);
+	va_end (argptr);
+
+	if (trace && trace->ent && trace->ent != sv.edicts)
+		touched = PR_GetString (trace->ent->v.classname);
+
+	Con_Printf ("sv_debugmovestep: %s [%s @ %.0f %.0f %.0f]%s%s\n",
+		buf,
+		PR_GetString (ent->v.classname),
+		ent->v.origin[0], ent->v.origin[1], ent->v.origin[2],
+		touched[0] ? " touched=" : "",
+		touched[0] ? touched : "");
+}
+
 /*
 =============
 SV_CheckBottom
@@ -136,7 +169,10 @@ realcheck:	// check it for real...
 	}
 */
 	if (trace.fraction == 1.0)
+	{
+		SV_DebugMoveStep_Log (ent, NULL, "CheckBottom: midpoint trace had no ground within 2*STEPSIZE down");
 		return false;
+	}
 
 	// trace did not reach full 36 below, so set mid and bottom
 	// to whatever distance it did get to below the ent's
@@ -191,7 +227,14 @@ realcheck:	// check it for real...
 			// because if it hits a surface more than 54 below the
 			// ent,the trace_fraction will be 1
 			if (trace.fraction == 1.0 || mid - trace.endpos[2] > STEPSIZE)
+			{
+				SV_DebugMoveStep_Log (ent, &trace,
+					"CheckBottom: corner (x=%d,y=%d) %s (mid=%.1f corner_z=%.1f)",
+					x, y,
+					(trace.fraction == 1.0) ? "off edge" : "drop > STEPSIZE",
+					mid, trace.endpos[2]);
 				return false;
+			}
 		}
 	}
 
@@ -273,7 +316,10 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 				if (set_trace)
 					set_move_trace(&trace);
 				if (trace.fraction < 1 || SV_PointContents(trace.endpos) == CONTENTS_EMPTY )
+				{
+					SV_DebugMoveStep_Log (ent, &trace, "swim monster left water (frac=%.2f)", trace.fraction);
 					return false;	// swim monster left water
+				}
 			}
 			else
 			{
@@ -295,6 +341,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 				break;
 		}
 
+		SV_DebugMoveStep_Log (ent, &trace, "flier blocked (frac=%.2f)", trace.fraction);
 		return false;
 	}
 
@@ -312,6 +359,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 
 	if (trace.allsolid)
 	{
+		SV_DebugMoveStep_Log (ent, &trace, "step-down trace allsolid (move=%.0f %.0f %.0f)", move[0], move[1], move[2]);
 		return false;
 	}
 
@@ -325,6 +373,9 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 		}
 		if (trace.allsolid || trace.startsolid)
 		{
+			SV_DebugMoveStep_Log (ent, &trace, "step-down still %s after retry (move=%.0f %.0f %.0f)",
+				trace.allsolid ? "allsolid" : "startsolid",
+				move[0], move[1], move[2]);
 			return false;
 		}
 	}
@@ -341,6 +392,8 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 			return true;
 		}
 
+		SV_DebugMoveStep_Log (ent, &trace, "walked off edge: no ground within 2*STEPSIZE down (move=%.0f %.0f %.0f)",
+			move[0], move[1], move[2]);
 		return false;	// walked off an edge
 	}
 
@@ -357,6 +410,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 			return true;
 		}
 
+		SV_DebugMoveStep_Log (ent, &trace, "CheckBottom failed at landing pos (groundent above)");
 		VectorCopy (oldorg, ent->v.origin);
 		return false;
 	}
