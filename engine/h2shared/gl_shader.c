@@ -478,6 +478,13 @@ static const char sworld_frag[] =
 	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
 	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
 	 * OIT path always preserves alpha for weighted blending. */
+	/* For cutout alpha-test (threshold > 0.5 = fence/holey, A2C enabled):
+	 * surviving fragments are by definition opaque, so force alpha=1 to
+	 * stop A2C from dithering their coverage based on the noisy
+	 * lightmap.a × tex.a × v_color.a multiply.
+	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
+	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
+	 * OIT path always preserves alpha for weighted blending. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
@@ -580,20 +587,15 @@ static const char salias_frag[] =
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"    vec4 color = tex * v_color;\n"
-	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    float fogfac = u_fog_density * v_fogdist;\n"
-	"    float fog = exp(-fogfac * fogfac);\n"
-	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	/* See sworld_frag — force alpha=1 only on the cutout path so A2C
-	 * doesn't dither.  Translucent draws (sprites, EF_TRANSPARENT alias
-	 * models, ENTALPHA, etc.) keep actual alpha for blend. */
-	"#ifdef OIT\n"
-	"    fragColor = color;\n"
-	"#else\n"
-	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
-	"#endif\n"
+	/* PROBE uhexen2-khsa r5: write solid magenta unconditionally — no
+	 * texture sample, no discard, no blend math.  If affected alias
+	 * entities render fully magenta in image2.png's scene, the FS is
+	 * running on every pixel — the holes come from downstream (depth /
+	 * blend / output) or the fragment-write side.  If they're still
+	 * mostly invisible, the FS isn't running for those pixels and the
+	 * bug is upstream (vertex transform, VAO bind, rasterizer, or
+	 * early-z reject).  Revert before any release. */
+	"    fragColor = vec4(1.0, 0.0, 1.0, 1.0);\n"
 	"}\n";
 
 /* --- shader_skeletal: skeletal animation with bone-weighted deformation --- */
