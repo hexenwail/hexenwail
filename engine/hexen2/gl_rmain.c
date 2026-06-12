@@ -630,7 +630,20 @@ static void R_DrawSpriteModel (entity_t *e)
 	VectorMA (point, frame->right, r_spritedesc.vright, point);
 	GL_ImmVertex3f (point[0], point[1], point[2]);
 
+	/* Pull the billboard quad slightly toward the camera so its edges
+	 * win the depth test against a wall the origin happens to sit near
+	 * — without it, the quad's vup/vright expansion penetrates the wall
+	 * plane and the penetrating half is depth-failed, leaving the sprite
+	 * looking half-eaten by the wall (uhexen2-rsy9).  Sign flips with
+	 * reversed-Z, matching the alias fullbright pass. */
+	float spr_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
+	glEnable_fp (GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset_fp (spr_offset, spr_offset);
+
 	GL_ImmEnd (GL_QUADS, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+
+	glDisable_fp (GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset_fp (0.0f, 0.0f);
 
 // restore tex parms
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
