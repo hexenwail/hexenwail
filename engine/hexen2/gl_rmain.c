@@ -1439,6 +1439,19 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else
 	{
+		/* uhexen2-khsa r12: defensively reset blend state for opaque draws.
+		 * The translucent branches above all enable GL_BLEND, two of them
+		 * (EF_SPECIAL_TRANS at line 1383, EF_HOLEY at 1411) set non-default
+		 * blend funcs.  An opaque draw that inherits GL_BLEND=on with the
+		 * EF_SPECIAL_TRANS func (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA) at
+		 * src.a=1 evaluates to dst — the wall behind shows through every
+		 * pixel.  Explicitly disable and reset the func so the opaque path
+		 * is leak-proof regardless of what drew before it. */
+		if (!OIT_InPass())
+		{
+			glDisable_fp (GL_BLEND);
+			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		}
 		model_constant_alpha = 1.0f;
 	}
 
@@ -2656,6 +2669,20 @@ static void R_DrawAliasInstanced (void)
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 
 	GL_SetAlphaThreshold(0.01f);
+
+	/* uhexen2-khsa r12: defensively reset blend state for the opaque
+	 * alias batch.  R_DrawAliasInstanced runs first in
+	 * R_DrawEntitiesOnList, before any legacy translucent alias draws,
+	 * so the only state that can leak in here comes from the world /
+	 * brush passes or from a frame-prior OIT teardown.  Either way we
+	 * want a clean opaque baseline before this batch fires — without
+	 * it, a stale GL_BLEND + EF_SPECIAL_TRANS-style inverted func can
+	 * turn every fragment in the batch into dst (the wall behind). */
+	if (!OIT_InPass())
+	{
+		glDisable_fp (GL_BLEND);
+		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
 
 	/* Draw each batch */
 	for (b = 0; b < num_alias_batches; b++)
