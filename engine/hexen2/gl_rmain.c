@@ -2951,6 +2951,40 @@ static void R_DumpAliasInfo (void)
 			   amb,
 			   lightcolor[0], lightcolor[1], lightcolor[2]);
 
+		/* uhexen2-khsa r10: entity-level fields that route R_DrawAliasModel
+		 * down translucent / lightstyle branches before the shader ever
+		 * sees the model.  If e->alpha != 0 (ENTALPHA_DEFAULT), or
+		 * drawflags has DRF_TRANSLUCENT or any MLS_*, the model is NOT on
+		 * the opaque path and the symptom may be entity-side, not skin
+		 * or lighting trace. */
+		{
+			char	dbuf[160];
+			int	mls = e->drawflags & MLS_MASKIN;
+			float	decoded_alpha;
+
+			dbuf[0] = '\0';
+			if (e->drawflags & DRF_TRANSLUCENT) q_strlcat(dbuf, "TRANSLUCENT ", sizeof(dbuf));
+			if (e->drawflags & DRF_ANIMATEONCE) q_strlcat(dbuf, "ANIMATEONCE ", sizeof(dbuf));
+			switch (mls)
+			{
+				case MLS_NONE:       break;
+				case MLS_FULLBRIGHT: q_strlcat(dbuf, "MLS_FULLBRIGHT ", sizeof(dbuf)); break;
+				case MLS_POWERMODE:  q_strlcat(dbuf, "MLS_POWERMODE ", sizeof(dbuf));  break;
+				case MLS_TORCH:      q_strlcat(dbuf, "MLS_TORCH ", sizeof(dbuf));      break;
+				case MLS_TOTALDARK:  q_strlcat(dbuf, "MLS_TOTALDARK ", sizeof(dbuf));  break;
+				case MLS_ABSLIGHT:   q_strlcat(dbuf, "MLS_ABSLIGHT ", sizeof(dbuf));   break;
+				default:             q_strlcat(dbuf, "MLS_? ", sizeof(dbuf));          break;
+			}
+			if (!dbuf[0]) q_strlcpy(dbuf, "(none) ", sizeof(dbuf));
+
+			decoded_alpha = ENTALPHA_DECODE(e->alpha);
+			Con_Printf("       e->alpha=0x%02x (=%.3f%s)  drawflags=0x%02x [%s] colorshade=%d  abslight=%d\n",
+				   (unsigned)e->alpha, decoded_alpha,
+				   (e->alpha == ENTALPHA_DEFAULT) ? " DEFAULT" : "",
+				   (unsigned)e->drawflags, dbuf,
+				   (int)e->colorshade, (int)e->abslight);
+		}
+
 		VectorCopy(saved_lc, lightcolor);
 		count++;
 	}
