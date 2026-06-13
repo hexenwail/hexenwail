@@ -90,6 +90,12 @@ typedef int64_t  GLint64;
 #define	GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT	0x84FF
 #endif
 
+/* GL 3.3+ texture swizzle (uhexen2-khsa r11).  Mingw's GL headers stop at
+ * 1.1, so spell the enum value out for the Windows cross-compile. */
+#ifndef	GL_TEXTURE_SWIZZLE_A
+#define	GL_TEXTURE_SWIZZLE_A			0x8E45
+#endif
+
 /* FBO (framebuffer object) enums */
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER				0x8D40
