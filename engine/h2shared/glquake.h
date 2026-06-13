@@ -39,8 +39,16 @@
 
 #define	GL_UNUSED_TEXTURE	(~(GLuint)0)
 
-#define	gl_solid_format		3
-#define	gl_alpha_format		4
+/* uhexen2-khsa: GL 4.3 core profile requires sized internal formats.  The
+ * legacy GLquake values (3, 4) are interpreted inconsistently across
+ * drivers — most strip alpha for "3" and keep it for "4", but NVIDIA Win64
+ * has been observed keeping alpha for both, which lights up palette-index-
+ * 255 texels (d_8to24table[255] &= MASK_rgb in gl_vidsdl.c) with tex.a=0
+ * and triggers the salias_frag discard path on otherwise opaque models.
+ * gl_draw.c:2142 already overrides to GL_RGBA8 for TEX_FENCE/TEX_HOLEY for
+ * the symmetric reason. */
+#define	gl_solid_format		0x8051	/* GL_RGB8 */
+#define	gl_alpha_format		0x8058	/* GL_RGBA8 */
 
 /* # of supported texture filter modes[] (gl_draw.c) */
 #define	NUM_GL_FILTERS		6
