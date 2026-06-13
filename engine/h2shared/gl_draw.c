@@ -2205,6 +2205,21 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 	}
 
+	/* uhexen2-khsa r11: opaque textures get GL_TEXTURE_SWIZZLE_A=GL_ONE so
+	 * the sampler returns 1.0 for alpha regardless of what's actually in
+	 * the texture.  GL_RGB8 is not a real hardware storage format on any
+	 * modern GPU — drivers promote it to GL_RGBA8 and may preserve the
+	 * source alpha, which for index-255 texels is 0 (d_8to24table[255]
+	 * &= MASK_rgb in gl_vidsdl.c).  That zero would leak into the alias
+	 * shader's tex.a and fire the production salias_frag discard line.
+	 * Forcing the swizzle on the sampler is cheaper than rewriting the
+	 * source buffer and works regardless of how the driver allocates
+	 * internal storage.  TEX_ALPHA paths (FENCE, HOLEY, TRANSPARENT,
+	 * SPECIAL_TRANS, translucent PNG skins) explicitly reset to
+	 * GL_ALPHA so re-uploads of the same texture name stay correct. */
+	glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+			   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
+
 	if (mark)
 		Hunk_FreeToLowMark(mark);
 }
@@ -2280,6 +2295,12 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	if (gl_max_anisotropy >= 2)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
+
+	/* uhexen2-khsa r11: see GL_Upload32 comment.  Embedded-mip BSP path
+	 * only uploads non-alpha indexed textures, so the swizzle is always
+	 * GL_ONE here — guarded on the flag anyway for safety. */
+	glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+			   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
 
 	Hunk_FreeToLowMark(mark);
 }
