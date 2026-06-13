@@ -105,6 +105,13 @@ cvar_t	r_speeds_gpufinish = {"r_speeds_gpufinish", "0", CVAR_NONE};	/* diagnosti
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
 cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
+/* uhexen2-khsa: Ironwail-style minimum-light floor for alias models.
+ * Ironwail itself only floors viewmodel (sum<72) and players (sum<24);
+ * Mathuzzz's r7 dump showed CASTLE_TR.MDL sampling at LC=(11,7,5) sum=23,
+ * which after the /200 divide renders effectively black and reads as
+ * "screen-door" against the dim scene. Default 24 matches Ironwail's
+ * player-floor value; 0 disables. */
+cvar_t	r_alias_minlight = {"r_alias_minlight", "24", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
@@ -1245,6 +1252,28 @@ static void R_DrawAliasModel (entity_t *e)
 					lightcolor[i] = 192;
 			}
 		}
+
+		/* uhexen2-khsa: Ironwail-style RGB-sum minlight floor for world
+		 * alias ents.  Apply after the dlight pass (so dynamic light can
+		 * push a dim sample above the floor before we lift), before the
+		 * /200 normalization.  Skipped for viewmodel (R_DrawViewModel
+		 * has its own ambientlight<24 clamp at the dedicated path). */
+		if (r_alias_minlight.value > 0.0f)
+		{
+			float minlight = r_alias_minlight.value;
+			float sum = lightcolor[0] + lightcolor[1] + lightcolor[2];
+			if (sum < minlight)
+			{
+				float lift = (minlight - sum) / 3.0f;
+				lightcolor[0] += lift;
+				lightcolor[1] += lift;
+				lightcolor[2] += lift;
+				if (ambientlight < minlight / 3.0f)
+					ambientlight = minlight / 3.0f;
+				if (shadelight < minlight / 3.0f)
+					shadelight = minlight / 3.0f;
+			}
+		}
 	}
 
 	shadedot_row_index = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
@@ -2275,6 +2304,26 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 			for (i = 0; i < 3; i++)
 				if (lightcolor[i] > 192) lightcolor[i] = 192;
 		}
+
+		/* uhexen2-khsa: Ironwail-style RGB-sum minlight floor.  Mirror of
+		 * the legacy path above so instanced + non-instanced alias draws
+		 * see the same floor.  Applied after dlights, before /200. */
+		if (r_alias_minlight.value > 0.0f)
+		{
+			float minlight = r_alias_minlight.value;
+			float sum = lightcolor[0] + lightcolor[1] + lightcolor[2];
+			if (sum < minlight)
+			{
+				float lift = (minlight - sum) / 3.0f;
+				lightcolor[0] += lift;
+				lightcolor[1] += lift;
+				lightcolor[2] += lift;
+				if (ambientlight < minlight / 3.0f)
+					ambientlight = minlight / 3.0f;
+				if (shadelight < minlight / 3.0f)
+					shadelight = minlight / 3.0f;
+			}
+		}
 	}
 
 	shadelight = shadelight / 200.0;
@@ -2846,8 +2895,9 @@ static void R_DumpAliasInfo (void)
 	char		fbuf[160];
 
 	Con_Printf("\n=== r_aliasinfo (uhexen2-khsa) ===\n");
-	Con_Printf("r_wateralpha=%g  r_softemu=%d  r_alphatocoverage=%d\n",
-		   r_wateralpha.value, r_softemu.integer, r_alphatocoverage.integer);
+	Con_Printf("r_wateralpha=%g  r_softemu=%d  r_alphatocoverage=%d  r_alias_minlight=%g\n",
+		   r_wateralpha.value, r_softemu.integer, r_alphatocoverage.integer,
+		   r_alias_minlight.value);
 	Con_Printf("gl_lightmap_format=0x%x (RGBA=0x%x → %s path)  worldmodel->lightdata=%s\n",
 		   gl_lightmap_format, GL_RGBA,
 		   (gl_lightmap_format == GL_RGBA) ? "R_LightPointColor" : "R_LightPoint",
