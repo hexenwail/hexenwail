@@ -1387,6 +1387,7 @@ static void R_DrawAliasModel (entity_t *e)
 			glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
 		model_constant_alpha = 1.0f;
 		glDisable_fp (GL_CULL_FACE);
+		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
@@ -1397,6 +1398,7 @@ static void R_DrawAliasModel (entity_t *e)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		else
 			model_constant_alpha = r_wateralpha.value;
+		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else if (e->model->flags & EF_TRANSPARENT)
 	{
@@ -1404,6 +1406,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		model_constant_alpha = 1.0f;
+		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else if (e->model->flags & EF_HOLEY)
 	{
@@ -1429,6 +1432,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (r_alphatocoverage.integer)
 			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 		model_constant_alpha = 1.0f;
+		GL_SetForceOpaqueAlpha(1.0f);	/* cutout survivors are opaque */
 	}
 	else if (e->alpha != ENTALPHA_DEFAULT)
 	{
@@ -1436,6 +1440,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
+		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else
 	{
@@ -1453,6 +1458,7 @@ static void R_DrawAliasModel (entity_t *e)
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		model_constant_alpha = 1.0f;
+		GL_SetForceOpaqueAlpha(1.0f);	/* opaque alias path */
 	}
 
 	skinnum = e->skinnum;
@@ -1582,6 +1588,7 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
+	GL_SetForceOpaqueAlpha(1.0f);	/* uhexen2-khsa r13: default opaque */
 
 	GL_PopMatrix();
 
@@ -2123,6 +2130,9 @@ void R_DrawBrushInstanced (void)
 			glUniform3f_fp(prog_opaque->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 		if (prog_opaque->u_alpha_threshold >= 0)
 			glUniform1f_fp(prog_opaque->u_alpha_threshold, 0.01f);
+		/* uhexen2-khsa r13: world opaque pass forces fragColor.a=1. */
+		if (prog_opaque->u_force_opaque_alpha >= 0)
+			glUniform1f_fp(prog_opaque->u_force_opaque_alpha, 1.0f);
 		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog_opaque);
 	}
 
@@ -2136,6 +2146,11 @@ void R_DrawBrushInstanced (void)
 			glUniform3f_fp(prog_cutout->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 		if (prog_cutout->u_alpha_threshold >= 0)
 			glUniform1f_fp(prog_cutout->u_alpha_threshold, 0.666f);
+		/* uhexen2-khsa r13: surviving fence/cutout fragments are opaque
+		 * (the alpha-test discard killed transparent ones), so force
+		 * fragColor.a=1 too. */
+		if (prog_cutout->u_force_opaque_alpha >= 0)
+			glUniform1f_fp(prog_cutout->u_force_opaque_alpha, 1.0f);
 		if (r_alphatocoverage.integer)
 			glEnable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
 		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog_cutout);
@@ -2664,6 +2679,11 @@ static void R_DrawAliasInstanced (void)
 	 * models that were never tagged as cutouts. uhexen2-6eab. */
 	if (prog->u_alpha_threshold >= 0)
 		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+	/* uhexen2-khsa r13: instanced alias batch is opaque-only (collector
+	 * filters out DRF_TRANSLUCENT / EF_TRANSPARENT / EF_HOLEY / non-default
+	 * ENTALPHA), so we can force fragColor.a=1 unconditionally here. */
+	if (prog->u_force_opaque_alpha >= 0)
+		glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -2818,6 +2838,10 @@ static void R_DrawAliasInstanced (void)
 			}
 			if (prog->u_alpha_threshold >= 0)
 				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+			/* uhexen2-khsa r13: fullbright pass is additive and we don't
+			 * want fragColor.a to leak garbage into FB.a. */
+			if (prog->u_force_opaque_alpha >= 0)
+				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);
