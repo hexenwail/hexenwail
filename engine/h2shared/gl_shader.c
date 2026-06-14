@@ -271,6 +271,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
+	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 }
 
 /* ------------------------------------------------------------------ */
@@ -423,6 +424,7 @@ static const char sworld_frag[] =
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
+	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"in vec2 v_texcoord;\n"
@@ -485,10 +487,12 @@ static const char sworld_frag[] =
 	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
 	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
 	 * OIT path always preserves alpha for weighted blending. */
+	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the threshold test.
+	 * See salias_frag for rationale. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
-	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
+	"    fragColor = vec4(color.rgb, u_force_opaque_alpha > 0.5 ? 1.0 : color.a);\n"
 	"#endif\n"
 	"}\n";
 
@@ -582,6 +586,7 @@ static const char salias_frag[] =
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
+	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
@@ -593,13 +598,18 @@ static const char salias_frag[] =
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	/* See sworld_frag — force alpha=1 only on the cutout path so A2C
-	 * doesn't dither.  Translucent draws (sprites, EF_TRANSPARENT alias
-	 * models, ENTALPHA, etc.) keep actual alpha for blend. */
+	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the old threshold-
+	 * based test.  Threshold > 0.5 was correct for fence cutouts but
+	 * caught opaque-as-translucent ents (CASTLE_TR.MDL etc.) that need
+	 * fragColor.a=1.0 to avoid bleeding a garbage color.a into FB.a
+	 * where any downstream pass (OIT compositor, post-process) could
+	 * read it as a transparency key.  C sets force_opaque_alpha=1 in
+	 * confirmed-opaque alias paths and =0 for ENTALPHA / DRF_TRANSLUCENT
+	 * which legitimately need blend-stage src.a from the shader. */
 	"#ifdef OIT\n"
 	"    fragColor = color;\n"
 	"#else\n"
-	"    fragColor = vec4(color.rgb, u_alpha_threshold > 0.5 ? 1.0 : color.a);\n"
+	"    fragColor = vec4(color.rgb, u_force_opaque_alpha > 0.5 ? 1.0 : color.a);\n"
 	"#endif\n"
 	"}\n";
 
@@ -1058,6 +1068,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
 	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
+	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
 
 	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);

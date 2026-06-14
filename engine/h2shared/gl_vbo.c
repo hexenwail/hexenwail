@@ -47,6 +47,10 @@ typedef struct {
 static immvert_t	imm_buffer[GL_IMM_MAX_VERTS];
 static int		imm_count;
 static float	imm_alpha_threshold = -1.0f;	/* -1 = use shader default */
+/* uhexen2-khsa r13: tracks whether the current immediate-mode batch should
+ * force fragColor.a = 1.0 (opaque) or preserve color.a (translucent).  Set
+ * by GL_SetForceOpaqueAlpha; flushed in GL_ImmEnd. */
+static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
 
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
@@ -186,6 +190,14 @@ void GL_SetAlphaThreshold (float threshold)
 	imm_alpha_threshold = threshold;
 }
 
+/* uhexen2-khsa r13.  Pass 1.0 for opaque draws (force fragColor.a=1.0 so
+ * downstream consumers of FB.a aren't confused), 0.0 to preserve color.a
+ * (needed for ENTALPHA / DRF_TRANSLUCENT immediate-mode batches). */
+void GL_SetForceOpaqueAlpha (float v)
+{
+	imm_force_opaque_alpha = v;
+}
+
 void GL_ImmColor4f (float r, float g, float b, float a)
 {
 	imm_cur_color[0] = r;
@@ -268,6 +280,7 @@ static const glprogram_t *imm_cache_shader;
 static float	imm_cache_mvp[16];
 static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
+static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
@@ -290,6 +303,7 @@ void GL_ImmInvalidateState (void)
 {
 	imm_cache_shader = NULL;
 	imm_cache_alpha = -2.0f;
+	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
@@ -333,6 +347,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		imm_cache_shader = shader;
 		imm_cache_alpha = -2.0f;
+	imm_cache_force_opaque_alpha = -2.0f;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
@@ -369,6 +384,13 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
 		imm_cache_alpha = imm_alpha_threshold;
+	}
+
+	if (imm_force_opaque_alpha >= 0.0f && shader->u_force_opaque_alpha >= 0 &&
+	    imm_force_opaque_alpha != imm_cache_force_opaque_alpha)
+	{
+		glUniform1f_fp(shader->u_force_opaque_alpha, imm_force_opaque_alpha);
+		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
 	}
 
 	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)

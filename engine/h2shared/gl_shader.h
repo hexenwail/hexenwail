@@ -34,6 +34,7 @@ typedef struct glprogram_s {
 	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
+	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */
@@ -73,6 +74,7 @@ typedef struct {
 	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
 	GLint	u_eyepos;	/* camera position for fog distance */
 	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
+	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
