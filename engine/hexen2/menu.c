@@ -994,13 +994,29 @@ static void M_Menu_SinglePlayer_f (void)
 	Cvar_Set ("timelimit", "0");		//put this here to help play single after dm
 }
 
+/* A custom mod rides on Portals data (GAME_PORTALS) but lives in its own
+ * gamedir -- it is neither the real Portals mission pack nor the base game.
+ * Both NEW and OLD MISSION launch the mod's "startmap" cvar; NEW additionally
+ * plays intermission #12 first. For mods we relabel these Portals-specific
+ * items for clarity (the big menu font only renders A-Z, space and '/').
+ */
+static qboolean M_RunningMod (void)
+{
+	return (gameflags & GAME_PORTALS) &&
+		q_strcasecmp(fs_gamedir_nopath, "portals") != 0 &&
+		q_strcasecmp(fs_gamedir_nopath, "data1") != 0;
+}
+
 static void M_SinglePlayer_Draw (void)
 {
 	int	f;
+	qboolean mod = M_RunningMod();
 
 	ScrollTitle("gfx/menu/title1.lmp");
 
-	if (gameflags & GAME_PORTALS)
+	if (mod)
+		M_DrawBigString (72, 60 + (0 * 20), "START W/ INTRO");
+	else if (gameflags & GAME_PORTALS)
 		M_DrawBigString (72, 60 + (0 * 20), "NEW MISSION");
 	else
 		M_DrawBigString (72, 60 + (0 * 20), "NEW GAME");
@@ -1010,8 +1026,8 @@ static void M_SinglePlayer_Draw (void)
 
 	if (gameflags & GAME_PORTALS)
 	{
-		M_DrawBigString (72, 60 + (3 * 20), "OLD MISSION");
-		M_DrawBigString (72, 60 + (4 * 20), "PORTALS INTRO");
+		M_DrawBigString (72, 60 + (3 * 20), mod ? "START" : "OLD MISSION");
+		M_DrawBigString (72, 60 + (4 * 20), mod ? "MOD INTRO" : "PORTALS INTRO");
 	}
 
 	/* Mouse hover */
