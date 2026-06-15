@@ -73,5 +73,5 @@ jobs:
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail.flatpak
-          manifest-path: flatpak/hexenwail.hexenwail.yml
+          manifest-path: flatpak/io.github.hexenwail.hexenwail.yml
           cache-key: flatpak-builder-${{ github.sha }}

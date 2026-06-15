@@ -2,7 +2,7 @@
 Name=Hexen II: Hexenwail
 Comment=Modernized Hexen II engine with SDL3 and GL 4.3 shaders
 Exec=hexenwail.sh
-Icon=hexenwail.hexenwail
+Icon=io.github.hexenwail.hexenwail
 StartupNotify=true
 PrefersNonDefaultGPU=true
 Terminal=false

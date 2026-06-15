@@ -36,7 +36,7 @@ jobs:
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail-${{ github.ref_name }}.flatpak
-          manifest-path: flatpak/hexenwail.hexenwail.yml
+          manifest-path: flatpak/io.github.hexenwail.hexenwail.yml
           cache-key: flatpak-builder-${{ github.sha }}
           upload-artifact: true
 
@@ -118,7 +118,7 @@ jobs:
             echo "## Downloads"
             echo ""
             echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
-            echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/hexenwail.hexenwail/.hexen2/data1/\`"
+            echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/\`"
             echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`glh2.exe\`"
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
