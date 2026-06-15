@@ -112,14 +112,6 @@ cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
  * "screen-door" against the dim scene. Default 24 matches Ironwail's
  * player-floor value; 0 disables. */
 cvar_t	r_alias_minlight = {"r_alias_minlight", "24", CVAR_ARCHIVE};
-/* uhexen2-khsa r17: opt-in glDisable(GL_DITHER) probe for the NVIDIA
- * screen-door artifact.  Default 1 = leave GL_DITHER at its spec default
- * (enabled), which is what every prior release shipped.  Set to 0 to
- * call glDisable(GL_DITHER) at the next state apply — used to A/B test
- * whether NVIDIA's color dither is the source of the alias-model
- * screen-door pattern.  Kept opt-in because r16 (which disabled it
- * unconditionally) regressed alpha-test cutouts on a different GPU. */
-cvar_t	r_gl_dither = {"r_gl_dither", "1", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};

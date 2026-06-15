@@ -235,39 +235,6 @@ static void R_SetClearColor_f (cvar_t *var)
 
 /*
 ===============
-R_GLDitherChanged_f -- uhexen2-khsa r17/r18
-
-Fires at cvar registration (initial config-load) and on every console
-change.  r18: only touches GL state when there's an actual transition
-across the "we disabled it" boundary.  At default 1 / fresh launch
-the callback is a no-op — glEnable on already-enabled GL_DITHER is a
-spec no-op but has been observed to perturb alpha-test discard on
-bobberb's GPU.  Initial registration with a config-persisted 0 still
-applies glDisable so the cvar value reflects effective GL state.
-===============
-*/
-static qboolean r_gl_dither_disabled_by_us = false;
-
-static void R_GLDitherChanged_f (cvar_t *var)
-{
-	if (var->integer)
-	{
-		if (r_gl_dither_disabled_by_us)
-		{
-			glEnable_fp(GL_DITHER);
-			r_gl_dither_disabled_by_us = false;
-		}
-		/* else: at spec default (enabled), don't touch */
-	}
-	else
-	{
-		glDisable_fp(GL_DITHER);
-		r_gl_dither_disabled_by_us = true;
-	}
-}
-
-/*
-===============
 R_Model_ExtraFlags_List_f -- Ironwail (johnfitz)
 
 Re-apply engine-set extra flags (MOD_NOLERP) to every cached model
@@ -377,10 +344,6 @@ void R_Init (void)
 	{ extern cvar_t r_brush_inst_offset; Cvar_RegisterVariable (&r_brush_inst_offset); }
 	Cvar_RegisterVariable (&r_alphatocoverage);
 	{ extern cvar_t r_alias_minlight; Cvar_RegisterVariable (&r_alias_minlight); }
-	{ extern cvar_t r_gl_dither;
-	  Cvar_RegisterVariable (&r_gl_dither);
-	  Cvar_SetCallback (&r_gl_dither, R_GLDitherChanged_f);
-	  R_GLDitherChanged_f (&r_gl_dither); }	/* apply initial state */
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_torch_dlight);
