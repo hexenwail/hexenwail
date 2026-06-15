@@ -2264,6 +2264,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 0);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
+			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
 			PRESET_COMMON
 		}
 		else if (preset == 2)	/* Retro — half res, banded, old-school */
@@ -2284,6 +2285,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_other_glows", 0);
 			Cvar_SetValue ("gl_glow_intensity", 0.4f);
 			Cvar_SetValue ("gl_torch_dlight", 1);
+			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
 			PRESET_COMMON
 		}
 		else if (preset == 3)	/* Faithful — native res, OG textures, static water */
