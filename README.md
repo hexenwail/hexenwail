@@ -3,7 +3,7 @@
 ![Screenshot](docs/screenshot1.png)
 *New worlds await!* ([Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey), by Inky)
 
-## [Latest Release](https://github.com/bobberb/hexenwail/releases) | [Report a Bug](https://github.com/bobberb/hexenwail/issues)
+## [Latest Release](https://github.com/hexenwail/hexenwail/releases) | [Report a Bug](https://github.com/hexenwail/hexenwail/issues)
 
 Just as [Ironwail](https://github.com/andrei-drexler/ironwail) took sezero's [QuakeSpasm](https://github.com/sezero/quakespasm) and modernized its renderer, Hexenwail does the same for Hexen II.
 
@@ -130,7 +130,7 @@ nix build .#release    # All platforms
 
 ## Contributing
 
-Contributions are welcome — bug reports, code cleanup, and documentation are all appreciated. Please file issues and pull requests on [GitHub](https://github.com/bobberb/hexenwail/issues).
+Contributions are welcome — bug reports, code cleanup, and documentation are all appreciated. Please file issues and pull requests on [GitHub](https://github.com/hexenwail/hexenwail/issues).
 
 ## License
 
