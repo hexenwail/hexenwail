@@ -594,7 +594,16 @@ static const char salias_frag[] =
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 color = tex * v_color;\n"
-	"    if (color.a < u_alpha_threshold) discard;\n"
+	/* uhexen2-khsa r15: gate the discard on a meaningful threshold.
+	 * Opaque alias batches set u_alpha_threshold=0.01 as a layout-parity
+	 * sentinel — they should never discard.  But tex.a * v_color.a can dip
+	 * below 0.01 from palette-255 texels (when GL_TEXTURE_SWIZZLE_A=GL_ONE
+	 * silently fails in a driver lacking ARB_texture_swizzle), mipmap LOD
+	 * filtering at UV seams, or stray lighting math — producing
+	 * screen-door holes and dark seam lines on confirmed-opaque models
+	 * (Mathuzzz NVIDIA Win64, CASTLE_TR.MDL).  Only EF_HOLEY / fence
+	 * cutouts (threshold=0.666) legitimately need the discard. */
+	"    if (u_alpha_threshold > 0.5 && color.a < u_alpha_threshold) discard;\n"
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
