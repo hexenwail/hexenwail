@@ -150,7 +150,7 @@ cvar_t	r_caustics = {"r_caustics", "1", CVAR_ARCHIVE};
 cvar_t	r_caustics_intensity = {"r_caustics_intensity", "0.35", CVAR_ARCHIVE};
 cvar_t	r_novis = {"r_novis", "0", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
-cvar_t	r_lerpmodels = {"r_lerpmodels", "1", CVAR_ARCHIVE};	/* smooth model animation interpolation */
+cvar_t	r_lerpmodels = {"r_lerpmodels", "0", CVAR_ARCHIVE};	/* smooth model animation interpolation; off by default */
 /* Off by default — vanilla Hexen II viewmodels have large pose-to-pose
  * deltas (idle vs attack are very different meshes), so interpolation
  * produces unnatural in-between shapes that read as a stuttery wobble.
