@@ -29,7 +29,7 @@ Options: `--scale 2|3|4` (default 4), `--upscaler realcugan|realesrgan` (default
 
 ## Game data paths
 
-**Flatpak:** Drop your game data into `~/.var/app/hexenwail.hexenwail/.hexen2/`
+**Flatpak:** Drop your game data into `~/.var/app/io.github.hexenwail.hexenwail/.hexen2/`
 
 To launch a mod with portals data included: `glhexen2 -mod <modname>`
 

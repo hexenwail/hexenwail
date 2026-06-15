@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>hexenwail.hexenwail</id>
+  <id>io.github.hexenwail.hexenwail</id>
   <name>Hexen II: Hexenwail</name>
   <summary>Modernized Hexen II engine</summary>
   <metadata_license>CC0-1.0</metadata_license>
@@ -18,7 +18,7 @@
     </p>
   </description>
 
-  <launchable type="desktop-id">hexenwail.hexenwail.desktop</launchable>
+  <launchable type="desktop-id">io.github.hexenwail.hexenwail.desktop</launchable>
 
   <url type="homepage">https://github.com/bobberb/hexenwail</url>
   <url type="bugtracker">https://github.com/bobberb/hexenwail/issues</url>
