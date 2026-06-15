@@ -1043,6 +1043,18 @@ static void GL_Init (void)
 
 //	glClearColor_fp(1,0,0,0);
 	glCullFace_fp(GL_FRONT);
+
+	/* uhexen2-khsa r16: disable GL_DITHER.  GL is spec-enabled at context
+	 * creation; modern AMD/Intel drivers no-op it, but some NVIDIA drivers
+	 * still apply a 4x4 ordered dither to color writes when the destination
+	 * is RGB8.  For alias models that's pure visual harm: tex*v_color
+	 * produces fractional RGB, dither quantizes per-pixel, the screen-space
+	 * dither pattern shows up as screen-door and lights up the UV-seam
+	 * edges where v_color discontinuities live.  Mathuzzz repro on NVIDIA
+	 * Win64 — r6 probe (no v_color multiply, no fractional output) was
+	 * dither-free; r13/r15 (correct shader output, fractional RGB) were
+	 * not.  No quality cost on modern HW; pure win where it bites. */
+	glDisable_fp(GL_DITHER);
 #if 0 /* causes side effects at least in 16 bpp.  */
 	/* Get rid of Z-fighting for textures by offsetting the
 	 * drawing of entity models compared to normal polygons.
