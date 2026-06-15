@@ -615,6 +615,12 @@ static void R_DrawSpriteModel (entity_t *e)
 		else
 			sprite_alpha = 1.0f;
 		GL_ImmColor4f (1.0f, 1.0f, 1.0f, sprite_alpha);
+		/* uhexen2-khsa r13 fixup: sprites always need fragColor.a = color.a
+		 * (the per-vertex sprite_alpha drives the blend stage's src.a).
+		 * Without this, R_DrawAliasModel's restore-to-1.0 from a prior
+		 * draw leaks through to this immediate-mode batch and turns
+		 * translucent sprites (tele shimmer, smoke, splash) opaque. */
+		GL_SetForceOpaqueAlpha (0.0f);
 	}
 
 	GL_ImmTexCoord2f (0, 1);
@@ -1588,7 +1594,11 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
-	GL_SetForceOpaqueAlpha(1.0f);	/* uhexen2-khsa r13: default opaque */
+	/* uhexen2-khsa r13 fixup: restore to 0 (preserve color.a) — that's
+	 * the safer default for any subsequent immediate-mode batch that
+	 * forgets to set this explicitly (e.g. translucent sprites).
+	 * Confirmed-opaque paths set 1.0 explicitly when they need it. */
+	GL_SetForceOpaqueAlpha(0.0f);
 
 	GL_PopMatrix();
 
