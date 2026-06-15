@@ -13,6 +13,14 @@ Hexenwail does *not* include any original game assets; a valid copy of Hexen II 
 
 See [USAGE.md](USAGE.md) for external textures, Steam Deck setup, and mod configuration.
 
+## Which version should I use?
+
+There are three living branches of the Hexen II engine, depending on what you want to play:
+
+- **Vanilla & upstream maintenance** — [Hammer of Thyrion / uHexen2](https://github.com/sezero/uhexen2), sezero's `main` branch. The reference cross-platform engine: the most faithful to the original release and the best base for general play and ongoing portability work.
+- **Classic community mods (Shanjaq era)** — [Shanjaq's fork](https://github.com/shanjaq/uhexen2) through its final `uhexen2-r6303.zip` build. This is the engine many mods in the active [Hexen II Discord community](https://discord.com/channels/557756282430554112) were built and tested against, so it remains the safest choice for that catalog of content.
+- **Steam Deck & modern systems** — Hexenwail (this project). A GL 4.3 / SDL3 modernization with gamepad support, render scaling, display presets, and Flatpak packaging, aimed at current hardware while staying mod-compatible.
+
 ## Platforms
 
 | Platform | Renderer | Packaging | Status |
