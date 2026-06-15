@@ -187,18 +187,12 @@ byte *Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model)
 Mod_ClearAll
 ===================
 */
-static void Mod_FreeUserNolerpList (void);	/* defined near Mod_SetExtraFlags */
-
 void Mod_ClearAll (void)
 {
 	int		i, key;
 	qmodel_t	*mod;
 
 	GL_FreeAliasGPUMeshes();
-
-	/* Drop the cached gamedir nolerp.txt; reloaded lazily on next model
-	 * load so a mod change picks up that gamedir's list. */
-	Mod_FreeUserNolerpList ();
 
 	for (i = 0, mod = mod_known; i < mod_numknown; i++, mod++)
 	{	// clear alias models only if textures were flushed (Pa3PyX)
@@ -2686,77 +2680,10 @@ static qboolean nameInList (const char *list, const char *name)
 
 /*
 =================
-Mod_LoadUserNolerpList
-
-Load an optional modder-supplied "nolerp.txt" from the current gamedir and
-normalize it into a comma-separated token list that nameInList() can scan.
-Lets a mod ship its own no-interpolation model list — one model path per
-line, e.g. "models/waterfall.mdl" — without the user editing r_nolerp_list.
-Lines may use // or # comments; whitespace and commas all act as separators.
-Cached per gamedir; invalidated by Mod_ClearAll on gamedir change.
-=================
-*/
-static char	*mod_usernolerp = NULL;		/* normalized nolerp.txt, or NULL */
-static qboolean	mod_usernolerp_loaded = false;
-
-static void Mod_FreeUserNolerpList (void)
-{
-	if (mod_usernolerp)
-	{
-		free (mod_usernolerp);
-		mod_usernolerp = NULL;
-	}
-	mod_usernolerp_loaded = false;
-}
-
-static void Mod_LoadUserNolerpList (void)
-{
-	byte	*raw;
-	char	*src, *dst, *base;
-
-	if (mod_usernolerp_loaded)
-		return;
-	mod_usernolerp_loaded = true;	/* attempt once per gamedir */
-
-	raw = FS_LoadMallocFile ("nolerp.txt", NULL);
-	if (!raw)
-		return;
-
-	/* Rewrite in place (output is always <= input): strip // and # line
-	 * comments and collapse every run of whitespace/commas into a single
-	 * comma, so nameInList() sees clean "models/a.mdl,models/b.mdl" tokens. */
-	base = src = dst = (char *)raw;
-	while (*src)
-	{
-		if ((src[0] == '/' && src[1] == '/') || src[0] == '#')
-		{
-			while (*src && *src != '\n')
-				src++;
-			continue;
-		}
-		if (*src == ' ' || *src == '\t' || *src == '\r' ||
-		    *src == '\n' || *src == ',')
-		{
-			if (dst != base && dst[-1] != ',')
-				*dst++ = ',';
-			src++;
-			continue;
-		}
-		*dst++ = *src++;
-	}
-	*dst = '\0';
-
-	mod_usernolerp = base;
-	Con_DPrintf ("Mod_SetExtraFlags: loaded nolerp.txt\n");
-}
-
-/*
-=================
 Mod_SetExtraFlags -- Ironwail (johnfitz)
 
 Apply engine-side flags to an alias model from cvar-driven lists
-(r_nolerp_list) plus an optional gamedir nolerp.txt (modder drop-in).
-Called at model load and on cvar change.
+(currently r_nolerp_list).  Called at model load and on cvar change.
 =================
 */
 void Mod_SetExtraFlags (qmodel_t *mod)
@@ -2769,10 +2696,7 @@ void Mod_SetExtraFlags (qmodel_t *mod)
 	/* Strip prior engine-set bits (preserve everything in the EF_* range). */
 	mod->flags &= ~MOD_NOLERP;
 
-	Mod_LoadUserNolerpList ();
-
-	if (nameInList (r_nolerp_list.string, mod->name) ||
-	    (mod_usernolerp && nameInList (mod_usernolerp, mod->name)))
+	if (nameInList (r_nolerp_list.string, mod->name))
 		mod->flags |= MOD_NOLERP;
 }
 
