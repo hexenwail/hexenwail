@@ -15,6 +15,8 @@ See [USAGE.md](USAGE.md) for external textures, Steam Deck setup, and mod config
 
 ## Which version should I use?
 
+**Lineage:** Hexen II by Raven Software, published by id Software *(1997)* → engine source open-sourced under the GPL *(2000)* → Anvil of Thyrion Linux port (Dan Olson & Clément Bourdarias) → Hammer of Thyrion / uHexen2 (O. Sezer, *2004*–2018; final release 1.5.9 on *2018-06-06*) → Shanjaq's additions → Hexenwail *(2026)*
+
 There are three living branches of the Hexen II engine, depending on what you want to play:
 
 - **Vanilla & upstream maintenance** — [Hammer of Thyrion / uHexen2](https://github.com/sezero/uhexen2), sezero's `main` branch. The reference cross-platform engine: the most faithful to the original release and the best base for general play and ongoing portability work.
@@ -162,3 +164,7 @@ Incorporates code and techniques from the Quake engine modernization community:
 - [Ironwail](https://github.com/andrei-drexler/ironwail) — GL 4.3 shader pipeline approach, software rendering emulation (palette dithering), render scale, gamepad input, scancode-based keyboard input, sound channel management
 - [QuakeSpasm](https://sourceforge.net/projects/quakespasm/) — texture manager, fog system, console infrastructure
 - [QuakeSpasm-Spiked](https://github.com/AAS/quakespasm-spiked) — protocol extensions, mod compatibility patterns
+
+---
+
+Hexenwail is a fan project and is not affiliated with Raven Software or id Software. Hexen and Quake are trademarks of their respective owners.

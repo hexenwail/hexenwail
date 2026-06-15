@@ -6,12 +6,14 @@ https://github.com/hexenwail/hexenwail
 
 Hexenwail is a modern source port of Raven Software's Hexen II,
 targeting Linux and Windows with SDL3 and OpenGL 4.3. It is based on
-Hammer of Thyrion (uHexen2) by O. Sezer, which descends from the
-Anvil of Thyrion Linux port by Dan Olson and Clément Bourdarias.
+Hammer of Thyrion (uHexen2) by O. Sezer (2004-2018; final release
+1.5.9 on 2018-06-06), which descends from the Anvil of Thyrion Linux
+port by Dan Olson and Clément Bourdarias.
 
-Hexen II was created by Raven Software Corp., published by Id Software
-Inc and distributed by Activision, Inc. Hexenwail is *not* made, and
-is *not* supported by any of these companies.
+Hexen II was created by Raven Software Corp. in 1997, published by Id
+Software Inc and distributed by Activision, Inc; its engine source was
+open-sourced under the GPL in 2000. Hexenwail is *not* made, and is
+*not* supported by any of these companies.
 
 This code is released under the GNU Public License v2 (see COPYING).
 
