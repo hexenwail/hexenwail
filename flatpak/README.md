@@ -13,10 +13,10 @@ flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/fl
 flatpak install --user flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
 
 # Build and install
-flatpak-builder --user --install --force-clean build-dir flatpak/com.github.bobberb.hexenwail.yml
+flatpak-builder --user --install --force-clean build-dir flatpak/hexenwail.hexenwail.yml
 
 # Run
-flatpak run com.github.bobberb.hexenwail
+flatpak run hexenwail.hexenwail
 ```
 
 ## Game Data
