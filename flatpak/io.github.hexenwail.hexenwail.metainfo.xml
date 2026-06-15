@@ -20,9 +20,9 @@
 
   <launchable type="desktop-id">io.github.hexenwail.hexenwail.desktop</launchable>
 
-  <url type="homepage">https://github.com/bobberb/hexenwail</url>
-  <url type="bugtracker">https://github.com/bobberb/hexenwail/issues</url>
-  <url type="vcs-browser">https://github.com/bobberb/hexenwail</url>
+  <url type="homepage">https://github.com/hexenwail/hexenwail</url>
+  <url type="bugtracker">https://github.com/hexenwail/hexenwail/issues</url>
+  <url type="vcs-browser">https://github.com/hexenwail/hexenwail</url>
 
   <developer id="com.github.bobberb">
     <name>bobberb</name>

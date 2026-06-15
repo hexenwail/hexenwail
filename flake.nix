@@ -102,7 +102,7 @@
                 Note: This package only provides the game engine. You need the original
                 game data files (pak0.pak, pak1.pak) from the commercial game to play.
               '';
-              homepage = "https://github.com/bobberb/hexenwail";
+              homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
               maintainers = [ ];
@@ -250,7 +250,7 @@
 
             meta = with pkgs.lib; {
               description = "Hexenwail - modernized Hexen II engine (OpenGL 4.3, Windows 64-bit)";
-              homepage = "https://github.com/bobberb/hexenwail";
+              homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.windows;
               maintainers = [ ];
