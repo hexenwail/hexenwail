@@ -235,20 +235,35 @@ static void R_SetClearColor_f (cvar_t *var)
 
 /*
 ===============
-R_GLDitherChanged_f -- uhexen2-khsa r17
+R_GLDitherChanged_f -- uhexen2-khsa r17/r18
 
 Fires at cvar registration (initial config-load) and on every console
-change. value!=0 leaves GL_DITHER enabled (spec default); value==0
-calls glDisable(GL_DITHER) so testers can A/B the NVIDIA screen-door
-hypothesis without a code change.
+change.  r18: only touches GL state when there's an actual transition
+across the "we disabled it" boundary.  At default 1 / fresh launch
+the callback is a no-op — glEnable on already-enabled GL_DITHER is a
+spec no-op but has been observed to perturb alpha-test discard on
+bobberb's GPU.  Initial registration with a config-persisted 0 still
+applies glDisable so the cvar value reflects effective GL state.
 ===============
 */
+static qboolean r_gl_dither_disabled_by_us = false;
+
 static void R_GLDitherChanged_f (cvar_t *var)
 {
 	if (var->integer)
-		glEnable_fp(GL_DITHER);
+	{
+		if (r_gl_dither_disabled_by_us)
+		{
+			glEnable_fp(GL_DITHER);
+			r_gl_dither_disabled_by_us = false;
+		}
+		/* else: at spec default (enabled), don't touch */
+	}
 	else
+	{
 		glDisable_fp(GL_DITHER);
+		r_gl_dither_disabled_by_us = true;
+	}
 }
 
 /*
