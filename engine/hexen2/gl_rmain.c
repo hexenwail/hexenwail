@@ -270,6 +270,8 @@ cvar_t	r_nolerp_list = {"r_nolerp_list",
 	"models/lavaball.mdl,"
 	"models/sm_expld.mdl,"
 	/* flowing-liquid sheets — flipbook frames, not deforming meshes */
+	"models/waterfall.mdl,"
+	"models/waterfall_90.mdl,"
 	"models/waterfallt.mdl",
 	CVAR_NONE};
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
