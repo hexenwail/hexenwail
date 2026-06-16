@@ -365,6 +365,7 @@ void R_Init (void)
 	{ extern cvar_t r_alias_fullbright; Cvar_RegisterVariable (&r_alias_fullbright); }	/* uhexen2-khsa r21 probe */
 	{ extern cvar_t r_alias_nofog;       Cvar_RegisterVariable (&r_alias_nofog); }	/* uhexen2-khsa r22 probe */
 	{ extern cvar_t r_alias_r6_mode;     Cvar_RegisterVariable (&r_alias_r6_mode); }	/* uhexen2-khsa r22 probe */
+	{ extern cvar_t r_alias_stochastic_alpha; Cvar_RegisterVariable (&r_alias_stochastic_alpha); }	/* uhexen2-khsa r28 probe */
 	{ extern cvar_t r_gl_dither;
 	  Cvar_RegisterVariable (&r_gl_dither);
 	  Cvar_SetCallback (&r_gl_dither, R_GLDitherChanged_f);

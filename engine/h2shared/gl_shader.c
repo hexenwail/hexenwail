@@ -275,6 +275,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_alias_fullbright = glGetUniformLocation_fp(p->program, "u_alias_fullbright");
 	p->u_alias_nofog      = glGetUniformLocation_fp(p->program, "u_alias_nofog");
 	p->u_alias_r6_mode    = glGetUniformLocation_fp(p->program, "u_alias_r6_mode");
+	p->u_alias_stochastic_alpha = glGetUniformLocation_fp(p->program, "u_alias_stochastic_alpha");
 }
 
 /* ------------------------------------------------------------------ */
@@ -611,10 +612,22 @@ static const char salias_frag[] =
 	"uniform float u_alias_fullbright;\n"	/* uhexen2-khsa r21 */
 	"uniform float u_alias_nofog;\n"	/* uhexen2-khsa r22 */
 	"uniform float u_alias_r6_mode;\n"	/* uhexen2-khsa r22 */
+	"uniform float u_alias_stochastic_alpha;\n"	/* uhexen2-khsa r28 */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
+	/* uhexen2-khsa r28: hash-based stochastic alpha-test (Wronski/Wyman
+	 * 2017).  Probe for the NVIDIA screen-door: changes the discard
+	 * topology from binary threshold to hash-driven, which on at least
+	 * some NVIDIA drivers reroutes how the compiler emits the
+	 * tex*v_color and fog mix chain.  Uses v_texcoord as a stable
+	 * per-fragment seed (object-space UV doesn't shimmer with view). */
+	"float khsa_hash13(vec2 p) {\n"
+	"    p = fract(p * vec2(443.8975, 397.2973));\n"
+	"    p += dot(p.yx, p.xy + 19.19);\n"
+	"    return fract((p.x + p.y) * p.x);\n"
+	"}\n"
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	/* uhexen2-khsa r22: full r6 match — short-circuit before any
@@ -643,7 +656,19 @@ static const char salias_frag[] =
 	 * the cutout texels' RGB (black/white/teal depending on upload
 	 * path), which looked like the cutout area was filled in.  Restore
 	 * the r14 behavior. */
-	"    if (color.a < u_alpha_threshold) discard;\n"
+	/* uhexen2-khsa r28: stochastic alpha-test when enabled.  Compares
+	 * color.a against a hash of v_texcoord (stable object-space seed).
+	 * For palette-255 cutouts (color.a = 0) discard always fires.  For
+	 * opaque pixels (color.a = 1) discard never fires.  For edge pixels
+	 * with intermediate alpha, discard fires probabilistically with
+	 * weight proportional to color.a — smooth coverage instead of hard
+	 * cutout edge.  Topology change vs binary threshold may shake loose
+	 * the NVIDIA codegen path that's producing Mathuzzz's screen-door. */
+	"    if (u_alias_stochastic_alpha > 0.5) {\n"
+	"        if (color.a < khsa_hash13(v_texcoord * 1024.0)) discard;\n"
+	"    } else {\n"
+	"        if (color.a < u_alpha_threshold) discard;\n"
+	"    }\n"
 	/* uhexen2-khsa r22: gate fog mix.  Mathuzzz ruled out v_color via
 	 * r_alias_fullbright (r21) — remaining suspect for the screen-door
 	 * is fog math (exp + mix even when fog density is 0). */
@@ -1126,6 +1151,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_alias_fullbright = glGetUniformLocation_fp(prog, "u_alias_fullbright");
 	p->u_alias_nofog      = glGetUniformLocation_fp(prog, "u_alias_nofog");
 	p->u_alias_r6_mode    = glGetUniformLocation_fp(prog, "u_alias_r6_mode");
+	p->u_alias_stochastic_alpha = glGetUniformLocation_fp(prog, "u_alias_stochastic_alpha");
 
 	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);

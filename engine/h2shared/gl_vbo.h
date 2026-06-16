@@ -54,6 +54,8 @@ void	GL_SetAliasFullbright (float v);
 /* uhexen2-khsa r22 probes — same convention as above. */
 void	GL_SetAliasNoFog (float v);
 void	GL_SetAliasR6Mode (float v);
+/* uhexen2-khsa r28 probe — hash-based stochastic alpha-test. */
+void	GL_SetAliasStochasticAlpha (float v);
 
 /* Init / shutdown */
 void	GL_VBO_Init (void);
