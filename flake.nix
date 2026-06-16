@@ -89,7 +89,7 @@
             cmakeFlags = [
               "-DUSE_CODEC_VORBIS=ON"
               "-DUSE_ALSA=ON"
-              "-DSOUNDFONT_PATH=${pkgs.soundfont-fluid}/share/soundfonts/FluidR3_GM2-2.sf3"
+              "-DSOUNDFONT_PATH=${pkgs.soundfont-fluid}/share/soundfonts/FluidR3_GM2-2.sf2"
             ];
 
             meta = with pkgs.lib; {
@@ -133,6 +133,13 @@
           # Bundles shared libraries so it runs on any distro without nix
           linux-fhs = let
             nixosPkg = self.packages.${system}.nixos;
+            # TimGM6mb (Tim Brechbill, GPL-2, ~6 MB) — small enough to bundle in
+            # a downloadable release, unlike FluidR3 (~142 MB).  Same soundfont
+            # the Flatpak ships.  Debian upstream tarball; hash is the tarball's.
+            timgmTar = pkgs.fetchurl {
+              url = "https://deb.debian.org/debian/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz";
+              sha256 = "af8f3a00e416dfb262bcaa904a1c84df04a51b72bbc1313aed012bc754bdf99b";
+            };
             runtimeLibs = with pkgs; [
               sdl3
               libvorbis
@@ -152,6 +159,13 @@
 
             cp ${nixosPkg}/bin/glhexen2 $out/bin/glhexen2
             chmod +w $out/bin/glhexen2
+
+            # Bundle a GM soundfont next to the binary so MIDI music works on
+            # machines with no system soundfont (the compile-time SOUNDFONT_PATH
+            # points into /nix/store, which is absent off-NixOS).  find_soundfont
+            # probes <exe dir>/soundfont.sf2 first.
+            tar xzf ${timgmTar}
+            cp -L timgm6mb-soundfont_1.3/TimGM6mb.sf2 $out/bin/soundfont.sf2
 
             # Bundle shared libraries
             for lib in ${pkgs.lib.concatMapStringsSep " " (l: "${l}/lib") runtimeLibs}; do
