@@ -187,7 +187,9 @@
 
           # Windows 64-bit build
           win64 = pkgsCross64.stdenv.mkDerivation {
-            pname = "hexenwail-win64";
+            # nixpkgs auto-appends the host triple (-x86_64-w64-mingw32) for
+            # cross builds, so "win64" here would just duplicate that.
+            pname = "hexenwail";
             inherit version;
 
             src = filteredSrc;
