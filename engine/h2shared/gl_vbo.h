@@ -51,6 +51,9 @@ void	GL_SetForceOpaqueAlpha (float v);
  * batch renders fullbright); 0 = normal lighting.  Negative leaves shader
  * default. */
 void	GL_SetAliasFullbright (float v);
+/* uhexen2-khsa r22 probes — same convention as above. */
+void	GL_SetAliasNoFog (float v);
+void	GL_SetAliasR6Mode (float v);
 
 /* Init / shutdown */
 void	GL_VBO_Init (void);

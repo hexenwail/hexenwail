@@ -127,6 +127,10 @@ cvar_t	r_gl_dither = {"r_gl_dither", "1", CVAR_ARCHIVE};
  * screen-door pattern.  Discard + ENTALPHA continue to work via
  * tex.a * v_color.a even when fullbright. */
 cvar_t	r_alias_fullbright = {"r_alias_fullbright", "0", CVAR_ARCHIVE};
+/* uhexen2-khsa r22 probes for the NVIDIA screen-door bisect (v_color RGB
+ * was ruled out by r21).  Both default 0 = normal behavior. */
+cvar_t	r_alias_nofog       = {"r_alias_nofog", "0", CVAR_ARCHIVE};
+cvar_t	r_alias_r6_mode     = {"r_alias_r6_mode", "0", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
@@ -1176,6 +1180,9 @@ static void R_DrawAliasModel (entity_t *e)
 	/* uhexen2-khsa r21: push fullbright probe state for the legacy
 	 * alias immediate-mode batch.  Cvar-driven; default 0 = normal. */
 	GL_SetAliasFullbright(r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
+	/* uhexen2-khsa r22 probes. */
+	GL_SetAliasNoFog(r_alias_nofog.value > 0.5f ? 1.0f : 0.0f);
+	GL_SetAliasR6Mode(r_alias_r6_mode.value > 0.5f ? 1.0f : 0.0f);
 
 	clmodel = e->model;
 
@@ -2719,6 +2726,13 @@ static void R_DrawAliasInstanced (void)
 	if (prog->u_alias_fullbright >= 0)
 		glUniform1f_fp(prog->u_alias_fullbright,
 			       r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
+	/* uhexen2-khsa r22 probes — fog/r6-mode gates. */
+	if (prog->u_alias_nofog >= 0)
+		glUniform1f_fp(prog->u_alias_nofog,
+			       r_alias_nofog.value > 0.5f ? 1.0f : 0.0f);
+	if (prog->u_alias_r6_mode >= 0)
+		glUniform1f_fp(prog->u_alias_r6_mode,
+			       r_alias_r6_mode.value > 0.5f ? 1.0f : 0.0f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -2884,6 +2898,13 @@ static void R_DrawAliasInstanced (void)
 			if (prog->u_alias_fullbright >= 0)
 				glUniform1f_fp(prog->u_alias_fullbright,
 					       r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
+			/* uhexen2-khsa r22 probes — fog/r6-mode gates. */
+			if (prog->u_alias_nofog >= 0)
+				glUniform1f_fp(prog->u_alias_nofog,
+					       r_alias_nofog.value > 0.5f ? 1.0f : 0.0f);
+			if (prog->u_alias_r6_mode >= 0)
+				glUniform1f_fp(prog->u_alias_r6_mode,
+					       r_alias_r6_mode.value > 0.5f ? 1.0f : 0.0f);
 
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);
