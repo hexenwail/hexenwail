@@ -33,14 +33,22 @@ static int		fs_sfont_id = -1;
 
 static cvar_t	snd_soundfont = {"snd_soundfont", "", CVAR_ARCHIVE};
 
-/* Common SoundFont search paths on Linux */
+/* Common SoundFont search paths.  Includes the Flatpak app prefix
+ * (/app/share/...) so a soundfont bundled with the Flatpak is found even
+ * though /usr there is the runtime, not the app. */
 static const char *sf_paths[] = {
+	/* Flatpak-bundled soundfont (see flatpak/io.github.hexenwail.hexenwail.yml) */
+	"/app/share/soundfonts/default.sf2",
+	"/app/share/soundfonts/FluidR3_GM.sf2",
+	"/app/share/sounds/sf2/FluidR3_GM.sf2",
+	/* System locations (Debian/Ubuntu/Mint, Fedora, Arch, etc.) */
 	"/usr/share/soundfonts/default.sf2",
 	"/usr/share/soundfonts/FluidR3_GM.sf2",
 	"/usr/share/soundfonts/FluidR3_GS.sf2",
 	"/usr/share/sounds/sf2/FluidR3_GM.sf2",
 	"/usr/share/sounds/sf2/FluidR3_GS.sf2",
 	"/usr/share/sounds/sf2/default-GM.sf2",
+	"/usr/share/sounds/sf2/TimGM6mb.sf2",
 	"/usr/share/sounds/sf3/FluidR3_GM.sf3",
 	"/usr/share/sounds/sf3/default-GM.sf3",
 	NULL
@@ -72,10 +80,22 @@ static const char *find_soundfont (void)
 		Con_Printf("FluidSynth: snd_soundfont '%s' not found\n", snd_soundfont.string);
 	}
 
-	/* 2. check game directory for bundled soundfont */
-	q_snprintf(sf_path, sizeof(sf_path), "%s/data1/soundfont.sf2", host_parms->basedir);
-	if (file_exists(sf_path))
-		return sf_path;
+	/* 2. check game directory for a bundled soundfont, in a few common
+	 * spots and extensions: next to the binary and inside data1. */
+	{
+		static const char *base_names[] = {
+			"%s/soundfont.sf2", "%s/soundfont.sf3",
+			"%s/data1/soundfont.sf2", "%s/data1/soundfont.sf3",
+			NULL
+		};
+		int n;
+		for (n = 0; base_names[n]; n++)
+		{
+			q_snprintf(sf_path, sizeof(sf_path), base_names[n], host_parms->basedir);
+			if (file_exists(sf_path))
+				return sf_path;
+		}
+	}
 
 #ifdef SOUNDFONT_PATH
 	/* 3. compile-time path (Nix builds) */
