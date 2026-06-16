@@ -2410,7 +2410,11 @@ static void M_Display_AdjustSliders (int dir)
 		VID_MenuAdjustResolution (dir);
 		break;
 	case DISP_MSAA:
-		VID_MenuAdjustMultisample (dir);
+		/* "Antialiasing" now toggles FXAA (post-process) rather than
+		 * window MSAA.  Window MSAA was removed because it screen-doored
+		 * translucent surfaces (uhexen2-zroc); FXAA is instant (no video
+		 * restart) and needs no multisampled framebuffer. */
+		Cvar_SetValue ("gl_fxaa", Cvar_VariableValue("gl_fxaa") > 0 ? 0 : 1);
 		break;
 	case DISP_VSYNC:
 		VID_MenuAdjustVSync (dir);
@@ -2549,18 +2553,12 @@ static void M_Display_Draw (void)
 
 		if (!M_Display_IsSkip(DISP_MSAA))
 		{
+			/* "Antialiasing" drives FXAA now (see M_Display_AdjustSliders);
+			 * window MSAA was removed for uhexen2-zroc. */
 			M_Print (76, 92 + 8*DISP_MSAA, disp_labels[DISP_MSAA]);
-			ms = VID_MenuGetMultisample (&is_current, &available);
-			if (available)
-			{
-				const char *label = ms <= 0 ? "Off" : va("%dx", ms);
-				if (is_current)
-					M_PrintWhite (220, 92 + 8*DISP_MSAA, label);
-				else
-					M_Print (220, 92 + 8*DISP_MSAA, label);
-			}
-			else
-				M_PrintWhite (220, 92 + 8*DISP_MSAA, "N/A");
+			M_PrintWhite (220, 92 + 8*DISP_MSAA,
+				      Cvar_VariableValue("gl_fxaa") > 0 ? "FXAA" : "Off");
+			(void)is_current; (void)available; (void)ms;
 		}
 
 		if (!M_Display_IsSkip(DISP_VSYNC))
