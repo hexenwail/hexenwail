@@ -2680,15 +2680,143 @@ static qboolean nameInList (const char *list, const char *name)
 
 /*
 =================
+Mod_ComputeFlipbookRatio  uhexen2-f807
+
+Compute the worst-case (per-vertex peak displacement) / (bbox diagonal)
+ratio across every pose pair R_AliasResolveLerp actually blends:
+
+  - intra-multi-pose-group adjacent pairs, including the wrap from the
+    last pose in the group back to the first (the group cycles)
+  - adjacent single-pose-frame pairs (consecutive frames are the typical
+    walk/idle/death tick targets the QC steps through)
+
+A flipbook (flames, torches, waterfalls, explosions whose 'frames' are
+unrelated geometry sheets) has pose deltas comparable to the model's
+own size, so the ratio approaches 1.0.  Real deforming animations
+(walk, swing, breathe) have small per-tick deltas, so the ratio is
+small.  Stored on mod->flipbook_max_ratio and consulted by
+Mod_SetExtraFlags so the threshold cvar can be tuned at runtime
+without re-reading pose data.
+
+Callers must invoke this BEFORE Hunk_FreeToLowMark in the load path,
+while the poseverts[] global still points into the working buffer.
+=================
+*/
+static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
+{
+	extern trivertx_t *poseverts[];
+	int   f, i, v, numverts;
+	float max_ratio = 0.0f;
+	float bbox_diag, dx, dy, dz;
+	float sx, sy, sz;
+
+	mod->flipbook_max_ratio = 0.0f;
+
+	if (!mod || mod->type != mod_alias || !hdr)
+		return;
+	if (hdr->numposes < 2 || hdr->numverts < 1)
+		return;
+
+	dx = mod->maxs[0] - mod->mins[0];
+	dy = mod->maxs[1] - mod->mins[1];
+	dz = mod->maxs[2] - mod->mins[2];
+	bbox_diag = sqrtf (dx*dx + dy*dy + dz*dz);
+	if (bbox_diag < 1.0f)	/* degenerate; ratio would be meaningless */
+		return;
+
+	sx = hdr->scale[0];
+	sy = hdr->scale[1];
+	sz = hdr->scale[2];
+	numverts = hdr->numverts;
+
+	for (f = 0; f < hdr->numframes; f++)
+	{
+		int first = hdr->frames[f].firstpose;
+		int n     = hdr->frames[f].numposes;
+		int pairs;
+
+		if (n > 1)
+		{
+			/* Multi-pose group: pose K -> K+1, with wrap. */
+			pairs = n;
+		}
+		else if (f + 1 < hdr->numframes && hdr->frames[f+1].numposes == 1)
+		{
+			/* Single pose, next frame also single: typical sequential
+			 * frame anim (QC ticks self.frame each think). */
+			pairs = 1;
+		}
+		else
+		{
+			continue;
+		}
+
+		for (i = 0; i < pairs; i++)
+		{
+			int a, b;
+			trivertx_t *va, *vb;
+			float max_d2 = 0.0f;
+			float ratio;
+
+			if (n > 1)
+			{
+				a = first + i;
+				b = first + ((i + 1) % n);
+			}
+			else
+			{
+				a = first;
+				b = hdr->frames[f+1].firstpose;
+			}
+			va = poseverts[a];
+			vb = poseverts[b];
+			if (!va || !vb)
+				continue;
+
+			for (v = 0; v < numverts; v++)
+			{
+				float ax = (float)va[v].v[0] * sx;
+				float ay = (float)va[v].v[1] * sy;
+				float az = (float)va[v].v[2] * sz;
+				float bx = (float)vb[v].v[0] * sx;
+				float by = (float)vb[v].v[1] * sy;
+				float bz = (float)vb[v].v[2] * sz;
+				float dvx = bx - ax;
+				float dvy = by - ay;
+				float dvz = bz - az;
+				float d2  = dvx*dvx + dvy*dvy + dvz*dvz;
+				if (d2 > max_d2)
+					max_d2 = d2;
+			}
+
+			ratio = sqrtf (max_d2) / bbox_diag;
+			if (ratio > max_ratio)
+				max_ratio = ratio;
+		}
+	}
+
+	mod->flipbook_max_ratio = max_ratio;
+}
+
+/*
+=================
 Mod_SetExtraFlags -- Ironwail (johnfitz)
 
 Apply engine-side flags to an alias model from cvar-driven lists
 (currently r_nolerp_list).  Called at model load and on cvar change.
+
+uhexen2-f807: also union in MOD_NOLERP for models whose load-time
+flipbook ratio exceeds r_lerp_autodetect_threshold.  The static list
+remains an explicit override (curated entries always win); the
+heuristic catches new flipbook models — typically mods — without
+maintenance.
 =================
 */
 void Mod_SetExtraFlags (qmodel_t *mod)
 {
 	extern cvar_t r_nolerp_list;
+	extern cvar_t r_lerp_autodetect;
+	extern cvar_t r_lerp_autodetect_threshold;
 
 	if (!mod || mod->type != mod_alias)
 		return;
@@ -2697,6 +2825,10 @@ void Mod_SetExtraFlags (qmodel_t *mod)
 	mod->flags &= ~MOD_NOLERP;
 
 	if (nameInList (r_nolerp_list.string, mod->name))
+		mod->flags |= MOD_NOLERP;
+
+	if (r_lerp_autodetect.integer &&
+	    mod->flipbook_max_ratio > r_lerp_autodetect_threshold.value)
 		mod->flags |= MOD_NOLERP;
 }
 
@@ -3177,6 +3309,12 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 		return;
 	memcpy (mod->cache.data, pheader, total);
 
+	/* uhexen2-f807: flipbook heuristic — compute BEFORE the hunk free
+	 * (poseverts[] points into the working buffer) and re-apply the
+	 * MOD_NOLERP bit now that mod->flipbook_max_ratio is known. */
+	Mod_ComputeFlipbookRatio (mod, pheader);
+	Mod_SetExtraFlags (mod);
+
 	Hunk_FreeToLowMark (start);
 
 	/* Snapshot defaults for PimpModel restore-on-map-change. uhexen2-oq0a. */
@@ -3359,6 +3497,10 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	if (!mod->cache.data)
 		return;
 	memcpy (mod->cache.data, pheader, total);
+
+	/* uhexen2-f807: see matching note in Mod_LoadAliasModelNew. */
+	Mod_ComputeFlipbookRatio (mod, pheader);
+	Mod_SetExtraFlags (mod);
 
 	Hunk_FreeToLowMark (start);
 
@@ -3603,6 +3745,12 @@ static void Mod_Print (void)
 			MOD_Printf (FH, " (!R)");
 		if (mod->needload & NL_NEEDS_LOADED)
 			MOD_Printf (FH, " (!P)");
+		/* uhexen2-f807: flipbook ratio + MOD_NOLERP state, for tuning
+		 * r_lerp_autodetect_threshold against actual loaded models. */
+		if (mod->type == mod_alias && mod->flipbook_max_ratio > 0.0f)
+			MOD_Printf (FH, " flipratio=%.3f", mod->flipbook_max_ratio);
+		if (mod->type == mod_alias && (mod->flags & MOD_NOLERP))
+			MOD_Printf (FH, " NOLERP");
 		MOD_Printf (FH, "\n");
 	}
 	if (FH)
