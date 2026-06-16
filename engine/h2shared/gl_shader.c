@@ -273,6 +273,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_fullbright = glGetUniformLocation_fp(p->program, "u_alias_fullbright");
+	p->u_alias_nofog      = glGetUniformLocation_fp(p->program, "u_alias_nofog");
+	p->u_alias_r6_mode    = glGetUniformLocation_fp(p->program, "u_alias_r6_mode");
 }
 
 /* ------------------------------------------------------------------ */
@@ -589,19 +591,28 @@ static const char salias_frag[] =
 	"uniform float u_alpha_threshold;\n"
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform float u_alias_fullbright;\n"	/* uhexen2-khsa r21 */
+	"uniform float u_alias_nofog;\n"	/* uhexen2-khsa r22 */
+	"uniform float u_alias_r6_mode;\n"	/* uhexen2-khsa r22 */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	/* uhexen2-khsa r22: full r6 match — short-circuit before any
+	 * v_color/fog/discard/alpha logic.  Will break cutouts (same as r6
+	 * does for bobberb) — used to confirm the screen-door is in our
+	 * shader's downstream logic at all on Mathuzzz's NVIDIA stack. */
+	"    if (u_alias_r6_mode > 0.5) {\n"
+	"        fragColor = vec4(tex.rgb, 1.0);\n"
+	"        return;\n"
+	"    }\n"
 	/* uhexen2-khsa r21: probe gate for the NVIDIA screen-door bisect.
 	 * When u_alias_fullbright > 0.5, skip the v_color RGB multiply so
 	 * fragments render at the texel's raw RGB (= r6 probe behavior on
 	 * the lighting side).  Alpha still respects v_color.a so EF_HOLEY
-	 * discard and ENTALPHA continue to work.  If Mathuzzz sees the
-	 * dither disappear with r_alias_fullbright 1, v_color is the
-	 * trigger and we dig into vertex-color precision / interpolation. */
+	 * discard and ENTALPHA continue to work.  RULED OUT for screen-door
+	 * (Mathuzzz r21 test). */
 	"    vec4 color = (u_alias_fullbright > 0.5)\n"
 	"                 ? vec4(tex.rgb, tex.a * v_color.a)\n"
 	"                 : tex * v_color;\n"
@@ -615,9 +626,14 @@ static const char salias_frag[] =
 	 * path), which looked like the cutout area was filled in.  Restore
 	 * the r14 behavior. */
 	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    float fogfac = u_fog_density * v_fogdist;\n"
-	"    float fog = exp(-fogfac * fogfac);\n"
-	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* uhexen2-khsa r22: gate fog mix.  Mathuzzz ruled out v_color via
+	 * r_alias_fullbright (r21) — remaining suspect for the screen-door
+	 * is fog math (exp + mix even when fog density is 0). */
+	"    if (u_alias_nofog < 0.5) {\n"
+	"        float fogfac = u_fog_density * v_fogdist;\n"
+	"        float fog = exp(-fogfac * fogfac);\n"
+	"        color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	"    }\n"
 	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the old threshold-
 	 * based test.  Threshold > 0.5 was correct for fence cutouts but
 	 * caught opaque-as-translucent ents (CASTLE_TR.MDL etc.) that need
@@ -1090,6 +1106,8 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
 	p->u_alias_fullbright = glGetUniformLocation_fp(prog, "u_alias_fullbright");
+	p->u_alias_nofog      = glGetUniformLocation_fp(prog, "u_alias_nofog");
+	p->u_alias_r6_mode    = glGetUniformLocation_fp(prog, "u_alias_r6_mode");
 
 	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);

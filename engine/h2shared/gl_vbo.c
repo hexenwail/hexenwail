@@ -54,6 +54,9 @@ static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
 /* uhexen2-khsa r21: per-batch alias fullbright probe.  -1 = leave shader
  * default (0 = normal lighting); 0/1 = explicit value for this batch. */
 static float	imm_alias_fullbright = -1.0f;
+/* uhexen2-khsa r22 probes — same convention. */
+static float	imm_alias_nofog = -1.0f;
+static float	imm_alias_r6_mode = -1.0f;
 
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
@@ -208,6 +211,19 @@ void GL_SetAliasFullbright (float v)
 	imm_alias_fullbright = v;
 }
 
+/* uhexen2-khsa r22: 1.0 = skip fog mix in alias frag, 0.0 = normal. */
+void GL_SetAliasNoFog (float v)
+{
+	imm_alias_nofog = v;
+}
+
+/* uhexen2-khsa r22: 1.0 = full r6 match (vec4(tex.rgb, 1.0), no discard,
+ * no fog, no alpha branch).  Will break cutouts. */
+void GL_SetAliasR6Mode (float v)
+{
+	imm_alias_r6_mode = v;
+}
+
 void GL_ImmColor4f (float r, float g, float b, float a)
 {
 	imm_cur_color[0] = r;
@@ -292,6 +308,8 @@ static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_fullbright = -2.0f;
+static float	imm_cache_alias_nofog = -2.0f;
+static float	imm_cache_alias_r6_mode = -2.0f;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
@@ -316,6 +334,8 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_fullbright = -2.0f;
+	imm_cache_alias_nofog = -2.0f;
+	imm_cache_alias_r6_mode = -2.0f;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
@@ -361,6 +381,8 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_fullbright = -2.0f;
+	imm_cache_alias_nofog = -2.0f;
+	imm_cache_alias_r6_mode = -2.0f;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
@@ -411,6 +433,20 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_alias_fullbright, imm_alias_fullbright);
 		imm_cache_alias_fullbright = imm_alias_fullbright;
+	}
+
+	if (imm_alias_nofog >= 0.0f && shader->u_alias_nofog >= 0 &&
+	    imm_alias_nofog != imm_cache_alias_nofog)
+	{
+		glUniform1f_fp(shader->u_alias_nofog, imm_alias_nofog);
+		imm_cache_alias_nofog = imm_alias_nofog;
+	}
+
+	if (imm_alias_r6_mode >= 0.0f && shader->u_alias_r6_mode >= 0 &&
+	    imm_alias_r6_mode != imm_cache_alias_r6_mode)
+	{
+		glUniform1f_fp(shader->u_alias_r6_mode, imm_alias_r6_mode);
+		imm_cache_alias_r6_mode = imm_alias_r6_mode;
 	}
 
 	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
