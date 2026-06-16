@@ -274,6 +274,17 @@ cvar_t	r_nolerp_list = {"r_nolerp_list",
 	"models/waterfall_90.mdl,"
 	"models/waterfallt.mdl",
 	CVAR_NONE};
+/* uhexen2-f807: replace the maintenance treadmill of r_nolerp_list with
+ * a geometry heuristic — at load each alias model's max pose-pair
+ * displacement (world units) is divided by its bbox diagonal, and any
+ * ratio above the threshold flags MOD_NOLERP automatically.  The static
+ * list above remains an explicit override (curated entries always win).
+ * Threshold tuning happens at runtime: load a map, toggle, observe.
+ * Disable with r_lerp_autodetect 0 to fall back to list-only.  Threshold
+ * 0.35 is conservative — flipbook frames have ratios near 1.0; combat
+ * model walk/death anims sit well below 0.25. */
+cvar_t	r_lerp_autodetect = {"r_lerp_autodetect", "1", CVAR_ARCHIVE};
+cvar_t	r_lerp_autodetect_threshold = {"r_lerp_autodetect_threshold", "0.35", CVAR_NONE};
 cvar_t	r_alphasort = {"r_alphasort", "1", CVAR_ARCHIVE};
 cvar_t	r_showbboxes = {"r_showbboxes", "0", CVAR_NONE};
 cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thinkers only, <0 = non-thinkers only (Ironwail parity) */

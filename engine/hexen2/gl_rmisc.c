@@ -306,6 +306,10 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_lerp_complete);
 	Cvar_RegisterVariable (&r_nolerp_list);
 	Cvar_SetCallback (&r_nolerp_list, R_Model_ExtraFlags_List_f);
+	Cvar_RegisterVariable (&r_lerp_autodetect);
+	Cvar_SetCallback (&r_lerp_autodetect, R_Model_ExtraFlags_List_f);
+	Cvar_RegisterVariable (&r_lerp_autodetect_threshold);
+	Cvar_SetCallback (&r_lerp_autodetect_threshold, R_Model_ExtraFlags_List_f);
 	Cvar_RegisterVariable (&r_showbboxes);
 	Cvar_RegisterVariable (&r_showbboxes_think);
 	Cvar_RegisterVariable (&r_showbboxes_health);

@@ -307,6 +307,8 @@ extern	cvar_t	r_lerpmodels;
 extern	cvar_t	r_lerp_viewmodel;
 extern	cvar_t	r_lerp_complete;
 extern	cvar_t	r_nolerp_list;
+extern	cvar_t	r_lerp_autodetect;
+extern	cvar_t	r_lerp_autodetect_threshold;
 extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_showbboxes_think;
 extern	cvar_t	r_showbboxes_health;

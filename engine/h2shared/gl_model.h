@@ -725,6 +725,17 @@ typedef struct qmodel_s
 	float		glow_settings[GLOW_SETTINGS_COUNT];
 	float		glow_color[4];		// RGBA color for glow effect
 
+	/* Max (per-vertex peak displacement in world units, divided by the
+	 * model's bbox diagonal) across every pose pair that R_AliasResolveLerp
+	 * actually blends — intra-multi-pose-group adjacencies plus adjacent
+	 * single-pose-frame pairs.  Computed at load (Mod_ComputeFlipbookRatio)
+	 * and read by Mod_SetExtraFlags: ratios above r_lerp_autodetect_threshold
+	 * mean adjacent poses are unrelated geometry sheets (flipbook flames,
+	 * torches, waterfalls), not deformations of one mesh, so morph
+	 * interpolation smears them — MOD_NOLERP suppresses the blend.  Zero
+	 * for non-alias models or models with one pose.  uhexen2-f807. */
+	float		flipbook_max_ratio;
+
 	/* Snapshot of the model's load-time flags / ex_flags / glow_settings,
 	 * captured at the end of Mod_LoadAliasModel{,New}.  PimpModel writes
 	 * through to mod->flags etc. so misc_modelpimp can change rendering
