@@ -452,6 +452,7 @@ typedef struct {
 	int		numbones;	// number of bones (0 if not skeletal)
 	int		boneinfo;	// offset to boneinfo_t array (numbones entries)
 	int		boneposedata;	// offset to bonepose_t array (numposes*numbones entries)
+	int		triangledata;	// offset to unsigned short[numtris*3] triangle indices (PV_IQM; 0 if not skeletal)
 
 	GLuint		gl_texturenum[MAX_SKINS][4];
 	GLuint		gl_fb_texturenum[MAX_SKINS][4];	// fullbright mask textures
@@ -465,6 +466,7 @@ typedef struct {
 /* GPU-resident alias model data for AZDO rendering */
 typedef struct {
 	GLuint	vao;		/* VAO for this model */
+	GLuint	vbo_verts;	/* vertex attribute VBO (iqmvert_t data, PV_IQM only) */
 	GLuint	vbo_tc;		/* static texcoord VBO */
 	GLuint	ibo;		/* index buffer (triangulated) */
 	GLuint	ssbo_pose;	/* all poses' trivertx_t data (GL 4.3, PV_QUAKE1) */

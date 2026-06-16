@@ -702,10 +702,21 @@ void Mod_ReloadTextures (void)
 				}
 				else
 				{
-					int flags = TEX_MIPMAP;
+					int flags = TEX_MIPMAP | TEX_EMBEDDED_MIPS;
 					if (tx->name[0] == '{')
 						flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);
 					tx->gl_texturenum = GL_LoadTexture (tx->name, (byte *)(tx+1), tx->width, tx->height, flags);
+					if (tx->name[0] != '*' && tx->name[0] != '{')
+					{
+						char fbname[32];
+						q_snprintf(fbname, sizeof(fbname), "%s_glow", tx->name);
+						tx->gl_fb_texturenum = Mod_LoadFullbrightTexture(
+							fbname, (byte *)(tx+1), tx->width, tx->height);
+					}
+					else
+					{
+						tx->gl_fb_texturenum = 0;
+					}
 				}
 			}
 		}
@@ -2215,6 +2226,8 @@ static void *Mod_LoadAliasFrame (void *pin, maliasframedesc_t *frame)
 				aliasmaxs[i] = out[i];
 		}
 	}
+	if (posenum >= MAXALIASFRAMES)
+		Sys_Error ("%s: too many poses", __thisfunc__);
 	poseverts[posenum] = pinframe;
 	posenum++;
 
@@ -2268,6 +2281,8 @@ static void *Mod_LoadAliasGroup (void *pin,  maliasframedesc_t *frame)
 
 	for (i = 0; i < numframes; i++)
 	{
+		if (posenum >= MAXALIASFRAMES)
+			Sys_Error ("%s: too many poses", __thisfunc__);
 		poseverts[posenum] = (trivertx_t *)((daliasframe_t *)ptemp + 1);
 
 		for (j = 0; j < pheader->numverts; j++)
@@ -2597,6 +2612,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 					skin_tex_mode |= TEX_HOLEY;
 				pheader->gl_texturenum[i][j&3] = GL_LoadTexture (name, external_skin,
 							ext_width, ext_height, skin_tex_mode);
+				pheader->gl_fb_texturenum[i][j&3] = 0;
 				free(external_skin);
 			}
 			else
@@ -2604,11 +2620,21 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 				// Fall back to embedded skin from MDL file
 				pheader->gl_texturenum[i][j&3] = GL_LoadTexture (name, (byte *)(pskintype),
 							pheader->skinwidth, pheader->skinheight, tex_mode);
+				{
+					char fbname[MAX_QPATH];
+					q_snprintf (fbname, sizeof(fbname), "%s_fb", name);
+					pheader->gl_fb_texturenum[i][j&3] = Mod_LoadFullbrightTexture (fbname,
+							(byte *)(pskintype),
+							pheader->skinwidth, pheader->skinheight);
+				}
 			}
 			pskintype = (daliasskintype_t *)((byte *)(pskintype) + s);
 		}
 		for (k = j; j < 4; j++)
+		{
 			pheader->gl_texturenum[i][j&3] = pheader->gl_texturenum[i][j - k];
+			pheader->gl_fb_texturenum[i][j&3] = pheader->gl_fb_texturenum[i][j - k];
+		}
 	    }
 	}
 
@@ -3192,10 +3218,19 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 	if (pheader->numverts > MAXALIASVERTS)
 		Sys_Error ("model %s has too many vertices", mod->name);
 
+	if (pheader->version <= 0)
+		Sys_Error ("model %s has no ST vertices", mod->name);
+
+	if (pheader->version > MAXALIASVERTS)
+		Sys_Error ("model %s has too many ST vertices", mod->name);
+
 	pheader->numtris = LittleLong (pinmodel->numtris);
 
 	if (pheader->numtris <= 0)
 		Sys_Error ("model %s has no triangles", mod->name);
+
+	if (pheader->numtris > MAXALIASTRIS)
+		Sys_Error ("model %s has too many triangles", mod->name);
 
 	pheader->numframes = LittleLong (pinmodel->numframes);
 	numframes = pheader->numframes;
@@ -3384,6 +3419,9 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 
 	if (pheader->numtris <= 0)
 		Sys_Error ("model %s has no triangles", mod->name);
+
+	if (pheader->numtris > MAXALIASTRIS)
+		Sys_Error ("model %s has too many triangles", mod->name);
 
 	pheader->numframes = LittleLong (pinmodel->numframes);
 	numframes = pheader->numframes;

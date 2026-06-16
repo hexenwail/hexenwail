@@ -87,6 +87,8 @@ void TexMgr_FreeTexture (gltexture_t *kill)
 		return;
 	if (kill->texnum)
 	{
+		if (currenttexture == kill->texnum)
+			currenttexture = GL_UNUSED_TEXTURE;
 		glDeleteTextures_fp (1, &kill->texnum);
 		kill->texnum = 0;	/* sentinel: TexMgr_LoadImage recycles slots
 					 * with texnum == 0.  glGenTextures never
@@ -190,6 +192,7 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int heigh
 	/* Generate and upload the texture */
 	glGenTextures_fp(1, &texnum);
 	glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	currenttexture = texnum;
 
 	if (flags & TEXPREF_NEAREST)
 	{

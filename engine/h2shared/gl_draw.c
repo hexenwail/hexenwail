@@ -447,6 +447,7 @@ static void Draw_TouchAllFilterModes (void)
 
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
+		if (!glt->identifier[0]) continue;	/* skip stale (deleted) entries */
 		if (glt->flags & (TEX_NEAREST|TEX_LINEAR))	/* TEX_MIPMAP mustn't be set in this case */
 			continue;
 		GL_Bind (glt->texnum);
@@ -499,6 +500,7 @@ static void Draw_TouchMipmapFilterModes (void)
 
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
+		if (!glt->identifier[0]) continue;	/* skip stale (deleted) entries */
 		if (glt->flags & TEX_MIPMAP)
 		{
 			GL_Bind (glt->texnum);
@@ -537,6 +539,7 @@ static void Draw_LodBias_f (cvar_t *var)
 	(void)var;
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
+		if (!glt->identifier[0]) continue;	/* skip stale (deleted) entries */
 		if (glt->flags & TEX_MIPMAP)
 		{
 			GL_Bind (glt->texnum);

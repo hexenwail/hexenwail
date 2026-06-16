@@ -2716,8 +2716,37 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				}
 			}
 
-			if (batch_count < MAX_BMODEL_BATCH)
-				batch_surfs[batch_count++] = surf;
+			if (batch_count >= MAX_BMODEL_BATCH)
+			{
+				/* Batch full — flush to make room before appending */
+				int run_start = 0;
+				int run_first = batch_surfs[0]->vbo_firstindex;
+				int run_total = batch_surfs[0]->vbo_numtris * 3;
+				int kk;
+				GL_Bind(cur_tex->gl_texturenum);
+				for (kk = 1; kk < batch_count; kk++)
+				{
+					int expected = run_first + run_total;
+					if (batch_surfs[kk]->vbo_firstindex == expected)
+						run_total += batch_surfs[kk]->vbo_numtris * 3;
+					else
+					{
+						glDrawElements_fp(GL_TRIANGLES, run_total,
+						    GL_UNSIGNED_INT,
+						    (void *)((size_t)run_first * sizeof(unsigned int)));
+						c_brush_polys += (kk - run_start);
+						run_start = kk;
+						run_first = batch_surfs[kk]->vbo_firstindex;
+						run_total = batch_surfs[kk]->vbo_numtris * 3;
+					}
+				}
+				glDrawElements_fp(GL_TRIANGLES, run_total,
+				    GL_UNSIGNED_INT,
+				    (void *)((size_t)run_first * sizeof(unsigned int)));
+				c_brush_polys += (batch_count - run_start);
+				batch_count = 0;
+			}
+			batch_surfs[batch_count++] = surf;
 		}
 
 		/* Flush final batch */

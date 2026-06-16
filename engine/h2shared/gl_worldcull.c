@@ -532,6 +532,7 @@ void R_BuildWorldCull (void)
 	if (!gpu_surfs || !cull_bucket_map)
 	{
 		Con_Printf("GPU world culling: malloc failed for surface data\n");
+		free(gpu_surfs); gpu_surfs = NULL;
 		R_FreeWorldCull();
 		return;
 	}

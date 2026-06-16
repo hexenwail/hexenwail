@@ -234,8 +234,14 @@ static qboolean MD5_ParseMesh(const char *text,
 			name[0] = 0;
 		}
 
-		if (sscanf(p, "%d ( %f %f %f ) ( %f %f %f %f )", &parent, &tx, &ty, &tz, &qx, &qy, &qz, &qw) != 8)
+		/* id Software .md5mesh stores only 3 quat components; W is implicit and
+		 * reconstructed as negative (canonical half-angle, lower hemisphere). */
+		if (sscanf(p, "%d ( %f %f %f ) ( %f %f %f )", &parent, &tx, &ty, &tz, &qx, &qy, &qz) != 7)
 			return false;
+		{
+			float ww = 1.0f - qx*qx - qy*qy - qz*qz;
+			qw = (ww > 0.0f) ? -sqrtf(ww) : 0.0f;
+		}
 
 		q_strlcpy(bones[i].name, name, 31);
 		bones[i].parent = parent;
@@ -486,7 +492,8 @@ aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size
 	int boneinfo_off    = sizeof(aliashdr_t);
 	int boneposedata_off = boneinfo_off + numbones * sizeof(boneinfo_t);
 	int posedata_off    = boneposedata_off + numposes * numbones * sizeof(bonepose_t);
-	int hunksize        = posedata_off + numverts * sizeof(iqmvert_t);
+	int tridata_off     = posedata_off + numverts * sizeof(iqmvert_t);
+	int hunksize        = tridata_off + numtris * 3 * sizeof(unsigned short);
 
 	hdr = (aliashdr_t *)Hunk_Alloc(hunksize);
 	if (!hdr)
@@ -505,9 +512,16 @@ aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size
 	hdr->boneinfo      = boneinfo_off;
 	hdr->boneposedata  = boneposedata_off;
 	hdr->posedata      = posedata_off;
+	hdr->triangledata  = tridata_off;
 
 	memcpy((byte *)hdr + boneinfo_off, bones, numbones * sizeof(boneinfo_t));
 	memcpy((byte *)hdr + posedata_off, verts, numverts * sizeof(iqmvert_t));
+	/* Persist triangle indices as unsigned short (numverts <= MD5_MAX_VERTS=4096 < 65536). */
+	{
+		unsigned short *tridata = (unsigned short *)((byte *)hdr + tridata_off);
+		for (int t = 0; t < numtris * 3; t++)
+			tridata[t] = (unsigned short)tris[t];
+	}
 
 	/* Rest-pose bone matrices = identity.  The skeletal shader applies
 	 * bones[i] to a_position; at rest pose the verts already hold their

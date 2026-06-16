@@ -391,11 +391,14 @@ void GL_FreeAliasGPUMeshes (void)
 	for (i = 0; i < num_alias_gpu_meshes; i++)
 	{
 		alias_gpu_mesh_t *gm = &alias_gpu_meshes[i];
-		if (gm->vao)       { glDeleteVertexArrays_fp(1, &gm->vao); }
-		if (gm->vbo_tc)    { glDeleteBuffers_fp(1, &gm->vbo_tc); }
-		if (gm->ibo)       { glDeleteBuffers_fp(1, &gm->ibo); }
-		if (gm->ssbo_pose) { glDeleteBuffers_fp(1, &gm->ssbo_pose); }
-		if (gm->tex_pose)  { glDeleteTextures_fp(1, &gm->tex_pose); }
+		if (gm->vao)           { glDeleteVertexArrays_fp(1, &gm->vao); }
+		if (gm->vbo_verts)     { glDeleteBuffers_fp(1, &gm->vbo_verts); }
+		if (gm->vbo_tc)        { glDeleteBuffers_fp(1, &gm->vbo_tc); }
+		if (gm->ibo)           { glDeleteBuffers_fp(1, &gm->ibo); }
+		if (gm->ssbo_pose)     { glDeleteBuffers_fp(1, &gm->ssbo_pose); }
+		if (gm->ssbo_pose_md3) { glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
+		if (gm->ssbo_bones)    { glDeleteBuffers_fp(1, &gm->ssbo_bones); }
+		if (gm->tex_pose)      { glDeleteTextures_fp(1, &gm->tex_pose); }
 	}
 	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
 	memset(alias_gpu_owners, 0, sizeof(alias_gpu_owners));
@@ -441,9 +444,12 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 			texcoords[i*2 + 1] = iqmv[i].st[1];
 		}
 
-		/* For now, assume simple triangle list (no strips/fans) */
-		for (i = 0; i < num_tris * 3; i++)
-			indices[i] = (unsigned short)i;
+		/* Build IBO from the persisted triangle indices (uhexen2-byu7+ssct). */
+		{
+			const unsigned short *src = (const unsigned short *)((byte *)hdr + hdr->triangledata);
+			for (i = 0; i < num_tris * 3; i++)
+				indices[i] = src[i];
+		}
 		vi = num_tris * 3;
 
 		goto iqm_gpu_setup;
@@ -592,9 +598,8 @@ iqm_gpu_setup:
 
 		/* Upload vertex data (iqmvert_t: 32 bytes per vertex) */
 #ifndef __EMSCRIPTEN__
-		GLuint vbo_verts;
-		glGenBuffers_fp(1, &vbo_verts);
-		glBindBuffer_fp(GL_ARRAY_BUFFER, vbo_verts);
+		glGenBuffers_fp(1, &gm->vbo_verts);
+		glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_verts);
 		glBufferData_fp(GL_ARRAY_BUFFER, hdr->poseverts * sizeof(iqmvert_t),
 				(byte *)hdr + hdr->posedata, GL_STATIC_DRAW);
 
