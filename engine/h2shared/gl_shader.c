@@ -73,6 +73,8 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 		size_t total = version_len + strlen(macro_def) + rest_len + 1;
 
 		modified_source = (char *)malloc(total);
+		if (!modified_source)
+			Sys_Error("GL_CompileShader: out of memory");
 		memcpy(modified_source, source, version_len);
 		memcpy(modified_source + version_len, macro_def, strlen(macro_def));
 		memcpy(modified_source + version_len + strlen(macro_def), version_end, rest_len + 1);
@@ -192,6 +194,8 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 		char *buf = (char *)malloc(total);
 		GLuint shader;
 
+		if (!buf)
+			Sys_Error("GL_CompileOITFragShader: out of memory");
 		memcpy(buf, frag_src, ver_len);
 		memcpy(buf + ver_len, oit_preamble, strlen(oit_preamble));
 		/* Copy everything between version line and "out vec4 fragColor;\n" */
@@ -227,6 +231,12 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 	if (p->program)
 	{
 		GL_InitProgramUniforms(p);
+		/* bind texture unit defaults (mirrors GL_InitProgram) */
+		glUseProgram_fp(p->program);
+		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
+		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
+		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
+		glUseProgram_fp(0);
 		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
 	else
@@ -1237,7 +1247,7 @@ void GL_Shaders_Shutdown (void)
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_world_opaque,
-		&gl_shader_alias, &gl_shader_particle, &gl_shader_sky,
+		&gl_shader_alias, &gl_shader_skeletal, &gl_shader_particle, &gl_shader_sky,
 		&gl_shader_particle_gpu.base,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit
 	};

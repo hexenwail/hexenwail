@@ -426,7 +426,7 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes,
 	}
 	else
 	{
-		GL_BindBufferCached (target, frame->host_buffer);
+		GL_BindBufferForce (target, frame->host_buffer);
 		glBufferSubData_fp (target, frameres_host_offset, numbytes, data);
 	}
 

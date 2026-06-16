@@ -136,6 +136,8 @@ void GL_VBO_Init (void)
 	glGenBuffers_fp(1, &imm_quad_ibo);
 	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
 	indices = (unsigned short *) malloc(IMM_MAX_QUAD_INDICES * sizeof(unsigned short));
+	if (!indices)
+		Sys_Error("GL_VBO_Init: out of memory allocating quad IBO scratch buffer");
 	for (i = 0; i < IMM_MAX_QUADS; i++)
 	{
 		indices[i*6 + 0] = i*4 + 0;

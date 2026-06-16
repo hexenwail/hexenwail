@@ -592,7 +592,8 @@ static qboolean VID_SetMode (int modenum)
 	modestate = (is_fullscreen) ? MS_FULLDIB : MS_WINDOWED;
 	Cvar_SetValueQuick (&vid_config_glx, WRWidth);
 	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
-	Cvar_SetValueQuick (&vid_config_fscr, is_fullscreen);
+	if (!is_fullscreen && vid_config_fscr.integer != 0)
+		Cvar_SetValueQuick (&vid_config_fscr, 0);
 	vid.width = vid.conwidth = WRWidth;
 	vid.height = vid.conheight = WRHeight;
 

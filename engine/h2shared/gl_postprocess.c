@@ -88,6 +88,7 @@ static GLuint	bloom_up_prog;		/* upsample 3x3 tent + additive blend */
 static GLint	bloom_bright_loc_scene, bloom_bright_loc_threshold, bloom_bright_loc_rcpframe;
 static GLint	bloom_down_loc_scene, bloom_down_loc_rcpframe;
 static GLint	bloom_up_loc_scene, bloom_up_loc_prev, bloom_up_loc_rcpframe;
+static GLuint	bloom_dummy_vao;		/* dummy VAO required for glDrawArrays in GL 4.3 core */
 
 /* Shader state */
 static GLuint	pp_program;
@@ -186,11 +187,12 @@ static const char oit_resolve_frag[] =
 
 static const char bloom_vert_src[] =
 	"#version 430 core\n"
-	"layout(location=0) in vec2 a_pos;\n"
 	"out vec2 v_uv;\n"
 	"void main() {\n"
-	"    v_uv = a_pos * 0.5 + 0.5;\n"
-	"    gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
+	"    vec2 pos = vec2(v) * 4.0 - 1.0;\n"
+	"    v_uv = pos * 0.5 + 0.5;\n"
+	"    gl_Position = vec4(pos, 0.0, 1.0);\n"
 	"}\n";
 
 static const char bloom_bright_frag_src[] =
@@ -225,7 +227,6 @@ static const char bloom_down_frag_src[] =
 static const char bloom_up_frag_src[] =
 	"#version 430 core\n"
 	"layout(binding=0) uniform sampler2D u_scene;\n"
-	"layout(binding=1) uniform sampler2D u_prev;\n"
 	"uniform vec2 u_rcpframe;\n"
 	"in vec2 v_uv;\n"
 	"layout(location=0) out vec4 fragColor;\n"
@@ -240,7 +241,7 @@ static const char bloom_up_frag_src[] =
 	"           + texture(u_scene, v_uv + vec2(-h.x, h.y))\n"
 	"           + texture(u_scene, v_uv + vec2( h.x, h.y));\n"
 	"    s /= 12.0;\n"
-	"    fragColor = s + texture(u_prev, v_uv);\n"
+	"    fragColor = s;\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */
@@ -796,6 +797,9 @@ static qboolean PP_InitShader (void)
 	bloom_up_loc_scene = glGetUniformLocation_fp(bloom_up_prog, "u_scene");
 	bloom_up_loc_prev = glGetUniformLocation_fp(bloom_up_prog, "u_prev");
 	bloom_up_loc_rcpframe = glGetUniformLocation_fp(bloom_up_prog, "u_rcpframe");
+
+	/* GL 4.3 core profile requires a VAO bound for any draw call. */
+	glGenVertexArrays_fp(1, &bloom_dummy_vao);
 
 	return true;
 }
@@ -1532,6 +1536,9 @@ void GL_PostProcess_EndFrame (void)
 		int bloom_src_h = pp_native_active ? pp_native_h : pp_height;
 		int i;
 
+		/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
+		glBindVertexArray_fp(bloom_dummy_vao);
+
 		/* Bright pass: extract overbright pixels */
 		glViewport_fp(0, 0, bloom_w[0], bloom_h[0]);
 		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[0]);
@@ -1556,7 +1563,14 @@ void GL_PostProcess_EndFrame (void)
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
 
-		/* Upsample + additive blend: level 3 → 2 → 1 → 0 */
+		/* Upsample + additive blend: level 3 → 2 → 1 → 0.
+		 * The upsample shader outputs the tent-filtered coarser level
+		 * only; GL_ONE/GL_ONE blending accumulates it into the
+		 * downsampled content already in bloom_tex[i] via the ROP,
+		 * avoiding the feedback loop that arose from sampling
+		 * bloom_tex[i] in the shader while also rendering to it. */
+		glEnable_fp(GL_BLEND);
+		glBlendFunc_fp(GL_ONE, GL_ONE);
 		for (i = BLOOM_LEVELS - 2; i >= 0; i--)
 		{
 			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
@@ -1564,13 +1578,13 @@ void GL_PostProcess_EndFrame (void)
 			glUseProgram_fp(bloom_up_prog);
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
-			glActiveTexture_fp(GL_TEXTURE1);
-			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i]);
 			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
-			if (bloom_up_loc_prev >= 0) glUniform1i_fp(bloom_up_loc_prev, 1);
 			if (bloom_up_loc_rcpframe >= 0) glUniform2f_fp(bloom_up_loc_rcpframe, 1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1]);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
+		glDisable_fp(GL_BLEND);
+
+		glBindVertexArray_fp(0);
 		/* bloom_tex[0] now contains the final bloom result at 1/2 scene res */
 	}
 

@@ -3336,7 +3336,7 @@ static void R_DrawEntitiesOnList (void)
 		e = cl_visedicts[i];
 		if (!e->model || e->model->type == mod_brush)
 			continue;
-		if (e == &cl_entities[cl.viewentity])
+		if (e == &cl_entities[cl.viewentity] && !use_instancing)
 			e->angles[0] *= 0.3;	// chase-cam pitch adj. by FrikaC
 
 		switch (e->model->type)
