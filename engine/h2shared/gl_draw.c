@@ -2193,7 +2193,26 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	}
 	else if (glt->flags & TEX_MIPMAP)
 	{
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
+		GLuint min_filter = gl_texmodes[gl_filter_idx].minimize;
+		/* uhexen2-khsa r29: TEX_HOLEY / TEX_FENCE cutout textures
+		 * pre-binarize alpha at each mip level (above, ~line 2172).
+		 * But trilinear MIPMAP_LINEAR interpolates BETWEEN mip levels,
+		 * producing fractional alpha at the LOD boundary — exactly the
+		 * values that flicker pass/fail through the 0.5 discard
+		 * threshold under viewer motion, producing the screen-door
+		 * shimmer Mathuzzz reported.  Demote to the MIPMAP_NEAREST
+		 * variant so each fragment samples ONE mip's binary alpha with
+		 * no cross-LOD interpolation.  Trade-off: slight mip-LOD
+		 * transition pop in exchange for stable cutout silhouettes.
+		 * In-mip bilinear filtering of RGB is preserved. */
+		if (glt->flags & (TEX_FENCE | TEX_HOLEY))
+		{
+			if (min_filter == GL_LINEAR_MIPMAP_LINEAR)
+				min_filter = GL_LINEAR_MIPMAP_NEAREST;
+			else if (min_filter == GL_NEAREST_MIPMAP_LINEAR)
+				min_filter = GL_NEAREST_MIPMAP_NEAREST;
+		}
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 		if (gl_max_anisotropy >= 2)
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
