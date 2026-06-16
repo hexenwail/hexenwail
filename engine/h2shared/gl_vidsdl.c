@@ -476,11 +476,13 @@ static qboolean VID_SetMode (int modenum)
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY );
 #endif
 
-	if (multisample)
-	{
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, multisample);
-	}
+	/* Window MSAA is intentionally NOT requested.  The main scene FBO
+	 * already force-disables MSAA (gl_postprocess.c PP_CreateFBO), and with
+	 * a vanilla config the world renders straight to this default
+	 * framebuffer; a multisampled window there mis-rendered translucent
+	 * surfaces (the "glass" screen-door, uhexen2-zroc).  Edge AA is provided
+	 * by FXAA (gl_fxaa) in the post-process chain instead. */
+	multisample = 0;
 
 	Con_SafePrintf ("Requested mode %d: %dx%dx%d\n", modenum, modelist[modenum].width, modelist[modenum].height, bpp);
 
