@@ -290,7 +290,17 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #define GLSL_EARLY_Z_OPAQUE	""
 #else
 #define GLSL_VERT_HEADER	"#version 430 core\n"
-#define GLSL_FRAG_HEADER	"#version 430 core\n"
+/* uhexen2-khsa r23: explicit `precision highp float;` in the fragment
+ * shader header.  GLSL 4.30 core defaults to highp, but some NVIDIA
+ * drivers have been observed to silently demote interpolated
+ * varying math (v_color * tex + fog mix) to mediump, producing per-
+ * pixel rounding noise that compounds across the multiply + fog chain.
+ * Mathuzzz's screen-door bisect (r22): neither r_alias_fullbright 1
+ * nor r_alias_nofog 1 alone fixes the dither, but the combo does —
+ * which is exactly the signature of a precision interaction between
+ * the two computations.  Explicit highp forces the compiler to keep
+ * full FP32 throughout. */
+#define GLSL_FRAG_HEADER	"#version 430 core\nprecision highp float;\n"
 /* Cutout shaders that use `discard` MUST NOT force early_fragment_tests:
  * early tests run depth+stencil — and write them — BEFORE the fragment
  * shader executes; a later `discard` cannot undo the depth write that
