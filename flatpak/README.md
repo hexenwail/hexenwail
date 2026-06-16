@@ -31,5 +31,8 @@ For Portal of Praevus, add `~/.hexen2/portals/pak3.pak`.
 
 - SDL3 and FluidSynth are built from source as Flatpak modules
 - ALSA is disabled (PulseAudio/PipeWire via Flatpak socket)
-- Soundfont not bundled — place `soundfont.sf2` in game dir or set `snd_soundfont` cvar
+- A General MIDI soundfont (TimGM6mb, GPL-2) is bundled at
+  `/app/share/soundfonts/default.sf2` so MIDI music works out of the box.
+  Override it with the `snd_soundfont` cvar or by placing `soundfont.sf2`
+  in the game dir.
 - Gamepad support via `--device=all` permission (Freedesktop 25.08 dropped `--device=input`)
