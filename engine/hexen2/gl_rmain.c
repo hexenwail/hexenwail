@@ -104,7 +104,17 @@ cvar_t	r_speeds = {"r_speeds", "0", CVAR_NONE};
 cvar_t	r_speeds_gpufinish = {"r_speeds_gpufinish", "0", CVAR_NONE};	/* diagnostic: glFinish() at start of chains to attribute GPU sync */
 cvar_t	r_waterwarp = {"r_waterwarp", "0", CVAR_ARCHIVE};
 cvar_t	r_motionblur = {"r_motionblur", "0", CVAR_ARCHIVE};
-cvar_t	r_alphatocoverage = {"r_alphatocoverage", "1", CVAR_ARCHIVE};
+/* Default OFF.  GL_SAMPLE_ALPHA_TO_COVERAGE only does anything on a
+ * multisampled target, and the main scene FBO force-disables MSAA
+ * (gl_postprocess.c PP_CreateFBO).  But with a vanilla config
+ * (PP_NeedsPostProcess() false) the world renders straight to the default
+ * framebuffer, which IS multisampled when the user enables antialiasing.
+ * There, A2C turned the partial alpha of translucent glass/water into a
+ * dithered screen-door (horizontal gray lines) — the long-standing "glass"
+ * bug that only appeared with AA on (uhexen2-zroc).  A2C buys antialiased
+ * cutout edges on alpha-tested fences, but the project relies on FXAA for
+ * edge AA, so default it off; users can re-enable with r_alphatocoverage 1. */
+cvar_t	r_alphatocoverage = {"r_alphatocoverage", "0", CVAR_ARCHIVE};
 /* uhexen2-khsa: Ironwail-style minimum-light floor for alias models.
  * Ironwail itself only floors viewmodel (sum<72) and players (sum<24);
  * Mathuzzz's r7 dump showed CASTLE_TR.MDL sampling at LC=(11,7,5) sum=23,
