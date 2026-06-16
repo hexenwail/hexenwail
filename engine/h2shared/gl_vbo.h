@@ -47,6 +47,10 @@ void	GL_SetAlphaThreshold (float threshold);
  * preserve color.a (ENTALPHA / DRF_TRANSLUCENT translucent paths).  Negative
  * leaves shader default.  uhexen2-khsa r13. */
 void	GL_SetForceOpaqueAlpha (float v);
+/* uhexen2-khsa r21 probe: 1 = skip v_color RGB multiply in salias_frag (alias
+ * batch renders fullbright); 0 = normal lighting.  Negative leaves shader
+ * default. */
+void	GL_SetAliasFullbright (float v);
 
 /* Init / shutdown */
 void	GL_VBO_Init (void);

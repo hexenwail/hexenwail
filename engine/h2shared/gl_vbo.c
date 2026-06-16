@@ -51,6 +51,9 @@ static float	imm_alpha_threshold = -1.0f;	/* -1 = use shader default */
  * force fragColor.a = 1.0 (opaque) or preserve color.a (translucent).  Set
  * by GL_SetForceOpaqueAlpha; flushed in GL_ImmEnd. */
 static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
+/* uhexen2-khsa r21: per-batch alias fullbright probe.  -1 = leave shader
+ * default (0 = normal lighting); 0/1 = explicit value for this batch. */
+static float	imm_alias_fullbright = -1.0f;
 
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
@@ -198,6 +201,13 @@ void GL_SetForceOpaqueAlpha (float v)
 	imm_force_opaque_alpha = v;
 }
 
+/* uhexen2-khsa r21: 1.0 = render alias batch fullbright (no v_color RGB
+ * multiply), 0.0 = normal lighting. */
+void GL_SetAliasFullbright (float v)
+{
+	imm_alias_fullbright = v;
+}
+
 void GL_ImmColor4f (float r, float g, float b, float a)
 {
 	imm_cur_color[0] = r;
@@ -281,6 +291,7 @@ static float	imm_cache_mvp[16];
 static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
+static float	imm_cache_alias_fullbright = -2.0f;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
@@ -304,6 +315,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_shader = NULL;
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
+	imm_cache_alias_fullbright = -2.0f;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
@@ -348,6 +360,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_shader = shader;
 		imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
+	imm_cache_alias_fullbright = -2.0f;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
@@ -391,6 +404,13 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_force_opaque_alpha, imm_force_opaque_alpha);
 		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
+	}
+
+	if (imm_alias_fullbright >= 0.0f && shader->u_alias_fullbright >= 0 &&
+	    imm_alias_fullbright != imm_cache_alias_fullbright)
+	{
+		glUniform1f_fp(shader->u_alias_fullbright, imm_alias_fullbright);
+		imm_cache_alias_fullbright = imm_alias_fullbright;
 	}
 
 	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)

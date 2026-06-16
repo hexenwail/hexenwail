@@ -362,6 +362,7 @@ void R_Init (void)
 	{ extern cvar_t r_brush_inst_offset; Cvar_RegisterVariable (&r_brush_inst_offset); }
 	Cvar_RegisterVariable (&r_alphatocoverage);
 	{ extern cvar_t r_alias_minlight; Cvar_RegisterVariable (&r_alias_minlight); }
+	{ extern cvar_t r_alias_fullbright; Cvar_RegisterVariable (&r_alias_fullbright); }	/* uhexen2-khsa r21 probe */
 	{ extern cvar_t r_gl_dither;
 	  Cvar_RegisterVariable (&r_gl_dither);
 	  Cvar_SetCallback (&r_gl_dither, R_GLDitherChanged_f);
