@@ -57,6 +57,8 @@ static float	imm_alias_fullbright = -1.0f;
 /* uhexen2-khsa r22 probes — same convention. */
 static float	imm_alias_nofog = -1.0f;
 static float	imm_alias_r6_mode = -1.0f;
+/* uhexen2-khsa r28 probe — stochastic alpha-test. */
+static float	imm_alias_stochastic_alpha = -1.0f;
 
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
@@ -224,6 +226,12 @@ void GL_SetAliasR6Mode (float v)
 	imm_alias_r6_mode = v;
 }
 
+/* uhexen2-khsa r28: 1.0 = hash-based stochastic alpha-test, 0.0 = binary. */
+void GL_SetAliasStochasticAlpha (float v)
+{
+	imm_alias_stochastic_alpha = v;
+}
+
 void GL_ImmColor4f (float r, float g, float b, float a)
 {
 	imm_cur_color[0] = r;
@@ -310,6 +318,7 @@ static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_fullbright = -2.0f;
 static float	imm_cache_alias_nofog = -2.0f;
 static float	imm_cache_alias_r6_mode = -2.0f;
+static float	imm_cache_alias_stochastic_alpha = -2.0f;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
@@ -336,6 +345,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alias_fullbright = -2.0f;
 	imm_cache_alias_nofog = -2.0f;
 	imm_cache_alias_r6_mode = -2.0f;
+	imm_cache_alias_stochastic_alpha = -2.0f;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
@@ -383,6 +393,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	imm_cache_alias_fullbright = -2.0f;
 	imm_cache_alias_nofog = -2.0f;
 	imm_cache_alias_r6_mode = -2.0f;
+	imm_cache_alias_stochastic_alpha = -2.0f;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
@@ -447,6 +458,13 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_alias_r6_mode, imm_alias_r6_mode);
 		imm_cache_alias_r6_mode = imm_alias_r6_mode;
+	}
+
+	if (imm_alias_stochastic_alpha >= 0.0f && shader->u_alias_stochastic_alpha >= 0 &&
+	    imm_alias_stochastic_alpha != imm_cache_alias_stochastic_alpha)
+	{
+		glUniform1f_fp(shader->u_alias_stochastic_alpha, imm_alias_stochastic_alpha);
+		imm_cache_alias_stochastic_alpha = imm_alias_stochastic_alpha;
 	}
 
 	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
