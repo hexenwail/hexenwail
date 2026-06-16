@@ -24,6 +24,7 @@
 
 #include <fluidsynth.h>
 #include <sys/stat.h>
+#include <unistd.h>	/* readlink */
 
 static fluid_settings_t	*fs_settings;
 static fluid_synth_t	*fs_synth;
@@ -61,15 +62,37 @@ static qboolean file_exists (const char *path)
 	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
 }
 
+/* Resolve the directory the running executable lives in (via /proc/self/exe).
+ * basedir is getcwd(), which is not necessarily the install dir, so a
+ * soundfont bundled next to the binary won't be found through basedir if the
+ * game was launched from elsewhere.  Returns NULL on failure. */
+static const char *exe_dir (void)
+{
+	static char dir[MAX_OSPATH];
+	ssize_t len;
+	char *slash;
+
+	len = readlink("/proc/self/exe", dir, sizeof(dir) - 1);
+	if (len <= 0 || len >= (ssize_t)sizeof(dir) - 1)
+		return NULL;
+	dir[len] = '\0';
+	slash = strrchr(dir, '/');
+	if (!slash)
+		return NULL;
+	*slash = '\0';
+	return dir;
+}
+
 /* Try to find a soundfont, checking in order:
  * 1. snd_soundfont cvar (user override)
- * 2. data1/soundfont.sf2 (game directory)
+ * 2. soundfont.sf2/.sf3 next to the binary or in basedir / data1
  * 3. SOUNDFONT_PATH compile-time define (Nix builds)
  * 4. Common system paths
  */
 static const char *find_soundfont (void)
 {
 	static char sf_path[MAX_OSPATH];
+	const char *exedir;
 	int i;
 
 	/* 1. user-specified path */
@@ -80,7 +103,24 @@ static const char *find_soundfont (void)
 		Con_Printf("FluidSynth: snd_soundfont '%s' not found\n", snd_soundfont.string);
 	}
 
-	/* 2. check game directory for a bundled soundfont, in a few common
+	/* 2a. next to the executable itself (portable installs: the bundled
+	 * soundfont ships here, regardless of the working directory). */
+	exedir = exe_dir();
+	if (exedir)
+	{
+		static const char *exe_names[] = {
+			"%s/soundfont.sf2", "%s/soundfont.sf3", NULL
+		};
+		int n;
+		for (n = 0; exe_names[n]; n++)
+		{
+			q_snprintf(sf_path, sizeof(sf_path), exe_names[n], exedir);
+			if (file_exists(sf_path))
+				return sf_path;
+		}
+	}
+
+	/* 2b. check game directory for a bundled soundfont, in a few common
 	 * spots and extensions: next to the binary and inside data1. */
 	{
 		static const char *base_names[] = {
