@@ -87,7 +87,11 @@ const int	tryrates[] = { 44100, 48000, 22050, 11025, 96000, 24000, 16000, 8000 }
 const int	MAX_TRYRATES = sizeof(tryrates)/sizeof(tryrates[0]);
 
 cvar_t		bgmvolume = {"bgmvolume", "1", CVAR_ARCHIVE};
-cvar_t		bgmtype = {"bgmtype", "cd", CVAR_ARCHIVE};	// cd or midi
+cvar_t		bgmtype = {"bgmtype", "midi", CVAR_ARCHIVE};	// cd or midi -- defaults to midi:
+								// SDL3 dropped CD-audio support (cd_sdl.c falls back to
+								// cd_null), so "cd" has no working playback path. "midi"
+								// drives the native synth (Windows) / FluidSynth (Linux)
+								// and, with bgm_extmusic, named ogg/mp3/flac in music/.
 cvar_t		sfxvolume = {"volume", "0.7", CVAR_ARCHIVE};
 
 cvar_t		precache = {"precache", "1", CVAR_NONE};

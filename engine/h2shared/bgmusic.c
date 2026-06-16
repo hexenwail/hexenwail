@@ -275,6 +275,30 @@ qboolean BGM_Init (void)
 		}
 	}
 
+	/* Report the active music capabilities at a normal log level so a
+	 * player troubleshooting "no music" can see what is actually wired
+	 * up without enabling developer mode. */
+	if (midi_drivers && midi_drivers->desc)
+		Con_Printf("BGM: MIDI driver: %s\n", midi_drivers->desc);
+	else
+		Con_Printf("BGM: MIDI driver: none (midi-named music will not play)\n");
+	{
+		char codecs[256];
+		music_handler_t *h;
+		codecs[0] = '\0';
+		for (h = music_handlers; h; h = h->next)
+		{
+			if (h->player != BGM_STREAMER || !h->ext)
+				continue;
+			if (codecs[0])
+				q_strlcat(codecs, " ", sizeof(codecs));
+			q_strlcat(codecs, h->ext, sizeof(codecs));
+		}
+		Con_Printf("BGM: stream codecs: %s\n", codecs[0] ? codecs : "none");
+	}
+	if (no_extmusic)
+		Con_Printf("BGM: external music disabled (-noextmusic)\n");
+
 	return true;
 }
 
