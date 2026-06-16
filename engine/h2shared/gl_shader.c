@@ -272,6 +272,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
+	p->u_alias_fullbright = glGetUniformLocation_fp(p->program, "u_alias_fullbright");
 }
 
 /* ------------------------------------------------------------------ */
@@ -587,13 +588,23 @@ static const char salias_frag[] =
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
+	"uniform float u_alias_fullbright;\n"	/* uhexen2-khsa r21 */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"    vec4 color = tex * v_color;\n"
+	/* uhexen2-khsa r21: probe gate for the NVIDIA screen-door bisect.
+	 * When u_alias_fullbright > 0.5, skip the v_color RGB multiply so
+	 * fragments render at the texel's raw RGB (= r6 probe behavior on
+	 * the lighting side).  Alpha still respects v_color.a so EF_HOLEY
+	 * discard and ENTALPHA continue to work.  If Mathuzzz sees the
+	 * dither disappear with r_alias_fullbright 1, v_color is the
+	 * trigger and we dig into vertex-color precision / interpolation. */
+	"    vec4 color = (u_alias_fullbright > 0.5)\n"
+	"                 ? vec4(tex.rgb, tex.a * v_color.a)\n"
+	"                 : tex * v_color;\n"
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
 	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
 	 * Confirmed via bisect (bobberb): some alias models route through
@@ -1078,6 +1089,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
+	p->u_alias_fullbright = glGetUniformLocation_fp(prog, "u_alias_fullbright");
 
 	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);

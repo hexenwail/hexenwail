@@ -120,6 +120,13 @@ cvar_t	r_alias_minlight = {"r_alias_minlight", "24", CVAR_ARCHIVE};
  * screen-door pattern.  Kept opt-in because r16 (which disabled it
  * unconditionally) regressed alpha-test cutouts on a different GPU. */
 cvar_t	r_gl_dither = {"r_gl_dither", "1", CVAR_ARCHIVE};
+/* uhexen2-khsa r21: probe gate that skips the v_color RGB multiply in
+ * salias_frag.  Default 0 = normal lighting (tex * v_color).  Set to 1
+ * to render alias models fullbright (texel RGB) — used to A/B test
+ * whether the v_color multiply is what triggers Mathuzzz's NVIDIA
+ * screen-door pattern.  Discard + ENTALPHA continue to work via
+ * tex.a * v_color.a even when fullbright. */
+cvar_t	r_alias_fullbright = {"r_alias_fullbright", "0", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
@@ -1165,6 +1172,10 @@ static void R_DrawAliasModel (entity_t *e)
 	float		xyfact = 1.0, zfact = 1.0; // avoid compiler warning
 	int		skinnum;
 	int		mls;
+
+	/* uhexen2-khsa r21: push fullbright probe state for the legacy
+	 * alias immediate-mode batch.  Cvar-driven; default 0 = normal. */
+	GL_SetAliasFullbright(r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
 
 	clmodel = e->model;
 
@@ -2704,6 +2715,10 @@ static void R_DrawAliasInstanced (void)
 	 * ENTALPHA), so we can force fragColor.a=1 unconditionally here. */
 	if (prog->u_force_opaque_alpha >= 0)
 		glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
+	/* uhexen2-khsa r21 probe: push fullbright cvar value for the instanced batch. */
+	if (prog->u_alias_fullbright >= 0)
+		glUniform1f_fp(prog->u_alias_fullbright,
+			       r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -2862,6 +2877,13 @@ static void R_DrawAliasInstanced (void)
 			 * want fragColor.a to leak garbage into FB.a. */
 			if (prog->u_force_opaque_alpha >= 0)
 				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
+			/* uhexen2-khsa r21 probe: fullbright cvar value for the additive pass.
+			 * This pass is already drawing texel RGB directly (it's the fullbright
+			 * pixels of the model), so the value mostly matters when r_alias_fullbright=1
+			 * makes the MAIN pass also skip v_color — keep state consistent here. */
+			if (prog->u_alias_fullbright >= 0)
+				glUniform1f_fp(prog->u_alias_fullbright,
+					       r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
 
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);
