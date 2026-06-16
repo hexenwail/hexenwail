@@ -96,6 +96,22 @@ modules:
         tag: libxmp-4.6.3
         commit: bed660f8e530d399c38f27a5a7732f4e79740585
 
+  # General MIDI soundfont for FluidSynth.  Without a soundfont FluidSynth
+  # fails to initialise, no MIDI driver registers, and every MIDI track
+  # reports "Couldn't handle music file <name>" -- there is no MID streamer
+  # codec, so midi/<name>.mid can only play through FluidSynth.  Bare systems
+  # (Steam Deck, fresh installs) ship no system soundfont, so we bundle one.
+  # TimGM6mb (Tim Brechbill, GPL-2) is ~6 MB.  Installed as default.sf2, which
+  # find_soundfont() in midi_fluid.c probes first under /app/share/soundfonts.
+  - name: timgm6mb-soundfont
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 TimGM6mb.sf2 /app/share/soundfonts/default.sf2
+    sources:
+      - type: archive
+        url: https://deb.debian.org/debian/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz
+        sha256: af8f3a00e416dfb262bcaa904a1c84df04a51b72bbc1313aed012bc754bdf99b
+
   - name: hexenwail
     buildsystem: cmake-ninja
     subdir: engine
@@ -105,6 +121,7 @@ modules:
       - -DUSE_CODEC_OPUS=ON
       - -DUSE_CODEC_XMP=ON
       - -DUSE_ALSA=OFF
+      - -DSOUNDFONT_PATH=/app/share/soundfonts/default.sf2
     sources:
       - type: dir
         path: ..
