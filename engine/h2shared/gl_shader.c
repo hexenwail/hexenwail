@@ -289,7 +289,15 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #define GLSL_EARLY_Z		""
 #define GLSL_EARLY_Z_OPAQUE	""
 #else
-#define GLSL_VERT_HEADER	"#version 430 core\n"
+/* uhexen2-khsa r27: explicit `precision highp float;` in the vertex
+ * shader header too.  r23 added it only to the fragment shader, but
+ * Mathuzzz's dither survived — and interpolated varyings (v_color,
+ * v_fogdist) are produced by the vertex shader.  If the vertex stage
+ * emits them at mediump, the fragment stage's highp can't recover the
+ * lost precision: the interpolator's input is already noisy.  Force
+ * highp on both stages so the varying interpolation stays FP32 end-
+ * to-end. */
+#define GLSL_VERT_HEADER	"#version 430 core\nprecision highp float;\n"
 /* uhexen2-khsa r23: explicit `precision highp float;` in the fragment
  * shader header.  GLSL 4.30 core defaults to highp, but some NVIDIA
  * drivers have been observed to silently demote interpolated
