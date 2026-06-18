@@ -1195,7 +1195,10 @@ static void AliasModelGetLightInfo (entity_t *e)
 	if (gl_lightmap_format == GL_RGBA)
 		ambientlight = shadelight = R_LightPointColor (adjust_origin);
 	else
+	{
 		ambientlight = shadelight = R_LightPoint (adjust_origin);
+		lightcolor[0] = lightcolor[1] = lightcolor[2] = ambientlight;
+	}
 }
 
 static void R_DrawAliasModel (entity_t *e)
