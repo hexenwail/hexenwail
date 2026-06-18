@@ -2222,6 +2222,31 @@ static void M_Menu_Display_f (void)
 #endif
 }
 
+/* Detect the active display preset by matching key cvars.
+ * Returns 0=User, 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra. */
+static int M_Display_DetectPreset (void)
+{
+	int se = (int)r_softemu.value;
+	float sc = r_scale.value;
+	int glow = (int)Cvar_VariableValue("gl_glows");
+	float mb = Cvar_VariableValue("r_motionblur");
+	int lmb = r_lightmap_bicubic.integer;
+
+	if (sc <= 0.25f && se == 1 && !lmb)
+		return 1;	/* Crunchy */
+	if (sc <= 0.5f && se == 2 && !lmb)
+		return 2;	/* Retro */
+	if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && glow && !lmb)
+		return 3;	/* Faithful */
+	if (sc >= 1.0f && se == 0 && gl_filter_idx == 2 && glow && !lmb)
+		return 4;	/* Clean */
+	if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0 && lmb)
+		return 5;	/* Modern */
+	if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb > 0 && lmb)
+		return 6;	/* Ultra */
+	return 0;	/* User — custom settings, no preset matches */
+}
+
 static void M_Display_AdjustSliders (int dir)
 {
 	float	f;
@@ -2233,9 +2258,15 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_PRESET:
 	{
 		/* Cycle through presets (skip "User" — that's auto-detected).
-		 * 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra. */
+		 * 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra.
+		 * Snap to the actual cvar state before stepping so the cycle
+		 * starts from where we really are, not a stale static.  When
+		 * detection returns 0 (User) keep the last known preset. */
 
 		static int preset = 5;
+		int detected = M_Display_DetectPreset();
+		if (detected != 0)
+			preset = detected;
 		preset += dir;
 		if (preset < 1) preset = 6;
 		if (preset > 6) preset = 1;
@@ -2467,28 +2498,11 @@ static void M_Display_Draw (void)
 
 	if (!M_Display_IsSkip(DISP_PRESET))
 	{
-		/* detect current preset by matching key cvars */
-		int se = (int)r_softemu.value;
-		float sc = r_scale.value;
-		int glow = (int)Cvar_VariableValue("gl_glows");
-		float mb = Cvar_VariableValue("r_motionblur");
-		int lmb = r_lightmap_bicubic.integer;
-
+		static const char *preset_names[] = {
+			"User", "Crunchy", "Retro", "Faithful", "Clean", "Modern", "Ultra"
+		};
 		M_Print (76, 92 + 8*DISP_PRESET, disp_labels[DISP_PRESET]);
-		if (sc <= 0.25f && se == 1 && !lmb)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
-		else if (sc <= 0.5f && se == 2 && !lmb)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && glow && !lmb)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx == 2 && glow && !lmb)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0 && lmb)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb > 0 && lmb)
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Ultra");
-		else
-			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
+		M_PrintWhite (220, 92 + 8*DISP_PRESET, preset_names[M_Display_DetectPreset()]);
 	}
 
 	if (!M_Display_IsSkip(DISP_GAMMA))
