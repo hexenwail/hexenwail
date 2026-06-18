@@ -315,6 +315,13 @@ cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pix
  * world.  (Polarity flipped from upstream uHexen2 in uhexen2-f29y.) */
 cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};
 cvar_t	gl_overbright = {"gl_overbright", "1", CVAR_ARCHIVE};	// world/brush lightmap overbright (Ironwail-style: build at >>(7+gl_overbright), shader multiplies by 1<<gl_overbright)
+/* r_lightmap_bicubic: shader-side B-spline bicubic filter for the lightmap
+ * atlas sample.  0 = hardware bilinear (default), 1 = 4-tap weighted-bilinear
+ * bicubic (Sigg/Hadwiger).  Smooths the 16-luxel lightmap grid on big flat
+ * walls — most visible at low render scales.  Cost is ~3 extra texture
+ * fetches per world-fragment, gated by a uniform-static branch so the
+ * bilinear path is unaffected.  uhexen2-b2f0. */
+cvar_t	r_lightmap_bicubic = {"r_lightmap_bicubic", "0", CVAR_ARCHIVE};
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};		// FXAA post-process anti-aliasing
 cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to disable)
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
@@ -4186,6 +4193,28 @@ static void R_SetupFrame (void)
 			{
 				glUseProgram_fp(gl_shader_world_oit.program);
 				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
+			}
+		}
+		/* Per-frame world bicubic lightmap toggle.  Same plumbing as
+		 * u_overbright above: set on all three world program variants so
+		 * the OIT and brush-batch paths pick it up without per-bind
+		 * uploads.  uhexen2-b2f0. */
+		{
+			float bicubic = r_lightmap_bicubic.integer ? 1.0f : 0.0f;
+			if (gl_shader_world.program && gl_shader_world.u_lightmap_bicubic >= 0)
+			{
+				glUseProgram_fp(gl_shader_world.program);
+				glUniform1f_fp(gl_shader_world.u_lightmap_bicubic, bicubic);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightmap_bicubic >= 0)
+			{
+				glUseProgram_fp(gl_shader_world_opaque.program);
+				glUniform1f_fp(gl_shader_world_opaque.u_lightmap_bicubic, bicubic);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightmap_bicubic >= 0)
+			{
+				glUseProgram_fp(gl_shader_world_oit.program);
+				glUniform1f_fp(gl_shader_world_oit.u_lightmap_bicubic, bicubic);
 			}
 		}
 		glUseProgram_fp(0);
