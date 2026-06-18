@@ -1,0 +1,33 @@
+name: CI (mathuzzz_mdl_fixes)
+
+on:
+  push:
+    branches: [mathuzzz_mdl_fixes]
+  pull_request:
+    branches: [mathuzzz_mdl_fixes]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@v17
+        continue-on-error: true
+        with:
+          name: hexenwail
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Build Linux
+        run: nix build .#nixos --print-build-logs
+
+      - name: Smoke test
+        run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+
+      - name: Build Windows
+        run: nix build .#win64 --print-build-logs
