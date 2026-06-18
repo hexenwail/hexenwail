@@ -31,3 +31,34 @@ jobs:
 
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
+
+      - name: Package artifacts
+        run: |
+          nix build .#release --print-build-logs
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          # Linux: single binary (NixOS-patched, works on most distros)
+          mkdir linux-pkg
+          cp result/release/linux-x86_64/bin/glhexen2 linux-pkg/
+          cp result/release/BUILD_INFO.txt linux-pkg/
+
+          # Windows: glh2.exe + all DLLs, self-contained
+          mkdir win-pkg
+          cp result/release/windows-x86_64/bin/* win-pkg/
+          cp result/release/BUILD_INFO.txt win-pkg/
+          echo "Place pak0.pak and pak1.pak in a data1/ folder next to glh2.exe." \
+            > win-pkg/README.txt
+
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexenwail-mdl-linux-${{ env.SHORT_SHA }}
+          path: linux-pkg/
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexenwail-mdl-windows-${{ env.SHORT_SHA }}
+          path: win-pkg/
