@@ -756,6 +756,7 @@ qmodel_t *Mod_FindName (const char *name);
 void	*Mod_Extradata (qmodel_t *mod);	// handles caching
 void	Mod_TouchModel (const char *name);
 void	Mod_ReloadTextures (void);
+void	Mod_ReuploadAliasSkins (qmodel_t *mod);
 
 mleaf_t *Mod_PointInLeaf (vec3_t p, qmodel_t *model);
 byte	*Mod_LeafPVS (mleaf_t *leaf, qmodel_t *model);

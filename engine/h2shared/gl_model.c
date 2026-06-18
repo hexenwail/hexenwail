@@ -2619,6 +2619,54 @@ skin_too_large:
 	return NULL;
 }
 
+/* Re-read the model file and re-upload alias skins with current mod->flags.
+ * Called from PF_pimpmodel when EF_HOLEY is newly added to a model that was
+ * originally uploaded without it.  TexMgr detects the TEX_HOLEY flag
+ * mismatch on the existing gltexture_t and re-uploads with correct alpha. */
+void Mod_ReuploadAliasSkins (qmodel_t *mod)
+{
+	byte		stackbuf[65536];
+	byte		*buf;
+	int		mod_type;
+	aliashdr_t	*saved_pheader;
+	qmodel_t	*saved_loadmodel;
+
+	if (!mod || mod->type != mod_alias)
+		return;
+
+	saved_pheader = pheader;
+	saved_loadmodel = loadmodel;
+
+	pheader = (aliashdr_t *)Mod_Extradata(mod);
+	if (!pheader)
+		goto restore;
+
+	buf = FS_LoadStackFile(mod->name, stackbuf, sizeof(stackbuf), NULL);
+	if (!buf)
+	{
+		Con_Printf("Mod_ReuploadAliasSkins: couldn't reload %s\n", mod->name);
+		goto restore;
+	}
+
+	loadmodel = mod;
+	mod_type = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
+
+	if (mod_type == IDPOLYHEADER)
+	{
+		mdl_t *pinmodel = (mdl_t *)buf;
+		Mod_LoadAllSkins(pheader->numskins, (daliasskintype_t *)&pinmodel[1], mod->flags);
+	}
+	else if (mod_type == RAPOLYHEADER)
+	{
+		newmdl_t *pinmodel = (newmdl_t *)buf;
+		Mod_LoadAllSkins(pheader->numskins, (daliasskintype_t *)&pinmodel[1], mod->flags);
+	}
+
+restore:
+	pheader = saved_pheader;
+	loadmodel = saved_loadmodel;
+}
+
 //=========================================================================
 
 /*

@@ -474,6 +474,11 @@ static void PF_pimpmodel (void)
 	 * uhexen2-oq0a / regression fix uhexen2-oq0a-followup. */
 	mod->flags = mod->orig_flags | (new_flags & 0x01ffffff);
 
+	/* If EF_HOLEY was just granted by pimpmodel, the skin was uploaded
+	 * without per-pixel alpha.  Re-upload now so discard can fire. */
+	if ((mod->flags & EF_HOLEY) && !(mod->orig_flags & EF_HOLEY))
+		Mod_ReuploadAliasSkins(mod);
+
 	/* Keep the per-entity trail_flags override too as a more-specific
 	 * layer on top of the shared mod->flags write.  R_GetEntityModelFlags
 	 * prefers this when present, so a single entity can deviate from
