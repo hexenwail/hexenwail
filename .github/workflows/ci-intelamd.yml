@@ -1,0 +1,62 @@
+name: CI (master_good_intelamd)
+
+on:
+  push:
+    branches: [master_good_intelamd]
+  pull_request:
+    branches: [master_good_intelamd]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@v17
+        continue-on-error: true
+        with:
+          name: hexenwail
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Build Linux
+        run: nix build .#nixos --print-build-logs
+
+      - name: Smoke test
+        run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+
+      - name: Build Windows
+        run: nix build .#win64 --print-build-logs
+
+      - name: Package artifacts
+        run: |
+          nix build .#release --print-build-logs
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          mkdir linux-pkg
+          cp result/release/linux-x86_64/bin/glhexen2 linux-pkg/
+          cp result/release/BUILD_INFO.txt linux-pkg/
+
+          mkdir win-pkg
+          cp result/release/windows-x86_64/bin/* win-pkg/
+          cp result/release/BUILD_INFO.txt win-pkg/
+          echo "Place pak0.pak and pak1.pak in a data1/ folder next to glh2.exe." \
+            > win-pkg/README.txt
+
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexenwail-intelamd-linux-${{ env.SHORT_SHA }}
+          path: linux-pkg/
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexenwail-intelamd-windows-${{ env.SHORT_SHA }}
+          path: win-pkg/
