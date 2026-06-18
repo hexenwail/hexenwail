@@ -2255,6 +2255,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_lightmap_bicubic", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
@@ -2276,6 +2277,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_lightmap_bicubic", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
@@ -2297,6 +2299,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_lightmap_bicubic", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
@@ -2316,6 +2319,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", 1);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_lightmap_bicubic", 0);
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
@@ -2336,6 +2340,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
+			Cvar_SetValue ("r_lightmap_bicubic", 1);
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
@@ -2356,6 +2361,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_texture_anisotropy", gl_max_anisotropy);
 			Cvar_SetValue ("gl_fullbrights", 1);
 			Cvar_SetValue ("gl_fxaa", 1);
+			Cvar_SetValue ("r_lightmap_bicubic", 1);
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
@@ -2466,19 +2472,20 @@ static void M_Display_Draw (void)
 		float sc = r_scale.value;
 		int glow = (int)Cvar_VariableValue("gl_glows");
 		float mb = Cvar_VariableValue("r_motionblur");
+		int lmb = r_lightmap_bicubic.integer;
 
 		M_Print (76, 92 + 8*DISP_PRESET, disp_labels[DISP_PRESET]);
-		if (sc <= 0.25f && se == 1)
+		if (sc <= 0.25f && se == 1 && !lmb)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Crunchy");
-		else if (sc <= 0.5f && se == 2)
+		else if (sc <= 0.5f && se == 2 && !lmb)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Retro");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && glow)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && glow && !lmb)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Faithful");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx == 2 && glow)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx == 2 && glow && !lmb)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Clean");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0 && lmb)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Modern");
-		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb > 0)
+		else if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb > 0 && lmb)
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "Ultra");
 		else
 			M_PrintWhite (220, 92 + 8*DISP_PRESET, "User");
@@ -2728,6 +2735,7 @@ enum
 	REND_DITHER,
 	REND_TEXFILTER,
 	REND_ANISOTROPY,
+	REND_LMBICUBIC,
 	REND_PARTICLES,
 	REND_FULLBRIGHTS,
 	REND_SHADOWS,
@@ -2754,6 +2762,7 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Dither Amount :",	/* REND_DITHER */
 	"Textures      :",	/* REND_TEXFILTER */
 	"Anisotropy    :",	/* REND_ANISOTROPY */
+	"Smooth Lmaps  :",	/* REND_LMBICUBIC */
 	"Particles     :",	/* REND_PARTICLES */
 	"Fullbrights   :",	/* REND_FULLBRIGHTS */
 	"Shadows       :",	/* REND_SHADOWS */
@@ -2836,6 +2845,9 @@ static void M_Rendering_AdjustSliders (int dir)
 		break;
 	case REND_ANISOTROPY:
 		VID_MenuAdjustAnisotropy (dir);
+		break;
+	case REND_LMBICUBIC:
+		Cvar_SetValue ("r_lightmap_bicubic", !r_lightmap_bicubic.integer);
 		break;
 	case REND_PARTICLES:
 		Cvar_SetValue ("gl_particles", !gl_particles.integer);
@@ -2973,6 +2985,12 @@ static void M_Rendering_Draw (void)
 			M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, va("%dx", aniso));
 		else
 			M_PrintWhite (220, 92 + 8*REND_ANISOTROPY, "N/A");
+	}
+
+	if (!M_Rendering_IsSkip(REND_LMBICUBIC))
+	{
+		M_Print (76, 92 + 8*REND_LMBICUBIC, rend_labels[REND_LMBICUBIC]);
+		M_DrawCheckbox (220, 92 + 8*REND_LMBICUBIC, r_lightmap_bicubic.integer);
 	}
 
 	if (!M_Rendering_IsSkip(REND_PARTICLES))

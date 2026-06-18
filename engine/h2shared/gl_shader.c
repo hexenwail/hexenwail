@@ -281,6 +281,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
+	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_fullbright = glGetUniformLocation_fp(p->program, "u_alias_fullbright");
 	p->u_alias_nofog      = glGetUniformLocation_fp(p->program, "u_alias_nofog");
@@ -430,6 +431,38 @@ static const char sworld_vert[] =
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
 
+/* 4-tap B-spline bicubic lightmap fetch (Sigg/Hadwiger).  16-luxel Hexen II
+ * lightmaps expose the bilinear lattice on big flat walls; bicubic
+ * smooths it for ~3 extra texture fetches per fragment.  Cost gated by
+ * u_lightmap_bicubic: uniform-static branch -> no work on the bilinear path.
+ * Uses textureSize() so the helper is agnostic to atlas resolution.
+ * uhexen2-b2f0. */
+#define GLSL_BICUBIC_LM_FN \
+	"vec4 BicubicLightmap(sampler2D s, vec2 uv) {\n" \
+	"    vec2 ts = vec2(textureSize(s, 0));\n" \
+	"    vec2 invts = 1.0 / ts;\n" \
+	"    vec2 tc = uv * ts - 0.5;\n" \
+	"    vec2 fr = fract(tc);\n" \
+	"    vec2 ic = floor(tc) + 0.5;\n" \
+	"    vec2 fr2 = fr * fr;\n" \
+	"    vec2 fr3 = fr2 * fr;\n" \
+	"    vec2 omf = 1.0 - fr;\n" \
+	"    vec2 omf3 = omf * omf * omf;\n" \
+	"    vec2 w0 = (1.0/6.0) * omf3;\n" \
+	"    vec2 w1 = (1.0/6.0) * (3.0*fr3 - 6.0*fr2 + 4.0);\n" \
+	"    vec2 w3 = (1.0/6.0) * fr3;\n" \
+	"    vec2 g0 = w0 + w1;\n" \
+	"    vec2 g1 = 1.0 - g0;\n" \
+	"    vec2 h0 = ((w1 / g0) - 1.0) * invts;\n" \
+	"    vec2 h1 = ((w3 / g1) + 1.0) * invts;\n" \
+	"    vec2 base = ic * invts;\n" \
+	"    vec4 c00 = texture(s, vec2(base.x + h0.x, base.y + h0.y));\n" \
+	"    vec4 c10 = texture(s, vec2(base.x + h1.x, base.y + h0.y));\n" \
+	"    vec4 c01 = texture(s, vec2(base.x + h0.x, base.y + h1.y));\n" \
+	"    vec4 c11 = texture(s, vec2(base.x + h1.x, base.y + h1.y));\n" \
+	"    return mix(mix(c00, c10, g1.x), mix(c01, c11, g1.x), g1.y);\n" \
+	"}\n"
+
 /* Procedural underwater caustics — cheap 2-sin product, ~104 world-unit
  * tiling (Hexen II uses 1 unit ≈ 1 inch).  Pow steepens the highlight so
  * the additive contribution looks like crisp light caustics rather than a
@@ -459,6 +492,7 @@ static const char sworld_frag[] =
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
+	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -468,6 +502,7 @@ static const char sworld_frag[] =
 	"flat in uvec4 v_texhandles;\n"
 	"#endif\n"
 	"out vec4 fragColor;\n"
+	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
 	"#if BINDLESS\n"
@@ -475,7 +510,9 @@ static const char sworld_frag[] =
 	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"#endif\n"
-	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
+	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
+	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
+	"        : texture(u_texture1, v_lmcoord);\n"
 	/* Sample the fullbright mask BEFORE the alpha-test discard.  texture()
 	 * uses implicit dFdx/dFdy to pick the mip level; derivatives are
 	 * undefined in a 2x2 quad where some lanes have already discarded, so
@@ -550,6 +587,7 @@ static const char sworld_frag_opaque[] =
 	"uniform float u_alpha_threshold;\n"	/* unused but kept for layout parity */
 	"uniform vec2 u_caustics;\n"		/* x=intensity, y=time (uhexen2-6bfm) */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
+	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -559,6 +597,7 @@ static const char sworld_frag_opaque[] =
 	"flat in uvec4 v_texhandles;\n"
 	"#endif\n"
 	"out vec4 fragColor;\n"
+	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
 	"#if BINDLESS\n"
@@ -566,7 +605,9 @@ static const char sworld_frag_opaque[] =
 	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"#endif\n"
-	"    vec4 lm = texture(u_texture1, v_lmcoord);\n"
+	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
+	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
+	"        : texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"#if BINDLESS\n"

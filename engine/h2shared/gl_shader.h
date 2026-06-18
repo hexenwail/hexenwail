@@ -34,6 +34,7 @@ typedef struct glprogram_s {
 	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
+	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
 	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
 	GLint	u_alias_fullbright; /* alias FS: when > 0.5, color = vec4(tex.rgb, tex.a*v_color.a) — skip the lighting multiply.  Probe for the NVIDIA screen-door bisect (r21 — does v_color RGB cause the dither?). */
 	GLint	u_alias_nofog;	    /* alias FS: when > 0.5, skip the fog mix entirely.  r22 probe — does fog math (exp, mix) trigger the dither even when fog density is 0? */

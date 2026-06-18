@@ -358,6 +358,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_overbright_models);
 	Cvar_RegisterVariable (&gl_overbright);
 	Cvar_SetCallback (&gl_overbright, R_OverbrightChanged);
+	Cvar_RegisterVariable (&r_lightmap_bicubic);
 	Cvar_RegisterVariable (&gl_fxaa);
 	Cvar_RegisterVariable (&gl_lmatlas);
 	Cvar_RegisterVariable (&r_motionblur);
