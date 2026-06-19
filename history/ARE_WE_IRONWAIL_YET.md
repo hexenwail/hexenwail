@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-06-12 (Promote Ironwail `017fdd2` ➖→✅: bead uhexen2-9a1l landed — fullbright sample in `sworld_frag` moved above the alpha-test `discard`, since `texture()`'s implicit dFdx/dFdy is undefined for surviving lanes in a 2×2 quad where peers discarded. Reframe zoom-system "Removed from exclusives" row: intentionally unimplemented for Hexen II, not pending work — bead uhexen2-mfbe demoted to P4.)
+Last updated: 2026-06-19 (MSAA with FBO resolve ✅→➖: vestigial window MSAA dropped in `5b6d57ec4`, 'Antialiasing' menu now routes to FXAA — we never had a multisampled scene FBO, only a multisampled window surface that caused the glass/screen-door bug. Added two Hexenwail exclusives: `r_lightmap_bicubic` bicubic lightmap filter (`f52826282`, uhexen2-b2f0) and `r_alias_stochastic_alpha` Wronski/Wyman hashed alpha-test probe (`c1fef9dfa`). Prior: promoted Ironwail `017fdd2` ➖→✅ — fullbright sample in `sworld_frag` moved above the alpha-test `discard`.)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -13,14 +13,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
 | Rendering — GPU Pipeline | 11 | 2 | 1 | 0 |
-| Rendering — Visual/Shading | 24 | 0 | 0 | 0 |
+| Rendering — Visual/Shading | 23 | 0 | 0 | 1 |
 | Performance / Engine | 11 | 0 | 0 | 1 |
 | UX / Menus / HUD | 24 | 0 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **83** | **2** | **1** | **8** |
+| **TOTAL** | **82** | **2** | **1** | **9** |
 
 **Parity: ~97% ported, 2% partial, 1% missing** (excluding N/A)
 
@@ -66,7 +66,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Render scale | ✅ | `r_scale`, FBO pipeline |
 | Software rendering emulation | ✅ | `r_softemu` (dithered, banded, palette LUT) |
 | Post-process pipeline | ✅ | Gamma, contrast, palette, dither, HDR |
-| MSAA with FBO resolve | ✅ | Multisampled scene FBO |
+| MSAA with FBO resolve | ➖ | Hexenwail uses FXAA instead. The scene FBO was never multisampled (`PP_CreateFBO` uses `samples=0`); the SDL window previously accepted MSAA hints when 'Antialiasing' was on, but that multisampled the default framebuffer only — causing the glass/screen-door bug via `GL_SAMPLE_ALPHA_TO_COVERAGE` (uhexen2-zroc). Vestigial window MSAA dropped in commit `5b6d57ec4`; 'Antialiasing' menu item now routes to FXAA. |
 | Gun FOV scale | ✅ | `cl_gun_fovscale` — 0–1 distortion correction blend |
 | Animated sky wind system | ✅ | Global `r_skyspeed_back`/`r_skyspeed_front` (defaults 8/16) plus per-skybox wind via Ironwail-format `gfx/env/<name>wind.cfg` (`skywind dist yaw period pitch`) — parsed by `Sky_LoadWindCfg`, triangle-wave phase oscillation via `Sky_UpdateWind`, scaled by global `r_skywind` (default 1), pushed to `u_wind` on `gl_shader_sky` (uhexen2-typa). |
 | Bounding box debug visualization | ✅ | `r_showbboxes` 0/1/2 + `r_showbboxes_think` / `r_showbboxes_health` filters + `r_showbboxes_targets` target/targetname highlighting + `r_showbboxes_links` directed reference lines (green = focused → X via QC entity-typed field, red = X → focused).  Center-ray pick → focused entity drawn in white; `health > 0` entities tint red.  uhexen2-4ej9 added `ED_NumFieldDefs` / `ED_FieldDefAt` to `pr_edict.c` so the renderer can walk `pr_fielddefs` directly. |
@@ -184,7 +184,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-06-12, three features are non-complete: bindless ❌ Missing (skeleton only — uhexen2-ubsu), MD5 🔶 Partial (~30%, parser only — uhexen2-7ok0), and Alias model GPU data layout 🔶 Partial (per-aliashdr_t but not Ironwail frame-major — uhexen2-48fx). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category. Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 83 ✅ / 2 🔶 / 1 ❌ / 8 ➖ (~97% parity).
+As of 2026-06-19, three features are non-complete: bindless ❌ Missing (skeleton only — uhexen2-ubsu), MD5 🔶 Partial (~30%, parser only — uhexen2-7ok0), and Alias model GPU data layout 🔶 Partial (per-aliashdr_t but not Ironwail frame-major — uhexen2-48fx). MSAA with FBO resolve reclassified ➖ (Hexenwail intentionally uses FXAA; vestigial window MSAA dropped in `5b6d57ec4`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category. Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 82 ✅ / 2 🔶 / 1 ❌ / 9 ➖ (~97% parity).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -221,6 +221,8 @@ Features Hexenwail has that Ironwail does NOT. Verified against Ironwail origin/
 | Track-name remap | `bgm_remap NN <name>` console command — points a numeric CD track at a named music file | Yes |
 | Graphics presets | Crunchy/Retro/Faithful/Clean/Modern/Ultra | Yes |
 | FluidSynth MIDI | Native MIDI playback | Yes |
+| Bicubic lightmap filter | `r_lightmap_bicubic` — GPU bicubic upsampling of the lightmap atlas in the world fragment shader (commit `f52826282`, uhexen2-b2f0) | Yes |
+| Stochastic alias alpha | `r_alias_stochastic_alpha` — Wronski/Wyman hashed alpha-test probe for alias model cutout surfaces; temporally stable under TAA-style accumulation (commit `c1fef9dfa`) | Yes |
 
 **Removed from exclusives (present in both):**
 
