@@ -2290,7 +2290,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
-			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("gl_glows", 0);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
@@ -2312,7 +2311,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
-			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("gl_glows", 0);
 			Cvar_SetValue ("gl_missile_glows", 0);
 			Cvar_SetValue ("gl_other_glows", 0);
@@ -2334,7 +2332,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 0);
 			Cvar_SetValue ("r_motionblur", 0);
-			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
@@ -2354,7 +2351,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 0);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
-			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
@@ -2375,7 +2371,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 0);
-			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
@@ -2396,7 +2391,6 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_watercolor", 1);
 			Cvar_SetValue ("r_waterwarp", 1);
 			Cvar_SetValue ("r_motionblur", 1.0f);
-			Cvar_SetValue ("r_shadows", 0);
 			Cvar_SetValue ("gl_glows", 1);
 			Cvar_SetValue ("gl_missile_glows", 1);
 			Cvar_SetValue ("gl_other_glows", 1);
@@ -2752,7 +2746,6 @@ enum
 	REND_LMBICUBIC,
 	REND_PARTICLES,
 	REND_FULLBRIGHTS,
-	REND_SHADOWS,
 	REND_DYNLIGHT,
 	REND_WATERCOLOR,
 	REND_WATERALPHA,
@@ -2779,7 +2772,6 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Smooth Lmaps  :",	/* REND_LMBICUBIC */
 	"Particles     :",	/* REND_PARTICLES */
 	"Fullbrights   :",	/* REND_FULLBRIGHTS */
-	"Shadows       :",	/* REND_SHADOWS */
 	"Dynamic Light :",	/* REND_DYNLIGHT */
 	"Water Tint    :",	/* REND_WATERCOLOR */
 	"Water Alpha   :",	/* REND_WATERALPHA */
@@ -2868,9 +2860,6 @@ static void M_Rendering_AdjustSliders (int dir)
 		break;
 	case REND_FULLBRIGHTS:
 		Cvar_SetValue ("gl_fullbrights", !gl_fullbrights.integer);
-		break;
-	case REND_SHADOWS:
-		Cvar_SetValue ("r_shadows", !r_shadows.integer);
 		break;
 	case REND_DYNLIGHT:
 		Cvar_SetValue ("r_dynamic", r_dynamic.integer ? 0 : 1);
@@ -3017,12 +3006,6 @@ static void M_Rendering_Draw (void)
 	{
 		M_Print (76, 92 + 8*REND_FULLBRIGHTS, rend_labels[REND_FULLBRIGHTS]);
 		M_DrawCheckbox (220, 92 + 8*REND_FULLBRIGHTS, gl_fullbrights.integer);
-	}
-
-	if (!M_Rendering_IsSkip(REND_SHADOWS))
-	{
-		M_Print (76, 92 + 8*REND_SHADOWS, rend_labels[REND_SHADOWS]);
-		M_DrawCheckbox (220, 92 + 8*REND_SHADOWS, r_shadows.integer);
 	}
 
 	if (!M_Rendering_IsSkip(REND_DYNLIGHT))
