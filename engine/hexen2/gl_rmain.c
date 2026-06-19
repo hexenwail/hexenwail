@@ -678,6 +678,11 @@ static void R_DrawSpriteModel (entity_t *e)
 		 * draw leaks through to this immediate-mode batch and turns
 		 * translucent sprites (tele shimmer, smoke, splash) opaque. */
 		GL_SetForceOpaqueAlpha (0.0f);
+		/* Sprites use alpha blending, not alpha testing — stochastic
+		 * alpha must not leak from a prior alias model draw or fragments
+		 * get hash-discarded, turning translucent sprites (teleport
+		 * shimmer, smoke) into a black fuzzy screen-door. */
+		GL_SetAliasStochasticAlpha (0.0f);
 	}
 
 	GL_ImmTexCoord2f (0, 1);
