@@ -162,7 +162,7 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 		"#define OIT 1\n"
 		"vec4 fragColor;\n"
 		"layout(location=0) out vec4 out_accum;\n"
-		"layout(location=1) out float out_reveal;\n"
+		"layout(location=1) out vec4 out_reveal;\n"
 		"void main_body();\n"
 		"void main() {\n"
 		"    main_body();\n"
@@ -170,7 +170,7 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 		"    float z = 1.0 / gl_FragCoord.w;\n"
 		"    float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n"
 		"    out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n"
-		"    out_reveal = fragColor.a;\n"
+		"    out_reveal = vec4(fragColor.a, 0.0, 0.0, 0.0);\n"
 		"}\n"
 		"#define main main_body\n";
 

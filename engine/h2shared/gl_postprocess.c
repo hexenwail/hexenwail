@@ -43,6 +43,9 @@
 #ifndef GL_FRAMEBUFFER_BINDING
 #define GL_FRAMEBUFFER_BINDING 0x8CA6
 #endif
+#ifndef GL_TEXTURE_2D_MULTISAMPLE
+#define GL_TEXTURE_2D_MULTISAMPLE 0x9100
+#endif
 
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
@@ -137,10 +140,13 @@ cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};	/* lumina
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
 /* ------------------------------------------------------------------ */
 
+extern cvar_t	vid_config_fsaa;	/* MSAA sample count (drives the GL context) */
+
 static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
-static GLuint	oit_revealage_tex;	/* R8 revealage */
+static GLuint	oit_revealage_tex;	/* RGBA16F revealage (.r used) */
 static GLuint	oit_fbo;		/* MRT FBO sharing scene depth/stencil */
-static GLuint	oit_resolve_prog;	/* fullscreen resolve shader */
+static GLuint	oit_resolve_prog;	/* fullscreen resolve shader (sampler2D) */
+static GLuint	oit_resolve_prog_msaa;	/* per-sample resolve (sampler2DMS) */
 static GLuint	oit_resolve_vao;	/* dummy VAO required for glDrawArrays
 					 * in GL 4.3 core profile — without one
 					 * bound, the resolve draw was a silent
@@ -148,6 +154,9 @@ static GLuint	oit_resolve_vao;	/* dummy VAO required for glDrawArrays
 					 * composite was being discarded. */
 static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
+static GLint	oit_resolve_msaa_loc_accum;
+static GLint	oit_resolve_msaa_loc_reveal;
+static int	oit_samples;		/* >1 when accum/revealage are multisampled */
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
 static qboolean	oit_in_pass;		/* true between Begin/EndTranslucency */
@@ -160,13 +169,10 @@ static const char oit_resolve_vert[] =
 	"    gl_Position = vec4(vec2(v) * 4.0 - 1.0, 0.0, 1.0);\n"
 	"}\n";
 
+/* No stencil gate, no early_fragment_tests. WBOIT handles empty pixels
+ * via math: accum=0, revealage=1 → alpha=0 → transparent → scene unchanged. */
 static const char oit_resolve_frag[] =
 	"#version 430 core\n"
-	/* early_fragment_tests removed: with both depth and stencil tests
-	 * disabled at OIT_End, the qualifier is a no-op on conformant
-	 * drivers but has been observed to cause silent fragment drops on
-	 * Mesa/AMD with non-default stencil mask state.  Letting the tests
-	 * run their natural (disabled) path is harmless. */
 	"layout(binding=0) uniform sampler2D TexAccum;\n"
 	"layout(binding=1) uniform sampler2D TexReveal;\n"
 	"layout(location=0) out vec4 out_fragcolor;\n"
@@ -175,6 +181,24 @@ static const char oit_resolve_frag[] =
 	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
 	"    float revealage = texelFetch(TexReveal, coords, 0).r;\n"
 	"    vec4 accumulation = texelFetch(TexAccum, coords, 0);\n"
+	"    if (isinf(max3(abs(accumulation.rgb))))\n"
+	"        accumulation.rgb = vec3(accumulation.a);\n"
+	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
+	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
+	"}\n";
+
+/* MSAA variant: per-sample resolve via sampler2DMS + gl_SampleID, used when
+ * the OIT accum/revealage targets are GL_TEXTURE_2D_MULTISAMPLE. */
+static const char oit_resolve_frag_msaa[] =
+	"#version 430 core\n"
+	"layout(binding=0) uniform sampler2DMS TexAccum;\n"
+	"layout(binding=1) uniform sampler2DMS TexReveal;\n"
+	"layout(location=0) out vec4 out_fragcolor;\n"
+	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
+	"void main() {\n"
+	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
+	"    float revealage = texelFetch(TexReveal, coords, gl_SampleID).r;\n"
+	"    vec4 accumulation = texelFetch(TexAccum, coords, gl_SampleID);\n"
 	"    if (isinf(max3(abs(accumulation.rgb))))\n"
 	"        accumulation.rgb = vec3(accumulation.a);\n"
 	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
@@ -363,7 +387,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 }
 
 /* Forward declaration — OIT FBO created after scene FBO */
-static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex);
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex, int samples);
 static void OIT_DeleteFBO (void);
 
 /* Forward declaration — bloom pyramid FBOs */
@@ -422,19 +446,10 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 static qboolean PP_CreateFBO (int width, int height)
 {
 	GLenum status;
-	/* MSAA on the main FBO is force-disabled here, regardless of vid_fsaa.
-	 * Two reasons:
-	 *   1. OIT_CreateFBO shares pp_depth_rb across its accum/revealage
-	 *      textures. Non-multisampled color + multisampled depth/stencil
-	 *      is GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE → translucent
-	 *      rendering silently broken on every MSAA-enabled boot.
-	 *   2. At 1920x1200 the per-sample fragment shader (lightmap +
-	 *      diffuse + fog + alphatest) eats ~50% of GPU world-pass time.
-	 *      FXAA in the post-process chain handles screen-space aliasing
-	 *      adequately for far less cost.
-	 * Re-enable when OIT is reworked to either use multisampled color
-	 * attachments or its own non-multisampled depth/stencil. */
-	int samples = 0;
+	/* OIT now follows Ironwail: when MSAA is active the accum/revealage
+	 * targets are created as GL_TEXTURE_2D_MULTISAMPLE and resolved
+	 * per-sample, so they share the multisampled depth/stencil cleanly. */
+	int samples = (vid_config_fsaa.integer > 1) ? vid_config_fsaa.integer : 0;
 
 	PP_DeleteFBO();
 
@@ -506,7 +521,7 @@ static qboolean PP_CreateFBO (int width, int height)
 			pp_width = width;
 			pp_height = height;
 			Con_DPrintf("PostProcess: %dx%d FBO with %dx MSAA\n", width, height, samples);
-			OIT_CreateFBO(width, height, pp_depth_rb, 0);
+			OIT_CreateFBO(width, height, pp_depth_rb, 0, samples);
 			return true;
 		}
 	}
@@ -548,7 +563,7 @@ static qboolean PP_CreateFBO (int width, int height)
 	pp_width = width;
 	pp_height = height;
 	}  /* end color_fmt scope */
-	OIT_CreateFBO(width, height, 0, pp_depth_tex);
+	OIT_CreateFBO(width, height, 0, pp_depth_tex, 0);
 	PP_CreateBloomFBOs(width, height);
 	return true;
 }
@@ -879,41 +894,57 @@ static void OIT_DeleteFBO (void)
 	if (oit_accum_tex) { glDeleteTextures_fp(1, &oit_accum_tex); oit_accum_tex = 0; }
 	if (oit_revealage_tex) { glDeleteTextures_fp(1, &oit_revealage_tex); oit_revealage_tex = 0; }
 	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
+	oit_samples = 0;
 	oit_available = false;
 }
 
-static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex)
+static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, GLuint depth_stencil_tex, int samples)
 {
 	GLenum status;
 	GLenum drawbufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	GLenum textarget = (samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 
 	OIT_DeleteFBO();
+	oit_samples = (samples > 1) ? samples : 0;
 
-	/* Accumulation texture (RGBA16F) */
+	/* Accumulation texture (RGBA16F). When MSAA is active these must be
+	 * multisampled to share the scene's multisampled depth/stencil. */
 	glGenTextures_fp(1, &oit_accum_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, oit_accum_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
-			GL_RGBA, GL_FLOAT, NULL);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glBindTexture_fp(textarget, oit_accum_tex);
+	if (oit_samples > 1)
+		glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
+					   GL_RGBA16F, width, height, GL_TRUE);
+	else
+	{
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
+				GL_RGBA, GL_FLOAT, NULL);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	}
 
 	glGenTextures_fp(1, &oit_revealage_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
-	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R8, width, height, 0,
-			GL_RED, GL_UNSIGNED_BYTE, NULL);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glBindTexture_fp(textarget, oit_revealage_tex);
+	if (oit_samples > 1)
+		glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
+					   GL_RGBA16F, width, height, GL_TRUE);
+	else
+	{
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
+				GL_RGBA, GL_FLOAT, NULL);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	}
 
 	/* FBO with both color attachments + shared depth/stencil. The scene
 	 * FBO supplies depth as either a multisampled renderbuffer (MSAA
-	 * branch — currently dead) or a sampler-readable texture (non-MSAA,
-	 * lets Hi-Z compute read it). */
+	 * branch) or a sampler-readable texture (non-MSAA, lets Hi-Z compute
+	 * read it). */
 	glGenFramebuffers_fp(1, &oit_fbo);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-				  GL_TEXTURE_2D, oit_accum_tex, 0);
+				  textarget, oit_accum_tex, 0);
 	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-				  GL_TEXTURE_2D, oit_revealage_tex, 0);
+				  textarget, oit_revealage_tex, 0);
 	if (depth_stencil_tex)
 		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
 					  GL_TEXTURE_2D, depth_stencil_tex, 0);
@@ -970,6 +1001,30 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
 
+	/* MSAA per-sample resolve variant — best-effort. If it fails to build
+	 * (e.g. sampler2DMS unsupported on WebGL2) the MSAA OIT path is simply
+	 * never selected, since oit_samples stays 0 there. */
+	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
+	fs = vs ? GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag_msaa) : 0;
+	if (vs && fs)
+	{
+		prog = glCreateProgram_fp();
+		glAttachShader_fp(prog, vs);
+		glAttachShader_fp(prog, fs);
+		glLinkProgram_fp(prog);
+		glGetProgramiv_fp(prog, GL_LINK_STATUS, &linked);
+		if (linked)
+		{
+			oit_resolve_prog_msaa = prog;
+			oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
+			oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+		}
+		else
+			glDeleteProgram_fp(prog);
+	}
+	if (vs) glDeleteShader_fp(vs);
+	if (fs) glDeleteShader_fp(fs);
+
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
 	glGenVertexArrays_fp(1, &oit_resolve_vao);
 
@@ -990,12 +1045,6 @@ void OIT_BeginTranslucency (void)
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
 	glClearBufferfv_fp(GL_COLOR, 1, ones);
 
-	/* Stencil: mark pixels touched by translucent geometry (bit 1) */
-	glEnable_fp(GL_STENCIL_TEST);
-	glStencilMask(2);
-	glStencilFunc_fp(GL_ALWAYS, 2, 2);
-	glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
-
 	/* Per-buffer blending for WBOIT */
 	glEnable_fp(GL_BLEND);
 	glBlendFunci_fp(0, GL_ONE, GL_ONE);			/* accum: additive */
@@ -1007,18 +1056,23 @@ void OIT_BeginTranslucency (void)
 
 void OIT_EndTranslucency (GLuint scene_fbo)
 {
+	GLenum textarget;
+	GLuint prog;
+	GLint loc_accum, loc_reveal;
+
 	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
 		return;
+
+	textarget = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+	prog = (oit_samples > 1) ? oit_resolve_prog_msaa : oit_resolve_prog;
+	loc_accum = (oit_samples > 1) ? oit_resolve_msaa_loc_accum : oit_resolve_loc_accum;
+	loc_reveal = (oit_samples > 1) ? oit_resolve_msaa_loc_reveal : oit_resolve_loc_reveal;
 
 	oit_in_pass = false;
 
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
 
-	glStencilFunc_fp(GL_EQUAL, 2, 2);
-	glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
-	glStencilMask(0);
-
-	glUseProgram_fp(oit_resolve_prog);
+	glUseProgram_fp(prog);
 
 	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glEnable_fp(GL_BLEND);
@@ -1026,12 +1080,12 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glDisable_fp(GL_DEPTH_TEST);
 
 	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(GL_TEXTURE_2D, oit_accum_tex);
+	glBindTexture_fp(textarget, oit_accum_tex);
 	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(GL_TEXTURE_2D, oit_revealage_tex);
+	glBindTexture_fp(textarget, oit_revealage_tex);
 
-	if (oit_resolve_loc_accum >= 0) glUniform1i_fp(oit_resolve_loc_accum, 0);
-	if (oit_resolve_loc_reveal >= 0) glUniform1i_fp(oit_resolve_loc_reveal, 1);
+	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
+	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
 
 	glViewport_fp(0, 0, pp_width, pp_height);
 	glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1042,11 +1096,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glBindVertexArray_fp(0);
 
 	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	glBindTexture_fp(textarget, 0);
 	glActiveTexture_fp(GL_TEXTURE0);
 	glUseProgram_fp(0);
-	glDisable_fp(GL_STENCIL_TEST);
-	glStencilMask(0xFF);
 	glEnable_fp(GL_DEPTH_TEST);
 	glDepthMask_fp(1);
 	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1124,6 +1176,7 @@ void GL_PostProcess_Init (void)
 	glBindRenderbuffer_fp = (glBindRenderbuffer_f) SDL_GL_GetProcAddress("glBindRenderbuffer");
 	glRenderbufferStorage_fp = (glRenderbufferStorage_f) SDL_GL_GetProcAddress("glRenderbufferStorage");
 	glRenderbufferStorageMultisample_fp = (glRenderbufferStorageMultisample_f) SDL_GL_GetProcAddress("glRenderbufferStorageMultisample");
+	glTexImage2DMultisample_fp = (glTexImage2DMultisample_f) SDL_GL_GetProcAddress("glTexImage2DMultisample");
 	glBlitFramebuffer_fp = (glBlitFramebuffer_f) SDL_GL_GetProcAddress("glBlitFramebuffer");
 
 	if (!glGenFramebuffers_fp || !glDeleteFramebuffers_fp ||
@@ -1164,6 +1217,7 @@ void GL_PostProcess_Shutdown (void)
 {
 	OIT_DeleteFBO();
 	if (oit_resolve_prog) { glDeleteProgram_fp(oit_resolve_prog); oit_resolve_prog = 0; }
+	if (oit_resolve_prog_msaa) { glDeleteProgram_fp(oit_resolve_prog_msaa); oit_resolve_prog_msaa = 0; }
 	PP_DeleteFBO();
 	PP_DeleteNativeFBO();
 	if (pp_program)
