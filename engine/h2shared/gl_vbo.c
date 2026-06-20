@@ -14,6 +14,7 @@
 #include "gl_matrix.h"
 #include "gl_vbo.h"
 #include "gl_sky.h"
+#include "gl_postprocess.h"
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -519,6 +520,16 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 			glUniform1f_fp(shader->u_overbright, ob);
 			imm_cache_overbright = ob;
 		}
+	}
+
+	/* A global glEnable(GL_BLEND) in the translucent draw paths resets the
+	 * per-buffer blend funcs to the global default on some drivers, which
+	 * breaks the WBOIT revealage buffer (geometry vanishes).  Re-assert the
+	 * OIT blend funcs immediately before every draw inside the OIT pass. */
+	if (OIT_InPass())
+	{
+		glBlendFunci_fp(0, GL_ONE, GL_ONE);
+		glBlendFunci_fp(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
 	}
 
 	/* draw */

@@ -313,6 +313,7 @@ GL_FUNCTION_OPT(GLenum, glCheckFramebufferStatus, (GLenum))
 GL_FUNCTION_OPT(void, glGenRenderbuffers, (GLsizei, GLuint *))
 GL_FUNCTION_OPT(void, glDeleteRenderbuffers, (GLsizei, const GLuint *))
 GL_FUNCTION_OPT(void, glRenderbufferStorageMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))
+GL_FUNCTION_OPT(void, glTexImage2DMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean))
 GL_FUNCTION_OPT(void, glBlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum))
 GL_FUNCTION_OPT(void, glBindRenderbuffer, (GLenum, GLuint))
 GL_FUNCTION_OPT(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei))
@@ -467,6 +468,8 @@ GL_FUNCTION_OPT(void, glSamplerParameterf, (GLuint, GLenum, GLfloat))
 #define glGenRenderbuffers_fp		glGenRenderbuffers
 #define glDeleteRenderbuffers_fp	glDeleteRenderbuffers
 #define glRenderbufferStorageMultisample_fp glRenderbufferStorageMultisample
+/* WebGL2 has no multisample textures; OIT MSAA path never runs on emscripten */
+#define glTexImage2DMultisample_fp(t,s,f,w,h,fx)	((void)0)
 #define glBlitFramebuffer_fp		glBlitFramebuffer
 #define glBindRenderbuffer_fp		glBindRenderbuffer
 #define glRenderbufferStorage_fp	glRenderbufferStorage
