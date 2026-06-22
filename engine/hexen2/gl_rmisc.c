@@ -579,6 +579,12 @@ void D_ClearOpenGLTextures (int last_tex)
 			Con_Printf ("[texgen]    drop %lu '%s'\n",
 				    (unsigned long)gltextures[i].texnum,
 				    gltextures[i].identifier);
+		/* Make bindless handle non-resident before deleting texture */
+		if (gltextures[i].bindless_handle)
+		{
+			glMakeTextureHandleNonResidentARB_fp(gltextures[i].bindless_handle);
+			gltextures[i].bindless_handle = 0;
+		}
 		glDeleteTextures_fp(1, &(gltextures[i].texnum));
 		key = Hash_GenerateKeyString (&hash_gltextures, gltextures[i].identifier, true);
 		Hash_Remove(&hash_gltextures, key, i);
