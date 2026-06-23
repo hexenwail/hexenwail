@@ -28,9 +28,18 @@
 
 static fluid_settings_t	*fs_settings;
 static fluid_synth_t	*fs_synth;
-static fluid_audio_driver_t	*fs_adriver;
 static fluid_player_t	*fs_player;
 static int		fs_sfont_id = -1;
+static int		fs_rate = 0;		/* synth render rate; matches shm->speed so S_RawSamples never resamples */
+static qboolean		fs_paused = false;	/* when set, FMIDI_Advance renders nothing (silence) */
+
+/* Synth output gain is held constant; bgmvolume is applied downstream in
+ * S_RawSamples (see FMIDI_Advance), so applying it here too would double it. */
+#define FS_SYNTH_GAIN		1.0f
+/* Per-write render block (stereo frames).  Kept small so the scratch buffer
+ * stays a modest static allocation; FMIDI_Advance loops to fill the ring. */
+#define FS_RENDER_FRAMES	1024
+static short		fs_buf[FS_RENDER_FRAMES * 2];	/* interleaved stereo s16 */
 
 static cvar_t	snd_soundfont = {"snd_soundfont", "", CVAR_ARCHIVE};
 
@@ -190,8 +199,19 @@ static qboolean FMIDI_Init (void)
 		return false;
 	}
 
-	/* use PipeWire/PulseAudio driver */
-	fluid_settings_setstr(fs_settings, "audio.driver", "pipewire");
+	/* Render MIDI ourselves and feed the engine's SDL mixer (see
+	 * FMIDI_Advance) instead of spinning up FluidSynth's own audio thread.
+	 * That thread can fail to reach the device inside the Flatpak sandbox,
+	 * killing MIDI even though SFX/OGG (which use the SDL mixer) play fine.
+	 * shm is set by S_Init, which runs before MIDI_Init; fall back to a sane
+	 * rate if sound failed to start (in which case FMIDI_Advance also bails). */
+	fs_rate = (shm && shm->speed) ? shm->speed : 44100;
+	fluid_settings_setnum(fs_settings, "synth.sample-rate", (double)fs_rate);
+	fluid_settings_setint(fs_settings, "synth.audio-channels", 1);	/* one stereo pair */
+	/* Advance the song by samples rendered (manual pull), not by a wall-clock
+	 * timer thread; this keeps playback tempo tied to our render calls and
+	 * freezes cleanly while paused (we simply stop calling write). */
+	fluid_settings_setstr(fs_settings, "player.timing-source", "sample");
 
 	fs_synth = new_fluid_synth(fs_settings);
 	if (!fs_synth)
@@ -216,29 +236,8 @@ static qboolean FMIDI_Init (void)
 
 	Con_Printf("FluidSynth: loaded %s\n", sf);
 
-	/* create audio driver (starts audio thread) */
-	fs_adriver = new_fluid_audio_driver(fs_settings, fs_synth);
-	if (!fs_adriver)
-	{
-		/* pipewire failed, try pulseaudio */
-		fluid_settings_setstr(fs_settings, "audio.driver", "pulseaudio");
-		fs_adriver = new_fluid_audio_driver(fs_settings, fs_synth);
-	}
-	if (!fs_adriver)
-	{
-		/* pulseaudio failed, try alsa */
-		fluid_settings_setstr(fs_settings, "audio.driver", "alsa");
-		fs_adriver = new_fluid_audio_driver(fs_settings, fs_synth);
-	}
-	if (!fs_adriver)
-	{
-		Con_Printf("FluidSynth: couldn't create audio driver\n");
-		delete_fluid_synth(fs_synth);
-		delete_fluid_settings(fs_settings);
-		fs_synth = NULL;
-		fs_settings = NULL;
-		return false;
-	}
+	/* Fixed gain; bgmvolume is applied in S_RawSamples downstream. */
+	fluid_synth_set_gain(fs_synth, FS_SYNTH_GAIN);
 
 	Con_Printf("FluidSynth MIDI driver initialized\n");
 	return true;
@@ -250,11 +249,6 @@ static void FMIDI_Shutdown (void)
 	{
 		delete_fluid_player(fs_player);
 		fs_player = NULL;
-	}
-	if (fs_adriver)
-	{
-		delete_fluid_audio_driver(fs_adriver);
-		fs_adriver = NULL;
 	}
 	if (fs_synth)
 	{
@@ -324,6 +318,7 @@ static void *FMIDI_Open (const char *filename)
 	free(buf);
 
 	fluid_player_set_loop(fs_player, -1);	/* loop forever */
+	fs_paused = false;
 	fluid_player_play(fs_player);
 
 	return (void *)fs_player;
@@ -331,8 +326,34 @@ static void *FMIDI_Open (const char *filename)
 
 static void FMIDI_Advance (void **handle)
 {
-	/* FluidSynth runs its own audio thread, nothing to do here */
+	int	bufferSamples;
+	int	frames;
+
 	(void)handle;
+
+	if (!fs_synth || !fs_player || fs_paused || !shm)
+		return;
+	if (bgmvolume.value <= 0)	/* paused-equivalent: emit nothing */
+		return;
+	/* Loop is forever (-1), so PLAYING is the only state we render; bail
+	 * otherwise so we never push trailing silence into the ring. */
+	if (fluid_player_get_status(fs_player) != FLUID_PLAYER_PLAYING)
+		return;
+
+	/* Mirror BGM_UpdateStream: render only the free space in the shared raw
+	 * ring this frame, in capped blocks, so it never overflows. */
+	if (s_rawend < paintedtime)
+		s_rawend = paintedtime;
+
+	while (s_rawend < paintedtime + MAX_RAW_SAMPLES)
+	{
+		bufferSamples = MAX_RAW_SAMPLES - (s_rawend - paintedtime);
+		frames = (bufferSamples > FS_RENDER_FRAMES) ? FS_RENDER_FRAMES : bufferSamples;
+
+		fluid_synth_write_s16(fs_synth, frames, fs_buf, 0, 2, fs_buf, 1, 2);
+		/* rate == shm->speed -> no resample; bgmvolume baked in here. */
+		S_RawSamples(frames, fs_rate, 2, 2, (byte *)fs_buf, bgmvolume.value);
+	}
 }
 
 static void FMIDI_Rewind (void **handle)
@@ -355,30 +376,31 @@ static void FMIDI_Close (void **handle)
 		delete_fluid_player(fs_player);
 		fs_player = NULL;
 	}
+	fs_paused = false;
 	if (handle)
 		*handle = NULL;
 }
 
 static void FMIDI_Pause (void **handle)
 {
-	/* FluidSynth has no pause — just stop the player */
-	if (fs_player)
-		fluid_player_stop(fs_player);
+	/* With sample-timed playback the song only advances when FMIDI_Advance
+	 * renders; gating on this flag freezes it and emits silence. */
+	fs_paused = true;
 	(void)handle;
 }
 
 static void FMIDI_Resume (void **handle)
 {
-	if (fs_player)
-		fluid_player_play(fs_player);
+	fs_paused = false;
 	(void)handle;
 }
 
 static void FMIDI_SetVol (void **handle, float value)
 {
-	if (fs_synth)
-		fluid_synth_set_gain(fs_synth, value);
+	/* No-op: bgmvolume is applied in S_RawSamples (FMIDI_Advance); synth gain
+	 * stays fixed so volume isn't applied twice. */
 	(void)handle;
+	(void)value;
 }
 
 static midi_driver_t midi_fluidsynth =
