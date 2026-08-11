@@ -236,6 +236,12 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
+		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
+		{
+			float ident[16];
+			Mat4_Identity(ident);
+			glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
+		}
 		glUseProgram_fp(0);
 		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
@@ -287,6 +293,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_alias_nofog      = glGetUniformLocation_fp(p->program, "u_alias_nofog");
 	p->u_alias_r6_mode    = glGetUniformLocation_fp(p->program, "u_alias_r6_mode");
 	p->u_alias_stochastic_alpha = glGetUniformLocation_fp(p->program, "u_alias_stochastic_alpha");
+	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
+	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 }
 
 /* ------------------------------------------------------------------ */
@@ -641,13 +649,23 @@ static const char salias_vert[] =
 	"in vec4 a_color;\n"
 	"uniform mat4 u_mvp;\n"
 	"uniform mat4 u_modelview;\n"
+	/* Model-only matrix (entity rotation + scale_origin + scale, no view).
+	 * u_modelview is view*model, so it lands vertices in EYE space — sampling
+	 * caustics there would make the pattern swim with the camera.  C uploads
+	 * the same transform chain R_DrawAliasModel pushes onto the matrix stack,
+	 * rebuilt on an identity base.  Defaults to identity so the sprite / warp
+	 * / brush-poly batches that share this program (which submit world-space
+	 * positions already) stay correct.  uhexen2-0gn3. */
+	"uniform mat4 u_alias_model;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	"out vec2 v_worldxy;\n"
 	"invariant gl_Position;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_color = a_color;\n"
+	"    v_worldxy = (u_alias_model * vec4(a_position, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
@@ -664,10 +682,13 @@ static const char salias_frag[] =
 	"uniform float u_alias_nofog;\n"	/* uhexen2-khsa r22 */
 	"uniform float u_alias_r6_mode;\n"	/* uhexen2-khsa r22 */
 	"uniform float u_alias_stochastic_alpha;\n"	/* uhexen2-khsa r28 */
+	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
+	"in vec2 v_worldxy;\n"
 	"out vec4 fragColor;\n"
+	GLSL_CAUSTICS_FN
 	/* uhexen2-khsa r28: hash-based stochastic alpha-test (Wronski/Wyman
 	 * 2017).  Probe for the NVIDIA screen-door: changes the discard
 	 * topology from binary threshold to hash-driven, which on at least
@@ -720,6 +741,16 @@ static const char salias_frag[] =
 	"    } else {\n"
 	"        if (color.a < u_alpha_threshold) discard;\n"
 	"    }\n"
+	/* Underwater caustics, same formula and same pre-fog position in the
+	 * chain as sworld_frag so a model and the floor it stands on receive
+	 * the identical highlight band.  v_worldxy is world space on every
+	 * vertex shader that links against this fragment shader.  Gated by
+	 * u_alias_caustics.x, which C leaves at 0 for every non-alias batch
+	 * that shares this program.  uhexen2-0gn3. */
+	"    if (u_alias_caustics.x > 0.0) {\n"
+	"        float c = Caustics(v_worldxy, u_alias_caustics.y);\n"
+	"        color.rgb += color.rgb * c * u_alias_caustics.x;\n"
+	"    }\n"
 	/* uhexen2-khsa r22: gate fog mix.  Mathuzzz ruled out v_color via
 	 * r_alias_fullbright (r21) — remaining suspect for the screen-door
 	 * is fog math (exp + mix even when fog density is 0). */
@@ -758,11 +789,13 @@ static const char sskeletal_vert[] =
 	"\n"
 	"uniform mat4 u_mvp;\n"
 	"uniform mat4 u_modelview;\n"
+	"uniform mat4 u_alias_model;\n"	/* see salias_vert (uhexen2-0gn3) */
 	"uniform int u_pose_base;\n"
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	"out vec2 v_worldxy;\n"
 	"invariant gl_Position;\n"
 	"\n"
 	"void main() {\n"
@@ -777,6 +810,7 @@ static const char sskeletal_vert[] =
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_color = vec4(skinned_normal * 0.5 + 0.5, 1.0);\n"
+	"    v_worldxy = (u_alias_model * vec4(skinned_pos, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(skinned_pos, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(skinned_pos, 1.0);\n"
@@ -942,6 +976,7 @@ static const char salias_inst_vert[] =
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
+	"out vec2 v_worldxy;\n"
 	"\n"
 	"invariant gl_Position;\n"
 	"\n"
@@ -1004,6 +1039,10 @@ static const char salias_inst_vert[] =
 	"    v_color = vec4(inst.LightAlpha.rgb * sdot, inst.LightAlpha.a);\n"
 	"\n"
 	"    v_texcoord = a_texcoord;\n"
+	/* The instance world matrix is model-only, so world_pos is already the
+	 * world-space vertex — no u_alias_model needed on this path and no
+	 * change to the 80-byte InstanceData layout.  uhexen2-0gn3. */
+	"    v_worldxy = world_pos.xy;\n"
 	"    v_fogdist = distance(world_pos, u_eyepos);\n"
 	"    gl_Position = u_viewproj * vec4(world_pos, 1.0);\n"
 	"}\n";
@@ -1083,6 +1122,15 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
+	/* GL zero-initialises mat4 uniforms, which would collapse every vertex
+	 * to world (0,0).  Identity keeps v_worldxy meaningful for the batches
+	 * that submit world-space positions directly.  uhexen2-0gn3. */
+	if (p->u_alias_model >= 0)
+	{
+		float ident[16];
+		Mat4_Identity(ident);
+		glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
+	}
 	glUseProgram_fp(0);
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
@@ -1203,6 +1251,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_alias_nofog      = glGetUniformLocation_fp(prog, "u_alias_nofog");
 	p->u_alias_r6_mode    = glGetUniformLocation_fp(prog, "u_alias_r6_mode");
 	p->u_alias_stochastic_alpha = glGetUniformLocation_fp(prog, "u_alias_stochastic_alpha");
+	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
 
 	/* Bind skin texture to unit 0 */
 	glUseProgram_fp(prog);

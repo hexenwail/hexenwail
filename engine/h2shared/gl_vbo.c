@@ -60,6 +60,18 @@ static float	imm_alias_nofog = -1.0f;
 static float	imm_alias_r6_mode = -1.0f;
 /* uhexen2-khsa r28 probe — stochastic alpha-test. */
 static float	imm_alias_stochastic_alpha = -1.0f;
+/* Underwater caustics on alias batches (uhexen2-0gn3).  Unlike the probes
+ * above these have a meaningful "off" value rather than a -1 sentinel: 0
+ * intensity is the resting state, and the alias draw paths restore it when
+ * they finish so sprites / warp polys / brush polys sharing gl_shader_alias
+ * never inherit the effect. */
+static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
+static float	imm_alias_model[16] = {
+	1.0f, 0.0f, 0.0f, 0.0f,
+	0.0f, 1.0f, 0.0f, 0.0f,
+	0.0f, 0.0f, 1.0f, 0.0f,
+	0.0f, 0.0f, 0.0f, 1.0f
+};
 
 /* Current vertex state (accumulated between calls) */
 static float	imm_cur_tc[2];
@@ -235,6 +247,18 @@ void GL_SetAliasStochasticAlpha (float v)
 	imm_alias_stochastic_alpha = v;
 }
 
+/* uhexen2-0gn3: intensity 0 disables the caustics overlay entirely. */
+void GL_SetAliasCaustics (float intensity, float time)
+{
+	imm_alias_caustics[0] = intensity;
+	imm_alias_caustics[1] = time;
+}
+
+void GL_SetAliasModelMatrix (const float *m)
+{
+	memcpy(imm_alias_model, m, sizeof(imm_alias_model));
+}
+
 void GL_ImmColor4f (float r, float g, float b, float a)
 {
 	imm_cur_color[0] = r;
@@ -316,6 +340,9 @@ static float	imm_cache_alias_fullbright = -2.0f;
 static float	imm_cache_alias_nofog = -2.0f;
 static float	imm_cache_alias_r6_mode = -2.0f;
 static float	imm_cache_alias_stochastic_alpha = -2.0f;
+static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
+static float	imm_cache_alias_model[16];
+static qboolean	imm_cache_alias_model_set;
 static float	imm_cache_fog_density = -1.0f;
 static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
@@ -343,6 +370,8 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alias_nofog = -2.0f;
 	imm_cache_alias_r6_mode = -2.0f;
 	imm_cache_alias_stochastic_alpha = -2.0f;
+	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_alias_model_set = false;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 	imm_cache_time = -1.0f;
@@ -391,6 +420,8 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	imm_cache_alias_nofog = -2.0f;
 	imm_cache_alias_r6_mode = -2.0f;
 	imm_cache_alias_stochastic_alpha = -2.0f;
+	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_alias_model_set = false;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
 		imm_cache_time = -1.0f;
@@ -462,6 +493,28 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_alias_stochastic_alpha, imm_alias_stochastic_alpha);
 		imm_cache_alias_stochastic_alpha = imm_alias_stochastic_alpha;
+	}
+
+	/* uhexen2-0gn3.  Both sit at their resting values (0 intensity,
+	 * identity matrix) unless an alias draw asked for caustics, so on dry
+	 * land these only fire on a program switch, never per batch. */
+	if (shader->u_alias_caustics >= 0 &&
+	    (imm_alias_caustics[0] != imm_cache_alias_caustics[0] ||
+	     imm_alias_caustics[1] != imm_cache_alias_caustics[1]))
+	{
+		glUniform2f_fp(shader->u_alias_caustics,
+			       imm_alias_caustics[0], imm_alias_caustics[1]);
+		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
+		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
+	}
+
+	if (shader->u_alias_model >= 0 &&
+	    (!imm_cache_alias_model_set ||
+	     memcmp(imm_alias_model, imm_cache_alias_model, sizeof(imm_alias_model)) != 0))
+	{
+		glUniformMatrix4fv_fp(shader->u_alias_model, 1, GL_FALSE, imm_alias_model);
+		memcpy(imm_cache_alias_model, imm_alias_model, sizeof(imm_alias_model));
+		imm_cache_alias_model_set = true;
 	}
 
 	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)

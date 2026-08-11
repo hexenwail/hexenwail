@@ -1200,6 +1200,25 @@ static void AliasModelGetLightInfo (entity_t *e)
 	}
 }
 
+/*
+===============
+R_CausticsIntensity
+
+Shader intensity for the caustics overlay, or 0 when it must not apply.
+Single source of truth for the world (uhexen2-6bfm) and alias (uhexen2-0gn3)
+paths — the two must agree, or a model and the floor under it disagree about
+whether the scene is underwater.
+===============
+*/
+static float R_CausticsIntensity (void)
+{
+	if (!r_caustics.integer)
+		return 0.0f;
+	if (!r_viewleaf || r_viewleaf->contents != CONTENTS_WATER)
+		return 0.0f;
+	return r_caustics_intensity.value;
+}
+
 static void R_DrawAliasModel (entity_t *e)
 {
 	int		i;
@@ -1214,6 +1233,8 @@ static void R_DrawAliasModel (entity_t *e)
 	float		xyfact = 1.0, zfact = 1.0; // avoid compiler warning
 	int		skinnum;
 	int		mls;
+	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
+	float		caustics = R_CausticsIntensity();
 
 	/* uhexen2-khsa r21: push fullbright probe state for the legacy
 	 * alias immediate-mode batch.  Cvar-driven; default 0 = normal. */
@@ -1443,13 +1464,48 @@ static void R_DrawAliasModel (entity_t *e)
 		 * (gun stays same apparent size as at 90 FOV). */
 		float fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
 		fovscale = 1.f + (fovscale - 1.f) * cl_gun_fovscale.value;
-		GL_Translatef (tmatrix[0][3], tmatrix[1][3] * fovscale, tmatrix[2][3] * fovscale);
-		GL_Scalef (tmatrix[0][0], tmatrix[1][1] * fovscale, tmatrix[2][2] * fovscale);
+		mdl_t[0] = tmatrix[0][3];
+		mdl_t[1] = tmatrix[1][3] * fovscale;
+		mdl_t[2] = tmatrix[2][3] * fovscale;
+		mdl_s[0] = tmatrix[0][0];
+		mdl_s[1] = tmatrix[1][1] * fovscale;
+		mdl_s[2] = tmatrix[2][2] * fovscale;
 	}
 	else
 	{
-		GL_Translatef (tmatrix[0][3], tmatrix[1][3], tmatrix[2][3]);
-		GL_Scalef (tmatrix[0][0], tmatrix[1][1], tmatrix[2][2]);
+		mdl_t[0] = tmatrix[0][3];
+		mdl_t[1] = tmatrix[1][3];
+		mdl_t[2] = tmatrix[2][3];
+		mdl_s[0] = tmatrix[0][0];
+		mdl_s[1] = tmatrix[1][1];
+		mdl_s[2] = tmatrix[2][2];
+	}
+
+	GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);
+	GL_Scalef (mdl_s[0], mdl_s[1], mdl_s[2]);
+
+	/* Caustics sample in world XY, but the stack top here is view*model, so
+	 * salias_vert would land vertices in eye space and the pattern would swim
+	 * with the camera.  Replay the identical transform chain on an identity
+	 * base to recover the model-only matrix.  Done on a scratch push rather
+	 * than by restructuring the chain above: the live modelview must keep
+	 * accumulating in exactly the order it always has, because the alias
+	 * fullbright re-draw depends on its rounding (uhexen2-iir3).
+	 * uhexen2-0gn3. */
+	if (caustics > 0.0f)
+	{
+		float	model_matrix[16];
+
+		GL_PushMatrix();
+		GL_LoadIdentity();
+		R_RotateForEntity2(e);
+		GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);
+		GL_Scalef (mdl_s[0], mdl_s[1], mdl_s[2]);
+		GL_GetModelview(model_matrix);
+		GL_PopMatrix();
+
+		GL_SetAliasModelMatrix(model_matrix);
+		GL_SetAliasCaustics(caustics, (float)cl.time);
 	}
 
 	/* blend state pokes gated for OIT pass */
@@ -1666,6 +1722,17 @@ static void R_DrawAliasModel (entity_t *e)
 	 * forgets to set this explicitly (e.g. translucent sprites).
 	 * Confirmed-opaque paths set 1.0 explicitly when they need it. */
 	GL_SetForceOpaqueAlpha(0.0f);
+	/* Restore the caustics resting state.  gl_shader_alias is also the
+	 * sprite / warp-poly / unlit-brush-poly program, and those call sites
+	 * never touch this state — leaving it hot would leak the overlay onto
+	 * them.  uhexen2-0gn3. */
+	if (caustics > 0.0f)
+	{
+		float ident[16];
+		Mat4_Identity(ident);
+		GL_SetAliasCaustics(0.0f, 0.0f);
+		GL_SetAliasModelMatrix(ident);
+	}
 
 	GL_PopMatrix();
 
@@ -2776,6 +2843,12 @@ static void R_DrawAliasInstanced (void)
 	if (prog->u_alias_stochastic_alpha >= 0)
 		glUniform1f_fp(prog->u_alias_stochastic_alpha,
 			       r_alias_stochastic_alpha.value > 0.5f ? 1.0f : 0.0f);
+	/* Underwater caustics.  Same intensity source as the world and legacy
+	 * alias paths; the instance world matrix already puts v_worldxy in world
+	 * space, so nothing else is needed here.  uhexen2-0gn3. */
+	if (prog->u_alias_caustics >= 0)
+		glUniform2f_fp(prog->u_alias_caustics,
+			       R_CausticsIntensity(), (float)cl.time);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -4161,11 +4234,8 @@ static void R_SetupFrame (void)
 	 * subsequent world-shader draw this frame picks up the right value
 	 * without per-bind plumbing.  uhexen2-6bfm. */
 	{
-		float intensity = 0.0f;
+		float intensity = R_CausticsIntensity();
 		float t = (float)cl.time;
-		if (r_caustics.integer && r_viewleaf &&
-		    r_viewleaf->contents == CONTENTS_WATER)
-			intensity = r_caustics_intensity.value;
 		if (gl_shader_world.program && gl_shader_world.u_caustics >= 0)
 		{
 			glUseProgram_fp(gl_shader_world.program);
