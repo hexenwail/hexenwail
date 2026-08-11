@@ -38,9 +38,22 @@ long Sys_filesize (const char *path);
 
 int Sys_CopyFile (const char *frompath, const char *topath);
 
-const char *Sys_FindFirstFile (const char *path, const char *pattern);
-const char *Sys_FindNextFile (void);
-void Sys_FindClose (void);
+/* Simplified findfirst/findnext: returns filenames only, not a dirent
+ * struct. The enumeration state is caller-owned so that two threads (the
+ * background save worker and the main thread) can walk directories at the
+ * same time. Declare an fsfind_t on the stack, pass it to all three calls,
+ * and always Sys_FindClose it — including on early exit from the loop.
+ * Returned names point into ctx->name and stay valid until the next
+ * Sys_FindNextFile on the same context. */
+typedef struct
+{
+	void	*priv;			/* platform enumeration state */
+	char	name[MAX_OSPATH];	/* current filename, UTF-8 */
+} fsfind_t;
+
+const char *Sys_FindFirstFile (fsfind_t *ctx, const char *path, const char *pattern);
+const char *Sys_FindNextFile (fsfind_t *ctx);
+void Sys_FindClose (fsfind_t *ctx);
 
 int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs);
 /* Scans 'path' for subdirectories, storing their names (not full paths)

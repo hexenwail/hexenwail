@@ -180,63 +180,83 @@ simplified findfirst/findnext implementation:
 Sys_FindFirstFile and Sys_FindNextFile return
 filenames only, not a dirent struct. this is
 what we presently need in this engine.
+
+state lives in the caller's fsfind_t so that the
+background save worker and the main thread can
+enumerate directories concurrently. the platform
+half is malloc'd, not Z_Malloc'd, because the
+zone allocator is not thread-safe, and the stat
+path is built into a local buffer rather than
+va(), whose static ring is shared engine-wide.
 =================================================
 */
-static DIR		*finddir;
-static struct dirent	*finddata;
-static char		*findpath, *findpattern;
-
-const char *Sys_FindFirstFile (const char *path, const char *pattern)
+typedef struct
 {
-	if (finddir)
-		Sys_Error ("Sys_FindFirst without FindClose");
+	DIR	*dir;
+	char	path[MAX_OSPATH];
+	char	pattern[MAX_OSPATH];
+} unixfind_t;
 
-	finddir = opendir (path);
-	if (!finddir)
+const char *Sys_FindFirstFile (fsfind_t *ctx, const char *path, const char *pattern)
+{
+	unixfind_t	*fd;
+
+	ctx->priv = NULL;
+	ctx->name[0] = '\0';
+
+	fd = (unixfind_t *) malloc (sizeof(unixfind_t));
+	if (!fd)
 		return NULL;
 
-	findpattern = Z_Strdup (pattern);
-	findpath = Z_Strdup (path);
+	fd->dir = opendir (path);
+	if (!fd->dir)
+	{
+		free (fd);
+		return NULL;
+	}
+	q_strlcpy (fd->path, path, sizeof(fd->path));
+	q_strlcpy (fd->pattern, pattern, sizeof(fd->pattern));
+	ctx->priv = fd;
 
-	return Sys_FindNextFile();
+	return Sys_FindNextFile (ctx);
 }
 
-const char *Sys_FindNextFile (void)
+const char *Sys_FindNextFile (fsfind_t *ctx)
 {
+	unixfind_t	*fd = (unixfind_t *) ctx->priv;
+	struct dirent	*ent;
 	struct stat	test;
+	char		fullpath[MAX_OSPATH];
 
-	if (!finddir)
+	if (!fd)
 		return NULL;
 
-	while ((finddata = readdir(finddir)) != NULL)
+	while ((ent = readdir(fd->dir)) != NULL)
 	{
-		if (!fnmatch (findpattern, finddata->d_name, FNM_PATHNAME))
+		if (fnmatch (fd->pattern, ent->d_name, FNM_PATHNAME))
+			continue;
+		if (q_snprintf(fullpath, sizeof(fullpath), "%s/%s", fd->path, ent->d_name) >= (int)sizeof(fullpath))
+			continue;
+		if (stat(fullpath, &test) == 0 && S_ISREG(test.st_mode))
 		{
-			if ( (stat(va("%s/%s", findpath, finddata->d_name), &test) == 0)
-						&& S_ISREG(test.st_mode))
-				return finddata->d_name;
+			q_strlcpy (ctx->name, ent->d_name, sizeof(ctx->name));
+			return ctx->name;
 		}
 	}
 
 	return NULL;
 }
 
-void Sys_FindClose (void)
+void Sys_FindClose (fsfind_t *ctx)
 {
-	if (finddir != NULL)
+	unixfind_t	*fd = (unixfind_t *) ctx->priv;
+
+	if (fd)
 	{
-		closedir(finddir);
-		finddir = NULL;
-	}
-	if (findpath != NULL)
-	{
-		Z_Free (findpath);
-		findpath = NULL;
-	}
-	if (findpattern != NULL)
-	{
-		Z_Free (findpattern);
-		findpattern = NULL;
+		if (fd->dir)
+			closedir (fd->dir);
+		free (fd);
+		ctx->priv = NULL;
 	}
 }
 

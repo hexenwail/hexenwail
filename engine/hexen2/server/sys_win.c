@@ -178,42 +178,65 @@ filenames only, not a dirent struct. this is
 what we presently need in this engine.
 =================================================
 */
-static HANDLE findhandle = INVALID_HANDLE_VALUE;
-static WIN32_FIND_DATA finddata;
-static char	findstr[MAX_OSPATH];
-
-const char *Sys_FindFirstFile (const char *path, const char *pattern)
+typedef struct
 {
-	if (findhandle != INVALID_HANDLE_VALUE)
-		Sys_Error ("Sys_FindFirst without FindClose");
-	q_snprintf (findstr, sizeof(findstr), "%s/%s", path, pattern);
-	findhandle = FindFirstFile(findstr, &finddata);
-	if (findhandle == INVALID_HANDLE_VALUE)
+	HANDLE			handle;
+	WIN32_FIND_DATA		data;
+} winfind_t;
+
+const char *Sys_FindFirstFile (fsfind_t *ctx, const char *path, const char *pattern)
+{
+	winfind_t	*fd;
+	char		findstr[MAX_OSPATH];
+
+	ctx->priv = NULL;
+	ctx->name[0] = '\0';
+
+	fd = (winfind_t *) malloc (sizeof(winfind_t));
+	if (!fd)
 		return NULL;
-	if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-		return Sys_FindNextFile();
-	return finddata.cFileName;
+
+	q_snprintf (findstr, sizeof(findstr), "%s/%s", path, pattern);
+	fd->handle = FindFirstFile(findstr, &fd->data);
+	if (fd->handle == INVALID_HANDLE_VALUE)
+	{
+		free (fd);
+		return NULL;
+	}
+	ctx->priv = fd;
+
+	if (fd->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		return Sys_FindNextFile (ctx);
+	q_strlcpy (ctx->name, fd->data.cFileName, sizeof(ctx->name));
+	return ctx->name;
 }
 
-const char *Sys_FindNextFile (void)
+const char *Sys_FindNextFile (fsfind_t *ctx)
 {
-	if (findhandle == INVALID_HANDLE_VALUE)
+	winfind_t	*fd = (winfind_t *) ctx->priv;
+
+	if (!fd)
 		return NULL;
-	while (FindNextFile(findhandle, &finddata) != 0)
+	while (FindNextFile(fd->handle, &fd->data) != 0)
 	{
-		if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		if (fd->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
-		return finddata.cFileName;
+		q_strlcpy (ctx->name, fd->data.cFileName, sizeof(ctx->name));
+		return ctx->name;
 	}
 	return NULL;
 }
 
-void Sys_FindClose (void)
+void Sys_FindClose (fsfind_t *ctx)
 {
-	if (findhandle != INVALID_HANDLE_VALUE)
+	winfind_t	*fd = (winfind_t *) ctx->priv;
+
+	if (fd)
 	{
-		FindClose(findhandle);
-		findhandle = INVALID_HANDLE_VALUE;
+		if (fd->handle != INVALID_HANDLE_VALUE)
+			FindClose (fd->handle);
+		free (fd);
+		ctx->priv = NULL;
 	}
 }
 

@@ -78,6 +78,7 @@ void Host_RemoveGIPFiles (const char *path)
 	const char	*name;
 	char	tempdir[MAX_OSPATH], *p;
 	size_t	len;
+	fsfind_t	find;
 
 	if (path)
 		q_strlcpy(tempdir, path, MAX_OSPATH);
@@ -87,17 +88,17 @@ void Host_RemoveGIPFiles (const char *path)
 	p = tempdir + len;
 	len = sizeof(tempdir) - len;
 
-	name = Sys_FindFirstFile (tempdir, "*.gip");
+	name = Sys_FindFirstFile (&find, tempdir, "*.gip");
 
 	while (name)
 	{
 		q_snprintf (p, len, "/%s", name);
 		Sys_unlink (tempdir);
 		*p = '\0';
-		name = Sys_FindNextFile();
+		name = Sys_FindNextFile(&find);
 	}
 
-	Sys_FindClose();
+	Sys_FindClose(&find);
 }
 
 void Host_DeleteSave (const char *savepath)
@@ -119,8 +120,9 @@ int Host_CopyFiles (const char *source, const char *pat, const char *dest)
 	const char	*name;
 	char	tempdir[MAX_OSPATH], tempdir2[MAX_OSPATH];
 	int	error;
+	fsfind_t	find;
 
-	name = Sys_FindFirstFile(source, pat);
+	name = Sys_FindFirstFile(&find, source, pat);
 	error = 0;
 
 	while (name)
@@ -128,9 +130,9 @@ int Host_CopyFiles (const char *source, const char *pat, const char *dest)
 		if (q_snprintf(tempdir, sizeof(tempdir),"%s/%s", source, name) >= (int)sizeof(tempdir) ||
 		    q_snprintf(tempdir2, sizeof(tempdir2),"%s/%s", dest, name) >= (int)sizeof(tempdir2))
 		{
-			Sys_FindClose();
-			Host_Error("%s: %d: string buffer overflow!", __thisfunc__, __LINE__);
-			return -1;
+			Con_Printf ("%s: string buffer overflow!\n", __thisfunc__);
+			error = -1;
+			goto error_out;
 		}
 
 		error = FS_CopyFile (tempdir, tempdir2);
@@ -140,11 +142,11 @@ int Host_CopyFiles (const char *source, const char *pat, const char *dest)
 			goto error_out;
 		}
 
-		name = Sys_FindNextFile();
+		name = Sys_FindNextFile(&find);
 	}
 
 error_out:
-	Sys_FindClose();
+	Sys_FindClose(&find);
 
 	return error;
 }
