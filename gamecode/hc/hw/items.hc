@@ -2000,6 +2000,47 @@ void spawn_weapon4_staff (void)
 
 /*
 ===============
+BadBackpackDump
+
+Diagnostic for the "Bad backpack!" case: DropBackpack decided a single item
+was being dropped, then walked its whole if/else dispatch chain without any
+branch matching.  The accumulated field set and the dispatched field set are
+identical, so a fallthrough means a value-level mismatch -- 'total' summed to
+1 while every individual field read as false.  Dump 'total' and every nonzero
+field so a repro under "developer 1" pins down which one.  (uhexen2-hwky)
+===============
+*/
+void BadBackpackDump(entity bag, float total)
+{
+	dprint(" total=");
+	dprint(ftos(total));
+	if (bag.cnt_torch)		{ dprint(" torch=");		dprint(ftos(bag.cnt_torch)); }
+	if (bag.cnt_h_boost)		{ dprint(" h_boost=");		dprint(ftos(bag.cnt_h_boost)); }
+	if (bag.cnt_sh_boost)		{ dprint(" sh_boost=");		dprint(ftos(bag.cnt_sh_boost)); }
+	if (bag.cnt_mana_boost)		{ dprint(" mana_boost=");	dprint(ftos(bag.cnt_mana_boost)); }
+	if (bag.cnt_teleport)		{ dprint(" teleport=");		dprint(ftos(bag.cnt_teleport)); }
+	if (bag.cnt_tome)		{ dprint(" tome=");		dprint(ftos(bag.cnt_tome)); }
+	if (bag.cnt_summon)		{ dprint(" summon=");		dprint(ftos(bag.cnt_summon)); }
+	if (bag.cnt_invisibility)	{ dprint(" invisibility=");	dprint(ftos(bag.cnt_invisibility)); }
+	if (bag.cnt_glyph)		{ dprint(" glyph=");		dprint(ftos(bag.cnt_glyph)); }
+	if (bag.cnt_haste)		{ dprint(" haste=");		dprint(ftos(bag.cnt_haste)); }
+	if (bag.cnt_blast)		{ dprint(" blast=");		dprint(ftos(bag.cnt_blast)); }
+	if (bag.cnt_polymorph)		{ dprint(" polymorph=");	dprint(ftos(bag.cnt_polymorph)); }
+	if (bag.cnt_flight)		{ dprint(" flight=");		dprint(ftos(bag.cnt_flight)); }
+	if (bag.cnt_cubeofforce)	{ dprint(" cubeofforce=");	dprint(ftos(bag.cnt_cubeofforce)); }
+	if (bag.cnt_invincibility)	{ dprint(" invincibility=");	dprint(ftos(bag.cnt_invincibility)); }
+	if (bag.armor_amulet)		{ dprint(" amulet=");		dprint(ftos(bag.armor_amulet)); }
+	if (bag.armor_bracer)		{ dprint(" bracer=");		dprint(ftos(bag.armor_bracer)); }
+	if (bag.armor_breastplate)	{ dprint(" breastplate=");	dprint(ftos(bag.armor_breastplate)); }
+	if (bag.armor_helmet)		{ dprint(" helmet=");		dprint(ftos(bag.armor_helmet)); }
+	if (bag.bluemana)		{ dprint(" bluemana=");		dprint(ftos(bag.bluemana)); }
+	if (bag.greenmana)		{ dprint(" greenmana=");	dprint(ftos(bag.greenmana)); }
+	if (bag.spawn_health)		{ dprint(" spawn_health=");	dprint(ftos(bag.spawn_health)); }
+	dprint("\n");
+}
+
+/*
+===============
 DropBackpack
 ===============
 */
@@ -2477,9 +2518,25 @@ void DropBackpack(void)
 			dprint(old_self.classname);
 			dprint(" at ");
 			dprint(vtos(old_self.origin));
-			dprint("\n");
-			remove(item);
+			BadBackpackDump(item, total);
 			self = old_self;
+
+			// Do NOT remove(item) here.  A misclassified drop used to
+			// destroy the loot outright, which is a real gameplay loss,
+			// not just a debug message.  Fall back to a normal backpack
+			// so nothing is lost while the root cause is still unknown.
+			// (uhexen2-hwky)
+			item.velocity_z = 300;
+			setmodel (item, "models/bag.mdl");
+			setsize (item, '-16 -16 -45', '16 16 10');
+			item.hull = HULL_POINT;
+			item.touch = BackpackTouch;
+			item.nextthink = time + 120;	// remove after 2 minutes
+			item.think = SUB_Remove;
+
+			item.scale = getBackpackSize(item) * 4.0 * 0.01;
+			if (item.scale > 2.4) item.scale = 2.4;
+			if (item.scale < .15) item.scale = .15;
 			return;
 		}
 
