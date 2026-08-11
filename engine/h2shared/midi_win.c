@@ -375,22 +375,27 @@ static int StreamBufferSetup(const char *filename)
 	{
 		stream_bufs[i].mh.dwBufferLength = OUT_BUFFER_SIZE;
 		/* Reuse a buffer still held from an earlier setup rather than
-		 * overwriting the pointer.  Every error path below returns
-		 * without releasing what was allocated here, so the next attempt
-		 * used to Z_Malloc a fresh set over the top of the old one and
-		 * abandon it — NUM_STREAM_BUFFERS * OUT_BUFFER_SIZE leaked from
-		 * the main zone for each track that failed to open, which for a
-		 * mod with a bad or missing MIDI track is once per level load.
-		 * uhexen2-5rir. */
+		 * overwriting the pointer.  This reuse is what fixes the leak:
+		 * we used to Z_Malloc a fresh set over the top of a live
+		 * lpData and abandon the old one, so NUM_STREAM_BUFFERS *
+		 * OUT_BUFFER_SIZE went missing from the main zone for every
+		 * track that failed to open -- for a mod with a bad or missing
+		 * MIDI track, once per level load.  uhexen2-5rir.
+		 *
+		 * The error paths below must NOT free these buffers.  By the
+		 * time we reach them the device may already own one via
+		 * midiStreamOut, and midiOutUnprepareHeader refuses to
+		 * unprepare a buffer that is still playing, so freeing here
+		 * hands the device and its callback thread a dangling pointer
+		 * into the zone.  Only MIDI_Stop's stop-and-wait handshake --
+		 * midiStreamStop, midiOutReset, then waiting on
+		 * hBufferReturnEvent -- makes freeing safe.  uhexen2-520e. */
 		if (!stream_bufs[i].mh.lpData)
 			stream_bufs[i].mh.lpData = (LPSTR) Z_Malloc(OUT_BUFFER_SIZE, Z_MAINZONE);
 	}
 
 	if (ConverterInit(filename))
-	{
-		FreeBuffers();
 		return 1;
-	}
 
 	for (i = 0; i < MIDI_CHANNELS; i++)
 		volume_cache[i] = VOL_CACHE_INIT;
@@ -403,7 +408,6 @@ static int StreamBufferSetup(const char *filename)
 	{
 		MidiErrorMessageBox(mmr);
 		ConverterCleanup();
-		FreeBuffers();
 		return 1;
 	}
 
@@ -431,7 +435,6 @@ static int StreamBufferSetup(const char *filename)
 			{
 				DEBUG_Printf("%s: Initial conversion pass failed\n", __thisfunc__);
 				ConverterCleanup();
-				FreeBuffers();
 				return 1;
 			}
 		}
@@ -444,7 +447,6 @@ static int StreamBufferSetup(const char *filename)
 			{
 				MidiErrorMessageBox(mmr);
 				ConverterCleanup();
-				FreeBuffers();
 				return 1;
 			}
 			stream_bufs[buf_num].prepared = TRUE;

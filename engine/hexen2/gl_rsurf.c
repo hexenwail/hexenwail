@@ -3402,7 +3402,22 @@ void R_DrawWorld (void)
 
 	DW_BEGIN();
 #ifndef __EMSCRIPTEN__
-	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer;
+	/* The cull path is atlas-only: it draws from world_vao, whose lightmap
+	 * UVs R_BuildWorldVBO bakes into atlas space only when the atlas is on,
+	 * and R_DrawWorldCulled binds lm_atlas_texture as the shader's lightmap
+	 * sampler unconditionally.  With the atlas off that is texture 0 — an
+	 * incomplete texture, which samples black — against page-local UVs, so
+	 * every surface it emits renders unlit.  Every other world-VBO consumer
+	 * already tests this pair (gl_rsurf.c:1963, :2636); this one did not.
+	 *
+	 * Skipping it costs only the optimisation.  DrawTextureChains draws the
+	 * full world either way — deliberately, since the compute filter skips
+	 * DRAWTILED/DRAWBLACK/FENCE/UNDERWATER and anything absent from a BSP
+	 * marksurf list — and falls through to the per-surface path that binds
+	 * per-page lightmaps and wants exactly the page-local UVs it has.
+	 * uhexen2-qt7s. */
+	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer &&
+			  lm_atlas_enabled && lm_atlas_texture;
 	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.
