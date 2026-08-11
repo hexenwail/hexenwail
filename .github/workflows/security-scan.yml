@@ -1,0 +1,158 @@
+name: Security scan
+
+# Neither Dependabot nor Renovate understands Nix flakes, so nothing was
+# watching what nixpkgs pulls into the shipped binary.  This does two things
+# Dependabot cannot: scan the built runtime closure against NVD, and report
+# how stale the pinned flake inputs are.
+#
+# Both jobs are advisory.  They write to the run summary and upload a report
+# rather than failing the build: a CVE in some transitive library of a
+# single-player game engine is worth knowing about, not worth blocking a
+# release on, and a scanner that cries wolf weekly gets muted.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays, 06:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/security-scan.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cve-scan:
+    name: CVE scan (vulnix)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@v17
+        # Same reasoning as ci.yml: a Cachix outage costs us the cache, not
+        # the run.
+        continue-on-error: true
+        with:
+          name: hexenwail
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # vulnix downloads the NVD JSON feeds (hundreds of MB) on a cold cache.
+      # Keyed by week so it refreshes on the same cadence as the schedule.
+      - name: Restore NVD feed cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vulnix
+          key: vulnix-nvd-${{ github.run_id }}
+          restore-keys: |
+            vulnix-nvd-
+
+      - name: Build runtime closure
+        run: nix build .#nixos --print-build-logs
+
+      - name: Scan closure against NVD
+        id: scan
+        run: |
+          set -o pipefail
+          # vulnix exits non-zero when it finds anything; that is the normal
+          # reporting path here, so swallow it and read the report instead.
+          nix run nixpkgs#vulnix -- --closure ./result --show-description \
+            | tee vulnix-report.txt || true
+          nix run nixpkgs#vulnix -- --closure ./result --json \
+            > vulnix-report.json || true
+
+      - name: Summarise
+        run: |
+          {
+            echo '## vulnix CVE scan'
+            echo
+            if [ -s vulnix-report.txt ]; then
+              echo 'Findings in the runtime closure of the .#nixos build:'
+              echo
+              echo '```'
+              head -c 60000 vulnix-report.txt
+              echo '```'
+              echo
+              echo 'Triage: most hits are transitive libraries that the engine'
+              echo 'never reaches with untrusted input.  What matters here is'
+              echo 'anything in the parsing path — SDL, image/audio codecs,'
+              echo 'zlib — because those do touch attacker-supplied map, model'
+              echo 'and music files.'
+            else
+              echo 'No findings, or the scanner could not reach the NVD feeds.'
+              echo 'Check the scan step log to tell those two apart.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnix-report
+          path: |
+            vulnix-report.txt
+            vulnix-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  flake-freshness:
+    name: Flake input freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - name: Report pinned input ages
+        run: |
+          nix flake metadata --json > flake-metadata.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, time
+
+          STALE_DAYS = 60
+
+          meta = json.load(open("flake-metadata.json"))
+          nodes = meta.get("locks", {}).get("nodes", {})
+          now = time.time()
+
+          rows, stale = [], []
+          for name, node in sorted(nodes.items()):
+              locked = node.get("locked")
+              if not locked or "lastModified" not in locked:
+                  continue          # the root node has no lock of its own
+              age = int((now - locked["lastModified"]) / 86400)
+              rev = (locked.get("rev") or "")[:12]
+              # A github: input pins a branch in `original` and resolves it to
+              # a bare rev in `locked`, so the branch name only survives here.
+              orig = node.get("original", {})
+              where = "/".join(p for p in (orig.get("owner"), orig.get("repo")) if p)
+              ref = orig.get("ref") or locked.get("ref") or ""
+              rows.append((name, f"{where} {ref}".strip(), rev, age))
+              if age >= STALE_DAYS:
+                  stale.append(name)
+
+          print("## Flake input freshness\n")
+          print("| input | source | rev | age (days) |")
+          print("|---|---|---|---|")
+          for name, source, rev, age in rows:
+              mark = " ⚠️" if age >= STALE_DAYS else ""
+              print(f"| `{name}` | {source} | `{rev}` | {age}{mark} |")
+          print()
+          if stale:
+              print(f"Inputs older than {STALE_DAYS} days: "
+                    + ", ".join(f"`{n}`" for n in stale) + ".")
+              print("Refresh with `nix flake update` and re-run CI — an old "
+                    "nixpkgs pin is how known-fixed CVEs stay in the shipped "
+                    "binary.")
+          else:
+              print(f"All inputs are newer than {STALE_DAYS} days.")
+          PY

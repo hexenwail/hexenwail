@@ -1,0 +1,16 @@
+version: 2
+
+# Dependabot has no Nix flake ecosystem, so it can only watch the Actions we
+# pin in .github/workflows.  Flake inputs (nixpkgs, flake-utils) and the CVE
+# status of everything they pull in are covered by security-scan.yml instead.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - dependencies
