@@ -3707,7 +3707,11 @@ static qboolean LM_StitchAtlas (void)
 
 	atlas = (byte *) calloc(1, (size_t)LM_ATLAS_WIDTH * lm_atlas_height * lightmap_bytes);
 	if (!atlas)
+	{
+		Con_Printf ("Lightmap atlas: out of memory for a %dx%d staging buffer\n",
+			    LM_ATLAS_WIDTH, lm_atlas_height);
 		return false;
+	}
 
 	for (page = 0; page < lm_pages_used; page++)
 	{
@@ -3730,10 +3734,32 @@ static qboolean LM_StitchAtlas (void)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	while (glGetError_fp() != GL_NO_ERROR)
+		;	/* drop anything already pending so the test below is ours */
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, lightmap_internalformat,
 			LM_ATLAS_WIDTH, lm_atlas_height, 0,
 			gl_lightmap_format, GL_UNSIGNED_BYTE, atlas);
 	free(atlas);
+
+	/* GL_BuildLightmaps has already ruled out the dimensions the driver is
+	 * required to reject, so an error here is something we could not
+	 * predict — VRAM, or an internalformat this driver dislikes at this
+	 * size.  Believing it worked is the expensive mistake: level 0 would be
+	 * left undefined while every draw path kept binding the texture, since
+	 * they all key on lm_atlas_texture being non-zero.
+	 *
+	 * Report and return false, but leave lm_atlas_texture alone — only the
+	 * caller knows whether abandoning the atlas is still possible.  For a
+	 * failed glTexImage2D GL leaves the texture's existing contents intact,
+	 * so R_RebuildAllLightmaps keeps a stale-but-correctly-shaped atlas,
+	 * which is the better of its two bad options. */
+	if (glGetError_fp() != GL_NO_ERROR)
+	{
+		Con_Printf ("Lightmap atlas: driver rejected a %dx%d texture\n",
+			    LM_ATLAS_WIDTH, lm_atlas_height);
+		currenttexture = GL_UNUSED_TEXTURE;
+		return false;
+	}
 
 	/* The raw glBindTexture above leaves lm_atlas_texture bound on the
 	 * current unit without updating the GL_Bind cache.  The bare call from
@@ -3820,6 +3846,51 @@ void GL_BuildLightmaps (void)
 		lm_atlas_rows = 1;	/* keep the UV divisor sane on a lightmap-less map */
 	lm_atlas_height = lm_atlas_rows * BLOCK_HEIGHT;
 
+	glActiveTexture_fp (GL_TEXTURE1);
+
+	/* The atlas is now only as tall as the map needs, so on a big enough map
+	 * it can outgrow what the driver will accept.  512 pages 8 to a row of
+	 * 256 is 2048x16384, which fits the 16384 a modern desktop reports but
+	 * not the 8192 or 4096 of older parts, and nowhere near the 2048 WebGL2
+	 * guarantees — and 2048 caps us at 64 pages, which is the entire luxel
+	 * budget of the 256-page 128x128 layout this replaced.  So a WASM user
+	 * on any map that filled the old engine would land here.  uhexen2-6yzs. */
+	if (lm_atlas_enabled &&
+	    (LM_ATLAS_WIDTH > gl_max_size || lm_atlas_height > gl_max_size))
+	{
+		Con_Printf ("Lightmap atlas %dx%d exceeds this driver's %d texture "
+			    "limit — using per-page lightmaps\n",
+			    LM_ATLAS_WIDTH, lm_atlas_height, (int)gl_max_size);
+		lm_atlas_enabled = false;
+	}
+
+	/* Stitch BEFORE pass 2, not after.  Both UV bakers — BuildSurfaceDisplay-
+	 * List below and R_BuildWorldVBO, which runs after us — remap into atlas
+	 * space whenever lm_atlas_enabled is set, and every draw path falls back
+	 * to per-page binds when lm_atlas_texture is 0.  Stitching afterwards
+	 * meant a failure left those two disagreeing: surfaces carrying UVs
+	 * scaled into an 8-by-N-page atlas, sampled against a single 256x256
+	 * page, so each one read a small corner of its own lightmap.  The
+	 * fallback rendered wrong rather than merely slower.  Stitching first
+	 * costs nothing — it reads only lightmaps[], which pass 1 has already
+	 * filled — and lets the failure turn the atlas off while that still
+	 * means something.  uhexen2-6yzs. */
+	atlas_ok = LM_StitchAtlas ();
+	if (!atlas_ok)
+	{
+		/* Drop the texture as well as the flag: a name left non-zero is
+		 * exactly what the draw-path guards read, and after a failed
+		 * upload its level 0 holds either nothing or the previous map's
+		 * atlas.  Deleting it is what makes the per-page path reachable. */
+		lm_atlas_enabled = false;
+		if (lm_atlas_texture)
+		{
+			glDeleteTextures_fp (1, &lm_atlas_texture);
+			lm_atlas_texture = 0;
+			currenttexture = GL_UNUSED_TEXTURE;
+		}
+	}
+
 	/* Pass 2: bake polygon UVs, now that the atlas height is settled.
 	 * Skipped on a video restart (draw_reinit) — the polys survive the
 	 * context loss with their UVs intact, and the page allocation above
@@ -3851,26 +3922,17 @@ void GL_BuildLightmaps (void)
 		}
 	}
 
-	glActiveTexture_fp (GL_TEXTURE1);
-
-	/* Build lightmap atlas — all pages in one 2D texture.
-	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
-	 * One bind for ALL world surfaces, zero lightmap rebinds.
-	 * Disabled on Intel GPUs due to driver timeout issues.
-	 *
-	 * Stitched BEFORE the per-page upload below so that upload can be
-	 * skipped when the atlas took: nothing samples lightmap_textures[] while
-	 * lm_atlas_texture is live (every draw path binds the atlas and only
-	 * falls back to the per-page texture when lm_atlas_texture is 0), so
-	 * uploading both was a straight duplicate of the whole lightmap set in
-	 * VRAM.  At 256x256 pages that is 256 KB apiece, so a large map was
-	 * paying tens of MB for data nothing reads.  The fallback still has to
-	 * work if stitching fails to allocate, which is why this is ordered
-	 * rather than simply deleted.  uhexen2-ez0w. */
-	atlas_ok = LM_StitchAtlas ();
-
 	//
 	// upload all lightmaps that were filled
+	//
+	// The atlas above already holds this data when it took: nothing samples
+	// lightmap_textures[] while lm_atlas_texture is live, since every draw
+	// path binds the atlas and only falls back to the per-page texture when
+	// lm_atlas_texture is 0.  Uploading both duplicated the entire lightmap
+	// set in VRAM, and at 256x256 pages that is 256 KB apiece — tens of MB
+	// on a large map, for data nothing reads.  The fallback still has to
+	// work when stitching fails, so this is skipped rather than deleted.
+	// uhexen2-ez0w.
 	//
 	for (i = 0; i < lm_pages_used; i++)
 	{
@@ -3963,8 +4025,15 @@ void R_RebuildAllLightmaps (void)
 	 * then rendered from stale per-page data against the new u_overbright
 	 * uniform, giving the "some surfaces darker, some lighter" toggle bug.
 	 * The lightmap_modified[] marking above still covers the atlas-disabled
-	 * per-page path via R_UpdateLightmaps. */
-	LM_StitchAtlas ();
+	 * per-page path via R_UpdateLightmaps.
+	 *
+	 * The result is deliberately ignored: unlike GL_BuildLightmaps we cannot
+	 * respond to a failure by turning the atlas off, because every surface's
+	 * UVs were baked into atlas space at map load and nothing re-bakes them
+	 * here.  Switching to per-page binds now would render every surface from
+	 * a corner of its own page.  A stale atlas is the better failure.
+	 * uhexen2-6yzs. */
+	(void) LM_StitchAtlas ();
 }
 
 

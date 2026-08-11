@@ -54,6 +54,8 @@ GL_FUNCTION(void, glEnable, (GLenum))
 GL_FUNCTION(void, glDisable, (GLenum))
 GL_FUNCTION(GLboolean, glIsEnabled, (GLenum))
 
+GL_FUNCTION(GLenum, glGetError, (void))
+
 GL_FUNCTION(void, glFinish, (void))
 GL_FUNCTION(void, glFlush, (void))
 GL_FUNCTION(void, glClear, (GLbitfield))
@@ -137,6 +139,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glEnable_fp		glEnable
 #define glDisable_fp		glDisable
 #define glIsEnabled_fp		glIsEnabled
+#define glGetError_fp		glGetError
 #define glFinish_fp		glFinish
 #define glFlush_fp		glFlush
 #define glClear_fp		glClear
@@ -220,6 +223,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glEnable_fp		glEnable
 #define glDisable_fp		glDisable
 #define glIsEnabled_fp		glIsEnabled
+#define glGetError_fp		glGetError
 #define glFinish_fp		glFinish
 #define glFlush_fp		glFlush
 #define glClear_fp		glClear
