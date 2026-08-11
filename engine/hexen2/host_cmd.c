@@ -378,6 +378,7 @@ static void Host_Changelevel2_f (void)
 	}
 
 	SV_SaveSpawnparms ();
+	Host_WaitForSaveThread();
 
 	// save the current level's state
 	old_svtime = sv.time;
