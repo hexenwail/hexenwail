@@ -25,9 +25,9 @@
 #include "bgmusic.h"
 #include <errno.h>
 #ifdef PLATFORM_WINDOWS
+#include <windows.h>	/* MultiByteToWideChar/MAX_PATH: only the client gets these free via glheader.h */
 #include <io.h>
-#endif
-#ifndef PLATFORM_WINDOWS
+#else
 #include <dirent.h>
 #endif
 #include "filenames.h"

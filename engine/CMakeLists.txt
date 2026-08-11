@@ -644,11 +644,9 @@ install(TARGETS ${EXECUTABLE_NAME}
 # sv_main/sv_user/net_*/pr_*/quakefs/zone/cmd.  This target replaces the
 # engine/hexen2/server/Makefile that was dropped in the build-system cleanup.
 if(BUILD_DEDICATED)
-if(NOT UNIX OR EMSCRIPTEN)
-    # Windows would additionally need Sys_ListDirectories() added to
-    # hexen2/server/sys_win.c (it exists only in the client's sys_win.c) plus a
-    # mingw cross-build pass; the web target has no use for a server at all.
-    message(WARNING "BUILD_DEDICATED is only wired up for Unix hosts - skipping h2ded")
+if(EMSCRIPTEN OR (NOT UNIX AND NOT WIN32))
+    # The web target has no use for a server at all.
+    message(WARNING "BUILD_DEDICATED is only wired up for Unix and Windows hosts - skipping h2ded")
 else()
     # Shares COMMON_SOURCES with the client; the removals below are the parts
     # of that list that cannot compile without a client.
@@ -666,17 +664,31 @@ else()
         ${COMMONDIR}/sv_model.c            # BSP-only replacement for gl_model.c
     )
 
-    # Network + system layer.  hexen2/server/sys_unix.c is the SDL-free
-    # counterpart of hexen2/sys_unix.c, so sys_sdl.c is not needed either.
-    list(APPEND SERVER_SOURCES
-        ${ENGINE_TOP}/hexen2/net_bsd.c
-        ${ENGINE_TOP}/hexen2/net_udp.c
-        ${ENGINE_TOP}/hexen2/server/sys_unix.c
-    )
+    # Network + system layer.  hexen2/server/sys_{unix,win}.c are the SDL-free
+    # counterparts of hexen2/sys_{unix,win}.c, so sys_sdl.c is not needed either.
+    if(WIN32)
+        list(APPEND SERVER_SOURCES
+            ${ENGINE_TOP}/hexen2/net_win.c
+            ${ENGINE_TOP}/hexen2/net_wins.c
+            ${ENGINE_TOP}/hexen2/server/sys_win.c
+        )
+    else()
+        list(APPEND SERVER_SOURCES
+            ${ENGINE_TOP}/hexen2/net_bsd.c
+            ${ENGINE_TOP}/hexen2/net_udp.c
+            ${ENGINE_TOP}/hexen2/server/sys_unix.c
+        )
+    endif()
 
+    # No WIN32 flag on Windows: h2ded is a console program with a plain main(),
+    # and its output is the server console.
     add_executable(h2ded ${SERVER_SOURCES})
     target_compile_definitions(h2ded PRIVATE SERVERONLY)
-    target_link_libraries(h2ded PRIVATE ${M_LIBRARY})
+    if(WIN32)
+        target_link_libraries(h2ded PRIVATE ws2_32 winmm)
+    else()
+        target_link_libraries(h2ded PRIVATE ${M_LIBRARY})
+    endif()
 
     install(TARGETS h2ded RUNTIME DESTINATION bin)
 

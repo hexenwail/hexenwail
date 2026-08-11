@@ -24,10 +24,13 @@
 #include <limits.h>
 #include <windows.h>
 #include <mmsystem.h>
+#include <wchar.h>
 
 
 #define MIN_MEM_ALLOC	0x2000000	/* 32 mb */
 #define STD_MEM_ALLOC	0x4000000	/* 64 mb */
+
+#define q_swprintf _snwprintf
 
 cvar_t		sys_nostdout = {"sys_nostdout", "0", CVAR_NONE};
 
@@ -238,6 +241,39 @@ void Sys_FindClose (fsfind_t *ctx)
 		free (fd);
 		ctx->priv = NULL;
 	}
+}
+
+int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
+{
+	WIN32_FIND_DATAW	fdata;
+	HANDLE		fh;
+	wchar_t		searchstr[MAX_OSPATH];
+	wchar_t		*widepath;
+	const char	*utf8name;
+	int		count = 0;
+
+	widepath = Sys_UTF8ToWide(path);
+	if (!widepath)
+		return 0;
+	q_swprintf(searchstr, sizeof(searchstr)/sizeof(wchar_t), L"%s/*", widepath);
+	fh = FindFirstFileW(searchstr, &fdata);
+	if (fh == INVALID_HANDLE_VALUE)
+		return 0;
+
+	do
+	{
+		if (!(fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+			continue;
+		if (fdata.cFileName[0] == L'.')
+			continue;	/* skip ".", ".." and hidden dirs */
+		utf8name = Sys_WideToUTF8(fdata.cFileName);
+		if (utf8name)
+			q_strlcpy(dirs[count], utf8name, 64);
+		count++;
+	} while (FindNextFileW(fh, &fdata) != 0 && count < maxdirs);
+
+	FindClose(fh);
+	return count;
 }
 
 
