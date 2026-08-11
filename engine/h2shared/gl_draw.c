@@ -32,6 +32,12 @@
 #include <emmintrin.h>
 #endif
 
+/* The console charset: a 16x16 grid of 8x8 glyphs, stored as raw paletted
+ * pixels with no header.  Fixed by the format, not by the file. */
+#define	CONCHARS_W	256
+#define	CONCHARS_H	128
+#define	CONCHARS_BYTES	(CONCHARS_W * CONCHARS_H)
+
 /* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
 #ifdef EMSCRIPTEN
 #ifndef GL_QUADS
@@ -677,6 +683,12 @@ void Draw_Init (void)
 	qpic_t		*p;
 	byte		*chars;
 	int		i;
+	int		charsofs, charsavail;
+	/* Static rather than on the stack: 32 KB is more than this thread's
+	 * frame should carry, and GL_LoadTexture may hold the pointer for a
+	 * later reload — the temp-file buffer it used to be handed is a good
+	 * deal more volatile than this. */
+	static byte	charbuf[CONCHARS_BYTES];
 
 	if (!draw_reinit)
 	{
@@ -703,23 +715,56 @@ void Draw_Init (void)
 	chars = FS_LoadTempFile ("gfx/menu/conchars.lmp", NULL);
 	Draw_PicCheckError (chars, "gfx/menu/conchars.lmp");
 
-	// SoT/karma2 mods have larger charset (32776 bytes) but it's raw data, not a qpic
-	// Accept both standard 32768 and extended 32768+ sizes as raw character data
-	if (fs_filesize < 256*128) {
-		Sys_Error ("gfx/menu/conchars.lmp: bad size (%d bytes, expected at least %d).",
-			fs_filesize, 256*128);
+	/* conchars.lmp is raw 256x128 pixels with no header of any kind, but
+	 * WAD tools that do not know that rewrite it as a qpic: an 8-byte
+	 * width/height header followed by the same pixels.  Sniffing that
+	 * header is the only way to tell one apart from the SoT/karma2
+	 * charsets, which are genuinely headerless and merely longer than
+	 * 32768 — both land on 32776 bytes, so the old size-only test sent a
+	 * headered lump down the "oversize raw" path and read it 8 bytes out
+	 * of phase, drawing shifted garbage rather than reporting anything.
+	 * uhexen2-52gf. */
+	charsofs = 0;
+	if (fs_filesize >= 8 + CONCHARS_BYTES &&
+	    LittleLong(((int *)chars)[0]) == CONCHARS_W &&
+	    LittleLong(((int *)chars)[1]) == CONCHARS_H)
+	{
+		Con_DPrintf ("conchars.lmp: qpic header found, skipping 8 bytes\n");
+		charsofs = 8;
 	}
-	// Only process the first 256*128 bytes to avoid buffer overruns
-	if (fs_filesize > 256*128) {
-		Con_DPrintf ("conchars.lmp: larger file (%ld bytes), using first 32768\n", fs_filesize);
+	else if (fs_filesize > CONCHARS_BYTES)
+	{
+		Con_DPrintf ("conchars.lmp: larger file (%ld bytes), using first %d\n",
+			     fs_filesize, CONCHARS_BYTES);
 	}
 
-	for (i = 0; i < 256*128; i++)
+	/* Copy into a fixed-size buffer and pad any shortfall instead of
+	 * calling Sys_Error.  A malformed charset in a mod pak used to kill
+	 * the engine during Draw_Init — before there was a console to print
+	 * the reason to — so it reached users as a bare fatal "bad size" with
+	 * no way to see what was wrong or to reach a command line and fix it.
+	 * Missing characters draw blank; everything else still works. */
+	charsavail = (int)fs_filesize - charsofs;
+	if (charsavail < 0)
+		charsavail = 0;
+	if (charsavail > CONCHARS_BYTES)
+		charsavail = CONCHARS_BYTES;
+	if (charsavail < CONCHARS_BYTES)
+		Con_Printf ("WARNING: gfx/menu/conchars.lmp is short (%d of %d "
+			    "bytes) — some characters will be blank\n",
+			    charsavail, CONCHARS_BYTES);
+
+	memcpy (charbuf, chars + charsofs, charsavail);
+	memset (charbuf + charsavail, 255, CONCHARS_BYTES - charsavail);
+	chars = charbuf;
+
+	for (i = 0; i < CONCHARS_BYTES; i++)
 	{
 		if (chars[i] == 0)
 			chars[i] = 255;	// proper transparent color
 	}
-	char_texture = GL_LoadTexture ("charset", chars, 256, 128, TEX_ALPHA|TEX_NEAREST);
+	char_texture = GL_LoadTexture ("charset", chars, CONCHARS_W, CONCHARS_H,
+				       TEX_ALPHA|TEX_NEAREST);
 	/* Set CLAMP_TO_EDGE on charset atlas to prevent edge sampling artifacts */
 	GL_Bind (char_texture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
