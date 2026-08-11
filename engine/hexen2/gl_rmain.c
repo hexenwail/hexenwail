@@ -4228,8 +4228,8 @@ static void R_SetupFrame (void)
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
 
-	/* Upload caustics uniform on both world programs.  GL uniform state is
-	 * per-program and persists across glUseProgram cycles, so setting once
+	/* Upload caustics uniform on all three world programs.  GL uniform state
+	 * is per-program and persists across glUseProgram cycles, so setting once
 	 * per frame (immediately after r_viewleaf updates) is enough — every
 	 * subsequent world-shader draw this frame picks up the right value
 	 * without per-bind plumbing.  uhexen2-6bfm. */
@@ -4245,6 +4245,16 @@ static void R_SetupFrame (void)
 		{
 			glUseProgram_fp(gl_shader_world_opaque.program);
 			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
+		}
+		/* Translucent world surfaces are drawn with gl_shader_world_oit
+		 * while an OIT pass is active (gl_rsurf.c DrawGLWaterPoly /
+		 * DrawGLPolyMTex), so it needs the same value or those surfaces
+		 * render uncausticked next to causticked opaque ones.
+		 * uhexen2-uxpp. */
+		if (gl_shader_world_oit.program && gl_shader_world_oit.u_caustics >= 0)
+		{
+			glUseProgram_fp(gl_shader_world_oit.program);
+			glUniform2f_fp(gl_shader_world_oit.u_caustics, intensity, t);
 		}
 		/* Per-frame world overbright (Ironwail-style).  Pushing it once
 		 * per frame here covers the OIT and brush-batch paths that don't
