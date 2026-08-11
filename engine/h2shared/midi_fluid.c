@@ -170,11 +170,47 @@ static void fs_log_suppress (int level, const char *message, void *data)
 	(void)data;
 }
 
+/* snd_soundfont is CVAR_ARCHIVE, but find_soundfont() below only ever ran
+ * once, from FMIDI_Init, which S_Init calls at host.c:1032 — long before
+ * host.c:1066 queues "exec hexen.rc" and the config assigns any archived
+ * cvar.  So the user's saved path was always read as "" and the override
+ * did nothing, on this run or any later one.  Making the cvar live fixes
+ * that ordering and gives runtime switching for free.  uhexen2-bsqq. */
+static void FMIDI_SoundFontChanged (cvar_t *var)
+{
+	int	id;
+
+	if (!fs_synth)
+		return;		/* driver never initialised — nothing to swap into */
+	if (!var->string[0])
+		return;		/* cleared: keep playing whatever is loaded */
+
+	if (!file_exists(var->string))
+	{
+		Con_Printf("FluidSynth: snd_soundfont '%s' not found\n", var->string);
+		return;
+	}
+
+	/* Load first, unload second: if the new font is unusable we keep
+	 * playing the old one instead of ending up with no font at all. */
+	id = fluid_synth_sfload(fs_synth, var->string, 1);
+	if (id == FLUID_FAILED)
+	{
+		Con_Printf("FluidSynth: failed to load %s\n", var->string);
+		return;
+	}
+	if (fs_sfont_id != FLUID_FAILED && fs_sfont_id != -1)
+		fluid_synth_sfunload(fs_synth, fs_sfont_id, 1);
+	fs_sfont_id = id;
+	Con_Printf("FluidSynth: loaded %s\n", var->string);
+}
+
 static qboolean FMIDI_Init (void)
 {
 	const char *sf;
 
 	Cvar_RegisterVariable(&snd_soundfont);
+	Cvar_SetCallback(&snd_soundfont, FMIDI_SoundFontChanged);
 
 	/* suppress FluidSynth's built-in logging */
 	fluid_set_log_function(FLUID_PANIC, fs_log_suppress, NULL);
