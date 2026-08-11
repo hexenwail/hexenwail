@@ -56,6 +56,12 @@ void	GL_SetAliasNoFog (float v);
 void	GL_SetAliasR6Mode (float v);
 /* uhexen2-khsa r28 probe — hash-based stochastic alpha-test. */
 void	GL_SetAliasStochasticAlpha (float v);
+/* Underwater caustics for subsequent alias batches.  intensity 0 = off (the
+ * default, and what every non-alias user of gl_shader_alias leaves it at).
+ * The model matrix is the entity's model-only transform; salias_vert needs it
+ * to recover world XY because u_modelview is view*model.  uhexen2-0gn3. */
+void	GL_SetAliasCaustics (float intensity, float time);
+void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
 
 /* Init / shutdown */
 void	GL_VBO_Init (void);

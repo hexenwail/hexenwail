@@ -40,6 +40,14 @@ typedef struct glprogram_s {
 	GLint	u_alias_nofog;	    /* alias FS: when > 0.5, skip the fog mix entirely.  r22 probe — does fog math (exp, mix) trigger the dither even when fog density is 0? */
 	GLint	u_alias_r6_mode;    /* alias FS: when > 0.5, fragColor = vec4(tex.rgb, 1.0) — full r6 match, no discard, no fog, no alpha branch.  r22 probe — is the bug somewhere in our shader logic at all? */
 	GLint	u_alias_stochastic_alpha; /* alias FS: when > 0.5, replace `if (color.a < threshold) discard;` with hash-based stochastic test (Wronski/Wyman 2017).  r28 probe — does restructuring the discard shake loose the NVIDIA compiler quirk that's producing Mathuzzz's screen-door? */
+	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
+	 * gl_shader_alias is the generic textured+vertex-color program and is
+	 * also used for sprites, warp polys and unlit brush polys, so its
+	 * caustics value is per-batch state pushed by GL_ImmEnd.  A shared name
+	 * would make GL_ImmEnd clobber the per-frame world u_caustics that
+	 * R_SetupFrame uploads. */
+	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
+	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */
@@ -84,6 +92,7 @@ typedef struct {
 	GLint	u_alias_nofog;	     /* uhexen2-khsa r22 — skip fog mix when > 0.5 */
 	GLint	u_alias_r6_mode;     /* uhexen2-khsa r22 — full r6 match when > 0.5 */
 	GLint	u_alias_stochastic_alpha; /* uhexen2-khsa r28 — hash-based stochastic alpha-test */
+	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
