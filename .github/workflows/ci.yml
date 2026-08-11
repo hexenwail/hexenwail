@@ -70,6 +70,15 @@ jobs:
       - name: Build Windows dedicated server
         run: nix build .#h2ded-win64 --print-build-logs
 
+      # BUILD_UTILS defaults OFF, so without these the three CMakeLists that
+      # build the map/model toolchain are gated by nothing.  Plain C, no SDL,
+      # GL or codecs — cheap on both hosts.  uhexen2-bjgb, uhexen2-4xd7.
+      - name: Build tools
+        run: nix build .#utils --print-build-logs
+
+      - name: Build Windows tools
+        run: nix build .#utils-win64 --print-build-logs
+
   flatpak:
     runs-on: ubuntu-latest
     # flatpak + flatpak-builder are installed directly on the runner — the
