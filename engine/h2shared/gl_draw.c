@@ -38,16 +38,6 @@
 #define	CONCHARS_H	128
 #define	CONCHARS_BYTES	(CONCHARS_W * CONCHARS_H)
 
-/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
-#ifdef EMSCRIPTEN
-#ifndef GL_QUADS
-#define GL_QUADS 0
-#endif
-#ifndef GL_POLYGON
-#define GL_POLYGON 0
-#endif
-#endif
-
 #if ENDIAN_RUNTIME_DETECT
 /* initialized by VID_Init() */
 unsigned int	MASK_r;

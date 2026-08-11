@@ -30,12 +30,6 @@
 #ifndef GLdouble
 #define GLdouble double
 #endif
-#ifndef GL_QUADS
-#define GL_QUADS 0
-#endif
-#ifndef GL_POLYGON
-#define GL_POLYGON 0
-#endif
 #endif
 
 /* gl_fog.c */
@@ -4937,11 +4931,18 @@ static int	rprof_wpoly, rprof_epoly; /* saved from previous frame */
 
 static void R_ProfileInit (void)
 {
+#ifdef __EMSCRIPTEN__
+	/* WebGL2 has no timer queries; glGenQueries_fp is a no-op macro there
+	 * and so cannot be tested as a value.  rprof_available stays false,
+	 * which short-circuits the rest of the GPU profiler. */
+	(void)rprof_queries;
+#else
 	if (rprof_available || !glGenQueries_fp)
 		return;
 	glGenQueries_fp(RPROF_COUNT + 1, rprof_queries);
 	rprof_available = true;
 	rprof_pending = false;
+#endif
 }
 
 static void R_ProfileTimestamp (int idx)
