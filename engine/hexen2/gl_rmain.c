@@ -1819,9 +1819,10 @@ extern int		world_num_indices;
 extern GLuint		lm_atlas_texture;
 extern qboolean		lm_atlas_enabled;
 extern int		lightmap_bytes;
-#define LM_BLOCK_WIDTH	128
-#define LM_BLOCK_HEIGHT	128
-extern unsigned char	*lightmaps;
+/* No LM_BLOCK_WIDTH/HEIGHT or lightmaps[] mirror here: both were unused
+ * copies of gl_rsurf.c internals, and the 128 they hardcoded silently went
+ * stale when the page size changed.  Anything needing page geometry should
+ * go through gl_rsurf.c rather than re-declare it.  uhexen2-vfvh. */
 extern int		d_lightstylevalue[256];
 extern int		r_framecount;
 extern void		R_BuildLightMap_Public (msurface_t *surf, byte *dest, int stride);

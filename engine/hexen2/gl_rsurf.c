@@ -103,9 +103,19 @@ static gl_draw_call_t	*drawcall_cpu_buffer = NULL;
  * has surfaces with extents > 256 world units (smax*tmax > 324) that
  * overflowed the old buffer the moment my R_RecursiveWorldNode hook
  * exposed them to R_BuildLightMap — caught by glibc fortified memset
- * as a SIGABRT during SoT map load on r7. */
-#define	BLOCK_WIDTH	128
-#define	BLOCK_HEIGHT	128
+ * as a SIGABRT during SoT map load on r7.
+ *
+ * uhexen2-vfvh: raised 128 -> 256 to match MAX_SURFACE_LIGHTMAP (255), the
+ * largest surface Mod_CalcSurfaceExtents will admit.  The two had disagreed
+ * since MAX_SURFACE_LIGHTMAP was raised for SoT: a surface between 129 and
+ * 255 luxels across loaded fine and then died in AllocBlock, which could
+ * not place it in any page however many pages existed — reported as the
+ * misleading "AllocBlock: full".  The page must be at least as big as the
+ * biggest surface the loader accepts, or the loader's limit is a lie.
+ * Costs 768 KB more in the two working buffers below; pages themselves are
+ * allocated on demand. */
+#define	BLOCK_WIDTH	256
+#define	BLOCK_HEIGHT	256
 
 static unsigned int	blocklights[BLOCK_WIDTH*BLOCK_HEIGHT];
 static unsigned int	blocklightscolor[BLOCK_WIDTH*BLOCK_HEIGHT*3];	// colored light support. *3 for RGB to the definitions at the top
@@ -144,16 +154,75 @@ static int	allocated[MAX_LIGHTMAPS][BLOCK_WIDTH];
 
 // the lightmap texture data needs to be kept in
 // main memory so texsubimage can update properly
-static byte	lightmaps[4*MAX_LIGHTMAPS*BLOCK_WIDTH*BLOCK_HEIGHT];
+//
+/* Grown on demand by AllocBlock rather than declared at the MAX_LIGHTMAPS
+ * worst case: 512 pages of 256x256 would be 128 MB of BSS carried by every
+ * map however small, which is dead weight on desktop and fatal to the
+ * WASM build's linear memory.  Sized at 4 bytes/texel regardless of the
+ * current lightmap_bytes, because gl_lightmapfmt can change lightmap_bytes
+ * at runtime and every index into this buffer scales by it.  uhexen2-vfvh. */
+#define LM_PAGE_BYTES	(BLOCK_WIDTH * BLOCK_HEIGHT * 4)
+static byte		*lightmaps;
+static unsigned int	lightmap_pages_alloced;
 
-/* Lightmap atlas — all pages in one 2D texture (16x16 grid of 128x128 pages = 2048x2048) */
-#define LM_ATLAS_COLS	16
-#define LM_ATLAS_ROWS	16
+/* Lightmap atlas — all pages in one 2D texture, a fixed 8 columns wide by
+ * however many rows the loaded map needs (256x256 pages, so 2048 x N*256).
+ * The row count is deliberately NOT a compile-time constant: surface UVs are
+ * baked against the atlas height, so a fixed worst-case height would force
+ * every map to allocate the full 2048x16384 texture.  Sizing to the pages
+ * actually used keeps ordinary maps well under their old footprint while
+ * letting a huge map grow.  Set once per map load, before any UVs are baked.
+ *
+ * The column count is chosen to hold the atlas width at 2048 now that pages
+ * are 256 wide: WebGL2 only guarantees GL_MAX_TEXTURE_SIZE 2048, and the
+ * WASM build has to keep fitting.  Height is the axis we grow instead. */
+#define LM_ATLAS_COLS	8
 #define LM_ATLAS_WIDTH	(LM_ATLAS_COLS * BLOCK_WIDTH)	/* 2048 */
-#define LM_ATLAS_HEIGHT	(LM_ATLAS_ROWS * BLOCK_HEIGHT)	/* 2048 */
 GLuint	lm_atlas_texture;	/* non-static — accessed by gl_worldcull.c */
-static int	lm_atlas_layers;	/* number of pages in the atlas */
+static int	lm_pages_used;		/* lightmap pages the current map filled */
+static int	lm_atlas_rows;		/* atlas rows covering lm_pages_used */
+static int	lm_atlas_height;	/* lm_atlas_rows * BLOCK_HEIGHT */
 qboolean	lm_atlas_enabled;	/* false = fall back to per-surface binds */
+
+/*
+==================
+LM_EnsurePages
+
+Make sure the lightmaps[] backing store covers `pages` pages, growing
+geometrically.  Returns false only if the allocation fails.  Callers must
+not hold a pointer into lightmaps[] across this — it reallocates.
+==================
+*/
+static qboolean LM_EnsurePages (unsigned int pages)
+{
+	byte		*grown;
+	unsigned int	want;
+
+	if (pages <= lightmap_pages_alloced)
+		return true;
+	if (pages > MAX_LIGHTMAPS)
+		return false;
+
+	want = lightmap_pages_alloced ? lightmap_pages_alloced : 32;
+	while (want < pages)
+		want *= 2;
+	if (want > MAX_LIGHTMAPS)
+		want = MAX_LIGHTMAPS;
+
+	grown = (byte *) realloc (lightmaps, (size_t)want * LM_PAGE_BYTES);
+	if (!grown)
+		return false;
+
+	/* Zero the fresh tail: the static array this replaced was BSS, and
+	 * gaps between packed surfaces are never written by R_BuildLightMap
+	 * but can still be reached by bilinear taps at page edges. */
+	memset (grown + (size_t)lightmap_pages_alloced * LM_PAGE_BYTES, 0,
+		(size_t)(want - lightmap_pages_alloced) * LM_PAGE_BYTES);
+
+	lightmaps = grown;
+	lightmap_pages_alloced = want;
+	return true;
+}
 
 /* ====================================================================
  * BINDLESS TEXTURE BINDING & SSBO MANAGEMENT
@@ -721,11 +790,14 @@ void R_UpdateLightmaps (qboolean Translucent)
 		glGenTextures_fp(MAX_LIGHTMAPS, lightmap_textures);
 	}
 
-	for (i = 0; i < MAX_LIGHTMAPS; i++)
+	/* Bounded by the pages this map filled, not MAX_LIGHTMAPS: the page
+	 * textures are all generated up front, so the old !lightmap_textures[i]
+	 * break never fired and this walked every slot.  That was merely
+	 * wasteful when lightmaps[] was a full-size static array; now that it
+	 * is grown to fit, indexing an unused page would read past the
+	 * allocation.  uhexen2-vfvh. */
+	for (i = 0; i < (unsigned int)lm_pages_used; i++)
 	{
-		if (!lightmap_textures[i])
-			break;		// no more used
-
 		if (lightmap_modified[i])
 		{
 			int rx = lightmap_rectmin[i][0];
@@ -3072,7 +3144,7 @@ void R_BuildWorldVBO (void)
 				int col = surf->lightmaptexturenum % LM_ATLAS_COLS;
 				int row = surf->lightmaptexturenum / LM_ATLAS_COLS;
 				s = (col + s) / (float)LM_ATLAS_COLS;
-				t = (row + t) / (float)LM_ATLAS_ROWS;
+				t = (row + t) / (float)lm_atlas_rows;
 			}
 
 			verts[v_pos].lm[0] = s;
@@ -3368,6 +3440,11 @@ LIGHTMAP ALLOCATION
 =============================================================================
 */
 
+/* Declared here rather than down by BuildSurfaceDisplayList so AllocBlock
+ * can name the offending model when it runs out of room. */
+static mvertex_t	*r_pcurrentvertbase;
+static qmodel_t		*currentmodel;
+
 static unsigned int last_lightmap_allocated = 0;
 
 // returns a texture number and the position inside it
@@ -3377,11 +3454,27 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 	int		best, best2;
 	unsigned int	texnum;
 
+	/* No page will ever hold this surface, however many we have.  Caught
+	 * up front so it reports as its own failure instead of masquerading
+	 * as page exhaustion — the two need completely different fixes (a
+	 * smaller qbsp subdivide size vs. a bigger engine budget), and the
+	 * old shared "full" message could not tell them apart. */
+	if (w > BLOCK_WIDTH || h > BLOCK_HEIGHT)
+		Sys_Error ("%s: surface in %s needs a %dx%d luxel lightmap, "
+			   "larger than the %dx%d page size — rebuild the map "
+			   "with a smaller qbsp subdivide size",
+			   __thisfunc__,
+			   currentmodel ? currentmodel->name : "?",
+			   w, h, BLOCK_WIDTH, BLOCK_HEIGHT);
+
 	for (texnum = last_lightmap_allocated; texnum < MAX_LIGHTMAPS; texnum++)
 	{
 		best = BLOCK_HEIGHT;
 
-		for (i = 0; i < BLOCK_WIDTH - w; i++)
+		/* <=, not <: at i == BLOCK_WIDTH - w the last sampled column is
+		 * BLOCK_WIDTH - 1, still in bounds.  The stock < rejected any
+		 * surface exactly one page wide even on a completely empty page. */
+		for (i = 0; i <= BLOCK_WIDTH - w; i++)
 		{
 			best2 = 0;
 
@@ -3402,6 +3495,12 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 		if (best + h > BLOCK_HEIGHT)
 			continue;
 
+		/* Grow the backing store before handing the page out — the
+		 * caller indexes lightmaps[] with the number we return. */
+		if (!LM_EnsurePages (texnum + 1))
+			Sys_Error ("%s: out of memory for lightmap page %u (%u KB/page)",
+				   __thisfunc__, texnum, (unsigned int)(LM_PAGE_BYTES >> 10));
+
 		for (i = 0; i < w; i++)
 			allocated[texnum][*x + i] = best + h;
 
@@ -3409,14 +3508,17 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 		return texnum;
 	}
 
-	Sys_Error ("%s: full", __thisfunc__);
+	Sys_Error ("%s: out of lightmap pages — %s needs more than the %d "
+		   "%dx%d pages this engine allows (%d luxels). Raise "
+		   "MAX_LIGHTMAPS or split the map",
+		   __thisfunc__, currentmodel ? currentmodel->name : "?",
+		   MAX_LIGHTMAPS, BLOCK_WIDTH, BLOCK_HEIGHT,
+		   MAX_LIGHTMAPS * BLOCK_WIDTH * BLOCK_HEIGHT);
 	return -1;	// shut up the compiler
 }
 
 
 #define	COLINEAR_EPSILON	0.001
-static mvertex_t	*r_pcurrentvertbase;
-static qmodel_t		*currentmodel;
 
 /*
 ================
@@ -3489,7 +3591,7 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 			int col = fa->lightmaptexturenum % LM_ATLAS_COLS;
 			int row = fa->lightmaptexturenum / LM_ATLAS_COLS;
 			s = (col + s) / (float)LM_ATLAS_COLS;
-			t = (row + t) / (float)LM_ATLAS_ROWS;
+			t = (row + t) / (float)lm_atlas_rows;
 		}
 
 		poly->verts[i][5] = s;
@@ -3600,12 +3702,14 @@ static void LM_StitchAtlas (void)
 
 	if (!lm_atlas_enabled)
 		return;
+	if (lm_atlas_rows < 1 || !lightmaps)
+		return;		/* nothing allocated yet — no map loaded */
 
-	atlas = (byte *) calloc(1, LM_ATLAS_WIDTH * LM_ATLAS_HEIGHT * lightmap_bytes);
+	atlas = (byte *) calloc(1, (size_t)LM_ATLAS_WIDTH * lm_atlas_height * lightmap_bytes);
 	if (!atlas)
 		return;
 
-	for (page = 0; page < lm_atlas_layers; page++)
+	for (page = 0; page < lm_pages_used; page++)
 	{
 		col = page % LM_ATLAS_COLS;
 		row = page / LM_ATLAS_COLS;
@@ -3627,7 +3731,7 @@ static void LM_StitchAtlas (void)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, lightmap_internalformat,
-			LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT, 0,
+			LM_ATLAS_WIDTH, lm_atlas_height, 0,
 			gl_lightmap_format, GL_UNSIGNED_BYTE, atlas);
 	free(atlas);
 
@@ -3669,6 +3773,20 @@ void GL_BuildLightmaps (void)
 	/* Decide atlas mode BEFORE building surfaces (UVs depend on it) */
 	lm_atlas_enabled = (Cvar_VariableValue("gl_lmatlas") != 0);
 
+	/* Keep page 0 backed even if this map turns out to have no lit surfaces
+	 * at all (everything sky or liquid).  Several draw paths compute
+	 * lightmaps + surf->lightmaptexturenum * ... unconditionally, and those
+	 * surfaces carry a zero page number; the static array this replaced was
+	 * always valid to index, a null pointer is not. */
+	if (!LM_EnsurePages (1))
+		Sys_Error ("GL_BuildLightmaps: out of memory for the lightmap buffer");
+
+	/* Pass 1: pack every surface into a lightmap page.  This has to finish
+	 * before a single UV is baked.  The atlas is now only as tall as the
+	 * pages the map actually used, and BuildSurfaceDisplayList normalises
+	 * the t coordinate against that height — baking as we went, the way
+	 * this used to, would normalise the early surfaces against a height
+	 * that the later ones then changed.  uhexen2-vfvh. */
 	for (j = 1; j < MAX_MODELS; j++)
 	{
 		m = cl.model_precache[j];
@@ -3681,16 +3799,52 @@ void GL_BuildLightmaps (void)
 		currentmodel = m;
 
 		for (i = 0; i < m->numsurfaces; i++)
-		{
 			GL_CreateSurfaceLightmap (m->surfaces + i);
-			if (m->surfaces[i].flags & SURF_DRAWTURB)
+	}
+
+	//
+	// size the atlas to the pages this map actually filled
+	//
+	lm_pages_used = 0;
+	for (i = 0; i < MAX_LIGHTMAPS; i++)
+	{
+		if (!allocated[i][0])
+			break;		// no more used
+		lm_pages_used++;
+	}
+	lm_atlas_rows = (lm_pages_used + LM_ATLAS_COLS - 1) / LM_ATLAS_COLS;
+	if (lm_atlas_rows < 1)
+		lm_atlas_rows = 1;	/* keep the UV divisor sane on a lightmap-less map */
+	lm_atlas_height = lm_atlas_rows * BLOCK_HEIGHT;
+
+	/* Pass 2: bake polygon UVs, now that the atlas height is settled.
+	 * Skipped on a video restart (draw_reinit) — the polys survive the
+	 * context loss with their UVs intact, and the page allocation above
+	 * is deterministic, so the height they were baked against is the one
+	 * we just recomputed. */
+	if (!draw_reinit)
+	{
+		for (j = 1; j < MAX_MODELS; j++)
+		{
+			m = cl.model_precache[j];
+			if (!m)
+				break;
+			if (m->name[0] == '*')
 				continue;
+
+			r_pcurrentvertbase = m->vertexes;
+			currentmodel = m;
+
+			for (i = 0; i < m->numsurfaces; i++)
+			{
+				if (m->surfaces[i].flags & SURF_DRAWTURB)
+					continue;
 #ifndef QUAKE2
-			if (m->surfaces[i].flags & SURF_DRAWSKY)
-				continue;
+				if (m->surfaces[i].flags & SURF_DRAWSKY)
+					continue;
 #endif
-			if (!draw_reinit)
 				BuildSurfaceDisplayList (m->surfaces + i);
+			}
 		}
 	}
 
@@ -3699,13 +3853,9 @@ void GL_BuildLightmaps (void)
 	//
 	// upload all lightmaps that were filled
 	//
-	lm_atlas_layers = 0;
-	for (i = 0; i < MAX_LIGHTMAPS; i++)
+	for (i = 0; i < lm_pages_used; i++)
 	{
-		if (!allocated[i][0])
-			break;		// no more used
 		lightmap_modified[i] = false;
-		lm_atlas_layers++;
 
 		GL_Bind(lightmap_textures[i]);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -3720,9 +3870,17 @@ void GL_BuildLightmaps (void)
 	 * One bind for ALL world surfaces, zero lightmap rebinds.
 	 * Disabled on Intel GPUs due to driver timeout issues. */
 	LM_StitchAtlas ();
+
+	/* Always report the page count, atlas or not.  When a map dies in
+	 * AllocBlock the next question is always "how close was it?", and
+	 * before this there was no way to answer it from a user's console
+	 * log.  uhexen2-vfvh. */
+	Con_SafePrintf ("Lightmaps: %d/%d pages (%dx%d)",
+			lm_pages_used, MAX_LIGHTMAPS, BLOCK_WIDTH, BLOCK_HEIGHT);
 	if (lm_atlas_enabled && lm_atlas_texture)
-		Con_SafePrintf("Lightmap atlas: %d pages in %dx%d texture\n",
-			       lm_atlas_layers, LM_ATLAS_WIDTH, LM_ATLAS_HEIGHT);
+		Con_SafePrintf (", atlas %dx%d\n", LM_ATLAS_WIDTH, lm_atlas_height);
+	else
+		Con_SafePrintf ("\n");
 
 	glActiveTexture_fp (GL_TEXTURE0);
 }
@@ -3769,10 +3927,12 @@ void R_RebuildAllLightmaps (void)
 		}
 	}
 
-	for (i = 0; i < MAX_LIGHTMAPS; i++)
+	/* Only the pages in use — see the matching note in R_UpdateLightmaps.
+	 * Dirtying a page beyond lm_pages_used would upload from past the end
+	 * of the grown lightmaps[] buffer, into a page texture that never got
+	 * storage allocated. */
+	for (i = 0; i < lm_pages_used; i++)
 	{
-		if (!lightmap_textures[i])
-			break;
 		lightmap_modified[i] = true;
 		lightmap_rectmin[i][0] = 0;
 		lightmap_rectmin[i][1] = 0;
