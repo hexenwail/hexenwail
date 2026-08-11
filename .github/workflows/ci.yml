@@ -92,11 +92,26 @@ jobs:
           # `flatpak --system install` fails with "operation Deploy not
           # allowed for user"; once the deps are present that install is a
           # no-op.
+          #
+          # --no-related skips the extensions flatpak would otherwise drag in
+          # with the runtime — .Locale (both Platform and Sdk), .GL.default,
+          # .codecs-extra — none of which a build needs.  Worth ~16s.  The
+          # action's own --install-deps-from=flathub only installs the runtime
+          # and sdk the manifest names, so it does not pull them back.
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub \
+          sudo flatpak install -y --noninteractive --no-related flathub \
             org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      # No cache-key: the action's default is
+      # flatpak-builder-<arch>-<sha256(manifest)[:20]>, and its only restore
+      # fallback is the prefix "flatpak-builder-<arch>".  A key containing
+      # ${{ github.sha }} sorts as flatpak-builder-<sha>-x86_64, which that
+      # prefix can never match, so every run logged "No cache was found" and
+      # rebuilt fluidsynth/ogg/vorbis/opus/opusfile/libxmp from scratch (~87s)
+      # before uploading a 69 MiB cache nobody would read.  With the default,
+      # an unchanged manifest is an exact hit (which also skips the save), and
+      # a changed manifest still warm-restores via the prefix and rebuilds
+      # only from the edited module onward.
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail.flatpak
           manifest-path: flatpak/io.github.hexenwail.hexenwail.yml
-          cache-key: flatpak-builder-${{ github.sha }}
