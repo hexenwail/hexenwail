@@ -46,14 +46,23 @@ FILE IO
 ===============================================================================
 */
 
-/* Convert UTF-8 path to UTF-16 for Windows API calls */
+/* Convert UTF-8 path to UTF-16 for Windows API calls, into a caller-owned
+ * buffer. Callers that need two converted paths live at once (copy, rename)
+ * MUST use this rather than the static-buffer wrapper below. */
+static wchar_t *Sys_UTF8ToWideBuf (const char *utf8path, wchar_t *buf, int buflen)
+{
+	if (MultiByteToWideChar(CP_UTF8, 0, utf8path, -1, buf, buflen) == 0)
+		return NULL;
+	return buf;
+}
+
+/* Convert UTF-8 path to UTF-16 for Windows API calls.
+ * The result points at a shared static buffer and is only valid until the
+ * next call: never hold two of these at once. */
 static wchar_t *Sys_UTF8ToWide (const char *utf8path)
 {
 	static wchar_t widepath[MAX_PATH];
-	int len = MultiByteToWideChar(CP_UTF8, 0, utf8path, -1, widepath, MAX_PATH);
-	if (len == 0)
-		return NULL;
-	return widepath;
+	return Sys_UTF8ToWideBuf(utf8path, widepath, MAX_PATH);
 }
 
 /* Convert UTF-16 filename to UTF-8 for return to engine */
@@ -106,9 +115,10 @@ int Sys_unlink (const char *path)
 
 int Sys_rename (const char *oldp, const char *newp)
 {
-	wchar_t *wideoldp = Sys_UTF8ToWide(oldp);
-	wchar_t *widenewp = Sys_UTF8ToWide(newp);
-	if (!wideoldp || !widenewp)
+	wchar_t wideoldp[MAX_PATH], widenewp[MAX_PATH];
+
+	if (!Sys_UTF8ToWideBuf(oldp, wideoldp, MAX_PATH) ||
+	    !Sys_UTF8ToWideBuf(newp, widenewp, MAX_PATH))
 		return -1;
 	if (MoveFileW(wideoldp, widenewp) != 0)
 		return 0;
