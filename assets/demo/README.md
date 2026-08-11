@@ -76,12 +76,44 @@ CD-ROM". Under `YOU SHALL NOT` it explicitly forbids:
 > or any copies of this Program, without the express prior written consent of
 > Activision.
 
-Whatever permission actually covers the 1997 demo's free circulation, it is not
-in this file — upstream appears to have copied the retail EULA into the demo
-package. The engine side is unaffected: Hexenwail is GPLv2+ and the HoT
-binaries in the tarball are too. The question is only about the Raven game
-content in `data1/pak0.pak`.
+The engine side is unaffected: Hexenwail is GPLv2+ and the HoT binaries in the
+tarball are too. The question is only about the Raven game content in
+`data1/pak0.pak`.
 
-Tracked separately as `uhexen2-3vmk`. That question gates deliverables 2–5 of
-`uhexen2-menr` (the flake outputs, the CI release artifacts, and the release
-notes) — not this directory, which only documents what the tarball contains.
+### What was searched, and what turned up
+
+Looking for a grant that covers the demo's free circulation. Nothing found:
+
+- **The demo's own data carries no license.** `data1/pak0.pak` was unpacked and
+  all 797 entries listed: game assets, `strings.txt`, `puzzles.txt`,
+  `maplist.txt`, menu graphics. No license, readme, order form, or legal file.
+- **Neither do the surrounding docs.** Every file under `docs/` in the tarball
+  is Hammer of Thyrion's own engine documentation, `COPYING` included — that is
+  the engine's GPL, not the data's terms. `SUBLICENSE.doc` is the only document
+  in the package that speaks to the game content at all.
+- **Upstream's release notes say nothing about terms.** The `README` files in
+  both the `Hexen2Demo-Nov.1997` and `Hexen2Demo-Aug.1997` SourceForge
+  directories are four lines each, describing which engine build was used.
+- **A second port reached the same conclusion independently.** The Hexen 2
+  Dreamcast port states: *"Hexen II Demo version Data files have another
+  Licence. In my view, Hexen II Demo version can't re-distribute without
+  Activision's permission."*
+- **The Hexen line was not shareware.** By the mid-90s the shareware model had
+  fallen out of favour; Hexen shipped a small demo rather than a shareware
+  episode, and was explicitly *not* a shareware product. So the
+  freely-redistributable grant that came with, say, Quake shareware is not a
+  thing to go looking for here.
+
+The one point on the other side is practice: uHexen2 has hosted these packages
+on SourceForge for roughly two decades with no visible objection. That is not a
+permission, and it is not one we inherit.
+
+**Conclusion: no redistribution right can be established.** Bundling
+`data1/pak0.pak` into a Hexenwail release artifact should not proceed on the
+strength of what is documented here.
+
+Tracked as `uhexen2-3vmk`, which gates deliverables 2–5 of `uhexen2-menr` (the
+flake outputs, the CI release artifacts, the Pages deploy). It stays open
+because the decision it feeds — ship engine-only with a user-fetched demo, or
+ask Activision — has not been made. This directory is unaffected either way:
+it documents what the tarball contains, it does not ship it.
