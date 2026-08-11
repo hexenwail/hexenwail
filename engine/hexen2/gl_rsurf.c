@@ -3522,6 +3522,80 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 
 /*
 ================
+LM_SurfaceLightmapUV
+
+The lightmap texture coordinate for one vertex of a surface, in whichever
+space the current atlas decision calls for.  A pure function of the vertex
+world position and the surface's texinfo / light_s / light_t /
+lightmaptexturenum, which is what lets the restart path below recompute it
+without re-deriving the polygon.  Shared with BuildSurfaceDisplayList so the
+two cannot drift apart.  uhexen2-u06s.
+================
+*/
+static void LM_SurfaceLightmapUV (const msurface_t *fa, const float *vec,
+				  float *s_out, float *t_out)
+{
+	float	s, t;
+
+	s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
+	s -= fa->texturemins[0];
+	s += fa->light_s*16;
+	s += 8;
+	s /= BLOCK_WIDTH*16;
+
+	t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
+	t -= fa->texturemins[1];
+	t += fa->light_t*16;
+	t += 8;
+	t /= BLOCK_HEIGHT*16;
+
+	/* Remap page-local UV to atlas position (if atlas enabled) */
+	if (lm_atlas_enabled)
+	{
+		int col = fa->lightmaptexturenum % LM_ATLAS_COLS;
+		int row = fa->lightmaptexturenum / LM_ATLAS_COLS;
+		s = (col + s) / (float)LM_ATLAS_COLS;
+		t = (row + t) / (float)lm_atlas_rows;
+	}
+
+	*s_out = s;
+	*t_out = t;
+}
+
+
+/*
+================
+LM_RebakeSurfaceLightmapUVs
+
+Rewrite an existing surface's lightmap UVs for the current atlas decision,
+in place.  Used on a video restart, where BuildSurfaceDisplayList must not
+run again — it allocates a fresh glpoly_t from the hunk and prepends it, so
+a second call would leak a whole duplicate set of polygons and chain them
+onto the first.
+
+Skipping the bake entirely, which is what the restart path used to do, left
+the UVs in whatever space they were baked in at map load while
+GL_BuildLightmaps re-read gl_lmatlas and possibly chose the other one.  The
+world position each UV derives from is already sitting in verts[i][0..2],
+so there is nothing to reconstruct.  uhexen2-u06s.
+================
+*/
+static void LM_RebakeSurfaceLightmapUVs (msurface_t *fa)
+{
+	glpoly_t	*poly;
+	int		i;
+
+	for (poly = fa->polys; poly; poly = poly->next)
+	{
+		for (i = 0; i < poly->numverts; i++)
+			LM_SurfaceLightmapUV (fa, poly->verts[i],
+					      &poly->verts[i][5], &poly->verts[i][6]);
+	}
+}
+
+
+/*
+================
 BuildSurfaceDisplayList
 ================
 */
@@ -3573,29 +3647,7 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 		//
 		// lightmap texture coordinates — mapped into atlas
 		//
-		s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
-		s -= fa->texturemins[0];
-		s += fa->light_s*16;
-		s += 8;
-		s /= BLOCK_WIDTH*16;
-
-		t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
-		t -= fa->texturemins[1];
-		t += fa->light_t*16;
-		t += 8;
-		t /= BLOCK_HEIGHT*16;
-
-		/* Remap page-local UV to atlas position (if atlas enabled) */
-		if (lm_atlas_enabled)
-		{
-			int col = fa->lightmaptexturenum % LM_ATLAS_COLS;
-			int row = fa->lightmaptexturenum / LM_ATLAS_COLS;
-			s = (col + s) / (float)LM_ATLAS_COLS;
-			t = (row + t) / (float)lm_atlas_rows;
-		}
-
-		poly->verts[i][5] = s;
-		poly->verts[i][6] = t;
+		LM_SurfaceLightmapUV (fa, vec, &poly->verts[i][5], &poly->verts[i][6]);
 	}
 
 	//
@@ -3891,34 +3943,41 @@ void GL_BuildLightmaps (void)
 		}
 	}
 
-	/* Pass 2: bake polygon UVs, now that the atlas height is settled.
-	 * Skipped on a video restart (draw_reinit) — the polys survive the
-	 * context loss with their UVs intact, and the page allocation above
-	 * is deterministic, so the height they were baked against is the one
-	 * we just recomputed. */
-	if (!draw_reinit)
+	/* Pass 2: bake polygon UVs, now that the atlas decision and height are
+	 * both settled.
+	 *
+	 * On a video restart the polys survive the context loss and must not be
+	 * rebuilt — BuildSurfaceDisplayList allocates from the hunk and prepends,
+	 * so a second call would leak a duplicate set and chain it onto the
+	 * first.  This used to skip the pass outright, which left the UVs in
+	 * whatever space they were baked in at map load while the gl_lmatlas
+	 * re-read above was free to pick the other one: toggle the cvar, change
+	 * resolution, and every surface samples a corner of its own lightmap
+	 * until the next map load.  Rewriting the UVs in place costs nothing and
+	 * allocates nothing.  uhexen2-u06s. */
+	for (j = 1; j < MAX_MODELS; j++)
 	{
-		for (j = 1; j < MAX_MODELS; j++)
+		m = cl.model_precache[j];
+		if (!m)
+			break;
+		if (m->name[0] == '*')
+			continue;
+
+		r_pcurrentvertbase = m->vertexes;
+		currentmodel = m;
+
+		for (i = 0; i < m->numsurfaces; i++)
 		{
-			m = cl.model_precache[j];
-			if (!m)
-				break;
-			if (m->name[0] == '*')
+			if (m->surfaces[i].flags & SURF_DRAWTURB)
 				continue;
-
-			r_pcurrentvertbase = m->vertexes;
-			currentmodel = m;
-
-			for (i = 0; i < m->numsurfaces; i++)
-			{
-				if (m->surfaces[i].flags & SURF_DRAWTURB)
-					continue;
 #ifndef QUAKE2
-				if (m->surfaces[i].flags & SURF_DRAWSKY)
-					continue;
+			if (m->surfaces[i].flags & SURF_DRAWSKY)
+				continue;
 #endif
+			if (draw_reinit)
+				LM_RebakeSurfaceLightmapUVs (m->surfaces + i);
+			else
 				BuildSurfaceDisplayList (m->surfaces + i);
-			}
 		}
 	}
 
