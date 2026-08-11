@@ -689,7 +689,18 @@ void S_ClearBuffer (void)
 
 	qsnd_driver->LockBuffer ();
 	if (! shm->buffer)
+	{
+		/* Must not return while holding the lock: LockBuffer and Submit
+		 * are a pair, and for the SDL driver they are a real
+		 * SDL_LockAudioStream / SDL_UnlockAudioStream.  Bailing out here
+		 * left the stream locked forever, wedging the audio callback
+		 * thread.  Latent only because shm->buffer is currently cleared
+		 * solely on shutdown, where shm itself is NULLed too — but the
+		 * check exists precisely because a driver may invalidate the
+		 * buffer, and then this would be a live deadlock.  uhexen2-fqre. */
+		qsnd_driver->Submit ();
 		return;
+	}
 
 	s_rawend = 0;
 
@@ -1051,7 +1062,12 @@ static void S_Update_ (void)
 
 	qsnd_driver->LockBuffer ();
 	if (! shm->buffer)
+	{
+		/* Same unbalanced-lock bail-out as in S_ClearBuffer — release
+		 * before returning.  uhexen2-fqre. */
+		qsnd_driver->Submit ();
 		return;
+	}
 
 // Updates DMA time
 	GetSoundtime();
