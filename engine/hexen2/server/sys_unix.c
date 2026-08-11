@@ -257,6 +257,33 @@ void Sys_FindClose (fsfind_t *ctx)
 	}
 }
 
+int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
+{
+	DIR		*d;
+	struct dirent	*ent;
+	struct stat	st;
+	int		count = 0;
+
+	d = opendir(path);
+	if (!d)
+		return 0;
+
+	while ((ent = readdir(d)) != NULL && count < maxdirs)
+	{
+		if (ent->d_name[0] == '.')
+			continue;	/* skip ".", ".." and hidden dirs */
+		if (stat(va("%s/%s", path, ent->d_name), &st) != 0)
+			continue;
+		if (!S_ISDIR(st.st_mode))
+			continue;
+		q_strlcpy(dirs[count], ent->d_name, 64);
+		count++;
+	}
+
+	closedir(d);
+	return count;
+}
+
 /*
 ===============================================================================
 

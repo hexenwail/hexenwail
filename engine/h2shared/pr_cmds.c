@@ -391,7 +391,10 @@ pimpmodel(entity reference, vector glow_color)
 Returns: float (1 on success, 0 on failure)
 =================
 */
-#ifndef H2W
+/* Renderer-only: pimp_override_t and the EF_* trail flags live in gl_model.h,
+ * which SERVERONLY builds replace with sv_model.h.  The builtin table below
+ * already maps slot #111 to PF_Fixme under SERVERONLY. */
+#if !defined(H2W) && !defined(SERVERONLY)
 static void PF_pimpmodel (void)
 {
 	edict_t	*ref_ent;

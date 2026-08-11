@@ -30,6 +30,10 @@ option(USE_CODEC_XMP "Enable tracker music via libxmp" ON)
 option(USE_CODEC_UMX "Enable Unreal UMX container support" ON)
 option(USE_CODEC_OPUS "Enable Opus codec" ON)
 
+# Off by default so `nix build` keeps producing exactly the client it does
+# today; the server is a separate, rarely-wanted artifact.
+option(BUILD_DEDICATED "Also build the h2ded dedicated server" OFF)
+
 #============================================================================
 # Platform Detection
 #============================================================================
@@ -79,18 +83,27 @@ else()
     add_compile_options(-O2 -DNDEBUG=1 -ffast-math -fomit-frame-pointer)
 endif()
 
-# Platform-specific defines
+# Platform-specific defines.
+# GLQUAKE/SDLQUAKE/GL_DLSYM/NO_SPLASHES select the renderer, video backend and
+# splash behaviour, so they belong to the client alone -- h2ded must never see
+# them (quakeinc.h keys its whole header set off SERVERONLY vs GLQUAKE).  They
+# are collected here and applied with target_compile_definitions() once the
+# client target exists rather than via add_definitions(), which would leak them
+# into every target in this directory.
 if(EMSCRIPTEN)
-    add_definitions(-DGLQUAKE -DSDLQUAKE -DNO_SPLASHES -D__EMSCRIPTEN__)
+    add_definitions(-D__EMSCRIPTEN__)
+    set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE NO_SPLASHES)
     set(USE_ALSA OFF)
     set(USE_CODEC_FLAC OFF)
     set(USE_CODEC_OPUS OFF)
     set(USE_CODEC_XMP OFF)
 elseif(WIN32)
-    add_definitions(-DWIN32_LEAN_AND_MEAN -DGLQUAKE -DSDLQUAKE -DGL_DLSYM -DNO_SPLASHES)
+    add_definitions(-DWIN32_LEAN_AND_MEAN)
+    set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE GL_DLSYM NO_SPLASHES)
     set(USE_ALSA OFF)
 elseif(UNIX)
-    add_definitions(-DGLQUAKE -DSDLQUAKE -D_GNU_SOURCE=1 -D_REENTRANT -DGL_DLSYM)
+    add_definitions(-D_GNU_SOURCE=1 -D_REENTRANT)
+    set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE GL_DLSYM)
 endif()
 
 #============================================================================
@@ -537,6 +550,8 @@ else()
     add_executable(${EXECUTABLE_NAME} ${ALL_SOURCES})
 endif()
 
+target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
+
 #============================================================================
 # Link Libraries
 #============================================================================
@@ -621,6 +636,55 @@ install(TARGETS ${EXECUTABLE_NAME}
 )
 
 #============================================================================
+# Dedicated Server (h2ded)
+#============================================================================
+# Client-free build: no renderer, no video, no sound, no input.  Everything is
+# driven by the SERVERONLY define, which switches quakeinc.h over to the
+# BSP-only sv_model.h header set and compiles out the client halves of
+# sv_main/sv_user/net_*/pr_*/quakefs/zone/cmd.  This target replaces the
+# engine/hexen2/server/Makefile that was dropped in the build-system cleanup.
+if(BUILD_DEDICATED)
+if(NOT UNIX OR EMSCRIPTEN)
+    # Windows would additionally need Sys_ListDirectories() added to
+    # hexen2/server/sys_win.c (it exists only in the client's sys_win.c) plus a
+    # mingw cross-build pass; the web target has no use for a server at all.
+    message(WARNING "BUILD_DEDICATED is only wired up for Unix hosts - skipping h2ded")
+else()
+    # Shares COMMON_SOURCES with the client; the removals below are the parts
+    # of that list that cannot compile without a client.
+    set(SERVER_SOURCES ${COMMON_SOURCES})
+    list(REMOVE_ITEM SERVER_SOURCES
+        ${ENGINE_TOP}/hexen2/host.c        # superseded by hexen2/server/host.c
+        ${ENGINE_TOP}/hexen2/host_cmd.c    # superseded by hexen2/server/host_cmd.c
+        ${ENGINE_TOP}/hexen2/host_async.c  # background-save worker needs SDL threads
+        ${ENGINE_TOP}/hexen2/net_loop.c    # loopback driver needs cls/ca_dedicated
+        ${COMMONDIR}/wad.c                 # gfx.wad lumps are renderer-only data
+    )
+    list(APPEND SERVER_SOURCES
+        ${ENGINE_TOP}/hexen2/server/host.c
+        ${ENGINE_TOP}/hexen2/server/host_cmd.c
+        ${COMMONDIR}/sv_model.c            # BSP-only replacement for gl_model.c
+    )
+
+    # Network + system layer.  hexen2/server/sys_unix.c is the SDL-free
+    # counterpart of hexen2/sys_unix.c, so sys_sdl.c is not needed either.
+    list(APPEND SERVER_SOURCES
+        ${ENGINE_TOP}/hexen2/net_bsd.c
+        ${ENGINE_TOP}/hexen2/net_udp.c
+        ${ENGINE_TOP}/hexen2/server/sys_unix.c
+    )
+
+    add_executable(h2ded ${SERVER_SOURCES})
+    target_compile_definitions(h2ded PRIVATE SERVERONLY)
+    target_link_libraries(h2ded PRIVATE ${M_LIBRARY})
+
+    install(TARGETS h2ded RUNTIME DESTINATION bin)
+
+    message(STATUS "Dedicated server: h2ded enabled")
+endif()
+endif()
+
+#============================================================================
 # Summary
 #============================================================================
 message(STATUS "")
@@ -636,5 +700,6 @@ message(STATUS "FluidSynth MIDI: ${FLUIDSYNTH_FOUND}")
 message(STATUS "Tracker (libxmp): ${USE_CODEC_XMP}")
 message(STATUS "UMX container:    ${USE_CODEC_UMX}")
 message(STATUS "Opus codec:       ${USE_CODEC_OPUS}")
+message(STATUS "Dedicated server: ${BUILD_DEDICATED}")
 message(STATUS "=============================")
 message(STATUS "")
