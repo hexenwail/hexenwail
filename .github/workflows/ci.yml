@@ -62,6 +62,14 @@ jobs:
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 
+      # Cheap on the back of the step above — same mingw toolchain closure,
+      # and the server links no SDL, GL or codecs.  Without it the WIN32
+      # branch of the h2ded target and engine/hexen2/server/sys_win.c can
+      # break silently, exactly the rot uhexen2-hx78 described for Unix.
+      # uhexen2-befz.
+      - name: Build Windows dedicated server
+        run: nix build .#h2ded-win64 --print-build-logs
+
   flatpak:
     runs-on: ubuntu-latest
     # flatpak + flatpak-builder are installed directly on the runner — the
