@@ -1534,6 +1534,12 @@ GLuint	world_ibo;
 GLuint	world_vao;
 int	world_num_verts;
 int	world_num_indices;
+/* Retained CPU copy of the world IBO contents.  gl_worldcull.c uploads this
+ * verbatim as cull_src_ibo; it must never re-derive the indices, because the
+ * fan rules here (surf->numedges) and the ones in BuildSurfaceDisplayList
+ * (poly->numverts, co-linear points stripped when gl_keeptjunctions 0) can
+ * disagree, which would misalign surf->vbo_firstindex offsets.  (uhexen2-vh5w) */
+unsigned int	*world_index_data;
 
 /* Sky stencil VBO — defined later, but referenced from DrawTextureChains. */
 extern GLuint	sky_stencil_vbo;
@@ -3045,6 +3051,7 @@ void R_BuildWorldVBO (void)
 	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
 	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
 
 	/* Pass 1: count vertices and triangles from BSP surfaces */
 	for (i = 0; i < m->numsurfaces; i++)
@@ -3184,7 +3191,9 @@ void R_BuildWorldVBO (void)
 	world_num_indices = idx_pos;
 
 	free(verts);
-	free(indices);
+	/* Keep the index array — gl_worldcull.c needs a byte-identical CPU copy
+	 * of the world IBO for its compute source SSBO (uhexen2-vh5w). */
+	world_index_data = indices;
 
 	Con_SafePrintf("World VBO: %d verts, %d tris in static buffer\n",
 		       world_num_verts, world_num_indices / 3);
@@ -3198,6 +3207,7 @@ void R_FreeWorldVBO (void)
 	if (world_vbo) { glDeleteBuffers_fp(1, &world_vbo); world_vbo = 0; }
 	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
+	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
 	if (lm_atlas_texture) { glDeleteTextures_fp(1, &lm_atlas_texture); lm_atlas_texture = 0; }
 	GL_DeleteDrawCallSSBO();
 	lm_atlas_enabled = false;
