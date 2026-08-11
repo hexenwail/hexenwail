@@ -681,43 +681,31 @@ void R_BuildWorldCull (void)
 		free(cmds);
 	}
 
-	/* Source index SSBO: read-only copy of world IBO for compute to read from.
-	 * We read the data back from the existing world IBO (built by R_BuildWorldVBO). */
+	/* Source index SSBO: read-only copy of the world IBO for compute to read
+	 * from.  Upload R_BuildWorldVBO's retained CPU array verbatim — do NOT
+	 * re-derive the indices here.  A local rebuild used to fan over
+	 * surf->polys->numverts, but R_BuildWorldVBO fans over surf->numedges,
+	 * and BuildSurfaceDisplayList strips co-linear points from the poly when
+	 * gl_keeptjunctions is 0.  When the two disagree, cull_src_ibo no longer
+	 * lines up with the surf->vbo_firstindex offsets cull_mark reads with,
+	 * and the tail of the buffer is left uninitialised.  (uhexen2-vh5w) */
 	{
-		extern GLuint world_ibo;
 		extern int world_num_indices;
-		unsigned int *idx_data;
+		extern unsigned int *world_index_data;
 
-		if (world_ibo && world_num_indices > 0)
+		if (world_index_data && world_num_indices > 0)
 		{
-			idx_data = (unsigned int *) malloc(world_num_indices * sizeof(unsigned int));
-			/* Rebuild index data from surface polys (same as R_BuildWorldVBO) */
-			{
-				int idx_pos = 0;
-				for (i = 0; i < m->numsurfaces; i++)
-				{
-					glpoly_t *p;
-					surf = &m->surfaces[i];
-					p = surf->polys;
-					if (!p || p->numverts < 3)
-						continue;
-					if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB))
-						continue;
-					for (j = 2; j < p->numverts; j++)
-					{
-						idx_data[idx_pos++] = surf->vbo_firstvert;
-						idx_data[idx_pos++] = surf->vbo_firstvert + j - 1;
-						idx_data[idx_pos++] = surf->vbo_firstvert + j;
-					}
-				}
-			}
-
 			glGenBuffers_fp(1, &cull_src_ibo);
 			glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, cull_src_ibo);
 			glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
 					world_num_indices * sizeof(unsigned int),
-					idx_data, GL_STATIC_DRAW);
-			free(idx_data);
+					world_index_data, GL_STATIC_DRAW);
+		}
+		else
+		{
+			Con_Printf("GPU world culling: no world index data, disabling\n");
+			R_FreeWorldCull();
+			return;
 		}
 	}
 
