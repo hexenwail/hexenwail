@@ -1581,8 +1581,32 @@ void FS_Init (void)
 	}
 	else
 	{
-	/* no proper Raven data: it's best to error out here */
-		Sys_Error ("Unable to find a proper Hexen II installation");
+	/* No proper Raven data.  Still fatal, but this is the first thing a new
+	 * user meets and the bare one-line version told them nothing: not what
+	 * file was wanted, not where it was looked for, not how to obtain any.
+	 * Hexenwail ships no game content and cannot -- see assets/demo/README.md
+	 * and uhexen2-3vmk -- so pointing at the fetch helper is the whole of the
+	 * answer we can give.  uhexen2-49ep. */
+		Sys_Error ("Unable to find a proper Hexen II installation.\n"
+			   "\n"
+			   "Wanted a \"data1\" directory containing pak0.pak, under:\n"
+			   "    %s\n"
+			   "\n"
+			   "If you own Hexen II (Steam, GOG or the CD), copy that\n"
+			   "installation's data1 directory to the path above.\n"
+			   "\n"
+			   "If you don't, the free three-level 1997 demo works. From a\n"
+			   "Hexenwail source tree, run either of:\n"
+#ifdef PLATFORM_WINDOWS
+			   "    scripts\\get_demo.ps1 \"%s\"\n"
+#else
+			   "    scripts/get_demo.sh \"%s\"\n"
+#endif
+			   "    nix run .#get-demo -- \"%s\"\n"
+			   "\n"
+			   "Either one downloads it from the uHexen2 project and checks\n"
+			   "it against a known hash.",
+			   fs_basedir, fs_basedir, fs_basedir);
 	}
 	if (gameflags & (GAME_OLD_DEMO|GAME_REGISTERED_OLD|GAME_OLD_OEM))
 		Sys_Printf ("Using old/unsupported, pre-1.11 version pak files.\n");
