@@ -707,17 +707,29 @@ void Draw_Init (void)
 
 	/* conchars.lmp is raw 256x128 pixels with no header of any kind, but
 	 * WAD tools that do not know that rewrite it as a qpic: an 8-byte
-	 * width/height header followed by the same pixels.  Sniffing that
-	 * header is the only way to tell one apart from the SoT/karma2
-	 * charsets, which are genuinely headerless and merely longer than
-	 * 32768 — both land on 32776 bytes, so the old size-only test sent a
-	 * headered lump down the "oversize raw" path and read it 8 bytes out
-	 * of phase, drawing shifted garbage rather than reporting anything.
-	 * uhexen2-52gf. */
+	 * width/height header followed by the same pixels.  A headered lump and
+	 * an oversize raw one both land on 32776 bytes, so size alone cannot
+	 * separate them and reading the wrong one shifts the whole atlas by 8
+	 * pixels.  uhexen2-52gf.
+	 *
+	 * The header test alone is not enough either.  Measured against the real
+	 * files (uhexen2-dmm2): karma2, SoT and portals all ship a 32776-byte
+	 * RAW charset that opens with 00 01 00 00 80 00 00 00 — pixels the mod
+	 * author drew into glyph 0, which read as exactly the 256/128 header we
+	 * were sniffing for.  Those three matched vanilla far better at offset 0
+	 * (79%) than at offset 8 (61%), so they are raw with 8 trailing bytes,
+	 * not headered.
+	 *
+	 * What does separate them: after a real header the image begins, and
+	 * glyph 0's first row is blank in every charset derived from the stock
+	 * one (vanilla opens with eight zero bytes).  So require both the header
+	 * AND a blank row behind it.  When in doubt, treat the lump as raw —
+	 * that is the reading every observed file wants. */
 	charsofs = 0;
 	if (fs_filesize >= 8 + CONCHARS_BYTES &&
 	    LittleLong(((int *)chars)[0]) == CONCHARS_W &&
-	    LittleLong(((int *)chars)[1]) == CONCHARS_H)
+	    LittleLong(((int *)chars)[1]) == CONCHARS_H &&
+	    !memcmp(chars + 8, "\0\0\0\0\0\0\0\0", 8))
 	{
 		Con_DPrintf ("conchars.lmp: qpic header found, skipping 8 bytes\n");
 		charsofs = 8;
