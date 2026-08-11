@@ -21,7 +21,9 @@ jobs:
       - name: Install flatpak-builder
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          # appstream provides appstreamcli, used to validate the metainfo
+          # after the release entry is injected below.
+          sudo apt-get install -y flatpak flatpak-builder appstream
           # The container image came with Flathub pre-configured and ran as
           # root; a bare apt install on the runner has neither.  Add the
           # system remote, then pre-install the runtime + SDK as root (root
@@ -39,6 +41,42 @@ jobs:
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive --no-related flathub \
             org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      # The manifest installs the metainfo verbatim, so whatever <release> sits
+      # at the top of it is the version GNOME Software and KDE Discover show.
+      # Nothing used to update it, and it silently read "26.03-alpha" for five
+      # months of releases.  Prepend an entry for the tag being built.
+      #
+      # HEAD is the tag commit (it is what triggered this run), so %cs works on
+      # the shallow clone without fetching history.  Idempotent: re-running a
+      # tag build will not duplicate the entry.
+      - name: Record this release in the AppStream metainfo
+        run: |
+          META=flatpak/io.github.hexenwail.hexenwail.metainfo.xml
+          VERSION="${{ github.ref_name }}"
+          if grep -q "<release version=\"$VERSION\"" "$META"; then
+            echo "metainfo already lists $VERSION"
+          else
+            DATE=$(git log -1 --format=%cs HEAD)
+            python3 - "$META" "$VERSION" "$DATE" <<'PY'
+          import sys
+          path, version, date = sys.argv[1:4]
+          entry = (
+              f'    <release version="{version}" date="{date}">\n'
+              f'      <url type="details">https://github.com/hexenwail/hexenwail/releases/tag/{version}</url>\n'
+              f'    </release>\n'
+          )
+          s = open(path).read()
+          if '  <releases>\n' not in s:
+              sys.exit('no <releases> block in ' + path)
+          open(path, 'w').write(s.replace('  <releases>\n', '  <releases>\n' + entry, 1))
+          PY
+            echo "added $VERSION ($DATE) to $META"
+          fi
+          appstreamcli validate --explain "$META" || {
+            echo "::error::metainfo failed AppStream validation after injection"
+            exit 1
+          }
+
       # No cache-key — see the same block in ci.yml.  A key built from
       # ${{ github.sha }} can never be matched by the action's only restore
       # fallback (the prefix "flatpak-builder-<arch>"), so the dependency
@@ -133,6 +171,8 @@ jobs:
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
             echo ""
+            echo "To verify a download, fetch \`SHA256SUMS\` alongside it and run \`sha256sum -c SHA256SUMS\`."
+            echo ""
             echo "**Requirements:** OpenGL 4.3 capable GPU (2012+)"
           } > release_notes.md
 
@@ -149,6 +189,23 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
+      # scripts/get_demo.sh verifies Raven's demo download against a known
+      # SHA-256, but our own binaries shipped with nothing to check them
+      # against.  Collect the three artifacts and publish digests alongside
+      # them so a download can be verified:  sha256sum -c SHA256SUMS
+      - name: Generate SHA256SUMS
+        run: |
+          mkdir -p dist
+          cp linux-bundle/hexenwail-${{ github.ref_name }}-linux-x86_64.zip dist/
+          cp windows-bundle/hexenwail-${{ github.ref_name }}-windows-x86_64.zip dist/
+          cp hexenwail-${{ github.ref_name }}-x86_64.flatpak/hexenwail-${{ github.ref_name }}.flatpak dist/
+          # Run in dist/ so the file records bare names, not paths — that is
+          # what `sha256sum -c` expects next to the downloaded files.  The
+          # patterns are explicit rather than `*` so the digest file can never
+          # end up listing itself.
+          (cd dist && sha256sum hexenwail-*.zip hexenwail-*.flatpak > SHA256SUMS)
+          cat dist/SHA256SUMS
+
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -158,6 +215,7 @@ jobs:
             --prerelease \
             --title "${{ github.ref_name }}" \
             --notes-file release-notes/release_notes.md \
-            linux-bundle/hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
-            windows-bundle/hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
-            hexenwail-${{ github.ref_name }}-x86_64.flatpak/hexenwail-${{ github.ref_name }}.flatpak
+            dist/hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
+            dist/hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
+            dist/hexenwail-${{ github.ref_name }}.flatpak \
+            dist/SHA256SUMS
