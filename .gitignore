@@ -16,3 +16,8 @@ engine/build/
 *.db
 .beads-credential-key
 /image4.png
+
+# The Hexen II demo tarball is fetched, not committed: 13 MB of binary, and its
+# redistribution terms are unresolved (uhexen2-3vmk).  See assets/demo/README.md
+# for the source URL and sha256.
+/assets/demo/hexen2demo_nov1997-linux-i586.tgz
