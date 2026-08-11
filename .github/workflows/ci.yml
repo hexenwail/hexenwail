@@ -14,11 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install shellcheck
-        run: sudo apt-get install -y shellcheck
+      - name: Install shellcheck and appstream
+        run: sudo apt-get install -y shellcheck appstream
 
       - name: Shellcheck
         run: shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh
+
+      # The metainfo is what GNOME Software and KDE Discover read, and Flathub
+      # rejects a submission whose metainfo does not validate.  Nothing checked
+      # it before, so breakage would only have surfaced at publish time.
+      # Note this validates structure, not currency — release.yml is what keeps
+      # the <releases> block from going stale.
+      - name: Validate AppStream metainfo
+        run: appstreamcli validate --explain flatpak/io.github.hexenwail.hexenwail.metainfo.xml
 
       # emscripten.h defines a bare EMSCRIPTEN alias under a deprecation
       # pragma, so a guard spelled that way only works in translation units

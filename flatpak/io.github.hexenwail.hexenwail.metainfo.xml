@@ -38,11 +38,19 @@
   </content_rating>
 
   <releases>
-    <release version="26.03-alpha" date="2026-03-24">
-      <description>
-        <p>First alpha release. SDL3 + GL 4.3 shader pipeline.</p>
-      </description>
+    <!-- Newest first.  release.yml prepends an entry for each tag it builds;
+         without one, software centres show whatever version is listed here,
+         which is how this file sat at 26.03-alpha for five months. -->
+    <release version="0.7.9-beta.r8" date="2026-08-11">
+      <url type="details">https://github.com/hexenwail/hexenwail/releases/tag/0.7.9-beta.r8</url>
     </release>
+    <!-- The original 26.03-alpha (2026-03-24) entry was dropped rather than
+         kept for history.  AppStream compares versions numerically, so the
+         old calendar scheme (26.03) sorts above every version the current
+         scheme can produce (0.7.x, and 1.x when it comes) — keeping it made
+         the file fail validation with releases-not-in-order forever, and
+         told software centres the March alpha was the newest build.  This is
+         the same legacy-tag-scheme trap release.yml documents for git tags. -->
   </releases>
 
   <categories>
