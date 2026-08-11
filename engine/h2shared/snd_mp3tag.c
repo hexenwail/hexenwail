@@ -73,7 +73,13 @@ static qboolean is_apetag(const unsigned char *data, size_t length) {
     if (length < 32 || memcmp(data,"APETAGEX",8) != 0) {
         return false;
     }
-    v = (unsigned)((data[11]<<24) | (data[10]<<16) | (data[9]<<8) | data[8]); /* version */
+    /* Assembled in unsigned arithmetic throughout this file: an unsigned char
+     * promotes to int, so a byte >= 0x80 shifted left by 24 overflows a 32-bit
+     * signed int.  That is undefined behaviour, not the wraparound the original
+     * expressions assumed, and it is reachable from any malformed file.
+     * uhexen2-exrx. */
+    v = ((unsigned int)data[11]<<24) | ((unsigned int)data[10]<<16) |
+        ((unsigned int)data[9] << 8) |  (unsigned int)data[8]; /* version */
     if (v != 2000U && v != 1000U) {
         return false;
     }
@@ -84,12 +90,23 @@ static qboolean is_apetag(const unsigned char *data, size_t length) {
     return true;
 }
 static long get_ape_len(const unsigned char *data) {
-    unsigned int flags, version;
-    long size = (long)((data[15]<<24) | (data[14]<<16) | (data[13]<<8) | data[12]);
-    version = (unsigned)((data[11]<<24) | (data[10]<<16) | (data[9]<<8) | data[8]);
-    flags = (unsigned)((data[23]<<24) | (data[22]<<16) | (data[21]<<8) | data[20]);
+    unsigned int flags, version, size;
+
+    size    = ((unsigned int)data[15]<<24) | ((unsigned int)data[14]<<16) |
+              ((unsigned int)data[13]<< 8) |  (unsigned int)data[12];
+    version = ((unsigned int)data[11]<<24) | ((unsigned int)data[10]<<16) |
+              ((unsigned int)data[9] << 8) |  (unsigned int)data[8];
+    flags   = ((unsigned int)data[23]<<24) | ((unsigned int)data[22]<<16) |
+              ((unsigned int)data[21]<< 8) |  (unsigned int)data[20];
+
+    /* Refuse a size that cannot survive the trip through long.  Callers only
+     * test len >= fh.length, so a length that came back negative would be
+     * subtracted from fh.length and *grow* it, running the reader off the end
+     * of the file — the actual damage the overflow above could do. */
+    if (size > 0x7FFFFFFFU - 32U)
+        return -1;
     if (version == 2000U && (flags & (1U<<31))) size += 32; /* header present. */
-    return size;
+    return (long)size;
 }
 static inline int is_lyrics3tag(const unsigned char *data, long length) {
     /* http://id3.org/Lyrics3
@@ -174,15 +191,22 @@ static long get_musicmatch_len(snd_stream_t *stream) {
     const int metasizes[4] = { 7868, 7936, 8004, 8132 };
     const unsigned char syncstr[10] = {'1','8','2','7','3','6','4','5',0,0};
     unsigned char buf[256];
-    int i, j, imgext_ofs, version_ofs;
+    int i, j;
+    unsigned int imgext_ofs, version_ofs, imgsize;
     long len;
 
     FS_fseek(&stream->fh, -68, SEEK_END);
     FS_fread(buf, 1, 20, &stream->fh);
-    imgext_ofs  = (int)((buf[3] <<24) | (buf[2] <<16) | (buf[1] <<8) | buf[0] );
-    version_ofs = (int)((buf[15]<<24) | (buf[14]<<16) | (buf[13]<<8) | buf[12]);
+    imgext_ofs  = ((unsigned int)buf[3] <<24) | ((unsigned int)buf[2] <<16) |
+                  ((unsigned int)buf[1] << 8) |  (unsigned int)buf[0];
+    version_ofs = ((unsigned int)buf[15]<<24) | ((unsigned int)buf[14]<<16) |
+                  ((unsigned int)buf[13]<< 8) |  (unsigned int)buf[12];
     if (version_ofs <= imgext_ofs) return -1;
-    if (version_ofs <= 0 || imgext_ofs <= 0) return -1;
+    if (version_ofs == 0 || imgext_ofs == 0) return -1;
+    /* The original test was <= 0 on ints, which also rejected any offset with
+     * the high bit set — it had wrapped negative.  Assembled as unsigned there
+     * is no wrap to catch it, so bound the range explicitly. */
+    if (version_ofs > 0x7FFFFFFFU || imgext_ofs > 0x7FFFFFFFU) return -1;
     /* Try finding the version info section:
      * Because metadata section comes after it, and because metadata section
      * has different sizes across versions (format ver. <= 3.00: always 7868
@@ -216,11 +240,13 @@ static long get_musicmatch_len(snd_stream_t *stream) {
     if (stream->fh.length < len) return -1;
     FS_fseek(&stream->fh, -len, SEEK_END);
     FS_fread(buf, 1, 8, &stream->fh);
-    j = (int)((buf[7] <<24) | (buf[6] <<16) | (buf[5] <<8) | buf[4]);
-    if (j < 0) return -1;
+    imgsize = ((unsigned int)buf[7] <<24) | ((unsigned int)buf[6] <<16) |
+              ((unsigned int)buf[5] << 8) |  (unsigned int)buf[4];
+    /* Bound before the +12 so that addition cannot overflow either. */
+    if (imgsize > 0x7FFFFFFFU - 12U) return -1;
     /* verify image size: */
     /* without this, we may land at a wrong place. */
-    if (j + 12 != version_ofs - imgext_ofs) return -1;
+    if (imgsize + 12 != version_ofs - imgext_ofs) return -1;
     /* try finding the optional header */
     if (stream->fh.length < len + 256) return len;
     FS_fseek(&stream->fh, -(len + 256), SEEK_END);
@@ -283,6 +309,9 @@ static int probe_apetag(snd_stream_t *stream, unsigned char *buf) {
             return -1;
         if (is_apetag(buf, 32)) {
             len = get_ape_len(buf);
+            /* len < 0 matters as much as len too large: fh.length -= len
+             * would otherwise grow the stream past the end of the file. */
+            if (len < 0) return -1;
             if (len >= stream->fh.length) return -1;
             stream->fh.length -= len;
             Con_DPrintf("MP3: skipped %ld bytes APE tag\n", len);
@@ -354,6 +383,7 @@ int mp3_skiptags(snd_stream_t *stream)
      * but not forbidden, either.)  read the header. */
     else if (is_apetag(buf, readsize)) {
         len = get_ape_len(buf);
+        if (len < 0) goto fail;
         if (len >= stream->fh.length) goto fail;
         stream->fh.start += len;
         stream->fh.length -= len;
