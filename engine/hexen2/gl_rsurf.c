@@ -3693,7 +3693,7 @@ disabled until the next map load.  No-op when atlas mode is off.
 uhexen2-f29y.
 ==================
 */
-static void LM_StitchAtlas (void)
+static qboolean LM_StitchAtlas (void)
 {
 	byte	*atlas;
 	int	page, row, col, y;
@@ -3701,13 +3701,13 @@ static void LM_StitchAtlas (void)
 	int	atlas_stride = LM_ATLAS_WIDTH * lightmap_bytes;
 
 	if (!lm_atlas_enabled)
-		return;
+		return false;
 	if (lm_atlas_rows < 1 || !lightmaps)
-		return;		/* nothing allocated yet — no map loaded */
+		return false;		/* nothing allocated yet — no map loaded */
 
 	atlas = (byte *) calloc(1, (size_t)LM_ATLAS_WIDTH * lm_atlas_height * lightmap_bytes);
 	if (!atlas)
-		return;
+		return false;
 
 	for (page = 0; page < lm_pages_used; page++)
 	{
@@ -3742,6 +3742,8 @@ static void LM_StitchAtlas (void)
 	 * the next frame's first GL_Bind skip its bind and draw a surface with
 	 * the atlas wrongly bound.  Invalidate the cache like R_UpdateLightmaps. */
 	currenttexture = GL_UNUSED_TEXTURE;
+
+	return true;
 }
 
 
@@ -3757,6 +3759,7 @@ void GL_BuildLightmaps (void)
 {
 	int		i, j;
 	qmodel_t	*m;
+	qboolean	atlas_ok;
 
 	memset (allocated, 0, sizeof(allocated));
 	memset (lightmap_modified, 0, sizeof(lightmap_modified));
@@ -3850,12 +3853,31 @@ void GL_BuildLightmaps (void)
 
 	glActiveTexture_fp (GL_TEXTURE1);
 
+	/* Build lightmap atlas — all pages in one 2D texture.
+	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
+	 * One bind for ALL world surfaces, zero lightmap rebinds.
+	 * Disabled on Intel GPUs due to driver timeout issues.
+	 *
+	 * Stitched BEFORE the per-page upload below so that upload can be
+	 * skipped when the atlas took: nothing samples lightmap_textures[] while
+	 * lm_atlas_texture is live (every draw path binds the atlas and only
+	 * falls back to the per-page texture when lm_atlas_texture is 0), so
+	 * uploading both was a straight duplicate of the whole lightmap set in
+	 * VRAM.  At 256x256 pages that is 256 KB apiece, so a large map was
+	 * paying tens of MB for data nothing reads.  The fallback still has to
+	 * work if stitching fails to allocate, which is why this is ordered
+	 * rather than simply deleted.  uhexen2-ez0w. */
+	atlas_ok = LM_StitchAtlas ();
+
 	//
 	// upload all lightmaps that were filled
 	//
 	for (i = 0; i < lm_pages_used; i++)
 	{
 		lightmap_modified[i] = false;
+
+		if (atlas_ok)
+			continue;	/* atlas is live — per-page copy is dead weight */
 
 		GL_Bind(lightmap_textures[i]);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -3864,12 +3886,6 @@ void GL_BuildLightmaps (void)
 				BLOCK_HEIGHT, 0, gl_lightmap_format, GL_UNSIGNED_BYTE,
 				lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes);
 	}
-
-	/* Build lightmap atlas — all pages in one 2D texture.
-	 * Surfaces already have atlas-remapped UVs from BuildSurfaceDisplayList.
-	 * One bind for ALL world surfaces, zero lightmap rebinds.
-	 * Disabled on Intel GPUs due to driver timeout issues. */
-	LM_StitchAtlas ();
 
 	/* Always report the page count, atlas or not.  When a map dies in
 	 * AllocBlock the next question is always "how close was it?", and

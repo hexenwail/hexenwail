@@ -206,6 +206,33 @@ if(NOT EMSCRIPTEN)
     endif()
 endif()
 
+# Degrade instead of failing when an optional codec's dev files are absent.
+# The USE_CODEC_* options default to ON and were used directly to add the
+# source file and -DUSE_CODEC_x, while only the *link* step was guarded by
+# the pkg-config result — so a missing libvorbis/libxmp/opusfile dev package
+# broke the build (missing headers, or an unresolved symbol at link) instead
+# of simply dropping that codec.  Only auto-disable when pkg-config actually
+# ran and reported the module missing; if pkg-config itself is unavailable we
+# cannot conclude anything and leave the user's choice alone.
+if(NOT EMSCRIPTEN AND PKG_CONFIG_FOUND)
+    # Vorbis is exempt on Windows: the oslibs prebuilt fallback just below
+    # supplies it without pkg-config.
+    if(USE_CODEC_VORBIS AND NOT VORBIS_FOUND AND NOT WIN32)
+        message(STATUS "Vorbis dev files not found - disabling USE_CODEC_VORBIS")
+        set(USE_CODEC_VORBIS OFF)
+    endif()
+    if(USE_CODEC_XMP AND NOT XMP_FOUND)
+        message(STATUS "libxmp not found - disabling USE_CODEC_XMP")
+        set(USE_CODEC_XMP OFF)
+    endif()
+    if(USE_CODEC_OPUS AND NOT OPUS_FOUND)
+        message(STATUS "opusfile not found - disabling USE_CODEC_OPUS")
+        set(USE_CODEC_OPUS OFF)
+    endif()
+endif()
+# MP3/FLAC/UMX are deliberately not listed: dr_mp3/dr_flac are header-only and
+# UMX is built in, so they have no external dev files that can go missing.
+
 if(WIN32 AND NOT VORBIS_FOUND)
     # Fallback: use prebuilt codecs from oslibs for Windows
     set(CODEC_INCLUDE_DIR ${OSLIBS}/windows/codecs/include)
