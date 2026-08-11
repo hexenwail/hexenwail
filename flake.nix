@@ -401,6 +401,31 @@
             };
           };
 
+          # Map/model toolchain for Windows.  The tools are plain C linking
+          # only the mingw runtime (and ws2_32 for the HexenWorld servers), so
+          # like h2ded-win64 this needs no buildInputs.  uhexen2-4xd7.
+          utils-win64 = pkgsCross64.stdenv.mkDerivation {
+            pname = "hexenwail-utils";
+            inherit version;
+
+            src = filteredSrc;
+
+            nativeBuildInputs = [ pkgs.cmake ];
+
+            cmakeFlags = [
+              "-DBUILD_ENGINE=OFF"
+              "-DBUILD_UTILS=ON"
+            ];
+
+            meta = with pkgs.lib; {
+              description = "Hexen II map, model and server tools (Windows 64-bit)";
+              homepage = "https://github.com/hexenwail/hexenwail";
+              license = licenses.gpl2Plus;
+              platforms = platforms.windows;
+              maintainers = [ ];
+            };
+          };
+
           # WebAssembly / Emscripten build
           # NOTE: WASM builds require network access for Emscripten SDL3 port
           # Quick fix (temporary): Use shell-wasm.nix for interactive dev builds
