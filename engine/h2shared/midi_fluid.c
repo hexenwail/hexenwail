@@ -215,12 +215,12 @@ static qboolean FMIDI_EnsureSoundFont (void)
 	return FMIDI_LoadSoundFont(sf);
 }
 
-/* snd_soundfont is CVAR_ARCHIVE, but find_soundfont() below only ever ran
- * once, from FMIDI_Init, which S_Init calls at host.c:1032 — long before
- * host.c:1066 queues "exec hexen.rc" and the config assigns any archived
- * cvar.  So the user's saved path was always read as "" and the override
- * did nothing, on this run or any later one.  Making the cvar live fixes
- * that ordering and gives runtime switching for free.  uhexen2-bsqq. */
+/* snd_soundfont is CVAR_ARCHIVE, but the search used to run only once, from
+ * FMIDI_Init, which S_Init calls at host.c:1032 — long before host.c:1066
+ * queues "exec hexen.rc" and the config assigns any archived cvar.  So the
+ * user's saved path was always read as "" and the override did nothing, on
+ * this run or any later one.  Making the cvar live fixes that ordering and
+ * gives runtime switching for free.  uhexen2-bsqq. */
 static void FMIDI_SoundFontChanged (cvar_t *var)
 {
 	if (!fs_synth)

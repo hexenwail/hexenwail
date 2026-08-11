@@ -229,7 +229,7 @@ Features Hexenwail has that Ironwail does NOT. Verified against Ironwail origin/
 | Feature | Notes |
 |---|---|
 | Underwater audio filter | Both have `snd_waterfx`. Ironwail: `snd_dma.c:84`. Independently implemented but same cvar name and concept. |
-| Zoom system | Ironwail has it (`gl_screen.c:108-109` — `zoom_fov` / `zoom_speed`); Hexen II has no scoped weapons or zoom-driven gameplay, so the `cl.zoom` field at `client.h:210` is an unused stub. Bead uhexen2-mfbe demoted to P4 — intentionally not pursuing parity. |
+| Zoom system | Both have it. Hexenwail: `zoom_fov` / `zoom_speed` cvars plus `+zoom` / `-zoom` / `togglezoom` binds (`gl_screen.c:111-112`, `513-552`); `cl.zoom` is lerped by `SCR_UpdateZoom` and smoothstepped into the FOV at `gl_screen.c:466-472`. Ironwail: `gl_screen.c:108-109`. Landed in `ecba5a981`; uhexen2-mfbe closed. |
 | Gun FOV scale | `cl_gun_fovscale` exists in Ironwail (`gl_screen.c:117`). This is a shared feature Hexenwail ported from Ironwail. |
 | Water ripple shader | `gl_waterripple` exists in Ironwail (`gl_rmain.c:133`). Not a Hexenwail exclusive. |
 | External texture overrides | `r_texture_external` exists in Ironwail (`gl_rmain.c:134`). Not a Hexenwail exclusive. |
