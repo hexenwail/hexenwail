@@ -26,7 +26,7 @@
 #include "gl_postprocess.h"
 
 /* ES 3.0 compatibility */
-#ifdef EMSCRIPTEN
+#ifdef __EMSCRIPTEN__
 #ifndef GLdouble
 #define GLdouble double
 #endif

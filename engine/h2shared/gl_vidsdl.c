@@ -649,7 +649,7 @@ void VID_ShiftPalette (const unsigned char *palette)
 
 static void GL_LoadFunctionPointers (void)
 {
-#ifndef EMSCRIPTEN
+#ifndef __EMSCRIPTEN__
 	/* On desktop GL, dynamically load function pointers */
 	/* load shader function pointers */
 	glCreateShader_fp = (glCreateShader_f) SDL_GL_GetProcAddress("glCreateShader");
@@ -760,7 +760,7 @@ static void GL_LoadFunctionPointers (void)
 	{
 		Sys_Error("Required GL 4.3 shader functions not found");
 	}
-#endif /* !EMSCRIPTEN */
+#endif /* !__EMSCRIPTEN__ */
 }
 
 
@@ -824,7 +824,7 @@ static void GL_Init_Functions (void)
 }
 #endif	/* GL_DLSYM */
 
-#ifndef EMSCRIPTEN
+#ifndef __EMSCRIPTEN__
 static void GL_ResetFunctions (void)
 {
 #ifdef	GL_DLSYM
@@ -946,7 +946,7 @@ static void GL_Init (void)
 	Con_SafePrintf("OpenGL max.MSAA samples: %d\n", gl_max_samples);
 
 	/* GL 4.3: multitexture is always available */
-#ifndef EMSCRIPTEN
+#ifndef __EMSCRIPTEN__
 	glActiveTexture_fp = (glActiveTexture_f) SDL_GL_GetProcAddress("glActiveTexture");
 	if (!glActiveTexture_fp)
 		Sys_Error("glActiveTexture not found");
