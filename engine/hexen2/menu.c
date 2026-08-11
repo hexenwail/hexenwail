@@ -646,6 +646,12 @@ static int	m_main_cursor;
 
 static void BGM_RestartMusic(void);
 static char	old_bgmtype[20];	// S.A
+/* Snapshotted alongside old_bgmtype: the MIDI ONLY <-> ALL CODECS menu item
+ * only flips bgm_extmusic and leaves bgmtype at "midi", so watching the
+ * bgmtype string alone never noticed that change and the music was not
+ * refreshed until the next level load.  -1 = nothing snapshotted, matching
+ * old_bgmtype[0] == 0.  uhexen2-3j53. */
+static int	old_extmusic = -1;
 
 
 void M_Menu_Main_f (void)
@@ -699,9 +705,12 @@ static void M_Main_Key (int key)
 		menu_disabled_mouse = false;
 		IN_ActivateMouse ();
 		// and check we haven't changed the music type
-		if (old_bgmtype[0] != 0 && strcmp(old_bgmtype,bgmtype.string) != 0)
+		if (old_bgmtype[0] != 0 &&
+		    (strcmp(old_bgmtype,bgmtype.string) != 0 ||
+		     old_extmusic != bgm_extmusic.integer))
 			BGM_RestartMusic ();
 		old_bgmtype[0] = 0;
+		old_extmusic = -1;
 		Key_SetDest (key_game);
 		m_state = m_none;
 		Sbar_Changed ();
@@ -3583,7 +3592,10 @@ static void M_Menu_Sound_f (void)
 	m_entersound = true;
 
 	if (old_bgmtype[0] == 0)
+	{
 		q_strlcpy(old_bgmtype, bgmtype.string, sizeof(old_bgmtype));
+		old_extmusic = bgm_extmusic.integer;
+	}
 }
 
 static void M_Sound_AdjustSliders (int dir)
@@ -6830,6 +6842,7 @@ void M_Init (void)
 	Cmd_AddCommand ("menu_class", M_Menu_Class2_f);
 
 	memset (old_bgmtype, 0, sizeof(old_bgmtype));
+	old_extmusic = -1;
 }
 
 
