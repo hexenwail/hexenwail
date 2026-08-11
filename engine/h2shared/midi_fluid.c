@@ -32,6 +32,7 @@ static fluid_player_t	*fs_player;
 static int		fs_sfont_id = -1;
 static int		fs_rate = 0;		/* synth render rate; matches shm->speed so S_RawSamples never resamples */
 static qboolean		fs_paused = false;	/* when set, FMIDI_Advance renders nothing (silence) */
+static qboolean		fs_loop_applied = false;	/* last bgmloop value pushed to the player */
 
 /* Synth output gain is held constant; bgmvolume is applied downstream in
  * S_RawSamples (see FMIDI_Advance), so applying it here too would double it. */
@@ -353,7 +354,12 @@ static void *FMIDI_Open (const char *filename)
 	}
 	free(buf);
 
-	fluid_player_set_loop(fs_player, -1);	/* loop forever */
+	/* Honour the caller's loop request instead of always looping forever:
+	 * BGM sets bgmloop per track (and "music_loop off" clears it), and a
+	 * hardcoded -1 here meant a non-looping track repeated until something
+	 * else stopped it.  uhexen2-oocu. */
+	fs_loop_applied = bgmloop;
+	fluid_player_set_loop(fs_player, bgmloop ? -1 : 1);
 	fs_paused = false;
 	fluid_player_play(fs_player);
 
@@ -371,8 +377,17 @@ static void FMIDI_Advance (void **handle)
 		return;
 	if (bgmvolume.value <= 0)	/* paused-equivalent: emit nothing */
 		return;
-	/* Loop is forever (-1), so PLAYING is the only state we render; bail
-	 * otherwise so we never push trailing silence into the ring. */
+	/* "music_loop" can flip bgmloop mid-track; push the change through so
+	 * the toggle takes effect on the current song rather than the next. */
+	if (fs_loop_applied != bgmloop)
+	{
+		fs_loop_applied = bgmloop;
+		fluid_player_set_loop(fs_player, bgmloop ? -1 : 1);
+	}
+
+	/* Render only while PLAYING, so we never push trailing silence into the
+	 * ring — and, for a non-looping track, so we stop feeding it once the
+	 * song reaches DONE instead of repeating it. */
 	if (fluid_player_get_status(fs_player) != FLUID_PLAYER_PLAYING)
 		return;
 

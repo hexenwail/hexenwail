@@ -579,12 +579,19 @@ void BGM_PlayCDtrack (byte track, qboolean looping)
 	BGM_Stop();
 	Con_DPrintf("BGM: PlayCDtrack %d (loop=%d)\n", (int)track, (int)looping);
 
+	/* Adopt the caller's loop request up front, for every path out of this
+	 * function.  It used to be set only in the remap branch below, so the
+	 * CD file-fallback further down opened its stream with whatever bgmloop
+	 * the *previous* track happened to leave behind — a non-looping track
+	 * would loop forever if something looping had played before it.
+	 * uhexen2-oocu. */
+	bgmloop = looping;
+
 	/* If a filename remap is set, route through the named-music path. */
 	if (track < BGM_NUM_REMAPS && bgm_remap_names[track][0])
 	{
 		const char *name = bgm_remap_names[track];
 		Con_DPrintf("BGM: remap track %d -> %s\n", (int)track, name);
-		bgmloop = looping;
 		BGM_PlayMIDIorMusic(name);
 		return;
 	}
@@ -675,8 +682,14 @@ void BGM_Stop (void)
 		bgmstream->status = STREAM_NONE;
 		S_CodecCloseStream(bgmstream);
 		bgmstream = NULL;
-		s_rawend = 0;
 	}
+	/* Flush the raw ring for BOTH sources, not just the streamer.  Since
+	 * uhexen2-tdss the MIDI driver renders through this same ring via
+	 * S_RawSamples (FMIDI_Advance), and this reset used to live inside the
+	 * bgmstream branch — so stopping MIDI left however much PCM was already
+	 * queued ahead of paintedtime to keep playing after the stop, a tail of
+	 * stale music over the silence.  uhexen2-aukj. */
+	s_rawend = 0;
 }
 
 void BGM_Pause (void)
