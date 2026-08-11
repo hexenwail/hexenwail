@@ -1,0 +1,6 @@
+This is the 3-level v1.11 Hexen II Demo from Nov. 1997 running on
+the Hammer of Thyrion (uHexen2) engine / v1.5.8 release.
+
+The binaries were compiled by changing the ENABLE_OLD_RETAIL and
+ENABLE_OLD_DEMO settings in h2config.h to 1 and then make DEMO=1
+
