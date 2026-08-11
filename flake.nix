@@ -605,6 +605,22 @@ EOF
           type = "app";
           program = "${self.packages.${system}.nixos}/bin/glhexen2";
         };
+
+        # nix run .#get-demo [destination]
+        #
+        # Fetches Raven's Nov 1997 Hexen II demo data from the uHexen2 project
+        # so a fresh checkout has something to run.  Deliberately NOT a
+        # packaged derivation: we have no right to redistribute that data
+        # (uhexen2-3vmk), so this only helps the user download it themselves,
+        # and nothing it produces ends up in a Hexenwail artifact.
+        apps.get-demo = {
+          type = "app";
+          program = "${pkgs.writeShellApplication {
+            name = "hexenwail-get-demo";
+            runtimeInputs = with pkgs; [ curl gnutar gzip coreutils ];
+            text = builtins.readFile ./scripts/get_demo.sh;
+          }}/bin/hexenwail-get-demo";
+        };
       }
     );
 }

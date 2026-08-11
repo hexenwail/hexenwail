@@ -11,6 +11,23 @@ Raven Software released the Hexen II source code in 2000. [Hammer of Thyrion](ht
 
 Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak`; it is auto-included when you launch with `-game modname` / `-mod modname` (use `-noportals` to opt out), and is toggleable from the Mods menu.
 
+### Just want to try it?
+
+The free three-level demo Raven released in November 1997 runs on Hexenwail. From a source tree, fetch it into the directory holding the executable:
+
+```sh
+scripts/get_demo.sh /path/to/hexenwail     # Linux, macOS
+nix run .#get-demo -- /path/to/hexenwail   # Nix
+```
+
+```powershell
+.\scripts\get_demo.ps1 C:\path\to\hexenwail   # Windows
+```
+
+Each downloads the demo package from the [uHexen2 project](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/), verifies it against a known SHA-256, and installs only its `data1` directory. Nothing is overwritten if you already have game data. We don't host or relicense that data — see [assets/demo/README.md](assets/demo/README.md) for its provenance and terms.
+
+The demo covers the first three levels; copying `data1` from a GOG, Steam or disc installation over it unlocks the full game.
+
 See [USAGE.md](USAGE.md) for external textures, Steam Deck setup, and mod configuration.
 
 ## Which version should I use?
