@@ -590,28 +590,25 @@ Copies the FROMPATH file as TOPATH file, creating any dirs needed.
 Used for saving the game. Returns 0 on success, non-zero on error.
 ===========
 */
+/* NOTE: reachable from the background save worker (Host_CopyFiles), so this
+ * must stay free of both zone allocation and console output — neither is
+ * thread-safe. FS_CreatePath only needs a mutable copy, which the stack
+ * provides, and failures are reported by the caller, which names both paths. */
 int FS_CopyFile (const char *frompath, const char *topath)
 {
-	char	*tmp;
+	char	tmp[MAX_OSPATH];
 	int	err;
 
 	if (!frompath || !topath)
-	{
-		Con_Printf ("%s: null input\n", __thisfunc__);
 		return 1;
-	}
+	if (q_strlcpy(tmp, topath, sizeof(tmp)) >= sizeof(tmp))
+		return 1;
 	/* create directories up to the dest file */
-	tmp = Z_Strdup (topath);
 	err = FS_CreatePath(tmp);
-	Z_Free (tmp);
 	if (err != 0)
-	{
-		Con_Printf ("%s: unable to create directory\n", __thisfunc__);
 		return err;
-	}
 
-	err = Sys_CopyFile (frompath, topath);
-	return err;
+	return Sys_CopyFile (frompath, topath);
 }
 
 #define	COPY_READ_BUFSIZE		8192	/* BUFSIZ */
@@ -621,7 +618,7 @@ int FS_WriteFileFromHandle (FILE *fromfile, const char *topath, size_t size)
 	FILE	*out;
 /*	off_t	remaining, count;*/
 	size_t	remaining, count;
-	char	*tmp;
+	char	tmp[MAX_OSPATH];
 	int	err;
 
 	if (!fromfile || !topath)
@@ -629,11 +626,14 @@ int FS_WriteFileFromHandle (FILE *fromfile, const char *topath, size_t size)
 		Con_Printf ("%s: null input\n", __thisfunc__);
 		return 1;
 	}
+	if (q_strlcpy(tmp, topath, sizeof(tmp)) >= sizeof(tmp))
+	{
+		Con_Printf ("%s: path too long\n", __thisfunc__);
+		return 1;
+	}
 
 	/* create directories up to the dest file */
-	tmp = Z_Strdup (topath);
 	err = FS_CreatePath(tmp);
-	Z_Free (tmp);
 	if (err != 0)
 	{
 		Con_Printf ("%s: unable to create directory\n", __thisfunc__);
@@ -1277,17 +1277,18 @@ static void FS_Maplist_f (void)
 		}
 		else
 		{
-			const char *findname = Sys_FindFirstFile(va("%s/maps",search->filename), "*.bsp");
+			fsfind_t find;
+			const char *findname = Sys_FindFirstFile(&find, va("%s/maps",search->filename), "*.bsp");
 			while (findname)
 			{
 				if (processMapname(findname, prefix, preLen) < 0)
 				{
-					Sys_FindClose ();
+					Sys_FindClose (&find);
 					goto done;
 				}
-				findname = Sys_FindNextFile ();
+				findname = Sys_FindNextFile (&find);
 			}
-			Sys_FindClose ();
+			Sys_FindClose (&find);
 		}
 	}
 

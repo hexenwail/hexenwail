@@ -122,6 +122,12 @@ void AsyncQueue_Init(void);
 void AsyncQueue_Destroy(void);
 void AsyncQueue_Drain(void);
 void Host_InvokeOnMainThread(void (*func)(void *param), void *param);
+qboolean Host_TryInvokeOnMainThread(void (*func)(void *param), void *param);
+qboolean Host_OnMainThread(void);
+
+/* Con_Printf substitute that is safe to call from any thread: prints
+ * directly on the main thread, otherwise defers to the next AsyncQueue_Drain. */
+void Host_PrintAsync (const char *fmt, ...) FUNC_PRINTF(1,2);
 
 /* Background save */
 void Host_InitSave(void);

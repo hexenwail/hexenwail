@@ -187,48 +187,73 @@ int Sys_CopyFile (const char *frompath, const char *topath)
 
 /*
 =================================================
-simplified findfirst/findnext implementation
+simplified findfirst/findnext implementation.
+state lives in the caller's fsfind_t so that the
+background save worker and the main thread can
+enumerate directories concurrently. the platform
+half is malloc'd, not Z_Malloc'd, because the
+zone allocator is not thread-safe.
 =================================================
 */
-static HANDLE findhandle = INVALID_HANDLE_VALUE;
-static WIN32_FIND_DATAW finddata;
-static wchar_t	findstr[MAX_OSPATH];
-
-const char *Sys_FindFirstFile (const char *path, const char *pattern)
+typedef struct
 {
-	wchar_t *widepath = Sys_UTF8ToWide(path);
-	if (findhandle != INVALID_HANDLE_VALUE)
-		Sys_Error ("Sys_FindFirst without FindClose");
-	if (!widepath)
+	HANDLE			handle;
+	WIN32_FIND_DATAW	data;
+} winfind_t;
+
+const char *Sys_FindFirstFile (fsfind_t *ctx, const char *path, const char *pattern)
+{
+	winfind_t	*fd;
+	wchar_t		widepath[MAX_PATH], findstr[MAX_PATH];
+
+	ctx->priv = NULL;
+	ctx->name[0] = '\0';
+
+	if (!Sys_UTF8ToWideBuf(path, widepath, MAX_PATH))
 		return NULL;
+	fd = (winfind_t *) malloc (sizeof(winfind_t));
+	if (!fd)
+		return NULL;
+
 	q_swprintf (findstr, sizeof(findstr)/sizeof(wchar_t), L"%s/%hs", widepath, pattern);
-	findhandle = FindFirstFileW(findstr, &finddata);
-	if (findhandle == INVALID_HANDLE_VALUE)
+	fd->handle = FindFirstFileW(findstr, &fd->data);
+	if (fd->handle == INVALID_HANDLE_VALUE)
+	{
+		free (fd);
 		return NULL;
-	if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-		return Sys_FindNextFile();
-	return Sys_WideToUTF8(finddata.cFileName);
+	}
+	ctx->priv = fd;
+
+	if (fd->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		return Sys_FindNextFile (ctx);
+	return Sys_WideToUTF8Buf (fd->data.cFileName, ctx->name, sizeof(ctx->name));
 }
 
-const char *Sys_FindNextFile (void)
+const char *Sys_FindNextFile (fsfind_t *ctx)
 {
-	if (findhandle == INVALID_HANDLE_VALUE)
+	winfind_t	*fd = (winfind_t *) ctx->priv;
+
+	if (!fd)
 		return NULL;
-	while (FindNextFileW(findhandle, &finddata) != 0)
+	while (FindNextFileW(fd->handle, &fd->data) != 0)
 	{
-		if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		if (fd->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 			continue;
-		return Sys_WideToUTF8(finddata.cFileName);
+		return Sys_WideToUTF8Buf (fd->data.cFileName, ctx->name, sizeof(ctx->name));
 	}
 	return NULL;
 }
 
-void Sys_FindClose (void)
+void Sys_FindClose (fsfind_t *ctx)
 {
-	if (findhandle != INVALID_HANDLE_VALUE)
+	winfind_t	*fd = (winfind_t *) ctx->priv;
+
+	if (fd)
 	{
-		FindClose(findhandle);
-		findhandle = INVALID_HANDLE_VALUE;
+		if (fd->handle != INVALID_HANDLE_VALUE)
+			FindClose (fd->handle);
+		free (fd);
+		ctx->priv = NULL;
 	}
 }
 

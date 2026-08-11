@@ -29,6 +29,16 @@ void AsyncQueue_Init(void) {}
 void AsyncQueue_Destroy(void) {}
 void AsyncQueue_Drain(void) {}
 void Host_InvokeOnMainThread(void (*func)(void *p), void *p) { func(p); }
+qboolean Host_TryInvokeOnMainThread(void (*func)(void *p), void *p) { func(p); return true; }
+qboolean Host_OnMainThread(void) { return true; }
+void Host_PrintAsync(const char *fmt, ...) {
+	va_list argptr;
+	char msg[MAX_PRINTMSG];
+	va_start(argptr, fmt);
+	q_vsnprintf(msg, sizeof(msg), fmt, argptr);
+	va_end(argptr);
+	Con_Printf("%s", msg);
+}
 void Host_InitSave(void) {}
 void Host_WaitForSaveThread(void) {}
 qboolean Host_IsSaving(void) { return false; }
@@ -81,11 +91,17 @@ typedef struct {
 } asyncqueue_t;
 
 static asyncqueue_t async_queue;
+static SDL_ThreadID main_thread_id;
 
 void AsyncQueue_Init(void) {
 	async_queue.mutex   = SDL_CreateMutex();
 	async_queue.notfull = SDL_CreateCondition();
 	SDL_SetAtomicInt(&async_queue.teardown, 0);
+	main_thread_id = SDL_GetCurrentThreadID();
+}
+
+qboolean Host_OnMainThread(void) {
+	return SDL_GetCurrentThreadID() == main_thread_id;
 }
 
 void AsyncQueue_Destroy(void) {
@@ -110,6 +126,25 @@ void Host_InvokeOnMainThread(void (*func)(void *p), void *p) {
 	SDL_UnlockMutex(async_queue.mutex);
 }
 
+/* Non-blocking variant: returns false instead of waiting for queue space.
+ * Callers that run before the worker clears save_in_progress must use this —
+ * the main thread may be parked in Host_WaitForSaveThread and therefore not
+ * draining, so blocking on a full queue would deadlock both threads. */
+qboolean Host_TryInvokeOnMainThread(void (*func)(void *p), void *p) {
+	qboolean queued = false;
+	SDL_LockMutex(async_queue.mutex);
+	if (((async_queue.tail - async_queue.head) < ASYNC_QUEUE_CAPACITY)
+		&& !SDL_GetAtomicInt(&async_queue.teardown)) {
+		size_t slot = async_queue.tail % ASYNC_QUEUE_CAPACITY;
+		async_queue.procs[slot].func  = func;
+		async_queue.procs[slot].param = p;
+		async_queue.tail++;
+		queued = true;
+	}
+	SDL_UnlockMutex(async_queue.mutex);
+	return queued;
+}
+
 void AsyncQueue_Drain(void) {
 	for (;;) {
 		asyncproc_t proc;
@@ -124,6 +159,40 @@ void AsyncQueue_Drain(void) {
 		SDL_UnlockMutex(async_queue.mutex);
 		proc.func(proc.param);
 	}
+}
+
+/* Deferred console output. Con_Printf is not thread-safe (unlocked console
+ * buffer, notify lines and log file), so off-thread callers hand the already
+ * formatted message to the main thread. malloc, not Z_Malloc: the zone
+ * allocator has no locking either. */
+static void PrintAsync_CB(void *param) {
+	char *msg = (char *) param;
+	Con_Printf("%s", msg);
+	free(msg);
+}
+
+void Host_PrintAsync(const char *fmt, ...) {
+	va_list argptr;
+	char msg[MAX_PRINTMSG];
+	char *copy;
+	size_t len;
+
+	va_start(argptr, fmt);
+	q_vsnprintf(msg, sizeof(msg), fmt, argptr);
+	va_end(argptr);
+
+	if (Host_OnMainThread()) {
+		Con_Printf("%s", msg);
+		return;
+	}
+
+	len = strlen(msg) + 1;
+	copy = (char *) malloc(len);
+	if (!copy)
+		return;		/* dropping a diagnostic beats crashing the worker */
+	memcpy(copy, msg, len);
+	if (!Host_TryInvokeOnMainThread(PrintAsync_CB, copy))
+		free(copy);	/* likewise: never block the worker for a message */
 }
 
 static savedata_t      save_pending;
