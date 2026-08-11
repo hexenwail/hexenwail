@@ -271,10 +271,19 @@
 
           # Windows 64-bit build
           win64 = pkgsCross64.stdenv.mkDerivation {
-            # nixpkgs auto-appends the host triple (-x86_64-w64-mingw32) for
-            # cross builds, so "win64" here would just duplicate that.
-            pname = "hexenwail";
-            inherit version;
+            # Explicit `name` rather than pname+version, to fix the build-log
+            # prefix.  nixpkgs always appends the host triple on cross builds
+            # (make-derivation.nix, `hostSuffix`) — there is no opt-out — but
+            # *where* it lands depends on which attrs you set:
+            #
+            #   pname+version -> hexenwail-x86_64-w64-mingw32-0.7.9-beta.r9
+            #   name          -> hexenwail-win64-0.7.9-beta.r9-x86_64-w64-mingw32
+            #
+            # nix's log prefix truncates at the first "-<digit>" component, so
+            # the first form logs as "hexenwail-x86_64-w64-mingw32>" (reads as
+            # a typo: 64, 64, 32) and the second as "hexenwail-win64>".
+            # The store path is longer either way; the prefix is what we want.
+            name = "hexenwail-win64-${version}";
 
             src = filteredSrc;
 
@@ -361,8 +370,8 @@
           # because the mingw toolchain is already here for .#win64, and the
           # WIN32 half of the h2ded target has nothing else to prove it builds.
           h2ded-win64 = pkgsCross64.stdenv.mkDerivation {
-            pname = "hexenwail-h2ded";
-            inherit version;
+            # Explicit `name` — see .#win64 above.
+            name = "hexenwail-h2ded-win64-${version}";
 
             src = filteredSrc;
 
@@ -405,8 +414,8 @@
           # only the mingw runtime (and ws2_32 for the HexenWorld servers), so
           # like h2ded-win64 this needs no buildInputs.  uhexen2-4xd7.
           utils-win64 = pkgsCross64.stdenv.mkDerivation {
-            pname = "hexenwail-utils";
-            inherit version;
+            # Explicit `name` — see .#win64 above.
+            name = "hexenwail-utils-win64-${version}";
 
             src = filteredSrc;
 
