@@ -1,0 +1,70 @@
+# vulnix whitelist for the weekly security scan (uhexen2-c58o).
+#
+# vulnix scans the Nix *closure*, which is every store path the build refers
+# to.  That is much larger than what the engine actually loads: SDL3 drags in
+# a desktop stack (avahi, cups, GTK/zenity helpers) whose libraries are never
+# in the binary's DT_NEEDED list and never see a game file.  Left unfiltered
+# the weekly report was 30 CVE references across 11 packages, none actionable,
+# which is how a scanner gets muted.
+#
+# Rule for adding an entry: the package must be unreachable from untrusted
+# input, or outside this project's control, and the reason must say which.
+# Anything the engine can be made to parse stays OFF this list even when the
+# CVE looks minor — that is the signal the scan exists to produce.
+#
+# Deliberately NOT whitelisted:
+#   libsndfile — reachable.  It is a load-time dependency of libfluidsynth.so.3,
+#   which the engine links directly, and FluidSynth parses SF3 soundfont sample
+#   data with it.  snd_soundfont is a live cvar and find_soundfont() probes the
+#   game directory, so a mod can ship a crafted .sf2/.sf3 and have it parsed
+#   mid-session.  Tracked separately in uhexen2-ql7h.
+
+# --- Parsing-path libraries, verified unreachable at runtime ----------------
+
+[zlib]
+comment = """
+Closure-only.  No libz in the engine's DT_NEEDED list and ldd over the fully
+resolved tree finds no libz.so; the engine has no zip/PK3 path, so no
+untrusted game file reaches it.  Present only as a transitive dependency of
+SDL3 and fluidsynth.  Covers CVE-2026-27820 (CVSS 9.8) and CVE-2023-6992.
+Re-check if PK3 or PNG loading is ever linked in.
+"""
+
+# --- Transitive desktop stack pulled in by SDL3, never loaded by the engine -
+
+[avahi]
+comment = "mDNS service discovery, transitive via SDL3. Not in DT_NEEDED; the engine does no service discovery."
+
+[cups]
+comment = "Printing stack, transitive via the GTK/zenity file-dialog path. cupsd is not run by the game."
+
+[libmicrohttpd]
+comment = "Embedded HTTP server, transitive. The engine starts no HTTP listener."
+
+[libssh2]
+comment = "SSH client library, transitive via curl. Not in DT_NEEDED; no network file transfer in the engine."
+
+[nghttp2]
+comment = "HTTP/2 library, transitive via curl. Not in DT_NEEDED."
+
+[cjson]
+comment = "JSON parser, transitive via the desktop stack. Not in DT_NEEDED; the engine parses no JSON."
+
+[orc]
+comment = "GStreamer JIT helper, transitive. The engine uses SDL audio and its own codecs, not GStreamer."
+
+# --- Toolchain and libc: outside per-project pinning ------------------------
+
+[gcc]
+comment = """
+Build-time toolchain in the closure, not loaded at runtime.  The headline
+CVE-2023-4039 is an AArch64 -fstack-protector issue and this target is
+x86_64.
+"""
+
+[glibc]
+comment = """
+Base libc, present in every Nix closure including CVE-2026-5450 (CVSS 9.8).
+There is no per-project action available: it clears when nixpkgs ships the
+fix and the pin is bumped.  Known-accepted rather than unreachable.
+"""

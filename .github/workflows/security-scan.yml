@@ -19,6 +19,7 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - '.github/workflows/security-scan.yml'
+      - '.github/vulnix-whitelist.toml'
 
 permissions:
   contents: read
@@ -60,11 +61,22 @@ jobs:
         id: scan
         run: |
           set -o pipefail
+          # -w filters the closure-only noise.  vulnix scans every store path
+          # the build refers to, which is far more than the engine loads; the
+          # whitelist records, with a written reason each, the packages that
+          # no untrusted input can reach.  See .github/vulnix-whitelist.toml —
+          # anything the engine can be made to parse is deliberately absent
+          # from it.  (uhexen2-c58o)
+          #
           # vulnix exits non-zero when it finds anything; that is the normal
           # reporting path here, so swallow it and read the report instead.
           nix run nixpkgs#vulnix -- --closure ./result --show-description \
+            -w .github/vulnix-whitelist.toml \
             | tee vulnix-report.txt || true
+          # The JSON artifact keeps the whitelisted entries (-s) so the full
+          # picture is still recoverable from a run without editing the file.
           nix run nixpkgs#vulnix -- --closure ./result --json \
+            -w .github/vulnix-whitelist.toml -s \
             > vulnix-report.json || true
 
       - name: Summarise
@@ -73,20 +85,25 @@ jobs:
             echo '## vulnix CVE scan'
             echo
             if [ -s vulnix-report.txt ]; then
-              echo 'Findings in the runtime closure of the .#nixos build:'
+              echo 'Findings in the runtime closure of the `.#nixos` build,'
+              echo 'after filtering through `.github/vulnix-whitelist.toml`:'
               echo
               echo '```'
               head -c 60000 vulnix-report.txt
               echo '```'
               echo
-              echo 'Triage: most hits are transitive libraries that the engine'
-              echo 'never reaches with untrusted input.  What matters here is'
-              echo 'anything in the parsing path — SDL, image/audio codecs,'
-              echo 'zlib — because those do touch attacker-supplied map, model'
-              echo 'and music files.'
+              echo 'Everything here is either new or on a path the engine can'
+              echo 'actually be made to parse — attacker-supplied map, model,'
+              echo 'texture, music and soundfont files.  Closure-only packages'
+              echo 'are filtered out by the whitelist, each with a written'
+              echo 'reason; the uploaded JSON artifact still lists them.'
+              echo
+              echo 'If a finding here is unreachable, add it to the whitelist'
+              echo 'with the reason rather than ignoring the report.'
             else
-              echo 'No findings, or the scanner could not reach the NVD feeds.'
-              echo 'Check the scan step log to tell those two apart.'
+              echo 'No findings past the whitelist, or the scanner could not'
+              echo 'reach the NVD feeds.  Check the scan step log to tell'
+              echo 'those two apart.'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
