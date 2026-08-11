@@ -1595,18 +1595,25 @@ void FS_Init (void)
 			   "If you own Hexen II (Steam, GOG or the CD), copy that\n"
 			   "installation's data1 directory to the path above.\n"
 			   "\n"
-			   "If you don't, the free three-level 1997 demo works. From a\n"
-			   "Hexenwail source tree, run either of:\n"
+			   "If you don't, the free three-level 1997 demo works. A\n"
+			   "helper that downloads and verifies it ships next to this\n"
+			   "executable:\n"
 #ifdef PLATFORM_WINDOWS
-			   "    scripts\\get_demo.ps1 \"%s\"\n"
-#else
-			   "    scripts/get_demo.sh \"%s\"\n"
-#endif
-			   "    nix run .#get-demo -- \"%s\"\n"
+			   "    get_demo.cmd\n"
 			   "\n"
-			   "Either one downloads it from the uHexen2 project and checks\n"
-			   "it against a known hash.",
-			   fs_basedir, fs_basedir, fs_basedir);
+			   "(double-click it, or run it from cmd). In a source\n"
+			   "checkout it is scripts\\get_demo.cmd instead.",
+#else
+			   "    ./get_demo.sh\n"
+			   "\n"
+			   "In a source checkout it is scripts/get_demo.sh instead, or\n"
+			   "run: nix run .#get-demo -- \"%s\"",
+#endif
+			   fs_basedir
+#ifndef PLATFORM_WINDOWS
+			   , fs_basedir
+#endif
+			   );
 	}
 	if (gameflags & (GAME_OLD_DEMO|GAME_REGISTERED_OLD|GAME_OLD_OEM))
 		Sys_Printf ("Using old/unsupported, pre-1.11 version pak files.\n");

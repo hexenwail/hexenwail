@@ -521,6 +521,19 @@
             mkdir -p $out/release/windows-x86_64
             cp -rL ${self.packages.${system}.win64}/bin $out/release/windows-x86_64/
 
+            # Demo fetch helper, beside the binary in every platform dir.
+            #
+            # The engine's no-data error names this script, and until it
+            # shipped here that instruction was answerable only from a source
+            # checkout -- i.e. by developers, not by the people who actually
+            # hit the error.  It is a downloader, not game content: nothing
+            # Raven owns is in this bundle.  uhexen2-49ep.
+            for d in linux-x86_64 linux-x86_64-nixos; do
+              install -Dm755 ${self}/scripts/get_demo.sh $out/release/$d/get_demo.sh
+            done
+            install -Dm644 ${self}/scripts/get_demo.ps1 $out/release/windows-x86_64/get_demo.ps1
+            install -Dm755 ${self}/scripts/get_demo.cmd $out/release/windows-x86_64/get_demo.cmd
+
             # License files
             mkdir -p $out/release/licenses
             cp ${self}/COPYING $out/release/licenses/COPYING.GPL2 2>/dev/null || \
@@ -538,6 +551,17 @@ Included platforms:
 - linux-x86_64/          Linux 64-bit (portable, any distro)
 - linux-x86_64-nixos/    Linux 64-bit (NixOS)
 - windows-x86_64/        Windows 64-bit
+
+No game data is included -- Hexenwail is an engine and ships no Raven content.
+Put a "data1" directory (pak0.pak, pak1.pak) from a GOG, Steam or disc copy of
+Hexen II beside the executable.  If you don't own it, each platform directory
+carries a helper that downloads the free 1997 three-level demo and verifies it:
+
+- linux-x86_64/get_demo.sh          run it from that directory
+- linux-x86_64-nixos/get_demo.sh    run it from that directory
+- windows-x86_64/get_demo.cmd       double-click, or run from cmd
+
+The demo data comes from the uHexen2 project and is not ours to relicense.
 
 Licenses:
 - licenses/COPYING.GPL2          Engine (GPL-2.0+)

@@ -13,16 +13,16 @@ Hexenwail does *not* include any original game assets; a valid copy of Hexen II 
 
 ### Just want to try it?
 
-The free three-level demo Raven released in November 1997 runs on Hexenwail. From a source tree, fetch it into the directory holding the executable:
+The free three-level demo Raven released in November 1997 runs on Hexenwail, and a fetch helper ships beside the executable in every release. Unpack the release, then from that directory:
 
-```sh
-scripts/get_demo.sh /path/to/hexenwail     # Linux, macOS
-nix run .#get-demo -- /path/to/hexenwail   # Nix
-```
+| | |
+|---|---|
+| Linux | `./get_demo.sh` |
+| Windows | `get_demo.cmd` (double-click, or run from `cmd`) |
+| Flatpak | launch it — you'll be offered the download when no game data is found |
+| Nix | `nix run .#get-demo -- /path/to/hexenwail` |
 
-```powershell
-.\scripts\get_demo.ps1 C:\path\to\hexenwail   # Windows
-```
+In a source checkout the scripts live in `scripts/` instead.
 
 Each downloads the demo package from the [uHexen2 project](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/), verifies it against a known SHA-256, and installs only its `data1` directory. Nothing is overwritten if you already have game data. We don't host or relicense that data — see [assets/demo/README.md](assets/demo/README.md) for its provenance and terms.
 
