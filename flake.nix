@@ -166,6 +166,41 @@
             };
           });
 
+          # Map/model toolchain (utils/) and HexenWorld servers (hw_utils/).
+          # Configures the repo root rather than engine/, with the engine
+          # switched off: the tools are plain C with no external dependencies
+          # at all, so this needs neither buildInputs nor pkg-config, and
+          # skipping the engine keeps SDL3/OpenGL/ALSA out of the closure.
+          # install(TARGETS) in the two CMakeLists means the stock installPhase
+          # already places all 18 binaries in $out/bin.
+          utils = pkgs.stdenv.mkDerivation {
+            pname = "hexenwail-utils";
+            inherit version;
+
+            src = filteredSrc;
+
+            nativeBuildInputs = [ pkgs.cmake ];
+
+            cmakeFlags = [
+              "-DBUILD_ENGINE=OFF"
+              "-DBUILD_UTILS=ON"
+            ];
+
+            meta = with pkgs.lib; {
+              description = "Hexen II map, model and server tools (qbsp, light, vis, hcc, ...)";
+              longDescription = ''
+                The Hexen II mapping and modding toolchain: qbsp, light, vis and
+                jsh2colour for compiling maps, hcc/dhcc for HexenC bytecode,
+                genmodel for .mdl files, pak/qfiles for archives, plus the
+                HexenWorld master server and rcon clients.
+              '';
+              homepage = "https://github.com/hexenwail/hexenwail";
+              license = licenses.gpl2Plus;
+              platforms = platforms.linux;
+              maintainers = [ ];
+            };
+          };
+
           # OpenGL version for standard FHS Linux systems (non-NixOS)
           # Bundles shared libraries so it runs on any distro without nix
           linux-fhs = let
@@ -527,6 +562,7 @@ EOF
             echo "  nix build .#nixos     - Linux build (NixOS)"
             echo "  nix build .#linux-fhs - Linux build (standard FHS)"
             echo "  nix build .#h2ded     - Dedicated server (headless)"
+            echo "  nix build .#utils     - Map/model toolchain (qbsp, light, vis, hcc...)"
             echo "  nix build .#win64     - Windows 64-bit"
             echo "  nix build .#release   - All platforms"
             echo ""
