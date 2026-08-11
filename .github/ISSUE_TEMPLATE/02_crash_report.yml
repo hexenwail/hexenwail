@@ -1,0 +1,146 @@
+name: Crash / hang
+description: The game closes unexpectedly, freezes, or fails to start at all.
+title: "[Crash]: "
+labels: ["bug", "crash", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A crash without a log or a backtrace is usually not actionable — the two fields marked required below
+        are what let us find the fault. If you can only supply one, make it `qconsole.log`.
+
+  - type: dropdown
+    id: crash-type
+    attributes:
+      label: What kind of failure?
+      options:
+        - Crashes to desktop during play
+        - Crashes on startup / never reaches the menu
+        - Crashes when loading a specific map or save
+        - Freezes / hangs (has to be force-quit)
+        - Error dialog or console error, then exits
+    validations:
+      required: true
+
+  - type: textarea
+    id: when
+    attributes:
+      label: When does it crash?
+      description: What you were doing at the moment it died, and whether it is reproducible on demand.
+      placeholder: |
+        Every time I load the second Meso level, about two seconds after the level finishes loading.
+        It also happens if I load a save made inside that level.
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: qconsole.log
+      description: |
+        Attach the log from the crashed session (drag and drop the file into this box). The last lines before
+        the log stops are what we look at first.
+
+        - **Windows** — `qconsole.log` next to `hexenwail.exe`
+        - **Linux (ZIP, Nix, source build)** — `~/.hexen2/qconsole.log`
+        - **Flatpak** — `~/.var/app/io.github.hexenwail.hexenwail/.hexen2/qconsole.log`
+
+        Launching with `-devlog` gives a more detailed log if you can reproduce on demand.
+    validations:
+      required: true
+
+  - type: textarea
+    id: backtrace
+    attributes:
+      label: Stack backtrace
+      description: |
+        If you can produce one, this usually turns a week of guessing into a same-day fix.
+
+        **Linux** — install `gdb`, then:
+        ```
+        gdb --args ./hexenwail -game yourmod
+        (gdb) run
+        ... reproduce the crash ...
+        (gdb) bt full
+        ```
+        Or, if it already crashed and systemd caught it: `coredumpctl gdb hexenwail` then `bt full`.
+
+        **Flatpak** — `flatpak run --command=sh io.github.hexenwail.hexenwail` then run under gdb inside the sandbox.
+
+        **Windows** — attach the crash dump if Windows produced one, or the Event Viewer entry
+        (Windows Logs → Application) showing the faulting module and offset.
+
+        Leave blank if you cannot get one — the log alone is still worth filing.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Hexenwail version
+      description: Bottom of the main menu, or the first line of `qconsole.log`. Commit hash if self-built.
+      placeholder: "0.7.9-beta.r7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install it?
+      options:
+        - Windows ZIP (hexenwail-*-windows-x86_64.zip)
+        - Linux ZIP (hexenwail-*-linux-x86_64.zip)
+        - Flatpak (.flatpak from Releases)
+        - Nix / NixOS
+        - Built from source
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 24H2 / Arch Linux (kernel 6.18) / SteamOS 3.7, Game Mode"
+    validations:
+      required: true
+
+  - type: textarea
+    id: gpu
+    attributes:
+      label: GPU and driver
+      description: The three `GL_` lines from `qconsole.log`. If the crash happens before those are printed, say so.
+      placeholder: |
+        GL_VENDOR: AMD
+        GL_RENDERER: AMD Radeon Graphics (radeonsi, vangogh, LLVM 19.1.7, DRM 3.61)
+        GL_VERSION: 4.6 (Compatibility Profile) Mesa 25.0.7
+    validations:
+      required: true
+
+  - type: input
+    id: mod
+    attributes:
+      label: Mod or map
+      description: The mod and launch line, or "none / base game".
+      placeholder: "Storm over Thyrion, launched with -game sot"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: last-good
+    attributes:
+      label: Did an earlier version work?
+      options:
+        - "Yes — an earlier Hexenwail release was fine (say which below)"
+        - "No — it has always crashed for me"
+        - "This is the first version I have tried"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >
+        The last known-good version, non-default cvars or command-line switches, overlays
+        (Steam, Discord, MSI Afterburner, OBS), and whether it also happens with a clean config.

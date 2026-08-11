@@ -1,0 +1,80 @@
+name: Build or packaging problem
+description: Compiling from source, the Nix flake, the Flatpak, or the CI/release artifacts fail.
+title: "[Build]: "
+labels: ["build", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For problems building or packaging the engine — not for bugs in a binary that runs.
+        If the game builds but then misbehaves, use the bug or crash template instead.
+
+  - type: dropdown
+    id: build-path
+    attributes:
+      label: Which build path?
+      options:
+        - Nix (nix build / nix develop)
+        - Flatpak (flatpak-builder)
+        - CMake from source, Linux
+        - CMake from source, Windows cross-compile
+        - WASM / Emscripten
+        - Distro packaging
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or tag
+      description: Output of `git rev-parse --short HEAD`, or the release tag you are building.
+      placeholder: "6d5aece73 / 0.7.9-beta.r7"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command you ran
+      placeholder: |
+        nix build .#hexenwail
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: >
+        The failing portion of the build log, with enough context to see the first error rather than just the
+        final "make: *** [all] Error 2". Attach the full log as a file if it is long.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "NixOS 25.11 / Ubuntu 24.04 / Fedora 42"
+    validations:
+      required: true
+
+  - type: textarea
+    id: toolchain
+    attributes:
+      label: Toolchain versions
+      description: Whatever is relevant to your build path — compiler, CMake, Nix, flatpak-builder, SDL3, Emscripten.
+      placeholder: |
+        gcc 14.2.0
+        cmake 3.31.6
+        nix 2.28.3
+        SDL 3.2.10
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Local modifications, an unusual dependency source, or whether a clean checkout also fails.

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Download the latest release first
+    url: https://github.com/hexenwail/hexenwail/releases/latest
+    about: Hexenwail is pre-1.0 and moves fast. Please reproduce on the newest build before filing — a good share of reports are already fixed.
+  - name: Setup, game data and mod configuration (USAGE.md)
+    url: https://github.com/hexenwail/hexenwail/blob/master/USAGE.md
+    about: Game data paths, external textures, Steam Deck setup, soundfonts and mod configuration. Check here before filing an "it won't start" issue.
+  - name: Hexen II community Discord
+    url: https://discord.com/channels/557756282430554112
+    about: Questions, mod help, and general chat. Use this instead of an issue if you are not sure something is a bug.

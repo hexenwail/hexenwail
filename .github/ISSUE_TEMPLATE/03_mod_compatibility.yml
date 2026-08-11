@@ -1,0 +1,103 @@
+name: Mod or map compatibility
+description: A mod, map or map pack behaves differently in Hexenwail than in uHexen2, Shanjaq's build, or the original engine.
+title: "[Mod]: "
+labels: ["compatibility", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Hexenwail aims to stay compatible with the existing Hexen II mod catalogue. If something worked in
+        another engine and does not work here, that is a bug on our side — please tell us which engine it
+        worked in, because that comparison is what makes it diagnosable.
+
+  - type: input
+    id: mod-name
+    attributes:
+      label: Mod or map pack
+      description: Name, version, and a download link if it is publicly available.
+      placeholder: "Storm over Thyrion 1.2 — https://www.moddb.com/mods/storm-over-thyrion"
+    validations:
+      required: true
+
+  - type: input
+    id: launch
+    attributes:
+      label: How do you launch it?
+      description: The exact command line or the Mods-menu entry you pick.
+      placeholder: "hexenwail -game sot  /  selected from the Mods menu"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What goes wrong?
+      description: What Hexenwail does, and what it does in the engine where it works correctly.
+      placeholder: |
+        In Hexenwail the scripted gate in map sot3 never opens, so the level is unfinishable.
+        In Shanjaq's r6303 build the same save file opens the gate normally.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Map name, where to stand, what to trigger. A save file dropped into this box is even better.
+      value: |
+        1. Launch with:
+        2. Map / location:
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: works-in
+    attributes:
+      label: Where does it work correctly?
+      multiple: true
+      options:
+        - uHexen2 / Hammer of Thyrion (sezero)
+        - Shanjaq's fork (uhexen2-r6303)
+        - Original Hexen II (glh2 / h2)
+        - An earlier Hexenwail release
+        - Nowhere — it is broken everywhere I tried
+        - Have not tested another engine
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Hexenwail version
+      placeholder: "0.7.9-beta.r7"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and install method
+      placeholder: "Windows 11 24H2, Windows ZIP / SteamOS 3.7, Flatpak"
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: qconsole.log
+      description: |
+        Attach the log from a session where the problem occurred — it lists which paks and mod directories were
+        loaded, which frequently is the whole answer.
+
+        - **Windows** — next to `hexenwail.exe`
+        - **Linux** — `~/.hexen2/qconsole.log`
+        - **Flatpak** — `~/.var/app/io.github.hexenwail.hexenwail/.hexen2/qconsole.log`
+    validations:
+      required: true
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots, video, or a save file
+      description: Side-by-side shots of Hexenwail vs. the working engine are the fastest way to settle a rendering difference.
