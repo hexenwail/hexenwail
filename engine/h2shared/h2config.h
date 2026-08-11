@@ -62,10 +62,22 @@
    Value  :	0 or 1
    Affects:	menu.c (player class selections, hexen2 only).
 
-   Change the define below to 0 if you want to allow the demoness
-   class in the old mission through the menu system.
+   Change the define below to 1 if you want to hide the demoness
+   class in the old mission through the menu system (upstream default).
+
+   We default to 0 (demoness offered in the old mission) because the
+   OLD MISSION and NEW MISSION menu entries do not select different
+   gamedirs:  portals/ is added to the searchpath at filesystem init
+   whenever GAME_PORTALS is set (quakefs.c, "step 2"), so both entries
+   run under the same progs.dat and differ only in the start map that
+   M_Difficulty_Key launches (demo1 vs. intermission 12 + keep1).  The
+   class list therefore stays consistent with the loaded gamecode
+   either way.  (A custom mod riding on portals data can still supply
+   a progs.dat without class 5; Host_Class_f only catches that once a
+   server is up, but that caveat is identical for the NEW MISSION /
+   START W/ INTRO entry, which has always offered the demoness.)
    ================================================================== */
-#define	DISALLOW_DEMONESS_IN_OLD_GAME	1
+#define	DISALLOW_DEMONESS_IN_OLD_GAME	0
 
 
 /* ====================================================================
