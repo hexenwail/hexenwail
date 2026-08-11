@@ -29,7 +29,14 @@
 #define MAX_GLTEXTURES		8192
 #define MAX_EXTRA_TEXTURES	156	/* 255-100+1 */
 #define	MAX_CACHED_PICS		256
-#define	MAX_LIGHTMAPS		256
+/* Lightmap page ceiling.  Large third-party maps (SoT 'tibet') exhausted
+ * the stock 256 and died in AllocBlock with a fatal "full".  Pages are
+ * BLOCK_WIDTH x BLOCK_HEIGHT (256x256) luxels, so 512 pages = 33.5M luxels,
+ * eight times the old budget.  Only the pages a map actually uses are
+ * allocated — see the growable lightmaps[] buffer in gl_rsurf.c — so raising
+ * this costs nothing at runtime beyond the small per-page bookkeeping
+ * arrays.  Keep it a multiple of LM_ATLAS_COLS.  uhexen2-vfvh. */
+#define	MAX_LIGHTMAPS		512
 
 /* maximum allowed size of a surface
  * vanilla limit was 16+1 (for linear sampling),
