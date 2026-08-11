@@ -7,5 +7,5 @@ contact_links:
     url: https://github.com/hexenwail/hexenwail/blob/master/USAGE.md
     about: Game data paths, external textures, Steam Deck setup, soundfonts and mod configuration. Check here before filing an "it won't start" issue.
   - name: Hexen II community Discord
-    url: https://discord.com/channels/557756282430554112
-    about: Questions, mod help, and general chat. Use this instead of an issue if you are not sure something is a bug.
+    url: https://discord.gg/nC848XavDQ
+    about: The hexen2/heretic2/hexenworld server. Questions, mod help, and general chat — use this instead of an issue if you are not sure something is a bug.
