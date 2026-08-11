@@ -120,7 +120,7 @@ Two ways to attach music to a custom map:
 
 ## Building
 
-See [BUILD.md](BUILD.md) for full instructions.
+See [docs/COMPILE](docs/COMPILE) for full instructions.
 
 **Quick start (any Linux):**
 ```bash
@@ -144,7 +144,7 @@ Contributions are welcome — bug reports, code cleanup, and documentation are a
 
 ## License
 
-GPL-2.0-or-later. See [COPYING](COPYING).
+GPL-2.0-or-later. See [LICENSE](LICENSE).
 
 Bundled third-party libraries:
 - [dr_libs](https://github.com/mackron/dr_libs) (public domain / MIT-0) — MP3, FLAC, WAV decoders
@@ -163,7 +163,7 @@ Based on [uHexen2 / Hammer of Thyrion](http://uhexen2.sourceforge.net/) by O. Se
 Incorporates code and techniques from the Quake engine modernization community:
 - [Ironwail](https://github.com/andrei-drexler/ironwail) — GL 4.3 shader pipeline approach, software rendering emulation (palette dithering), render scale, gamepad input, scancode-based keyboard input, sound channel management
 - [QuakeSpasm](https://sourceforge.net/projects/quakespasm/) — texture manager, fog system, console infrastructure
-- [QuakeSpasm-Spiked](https://github.com/AAS/quakespasm-spiked) — protocol extensions, mod compatibility patterns
+- [QuakeSpasm-Spiked](https://github.com/Shpoike/Quakespasm) — protocol extensions, mod compatibility patterns
 
 ---
 
