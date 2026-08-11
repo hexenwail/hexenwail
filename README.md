@@ -140,7 +140,10 @@ nix build .#release    # All platforms
 
 ## Contributing
 
-Contributions are welcome — bug reports, code cleanup, and documentation are all appreciated. Please file issues and pull requests on [GitHub](https://github.com/hexenwail/hexenwail/issues).
+Contributions are welcome — bug reports, code cleanup, and documentation are all appreciated. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, what CI checks, and the two rules that matter most (Ironwail parity and mod compatibility).
+
+- **Found a bug?** [File it here](https://github.com/hexenwail/hexenwail/issues/new/choose) — the forms ask for your `qconsole.log`, GPU and driver, which is what makes a report fixable.
+- **Found a security issue?** Please report it privately instead — see [SECURITY.md](SECURITY.md).
 
 ## License
 
