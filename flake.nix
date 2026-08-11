@@ -129,6 +129,43 @@
 
           default = self.packages.${system}.nixos;
 
+          # Dedicated server (h2ded) — headless, links only libm/libc.
+          # A separate output rather than a flag on `nixos` so CI can build it
+          # on every push: nothing else compiles the SERVERONLY half of the
+          # shared sources, so without a gate it silently rots.
+          h2ded = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
+            pname = "hexenwail-h2ded";
+
+            # The client's buildInputs are still needed even though h2ded links
+            # none of them: engine/CMakeLists.txt looks up SDL3, OpenGL and ALSA
+            # as REQUIRED for any Unix configure, not just the client target.
+            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DBUILD_DEDICATED=ON" ];
+
+            # Build only the server; the default target would also rebuild the
+            # whole client, which .#nixos already covers.
+            buildFlags = [ "h2ded" ];
+
+            installPhase = ''
+              runHook preInstall
+
+              install -Dm755 bin/h2ded $out/bin/h2ded
+
+              runHook postInstall
+            '';
+
+            meta = linuxBuildAttrs.meta // {
+              description = "Hexenwail dedicated server (headless h2ded)";
+              longDescription = ''
+                Headless Hexen II server built from the shared engine sources
+                with -DSERVERONLY: no renderer, video, sound or input.
+
+                Note: you still need the original game data files (pak0.pak,
+                pak1.pak) from the commercial game to host a server.
+              '';
+              mainProgram = "h2ded";
+            };
+          });
+
           # OpenGL version for standard FHS Linux systems (non-NixOS)
           # Bundles shared libraries so it runs on any distro without nix
           linux-fhs = let
@@ -278,6 +315,50 @@
 
             meta = with pkgs.lib; {
               description = "Hexenwail - modernized Hexen II engine (OpenGL 4.3, Windows 64-bit)";
+              homepage = "https://github.com/hexenwail/hexenwail";
+              license = licenses.gpl2Plus;
+              platforms = platforms.windows;
+              maintainers = [ ];
+            };
+          };
+
+          # Dedicated server, cross-compiled for Windows.  Its own output
+          # because the mingw toolchain is already here for .#win64, and the
+          # WIN32 half of the h2ded target has nothing else to prove it builds.
+          h2ded-win64 = pkgsCross64.stdenv.mkDerivation {
+            pname = "hexenwail-h2ded";
+            inherit version;
+
+            src = filteredSrc;
+
+            nativeBuildInputs = with pkgs; [
+              cmake
+              pkg-config
+            ];
+
+            # No buildInputs at all: the Windows server links only ws2_32,
+            # winmm and the mingw runtime, and the Windows configure takes SDL3
+            # from oslibs rather than from a package.
+
+            preConfigure = ''
+              cd engine
+            '';
+
+            cmakeFlags = [ "-DBUILD_DEDICATED=ON" ];
+
+            # Only the server target; the client .exe is .#win64's job.
+            buildFlags = [ "h2ded" ];
+
+            installPhase = ''
+              runHook preInstall
+
+              install -Dm755 bin/h2ded.exe $out/bin/h2ded.exe
+
+              runHook postInstall
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Hexenwail dedicated server (headless h2ded, Windows 64-bit)";
               homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
               platforms = platforms.windows;
@@ -445,6 +526,7 @@ EOF
             echo "Direct Nix commands:"
             echo "  nix build .#nixos     - Linux build (NixOS)"
             echo "  nix build .#linux-fhs - Linux build (standard FHS)"
+            echo "  nix build .#h2ded     - Dedicated server (headless)"
             echo "  nix build .#win64     - Windows 64-bit"
             echo "  nix build .#release   - All platforms"
             echo ""

@@ -20,6 +20,20 @@ jobs:
       - name: Shellcheck
         run: shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh
 
+      # emscripten.h defines a bare EMSCRIPTEN alias under a deprecation
+      # pragma, so a guard spelled that way only works in translation units
+      # that happen to include the header — it fails silently rather than
+      # loudly, and would compile the desktop branch on WASM.  uhexen2-uf5s.
+      # The if(EMSCRIPTEN) uses in engine/CMakeLists.txt are CMake variables,
+      # not C macros, so this is deliberately scoped to C sources.
+      - name: No bare EMSCRIPTEN guards in C sources
+        run: |
+          if grep -rnE '(^|[^_A-Za-z])EMSCRIPTEN([^_A-Za-z]|$)' \
+               --include='*.c' --include='*.h' engine/; then
+            echo "::error::use __EMSCRIPTEN__, not the deprecated bare EMSCRIPTEN"
+            exit 1
+          fi
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -41,6 +55,9 @@ jobs:
 
       - name: Smoke test
         run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+
+      - name: Build dedicated server
+        run: nix build .#h2ded --print-build-logs
 
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
