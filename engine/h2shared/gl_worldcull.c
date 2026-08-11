@@ -1208,6 +1208,15 @@ void R_DrawWorldCulled (void)
 	if (!cull_initialized || !cull_dst_ibo || cull_total_indices <= 0)
 		return;
 
+	/* This path has no lightmap of its own — it binds the atlas below as the
+	 * world shader's lightmap sampler, and world_vao's UVs are only in atlas
+	 * space when the atlas is on.  Drawing without it renders the whole
+	 * opaque world unlit, since an unbound sampler2D reads black.  The
+	 * caller already declines to set gpu_cull_active in that case; this is
+	 * the invariant stated where it is actually relied upon.  uhexen2-qt7s. */
+	if (!lm_atlas_texture)
+		return;
+
 	/* Bind world VAO but replace its IBO with the compute-written dest IBO */
 	glBindVertexArray_fp(world_vao);
 	glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, cull_dst_ibo);
