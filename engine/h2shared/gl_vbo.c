@@ -298,14 +298,8 @@ void GL_ImmVertex2f (float x, float y)
 /* ------------------------------------------------------------------ */
 
 /* GL_QUADS is not available in GLES / GL core.  We convert quads to
- * triangles using the pre-built index buffer. */
-
-#ifndef GL_QUADS
-#define GL_QUADS 0x0007
-#endif
-#ifndef GL_POLYGON
-#define GL_POLYGON 0x0009
-#endif
+ * triangles using the pre-built index buffer.  (The enum itself comes from
+ * glheader.h, which shims it for GLES3.) */
 
 /* Per-shader uniform cache: most HUD/2D draws share identical fog,
  * alpha threshold, and MVP. Driver-side glUniform calls aren't free —

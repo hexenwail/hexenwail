@@ -47,14 +47,13 @@
 #define GL_TEXTURE_2D_MULTISAMPLE 0x9100
 #endif
 
-/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
-#ifdef EMSCRIPTEN
-#ifndef GL_QUADS
-#define GL_QUADS 0
-#endif
-#ifndef GL_POLYGON
-#define GL_POLYGON 0
-#endif
+/* OIT needs per-draw-buffer blend equations (glBlendFunci, GL 4.0), which
+ * WebGL2 does not expose.  There glBlendFunci_fp is a no-op function-like
+ * macro, so it cannot be tested as a value — go through this helper instead. */
+#ifdef __EMSCRIPTEN__
+#define HW_OIT_HAS_BLEND_FUNCI	0
+#else
+#define HW_OIT_HAS_BLEND_FUNCI	(glBlendFunci_fp != NULL)
 #endif
 
 /* FBO state — scaled 3D scene */
@@ -1037,7 +1036,7 @@ void OIT_BeginTranslucency (void)
 	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
 	static const float ones[4] = {1.f, 1.f, 1.f, 1.f};
 
-	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
+	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
 
 	oit_in_pass = true;
@@ -1060,7 +1059,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	GLuint prog;
 	GLint loc_accum, loc_reveal;
 
-	if (!oit_available || !r_oit.integer || !glBlendFunci_fp)
+	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
 
 	textarget = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
@@ -1106,7 +1105,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 qboolean OIT_Active (void)
 {
-	return oit_available && r_oit.integer && glBlendFunci_fp != NULL;
+	return oit_available && r_oit.integer && HW_OIT_HAS_BLEND_FUNCI;
 }
 
 qboolean OIT_InPass (void)
@@ -1209,7 +1208,7 @@ void GL_PostProcess_Init (void)
 	Con_SafePrintf("PostProcess: gamma/contrast shader ready\n");
 
 	/* Init OIT resolve shader (FBO created lazily when scene FBO is ready) */
-	if (glBlendFunci_fp && glDrawBuffers_fp && glClearBufferfv_fp)
+	if (HW_OIT_HAS_BLEND_FUNCI && glDrawBuffers_fp && glClearBufferfv_fp)
 		OIT_InitShader();
 }
 

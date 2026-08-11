@@ -23,16 +23,6 @@
 #include "gl_vbo.h"
 #include "gl_postprocess.h"
 
-/* ES 3.0 compatibility: GL_QUADS and GL_POLYGON don't exist */
-#ifdef EMSCRIPTEN
-#ifndef GL_QUADS
-#define GL_QUADS 0
-#endif
-#ifndef GL_POLYGON
-#define GL_POLYGON 0
-#endif
-#endif
-
 int		skytexturenum;
 
 static GLuint	solidskytexture, alphaskytexture;

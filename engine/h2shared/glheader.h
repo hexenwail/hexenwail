@@ -64,6 +64,19 @@ typedef int64_t  GLint64;
 #define GL_DYNAMIC_DRAW				0x88E8
 #endif
 
+/* Legacy primitive modes.  GLES3/WebGL2 drops them, but GL_ImmEnd/GL_ImmDraw
+ * still take them as a mode argument and convert to triangles themselves
+ * (gl_vbo.c), so they must keep their real GL values — a caller passing 0
+ * here would fall through to the raw glDrawArrays path as GL_POINTS. */
+#ifdef __EMSCRIPTEN__
+#ifndef GL_QUADS
+#define GL_QUADS				0x0007
+#endif
+#ifndef GL_POLYGON
+#define GL_POLYGON				0x0009
+#endif
+#endif
+
 #ifndef	GL_TEXTURE0
 #define	GL_TEXTURE0				0x84C0
 #define	GL_TEXTURE1				0x84C1
