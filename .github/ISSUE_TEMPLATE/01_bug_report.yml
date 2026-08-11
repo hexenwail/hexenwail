@@ -1,0 +1,175 @@
+name: Bug report
+description: Crash, rendering glitch, audio problem, input problem, or wrong behaviour in-game.
+title: "[Bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        **Two things make a report fixable, and without them we usually cannot act:**
+        1. The `qconsole.log` from the session where it happened (it is written automatically — see the field below).
+        2. Exact steps that reproduce it, including the map and mod.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before filing
+      options:
+        - label: I am on the [latest release](https://github.com/hexenwail/hexenwail/releases/latest) (or a newer self-built commit) and it still happens.
+          required: true
+        - label: I searched [existing issues](https://github.com/hexenwail/hexenwail/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What went wrong, and what did you expect instead?
+      placeholder: |
+        The gold pool in romeric6 renders translucent — you can see the floor through it.
+        In the original game it is opaque.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Be specific. Console commands, `map` name and a `-game` / `-mod` line beat prose.
+        If it only happens after a while, say roughly how long and what you were doing.
+      placeholder: |
+        1. Launch: hexenwail -game portals
+        2. In the console: map romeric6
+        3. Walk to the gold pool in the north-east corner
+        4. The pool is see-through
+      value: |
+        1. Launch with:
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Most of the time
+        - Occasionally / hard to reproduce
+        - Happened once
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Hexenwail version
+      description: >
+        Shown at the bottom of the main menu, and on the first line of `qconsole.log`
+        (e.g. `Hexenwail 0.7.9-beta.r7 (linux x86_64)`). If you built it yourself, give the commit hash.
+      placeholder: "0.7.9-beta.r7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install it?
+      options:
+        - Windows ZIP (hexenwail-*-windows-x86_64.zip)
+        - Linux ZIP (hexenwail-*-linux-x86_64.zip)
+        - Flatpak (.flatpak from Releases)
+        - Nix / NixOS
+        - Built from source
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Name and version. On a Steam Deck, say so and give the SteamOS version and whether you are in Game Mode or Desktop Mode.
+      placeholder: "Windows 11 24H2 / Arch Linux (kernel 6.18) / SteamOS 3.7, Game Mode"
+    validations:
+      required: true
+
+  - type: textarea
+    id: gpu
+    attributes:
+      label: GPU and driver
+      description: >
+        Copy the three `GL_` lines from near the top of `qconsole.log`. They identify the GPU and the exact driver build,
+        which is the single most useful piece of information for a rendering bug.
+      placeholder: |
+        GL_VENDOR: NVIDIA Corporation
+        GL_RENDERER: NVIDIA GeForce RTX 3080/PCIe/SSE2
+        GL_VERSION: 4.6.0 NVIDIA 570.86.16
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: qconsole.log
+      description: |
+        Hexenwail always writes a console log. Attach the file from the run where the bug happened
+        (drag and drop it into this box), or paste its contents.
+
+        Where to find it:
+        - **Windows** — `qconsole.log` next to `hexenwail.exe`
+        - **Linux (ZIP, Nix, source build)** — `~/.hexen2/qconsole.log`
+        - **Flatpak** — `~/.var/app/io.github.hexenwail.hexenwail/.hexen2/qconsole.log`
+
+        The path is also printed at startup on the `userdir is:` line. For a hard-to-catch bug,
+        launch with `-devlog` for a more verbose log.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: game-data
+    attributes:
+      label: Which game data are you using?
+      description: Hexenwail ships no game assets — this tells us which pak files you have.
+      multiple: true
+      options:
+        - Retail Hexen II (GOG)
+        - Retail Hexen II (Steam)
+        - Retail Hexen II (original CD)
+        - Portal of Praevus (portals/pak3.pak)
+        - Demo version
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: mod
+    attributes:
+      label: Mod or map
+      description: >
+        The mod this happens in and how you launched it, or "none / base game".
+        Third-party mods are supported, but knowing which one is essential for reproducing.
+      placeholder: "Storm over Thyrion, launched with -game sot / Wheel of Karma / none"
+    validations:
+      required: true
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots or video
+      description: >
+        Strongly encouraged for anything visual. Drag images or clips into this box.
+        A screenshot of the correct behaviour in another engine, side by side, is ideal for rendering bugs.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >
+        Non-default cvars, an older Hexenwail version where it worked, whether it also happens in
+        [uHexen2](https://github.com/sezero/uhexen2), other engines you compared against, multi-monitor or
+        HDR setups, unusual audio hardware — anything you think might matter.
