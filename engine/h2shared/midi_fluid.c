@@ -171,6 +171,50 @@ static void fs_log_suppress (int level, const char *message, void *data)
 	(void)data;
 }
 
+/* True once a usable font is in the synth.  fs_sfont_id starts at -1 and
+ * fluid_synth_sfload() reports failure as FLUID_FAILED, so both count as
+ * "nothing loaded". */
+#define FS_HAVE_SOUNDFONT()	(fs_sfont_id != FLUID_FAILED && fs_sfont_id != -1)
+
+/* Swap a soundfont into the live synth.  Load first, unload second: if the
+ * new font is unusable we keep playing the old one instead of ending up with
+ * no font at all. */
+static qboolean FMIDI_LoadSoundFont (const char *path)
+{
+	int	id;
+
+	if (!fs_synth)
+		return false;
+
+	id = fluid_synth_sfload(fs_synth, path, 1);
+	if (id == FLUID_FAILED)
+	{
+		Con_Printf("FluidSynth: failed to load %s\n", path);
+		return false;
+	}
+	if (FS_HAVE_SOUNDFONT())
+		fluid_synth_sfunload(fs_synth, fs_sfont_id, 1);
+	fs_sfont_id = id;
+	Con_Printf("FluidSynth: loaded %s\n", path);
+	return true;
+}
+
+/* Load a font if we don't have one yet.  Called from the play path as well as
+ * from init, so a font that only turned up later — snd_soundfont assigned by
+ * config.cfg, which is exec'd well after MIDI_Init, or a file dropped in the
+ * game directory mid-session — still gets picked up without a restart. */
+static qboolean FMIDI_EnsureSoundFont (void)
+{
+	const char *sf;
+
+	if (FS_HAVE_SOUNDFONT())
+		return true;
+	sf = find_soundfont();
+	if (!sf)
+		return false;
+	return FMIDI_LoadSoundFont(sf);
+}
+
 /* snd_soundfont is CVAR_ARCHIVE, but find_soundfont() below only ever ran
  * once, from FMIDI_Init, which S_Init calls at host.c:1032 — long before
  * host.c:1066 queues "exec hexen.rc" and the config assigns any archived
@@ -179,10 +223,8 @@ static void fs_log_suppress (int level, const char *message, void *data)
  * that ordering and gives runtime switching for free.  uhexen2-bsqq. */
 static void FMIDI_SoundFontChanged (cvar_t *var)
 {
-	int	id;
-
 	if (!fs_synth)
-		return;		/* driver never initialised — nothing to swap into */
+		return;		/* synth never created — nothing to swap into */
 	if (!var->string[0])
 		return;		/* cleared: keep playing whatever is loaded */
 
@@ -192,24 +234,13 @@ static void FMIDI_SoundFontChanged (cvar_t *var)
 		return;
 	}
 
-	/* Load first, unload second: if the new font is unusable we keep
-	 * playing the old one instead of ending up with no font at all. */
-	id = fluid_synth_sfload(fs_synth, var->string, 1);
-	if (id == FLUID_FAILED)
-	{
-		Con_Printf("FluidSynth: failed to load %s\n", var->string);
-		return;
-	}
-	if (fs_sfont_id != FLUID_FAILED && fs_sfont_id != -1)
-		fluid_synth_sfunload(fs_synth, fs_sfont_id, 1);
-	fs_sfont_id = id;
-	Con_Printf("FluidSynth: loaded %s\n", var->string);
+	/* Deliberately does not restart the track that failed for want of a
+	 * font: the next one BGM asks for will play. */
+	FMIDI_LoadSoundFont(var->string);
 }
 
 static qboolean FMIDI_Init (void)
 {
-	const char *sf;
-
 	Cvar_RegisterVariable(&snd_soundfont);
 	Cvar_SetCallback(&snd_soundfont, FMIDI_SoundFontChanged);
 
@@ -219,15 +250,6 @@ static qboolean FMIDI_Init (void)
 	fluid_set_log_function(FLUID_WARN, fs_log_suppress, NULL);
 	fluid_set_log_function(FLUID_INFO, fs_log_suppress, NULL);
 	fluid_set_log_function(FLUID_DBG, fs_log_suppress, NULL);
-
-	/* find soundfont before creating the synth */
-	sf = find_soundfont();
-	if (!sf)
-	{
-		Con_Printf("FluidSynth: no soundfont found, MIDI disabled\n");
-		Con_Printf("  Set snd_soundfont or place soundfont.sf2 in game directory\n");
-		return false;
-	}
 
 	fs_settings = new_fluid_settings();
 	if (!fs_settings)
@@ -259,22 +281,19 @@ static qboolean FMIDI_Init (void)
 		return false;
 	}
 
-	/* load the soundfont we found */
-	fs_sfont_id = fluid_synth_sfload(fs_synth, sf, 1);
-	if (fs_sfont_id == FLUID_FAILED)
-	{
-		Con_Printf("FluidSynth: failed to load %s\n", sf);
-		delete_fluid_synth(fs_synth);
-		delete_fluid_settings(fs_settings);
-		fs_synth = NULL;
-		fs_settings = NULL;
-		return false;
-	}
-
-	Con_Printf("FluidSynth: loaded %s\n", sf);
-
 	/* Fixed gain; bgmvolume is applied in S_RawSamples downstream. */
 	fluid_synth_set_gain(fs_synth, FS_SYNTH_GAIN);
+
+	/* A missing soundfont is no longer fatal.  Failing init here unregistered
+	 * the driver for the whole run, and since Linux has no .mid streamer codec
+	 * that silenced every one of Hexen II's tracks — even if the user set
+	 * snd_soundfont a moment later from config.cfg or the console.  Register
+	 * anyway and pick a font up from the callback or the play path. */
+	if (!FMIDI_EnsureSoundFont())
+	{
+		Con_Printf("FluidSynth: no soundfont found, MIDI silent until one is set\n");
+		Con_Printf("  Set snd_soundfont or place soundfont.sf2 in game directory\n");
+	}
 
 	Con_Printf("FluidSynth MIDI driver initialized\n");
 	return true;
@@ -309,6 +328,16 @@ static void *FMIDI_Open (const char *filename)
 
 	if (!fs_synth)
 		return NULL;
+
+	/* Retry the search before touching the current player, so a track we
+	 * can't voice leaves whatever is playing alone.  BGM would otherwise
+	 * report only its generic "Couldn't handle music file", which points at
+	 * the file rather than at the missing soundfont. */
+	if (!FMIDI_EnsureSoundFont())
+	{
+		Con_Printf("FluidSynth: no soundfont loaded, cannot play %s (set snd_soundfont)\n", filename);
+		return NULL;
+	}
 
 	/* stop any current playback */
 	if (fs_player)
