@@ -30,14 +30,24 @@ jobs:
           # `flatpak --system install` fails with "operation Deploy not
           # allowed for user"; once the deps are present that install is a
           # no-op.
+          #
+          # --no-related skips the extensions flatpak would otherwise drag in
+          # with the runtime — .Locale (both Platform and Sdk), .GL.default,
+          # .codecs-extra — none of which a build needs.  Worth ~16s.  The
+          # action's own --install-deps-from=flathub only installs the runtime
+          # and sdk the manifest names, so it does not pull them back.
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub \
+          sudo flatpak install -y --noninteractive --no-related flathub \
             org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+      # No cache-key — see the same block in ci.yml.  A key built from
+      # ${{ github.sha }} can never be matched by the action's only restore
+      # fallback (the prefix "flatpak-builder-<arch>"), so the dependency
+      # modules were rebuilt on every single run.  Leaving it at the default
+      # also makes tag builds share the cache CI already warmed on master.
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: hexenwail-${{ github.ref_name }}.flatpak
           manifest-path: flatpak/io.github.hexenwail.hexenwail.yml
-          cache-key: flatpak-builder-${{ github.sha }}
           upload-artifact: true
 
   build:
