@@ -5797,6 +5797,13 @@ static void M_Quit_Key (int key)
 
 	case 'Y':
 	case 'y':
+	/* K_ENTER is what a gamepad A press arrives as (M_Keydown maps it), so
+	 * this is the confirm side of the prompt for a controller-only player.
+	 * Without it the Steam Deck could reach this prompt and cancel it with B
+	 * but never answer yes, leaving no way to quit without plugging in a
+	 * keyboard.  The cancel side already worked: B arrives as K_ESCAPE.
+	 * uhexen2-4364. */
+	case K_ENTER:
 		Key_SetDest (key_console);
 		Host_Quit_f ();
 		break;
@@ -7080,14 +7087,37 @@ void M_Keydown (int key, qboolean repeat)
 		key = K_ESCAPE;
 	/* D-pad → arrows so menu nav works alongside the new K_GP_DPAD_*
 	 * keycodes that exist for in-game bindings. uhexen2-x552. */
-	else if (key == K_GP_DPAD_UP)
-		key = K_UPARROW;
-	else if (key == K_GP_DPAD_DOWN)
-		key = K_DOWNARROW;
-	else if (key == K_GP_DPAD_LEFT)
-		key = K_LEFTARROW;
-	else if (key == K_GP_DPAD_RIGHT)
-		key = K_RIGHTARROW;
+	else if (key == K_GP_DPAD_UP || key == K_GP_DPAD_DOWN ||
+		 key == K_GP_DPAD_LEFT || key == K_GP_DPAD_RIGHT)
+	{
+		/* Debounce repeats of the same direction.  A d-pad press should move
+		 * the cursor exactly one item, but on a Steam Deck one press was
+		 * moving two — the device filter added in in_sdl.c for uhexen2-flj2
+		 * covers the duplicate-device case, and this covers any other source
+		 * of a doubled press (Steam Input's own d-pad auto-repeat, say) that
+		 * we cannot see from here.  The window is deliberately short: it is
+		 * far longer than the milliseconds a duplicate takes to arrive, and
+		 * far shorter than a deliberate second tap, so navigation stays
+		 * responsive.  Only menu navigation is affected — in-game d-pad
+		 * bindings still see every K_GP_DPAD_* event. */
+		static double	dpad_next_ok;
+		static int	dpad_last;
+		const double	DPAD_MENU_DEBOUNCE = 0.1;
+
+		if (key == dpad_last && realtime < dpad_next_ok)
+			return;
+		dpad_last = key;
+		dpad_next_ok = realtime + DPAD_MENU_DEBOUNCE;
+
+		if (key == K_GP_DPAD_UP)
+			key = K_UPARROW;
+		else if (key == K_GP_DPAD_DOWN)
+			key = K_DOWNARROW;
+		else if (key == K_GP_DPAD_LEFT)
+			key = K_LEFTARROW;
+		else
+			key = K_RIGHTARROW;
+	}
 
 	/* Suppress key repeat for everything except navigation/escape */
 	if (repeat)

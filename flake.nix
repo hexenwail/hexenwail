@@ -136,8 +136,20 @@
             # TimGM6mb (Tim Brechbill, GPL-2, ~6 MB) — small enough to bundle in
             # a downloadable release, unlike FluidR3 (~142 MB).  Same soundfont
             # the Flatpak ships.  Debian upstream tarball; hash is the tarball's.
+            # deb.debian.org serves only what is currently in the archive, so
+            # that URL 404s the moment this package is superseded or dropped —
+            # and it would take the release build with it.  snapshot.debian.org
+            # is Debian's permanent archive and keeps the 1.3 tarball at a
+            # fixed timestamp forever.  fetchurl tries each URL in order and
+            # the result is content-addressed by the hash below, so the mirror
+            # can only ever serve the same bytes (verified: the snapshot copy
+            # hashes identically).  Same primary/fallback approach already used
+            # for the Xiph downloads in the Flatpak manifest.  uhexen2-bbul.
             timgmTar = pkgs.fetchurl {
-              url = "https://deb.debian.org/debian/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz";
+              urls = [
+                "https://deb.debian.org/debian/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz"
+                "https://snapshot.debian.org/archive/debian/20240101T000000Z/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz"
+              ];
               sha256 = "af8f3a00e416dfb262bcaa904a1c84df04a51b72bbc1313aed012bc754bdf99b";
             };
             runtimeLibs = with pkgs; [
@@ -350,8 +362,15 @@
             mkdir -p $out/release
 
             # Linux portable (FHS binary, runs on any distro)
+            # lib/ is not optional here: linux-fhs patchelfs the binary to
+            # rpath $ORIGIN/../lib and bundles ~36 shared objects there, so
+            # shipping bin/ alone produced a "portable" build that resolved
+            # its rpath to a directory that did not exist and failed to start
+            # on any machine without those libraries system-wide — i.e. on
+            # exactly the distros the portable build is for. uhexen2-3aet.
             mkdir -p $out/release/linux-x86_64
             cp -r ${self.packages.${system}.linux-fhs}/bin $out/release/linux-x86_64/
+            cp -rL ${self.packages.${system}.linux-fhs}/lib $out/release/linux-x86_64/
 
             # Linux NixOS (nix store rpaths)
             mkdir -p $out/release/linux-x86_64-nixos
