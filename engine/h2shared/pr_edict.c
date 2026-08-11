@@ -796,12 +796,14 @@ void ED_Free (edict_t *ed)
 	SV_UnlinkEdict (ed);		// unlink from world bsp
 
 	// Clear per-entity PimpModel overrides
+#ifndef SERVERONLY
 	{
 		int entnum = NUM_FOR_EDICT(ed);
 		pimp_override_t *pimp = R_GetPimpOverride(entnum);
 		if (pimp)
 			pimp->active = false;
 	}
+#endif
 
 	ed->free = true;
 	ed->v.model = 0;
