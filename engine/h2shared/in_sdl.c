@@ -1385,6 +1385,17 @@ void IN_SendKeyEvents (void)
 		case SDL_EVENT_GAMEPAD_BUTTON_UP:
 			if (in_mode_set)
 				break;
+			/* Only from the pad we actually opened.  Stick and trigger input
+			 * is polled from gp_active alone, but button events were taken
+			 * from every connected gamepad — so with a second device present
+			 * each press arrived twice.  A Steam Deck is exactly that case:
+			 * the built-in controller and Steam Input's virtual pad are both
+			 * visible, which is why the d-pad jumped two menu items per press
+			 * while the analog stick (polled, edge-triggered) behaved.
+			 * SDL_EVENT_GAMEPAD_REMOVED below already filters this way.
+			 * uhexen2-flj2. */
+			if (gp_active && event.gbutton.which != gp_active_id)
+				break;
 			key = IN_GPButtonToKey((SDL_GamepadButton)event.gbutton.button);
 			if (key)
 				Key_Event(key, event.gbutton.down);

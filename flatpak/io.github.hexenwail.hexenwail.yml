@@ -41,6 +41,24 @@ modules:
       - -Denable-libsndfile=off
       - -Denable-dbus=off
       - -Denable-systemd=off
+      # No audio driver backends: since uhexen2-tdss the engine renders MIDI
+      # itself with fluid_synth_write_s16 and feeds the result to the engine's
+      # own SDL mixer, so it never calls new_fluid_audio_driver.  Every backend
+      # below is therefore dead code in this build, and leaving them enabled
+      # links extra libraries into the sandbox for a driver that is never
+      # created — the same driver stack that failed inside the sandbox and
+      # caused uhexen2-tdss in the first place.  uhexen2-hfd6.
+      - -Denable-jack=off
+      - -Denable-pulseaudio=off
+      - -Denable-alsa=off
+      - -Denable-oss=off
+      - -Denable-pipewire=off
+      - -Denable-portaudio=off
+      - -Denable-sdl2=off
+      # sdl3 especially: org.freedesktop.Platform 25.08 bundles SDL3, so this
+      # backend would otherwise be detected and built even though the engine
+      # drives the synth itself.
+      - -Denable-sdl3=off
     sources:
       - type: git
         url: https://github.com/FluidSynth/fluidsynth.git
