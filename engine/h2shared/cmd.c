@@ -307,6 +307,37 @@ void Cmd_StuffCmds_f (void)
 
 
 /*
+ * Engine-side defaults, applied immediately after any default.cfg.
+ *
+ * The default.cfg players actually execute lives inside Raven's retail
+ * pak0.pak.  The copies under gamecode/res/<game>/ are only source-of-truth
+ * for rebuilding a game data pak, and no release artifact ships them, so a
+ * default the engine has superseded stays superseded only in the repo unless
+ * it is re-applied from here.
+ *
+ * Cmd_Exec_f injects this right after the default.cfg body and before whatever
+ * hexen.rc queued next, so config.cfg and autoexec.cfg still override it and a
+ * user's saved settings win.  It also lands on the two other paths that reach
+ * default.cfg: "reset to defaults" in the options menu and a gamedir change.
+ *
+ * Keep this minimal -- only defaults the engine has genuinely replaced.  Set
+ * cfg_enginedefaults 0 (from the command line, since it is read before
+ * autoexec.cfg runs) for the unmodified retail defaults.
+ */
+static cvar_t	cfg_enginedefaults = {"cfg_enginedefaults", "1", CVAR_NONE};
+
+static const char cmd_engine_defaults[] =
+/* Raven's default.cfg fakes a zoom with a zoom_in/zoom_out alias pair that
+ * steps the fov cvar with "wait" between each step: frame-rate dependent,
+ * clobbers the user's fov and sensitivity, and fights SCR_UpdateZoom.  Point
+ * the aliases at the engine zoom instead of unbinding them, so every key any
+ * config bound to them keeps working -- F11 and MOUSE2 in h2/portals, F11 and
+ * ' in hw, PGUP/PGDN in siege -- including keys in a stale user config.cfg. */
+	"alias zoom_in \"togglezoom\"\n"
+	"alias zoom_out \"togglezoom\"\n"
+;
+
+/*
 ===============
 Cmd_Exec_f
 ===============
@@ -331,6 +362,12 @@ static void Cmd_Exec_f (void)
 		return;
 	}
 	Con_Printf ("execing %s\n", Cmd_Argv(1));
+
+/* Two inserts, defaults first: Cbuf_InsertText prepends, so the file body ends
+ * up ahead of the engine defaults, which end up ahead of the rest of the
+ * buffer.  Order is default.cfg -> engine defaults -> config.cfg. */
+	if (cfg_enginedefaults.integer && !q_strcasecmp(Cmd_Argv(1), "default.cfg"))
+		Cbuf_InsertText (cmd_engine_defaults);
 
 	Cbuf_InsertText (f);
 	Hunk_FreeToLowMark (mark);
@@ -1011,5 +1048,7 @@ void Cmd_Init (void)
 	Cmd_AddCommand ("cvarlist", Cmd_ListCvar_f);
 	Cmd_AddCommand ("aliaslist", Cmd_ListAlias_f);
 #endif
+
+	Cvar_RegisterVariable (&cfg_enginedefaults);
 }
 
