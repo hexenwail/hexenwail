@@ -145,6 +145,10 @@ modules:
         path: ..
     post-install:
       - install -Dm755 ../flatpak/hexenwail.sh /app/bin/hexenwail.sh
+      # Demo fetch helper, offered by hexenwail.sh when no game data is
+      # present.  A downloader, not game content -- nothing Raven owns is in
+      # this bundle, and none of it could be (uhexen2-3vmk).  uhexen2-49ep.
+      - install -Dm755 ../scripts/get_demo.sh /app/bin/get_demo.sh
       - install -Dm644 ../flatpak/io.github.hexenwail.hexenwail.desktop /app/share/applications/io.github.hexenwail.hexenwail.desktop
       - install -Dm644 ../flatpak/io.github.hexenwail.hexenwail.metainfo.xml /app/share/metainfo/io.github.hexenwail.hexenwail.metainfo.xml
       - install -Dm644 ../engine/resource/hexen2.png /app/share/icons/hicolor/128x128/apps/io.github.hexenwail.hexenwail.png
