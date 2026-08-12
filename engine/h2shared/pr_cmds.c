@@ -2373,7 +2373,18 @@ static void PF_droptofloor (void)
 	trace = SV_Move (ent->v.origin, ent->v.mins, ent->v.maxs, end, false, ent);
 
 	if (trace.fraction == 1 || trace.allsolid)
+	{
+		Con_DPrintf ("droptofloor failed: %s at '%.1f %.1f %.1f' size '%.1f %.1f %.1f'->'%.1f %.1f %.1f' "
+			     "(%s, frac %.4f, startsolid %d, allsolid %d, hit '%s')\n",
+			     PR_GetString(ent->v.classname),
+			     ent->v.origin[0], ent->v.origin[1], ent->v.origin[2],
+			     ent->v.mins[0], ent->v.mins[1], ent->v.mins[2],
+			     ent->v.maxs[0], ent->v.maxs[1], ent->v.maxs[2],
+			     trace.allsolid ? "stuck in solid" : "no floor within 256",
+			     trace.fraction, trace.startsolid, trace.allsolid,
+			     (trace.ent && trace.ent->v.classname) ? PR_GetString(trace.ent->v.classname) : "none");
 		G_FLOAT(OFS_RETURN) = 0;
+	}
 	else
 	{
 		VectorCopy (trace.endpos, ent->v.origin);
