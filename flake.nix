@@ -52,6 +52,46 @@
             );
         };
 
+        # Dr. MinGW's runtime -- the post-mortem handler we ship beside the
+        # Windows binaries.  It is here rather than in nixpkgs because nixpkgs
+        # does not package it, and it is worth the vendoring: we cross-compile
+        # with mingw and so emit DWARF, which means the entire native Windows
+        # crash-debugging stack (WinDbg, procdump, Windows Error Reporting
+        # minidumps) cannot symbolize our binaries -- they all expect PDB.
+        # Dr. MinGW reads DWARF, and its exchndl.dll writes a backtrace with
+        # no debugger attached and nothing for the player to install.
+        #
+        # symsrv.dll and symsrv.yes are deliberately dropped: they exist to
+        # pull symbols from Microsoft's server, which would have the handler
+        # make a network request at crash time.  uhexen2-hger.
+        drmingw = pkgs.stdenvNoCC.mkDerivation rec {
+          pname = "drmingw-runtime";
+          version = "0.9.13";
+
+          src = pkgs.fetchurl {
+            url = "https://github.com/jrfonseca/drmingw/releases/download/${version}/drmingw-${version}-win64.7z";
+            hash = "sha256-okBKKuPgM4a1eb3ZjS048fauy/cWfZB+6v9E81CXoOA=";
+          };
+
+          nativeBuildInputs = [ pkgs.p7zip ];
+          unpackPhase = "7z x $src";
+
+          installPhase = ''
+            mkdir -p $out/bin $out/licenses
+            for dll in exchndl.dll mgwhelp.dll dbghelp.dll dbgcore.dll; do
+              install -Dm755 drmingw-${version}-win64/bin/$dll $out/bin/$dll
+            done
+            install -Dm644 drmingw-${version}-win64/doc/LICENSE.txt \
+              $out/licenses/LICENSE.drmingw
+            install -Dm644 drmingw-${version}-win64/doc/LICENSE-libdwarf.txt \
+              $out/licenses/LICENSE.libdwarf
+            install -Dm644 drmingw-${version}-win64/doc/LICENSE-zlib.txt \
+              $out/licenses/LICENSE.zlib
+          '';
+
+          meta.description = "Dr. MinGW post-mortem exception handler (runtime DLLs)";
+        };
+
       in
       {
         packages = let
@@ -269,7 +309,19 @@
             done
           '';
 
-          # Windows 64-bit build
+
+          # Windows 64-bit build.  Ships with its debug symbols kept, which is
+          # a deliberate choice rather than an oversight: -g does not affect
+          # codegen (verified -- .text hashes identical with and without it),
+          # and the loader never maps DWARF sections, so players get exactly
+          # the same machine code at exactly the same speed.  The only cost is
+          # ~4.2 MB of download.
+          #
+          # Paying that once means there is no second "debug build" to talk
+          # anyone into downloading: every crash any player ever hits comes
+          # back as a report naming source files and line numbers.  A separate
+          # symbol build was built first and dropped for exactly that reason.
+          # uhexen2-hger.
           win64 = pkgsCross64.stdenv.mkDerivation {
             # Explicit `name` rather than pname+version, to fix the build-log
             # prefix.  nixpkgs always appends the host triple on cross builds
@@ -290,6 +342,7 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
+              removeReferencesTo
             ];
 
             buildInputs = with pkgsCross64; [
@@ -309,6 +362,30 @@
               "-DUSE_CODEC_VORBIS=ON"
               "-DUSE_CODEC_OPUS=ON"
               "-DUSE_CODEC_XMP=ON"
+              "-DUSE_DEBUGINFO=ON"
+            ];
+
+            # Tidy the paths the DWARF we now ship records.  Mapping the
+            # source root makes a crash report read
+            # "/hexenwail/engine/hexen2/cl_parse.c" instead of exposing the
+            # build sandbox, and -gno-record-gcc-switches drops the
+            # DW_AT_producer command line, which is just the -I flags.
+            #
+            # The replacement must stay absolute (leading slash).  Mapping to
+            # a bare "hexenwail" makes every DW_AT_name look relative, and
+            # addr2line then joins it onto DW_AT_comp_dir -- which was mapped
+            # the same way -- yielding the doubled nonsense
+            # "hexenwail/engine/build/hexenwail/engine/hexen2/cl_parse.c".
+            #
+            # -fdebug-prefix-map rather than -ffile-prefix-map on purpose: the
+            # latter also rewrites __FILE__, which would change the text of
+            # Sys_Error messages.  Note this only renames the /nix/store
+            # prefix -- the store hashes survive it, which is what postFixup
+            # below has to deal with.  uhexen2-hger.
+            env.NIX_CFLAGS_COMPILE = builtins.concatStringsSep " " [
+              "-gno-record-gcc-switches"
+              "-fdebug-prefix-map=/nix/store=/nixpkgs"
+              "-fdebug-prefix-map=/build/source=/hexenwail"
             ];
 
             installPhase = ''
@@ -318,6 +395,13 @@
 
               # Install the Windows executable
               install -Dm755 bin/glh2.exe $out/bin/glh2.exe
+
+              # Dr. MinGW's post-mortem handler.  engine/hexen2/sys_win.c
+              # LoadLibraryA()s exchndl.dll as the first thing WinMain does,
+              # so shipping these four DLLs is the entire crash-reporting
+              # setup -- a crash drops a symbolized glh2.RPT next to the
+              # binary without the player installing a debugger.  uhexen2-hger.
+              install -Dm755 ${drmingw}/bin/*.dll -t $out/bin/
 
               # Install DLLs from build output (MinGW runtime)
               for dll in bin/*.dll; do
@@ -354,8 +438,44 @@
                   cp -L "$f" "$f.tmp" && mv "$f.tmp" "$f"
                 fi
               done
-              $STRIP -S -p $out/bin/*.exe $out/bin/*.dll 2>/dev/null || true
+
+              # Skip Dr. MinGW's runtime.  dbghelp.dll and dbgcore.dll in that
+              # set are redistributed *Microsoft* binaries, and running GNU
+              # strip across a signed MS PE is a good way to ship a DLL that
+              # no longer loads -- which would silently disable exactly the
+              # crash reporting we just added.  All four are shipped stripped
+              # upstream anyway, so there is nothing to gain.
+              for f in $out/bin/*.dll; do
+                case "''${f##*/}" in
+                  exchndl.dll|mgwhelp.dll|dbghelp.dll|dbgcore.dll) continue ;;
+                esac
+                $STRIP -S -p "$f" 2>/dev/null || true
+              done
+
+              # GCC bakes the absolute path of every header it read, and of
+              # its own include dir, into the DWARF.  A Windows .exe has no
+              # runtime dependency on any of them -- but nix scans the output
+              # for store hashes, finds those, and concludes otherwise: the
+              # closure went from 7.8 MiB to 703 MiB, dragging the mingw
+              # toolchain and five -dev outputs behind a binary that links
+              # none of them.  Players never see it; the binary cache would
+              # eat ~700 MiB per build.
+              #
+              # remove-references-to overwrites each hash in place with a dead
+              # one of the same length, so the PE layout is untouched and the
+              # paths become inert text.  Anchoring the scan to the /nixpkgs
+              # prefix that -fdebug-prefix-map produces is what keeps it from
+              # matching a 32-byte run inside .text and corrupting code.  Our
+              # own source paths are not store paths and so are untouched --
+              # they are what makes the reports readable.  uhexen2-hger.
+              for h in $(grep -oaE '/nixpkgs/[0-9a-df-np-sv-z]{32}-' \
+                           $out/bin/glh2.exe | cut -d/ -f3 | cut -d- -f1 | sort -u); do
+                remove-references-to -t "$NIX_STORE/$h-x" $out/bin/glh2.exe
+              done
             '';
+            # Note glh2.exe is deliberately absent from the strip loop above:
+            # its DWARF is the payload, not waste.  Stripping it would turn
+            # every future crash report back into raw hex addresses.
 
             meta = with pkgs.lib; {
               description = "Hexenwail - modernized Hexen II engine (OpenGL 4.3, Windows 64-bit)";
@@ -549,6 +669,8 @@
               echo "GNU General Public License v2.0 or later — see https://www.gnu.org/licenses/gpl-2.0.html" > $out/release/licenses/COPYING.GPL2
             cp ${self}/oslibs/windows/SDL3/LICENSE.txt $out/release/licenses/LICENSE.SDL3
             cp ${self}/oslibs/windows/codecs/COPYING.ogg-vorbis $out/release/licenses/COPYING.ogg-vorbis
+            # Dr. MinGW ships in both Windows bundles, so its terms travel too.
+            cp ${drmingw}/licenses/* $out/release/licenses/
 
             # Create a release info file
             cat > $out/release/BUILD_INFO.txt <<EOF
@@ -572,10 +694,23 @@ carries a helper that downloads the free 1997 three-level demo and verifies it:
 
 The demo data comes from the uHexen2 project and is not ours to relicense.
 
+Crash reporting (Windows):
+The Windows build carries Dr. MinGW, so a crash writes "glh2.RPT" beside
+glh2.exe by itself -- nothing to install, nothing to turn on.  Send that file
+and qconsole.log with any crash report; between them they name the source file
+and line the game died on.
+
+The .exe ships with its debug symbols, which is why those reports are readable.
+It costs about 4 MB of download and nothing else: the machine code is identical
+to a stripped build and the symbols are never loaded while you play.
+
 Licenses:
 - licenses/COPYING.GPL2          Engine (GPL-2.0+)
 - licenses/LICENSE.SDL3           SDL3 (Zlib)
 - licenses/COPYING.ogg-vorbis    libogg/libvorbis (BSD-3)
+- licenses/LICENSE.drmingw       Dr. MinGW crash handler (LGPL-2.1+)
+- licenses/LICENSE.libdwarf      libdwarf, via Dr. MinGW (LGPL-2.1+)
+- licenses/LICENSE.zlib          zlib, via Dr. MinGW (Zlib)
 - dr_mp3, dr_flac, dr_wav are public domain (dr_libs by David Reid)
 
 Built with Nix flakes

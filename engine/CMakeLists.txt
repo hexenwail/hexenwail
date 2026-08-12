@@ -21,6 +21,7 @@ set(OSLIBS ${UHEXEN2_TOP}/oslibs)
 # Build Options
 #============================================================================
 option(USE_DEBUG "Debug build" OFF)
+option(USE_DEBUGINFO "Release build, but keep DWARF so crashes can be backtraced" OFF)
 option(USE_SOUND "Enable sound support" ON)
 option(USE_ALSA "Enable ALSA audio (Linux)" ON)
 option(USE_CODEC_VORBIS "Enable Ogg Vorbis codec" ON)
@@ -79,6 +80,18 @@ add_compile_options(-Wall -Wno-error=unused-result -Wno-error=array-bounds)
 
 if(USE_DEBUG)
     add_compile_options(-g -DDEBUG=1 -DDEBUG_BUILD=1)
+elseif(USE_DEBUGINFO)
+    # A shipping build that can still be backtraced: byte-for-byte the same
+    # flags as the plain release below, plus -g.  -g does not affect codegen,
+    # so this produces the identical .text -- it only adds DWARF sections the
+    # loader never maps, which is what lets us ship symbols to players at no
+    # runtime cost and get a real stack trace back when they crash.
+    #
+    # Note -fomit-frame-pointer stays.  Forcing frame pointers was tried and
+    # dropped: on x86-64 Windows, unwinding goes through the mandatory
+    # .pdata/.xdata tables rather than RBP, and a test binary built both ways
+    # produced the same resolved backtrace.  uhexen2-hger.
+    add_compile_options(-O2 -DNDEBUG=1 -ffast-math -fomit-frame-pointer -g)
 else()
     add_compile_options(-O2 -DNDEBUG=1 -ffast-math -fomit-frame-pointer)
 endif()
