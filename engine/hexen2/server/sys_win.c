@@ -116,6 +116,8 @@ int Sys_unlink (const char *path)
 	return -1;
 }
 
+/* Kept in step with hexen2/sys_win.c: MOVEFILE_REPLACE_EXISTING so this
+ * behaves like POSIX rename().  uhexen2-ghv0 */
 int Sys_rename (const char *oldp, const char *newp)
 {
 	wchar_t wideoldp[MAX_PATH], widenewp[MAX_PATH];
@@ -123,7 +125,7 @@ int Sys_rename (const char *oldp, const char *newp)
 	if (!Sys_UTF8ToWideBuf(oldp, wideoldp, MAX_PATH) ||
 	    !Sys_UTF8ToWideBuf(newp, widenewp, MAX_PATH))
 		return -1;
-	if (MoveFileW(wideoldp, widenewp) != 0)
+	if (MoveFileExW(wideoldp, widenewp, MOVEFILE_REPLACE_EXISTING) != 0)
 		return 0;
 	return -1;
 }
