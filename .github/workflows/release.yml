@@ -123,6 +123,10 @@ jobs:
           winpkg=hexenwail-windows
           mkdir -p "$winpkg/data1"
           cp staging/windows-x86_64/bin/* "$winpkg/"
+          # get_demo.* live beside bin/, not in it, so copying bin/* alone
+          # shipped a bundle whose own BUILD_INFO.txt told users to run a
+          # file that was not there.
+          cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
           cp -r staging/licenses "$winpkg/"
           cp staging/BUILD_INFO.txt "$winpkg/"
           echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
@@ -170,6 +174,15 @@ jobs:
             echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`glh2.exe\`"
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
+            echo ""
+            echo "### Reporting a crash"
+            echo ""
+            echo "Windows builds report crashes by themselves — there is nothing to install or enable."
+            echo "If the game dies, a file called \`glh2.RPT\` appears next to \`glh2.exe\`."
+            echo "Attach that file and \`qconsole.log\` from the same folder to your report."
+            echo ""
+            echo "The Windows build ships with debug symbols, so that report names the source file"
+            echo "and line the game died on — there is no separate debug download to fetch."
             echo ""
             echo "To verify a download, fetch \`SHA256SUMS\` alongside it and run \`sha256sum -c SHA256SUMS\`."
             echo ""
