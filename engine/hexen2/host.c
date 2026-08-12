@@ -53,6 +53,10 @@ static jmp_buf	host_abort;
 double		host_frametime;
 double		realtime;			// without any filtering or bounding
 static double	oldrealtime;			// last frame run
+
+// config.cfg flush debounce, see the end of _Host_Frame.  uhexen2-ghv0
+#define CONFIG_FLUSH_DELAY	2.0		// seconds
+static double	config_flush_time;
 int		host_framecount;
 
 int		host_hunklevel;
@@ -417,12 +421,29 @@ Writes key bindings and archived cvars to config.cfg
 void Host_WriteConfiguration (const char *fname)
 {
 	FILE	*f;
+	char	path[MAX_OSPATH], temppath[MAX_OSPATH];
+	int	err = 0, patherr = 0;
 
 // dedicated servers initialize the host but don't parse and set the
 // config.cfg cvars
 	if (host_initialized && !isDedicated && !host_parms->errstate)
 	{
-		f = fopen (FS_MakePath(FS_USERDIR,NULL,fname), "w");
+		FS_MakePath_BUF (FS_USERDIR, &patherr, path, sizeof(path), fname);
+		FS_MakePath_VABUF (FS_USERDIR, &err, temppath, sizeof(temppath), "%s.tmp", fname);
+		if (patherr || err)
+		{
+			Con_Printf ("Couldn't write %s: path too long.\n", fname);
+			return;
+		}
+
+	// Write to a temporary and rename it into place.  Since uhexen2-ghv0
+	// this file is rewritten during play rather than only at shutdown, so
+	// fopen("w") on the real thing would leave a window where an unclean
+	// exit finds a truncated config -- the exact loss this was meant to
+	// prevent.  POSIX rename() replaces atomically; MoveFileW, which is
+	// what Sys_rename is on Windows, refuses an existing target, hence
+	// the unlink there.
+		f = fopen (temppath, "w");
 		if (!f)
 		{
 			Con_Printf ("Couldn't write %s.\n",fname);
@@ -435,7 +456,25 @@ void Host_WriteConfiguration (const char *fname)
 		if (in_mlook.state & 1)
 			fprintf (f, "+mlook\n");
 
-		fclose (f);
+		err = ferror (f);
+		if (fclose (f) != 0)
+			err = 1;
+
+#ifdef PLATFORM_WINDOWS
+		if (!err)
+			Sys_unlink (path);
+#endif
+		if (err || Sys_rename (temppath, path) != 0)
+		{
+			Con_Printf ("Couldn't write %s.\n", fname);
+			Sys_unlink (temppath);
+			return;
+		}
+
+		// Whatever prompted this write, the file now matches memory, so
+		// the periodic flush in _Host_Frame has nothing left to do.
+		// uhexen2-ghv0
+		Cvar_ConfigWritten ();
 	}
 }
 
@@ -924,6 +963,18 @@ static void _Host_Frame (float time)
 		S_Update (vec3_origin, vec3_origin, vec3_origin, vec3_origin);
 
 	CDAudio_Update();
+
+// Flush config.cfg while we are still running.  It used to be written only by
+// Host_Shutdown, the saveConfig command and a gamedir change, so an alt-F4 or
+// a crash threw away every setting touched that session -- which is how most
+// people leave a game.  Debounced rather than written on each change: dragging
+// a menu slider fires a set per frame, and this is a whole-file rewrite.
+// uhexen2-ghv0
+	if (Cvar_ConfigDirty () && realtime - config_flush_time >= CONFIG_FLUSH_DELAY)
+	{
+		Host_WriteConfiguration ("config.cfg");
+		config_flush_time = realtime;
+	}
 
 	if (host_speeds.integer)
 	{

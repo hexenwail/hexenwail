@@ -135,6 +135,23 @@ const char *Cvar_VariableString (const char *var_name)
 }
 
 
+static qboolean	cvar_config_dirty;
+
+void Cvar_MarkConfigDirty (void)
+{
+	cvar_config_dirty = true;
+}
+
+qboolean Cvar_ConfigDirty (void)
+{
+	return cvar_config_dirty;
+}
+
+void Cvar_ConfigWritten (void)
+{
+	cvar_config_dirty = false;
+}
+
 void Cvar_SetQuick (cvar_t *var, const char *value)
 {
 	if (var->flags & (CVAR_ROM|CVAR_LOCKED))
@@ -155,6 +172,11 @@ void Cvar_SetQuick (cvar_t *var, const char *value)
 			return;
 
 		var->flags |= CVAR_CHANGED;
+	// Below the no-change return, so a redundant set does not mark the
+	// config stale.  Above the callback, because a callback is free to
+	// set further cvars and each of those marks itself.  uhexen2-ghv0
+		if (var->flags & CVAR_ARCHIVE)
+			Cvar_MarkConfigDirty ();
 		len = strlen (value);
 		if (len != strlen(var->string))
 		{
