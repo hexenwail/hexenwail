@@ -481,17 +481,28 @@ void SV_LinkEdict (edict_t *ent, qboolean touch_triggers)
 
 	// Workaround for puzzle_piece entities initialized with zero size.
 	// h2 progs bug: puzzle_piece() calls setsize(self, '0 0 0', '0 0 0') before
-	// calling StartItem->PlaceItem, resulting in uncollectable items.
+	// calling StartItem->PlaceItem, so the piece links with a degenerate box and
+	// the player's touch test never overlaps it (uhexen2-ogsd).
+	//
+	// Only the *link* bounds are widened here.  v.mins/v.maxs are the physics
+	// box and are fed to SV_Move by droptofloor(), walkmove() and the toss
+	// physics; fattening those made any piece placed within 28 units of a floor
+	// brush or against a door start solid, droptofloor() then returned 0 and the
+	// progs deleted the item as "fell out of level" (uhexen2-4p8t: SoT docks
+	// Green Key).  absmin/absmax feed SV_TouchLinks and nothing else, so
+	// widening them alone restores pickup without touching collision.
 	if (ent->v.mins[0] == 0 && ent->v.mins[1] == 0 && ent->v.mins[2] == 0 &&
 	    ent->v.maxs[0] == 0 && ent->v.maxs[1] == 0 && ent->v.maxs[2] == 0)
 	{
 		const char *classname = PR_GetString(ent->v.classname);
 		if (classname && strstr(classname, "puzzle") != NULL)
 		{
-			ent->v.mins[0] = -8;  ent->v.mins[1] = -8;  ent->v.mins[2] = -28;
-			ent->v.maxs[0] = 8;   ent->v.maxs[1] = 8;   ent->v.maxs[2] = 8;
-			VectorAdd (ent->v.origin, ent->v.mins, ent->v.absmin);
-			VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
+			ent->v.absmin[0] = ent->v.origin[0] - 8;
+			ent->v.absmin[1] = ent->v.origin[1] - 8;
+			ent->v.absmin[2] = ent->v.origin[2] - 28;
+			ent->v.absmax[0] = ent->v.origin[0] + 8;
+			ent->v.absmax[1] = ent->v.origin[1] + 8;
+			ent->v.absmax[2] = ent->v.origin[2] + 8;
 		}
 	}
 
