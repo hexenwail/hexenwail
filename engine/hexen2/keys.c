@@ -769,6 +769,10 @@ void Key_SetBinding (int keynum, const char *binding)
 // allocate memory for new binding
 	if (binding)
 		keybindings[keynum] = Z_Strdup(binding);
+
+// Host_WriteConfiguration emits bindings alongside the archived cvars, so a
+// rebind makes config.cfg stale just as a cvar change does.  uhexen2-ghv0
+	Cvar_MarkConfigDirty ();
 }
 
 /*

@@ -130,6 +130,15 @@ void	Cvar_WriteVariables (FILE *f);
 // Writes lines containing "set variable value" for all variables
 // with the CVAR_ARCHIVE flag set
 
+void	Cvar_MarkConfigDirty (void);
+qboolean Cvar_ConfigDirty (void);
+void	Cvar_ConfigWritten (void);
+// "config.cfg no longer matches what is in memory".  Set automatically
+// whenever an archived cvar's value actually changes, and by hand for the
+// other things Host_WriteConfiguration emits (key bindings).  The host
+// polls this to flush the config while the game is running instead of only
+// at a clean shutdown.  uhexen2-ghv0
+
 cvar_t	*Cvar_FindVar (const char *var_name);
 cvar_t	*Cvar_FindVarAfter (const char *prev_name, unsigned int with_flags);
 
