@@ -24,40 +24,16 @@
 
 /*
 ================
-SND_FetchSample
-
-Reads one source sample and normalizes it to signed 16 bit, whatever the
-input width is.  The index is clamped to the source buffer: the cubic
-kernel below reaches out to i-1 and i+2, which run past both ends near the
-start and end of a sound.
-================
-*/
-static int SND_FetchSample (byte *data, int inwidth, int index, int incount)
-{
-	if (index < 0)
-		index = 0;
-	else if (index >= incount)
-		index = incount - 1;
-
-	if (inwidth == 2)
-		return LittleShort ( ((short *)data)[index] );
-
-	return (int)( (unsigned char)(data[index]) - 128 ) << 8;
-}
-
-/*
-================
 ResampleSfx
 ================
 */
 static void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 {
-	int		outcount, incount;
+	int		outcount;
 	int		srcsample;
 	float	stepscale;
 	int		i;
 	int		sample, samplefrac, fracstep;
-	float	p0, p1, p2, p3, frac, interp;
 	sfxcache_t	*sc;
 
 	sc = (sfxcache_t *) Cache_Check (&sfx->cache);
@@ -66,7 +42,6 @@ static void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 
 	stepscale = (float)inrate / shm->speed;	// this is usually 0.5, 1, or 2
 
-	incount = sc->length;
 	outcount = sc->length / stepscale;
 	sc->length = outcount;
 	if (sc->loopstart != -1)
@@ -87,11 +62,9 @@ static void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 		for (i = 0; i < outcount; i++)
 			((signed char *)sc->data)[i] = (int)( (unsigned char)(data[i]) - 128);
 	}
-	else if (stepscale == 1 || incount < 4)
+	else
 	{
-// straight copy: at stepscale 1 every output sample lands exactly on a
-// source sample, so interpolating could only add rounding error.  Sounds
-// with fewer samples than the cubic kernel has taps land here too.
+// general case
 		samplefrac = 0;
 		fracstep = stepscale*256;
 		for (i = 0; i < outcount; i++)
@@ -102,45 +75,6 @@ static void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 				sample = LittleShort ( ((short *)data)[srcsample] );
 			else
 				sample = (int)( (unsigned char)(data[srcsample]) - 128) << 8;
-			if (sc->width == 2)
-				((short *)sc->data)[i] = sample;
-			else
-				((signed char *)sc->data)[i] = sample >> 8;
-		}
-	}
-	else
-	{
-// general case: Catmull-Rom cubic interpolation.  The original code point
-// sampled, which turns the 11 kHz pak sounds into aliasing hash once they
-// are stretched to a 44 kHz mixer rate.  This runs at load time and the
-// result is cached in sfxcache_t, so the extra taps cost nothing at mix
-// time -- unlike a paint-time filter, we only pay once per sound.
-		samplefrac = 0;
-		fracstep = stepscale*256;
-		for (i = 0; i < outcount; i++)
-		{
-			srcsample = samplefrac >> 8;
-			frac = (samplefrac & 255) * (1.0f / 256.0f);
-			samplefrac += fracstep;
-
-			p0 = (float) SND_FetchSample (data, inwidth, srcsample - 1, incount);
-			p1 = (float) SND_FetchSample (data, inwidth, srcsample    , incount);
-			p2 = (float) SND_FetchSample (data, inwidth, srcsample + 1, incount);
-			p3 = (float) SND_FetchSample (data, inwidth, srcsample + 2, incount);
-
-			interp = 0.5f * ((2.0f * p1) +
-					 (-p0 + p2) * frac +
-					 (2.0f*p0 - 5.0f*p1 + 4.0f*p2 - p3) * frac*frac +
-					 (-p0 + 3.0f*p1 - 3.0f*p2 + p3) * frac*frac*frac);
-
-		// round to nearest, then saturate: a cubic overshoots on
-		// transients and would wrap to the opposite rail without this
-			sample = (interp >= 0.0f) ? (int)(interp + 0.5f) : (int)(interp - 0.5f);
-			if (sample > 32767)
-				sample = 32767;
-			else if (sample < -32768)
-				sample = -32768;
-
 			if (sc->width == 2)
 				((short *)sc->data)[i] = sample;
 			else
