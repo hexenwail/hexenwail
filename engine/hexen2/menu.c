@@ -3330,8 +3330,16 @@ static void M_Graphics_AdjustSliders (int dir)
 		break;
 	}
 	case GFX_OVERBRIGHT:
-		Cvar_SetValue ("gl_overbright_models", !gl_overbright_models.integer);
+	{
+		/* Three states since uhexen2-enbw, so this cycles rather than
+		 * toggling — a checkbox here would have silently reset a
+		 * console-set 2 to 1 the first time anyone touched it. */
+		int v = gl_overbright_models.integer + dir;
+		if (v < 0) v = 2;
+		if (v > 2) v = 0;
+		Cvar_SetValue ("gl_overbright_models", v);
 		break;
+	}
 	case GFX_COLORED_LM:
 		Cvar_SetValue ("gl_coloredlight", !gl_coloredlight.integer);
 		break;
@@ -3451,7 +3459,9 @@ static void M_Graphics_Draw (void)
 	if (!M_Graphics_IsSkip(GFX_OVERBRIGHT))
 	{
 		M_Print (76, 92 + 8*GFX_OVERBRIGHT, gfx_labels[GFX_OVERBRIGHT]);
-		M_DrawCheckbox (220, 92 + 8*GFX_OVERBRIGHT, gl_overbright_models.integer);
+		M_PrintWhite (220, 92 + 8*GFX_OVERBRIGHT,
+			gl_overbright_models.integer >= 2 ? "Full" :
+			gl_overbright_models.integer == 1 ? "On" : "Off");
 	}
 
 	if (!M_Graphics_IsSkip(GFX_COLORED_LM))

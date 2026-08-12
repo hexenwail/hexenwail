@@ -69,7 +69,7 @@ Planned:
 - Scrolling two-layer sky (configurable speed) and skybox support
 - Shader-based fog, underwater color tint, underwater warp, underwater caustics (`r_caustics`), motion blur
 - Fence textures, water tint options, glow effects with fog attenuation
-- Per-entity alpha (ENTALPHA), translucent brush entities, world lightmap overbright (`gl_overbright`), model overbright (`gl_overbright_models`), fullbright skins
+- Per-entity alpha (ENTALPHA), translucent brush entities, world lightmap overbright (`gl_overbright`), model overbright (`gl_overbright_models`: 0 vanilla clamp, 1 unclamped, 2 doubled to match the world's range), fullbright skins
 - Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items)
 - MD3 model format support (Quake 3 models with GPU-compressed vertex decoding)
 - External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
