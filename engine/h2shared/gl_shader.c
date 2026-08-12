@@ -158,9 +158,19 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 {
 	/* The OIT output block (inserted after #version, before the rest).
 	 * Uses the main→main_body rename trick from Ironwail. */
+	/* fragColor is initialized rather than merely declared.  main() below
+	 * reads it after calling main_body(), which is only a prototype at
+	 * that point, so the compiler cannot see the assignment inside and
+	 * correctly reports a read of an uninitialized global — three
+	 * GL_DEBUG_SEVERITY_HIGH lines on every cold start.  More than noise:
+	 * this wrapper is only correct because every shader it wraps happens
+	 * to assign fragColor on every non-discard path, and nothing enforces
+	 * that.  An early `return;` added to one of them later would yield
+	 * undefined colour in OIT mode only.  Seeding it makes that case
+	 * transparent black instead of garbage.  uhexen2-nkvm. */
 	static const char oit_preamble[] =
 		"#define OIT 1\n"
-		"vec4 fragColor;\n"
+		"vec4 fragColor = vec4(0.0);\n"
 		"layout(location=0) out vec4 out_accum;\n"
 		"layout(location=1) out vec4 out_reveal;\n"
 		"void main_body();\n"
