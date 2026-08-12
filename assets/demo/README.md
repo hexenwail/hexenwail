@@ -112,8 +112,48 @@ permission, and it is not one we inherit.
 `data1/pak0.pak` into a Hexenwail release artifact should not proceed on the
 strength of what is documented here.
 
-Tracked as `uhexen2-3vmk`, which gates deliverables 2–5 of `uhexen2-menr` (the
-flake outputs, the CI release artifacts, the Pages deploy). It stays open
-because the decision it feeds — ship engine-only with a user-fetched demo, or
-ask Activision — has not been made. This directory is unaffected either way:
-it documents what the tarball contains, it does not ship it.
+## Decision — Hexenwail ships engine-only
+
+Recorded 2026-08-11 under `uhexen2-3vmk`. Absent a grant, the default is *no*:
+we do not host, mirror, or attach Raven's demo data to anything Hexenwail
+publishes. Every release artifact stays engine-only.
+
+The user-facing goal — "download one thing, be playing" — is met by having the
+user fetch the data themselves rather than by us shipping it:
+
+| Route | Where |
+|---|---|
+| Linux / portable | `scripts/get_demo.sh`, shipped in each release directory |
+| Windows | `scripts/get_demo.cmd` (`get_demo.ps1` underneath) |
+| From a checkout | `nix run .#get-demo [destination]` |
+
+Each downloads the tarball from uHexen2's SourceForge and verifies it against
+the sha256 above before unpacking. The engine's "no game data" error names the
+script, so the path is discoverable from the failure itself. Delivered under
+`uhexen2-49ep` (commit `9cec08fd5`).
+
+The distinction is deliberate and is the whole basis of the decision: pointing
+a user at a URL is not distribution; serving them the bytes is. We do the
+former. The demo tarball in this directory is a local working copy — it is
+gitignored, it is not a build input, and no flake output references it.
+
+### Consequences for `uhexen2-menr`
+
+Deliverable 1 (this directory) stands. Deliverables 2–5 do not ship as written:
+
+- `demodata` / `demo-linux` / `demo-windows` flake outputs — dropped
+  (`menr.3`–`menr.5`).
+- `demo-wasm` — dropped (`menr.6`). A browser build cannot shell out to a
+  fetch script, so the ES tier's answer is user-supplied data instead; see
+  `uhexen2-4zzm`.
+- Release artifacts and the Pages deploy — dropped (`menr.7`, `menr.8`).
+- Release notes advertise the fetch command, not a "no data needed" download.
+
+### What would reopen this
+
+Written permission from Activision (now Microsoft) covering redistribution of
+the Nov 1997 demo data, or a period grant surfacing from a source not yet
+checked. Nothing short of a document changes the answer — in particular, the
+fact that the demo has circulated freely for ~25 years is evidence about
+practice, not about rights, and is not a permission we inherit. If one turns
+up, file it here and the bundling path becomes available again unchanged.

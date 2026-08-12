@@ -17,7 +17,9 @@ engine/build/
 .beads-credential-key
 /image4.png
 
-# The Hexen II demo tarball is fetched, not committed: 13 MB of binary, and its
-# redistribution terms are unresolved (uhexen2-3vmk).  See assets/demo/README.md
-# for the source URL and sha256.
+# The Hexen II demo tarball is fetched, not committed: 13 MB of binary, and we
+# have no right to redistribute it -- the only licence shipped with it is
+# Activision's retail EULA, which forbids distributing copies (uhexen2-3vmk).
+# Users fetch it themselves via scripts/get_demo.sh / .cmd.  See
+# assets/demo/README.md for the source URL, sha256 and the full reasoning.
 /assets/demo/hexen2demo_nov1997-linux-i586.tgz
