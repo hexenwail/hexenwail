@@ -1112,7 +1112,6 @@ void Host_Shutdown(void)
 
 	Host_WaitForSaveThread();
 	Host_ShutdownSave();
-	AsyncQueue_Destroy();
 
 // keep Con_Printf from trying to update the screen
 	scr_disabled_for_loading = true;
@@ -1130,6 +1129,11 @@ void Host_Shutdown(void)
 		IN_Shutdown ();
 		VID_Shutdown();
 	}
+
+// after the subsystems, not before: the audio backends own threads that post
+// APCs (the Windows MIDI callback does, uhexen2-99v0), and tearing the queue
+// down first left them writing into a zeroed queue whose mutex is gone.
+	AsyncQueue_Destroy();
 
 	LOG_Close ();
 }

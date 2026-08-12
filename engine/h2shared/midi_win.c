@@ -73,13 +73,17 @@ static midi_driver_t midi_win_ms =
 static qboolean	midi_file_open, midi_playing, midi_paused;
 static UINT	device_id = MIDI_MAPPER, callback_status;
 static int	buf_num, num_empty_bufs;
-static DWORD	volume_cache[MIDI_CHANNELS];
-static qboolean	hw_vol_capable = false;
+static DWORD	volume_cache[MIDI_CHANNELS];	/* main thread only, see MidiVolume_CB */
 
 static HMIDISTRM	hStream;
 static convert_buf_t	stream_bufs[NUM_STREAM_BUFFERS];
 
 static HANDLE		hBufferReturnEvent;
+
+/* Set by the callback thread when a track has run out of data (or hit an
+ * error) and must be torn down.  Polled by MIDI_Update on the main thread.
+ * The callback cannot run MIDI_Stop itself -- see MidiProc_EndOfData. */
+static LONG volatile	midi_stop_pending;
 
 static void FreeBuffers (void);
 static int  StreamBufferSetup (const char *filename);
@@ -99,27 +103,27 @@ do {					\
 	}				\
 } while (0)
 
+/* Host_PrintAsync, not Con_Printf: this is reached from MidiProc, i.e. from
+ * the midiStream callback thread, and the console buffer has no locking.
+ * midiOutGetErrorText is a string lookup, not a device call, so it is safe
+ * there.  uhexen2-99v0 */
 static void MidiErrorMessageBox (MMRESULT mmr)
 {
 	char temp[1024];
 
 	midiOutGetErrorText(mmr, temp, sizeof(temp));
-	Con_Printf("MIDI_DRV: %s\n", temp);
+	Host_PrintAsync("MIDI_DRV: %s\n", temp);
 }
 
 static void MIDI_SetVolume (void **handle, float value)
 {
 	CHECK_MIDI_ALIVE();
 
-	if (hw_vol_capable)
-	{
-		DWORD val = (DWORD)(value * 65535.0f);
-		midiOutSetVolume((HMIDIOUT)hStream, (val << 16) + val);
-	}
-	else
-	{
-		MIDI_SetAllChannelVolumes((DWORD) (value * 1000.0f));
-	}
+	/* No midiOutSetVolume path: on Vista+ it moves the app's slider in the
+	 * system mixer instead of the device volume, so upstream disabled it
+	 * (892bc9588) and every device is driven through per-channel main
+	 * volume controllers instead.  uhexen2-q646 */
+	MIDI_SetAllChannelVolumes((DWORD) (value * 1000.0f));
 }
 
 static void MIDI_Rewind (void **handle)
@@ -131,9 +135,23 @@ static void MIDI_Rewind (void **handle)
 
 static void MIDI_Update (void **handle)
 {
+	/* End-of-track teardown is requested by the callback thread and run
+	 * here, on the main thread: MIDI_Stop calls midiStreamStop /
+	 * midiOutReset / midiStreamClose, which MSDN forbids from inside a MIDI
+	 * callback, and it also frees zone memory and waits on the very event
+	 * the callback is supposed to signal.  BGM_Update calls us once per
+	 * frame for as long as it holds a handle, so a polled flag is a
+	 * guaranteed hand-off -- the APC queue can refuse work when full.
+	 * uhexen2-99v0 */
+	if (InterlockedExchange(&midi_stop_pending, 0))
+	{
+		MIDI_Stop(handle);
+		return;
+	}
+
 	CHECK_MIDI_ALIVE();
 
-	/* handled by callback */
+	/* otherwise handled by callback */
 }
 
 qboolean MIDI_Init(void)
@@ -216,7 +234,13 @@ static void *MIDI_Play (const char *filename)
 
 	midi_playing = true;
 	midi_paused = false;
-	MIDI_SetVolume ((void **) &hStream, bgmvolume.value);
+	/* NULL, not (void **)&hStream: the parameter is a slot that
+	 * CHECK_MIDI_ALIVE zeroes to tell BGM the track is gone, and hStream is
+	 * the live HMIDISTRM rather than such a slot -- passing it meant one
+	 * tripped check away from nulling the stream handle itself.  Every other
+	 * caller passes &midi_handle.handle, which BGM has not been given yet at
+	 * this point, so there is nothing to invalidate.  uhexen2-q646 */
+	MIDI_SetVolume (NULL, bgmvolume.value);
 
 	return hStream;
 }
@@ -250,6 +274,11 @@ static void MIDI_Stop (void **handle)
 	/*CHECK_MIDI_ALIVE();*/
 	if (handle)
 		*handle = NULL;
+
+	/* Consume any pending request from the callback thread: we are doing the
+	 * teardown right now, and a leftover flag would otherwise kill the next
+	 * track on its first MIDI_Update.  uhexen2-99v0 */
+	InterlockedExchange(&midi_stop_pending, 0);
 
 	if (midi_file_open || midi_playing)/* || callback_status != STATUS_CALLBACKDEAD)*/
 	{
@@ -469,16 +498,60 @@ static int StreamBufferSetup(const char *filename)
 	return 0;
 }
 
+/* MidiProc_EndOfData
+ *
+ * Called on the callback thread when the converter has no more data for this
+ * track, or when refilling a buffer failed.  Waits for the buffers the device
+ * still owns to come back, then hands the teardown to the main thread rather
+ * than running MIDI_Stop here -- see MIDI_Update for why.
+ *
+ * The all-buffers-already-back case has to be handled inline: if we merely
+ * set STATUS_WAITINGFOREND there, no further MOM_DONE would ever arrive and
+ * the track would sit half-stopped with the stream still open.
+ */
+static void MidiProc_EndOfData (void)
+{
+	if (num_empty_bufs < NUM_STREAM_BUFFERS)
+	{
+		callback_status = STATUS_WAITINGFOREND;
+		return;
+	}
+
+	callback_status = STATUS_CALLBACKDEAD;
+	InterlockedExchange(&midi_stop_pending, 1);
+	SetEvent(hBufferReturnEvent);
+}
+
+/* MidiVolume_CB
+ *
+ * Main-thread half of the MOM_POSITIONCB main-volume handling.  The channel
+ * number and the volume data byte are packed into the APC parameter, so this
+ * needs no allocation and volume_cache stays main-thread-only.
+ */
+static void MidiVolume_CB (void *param)
+{
+	DWORD packed = (DWORD)(uintptr_t) param;
+	DWORD channel = packed & (MIDI_CHANNELS - 1);
+
+	volume_cache[channel] = (packed >> 8) & 0x7F;
+	MIDI_SetChannelVolume(channel, (DWORD) (bgmvolume.value * 1000.0f));
+}
+
 /* MidiProc
  *
  * the callback handler which continually refills MIDI data buffers
  * as they're returned to us from the audio subsystem.
+ *
+ * Runs on a Windows-owned callback thread.  Nothing here may call a
+ * multimedia function other than midiStreamOut (MSDN: doing so can
+ * deadlock), touch the zone allocator, or print to the console.
  */
 static void CALLBACK MidiProc(HMIDIIN hMidi, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
 	MIDIEVENT *me;
 	MIDIHDR *mh;
 	MMRESULT mmr;
+	DWORD packed;
 	int err;
 
 	switch (uMsg)
@@ -498,7 +571,7 @@ static void CALLBACK MidiProc(HMIDIIN hMidi, UINT uMsg, DWORD_PTR dwInstance, DW
 			else
 			{
 				callback_status = STATUS_CALLBACKDEAD;
-				MIDI_Stop((void **)NULL);
+				InterlockedExchange(&midi_stop_pending, 1);
 				SetEvent(hBufferReturnEvent);
 				return;
 			}
@@ -534,17 +607,15 @@ static void CALLBACK MidiProc(HMIDIIN hMidi, UINT uMsg, DWORD_PTR dwInstance, DW
 			err = ConvertToBuffer(0, &stream_bufs[buf_num]);
 			if (err != CONVERTERR_NOERROR)
 			{
-				if (err == CONVERTERR_DONE)
-				{
-					callback_status = STATUS_WAITINGFOREND;
-					return;
-				}
-				else
-				{
-					Con_Printf("MidiProc() conversion pass failed!");
-					ConverterCleanup();
-					return;
-				}
+				if (err != CONVERTERR_DONE)
+					Host_PrintAsync("MidiProc() conversion pass failed!\n");
+				/* Both cases end the track.  The error case used to call
+				 * ConverterCleanup() here and then keep going, which frees
+				 * the track data out from under the next refill on the
+				 * wrong thread; let the main thread do the cleanup as part
+				 * of the normal stop.  uhexen2-99v0 */
+				MidiProc_EndOfData();
+				return;
 			}
 
 			stream_bufs[buf_num].mh.dwBytesRecorded = stream_bufs[buf_num].bytes_in;
@@ -553,7 +624,7 @@ static void CALLBACK MidiProc(HMIDIIN hMidi, UINT uMsg, DWORD_PTR dwInstance, DW
 			if (mmr != MMSYSERR_NOERROR)
 			{
 				MidiErrorMessageBox(mmr);
-				ConverterCleanup();
+				MidiProc_EndOfData();
 				return;
 			}
 			buf_num = (buf_num + 1) % NUM_STREAM_BUFFERS;
@@ -569,11 +640,16 @@ static void CALLBACK MidiProc(HMIDIIN hMidi, UINT uMsg, DWORD_PTR dwInstance, DW
 			if (MIDIEVENT_DATA1(me->dwEvent) != MIDICTL_MSB_MAIN_VOLUME)
 				break;
 
-			/* mask off the channel number and cache the volume data byte */
-			volume_cache[MIDIEVENT_CHANNEL(me->dwEvent)] = MIDIEVENT_VOLUME(me->dwEvent);
-			if (hw_vol_capable) break;
-			MIDI_SetChannelVolume(MIDIEVENT_CHANNEL(me->dwEvent),
-					(DWORD) (bgmvolume.value * 1000.0f));
+			/* Caching the volume byte and rescaling the channel by
+			 * bgmvolume both move to the main thread: midiOutShortMsg from
+			 * inside a MIDI callback can deadlock, and it raced the main
+			 * thread's own midiOutShortMsg calls on the same stream.  A
+			 * dropped APC (queue full) only costs one volume update, so
+			 * the non-blocking variant is right here -- blocking would
+			 * stall the device's callback thread.  uhexen2-99v0,
+			 * uhexen2-q646 */
+			packed = MIDIEVENT_CHANNEL(me->dwEvent) | (MIDIEVENT_VOLUME(me->dwEvent) << 8);
+			Host_TryInvokeOnMainThread(MidiVolume_CB, (void *)(uintptr_t) packed);
 		}
 		break;
 
