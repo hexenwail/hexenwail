@@ -443,6 +443,13 @@ static void CL_ParseServerInfo (void)
 		S_TouchSound (str);
 	}
 
+	/* Report the headroom, not just the count: large mod hubs are authored
+	 * around these ceilings (uhexen2-dv19) and "Server sent too many ...
+	 * precaches" is the only other signal, which arrives too late to plan
+	 * around.  Same shape as the "Lightmaps: n/m pages" line. */
+	Con_SafePrintf ("Precache: %d/%d models, %d/%d sounds\n",
+			nummodels - 1, MAX_MODELS - 1, numsounds - 1, MAX_SOUNDS - 1);
+
 //
 // now we try to load everything else until a cache allocation fails
 //

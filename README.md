@@ -128,6 +128,21 @@ Two ways to attach music to a custom map:
    bgm_remap 18 -            // clear
    ```
 
+### Skybox and fog for mappers
+Engine-only worldspawn keys take the underscore prefix, so they never collide
+with the HexenC field namespace and your progs doesn't have to declare them:
+
+```
+"_sky"    "grimmnight_"      // loads gfx/env/grimmnight_{rt,bk,lf,ft,up,dn}
+"_skyfog" "0.5"
+"_fog"    "0.037 0.08 0.07 0.18"   // density r g b
+```
+
+The unprefixed `sky`, `skyname` (Half-Life), `qlsky` (Quake Lives), `skyfog`
+and `fog` spellings are still accepted for maps that already ship them, and
+neither spelling produces an `'sky' is not a field` warning any more. `sky
+<name>` also works from the console.
+
 ### Platform
 - SDL3 on Linux and Windows
 - CMake build, Nix flake (reproducible builds + Windows cross-compilation), Flatpak
