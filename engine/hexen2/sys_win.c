@@ -121,6 +121,11 @@ int Sys_unlink (const char *path)
 	return -1;
 }
 
+/* MOVEFILE_REPLACE_EXISTING to match POSIX rename(), which overwrites.
+ * Plain MoveFileW fails outright when the target exists, which would force
+ * every caller to unlink first and so give up the one property that makes a
+ * write-temp-then-rename worth doing -- the target is never absent.  Callers
+ * relying on the old refuse-if-exists behaviour: none.  uhexen2-ghv0 */
 int Sys_rename (const char *oldp, const char *newp)
 {
 	wchar_t wideoldp[MAX_PATH], widenewp[MAX_PATH];
@@ -128,7 +133,7 @@ int Sys_rename (const char *oldp, const char *newp)
 	if (!Sys_UTF8ToWideBuf(oldp, wideoldp, MAX_PATH) ||
 	    !Sys_UTF8ToWideBuf(newp, widenewp, MAX_PATH))
 		return -1;
-	if (MoveFileW(wideoldp, widenewp) != 0)
+	if (MoveFileExW(wideoldp, widenewp, MOVEFILE_REPLACE_EXISTING) != 0)
 		return 0;
 	return -1;
 }

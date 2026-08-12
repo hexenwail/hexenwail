@@ -440,9 +440,8 @@ void Host_WriteConfiguration (const char *fname)
 	// this file is rewritten during play rather than only at shutdown, so
 	// fopen("w") on the real thing would leave a window where an unclean
 	// exit finds a truncated config -- the exact loss this was meant to
-	// prevent.  POSIX rename() replaces atomically; MoveFileW, which is
-	// what Sys_rename is on Windows, refuses an existing target, hence
-	// the unlink there.
+	// prevent.  Sys_rename replaces the target in one step on both POSIX
+	// and Windows, so config.cfg is never absent, only old or new.
 		f = fopen (temppath, "w");
 		if (!f)
 		{
@@ -460,10 +459,6 @@ void Host_WriteConfiguration (const char *fname)
 		if (fclose (f) != 0)
 			err = 1;
 
-#ifdef PLATFORM_WINDOWS
-		if (!err)
-			Sys_unlink (path);
-#endif
 		if (err || Sys_rename (temppath, path) != 0)
 		{
 			Con_Printf ("Couldn't write %s.\n", fname);
