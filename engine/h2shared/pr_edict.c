@@ -1582,6 +1582,45 @@ static qboolean	ED_ParseEpair (void *base, ddef_t *key, const char *s)
 
 /*
 ====================
+ED_IsEngineWorldspawnKey
+
+True for worldspawn keys the engine reads straight out of the entity
+lump (Sky_NewMap, Fog_ParseWorldspawn) and that the progs therefore has
+no field for.  Callers must already have established that ED_FindField
+failed, so a mod that does declare one of these keeps normal behaviour.
+
+Engine-only keys should be spelled with a leading underscore (_sky,
+_fog) per the FTE convention -- ED_ParseEdict drops those before it ever
+gets here, and both worldspawn parsers strip the underscore.  This list
+exists for the unprefixed spellings already baked into shipped maps.
+====================
+*/
+static qboolean ED_IsEngineWorldspawnKey (const char *keyname)
+{
+	static const char *const engine_keys[] =
+	{
+		"sky",		/* QuakeSpasm / Quakespasm-spiked skybox */
+		"skyname",	/* half-life */
+		"qlsky",	/* quake lives */
+		"skyfog",
+		"fog",
+		"wad",		/* editor bookkeeping, written by every compiler */
+		"mapversion",
+		NULL
+	};
+	int	i;
+
+	for (i = 0; engine_keys[i]; i++)
+	{
+		if (!strcmp(engine_keys[i], keyname))
+			return true;
+	}
+
+	return false;
+}
+
+/*
+====================
 ED_ParseEdict
 
 Parses an edict out of the given string, returning the new position
@@ -1665,7 +1704,14 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 		key = ED_FindField (keyname);
 		if (!key)
 		{
-			Con_Printf ("'%s' is not a field\n", keyname);
+			/* Worldspawn keys the engine consumes itself are not progs
+			 * fields and never will be, so don't nag the mapper about
+			 * them.  The prefixed spellings (_sky, _fog) are already
+			 * dropped by the leading-underscore rule above and are the
+			 * form to prefer; these are the legacy unprefixed ones that
+			 * shipping maps use.  uhexen2-9afp. */
+			if (!(ent == sv.edicts && ED_IsEngineWorldspawnKey (keyname)))
+				Con_Printf ("'%s' is not a field\n", keyname);
 			continue;
 		}
 
