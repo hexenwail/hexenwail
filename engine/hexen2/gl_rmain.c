@@ -306,7 +306,21 @@ cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pix
 /* gl_overbright_models: Ironwail semantics — 1 lets alias model lighting
  * use its full natural range (overbright), 0 clamps it to the legacy
  * Hexen II vanilla cap of 192.  Default 1 to match gl_overbright on the
- * world.  (Polarity flipped from upstream uHexen2 in uhexen2-f29y.) */
+ * world.  (Polarity flipped from upstream uHexen2 in uhexen2-f29y.)
+ *
+ * 2 additionally doubles the light that reaches the shader, so models span
+ * the same range the world does.  Removing the clamp (1) only lets model
+ * lighting reach its natural ceiling, which is lower than the world's:
+ * lightcolor tops out at 255 and is normalized by 200, so a fully lit model
+ * texel maxes at 1.275, while a world surface under gl_overbright is
+ * texture * lightmap * 2 and reaches 2.0 before the framebuffer clips it.
+ * A bright skin on a brightly lit model therefore cannot go white the way
+ * the wall behind it does.  Setting 2 closes that gap.  uhexen2-enbw.
+ *
+ * Left off by default: it is a look change on every model in the game, and
+ * 1 is what the tester has been running.  Meant to be paired with
+ * gl_overbright 1 (the default) — with the world's doubling off, 2 makes
+ * models brighter than their surroundings rather than equal to them. */
 cvar_t	gl_overbright_models = {"gl_overbright_models", "1", CVAR_ARCHIVE};
 cvar_t	gl_overbright = {"gl_overbright", "1", CVAR_ARCHIVE};	// world/brush lightmap overbright (Ironwail-style: build at >>(7+gl_overbright), shader multiplies by 1<<gl_overbright)
 /* r_lightmap_bicubic: shader-side B-spline bicubic filter for the lightmap
@@ -747,6 +761,23 @@ float	r_avertexnormal_dots[SHADEDOT_QUANT][256] =
 static float	*shadedots = r_avertexnormal_dots[0];
 static int	shadedot_row_index;	/* row index for GPU path (0-15) */
 static vec3_t	shadevector;
+
+/*
+=================
+R_AliasLightScale
+
+The divisor that turns 0..255 lighting into the shader's 0..1-ish range,
+folded together with the gl_overbright_models 2 boost.  Both alias lighting
+setups call it at the same point so the legacy and instanced paths cannot
+drift apart on brightness.  See the cvar comment for why 2 exists and why
+it is not the default.  uhexen2-enbw.
+=================
+*/
+static float R_AliasLightScale (void)
+{
+	const float boost = (gl_overbright_models.integer >= 2) ? 2.0f : 1.0f;
+	return boost * (1.0f / 200.0f);
+}
 
 static int	lastposenum;
 
@@ -1372,8 +1403,11 @@ static void R_DrawAliasModel (entity_t *e)
 
 	shadedot_row_index = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
 	shadedots = r_avertexnormal_dots[shadedot_row_index];
-	shadelight = shadelight / 200.0;
-	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
+	{
+		const float lightscale = R_AliasLightScale ();
+		shadelight *= lightscale;
+		VectorScale(lightcolor, lightscale, lightcolor);
+	}
 
 	an = e->angles[1] / 180 * M_PI;
 	shadevector[0] = cos(-an);
@@ -2499,8 +2533,11 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		}
 	}
 
-	shadelight = shadelight / 200.0;
-	VectorScale(lightcolor, 1.0f / 200.0f, lightcolor);
+	{
+		const float lightscale = R_AliasLightScale ();
+		shadelight *= lightscale;
+		VectorScale(lightcolor, lightscale, lightcolor);
+	}
 
 	/* --- Build world matrix with scale/origin baked in --- */
 	/* Save current modelview (which is the VIEW matrix), load identity,
