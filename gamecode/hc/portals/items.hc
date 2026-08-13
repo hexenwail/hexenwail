@@ -1750,11 +1750,12 @@ float total;
 		item.nextthink = time + 120;	// remove after 2 minutes
 		item.think = SUB_Remove;
 
-		if (!total)
-		{
-			remove(item);
-			return;
-		}
+		// Do NOT remove(item) on !total here.  bluemana, greenmana and
+		// spawn_health are copied to the item after `total` is accumulated,
+		// so they never count toward it -- a mana/health-only drop reaches
+		// this branch with total==0 and must survive.  The genuine
+		// nothing-to-drop case already returned at the early-out above.
+		// (uhexen2-9r3n)
 	}
 
 	self.cnt_torch=0;
