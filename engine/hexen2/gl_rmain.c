@@ -260,6 +260,7 @@ cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thin
 cvar_t	r_showbboxes_health = {"r_showbboxes_health", "0", CVAR_NONE};	/* >0 = health>0 only, <0 = health<=0 only (Ironwail parity) */
 cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "0", CVAR_NONE};	/* 1 = highlight target/targetname matches of the focused entity (Ironwail parity) */
 cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw line segments from the focused edict's entity-typed QC fields to their targets, and from edicts referencing the focused one back to it (uhexen2-4ej9) */
+cvar_t	r_pointfile_depthtest = {"r_pointfile_depthtest", "1", CVAR_NONE};	/* 0 = draw the `pointfile` leak arrows through world geometry (uhexen2-nwx1) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
@@ -4925,6 +4926,104 @@ static void R_ShowBoundingBoxes (void)
 
 
 /*
+================
+R_ShowPointFile
+
+Draw the map leak path loaded by the `pointfile` command as a chain of
+arrows, so the direction of travel out of the sealed world is readable.
+Ported from Ironwail 26902e0e2, which replaced the QuakeSpasm-era
+one-particle-per-point trail.
+
+r_pointfile_depthtest 0 draws the whole path through world geometry.
+Arrow color comes from the existing leak_color palette index.
+================
+*/
+#define POINTFILE_ARROW_VERTS	6	/* shaft + two head strokes, as GL_LINES */
+#define POINTFILE_ARROW_SIZE	8.0f	/* head half-width / length, world units */
+
+static void R_EmitPointFileArrow (const vec3_t from, const vec3_t to, float frac)
+{
+	vec3_t	center, dir, side, tmp;
+	float	len;
+
+	GL_ImmVertex3f (from[0], from[1], from[2]);
+	GL_ImmVertex3f (to[0], to[1], to[2]);
+
+	VectorSubtract (to, from, dir);
+	len = VectorNormalize (dir);
+	if (len < 0.01f)
+	{
+		VectorCopy (vup, dir);
+		VectorCopy (vright, side);
+	}
+	else
+	{
+		/* Keep the head strokes facing the viewer: perpendicular to both
+		 * the segment and the eye-to-segment vector. */
+		VectorSubtract (from, r_origin, tmp);
+		CrossProduct (dir, tmp, side);
+		VectorNormalize (side);
+	}
+
+	/* The head slides from `from` to `to` once a second — that animation is
+	 * what conveys direction; a static chevron on a long line does not. */
+	center[0] = from[0] + (to[0] - from[0]) * frac;
+	center[1] = from[1] + (to[1] - from[1]) * frac;
+	center[2] = from[2] + (to[2] - from[2]) * frac;
+
+	VectorMA (center, POINTFILE_ARROW_SIZE, side, tmp);
+	VectorMA (tmp, -POINTFILE_ARROW_SIZE, dir, tmp);
+	GL_ImmVertex3f (tmp[0], tmp[1], tmp[2]);
+	GL_ImmVertex3f (center[0], center[1], center[2]);
+
+	VectorMA (tmp, -2.0f * POINTFILE_ARROW_SIZE, side, tmp);
+	GL_ImmVertex3f (tmp[0], tmp[1], tmp[2]);
+	GL_ImmVertex3f (center[0], center[1], center[2]);
+}
+
+static void R_ShowPointFile (void)
+{
+	const byte	*pal;
+	float		r, g, b, frac;
+	int		i;
+
+	if (r_numpointfile < 2)
+		return;
+
+	pal = (const byte *) &d_8to24table[leak_color.integer & 255];
+	r = pal[0] * (1.0f / 255.0f);
+	g = pal[1] * (1.0f / 255.0f);
+	b = pal[2] * (1.0f / 255.0f);
+
+	frac = (float)(realtime - floor (realtime));
+
+	if (!r_pointfile_depthtest.integer)
+		glDisable_fp (GL_DEPTH_TEST);
+	glEnable_fp (GL_BLEND);
+	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	GL_ImmBegin ();
+	GL_ImmColor4f (r, g, b, 0.9f);
+	for (i = 1; i < r_numpointfile; i++)
+	{
+		/* GL_ImmVertex3f silently drops anything past GL_IMM_MAX_VERTS, so
+		 * flush before emitting a segment that would not fit whole. */
+		if (GL_ImmCount () + POINTFILE_ARROW_VERTS > GL_IMM_MAX_VERTS)
+		{
+			GL_ImmEnd (GL_LINES, &gl_shader_flat);
+			GL_ImmBegin ();
+			GL_ImmColor4f (r, g, b, 0.9f);
+		}
+		R_EmitPointFileArrow (r_pointfile[i - 1], r_pointfile[i], frac);
+	}
+	GL_ImmEnd (GL_LINES, &gl_shader_flat);
+
+	glEnable_fp (GL_DEPTH_TEST);
+	glDisable_fp (GL_BLEND);
+}
+
+
+/*
 =============
 R_PrintTimes
 =============
@@ -5147,6 +5246,8 @@ void R_RenderView (void)
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_MIRROR);
 
 	R_ShowBoundingBoxes ();
+
+	R_ShowPointFile ();
 
 	// render mirror view
 	R_Mirror ();

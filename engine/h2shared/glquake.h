@@ -318,6 +318,8 @@ extern	cvar_t	r_showbboxes_think;
 extern	cvar_t	r_showbboxes_health;
 extern	cvar_t	r_showbboxes_targets;
 extern	cvar_t	r_showbboxes_links;
+extern	cvar_t	r_pointfile_depthtest;
+extern	cvar_t	leak_color;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
 extern	cvar_t	r_alphasort;
@@ -469,7 +471,17 @@ void R_NetGraph (void);
 void R_InitNetgraphTexture (void);
 #endif
 
+/* Map leak path from maps/<map>.pts, loaded by the `pointfile` command and
+ * drawn as direction arrows by R_ShowPointFile (Ironwail 26902e0e2).  The
+ * cap is on stored points, which R_ReadPointFile_f has already collapsed
+ * along straight runs, so it bounds direction changes rather than raw file
+ * lines. */
+#define MAX_POINTFILE_POINTS	16384
+extern vec3_t	r_pointfile[MAX_POINTFILE_POINTS];
+extern int	r_numpointfile;
+
 void R_ReadPointFile_f (void);
+void R_ClearPointFile (void);
 void R_AliasInfo_f (void);	/* uhexen2-khsa diagnostic */
 void R_TranslatePlayerSkin (int playernum);
 
