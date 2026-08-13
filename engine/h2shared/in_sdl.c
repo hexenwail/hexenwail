@@ -356,6 +356,11 @@ static void IN_ShutdownGamepad (void)
 {
 	if (gp_active)
 	{
+		/* Turn the LED off so the pad doesn't keep glowing after we exit.
+		 * Set it directly instead of via IN_ApplyGamepadLED(), which would
+		 * re-apply the user's joy_led color.  Pads without an LED just fail
+		 * the call harmlessly. */
+		SDL_SetGamepadLED(gp_active, 0, 0, 0);
 		SDL_CloseGamepad(gp_active);
 		gp_active = NULL;
 		gp_active_id = 0;
