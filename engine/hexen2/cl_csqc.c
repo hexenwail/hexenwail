@@ -89,6 +89,7 @@ void CL_LoadCSProgs (void)
 	byte		*buf;
 	dprograms_t	*p;
 	dfunction_t	*fn;
+	const char	*bad;
 	int		i;
 
 	CL_ShutdownCSProgs ();
@@ -113,6 +114,20 @@ void CL_LoadCSProgs (void)
 		return;
 	}
 
+	/* Before the header byteswap below, which is itself a write through `buf'
+	 * and needs the whole header to be present, and before any lump pointer is
+	 * computed from an offset nothing has vetted.  csprogs.dat is the one progs
+	 * image that arrives with downloaded mod or server content rather than the
+	 * game install, so a deliberately malformed one is a real scenario, not just
+	 * a truncated download.  Declining it must stay a message and a return: a
+	 * Host_Error here would turn a hostile file into a denial of service. */
+	bad = PR_CheckProgsExtents ((const dprograms_t *)buf, fs_filesize);
+	if (bad)
+	{
+		Con_Printf ("CSQC: ignoring csprogs.dat: %s\n", bad);
+		return;
+	}
+
 	p = (dprograms_t *)buf;
 
 	/* byte swap header */
@@ -130,6 +145,15 @@ void CL_LoadCSProgs (void)
 	if (p->version != PROG_VERSION_V6 && p->version != PROG_VERSION_V7)
 	{
 		Con_Printf ("CSQC: csprogs.dat has unsupported version %d\n", p->version);
+		return;
+	}
+
+	/* entityfields is not bounded by any lump, so PR_CheckProgsExtents() cannot
+	 * speak for it; unchecked it makes edict_size below negative or overflows
+	 * it.  Same hole on the server path, tracked as uhexen2-6z5o. */
+	if (p->entityfields < 0 || p->entityfields > (INT_MAX - (int)sizeof(edict_t)) / 4)
+	{
+		Con_Printf ("CSQC: csprogs.dat has bad entityfields (%d)\n", p->entityfields);
 		return;
 	}
 

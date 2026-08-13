@@ -140,6 +140,11 @@ void PR_Init (void);
 void PR_ExecuteProgram (func_t fnum, const char *funcname);
 void PR_LoadProgs (void);
 
+/* Returns NULL if every lump `raw' describes lies inside `filelen', else a
+ * reason string.  Byteswaps the header into a local copy, so it is safe to
+ * call on an unvetted image before the caller does its own in-place swap. */
+const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen);
+
 const char *PR_GetString (int num);
 int PR_SetEngineString (const char *s);
 int PR_AllocString (int bufferlength, char **ptr);
