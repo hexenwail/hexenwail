@@ -50,54 +50,13 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	GLint status;
 	char log[2048];
 	const char *type_name = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
-	const char *version_end;
-	char macro_def[256];
-	char *modified_source = NULL;
-	const char *sources[3];
-	int num_sources = 0;
 
 	shader = glCreateShader_fp(type);
 
-	/* Find #version line and inject BINDLESS macro after it */
-	version_end = strchr(source, '\n');
-	if (version_end)
-	{
-		version_end++; /* skip newline */
-		q_snprintf(macro_def, sizeof(macro_def), "#define BINDLESS %d\n", gl_bindless_able ? 1 : 0);
-		if (developer.integer)
-			Con_SafePrintf("[SHADER] Compiling %s shader with BINDLESS=%d\n", type_name, gl_bindless_able ? 1 : 0);
-
-		/* Source array: [version line] [macro def] [rest of source] */
-		size_t version_len = version_end - source;
-		size_t rest_len = strlen(version_end);
-		size_t total = version_len + strlen(macro_def) + rest_len + 1;
-
-		modified_source = (char *)malloc(total);
-		if (!modified_source)
-			Sys_Error("GL_CompileShader: out of memory");
-		memcpy(modified_source, source, version_len);
-		memcpy(modified_source + version_len, macro_def, strlen(macro_def));
-		memcpy(modified_source + version_len + strlen(macro_def), version_end, rest_len + 1);
-
-		sources[0] = modified_source;
-		num_sources = 1;
-	}
-	else
-	{
-		/* No #version found, use source as-is (shouldn't happen with GLSL_VERT_HEADER) */
-		if (developer.integer)
-			Con_SafePrintf("[SHADER] WARNING: No #version found in %s shader\n", type_name);
-		sources[0] = source;
-		num_sources = 1;
-	}
-
-	glShaderSource_fp(shader, num_sources, sources, NULL);
+	glShaderSource_fp(shader, 1, &source, NULL);
 
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
-
-	if (modified_source)
-		free(modified_source);
 
 	if (!status)
 	{
@@ -406,12 +365,6 @@ static const char sflat_frag[] =
 /* --- shader_world: textured + lightmap multitexture, with fog --- */
 static const char sworld_vert[] =
 	GLSL_VERT_HEADER
-	"#if BINDLESS\n"
-	"#extension GL_ARB_gpu_shader_int64 : require\n"
-	"struct DrawCall { uint flags; uint _pad; uint64_t tx_handle; uint64_t fb_handle; };\n"
-	"layout(binding=0, std430) buffer DrawCallBuffer { DrawCall calls[]; } u_draw_calls;\n"
-	"flat out uvec4 v_texhandles;\n"
-	"#endif\n"
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
@@ -440,10 +393,6 @@ static const char sworld_vert[] =
 	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
 	"    v_worldxy = a_position.xy;\n"
-	"#if BINDLESS\n"
-	"    DrawCall call = u_draw_calls.calls[0];\n"
-	"    v_texhandles = uvec4(unpackUint2x32(call.tx_handle), unpackUint2x32(call.fb_handle));\n"
-	"#endif\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
@@ -498,9 +447,6 @@ static const char sworld_vert[] =
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z
-	"#if BINDLESS\n"
-	"#extension GL_ARB_gpu_shader_int64 : require\n"
-	"#endif\n"
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask (uhexen2-sjvf) */
@@ -516,18 +462,11 @@ static const char sworld_frag[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
-	"#if BINDLESS\n"
-	"flat in uvec4 v_texhandles;\n"
-	"#endif\n"
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
-	"#if BINDLESS\n"
-	"    vec4 tex = texture(sampler2D(packUint2x32(v_texhandles.xy)), v_texcoord);\n"
-	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"#endif\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
 	"        : texture(u_texture1, v_lmcoord);\n"
@@ -540,11 +479,7 @@ static const char sworld_frag[] =
 	 * at full intensity regardless of lightmap.  For surfaces with no
 	 * fullbright pixels the engine binds a 1x1 black sentinel at unit 2
 	 * so the sample contributes 0.  uhexen2-9a1l. */
-	"#if BINDLESS\n"
-	"    vec3 fb = texture(sampler2D(packUint2x32(v_texhandles.zw)), v_texcoord).rgb;\n"
-	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
-	"#endif\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"    if (color.a < u_alpha_threshold) discard;\n"
@@ -594,9 +529,6 @@ static const char sworld_frag[] =
 static const char sworld_frag_opaque[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z_OPAQUE
-	"#if BINDLESS\n"
-	"#extension GL_ARB_gpu_shader_int64 : require\n"
-	"#endif\n"
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask */
@@ -611,28 +543,17 @@ static const char sworld_frag_opaque[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
-	"#if BINDLESS\n"
-	"flat in uvec4 v_texhandles;\n"
-	"#endif\n"
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
-	"#if BINDLESS\n"
-	"    vec4 tex = texture(sampler2D(packUint2x32(v_texhandles.xy)), v_texcoord);\n"
-	"#else\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"#endif\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
 	"        : texture(u_texture1, v_lmcoord);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
-	"#if BINDLESS\n"
-	"    vec3 fb = texture(sampler2D(packUint2x32(v_texhandles.zw)), v_texcoord).rgb;\n"
-	"#else\n"
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
-	"#endif\n"
 	"    color.rgb += fb;\n"
 	"    if (u_caustics.x > 0.0) {\n"
 	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
