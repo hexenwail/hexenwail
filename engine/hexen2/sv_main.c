@@ -345,6 +345,22 @@ void SV_UpdateSoundPos (edict_t *entity, int channel)
 
 /*
 ==================
+SV_MaxSounds
+
+Sound indices this protocol can express in svc_sound.  See server.h.
+==================
+*/
+int SV_MaxSounds (void)
+{
+	if (sv_protocol <= PROTOCOL_RAVEN_111)
+		return MAX_SOUNDS_OLD;		/* bare byte				*/
+	if (sv_protocol < PROTOCOL_UH2_114)
+		return MAX_SOUNDS_H2MP;		/* byte + SND_OVERFLOW			*/
+	return MAX_SOUNDS_UH2;			/* byte + SND_OVERFLOW + SND_OVERFLOW2	*/
+}
+
+/*
+==================
 SV_StartSound
 
 Each entity can have eight independant sound sources, like voice,
@@ -402,14 +418,24 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 		field_mask |= SND_VOLUME;
 	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION)
 		field_mask |= SND_ATTENUATION;
+	if (sound_num >= SV_MaxSounds())
+	{
+		/* Precache is clamped to SV_MaxSounds(), so this only fires if
+		 * sv_protocol changed under us after the map was precached. */
+		Con_DPrintf("%s: protocol %i violation: %s sound_num == %i >= %i\n",
+				__func__, sv_protocol, sample, sound_num, SV_MaxSounds());
+		return;
+	}
+	/* Split the index across the byte and the two overflow mask bits.
+	 * Both bits may be set at once on protocol 21 (=> +768); older
+	 * protocols never reach that far because of the clamp above. */
+	if (sound_num >= MAX_SOUNDS_H2MP)
+	{
+		field_mask |= SND_OVERFLOW2;
+		sound_num -= MAX_SOUNDS_H2MP;
+	}
 	if (sound_num >= MAX_SOUNDS_OLD)
 	{
-		if (sv_protocol == PROTOCOL_RAVEN_111)
-		{
-			Con_DPrintf("%s: protocol 18 violation: %s sound_num == %i >= %i\n",
-					__func__, sample, sound_num, MAX_SOUNDS_OLD);
-			return;
-		}
 		field_mask |= SND_OVERFLOW;
 		sound_num -= MAX_SOUNDS_OLD;
 	}
@@ -561,11 +587,13 @@ static void SV_SendServerinfo (client_t *client)
 // send full levelname
 	MSG_WriteString(&client->message, SV_GetLevelname ());
 
-	for (i = 1, s = sv.model_precache + 1; i < MAX_MODELS && *s; s++)
+	/* i must advance with s: these loops relied purely on the NULL
+	 * terminator, so a completely full precache array ran off the end. */
+	for (i = 1, s = sv.model_precache + 1; i < MAX_MODELS && *s; s++, i++)
 		MSG_WriteString (&client->message, *s);
 	MSG_WriteByte (&client->message, 0);
 
-	for (i = 1, s = sv.sound_precache + 1; i < MAX_SOUNDS && *s; s++)
+	for (i = 1, s = sv.sound_precache + 1; i < MAX_SOUNDS && *s; s++, i++)
 		MSG_WriteString (&client->message, *s);
 	MSG_WriteByte (&client->message, 0);
 

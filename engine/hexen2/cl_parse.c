@@ -158,19 +158,14 @@ static void CL_ParseStartSoundPacket(void)
 
 	channel = MSG_ReadShort ();
 	sound_num = MSG_ReadByte ();
+	/* The index is split across the byte and the two overflow mask bits;
+	 * on protocol 21 both bits may be set at once (=> +768).  This used to
+	 * bail out on SND_OVERFLOW2 *before* reading the coords below, which
+	 * left three coords in the buffer and desynced the rest of the packet. */
 	if (field_mask & SND_OVERFLOW)
-		sound_num += MAX_SOUNDS_OLD;
+		sound_num += MAX_SOUNDS_OLD;	/* +256 */
 	if (field_mask & SND_OVERFLOW2)
-	{
-	/* this means the server has MAX_SOUNDS > 512 (== 1024)
-	 * and is sending it to us as a byte: Kor Skarn's code.
-	 * UQE does this but I haven't seen this in real life yet.
-	 * Currently not supported.  TODO: in a newer protocol.
-	 */
-		sound_num += MAX_SOUNDS_H2MP;	/* +512  */
-		Con_DPrintf("%s: field_mask & SND_OVERFLOW2 (%d)\n", __thisfunc__, sound_num);
-		return;
-	}
+		sound_num += MAX_SOUNDS_H2MP;	/* +512 */
 
 	ent = channel >> 3;
 	channel &= 7;
@@ -180,6 +175,14 @@ static void CL_ParseStartSoundPacket(void)
 
 	for (i = 0; i < 3; i++)
 		pos[i] = MSG_ReadCoord ();
+
+	/* Drain first, validate second: a hostile or mismatched server must not
+	 * be able to index past cl.sound_precache[]. */
+	if (sound_num < 0 || sound_num >= MAX_SOUNDS)
+	{
+		Con_DPrintf("%s: sound_num %i out of range\n", __thisfunc__, sound_num);
+		return;
+	}
 
 	S_StartSound (ent, channel, cl.sound_precache[sound_num], pos, volume/255.0, attenuation);
 }
@@ -255,8 +258,11 @@ static void CL_ParseServerInfo (void)
 	const char	*str;
 	int		i, j;
 	int		nummodels, numsounds, numfx, numitems;
-	char	model_precache[MAX_MODELS][MAX_QPATH];
-	char	sound_precache[MAX_SOUNDS][MAX_QPATH];
+	int		maxsounds;
+	/* static, not automatic: 2048 models + 1024 sounds at MAX_QPATH each is
+	 * a 192 KB stack frame, which is a lot to ask of a 1 MB main thread. */
+	static char	model_precache[MAX_MODELS][MAX_QPATH];
+	static char	sound_precache[MAX_SOUNDS][MAX_QPATH];
 
 	// Initialize arrays to prevent crashes on bad data
 	memset(model_precache, 0, sizeof(model_precache));
@@ -446,9 +452,15 @@ static void CL_ParseServerInfo (void)
 	/* Report the headroom, not just the count: large mod hubs are authored
 	 * around these ceilings (uhexen2-dv19) and "Server sent too many ...
 	 * precaches" is the only other signal, which arrives too late to plan
-	 * around.  Same shape as the "Lightmaps: n/m pages" line. */
+	 * around.  Same shape as the "Lightmaps: n/m pages" line.
+	 * The sound ceiling is the one svc_sound can address on the protocol we
+	 * actually negotiated, not the array bound -- quoting 1023 to a mod
+	 * author on a protocol-19 server would be a lie worth 511 sounds. */
+	maxsounds = (cl_protocol <= PROTOCOL_RAVEN_111) ? MAX_SOUNDS_OLD :
+		    (cl_protocol <  PROTOCOL_UH2_114)  ? MAX_SOUNDS_H2MP :
+							 MAX_SOUNDS_UH2;
 	Con_SafePrintf ("Precache: %d/%d models, %d/%d sounds\n",
-			nummodels - 1, MAX_MODELS - 1, numsounds - 1, MAX_SOUNDS - 1);
+			nummodels - 1, MAX_MODELS - 1, numsounds - 1, maxsounds - 1);
 
 //
 // now we try to load everything else until a cache allocation fails
@@ -1258,6 +1270,12 @@ static void CL_ParseStaticSound (void)
 	else	sound_num = MSG_ReadShort();
 	vol = MSG_ReadByte ();
 	atten = MSG_ReadByte ();
+
+	if (sound_num < 0 || sound_num >= MAX_SOUNDS)
+	{
+		Con_DPrintf("%s: sound_num %i out of range\n", __thisfunc__, sound_num);
+		return;
+	}
 
 	S_StaticSound (cl.sound_precache[sound_num], org, vol, atten);
 }
