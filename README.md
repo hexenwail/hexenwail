@@ -22,7 +22,7 @@ The free three-level demo Raven released in November 1997 runs on Hexenwail, and
 | Flatpak | launch it — you'll be offered the download when no game data is found |
 | Nix | `nix run .#get-demo -- /path/to/hexenwail` |
 
-In a source checkout the scripts live in `scripts/` instead.
+In a source checkout the scripts live in `scripts/` instead, and `nix build .#demodata` is the declarative equivalent — it puts a hash-verified `data1` in the Nix store, playable with `nix run . -- -basedir ./result/share/hexenwail`.
 
 Each downloads [`hexen2demo_nov1997-linux-i586.tgz`](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/hexen2demo_nov1997-linux-i586.tgz/download) (13 MB) from the [uHexen2 project](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/), verifies it against a known SHA-256, and installs only its `data1` directory. Nothing is overwritten if you already have game data. You can also fetch that tarball by hand and copy its `hexen2demo_nov1997/data1` next to the executable — the scripts do nothing more than that. We don't host or relicense that data — see [assets/demo/README.md](assets/demo/README.md) for its provenance and terms.
 
