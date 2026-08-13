@@ -14,7 +14,16 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = import nixpkgs {
+          inherit system;
+          # packages.demodata is marked unfree on purpose (uhexen2-3vmk: the
+          # Nov 1997 demo carries Activision's retail EULA and no
+          # redistribution grant).  Permit that one derivation by name so a
+          # user who wants it gets a working `nix build .#demodata` instead of
+          # having to pass --impure; everything else stays refused as before.
+          config.allowUnfreePredicate = pkg:
+            nixpkgs.lib.getName pkg == "hexen2-demodata";
+        };
         pkgsCross64 = import nixpkgs {
           inherit system;
           crossSystem = {
@@ -620,6 +629,102 @@
             };
           };
 
+          # Raven's free Nov 1997 three-level demo data, fetched from the
+          # uHexen2 project.  The declarative counterpart to `nix run
+          # .#get-demo`: same tarball, same sha256, same "keep only data1"
+          # rule, but hash-pinned and usable as a store path:
+          #
+          #   nix build .#demodata
+          #   nix run .#default -- -basedir ./result/share/hexenwail
+          #
+          # DO NOT WIRE THIS INTO ANYTHING WE PUBLISH.  uhexen2-3vmk settled
+          # that the only licence shipping with this data is Activision's
+          # RETAIL EULA -- it forbids transferring copies, and a search for a
+          # demo-specific grant came back empty.  The line that decision draws
+          # is: pointing a user at uHexen2's URL is not distribution, serving
+          # them the bytes is.  A fetchurl the *user* evaluates stays on the
+          # right side of it; a copy in hexenwail.cachix.org would not.  So
+          # this output must never be referenced by `release`, never appear in
+          # a workflow (ci.yml/release.yml build named packages one by one --
+          # keep it that way, and never add a build-everything sweep), and
+          # never be pushed to the binary cache.  hydraPlatforms = [] and the
+          # unfree licence below are the guards; both are load-bearing.
+          #
+          # licenses.unfree, deliberately not unfreeRedistributable: the
+          # latter asserts a redistribution grant, and per uhexen2-3vmk no
+          # such grant is known to exist.  (uhexen2-118f)
+          demodata = pkgs.stdenvNoCC.mkDerivation {
+            pname = "hexen2-demodata";
+            version = "1997-11";
+
+            src = pkgs.fetchurl {
+              # mirror:// first so a dead SourceForge mirror rotates instead
+              # of failing the build; the direct URL the get_demo scripts use
+              # is kept as the last resort.  Content-addressed by the hash, so
+              # no mirror can serve different bytes.
+              urls = [
+                "mirror://sourceforge/uhexen2/Hexen2Demo-Nov.1997/hexen2demo_nov1997-linux-i586.tgz"
+                "https://downloads.sourceforge.net/project/uhexen2/Hexen2Demo-Nov.1997/hexen2demo_nov1997-linux-i586.tgz"
+              ];
+              # Recorded in assets/demo/README.md alongside the provenance.
+              hash = "sha256-LfFc3gEot6A25xmV4GjKhT8Tvo4rWRyqwUACXWZkP8A=";
+            };
+
+            sourceRoot = "hexen2demo_nov1997";
+
+            dontConfigure = true;
+            dontBuild = true;
+
+            # The tarball also carries an i586 Hammer of Thyrion build
+            # (glhexen2, hexen2, h2ded, hexen2.svga).  Those are GPL and
+            # harmless, but they are a 1997 32-bit engine we have no use for,
+            # so only data1 is installed.
+            installPhase = ''
+              runHook preInstall
+
+              mkdir -p $out/share/hexenwail
+              cp -r data1 $out/share/hexenwail/data1
+
+              # Keep the terms with the bytes -- SUBLICENSE.doc is the whole
+              # reason this package is marked unfree, so shipping the data
+              # without it would hide the one document that matters.
+              install -Dm644 SUBLICENSE.doc DEMO.TXT docs/ABOUT \
+                -t $out/share/doc/hexen2-demodata
+
+              runHook postInstall
+            '';
+
+            # 13 MB over the wire, then a copy; not worth a remote builder.
+            preferLocalBuild = true;
+
+            meta = with pkgs.lib; {
+              description = "Hexen II three-level demo data (Raven, Nov 1997)";
+              longDescription = ''
+                The data1/ directory from the free three-level Hexen II demo
+                Raven released in November 1997, as repackaged by the
+                Hammer of Thyrion (uHexen2) project. Enough content to run
+                Hexenwail without a retail copy of the game:
+
+                  nix build .#demodata
+                  nix run .#default -- -basedir ./result/share/hexenwail
+
+                Copying data1/ from a GOG, Steam or disc installation over it
+                unlocks the full game.
+
+                Hexenwail neither hosts nor relicenses this data: building
+                this package downloads it from uHexen2's SourceForge project
+                to your machine. See assets/demo/README.md for provenance and
+                terms, and the SUBLICENSE.doc installed into share/doc.
+              '';
+              homepage = "https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/";
+              license = licenses.unfree;
+              platforms = platforms.all;
+              # Never build this on a shared builder or push it to a cache.
+              hydraPlatforms = [ ];
+              sourceProvenance = with sourceTypes; [ binaryBytecode ];
+            };
+          };
+
           # Release package - builds all platforms together
           release = pkgs.runCommand "hexenwail-release-${version}" {
             meta = with pkgs.lib; {
@@ -777,10 +882,13 @@ EOF
         # nix run .#get-demo [destination]
         #
         # Fetches Raven's Nov 1997 Hexen II demo data from the uHexen2 project
-        # so a fresh checkout has something to run.  Deliberately NOT a
-        # packaged derivation: we have no right to redistribute that data
-        # (uhexen2-3vmk), so this only helps the user download it themselves,
-        # and nothing it produces ends up in a Hexenwail artifact.
+        # so a fresh checkout has something to run.  This is the imperative
+        # route: it installs data1 into a directory you name, off the store,
+        # which is what you want beside an unpacked release or a non-Nix
+        # build.  packages.demodata is the declarative route to the same
+        # bytes; see the redistribution constraint documented there
+        # (uhexen2-3vmk).  Neither one puts demo data in an artifact we
+        # publish -- both only help the user download it themselves.
         apps.get-demo = {
           type = "app";
           program = "${pkgs.writeShellApplication {
