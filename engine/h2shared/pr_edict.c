@@ -2061,6 +2061,153 @@ static dstatement_v7_t *PR_ConvertV6Stmts (dstatement_v6_t *v6stmts, int numstmt
 	return v7stmts;
 }
 
+#if !defined(H2W)
+/* Bundled gamecode: a drop-in engine brings its own progs.dat, so a player who
+ * unzips a release gets our fixes without hand-copying anything into data1/.
+ *
+ * The whole feature is a narrow substitution of one filename inside
+ * PR_LoadProgs(), never a searchpath entry: a searchpath entry is a standing
+ * offer to shadow *any* file that ever lands in the bundle directory, and one
+ * given a fresh path_id would additionally make PR_GetProgFilename() discard
+ * data1's maplist.txt, killing progs2.dat on ten maps with no report outside
+ * `developer 1'.  Design, findings and the verification matrix are in
+ * docs/BUNDLED_GAMECODE.md.
+ *
+ * H2W is excluded because def_progname there is "hwprogs.dat": this fork
+ * builds no HexenWorld engine and ships no HexenWorld gamecode to compare
+ * against, so the substitution has nothing correct to do.
+ */
+
+/*
+===============
+PR_FindBundleDir
+
+Directory holding the gamecode shipped beside the engine, or NULL if none is
+present.  Three layers, mirroring SF_FindSoundFont()'s: the portable/zip layout
+first, then the FHS/Nix one, then a compile-time override for packagers.
+
+Resolved through Sys_GetExeDir() and never through basedir: basedir is the
+working directory the game was launched *from*, which for a desktop launcher or
+a Steam shortcut is routinely not the install directory.  Sys_GetExeDir()
+returns NULL where the platform cannot answer, which simply means the next
+layer is tried.
+
+Not cached: the answer is cheap, and recomputing it removes a whole class of
+staleness bug for free.
+===============
+*/
+static const char *PR_FindBundleDir (void)
+{
+	static char	dir[MAX_OSPATH];
+	const char	*exedir;
+
+	exedir = Sys_GetExeDir();
+	if (exedir)
+	{
+		/* 1. <exedir>/gamecode/ -- portable/zip layout.  Already the
+		 *    shipped path on Windows, whose release zip is flat. */
+		q_snprintf (dir, sizeof(dir), "%s/gamecode", exedir);
+		if (Sys_FileType(dir) == FS_ENT_DIRECTORY)
+			return dir;
+
+		/* 2. <exedir>/../share/hexenwail/ -- FHS/Nix layout, where the
+		 *    binary sits in <platform>/bin/. */
+		q_snprintf (dir, sizeof(dir), "%s/../share/hexenwail", exedir);
+		if (Sys_FileType(dir) == FS_ENT_DIRECTORY)
+			return dir;
+	}
+
+#ifdef BUNDLED_GAMECODE_DIR
+	/* 3. compile-time path, for distribution packagers who put the data
+	 *    somewhere neither of the above finds. */
+	q_strlcpy (dir, BUNDLED_GAMECODE_DIR, sizeof(dir));
+	if (Sys_FileType(dir) == FS_ENT_DIRECTORY)
+		return dir;
+#endif
+
+	return NULL;
+}
+
+/*
+===============
+PR_BundledProgsPath
+
+Decides whether the progs about to be loaded should come from the bundle
+instead of the player's game directory, and if so writes its absolute path to
+`out'.
+
+Recomputed on every call.  PR_LoadProgs() runs per map spawn and the gamedir
+can change at runtime through Host_Game_f (the Mods menu), so anything derived
+from com_argv stops describing reality the moment the player switches -- in
+both directions: launched into a mod and switched back to Hexen II, a
+command-line gate would refuse to substitute forever; launched bare and
+switched into a mod, it would substitute inside the mod.
+
+Two independent conditions, ANDed.  Each alone has a reachable hole:
+
+  - path_id answers "is this the base game's file?".  Alone it is not enough:
+    a pure map pack that ships no gamecode of its own resolves progs.dat from
+    portals (which -game pulls onto the path by itself) or from data1, i.e. at
+    an id we ship a bundle for -- and substituting there would change the
+    gamecode underneath a mod.
+
+  - fs_gamedir_nopath answers "is the base game the game the player is in?".
+    Alone it is not enough either: launch -portals against an install whose
+    portals/ has no progs.dat and nopath reads "portals" while the file that
+    actually resolves is data1's, so the portals bundle would be swapped in for
+    a data1 file.
+
+Both holes are reachable from the shipped Mods menu.  Do not reduce the AND.
+===============
+*/
+static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t outsz)
+{
+	unsigned int	path_id, portals_id;
+	const char	*bundle;
+	const char	*gamedir;
+
+	/* Off switch.  Command line only, never a cvar: a cvar is mutable
+	 * mid-session and this runs per map spawn, so it would let the gamecode
+	 * change between levels of one campaign, and a CVAR_ARCHIVE one would
+	 * write an engine-packaging decision into the player's config tree. */
+	if (COM_CheckParm("-vanillaprogs"))
+		return false;
+
+	/* Our gamecode is built from the 1.11 tree.  The demo, the OEM release
+	 * and mix'n'match installs are different versions of the game, so decline
+	 * them wholesale.  Fingerprinted once in FS_Init; cannot change. */
+	if (!(gameflags & GAME_REGISTERED))
+		return false;
+
+	if (!(bundle = PR_FindBundleDir()))
+		return false;			/* nothing shipped, or not extracted */
+
+	/* Condition 1 -- is this the BASE GAME's file?  Ask the filesystem where
+	 * progname actually resolves rather than assuming; that is what makes
+	 * this robust against searchpath arrangements nobody has thought of. */
+	if (!FS_FileExists(progname, &path_id))
+		return false;			/* no gamecode at all: unchanged error */
+
+	portals_id = FS_GetPortalsPathID();
+	if (path_id == 1U)			/* data1 is assigned 1U first */
+		gamedir = "data1";
+	else if (portals_id && path_id == portals_id)
+		gamedir = "portals";
+	else
+		return false;			/* a mod owns this file */
+
+	/* Condition 2 -- is that gamedir the one the PLAYER IS IN? */
+	if (q_strcasecmp(fs_gamedir_nopath, gamedir) != 0)
+		return false;
+
+	q_snprintf (out, outsz, "%s/%s/%s", bundle, gamedir, progname);
+
+	/* Per-file, not per-install: a bundle carrying data1/progs.dat but not
+	 * portals/progs.dat must degrade for portals alone. */
+	return (Sys_FileType(out) == FS_ENT_FILE);
+}
+#endif	/* !H2W */
+
 /*
 ===============
 PR_LoadProgs
@@ -2083,7 +2230,23 @@ void PR_LoadProgs (void)
 		gefvCache[i].field[0] = 0;
 
 	progname = PR_GetProgFilename();
-	progs = (dprograms_t *)FS_LoadHunkFile (progname, NULL);
+	progs = NULL;
+#if !defined(H2W)
+	{
+		char	bundled[MAX_OSPATH];
+
+		/* Deliberately after PR_GetProgFilename() has returned: that
+		 * function picks progs.dat vs progs2.dat by comparing
+		 * maplist.txt's path_id against progs.dat's, and by now that
+		 * comparison has already run against the real searchpath.  The
+		 * bundle therefore cannot influence which file is wanted -- only
+		 * where the bytes for it come from.  Keep it in this order. */
+		if (PR_BundledProgsPath (progname, bundled, sizeof(bundled)))
+			progs = (dprograms_t *) FS_LoadHunkFileFromOSPath (bundled);
+	}
+#endif
+	if (!progs)	/* no bundle, gate declined, or the bundled file would not open */
+		progs = (dprograms_t *)FS_LoadHunkFile (progname, NULL);
 	if (!progs)
 		Host_Error ("%s: couldn't load %s", __thisfunc__, progname);
 	/* FS_LastFileSource() describes the last lookup only, so grab it before

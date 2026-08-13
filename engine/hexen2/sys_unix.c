@@ -510,6 +510,7 @@ static const char *help_strings[] = {
 	"     [-nomouse]              Disable mouse usage",
 	"     [-listen N]             Enable multiplayer with max N players",
 	"     [-heapsize Bytes]       Heapsize (memory to allocate)",
+	"     [-vanillaprogs]         Ignore the bundled gamecode, use the game's own",
 	NULL
 };
 

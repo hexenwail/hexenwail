@@ -513,6 +513,7 @@ static const char *help_strings[] = {
 #   endif
 #endif
 	"     [-heapsize Bytes]       Heapsize (memory to allocate)",
+	"     [-vanillaprogs]         Ignore the bundled gamecode, use the game's own",
 	NULL
 };
 
