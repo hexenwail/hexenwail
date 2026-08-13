@@ -943,14 +943,22 @@
             # One shared directory, not a copy per platform: progs bytecode is
             # platform-independent, so three copies would add ~5.7 MB to the
             # download to say the same thing three times.  The tree under
-            # gamecode/ IS the install instruction -- data1/ and portals/ are
-            # the gamedirs the files belong to -- which is why the gamedir names
-            # are kept rather than flattening the three files together.  Where
-            # that tree gets copied TO is platform-dependent and README.txt
-            # spells it out: ~/.hexen2 on Unix, the game folder on Windows.
-            # uhexen2-qoy7 is why they differ.
+            # gamecode/ names the gamedirs the files belong to -- data1/ and
+            # portals/ -- rather than flattening the three files together, so
+            # that wherever they are being copied to, the destination is
+            # self-evident.
             #
-            # Staged for the player to copy, NOT extracted over their data1/.
+            # Since uhexen2-xsmc the player copies nothing on either platform:
+            # the engine loads this gamecode from beside its own executable.
+            # On Windows this very directory is what it finds (release.yml
+            # flattens that zip, leaving gamecode/ next to glh2.exe, i.e. the
+            # first lookup layer); on Linux it finds the per-platform copy
+            # installed below.  What survives here is the hand-install case --
+            # feeding these files to a DIFFERENT engine -- which is the only
+            # remaining reason to copy them anywhere.  gamecode/README.txt
+            # frames it that way and says to back up first.
+            #
+            # Staged, NOT extracted over the player's data1/.
             # Retail ships progs.dat as a LOOSE file and the paks contain no
             # copy of it (verified against a retail install: pak0/pak1/pak3
             # hold zero .dat entries), so an overlay that lands directly in
@@ -982,7 +990,7 @@
 Hexenwail compiled gamecode (progs.dat)
 =======================================
 
-These are OPTIONAL.  The game runs fine without them.
+There is nothing to install.  The engine already loads these.
 
 They are the Hexen II game logic, rebuilt from the HexenC sources in this
 project.  They carry bug fixes that are not in Raven's 1997 progs.dat -- most
@@ -990,63 +998,104 @@ notably a fix for dropped backpacks silently vanishing in co-op and
 deathmatch.  Nothing else in this download changes game behaviour; these files
 do.
 
-WHERE THEY GO
--------------
-Two different answers, because Linux and Windows do not have the same set of
-places to put them.
+Hexenwail carries its own copy of them next to the engine and prefers it to
+the one in your Hexen II folder.  That is true on Linux and on Windows alike,
+straight out of the zip: nothing is copied, nothing of yours is overwritten,
+and there is no step you have missed.
 
-Linux, macOS, BSD -- your Hexen II user directory.  The engine creates it the
-first time you run it, and it is where your config and savegames already live:
+So this gamecode/ folder is not a job waiting for you.  On Windows it IS the
+copy the engine loads -- it sits beside glh2.exe, which is where the engine
+looks first.  On Linux the engine loads its own from the platform directory
+and this folder is a spare.  Either way, read on only if you want to check
+what you are running, turn it off, or use these files somewhere else.
 
-  gamecode/data1/progs.dat    ->  ~/.hexen2/data1/progs.dat
-  gamecode/data1/progs2.dat   ->  ~/.hexen2/data1/progs2.dat
-  gamecode/portals/progs.dat  ->  ~/.hexen2/portals/progs.dat
+WHICH GAMECODE AM I RUNNING?
+----------------------------
+The engine says so.  Whenever it loads gamecode it prints one line to the
+console naming the exact file:
 
-Windows -- there is no user directory, so they go in the game folder itself,
-beside the .pak files:
+  Gamecode: progs.dat from <full path to the file> (<version>, file crc <n>)
+
+If that path has gamecode or share/hexenwail in it, you are running ours.  If
+it points inside your Hexen II folder, you are running the one that came with
+the game.  Quote the whole line in bug reports; the crc identifies the file
+exactly, which a filename cannot.
+
+One exception worth knowing: our gamecode is built from the v1.11 sources, so
+the engine declines to substitute it on the shareware demo, the OEM release
+and mix-and-match installs -- those are different versions of the game.  There
+you get the gamecode your install came with, and the line above will say so.
+
+TURNING IT OFF
+--------------
+Launch the engine with -vanillaprogs.  It then ignores its own copy entirely
+and uses whatever gamecode your Hexen II install provides.
+
+Nothing is moved or deleted, so this is a per-launch decision -- drop the
+switch and you are back on ours.  Use it when you want Raven's 1997 behaviour,
+and when you are reporting a bug and want to say whether it happens both ways.
+
+RUNNING SOME OTHER GAMECODE
+---------------------------
+A translation, a balance patch, your own build.
+
+Linux, macOS, BSD -- put it in your Hexen II user directory.  The engine
+creates it the first time you run it, and it is where your config and
+savegames already live:
+
+  ~/.hexen2/data1/progs.dat
+  ~/.hexen2/data1/progs2.dat
+  ~/.hexen2/portals/progs.dat
+
+The order is: your user directory beats the engine's own copy, which beats
+your Hexen II folder.  ~/.hexen2 is therefore the one place that wins
+outright, and it is why a progs.dat dropped into <your Hexen II folder>/data1/
+has no effect -- the engine's copy is preferred to it.
+
+Two more reasons it is the right place, both about being able to undo it:
+
+  - Nothing of Raven's is overwritten.  Retail Hexen II keeps progs.dat as a
+    loose file and there is NO copy inside pak0.pak/pak1.pak/pak3.pak to fall
+    back on, so overwriting it in the game folder cannot be undone.
+
+  - Uninstalling is deleting files you put there yourself, in a directory you
+    own.  The game folder is never touched, so there is nothing to restore.
+
+Windows -- there is no user directory, so replace the files inside the
+gamecode\ folder beside glh2.exe instead:
+
+  gamecode\data1\progs.dat
+  gamecode\data1\progs2.dat
+  gamecode\portals\progs.dat
+
+Those are our files, not Raven's, so nothing irreplaceable is at risk --
+re-extracting the zip puts them back.
+
+USING THESE WITH A DIFFERENT ENGINE
+-----------------------------------
+This is the one case that calls for copying anything.  The original glhexen2,
+or another port, will not know to look beside its own executable, so it wants
+the files in the game folder:
 
   gamecode\data1\progs.dat    ->  <your Hexen II folder>\data1\progs.dat
   gamecode\data1\progs2.dat   ->  <your Hexen II folder>\data1\progs2.dat
   gamecode\portals\progs.dat  ->  <your Hexen II folder>\portals\progs.dat
 
-WHY ~/.hexen2 AND NOT THE GAME FOLDER
--------------------------------------
-Three reasons, and the first one decides it:
+BACK UP FIRST.  That overwrites Raven's files, and as above no .pak holds a
+copy to fall back on, so your backup is the only way back.  Put your existing
+data1\progs.dat, data1\progs2.dat and portals\progs.dat somewhere safe before
+you copy over them.  To undo it, restore those backups -- nothing else is
+needed.
 
-1. It works.  Hexenwail carries its own copy of this gamecode next to the
-   engine and prefers it to the game folder's, so on Linux a progs.dat copied
-   into <your Hexen II folder>/data1/ has no effect -- the engine's copy is
-   used instead.  ~/.hexen2 is the one place that outranks it.  That is also
-   the answer if you want to run some OTHER progs.dat -- a translation, a
-   balance patch, your own build: put it in ~/.hexen2 and it wins.
+None of this is required to play Hexenwail, and doing it changes what that
+other engine runs, not what Hexenwail runs.
 
-   On Windows the engine's copy already sits beside glh2.exe and there is no
-   user directory, so the game folder is both the only answer and the right
-   one.
+Whichever engine you are feeding, copy progs.dat and progs2.dat TOGETHER.
+Some late-game maps use progs2.dat and the rest use progs.dat; installing one
+without the other leaves the game running new gamecode on some maps and 1997
+gamecode on others.
 
-2. Nothing of Raven's is overwritten.  Retail Hexen II keeps progs.dat as a
-   loose file and there is NO copy inside pak0.pak/pak1.pak/pak3.pak to fall
-   back on, so overwriting it in the game folder cannot be undone.
-
-3. Uninstalling is deleting files you put there yourself, in a directory you
-   own.  The game folder is never touched, so there is nothing to restore.
-
-BACK UP FIRST -- WINDOWS ONLY
------------------------------
-Copying into the game folder overwrites Raven's files, and as above there is
-no packed copy to fall back on.  Put your existing data1\progs.dat,
-data1\progs2.dat and portals\progs.dat somewhere safe before you copy over
-them.  To go back to Raven's gamecode, restore those backups -- nothing else
-is needed.
-
-On Linux there is nothing to back up.  You are only adding files to
-~/.hexen2, and `rm' takes them away again.
-
-Copy progs.dat and progs2.dat TOGETHER.  Ten late-game maps use progs2.dat and
-the rest use progs.dat; installing one without the other leaves the game
-running new gamecode on some maps and 1997 gamecode on others.
-
-Install portals/progs.dat if you have the Portal of Praevus mission pack.
+Include portals/progs.dat if you have the Portal of Praevus mission pack.
 When the mission pack is active it takes priority over data1 completely, so
 without this file you get none of the fixes.
 
@@ -1062,10 +1111,11 @@ gamecode briefly did something else: builds made from source for a while let
 the glyph pass harmlessly through the caster.  That exemption is gone -- it was
 never how the game worked.
 
-Once you install these, you are no longer running "vanilla" Hexen II gamecode.
-If you report a bug, please say whether these files are installed.  Removing
-them -- delete them from ~/.hexen2, or restore your backups on Windows -- is
-the fastest way to tell whether a problem is ours or Raven's.
+"Vanilla" now means two things.  A Hexenwail build runs our gamecode unless
+you asked otherwise, so it will differ from Raven's in ways that are not
+engine bugs.  If you report a bug, paste the Gamecode: line, or say whether
+-vanillaprogs changes what you see -- that is the fastest way to tell whether
+a problem is ours or Raven's, and it deletes nothing.
 EOF
 
             # The same three files again, this time where the engine finds them
@@ -1082,9 +1132,11 @@ EOF
             # gamecode/ beside glh2.exe and satisfies the engine's first
             # lookup layer, <exedir>/gamecode/, as shipped.
             #
-            # An addition, not a move: the staging tree above stays the
-            # manual-install path gamecode/README.txt describes, and the copy
-            # a -vanillaprogs player falls back to.  ~2.9 MB per platform dir.
+            # An addition, not a move: the staging tree above stays, as the
+            # hand-install source gamecode/README.txt points at for feeding a
+            # different engine.  (It is NOT what -vanillaprogs falls back to --
+            # that switch declines the bundle and takes the player's own
+            # install's gamecode.)  ~2.9 MB per platform dir.
             # hw/ and siege/ are withheld here for the same reason as above.
             for d in linux-x86_64 linux-x86_64-nixos; do
               install -Dm644 \
@@ -1127,17 +1179,22 @@ carries a helper that downloads the free 1997 three-level demo and verifies it:
 
 The demo data comes from the uHexen2 project and is not ours to relicense.
 
-Optional gamecode (gamecode/):
+Compiled gamecode (gamecode/):
 This release also carries the Hexen II game logic rebuilt from source, with
 fixes that are not in Raven's 1997 progs.dat -- chiefly dropped backpacks
 silently vanishing in co-op and deathmatch.  The engine already loads it from
-beside the executable, so there is nothing to do; gamecode/ is the same three
-files staged for a hand install, e.g. into another engine.  Where they go is
-not the same on both platforms -- ~/.hexen2/data1/ on Linux, data1/ in the
-game folder on Windows -- and on Windows that means overwriting files retail
-keeps loose with no .pak copy to fall back on.  Read gamecode/README.txt
-first; it explains both, and lists one deliberate behaviour change to the
-Crusader's Glyph of the Ancients.
+beside the executable on both platforms, so there is nothing to install and
+nothing of yours is overwritten.  Launch with -vanillaprogs to ignore it and
+use your own install's gamecode instead; the "Gamecode:" line the engine
+prints on load always names the file it actually used.
+
+gamecode/ is the same three files kept separately.  On Windows it is the copy
+the engine loads, since it sits beside glh2.exe; on Linux the engine loads its
+own from the platform directory and this is a spare.  Copying it into a Hexen
+II folder is needed only to feed a DIFFERENT engine, and that overwrites files
+retail keeps loose with no .pak copy to fall back on -- back up first.  Read
+gamecode/README.txt; it covers all of this, and lists one deliberate behaviour
+change to the Crusader's Glyph of the Ancients.
 
 Crash reporting (Windows):
 The Windows build carries Dr. MinGW, so a crash writes "glh2.RPT" beside

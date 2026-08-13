@@ -18,9 +18,12 @@ followed from that, both bad:
    way to root-cause the remaining field reports in `uhexen2-9gdx`, and testers
    on retail progs cannot run it.
 
-This output fixed (1) and made (2) possible. `uhexen2-8qp3` then fixed (2):
-release bundles now carry the compiled gamecode under `gamecode/`, staged for
-the player to copy. See [Shipping](#shipping-in-the-release-bundle).
+This output fixed (1) and made (2) possible. `uhexen2-8qp3` then carried the
+compiled gamecode in the release bundles under `gamecode/`, staged for the
+player to copy, and `uhexen2-xsmc` finished (2) by making the engine load it
+from beside its own executable — so the fix now reaches players who copy
+nothing. See [Shipping](#shipping-in-the-release-bundle) and
+[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md).
 
 ## Building
 
@@ -88,10 +91,15 @@ See [Shipping](#shipping-in-the-release-bundle).
 
 ## Installing
 
-This section is the source-checkout path. Players get the same files staged in
-the release bundle under `gamecode/`; see
-[Shipping](#shipping-in-the-release-bundle). Nothing installs them
-automatically either way. To use it from a checkout:
+This section is the source-checkout path — a developer running the engine out
+of a build tree, where nothing sits beside the binary to be found.
+
+**Players do not do any of this.** Since `uhexen2-xsmc` a release bundle loads
+its own gamecode from beside the executable on both platforms, so a normal
+install copies nothing; see [Shipping](#shipping-in-the-release-bundle) and
+[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md). What follows is also the recipe for
+overriding that bundle with some other `progs.dat`, since `~/.hexen2` outranks
+it. To use it from a checkout:
 
 ```sh
 nix build .#gamecode
@@ -103,8 +111,12 @@ cp result/share/hexenwail/data1/progs2.dat ~/.hexen2/data1/
 `~/.hexen2` is the per-user data directory on Unix
 (`engine/h2shared/userdir.h :: SYS_USERDIR_UNIX`); demo builds use
 `~/.hexen2demo` (same macro, demo `#ifdef`). Windows and OS/2 have no user
-directory — `engine/h2shared/sys.h :: DO_USERDIRS` is forced to 0 there — so
-the files go into the install's own `data1/` beside `pak0.pak`.
+directory — `engine/h2shared/sys.h :: DO_USERDIRS` is forced to 0 there — so on
+those a build-tree run needs the files beside the executable, in
+`<exedir>/gamecode/<gamedir>/`, which is the bundle's own first lookup layer.
+Do not reach for the install's `data1/` instead: that overwrites Raven's loose
+`progs.dat` irreversibly (see *Retail keeps progs.dat loose*), and the bundle
+outranks it anyway, so it would not even take effect.
 
 Prefer the user directory where you have one. It takes precedence over the
 install (see below), and uninstalling is `rm` on files you own rather than an
@@ -271,11 +283,13 @@ column of `maplist.txt`, and `pak0.pak`'s copy spells it lowercase.
 matches the requested case exactly, which is not our situation. Verified by
 running the engine, not by reading alone — see below.
 
-Note the cosmetic wart: on Linux the player is left with both `progs.dat` and
-`PROGS.DAT` in `data1/`. Ours wins, the retail file is inert, and that is
-effectively a free backup. On Windows the filesystem is case-insensitive, so
-copying `progs.dat` over `PROGS.DAT` replaces its contents and no backup
-survives — hence the instruction to back up first.
+Note the cosmetic wart: on Linux a copy into `data1/` leaves both `progs.dat`
+and `PROGS.DAT` there. Ours wins over retail's, the retail file is inert, and
+that is effectively a free backup. On Windows the filesystem is
+case-insensitive, so copying `progs.dat` over `PROGS.DAT` replaces its contents
+and no backup survives — which is why `gamecode/README.txt` says to back up
+first in the one case that still calls for this copy, feeding the files to a
+different engine. Nothing on the normal Hexenwail path performs it.
 
 ## Shipping in the release bundle
 
@@ -319,13 +333,18 @@ install it automatically. That was rejected: retail keeps `progs.dat` loose with
 no packed copy (above), so an overlay silently destroys the player's only copy of
 Raven's gamecode at unzip time, before they have read anything.
 
-The cost is real and worth naming: an opt-in copy means most players will not
-perform it, so a shipped fix still does not reach them. That is the trade the
-project already recorded under *Installing* — "a stale copy in `data1/` is
-invisible and permanent until removed by hand… the reason it is not automated".
-Automating an irreversible overwrite would contradict it. If that trade is ever
-revisited, the honest options are an installer that backs up first, or an engine
-that loads our progs from its own directory rather than the game's.
+The cost was real and worth naming: an opt-in copy meant most players would not
+perform it, so a shipped fix still did not reach them. That is the trade the
+project recorded under *Installing* — "a stale copy in `data1/` is invisible and
+permanent until removed by hand… the reason it is not automated". Automating an
+irreversible overwrite would have contradicted it.
+
+Of the two honest ways out named here — an installer that backs up first, or an
+engine that loads our progs from its own directory rather than the game's —
+`uhexen2-xsmc` took the second. It reaches every player without writing to the
+game folder at all, so the overwrite hazard above never arises and the staged
+tree stops being an instruction: it is now only a source for hand-feeding a
+different engine.
 
 ### Verified end-to-end
 
@@ -454,22 +473,22 @@ Still out of scope, and not to be inferred from the existence of this output:
   *correct*. A mod built against Raven's v1.11 progs and running alongside our
   `data1` progs is a configuration nobody has tested.
 
-- **Reporting which progs is loaded.** The only record is two `Con_DPrintf`
-  calls in `PR_LoadProgs()`, invisible without `developer 1`. Now that builds
-  ship gamecode, "which one is this player running?" is a question on every bug
-  report, and the answer is currently unobtainable from a normal console log.
-  A one-line unconditional startup print is the obvious fix; it is deliberately
-  not part of `uhexen2-8qp3` because it is an engine change, and `gamecodeSrc`
-  exists precisely so gamecode work leaves the engine's input hash alone.
+Resolved since: **reporting which progs is loaded.** It was two `Con_DPrintf`
+calls in `PR_LoadProgs()`, invisible without `developer 1`, which left "which
+one is this player running?" unanswerable from a normal console log.
+`uhexen2-zixe` added the unconditional `Gamecode:` line naming the file's path,
+version and whole-file CRC. That line is now what the release notes and
+`gamecode/README.txt` ask bug reporters to paste.
 
 Field context: Tome of Power Abuser pulled r11 expecting the backpack fix and
 asked why there is still a bug and no `progs.dat` in the zip. `uhexen2-zmb3`
-answered the build half; `uhexen2-8qp3` answers the shipping half. What remains
-is that installing it is still a manual copy, so the fix reaches only players
-who read the README.
+answered the build half; `uhexen2-8qp3` answered the shipping half, leaving the
+fix reaching only players who read the README and performed a manual copy.
 
-That last gap is the subject of `uhexen2-xsmc` — making a drop-in engine bring
-its own gamecode, so no copy is needed. The design analysis, including the two
+`uhexen2-xsmc` closed that gap — a drop-in engine now brings its own gamecode
+and loads it from beside its own executable, so **no copy is needed on either
+platform** and the fix reaches every player who unzips a release.
+`uhexen2-qoy7` then ranked the user directory above it, so a player who wants
+different gamecode still wins. The design analysis, including the two
 mechanisms that look obvious and are both wrong, is in
-[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md). It is a proposal; none of it is
-implemented.
+[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md).
