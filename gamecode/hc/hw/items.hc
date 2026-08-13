@@ -2558,11 +2558,12 @@ void DropBackpack(void)
 		if(item.scale > 2.4)item.scale = 2.4;
 		if(item.scale < .15)item.scale = .15;
 
-		if (!total)
-		{
-			remove(item);
-			return;
-		}
+		// Do NOT remove(item) on !total here.  bluemana, greenmana and
+		// spawn_health are copied to the item after `total` is accumulated,
+		// so they never count toward it -- a mana/health-only drop reaches
+		// this branch with total==0 and must survive.  The genuine
+		// nothing-to-drop case already returned at the early-out above.
+		// (uhexen2-9r3n)
 	}
 }
 
