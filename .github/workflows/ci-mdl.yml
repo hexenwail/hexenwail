@@ -1,0 +1,155 @@
+name: Tester build
+
+# Hands an arbitrary commit to an external tester as a downloadable, runnable
+# build.  Restored from 87719ff2e (uhexen2-n3lb), which was reachable from no
+# ref after its branch was deleted.
+#
+# The original keyed off `push: branches: [mathuzzz_mdl_fixes]`.  That branch
+# is gone, so restoring the trigger verbatim would have produced a workflow
+# that could never fire again.  The two triggers below replace it:
+#
+#   workflow_dispatch  the real use case -- a maintainer decides to hand
+#                      someone a build.  The `ref` input is not redundant
+#                      with GitHub's own "Use workflow from" branch picker:
+#                      workflow_dispatch can only run a workflow *file* that
+#                      exists on the selected ref, and the commits we most
+#                      need to hand out (the khsa probe builds on the
+#                      rescue/khsa-* branches) predate this file.  Dispatch
+#                      from master and set `ref` to build those.
+#
+#   push tester/**     keeps the old "push a branch, get a build, send the
+#                      link" loop that uhexen2-khsa and uhexen2-zroc were
+#                      actually delivered through, but namespaced instead of
+#                      tied to one person's branch name.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, tag or branch to build (blank = this workflow ref)'
+        required: false
+        type: string
+  push:
+    branches:
+      - 'tester/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Blank falls back to the dispatch/push ref, which is checkout's
+          # default anyway.  Shallow is fine: the version string comes from
+          # engine/hexen2/quakedef.h (HW_BASE_VERSION), not from git describe.
+          ref: ${{ inputs.ref }}
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@v17
+        # Cachix outages shouldn't fail the build -- see ci.yml.
+        continue-on-error: true
+        with:
+          name: hexenwail
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # Named packages, individually -- never a sweep over `packages`.
+      # packages.demodata is lib.licenses.unfree with hydraPlatforms = [], and
+      # must never reach hexenwail.cachix.org (uhexen2-118f, uhexen2-3vmk).
+      # The flake's allowUnfreePredicate permits it by name for local use, so
+      # a sweep here would build and push it without complaint.  .#release
+      # pulls only linux-fhs, nixos and win64.
+      - name: Build release bundle
+        run: nix build .#release --print-build-logs
+
+      - name: Smoke test
+        run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+
+      - name: Package artifacts
+        # Passed as env rather than interpolated into the script body: a
+        # ${{ }} expression is pasted in as literal text before bash sees it,
+        # so a dispatch `ref` containing $(...) would otherwise execute inside
+        # the unquoted heredoc below.
+        env:
+          REF_NAME: ${{ inputs.ref || github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # The checked-out ref, not github.sha: with a `ref` input those are
+          # different commits, and the whole point of the artifact name is
+          # that the tester can tell us what they actually ran.
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
+
+          cp -rL result/release staging
+
+          # Linux: the whole linux-x86_64/ tree.  The original workflow copied
+          # bin/glhexen2 alone, which cannot start -- linux-fhs patchelfs the
+          # binary to rpath $ORIGIN/../lib and bundles 36 shared objects there
+          # (uhexen2-3aet), and bin/ also carries soundfont.sf2.
+          mkdir linux-pkg
+          cp -r staging/linux-x86_64/. linux-pkg/
+          cp -r staging/licenses linux-pkg/
+          cp staging/BUILD_INFO.txt linux-pkg/
+
+          # Windows: flat layout matching release.yml, so a tester extracts it
+          # straight into a Hexen II directory.  bin/* is what makes it
+          # runnable without a toolchain -- the win64 derivation installs
+          # SDL3.dll and the codec DLLs into bin/ beside glh2.exe.
+          winpkg=win-pkg
+          mkdir -p "$winpkg/data1"
+          cp staging/windows-x86_64/bin/* "$winpkg/"
+          # get_demo.* live beside bin/, not in it; BUILD_INFO.txt tells the
+          # user to run them, so they have to travel too.
+          cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
+          cp -r staging/licenses "$winpkg/"
+          cp staging/BUILD_INFO.txt "$winpkg/"
+          echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
+            > "$winpkg/data1/README - put pak files here.txt"
+
+          # Nothing else in the bundle records which commit this is, and a
+          # tester reporting against "the build you sent me" is how uhexen2-khsa
+          # burned ~29 builds without a reproducible data point.
+          COMMIT=$(git rev-parse HEAD)
+          for d in linux-pkg "$winpkg"; do
+            cat > "$d/TESTING.txt" <<EOF
+          Hexenwail test build
+          Commit:  ${COMMIT}
+          Ref:     ${REF_NAME}
+          Run:     ${RUN_URL}
+
+          This is a test build, not a release. Quote the commit above in any
+          report so it can be tied back to a specific build.
+
+          If you are reporting a rendering problem, these are worth far more
+          than a description:
+            - a savegame parked where the problem is visible
+            - a screenshot of it
+            - your GPU model and driver version
+            - qconsole.log from this folder
+
+          On Windows a crash also writes glh2.RPT next to glh2.exe; send that too.
+          EOF
+          done
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexenwail-test-linux-${{ env.SHORT_SHA }}
+          path: linux-pkg/
+          # GitHub's maximum. uhexen2-zroc sat undelivered for two months;
+          # a tester build expiring before anyone sends the link is the
+          # failure mode this workflow exists to prevent, so don't leave it
+          # to an implicit default someone can lower repo-wide.
+          retention-days: 90
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexenwail-test-windows-${{ env.SHORT_SHA }}
+          path: win-pkg/
+          retention-days: 90
