@@ -330,8 +330,10 @@ _load_embedded:
 		loadmodel->entities = NULL;
 		return;
 	}
-	loadmodel->entities = (char *) Hunk_AllocName ( l->filelen, "entities");
+	// entity lumps aren't guaranteed NUL-terminated on disk (Ironwail 39ba13eda)
+	loadmodel->entities = (char *) Hunk_AllocName ( l->filelen + 1, "entities");
 	memcpy (loadmodel->entities, mod_base + l->fileofs, l->filelen);
+	loadmodel->entities[l->filelen] = '\0';
 }
 
 
