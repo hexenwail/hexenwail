@@ -41,25 +41,60 @@
           strs = builtins.filter builtins.isString parts;
         in builtins.elemAt strs 1;
 
-        # Source filter: exclude non-build files to improve cache hits
-        filteredSrc = pkgs.lib.cleanSourceWith {
-          src = ./.;
-          filter = path: type:
-            let baseName = baseNameOf (toString path);
-            in !(
-              baseName == ".beads" ||
-              baseName == ".github" ||
-              baseName == "history" ||
-              baseName == "docs" ||
-              baseName == "flatpak" ||
-              baseName == "gamecode" ||
-              (type == "regular" && (
-                pkgs.lib.hasSuffix ".md" baseName ||
-                baseName == "release.sh" ||
-                baseName == ".gitignore"
-              ))
-            );
-        };
+        # Source filter: what the CMake builds actually read, and nothing else.
+        #
+        # An allowlist rather than a denylist, because the failure modes are
+        # not symmetric: forgetting to deny something silently costs cache
+        # hits forever, while forgetting to allow something fails the build
+        # immediately and loudly.  Note this runs *after* git has already
+        # dropped .gitignored paths (result, capture.rdc, the demo tarball,
+        # build artefacts), so it only has to reason about tracked files.
+        #
+        # Why each entry is here -- check before removing one:
+        #   CMakeLists.txt  the root list; `utils` configures against it
+        #                   (BUILD_UTILS=ON), the engine packages `cd engine`
+        #   engine          the client, h2ded and the WASM build
+        #   utils           qbsp/light/vis/hcc et al
+        #   hw_utils        the HexenWorld master server and rcon clients
+        #   common          shared sources, pulled in by all three lists above
+        #   scripts         utils/CMakeLists.txt reads it (mk_header.c)
+        #   oslibs          NOT optional despite no literal path in any
+        #                   CMakeLists: engine/CMakeLists.txt reaches it as
+        #                   ${UHEXEN2_TOP}/oslibs for the prebuilt Windows
+        #                   SDL3 and codecs, and the win64 installPhase copies
+        #                   SDL3.dll out of it by relative path
+        #
+        # Deliberately absent, and the reason it is safe: flake.nix,
+        # flake.lock and shell-wasm.nix (a source copy of the recipe is not a
+        # build input -- keeping them meant every flake edit rebuilt every
+        # package from scratch), assets, patches, tools, h2patch, LICENSE and
+        # the legacy top-level Makefile (not read by any CMake build).  The
+        # release package reaches scripts/, oslibs/ and COPYING through
+        # ${self}, which is the unfiltered flake source, so trimming here
+        # cannot starve it.
+        filteredSrc =
+          let
+            root = toString ./.;
+            keep = [
+              "CMakeLists.txt"
+              "engine"
+              "utils"
+              "hw_utils"
+              "common"
+              "scripts"
+              "oslibs"
+            ];
+          in pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let
+                rel = pkgs.lib.removePrefix (root + "/") (toString path);
+                top = builtins.head (pkgs.lib.splitString "/" rel);
+              in
+                builtins.elem top keep
+                # Docs travelling inside a kept tree are still just docs.
+                && !(type == "regular" && pkgs.lib.hasSuffix ".md" rel);
+          };
 
         # Dr. MinGW's runtime -- the post-mortem handler we ship beside the
         # Windows binaries.  It is here rather than in nixpkgs because nixpkgs
