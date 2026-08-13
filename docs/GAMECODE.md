@@ -18,9 +18,9 @@ followed from that, both bad:
    way to root-cause the remaining field reports in `uhexen2-9gdx`, and testers
    on retail progs cannot run it.
 
-This output fixes (1) and makes (2) *possible* — it does not fix (2). Building
-the gamecode is not the same as shipping it; wiring the artifacts into the
-release is `uhexen2-8qp3`.
+This output fixed (1) and made (2) possible. `uhexen2-8qp3` then fixed (2):
+release bundles now carry the compiled gamecode under `gamecode/`, staged for
+the player to copy. See [Shipping](#shipping-in-the-release-bundle).
 
 ## Building
 
@@ -83,12 +83,15 @@ the build. `ci.yml` and `release.yml` build named packages one at a time and
 never sweep all of `packages` — a new output is invisible to CI until it is
 named explicitly. Keep it that way.
 
-`packages.release` does **not** reference `gamecode`. Release artifacts are
-engine-only today; `uhexen2-8qp3` is the work to change that.
+`packages.release` references `gamecode` and stages three of its five files.
+See [Shipping](#shipping-in-the-release-bundle).
 
 ## Installing
 
-Nothing installs this for you. To use it:
+This section is the source-checkout path. Players get the same files staged in
+the release bundle under `gamecode/`; see
+[Shipping](#shipping-in-the-release-bundle). Nothing installs them
+automatically either way. To use it from a checkout:
 
 ```sh
 nix build .#gamecode
@@ -164,8 +167,8 @@ Two related facts, both verified:
   on purpose — `FS_AddGameDirectory()` adds the directory itself *after* its
   paks, and says why in a comment: "so that the dir itself will be placed above
   the pakfiles in the search order which, in turn, will allow override files".
-  This is what makes a loose `data1/progs.dat` override `pak0.pak`'s copy at
-  all.
+  It is what would let a loose `data1/progs.dat` override a packed copy — but
+  see below: in practice there is no packed copy to override.
 - **The user directory beats the install directory.** One
   `FS_AddGameDirectory()` call adds the basedir's paks and directory, then
   loops back to add the userdir's paks and directory — later, so higher.
@@ -184,22 +187,175 @@ gamedir.** An entire later gamedir outranks an earlier one, paks included —
 there is no per-file arbitration between them. So:
 
 - **With the mission pack active, a `data1/progs.dat` we ship is never read.**
-  `portals/progs.dat`, or the copy inside `portals/pak3.pak`, wins outright.
+  `portals/progs.dat` wins outright.
   And "active" is a much wider condition in this fork than the name suggests:
   five flags set `check_portals` in `quakefs.c :: FS_Init()` step 2 —
   `-portals`, `-missionpack`, `-h2mp`, `-game <dir>` and `-mod <dir>`. Only
   `-noportals` overrides, and it is checked first.
 - The same fall-through applies to mods: one that ships no `progs.dat` of its
-  own lands on `portals/pak3.pak`'s Mission Pack v1.12 progs, *not* `data1`'s
+  own lands on `portals/progs.dat`'s Mission Pack v1.12 progs, *not* `data1`'s
   v1.11 — with or without anything we install. `-noportals` restores the
   `data1` fallback.
 - **A bare launch with no arguments does reach `data1/progs.dat`.** That is
   the one common case where a shipped `data1` progs is the one that loads.
 
-The practical upshot, and this is a live decision in `uhexen2-8qp3`: shipping
-only the `h2` tree would silently miss every Portals player. Both `data1/` and
-`portals/` have to go in the zip for the mission pack audience to receive a
-gamecode fix at all.
+The practical upshot, settled by `uhexen2-8qp3`: shipping only the `h2` tree
+would silently miss every Portals player. Both `data1/` and `portals/` go in
+the zip, and both were verified end-to-end (below).
+
+### Retail keeps progs.dat loose — the paks hold no copy
+
+Checked against a retail install (Hexen II + Portal of Praevus) rather than
+assumed, because the safety of the whole install path turns on it:
+
+| Pak | Entries | `*.dat` entries |
+|---|---|---|
+| `data1/pak0.pak` | 696 | none |
+| `data1/pak1.pak` | 523 | none |
+| `portals/pak3.pak` | 245 | none |
+
+The gamecode ships as **loose files**: `data1/PROGS.DAT`, `data1/PROGS2.DAT`
+(uppercase) and `portals/progs.dat` (lowercase). `pak0.pak` does contain
+`maplist.txt`, which names `progs2.dat` in lowercase.
+
+Two consequences:
+
+1. **Overwriting a player's `progs.dat` is irreversible.** There is no packed
+   copy to fall back on, so "just delete the loose file" does not restore Raven's
+   gamecode the way it would in Quake. This is why the release bundle stages the
+   files for a deliberate copy instead of overlaying `data1/` directly — on
+   Windows an overlay would destroy the retail gamecode at unzip time.
+2. **A fresh install made only from `pak0.pak` + `pak1.pak` has no gamecode
+   at all** and cannot start a map. Anyone assembling `data1/` by hand needs
+   the loose files too.
+
+### Case: our lowercase `progs.dat` beats retail's `PROGS.DAT`, deterministically
+
+We install `progs.dat` lowercase; retail's is `PROGS.DAT`. On Linux both then
+sit loose in `data1/` at once, so which one loads is a real question — and the
+answer is not readdir order.
+
+`quakefs.c :: FS_OpenFile_Internal()` tries the **exact-case path first** and
+only falls back to a case-insensitive directory scan if that misses:
+
+```c
+q_snprintf (ospath, sizeof(ospath), "%s/%s", search->filename, filename);
+fs_filesize = Sys_filesize (ospath);        /* exact case, tried first */
+#ifndef PLATFORM_WINDOWS
+if (fs_filesize < 0)                        /* only on a miss */
+{
+    if (FS_ResolveCasePath (search->filename, filename, ospath))
+        fs_filesize = Sys_filesize (ospath);
+}
+#endif
+```
+
+The engine asks for `"progs.dat"` — `pr_edict.c :: def_progname`, lowercase —
+so with our file present the exact-case `stat` hits immediately and
+`FS_ResolveCasePath()` never runs. `PROGS.DAT` is not even scanned. That is
+also *why* retail's uppercase file loads today on Linux: exact case misses, and
+the fallback scan matches it case-insensitively.
+
+`progs2.dat` resolves the same way. Its name comes verbatim from the second
+column of `maplist.txt`, and `pak0.pak`'s copy spells it lowercase.
+
+`FS_ResolveCasePath()`'s `readdir` order is only reachable when *no* file
+matches the requested case exactly, which is not our situation. Verified by
+running the engine, not by reading alone — see below.
+
+Note the cosmetic wart: on Linux the player is left with both `progs.dat` and
+`PROGS.DAT` in `data1/`. Ours wins, the retail file is inert, and that is
+effectively a free backup. On Windows the filesystem is case-insensitive, so
+copying `progs.dat` over `PROGS.DAT` replaces its contents and no backup
+survives — hence the instruction to back up first.
+
+## Shipping in the release bundle
+
+`uhexen2-8qp3`. Both release zips carry a top-level `gamecode/` directory:
+
+```
+gamecode/
+  README.txt
+  data1/progs.dat      888,368
+  data1/progs2.dat     838,712
+  portals/progs.dat  1,147,444
+```
+
+### Three files, not five
+
+`hw/hwprogs.dat` and `siege/hwprogs.dat` are built but **not shipped**. No
+retail HexenWorld bytecode exists to compare them against, and this fork builds
+no HexenWorld engine, so they would be untested bytes. Deferred to
+`uhexen2-nr9l`. `flake.nix` names the three shipped files individually rather
+than copying the tree, so adding a sixth is a deliberate edit and a vanished
+path fails the build.
+
+### Why one shared directory, not one per platform
+
+Progs bytecode is platform-independent. Three per-platform copies would add
+~5.7 MB to the download to say the same thing three times. More importantly the
+files do not belong beside the executable at all — they belong in the player's
+*game data* directory, which is a different place from the engine on every
+platform.
+
+So the layout is the instruction: the tree under `gamecode/` mirrors the game
+directory, and `gamecode/data1/progs.dat` → `<install>/data1/progs.dat` needs no
+explanation beyond itself. This matches `packages.gamecode`'s own gamedir layout
+and `packages.demodata`'s "gamedirs under a basedir" convention.
+
+### Why it is staged, not overlaid
+
+The Windows zip is a flat overlay — it already contains a `data1/` meant to be
+extracted straight into a Hexen II folder — so putting `progs.dat` there would
+install it automatically. That was rejected: retail keeps `progs.dat` loose with
+no packed copy (above), so an overlay silently destroys the player's only copy of
+Raven's gamecode at unzip time, before they have read anything.
+
+The cost is real and worth naming: an opt-in copy means most players will not
+perform it, so a shipped fix still does not reach them. That is the trade the
+project already recorded under *Installing* — "a stale copy in `data1/` is
+invisible and permanent until removed by hand… the reason it is not automated".
+Automating an irreversible overwrite would contradict it. If that trade is ever
+revisited, the honest options are an installer that backs up first, or an engine
+that loads our progs from its own directory rather than the game's.
+
+### Verified end-to-end
+
+Against a real retail install (Hexen II + Portal of Praevus) copied to a scratch
+tree, using `h2ded -developer`, which prints `Programs occupy NNNK` and
+`Loaded <name>, v6, <crc> crc`:
+
+| Case | Retail | After installing ours |
+|---|---|---|
+| `data1/progs.dat` (bare launch) | 930K | **867K** |
+| `data1/progs2.dat` (via `maplist.txt`, map `rick3`) | 877K | **819K** |
+| `portals/progs.dat` (`-portals`) | 1147K | **1120K** |
+
+Each "after" figure is the shipped file's size in KiB, so every one of the three
+is confirmed to be what actually loads — including `data1/progs.dat` while
+retail's `PROGS.DAT` sits beside it untouched.
+
+Functional confirmation, stronger than sizes:
+`tools/qcdis.py <progs> --list BadBackpackDump` finds the `uhexen2-hwky`
+diagnostic in both shipped Hexen II and Portals files and in neither retail
+file — so a tester on a shipped build can finally produce it.
+
+### Player-visible consequences for the release notes
+
+Both are stated in `gamecode/README.txt`, `BUILD_INFO.txt` and the generated
+release notes:
+
+1. **"Vanilla" now means two things.** A bug report may be against our gamecode
+   or Raven's, and the reporter cannot tell by looking. Ask. Removing the files
+   is the fastest bisection available. This cuts both ways — some past reports
+   will have been gamecode bugs already fixed here.
+2. **Crusader's Glyph of the Ancients damages the caster.** `TimeBombTouch`
+   halves `self.dmg` and calls `T_Damage` on whoever touches it — 50 in
+   deathmatch, 37 otherwise — with no owner exemption. Confirmed identical to
+   retail portals 1.12 by disassembly, so this is *not* a change for a player
+   coming from stock progs; it is a change only against the fork's own
+   intermediate gamecode, which briefly early-returned on
+   `other == self.owner`. Restored by `ce8c9d1c4` (`uhexen2-qj8s`).
 
 ## Licensing
 
@@ -264,12 +420,11 @@ about rights.
 
 ## Not yet decided
 
-Two of the questions `uhexen2-zmb3` left open have since been answered by the
-owner: we **keep serving the compiled progs through cachix**, and we **bundle
-it in the release zip** (`uhexen2-8qp3`). That does not make bundling free —
-it changes what "vanilla" means for every bug report we receive, a cost paid on
-every future issue rather than once, so the release notes should say which
-gamecode a build carries.
+Two of the questions `uhexen2-zmb3` left open were answered by the owner: we
+**keep serving the compiled progs through cachix**, and we **bundle it in the
+release zip**. Both are done — bundling landed in `uhexen2-8qp3`, above. It was
+not free: it changes what "vanilla" means for every bug report we receive, a
+cost paid on every future issue rather than once.
 
 Still out of scope, and not to be inferred from the existence of this output:
 
@@ -282,6 +437,16 @@ Still out of scope, and not to be inferred from the existence of this output:
   *correct*. A mod built against Raven's v1.11 progs and running alongside our
   `data1` progs is a configuration nobody has tested.
 
-Field context for whoever picks this up: Tome of Power Abuser pulled r11
-expecting the backpack fix and asked why there is still a bug and no
-`progs.dat` in the zip. The build pipeline is the answer to half of that.
+- **Reporting which progs is loaded.** The only record is two `Con_DPrintf`
+  calls in `PR_LoadProgs()`, invisible without `developer 1`. Now that builds
+  ship gamecode, "which one is this player running?" is a question on every bug
+  report, and the answer is currently unobtainable from a normal console log.
+  A one-line unconditional startup print is the obvious fix; it is deliberately
+  not part of `uhexen2-8qp3` because it is an engine change, and `gamecodeSrc`
+  exists precisely so gamecode work leaves the engine's input hash alone.
+
+Field context: Tome of Power Abuser pulled r11 expecting the backpack fix and
+asked why there is still a bug and no `progs.dat` in the zip. `uhexen2-zmb3`
+answered the build half; `uhexen2-8qp3` answers the shipping half. What remains
+is that installing it is still a manual copy, so the fix reaches only players
+who read the README.
