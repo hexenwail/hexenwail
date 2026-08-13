@@ -60,6 +60,17 @@ int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs);
  * into 'dirs'. Each name slot is 64 bytes (matching MAX_QPATH).
  * Returns the number of directories found. Skips "." and "..". */
 
+const char *Sys_GetExeDir (void);
+/* Directory containing the running executable, with no trailing slash, or
+ * NULL where the platform cannot answer (everything but Linux and Windows).
+ * This is NOT host_parms->basedir: basedir is the working directory the game
+ * was launched from, so anything shipped beside the binary must be looked up
+ * through here instead. Callers must treat NULL as "try the next lookup
+ * layer", never as an error.
+ * The result points into a static buffer resolved on first call; it cannot
+ * change during a run, so the buffer is never rewritten. Make that first call
+ * from the main thread (the background save worker must not race it). */
+
 /* memory protection */
 
 void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length);

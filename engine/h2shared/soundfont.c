@@ -27,9 +27,6 @@
 #include "soundfont.h"
 
 #include <sys/stat.h>
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-#include <unistd.h>	/* readlink */
-#endif
 
 cvar_t	snd_soundfont = {"snd_soundfont", "", CVAR_ARCHIVE};
 
@@ -71,31 +68,6 @@ qboolean SF_FileExists (const char *path)
 	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
 }
 
-/* Resolve the directory the running executable lives in (via /proc/self/exe).
- * basedir is getcwd(), which is not necessarily the install dir, so a
- * soundfont bundled next to the binary won't be found through basedir if the
- * game was launched from elsewhere.  Returns NULL on failure. */
-static const char *exe_dir (void)
-{
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-	static char dir[MAX_OSPATH];
-	ssize_t len;
-	char *slash;
-
-	len = readlink("/proc/self/exe", dir, sizeof(dir) - 1);
-	if (len <= 0 || len >= (ssize_t)sizeof(dir) - 1)
-		return NULL;
-	dir[len] = '\0';
-	slash = strrchr(dir, '/');
-	if (!slash)
-		return NULL;
-	*slash = '\0';
-	return dir;
-#else
-	return NULL;
-#endif
-}
-
 const char *SF_FindSoundFont (void)
 {
 	static char sf_path[MAX_OSPATH];
@@ -112,7 +84,7 @@ const char *SF_FindSoundFont (void)
 
 	/* 2a. next to the executable itself (portable installs: the bundled
 	 * soundfont ships here, regardless of the working directory). */
-	exedir = exe_dir();
+	exedir = Sys_GetExeDir();
 	if (exedir)
 	{
 		static const char *exe_names[] = {
