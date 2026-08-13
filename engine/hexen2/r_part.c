@@ -112,7 +112,10 @@ static int	r_numparticles;
 vec3_t		r_pright, r_pup, r_ppn;
 static	vec3_t	rider_origin;
 
-static	cvar_t	leak_color = {"leak_color", "251", CVAR_ARCHIVE};
+/* Not static: R_ShowPointFile (gl_rmain.c) colors the leak arrows with it,
+ * so the archived cvar keeps meaning something now that the pointfile no
+ * longer goes through the palette-indexed particle system. */
+cvar_t		leak_color = {"leak_color", "251", CVAR_ARCHIVE};
 static	cvar_t	snow_flurry= {"snow_flurry", "1", CVAR_ARCHIVE};
 static	cvar_t	snow_active= {"snow_active", "1", CVAR_ARCHIVE};
 
@@ -243,20 +246,55 @@ void R_ClearParticles (void)
 }
 
 
+vec3_t	r_pointfile[MAX_POINTFILE_POINTS];
+int	r_numpointfile;
+
+void R_ClearPointFile (void)
+{
+	r_numpointfile = 0;
+}
+
+/*
+===============
+PointFile_Collinear
+
+True when b lies (near enough) on the segment a-c, so b can be dropped.
+===============
+*/
+static qboolean PointFile_Collinear (const vec3_t a, const vec3_t b, const vec3_t c)
+{
+	vec3_t	ab, bc, ac;
+
+	VectorSubtract (b, a, ab);
+	VectorSubtract (c, b, bc);
+	VectorSubtract (c, a, ac);
+
+	return VectorLength (ab) + VectorLength (bc) < VectorLength (ac) * 1.00001f;
+}
+
+/*
+===============
+R_ReadPointFile_f
+
+Load the leak path qbsp wrote to maps/<map>.pts.  Ironwail 26902e0e2
+replaced the old one-particle-per-point trail with direction arrows;
+R_ShowPointFile (gl_rmain.c) draws them.
+===============
+*/
 void R_ReadPointFile_f (void)
 {
 	FILE	*f;
 	vec3_t	org;
 	int		r;
 	int		c;
-	particle_t	*p;
+	qboolean	truncated;
 	char	name[MAX_QPATH];
-	byte	color;
+
+	R_ClearPointFile ();
 
 	if (cls.state != ca_connected)
 		return; // need an active map.
 
-	color = (byte)leak_color.integer;
 	q_snprintf (name, sizeof(name), "maps/%s.pts", cl.mapname);
 
 	FS_OpenFile (name, &f, NULL);
@@ -268,6 +306,7 @@ void R_ReadPointFile_f (void)
 
 	Con_Printf ("Reading %s...\n", name);
 	c = 0;
+	truncated = false;
 	VectorClear (org); // silence pesky compiler warnings
 	for ( ;; )
 	{
@@ -276,22 +315,32 @@ void R_ReadPointFile_f (void)
 			break;
 		c++;
 
-		p = AllocParticle();
-		if (!p)
+		if (r_numpointfile == MAX_POINTFILE_POINTS)
 		{
-			Con_Printf ("Not enough free particles\n");
-			break;
+			truncated = true;
+			continue;	// keep counting so the reported total stays honest
 		}
 
-		p->die = 99999;
-		p->color = color; // (-c)&15;
-		p->type = pt_static;
-		VectorClear (p->vel);
-		VectorCopy (org, p->org);
+		VectorCopy (org, r_pointfile[r_numpointfile]);
+		r_numpointfile++;
+
+		// Collapse straight runs: qbsp emits a dense polyline, and one long
+		// arrow reads far better than a chain of coincident stubs.
+		if (r_numpointfile >= 3 &&
+		    PointFile_Collinear (r_pointfile[r_numpointfile - 3],
+					 r_pointfile[r_numpointfile - 2],
+					 r_pointfile[r_numpointfile - 1]))
+		{
+			VectorCopy (r_pointfile[r_numpointfile - 1], r_pointfile[r_numpointfile - 2]);
+			r_numpointfile--;
+		}
 	}
 
 	fclose (f);
-	Con_Printf ("%i points read\n", c);
+	Con_Printf ("%i points read (%i significant)\n", c, r_numpointfile);
+	if (truncated)
+		Con_Printf ("pointfile truncated at %i stored points, leak path is incomplete\n",
+			    MAX_POINTFILE_POINTS);
 }
 
 
