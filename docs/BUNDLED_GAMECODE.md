@@ -35,7 +35,7 @@ look obvious first; the rest constrain what is left.
 The intuitive design is "add our bundle as a lowest-priority gamedir, so
 anything the player has wins". It does nothing.
 
-`FS_OpenFile_Internal()` (`quakefs.c:892-900`) stats the exact-case path first
+`FS_OpenFile_Internal()` (`quakefs.c:897-905`) stats the exact-case path first
 and falls back to `FS_ResolveCasePath()`'s `readdir` scan only on a miss:
 
 ```c
@@ -112,10 +112,10 @@ introduces it and dies three commits later.
 
 `fs_gamedir_nopath` (`quakefs.c:87`) is the engine's own answer to "which game
 am I in". It is set by `FS_AddGameDirectory()` (`quakefs.c:391-392`) and by
-`Host_Game_f()` (`quakefs.c:1482-1483`), and is correct at every call site
+`Host_Game_f()` (`quakefs.c:1505-1506`), and is correct at every call site
 except one:
 
-The **invalid-mission-pack rollback** (`quakefs.c:1706-1709`) unwinds the
+The **invalid-mission-pack rollback** (`quakefs.c:1729-1732`) unwinds the
 searchpath and restores `fs_gamedir` / `fs_userdir` to `data1`:
 
 ```c
@@ -128,7 +128,7 @@ FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
 — but leaves `fs_gamedir_nopath` reading `"portals"`.
 
 This is pre-existing and not caused by anything here. It also already makes
-`Host_Game_f`'s "already running that game" check (`quakefs.c:1399`) wrong in
+`Host_Game_f`'s "already running that game" check (`quakefs.c:1422`) wrong in
 that state: a player in the rolled-back configuration who selects Portals from
 the Mods menu is told they are already in it.
 
@@ -137,8 +137,8 @@ that variable.
 
 ### F4 — runtime gamedir switching is first-class, so launch-time gates are stale
 
-`Host_Game_f()` (`quakefs.c:1369`) rebuilds the searchpath at runtime and can
-add `portals` with a fresh `path_id` (`quakefs.c:1466-1474`):
+`Host_Game_f()` (`quakefs.c:1392`) rebuilds the searchpath at runtime and can
+add `portals` with a fresh `path_id` (`quakefs.c:1488-1497`):
 
 ```c
 /* optionally add portals as base for custom mods */
@@ -212,7 +212,7 @@ so `<exedir>/gamecode/` does not exist.
 
 ### F7 — the CRC table is a real safety net
 
-`PR_LoadProgs()` (`pr_edict.c:2113-2154`) switches on `progs->crc` against a
+`PR_LoadProgs()` (`pr_edict.c:2117-2158`) switches on `progs->crc` against a
 fixed table of known-good values and `Host_Error`s on anything else:
 
 ```c
@@ -288,7 +288,7 @@ path. `path` prints it, so the configuration is self-documenting.
   `strings.txt` or `.mdl` in the bundle tree — now or in five years — and it
   overrides the player's. The design intends to be about two files; the
   mechanism is not.
-- **`Host_Game_f`'s runtime portals add is a second call site.** `quakefs.c:1471`
+- **`Host_Game_f`'s runtime portals add is a second call site.** `quakefs.c:1494`
   calls `FS_AddGameDirectory("portals", true)` at runtime; both paths must
   behave identically or the Mods menu produces a different filesystem than the
   command line did.
@@ -298,7 +298,7 @@ path. `path` prints it, so the configuration is self-documenting.
 
 ### Candidate B — explicit-path substitution in `PR_LoadProgs()`
 
-**Placement**: `PR_LoadProgs()` (`pr_edict.c:2084-2085`), between
+**Placement**: `PR_LoadProgs()` (`pr_edict.c:2085-2086`), between
 `PR_GetProgFilename()` and `FS_LoadHunkFile()`:
 
 ```c
@@ -417,10 +417,19 @@ They answer different questions, and each alone has a hole.
   — it is a fact about intent.
 
 **Hole in `path_id` alone**: a pure map pack (`-game mappack`, no `progs.dat` of
-its own) resolves `progs.dat` from `data1` at `path_id` 1. Condition 1 passes.
-Substituting there would silently change the gamecode underneath a mod — the
-precise thing this design promises not to do. Condition 2 catches it, because
-`fs_gamedir_nopath` reads `"mappack"`.
+its own) resolves `progs.dat` from whichever gamedir beneath it has one. On a
+mission-pack install that is **`portals`**, not `data1`, because `-game` by
+itself pulls `portals` onto the path (`quakefs.c:1674-1689`, pushed at
+`:1698-1701`); only where `portals/` is absent or `-noportals` was passed does
+it fall to `data1` at `path_id` 1. Either way the resolved `path_id` is one we
+ship a bundle for, so condition 1 passes, and substituting there would silently
+change the gamecode underneath a mod — the precise thing this design promises
+not to do. Condition 2 catches both, because `fs_gamedir_nopath` reads
+`"mappack"`.
+
+The `portals` route is the common one, since it is taken by essentially every
+mod launch; it is failure mode 1, and it is the reason this AND cannot be
+reduced to its first term.
 
 **Hole in `fs_gamedir_nopath` alone**: launch `-portals` against an install
 whose `portals/` has no `progs.dat` (or where the mission pack rolled back,
@@ -442,7 +451,7 @@ Neither hole is exotic. Both are reachable from the shipped Mods menu.
    own 1,421,514-byte gamecode loads, exactly as today.
 3. **Player opens the Mods menu and selects "Hexen II".** `Host_Game_f()`
    unwinds to `fs_base_searchpaths` and sets `fs_gamedir_nopath = "data1"`
-   (`quakefs.c:1482-1483`). The searchpath is `data1` at `path_id` 1.
+   (`quakefs.c:1505-1506`). The searchpath is `data1` at `path_id` 1.
 4. **Next map spawn.** `PR_LoadProgs()` runs again — per spawn, not per launch.
    `progs.dat` now resolves from `data1` at `path_id` 1: **condition 1 passes.**
    `fs_gamedir_nopath` reads `"data1"`: **condition 2 passes.** Our bundled
@@ -468,7 +477,7 @@ together:
   There is no configuration in which it reaches a mod.
 - The **`portals`** substitution is the only one that could reach one, because
   `portals` is deliberately used as a *base* for custom mods
-  (`quakefs.c:1466-1474`, `-mod`). Gating on `fs_gamedir_nopath` removes that
+  (`quakefs.c:1488-1497`, `-mod`). Gating on `fs_gamedir_nopath` removes that
   exposure completely.
 
 The cost of gating that way is explicit and accepted: **a pure map pack layered
@@ -516,7 +525,7 @@ and no `PrintHelp` — nothing to add there.
 
 ## Bundle location
 
-Follow `soundfont.c`'s layering (`SF_FindSoundFont`, `soundfont.c:98`), in
+Follow `soundfont.c`'s layering (`SF_FindSoundFont`, `soundfont.c:99`), in
 order:
 
 1. **`<exedir>/gamecode/`** — the portable/zip layout. Already the shipped path
@@ -573,12 +582,10 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    machine: precisely the thing this design promises not to do. What stops it is
    condition 2, `fs_gamedir_nopath` reading `"mappack"`.
 
-   It is also the *common* form of the "hole in `path_id` alone" stated above,
-   and worth reading as a correction to it: that illustration has the map pack
-   resolving from `data1`, which only happens when `portals/` is missing or
-   `-noportals` was passed. On a mission-pack install — the majority — the same
-   launch resolves from `portals` instead. Same hole, reached by the ordinary
-   path rather than the unusual one.
+   It is the "hole in `path_id` alone" stated above, in the form it actually
+   takes on most machines: that argument holds whether the map pack resolves
+   from `data1` or from `portals`, but the `portals` route is the one nearly
+   every mod launch takes, and it needs no unusual install to reach.
 
    **Do not "simplify" the AND away.** The second condition looks redundant on
    any install where `portals/` is absent, which is exactly the install a
