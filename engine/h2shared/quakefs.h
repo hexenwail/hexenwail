@@ -101,6 +101,12 @@ qboolean FS_FileExists (const char *filename, unsigned int *path_id);
 	/* Returns whether the file is found in the hexen2 filesystem.  if path_id is
 	 * not NULL, the id number of the found file's gamedir is stored in path_id. */
 
+const char *FS_LastFileSource (void);
+	/* OS path of the searchpath entry that satisfied the most recent lookup:
+	 * the pak file the entry lives in, or the loose file itself.  Empty after
+	 * a failed lookup.  Like fs_filesize, this describes the *last* call, so
+	 * read it right after the FS_OpenFile / FS_Load*File you care about.  */
+
 qboolean FS_FileInGamedir (const char *filename);
 	/* Reports the existance of a file with read permissions in
 	 * fs_gamedir or fs_userdir. *NOT* for files in pakfiles!  */

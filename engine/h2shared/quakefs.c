@@ -581,6 +581,10 @@ FILE I/O within QFS
 long		fs_filesize;	/* size of the last file opened through QFS */
 int		file_from_pak;	/* ZOID: global indicating that file came from a pak */
 
+/* OS path of the searchpath entry that satisfied the last lookup; see
+ * FS_LastFileSource().  Tracked alongside fs_filesize / file_from_pak. */
+static char	fs_lastfile_source[MAX_OSPATH];
+
 
 /*
 ===========
@@ -875,6 +879,7 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 				/* found it! */
 				fs_filesize = pak->files[i].filelen;
 				file_from_pak = 1;
+				q_strlcpy (fs_lastfile_source, pak->filename, sizeof(fs_lastfile_source));
 				if (path_id)
 					*path_id = search->path_id;
 				if (!file) /* for FS_FileExists() */
@@ -900,6 +905,7 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 #endif
 			if (fs_filesize < 0)
 				continue;
+			q_strlcpy (fs_lastfile_source, ospath, sizeof(fs_lastfile_source));
 			if (path_id)
 				*path_id = search->path_id;
 			if (!file) /* for FS_FileExists() */
@@ -918,7 +924,24 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 
 	if (file) *file = NULL;
 	fs_filesize = -1;
+	fs_lastfile_source[0] = '\0';
 	return fs_filesize;
+}
+
+/*
+===========
+FS_LastFileSource
+
+OS path of the searchpath entry that satisfied the most recent lookup:
+the pak file the entry lives in, or the loose file itself.  Empty after a
+failed lookup.  Same "state left behind by the last call" contract as
+fs_filesize, so read it immediately after the FS_OpenFile / FS_Load*File
+whose provenance you want.
+===========
+*/
+const char *FS_LastFileSource (void)
+{
+	return fs_lastfile_source;
 }
 
 /*
