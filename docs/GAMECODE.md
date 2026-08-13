@@ -218,6 +218,14 @@ The gamecode ships as **loose files**: `data1/PROGS.DAT`, `data1/PROGS2.DAT`
 (uppercase) and `portals/progs.dat` (lowercase). `pak0.pak` does contain
 `maplist.txt`, which names `progs2.dat` in lowercase.
 
+`maplist.txt` lives in **`data1/pak0.pak` only** — 193 bytes, 10 entries, every
+one of them mapping to `progs2.dat`. `pak1.pak` has no copy and `pak3.pak` has
+neither a `maplist.txt` nor any `.dat` entry, so the entire `progs2.dat`
+mechanism is reachable only through that single 193-byte file at `path_id` 1.
+Half of what it names is unreachable: of its ten maps, `rick3`–`rick7` ship in
+no retail pak at all. The five that do exist are `rider1a`, `rider2c`, `meso9`,
+`romeric6` and `eidolon`, all in `pak1.pak`.
+
 Two consequences:
 
 1. **Overwriting a player's `progs.dat` is irreversible.** There is no packed
@@ -328,12 +336,21 @@ tree, using `h2ded -developer`, which prints `Programs occupy NNNK` and
 | Case | Retail | After installing ours |
 |---|---|---|
 | `data1/progs.dat` (bare launch) | 930K | **867K** |
-| `data1/progs2.dat` (via `maplist.txt`, map `rick3`) | 877K | **819K** |
+| `data1/progs2.dat` (via `maplist.txt`, map `eidolon`) | 877K | **819K** |
 | `portals/progs.dat` (`-portals`) | 1147K | **1120K** |
 
 Each "after" figure is the shipped file's size in KiB, so every one of the three
 is confirmed to be what actually loads — including `data1/progs.dat` while
 retail's `PROGS.DAT` sits beside it untouched.
+
+**Use a map that exists.** This table originally cited `map rick3`, which is in
+neither `pak0.pak` nor `pak1.pak` (above). The check appeared to pass anyway,
+because `PR_LoadProgs()` runs at `sv_main.c:2432` and `Mod_ForName` for the
+worldmodel only at `sv_main.c:2502` — so `progs2.dat` loads and prints its size,
+and *then* the map load fails. A nonexistent map produces a
+correct-looking `progs2.dat` line, which is exactly the shape of result that
+survives review. Use `eidolon`, or any of `romeric6` / `meso9` / `rider1a` /
+`rider2c`, and confirm the map actually spawns.
 
 Functional confirmation, stronger than sizes:
 `tools/qcdis.py <progs> --list BadBackpackDump` finds the `uhexen2-hwky`
@@ -450,3 +467,9 @@ asked why there is still a bug and no `progs.dat` in the zip. `uhexen2-zmb3`
 answered the build half; `uhexen2-8qp3` answers the shipping half. What remains
 is that installing it is still a manual copy, so the fix reaches only players
 who read the README.
+
+That last gap is the subject of `uhexen2-xsmc` — making a drop-in engine bring
+its own gamecode, so no copy is needed. The design analysis, including the two
+mechanisms that look obvious and are both wrong, is in
+[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md). It is a proposal; none of it is
+implemented.
