@@ -39,6 +39,17 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 # today; the server is a separate, rarely-wanted artifact.
 option(BUILD_DEDICATED "Also build the h2ded dedicated server" OFF)
 
+# Bundled gamecode (docs/BUNDLED_GAMECODE.md).  Third and last lookup layer,
+# for distribution packagers who install the data somewhere neither
+# <exedir>/gamecode/ nor <exedir>/../share/hexenwail/ finds.  Unset by default:
+# the two exedir-relative layers cover the release zips unaided.  Applied with
+# add_definitions() rather than target_compile_definitions() because both the
+# client and h2ded compile the substitution.
+if(BUNDLED_GAMECODE_DIR)
+    add_definitions(-DBUNDLED_GAMECODE_DIR="${BUNDLED_GAMECODE_DIR}")
+    message(STATUS "Bundled gamecode fallback path: ${BUNDLED_GAMECODE_DIR}")
+endif()
+
 #============================================================================
 # Platform Detection
 #============================================================================

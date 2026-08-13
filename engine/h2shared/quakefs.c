@@ -86,6 +86,12 @@ static char	fs_gamedir[MAX_OSPATH];
 static char	fs_userdir[MAX_OSPATH];
 char	fs_gamedir_nopath[MAX_QPATH];
 
+/* path_id the "portals" gamedir was assigned, or 0 if it was never added.
+ * Unlike data1's, it is not a constant: it depends on what else is already on
+ * the path, and Host_Game_f can add portals again at runtime with a different
+ * one.  See FS_GetPortalsPathID(). */
+static unsigned int	fs_portals_path_id;
+
 unsigned int	gameflags;
 
 cvar_t	oem = {"oem", "0", CVAR_ROM};
@@ -399,6 +405,12 @@ static void FS_AddGameDirectory (const char *dir, qboolean base_fs)
 	if (fs_searchpaths)
 		path_id = fs_searchpaths->path_id << 1;
 	else	path_id = 1U;
+
+	/* Recorded where it is assigned rather than recomputed by walking the
+	 * searchpath later: this is the one place that sees every add, including
+	 * Host_Game_f's runtime one. */
+	if (!q_strcasecmp(dir, "portals"))
+		fs_portals_path_id = path_id;
 
 #if DO_USERDIRS
 add_pakfile:
@@ -1032,17 +1044,12 @@ static int		zone_num;
 #define Draw_EndDisc()
 #endif
 
-static byte *FS_LoadFile (const char *path, int usehunk, unsigned int *path_id)
+/* Allocate-and-read tail, shared by the searchpath loader below and by
+ * FS_LoadHunkFileFromOSPath().  Consumes `h': it is closed either way. */
+static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len)
 {
-	FILE	*h;
 	byte	*buf;
 	char	base[32];
-	long	len;
-
-/* look for it in the filesystem or pack files */
-	len = FS_OpenFile (path, &h, path_id);
-	if (len < 0)
-		return NULL;
 
 /* extract the file's base name for hunk tag */
 	COM_FileBase (path, base, sizeof(base));
@@ -1088,6 +1095,43 @@ static byte *FS_LoadFile (const char *path, int usehunk, unsigned int *path_id)
 	Draw_EndDisc ();
 
 	return buf;
+}
+
+static byte *FS_LoadFile (const char *path, int usehunk, unsigned int *path_id)
+{
+	FILE	*h;
+	long	len;
+
+/* look for it in the filesystem or pack files */
+	len = FS_OpenFile (path, &h, path_id);
+	if (len < 0)
+		return NULL;
+
+	return FS_ReadIntoBuffer (h, path, usehunk, len);
+}
+
+byte *FS_LoadHunkFileFromOSPath (const char *ospath)
+{
+	FILE	*h;
+	long	len;
+
+	len = Sys_filesize (ospath);
+	if (len < 0)
+		return NULL;
+	h = FS_FOpen (ospath, "rb");
+	if (!h)
+		return NULL;
+
+	/* Callers read fs_filesize, file_from_pak and FS_LastFileSource() as
+	 * state left behind by the load.  PR_LoadProgs() uses fs_filesize three
+	 * times -- the size print, the CRC over the whole file, and the strings
+	 * bounds check -- so a stale one there corrupts the CRC and the bounds
+	 * check silently rather than failing. */
+	fs_filesize = len;
+	file_from_pak = 0;
+	q_strlcpy (fs_lastfile_source, ospath, sizeof(fs_lastfile_source));
+
+	return FS_ReadIntoBuffer (h, ospath, LOADFILE_HUNK, len);
 }
 
 byte *FS_LoadHunkFile (const char *path, unsigned int *path_id)
@@ -1943,6 +1987,11 @@ const char *FS_GetGamedir (void)
 const char *FS_GetUserdir (void)
 {
 	return fs_userdir;
+}
+
+unsigned int FS_GetPortalsPathID (void)
+{
+	return fs_portals_path_id;
 }
 
 /* The following FS_*() stdio replacements are necessary if one is

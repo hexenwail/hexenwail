@@ -52,6 +52,11 @@ const char *FS_GetUserbase (void);
 const char *FS_GetGamedir (void);
 const char *FS_GetUserdir (void);
 
+unsigned int FS_GetPortalsPathID (void);
+	/* path_id the "portals" gamedir was assigned, or 0 if portals was never
+	 * added.  data1's id is the constant 1U, but portals' depends on what
+	 * else is on the path, so it has to be read rather than assumed.  */
+
 extern	struct cvar_s	registered;
 extern	struct cvar_s	oem;
 extern	unsigned int	gameflags;
@@ -134,6 +139,12 @@ byte *FS_LoadStackFile (const char *path, void *buffer, long bufsize,
 	/* uses the specified stack stack buffer with the specified size
 	 * of bufsize. if bufsize is too short, uses temp hunk. the bufsize
 	 * must include the +1  */
+
+byte *FS_LoadHunkFileFromOSPath (const char *ospath);
+	/* Loads an absolute OS path onto the hunk, bypassing the searchpath
+	 * entirely.  Returns NULL if the path is not a readable file.  Leaves
+	 * fs_filesize, file_from_pak and FS_LastFileSource() describing this
+	 * load, exactly as the searchpath loaders above do.  */
 
 struct cache_user_s;
 void  FS_LoadCacheFile (const char *path, struct cache_user_s *cu,
