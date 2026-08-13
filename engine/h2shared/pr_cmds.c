@@ -322,6 +322,17 @@ static void PF_setmodel (void)
 	e->v.model = PR_SetEngineString(*check);
 	e->v.modelindex = i; //SV_ModelIndex (m);
 
+	/* This applies mod->mins/maxs to EVERY model type, alias included, so
+	 * the loader's box is the entity's physics box until the progs calls
+	 * setsize().  h2ded and the listen server disagree about what that box
+	 * is for a .mdl: PF_precache_model()'s Mod_ForName() is #ifndef
+	 * SERVERONLY, so on h2ded sv.models[] stays NULL for progs-precached
+	 * models and the vec3_origin branch below runs, giving '0 0 0' where a
+	 * listen server gives the mesh extents padded by 10.  Latent, because
+	 * stock gamecode always calls setsize() after setmodel().  Do not
+	 * "reconcile" the two without checking real mod behaviour first --
+	 * see docs/SrcNotes.txt, "Alias model bounds: h2ded vs. the listen
+	 * server" (uhexen2-3coq). */
 	mod = sv.models[ (int)e->v.modelindex];	// Mod_ForName (m, true);
 
 	if (mod)
