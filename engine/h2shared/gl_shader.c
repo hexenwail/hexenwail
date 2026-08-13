@@ -258,10 +258,6 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
-	p->u_alias_fullbright = glGetUniformLocation_fp(p->program, "u_alias_fullbright");
-	p->u_alias_nofog      = glGetUniformLocation_fp(p->program, "u_alias_nofog");
-	p->u_alias_r6_mode    = glGetUniformLocation_fp(p->program, "u_alias_r6_mode");
-	p->u_alias_stochastic_alpha = glGetUniformLocation_fp(p->program, "u_alias_stochastic_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 }
@@ -278,26 +274,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #define GLSL_EARLY_Z		""
 #define GLSL_EARLY_Z_OPAQUE	""
 #else
-/* uhexen2-khsa r27: explicit `precision highp float;` in the vertex
- * shader header too.  r23 added it only to the fragment shader, but
- * Mathuzzz's dither survived — and interpolated varyings (v_color,
- * v_fogdist) are produced by the vertex shader.  If the vertex stage
- * emits them at mediump, the fragment stage's highp can't recover the
- * lost precision: the interpolator's input is already noisy.  Force
- * highp on both stages so the varying interpolation stays FP32 end-
- * to-end. */
-#define GLSL_VERT_HEADER	"#version 430 core\nprecision highp float;\n"
-/* uhexen2-khsa r23: explicit `precision highp float;` in the fragment
- * shader header.  GLSL 4.30 core defaults to highp, but some NVIDIA
- * drivers have been observed to silently demote interpolated
- * varying math (v_color * tex + fog mix) to mediump, producing per-
- * pixel rounding noise that compounds across the multiply + fog chain.
- * Mathuzzz's screen-door bisect (r22): neither r_alias_fullbright 1
- * nor r_alias_nofog 1 alone fixes the dither, but the combo does —
- * which is exactly the signature of a precision interaction between
- * the two computations.  Explicit highp forces the compiler to keep
- * full FP32 throughout. */
-#define GLSL_FRAG_HEADER	"#version 430 core\nprecision highp float;\n"
+#define GLSL_VERT_HEADER	"#version 430 core\n"
+#define GLSL_FRAG_HEADER	"#version 430 core\n"
 /* Cutout shaders that use `discard` MUST NOT force early_fragment_tests:
  * early tests run depth+stencil — and write them — BEFORE the fragment
  * shader executes; a later `discard` cannot undo the depth write that
@@ -502,13 +480,6 @@ static const char sworld_frag[] =
 	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
 	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
 	 * OIT path always preserves alpha for weighted blending. */
-	/* For cutout alpha-test (threshold > 0.5 = fence/holey, A2C enabled):
-	 * surviving fragments are by definition opaque, so force alpha=1 to
-	 * stop A2C from dithering their coverage based on the noisy
-	 * lightmap.a × tex.a × v_color.a multiply.
-	 * For non-cutout draws (threshold ~ 0.01): preserve actual alpha so
-	 * GL_BLEND with GL_SRC_ALPHA works for translucent surfaces.
-	 * OIT path always preserves alpha for weighted blending. */
 	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the threshold test.
 	 * See salias_frag for rationale. */
 	"#ifdef OIT\n"
@@ -609,10 +580,6 @@ static const char salias_frag[] =
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
-	"uniform float u_alias_fullbright;\n"	/* uhexen2-khsa r21 */
-	"uniform float u_alias_nofog;\n"	/* uhexen2-khsa r22 */
-	"uniform float u_alias_r6_mode;\n"	/* uhexen2-khsa r22 */
-	"uniform float u_alias_stochastic_alpha;\n"	/* uhexen2-khsa r28 */
 	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
@@ -620,36 +587,9 @@ static const char salias_frag[] =
 	"in vec2 v_worldxy;\n"
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
-	/* uhexen2-khsa r28: hash-based stochastic alpha-test (Wronski/Wyman
-	 * 2017).  Probe for the NVIDIA screen-door: changes the discard
-	 * topology from binary threshold to hash-driven, which on at least
-	 * some NVIDIA drivers reroutes how the compiler emits the
-	 * tex*v_color and fog mix chain.  Uses v_texcoord as a stable
-	 * per-fragment seed (object-space UV doesn't shimmer with view). */
-	"float khsa_hash13(vec2 p) {\n"
-	"    p = fract(p * vec2(443.8975, 397.2973));\n"
-	"    p += dot(p.yx, p.xy + 19.19);\n"
-	"    return fract((p.x + p.y) * p.x);\n"
-	"}\n"
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	/* uhexen2-khsa r22: full r6 match — short-circuit before any
-	 * v_color/fog/discard/alpha logic.  Will break cutouts (same as r6
-	 * does for bobberb) — used to confirm the screen-door is in our
-	 * shader's downstream logic at all on Mathuzzz's NVIDIA stack. */
-	"    if (u_alias_r6_mode > 0.5) {\n"
-	"        fragColor = vec4(tex.rgb, 1.0);\n"
-	"        return;\n"
-	"    }\n"
-	/* uhexen2-khsa r21: probe gate for the NVIDIA screen-door bisect.
-	 * When u_alias_fullbright > 0.5, skip the v_color RGB multiply so
-	 * fragments render at the texel's raw RGB (= r6 probe behavior on
-	 * the lighting side).  Alpha still respects v_color.a so EF_HOLEY
-	 * discard and ENTALPHA continue to work.  RULED OUT for screen-door
-	 * (Mathuzzz r21 test). */
-	"    vec4 color = (u_alias_fullbright > 0.5)\n"
-	"                 ? vec4(tex.rgb, tex.a * v_color.a)\n"
-	"                 : tex * v_color;\n"
+	"    vec4 color = tex * v_color;\n"
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
 	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
 	 * Confirmed via bisect (bobberb): some alias models route through
@@ -659,19 +599,7 @@ static const char salias_frag[] =
 	 * the cutout texels' RGB (black/white/teal depending on upload
 	 * path), which looked like the cutout area was filled in.  Restore
 	 * the r14 behavior. */
-	/* uhexen2-khsa r28: stochastic alpha-test when enabled.  Compares
-	 * color.a against a hash of v_texcoord (stable object-space seed).
-	 * For palette-255 cutouts (color.a = 0) discard always fires.  For
-	 * opaque pixels (color.a = 1) discard never fires.  For edge pixels
-	 * with intermediate alpha, discard fires probabilistically with
-	 * weight proportional to color.a — smooth coverage instead of hard
-	 * cutout edge.  Topology change vs binary threshold may shake loose
-	 * the NVIDIA codegen path that's producing Mathuzzz's screen-door. */
-	"    if (u_alias_stochastic_alpha > 0.5) {\n"
-	"        if (color.a < khsa_hash13(v_texcoord * 1024.0)) discard;\n"
-	"    } else {\n"
-	"        if (color.a < u_alpha_threshold) discard;\n"
-	"    }\n"
+	"    if (color.a < u_alpha_threshold) discard;\n"
 	/* Underwater caustics, same formula and same pre-fog position in the
 	 * chain as sworld_frag so a model and the floor it stands on receive
 	 * the identical highlight band.  v_worldxy is world space on every
@@ -682,14 +610,9 @@ static const char salias_frag[] =
 	"        float c = Caustics(v_worldxy, u_alias_caustics.y);\n"
 	"        color.rgb += color.rgb * c * u_alias_caustics.x;\n"
 	"    }\n"
-	/* uhexen2-khsa r22: gate fog mix.  Mathuzzz ruled out v_color via
-	 * r_alias_fullbright (r21) — remaining suspect for the screen-door
-	 * is fog math (exp + mix even when fog density is 0). */
-	"    if (u_alias_nofog < 0.5) {\n"
-	"        float fogfac = u_fog_density * v_fogdist;\n"
-	"        float fog = exp(-fogfac * fogfac);\n"
-	"        color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
-	"    }\n"
+	"    float fogfac = u_fog_density * v_fogdist;\n"
+	"    float fog = exp(-fogfac * fogfac);\n"
+	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
 	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the old threshold-
 	 * based test.  Threshold > 0.5 was correct for fence cutouts but
 	 * caught opaque-as-translucent ents (CASTLE_TR.MDL etc.) that need
@@ -1178,10 +1101,6 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
-	p->u_alias_fullbright = glGetUniformLocation_fp(prog, "u_alias_fullbright");
-	p->u_alias_nofog      = glGetUniformLocation_fp(prog, "u_alias_nofog");
-	p->u_alias_r6_mode    = glGetUniformLocation_fp(prog, "u_alias_r6_mode");
-	p->u_alias_stochastic_alpha = glGetUniformLocation_fp(prog, "u_alias_stochastic_alpha");
 	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
 
 	/* Bind skin texture to unit 0 */

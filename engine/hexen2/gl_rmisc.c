@@ -349,10 +349,6 @@ void R_Init (void)
 	{ extern cvar_t r_brush_inst_offset; Cvar_RegisterVariable (&r_brush_inst_offset); }
 	Cvar_RegisterVariable (&r_alphatocoverage);
 	{ extern cvar_t r_alias_minlight; Cvar_RegisterVariable (&r_alias_minlight); }
-	{ extern cvar_t r_alias_fullbright; Cvar_RegisterVariable (&r_alias_fullbright); }	/* uhexen2-khsa r21 probe */
-	{ extern cvar_t r_alias_nofog;       Cvar_RegisterVariable (&r_alias_nofog); }	/* uhexen2-khsa r22 probe */
-	{ extern cvar_t r_alias_r6_mode;     Cvar_RegisterVariable (&r_alias_r6_mode); }	/* uhexen2-khsa r22 probe */
-	{ extern cvar_t r_alias_stochastic_alpha; Cvar_RegisterVariable (&r_alias_stochastic_alpha); }	/* uhexen2-khsa r28 probe */
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_torch_dlight);

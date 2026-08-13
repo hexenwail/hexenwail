@@ -52,16 +52,8 @@ static float	imm_alpha_threshold = -1.0f;	/* -1 = use shader default */
  * force fragColor.a = 1.0 (opaque) or preserve color.a (translucent).  Set
  * by GL_SetForceOpaqueAlpha; flushed in GL_ImmEnd. */
 static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
-/* uhexen2-khsa r21: per-batch alias fullbright probe.  -1 = leave shader
- * default (0 = normal lighting); 0/1 = explicit value for this batch. */
-static float	imm_alias_fullbright = -1.0f;
-/* uhexen2-khsa r22 probes — same convention. */
-static float	imm_alias_nofog = -1.0f;
-static float	imm_alias_r6_mode = -1.0f;
-/* uhexen2-khsa r28 probe — stochastic alpha-test. */
-static float	imm_alias_stochastic_alpha = -1.0f;
-/* Underwater caustics on alias batches (uhexen2-0gn3).  Unlike the probes
- * above these have a meaningful "off" value rather than a -1 sentinel: 0
+/* Underwater caustics on alias batches (uhexen2-0gn3).  These have a
+ * meaningful "off" value rather than a -1 sentinel: 0
  * intensity is the resting state, and the alias draw paths restore it when
  * they finish so sprites / warp polys / brush polys sharing gl_shader_alias
  * never inherit the effect. */
@@ -221,32 +213,6 @@ void GL_SetForceOpaqueAlpha (float v)
 	imm_force_opaque_alpha = v;
 }
 
-/* uhexen2-khsa r21: 1.0 = render alias batch fullbright (no v_color RGB
- * multiply), 0.0 = normal lighting. */
-void GL_SetAliasFullbright (float v)
-{
-	imm_alias_fullbright = v;
-}
-
-/* uhexen2-khsa r22: 1.0 = skip fog mix in alias frag, 0.0 = normal. */
-void GL_SetAliasNoFog (float v)
-{
-	imm_alias_nofog = v;
-}
-
-/* uhexen2-khsa r22: 1.0 = full r6 match (vec4(tex.rgb, 1.0), no discard,
- * no fog, no alpha branch).  Will break cutouts. */
-void GL_SetAliasR6Mode (float v)
-{
-	imm_alias_r6_mode = v;
-}
-
-/* uhexen2-khsa r28: 1.0 = hash-based stochastic alpha-test, 0.0 = binary. */
-void GL_SetAliasStochasticAlpha (float v)
-{
-	imm_alias_stochastic_alpha = v;
-}
-
 /* uhexen2-0gn3: intensity 0 disables the caustics overlay entirely. */
 void GL_SetAliasCaustics (float intensity, float time)
 {
@@ -336,10 +302,6 @@ static float	imm_cache_mvp[16];
 static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
-static float	imm_cache_alias_fullbright = -2.0f;
-static float	imm_cache_alias_nofog = -2.0f;
-static float	imm_cache_alias_r6_mode = -2.0f;
-static float	imm_cache_alias_stochastic_alpha = -2.0f;
 static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
 static float	imm_cache_alias_model[16];
 static qboolean	imm_cache_alias_model_set;
@@ -366,10 +328,6 @@ void GL_ImmInvalidateState (void)
 	imm_cache_shader = NULL;
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_fullbright = -2.0f;
-	imm_cache_alias_nofog = -2.0f;
-	imm_cache_alias_r6_mode = -2.0f;
-	imm_cache_alias_stochastic_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
 	imm_cache_alias_model_set = false;
 	imm_cache_fog_density = -1.0f;
@@ -416,10 +374,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_shader = shader;
 		imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_fullbright = -2.0f;
-	imm_cache_alias_nofog = -2.0f;
-	imm_cache_alias_r6_mode = -2.0f;
-	imm_cache_alias_stochastic_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
 	imm_cache_alias_model_set = false;
 		imm_cache_fog_density = -1.0f;
@@ -465,34 +419,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_force_opaque_alpha, imm_force_opaque_alpha);
 		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
-	}
-
-	if (imm_alias_fullbright >= 0.0f && shader->u_alias_fullbright >= 0 &&
-	    imm_alias_fullbright != imm_cache_alias_fullbright)
-	{
-		glUniform1f_fp(shader->u_alias_fullbright, imm_alias_fullbright);
-		imm_cache_alias_fullbright = imm_alias_fullbright;
-	}
-
-	if (imm_alias_nofog >= 0.0f && shader->u_alias_nofog >= 0 &&
-	    imm_alias_nofog != imm_cache_alias_nofog)
-	{
-		glUniform1f_fp(shader->u_alias_nofog, imm_alias_nofog);
-		imm_cache_alias_nofog = imm_alias_nofog;
-	}
-
-	if (imm_alias_r6_mode >= 0.0f && shader->u_alias_r6_mode >= 0 &&
-	    imm_alias_r6_mode != imm_cache_alias_r6_mode)
-	{
-		glUniform1f_fp(shader->u_alias_r6_mode, imm_alias_r6_mode);
-		imm_cache_alias_r6_mode = imm_alias_r6_mode;
-	}
-
-	if (imm_alias_stochastic_alpha >= 0.0f && shader->u_alias_stochastic_alpha >= 0 &&
-	    imm_alias_stochastic_alpha != imm_cache_alias_stochastic_alpha)
-	{
-		glUniform1f_fp(shader->u_alias_stochastic_alpha, imm_alias_stochastic_alpha);
-		imm_cache_alias_stochastic_alpha = imm_alias_stochastic_alpha;
 	}
 
 	/* uhexen2-0gn3.  Both sit at their resting values (0 intensity,

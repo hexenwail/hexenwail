@@ -116,23 +116,6 @@ cvar_t	r_alphatocoverage = {"r_alphatocoverage", "0", CVAR_ARCHIVE};
  * "screen-door" against the dim scene. Default 24 matches Ironwail's
  * player-floor value; 0 disables. */
 cvar_t	r_alias_minlight = {"r_alias_minlight", "24", CVAR_ARCHIVE};
-/* uhexen2-khsa r21: probe gate that skips the v_color RGB multiply in
- * salias_frag.  Default 0 = normal lighting (tex * v_color).  Set to 1
- * to render alias models fullbright (texel RGB) — used to A/B test
- * whether the v_color multiply is what triggers Mathuzzz's NVIDIA
- * screen-door pattern.  Discard + ENTALPHA continue to work via
- * tex.a * v_color.a even when fullbright. */
-cvar_t	r_alias_fullbright = {"r_alias_fullbright", "0", CVAR_ARCHIVE};
-/* uhexen2-khsa r22 probes for the NVIDIA screen-door bisect (v_color RGB
- * was ruled out by r21).  Both default 0 = normal behavior. */
-cvar_t	r_alias_nofog       = {"r_alias_nofog", "0", CVAR_ARCHIVE};
-cvar_t	r_alias_r6_mode     = {"r_alias_r6_mode", "0", CVAR_ARCHIVE};
-/* uhexen2-khsa r28: stochastic alpha-test probe (Wronski/Wyman 2017).
- * Default 0 = binary discard.  Set to 1 to replace the discard with a
- * hash-based stochastic test seeded by v_texcoord — changes the shader
- * topology enough that NVIDIA's compiler may emit the tex*v_color +
- * fog mix chain through a different codegen path. */
-cvar_t	r_alias_stochastic_alpha = {"r_alias_stochastic_alpha", "0", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
@@ -678,11 +661,6 @@ static void R_DrawSpriteModel (entity_t *e)
 		 * draw leaks through to this immediate-mode batch and turns
 		 * translucent sprites (tele shimmer, smoke, splash) opaque. */
 		GL_SetForceOpaqueAlpha (0.0f);
-		/* Sprites use alpha blending, not alpha testing — stochastic
-		 * alpha must not leak from a prior alias model draw or fragments
-		 * get hash-discarded, turning translucent sprites (teleport
-		 * shimmer, smoke) into a black fuzzy screen-door. */
-		GL_SetAliasStochasticAlpha (0.0f);
 	}
 
 	GL_ImmTexCoord2f (0, 1);
@@ -1258,14 +1236,6 @@ static void R_DrawAliasModel (entity_t *e)
 	int		mls;
 	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
 	float		caustics = R_CausticsIntensity();
-
-	/* uhexen2-khsa r21: push fullbright probe state for the legacy
-	 * alias immediate-mode batch.  Cvar-driven; default 0 = normal. */
-	GL_SetAliasFullbright(r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
-	/* uhexen2-khsa r22 probes. */
-	GL_SetAliasNoFog(r_alias_nofog.value > 0.5f ? 1.0f : 0.0f);
-	GL_SetAliasR6Mode(r_alias_r6_mode.value > 0.5f ? 1.0f : 0.0f);
-	GL_SetAliasStochasticAlpha(r_alias_stochastic_alpha.value > 0.5f ? 1.0f : 0.0f);
 
 	clmodel = e->model;
 
@@ -2858,20 +2828,6 @@ static void R_DrawAliasInstanced (void)
 	 * ENTALPHA), so we can force fragColor.a=1 unconditionally here. */
 	if (prog->u_force_opaque_alpha >= 0)
 		glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
-	/* uhexen2-khsa r21 probe: push fullbright cvar value for the instanced batch. */
-	if (prog->u_alias_fullbright >= 0)
-		glUniform1f_fp(prog->u_alias_fullbright,
-			       r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
-	/* uhexen2-khsa r22 probes — fog/r6-mode gates. */
-	if (prog->u_alias_nofog >= 0)
-		glUniform1f_fp(prog->u_alias_nofog,
-			       r_alias_nofog.value > 0.5f ? 1.0f : 0.0f);
-	if (prog->u_alias_r6_mode >= 0)
-		glUniform1f_fp(prog->u_alias_r6_mode,
-			       r_alias_r6_mode.value > 0.5f ? 1.0f : 0.0f);
-	if (prog->u_alias_stochastic_alpha >= 0)
-		glUniform1f_fp(prog->u_alias_stochastic_alpha,
-			       r_alias_stochastic_alpha.value > 0.5f ? 1.0f : 0.0f);
 	/* Underwater caustics.  Same intensity source as the world and legacy
 	 * alias paths; the instance world matrix already puts v_worldxy in world
 	 * space, so nothing else is needed here.  uhexen2-0gn3. */
@@ -3036,23 +2992,6 @@ static void R_DrawAliasInstanced (void)
 			 * want fragColor.a to leak garbage into FB.a. */
 			if (prog->u_force_opaque_alpha >= 0)
 				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
-			/* uhexen2-khsa r21 probe: fullbright cvar value for the additive pass.
-			 * This pass is already drawing texel RGB directly (it's the fullbright
-			 * pixels of the model), so the value mostly matters when r_alias_fullbright=1
-			 * makes the MAIN pass also skip v_color — keep state consistent here. */
-			if (prog->u_alias_fullbright >= 0)
-				glUniform1f_fp(prog->u_alias_fullbright,
-					       r_alias_fullbright.value > 0.5f ? 1.0f : 0.0f);
-			/* uhexen2-khsa r22 probes — fog/r6-mode gates. */
-			if (prog->u_alias_nofog >= 0)
-				glUniform1f_fp(prog->u_alias_nofog,
-					       r_alias_nofog.value > 0.5f ? 1.0f : 0.0f);
-			if (prog->u_alias_r6_mode >= 0)
-				glUniform1f_fp(prog->u_alias_r6_mode,
-					       r_alias_r6_mode.value > 0.5f ? 1.0f : 0.0f);
-			if (prog->u_alias_stochastic_alpha >= 0)
-				glUniform1f_fp(prog->u_alias_stochastic_alpha,
-					       r_alias_stochastic_alpha.value > 0.5f ? 1.0f : 0.0f);
 
 			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);

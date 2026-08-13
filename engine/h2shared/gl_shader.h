@@ -36,10 +36,6 @@ typedef struct glprogram_s {
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
 	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
-	GLint	u_alias_fullbright; /* alias FS: when > 0.5, color = vec4(tex.rgb, tex.a*v_color.a) — skip the lighting multiply.  Probe for the NVIDIA screen-door bisect (r21 — does v_color RGB cause the dither?). */
-	GLint	u_alias_nofog;	    /* alias FS: when > 0.5, skip the fog mix entirely.  r22 probe — does fog math (exp, mix) trigger the dither even when fog density is 0? */
-	GLint	u_alias_r6_mode;    /* alias FS: when > 0.5, fragColor = vec4(tex.rgb, 1.0) — full r6 match, no discard, no fog, no alpha branch.  r22 probe — is the bug somewhere in our shader logic at all? */
-	GLint	u_alias_stochastic_alpha; /* alias FS: when > 0.5, replace `if (color.a < threshold) discard;` with hash-based stochastic test (Wronski/Wyman 2017).  r28 probe — does restructuring the discard shake loose the NVIDIA compiler quirk that's producing Mathuzzz's screen-door? */
 	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
 	 * gl_shader_alias is the generic textured+vertex-color program and is
 	 * also used for sprites, warp polys and unlit brush polys, so its
@@ -88,10 +84,6 @@ typedef struct {
 	GLint	u_eyepos;	/* camera position for fog distance */
 	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
 	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
-	GLint	u_alias_fullbright;  /* uhexen2-khsa r21 — skip v_color RGB multiply when > 0.5 */
-	GLint	u_alias_nofog;	     /* uhexen2-khsa r22 — skip fog mix when > 0.5 */
-	GLint	u_alias_r6_mode;     /* uhexen2-khsa r22 — full r6 match when > 0.5 */
-	GLint	u_alias_stochastic_alpha; /* uhexen2-khsa r28 — hash-based stochastic alpha-test */
 	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
 } gl_alias_inst_prog_t;
 
