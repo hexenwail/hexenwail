@@ -21,10 +21,9 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "midi_drv.h"
+#include "soundfont.h"
 
 #include <fluidsynth.h>
-#include <sys/stat.h>
-#include <unistd.h>	/* readlink */
 
 static fluid_settings_t	*fs_settings;
 static fluid_synth_t	*fs_synth;
@@ -41,127 +40,6 @@ static qboolean		fs_loop_applied = false;	/* last bgmloop value pushed to the pl
  * stays a modest static allocation; FMIDI_Advance loops to fill the ring. */
 #define FS_RENDER_FRAMES	1024
 static short		fs_buf[FS_RENDER_FRAMES * 2];	/* interleaved stereo s16 */
-
-static cvar_t	snd_soundfont = {"snd_soundfont", "", CVAR_ARCHIVE};
-
-/* Common SoundFont search paths.  Includes the Flatpak app prefix
- * (/app/share/...) so a soundfont bundled with the Flatpak is found even
- * though /usr there is the runtime, not the app. */
-static const char *sf_paths[] = {
-	/* Flatpak-bundled soundfont (see flatpak/io.github.hexenwail.hexenwail.yml) */
-	"/app/share/soundfonts/default.sf2",
-	"/app/share/soundfonts/FluidR3_GM.sf2",
-	"/app/share/sounds/sf2/FluidR3_GM.sf2",
-	/* System locations (Debian/Ubuntu/Mint, Fedora, Arch, etc.) */
-	"/usr/share/soundfonts/default.sf2",
-	"/usr/share/soundfonts/FluidR3_GM.sf2",
-	"/usr/share/soundfonts/FluidR3_GS.sf2",
-	"/usr/share/sounds/sf2/FluidR3_GM.sf2",
-	"/usr/share/sounds/sf2/FluidR3_GS.sf2",
-	"/usr/share/sounds/sf2/default-GM.sf2",
-	"/usr/share/sounds/sf2/TimGM6mb.sf2",
-	"/usr/share/sounds/sf3/FluidR3_GM.sf3",
-	"/usr/share/sounds/sf3/default-GM.sf3",
-	NULL
-};
-
-/* Check if a file exists without FluidSynth's noisy error output */
-static qboolean file_exists (const char *path)
-{
-	struct stat st;
-	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
-}
-
-/* Resolve the directory the running executable lives in (via /proc/self/exe).
- * basedir is getcwd(), which is not necessarily the install dir, so a
- * soundfont bundled next to the binary won't be found through basedir if the
- * game was launched from elsewhere.  Returns NULL on failure. */
-static const char *exe_dir (void)
-{
-	static char dir[MAX_OSPATH];
-	ssize_t len;
-	char *slash;
-
-	len = readlink("/proc/self/exe", dir, sizeof(dir) - 1);
-	if (len <= 0 || len >= (ssize_t)sizeof(dir) - 1)
-		return NULL;
-	dir[len] = '\0';
-	slash = strrchr(dir, '/');
-	if (!slash)
-		return NULL;
-	*slash = '\0';
-	return dir;
-}
-
-/* Try to find a soundfont, checking in order:
- * 1. snd_soundfont cvar (user override)
- * 2. soundfont.sf2/.sf3 next to the binary or in basedir / data1
- * 3. SOUNDFONT_PATH compile-time define (Nix builds)
- * 4. Common system paths
- */
-static const char *find_soundfont (void)
-{
-	static char sf_path[MAX_OSPATH];
-	const char *exedir;
-	int i;
-
-	/* 1. user-specified path */
-	if (snd_soundfont.string[0])
-	{
-		if (file_exists(snd_soundfont.string))
-			return snd_soundfont.string;
-		Con_Printf("FluidSynth: snd_soundfont '%s' not found\n", snd_soundfont.string);
-	}
-
-	/* 2a. next to the executable itself (portable installs: the bundled
-	 * soundfont ships here, regardless of the working directory). */
-	exedir = exe_dir();
-	if (exedir)
-	{
-		static const char *exe_names[] = {
-			"%s/soundfont.sf2", "%s/soundfont.sf3", NULL
-		};
-		int n;
-		for (n = 0; exe_names[n]; n++)
-		{
-			q_snprintf(sf_path, sizeof(sf_path), exe_names[n], exedir);
-			if (file_exists(sf_path))
-				return sf_path;
-		}
-	}
-
-	/* 2b. check game directory for a bundled soundfont, in a few common
-	 * spots and extensions: next to the binary and inside data1. */
-	{
-		static const char *base_names[] = {
-			"%s/soundfont.sf2", "%s/soundfont.sf3",
-			"%s/data1/soundfont.sf2", "%s/data1/soundfont.sf3",
-			NULL
-		};
-		int n;
-		for (n = 0; base_names[n]; n++)
-		{
-			q_snprintf(sf_path, sizeof(sf_path), base_names[n], host_parms->basedir);
-			if (file_exists(sf_path))
-				return sf_path;
-		}
-	}
-
-#ifdef SOUNDFONT_PATH
-	/* 3. compile-time path (Nix builds) */
-	if (file_exists(SOUNDFONT_PATH))
-		return SOUNDFONT_PATH;
-#endif
-
-	/* 4. common system paths */
-	for (i = 0; sf_paths[i]; i++)
-	{
-		if (file_exists(sf_paths[i]))
-			return sf_paths[i];
-	}
-
-	return NULL;
-}
 
 /* Suppress FluidSynth's log output during normal operation */
 static void fs_log_suppress (int level, const char *message, void *data)
@@ -209,7 +87,7 @@ static qboolean FMIDI_EnsureSoundFont (void)
 
 	if (FS_HAVE_SOUNDFONT())
 		return true;
-	sf = find_soundfont();
+	sf = SF_FindSoundFont();
 	if (!sf)
 		return false;
 	return FMIDI_LoadSoundFont(sf);
@@ -228,7 +106,7 @@ static void FMIDI_SoundFontChanged (cvar_t *var)
 	if (!var->string[0])
 		return;		/* cleared: keep playing whatever is loaded */
 
-	if (!file_exists(var->string))
+	if (!SF_FileExists(var->string))
 	{
 		Con_Printf("FluidSynth: snd_soundfont '%s' not found\n", var->string);
 		return;
@@ -241,7 +119,7 @@ static void FMIDI_SoundFontChanged (cvar_t *var)
 
 static qboolean FMIDI_Init (void)
 {
-	Cvar_RegisterVariable(&snd_soundfont);
+	SF_RegisterCvar();
 	Cvar_SetCallback(&snd_soundfont, FMIDI_SoundFontChanged);
 
 	/* suppress FluidSynth's built-in logging */
