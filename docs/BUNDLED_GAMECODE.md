@@ -5,12 +5,21 @@ gamecode, so that a player who unzips a release gets our `progs.dat` fixes
 without performing a manual copy into their own `data1/`.
 
 Companion to [GAMECODE.md](GAMECODE.md), which covers what the build produces
-today and how it is installed by hand. That document ends on *"installing it is
-still a manual copy, so the fix reaches only players who read the README"*.
-This one is the answer to that sentence.
+and how to install it by hand from a checkout. Before this landed, that document
+stood on *"installing it is still a manual copy, so the fix reaches only players
+who read the README"*. This one is the answer to that sentence.
 
-**Status: design only.** Nothing described below is implemented. Read every
-"we do X" as "the recommendation is to do X".
+**Status: implemented.** `uhexen2-xsmc` landed the substitution in
+`PR_LoadProgs()` (`PR_FindBundleDir` / `PR_BundledProgsPath`, `pr_edict.c`), the
+shared `Sys_GetExeDir()` it needs, and the per-platform bundle in `flake.nix`;
+`uhexen2-qoy7` added the user-directory stand-down and `uhexen2-zixe` the
+`Gamecode:` startup line. This document is kept as the design record — read
+every "we recommend X" as "X is what shipped".
+
+The player-facing consequence, which the two texts below are written against:
+**a normal install copies nothing on either platform.** On Linux the engine
+finds `<exedir>/../share/hexenwail/`; on Windows the release zip is flat, so
+`gamecode/` already sits beside `glh2.exe` and satisfies lookup layer 1.
 
 ## Verdict
 
@@ -683,13 +692,18 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    `FS_UserdirHasFile()` compiles to a constant `false` there, deliberately: a
    probe of the userdir on Windows would be a probe of the install directory,
    which every retail tree populates, and the feature would be inert. A Windows
-   player's `<install>/data1/progs.dat` loses to the bundle, and `-vanillaprogs`
-   — or deleting the bundle — is the only recourse they have.
+   player's `<install>/data1/progs.dat` loses to the bundle, so their recourse
+   is `-vanillaprogs`, or **replacing the file inside `gamecode/` beside
+   `glh2.exe`** — the bundle is our file, not Raven's, so overwriting it risks
+   nothing and re-extracting the zip undoes it. Prefer that to "delete the
+   bundle": it is reversible and it keeps the other two gamedirs intact.
 
    Same user action, two behaviours, decided by a `#define` in `sys.h`. It
    belongs in the release notes, not only here. `gamecode/README.txt` states the
-   split where the players who hit it will read it: on Unix it directs the
-   manual install at `~/.hexen2/`, on Windows at the game folder.
+   split under *RUNNING SOME OTHER GAMECODE*, where the players who hit it will
+   read it: `~/.hexen2/` on Unix, the `gamecode/` folder on Windows. Neither is
+   framed as an install step, because on both platforms the bundle is already
+   live and the normal player copies nothing.
 
 8. **Savegames crossing a progs change.** This is *the* genuinely new risk
    relative to `uhexen2-8qp3`. The manual copy let the player pick the moment;
