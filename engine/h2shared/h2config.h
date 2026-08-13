@@ -67,12 +67,14 @@
 
    We default to 0 (demoness offered in the old mission) because the
    OLD MISSION and NEW MISSION menu entries do not select different
-   gamedirs:  portals/ is added to the searchpath at filesystem init
-   whenever GAME_PORTALS is set (quakefs.c, "step 2"), so both entries
-   run under the same progs.dat and differ only in the start map that
-   M_Difficulty_Key launches (demo1 vs. intermission 12 + keep1).  The
-   class list therefore stays consistent with the loaded gamecode
-   either way.  (A custom mod riding on portals data can still supply
+   gamedirs:  GAME_PORTALS is only ever set by quakefs.c "step 2"
+   validating portals/pak3.pak as it adds portals/ to the searchpath,
+   and the OLD MISSION entry is only drawn when GAME_PORTALS is set.
+   So whenever either entry can be picked at all, portals/ is already
+   in the searchpath and its progs.dat is the loaded gamecode; the two
+   entries differ only in the start map that M_Difficulty_Key launches
+   (demo1 vs. intermission 12 + keep1).  The class list therefore stays
+   consistent with the loaded gamecode either way.  (A custom mod riding on portals data can still supply
    a progs.dat without class 5; Host_Class_f only catches that once a
    server is up, but that caveat is identical for the NEW MISSION /
    START W/ INTRO entry, which has always offered the demoness.)
