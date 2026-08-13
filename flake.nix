@@ -943,9 +943,12 @@
             # One shared directory, not a copy per platform: progs bytecode is
             # platform-independent, so three copies would add ~5.7 MB to the
             # download to say the same thing three times.  The tree under
-            # gamecode/ IS the install instruction -- gamecode/data1/progs.dat
-            # goes to <install>/data1/progs.dat -- which is why the gamedir
-            # names are kept rather than flattening the three files together.
+            # gamecode/ IS the install instruction -- data1/ and portals/ are
+            # the gamedirs the files belong to -- which is why the gamedir names
+            # are kept rather than flattening the three files together.  Where
+            # that tree gets copied TO is platform-dependent and README.txt
+            # spells it out: ~/.hexen2 on Unix, the game folder on Windows.
+            # uhexen2-qoy7 is why they differ.
             #
             # Staged for the player to copy, NOT extracted over their data1/.
             # Retail ships progs.dat as a LOOSE file and the paks contain no
@@ -989,19 +992,55 @@ do.
 
 WHERE THEY GO
 -------------
-The layout below mirrors your Hexen II directory.  Copy each file to the
-matching place in your installation, beside the .pak files:
+Two different answers, because Linux and Windows do not have the same set of
+places to put them.
 
-  gamecode/data1/progs.dat    ->  <your Hexen II folder>/data1/progs.dat
-  gamecode/data1/progs2.dat   ->  <your Hexen II folder>/data1/progs2.dat
-  gamecode/portals/progs.dat  ->  <your Hexen II folder>/portals/progs.dat
+Linux, macOS, BSD -- your Hexen II user directory.  The engine creates it the
+first time you run it, and it is where your config and savegames already live:
 
-BACK UP FIRST
--------------
-Retail Hexen II keeps progs.dat as a loose file, and there is NO copy inside
-pak0.pak/pak1.pak/pak3.pak to fall back on.  Copy your existing progs.dat,
-progs2.dat and portals/progs.dat somewhere safe before overwriting them.  To
-go back to Raven's gamecode, restore those backups -- nothing else is needed.
+  gamecode/data1/progs.dat    ->  ~/.hexen2/data1/progs.dat
+  gamecode/data1/progs2.dat   ->  ~/.hexen2/data1/progs2.dat
+  gamecode/portals/progs.dat  ->  ~/.hexen2/portals/progs.dat
+
+Windows -- there is no user directory, so they go in the game folder itself,
+beside the .pak files:
+
+  gamecode\data1\progs.dat    ->  <your Hexen II folder>\data1\progs.dat
+  gamecode\data1\progs2.dat   ->  <your Hexen II folder>\data1\progs2.dat
+  gamecode\portals\progs.dat  ->  <your Hexen II folder>\portals\progs.dat
+
+WHY ~/.hexen2 AND NOT THE GAME FOLDER
+-------------------------------------
+Three reasons, and the first one decides it:
+
+1. It works.  Hexenwail carries its own copy of this gamecode next to the
+   engine and prefers it to the game folder's, so on Linux a progs.dat copied
+   into <your Hexen II folder>/data1/ has no effect -- the engine's copy is
+   used instead.  ~/.hexen2 is the one place that outranks it.  That is also
+   the answer if you want to run some OTHER progs.dat -- a translation, a
+   balance patch, your own build: put it in ~/.hexen2 and it wins.
+
+   On Windows the engine's copy already sits beside glh2.exe and there is no
+   user directory, so the game folder is both the only answer and the right
+   one.
+
+2. Nothing of Raven's is overwritten.  Retail Hexen II keeps progs.dat as a
+   loose file and there is NO copy inside pak0.pak/pak1.pak/pak3.pak to fall
+   back on, so overwriting it in the game folder cannot be undone.
+
+3. Uninstalling is deleting files you put there yourself, in a directory you
+   own.  The game folder is never touched, so there is nothing to restore.
+
+BACK UP FIRST -- WINDOWS ONLY
+-----------------------------
+Copying into the game folder overwrites Raven's files, and as above there is
+no packed copy to fall back on.  Put your existing data1\progs.dat,
+data1\progs2.dat and portals\progs.dat somewhere safe before you copy over
+them.  To go back to Raven's gamecode, restore those backups -- nothing else
+is needed.
+
+On Linux there is nothing to back up.  You are only adding files to
+~/.hexen2, and `rm' takes them away again.
 
 Copy progs.dat and progs2.dat TOGETHER.  Ten late-game maps use progs2.dat and
 the rest use progs.dat; installing one without the other leaves the game
@@ -1025,8 +1064,8 @@ never how the game worked.
 
 Once you install these, you are no longer running "vanilla" Hexen II gamecode.
 If you report a bug, please say whether these files are installed.  Removing
-them (restore your backups) is the fastest way to tell whether a problem is
-ours or Raven's.
+them -- delete them from ~/.hexen2, or restore your backups on Windows -- is
+the fastest way to tell whether a problem is ours or Raven's.
 EOF
 
             # The same three files again, this time where the engine finds them
@@ -1091,12 +1130,14 @@ The demo data comes from the uHexen2 project and is not ours to relicense.
 Optional gamecode (gamecode/):
 This release also carries the Hexen II game logic rebuilt from source, with
 fixes that are not in Raven's 1997 progs.dat -- chiefly dropped backpacks
-silently vanishing in co-op and deathmatch.  It is NOT installed for you: the
-directory tree under gamecode/ mirrors your Hexen II folder, so copy
-gamecode/data1/progs.dat to data1/progs.dat and so on.  Back up the files you
-replace first -- retail keeps them loose and no .pak holds a spare copy.
-Read gamecode/README.txt before you do; it lists one deliberate behaviour
-change to the Crusader's Glyph of the Ancients.
+silently vanishing in co-op and deathmatch.  The engine already loads it from
+beside the executable, so there is nothing to do; gamecode/ is the same three
+files staged for a hand install, e.g. into another engine.  Where they go is
+not the same on both platforms -- ~/.hexen2/data1/ on Linux, data1/ in the
+game folder on Windows -- and on Windows that means overwriting files retail
+keeps loose with no .pak copy to fall back on.  Read gamecode/README.txt
+first; it explains both, and lists one deliberate behaviour change to the
+Crusader's Glyph of the Ancients.
 
 Crash reporting (Windows):
 The Windows build carries Dr. MinGW, so a crash writes "glh2.RPT" beside

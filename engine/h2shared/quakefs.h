@@ -116,6 +116,12 @@ qboolean FS_FileInGamedir (const char *filename);
 	/* Reports the existance of a file with read permissions in
 	 * fs_gamedir or fs_userdir. *NOT* for files in pakfiles!  */
 
+qboolean FS_UserdirHasFile (const char *gamedir, const char *filename);
+	/* Is there a loose copy of filename in the user directory's named gamedir,
+	 * i.e. did the player install their own?  Case-insensitive on the same
+	 * platforms the searchpath is.  *NOT* for files in pakfiles, and always
+	 * false where there is no user directory (Windows, OS/2).  */
+
 int FS_ListSearchSubdirs (const char *relpath, char dirs[][64], int maxdirs);
 	/* Enumerates subdirectories of relpath (e.g. "music") across all loose
 	 * (non-pak) searchpath gamedirs.  Names are deduped case-insensitively;

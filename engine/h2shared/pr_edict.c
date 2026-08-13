@@ -2143,7 +2143,8 @@ both directions: launched into a mod and switched back to Hexen II, a
 command-line gate would refuse to substitute forever; launched bare and
 switched into a mod, it would substitute inside the mod.
 
-Two independent conditions, ANDed.  Each alone has a reachable hole:
+Two independent conditions establish that the bundle MAY substitute, ANDed
+because each alone has a reachable hole:
 
   - path_id answers "is this the base game's file?".  Alone it is not enough:
     a pure map pack that ships no gamecode of its own resolves progs.dat from
@@ -2158,6 +2159,18 @@ Two independent conditions, ANDed.  Each alone has a reachable hole:
     a data1 file.
 
 Both holes are reachable from the shipped Mods menu.  Do not reduce the AND.
+
+A third condition then decides that it MUST NOT, giving the ordering
+
+	user directory  >  bundle  >  install directory
+
+The two losers are not symmetric, which is what makes this decidable at all.
+The install's data1/PROGS.DAT is Raven's file and superseding it IS the
+feature -- every retail tree has one, so ranking it above the bundle would
+make the bundle dead code.  But nothing creates ~/.hexen2/data1/progs.dat:
+not retail, not any installer.  A file there is a deliberate act, and it is
+the only statement of intent the engine gets, so it wins.  Windows has no
+user directory, so there the ordering is just bundle > install directory.
 ===============
 */
 static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t outsz)
@@ -2198,6 +2211,13 @@ static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t out
 
 	/* Condition 2 -- is that gamedir the one the PLAYER IS IN? */
 	if (q_strcasecmp(fs_gamedir_nopath, gamedir) != 0)
+		return false;
+
+	/* Condition 3, a stand-down -- has the player installed their own copy?
+	 * Asked of the user directory only.  path_id cannot answer this: a
+	 * gamedir's basedir entry and its userdir entry get the SAME id from
+	 * FS_AddGameDirectory, so both read 1U for data1. */
+	if (FS_UserdirHasFile (gamedir, progname))
 		return false;
 
 	q_snprintf (out, outsz, "%s/%s/%s", bundle, gamedir, progname);
