@@ -2562,12 +2562,6 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 					else
 						Con_DPrintf ("Texture cache mismatch: %lu, %s, creating new entry\n",
 								    (unsigned long)old_texnum, identifier);
-					/* Make bindless handle non-resident before deleting texture */
-					if (glt->bindless_handle)
-					{
-						glMakeTextureHandleNonResidentARB_fp(glt->bindless_handle);
-						glt->bindless_handle = 0;
-					}
 					glDeleteTextures_fp (1, &old_texnum);
 					if (currenttexture == old_texnum)
 						currenttexture = GL_UNUSED_TEXTURE;
@@ -2598,14 +2592,6 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 	if (flags & TEX_RGBA)
 		GL_Upload32 ((unsigned int *)data, glt);
 	else	GL_Upload8 (data, glt);
-
-	/* Generate bindless texture handle if enabled */
-	glt->bindless_handle = 0;
-	if (gl_bindless_able && (flags & TEX_BINDLESS))
-	{
-		glt->bindless_handle = glGetTextureHandleARB_fp(glt->texnum);
-		glMakeTextureHandleResidentARB_fp(glt->bindless_handle);
-	}
 
 	return glt->texnum;
 }

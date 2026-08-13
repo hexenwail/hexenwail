@@ -31,50 +31,6 @@
 extern float r_fog_density;
 extern float r_fog_color[3];
 
-/* ====================================================================
- * BINDLESS TEXTURE INFRASTRUCTURE (GL_ARB_bindless_texture)
- *
- * When gl_bindless_able is true, texture sampling is handle-indexed from
- * an SSBO instead of per-draw glBindTexture calls.  This union defines the
- * two paths:
- *
- * Bindless path (BINDLESS=1 in shaders):
- *  - Populate SSBO with uvec2 txhandle + fbhandle (64-bit each)
- *  - Vertex shader passes flat uvec4 to fragment
- *  - Fragment shader casts to sampler2D(uvec2)
- *  - No glBindTexture calls
- *
- * Fallback path (BINDLESS=0 in shaders):
- *  - Traditional glBindTexture before each draw
- *  - baseinstance uniform indexes the call SSBO
- *  - Sampler uniforms u_texture0, u_texture2 used normally
- *
- * Implementation note: full bindless integration requires refactoring the
- * DrawTextureChains submission logic to populate handles before drawing.
- * Current code (as of ctrx.4 partial) establishes the infrastructure;
- * full draw-path migration is a follow-up task.
- * ==================================================================== */
-
-typedef struct {
-	GLuint   flags;
-	GLfloat  alpha;
-	GLuint64 tx_handle;   /* diffuse texture bindless handle */
-	GLuint64 fb_handle;   /* fullbright texture bindless handle */
-} gl_bindless_call_t;
-
-typedef struct {
-	GLuint  flags;
-	GLuint  baseinstance;
-	GLuint  _pad0;
-	GLuint  _pad1;
-} gl_bound_call_t;
-
-typedef union {
-	gl_bindless_call_t bindless;
-	gl_bound_call_t    bound;
-} gl_draw_call_t;
-
-
 int		gl_lightmap_format = GL_RGBA;
 cvar_t		gl_lightmapfmt = {"gl_lightmapfmt", "GL_RGBA", CVAR_NONE};
 int		lightmap_bytes = 4;		// 1, 2, or 4. default is 4 for GL_RGBA
@@ -82,9 +38,6 @@ static int	lightmap_internalformat = 0x8058;	// GL_RGBA8: sized internal format 
 GLuint		lightmap_textures[MAX_LIGHTMAPS];
 
 /* Bindless texture SSBO for draw call data */
-#define MAX_SURFACE_DRAW_CALLS 16384
-static GLuint		drawcall_ssbo = 0;
-static gl_draw_call_t	*drawcall_cpu_buffer = NULL;
 
 /* uhexen2-iihz/SoT crash fix: blocklights/blocklightscolor are sized for
  * the lightmap atlas page (BLOCK_WIDTH * BLOCK_HEIGHT), not the legacy
@@ -214,89 +167,18 @@ static qboolean LM_EnsurePages (unsigned int pages)
 	return true;
 }
 
-/* ====================================================================
- * BINDLESS TEXTURE BINDING & SSBO MANAGEMENT
- * ==================================================================== */
-
 static inline void GL_BindDiffuse (GLuint texnum)
 {
-	if (!gl_bindless_able)
-	{
-		glActiveTexture_fp(GL_TEXTURE0);
-		glBindTexture_fp(GL_TEXTURE_2D, texnum);
-	}
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, texnum);
 }
 
 static inline void GL_BindFullbright (GLuint texnum)
 {
-	if (!gl_bindless_able)
-	{
-		glActiveTexture_fp(GL_TEXTURE2);
-		glBindTexture_fp(GL_TEXTURE_2D, texnum);
-		glActiveTexture_fp(GL_TEXTURE0);
-	}
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	glActiveTexture_fp(GL_TEXTURE0);
 }
-
-static void GL_DeleteDrawCallSSBO (void);
-
-static void GL_CreateDrawCallSSBO (void)
-{
-	size_t ssbo_size;
-
-	if (!gl_bindless_able)
-		return;
-
-	/* Free any prior allocation — R_BuildWorldVBO calls us on every map
-	 * load and video restart, so without this the old GPU buffer and CPU
-	 * mirror leak each time (VRAM + heap growth across hub travel). */
-	GL_DeleteDrawCallSSBO();
-
-	ssbo_size = MAX_SURFACE_DRAW_CALLS * sizeof(gl_draw_call_t);
-	drawcall_cpu_buffer = (gl_draw_call_t *)malloc(ssbo_size);
-	if (!drawcall_cpu_buffer)
-	{
-		Con_Printf("GL_CreateDrawCallSSBO: failed to allocate CPU buffer\n");
-		return;
-	}
-
-	glGenBuffers_fp(1, &drawcall_ssbo);
-	glBindBuffer_fp(GL_COPY_WRITE_BUFFER, drawcall_ssbo);
-	glBufferData_fp(GL_COPY_WRITE_BUFFER, ssbo_size, NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer_fp(GL_COPY_WRITE_BUFFER, 0);
-
-	Con_DPrintf("Created bindless draw-call SSBO (%zu bytes, %d calls)\n",
-		    ssbo_size, MAX_SURFACE_DRAW_CALLS);
-}
-
-static void GL_DeleteDrawCallSSBO (void)
-{
-	if (drawcall_ssbo)
-	{
-		glDeleteBuffers_fp(1, &drawcall_ssbo);
-		drawcall_ssbo = 0;
-	}
-	if (drawcall_cpu_buffer)
-	{
-		free(drawcall_cpu_buffer);
-		drawcall_cpu_buffer = NULL;
-	}
-}
-
-static void GL_UploadDrawCallSSBO (int num_calls)
-{
-	if (!gl_bindless_able || !drawcall_ssbo || !drawcall_cpu_buffer)
-		return;
-
-	if (num_calls <= 0 || num_calls > MAX_SURFACE_DRAW_CALLS)
-		return;
-
-	glBindBuffer_fp(GL_COPY_WRITE_BUFFER, drawcall_ssbo);
-	glBufferSubData_fp(GL_COPY_WRITE_BUFFER, 0,
-			   num_calls * sizeof(gl_draw_call_t),
-			   drawcall_cpu_buffer);
-	glBindBuffer_fp(GL_COPY_WRITE_BUFFER, 0);
-}
-
 
 /*
 ===============
@@ -2069,7 +1951,6 @@ static void DrawTextureChains (entity_t *e)
 				 * f1e0fb378 had already fixed.  Depth test
 				 * eliminates the overdraw at negligible GPU cost. */
 
-				texture_t *batch_texture = NULL;
 
 				if (!world_state_set)
 				{
@@ -2078,14 +1959,8 @@ static void DrawTextureChains (entity_t *e)
 				}
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
-					/* Bindless-aware texture binding: use helper functions
-					 * that conditionally bind or defer to shader handle
-					 * indexing based on gl_bindless_able. */
 					GL_BindDiffuse(tt->gl_texturenum);
 					GL_BindFullbright(tt->gl_fb_texturenum ? tt->gl_fb_texturenum : gl_null_fb_texture);
-
-					/* Store texture for SSBO population during batch submission */
-					batch_texture = tt;
 				}
 
 				{
@@ -2164,22 +2039,6 @@ static void DrawTextureChains (entity_t *e)
 				/* Merge contiguous IBO ranges and draw */
 				if (batch_count > 0)
 				{
-					/* Populate single SSBO entry for batch texture (all surfs share same texture) */
-					if (gl_bindless_able && drawcall_cpu_buffer && batch_texture)
-					{
-						gltexture_t *tx = gltextures + batch_texture->gl_texturenum;
-						gltexture_t *fb = batch_texture->gl_fb_texturenum ? gltextures + batch_texture->gl_fb_texturenum : NULL;
-						drawcall_cpu_buffer[0].bindless.tx_handle = tx ? tx->bindless_handle : 0;
-						drawcall_cpu_buffer[0].bindless.fb_handle = fb ? fb->bindless_handle : 0;
-						drawcall_cpu_buffer[0].bindless.flags = 0;
-						drawcall_cpu_buffer[0].bindless.alpha = 1.0f;
-						GL_UploadDrawCallSSBO(1);
-
-						/* Bind SSBO for shader access */
-						if (drawcall_ssbo)
-							glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, drawcall_ssbo);
-					}
-
 					int run_start = 0;
 					int run_first_idx = batch_surfs[0]->vbo_firstindex;
 					int run_total_idx = batch_surfs[0]->vbo_numtris * 3;
@@ -3197,9 +3056,6 @@ void R_BuildWorldVBO (void)
 
 	Con_SafePrintf("World VBO: %d verts, %d tris in static buffer\n",
 		       world_num_verts, world_num_indices / 3);
-
-	/* Create bindless draw-call SSBO if supported */
-	GL_CreateDrawCallSSBO();
 }
 
 void R_FreeWorldVBO (void)
@@ -3209,7 +3065,6 @@ void R_FreeWorldVBO (void)
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
 	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
 	if (lm_atlas_texture) { glDeleteTextures_fp(1, &lm_atlas_texture); lm_atlas_texture = 0; }
-	GL_DeleteDrawCallSSBO();
 	lm_atlas_enabled = false;
 	world_num_verts = 0;
 	world_num_indices = 0;
