@@ -358,6 +358,7 @@ set(COMMON_SOURCES
     ${COMMONDIR}/common.c
     ${COMMONDIR}/wad.c
     ${COMMONDIR}/msg_io.c
+    ${COMMONDIR}/sys_exedir.c
     # From common directory
     ${UHEXEN2_SHARED}/qsnprint.c
     ${UHEXEN2_SHARED}/strlcat.c
