@@ -552,11 +552,107 @@ the engine derivation may not.
 
 ## Failure modes
 
-> **Editorial note.** The savegame item below is the one the source analysis
-> spelled out; the remaining seven are stated here from the findings they arise
-> from. Treat them as the checklist, not as an exhaustive proof.
+Thirteen, in an arc: 1–5 are ways this feature could **reach a mod**, 6–9 ways
+it could **override the player**, 10–11 ways it could **degrade badly**, and
+12–13 what it costs **us**.
 
-1. **Savegames crossing a progs change.** This is *the* genuinely new risk
+1. **`portals` joins the searchpath on the mere presence of `-game`, so a
+   `path_id` test alone would substitute under every gamecode-less mod.** This
+   is the largest single divergence from the model of the world Candidate A
+   assumes, and it is the entire reason the gate is a two-condition AND.
+
+   Any of `-portals`, `-missionpack`, `-h2mp`, `-game <dir>` or `-mod <dir>`
+   sets `check_portals` (`quakefs.c:1674-1689` — the `#else` arm is the live
+   one, since no build in this tree defines `H2MP` or `H2W`), and `portals` is
+   then pushed onto the path (`quakefs.c:1698-1701`). So `glhexen2 -game
+   mappack` yields `data1`, `portals`, `mappack`, and a mappack with no gamecode
+   of its own resolves `progs.dat` **from `portals`** — not from `data1`.
+
+   Under a `path_id`-only rule the portals arm's condition 1 passes there, and
+   our `portals/progs.dat` runs underneath every gamecode-less mod on the
+   machine: precisely the thing this design promises not to do. What stops it is
+   condition 2, `fs_gamedir_nopath` reading `"mappack"`.
+
+   It is also the *common* form of the "hole in `path_id` alone" stated above,
+   and worth reading as a correction to it: that illustration has the map pack
+   resolving from `data1`, which only happens when `portals/` is missing or
+   `-noportals` was passed. On a mission-pack install — the majority — the same
+   launch resolves from `portals` instead. Same hole, reached by the ordinary
+   path rather than the unusual one.
+
+   **Do not "simplify" the AND away.** The second condition looks redundant on
+   any install where `portals/` is absent, which is exactly the install a
+   maintainer is most likely to be testing on.
+
+2. **Mods that ship only part of the gamecode set.** All four mods present ship
+   `progs.dat` and nothing else — no `progs2.dat`, no `maplist.txt` (F8). With
+   one of them active, `data1`'s `maplist.txt` is rejected by the priority test
+   (`id1` is 1, `id0` is the mod's, so `id1 < id0` fires) and the mod's single
+   `progs.dat` serves every map, including the five that would otherwise want
+   `progs2.dat`. That is the behaviour today and this feature does not change it
+   in either direction.
+
+   The interesting variant is hypothetical: a mod shipping its own `maplist.txt`
+   naming a file it does not itself ship. The maplist survives the priority test
+   — both ids are the mod's — `PR_GetProgFilename()` returns `"progs2.dat"`, and
+   the lookup falls through to `portals` or `data1` for that name. Candidate B
+   declines to substitute, because `fs_gamedir_nopath` is the mod. Correct, and
+   conservative in the direction we want: a half-specified intent gets retail
+   bytes, not ours.
+
+3. **A stale launch-time gate after a runtime gamedir switch (F4).** Substituting
+   inside a mod, or refusing to substitute in the base game, for the rest of the
+   session. Prevented by recomputing per `PR_LoadProgs()`; reintroduced by any
+   future caching of the gate result.
+
+4. **Stale `fs_gamedir_nopath` after the invalid-mission-pack rollback (F3).**
+   `nopath` reads `"portals"` while the searchpath is `data1`. Condition 1 makes
+   this fail closed rather than substitute the wrong tree, but the underlying
+   inconsistency should be fixed on its own merits.
+
+5. **`progs2.dat` silently dropped (F2).** Only reachable under Candidate A, and
+   only observable with `developer 1`. Listed because it is the failure this
+   design is shaped to make impossible, and because that shaping is the reason
+   to prefer B.
+
+6. **Non-registered data — demo, OEM and mix'n'match installs.** Our gamecode is
+   built from the 1.11 tree. The Nov 1997 demo and the OEM/bundle release are
+   different versions of the game, and the demo additionally ships a loose
+   lowercase `progs.dat` that wins the first stat (F1) inside a tree whose
+   gamecode we have never compared against ours.
+
+   Gate the whole feature on `gameflags & GAME_REGISTERED`, set only when `pak0`
+   *and* `pak1` both match the 1.11 fingerprints (`quakefs.c:1564-1565`, from
+   the `GAME_REGISTERED0` / `GAME_REGISTERED1` returns at `quakefs.c:261-264`).
+   One line removes an entire class of unknowns from the test matrix. Unlike the
+   two conditions it is also *not* a per-spawn question: the fingerprinting
+   happens once in `FS_Init` and the answer cannot change for the session.
+
+   It does not subsume the F1 rescue case the scope decision declines, and
+   should not be confused with it: a retail install with its `progs.dat` deleted
+   is still `GAME_REGISTERED`, and is declined by condition 1 instead. Two
+   independent gates, both failing closed, for two different reasons.
+
+7. **A player who deliberately installed a different `progs.dat`** — a
+   translation, a balance patch, a hand-built experiment dropped into `data1/`.
+   Under Candidate B their file resolves at `path_id` 1 in the game they are in,
+   which is exactly the state that says "substitute". The feature overrides a
+   choice they made on purpose.
+
+   **The recourse is not the same on both platforms, and the asymmetry has to be
+   documented rather than discovered.** On Unix there is a user directory,
+   `~/.hexen2/data1/`, which the engine already ranks above the install (F1), so
+   the predicate can consult it and stand down when the player's own file is
+   there; verification row B5 is what pins that behaviour down. On Windows
+   `DO_USERDIRS` is forced to 0 (`sys.h:72-74`), `fs_userdir` collapses onto the
+   install directory, and there is no location that expresses "mine, not yours".
+   A Windows player's `<install>/data1/progs.dat` loses to the bundle, and
+   `-vanillaprogs` — or deleting the bundle — is the only recourse they have.
+
+   Same user action, two behaviours, decided by a `#define` in `sys.h`. It
+   belongs in the release notes, not only here.
+
+8. **Savegames crossing a progs change.** This is *the* genuinely new risk
    relative to `uhexen2-8qp3`. The manual copy let the player pick the moment;
    bundling makes it happen on an engine upgrade, potentially mid-campaign.
 
@@ -570,42 +666,41 @@ the engine derivation may not.
    (`flake.nix:362`). The portals cross-load is therefore the one to test, and
    the one most likely to warn.
 
-2. **Demo playback across a progs change.** Demos replay recorded network
+9. **Demo playback across a progs change.** Demos replay recorded network
    traffic, but stat and effect semantics can shift with gamecode. Old demos
    under new progs, and vice versa, are both reachable by any player who keeps a
    `.dem` around.
 
-3. **`progs2.dat` silently dropped (F2).** Only reachable under Candidate A, and
-   only observable with `developer 1`. Listed because it is the failure this
-   design is shaped to make impossible, and because that shaping is the reason
-   to prefer B.
+10. **A structurally incompatible bundled progs.** Caught loudly by the CRC and
+    version checks (F7) with a `Host_Error` naming the file, at map load rather
+    than at startup. Contained, but the message a player sees is a CRC number,
+    which is not self-explanatory.
 
-4. **A stale launch-time gate after a runtime gamedir switch (F4).** Substituting
-   inside a mod, or refusing to substitute in the base game, for the rest of the
-   session. Prevented by recomputing per `PR_LoadProgs()`; reintroduced by any
-   future caching of the gate result.
+11. **Absent or partially extracted bundle.** A player who extracts only `bin/`,
+    or a distro package that omits the data, must get today's behaviour exactly.
+    `PR_FindBundleDir()` returning NULL and the final `Sys_FileType` check are
+    both fail-closed for this reason; a bundle containing `data1/progs.dat` but
+    not `portals/progs.dat` must degrade per-file, not per-install.
 
-5. **Stale `fs_gamedir_nopath` after the invalid-mission-pack rollback (F3).**
-   `nopath` reads `"portals"` while the searchpath is `data1`. Condition 1 makes
-   this fail closed rather than substitute the wrong tree, but the underlying
-   inconsistency should be fixed on its own merits.
+12. **Diagnostic opacity.** `path` will show `data1` while the running gamecode
+    came from the bundle, so a developer reading a pasted console log draws the
+    wrong conclusion. This is Candidate B's stated cost and the reason the
+    unconditional startup print (`uhexen2-zixe`, landed in `f619026e1`) is a
+    hard prerequisite rather than a companion nicety: it is the only thing that
+    puts the real path into a log nobody thought to ask for.
 
-6. **A structurally incompatible bundled progs.** Caught loudly by the CRC and
-   version checks (F7) with a `Host_Error` naming the file, at map load rather
-   than at startup. Contained, but the message a player sees is a CRC number,
-   which is not self-explanatory.
+13. **"Vanilla" gets harder to say, not easier.** `uhexen2-8qp3` turned "which
+    gamecode is this player running?" into a question that has to be asked on
+    every bug report; this feature makes *our* gamecode the default answer
+    rather than an opt-in. That is not a one-time cost paid at merge — it is
+    paid again on every future issue, by whoever triages it.
 
-7. **Absent or partially extracted bundle.** A player who extracts only `bin/`,
-   or a distro package that omits the data, must get today's behaviour exactly.
-   `PR_FindBundleDir()` returning NULL and the final `Sys_FileType` check are
-   both fail-closed for this reason; a bundle containing `data1/progs.dat` but
-   not `portals/progs.dat` must degrade per-file, not per-install.
-
-8. **Diagnostic opacity.** `path` will show `data1` while the running gamecode
-   came from the bundle, so a developer reading a pasted console log draws the
-   wrong conclusion. This is Candidate B's stated cost and the reason the
-   unconditional startup print (`uhexen2-zixe`) is a hard prerequisite rather
-   than a companion nicety.
+    Two things keep it tractable: the startup print (failure mode 12), which
+    makes the answer appear in any pasted log without being asked for, and
+    `-vanillaprogs`, which turns "reproduce without our gamecode" into a
+    one-word instruction. **This is why neither of them is optional.** Shipping
+    the substitution without both of them converts every report into a round
+    trip.
 
 ## Verification matrix
 
@@ -657,7 +752,7 @@ will look like bugs to anyone who has not read the scope decision.
 | S4 | bundled `portals` progs | retail `portals` progs (`-vanillaprogs`) |
 
 S3 and S4 are the ones to watch: the `portals` tree is built with `-oi -on`
-(failure mode 1). A `'%s' is not a field` print is acceptable; a `Host_Error`,
+(failure mode 8). A `'%s' is not a field` print is acceptable; a `Host_Error`,
 a lost inventory or a broken objective is not.
 
 ### Demos
@@ -733,8 +828,11 @@ In dependency order:
 
 1. **`Sys_GetExeDir()`** — promote `soundfont.c`'s `static exe_dir()` to a
    shared, cross-platform helper reachable from `h2ded` (F5).
-2. **The unconditional startup print** (`uhexen2-zixe`) — mandatory under
-   Candidate B, not optional (failure mode 8).
+2. **The unconditional startup print** (`uhexen2-zixe`) — **already satisfied**,
+   landed in `f619026e1`. Mandatory under Candidate B rather than a nicety
+   (failure modes 12 and 13); kept on this list so that a future reader treats
+   it as a dependency of the substitution and not as an unrelated coincidence
+   that may be reverted.
 3. **Fix `fs_gamedir_nopath` in the mission-pack rollback** (F3) — independently
    correct, and it removes one fail-closed corner from this feature's state
    space.
