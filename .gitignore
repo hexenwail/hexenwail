@@ -35,3 +35,8 @@ engine/build/
 # Users fetch it themselves via scripts/get_demo.sh / .cmd.  See
 # assets/demo/README.md for the source URL, sha256 and the full reasoning.
 /assets/demo/hexen2demo_nov1997-linux-i586.tgz
+
+# tools/*.py are runnable scripts, but importing them (as the qcdis.py
+# self-checks do) leaves a bytecode cache behind.
+__pycache__/
+*.pyc
