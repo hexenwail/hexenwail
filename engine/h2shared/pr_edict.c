@@ -2210,6 +2210,97 @@ static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t out
 
 /*
 ===============
+PR_LumpFits
+
+Does `count' elements of `elemsize' starting at `ofs' lie inside `filelen'?
+Written as a division so that neither the multiply nor the addition can
+overflow on a header we have not vetted yet.
+===============
+*/
+static qboolean PR_LumpFits (int ofs, int count, size_t elemsize, long filelen)
+{
+	if (ofs < 0 || count < 0 || (long)ofs > filelen)
+		return false;
+	return (long)count <= (filelen - (long)ofs) / (long)elemsize;
+}
+
+/*
+===============
+PR_CheckProgsExtents
+
+Returns NULL if every lump the header describes lies inside `filelen', or a
+reason string naming the first one that does not.
+
+The byteswap loops at the bottom of PR_LoadProgs() write through each of these
+lumps (a v6 image is read through instead and converted into fresh allocations),
+so a header whose offsets or counts overrun the file turns those loops into
+out-of-bounds writes -- for a plausibly truncated progs.dat, hundreds of KB of
+them, into whatever the hunk happens to hold next.  Only the string pool was
+checked before, and it is the lump least able to detect truncation because it
+sits at the very front of the file.
+
+The header is byteswapped into a local copy so this can run before PR_LoadProgs()
+has committed to the image, which is what lets the bundled-progs path reject a
+file and fall back rather than die.
+===============
+*/
+static const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen)
+{
+	static char	reason[128];
+	dprograms_t	hdr;
+	size_t		defsize, stmtsize;
+	int		i;
+
+	if (filelen < (long) sizeof(hdr))
+	{
+		q_snprintf (reason, sizeof(reason),
+			    "file is %ld bytes, too short for a %d byte header",
+			    filelen, (int) sizeof(hdr));
+		return reason;
+	}
+
+	memcpy (&hdr, raw, sizeof(hdr));
+	for (i = 0; i < (int) sizeof(hdr) / 4; i++)
+		((int *)&hdr)[i] = LittleLong ( ((int *)&hdr)[i] );
+
+	switch (hdr.version) {
+	case PROG_VERSION_V6:
+		defsize = sizeof(ddef_v6_t);
+		stmtsize = sizeof(dstatement_v6_t);
+		break;
+	case PROG_VERSION_V7:
+		defsize = sizeof(ddef_v7_t);
+		stmtsize = sizeof(dstatement_v7_t);
+		break;
+	default:
+		q_snprintf (reason, sizeof(reason),
+			    "unsupported version (%d, should be %d or %d)",
+			    hdr.version, PROG_VERSION_V6, PROG_VERSION_V7);
+		return reason;
+	}
+
+	if (!PR_LumpFits (hdr.ofs_statements, hdr.numstatements, stmtsize, filelen))
+		return "statements go past end of file";
+	if (!PR_LumpFits (hdr.ofs_globaldefs, hdr.numglobaldefs, defsize, filelen))
+		return "globaldefs go past end of file";
+	if (!PR_LumpFits (hdr.ofs_fielddefs, hdr.numfielddefs, defsize, filelen))
+		return "fielddefs go past end of file";
+	if (!PR_LumpFits (hdr.ofs_functions, hdr.numfunctions, sizeof(dfunction_t), filelen))
+		return "functions go past end of file";
+	if (!PR_LumpFits (hdr.ofs_globals, hdr.numglobals, sizeof(int), filelen))
+		return "globals go past end of file";
+	/* Strings keep the strict end-of-pool test PR_LoadProgs() has always
+	 * used: the pool has to stop short of EOF, not merely reach it.  The
+	 * PR_LumpFits() call first is what makes the addition safe. */
+	if (!PR_LumpFits (hdr.ofs_strings, hdr.numstrings, 1, filelen) ||
+	    (long)hdr.ofs_strings + hdr.numstrings >= filelen)
+		return "strings go past end of file";
+
+	return NULL;
+}
+
+/*
+===============
 PR_LoadProgs
 ===============
 */
@@ -2234,6 +2325,7 @@ void PR_LoadProgs (void)
 #if !defined(H2W)
 	{
 		char	bundled[MAX_OSPATH];
+		int	hunkmark = Hunk_LowMark ();
 
 		/* Deliberately after PR_GetProgFilename() has returned: that
 		 * function picks progs.dat vs progs2.dat by comparing
@@ -2242,10 +2334,35 @@ void PR_LoadProgs (void)
 		 * bundle therefore cannot influence which file is wanted -- only
 		 * where the bytes for it come from.  Keep it in this order. */
 		if (PR_BundledProgsPath (progname, bundled, sizeof(bundled)))
+		{
+			const char	*bad;
+
 			progs = (dprograms_t *) FS_LoadHunkFileFromOSPath (bundled);
+			if (!progs)
+				bad = "cannot be opened for reading";
+			else
+				bad = PR_CheckProgsExtents (progs, fs_filesize);
+
+			if (bad)
+			{
+				/* The bundle is only ever an optimization over a
+				 * file that already works, so anything doubtful
+				 * about it surrenders to the player's copy instead
+				 * of escalating to Host_Error.  Said out loud
+				 * because a silent fallback would leave a player
+				 * whose bundle got truncated or quarantined with no
+				 * account of why their gamecode is not ours.
+				 * FS_LoadHunkFile() below overwrites fs_filesize,
+				 * file_from_pak and FS_LastFileSource() wholesale,
+				 * so the provenance line still names what loaded. */
+				Con_Printf ("Ignoring bundled %s: %s\n", bundled, bad);
+				Hunk_FreeToLowMark (hunkmark);
+				progs = NULL;
+			}
+		}
 	}
 #endif
-	if (!progs)	/* no bundle, gate declined, or the bundled file would not open */
+	if (!progs)	/* no bundle, gate declined, or the bundled file was unusable */
 		progs = (dprograms_t *)FS_LoadHunkFile (progname, NULL);
 	if (!progs)
 		Host_Error ("%s: couldn't load %s", __thisfunc__, progname);
@@ -2253,6 +2370,15 @@ void PR_LoadProgs (void)
 	 * anything below touches the filesystem again. */
 	q_strlcpy (progsource, FS_LastFileSource(), sizeof(progsource));
 	Con_DPrintf ("Programs occupy %ldK.\n", fs_filesize / 1024);
+
+	/* Before the header byteswap below, which is itself a write through
+	 * `progs' and needs the header to be there at all. */
+	{
+		const char	*bad = PR_CheckProgsExtents (progs, fs_filesize);
+
+		if (bad)
+			Host_Error ("%s: %s", progname, bad);
+	}
 
 	pr_crc = CRC_Block ((byte *)progs, fs_filesize);
 	#if defined(H2W) /* add prog crc to the serverinfo */
@@ -2322,8 +2448,8 @@ void PR_LoadProgs (void)
 
 	pr_functions = (dfunction_t *)((byte *)progs + progs->ofs_functions);
 	pr_strings = (char *)progs + progs->ofs_strings;
-	if (progs->ofs_strings + progs->numstrings >= fs_filesize)
-		Host_Error ("%s: strings go past end of file\n", progname);
+	/* extents, strings included, were checked above before anything wrote
+	 * through the header */
 
 	// initialize the strings
 	pr_numknownstrings = 0;
