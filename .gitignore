@@ -8,7 +8,19 @@ engine/build/
 
 # bv (beads viewer) local config and caches
 .bv/
-.beads/
+
+# .beads/* rather than .beads/, so that the one tracked file in there can be
+# re-included below.  bd stages .beads/issues.jsonl itself after every
+# mutating command, and `git add` refuses any path underneath an ignored
+# *directory* -- even a tracked one, and even when the file itself matches no
+# ignore rule.  With the directory ignored, every bd command ended in
+# "Warning: auto-export: git add failed: exit status 1" and the export had to
+# be staged by hand with `git add -u`.  Ignoring the contents instead leaves
+# the directory visible, so the negation works and bd stages cleanly.
+# Everything else under .beads/ (the Dolt database, server pid/log/port
+# files, ephemeral sqlite, backups) stays ignored by the glob.
+.beads/*
+!.beads/issues.jsonl
 /capture.rdc
 
 # Beads / Dolt files (added by bd init)
