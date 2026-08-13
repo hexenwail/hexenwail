@@ -1029,6 +1029,34 @@ them (restore your backups) is the fastest way to tell whether a problem is
 ours or Raven's.
 EOF
 
+            # The same three files again, this time where the engine finds them
+            # by itself.  uhexen2-xsmc.
+            #
+            # The binary sits at <platform>/bin/glhexen2, so the engine's
+            # <exedir>/../share/hexenwail/ lookup resolves to
+            # <platform>/share/hexenwail/ -- which is already exactly the
+            # layout packages.gamecode installs into, so nothing has to be
+            # rearranged to satisfy it.  docs/BUNDLED_GAMECODE.md.
+            #
+            # Windows gets no equivalent because it needs none: release.yml
+            # flattens that zip to a Hexen II-style root, which leaves
+            # gamecode/ beside glh2.exe and satisfies the engine's first
+            # lookup layer, <exedir>/gamecode/, as shipped.
+            #
+            # An addition, not a move: the staging tree above stays the
+            # manual-install path gamecode/README.txt describes, and the copy
+            # a -vanillaprogs player falls back to.  ~2.9 MB per platform dir.
+            # hw/ and siege/ are withheld here for the same reason as above.
+            for d in linux-x86_64 linux-x86_64-nixos; do
+              install -Dm644 \
+                ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs.dat \
+                ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs2.dat \
+                -t $out/release/$d/share/hexenwail/data1
+              install -Dm644 \
+                ${self.packages.${system}.gamecode}/share/hexenwail/portals/progs.dat \
+                -t $out/release/$d/share/hexenwail/portals
+            done
+
             # License files
             mkdir -p $out/release/licenses
             cp ${self}/COPYING $out/release/licenses/COPYING.GPL2 2>/dev/null || \
