@@ -280,6 +280,8 @@ qboolean BGM_Init (void)
 	 * up without enabling developer mode. */
 	if (midi_drivers && midi_drivers->desc)
 		Con_Printf("BGM: MIDI driver: %s\n", midi_drivers->desc);
+	else if (S_CodecIsAvailable(CODECTYPE_MID) == 1)
+		Con_Printf("BGM: MIDI driver: none (streaming midi through a codec)\n");
 	else
 		Con_Printf("BGM: MIDI driver: none (midi-named music will not play)\n");
 	{

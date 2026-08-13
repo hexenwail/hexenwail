@@ -35,6 +35,7 @@
 #include "snd_xmp.h"
 #include "snd_umx.h"
 #include "snd_opus.h"
+#include "snd_timidity.h"
 
 
 static snd_codec_t *codecs;
@@ -80,6 +81,9 @@ void S_CodecInit (void)
 #endif
 #ifdef USE_CODEC_XMP
 	S_CodecRegister(&xmp_codec);
+#endif
+#ifdef USE_CODEC_TIMIDITY
+	S_CodecRegister(&timidity_codec);
 #endif
 
 	codec = codecs;

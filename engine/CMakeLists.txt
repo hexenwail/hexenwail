@@ -30,6 +30,10 @@ option(USE_CODEC_FLAC "Enable FLAC codec" ON)
 option(USE_CODEC_XMP "Enable tracker music via libxmp" ON)
 option(USE_CODEC_UMX "Enable Unreal UMX container support" ON)
 option(USE_CODEC_OPUS "Enable Opus codec" ON)
+option(USE_FLUIDSYNTH "Use FluidSynth as the MIDI driver when available" ON)
+# BGM tier 2 only: activated solely on targets where no MIDI driver claims
+# tier 1 (no FluidSynth, or WASM).  FluidSynth always wins where present.
+option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" ON)
 
 # Off by default so `nix build` keeps producing exactly the client it does
 # today; the server is a separate, rarely-wanted artifact.
@@ -442,9 +446,10 @@ if(EMSCRIPTEN)
         ${ENGINE_TOP}/hexen2/net_udp.c
     )
 
-    # No MIDI, no CD audio
+    # No MIDI driver (tier 1); MIDI plays through the libTiMidity codec instead
     list(APPEND PLATFORM_SOURCES ${COMMONDIR}/midi_nul.c)
     add_definitions(-D_NO_MIDIDRV)
+    set(MIDI_CODEC_FALLBACK ON)
     list(APPEND PLATFORM_SOURCES ${COMMONDIR}/cd_sdl.c)
 
 elseif(WIN32)
@@ -494,13 +499,16 @@ elseif(UNIX)
         ${COMMONDIR}/sys_sdl.c
     )
 
-    # MIDI (FluidSynth on Linux, with null fallback)
+    # MIDI (FluidSynth on Linux, with the libTiMidity codec as fallback)
     find_package(PkgConfig)
-    if(PKG_CONFIG_FOUND)
+    # -DUSE_FLUIDSYNTH=OFF makes the fallback arm reachable on machines that
+    # do have FluidSynth, which is the only way to exercise it in a test.
+    if(PKG_CONFIG_FOUND AND USE_FLUIDSYNTH)
         pkg_check_modules(FLUIDSYNTH fluidsynth)
     endif()
     if(FLUIDSYNTH_FOUND)
         list(APPEND PLATFORM_SOURCES ${COMMONDIR}/midi_fluid.c)
+        set(SOUNDFONT_SOURCES ${COMMONDIR}/soundfont.c)
         include_directories(${FLUIDSYNTH_INCLUDE_DIRS})
         if(SOUNDFONT_PATH)
             add_definitions(-DSOUNDFONT_PATH="${SOUNDFONT_PATH}")
@@ -511,6 +519,7 @@ elseif(UNIX)
     else()
         list(APPEND PLATFORM_SOURCES ${COMMONDIR}/midi_nul.c)
         add_definitions(-D_NO_MIDIDRV)
+        set(MIDI_CODEC_FALLBACK ON)
         message(STATUS "FluidSynth MIDI: not found, disabled")
     endif()
 
@@ -523,6 +532,41 @@ elseif(UNIX)
 endif()
 
 #============================================================================
+# MIDI Fallback Codec (libTiMidity, vendored)
+#============================================================================
+# BGM runs MIDI as two tiers (see bgmusic.c): a MIDI driver first, then this
+# streamer codec.  It is compiled only where tier 1 is midi_nul.c, so it can
+# never displace FluidSynth or the Windows midiStream driver.  Pure C with no
+# external dependencies, which is why it -- and not FluidSynth -- can go to
+# WASM.  Reads the same SF2 file FluidSynth uses (libtimidity >= 0.2.8).
+if(USE_SOUND AND USE_CODEC_TIMIDITY AND MIDI_CODEC_FALLBACK)
+    set(TIMIDITY_DIR ${LIBS_DIR}/timidity)
+    list(APPEND SOUND_SOURCES
+        ${COMMONDIR}/snd_timidity.c
+        ${TIMIDITY_DIR}/common.c
+        ${TIMIDITY_DIR}/instrum.c
+        ${TIMIDITY_DIR}/mix.c
+        ${TIMIDITY_DIR}/output.c
+        ${TIMIDITY_DIR}/playmidi.c
+        ${TIMIDITY_DIR}/readmidi.c
+        ${TIMIDITY_DIR}/readsbk.c
+        ${TIMIDITY_DIR}/resample.c
+        ${TIMIDITY_DIR}/sndfont.c
+        ${TIMIDITY_DIR}/stream.c
+        ${TIMIDITY_DIR}/tables.c
+        ${TIMIDITY_DIR}/timidity.c
+    )
+    include_directories(${TIMIDITY_DIR})
+    # Compiled straight into the executable, not linked as a DLL: keeps
+    # TIMI_EXPORT empty instead of __declspec(dllimport) on Windows/OS2.
+    add_definitions(-DUSE_CODEC_TIMIDITY -DTIMIDITY_BUILD=1 -DTIMIDITY_STATIC=1)
+    set(SOUNDFONT_SOURCES ${COMMONDIR}/soundfont.c)
+    set(TIMIDITY_CODEC_ENABLED ON)
+else()
+    set(TIMIDITY_CODEC_ENABLED OFF)
+endif()
+
+#============================================================================
 # Create Executable
 #============================================================================
 # Combine all sources
@@ -531,6 +575,7 @@ set(ALL_SOURCES
     ${CLIENT_SOURCES}
     ${COMMON_SOURCES}
     ${SOUND_SOURCES}
+    ${SOUNDFONT_SOURCES}
     ${PLATFORM_SOURCES}
 )
 
@@ -722,6 +767,7 @@ message(STATUS "Vorbis codec: ${USE_CODEC_VORBIS}")
 message(STATUS "MP3 codec: ${USE_CODEC_MP3}")
 message(STATUS "FLAC codec: ${USE_CODEC_FLAC}")
 message(STATUS "FluidSynth MIDI: ${FLUIDSYNTH_FOUND}")
+message(STATUS "MIDI fallback codec (libTiMidity): ${TIMIDITY_CODEC_ENABLED}")
 message(STATUS "Tracker (libxmp): ${USE_CODEC_XMP}")
 message(STATUS "UMX container:    ${USE_CODEC_UMX}")
 message(STATUS "Opus codec:       ${USE_CODEC_OPUS}")
