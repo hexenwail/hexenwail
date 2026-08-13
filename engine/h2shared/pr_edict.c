@@ -2261,10 +2261,11 @@ sits at the very front of the file.
 
 The header is byteswapped into a local copy so this can run before PR_LoadProgs()
 has committed to the image, which is what lets the bundled-progs path reject a
-file and fall back rather than die.
+file and fall back rather than die.  CL_LoadCSProgs() relies on the same property
+for csprogs.dat.
 ===============
 */
-static const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen)
+const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen)
 {
 	static char	reason[128];
 	dprograms_t	hdr;
