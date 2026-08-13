@@ -44,11 +44,11 @@ other trees have no such legacy to protect. Do not "make it consistent".
 The layout matches gamedir names, so the tree drops straight onto an install.
 It is also the layout upstream uses in `gamedata-all-1.29b.tgz`.
 
-| Path under `result/share/hexenwail/` | Source tree | Bytes at `bb570666a` |
+| Path under `result/share/hexenwail/` | Source tree | Bytes at `ce8c9d1c4` |
 |---|---|---|
-| `data1/progs.dat` | `gamecode/hc/h2` | 889,056 |
-| `data1/progs2.dat` | `gamecode/hc/h2` (`-name progs2.src`) | 839,396 |
-| `portals/progs.dat` | `gamecode/hc/portals` | 1,148,080 |
+| `data1/progs.dat` | `gamecode/hc/h2` | 888,368 |
+| `data1/progs2.dat` | `gamecode/hc/h2` (`-name progs2.src`) | 838,712 |
+| `portals/progs.dat` | `gamecode/hc/portals` | 1,147,444 |
 | `hw/hwprogs.dat` | `gamecode/hc/hw` | 953,380 |
 | `siege/hwprogs.dat` | `gamecode/hc/siege` | 796,276 |
 
