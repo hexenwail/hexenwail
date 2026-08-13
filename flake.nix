@@ -96,6 +96,34 @@
                 && !(type == "regular" && pkgs.lib.hasSuffix ".md" rel);
           };
 
+        # The HexenC sources, and only those: input to `packages.gamecode`.
+        #
+        # A second filter rather than a "gamecode" entry in filteredSrc's
+        # allowlist, and the asymmetry is the whole point.  hcc reads .hc
+        # files; no CMake build does.  Sharing one source would make every
+        # gamecode edit rebuild the engine, h2ded, both mingw cross builds,
+        # the WASM build and the toolchain, and invalidate their cache
+        # entries for every user -- while a .hc file cannot affect a single
+        # byte of any of them.  Keeping the filters separate leaves the
+        # engine's input hash untouched by anything under gamecode/.
+        #
+        # Scoped to gamecode/hc, not gamecode/: the siblings are res/, devel/,
+        # mapfixes/, hc-unused/ and patch111/ (which carries xdelta binaries),
+        # none of which hcc reads.
+        gamecodeSrc =
+          let
+            root = toString ./.;
+          in pkgs.lib.cleanSourceWith {
+            name = "hexenwail-gamecode-src";
+            src = ./.;
+            filter = path: type:
+              let
+                rel = pkgs.lib.removePrefix (root + "/") (toString path);
+              in
+                rel == "gamecode" || rel == "gamecode/hc"
+                || pkgs.lib.hasPrefix "gamecode/hc/" rel;
+          };
+
         # Dr. MinGW's runtime -- the post-mortem handler we ship beside the
         # Windows binaries.  It is here rather than in nixpkgs because nixpkgs
         # does not package it, and it is worth the vendoring: we cross-compile
@@ -277,6 +305,105 @@
                 jsh2colour for compiling maps, hcc/dhcc for HexenC bytecode,
                 genmodel for .mdl files, pak/qfiles for archives, plus the
                 HexenWorld master server and rcon clients.
+              '';
+              homepage = "https://github.com/hexenwail/hexenwail";
+              license = licenses.gpl2Plus;
+              platforms = platforms.linux;
+              maintainers = [ ];
+            };
+          };
+
+          # The HexenC gamecode, compiled to progs bytecode with hcc.
+          #
+          # This exists because gamecode fixes were rotting in place: nothing
+          # in the build touched gamecode/, so a .hc edit that did not even
+          # parse would land green, and every fix we made was inert for
+          # players -- who run Raven's retail 1997 progs.dat.  Wiring it into
+          # CI makes hcc the gate.  uhexen2-zmb3.
+          #
+          # Building it is NOT a decision to ship it: nothing references this
+          # output, `release` least of all.  See docs/GAMECODE.md for the
+          # licence position and the install path.
+          #
+          # All four trees, not just h2, because a fix typically lands in
+          # three of them at once -- bb570666a (uhexen2-9r3n) touched h2, hw
+          # and portals -- so gating only h2 would let the other two break
+          # silently, which is the exact failure this output exists to stop.
+          # They are seconds each and pull in no dependency beyond hcc.
+          gamecode = pkgs.stdenvNoCC.mkDerivation {
+            pname = "hexenwail-gamecode";
+            inherit version;
+
+            src = gamecodeSrc;
+
+            nativeBuildInputs = [ self.packages.${system}.utils ];
+
+            dontConfigure = true;
+
+            # hcc resolves progs.src's first token against -src and writes the
+            # .dat there, plus progdefs.h and files.dat beside it -- so it
+            # needs a writable tree.  stdenv's unpack already gave us one (the
+            # store copy is chmod u+w), hence no extra copy here.
+            #
+            # h2 alone omits -oi/-on: per gamecode/COMPILE those two make the
+            # engine warn when loading pre-existing Hexen II saves.  The other
+            # trees have no such legacy to protect.
+            buildPhase = ''
+              runHook preBuild
+
+              hcc -src gamecode/hc/h2      -os
+              hcc -src gamecode/hc/h2      -os -name progs2.src
+              hcc -src gamecode/hc/portals -os -oi -on
+              hcc -src gamecode/hc/hw      -os -oi -on
+              hcc -src gamecode/hc/siege   -os -oi -on
+
+              runHook postBuild
+            '';
+
+            # Laid out as gamedirs under a basedir, matching packages.demodata,
+            # so the tree can be dropped straight onto an install:
+            #   cp -r result/share/hexenwail/data1/. ~/.hexen2/data1/
+            #
+            # hw/ and siege/ are HexenWorld progs and this fork builds no
+            # HexenWorld engine, so they are compile-gate artefacts today.
+            # They are installed anyway rather than discarded: a HexenWorld
+            # server operator can use them, and dropping them would invite
+            # someone to "simplify" the build steps that produce them.
+            installPhase = ''
+              runHook preInstall
+
+              install -Dm644 gamecode/hc/h2/progs.dat \
+                gamecode/hc/h2/progs2.dat -t $out/share/hexenwail/data1
+              install -Dm644 gamecode/hc/portals/progs.dat \
+                -t $out/share/hexenwail/portals
+              install -Dm644 gamecode/hc/hw/hwprogs.dat \
+                -t $out/share/hexenwail/hw
+              install -Dm644 gamecode/hc/siege/hwprogs.dat \
+                -t $out/share/hexenwail/siege
+
+              runHook postInstall
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Hexen II gamecode (progs.dat) built from the HexenC sources";
+              longDescription = ''
+                The uHexen2 HexenC gamecode compiled with hcc: progs.dat and
+                progs2.dat for Hexen II, progs.dat for the Portal of Praevus
+                mission pack, and hwprogs.dat for HexenWorld and Siege.
+
+                This carries the Hammer of Thyrion gamecode fixes through
+                1.29c plus Hexenwail's own, none of which are in the retail
+                1997 progs.dat that players otherwise run.
+
+                Hexenwail does not ship these in any release artifact. To use
+                them, copy over your own installation:
+
+                  nix build .#gamecode
+                  cp result/share/hexenwail/data1/progs.dat ~/.hexen2/data1/
+
+                See docs/GAMECODE.md before doing so -- a mod's own progs.dat
+                takes precedence, but a stale copy in data1/ is invisible and
+                permanent until removed by hand.
               '';
               homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;

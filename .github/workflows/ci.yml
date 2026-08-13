@@ -87,6 +87,19 @@ jobs:
       - name: Build Windows tools
         run: nix build .#utils-win64 --print-build-logs
 
+      # Runs hcc over all four HexenC trees.  Until this existed nothing in
+      # the build read gamecode/ at all, so a .hc edit that did not even
+      # compile would land green — and did not have to be exotic to do it:
+      # a fix normally goes into h2, hw and portals together.  Nearly free
+      # on the back of .#utils above (same closure, hcc is the only input,
+      # a couple of seconds per tree).
+      #
+      # This gates compilation only.  It is deliberately NOT wired into
+      # .#release: whether Hexenwail ships a progs.dat is a separate and
+      # still-open question, see docs/GAMECODE.md.  uhexen2-zmb3.
+      - name: Build gamecode
+        run: nix build .#gamecode --print-build-logs
+
   flatpak:
     runs-on: ubuntu-latest
     # flatpak + flatpak-builder are installed directly on the runner — the
