@@ -113,9 +113,11 @@ jobs:
         run: |
           cp -rL result/release staging
 
-          # Linux: keep the linux-x86_64/ tree as-is.
+          # Linux: keep the linux-x86_64/ tree as-is.  gamecode/ is a shared
+          # staging tree, not part of any platform dir, so it has to be named
+          # here or it ships nowhere (uhexen2-8qp3).
           (cd staging && zip -r ../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
-            linux-x86_64/ licenses/ BUILD_INFO.txt)
+            linux-x86_64/ gamecode/ licenses/ BUILD_INFO.txt)
 
           # Windows: Hexen II-style flat layout — glh2.exe + DLLs at the zip
           # root next to an empty data1/, so users extract straight into their
@@ -127,6 +129,12 @@ jobs:
           # shipped a bundle whose own BUILD_INFO.txt told users to run a
           # file that was not there.
           cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
+          # gamecode/ stays a subdirectory even in the flat Windows layout:
+          # this zip is meant to be extracted straight into a Hexen II folder,
+          # so putting progs.dat at data1/progs.dat here would overwrite the
+          # player's retail gamecode on unzip, with no copy in any .pak to
+          # restore from.  Keep the copy deliberate.
+          cp -r staging/gamecode "$winpkg/"
           cp -r staging/licenses "$winpkg/"
           cp staging/BUILD_INFO.txt "$winpkg/"
           echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
@@ -174,6 +182,35 @@ jobs:
             echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`glh2.exe\`"
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
+            echo ""
+            echo "### Optional: compiled gamecode"
+            echo ""
+            echo "Both zips now include a \`gamecode/\` folder — the Hexen II game logic rebuilt"
+            echo "from source, carrying fixes that are not in Raven's 1997 \`progs.dat\` (chiefly"
+            echo "dropped backpacks silently vanishing in co-op and deathmatch)."
+            echo ""
+            echo "**It is not installed for you.** The tree under \`gamecode/\` mirrors your Hexen II"
+            echo "folder: copy \`gamecode/data1/progs.dat\` to \`data1/progs.dat\`, and so on. Install"
+            echo "\`progs.dat\` and \`progs2.dat\` together, and add \`portals/progs.dat\` if you have the"
+            echo "Portal of Praevus mission pack — with the mission pack active the \`data1\` copy is"
+            echo "never read."
+            echo ""
+            echo "**Back up the files you replace.** Retail keeps \`progs.dat\` loose and no \`.pak\`"
+            echo "contains a spare copy, so restoring your backup is the only way back."
+            echo ""
+            echo "Two things to know before you install it:"
+            echo ""
+            echo "- **\"Vanilla\" now means two different things.** A build running our gamecode will"
+            echo "  behave differently from Raven's in ways that are not engine bugs. If you report"
+            echo "  a problem, please say whether \`gamecode/\` is installed; removing it is the"
+            echo "  fastest way to tell whose bug it is. This cuts both ways — some reports against"
+            echo "  older releases will have been gamecode issues we had already fixed."
+            echo "- **Portals: the Crusader's Glyph of the Ancients damages you too.** The glyph"
+            echo "  detonates on whoever touches it for real damage — 50 in deathmatch, 37"
+            echo "  otherwise — the caster included. Do not walk into your own glyph. This is"
+            echo "  Raven's original behaviour, so nothing changes if you are coming from a stock"
+            echo "  \`progs.dat\`; it is called out because Hexenwail's own gamecode briefly let the"
+            echo "  glyph pass harmlessly through the caster, and that exemption is gone."
             echo ""
             echo "### Reporting a crash"
             echo ""

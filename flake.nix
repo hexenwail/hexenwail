@@ -326,9 +326,10 @@
           # players -- who run Raven's retail 1997 progs.dat.  Wiring it into
           # CI makes hcc the gate.  uhexen2-zmb3.
           #
-          # Building it is NOT a decision to ship it: nothing references this
-          # output, `release` least of all.  See docs/GAMECODE.md for the
-          # licence position and the install path.
+          # `release` stages three of these files for the player to copy --
+          # data1/progs.dat, data1/progs2.dat and portals/progs.dat, and not
+          # hw/ or siege/ (uhexen2-8qp3).  See docs/GAMECODE.md for the licence
+          # position, the precedence trace and the install path.
           #
           # All four trees, not just h2, because a fix typically lands in
           # three of them at once -- bb570666a (uhexen2-9r3n) touched h2, hw
@@ -400,8 +401,10 @@
                 1.29c plus Hexenwail's own, none of which are in the retail
                 1997 progs.dat that players otherwise run.
 
-                Hexenwail does not ship these in any release artifact. To use
-                them, copy over your own installation:
+                Release bundles stage the Hexen II and Portals files under
+                gamecode/ for the player to copy; hw/ and siege/ are built as a
+                compile gate only and are not shipped. To install from a source
+                checkout instead:
 
                   nix build .#gamecode
                   cp result/share/hexenwail/data1/progs.dat ~/.hexen2/data1/
@@ -935,6 +938,97 @@
             install -Dm644 ${self}/scripts/get_demo.ps1 $out/release/windows-x86_64/get_demo.ps1
             install -Dm755 ${self}/scripts/get_demo.cmd $out/release/windows-x86_64/get_demo.cmd
 
+            # Compiled gamecode.  uhexen2-8qp3.
+            #
+            # One shared directory, not a copy per platform: progs bytecode is
+            # platform-independent, so three copies would add ~5.7 MB to the
+            # download to say the same thing three times.  The tree under
+            # gamecode/ IS the install instruction -- gamecode/data1/progs.dat
+            # goes to <install>/data1/progs.dat -- which is why the gamedir
+            # names are kept rather than flattening the three files together.
+            #
+            # Staged for the player to copy, NOT extracted over their data1/.
+            # Retail ships progs.dat as a LOOSE file and the paks contain no
+            # copy of it (verified against a retail install: pak0/pak1/pak3
+            # hold zero .dat entries), so an overlay that lands directly in
+            # data1/ overwrites the player's only copy of Raven's gamecode,
+            # irreversibly and without asking.  On Windows that happens on
+            # unzip, before anyone has read a word of documentation.  The
+            # copy stays a deliberate act; gamecode/README.txt says to back up
+            # first.  docs/GAMECODE.md has the precedence trace behind this.
+            #
+            # portals/ is not optional.  Priority is mod > portals > data1 and
+            # the unit of priority is a whole gamedir, so with the mission pack
+            # active a shipped data1/progs.dat is never read -- shipping only
+            # h2 would miss every Portals player.
+            #
+            # hw/ and siege/ are built (they gate compile errors) but withheld:
+            # no retail HexenWorld bytecode exists to compare them against and
+            # this fork builds no HexenWorld engine.  Deferred to uhexen2-nr9l.
+            # Named one by one rather than copying the tree so that stays true
+            # by construction, and so a vanished path fails the build.
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs.dat \
+              ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs2.dat \
+              -t $out/release/gamecode/data1
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/portals/progs.dat \
+              -t $out/release/gamecode/portals
+
+            cat > $out/release/gamecode/README.txt <<'EOF'
+Hexenwail compiled gamecode (progs.dat)
+=======================================
+
+These are OPTIONAL.  The game runs fine without them.
+
+They are the Hexen II game logic, rebuilt from the HexenC sources in this
+project.  They carry bug fixes that are not in Raven's 1997 progs.dat -- most
+notably a fix for dropped backpacks silently vanishing in co-op and
+deathmatch.  Nothing else in this download changes game behaviour; these files
+do.
+
+WHERE THEY GO
+-------------
+The layout below mirrors your Hexen II directory.  Copy each file to the
+matching place in your installation, beside the .pak files:
+
+  gamecode/data1/progs.dat    ->  <your Hexen II folder>/data1/progs.dat
+  gamecode/data1/progs2.dat   ->  <your Hexen II folder>/data1/progs2.dat
+  gamecode/portals/progs.dat  ->  <your Hexen II folder>/portals/progs.dat
+
+BACK UP FIRST
+-------------
+Retail Hexen II keeps progs.dat as a loose file, and there is NO copy inside
+pak0.pak/pak1.pak/pak3.pak to fall back on.  Copy your existing progs.dat,
+progs2.dat and portals/progs.dat somewhere safe before overwriting them.  To
+go back to Raven's gamecode, restore those backups -- nothing else is needed.
+
+Copy progs.dat and progs2.dat TOGETHER.  Ten late-game maps use progs2.dat and
+the rest use progs.dat; installing one without the other leaves the game
+running new gamecode on some maps and 1997 gamecode on others.
+
+Install portals/progs.dat if you have the Portal of Praevus mission pack.
+When the mission pack is active it takes priority over data1 completely, so
+without this file you get none of the fixes.
+
+WHAT CHANGES
+------------
+Crusader's Glyph of the Ancients (Portal of Praevus).  The glyph detonates on
+whoever touches it for real damage -- 50 in deathmatch, 37 otherwise -- and
+that includes YOU, the caster.  Do not walk into your own glyph.
+
+This is Raven's original behaviour, so nothing about the glyph changes if you
+are coming from a stock progs.dat.  It is called out because Hexenwail's own
+gamecode briefly did something else: builds made from source for a while let
+the glyph pass harmlessly through the caster.  That exemption is gone -- it was
+never how the game worked.
+
+Once you install these, you are no longer running "vanilla" Hexen II gamecode.
+If you report a bug, please say whether these files are installed.  Removing
+them (restore your backups) is the fastest way to tell whether a problem is
+ours or Raven's.
+EOF
+
             # License files
             mkdir -p $out/release/licenses
             cp ${self}/COPYING $out/release/licenses/COPYING.GPL2 2>/dev/null || \
@@ -965,6 +1059,16 @@ carries a helper that downloads the free 1997 three-level demo and verifies it:
 - windows-x86_64/get_demo.cmd       double-click, or run from cmd
 
 The demo data comes from the uHexen2 project and is not ours to relicense.
+
+Optional gamecode (gamecode/):
+This release also carries the Hexen II game logic rebuilt from source, with
+fixes that are not in Raven's 1997 progs.dat -- chiefly dropped backpacks
+silently vanishing in co-op and deathmatch.  It is NOT installed for you: the
+directory tree under gamecode/ mirrors your Hexen II folder, so copy
+gamecode/data1/progs.dat to data1/progs.dat and so on.  Back up the files you
+replace first -- retail keeps them loose and no .pak holds a spare copy.
+Read gamecode/README.txt before you do; it lists one deliberate behaviour
+change to the Crusader's Glyph of the Ancients.
 
 Crash reporting (Windows):
 The Windows build carries Dr. MinGW, so a crash writes "glh2.RPT" beside
