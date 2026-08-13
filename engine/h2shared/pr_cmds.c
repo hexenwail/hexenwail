@@ -1104,8 +1104,7 @@ static void PF_ambientsound (void)
 	float		vol, attenuation;
 	int		i, soundnum;
 	#ifndef H2W /* just to be on the safe side */
-	const int SV_MAXSOUNDS = (sv_protocol == PROTOCOL_RAVEN_111) ?
-					 MAX_SOUNDS_OLD : MAX_SOUNDS;
+	const int SV_MAXSOUNDS = SV_MaxSounds ();
 	#endif
 
 	pos = G_VECTOR (OFS_PARM0);
@@ -2153,8 +2152,7 @@ static void PF_precache_sound (void)
 	const char	*s;
 	int		i;
 	#ifndef H2W /* just to be on the safe side */
-	const int SV_MAXSOUNDS = (sv_protocol == PROTOCOL_RAVEN_111) ?
-					 MAX_SOUNDS_OLD : MAX_SOUNDS;
+	const int SV_MAXSOUNDS = SV_MaxSounds ();
 	#endif
 
 	if (sv.state != ss_loading && !ignore_precache)

@@ -90,7 +90,17 @@
 #define	MAX_SOUNDS_H2MP	512		/* Mission Pack (protocol 19), messy thing:		*/
 					/* SV_StartSound sends it as a byte, but PF_ambientsound
 					   sends it as a word.					*/
-#define	MAX_SOUNDS	(MAX_SOUNDS_H2MP)
+#define	MAX_SOUNDS_UH2	1024		/* protocol 21 (PROTOCOL_UH2_114).  svc_sound still	*/
+					/* sends the index as a byte, but SND_OVERFLOW (+256)
+					   and SND_OVERFLOW2 (+512) may now both be set, so the
+					   wire tops out at 255+256+512 == 1023.  1024 is the
+					   ceiling the encoding gives us, not a chosen number:
+					   going higher needs a wider field in svc_sound.	*/
+#define	MAX_SOUNDS	(MAX_SOUNDS_UH2)
+
+					/* The array bound above is what the engine allocates.
+					   What a given session may actually _use_ depends on
+					   the negotiated protocol -- see SV_MaxSounds().	*/
 
 #define	MAX_STYLESTRING		64
 

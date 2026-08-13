@@ -286,6 +286,14 @@ extern	edict_t		*sv_player;
 void SV_Init (void);
 void SV_UserInit (void);
 
+/* How many sound indices the negotiated protocol can actually put on the
+ * wire.  svc_sound sends the index as a byte plus the SND_OVERFLOW /
+ * SND_OVERFLOW2 mask bits, so the reachable range is a property of the
+ * protocol, not of the MAX_SOUNDS array bound.  Precache paths must clamp
+ * to this, otherwise a mod fills slots the client can never be told about
+ * and the sounds simply go missing at runtime. */
+int SV_MaxSounds (void);
+
 void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count);
 void SV_StartParticle2 (vec3_t org, vec3_t dmin, vec3_t dmax, int color, int effect, int count);
 void SV_StartParticle3 (vec3_t org, vec3_t box, int color, int effect, int count);
