@@ -19,8 +19,8 @@ followed from that, both bad:
    on retail progs cannot run it.
 
 This output fixes (1) and makes (2) *possible* — it does not fix (2). Building
-the gamecode is not the same as shipping it; see [Not yet
-decided](#not-yet-decided).
+the gamecode is not the same as shipping it; wiring the artifacts into the
+release is `uhexen2-8qp3`.
 
 ## Building
 
@@ -83,8 +83,8 @@ the build. `ci.yml` and `release.yml` build named packages one at a time and
 never sweep all of `packages` — a new output is invisible to CI until it is
 named explicitly. Keep it that way.
 
-`packages.release` does **not** reference `gamecode`. Release artifacts stay
-engine-only.
+`packages.release` does **not** reference `gamecode`. Release artifacts are
+engine-only today; `uhexen2-8qp3` is the work to change that.
 
 ## Installing
 
@@ -98,10 +98,10 @@ cp result/share/hexenwail/data1/progs2.dat ~/.hexen2/data1/
 ```
 
 `~/.hexen2` is the per-user data directory on Unix
-(`engine/h2shared/userdir.h:35`, `SYS_USERDIR_UNIX`); demo builds use
-`~/.hexen2demo` (`userdir.h:29`). Windows and OS/2 have no user directory —
-`DO_USERDIRS` is forced to 0 at `engine/h2shared/sys.h:73-75` — so there the
-files go into the install's own `data1/` beside `pak0.pak`.
+(`engine/h2shared/userdir.h :: SYS_USERDIR_UNIX`); demo builds use
+`~/.hexen2demo` (same macro, demo `#ifdef`). Windows and OS/2 have no user
+directory — `engine/h2shared/sys.h :: DO_USERDIRS` is forced to 0 there — so
+the files go into the install's own `data1/` beside `pak0.pak`.
 
 Prefer the user directory where you have one. It takes precedence over the
 install (see below), and uninstalling is `rm` on files you own rather than an
@@ -110,17 +110,17 @@ edit to the game directory.
 **Copy `progs.dat` and `progs2.dat` together.** `progs2.dat` is never requested
 by that name. A `maplist.txt` found on the search path maps individual maps to
 a progs file, and the engine re-reads it on every map spawn
-(`PR_GetProgFilename`, `engine/h2shared/pr_edict.c:1923-1999`, gated by
-`USE_MULTIPLE_PROGS` at `engine/h2shared/progs.h:129`). Installing one without
+(`engine/h2shared/pr_edict.c :: PR_GetProgFilename()`, gated by
+`engine/h2shared/progs.h :: USE_MULTIPLE_PROGS`). Installing one without
 the other leaves the game on a new progs for most maps and Raven's 1997 progs
 for the rest — a mismatch that will not announce itself.
 
 To undo, delete the files. Nothing else is needed, but nothing else will remind
 you either: the filename carries no version, and the only report of which progs
-loaded is a `Con_DPrintf` at `pr_edict.c:2183` ("Loaded %s, v%d, %d crc"),
-which requires `developer 1`. A stale copy is therefore invisible and permanent
-until removed by hand. That is the main hazard of this install path and the
-reason it is not automated.
+loaded is a `Con_DPrintf` in `pr_edict.c :: PR_LoadProgs()` ("Loaded %s, v%d,
+%d crc"), which requires `developer 1`. A stale copy is therefore invisible
+and permanent until removed by hand. That is the main hazard of this install
+path and the reason it is not automated.
 
 ## Precedence — confirmed, not assumed
 
@@ -131,20 +131,22 @@ whether bundling could ever be safe.
 The mechanism, in order:
 
 - The search path is a **prepend-only list** — later additions land at the
-  head. `engine/h2shared/quakefs.c:420-421` (paks) and `quakefs.c:434-435` (the
-  directory itself) both do `search->next = fs_searchpaths; fs_searchpaths =
-  search;`.
-- **Lookup returns the first hit and stops.** `quakefs.c:865` iterates
-  `for (search = fs_searchpaths; search; search = search->next)` and returns at
-  `quakefs.c:887` (pak hit) or `quakefs.c:910` (loose hit).
-- **`data1` is added first**, at `quakefs.c:1537-1538` — so it ends up at the
-  *tail*, i.e. lowest priority.
-- **The mod gamedir is added last**, at `quakefs.c:1727-1747`
-  (`-game`/`-mod` → `FS_Gamedir`), which reaches `FS_AddGameDirectory` at
-  `quakefs.c:565` — so it ends up at the head.
+  head. `engine/h2shared/quakefs.c :: FS_AddGameDirectory()` does
+  `search->next = fs_searchpaths; fs_searchpaths = search;` for each pak and
+  again for the directory itself, and gives every new gamedir
+  `path_id = fs_searchpaths->path_id << 1`.
+- **Lookup returns the first hit and stops.**
+  `quakefs.c :: FS_OpenFile_Internal()` walks
+  `for (search = fs_searchpaths; search; search = search->next)` and returns
+  from inside the loop on the first pak hit or loose hit.
+- **`data1` is added first**, in `quakefs.c :: FS_Init()` step 1 — so it ends
+  up at the *tail*, i.e. lowest priority.
+- **The mod gamedir is added last**, by `FS_Init()`'s `-game`/`-mod` handling
+  at the end of the function, which calls `FS_Gamedir()` →
+  `FS_AddGameDirectory()` — so it ends up at the head.
 - **`progs.dat` is loaded by plain relative name through that search path**,
   with no basedir or gamedir qualification: `PR_GetProgFilename()` returns
-  `"progs.dat"` (`pr_edict.c:1919`) and `pr_edict.c:2084-2085` calls
+  `def_progname`, i.e. `"progs.dat"`, and `pr_edict.c :: PR_LoadProgs()` calls
   `FS_LoadHunkFile(progname, NULL)`.
 
 Resulting order for `-game sot`, head to tail:
@@ -159,37 +161,45 @@ difference, because *all* of the mod's entries sit above *all* of `data1`'s.
 Two related facts, both verified:
 
 - **Within one directory, loose files beat paks.** Hexen II inverts Quake here
-  on purpose — `quakefs.c:424-428` adds the directory itself *after* its paks
-  specifically "to allow override files". This is what makes a loose
-  `data1/progs.dat` override `pak0.pak`'s copy at all.
+  on purpose — `FS_AddGameDirectory()` adds the directory itself *after* its
+  paks, and says why in a comment: "so that the dir itself will be placed above
+  the pakfiles in the search order which, in turn, will allow override files".
+  This is what makes a loose `data1/progs.dat` override `pak0.pak`'s copy at
+  all.
 - **The user directory beats the install directory.** One
-  `FS_AddGameDirectory` call adds the basedir's paks and directory, then loops
-  (`quakefs.c:437-448`) to add the userdir's paks and directory — later, so
-  higher.
+  `FS_AddGameDirectory()` call adds the basedir's paks and directory, then
+  loops back to add the userdir's paks and directory — later, so higher.
 
 The engine already protects mods from a `data1` `maplist.txt` hijacking their
-progs: `pr_edict.c:1941-1945` compares `path_id`s and logs `"ignored maplist.txt
-from a gamedir with lower priority"`.
+progs: `PR_GetProgFilename()` compares `path_id`s and logs `"ignored
+maplist.txt from a gamedir with lower priority"`.
 
-### Two caveats worth knowing
+### What this means for bundling
 
-Neither changes the verdict, but both affect what a bundling pass would need to
-reason about:
+The verdict above is about *mods*. The same mechanism has a consequence for
+what we ship that is easy to miss, so state it plainly:
 
-1. **`portals/` sits between the mod and `data1/`.** In this fork, passing
-   `-game`/`-mod` at all turns the mission pack on (`quakefs.c:1659-1664`). So
-   a mod that ships no `progs.dat` of its own falls through to
-   `portals/pak3.pak`'s Mission Pack v1.12 progs, *not* `data1`'s v1.11 — with
-   or without anything we install. `-noportals` (`quakefs.c:1650`) restores the
-   `data1` fallback.
-2. **`portals` appears to be added twice for `-game <mod>`.** `quakefs.c:1677`
-   adds it (because `check_portals` was set true by the presence of `-game`),
-   then `quakefs.c:1741-1745` adds it again — the guard there only checks that
-   the mod is not literally named `portals`, not whether portals is already in
-   the path. Harmless for lookup since the duplicates are adjacent and
-   identical, but it costs a file descriptor, a second hash table for
-   `pak3.pak`, a phantom entry in `path` output, and a wasted `path_id` bit.
-   Filed separately; not fixed here.
+**Priority is mod > portals > data1, and the unit of priority is a whole
+gamedir.** An entire later gamedir outranks an earlier one, paks included —
+there is no per-file arbitration between them. So:
+
+- **With the mission pack active, a `data1/progs.dat` we ship is never read.**
+  `portals/progs.dat`, or the copy inside `portals/pak3.pak`, wins outright.
+  And "active" is a much wider condition in this fork than the name suggests:
+  five flags set `check_portals` in `quakefs.c :: FS_Init()` step 2 —
+  `-portals`, `-missionpack`, `-h2mp`, `-game <dir>` and `-mod <dir>`. Only
+  `-noportals` overrides, and it is checked first.
+- The same fall-through applies to mods: one that ships no `progs.dat` of its
+  own lands on `portals/pak3.pak`'s Mission Pack v1.12 progs, *not* `data1`'s
+  v1.11 — with or without anything we install. `-noportals` restores the
+  `data1` fallback.
+- **A bare launch with no arguments does reach `data1/progs.dat`.** That is
+  the one common case where a shipped `data1` progs is the one that loads.
+
+The practical upshot, and this is a live decision in `uhexen2-8qp3`: shipping
+only the `h2` tree would silently miss every Portals player. Both `data1/` and
+`portals/` have to go in the zip for the mission pack audience to receive a
+gamecode fix at all.
 
 ## Licensing
 
@@ -228,7 +238,7 @@ accompanies the gamecode — not in this tree, and not in upstream's
 `gamedata-src-1.29b.tgz` either. The only licence assertion covering it is
 structural: uHexen2's release script copies `docs/COPYING` (GPLv2) to
 `LICENSE.txt` at the root of a tree containing `gamecode-<ver>/`
-(`scripts/mkrelease.sh:18-22`).
+(`scripts/mkrelease.sh`).
 
 ### Why this does not mirror the `demodata` caution
 
@@ -254,12 +264,15 @@ about rights.
 
 ## Not yet decided
 
-Deliberately out of scope for `uhexen2-zmb3`. Do not infer answers from the
-existence of this output:
+Two of the questions `uhexen2-zmb3` left open have since been answered by the
+owner: we **keep serving the compiled progs through cachix**, and we **bundle
+it in the release zip** (`uhexen2-8qp3`). That does not make bundling free —
+it changes what "vanilla" means for every bug report we receive, a cost paid on
+every future issue rather than once, so the release notes should say which
+gamecode a build carries.
 
-- **Whether we bundle `progs.dat` in the release zip, or offer it as an
-  optional download.** Bundling changes what "vanilla" means for every bug
-  report we receive, which is a cost paid on every future issue, not once.
+Still out of scope, and not to be inferred from the existence of this output:
+
 - **Savegame and demo compatibility across a progs change.** Note that the
   `-oi`/`-on` omission for `h2` exists precisely because save compatibility is
   sensitive to progs layout, so this is not hypothetical.
