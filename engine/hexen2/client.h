@@ -238,6 +238,7 @@ typedef struct
 
 	int		cdtrack, looptrack;	// cd audio
 	char		midi_name[128];		// midi file name
+	char		mod_name[128];		// server's gamedir, from svc_mod_name
 	byte		current_frame, last_frame, reference_frame;
 	byte		current_sequence, last_sequence;
 	byte		need_build;

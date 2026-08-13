@@ -27,6 +27,8 @@
 
 /* gl_fog.c */
 void Fog_ParseServerMessage (void);
+/* gl_sky.c */
+void Sky_LoadSkyBox (const char *name);
 
 static const char *svc_strings[] =
 {
@@ -1388,6 +1390,7 @@ void CL_ParseServerMessage (void)
 	byte		test;
 	float		compangles[2][3];
 	vec3_t		deltaangles;
+	const char	*str;
 
 // if recording demos, copy the message out
 	if (net_message.cursize > LastServerMessageSize)
@@ -2111,9 +2114,23 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_mod_name:
+			q_strlcpy (cl.mod_name, MSG_ReadString(), sizeof(cl.mod_name));
+			if (cl.mod_name[0])
+				Con_DPrintf ("Server gamedir: %s\n", cl.mod_name);
+			break;
+
 		case svc_skybox:
-			MSG_ReadString();
-			Con_DPrintf ("Ignored server msg %d (%s)\n", cmd, svc_strings[cmd]);
+			/* Arrives during signon, AFTER CL_ParseServerInfo has run
+			 * R_NewMap -> Sky_NewMap and loaded the sky from worldspawn.
+			 * An empty string means the server has nothing to declare,
+			 * NOT "clear the sky" -- applying it would wipe a correctly
+			 * loaded skybox, and on hub revisit it would also stomp the
+			 * per-map recall that uhexen2-7gl5 added.  Ignore it.
+			 * A non-empty name that matches is a no-op inside
+			 * Sky_LoadSkyBox, which is the listen-server case. */
+			str = MSG_ReadString();
+			if (str[0])
+				Sky_LoadSkyBox (str);
 			break;
 
 		case svc_fog:
