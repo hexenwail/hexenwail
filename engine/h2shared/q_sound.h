@@ -154,6 +154,7 @@ extern	vec3_t		listener_up;
 
 extern	cvar_t		sfxvolume;
 extern	cvar_t		loadas8bit;
+extern	cvar_t		snd_resample;
 
 #define	MAX_RAW_SAMPLES	8192
 extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
@@ -164,6 +165,7 @@ extern	cvar_t		bgmvolume;
 
 void S_LocalSound (const char *name);
 sfxcache_t *S_LoadSound (sfx_t *s);
+int SND_ResampledWidth (int inwidth, float stepscale);
 
 wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength);
 

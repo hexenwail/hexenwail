@@ -96,6 +96,11 @@ cvar_t		sfxvolume = {"volume", "0.7", CVAR_ARCHIVE};
 
 cvar_t		precache = {"precache", "1", CVAR_NONE};
 cvar_t		loadas8bit = {"loadas8bit", "0", CVAR_NONE};
+/* 0 = legacy nearest-sample resample, 1 = band-limited windowed sinc.
+ * See the header comment in snd_mem.c for the measurements.  Archived so a
+ * user who prefers it keeps it; default off because it is a taste change,
+ * not a bug fix, and this one has been reverted once already. */
+cvar_t		snd_resample = {"snd_resample", "0", CVAR_ARCHIVE | CVAR_CALLBACK};
 
 static	cvar_t	sfx_mutedvol = {"sfx_mutedvol", "0", CVAR_ARCHIVE};
 static	cvar_t	bgm_mutedvol = {"bgm_mutedvol", "0", CVAR_ARCHIVE};
@@ -225,6 +230,36 @@ void S_Startup (void)
 
 /*
 ================
+S_ResampleChanged
+
+snd_resample only takes effect at load time, and every sound the session has
+touched is already sitting resampled in the cache.  Drop them so the next
+play re-runs ResampleSfx -- otherwise the cvar looks like it does nothing
+until a map change happens to evict the sound you were listening to, which
+makes A/B comparison impossible.
+================
+*/
+static void S_ResampleChanged (cvar_t *var)
+{
+	int	i;
+	sfx_t	*sfx;
+
+	(void) var;
+
+	if (!snd_initialized)
+		return;
+
+	S_StopAllSounds (true);
+
+	for (sfx = known_sfx, i = 0; i < num_sfx; i++, sfx++)
+	{
+		if (Cache_Check (&sfx->cache))
+			Cache_Free (&sfx->cache);
+	}
+}
+
+/*
+================
 S_Init
 ================
 */
@@ -254,6 +289,8 @@ void S_Init (void)
 	Cvar_RegisterVariable(&sfxvolume);
 	Cvar_RegisterVariable(&sfx_mutedvol);
 	Cvar_RegisterVariable(&loadas8bit);
+	Cvar_RegisterVariable(&snd_resample);
+	Cvar_SetCallback(&snd_resample, S_ResampleChanged);
 	Cvar_RegisterVariable(&bgmvolume);
 	Cvar_RegisterVariable(&bgm_mutedvol);
 	Cvar_RegisterVariable(&ambient_level);
