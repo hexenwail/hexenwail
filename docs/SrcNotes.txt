@@ -49,6 +49,90 @@ specific intrusions in the hexen2 code:
   Used for particle velocity calculations.  Hexen II only.
 
 
+Alias model bounds: h2ded vs. the listen server:
+--------------------------------------------------------------
+The dedicated server and the listen server do NOT agree on the implicit
+physics bounds an alias (.mdl) entity gets from setmodel().  Progs that
+call setsize() after setmodel() -- which is what all of the shipped
+gamecode does -- never notice, so this is latent rather than active.  It
+is written down here because it is not visible from any single file.
+
+pr_cmds.c :: PF_setmodel() applies the model's mins/maxs to EVERY model
+type, alias included, not just to brush models:
+
+	mod = sv.models[(int)e->v.modelindex];
+	if (mod)
+		SetMinMaxSize (e, mod->mins, mod->maxs, true);
+	else
+		SetMinMaxSize (e, vec3_origin, vec3_origin, true);
+
+So whatever the loader computed for mod->mins/maxs becomes the entity's
+physics box until the progs calls setsize().  PF_setpuzzlemodel() has the
+same code and the same exposure.
+
+On the client / listen server the loader is gl_model.c.  Both of its
+alias paths, Mod_LoadAliasModel() and Mod_LoadAliasModelNew(), set the
+box to the mesh extents padded by 10 units on every axis:
+
+	mod->mins[i] = aliasmins[i] - 10;
+	mod->maxs[i] = aliasmaxs[i] + 10;
+
+Quake's +/-16 constants are still there, commented out, under the
+inherited "FIXME: do this right".  The +/-10 is not a uHexen2 invention:
+Spoike checked the original Hexen II source release and confirmed +/-10
+is what Raven specified.  This path is correct -- do not "fix" it back to
+the Quake numbers.
+
+h2ded is built with SERVERONLY (engine/CMakeLists.txt), which does two
+things that matter here:
+
+  1. It swaps gl_model.c for sv_model.c.  sv_model.c has no alias path at
+     all: its Mod_LoadModel() calls Mod_LoadBrushModel() unconditionally,
+     with none of the RAPOLYHEADER / IDPOLYHEADER / IDSPRITEHEADER
+     dispatch that gl_model.c :: Mod_LoadModel() does.  Handing it a .mdl
+     would make Mod_LoadBrushModel() read the model's "IDPO"/"RAPO" ident
+     as dheader_t.version and Host_Error() out.
+
+  2. It compiles out the Mod_ForName() call in PF_precache_model() and in
+     PF_precache_puzzle_model(), both of which are #ifndef SERVERONLY.
+
+(2) is why (1) never fires -- h2ded never asks sv_model.c to load a .mdl
+in the first place.  But it also leaves sv.models[] NULL for every model
+the progs precaches.  sv is zeroed by Host_ClearMemory() at
+SV_SpawnServer() time, and the only entries SV_SpawnServer() goes on to
+fill are the worldmodel at index 1 and the inline BSP submodels *1..*N.
+Those two assignments are unguarded, so brush models behave identically
+on both builds.  Alias models do not:
+
+  build           bounds an alias entity gets from setmodel()
+  --------------  --------------------------------------------
+  listen server   mesh extents, padded by 10 on each axis
+  h2ded           '0 0 0' / '0 0 0'  (mod is NULL, so the
+                  vec3_origin branch of PF_setmodel runs)
+
+An alias entity that never calls setsize() is therefore a zero-size point
+on a dedicated server and a mesh-sized box on a listen server.  Nothing
+in the stock gamecode depends on the implicit box, so no shipped map or
+monster misbehaves today; a mod that omitted setsize() would.
+
+Do NOT reconcile this by bolting an alias loader onto sv_model.c without
+first checking real mod behaviour.  Making the two agree means changing
+entity sizes on one build or the other, and engine-side entity sizing is
+load-bearing in non-obvious ways: fattening the puzzle_piece bounds once
+caused map items to be silently deleted at spawn, because the larger box
+no longer fit where the mapper had put it.  Growing h2ded's alias boxes
+from a point to the mesh extents is that same class of change applied to
+every alias entity at once.  It would also make h2ded load, byte-swap and
+keep in memory every .mdl on the server, which is precisely the cost that
+SERVERONLY exists to avoid.
+
+Historical note: engine/h2shared/model.c used to carry a third answer
+again -- the same alias-bounds code with no +/-10 padding at all.  No
+build target ever compiled it.  It has been removed, so if you are
+diffing against an older tree or against upstream uHexen2, that file is
+not a reference for what this engine does.
+
+
 SV_SpawnServer, Host_ShutdownServer and SCR_UpdateScreen:
 --------------------------------------------------------------
 The timeout in SCR_UpdateScreen(), and more (actually a bug) :
