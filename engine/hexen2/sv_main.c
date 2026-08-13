@@ -512,6 +512,52 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 SV_UpdateExInventory
 ==================
 */
+/*
+==================
+SV_ClientInventoryPage
+
+Find, or claim, the extended-inventory page belonging to a client.
+
+sv.ex_inventory_pages lives in the hunk, and Host_ClearMemory both frees
+the hunk and zeroes sv on every map load -- so the array is a fresh
+allocation at a fresh address each map.  client_t does not follow it:
+svs.clients is allocated once in Host_Init and survives.  Any caller that
+leaves a previous map's pointer in client->ex_inventory therefore leaves a
+dangling pointer into freed hunk, which INV_UpdateExItem then walks as a
+linked list -- reading ->next out of whatever the new map has written
+there.  That was uhexen2-rutp: a nondeterministic changelevel crash that
+retrying made go away, because the reused bytes differ every time.
+
+Returns NULL when no page is available.  Callers must assign the result
+unconditionally; INV_UpdateExItem treats NULL as an empty chain.
+==================
+*/
+ex_inventory_page_t *SV_ClientInventoryPage (int clientnum)
+{
+	int	npages, i;
+
+	if (!sv.ex_inventory_pages)
+		return NULL;
+
+	/* The array is maxclients * MAX_INVENTORY_EX_PAGES entries.  Two of
+	 * the three original search sites bounded by maxclients alone, so in
+	 * single player only page 0 was ever reachable out of the 8. */
+	npages = svs.maxclients * MAX_INVENTORY_EX_PAGES;
+
+	for (i = 0; i < npages; i++)
+	{
+		if (sv.ex_inventory_pages[i].id != 0 &&
+		    sv.ex_inventory_pages[i].client_id != clientnum)
+			continue;		/* in use by someone else */
+
+		if (sv.ex_inventory_pages[i].id == 0)
+			sv.ex_inventory_pages[i].id = ++sv.next_page_id;
+		return &sv.ex_inventory_pages[i];
+	}
+
+	return NULL;
+}
+
 int INV_UpdateExItem(ex_inventory_page_t *startPage, int inv_id, int inv_cnt, qboolean inc)
 {
 	qboolean bFound = false;
@@ -575,19 +621,18 @@ int INV_UpdateExItem(ex_inventory_page_t *startPage, int inv_id, int inv_cnt, qb
 				{
 					if (page->next == NULL)
 					{
-
-						//find matching or first empty inventory page
-						for (j = 0; ((j < (svs.maxclients * MAX_INVENTORY_EX_PAGES)) && (sv.ex_inventory_pages[j].id != 0) && (sv.ex_inventory_pages[j].client_id != i)); j++);
-						if (j < svs.maxclients * MAX_INVENTORY_EX_PAGES)
-						{
-							page->next = &sv.ex_inventory_pages[j];
-							if (page->next->id == 0)
-								page->next->id = ++sv.next_page_id;
-						}
-						//page = startPage; //shan find blank page?  with no associated client?
+						/* The old search compared client_id against i,
+						 * the inventory SLOT index, not a client id.
+						 * The owner is whoever owns the chain we are
+						 * extending. */
+						page->next = SV_ClientInventoryPage (startPage->client_id);
+						if (page->next == NULL)
+							break;	/* out of pages; without this the
+								 * loop spun forever, since page
+								 * never advanced and ->next was
+								 * never filled in */
 					}
-					else
-						page = page->next;
+					page = page->next;
 				}
 				else
 					break;
@@ -750,14 +795,7 @@ static void SV_ConnectClient (int clientnum)
 	client->spawned = false;
 	client->edict = ent;
 
-	//find matching or first empty inventory page
-	for (i = 0; ((i < svs.maxclients) && (sv.ex_inventory_pages[i].id != 0) && (sv.ex_inventory_pages[i].client_id != clientnum)); i++);
-	if (i < svs.maxclients)
-	{
-		client->ex_inventory = &sv.ex_inventory_pages[i];
-		if (client->ex_inventory->id == 0)
-			client->ex_inventory->id = ++sv.next_page_id;
-	}
+	client->ex_inventory = SV_ClientInventoryPage (clientnum);
 
 	SZ_Init (&client->message, client->msgbuf, sizeof(client->msgbuf));
 	client->message.allowoverflow = true;	// we can catch it
@@ -2506,6 +2544,17 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	if (sv.ex_inventory_pages == NULL)
 	{
 		sv.ex_inventory_pages = (ex_inventory_page_t *)Hunk_AllocName((svs.maxclients * MAX_INVENTORY_EX_PAGES) * sizeof(ex_inventory_page_t), "ex_pages");
+	}
+
+	/* Re-point every client that is still connected.  Host_ClearMemory
+	 * freed the previous array a few lines above this function's caller,
+	 * and clients survive a changelevel -- so without this their
+	 * ex_inventory dangles into freed hunk for the rest of the session.
+	 * uhexen2-rutp. */
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		if (svs.clients[i].active)
+			svs.clients[i].ex_inventory = SV_ClientInventoryPage (i);
 	}
 
 //

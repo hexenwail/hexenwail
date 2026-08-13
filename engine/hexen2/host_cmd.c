@@ -967,14 +967,7 @@ static void RestoreClients (int ClientsMode)
 			G_FLOAT(OFS_PARM0) = time_diff;
 			PR_ExecuteProgram (*sv_globals.ClientReEnter, "ClientReEnter");
 
-			//find matching or first empty inventory page
-			for (j = 0; ((j < svs.maxclients) && (sv.ex_inventory_pages[j].id != 0) && (sv.ex_inventory_pages[j].client_id != i)); j++);
-			if (j < svs.maxclients)
-			{
-				host_client->ex_inventory = &sv.ex_inventory_pages[j];
-				if (host_client->ex_inventory->id == 0)
-					host_client->ex_inventory->id = ++sv.next_page_id;
-			}
+			host_client->ex_inventory = SV_ClientInventoryPage (i);
 		}
 	}
 	SaveGamestate (true);
