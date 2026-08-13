@@ -47,15 +47,6 @@ void	GL_SetAlphaThreshold (float threshold);
  * preserve color.a (ENTALPHA / DRF_TRANSLUCENT translucent paths).  Negative
  * leaves shader default.  uhexen2-khsa r13. */
 void	GL_SetForceOpaqueAlpha (float v);
-/* uhexen2-khsa r21 probe: 1 = skip v_color RGB multiply in salias_frag (alias
- * batch renders fullbright); 0 = normal lighting.  Negative leaves shader
- * default. */
-void	GL_SetAliasFullbright (float v);
-/* uhexen2-khsa r22 probes — same convention as above. */
-void	GL_SetAliasNoFog (float v);
-void	GL_SetAliasR6Mode (float v);
-/* uhexen2-khsa r28 probe — hash-based stochastic alpha-test. */
-void	GL_SetAliasStochasticAlpha (float v);
 /* Underwater caustics for subsequent alias batches.  intensity 0 = off (the
  * default, and what every non-alias user of gl_shader_alias leaves it at).
  * The model matrix is the entity's model-only transform; salias_vert needs it
