@@ -24,7 +24,7 @@ The free three-level demo Raven released in November 1997 runs on Hexenwail, and
 
 In a source checkout the scripts live in `scripts/` instead.
 
-Each downloads the demo package from the [uHexen2 project](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/), verifies it against a known SHA-256, and installs only its `data1` directory. Nothing is overwritten if you already have game data. We don't host or relicense that data — see [assets/demo/README.md](assets/demo/README.md) for its provenance and terms.
+Each downloads [`hexen2demo_nov1997-linux-i586.tgz`](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/hexen2demo_nov1997-linux-i586.tgz/download) (13 MB) from the [uHexen2 project](https://sourceforge.net/projects/uhexen2/files/Hexen2Demo-Nov.1997/), verifies it against a known SHA-256, and installs only its `data1` directory. Nothing is overwritten if you already have game data. You can also fetch that tarball by hand and copy its `hexen2demo_nov1997/data1` next to the executable — the scripts do nothing more than that. We don't host or relicense that data — see [assets/demo/README.md](assets/demo/README.md) for its provenance and terms.
 
 The demo covers the first three levels; copying `data1` from a GOG, Steam or disc installation over it unlocks the full game.
 
