@@ -235,24 +235,6 @@ static void R_SetClearColor_f (cvar_t *var)
 
 /*
 ===============
-R_GLDitherChanged_f -- uhexen2-khsa r17
-
-Fires at cvar registration (initial config-load) and on every console
-change. value!=0 leaves GL_DITHER enabled (spec default); value==0
-calls glDisable(GL_DITHER) so testers can A/B the NVIDIA screen-door
-hypothesis without a code change.
-===============
-*/
-static void R_GLDitherChanged_f (cvar_t *var)
-{
-	if (var->integer)
-		glEnable_fp(GL_DITHER);
-	else
-		glDisable_fp(GL_DITHER);
-}
-
-/*
-===============
 R_Model_ExtraFlags_List_f -- Ironwail (johnfitz)
 
 Re-apply engine-set extra flags (MOD_NOLERP) to every cached model
@@ -371,10 +353,6 @@ void R_Init (void)
 	{ extern cvar_t r_alias_nofog;       Cvar_RegisterVariable (&r_alias_nofog); }	/* uhexen2-khsa r22 probe */
 	{ extern cvar_t r_alias_r6_mode;     Cvar_RegisterVariable (&r_alias_r6_mode); }	/* uhexen2-khsa r22 probe */
 	{ extern cvar_t r_alias_stochastic_alpha; Cvar_RegisterVariable (&r_alias_stochastic_alpha); }	/* uhexen2-khsa r28 probe */
-	{ extern cvar_t r_gl_dither;
-	  Cvar_RegisterVariable (&r_gl_dither);
-	  Cvar_SetCallback (&r_gl_dither, R_GLDitherChanged_f);
-	  R_GLDitherChanged_f (&r_gl_dither); }	/* apply initial state */
 	Cvar_RegisterVariable (&gl_glows);
 	Cvar_RegisterVariable (&gl_missile_glows);
 	Cvar_RegisterVariable (&gl_torch_dlight);
