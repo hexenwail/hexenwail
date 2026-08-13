@@ -1507,6 +1507,7 @@ FS_Init
 void FS_Init (void)
 {
 	qboolean check_portals = false;
+	qboolean portals_in_path = false;
 	int	i;
 
 	Cvar_RegisterVariable (&oem);
@@ -1707,6 +1708,10 @@ void FS_Init (void)
 			FS_MakePath_BUF (FS_BASEDIR, NULL, fs_gamedir, sizeof(fs_gamedir), "data1");
 			FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
 		}
+		else
+		{
+			portals_in_path = true;
+		}
 	}
 
 /* step 3: hw directory (hexenworld) */
@@ -1733,12 +1738,16 @@ void FS_Init (void)
 		if (! (gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)))
 			Sys_Error ("You must have the full version of Hexen II to play modified games");
 		/* add basedir/gamedir as an override game.
-		 * FS_Gamedir resets the search path above fs_base_searchpaths,
-		 * so we need to re-add portals if -mod was used (portals has
-		 * shared models like sucwp2p.mdl that mods depend on). */
+		 * Mods depend on shared mission pack models (sucwp2p.mdl etc.),
+		 * so portals must sit below the mod in the search path.  Step 2
+		 * normally already put it there, *below* fs_base_searchpaths,
+		 * where FS_Gamedir will not strip it -- adding it again here
+		 * would only burn a second path_id and fd (uhexen2-6h8x).  The
+		 * add is still needed when step 2 rolled portals back out. */
 		if (i < com_argc - 1)
 		{
-			if (check_portals && q_strcasecmp(com_argv[i+1], "portals"))
+			if (check_portals && !portals_in_path &&
+					q_strcasecmp(com_argv[i+1], "portals"))
 			{
 				FS_AddGameDirectory ("portals", true);
 				fs_base_searchpaths = fs_searchpaths;
