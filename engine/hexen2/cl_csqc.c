@@ -119,6 +119,14 @@ void CL_LoadCSProgs (void)
 	for (i = 0; i < (int)sizeof(*p) / 4; i++)
 		((int *)p)[i] = LittleLong (((int *)p)[i]);
 
+	/* Interop hazard, do not "fix" by relaxing this (uhexen2-xkvg):
+	 * uHexen2's v7 progs format and fteqcc's v7 share a version number but
+	 * are NOT the same layout.  A csprogs.dat built by fteqcc -- which is
+	 * what any FTE-derived HexenWorld gamecode such as ftehw.pk3 would ship
+	 * -- passes this version check and is then misparsed, because only the
+	 * header number matches and the def/statement layout does not.  Spoike
+	 * (FTE) raised exactly this collision.  Loading FTE-built csprogs needs
+	 * a real discriminator beyond p->version, which we do not have. */
 	if (p->version != PROG_VERSION_V6 && p->version != PROG_VERSION_V7)
 	{
 		Con_Printf ("CSQC: csprogs.dat has unsupported version %d\n", p->version);
