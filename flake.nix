@@ -58,6 +58,10 @@
         #   hw_utils        the HexenWorld master server and rcon clients
         #   common          shared sources, pulled in by all three lists above
         #   scripts         utils/CMakeLists.txt reads it (mk_header.c)
+        #   libs            vendored libTiMidity, compiled into the engine as
+        #                   the tier-2 MIDI fallback codec when
+        #                   USE_CODEC_TIMIDITY is on (always, for WASM and for
+        #                   any build without FluidSynth) -- uhexen2-unvi
         #   oslibs          NOT optional despite no literal path in any
         #                   CMakeLists: engine/CMakeLists.txt reaches it as
         #                   ${UHEXEN2_TOP}/oslibs for the prebuilt Windows
@@ -83,6 +87,7 @@
               "common"
               "scripts"
               "oslibs"
+              "libs"
             ];
           in pkgs.lib.cleanSourceWith {
             src = ./.;
