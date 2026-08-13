@@ -67,6 +67,10 @@ void M_Menu_Main_f (void);
 void M_Menu_Options_f (void);
 void M_Menu_Quit_f (void);
 
+/* rebuilds the Key Setup rows from the engine defaults plus the current
+ * gamedir's bindlist.lst -- must be re-run whenever the gamedir changes */
+void M_BuildBindList (void);
+
 void M_Print (int cx, int cy, const char *str);
 void M_PrintWhite (int cx, int cy, const char *str);
 

@@ -1515,6 +1515,9 @@ static void Host_Game_f (void)
 	Draw_ReInit ();
 	BGM_Stop ();	/* stop music from previous game */
 
+	/* re-read bindlist.lst so the previous mod's Key Setup rows don't linger */
+	M_BuildBindList ();
+
 	/* clean slate: reload binds, aliases, and configs from new mod */
 	Cbuf_AddText ("unbindall\nunaliasall\nexec hexen.rc\n");
 	Con_Printf ("\ngame changed to \"%s\"\n", dir);

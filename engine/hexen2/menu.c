@@ -4283,6 +4283,8 @@ static void M_Gamepad_Key (int k)
 //=============================================================================
 /* KEYS MENU */
 
+/* Engine defaults. These seed the runtime row list built by M_BuildBindList();
+ * a mod's bindlist.lst is appended after them, never in place of them. */
 static const char *bindnames[][2] =
 {
 	{"+attack",		"attack"},
@@ -4333,7 +4335,29 @@ static const char *bindnames[][2] =
 	{"impulse 114",		"inv:icon defn"}
 };
 
-#define	NUMCOMMANDS	(sizeof(bindnames)/sizeof(bindnames[0]))
+#define	NUM_ENGINE_BINDS	(sizeof(bindnames)/sizeof(bindnames[0]))
+
+/* Mod-supplied rows, parsed from the gamedir's bindlist.lst. Caps are hard:
+ * a malformed or hostile file must degrade to "engine binds only", not crash.
+ * MAX_BIND_COMMAND is sized so the longest command still fits M_Keybind()'s
+ * "bind2 \"KEY\" \"command\"" buffer without truncation. */
+#define	MAX_MOD_BINDS		64
+#define	MAX_BIND_COMMAND	48
+#define	MAX_BIND_LABEL		32
+
+typedef struct
+{
+	char	command[MAX_BIND_COMMAND];
+	char	label[MAX_BIND_LABEL];
+} modbind_t;
+
+static modbind_t	modbinds[MAX_MOD_BINDS];
+
+/* The list the menu actually renders: engine rows, then mod rows. Entries
+ * point either at the bindnames literals or into modbinds, so nothing here
+ * is dynamically allocated and nothing can leak across rebuilds. */
+static const char	*keys_bindlist[NUM_ENGINE_BINDS + MAX_MOD_BINDS][2];
+static int		keys_numcommands;
 
 #define KEYS_SIZE 14
 
@@ -4341,8 +4365,75 @@ static int		keys_cursor;
 static int		keys_top = 0;
 static qboolean		keys_tap = false;	// TAB toggles tap binding mode
 
+/*
+================
+M_BuildBindList
+
+Rebuilds the Key Setup rows: the engine defaults, then any extra rows from
+the current gamedir's bindlist.lst -- a list of "command" "label" pairs, as
+used by QSS and Keep.
+
+Ported from Ironwail 096c3d952, which deliberately differs from QSS here:
+the mod's rows are MERGED after the engine's rather than replacing them, so
+a mod that lists three of its own commands doesn't lose the movement rows.
+
+Also called on a gamedir switch, so a previous mod's rows can't survive into
+the next one even if the Key Setup menu is on screen at the time.
+================
+*/
+void M_BuildBindList (void)
+{
+	const char	*data;
+	size_t		i;
+	int		n;
+
+	for (i = 0; i < NUM_ENGINE_BINDS; i++)
+	{
+		keys_bindlist[i][0] = bindnames[i][0];
+		keys_bindlist[i][1] = bindnames[i][1];
+	}
+	keys_numcommands = (int) NUM_ENGINE_BINDS;
+
+	memset (modbinds, 0, sizeof(modbinds));
+
+	/* temp hunk: resolves out of the gamedir and out of PAKs, and is
+	 * reclaimed on its own, so repeated rebuilds cost nothing */
+	data = (const char *) FS_LoadTempFile ("bindlist.lst", NULL);
+
+	for (n = 0; data && n < MAX_MOD_BINDS; )
+	{
+		data = COM_Parse (data);
+		if (!data)
+			break;			/* end of file */
+		q_strlcpy (modbinds[n].command, com_token, sizeof(modbinds[n].command));
+
+		data = COM_Parse (data);
+		if (!data)
+			break;			/* odd token count: drop the dangling command */
+		q_strlcpy (modbinds[n].label, com_token, sizeof(modbinds[n].label));
+
+		if (!modbinds[n].command[0] || !modbinds[n].label[0])
+			continue;		/* empty quoted token: skip the pair, reuse the slot */
+
+		keys_bindlist[keys_numcommands][0] = modbinds[n].command;
+		keys_bindlist[keys_numcommands][1] = modbinds[n].label;
+		keys_numcommands++;
+		n++;
+	}
+
+	if (keys_cursor >= keys_numcommands)
+		keys_cursor = keys_numcommands - 1;
+	if (keys_cursor < 0)
+		keys_cursor = 0;
+	if (keys_top > keys_numcommands - KEYS_SIZE)
+		keys_top = keys_numcommands - KEYS_SIZE;
+	if (keys_top < 0)
+		keys_top = 0;
+}
+
 static void M_Menu_Keys_f (void)
 {
+	M_BuildBindList ();
 	keys_tap = false;
 	Key_SetDest (key_menu);
 	m_state = m_keys;
@@ -4467,16 +4558,16 @@ static void M_Keys_Draw (void)
 
 	if (keys_top)
 		M_DrawCharacter (6, 80, 128);
-	if (keys_top + KEYS_SIZE < (int)NUMCOMMANDS)
+	if (keys_top + KEYS_SIZE < keys_numcommands)
 		M_DrawCharacter (6, 80 + ((KEYS_SIZE-1)*8), 129);
 
 	/* Proportional scrollbar on right edge */
-	if ((int)NUMCOMMANDS > KEYS_SIZE)
+	if (keys_numcommands > KEYS_SIZE)
 	{
 		int track_y = 80;
 		int track_h = KEYS_SIZE * 8;
-		int thumb_h = (KEYS_SIZE * track_h) / (int)NUMCOMMANDS;
-		int thumb_y = track_y + (keys_top * track_h) / (int)NUMCOMMANDS;
+		int thumb_h = (KEYS_SIZE * track_h) / keys_numcommands;
+		int thumb_y = track_y + (keys_top * track_h) / keys_numcommands;
 		int j;
 		if (thumb_h < 8) thumb_h = 8;
 		for (j = 0; j < track_h; j += 8)
@@ -4492,14 +4583,17 @@ static void M_Keys_Draw (void)
 // search for known bindings
 	for (i = 0; i < KEYS_SIZE; i++)
 	{
+		if (i + keys_top >= keys_numcommands)
+			break;		/* count is now runtime, so it may fall short of a full page */
+
 		y = 80 + 8*i;
 
-		M_Print (16, y, bindnames[i+keys_top][1]);
+		M_Print (16, y, keys_bindlist[i+keys_top][1]);
 
 		if (keys_tap)
-			M_FindDoubleKeysForCommand (bindnames[i+keys_top][0], keys);
+			M_FindDoubleKeysForCommand (keys_bindlist[i+keys_top][0], keys);
 		else
-			M_FindKeysForCommand (bindnames[i+keys_top][0], keys);
+			M_FindKeysForCommand (keys_bindlist[i+keys_top][0], keys);
 
 		if (keys[0] == -1)
 		{
@@ -4565,14 +4659,14 @@ static void M_Keys_Key (int k)
 		S_LocalSound ("raven/menu1.wav");
 		keys_cursor--;
 		if (keys_cursor < 0)
-			keys_cursor = NUMCOMMANDS-1;
+			keys_cursor = keys_numcommands-1;
 		break;
 
 	case K_DOWNARROW:
 	case K_RIGHTARROW:
 		S_LocalSound ("raven/menu1.wav");
 		keys_cursor++;
-		if (keys_cursor >= (int)NUMCOMMANDS)
+		if (keys_cursor >= keys_numcommands)
 			keys_cursor = 0;
 		break;
 
@@ -4583,16 +4677,16 @@ static void M_Keys_Key (int k)
 
 	case K_ENTER:		// go into bind mode
 		if (keys_tap)
-			M_FindDoubleKeysForCommand (bindnames[keys_cursor][0], keys);
+			M_FindDoubleKeysForCommand (keys_bindlist[keys_cursor][0], keys);
 		else
-			M_FindKeysForCommand (bindnames[keys_cursor][0], keys);
+			M_FindKeysForCommand (keys_bindlist[keys_cursor][0], keys);
 		S_LocalSound ("raven/menu2.wav");
 		if (keys[1] != -1)
 		{
 			if (keys_tap)
-				M_UnbindDoubleCommand (bindnames[keys_cursor][0]);
+				M_UnbindDoubleCommand (keys_bindlist[keys_cursor][0]);
 			else
-				M_UnbindCommand (bindnames[keys_cursor][0]);
+				M_UnbindCommand (keys_bindlist[keys_cursor][0]);
 		}
 		Key_SetDest (key_menubind);
 		break;
@@ -4601,9 +4695,9 @@ static void M_Keys_Key (int k)
 	case K_DEL:		// delete bindings
 		S_LocalSound ("raven/menu2.wav");
 		if (keys_tap)
-			M_UnbindDoubleCommand (bindnames[keys_cursor][0]);
+			M_UnbindDoubleCommand (keys_bindlist[keys_cursor][0]);
 		else
-			M_UnbindCommand (bindnames[keys_cursor][0]);
+			M_UnbindCommand (keys_bindlist[keys_cursor][0]);
 		break;
 
 	default:
@@ -4612,10 +4706,10 @@ static void M_Keys_Key (int k)
 		{
 			int j, start = keys_cursor + 1;
 			char ch = (k >= 'A' && k <= 'Z') ? k + 32 : k;
-			for (j = 0; j < (int)NUMCOMMANDS; j++)
+			for (j = 0; j < keys_numcommands; j++)
 			{
-				int idx = (start + j) % (int)NUMCOMMANDS;
-				const char *name = bindnames[idx][1];
+				int idx = (start + j) % keys_numcommands;
+				const char *name = keys_bindlist[idx][1];
 				int n;
 				for (n = 0; name[n]; n++)
 				{
@@ -6842,6 +6936,8 @@ void M_Init (void)
 		}
 	}
 
+	M_BuildBindList ();
+
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
 	Cmd_AddCommand ("menu_main", M_Menu_Main_f);
@@ -7053,7 +7149,7 @@ void M_Draw (void)
 void M_Keybind (int key)
 {
 	char	cmd[80];
-	const char *command = bindnames[keys_cursor][0];
+	const char *command = keys_bindlist[keys_cursor][0];
 	S_LocalSound ("raven/menu1.wav");
 	if (key != K_ESCAPE && key != '`')
 	{
