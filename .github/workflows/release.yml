@@ -155,6 +155,25 @@ jobs:
 
       - name: Generate changelog
         run: |
+          # A release may ship hand-written notes: put them at
+          # docs/release-notes/<tag>.md and they replace the generated header
+          # and commit dump.  Everything after that point is boilerplate and
+          # is emitted either way.  Raw commit lists are a poor summary of a
+          # rollup release, and PREV_TAG below is by design the *previous*
+          # tag, which for a long-running branch may be days old while the
+          # release spans months.
+          CURATED="docs/release-notes/${{ github.ref_name }}.md"
+          CURATED_BODY=""
+          FULL_CHANGELOG=""
+          if [ -f "$CURATED" ]; then
+            # Held back and re-emitted at the very end of the assembled body,
+            # where GitHub's own generated notes put it; left in place it
+            # would land mid-document, ahead of Downloads.  Command
+            # substitution also eats the trailing blank line it leaves.
+            CURATED_BODY=$(sed '/^\*\*Full Changelog\*\*:/d' "$CURATED")
+            FULL_CHANGELOG=$(sed -n '/^\*\*Full Changelog\*\*:/p' "$CURATED")
+          fi
+
           # Pick the most recently CREATED tag, not the lex-highest version
           # name.  Three legacy tag schemes linger in this repo (uhexen2-*,
           # 26.03-*, v0.7.1-alpha.r3) and lex-sort above the current
@@ -169,11 +188,17 @@ jobs:
             HEADER="## Initial release"
           fi
           {
-            echo "$HEADER"
-            echo ""
-            echo "### Commits"
-            echo ""
-            git log "$RANGE" --no-merges --format="- %s (\`%h\`)" | grep -v "Sync beads" || true
+            if [ -f "$CURATED" ]; then
+              # printf, not echo: the notes are markdown full of backticks and
+              # $ and must reach the release body uninterpreted.
+              printf '%s\n' "$CURATED_BODY"
+            else
+              echo "$HEADER"
+              echo ""
+              echo "### Commits"
+              echo ""
+              git log "$RANGE" --no-merges --format="- %s (\`%h\`)" | grep -v "Sync beads" || true
+            fi
             echo ""
             echo "## Downloads"
             echo ""
@@ -236,6 +261,10 @@ jobs:
             echo "To verify a download, fetch \`SHA256SUMS\` alongside it and run \`sha256sum -c SHA256SUMS\`."
             echo ""
             echo "**Requirements:** OpenGL 4.3 capable GPU (2012+)"
+            if [ -n "$FULL_CHANGELOG" ]; then
+              echo ""
+              printf '%s\n' "$FULL_CHANGELOG"
+            fi
           } > release_notes.md
 
       - name: Upload release notes
