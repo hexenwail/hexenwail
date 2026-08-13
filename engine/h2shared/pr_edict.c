@@ -2071,6 +2071,7 @@ void PR_LoadProgs (void)
 	int			i;
 	const char	*progname;
 	const char	*progvstr;
+	char		progsource[MAX_OSPATH];
 	sv_def_t	*def;
 	#if defined(H2W)
 	char		num[32];
@@ -2085,6 +2086,9 @@ void PR_LoadProgs (void)
 	progs = (dprograms_t *)FS_LoadHunkFile (progname, NULL);
 	if (!progs)
 		Host_Error ("%s: couldn't load %s", __thisfunc__, progname);
+	/* FS_LastFileSource() describes the last lookup only, so grab it before
+	 * anything below touches the filesystem again. */
+	q_strlcpy (progsource, FS_LastFileSource(), sizeof(progsource));
 	Con_DPrintf ("Programs occupy %ldK.\n", fs_filesize / 1024);
 
 	pr_crc = CRC_Block ((byte *)progs, fs_filesize);
@@ -2180,8 +2184,30 @@ void PR_LoadProgs (void)
 		pr_statements = (dstatement_t *)((byte *)progs + progs->ofs_statements);
 	}
 
-	Con_DPrintf ("Loaded %s, v%d, %d crc, %s structures\n",
+	Con_DPrintf ("Loaded %s, v%d, %d progdefs crc, %s structures\n",
 			progname, progs->version, progs->crc, progvstr);
+
+	/* uhexen2-8qp3: releases now ship compiled gamecode for players to install
+	 * by hand, so "which progs is this bug report running?" needs an answer
+	 * without `developer 1'.  The source path is the load-bearing half: a
+	 * bare name cannot tell retail gamecode (inside pakN.pak) apart from a
+	 * hand-installed loose progs.dat apart from a mod's.  pr_crc is the
+	 * whole-file CRC, unlike the progdefs crc above, which only names the
+	 * interface version and has three possible values.  Repeats are suppressed
+	 * so a session logs one line, plus one more whenever the gamecode really
+	 * changes -- e.g. a data1 map that pulls progs2.dat via maplist.txt. */
+	{
+		static char	lastreport[MAX_OSPATH + MAX_QPATH + 64];
+		char		report[MAX_OSPATH + MAX_QPATH + 64];
+
+		q_snprintf (report, sizeof(report), "Gamecode: %s from %s (%s, file crc %u)\n",
+			    progname, (progsource[0]) ? progsource : "unknown", progvstr, pr_crc);
+		if (strcmp(report, lastreport) != 0)
+		{
+			q_strlcpy (lastreport, report, sizeof(lastreport));
+			Con_Printf ("%s", report);
+		}
+	}
 
 	memset (&sv_globals, 0, sizeof(sv_globals));
 	pr_globals = (float *)((byte *)progs + progs->ofs_globals);
