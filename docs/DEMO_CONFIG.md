@@ -37,7 +37,7 @@ Configure any cvar per-demo:
 **mydemo_start.cfg**:
 ```
 fov 120
-r_maxfps 60
+host_maxfps 60
 hide_hud 1
 gamma 0.8
 ```
@@ -45,7 +45,7 @@ gamma 0.8
 **mydemo_end.cfg**:
 ```
 fov 90
-r_maxfps 0
+host_maxfps 0
 hide_hud 0
 gamma 1.0
 ```
@@ -57,21 +57,19 @@ Execute console commands before/after demos:
 **intro_start.cfg**:
 ```
 // Pre-demo setup
-volumeRGB_UI 0.5
-cd_music 0
+bgmvolume 0.5
 ```
 
 **intro_end.cfg**:
 ```
 // Post-demo cleanup
-volumeRGB_UI 1.0
-cd_music 1
+bgmvolume 1.0
 ```
 
 ## Available CVars
 
 - `hide_hud` — Hide status bar and HUD elements (0=show, 1=hide, default 0)
-- Standard cvars: `fov`, `r_maxfps`, `gamma`, `brightness`, etc.
+- Standard cvars: `fov`, `host_maxfps`, `gamma`, `contrast`, `bgmvolume`, `volume`, etc.
 
 ## File Location
 

@@ -191,9 +191,13 @@ static const char *exe_dir (void)
 ```
 
 but it is `static`, Linux-only, and lives in a translation unit `h2ded` does not
-compile: `soundfont.c` reaches only `ALL_SOURCES` via `SOUNDFONT_SOURCES`
-(`engine/CMakeLists.txt:511` and `:563`, consumed at `:578`), while `h2ded` is
-built from `SERVER_SOURCES` (`:743`).
+compile: `soundfont.c` reaches only `ALL_SOURCES` via the two `SOUNDFONT_SOURCES`
+assignments in `engine/CMakeLists.txt` (one per MIDI backend that needs it:
+FluidSynth and the libTiMidity fallback), consumed where `ALL_SOURCES` is
+assembled, while `h2ded` is built from the separate `SERVER_SOURCES` list in
+the `BUILD_DEDICATED` block (`engine/CMakeLists.txt :: SERVER_SOURCES`).
+(Bare line numbers omitted deliberately — this doc has already drifted four
+times in one day; see `uhexen2-2z1z`.)
 
 It needs promoting to a shared `Sys_GetExeDir()` with per-platform backings
 (`/proc/self/exe`, `GetModuleFileName`, `_NSGetExecutablePath`). That is a
@@ -221,7 +225,7 @@ so `<exedir>/gamecode/` does not exist.
 
 ### F7 — the CRC table is a real safety net
 
-`PR_LoadProgs()` (`pr_edict.c:2117-2158`) switches on `progs->crc` against a
+`PR_LoadProgs()` (`pr_edict.c :: PR_LoadProgs()`, crc switch) switches on `progs->crc` against a
 fixed table of known-good values and `Host_Error`s on anything else:
 
 ```c
@@ -238,6 +242,12 @@ default:
 A structurally incompatible bundled progs therefore **fails loudly at map load**
 rather than running silently against the wrong globals layout. There is also a
 version check immediately above it (`PROG_VERSION_V6` / `V7`).
+
+(This finding predates 59343680d, which added ~130 lines to `pr_edict.c`
+ahead of `PR_LoadProgs()` for the bundle-substitution path; the crc switch
+itself is unchanged in content, just further down the file than when this was
+written. Citation deliberately left symbolic rather than re-pinned — see the
+note under F5.)
 
 This is a genuine safety net and worth naming: the worst outcome of shipping a
 broken bundle is a clear error naming the file, not corrupted gameplay.
@@ -544,7 +554,8 @@ order:
    `$out/share/hexenwail/data1`, `.../portals`), so the convention costs nothing
    to adopt.
 3. **A compile-time `-DBUNDLED_GAMECODE_DIR=...`**, mirroring `SOUNDFONT_PATH`
-   (`engine/CMakeLists.txt:513-514`), for distribution packagers who put the
+   (`engine/CMakeLists.txt`, `add_definitions(-DSOUNDFONT_PATH=...)` inside the
+   `FLUIDSYNTH_FOUND` branch), for distribution packagers who put the
    data somewhere neither of the above finds.
 
 All three resolve through `Sys_GetExeDir()` (F5), never through `basedir`.
