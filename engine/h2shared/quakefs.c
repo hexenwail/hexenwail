@@ -1019,6 +1019,55 @@ qboolean FS_FileInGamedir (const char *filename)
 
 /*
 ============
+FS_UserdirHasFile
+
+Is there a loose copy of `filename' in the user directory's `gamedir'?
+
+Not the same question as FS_FileInGamedir(): that one asks about the gamedir
+currently set and answers yes for the install directory's copy as well.  This
+one is specifically "did the player put their own file in ~/.hexen2?", and it
+takes the gamedir by name because the caller need not be asking about the
+current one -- fs_userdir tracks the gamedir last *set*.
+
+Resolved the way FS_OpenFile_Internal resolves a loose file, case-fold and
+all, so that a hand-copied PROGS.DAT is seen exactly when the searchpath
+would have seen it.
+
+False where there is no user directory (Windows, OS/2), and false where the
+user directory and the install directory are the same place: that is the test
+FS_AddGameDirectory uses to decide whether a userdir searchpath exists at all,
+and where it doesn't, the "user's own file" would just be the install's.
+============
+*/
+qboolean FS_UserdirHasFile (const char *gamedir, const char *filename)
+{
+#if DO_USERDIRS
+	char	userpath[MAX_OSPATH];
+	char	basepath[MAX_OSPATH];
+	char	ospath[MAX_OSPATH];
+
+	FS_MakePath_BUF (FS_USERBASE, NULL, userpath, sizeof(userpath), gamedir);
+	FS_MakePath_BUF (FS_BASEDIR, NULL, basepath, sizeof(basepath), gamedir);
+	if (!strcmp(userpath, basepath))
+		return false;
+
+	q_snprintf (ospath, sizeof(ospath), "%s/%s", userpath, filename);
+	if (Sys_FileType(ospath) & FS_ENT_FILE)
+		return true;
+#ifndef PLATFORM_WINDOWS
+	if (FS_ResolveCasePath (userpath, filename, ospath))
+		return (Sys_FileType(ospath) & FS_ENT_FILE) ? true : false;
+#endif
+	return false;
+#else
+	(void) gamedir;
+	(void) filename;
+	return false;
+#endif	/* DO_USERDIRS */
+}
+
+/*
+============
 FS_LoadFile
 
 Filename are reletive to the quake directory.

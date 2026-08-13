@@ -646,18 +646,50 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    which is exactly the state that says "substitute". The feature overrides a
    choice they made on purpose.
 
-   **The recourse is not the same on both platforms, and the asymmetry has to be
-   documented rather than discovered.** On Unix there is a user directory,
-   `~/.hexen2/data1/`, which the engine already ranks above the install (F1), so
-   the predicate can consult it and stand down when the player's own file is
-   there; verification row B5 is what pins that behaviour down. On Windows
-   `DO_USERDIRS` is forced to 0 (`sys.h:72-74`), `fs_userdir` collapses onto the
-   install directory, and there is no location that expresses "mine, not yours".
-   A Windows player's `<install>/data1/progs.dat` loses to the bundle, and
-   `-vanillaprogs` — or deleting the bundle — is the only recourse they have.
+   **Settled by a third condition — a stand-down, giving the ordering
+   `user directory > bundle > install directory`** (`uhexen2-qoy7`, landed after
+   the audit that reproduced the problem). Conditions 1 and 2 decide that the
+   bundle *may* substitute; condition 3 decides that it *must not*, because the
+   player has installed their own copy in `~/.hexen2/<gamedir>/`.
+
+   The two losing locations are not symmetric, and that is the whole reason this
+   is decidable rather than a coin-flip. The install's `data1/PROGS.DAT` is
+   Raven's file and superseding it **is** the feature — every retail tree has
+   one, so ranking it above the bundle would leave the bundle dead code on every
+   real install. But nothing creates `~/.hexen2/data1/progs.dat`: not retail, not
+   any installer, not the engine (see *Do not do this*). A file there is a
+   deliberate act, and it is the only statement of intent the engine gets.
+
+   **`path_id` cannot make this distinction**, which is why the stand-down is a
+   separate filesystem probe rather than a refinement of condition 1.
+   `FS_AddGameDirectory` assigns a gamedir's basedir entry and its userdir entry
+   the **same** `path_id`: it is computed once at `quakefs.c:404-407` and stored
+   on both entries at `:445`, the second time round the `goto add_pakfile` loop
+   the userdir pass takes (`:453-461`). Both therefore read `1U` for `data1` and
+   the predicate has no way to tell them apart — the same fact F1 relies on when
+   it says the userdir entry "shares the gamedir's `path_id`". The audit
+   demonstrated it: a foreign `progs.dat` in `~/.hexen2/data1/` and the same file
+   in the install's `data1/` both lost to the bundle.
+
+   `FS_UserdirHasFile()` (`quakefs.c`) answers it instead. It resolves the same
+   way `FS_OpenFile_Internal` resolves a loose file, case-fold included, so a
+   hand-copied `PROGS.DAT` is seen exactly when the searchpath would have seen
+   it. Verification row B5 pins the behaviour down.
+
+   **The recourse is still not the same on both platforms, and the asymmetry
+   has to be documented rather than discovered.** On Windows `DO_USERDIRS` is
+   forced to 0 (`sys.h:83-86`), `fs_userdir` collapses onto the install
+   directory, and there is no location that expresses "mine, not yours".
+   `FS_UserdirHasFile()` compiles to a constant `false` there, deliberately: a
+   probe of the userdir on Windows would be a probe of the install directory,
+   which every retail tree populates, and the feature would be inert. A Windows
+   player's `<install>/data1/progs.dat` loses to the bundle, and `-vanillaprogs`
+   — or deleting the bundle — is the only recourse they have.
 
    Same user action, two behaviours, decided by a `#define` in `sys.h`. It
-   belongs in the release notes, not only here.
+   belongs in the release notes, not only here. `gamecode/README.txt` states the
+   split where the players who hit it will read it: on Unix it directs the
+   manual install at `~/.hexen2/`, on Windows at the game folder.
 
 8. **Savegames crossing a progs change.** This is *the* genuinely new risk
    relative to `uhexen2-8qp3`. The manual copy let the player pick the moment;
@@ -744,7 +776,7 @@ will look like bugs to anyone who has not read the scope decision.
 | B2 | `progs2.dat` on the other four | `romeric6`, `meso9`, `rider1a`, `rider2c` |
 | B3 | runtime gamedir switching | Mods menu: Hexen II → `sot` → Hexen II → Portals, spawning a map after each switch. This is the F4 row and the one no command-line test covers. |
 | B4 | case handling | Linux install with uppercase `PROGS.DAT` only; then with both cases present; confirm which loads and that it matches the documented rule |
-| B5 | userdir override | `~/.hexen2/data1/progs.dat` present — confirm the documented precedence between it and the bundle, and that the answer is the same one the docs claim |
+| B5 | userdir override | `~/.hexen2/data1/progs.dat` present — **the player's file must load, not the bundle** (F7). Then the same file in the install's `data1/` instead: **the bundle must still win**, which is the feature. Both rows in one run, since the difference between them is the whole point. |
 | B6 | absent bundle | delete `<exedir>/gamecode/`; engine must behave exactly as today |
 | B7 | partial bundle | `data1/progs.dat` present, `portals/progs.dat` absent; must degrade per file |
 | B8 | functional proof | `tools/qcdis.py <progs> --list BadBackpackDump` — present in the bundled files, absent in retail. This is the row that proves the *right bytes* loaded, rather than merely that *some* file did. |
