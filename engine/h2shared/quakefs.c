@@ -1099,6 +1099,7 @@ static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len
 {
 	byte	*buf;
 	char	base[32];
+	size_t	nread;
 
 /* extract the file's base name for hunk tag */
 	COM_FileBase (path, base, sizeof(base));
@@ -1139,9 +1140,29 @@ static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len
 	((byte *)buf)[len] = 0;
 
 	Draw_BeginDisc ();
-	fread (buf, 1, (size_t)len, h);
+	nread = fread (buf, 1, (size_t)len, h);
 	fclose (h);
 	Draw_EndDisc ();
+
+	/* A short read means the length the filesystem promised and the bytes
+	 * that actually arrived disagree -- a truncated pak member, an I/O
+	 * error, a file rewritten under us.  Every caller sizes its parsing from
+	 * fs_filesize rather than from what was read, so the gap has to be
+	 * filled rather than left: Hunk_AllocName() hands back zeroed memory,
+	 * but malloc(), Cache_Alloc() and the LOADFILE_STACK buffer do not, and
+	 * on those paths the tail of a short read is whatever the allocator was
+	 * holding, which the caller then parses as file content.  Zeroing keeps
+	 * the hunk paths behaving exactly as before and extends that behaviour
+	 * to the rest; the warning is what turns a genuine short read from
+	 * silent into diagnosable.  Deliberately not an error: the loaders'
+	 * contract is unchanged, which is what kept 9f52d0a6a from touching
+	 * this.  uhexen2-huys. */
+	if (nread < (size_t)len)
+	{
+		memset (buf + nread, 0, (size_t)len - nread);
+		Sys_Printf ("WARNING: %s: short read on %s (%lu of %ld bytes)\n",
+			    __thisfunc__, path, (unsigned long)nread, len);
+	}
 
 	return buf;
 }

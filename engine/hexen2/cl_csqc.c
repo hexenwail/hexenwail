@@ -228,6 +228,17 @@ void CL_LoadCSProgs (void)
 	for (i = 1; i < p->numfunctions; i++)
 	{
 		fn = &csqc_state.functions[i];
+		/* s_name is an offset into the string pool that nothing has vetted:
+		 * PR_CheckProgsExtents() speaks for where the pool is and for its
+		 * terminator, not for the offsets pointing into it.  Out of range
+		 * means the strcmp() below would start reading from outside the pool
+		 * altogether, so skip the function rather than name it.  None of the
+		 * four entry points is then found and the "no CSQC_DrawHud" path
+		 * below declines the file, which is the right answer for a csprogs.dat
+		 * whose function table does not describe its own strings.
+		 * uhexen2-uglw. */
+		if (fn->s_name < 0 || fn->s_name >= csqc_state.stringssize)
+			continue;
 		const char *name = csqc_state.strings + fn->s_name;
 		if (!strcmp(name, "CSQC_Init"))
 			csqc_fn_init = (func_t)i;

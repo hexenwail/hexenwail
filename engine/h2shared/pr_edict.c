@@ -2316,6 +2316,20 @@ const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen)
 	if (!PR_LumpFits (hdr.ofs_strings, hdr.numstrings, 1, filelen) ||
 	    (long)hdr.ofs_strings + hdr.numstrings >= filelen)
 		return "strings go past end of file";
+	/* Every string in a progs image is reached as `pool + offset' and then
+	 * handed straight to strcmp(), so keeping the offset in range is only
+	 * half of what makes that read safe -- the walk still has to meet a
+	 * terminator before the pool ends.  Requiring the pool's final byte to
+	 * be NUL supplies that for every offset at once: a scan starting
+	 * anywhere inside the pool stops at or before its last byte, whatever
+	 * the offset was.  qcc emits each string NUL-terminated, so the last
+	 * one ends the pool and every real image already satisfies this; an
+	 * image with no NUL in its pool does not, and is the half of
+	 * uhexen2-uglw that a range check alone cannot cover.  Callers still
+	 * range-check the offset itself. */
+	if (hdr.numstrings > 0 &&
+	    ((const byte *)raw)[(long)hdr.ofs_strings + hdr.numstrings - 1] != 0)
+		return "string pool is not null-terminated";
 
 	return NULL;
 }
@@ -2424,6 +2438,17 @@ void PR_LoadProgs (void)
 		return; /* silence compiler */
 	}
 
+	/* entityfields lies inside no lump, so PR_CheckProgsExtents() cannot
+	 * speak for it, yet pr_edict_size below is computed straight from it:
+	 * a negative value makes that size negative and a large one overflows
+	 * the multiply, and every edict memset() in the engine -- ED_Alloc(),
+	 * ED_ClearEdict(), the savegame loader -- is sized from the result.
+	 * This is the guard CL_LoadCSProgs() already applies to csprogs.dat,
+	 * on the path that loads progs.dat.  uhexen2-6z5o. */
+	if (progs->entityfields < 0 ||
+	    progs->entityfields > (INT_MAX - (int)sizeof(edict_t)) / 4)
+		Host_Error ("%s has bad entityfields (%d)", progname, progs->entityfields);
+
 	switch (progs->crc) {
 	#if !defined(H2W) /* HEXEN2 PROGS: */
 	case PROGS_V103_CRC:
@@ -2517,6 +2542,35 @@ void PR_LoadProgs (void)
 			q_strlcpy (lastreport, report, sizeof(lastreport));
 			Con_Printf ("%s", report);
 		}
+	}
+
+	/* The walk below hands out the address of G_FLOAT(def->offset) for every
+	 * entry in the table the progdefs CRC selected, and so trusts that CRC to
+	 * guarantee numglobals covers the fixed globals block the table describes.
+	 * A forged-large numglobals is refused by PR_CheckProgsExtents(), but a
+	 * forged *small* one keeps the CRC of a layout the image no longer has and
+	 * would place those pointers past the end of the globals lump -- where
+	 * every later sv_globals read and write lands outside the image, for the
+	 * whole life of the server.  Measure the table's own reach instead of
+	 * trusting the CRC for it; `def' itself is the walk's cursor, so the
+	 * measurement takes its own.  uhexen2-w70p. */
+	{
+		const sv_def_t	*d;
+		int		need = 0;
+
+		for (d = def; d->field; d++)
+		{
+			/* offsets come from offsetof() in the tables above, so the
+			 * only question is how far past the last one the value it
+			 * names extends: a vector is three globals wide. */
+			int	end = d->offset + ((d->type == ev_vector) ? 3 : 1);
+
+			if (end > need)
+				need = end;
+		}
+		if (progs->numglobals < need)
+			Host_Error ("%s declares %d globals, %s structures need %d",
+				    progname, progs->numglobals, progvstr, need);
 	}
 
 	memset (&sv_globals, 0, sizeof(sv_globals));

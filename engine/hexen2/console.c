@@ -1052,6 +1052,29 @@ qboolean Con_CopySelectionToClipboard (void)
 
 		// Copy characters from this line
 		short *text_row = con->text + (line % con_totallines) * con_linewidth;
+
+		/* The console is a fixed-width character grid, so everything past
+		 * the end of a row's text is blank cells -- and the ranges above
+		 * deliberately run the first and middle lines of a selection out to
+		 * con_linewidth - 1.  Without this, every line of a multi-line copy
+		 * but the last is padded out to the full console width with spaces.
+		 * Trim those blanks off the end of the range.  uhexen2-g914.
+		 *
+		 * The trim is exactly why the loop below must keep its bounded
+		 * `col <= line_end' form and must not become pointer + length: an
+		 * all-blank line trims to line_end < line_start, and length
+		 * arithmetic on that underflows.  Ironwail had to patch that shape
+		 * (c03a5bdc1); in this form the loop simply does not run, which is
+		 * the correct result for a line with nothing on it. */
+		while (line_end >= line_start)
+		{
+			char blank = text_row[line_end] & 0xFF;
+
+			if (blank != ' ' && blank != '\0')
+				break;
+			line_end--;
+		}
+
 		for (col = line_start; col <= line_end && buf_pos < (int)sizeof(buf) - 2; col++)
 		{
 			char c = text_row[col] & 0xFF;
