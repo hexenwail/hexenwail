@@ -73,6 +73,13 @@ typedef struct
 
 	char		name[64];	// map name
 	char		midi_name[128];	// midi file name
+	/* svc_mod_name / svc_skybox, protocol 20+ (UQE 1.13).  Both used to
+	 * be sent as literal "" -- see uhexen2-6dgk.  skybox is the sky the
+	 * map's worldspawn declares; the client already read the same key
+	 * out of the BSP, so this is normally a confirmation, and matters
+	 * when the client's copy of the map differs or is absent. */
+	char		mod_name[128];	// gamedir this server is running
+	char		skybox[64];	// worldspawn sky/skyname/qlsky key, "" if none
 	byte		cd_track;	// cd track number
 
 	char		startspot[64];

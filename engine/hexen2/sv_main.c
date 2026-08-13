@@ -345,6 +345,60 @@ void SV_UpdateSoundPos (edict_t *entity, int channel)
 
 /*
 ==================
+SV_ParseWorldspawnSky
+
+Pull the sky name out of the world's entity lump so the server has an
+authoritative answer for svc_skybox instead of the literal "" it used to
+send (uhexen2-6dgk).  The client reads the same key itself in Sky_NewMap,
+so on a listen server this agrees with what is already on screen and
+Sky_LoadSkyBox early-returns; it earns its keep for a remote client whose
+copy of the map differs, or which has no BSP at all.
+
+Accepts the same three spellings Sky_NewMap does, so the two cannot
+disagree about which key wins.
+==================
+*/
+static void SV_ParseWorldspawnSky (void)
+{
+	char		key[128];
+	const char	*data;
+
+	sv.skybox[0] = 0;
+
+	if (!sv.worldmodel || !sv.worldmodel->entities)
+		return;
+
+	data = COM_Parse (sv.worldmodel->entities);
+	if (!data || com_token[0] != '{')
+		return;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (!data)
+			return;
+		if (com_token[0] == '}')
+			return;			/* end of worldspawn */
+
+		q_strlcpy (key, (com_token[0] == '_') ? com_token + 1 : com_token, sizeof(key));
+		while (key[0] && key[strlen(key)-1] == ' ')
+			key[strlen(key)-1] = 0;
+
+		data = COM_Parse (data);
+		if (!data)
+			return;
+
+		if (!strcmp("sky", key) ||		/* quake		*/
+		    !strcmp("skyname", key) ||		/* half-life		*/
+		    !strcmp("qlsky", key))		/* quake lives		*/
+		{
+			q_strlcpy (sv.skybox, com_token, sizeof(sv.skybox));
+		}
+	}
+}
+
+/*
+==================
 SV_MaxSounds
 
 Sound indices this protocol can express in svc_sound.  See server.h.
@@ -641,9 +695,9 @@ static void SV_SendServerinfo (client_t *client)
 	if (sv_protocol >= PROTOCOL_UQE_113)
 	{
 		MSG_WriteByte (&client->message, svc_mod_name);
-		MSG_WriteString (&client->message, "");	/* uqe-hexen2 sends sv.mod_name */
+		MSG_WriteString (&client->message, sv.mod_name);
 		MSG_WriteByte (&client->message, svc_skybox);
-		MSG_WriteString (&client->message, "");	/* uqe-hexen2 sends "sv.skybox" */
+		MSG_WriteString (&client->message, sv.skybox);
 	}
 
 // set view
@@ -2419,6 +2473,9 @@ void SV_SpawnServer (const char *server, const char *startspot)
 		return;
 	}
 	sv.models[1] = sv.worldmodel;
+
+	SV_ParseWorldspawnSky ();
+	q_strlcpy (sv.mod_name, fs_gamedir_nopath, sizeof(sv.mod_name));
 
 //
 // clear world interaction links
