@@ -57,6 +57,57 @@ static void SV_DebugMoveStep_Log (const edict_t *ent, const trace_t *trace, cons
 		touched[0] ? touched : "");
 }
 
+#define	DEBUGMOVESTEP_MOVER_RADIUS	256
+
+/*
+=============
+SV_DebugMoveStep_DumpMovers
+
+Dumps every non-world SOLID_BSP brush entity whose bounding box comes within
+DEBUGMOVESTEP_MOVER_RADIUS of the failing foot position. The real absmin/absmax
+is the only reliable way to tell a walkable platform from a shaft-filling
+elevator car, so a monster refusing to step "onto a train" can be judged
+without reading the BSP submodel lump (uhexen2-nnwb).
+=============
+*/
+static void SV_DebugMoveStep_DumpMovers (const vec3_t foot)
+{
+	edict_t	*check;
+	int	i, j;
+
+	if (sv_debugmovestep_remaining <= 0)
+		return;
+
+	check = NEXT_EDICT(sv.edicts);
+	for (i = 1; i < sv.num_edicts; i++, check = NEXT_EDICT(check))
+	{
+		if (check->free)
+			continue;
+		if (check->v.solid != SOLID_BSP)
+			continue;
+
+		for (j = 0; j < 3; j++)
+		{
+			if (foot[j] < check->v.absmin[j] - DEBUGMOVESTEP_MOVER_RADIUS ||
+			    foot[j] > check->v.absmax[j] + DEBUGMOVESTEP_MOVER_RADIUS)
+				break;
+		}
+		if (j != 3)
+			continue;
+
+		if (sv_debugmovestep_remaining <= 0)
+			return;
+		sv_debugmovestep_remaining--;
+
+		Con_Printf ("sv_debugmovestep:   mover %s org=%.0f %.0f %.0f abs=[%.0f %.0f %.0f]..[%.0f %.0f %.0f] | foot=%.0f %.0f %.0f\n",
+			PR_GetString (check->v.classname),
+			check->v.origin[0], check->v.origin[1], check->v.origin[2],
+			check->v.absmin[0], check->v.absmin[1], check->v.absmin[2],
+			check->v.absmax[0], check->v.absmax[1], check->v.absmax[2],
+			foot[0], foot[1], foot[2]);
+	}
+}
+
 /*
 =============
 SV_CheckBottom
@@ -171,6 +222,7 @@ realcheck:	// check it for real...
 	if (trace.fraction == 1.0)
 	{
 		SV_DebugMoveStep_Log (ent, NULL, "CheckBottom: midpoint trace had no ground within 2*STEPSIZE down");
+		SV_DebugMoveStep_DumpMovers (start);
 		return false;
 	}
 
@@ -233,6 +285,7 @@ realcheck:	// check it for real...
 					x, y,
 					(trace.fraction == 1.0) ? "off edge" : "drop > STEPSIZE",
 					mid, trace.endpos[2]);
+				SV_DebugMoveStep_DumpMovers (start);
 				return false;
 			}
 		}
