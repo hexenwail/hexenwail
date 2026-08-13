@@ -1,5 +1,17 @@
 # Hexenwail WASM/Emscripten Build Status
 
+**Update 2026-08-13:** This file otherwise describes the state as of
+2026-03-26 (~5 months stale) and has not been re-verified against a browser
+run since. One claim below is now confirmed wrong: commit `59343680d`
+(uhexen2-unvi) wired a libTiMidity MIDI fallback codec that *does* compile and
+link for WASM (the `.wasm` grew from 1.4 MB to ~1.70 MB accordingly). It is
+not yet audible in a browser — no soundfont reaches the Emscripten virtual FS
+yet, tracked separately in uhexen2-g3j9 — so "no MIDI" is still the practical
+outcome today, but the cause has changed from "not implemented" to "implemented,
+not yet wired to a soundfont source". See the corrected "Known Limitations"
+entry below. Nothing else in this file has been re-verified; treat the rest as
+unconfirmed rather than current.
+
 ## Current State (2026-03-26)
 
 ### ✅ Completed
@@ -22,7 +34,10 @@
 - **WASM Build**: Successfully builds with shell-wasm.nix development shell
   - All C source files compile to WASM object files
   - Emscripten SDL3 port downloads and builds via network access
-  - Linking completes successfully (1.4 MB .wasm binary + 245 KB .js glue code)
+  - Linking completes successfully (1.4 MB .wasm binary + 245 KB .js glue code
+    at the time this was written; ~1.70 MB as of `59343680d` 2026-08-13, which
+    added the libTiMidity MIDI fallback codec — see the 2026-08-13 update note
+    at the top of this file)
   - Fixed undefined symbol GL_AliasGPU_SetUniforms by reorganizing ifdef guards
 
 ### ✅ Resolved: Nix Sandbox and Emscripten Ports
@@ -110,10 +125,21 @@ WASM build now links successfully! Next steps:
 ## Known Limitations (WASM)
 
 - SSBOs (Shader Storage Buffer Objects) not available in WebGL2/ES 3.0
-  - r_alias_gpu forced to 0 (disabled) in WASM builds
+  - r_alias_gpu forced to 0 (disabled) in WASM builds — confirmed still true,
+    `gl_rmain.c` sets `r_alias_gpu` default to `"0"` under `__EMSCRIPTEN__`
   - Alias model rendering falls back to streaming path
-- Audio codecs disabled to reduce binary size
-- MIDI synthesis (FluidSynth) not available
+- Audio codecs: the flake's `packages.wasm` recipe still passes
+  `-DUSE_CODEC_VORBIS=OFF`, and pkg-config codec discovery (Vorbis/XMP/Opus)
+  is skipped entirely under `EMSCRIPTEN` in `engine/CMakeLists.txt` — WAV/FLAC/MP3
+  (dr_libs, no external deps) are unaffected.
+- MIDI synthesis: **outdated as of 2026-08-13.** FluidSynth itself is still
+  unavailable for WASM (its glib/dbus/jack dependency closure cannot target
+  Emscripten), but that is no longer the whole story — `59343680d`
+  (uhexen2-unvi) added libTiMidity as a pure-C tier-2 MIDI fallback codec that
+  *does* compile and link for WASM, reading the same `TimGM6mb.sf2` FluidSynth
+  uses elsewhere. It has not produced audible MIDI in a browser yet because no
+  soundfont is delivered into the Emscripten virtual filesystem (`SF_FindSoundFont()`
+  has nothing to find there) — that gap is tracked in uhexen2-g3j9, not this file.
 - No ALSA for platform audio control
 - Networking limited to WebSocket/loopback due to browser sandbox
 

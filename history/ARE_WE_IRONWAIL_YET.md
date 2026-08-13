@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-06-19 (MSAA with FBO resolve ✅→➖: vestigial window MSAA dropped in `5b6d57ec4`, 'Antialiasing' menu now routes to FXAA — we never had a multisampled scene FBO, only a multisampled window surface that caused the glass/screen-door bug. Added two Hexenwail exclusives: `r_lightmap_bicubic` bicubic lightmap filter (`f52826282`, uhexen2-b2f0) and `r_alias_stochastic_alpha` Wronski/Wyman hashed alpha-test probe (`c1fef9dfa`). Prior: promoted Ironwail `017fdd2` ➖→✅ — fullbright sample in `sworld_frag` moved above the alpha-test `discard`.)
+Last updated: 2026-08-13 (Doc-harmonization pass against ~99 commits landed since the previous update. Added two rows: bindlist.lst mod-supplied Key Setup entries ✅ (Ironwail `096c3d952`, commit `d4b01fd39`, uhexen2-7aok) and pointfile leak visualization 🔶 (Ironwail `26902e0e2`, commit `3993cff2c`, uhexen2-nwx1; auto-load/warning/label helpers remain, uhexen2-m183). Corrected the Bindless textures row's status cell from literal text "n/a" to the ➖ symbol the Legend defines, and recomputed the scorecard from the actual per-row symbols — it had drifted independently of any row's content (previously claimed 1 ❌ where no row anywhere in the document carries that status). Updated the WASM binary size in Hexenwail Exclusives to reflect the libTiMidity MIDI fallback tier landing for WASM (uhexen2-unvi). None of the ~22 engine-touching commits in this window changed feature parity status beyond the two additions above — most were gamecode-bundling, security-hardening, and bugfix work orthogonal to Ironwail parity. Prior entry (2026-06-19): MSAA with FBO resolve ✅→➖, `r_lightmap_bicubic` and `r_alias_stochastic_alpha` added as exclusives, Ironwail `017fdd2` ➖→✅.)
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -12,17 +12,17 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 
 | Category | ✅ | 🔶 | ❌ | ➖ |
 |---|---|---|---|---|
-| Rendering — GPU Pipeline | 11 | 2 | 1 | 0 |
+| Rendering — GPU Pipeline | 12 | 1 | 0 | 1 |
 | Rendering — Visual/Shading | 23 | 0 | 0 | 1 |
-| Performance / Engine | 11 | 0 | 0 | 1 |
-| UX / Menus / HUD | 24 | 0 | 0 | 1 |
+| Performance / Engine | 10 | 1 | 0 | 1 |
+| UX / Menus / HUD | 25 | 1 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **82** | **2** | **1** | **9** |
+| **TOTAL** | **83** | **3** | **0** | **10** |
 
-**Parity: ~97% ported, 2% partial, 1% missing** (excluding N/A)
+**Parity: ~96% ported, 4% partial, 0% missing** (excluding N/A). No row currently carries ❌ — recomputed from the actual per-row symbols in the tables below, which had drifted from the scorecard (previous scorecard listed 1 ❌ and 9 ➖ from a stale bindless-textures row still marked "n/a" text instead of the ➖ symbol the Legend defines; there is no ❌ row anywhere in this document to source a "1 missing" figure from).
 
 ---
 
@@ -40,7 +40,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Triple-buffering / frames in flight | ✅ | `gl_buffer.c` ring with `FRAMES_IN_FLIGHT=3` + `glFenceSync` (uhexen2-8pc2, commit `32bdbea5`). `GL_AcquireFrameResources`/`GL_ReleaseFrameResources` wired into `GL_BeginRendering`/`GL_EndRendering`. All per-frame uploads stream through the ring. |
 | Persistent mapped buffers | ✅ | `gl_buffer.c` opens `ARB_buffer_storage` with `GL_MAP_PERSISTENT_BIT \| GL_MAP_COHERENT_BIT` when available (uhexen2-8pc2). Used by alias instances (main + fullbright passes), GPU world-cull PVS bitvector (uhexen2-o35n), and the immediate-mode emulator (uhexen2-y1v5: `GL_ImmEnd`/`GL_ImmDraw` route through `GL_Upload` + `glBindVertexBuffer` via ARB_vertex_attrib_binding). |
 | Hi-Z occlusion culling | ✅ | Previous-frame depth pyramid + per-AABB rejection inside `cull_mark` compute (uhexen2-xd87, commits `d58198a1`/`2f8376297`).  Decoupled from the postprocess pipeline 2026-05-12 (uhexen2-9912, `bddc22128`) — standalone depth resolve in `gl_worldcull.c` works whether or not FXAA/HDR/etc. are on.  `gl_hiz_cull` flipped to default **1** after the acceptance sweep (uhexen2-8pzr) measured 44-58% cull rate on demo1 vistas, well above the ≥10% gate. |
-| Bindless textures | n/a | **Scaffolding removed in 8124ed055 (uhexen2-ubsu).** It had never executed on any hardware: the ARB entry points were declared through `GL_FUNCTION_OPT`, which `GL_Init_Functions` expands to nothing, and nothing else loaded them — so `gl_bindless_able` could never be true and every downstream defect (shaders always `BINDLESS=0`, `TEX_BINDLESS` with zero call sites, `bindless_handle` always 0, the SSBO writing zero handles, samplers created but never bound) sat behind a gate wired shut. Removed rather than completed: as written it saved ~2 `glBindTexture` calls per draw with no batching, and llvmpipe has no `ARB_bindless_texture` so neither the dev box nor CI could validate it. Ironwail does not use `ARB_bindless_texture` either. uhexen2-im9g holds the conditions for revisiting. |
+| Bindless textures | ➖ | **Scaffolding removed in 8124ed055 (uhexen2-ubsu).** It had never executed on any hardware: the ARB entry points were declared through `GL_FUNCTION_OPT`, which `GL_Init_Functions` expands to nothing, and nothing else loaded them — so `gl_bindless_able` could never be true and every downstream defect (shaders always `BINDLESS=0`, `TEX_BINDLESS` with zero call sites, `bindless_handle` always 0, the SSBO writing zero handles, samplers created but never bound) sat behind a gate wired shut. Removed rather than completed: as written it saved ~2 `glBindTexture` calls per draw with no batching, and llvmpipe has no `ARB_bindless_texture` so neither the dev box nor CI could validate it. Ironwail does not use `ARB_bindless_texture` either. uhexen2-im9g holds the conditions for revisiting. |
 | Reversed-Z depth buffer | ✅ | `ARB_clip_control` — `gl_vidsdl.c:893` detects `glClipControl`, switches clip space to `[0,1]`; `GL_Frustum` (`gl_matrix.c:222`), R_Clear/mirror split, viewmodel near-clip, sky pin all flipped to `GEQUAL` / far=0, near=1 |
 | SIMD mipmap generation | ✅ | `GL_MipMap_W` / `GL_MipMap_H` split with `__SSE2__` fast-paths (`_mm_avg_epu8`) in `gl_draw.c`. Combined downsample now does W-pass + H-pass with Ironwail's `(a+b+1)>>1` rounding. Scalar fallback retained for non-x86 builds. |
 | MD5mesh / IQM skeletal model support | 🔶 | **~30%, would crash on first real load (uhexen2-7ok0; original audit: uhexen2-mxx5.6).** Title was misleading — there is no `.iqm` parser, no `iqm.h`; `iqmvert_t` is just an internal vertex struct name. MD5mesh parser exists (`md5mesh.c`) but: 96KB+128KB stack arrays SIGSEGV on first real load; stores stack-address into hunk pointer (use-after-stack); bone-pose data never allocated, SSBO uploads garbage; rest-pose XYZ zeroed (every vertex collapses to origin); bone weights not normalized. No `.md5anim` parser anywhere — no animation, hardcoded `numposes=1`. Skeletal shader is never invoked: zero `gl_shader_skeletal` draw-site references, no `PV_IQM` branch in `R_DrawAliasModel`. d18ca709c is mislabeled — 265 of 315 lines are unrelated Bloom code. |
@@ -120,6 +120,8 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Menu live preview | ✅ | Restored 2026-05-13 (commit d29f8c04a) — backdrop briefly dims for 0.8s when presets are changed in Display menu, showing the effect without menu text flashing. |
 | Show speed / show time overlays | ✅ | `scr_showspeed`, `showclock` (4-state: off / game-time / wall HH:MM / wall HH:MM:SS); both toggleable from Misc/HUD submenu |
 | Map-editor auto-check on launch | ➖ | Ironwail commit `5a983620` (2026-05): `Sys_IsStartedFromMapEditor` detects Qrucible parent process, triggers map check. Hexenwail has no equivalent function and no TrenchBroom workflow integration. Could be ported but low priority for Hexen II mapping scene. |
+| Mod-supplied bindlist.lst rows in Key Setup | ✅ | Ironwail `096c3d952`. A mod's `bindlist.lst` merges mod-specific rows into the Key Setup menu alongside the engine's own binds. `M_BuildBindList()` in `menu.c` replaces the old compile-time `bindnames[][2]`/`NUMCOMMANDS` pair with a runtime list (`keys_bindlist[]`/`keys_numcommands`); rebuilt on `M_Init`, every `M_Menu_Keys_f`, and `Host_Game_f` (mod switch while the menu is open). No dynamic allocation — mod rows point into a static 64-entry pool. (commit `d4b01fd39`, uhexen2-7aok closed) |
+| Pointfile leak visualization | 🔶 | Ironwail `26902e0e2`. Map-leak `.pts` files now draw as animated direction arrows (`R_ShowPointFile` / `R_EmitPointFileArrow` in `gl_rmain.c`, depth-test toggle `r_pointfile_depthtest`) instead of one particle per point — ported via the existing `R_ShowBoundingBoxes`-style immediate-draw batching, no new abstraction. (commit `3993cff2c`, uhexen2-nwx1 closed). Ironwail's companion pieces from the same commit — auto-load on a visdata-less map, the console leak warning, and the on-screen "Leak" label — are not yet ported (uhexen2-m183, open). |
 
 ## Input / Controller
 
@@ -184,7 +186,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-06-19, three features are non-complete: bindless ❌ Missing (skeleton only — uhexen2-ubsu), MD5 🔶 Partial (~30%, parser only — uhexen2-7ok0), and Alias model GPU data layout 🔶 Partial (per-aliashdr_t but not Ironwail frame-major — uhexen2-48fx). MSAA with FBO resolve reclassified ➖ (Hexenwail intentionally uses FXAA; vestigial window MSAA dropped in `5b6d57ec4`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category. Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 82 ✅ / 2 🔶 / 1 ❌ / 9 ➖ (~97% parity).
+As of 2026-08-13, three features are non-complete: MD5 🔶 Partial (~30%, parser only — uhexen2-7ok0), Alias model GPU data layout 🔶 Partial (per-aliashdr_t but not Ironwail frame-major — uhexen2-48fx), and Pointfile leak visualization 🔶 Partial (arrow rendering shipped, auto-load/warning/screen-label helpers remain — uhexen2-m183). Bindless textures were removed as non-functional scaffolding and reclassified ➖ N/A rather than ❌ Missing (uhexen2-ubsu; the row previously read literal text "n/a" instead of the ➖ symbol the Legend defines, which desynced the scorecard from the table — corrected here). MSAA with FBO resolve reclassified ➖ (Hexenwail intentionally uses FXAA; vestigial window MSAA dropped in `5b6d57ec4`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category. Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 83 ✅ / 3 🔶 / 0 ❌ / 10 ➖ (~96% parity, excluding N/A).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
@@ -215,7 +217,7 @@ Features Hexenwail has that Ironwail does NOT. Verified against Ironwail origin/
 | Motion blur | `r_motionblur` with view delta tracking | Yes |
 | FXAA | `gl_fxaa` toggle | Yes — Ironwail has no FXAA |
 | Alpha-to-coverage cutout antialiasing | `r_alphatocoverage` — MSAA-based fence edge smoothing | Yes — no `GL_SAMPLE_ALPHA_TO_COVERAGE` usage |
-| WebGL2 / WASM build | Emscripten + ES3 fallback, 1.4 MB binary | Yes |
+| WebGL2 / WASM build | Emscripten + ES3 fallback, ~1.70 MB binary (grew from 1.4 MB when the libTiMidity MIDI fallback tier was added for WASM, uhexen2-unvi — audibility still needs a soundfont delivered to the virtual FS, tracked in uhexen2-g3j9) | Yes |
 | Hexen II class system | 5 player classes with unique HUD/inventory | Yes — Quake-only engine |
 | Per-mod music subdirs | `<gamedir>/music/<author>/<file>.<ext>` lookup so multiple authors can ship tracks without colliding | Yes |
 | Track-name remap | `bgm_remap NN <name>` console command — points a numeric CD track at a named music file | Yes |

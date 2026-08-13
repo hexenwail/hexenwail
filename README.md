@@ -97,11 +97,13 @@ Planned:
 - Mods menu (up to 128 entries, scrollable with PgUp/PgDn/Home/End/mousewheel), per-mod config, portals data toggle
 - Per-liquid alpha (`r_wateralpha`, `r_lavaalpha`, `r_slimealpha`, `r_telealpha`) + `r_turbalpha` catch-all for custom-named mod liquids
 - TrueLightning (`cl_truelightning`)
+- Ships its own rebuilt `progs.dat`/`progs2.dat`/`portals/progs.dat` beside the executable and prefers it to your Hexen II install's copy — nothing is copied or overwritten on either platform, `-vanillaprogs` opts back out to Raven's 1997 gamecode, and a mod's own `progs.dat` (or anything you place in `~/.hexen2`) always wins over ours. See `gamecode/README.txt`.
+- Mods can add their own rows to the Key Setup menu via `bindlist.lst`, merged alongside the engine's own key bindings
 
 ### Audio
 - OGG Vorbis, Opus, MP3, FLAC, WAV music (CD track fallback)
 - Tracker music via libxmp (MOD/S3M/XM/IT) and UMX containers
-- MIDI via FluidSynth (Linux) or native Windows MIDI, with soundfont auto-detection
+- MIDI via FluidSynth (Linux) or native Windows MIDI, with soundfont auto-detection; libTiMidity plays the same soundfont as a fallback wherever FluidSynth isn't found
 - Per-mod music subdirs (`<gamedir>/music/<author>/`)
 - `bgm_remap NN <name>` — map a CD track number to a named music file
 - Underwater audio low-pass (`snd_waterfx`)
