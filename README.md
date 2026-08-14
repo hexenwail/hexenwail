@@ -1,3 +1,5 @@
+[![Download](https://img.shields.io/github/v/release/hexenwail/hexenwail?display_name=release&style=for-the-badge&label=Download)](https://github.com/hexenwail/hexenwail/releases/latest)
+
 # Hexen II: Hexenwail
 
 ![Screenshot](docs/screenshot1.png)
