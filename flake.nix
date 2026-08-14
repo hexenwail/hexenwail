@@ -234,7 +234,17 @@
               runHook preInstall
 
               mkdir -p $out/bin
-              mkdir -p $out/share/hexenwail
+
+              # No $out/share/hexenwail here, deliberately.  This output
+              # carries no gamecode -- referencing packages.gamecode from the
+              # engine derivation would put it in this .drv's hash and make
+              # every .hc edit rebuild the engine (uhexen2-r32l).  An EMPTY
+              # share/hexenwail is worse than none: PR_FindBundleDir's layer 2
+              # matches on the directory existing, so it would shadow layer 3's
+              # BUNDLED_GAMECODE_DIR for any packager who set one.
+              # packages.nixos-bundled composes this output with the gamecode
+              # afterwards; that is what packages.default and apps.default
+              # point at.  uhexen2-9die.
 
               # Install the OpenGL binary from CMake build directory
               install -Dm755 bin/glhexen2 $out/bin/glhexen2
@@ -244,7 +254,77 @@
             '';
           });
 
-          default = self.packages.${system}.nixos;
+          # The engine plus the gamecode it should run: what `nix run` and
+          # `nix profile install` give you.  uhexen2-9die.
+          #
+          # Composed here rather than inside `nixos` because of uhexen2-r32l's
+          # constraint -- an engine derivation that referenced ${gamecode}
+          # would carry it in its .drv hash, and every .hc edit would rebuild
+          # the engine, h2ded, both mingw cross builds and the WASM build.
+          # Same trick `linux-fhs` already uses on this output.
+          #
+          # The binary is COPIED, not symlinked.  PR_FindBundleDir() resolves
+          # the bundle relative to Sys_GetExeDir(), which reads
+          # /proc/self/exe, and that resolves through a symlink to the real
+          # target -- so a symlinkJoin would send the lookup back to the
+          # gamecode-less `nixos` output and find nothing.
+          #
+          # Layout matches the release tree's: bin/glhexen2 with the gamecode
+          # at ../share/hexenwail, which is PR_FindBundleDir()'s layer 2.
+          # hw/ and siege/ are withheld here for the same reason as in the
+          # release derivation -- see the note there.
+          nixos-bundled =
+            let
+              nixosPkg = self.packages.${system}.nixos;
+              gamecodePkg = self.packages.${system}.gamecode;
+            in pkgs.runCommand "hexenwail-bundled-${nixosPkg.version}" {
+              meta = nixosPkg.meta // {
+                description = "${nixosPkg.meta.description} (with bundled gamecode)";
+              };
+              passthru = { inherit (nixosPkg) version; };
+            } ''
+              mkdir -p $out/bin
+              cp ${nixosPkg}/bin/glhexen2 $out/bin/glhexen2
+              chmod +w $out/bin/glhexen2
+
+              install -Dm644 \
+                ${gamecodePkg}/share/hexenwail/data1/progs.dat \
+                ${gamecodePkg}/share/hexenwail/data1/progs2.dat \
+                -t $out/share/hexenwail/data1
+              install -Dm644 \
+                ${gamecodePkg}/share/hexenwail/portals/progs.dat \
+                -t $out/share/hexenwail/portals
+            '';
+
+          # Same composition for the dedicated server.  h2ded runs
+          # PR_LoadProgs() exactly as the client does, so a bare .#h2ded has
+          # the same gap -- and it is the engine used for headless gamecode
+          # investigation, where running Raven's progs instead of ours would
+          # quietly invalidate the run.  uhexen2-9die.
+          h2ded-bundled =
+            let
+              h2dedPkg = self.packages.${system}.h2ded;
+              gamecodePkg = self.packages.${system}.gamecode;
+            in pkgs.runCommand "hexenwail-h2ded-bundled-${h2dedPkg.version}" {
+              meta = h2dedPkg.meta // {
+                description = "${h2dedPkg.meta.description} (with bundled gamecode)";
+              };
+              passthru = { inherit (h2dedPkg) version; };
+            } ''
+              mkdir -p $out/bin
+              cp ${h2dedPkg}/bin/h2ded $out/bin/h2ded
+              chmod +w $out/bin/h2ded
+
+              install -Dm644 \
+                ${gamecodePkg}/share/hexenwail/data1/progs.dat \
+                ${gamecodePkg}/share/hexenwail/data1/progs2.dat \
+                -t $out/share/hexenwail/data1
+              install -Dm644 \
+                ${gamecodePkg}/share/hexenwail/portals/progs.dat \
+                -t $out/share/hexenwail/portals
+            '';
+
+          default = self.packages.${system}.nixos-bundled;
 
           # Dedicated server (h2ded) — headless, links only libm/libc.
           # A separate output rather than a flag on `nixos` so CI can build it
@@ -1261,9 +1341,11 @@ EOF
             echo "  make release        - Build all platforms with CMake"
             echo ""
             echo "Direct Nix commands:"
-            echo "  nix build .#nixos     - Linux build (NixOS)"
+            echo "  nix build .#nixos     - Linux build (NixOS), engine only"
+            echo "  nix build .#nixos-bundled  - engine + our gamecode (the default)"
             echo "  nix build .#linux-fhs - Linux build (standard FHS)"
-            echo "  nix build .#h2ded     - Dedicated server (headless)"
+            echo "  nix build .#h2ded     - Dedicated server (headless), engine only"
+            echo "  nix build .#h2ded-bundled  - dedicated server + our gamecode"
             echo "  nix build .#utils     - Map/model toolchain (qbsp, light, vis, hcc...)"
             echo "  nix build .#win64     - Windows 64-bit"
             echo "  nix build .#release   - All platforms"
@@ -1277,10 +1359,12 @@ EOF
           '';
         };
 
-        # App for easy running
+        # App for easy running.  nixos-bundled, not nixos: `nix run` should
+        # get our gamecode, not silently fall back to the player's retail
+        # 1997 progs.dat.  uhexen2-9die.
         apps.default = {
           type = "app";
-          program = "${self.packages.${system}.nixos}/bin/glhexen2";
+          program = "${self.packages.${system}.nixos-bundled}/bin/glhexen2";
         };
 
         # nix run .#get-demo [destination]

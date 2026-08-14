@@ -586,6 +586,24 @@ binary's RPATH pointing at absolute `/nix/store` paths, so it is startable only
 on the machine that built it, and NixOS users are served by the flake
 (`nix run github:bobberb/hexenwail`) rather than by a download.
 
+**Nix: a composed output, not a fatter engine output** (uhexen2-9die). Making
+the flake path carry the bundle cannot be done inside `.#nixos` without
+violating the `${gamecode}` rule below, so `.#nixos-bundled` copies the binary
+out of `.#nixos` and installs the progs beside it — the same trick
+`.#linux-fhs` already uses on that output. `packages.default` and `apps.default`
+point at it; `.#h2ded-bundled` does the same for the dedicated server.
+
+Two details that are easy to get wrong:
+
+- **Copy the binary, do not symlink it.** `PR_FindBundleDir()` resolves the
+  bundle from `Sys_GetExeDir()`, which reads `/proc/self/exe`, and that resolves
+  *through* a symlink to its target. A `symlinkJoin` would therefore send the
+  lookup back to the gamecode-less `.#nixos` output.
+- **An empty `share/hexenwail/` is worse than none.** Layer 2 matches on the
+  directory existing, so an empty one is returned as the bundle directory and
+  shadows layer 3's `BUNDLED_GAMECODE_DIR`. `.#nixos` used to `mkdir` one and
+  put nothing in it; it no longer creates the directory at all.
+
 **Do not reference `${gamecode}` from the engine derivation.** Doing so would
 put the gamecode derivation into the engine's `.drv` hash, and every `.hc` edit
 would then rebuild the engine, `h2ded`, both mingw cross builds, the WASM build
@@ -847,7 +865,9 @@ a lost inventory or a broken objective is not.
 | # | Check |
 |---|---|
 | K1 | unzip the Linux artifact to a clean directory, run from **outside** it (`cd /tmp && /path/to/linux-x86_64/bin/glhexen2`) — this is the row that proves F5, since `basedir` will be wrong by construction |
-| K2 | ~~same for `linux-x86_64-nixos`~~ — n/a, that tree is no longer built into `.#release` (uhexen2-2tia). Note that the flake install path carries **no** bundled gamecode: `.#nixos` installs `bin/glhexen2` and an empty `share/hexenwail/`, so `nix run` users run retail gamecode. Tracked as uhexen2-9die |
+| K2 | ~~same for `linux-x86_64-nixos`~~ — n/a, that tree is no longer built into `.#release` (uhexen2-2tia). The flake install path is checked instead: `nix run` must print a `Gamecode:` line pointing inside the store, not at the player's `data1/` (uhexen2-9die) |
+| K2a | `.#nixos` and `.#h2ded` must carry **no** `share/hexenwail` at all — an empty one shadows `PR_FindBundleDir()`'s layer 3 |
+| K2b | a `.hc` edit must leave `.#nixos.drvPath` and `.#h2ded.drvPath` unchanged while moving `.#gamecode.drvPath` (uhexen2-r32l) |
 | K3 | unzip the Windows artifact into a retail Hexen II directory and run in place |
 | K4 | confirm the root-level `gamecode/` staging tree is still present and still matches its README |
 | K5 | confirm the engine derivation's `.drv` hash is unchanged by a `.hc` edit |
