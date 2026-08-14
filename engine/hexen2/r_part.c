@@ -248,10 +248,12 @@ void R_ClearParticles (void)
 
 vec3_t	r_pointfile[MAX_POINTFILE_POINTS];
 int	r_numpointfile;
+qboolean r_pointfile_isleak;
 
 void R_ClearPointFile (void)
 {
 	r_numpointfile = 0;
+	r_pointfile_isleak = false;
 }
 
 /*
@@ -279,6 +281,12 @@ R_ReadPointFile_f
 Load the leak path qbsp wrote to maps/<map>.pts.  Ironwail 26902e0e2
 replaced the old one-particle-per-point trail with direction arrows;
 R_ShowPointFile (gl_rmain.c) draws them.
+
+`pointfile leak` is the auto-load form R_NewMap issues when the world has
+no visdata.  It differs from a hand-typed `pointfile` in two ways: a missing
+.pts file is silent (a leaked map the mapper never re-ran qbsp on would
+otherwise nag on every load), and a successful load marks the path as a
+confirmed leak so R_ShowPointFile labels its origin on screen.
 ===============
 */
 void R_ReadPointFile_f (void)
@@ -288,7 +296,10 @@ void R_ReadPointFile_f (void)
 	int		r;
 	int		c;
 	qboolean	truncated;
+	qboolean	autoload;
 	char	name[MAX_QPATH];
+
+	autoload = (Cmd_Argc () > 1 && !q_strcasecmp (Cmd_Argv (1), "leak"));
 
 	R_ClearPointFile ();
 
@@ -300,7 +311,8 @@ void R_ReadPointFile_f (void)
 	FS_OpenFile (name, &f, NULL);
 	if (!f)
 	{
-		Con_Printf ("couldn't open %s\n", name);
+		if (!autoload)
+			Con_Printf ("couldn't open %s\n", name);
 		return;
 	}
 
@@ -341,6 +353,11 @@ void R_ReadPointFile_f (void)
 	if (truncated)
 		Con_Printf ("pointfile truncated at %i stored points, leak path is incomplete\n",
 			    MAX_POINTFILE_POINTS);
+
+	/* Only the auto-load form knows the map actually leaked; a hand-typed
+	 * `pointfile` may well be a mapper inspecting a stale .pts on a map
+	 * that now seals, so it gets the arrows without the on-screen label. */
+	r_pointfile_isleak = (autoload && r_numpointfile >= 1);
 }
 
 

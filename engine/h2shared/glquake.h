@@ -479,9 +479,15 @@ void R_InitNetgraphTexture (void);
 #define MAX_POINTFILE_POINTS	16384
 extern vec3_t	r_pointfile[MAX_POINTFILE_POINTS];
 extern int	r_numpointfile;
+/* True only for the `pointfile leak` auto-load R_NewMap issues on a world
+ * with no visdata, i.e. when the path is known to be a real leak rather than
+ * a stale .pts a mapper asked for by hand.  Gates the on-screen label. */
+extern qboolean	r_pointfile_isleak;
 
 void R_ReadPointFile_f (void);
 void R_ClearPointFile (void);
+/* Canvas-space position of the leak origin, valid this frame only. */
+qboolean R_GetPointFileLabelPos (float *x, float *y);
 void R_AliasInfo_f (void);	/* uhexen2-khsa diagnostic */
 void R_TranslatePlayerSkin (int playernum);
 

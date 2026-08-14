@@ -659,6 +659,42 @@ static void SCR_DrawNet (void)
 	Draw_Pic (scr_vrect.x+64, scr_vrect.y, scr_net);
 }
 
+#if !defined(H2W)
+/*
+==============
+SCR_DrawPointFileLabel
+
+Label the origin of the leak path -- the point qbsp says the inside of the map
+connects to the void -- so a mapper can find it without following the arrow
+chain by eye.  Only drawn for the `pointfile leak` auto-load, where the world
+genuinely has no visdata; a hand-typed `pointfile` gets arrows and nothing
+else, since it may well be a stale .pts on a map that now seals.
+
+R_ShowPointFile does the projection while the 3D matrices are still live and
+hands back CANVAS_DEFAULT coordinates, which is the canvas already active
+here.
+==============
+*/
+static void SCR_DrawPointFileLabel (void)
+{
+	static const char	label[] = "Leak";
+	float	x, y;
+
+	if (!r_pointfile_isleak || !R_GetPointFileLabelPos (&x, &y))
+		return;
+
+	/* R_GetPointFileLabelPos answers in CANVAS_DEFAULT coordinates, and the
+	 * HUD overlays that run just before this leave whatever canvas they
+	 * needed (Draw_Crosshair in particular switches to CANVAS_CROSSHAIR),
+	 * so say which one we want rather than inheriting it. */
+	GL_SetCanvas (CANVAS_DEFAULT);
+
+	/* Centre the word on the point and lift it clear, so the arrowhead
+	 * underneath stays readable. */
+	Draw_String ((int)(x - (sizeof(label) - 1) * 4), (int)(y - 12), label);
+}
+#endif	/* !H2W */
+
 /*
 ==============
 SCR_InfoCorner
@@ -1636,6 +1672,9 @@ void SCR_UpdateScreen (void)
 			SCR_DrawNet();
 			SCR_DrawTurtle();
 			SCR_DrawPause();
+#if !defined(H2W)
+			SCR_DrawPointFileLabel();
+#endif
 			SCR_CheckDrawCenterString();
 #if !defined(SERVERONLY) && !defined(H2W)
 			if (!CSQC_DrawHud ())

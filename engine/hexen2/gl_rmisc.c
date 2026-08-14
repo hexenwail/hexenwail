@@ -533,6 +533,19 @@ void R_NewMap (void)
 	R_ClearParticles ();
 	R_ClearPointFile ();
 
+	/* A world with no visdata is a world vis never ran on -- most often
+	 * because qbsp found a leak and stopped, which is exactly when the
+	 * mapper wants the .pts path.  Say so and load it without being asked;
+	 * `pointfile leak` stays quiet if there is no .pts to load, so a map
+	 * that simply shipped unvis'd costs one warning line and nothing else.
+	 * Ironwail 26902e0e2. */
+	if (!cl.worldmodel->visdata)
+	{
+		Con_Printf ("Warning: %s has no visibility data -- the map leaked, or vis was never run.\n",
+			    cl.worldmodel->name);
+		Cbuf_AddText ("pointfile leak\n");
+	}
+
 	GL_BuildLightmaps ();
 	R_BuildWorldVBO ();
 	R_BuildSkyStencilVBO ();
