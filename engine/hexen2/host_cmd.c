@@ -180,6 +180,75 @@ static void Host_Noclip_f (void)
 	}
 }
 
+/*
+==================
+Host_SetPos_f
+
+Teleport the player, so a specific spot in a map can be reached without
+playing to it.  Ironwail and QuakeSpasm both have this; it is here because
+uhexen2-nnwb needs a player standing in a named trigger volume before the
+mover it arms will run, and "ask the reporter to walk there" is not a repro
+anyone can re-run.
+
+One deliberate difference from Ironwail's: this does NOT force MOVETYPE_NOCLIP.
+Noclip physics link the player with touch_triggers off, so a player parked
+inside a trigger_activate by a noclipping setpos would never fire it -- which
+is the entire reason this command exists here.  The link below passes true, so
+whatever is at the destination fires on arrival.  Type `noclip` first if you
+want to land inside geometry.
+
+Cheat-gated exactly like noclip: single player, skill <= 2.
+==================
+*/
+static void Host_SetPos_f (void)
+{
+	int	i;
+
+	if (cmd_source == src_command)
+	{
+		Cmd_ForwardToServer ();
+		return;
+	}
+
+	if (*sv_globals.deathmatch || *sv_globals.coop || skill.integer > 2)
+		return;
+
+	if (Cmd_Argc() != 4 && Cmd_Argc() != 7)
+	{
+		SV_ClientPrintf (0, "usage:\n");
+		SV_ClientPrintf (0, "   setpos <x> <y> <z>\n");
+		SV_ClientPrintf (0, "   setpos <x> <y> <z> <pitch> <yaw> <roll>\n");
+		SV_ClientPrintf (0, "current position is %i %i %i %i %i %i\n",
+				 (int)sv_player->v.origin[0],
+				 (int)sv_player->v.origin[1],
+				 (int)sv_player->v.origin[2],
+				 (int)sv_player->v.v_angle[0],
+				 (int)sv_player->v.v_angle[1],
+				 (int)sv_player->v.v_angle[2]);
+		return;
+	}
+
+	/* whatever momentum they had belongs to where they were, not to here */
+	VectorClear (sv_player->v.velocity);
+
+	for (i = 0; i < 3; i++)
+		sv_player->v.origin[i] = atof (Cmd_Argv(1 + i));
+
+	if (Cmd_Argc() == 7)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			sv_player->v.angles[i] = atof (Cmd_Argv(4 + i));
+			sv_player->v.v_angle[i] = sv_player->v.angles[i];
+		}
+		/* sv_main.c honours this and sends svc_setangle, so the client's
+		 * view follows instead of snapping back on the next usercmd. */
+		sv_player->v.fixangle = 1;
+	}
+
+	SV_LinkEdict (sv_player, true);
+}
+
 
 /*
 ==================
@@ -2251,6 +2320,7 @@ void Host_InitCommands (void)
 	Cmd_AddCommand ("name", Host_Name_f);
 	Cmd_AddCommand ("playerclass", Host_Class_f);
 	Cmd_AddCommand ("noclip", Host_Noclip_f);
+	Cmd_AddCommand ("setpos", Host_SetPos_f);
 	Cmd_AddCommand ("say", Host_Say_f);
 	Cmd_AddCommand ("say_team", Host_Say_Team_f);
 	Cmd_AddCommand ("tell", Host_Tell_f);
