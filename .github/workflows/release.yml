@@ -162,6 +162,13 @@ jobs:
           # rollup release, and PREV_TAG below is by design the *previous*
           # tag, which for a long-running branch may be days old while the
           # release spans months.
+          #
+          # docs/RELEASE_NOTES_STYLE.md is the template that curated file is
+          # written to -- structure, voice, badge colors, and the standing rule
+          # that a release body never lists raw commits or SHAs.  The fallback
+          # below breaks that rule on purpose: an un-curated tag still needs a
+          # body, and a commit dump that says so is better than an empty one.
+          # It is a placeholder, not the format.  uhexen2-rf9y.
           CURATED="docs/release-notes/${{ github.ref_name }}.md"
           CURATED_BODY=""
           FULL_CHANGELOG=""
@@ -182,25 +189,34 @@ jobs:
           PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ github.ref_name }}$" | head -1 || echo "")
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
-            HEADER="## What's changed since $PREV_TAG"
+            HEADER="### Changes since [$PREV_TAG](https://github.com/hexenwail/hexenwail/releases/tag/$PREV_TAG)"
           else
             RANGE="HEAD"
-            HEADER="## Initial release"
+            HEADER="### Initial release"
           fi
+          TAG="${{ github.ref_name }}"
           {
             if [ -f "$CURATED" ]; then
               # printf, not echo: the notes are markdown full of backticks and
               # $ and must reach the release body uninterpreted.
               printf '%s\n' "$CURATED_BODY"
             else
+              # No curated body for this tag.  Emit the download badges the
+              # curated file would have carried, then say plainly that what
+              # follows is a placeholder, so nobody mistakes a commit dump for
+              # the house style.  See docs/RELEASE_NOTES_STYLE.md.
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-windows-x86_64.zip\">![Download Windows build](https://img.shields.io/github/downloads/hexenwail/hexenwail/$TAG/hexenwail-$TAG-windows-x86_64.zip?color=blue&label=Windows%20x86_64&logo=windows&style=for-the-badge)</a>"
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-linux-x86_64.zip\">![Download Linux build](https://img.shields.io/github/downloads/hexenwail/hexenwail/$TAG/hexenwail-$TAG-linux-x86_64.zip?color=8A9A5B&label=Linux%20x86_64&style=for-the-badge)</a>"
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG.flatpak\">![Download Flatpak](https://img.shields.io/github/downloads/hexenwail/hexenwail/$TAG/hexenwail-$TAG.flatpak?color=4A90D9&label=Flatpak&logo=flatpak&style=for-the-badge)</a>"
+              echo ""
               echo "$HEADER"
               echo ""
-              echo "### Commits"
+              echo "❗ **Note**: this tag shipped without hand-written notes, so the raw commit list stands in for them."
               echo ""
               git log "$RANGE" --no-merges --format="- %s (\`%h\`)" | grep -v "Sync beads" || true
             fi
             echo ""
-            echo "## Downloads"
+            echo "### Downloads"
             echo ""
             echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
             echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/\`"
