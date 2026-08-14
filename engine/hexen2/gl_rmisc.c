@@ -596,6 +596,11 @@ void D_ClearOpenGLTextures (int last_tex)
 	// Delete OpenGL textures
 	for (i = last_tex; i < numgltextures; i++)
 	{
+		/* A slot GL_LoadTexture retired already had its name deleted and its
+		 * hash entry removed; the name may since have been recycled to a live
+		 * texture, so do not delete it a second time.  uhexen2-owyq. */
+		if (gltextures[i].texnum == GL_UNUSED_TEXTURE)
+			continue;
 		if (gl_log_texgen.integer >= 2)
 			Con_Printf ("[texgen]    drop %lu '%s'\n",
 				    (unsigned long)gltextures[i].texnum,

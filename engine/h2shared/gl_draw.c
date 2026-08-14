@@ -158,6 +158,10 @@ gltexture_t	gltextures[MAX_GLTEXTURES];
 int			numgltextures;
 hashindex_t	hash_gltextures;
 
+/* Set when GL_LoadTexture retires a slot, cleared by the first scan that finds
+ * nothing left to reclaim, so the common path never walks the array. */
+static qboolean	gl_stale_gltextures;
+
 static GLuint GL_LoadPixmap (const char *name, const char *data);
 static void GL_Upload32 (unsigned int *data, gltexture_t *glt);
 static void GL_Upload8 (byte *data, gltexture_t *glt);
@@ -447,7 +451,7 @@ static void Draw_TouchAllFilterModes (void)
 
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
-		if (!glt->identifier[0]) continue;	/* skip stale (deleted) entries */
+		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & (TEX_NEAREST|TEX_LINEAR))	/* TEX_MIPMAP mustn't be set in this case */
 			continue;
 		GL_Bind (glt->texnum);
@@ -500,7 +504,7 @@ static void Draw_TouchMipmapFilterModes (void)
 
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
-		if (!glt->identifier[0]) continue;	/* skip stale (deleted) entries */
+		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & TEX_MIPMAP)
 		{
 			GL_Bind (glt->texnum);
@@ -539,7 +543,7 @@ static void Draw_LodBias_f (cvar_t *var)
 	(void)var;
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
-		if (!glt->identifier[0]) continue;	/* skip stale (deleted) entries */
+		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & TEX_MIPMAP)
 		{
 			GL_Bind (glt->texnum);
@@ -672,6 +676,7 @@ void Draw_ReInit (void)
 Draw_Init
 ===============
 */
+
 void Draw_Init (void)
 {
 	qpic_t		*p;
@@ -2563,12 +2568,55 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 
 /*
 ================
+GL_ClaimStaleTexture
+
+Hand back a retired gltexture_t slot for reuse, or -1 if there is none.
+
+A retired slot (see GL_LoadTexture below) has already had its GL name deleted
+and its hash entry removed, and carries GL_UNUSED_TEXTURE as its texnum to say
+so -- glGenTextures never issues that value, and the two callers that load a
+texture under an empty identifier are live entries, so the name alone is not a
+reliable marker.  Nothing outside gltextures[] can still be pointed at a
+retired slot, which is what makes reuse safe where reusing the *live* slot in
+GL_LoadTexture would not be (uhexen2-0fsq).
+
+Only slots at or above gl_texlevel are offered.  D_ClearOpenGLTextures purges
+by index range, so a map texture handed a slot below the static-texture
+watermark would quietly survive every map change.  uhexen2-owyq.
+================
+*/
+static int GL_ClaimStaleTexture (void)
+{
+	int	i;
+
+	if (!gl_stale_gltextures)
+		return -1;
+
+	for (i = gl_texlevel; i < numgltextures; i++)
+	{
+		if (gltextures[i].texnum == GL_UNUSED_TEXTURE)
+		{
+			if (gl_log_texgen.integer)
+				Con_Printf ("[texgen] f=%d reclaim slot %d (of %d)\n",
+					    host_framecount, i, numgltextures);
+			return i;
+		}
+	}
+
+	/* nothing reclaimable: either a flush took them, or the only retired
+	 * slots are below the watermark, where we must not touch them. */
+	gl_stale_gltextures = false;
+	return -1;
+}
+
+/*
+================
 GL_LoadTexture
 ================
 */
 GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height, int flags)
 {
-	int		i, size, key;
+	int		i, slot, size, key;
 	unsigned short	crc;
 	gltexture_t	*glt;
 
@@ -2617,6 +2665,12 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 						currenttexture = GL_UNUSED_TEXTURE;
 					Hash_Remove (&hash_gltextures, key, i);
 					glt->identifier[0] = '\0';	/* mark entry stale */
+					/* GL_UNUSED_TEXTURE is the marker GL_ClaimStaleTexture
+					 * reads, and it also keeps D_ClearOpenGLTextures from
+					 * re-deleting a name the driver may have recycled to a
+					 * live texture by then.  uhexen2-owyq. */
+					glt->texnum = GL_UNUSED_TEXTURE;
+					gl_stale_gltextures = true;
 					break;	/* exit loop, continue to new-entry creation below */
 				}
 				else	return glt->texnum;	/* the same is present. */
@@ -2624,12 +2678,16 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 		}
 	}
 
-	if (numgltextures >= MAX_GLTEXTURES)
-		Sys_Error ("%s: cache full, max is %i textures.", __thisfunc__, MAX_GLTEXTURES);
+	slot = GL_ClaimStaleTexture ();
+	if (slot < 0)
+	{
+		if (numgltextures >= MAX_GLTEXTURES)
+			Sys_Error ("%s: cache full, max is %i textures.", __thisfunc__, MAX_GLTEXTURES);
+		slot = numgltextures++;
+	}
 
-	Hash_Add (&hash_gltextures, key, numgltextures);
-	glt = &gltextures[numgltextures];
-	numgltextures++;
+	Hash_Add (&hash_gltextures, key, slot);
+	glt = &gltextures[slot];
 	q_strlcpy (glt->identifier, identifier, MAX_QPATH);
 
 	glGenTextures_fp(1, &glt->texnum);
