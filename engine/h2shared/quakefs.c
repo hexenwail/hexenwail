@@ -1647,7 +1647,6 @@ FS_Init
 void FS_Init (void)
 {
 	qboolean check_portals = false;
-	qboolean portals_in_path = false;
 	int	i;
 
 	Cvar_RegisterVariable (&oem);
@@ -1848,10 +1847,8 @@ void FS_Init (void)
 			FS_MakePath_BUF (FS_BASEDIR, NULL, fs_gamedir, sizeof(fs_gamedir), "data1");
 			FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
 		}
-		else
-		{
-			portals_in_path = true;
-		}
+		/* nothing to do on success: the portals entry stays where
+		 * FS_AddGameDirectory put it, below fs_base_searchpaths. */
 	}
 
 /* step 3: hw directory (hexenworld) */
@@ -1882,18 +1879,22 @@ void FS_Init (void)
 		 * so portals must sit below the mod in the search path.  Step 2
 		 * normally already put it there, *below* fs_base_searchpaths,
 		 * where FS_Gamedir will not strip it -- adding it again here
-		 * would only burn a second path_id and fd (uhexen2-6h8x).  The
-		 * add is still needed when step 2 rolled portals back out. */
+		 * would only burn a second path_id and fd (uhexen2-6h8x).
+		 *
+		 * And it is not re-added when step 2 rolled it back out.  That
+		 * rollback happens for exactly one reason -- the mission pack
+		 * failed validation -- because check_portals is what gates step
+		 * 2 in the first place, so "step 2 ran but portals is not on
+		 * the path" can only mean it was rejected.  Putting the
+		 * directory back here would undo a rollback whose whole purpose
+		 * is that "the portals directory is reserved for the mission
+		 * pack": a broken or partial install would serve files to the
+		 * mod anyway, re-scanning the same rejected pak and printing
+		 * its warning a second time.  A mod that wanted mission pack
+		 * assets does without them, which is what an H2MP build already
+		 * does after the same rollback.  uhexen2-ofgb. */
 		if (i < com_argc - 1)
-		{
-			if (check_portals && !portals_in_path &&
-					q_strcasecmp(com_argv[i+1], "portals"))
-			{
-				FS_AddGameDirectory ("portals", true);
-				fs_base_searchpaths = fs_searchpaths;
-			}
 			FS_Gamedir (com_argv[i+1]);
-		}
 	}
 }
 
