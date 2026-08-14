@@ -26,6 +26,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern char skybox_name[32];
 extern float sky_wind_uv[2];	/* per-skybox wind UV offset (uhexen2-typa) */
+extern cvar_t gl_farclip;	/* projection far plane; defined here because the
+				 * ported sky code needed the name.  Read by
+				 * R_SetupGL (uhexen2-li13). */
 
 void Sky_Init (void);
 void Sky_NewMap (void);
