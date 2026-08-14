@@ -382,9 +382,9 @@ retail's `PROGS.DAT` sits beside it untouched.
 
 **Use a map that exists.** This table originally cited `map rick3`, which is in
 neither `pak0.pak` nor `pak1.pak` (above). The check appeared to pass anyway,
-because `PR_LoadProgs()` runs at `sv_main.c:2432` and `Mod_ForName` for the
-worldmodel only at `sv_main.c:2502` — so `progs2.dat` loads and prints its size,
-and *then* the map load fails. A nonexistent map produces a
+because `sv_main.c :: SV_SpawnServer()` calls `PR_LoadProgs()` well before it
+calls `Mod_ForName()` for the worldmodel — so `progs2.dat` loads and prints its
+size, and *then* the map load fails. A nonexistent map produces a
 correct-looking `progs2.dat` line, which is exactly the shape of result that
 survives review. Use `eidolon`, or any of `romeric6` / `meso9` / `rider1a` /
 `rider2c`, and confirm the map actually spawns.
