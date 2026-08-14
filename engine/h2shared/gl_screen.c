@@ -659,6 +659,27 @@ static void SCR_DrawNet (void)
 	Draw_Pic (scr_vrect.x+64, scr_vrect.y, scr_net);
 }
 
+/*
+==============
+SCR_InfoCorner
+
+The bottom-right corner the debug readouts stack up from, in CANVAS_INFO's own
+coordinates.  They used to measure from vid.width/vid.height, which is only the
+right answer while the canvas is 1:1; with scr_infoscale it no longer is, and
+the status bar they sit above is measured in vid space either way, so its height
+has to come across with them.  uhexen2-r9qj.
+==============
+*/
+static void SCR_InfoCorner (int *right, int *bottom)
+{
+	int	w, h;
+
+	SCR_InfoCanvasSize (&w, &h);
+	*right = w;
+	/* round the bar up, so a half-canvas-pixel of it never overlaps the text */
+	*bottom = h - (sb_lines * h + vid.height - 1) / vid.height;
+}
+
 static void SCR_DrawFPS (void)
 {
 	static double	oldtime = 0;
@@ -690,8 +711,9 @@ static void SCR_DrawFPS (void)
 	}
 
 	sprintf(st, "%4.0f FPS", lastfps);
-	x = vid.width - strlen(st) * 8 - 8;
-	y = vid.height - sb_lines - 8;
+	SCR_InfoCorner (&x, &y);
+	x -= strlen(st) * 8 + 8;
+	y -= 8;
 //	Draw_TileClear(x, y, strlen(st) * 8, 8);
 	Draw_String(x, y, st);
 }
@@ -699,7 +721,7 @@ static void SCR_DrawFPS (void)
 static void SCR_DrawClock (void)
 {
 	char	st[16];
-	int	x, y;
+	int	x, y, right;
 	int	minutes, seconds;
 
 	if (!scr_showclock.integer)
@@ -730,8 +752,9 @@ static void SCR_DrawClock (void)
 			sprintf(st, "%d:%02d", minutes, seconds);
 	}
 
-	x = vid.width - strlen(st) * 8 - 8;
-	y = vid.height - sb_lines - 16 - (scr_showfps.integer ? 8 : 0);
+	SCR_InfoCorner (&right, &y);
+	x = right - strlen(st) * 8 - 8;
+	y -= 16 + (scr_showfps.integer ? 8 : 0);
 	Draw_String(x, y, st);
 
 	/* Also show host uptime below the clock */
@@ -744,7 +767,7 @@ static void SCR_DrawClock (void)
 			sprintf(st, "%d:%02d:%02d", minutes / 60, minutes % 60, seconds);
 		else
 			sprintf(st, "%d:%02d", minutes, seconds);
-		x = vid.width - strlen(st) * 8 - 8;
+		x = right - strlen(st) * 8 - 8;
 		y -= 8;
 		Draw_String(x, y, st);
 	}
@@ -789,8 +812,9 @@ static void SCR_DrawSpeed (void)
 		return;
 
 	sprintf (st, "%d", (int)display_speed);
-	x = vid.width - strlen(st) * 8 - 8;
-	y = vid.height - sb_lines - 8;
+	SCR_InfoCorner (&x, &y);
+	x -= strlen(st) * 8 + 8;
+	y -= 8;
 	if (scr_showfps.integer)
 		y -= 8;
 	if (scr_showclock.integer)
@@ -1618,11 +1642,14 @@ void SCR_UpdateScreen (void)
 #endif
 				Sbar_Draw();
 		}
-		GL_SetCanvas (CANVAS_DEFAULT);
+		/* Debug readouts on their own canvas so scr_infoscale can size
+		 * them without moving the HUD, and vice versa (uhexen2-r9qj). */
+		GL_SetCanvas (CANVAS_INFO);
 		SCR_DrawFPS();
 		SCR_DrawClock();
 		SCR_DrawSpeed();
 
+		GL_SetCanvas (CANVAS_DEFAULT);
 		Plaque_Draw(plaquemessage, false);
 		SCR_DrawConsole();
 		M_Draw();

@@ -120,6 +120,7 @@ typedef enum {
 	CANVAS_SBAR,
 	CANVAS_MENU,
 	CANVAS_CROSSHAIR,
+	CANVAS_INFO,
 	CANVAS_INVALID = -1
 } canvastype;
 
@@ -128,10 +129,16 @@ void GL_SetCanvas (canvastype newcanvas);
 extern cvar_t scr_sbarscale;
 extern cvar_t scr_menuscale;
 extern cvar_t scr_crosshairscale;
+extern cvar_t scr_infoscale;
 extern cvar_t scr_conalpha;
 extern cvar_t scr_conbrightness;
 
 float SCR_CalcUIScale (cvar_t *user);
+
+/* CANVAS_INFO's logical size, and the scale it resolved to.  Either pointer may
+ * be NULL.  The debug readouts anchor to this canvas' edges, so they have to ask
+ * for its size rather than assume vid.width/vid.height. */
+float SCR_InfoCanvasSize (int *w, int *h);
 #endif	/* GLQUAKE */
 
 #endif	/* __HX2_DRAW_H */

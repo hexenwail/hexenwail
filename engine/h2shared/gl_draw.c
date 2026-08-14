@@ -74,6 +74,10 @@ cvar_t	gl_lodbias = {"gl_lodbias", "0", CVAR_ARCHIVE};
 cvar_t	scr_sbarscale       = {"scr_sbarscale",       "0", CVAR_ARCHIVE};
 cvar_t	scr_menuscale       = {"scr_menuscale",       "0", CVAR_ARCHIVE};
 cvar_t	scr_crosshairscale  = {"scr_crosshairscale",  "0", CVAR_ARCHIVE};
+/* The debug readouts (showfps, showclock, showspeed) get their own scale so
+ * they can be legible at 4K without the HUD growing with them, and so they stay
+ * put when a player changes scr_sbarscale.  Ironwail cc03300c7, uhexen2-r9qj. */
+cvar_t	scr_infoscale       = {"scr_infoscale",       "0", CVAR_ARCHIVE};
 /* Console background tweaks (Ironwail parity).
  * scr_conalpha caps the fully-down console alpha (1.0 = opaque,
  * 0.5 = semi-transparent), scr_conbrightness multiplies the conback
@@ -692,6 +696,7 @@ void Draw_Init (void)
 		Cvar_RegisterVariable (&scr_sbarscale);
 		Cvar_RegisterVariable (&scr_menuscale);
 		Cvar_RegisterVariable (&scr_crosshairscale);
+		Cvar_RegisterVariable (&scr_infoscale);
 		Cvar_RegisterVariable (&scr_conalpha);
 		Cvar_RegisterVariable (&scr_conbrightness);
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
@@ -1768,6 +1773,36 @@ float SCR_CalcUIScale (cvar_t *user)
 
 /*
 ================
+SCR_InfoCanvasSize
+
+Resolves scr_infoscale into CANVAS_INFO's logical size, and returns the scale it
+settled on.  Callers need the size as well as the scale because the readouts on
+this canvas are corner-anchored: they position themselves from its right and
+bottom edges, which move with the scale.
+
+The clamp keeps a canvas that can still hold a line of text -- 40 characters at
+8x8 -- so a big scr_infoscale in a small window degrades to "as large as fits"
+rather than to a readout with its right half off-screen.
+================
+*/
+float SCR_InfoCanvasSize (int *w, int *h)
+{
+	float	s = SCR_CalcUIScale (&scr_infoscale);
+
+	s = q_min (s, (float)glwidth / 320.0f);
+	s = q_min (s, (float)glheight / 240.0f);
+	if (s < 1.0f)
+		s = 1.0f;
+
+	if (w)
+		*w = (int)((float)glwidth / s);
+	if (h)
+		*h = (int)((float)glheight / s);
+	return s;
+}
+
+/*
+================
 GL_SetCanvas
 
 Switches the active 2D canvas. Each canvas owns its ortho
@@ -1831,6 +1866,11 @@ void GL_SetCanvas (canvastype newcanvas)
 		h = glheight;
 		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
 		GL_Ortho (0, 320, (float)glheight / s, 0, -99999, 99999);
+		break;
+	case CANVAS_INFO:
+		SCR_InfoCanvasSize (&w, &h);
+		glViewport_fp (glx, gly, glwidth, glheight);
+		GL_Ortho (0, w, h, 0, -99999, 99999);
 		break;
 	case CANVAS_CROSSHAIR:
 		s = SCR_CalcUIScale (&scr_crosshairscale);
