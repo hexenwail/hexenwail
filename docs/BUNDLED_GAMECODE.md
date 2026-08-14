@@ -125,32 +125,37 @@ correct-but-load-bearing subtlety with **no compiler check and no test to
 enforce it** — exactly the kind of invariant that survives the commit that
 introduces it and dies three commits later.
 
-### F3 — `fs_gamedir_nopath` is reliable, with one pre-existing exception
+### F3 — `fs_gamedir_nopath` is reliable (both exceptions now fixed)
 
 `fs_gamedir_nopath` (`quakefs.c`, file scope) is the engine's own answer to "which game
 am I in". It is set by `quakefs.c :: FS_AddGameDirectory()` and by
-`quakefs.c :: Host_Game_f()`, and is correct at every call site
-except one:
+`quakefs.c :: Host_Game_f()`. When this document was written it disagreed with
+the searchpath in two places. **Both have since been fixed**; the history is
+kept because the gate below is keyed on this variable and a future reader needs
+to know what was checked.
 
-The **invalid-mission-pack rollback** (`quakefs.c :: Host_Game_f()`) unwinds the
-searchpath and restores `fs_gamedir` / `fs_userdir` to `data1`:
+**Exception 1 — the name lagged the path.** The invalid-mission-pack rollback
+(`quakefs.c :: FS_Init()`, step 2) unwound the searchpath and restored
+`fs_gamedir` / `fs_userdir` to `data1` but left `fs_gamedir_nopath` reading
+`"portals"`. That also made `Host_Game_f`'s "already running that game" check
+wrong in that state: a player in the rolled-back configuration who selected
+Portals from the Mods menu was told they were already in it. Fixed in
+`uhexen2-1bmj` — the rollback now sets all three.
 
-```c
-fs_searchpaths = mark;
-/* back to data1 */
-FS_MakePath_BUF (FS_BASEDIR, NULL, fs_gamedir, sizeof(fs_gamedir), "data1");
-FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
-```
+**Exception 2 — the path lagged the name.** The mirror case, and the worse one.
+`Host_Game_f` unwound to `fs_base_searchpaths`, but a `-game` launch folds
+`portals` *into* that base (`FS_Init()` step 2), so `game data1` set the name to
+`"data1"` and left `portals/pak3.pak` on the path above `data1` forever. Every
+lookup went through the mission pack — maps, models, sounds, configs and
+`progs.dat` alike — so a base-game map ran `portals/progs.dat` 20799 rather than
+the `data1` bundle 10626. Found by the B3 verification row below, fixed in
+`uhexen2-5vb6`: `FS_Init` now also records `fs_base_nomp_searchpaths`, the mark
+at the end of step 1, and `Host_Game_f` unwinds to *that*, re-adding `portals`
+only when the destination wants it.
 
-— but leaves `fs_gamedir_nopath` reading `"portals"`.
-
-This is pre-existing and not caused by anything here. It also already makes
-`Host_Game_f`'s "already running that game" check wrong in
-that state: a player in the rolled-back configuration who selects Portals from
-the Mods menu is told they are already in it.
-
-Worth fixing on its own merits, and worth knowing about before keying a gate on
-that variable.
+Note that neither exception could have made the substitution fire wrongly —
+condition 1 asks the filesystem where the file actually resolved, so both states
+failed closed. What exception 2 broke was everything else reading the same list.
 
 ### F4 — runtime gamedir switching is first-class, so launch-time gates are stale
 
@@ -394,7 +399,7 @@ Four reasons it was chosen, in weight order:
    `PR_LoadProgs()`.
 
 4. **It fails closed in every constructible state**, including runtime gamedir
-   switches, the F3 stale-`nopath` state, a missing bundle, and a partially
+   switches, both F3 name/path disagreements, a missing bundle, and a partially
    extracted one. The default in every unrecognised situation is "load exactly
    what the engine loads today".
 
@@ -676,10 +681,13 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    session. Prevented by recomputing per `PR_LoadProgs()`; reintroduced by any
    future caching of the gate result.
 
-4. **Stale `fs_gamedir_nopath` after the invalid-mission-pack rollback (F3).**
-   `nopath` reads `"portals"` while the searchpath is `data1`. Condition 1 makes
-   this fail closed rather than substitute the wrong tree, but the underlying
-   inconsistency should be fixed on its own merits.
+4. **`fs_gamedir_nopath` disagreeing with the searchpath (F3).** Both directions
+   existed — `nopath` reading `"portals"` over a `data1` path
+   (invalid-mission-pack rollback) and `nopath` reading `"data1"` over a path
+   that still held `portals` (`game data1` after a `-game` launch). Condition 1
+   made both fail closed rather than substitute the wrong tree. Both are now
+   fixed on their own merits (`uhexen2-1bmj`, `uhexen2-5vb6`); reintroduced by
+   any future unwind that stops at a mark it did not choose deliberately.
 
 5. **`progs2.dat` silently dropped (F2).** Only reachable under Candidate A, and
    only observable with `developer 1`. Listed because it is the failure this
@@ -943,12 +951,25 @@ Filed and fixed as `uhexen2-5mhd`. With that fix the three switches pass:
 `data1` → `game portals 0` puts the bundled `portals/progs.dat` 44043 on `keep1`.
 
 The second is the leg back. Coming from a portals-based mod, `game data1`
-leaves the `portals` searchpath entry in place, so a *`data1`* map then spawns
+left the `portals` searchpath entry in place, so a *`data1`* map spawned
 on `portals/progs.dat` 20799 instead of the `data1` bundle 10626. That is F3's
-"one pre-existing exception", and prerequisite 3 of this document — never done,
-and B3 is what makes it visible. Filed as `uhexen2-5vb6`. It is a searchpath
-bug, not a gamecode one: everything else resolves through the same list, so
-maps, models and configs are coming from the mission pack too.
+exception 2, and prerequisite 3 of this document — never done, and B3 is what
+made it visible. Filed and fixed as `uhexen2-5vb6`. It was a searchpath bug, not
+a gamecode one: everything else resolves through the same list, so maps, models
+and configs were coming from the mission pack too.
+
+With that fix, the leg back and the round trip both pass (GL client, offscreen,
+`-basedir $HOME/hexen2`, engine at the `uhexen2-5vb6` commit):
+
+| switch | `path` after | gamecode on next spawn |
+|---|---|---|
+| `-game sot` → `game data1` | `data1` only, no `portals` | bundled `data1/progs.dat` **10626** on `demo1` |
+| … → `game portals` | `portals` above `data1` | bundled `portals/progs.dat` **44043** on `demo1` |
+| … → `game sot 1` | `sot` / `portals` / `data1` | `sot/progs.dat` **28154** on `Arena` |
+
+The third row is the one that shows nothing leaked: the rebuilt path is
+byte-identical to the one the `-game sot` launch produced, with no duplicate
+`portals` entry and no second `pak3` handle.
 
 Two harness notes for whoever runs B3 next. It is GL-client-only (`game` sits
 inside `#if !defined(SERVERONLY)`), and `Host_Game_f` calls `Cbuf_Clear()`, so a
@@ -1034,6 +1055,8 @@ In dependency order:
    (failure modes 12 and 13); kept on this list so that a future reader treats
    it as a dependency of the substitution and not as an unrelated coincidence
    that may be reverted.
-3. **Fix `fs_gamedir_nopath` in the mission-pack rollback** (F3) — independently
-   correct, and it removes one fail-closed corner from this feature's state
-   space.
+3. **Fix `fs_gamedir_nopath` in the mission-pack rollback** (F3) — **already
+   satisfied**, in two parts: the name half in `uhexen2-1bmj`, and the
+   searchpath half — `game data1` not rolling `portals` back off the path — in
+   `uhexen2-5vb6`. Independently correct, and together they remove both
+   fail-closed corners from this feature's state space.
