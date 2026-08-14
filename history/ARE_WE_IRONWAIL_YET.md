@@ -15,14 +15,14 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | Rendering — GPU Pipeline | 12 | 1 | 0 | 1 |
 | Rendering — Visual/Shading | 23 | 0 | 0 | 1 |
 | Performance / Engine | 10 | 1 | 0 | 1 |
-| UX / Menus / HUD | 25 | 1 | 0 | 1 |
+| UX / Menus / HUD | 26 | 1 | 0 | 1 |
 | Input / Controller | 9 | 0 | 0 | 1 |
 | Audio | 3 | 0 | 0 | 1 |
 | Network / Protocol | 1 | 0 | 0 | 2 |
 | Steam / Platform | 0 | 0 | 0 | 2 |
-| **TOTAL** | **83** | **3** | **0** | **10** |
+| **TOTAL** | **84** | **3** | **0** | **10** |
 
-**Parity: ~96% ported, 4% partial, 0% missing** (excluding N/A). No row currently carries ❌ — recomputed from the actual per-row symbols in the tables below, which had drifted from the scorecard (previous scorecard listed 1 ❌ and 9 ➖ from a stale bindless-textures row still marked "n/a" text instead of the ➖ symbol the Legend defines; there is no ❌ row anywhere in this document to source a "1 missing" figure from).
+**Parity: ~97% ported, 3% partial, 0% missing** (excluding N/A). No row currently carries ❌ — recomputed from the actual per-row symbols in the tables below, which had drifted from the scorecard (previous scorecard listed 1 ❌ and 9 ➖ from a stale bindless-textures row still marked "n/a" text instead of the ➖ symbol the Legend defines; there is no ❌ row anywhere in this document to source a "1 missing" figure from).
 
 ---
 
@@ -109,6 +109,7 @@ Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irr
 | HUD / statusbar scaling | ✅ | `scr_sbarscale` — `CANVAS_SBAR` in `gl_draw.c`, slider in Misc/HUD submenu (`menu.c`) |
 | Menu scaling | ✅ | `scr_menuscale` — `CANVAS_MENU`, M_CenterOfs() helper, M_ScreenYToCanvasY for mouse hit-test |
 | Crosshair scaling | ✅ | `scr_crosshairscale` — `CANVAS_CROSSHAIR`, slider in Misc/HUD submenu |
+| Debug-text scaling | ✅ | `scr_infoscale` (Ironwail `cc03300c7`, uhexen2-r9qj) — `CANVAS_INFO` in `gl_draw.c`, sized by `SCR_InfoCanvasSize()`. Carries the showfps / showclock / showspeed readouts so they can be legible at 4K without the HUD growing with them. No menu entry: debug-only, as in Ironwail. |
 | Console alpha | ✅ | `scr_conalpha` — caps `Draw_ConsoleBackground` alpha, slider in Misc/HUD submenu |
 | Console brightness | ✅ | `scr_conbrightness` — multiplies conback RGB, slider in Misc/HUD submenu |
 | Menu background style | ✅ | `scr_menubgstyle` (default 1) — 0=off / 1=simple dim (Draw_FadeScreen) / 2=dim+translucent backdrop quad over the menu-item area in CANVAS_MENU. Display submenu cycles Off/Simple/Menu Box. Replaces legacy `scr_menufade`. |
@@ -186,7 +187,7 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ## Bead Coverage
 
-As of 2026-08-13, three features are non-complete: MD5 🔶 Partial (~30%, parser only — uhexen2-7ok0), Alias model GPU data layout 🔶 Partial (per-aliashdr_t but not Ironwail frame-major — uhexen2-48fx), and Pointfile leak visualization 🔶 Partial (arrow rendering shipped, auto-load/warning/screen-label helpers remain — uhexen2-m183). Bindless textures were removed as non-functional scaffolding and reclassified ➖ N/A rather than ❌ Missing (uhexen2-ubsu; the row previously read literal text "n/a" instead of the ➖ symbol the Legend defines, which desynced the scorecard from the table — corrected here). MSAA with FBO resolve reclassified ➖ (Hexenwail intentionally uses FXAA; vestigial window MSAA dropped in `5b6d57ec4`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category. Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 83 ✅ / 3 🔶 / 0 ❌ / 10 ➖ (~96% parity, excluding N/A).
+As of 2026-08-13, three features are non-complete: MD5 🔶 Partial (~30%, parser only — uhexen2-7ok0), Alias model GPU data layout 🔶 Partial (per-aliashdr_t but not Ironwail frame-major — uhexen2-48fx), and Pointfile leak visualization 🔶 Partial (arrow rendering shipped, auto-load/warning/screen-label helpers remain — uhexen2-m183). Bindless textures were removed as non-functional scaffolding and reclassified ➖ N/A rather than ❌ Missing (uhexen2-ubsu; the row previously read literal text "n/a" instead of the ➖ symbol the Legend defines, which desynced the scorecard from the table — corrected here). MSAA with FBO resolve reclassified ➖ (Hexenwail intentionally uses FXAA; vestigial window MSAA dropped in `5b6d57ec4`). The umbrella epic `uhexen2-a5nn` enumerates the full set grouped by category. Run `bd show uhexen2-a5nn` for the current child list. Scorecard: 84 ✅ / 3 🔶 / 0 ❌ / 10 ➖ (~97% parity, excluding N/A).
 
 When porting a parity item, claim the bead with `bd update <id> --status=in_progress`, implement, update the matching row here to ✅, and close the bead with a reference to the landing commit.
 
