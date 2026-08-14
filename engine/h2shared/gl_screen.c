@@ -683,10 +683,12 @@ static void SCR_DrawPointFileLabel (void)
 	if (!r_pointfile_isleak || !R_GetPointFileLabelPos (&x, &y))
 		return;
 
-	/* R_GetPointFileLabelPos answers in CANVAS_DEFAULT coordinates, and the
-	 * HUD overlays that run just before this leave whatever canvas they
-	 * needed (Draw_Crosshair in particular switches to CANVAS_CROSSHAIR),
-	 * so say which one we want rather than inheriting it. */
+	/* R_GetPointFileLabelPos answers in CANVAS_DEFAULT coordinates, which is
+	 * what the have_world block runs in -- Draw_Crosshair switches to
+	 * CANVAS_CROSSHAIR but restores on the way out, so the canvas is not
+	 * inherited from it (uhexen2-ffdy).  Name it anyway: GL_SetCanvas is a
+	 * no-op when the canvas already matches, and this way the function does
+	 * not depend on where in the block it is called from. */
 	GL_SetCanvas (CANVAS_DEFAULT);
 
 	/* Centre the word on the point and lift it clear, so the arrowhead

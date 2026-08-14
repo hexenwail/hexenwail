@@ -957,6 +957,12 @@ Draw_Crosshair
 
 Drawn inside CANVAS_CROSSHAIR so scr_crosshairscale enlarges it
 on high-DPI displays without affecting the rest of the HUD.
+
+Restores CANVAS_DEFAULT on the way out.  This is load-bearing: it is the first
+call in SCR_UpdateScreen's have_world block, and the overlays after it draw at
+CANVAS_DEFAULT coordinates without naming a canvas.  Leaving CANVAS_CROSSHAIR
+active would put them off-screen with no error and nothing in the log
+(uhexen2-ffdy).
 ================
 */
 void Draw_Crosshair (void)
