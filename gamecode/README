@@ -4,6 +4,78 @@ Hexen II: Hammer of Thyrion (uHexen2) - GAMECODE
 Changes
 -------
 
+Everything from 2022-06-12 (1.29c) down is Raven's and uHexen2's history.
+Above it are the Hexenwail fork's own divergences from 1.29c, newest first.
+The policy is that our .hc wins and every divergence gets recorded here, so
+that anyone auditing why our progs.dat differs from Raven's can read this file
+instead of diffing.  Bracketed ids are beads issues; run "bd show <id>" for the
+full investigation.
+
+
+Hexenwail fork (diverges from 1.29c):
+=====================================
+
+2026-08-13 [uhexen2-qj8s] (ce8c9d1c4):
+- invntory.hc (h2, portals): reverted the Crusader's Glyph of the Ancients
+  (TimeBomb) to Raven's behaviour -- think=TimeBombBoom, spawned at
+  self.origin+self.proj_ofs, nextthink time+0.75.  Two earlier fork commits
+  (e9731510a, d39212a12, both below) had changed it on the premise that the
+  glyph landing at the caster's feet was a defect.  Disassembling retail
+  data1, retail portals and Storm Over Thyrion showed drop-and-detonate is
+  the intended vanilla design in all three, so the premise was wrong.  hw/
+  and siege/ never had the change and were not touched.
+
+2026-08-13 [uhexen2-9r3n] (bb570666a):
+- items.hc (h2, hw, portals): DropBackpack no longer deletes the bag it has
+  just finished building.  bluemana, greenmana and spawn_health are copied
+  onto the item after 'total' is accumulated, so a drop carrying two or more
+  of them and no artifacts or full armor matched none of the single-item
+  conditions, fell through to the multi-item bag branch, and was then removed
+  by that branch's trailing "if (!total) remove(item)".  The player got
+  nothing, with no dprint, so the loss was invisible even under developer 1.
+
+2026-08-11 [uhexen2-hwky] (fe1f2bdc1):
+- items.hc (h2, hw, portals): the "Bad backpack!" fallthrough in DropBackpack
+  no longer remove()s the item.  It now drops a normal bag.mdl backpack
+  (matching the multi-item branch, including hw's scale calculation), so a
+  misclassified drop loses nothing.  Added BadBackpackDump(), which prints
+  'total' and every nonzero inventory field so the next report under
+  developer 1 identifies which field is lying.  The root cause is still open.
+
+2026-03-22 (d39212a12):
+- invntory.hc (h2, portals): centerprint messages beginning with '_' are drawn
+  as a bottom-screen plaque instead of center-screen, with the underscore
+  stripped.  Applies to any centerprint, not just intros.
+- invntory.hc (h2, portals): also changed the TimeBomb glyph to orbit a fixed
+  point on a 5 second fuse.  This was not mentioned in the commit message and
+  was reverted on 2026-08-13, above.
+
+2026-03-22 (e9731510a):
+- MG_AI.hc (h2, hw, portals, siege): FindMonsterTarget() now tests
+  FL_NOTARGET, so summoned monsters -- imp lords, cubes of force -- respect
+  the notarget cheat like everything else does.
+- portals/tripmine.hc: the Assassin's tripwire sets missile.dmg=50.  It was
+  unset, so MultiExplode did 0 radius damage.
+- portals/artifact.hc: art_sword_and_crown played "crusader/Lghtn2.mdl";
+  corrected to "crusader/lghtn2.wav".
+- portals/invntory.hc (BecomeImp): set hull=HULL_HYDRA and
+  solid=SOLID_SLIDEBOX on the spawned imp lord; both were missing.
+- portals/invntory.hc (UseBlast): decrement cnt_blast before processing
+  damage, since the damage can trigger an explosion that kills the caster and
+  leave the count at -1.
+- portals/invntory.hc: also threw the TimeBomb glyph forward on a 10 second
+  MOVETYPE_BOUNCE fuse; reverted on 2026-08-13, above.
+
+2026-03-21 (a14b5eecd):
+- items.hc (h2, hw, portals, siege): the "Bad backpack!" dprint now names the
+  entity's classname and origin instead of printing the bare string, so the
+  report is actionable.  (What it printed about was fixed later; see the two
+  2026-08 entries above.)
+
+
+uHexen2 / Raven history:
+========================
+
 2022-06-12 (1.29c):
 ===================
 - object.hc(ballista_think): break early from loop if find() returns world
