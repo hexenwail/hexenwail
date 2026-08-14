@@ -403,8 +403,8 @@ Returns: float (1 on success, 0 on failure)
 =================
 */
 /* Renderer-only: pimp_override_t and the EF_* trail flags live in gl_model.h,
- * which SERVERONLY builds replace with sv_model.h.  The builtin table below
- * already maps slot #111 to PF_Fixme under SERVERONLY. */
+ * which SERVERONLY builds replace with sv_model.h.  See the stub below for what
+ * h2ded does with the call instead. */
 #if !defined(H2W) && !defined(SERVERONLY)
 static void PF_pimpmodel (void)
 {
@@ -571,6 +571,30 @@ static void PF_pimpmodel (void)
 	}
 
 	G_INT(OFS_RETURN) = 1;
+}
+#elif !defined(H2W)
+/*
+Everything the client's PF_pimpmodel does is render state: per-entity glow and
+trail overrides, and the shared model flags the renderer reads back.  A
+dedicated server has none of it and needs none of it -- but it does have to
+answer the call, because the QC branches on the return value and SoT's
+misc_modelpimper.hc calls it during spawn.  Leaving slot #111 as PF_Fixme meant
+"unimplemented builtin" and then Host_Error, which is why h2ded could not load
+Storm Over Thyrion at all (uhexen2-ti8y).
+
+Same shape as set_extra_flags (#107) and set_fx_color (#108), which have always
+compiled under SERVERONLY with their renderer writes gated out.  The one branch
+worth keeping is the client's early-out for an entity with no model, so the
+value the QC sees does not depend on which build answered.  Mod_FindName() is
+deliberately not called: on this side it allocates an entry for a model the
+server may never load, and Host_Error()s if the table is full, which would turn
+a cosmetic builtin back into the abort this fixes.
+*/
+static void PF_pimpmodel (void)
+{
+	edict_t	*ref_ent = G_EDICT(OFS_PARM0);
+
+	G_INT(OFS_RETURN) = (ref_ent->v.model != 0) ? 1 : 0;
 }
 #endif
 
@@ -4360,11 +4384,7 @@ static builtin_t pr_builtin[] =
 	PF_set_fx_color,	// void(string model, float r, float g, float b, float a) set_fx_color	= #108
 	PF_strhash,		// float(string s1) strhash = #109
 	PF_register_ex_item,	// void (string img, float id)	= #110
-#if !defined(SERVERONLY)
 	PF_pimpmodel,		// float(entity e, vector glow_color) pimpmodel = #111
-#else
-	PF_Fixme,		// 111
-#endif
 	PF_update_ex_item,	// float (entity forent, float id, float amount)	= #112
 	PF_Fixme,		// 113
 #endif
