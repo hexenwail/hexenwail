@@ -5,6 +5,14 @@
  * manager double-click is frequently not the install directory.  Anything
  * that ships beside the binary has to be found without going through basedir.
  *
+ * macOS caveat for whoever packages this: inside a .app bundle the executable
+ * lives in Foo.app/Contents/MacOS/, so that is what this returns, and anything
+ * layered on it (docs/BUNDLED_GAMECODE.md F5) resolves inside the bundle
+ * rather than beside the .app.  For a plain CLI build -- Homebrew, MacPorts,
+ * nix, a local ./configure -- that is exactly right.  For a real bundle the
+ * payload has to be placed under Contents/, not next to the .app; this
+ * function is not the place to special-case it.
+ *
  * Copyright (C) 2026  uHexen2 contributors
  *
  * This program is free software; you can redistribute it and/or modify
@@ -27,6 +35,10 @@
 
 #if defined(PLATFORM_WINDOWS)
 #include <windows.h>	/* GetModuleFileName: h2ded gets nothing from glheader.h */
+#define EXEDIR_SUPPORTED	1
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>	/* _NSGetExecutablePath */
+#include <stdlib.h>		/* realpath */
 #define EXEDIR_SUPPORTED	1
 #elif defined(__linux__) && !defined(__EMSCRIPTEN__)
 #include <unistd.h>	/* readlink */
@@ -58,6 +70,28 @@ const char *Sys_GetExeDir (void)
 	slash = strrchr(exedir, '\\');
 	if (!slash)
 		slash = strrchr(exedir, '/');
+#elif defined(__APPLE__)
+	{
+		char		raw[MAX_OSPATH];
+		uint32_t	rawsize = (uint32_t) sizeof(raw);
+
+		/* Returns -1 and overwrites rawsize with the size needed when the
+		 * buffer is too small.  A path that does not fit MAX_OSPATH is one
+		 * nothing else in the engine could hold either, so a short buffer
+		 * is a hard no rather than something to retry larger. */
+		if (_NSGetExecutablePath(raw, &rawsize) != 0)
+			return NULL;
+
+		/* What comes back is whatever argv[0] resolution produced: it may be
+		 * relative, may contain . or .., and may run through symlinks --
+		 * Homebrew and MacPorts both install the binary as one.  Apple's own
+		 * documentation says to pass it through realpath, and the truncation
+		 * below needs a real directory to cut.  exedir is MAX_OSPATH, which
+		 * is PATH_MAX on this platform, which is realpath's contract. */
+		if (!realpath(raw, exedir))
+			return NULL;
+	}
+	slash = strrchr(exedir, '/');
 #else
 	{
 		ssize_t len = readlink("/proc/self/exe", exedir, sizeof(exedir) - 1);
