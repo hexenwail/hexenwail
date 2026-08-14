@@ -95,6 +95,12 @@ jobs:
           cp -r staging/linux-x86_64/. linux-pkg/
           cp -r staging/licenses linux-pkg/
           cp staging/BUILD_INFO.txt linux-pkg/
+          # The gamecode the engine actually loads on Linux travelled with the
+          # line above -- it lives at linux-x86_64/share/hexenwail/.  This is
+          # release.yml's root-level spare copy, which BUILD_INFO.txt and
+          # gamecode/README.txt both describe, so the tester's tree matches the
+          # zip they would have got.  uhexen2-biyi.
+          cp -r staging/gamecode linux-pkg/
 
           # Windows: flat layout matching release.yml, so a tester extracts it
           # straight into a Hexen II directory.  bin/* is what makes it
@@ -106,6 +112,13 @@ jobs:
           # get_demo.* live beside bin/, not in it; BUILD_INFO.txt tells the
           # user to run them, so they have to travel too.
           cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
+          # Windows has no share/hexenwail layer: gamecode/ beside glh2.exe is
+          # the copy PR_FindBundleDir() loads, so without this the tester runs
+          # their own install's retail progs.dat while the release runs ours --
+          # exactly the gamecode mismatch this workflow's comment about
+          # confusing bug reports is about.  Same placement as release.yml.
+          # uhexen2-biyi.
+          cp -r staging/gamecode "$winpkg/"
           cp -r staging/licenses "$winpkg/"
           cp staging/BUILD_INFO.txt "$winpkg/"
           echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
@@ -124,6 +137,12 @@ jobs:
 
           This is a test build, not a release. Quote the commit above in any
           report so it can be tied back to a specific build.
+
+          This build carries its own gamecode, the same as a release does, so
+          it is not running your install's progs.dat. The engine prints a
+          "Gamecode:" line naming the exact file whenever it loads one --
+          quote that line too, and if a bug looks like game logic rather than
+          rendering, say whether launching with -vanillaprogs changes it.
 
           If you are reporting a rendering problem, these are worth far more
           than a description:
