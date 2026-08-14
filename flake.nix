@@ -917,9 +917,16 @@
             cp -r ${self.packages.${system}.linux-fhs}/bin $out/release/linux-x86_64/
             cp -rL ${self.packages.${system}.linux-fhs}/lib $out/release/linux-x86_64/
 
-            # Linux NixOS (nix store rpaths)
-            mkdir -p $out/release/linux-x86_64-nixos
-            cp -r ${self.packages.${system}.nixos}/bin $out/release/linux-x86_64-nixos/
+            # No linux-x86_64-nixos/ tree.  .#nixos leaves the binary's RPATH
+            # pointing at absolute /nix/store paths -- SDL3, libglvnd, ALSA,
+            # fluidsynth and glibc itself -- so a copy of it is startable only
+            # on a machine that already has those exact store paths, which no
+            # download can promise, not even on another NixOS box with a
+            # different nixpkgs pin.  Publishing it would ship a binary that
+            # fails to launch for everyone who is not the builder.  NixOS users
+            # are served by the flake instead: `nix run github:bobberb/hexenwail`
+            # builds against their own nixpkgs and gets correct rpaths.
+            # uhexen2-2tia.
 
             # Windows 64-bit (dereference symlinks so DLLs are real files)
             mkdir -p $out/release/windows-x86_64
@@ -932,9 +939,7 @@
             # checkout -- i.e. by developers, not by the people who actually
             # hit the error.  It is a downloader, not game content: nothing
             # Raven owns is in this bundle.  uhexen2-49ep.
-            for d in linux-x86_64 linux-x86_64-nixos; do
-              install -Dm755 ${self}/scripts/get_demo.sh $out/release/$d/get_demo.sh
-            done
+            install -Dm755 ${self}/scripts/get_demo.sh $out/release/linux-x86_64/get_demo.sh
             install -Dm644 ${self}/scripts/get_demo.ps1 $out/release/windows-x86_64/get_demo.ps1
             install -Dm755 ${self}/scripts/get_demo.cmd $out/release/windows-x86_64/get_demo.cmd
 
@@ -1137,17 +1142,15 @@ EOF
             # hand-install source gamecode/README.txt points at for feeding a
             # different engine.  (It is NOT what -vanillaprogs falls back to --
             # that switch declines the bundle and takes the player's own
-            # install's gamecode.)  ~2.9 MB per platform dir.
+            # install's gamecode.)  ~2.9 MB for the one platform dir.
             # hw/ and siege/ are withheld here for the same reason as above.
-            for d in linux-x86_64 linux-x86_64-nixos; do
-              install -Dm644 \
-                ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs.dat \
-                ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs2.dat \
-                -t $out/release/$d/share/hexenwail/data1
-              install -Dm644 \
-                ${self.packages.${system}.gamecode}/share/hexenwail/portals/progs.dat \
-                -t $out/release/$d/share/hexenwail/portals
-            done
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs.dat \
+              ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs2.dat \
+              -t $out/release/linux-x86_64/share/hexenwail/data1
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/portals/progs.dat \
+              -t $out/release/linux-x86_64/share/hexenwail/portals
 
             # License files
             mkdir -p $out/release/licenses
@@ -1166,8 +1169,12 @@ Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
 Included platforms:
 - linux-x86_64/          Linux 64-bit (portable, any distro)
-- linux-x86_64-nixos/    Linux 64-bit (NixOS)
 - windows-x86_64/        Windows 64-bit
+
+On NixOS, install from the flake rather than from this zip:
+  nix run github:bobberb/hexenwail
+That builds against your own nixpkgs, so the binary's rpaths point at store
+paths you actually have.  A prebuilt Nix-store binary could not.
 
 No game data is included -- Hexenwail is an engine and ships no Raven content.
 Put a "data1" directory (pak0.pak, pak1.pak) from a GOG, Steam or disc copy of
@@ -1175,7 +1182,6 @@ Hexen II beside the executable.  If you don't own it, each platform directory
 carries a helper that downloads the free 1997 three-level demo and verifies it:
 
 - linux-x86_64/get_demo.sh          run it from that directory
-- linux-x86_64-nixos/get_demo.sh    run it from that directory
 - windows-x86_64/get_demo.cmd       double-click, or run from cmd
 
 The demo data comes from the uHexen2 project and is not ours to relicense.
