@@ -875,7 +875,7 @@ a lost inventory or a broken objective is not.
 
 | # | Check |
 |---|---|
-| K1 | unzip the Linux artifact to a clean directory, run from **outside** it (`cd /tmp && /path/to/linux-x86_64/bin/glhexen2`) — this is the row that proves F5, since `basedir` will be wrong by construction |
+| K1 | unzip the Linux artifact to a clean directory, run from **outside** it, with `-basedir` pointing at a game tree that is *not* the extracted directory (`cd /tmp && /path/to/linux-x86_64/bin/glhexen2 -basedir /somewhere/else`) — this is the row that proves F5, since `basedir` will be wrong by construction. Without `-basedir` the engine does not start at all; see the results below |
 | K2 | ~~same for `linux-x86_64-nixos`~~ — n/a, that tree is no longer built into `.#release` (uhexen2-2tia). The flake install path is checked instead: `nix run` must print a `Gamecode:` line pointing inside the store, not at the player's `data1/` (uhexen2-9die) |
 | K2a | `.#nixos` and `.#h2ded` must carry **no** `share/hexenwail` at all — an empty one shadows `PR_FindBundleDir()`'s layer 3 |
 | K2b | a `.hc` edit must leave `.#nixos.drvPath` and `.#h2ded.drvPath` unchanged while moving `.#gamecode.drvPath` (uhexen2-r32l) |
@@ -886,6 +886,97 @@ a lost inventory or a broken objective is not.
 K1 is not optional. Testing from inside the extracted directory makes `basedir`
 and `<exedir>` coincide, which is precisely the case that cannot distinguish a
 correct implementation from one that reads `basedir`.
+
+### Results — 2026-08-14 (`uhexen2-ctv7`)
+
+Run on Linux x86_64 (NixOS, llvmpipe, offscreen SDL) at commit `bb3e9480e`, against
+a full retail install — `data1` with uppercase `PROGS.DAT`/`PROGS2.DAT`, `portals`,
+and the `sot` / `soc` / `karma2` / `GameOfTomes` mods. Two binaries: `.#h2ded-bundled`
+and the GL client, the latter both as `.#default` and as the real
+`.#release` linux-fhs artifact.
+
+**Read the setup before reading the table.** The game data lives in a tree that
+is *not* the install tree, and every run passes `-basedir` at it. That is what
+makes K1's property hold for every row at once: `basedir` and `<exedir>` share no
+ancestor, so a bundle lookup that read `basedir` would find nothing anywhere in
+this matrix, not just in K1.
+
+| # | Verdict | What was observed |
+|---|---|---|
+| P1 | pass | `<exedir>/../share/hexenwail/data1/progs.dat`, crc 10626 |
+| P2 | pass | `…/share/hexenwail/portals/progs.dat`, crc 44043 |
+| P3 | pass | `-noportals` → bundled `data1`, crc 10626 |
+| P4–P7 | pass | `sot` 28154, `soc` 58269, `karma2` 22850, `GameOfTomes` 41534 — each the mod's own file |
+| P8 | pass | all seven configurations; bare/`-noportals` → `data1/PROGS.DAT` 17499, `-portals` → `portals/progs.dat` 20799, mods unchanged |
+| P9 | pass | `-game mapsonly` (a directory with a `maps/` and no gamecode) → `data1/PROGS.DAT` 17499, **not** the bundle. Control with no `-game` in the same tree → bundle 10626 |
+| P10 | pass | `data1` gamecode renamed away → `Host_Error: PR_LoadProgs: couldn't load progs.dat`, byte-identical with and without `-vanillaprogs` |
+| B1 | pass | `map eidolon` spawns (80 entities inhibited, "Server spawned"), `Programs occupy 819K`, bundled `progs2.dat` crc 63829 |
+| B2 | pass | `romeric6`, `meso9`, `rider1a`, `rider2c` — all four spawn, all four on 63829 |
+| B3 | **found two bugs** | see below |
+| B4 | pass | uppercase-only → `PROGS.DAT` via the case-insensitive fallback; with a lowercase twin added, the exact-case `progs.dat` wins. Matches F1's rule |
+| B5 | pass | `~/.hexen2/data1/progs.dat` beats the bundle (17499); the same file in the install's `data1/` does not (10626) |
+| B6 | pass | `share/hexenwail/` deleted → retail files everywhere, including `PROGS2.DAT` 33075 on `eidolon` |
+| B7 | pass | `portals` half of the bundle deleted → `data1` still bundled 10626, `portals` falls back to the player's 20799. Degrades per file |
+| B8 | pass | `qcdis.py --list BadBackpackDump` finds it in all three bundled files and in neither retail file |
+| S1–S4 | pass | all four crossings load, spawn and reach `CL_SignonReply: 4`. Only `'<name>' is not a global` prints, which F8 anticipated. No `Host_Error` |
+| D1 | pass | recorded under retail 17499, played back on a bundled client |
+| D2 | pass | recorded under bundled 10626, played back with `-vanillaprogs` |
+| D3 | pass | `portals/pak3.pak`'s `t9.dem` plays under both, loading `maps/thomas.bsp` |
+| K1 | pass | release linux-fhs client, `cwd=/tmp`, basedir elsewhere → `<exedir>/../share/hexenwail/{data1,portals}` |
+| K2 | pass | store-path binary reports a `Gamecode:` line inside `/nix/store/…` for both `data1` and `portals` |
+| K2a | pass | `.#nixos` and `.#h2ded` carry no `share/hexenwail`; the three `-bundled` variants do |
+| K2b / K5 | pass | a `.hc` edit moves `.#gamecode.drvPath` and leaves `.#nixos.drvPath` and `.#h2ded.drvPath` byte-identical |
+| K3 | **not run** | needs Windows; see below |
+| K4 | pass | the `gamecode/` source tree is present and its README's newest entry (`ce8c9d1c4`) is the newest `gamecode/hc` commit |
+
+**B3 was worth the whole exercise.** It is the only row that touches runtime
+gamedir switching, and it failed twice for two unrelated reasons — neither of
+them in the substitution itself.
+
+The first stopped the row from running at all. `Host_Game_f` probed
+`host_parms->basedir` where the rest of `quakefs.c` uses `fs_basedir`, and
+`-basedir` moves only the latter, so every mod came back
+`Game directory "sot" not found` and the searchpath never changed. The Mods menu
+issues the same command, so it could list mods and then refuse all of them.
+Filed and fixed as `uhexen2-5mhd`. With that fix the three switches pass:
+`data1` → `sot` puts `sot/progs.dat` 28154 on an `Arena` spawn, and
+`data1` → `game portals 0` puts the bundled `portals/progs.dat` 44043 on `keep1`.
+
+The second is the leg back. Coming from a portals-based mod, `game data1`
+leaves the `portals` searchpath entry in place, so a *`data1`* map then spawns
+on `portals/progs.dat` 20799 instead of the `data1` bundle 10626. That is F3's
+"one pre-existing exception", and prerequisite 3 of this document — never done,
+and B3 is what makes it visible. Filed as `uhexen2-5vb6`. It is a searchpath
+bug, not a gamecode one: everything else resolves through the same list, so
+maps, models and configs are coming from the mission pack too.
+
+Two harness notes for whoever runs B3 next. It is GL-client-only (`game` sits
+inside `#if !defined(SERVERONLY)`), and `Host_Game_f` calls `Cbuf_Clear()`, so a
+`+game X +map Y` command line silently loses the `map` — drive the post-switch
+spawn from the new gamedir's `autoexec.cfg`, which the switch reaches via its
+closing `exec hexen.rc`.
+
+**K1's wording needs an edit, not its intent.** Taken literally — `cd /tmp &&
+/path/to/linux-x86_64/bin/glhexen2` — the engine never starts: `basedir` defaults
+to the working directory, `/tmp` has no `data1`, and it exits with "Unable to
+find a proper Hexen II installation". Pass `-basedir` at a game tree that is not
+the extracted directory. That is a stronger test than the row asks for, since
+`basedir` and `<exedir>` then share no ancestor at all.
+
+**K3 is the one row this machine cannot do.** It needs the `.exe` on Windows.
+The lookup layer it exercises — `gamecode/` beside the executable, with no
+`share/hexenwail` anywhere — was reproduced on Linux under `uhexen2-biyi` and
+resolves correctly for both `data1` and `portals`, but that is the mechanism,
+not the artifact. K3 still wants a Windows run.
+
+Two limits worth stating rather than leaving implied. The savegame rows were
+checked by diffing the player entity between the original save and a re-save
+taken after the crossing, on a player given `impulse 9` (all weapons, full mana):
+every inventory field survived, and only animation and timing fields moved. That
+covers "lost inventory"; it does not cover "broken objective", which needs a
+playthrough. And the demo rows prove playback survives the gamecode difference —
+`.dem` playback is client-side and runs no `PR_LoadProgs`, so no `Gamecode:` line
+appears on a playback run and none should be looked for.
 
 ## Do not do this
 
