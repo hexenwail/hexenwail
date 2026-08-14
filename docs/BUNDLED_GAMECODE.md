@@ -565,11 +565,16 @@ All three resolve through `Sys_GetExeDir()` (F5), never through `basedir`.
 **Windows: no change.** `gamecode/` is already a root-level directory beside
 `glh2.exe` (F6).
 
-**Linux: add `share/hexenwail/{data1,portals}` under each of `linux-x86_64/`
-and `linux-x86_64-nixos/`** — roughly 2.9 MB per platform directory (867K +
-819K + 1120K), so about 5.7 MB added to the two Linux zips combined. The
-root-level `gamecode/` staging tree stays exactly as it is, because it remains
-the manual-install path and the thing `gamecode/README.txt` describes.
+**Linux: add `share/hexenwail/{data1,portals}` under `linux-x86_64/`** —
+roughly 2.9 MB (867K + 819K + 1120K) added to the Linux zip. The root-level
+`gamecode/` staging tree stays exactly as it is, because it remains the
+manual-install path and the thing `gamecode/README.txt` describes.
+
+This originally landed under `linux-x86_64-nixos/` as well. That tree has since
+been dropped from `.#release` entirely (uhexen2-2tia): `.#nixos` leaves the
+binary's RPATH pointing at absolute `/nix/store` paths, so it is startable only
+on the machine that built it, and NixOS users are served by the flake
+(`nix run github:bobberb/hexenwail`) rather than by a download.
 
 **Do not reference `${gamecode}` from the engine derivation.** Doing so would
 put the gamecode derivation into the engine's `.drv` hash, and every `.hc` edit
@@ -832,7 +837,7 @@ a lost inventory or a broken objective is not.
 | # | Check |
 |---|---|
 | K1 | unzip the Linux artifact to a clean directory, run from **outside** it (`cd /tmp && /path/to/linux-x86_64/bin/glhexen2`) — this is the row that proves F5, since `basedir` will be wrong by construction |
-| K2 | same for `linux-x86_64-nixos` |
+| K2 | ~~same for `linux-x86_64-nixos`~~ — n/a, that tree is no longer built into `.#release` (uhexen2-2tia). Note that the flake install path carries **no** bundled gamecode: `.#nixos` installs `bin/glhexen2` and an empty `share/hexenwail/`, so `nix run` users run retail gamecode. Tracked as uhexen2-9die |
 | K3 | unzip the Windows artifact into a retail Hexen II directory and run in place |
 | K4 | confirm the root-level `gamecode/` staging tree is still present and still matches its README |
 | K5 | confirm the engine derivation's `.drv` hash is unchanged by a `.hc` edit |
