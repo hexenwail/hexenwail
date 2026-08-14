@@ -4542,6 +4542,32 @@ static void M_UnbindDoubleCommand (const char *command)
 }
 
 
+/*
+================
+M_Keys_FitLabel
+
+The label column runs from x=16 to the cursor at x=130, which is fourteen 8px
+characters.  Every engine label was written to fit; a mod's bindlist.lst label
+need not be, and the storage cap is 32 on purpose (uhexen2-7aok kept the modder's
+whole string rather than silently shortening it at parse time).  So the shortening
+happens here, at the draw, where it costs nothing but the pixels it saves: a long
+label ends in "..." instead of running through the key names.  uhexen2-tgr7.
+================
+*/
+#define	KEYS_LABEL_COLS		14
+
+static const char *M_Keys_FitLabel (const char *label)
+{
+	static char	fitted[KEYS_LABEL_COLS + 1];
+
+	if (strlen(label) <= KEYS_LABEL_COLS)
+		return label;
+
+	q_strlcpy (fitted, label, KEYS_LABEL_COLS - 3 + 1);
+	q_strlcat (fitted, "...", sizeof(fitted));
+	return fitted;
+}
+
 static void M_Keys_Draw (void)
 {
 	int		i, x, y;
@@ -4588,7 +4614,7 @@ static void M_Keys_Draw (void)
 
 		y = 80 + 8*i;
 
-		M_Print (16, y, keys_bindlist[i+keys_top][1]);
+		M_Print (16, y, M_Keys_FitLabel (keys_bindlist[i+keys_top][1]));
 
 		if (keys_tap)
 			M_FindDoubleKeysForCommand (keys_bindlist[i+keys_top][0], keys);
