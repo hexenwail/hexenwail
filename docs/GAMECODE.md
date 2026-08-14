@@ -238,6 +238,24 @@ Half of what it names is unreachable: of its ten maps, `rick3`–`rick7` ship in
 no retail pak at all. The five that do exist are `rider1a`, `rider2c`, `meso9`,
 `romeric6` and `eidolon`, all in `pak1.pak`.
 
+**The count a player actually meets is five.** Scanning the entity lump of all
+42 `.bsp` files in `pak0.pak` and `pak1.pak` for `"map"` keys, every one of
+those five is the target of a `trigger_changelevel` in the normal campaign
+flow, and `rick3`–`rick7` are named by nothing at all:
+
+| progs2.dat map | reached from |
+| --- | --- |
+| `rider1a` | `village2` |
+| `rider2c` | `egypt1` |
+| `meso9` | `meso8` |
+| `romeric6` | `romeric5` |
+| `eidolon` | `castle5` |
+| `rick3`–`rick7` | *(no `"map"` key in any shipped map)* |
+
+So `gamecode/README.txt` can state the number outright rather than hedging with
+"some": the five above use `progs2.dat`, every other map uses `progs.dat`.
+Reproduce with `scripts/progs2_maps.py` against a retail install.
+
 Two consequences:
 
 1. **Overwriting a player's `progs.dat` is irreversible.** There is no packed

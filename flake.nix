@@ -1091,9 +1091,10 @@ None of this is required to play Hexenwail, and doing it changes what that
 other engine runs, not what Hexenwail runs.
 
 Whichever engine you are feeding, copy progs.dat and progs2.dat TOGETHER.
-Some late-game maps use progs2.dat and the rest use progs.dat; installing one
-without the other leaves the game running new gamecode on some maps and 1997
-gamecode on others.
+Five maps use progs2.dat and the rest use progs.dat: rider1a, rider2c, meso9,
+romeric6 and eidolon -- the boss arenas at the end of each hub, and Eidolon's
+lair.  Installing one file without the other leaves the game running new
+gamecode on those five maps and 1997 gamecode everywhere else.
 
 Include portals/progs.dat if you have the Portal of Praevus mission pack.
 When the mission pack is active it takes priority over data1 completely, so
