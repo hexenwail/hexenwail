@@ -66,11 +66,21 @@ Hexenwail fork (diverges from 1.29c):
 - portals/invntory.hc: also threw the TimeBomb glyph forward on a 10 second
   MOVETYPE_BOUNCE fuse; reverted on 2026-08-13, above.
 
-2026-03-21 (a14b5eecd):
+2026-03-21 [uhexen2-o4tn] (a14b5eecd):
 - items.hc (h2, hw, portals, siege): the "Bad backpack!" dprint now names the
   entity's classname and origin instead of printing the bare string, so the
   report is actionable.  (What it printed about was fixed later; see the two
   2026-08 entries above.)
+
+  This one is deliberate instrumentation and is being kept, decided under
+  uhexen2-o4tn.  It reaches no ordinary player: dprint is PF_dprint, which is
+  Con_DPrintf, which is CON_Printf(_PRINT_DEVEL, ...) and is dropped unless
+  the developer cvar is set -- in the client and in h2ded alike.  What it buys
+  is the other half of the diagnostic that BadBackpackDump() prints: the dump
+  says what was in the bag, this says which entity dropped it, which is
+  exactly the question uhexen2-9gdx has to answer about the archer and
+  leopard field reports.  siege carries the same lines but they sit inside the
+  "Always throw BP in Siege" comment block, so there they are inert.
 
 
 uHexen2 / Raven history:
