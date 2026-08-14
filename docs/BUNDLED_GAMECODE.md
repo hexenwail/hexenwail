@@ -909,6 +909,14 @@ makes K1's property hold for every row at once: `basedir` and `<exedir>` share n
 ancestor, so a bundle lookup that read `basedir` would find nothing anywhere in
 this matrix, not just in K1.
 
+**The bundle crcs below are dated, and are expected to move.** They fingerprint
+*our* build of the gamecode, so every `gamecode/hc` divergence changes them —
+the retail numbers (`17499`, `20799`, `33075`) are the stable ones. As of this
+writing the pair is `data1` **24008** and `portals` **17171**, changed from the
+table's `10626` / `44043` by `uhexen2-h77u`. Rows that turn on *which file
+loaded* stay valid; only the literal numbers age. Re-read them from any
+`Gamecode:` line rather than trusting this paragraph.
+
 | # | Verdict | What was observed |
 |---|---|---|
 | P1 | pass | `<exedir>/../share/hexenwail/data1/progs.dat`, crc 10626 |

@@ -1368,7 +1368,15 @@ float it_total;
 				self.cnt_tome = 1;
 			else if (chance < .80)
 				self.cnt_haste = 1;
-			else if (chance < .90)
+			// uhexen2-h77u: this was "else if (chance < .90)", which left
+			// [0.90,1.0) setting no field at all -- the henchman passed the
+			// 15% drop gate and then dropped nothing, silently.  The grunt and
+			// leader chains in this same function both terminate in a bare
+			// else, and the leader's absorbs an oversized remainder (0.15
+			// against 0.05 steps) rather than rescaling, so a bare else here
+			// is Raven's own convention applied to the one chain that missed
+			// it.  See gamecode/README.
+			else
 				self.cnt_blast = 1;
 			it_total+=1;
 		}		
