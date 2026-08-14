@@ -21,6 +21,14 @@ The player-facing consequence, which the two texts below are written against:
 finds `<exedir>/../share/hexenwail/`; on Windows the release zip is flat, so
 `gamecode/` already sits beside `glh2.exe` and satisfies lookup layer 1.
 
+**Citation convention: `file.c :: Symbol()`, never `file.c:LINE`.** This
+document cited bare line numbers until `uhexen2-2z1z`, and they went stale four
+separate times in a single day — any commit inserting a line anywhere above a
+citation silently invalidates it, and nothing checks. Symbols move with their
+code and a vanished one is greppable. Same convention as
+[SrcNotes.txt](SrcNotes.txt) and [GAMECODE.md](GAMECODE.md). Please keep it:
+re-pinning numbers only buys another day.
+
 ## Verdict
 
 It can be done safely — but **not as a search-path insertion, and not below
@@ -44,7 +52,7 @@ look obvious first; the rest constrain what is left.
 The intuitive design is "add our bundle as a lowest-priority gamedir, so
 anything the player has wins". It does nothing.
 
-`FS_OpenFile_Internal()` (`quakefs.c:897-905`) stats the exact-case path first
+`quakefs.c :: FS_OpenFile_Internal()` stats the exact-case path first
 and falls back to `FS_ResolveCasePath()`'s `readdir` scan only on a miss:
 
 ```c
@@ -79,7 +87,7 @@ every mod behaves, and no player ever loads our progs.
 
 ### F2 — giving our files a new `path_id` silently kills `progs2.dat`
 
-`PR_GetProgFilename()` (`pr_edict.c:1941`) contains:
+`pr_edict.c :: PR_GetProgFilename()` contains:
 
 ```c
 FH.length = FS_OpenFile (maplist_name, &FH.file, &id1);
@@ -103,7 +111,7 @@ gamecode.
 entry.
 
 Now suppose a bundled searchpath entry takes `path_id = fs_searchpaths->path_id
-<< 1` (`quakefs.c:400`) like every other gamedir, and suppose it wins the
+<< 1` (`quakefs.c :: FS_AddGameDirectory()`) like every other gamedir, and suppose it wins the
 `progs.dat` lookup. Then `progs.dat` resolves at `path_id` 2 while `maplist.txt`
 still sits at 1. `id1 < id0` becomes true, the guard fires, the maplist is
 discarded — and **`progs2.dat` never loads on any map**, on any install, forever.
@@ -119,12 +127,12 @@ introduces it and dies three commits later.
 
 ### F3 — `fs_gamedir_nopath` is reliable, with one pre-existing exception
 
-`fs_gamedir_nopath` (`quakefs.c:87`) is the engine's own answer to "which game
-am I in". It is set by `FS_AddGameDirectory()` (`quakefs.c:391-392`) and by
-`Host_Game_f()` (`quakefs.c:1505-1506`), and is correct at every call site
+`fs_gamedir_nopath` (`quakefs.c`, file scope) is the engine's own answer to "which game
+am I in". It is set by `quakefs.c :: FS_AddGameDirectory()` and by
+`quakefs.c :: Host_Game_f()`, and is correct at every call site
 except one:
 
-The **invalid-mission-pack rollback** (`quakefs.c:1729-1732`) unwinds the
+The **invalid-mission-pack rollback** (`quakefs.c :: Host_Game_f()`) unwinds the
 searchpath and restores `fs_gamedir` / `fs_userdir` to `data1`:
 
 ```c
@@ -137,7 +145,7 @@ FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
 — but leaves `fs_gamedir_nopath` reading `"portals"`.
 
 This is pre-existing and not caused by anything here. It also already makes
-`Host_Game_f`'s "already running that game" check (`quakefs.c:1422`) wrong in
+`Host_Game_f`'s "already running that game" check wrong in
 that state: a player in the rolled-back configuration who selects Portals from
 the Mods menu is told they are already in it.
 
@@ -146,8 +154,8 @@ that variable.
 
 ### F4 — runtime gamedir switching is first-class, so launch-time gates are stale
 
-`Host_Game_f()` (`quakefs.c:1392`) rebuilds the searchpath at runtime and can
-add `portals` with a fresh `path_id` (`quakefs.c:1488-1497`):
+`quakefs.c :: Host_Game_f()` rebuilds the searchpath at runtime and can
+add `portals` with a fresh `path_id`:
 
 ```c
 /* optionally add portals as base for custom mods */
@@ -169,44 +177,35 @@ Launched with `-game` and switched back to Hexen II, it refuses to substitute
 when it should.
 
 Gating must be **recomputed from filesystem state at every `PR_LoadProgs()`** —
-that is, per map spawn (`sv_main.c:2432`).
+that is, per map spawn (`sv_main.c :: SV_SpawnServer()`).
 
 ### F5 — `basedir` cannot express "beside the binary"
 
-`basedir` is `getcwd()` on Unix (`Sys_GetBasedir`, `sys_unix.c:429`; the call
-itself is at `:433`) and `GetCurrentDirectory()` on Windows (`sys_win.c:467`).
+`basedir` is `getcwd()` on Unix (`sys_unix.c :: Sys_GetBasedir()`) and `GetCurrentDirectory()` on Windows (`sys_win.c :: Sys_GetBasedir()`).
 It is the working directory the game was *launched from*, which for a desktop
 launcher, a Steam shortcut or a file-manager double-click is frequently not the
 install directory.
 
-`soundfont.c:74-97` already solves this, resolving `/proc/self/exe`:
+`soundfont.c` already solved this, with a `static const char *exe_dir (void)`
+that resolved `/proc/self/exe` — but it was `static`, Linux-only, and lived in a
+translation unit `h2ded` does not compile: `soundfont.c` reaches only
+`ALL_SOURCES` via the two `SOUNDFONT_SOURCES` assignments in
+`engine/CMakeLists.txt` (one per MIDI backend that needs it: FluidSynth and the
+libTiMidity fallback), consumed where `ALL_SOURCES` is assembled, while `h2ded`
+is built from the separate `SERVER_SOURCES` list in the `BUILD_DEDICATED` block
+(`engine/CMakeLists.txt :: SERVER_SOURCES`).
 
-```c
-static const char *exe_dir (void)
-{
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-	...
-	len = readlink("/proc/self/exe", dir, sizeof(dir) - 1);
-	...
-```
-
-but it is `static`, Linux-only, and lives in a translation unit `h2ded` does not
-compile: `soundfont.c` reaches only `ALL_SOURCES` via the two `SOUNDFONT_SOURCES`
-assignments in `engine/CMakeLists.txt` (one per MIDI backend that needs it:
-FluidSynth and the libTiMidity fallback), consumed where `ALL_SOURCES` is
-assembled, while `h2ded` is built from the separate `SERVER_SOURCES` list in
-the `BUILD_DEDICATED` block (`engine/CMakeLists.txt :: SERVER_SOURCES`).
-(Bare line numbers omitted deliberately — this doc has already drifted four
-times in one day; see `uhexen2-2z1z`.)
-
-It needs promoting to a shared `Sys_GetExeDir()` with per-platform backings
-(`/proc/self/exe`, `GetModuleFileName`, `_NSGetExecutablePath`). That is a
-prerequisite, and it also removes the duplicate rather than adding a second one.
+So it needed promoting to a shared `Sys_GetExeDir()` with per-platform backings
+(`/proc/self/exe`, `GetModuleFileName`), removing the duplicate rather than
+adding a second one. **That is what shipped**: `uhexen2-hgi3` moved it to
+`engine/h2shared/sys_exedir.c :: Sys_GetExeDir()`, declared in
+`engine/h2shared/sys.h`, compiled into both the client and `h2ded`;
+`soundfont.c` now calls it rather than carrying its own copy.
 
 ### F6 — the Windows package already has the right shape
 
 The Windows release zip is flat, and `gamecode/` is already a root-level
-subdirectory sitting beside `glh2.exe` (`.github/workflows/release.yml:122-137`):
+subdirectory sitting beside `glh2.exe` (`.github/workflows/release.yml`, the `Package` step):
 
 ```sh
 winpkg=hexenwail-windows
@@ -220,7 +219,7 @@ So `<exedir>/gamecode/data1/progs.dat` is **already the shipped path on
 Windows**. No packaging change at all.
 
 Only Linux needs a layout change: there the executable lives at
-`linux-x86_64/bin/` (`flake.nix:916-918`) while `gamecode/` is at the zip root,
+`linux-x86_64/bin/` (`flake.nix`, the `release` derivation's Linux portable tree) while `gamecode/` is at the zip root,
 so `<exedir>/gamecode/` does not exist.
 
 ### F7 — the CRC table is a real safety net
@@ -285,7 +284,7 @@ mod case — pure map packs, which supply maps and nothing else and therefore ru
 
 ### Candidate A — searchpath overlay in `FS_AddGameDirectory()`
 
-**Placement**: inside `FS_AddGameDirectory()` (`quakefs.c:382`), after the
+**Placement**: inside `quakefs.c :: FS_AddGameDirectory()`, after the
 gamedir's own basedir and userdir entries are pushed, insert one more
 `searchpath_t` pointing at `<bundle>/<dir>` — **sharing the gamedir's
 `path_id`** rather than taking a new one.
@@ -307,7 +306,7 @@ path. `path` prints it, so the configuration is self-documenting.
   `strings.txt` or `.mdl` in the bundle tree — now or in five years — and it
   overrides the player's. The design intends to be about two files; the
   mechanism is not.
-- **`Host_Game_f`'s runtime portals add is a second call site.** `quakefs.c:1494`
+- **`Host_Game_f`'s runtime portals add is a second call site.** `quakefs.c :: Host_Game_f()`
   calls `FS_AddGameDirectory("portals", true)` at runtime; both paths must
   behave identically or the Mods menu produces a different filesystem than the
   command line did.
@@ -317,7 +316,7 @@ path. `path` prints it, so the configuration is self-documenting.
 
 ### Candidate B — explicit-path substitution in `PR_LoadProgs()`
 
-**Placement**: `PR_LoadProgs()` (`pr_edict.c:2085-2086`), between
+**Placement**: `pr_edict.c :: PR_LoadProgs()`, between
 `PR_GetProgFilename()` and `FS_LoadHunkFile()`:
 
 ```c
@@ -352,9 +351,20 @@ and the Nov 1997 demo — the `data1` lookup succeeds and the walk never descend
 to it. Its only unique capability is rescuing an install that has no gamecode at
 all, which is not the problem being solved.
 
-## Recommendation — Candidate B
+## Recommendation — Candidate B (this is what shipped)
 
-Four reasons, in weight order:
+Where to read the code this section argues for:
+
+| Design element | Shipped as |
+| --- | --- |
+| bundle discovery, three layers | `pr_edict.c :: PR_FindBundleDir()` |
+| the gating predicate | `pr_edict.c :: PR_BundledProgsPath()` |
+| the substitution itself | `pr_edict.c :: PR_LoadProgs()`, via `FS_LoadHunkFileFromOSPath()` |
+| resolving `<exedir>` | `sys_exedir.c :: Sys_GetExeDir()` |
+| the opt-out | `-vanillaprogs`, checked in `PR_BundledProgsPath()` |
+| the startup provenance line | the `Gamecode:` print, `uhexen2-zixe` / `f619026e1` |
+
+Four reasons it was chosen, in weight order:
 
 1. **Bounded blast radius.** B cannot shadow anything but the two files it is
    about. A searchpath entry is a standing offer to shadow any filename that
@@ -438,7 +448,7 @@ They answer different questions, and each alone has a hole.
 **Hole in `path_id` alone**: a pure map pack (`-game mappack`, no `progs.dat` of
 its own) resolves `progs.dat` from whichever gamedir beneath it has one. On a
 mission-pack install that is **`portals`**, not `data1`, because `-game` by
-itself pulls `portals` onto the path (`quakefs.c:1674-1689`, pushed at
+itself pulls `portals` onto the path (`quakefs.c :: FS_Init()`, pushed at
 `:1698-1701`); only where `portals/` is absent or `-noportals` was passed does
 it fall to `data1` at `path_id` 1. Either way the resolved `path_id` is one we
 ship a bundle for, so condition 1 passes, and substituting there would silently
@@ -463,14 +473,14 @@ Neither hole is exotic. Both are reachable from the shipped Mods menu.
 
 1. **Launch `glhexen2 -game sot`.** `FS_AddGameDirectory("sot")` pushes the mod
    at a fresh `path_id` and sets `fs_gamedir_nopath = "sot"`.
-2. **Map spawn.** `PR_LoadProgs()` at `sv_main.c:2432`. `PR_GetProgFilename()`
+2. **Map spawn.** `PR_LoadProgs()` at `sv_main.c :: SV_SpawnServer()`. `PR_GetProgFilename()`
    returns `"progs.dat"` — `sot` ships no `maplist.txt` (F8), so the maplist
    path is not taken. `FS_FileExists("progs.dat", &path_id)` resolves inside
    `sot/` and reports `sot`'s id. **Condition 1 fails. No substitution.** Sot's
    own 1,421,514-byte gamecode loads, exactly as today.
 3. **Player opens the Mods menu and selects "Hexen II".** `Host_Game_f()`
    unwinds to `fs_base_searchpaths` and sets `fs_gamedir_nopath = "data1"`
-   (`quakefs.c:1505-1506`). The searchpath is `data1` at `path_id` 1.
+   (`quakefs.c :: Host_Game_f()`). The searchpath is `data1` at `path_id` 1.
 4. **Next map spawn.** `PR_LoadProgs()` runs again — per spawn, not per launch.
    `progs.dat` now resolves from `data1` at `path_id` 1: **condition 1 passes.**
    `fs_gamedir_nopath` reads `"data1"`: **condition 2 passes.** Our bundled
@@ -496,7 +506,7 @@ together:
   There is no configuration in which it reaches a mod.
 - The **`portals`** substitution is the only one that could reach one, because
   `portals` is deliberately used as a *base* for custom mods
-  (`quakefs.c:1488-1497`, `-mod`). Gating on `fs_gamedir_nopath` removes that
+  (`quakefs.c :: Host_Game_f()`, `-mod`). Gating on `fs_gamedir_nopath` removes that
   exposure completely.
 
 The cost of gating that way is explicit and accepted: **a pure map pack layered
@@ -537,20 +547,20 @@ records us having lost — a bug report can say "reproduced with `-vanillaprogs`
 and mean something precise.
 
 **Where it goes.** The `help_strings[]` tables and `USAGE.md`. Note that there
-are **three** such tables, not four: `engine/hexen2/sys_unix.c:484`,
-`engine/hexen2/server/sys_unix.c:534` and `engine/hexen2/server/sys_win.c:506`.
+are **three** such tables, not four: `engine/hexen2/sys_unix.c :: help_strings[]`,
+`engine/hexen2/server/sys_unix.c :: help_strings[]` and `engine/hexen2/server/sys_win.c :: help_strings[]`.
 `engine/hexen2/sys_win.c` is a `WinMain` GUI entry point with no `help_strings`
 and no `PrintHelp` — nothing to add there.
 
 ## Bundle location
 
-Follow `soundfont.c`'s layering (`SF_FindSoundFont`, `soundfont.c:99`), in
+Follow `soundfont.c :: SF_FindSoundFont()`'s layering, in
 order:
 
 1. **`<exedir>/gamecode/`** — the portable/zip layout. Already the shipped path
    on Windows (F6).
 2. **`<exedir>/../share/hexenwail/`** — the FHS/Nix layout. This is already
-   exactly where `packages.gamecode` installs (`flake.nix:381-388`:
+   exactly where `packages.gamecode` installs (`flake.nix`, `packages.gamecode`'s `installPhase`:
    `$out/share/hexenwail/data1`, `.../portals`), so the convention costs nothing
    to adopt.
 3. **A compile-time `-DBUNDLED_GAMECODE_DIR=...`**, mirroring `SOUNDFONT_PATH`
@@ -580,7 +590,7 @@ on the machine that built it, and NixOS users are served by the flake
 put the gamecode derivation into the engine's `.drv` hash, and every `.hc` edit
 would then rebuild the engine, `h2ded`, both mingw cross builds, the WASM build
 and the toolchain — destroying exactly the property `gamecodeSrc` exists to
-protect (`flake.nix:104-113`). The `release` derivation may reference it,
+protect (`flake.nix :: gamecodeSrc`). The `release` derivation may reference it,
 because `release` is an aggregate whose whole job is to depend on everything;
 the engine derivation may not.
 
@@ -596,9 +606,9 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    assumes, and it is the entire reason the gate is a two-condition AND.
 
    Any of `-portals`, `-missionpack`, `-h2mp`, `-game <dir>` or `-mod <dir>`
-   sets `check_portals` (`quakefs.c:1674-1689` — the `#else` arm is the live
+   sets `check_portals` (`quakefs.c :: FS_Init()` — the `#else` arm is the live
    one, since no build in this tree defines `H2MP` or `H2W`), and `portals` is
-   then pushed onto the path (`quakefs.c:1698-1701`). So `glhexen2 -game
+   then pushed onto the path (`quakefs.c :: FS_Init()`). So `glhexen2 -game
    mappack` yields `data1`, `portals`, `mappack`, and a mappack with no gamecode
    of its own resolves `progs.dat` **from `portals`** — not from `data1`.
 
@@ -654,8 +664,8 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    gamecode we have never compared against ours.
 
    Gate the whole feature on `gameflags & GAME_REGISTERED`, set only when `pak0`
-   *and* `pak1` both match the 1.11 fingerprints (`quakefs.c:1564-1565`, from
-   the `GAME_REGISTERED0` / `GAME_REGISTERED1` returns at `quakefs.c:261-264`).
+   *and* `pak1` both match the 1.11 fingerprints (`quakefs.c :: FS_Init()`, from
+   the `GAME_REGISTERED0` / `GAME_REGISTERED1` returns at `quakefs.c :: check_known_paks()`).
    One line removes an entire class of unknowns from the test matrix. Unlike the
    two conditions it is also *not* a per-spawn question: the fingerprinting
    happens once in `FS_Init` and the answer cannot change for the session.
@@ -688,7 +698,7 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    **`path_id` cannot make this distinction**, which is why the stand-down is a
    separate filesystem probe rather than a refinement of condition 1.
    `FS_AddGameDirectory` assigns a gamedir's basedir entry and its userdir entry
-   the **same** `path_id`: it is computed once at `quakefs.c:404-407` and stored
+   the **same** `path_id`: it is computed once at `quakefs.c :: FS_AddGameDirectory()` and stored
    on both entries at `:445`, the second time round the `goto add_pakfile` loop
    the userdir pass takes (`:453-461`). Both therefore read `1U` for `data1` and
    the predicate has no way to tell them apart — the same fact F1 relies on when
@@ -703,7 +713,7 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
 
    **The recourse is still not the same on both platforms, and the asymmetry
    has to be documented rather than discovered.** On Windows `DO_USERDIRS` is
-   forced to 0 (`sys.h:83-86`), `fs_userdir` collapses onto the install
+   forced to 0 (`sys.h :: DO_USERDIRS`), `fs_userdir` collapses onto the install
    directory, and there is no location that expresses "mine, not yours".
    `FS_UserdirHasFile()` compiles to a constant `false` there, deliberately: a
    probe of the userdir on Windows would be a probe of the install directory,
@@ -727,12 +737,12 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
 
    *Mitigating*: saves are text, keyed by field **name** rather than offset; an
    unknown field produces `Con_Printf ("'%s' is not a field\n", ...)`
-   (`pr_edict.c:1714`) and is skipped, not a failure; `SAVEGAME_VERSION` is
-   unchanged (`quakedef.h:138`, currently 5); and the `h2` tree deliberately
-   omits `-oi`/`-on` for exactly this reason (`flake.nix:354-360`).
+   (`pr_edict.c :: ED_ParseEdict()`) and is skipped, not a failure; `SAVEGAME_VERSION` is
+   unchanged (`quakedef.h :: SAVEGAME_VERSION`, currently 5); and the `h2` tree deliberately
+   omits `-oi`/`-on` for exactly this reason (`flake.nix`, `packages.gamecode`'s `buildPhase` — the two `h2` `hcc` lines).
 
    *Aggravating*: the `portals` tree **is** built with `-oi -on`
-   (`flake.nix:362`). The portals cross-load is therefore the one to test, and
+   (`flake.nix`, `packages.gamecode`'s `buildPhase` — the `portals` `hcc` line). The portals cross-load is therefore the one to test, and
    the one most likely to warn.
 
 9. **Demo playback across a progs change.** Demos replay recorded network
