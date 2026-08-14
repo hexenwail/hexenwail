@@ -424,18 +424,37 @@ const char *Sys_ConsoleInput (void)
 {
 	static char	con_text[256];
 	static int	textlen;
+	static qboolean	stdin_dead = false;
 	char		c;
+	ssize_t		readlen;
 	fd_set		set;
 	struct timeval	timeout;
+
+	if (stdin_dead)
+		return NULL;
 
 	FD_ZERO (&set);
 	FD_SET (0, &set);	// stdin
 	timeout.tv_sec = 0;
 	timeout.tv_usec = 0;
 
-	while (select (1, &set, NULL, NULL, &timeout))
+	while (select (1, &set, NULL, NULL, &timeout) > 0)
 	{
-		read (0, &c, 1);
+		readlen = read (0, &c, 1);
+		if (readlen < 0 && (errno == EINTR || errno == EAGAIN))
+			break;		// nothing to read after all, try again next frame
+		if (readlen <= 0)
+		{
+		// stdin is at end of file (closed, /dev/null, a consumed
+		// file or pipe).  A descriptor at EOF stays readable, so
+		// coming back here would spin forever: stop polling stdin
+		// for the rest of the run.
+			stdin_dead = true;
+			textlen = 0;
+			con_text[0] = '\0';
+			Sys_PrintTerm ("\nstdin at EOF, console input disabled\n");
+			break;
+		}
 		if (c == '\n' || c == '\r')
 		{
 			con_text[textlen] = '\0';
