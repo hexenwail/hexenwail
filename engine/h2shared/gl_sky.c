@@ -116,8 +116,17 @@ gltexture_t	*skybox_textures[6];
 GLuint	skybox_texnums[6]; // Actual OpenGL texture IDs (TexMgr_LoadImage returns same pointer)
 gltexture_t	*solidskytexture, *alphaskytexture;
 
-/* uhexen2 doesn't have gl_farclip, use a default value */
-cvar_t gl_farclip = {"gl_farclip", "2048", CVAR_NONE};
+/* Projection far plane, in world units.  Ironwail's and QuakeSpasm's name for
+ * this setting, which is why it lives here: the ported sky code needed it to
+ * exist.  It was registered at 2048 and read by nobody for the whole of that
+ * time, so typing it did nothing while the real far plane sat hardcoded at
+ * 16384 in R_SetupGL.  Now wired up, and defaulted to that same 16384 so the
+ * behaviour it used to lie about is the behaviour it now describes.
+ *
+ * Not to be confused with r_farclip, which is a CPU-side BSP-subtree cull
+ * distance and is overwritten per level by protocol (gl_rmisc.c).  This one is
+ * the frustum.  uhexen2-li13. */
+cvar_t gl_farclip = {"gl_farclip", "16384", CVAR_ARCHIVE};
 extern cvar_t r_skyalpha; /* defined in gl_rmain.c */
 cvar_t r_fastsky = {"r_fastsky", "0", CVAR_NONE};
 cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};

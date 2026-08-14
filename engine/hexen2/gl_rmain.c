@@ -4353,9 +4353,19 @@ static void R_SetupGL (void)
 	{
 		GLdouble xmax = NEARCLIP * tan(r_refdef.fov_x * M_PI / 360.0);
 		GLdouble ymax = NEARCLIP * tan(r_refdef.fov_y * M_PI / 360.0);
+		/* Far plane from gl_farclip rather than the 16384 that used to be
+		 * written here, which left the cvar of that name -- Ironwail's and
+		 * QuakeSpasm's name for exactly this -- accepting values and doing
+		 * nothing.  Clamped rather than trusted: the low bound keeps a stray
+		 * small value from clipping the view into uselessness with no
+		 * obvious way back, and the high bound is well inside what
+		 * reversed-Z handles without precision loss.  uhexen2-li13. */
+		GLdouble zfar = gl_farclip.value;
+		if (zfar < 4096.0) zfar = 4096.0;
+		else if (zfar > 262144.0) zfar = 262144.0;
 		GL_MatrixMode(GL_MAT_PROJECTION);
 		GL_LoadIdentity();
-		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, 16384);
+		GL_Frustum(-xmax, xmax, -ymax, ymax, NEARCLIP, zfar);
 	}
 
 	if (mirror)
