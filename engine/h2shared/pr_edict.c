@@ -2334,6 +2334,353 @@ const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen)
 	return NULL;
 }
 
+/* What PR_ExecuteProgram() does with each operand of a statement.  These are
+ * roles, not QC types: a/b/c are raw int32s out of the image, and OPA/OPB/OPC
+ * turn them into &pr_globals[x] with no check of any kind, so this table plus
+ * the walk in PR_ValidateBytecode() is the only thing keeping the interpreter's
+ * reads and writes inside the globals lump.  uhexen2-1p3o. */
+enum {
+	PRO_UNUSED = 0,	/* never dereferenced for this opcode */
+	PRO_GLOBAL,	/* offset of one global */
+	PRO_VECTOR,	/* offset of three consecutive globals */
+	PRO_JUMP,	/* statement offset, relative to the statement itself */
+	PRO_ARRAY	/* array base; its element count sits one global below */
+};
+
+/* Indexed by opcode, so the row order has to stay exactly the enum order in
+ * common/pr_comp.h.  Read off PR_ExecuteProgram()'s case bodies one by one:
+ * PRO_VECTOR is written wherever the body touches ->vector[], which is wider
+ * than the QC type suggests in a few places -- OP_DONE/OP_RETURN copy three
+ * globals out of `a' whatever the function returns, and OP_CALL1..8 copy three
+ * out of `b' (and `c' from OP_CALL2 up) into the parameter block whether the
+ * argument is a vector or a float. */
+static const byte pr_operandrole[][3] =
+{
+	{ PRO_VECTOR, PRO_UNUSED, PRO_UNUSED },	/* OP_DONE */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_MUL_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_GLOBAL },	/* OP_MUL_V */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_MUL_FV */
+	{ PRO_VECTOR, PRO_GLOBAL, PRO_VECTOR },	/* OP_MUL_VF */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_DIV_F */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_ADD_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_VECTOR },	/* OP_ADD_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_SUB_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_VECTOR },	/* OP_SUB_V */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_EQ_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_GLOBAL },	/* OP_EQ_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_EQ_S */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_EQ_E */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_EQ_FNC */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_NE_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_GLOBAL },	/* OP_NE_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_NE_S */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_NE_E */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_NE_FNC */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LE */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_GE */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LT */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_GT */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LOAD_F */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_VECTOR },	/* OP_LOAD_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LOAD_S */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LOAD_ENT */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LOAD_FLD */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_LOAD_FNC */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_ADDRESS */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STORE_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_UNUSED },	/* OP_STORE_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STORE_S */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STORE_ENT */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STORE_FLD */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STORE_FNC */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STOREP_F */
+	{ PRO_VECTOR, PRO_GLOBAL, PRO_UNUSED },	/* OP_STOREP_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STOREP_S */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STOREP_ENT */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STOREP_FLD */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STOREP_FNC */
+
+	{ PRO_VECTOR, PRO_UNUSED, PRO_UNUSED },	/* OP_RETURN */
+	{ PRO_GLOBAL, PRO_UNUSED, PRO_GLOBAL },	/* OP_NOT_F */
+	{ PRO_VECTOR, PRO_UNUSED, PRO_GLOBAL },	/* OP_NOT_V */
+	{ PRO_GLOBAL, PRO_UNUSED, PRO_GLOBAL },	/* OP_NOT_S */
+	{ PRO_GLOBAL, PRO_UNUSED, PRO_GLOBAL },	/* OP_NOT_ENT */
+	{ PRO_GLOBAL, PRO_UNUSED, PRO_GLOBAL },	/* OP_NOT_FNC */
+	{ PRO_GLOBAL, PRO_JUMP,   PRO_UNUSED },	/* OP_IF */
+	{ PRO_GLOBAL, PRO_JUMP,   PRO_UNUSED },	/* OP_IFNOT */
+	{ PRO_GLOBAL, PRO_UNUSED, PRO_UNUSED },	/* OP_CALL0 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_UNUSED },	/* OP_CALL1 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL2 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL3 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL4 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL5 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL6 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL7 */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_VECTOR },	/* OP_CALL8 */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_STATE */
+	{ PRO_JUMP,   PRO_UNUSED, PRO_UNUSED },	/* OP_GOTO */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_AND */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_OR */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_BITAND */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_BITOR */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_MULSTORE_F */
+	{ PRO_GLOBAL, PRO_VECTOR, PRO_UNUSED },	/* OP_MULSTORE_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_MULSTOREP_F */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_VECTOR },	/* OP_MULSTOREP_V */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_DIVSTORE_F */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_DIVSTOREP_F */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_ADDSTORE_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_UNUSED },	/* OP_ADDSTORE_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_ADDSTOREP_F */
+	{ PRO_VECTOR, PRO_GLOBAL, PRO_VECTOR },	/* OP_ADDSTOREP_V */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_SUBSTORE_F */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_UNUSED },	/* OP_SUBSTORE_V */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_GLOBAL },	/* OP_SUBSTOREP_F */
+	{ PRO_VECTOR, PRO_GLOBAL, PRO_VECTOR },	/* OP_SUBSTOREP_V */
+
+	{ PRO_ARRAY,  PRO_GLOBAL, PRO_GLOBAL },	/* OP_FETCH_GBL_F */
+	{ PRO_ARRAY,  PRO_GLOBAL, PRO_VECTOR },	/* OP_FETCH_GBL_V */
+	{ PRO_ARRAY,  PRO_GLOBAL, PRO_GLOBAL },	/* OP_FETCH_GBL_S */
+	{ PRO_ARRAY,  PRO_GLOBAL, PRO_GLOBAL },	/* OP_FETCH_GBL_E */
+	{ PRO_ARRAY,  PRO_GLOBAL, PRO_GLOBAL },	/* OP_FETCH_GBL_FNC */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_CSTATE */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_CWSTATE */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_THINKTIME */
+
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_BITSET */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_BITSETP */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_BITCLR */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_BITCLRP */
+
+	{ PRO_UNUSED, PRO_UNUSED, PRO_UNUSED },	/* OP_RAND0 */
+	{ PRO_GLOBAL, PRO_UNUSED, PRO_UNUSED },	/* OP_RAND1 */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_UNUSED },	/* OP_RAND2 */
+	{ PRO_UNUSED, PRO_UNUSED, PRO_UNUSED },	/* OP_RANDV0 */
+	{ PRO_VECTOR, PRO_UNUSED, PRO_UNUSED },	/* OP_RANDV1 */
+	{ PRO_VECTOR, PRO_VECTOR, PRO_UNUSED },	/* OP_RANDV2 */
+
+	{ PRO_GLOBAL, PRO_JUMP,   PRO_UNUSED },	/* OP_SWITCH_F */
+	/* the other four switch types are PR_RunError()s in the interpreter,
+	 * so they never reach an operand */
+	{ PRO_UNUSED, PRO_UNUSED, PRO_UNUSED },	/* OP_SWITCH_V */
+	{ PRO_UNUSED, PRO_UNUSED, PRO_UNUSED },	/* OP_SWITCH_S */
+	{ PRO_UNUSED, PRO_UNUSED, PRO_UNUSED },	/* OP_SWITCH_E */
+	{ PRO_UNUSED, PRO_UNUSED, PRO_UNUSED },	/* OP_SWITCH_FNC */
+
+	{ PRO_GLOBAL, PRO_JUMP,   PRO_UNUSED },	/* OP_CASE */
+	{ PRO_GLOBAL, PRO_GLOBAL, PRO_JUMP    }	/* OP_CASERANGE */
+};
+
+COMPILE_TIME_ASSERT(pr_operandrole,
+		    sizeof(pr_operandrole) / sizeof(pr_operandrole[0]) == OP_CASERANGE + 1);
+
+/*
+===============
+PR_ValidateBytecode
+
+Returns NULL if the statement and function tables reach only memory the image
+actually has, or a reason string naming the first place they do not.
+
+PR_CheckProgsExtents() vets the container -- where each lump sits and how far it
+runs.  It deliberately says nothing about what the bytecode inside those lumps
+then asks the interpreter to do, and PR_ExecuteProgram() asks no questions of its
+own: OPA/OPB/OPC are `&pr_globals[st->a]' with the operand a raw int32 out of the
+file, and OPC is a write target (`c->_float = a->_float + b->_float').  A forged
+operand is therefore an arbitrary read *and* write several GB either side of the
+globals lump, which is a different class of bug from the header-field overreads
+that hardening pass fixed -- and it is reachable from a player-supplied file,
+because csprogs.dat arrives with downloaded mod or server content and runs every
+frame once it exports CSQC_DrawHud.  uhexen2-1p3o.
+
+The instruction pointer needs the same treatment for the same reason: the
+dispatch loop is a bare `while (1) { st++; ... }' with nothing comparing st
+against numstatements, so a function body that never meets a DONE/RETURN walks
+straight off the end of the lump and executes whatever the hunk holds next.
+uhexen2-im9e.  Three checks close that off between them, without costing the
+interpreter's hot loop a single instruction:
+
+  - every function's first_statement lands inside the lump, so execution starts
+    in range;
+  - every jump lands inside the lump, so it stays in range across a branch;
+  - the last statement in the lump is DONE, RETURN or GOTO, so nothing can fall
+    off the end -- falling through is the only remaining way past numstatements,
+    and it can only happen from that one statement.
+
+Call it once at load, after the byteswap loops and (for a v6 image) after the
+statements have been converted, with the same is_v6 flag PR_ExecuteProgram()
+would run under: v6 jump offsets are sign-extended from short at dispatch, and
+the check has to extend them the same way to compute the same target.
+===============
+*/
+const char *PR_ValidateBytecode (const dstatement_t *statements, int numstatements,
+				 const dfunction_t *functions, int numfunctions,
+				 int numglobals, qboolean v6)
+{
+	static char	reason[128];
+	int		i, k;
+
+	if (numstatements <= 0 || numfunctions <= 0)
+		return "image has no code";
+
+	for (i = 0; i < numfunctions; i++)
+	{
+		const dfunction_t	*f = &functions[i];
+		int			j, parmwords = 0;
+
+		/* A negative first_statement is a builtin number, and the call
+		 * site bounds -first_statement against pr_numbuiltins -- but it
+		 * negates first, and INT_MIN has no positive counterpart to
+		 * compare. */
+		if (f->first_statement >= numstatements || f->first_statement == INT_MIN)
+		{
+			q_snprintf (reason, sizeof(reason),
+				    "function %d starts at statement %d of %d",
+				    i, f->first_statement, numstatements);
+			return reason;
+		}
+		/* Only the upper end: HCC writes numparms -1 for a variadic builtin
+		 * and retail data1/portals gamecode both do -- `starteffect' is
+		 * builtin 88 with numparms -1 in every shipped Hexen II progs.dat.
+		 * A negative count simply skips EnterFunction()'s copy loop, so it
+		 * is the too-large one that walks the parameter block. */
+		if (f->numparms > MAX_PARMS)
+		{
+			q_snprintf (reason, sizeof(reason), "function %d takes %d parameters",
+				    i, f->numparms);
+			return reason;
+		}
+		/* parm_size is a byte and the copy loop in EnterFunction() reads
+		 * pr_globals[OFS_PARM0 + i*3 + j] for j < parm_size[i], so a size
+		 * past a vector's three words walks out of the parameter block
+		 * and into whatever global follows it. */
+		for (j = 0; j < f->numparms; j++)
+		{
+			if (f->parm_size[j] > 3)
+			{
+				q_snprintf (reason, sizeof(reason),
+					    "function %d parameter %d is %d words wide",
+					    i, j, f->parm_size[j]);
+				return reason;
+			}
+			parmwords += f->parm_size[j];
+		}
+		/* EnterFunction() saves locals[] off the globals lump starting at
+		 * parm_start and LeaveFunction() writes them back, so both ends of
+		 * that range have to exist.  Subtraction rather than addition:
+		 * parm_start + locals is two attacker-chosen ints. */
+		if (f->parm_start < 0 || f->locals < 0 ||
+		    f->locals > numglobals - f->parm_start ||
+		    parmwords > numglobals - f->parm_start)
+		{
+			q_snprintf (reason, sizeof(reason),
+				    "function %d has %d locals at global %d of %d",
+				    i, f->locals, f->parm_start, numglobals);
+			return reason;
+		}
+	}
+
+	for (i = 0; i < numstatements; i++)
+	{
+		const dstatement_t	*st = &statements[i];
+		const int		operand[3] = { st->a, st->b, st->c };
+
+		if (st->op > OP_CASERANGE)	/* the table's last row */
+		{
+			q_snprintf (reason, sizeof(reason), "statement %d has opcode %d",
+				    i, st->op);
+			return reason;
+		}
+
+		for (k = 0; k < 3; k++)
+		{
+			int	ofs = operand[k];
+			int	width;
+
+			switch (pr_operandrole[st->op][k])
+			{
+			case PRO_UNUSED:
+				continue;
+
+			case PRO_JUMP:
+				/* the dispatch loop does `st += ofs - 1' and then
+				 * the st++ at the top of the next pass, so the
+				 * statement that runs next is at i + ofs */
+				if (v6)
+					ofs = (signed short) ofs;
+				if (ofs < -i || ofs >= numstatements - i)
+				{
+					q_snprintf (reason, sizeof(reason),
+						    "statement %d jumps to %d of %d",
+						    i, i + ofs, numstatements);
+					return reason;
+				}
+				continue;
+
+			case PRO_ARRAY:
+				/* OP_FETCH_GBL_* reads the element count from the
+				 * global below the base before it indexes, so the
+				 * base cannot be global 0.  How far the indexing
+				 * itself may reach depends on that count, which is
+				 * a global the program can write at runtime -- the
+				 * interpreter bounds that one for itself. */
+				if (ofs < 1 || ofs >= numglobals)
+				{
+					q_snprintf (reason, sizeof(reason),
+						    "statement %d indexes an array at global %d of %d",
+						    i, ofs, numglobals);
+					return reason;
+				}
+				continue;
+
+			case PRO_VECTOR:
+				width = 3;
+				break;
+
+			default:
+				width = 1;
+				break;
+			}
+
+			if (ofs < 0 || ofs > numglobals - width)
+			{
+				q_snprintf (reason, sizeof(reason),
+					    "statement %d reaches global %d of %d",
+					    i, ofs, numglobals);
+				return reason;
+			}
+		}
+	}
+
+	switch (statements[numstatements - 1].op)
+	{
+	case OP_DONE:
+	case OP_RETURN:
+	case OP_GOTO:
+		break;
+	default:
+		q_snprintf (reason, sizeof(reason),
+			    "last statement is opcode %d, which falls off the end of the code",
+			    statements[numstatements - 1].op);
+		return reason;
+	}
+
+	return NULL;
+}
+
 /*
 ===============
 PR_LoadProgs
@@ -2622,6 +2969,20 @@ void PR_LoadProgs (void)
 
 	for (i = 0; i < progs->numglobals; i++)
 		((int *)pr_globals)[i] = LittleLong (((int *)pr_globals)[i]);
+
+	/* Last, because every table it reads has to be in host byte order first
+	 * (and, for a v6 image, converted).  Fatal here rather than a fallback:
+	 * unlike the bundled-progs check above there is no second copy left to
+	 * try by this point, and the alternative to stopping is running bytecode
+	 * that has been shown to index outside the image.  uhexen2-1p3o,
+	 * uhexen2-im9e. */
+	{
+		const char	*bad = PR_ValidateBytecode (pr_statements, progs->numstatements,
+							    pr_functions, progs->numfunctions,
+							    progs->numglobals, is_progs_v6);
+		if (bad)
+			Host_Error ("%s: %s", progname, bad);
+	}
 
 	pr_edict_size = progs->entityfields * 4 + sizeof(edict_t) - sizeof(entvars_t);
 	// round off to next highest whole word address (esp for Alpha)
