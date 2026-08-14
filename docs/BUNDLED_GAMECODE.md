@@ -196,11 +196,22 @@ is built from the separate `SERVER_SOURCES` list in the `BUILD_DEDICATED` block
 (`engine/CMakeLists.txt :: SERVER_SOURCES`).
 
 So it needed promoting to a shared `Sys_GetExeDir()` with per-platform backings
-(`/proc/self/exe`, `GetModuleFileName`), removing the duplicate rather than
-adding a second one. **That is what shipped**: `uhexen2-hgi3` moved it to
-`engine/h2shared/sys_exedir.c :: Sys_GetExeDir()`, declared in
-`engine/h2shared/sys.h`, compiled into both the client and `h2ded`;
-`soundfont.c` now calls it rather than carrying its own copy.
+(`/proc/self/exe`, `GetModuleFileName`, `_NSGetExecutablePath`), removing the
+duplicate rather than adding a second one. **That is what shipped**:
+`uhexen2-hgi3` moved it to `engine/h2shared/sys_exedir.c :: Sys_GetExeDir()`,
+declared in `engine/h2shared/sys.h`, compiled into both the client and `h2ded`;
+`soundfont.c` now calls it rather than carrying its own copy. The macOS arm
+followed in `uhexen2-81n6`.
+
+On macOS `_NSGetExecutablePath` hands back whatever `argv[0]` resolution
+produced — possibly relative, possibly through a symlink, as Homebrew and
+MacPorts both install one — so it is run through `realpath()` before the
+directory is taken. Note for whoever packages a `.app`: inside a bundle the
+executable lives in `Foo.app/Contents/MacOS/`, so that is the directory
+everything here layers on, and the gamecode payload has to go under
+`Contents/`, not beside the `.app`. Every other platform is unaffected: the
+arm is inside `#elif defined(__APPLE__)`, and the Linux and Windows paths are
+byte-identical to before.
 
 ### F6 — the Windows package already has the right shape
 
