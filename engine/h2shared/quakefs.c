@@ -1843,7 +1843,14 @@ void FS_Init (void)
 				fs_searchpaths = next;
 			}
 			fs_searchpaths = mark;
-			/* back to data1 */
+			/* back to data1.  All three, the way Host_Game_f's own
+			 * reset-to-data1 does it: leaving fs_gamedir_nopath on
+			 * "portals" while the path holds only data1 makes the
+			 * engine misreport which game it is running, and any
+			 * gate keyed on that name inherits the lie.
+			 * uhexen2-1bmj. */
+			qerr_strlcpy(__thisfunc__, __LINE__, fs_gamedir_nopath, "data1",
+							sizeof(fs_gamedir_nopath));
 			FS_MakePath_BUF (FS_BASEDIR, NULL, fs_gamedir, sizeof(fs_gamedir), "data1");
 			FS_MakePath_BUF (FS_USERBASE,NULL, fs_userdir, sizeof(fs_userdir), "data1");
 		}
