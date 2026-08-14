@@ -15,6 +15,47 @@ full investigation.
 Hexenwail fork (diverges from 1.29c):
 =====================================
 
+2026-08-14 [uhexen2-h77u]:
+- items.hc (h2, hw, portals, siege): MonsterDropStuff's CLASS_HENCHMAN chain
+  ended at "else if (chance < .90)" with nothing after it, so chance in
+  [0.90,1.0) set no field, DropBackpack found total==0 and took its "nothing
+  to put in the backpack" path, and the henchman dropped nothing.  15% * 10%
+  = 1.5% of henchman kills -- every mezzoman, the "leopard" of the field
+  reports -- earned a drop and got silently nothing.  Confirmed in retail
+  data1/PROGS.DAT with tools/qcdis.py, so it is Raven's and dates to 1997.
+  That branch is now a bare "else".
+
+  THIS IS A BALANCE CHANGE and was made deliberately, not because it was the
+  smallest diff.  The reasoning, which is the part worth keeping:
+
+    chain        branches  step  last band  unassigned tail
+    CLASS_GRUNT      4     .25      .25          0
+    CLASS_HENCHMAN  11     .08      .10        > .10 <
+    CLASS_LEADER    18     .05      .15          0
+
+  The two chains that terminate correctly do so with a bare else, and the
+  leader's else absorbs a remainder three times its own step width -- Raven
+  let the last item soak up the leftover rather than rescaling the chain.
+  Henchman is the only one of the three with an unassigned tail and the only
+  one without a terminal else, and its final bound is a round .90 where the
+  .08 cadence would have put .88.  It reads as an edit that stopped one
+  keyword early.  So the fix restores the convention the sibling chains
+  already follow; cnt_blast now covers [.80,1.0), 2.5x its neighbours, which
+  is the same shape as the leader's helmet at 3x.
+
+  The alternatives were considered and rejected.  Rescaling all 11 bands to
+  1/11 changes every outcome's odds, a strictly larger divergence than the
+  one it avoids.  Giving [0.90,1.0) its own artifact invents content: the
+  eight artifacts absent from this table are absent on purpose, per the
+  function's own "Henchmen drop instant items or lesser artifacts".  Leaving
+  it alone conflicts with the two fixes below (uhexen2-9r3n, uhexen2-hwky),
+  which are the same defect class -- a drop the player earned, lost with no
+  message -- in the same function.
+
+  Note for portals: its copy also does "it_total+=1" after the chain, which
+  counted the dead-zone case as a drop.  That count is now honest as a side
+  effect; no separate change was needed.
+
 2026-08-13 [uhexen2-qj8s] (ce8c9d1c4):
 - invntory.hc (h2, portals): reverted the Crusader's Glyph of the Ancients
   (TimeBomb) to Raven's behaviour -- think=TimeBombBoom, spawned at
