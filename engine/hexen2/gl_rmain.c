@@ -4981,14 +4981,79 @@ static void R_EmitPointFileArrow (const vec3_t from, const vec3_t to, float frac
 	GL_ImmVertex3f (center[0], center[1], center[2]);
 }
 
+/* Canvas-space position of the leak origin, recomputed each frame by
+ * R_ShowPointFile while the 3D matrices are still live and consumed by
+ * SCR_DrawPointFileLabel in the 2D pass. */
+static qboolean	pointfile_label_valid;
+static float	pointfile_label_x, pointfile_label_y;
+
+qboolean R_GetPointFileLabelPos (float *x, float *y)
+{
+	if (!pointfile_label_valid)
+		return false;
+	*x = pointfile_label_x;
+	*y = pointfile_label_y;
+	return true;
+}
+
+/*
+================
+R_ProjectPointFileLabel
+
+Project the first point of the leak path -- where qbsp says the inside of
+the map connects to the void -- into CANVAS_DEFAULT coordinates.
+
+The 2D pass has no view matrices left to work with, so this has to run here,
+inside the 3D pass.  r_refdef.vrect is already in vid.width/vid.height space
+and CANVAS_DEFAULT is ortho 0..vid.width by 0..vid.height over the whole
+screen, so the viewport mapping falls out with no extra scaling.
+================
+*/
+static void R_ProjectPointFileLabel (const vec3_t org)
+{
+	float	mvp[16], clip[4], ndc[2];
+	int	i;
+
+	pointfile_label_valid = false;
+
+	GL_GetMVP (mvp);
+
+	/* GL_GetMVP hands back a column-major matrix, so column i is mvp[i*4]. */
+	for (i = 0; i < 4; i++)
+		clip[i] = mvp[i] * org[0] + mvp[4 + i] * org[1] +
+			  mvp[8 + i] * org[2] + mvp[12 + i];
+
+	if (clip[3] <= 0.0f)	/* at or behind the eye -- no sensible screen position */
+		return;
+
+	ndc[0] = clip[0] / clip[3];
+	ndc[1] = clip[1] / clip[3];
+
+	/* Off-view horizontally or vertically: drawing the label clamped to an
+	 * edge would point at the wrong place, so just omit it. */
+	if (ndc[0] < -1.0f || ndc[0] > 1.0f || ndc[1] < -1.0f || ndc[1] > 1.0f)
+		return;
+
+	pointfile_label_x = r_refdef.vrect.x +
+			    (ndc[0] * 0.5f + 0.5f) * r_refdef.vrect.width;
+	pointfile_label_y = r_refdef.vrect.y +
+			    (0.5f - ndc[1] * 0.5f) * r_refdef.vrect.height;
+	pointfile_label_valid = true;
+}
+
 static void R_ShowPointFile (void)
 {
 	const byte	*pal;
 	float		r, g, b, frac;
 	int		i;
 
+	pointfile_label_valid = false;
+
 	if (r_numpointfile < 2)
 		return;
+
+	if (r_pointfile_isleak)
+		R_ProjectPointFileLabel (r_pointfile[0]);
 
 	pal = (const byte *) &d_8to24table[leak_color.integer & 255];
 	r = pal[0] * (1.0f / 255.0f);
