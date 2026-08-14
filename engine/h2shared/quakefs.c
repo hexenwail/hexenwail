@@ -80,6 +80,14 @@ typedef struct searchpath_s
 
 static searchpath_t	*fs_searchpaths;
 static searchpath_t	*fs_base_searchpaths;	/* without gamedirs */
+/* The base searchpath WITHOUT the mission pack: the state right after step 1
+ * of FS_Init added data1.  fs_base_searchpaths cannot serve here because a
+ * -game launch folds portals into the base (FS_Init step 2), so unwinding to
+ * it leaves the mission pack on the path forever -- base-game maps then read
+ * portals content, gamecode included.  Host_Game_f rebuilds from this mark
+ * instead and re-adds portals only when the destination wants it.
+ * uhexen2-5vb6. */
+static searchpath_t	*fs_base_nomp_searchpaths;
 
 static const char	*fs_basedir;
 static char	fs_gamedir[MAX_OSPATH];
@@ -379,6 +387,49 @@ pak_error:
 
 /*
 ================
+FS_UnwindSearchpaths
+
+Pops and frees every searchpath entry above `mark', leaving fs_searchpaths
+at `mark'.  The three callers that used to open-code this loop -- FS_Gamedir,
+Host_Game_f's reset and FS_Init's mission pack rollback -- differ only in
+whether they narrate what they removed.
+
+Centralised because of fs_portals_path_id: an id that outlives the entries it
+names is worse than no id at all, since PR_ShouldSubstituteProgs matches on it
+to decide the file it found belongs to the mission pack.  A removal path that
+forgot to clear it would hand that gate a stale answer.  uhexen2-5vb6.
+================
+*/
+static void FS_UnwindSearchpaths (searchpath_t *mark, qboolean verbose)
+{
+	searchpath_t	*next;
+
+	while (fs_searchpaths != mark)
+	{
+		if (fs_searchpaths->pack)
+		{
+			if (verbose)
+				Sys_Printf ("Removed packfile %s\n", fs_searchpaths->pack->filename);
+			fclose (fs_searchpaths->pack->handle);
+			Z_Free (fs_searchpaths->pack->files);
+			Hash_Free(&fs_searchpaths->pack->hash);
+			Z_Free (fs_searchpaths->pack);
+		}
+		else if (verbose)
+		{
+			Sys_Printf ("Removed path %s\n", fs_searchpaths->filename);
+		}
+		if (fs_portals_path_id && fs_searchpaths->path_id == fs_portals_path_id)
+			fs_portals_path_id = 0;
+		next = fs_searchpaths->next;
+		Z_Free (fs_searchpaths);
+		fs_searchpaths = next;
+	}
+}
+
+
+/*
+================
 FS_AddGameDirectory
 
 Sets fs_gamedir, fs_userdir and fs_gamedir_nopath.  adds the directory
@@ -494,8 +545,6 @@ static inline void set_hw_dir (void) { /* helper for FS_Gamedir () */
 
 void FS_Gamedir (const char *dir)
 {
-	searchpath_t	*next;
-
 	if (!*dir || !strcmp(dir, ".") || strstr(dir, "..") || strstr(dir, "/") || strstr(dir, "\\") || strstr(dir, ":"))
 	{
 		if (!host_initialized)
@@ -514,19 +563,7 @@ void FS_Gamedir (const char *dir)
  * since hexen2 doesn't use this during game execution there will be no
  * changes for it: it has portals or data1 at the top.
  */
-	while (fs_searchpaths != fs_base_searchpaths)
-	{
-		if (fs_searchpaths->pack)
-		{
-			fclose (fs_searchpaths->pack->handle);
-			Z_Free (fs_searchpaths->pack->files);
-			Hash_Free(&fs_searchpaths->pack->hash);
-			Z_Free (fs_searchpaths->pack);
-		}
-		next = fs_searchpaths->next;
-		Z_Free (fs_searchpaths);
-		fs_searchpaths = next;
-	}
+	FS_UnwindSearchpaths (fs_base_searchpaths, false);
 
 /* flush all data, so it will be forced to reload */
 #if !defined(SERVERONLY)
@@ -1582,25 +1619,17 @@ static void Host_Game_f (void)
 	/* discard any pending commands from the old mod */
 	Cbuf_Clear ();
 
-	/* reset the filesystem back to base (data1 only) before
-	 * adding new game paths — FS_Gamedir strips paths above
-	 * fs_base_searchpaths, but we need a clean slate */
-	{
-		searchpath_t	*next;
-		while (fs_searchpaths != fs_base_searchpaths)
-		{
-			if (fs_searchpaths->pack)
-			{
-				fclose (fs_searchpaths->pack->handle);
-				Z_Free (fs_searchpaths->pack->files);
-				Hash_Free(&fs_searchpaths->pack->hash);
-				Z_Free (fs_searchpaths->pack);
-			}
-			next = fs_searchpaths->next;
-			Z_Free (fs_searchpaths);
-			fs_searchpaths = next;
-		}
-	}
+	/* Reset the filesystem back to the base game before adding new game
+	 * paths.  Unwind to fs_base_nomp_searchpaths, NOT fs_base_searchpaths:
+	 * the latter includes portals whenever the session was launched with
+	 * -game, because FS_Init step 2 folds the mission pack into the base for
+	 * mods to read.  Stopping there left pak3 on the path across every later
+	 * switch, so "game data1" put the player on base-game maps running
+	 * mission-pack content -- maps, models, sounds and progs.dat alike.
+	 * Portals is re-added below when the destination actually wants it.
+	 * uhexen2-5vb6. */
+	FS_UnwindSearchpaths (fs_base_nomp_searchpaths, false);
+	fs_base_searchpaths = fs_base_nomp_searchpaths;
 	Cache_Flush ();
 
 	/* optionally add portals as base for custom mods */
@@ -1771,6 +1800,11 @@ void FS_Init (void)
 		Sys_Error ("You must have the full version of Hexen II to play modified games");
 #endif
 
+/* Mark the end of step 1.  Everything at or below this point is the base
+ * game and nothing else; Host_Game_f unwinds here to return to data1.
+ * uhexen2-5vb6. */
+	fs_base_nomp_searchpaths = fs_searchpaths;
+
 /* step 2: portals directory (mission pack) */
 #if defined(H2MP)
 	if (! COM_CheckParm ("-noportals"))
@@ -1824,29 +1858,10 @@ void FS_Init (void)
 			/* back out searchpaths from invalid mission pack
 			 * installations because the portals directory is
 			 * reserved for the mission pack */
-			searchpath_t	*next;
 			Sys_Printf ("Missing or invalid mission pack installation\n");
 			Con_Printf("Missing or invalid mission pack installation\n");
 
-			while (fs_searchpaths != mark)
-			{
-				if (fs_searchpaths->pack)
-				{
-					fclose (fs_searchpaths->pack->handle);
-					Z_Free (fs_searchpaths->pack->files);
-					Hash_Free(&fs_searchpaths->pack->hash);
-					Z_Free (fs_searchpaths->pack);
-					Sys_Printf ("Removed packfile %s\n", fs_searchpaths->pack->filename);
-				}
-				else
-				{
-					Sys_Printf ("Removed path %s\n", fs_searchpaths->filename);
-				}
-				next = fs_searchpaths->next;
-				Z_Free (fs_searchpaths);
-				fs_searchpaths = next;
-			}
-			fs_searchpaths = mark;
+			FS_UnwindSearchpaths (mark, true);
 			/* back to data1.  All three, the way Host_Game_f's own
 			 * reset-to-data1 does it: leaving fs_gamedir_nopath on
 			 * "portals" while the path holds only data1 makes the
@@ -1868,6 +1883,12 @@ void FS_Init (void)
 	/* error out if GAME_HEXENWORLD isn't set */
 	if (!(gameflags & GAME_HEXENWORLD))
 		Sys_Error ("You must have the HexenWorld data installed");
+	/* hw is added ABOVE portals, so a single pointer cannot mark a base that
+	 * keeps hw and drops the mission pack.  HexenWorld never rolls back to
+	 * data1 at runtime -- FS_Gamedir refuses both "data1" and "portals" -- so
+	 * collapse the two marks rather than invent a partial unwind for a path
+	 * nothing takes. */
+	fs_base_nomp_searchpaths = fs_searchpaths;
 #endif	/* H2W */
 
 /* this is the end of our base searchpath:
