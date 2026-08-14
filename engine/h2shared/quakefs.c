@@ -1542,7 +1542,11 @@ static void Host_Game_f (void)
 	/* validate that the directory exists (skip for data1) */
 	if (q_strcasecmp(dir, "data1"))
 	{
-		q_snprintf (path, sizeof(path), "%s/%s", host_parms->basedir, dir);
+		/* fs_basedir, not host_parms->basedir: -basedir moves the former and
+		 * never touches the latter, so probing host_parms->basedir looks for
+		 * mods under the working directory the process happened to start in.
+		 * uhexen2-5mhd. */
+		q_snprintf (path, sizeof(path), "%s/%s", fs_basedir, dir);
 		if (Sys_FileType(path) != FS_ENT_DIRECTORY)
 		{
 			Con_Printf ("Game directory \"%s\" not found\n", dir);
@@ -1602,7 +1606,7 @@ static void Host_Game_f (void)
 	/* optionally add portals as base for custom mods */
 	if (use_portals && q_strcasecmp(dir, "data1") && q_strcasecmp(dir, "portals"))
 	{
-		q_snprintf (path, sizeof(path), "%s/portals", host_parms->basedir);
+		q_snprintf (path, sizeof(path), "%s/portals", fs_basedir);	/* uhexen2-5mhd */
 		if (Sys_FileType(path) == FS_ENT_DIRECTORY)
 		{
 			FS_AddGameDirectory ("portals", true);
