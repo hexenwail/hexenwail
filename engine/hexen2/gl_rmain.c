@@ -4230,7 +4230,12 @@ static void R_SetupFrame (void)
 		 * route through GL_ImmEnd or the per-binding-site uploads.
 		 * uhexen2-f29y. */
 		{
-			float ob = gl_overbright.integer ? 2.0f : 1.0f;
+			/* r_fullbright forces the multiplier back to 1: it replaces the
+			 * lightmap sample with white, and overbright would then double a
+			 * value that is already at full scale, blowing every surface to
+			 * pure white and hiding the very texture detail the mode exists
+			 * to show.  uhexen2-isq7. */
+			float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
 			if (gl_shader_world.program && gl_shader_world.u_overbright >= 0)
 			{
 				glUseProgram_fp(gl_shader_world.program);
@@ -4245,6 +4250,34 @@ static void R_SetupFrame (void)
 			{
 				glUseProgram_fp(gl_shader_world_oit.program);
 				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
+			}
+		}
+		/* Per-frame world lighting-debug switches.  Same plumbing again:
+		 * r_fullbright whites out the lightmap sample, r_lightmap whites out
+		 * the diffuse sample and suppresses the fullbright mask, so the two
+		 * halves of a world fragment can be looked at separately.  Both were
+		 * previously inert for brush surfaces -- r_fullbright reached only the
+		 * alias fullbright pass and r_lightmap was registered and never read,
+		 * which quietly invalidated any "is this lighting or texture" test
+		 * anyone ran with them.  uhexen2-isq7. */
+		{
+			float ld[2];
+			ld[0] = r_fullbright.integer ? 1.0f : 0.0f;
+			ld[1] = r_lightmap.integer ? 1.0f : 0.0f;
+			if (gl_shader_world.program && gl_shader_world.u_lightdebug >= 0)
+			{
+				glUseProgram_fp(gl_shader_world.program);
+				glUniform2f_fp(gl_shader_world.u_lightdebug, ld[0], ld[1]);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightdebug >= 0)
+			{
+				glUseProgram_fp(gl_shader_world_opaque.program);
+				glUniform2f_fp(gl_shader_world_opaque.u_lightdebug, ld[0], ld[1]);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightdebug >= 0)
+			{
+				glUseProgram_fp(gl_shader_world_oit.program);
+				glUniform2f_fp(gl_shader_world_oit.u_lightdebug, ld[0], ld[1]);
 			}
 		}
 		/* Per-frame world bicubic lightmap toggle.  Same plumbing as

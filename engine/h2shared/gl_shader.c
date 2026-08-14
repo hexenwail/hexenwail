@@ -257,6 +257,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
+	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
@@ -435,6 +436,7 @@ static const char sworld_frag[] =
 	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
+	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -447,7 +449,14 @@ static const char sworld_frag[] =
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
+	/* r_fullbright / r_lightmap.  Applied to the samples rather than to the
+	 * final colour so everything downstream -- overbright, the fullbright
+	 * mask, caustics, fog, the alpha test -- keeps seeing a well-formed
+	 * value.  rgb only on the diffuse: tex.a still gates the alpha test, so
+	 * r_lightmap must not turn a fence into a solid sheet.  uhexen2-isq7. */
 	"        : texture(u_texture1, v_lmcoord);\n"
+	"    lm.rgb = mix(lm.rgb, vec3(1.0), u_lightdebug.x);\n"
+	"    tex.rgb = mix(tex.rgb, vec3(1.0), u_lightdebug.y);\n"
 	/* Sample the fullbright mask BEFORE the alpha-test discard.  texture()
 	 * uses implicit dFdx/dFdy to pick the mip level; derivatives are
 	 * undefined in a 2x2 quad where some lanes have already discarded, so
@@ -457,7 +466,7 @@ static const char sworld_frag[] =
 	 * at full intensity regardless of lightmap.  For surfaces with no
 	 * fullbright pixels the engine binds a 1x1 black sentinel at unit 2
 	 * so the sample contributes 0.  uhexen2-9a1l. */
-	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"    vec3 fb = texture(u_texture2, v_texcoord).rgb * (1.0 - u_lightdebug.y);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"    if (color.a < u_alpha_threshold) discard;\n"
@@ -509,6 +518,7 @@ static const char sworld_frag_opaque[] =
 	"uniform vec2 u_caustics;\n"		/* x=intensity, y=time (uhexen2-6bfm) */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
+	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -522,9 +532,11 @@ static const char sworld_frag_opaque[] =
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
 	"        : texture(u_texture1, v_lmcoord);\n"
+	"    lm.rgb = mix(lm.rgb, vec3(1.0), u_lightdebug.x);\n"	/* uhexen2-isq7 */
+	"    tex.rgb = mix(tex.rgb, vec3(1.0), u_lightdebug.y);\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
-	"    vec3 fb = texture(u_texture2, v_texcoord).rgb;\n"
+	"    vec3 fb = texture(u_texture2, v_texcoord).rgb * (1.0 - u_lightdebug.y);\n"
 	"    color.rgb += fb;\n"
 	"    if (u_caustics.x > 0.0) {\n"
 	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
