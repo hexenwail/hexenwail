@@ -462,11 +462,12 @@ static void DrawLowerBar(void)
 	int	ringhealth;
 
 	//playerClass = cl.v.playerclass;
+	// 1-based here; CalcAC() keeps the same value 0-based.  See the note there.
 	playerClass = cl_playerclass.integer;
 	if (playerClass < 1 || playerClass > MAX_PLAYER_CLASS)
-		playerClass = 1;	// Default to paladin
+		playerClass = CLASS_PALADIN;	// Default to paladin
 	if (!(gameflags & GAME_PORTALS) && playerClass > MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES)
-		playerClass = 1;	// Default to paladin
+		playerClass = CLASS_PALADIN;	// Default to paladin
 
 	// Backdrop
 	Sbar_DrawPic(0, 46, Draw_CachePic("gfx/btmbar1.lmp"));
@@ -622,11 +623,16 @@ static int CalcAC(void)
 	int	playerClass;
 
 	//playerClass = cl.v.playerclass;
+	// NOTE: 0-based here, unlike DrawLowerBar()'s 1-based copy of these
+	// same two clamps -- this indexes the AC tables directly.  That is why
+	// the Portals clamp below is >= and DrawLowerBar()'s is >, and why the
+	// fallback is CLASS_PALADIN - 1 rather than the 1 the comment used to
+	// claim was the Paladin.  uhexen2-9xhs.
 	playerClass = cl_playerclass.integer -1;
 	if (playerClass < 0 || playerClass >= MAX_PLAYER_CLASS)
-		playerClass = 1;	// Default to paladin
-	if (!(gameflags & GAME_PORTALS) && playerClass > MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES)
-		playerClass = 1;	// Default to paladin
+		playerClass = CLASS_PALADIN - 1;	// Default to paladin
+	if (!(gameflags & GAME_PORTALS) && playerClass >= MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES)
+		playerClass = CLASS_PALADIN - 1;	// Default to paladin
 
 	a = 0;
 	if (cl.v.armor_amulet > 0)
