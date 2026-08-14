@@ -2283,26 +2283,36 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	}
 	else if (glt->flags & TEX_MIPMAP)
 	{
-		GLuint min_filter = gl_texmodes[gl_filter_idx].minimize;
-		/* uhexen2-khsa r29: TEX_HOLEY / TEX_FENCE cutout textures
-		 * pre-binarize alpha at each mip level (above, ~line 2172).
-		 * But trilinear MIPMAP_LINEAR interpolates BETWEEN mip levels,
-		 * producing fractional alpha at the LOD boundary — exactly the
-		 * values that flicker pass/fail through the 0.5 discard
-		 * threshold under viewer motion, producing the screen-door
-		 * shimmer Mathuzzz reported.  Demote to the MIPMAP_NEAREST
-		 * variant so each fragment samples ONE mip's binary alpha with
-		 * no cross-LOD interpolation.  Trade-off: slight mip-LOD
-		 * transition pop in exchange for stable cutout silhouettes.
-		 * In-mip bilinear filtering of RGB is preserved. */
-		if (glt->flags & (TEX_FENCE | TEX_HOLEY))
-		{
-			if (min_filter == GL_LINEAR_MIPMAP_LINEAR)
-				min_filter = GL_LINEAR_MIPMAP_NEAREST;
-			else if (min_filter == GL_NEAREST_MIPMAP_LINEAR)
-				min_filter = GL_NEAREST_MIPMAP_NEAREST;
-		}
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
+		/* TEX_HOLEY / TEX_FENCE cutout textures get no special MIN_FILTER
+		 * treatment here -- they take gl_texturemode like everything else.
+		 * uhexen2-khsa r29 used to demote GL_LINEAR_MIPMAP_LINEAR to
+		 * GL_LINEAR_MIPMAP_NEAREST for them, on the theory that cross-LOD
+		 * interpolation of the pre-binarized mip alpha (see the
+		 * re-binarization loop above) was what flickered through the 0.5
+		 * discard and produced Mathuzzz's screen-door.  Removed in
+		 * uhexen2-izii for three reasons:
+		 *
+		 *   - The theory is dead.  The 2026-06-22 repro detail (always the
+		 *     same entity, shifts between builds, re-running the same map
+		 *     fixes it, a different map in between breaks it again) pointed
+		 *     at a stale resource across a map transition, and the whole
+		 *     alpha/discard/mipmap/A2C family was ruled out with it.  r29
+		 *     was never confirmed to fix anything.
+		 *
+		 *   - It would not have worked anyway.  MIPMAP_NEAREST only picks
+		 *     one mip; sampling *within* that mip is still bilinear, so
+		 *     every cutout edge still yields the full 0..255 fractional
+		 *     alpha range, and anisotropic filtering still multi-taps.  It
+		 *     removed one of two sources of an effect that remains.
+		 *
+		 *   - It was not free.  Every FENCE/HOLEY texture paid visible
+		 *     mip-LOD popping for it -- world brush grates and fences, not
+		 *     just the alias models the report was about.
+		 *
+		 * The mip alpha re-binarization above is the principled half and
+		 * stays.  Do not re-add the demotion without a repro that a
+		 * MIN_FILTER change actually moves. */
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, gl_texmodes[gl_filter_idx].minimize);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 		if (gl_max_anisotropy >= 2)
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
