@@ -218,6 +218,23 @@ void CL_LoadCSProgs (void)
 	for (i = 0; i < p->numglobals; i++)
 		((int *)csqc_state.globals)[i] = LittleLong (((int *)csqc_state.globals)[i]);
 
+	/* The bytecode itself, now that its tables are in host byte order.  This is
+	 * the path that makes uhexen2-1p3o and uhexen2-im9e reachable rather than
+	 * theoretical: csprogs.dat is the one progs image that arrives with
+	 * downloaded mod or server content, and once it exports CSQC_DrawHud its
+	 * statements run every frame.  A hostile one gets declined with a message,
+	 * for the same reason the extents check does -- Host_Error() here would let
+	 * a bad file deny the player their client. */
+	bad = PR_ValidateBytecode (csqc_state.statements, p->numstatements,
+				   csqc_state.functions, p->numfunctions,
+				   p->numglobals, false);
+	if (bad)
+	{
+		Con_Printf ("CSQC: ignoring csprogs.dat: %s\n", bad);
+		memset (&csqc_state, 0, sizeof(csqc_state));
+		return;
+	}
+
 	/* install CSQC builtins */
 	csqc_state.builtins = csqc_builtins;
 	csqc_state.numbuiltins = csqc_numbuiltins;

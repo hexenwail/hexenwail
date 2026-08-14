@@ -145,6 +145,17 @@ void PR_LoadProgs (void);
  * call on an unvetted image before the caller does its own in-place swap. */
 const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen);
 
+/* Returns NULL if the bytecode inside those lumps only ever reaches globals and
+ * statements the image has, else a reason string.  Where PR_CheckProgsExtents()
+ * vets the container, this vets what the container holds: statement operands are
+ * raw int32 indices into pr_globals and PR_ExecuteProgram() dereferences them --
+ * including as write targets -- without a check of its own.  Call after the
+ * byteswap loops, with the same is_v6 flag the interpreter will run under.
+ * uhexen2-1p3o, uhexen2-im9e. */
+const char *PR_ValidateBytecode (const dstatement_t *statements, int numstatements,
+				 const dfunction_t *functions, int numfunctions,
+				 int numglobals, qboolean v6);
+
 const char *PR_GetString (int num);
 int PR_SetEngineString (const char *s);
 int PR_AllocString (int bufferlength, char **ptr);

@@ -451,12 +451,16 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 		c->vector[2] = ptr->vector[2];
 		break;
 
+	/* The element count these bound the index against is G_INT(st->a - 1) --
+	 * a global, which the program is free to write at runtime, so a load-time
+	 * check cannot speak for where the indexing ends up.  PR_ValidateBytecode()
+	 * vets the base; the reach past it has to be vetted here.  uhexen2-1p3o. */
 	case OP_FETCH_GBL_F:
 	case OP_FETCH_GBL_S:
 	case OP_FETCH_GBL_E:
 	case OP_FETCH_GBL_FNC:
 	  {	int i = (int)b->_float;
-		if (i < 0 || i > G_INT(st->a - 1))
+		if (i < 0 || i > G_INT(st->a - 1) || i >= progs->numglobals - st->a)
 		{
 			pr_xstatement = st - pr_statements;
 			PR_RunError("array index out of bounds: %d", i);
@@ -466,7 +470,11 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 	  }	break;
 	case OP_FETCH_GBL_V:
 	  {	int i = (int)b->_float;
-		if (i < 0 || i > G_INT(st->a - 1))
+		/* room is at least 1: the base is inside the lump.  Taking the
+		 * subtraction in this order keeps a large index from overflowing
+		 * the multiply it would need on the other side. */
+		int room = progs->numglobals - st->a;
+		if (i < 0 || i > G_INT(st->a - 1) || room < 3 || i > (room - 3) / 3)
 		{
 			pr_xstatement = st - pr_statements;
 			PR_RunError("array index out of bounds: %d", i);
@@ -540,6 +548,15 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 		if (!a->function)
 		{
 			PR_RunError("NULL function");
+		}
+		/* PR_ExecuteProgram() bounds fnum for calls that come in from the
+		 * engine, but a call made *by* the bytecode reached the function
+		 * table with nothing but the NULL test above -- and the entry it
+		 * lands on decides where execution goes next, so an index past the
+		 * table is an arbitrary instruction pointer.  uhexen2-im9e. */
+		if ((unsigned int)a->function >= (unsigned int)progs->numfunctions)
+		{
+			PR_RunError("Bad function call number %d", a->function);
 		}
 		newf = &pr_functions[a->function];
 		if (newf->first_statement < 0)
