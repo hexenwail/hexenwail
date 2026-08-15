@@ -1956,7 +1956,7 @@ static void M_Gamepad_Key (int k);
  * provides a `const char *labels[ITEMS]` table; while m_search_len > 0
  * the menu's IsSkip helper hides rows whose label doesn't contain the
  * (case-insensitive) search buffer.  Initial integration: Rendering
- * submenu (REND_ITEMS == 18, biggest list).  Pattern propagates to other
+ * submenu (REND_ITEMS == 19, biggest list).  Pattern propagates to other
  * submenus by adding a labels table + IsSkip + search hooks in *_Key.
  * ------------------------------------------------------------------------- */
 #define M_SEARCH_BUFLEN	24
@@ -2779,6 +2779,7 @@ enum
 	REND_ANISOTROPY,
 	REND_LMBICUBIC,
 	REND_PARTICLES,
+	REND_SOFTPARTICLES,
 	REND_FULLBRIGHTS,
 	REND_DYNLIGHT,
 	REND_WATERCOLOR,
@@ -2805,6 +2806,7 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Anisotropy    :",	/* REND_ANISOTROPY */
 	"Smooth Lmaps  :",	/* REND_LMBICUBIC */
 	"Particles     :",	/* REND_PARTICLES */
+	"Soft Sprites  :",	/* REND_SOFTPARTICLES */
 	"Fullbrights   :",	/* REND_FULLBRIGHTS */
 	"Dynamic Light :",	/* REND_DYNLIGHT */
 	"Water Tint    :",	/* REND_WATERCOLOR */
@@ -2891,6 +2893,9 @@ static void M_Rendering_AdjustSliders (int dir)
 		break;
 	case REND_PARTICLES:
 		Cvar_SetValue ("gl_particles", !gl_particles.integer);
+		break;
+	case REND_SOFTPARTICLES:
+		Cvar_SetValue ("r_softparticles", !r_softparticles.integer);
 		break;
 	case REND_FULLBRIGHTS:
 		Cvar_SetValue ("gl_fullbrights", !gl_fullbrights.integer);
@@ -3036,6 +3041,12 @@ static void M_Rendering_Draw (void)
 	{
 		M_Print (76, 92 + 8*REND_PARTICLES, rend_labels[REND_PARTICLES]);
 		M_PrintWhite (220, 92 + 8*REND_PARTICLES, gl_particles.integer ? "Round" : "Square");
+	}
+
+	if (!M_Rendering_IsSkip(REND_SOFTPARTICLES))
+	{
+		M_Print (76, 92 + 8*REND_SOFTPARTICLES, rend_labels[REND_SOFTPARTICLES]);
+		M_DrawCheckbox (220, 92 + 8*REND_SOFTPARTICLES, r_softparticles.integer);
 	}
 
 	if (!M_Rendering_IsSkip(REND_FULLBRIGHTS))

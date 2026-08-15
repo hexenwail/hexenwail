@@ -511,6 +511,63 @@ typedef struct
 	vec3_t		vup, vright, vpn;	// in worldspace
 } spritedesc_t;
 
+/*
+=================
+R_SoftParticleParams
+
+Coefficients that turn a window-space depth into a positive view-space
+distance, as z = zb / (za - d).  Returns false when the soft-particle fade
+should not run at all this draw (uhexen2-mf9u).
+
+Derivation: for any perspective projection, z_clip = P22*z_eye + P23 and
+w_clip = -z_eye, so the post-divide depth is an affine function of 1/z_eye.
+Inverting it gives the two constants below.  The [-1,1] and [0,1] clip
+conventions differ only in how z_ndc maps to the depth range, and
+glDepthRange is folded in on top, so one expression covers reversed-Z,
+forward-Z, and the mirror pass's split ranges without the shader needing to
+know which is in play.
+=================
+*/
+static qboolean R_SoftParticleParams (float *inv_dist, float *za, float *zb)
+{
+	float	proj[16], a, b, range;
+	float	dist = r_softparticles_scale.value;
+
+	if (!r_softparticles.integer || !GL_SoftDepth_GetTex())
+		return false;
+	if (dist < 1.0f)
+		return false;
+
+	GL_GetProjection (proj);
+	/* Column-major: proj[10] is P22, proj[14] is P23, proj[11] is P32 = -1.
+	 * A zero P32 means an orthographic matrix is current, which has no
+	 * 1/z relationship to invert. */
+	if (proj[11] == 0.0f || proj[14] == 0.0f)
+		return false;
+
+	if (gl_clipcontrol_able)
+	{
+		/* [0,1] clip space: d = z_ndc directly. */
+		a = -proj[10];
+		b = -proj[14];
+	}
+	else
+	{
+		/* [-1,1] clip space: d = 0.5*z_ndc + 0.5. */
+		a = 0.5f - 0.5f * proj[10];
+		b = -0.5f * proj[14];
+	}
+
+	/* Fold glDepthRange in so the shader can feed raw gl_FragCoord.z. */
+	range = gldepthmax - gldepthmin;
+	if (range == 0.0f)
+		return false;
+	*za = a * range + gldepthmin;
+	*zb = b * range;
+	*inv_dist = 1.0f / dist;
+	return true;
+}
+
 static void R_DrawSpriteModel (entity_t *e)
 {
 	vec3_t		point;
@@ -520,6 +577,8 @@ static void R_DrawSpriteModel (entity_t *e)
 	float		dot, angle, sr, cr;
 	spritedesc_t	r_spritedesc;
 	int			i;
+	float		soft_inv = 0.0f, soft_za = 0.0f, soft_zb = 0.0f;
+	qboolean	soft_active;
 
 	frame = R_GetSpriteFrame (e);
 	psprite = (msprite_t *) e->model->cache.data;
@@ -623,13 +682,22 @@ static void R_DrawSpriteModel (entity_t *e)
 		Sys_Error ("%s: Bad sprite type %d", __thisfunc__, psprite->type);
 	}
 
+	soft_active = R_SoftParticleParams (&soft_inv, &soft_za, &soft_zb);
+
 	/* translucency handling.  Inside an OIT pass the FBO has two
 	 * blend-enabled MRT attachments configured by OIT_BeginTranslucency
 	 * (accum + revealage).  Disabling GL_BLEND there would clobber both
 	 * attachments with REPLACE writes — so opaque sprites must still
-	 * keep blend on and just contribute α=1.0 through the OIT formula. */
+	 * keep blend on and just contribute α=1.0 through the OIT formula.
+	 *
+	 * A soft-particle sprite also needs blend on even when it is nominally
+	 * opaque: the fade lands in fragColor.a, and with blending off that
+	 * alpha reaches the framebuffer without ever modulating anything.
+	 * Harmless for a sprite that isn't near geometry — .spr texels are
+	 * fully opaque or fully cut out, so the fade is the only thing that can
+	 * put an intermediate alpha there.  uhexen2-mf9u. */
 	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT) ||
-	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
+	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)) || soft_active)
 	{
 		glEnable_fp (GL_BLEND);
 		if (!OIT_InPass())
@@ -638,6 +706,17 @@ static void R_DrawSpriteModel (entity_t *e)
 	else if (!OIT_InPass())
 	{
 		glDisable_fp (GL_BLEND);
+	}
+
+	if (soft_active)
+	{
+		/* Unit 1 is bound by hand rather than through GL_Bind, which only
+		 * tracks unit 0.  Restore the active unit immediately so the
+		 * GL_Bind below still lands where it expects to. */
+		glActiveTexture_fp (GL_TEXTURE1);
+		glBindTexture_fp (GL_TEXTURE_2D, GL_SoftDepth_GetTex());
+		glActiveTexture_fp (GL_TEXTURE0);
+		GL_SetSoftParticles (soft_inv, soft_za, soft_zb);
 	}
 
 	GL_Bind(frame->gl_texturenum);
@@ -698,6 +777,16 @@ static void R_DrawSpriteModel (entity_t *e)
 
 	glDisable_fp (GL_POLYGON_OFFSET_FILL);
 	glPolygonOffset_fp (0.0f, 0.0f);
+
+	if (soft_active)
+	{
+		/* Back to the resting state before any alias / warp / brush batch
+		 * picks up this program.  uhexen2-mf9u. */
+		GL_SetSoftParticles (0.0f, 0.0f, 0.0f);
+		glActiveTexture_fp (GL_TEXTURE1);
+		glBindTexture_fp (GL_TEXTURE_2D, 0);
+		glActiveTexture_fp (GL_TEXTURE0);
+	}
 
 // restore tex parms
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
@@ -4592,6 +4681,10 @@ static void R_Mirror (void)
 
 	R_RenderScene ();
 
+	/* Re-snapshot: the mirror view has its own opaque depth and its own
+	 * depth range, and R_SoftParticleParams reads both live.  uhexen2-mf9u. */
+	GL_SoftDepth_Capture ();
+
 	glDepthMask_fp(0);
 
 	R_DrawParticles ();
@@ -5333,6 +5426,11 @@ void R_RenderView (void)
 	/* Opaque liquids draw before OIT_BeginTranslucency; translucent
 	 * water/ice runs inside OIT below. */
 	R_DrawWaterSurfaces (WATER_PHASE_OPAQUE);
+
+	/* Last point at which the depth buffer holds opaque geometry only —
+	 * snapshot it for the soft-particle fade before translucency starts
+	 * layering onto it.  uhexen2-mf9u. */
+	GL_SoftDepth_Capture ();
 
 	glDepthMask_fp(0);
 

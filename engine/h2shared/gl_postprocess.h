@@ -75,6 +75,23 @@ GLuint GL_PostProcess_GetSceneDepthTex (void);
  * FBO is active. */
 qboolean GL_PostProcess_GetSceneSize (int *w, int *h);
 
+/* Soft particles (uhexen2-mf9u).  r_softparticles fades a sprite's alpha as
+ * it approaches the opaque geometry behind it, so billboards that intersect
+ * a wall dissolve into it instead of being sliced along the intersection.
+ * r_softparticles_scale is the fade distance in world units. */
+extern cvar_t r_softparticles;
+extern cvar_t r_softparticles_scale;
+
+/* Snapshot the opaque scene depth for this frame's soft-particle fade.  Call
+ * after the last opaque draw and before any translucent one; a no-op when
+ * r_softparticles is off or the scene is multisampled. */
+void GL_SoftDepth_Capture (void);
+
+/* The depth snapshot taken by GL_SoftDepth_Capture, or 0 when there isn't
+ * one for this frame.  Sample it at gl_FragCoord.xy — it is the size of the
+ * current render target. */
+GLuint GL_SoftDepth_GetTex (void);
+
 /* OIT_OUTPUT macro for injection into translucent fragment shaders.
  * Replaces `out vec4 fragColor` with MRT outputs when OIT==1. */
 extern const char *OIT_OUTPUT_GLSL_STR;
