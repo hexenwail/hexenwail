@@ -693,9 +693,28 @@ static const char *PR_FindBundleDir (void);
 PR_LatchGamecode
 
 Called when a NEW GAME starts, and only then.  changelevel and restart must not
-call it: a campaign has to finish on the gamecode it began with, and a
-savegame's progdefs CRC is checked against whatever is loaded, so swapping
-mid-run would leave the player unable to load their own saves.
+call it: a campaign has to finish on the gamecode it began with, for two
+reasons.
+
+1. Semantic mismatch.  Drop tables, item behaviour and progression differ
+   between the images; changing them between levels of one campaign is
+   incoherent on its own terms.
+2. Silent savegame field loss.  Nothing refuses a cross-variant load -- see
+   below -- so the failure is quiet rather than loud, which makes it worse,
+   not better.  Entity state is stored as field-name/value text and restored
+   through ED_ParseEdict() -> ED_FindField(); a field the loaded progs does
+   not have is reported and skipped, and the load still succeeds with that
+   value gone.  uhexen2-acew tracks that hazard on its own.
+
+NOT because of a savegame CRC check -- there is no such check, and an earlier
+version of this comment (and ebd68cc11's commit message) claimed there was.
+Host_Loadgame_f() (hexen2/host_cmd.c) validates SAVEGAME_VERSION and nothing
+else.  progs->crc is consulted only by the CLASS_DEMON availability gate and by
+PR_LoadProgs()'s globals-layout switch; pr_crc is saved and restored only by
+PR_SaveVMState/PR_RestoreVMState, which exist for CSQC VM switching.  The
+24008 / 17499 figures cited in that commit message are the whole-file pr_crc
+from the startup provenance line: they prove the two images differ, but no load
+path compares them.  uhexen2-lrjk.
 ===============
 */
 void PR_LatchGamecode (void)
