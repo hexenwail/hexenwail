@@ -133,6 +133,45 @@ diffing against an older tree or against upstream uHexen2, that file is
 not a reference for what this engine does.
 
 
+Replacement .mdl files change entity physics bounds:
+--------------------------------------------------------------
+This is the content-author-facing half of the section above.  Because
+the listen server derives an alias entity's box from mesh geometry
+rather than from a constant, dropping in a replacement model changes
+that entity's collision, not only its appearance.
+
+Swap a remodelled, rescaled or higher-poly .mdl over one of Raven's and
+gl_model.c recomputes aliasmins/aliasmaxs from the new mesh, applies the
++/-10 padding to those new extents, and PF_setmodel hands the result to
+SetMinMaxSize().  An entity whose progs never calls setsize() now blocks,
+catches and is caught by a differently sized box than the one the mapper
+built around.  Nothing warns.  The swap looks cosmetic and is not.
+
+Notes for the three parties this can bite:
+
+  - Mod authors: call setsize() after setmodel().  All of the shipped
+    gamecode already does, which is what keeps this latent.  A mod that
+    leans on the implicit box has tied its physics to the vertex extents
+    of whichever .mdl happens to be installed.
+
+  - Model authors: if a replacement is meant as a drop-in for stock
+    content, keep its extents near the original's.  Silhouette is free;
+    reach is not.
+
+  - Anyone packaging or hosting fan content: a "just the models" pack is
+    not necessarily gameplay-neutral, and can change collision on maps it
+    was never tested against.
+
+Spoike's summary, on Discord 2026-08-13, in the same conversation that
+confirmed the +/-10 against Raven's original source release: "beware of
+replacement models".
+
+This is vanilla Hexen II behaviour, inherited and deliberately kept --
+see the section above for why engine-side alias bounds are not a safe
+thing to change.  The note exists because the behaviour is invisible
+until it bites, not because it is wrong.
+
+
 SV_SpawnServer, Host_ShutdownServer and SCR_UpdateScreen:
 --------------------------------------------------------------
 The timeout in SCR_UpdateScreen(), and more (actually a bug) :
