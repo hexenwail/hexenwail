@@ -1479,8 +1479,17 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_bloom_threshold);
 	Cvar_RegisterVariable(&r_softparticles);
 	Cvar_RegisterVariable(&r_softparticles_scale);
-	if (r_oit.integer)
-		Cvar_Set("r_oit", "0");
+
+	/* r_oit used to be force-reset to 0 here, discarding an archived 1 on
+	 * every startup, because OIT rendered nothing at all.  That was
+	 * uhexen2-z4r1: the resolve's fullscreen triangle was front-face culled,
+	 * so correctly filled accum/revealage buffers were composited nowhere.
+	 * Fixed in 8dcbc6284, so the workaround is now hiding a fixed bug and
+	 * stopping anybody from accumulating playtime on the feature.
+	 *
+	 * Still defaults to 0 -- WBOIT is an approximation, not a free upgrade,
+	 * and this only lets the setting persist for someone who opts in.
+	 * uhexen2-hhs1. */
 
 	pp_initialized = false;
 	pp_active = false;
