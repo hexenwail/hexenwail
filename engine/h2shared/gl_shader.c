@@ -148,6 +148,22 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 	if (!rest) return 0;
 	rest++; /* skip past newline */
 
+	/* ...and past any default-precision declarations following it.  GLSL ES
+	 * requires `precision <qual> <type>;` to appear before the first use of
+	 * that type, and the preamble spliced in below declares vec4s of its
+	 * own.  Splicing between #version and the precision line therefore made
+	 * every OIT fragment shader on the ES tier fail to compile with "No
+	 * precision specified in this scope for type `vec4'", losing OIT for
+	 * world, alias and particle translucency there.  GLSL_FRAG_HEADER
+	 * carries no precision line on desktop, so this loop does nothing on
+	 * that path.  uhexen2-g63k, surfaced by uhexen2-0py6. */
+	while (!strncmp(rest, "precision ", 10))
+	{
+		const char *eol = strchr(rest, '\n');
+		if (!eol) return 0;
+		rest = eol + 1;
+	}
+
 	/* Build modified source: version line + OIT preamble + rest (minus `out vec4 fragColor;\n`) */
 	{
 		/* Skip the `out vec4 fragColor;\n` line in the rest */
@@ -158,7 +174,6 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 		/* Allocate buffer: version + preamble + (rest before fragColor) + (rest after fragColor) */
 		size_t ver_len = rest - frag_src;
 		size_t before_len = skip - strlen("out vec4 fragColor;\n") - rest;
-		size_t after_start = skip - frag_src;
 		size_t total = ver_len + strlen(oit_preamble) + before_len + strlen(skip) + 1;
 		char *buf = (char *)malloc(total);
 		GLuint shader;
@@ -268,7 +283,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 /* ------------------------------------------------------------------ */
 
 /* GLSL version header: desktop GL 4.3 vs WebGL2 (ES 3.0) */
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 #define GLSL_VERT_HEADER	"#version 300 es\nprecision highp float;\n"
 #define GLSL_FRAG_HEADER	"#version 300 es\nprecision mediump float;\n"
 /* GLSL ES 3.00 doesn't support early_fragment_tests */
@@ -640,7 +655,11 @@ static const char salias_frag[] =
 	"#endif\n"
 	"}\n";
 
-/* --- shader_skeletal: skeletal animation with bone-weighted deformation --- */
+/* --- shader_skeletal: skeletal animation with bone-weighted deformation ---
+ * Desktop only: the bone matrices arrive in a std430 shader storage block,
+ * which is GLSL ES 3.10 and absent from WebGL2 entirely.  See GL_Shaders_Init
+ * and uhexen2-dfay. */
+#ifndef USE_GLES
 static const char sskeletal_vert[] =
 	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
@@ -681,6 +700,7 @@ static const char sskeletal_vert[] =
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(skinned_pos, 1.0);\n"
 	"}\n";
+#endif /* !USE_GLES */
 
 /* --- shader_particle: textured triangles with per-vertex color --- */
 static const char spart_vert[] =
@@ -720,7 +740,7 @@ static const char spart_frag[] =
 	"    fragColor = color;\n"
 	"}\n";
 
-#ifndef __EMSCRIPTEN__  /* SSBO shaders require GL 4.3 — not available in WebGL2 */
+#ifndef USE_GLES  /* SSBO shaders require GL 4.3 — not available in WebGL2 */
 /* --- shader_particle_gpu: SSBO-driven billboard particles ---
  * Vertex shader reads particle state from an SSBO (binding=0).
  * Each particle uses 3 vertices (gl_VertexID/3 = particle index).
@@ -790,7 +810,7 @@ static const char spart_gpu_vert[] =
 	"    v_fogdist   = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(pos, 1.0);\n"
 	"}\n";
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 
 /* --- shader_alias_instanced: GL 4.3 SSBO-based instanced alias models ---
  * Instance data in SSBO binding 0 (streamed via gl_buffer.c each frame).
@@ -801,7 +821,7 @@ static const char spart_gpu_vert[] =
  * Scale/origin baked into the world matrix CPU-side.
  * 80-byte instance struct matching Ironwail's compact layout.
  */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 static const char salias_inst_vert[] =
 	"#version 430 core\n"
 	"\n"
@@ -912,7 +932,7 @@ static const char salias_inst_vert[] =
 	"    v_fogdist = distance(world_pos, u_eyepos);\n"
 	"    gl_Position = u_viewproj * vec4(world_pos, 1.0);\n"
 	"}\n";
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
 static const char ssky_vert[] =
@@ -1003,7 +1023,7 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	return true;
 }
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 {
 	p->base.program = GL_LoadProgram(spart_gpu_vert, spart_frag);
@@ -1030,7 +1050,7 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 	Con_SafePrintf("  shader 'particle_gpu' loaded (program %u)\n", p->base.program);
 	return true;
 }
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 
 void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				  const float *pup, const float *pright,
@@ -1067,7 +1087,7 @@ gl_alias_inst_prog_t gl_shader_alias_inst;
 /* Shadedots table — defined in gl_rmain.c */
 extern float r_avertexnormal_dots[16][256];
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 {
 	GLuint vs, fs, prog;
@@ -1135,11 +1155,11 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	Sys_Printf("  alias_instanced: OK (prog=%u, ubo=%u)\n", prog, p->ubo_shadedots);
 	return true;
 }
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 
 void GL_AliasInst_Init (void)
 {
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst))
 		Sys_Printf("WARNING: instanced alias shader failed to init\n");
 #endif
@@ -1163,7 +1183,17 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
+#ifndef USE_GLES
+	/* Skipped on the ES tier: sskeletal_vert reads its bone matrices from a
+	 * `layout(std430) buffer`, and shader storage blocks are GLSL ES 3.10,
+	 * not 3.00 — WebGL2 has none at all.  Compiling it there only produced a
+	 * guaranteed failure on every startup, and left the driver linking a
+	 * program built from a shader it had already rejected.  Nothing draws
+	 * with it yet (the PV_IQM dispatch is uhexen2-7ok0.3); whoever wires
+	 * that up owns giving the ES tier a UBO or texture-buffer skinning
+	 * path, or leaving skeletal models unsupported there.  uhexen2-dfay. */
 	GL_InitProgram(&gl_shader_skeletal, "skeletal", sskeletal_vert, salias_frag);
+#endif
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
 
@@ -1188,7 +1218,7 @@ void GL_Shaders_Init (void)
 	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
 	GL_InitOITProgram(&gl_shader_particle_oit, "particle", spart_vert,  spart_frag);
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
 #endif
 	GL_AliasInst_Init();
