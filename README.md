@@ -80,6 +80,9 @@ Planned:
 - HUD / menu / crosshair / console scale sliders (auto by framebuffer height)
 - Console alpha + brightness sliders
 
+![Overbright lighting](docs/gloverbright.png)
+*Overbright world lighting (`gl_overbright`, default on) — lightmaps are built one bit dimmer and doubled back in the shader, so brightly lit surfaces keep their color instead of clipping to white.*
+
 ### Input
 - WASD + mouselook defaults
 - Scancode-based bindings (works on AZERTY, Dvorak, etc.)
