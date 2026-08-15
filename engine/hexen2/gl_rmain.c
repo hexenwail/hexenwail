@@ -1890,6 +1890,9 @@ extern void		LM_ExpandDirtyRect (int lmnum, int x, int y, int w, int h);
 extern void		R_LightmapRebuildIfDirty (msurface_t *s);
 extern texture_t	*R_TextureAnimation (entity_t *e, texture_t *base);
 
+/* Used only by R_DrawBrushInstanced, whose body is compiled out on the ES
+ * tier — same guard as its only caller.  uhexen2-ol6o. */
+#ifndef USE_GLES
 static int world_surf_key_cmp (const void *a, const void *b)
 {
 	const world_surf_key_t *sa = (const world_surf_key_t *)a;
@@ -1908,6 +1911,7 @@ static int world_surf_key_cmp (const void *a, const void *b)
 		return (sa->first < sb->first) ? -1 : 1;
 	return 0;
 }
+#endif	/* !USE_GLES */
 
 extern cvar_t r_brush_inst;
 
@@ -2162,6 +2166,7 @@ void R_CollectBrushInstances (void)
  * gl_shader_world (the same shader as world surfaces) so within-shader
  * invariant gl_Position covers both world and brush-ent draws — no
  * cross-shader z-fight, no polygon-offset backstop needed. */
+#ifndef USE_GLES
 static void R_DispatchBrushInstancedPass (
 	const world_surf_key_t *keys, int num_keys, glprogram_t *prog)
 {
@@ -2207,6 +2212,7 @@ static void R_DispatchBrushInstancedPass (
 		}
 	}
 }
+#endif	/* !USE_GLES */
 
 void R_DrawBrushInstanced (void)
 {
@@ -2685,7 +2691,7 @@ static inst_sort_t inst_sort_keys[MAX_ALIAS_INSTANCES];
 
 static void R_CollectAndBatchAliasInstances (void)
 {
-	int	i, j;
+	int	i;
 	entity_t *e;
 
 	num_alias_instances = 0;
@@ -4030,28 +4036,11 @@ static void R_MarkLeaves (void)
 
 /*
 =================
-GL_DrawBlendPoly
-
-Renders a polygon covering the whole screen. For
-fullscreen color blending and approximated gamma
-correction. To be called from R_PolyBlend().
-=================
-*/
-static void GL_DrawBlendPoly (void)
-{
-	GL_ImmBegin ();
-	GL_ImmVertex3f (10, 100, 100);
-	GL_ImmVertex3f (10, -100, 100);
-	GL_ImmVertex3f (10, -100, -100);
-	GL_ImmVertex3f (10, 100, -100);
-	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
-}
-
-/*
-=================
 GL_DoGamma
 
-Uses GL_DrawBlendPoly() for gamma correction.
+Draws a fullscreen quad for gamma correction.  (Its GL_DrawBlendPoly()
+helper is gone — R_PolyBlend inlines the same quad because it has a
+colour to set, and this block has been #if 0 for as long.)
 Idea originally from LordHavoc.
 This trick is useful if normal ways of gamma
 adjustment fail: In case of 3dfx Voodoo1/2/Rush,
