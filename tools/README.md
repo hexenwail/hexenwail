@@ -17,6 +17,7 @@ These are plain scripts, run directly. The Python ones need only stock
 | `headless-drive.sh` | drive the engine's menus under Xvfb with real key events |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
+| `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
 
 ---
 
@@ -218,6 +219,33 @@ Timings are deliberately generous (the engine gets 25 s to load a map). It is
 slow, and that is the tradeoff for driving a real event loop.
 
 ---
+
+## progs_crc.py — which gamecode is this file?
+
+```
+progs_crc.py <progs.dat> [progs.dat ...]
+```
+
+Prints the two numbers `PR_ClassifyGamecode()` (`engine/h2shared/pr_edict.c`)
+works from, and flags whether the first is one it recognises:
+
+- **file crc** — CRC over the whole file, engine-side `pr_crc`. Identifies one
+  exact build. This is what the `retail_crcs[]` table holds.
+- **progdefs crc** — the `crc` field of the `dprograms_t` header, engine-side
+  `progs->crc`. Identifies the *interface generation* only, and is what
+  `progdefs.h`'s `PROGS_V103_CRC` / `PROGS_V111_CRC` / `PROGS_V112_CRC` name.
+
+Keeping them apart is the point. Mods share progdefs CRCs with retail exactly —
+`GameOfTomes` has retail `data1`'s 38488, and `karma2`, `soc` and `sot` all have
+retail `portals`' 26905 — so only the whole-file CRC separates a mod from
+Raven's own file.
+
+The reason to have it: `retail_crcs[]` covers the three files a **1.11/1.12a**
+install has, because that is the only retail release anyone here has had in
+hand. Someone on 1.03 or 1.09 gets their retail gamecode reported as
+`Third-party` (`uhexen2-qvqk`). Fixing that needs only the missing numbers, and
+this reads them out of the file — so a report needs the `progs.dat`, not an
+installed and running copy of that release.
 
 ## Provenance
 
