@@ -1217,6 +1217,50 @@ void Inv_Update(qboolean force)
 
 //==========================================================================
 //
+// SB_GetSelectedArtifact / SB_SetSelectedArtifact
+//
+// Savegame hooks for sb_sticky_artifact.  The static above carries the
+// selection across a level change, and across a "load" issued in the same
+// engine run as a side effect, but the savegame itself recorded nothing: a
+// save loaded after a relaunch found the static back at -1 (torch), and an
+// older save loaded mid-session inherited whatever the *current* playthrough
+// had selected.  Host_Savegame_f/Host_Loadgame_f move the id through info.dat
+// so the save is the authority instead.  uhexen2-1knr.
+//
+//==========================================================================
+
+int SB_GetSelectedArtifact (void)
+{
+	/* Protocol 21 indexes selection through ex_inventory item ids, a different
+	 * id space that the sticky machinery does not track (same scope as the
+	 * level-change fix).  Report "nothing remembered" rather than a number
+	 * that would be misread as a standard artifact id on load. */
+	if (cl_protocol == PROTOCOL_UH2_114)
+		return -1;
+
+	/* Prefer the live selection.  sb_sticky_artifact is only written when
+	 * Inv_Update commits a choice, so a player who saved without ever having
+	 * opened the inventory bar this run still has a real selection to record. */
+	if (cl.inv_selected >= 0 && cl.inv_selected < cl.inv_count)
+		return cl.inv_order[cl.inv_selected];
+
+	return sb_sticky_artifact;
+}
+
+void SB_SetSelectedArtifact (int artifact)
+{
+	/* Out of range covers both "this save predates the field" and a corrupt
+	 * info.dat.  Leave the static alone rather than resetting it to -1: that
+	 * keeps loading an old save mid-session behaving as it does today, holding
+	 * the selection carried in memory instead of dropping back to the torch. */
+	if (artifact < 0 || artifact >= MAX_INVENTORY)
+		return;
+
+	sb_sticky_artifact = artifact;
+}
+
+//==========================================================================
+//
 // DrawBarArtifactIcon
 //
 //==========================================================================

@@ -116,6 +116,7 @@ typedef struct {
 	float        playerclass_val;
 	unsigned int info_mask;
 	unsigned int info_mask2;
+	int          inv_artifact;   /* selected artifact id, -1 if none; uhexen2-1knr */
 	char         savedest[256];  /* MAX_OSPATH, destination save slot dir */
 	char         userdir[256];   /* MAX_OSPATH, FS_GetUserdir() snapshot */
 } savedata_t;
