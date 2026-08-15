@@ -3772,6 +3772,7 @@ enum
 	GAME_ANIMSMOOTH,
 	GAME_LERPVIEWMDL,
 	GAME_CONTRANS,
+	GAME_GAMECODE,
 	GAME_ITEMS
 };
 
@@ -3794,11 +3795,15 @@ static const char *game_labels[GAME_ITEMS] = {
 	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
 	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
 	"Console Alpha :",	/* GAME_CONTRANS */
+	"Gamecode      :",	/* GAME_GAMECODE */
 };
 
 static qboolean M_Game_IsSkip (int i)
 {
 	if (i < 0 || i >= GAME_ITEMS) return true;
+	/* Nothing shipped to switch to, so the control would do nothing.
+	 * uhexen2-vbnx. */
+	if (i == GAME_GAMECODE && !PR_GamecodeAvailable()) return true;
 	return M_Filter_Active() && !M_Filter_Matches(game_labels[i]);
 }
 
@@ -3890,6 +3895,12 @@ static void M_Game_AdjustSliders (int dir)
 		if (f < 0)	f = 0;
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrans", f);
+		break;
+
+	case GAME_GAMECODE:
+		/* Takes effect on the next new game, never mid-campaign -- see
+		 * PR_LatchGamecode.  uhexen2-vbnx. */
+		Cvar_SetValue ("sv_gamecode", Cvar_VariableValue("sv_gamecode") ? 0 : 1);
 		break;
 	}
 }
@@ -4005,6 +4016,13 @@ static void M_Game_Draw (void)
 		M_Print (76, 92 + 8*GAME_CONTRANS, game_labels[GAME_CONTRANS]);
 		M_PrintWhite (220, 92 + 8*GAME_CONTRANS,
 			ct == 0 ? "Opaque" : ct == 1 ? "Light" : "Clear");
+	}
+
+	if (!M_Game_IsSkip(GAME_GAMECODE))
+	{
+		M_Print (76, 92 + 8*GAME_GAMECODE, game_labels[GAME_GAMECODE]);
+		M_PrintWhite (220, 92 + 8*GAME_GAMECODE,
+			Cvar_VariableValue("sv_gamecode") ? "Updated" : "Classic");
 	}
 
 	{

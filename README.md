@@ -204,6 +204,9 @@ Incorporates code and techniques from the Quake engine modernization community:
 - [QuakeSpasm](https://sourceforge.net/projects/quakespasm/) — texture manager, fog system, console infrastructure
 - [QuakeSpasm-Spiked](https://github.com/Shpoike/Quakespasm) — protocol extensions, mod compatibility patterns
 
+Gamecode fixes:
+- [jsHexen2-progs](https://github.com/KoMiKoZa/jsHexen2-progs) by KoMiKoZa — a curated bugfix fork of the Portal of Praevus HexenC source. Its diagnosis of `RandomMonsterGoodies` rolling monster loot onto the corpse instead of onto the dropped item — the root cause behind "Bad backpack!", present since Raven shipped it in 1997 — is the basis of our fix in `gamecode/hc/portals/items.hc`. Where its choices differ from ours, ours are the ones recorded in `gamecode/README`.
+
 ---
 
 Hexenwail is a fan project and is not affiliated with Raven Software or id Software. Hexen and Quake are trademarks of their respective owners.
