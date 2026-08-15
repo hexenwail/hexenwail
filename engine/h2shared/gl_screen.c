@@ -1122,7 +1122,7 @@ static void SCR_ScreenShot_f (void)
 {
 	char	filename[80];
 	char	fullpath[MAX_OSPATH];
-	int	i, size, temp;
+	int	i, size;
 	byte	*buffer;
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), "shots");
@@ -1150,15 +1150,33 @@ static void SCR_ScreenShot_f (void)
 	buffer[15] = glheight >> 8;
 	buffer[16] = 24;	/* pixel size */
 
-	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
-	glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer+18);
-
-	/* swap rgb to bgr */
-	for (i = 18; i < size; i += 3)
+	/* GL ES 3.0 guarantees exactly one glReadPixels format/type pair --
+	 * GL_RGBA/GL_UNSIGNED_BYTE -- plus one implementation-chosen pair that
+	 * has to be queried.  GL_RGB is a desktop-only spelling, and asking for
+	 * it on the ES tier wrote a stride-mismatched green smear instead of the
+	 * frame.  Desktop GL accepts RGBA just as happily, so read RGBA on both
+	 * tiers and pack down to the TGA's 24-bit BGR here rather than fork the
+	 * path.  uhexen2-3cke. */
 	{
-		temp = buffer[i];
-		buffer[i] = buffer[i+2];
-		buffer[i+2] = temp;
+		byte	*rgba = (byte *) malloc((size_t)glwidth * glheight * 4);
+		int	npix = glwidth * glheight;
+
+		if (!rgba)
+		{
+			free(buffer);
+			Con_Printf("Screenshot: out of memory\n");
+			return;
+		}
+		glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
+		glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+		for (i = 0; i < npix; i++)
+		{
+			buffer[18 + i*3 + 0] = rgba[i*4 + 2];	/* B */
+			buffer[18 + i*3 + 1] = rgba[i*4 + 1];	/* G */
+			buffer[18 + i*3 + 2] = rgba[i*4 + 0];	/* R */
+		}
+		free(rgba);
 	}
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
@@ -1179,15 +1197,21 @@ static void SCR_ScreenHash_f (void)
 	byte		*buffer;
 	uint32_t	hash = 2166136261u;	/* FNV-1a offset basis */
 
-	size = glwidth * glheight * 3;
+	/* RGBA rather than RGB for the reason given in SCR_ScreenShot_f
+	 * (uhexen2-3cke).  The alpha byte is dropped before hashing, and the RGB
+	 * bytes are fed in the same order as before, so hashes recorded by the
+	 * uhexen2-8pzr sweep stay comparable across this change. */
+	size = glwidth * glheight * 4;
 	buffer = (byte *) malloc(size);
 	if (!buffer) { Con_Printf("screenhash: out of memory\n"); return; }
 
 	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
-	glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+	glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
 
 	for (i = 0; i < size; i++)
 	{
+		if ((i & 3) == 3)
+			continue;	/* alpha */
 		hash ^= buffer[i];
 		hash *= 16777619u;
 	}
@@ -1602,7 +1626,7 @@ void SCR_UpdateScreen (void)
 		V_RenderView ();
 
 	GL_PostProcess_End3D ();
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* Build Hi-Z pyramid for next frame's cull dispatch.  End3D already
 	 * calls this in the pp_active path (where pp_depth_tex is ready).
 	 * For the !pp_active path, drive the standalone depth resolve here
