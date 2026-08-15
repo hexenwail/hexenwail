@@ -50,10 +50,45 @@
 /* OIT needs per-draw-buffer blend equations (glBlendFunci, GL 4.0), which
  * WebGL2 does not expose.  There glBlendFunci_fp is a no-op function-like
  * macro, so it cannot be tested as a value — go through this helper instead. */
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 #define HW_OIT_HAS_BLEND_FUNCI	0
 #else
 #define HW_OIT_HAS_BLEND_FUNCI	(glBlendFunci_fp != NULL)
+#endif
+
+/* GLSL version headers, mirroring gl_shader.c.  Every shader in this file used
+ * to be hardcoded to "#version 430 core", so the entire post-process chain --
+ * gamma/contrast, FXAA, bloom, motion blur, softemu palettization and the OIT
+ * resolve -- failed to compile on the ES tier and silently disabled itself.
+ * That went unnoticed because only the browser could reach the tier and nobody
+ * was reading its shader log; a desktop -DUSE_GLES=ON build (uhexen2-0py6)
+ * makes it a visible crash instead.  uhexen2-7wdv.
+ *
+ * GLSL ES 3.00 declares no default float precision in the fragment language,
+ * so it must be stated.  int is declared mediump there, which is as little as
+ * 16 bits -- not enough for bayer16's 32-bit shifts below -- hence highp int.
+ * sampler3D likewise has no default (only sampler2D and samplerCube do), and
+ * softemu's palette LUT is a sampler3D whose .r is scaled by 255 to index the
+ * palette, so it wants the full range too. */
+#ifdef USE_GLES
+#define PP_ES_PRECISION	"precision highp float;\nprecision highp int;\nprecision highp sampler3D;\n"
+#define PP_VERT_HEADER	"#version 300 es\n" PP_ES_PRECISION
+#define PP_FRAG_HEADER	"#version 300 es\n" PP_ES_PRECISION
+/* bitfieldReverse is GLSL 4.00 / ES 3.10.  Only bayer16 uses it, and only on
+ * a value whose meaningful bits are the low 16, but a full 32-bit reversal is
+ * what the desktop builtin does and what the following ">> 24" expects. */
+#define PP_BITFIELD_REVERSE \
+	"uint bitfieldReverse(uint v) {\n" \
+	"    v = ((v & 0x55555555u) << 1) | ((v >> 1) & 0x55555555u);\n" \
+	"    v = ((v & 0x33333333u) << 2) | ((v >> 2) & 0x33333333u);\n" \
+	"    v = ((v & 0x0F0F0F0Fu) << 4) | ((v >> 4) & 0x0F0F0F0Fu);\n" \
+	"    v = ((v & 0x00FF00FFu) << 8) | ((v >> 8) & 0x00FF00FFu);\n" \
+	"    return (v << 16) | (v >> 16);\n" \
+	"}\n"
+#else
+#define PP_VERT_HEADER	"#version 430 core\n"
+#define PP_FRAG_HEADER	"#version 430 core\n"
+#define PP_BITFIELD_REVERSE	""
 #endif
 
 /* FBO state — scaled 3D scene */
@@ -162,7 +197,7 @@ static qboolean	oit_in_pass;		/* true between Begin/EndTranslucency */
 
 /* OIT resolve shaders */
 static const char oit_resolve_vert[] =
-	"#version 430 core\n"
+	PP_VERT_HEADER
 	"void main() {\n"
 	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
 	"    gl_Position = vec4(vec2(v) * 4.0 - 1.0, 0.0, 1.0);\n"
@@ -171,9 +206,9 @@ static const char oit_resolve_vert[] =
 /* No stencil gate, no early_fragment_tests. WBOIT handles empty pixels
  * via math: accum=0, revealage=1 → alpha=0 → transparent → scene unchanged. */
 static const char oit_resolve_frag[] =
-	"#version 430 core\n"
-	"layout(binding=0) uniform sampler2D TexAccum;\n"
-	"layout(binding=1) uniform sampler2D TexReveal;\n"
+	PP_FRAG_HEADER
+	"uniform sampler2D TexAccum;\n"
+	"uniform sampler2D TexReveal;\n"
 	"layout(location=0) out vec4 out_fragcolor;\n"
 	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
 	"void main() {\n"
@@ -187,11 +222,18 @@ static const char oit_resolve_frag[] =
 	"}\n";
 
 /* MSAA variant: per-sample resolve via sampler2DMS + gl_SampleID, used when
- * the OIT accum/revealage targets are GL_TEXTURE_2D_MULTISAMPLE. */
+ * the OIT accum/revealage targets are GL_TEXTURE_2D_MULTISAMPLE.
+ *
+ * Absent on the ES tier: sampler2DMS and gl_SampleID are GLSL ES 3.10, and
+ * glTexImage2DMultisample_fp is a no-op there, so oit_samples never exceeds 1
+ * and this program could never be selected.  It used to be compiled anyway on
+ * the theory that a failed build was harmless; it is not -- a driver handed a
+ * shader it just rejected is a driver in a state nothing tests. */
+#ifndef USE_GLES
 static const char oit_resolve_frag_msaa[] =
-	"#version 430 core\n"
-	"layout(binding=0) uniform sampler2DMS TexAccum;\n"
-	"layout(binding=1) uniform sampler2DMS TexReveal;\n"
+	PP_FRAG_HEADER
+	"uniform sampler2DMS TexAccum;\n"
+	"uniform sampler2DMS TexReveal;\n"
 	"layout(location=0) out vec4 out_fragcolor;\n"
 	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
 	"void main() {\n"
@@ -203,13 +245,14 @@ static const char oit_resolve_frag_msaa[] =
 	"    vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);\n"
 	"    out_fragcolor = vec4(average_color, 1.0 - revealage);\n"
 	"}\n";
+#endif /* !USE_GLES */
 
 /* ------------------------------------------------------------------ */
 /* Bloom post-process shaders                                          */
 /* ------------------------------------------------------------------ */
 
 static const char bloom_vert_src[] =
-	"#version 430 core\n"
+	PP_VERT_HEADER
 	"out vec2 v_uv;\n"
 	"void main() {\n"
 	"    ivec2 v = ivec2(gl_VertexID & 1, gl_VertexID >> 1);\n"
@@ -219,8 +262,8 @@ static const char bloom_vert_src[] =
 	"}\n";
 
 static const char bloom_bright_frag_src[] =
-	"#version 430 core\n"
-	"layout(binding=0) uniform sampler2D u_scene;\n"
+	PP_FRAG_HEADER
+	"uniform sampler2D u_scene;\n"
 	"uniform float u_threshold;\n"
 	"uniform vec2 u_rcpframe;\n"
 	"in vec2 v_uv;\n"
@@ -233,8 +276,8 @@ static const char bloom_bright_frag_src[] =
 	"}\n";
 
 static const char bloom_down_frag_src[] =
-	"#version 430 core\n"
-	"layout(binding=0) uniform sampler2D u_scene;\n"
+	PP_FRAG_HEADER
+	"uniform sampler2D u_scene;\n"
 	"uniform vec2 u_rcpframe;\n"
 	"in vec2 v_uv;\n"
 	"layout(location=0) out vec4 fragColor;\n"
@@ -248,8 +291,8 @@ static const char bloom_down_frag_src[] =
 	"}\n";
 
 static const char bloom_up_frag_src[] =
-	"#version 430 core\n"
-	"layout(binding=0) uniform sampler2D u_scene;\n"
+	PP_FRAG_HEADER
+	"uniform sampler2D u_scene;\n"
 	"uniform vec2 u_rcpframe;\n"
 	"in vec2 v_uv;\n"
 	"layout(location=0) out vec4 fragColor;\n"
@@ -572,7 +615,7 @@ static qboolean PP_CreateFBO (int width, int height)
 /* ------------------------------------------------------------------ */
 
 static const char pp_vert_src[] =
-	"#version 430 core\n"
+	PP_VERT_HEADER
 	"layout(location = 0) in vec3 a_position;\n"
 	"layout(location = 1) in vec2 a_texcoord;\n"
 	"out vec2 v_texcoord;\n"
@@ -583,7 +626,7 @@ static const char pp_vert_src[] =
 	"}\n";
 
 static const char pp_frag_src[] =
-	"#version 430 core\n"
+	PP_FRAG_HEADER
 	"uniform sampler2D scene;\n"
 	"uniform float gamma;\n"
 	"uniform float contrast;\n"
@@ -631,6 +674,7 @@ static const char pp_frag_src[] =
 	"    #undef LM\n"
 	"}\n"
 	"\n"
+	PP_BITFIELD_REVERSE
 	"float bayer16(ivec2 c) {\n"
 	"    c &= 15;\n"
 	"    c.y ^= c.x;\n"
@@ -1000,9 +1044,10 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
 
+#ifndef USE_GLES
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
-	 * (e.g. sampler2DMS unsupported on WebGL2) the MSAA OIT path is simply
-	 * never selected, since oit_samples stays 0 there. */
+	 * the MSAA OIT path is simply never selected, since oit_samples stays 0
+	 * then.  Not built at all on the ES tier — see oit_resolve_frag_msaa. */
 	vs = GL_CompileShader(GL_VERTEX_SHADER, oit_resolve_vert);
 	fs = vs ? GL_CompileShader(GL_FRAGMENT_SHADER, oit_resolve_frag_msaa) : 0;
 	if (vs && fs)
@@ -1023,6 +1068,7 @@ static qboolean OIT_InitShader (void)
 	}
 	if (vs) glDeleteShader_fp(vs);
 	if (fs) glDeleteShader_fp(fs);
+#endif /* !USE_GLES */
 
 	/* GL 4.3 core profile requires a VAO bound for any draw call. */
 	glGenVertexArrays_fp(1, &oit_resolve_vao);
@@ -1162,7 +1208,7 @@ void GL_PostProcess_Init (void)
 	/* GL 4.3: shaders always available */
 
 	/* check for FBO function pointers */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* On desktop GL, dynamically load function pointers */
 	glGenFramebuffers_fp = (glGenFramebuffers_f) SDL_GL_GetProcAddress("glGenFramebuffers");
 	glDeleteFramebuffers_fp = (glDeleteFramebuffers_f) SDL_GL_GetProcAddress("glDeleteFramebuffers");
@@ -1193,7 +1239,7 @@ void GL_PostProcess_Init (void)
 	glUniform3fv_fp = (glUniform3fv_f) SDL_GL_GetProcAddress("glUniform3fv");
 	if (!glUniform2f_fp)
 		glUniform2f_fp = (glUniform2f_f) SDL_GL_GetProcAddress("glUniform2f");
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 
 	if (!PP_InitShader())
 	{
@@ -1452,7 +1498,7 @@ void GL_PostProcess_End3D (void)
 
 	/* Scene depth is final and pp_depth_tex is sampler-readable: build the
 	 * Hi-Z pyramid that next frame's cull dispatch consumes (uhexen2-xd87). */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	R_BuildHiZForNextFrame();
 #endif
 
