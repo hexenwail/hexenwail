@@ -45,8 +45,11 @@ done
 [ -x "$ENGINE" ] || { echo "headless-drive: no engine at $ENGINE (set ENGINE=)" >&2; exit 3; }
 [ -d "$BASEDIR" ] || { echo "headless-drive: no basedir at $BASEDIR" >&2; exit 3; }
 
-ENGINE=$(cd "$(dirname "$ENGINE")" && pwd)/$(basename "$ENGINE")
+# Resolve through symlinks: ./result is a symlink into /nix/store, and the
+# store path is outside $HOME, which the bwrap below replaces wholesale.
+ENGINE=$(readlink -f "$ENGINE")
 BASEDIR=$(cd "$BASEDIR" && pwd)
+ENGINE_DIR=$(dirname "$ENGINE")
 
 rm -rf "$OUT"; mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
@@ -77,9 +80,15 @@ trap cleanup EXIT
 # throwaway dir over $HOME so a run cannot touch the real one, then re-bind the
 # game data read-only *on top* -- the basedir usually lives inside $HOME, so
 # the order matters: the ro-bind must come after the HOME bind or it is hidden.
+#
+# The engine binary needs the same treatment for the same reason: a source
+# checkout under $HOME puts ./result there too, and without this the sandbox
+# hides the very binary it is about to exec.  Harmless when ENGINE_DIR is
+# already outside $HOME (a /nix/store path binds over itself).
 bwrap --dev-bind / / \
       --bind "$WORK/home" "$HOME" \
       --ro-bind "$BASEDIR" "$BASEDIR" \
+      --ro-bind "$ENGINE_DIR" "$ENGINE_DIR" \
   env DISPLAY="$DISP" HOME="$HOME" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
   "$ENGINE" -basedir "$BASEDIR" -width "$W" -height "$H" -window -nosound "$@" \
   >"$OUT/engine.stdout" 2>&1 &
@@ -101,6 +110,14 @@ shot()  { sleep 2; import -window root "$OUT/$1.png" 2>/dev/null; echo "  shot $
 key()   { xdotool key --clearmodifiers "$1"; sleep 0.7; }
 keyn()  { for _ in $(seq 1 "$2"); do xdotool key --clearmodifiers "$1"; sleep 0.5; done; }
 typ()   { xdotool type --clearmodifiers --delay 40 "$1"; sleep 0.4; xdotool key Return; sleep 0.8; }
+# type without submitting, and wipe the line back to the prompt -- needed to
+# test TAB, where pressing Return would run whatever just got completed
+typn()  { xdotool type --clearmodifiers --delay 40 "$1"; sleep 0.5; }
+# End first: the cursor can be mid-line (that is the point of the TAB splice
+# tests) and BackSpace only eats backwards, so without it the tail survives
+# into the next case and every later shot carries stale text.
+wipe()  { xdotool key --clearmodifiers End; sleep 0.2
+          for _ in $(seq 1 60); do xdotool key --clearmodifiers BackSpace; done; sleep 0.5; }
 
 # Shared in-game sequence: cheats, spawn ONE armor helmet (HelmetAC differs most
 # between Paladin[4] and Demoness[8]), touch it, expand the lower bar, chase cam.
@@ -204,6 +221,66 @@ case "$SCEN" in
     shot 03-class-menu
     keyn Down 6           # walk past the 4th entry; must wrap at 4, never reach a 5th
     shot 04-class-menu-after-6-down
+    ;;
+
+  # TAB completion in a live console (uhexen2-q6ap).  The point is that these
+  # are real X key events, so Key_Event -> CompleteCommand runs exactly as it
+  # does under a human; nothing here simulates the console.
+  #
+  # Never press Return: the whole line would execute, and half of these
+  # complete to a "map" that would then load.  Read the result off the shots,
+  # and the ambiguous-match listings out of qconsole.log (pass -condebug).
+  #
+  # Map names assumed are stock data1 (42 maps): eidolon is the only "eido*",
+  # romeric1..7 are the only "rom*", nothing matches "zzz".
+  # MUST be run with "+map demo1" (or any map) as an extra engine arg. The
+  # console cannot be opened from the main menu: Escape closes it, but with
+  # nothing connected and no demo loop the engine puts it straight back, and a
+  # menu eats grave -- the run then screenshots the untouched menu eight times
+  # and looks like a pass. Being in a map puts key_dest at key_game, where
+  # toggleconsole binds.
+  console_tab)
+    sleep 25                   # map load
+    key grave;  sleep 2
+    shot 00-console-open
+
+    # 1. unique prefix completes fully AND appends a trailing space
+    typn "map eido";      key Tab; shot 01-unique-arg
+    wipe
+
+    # 2. ambiguous prefix completes to the common stem and lists candidates
+    typn "map rom";       key Tab; shot 02-ambiguous-arg
+    wipe
+
+    # 3. no match leaves the line exactly as typed (must not eat characters)
+    typn "map zzz";       key Tab; shot 03-no-match
+    wipe
+
+    # 4. cursor mid-line: completes only up to the cursor, splices the tail
+    #    back. Type the tail, walk left over it, then TAB.
+    typn "map eidoXY";    key Left; key Left; sleep 0.3
+    key Tab; shot 04-midline-splice
+    wipe
+
+    # 5. the command word itself (argno 0) still completes
+    typn "sv_altnoc";     key Tab; shot 05-command-word
+    wipe
+
+    # 6. second argument slot: record takes <demo> then <map>
+    typn "record foo eido"; key Tab; shot 06-arg2-maps
+    wipe
+
+    # 7. sky in stock data1, which has no gfx/env: must do nothing rather
+    #    than misbehave
+    typn "sky ";          key Tab; shot 07-sky-empty
+    wipe
+
+    # 8. a completion AFTER several others: every row's cleanup is
+    #    FS_FreeNameList over a shared single-owner list, so a leaked one
+    #    breaks the NEXT completion rather than its own. Repeat case 1 last;
+    #    it must still behave identically to shot 01.
+    typn "map eido";      key Tab; shot 08-repeat-after-many
+    wipe
     ;;
 
   *)
