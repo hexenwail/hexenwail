@@ -4076,13 +4076,18 @@ static void M_Game_Draw (void)
 	 * until a map has loaded -- including on a client attached to a remote
 	 * server, where the answer is genuinely unknown -- and then the row is
 	 * simply absent rather than showing a placeholder.  uhexen2-8r3e. */
+	/* One full-width line rather than the label/value pair every row above
+	 * uses.  "hexenwail-2026-08-15" is 20 characters and the value column
+	 * starts at x=220 on a canvas 320 units wide, which leaves room for 12 --
+	 * so in two columns the stamp would run off the right edge.  Left-aligned
+	 * at x=16 the whole string ends at 312 and fits. */
 	{
 		const char	*ident = PR_GamecodeIdent();
 
-		if (ident && (!M_Filter_Active() || M_Filter_Matches("Running")))
+		if (ident && (!M_Filter_Active() || M_Filter_Matches("Gamecode")))
 		{
-			M_Print (76, 92 + 8*GAME_ITEMS, "Running       :");
-			M_PrintWhite (220, 92 + 8*GAME_ITEMS, ident);
+			M_Print (16, 92 + 8*GAME_ITEMS, "Gamecode loaded:");
+			M_PrintWhite (16 + 8*17, 92 + 8*GAME_ITEMS, ident);
 		}
 	}
 

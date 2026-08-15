@@ -135,6 +135,12 @@
                 # two filters apart.
                 || rel == "gamecode/fieldsets"
                 || pkgs.lib.hasPrefix "gamecode/fieldsets/" rel
+                # The changelog, because the ident-stamp gate below checks the
+                # marker date against its newest fork entry.  A prose edit to
+                # it now rebuilds the gamecode, which is the price of having
+                # the changelog be load-bearing; the engine's filteredSrc is
+                # still untouched, which is the property that matters.
+                || rel == "gamecode/README"
                 || rel == "tools"
                 || rel == "tools/qcdis.py"
                 || rel == "tools/check_progs_fields.py";
@@ -503,16 +509,49 @@
               # a bare name also matches HexenwailGamecodeXX and any other
               # superstring -- which is exactly the rename this gate exists to
               # catch, and it passed until the anchors went in.
+              stamp=""
               for p in gamecode/hc/h2/progs.dat gamecode/hc/h2/progs2.dat \
                        gamecode/hc/portals/progs.dat \
                        gamecode/hc/hw/hwprogs.dat gamecode/hc/siege/hwprogs.dat; do
-                if ! python3 tools/qcdis.py "$p" --list '^HexenwailGamecode$' \
-                     | grep -q .; then
-                  echo "ERROR: $p carries no HexenwailGamecode marker." >&2
+                got=$(python3 tools/qcdis.py "$p" \
+                        --list '^HexenwailGamecode_[0-9]{8}$' | awk '{print $1}')
+                if [ -z "$got" ]; then
+                  echo "ERROR: $p carries no HexenwailGamecode_YYYYMMDD marker." >&2
                   echo "       See gamecode/hc/*/ident.hc and its progs.src entry." >&2
                   exit 1
                 fi
+                # One tree restamped and the others not would ship five images
+                # claiming different revisions, and the engine would report
+                # whichever one the player happened to load.
+                if [ -z "$stamp" ]; then stamp="$got"; else
+                  if [ "$got" != "$stamp" ]; then
+                    echo "ERROR: $p is $got but an earlier image is $stamp." >&2
+                    echo "       All gamecode/hc/*/ident.hc must carry one date." >&2
+                    exit 1
+                  fi
+                fi
               done
+
+              # The stamp is a hand-typed constant, so the real hazard is not a
+              # typo but a gamecode change that forgets to restamp -- leaving a
+              # confident wrong date, which is worse than no date at all.  The
+              # fork's policy is already that every divergence gets a dated
+              # gamecode/README entry, so requiring the two to agree makes the
+              # build fail at exactly the moment a change is recorded without
+              # restamping.  Fork entries are "YYYY-MM-DD [uhexen2-xxxx]:"; the
+              # pre-fork history uses "(1.29c)"-style parens and is not matched.
+              newest=$(grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} \[' gamecode/README \
+                       | cut -c1-10 | sort -r | head -1 | tr -d -)
+              if [ -z "$newest" ]; then
+                echo "ERROR: no dated fork entry found in gamecode/README." >&2
+                exit 1
+              fi
+              if [ "$stamp" != "HexenwailGamecode_$newest" ]; then
+                echo "ERROR: gamecode is stamped $stamp but the newest" >&2
+                echo "       gamecode/README entry is dated $newest." >&2
+                echo "       Restamp gamecode/hc/*/ident.hc, or date the entry." >&2
+                exit 1
+              fi
 
               runHook postCheck
             '';

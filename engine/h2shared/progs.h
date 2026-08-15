@@ -149,12 +149,14 @@ void	 PR_LatchGamecode (void);
 qboolean PR_GamecodeIsUpdated (void);
 qboolean PR_GamecodeAvailable (void);	/* is there a bundle to switch to? */
 
-/* Origin of the gamecode actually loaded -- "Raven", "Hexenwail" or
- * "Third-party" -- or NULL if PR_LoadProgs has not run in this process.  That
- * NULL is also the right answer on a client attached to someone else's server:
- * the progs it is running was never loaded here.  Answers a different question
- * from the three above, which describe intent; a hand-copied progs.dat makes
- * the two disagree.  uhexen2-8r3e. */
+/* Origin of the gamecode actually loaded -- "Raven 1.11", "hexenwail-2026-08-15"
+ * or "Third-party" -- or NULL if PR_LoadProgs has not run in this process.  Our
+ * answer carries the gamecode's own date stamp, falling back to a bare
+ * "hexenwail" for a build whose marker has no readable one.  The NULL is the
+ * right answer on a client attached to someone else's server: the progs it is
+ * running was never loaded here.  Answers a different question from the three
+ * above, which describe intent; a hand-copied progs.dat makes the two
+ * disagree.  uhexen2-8r3e. */
 const char *PR_GamecodeIdent (void);
 #endif
 

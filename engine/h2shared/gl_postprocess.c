@@ -1263,6 +1263,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	GLuint prog;
 	GLint loc_accum, loc_reveal;
 	GLboolean cull_was_on;
+	GLint saved_viewport[4];
 
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;

@@ -47,6 +47,12 @@ Hexenwail fork (diverges from 1.29c):
   this scheme's one weakness.  A build where they disagree does not fail, it
   quietly reports our gamecode as "Third-party".
 
+  The date in the name is restamped BY HAND on every gamecode change, and two
+  flake.nix gates hold it: all five images must agree on one stamp, and it must
+  equal the newest dated entry in THIS FILE.  So adding an entry below without
+  restamping ident.hc fails the build, which is the point -- a confidently
+  wrong date is worse than no date.
+
 2026-08-14 [uhexen2-9gdx]:
 - items.hc (portals only): RandomMonsterGoodies now takes the drop entity and
   rolls into it.  Raven wrote the assignments against self -- the corpse -- but

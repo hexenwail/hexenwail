@@ -920,8 +920,8 @@ this paragraph.
 
 **Reading a crc is no longer how you tell whose gamecode it is.** That churn is
 exactly why `uhexen2-8r3e` stopped depending on it: the `Gamecode:` line now
-ends in `Raven 1.11` / `Raven 1.12a` / `Hexenwail` / `Third-party`, and the
-Hexenwail answer comes from a marker function the gamecode carries
+ends in `Raven 1.11` / `Raven 1.12a` / `hexenwail-<date>` / `Third-party`, and
+the hexenwail answer comes from a marker function the gamecode carries
 (`gamecode/hc/<tree>/ident.hc`), not from a number that moves. Only the three
 retail crcs above are still matched literally, and those were fixed in 1997.
 The numbers in this table remain useful for telling two *builds of ours* apart,

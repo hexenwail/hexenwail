@@ -769,9 +769,14 @@ qboolean PR_GamecodeAvailable (void)
  * uhexen2-8r3e. */
 static const char	*pr_gamecode_ident;
 
-/* The marker gamecode/hc/<tree>/ident.hc defines.  A function, not a global,
- * because hcc strips global names under -on; see that file for the full
- * reasoning.  Keep the two spellings in sync by hand. */
+/* The marker gamecode/hc/<tree>/ident.hc defines, as a PREFIX: the real symbol
+ * is GAMECODE_SENTINEL "_YYYYMMDD".  A function, not a global, because hcc
+ * strips global names under -on -- which is also why the date has to live in
+ * the name rather than in a string it could point at.  See that file.
+ *
+ * Matched as a prefix so a stamp change is not an engine change, and so our
+ * builds that carry the bare unstamped name (uhexen2-8r3e as first landed)
+ * still identify, just without a date.  Keep the spelling in sync by hand. */
 #define	GAMECODE_SENTINEL	"HexenwailGamecode"
 
 /*
@@ -794,9 +799,14 @@ The Raven answer carries a release number, taken from progs->crc -- the same
 field the progvstr switch reads, and the file's own statement of its interface
 version.  "1.12a" rather than progvstr's "H2MP/v1.12" because 1.12a is what
 Raven actually shipped the mission pack as; the bare "1.12" is the progdefs
-generation, not a release.  Our side gets no number: the whole-file CRC already
-on the same line identifies our revision exactly, and no counter we invent
-could be as precise.
+generation, not a release.
+
+Our answer carries the date the gamecode last changed, read out of the marker's
+own name, giving "hexenwail-2026-08-15".  The whole-file CRC on the same line is
+the exact revision and the date is not a substitute for it -- but a CRC is not
+something a player can hold in their head or recognise as older than another,
+and this is the string testers are asked to read back.  A stamp that fails to
+parse degrades to the bare name rather than printing a malformed date.
 
 Anything unrecognised reads as third-party rather than as Raven: the retail
 list covers the three files a retail install has, and the mods measured in the
@@ -808,6 +818,31 @@ misfiled, which is the known cost of not being able to enumerate them.
 /* Defined further down this file and not in any header; host_cmd.c reaches it
  * through a local prototype the same way. */
 dfunction_t *ED_FindFunctioni (const char *fn_name);
+
+/*
+===============
+PR_GamecodeStamp
+
+The tail of the marker function's name -- "_20260815", or "" for a build that
+carries the bare unstamped name -- or NULL if the marker is absent entirely.
+Walks the function table itself rather than going through ED_FindFunctioni(),
+which is an exact match and cannot find a name whose suffix it does not know.
+===============
+*/
+static const char *PR_GamecodeStamp (void)
+{
+	const size_t	preflen = strlen(GAMECODE_SENTINEL);
+	int		i;
+
+	for (i = 0; i < progs->numfunctions; i++)
+	{
+		const char *name = PR_GetString (pr_functions[i].s_name);
+
+		if (!strncmp (name, GAMECODE_SENTINEL, preflen))
+			return name + preflen;
+	}
+	return NULL;
+}
 
 static const char *PR_ClassifyGamecode (void)
 {
@@ -828,8 +863,26 @@ static const char *PR_ClassifyGamecode (void)
 		}
 	}
 
-	if (ED_FindFunctioni (GAMECODE_SENTINEL) != NULL)
-		return "Hexenwail";
+	{
+		static char	ident[32];
+		const char	*stamp = PR_GamecodeStamp ();
+
+		if (stamp)
+		{
+			/* "_YYYYMMDD" and nothing else.  Anything shorter, longer or
+			 * non-numeric is a name this engine does not understand, and
+			 * printing part of it as a date would be a confident lie --
+			 * so an unparseable tail degrades to the bare name. */
+			if (stamp[0] == '_' && strlen(stamp) == 9 &&
+			    strspn(stamp + 1, "0123456789") == 8)
+			{
+				q_snprintf (ident, sizeof(ident), "hexenwail-%.4s-%.2s-%.2s",
+					    stamp + 1, stamp + 5, stamp + 7);
+				return ident;
+			}
+			return "hexenwail";
+		}
+	}
 
 	/* Builds shipped before uhexen2-8r3e carry no ident.hc, so fall back to
 	 * the incidental marker docs/GAMECODE.md already relies on.
@@ -837,7 +890,7 @@ static const char *PR_ClassifyGamecode (void)
 	 * files -- the B8 verification row is exactly this test, run offline with
 	 * qcdis.py.  Drop this once no such build is in the field. */
 	if (ED_FindFunctioni ("BadBackpackDump") != NULL)
-		return "Hexenwail";
+		return "hexenwail";
 
 	return "Third-party";
 }
