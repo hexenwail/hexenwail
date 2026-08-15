@@ -790,6 +790,7 @@ static void Mod_LoadLighting (lump_t *l)
 			int		mark;
 			char	litfilename[MAX_QPATH];
 			unsigned int	path_id;
+			long	litsize;
 
 			q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 			COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
@@ -799,6 +800,9 @@ static void Mod_LoadLighting (lump_t *l)
 			data = (byte*) FS_LoadHunkFile (litfilename, &path_id);
 			if (data == NULL)
 				goto _load_internal;
+			/* fs_filesize describes the call above and nothing else, so
+			 * take a copy before anything else touches the FS. */
+			litsize = fs_filesize;
 			// use lit file only from the same gamedir as the map
 			// itself or from a searchpath with higher priority.
 			if (path_id < loadmodel->path_id)
@@ -818,6 +822,27 @@ static void Mod_LoadLighting (lump_t *l)
 			{
 				Hunk_FreeToLowMark(mark);
 				Con_Printf("Unknown .lit file version (%d)\n", i);
+				goto _load_internal;
+			}
+			/* A .lit is only meaningful against the exact BSP it was
+			 * compiled for: it is a flat luxel array indexed by the same
+			 * offsets the faces carry, so any recompile of the map shifts
+			 * every one of them.  A stale sidecar is not "slightly off" --
+			 * every surface reads another compile's lighting at an
+			 * arbitrary offset, and a short one is read past its end.
+			 * Alias models show it worst: AliasModelGetLightInfo
+			 * (gl_rmain.c) puts R_LightPointColor's RGB nearly straight
+			 * onto the skin instead of modulating a wall texture, so a
+			 * mismatched .lit turns whole models a flat solid colour.
+			 *
+			 * Skipped when the BSP has no lighting lump: there is no
+			 * expected size to compare against, and the colored-only path
+			 * below is a deliberate feature of this engine.  uhexen2-2mwz. */
+			if (l->filelen && litsize != 8 + (long)l->filelen * 3)
+			{
+				Hunk_FreeToLowMark(mark);
+				Con_Printf("Outdated .lit file (%s should be %ld bytes, not %ld)\n",
+						litfilename, 8 + (long)l->filelen * 3, litsize);
 				goto _load_internal;
 			}
 			Con_DPrintf("%s loaded\n", litfilename);
