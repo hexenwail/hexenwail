@@ -1068,6 +1068,16 @@ void Host_Init (void)
 		host_colormap = (byte *)FS_LoadHunkFile ("gfx/colormap.lmp", NULL);
 		if (!host_colormap)
 			Sys_Error ("Couldn't load gfx/colormap.lmp");
+		/* Nothing downstream bounds-checks this table -- the software
+		 * lighting ramps, and PP_BuildColormapLUT for r_softemu 3, both
+		 * index all VID_GRADES rows on faith.  A mod shipping a short
+		 * colormap would over-read every one of them, so refuse it here
+		 * while we still have the length.  fs_filesize describes the call
+		 * immediately above and nothing else, so it must be read now.
+		 * uhexen2-me41. */
+		if (fs_filesize < 256 * VID_GRADES)
+			Sys_Error ("gfx/colormap.lmp is %ld bytes, need at least %d",
+					fs_filesize, 256 * VID_GRADES);
 
 		VID_Init (host_basepal);
 		Draw_Init ();

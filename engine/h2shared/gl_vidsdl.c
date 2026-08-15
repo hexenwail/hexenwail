@@ -1838,10 +1838,27 @@ void	VID_Init (const unsigned char *palette)
 	vid.maxwarpwidth = WARP_WIDTH;
 	vid.maxwarpheight = WARP_HEIGHT;
 	vid.colormap = host_colormap;
-	vid.fullbright = 256 - LittleLong (*((int *)(vid.colormap + 256 * 64)));
+
+	/* The standard Quake/Hexen II fullbright range, 224..255.  This is a
+	 * constant on purpose -- DO NOT derive it from the colormap.
+	 *
+	 * gfx/colormap.lmp is 16385 bytes: VID_GRADES(64) rows of 256, plus one
+	 * trailing byte.  This line used to read a 4-byte int at offset 256*64,
+	 * i.e. three bytes past the end of the buffer, and then subtract it from
+	 * 256.  That is undefined behaviour; it went unnoticed only because the
+	 * garbage reliably landed outside the range accepted by the guard below
+	 * it, so the 224 fallback was what actually got installed.  The engine
+	 * was correct by accident.  uhexen2-me41.
+	 *
+	 * Reading the trailing byte "properly" is NOT the fix.  It is 1 in retail
+	 * data1/pak0.pak, so 256 - 1 = 255, and the only consumer of this field --
+	 * gl_model.c :: Mod_LoadFullbrightTexture(), whose scan loops test
+	 * `data[i] >= vid.fullbright && data[i] < 255' -- would then be asking for
+	 * `>= 255 && < 255' and match nothing.  That silently turns off fullbright
+	 * masks on every alias skin and BSP miptex in the game.  Whatever that
+	 * byte means, it is not a fullbright count. */
+	vid.fullbright = 224;
 	Con_DPrintf ("Fullbright start index: %d\n", vid.fullbright);
-	if (vid.fullbright < 1 || vid.fullbright > 256)
-		vid.fullbright = 224;	/* fallback: standard Quake/Hexen II value */
 
 	temp = scr_disabled_for_loading;
 	scr_disabled_for_loading = true;
