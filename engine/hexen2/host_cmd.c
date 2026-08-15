@@ -1142,6 +1142,8 @@ static int LoadGamestate (const char *level, const char *startspot, int ClientsM
 		SV_LoadInventory(f);
 
 // load the edicts out of the savegame file
+	ED_ResetDroppedFields ();
+
 	while (!feof(f))
 	{
 		fscanf (f, "%i\n", &entnum);
@@ -1231,6 +1233,27 @@ static int LoadGamestate (const char *level, const char *startspot, int ClientsM
 	}
 
 	fclose (f);
+
+	/* A savegame carries no fingerprint of the gamecode that wrote it:
+	 * Host_Loadgame_f validates SAVEGAME_VERSION and nothing else, and
+	 * progs->crc is never consulted on load (it gates CLASS_DEMON and
+	 * PR_LoadProgs's globals layout, nothing here).  Entity state is
+	 * field-name/value text, so a save crossed onto a progs.dat with a
+	 * different field set LOADS -- ED_ParseEdict just skips every key it
+	 * cannot place, one Con_Printf at a time, and the player gets their
+	 * game back with state missing and no idea why.
+	 *
+	 * Say it once, plainly, at the end, where it is not buried in the
+	 * per-key noise.  Deliberately NOT a refusal: rejecting on a mismatch
+	 * would break saves from other engines and from every mod, which is a
+	 * far bigger blast radius than the problem.  uhexen2-acew. */
+	{
+		int dropped = ED_DroppedFields ();
+		if (dropped > 0)
+			Con_Printf ("WARNING: %d saved field%s could not be restored.\n"
+				    "This save was written by different gamecode; some entity state is lost.\n",
+				    dropped, (dropped == 1) ? "" : "s");
+	}
 
 	if (ClientsMode == 0)
 	{
