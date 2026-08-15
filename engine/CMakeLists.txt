@@ -39,6 +39,17 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 # today; the server is a separate, rarely-wanted artifact.
 option(BUILD_DEDICATED "Also build the h2ded dedicated server" OFF)
 
+# The GL ES 3.0 render tier.  Emscripten/WebGL2 is one *instance* of it, not
+# the definition of it: everything the ES path does differently -- statically
+# linked entry points instead of dlsym, no SSBO/compute, no buffer_storage or
+# fence sync, "#version 300 es" shader headers, an ES context request -- follows
+# from the API level, not from running in a browser.  Keying those on
+# __EMSCRIPTEN__ made the browser the only way to reach the path.  Forced ON for
+# Emscripten below, and settable on a desktop build (-DUSE_GLES=ON) to exercise
+# the same tier against Mesa, which is also the cheap way to validate the ANGLE
+# route to macOS/Metal without a Mac.  uhexen2-0py6.
+option(USE_GLES "Target the OpenGL ES 3.0 render path instead of desktop GL 4.3" OFF)
+
 # Bundled gamecode (docs/BUNDLED_GAMECODE.md).  Third and last lookup layer,
 # for distribution packagers who install the data somewhere neither
 # <exedir>/gamecode/ nor <exedir>/../share/hexenwail/ finds.  Unset by default:
@@ -120,6 +131,9 @@ endif()
 # into every target in this directory.
 if(EMSCRIPTEN)
     add_definitions(-D__EMSCRIPTEN__)
+    # The browser has no GL to dlsym: WebGL2 entry points are linked in
+    # statically, which is exactly what USE_GLES selects below.
+    set(USE_GLES ON)
     set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE NO_SPLASHES)
     set(USE_ALSA OFF)
     set(USE_CODEC_FLAC OFF)
@@ -132,6 +146,25 @@ elseif(WIN32)
 elseif(UNIX)
     add_definitions(-D_GNU_SOURCE=1 -D_REENTRANT)
     set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE GL_DLSYM)
+endif()
+
+# GL_DLSYM and USE_GLES are mutually exclusive: the ES tier resolves its entry
+# points at link time (gl_func.h maps every _fp name straight onto the real
+# function), so there is nothing for the dlsym loader to fill in and its
+# GL_FUNCTION table would declare pointers that the ES branch never emits.
+# Dropping it here is what makes a desktop -DUSE_GLES=ON build take the same
+# code path Emscripten already takes, rather than a third hybrid one.
+if(USE_GLES AND "GL_DLSYM" IN_LIST CLIENT_DEFINITIONS)
+    list(REMOVE_ITEM CLIENT_DEFINITIONS GL_DLSYM)
+endif()
+
+# Applied with add_definitions() rather than target_compile_definitions()
+# because the ES tier reaches into h2shared sources that both the client and
+# any future GL-linked target compile, and glheader.h/gl_func.h are included
+# from files configured outside CLIENT_DEFINITIONS' target.
+if(USE_GLES)
+    add_definitions(-DUSE_GLES=1)
+    message(STATUS "Render tier: OpenGL ES 3.0 (USE_GLES)")
 endif()
 
 #============================================================================
@@ -206,13 +239,21 @@ endif()
 
 if(NOT EMSCRIPTEN)
     if(UNIX)
-        # OpenGL
-        find_package(OpenGL REQUIRED)
-
-        # Find packages using pkg-config
+        # Find packages using pkg-config.  Hoisted above the GL lookup because
+        # the ES tier is discovered through it (there is no find_package(GLES)).
         find_package(PkgConfig QUIET)
         if(NOT PKG_CONFIG_FOUND)
             message(FATAL_ERROR "pkg-config is required for Linux builds")
+        endif()
+
+        # OpenGL, or the ES 3.0 tier when USE_GLES is on.  libglvnd supplies
+        # both glesv2.pc and the GLES3/ headers glheader.h reaches for, so a
+        # desktop ES build needs no extra dependency beyond the GL package
+        # already present.
+        if(USE_GLES)
+            pkg_check_modules(GLESV2 REQUIRED glesv2)
+        else()
+            find_package(OpenGL REQUIRED)
         endif()
 
         # ALSA
@@ -659,8 +700,13 @@ elseif(WIN32)
         target_include_directories(${EXECUTABLE_NAME} PRIVATE ${OPUS_INCLUDE_DIRS})
     endif()
 elseif(UNIX)
-    # OpenGL
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE OpenGL::GL)
+    # OpenGL, or GLESv2 for the ES tier (see USE_GLES above)
+    if(USE_GLES)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${GLESV2_LIBRARIES})
+        target_include_directories(${EXECUTABLE_NAME} PRIVATE ${GLESV2_INCLUDE_DIRS})
+    else()
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE OpenGL::GL)
+    endif()
 
     # System libraries
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${M_LIBRARY})

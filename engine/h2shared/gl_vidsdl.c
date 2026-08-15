@@ -459,7 +459,7 @@ static qboolean VID_SetMode (int modenum)
 	SDL_GL_SetAttribute( SDL_GL_STENCIL_SIZE, 8 );
 	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
 
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 	/* WebGL2 = OpenGL ES 3.0 */
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
@@ -645,7 +645,7 @@ void VID_ShiftPalette (const unsigned char *palette)
 
 static void GL_LoadFunctionPointers (void)
 {
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* On desktop GL, dynamically load function pointers */
 	/* load shader function pointers */
 	glCreateShader_fp = (glCreateShader_f) SDL_GL_GetProcAddress("glCreateShader");
@@ -756,7 +756,7 @@ static void GL_LoadFunctionPointers (void)
 	{
 		Sys_Error("Required GL 4.3 shader functions not found");
 	}
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 }
 
 
@@ -820,7 +820,7 @@ static void GL_Init_Functions (void)
 }
 #endif	/* GL_DLSYM */
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 static void GL_ResetFunctions (void)
 {
 #ifdef	GL_DLSYM
@@ -882,7 +882,7 @@ static void GL_Init (void)
 	Con_SafePrintf("OpenGL max.MSAA samples: %d\n", gl_max_samples);
 
 	/* GL 4.3: multitexture is always available */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	glActiveTexture_fp = (glActiveTexture_f) SDL_GL_GetProcAddress("glActiveTexture");
 	if (!glActiveTexture_fp)
 		Sys_Error("glActiveTexture not found");
@@ -903,7 +903,7 @@ static void GL_Init (void)
 	/* stencil buffer */
 	have_stencil = !!vid_attribs.stencil;
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* load shader and VBO function pointers (Emscripten uses direct calls) */
 	GL_LoadFunctionPointers();
 
@@ -926,7 +926,7 @@ static void GL_Init (void)
 	/* Streaming buffer ring (gl_buffer.c) — uhexen2-8pc2.
 	 * Probe extension availability by entry-point load, query offset
 	 * alignments, then allocate FRAMES_IN_FLIGHT host buffers. */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	gl_buffer_storage_able = (glBufferStorage_fp != NULL) &&
 				 (glMapBufferRange_fp != NULL) &&
 				 (glUnmapBuffer_fp != NULL);
@@ -955,7 +955,7 @@ static void GL_Init (void)
 	 * [0,1] and flip depth defaults so far=0, near=1, depth-test=GEQUAL.
 	 * Per-call-site flips for sky / mirror / viewmodel are gated on
 	 * gl_clipcontrol_able elsewhere. */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	gl_clipcontrol_able = (glClipControl_fp != NULL) && (gl_reversed_z.value != 0.0f);
 	if (gl_clipcontrol_able)
 	{
@@ -1003,7 +1003,7 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 
 //	glViewport_fp (*x, *y, *width, *height);
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* Wait on the slot we're about to reuse (and drain its garbage),
 	 * then advance the ring writes to that slot.  uhexen2-8pc2. */
 	GL_AcquireFrameResources ();
@@ -1013,7 +1013,7 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 
 void GL_EndRendering (void)
 {
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* Insert a GPU fence on the current slot so the next Acquire can
 	 * tell when its work has retired, advance ring index.  Must precede
 	 * SwapWindow so the fence covers all of this frame's GPU work. */
@@ -1256,7 +1256,7 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
 	GL_Shaders_Shutdown();
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	GL_DeleteFrameResources ();
 #endif
 
@@ -1326,7 +1326,7 @@ static void VID_ChangeVideoMode (int newmode)
 	{
 		R_BuildWorldVBO ();
 		R_BuildSkyStencilVBO ();
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 		R_BuildWorldCull ();
 #endif
 	}

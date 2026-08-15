@@ -312,7 +312,7 @@ void R_Init (void)
 		extern cvar_t r_gpucull;
 		Cvar_RegisterVariable (&r_gpucull);
 	}
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	{
 		extern cvar_t gl_hiz_cull;
 		extern cvar_t gl_hiz_stats;
@@ -549,7 +549,7 @@ void R_NewMap (void)
 	GL_BuildLightmaps ();
 	R_BuildWorldVBO ();
 	R_BuildSkyStencilVBO ();
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	R_BuildWorldCull ();
 #endif
 

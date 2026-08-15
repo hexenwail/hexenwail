@@ -76,7 +76,7 @@ static float	imm_cur_color[4] = { 1, 1, 1, 1 };
  * keep the original per-draw glBufferData(STREAM_DRAW) path on a
  * dedicated VBO.  uhexen2-y1v5. */
 static GLuint	imm_vao;
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 static GLuint	imm_vbo;
 #endif
 
@@ -98,7 +98,7 @@ void GL_VBO_Init (void)
 	glGenVertexArrays_fp(1, &imm_vao);
 	glBindVertexArray_fp(imm_vao);
 
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 	/* WebGL2: dedicated VBO; attributes baked to it via VertexAttribPointer. */
 	glGenBuffers_fp(1, &imm_vbo);
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
@@ -168,7 +168,7 @@ void GL_VBO_Init (void)
 void GL_VBO_Shutdown (void)
 {
 	if (imm_quad_ibo) { glDeleteBuffers_fp(1, &imm_quad_ibo); imm_quad_ibo = 0; }
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 	if (imm_vbo)      { glDeleteBuffers_fp(1, &imm_vbo); imm_vbo = 0; }
 #endif
 	if (imm_vao)      { glDeleteVertexArrays_fp(1, &imm_vao); imm_vao = 0; }
@@ -351,7 +351,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	 * frame ring (GL_Upload returns buf+offset); WebGL2 falls back to a
 	 * dedicated VBO orphaned each frame via glBufferData(STREAM_DRAW). */
 	glBindVertexArray_fp(imm_vao);
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
 	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
 			 imm_buffer, GL_STREAM_DRAW);
@@ -542,7 +542,7 @@ void GL_ImmDraw (GLenum mode)
 		return;
 
 	glBindVertexArray_fp(imm_vao);
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 	glBindBuffer_fp(GL_ARRAY_BUFFER, imm_vbo);
 	glBufferData_fp(GL_ARRAY_BUFFER, imm_count * sizeof(immvert_t),
 			 imm_buffer, GL_STREAM_DRAW);

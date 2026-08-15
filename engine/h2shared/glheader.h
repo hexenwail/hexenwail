@@ -3,9 +3,23 @@
 #ifndef __GLHEADER_H
 #define __GLHEADER_H
 
-#if defined(__EMSCRIPTEN__)
+/* Emscripten/WebGL2 is one instance of the GL ES 3.0 tier, not the whole of
+ * it -- see the USE_GLES option in engine/CMakeLists.txt.  The build system
+ * already implies one from the other, but a hand-rolled compile that defines
+ * only __EMSCRIPTEN__ must not silently fall through to the desktop headers,
+ * so the implication is restated here where every GL translation unit sees
+ * it.  uhexen2-0py6. */
+#if defined(__EMSCRIPTEN__) && !defined(USE_GLES)
+#define USE_GLES 1
+#endif
+
+#if defined(USE_GLES)
 #include <GLES3/gl3.h>
+/* The runtime header is emscripten's alone -- a desktop ES build (Mesa,
+ * ANGLE) has no such thing. */
+#ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#endif
 
 #elif defined(PLATFORM_WINDOWS)
 #include <windows.h>
@@ -68,7 +82,7 @@ typedef int64_t  GLint64;
  * still take them as a mode argument and convert to triangles themselves
  * (gl_vbo.c), so they must keep their real GL values — a caller passing 0
  * here would fall through to the raw glDrawArrays path as GL_POINTS. */
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 #ifndef GL_QUADS
 #define GL_QUADS				0x0007
 #endif

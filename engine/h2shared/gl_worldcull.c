@@ -20,7 +20,7 @@
 #include "quakedef.h"
 
 #ifdef GLQUAKE
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 
 #include "gl_shader.h"
 #include "gl_vbo.h"
@@ -1297,7 +1297,7 @@ void R_DrawWorldCulled (void)
 }
 
 
-#else	/* __EMSCRIPTEN__ — GPU culling needs compute shaders and SSBOs, which
+#else	/* USE_GLES — GPU culling needs compute shaders and SSBOs, which
 	 * WebGL2 lacks, so the whole module is compiled out.  Only the
 	 * shutdown hook is reachable from live code (gl_vidsdl.c); stub it so
 	 * VID_Shutdown links without an ifdef at the call site, matching the
@@ -1305,5 +1305,5 @@ void R_DrawWorldCulled (void)
 
 void R_FreeWorldCull (void) {}
 
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 #endif /* GLQUAKE */

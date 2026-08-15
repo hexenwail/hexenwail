@@ -3256,7 +3256,7 @@ void R_DrawWorld (void)
 	DW_END(rprof_cpu_lmupload);
 
 	DW_BEGIN();
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* The cull path is atlas-only: it draws from world_vao, whose lightmap
 	 * UVs R_BuildWorldVBO bakes into atlas space only when the atlas is on,
 	 * and R_DrawWorldCulled binds lm_atlas_texture as the shader's lightmap
