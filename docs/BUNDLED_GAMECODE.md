@@ -911,11 +911,21 @@ this matrix, not just in K1.
 
 **The bundle crcs below are dated, and are expected to move.** They fingerprint
 *our* build of the gamecode, so every `gamecode/hc` divergence changes them —
-the retail numbers (`17499`, `20799`, `33075`) are the stable ones. As of this
-writing the pair is `data1` **24008** and `portals` **17171**, changed from the
-table's `10626` / `44043` by `uhexen2-h77u`. Rows that turn on *which file
-loaded* stay valid; only the literal numbers age. Re-read them from any
-`Gamecode:` line rather than trusting this paragraph.
+the retail numbers (`17499`, `20799`, `33075`) are the stable ones. The pair has
+been `10626` / `44043` (the table's own numbers), then `24008` / `17171`
+(`uhexen2-h77u`), and is `data1` **44321** / `portals` **13325** as of
+`uhexen2-8r3e`. Rows that turn on *which file loaded* stay valid; only the
+literal numbers age. Re-read them from any `Gamecode:` line rather than trusting
+this paragraph.
+
+**Reading a crc is no longer how you tell whose gamecode it is.** That churn is
+exactly why `uhexen2-8r3e` stopped depending on it: the `Gamecode:` line now
+ends in `Raven 1.11` / `Raven 1.12a` / `Hexenwail` / `Third-party`, and the
+Hexenwail answer comes from a marker function the gamecode carries
+(`gamecode/hc/<tree>/ident.hc`), not from a number that moves. Only the three
+retail crcs above are still matched literally, and those were fixed in 1997.
+The numbers in this table remain useful for telling two *builds of ours* apart,
+which is what a bug report needs.
 
 | # | Verdict | What was observed |
 |---|---|---|

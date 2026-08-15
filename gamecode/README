@@ -11,9 +11,41 @@ that anyone auditing why our progs.dat differs from Raven's can read this file
 instead of diffing.  Bracketed ids are beads issues; run "bd show <id>" for the
 full investigation.
 
+Sibling forks are vendored under gamecode/vendor/ as submodules, so that "what
+have they found that we have not looked at?" is answerable with git log.  They
+are reference trees only: nothing there is compiled, the build reads
+gamecode/hc/ and the flake's gamecodeSrc filter cannot even see them, and the
+policy above is unchanged -- importing means writing our own hunk and recording
+it here with the upstream ref, never merging.  See gamecode/vendor/README.md.
+
 
 Hexenwail fork (diverges from 1.29c):
 =====================================
+
+2026-08-15 [uhexen2-8r3e]:
+- ident.hc (h2, hw, portals, siege): NEW.  Defines HexenwailGamecode(), a
+  marker function that exists only to be looked up, so the engine can say
+  whether the loaded progs is Raven's, ours, or a third party's.  It is never
+  called and it changes no behaviour.
+
+  A function rather than a string global because hcc.c :: WriteData() replaces
+  a global's name with "LCL+" under -on unless the global carries
+  DEF_SAVEGLOBAL, and hcc only sets that for UNinitialised globals -- so a
+  version string would lose its name in portals, hw and siege, the three trees
+  built with -on.  The strip test is "def->type->type < ev_field" and
+  ev_function sorts above ev_field, so function names always survive it.  That
+  is also why qcdis.py --list BadBackpackDump works on the portals build.
+
+  Costs nothing structurally: it is not an entity field, so gamecode/fieldsets
+  stays byte-identical, and PR_WriteProgdefs() CRCs only the globals up to
+  end_sys_globals plus the field table, so the progdefs CRC the engine reports
+  as "H2/v1.11" is untouched.  The whole-file CRC does move -- data1 24008 ->
+  44321, portals 17171 -> 13325 -- which is expected and documented.
+
+  Engine side is PR_ClassifyGamecode() in engine/h2shared/pr_edict.c.  The two
+  spellings of the name are kept in sync BY HAND; nothing checks it, which is
+  this scheme's one weakness.  A build where they disagree does not fail, it
+  quietly reports our gamecode as "Third-party".
 
 2026-08-14 [uhexen2-9gdx]:
 - items.hc (portals only): RandomMonsterGoodies now takes the drop entity and

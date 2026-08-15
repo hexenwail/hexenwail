@@ -487,6 +487,33 @@
                 --golden gamecode/fieldsets/portals.fields \
                 gamecode/hc/portals/progs.dat
 
+              # The marker PR_ClassifyGamecode() looks up to tell our gamecode
+              # apart from Raven's (uhexen2-8r3e).  Losing it does not fail a
+              # build or a map load -- the engine simply reports our own progs
+              # as "Third-party" -- so nothing else would ever notice.  The
+              # realistic ways to lose it are dropping ident.hc from a
+              # progs.src or renaming the function, and both are caught here.
+              #
+              # This gate cannot see the engine's half of the contract:
+              # GAMECODE_SENTINEL lives in engine/h2shared/pr_edict.c, which is
+              # deliberately not an input to this derivation (uhexen2-r32l), so
+              # the name is repeated below rather than shared.  A three-way
+              # rename still needs a human.
+              # ANCHORED.  qcdis --list takes a regex and applies re.search, so
+              # a bare name also matches HexenwailGamecodeXX and any other
+              # superstring -- which is exactly the rename this gate exists to
+              # catch, and it passed until the anchors went in.
+              for p in gamecode/hc/h2/progs.dat gamecode/hc/h2/progs2.dat \
+                       gamecode/hc/portals/progs.dat \
+                       gamecode/hc/hw/hwprogs.dat gamecode/hc/siege/hwprogs.dat; do
+                if ! python3 tools/qcdis.py "$p" --list '^HexenwailGamecode$' \
+                     | grep -q .; then
+                  echo "ERROR: $p carries no HexenwailGamecode marker." >&2
+                  echo "       See gamecode/hc/*/ident.hc and its progs.src entry." >&2
+                  exit 1
+                fi
+              done
+
               runHook postCheck
             '';
 

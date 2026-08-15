@@ -3,6 +3,7 @@ progs2.dat
 global.hc
 entity.hc
 constant.hc
+ident.hc
 builtin.hc
 proto.hc
 

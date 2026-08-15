@@ -758,6 +758,101 @@ qboolean PR_GamecodeAvailable (void)
 		return false;
 	return (PR_FindBundleDir() != NULL);
 }
+
+/* WHOSE gamecode is loaded, as opposed to WHICH FILE it came from.  The two
+ * are independent and both are needed: sv_gamecode and the bundle decide the
+ * file, but a player who hand-copied our progs.dat into the install's data1/
+ * -- the pre-bundle install method releases documented under uhexen2-8qp3 --
+ * gets our code out of the "Classic" setting, and nothing said so.  NULL until
+ * PR_LoadProgs() has run, which is also the honest answer on a client
+ * connected to someone else's server: that progs was never loaded here.
+ * uhexen2-8r3e. */
+static const char	*pr_gamecode_ident;
+
+/* The marker gamecode/hc/<tree>/ident.hc defines.  A function, not a global,
+ * because hcc strips global names under -on; see that file for the full
+ * reasoning.  Keep the two spellings in sync by hand. */
+#define	GAMECODE_SENTINEL	"HexenwailGamecode"
+
+/*
+===============
+PR_ClassifyGamecode
+
+Names the origin of the image just loaded.  Three tiers, most certain first.
+
+The retail CRCs are whole-file pr_crc values for Raven's own shipped files, and
+they are the only numbers here that can be hardcoded safely: they were fixed in
+1997 and cannot move.  Ours emphatically can -- every gamecode/hc edit changes
+it, which is why docs/BUNDLED_GAMECODE.md stamps its own table "dated, and
+expected to move" -- so our side is identified by a symbol instead.
+
+Raven is asked first only because pr_crc is already computed and the test is
+six compares; retail can never carry the sentinel, so the order is not
+load-bearing.
+
+The Raven answer carries a release number, taken from progs->crc -- the same
+field the progvstr switch reads, and the file's own statement of its interface
+version.  "1.12a" rather than progvstr's "H2MP/v1.12" because 1.12a is what
+Raven actually shipped the mission pack as; the bare "1.12" is the progdefs
+generation, not a release.  Our side gets no number: the whole-file CRC already
+on the same line identifies our revision exactly, and no counter we invent
+could be as precise.
+
+Anything unrecognised reads as third-party rather than as Raven: the retail
+list covers the three files a retail install has, and the mods measured in the
+verification matrix (sot 28154, soc 58269, karma2 22850, GameOfTomes 41534) all
+land here correctly.  An older Raven release we have no CRC for would be
+misfiled, which is the known cost of not being able to enumerate them.
+===============
+*/
+/* Defined further down this file and not in any header; host_cmd.c reaches it
+ * through a local prototype the same way. */
+dfunction_t *ED_FindFunctioni (const char *fn_name);
+
+static const char *PR_ClassifyGamecode (void)
+{
+	/* data1/PROGS.DAT, portals/progs.dat, data1/PROGS2.DAT -- read off a real
+	 * retail install in docs/BUNDLED_GAMECODE.md's P8/B6 rows. */
+	static const unsigned int	retail_crcs[] = { 17499U, 20799U, 33075U };
+	size_t	i;
+
+	for (i = 0; i < sizeof(retail_crcs) / sizeof(retail_crcs[0]); i++)
+	{
+		if ((unsigned int)pr_crc != retail_crcs[i])
+			continue;
+		switch (progs->crc) {
+		case PROGS_V103_CRC:	return "Raven 1.03";
+		case PROGS_V111_CRC:	return "Raven 1.11";
+		case PROGS_V112_CRC:	return "Raven 1.12a";
+		default:		return "Raven";
+		}
+	}
+
+	if (ED_FindFunctioni (GAMECODE_SENTINEL) != NULL)
+		return "Hexenwail";
+
+	/* Builds shipped before uhexen2-8r3e carry no ident.hc, so fall back to
+	 * the incidental marker docs/GAMECODE.md already relies on.
+	 * BadBackpackDump is ours (uhexen2-hwky) and is absent from both retail
+	 * files -- the B8 verification row is exactly this test, run offline with
+	 * qcdis.py.  Drop this once no such build is in the field. */
+	if (ED_FindFunctioni ("BadBackpackDump") != NULL)
+		return "Hexenwail";
+
+	return "Third-party";
+}
+
+/*
+===============
+PR_GamecodeIdent
+
+Origin of the gamecode currently loaded, or NULL if none has been.
+===============
+*/
+const char *PR_GamecodeIdent (void)
+{
+	return pr_gamecode_ident;
+}
 #endif	/* !H2W */
 
 #if !defined(H2W)
@@ -3017,13 +3112,29 @@ void PR_LoadProgs (void)
 	 * whole-file CRC, unlike the progdefs crc above, which only names the
 	 * interface version and has three possible values.  Repeats are suppressed
 	 * so a session logs one line, plus one more whenever the gamecode really
-	 * changes -- e.g. a data1 map that pulls progs2.dat via maplist.txt. */
+	 * changes -- e.g. a data1 map that pulls progs2.dat via maplist.txt.
+	 *
+	 * uhexen2-8r3e appends WHOSE code it is.  The path answers "which file",
+	 * which is not the same question: our progs.dat hand-copied into the
+	 * install's data1/ loads from a path indistinguishable from Raven's, and
+	 * reads as "Classic" in the menu while running our fixes.  Extended in
+	 * place rather than printed as a second line because this one is already
+	 * what the release notes and gamecode/README ask bug reporters to paste. */
 	{
 		static char	lastreport[MAX_OSPATH + MAX_QPATH + 64];
 		char		report[MAX_OSPATH + MAX_QPATH + 64];
 
+#if !defined(H2W)
+		/* Latched for the menu before the report is built, so a caller that
+		 * never reaches the print still gets a current answer. */
+		pr_gamecode_ident = PR_ClassifyGamecode ();
+		q_snprintf (report, sizeof(report), "Gamecode: %s from %s (%s, file crc %u) -- %s\n",
+			    progname, (progsource[0]) ? progsource : "unknown", progvstr, pr_crc,
+			    pr_gamecode_ident);
+#else
 		q_snprintf (report, sizeof(report), "Gamecode: %s from %s (%s, file crc %u)\n",
 			    progname, (progsource[0]) ? progsource : "unknown", progvstr, pr_crc);
+#endif
 		if (strcmp(report, lastreport) != 0)
 		{
 			q_strlcpy (lastreport, report, sizeof(lastreport));

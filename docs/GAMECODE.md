@@ -498,6 +498,30 @@ one is this player running?" unanswerable from a normal console log.
 version and whole-file CRC. That line is now what the release notes and
 `gamecode/README.txt` ask bug reporters to paste.
 
+`uhexen2-8r3e` then made it say *whose* code it is, which the path cannot:
+
+```
+Gamecode: progs.dat from …/data1/PROGS.DAT   (H2/v1.11,  file crc 17499) -- Raven 1.11
+Gamecode: progs.dat from …/portals/progs.dat (H2MP/v1.12, file crc 20799) -- Raven 1.12a
+Gamecode: progs.dat from …/share/hexenwail/data1/progs.dat (H2/v1.11, file crc 44321) -- Hexenwail
+Gamecode: progs.dat from …/karma2/progs.dat  (H2MP/v1.12, file crc 22850) -- Third-party
+```
+
+Raven is matched on the three retail whole-file CRCs, which are fixed forever.
+Ours is matched on `HexenwailGamecode`, a marker function every tree carries via
+`gamecode/hc/<tree>/ident.hc` — a *function* because `hcc` strips global names
+under `-on` (`hcc.c :: WriteData()`) in exactly the trees that need it, while
+function names always survive. It perturbs neither the entity field table nor
+the progdefs CRC; see that file for why. Older builds of ours, which predate the
+marker, still identify through a `BadBackpackDump` fallback.
+
+The same string appears in Game Options as a read-only `Running:` row beneath
+the `Gamecode:` toggle. The toggle is the player's *intent* and can disagree
+with reality: a `progs.dat` hand-copied into the install's `data1/` — the
+pre-bundle install method above — is loaded by the "Classic" setting and is
+ours. The row is absent until a map has loaded, which is also the honest answer
+on a client attached to someone else's server.
+
 Field context: Tome of Power Abuser pulled r11 expecting the backpack fix and
 asked why there is still a bug and no `progs.dat` in the zip. `uhexen2-zmb3`
 answered the build half; `uhexen2-8qp3` answered the shipping half, leaving the

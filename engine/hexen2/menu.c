@@ -4067,6 +4067,25 @@ static void M_Game_Draw (void)
 			Cvar_VariableValue("sv_gamecode") ? "Updated" : "Classic");
 	}
 
+	/* Status, not a control: no enum slot, no cursor stop, nothing to press.
+	 * The row above is the player's INTENT, and it can be wrong about what is
+	 * running -- a progs.dat hand-copied into the install's data1/ is loaded
+	 * by "Classic" and is ours.  This says which it actually got, and is drawn
+	 * whether or not the toggle above is (that one hides itself when no bundle
+	 * shipped, and a player in exactly that state still hand-copies).  NULL
+	 * until a map has loaded -- including on a client attached to a remote
+	 * server, where the answer is genuinely unknown -- and then the row is
+	 * simply absent rather than showing a placeholder.  uhexen2-8r3e. */
+	{
+		const char	*ident = PR_GamecodeIdent();
+
+		if (ident && (!M_Filter_Active() || M_Filter_Matches("Running")))
+		{
+			M_Print (76, 92 + 8*GAME_ITEMS, "Running       :");
+			M_PrintWhite (220, 92 + 8*GAME_ITEMS, ident);
+		}
+	}
+
 	{
 		int h = M_MouseToMenuItem(menu_mouse_y, 92, 8, GAME_ITEMS);
 		if (h >= 0 && !M_Game_IsSkip(h))

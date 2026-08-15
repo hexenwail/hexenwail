@@ -1,0 +1,3 @@
+[submodule "gamecode/vendor/jsHexen2-progs"]
+	path = gamecode/vendor/jsHexen2-progs
+	url = https://github.com/KoMiKoZa/jsHexen2-progs.git
