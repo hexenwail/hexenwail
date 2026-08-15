@@ -45,6 +45,12 @@ typedef struct glprogram_s {
 	 * R_SetupFrame uploads. */
 	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
 	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
+	/* Soft particles (uhexen2-mf9u).  Same per-batch-state reasoning as
+	 * u_alias_caustics: gl_shader_alias is shared by sprites, warp polys,
+	 * unlit brush polys and alias models, and only the sprite path wants
+	 * the fade, so the enable lives in the uniform rather than the program. */
+	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 */
+	GLint	u_soft_params;	    /* alias FS: vec3(1/fade_distance, zparam_a, zparam_b); x=0 disables */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */

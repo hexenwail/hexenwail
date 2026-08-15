@@ -53,6 +53,13 @@ void	GL_SetForceOpaqueAlpha (float v);
  * to recover world XY because u_modelview is view*model.  uhexen2-0gn3. */
 void	GL_SetAliasCaustics (float intensity, float time);
 void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
+/* Soft-particle depth fade for subsequent sprite batches (uhexen2-mf9u).
+ * inv_dist is the reciprocal of the fade distance in world units, 0 = off
+ * (the default, and what every non-sprite user of gl_shader_alias leaves it
+ * at).  za/zb linearize a window-space depth to a view-space distance as
+ * z = zb / (za - d); R_SoftParticleParams derives them from the live
+ * projection matrix and depth range. */
+void	GL_SetSoftParticles (float inv_dist, float za, float zb);
 
 /* Init / shutdown */
 void	GL_VBO_Init (void);

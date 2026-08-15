@@ -104,6 +104,20 @@ static qboolean	pp_fbo_failed;	/* true if FBO creation failed — don't retry ev
 static GLuint	pp_copyback_tex;/* fallback texture for copyback mode (no FBO) */
 static int	pp_copyback_w, pp_copyback_h;
 
+/* Soft-particle depth snapshot (uhexen2-mf9u).  Sprites need to read the
+ * depth of the opaque scene behind them, but at sprite-draw time that depth
+ * is the bound framebuffer's own attachment — sampling it is a rendering
+ * feedback loop, undefined under the GL 4.3 spec.  Blit a private copy once,
+ * after the opaque pass and before any translucency, and sample that.
+ * Snapshotting there also makes the fade opaque-only by construction, which
+ * is what it should be: a sprite ought to dissolve into the wall behind it,
+ * not into whichever translucent entity happened to sort earlier. */
+static GLuint	soft_depth_fbo;
+static GLuint	soft_depth_tex;
+static int	soft_depth_w, soft_depth_h;
+static GLenum	soft_depth_fmt;		/* internal format the texture was built with */
+static qboolean	soft_depth_valid;	/* captured successfully this frame */
+
 /* FBO state — native res for 2D composite */
 static GLuint	pp_native_fbo;
 static GLuint	pp_native_color_tex;
@@ -170,6 +184,13 @@ cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 cvar_t	r_bloom = {"r_bloom", "0", CVAR_ARCHIVE};		/* bloom post-process */
 cvar_t	r_bloom_intensity = {"r_bloom_intensity", "1.0", CVAR_ARCHIVE};	/* bloom glow strength */
 cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};	/* luminance threshold */
+/* Soft particles (uhexen2-mf9u).  Default off until it has been looked at on
+ * real hardware; costs one full-res depth blit per frame plus a depth fetch
+ * per sprite fragment when on.  The scale is the fade distance in world
+ * units: sm_expld.spr, the sprite the report came in about, is 48 units
+ * across, so 24 dissolves the sprite over roughly its own half-width. */
+cvar_t	r_softparticles = {"r_softparticles", "0", CVAR_ARCHIVE};
+cvar_t	r_softparticles_scale = {"r_softparticles_scale", "24", CVAR_ARCHIVE};
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
@@ -1300,6 +1321,108 @@ GLuint GL_PostProcess_GetSceneDepthTex (void)
 	return pp_depth_tex;	/* 0 in the MSAA branch or when no FBO is up */
 }
 
+/* ------------------------------------------------------------------ */
+/* Soft-particle depth snapshot (uhexen2-mf9u)                         */
+/* ------------------------------------------------------------------ */
+
+static void PP_DeleteSoftDepth (void)
+{
+	if (soft_depth_tex) { glDeleteTextures_fp(1, &soft_depth_tex); soft_depth_tex = 0; }
+	if (soft_depth_fbo) { glDeleteFramebuffers_fp(1, &soft_depth_fbo); soft_depth_fbo = 0; }
+	soft_depth_w = soft_depth_h = 0;
+	soft_depth_fmt = 0;
+	soft_depth_valid = false;
+}
+
+void GL_SoftDepth_Capture (void)
+{
+	GLenum	fmt, attach, status;
+	GLint	prev_draw = 0, prev_read = 0;
+	int	w = glwidth, h = glheight;	/* pp rebinds these to the scaled scene size */
+
+	soft_depth_valid = false;
+
+	if (!r_softparticles.integer || !glBlitFramebuffer_fp || w <= 0 || h <= 0)
+		return;
+
+	/* MSAA scene: resolving a multisampled depth buffer down to one sample
+	 * is implementation-defined, so the snapshot would not reliably match
+	 * what the depth test actually compared against.  Skip and let sprites
+	 * keep the hard cut rather than fade against a guess.  Mirrors how
+	 * R_BuildHiZForNextFrame declines the same path. */
+	if (pp_fbo && pp_samples > 1)
+		return;
+
+	/* glBlitFramebuffer wants matching depth formats.  The scene FBO carries
+	 * packed depth/stencil; the default-framebuffer case mirrors the format
+	 * the Hi-Z standalone resolve has been blitting from fb 0 since
+	 * uhexen2-9912. */
+	if (pp_fbo)	{ fmt = GL_DEPTH24_STENCIL8;  attach = GL_DEPTH_STENCIL_ATTACHMENT; }
+	else		{ fmt = GL_DEPTH_COMPONENT24; attach = GL_DEPTH_ATTACHMENT; }
+
+	if (soft_depth_tex && soft_depth_fbo &&
+	    soft_depth_w == w && soft_depth_h == h && soft_depth_fmt == fmt)
+		goto blit;
+
+	PP_DeleteSoftDepth();
+
+	glGenTextures_fp(1, &soft_depth_tex);
+	glBindTexture_fp(GL_TEXTURE_2D, soft_depth_tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, fmt, w, h, 0,
+			(fmt == GL_DEPTH24_STENCIL8) ? GL_DEPTH_STENCIL : GL_DEPTH_COMPONENT,
+			(fmt == GL_DEPTH24_STENCIL8) ? GL_UNSIGNED_INT_24_8 : GL_UNSIGNED_INT,
+			NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+
+	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+	glGenFramebuffers_fp(1, &soft_depth_fbo);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, soft_depth_fbo);
+	glFramebufferTexture2D_fp(GL_DRAW_FRAMEBUFFER, attach,
+				  GL_TEXTURE_2D, soft_depth_tex, 0);
+	/* Depth-only FBO needs DRAW_BUFFER = NONE for completeness on strict
+	 * drivers; it is only ever a blit destination. */
+	{
+		GLenum none = GL_NONE;
+		glDrawBuffers_fp(1, &none);
+	}
+	status = glCheckFramebufferStatus_fp(GL_DRAW_FRAMEBUFFER);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_DPrintf("Soft particles: depth FBO incomplete (0x%x)\n", status);
+		PP_DeleteSoftDepth();
+		return;
+	}
+
+	soft_depth_w = w;
+	soft_depth_h = h;
+	soft_depth_fmt = fmt;
+
+blit:
+	/* Read from whatever the scene is currently drawing into — pp_fbo when
+	 * postprocess is up, the default framebuffer otherwise, and either one
+	 * again on the mirror pass.  GL_NEAREST is the only legal depth filter. */
+	glGetIntegerv_fp(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw);
+	glGetIntegerv_fp(GL_READ_FRAMEBUFFER_BINDING, &prev_read);
+	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, (GLuint)prev_draw);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, soft_depth_fbo);
+	glBlitFramebuffer_fp(0, 0, w, h, 0, 0, w, h,
+			     GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw);
+	glBindFramebuffer_fp(GL_READ_FRAMEBUFFER, (GLuint)prev_read);
+
+	soft_depth_valid = true;
+}
+
+GLuint GL_SoftDepth_GetTex (void)
+{
+	return soft_depth_valid ? soft_depth_tex : 0;
+}
+
 qboolean GL_PostProcess_GetSceneSize (int *w, int *h)
 {
 	if (!pp_initialized || !pp_fbo || pp_width <= 0 || pp_height <= 0)
@@ -1324,6 +1447,8 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_bloom);
 	Cvar_RegisterVariable(&r_bloom_intensity);
 	Cvar_RegisterVariable(&r_bloom_threshold);
+	Cvar_RegisterVariable(&r_softparticles);
+	Cvar_RegisterVariable(&r_softparticles_scale);
 	if (r_oit.integer)
 		Cvar_Set("r_oit", "0");
 
@@ -1335,6 +1460,12 @@ void GL_PostProcess_Init (void)
 	pp_depth_tex = 0;
 	pp_program = 0;
 	pp_width = pp_height = 0;
+	/* Context is new — drop the old names rather than deleting them. */
+	soft_depth_fbo = 0;
+	soft_depth_tex = 0;
+	soft_depth_w = soft_depth_h = 0;
+	soft_depth_fmt = 0;
+	soft_depth_valid = false;
 
 	/* GL 4.3: shaders always available */
 
@@ -1396,6 +1527,7 @@ void GL_PostProcess_Shutdown (void)
 	if (oit_resolve_prog_msaa) { glDeleteProgram_fp(oit_resolve_prog_msaa); oit_resolve_prog_msaa = 0; }
 	PP_DeleteFBO();
 	PP_DeleteNativeFBO();
+	PP_DeleteSoftDepth();
 	if (pp_program)
 	{
 		glDeleteProgram_fp(pp_program);

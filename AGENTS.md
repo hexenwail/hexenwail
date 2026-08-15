@@ -1,7 +1,7 @@
 # Agent Instructions
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
-
+Prefer doing work in worktree. 
 ## First-time setup (fresh clone)
 
 The issue history is version-controlled in `.beads/issues.jsonl`; the local Dolt

@@ -58,6 +58,11 @@ static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
  * they finish so sprites / warp polys / brush polys sharing gl_shader_alias
  * never inherit the effect. */
 static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
+/* Soft-particle fade for sprite batches (uhexen2-mf9u).  Like the caustics
+ * pair above, 0 intensity is the resting state rather than a -1 sentinel, and
+ * R_DrawSpriteModel restores it after each sprite so the alias / warp / brush
+ * batches that share gl_shader_alias never inherit the fade. */
+static float	imm_soft[3] = { 0.0f, 0.0f, 0.0f };
 static float	imm_alias_model[16] = {
 	1.0f, 0.0f, 0.0f, 0.0f,
 	0.0f, 1.0f, 0.0f, 0.0f,
@@ -220,6 +225,15 @@ void GL_SetAliasCaustics (float intensity, float time)
 	imm_alias_caustics[1] = time;
 }
 
+/* uhexen2-mf9u.  inv_dist 0 disables the fade entirely; za/zb are the
+ * window-depth -> view-distance coefficients for the live projection. */
+void GL_SetSoftParticles (float inv_dist, float za, float zb)
+{
+	imm_soft[0] = inv_dist;
+	imm_soft[1] = za;
+	imm_soft[2] = zb;
+}
+
 void GL_SetAliasModelMatrix (const float *m)
 {
 	memcpy(imm_alias_model, m, sizeof(imm_alias_model));
@@ -303,6 +317,7 @@ static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
+static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
 static float	imm_cache_alias_model[16];
 static qboolean	imm_cache_alias_model_set;
 static float	imm_cache_fog_density = -1.0f;
@@ -329,6 +344,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
 	imm_cache_alias_model_set = false;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
@@ -375,6 +391,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
 	imm_cache_alias_model_set = false;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
@@ -432,6 +449,21 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 			       imm_alias_caustics[0], imm_alias_caustics[1]);
 		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
 		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
+	}
+
+	/* uhexen2-mf9u.  Resting value is 0 intensity, so on a build with
+	 * r_softparticles off this fires once per program switch and never
+	 * again — same shape as the caustics push above. */
+	if (shader->u_soft_params >= 0 &&
+	    (imm_soft[0] != imm_cache_soft[0] ||
+	     imm_soft[1] != imm_cache_soft[1] ||
+	     imm_soft[2] != imm_cache_soft[2]))
+	{
+		glUniform3f_fp(shader->u_soft_params,
+			       imm_soft[0], imm_soft[1], imm_soft[2]);
+		imm_cache_soft[0] = imm_soft[0];
+		imm_cache_soft[1] = imm_soft[1];
+		imm_cache_soft[2] = imm_soft[2];
 	}
 
 	if (shader->u_alias_model >= 0 &&

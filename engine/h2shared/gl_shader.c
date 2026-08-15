@@ -224,6 +224,7 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
+		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
 		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
 		{
 			float ident[16];
@@ -282,6 +283,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
+	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
+	p->u_soft_params      = glGetUniformLocation_fp(p->program, "u_soft_params");
 }
 
 /* ------------------------------------------------------------------ */
@@ -614,6 +617,12 @@ static const char salias_frag[] =
 	"uniform float u_alpha_threshold;\n"
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
+	/* Soft particles (uhexen2-mf9u).  Explicitly highp: GLSL_FRAG_HEADER
+	 * defaults the ES tier to mediump, whose 10-bit mantissa cannot tell
+	 * two window-space depths apart, and the whole fade is a difference of
+	 * two of them.  Desktop GLSL accepts the qualifier and ignores it. */
+	"uniform highp sampler2D u_soft_depth;\n"
+	"uniform highp vec3 u_soft_params;\n"	/* x=1/fade distance (0=off), yz=depth linearization */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
@@ -646,6 +655,28 @@ static const char salias_frag[] =
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* Soft particles (uhexen2-mf9u).  A view-parallel billboard whose origin
+	 * sits on an impact surface has up to half its quad behind that surface
+	 * at any oblique view angle; depth-testing it per fragment slices the
+	 * sprite along a hard line.  Fade alpha with the distance to whatever
+	 * opaque geometry is behind instead, so it dissolves into the wall.
+	 *
+	 * u_soft_params.yz linearize a window-space depth to a positive
+	 * view-space distance as z = b / (a - d).  C derives a and b from the
+	 * live projection matrix with glDepthRange folded in, so the expression
+	 * is identical for the reversed-Z and forward-Z conventions and for the
+	 * mirror pass's split depth range.
+	 *
+	 * Deliberately after the alpha test: the cutout decision belongs to the
+	 * sprite's own texel alpha, and a texel faded to near-zero by proximity
+	 * must still blend rather than discard.  Gated by .x, which every
+	 * non-sprite user of this program leaves at 0. */
+	"    if (u_soft_params.x > 0.0) {\n"
+	"        highp float dscene = texelFetch(u_soft_depth, ivec2(gl_FragCoord.xy), 0).r;\n"
+	"        highp float zscene = u_soft_params.z / (u_soft_params.y - dscene);\n"
+	"        highp float zfrag  = u_soft_params.z / (u_soft_params.y - gl_FragCoord.z);\n"
+	"        color.a *= clamp((zscene - zfrag) * u_soft_params.x, 0.0, 1.0);\n"
+	"    }\n"
 	/* uhexen2-khsa r13: u_force_opaque_alpha replaces the old threshold-
 	 * based test.  Threshold > 0.5 was correct for fence cutouts but
 	 * caught opaque-as-translucent ents (CASTLE_TR.MDL etc.) that need
@@ -1014,6 +1045,10 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
+	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —
+	 * gl_shader_alias has no u_texture1 — so the depth snapshot can sit
+	 * there permanently and only the sprite path ever binds to it. */
+	if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);
 	/* GL zero-initialises mat4 uniforms, which would collapse every vertex
 	 * to world (0,0).  Identity keeps v_worldxy meaningful for the batches
 	 * that submit world-space positions directly.  uhexen2-0gn3. */
