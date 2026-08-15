@@ -1468,7 +1468,7 @@ scan the gamedir root, in which case pak entries in subdirectories
 are ignored. Fills the shared name list.
 ===========
 */
-static void FS_ScanFiles (const char *subdir, const char *ext, const char *prefix, size_t preLen)
+static void FS_ScanFilesEx (const char *subdir, const char *ext, const char *prefix, size_t preLen, qboolean reset)
 {
 	searchpath_t	*search;
 	fsfind_t	find;
@@ -1477,7 +1477,8 @@ static void FS_ScanFiles (const char *subdir, const char *ext, const char *prefi
 	char		pattern[MAX_QPATH];
 	size_t		dirlen;
 
-	FS_FreeNameList ();
+	if (reset)
+		FS_FreeNameList ();
 
 	pakdir[0] = 0;
 	if (subdir)
@@ -1524,6 +1525,12 @@ static void FS_ScanFiles (const char *subdir, const char *ext, const char *prefi
 			Sys_FindClose (&find);
 		}
 	}
+}
+
+/* The common case: one extension, starting a fresh list. */
+static void FS_ScanFiles (const char *subdir, const char *ext, const char *prefix, size_t preLen)
+{
+	FS_ScanFilesEx (subdir, ext, prefix, preLen, true);
 }
 
 /*
@@ -1574,6 +1581,89 @@ picked up from that searchpath entry rather than the basedir one.
 int ListDemos (const char *prefix, const char **buf, int pos)
 {
 	FS_ScanFiles (NULL, ".dem", prefix, (prefix == NULL) ? 0 : strlen(prefix));
+	return fillMatches (buf, pos);
+}
+
+/*
+===========
+ListCfgs
+Console tab-completion lister for "exec" targets: .cfg basenames in
+the gamedir root across every searchpath.  That includes the user
+directory, so a config the player wrote themselves completes the same
+as the shipped ones.
+===========
+*/
+int ListCfgs (const char *prefix, const char **buf, int pos)
+{
+	FS_ScanFiles (NULL, ".cfg", prefix, (prefix == NULL) ? 0 : strlen(prefix));
+	return fillMatches (buf, pos);
+}
+
+/*
+===========
+ListSkies
+Console tab-completion lister for "sky" targets.
+
+Sky_LoadSkyBox builds gfx/env/<name>_<suf>.<ext> for suf in rt/bk/lf/
+ft/up/dn, trying png, then tga, then pcx.  So the set of valid names is
+exactly the set of files matching gfx/env/*_rt.<ext> with the suffix
+trimmed -- the right face is enough to offer a name, and demanding all
+six would reject a half-installed skybox that the loader itself accepts
+face by face.
+
+Names ending in '_' are not a separate case: Sky_LoadSkyBox only skips
+the separator it would otherwise double, so "moon" and "moon_" resolve
+to the same files and "moon" is the form to offer.
+===========
+*/
+int ListSkies (const char *prefix, const char **buf, int pos)
+{
+	size_t	preLen = (prefix == NULL) ? 0 : strlen(prefix);
+
+	FS_ScanFilesEx ("gfx/env", "_rt.png", prefix, preLen, true);
+	FS_ScanFilesEx ("gfx/env", "_rt.tga", prefix, preLen, false);
+	FS_ScanFilesEx ("gfx/env", "_rt.pcx", prefix, preLen, false);
+	return fillMatches (buf, pos);
+}
+
+/*
+===========
+ListSaves
+Console tab-completion lister for "save" and "load" targets.
+
+The console commands take an arbitrary name, unlike the menu's fixed
+s0..sN / ms0..msN slots, so this enumerates whatever is actually there:
+directories directly under fs_userdir holding an info.dat.  That file is
+what Host_Loadgame_f reads first, so its presence is the same test the
+loader applies -- a directory without one would complete and then fail.
+
+Offered for "save" as well as "load" so overwriting an existing save is
+as easy to type as loading it.  New names simply have nothing to
+complete against, which is correct.
+===========
+*/
+int ListSaves (const char *prefix, const char **buf, int pos)
+{
+	char	alldirs[MAX_GAMEDIRS][MAX_QPATH];
+	char	path[MAX_OSPATH];
+	size_t	preLen = (prefix == NULL) ? 0 : strlen(prefix);
+	int	numdirs, i;
+
+	FS_FreeNameList ();
+
+	numdirs = Sys_ListDirectories (fs_userdir, alldirs, MAX_GAMEDIRS);
+
+	for (i = 0; i < numdirs; i++)
+	{
+		if (preLen && q_strncasecmp(prefix, alldirs[i], preLen) != 0)
+			continue;
+		q_snprintf (path, sizeof(path), "%s/%s/info.dat", fs_userdir, alldirs[i]);
+		if (Sys_FileType(path) != FS_ENT_FILE)
+			continue;
+		if (addListName(alldirs[i]) < 0)
+			break;
+	}
+
 	return fillMatches (buf, pos);
 }
 
