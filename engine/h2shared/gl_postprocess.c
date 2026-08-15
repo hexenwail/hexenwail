@@ -1276,6 +1276,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	oit_in_pass = false;
 
 	cull_was_on = glIsEnabled_fp(GL_CULL_FACE);
+	glGetIntegerv_fp(GL_VIEWPORT, saved_viewport);
 
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
 
@@ -1294,6 +1295,22 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
 	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
 
+	/* Full-buffer for the resolve triangle, but SAVED and put back below.
+	 * The scene's viewport is not the whole buffer: R_SetupGL() derives it
+	 * from r_refdef.vrect, and SCR_CalcRefdef() gives the status bar 36 lines
+	 * whenever viewsize < 110, so the 3D view is (0,36,W,H-36).  Leaving the
+	 * full-buffer viewport behind put everything drawn after this -- glows,
+	 * viewmodel, mirror, the bbox/pointfile debug draws -- through a different
+	 * viewport transform than the world it is meant to sit on: same clip
+	 * coords, so a downward shift plus a vertical stretch.  Measured at
+	 * 640x480 viewsize 100, the mana-orb glows landed 24 px below their orbs
+	 * while the world stayed pixel-identical.  uhexen2-osya.
+	 *
+	 * Same reasoning as the cull-state save/restore below, and the same
+	 * mid-frame reason it has to be a restore and not a re-assert: this runs
+	 * between R_RenderScene and those passes, none of which set a viewport of
+	 * their own.  Queried rather than recomputed so a caller that arrives with
+	 * some other viewport gets its own back. */
 	glViewport_fp(0, 0, pp_width, pp_height);
 	glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
@@ -1322,6 +1339,9 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 	if (cull_was_on)
 		glEnable_fp(GL_CULL_FACE);
+
+	glViewport_fp(saved_viewport[0], saved_viewport[1],
+		      saved_viewport[2], saved_viewport[3]);
 
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(textarget, 0);
