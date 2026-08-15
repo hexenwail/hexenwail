@@ -188,6 +188,13 @@ const char *ED_GetProperty (edict_t *ed, char *propname);
 void ED_Write (FILE *f, edict_t *ed);
 const char *ED_ParseEdict (const char *data, edict_t *ent);
 
+void ED_ResetDroppedFields (void);
+int  ED_DroppedFields (void);
+	/* Keys ED_ParseEdict discarded because the loaded progs has no such
+	 * field.  Reset before a savegame parse and read after it: a save
+	 * carries no gamecode fingerprint, so crossing progs images loses
+	 * entity state silently unless somebody counts.  uhexen2-acew. */
+
 void ED_WriteGlobals (FILE *f);
 void ED_ParseGlobals (const char *data);
 

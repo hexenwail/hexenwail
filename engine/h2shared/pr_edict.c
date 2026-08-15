@@ -1716,6 +1716,35 @@ static qboolean ED_IsEngineWorldspawnKey (const char *keyname)
 	return false;
 }
 
+/* Keys ED_ParseEdict had to throw away because the loaded progs has no such
+ * field.  Only the savegame loader consumes this -- see ED_DroppedFields().
+ * uhexen2-acew. */
+static int	ed_dropped_fields;
+
+void ED_ResetDroppedFields (void)
+{
+	ed_dropped_fields = 0;
+}
+
+/*
+====================
+ED_DroppedFields
+
+How many keys the last run of ED_ParseEdict calls silently discarded.
+
+A savegame stores entity state as field-name/value text, and nothing in
+Hexen II fingerprints the gamecode a save was written under -- Host_Loadgame_f
+checks SAVEGAME_VERSION and nothing else, and progs->crc is never consulted on
+load.  So a save written under one progs.dat and loaded under another with a
+different field set does not fail; it succeeds with that state quietly gone.
+Counting the drops is what lets the loader say so out loud.  uhexen2-acew.
+====================
+*/
+int ED_DroppedFields (void)
+{
+	return ed_dropped_fields;
+}
+
 /*
 ====================
 ED_ParseEdict
@@ -1808,7 +1837,17 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 			 * form to prefer; these are the legacy unprefixed ones that
 			 * shipping maps use.  uhexen2-9afp. */
 			if (!(ent == sv.edicts && ED_IsEngineWorldspawnKey (keyname)))
+			{
 				Con_Printf ("'%s' is not a field\n", keyname);
+				/* Counted so the savegame loader can say something a
+				 * player will actually read.  Coming from a .bsp this
+				 * is a mapper's typo and one line per key is the right
+				 * volume; coming from a savegame it means the save was
+				 * written under gamecode with a different field set and
+				 * that entity is being restored with state missing, one
+				 * quiet line at a time.  uhexen2-acew. */
+				ed_dropped_fields++;
+			}
 			continue;
 		}
 
