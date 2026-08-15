@@ -458,6 +458,9 @@ def main(argv=None):
                     help='collapse temporaries into expressions (easier to diff)')
     ap.add_argument('--list', nargs='?', const='', metavar='PATTERN',
                     help='list function names matching a regex (default: all)')
+    ap.add_argument('--fields', action='store_true',
+                    help='print the entity field table as "name type offset", '
+                         'sorted by name, for diffing two progs images')
     ap.add_argument('--max-statements', type=int, default=400, metavar='N',
                     help='statement budget per function (default: 400)')
     ap.add_argument('--check-opcodes', nargs='?', const=default_header(),
@@ -478,6 +481,24 @@ def main(argv=None):
     except OSError as e:
         print('qcdis: cannot read %s: %s' % (args.progs, e), file=sys.stderr)
         return 2
+
+    if args.fields:
+        # A savegame stores entity state as field-NAME/value text, so what
+        # decides whether two progs images can read each other's saves is this
+        # table and not the whole-file crc.  Sorted by name and one field per
+        # line so two images can simply be diffed.  uhexen2-uhub.
+        seen = {}
+        for t, ofs, s in p.fielddefs:
+            name = p.string(s)
+            t &= ~DEF_SAVEGLOBAL
+            # hcc can emit the same field more than once; first def wins, the
+            # same rule the engine's ED_FindField follows.
+            seen.setdefault(name, (t, ofs))
+        for name in sorted(seen):
+            t, ofs = seen[name]
+            tname = TYPES[t] if t < len(TYPES) else 'type%d' % t
+            print('%-32s %-9s %d' % (name, tname, ofs))
+        return 0
 
     if args.list is not None:
         try:
