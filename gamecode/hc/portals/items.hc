@@ -1308,66 +1308,94 @@ void MonsterDropStuff(void)
 	DropBackpack();
 }
 
-float RandomMonsterGoodies ()
+/*
+===============
+RandomMonsterGoodies
+
+Rolls the random monster drop.  Writes into 'item', the entity DropBackpack is
+about to throw -- NOT into self.  Raven wrote these assignments against self,
+the corpse, but DropBackpack copies the corpse inventory into 'item' before it
+calls this, and nothing copies again afterwards, so every rolled item landed on
+a dead body that was about to be discarded and the drop went out empty.  That
+is the whole of the "Bad backpack!" report: the roll succeeds, 'total' says one
+item, and the dispatch chain below finds every field on 'item' zero.
+
+The return value counts only what DropBackpack's own 'total' counts -- artifacts
+and armor.  Mana and instant health travel in their own fields and are tested
+separately by the caller, so counting them here routes an instant-item roll into
+the single-artifact branch and it falls through.  Raven's probability tables are
+untouched.  (uhexen2-9gdx)
+===============
+*/
+float RandomMonsterGoodies (entity item)
 {
 float chance;
-float it_total;	
+float it_total;
+
+	// HexenC locals are not zero-initialized -- they live in the globals
+	// block and keep whatever the last caller left there.  Raven never set
+	// this, so a stale nonzero value made the function claim an artifact it
+	// had not rolled, which lands the caller in the same 'Bad backpack!'
+	// dead end this whole fix is about.  (uhexen2-9gdx)
+	it_total = 0;
 
 	// Grunts drop only instant items
 	if (self.monsterclass == CLASS_GRUNT)
 	{
-		if (random() < .15) // %15 chance he'll drop something	
+		if (random() < .15) // %15 chance he'll drop something
 		{
 			chance = random();
 			if (chance < .25)
-				self.greenmana = 10;
+				item.greenmana = 10;
 			else if (chance < .50)
-				self.bluemana = 10;
+				item.bluemana = 10;
 			else if (chance < .75)
 			{
-				self.greenmana = 10;
-				self.bluemana = 10;
+				item.greenmana = 10;
+				item.bluemana = 10;
 			}
 			else
 			{
-				self.spawn_health = 1;
+				item.spawn_health = 1;
 			}
-			it_total+=1;
+			// Instant items are not artifacts -- see the header comment.
+			if (!item.bluemana && !item.greenmana && !item.spawn_health)
+				it_total+=1;
 		}
 	}
 
 	// Henchmen drop instant items or lesser artifacts
 	else if (self.monsterclass == CLASS_HENCHMAN)
 	{
-		if (random() < .15) // %15 chance he'll drop something	
+		if (random() < .15) // %15 chance he'll drop something
 		{
 			chance = random();
 
 			if (chance < .08)
-				self.greenmana = 10;
+				item.greenmana = 10;
 			else if (chance < .16)
-				self.bluemana = 10;
+				item.bluemana = 10;
 			else if (chance < .24)
 			{
-				self.greenmana = 10;
-				self.bluemana = 10;
+				item.greenmana = 10;
+				item.bluemana = 10;
 			}
 			else if (chance < .32)
 			{
-				self.spawn_health = 1;
+				item.spawn_health = 1;
 			}
 			else if (chance < .40)
-				self.cnt_torch = 1;
+				item.cnt_torch = 1;
 			else if (chance < .48)
-				self.cnt_h_boost = 1;
+				item.cnt_h_boost = 1;
 			else if (chance < .56)
-				self.cnt_mana_boost = 1;
+				item.cnt_mana_boost = 1;
 			else if (chance < .64)
-				self.cnt_teleport = 1;
+				item.cnt_teleport = 1;
 			else if (chance < .72)
-				self.cnt_tome = 1;
+				item.cnt_tome = 1;
 			else if (chance < .80)
-				self.cnt_haste = 1;
+				item.cnt_haste = 1;
 			// uhexen2-h77u: this was "else if (chance < .90)", which left
 			// [0.90,1.0) setting no field at all -- the henchman passed the
 			// 15% drop gate and then dropped nothing, silently.  The grunt and
@@ -1377,54 +1405,59 @@ float it_total;
 			// is Raven's own convention applied to the one chain that missed
 			// it.  See gamecode/README.
 			else
-				self.cnt_blast = 1;
-			it_total+=1;
-		}		
+				item.cnt_blast = 1;
+			// Instant items are not artifacts -- see the header comment.
+			if (!item.bluemana && !item.greenmana && !item.spawn_health)
+				it_total+=1;
+		}
 	}
 	// Leaders drop armor or artifacts
 	else if (self.monsterclass == CLASS_LEADER)
-	{		
-		if (random() < .15) // %15 chance he'll drop something	
+	{
+		if (random() < .15) // %15 chance he'll drop something
 		{
 			chance = random();
-		
+
 			 if (chance < .05)
-				self.cnt_torch = 1;
+				item.cnt_torch = 1;
 			else if (chance < .10)
-				self.cnt_h_boost = 1;
+				item.cnt_h_boost = 1;
 			else if (chance < .15)
-				self.cnt_sh_boost = 1;
+				item.cnt_sh_boost = 1;
 			else if (chance < .20)
-				self.cnt_mana_boost = 1;
+				item.cnt_mana_boost = 1;
 			else if (chance < .25&&!(world.spawnflags&MISSIONPACK))
-				self.cnt_teleport = 1;
+				item.cnt_teleport = 1;
 			else if (chance < .30)
-				self.cnt_tome = 1;
+				item.cnt_tome = 1;
 			else if (chance < .35)
-				self.cnt_summon = 1;
+				item.cnt_summon = 1;
 			else if (chance < .40)
-				self.cnt_invisibility = 1;
+				item.cnt_invisibility = 1;
 			else if (chance < .45)
-				self.cnt_glyph = 1;
+				item.cnt_glyph = 1;
 			else if (chance < .50)
-				self.cnt_haste = 1;
+				item.cnt_haste = 1;
 			else if (chance < .55)
-				self.cnt_blast = 1;
+				item.cnt_blast = 1;
 			else if (chance < .60)
-				self.cnt_polymorph = 1;
+				item.cnt_polymorph = 1;
 			else if (chance < .65)
-				self.cnt_cubeofforce = 1;
+				item.cnt_cubeofforce = 1;
 			else if (chance < .70)
-				self.cnt_invincibility = 1;
+				item.cnt_invincibility = 1;
 			else if (chance < .75)
-				self.armor_amulet = 20;
+				item.armor_amulet = 20;
 			else if (chance < .80)
-				self.armor_bracer = 20;
+				item.armor_bracer = 20;
 			else if (chance < .85)
-				self.armor_breastplate = 20;
+				item.armor_breastplate = 20;
 			else
-				self.armor_helmet = 20;
-			it_total+=1;
+				item.armor_helmet = 20;
+			// Leaders roll no instant items, but keep the same guard so the
+			// accounting stays correct if the table ever grows one.
+			if (!item.bluemana && !item.greenmana && !item.spawn_health)
+				it_total+=1;
 		}
 	}
 	return it_total;
@@ -1595,7 +1628,7 @@ float total;
 
 	if (!total && !item.bluemana && !item.greenmana && !item.spawn_health) 
 		if(self.classname!="player")
-			total=RandomMonsterGoodies();
+			total=RandomMonsterGoodies(item);	// rolls into the drop, not the corpse
 
 	if (!total && !item.bluemana && !item.greenmana && !item.spawn_health) 
 	{	// Nothing to put in the backpack
