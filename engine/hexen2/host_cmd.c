@@ -345,6 +345,14 @@ static void Host_Map_f (void)
 	svs.serverflags = 0;		// haven't completed an episode yet
 	q_strlcpy (name, Cmd_Argv(1), sizeof(name));
 
+	/* The one place the gamecode choice is allowed to change.  This is the
+	 * "start a new server" command and it has just torn the old one down, so
+	 * nothing is mid-campaign.  changelevel and savegame loads deliberately
+	 * do NOT latch: a campaign has to finish on the gamecode it began with,
+	 * and a save's progdefs CRC is checked against whatever gets loaded.
+	 * uhexen2-vbnx. */
+	PR_LatchGamecode ();
+
 	SV_SpawnServer (name, NULL);
 
 	if (!sv.active)

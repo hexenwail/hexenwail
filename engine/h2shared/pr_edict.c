@@ -664,6 +664,84 @@ static gefv_cache	gefvCache[GEFV_CACHESIZE] =
 cvar_t	max_temp_edicts = {"max_temp_edicts", "30", CVAR_ARCHIVE};
 
 #if !defined(H2W)
+/* Which gamecode to run when a bundled copy is available: 0 = Classic, the
+ * progs.dat that shipped with the player's install (Raven's), 1 = Updated,
+ * the one built from this tree.  Default 1, which is what the engine did
+ * before this existed.
+ *
+ * PR_BundledProgsPath's -vanillaprogs comment argued against ever making this
+ * a cvar, on two grounds.  The first still stands and is handled below by
+ * latching: PR_LoadProgs runs on every map spawn, so a live cvar would let the
+ * gamecode change between levels of one campaign.  The second -- that
+ * CVAR_ARCHIVE writes an engine-packaging decision into the player's config --
+ * no longer applies now that it is a deliberate player choice with a menu
+ * entry rather than something the packager decided for them.  -vanillaprogs
+ * still wins outright over both. */
+cvar_t	sv_gamecode = {"sv_gamecode", "1", CVAR_ARCHIVE};
+
+/* The latched copy.  -1 means "never latched", in which case the cvar is read
+ * directly -- that covers the first map of the session and any path that
+ * reaches PR_LoadProgs without going through Host_Map_f. */
+static int	pr_gamecode_latched = -1;
+
+/* Defined down with the rest of the bundle lookup; needed here by
+ * PR_GamecodeAvailable. */
+static const char *PR_FindBundleDir (void);
+
+/*
+===============
+PR_LatchGamecode
+
+Called when a NEW GAME starts, and only then.  changelevel and restart must not
+call it: a campaign has to finish on the gamecode it began with, and a
+savegame's progdefs CRC is checked against whatever is loaded, so swapping
+mid-run would leave the player unable to load their own saves.
+===============
+*/
+void PR_LatchGamecode (void)
+{
+	pr_gamecode_latched = (sv_gamecode.integer != 0);
+}
+
+/*
+===============
+PR_GamecodeIsUpdated
+
+The latched answer, or the cvar if nothing has latched yet.
+===============
+*/
+qboolean PR_GamecodeIsUpdated (void)
+{
+	if (pr_gamecode_latched < 0)
+		return (sv_gamecode.integer != 0);
+	return (pr_gamecode_latched != 0);
+}
+
+/*
+===============
+PR_GamecodeAvailable
+
+Is there anything to choose BETWEEN?  Offering the switch when no bundled
+gamecode shipped would be a control that does nothing, so the menu hides it.
+Answers only the cheap, stable half of PR_BundledProgsPath's conditions -- the
+build carries a bundle, the install is one we will substitute for, and the
+player has not forced vanilla.  The per-gamedir conditions are deliberately not
+repeated here: they depend on the searchpath at map spawn, and a menu item that
+appeared and vanished as the player moved between data1 and portals would be
+worse than one that is occasionally present but inert.
+===============
+*/
+qboolean PR_GamecodeAvailable (void)
+{
+	if (COM_CheckParm("-vanillaprogs"))
+		return false;
+	if (!(gameflags & GAME_REGISTERED))
+		return false;
+	return (PR_FindBundleDir() != NULL);
+}
+#endif	/* !H2W */
+
+#if !defined(H2W)
 // these actually are not used in hexen2, but mods may use them.
 cvar_t	nomonsters = {"nomonsters", "0", CVAR_NONE};
 cvar_t	gamecfg = {"gamecfg", "0", CVAR_NONE};
@@ -2179,11 +2257,15 @@ static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t out
 	const char	*bundle;
 	const char	*gamedir;
 
-	/* Off switch.  Command line only, never a cvar: a cvar is mutable
-	 * mid-session and this runs per map spawn, so it would let the gamecode
-	 * change between levels of one campaign, and a CVAR_ARCHIVE one would
-	 * write an engine-packaging decision into the player's config tree. */
+	/* Hard off switch, still command line only: it exists so a packager or a
+	 * bug report can take the engine's gamecode out of the picture entirely,
+	 * and it outranks the player's menu choice below. */
 	if (COM_CheckParm("-vanillaprogs"))
+		return false;
+
+	/* The player's choice, latched at new-game time so a campaign cannot
+	 * change gamecode between its own levels.  See sv_gamecode. */
+	if (!PR_GamecodeIsUpdated())
 		return false;
 
 	/* Our gamecode is built from the 1.11 tree.  The demo, the OEM release
@@ -3023,6 +3105,9 @@ void PR_Init (void)
 	Cmd_AddCommand ("profile", PR_Profile_f);
 
 	Cvar_RegisterVariable (&max_temp_edicts);
+#if !defined(H2W)
+	Cvar_RegisterVariable (&sv_gamecode);
+#endif
 
 #if !defined(H2W)
 	Cvar_RegisterVariable (&nomonsters);

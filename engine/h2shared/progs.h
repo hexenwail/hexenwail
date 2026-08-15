@@ -140,6 +140,16 @@ void PR_Init (void);
 void PR_ExecuteProgram (func_t fnum, const char *funcname);
 void PR_LoadProgs (void);
 
+#if !defined(H2W)
+/* Gamecode selection: Classic (the install's own progs.dat) vs Updated (the
+ * copy built from this tree).  PR_LatchGamecode is called when a NEW GAME
+ * starts and nowhere else -- see its definition for why changelevel and
+ * savegame loads must not re-latch.  uhexen2-vbnx. */
+void	 PR_LatchGamecode (void);
+qboolean PR_GamecodeIsUpdated (void);
+qboolean PR_GamecodeAvailable (void);	/* is there a bundle to switch to? */
+#endif
+
 /* Returns NULL if every lump `raw' describes lies inside `filelen', else a
  * reason string.  Byteswaps the header into a local copy, so it is safe to
  * call on an unvetted image before the caller does its own in-place swap. */

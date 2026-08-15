@@ -15,6 +15,33 @@ full investigation.
 Hexenwail fork (diverges from 1.29c):
 =====================================
 
+2026-08-14 [uhexen2-9gdx]:
+- items.hc (portals only): RandomMonsterGoodies now takes the drop entity and
+  rolls into it.  Raven wrote the assignments against self -- the corpse -- but
+  DropBackpack finishes copying self -> item before it calls this and never
+  copies again, so every random monster drop in the mission pack landed on a
+  body about to be discarded.  The item went out empty while 'total' claimed
+  one artifact, which sent the caller down the single-artifact branch, found
+  nothing, and binned the drop.  That is the whole of the "Bad backpack!"
+  report.  Present since 1997 and still present in HoT/uhexen2.
+
+  it_total is now also initialised.  HexenC locals live in the globals block
+  and keep whatever the previous caller left there; a stale nonzero value made
+  the function report an artifact it had never rolled, reaching the same dead
+  end from the other direction.  Raven never set it.
+
+  Only the portals tree has this.  In h2 (and hw, siege) the roll lives in
+  MonsterDropStuff and runs BEFORE DropBackpack copies self -> item, so writing
+  to self is correct there and those trees are untouched.
+
+  Credit: diagnosed in KoMiKoZa/jsHexen2-progs 22b5c8a, which is where the
+  self-vs-item mechanism was worked out.  Two of that commit's other hunks were
+  already fixed here independently (uhexen2-9r3n, uhexen2-hwky), and its
+  handling of the CLASS_HENCHMAN tail is deliberately NOT taken -- it keeps
+  Raven's dead zone and only stops miscounting it, where uhexen2-h77u below
+  closes the zone outright.  Per this file's policy our .hc wins; that entry
+  documents the reasoning and it still stands.
+
 2026-08-14 [uhexen2-h77u]:
 - items.hc (h2, hw, portals, siege): MonsterDropStuff's CLASS_HENCHMAN chain
   ended at "else if (chance < .90)" with nothing after it, so chance in
