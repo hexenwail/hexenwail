@@ -509,8 +509,6 @@ store:
 	switch (gl_lightmap_format)
 	{
 	case GL_RGBA:
-		stride -= (smax<<2);
-
 		blcr = &blocklightscolor[0];
 
 		/* Ironwail-style overbright: when gl_overbright is on, build the
@@ -520,9 +518,17 @@ store:
 		 * shift 7 (which clamps at the atlas).  uhexen2-f29y. */
 		{
 		const int lmshift = 7 + (gl_overbright.integer ? 1 : 0);
+		/* What the writers below add to dest at the end of a row, which is
+		 * the row stride less the smax pixels they just walked it over.  A
+		 * separate name because `stride` stays the caller's row stride all
+		 * the way down to LM_FillGutter, which needs the real thing: this
+		 * used to decrement `stride` in place and the gutter fill then
+		 * walked rows by the leftover, scattering edge luxels across other
+		 * surfaces' light.  uhexen2-jwzf. */
+		const int dest_step = stride - (smax << 2);
 		if (gl_coloredlight.integer)
 		{
-			for (i = 0; i < tmax; i++, dest += stride)
+			for (i = 0; i < tmax; i++, dest += dest_step)
 			{
 				for (j = 0; j < smax; j++)
 				{
@@ -540,7 +546,7 @@ store:
 		}
 		else
 		{
-			for (i = 0; i < tmax; i++, dest += stride)
+			for (i = 0; i < tmax; i++, dest += dest_step)
 			{
 				for (j = 0; j < smax; j++)
 				{
