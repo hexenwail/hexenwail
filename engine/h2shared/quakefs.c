@@ -1364,53 +1364,294 @@ static void FS_Path_f (void)
 }
 
 /*
+==============================================================================
+
+NAME LISTING (console listers and tab-completion)
+
+The listers below all share one name list. Only one list can be live at a
+time, which is fine because every caller is synchronous: it reads the names
+and calls FS_FreeNameList() before returning. Each scan drops whatever the
+previous caller left behind, so a caller that bails out early cannot leak.
+
+==============================================================================
+*/
+#if !defined(SERVERONLY)	/* dedicated servers dont need these commands */
+
+#define MAX_LISTNAMES	256	/* max number of names to list */
+#define MAX_GAMEDIRS	128	/* max subdirectories probed for "game" */
+static int	listname_count = 0;
+static char	*listnames[MAX_LISTNAMES];
+
+/*
 ===========
-processMapname: Callback for FS_Maplist_f.
-Returns 0 if a name is skipped, the current
-number of names added to the list if the name
-is added, or -1 upon failures.
+FS_FreeNameList
+Releases the names handed out by the last scan.
 ===========
 */
-#if !defined(SERVERONLY)	/* dedicated servers dont need this command */
-
-#define MAX_NUMMAPS	256	/* max number of maps to list */
-static int	map_count = 0;
-static char	*maplist[MAX_NUMMAPS];
-
-static int processMapname (const char *mapname, const char *partial, size_t len_partial)
+void FS_FreeNameList (void)
 {
-	char	cur_name[MAX_QPATH];
-	int	j, len;
+	while (listname_count)
+		Z_Free (listnames[--listname_count]);
+}
 
-	if (map_count >= MAX_NUMMAPS)
+/*
+===========
+addListName
+Adds one already-trimmed name to the list, skipping names that
+are already there (case-insensitively, so the same file reached
+through two searchpaths is only offered once).
+Returns 0 if the name is skipped, the new count if it is added,
+or -1 when the list is full.
+===========
+*/
+static int addListName (const char *name)
+{
+	int	j;
+
+	if (listname_count >= MAX_LISTNAMES)
 	{
-		Con_Printf ("WARNING: reached maximum number of maps to list\n");
+		Con_Printf ("WARNING: reached maximum number of names to list\n");
 		return -1;
 	}
 
+	for (j = 0; j < listname_count; j++)
+	{
+		if (! q_strcasecmp(listnames[j], name))
+			return 0;	/* duplicated name. skip. */
+	}
+
+	listnames[listname_count] = Z_Strdup (name);
+	return (++listname_count);
+}
+
+/*
+===========
+addFileName
+Prefix-filters a filename, strips its extension and adds it.
+The prefix is matched against the name with the extension still
+on, which is what the maplist command has always done.
+===========
+*/
+static int addFileName (const char *filename, const char *partial, size_t len_partial, const char *ext)
+{
+	char	cur_name[MAX_QPATH];
+	size_t	extlen = strlen(ext);
+	size_t	len;
+
 	if (len_partial)
 	{
-		if (q_strncasecmp(partial, mapname, len_partial) != 0)
+		if (q_strncasecmp(partial, filename, len_partial) != 0)
 			return 0;	/* doesn't match the prefix. skip. */
 	}
 
-	len = q_strlcpy (cur_name, mapname, sizeof(cur_name)) - 4; /* -4 to kill ".bsp" */
-	if (len <= 0)
+	len = q_strlcpy (cur_name, filename, sizeof(cur_name));
+	if (len >= sizeof(cur_name))
+		return 0;	/* truncated: not a name we could hand back */
+	if (len <= extlen)
 		return 0;
-	if (q_strcasecmp(&cur_name[len], ".bsp") != 0)
+
+	len -= extlen;
+	if (q_strcasecmp(&cur_name[len], ext) != 0)
 		return 0;
 
 	cur_name[len] = 0;
 
-	for (j = 0; j < map_count; j++)
+	return addListName (cur_name);
+}
+
+/*
+===========
+FS_ScanFiles
+Walks every searchpath collecting files with the given extension.
+subdir names a directory below the gamedir ("maps"), or is NULL to
+scan the gamedir root, in which case pak entries in subdirectories
+are ignored. Fills the shared name list.
+===========
+*/
+static void FS_ScanFiles (const char *subdir, const char *ext, const char *prefix, size_t preLen)
+{
+	searchpath_t	*search;
+	fsfind_t	find;
+	const char	*findname;
+	char		pakdir[MAX_QPATH];
+	char		pattern[MAX_QPATH];
+	size_t		dirlen;
+
+	FS_FreeNameList ();
+
+	pakdir[0] = 0;
+	if (subdir)
+		q_snprintf (pakdir, sizeof(pakdir), "%s/", subdir);
+	dirlen = strlen (pakdir);
+	q_snprintf (pattern, sizeof(pattern), "*%s", ext);
+
+	for (search = fs_searchpaths; search; search = search->next)
 	{
-		if (! q_strcasecmp(maplist[j], cur_name))
-			return 0;	/* duplicated name. skip. */
+		if (search->pack)
+		{
+			int i = 0;
+			for (; i < search->pack->numfiles; ++i)
+			{
+				const char *name = search->pack->files[i].name;
+
+				if (dirlen)
+				{
+					if (strncmp(pakdir, name, dirlen) != 0)
+						continue;
+					name += dirlen;
+				}
+				else if (strchr(name, '/'))
+					continue;	/* gamedir root only */
+
+				if (addFileName(name, prefix, preLen, ext) < 0)
+					return;
+			}
+		}
+		else
+		{
+			findname = Sys_FindFirstFile(&find,
+					subdir ? va("%s/%s", search->filename, subdir) : search->filename,
+					pattern);
+			while (findname)
+			{
+				if (addFileName(findname, prefix, preLen, ext) < 0)
+				{
+					Sys_FindClose (&find);
+					return;
+				}
+				findname = Sys_FindNextFile (&find);
+			}
+			Sys_FindClose (&find);
+		}
+	}
+}
+
+/*
+===========
+fillMatches
+Hands the scanned names to a tab-completion caller in the
+ListCommands() shape: fills buf[pos+i], returns the count added.
+===========
+*/
+static int fillMatches (const char **buf, int pos)
+{
+	int	i;
+
+	if (!buf)
+		return 0;
+
+	for (i = 0; i < listname_count; i++)
+	{
+		if (pos + i >= MAX_MATCHES)
+			break;
+		buf[pos + i] = listnames[i];
 	}
 
-	/* add to the maplist */
-	maplist[map_count] = Z_Strdup (cur_name);
-	return (++map_count);
+	return i;
+}
+
+/*
+===========
+ListMaps
+Console tab-completion lister for map names.
+===========
+*/
+int ListMaps (const char *prefix, const char **buf, int pos)
+{
+	FS_ScanFiles ("maps", ".bsp", prefix, (prefix == NULL) ? 0 : strlen(prefix));
+	return fillMatches (buf, pos);
+}
+
+/*
+===========
+ListDemos
+Console tab-completion lister for demo names. Demos live in the
+gamedir root, and CL_Record_f writes them through FS_USERDIR, so
+on platforms with a user directory the freshly recorded ones are
+picked up from that searchpath entry rather than the basedir one.
+===========
+*/
+int ListDemos (const char *prefix, const char **buf, int pos)
+{
+	FS_ScanFiles (NULL, ".dem", prefix, (prefix == NULL) ? 0 : strlen(prefix));
+	return fillMatches (buf, pos);
+}
+
+/*
+===========
+FS_IsGamedir
+Is basedir/dir a game data directory, i.e. does it hold a
+progs.dat or any of pak0.pak through pak9.pak? This is the one
+definition of "mod directory" -- the mods menu uses it too.
+===========
+*/
+qboolean FS_IsGamedir (const char *basedir, const char *dir)
+{
+	char	path[MAX_OSPATH];
+	int	i;
+
+	q_snprintf (path, sizeof(path), "%s/%s/progs.dat", basedir, dir);
+	if (Sys_FileType(path) == FS_ENT_FILE)
+		return true;
+
+	for (i = 0; i < 10; i++)
+	{
+		q_snprintf (path, sizeof(path), "%s/%s/pak%d.pak", basedir, dir, i);
+		if (Sys_FileType(path) == FS_ENT_FILE)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+===========
+ListGames
+Console tab-completion lister for "game" targets. Unlike the mods
+menu, which renders data1 and portals as fixed rows and so leaves
+them out of its scan, this offers everything Host_Game_f accepts:
+data1 unconditionally (it is accepted without a filesystem probe),
+portals when it is installed, and every other game data directory.
+===========
+*/
+int ListGames (const char *prefix, const char **buf, int pos)
+{
+	char	alldirs[MAX_GAMEDIRS][MAX_QPATH];
+	char	path[MAX_OSPATH];
+	size_t	preLen = (prefix == NULL) ? 0 : strlen(prefix);
+	int	numdirs, i;
+
+	FS_FreeNameList ();
+
+	/* fs_basedir, not host_parms->basedir: Host_Game_f resolves its
+	 * argument against the former, which -basedir moves.  uhexen2-5mhd. */
+	if (!preLen || !q_strncasecmp(prefix, "data1", preLen))
+		addListName ("data1");
+
+	q_snprintf (path, sizeof(path), "%s/portals", fs_basedir);
+	if (Sys_FileType(path) == FS_ENT_DIRECTORY)
+	{
+		if (!preLen || !q_strncasecmp(prefix, "portals", preLen))
+			addListName ("portals");
+	}
+
+	numdirs = Sys_ListDirectories (fs_basedir, alldirs, MAX_GAMEDIRS);
+
+	for (i = 0; i < numdirs; i++)
+	{
+		/* hw holds HexenWorld's data, which only the hwcl/hwsv binaries
+		 * can use; the single player client has nothing to do with it */
+		if (!q_strcasecmp(alldirs[i], "hw"))
+			continue;
+		if (preLen && q_strncasecmp(prefix, alldirs[i], preLen) != 0)
+			continue;
+		if (!FS_IsGamedir(fs_basedir, alldirs[i]))
+			continue;
+		if (addListName(alldirs[i]) < 0)
+			break;
+	}
+
+	return fillMatches (buf, pos);
 }
 
 /*
@@ -1421,7 +1662,6 @@ Prints map filenames to the console
 */
 static void FS_Maplist_f (void)
 {
-	searchpath_t	*search;
 	const char	*prefix;
 	size_t		preLen;
 
@@ -1436,53 +1676,22 @@ static void FS_Maplist_f (void)
 		prefix = NULL;
 	}
 
-	for (search = fs_searchpaths; search; search = search->next)
-	{
-		if (search->pack)
-		{
-			int i = 0;
-			for (; i < search->pack->numfiles; ++i)
-			{
-				if (strncmp("maps/", search->pack->files[i].name, 5) != 0)
-					continue;
-				if (processMapname(search->pack->files[i].name + 5, prefix, preLen) < 0)
-					goto done;
-			}
-		}
-		else
-		{
-			fsfind_t find;
-			const char *findname = Sys_FindFirstFile(&find, va("%s/maps",search->filename), "*.bsp");
-			while (findname)
-			{
-				if (processMapname(findname, prefix, preLen) < 0)
-				{
-					Sys_FindClose (&find);
-					goto done;
-				}
-				findname = Sys_FindNextFile (&find);
-			}
-			Sys_FindClose (&find);
-		}
-	}
+	FS_ScanFiles ("maps", ".bsp", prefix, preLen);
 
-done:
-	if (!map_count)
+	if (!listname_count)
 	{
 		Con_Printf ("No maps found.\n\n");
 		return;
 	}
 
-	Con_Printf ("Found %d maps:\n\n", map_count);
+	Con_Printf ("Found %d maps:\n\n", listname_count);
 	/* sort the list */
-	if (map_count > 1)
-		qsort (maplist, map_count, sizeof(char *), COM_StrCompare);
-	Con_ShowList (map_count, (const char**)maplist);
+	if (listname_count > 1)
+		qsort (listnames, listname_count, sizeof(char *), COM_StrCompare);
+	Con_ShowList (listname_count, (const char**)listnames);
 	Con_Printf ("\n");
 
-	/* free the memory and zero map_count */
-	while (map_count)
-		Z_Free (maplist[--map_count]);
+	FS_FreeNameList ();
 }
 #endif	/* SERVERONLY */
 

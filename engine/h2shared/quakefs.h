@@ -129,6 +129,38 @@ int FS_ListSearchSubdirs (const char *relpath, char dirs[][64], int maxdirs);
 	 * maxdirs.  Pak entries are skipped — pak-packed mods will not contribute
 	 * subdir names here.  */
 
+#if !defined(SERVERONLY)
+/* Console tab-completion listers, shaped like ListCommands() in cmd.h: each
+ * writes matches into buf[pos+i], capped at MAX_MATCHES, and returns how many
+ * it added.  Names are matched against prefix case-insensitively and deduped,
+ * and keep their on-disk casing.
+ *
+ * OWNERSHIP: all three share one name list owned by quakefs.c.  Only one list
+ * can be live at a time; the pointers are valid until the next List*() call or
+ * FS_FreeNameList(), whichever comes first.  Callers must call
+ * FS_FreeNameList() on every path once they are done reading the names.  */
+
+int ListMaps (const char *prefix, const char **buf, int pos);
+	/* .bsp basenames under maps/ across every searchpath. */
+
+int ListDemos (const char *prefix, const char **buf, int pos);
+	/* .dem basenames in the gamedir root across every searchpath, which
+	 * includes the user directory where CL_Record_f writes new demos. */
+
+int ListGames (const char *prefix, const char **buf, int pos);
+	/* Directories "game" will accept: data1, portals when installed, and
+	 * every other game data directory under fs_basedir except hw. */
+
+void FS_FreeNameList (void);
+	/* Releases the names a preceding List*() handed out.  Safe to call when
+	 * there is no outstanding list.  */
+
+qboolean FS_IsGamedir (const char *basedir, const char *dir);
+	/* Does basedir/dir hold game data -- a progs.dat, or any of pak0.pak
+	 * through pak9.pak?  The single definition of "mod directory": the mods
+	 * menu tests candidates with this too.  */
+#endif	/* SERVERONLY */
+
 /* these procedures open a file using FS_OpenFile and loads it into a proper
  * buffer. the buffer is allocated with a total size of fs_filesize + 1. the
  * procedures differ by their buffer allocation method.  */
