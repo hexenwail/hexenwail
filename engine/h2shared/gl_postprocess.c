@@ -1262,6 +1262,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	GLenum textarget;
 	GLuint prog;
 	GLint loc_accum, loc_reveal;
+	GLboolean cull_was_on;
 
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
 		return;
@@ -1272,6 +1273,8 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	loc_reveal = (oit_samples > 1) ? oit_resolve_msaa_loc_reveal : oit_resolve_loc_reveal;
 
 	oit_in_pass = false;
+
+	cull_was_on = glIsEnabled_fp(GL_CULL_FACE);
 
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
 
@@ -1293,10 +1296,31 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glViewport_fp(0, 0, pp_width, pp_height);
 	glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
+	/* The resolve triangle is counter-clockwise in NDC, i.e. front-facing,
+	 * and this engine culls FRONT faces (gl_vidsdl.c :: GL_Init(), and
+	 * R_SetupGL re-asserts it every frame when gl_cull is on).  Leave culling
+	 * enabled and the whole fullscreen triangle is thrown away before
+	 * rasterisation: accum and revealage are written correctly and then
+	 * composited nowhere, so every translucent thing routed through OIT --
+	 * sprites, particles, translucent water -- renders as absolutely nothing.
+	 * That is uhexen2-z4r1, and uhexen2-a0hp / uhexen2-mex9 before it; it
+	 * looked hardware-specific only because nobody had reproduced it on a
+	 * second stack.  PP_BlitWith3DEffects and the final blit both disable
+	 * culling before their fullscreen draws; this one has to as well.
+	 *
+	 * Restored rather than left off, because unlike those two this runs
+	 * mid-frame -- R_DrawAllGlows, R_DrawViewModel and R_Mirror all draw
+	 * after it and expect the scene's cull state.  Queried rather than
+	 * assumed, since gl_cull 0 legitimately leaves it off. */
+	glDisable_fp(GL_CULL_FACE);
+
 	/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
 	glBindVertexArray_fp(oit_resolve_vao);
 	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 	glBindVertexArray_fp(0);
+
+	if (cull_was_on)
+		glEnable_fp(GL_CULL_FACE);
 
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(textarget, 0);
