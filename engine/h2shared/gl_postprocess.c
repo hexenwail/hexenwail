@@ -186,11 +186,17 @@ cvar_t	r_bloom_intensity = {"r_bloom_intensity", "1.0", CVAR_ARCHIVE};	/* bloom 
 cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};	/* luminance threshold */
 /* Soft particles (uhexen2-mf9u).  Default off until it has been looked at on
  * real hardware; costs one full-res depth blit per frame plus a depth fetch
- * per sprite fragment when on.  The scale is the fade distance in world
- * units: sm_expld.spr, the sprite the report came in about, is 48 units
- * across, so 24 dissolves the sprite over roughly its own half-width. */
+ * per sprite fragment when on.
+ *
+ * The scale is the fade distance in world units, and 8 is a measured choice,
+ * not a guess.  sm_expld.spr — the sprite the original report came in about —
+ * is 48 units across and detonates centred on the impact surface, so the fade
+ * distance trades artifact removal against washing the sprite out.  Compared
+ * headless on demo1 (Necromancer, raven staff, explosions on the plinth): 24
+ * dissolves most of the flame and visibly drains the explosion; 8 removes the
+ * hard rectangular cut while leaving the flame at close to full brightness. */
 cvar_t	r_softparticles = {"r_softparticles", "0", CVAR_ARCHIVE};
-cvar_t	r_softparticles_scale = {"r_softparticles_scale", "24", CVAR_ARCHIVE};
+cvar_t	r_softparticles_scale = {"r_softparticles_scale", "8", CVAR_ARCHIVE};
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
