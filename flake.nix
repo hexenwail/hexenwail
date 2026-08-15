@@ -126,7 +126,18 @@
                 rel = pkgs.lib.removePrefix (root + "/") (toString path);
               in
                 rel == "gamecode" || rel == "gamecode/hc"
-                || pkgs.lib.hasPrefix "gamecode/hc/" rel;
+                || pkgs.lib.hasPrefix "gamecode/hc/" rel
+                # The field-set gate and its golden tables (uhexen2-uhub).
+                # Widening this filter means a checker edit rebuilds the
+                # gamecode, which is correct -- the check is part of what
+                # producing a progs.dat means -- and still leaves the engine's
+                # filteredSrc hash untouched, which is the point of keeping the
+                # two filters apart.
+                || rel == "gamecode/fieldsets"
+                || pkgs.lib.hasPrefix "gamecode/fieldsets/" rel
+                || rel == "tools"
+                || rel == "tools/qcdis.py"
+                || rel == "tools/check_progs_fields.py";
           };
 
         # Dr. MinGW's runtime -- the post-mortem handler we ship beside the
@@ -422,7 +433,7 @@
 
             src = gamecodeSrc;
 
-            nativeBuildInputs = [ self.packages.${system}.utils ];
+            nativeBuildInputs = [ self.packages.${system}.utils pkgs.python3 ];
 
             dontConfigure = true;
 
@@ -444,6 +455,39 @@
               hcc -src gamecode/hc/siege   -os -oi -on
 
               runHook postBuild
+            '';
+
+            # A savegame stores entity state by field NAME and carries no
+            # fingerprint of the gamecode that wrote it, so an image whose
+            # field set has drifted loads a stale save successfully and
+            # silently missing state (uhexen2-acew).  The engine warns at load
+            # time; this refuses to ship the divergence in the first place.
+            #
+            # The golden tables pin the field set against a checked-in copy,
+            # because the image that matters most cannot be in the build:
+            # Raven's retail PROGS.DAT is unfree and lives only in the player's
+            # install.  As of 2026-08-15 h2.fields is exactly what retail
+            # produces -- 497 fields, zero diff -- which is what makes
+            # sv_gamecode 0 and 1 interchangeable.
+            #
+            # portals is checked separately against its own golden rather than
+            # against h2: it is a different campaign in its own gamedir with
+            # its own 511-field layout, and no savegame crosses between them.
+            # hw and siege are HexenWorld images with no savegames of this
+            # kind, so they are not gated.
+            doCheck = true;
+            checkPhase = ''
+              runHook preCheck
+
+              python3 tools/check_progs_fields.py \
+                --golden gamecode/fieldsets/h2.fields \
+                gamecode/hc/h2/progs.dat gamecode/hc/h2/progs2.dat
+
+              python3 tools/check_progs_fields.py \
+                --golden gamecode/fieldsets/portals.fields \
+                gamecode/hc/portals/progs.dat
+
+              runHook postCheck
             '';
 
             # Laid out as gamedirs under a basedir, matching packages.demodata,
