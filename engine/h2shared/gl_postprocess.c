@@ -521,6 +521,20 @@ static qboolean PP_CreateFBO (int width, int height)
 	 * per-sample, so they share the multisampled depth/stencil cleanly. */
 	int samples = (vid_config_fsaa.integer > 1) ? vid_config_fsaa.integer : 0;
 
+	/* Clamp to what the driver can actually allocate.  config.cfg is a plain
+	 * text file and survives GPU swaps, so an inherited 16 on an 8-sample
+	 * driver is an ordinary case, not a corrupt one -- clamp it rather than
+	 * letting the allocation fail into the fallback path on every restart. */
+	if (samples > 1)
+	{
+		GLint max_samples = 0;
+		glGetIntegerv_fp(GL_MAX_SAMPLES, &max_samples);
+		if (max_samples > 1 && samples > max_samples)
+			samples = max_samples;
+		else if (max_samples <= 1)
+			samples = 0;
+	}
+
 	PP_DeleteFBO();
 
 	/* resolve texture (always non-multisampled — this is what the shader reads) */

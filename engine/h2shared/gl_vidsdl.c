@@ -293,8 +293,20 @@ cvar_t		gl_reversed_z = {"gl_reversed_z", "1", CVAR_ARCHIVE};
 #define	USE_GAMMA_RAMPS			0
 static qboolean	gammaworks = false;	// whether hw-gamma works
 
-// multisampling
+/* Multisampling.  Two separate things, and conflating them was uhexen2-eh1c:
+ *
+ *   multisample     - samples requested for the WINDOW (default framebuffer).
+ *                     Deliberately pinned to 0, see VID_SetMode.
+ *   vid_config_fsaa - samples the player asked for.  This is what actually
+ *                     drives AA, because the world renders into the scene FBO
+ *                     and gl_postprocess.c PP_CreateFBO reads this cvar.
+ *   vid_menu_fsaa   - the menu's pending value, applied to the cvar on Apply.
+ *
+ * VID_SetMode used to write `multisample` back over the cvar, which pinned it
+ * to 0 forever and made the multisampled FBO (and the MSAA OIT resolve with it)
+ * unreachable.  Keep these three distinct. */
 static int	multisample = 0; // do not set this if SDL cannot multisample
+static int	vid_menu_fsaa = 0;	/* menu-pending sample count, not yet applied */
 static qboolean	sdl_has_multisample = false;
 static int	gl_max_samples = 0;	/* GL_MAX_SAMPLES query, populated post-context-init */
 cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_ARCHIVE};	/* read by gl_lodbias auto-scale */
@@ -541,12 +553,12 @@ static qboolean VID_SetMode (int modenum)
 	SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY );
 #endif
 
-	/* Window MSAA is intentionally NOT requested.  The main scene FBO
-	 * already force-disables MSAA (gl_postprocess.c PP_CreateFBO), and with
-	 * a vanilla config the world renders straight to this default
-	 * framebuffer; a multisampled window there mis-rendered translucent
-	 * surfaces (the "glass" screen-door, uhexen2-zroc).  Edge AA is provided
-	 * by FXAA (gl_fxaa) in the post-process chain instead. */
+	/* Window MSAA is intentionally NOT requested: a multisampled default
+	 * framebuffer mis-rendered translucent surfaces (the "glass" screen-door,
+	 * uhexen2-zroc).  This says nothing about vid_config_fsaa -- the world
+	 * renders into the scene FBO, and PP_CreateFBO allocates that one
+	 * multisampled from the cvar, resolving OIT per-sample.  Do NOT copy this
+	 * 0 back into vid_config_fsaa; that was uhexen2-eh1c. */
 	multisample = 0;
 
 	Con_SafePrintf ("Requested mode %d: %dx%dx%d\n", modenum, modelist[modenum].width, modelist[modenum].height, bpp);
@@ -672,7 +684,6 @@ static qboolean VID_SetMode (int modenum)
 		SDL_GL_GetAttribute(SDL_GL_MULTISAMPLESAMPLES, &multisample);
 		Con_SafePrintf ("multisample buffer with %i samples\n", multisample);
 	}
-	Cvar_SetValueQuick (&vid_config_fsaa, multisample);
 
 	IN_HideMouse ();
 
@@ -1830,10 +1841,12 @@ void	VID_Init (const unsigned char *palette)
 	if (vid_config_consize.integer != width)
 		vid_conscale = true;
 
-	multisample = vid_config_fsaa.integer;
+	/* -fsaa overrides the archived sample count.  It feeds vid_config_fsaa,
+	 * not `multisample`: the scene FBO is what gets multisampled now, and the
+	 * window request stays at 0 regardless (see VID_SetMode). */
 	i = COM_CheckParm ("-fsaa");
 	if (i && i < com_argc-1)
-		multisample = atoi(com_argv[i+1]);
+		Cvar_SetValueQuick (&vid_config_fsaa, atoi(com_argv[i+1]));
 
 	vid.maxwarpwidth = WARP_WIDTH;
 	vid.maxwarpheight = WARP_HEIGHT;
@@ -2149,13 +2162,14 @@ static void VID_MenuDraw (void)
 		vid_menunum = vid_modenum;
 		vid_menu_fs = vid_config_fscr.integer;
 		vid_menu_aspect = 0;	// "All"
+		vid_menu_fsaa = vid_config_fsaa.integer;
 		vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
 		vid_menu_firsttime = false;
 	}
 
 	need_apply = (vid_menunum != vid_modenum) ||
 			(vid_menu_fs != vid_config_fscr.integer) ||
-			(multisample != vid_config_fsaa.integer);
+			(vid_menu_fsaa != vid_config_fsaa.integer);
 
 	M_Print (76, 92 + 8*VID_FULLSCREEN, "Window Mode   :");
 	M_PrintWhite (76+16*8, 92 + 8*VID_FULLSCREEN,
@@ -2173,10 +2187,10 @@ static void VID_MenuDraw (void)
 	M_Print (76, 92 + 8*VID_MULTISAMPLE, "Antialiasing  :");
 	if (sdl_has_multisample)
 	{
-		if (multisample == vid_config_fsaa.integer)
-			M_PrintWhite (76+16*8, 92 + 8*VID_MULTISAMPLE, va("%d",multisample));
+		if (vid_menu_fsaa == vid_config_fsaa.integer)
+			M_PrintWhite (76+16*8, 92 + 8*VID_MULTISAMPLE, va("%d",vid_menu_fsaa));
 		else
-			M_Print (76+16*8, 92 + 8*VID_MULTISAMPLE, va("%d",multisample));
+			M_Print (76+16*8, 92 + 8*VID_MULTISAMPLE, va("%d",vid_menu_fsaa));
 	}
 	else
 		M_PrintWhite (76+16*8, 92 + 8*VID_MULTISAMPLE, "N/A");
@@ -2263,7 +2277,7 @@ static void VID_MenuKey (int key)
 		case VID_RESET:
 			vid_menu_fs = vid_config_fscr.integer;
 			vid_menunum = vid_modenum;
-			multisample = vid_config_fsaa.integer;
+			vid_menu_fsaa = vid_config_fsaa.integer;
 			vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
 			break;
 		case VID_APPLY:
@@ -2271,6 +2285,7 @@ static void VID_MenuKey (int key)
 			{
 				Cvar_SetValueQuick(&vid_mode, vid_menunum);
 				Cvar_SetValueQuick(&vid_config_fscr, vid_menu_fs);
+				Cvar_SetValueQuick(&vid_config_fsaa, vid_menu_fsaa);
 				VID_Restart_f();
 			}
 			vid_cursor = (num_fmodes) ? 0 : VID_RESOLUTION;
@@ -2302,14 +2317,7 @@ static void VID_MenuKey (int key)
 			break;
 		}
 		case VID_MULTISAMPLE:
-			if (!sdl_has_multisample)
-				break;
-			if (multisample <= 2)
-				multisample = 0;
-			else if (multisample <= 4)
-				multisample = 2;
-			else
-				multisample = 4;
+			VID_MenuAdjustMultisample(-1);
 			break;
 		case VID_VSYNC:
 			if (vid_vsync.integer == 1)
@@ -2360,14 +2368,7 @@ static void VID_MenuKey (int key)
 			break;
 		}
 		case VID_MULTISAMPLE:
-			if (!sdl_has_multisample)
-				break;
-			if (multisample < 2)
-				multisample = 2;
-			else if (multisample < 4)
-				multisample = 4;
-			else if (multisample < 8)
-				multisample = 8;
+			VID_MenuAdjustMultisample(+1);
 			break;
 		case VID_VSYNC:
 			if (vid_vsync.integer == 0)
@@ -2410,7 +2411,7 @@ void VID_MenuInit (void)
 	vid_menunum = vid_modenum;
 	vid_menu_fs = vid_config_fscr.integer;
 	vid_menu_aspect = 0;
-	multisample = vid_config_fsaa.integer;
+	vid_menu_fsaa = vid_config_fsaa.integer;
 }
 
 qboolean VID_MenuNeedApply (void)
@@ -2420,8 +2421,8 @@ qboolean VID_MenuNeedApply (void)
 		return true;	/* any resolution change needs restart */
 	if (fs_changed && (vid_menu_fs == 2 || vid_config_fscr.integer == 2))
 		return true;	/* switching to/from exclusive needs restart */
-	if (multisample != vid_config_fsaa.integer)
-		return true;
+	if (vid_menu_fsaa != vid_config_fsaa.integer)
+		return true;	/* scene FBO is reallocated at the new sample count */
 	return false;
 }
 
@@ -2429,6 +2430,7 @@ void VID_MenuApply (void)
 {
 	Cvar_SetValueQuick(&vid_mode, vid_menunum);
 	Cvar_SetValueQuick(&vid_config_fscr, vid_menu_fs);
+	Cvar_SetValueQuick(&vid_config_fsaa, vid_menu_fsaa);
 	VID_Restart_f();
 }
 
@@ -2436,7 +2438,7 @@ void VID_MenuReset (void)
 {
 	vid_menu_fs = vid_config_fscr.integer;
 	vid_menunum = vid_modenum;
-	multisample = vid_config_fsaa.integer;
+	vid_menu_fsaa = vid_config_fsaa.integer;
 }
 
 const char *VID_MenuGetResolution (qboolean *is_current)
@@ -2457,9 +2459,11 @@ int VID_MenuGetWindowMode (void)
 
 int VID_MenuGetMultisample (qboolean *is_current, qboolean *available)
 {
-	*available = sdl_has_multisample;
-	*is_current = (multisample == vid_config_fsaa.integer);
-	return multisample;
+	/* Availability is the scene FBO's, not the window's: the driver has to be
+	 * able to allocate a multisampled renderbuffer at >1 sample. */
+	*available = sdl_has_multisample && (gl_max_samples > 1);
+	*is_current = (vid_menu_fsaa == vid_config_fsaa.integer);
+	return vid_menu_fsaa;
 }
 
 int VID_MenuGetVSync (void)
@@ -2528,12 +2532,12 @@ void VID_MenuAdjustMultisample (int dir)
 			max_step = i;
 	}
 
-	/* find current step (snap up to next supported value if multisample
+	/* find current step (snap up to next supported value if the pending count
 	 * isn't on a canonical step — handles arbitrary cfg values) */
 	cur = 0;
 	for (i = 0; i <= max_step; i++)
 	{
-		if (msaa_steps[i] <= multisample)
+		if (msaa_steps[i] <= vid_menu_fsaa)
 			cur = i;
 	}
 
@@ -2541,7 +2545,7 @@ void VID_MenuAdjustMultisample (int dir)
 	if (cur < 0) cur = 0;
 	if (cur > max_step) cur = max_step;
 
-	multisample = msaa_steps[cur];
+	vid_menu_fsaa = msaa_steps[cur];
 }
 
 void VID_MenuAdjustVSync (int dir)
