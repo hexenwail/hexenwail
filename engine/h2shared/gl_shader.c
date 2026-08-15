@@ -110,6 +110,10 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 	return prog;
 }
 
+/* The OIT program builders below are desktop-only: OIT cannot run on the ES
+ * tier at all (no glBlendFunci in WebGL2), so nothing there would call
+ * them.  See GL_Shaders_Init and uhexen2-ha7n. */
+#ifndef USE_GLES
 /* Compile an OIT variant of a fragment shader.
  * Injects `#define OIT 1` and OIT MRT outputs after the #version line,
  * replacing the `out vec4 fragColor;` declaration. */
@@ -234,6 +238,8 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		Con_SafePrintf("  %s_oit: FAILED\n", name);
 	}
 }
+#endif	/* !USE_GLES */
+
 
 GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
 {
@@ -1091,7 +1097,6 @@ extern float r_avertexnormal_dots[16][256];
 static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 {
 	GLuint vs, fs, prog;
-	GLuint ubo_block_idx;
 
 	vs = GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
 	fs = GL_CompileShader(GL_FRAGMENT_SHADER, salias_frag);
@@ -1213,10 +1218,27 @@ void GL_Shaders_Init (void)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	}
 
-	/* OIT variants for translucent rendering */
+	/* OIT variants for translucent rendering.
+	 *
+	 * Not on the ES tier, where they could never be selected: every call
+	 * site picks between the OIT and plain program with
+	 * `OIT_InPass() ? &gl_shader_X_oit : &gl_shader_X`, and oit_in_pass is
+	 * only ever set inside OIT_BeginTranslucency, which returns early
+	 * unless HW_OIT_HAS_BLEND_FUNCI — a literal 0 under USE_GLES, because
+	 * glBlendFunci is GL 4.0 and WebGL2 exposes no per-draw-buffer blend
+	 * equations at all.  So this was six shader compiles and three links
+	 * per startup for programs nothing can reach, on the tier least able to
+	 * spare either.  GL_PostProcess_Init already guards the resolve half of
+	 * OIT on the same condition; this is the half that missed it.
+	 *
+	 * Note for anyone arriving from uhexen2-g63k: that fixed a genuine
+	 * compile failure in these three on ES, but it did not make OIT work
+	 * there and could not have.  uhexen2-ha7n. */
+#ifndef USE_GLES
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
 	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
 	GL_InitOITProgram(&gl_shader_particle_oit, "particle", spart_vert,  spart_frag);
+#endif
 
 #ifndef USE_GLES
 	GL_InitParticleGPUProgram(&gl_shader_particle_gpu);
