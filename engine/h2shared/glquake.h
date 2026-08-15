@@ -22,6 +22,13 @@
 #ifndef GLQUAKE_H
 #define GLQUAKE_H
 
+/* Same implication glheader.h and gl_func.h make, restated because this
+ * header does not include either and its texture format choice below depends
+ * on the tier.  uhexen2-0py6. */
+#if defined(__EMSCRIPTEN__) && !defined(USE_GLES)
+#define USE_GLES 1
+#endif
+
 /* ====================================================================
    COMMON DEFINITIONS
    ================================================================== */
@@ -54,7 +61,27 @@
  * and triggers the salias_frag discard path on otherwise opaque models.
  * gl_draw.c:2142 already overrides to GL_RGBA8 for TEX_FENCE/TEX_HOLEY for
  * the symmetric reason. */
+/* uhexen2-6yh1: GL_RGB8 is not usable on the ES tier.  ES 3.0 validates the
+ * (internalformat, format, type) triple of glTexImage2D against a fixed table
+ * where sized GL_RGB8 admits only format GL_RGB, and every upload in this
+ * engine hands over GL_RGBA/GL_UNSIGNED_BYTE (gl_draw.c GL_Upload32,
+ * gl_rmisc.c).  Desktop GL accepts the mismatch and discards the alpha; ES
+ * rejects the call with GL_INVALID_OPERATION and leaves the texture object
+ * with no image at all, so it samples black.
+ *
+ * That silently blacked out every texture NOT flagged TEX_ALPHA -- measured on
+ * demo1: 55 of them, including conback, both status bar halves, upsky, the
+ * liquid warps (*lowlight, *rtex078, *rtex346) and a number of model skins.
+ * Nothing reported it because the GL debug callback is desktop-only.
+ *
+ * RGBA8 on that tier costs one stored byte per texel and nothing else -- the
+ * source data is already RGBA, and the alpha it now keeps is the 255 the
+ * loader put there. */
+#ifdef USE_GLES
+#define	gl_solid_format		0x8058	/* GL_RGBA8 -- GL_RGB8 is invalid here */
+#else
 #define	gl_solid_format		0x8051	/* GL_RGB8 */
+#endif
 #define	gl_alpha_format		0x8058	/* GL_RGBA8 */
 
 /* # of supported texture filter modes[] (gl_draw.c) */
