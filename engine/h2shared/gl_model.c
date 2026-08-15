@@ -2926,6 +2926,42 @@ void Mod_SetExtraFlags (qmodel_t *mod)
 
 /*
 =================
+Mod_FixupMissingModelFlags
+
+Patch transparency flags that Raven left out of a shipped MDL header.
+
+models/ball.mdl -- the Necromancer's magic missile -- is an eight-vertex,
+four-triangle EF_FACE_VIEW billboard whose skin is a radial glow painted on
+palette index 0, built exactly like its siblings star.mdl, glowball.mdl and
+handfx.mdl.  All three of those declare EF_HOLEY; the base-game ball.mdl in
+data1/pak0.pak declares only EF_FACE_VIEW | EF_MAGICMISSILE (0x00090000).
+With no transparency bit Mod_LoadAllSkins picks an opaque tex_mode and
+R_DrawAliasModel takes the opaque branch, so the index-0 background draws as
+a black square around the missile.
+
+Raven caught this themselves: the copy in the Portal of Praevus mission pack
+(portals/pak3.pak) is flagged EF_HOLEY | EF_MAGICMISSILE (0x00084000).  That
+copy wins whenever portals/ is on the searchpath, which is why the black box
+only shows up for players running the base game without the mission pack.
+Patch the flag in at load time so both configurations match.
+
+Applied only when the loaded copy declares no transparency mode at all, so a
+mod shipping its own ball.mdl -- already fixed like Shadows of Turmoil's, or
+deliberately using a different mode -- is left alone.  Must run before
+Mod_LoadAllSkins, which reads mod->flags to choose the skin's tex_mode.
+=================
+*/
+static void Mod_FixupMissingModelFlags (qmodel_t *mod)
+{
+	if (mod->flags & (EF_TRANSPARENT | EF_HOLEY | EF_SPECIAL_TRANS))
+		return;
+
+	if (!q_strcasecmp (mod->name, "models/ball.mdl"))
+		mod->flags |= EF_HOLEY;
+}
+
+/*
+=================
 Mod_RestoreAliasModelDefaults
 
 Walk every loaded alias model and restore the snapshot taken at load
@@ -3262,6 +3298,7 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
 
 	mod->flags = LittleLong (pinmodel->flags);
+	Mod_FixupMissingModelFlags (mod);	/* Raven's missing EF_HOLEY */
 	Mod_SetExtraFlags (mod);	/* Ironwail r_nolerp_list */
 
 //
@@ -3459,6 +3496,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	pheader = (aliashdr_t *) Hunk_AllocName (size, loadname);
 
 	mod->flags = LittleLong (pinmodel->flags);
+	Mod_FixupMissingModelFlags (mod);	/* Raven's missing EF_HOLEY */
 	Mod_SetExtraFlags (mod);	/* Ironwail r_nolerp_list */
 
 //
