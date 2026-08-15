@@ -1839,25 +1839,42 @@ void	VID_Init (const unsigned char *palette)
 	vid.maxwarpheight = WARP_HEIGHT;
 	vid.colormap = host_colormap;
 
-	/* The standard Quake/Hexen II fullbright range, 224..255.  This is a
-	 * constant on purpose -- DO NOT derive it from the colormap.
+	/* Hexen II is NOT Quake here, and 224 is Quake's answer, not Raven's.
 	 *
-	 * gfx/colormap.lmp is 16385 bytes: VID_GRADES(64) rows of 256, plus one
-	 * trailing byte.  This line used to read a 4-byte int at offset 256*64,
-	 * i.e. three bytes past the end of the buffer, and then subtract it from
-	 * 256.  That is undefined behaviour; it went unnoticed only because the
-	 * garbage reliably landed outside the range accepted by the guard below
-	 * it, so the 224 fallback was what actually got installed.  The engine
-	 * was correct by accident.  uhexen2-me41.
+	 * gfx/colormap.lmp is VID_GRADES(64) rows of 256 plus one trailing byte,
+	 * and that byte is the count of fullbright colours at the top of the
+	 * palette.  It is 1 in both the 1997 demo and retail data1: ONE fullbright
+	 * colour, index 255.  That is measurable rather than folklore -- push every
+	 * palette index through all 64 lighting rows of that file and only 0 and
+	 * 255 come back unchanged.  224..254 are ordinary browns and golds in
+	 * Raven's palette and they do get lit, which is why hardcoding Quake's 224
+	 * lights up a third of the palette on every alias skin and BSP miptex and
+	 * makes the whole world brighter and flatter (uhexen2-6rqa: measured
+	 * mean|d| 7.9 across 38% of pixels on Blackmarsh).
 	 *
-	 * Reading the trailing byte "properly" is NOT the fix.  It is 1 in retail
-	 * data1/pak0.pak, so 256 - 1 = 255, and the only consumer of this field --
-	 * gl_model.c :: Mod_LoadFullbrightTexture(), whose scan loops test
-	 * `data[i] >= vid.fullbright && data[i] < 255' -- would then be asking for
-	 * `>= 255 && < 255' and match nothing.  That silently turns off fullbright
-	 * masks on every alias skin and BSP miptex in the game.  Whatever that
-	 * byte means, it is not a fullbright count. */
-	vid.fullbright = 224;
+	 * So 255 it is, and Mod_LoadFullbrightTexture() (gl_model.c) then finds
+	 * nothing: its scan tests `data[i] >= vid.fullbright && data[i] < 255', and
+	 * the one colour Raven nominates is also the transparency index (0 alpha in
+	 * d_8to24table).  Hexen II having no usable fullbrights is the correct
+	 * answer and has been the engine's behaviour all along -- see uhexen2-6rqa
+	 * before "fixing" that upper bound to let 255 through.
+	 *
+	 * Still derived rather than hardcoded, so a mod shipping its own colormap
+	 * gets what it asked for.  The read is ONE byte: it used to be a 4-byte int
+	 * at this offset, three bytes past the end of the buffer, which is
+	 * undefined behaviour that happened to give the right answer because the
+	 * bytes past the end read as zero (uhexen2-me41).  Guarded on the length so
+	 * a colormap carrying only the 64 rows falls back instead of over-reading. */
+	vid.fullbright = 255;
+	if (host_colormapsize > 256 * VID_GRADES)
+	{
+		int	fbcount = host_colormap[256 * VID_GRADES];
+		if (fbcount >= 1 && fbcount <= 255)
+			vid.fullbright = 256 - fbcount;
+		else
+			Con_DPrintf ("Bogus fullbright count %d in colormap, using %d\n",
+					fbcount, vid.fullbright);
+	}
 	Con_DPrintf ("Fullbright start index: %d\n", vid.fullbright);
 
 	temp = scr_disabled_for_loading;

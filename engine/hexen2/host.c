@@ -65,6 +65,7 @@ client_t	*host_client;			// current client
 
 byte		*host_basepal;
 byte		*host_colormap;
+long		host_colormapsize;
 
 cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};
 static	cvar_t	sys_adaptive = {"sys_adaptive", "1", CVAR_ARCHIVE};
@@ -1078,6 +1079,7 @@ void Host_Init (void)
 		if (fs_filesize < 256 * VID_GRADES)
 			Sys_Error ("gfx/colormap.lmp is %ld bytes, need at least %d",
 					fs_filesize, 256 * VID_GRADES);
+		host_colormapsize = fs_filesize;
 
 		VID_Init (host_basepal);
 		Draw_Init ();
