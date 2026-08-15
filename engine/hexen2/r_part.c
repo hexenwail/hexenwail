@@ -30,6 +30,17 @@
 /* GPU particle SSBO rendering                                         */
 /* ------------------------------------------------------------------ */
 
+/* Not built on the ES tier: shader storage buffers are GLSL ES 3.10 and absent
+ * from WebGL2 entirely, so GL_SHADER_STORAGE_BUFFER is not a valid buffer
+ * target there and the consuming program (gl_shader_particle_gpu) is not
+ * compiled either -- this only bound an invalid target, raised a GL error and
+ * reserved 1 MB of buffer plus 1 MB of BSS that nothing on the tier could
+ * reach.  The BSS is the part that matters: it is carried in the WASM module's
+ * linear memory.  uhexen2-0py6 made the tier reachable on the desktop, which
+ * is how this surfaced.  See also the bead on the path being unreferenced on
+ * every tier (uhexen2-vp8t). */
+#ifndef USE_GLES
+
 typedef struct {
     float   pos[3];
     float   die;
@@ -70,6 +81,15 @@ void R_GPU_Particles_Shutdown (void)
         gpu_particle_vao = 0;
     }
 }
+
+#else	/* USE_GLES */
+
+/* Kept as symbols so the r_part.h prototype and gl_vidsdl.c's unconditional
+ * shutdown call need no guards of their own. */
+static void R_GPU_Particles_Init (void) { }
+void R_GPU_Particles_Shutdown (void) { }
+
+#endif	/* USE_GLES */
 #endif
 
 
