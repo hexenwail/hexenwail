@@ -120,6 +120,15 @@ static qboolean sb_ShowDM;
 
 static qboolean inv_flg;	// true - show inventory interface
 
+/* Artifact id (not slot index) the player last had selected.  cl.inv_selected
+ * is a slot in cl, and CL_ClearState memsets cl on every level change, so the
+ * selection fell back to slot 0 -- the torch -- on each map.  Deliberately
+ * outside cl so it survives that wipe; SB_InvChanged re-finds this artifact in
+ * the newly built order.  Client-side only, which is what makes this safe: no
+ * new entity field, so gamecode/fieldsets and the e0f7d4c0f field-set gate are
+ * untouched and old savegames still load.  uhexen2-1id8. */
+static int sb_sticky_artifact = -1;
+
 static float InventoryHideTime;
 
 extern const char *ClassNames[MAX_PLAYER_CLASS];	//from menu.c
@@ -1180,10 +1189,20 @@ void Inv_Update(qboolean force)
 			if (cl_protocol == PROTOCOL_UH2_114)
 				cl.v.inventory = cl.ex_inventory->item_id[cl.ex_inventory->inv_order[cl.inv_selected]];
 			else
+			{
 				cl.v.inventory = cl.inv_order[cl.inv_selected] + 1;
+				/* Every commit of the selection passes through here, so this
+				 * is the one place that sees what the player settled on. */
+				sb_sticky_artifact = cl.inv_order[cl.inv_selected];
+			}
 		}
 		else
+		{
+			/* Note: sb_sticky_artifact is NOT cleared here.  inv_count is 0
+			 * for the whole level transition, which is exactly the window the
+			 * remembered artifact has to survive. */
 			cl.v.inventory = 0;
+		}
 
 		if (!force)
 		{
@@ -1521,6 +1540,16 @@ void SB_InvChanged(void)
 		 * uhexen2-o0n2. */
 		if (cl.inv_selected >= 0 && cl.inv_selected < cl.inv_count)
 			prev_artifact = cl.inv_order[cl.inv_selected];
+		else
+		{
+			/* No live selection to preserve. That is the state right after a
+			 * level change, because CL_ClearState zeroed inv_count. Fall back
+			 * to the artifact carried over from the previous map so the
+			 * re-find below pins selection to it instead of leaving slot 0
+			 * (the torch) selected. If the player no longer has it, the
+			 * re-find simply misses and the clamp picks slot 0 as before. */
+			prev_artifact = sb_sticky_artifact;
+		}
 
 		if (cl.inv_selected >= 0 && Inv_GetCount(cl.inv_order[cl.inv_selected]) == 0)
 			ForceUpdate = true;
