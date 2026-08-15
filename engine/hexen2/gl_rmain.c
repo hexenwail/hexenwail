@@ -26,7 +26,7 @@
 #include "gl_postprocess.h"
 
 /* ES 3.0 compatibility */
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 #ifndef GLdouble
 #define GLdouble double
 #endif
@@ -917,7 +917,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 
 
 /* r_alias_gpu: 0 = CPU streaming, 1 = SSBO instanced batching */
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 cvar_t	r_alias_gpu = {"r_alias_gpu", "0", CVAR_NONE};	/* no SSBOs in WebGL2 */
 #else
 cvar_t	r_alias_gpu = {"r_alias_gpu", "1", CVAR_ARCHIVE};
@@ -2193,7 +2193,7 @@ static void R_DispatchBrushInstancedPass (
 
 void R_DrawBrushInstanced (void)
 {
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 	/* Two programs, identical uniform layout: opaque variant carries
 	 * layout(early_fragment_tests) for Hi-Z, cutout variant carries
 	 * the discard for fence textures.  uhexen2-5c6r. */
@@ -2308,7 +2308,7 @@ void R_DrawBrushInstanced (void)
 
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
-#endif /* !__EMSCRIPTEN__ */
+#endif /* !USE_GLES */
 }
 
 qboolean R_BrushInst_WasCollected (int visedict_idx)
@@ -5186,7 +5186,7 @@ static int	rprof_wpoly, rprof_epoly; /* saved from previous frame */
 
 static void R_ProfileInit (void)
 {
-#ifdef __EMSCRIPTEN__
+#ifdef USE_GLES
 	/* WebGL2 has no timer queries; glGenQueries_fp is a no-op macro there
 	 * and so cannot be tested as a value.  rprof_available stays false,
 	 * which short-circuits the rest of the GPU profiler. */

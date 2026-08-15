@@ -24,13 +24,26 @@
 /* whether to dlsym gl function calls:
  * the define GL_DLSYM is decided in the Makefile */
 
+/* Restated from glheader.h because this file is also included directly
+ * (gl_vidsdl.c re-includes it to expand the loader tables), and because it
+ * must never be possible to reach the dlsym branch below on an ES build.
+ * uhexen2-0py6. */
+#if defined(__EMSCRIPTEN__) && !defined(USE_GLES)
+#define USE_GLES 1
+#endif
+
 #ifndef __GL_FUNC_EXTERN
 #define __GL_FUNC_EXTERN extern
 #endif
 
 /* core gl functions
  */
-#if defined(GL_DLSYM)
+/* USE_GLES outranks GL_DLSYM: the ES tier has no entry points to resolve at
+ * runtime (every _fp name below maps onto the real function), so if a build
+ * sets both -- a desktop -DUSE_GLES=ON whose platform block already asked for
+ * GL_DLSYM -- the ES branch is the correct one.  CMake also strips GL_DLSYM in
+ * that case; this keeps the header honest on its own. */
+#if defined(GL_DLSYM) && !defined(USE_GLES)
 
 #ifndef GL_FUNCTION
 #define GL_FUNCTION(ret, func, params) \
@@ -118,12 +131,12 @@ GL_FUNCTION(void, glStencilFunc, (GLenum,GLint,GLuint))
 GL_FUNCTION(void, glStencilOp, (GLenum,GLenum,GLenum))
 GL_FUNCTION(void, glClearStencil, (GLint))
 
-#elif defined(__EMSCRIPTEN__)
+#elif defined(USE_GLES)
 
-/* Emscripten / WebGL2: GLES3 functions linked statically.
- * Legacy GL1 functions (glBegin, glVertex, glMatrixMode, etc.)
- * do not exist — the engine uses VBO/shader paths instead.
- * We define stubs for the _fp names that are still referenced. */
+/* The GL ES 3.0 tier (WebGL2, or a desktop -DUSE_GLES=ON build): GLES3
+ * functions are linked statically.  Legacy GL1 functions (glBegin, glVertex,
+ * glMatrixMode, etc.) do not exist — the engine uses VBO/shader paths
+ * instead.  We define stubs for the _fp names that are still referenced. */
 #ifndef GL_FUNC_H
 #define GL_FUNC_H
 
@@ -290,8 +303,8 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 
 /* global gl functions link to at runtime
  */
-#if defined(__EMSCRIPTEN__)
-/* Emscripten: all GL functions are statically linked */
+#if defined(USE_GLES)
+/* ES tier: all GL functions are statically linked */
 #ifndef GL_FUNCTION_OPT
 #define GL_FUNCTION_OPT(ret, func, params)	/* nothing — use direct defines below */
 #endif
@@ -446,8 +459,8 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 
 #undef GL_FUNCTION_OPT
 
-#if defined(__EMSCRIPTEN__)
-/* Direct-call defines for GLES3 functions on Emscripten */
+#if defined(USE_GLES)
+/* Direct-call defines for the GLES3 functions of the ES tier */
 #define glActiveTexture_fp		glActiveTexture
 #define glMultiTexCoord2fARB_fp(t,s,u)	((void)0)	/* unused */
 #define glGenFramebuffers_fp		glGenFramebuffers
@@ -503,7 +516,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glBindBufferBase_fp		glBindBufferBase
 /* Separate vertex attribute bindings — not available in WebGL2.  The
  * streaming immediate-mode emulator uses the legacy glVertexAttribPointer
- * path on emscripten (gl_vbo.c branches on __EMSCRIPTEN__). */
+ * path on the ES tier (gl_vbo.c branches on USE_GLES). */
 #define glVertexAttribFormat_fp(a,s,t,n,o)	((void)0)
 #define glVertexAttribBinding_fp(a,i)		((void)0)
 #define glBindVertexBuffer_fp(i,b,o,s)		((void)0)
@@ -533,7 +546,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glUniform3fv_fp			glUniform3fv
 #define glUniform4fv_fp			glUniform4fv
 /* GL 4.3+ buffer streaming: not in WebGL2.  The streaming ring
- * (gl_buffer.c) is compiled out under __EMSCRIPTEN__ — these stubs
+ * (gl_buffer.c) is compiled out under USE_GLES — these stubs
  * exist so call sites still link. */
 #define glBufferStorage_fp(t,sz,d,fl)		((void)0)
 #define glMapBufferRange_fp(t,o,l,fl)		((void *)0)
@@ -543,7 +556,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glClientWaitSync_fp(s,fl,t)		((GLenum)0)
 #define glWaitSync_fp(s,fl,t)			((void)0)
 #define glBindBuffersRange_fp(t,f,c,b,o,sz)	((void)0)
-#endif /* __EMSCRIPTEN__ */
+#endif /* USE_GLES */
 
 
 /* typedefs for functions linked to locally at runtime

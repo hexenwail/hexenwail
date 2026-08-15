@@ -597,7 +597,7 @@ iqm_gpu_setup:
 		glBindVertexArray_fp(gm->vao);
 
 		/* Upload vertex data (iqmvert_t: 32 bytes per vertex) */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 		glGenBuffers_fp(1, &gm->vbo_verts);
 		glBindBuffer_fp(GL_ARRAY_BUFFER, gm->vbo_verts);
 		glBufferData_fp(GL_ARRAY_BUFFER, hdr->poseverts * sizeof(iqmvert_t),
@@ -656,7 +656,7 @@ iqm_gpu_setup:
 		 * Upload md3Vertex_t data to separate SSBO (8 bytes per vertex)
 		 * MD3 data is in hdr->posedata, packs as short[3] + ubyte[2]
 		 */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 		glGenBuffers_fp(1, &gm->ssbo_pose_md3);
 		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose_md3);
 		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,
@@ -668,7 +668,7 @@ iqm_gpu_setup:
 	else
 	{
 		/* PV_QUAKE1: standard path */
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 		glGenBuffers_fp(1, &gm->ssbo_pose);
 		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, gm->ssbo_pose);
 		glBufferData_fp(GL_SHADER_STORAGE_BUFFER,

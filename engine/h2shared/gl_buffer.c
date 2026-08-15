@@ -19,13 +19,13 @@
  *     GL_ARB_multi_bind is missing.
  *
  * The whole module is GL 4.3 territory; the WebGL2/Emscripten build
- * stubs out at compile time via __EMSCRIPTEN__ guards (the alias
+ * stubs out at compile time via USE_GLES guards (the alias
  * instance SSBO shader doesn't compile on WebGL2 anyway).
  */
 
 #include "quakedef.h"
 
-#ifndef __EMSCRIPTEN__
+#ifndef USE_GLES
 
 #include "glheader.h"
 #include "glquake.h"
@@ -436,7 +436,7 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes,
 	frameres_host_offset += numbytes;
 }
 
-#else	/* __EMSCRIPTEN__ — WebGL2 has no buffer_storage, sync, multi_bind.
+#else	/* USE_GLES — WebGL2 has no buffer_storage, sync, multi_bind.
 	 * The alias instance SSBO shader does not compile on WebGL2, so the
 	 * only consumer of this module no-ops anyway.  Provide stubs so
 	 * vid_setup paths can link without ifdefs at the call sites. */
@@ -481,4 +481,4 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 	(void)buffers; (void)offsets; (void)sizes;
 }
 
-#endif	/* __EMSCRIPTEN__ */
+#endif	/* USE_GLES */

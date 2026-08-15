@@ -38,6 +38,26 @@ Build steps:
 The binary will be named glhexen2 (Linux) or glh2.exe (Windows).
 
 
+Building against OpenGL ES 3.0 instead of desktop GL:
+=====================================================
+
+    cmake -DUSE_GLES=ON ..
+
+The renderer has a second tier that targets GL ES 3.0 rather than GL 4.3: GL
+entry points resolved at link time instead of by dlsym, "#version 300 es"
+shaders, and no SSBO, compute, buffer_storage, fence sync, timer query or Hi-Z
+cull.  The Emscripten/WebGL2 build implies it automatically; -DUSE_GLES=ON is
+how you reach it on the desktop.
+
+You need glesv2.pc and the GLES3/ headers, both of which libglvnd already
+supplies wherever desktop GL is installed.  The resulting binary links
+libGLESv2 rather than libGL and requests an ES context from SDL.
+
+This is the cheap way to exercise the tier without a browser -- it runs against
+Mesa, including llvmpipe under SDL_VIDEODRIVER=offscreen -- and it is the same
+tier ANGLE would serve on macOS/Metal.
+
+
 Cross-compiling for Windows:
 ============================
 
