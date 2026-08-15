@@ -193,8 +193,12 @@ extern qboolean	menu_mouse_moved;
 static int M_ScreenYToCanvasY (int screen_y);
 
 /* Convert screen mouse position to menu-local coordinates.
- * Menu items are drawn at (76 + offset, 92 + cursor*8) in a
- * 320x200 virtual viewport centered on screen. */
+ * Menu items are drawn at (76 + offset, 92 + cursor*8) in a viewport that is
+ * 320 logical units wide and centered on screen.  It is NOT 200 tall: see
+ * CANVAS_MENU in gl_draw.c, whose ortho height is glheight/scale, so the
+ * visible Y range is at least 480 at every automatic scale.  Submenus longer
+ * than 200 units rely on that: Rendering's 19 rows end at y=236 and its
+ * search prompt sits at y=252. */
 static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int num_items)
 {
 	int vy = M_ScreenYToCanvasY (screen_y);
