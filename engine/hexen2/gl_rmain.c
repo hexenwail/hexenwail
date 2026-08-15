@@ -1913,9 +1913,26 @@ extern cvar_t r_brush_inst;
 
 qboolean R_BrushInst_Available (void)
 {
+#ifdef USE_GLES
+	/* R_DrawBrushInstanced's whole body is compiled out on the ES tier —
+	 * it wants SSBO-fed instance data and the GL 4.3 world programs, and
+	 * ES 3.0 has neither.  Claiming the path is available anyway made
+	 * R_DrawEntitiesOnList take the instanced branch, collect every brush
+	 * entity, mark it as not needing legacy, call an empty function, and
+	 * skip the fallback walk — so doors, platforms, buttons and func_walls
+	 * were never drawn at all.  Not subtle once you can see it: on demo1
+	 * the carved wall panel is simply absent and you look through it.
+	 *
+	 * The legacy per-entity R_DrawBrushModel walk is tier-agnostic and
+	 * already reachable as the r_brush_inst=0 path, so refusing here is
+	 * the whole fix.  r_brush_inst stays registered and archived — it just
+	 * has no effect on this tier.  uhexen2-gool. */
+	return false;
+#else
 	return r_brush_inst.integer != 0 &&
 	       gl_shader_world.program != 0 &&
 	       world_vao && world_ibo && lm_atlas_enabled && lm_atlas_texture;
+#endif
 }
 
 void R_CollectBrushInstances (void)
