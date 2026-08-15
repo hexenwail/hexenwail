@@ -57,8 +57,33 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
  * biggest surface the loader accepts, or the loader's limit is a lie.
  * Costs 768 KB more in the two working buffers below; pages themselves are
  * allocated on demand. */
-#define	BLOCK_WIDTH	256
-#define	BLOCK_HEIGHT	256
+/* uhexen2-jwzf: 256 -> 260 to make room for LM_GUTTER on both sides of the
+ * largest surface the loader will admit.  MAX_SURFACE_LIGHTMAP is 255, so a
+ * padded worst case is 255 + 2*2 = 259 and the page must be at least that or
+ * AllocBlock would start rejecting surfaces it accepts today.  Nothing here
+ * requires a power of two -- every use of these is a multiply or an add, the
+ * atlas carries no mipmaps and samples GL_LINEAR/GL_CLAMP_TO_EDGE, and NPOT is
+ * core in both GL 3+ and ES 3.0.  Costs about 40 KB across blocklights,
+ * blocklightscolor and allocated[], plus 8 KB per page actually allocated. */
+#define	BLOCK_WIDTH	260
+#define	BLOCK_HEIGHT	260
+
+/* Luxels of padding reserved around every surface's lightmap rect.
+ *
+ * Bilinear needs none: LM_SurfaceLightmapUV's "+ 8" half-luxel inset centres
+ * the sample so a +/-0.5 texel footprint stays inside the rect, which is
+ * exactly what that inset was sized for and no more.  Bicubic
+ * (r_lightmap_bicubic, GLSL_BICUBIC_LM_FN) has the 4x4 B-spline support, so
+ * from the edge luxels it reaches one luxel before the rect and two past it.
+ * AllocBlock packed surfaces edge to edge, so those taps landed on an
+ * unrelated surface -- or, at a page edge with the atlas on, on an unrelated
+ * PAGE -- and drew bright or dark seams along surface boundaries.
+ *
+ * 2 rather than the strictly-needed 1-before/2-after: a single symmetric
+ * number keeps AllocBlock, the dirty rect and the gutter fill all agreeing
+ * without three off-by-one opportunities, and the extra luxel is free next to
+ * the rounding the allocator does anyway. */
+#define	LM_GUTTER	2
 
 static unsigned int	blocklights[BLOCK_WIDTH*BLOCK_HEIGHT];
 static unsigned int	blocklightscolor[BLOCK_WIDTH*BLOCK_HEIGHT*3];	// colored light support. *3 for RGB to the definitions at the top
@@ -70,8 +95,25 @@ static qboolean	lightmap_modified[MAX_LIGHTMAPS];
 static int	lightmap_rectmin[MAX_LIGHTMAPS][2]; /* x, y */
 static int	lightmap_rectmax[MAX_LIGHTMAPS][2]; /* x, y */
 
+/* Every caller passes a surface's own rect.  The gutter around it is rebuilt
+ * whenever the rect is (see LM_FillGutter), so it has to travel to the GPU with
+ * it -- expanding here rather than at six call sites keeps the two definitions
+ * of "this surface's footprint" from drifting apart.  Clamped to the page: a
+ * surface at the very edge has its gutter inside the page by construction, but
+ * the arithmetic should not depend on that being true.  uhexen2-jwzf. */
 static void LM_ExpandDirtyRect (int page, int x, int y, int w, int h)
 {
+	x -= LM_GUTTER;
+	y -= LM_GUTTER;
+	w += LM_GUTTER * 2;
+	h += LM_GUTTER * 2;
+	if (x < 0) { w += x; x = 0; }
+	if (y < 0) { h += y; y = 0; }
+	if (x + w > BLOCK_WIDTH)  w = BLOCK_WIDTH  - x;
+	if (y + h > BLOCK_HEIGHT) h = BLOCK_HEIGHT - y;
+	if (w <= 0 || h <= 0)
+		return;
+
 	if (!lightmap_modified[page])
 	{
 		lightmap_modified[page] = true;
@@ -330,8 +372,60 @@ R_BuildLightMap
 Combine and scale multiple lightmaps into the 8.8 format in blocklights
 ===============
 */
+/*
+================
+LM_FillGutter
+
+Replicate a surface's edge luxels outward into the LM_GUTTER border AllocBlock
+reserved for it, so the taps bicubic makes outside the rect read this surface's
+own light instead of whatever was packed next to it.
+
+Edge extension rather than anything cleverer on purpose: it is what
+GL_CLAMP_TO_EDGE would have done had the rect been its own texture, so the
+filter behaves at a surface boundary exactly as it does against the atlas
+border, and no new discontinuity is invented.
+
+Runs on every rebuild, not just at load: the block is re-written whenever a
+dlight or a light style touches it, and a stale gutter next to fresh luxels
+would be its own seam.  Cost is the perimeter, against the area the caller has
+already written.  uhexen2-jwzf.
+================
+*/
+static void LM_FillGutter (byte *block, int stride, int smax, int tmax)
+{
+	const int	bpp = lightmap_bytes;
+	const size_t	padw = (size_t)(smax + LM_GUTTER * 2) * bpp;
+	byte		*row, *last;
+	int		i, g;
+
+	if (smax <= 0 || tmax <= 0)
+		return;
+
+	/* Sides first, so the corners come free with the rows below. */
+	for (i = 0; i < tmax; i++)
+	{
+		row  = block + (size_t)i * stride;
+		last = row + (size_t)(smax - 1) * bpp;
+		for (g = 1; g <= LM_GUTTER; g++)
+		{
+			memcpy (row  - (size_t)g * bpp, row,  bpp);
+			memcpy (last + (size_t)g * bpp, last, bpp);
+		}
+	}
+
+	/* Top and bottom: whole padded rows, corners included. */
+	row = block - (size_t)LM_GUTTER * bpp;
+	for (g = 1; g <= LM_GUTTER; g++)
+		memcpy (row - (size_t)g * stride, row, padw);
+
+	last = block + (size_t)(tmax - 1) * stride - (size_t)LM_GUTTER * bpp;
+	for (g = 1; g <= LM_GUTTER; g++)
+		memcpy (last + (size_t)g * stride, last, padw);
+}
+
 static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 {
+	byte		*block = dest;	/* dest is walked by the writers below */
 	int		smax, tmax;
 	int		t, r, s, q;
 	int		i, j, size;
@@ -487,6 +581,10 @@ store:
 	default:
 		Sys_Error ("Bad lightmap format");
 	}
+
+	/* The block is written; extend it into the padding AllocBlock reserved
+	 * around it.  uhexen2-jwzf. */
+	LM_FillGutter (block, stride, smax, tmax);
 }
 
 
@@ -3318,18 +3416,30 @@ static qmodel_t		*currentmodel;
 static unsigned int last_lightmap_allocated = 0;
 
 // returns a texture number and the position inside it
+/* Takes the surface's own luxel dimensions and returns the position of the
+ * surface's own top-left luxel.  What it RESERVES is that rect grown by
+ * LM_GUTTER on all four sides, so the padding belongs to this surface and no
+ * other allocation can be placed in it -- which is the entire point, since
+ * bicubic reads into it (uhexen2-jwzf).  Callers keep passing and receiving
+ * unpadded coordinates and do not need to know.  */
 static unsigned int AllocBlock (int w, int h, int *x, int *y)
 {
 	int		i, j;
 	int		best, best2;
 	unsigned int	texnum;
+	const int	padw = w + LM_GUTTER * 2;
+	const int	padh = h + LM_GUTTER * 2;
 
 	/* No page will ever hold this surface, however many we have.  Caught
 	 * up front so it reports as its own failure instead of masquerading
 	 * as page exhaustion — the two need completely different fixes (a
 	 * smaller qbsp subdivide size vs. a bigger engine budget), and the
-	 * old shared "full" message could not tell them apart. */
-	if (w > BLOCK_WIDTH || h > BLOCK_HEIGHT)
+	 * old shared "full" message could not tell them apart.
+	 *
+	 * Tested on the PADDED size, and BLOCK_* was raised to keep the padded
+	 * worst case fitting, so this still admits exactly the surfaces it
+	 * admitted before the gutter existed. */
+	if (padw > BLOCK_WIDTH || padh > BLOCK_HEIGHT)
 		Sys_Error ("%s: surface in %s needs a %dx%d luxel lightmap, "
 			   "larger than the %dx%d page size — rebuild the map "
 			   "with a smaller qbsp subdivide size",
@@ -3341,28 +3451,30 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 	{
 		best = BLOCK_HEIGHT;
 
-		/* <=, not <: at i == BLOCK_WIDTH - w the last sampled column is
-		 * BLOCK_WIDTH - 1, still in bounds.  The stock < rejected any
-		 * surface exactly one page wide even on a completely empty page. */
-		for (i = 0; i <= BLOCK_WIDTH - w; i++)
+		/* <=, not <: at i == BLOCK_WIDTH - padw the last sampled column
+		 * is BLOCK_WIDTH - 1, still in bounds.  The stock < rejected any
+		 * surface exactly one page wide even on a completely empty page.
+		 * Packing works in PADDED units throughout -- the reserved region
+		 * is what must not overlap anything else. */
+		for (i = 0; i <= BLOCK_WIDTH - padw; i++)
 		{
 			best2 = 0;
 
-			for (j = 0; j < w; j++)
+			for (j = 0; j < padw; j++)
 			{
 				if (allocated[texnum][i+j] >= best)
 					break;
 				if (allocated[texnum][i+j] > best2)
 					best2 = allocated[texnum][i+j];
 			}
-			if (j == w)
+			if (j == padw)
 			{	// this is a valid spot
 				*x = i;
 				*y = best = best2;
 			}
 		}
 
-		if (best + h > BLOCK_HEIGHT)
+		if (best + padh > BLOCK_HEIGHT)
 			continue;
 
 		/* Grow the backing store before handing the page out — the
@@ -3371,8 +3483,13 @@ static unsigned int AllocBlock (int w, int h, int *x, int *y)
 			Sys_Error ("%s: out of memory for lightmap page %u (%u KB/page)",
 				   __thisfunc__, texnum, (unsigned int)(LM_PAGE_BYTES >> 10));
 
-		for (i = 0; i < w; i++)
-			allocated[texnum][*x + i] = best + h;
+		for (i = 0; i < padw; i++)
+			allocated[texnum][*x + i] = best + padh;
+
+		/* Reserved the padded region; hand back where the surface's own
+		 * luxels go, which is LM_GUTTER in from that corner. */
+		*x += LM_GUTTER;
+		*y += LM_GUTTER;
 
 		last_lightmap_allocated = texnum;
 		return texnum;

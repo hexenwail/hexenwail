@@ -38,12 +38,24 @@
 #define	MAX_CACHED_PICS		256
 /* Lightmap page ceiling.  Large third-party maps (SoT 'tibet') exhausted
  * the stock 256 and died in AllocBlock with a fatal "full".  Pages are
- * BLOCK_WIDTH x BLOCK_HEIGHT (256x256) luxels, so 512 pages = 33.5M luxels,
- * eight times the old budget.  Only the pages a map actually uses are
+ * BLOCK_WIDTH x BLOCK_HEIGHT luxels.  Only the pages a map actually uses are
  * allocated — see the growable lightmaps[] buffer in gl_rsurf.c — so raising
  * this costs nothing at runtime beyond the small per-page bookkeeping
- * arrays.  Keep it a multiple of LM_ATLAS_COLS.  uhexen2-vfvh. */
-#define	MAX_LIGHTMAPS		512
+ * arrays.  Keep it a multiple of LM_ATLAS_COLS.  uhexen2-vfvh.
+ *
+ * 512 -> 1536 for uhexen2-jwzf.  The LM_GUTTER padding around every surface
+ * costs area superlinearly on small rects — most Quake surfaces are a handful
+ * of luxels across, and a 4x4 becomes 8x8 — and demo1, a tiny map, went from
+ * 4 pages to 10.  At 2.5x, a map sitting at 400 pages before would have hit
+ * the 512 ceiling and died in AllocBlock on a map that loads today, so the
+ * ceiling moves with the cost.  3x rather than 2.5x for headroom, since the
+ * multiplier depends on a map's surface size distribution and 2.5 is one
+ * sample.  The bookkeeping arrays grow to about 1.6 MB, from 0.5.
+ *
+ * Maps that then make the ATLAS too tall for the driver are not a new failure:
+ * uhexen2-6yzs already catches that and falls back to per-page lightmaps,
+ * which is slower and costs brush-entity instancing but renders correctly. */
+#define	MAX_LIGHTMAPS		1536
 
 /* maximum allowed size of a surface
  * vanilla limit was 16+1 (for linear sampling),
