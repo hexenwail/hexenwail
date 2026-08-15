@@ -2232,7 +2232,8 @@ static void M_Menu_Display_f (void)
 }
 
 /* Detect the active display preset by matching key cvars.
- * Returns 0=User, 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra. */
+ * Returns 0=User, 1=Crunchy, 2=Retro, 3=Authentic, 4=Faithful, 5=Clean,
+ * 6=Modern, 7=Ultra. */
 static int M_Display_DetectPreset (void)
 {
 	int se = (int)r_softemu.value;
@@ -2245,14 +2246,16 @@ static int M_Display_DetectPreset (void)
 		return 1;	/* Crunchy */
 	if (sc <= 0.5f && se == 2 && !lmb)
 		return 2;	/* Retro */
+	if (sc <= 0.5f && se == 3 && !lmb)
+		return 3;	/* Authentic */
 	if (sc >= 1.0f && se == 0 && gl_filter_idx <= 1 && glow && !lmb)
-		return 3;	/* Faithful */
+		return 4;	/* Faithful */
 	if (sc >= 1.0f && se == 0 && gl_filter_idx == 2 && glow && !lmb)
-		return 4;	/* Clean */
+		return 5;	/* Clean */
 	if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb <= 0 && lmb)
-		return 5;	/* Modern */
+		return 6;	/* Modern */
 	if (sc >= 1.0f && se == 0 && gl_filter_idx >= 3 && mb > 0 && lmb)
-		return 6;	/* Ultra */
+		return 7;	/* Ultra */
 	return 0;	/* User — custom settings, no preset matches */
 }
 
@@ -2267,18 +2270,19 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_PRESET:
 	{
 		/* Cycle through presets (skip "User" — that's auto-detected).
-		 * 1=Crunchy, 2=Retro, 3=Faithful, 4=Clean, 5=Modern, 6=Ultra.
+		 * 1=Crunchy, 2=Retro, 3=Authentic, 4=Faithful, 5=Clean,
+		 * 6=Modern, 7=Ultra.
 		 * Snap to the actual cvar state before stepping so the cycle
 		 * starts from where we really are, not a stale static.  When
 		 * detection returns 0 (User) keep the last known preset. */
 
-		static int preset = 5;
+		static int preset = 6;
 		int detected = M_Display_DetectPreset();
 		if (detected != 0)
 			preset = detected;
 		preset += dir;
-		if (preset < 1) preset = 6;
-		if (preset > 6) preset = 1;
+		if (preset < 1) preset = 7;
+		if (preset > 7) preset = 1;
 
 #define PRESET_COMMON \
 	Cvar_SetValue ("gl_flashblend", 0); \
@@ -2328,7 +2332,28 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
 			PRESET_COMMON
 		}
-		else if (preset == 3)	/* Faithful — native res, OG textures, static water */
+		else if (preset == 3)	/* Authentic — Retro, but quantized through Raven's own colormap */
+		{
+			Cvar_SetValue ("r_scale", 0.5f);
+			Cvar_SetValue ("r_softemu", 3);
+			Cvar_SetValue ("r_dither", 0.5f);
+			Cvar_Set ("gl_texturemode", "GL_NEAREST_MIPMAP_NEAREST");
+			Cvar_SetValue ("gl_texture_anisotropy", 1);
+			Cvar_SetValue ("gl_fullbrights", 1);
+			Cvar_SetValue ("gl_fxaa", 0);
+			Cvar_SetValue ("r_lightmap_bicubic", 0);
+			Cvar_SetValue ("r_watercolor", 0);
+			Cvar_SetValue ("r_waterwarp", 1);
+			Cvar_SetValue ("r_motionblur", 0);
+			Cvar_SetValue ("gl_glows", 0);
+			Cvar_SetValue ("gl_missile_glows", 0);
+			Cvar_SetValue ("gl_other_glows", 0);
+			Cvar_SetValue ("gl_glow_intensity", 0.4f);
+			Cvar_SetValue ("gl_torch_dlight", 1);
+			Cvar_SetValue ("r_lerpmodels", 0);	/* snappy lo-fi animation */
+			PRESET_COMMON
+		}
+		else if (preset == 4)	/* Faithful — native res, OG textures, static water */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
@@ -2347,7 +2372,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_glow_intensity", 0.2f);
 			PRESET_COMMON
 		}
-		else if (preset == 4)	/* Clean — sharp native, mild effects */
+		else if (preset == 5)	/* Clean — sharp native, mild effects */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
@@ -2367,7 +2392,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			PRESET_COMMON
 		}
-		else if (preset == 5)	/* Modern — smooth, full effects */
+		else if (preset == 6)	/* Modern — smooth, full effects */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
@@ -2387,7 +2412,7 @@ static void M_Display_AdjustSliders (int dir)
 			Cvar_SetValue ("gl_torch_dlight", 1);
 			PRESET_COMMON
 		}
-		else if (preset == 6)	/* Ultra — everything maxed */
+		else if (preset == 7)	/* Ultra — everything maxed */
 		{
 			Cvar_SetValue ("r_scale", 1.0f);
 			Cvar_SetValue ("r_softemu", 0);
@@ -2502,7 +2527,7 @@ static void M_Display_Draw (void)
 	if (!M_Display_IsSkip(DISP_PRESET))
 	{
 		static const char *preset_names[] = {
-			"User", "Crunchy", "Retro", "Faithful", "Clean", "Modern", "Ultra"
+			"User", "Crunchy", "Retro", "Authentic", "Faithful", "Clean", "Modern", "Ultra"
 		};
 		M_Print (76, 92 + 8*DISP_PRESET, disp_labels[DISP_PRESET]);
 		M_PrintWhite (220, 92 + 8*DISP_PRESET, preset_names[M_Display_DetectPreset()]);
@@ -2842,8 +2867,8 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_SOFTEMU:
 	{
 		int v = (int)r_softemu.value + dir;
-		if (v < 0) v = 2;
-		if (v > 2) v = 0;
+		if (v < 0) v = 3;
+		if (v > 3) v = 0;
 		Cvar_SetValue ("r_softemu", v);
 		break;
 	}
@@ -2971,6 +2996,8 @@ static void M_Rendering_Draw (void)
 			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Dithered");
 		else if ((int)r_softemu.value == 2)
 			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Banded");
+		else if ((int)r_softemu.value == 3)
+			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Colormap");
 		else
 			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Off");
 	}

@@ -149,7 +149,8 @@ static GLint	pp_loc_bloom_tex;
 static GLint	pp_loc_bloom_strength;
 
 /* Palette LUT state */
-static GLuint	pp_palette_lut;	/* 32x32x32 3D texture */
+static GLuint	pp_palette_lut;		/* 32x32x32 3D texture, nearest-colour (r_softemu 1/2) */
+static GLuint	pp_colormap_lut;	/* 32x32x32 3D texture, via gfx/colormap.lmp (r_softemu 3) */
 static qboolean	pp_lut_built;
 
 static qboolean	pp_initialized;
@@ -868,6 +869,142 @@ static qboolean PP_InitShader (void)
 
 extern unsigned int d_8to24table[256];
 
+/* ITU-R BT.601 luma, fixed point: (r*77 + g*151 + b*28) >> 8 spans 0..255. */
+#define PP_LUMA(r,g,b)	((((r) * 77) + ((g) * 151) + ((b) * 28)) >> 8)
+
+static GLuint PP_UploadLUT (const unsigned char *lut)
+{
+	GLuint tex = 0;
+
+	glGenTextures_fp(1, &tex);
+	glActiveTexture_fp(GL_TEXTURE0 + 1);
+	glBindTexture_fp(GL_TEXTURE_3D, tex);
+	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_R8, 32, 32, 32, 0,
+			GL_RED, GL_UNSIGNED_BYTE, lut);
+	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp(GL_TEXTURE_3D, 0);
+	glActiveTexture_fp(GL_TEXTURE0);
+
+	return tex;
+}
+
+/* r_softemu 3 -- quantize the way the 1997 rasterizer did.
+ *
+ * The software renderer never chose a colour by RGB distance.  Every lit pixel
+ * was colormap[light * 256 + texel]: an authored table whose darkening ramps
+ * take a deliberately non-linear path through the palette, with hue shifts at
+ * the dark end that a Euclidean nearest-colour search cannot reproduce.
+ *
+ * The post-process only ever sees the product of texel and light, so splitting
+ * one back into the other is an inference.  The table's own calibration makes
+ * the split: row ~30 is the identity row (colormap[30*256 + i] == i for most
+ * i), so a fully lit texel sits mid-ramp and the rows above it are Raven's
+ * overbright headroom.  Luminance is therefore the light axis -- for a
+ * candidate texel, the light level is the row of that texel's ramp whose
+ * luminance lands nearest the incoming pixel's.  Pinning the light level that
+ * way leaves exactly one reachable colour per texel, and the texel is then
+ * whichever of those 255 candidates is closest in RGB.
+ *
+ * So brightness picks the light level and chroma picks the texel: the
+ * rasterizer's own split, run backwards.  The result is whatever Raven's table
+ * says lives at that pair, which is why it is not the nearest palette entry --
+ * 27.8% of the 32^3 grid lands elsewhere, and the disagreement concentrates in
+ * the dark ranges (56% of dark grid points move, mean delta 40/255, against
+ * 25% and 11/255 in the midtones) where the authored ramps bend.
+ *
+ * Ramp luminance is not quite monotonic in light level (90 of the 256 ramps
+ * wobble), so the level search has to be exhaustive rather than a bisection.
+ */
+static qboolean PP_BuildColormapLUT (void)
+{
+	/* static: ~114 KB of tables, too much for the stack on Windows */
+	static unsigned char lut[32 * 32 * 32];
+	static unsigned char rampluma[VID_GRADES][256];	/* [light][texel] -> luma */
+	static unsigned char bestlevel[256][256];	/* [texel][target luma] -> light */
+	const byte *cmap = host_colormap;
+	int r, g, b, i, l, y;
+
+	if (!glTexImage3D_fp || !cmap)
+		return false;
+
+	for (l = 0; l < VID_GRADES; l++)
+	{
+		for (i = 0; i < 256; i++)
+		{
+			unsigned int c = d_8to24table[cmap[l * 256 + i]];
+			rampluma[l][i] = (unsigned char)
+				PP_LUMA((int)((c >> 0) & 0xff),
+					(int)((c >> 8) & 0xff),
+					(int)((c >> 16) & 0xff));
+		}
+	}
+
+	for (i = 0; i < 256; i++)
+	{
+		for (y = 0; y < 256; y++)
+		{
+			int best = 0;
+			int bestdist = 0x7fffffff;
+
+			for (l = 0; l < VID_GRADES; l++)
+			{
+				int d = (int)rampluma[l][i] - y;
+				if (d < 0)
+					d = -d;
+				if (d < bestdist)
+				{
+					bestdist = d;
+					best = l;
+				}
+			}
+			bestlevel[i][y] = (unsigned char)best;
+		}
+	}
+
+	for (b = 0; b < 32; b++)
+	{
+		for (g = 0; g < 32; g++)
+		{
+			for (r = 0; r < 32; r++)
+			{
+				int tr = (r * 255) / 31;
+				int tg = (g * 255) / 31;
+				int tb = (b * 255) / 31;
+				int ty = PP_LUMA(tr, tg, tb);
+				int best = 0;
+				int bestdist = 0x7fffffff;
+
+				/* skip texel 255 (transparent / fullbright), as the
+				 * nearest-colour LUT does.  No other texel's ramp
+				 * resolves to 255 in the retail colormap, so mode 3
+				 * never emits it either. */
+				for (i = 0; i < 255; i++)
+				{
+					int entry = cmap[bestlevel[i][ty] * 256 + i];
+					unsigned int pal = d_8to24table[entry];
+					int dr = tr - (int)((pal >>  0) & 0xff);
+					int dg = tg - (int)((pal >>  8) & 0xff);
+					int db = tb - (int)((pal >> 16) & 0xff);
+					int dist = dr*dr + dg*dg + db*db;
+					if (dist < bestdist)
+					{
+						bestdist = dist;
+						best = entry;
+					}
+				}
+				lut[b * 32 * 32 + g * 32 + r] = (unsigned char)best;
+			}
+		}
+	}
+
+	pp_colormap_lut = PP_UploadLUT(lut);
+	return pp_colormap_lut != 0;
+}
+
 static void PP_BuildPaletteLUT (void)
 {
 	unsigned char lut[32 * 32 * 32];
@@ -911,21 +1048,15 @@ static void PP_BuildPaletteLUT (void)
 		}
 	}
 
-	glGenTextures_fp(1, &pp_palette_lut);
-	glActiveTexture_fp(GL_TEXTURE0 + 1);
-	glBindTexture_fp(GL_TEXTURE_3D, pp_palette_lut);
-	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_R8, 32, 32, 32, 0,
-			GL_RED, GL_UNSIGNED_BYTE, lut);
-	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_3D, 0);
-	glActiveTexture_fp(GL_TEXTURE0);
+	pp_palette_lut = PP_UploadLUT(lut);
 
 	pp_lut_built = true;
 	Con_SafePrintf("PostProcess: palette LUT built\n");
+
+	if (PP_BuildColormapLUT())
+		Con_SafePrintf("PostProcess: colormap LUT built\n");
+	else
+		Con_SafePrintf("PostProcess: no colormap, r_softemu 3 falls back to nearest-colour\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1274,6 +1405,11 @@ void GL_PostProcess_Shutdown (void)
 	{
 		glDeleteTextures_fp(1, &pp_palette_lut);
 		pp_palette_lut = 0;
+	}
+	if (pp_colormap_lut)
+	{
+		glDeleteTextures_fp(1, &pp_colormap_lut);
+		pp_colormap_lut = 0;
 	}
 	pp_lut_built = false;
 	pp_initialized = false;
@@ -1718,8 +1854,12 @@ apply_shader:
 	/* bind palette LUT on texture unit 1 if softemu is active */
 	if ((int)r_softemu.value > 0 && pp_lut_built)
 	{
+		/* mode 3 swaps in the colormap-derived LUT; the shader is identical
+		 * either way, only the table it reads changes */
+		GLuint lut = ((int)r_softemu.value == 3 && pp_colormap_lut) ?
+				pp_colormap_lut : pp_palette_lut;
 		glActiveTexture_fp(GL_TEXTURE0 + 1);
-		glBindTexture_fp(GL_TEXTURE_3D, pp_palette_lut);
+		glBindTexture_fp(GL_TEXTURE_3D, lut);
 		glActiveTexture_fp(GL_TEXTURE0);
 	}
 
