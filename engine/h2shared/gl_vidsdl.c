@@ -62,6 +62,10 @@
 typedef void (APIENTRY *GLDEBUGPROC)(GLenum source, GLenum type, GLuint id,
 	GLenum severity, GLsizei length, const char *message, const void *userParam);
 typedef void (APIENTRY *glDebugMessageCallback_f)(GLDEBUGPROC callback, const void *userParam);
+
+/* KHR_debug is GL 4.3 / GLES 3.2 and the engine requests an ES 3.0 context,
+ * so none of this exists on that tier — it polls glGetError instead, below. */
+#ifndef USE_GLES
 static glDebugMessageCallback_f glDebugMessageCallback_fp;
 
 static const char *GL_DebugSeverityStr (GLenum severity)
@@ -86,6 +90,71 @@ static void APIENTRY GL_DebugCallback (GLenum source, GLenum type, GLuint id,
 	if (type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
 		Con_Printf ("GL: fatal error type — check qconsole.log\n");
 }
+#endif	/* !USE_GLES */
+
+/* ------------------------------------------------------------------ */
+/* Error reporting for the ES tier                                     */
+/* ------------------------------------------------------------------ */
+
+/* KHR_debug is GL 4.3 / GLES 3.2, and VID_SetMode asks SDL only for an ES 3.0
+ * context, so the callback above does not exist on this tier and every GL
+ * error it makes would be discarded unseen.  That is not hypothetical: the
+ * GL_RGB8 upload bug (uhexen2-6yh1) failed 55 texture uploads on every map
+ * load — blacking out the status bar, conback, the sky and the liquid warps —
+ * and printed nothing at all, in the browser or anywhere else, until someone
+ * hand-instrumented glTexImage2D.  A drained glGetError once a frame would
+ * have said so on the first run.  uhexen2-ekuj.
+ *
+ * One glGetError per frame is negligible.  The budget exists because a single
+ * bad call in a per-object loop can raise thousands of errors a frame, and a
+ * console that scrolls is no more useful than a silent one; it is reset by
+ * GL_Init so startup and every vid_restart get a fresh allowance rather than
+ * one allowance for the whole session. */
+#ifdef USE_GLES
+#define GL_ERROR_REPORT_BUDGET	32
+
+static int	gl_errors_reported;
+
+static const char *GL_ErrorStr (GLenum e)
+{
+	switch (e)
+	{
+	case 0x0500:	return "GL_INVALID_ENUM";
+	case 0x0501:	return "GL_INVALID_VALUE";
+	case 0x0502:	return "GL_INVALID_OPERATION";
+	case 0x0503:	return "GL_STACK_OVERFLOW";
+	case 0x0504:	return "GL_STACK_UNDERFLOW";
+	case 0x0505:	return "GL_OUT_OF_MEMORY";
+	case 0x0506:	return "GL_INVALID_FRAMEBUFFER_OPERATION";
+	default:	return "GL_?";
+	}
+}
+
+/* Drain the error queue and report what is in it.  `tag` names the point in
+ * the frame that noticed, which is as much locality as glGetError can give —
+ * the offending call is somewhere since the previous drain. */
+static void GL_PollErrors (const char *tag)
+{
+	GLenum	e;
+	int	drained = 0;
+
+	/* Bounded because a lost context returns the same error forever and
+	 * this would otherwise not terminate. */
+	while (drained < 64 && (e = glGetError_fp()) != 0)
+	{
+		drained++;
+		if (gl_errors_reported >= GL_ERROR_REPORT_BUDGET)
+			continue;
+		gl_errors_reported++;
+		Con_Printf ("GL error %s (0x%04x) detected at %s\n",
+			    GL_ErrorStr(e), (unsigned int)e, tag);
+		if (gl_errors_reported == GL_ERROR_REPORT_BUDGET)
+			Con_Printf ("GL: further errors suppressed until vid_restart\n");
+	}
+}
+#else
+#define GL_PollErrors(tag)	((void)0)
+#endif	/* USE_GLES */
 
 #define WARP_WIDTH		320
 #define WARP_HEIGHT		200
@@ -643,9 +712,9 @@ void VID_ShiftPalette (const unsigned char *palette)
 
 /* GL_CompileShader and GL_LinkProgram are now in gl_shader.c */
 
+#ifndef USE_GLES
 static void GL_LoadFunctionPointers (void)
 {
-#ifndef USE_GLES
 	/* On desktop GL, dynamically load function pointers */
 	/* load shader function pointers */
 	glCreateShader_fp = (glCreateShader_f) SDL_GL_GetProcAddress("glCreateShader");
@@ -756,8 +825,8 @@ static void GL_LoadFunctionPointers (void)
 	{
 		Sys_Error("Required GL 4.3 shader functions not found");
 	}
-#endif /* !USE_GLES */
 }
+#endif /* !USE_GLES */
 
 
 #ifdef GL_DLSYM
@@ -917,11 +986,22 @@ static void GL_Init (void)
 		glDebugMessageCallback_fp(GL_DebugCallback, NULL);
 		Con_SafePrintf("GL debug output enabled\n");
 	}
+#else
+	/* No KHR_debug at ES 3.0, so errors are polled instead — see
+	 * GL_PollErrors.  Fresh report budget per GL_Init, i.e. per startup and
+	 * per vid_restart.  uhexen2-ekuj. */
+	gl_errors_reported = 0;
+	Con_SafePrintf("GL error polling enabled (no KHR_debug on the ES tier)\n");
 #endif
 
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
+
+	/* Init does a lot of texture and shader work; drain before the first
+	 * frame so anything it raised is attributed here rather than to the
+	 * frame that happens to poll next. */
+	GL_PollErrors ("GL_Init");
 
 	/* Streaming buffer ring (gl_buffer.c) — uhexen2-8pc2.
 	 * Probe extension availability by entry-point load, query offset
@@ -1019,6 +1099,11 @@ void GL_EndRendering (void)
 	 * SwapWindow so the fence covers all of this frame's GPU work. */
 	GL_ReleaseFrameResources ();
 #endif
+
+	/* Before the swap, so anything this frame queued is attributed to this
+	 * frame rather than the next one.  No-op off the ES tier, where the
+	 * debug callback reports errors as they happen.  uhexen2-ekuj. */
+	GL_PollErrors ("end of frame");
 
 	if (!scr_skipupdate)
 		SDL_GL_SwapWindow(window);
