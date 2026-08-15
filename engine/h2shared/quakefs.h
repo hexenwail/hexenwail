@@ -151,6 +151,19 @@ int ListGames (const char *prefix, const char **buf, int pos);
 	/* Directories "game" will accept: data1, portals when installed, and
 	 * every other game data directory under fs_basedir except hw. */
 
+int ListCfgs (const char *prefix, const char **buf, int pos);
+	/* .cfg basenames in the gamedir root across every searchpath, for
+	 * "exec".  Includes the user directory. */
+
+int ListSkies (const char *prefix, const char **buf, int pos);
+	/* Skybox names for "sky": gfx/env/*_rt.{png,tga,pcx} with the suffix
+	 * trimmed, which is exactly what Sky_LoadSkyBox will look for. */
+
+int ListSaves (const char *prefix, const char **buf, int pos);
+	/* Savegame names for "save" and "load": directories under fs_userdir
+	 * holding an info.dat, i.e. the ones Host_Loadgame_f can actually
+	 * read.  Not limited to the menu's fixed s0..sN slots. */
+
 void FS_FreeNameList (void);
 	/* Releases the names a preceding List*() handed out.  Safe to call when
 	 * there is no outstanding list.  */

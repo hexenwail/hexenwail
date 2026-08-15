@@ -229,6 +229,10 @@ static const struct
 	{ "record",		2,	ListMaps,	FS_FreeNameList },
 	{ "playdemo",		1,	ListDemos,	FS_FreeNameList },
 	{ "timedemo",		1,	ListDemos,	FS_FreeNameList },
+	{ "exec",		1,	ListCfgs,	FS_FreeNameList },
+	{ "save",		1,	ListSaves,	FS_FreeNameList },
+	{ "load",		1,	ListSaves,	FS_FreeNameList },
+	{ "sky",		1,	ListSkies,	FS_FreeNameList },
 };
 
 #define NUM_ARG_COMPLETIONS	(int)(sizeof(arg_completion_types)/sizeof(arg_completion_types[0]))
