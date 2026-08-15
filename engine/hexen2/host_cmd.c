@@ -715,6 +715,10 @@ static void Host_Savegame_f (void)
 		sd.playerclass_val= cl_playerclass.value;
 		sd.info_mask      = info_mask;
 		sd.info_mask2     = info_mask2;
+		/* Client-side inventory selection: not an entity field, so this adds
+		 * nothing to the .gip entity data and leaves gamecode/fieldsets alone.
+		 * The writers append it as the last line of info.dat.  uhexen2-1knr. */
+		sd.inv_artifact   = SB_GetSelectedArtifact();
 		FS_MakePath_BUF(FS_USERDIR, NULL, sd.savedest, sizeof(sd.savedest), p);
 		q_strlcpy(sd.userdir, FS_GetUserdir(), sizeof(sd.userdir));
 		Host_SubmitSave(&sd);
@@ -865,6 +869,18 @@ static void Host_Loadgame_f (void)
 	// mission pack, objectives strings
 	fscanf (f, "%u\n", &info_mask);
 	fscanf (f, "%u\n", &info_mask2);
+
+	/* Optional trailing field: the artifact the player had selected when the
+	 * save was written.  Appended after info_mask2 rather than given a new
+	 * SAVEGAME_VERSION so saves stay interchangeable in both directions -- an
+	 * older engine stops reading here and ignores the extra line, and a save
+	 * written before this field existed hits EOF, leaving tempi at -1.  Out of
+	 * range is a no-op inside SB_SetSelectedArtifact, so an old save keeps
+	 * whatever selection the running session was already carrying.
+	 * uhexen2-1knr. */
+	tempi = -1;
+	if (fscanf (f, "%d\n", &tempi) == 1)
+		SB_SetSelectedArtifact (tempi);
 
 	fclose (f);
 

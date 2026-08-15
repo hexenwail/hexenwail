@@ -67,6 +67,9 @@ void Host_SubmitSave(const savedata_t *sd) {
 	fprintf(f, "%f\n", sd->playerclass_val);
 	fprintf(f, "%u\n", sd->info_mask);
 	fprintf(f, "%u\n", sd->info_mask2);
+	/* Must stay last: older engines stop reading after info_mask2, so keeping
+	 * this on the tail is what makes the save readable both ways. uhexen2-1knr */
+	fprintf(f, "%d\n", sd->inv_artifact);
 	if (ferror(f)) Con_Printf("Warning: save write error.\n");
 	fclose(f);
 }
@@ -249,6 +252,8 @@ static int SDLCALL SaveThread_f(void *unused) {
 		fprintf(f, "%f\n", sd.playerclass_val);
 		fprintf(f, "%u\n", sd.info_mask);
 		fprintf(f, "%u\n", sd.info_mask2);
+		/* Must stay last -- see the note in the synchronous writer above. */
+		fprintf(f, "%d\n", sd.inv_artifact);
 		err = ferror(f);
 		fclose(f);
 

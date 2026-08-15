@@ -36,6 +36,8 @@ void Sbar_Changed(void);
 void Sbar_Draw(void);
 void SB_InvChanged(void);
 void SB_InvReset(void);
+int  SB_GetSelectedArtifact(void);	// artifact id to store in a savegame, -1 if none
+void SB_SetSelectedArtifact(int artifact);	// seed it back from a loaded savegame
 void SB_ViewSizeChanged(void);
 void Sbar_DeathmatchOverlay(void);
 
