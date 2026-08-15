@@ -211,12 +211,38 @@ Output goes to `<outdir>`: numbered PNGs, `engine.stdout`, `xvfb.log`,
 
 The scenarios in the `case` block (`noportals`, `oldmission_paladin`,
 `oldmission_demoness`, `demoness_skin`, `newmission`) are the ones written for
-`uhexen2-uh5c`; treat them as worked examples. The reusable parts are the
-harness itself and the `shot` / `key` / `keyn` / `typ` helpers — add a scenario
-rather than rewriting the setup.
+`uhexen2-uh5c`; `console_tab` was written for `uhexen2-q6ap`. Treat them as
+worked examples — the reusable parts are the harness itself and the `shot` /
+`key` / `keyn` / `typ` / `typn` / `wipe` helpers. Add a scenario rather than
+rewriting the setup.
 
 Timings are deliberately generous (the engine gets 25 s to load a map). It is
 slow, and that is the tradeoff for driving a real event loop.
+
+### console_tab — TAB completion
+
+```
+tools/headless-drive.sh console_tab /tmp/out ~/hexen2 -condebug +"map demo1"
+```
+
+Presses TAB in a live console, so `Key_Event` → `CompleteCommand`
+(`engine/hexen2/keys.c`) runs exactly as it does under a human. Eight cases:
+unique completion, ambiguous stem plus listing, no-match, mid-line splice,
+command-word (`argno` 0), second argument slot, `sky` with no `gfx/env`, and a
+repeat after all of the above to catch a leaked `FS_FreeNameList`.
+
+Two things it will not tolerate being dropped:
+
+- **`+map demo1`.** The console cannot be opened from the main menu — Escape
+  closes it, but with nothing connected and no demo loop the engine puts it
+  straight back, and a menu eats `grave`. The run then screenshots the
+  untouched menu eight times and looks like a pass.
+- **`-condebug`.** The ambiguous-match listing is console output; without the
+  log you only have the completed line.
+
+Read the results off the PNGs — the line under `]` is the assertion. `wipe`
+presses `End` before backspacing, because these cases deliberately leave the
+cursor mid-line and the tail would otherwise survive into the next shot.
 
 ---
 
