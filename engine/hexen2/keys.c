@@ -199,14 +199,50 @@ static keyname_t keynames[] =
 ==============================================================================
 */
 
+/*
+Argument completion. Each row says how to complete one argument slot of
+one command: argno 1 is the first argument, argno 0 being the command
+word itself, which the command/cvar/alias listers already handle. A
+command can appear more than once when its slots take different things
+-- "record <demoname> [<map>]" is why the table is keyed on the slot and
+not just the command.
+
+The completer has the same shape as ListCommands/ListCvars. cleanup (may
+be NULL) releases whatever storage the returned strings live in;
+CompleteCommand calls it on every path once it is done with them.
+*/
+typedef int  (*arg_completer_t) (const char *prefix, const char **buf, int pos);
+typedef void (*arg_cleanup_t) (void);
+
+static const struct
+{
+	const char	*command;
+	int		argno;
+	arg_completer_t	complete;
+	arg_cleanup_t	cleanup;
+} arg_completion_types[] =
+{
+	{ "map",		1,	ListMaps,	FS_FreeNameList },
+	{ "changelevel",	1,	ListMaps,	FS_FreeNameList },
+	{ "game",		1,	ListGames,	FS_FreeNameList },
+	{ "record",		1,	ListDemos,	FS_FreeNameList },
+	{ "record",		2,	ListMaps,	FS_FreeNameList },
+	{ "playdemo",		1,	ListDemos,	FS_FreeNameList },
+	{ "timedemo",		1,	ListDemos,	FS_FreeNameList },
+};
+
+#define NUM_ARG_COMPLETIONS	(int)(sizeof(arg_completion_types)/sizeof(arg_completion_types[0]))
+
 static void CompleteCommand (void)
 {
 	char	*matches[MAX_MATCHES];
 	char		backup[MAXCMDLINE];
-	char		c, *prefix, *workline;
+	char		cmdword[MAXCMDLINE];
+	char		c, *prefix, *workline, *next;
 	qboolean	editing;
-	int		count, i;
-	size_t		len1, len2;
+	arg_cleanup_t	cleanup;
+	int		count, i, argno, entry;
+	size_t		offset, len1, len2, cmdlen;
 
 	if (key_linepos < 2)
 		return;
@@ -235,36 +271,100 @@ static void CompleteCommand (void)
 		++prefix;
 	}
 
-	// if the remainder line has no length or has
-	// spaces in it, don't bother
-	if (!*prefix || strstr(prefix," "))
+	// if the remainder line has no length, don't bother
+	if (!*prefix)
 	{
 		workline[key_linepos] = c;
 		return;
 	}
 
+	// walk the tokens ahead of the cursor to find which argument slot the
+	// cursor sits in, leaving prefix on the token being completed. argno 0
+	// means the cursor is still on the command word itself.
+	argno = 0;
+	cmdword[0] = 0;
+	for (;;)
+	{
+		next = strchr (prefix, ' ');
+		if (!next)
+			break;
+		if (argno == 0)
+		{
+			cmdlen = next - prefix;
+			if (cmdlen >= sizeof(cmdword))
+				cmdlen = sizeof(cmdword) - 1;
+			memcpy (cmdword, prefix, cmdlen);
+			cmdword[cmdlen] = 0;
+		}
+		argno++;
+		// a run of spaces is one separator, matching how the command
+		// itself will be tokenized -- otherwise "map  demo" would look
+		// like argument 2 and refuse to complete
+		prefix = next + 1;
+		while (*prefix == ' ')
+			++prefix;
+	}
+
+	count = 0;
+	cleanup = NULL;
+
+	if (argno == 0)
+	{
+		// no argument typed yet: complete the command word itself
+		count += ListCommands(prefix, (const char**)matches, count);
+		count += ListCvars   (prefix, (const char**)matches, count);
+		count += ListAlias   (prefix, (const char**)matches, count);
+	}
+	else
+	{
+		entry = -1;
+		for (i = 0; i < NUM_ARG_COMPLETIONS; i++)
+		{
+			if (arg_completion_types[i].argno == argno &&
+			    !q_strcasecmp(cmdword, arg_completion_types[i].command))
+			{
+				entry = i;
+				break;
+			}
+		}
+
+		// nothing knows how to complete this slot: leave the line alone
+		if (entry < 0)
+		{
+			workline[key_linepos] = c;
+			return;
+		}
+
+		cleanup = arg_completion_types[entry].cleanup;
+		count = arg_completion_types[entry].complete (prefix, (const char**)matches, 0);
+	}
+
+	// where in the line the token being completed starts: the command
+	// word at workline+1, or the argument just past its space
+	offset = prefix - workline;
+
 	// store the length of the relevant partial
 	len1 = len2 = strlen(prefix);
 
-	// start checking for matches, finally...
-	count = 0;
-	count += ListCommands(prefix, (const char**)matches, count);
-	count += ListCvars   (prefix, (const char**)matches, count);
-	count += ListAlias   (prefix, (const char**)matches, count);
-
+	// Everything below must leave key_linepos <= MAXCMDLINE-1, so that the
+	// terminator lands inside workline and the q_strlcpy that puts the tail
+	// back is handed a size of at least 1. offset is wherever the token under
+	// the cursor starts, so unlike the command word it can sit arbitrarily
+	// far into the line and a completed name can run off the end.
 	if (count)
 	{
 		// do not do a full auto-complete
 		// unless there is only one match
 		if (count == 1)
 		{
-		//	workline[1] = '/';
-		//	q_strlcpy (workline + 2, matches[0], MAXCMDLINE-2);
-		//	key_linepos = 2 + strlen(matches[0]);
-			q_strlcpy (workline + 1, matches[0], MAXCMDLINE-1);
-			key_linepos = 1 + strlen(matches[0]);
-			workline[key_linepos] = ' ';
-			key_linepos++;
+			q_strlcpy (workline + offset, matches[0], MAXCMDLINE-offset);
+			key_linepos = offset + strlen(workline + offset);
+			// append the trailing space only if it still fits
+			if (key_linepos < MAXCMDLINE - 1)
+			{
+				workline[key_linepos] = ' ';
+				key_linepos++;
+			}
 		}
 		else
 		{
@@ -286,26 +386,37 @@ static void CompleteCommand (void)
 			// cycle throgh all matches and see
 			// if there is a partial completion
 		_search:
+			if (!matches[0][len2])
+				goto _check;
 			for (i = 1; i < count && i < MAX_MATCHES; i++)
 			{
-				if (matches[0][len2] != matches[i][len2])
+				// compare case-insensitively: map names carry their
+				// on-disk casing, so a byte compare would cut the
+				// common prefix short at the first casing difference
+				if (q_strncasecmp(matches[0] + len2, matches[i] + len2, 1) != 0)
 					goto _check;
 			}
 			++len2;
 			goto _search;
 		_check:
+			// clamp before the copy, not after: len2 is bounded only by
+			// the length of the matched name
+			if (len2 > MAXCMDLINE - 1 - offset)
+				len2 = MAXCMDLINE - 1 - offset;
 			if (len2 > len1)	// found a partial match
 			{
-			//	workline[1] = '/';
-			//	strncpy (workline + 2, matches[0], len2);
-			//	key_linepos = len2 + 2;
-				strncpy (workline + 1, matches[0], len2);
-				key_linepos = len2 + 1;
+				// always take the bytes from matches[0] so the line
+				// holds one real name's casing, never a splice
+				strncpy (workline + offset, matches[0], len2);
+				key_linepos = offset + len2;
 			}
 		}
 
 		workline[key_linepos] = 0;
 	}
+
+	if (cleanup)
+		cleanup ();
 
 	// put back the remainder of the original text
 	// which was lost after the trimming

@@ -4827,27 +4827,6 @@ static int mods_strcmp (const void *a, const void *b)
 	return q_strcasecmp ((const char *)a, (const char *)b);
 }
 
-static qboolean M_IsModDir (const char *dir)
-{
-	char	path[MAX_OSPATH];
-	int	i;
-
-	/* check for progs.dat */
-	q_snprintf (path, sizeof(path), "%s/%s/progs.dat", host_parms->basedir, dir);
-	if (Sys_FileType(path) == FS_ENT_FILE)
-		return true;
-
-	/* check for any pak file (pak0.pak through pak9.pak) */
-	for (i = 0; i < 10; i++)
-	{
-		q_snprintf (path, sizeof(path), "%s/%s/pak%d.pak", host_parms->basedir, dir, i);
-		if (Sys_FileType(path) == FS_ENT_FILE)
-			return true;
-	}
-
-	return false;
-}
-
 /* Fixed entries at top of mods list */
 #define MODS_FIXED_HEXEN2	0
 #define MODS_FIXED_PORTALS	1
@@ -4883,7 +4862,7 @@ static void M_ScanMods (void)
 			continue;
 		if (!q_strcasecmp(alldirs[i], "hw"))
 			continue;
-		if (!M_IsModDir(alldirs[i]))
+		if (!FS_IsGamedir(host_parms->basedir, alldirs[i]))
 			continue;
 
 		q_strlcpy (mods_list[MODS_FIXED_COUNT + custom_count], alldirs[i], MAX_QPATH);
