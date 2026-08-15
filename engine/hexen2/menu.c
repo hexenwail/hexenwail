@@ -4880,12 +4880,19 @@ static void M_ScanMods (void)
 {
 	char	alldirs[MODS_MAX][MAX_QPATH];
 	char	path[MAX_OSPATH];
+	const char	*basedir;
 	int	numdirs, i, custom_count;
 
 	mods_count = MODS_FIXED_COUNT;
 
+	/* FS_GetBasedir(), not host_parms->basedir: -basedir moves fs_basedir and
+	 * never touches host_parms->basedir, so scanning the latter would list a
+	 * different set of mods than the ones Host_Game_f (quakefs.c) and the
+	 * `game' tab completer will actually accept.  uhexen2-jk53. */
+	basedir = FS_GetBasedir ();
+
 	/* check if portals directory exists */
-	q_snprintf (path, sizeof(path), "%s/portals", host_parms->basedir);
+	q_snprintf (path, sizeof(path), "%s/portals", basedir);
 	mods_have_portals = (Sys_FileType(path) == FS_ENT_DIRECTORY);
 
 	/* fixed entries */
@@ -4893,7 +4900,7 @@ static void M_ScanMods (void)
 	q_strlcpy (mods_list[MODS_FIXED_PORTALS], "portals", MAX_QPATH);
 
 	/* scan for custom mods */
-	numdirs = Sys_ListDirectories (host_parms->basedir, alldirs, MODS_MAX);
+	numdirs = Sys_ListDirectories (basedir, alldirs, MODS_MAX);
 	custom_count = 0;
 
 	for (i = 0; i < numdirs && (MODS_FIXED_COUNT + custom_count) < MODS_MAX; i++)
@@ -4904,7 +4911,7 @@ static void M_ScanMods (void)
 			continue;
 		if (!q_strcasecmp(alldirs[i], "hw"))
 			continue;
-		if (!FS_IsGamedir(host_parms->basedir, alldirs[i]))
+		if (!FS_IsGamedir(basedir, alldirs[i]))
 			continue;
 
 		q_strlcpy (mods_list[MODS_FIXED_COUNT + custom_count], alldirs[i], MAX_QPATH);

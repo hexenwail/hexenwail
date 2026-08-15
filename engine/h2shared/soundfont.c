@@ -110,7 +110,11 @@ const char *SF_FindSoundFont (void)
 		int n;
 		for (n = 0; base_names[n]; n++)
 		{
-			q_snprintf(sf_path, sizeof(sf_path), base_names[n], host_parms->basedir);
+			/* FS_GetBasedir(), not host_parms->basedir: -basedir moves
+			 * the game data and leaves host_parms->basedir on the launch
+			 * cwd, so the latter would miss a soundfont sitting beside
+			 * the data the player actually asked for.  uhexen2-jk53. */
+			q_snprintf(sf_path, sizeof(sf_path), base_names[n], FS_GetBasedir());
 			if (SF_FileExists(sf_path))
 				return sf_path;
 		}
