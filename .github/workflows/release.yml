@@ -205,9 +205,12 @@ jobs:
               # curated file would have carried, then say plainly that what
               # follows is a placeholder, so nobody mistakes a commit dump for
               # the house style.  See docs/RELEASE_NOTES_STYLE.md.
-              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-windows-x86_64.zip\">![Download Windows build](https://img.shields.io/github/downloads/hexenwail/hexenwail/$TAG/hexenwail-$TAG-windows-x86_64.zip?color=blue&label=Windows%20x86_64&logo=windows&style=for-the-badge)</a>"
-              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-linux-x86_64.zip\">![Download Linux build](https://img.shields.io/github/downloads/hexenwail/hexenwail/$TAG/hexenwail-$TAG-linux-x86_64.zip?color=8A9A5B&label=Linux%20x86_64&style=for-the-badge)</a>"
-              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG.flatpak\">![Download Flatpak](https://img.shields.io/github/downloads/hexenwail/hexenwail/$TAG/hexenwail-$TAG.flatpak?color=4A90D9&label=Flatpak&logo=flatpak&style=for-the-badge)</a>"
+              # Static badges, not the github/downloads count endpoint: that
+              # renders 0 for a tag nobody has downloaded yet, so the buttons
+              # look broken in the first hours.  docs/RELEASE_NOTES_STYLE.md.
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-windows-x86_64.zip\">![Download Windows build](https://img.shields.io/badge/%E2%AC%87_Windows_x86__64-blue?style=for-the-badge&logo=windows&logoColor=white)</a>"
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-linux-x86_64.zip\">![Download Linux build](https://img.shields.io/badge/%E2%AC%87_Linux_x86__64-8A9A5B?style=for-the-badge)</a>"
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG.flatpak\">![Download Flatpak](https://img.shields.io/badge/%E2%AC%87_Flatpak-4A90D9?style=for-the-badge&logo=flatpak&logoColor=white)</a>"
               echo ""
               echo "$HEADER"
               echo ""
