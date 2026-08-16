@@ -509,7 +509,27 @@
               # a bare name also matches HexenwailGamecodeXX and any other
               # superstring -- which is exactly the rename this gate exists to
               # catch, and it passed until the anchors went in.
-              stamp=""
+              # The stamp is a hand-typed constant, so the real hazard is not a
+              # typo but a gamecode change that forgets to restamp -- leaving a
+              # confident wrong date, which is worse than no date at all.  The
+              # fork's policy is already that every divergence gets a dated
+              # gamecode/README entry, so requiring the two to agree makes the
+              # build fail at exactly the moment a change is recorded without
+              # restamping.  Fork entries are "YYYY-MM-DD [uhexen2-xxxx]:"; the
+              # pre-fork history uses "(1.29c)"-style parens and is not matched.
+              #
+              # Checking every image against that one expected value also gets
+              # "all five agree" for free -- one tree restamped and the others
+              # not would ship five images claiming different revisions, with
+              # the engine reporting whichever the player happened to load.
+              newest=$(grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} \[' gamecode/README \
+                       | cut -c1-10 | sort -r | head -1 | tr -d -)
+              if [ -z "$newest" ]; then
+                echo "ERROR: no dated fork entry found in gamecode/README." >&2
+                exit 1
+              fi
+              want="HexenwailGamecode_$newest"
+
               for p in gamecode/hc/h2/progs.dat gamecode/hc/h2/progs2.dat \
                        gamecode/hc/portals/progs.dat \
                        gamecode/hc/hw/hwprogs.dat gamecode/hc/siege/hwprogs.dat; do
@@ -520,38 +540,13 @@
                   echo "       See gamecode/hc/*/ident.hc and its progs.src entry." >&2
                   exit 1
                 fi
-                # One tree restamped and the others not would ship five images
-                # claiming different revisions, and the engine would report
-                # whichever one the player happened to load.
-                if [ -z "$stamp" ]; then stamp="$got"; else
-                  if [ "$got" != "$stamp" ]; then
-                    echo "ERROR: $p is $got but an earlier image is $stamp." >&2
-                    echo "       All gamecode/hc/*/ident.hc must carry one date." >&2
-                    exit 1
-                  fi
+                if [ "$got" != "$want" ]; then
+                  echo "ERROR: $p is stamped $got but the newest" >&2
+                  echo "       gamecode/README entry is dated $newest." >&2
+                  echo "       Restamp gamecode/hc/*/ident.hc, or date the entry." >&2
+                  exit 1
                 fi
               done
-
-              # The stamp is a hand-typed constant, so the real hazard is not a
-              # typo but a gamecode change that forgets to restamp -- leaving a
-              # confident wrong date, which is worse than no date at all.  The
-              # fork's policy is already that every divergence gets a dated
-              # gamecode/README entry, so requiring the two to agree makes the
-              # build fail at exactly the moment a change is recorded without
-              # restamping.  Fork entries are "YYYY-MM-DD [uhexen2-xxxx]:"; the
-              # pre-fork history uses "(1.29c)"-style parens and is not matched.
-              newest=$(grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} \[' gamecode/README \
-                       | cut -c1-10 | sort -r | head -1 | tr -d -)
-              if [ -z "$newest" ]; then
-                echo "ERROR: no dated fork entry found in gamecode/README." >&2
-                exit 1
-              fi
-              if [ "$stamp" != "HexenwailGamecode_$newest" ]; then
-                echo "ERROR: gamecode is stamped $stamp but the newest" >&2
-                echo "       gamecode/README entry is dated $newest." >&2
-                echo "       Restamp gamecode/hc/*/ident.hc, or date the entry." >&2
-                exit 1
-              fi
 
               runHook postCheck
             '';

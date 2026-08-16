@@ -308,7 +308,7 @@ static qboolean	gammaworks = false;	// whether hw-gamma works
 static int	multisample = 0; // do not set this if SDL cannot multisample
 static int	vid_menu_fsaa = 0;	/* menu-pending sample count, not yet applied */
 static qboolean	sdl_has_multisample = false;
-static int	gl_max_samples = 0;	/* GL_MAX_SAMPLES query, populated post-context-init */
+int		gl_max_samples = 0;	/* GL_MAX_SAMPLES query, populated post-context-init */
 cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_ARCHIVE};	/* read by gl_lodbias auto-scale */
 
 // stencil buffer

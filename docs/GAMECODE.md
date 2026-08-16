@@ -529,7 +529,9 @@ fails at exactly the moment a change is recorded without restamping.
 The same string appears in Game Options as a read-only `Gamecode loaded:` row
 beneath the `Gamecode:` toggle. It is drawn as one full-width line rather than
 the label/value pair the rows above use: the value column starts at x=220 on a
-320-unit canvas, which leaves 12 characters, and `hexenwail-2026-08-15` is 20. The toggle is the player's *intent* and can disagree
+320-unit canvas, which leaves 12 characters, and `hexenwail-2026-08-15` is 20.
+
+The toggle is the player's *intent* and can disagree
 with reality: a `progs.dat` hand-copied into the install's `data1/` — the
 pre-bundle install method above — is loaded by the "Classic" setting and is
 ours. The row is absent until a map has loaded, which is also the honest answer

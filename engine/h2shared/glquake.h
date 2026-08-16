@@ -237,6 +237,8 @@ extern	glmode_t	gl_texmodes[NUM_GL_FILTERS];
 /* hardware-caps related globals */
 extern	GLint		gl_max_size;
 extern	GLfloat		gl_max_anisotropy;
+extern	int		gl_max_samples;	/* GL_MAX_SAMPLES; bounds both the Options
+					 * picker and the scene FBO's sample count */
 extern	qboolean	have_stencil;
 extern	qboolean	gl_clipcontrol_able;	/* reversed-Z when true */
 

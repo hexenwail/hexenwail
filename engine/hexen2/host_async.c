@@ -23,6 +23,40 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 
+/*
+ * The info.dat field sequence, in one place.  Both writers below -- the
+ * Emscripten synchronous fallback and the native worker thread -- emit exactly
+ * this, and they sit in opposite arms of an #ifdef, so neither compiler ever
+ * sees both: a field added to one and missed in the other would give the WASM
+ * build a different on-disk layout than native, and no build or test could
+ * catch it.  Host_Loadgame_f (host_cmd.c) is the matching reader.
+ *
+ * Order is load-bearing.  inv_artifact must stay LAST: an older engine stops
+ * reading after info_mask2 and ignores the tail, which is what keeps saves
+ * interchangeable in both directions.  uhexen2-1knr.
+ */
+static void Host_WriteInfoDat (FILE *f, const savedata_t *sd)
+{
+	int	i;
+
+	fprintf(f, "%i\n", sd->version);
+	fprintf(f, "%s\n", sd->comment);
+	for (i = 0; i < NUM_SPAWN_PARMS; i++)
+		fprintf(f, "%f\n", sd->spawn_parms[i]);
+	fprintf(f, "%d\n", sd->current_skill);
+	fprintf(f, "%s\n", sd->mapname);
+	fprintf(f, "%f\n", sd->sv_time);
+	fprintf(f, "%d\n", sd->maxclients);
+	fprintf(f, "%f\n", sd->deathmatch_val);
+	fprintf(f, "%f\n", sd->coop_val);
+	fprintf(f, "%f\n", sd->teamplay_val);
+	fprintf(f, "%f\n", sd->randomclass_val);
+	fprintf(f, "%f\n", sd->playerclass_val);
+	fprintf(f, "%u\n", sd->info_mask);
+	fprintf(f, "%u\n", sd->info_mask2);
+	fprintf(f, "%d\n", sd->inv_artifact);
+}
+
 #ifdef __EMSCRIPTEN__
 /* No pthreads in Emscripten build — APC is no-op, save is synchronous. */
 void AsyncQueue_Init(void) {}
@@ -46,30 +80,14 @@ void Host_SubmitSave(const savedata_t *sd) {
 	/* Synchronous fallback: do what the worker thread would have done */
 	char path[MAX_OSPATH];
 	FILE *f;
-	int i, err;
+	int err;
 	Host_RemoveGIPFiles(sd->savedest);
 	err = Host_CopyFiles(sd->userdir, "*.gip", sd->savedest);
 	if (err) { Con_Printf("Warning: save copy failed.\n"); return; }
 	if (q_snprintf(path, sizeof(path), "%s/info.dat", sd->savedest) >= (int)sizeof(path)) return;
 	f = fopen(path, "w");
 	if (!f) { Con_Printf("Warning: could not write info.dat.\n"); return; }
-	fprintf(f, "%i\n", sd->version);
-	fprintf(f, "%s\n", sd->comment);
-	for (i = 0; i < NUM_SPAWN_PARMS; i++) fprintf(f, "%f\n", sd->spawn_parms[i]);
-	fprintf(f, "%d\n", sd->current_skill);
-	fprintf(f, "%s\n", sd->mapname);
-	fprintf(f, "%f\n", sd->sv_time);
-	fprintf(f, "%d\n", sd->maxclients);
-	fprintf(f, "%f\n", sd->deathmatch_val);
-	fprintf(f, "%f\n", sd->coop_val);
-	fprintf(f, "%f\n", sd->teamplay_val);
-	fprintf(f, "%f\n", sd->randomclass_val);
-	fprintf(f, "%f\n", sd->playerclass_val);
-	fprintf(f, "%u\n", sd->info_mask);
-	fprintf(f, "%u\n", sd->info_mask2);
-	/* Must stay last: older engines stop reading after info_mask2, so keeping
-	 * this on the tail is what makes the save readable both ways. uhexen2-1knr */
-	fprintf(f, "%d\n", sd->inv_artifact);
+	Host_WriteInfoDat(f, sd);
 	if (ferror(f)) Con_Printf("Warning: save write error.\n");
 	fclose(f);
 }
@@ -214,7 +232,7 @@ static int SDLCALL SaveThread_f(void *unused) {
 	savedata_t sd;
 	char path[MAX_OSPATH];
 	FILE *f;
-	int i, err;
+	int err;
 
 	for (;;) {
 		SDL_LockMutex(save_mutex);
@@ -237,23 +255,7 @@ static int SDLCALL SaveThread_f(void *unused) {
 			>= (int)sizeof(path)) { err = 1; goto done; }
 		f = fopen(path, "w");
 		if (!f) { err = 1; goto done; }
-		fprintf(f, "%i\n", sd.version);
-		fprintf(f, "%s\n", sd.comment);
-		for (i = 0; i < NUM_SPAWN_PARMS; i++)
-			fprintf(f, "%f\n", sd.spawn_parms[i]);
-		fprintf(f, "%d\n", sd.current_skill);
-		fprintf(f, "%s\n", sd.mapname);
-		fprintf(f, "%f\n", sd.sv_time);
-		fprintf(f, "%d\n", sd.maxclients);
-		fprintf(f, "%f\n", sd.deathmatch_val);
-		fprintf(f, "%f\n", sd.coop_val);
-		fprintf(f, "%f\n", sd.teamplay_val);
-		fprintf(f, "%f\n", sd.randomclass_val);
-		fprintf(f, "%f\n", sd.playerclass_val);
-		fprintf(f, "%u\n", sd.info_mask);
-		fprintf(f, "%u\n", sd.info_mask2);
-		/* Must stay last -- see the note in the synchronous writer above. */
-		fprintf(f, "%d\n", sd.inv_artifact);
+		Host_WriteInfoDat(f, &sd);
 		err = ferror(f);
 		fclose(f);
 
