@@ -989,10 +989,10 @@ void CL_UpdateEffects (void)
 	float		frametime;
 //	edict_t		test;
 //	trace_t		trace;
-	vec3_t		org, org2, alldir, snow_org;
+	vec3_t		org, org2, alldir;
 	int		x_dir, y_dir;
 	entity_t	*ent;
-	float		distance, smoketime;
+	float		snow_dx, snow_dy, snow_distsq, smoketime;
 
 	if (cls.state == ca_disconnected)
 		return;
@@ -1035,21 +1035,31 @@ void CL_UpdateEffects (void)
 			VectorCopy(cl.Effects[idx].ef.Rain.max_org, org2);
 			VectorCopy(cl.Effects[idx].ef.Rain.dir, alldir);
 
-			VectorAdd(org, org2, snow_org);
-
-			snow_org[0] *= 0.5;
-			snow_org[1] *= 0.5;
-			snow_org[2] *= 0.5;
-
-			snow_org[2] = r_origin[2];
-
-			VectorSubtract(snow_org, r_origin, snow_org);
-
-			distance = VectorNormalizeFast(snow_org);
+			/* Horizontal distance from the camera to the nearest point of
+			 * the volume's footprint, which is zero while you stand inside
+			 * it.  Raven measured to the volume's CENTRE instead: fine for
+			 * the small brushes the original maps use, but it defeats a
+			 * map-scale one, because most of such a brush's own footprint
+			 * then lies outside its own cutoff.  On SoT's winter not one of
+			 * its fifteen volumes passed the old test from any player
+			 * start -- the correct stock behaviour there was no snow at
+			 * all.
+			 *
+			 * The 1024 budget stays, and still does its job: on that map
+			 * this leaves 2-5 volumes live depending on where you stand,
+			 * ~17.5k of the 32k particle pool at worst, where spawning
+			 * every volume unconditionally would want ~41.7k and starve
+			 * every other particle effect in the game.  Height is still
+			 * ignored, as before -- snow falls, so a volume overhead should
+			 * reach you.  uhexen2-ykqw. */
+			snow_dx = (r_origin[0] < org[0])  ? org[0] - r_origin[0] :
+				  (r_origin[0] > org2[0]) ? r_origin[0] - org2[0] : 0;
+			snow_dy = (r_origin[1] < org[1])  ? org[1] - r_origin[1] :
+				  (r_origin[1] > org2[1]) ? r_origin[1] - org2[1] : 0;
+			snow_distsq = snow_dx * snow_dx + snow_dy * snow_dy;
 
 			cl.Effects[idx].ef.Rain.next_time += frametime;
-			/* jfm:  fixme, check distance to player first */
-			if (cl.Effects[idx].ef.Rain.next_time >= 0.10 && distance < 1024)
+			if (cl.Effects[idx].ef.Rain.next_time >= 0.10 && snow_distsq < 1024 * 1024)
 			{
 				R_SnowEffect(org, org2, cl.Effects[idx].ef.Rain.flags, alldir,
 								cl.Effects[idx].ef.Rain.count);
