@@ -72,6 +72,7 @@ extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 
 extern GLuint		gl_null_fb_texture;	/* 1x1 black sentinel for u_texture2 (uhexen2-sjvf) */
+extern GLuint		gl_solid_white_texture;	/* 1x1 opaque white, for untextured imm batches */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 
 /* OIT variants — same shaders but output to MRT accum+revealage */

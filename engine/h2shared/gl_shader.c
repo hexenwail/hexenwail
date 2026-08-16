@@ -31,6 +31,12 @@ glprogram_t	gl_shader_sky;
  * (zero contribution) instead of branching per-fragment.  uhexen2-sjvf. */
 GLuint		gl_null_fb_texture;
 
+/* Solid white 1x1 RGBA.  The shaders that back the immediate-mode batches
+ * all sample a texture unconditionally and multiply it into the vertex
+ * colour, so a caller that wants a flat untextured draw has to hand them
+ * something that multiplies by one.  Binding this is that "no texture". */
+GLuint		gl_solid_white_texture;
+
 /* OIT variants of translucent shaders */
 glprogram_t	gl_shader_world_oit;
 glprogram_t	gl_shader_alias_oit;
@@ -1251,6 +1257,27 @@ void GL_Shaders_Init (void)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
+
+	/* Companion to the above: 1x1 opaque white, so an immediate-mode batch
+	 * can draw flat vertex colour through a shader that always samples a
+	 * texture.  R_DrawParticles' square mode is the first caller.
+	 * uhexen2-2rxl. */
+	{
+		static const unsigned char white_pixel[4] = {255, 255, 255, 255};
+		glGenTextures_fp(1, &gl_solid_white_texture);
+		glBindTexture_fp(GL_TEXTURE_2D, gl_solid_white_texture);
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		/* Both blocks above bound straight through glBindTexture_fp, behind
+		 * GL_Bind's back.  Tell the cache what is actually bound now, or the
+		 * next GL_Bind of a texture that happens to match the stale value
+		 * would skip a bind it genuinely needs. */
+		currenttexture = gl_solid_white_texture;
 	}
 
 	/* OIT variants for translucent rendering.

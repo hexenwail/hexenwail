@@ -1529,7 +1529,17 @@ void R_DrawParticles (void)
     if (!active_particles)
         return;
 
-    GL_Bind(particletexture);
+    /* Square mode draws flat colour, so it must NOT sample particletexture.
+     * That texture is a 2x2 atlas of four flake/spark sprites, and the one
+     * texcoord the point path can supply -- (0.5, 0.5) -- lands exactly on
+     * the seam where all four quadrants meet, which is empty in the stock
+     * 16x16 dot texture.  spart_frag multiplies the sample into the vertex
+     * colour and then `if (color.a < 0.01) discard;`, so every point was
+     * thrown away and gl_particles 0 rendered nothing at all: no rain, no
+     * snow, no blood, no sparks.  Binding solid white makes the multiply a
+     * no-op and gives square mode the flat particle it is asking for.
+     * Reported against SoT by Garrett; uhexen2-2rxl. */
+    GL_Bind(square ? gl_solid_white_texture : particletexture);
     glEnable_fp(GL_BLEND);
     /* Inside an OIT pass, OIT_BeginTranslucency already configured the
      * per-buffer blend funcs (accum: ONE/ONE, reveal: ZERO/ONE_MINUS_SRC_COLOR).
