@@ -141,22 +141,39 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname);
 void PR_LoadProgs (void);
 
 #if !defined(H2W)
-/* Gamecode selection: Classic (the install's own progs.dat) vs Updated (the
- * copy built from this tree).  PR_LatchGamecode is called when a NEW GAME
- * starts and nowhere else -- see its definition for why changelevel and
- * savegame loads must not re-latch.  uhexen2-vbnx. */
+/* Gamecode SOURCE selection -- which file, never whose code.  sv_gamecode
+ * holds one of three states: the install's own gamedir (0), the copy bundled
+ * beside the engine (1), or the pak copy specifically, stepping over a loose
+ * file that would otherwise hide it (2).  See sv_gamecode's own comment in
+ * pr_edict.c for why the labels name a place and not an author.
+ * PR_LatchGamecode is called when a NEW GAME starts and nowhere else -- see
+ * its definition for why changelevel and savegame loads must not re-latch.
+ * uhexen2-vbnx, uhexen2-nt96. */
 void	 PR_LatchGamecode (void);
-qboolean PR_GamecodeIsUpdated (void);
+qboolean PR_GamecodeIsUpdated (void);	/* state 1: substitute the bundle? */
+qboolean PR_GamecodeIsPakOnly (void);	/* state 2: skip the loose file? */
 qboolean PR_GamecodeAvailable (void);	/* is there a bundle to switch to? */
 
-/* Origin of the gamecode actually loaded -- "Raven 1.11", "hexenwail-2026-08-15"
- * or "Third-party" -- or NULL if PR_LoadProgs has not run in this process.  Our
- * answer carries the gamecode's own date stamp, falling back to a bare
- * "hexenwail" for a build whose marker has no readable one.  The NULL is the
- * right answer on a client attached to someone else's server: the progs it is
- * running was never loaded here.  Answers a different question from the three
- * above, which describe intent; a hand-copied progs.dat makes the two
- * disagree.  uhexen2-8r3e. */
+/* Menu-facing pair.  The first says whether state 2 is worth offering at all:
+ * where no loose file shadows a pak copy of the base game's gamecode it
+ * resolves the identical file state 0 does, and an inert rotation step is
+ * exactly what PR_GamecodeAvailable exists to prevent.  The second says which
+ * of the two state 0 will get, so the row can read "Loose" or "Pak" rather
+ * than making a claim about authorship it cannot support.  Both are recomputed
+ * per call and answer for progs.dat by proxy -- see their definitions. */
+qboolean PR_GamecodePakOnlyAvailable (void);
+qboolean PR_GamecodeLooseShadowsPak (void);
+
+/* Origin of the gamecode actually loaded -- "Raven 1.11", "hexenwail-2026-08-15",
+ * "hexenwail (undated)" or "Third-party" -- or NULL if PR_LoadProgs has not run
+ * in this process.  Our answer carries the gamecode's own date stamp, falling
+ * back to "hexenwail (undated)" for a build whose marker has no readable one;
+ * spelled out rather than left as a bare "hexenwail" because in the 8px menu
+ * font that scanned as the dated form and cost a field report (uhexen2-nt96).
+ * The NULL is the right answer on a client attached to someone else's server:
+ * the progs it is running was never loaded here.  Answers a different question
+ * from the ones above, which describe intent; a hand-copied progs.dat makes the
+ * two disagree.  uhexen2-8r3e. */
 const char *PR_GamecodeIdent (void);
 #endif
 

@@ -3837,7 +3837,7 @@ static const char *game_labels[GAME_ITEMS] = {
 	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
 	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
 	"Console Alpha :",	/* GAME_CONTRANS */
-	"Gamecode      :",	/* GAME_GAMECODE */
+	"Gamecode from :",	/* GAME_GAMECODE */
 };
 
 static qboolean M_Game_IsSkip (int i)
@@ -3941,8 +3941,29 @@ static void M_Game_AdjustSliders (int dir)
 
 	case GAME_GAMECODE:
 		/* Takes effect on the next new game, never mid-campaign -- see
-		 * PR_LatchGamecode.  uhexen2-vbnx. */
-		Cvar_SetValue ("sv_gamecode", Cvar_VariableValue("sv_gamecode") ? 0 : 1);
+		 * PR_LatchGamecode.  uhexen2-vbnx.
+		 *
+		 * A rotation, not a flip, and how far it rotates depends on the
+		 * install: state 2 (the pak copy specifically) is only a distinct
+		 * outcome where a loose file is hiding that copy.  Everywhere else
+		 * it resolves the identical file state 0 does, and stepping through
+		 * a setting that changes nothing is the inert control M_Game_IsSkip
+		 * hides the whole row to avoid.  uhexen2-nt96. */
+		{
+			int	states = PR_GamecodePakOnlyAvailable() ? 3 : 2;
+			int	v = (int)Cvar_VariableValue("sv_gamecode");
+
+			/* CVAR_ARCHIVE: the config may have come from an install with a
+			 * different answer above, or from a build that predates state 2.
+			 * Fold before rotating so the row cannot get stuck. */
+			if (v == 2 && states < 3)	v = 0;
+			else if (v != 0 && v != 2)	v = 1;
+
+			v = (v + dir) % states;
+			if (v < 0)
+				v += states;
+			Cvar_SetValue ("sv_gamecode", v);
+		}
 		break;
 	}
 }
@@ -4060,27 +4081,45 @@ static void M_Game_Draw (void)
 			ct == 0 ? "Opaque" : ct == 1 ? "Light" : "Clear");
 	}
 
+	/* Names WHERE the gamecode comes from, never whose it is.  The first cut
+	 * read "Classic" / "Updated", which is a claim about authorship, and it is
+	 * wrong on any install carrying a loose copy of OUR progs.dat in data1/ --
+	 * put there by the pre-bundle install instructions, and loaded by
+	 * "Classic".  A source is something this row can state truthfully every
+	 * time.  The value column starts at x=220 on a 320-unit canvas, so 12
+	 * characters; the longest of these is 7.  uhexen2-nt96. */
 	if (!M_Game_IsSkip(GAME_GAMECODE))
 	{
+		int		gc = (int)Cvar_VariableValue("sv_gamecode");
+		const char	*src;
+
+		if (gc == 2 && PR_GamecodePakOnlyAvailable())
+			src = "Pak";
+		else if (gc != 0 && gc != 2)
+			src = "Bundled";
+		else	/* state 0, and state 2 where it folds onto state 0 */
+			src = PR_GamecodeLooseShadowsPak() ? "Loose" : "Pak";
+
 		M_Print (76, 92 + 8*GAME_GAMECODE, game_labels[GAME_GAMECODE]);
-		M_PrintWhite (220, 92 + 8*GAME_GAMECODE,
-			Cvar_VariableValue("sv_gamecode") ? "Updated" : "Classic");
+		M_PrintWhite (220, 92 + 8*GAME_GAMECODE, src);
 	}
 
 	/* Status, not a control: no enum slot, no cursor stop, nothing to press.
-	 * The row above is the player's INTENT, and it can be wrong about what is
-	 * running -- a progs.dat hand-copied into the install's data1/ is loaded
-	 * by "Classic" and is ours.  This says which it actually got, and is drawn
-	 * whether or not the toggle above is (that one hides itself when no bundle
-	 * shipped, and a player in exactly that state still hand-copies).  NULL
-	 * until a map has loaded -- including on a client attached to a remote
-	 * server, where the answer is genuinely unknown -- and then the row is
-	 * simply absent rather than showing a placeholder.  uhexen2-8r3e. */
+	 * The row above names a SOURCE; this one names the author of what came out
+	 * of it, and the pair is only informative because the two can disagree --
+	 * a progs.dat hand-copied into the install's data1/ is loaded by "Loose"
+	 * and is ours.  Drawn whether or not the row above is (that one hides
+	 * itself when no bundle shipped, and a player in exactly that state still
+	 * hand-copies).  NULL until a map has loaded -- including on a client
+	 * attached to a remote server, where the answer is genuinely unknown --
+	 * and then the row is simply absent rather than showing a placeholder.
+	 * uhexen2-8r3e. */
 	/* One full-width line rather than the label/value pair every row above
 	 * uses.  "hexenwail-2026-08-15" is 20 characters and the value column
 	 * starts at x=220 on a canvas 320 units wide, which leaves room for 12 --
 	 * so in two columns the stamp would run off the right edge.  Left-aligned
-	 * at x=16 the whole string ends at 312 and fits. */
+	 * at x=16 the whole string ends at 312 and fits.  The other long form,
+	 * "hexenwail (undated)", is 19 and ends at 304 (uhexen2-nt96). */
 	{
 		const char	*ident = PR_GamecodeIdent();
 

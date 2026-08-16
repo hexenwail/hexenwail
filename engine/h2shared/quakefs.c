@@ -903,9 +903,19 @@ FS_OpenFile_Internal
 
 Internal function - finds the file in the search path, returns fs_filesize.
 If silent is true, suppresses error messages for missing files.
+
+If paks_only is true the directory entries are skipped and only pak members
+can satisfy the lookup.  FS_AddGameDirectory links a gamedir's bare directory
+entry ABOVE its pak entries on purpose (see the comment there), so a loose
+file permanently hides the pak copy of the same name; this is the only way to
+reach the copy underneath without moving the loose file out of the way.  A
+flag through the one loop rather than a second copy of it: the two searches
+must stay in step on case folding, hashing and the fs_filesize /
+file_from_pak / fs_lastfile_source state every caller reads afterwards.
+uhexen2-nt96.
 ===========
 */
-static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned int *path_id, qboolean silent)
+static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned int *path_id, qboolean silent, qboolean paks_only)
 {
 	searchpath_t	*search;
 	pack_t		*pak;
@@ -941,7 +951,7 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 				return fs_filesize;
 			}
 		}
-		else	/* check a file in the directory tree */
+		else if (!paks_only)	/* check a file in the directory tree */
 		{
 			q_snprintf (ospath, sizeof(ospath), "%s/%s",search->filename, filename);
 			fs_filesize = Sys_filesize (ospath);
@@ -1002,7 +1012,20 @@ Finds the file in the search path, returns fs_filesize.
 */
 long FS_OpenFile (const char *filename, FILE **file, unsigned int *path_id)
 {
-	return FS_OpenFile_Internal (filename, file, path_id, false);
+	return FS_OpenFile_Internal (filename, file, path_id, false, false);
+}
+
+/*
+===========
+FS_OpenFileInPak
+
+Same, but only pak members are considered.  Silent, because both callers
+report the miss themselves in terms the player can act on.
+===========
+*/
+static long FS_OpenFileInPak (const char *filename, FILE **file, unsigned int *path_id)
+{
+	return FS_OpenFile_Internal (filename, file, path_id, true, true);
 }
 
 /*
@@ -1016,7 +1039,7 @@ Use for optional file checks (e.g., external textures).
 */
 long FS_OpenFile_Silent (const char *filename, FILE **file, unsigned int *path_id)
 {
-	return FS_OpenFile_Internal (filename, file, path_id, true);
+	return FS_OpenFile_Internal (filename, file, path_id, true, false);
 }
 
 /*
@@ -1029,6 +1052,22 @@ Returns whether the file is found in the hexen2 filesystem.
 qboolean FS_FileExists (const char *filename, unsigned int *path_id)
 {
 	long ret = FS_OpenFile_Silent(filename, NULL, path_id);
+	return (ret < 0) ? false : true;
+}
+
+/*
+===========
+FS_FileExistsInPak
+
+Is there a copy of the file inside some pak on the search path, whether or
+not a loose file is currently hiding it?  Touches no directories, so it costs
+a few hash lookups and no syscalls -- ask it first when both questions are
+being asked.
+===========
+*/
+qboolean FS_FileExistsInPak (const char *filename, unsigned int *path_id)
+{
+	long ret = FS_OpenFileInPak(filename, NULL, path_id);
 	return (ret < 0) ? false : true;
 }
 
@@ -1244,6 +1283,22 @@ byte *FS_LoadHunkFileFromOSPath (const char *ospath)
 byte *FS_LoadHunkFile (const char *path, unsigned int *path_id)
 {
 	return FS_LoadFile (path, LOADFILE_HUNK, path_id);
+}
+
+byte *FS_LoadHunkFileFromPak (const char *path, unsigned int *path_id)
+{
+	FILE	*h;
+	long	len;
+
+	len = FS_OpenFileInPak (path, &h, path_id);
+	if (len < 0)
+		return NULL;
+
+	/* FS_OpenFileInPak has already left fs_filesize, file_from_pak and
+	 * fs_lastfile_source describing the pak member, exactly as FS_OpenFile
+	 * does for FS_LoadFile above -- PR_LoadProgs' provenance line reads all
+	 * three and must name the pak, not the loose file it stepped over. */
+	return FS_ReadIntoBuffer (h, path, LOADFILE_HUNK, len);
 }
 
 byte *FS_LoadZoneFile (const char *path, int zone_id, unsigned int *path_id)
