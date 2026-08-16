@@ -538,15 +538,20 @@ policy is already that every divergence gets a dated README entry, so the build
 fails at exactly the moment a change is recorded without restamping.
 
 The same string appears in Game Options as a read-only `Gamecode loaded:` row
-beneath the `Gamecode:` toggle. It is drawn as one full-width line rather than
-the label/value pair the rows above use: the value column starts at x=220 on a
-320-unit canvas, which leaves 12 characters, and `hexenwail-2026-08-15` is 20.
+beneath the `Gamecode from :` row. It is drawn as one full-width line rather
+than the label/value pair the rows above use: the value column starts at x=220
+on a 320-unit canvas, which leaves 12 characters, and `hexenwail-2026-08-15`
+is 20.
 
-The toggle is the player's *intent* and can disagree
-with reality: a `progs.dat` hand-copied into the install's `data1/` — the
-pre-bundle install method above — is loaded by the "Classic" setting and is
-ours. The row is absent until a map has loaded, which is also the honest answer
-on a client attached to someone else's server.
+The two rows answer different questions, and the pair is only informative
+because they can disagree: the row above names a *source* and this one names
+the author of what came out of it. A `progs.dat` hand-copied into the install's
+`data1/` — the pre-bundle install method above — is loaded by the `Loose`
+setting and is ours. (The source row used to read `Classic` / `Updated`, i.e.
+to name an author itself, which on that install was simply false; see
+[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md#three-states-named-for-a-place).)
+This row is absent until a map has loaded, which is also the honest answer on a
+client attached to someone else's server.
 
 Field context: Tome of Power Abuser pulled r11 expecting the backpack fix and
 asked why there is still a bug and no `progs.dat` in the zip. `uhexen2-zmb3`
