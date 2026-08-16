@@ -62,13 +62,22 @@ count in a closing sentence instead:
 
 ## Badges
 
-Release body — one per shipped asset, `<TAG>` substituted throughout:
+Release body — one per shipped asset, `<TAG>` substituted in the `href`:
 
 ```html
-<a href="https://github.com/hexenwail/hexenwail/releases/download/<TAG>/hexenwail-<TAG>-windows-x86_64.zip">![Download Windows build](https://img.shields.io/github/downloads/hexenwail/hexenwail/<TAG>/hexenwail-<TAG>-windows-x86_64.zip?color=blue&label=Windows%20x86_64&logo=windows&style=for-the-badge)</a>
-<a href="https://github.com/hexenwail/hexenwail/releases/download/<TAG>/hexenwail-<TAG>-linux-x86_64.zip">![Download Linux build](https://img.shields.io/github/downloads/hexenwail/hexenwail/<TAG>/hexenwail-<TAG>-linux-x86_64.zip?color=8A9A5B&label=Linux%20x86_64&style=for-the-badge)</a>
-<a href="https://github.com/hexenwail/hexenwail/releases/download/<TAG>/hexenwail-<TAG>.flatpak">![Download Flatpak](https://img.shields.io/github/downloads/hexenwail/hexenwail/<TAG>/hexenwail-<TAG>.flatpak?color=4A90D9&label=Flatpak&logo=flatpak&style=for-the-badge)</a>
+<a href="https://github.com/hexenwail/hexenwail/releases/download/<TAG>/hexenwail-<TAG>-windows-x86_64.zip">![Download Windows build](https://img.shields.io/badge/%E2%AC%87_Windows_x86__64-blue?style=for-the-badge&logo=windows&logoColor=white)</a>
+<a href="https://github.com/hexenwail/hexenwail/releases/download/<TAG>/hexenwail-<TAG>-linux-x86_64.zip">![Download Linux build](https://img.shields.io/badge/%E2%AC%87_Linux_x86__64-8A9A5B?style=for-the-badge)</a>
+<a href="https://github.com/hexenwail/hexenwail/releases/download/<TAG>/hexenwail-<TAG>.flatpak">![Download Flatpak](https://img.shields.io/badge/%E2%AC%87_Flatpak-4A90D9?style=for-the-badge&logo=flatpak&logoColor=white)</a>
 ```
+
+**Static badges, not `github/downloads` count badges.** These used to be
+shields' download-count endpoint, which renders the tally for that one tag's
+asset. On a release's first hours that is `0` on all three, so the buttons read
+as broken at exactly the moment the most people click them — and the count is
+per-tag, so it never accumulates into a number worth showing anyway. The label
+is the whole job of the button. Note shields' own escaping in the static form:
+a literal `_` doubles (`x86__64`) and `_` renders as a space, which is why the
+text reads `⬇ Windows x86_64`.
 
 Colors are not free choices:
 
