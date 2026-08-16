@@ -504,8 +504,17 @@ version and whole-file CRC. That line is now what the release notes and
 Gamecode: progs.dat from …/data1/PROGS.DAT   (H2/v1.11,  file crc 17499) -- Raven 1.11
 Gamecode: progs.dat from …/portals/progs.dat (H2MP/v1.12, file crc 20799) -- Raven 1.12a
 Gamecode: progs.dat from …/share/hexenwail/data1/progs.dat (H2/v1.11, file crc 49692) -- hexenwail-2026-08-15
+Gamecode: progs.dat from …/data1/progs.dat   (H2/v1.11,  file crc 24008) -- hexenwail (undated)
 Gamecode: progs.dat from …/karma2/progs.dat  (H2MP/v1.12, file crc 22850) -- Third-party
 ```
+
+That third-from-last line is the one that cost a field report: a copy of *our*
+gamecode hand-copied into the install's own `data1/` under the pre-bundle
+install instructions, loading from a path indistinguishable from Raven's.
+`uhexen2-bflw` now follows it with an explicit warning naming the file, and
+`uhexen2-nt96` renamed the menu's source row so it no longer claims to know
+whose code that is. Both are written up in
+[BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md#three-states-named-for-a-place).
 
 Raven is matched on the three retail whole-file CRCs, which are fixed forever.
 Ours is matched on `HexenwailGamecode_YYYYMMDD`, a marker function every tree
@@ -515,9 +524,11 @@ it, while function names always survive. That is also why the date rides in the
 name: the one form that could hold a value is the one that loses its name. It
 perturbs neither the entity field table nor the progdefs CRC; see that file for
 why. Older builds of ours, which predate the marker, still identify through a
-`BadBackpackDump` fallback, and degrade to a bare `hexenwail` with no date — as
-does any stamp that fails to parse, since printing part of an unrecognised tail
-as a date would be a confident lie.
+`BadBackpackDump` fallback, and degrade to `hexenwail (undated)` — as does any
+stamp that fails to parse, since printing part of an unrecognised tail as a
+date would be a confident lie. The word is spelled out rather than left as a
+bare `hexenwail`, which is how it first shipped: at the 8px menu font the short
+form and `hexenwail-2026-08-15` scan as the same string (`uhexen2-nt96`).
 
 **The date is a source constant, restamped by hand.** A build timestamp would
 end `.#gamecode`'s bit-reproducibility. Two `checkPhase` gates hold it honest:

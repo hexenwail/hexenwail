@@ -663,11 +663,39 @@ static gefv_cache	gefvCache[GEFV_CACHESIZE] =
 
 cvar_t	max_temp_edicts = {"max_temp_edicts", "30", CVAR_ARCHIVE};
 
+/* The gamecode filename, absent a maplist.txt override.  Up here rather than
+ * beside PR_GetProgFilename() because the gamecode-source predicates below
+ * need it too, and they must not call PR_GetProgFilename() itself -- see
+ * PR_GamecodePakOnlyAvailable. */
 #if !defined(H2W)
-/* Which gamecode to run when a bundled copy is available: 0 = Classic, the
- * progs.dat that shipped with the player's install (Raven's), 1 = Updated,
- * the one built from this tree.  Default 1, which is what the engine did
- * before this existed.
+static const char def_progname[] = "progs.dat";
+#else
+static const char def_progname[] = "hwprogs.dat";
+#endif
+
+#if !defined(H2W)
+/* WHERE the gamecode about to load should come from.  The three states name a
+ * SOURCE, not an author, and that is the whole point of the naming: the first
+ * cut called 0 "Classic" and 1 "Updated", which is a claim about whose code
+ * runs, and it is false on any install that has a loose copy of OURS sitting in
+ * data1/ -- the pre-bundle install method under uhexen2-8qp3 told players to
+ * put it there, and one such install is what filed uhexen2-nt96.  "Classic"
+ * there loads Hexenwail gamecode and the menu said so with a straight face.
+ * A source is something the engine can state truthfully in every case.
+ *
+ *   GAMECODE_INSTALL (0) -- whatever the install's own gamedir resolves to.
+ *                           Loose file if one is there, the pak copy if not;
+ *                           the menu reads back which of the two it is.
+ *   GAMECODE_BUNDLE  (1) -- the copy shipped beside the engine.  Default,
+ *                           which is what the engine did before any of this.
+ *   GAMECODE_PAKONLY (2) -- the pak copy specifically, stepping over a loose
+ *                           file that would otherwise hide it.  Offered only
+ *                           where something IS hiding it, because everywhere
+ *                           else it resolves the identical file state 0 does.
+ *
+ * 0 and 1 keep the meanings they were written with, so a config from an older
+ * build still says what it always said.  2 is new; it was a synonym for 1
+ * before (any nonzero meant "bundle"), which nothing shipped ever wrote.
  *
  * PR_BundledProgsPath's -vanillaprogs comment argued against ever making this
  * a cvar, on two grounds.  The first still stands and is handled below by
@@ -676,7 +704,11 @@ cvar_t	max_temp_edicts = {"max_temp_edicts", "30", CVAR_ARCHIVE};
  * CVAR_ARCHIVE writes an engine-packaging decision into the player's config --
  * no longer applies now that it is a deliberate player choice with a menu
  * entry rather than something the packager decided for them.  -vanillaprogs
- * still wins outright over both. */
+ * still wins outright over all three. */
+#define	GAMECODE_INSTALL	0
+#define	GAMECODE_BUNDLE		1
+#define	GAMECODE_PAKONLY	2
+
 cvar_t	sv_gamecode = {"sv_gamecode", "1", CVAR_ARCHIVE};
 
 /* The latched copy.  -1 means "never latched", in which case the cvar is read
@@ -687,6 +719,22 @@ static int	pr_gamecode_latched = -1;
 /* Defined down with the rest of the bundle lookup; needed here by
  * PR_GamecodeAvailable. */
 static const char *PR_FindBundleDir (void);
+
+/*
+===============
+PR_GamecodeWanted
+
+The cvar's raw integer folded onto one of the three states.  Anything else
+nonzero is GAMECODE_BUNDLE: that is what every nonzero value meant while this
+was a boolean, and a config carrying one predates the third state.
+===============
+*/
+static int PR_GamecodeWanted (int raw)
+{
+	if (raw == GAMECODE_PAKONLY)
+		return GAMECODE_PAKONLY;
+	return (raw != 0) ? GAMECODE_BUNDLE : GAMECODE_INSTALL;
+}
 
 /*
 ===============
@@ -719,21 +767,64 @@ path compares them.  uhexen2-lrjk.
 */
 void PR_LatchGamecode (void)
 {
-	pr_gamecode_latched = (sv_gamecode.integer != 0);
+	/* The player's raw intent, not the folded-for-this-install answer: the
+	 * fold below depends on the searchpath, which Host_Game_f can change
+	 * under a running session, so it is recomputed at every read rather
+	 * than frozen here alongside the choice. */
+	pr_gamecode_latched = PR_GamecodeWanted (sv_gamecode.integer);
+}
+
+/*
+===============
+PR_GamecodeState
+
+The latched state, or the cvar if nothing has latched yet, folded onto what
+this install can actually offer.
+
+The fold is not cosmetic.  sv_gamecode is CVAR_ARCHIVE, so a config written on
+an install where a loose progs.dat shadows a pak copy gets read on one where
+nothing shadows anything -- and there GAMECODE_PAKONLY names the same file
+GAMECODE_INSTALL does.  Collapsing the two keeps a setting that arrived from
+somewhere else from being a state the menu will not show and the loader would
+have to fail its way out of.
+===============
+*/
+static int PR_GamecodeState (void)
+{
+	int	state = (pr_gamecode_latched < 0)
+			? PR_GamecodeWanted (sv_gamecode.integer)
+			: pr_gamecode_latched;
+
+	if (state == GAMECODE_PAKONLY && !PR_GamecodePakOnlyAvailable())
+		return GAMECODE_INSTALL;
+	return state;
 }
 
 /*
 ===============
 PR_GamecodeIsUpdated
 
-The latched answer, or the cvar if nothing has latched yet.
+Should the bundle substitute?  GAMECODE_BUNDLE and nothing else: the other two
+states both load the install's own file, they only disagree about which of the
+install's copies.  Deliberately not widened to "not GAMECODE_INSTALL" -- every
+caller of this is asking about the bundle specifically.
 ===============
 */
 qboolean PR_GamecodeIsUpdated (void)
 {
-	if (pr_gamecode_latched < 0)
-		return (sv_gamecode.integer != 0);
-	return (pr_gamecode_latched != 0);
+	return (PR_GamecodeState() == GAMECODE_BUNDLE);
+}
+
+/*
+===============
+PR_GamecodeIsPakOnly
+
+Should the loader step over a loose progs.dat and take the pak copy?
+===============
+*/
+qboolean PR_GamecodeIsPakOnly (void)
+{
+	return (PR_GamecodeState() == GAMECODE_PAKONLY);
 }
 
 /*
@@ -759,11 +850,98 @@ qboolean PR_GamecodeAvailable (void)
 	return (PR_FindBundleDir() != NULL);
 }
 
+/*
+===============
+PR_GamecodeLooseShadowsPak
+
+Is the gamecode the install would hand us a LOOSE file that is hiding a pak
+copy of the same name?  This is what lets GAMECODE_INSTALL read back as
+"Loose" or "Pak" instead of naming an author it cannot vouch for, which is the
+mistake uhexen2-nt96 was filed against.
+
+Asks about def_progname rather than PR_GetProgFilename().  Two reasons, both
+about the menu, which is the only caller that draws this every frame:
+
+  - PR_GetProgFilename() opens and parses maplist.txt, and its answer depends
+    on sv.name, so the row's reading would change as the player crossed into
+    one of the ten data1 maps that pull progs2.dat.  A control that describes
+    itself differently depending on which map you last loaded is the flicker
+    PR_GamecodeAvailable's comment refuses.
+  - It leaves file_from_pak and fs_lastfile_source describing maplist.txt,
+    which is exactly the state this function reads back.
+
+progs2.dat is therefore answered for by proxy.  Safe in both directions: the
+loader's own paks-only attempt is generic over progname and falls back with a
+message if the proxy was optimistic.
+===============
+*/
+qboolean PR_GamecodeLooseShadowsPak (void)
+{
+	/* Pak members first: pure hash lookups, no syscalls, and a no means the
+	 * question is settled without touching a directory. */
+	if (!FS_FileExistsInPak (def_progname, NULL))
+		return false;
+	if (!FS_FileExists (def_progname, NULL))
+		return false;			/* no gamecode at all */
+	return (file_from_pak == 0);
+}
+
+/*
+===============
+PR_GamecodePakOnlyAvailable
+
+Is GAMECODE_PAKONLY worth offering, i.e. would it reach a different file from
+GAMECODE_INSTALL?  Where nothing shadows the pak copy the two are byte for
+byte the same load, and a rotation step that changes nothing is the inert
+control PR_GamecodeAvailable exists to avoid.
+
+Two conditions on top of the shadowing test:
+
+  - -vanillaprogs outranks every state, so with it set the row can only ever
+    describe the one thing that happens.
+  - The shadowed file must belong to the base game.  A mod's own progs.dat is
+    a loose file shadowing data1's pak copy by this test's letter, and taking
+    the pak copy there would run Raven's gamecode under a mod that never
+    asked for it.  This is PR_BundledProgsPath's condition 1 and it is needed
+    for the same reason.
+
+Its condition 2 (fs_gamedir_nopath must name that same gamedir) is NOT
+repeated, because the hole it plugs does not exist here.  There the bundle is
+found by gamedir NAME, so a nopath that disagrees with path_id picks the wrong
+bundle; here the paks-only search resolves the same progname through the same
+searchpath and cannot address the wrong file.  Leaving it out also keeps this
+answer from moving when the player enters a map pack that ships no gamecode --
+data1's file still loads, and stepping over a loose one is still meaningful.
+===============
+*/
+qboolean PR_GamecodePakOnlyAvailable (void)
+{
+	unsigned int	path_id, portals_id;
+
+	if (COM_CheckParm("-vanillaprogs"))
+		return false;
+	if (!PR_GamecodeLooseShadowsPak())
+		return false;
+
+	/* PR_GamecodeLooseShadowsPak just resolved this; ask again only for the
+	 * path_id it did not return. */
+	if (!FS_FileExists (def_progname, &path_id))
+		return false;
+	portals_id = FS_GetPortalsPathID();
+	if (path_id != 1U && !(portals_id && path_id == portals_id))
+		return false;			/* a mod owns this file */
+
+	return true;
+}
+
 /* WHOSE gamecode is loaded, as opposed to WHICH FILE it came from.  The two
  * are independent and both are needed: sv_gamecode and the bundle decide the
  * file, but a player who hand-copied our progs.dat into the install's data1/
  * -- the pre-bundle install method releases documented under uhexen2-8qp3 --
- * gets our code out of the "Classic" setting, and nothing said so.  NULL until
+ * gets our code out of the install's own gamedir, and nothing said so.  It is
+ * why the menu row above stopped claiming to name an author at all
+ * (uhexen2-nt96) and why PR_LoadProgs warns about the disagreement outright
+ * (uhexen2-bflw); this string is the third leg of the same answer.  NULL until
  * PR_LoadProgs() has run, which is also the honest answer on a client
  * connected to someone else's server: that progs was never loaded here.
  * uhexen2-8r3e. */
@@ -806,7 +984,13 @@ own name, giving "hexenwail-2026-08-15".  The whole-file CRC on the same line is
 the exact revision and the date is not a substitute for it -- but a CRC is not
 something a player can hold in their head or recognise as older than another,
 and this is the string testers are asked to read back.  A stamp that fails to
-parse degrades to the bare name rather than printing a malformed date.
+parse degrades to "hexenwail (undated)" rather than printing a malformed date.
+
+The word "undated" is spelled out because the first cut said just "hexenwail",
+and the menu draws this at 8px: next to "hexenwail-2026-08-15" the short form
+reads as the same string at a glance.  A reporter on a build with no stamp
+flipped the source row back and forth, saw the row below apparently not move,
+and concluded the control was broken.  uhexen2-nt96.
 
 Anything unrecognised reads as third-party rather than as Raven: the retail
 list covers the three files a retail install has, and the mods measured in the
@@ -872,7 +1056,7 @@ static const char *PR_ClassifyGamecode (void)
 			/* "_YYYYMMDD" and nothing else.  Anything shorter, longer or
 			 * non-numeric is a name this engine does not understand, and
 			 * printing part of it as a date would be a confident lie --
-			 * so an unparseable tail degrades to the bare name. */
+			 * so an unparseable tail degrades to the undated form. */
 			if (stamp[0] == '_' && strlen(stamp) == 9 &&
 			    strspn(stamp + 1, "0123456789") == 8)
 			{
@@ -880,7 +1064,7 @@ static const char *PR_ClassifyGamecode (void)
 					    stamp + 1, stamp + 5, stamp + 7);
 				return ident;
 			}
-			return "hexenwail";
+			return "hexenwail (undated)";
 		}
 	}
 
@@ -890,7 +1074,7 @@ static const char *PR_ClassifyGamecode (void)
 	 * files -- the B8 verification row is exactly this test, run offline with
 	 * qcdis.py.  Drop this once no such build is in the field. */
 	if (ED_FindFunctioni ("BadBackpackDump") != NULL)
-		return "hexenwail";
+		return "hexenwail (undated)";
 
 	return "Third-party";
 }
@@ -2199,11 +2383,6 @@ return the correct progs filename based on map name
 by parsing maplist.txt
 ===============
 */
-#if !defined(H2W)
-static const char def_progname[] = "progs.dat";
-#else
-static const char def_progname[] = "hwprogs.dat";
-#endif
 static const char *PR_GetProgFilename (void)
 {
 #if !USE_MULTIPLE_PROGS
@@ -2470,7 +2649,11 @@ static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t out
 		return false;
 
 	/* The player's choice, latched at new-game time so a campaign cannot
-	 * change gamecode between its own levels.  See sv_gamecode. */
+	 * change gamecode between its own levels.  See sv_gamecode.  False for
+	 * BOTH of the other two states: neither GAMECODE_INSTALL nor
+	 * GAMECODE_PAKONLY wants the bundle, they differ only in which of the
+	 * install's own copies they take, and that choice is made in
+	 * PR_LoadProgs where the load actually happens. */
 	if (!PR_GamecodeIsUpdated())
 		return false;
 
@@ -3030,9 +3213,45 @@ void PR_LoadProgs (void)
 				progs = NULL;
 			}
 		}
+		else if (PR_GamecodeIsPakOnly ())
+		{
+			/* GAMECODE_PAKONLY.  Mutually exclusive with the bundle by
+			 * construction -- PR_GamecodeState returns one state -- so the
+			 * else is exhaustive rather than a priority.
+			 *
+			 * Generic over progname on purpose: whatever PR_GetProgFilename()
+			 * settled on above is what gets looked up, so a data1 map that
+			 * pulled progs2.dat via maplist.txt takes progs2.dat out of the
+			 * pak, not progs.dat.  Nothing here knows or needs to know which
+			 * file it is holding.
+			 *
+			 * Surrenders the same way the bundle does above: this state
+			 * exists to reach a copy the player already has, so a pak that
+			 * turns out not to hold one, or to hold a damaged one, falls back
+			 * to normal resolution rather than refusing to start the map.
+			 * Said out loud for the same reason -- the menu offered this and
+			 * a silent no-op would look like the menu lying again.
+			 * uhexen2-nt96. */
+			const char	*bad;
+
+			progs = (dprograms_t *) FS_LoadHunkFileFromPak (progname, NULL);
+			if (!progs)
+				bad = "no pak on the search path holds it";
+			else
+				bad = PR_CheckProgsExtents (progs, fs_filesize);
+
+			if (bad)
+			{
+				Con_Printf ("Ignoring pak-only %s: %s\n", progname, bad);
+				Hunk_FreeToLowMark (hunkmark);
+				progs = NULL;
+			}
+		}
 	}
 #endif
-	if (!progs)	/* no bundle, gate declined, or the bundled file was unusable */
+	/* Normal resolution: no bundle, a gate declined, or one of the two
+	 * special sources above was asked for and could not deliver. */
+	if (!progs)
 		progs = (dprograms_t *)FS_LoadHunkFile (progname, NULL);
 	if (!progs)
 		Host_Error ("%s: couldn't load %s", __thisfunc__, progname);
@@ -3169,10 +3388,10 @@ void PR_LoadProgs (void)
 	 *
 	 * uhexen2-8r3e appends WHOSE code it is.  The path answers "which file",
 	 * which is not the same question: our progs.dat hand-copied into the
-	 * install's data1/ loads from a path indistinguishable from Raven's, and
-	 * reads as "Classic" in the menu while running our fixes.  Extended in
-	 * place rather than printed as a second line because this one is already
-	 * what the release notes and gamecode/README ask bug reporters to paste. */
+	 * install's data1/ loads from a path indistinguishable from Raven's while
+	 * running our fixes.  Extended in place rather than printed as a second
+	 * line because this one is already what the release notes and
+	 * gamecode/README ask bug reporters to paste. */
 	{
 		static char	lastreport[MAX_OSPATH + MAX_QPATH + 64];
 		char		report[MAX_OSPATH + MAX_QPATH + 64];
@@ -3192,6 +3411,32 @@ void PR_LoadProgs (void)
 		{
 			q_strlcpy (lastreport, report, sizeof(lastreport));
 			Con_Printf ("%s", report);
+#if !defined(H2W)
+			/* The line above states the fact; a reporter has to know the
+			 * ident strings to see the contradiction in it.  Say it plainly
+			 * when the player asked for their install's own gamecode and got
+			 * ours: that means a loose copy of ours is sitting in the game
+			 * directory, put there by the pre-bundle install instructions
+			 * (uhexen2-8qp3), and no setting in this engine can get past it
+			 * -- FS_AddGameDirectory ranks a gamedir's loose files above its
+			 * own paks, so the retail file underneath is unreachable while
+			 * that one is there.  Naming the resolved path is the whole
+			 * value: the remedy is a file operation and the player needs to
+			 * know which file.
+			 *
+			 * Inside the repeat guard so it keeps the provenance line's
+			 * once-per-session cadence rather than shouting at every map
+			 * spawn.  Prefix-matched because the ident carries a date stamp
+			 * that moves every time the gamecode is rebuilt.  uhexen2-bflw. */
+			if (!PR_GamecodeIsUpdated() &&
+			    !strncmp (pr_gamecode_ident, "hexenwail", 9))
+			{
+				Con_Printf ("WARNING: gamecode source is set to the game's own file, but\n");
+				Con_Printf ("  %s\n", (progsource[0]) ? progsource : "the file that loaded");
+				Con_Printf ("is Hexenwail gamecode, not your install's original.\n");
+				Con_Printf ("Remove or rename it to get Raven's.\n");
+			}
+#endif
 		}
 	}
 

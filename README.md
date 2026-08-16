@@ -102,7 +102,7 @@ Planned:
 - Mods menu (up to 128 entries, scrollable with PgUp/PgDn/Home/End/mousewheel), per-mod config, portals data toggle
 - Per-liquid alpha (`r_wateralpha`, `r_lavaalpha`, `r_slimealpha`, `r_telealpha`) + `r_turbalpha` catch-all for custom-named mod liquids
 - TrueLightning (`cl_truelightning`)
-- Ships its own rebuilt `progs.dat`/`progs2.dat`/`portals/progs.dat` beside the executable and prefers it to your Hexen II install's copy — nothing is copied or overwritten on either platform, `-vanillaprogs` opts back out to Raven's 1997 gamecode, and a mod's own `progs.dat` (or anything you place in `~/.hexen2`) always wins over ours. See `gamecode/README.txt`.
+- Ships its own rebuilt `progs.dat`/`progs2.dat`/`portals/progs.dat` beside the executable and prefers it to your Hexen II install's copy — nothing is copied or overwritten on either platform, and a mod's own `progs.dat` (or anything you place in `~/.hexen2`) always wins over ours. **Options → Game → Gamecode from** picks the source by *place*: `Bundled`, `Loose` (your install's own gamedir) or `Pak` (the pak copy specifically, offered when a loose file is shadowing it). `-vanillaprogs` outranks all three and opts back out to Raven's 1997 gamecode. The console names both the file and whose code it turned out to be at every map load. See `gamecode/README.txt`.
 - Mods can add their own rows to the Key Setup menu via `bindlist.lst`, merged alongside the engine's own key bindings
 
 ### Audio

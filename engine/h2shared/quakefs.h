@@ -106,6 +106,14 @@ qboolean FS_FileExists (const char *filename, unsigned int *path_id);
 	/* Returns whether the file is found in the hexen2 filesystem.  if path_id is
 	 * not NULL, the id number of the found file's gamedir is stored in path_id. */
 
+qboolean FS_FileExistsInPak (const char *filename, unsigned int *path_id);
+	/* Same question asked of pak members only, so it still answers yes when a
+	 * loose file of that name is hiding the pak copy -- FS_AddGameDirectory
+	 * ranks a gamedir's directory entry above its own paks.  Reads no
+	 * directories, so it is the cheap half of "is something shadowing this?".
+	 * Like every lookup here it overwrites fs_filesize, file_from_pak and
+	 * FS_LastFileSource().  uhexen2-nt96.  */
+
 const char *FS_LastFileSource (void);
 	/* OS path of the searchpath entry that satisfied the most recent lookup:
 	 * the pak file the entry lives in, or the loose file itself.  Empty after
@@ -183,6 +191,10 @@ byte *FS_LoadTempFile (const char *path, unsigned int *path_id);
 	/* allocates the buffer on the temp hunk.  */
 byte *FS_LoadHunkFile (const char *path, unsigned int *path_id);
 	/* allocates the buffer on the hunk.  */
+byte *FS_LoadHunkFileFromPak (const char *path, unsigned int *path_id);
+	/* as FS_LoadHunkFile, but only pak members can satisfy the lookup: a
+	 * loose file of the same name is stepped over rather than preferred.
+	 * NULL if no pak on the path holds it.  */
 byte *FS_LoadMallocFile (const char *path, unsigned int *path_id);
 	/* allocates the buffer on the system mem (malloc).  */
 byte *FS_LoadStackFile (const char *path, void *buffer, long bufsize,

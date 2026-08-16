@@ -379,6 +379,9 @@ Where to read the code this section argues for:
 | resolving `<exedir>` | `sys_exedir.c :: Sys_GetExeDir()` |
 | the opt-out | `-vanillaprogs`, checked in `PR_BundledProgsPath()` |
 | the startup provenance line | the `Gamecode:` print, `uhexen2-zixe` / `f619026e1` |
+| the player-facing source choice | `sv_gamecode`, three states — `pr_edict.c :: PR_GamecodeState()` |
+| the paks-only third state | `pr_edict.c :: PR_GamecodeIsPakOnly()`, via `FS_LoadHunkFileFromPak()` |
+| whether that state is worth offering | `pr_edict.c :: PR_GamecodePakOnlyAvailable()` |
 
 Four reasons it was chosen, in weight order:
 
@@ -446,6 +449,12 @@ static qboolean PR_BundledProgsPath (const char *progname,
 and the `portals` arm is the same shape with `"portals"` on both sides — its
 `path_id` being the one `portals` was assigned, and `fs_gamedir_nopath` reading
 `"portals"`.
+
+The shipped version has one more early-out than the sketch: the player's choice,
+`if (!PR_GamecodeIsUpdated()) return false;`. That is false for **both** of the
+other two `sv_gamecode` states — neither of them wants the bundle, they differ
+only in which of the *install's* copies they take, and that decision is made in
+`PR_LoadProgs()` where the load happens rather than here.
 
 Note the ordering: **`FS_FileExists` is asked first and its answer is used**,
 rather than assuming where the file lives. That is what makes the predicate
@@ -567,6 +576,72 @@ are **three** such tables, not four: `engine/hexen2/sys_unix.c :: help_strings[]
 `engine/hexen2/server/sys_unix.c :: help_strings[]` and `engine/hexen2/server/sys_win.c :: help_strings[]`.
 `engine/hexen2/sys_win.c` is a `WinMain` GUI entry point with no `help_strings`
 and no `PrintHelp` — nothing to add there.
+
+### `sv_gamecode` — the cvar that happened anyway
+
+`uhexen2-vbnx` added the cvar this section argues against, and the argument
+above survives only half intact. The mid-campaign objection stands and is what
+`PR_LatchGamecode()` exists for: the value is frozen at *new game* and read from
+the latch thereafter, so `changelevel` and savegame loads cannot move it. The
+`CVAR_ARCHIVE` objection does not survive: it is no longer a packaging decision
+leaking into the player's config, it is a player's own choice with a menu row.
+`-vanillaprogs` still outranks it outright, and stays command-line only.
+
+### Three states, named for a place
+
+`uhexen2-nt96` widened it from a toggle to three, and renamed the labels:
+
+| `sv_gamecode` | Menu reads | Loads |
+| --- | --- | --- |
+| `1` (default) | `Bundled` | the copy beside the engine |
+| `0` | `Loose` **or** `Pak` | the install's own gamedir, whatever normally resolves — the label says which of the two it turned out to be |
+| `2` | `Pak` | the pak copy specifically, stepping over a loose file that would otherwise hide it |
+
+**Why the rename.** The first cut read `Classic` / `Updated`, which names *whose*
+code runs. That is a claim the engine cannot honour: `FS_AddGameDirectory()`
+links a gamedir's bare directory entry **above** its own pak entries on purpose,
+so a loose `data1/progs.dat` permanently hides retail's `PROGS.DAT` inside
+`pak0.pak` — and the pre-bundle install instructions (`uhexen2-8qp3`) told
+players to put exactly our `progs.dat` exactly there. On such an install
+`Classic` loaded *Hexenwail* gamecode, and the menu asserted otherwise. A field
+report arrived from one: file crc `24008`, our own former bundle build, sitting
+loose in `data1/`. A *source* is something the engine can state truthfully in
+every configuration; an author is not.
+
+**Why a third state rather than a warning alone.** On that install there was no
+way to reach Raven's gamecode short of deleting a file by hand. State `2` is the
+in-engine remedy; `FS_LoadHunkFileFromPak()` is `FS_OpenFile_Internal()` with the
+directory branch skipped, which is the only way past a loose file that does not
+involve moving it.
+
+**Why it is not always offered.** Where nothing shadows the pak copy, state `2`
+resolves the identical file state `0` does, and a rotation step that changes
+nothing is the inert control `PR_GamecodeAvailable()`'s own comment refuses.
+`PR_GamecodePakOnlyAvailable()` gates it on a loose file *and* a pak copy both
+existing for the base game's gamecode; the menu rotation is 3-way when that
+holds and a 2-way flip otherwise. Because `sv_gamecode` is `CVAR_ARCHIVE`, a
+config carrying `2` will eventually be read on an install where it does not
+hold — `PR_GamecodeState()` folds it back onto `0` there rather than leaving a
+setting the menu will not show.
+
+That predicate deliberately asks about `progs.dat` rather than calling
+`PR_GetProgFilename()`: that function parses `maplist.txt` and its answer
+depends on `sv.name`, so the row would re-read itself on the ten `data1` maps
+that pull `progs2.dat`, and it would leave the `file_from_pak` /
+`fs_lastfile_source` state describing `maplist.txt` — which is what the
+predicate reads back. The **load** path is generic over `progname` and is
+handed whatever `PR_GetProgFilename()` settled on, so `progs2.dat` is served
+correctly; only the menu's offer/label decision is answered by proxy. If the
+proxy was optimistic, the paks-only load falls back to normal resolution with a
+`Con_Printf`, the same surrender the bundle makes when its own file is
+unusable.
+
+**And the warning too.** `uhexen2-bflw`: when the player asked for the install's
+own file and `PR_ClassifyGamecode()` says what loaded is ours, `PR_LoadProgs()`
+says so outright and names the resolved path, because the remedy is a file
+operation and the player needs to know which file. It rides inside the
+provenance line's existing repeat guard, so it is once per session rather than
+once per map spawn.
 
 ## Bundle location
 
@@ -920,12 +995,21 @@ this paragraph.
 
 **Reading a crc is no longer how you tell whose gamecode it is.** That churn is
 exactly why `uhexen2-8r3e` stopped depending on it: the `Gamecode:` line now
-ends in `Raven 1.11` / `Raven 1.12a` / `hexenwail-<date>` / `Third-party`, and
-the hexenwail answer comes from a marker function the gamecode carries
+ends in `Raven 1.03` / `Raven 1.11` / `Raven 1.12a` / `Raven` /
+`hexenwail-<date>` / `hexenwail (undated)` / `Third-party`, and the hexenwail
+answer comes from a marker function the gamecode carries
 (`gamecode/hc/<tree>/ident.hc`), not from a number that moves. Only the three
 retail crcs above are still matched literally, and those were fixed in 1997.
 The numbers in this table remain useful for telling two *builds of ours* apart,
 which is what a bug report needs.
+
+`hexenwail (undated)` covers a build whose marker is missing its `_YYYYMMDD`
+tail, whose tail does not parse, or which predates the marker entirely and is
+recognised through the legacy `BadBackpackDump` fallback. It reads as a
+sentence rather than a bare `hexenwail` because that is how it shipped first,
+and at the 8px menu font a bare `hexenwail` and a `hexenwail-2026-08-15` scan
+as the same string — a reporter flipped the source row, saw the status row
+apparently not move, and filed the control as broken (`uhexen2-nt96`).
 
 | # | Verdict | What was observed |
 |---|---|---|
