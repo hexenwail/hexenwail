@@ -109,10 +109,10 @@ sleep 10
 shot()  { sleep 2; import -window root "$OUT/$1.png" 2>/dev/null; echo "  shot $1"; }
 key()   { xdotool key --clearmodifiers "$1"; sleep 0.7; }
 keyn()  { for _ in $(seq 1 "$2"); do xdotool key --clearmodifiers "$1"; sleep 0.5; done; }
-typ()   { xdotool type --clearmodifiers --delay 40 "$1"; sleep 0.4; xdotool key Return; sleep 0.8; }
-# type without submitting, and wipe the line back to the prompt -- needed to
-# test TAB, where pressing Return would run whatever just got completed
+# type without submitting -- needed to test TAB, where pressing Return would
+# run whatever just got completed
 typn()  { xdotool type --clearmodifiers --delay 40 "$1"; sleep 0.5; }
+typ()   { typn "$1"; xdotool key Return; sleep 0.8; }
 # End first: the cursor can be mid-line (that is the point of the TAB splice
 # tests) and BackSpace only eats backwards, so without it the tail survives
 # into the next case and every later shot carries stale text.

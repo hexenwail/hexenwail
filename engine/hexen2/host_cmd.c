@@ -874,11 +874,10 @@ static void Host_Loadgame_f (void)
 	 * save was written.  Appended after info_mask2 rather than given a new
 	 * SAVEGAME_VERSION so saves stay interchangeable in both directions -- an
 	 * older engine stops reading here and ignores the extra line, and a save
-	 * written before this field existed hits EOF, leaving tempi at -1.  Out of
-	 * range is a no-op inside SB_SetSelectedArtifact, so an old save keeps
-	 * whatever selection the running session was already carrying.
-	 * uhexen2-1knr. */
-	tempi = -1;
+	 * written before this field existed simply hits EOF, so the fscanf fails
+	 * and the selection the running session was already carrying stands.  A
+	 * value that is present but out of range (a corrupt info.dat) is a no-op
+	 * inside SB_SetSelectedArtifact.  uhexen2-1knr. */
 	if (fscanf (f, "%d\n", &tempi) == 1)
 		SB_SetSelectedArtifact (tempi);
 

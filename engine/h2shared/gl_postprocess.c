@@ -524,16 +524,15 @@ static qboolean PP_CreateFBO (int width, int height)
 	/* Clamp to what the driver can actually allocate.  config.cfg is a plain
 	 * text file and survives GPU swaps, so an inherited 16 on an 8-sample
 	 * driver is an ordinary case, not a corrupt one -- clamp it rather than
-	 * letting the allocation fail into the fallback path on every restart. */
-	if (samples > 1)
-	{
-		GLint max_samples = 0;
-		glGetIntegerv_fp(GL_MAX_SAMPLES, &max_samples);
-		if (max_samples > 1 && samples > max_samples)
-			samples = max_samples;
-		else if (max_samples <= 1)
-			samples = 0;
-	}
+	 * letting the allocation fail into the fallback path on every restart.
+	 * gl_max_samples is the engine's one GL_MAX_SAMPLES query (gl_vidsdl.c,
+	 * populated post-context-init and already the bound the Options menu picks
+	 * against); the cap cannot change within a context, so re-querying it here
+	 * would only risk the two clamps drifting apart. */
+	if (samples > gl_max_samples)
+		samples = gl_max_samples;
+	if (samples < 2)
+		samples = 0;
 
 	PP_DeleteFBO();
 

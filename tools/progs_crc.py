@@ -57,8 +57,15 @@ the engine does.
 """
 
 import argparse
-import struct
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from qcdis import Progs, ProgsError
+except ImportError as e:
+    print('progs_crc: cannot import qcdis: %s' % e, file=sys.stderr)
+    sys.exit(2)
 
 POLY = 0x1021
 CRC_INIT_VALUE = 0xFFFF
@@ -101,18 +108,13 @@ def crc_block(data):
 
 
 def describe(path):
-    with open(path, "rb") as f:
-        data = f.read()
-
-    if len(data) < 8:
-        raise ValueError("too short to be a progs.dat")
-    version, progdefs_crc = struct.unpack_from("<ii", data, 0)
-    if version not in (6,):
-        # Hexen II and Quake both use PROG_VERSION 6; anything else is not a
-        # progs.dat and its "crc" field is meaningless.
-        raise ValueError("header version %d, expected 6 -- not a progs.dat" % version)
-
-    return crc_block(data), progdefs_crc
+    # qcdis.Progs is the repo's one progs.dat header parser -- it unpacks the
+    # full dprograms_t, checks the version and bounds-checks every section, and
+    # keeps the raw bytes as .buf, which is exactly what the whole-file CRC
+    # needs.  Parsing the header a second time here would only give the two
+    # tools different ideas of what counts as a progs.dat.
+    p = Progs(path)
+    return crc_block(p.buf), p.crc
 
 
 def main():
@@ -128,8 +130,13 @@ def main():
     for path in args.progs:
         try:
             file_crc, progdefs_crc = describe(path)
-        except (OSError, ValueError) as err:
-            print("%-52s %8s %9s  %s" % (path, "-", "-", err))
+        except (OSError, ProgsError) as err:
+            # qcdis prefixes its messages with the path; the row already has a
+            # path column, so drop the repeat.
+            msg = str(err)
+            if msg.startswith(path + ": "):
+                msg = msg[len(path) + 2:]
+            print("%-52s %8s %9s  %s" % (path, "-", "-", msg))
             status = 1
             continue
 
