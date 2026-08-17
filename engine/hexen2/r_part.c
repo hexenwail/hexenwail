@@ -138,6 +138,13 @@ static	vec3_t	rider_origin;
 cvar_t		leak_color = {"leak_color", "251", CVAR_ARCHIVE};
 static	cvar_t	snow_flurry= {"snow_flurry", "1", CVAR_ARCHIVE};
 static	cvar_t	snow_active= {"snow_active", "1", CVAR_ARCHIVE};
+/* Rain shipped with no collision test whatsoever, so drops fell through
+ * floors, ceilings and everything else and expired purely on a timer.  That
+ * confined the effect to open sky -- the reason SoT only uses it in a couple
+ * of outdoor areas.  Snow has always done this test; rain simply never got
+ * it.  Cvar'd because it changes how existing maps look, and turning it off
+ * restores the stock behaviour exactly.  uhexen2-km0d. */
+static	cvar_t	r_raincollide = {"r_raincollide", "1", CVAR_ARCHIVE};
 
 
 static particle_t *AllocParticle (void);
@@ -177,6 +184,7 @@ void R_InitParticles (void)
 	//JFM: snow test
 	Cvar_RegisterVariable (&snow_flurry);
 	Cvar_RegisterVariable (&snow_active);
+	Cvar_RegisterVariable (&r_raincollide);
 #ifdef GLQUAKE
 	R_GPU_Particles_Init();
 #endif
@@ -1806,6 +1814,21 @@ void R_UpdateParticles (void)
 			p->org[0] += p->vel[0] * (frametime - .004);
 			p->org[1] += p->vel[1] * (frametime - .004);
 			p->org[2] += p->vel[2] * (frametime - .004);
+
+			/* Stop at the first solid the drop lands in, rather than
+			 * sailing through it.  A point test, like the one snow does:
+			 * a drop moving 256-955 u/s covers 4-16 units per frame at
+			 * 60fps, so it can still tunnel through a brush thinner than
+			 * that.  Snow carries the same limitation and Raven left a
+			 * commented-out stepped sweep next to it; if thin-brush
+			 * tunnelling ever shows up in practice, that is where the fix
+			 * goes for both.  uhexen2-km0d. */
+			if (r_raincollide.integer)
+			{
+				mleaf_t	*l = Mod_PointInLeaf (p->org, cl.worldmodel);
+				if (l->contents != CONTENTS_EMPTY)
+					p->die = -1;
+			}
 		}
 		else if (p->type == pt_snow)
 		{
