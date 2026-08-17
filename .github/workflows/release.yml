@@ -72,7 +72,16 @@ jobs:
           PY
             echo "added $VERSION ($DATE) to $META"
           fi
-          appstreamcli validate --explain "$META" || {
+          # --no-net: without it, appstreamcli fetches every <url> in the file
+          # and reports an unreachable one as a warning, which it exits non-zero
+          # on -- so a release could fail for reasons that have nothing to do
+          # with the tag being built.  0.8.0-beta.r5 died exactly that way while
+          # r4 had passed the day before on the same workflow, the same
+          # appstreamcli 1.0.2 and the same URLs: the bugtracker link resolves
+          # or not depending on how github.com answers that minute.  We want
+          # this step checking that the entry we just injected is well-formed,
+          # not probing the internet.  uhexen2-vm9w.
+          appstreamcli validate --no-net --explain "$META" || {
             echo "::error::metainfo failed AppStream validation after injection"
             exit 1
           }
