@@ -50,7 +50,8 @@ void R_SunStaffTrail (vec3_t source, vec3_t dest);
 void R_LavaSplash (vec3_t org);
 void R_TeleportSplash (vec3_t org);
 
-void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int color, int count);
+/* z_dir: fall speed in units/sec, 0 for the stock random 256-955 spread */
+void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, int color, int count);
 void R_SnowEffect (vec3_t org1, vec3_t org2, int flags, vec3_t alldir, int count);
 
 void R_RunQuakeEffect (vec3_t org, float distance);

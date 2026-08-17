@@ -990,7 +990,7 @@ void CL_UpdateEffects (void)
 //	edict_t		test;
 //	trace_t		trace;
 	vec3_t		org, org2, alldir;
-	int		x_dir, y_dir;
+	int		x_dir, y_dir, z_dir;
 	entity_t	*ent;
 	float		snow_dx, snow_dy, snow_distsq, smoketime;
 
@@ -1020,11 +1020,16 @@ void CL_UpdateEffects (void)
 
 			x_dir = cl.Effects[idx].ef.Rain.dir[0];
 			y_dir = cl.Effects[idx].ef.Rain.dir[1];
+			/* Z of the direction vector has always been sent and parsed
+			 * and then dropped on the floor for rain.  Spend it on the
+			 * fall speed, so a mapper can pick drizzle or downpour with
+			 * no protocol change.  Zero keeps the stock random spread. */
+			z_dir = cl.Effects[idx].ef.Rain.dir[2];
 
 			cl.Effects[idx].ef.Rain.next_time += frametime;
 			if (cl.Effects[idx].ef.Rain.next_time >= cl.Effects[idx].ef.Rain.wait)
 			{
-				R_RainEffect(org, org2, x_dir, y_dir, cl.Effects[idx].ef.Rain.color,
+				R_RainEffect(org, org2, x_dir, y_dir, z_dir, cl.Effects[idx].ef.Rain.color,
 								cl.Effects[idx].ef.Rain.count);
 				cl.Effects[idx].ef.Rain.next_time = 0;
 			}
