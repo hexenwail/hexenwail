@@ -1548,6 +1548,12 @@ static const float ptex_coord[4][3][2] =
 	{ {1.000, 1.000}, {1.000, 0.180}, {0.180, 1.000} }	// snow count >= 69 : happy snow!
 };
 
+/* How far a raindrop's billboard is stretched along its own velocity, and
+ * how far it is squeezed across, relative to the 1.5-unit half-size every
+ * other particle uses.  Long and thin is what makes it read as rain. */
+#define RAIN_STREAK 3.0f
+#define RAIN_WIDTH  0.5f
+
 void R_DrawParticles (void)
 {
     particle_t      *p;
@@ -1615,6 +1621,10 @@ void R_DrawParticles (void)
         {
             float scale;
             int i;
+            /* Billboard axes.  Every particle but rain gets the shared
+             * view-aligned pair; rain gets its own, built below. */
+            const float *pup = r_pup, *pright = r_pright;
+            vec3_t rain_up, rain_side;
 
             /* Flush batch before overflow (3 verts per particle) */
             if (GL_ImmCount() >= GL_IMM_MAX_VERTS - 3)
@@ -1644,17 +1654,46 @@ void R_DrawParticles (void)
                 else if (p->count >= 40) i = 2;
                 else if (p->count >= 30) i = 1;
             }
+            else if (p->type == pt_rain)
+            {
+            /* Rain and snow drew the same round blob off the same sprite,
+             * which is why a downpour read as drifting flakes -- Mathuzzz
+             * asked for rain that looks like rain.  Rather than spend an
+             * atlas slot (all four are taken by the snow sizes) stretch the
+             * billboard along the drop's own velocity and thin it across:
+             * same sprite, same triangle, same vertex count, but it now
+             * draws as a streak pointing the way the drop is going.
+             *
+             * The streak trails from the head, so it is built along -vel.
+             * Width runs perpendicular to both the fall and the view, which
+             * degenerates when you look straight up or down the rain; in
+             * that case the length comes out zero and we keep the stock
+             * view-aligned pair.  uhexen2-km0d. */
+                vec3_t vdir;
+                VectorCopy(p->vel, vdir);
+                if (VectorNormalize(vdir) > 0.0f)
+                {
+                    CrossProduct(vdir, vpn, rain_side);
+                    if (VectorNormalize(rain_side) > 0.0f)
+                    {
+                        VectorScale(vdir, -1.5f * RAIN_STREAK, rain_up);
+                        VectorScale(rain_side, 1.5f * RAIN_WIDTH, rain_side);
+                        pup = rain_up;
+                        pright = rain_side;
+                    }
+                }
+            }
 
             GL_ImmTexCoord2f(ptex_coord[i][0][0], ptex_coord[i][0][1]);
             GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
             GL_ImmTexCoord2f(ptex_coord[i][1][0], ptex_coord[i][1][1]);
-            GL_ImmVertex3f(p->org[0] + r_pup[0]*scale,
-                           p->org[1] + r_pup[1]*scale,
-                           p->org[2] + r_pup[2]*scale);
+            GL_ImmVertex3f(p->org[0] + pup[0]*scale,
+                           p->org[1] + pup[1]*scale,
+                           p->org[2] + pup[2]*scale);
             GL_ImmTexCoord2f(ptex_coord[i][2][0], ptex_coord[i][2][1]);
-            GL_ImmVertex3f(p->org[0] + r_pright[0]*scale,
-                           p->org[1] + r_pright[1]*scale,
-                           p->org[2] + r_pright[2]*scale);
+            GL_ImmVertex3f(p->org[0] + pright[0]*scale,
+                           p->org[1] + pright[1]*scale,
+                           p->org[2] + pright[2]*scale);
         }
         GL_ImmEnd(GL_TRIANGLES, prog);
     }
