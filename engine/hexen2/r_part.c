@@ -1353,7 +1353,7 @@ R_RainEffect
 
 ===============
 */
-void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int color, int count)
+void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, int color, int count)
 {
 	int		i, holdint;
 	particle_t	*p;
@@ -1367,10 +1367,31 @@ void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int color, i
 
 		p->vel[0] = x_dir;	// X and Y motion
 		p->vel[1] = y_dir;
-		p->vel[2] = -(rand() % 956);
-		if (p->vel[2] > -256)
+		if (z_dir)
 		{
-			p->vel[2] += -256;
+		/* Fall speed the mapper asked for.  It rides in on the Z of the
+		 * effect's direction vector, which the server has always sent and
+		 * the client has always parsed and then ignored for rain -- so
+		 * this costs no protocol change, and content that leaves it at
+		 * zero (all of it, as far as we know) keeps the stock random
+		 * speed below.  Jittered +/-25% because a field of drops all
+		 * falling at exactly one speed reads as a moving texture rather
+		 * than as rain.  Floored so a typo cannot produce drops that
+		 * hang in the air long enough to exhaust the particle pool.
+		 * uhexen2-km0d. */
+			int speed = abs(z_dir);
+			speed = speed * (768 + (rand() & 511)) / 1024;
+			if (speed < 64)
+				speed = 64;
+			p->vel[2] = -speed;
+		}
+		else
+		{
+			p->vel[2] = -(rand() % 956);
+			if (p->vel[2] > -256)
+			{
+				p->vel[2] += -256;
+			}
 		}
 
 		z_time = -(e_size[2]/p->vel[2]);

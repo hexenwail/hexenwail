@@ -1326,7 +1326,9 @@ static void CL_ParseRainEffect(void)
 	color = MSG_ReadShort();
 	count = MSG_ReadShort();
 
-	R_RainEffect(org,e_size,x_dir,y_dir,color,count);
+	/* svc_raineffect carries no Z direction, so this one-shot path has no
+	 * mapper-chosen fall speed to pass on -- 0 keeps the stock spread. */
+	R_RainEffect(org,e_size,x_dir,y_dir,0,color,count);
 }
 
 
