@@ -864,6 +864,10 @@ Mod_LoadLighting
 */
 static void Mod_LoadLighting (lump_t *l)
 {
+	int	i;
+	byte	*in, *out, *data;
+	byte	d;
+
 	GL_SetupLightmapFmt();	// setup the lightmap format to reflect any
 				// changes via the cvar gl_lightmapfmt
 
@@ -872,162 +876,144 @@ static void Mod_LoadLighting (lump_t *l)
 		Cvar_Set ("gl_coloredlight", "0");
 	gl_coloredstatic = gl_coloredlight.integer;
 
-	if (gl_lightmap_format == GL_RGBA)
-	{
-		int	i;
-		byte	*in, *out, *data;
-		byte	d;
+	loadmodel->lightdata = NULL;
 
-		loadmodel->lightdata = NULL;
+	if (gl_coloredlight.integer)
+	{	// LordHavoc: check for a .lit file
+		int		mark;
+		char	litfilename[MAX_QPATH];
+		unsigned int	path_id;
+		long	litsize;
 
-		if (gl_coloredlight.integer)
-		{	// LordHavoc: check for a .lit file
-			int		mark;
-			char	litfilename[MAX_QPATH];
-			unsigned int	path_id;
-			long	litsize;
+		q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
+		COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
+		q_strlcat(litfilename, ".lit", sizeof(litfilename));
+		Con_DPrintf("trying to load %s\n", litfilename);
+		mark = Hunk_LowMark();
+		data = (byte*) FS_LoadHunkFile (litfilename, &path_id);
+		if (data == NULL)
+			goto _load_internal;
+		/* fs_filesize describes the call above and nothing else, so
+		 * take a copy before anything else touches the FS. */
+		litsize = fs_filesize;
+		// use lit file only from the same gamedir as the map
+		// itself or from a searchpath with higher priority.
+		if (path_id < loadmodel->path_id)
+		{
+			Hunk_FreeToLowMark(mark);
+			Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
+			goto _load_internal;
+		}
+		if (data[0] != 'Q' || data[1] != 'L' || data[2] != 'I' || data[3] != 'T')
+		{
+			Hunk_FreeToLowMark(mark);
+			Con_Printf("Corrupt .lit file (old version?), ignoring\n");
+			goto _load_internal;
+		}
+		i = LittleLong(((int *)data)[1]);
+		if (i != 1)
+		{
+			Hunk_FreeToLowMark(mark);
+			Con_Printf("Unknown .lit file version (%d)\n", i);
+			goto _load_internal;
+		}
+		/* A .lit is only meaningful against the exact BSP it was
+		 * compiled for: it is a flat luxel array indexed by the same
+		 * offsets the faces carry, so any recompile of the map shifts
+		 * every one of them.  A stale sidecar is not "slightly off" --
+		 * every surface reads another compile's lighting at an
+		 * arbitrary offset, and a short one is read past its end.
+		 * Alias models show it worst: AliasModelGetLightInfo
+		 * (gl_rmain.c) puts R_LightPointColor's RGB nearly straight
+		 * onto the skin instead of modulating a wall texture, so a
+		 * mismatched .lit turns whole models a flat solid colour.
+		 *
+		 * Skipped when the BSP has no lighting lump: there is no
+		 * expected size to compare against, and the colored-only path
+		 * below is a deliberate feature of this engine.  uhexen2-2mwz. */
+		if (l->filelen && litsize != 8 + (long)l->filelen * 3)
+		{
+			Hunk_FreeToLowMark(mark);
+			Con_Printf("Outdated .lit file (%s should be %ld bytes, not %ld)\n",
+					litfilename, 8 + (long)l->filelen * 3, litsize);
+			goto _load_internal;
+		}
+		Con_DPrintf("%s loaded\n", litfilename);
+		Con_DPrintf("Loaded colored light (32-bit)\n");
+		if (gl_coloredlight.integer == 1)
+		{
+			loadmodel->lightdata = data + 8;
+			return;
+		}
+		else if (!l->filelen)
+		{
+			loadmodel->lightdata = data + 8;
+			Con_Printf("No white light data. Using colored only\n");
+			return;
+		}
+		else	// experimental blend code for gl_coloredlight.integer == 2
+		{
+			int	min_light = 8;
+			int	k = 0;
+			int	j, r, g, b;
+			float	l2lc = 0;
+			float	lc = 0;
+			float	li = 0;
 
-			q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
-			COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
-			q_strlcat(litfilename, ".lit", sizeof(litfilename));
-			Con_DPrintf("trying to load %s\n", litfilename);
+			// allocate memory and load light data from .bsp
 			mark = Hunk_LowMark();
-			data = (byte*) FS_LoadHunkFile (litfilename, &path_id);
-			if (data == NULL)
-				goto _load_internal;
-			/* fs_filesize describes the call above and nothing else, so
-			 * take a copy before anything else touches the FS. */
-			litsize = fs_filesize;
-			// use lit file only from the same gamedir as the map
-			// itself or from a searchpath with higher priority.
-			if (path_id < loadmodel->path_id)
-			{
-				Hunk_FreeToLowMark(mark);
-				Con_DPrintf("ignored %s from a gamedir with lower priority\n", litfilename);
-				goto _load_internal;
-			}
-			if (data[0] != 'Q' || data[1] != 'L' || data[2] != 'I' || data[3] != 'T')
-			{
-				Hunk_FreeToLowMark(mark);
-				Con_Printf("Corrupt .lit file (old version?), ignoring\n");
-				goto _load_internal;
-			}
-			i = LittleLong(((int *)data)[1]);
-			if (i != 1)
-			{
-				Hunk_FreeToLowMark(mark);
-				Con_Printf("Unknown .lit file version (%d)\n", i);
-				goto _load_internal;
-			}
-			/* A .lit is only meaningful against the exact BSP it was
-			 * compiled for: it is a flat luxel array indexed by the same
-			 * offsets the faces carry, so any recompile of the map shifts
-			 * every one of them.  A stale sidecar is not "slightly off" --
-			 * every surface reads another compile's lighting at an
-			 * arbitrary offset, and a short one is read past its end.
-			 * Alias models show it worst: AliasModelGetLightInfo
-			 * (gl_rmain.c) puts R_LightPointColor's RGB nearly straight
-			 * onto the skin instead of modulating a wall texture, so a
-			 * mismatched .lit turns whole models a flat solid colour.
-			 *
-			 * Skipped when the BSP has no lighting lump: there is no
-			 * expected size to compare against, and the colored-only path
-			 * below is a deliberate feature of this engine.  uhexen2-2mwz. */
-			if (l->filelen && litsize != 8 + (long)l->filelen * 3)
-			{
-				Hunk_FreeToLowMark(mark);
-				Con_Printf("Outdated .lit file (%s should be %ld bytes, not %ld)\n",
-						litfilename, 8 + (long)l->filelen * 3, litsize);
-				goto _load_internal;
-			}
-			Con_DPrintf("%s loaded\n", litfilename);
-			Con_DPrintf("Loaded colored light (32-bit)\n");
-			if (gl_coloredlight.integer == 1)
-			{
-				loadmodel->lightdata = data + 8;
-				return;
-			}
-			else if (!l->filelen)
-			{
-				loadmodel->lightdata = data + 8;
-				Con_Printf("No white light data. Using colored only\n");
-				return;
-			}
-			else	// experimental blend code for gl_coloredlight.integer == 2
-			{
-				int	min_light = 8;
-				int	k = 0;
-				int	j, r, g, b;
-				float	l2lc = 0;
-				float	lc = 0;
-				float	li = 0;
+			loadmodel->lightdata = (byte *) Hunk_AllocName (l->filelen, "light");
+			memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
 
-				// allocate memory and load light data from .bsp
-				mark = Hunk_LowMark();
-				loadmodel->lightdata = (byte *) Hunk_AllocName (l->filelen, "light");
-				memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
+			for (i = 0, j = 0, k = 0; i < l->filelen * 3; i += 3, j += 3)
+			{
+				// set some minimal light level
+				r = q_max(data[8+i  ], min_light);
+				g = q_max(data[8+i+1], min_light);
+				b = q_max(data[8+i+2], min_light);
 
-				for (i = 0, j = 0, k = 0; i < l->filelen * 3; i += 3, j += 3)
-				{
-					// set some minimal light level
-					r = q_max(data[8+i  ], min_light);
-					g = q_max(data[8+i+1], min_light);
-					b = q_max(data[8+i+2], min_light);
+				// compute brightness of colored ligths present in .lit file
+				lc = (r + g + b) / 3.0f;
+				li = (float) loadmodel->lightdata[k];
+				if (li == 0)
+					li = min_light;
+				if (lc == 0)
+					lc = min_light;
 
-					// compute brightness of colored ligths present in .lit file
-					lc = (r + g + b) / 3.0f;
-					li = (float) loadmodel->lightdata[k];
-					if (li == 0)
-						li = min_light;
-					if (lc == 0)
-						lc = min_light;
+				// compute light amplification level
+				l2lc = li / lc;
+				if (l2lc < 1.5f)
+					l2lc = 1.0f;
 
-					// compute light amplification level
-					l2lc = li / lc;
-					if (l2lc < 1.5f)
-						l2lc = 1.0f;
-
-					// update colors
-					data[8+j]   = (byte) q_min (q_max(ceil(r*l2lc), min_light), 255);
-					data[8+j+1] = (byte) q_min (q_max(ceil(g*l2lc), min_light), 255);
-					data[8+j+2] = (byte) q_min (q_max(ceil(b*l2lc), min_light), 255);
-					k++;
-				}
-				Hunk_FreeToLowMark(mark);
-
-				loadmodel->lightdata = data + 8;
-				Con_DPrintf("Blended colored and white light.\n");
-				return;
+				// update colors
+				data[8+j]   = (byte) q_min (q_max(ceil(r*l2lc), min_light), 255);
+				data[8+j+1] = (byte) q_min (q_max(ceil(g*l2lc), min_light), 255);
+				data[8+j+2] = (byte) q_min (q_max(ceil(b*l2lc), min_light), 255);
+				k++;
 			}
+			Hunk_FreeToLowMark(mark);
+
+			loadmodel->lightdata = data + 8;
+			Con_DPrintf("Blended colored and white light.\n");
+			return;
 		}
+	}
   _load_internal:
-		// no .lit found, expand the white lighting data to color
-		if (!l->filelen)
-			return;
-		loadmodel->lightdata = (byte *) Hunk_AllocName (l->filelen*3, "light");
-		in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
-		out = loadmodel->lightdata;
-		memcpy (in, mod_base + l->fileofs, l->filelen);
-		for (i = 0; i < l->filelen; i++)
-		{
-			d = *in++;
-			*out++ = d;
-			*out++ = d;
-			*out++ = d;
-		}
-		Con_DPrintf("Loaded white light (32-bit)\n");
-	}
-	else
+	// no .lit found, expand the white lighting data to color
+	if (!l->filelen)
+		return;
+	loadmodel->lightdata = (byte *) Hunk_AllocName (l->filelen*3, "light");
+	in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
+	out = loadmodel->lightdata;
+	memcpy (in, mod_base + l->fileofs, l->filelen);
+	for (i = 0; i < l->filelen; i++)
 	{
-		if (!l->filelen)
-		{
-			loadmodel->lightdata = NULL;
-			return;
-		}
-		loadmodel->lightdata = (byte *) Hunk_AllocName ( l->filelen, "light");
-		memcpy (loadmodel->lightdata, mod_base + l->fileofs, l->filelen);
-		Con_DPrintf("Loaded white light (8-bit)\n");
+		d = *in++;
+		*out++ = d;
+		*out++ = d;
+		*out++ = d;
 	}
+	Con_DPrintf("Loaded white light (32-bit)\n");
 }
 
 
@@ -1399,11 +1385,7 @@ static void Mod_LoadFaces_BSP2(lump_t *l)
 		}
 		else
 		{
-			//out->samples = loadmodel->lightdata + i;
-			if (gl_lightmap_format == GL_RGBA)
-				out->samples = loadmodel->lightdata + (i * 3);
-			else
-				out->samples = loadmodel->lightdata + i;
+			out->samples = loadmodel->lightdata + (i * 3);
 		}
 
 	// set the drawing flags flag
@@ -1455,11 +1437,7 @@ static void Mod_LoadFaces_V29 (lump_t *l)
 		}
 		else
 		{
-			//out->samples = loadmodel->lightdata + i;
-			if (gl_lightmap_format == GL_RGBA)
-				out->samples = loadmodel->lightdata + (i * 3);
-			else
-				out->samples = loadmodel->lightdata + i;
+			out->samples = loadmodel->lightdata + (i * 3);
 		}
 
 	// set the drawing flags flag
