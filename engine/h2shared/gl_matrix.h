@@ -30,7 +30,7 @@ void	GL_LoadMatrixf (const float *m);
 /* Retrieve current matrices (column-major, OpenGL convention) */
 void	GL_GetModelview (float *out);
 void	GL_GetProjection (float *out);
-void	GL_GetMVP (float *out);		/* modelview * projection */
+void	GL_GetMVP (float *out);		/* projection * modelview */
 
 /* 4x4 matrix math utilities */
 void	Mat4_Identity (float *out);
