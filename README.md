@@ -48,6 +48,7 @@ There are three living branches of the Hexen II engine, depending on what you wa
 |----------|----------|-----------|--------|
 | 64-bit Linux / SDL3 | OpenGL 4.3 | Nix, Flatpak, tarball | Supported |
 | 64-bit Windows / SDL3 | OpenGL 4.3 | ZIP (cross-compiled from Nix) | Supported |
+| Web / WASM (Emscripten) | WebGL2 | dev shell (`shell-wasm.nix`) | Builds and runs; hosting, data delivery, and save persistence in progress |
 
 Planned:
 
@@ -55,6 +56,7 @@ Planned:
 |----------|----------|--------|
 | Flathub listing | OpenGL 4.3 | Not started |
 | AppImage | OpenGL 4.3 | Not started |
+| Android / SDL3 | GLES3 | Not started — builds on the WASM/GLES render path |
 
 ## Features
 
