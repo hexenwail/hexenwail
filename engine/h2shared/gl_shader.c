@@ -705,11 +705,17 @@ static const char salias_frag[] =
 #ifndef USE_GLES
 static const char sskeletal_vert[] =
 	GLSL_VERT_HEADER
-	"in vec3 a_position;\n"
-	"in vec4 a_normal;\n"
-	"in vec2 a_texcoord;\n"
-	"in vec4 a_weights;\n"
-	"in uvec4 a_indices;\n"
+	/* Explicit locations, because the IQM VAO (GL_CreateAliasGPUMesh in
+	 * gl_mesh.c) hardcodes this layout and it does not match the generic
+	 * a_position/a_texcoord/a_lmcoord/a_color bindings GL_LoadProgram
+	 * applies to every other program.  A layout qualifier overrides
+	 * glBindAttribLocation, so this stays local to the skeletal program
+	 * and leaves the shared contract alone.  uhexen2-bynk. */
+	"layout(location=0) in vec3 a_position;\n"
+	"layout(location=1) in vec4 a_normal;\n"
+	"layout(location=2) in vec2 a_texcoord;\n"
+	"layout(location=3) in vec4 a_weights;\n"
+	"layout(location=4) in uvec4 a_indices;\n"
 	"\n"
 	"layout(std430, binding=4) restrict readonly buffer BoneBuffer {\n"
 	"    mat3x4 bones[];\n"
