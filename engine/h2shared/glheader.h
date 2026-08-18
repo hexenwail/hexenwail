@@ -123,6 +123,16 @@ typedef int64_t  GLint64;
 #define	GL_TEXTURE_SWIZZLE_A			0x8E45
 #endif
 
+/* Texture LOD clamp, GL 1.2.  Same story as the swizzle above -- mingw's GL
+ * headers stop at 1.1, so GL_UploadCompressed's mip-range clamp does not
+ * compile for the Windows cross-build without these spelled out. */
+#ifndef	GL_TEXTURE_BASE_LEVEL
+#define	GL_TEXTURE_BASE_LEVEL			0x813C
+#endif
+#ifndef	GL_TEXTURE_MAX_LEVEL
+#define	GL_TEXTURE_MAX_LEVEL			0x813D
+#endif
+
 /* FBO (framebuffer object) enums */
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER				0x8D40

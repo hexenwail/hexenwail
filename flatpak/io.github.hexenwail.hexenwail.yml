@@ -134,10 +134,18 @@ modules:
       # those rather than building our own, assert the binary really did link
       # them.  Plain grep rather than readelf: SONAMEs live in .dynstr, so a
       # binary grep finds them, and binutils is not an explicit component of
-      # org.freedesktop.Sdk.  uhexen2-bvei.
+      # org.freedesktop.Sdk.
+      #
+      # Entry-point libraries only.  The first cut of this also demanded
+      # libvorbis.so.0 and libogg.so.0 and failed the build: linking against
+      # the runtime's libvorbisfile leaves those two transitive rather than
+      # direct DT_NEEDED entries, where our own nixpkgs build records all
+      # three.  libvorbisfile is the one the engine actually calls and the one
+      # USE_CODEC_VORBIS gates, so its presence is the property worth
+      # asserting.  uhexen2-bvei.
       - |
-        for so in libvorbisfile.so.3 libvorbis.so.0 libogg.so.0 \
-                  libopusfile.so.0 libxmp.so.4 libfluidsynth.so.3; do
+        for so in libvorbisfile.so.3 libopusfile.so.0 \
+                  libxmp.so.4 libfluidsynth.so.3; do
           grep -qa "$so" /app/bin/glhexen2 || {
             echo "FATAL: glhexen2 did not link $so -- a codec was silently disabled"
             exit 1
