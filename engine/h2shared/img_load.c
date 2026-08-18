@@ -2,12 +2,18 @@
  * img_load.c - External image loading (PCX, TGA, PNG)
  *
  * Supports loading external textures to override internal BSP textures.
- * Checks for files in textures/ directory with extensions: .pcx, .tga, .png
+ * Decoded formats live here (.pcx, .tga, .png); the block-compressed
+ * containers (.dds, .ktx) are parsed in img_dds.c and preferred over these
+ * when both are present.  Search order for a world texture is
+ *
+ *     textures/<mapname>/<texname>.{dds,ktx,png,tga,pcx}
+ *     textures/<texname>.{dds,ktx,png,tga,pcx}
  *
  * Copyright (C) 2025 uHexen2 project
  */
 
 #include "quakedef.h"
+#include "img_load.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -376,166 +382,321 @@ byte *IMG_LoadPNG (const char *filename, int *width, int *height, int *has_alpha
 
 /*
 =================
+IMG_SafeName
+
+Sanitize a texture name for filesystem use: '*' marks liquid textures in the
+BSP (e.g. *lowlight) but is not a legal Windows filename character, so it
+becomes '#' per Quake convention.
+=================
+*/
+static void IMG_SafeName (char *dst, size_t dstsize, const char *name)
+{
+	int	i;
+
+	q_strlcpy (dst, name, dstsize);
+	for (i = 0; dst[i]; i++)
+	{
+		if (dst[i] == '*')
+			dst[i] = '#';
+	}
+}
+
+/*
+=================
+IMG_MapBaseName
+
+Reduce a model path ("maps/demo1.bsp") to the bare map name ("demo1") used as
+the per-map override directory.  Returns false when there is nothing usable,
+in which case the caller simply skips the per-map candidate.
+=================
+*/
+static qboolean IMG_MapBaseName (char *dst, size_t dstsize, const char *modelname)
+{
+	const char	*slash, *dot;
+	size_t		len;
+
+	if (!modelname || !*modelname)
+		return false;
+
+	slash = strrchr (modelname, '/');
+	slash = slash ? slash + 1 : modelname;
+
+	dot = strrchr (slash, '.');
+	len = dot ? (size_t)(dot - slash) : strlen (slash);
+
+	if (len < 1 || len >= dstsize)
+		return false;
+
+	memcpy (dst, slash, len);
+	dst[len] = '\0';
+	return true;
+}
+
+/*
+=================
+IMG_BuildCandidates
+
+Fill in the extension-less paths to probe for a replacement, in search order,
+and return how many there are.
+
+Names that already carry their own directory (models/, gfx/, particles/) are
+used as-is -- they are full paths from the game directory and were never part
+of the flat textures/ pool.  Everything else is a world texture out of the BSP
+miptex lump, which gets the per-map directory first so two maps can disagree
+about what "wall01" looks like, then the shared pool.
+=================
+*/
+static int IMG_BuildCandidates (const char *name, const char *modelname,
+				char paths[IMG_MAX_CANDIDATES][MAX_OSPATH])
+{
+	char	safename[MAX_QPATH];
+	char	mapname[MAX_QPATH];
+	int	n = 0;
+
+	IMG_SafeName (safename, sizeof(safename), name);
+
+	if (!strncmp (safename, "models/", 7) ||
+	    !strncmp (safename, "gfx/", 4) ||
+	    !strncmp (safename, "particles/", 10))
+	{
+		q_snprintf (paths[n++], MAX_OSPATH, "%s", safename);
+		return n;
+	}
+
+	if (IMG_MapBaseName (mapname, sizeof(mapname), modelname))
+		q_snprintf (paths[n++], MAX_OSPATH, "textures/%s/%s", mapname, safename);
+
+	q_snprintf (paths[n++], MAX_OSPATH, "textures/%s", safename);
+
+	return n;
+}
+
+/*
+=================
+IMG_TryDecoded
+
+Probe one base path for a decoded image, newest format first.
+=================
+*/
+static byte *IMG_TryDecoded (const char *base, int *width, int *height, qboolean *has_alpha)
+{
+	char	path[MAX_OSPATH];
+	byte	*data;
+	int	alpha;
+
+	q_snprintf (path, sizeof(path), "%s.png", base);
+	data = IMG_LoadPNG (path, width, height, &alpha);
+	if (data)
+	{
+		*has_alpha = alpha ? true : false;
+		if (developer.value >= 2)
+			Con_Printf ("Loaded external texture: %s\n", path);
+		return data;
+	}
+
+	q_snprintf (path, sizeof(path), "%s.tga", base);
+	data = IMG_LoadTGA (path, width, height, &alpha);
+	if (data)
+	{
+		*has_alpha = alpha ? true : false;
+		if (developer.value >= 2)
+			Con_Printf ("Loaded external texture: %s\n", path);
+		return data;
+	}
+
+	q_snprintf (path, sizeof(path), "%s.pcx", base);
+	data = IMG_LoadPCX (path, width, height);
+	if (data)
+	{
+		*has_alpha = true;	/* PCX uses index 255 for transparency */
+		if (developer.value >= 2)
+			Con_Printf ("Loaded external texture: %s\n", path);
+		return data;
+	}
+
+	return NULL;
+}
+
+/*
+=================
+IMG_CompressedFits
+
+Whether any level of the chain is small enough for this GPU to accept.
+
+Block data cannot be resampled the way GL_Upload32 rescales RGBA, so the only
+way to fit an oversized compressed texture is to start further down its mip
+chain.  A container that ships one huge level and no mips has nowhere to go:
+uploading it would fail with GL_INVALID_VALUE and leave the surface black.
+Rejecting it here instead lets resolution carry on to the decoded image in the
+same directory, which can be rescaled.
+=================
+*/
+static qboolean IMG_CompressedFits (const imgreplace_t *r)
+{
+	int	i;
+
+	for (i = 0; i < r->nummips; i++)
+	{
+		if (r->mipw[i] <= gl_max_size && r->miph[i] <= gl_max_size)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+=================
+IMG_TryCompressed
+
+Probe one base path for a block-compressed container.
+=================
+*/
+static qboolean IMG_TryCompressed (const char *base, imgreplace_t *out)
+{
+	char	path[MAX_OSPATH];
+
+	q_snprintf (path, sizeof(path), "%s.dds", base);
+	if (IMG_LoadDDS (path, out))
+	{
+		if (IMG_CompressedFits (out))
+			return true;
+		Con_DPrintf ("%s: no mip level fits %d texels, ignoring\n",
+			     path, (int) gl_max_size);
+		IMG_FreeReplacement (out);
+	}
+
+	q_snprintf (path, sizeof(path), "%s.ktx", base);
+	if (IMG_LoadKTX (path, out))
+	{
+		if (IMG_CompressedFits (out))
+			return true;
+		Con_DPrintf ("%s: no mip level fits %d texels, ignoring\n",
+			     path, (int) gl_max_size);
+		IMG_FreeReplacement (out);
+	}
+
+	return false;
+}
+
+/*
+=================
+IMG_LoadReplacement
+
+Resolve a replacement image, preferring a per-map override over the shared
+pool and, within one directory, a compressed container over a decoded one.
+
+The ordering is deliberate: a pack that ships both textures/e1m1/wall01.png
+and textures/wall01.dds means the first to win for e1m1, because per-map is
+the more specific statement.  Only when two files sit in the *same* directory
+does format preference decide, and there the pre-compressed one is strictly
+better -- no CPU decode, a quarter of the VRAM, and its own mip chain.
+=================
+*/
+qboolean IMG_LoadReplacement (const char *name, const char *modelname, imgreplace_t *out)
+{
+	char		paths[IMG_MAX_CANDIDATES][MAX_OSPATH];
+	int		n, i;
+	qboolean	is_fence = (name[0] == '{');
+
+	memset (out, 0, sizeof(*out));
+
+	n = IMG_BuildCandidates (name, modelname, paths);
+
+	for (i = 0; i < n; i++)
+	{
+		if (IMG_TryCompressed (paths[i], out))
+		{
+			if (is_fence)
+				out->has_alpha = true;
+			return true;
+		}
+
+		out->rgba = IMG_TryDecoded (paths[i], &out->width, &out->height, &out->has_alpha);
+		if (out->rgba)
+		{
+			if (is_fence)
+				out->has_alpha = true;
+			return true;
+		}
+	}
+
+	memset (out, 0, sizeof(*out));
+	return false;
+}
+
+/*
+=================
+IMG_LoadReplacementGlow
+
+Resolve the fullbright sidecar for a texture.
+
+The engine's own fullbright masks come from palette indices >= vid.fullbright,
+which an RGBA replacement no longer has -- so once a texture is replaced, its
+glow can only come from a companion file.  Without this, dropping a HD pack in
+puts out every torch, rune and monster eye in the game (uhexen2-0vgo.1).
+
+_glow is our name; _luma is what FTE and jsHexen2 packs ship.  Both are
+accepted so an existing pack works unmodified.
+=================
+*/
+qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgreplace_t *out)
+{
+	char	buf[MAX_QPATH];
+
+	q_snprintf (buf, sizeof(buf), "%s_glow", name);
+	if (IMG_LoadReplacement (buf, modelname, out))
+		return true;
+
+	q_snprintf (buf, sizeof(buf), "%s_luma", name);
+	return IMG_LoadReplacement (buf, modelname, out);
+}
+
+/*
+=================
+IMG_FreeReplacement
+=================
+*/
+void IMG_FreeReplacement (imgreplace_t *r)
+{
+	if (!r)
+		return;
+
+	if (r->rgba)
+		free (r->rgba);
+	if (r->blocks)
+		free (r->blocks);
+
+	memset (r, 0, sizeof(*r));
+}
+
+/*
+=================
 IMG_LoadExternalTexture
 
-Try to load an external texture file.
-Checks for .png, .tga, .pcx extensions in order.
+Decoded-only replacement lookup, for callers that cannot use a compressed
+source: the 2D/HUD pics and the particle sprite, which are uploaded without
+mipmaps and are exactly the surfaces block compression damages most.
+
 Returns allocated RGBA buffer, caller must free after uploading to GL.
 =================
 */
 byte *IMG_LoadExternalTexture (const char *name, int *width, int *height, qboolean *has_alpha)
 {
-	char	path[MAX_OSPATH];
-	char	safename[MAX_QPATH];
+	char	paths[IMG_MAX_CANDIDATES][MAX_OSPATH];
+	int	n, i;
 	byte	*data;
-	int		alpha;
-	int		i;
 
 	*has_alpha = false;
 
-	// Sanitize texture name for filesystem use:
-	// '*' is used in BSP for liquid textures (e.g. *lowlight) but is
-	// invalid in Windows filenames. Replace with '#' per Quake convention.
-	q_strlcpy (safename, name, sizeof(safename));
-	for (i = 0; safename[i]; i++)
+	n = IMG_BuildCandidates (name, NULL, paths);
+
+	for (i = 0; i < n; i++)
 	{
-		if (safename[i] == '*')
-			safename[i] = '#';
-	}
-
-	// For model skins (names starting with "models/"), try direct path first
-	if (!strncmp(safename, "models/", 7))
-	{
-		// Try PNG first
-		q_snprintf (path, sizeof(path), "%s.png", safename);
-		data = IMG_LoadPNG (path, width, height, &alpha);
+		data = IMG_TryDecoded (paths[i], width, height, has_alpha);
 		if (data)
 		{
-			*has_alpha = alpha;
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external skin: %s\n", path);
-			return data;
-		}
-
-		// Try TGA
-		q_snprintf (path, sizeof(path), "%s.tga", safename);
-		data = IMG_LoadTGA (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha;
-			return data;
-		}
-
-		// Try PCX
-		q_snprintf (path, sizeof(path), "%s.pcx", safename);
-		data = IMG_LoadPCX (path, width, height);
-		if (data)
-		{
-			*has_alpha = true;	// PCX uses index 255 for transparency
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external skin: %s\n", path);
-			return data;
-		}
-	}
-	// For GFX/HUD pics (names starting with "gfx/"), try direct path
-	else if (!strncmp(safename, "gfx/", 4))
-	{
-		q_snprintf (path, sizeof(path), "%s.png", safename);
-		data = IMG_LoadPNG (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha;
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external gfx: %s\n", path);
-			return data;
-		}
-
-		q_snprintf (path, sizeof(path), "%s.tga", safename);
-		data = IMG_LoadTGA (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha;
-			return data;
-		}
-
-		q_snprintf (path, sizeof(path), "%s.pcx", safename);
-		data = IMG_LoadPCX (path, width, height);
-		if (data)
-		{
-			*has_alpha = true;
-			return data;
-		}
-	}
-	// For particles/ directory (e.g., "particles/blood")
-	else if (!strncmp(safename, "particles/", 10))
-	{
-		// Direct path for particles
-		q_snprintf (path, sizeof(path), "%s.png", safename);
-		data = IMG_LoadPNG (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha;
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external texture: %s\n", path);
-			return data;
-		}
-
-		q_snprintf (path, sizeof(path), "%s.tga", safename);
-		data = IMG_LoadTGA (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha;
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external texture: %s\n", path);
-			return data;
-		}
-
-		q_snprintf (path, sizeof(path), "%s.pcx", safename);
-		data = IMG_LoadPCX (path, width, height);
-		if (data)
-		{
-			*has_alpha = true;
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external texture: %s\n", path);
-			return data;
-		}
-	}
-	else
-	{
-		// Check for fence textures (texture names starting with '{')
-		// These use alpha testing with magenta (255,0,255) as transparent
-		qboolean is_fence = (safename[0] == '{');
-
-		// Try textures/ directory for world textures
-		q_snprintf (path, sizeof(path), "textures/%s.png", safename);
-		data = IMG_LoadPNG (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha || is_fence;  // Force alpha for fence textures
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external texture: %s (alpha=%d, fence=%d)\n", path, alpha, is_fence);
-			return data;
-		}
-
-		// Try TGA
-		q_snprintf (path, sizeof(path), "textures/%s.tga", safename);
-		data = IMG_LoadTGA (path, width, height, &alpha);
-		if (data)
-		{
-			*has_alpha = alpha || is_fence;  // Force alpha for fence textures
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external texture: %s (alpha=%d, fence=%d)\n", path, alpha, is_fence);
-			return data;
-		}
-
-		// Try PCX
-		q_snprintf (path, sizeof(path), "textures/%s.pcx", safename);
-		data = IMG_LoadPCX (path, width, height);
-		if (data)
-		{
-			*has_alpha = true;	// PCX uses index 255 for transparency (always alpha for fence or PCX)
-			if (developer.value >= 2)
-				Con_Printf ("Loaded external texture: %s\n", path);
+			if (name[0] == '{')
+				*has_alpha = true;	/* fence textures are always cutouts */
 			return data;
 		}
 	}

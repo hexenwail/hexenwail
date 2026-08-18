@@ -283,6 +283,9 @@ static const char	*gl_version;
 
 GLint		gl_max_size = 256;
 GLfloat		gl_max_anisotropy;
+qboolean	gl_have_s3tc = false;
+qboolean	gl_have_rgtc = false;
+qboolean	gl_have_bptc = false;
 float		gldepthmin, gldepthmax;
 qboolean	gl_clipcontrol_able = false;
 /* User toggle: gl_reversed_z 0 + vid_restart forces forward-Z for
@@ -979,6 +982,26 @@ static void GL_Init (void)
 
 	/* NPOT textures: always available on GL 4.3 */
 	Con_SafePrintf("NPOT textures enabled\n");
+
+	/* Block-compressed texture families, for the DDS/KTX replacement loader
+	 * (uhexen2-0vgo.5).  S3TC is queried by name because it is an extension
+	 * on every driver -- it was never promoted to core GL, patents having
+	 * outlived the format's relevance.  RGTC and BPTC are core on the
+	 * desktop tier this engine targets but do not exist on ES, so they are
+	 * compiled out rather than probed there. */
+	gl_have_s3tc = SDL_GL_ExtensionSupported("GL_EXT_texture_compression_s3tc") ||
+		       SDL_GL_ExtensionSupported("GL_S3_s3tc");
+#ifndef USE_GLES
+	gl_have_rgtc = true;	/* core since GL 3.0 */
+	gl_have_bptc = true;	/* core since GL 4.2 */
+#else
+	gl_have_rgtc = false;
+	gl_have_bptc = false;
+#endif
+	Con_SafePrintf("Compressed textures: S3TC %s, RGTC %s, BPTC %s\n",
+		       gl_have_s3tc ? "yes" : "no",
+		       gl_have_rgtc ? "yes" : "no",
+		       gl_have_bptc ? "yes" : "no");
 
 	/* stencil buffer */
 	have_stencil = !!vid_attribs.stencil;

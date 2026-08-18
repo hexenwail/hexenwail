@@ -354,6 +354,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_vbo.c
     ${COMMONDIR}/image.c
     ${COMMONDIR}/img_load.c
+    ${COMMONDIR}/img_dds.c
 )
 
 # Client sources from hexen2

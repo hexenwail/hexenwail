@@ -530,24 +530,46 @@ bsp_tex_internal:
 			R_InitSky (tx);
 		else
 		{
-			// Try external texture file (PNG, TGA, PCX) first
-			byte	*external_data;
-			int		ext_width, ext_height;
-			qboolean	has_alpha;
-			int		tex_flags;
+			/* An external replacement wins over the miptex data embedded
+			 * in the BSP.  IMG_LoadReplacement searches the per-map
+			 * directory before the shared pool and prefers a compressed
+			 * container over a decoded one; see img_load.c. */
+			imgreplace_t	rep;
+			int		rep_flags;
 
-			external_data = IMG_LoadExternalTexture(mt->name, &ext_width, &ext_height, &has_alpha);
-			if (external_data)
+			if (IMG_LoadReplacement (mt->name, loadmodel->name, &rep))
 			{
-				// External texture loaded successfully
-				tex_flags = TEX_MIPMAP | TEX_RGBA;
-				if (has_alpha)
-					tex_flags |= TEX_ALPHA;
+				rep_flags = TEX_MIPMAP;
 				// Check for fence texture (name starts with '{')
 				if (mt->name[0] == '{')
-					tex_flags |= (TEX_ALPHA | TEX_FENCE);  // Need TEX_ALPHA for alpha channel!
-				tx->gl_texturenum = GL_LoadTexture(mt->name, external_data, ext_width, ext_height, tex_flags);
-				free(external_data);
+					rep_flags |= (TEX_ALPHA | TEX_FENCE);  // Need TEX_ALPHA for alpha channel!
+				tx->gl_texturenum = GL_LoadReplacement (mt->name, &rep, rep_flags);
+				IMG_FreeReplacement (&rep);
+
+				/* The fullbright mask is normally extracted from palette
+				 * indices >= vid.fullbright, which an RGBA or block
+				 * replacement no longer carries -- so once a texture is
+				 * replaced its glow can only come from a sidecar file.
+				 * Without this, installing a HD pack puts out every torch,
+				 * rune and lava highlight in the map (uhexen2-0vgo.1).
+				 * Same exclusions as the embedded path below: sky, turb
+				 * and fence surfaces never get the additive pass. */
+				if (mt->name[0] != '*' && mt->name[0] != '{' &&
+				    strncmp(mt->name, "sky", 3) != 0 &&
+				    gl_fullbrights.integer)
+				{
+					imgreplace_t	glow;
+
+					if (IMG_LoadReplacementGlow (mt->name, loadmodel->name, &glow))
+					{
+						char	fbname[MAX_QPATH];
+
+						q_snprintf (fbname, sizeof(fbname), "%s_glow", mt->name);
+						tx->gl_fb_texturenum = GL_LoadReplacement (fbname, &glow,
+										TEX_MIPMAP | TEX_ALPHA);
+						IMG_FreeReplacement (&glow);
+					}
+				}
 			}
 			else
 			{
@@ -2562,30 +2584,48 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			*dot = '\0';  // strip .mdl extension
 		q_snprintf (name, sizeof(name), "%s_%i", skinname, i);
 
-		// Try external skin file first (PNG, TGA, PCX)
-		byte	*external_skin;
-		int		ext_width, ext_height;
-		qboolean	has_alpha;
+		// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins over
+		// the skin embedded in the MDL.
+		imgreplace_t	rep;
 
-		external_skin = IMG_LoadExternalTexture(name, &ext_width, &ext_height, &has_alpha);
-		if (external_skin)
+		if (IMG_LoadReplacement (name, NULL, &rep))
 		{
-			// External skin loaded successfully
-			int skin_tex_mode = TEX_MIPMAP | TEX_RGBA;
-			if (has_alpha || (mdl_flags & EF_HOLEY))
-				skin_tex_mode |= TEX_ALPHA;
+			int skin_tex_mode = TEX_MIPMAP;
 			if (mdl_flags & EF_HOLEY)
-				skin_tex_mode |= TEX_HOLEY;
+				skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
 			pheader->gl_texturenum[i][0] =
 			pheader->gl_texturenum[i][1] =
 			pheader->gl_texturenum[i][2] =
-			pheader->gl_texturenum[i][3] = GL_LoadTexture (name, external_skin,
-							ext_width, ext_height, skin_tex_mode);
+			pheader->gl_texturenum[i][3] = GL_LoadReplacement (name, &rep, skin_tex_mode);
+			IMG_FreeReplacement (&rep);
+
+			/* The palette-index fullbrights are gone along with the
+			 * embedded skin, so the glow layer has to come from a sidecar
+			 * or not at all.  Leaving it at 0 unconditionally is what put
+			 * out the glowing eyes and runes on every replaced skin
+			 * (uhexen2-0vgo.1). */
 			pheader->gl_fb_texturenum[i][0] =
 			pheader->gl_fb_texturenum[i][1] =
 			pheader->gl_fb_texturenum[i][2] =
 			pheader->gl_fb_texturenum[i][3] = 0;
-			free(external_skin);
+
+			if (gl_fullbrights.integer)
+			{
+				imgreplace_t	glow;
+
+				if (IMG_LoadReplacementGlow (name, NULL, &glow))
+				{
+					char	fbname[MAX_QPATH];
+
+					q_snprintf (fbname, sizeof(fbname), "%s_fb", name);
+					pheader->gl_fb_texturenum[i][0] =
+					pheader->gl_fb_texturenum[i][1] =
+					pheader->gl_fb_texturenum[i][2] =
+					pheader->gl_fb_texturenum[i][3] =
+						GL_LoadReplacement (fbname, &glow, TEX_MIPMAP | TEX_ALPHA);
+					IMG_FreeReplacement (&glow);
+				}
+			}
 		}
 		else
 		{
@@ -2623,24 +2663,37 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
 			q_snprintf (name, sizeof(name), "%s_%i_%i", loadmodel->name, i, j);
 
-			// Try external skin file first (PNG, TGA, PCX)
-			byte	*external_skin;
-			int		ext_width, ext_height;
-			qboolean	has_alpha;
+			// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins
+			// over the skin embedded in the MDL.
+			imgreplace_t	rep;
 
-			external_skin = IMG_LoadExternalTexture(name, &ext_width, &ext_height, &has_alpha);
-			if (external_skin)
+			if (IMG_LoadReplacement (name, NULL, &rep))
 			{
-				// External skin loaded successfully
-				int skin_tex_mode = TEX_MIPMAP | TEX_RGBA;
-				if (has_alpha || (mdl_flags & EF_HOLEY))
-					skin_tex_mode |= TEX_ALPHA;
+				int skin_tex_mode = TEX_MIPMAP;
 				if (mdl_flags & EF_HOLEY)
-					skin_tex_mode |= TEX_HOLEY;
-				pheader->gl_texturenum[i][j&3] = GL_LoadTexture (name, external_skin,
-							ext_width, ext_height, skin_tex_mode);
+					skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
+				pheader->gl_texturenum[i][j&3] =
+					GL_LoadReplacement (name, &rep, skin_tex_mode);
+				IMG_FreeReplacement (&rep);
+
+				/* Glow layer from a sidecar, same as the single-skin path
+				 * above -- see uhexen2-0vgo.1. */
 				pheader->gl_fb_texturenum[i][j&3] = 0;
-				free(external_skin);
+
+				if (gl_fullbrights.integer)
+				{
+					imgreplace_t	glow;
+
+					if (IMG_LoadReplacementGlow (name, NULL, &glow))
+					{
+						char	fbname[MAX_QPATH];
+
+						q_snprintf (fbname, sizeof(fbname), "%s_fb", name);
+						pheader->gl_fb_texturenum[i][j&3] =
+							GL_LoadReplacement (fbname, &glow, TEX_MIPMAP | TEX_ALPHA);
+						IMG_FreeReplacement (&glow);
+					}
+				}
 			}
 			else
 			{

@@ -74,7 +74,7 @@ Planned:
 - Per-entity alpha (ENTALPHA), translucent brush entities, world lightmap overbright (`gl_overbright`), model overbright (`gl_overbright_models`: 0 vanilla clamp, 1 unclamped, 2 doubled to match the world's range), fullbright skins
 - Correct index-0 transparency for all model skins (fixes black backgrounds on projectiles, weapons, items)
 - MD3 model format support (Quake 3 models with GPU-compressed vertex decoding)
-- External texture overrides for BSP textures, model skins, and HUD graphics (TGA/PNG/PCX)
+- External texture overrides for BSP textures, model skins, particles and HUD graphics (DDS/KTX/PNG/TGA/PCX), with per-map override directories, `_glow`/`_luma` sidecars, and block-compressed (BC1–BC7) sources that cut HD-pack VRAM by 4–8x
 - Physics/render decoupling with entity and lightstyle interpolation; pose-driven alias animation lerp (`r_lerpmodels`, `r_lerp_viewmodel`)
 - FOV slider, FPS limiter, HUD modes (Full/Mini/Off/Clean)
 - HUD / menu / crosshair / console scale sliders (auto by framebuffer height)
