@@ -943,9 +943,9 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 			else if (gl_lightmap_format == GL_RGBA)
 			{
 				l = shadedots[verts->lightnormalindex];
-				tmp_color[vi][0] = l * lightcolor[0];
-				tmp_color[vi][1] = l * lightcolor[1];
-				tmp_color[vi][2] = l * lightcolor[2];
+				tmp_color[vi][0] = l * lightcolor[0] * r;
+				tmp_color[vi][1] = l * lightcolor[1] * g;
+				tmp_color[vi][2] = l * lightcolor[2] * b;
 				tmp_color[vi][3] = model_constant_alpha;
 			}
 			else
