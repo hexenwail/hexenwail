@@ -349,33 +349,10 @@ void Fog_StartAdditive (void)
 	}
 }
 
-void Fog_StartAdditiveDouble(void)
-{
-	if (Fog_GetDensity() > 0)
-	{
-		r_fog_density *= 10.0;
-		r_fog_color[0] = 0;
-		r_fog_color[1] = 0;
-		r_fog_color[2] = 0;
-	}
-}
-
 void Fog_StopAdditive (void)
 {
 	if (Fog_GetDensity() > 0)
 	{
-		float *c = Fog_GetColor();
-		r_fog_color[0] = c[0];
-		r_fog_color[1] = c[1];
-		r_fog_color[2] = c[2];
-	}
-}
-
-void Fog_StopAdditiveDouble(void)
-{
-	if (Fog_GetDensity() > 0)
-	{
-		r_fog_density /= 10.0;
 		float *c = Fog_GetColor();
 		r_fog_color[0] = c[0];
 		r_fog_color[1] = c[1];
