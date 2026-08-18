@@ -1347,7 +1347,16 @@ static void R_DrawAliasModel (entity_t *e)
 	VectorAdd (e->origin, clmodel->maxs, maxs);
 
 	if (!AlwaysDrawModel && R_CullBox (mins, maxs))
+	{
+		/* Depth-mask invariant (documented at the blend branch chain
+		 * below): every exit hands the mask back ON, including the ones
+		 * that draw nothing.  R_DrawTransEntitiesOnList tracks the mask
+		 * from that guarantee and cannot see that we culled.
+		 * uhexen2-gwtq. */
+		if (!OIT_InPass())
+			glDepthMask_fp (1);
 		return;
+	}
 
 	VectorCopy (e->origin, r_entorigin);
 	VectorSubtract (r_origin, r_entorigin, modelorg);
@@ -1608,12 +1617,33 @@ static void R_DrawAliasModel (entity_t *e)
 		GL_SetAliasCaustics(caustics, (float)cl.time);
 	}
 
-	/* blend state pokes gated for OIT pass */
+	/* Blend state pokes gated for OIT pass (OIT_BeginTranslucency owns
+	 * blend and depth inside its pass).
+	 *
+	 * DEPTH-MASK INVARIANT (uhexen2-gwtq): outside an OIT pass this
+	 * function owns the depth mask for the whole draw and always returns
+	 * with it back ON.  Every branch below therefore sets the mask it
+	 * needs rather than inheriting the caller's, and the restore near the
+	 * bottom of the function puts it back.  Callers must not set it up
+	 * beforehand and must not assume it survived the call.
+	 *
+	 * Alpha-blended alias geometry must NOT write depth.  A mod's mist is
+	 * one .mdl drawn eight times per frame; with depth writes on, each
+	 * instance depth-rejects the next wherever they overlap, so the
+	 * overlap is replaced wholesale instead of composited and the cloud
+	 * breaks into hard-edged clumps.  Sorting can't rescue it:
+	 * r_alphasort orders back-to-front by squared distance to entity
+	 * ORIGIN, which says nothing useful about interpenetrating instances.
+	 * Same discipline R_RenderBrushPoly already follows for translucent
+	 * brush surfaces (uhexen2-t4kt, uhexen2-j001). */
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		glEnable_fp (GL_BLEND);
 		if (!OIT_InPass())
+		{
 			glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
+			glDepthMask_fp (0);	/* blended: no depth write */
+		}
 		model_constant_alpha = 1.0f;
 		glDisable_fp (GL_CULL_FACE);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1622,7 +1652,10 @@ static void R_DrawAliasModel (entity_t *e)
 	{
 		glEnable_fp (GL_BLEND);
 		if (!OIT_InPass())
+		{
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask_fp (0);	/* blended: no depth write */
+		}
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		else
@@ -1633,14 +1666,25 @@ static void R_DrawAliasModel (entity_t *e)
 	{
 		glEnable_fp (GL_BLEND);
 		if (!OIT_InPass())
+		{
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask_fp (0);	/* blended: no depth write */
+		}
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else if (e->model->flags & EF_HOLEY)
 	{
 		if (!OIT_InPass())
+		{
 			glDisable_fp (GL_BLEND);
+			/* Alpha TEST, not blending: surviving fragments are fully
+			 * opaque and must keep occluding.  Asserted rather than
+			 * inherited because EF_HOLEY entities are routed through
+			 * the translucent list, which no longer pre-enables the
+			 * mask for us.  uhexen2-gwtq. */
+			glDepthMask_fp (1);
+		}
 		/* uhexen2-khsa: 0.5 instead of legacy 0.666. Mathuzzz's
 		 * r_aliasinfo dump (build r3) confirmed CASTLE_TR.MDL is
 		 * EF_HOLEY and all visible entities have e->alpha=0/1.000,
@@ -1667,7 +1711,14 @@ static void R_DrawAliasModel (entity_t *e)
 	{
 		glEnable_fp (GL_BLEND);
 		if (!OIT_InPass())
+		{
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			/* An explicit alpha of 1.0 still composites to an opaque
+			 * result, so only genuinely translucent alphas drop the
+			 * depth write — same predicate the fullbright and blend
+			 * restores below use. */
+			glDepthMask_fp (ENTALPHA_OPAQUE(e->alpha) ? 1 : 0);
+		}
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
@@ -1685,6 +1736,7 @@ static void R_DrawAliasModel (entity_t *e)
 		{
 			glDisable_fp (GL_BLEND);
 			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glDepthMask_fp (1);	/* opaque: writes depth */
 		}
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(1.0f);	/* opaque alias path */
@@ -1822,6 +1874,14 @@ static void R_DrawAliasModel (entity_t *e)
 		if (r_alphatocoverage.integer)
 			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
 	}
+
+	/* Close out the depth-mask invariant documented at the branch chain
+	 * above: whatever a translucent branch turned off, hand back ON.  The
+	 * fullbright and shadow passes below/above already restore to 1
+	 * themselves, so every exit from here leaves the same state and no
+	 * caller has to track it.  uhexen2-gwtq. */
+	if (!OIT_InPass())
+		glDepthMask_fp (1);
 
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
 	/* uhexen2-khsa r13 fixup: restore to 0 (preserve color.a) — that's
@@ -3682,13 +3742,18 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		switch (e->model->type)
 		{
 		case mod_alias:
-			/* depth-write toggle gated for OIT pass */
-			if (!depthMaskWrite && !OIT_InPass())
-			{
-				depthMaskWrite = 1;
-				glDepthMask_fp(1);
-			}
+			/* No depth-mask poke here: R_DrawAliasModel picks the
+			 * mask its own branch needs (blended alias geometry
+			 * draws with writes OFF -- uhexen2-gwtq) and returns
+			 * with the mask back ON.  The shadow variable is
+			 * therefore updated from that guarantee AFTER the call
+			 * instead of from an assumption made before it; the
+			 * callee also flips the mask internally for its
+			 * fullbright and shadow passes, so anything this loop
+			 * believed beforehand would be stale by now. */
 			R_DrawAliasModel (e);
+			if (!OIT_InPass())
+				depthMaskWrite = 1;
 			break;
 		case mod_brush:
 			if (!depthMaskWrite && !OIT_InPass())
