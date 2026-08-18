@@ -1396,13 +1396,63 @@ static int R_WeatherCount (int count, const cvar_t *intensity)
 
 /*
 ===============
+R_PickRainSpawn
+
+Choose a point on the volume's top plane for one drop, avoiding solid.
+
+Rain never had the retry loop snow has, which cost nothing while drops fell
+through everything: one spawned inside a wall simply emerged below it a moment
+later.  With r_raincollide on it dies on its first update instead, and that is
+not hypothetical -- Raven's own castle4 embeds rain brushes in the
+architecture, and ten of its seventeen volumes have 50-98% of their top plane
+inside solid.  Without this the collision test silently deleted most of the
+rain from a retail map, which is a poor trade for drops no longer sailing
+through floors.
+
+Returns false when the tries run out, and the caller then skips that drop
+rather than spending a particle on one that dies immediately.  Deliberately
+NOT snow's Sys_Error next door: a rain brush buried in geometry is a mapping
+quirk, not a reason to end the game.
+
+With collision off this returns on the first try having drawn exactly the two
+random numbers the stock code drew, so that path is untouched down to the RNG
+sequence.
+===============
+*/
+static qboolean R_PickRainSpawn (vec3_t org, vec3_t e_size, vec3_t out)
+{
+	int	sx = (int)e_size[0];
+	int	sy = (int)e_size[1];
+	int	tries;
+
+	for (tries = 0; tries < 50; tries++)
+	{
+		/* A zero-thickness volume would divide by zero here.  Stock never
+		 * guarded it; nothing in the shipping maps hits it, but a mapper
+		 * should not be able to crash the client with a flat brush. */
+		out[0] = org[0] + ((sx > 0) ? (rand() % sx) : 0);
+		out[1] = org[1] + ((sy > 0) ? (rand() % sy) : 0);
+		out[2] = org[2];
+
+		if (!r_raincollide.integer || !cl.worldmodel)
+			return true;
+
+		if (Mod_PointInLeaf (out, cl.worldmodel)->contents == CONTENTS_EMPTY)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+===============
 R_RainEffect
 
 ===============
 */
 void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, int color, int count)
 {
-	int		i, holdint;
+	int		i;
 	particle_t	*p;
 	float		z_time, fall;
 
@@ -1437,6 +1487,14 @@ void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, i
 
 	for (i = 0; i < count; i++)
 	{
+		vec3_t	spawn;
+
+		/* Pick the spot before committing a particle to it, so a volume
+		 * whose top plane is largely buried costs skipped drops rather
+		 * than particles that die on the frame they were born. */
+		if (!R_PickRainSpawn (org, e_size, spawn))
+			continue;
+
 		p = AllocParticle();
 		if (!p)
 			return;
@@ -1478,11 +1536,7 @@ void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, i
 
 		p->type = pt_rain;
 
-		holdint = e_size[0];
-		p->org[0] = org[0] + (rand() % holdint);
-		holdint = e_size[1];
-		p->org[1] = org[1] + (rand() % holdint);
-		p->org[2] = org[2];
+		VectorCopy (spawn, p->org);
 	}
 }
 
