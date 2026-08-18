@@ -940,20 +940,12 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 			{
 				tmp_color[vi][0] = tmp_color[vi][1] = tmp_color[vi][2] = tmp_color[vi][3] = 1;
 			}
-			else if (gl_lightmap_format == GL_RGBA)
+			else
 			{
 				l = shadedots[verts->lightnormalindex];
 				tmp_color[vi][0] = l * lightcolor[0] * r;
 				tmp_color[vi][1] = l * lightcolor[1] * g;
 				tmp_color[vi][2] = l * lightcolor[2] * b;
-				tmp_color[vi][3] = model_constant_alpha;
-			}
-			else
-			{
-				l = shadedots[verts->lightnormalindex] * shadelight;
-				tmp_color[vi][0] = r*l;
-				tmp_color[vi][1] = g*l;
-				tmp_color[vi][2] = b*l;
 				tmp_color[vi][3] = model_constant_alpha;
 			}
 
@@ -1310,13 +1302,7 @@ static void AliasModelGetLightInfo (entity_t *e)
 
 	VectorCopy(e->origin, adjust_origin);
 	adjust_origin[2] += (e->model->mins[2] + e->model->maxs[2]) / 2;
-	if (gl_lightmap_format == GL_RGBA)
-		ambientlight = shadelight = R_LightPointColor (adjust_origin);
-	else
-	{
-		ambientlight = shadelight = R_LightPoint (adjust_origin);
-		lightcolor[0] = lightcolor[1] = lightcolor[2] = ambientlight;
-	}
+	ambientlight = shadelight = R_LightPointColor (adjust_origin);
 }
 
 /*
@@ -2739,37 +2725,19 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst = &alias_instances[num_alias_instances];
 	Mat4_Transpose4x3(world, inst->worldmatrix);
 
-	/* Store light color.  In RGBA lightmap mode, lightcolor already has
-	 * full intensity from R_LightPointColor — don't multiply by shadelight
-	 * (the CPU path also skips shadelight in RGBA mode). */
+	/* Store light color.  lightcolor already has full intensity from
+	 * R_LightPointColor — don't multiply by shadelight (the CPU path also
+	 * skips shadelight). */
 	cs = e->colorshade;
-	if (gl_lightmap_format == GL_RGBA)
+	if (cs)
 	{
-		if (cs)
-		{
-			inst->light_color[0] = lightcolor[0] * RTint[cs];
-			inst->light_color[1] = lightcolor[1] * GTint[cs];
-			inst->light_color[2] = lightcolor[2] * BTint[cs];
-		}
-		else
-		{
-			VectorCopy(lightcolor, inst->light_color);
-		}
+		inst->light_color[0] = lightcolor[0] * RTint[cs];
+		inst->light_color[1] = lightcolor[1] * GTint[cs];
+		inst->light_color[2] = lightcolor[2] * BTint[cs];
 	}
 	else
 	{
-		if (cs)
-		{
-			inst->light_color[0] = lightcolor[0] * RTint[cs] * shadelight;
-			inst->light_color[1] = lightcolor[1] * GTint[cs] * shadelight;
-			inst->light_color[2] = lightcolor[2] * BTint[cs] * shadelight;
-		}
-		else
-		{
-			inst->light_color[0] = lightcolor[0] * shadelight;
-			inst->light_color[1] = lightcolor[1] * shadelight;
-			inst->light_color[2] = lightcolor[2] * shadelight;
-		}
+		VectorCopy(lightcolor, inst->light_color);
 	}
 
 	inst->alpha = 1.0f;
@@ -3261,9 +3229,8 @@ static void R_DumpAliasInfo (void)
 	Con_Printf("r_wateralpha=%g  r_softemu=%d  r_alphatocoverage=%d  r_alias_minlight=%g\n",
 		   r_wateralpha.value, r_softemu.integer, r_alphatocoverage.integer,
 		   r_alias_minlight.value);
-	Con_Printf("gl_lightmap_format=0x%x (RGBA=0x%x → %s path)  worldmodel->lightdata=%s\n",
+	Con_Printf("gl_lightmap_format=0x%x (RGBA=0x%x, R_LightPointColor path)  worldmodel->lightdata=%s\n",
 		   gl_lightmap_format, GL_RGBA,
-		   (gl_lightmap_format == GL_RGBA) ? "R_LightPointColor" : "R_LightPoint",
 		   (cl.worldmodel && cl.worldmodel->lightdata) ? "present" : "NULL (fullbright map)");
 	Con_Printf("frame=%d  cl_numvisedicts=%d\n", r_framecount, cl_numvisedicts);
 	Con_Printf("idx slot model                          flags                          origin                       ambient  lightcolor(r,g,b)\n");
@@ -3298,15 +3265,8 @@ static void R_DumpAliasInfo (void)
 		VectorCopy(lightcolor, saved_lc);
 		VectorCopy(e->origin, adjust_origin);
 		adjust_origin[2] += (e->model->mins[2] + e->model->maxs[2]) / 2;
-		if (gl_lightmap_format == GL_RGBA)
-		{
-			lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
-			amb = R_LightPointColor(adjust_origin);
-		}
-		else
-		{
-			amb = R_LightPoint(adjust_origin);
-		}
+		lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
+		amb = R_LightPointColor(adjust_origin);
 
 		Con_Printf("%3d %4d %-30s %-30s (%7.1f %7.1f %7.1f) amb=%6.1f lc=(%6.1f %6.1f %6.1f)\n",
 			   i, (int)(e - cl_entities), e->model->name, fbuf,
@@ -4020,24 +3980,15 @@ static void R_DrawViewModel (void)
 	if (!e->model)
 		return;
 
-	if (gl_lightmap_format == GL_RGBA)
-	{
-		ambientlight = R_LightPointColor (e->origin);
-		if (lightcolor[0] < 24)
-			lightcolor[0] = 24;
-		if (lightcolor[1] < 24)
-			lightcolor[1] = 24;
-		if (lightcolor[2] < 24)
-			lightcolor[2] = 24;
-		if (ambientlight < 24)
-			ambientlight = 24;		// always give some light on gun
-	}
-	else
-	{
-		ambientlight = shadelight = R_LightPoint (e->origin);
-		if (ambientlight < 24)
-			ambientlight = shadelight = 24;	// always give some light on gun
-	}
+	ambientlight = R_LightPointColor (e->origin);
+	if (lightcolor[0] < 24)
+		lightcolor[0] = 24;
+	if (lightcolor[1] < 24)
+		lightcolor[1] = 24;
+	if (lightcolor[2] < 24)
+		lightcolor[2] = 24;
+	if (ambientlight < 24)
+		ambientlight = 24;		// always give some light on gun
 
 // add dynamic lights
 	if (!r_dynamic.integer)
@@ -4054,16 +4005,9 @@ static void R_DrawViewModel (void)
 		add = dl->radius - VectorLengthFast(dist);
 		if (add > 0)
 		{
-			if (gl_lightmap_format == GL_RGBA)
-			{
-				lightcolor[0] += (float) (dl->color[0] * add);
-				lightcolor[1] += (float) (dl->color[1] * add);
-				lightcolor[2] += (float) (dl->color[2] * add);
-			}
-			else
-			{
-				shadelight += (float) add;
-			}
+			lightcolor[0] += (float) (dl->color[0] * add);
+			lightcolor[1] += (float) (dl->color[1] * add);
+			lightcolor[2] += (float) (dl->color[2] * add);
 
 			ambientlight += add;
 		}
