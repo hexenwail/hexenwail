@@ -2642,20 +2642,6 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 		return;
 	}
 
-	/* TEMP DEBUG uhexen2-zo7x */
-	if (strstr(glt->identifier, "ball") || strstr(glt->identifier, "star"))
-	{
-		int zero = 0, full = 0, j;
-		for (j = 0; j < s; j++)
-		{
-			unsigned int a = (trans[j] & MASK_a) >> SHIFT_a;
-			if (a == 0) zero++;
-			else if (a == 255) full++;
-		}
-		Con_Printf("ZO7X %s flags=0x%x %dx%d alpha0=%d alpha255=%d of %d\n",
-			   glt->identifier, glt->flags, glt->width, glt->height, zero, full, s);
-	}
-
 	GL_Upload32 (trans, glt);
 	Hunk_FreeToLowMark(mark);
 }
