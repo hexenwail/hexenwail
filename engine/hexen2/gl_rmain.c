@@ -2952,7 +2952,7 @@ static void R_DrawAliasInstanced (void)
 			       R_CausticsIntensity(), (float)cl.time);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 
 	GL_SetAlphaThreshold(0.01f);
 
@@ -2997,9 +2997,9 @@ static void R_DrawAliasInstanced (void)
 		if (pose_ssbo != last_pose_ssbo)
 		{
 			if (gm->poseverttype == PV_MD3)
-				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, pose_ssbo);
+				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, pose_ssbo);
 			else
-				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, pose_ssbo);
+				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, pose_ssbo);
 			last_pose_ssbo = pose_ssbo;
 		}
 
@@ -3025,10 +3025,10 @@ static void R_DrawAliasInstanced (void)
 	/* Restore state */
 	glBindVertexArray_fp(0);
 	glUseProgram_fp(0);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, 0);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, 0);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, 0);
 	GL_SetAlphaThreshold(0.01f);
 
 	/* Reset SSBO cache for next frame */
@@ -3123,7 +3123,7 @@ static void R_DrawAliasInstanced (void)
 			if (prog->u_force_opaque_alpha >= 0)
 				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
+			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			glEnable_fp(GL_BLEND);
 			glBlendFunc_fp(GL_ONE, GL_ONE);	/* additive */
 			glDepthMask_fp(0);
@@ -3150,7 +3150,7 @@ static void R_DrawAliasInstanced (void)
 
 				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
-				glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
+				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
 				if (prog->u_inst_base >= 0)
 					glUniform1i_fp(prog->u_inst_base, batch->first);
 				glBindVertexArray_fp(gm->vao);
@@ -3167,9 +3167,9 @@ static void R_DrawAliasInstanced (void)
 
 			glBindVertexArray_fp(0);
 			glUseProgram_fp(0);
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, 0);
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, 0);
-			glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 2, 0);
+			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
 		}
 	}
 }

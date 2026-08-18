@@ -139,6 +139,38 @@ void GL_BindBufferRange (GLenum target, GLuint index,
 	glBindBufferRange_fp (target, index, buffer, offset, size);
 }
 
+void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
+{
+	bufferrange_t *cache = NULL;
+
+	if (target == GL_SHADER_STORAGE_BUFFER && index < CACHED_BUFFER_RANGES)
+		cache = &ssbo_ranges[index];
+	else if (target == GL_UNIFORM_BUFFER && index < CACHED_BUFFER_RANGES)
+		cache = &ubo_ranges[index];
+
+	/* Record the new binding rather than skip a redundant one: a raw
+	 * glBindBufferBase_fp here would leave the range cache holding the
+	 * previous (buffer, offset, size), and the next GL_BindBufferRange
+	 * repeating that triple would short-circuit while the real binding
+	 * still points wherever BindBufferBase left it.  size 0 is not a legal
+	 * BindBufferRange size, so it can never be mistaken for a cache hit.
+	 * uhexen2-lzex. */
+	if (cache)
+	{
+		cache->buffer = buffer;
+		cache->offset = 0;
+		cache->size   = 0;
+	}
+
+	/* BindBufferBase moves the generic target binding too. */
+	if (target == GL_SHADER_STORAGE_BUFFER)
+		current_shader_storage_buffer = buffer;
+	else if (target == GL_UNIFORM_BUFFER)
+		current_uniform_buffer = buffer;
+
+	glBindBufferBase_fp (target, index, buffer);
+}
+
 void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 			  const GLuint *buffers,
 			  const GLintptr *offsets,
@@ -470,6 +502,12 @@ void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size)
 {
 	(void)target; (void)index; (void)buffer; (void)offset; (void)size;
+}
+
+/* No range cache to keep in sync here, but callers still need the bind. */
+void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
+{
+	glBindBufferBase_fp (target, index, buffer);
 }
 
 void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,

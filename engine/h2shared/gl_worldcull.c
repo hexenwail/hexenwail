@@ -1079,7 +1079,7 @@ void R_DispatchWorldCull (void)
 	/* Pass 1: clear indirect buffer */
 	glUseProgram_fp(cull_clear_prog);
 	glUniform1i_fp(cull_clear_u_num_buckets, cull_num_buckets);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
 	glDispatchCompute_fp((cull_num_buckets + 63) / 64, 1, 1);
 	glMemoryBarrier_fp(GL_SHADER_STORAGE_BARRIER_BIT);
 
@@ -1130,13 +1130,13 @@ void R_DispatchWorldCull (void)
 		glUniform4fv_fp(cull_mark_u_frustum, 4, frust);
 	}
 
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 0, cull_surf_ssbo);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 1, cull_marksurf_ssbo);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, cull_surf_ssbo);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, cull_marksurf_ssbo);
 	/* binding 2 already bound via GL_BindBufferRange above (PVS upload). */
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 4, cull_src_ibo);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 5, cull_dst_ibo);
-	glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 6, cull_dedup_ssbo);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, cull_src_ibo);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, cull_dst_ibo);
+	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, cull_dedup_ssbo);
 
 	/* Stats counters (uhexen2-cyu0).  Bind always; gating happens via
 	 * u_stats_enable in the shader so we don't pay for atomicAdds when
@@ -1152,7 +1152,7 @@ void R_DispatchWorldCull (void)
 		}
 		if (cull_mark_u_stats_enable >= 0)
 			glUniform1i_fp(cull_mark_u_stats_enable, stats_on ? 1 : 0);
-		glBindBufferBase_fp(GL_SHADER_STORAGE_BUFFER, 7, cull_stats_ssbo);
+		GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, cull_stats_ssbo);
 	}
 
 	glDispatchCompute_fp((cull_num_marksurfs + 63) / 64, 1, 1);

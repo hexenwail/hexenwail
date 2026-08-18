@@ -278,6 +278,11 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes,
 		GLuint *outbuf, GLintptr *outofs);
 void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size);
+/* Indexed binder that keeps the range cache in sync.  Prefer over raw
+ * glBindBufferBase_fp for SHADER_STORAGE/UNIFORM: a raw bind leaves the
+ * cache stale and the next GL_BindBufferRange can short-circuit onto a
+ * binding that is no longer there. */
+void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer);
 void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 			  const GLuint *buffers,
 			  const GLintptr *offsets,
