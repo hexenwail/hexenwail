@@ -374,3 +374,65 @@ Fix uhexen2-mr2l regardless — it is a real bug on its own. Then one question t
 the tester, no build required: **do the guards render correctly on a fresh load
 of egypt (new game / direct map load), versus after arriving from another map?**
 That tests the whole chain in one answer.
+
+
+---
+
+# Addendum 3 — r9 tested, not fixed (2026-08-18)
+
+Mathuzzz tested 0.8.0-beta.r9. The uhexen2-mr2l pimpmodel skin fixes **do not**
+resolve the screen-door. The stale-HOLEY-skin mechanism is eliminated as the
+cause.
+
+That was always the weak link, and Addendum 2 said so: the EF_HOLEY pimp grants
+in SoT target `parchment`/`book`/`empty*.mdl` and never `guard.mdl`. mr2l stays
+closed on its own merits — the EF_TRANSPARENT grant path really was leaving
+SoT's candles, waterfalls and crown pickup silently opaque — it is simply not
+this bug. The khsa→mr2l dependency has been removed.
+
+## Also eliminated: stencil
+
+Worth writing down because it looked good on paper. A garbage stencil buffer
+would produce per-fragment ~50% coverage loss with byte-exact background, and
+would plausibly differ between vendors — Mesa tends to zero-fill VRAM, NVIDIA
+does not.
+
+It does not happen here. `R_SetupGL` clears stencil unconditionally every frame
+when `have_stencil` (`gl_rmain.c:4619-4623`), and every `glEnable(GL_STENCIL_TEST)`
+site has a matching disable (`gl_rsurf.c:2563`, `gl_rmain.c:1106`,
+`gl_sky.c:1643`).
+
+## Running elimination list
+
+A2C · ordered dither · `r_softemu`/`r_dither` · MSAA sample masks · lightmap
+alpha · `v_color.a` · soft particles · stochastic alpha (absent from tree) ·
+external TGA skins (alpha uniformly 255) · `Mod_FixupMissingModelFlags` (scoped
+to `ball.mdl`) · the r29 mipmap-filter theory · mr2l stale HOLEY skins · stencil.
+
+## Established, and not in dispute
+
+* fragments are **discarded**, not blended — holes are byte-exact background
+* ~50% coverage loss, one screen pixel, not aligned to the screen grid
+* hits **both** alias models (guards) and brush entities (the egypt ship)
+* NVIDIA only, across two architectures (980 Maxwell, 1080 Pascal); never AMD
+* the correct texture pops in and out with **view angle** → mip LOD /
+  anisotropic taps are involved
+* cross-map, and per the 2026-06-22 clues tied to map **transitions**
+
+## Process
+
+Per the 2026-06-22 pivot note: **do not ship another speculative probe build.**
+That pattern has now cost ~30 builds across a multi-day Discord loop, and the
+defect has still never been directly observed by a developer. The remaining
+candidates cannot be separated by reading code. They need one observation.
+
+Two cheap things are still missing:
+
+1. Mathuzzz said "not fixed" but has not answered the discriminating question —
+   for each map, did he **arrive from another map** or load it **directly**
+   (`map <name>` / new game), and does re-loading the same map clear it? A
+   cold-direct-load sighting kills the entire map-transition family in one reply.
+2. **A RenderDoc capture** from either reporter. Now the highest-value artifact
+   by a wide margin: it shows the guard's actual draw call, the skin texture
+   actually bound with its alpha channel, and the live `u_alpha_threshold`. That
+   separates every remaining candidate at once.
