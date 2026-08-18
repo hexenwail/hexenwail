@@ -1544,6 +1544,14 @@ extern int	sky_stencil_total_indices;
  * shader/VAO/atlas/fog/alpha_threshold bind. */
 qboolean brush_batch_active = false;
 
+/* Monotonic id for R_DrawBrushModel's special-surface handoff.  Stamping
+ * surf->visframe with a per-pass id instead of a sticky -1 sentinel means a
+ * mark left by an earlier frame, or by another entity sharing this submodel,
+ * can never be mistaken for one made during this pass -- backface culling
+ * leaves the field untouched, so the old sentinel kept redrawing surfaces
+ * that had since turned away.  uhexen2-gkuh. */
+static int	brush_special_pass = 0;
+
 /* Walk a brush submodel's surfaces and render only the special ones
  * (sky / turb / fence / underwater) via the legacy R_RenderBrushPoly.
  * Used when the brush-instance collector has already drawn this
@@ -2703,6 +2711,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		static msurface_t *batch_surfs[MAX_BMODEL_BATCH];
 		int batch_count = 0;
 		int n_special = 0;
+		int special_pass;
 		float mvp[16], mv[16];
 		int s_idx;
 		texture_t *cur_tex = NULL;
@@ -2750,6 +2759,13 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		if (prog->u_modelview >= 0)
 			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
 
+		/* Claim an id for this pass's special-surface handoff.  Ids stay
+		 * negative so they never collide with the r_framecount stamp the
+		 * same field carries for surfaces drawn below. */
+		if (++brush_special_pass < 0)
+			brush_special_pass = 1;
+		special_pass = -brush_special_pass;
+
 		/* Build texture chains by walking surfaces in texturechain
 		 * order via the model's textures.  Each chain is processed,
 		 * issuing a single batched glDrawElements per texture. */
@@ -2768,7 +2784,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 			if (surf->flags & (SURF_DRAWSKY | SURF_DRAWTURB |
 					   SURF_DRAWFENCE | SURF_UNDERWATER))
 			{
-				surf->visframe = -1;	/* mark for legacy pass */
+				surf->visframe = special_pass;	/* mark for legacy pass */
 				n_special++;
 				continue;
 			}
@@ -2922,7 +2938,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 			psurf = &clmodel->surfaces[clmodel->firstmodelsurface];
 			for (i = 0; i < clmodel->nummodelsurfaces; i++, psurf++)
 			{
-				if (psurf->visframe != -1)
+				if (psurf->visframe != special_pass)
 					continue;
 				R_RenderBrushPoly (e, psurf, false);
 			}
