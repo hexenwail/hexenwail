@@ -33,6 +33,11 @@ on:
     branches:
       - 'tester/**'
 
+# Builds and uploads artifacts; writes nothing back to the repository.
+# Matches security-scan.yml and ci.yml.  uhexen2-bvei.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -65,8 +70,18 @@ jobs:
       - name: Build release bundle
         run: nix build .#release --print-build-logs
 
+      # Same fix as ci.yml: this could not fail, because without pipefail the
+      # pipeline reported head's status and `|| true` swallowed the rest.  It
+      # matters more here than there -- the whole point of this workflow is
+      # handing a tester something that runs, so shipping a binary that dies
+      # on startup is the one outcome it exists to prevent.  -k 5 because the
+      # engine ignores SIGTERM during shutdown.  uhexen2-bvei.
       - name: Smoke test
-        run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+        run: |
+          set -euo pipefail
+          SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \
+            timeout -k 5 10 nix run .#nixos -- -help > smoke.log 2>&1
+          head -20 smoke.log
 
       - name: Package artifacts
         # Passed as env rather than interpolated into the script body: a

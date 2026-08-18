@@ -8,6 +8,13 @@ on:
   pull_request:
     branches: [master]
 
+# Nothing here writes to the repository -- it builds, lints and throws the
+# result away.  security-scan.yml has always scoped itself this way; these
+# jobs simply never did, and inherited whatever the repository default is.
+# uhexen2-bvei.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -15,7 +22,12 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install shellcheck and appstream
-        run: sudo apt-get install -y shellcheck appstream
+        run: |
+          # The flatpak job below updates before installing; this one did not,
+          # so it worked only for as long as the runner image's index stayed
+          # fresh enough to still resolve these versions.  uhexen2-bvei.
+          sudo apt-get update
+          sudo apt-get install -y shellcheck appstream
 
       - name: Shellcheck
         run: shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh
@@ -25,8 +37,15 @@ jobs:
       # it before, so breakage would only have surfaced at publish time.
       # Note this validates structure, not currency — release.yml is what keeps
       # the <releases> block from going stale.
+      #
+      # --no-net for the same reason release.yml carries it (327bd5510):
+      # appstreamcli otherwise fetches every <url> in the file and treats an
+      # unreachable one as a warning it exits non-zero on, so this step went
+      # red when github.com had a bad minute rather than when the file was
+      # wrong.  That is what failed release r5.  Structure is what we want
+      # checked here.  uhexen2-vm9w, uhexen2-bvei.
       - name: Validate AppStream metainfo
-        run: appstreamcli validate --explain flatpak/io.github.hexenwail.hexenwail.metainfo.xml
+        run: appstreamcli validate --no-net --explain flatpak/io.github.hexenwail.hexenwail.metainfo.xml
 
       # emscripten.h defines a bare EMSCRIPTEN alias under a deprecation
       # pragma, so a guard spelled that way only works in translation units
@@ -61,8 +80,23 @@ jobs:
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
+      # This is the only step in the pipeline that runs the engine rather than
+      # compiling it, and until now it could not fail: with no pipefail the
+      # pipeline reported head's status, and `|| true` swallowed whatever
+      # survived that.  A binary that segfaulted on startup passed.
+      #
+      # -k 5 because the engine ignores SIGTERM during shutdown, so a plain
+      # `timeout` can wait forever on a wedged process -- which, with no
+      # timeout-minutes on the job, is a six-hour run.
+      #
+      # -help is safe to assert on: sys_unix.c handles it with PrintHelp()
+      # then exit(0), before any SDL or video init.  uhexen2-bvei.
       - name: Smoke test
-        run: SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy timeout 10 nix run .#nixos -- -help 2>&1 | head -20 || true
+        run: |
+          set -euo pipefail
+          SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \
+            timeout -k 5 10 nix run .#nixos -- -help > smoke.log 2>&1
+          head -20 smoke.log
 
       - name: Build dedicated server
         run: nix build .#h2ded --print-build-logs
