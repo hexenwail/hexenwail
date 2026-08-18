@@ -1265,6 +1265,13 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 
 	if (blend > 0.0f && blend < 1.0f && prevpose != pose)
 		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, blend);
+	else if (blend <= 0.0f && prevpose != pose)
+	{
+		/* blend 0 means "fully the previous pose", matching the GPU
+		 * path's mix(v1, v0, blend) with v1 = prevpose. Drawing pose
+		 * here pops one frame forward on every pose change. */
+		GL_DrawAliasFrame(e, paliashdr, prevpose, prevpose, 0.0f);
+	}
 	else
 	{
 		GL_DrawAliasFrame(e, paliashdr, pose, pose, 0.0f);
