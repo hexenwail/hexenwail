@@ -1404,9 +1404,36 @@ void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, i
 {
 	int		i, holdint;
 	particle_t	*p;
-	float		z_time;
+	float		z_time, fall;
 
 	count = R_WeatherCount (count, &r_rainintensity);
+
+	/* How far the drop is allowed to fall before its timer gives up.
+	 * Stock is the volume's own height, so a drop dies exactly as it
+	 * leaves the brush -- which is why rain from a brush suspended
+	 * above the floor stops in mid-air instead of reaching the ground.
+	 * SoT's demo1 is the case that showed it: the volume bottom sits
+	 * 587 units above one of the two player starts, so at that spawn
+	 * the rain is a band overhead and never arrives.
+	 *
+	 * With collision on, the timer no longer has to be the thing that
+	 * stops a drop -- the world is -- so let it keep falling and land.
+	 * Still bounded, because a drop over a pit, or over a leak, may
+	 * never hit anything at all: below the bottom of the world it can
+	 * no longer be in front of anybody, and that bound scales with the
+	 * map rather than being a number picked out of the air.
+	 *
+	 * Gated on r_raincollide because without the collision test this
+	 * would only buy longer flights through solid geometry.  Never
+	 * shortens the stock fall, so a volume taller than the drop's room
+	 * below it keeps behaving exactly as it did.  uhexen2-2rxl. */
+	fall = e_size[2];
+	if (r_raincollide.integer && cl.worldmodel)
+	{
+		float	room = org[2] - cl.worldmodel->mins[2];
+		if (room > fall)
+			fall = room;
+	}
 
 	for (i = 0; i < count; i++)
 	{
@@ -1443,7 +1470,7 @@ void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, i
 			}
 		}
 
-		z_time = -(e_size[2]/p->vel[2]);
+		z_time = -(fall/p->vel[2]);
 		p->die = cl.time + z_time;
 		p->color = color;
 		p->ramp = rand() & 3;
