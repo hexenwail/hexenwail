@@ -165,6 +165,8 @@ static qboolean	gl_stale_gltextures;
 static GLuint GL_LoadPixmap (const char *name, const char *data);
 static void GL_Upload32 (unsigned int *data, gltexture_t *glt);
 static void GL_Upload8 (byte *data, gltexture_t *glt);
+static void GL_UploadCompressed (const imgreplace_t *r, unsigned int glformat, gltexture_t *glt);
+static void GL_SetTextureFilter (const gltexture_t *glt);
 
 
 //=============================================================================
@@ -2282,6 +2284,27 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 		}
 	}
 
+	GL_SetTextureFilter (glt);
+
+	if (mark)
+		Hunk_FreeToLowMark(mark);
+}
+
+/*
+===============
+GL_SetTextureFilter
+
+Sampler state for a freshly uploaded texture: min/mag filters, anisotropy,
+LOD bias and the alpha swizzle.  Split out of GL_Upload32 so the
+block-compressed path (GL_UploadCompressed) applies exactly the same rules --
+a texture that came from a DDS should sample identically to the same art
+shipped as a PNG, and two copies of this would not stay that way.
+
+The texture must already be bound.
+===============
+*/
+static void GL_SetTextureFilter (const gltexture_t *glt)
+{
 	if (glt->flags & TEX_NEAREST)
 	{
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -2349,9 +2372,61 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	 * GL_ALPHA so re-uploads of the same texture name stay correct. */
 	glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
 			   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
+}
 
-	if (mark)
-		Hunk_FreeToLowMark(mark);
+/*
+===============
+GL_UploadCompressed
+
+Hand a pre-compressed block payload straight to the driver, one mip level per
+call.  No decode, no resample, no mip generation -- the pack already did all
+three, which is the entire point of shipping DDS/KTX.
+
+gl_picmip and gl_max_size are honoured by dropping whole levels off the top of
+the chain rather than by rescaling; for a mip chain that is not an
+approximation of what the RGBA path does, it is the same answer for free.
+
+uhexen2-0vgo.5
+===============
+*/
+static void GL_UploadCompressed (const imgreplace_t *r, unsigned int glformat, gltexture_t *glt)
+{
+	int	i, first, levels;
+
+	first = gl_picmip.integer;
+	if (first < 0)
+		first = 0;
+	if (first > r->nummips - 1)
+		first = r->nummips - 1;
+
+	while (first < r->nummips - 1 &&
+	       (r->mipw[first] > gl_max_size || r->miph[first] > gl_max_size))
+		first++;
+
+	levels = 0;
+	for (i = first; i < r->nummips; i++)
+	{
+		glCompressedTexImage2D_fp (GL_TEXTURE_2D, levels, (GLenum)glformat,
+					   r->mipw[i], r->miph[i], 0,
+					   (GLsizei) r->mipsize[i],
+					   r->blocks + r->mipofs[i]);
+		levels++;
+
+		if (!(glt->flags & TEX_MIPMAP))
+			break;
+	}
+
+	/* A container is free to ship a single level, and plenty do.  Under a
+	 * mipmapping min filter that leaves the texture incomplete, which
+	 * samples as white or black depending on the driver -- so cap the chain
+	 * at what was actually uploaded instead of leaving GL's default of
+	 * 1000.  Set explicitly rather than only when short: this texture name
+	 * is fresh from glGenTextures, but being explicit costs nothing and
+	 * survives any future slot reuse. */
+	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri_fp (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels > 0 ? levels - 1 : 0);
+
+	GL_SetTextureFilter (glt);
 }
 
 /*
@@ -2631,10 +2706,20 @@ static int GL_ClaimStaleTexture (void)
 
 /*
 ================
-GL_LoadTexture
+GL_LoadTextureEx
+
+Shared body of GL_LoadTexture and GL_LoadReplacement.
+
+cimg is NULL for the ordinary indexed/RGBA path.  When it is set, data is
+ignored and the texture comes from that container's block payload in cformat
+instead.  Everything around the upload -- the identifier hash, stale-slot
+reuse, and the mismatch detection that retires an entry whose properties
+changed mid-session (uhexen2-0fsq) -- is identical either way, which is why
+the two entry points share this rather than keeping separate copies of it.
 ================
 */
-GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height, int flags)
+static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, int height,
+				int flags, const imgreplace_t *cimg, unsigned int cformat)
 {
 	int		i, slot, size, key;
 	unsigned short	crc;
@@ -2645,10 +2730,22 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 		return GL_UNUSED_TEXTURE;
 #endif
 
-	size = width * height;
-	if (flags & TEX_RGBA)
-		size *= 4;
-	crc = CRC_Block (data, size);
+	if (cimg)
+	{
+		/* CRC the block payload, not width*height: the dimensions say
+		 * nothing about how many bytes a compressed level occupies, and
+		 * the cache must still be able to tell two same-sized textures
+		 * that share an identifier apart. */
+		size = (int)(cimg->mipofs[cimg->nummips - 1] + cimg->mipsize[cimg->nummips - 1]);
+		crc = CRC_Block (cimg->blocks, size);
+	}
+	else
+	{
+		size = width * height;
+		if (flags & TEX_RGBA)
+			size *= 4;
+		crc = CRC_Block (data, size);
+	}
 
 	key = Hash_GenerateKeyString (&hash_gltextures, identifier, true);
 	if (identifier[0])
@@ -2717,11 +2814,62 @@ GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height
 	glt->crc = crc;
 
 	GL_Bind (glt->texnum);
-	if (flags & TEX_RGBA)
+	if (cimg)
+		GL_UploadCompressed (cimg, cformat, glt);
+	else if (flags & TEX_RGBA)
 		GL_Upload32 ((unsigned int *)data, glt);
 	else	GL_Upload8 (data, glt);
 
 	return glt->texnum;
+}
+
+/*
+================
+GL_LoadTexture
+================
+*/
+GLuint GL_LoadTexture (const char *identifier, byte *data, int width, int height, int flags)
+{
+	return GL_LoadTextureEx (identifier, data, width, height, flags, NULL, 0);
+}
+
+/*
+================
+GL_LoadReplacement
+
+Upload a replacement image resolved by img_load.c, taking whichever path the
+file on disk calls for.  Callers pass only what they know about the surface
+(TEX_MIPMAP, and TEX_FENCE / TEX_HOLEY for cutouts); TEX_ALPHA and TEX_RGBA
+come from the image.
+================
+*/
+GLuint GL_LoadReplacement (const char *identifier, const struct imgreplace_s *r, int extraflags)
+{
+	int		flags = extraflags;
+	unsigned int	format;
+
+	if (r->has_alpha)
+		flags |= TEX_ALPHA;
+
+	if (!r->blocks || r->nummips < 1)
+		return GL_LoadTextureEx (identifier, r->rgba, r->width, r->height,
+					 flags | TEX_RGBA, NULL, 0);
+
+	format = r->glformat;
+
+	/* A DXT1 file that did not set DDPF_ALPHAPIXELS decodes with alpha
+	 * forced to 1.0.  That is right for an opaque wall and wrong for a
+	 * cutout, where the holes are the entire point of the texture -- and
+	 * most DDS writers never set the flag.  Where the caller has already
+	 * established this is a cutout (a '{' texture name, or EF_HOLEY on a
+	 * model), believe the caller over the file. */
+	if ((flags & (TEX_FENCE | TEX_HOLEY)) && format == GL_COMPRESSED_RGB_S3TC_DXT1_EXT)
+	{
+		format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+		flags |= TEX_ALPHA;
+	}
+
+	return GL_LoadTextureEx (identifier, NULL, r->width, r->height, flags, r, format);
 }
 
 /*

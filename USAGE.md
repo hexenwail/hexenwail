@@ -2,13 +2,76 @@
 
 ## External textures
 
-Hexenwail supports external texture overrides — drop hi-res TGA/PNG/PCX files into the game directory to replace internal assets:
+Hexenwail supports external texture overrides — drop hi-res files into the game
+directory to replace internal assets:
 
 | Asset type | Override path | Cvar |
 |------------|--------------|------|
-| BSP textures | `textures/<name>.tga` | `r_texture_external 1` |
-| Model skins | `models/<model>_<skin>.tga` | `r_texture_external 1` |
-| HUD/menu graphics | `gfx/<name>.tga` | `r_texture_external_hud 1` |
+| BSP textures | `textures/<name>.<ext>` | always on |
+| BSP textures, one map only | `textures/<mapname>/<name>.<ext>` | always on |
+| Model skins | `models/<model>_<skin>.<ext>` | always on |
+| Particles | `particles/<name>.<ext>` | always on |
+| HUD/menu graphics | `gfx/<name>.<ext>` | `r_texture_external_hud 1` |
+
+`<ext>` is tried in the order `dds`, `ktx`, `png`, `tga`, `pcx`.
+
+### Search order
+
+For a BSP texture the per-map directory is searched first, then the shared
+pool. `textures/demo1/wall01.png` therefore beats `textures/wall01.dds` when
+you are playing `demo1`, and only that map is affected — two maps can disagree
+about what `wall01` looks like without renaming anything in the BSP.
+
+Within a single directory the compressed containers win, because they cost the
+GPU a quarter of the memory and skip the CPU decode entirely.
+
+### Texture names
+
+Liquid textures are named `*lowlight` in the BSP, and `*` is not a legal
+filename character on Windows, so write them with `#`: `textures/#lowlight.png`.
+
+Fence textures (names beginning with `{`) are always treated as cutouts, so a
+replacement works even if the file itself carries no alpha channel.
+
+### Glow maps
+
+A replaced texture loses the palette-index fullbright information the engine
+normally derives its glow layer from, so ship the glow as a companion file:
+
+```
+textures/torch_side.png        albedo
+textures/torch_side_glow.png   the bits that stay lit
+```
+
+`_luma` is accepted as a synonym for `_glow`, so packs built for FTE or
+jsHexen2 work unmodified. Model skins use the same convention
+(`models/mummy_0_glow.png`). Without a companion file a replaced texture simply
+has no glow layer — `gl_fullbrights 0` disables the whole feature.
+
+### Compressed textures (DDS/KTX)
+
+A 2048×2048 RGBA texture is about 21 MB of VRAM once mipped; the same art as
+BC1 is under 3 MB, and BC3 under 6 MB. For a pack spanning a whole episode that
+is the difference between running and not.
+
+Supported: DDS with `DXT1`/`DXT3`/`DXT5`, `ATI1`/`BC4U`, `ATI2`/`BC5U`, or a
+DX10 header carrying BC1–BC5 or BC7; and KTX 1.1 holding any of the same
+formats. Cube maps, volume textures, arrays and uncompressed containers are
+rejected — the engine falls through to the PNG/TGA/PCX beside them.
+
+Mip levels in the file are used as-is, so include a full chain. `gl_picmip`
+and the GPU's maximum texture size are honoured by starting further down that
+chain, which is why a container that ships a single oversized level is skipped
+rather than uploaded: block data cannot be rescaled the way an RGBA image can.
+
+Which families are available depends on the driver; the console prints what it
+found at startup (`Compressed textures: S3TC yes, RGTC yes, BPTC yes`). S3TC is
+an extension rather than core GL, and the ES/WebGL2 build has neither RGTC nor
+BPTC.
+
+2D assets — HUD, menu graphics and the particle sprite — deliberately do not
+take a compressed source. They are uploaded unmipped at their native size,
+which is exactly the case block compression damages most.
 
 ## AI upscale tool
 

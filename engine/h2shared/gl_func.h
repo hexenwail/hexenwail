@@ -60,6 +60,10 @@ GL_FUNCTION(void, glTexEnvf, (GLenum,GLenum,GLfloat))
 GL_FUNCTION(void, glScalef, (GLfloat,GLfloat,GLfloat))
 GL_FUNCTION(void, glTexImage2D, (GLenum,GLint,GLint,GLsizei,GLsizei,GLint,GLenum,GLenum,const GLvoid*))
 GL_FUNCTION(void, glTexSubImage2D, (GLenum,GLint,GLint,GLint,GLsizei,GLsizei,GLenum,GLenum,const GLvoid *))
+/* GL 1.3; must be resolved at runtime because Windows' opengl32.dll still
+ * only exports the GL 1.1 entry points.  Used by the DDS/KTX replacement
+ * texture path (uhexen2-0vgo.5). */
+GL_FUNCTION(void, glCompressedTexImage2D, (GLenum,GLint,GLenum,GLsizei,GLsizei,GLint,GLsizei,const GLvoid*))
 
 GL_FUNCTION(void, glBegin, (GLenum))
 GL_FUNCTION(void, glEnd, (void))
@@ -148,6 +152,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glTexParameteri_fp	glTexParameteri
 #define glTexImage2D_fp		glTexImage2D
 #define glTexSubImage2D_fp	glTexSubImage2D
+#define glCompressedTexImage2D_fp	glCompressedTexImage2D
 #define glCopyTexSubImage2D_fp	glCopyTexSubImage2D
 #define glEnable_fp		glEnable
 #define glDisable_fp		glDisable
@@ -229,6 +234,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glScalef_fp		glScalef
 #define glTexImage2D_fp		glTexImage2D
 #define glTexSubImage2D_fp	glTexSubImage2D
+#define glCompressedTexImage2D_fp	glCompressedTexImage2D
 #define glCopyTexSubImage2D_fp	glCopyTexSubImage2D
 
 #define glBegin_fp		glBegin

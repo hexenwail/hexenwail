@@ -242,6 +242,16 @@ extern	int		gl_max_samples;	/* GL_MAX_SAMPLES; bounds both the Options
 extern	qboolean	have_stencil;
 extern	qboolean	gl_clipcontrol_able;	/* reversed-Z when true */
 
+/* Block-compressed texture families backing the DDS/KTX loader
+ * (engine/h2shared/img_dds.c, uhexen2-0vgo.5).  Probed in GL_Init.  The three
+ * ship independently: S3TC (BC1-3) is an extension on every driver and never
+ * core GL, while RGTC (BC4/5) and BPTC (BC7) are core on desktop GL 3.0/4.2
+ * but absent on the ES tier.  A container whose format is not backed here is
+ * refused, and the caller falls through to the PNG/TGA/PCX path. */
+extern	qboolean	gl_have_s3tc;
+extern	qboolean	gl_have_rgtc;
+extern	qboolean	gl_have_bptc;
+
 /* Frame-resources streaming buffer ring (engine/h2shared/gl_buffer.c).
  * uhexen2-8pc2: Ironwail-parity replacement for raw glBufferSubData → bind
  * → draw uploads.  See gl_buffer.c for the full architecture. */
@@ -452,6 +462,43 @@ GLuint GL_LoadTexture (const char *identifier, byte *data,
 #define	TEX_FENCE		(1 << 16)	/* Fence texture (binary transparency)		*/
 #define	TEX_SPECIAL_TRANS	(1 << 15)	/* Translucency through the particle table	*/
 #define	TEX_EMBEDDED_MIPS	(1 << 17)	/* Data contains all 4 BSP mip levels		*/
+
+/* Block-compressed internal formats, for the DDS/KTX replacement path
+ * (uhexen2-0vgo.5).  Spelled out here rather than taken from the system GL
+ * headers: S3TC is an extension everywhere, and the ES tier's headers do not
+ * carry the desktop BPTC/RGTC enums at all. */
+#ifndef GL_COMPRESSED_RGB_S3TC_DXT1_EXT
+#define GL_COMPRESSED_RGB_S3TC_DXT1_EXT		0x83F0
+#endif
+#ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
+#define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT	0x83F1
+#endif
+#ifndef GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
+#define GL_COMPRESSED_RGBA_S3TC_DXT3_EXT	0x83F2
+#endif
+#ifndef GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
+#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT	0x83F3
+#endif
+#ifndef GL_COMPRESSED_RED_RGTC1
+#define GL_COMPRESSED_RED_RGTC1			0x8DBB
+#endif
+#ifndef GL_COMPRESSED_RG_RGTC2
+#define GL_COMPRESSED_RG_RGTC2			0x8DBD
+#endif
+#ifndef GL_COMPRESSED_RGBA_BPTC_UNORM
+#define GL_COMPRESSED_RGBA_BPTC_UNORM		0x8E8C
+#endif
+#ifndef GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+#define GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM	0x8E8D
+#endif
+
+/* Upload an already-resolved replacement image (img_load.h) as a GL texture,
+ * taking the compressed or the RGBA path according to what was found on disk.
+ * extraflags carries the caller's own requirements -- TEX_MIPMAP, TEX_FENCE,
+ * TEX_HOLEY -- and TEX_ALPHA / TEX_RGBA are added here from the image itself.
+ * Returns the GL texture name. */
+struct imgreplace_s;
+GLuint GL_LoadReplacement (const char *identifier, const struct imgreplace_s *r, int extraflags);
 
 GLuint GL_LoadPicTexture (qpic_t *pic);
 void D_ClearOpenGLTextures (int last_tex);
