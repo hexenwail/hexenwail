@@ -1548,8 +1548,8 @@ static void Mod_LoadNodes_V29 (lump_t *l)
 		p = LittleLong(in->planenum);
 		out->plane = loadmodel->planes + p;
 
-		out->firstsurface = LittleShort (in->firstface);
-		out->numsurfaces = LittleShort (in->numfaces);
+		out->firstsurface = (unsigned short)LittleShort (in->firstface);
+		out->numsurfaces = (unsigned short)LittleShort (in->numfaces);
 
 		for (j = 0; j < 2; j++)
 		{
@@ -1675,8 +1675,11 @@ static void Mod_LoadLeafs_V29 (lump_t *l)
 		p = LittleLong(in->contents);
 		out->contents = p;
 
-		out->firstmarksurface = loadmodel->marksurfaces + LittleShort(in->firstmarksurface);
-		out->nummarksurfaces = LittleShort(in->nummarksurfaces);
+		/* Unsigned: the marksurfaces lump itself is read as unsigned
+		 * short, so a map with >32K marksurfaces would otherwise wrap
+		 * negative and point before the array. */
+		out->firstmarksurface = loadmodel->marksurfaces + (unsigned short)LittleShort(in->firstmarksurface);
+		out->nummarksurfaces = (unsigned short)LittleShort(in->nummarksurfaces);
 
 		p = LittleLong(in->visofs);
 		if (p == -1)
