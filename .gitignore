@@ -21,7 +21,16 @@ engine/build/
 # files, ephemeral sqlite, backups) stays ignored by the glob.
 .beads/*
 !.beads/issues.jsonl
-/capture.rdc
+
+# RenderDoc captures and the artifacts of picking one apart.  A .rdc is tens
+# to hundreds of MB (the three sitting in this tree when the rule was widened
+# came to 166 MB), and `renderdoccmd convert -c zip.xml` spits out an equally
+# disposable .xml beside it.  They are debugging scratch for one bug -- the
+# findings belong in the bead, the capture does not belong in history, where
+# it cannot be taken back out.  Root-anchored so a mod or tool directory that
+# legitimately ships an .xml is unaffected.
+/*.rdc
+/*.xml
 
 # Beads / Dolt files (added by bd init)
 .dolt/

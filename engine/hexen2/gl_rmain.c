@@ -1892,8 +1892,18 @@ static void R_DrawAliasModel (entity_t *e)
 	/* Restore the caustics resting state.  gl_shader_alias is also the
 	 * sprite / warp-poly / unlit-brush-poly program, and those call sites
 	 * never touch this state — leaving it hot would leak the overlay onto
-	 * them.  uhexen2-0gn3. */
-	if (caustics > 0.0f)
+	 * them.  uhexen2-0gn3.
+	 *
+	 * Unconditional, though the set above is gated on caustics > 0.0f
+	 * (uhexen2-9bte).  Nothing leaks today: `caustics` is assigned once at
+	 * the top of the function and never reassigned, so set and reset read
+	 * the same value and an entity either does both or neither.  What that
+	 * safety rests on is the absence of any early return between the two --
+	 * and uhexen2-gwtq has since added one to this very function.  Writing
+	 * the resting state unconditionally costs two stores to CPU-side shadow
+	 * variables that the dirty-compare in GL_ImmEnd then skips,
+	 * and in exchange the pairing invariant stops being something the next
+	 * `return` has to know about. */
 	{
 		float ident[16];
 		Mat4_Identity(ident);
