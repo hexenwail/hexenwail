@@ -102,7 +102,15 @@ void R_GPU_Particles_Shutdown (void) { }
 #define	SFL_64			64
 #define	SFL_128			128
 
-#define	MAX_PARTICLES		32768	// default max # of particles at one time
+/* Raised from Raven's 32768.  SoT's map-scale snow already peaked at ~17.5k of
+ * the old pool at the stock counts, so the intensity multipliers below had no
+ * headroom to multiply into: snow at 2x would run the list dry and starve
+ * blood, sparks and spell impacts, which allocate from the same free list and
+ * simply stop appearing when it is empty.  Costs ~2.4 MB more of a >=64 MB
+ * heap.  gpu_particle_buf is deliberately NOT resized to match -- that path is
+ * unreferenced on every tier (uhexen2-vp8t), so GPU_MAX_PARTICLES constrains
+ * nothing at runtime and doubling it would only waste 1 MB of .bss. */
+#define	MAX_PARTICLES		65536	// default max # of particles at one time
 #define	ABSOLUTE_MIN_PARTICLES	512	// no fewer than this no matter what's
 					// on the command line
 
@@ -146,6 +154,17 @@ static	cvar_t	snow_active= {"snow_active", "1", CVAR_ARCHIVE};
  * restores the stock behaviour exactly.  uhexen2-km0d. */
 static	cvar_t	r_raincollide = {"r_raincollide", "1", CVAR_ARCHIVE};
 
+/* Weather density multipliers.  The per-burst counts come from the map -- 300
+ * drops every 0.1s for rain, 4-50 flakes per volume for snow -- and Raven
+ * chose them for the small brushes the original maps use.  A map-scale volume
+ * spreads that same budget over a far bigger footprint and thins out to almost
+ * nothing: SoT's demo1 rain brush is 1222x1438 units, roughly 7x the area of a
+ * stock-sized one, for identical drops per burst, which is most of why its
+ * rain reads as absent rather than light.  Scaling here rather than in the
+ * gamecode is what makes it work on content we cannot rebuild.  uhexen2-2rxl. */
+static	cvar_t	r_rainintensity = {"r_rainintensity", "2", CVAR_ARCHIVE};
+static	cvar_t	r_snowintensity = {"r_snowintensity", "2", CVAR_ARCHIVE};
+
 
 static particle_t *AllocParticle (void);
 
@@ -185,6 +204,8 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&snow_flurry);
 	Cvar_RegisterVariable (&snow_active);
 	Cvar_RegisterVariable (&r_raincollide);
+	Cvar_RegisterVariable (&r_rainintensity);
+	Cvar_RegisterVariable (&r_snowintensity);
 #ifdef GLQUAKE
 	R_GPU_Particles_Init();
 #endif
@@ -1349,6 +1370,32 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 
 /*
 ===============
+R_WeatherCount
+
+Scale a weather burst by its intensity cvar.  Clamped at both ends: a negative
+value is a typo rather than an instruction, and 8x the stock counts already
+outruns the pool on a snow map, so honouring more would only trade weather for
+every other particle in the game.  A non-zero multiplier never rounds a
+non-empty burst down to nothing, so fractional values thin the weather rather
+than switching it off -- 0 is the only way to ask for none.
+===============
+*/
+static int R_WeatherCount (int count, const cvar_t *intensity)
+{
+	float	scale = intensity->value;
+	int	scaled;
+
+	if (count <= 0 || scale <= 0)
+		return 0;
+	if (scale > 8)
+		scale = 8;
+
+	scaled = (int)(count * scale + 0.5f);
+	return (scaled < 1) ? 1 : scaled;
+}
+
+/*
+===============
 R_RainEffect
 
 ===============
@@ -1358,6 +1405,8 @@ void R_RainEffect (vec3_t org, vec3_t e_size, int x_dir, int y_dir, int z_dir, i
 	int		i, holdint;
 	particle_t	*p;
 	float		z_time;
+
+	count = R_WeatherCount (count, &r_rainintensity);
 
 	for (i = 0; i < count; i++)
 	{
@@ -1424,6 +1473,7 @@ void R_SnowEffect (vec3_t org1, vec3_t org2, int flags, vec3_t alldir, int count
 	mleaf_t		*l;
 
 	count *= snow_active.integer;
+	count = R_WeatherCount (count, &r_snowintensity);
 	for (i = 0; i < count; i++)
 	{
 		p = AllocParticle();
