@@ -1625,20 +1625,35 @@ void Sky_DrawSky (void)
 		GL_ImmColor4f(1, 1, 1, 1);
 		if (have_stencil)
 		{
-			/* Draw skybox only where stencil=1 (sky surface pixels).
-			 * depth-mask ON: glDepthRange(0,0) inside Sky_DrawSkyBox
-			 * pins fragment depth to the far plane, so writing it
-			 * replaces the sky-brush wall depth the pre-pass laid down.
-			 * Entities drawn afterwards z-test against far instead of
-			 * wall depth, so enemies / sprites outside sky-windowed
-			 * openings render correctly (uhexen2-4h32).  World pixels
-			 * remain untouched: stencil=0 there since the world chain
-			 * resets it. */
+			/* Draw skybox only where stencil=1 (sky surface pixels);
+			 * world pixels remain untouched, stencil=0 there since the
+			 * world chain resets it.
+			 *
+			 * Depth-mask OFF, matching Ironwail / QuakeSpasm: sky
+			 * SURFACES write depth (the pre-pass in DrawTextureChains
+			 * does that), the skybox itself does not.  That keeps the
+			 * sky-brush wall depth alive for every later pass, so
+			 * geometry a mapper deliberately hid behind a sky brush --
+			 * a standard visibility/perf trick -- stays hidden.
+			 *
+			 * This intentionally reverts uhexen2-4h32, which turned the
+			 * mask ON here so that glDepthRange(0,0) inside
+			 * Sky_DrawSkyBox would stamp far-plane depth over the wall
+			 * depth and make enemies / sprites visible through
+			 * sky-windowed openings.  That traded away sky occlusion
+			 * for every map to fix one; 4h32's case gets a targeted
+			 * solution instead.  uhexen2-ixdb -- read both beads before
+			 * flipping this back.
+			 *
+			 * GL_ALWAYS stays: with writes off the skybox is a pure
+			 * stencil-limited colour fill, and the pinned far-plane
+			 * depth range would otherwise fail the test against the
+			 * wall depth the pre-pass just wrote. */
 			glEnable_fp(GL_STENCIL_TEST);
 			glStencilFunc_fp(GL_EQUAL, 1, 0xFF);
 			glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
 			glDepthFunc_fp(GL_ALWAYS);
-			glDepthMask_fp(1);
+			glDepthMask_fp(0);
 		}
 		else
 		{
