@@ -617,7 +617,9 @@ iqm_gpu_setup:
 		glVertexAttribPointer_fp(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(iqmvert_t), (void *)24);
 
 		glEnableVertexAttribArray_fp(4); /* bone indices */
-		glVertexAttribPointer_fp(4, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(iqmvert_t), (void *)28);
+		/* uvec4 in the skeletal shader: must use the integer path, or the
+		 * indices arrive int-to-float converted and select the wrong bones. */
+		glVertexAttribIPointer_fp(4, 4, GL_UNSIGNED_BYTE, sizeof(iqmvert_t), (void *)28);
 
 		/* Index buffer */
 		glGenBuffers_fp(1, &gm->ibo);
