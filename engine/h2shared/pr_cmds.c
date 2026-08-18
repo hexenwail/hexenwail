@@ -488,9 +488,23 @@ static void PF_pimpmodel (void)
 	 * uhexen2-oq0a / regression fix uhexen2-oq0a-followup. */
 	mod->flags = mod->orig_flags | (new_flags & 0x01ffffff);
 
-	/* If EF_HOLEY was just granted by pimpmodel, the skin was uploaded
-	 * without per-pixel alpha.  Re-upload now so discard can fire. */
-	if ((mod->flags & EF_HOLEY) && !(mod->orig_flags & EF_HOLEY))
+	/* If pimpmodel just changed one of the three flags Mod_LoadAllSkins
+	 * reads to pick a tex_mode, the skin on the GPU no longer matches
+	 * what the renderer is about to assume about it -- re-upload.
+	 *
+	 * This used to test EF_HOLEY alone, which left the other two modes
+	 * broken in shipped content: SoT grants EF_TRANSPARENT (4096) to
+	 * cndl.mdl, waterfall.mdl, waterfall_90.mdl, crown.mdl, ray3.mdl,
+	 * elipse.mdl and flame7_violet.mdl across cathedral / courtyard /
+	 * keep / palace / winter.  Those took the EF_TRANSPARENT branch in
+	 * R_DrawAliasModel -- GL_BLEND on, force_opaque_alpha 0 -- against a
+	 * skin still uploaded opaque, so alpha was 255 everywhere and the
+	 * per-texel translucency the mapper asked for never appeared.
+	 *
+	 * Symmetric with the restore side in Mod_RestoreAliasModelDefaults.
+	 * uhexen2-mr2l. */
+	if ((mod->flags ^ mod->orig_flags)
+	    & (EF_TRANSPARENT | EF_HOLEY | EF_SPECIAL_TRANS))
 		Mod_ReuploadAliasSkins(mod);
 
 	/* Keep the per-entity trail_flags override too as a more-specific
