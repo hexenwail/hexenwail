@@ -213,6 +213,10 @@ static inline void GL_BindDiffuse (GLuint texnum)
 {
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	/* GL_Bind's cache tracks TU0, which is exactly what we just bound.
+	 * Without this a later GL_Bind can cache-hit on a stale value and
+	 * draw with this texture still bound. */
+	currenttexture = texnum;
 }
 
 static inline void GL_BindFullbright (GLuint texnum)
