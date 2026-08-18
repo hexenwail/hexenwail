@@ -43,6 +43,9 @@ void	GL_ImmDraw (GLenum mode);	/* draw without changing shader (caller manages p
 
 /* Set alpha threshold for subsequent draws (0 = no discard, 0.666 = standard) */
 void	GL_SetAlphaThreshold (float threshold);
+/* Current threshold, so callers that must clobber it can restore the caller's
+ * value rather than guessing the engine default.  uhexen2-nudx. */
+float	GL_GetAlphaThreshold (void);
 /* Force fragColor.a = 1.0 for confirmed-opaque draws.  v=1 to force, v=0 to
  * preserve color.a (ENTALPHA / DRF_TRANSLUCENT translucent paths).  Negative
  * leaves shader default.  uhexen2-khsa r13. */

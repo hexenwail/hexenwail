@@ -210,6 +210,11 @@ void GL_SetAlphaThreshold (float threshold)
 	imm_alpha_threshold = threshold;
 }
 
+float GL_GetAlphaThreshold (void)
+{
+	return imm_alpha_threshold;
+}
+
 /* uhexen2-khsa r13.  Pass 1.0 for opaque draws (force fragColor.a=1.0 so
  * downstream consumers of FB.a aren't confused), 0.0 to preserve color.a
  * (needed for ENTALPHA / DRF_TRANSLUCENT immediate-mode batches). */
