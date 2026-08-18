@@ -594,6 +594,11 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 	float		bspeed = r_skyspeed_back.value;
 	float		fspeed = r_skyspeed_front.value;
+	/* The sky shader abuses the alpha threshold as a mode switch, so it is
+	 * load-bearing here but must not leak into whatever draws next.  A brush
+	 * entity with a sky face would otherwise discard its own translucent
+	 * faces at threshold 1.0.  uhexen2-nudx. */
+	float		saved_threshold = GL_GetAlphaThreshold ();
 
 	if (alpha >= 1.0f)
 	{
@@ -699,6 +704,8 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 
 		glDisable_fp(GL_BLEND);
 	}
+
+	GL_SetAlphaThreshold (saved_threshold);
 }
 
 /*
@@ -809,6 +816,9 @@ void R_DrawSkyChain (msurface_t *s)
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 	float		bspeed = r_skyspeed_back.value;
 	float		fspeed = r_skyspeed_front.value;
+	/* See EmitSkyPolysMulti: the threshold doubles as the sky shader's mode
+	 * switch and must be handed back untouched.  uhexen2-nudx. */
+	float		saved_threshold = GL_GetAlphaThreshold ();
 
 	/* Per-surface bbox cull: skip surfaces fully outside the view. */
 #define EMIT_LOOP(VERT_MACRO, COLOR_SETUP) \
@@ -881,6 +891,8 @@ void R_DrawSkyChain (msurface_t *s)
 		EMIT_LOOP (SKYWARP_VERT_FRONT, GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
 		glDisable_fp (GL_BLEND);
 	}
+
+	GL_SetAlphaThreshold (saved_threshold);
 
 #undef EMIT_LOOP
 }
