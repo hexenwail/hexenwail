@@ -123,6 +123,7 @@ static GLuint	pp_native_fbo;
 static GLuint	pp_native_color_tex;
 static GLuint	pp_native_depth_rb;
 static int	pp_native_w, pp_native_h;
+static GLenum	pp_native_fmt;		/* colour format the native FBO was built with */
 
 /* Bloom post-process FBO pyramid (1/2, 1/4, 1/8, 1/16 res) */
 #define BLOOM_LEVELS 4
@@ -377,6 +378,20 @@ static qboolean PP_NeedsPostProcess (void)
 
 static void PP_DeleteBloomFBOs (void);	/* forward decl to avoid implicit declaration */
 
+/* r_hdr changes the FBO colour format and r_bloom decides whether the
+ * pyramid exists at all, but the per-frame gate only rebuilds on a size
+ * change -- so a runtime toggle used to do nothing until vid_restart.
+ * The callbacks can fire mid-frame from the console or the menu, so they
+ * only raise a flag; PP_BeginFrame does the reallocation at the same safe
+ * point the size-change rebuild already uses.  uhexen2-3p6p. */
+static qboolean	pp_rebuild_pending;
+
+static void PP_FormatChanged (cvar_t *var)
+{
+	(void) var;
+	pp_rebuild_pending = true;
+}
+
 static void PP_DeleteFBO (void)
 {
 	if (pp_color_tex)   { glDeleteTextures_fp(1, &pp_color_tex); pp_color_tex = 0; }
@@ -395,6 +410,7 @@ static void PP_DeleteNativeFBO (void)
 	if (pp_native_depth_rb)  { glDeleteRenderbuffers_fp(1, &pp_native_depth_rb); pp_native_depth_rb = 0; }
 	if (pp_native_fbo)       { glDeleteFramebuffers_fp(1, &pp_native_fbo); pp_native_fbo = 0; }
 	pp_native_w = pp_native_h = 0;
+	pp_native_fmt = 0;
 }
 
 static void PP_DeleteBloomFBOs (void)
@@ -411,8 +427,12 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 {
 	GLenum status;
 
-	if (width == pp_native_w && height == pp_native_h && pp_native_fbo)
-		return true;	/* already correct size */
+	/* Size alone is not enough: r_hdr selects the colour format, so a
+	 * runtime toggle must reallocate even at an unchanged resolution.
+	 * uhexen2-3p6p. */
+	if (width == pp_native_w && height == pp_native_h && pp_native_fbo &&
+	    pp_native_fmt == (GLenum)(r_hdr.integer ? GL_RGBA16F : GL_RGBA8))
+		return true;	/* already correct size and format */
 
 	PP_DeleteNativeFBO();
 
@@ -452,6 +472,7 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 
 	pp_native_w = width;
 	pp_native_h = height;
+	pp_native_fmt = native_fmt;
 	}  /* end native_fmt scope */
 	return true;
 }
@@ -468,10 +489,12 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 	GLenum color_fmt, color_type, status;
 	int i;
 
+	/* Delete first so a runtime r_bloom 0 actually releases the pyramid
+	 * rather than leaving it allocated but unused.  uhexen2-3p6p. */
+	PP_DeleteBloomFBOs();
+
 	if (!r_bloom.integer)
 		return true;	/* bloom disabled, skip allocation */
-
-	PP_DeleteBloomFBOs();
 
 	color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
 	color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
@@ -605,6 +628,10 @@ static qboolean PP_CreateFBO (int width, int height)
 			pp_height = height;
 			Con_DPrintf("PostProcess: %dx%d FBO with %dx MSAA\n", width, height, samples);
 			OIT_CreateFBO(width, height, pp_depth_rb, 0, samples);
+			/* Bloom samples the resolved texture, so it applies under MSAA
+			 * exactly as it does without.  Omitting this left r_bloom 1 a
+			 * silent no-op whenever vid_config_fsaa >= 2.  uhexen2-3p6p. */
+			PP_CreateBloomFBOs(width, height);
 			return true;
 		}
 	}
@@ -1514,6 +1541,9 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_softparticles);
 	Cvar_RegisterVariable(&r_softparticles_scale);
 
+	Cvar_SetCallback(&r_hdr, PP_FormatChanged);
+	Cvar_SetCallback(&r_bloom, PP_FormatChanged);
+
 	/* r_oit used to be force-reset to 0 here, discarding an archived 1 on
 	 * every startup, because OIT rendered nothing at all.  That was
 	 * uhexen2-z4r1: the resolve's fullscreen triangle was front-face culled,
@@ -1665,8 +1695,9 @@ void GL_PostProcess_BeginFrame (void)
 		pp_saved_glheight = glheight;
 		return;
 	}
-	if (w != pp_width || h != pp_height)
+	if (w != pp_width || h != pp_height || pp_rebuild_pending)
 	{
+		pp_rebuild_pending = false;
 		if (!PP_CreateFBO(w, h))
 			return;
 	}
