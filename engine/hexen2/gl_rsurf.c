@@ -944,6 +944,25 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 				GL_ImmColor4f(lv, lv, lv, alpha_val);
 				VectorCopy(saved_lc, lightcolor);
 			}
+			else if (self_emissive)
+			{
+				/* A self-emissive liquid is its own light source, so the
+				 * entity's light level must not scale it either -- the
+				 * lightmap exemption above is pointless if MLS_ABSLIGHT
+				 * (intensity = abslight/255) or an MLS_* lightstyle slot
+				 * dims the very same texel a line later.  uhexen2-nqwl:
+				 * SoT docks.bsp carries its sewer slime on a brush ent
+				 * with abslight 25, and the RenderDoc capture shows every
+				 * vertex of the *lowlight6 batch at 25/255 = 0.098, which
+				 * multiplies the channel down to black.  Both sibling
+				 * paths already agree: R_DrawSequentialPoly forces
+				 * intensity = 1.0 for SURF_DRAWTURB, and
+				 * R_DrawWaterSurfaces emits (1,1,1,a) unconditionally.
+				 * *water is deliberately left on the intensity path --
+				 * real water is lit by its surroundings, so an abslight
+				 * brush ent dimming it is the mapper's intent. */
+				GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha_val);
+			}
 			else
 				GL_ImmColor4f(intensity, intensity, intensity, alpha_val);
 		}
