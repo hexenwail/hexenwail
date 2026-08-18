@@ -3049,6 +3049,19 @@ static void R_DrawAliasInstanced (void)
 			entity_t *se = inst_entities[i].ent;
 			aliashdr_t *shdr = inst_entities[i].hdr;
 			int spose = inst_entities[i].pose;
+			float an;
+
+			/* GL_DrawAliasShadow consumes two per-entity globals:
+			 * lightspot (floor height, a side effect of R_LightPoint*)
+			 * and shadevector. Collection leaves lightspot holding the
+			 * last entity's value and never sets shadevector at all, so
+			 * recompute both here, matching R_DrawAliasModel. */
+			AliasModelGetLightInfo(se);
+			an = se->angles[1] / 180 * M_PI;
+			shadevector[0] = cos(-an);
+			shadevector[1] = sin(-an);
+			shadevector[2] = 1;
+			VectorNormalize(shadevector);
 
 			GL_PushMatrix();
 			R_RotateForEntity2(se);
