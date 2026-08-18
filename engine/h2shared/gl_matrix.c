@@ -89,23 +89,25 @@ void GL_LoadIdentity (void)
 	Mat4_Identity(current_matrix());
 }
 
+/* Unbalanced push/pop is a programming error, not a runtime condition, so
+ * both ends abort rather than saturate.  A saturating push used to no-op
+ * while its matching pop still decremented, which silently overwrote the
+ * caller's parent matrix.  Real nesting is ~3 of MAT_STACK_DEPTH. */
 void GL_PushMatrix (void)
 {
 	if (mat_current_mode == GL_MAT_PROJECTION)
 	{
-		if (mat_proj_depth < MAT_STACK_DEPTH - 1)
-		{
-			Mat4_Copy(mat_projection[mat_proj_depth], mat_projection[mat_proj_depth + 1]);
-			mat_proj_depth++;
-		}
+		if (mat_proj_depth >= MAT_STACK_DEPTH - 1)
+			Sys_Error ("GL_PushMatrix: projection stack overflow");
+		Mat4_Copy(mat_projection[mat_proj_depth], mat_projection[mat_proj_depth + 1]);
+		mat_proj_depth++;
 	}
 	else
 	{
-		if (mat_mv_depth < MAT_STACK_DEPTH - 1)
-		{
-			Mat4_Copy(mat_modelview[mat_mv_depth], mat_modelview[mat_mv_depth + 1]);
-			mat_mv_depth++;
-		}
+		if (mat_mv_depth >= MAT_STACK_DEPTH - 1)
+			Sys_Error ("GL_PushMatrix: modelview stack overflow");
+		Mat4_Copy(mat_modelview[mat_mv_depth], mat_modelview[mat_mv_depth + 1]);
+		mat_mv_depth++;
 	}
 }
 
@@ -113,13 +115,15 @@ void GL_PopMatrix (void)
 {
 	if (mat_current_mode == GL_MAT_PROJECTION)
 	{
-		if (mat_proj_depth > 0)
-			mat_proj_depth--;
+		if (mat_proj_depth <= 0)
+			Sys_Error ("GL_PopMatrix: projection stack underflow");
+		mat_proj_depth--;
 	}
 	else
 	{
-		if (mat_mv_depth > 0)
-			mat_mv_depth--;
+		if (mat_mv_depth <= 0)
+			Sys_Error ("GL_PopMatrix: modelview stack underflow");
+		mat_mv_depth--;
 	}
 }
 
