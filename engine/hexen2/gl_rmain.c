@@ -38,6 +38,8 @@ void Fog_EnableGFog (void);
 float Fog_GetDensity (void);
 float *Fog_GetColor (void);
 void Fog_DisableGFog (void);
+void Fog_StartAdditive (void);
+void Fog_StopAdditive (void);
 
 entity_t	r_worldentity;
 vec3_t		modelorg, r_entorigin;
@@ -1763,9 +1765,16 @@ static void R_DrawAliasModel (entity_t *e)
 			glPolygonOffset_fp (fb_offset, fb_offset);
 			GL_SetAlphaThreshold(0.01f);
 
+			/* Additive blend: fog must fade to black, or the fog color
+			 * gets ADDED over the model's whole silhouette. GL_ImmEnd
+			 * uploads r_fog_color, which this temporarily blacks. */
+			Fog_StartAdditive ();
+
 			model_fullbright_pass = true;
 			R_SetupAliasFrame (e, paliashdr);
 			model_fullbright_pass = false;
+
+			Fog_StopAdditive ();
 
 			glDisable_fp (GL_POLYGON_OFFSET_FILL);
 			glPolygonOffset_fp (0.0f, 0.0f);
@@ -3092,13 +3101,14 @@ static void R_DrawAliasInstanced (void)
 			if (prog->u_viewproj >= 0)
 				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
 						      alias_inst_view_proj);
+			/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw
+			 * Fog_GetDensity(). This pass blends GL_ONE,GL_ONE, so fog
+			 * must fade to black — a non-black fog color would be ADDED
+			 * over the whole silhouette. See Fog_StartAdditive. */
 			if (prog->u_fog_density >= 0)
-				glUniform1f_fp(prog->u_fog_density, Fog_GetDensity());
+				glUniform1f_fp(prog->u_fog_density, r_fog_density);
 			if (prog->u_fog_color >= 0)
-			{
-				const float *fc = Fog_GetColor();
-				glUniform3f_fp(prog->u_fog_color, fc[0], fc[1], fc[2]);
-			}
+				glUniform3f_fp(prog->u_fog_color, 0.0f, 0.0f, 0.0f);
 			if (prog->u_alpha_threshold >= 0)
 				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 			/* uhexen2-khsa r13: fullbright pass is additive and we don't
