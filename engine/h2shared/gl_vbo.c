@@ -24,6 +24,7 @@ extern float r_fog_color[3];
  * Kept here so GL_ImmEnd can push the value alongside other auto-uploaded
  * uniforms.  uhexen2-f29y. */
 extern cvar_t gl_overbright;
+extern cvar_t r_fullbright;
 
 /* ------------------------------------------------------------------ */
 /* Vertex format for the streaming VBO:                                */
@@ -524,7 +525,10 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 
 	if (shader->u_overbright >= 0)
 	{
-		float ob = gl_overbright.integer ? 2.0f : 1.0f;
+		/* Same gate as R_SetupFrame: r_fullbright already replaces the
+		 * lightmap sample with white, so doubling it blows every surface
+		 * to pure white.  uhexen2-isq7. */
+		float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
 		if (ob != imm_cache_overbright)
 		{
 			glUniform1f_fp(shader->u_overbright, ob);
