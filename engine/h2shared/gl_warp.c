@@ -250,7 +250,11 @@ void EmitWaterPolys (msurface_t *fa)
 
 				nz = v[2];
 				if (ripple > 0)
-					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[2]*0.05 + realtime);
+					/* Both factors must key on the in-plane axes: on a
+					 * horizontal liquid surface v[2] is constant, so keying
+					 * one of them on it collapses the ripple to 1-D stripes
+					 * that flatten whenever that constant term crosses zero. */
+					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[1]*0.05 + realtime);
 
 				s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
 				s *= (1.0/64);
