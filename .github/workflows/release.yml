@@ -35,9 +35,26 @@ jobs:
       - name: Install flatpak-builder
         run: |
           sudo apt-get update
-          # appstream provides appstreamcli, used to validate the metainfo
-          # after the release entry is injected below.
-          sudo apt-get install -y flatpak flatpak-builder appstream
+          # --no-install-recommends, with the tools flatpak-builder actually
+          # shells out to named explicitly.  Plain `apt-get install
+          # flatpak-builder` pulls 123 packages and 99 MB: appstream-compose
+          # Recommends ffmpeg, which drags in the entire multimedia stack --
+          # libavcodec, mesa-va-drivers, intel-media-va-driver, pocketsphinx,
+          # openal, SDL2 -- none of which builds a Flatpak.  That apt step was
+          # ~47s of a ~60-125s job, far more than flatpak-builder's own ~42s.
+          #
+          # The named set is what upstream flatpak-builder actually links or
+          # invokes (appstream-compose for metainfo, desktop-file-utils to
+          # validate the .desktop, elfutils for debuginfo, ostree for the repo,
+          # bubblewrap for the build sandbox).  Fewer packages is also fewer
+          # downloads to fail: on 2026-08-17 a GitHub incident took releases
+          # down by failing a single tarball fetch, and 123 packages is 123
+          # chances at that.  uhexen2-bvei.
+          # `appstream` on top of that set: it provides appstreamcli, which the
+          # metainfo validation step below needs.
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder bubblewrap ostree \
+            appstream-compose desktop-file-utils elfutils appstream
           # The container image came with Flathub pre-configured and ran as
           # root; a bare apt install on the runner has neither.  Add the
           # system remote, then pre-install the runtime + SDK as root (root
