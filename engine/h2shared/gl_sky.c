@@ -1330,6 +1330,16 @@ FIXME: eliminate cracks by adding an extra vert on tjuncs
 void Sky_DrawSkyBox (void)
 {
 	int		i;
+	/* The sky shader borrows u_alpha_threshold as a layer-mode switch, and
+	 * that uniform is engine-global state shared with every other program.
+	 * Leaving it hot at 1.0 turned the next entity's discard into
+	 * "if (color.a < 1.0)", which on NVIDIA kills roughly half the
+	 * fragments of a fully opaque skin: its texture filter returns values
+	 * a hair under 1.0 for most sub-texel positions, where AMD's returns
+	 * exactly 1.0.  That was uhexen2-khsa -- the screen-door.  Both
+	 * EmitSkyPolysMulti and the turb sky path in gl_warp.c already
+	 * save/restore around the same borrow; this one did not.  uhexen2-sp7v. */
+	float		saved_threshold = GL_GetAlphaThreshold ();
 
 	// update UV scroll offset (same unit as r_skyspeed_*: scroll units/sec, 128 = full texture)
 	sky_box_scroll = (float)fmod(cl.time * r_skybox_speed.value * (1.0 / 128.0), 1.0);
@@ -1394,6 +1404,7 @@ void Sky_DrawSkyBox (void)
 	// Restore GL state — full window-Z range is symmetric, no flip needed
 	glDepthRange_fp(0.0, 1.0);
 	glEnable_fp(GL_CULL_FACE);
+	GL_SetAlphaThreshold (saved_threshold);
 }
 
 //==============================================================================
