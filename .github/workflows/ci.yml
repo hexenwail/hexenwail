@@ -15,9 +15,22 @@ on:
 permissions:
   contents: read
 
+# A second push while the first is still going makes the first result
+# worthless -- it describes a tree nobody has any more -- and this workflow
+# builds seven targets, so paying for it twice is the expensive kind of
+# worthless.  uhexen2-bvei.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    # Observed runtime is well under a minute to a few minutes; this is a
+    # "something is stuck" threshold, not a target, and is sized to leave
+    # room for a cold cache.  Without it the job inherits GitHub's 6-hour
+    # default.  uhexen2-bvei.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -63,6 +76,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v31
@@ -136,6 +150,7 @@ jobs:
 
   flatpak:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # flatpak + flatpak-builder are installed directly on the runner — the
     # bilelmoussaoui/flatpak-github-actions container image worked until
     # Docker Hub flaked (release run 27069188929, 2026-06-06) and tanked

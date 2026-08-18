@@ -13,12 +13,22 @@ on:
 permissions:
   contents: read
 
+# Deliberately no `concurrency` here, unlike the other three.  Cancelling a
+# release mid-flight can leave a tag with some assets uploaded and no release
+# body, or a published release missing a bundle -- strictly worse than paying
+# for a duplicate run.  Tags are pushed one at a time anyway.  uhexen2-bvei.
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   flatpak:
     runs-on: ubuntu-latest
+    # Observed runtime is well under a minute to a few minutes; this is a
+    # "something is stuck" threshold, not a target, and is sized to leave
+    # room for a cold cache.  Without it the job inherits GitHub's 6-hour
+    # default.  uhexen2-bvei.
+    timeout-minutes: 30
     # flatpak-builder installed directly on the runner — see ci.yml for rationale.
     steps:
       - uses: actions/checkout@v6
@@ -103,6 +113,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -307,6 +318,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [flatpak, build]
     # The only job that writes: `gh release create` below.
     permissions:

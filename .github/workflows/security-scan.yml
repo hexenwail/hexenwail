@@ -24,10 +24,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cve-scan:
     name: CVE scan (vulnix)
     runs-on: ubuntu-latest
+    # Observed runtime is well under a minute to a few minutes; this is a
+    # "something is stuck" threshold, not a target, and is sized to leave
+    # room for a cold cache.  Without it the job inherits GitHub's 6-hour
+    # default.  uhexen2-bvei.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -45,7 +54,15 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       # vulnix downloads the NVD JSON feeds (hundreds of MB) on a cold cache.
-      # Keyed by week so it refreshes on the same cadence as the schedule.
+      #
+      # Rolling, not weekly -- an earlier comment here claimed weekly, which
+      # the key never did.  A run_id key can never hit exactly, so every run
+      # restores the newest entry via the vulnix-nvd- prefix, tops it up and
+      # saves it forward.  That is the behaviour we want: NVD publishes
+      # continuously rather than weekly, so pinning the key to a week would
+      # serve a deliberately stale feed for up to seven days.  The cost is one
+      # new cache entry per run, and this workflow runs weekly plus the odd PR
+      # touching flake.lock, so it is nowhere near the 10 GB budget.
       - name: Restore NVD feed cache
         uses: actions/cache@v4
         with:
@@ -121,6 +138,7 @@ jobs:
   flake-freshness:
     name: Flake input freshness
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 

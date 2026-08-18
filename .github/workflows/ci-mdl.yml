@@ -38,9 +38,24 @@ on:
 permissions:
   contents: read
 
+# Keyed on the ref actually being built, not github.ref.  Under
+# workflow_dispatch github.ref is always the workflow's own branch, so the
+# obvious key would make two dispatches for two different commits cancel each
+# other -- and a tester build silently killed by the next one is precisely the
+# failure this workflow exists to avoid.  Two pushes to the same tester/**
+# branch do supersede, which is what you want there.  uhexen2-bvei.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Observed runtime is well under a minute to a few minutes; this is a
+    # "something is stuck" threshold, not a target, and is sized to leave
+    # room for a cold cache.  Without it the job inherits GitHub's 6-hour
+    # default.  uhexen2-bvei.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
