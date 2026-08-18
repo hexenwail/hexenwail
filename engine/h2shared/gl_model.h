@@ -749,6 +749,13 @@ typedef struct qmodel_s
 	int		orig_ex_flags;
 	float		orig_glow_settings[GLOW_SETTINGS_COUNT];
 	qboolean	orig_state_saved;
+
+	/* MD5mesh models are mod_alias but keep their aliashdr_t on the hunk
+	 * (like sprites do) instead of in the cache heap.  Cache_Check /
+	 * Cache_Free derive a cache_system_t from the 16 bytes preceding
+	 * cache.data and splice the LRU chain through them, so they must not
+	 * run on a hunk pointer.  uhexen2-zjux. */
+	qboolean	cache_is_hunk;
 	cache_user_t	cache;		// only access through Mod_Extradata
 } qmodel_t;
 

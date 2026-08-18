@@ -858,6 +858,21 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 	byte		ColorShade;
 	qboolean	do_lerp;
 
+	/* Skeletal meshes carry no GL command list (commands == 0) and store
+	 * iqmvert_t, not trivertx_t — walking them here would treat the header
+	 * itself as a command stream.  Drop them until the IQM draw dispatch
+	 * lands (uhexen2-7ok0.3).  uhexen2-zjux. */
+	if (paliashdr->poseverttype == PV_IQM)
+	{
+		static qboolean warned = false;
+		if (!warned)
+		{
+			warned = true;
+			Con_DPrintf ("GL_DrawAliasFrame: skipping skeletal model (no legacy draw path)\n");
+		}
+		return;
+	}
+
 	lastposenum = posenum;
 
 	verts = (trivertx_t *)((byte *)paliashdr + paliashdr->posedata);
@@ -1040,6 +1055,10 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 	vec3_t		point;
 	float		height, lheight;
 	int		count;
+
+	/* No command list on skeletal meshes -- see GL_DrawAliasFrame. uhexen2-zjux. */
+	if (paliashdr->poseverttype == PV_IQM)
+		return;
 
 	lheight = e->origin[2] - lightspot[2];
 

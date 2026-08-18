@@ -37,6 +37,7 @@ static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer);
+static float RadiusFromBounds (const vec3_t mins, const vec3_t maxs);
 /* Mod_LoadFullbrightTexture: prototype now in gl_model.h (uhexen2-sjvf) */
 
 static void Mod_Print (void);
@@ -86,9 +87,17 @@ void *Mod_Extradata (qmodel_t *mod)
 {
 	void	*r;
 
-	r = Cache_Check (&mod->cache);
-	if (r)
-		return r;
+	if (mod->cache_is_hunk)
+	{
+		if (mod->cache.data)
+			return mod->cache.data;
+	}
+	else
+	{
+		r = Cache_Check (&mod->cache);
+		if (r)
+			return r;
+	}
 
 	Mod_LoadModel (mod, true);
 
@@ -196,7 +205,7 @@ void Mod_ClearAll (void)
 
 	for (i = 0, mod = mod_known; i < mod_numknown; i++, mod++)
 	{	// clear alias models only if textures were flushed (Pa3PyX)
-		if (mod->type == mod_alias)
+		if (mod->type == mod_alias && !mod->cache_is_hunk)
 		{
 			if (flush_textures && gl_purge_maptex.integer)
 			{
@@ -288,9 +297,58 @@ void Mod_TouchModel (const char *name)
 
 	if (mod->needload == NL_PRESENT)
 	{
-		if (mod->type == mod_alias)
+		if (mod->type == mod_alias && !mod->cache_is_hunk)
 			Cache_Check (&mod->cache);
 	}
+}
+
+/*
+==================
+Mod_SetMD5Bounds
+
+Derives mod->mins/maxs from the MD5 rest-pose vertices.  Without this the
+model keeps the all-zero bbox from Mod_ClearAll and R_CullBox rejects it
+from every view.  Padded like the native alias loaders do.  uhexen2-zjux.
+==================
+*/
+static void Mod_SetMD5Bounds (qmodel_t *mod, const aliashdr_t *hdr)
+{
+	const iqmvert_t	*v;
+	vec3_t		mins, maxs;
+	int		i, j;
+
+	if (hdr->numverts <= 0 || !hdr->posedata)
+	{
+		mod->mins[0] = mod->mins[1] = mod->mins[2] = -16;
+		mod->maxs[0] = mod->maxs[1] = mod->maxs[2] = 16;
+		mod->radius = 0;
+		return;
+	}
+
+	v = (const iqmvert_t *)((const byte *)hdr + hdr->posedata);
+
+	mins[0] = maxs[0] = v[0].xyz[0];
+	mins[1] = maxs[1] = v[0].xyz[1];
+	mins[2] = maxs[2] = v[0].xyz[2];
+
+	for (i = 1; i < hdr->numverts; i++)
+	{
+		for (j = 0; j < 3; j++)
+		{
+			if (v[i].xyz[j] < mins[j])
+				mins[j] = v[i].xyz[j];
+			if (v[i].xyz[j] > maxs[j])
+				maxs[j] = v[i].xyz[j];
+		}
+	}
+
+	for (j = 0; j < 3; j++)
+	{
+		mod->mins[j] = mins[j] - 10;
+		mod->maxs[j] = maxs[j] + 10;
+	}
+
+	mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
 }
 
 /*
@@ -307,13 +365,17 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	int	mod_type;
 
 	// allow recycling of models (Pa3PyX)
-	if (mod->type == mod_alias)
+	if (mod->type == mod_alias && !mod->cache_is_hunk)
 	{
 		if (Cache_Check(&mod->cache))
 		{
 			mod->needload = NL_PRESENT;
 			return mod;
 		}
+	}
+	else if (mod->cache_is_hunk && mod->cache.data && mod->needload == NL_PRESENT)
+	{
+		return mod;
 	}
 	else if (mod->needload == NL_PRESENT)
 	{
@@ -356,7 +418,12 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 			return mod;
 		}
 		mod->type = mod_alias;
+		mod->cache_is_hunk = true;
 		loadmodel->cache.data = (void *)ahdr;
+		Mod_SetMD5Bounds (mod, ahdr);
+		mod->flags = 0;
+		mod->numframes = ahdr->numframes;
+		mod->synctype = ST_SYNC;
 		return mod;
 	}
 
@@ -747,6 +814,12 @@ void Mod_ReloadTextures (void)
 	// Reload alias models and sprites
 	for (j = 0; j < mod_numknown; j++)
 	{
+		/* MD5mesh models own no engine-loaded skins and live on the hunk,
+		 * so there is nothing to re-upload and the cache calls below would
+		 * corrupt the LRU chain.  uhexen2-zjux. */
+		if (mod_known[j].cache_is_hunk)
+			continue;
+
 		if ((mod_known[j].type == mod_alias) && (mod_known[j].needload != NL_UNREFERENCED))
 		{
 			if (Cache_Check(&(mod_known[j].cache)))
