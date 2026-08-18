@@ -3092,6 +3092,22 @@ static void Mod_FixupMissingModelFlags (qmodel_t *mod)
 		mod->flags |= EF_HOLEY;
 }
 
+/* Is the alias data currently resident, i.e. would Mod_Extradata return
+ * without going to disk?  Mirrors the two branches at the top of
+ * Mod_Extradata.  Used to keep Mod_RestoreAliasModelDefaults' skin
+ * re-upload from dragging an evicted model back off disk during R_NewMap:
+ * a model that is not resident gets a full Mod_LoadAliasModel the next
+ * time anything asks for it, and that path re-reads the header flags and
+ * re-uploads the skins anyway -- GL_LoadTexture forces a fresh upload when
+ * the cached texture's TEX_ALPHA/TEX_HOLEY/TEX_FENCE bits disagree with
+ * the requested ones.  uhexen2-mr2l. */
+static qboolean Mod_AliasDataResident (qmodel_t *mod)
+{
+	if (mod->cache_is_hunk)
+		return mod->cache.data != NULL;
+	return Cache_Check (&mod->cache) != NULL;
+}
+
 /*
 =================
 Mod_RestoreAliasModelDefaults
@@ -3112,14 +3128,43 @@ void Mod_RestoreAliasModelDefaults (void)
 	for (i = 0; i < mod_numknown; i++)
 	{
 		qmodel_t *mod = &mod_known[i];
+		int	skinbits;
+
 		if (mod->type != mod_alias || !mod->orig_state_saved)
 			continue;
+
+		/* Which of the three flags Mod_LoadAllSkins reads to pick a
+		 * tex_mode is this restore about to change?  Sampled before the
+		 * write below, since that is what clears them. */
+		skinbits = (mod->flags ^ mod->orig_flags)
+			 & (EF_TRANSPARENT | EF_HOLEY | EF_SPECIAL_TRANS);
+
 		mod->flags = mod->orig_flags;
 		mod->ex_flags = mod->orig_ex_flags;
 		memcpy(mod->glow_settings, mod->orig_glow_settings, sizeof(mod->glow_settings));
 		/* Re-apply engine-set bits (MOD_NOLERP via r_nolerp_list) after
 		 * the rollback to orig_flags, in case the cvar changed mid-game. */
 		Mod_SetExtraFlags (mod);
+
+		/* uhexen2-mr2l: PF_pimpmodel grants EF_HOLEY into the shared
+		 * mod->flags and calls Mod_ReuploadAliasSkins so the skins go up
+		 * through GL_Upload8's TEX_HOLEY path, where every palette-index-0
+		 * texel becomes alpha 0.  Rolling the flag back here without a
+		 * matching re-upload left that alpha in a texture the renderer now
+		 * treats as opaque — and the opaque alias path still runs the
+		 * discard, at u_alpha_threshold 0.01 (the test is unconditional;
+		 * see the khsa r20 comment in salias_frag).  0 < 0.01, so every
+		 * index-0 texel kept getting punched out on the following map,
+		 * with mip/anisotropic filtering flickering the boundary as the
+		 * view angle changed.  Re-upload whenever the restore actually
+		 * moves one of those flags, so skin alpha and mod->flags cannot
+		 * disagree across a map change.
+		 *
+		 * Ordered after the mod->flags write above because
+		 * Mod_ReuploadAliasSkins passes mod->flags straight through to
+		 * Mod_LoadAllSkins. */
+		if (skinbits && Mod_AliasDataResident (mod))
+			Mod_ReuploadAliasSkins (mod);
 	}
 }
 
