@@ -2895,13 +2895,20 @@ static void R_RecursiveWorldNode (mnode_t *node)
 
 	/* CPU-side draw distance — skip subtrees beyond r_farclip.
 	 * This replaces the old GPU far clip plane, avoiding artifacts
-	 * with sky, entities, and scrolling sky at the clip boundary. */
+	 * with sky, entities, and scrolling sky at the clip boundary.
+	 * Measure to the nearest point of the node AABB, not its center:
+	 * a center test is not conservative and can cull a subtree whose
+	 * geometry reaches much closer to the viewer. */
 	{
-		float dx = ((node->minmaxs[0] + node->minmaxs[3]) * 0.5f) - r_origin[0];
-		float dy = ((node->minmaxs[1] + node->minmaxs[4]) * 0.5f) - r_origin[1];
-		float dz = ((node->minmaxs[2] + node->minmaxs[5]) * 0.5f) - r_origin[2];
-		float dist_sq = dx*dx + dy*dy + dz*dz;
+		float dx = q_max(node->minmaxs[0] - r_origin[0], r_origin[0] - node->minmaxs[3]);
+		float dy = q_max(node->minmaxs[1] - r_origin[1], r_origin[1] - node->minmaxs[4]);
+		float dz = q_max(node->minmaxs[2] - r_origin[2], r_origin[2] - node->minmaxs[5]);
+		float dist_sq;
 		float clip = r_farclip.value;
+		if (dx < 0) dx = 0;
+		if (dy < 0) dy = 0;
+		if (dz < 0) dz = 0;
+		dist_sq = dx*dx + dy*dy + dz*dz;
 		if (dist_sq > clip * clip)
 			return;
 	}
