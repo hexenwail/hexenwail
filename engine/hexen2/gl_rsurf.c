@@ -1812,6 +1812,37 @@ static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_co
 	}
 }
 
+/*
+=================
+R_ChainIsSky / R_AnySkyChain
+
+Whether a texture's visible chain is sky, keyed on the surfaces instead of
+on skytexturenum.  That index only ever remembers the LAST sky* texture a
+map declared, so on a map with more than one every other sky chain missed
+the sky path, fell into the atlas fast path (which skips SURF_DRAWSKY) and
+was then nulled without ever being drawn.  Mod_SetDrawingFlags stamps
+SURF_DRAWSKY on every surface of a sky* texture, so the chain head answers
+for the whole chain.  uhexen2-kjxf.
+=================
+*/
+static qboolean R_ChainIsSky (const texture_t *t)
+{
+	return (t->texturechain && (t->texturechain->flags & SURF_DRAWSKY)) ? true : false;
+}
+
+static qboolean R_AnySkyChain (void)
+{
+	int	i;
+
+	for (i = 0; i < cl.worldmodel->numtextures; i++)
+	{
+		texture_t *t = cl.worldmodel->textures[i];
+		if (t && R_ChainIsSky (t))
+			return true;
+	}
+	return false;
+}
+
 /* One (firstindex, numindices) span in the pre-baked sky stencil IBO. */
 typedef struct {
 	int	first;
@@ -2133,12 +2164,10 @@ static void DrawTextureChains (entity_t *e)
 	 * buffer upload — this used to be the dominant CPU cost on large
 	 * maps.  Falls back to the imm path when the VBO isn't available
 	 * (e.g. WebGL2 init failure). */
-	if (have_stencil && skytexturenum >= 0 &&
-	    skytexturenum < cl.worldmodel->numtextures &&
-	    cl.worldmodel->textures[skytexturenum] &&
-	    cl.worldmodel->textures[skytexturenum]->texturechain)
+	if (have_stencil && R_AnySkyChain ())
 	{
 		msurface_t *sky;
+		int	ti;
 		_t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
 		glEnable_fp(GL_STENCIL_TEST);
 		glStencilFunc_fp(GL_ALWAYS, 1, 0xFF);
@@ -2155,19 +2184,24 @@ static void DrawTextureChains (entity_t *e)
 			int n_runs = 0;
 			qboolean sky_bound = false;
 
-			for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
-			     sky; sky = sky->texturechain)
+			for (ti = 0; ti < cl.worldmodel->numtextures; ti++)
 			{
-				if (sky->sky_numindices <= 0) continue;
-				if (n_runs == (int)(sizeof(sky_runs)/sizeof(sky_runs[0])))
+				texture_t *st = cl.worldmodel->textures[ti];
+				if (!st || !R_ChainIsSky (st))
+					continue;
+				for (sky = st->texturechain; sky; sky = sky->texturechain)
 				{
-					R_EmitSkyStencilRuns (sky_runs, n_runs, &sky_bound);
-					n_runs = 0;
+					if (sky->sky_numindices <= 0) continue;
+					if (n_runs == (int)(sizeof(sky_runs)/sizeof(sky_runs[0])))
+					{
+						R_EmitSkyStencilRuns (sky_runs, n_runs, &sky_bound);
+						n_runs = 0;
+					}
+					sky_runs[n_runs].first = sky->sky_firstindex;
+					sky_runs[n_runs].count = sky->sky_numindices;
+					n_runs++;
+					if (e == &r_worldentity) rprof_chains_n_skypoly++;
 				}
-				sky_runs[n_runs].first = sky->sky_firstindex;
-				sky_runs[n_runs].count = sky->sky_numindices;
-				n_runs++;
-				if (e == &r_worldentity) rprof_chains_n_skypoly++;
 			}
 
 			R_EmitSkyStencilRuns (sky_runs, n_runs, &sky_bound);
@@ -2186,27 +2220,32 @@ static void DrawTextureChains (entity_t *e)
 		{
 			/* Fallback: original per-frame triangulation through imm batcher. */
 			GL_ImmBegin();
-			for (sky = cl.worldmodel->textures[skytexturenum]->texturechain;
-			     sky; sky = sky->texturechain)
+			for (ti = 0; ti < cl.worldmodel->numtextures; ti++)
 			{
-				glpoly_t *p;
-				for (p = sky->polys; p; p = p->next)
+				texture_t *st = cl.worldmodel->textures[ti];
+				if (!st || !R_ChainIsSky (st))
+					continue;
+				for (sky = st->texturechain; sky; sky = sky->texturechain)
 				{
-					int j;
-					if (p->numverts < 3)
-						continue;
-					if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+					glpoly_t *p;
+					for (p = sky->polys; p; p = p->next)
 					{
-						GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
-						GL_ImmBegin();
+						int j;
+						if (p->numverts < 3)
+							continue;
+						if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+						{
+							GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
+							GL_ImmBegin();
+						}
+						for (j = 2; j < p->numverts; j++)
+						{
+							GL_ImmVertex3f(p->verts[0][0], p->verts[0][1], p->verts[0][2]);
+							GL_ImmVertex3f(p->verts[j-1][0], p->verts[j-1][1], p->verts[j-1][2]);
+							GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
+						}
+						if (e == &r_worldentity) rprof_chains_n_skypoly++;
 					}
-					for (j = 2; j < p->numverts; j++)
-					{
-						GL_ImmVertex3f(p->verts[0][0], p->verts[0][1], p->verts[0][2]);
-						GL_ImmVertex3f(p->verts[j-1][0], p->verts[j-1][1], p->verts[j-1][2]);
-						GL_ImmVertex3f(p->verts[j][0], p->verts[j][1], p->verts[j][2]);
-					}
-					if (e == &r_worldentity) rprof_chains_n_skypoly++;
 				}
 			}
 			GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
@@ -2251,7 +2290,7 @@ static void DrawTextureChains (entity_t *e)
 		s = t->texturechain;
 		if (!s)
 			continue;
-		if (i == skytexturenum)
+		if (R_ChainIsSky (t))
 		{
 			{
 			double _t0sp = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
