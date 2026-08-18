@@ -3843,9 +3843,16 @@ static const char *game_labels[GAME_ITEMS] = {
 static qboolean M_Game_IsSkip (int i)
 {
 	if (i < 0 || i >= GAME_ITEMS) return true;
-	/* Nothing shipped to switch to, so the control would do nothing.
-	 * uhexen2-vbnx. */
-	if (i == GAME_GAMECODE && !PR_GamecodeAvailable()) return true;
+	/* Hidden only when there is genuinely nothing to choose between.  A
+	 * bundle is one way to have a second state, not the only one: on a
+	 * bundle-less build a loose progs.dat hiding the pak copy makes "Loose"
+	 * and "Pak" distinct loads, and gating on the bundle alone hid the row
+	 * from exactly the player who needed it -- one carrying a stale
+	 * hand-copied gamecode, whose only other remedy was to delete the file
+	 * by hand.  -vanillaprogs still hides it outright, since both predicates
+	 * answer false under it.  uhexen2-vbnx, uhexen2-uw6y. */
+	if (i == GAME_GAMECODE &&
+	    !PR_GamecodeAvailable() && !PR_GamecodePakOnlyAvailable()) return true;
 	return M_Filter_Active() && !M_Filter_Matches(game_labels[i]);
 }
 
@@ -3950,19 +3957,45 @@ static void M_Game_AdjustSliders (int dir)
 		 * a setting that changes nothing is the inert control M_Game_IsSkip
 		 * hides the whole row to avoid.  uhexen2-nt96. */
 		{
-			int	states = PR_GamecodePakOnlyAvailable() ? 3 : 2;
+			int	avail[3];
+			int	n = 0, cur = 0, i;
 			int	v = (int)Cvar_VariableValue("sv_gamecode");
 
-			/* CVAR_ARCHIVE: the config may have come from an install with a
-			 * different answer above, or from a build that predates state 2.
-			 * Fold before rotating so the row cannot get stuck. */
-			if (v == 2 && states < 3)	v = 0;
-			else if (v != 0 && v != 2)	v = 1;
+			/* Build the reachable states rather than assuming a count.  State
+			 * 1 and state 2 are independently available -- a bundle-less
+			 * install can offer 0 and 2, which the old fixed "2 states, and a
+			 * 3rd if pak-only" shape could not express and would have rotated
+			 * into the unreachable state 1. */
+			avail[n++] = 0;				/* the install's own file */
+			if (PR_GamecodeAvailable())
+				avail[n++] = 1;			/* the bundle beside the engine */
+			if (PR_GamecodePakOnlyAvailable())
+				avail[n++] = 2;			/* the pak copy specifically */
 
-			v = (v + dir) % states;
-			if (v < 0)
-				v += states;
-			Cvar_SetValue ("sv_gamecode", v);
+			/* Mirror PR_GamecodeWanted before looking v up: any nonzero
+			 * value that is not state 2 means state 1, which is what every
+			 * nonzero value meant while this was a boolean.  Without this a
+			 * config carrying such a value would sit at cur 0 and spend its
+			 * first press moving to a state the row already names. */
+			if (v != 0 && v != 2)
+				v = 1;
+
+			/* CVAR_ARCHIVE: the config may have come from an install with
+			 * different answers above, or from a build that predates a state.
+			 * Anything unreachable folds onto 0 so the row cannot get stuck. */
+			for (i = 0; i < n; i++)
+			{
+				if (avail[i] == v)
+				{
+					cur = i;
+					break;
+				}
+			}
+
+			cur = (cur + dir) % n;
+			if (cur < 0)
+				cur += n;
+			Cvar_SetValue ("sv_gamecode", avail[cur]);
 		}
 		break;
 	}
@@ -4093,11 +4126,24 @@ static void M_Game_Draw (void)
 		int		gc = (int)Cvar_VariableValue("sv_gamecode");
 		const char	*src;
 
-		if (gc == 2 && PR_GamecodePakOnlyAvailable())
+		/* Fold the archived value onto what this install can actually reach
+		 * before naming it.  A config carrying state 1 from a bundled build,
+		 * read on a build that ships no bundle, would otherwise read
+		 * "Bundled" for a load that cannot happen: PR_BundledProgsPath gates
+		 * on the same three conditions PR_GamecodeAvailable tests, so with it
+		 * false the install's own file is what loads.  Rotating the row is
+		 * not what makes this true, so the fold cannot live in the rotation
+		 * -- the row has to read correctly before it is ever touched. */
+		if (gc != 0 && gc != 2 && !PR_GamecodeAvailable())
+			gc = 0;
+		if (gc == 2 && !PR_GamecodePakOnlyAvailable())
+			gc = 0;
+
+		if (gc == 2)
 			src = "Pak";
-		else if (gc != 0 && gc != 2)
+		else if (gc != 0)
 			src = "Bundled";
-		else	/* state 0, and state 2 where it folds onto state 0 */
+		else	/* state 0, and the states that fold onto it */
 			src = PR_GamecodeLooseShadowsPak() ? "Loose" : "Pak";
 
 		M_Print (76, 92 + 8*GAME_GAMECODE, game_labels[GAME_GAMECODE]);
