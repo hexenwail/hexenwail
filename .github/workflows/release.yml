@@ -6,8 +6,12 @@ on:
       - '[0-9][0-9].[0-9][0-9]-*'
       - '[0-9]*.[0-9]*.[0-9]*-*'
 
+# Read by default.  Only `publish` creates the release, and it is the one job
+# that touches nothing but already-built artifacts -- where flatpak and build
+# run flatpak-builder and Nix fetches over the network while holding whatever
+# token they were given.  Narrowed at the job level below.  uhexen2-bvei.
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -304,6 +308,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs: [flatpak, build]
+    # The only job that writes: `gh release create` below.
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
