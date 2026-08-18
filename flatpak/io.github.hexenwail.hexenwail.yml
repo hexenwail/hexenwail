@@ -37,7 +37,25 @@ modules:
     buildsystem: cmake-ninja
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
-      - -DLIB_SUFFIX=
+      # Pin the libdir, or nothing here is ever linked.  FluidSynth's
+      # DefaultDirs.cmake is a bare include(GNUInstallDirs), and GNUInstallDirs
+      # defaults CMAKE_INSTALL_LIBDIR to lib64 on 64-bit Linux.  Its exceptions
+      # never covered us either way: the Debian-multiarch one needs
+      # /etc/debian_version and an /usr prefix, and CMake 4.x dropped the
+      # distro exceptions entirely, leaving only a conda check.
+      # fluidsynth.pc then installs to /app/lib64/pkgconfig, which is not on
+      # flatpak's PKG_CONFIG_PATH, so pkg_check_modules(FLUIDSYNTH fluidsynth)
+      # misses it, engine/CMakeLists.txt quietly takes its else arm, and the
+      # build ships midi_nul.c + libTiMidity with every option below inert.
+      # That is uhexen2-rp1z, and it is why opusfile and libxmp resolved fine
+      # while this module did not: both are autotools and land in /app/lib.
+      #
+      # This replaces -DLIB_SUFFIX=, which was doing nothing whatsoever:
+      # LIB_SUFFIX does not appear anywhere in FluidSynth 2.4.6's build system
+      # (checked against the v2.4.6 tree; the only hit in the repo is a stale
+      # line in their own Android CI yml).  It was removed upstream, so the
+      # option this manifest was using to control the libdir had no effect.
+      - -DCMAKE_INSTALL_LIBDIR=lib
       - -Denable-libsndfile=off
       - -Denable-dbus=off
       - -Denable-systemd=off
@@ -144,17 +162,17 @@ modules:
       # USE_CODEC_VORBIS gates, so its presence is the property worth
       # asserting.  uhexen2-bvei.
       #
-      # libfluidsynth.so.3 is deliberately NOT in this list, and that is a
-      # bug being tracked rather than a decision.  This guard's second run
-      # caught that the Flatpak has never detected FluidSynth: the build logs
-      # "FluidSynth MIDI: not found, disabled", compiles midi_nul.c, and falls
-      # back to libTiMidity -- so the fluidsynth module, its stripped-out
-      # audio backends and the 6 MB soundfont this manifest bundles are all
-      # inert.  It predates the module cleanup (the previous green build did
-      # the same), so blocking on it here would only wedge master.  Put the
-      # SONAME back in this loop when uhexen2-rp1z is fixed.
+      # libfluidsynth.so.3 is back in this list as of the uhexen2-rp1z fix.
+      # This guard is what caught that the Flatpak had never detected
+      # FluidSynth at all -- the build logged "FluidSynth MIDI: not found,
+      # disabled", compiled midi_nul.c and fell back to libTiMidity, leaving
+      # the fluidsynth module, its stripped-out audio backends and the 6 MB
+      # soundfont this manifest bundles all inert.  It was narrowed out of the
+      # loop only so master would not wedge on a pre-existing bug.  Now that
+      # the libdir is pinned above, asserting the SONAME is what proves the
+      # fix took and stops it regressing silently a third time.
       - |
-        for so in libvorbisfile.so.3 libopusfile.so.0 libxmp.so.4; do
+        for so in libvorbisfile.so.3 libopusfile.so.0 libxmp.so.4 libfluidsynth.so.3; do
           grep -qa "$so" /app/bin/glhexen2 || {
             echo "FATAL: glhexen2 did not link $so -- a codec was silently disabled"
             exit 1
