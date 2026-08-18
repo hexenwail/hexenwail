@@ -125,8 +125,17 @@ static qboolean S_TIMIDITY_CodecInitialize (void)
 	 * which are a different format we bundle nowhere.  Env var stays the
 	 * top-priority override; otherwise use the shared search. */
 	sf2 = getenv("TIMIDITY_SOUNDFONT");
+	/* An SF3 here would not fail -- libTiMidity would play the Vorbis
+	 * bitstream as raw PCM.  Refuse it even though the env var is an
+	 * override, and fall through to the search for a font we can play. */
+	if (sf2 && SF_IsCompressed(sf2))
+	{
+		Con_Printf("Timidity: TIMIDITY_SOUNDFONT '%s' is a compressed SF3, "
+			   "which libTiMidity cannot decode; ignoring it\n", sf2);
+		sf2 = NULL;
+	}
 	if (!sf2)
-		sf2 = SF_FindSoundFont();
+		sf2 = SF_FindSoundFont(false);
 	if (sf2)
 	{
 		Con_DPrintf("Timidity: setting soundfont: %s\n", sf2);

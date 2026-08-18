@@ -29,10 +29,20 @@ void SF_RegisterCvar (void);
 
 qboolean SF_FileExists (const char *path);
 
+/* True for a compressed SoundFont (SF3) -- Ogg Vorbis sample data in an
+ * otherwise ordinary RIFF/sfbk container.  Sniffs the file, not its name.
+ * A synth with no Vorbis decoder must not be handed one: it will not fail,
+ * it will play the bitstream as PCM.  uhexen2-d4e7. */
+qboolean SF_IsCompressed (const char *path);
+
 /* Locate a General MIDI soundfont, or return NULL.  Search order: the
  * snd_soundfont cvar, soundfont.sf2/.sf3 beside the executable, the same
  * under basedir and basedir/data1, the compile-time SOUNDFONT_PATH, then
- * well-known system and Flatpak locations. */
-const char *SF_FindSoundFont (void);
+ * well-known system and Flatpak locations.
+ *
+ * Pass allow_compressed false unless the caller's synth decodes SF3; every
+ * candidate is then sniffed and SF3s are passed over, so the search keeps
+ * going and finds a playable font instead of returning an unplayable one. */
+const char *SF_FindSoundFont (qboolean allow_compressed);
 
 #endif	/* _SOUNDFONT_H_ */

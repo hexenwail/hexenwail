@@ -87,7 +87,8 @@ static qboolean FMIDI_EnsureSoundFont (void)
 
 	if (FS_HAVE_SOUNDFONT())
 		return true;
-	sf = SF_FindSoundFont();
+	/* true: FluidSynth decodes SF3 sample data through libsndfile. */
+	sf = SF_FindSoundFont(true);
 	if (!sf)
 		return false;
 	return FMIDI_LoadSoundFont(sf);
