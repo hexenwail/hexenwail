@@ -39,7 +39,7 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
 
 /* Bindless texture SSBO for draw call data */
 
-/* uhexen2-iihz/SoT crash fix: blocklights/blocklightscolor are sized for
+/* uhexen2-iihz/SoT crash fix: blocklightscolor is sized for
  * the lightmap atlas page (BLOCK_WIDTH * BLOCK_HEIGHT), not the legacy
  * 18*18 Quake surface cap.  AllocBlock won't place a single surface
  * larger than one atlas page anyway, so this is a hard ceiling.  SoT
@@ -55,7 +55,7 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
  * not place it in any page however many pages existed — reported as the
  * misleading "AllocBlock: full".  The page must be at least as big as the
  * biggest surface the loader accepts, or the loader's limit is a lie.
- * Costs 768 KB more in the two working buffers below; pages themselves are
+ * Costs 768 KB more in the working buffer below; pages themselves are
  * allocated on demand. */
 /* uhexen2-jwzf: 256 -> 260 to make room for LM_GUTTER on both sides of the
  * largest surface the loader will admit.  MAX_SURFACE_LIGHTMAP is 255, so a
@@ -63,8 +63,8 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
  * AllocBlock would start rejecting surfaces it accepts today.  Nothing here
  * requires a power of two -- every use of these is a multiply or an add, the
  * atlas carries no mipmaps and samples GL_LINEAR/GL_CLAMP_TO_EDGE, and NPOT is
- * core in both GL 3+ and ES 3.0.  Costs about 40 KB across blocklights,
- * blocklightscolor and allocated[], plus 8 KB per page actually allocated. */
+ * core in both GL 3+ and ES 3.0.  Costs about 40 KB across blocklightscolor
+ * and allocated[], plus 8 KB per page actually allocated. */
 #define	BLOCK_WIDTH	260
 #define	BLOCK_HEIGHT	260
 
@@ -85,7 +85,6 @@ GLuint		lightmap_textures[MAX_LIGHTMAPS];
  * the rounding the allocator does anyway. */
 #define	LM_GUTTER	2
 
-static unsigned int	blocklights[BLOCK_WIDTH*BLOCK_HEIGHT];
 static unsigned int	blocklightscolor[BLOCK_WIDTH*BLOCK_HEIGHT*3];	// colored light support. *3 for RGB to the definitions at the top
 
 static glpoly_t	*lightmap_polys[MAX_LIGHTMAPS];
@@ -309,8 +308,6 @@ static void R_AddDynamicLights (msurface_t *surf)
 						bl[1] += (int)(brightness * cgreen);
 						bl[2] += (int)(brightness * cblue);
 					}
-
-					blocklights[t*smax + s] += (rad - dist)*256;
 				}
 
 				bl += 3;
@@ -331,49 +328,40 @@ from Mod_LoadLighting().
 */
 void GL_SetupLightmapFmt (void)
 {
-	// only GL_LUMINANCE and GL_RGBA are supported
-	if (!q_strcasecmp(gl_lightmapfmt.string, "GL_LUMINANCE"))
-		gl_lightmap_format = GL_LUMINANCE;
-	else if (!q_strcasecmp(gl_lightmapfmt.string, "GL_RGBA"))
-		gl_lightmap_format = GL_RGBA;
-	else
-	{
-		gl_lightmap_format = GL_RGBA;
-		Cvar_SetQuick (&gl_lightmapfmt, "GL_RGBA");
-	}
+	qboolean	want_luminance;
+
+	/* GL_LUMINANCE is not a core GL 4.3 format, so glTexImage2D rejects it
+	 * and the atlas samples black -- an unlit world.  Nothing in the GLSL
+	 * pipeline wants it either: the shader multiplies tex*lm, while the
+	 * 1-byte store this format fed wrote inverted luxels for the old
+	 * GL_BLEND texenv.  Warn and use RGBA rather than refuse to start, so
+	 * old configs and -lm_1 shortcuts still launch.  uhexen2-q3j7. */
+	want_luminance = !q_strcasecmp(gl_lightmapfmt.string, "GL_LUMINANCE");
 
 	if (!host_initialized) // check for cmdline overrides
 	{
 		if (COM_CheckParm ("-lm_1"))
-		{
-			gl_lightmap_format = GL_LUMINANCE;
-			Cvar_SetQuick (&gl_lightmapfmt, "GL_LUMINANCE");
-		}
+			want_luminance = true;
 		else if (COM_CheckParm ("-lm_4"))
-		{
-			gl_lightmap_format = GL_RGBA;
-			Cvar_SetQuick (&gl_lightmapfmt, "GL_RGBA");
-		}
+			want_luminance = false;
 	}
 
-	switch (gl_lightmap_format)
-	{
-	case GL_RGBA:
-		lightmap_bytes = 4;
-		lightmap_internalformat = 0x8058;	/* GL_RGBA8 */
-		break;
-	case GL_LUMINANCE:
-		lightmap_bytes = 1;
-		lightmap_internalformat = GL_LUMINANCE;
-		break;
-	}
+	if (want_luminance)
+		Con_Printf ("gl_lightmapfmt GL_LUMINANCE not supported in the GL4 pipeline, using GL_RGBA\n");
+
+	if (q_strcasecmp(gl_lightmapfmt.string, "GL_RGBA"))
+		Cvar_SetQuick (&gl_lightmapfmt, "GL_RGBA");
+
+	gl_lightmap_format = GL_RGBA;
+	lightmap_bytes = 4;
+	lightmap_internalformat = 0x8058;	/* GL_RGBA8 */
 }
 
 /*
 ===============
 R_BuildLightMap
 
-Combine and scale multiple lightmaps into the 8.8 format in blocklights
+Combine and scale multiple lightmaps into the 8.8 format in blocklightscolor
 ===============
 */
 /*
@@ -436,12 +424,12 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 	byte		*lightmap;
 	unsigned int	scale;
 	int		maps;
-	unsigned int	*bl, *blcr, *blcg, *blcb;
+	unsigned int	*blcr, *blcg, *blcb;
 
 	/* Sky/turb/tiled surfaces carry placeholder extents (16384, set in
 	 * Mod_SetDrawingFlags) and no lightmap samples.  A dynamic light marking
 	 * a water surface near the player can reach here and drive the memset
-	 * below past blocklights[] (smax*tmax = 1025*1025), aborting via
+	 * below past blocklightscolor[] (smax*tmax = 1025*1025), aborting via
 	 * _FORTIFY_SOURCE.  Tiled surfaces never sample a lightmap, so skip.
 	 * (uhexen2-dcz8 / SoT crash) */
 	if (surf->flags & SURF_DRAWTILED)
@@ -459,21 +447,15 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 	{
 		for (i = 0; i < size; i++)
 		{
-			if (gl_lightmap_format == GL_RGBA)
-				blocklightscolor[i*3+0] =
-				blocklightscolor[i*3+1] =
-				blocklightscolor[i*3+2] = 65280;
-			else
-				blocklights[i] = 255*256;
+			blocklightscolor[i*3+0] =
+			blocklightscolor[i*3+1] =
+			blocklightscolor[i*3+2] = 65280;
 		}
 		goto store;
 	}
 
 // clear to no light
-	if (gl_lightmap_format == GL_RGBA)
-		memset(blocklightscolor, 0, size * 3 * sizeof(unsigned int));
-	else
-		memset(blocklights, 0, size * sizeof(unsigned int));
+	memset(blocklightscolor, 0, size * 3 * sizeof(unsigned int));
 
 // add all the lightmaps
 	if (lightmap)
@@ -483,24 +465,15 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 			scale = d_lightstylevalue[surf->styles[maps]];
 			surf->cached_light[maps] = scale;	// 8.8 fraction
 
-			if (gl_lightmap_format == GL_RGBA)
+			for (i = 0, j = 0; i < size; i++)
 			{
-				for (i = 0, j = 0; i < size; i++)
-				{
-					blocklightscolor[i*3+0] += lightmap[j] * scale;
-					blocklightscolor[i*3+1] += lightmap[++j] * scale;
-					blocklightscolor[i*3+2] += lightmap[++j] * scale;
-					j++;
-				}
+				blocklightscolor[i*3+0] += lightmap[j] * scale;
+				blocklightscolor[i*3+1] += lightmap[++j] * scale;
+				blocklightscolor[i*3+2] += lightmap[++j] * scale;
+				j++;
+			}
 
-				lightmap += size * 3;
-			}
-			else
-			{
-				for (i = 0; i < size; i++)
-					blocklights[i] += lightmap[i] * scale;
-				lightmap += size;	// skip to next lightmap
-			}
+			lightmap += size * 3;
 		}
 	}
 
@@ -571,23 +544,6 @@ store:
 		}
 		break;
 
-	case GL_LUMINANCE:
-		bl = blocklights;
-		{
-		const int lmshift = 7 + (gl_overbright.integer ? 1 : 0);
-		for (i = 0; i < tmax; i++, dest += stride)
-		{
-			for (j = 0; j < smax; j++)
-			{
-				t = *bl++;
-				t >>= lmshift;
-				if (t > 255)
-					t = 255;
-				dest[j] = 255-t;
-			}
-		}
-		}
-		break;
 	default:
 		Sys_Error ("Bad lightmap format");
 	}
@@ -2439,7 +2395,7 @@ static void DrawTextureChains (entity_t *e)
 						batch_surfs[batch_count++] = s;
 					}
 
-					/* Apply dlights to blocklights for this surface */
+					/* Apply dlights to blocklightscolor for this surface */
 					if (r_dynamic.integer && s->dlightframe == r_framecount)
 						R_AddDynamicLights(s);
 
