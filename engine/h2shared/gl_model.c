@@ -606,6 +606,15 @@ bsp_tex_internal:
 
 			if (IMG_LoadReplacement (mt->name, loadmodel->name, &rep))
 			{
+				/* IMG_LoadReplacement already named the winning file.
+				 * Add what only this caller knows: the BSP shipped its
+				 * own texture under that name and lost.  Printing the
+				 * miptex dimensions next to it makes a botched export
+				 * legible -- the #lowlight6.tga behind uhexen2-nqwl was
+				 * a 64x64 outlier among 256x256 siblings.  uhexen2-0q4f. */
+				Con_DPrintf ("IMG: BSP miptex \"%s\" (%dx%d) displaced\n",
+					     mt->name, tx->width, tx->height);
+
 				rep_flags = TEX_MIPMAP;
 				// Check for fence texture (name starts with '{')
 				if (mt->name[0] == '{')

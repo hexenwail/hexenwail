@@ -476,9 +476,15 @@ static int IMG_BuildCandidates (const char *name, const char *modelname,
 IMG_TryDecoded
 
 Probe one base path for a decoded image, newest format first.
+
+pathout receives the file that actually won.  The base path alone does not
+say which extension resolved, and that filename is the whole point of the
+diagnostic in IMG_LogReplacement -- so it is threaded back out rather than
+logged here, where the caller may still reject the hit.
 =================
 */
-static byte *IMG_TryDecoded (const char *base, int *width, int *height, qboolean *has_alpha)
+static byte *IMG_TryDecoded (const char *base, int *width, int *height, qboolean *has_alpha,
+			     char *pathout, size_t pathoutsize)
 {
 	char	path[MAX_OSPATH];
 	byte	*data;
@@ -489,8 +495,7 @@ static byte *IMG_TryDecoded (const char *base, int *width, int *height, qboolean
 	if (data)
 	{
 		*has_alpha = alpha ? true : false;
-		if (developer.value >= 2)
-			Con_Printf ("Loaded external texture: %s\n", path);
+		q_strlcpy (pathout, path, pathoutsize);
 		return data;
 	}
 
@@ -499,8 +504,7 @@ static byte *IMG_TryDecoded (const char *base, int *width, int *height, qboolean
 	if (data)
 	{
 		*has_alpha = alpha ? true : false;
-		if (developer.value >= 2)
-			Con_Printf ("Loaded external texture: %s\n", path);
+		q_strlcpy (pathout, path, pathoutsize);
 		return data;
 	}
 
@@ -509,8 +513,7 @@ static byte *IMG_TryDecoded (const char *base, int *width, int *height, qboolean
 	if (data)
 	{
 		*has_alpha = true;	/* PCX uses index 255 for transparency */
-		if (developer.value >= 2)
-			Con_Printf ("Loaded external texture: %s\n", path);
+		q_strlcpy (pathout, path, pathoutsize);
 		return data;
 	}
 
@@ -549,9 +552,14 @@ static qboolean IMG_CompressedFits (const imgreplace_t *r)
 IMG_TryCompressed
 
 Probe one base path for a block-compressed container.
+
+pathout receives the file that won, for the same reason as IMG_TryDecoded.
+It is written only on success -- a container rejected for size is not the
+texture the surface ended up with.
 =================
 */
-static qboolean IMG_TryCompressed (const char *base, imgreplace_t *out)
+static qboolean IMG_TryCompressed (const char *base, imgreplace_t *out,
+				   char *pathout, size_t pathoutsize)
 {
 	char	path[MAX_OSPATH];
 
@@ -559,7 +567,10 @@ static qboolean IMG_TryCompressed (const char *base, imgreplace_t *out)
 	if (IMG_LoadDDS (path, out))
 	{
 		if (IMG_CompressedFits (out))
+		{
+			q_strlcpy (pathout, path, pathoutsize);
 			return true;
+		}
 		Con_DPrintf ("%s: no mip level fits %d texels, ignoring\n",
 			     path, (int) gl_max_size);
 		IMG_FreeReplacement (out);
@@ -569,13 +580,42 @@ static qboolean IMG_TryCompressed (const char *base, imgreplace_t *out)
 	if (IMG_LoadKTX (path, out))
 	{
 		if (IMG_CompressedFits (out))
+		{
+			q_strlcpy (pathout, path, pathoutsize);
 			return true;
+		}
 		Con_DPrintf ("%s: no mip level fits %d texels, ignoring\n",
 			     path, (int) gl_max_size);
 		IMG_FreeReplacement (out);
 	}
 
 	return false;
+}
+
+/*
+=================
+IMG_LogReplacement
+
+Name the file a texture actually came from.
+
+An external image silently displaces whatever the BSP or MDL embedded, and
+nothing downstream can say which file won -- so a bad pack presents exactly
+like a renderer bug.  uhexen2-nqwl spent a full RenderDoc capture teardown
+proving that a black slime surface was a near-black #lowlight6.tga sitting in
+the game's own pack; this one line would have named it in seconds.
+
+Con_DPrintf, so an ordinary session stays silent and a field tester can be
+asked for a `developer 1` log instead of a capture.  Deliberately reports
+only -- rejecting a replacement that "looks wrong" would be a heuristic
+overriding legitimate authoring, and dark or low-res replacements are both
+legal.  uhexen2-0q4f.
+=================
+*/
+static void IMG_LogReplacement (const char *name, const char *path,
+				int width, int height, qboolean compressed)
+{
+	Con_DPrintf ("IMG: \"%s\" replaced by %s (%dx%d%s)\n",
+		     name, path, width, height, compressed ? ", compressed" : "");
 }
 
 /*
@@ -595,6 +635,7 @@ better -- no CPU decode, a quarter of the VRAM, and its own mip chain.
 qboolean IMG_LoadReplacement (const char *name, const char *modelname, imgreplace_t *out)
 {
 	char		paths[IMG_MAX_CANDIDATES][MAX_OSPATH];
+	char		winner[MAX_OSPATH];
 	int		n, i;
 	qboolean	is_fence = (name[0] == '{');
 
@@ -604,18 +645,21 @@ qboolean IMG_LoadReplacement (const char *name, const char *modelname, imgreplac
 
 	for (i = 0; i < n; i++)
 	{
-		if (IMG_TryCompressed (paths[i], out))
+		if (IMG_TryCompressed (paths[i], out, winner, sizeof(winner)))
 		{
 			if (is_fence)
 				out->has_alpha = true;
+			IMG_LogReplacement (name, winner, out->width, out->height, true);
 			return true;
 		}
 
-		out->rgba = IMG_TryDecoded (paths[i], &out->width, &out->height, &out->has_alpha);
+		out->rgba = IMG_TryDecoded (paths[i], &out->width, &out->height, &out->has_alpha,
+					    winner, sizeof(winner));
 		if (out->rgba)
 		{
 			if (is_fence)
 				out->has_alpha = true;
+			IMG_LogReplacement (name, winner, out->width, out->height, false);
 			return true;
 		}
 	}
@@ -683,6 +727,7 @@ Returns allocated RGBA buffer, caller must free after uploading to GL.
 byte *IMG_LoadExternalTexture (const char *name, int *width, int *height, qboolean *has_alpha)
 {
 	char	paths[IMG_MAX_CANDIDATES][MAX_OSPATH];
+	char	winner[MAX_OSPATH];
 	int	n, i;
 	byte	*data;
 
@@ -692,11 +737,17 @@ byte *IMG_LoadExternalTexture (const char *name, int *width, int *height, qboole
 
 	for (i = 0; i < n; i++)
 	{
-		data = IMG_TryDecoded (paths[i], width, height, has_alpha);
+		data = IMG_TryDecoded (paths[i], width, height, has_alpha,
+				       winner, sizeof(winner));
 		if (data)
 		{
 			if (name[0] == '{')
 				*has_alpha = true;	/* fence textures are always cutouts */
+
+			/* A HUD pic or the particle sprite is displaced just as
+			 * silently as a world texture, so it gets the same line.
+			 * uhexen2-0q4f. */
+			IMG_LogReplacement (name, winner, *width, *height, false);
 			return data;
 		}
 	}
