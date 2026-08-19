@@ -174,7 +174,38 @@ include_directories(
     ${ENGINE_TOP}/hexen2
     ${COMMONDIR}
     ${UHEXEN2_SHARED}
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+
+#============================================================================
+# GLSL -> C string literals
+#============================================================================
+# engine/shaders/*.glsl is the source of truth for every draw shader.  A CMake
+# script expands their #includes and emits one header of string literals, which
+# gl_shader.c consumes.  Done in CMake rather than with a host tool because this
+# has to work identically under the native, mingw-w64 and emscripten toolchains.
+# uhexen2-p4ln.4.
+set(SHADER_SRC_DIR ${ENGINE_TOP}/shaders)
+set(SHADERS_GEN_H ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders_gen.h)
+file(GLOB SHADER_SOURCES ${SHADER_SRC_DIR}/*.glsl ${SHADER_SRC_DIR}/*.inc)
+
+add_custom_command(
+    OUTPUT ${SHADERS_GEN_H}
+    COMMAND ${CMAKE_COMMAND}
+            -DSHADER_DIR=${SHADER_SRC_DIR}
+            -DOUT_FILE=${SHADERS_GEN_H}
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
+    DEPENDS ${SHADER_SOURCES} ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
+    COMMENT "Embedding GLSL shaders"
+    VERBATIM
+)
+add_custom_target(shaders_gen DEPENDS ${SHADERS_GEN_H})
+
+# Compile the same sources to SPIR-V when a validator is available.  Nothing
+# consumes the .spv yet -- the SDL_GPU backend (uhexen2-p4ln.5) is what will --
+# but running the compile keeps the shaders honest against a second frontend,
+# and a build without glslang simply skips it.
+find_program(GLSLANG_VALIDATOR glslangValidator)
 
 # Windows-specific includes
 if(WIN32)
@@ -666,6 +697,7 @@ else()
 endif()
 
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
+add_dependencies(${EXECUTABLE_NAME} shaders_gen)
 
 #============================================================================
 # Link Libraries

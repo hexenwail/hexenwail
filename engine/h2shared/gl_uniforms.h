@@ -33,8 +33,8 @@
  * if it disagrees.
  *
  * Shader bodies keep the old scalar names via the #defines at the end of
- * GLSL_UNIFORM_BLOCKS, so moving to blocks did not touch a line of shader
- * logic -- only the declarations at the top of each stage.
+ * uniforms.inc, so moving to blocks did not touch a line of shader logic --
+ * only the declarations at the top of each stage.
  */
 
 #ifndef GL_UNIFORMS_H
@@ -46,58 +46,12 @@
 #define RU_BINDING_PERFRAME	0
 #define RU_BINDING_PERDRAW	1
 
-/* GLSL declarations, injected into every draw shader.  One macro, so the two
- * dialects and all eleven programs cannot drift apart. */
-#define GLSL_UNIFORM_BLOCKS \
-	"layout(std140) uniform PerFrame {\n" \
-	"    highp vec4 u_fogv;     // xyz fog color, w fog density\n" \
-	"    highp vec4 u_eyetime;  // xyz eye position, w cl.time\n" \
-	"    highp vec4 u_worldp;   // x caustics intensity, y caustics time, z overbright, w bicubic\n" \
-	"    highp vec4 u_debugp;   // x r_fullbright, y r_lightmap\n" \
-	"    highp vec4 u_skyfogv;  // rgb sky fog color, a blend\n" \
-	"    highp vec4 u_windv;    // xy sky wind uv offset\n" \
-	"    highp vec4 u_ppup;     // xyz particle billboard up\n" \
-	"    highp vec4 u_ppright;  // xyz particle billboard right\n" \
-	"    highp vec4 u_pvpn;     // xyz view forward\n" \
-	"    highp vec4 u_porigin;  // xyz camera origin, w cl.time for particles\n" \
-	"    highp mat4 u_viewprojm;// instanced alias view-projection\n" \
-	"};\n" \
-	"layout(std140) uniform PerDraw {\n" \
-	"    highp mat4 u_mvp;\n" \
-	"    highp mat4 u_modelview;\n" \
-	"    highp mat4 u_modelm;   // model-only matrix, no view\n" \
-	"    highp vec4 u_draw0;    // x alpha threshold, y force-opaque alpha, zw alias caustics\n" \
-	"    highp vec4 u_draw1;    // xyz soft-particle params\n" \
-	"    highp ivec4 u_drawi;   // x pose base, y instance base, z pose vertex type\n" \
-	"};\n" \
-	"// Scalar aliases: shader bodies were written against these names and are\n" \
-	"// left untouched.  Chained swizzles (u_worldp.xy.x) are legal GLSL.\n" \
-	"#define u_fog_color u_fogv.xyz\n" \
-	"#define u_fog_density u_fogv.w\n" \
-	"#define u_eyepos u_eyetime.xyz\n" \
-	"#define u_time u_eyetime.w\n" \
-	"#define u_caustics u_worldp.xy\n" \
-	"#define u_overbright u_worldp.z\n" \
-	"#define u_lightmap_bicubic u_worldp.w\n" \
-	"#define u_lightdebug u_debugp.xy\n" \
-	"#define u_skyfog u_skyfogv\n" \
-	"#define u_wind u_windv.xy\n" \
-	"#define u_pup u_ppup.xyz\n" \
-	"#define u_pright u_ppright.xyz\n" \
-	"#define u_vpn u_pvpn.xyz\n" \
-	"#define u_origin u_porigin.xyz\n" \
-	"#define u_ctime u_porigin.w\n" \
-	"#define u_viewproj u_viewprojm\n" \
-	"#define u_alpha_threshold u_draw0.x\n" \
-	"#define u_force_opaque_alpha u_draw0.y\n" \
-	"#define u_alias_caustics u_draw0.zw\n" \
-	"#define u_soft_params u_draw1.xyz\n" \
-	"#define u_alias_model u_modelm\n" \
-	"#define u_pose_base u_drawi.x\n" \
-	"#define u_inst_base u_drawi.y\n" \
-	"#define u_poseverttype u_drawi.z\n"
+/* The GLSL side of these blocks is engine/shaders/uniforms.inc, included by
+ * every draw shader.  The C mirrors below must match it member for member;
+ * R_BindProgramBlocks asks the driver for the block sizes once and says so if
+ * they have drifted apart. */
 
-/* C mirrors.  Field order and types must match the GLSL above exactly. */
+/* C mirrors.  Field order and types must match uniforms.inc exactly. */
 typedef struct {
 	float	fog[4];
 	float	eyetime[4];
