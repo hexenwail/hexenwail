@@ -27,6 +27,7 @@
 #include "gl_postprocess.h"
 #include "gl_vbo.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "sbar.h"
 #include "sdl_inc.h"
 
@@ -7202,7 +7203,7 @@ void M_Draw (void)
 				const float bg_x1 = 288, bg_y1 = 168;
 				GL_SetCanvas (CANVAS_MENU);
 				Draw_FlushCharBatch ();
-				glEnable_fp (GL_BLEND);
+				R_SetBlend (true);
 				GL_ImmBegin ();
 				GL_ImmColor4f (0.0f, 0.0f, 0.0f, 0.5f);
 				GL_ImmVertex2f (bg_x0, bg_y0);
@@ -7210,7 +7211,7 @@ void M_Draw (void)
 				GL_ImmVertex2f (bg_x1, bg_y1);
 				GL_ImmVertex2f (bg_x0, bg_y1);
 				GL_ImmEnd (GL_QUADS, &gl_shader_flat);
-				glDisable_fp (GL_BLEND);
+				R_SetBlend (false);
 			}
 		}
 		if (scr_viewsize.integer < 110)

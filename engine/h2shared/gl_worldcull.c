@@ -23,6 +23,7 @@
 #ifndef USE_GLES
 
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -761,6 +762,7 @@ void R_FreeWorldCull (void)
 	if (cull_dst_ibo) { glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
 	if (cull_dedup_ssbo) { glDeleteBuffers_fp(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
 	if (cull_stats_ssbo) { glDeleteBuffers_fp(1, &cull_stats_ssbo); cull_stats_ssbo = 0; }
+	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }
 	if (cull_bucket_map) { free(cull_bucket_map); cull_bucket_map = NULL; }
@@ -846,6 +848,7 @@ void R_BuildHiZ (void)
 
 void R_FreeHiZ (void)
 {
+	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (hiz_pyramid_tex)   { glDeleteTextures_fp(1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
 	if (hiz_copy_prog)     { glDeleteProgram_fp(hiz_copy_prog);        hiz_copy_prog = 0; }
 	if (hiz_reduce_prog)   { glDeleteProgram_fp(hiz_reduce_prog);      hiz_reduce_prog = 0; }
@@ -986,7 +989,7 @@ void R_BuildHiZForNextFrame (void)
 		return;
 
 	/* Copy scene depth -> mip 0 */
-	glUseProgram_fp(hiz_copy_prog);
+	R_UseProgram (hiz_copy_prog);
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, scene_depth_tex);
 	glBindImageTexture_fp(0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
@@ -998,7 +1001,7 @@ void R_BuildHiZForNextFrame (void)
 	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 	/* Reduce mip N -> mip N+1 */
-	glUseProgram_fp(hiz_reduce_prog);
+	R_UseProgram (hiz_reduce_prog);
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
 	{
@@ -1024,7 +1027,7 @@ void R_BuildHiZForNextFrame (void)
 		}
 	}
 
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
 }
@@ -1077,14 +1080,14 @@ void R_DispatchWorldCull (void)
 	}
 
 	/* Pass 1: clear indirect buffer */
-	glUseProgram_fp(cull_clear_prog);
+	R_UseProgram (cull_clear_prog);
 	glUniform1i_fp(cull_clear_u_num_buckets, cull_num_buckets);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, cull_indirect_buf);
 	glDispatchCompute_fp((cull_num_buckets + 63) / 64, 1, 1);
 	glMemoryBarrier_fp(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	/* Pass 2: cull + mark surfaces */
-	glUseProgram_fp(cull_mark_prog);
+	R_UseProgram (cull_mark_prog);
 	glUniform3f_fp(cull_mark_u_vieworg, r_origin[0], r_origin[1], r_origin[2]);
 	glUniform1i_fp(cull_mark_u_framecount, framecount);
 	glUniform1i_fp(cull_mark_u_num_marksurfs, cull_num_marksurfs);
@@ -1188,7 +1191,7 @@ void R_DispatchWorldCull (void)
 		}
 	}
 
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1227,7 +1230,7 @@ void R_DrawWorldCulled (void)
 	 * the early_fragment_tests variant for Hi-Z.  uhexen2-5c6r. */
 	{
 		glprogram_t *prog = &gl_shader_world_opaque;
-		glUseProgram_fp(prog->program);
+		R_UseProgram (prog->program);
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
 		if (prog->u_mvp >= 0)
@@ -1283,7 +1286,7 @@ void R_DrawWorldCulled (void)
 	}
 
 	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 	/* External upload to gl_shader_world; clear GL_ImmEnd's uniform
 	 * cache so a later ImmEnd reusing the same shader uploads fresh. */
 	GL_ImmInvalidateState();
