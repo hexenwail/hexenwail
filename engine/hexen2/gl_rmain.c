@@ -279,6 +279,14 @@ cvar_t	gl_nocolors = {"gl_nocolors", "0", CVAR_NONE};
 cvar_t	gl_keeptjunctions = {"gl_keeptjunctions", "1", CVAR_ARCHIVE};
 cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
+/* Surface warp on liquids -- the texcoord turb in EmitWaterPolys, the Z
+ * ripple beside it, and the underwater wall wobble in DrawGLWaterPoly.
+ * Vanilla is 1/1; the defaults here run it at half rate and half throw
+ * because the stock warp reads as seasick on a modern framerate and a
+ * large liquid surface.  Not to be confused with r_waterwarp, which is the
+ * fullscreen distortion applied while the camera is submerged. */
+cvar_t	gl_waterwarp_speed = {"gl_waterwarp_speed", "0.5", CVAR_ARCHIVE};
+cvar_t	gl_waterwarp_amount = {"gl_waterwarp_amount", "0.5", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};	// fullbright pixel overlay on models
 /* gl_overbright_models: Ironwail semantics — 1 lets alias model lighting

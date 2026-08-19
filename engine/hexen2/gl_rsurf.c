@@ -621,8 +621,11 @@ static void DrawGLWaterPoly (glpoly_t *p)
 
 		if (r_waterwarp.integer && !GL_PostProcess_Active())
 		{
-			nv[0] = v[0] + 8*sin(v[1]*0.05+realtime)*sin(v[2]*0.05+realtime);
-			nv[1] = v[1] + 8*sin(v[0]*0.05+realtime)*sin(v[2]*0.05+realtime);
+			float	wamt = 8 * R_WaterWarpAmount();
+			float	wt = realtime * R_WaterWarpSpeed();
+
+			nv[0] = v[0] + wamt*sin(v[1]*0.05+wt)*sin(v[2]*0.05+wt);
+			nv[1] = v[1] + wamt*sin(v[0]*0.05+wt)*sin(v[2]*0.05+wt);
 			nv[2] = v[2];
 			GL_ImmVertex3f (nv[0], nv[1], nv[2]);
 		}
@@ -650,8 +653,11 @@ static void DrawGLWaterPolyMTexLM (glpoly_t *p)
 
 		if (r_waterwarp.integer && !GL_PostProcess_Active())
 		{
-			nv[0] = v[0] + 8*sin(v[1]*0.05+realtime)*sin(v[2]*0.05+realtime);
-			nv[1] = v[1] + 8*sin(v[0]*0.05+realtime)*sin(v[2]*0.05+realtime);
+			float	wamt = 8 * R_WaterWarpAmount();
+			float	wt = realtime * R_WaterWarpSpeed();
+
+			nv[0] = v[0] + wamt*sin(v[1]*0.05+wt)*sin(v[2]*0.05+wt);
+			nv[1] = v[1] + wamt*sin(v[0]*0.05+wt)*sin(v[2]*0.05+wt);
 			nv[2] = v[2];
 			GL_ImmVertex3f (nv[0], nv[1], nv[2]);
 		}
