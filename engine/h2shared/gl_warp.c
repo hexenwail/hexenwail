@@ -206,6 +206,44 @@ static float	turbsin[] =
 
 /*
 =============
+R_WaterWarpSpeed / R_WaterWarpAmount
+
+Rate and throw of the liquid surface warp, clamped in one place so every
+warp site agrees: the texcoord turb and Z ripple below, and the underwater
+wall wobble in DrawGLWaterPoly / DrawGLWaterPolyMTexLM.  Vanilla Hexen II is
+1.0 for both; the shipped defaults halve them because the stock warp reads
+as seasick on a large liquid surface at a modern framerate.
+
+Clamped rather than trusted: at speed much above vanilla the texcoords step
+more than one turbsin entry per frame and the warp aliases into noise
+instead of getting faster.  Distinct from r_waterwarp, which is the
+fullscreen distortion applied while the camera is submerged.
+=============
+*/
+float R_WaterWarpSpeed (void)
+{
+	float	v = gl_waterwarp_speed.value;
+
+	if (v < 0.0f)
+		return 0.0f;
+	if (v > 4.0f)
+		return 4.0f;
+	return v;
+}
+
+float R_WaterWarpAmount (void)
+{
+	float	v = gl_waterwarp_amount.value;
+
+	if (v < 0.0f)
+		return 0.0f;
+	if (v > 4.0f)
+		return 4.0f;
+	return v;
+}
+
+/*
+=============
 EmitWaterPolys
 
 Does a water warp on the pre-fragmented glpoly_t chain
@@ -219,6 +257,8 @@ void EmitWaterPolys (msurface_t *fa)
 	float		s, t, os, ot;
 	float		nz;
 	float		ripple = gl_waterripple.value;
+	float		warpamt = R_WaterWarpAmount();
+	float		wtime = realtime * R_WaterWarpSpeed();
 
 	if (ripple < 0) ripple = 0;
 	else if (ripple > 10) ripple = 10;
@@ -254,11 +294,11 @@ void EmitWaterPolys (msurface_t *fa)
 					 * horizontal liquid surface v[2] is constant, so keying
 					 * one of them on it collapses the ripple to 1-D stripes
 					 * that flatten whenever that constant term crosses zero. */
-					nz += ripple * sin(v[0]*0.05 + realtime) * sin(v[1]*0.05 + realtime);
+					nz += ripple * warpamt * sin(v[0]*0.05 + wtime) * sin(v[1]*0.05 + wtime);
 
-				s = os + turbsin[(int)((ot*0.125 + realtime) * TURBSCALE) & 255];
+				s = os + warpamt * turbsin[(int)((ot*0.125 + wtime) * TURBSCALE) & 255];
 				s *= (1.0/64);
-				t = ot + turbsin[(int)((os*0.125 + realtime) * TURBSCALE) & 255];
+				t = ot + warpamt * turbsin[(int)((os*0.125 + wtime) * TURBSCALE) & 255];
 				t *= (1.0/64);
 
 				GL_ImmTexCoord2f (s, t);
