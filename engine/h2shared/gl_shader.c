@@ -202,35 +202,18 @@ static GLuint GL_CompileOITFragShader (const char *frag_body)
 		"}\n"
 		"#define main main_body\n";
 
-	/* The body declares its own fragColor as a fragment output; the preamble
-	 * replaces it with a plain global plus the two MRT outputs, so that one
-	 * line has to come out.  This used to have to find the #version line and
-	 * then step past any precision declarations to know where it was safe to
-	 * splice (uhexen2-g63k) -- with the header supplied as a separate
-	 * glShaderSource chunk there is nothing to step past. */
-	static const char decl[] = "out vec4 fragColor;\n";
-	const char *skip = strstr(frag_body, decl);
-	size_t before_len;
-	size_t total;
-	char *buf;
-	GLuint shader;
+	/* Three chunks, no string surgery.  This used to allocate a copy of the
+	 * source so it could find the #version line, step past any precision
+	 * declarations (uhexen2-g63k) and delete the body's `out vec4 fragColor;`
+	 * before splicing.  The header is its own chunk now, and the body guards
+	 * that declaration with #ifndef OIT -- which the preamble's `#define OIT
+	 * 1` above satisfies -- so there is nothing left to cut. */
+	const char *parts[3];
 
-	if (!skip)
-		return 0;
-	before_len = skip - frag_body;
-	skip += strlen(decl);
-
-	total = strlen(oit_preamble) + before_len + strlen(skip) + 1;
-	buf = (char *) malloc(total);
-	if (!buf)
-		Sys_Error("GL_CompileOITFragShader: out of memory");
-	memcpy(buf, oit_preamble, strlen(oit_preamble));
-	memcpy(buf + strlen(oit_preamble), frag_body, before_len);
-	strcpy(buf + strlen(oit_preamble) + before_len, skip);
-
-	shader = GL_CompileStage(GL_FRAGMENT_SHADER, NULL, buf);
-	free(buf);
-	return shader;
+	parts[0] = GLSL_FRAG_HEADER;
+	parts[1] = oit_preamble;
+	parts[2] = frag_body;
+	return GL_CompileShaderParts (GL_FRAGMENT_SHADER, 3, parts);
 }
 
 static GLuint GL_LoadOITProgram (const char *vert_src, const char *frag_src)

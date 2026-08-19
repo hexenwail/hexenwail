@@ -1,4 +1,61 @@
-layout(std140) uniform PerFrame {
+// Descriptor layout.
+//
+// On the GL path these expand to nothing beyond the packing qualifier: GL 4.3
+// and GLSL ES 3.00 take a block's binding point from C (glUniformBlockBinding)
+// and a sampler's texture unit from glUniform1i, so the shader does not name
+// either.  GLSL ES 3.00 could not name them anyway -- layout(binding=) on a
+// uniform block is 4.20 / ES 3.10.
+//
+// Under VULKAN they expand to the numbering SDL_GPU fixes and documents in
+// SDL_gpu.h: for a graphics pipeline the vertex stage uses set 0 for sampled
+// textures and storage buffers and set 1 for uniform buffers, and the fragment
+// stage uses set 2 and set 3.  FRAGMENT_STAGE picks the pair, and each
+// fragment shader declares it itself rather than taking it from the command
+// line, so a vertex and fragment stage compiled in one invocation still each
+// get the right sets.
+#ifdef VULKAN
+  #ifdef FRAGMENT_STAGE
+    #define UBO(b)  layout(std140, set = 3, binding = b)
+    #define TEX(b)  layout(set = 2, binding = b)
+    #define SSBO(b) layout(std430, set = 2, binding = b)
+  #else
+    #define UBO(b)  layout(std140, set = 1, binding = b)
+    #define TEX(b)  layout(set = 0, binding = b)
+    #define SSBO(b) layout(std430, set = 0, binding = b)
+  #endif
+#else
+  #define UBO(b)  layout(std140)
+  #define TEX(b)
+  #define SSBO(b) layout(std430, binding = b)
+#endif
+
+
+// Stage interface locations.  Vulkan requires one on every user input and
+// output; GL assigns vertex attributes from C (glBindAttribLocation, the ATTR_*
+// values in gl_shader.h) and matches varyings by name, and GLSL ES 3.00 cannot
+// put a location on a varying at all -- that is enhanced layouts, 4.40 / ES
+// 3.20.  The numbers here match ATTR_* exactly, so the two agree.
+// GL and Vulkan spell the two draw-index builtins differently.  The values
+// agree for how this engine draws: gl_VertexIndex differs from gl_VertexID only
+// by the base vertex of an indexed draw, and gl_InstanceIndex differs from
+// gl_InstanceID only by firstInstance -- the instanced alias path carries its
+// own base in u_inst_base and draws with firstInstance 0.  Revisit if either
+// ever becomes non-zero.
+#ifdef VULKAN
+  #define gl_VertexID   gl_VertexIndex
+  #define gl_InstanceID gl_InstanceIndex
+#endif
+
+#ifdef VULKAN
+  #define ATTR(n)    layout(location = n)
+  #define VARY(n)    layout(location = n)
+  #define FRAGOUT(n) layout(location = n)
+#else
+  #define ATTR(n)
+  #define VARY(n)
+  #define FRAGOUT(n)
+#endif
+UBO(0) uniform PerFrame {
     highp vec4 u_fogv;     // xyz fog color, w fog density
     highp vec4 u_eyetime;  // xyz eye position, w cl.time
     highp vec4 u_worldp;   // x caustics intensity, y caustics time, z overbright, w bicubic
@@ -11,7 +68,7 @@ layout(std140) uniform PerFrame {
     highp vec4 u_porigin;  // xyz camera origin, w cl.time for particles
     highp mat4 u_viewprojm;// instanced alias view-projection
 };
-layout(std140) uniform PerDraw {
+UBO(1) uniform PerDraw {
     highp mat4 u_mvp;
     highp mat4 u_modelview;
     highp mat4 u_modelm;   // model-only matrix, no view

@@ -1,9 +1,9 @@
 #include "uniforms.inc"
-in vec3 a_position;
-in vec2 a_texcoord;
-in vec4 a_color;
-out vec2 v_texcoord;
-out vec4 v_color;
+ATTR(0) in vec3 a_position;
+ATTR(1) in vec2 a_texcoord;
+ATTR(3) in vec4 a_color;
+VARY(0) out vec2 v_texcoord;
+VARY(1) out vec4 v_color;
 void main() {
     v_texcoord = a_texcoord;
     v_color = a_color;
