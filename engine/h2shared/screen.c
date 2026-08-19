@@ -1381,6 +1381,7 @@ void SCR_UpdateScreen (void)
 	if (scr_drawdialog)
 	{
 		Sbar_Draw ();
+		GL_SetCanvas (CANVAS_DEFAULT);
 		Draw_FadeScreen ();
 		SCR_DrawNotifyString ();
 		scr_copyeverything = true;
@@ -1419,6 +1420,7 @@ void SCR_UpdateScreen (void)
 			SCR_DrawPause();
 			Sbar_Draw();
 		}
+		GL_SetCanvas (CANVAS_DEFAULT);
 		SCR_CheckDrawCenterString();
 		SCR_DrawFPS();
 

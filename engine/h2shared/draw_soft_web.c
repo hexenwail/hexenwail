@@ -38,6 +38,10 @@
  * historical names. Refreshed on every Draw_SoftWebInit()/present. */
 int	glwidth, glheight;
 
+/* Origin of the current 2D canvas in framebuffer pixels. Set by
+ * GL_SetCanvas, applied by every drawing primitive in draw.c. */
+int	draw_canvas_x, draw_canvas_y;
+
 cvar_t	scr_sbarscale = {"scr_sbarscale", "1", CVAR_ARCHIVE};
 cvar_t	scr_menuscale = {"scr_menuscale", "1", CVAR_ARCHIVE};
 cvar_t	scr_crosshairscale = {"scr_crosshairscale", "1", CVAR_ARCHIVE};
@@ -76,16 +80,49 @@ void Draw_SoftWebInit (void)
 ================
 GL_SetCanvas
 
-The software renderer has exactly one canvas: the framebuffer itself. The
-WebGL2 backend's GL_SetCanvas is likewise a no-op that simply records the
-full framebuffer extents, so both renderers agree.
+The software rasteriser has no projection matrix, so a canvas is simply a
+translation of the 2D drawing origin: the 320-wide UI canvases are placed
+on the framebuffer where gl_draw.c's GL_SetCanvas puts its viewports, which
+is the same rectangle once its UI scale resolves to 1. This renderer cannot
+scale 2D, so SCR_CalcUIScale reports 1 here and the scale never differs.
+The canvas rectangles are:
+
+  CANVAS_SBAR : 320 x UI_SBAR_CANVAS_HEIGHT, bottom of screen, centred
+  CANVAS_MENU : 320 wide, top of screen, centred
+  everything else : the framebuffer itself
+
+sbar.c and menu.c draw in canvas coordinates, which is why a no-op here
+left the status bar and the menus stranded in the top-left corner.
 ================
 */
 void GL_SetCanvas (canvastype newcanvas)
 {
-	(void) newcanvas;
 	glwidth = vid.width;
 	glheight = vid.height;
+
+	switch (newcanvas)
+	{
+	case CANVAS_SBAR:
+		draw_canvas_x = (vid.width - UI_CANVAS_WIDTH) / 2;
+		draw_canvas_y = vid.height - UI_SBAR_CANVAS_HEIGHT;
+		break;
+	case CANVAS_MENU:
+		draw_canvas_x = (vid.width - UI_CANVAS_WIDTH) / 2;
+		draw_canvas_y = 0;
+		break;
+	default:
+		draw_canvas_x = 0;
+		draw_canvas_y = 0;
+		break;
+	}
+
+	/* a canvas larger than the framebuffer is clamped, not shifted
+	 * off-screen: the resolution ladder starts at 320x240, so this
+	 * only ever matters if that changes */
+	if (draw_canvas_x < 0)
+		draw_canvas_x = 0;
+	if (draw_canvas_y < 0)
+		draw_canvas_y = 0;
 }
 
 /*
@@ -193,9 +230,12 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 		return;
 	if (threshold >= 16)
 	{
-		Draw_TransPic (x, y, pic);
+		Draw_TransPic (x, y, pic);	/* canvas coords: it translates */
 		return;
 	}
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if (x < 0 || (x + pic->width) > vid.width ||
 	    y < 0 || (y + pic->height) > vid.height)
@@ -309,13 +349,16 @@ void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, floa
 	if (threshold <= 0 || w <= 0 || h <= 0)
 		return;
 
-	/* clamp instead of Sys_Error: callers derive rects from cvars */
+	/* Clamp instead of Sys_Error: callers derive rects from cvars.
+	   Clamping happens in canvas space so the opaque path can hand
+	   canvas coordinates straight to Draw_Fill, which applies the
+	   canvas translation itself. */
 	x2 = x + w;
 	y2 = y + h;
-	if (x < 0) x = 0;
-	if (y < 0) y = 0;
-	if (x2 > vid.width) x2 = vid.width;
-	if (y2 > vid.height) y2 = vid.height;
+	if (x < -draw_canvas_x) x = -draw_canvas_x;
+	if (y < -draw_canvas_y) y = -draw_canvas_y;
+	if (x2 > vid.width - draw_canvas_x) x2 = vid.width - draw_canvas_x;
+	if (y2 > vid.height - draw_canvas_y) y2 = vid.height - draw_canvas_y;
 	if (x >= x2 || y >= y2)
 		return;
 
@@ -326,6 +369,11 @@ void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, floa
 		Draw_Fill (x, y, x2 - x, y2 - y, color);
 		return;
 	}
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
+	x2 += draw_canvas_x;
+	y2 += draw_canvas_y;
 
 	dest = vid.buffer + y * vid.rowbytes + x;
 	for (v = y; v < y2; v++)
