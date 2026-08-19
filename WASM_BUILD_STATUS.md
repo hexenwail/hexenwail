@@ -178,7 +178,13 @@ WASM build now links successfully! Next steps:
   - `-sEXPORTED_RUNTIME_METHODS=['FS','callMain']`
 - The browser shell still uses a custom `--shell-file`, now aligned with the new PWA launcher structure.
 
+### Verified on port into this tree (2026-08-19)
+- `nix-shell shell-wasm.nix` + `emcmake`/`emmake` links cleanly with the new flags, emitting
+  `bin/hexenwail.{html,js,wasm}`; the generated JS exports both `callMain` and `FS`, and the
+  PWA shell is substituted into `hexenwail.html`
+- Desktop `nix build` stays green — the new flags live inside `if(EMSCRIPTEN)` and do not reach it
+- `node --test web/test/*.test.js` passes (8/8)
+
 ### Still not fully verified here
-- Actual `emcc`/`emmake` compilation was not re-run in this sandbox unless an environment with emsdk is available
 - Real GitHub Pages deployment still requires the repo setting **Settings → Pages → Source → GitHub Actions**
 - Actual iPadOS hardware validation (install flow, storage persistence behavior, Pointer Lock limitations in practice) remains follow-up QA work

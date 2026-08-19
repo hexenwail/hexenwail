@@ -639,6 +639,9 @@ if(EMSCRIPTEN)
     add_executable(${EXECUTABLE_NAME} ${ALL_SOURCES})
     # Emscripten link flags: WebGL2, memory growth, shell template
     # For pure Nix builds, use: nix develop -f shell-wasm.nix
+    # callMain MUST stay in EXPORTED_RUNTIME_METHODS: the launcher defers main()
+    # until the user's imported paks are in the FS, and INVOKE_RUN=0 otherwise
+    # leaves no callMain wrapper for it to call at all.
     target_link_options(${EXECUTABLE_NAME} PRIVATE
         -sFULL_ES3=1
         -sALLOW_MEMORY_GROWTH=1
