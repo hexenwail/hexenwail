@@ -1347,6 +1347,9 @@ static void R_DrawAliasModel (entity_t *e)
 	int		mls;
 	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
 	float		caustics = R_CausticsIntensity();
+	/* uhexen2-fc1c: the one alias entity that keeps writing depth even
+	 * when it draws blended.  Rationale at the branch chain below. */
+	qboolean	viewmodel_depth_write = (e == &cl.viewent);
 
 	clmodel = e->model;
 
@@ -1642,14 +1645,28 @@ static void R_DrawAliasModel (entity_t *e)
 	 * r_alphasort orders back-to-front by squared distance to entity
 	 * ORIGIN, which says nothing useful about interpenetrating instances.
 	 * Same discipline R_RenderBrushPoly already follows for translucent
-	 * brush surfaces (uhexen2-t4kt, uhexen2-j001). */
+	 * brush surfaces (uhexen2-t4kt, uhexen2-j001).
+	 *
+	 * THE VIEWMODEL IS THE EXCEPTION (uhexen2-fc1c).  The rule above is
+	 * about compositing SEPARATE instances that overlap; it says nothing
+	 * about a single mesh resolving against ITSELF, which still needs the
+	 * depth buffer.  The mist is eight entities and reads correctly with
+	 * writes off; a weapon is one entity whose own back and interior
+	 * faces must stay hidden behind its front ones, and with writes off
+	 * they blend straight through -- the gun goes see-through.  Costs
+	 * nothing elsewhere: R_DrawViewModel gives cl.viewent a private depth
+	 * slice (the upper 30% under reversed-Z) and restores the full range
+	 * afterwards, so these writes never meet world geometry.  This is
+	 * also what shipped before uhexen2-gwtq, when
+	 * R_DrawTransEntitiesOnList forced the mask on for every mod_alias
+	 * entity and the viewmodel inherited it. */
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-			R_SetDepthMask (false);	/* blended: no depth write */
+			R_SetDepthMask (viewmodel_depth_write);	/* blended: no depth write, except the viewmodel */
 		}
 		model_constant_alpha = 1.0f;
 		R_SetCull (false);
@@ -1661,7 +1678,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (false);	/* blended: no depth write */
+			R_SetDepthMask (viewmodel_depth_write);	/* blended: no depth write, except the viewmodel */
 		}
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
@@ -1675,7 +1692,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (false);	/* blended: no depth write */
+			R_SetDepthMask (viewmodel_depth_write);	/* blended: no depth write, except the viewmodel */
 		}
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1726,7 +1743,7 @@ static void R_DrawAliasModel (entity_t *e)
 			 * result, so only genuinely translucent alphas drop the
 			 * depth write — same predicate the fullbright and blend
 			 * restores below use. */
-			R_SetDepthMask (ENTALPHA_OPAQUE(e->alpha) ? true : false);
+			R_SetDepthMask (viewmodel_depth_write || ENTALPHA_OPAQUE(e->alpha));
 		}
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
