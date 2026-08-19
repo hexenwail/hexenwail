@@ -34,7 +34,10 @@ jobs:
           sudo apt-get install -y shellcheck appstream
 
       - name: Shellcheck
-        run: shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh
+        run: |
+          shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh \
+            scripts/wasm-build.sh scripts/wasm-assemble-artifact.sh \
+            scripts/wasm-validate-artifact.sh
 
       # The metainfo is what GNOME Software and KDE Discover read, and Flathub
       # rejects a submission whose metainfo does not validate.  Nothing checked

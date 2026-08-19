@@ -3,6 +3,9 @@ result
 .flatpak-builder/
 audit.md
 engine/build/
+# Assembled by scripts/wasm-assemble-artifact.sh -- engine/build/bin output
+# copied over web/, i.e. entirely derived and multi-MB.
+/dist/
 *.o
 *.d
 

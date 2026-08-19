@@ -139,6 +139,11 @@ if(EMSCRIPTEN)
     set(USE_CODEC_FLAC OFF)
     set(USE_CODEC_OPUS OFF)
     set(USE_CODEC_XMP OFF)
+    # -sUSE_SDL=3 is already on the link line, but Emscripten's SDL3 port only
+    # puts SDL3/*.h on the include path when the flag is present at *compile*
+    # time too.  Without it the SDL include search below is what has to find
+    # headers, and the only thing it can find is the host's.
+    add_compile_options(-sUSE_SDL=3)
 elseif(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
     set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE GL_DLSYM NO_SPLASHES)
@@ -200,27 +205,17 @@ if(WIN32)
     set(SDL_FOUND TRUE)
 else()
     if(EMSCRIPTEN)
-        # Emscripten: find SDL3 via both find_package and pkg-config
-        set(SDL_FOUND TRUE)  # Assume SDL3 is available
-        find_package(SDL3 QUIET)
-        if(SDL3_FOUND)
-            set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
-        else()
-            # Try pkg-config as fallback
-            find_package(PkgConfig QUIET)
-            if(PKG_CONFIG_FOUND)
-                pkg_check_modules(SDL3 QUIET sdl3)
-                if(SDL3_FOUND)
-                    set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
-                else()
-                    message(WARNING "SDL3 not found via pkg-config, trying system paths")
-                    set(SDL_INCLUDE_DIR "/usr/include")
-                endif()
-            else()
-                message(WARNING "pkg-config not found, using system paths for SDL3")
-                set(SDL_INCLUDE_DIR "/usr/include")
-            endif()
-        endif()
+        # Emscripten ships SDL3 itself, headers and all, behind -sUSE_SDL=3.
+        # Never search for a native SDL3 here: find_package/pkg-config resolve
+        # against the *host*, and every one of the old fallbacks -- nixpkgs
+        # sdl3-dev via pkg-config, or a bare /usr/include -- puts host glibc
+        # headers into the cross-compile sysroot.  On a runner with no SDL3 at
+        # all that reached /usr/include and died in glibc's features-time64.h
+        # ("bits/wordsize.h" not found); under shell-wasm.nix it silently
+        # compiled the browser build against native SDL3 headers instead of
+        # the port's, which is the same bug wearing a hat.
+        set(SDL_FOUND TRUE)
+        set(SDL_INCLUDE_DIR "")
         set(SDL_LIBRARY "")  # Link flag is set in target_link_options (-sUSE_SDL=3)
     else()
         find_package(SDL3 QUIET)
@@ -676,9 +671,15 @@ target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
 #============================================================================
 # Link Libraries
 #============================================================================
-# SDL is always required
-target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${SDL_LIBRARY})
-target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL_INCLUDE_DIR})
+# SDL is always required.  Both may legitimately be empty on Emscripten, where
+# SDL arrives through -sUSE_SDL=3 rather than a path; an empty entry is a hard
+# error for target_include_directories, not a no-op.
+if(SDL_LIBRARY)
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${SDL_LIBRARY})
+endif()
+if(SDL_INCLUDE_DIR)
+    target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL_INCLUDE_DIR})
+endif()
 
 # Platform-specific linking
 if(EMSCRIPTEN)
