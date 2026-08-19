@@ -20,7 +20,12 @@
       --chrome-bg: rgba(12, 10, 18, 0.94);
       --panel-bg: rgba(24, 19, 37, 0.92);
       --panel-border: rgba(255, 255, 255, 0.1);
+      --accent: #ccad63;
       --text-dim: #c3bed5;
+      --ok: #8dd890;
+      --warn: #e8c26d;
+      --err: #ff7e7e;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -29,7 +34,6 @@
       background: radial-gradient(circle at top, #2a2142 0%, #15111f 45%, #06070c 100%);
       color: #f7f5fb;
       overscroll-behavior: none;
-      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     body {
       min-height: 100vh;
@@ -40,9 +44,11 @@
       display: grid;
       grid-template-rows: auto 1fr;
     }
+    body[data-engine-state="running"] #control-panel { opacity: 0.92; }
     .topbar {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       justify-content: space-between;
       gap: 0.75rem;
       padding: 0.75rem 1rem;
@@ -50,9 +56,18 @@
       border-bottom: 1px solid var(--panel-border);
       backdrop-filter: blur(14px);
     }
-    .topbar h1 { margin: 0; font-size: 1rem; letter-spacing: 0.08em; text-transform: uppercase; }
-    .topbar small, .muted, .card p, .card li, .card code, .card small { color: var(--text-dim); }
-    .shell { display: grid; grid-template-columns: minmax(18rem, 28rem) 1fr; min-height: 0; }
+    .topbar h1 {
+      margin: 0;
+      font-size: 1rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .topbar small { color: var(--text-dim); }
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(18rem, 28rem) 1fr;
+      min-height: 0;
+    }
     #control-panel {
       background: var(--panel-bg);
       border-right: 1px solid var(--panel-border);
@@ -67,8 +82,19 @@
       border-radius: 16px;
       padding: 1rem;
     }
-    .card h2 { margin: 0 0 0.55rem; font-size: 0.95rem; }
-    .buttons { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .card h2 {
+      margin: 0 0 0.55rem;
+      font-size: 0.95rem;
+    }
+    .card p, .card li, .card code, .card small {
+      color: var(--text-dim);
+      line-height: 1.45;
+    }
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
     button {
       appearance: none;
       border: 1px solid rgba(255, 255, 255, 0.12);
@@ -79,8 +105,10 @@
       background: rgba(255, 255, 255, 0.08);
       cursor: pointer;
     }
-    button.primary { background: linear-gradient(135deg, #6e569b, #49376e); }
+    button:hover { background: rgba(255, 255, 255, 0.14); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.primary { background: linear-gradient(135deg, #6e569b, #49376e); }
+    button.primary:hover { background: linear-gradient(135deg, #7b62ad, #53407e); }
     #drop-zone {
       min-height: 9rem;
       display: grid;
@@ -92,10 +120,24 @@
       background: rgba(204, 173, 99, 0.06);
     }
     #drop-zone[data-drag="true"] { background: rgba(204, 173, 99, 0.13); }
-    #status-panel[data-kind="error"] #status-text, #import-message[data-kind="error"] { color: #ff7e7e; }
-    #import-message[data-kind="success"] { color: #8dd890; }
-    .viewport { position: relative; min-width: 0; min-height: 0; background: black; }
-    #canvas { display: block; width: 100%; height: 100%; background: black; touch-action: none; outline: none; }
+    #status-panel[data-kind="error"] #status-text, #import-message[data-kind="error"] { color: var(--err); }
+    #import-message[data-kind="success"] { color: var(--ok); }
+    #status-panel[data-kind="warn"] #status-text { color: var(--warn); }
+    .muted { color: var(--text-dim); }
+    .viewport {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      background: black;
+    }
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: black;
+      touch-action: none;
+      outline: none;
+    }
     .canvas-hint {
       position: absolute;
       inset: auto 1rem 1rem 1rem;
@@ -117,7 +159,7 @@
     }
   </style>
   <script>
-    window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = true;
+    window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = false;
     window.HexenwailBoot = { runtimeInitialized: false };
     window.Module = {
       preRun: [],
@@ -175,7 +217,8 @@
         <section class="card">
           <h2>Storage</h2>
           <small id="storage-backend-text" class="muted">Storage backend: probing…</small><br>
-          <small id="storage-text" class="muted">Browser storage estimate unavailable.</small>
+          <small id="storage-text" class="muted">Browser storage estimate unavailable.</small><br>
+          <small class="muted">Save games are written by the engine under your imported <code>data1/</code> folder and are synced to persistent browser storage automatically (periodically during play, and when you switch away or close the tab). "Clear imported data &amp; saves" deletes both.</small>
         </section>
         <section class="card">
           <h2>Notes for iPadOS</h2>
@@ -183,6 +226,7 @@
             <li>Install via Safari → Share → <strong>Add to Home Screen</strong>.</li>
             <li>Pointer Lock is currently unavailable on iPadOS Safari; external keyboards and mice still help.</li>
             <li>Standalone mode is the practical target on iPadOS; it is close to fullscreen but still obeys system safe areas.</li>
+            <li>Storage persistence is best-effort; avoid clearing Safari website data for this app, and periodically confirm persistence in the Storage panel above.</li>
           </ul>
         </section>
       </div>
@@ -192,7 +236,6 @@
       <div class="canvas-hint">Tap/click the canvas to focus input. On platforms without Pointer Lock (notably iPadOS Safari), mouselook remains limited.</div>
     </section>
   </main>
-  {{{ SCRIPT }}}
   <script type="module" src="./app.js"></script>
 </body>
 </html>

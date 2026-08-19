@@ -152,3 +152,33 @@ WASM build now links successfully! Next steps:
 | Windows 64-bit | ✅ Complete | `nix build .#win64` |
 | WASM (Flake) | ⚠️ Sandbox Limited | `nix build .#wasm --impure --allow-network` (if network access granted) |
 | WASM (Dev Shell) | ✅ Complete | `nix develop -f shell-wasm.nix` (Recommended for dev builds) |
+
+
+## PWA / GitHub Pages update (2026-08-07)
+
+### ✅ Added in this session
+- New root-level `web/` launcher assets for a GitHub Pages deployment target
+  - `web/index.html`: responsive installable launcher shell with safe-area handling, storage/import UI, fullscreen button, and iPadOS notes
+  - `web/app.js`: OPFS-first asset import pipeline with IndexedDB fallback, ZIP import, runtime filesystem population before `main()`, and periodic save/config sync back to browser storage
+  - `web/sw.js`: versioned service worker precache for launcher/runtime assets only
+  - `web/manifest.webmanifest` + placeholder icons for installability
+- New `.github/workflows/pages.yml`
+  - Builds the WASM target on Ubuntu using a direct emsdk install instead of relying on Nix sandboxed port fetching
+  - Assembles a Pages-ready `dist/` directory
+  - Deploys with GitHub's supported Pages actions
+- Lightweight Node tests for ZIP parsing, path mapping, and launcher asset validation
+
+### Build-system adjustments
+- Emscripten link flags now explicitly keep the build single-threaded and browser-oriented:
+  - `-sENVIRONMENT=web`
+  - `-sALLOW_MEMORY_GROWTH=1`
+  - `-sFORCE_FILESYSTEM=1`
+  - `-sINVOKE_RUN=0`
+  - `-sNO_EXIT_RUNTIME=1`
+  - `-sEXPORTED_RUNTIME_METHODS=['FS','callMain']`
+- The browser shell still uses a custom `--shell-file`, now aligned with the new PWA launcher structure.
+
+### Still not fully verified here
+- Actual `emcc`/`emmake` compilation was not re-run in this sandbox unless an environment with emsdk is available
+- Real GitHub Pages deployment still requires the repo setting **Settings → Pages → Source → GitHub Actions**
+- Actual iPadOS hardware validation (install flow, storage persistence behavior, Pointer Lock limitations in practice) remains follow-up QA work

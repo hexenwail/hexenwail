@@ -1,0 +1,8 @@
+{
+  "name": "hexenwail-pwa-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test web/test/*.test.js"
+  }
+}

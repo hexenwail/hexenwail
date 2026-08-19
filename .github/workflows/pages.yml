@@ -1,0 +1,87 @@
+name: Pages PWA
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  EMSDK_VERSION: latest
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config python3
+
+      - name: Install emsdk
+        run: |
+          git clone https://github.com/emscripten-core/emsdk.git emsdk
+          cd emsdk
+          ./emsdk install "$EMSDK_VERSION"
+          ./emsdk activate "$EMSDK_VERSION"
+          echo "EMSDK=$PWD" >> "$GITHUB_ENV"
+          echo "$PWD" >> "$GITHUB_PATH"
+          echo "$PWD/upstream/emscripten" >> "$GITHUB_PATH"
+
+      - name: Run lightweight PWA tests
+        run: node --test web/test/*.test.js
+
+      - name: Build WebAssembly client
+        shell: bash
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          mkdir -p engine/build
+          cd engine/build
+          emcmake cmake -DCMAKE_BUILD_TYPE=Release -DUSE_CODEC_VORBIS=OFF -DUSE_ALSA=OFF -DUSE_SDL3_STATIC=ON ..
+          emmake make -j"$(nproc)"
+
+      - name: Assemble Pages artifact
+        run: |
+          rm -rf dist
+          mkdir -p dist
+          cp -r web/. dist/
+          cp engine/build/bin/hexenwail.js dist/
+          cp engine/build/bin/hexenwail.wasm dist/
+          if [ -f engine/build/bin/hexenwail.data ]; then cp engine/build/bin/hexenwail.data dist/; fi
+          if [ -f engine/build/bin/hexenwail.worker.js ]; then cp engine/build/bin/hexenwail.worker.js dist/; fi
+          cp engine/build/bin/hexenwail.html dist/engine-shell-debug.html
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Repository Settings → Pages → Source must be set to “GitHub Actions”.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -644,6 +644,12 @@ if(EMSCRIPTEN)
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=134217728
         -sSTACK_SIZE=2097152
+        -sENVIRONMENT=web
+        -sFORCE_FILESYSTEM=1
+        -sINVOKE_RUN=0
+        -sMODULARIZE=0
+        -sNO_EXIT_RUNTIME=1
+        -sEXPORTED_RUNTIME_METHODS=['FS','callMain']
         -sUSE_SDL=3
         --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
     )
