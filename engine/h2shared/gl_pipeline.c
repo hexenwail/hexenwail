@@ -202,6 +202,22 @@ qboolean R_GetCull (void)
 	return rp.cull;
 }
 
+qboolean R_GetBlend (void)
+{
+	return rp.blend;
+}
+
+qboolean R_GetDepthMask (void)
+{
+	return rp.depth_mask;
+}
+
+void R_GetDepthRange (double *znear, double *zfar)
+{
+	if (znear) *znear = rp.depth_near;
+	if (zfar)  *zfar  = rp.depth_far;
+}
+
 /* The disable paths also zero factor/units, matching what the scattered
  * clusters did: every glDisable(GL_POLYGON_OFFSET_FILL) in the engine was
  * paired with a glPolygonOffset(0,0) on the next line. */

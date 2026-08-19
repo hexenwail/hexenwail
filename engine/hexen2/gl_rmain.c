@@ -120,6 +120,22 @@ cvar_t	r_alphatocoverage = {"r_alphatocoverage", "0", CVAR_ARCHIVE};
  * player-floor value; 0 disables. */
 cvar_t	r_alias_minlight = {"r_alias_minlight", "24", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
+
+/* uhexen2-ac4c follow-up: what R_DrawAliasModel actually did to the viewmodel
+ * on its last pass.  Recorded at the draw rather than recomputed in the dump,
+ * so the diagnostic cannot drift away from the branch chain it is reporting
+ * on -- the whole point is to find out which branch really ran. */
+static const char *r_vm_branch		= "(not drawn yet)";
+static const char *r_vm_model		= "(none)";
+static unsigned int r_vm_mflags		= 0;
+static unsigned int r_vm_drawflags	= 0;
+static unsigned int r_vm_entalpha	= 0;
+static float	r_vm_alpha		= 1.0f;
+static qboolean	r_vm_blend		= false;
+static qboolean	r_vm_depthmask		= true;
+static qboolean	r_vm_fullbright		= false;
+static double	r_vm_depth_near		= 0.0;
+static double	r_vm_depth_far		= 1.0;
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_NONE};
@@ -1348,6 +1364,7 @@ static void R_DrawAliasModel (entity_t *e)
 	 * ignores its model's own translucency flags entirely.  Rationale at
 	 * the branch chain below. */
 	qboolean	viewmodel = (e == &cl.viewent);
+	const char	*branch_taken = "(none)";	/* for r_aliasinfo */
 
 	clmodel = e->model;
 
@@ -1689,6 +1706,7 @@ static void R_DrawAliasModel (entity_t *e)
 	 * a hole and only the 50% class is lost. */
 	if ((e->model->flags & EF_SPECIAL_TRANS) && !viewmodel)
 	{
+		branch_taken = "EF_SPECIAL_TRANS";
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
@@ -1701,6 +1719,7 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
+		branch_taken = "DRF_TRANSLUCENT";
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
@@ -1715,6 +1734,7 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else if ((e->model->flags & EF_TRANSPARENT) && !viewmodel)
 	{
+		branch_taken = "EF_TRANSPARENT";
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
@@ -1726,6 +1746,7 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else if (e->model->flags & EF_HOLEY)
 	{
+		branch_taken = "EF_HOLEY (alpha test)";
 		if (!OIT_InPass())
 		{
 			R_SetBlend (false);
@@ -1762,6 +1783,7 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else if (e->alpha != ENTALPHA_DEFAULT)
 	{
+		branch_taken = "per-entity ENTALPHA";
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
@@ -1791,6 +1813,7 @@ static void R_DrawAliasModel (entity_t *e)
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			R_SetDepthMask (true);	/* opaque: writes depth */
 		}
+		branch_taken = "opaque";
 		model_constant_alpha = 1.0f;
 		/* Asserted, not inherited (uhexen2-ac4c).  A skin can still carry
 		 * index-0 holes on this path -- the viewmodel now arrives here
@@ -1799,6 +1822,23 @@ static void R_DrawAliasModel (entity_t *e)
 		 * u_force_opaque_alpha rewrites the output alpha afterwards. */
 		GL_SetAlphaThreshold(0.01f);
 		GL_SetForceOpaqueAlpha(1.0f);	/* opaque alias path */
+	}
+
+	/* r_aliasinfo capture (uhexen2-ac4c follow-up).  Read back from the
+	 * pipeline shadow rather than inferred from the branch, so the dump
+	 * reports the state the GPU will actually see. */
+	if (viewmodel)
+	{
+		r_vm_branch	= branch_taken;
+		r_vm_model	= e->model->name;
+		r_vm_mflags	= (unsigned int) e->model->flags;
+		r_vm_drawflags	= (unsigned int) e->drawflags;
+		r_vm_entalpha	= (unsigned int) e->alpha;
+		r_vm_alpha	= model_constant_alpha;
+		r_vm_blend	= R_GetBlend();
+		r_vm_depthmask	= R_GetDepthMask();
+		r_vm_fullbright	= false;
+		R_GetDepthRange (&r_vm_depth_near, &r_vm_depth_far);
 	}
 
 	skinnum = e->skinnum;
@@ -1895,6 +1935,8 @@ static void R_DrawAliasModel (entity_t *e)
 			model_fullbright_pass = true;
 			R_SetupAliasFrame (e, paliashdr);
 			model_fullbright_pass = false;
+			if (viewmodel)
+				r_vm_fullbright = true;
 
 			Fog_StopAdditive ();
 
@@ -3405,6 +3447,79 @@ static void R_DumpAliasInfo (void)
 		VectorCopy(saved_lc, lightcolor);
 		count++;
 	}
+
+	/* The viewmodel is not in cl_visedicts, so the loop above has never
+	 * covered it -- and it is the entity every weapon-transparency report
+	 * has actually been about.  These fields are recorded by
+	 * R_DrawAliasModel itself (uhexen2-ac4c follow-up) rather than
+	 * recomputed here, so they cannot drift from the branch chain.
+	 *
+	 * One frame stale: R_DumpAliasInfo runs from R_DrawEntitiesOnList,
+	 * which is earlier in the frame than R_DrawViewModel, so this reports
+	 * the previous frame's draw.  Harmless -- none of it changes at frame
+	 * rate -- but it is why the model can read "(not drawn yet)" if you
+	 * dump on the very first frame after a map load. */
+	Con_Printf("\n--- viewmodel (cl.viewent) ---\n");
+	if (!cl.viewent.model)
+	{
+		Con_Printf("  no viewmodel (chase/dead/r_drawviewmodel 0?)\n");
+	}
+	else
+	{
+		char	vbuf[160], dbuf[160];
+
+		vbuf[0] = '\0';
+		if (r_vm_mflags & EF_TRANSPARENT)   q_strlcat(vbuf, "TRANSPARENT ", sizeof(vbuf));
+		if (r_vm_mflags & EF_HOLEY)         q_strlcat(vbuf, "HOLEY ", sizeof(vbuf));
+		if (r_vm_mflags & EF_SPECIAL_TRANS) q_strlcat(vbuf, "SPECIAL_TRANS ", sizeof(vbuf));
+		if (!vbuf[0]) q_strlcpy(vbuf, "(none) ", sizeof(vbuf));
+
+		dbuf[0] = '\0';
+		if (r_vm_drawflags & DRF_TRANSLUCENT) q_strlcat(dbuf, "TRANSLUCENT ", sizeof(dbuf));
+		switch (r_vm_drawflags & MLS_MASKIN)
+		{
+			case MLS_NONE:       break;
+			case MLS_FULLBRIGHT: q_strlcat(dbuf, "MLS_FULLBRIGHT ", sizeof(dbuf)); break;
+			case MLS_POWERMODE:  q_strlcat(dbuf, "MLS_POWERMODE ", sizeof(dbuf));  break;
+			case MLS_TORCH:      q_strlcat(dbuf, "MLS_TORCH ", sizeof(dbuf));      break;
+			case MLS_TOTALDARK:  q_strlcat(dbuf, "MLS_TOTALDARK ", sizeof(dbuf));  break;
+			case MLS_ABSLIGHT:   q_strlcat(dbuf, "MLS_ABSLIGHT ", sizeof(dbuf));   break;
+			default:             q_strlcat(dbuf, "MLS_? ", sizeof(dbuf));          break;
+		}
+		if (!dbuf[0]) q_strlcpy(dbuf, "(none) ", sizeof(dbuf));
+
+		Con_Printf("  model      %s\n", r_vm_model);
+		Con_Printf("  mflags     0x%08x [%s]\n", r_vm_mflags, vbuf);
+		Con_Printf("  drawflags  0x%02x [%s]\n", r_vm_drawflags, dbuf);
+		Con_Printf("  e->alpha   0x%02x (=%.3f%s)\n", r_vm_entalpha,
+			   ENTALPHA_DECODE(r_vm_entalpha),
+			   (r_vm_entalpha == ENTALPHA_DEFAULT) ? " DEFAULT" : "");
+		Con_Printf("  branch     %s\n", r_vm_branch);
+		Con_Printf("  alpha      %.3f\n", r_vm_alpha);
+		Con_Printf("  blend      %s\n", r_vm_blend ? "ON  <-- weapon is translucent" : "off (opaque)");
+		Con_Printf("  depthmask  %s\n", r_vm_depthmask ? "ON (writes depth)" : "off  <-- no self-occlusion");
+		Con_Printf("  depthrange [%.3f, %.3f]\n", r_vm_depth_near, r_vm_depth_far);
+		Con_Printf("  fullbright %s\n", r_vm_fullbright ? "pass ran (additive overlay)" : "skipped");
+	}
+
+	/* Effects that draw before the viewmodel can only appear in front of
+	 * it if the viewmodel is blended -- R_DrawViewModel is the last thing
+	 * in R_RenderScene.  Anything drawn AFTER it is listed here so a
+	 * "glow on top of the weapon" report has somewhere to land. */
+	Con_Printf("\n--- frame context ---\n");
+	Con_Printf("  r_oit %d (active %d)  r_shadows %d\n",
+		   r_oit.integer, OIT_Active() ? 1 : 0, r_shadows.integer);
+	Con_Printf("  glows: gl_glows %d  gl_missile_glows %d  gl_other_glows %d\n",
+		   gl_glows.integer, gl_missile_glows.integer, gl_other_glows.integer);
+	Con_Printf("  viewmodel gates: r_drawviewmodel %d  scr_viewsize %d  chase %d  health %d\n",
+		   r_drawviewmodel.integer, scr_viewsize.integer,
+		   chase_active.integer, (int)cl.v.health);
+	Con_Printf("  r_wateralpha %.3f  r_alphasort %d\n",
+		   r_wateralpha.value, r_alphasort.integer);
+	Con_Printf("  draw order is: particles -> trans ents -> OIT resolve -> glows\n");
+	Con_Printf("                 -> VIEWMODEL -> mirror -> polyblend\n");
+	Con_Printf("  so an effect can only paint over an OPAQUE viewmodel if it is\n");
+	Con_Printf("  drawn after it; check 'blend' above before suspecting ordering.\n");
 
 	Con_Printf("=== end r_aliasinfo (%d alias ents) ===\n\n", count);
 	r_aliasinfo_request = false;
