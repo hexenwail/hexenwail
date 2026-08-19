@@ -2789,6 +2789,7 @@ enum
 	REND_WATERCOLOR,
 	REND_WATERALPHA,
 	REND_WATERWARP,
+	REND_LIQUIDWARP,
 	REND_GLOWS,
 	REND_FLASHINTENSITY,
 	REND_FXAA,
@@ -2816,6 +2817,7 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Water Tint    :",	/* REND_WATERCOLOR */
 	"Water Alpha   :",	/* REND_WATERALPHA */
 	"Water Warp    :",	/* REND_WATERWARP */
+	"Liquid Warp   :",	/* REND_LIQUIDWARP */
 	"Glows         :",	/* REND_GLOWS */
 	"Dyn Light Str :",	/* REND_FLASHINTENSITY */
 	"FXAA          :",	/* REND_FXAA */
@@ -2927,6 +2929,21 @@ static void M_Rendering_AdjustSliders (int dir)
 		Cvar_SetValue ("r_waterwarp", !r_waterwarp.integer);
 		GL_PostProcess_RequestWaterwarpPreview(0.5f);	/* 500ms preview */
 		break;
+	case REND_LIQUIDWARP:
+	{
+		/* Strength of the warp on the liquid surface itself, as a
+		 * percentage of vanilla.  Stops at 200%: the engine clamps
+		 * gl_waterwarp_amount at 4, but past double the stock throw the
+		 * turb stops reading as a moving surface and starts reading as a
+		 * broken texture, which is not something to offer in a menu.
+		 * gl_waterwarp_speed stays a console knob -- this row is the one
+		 * people mean when they say the water is too much. */
+		float f = gl_waterwarp_amount.value + dir * 0.1f;
+		if (f < 0.0f) f = 0.0f;
+		if (f > 2.0f) f = 2.0f;
+		Cvar_SetValue ("gl_waterwarp_amount", f);
+		break;
+	}
 	case REND_GLOWS:
 	{
 		/* cycle: Off(0) -> Torch Only(1) -> Reduced(2) -> All(3) */
@@ -3088,6 +3105,17 @@ static void M_Rendering_Draw (void)
 	{
 		M_Print (76, 92 + 8*REND_WATERWARP, rend_labels[REND_WATERWARP]);
 		M_DrawCheckbox (220, 92 + 8*REND_WATERWARP, r_waterwarp.integer);
+	}
+
+	if (!M_Rendering_IsSkip(REND_LIQUIDWARP))
+	{
+		M_Print (76, 92 + 8*REND_LIQUIDWARP, rend_labels[REND_LIQUIDWARP]);
+		r = gl_waterwarp_amount.value;
+		if (r <= 0.0f)
+			M_PrintWhite (220, 92 + 8*REND_LIQUIDWARP, "Off");
+		else
+			M_DrawSliderValue (220, 92 + 8*REND_LIQUIDWARP, r * 0.5f,
+					   "%.0f%%", r * 100);
 	}
 
 	if (!M_Rendering_IsSkip(REND_GLOWS))
