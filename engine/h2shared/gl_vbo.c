@@ -11,6 +11,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"
 #include "gl_pipeline.h"
 #include "gl_matrix.h"
 #include "gl_vbo.h"
@@ -312,29 +313,13 @@ void GL_ImmVertex2f (float x, float y)
  * triangles using the pre-built index buffer.  (The enum itself comes from
  * glheader.h, which shims it for GLES3.) */
 
-/* Per-shader uniform cache: most HUD/2D draws share identical fog,
- * alpha threshold, and MVP. Driver-side glUniform calls aren't free —
- * skipping the redundant uploads cuts ~100 calls/frame on a typical
- * scene with HUD + center print + several pic draws. The cache is
- * invalidated when the shader changes (different uniform locations)
- * and via GL_ImmInvalidateState() at context boundaries. */
-static const glprogram_t *imm_cache_shader;
-static float	imm_cache_mvp[16];
-static float	imm_cache_mv[16];
-static float	imm_cache_alpha = -2.0f;
-static float	imm_cache_force_opaque_alpha = -2.0f;
-static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
-static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
-static float	imm_cache_alias_model[16];
-static qboolean	imm_cache_alias_model_set;
-static float	imm_cache_fog_density = -1.0f;
-static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
-static float	imm_cache_time = -1.0f;
-static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
-static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
-static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
-static qboolean	imm_cache_mvp_set;
-static qboolean	imm_cache_mv_set;
+/* The per-shader uniform cache that used to live here is gone.  It existed
+ * because uniform locations are per-program, so every value had to be tracked
+ * per shader and re-pushed on a program switch -- and it had to be invalidated
+ * by hand whenever anything outside GL_ImmEnd touched a uniform.  The std140
+ * blocks in gl_uniforms.c are program-independent, so the same value set twice
+ * costs nothing and a program switch costs nothing, and the setters do their
+ * own change detection.  uhexen2-p4ln.2. */
 
 void GL_ImmResetState (void)
 {
@@ -347,20 +332,7 @@ void GL_ImmResetState (void)
  * shader handles. */
 void GL_ImmInvalidateState (void)
 {
-	imm_cache_shader = NULL;
-	imm_cache_alpha = -2.0f;
-	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
-	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
-	imm_cache_alias_model_set = false;
-	imm_cache_fog_density = -1.0f;
-	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-	imm_cache_time = -1.0f;
-	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
-	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
-	imm_cache_overbright = -1.0f;
-	imm_cache_mvp_set = false;
-	imm_cache_mv_set = false;
+	R_InvalidateUniforms ();
 }
 
 void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
@@ -389,153 +361,35 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	}
 #endif
 
-	/* activate shader; reset uniform cache when the program changes
-	 * because uniform locations are per-program */
 	R_UseProgram (shader->program);
-	if (shader != imm_cache_shader)
-	{
-		imm_cache_shader = shader;
-		imm_cache_alpha = -2.0f;
-	imm_cache_force_opaque_alpha = -2.0f;
-	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
-	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
-	imm_cache_alias_model_set = false;
-		imm_cache_fog_density = -1.0f;
-		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
-		imm_cache_time = -1.0f;
-		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
-		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
-		imm_cache_overbright = -1.0f;
-		imm_cache_mvp_set = false;
-		imm_cache_mv_set = false;
-	}
 
+	/* Push what this batch needs.  Every setter below folds away when the
+	 * value is unchanged, and unlike the old per-shader cache it does so
+	 * across program switches too -- the blocks are shared, so a value set
+	 * for the world shader is already correct for the alias shader.
+	 * R_DrawElements / R_DrawArrays upload whatever ended up dirty. */
 	GL_GetMVP(mvp);
-	if (shader->u_mvp >= 0 &&
-	    (!imm_cache_mvp_set || memcmp(mvp, imm_cache_mvp, sizeof(mvp)) != 0))
-	{
-		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
-		memcpy(imm_cache_mvp, mvp, sizeof(mvp));
-		imm_cache_mvp_set = true;
-	}
-
-	if (shader->u_modelview >= 0)
+	R_SetMVP (mvp);
 	{
 		float mv[16];
 		GL_GetModelview(mv);
-		if (!imm_cache_mv_set || memcmp(mv, imm_cache_mv, sizeof(mv)) != 0)
-		{
-			glUniformMatrix4fv_fp(shader->u_modelview, 1, GL_FALSE, mv);
-			memcpy(imm_cache_mv, mv, sizeof(mv));
-			imm_cache_mv_set = true;
-		}
+		R_SetModelView (mv);
 	}
-
-	if (imm_alpha_threshold >= 0.0f && shader->u_alpha_threshold >= 0 &&
-	    imm_alpha_threshold != imm_cache_alpha)
-	{
-		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
-		imm_cache_alpha = imm_alpha_threshold;
-	}
-
-	if (imm_force_opaque_alpha >= 0.0f && shader->u_force_opaque_alpha >= 0 &&
-	    imm_force_opaque_alpha != imm_cache_force_opaque_alpha)
-	{
-		glUniform1f_fp(shader->u_force_opaque_alpha, imm_force_opaque_alpha);
-		imm_cache_force_opaque_alpha = imm_force_opaque_alpha;
-	}
-
-	/* uhexen2-0gn3.  Both sit at their resting values (0 intensity,
-	 * identity matrix) unless an alias draw asked for caustics, so on dry
-	 * land these only fire on a program switch, never per batch. */
-	if (shader->u_alias_caustics >= 0 &&
-	    (imm_alias_caustics[0] != imm_cache_alias_caustics[0] ||
-	     imm_alias_caustics[1] != imm_cache_alias_caustics[1]))
-	{
-		glUniform2f_fp(shader->u_alias_caustics,
-			       imm_alias_caustics[0], imm_alias_caustics[1]);
-		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
-		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
-	}
-
-	/* uhexen2-mf9u.  Resting value is 0 intensity, so on a build with
-	 * r_softparticles off this fires once per program switch and never
-	 * again — same shape as the caustics push above. */
-	if (shader->u_soft_params >= 0 &&
-	    (imm_soft[0] != imm_cache_soft[0] ||
-	     imm_soft[1] != imm_cache_soft[1] ||
-	     imm_soft[2] != imm_cache_soft[2]))
-	{
-		glUniform3f_fp(shader->u_soft_params,
-			       imm_soft[0], imm_soft[1], imm_soft[2]);
-		imm_cache_soft[0] = imm_soft[0];
-		imm_cache_soft[1] = imm_soft[1];
-		imm_cache_soft[2] = imm_soft[2];
-	}
-
-	if (shader->u_alias_model >= 0 &&
-	    (!imm_cache_alias_model_set ||
-	     memcmp(imm_alias_model, imm_cache_alias_model, sizeof(imm_alias_model)) != 0))
-	{
-		glUniformMatrix4fv_fp(shader->u_alias_model, 1, GL_FALSE, imm_alias_model);
-		memcpy(imm_cache_alias_model, imm_alias_model, sizeof(imm_alias_model));
-		imm_cache_alias_model_set = true;
-	}
-
-	if (shader->u_fog_density >= 0 && r_fog_density != imm_cache_fog_density)
-	{
-		glUniform1f_fp(shader->u_fog_density, r_fog_density);
-		imm_cache_fog_density = r_fog_density;
-	}
-	if (shader->u_fog_color >= 0 &&
-	    (r_fog_color[0] != imm_cache_fog_color[0] ||
-	     r_fog_color[1] != imm_cache_fog_color[1] ||
-	     r_fog_color[2] != imm_cache_fog_color[2]))
-	{
-		glUniform3f_fp(shader->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		imm_cache_fog_color[0] = r_fog_color[0];
-		imm_cache_fog_color[1] = r_fog_color[1];
-		imm_cache_fog_color[2] = r_fog_color[2];
-	}
-
-	if (shader->u_time >= 0 && cl.time != imm_cache_time)
-	{
-		glUniform1f_fp(shader->u_time, cl.time);
-		imm_cache_time = cl.time;
-	}
-
-	if (shader->u_eyepos >= 0 &&
-	    (r_origin[0] != imm_cache_eyepos[0] ||
-	     r_origin[1] != imm_cache_eyepos[1] ||
-	     r_origin[2] != imm_cache_eyepos[2]))
-	{
-		glUniform3f_fp(shader->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
-		imm_cache_eyepos[0] = r_origin[0];
-		imm_cache_eyepos[1] = r_origin[1];
-		imm_cache_eyepos[2] = r_origin[2];
-	}
-
-	if (shader->u_wind >= 0 &&
-	    (sky_wind_uv[0] != imm_cache_wind[0] ||
-	     sky_wind_uv[1] != imm_cache_wind[1]))
-	{
-		glUniform2f_fp(shader->u_wind, sky_wind_uv[0], sky_wind_uv[1]);
-		imm_cache_wind[0] = sky_wind_uv[0];
-		imm_cache_wind[1] = sky_wind_uv[1];
-	}
-
-	if (shader->u_overbright >= 0)
-	{
-		/* Same gate as R_SetupFrame: r_fullbright already replaces the
-		 * lightmap sample with white, so doubling it blows every surface
-		 * to pure white.  uhexen2-isq7. */
-		float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
-		if (ob != imm_cache_overbright)
-		{
-			glUniform1f_fp(shader->u_overbright, ob);
-			imm_cache_overbright = ob;
-		}
-	}
+	if (imm_alpha_threshold >= 0.0f)
+		R_SetAlphaThresholdU (imm_alpha_threshold);
+	if (imm_force_opaque_alpha >= 0.0f)
+		R_SetForceOpaqueAlphaU (imm_force_opaque_alpha);
+	R_SetAliasCaustics (imm_alias_caustics[0], imm_alias_caustics[1]);	/* uhexen2-0gn3 */
+	R_SetSoftParams (imm_soft[0], imm_soft[1], imm_soft[2]);		/* uhexen2-mf9u */
+	R_SetModelMatrix (imm_alias_model);
+	R_SetFog (r_fog_density, r_fog_color);
+	R_SetFrameTime (cl.time);
+	R_SetEyePos (r_origin);
+	R_SetSkyWind (sky_wind_uv[0], sky_wind_uv[1]);
+	/* Same gate as R_SetupFrame: r_fullbright already replaces the lightmap
+	 * sample with white, so doubling it blows every surface to pure white.
+	 * uhexen2-isq7. */
+	R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 
 	/* A global glEnable(GL_BLEND) in the translucent draw paths resets the
 	 * per-buffer blend funcs to the global default on some drivers, which
@@ -558,17 +412,17 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		int num_quads = imm_count / 4;
 		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
-		glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
+		R_DrawElements (GL_TRIANGLES, num_quads * 6,
 				   GL_UNSIGNED_SHORT, NULL);
 		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
 	else if (mode == GL_POLYGON)
 	{
-		glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
+		R_DrawArrays (GL_TRIANGLE_FAN, 0, imm_count);
 	}
 	else
 	{
-		glDrawArrays_fp(mode, 0, imm_count);
+		R_DrawArrays (mode, 0, imm_count);
 	}
 
 	glBindVertexArray_fp(0);
@@ -609,17 +463,17 @@ void GL_ImmDraw (GLenum mode)
 	{
 		int num_quads = imm_count / 4;
 		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, imm_quad_ibo);
-		glDrawElements_fp(GL_TRIANGLES, num_quads * 6,
+		R_DrawElements (GL_TRIANGLES, num_quads * 6,
 				   GL_UNSIGNED_SHORT, NULL);
 		glBindBuffer_fp(GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
 	else if (mode == GL_POLYGON)
 	{
-		glDrawArrays_fp(GL_TRIANGLE_FAN, 0, imm_count);
+		R_DrawArrays (GL_TRIANGLE_FAN, 0, imm_count);
 	}
 	else
 	{
-		glDrawArrays_fp(mode, 0, imm_count);
+		R_DrawArrays (mode, 0, imm_count);
 	}
 
 	glBindVertexArray_fp(0);

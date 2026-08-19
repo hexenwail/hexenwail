@@ -102,4 +102,21 @@ void	R_PipelineForgetProgram (void);
  * construction and free, unlike the glIsEnabled round trip it replaces. */
 qboolean R_GetCull (void);
 
+/* Draw entry points.  Every one flushes the std140 uniform blocks first, which
+ * is the only reason no draw path has to remember to -- a missed flush would
+ * render a batch with the previous batch's matrices, which is exactly the kind
+ * of bug that shows up on one map and not the next.  They are also the seam a
+ * second backend needs: SDL_GPU records draws into a command buffer rather
+ * than issuing them, so the call sites must not name glDraw* directly.
+ * uhexen2-p4ln.2. */
+void	R_DrawArrays (GLenum mode, GLint first, GLsizei count);
+void	R_DrawElements (GLenum mode, GLsizei count, GLenum type,
+			const void *indices);
+void	R_DrawElementsInstanced (GLenum mode, GLsizei count, GLenum type,
+				 const void *indices, GLsizei primcount);
+void	R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect);
+void	R_MultiDrawElementsIndirect (GLenum mode, GLenum type,
+				     const void *indirect, GLsizei drawcount,
+				     GLsizei stride);
+
 #endif	/* GL_PIPELINE_H */

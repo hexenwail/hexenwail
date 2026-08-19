@@ -24,6 +24,7 @@
 #include "gl_sky.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -1645,14 +1646,9 @@ void R_BeginBrushBatch (void)
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (gl_shader_world_opaque.program);
-	if (gl_shader_world_opaque.u_fog_density >= 0)
-		glUniform1f_fp(gl_shader_world_opaque.u_fog_density, r_fog_density);
-	if (gl_shader_world_opaque.u_fog_color >= 0)
-		glUniform3f_fp(gl_shader_world_opaque.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (gl_shader_world_opaque.u_alpha_threshold >= 0)
-		glUniform1f_fp(gl_shader_world_opaque.u_alpha_threshold, 0.01f);
-	if (gl_shader_world_opaque.u_overbright >= 0)
-		glUniform1f_fp(gl_shader_world_opaque.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+	R_SetFog (r_fog_density, r_fog_color);
+	R_SetAlphaThresholdU (0.01f);
+	R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	glActiveTexture_fp(GL_TEXTURE2);
@@ -1709,19 +1705,11 @@ static void DrawTextureChains_BindWorldState (void)
 	R_UseProgram (prog->program);
 	GL_GetMVP(mvp);
 	GL_GetModelview(mv);
-	if (prog->u_mvp >= 0)
-		glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-	if (prog->u_modelview >= 0)
-		glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
-	if (prog->u_fog_density >= 0)
-		glUniform1f_fp(prog->u_fog_density, r_fog_density);
-	if (prog->u_fog_color >= 0)
-		glUniform3f_fp(prog->u_fog_color,
-			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (prog->u_alpha_threshold >= 0)
-		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-	if (prog->u_overbright >= 0)
-		glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+	R_SetMVP (mvp);
+	R_SetModelView (mv);
+	R_SetFog (r_fog_density, r_fog_color);
+	R_SetAlphaThresholdU (0.01f);
+	R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* TU2 is the fullbright mask sampled by sworld_frag.  Default to the
@@ -1773,7 +1761,7 @@ static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_co
 		{
 			if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 			{
-				glDrawElements_fp(GL_TRIANGLES,
+				R_DrawElements (GL_TRIANGLES,
 						  run_total_idx,
 						  GL_UNSIGNED_INT,
 						  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
@@ -1786,7 +1774,7 @@ static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_co
 	}
 	if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 	{
-		glDrawElements_fp(GL_TRIANGLES,
+		R_DrawElements (GL_TRIANGLES,
 				  run_total_idx,
 				  GL_UNSIGNED_INT,
 				  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
@@ -1869,8 +1857,7 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 		glBindVertexArray_fp(sky_stencil_vao);
 		R_UseProgram (gl_shader_flat.program);
 		GL_GetMVP(mvp);
-		if (gl_shader_flat.u_mvp >= 0)
-			glUniformMatrix4fv_fp(gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+		R_SetMVP (mvp);
 		/* a_color attribute disabled in this VAO -> uses generic value */
 		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 		*bound = true;
@@ -1886,12 +1873,12 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 				run_count += runs[j].count;
 				continue;
 			}
-			glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+			R_DrawElements (GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 					  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
 			run_first = runs[j].first;
 			run_count = runs[j].count;
 		}
-		glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+		R_DrawElements (GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 				  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
 	}
 }
@@ -1995,17 +1982,11 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 				float mvp[16], mv[16];
 				GL_GetMVP(mvp);
 				GL_GetModelview(mv);
-				if (gl_shader_world.u_mvp >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
-				if (gl_shader_world.u_modelview >= 0)
-					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
+				R_SetMVP (mvp);
+				R_SetModelView (mv);
 			}
-			if (gl_shader_world.u_fog_density >= 0)
-				glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
-			if (gl_shader_world.u_fog_color >= 0)
-				glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-			if (gl_shader_world.u_overbright >= 0)
-				glUniform1f_fp(gl_shader_world.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+			R_SetFog (r_fog_density, r_fog_color);
+			R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 			glActiveTexture_fp(GL_TEXTURE1);
 			glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 			glActiveTexture_fp(GL_TEXTURE2);
@@ -2026,8 +2007,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 } while (0)
 #define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
 	if ((N) <= 0) break; \
-	if (gl_shader_world.u_alpha_threshold >= 0) \
-		glUniform1f_fp(gl_shader_world.u_alpha_threshold, (ALPHA_T)); \
+	R_SetAlphaThresholdU ((ALPHA_T)); \
 	if (A2C_ON) \
 		R_SetAlphaToCoverage (true); \
 	else \
@@ -2050,7 +2030,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 		if (cur_tex_ && run_total_ > 0) \
 		{ \
 			BIND_TEX_WITH_FB(cur_tex_); \
-			glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+			R_DrawElements (GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 			    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 			c_brush_polys += count_run_; \
 		} \
@@ -2062,7 +2042,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 	if (cur_tex_ && run_total_ > 0) \
 	{ \
 		BIND_TEX_WITH_FB(cur_tex_); \
-		glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+		R_DrawElements (GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 		    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 		c_brush_polys += count_run_; \
 	} \
@@ -2763,22 +2743,15 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		if (!brush_batch_active)
 		{
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-			if (prog->u_fog_density >= 0)
-				glUniform1f_fp(prog->u_fog_density, r_fog_density);
-			if (prog->u_fog_color >= 0)
-				glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-			if (prog->u_alpha_threshold >= 0)
-				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-			if (prog->u_overbright >= 0)
-				glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+			R_SetFog (r_fog_density, r_fog_color);
+			R_SetAlphaThresholdU (0.01f);
+			R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 			GL_ImmInvalidateState();
 		}
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+		R_SetMVP (mvp);
+		R_SetModelView (mv);
 
 		/* Claim an id for this pass's special-surface handoff.  Ids stay
 		 * negative so they never collide with the r_framecount stamp the
@@ -2832,7 +2805,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total += batch_surfs[kk]->vbo_numtris * 3;
 					else
 					{
-						glDrawElements_fp(GL_TRIANGLES, run_total,
+						R_DrawElements (GL_TRIANGLES, run_total,
 						    GL_UNSIGNED_INT,
 						    (void *)((size_t)run_first * sizeof(unsigned int)));
 						c_brush_polys += (kk - run_start);
@@ -2841,7 +2814,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total = batch_surfs[kk]->vbo_numtris * 3;
 					}
 				}
-				glDrawElements_fp(GL_TRIANGLES, run_total,
+				R_DrawElements (GL_TRIANGLES, run_total,
 				    GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys += (batch_count - run_start);
@@ -2897,7 +2870,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total += batch_surfs[kk]->vbo_numtris * 3;
 					else
 					{
-						glDrawElements_fp(GL_TRIANGLES, run_total,
+						R_DrawElements (GL_TRIANGLES, run_total,
 						    GL_UNSIGNED_INT,
 						    (void *)((size_t)run_first * sizeof(unsigned int)));
 						c_brush_polys += (kk - run_start);
@@ -2906,7 +2879,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total = batch_surfs[kk]->vbo_numtris * 3;
 					}
 				}
-				glDrawElements_fp(GL_TRIANGLES, run_total,
+				R_DrawElements (GL_TRIANGLES, run_total,
 				    GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys += (batch_count - run_start);
@@ -2930,7 +2903,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 					run_total += batch_surfs[kk]->vbo_numtris * 3;
 				else
 				{
-					glDrawElements_fp(GL_TRIANGLES, run_total,
+					R_DrawElements (GL_TRIANGLES, run_total,
 					    GL_UNSIGNED_INT,
 					    (void *)((size_t)run_first * sizeof(unsigned int)));
 					c_brush_polys += (kk - run_start);
@@ -2939,7 +2912,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 					run_total = batch_surfs[kk]->vbo_numtris * 3;
 				}
 			}
-			glDrawElements_fp(GL_TRIANGLES, run_total,
+			R_DrawElements (GL_TRIANGLES, run_total,
 			    GL_UNSIGNED_INT,
 			    (void *)((size_t)run_first * sizeof(unsigned int)));
 			c_brush_polys += (batch_count - run_start);

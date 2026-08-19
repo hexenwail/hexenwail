@@ -12,6 +12,7 @@
 #include "sdl_inc.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"
 #include "gl_pipeline.h"
 
 extern float	r_fog_density;
@@ -232,12 +233,6 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
-		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
-		{
-			float ident[16];
-			Mat4_Identity(ident);
-			glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
-		}
 		R_UseProgram (0);
 		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
@@ -270,28 +265,11 @@ GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
 
 static void GL_InitProgramUniforms (glprogram_t *p)
 {
-	p->u_mvp             = glGetUniformLocation_fp(p->program, "u_mvp");
 	p->u_texture0        = glGetUniformLocation_fp(p->program, "u_texture0");
 	p->u_texture1        = glGetUniformLocation_fp(p->program, "u_texture1");
 	p->u_texture2        = glGetUniformLocation_fp(p->program, "u_texture2");
-	p->u_color           = glGetUniformLocation_fp(p->program, "u_color");
-	p->u_fog_density     = glGetUniformLocation_fp(p->program, "u_fog_density");
-	p->u_fog_color       = glGetUniformLocation_fp(p->program, "u_fog_color");
-	p->u_alpha_threshold = glGetUniformLocation_fp(p->program, "u_alpha_threshold");
-	p->u_modelview       = glGetUniformLocation_fp(p->program, "u_modelview");
-	p->u_time            = glGetUniformLocation_fp(p->program, "u_time");
-	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
-	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
-	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
-	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
-	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
-	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
-	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
-	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
-	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
-	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
-	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
-	p->u_soft_params      = glGetUniformLocation_fp(p->program, "u_soft_params");
+	p->u_soft_depth      = glGetUniformLocation_fp(p->program, "u_soft_depth");
+	R_BindProgramBlocks (p->program);
 }
 
 /* ------------------------------------------------------------------ */
@@ -326,10 +304,10 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 /* --- shader_2d: orthographic HUD/text rendering --- */
 static const char s2d_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"void main() {\n"
@@ -340,8 +318,8 @@ static const char s2d_vert[] =
 
 static const char s2d_frag[] =
 	GLSL_FRAG_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"uniform sampler2D u_texture0;\n"
-	"uniform float u_alpha_threshold;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
@@ -355,9 +333,9 @@ static const char s2d_frag[] =
 /* --- shader_flat: untextured, vertex-colored (dlights, blendpoly) --- */
 static const char sflat_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec3 a_position;\n"
 	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
 	"out vec4 v_color;\n"
 	"void main() {\n"
 	"    v_color = a_color;\n"
@@ -366,6 +344,7 @@ static const char sflat_vert[] =
 
 static const char sflat_frag[] =
 	GLSL_FRAG_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
@@ -375,12 +354,11 @@ static const char sflat_frag[] =
 /* --- shader_world: textured + lightmap multitexture, with fog --- */
 static const char sworld_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
 	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
@@ -457,17 +435,10 @@ static const char sworld_vert[] =
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z
+	GLSL_UNIFORM_BLOCKS
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask (uhexen2-sjvf) */
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
-	"uniform float u_alpha_threshold;\n"
-	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
-	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
-	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
-	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
-	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -540,16 +511,10 @@ static const char sworld_frag[] =
 static const char sworld_frag_opaque[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z_OPAQUE
+	GLSL_UNIFORM_BLOCKS
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask */
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
-	"uniform float u_alpha_threshold;\n"	/* unused but kept for layout parity */
-	"uniform vec2 u_caustics;\n"		/* x=intensity, y=time (uhexen2-6bfm) */
-	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
-	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
-	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -589,11 +554,10 @@ static const char sworld_frag_opaque[] =
  * the fullbright pass also enables polygon offset as a backstop. */
 static const char salias_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
 	/* Model-only matrix (entity rotation + scale_origin + scale, no view).
 	 * u_modelview is view*model, so it lands vertices in EYE space — sampling
 	 * caustics there would make the pattern swim with the camera.  C uploads
@@ -601,7 +565,6 @@ static const char salias_vert[] =
 	 * rebuilt on an identity base.  Defaults to identity so the sprite / warp
 	 * / brush-poly batches that share this program (which submit world-space
 	 * positions already) stay correct.  uhexen2-0gn3. */
-	"uniform mat4 u_alias_model;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
@@ -618,18 +581,13 @@ static const char salias_vert[] =
 
 static const char salias_frag[] =
 	GLSL_FRAG_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"uniform sampler2D u_texture0;\n"
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
-	"uniform float u_alpha_threshold;\n"
-	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
-	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
 	/* Soft particles (uhexen2-mf9u).  Explicitly highp: GLSL_FRAG_HEADER
 	 * defaults the ES tier to mediump, whose 10-bit mantissa cannot tell
 	 * two window-space depths apart, and the whole fade is a difference of
 	 * two of them.  Desktop GLSL accepts the qualifier and ignores it. */
 	"uniform highp sampler2D u_soft_depth;\n"
-	"uniform highp vec3 u_soft_params;\n"	/* x=1/fade distance (0=off), yz=depth linearization */
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
@@ -706,6 +664,7 @@ static const char salias_frag[] =
 #ifndef USE_GLES
 static const char sskeletal_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	/* Explicit locations, because the IQM VAO (GL_CreateAliasGPUMesh in
 	 * gl_mesh.c) hardcodes this layout and it does not match the generic
 	 * a_position/a_texcoord/a_lmcoord/a_color bindings GL_LoadProgram
@@ -722,10 +681,6 @@ static const char sskeletal_vert[] =
 	"    mat3x4 bones[];\n"
 	"};\n"
 	"\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	"uniform mat4 u_alias_model;\n"	/* see salias_vert (uhexen2-0gn3) */
-	"uniform int u_pose_base;\n"
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
@@ -755,11 +710,10 @@ static const char sskeletal_vert[] =
 /* --- shader_particle: textured triangles with per-vertex color --- */
 static const char spart_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
@@ -773,9 +727,8 @@ static const char spart_vert[] =
 
 static const char spart_frag[] =
 	GLSL_FRAG_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"uniform sampler2D u_texture0;\n"
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
@@ -797,6 +750,7 @@ static const char spart_frag[] =
  * Dead particles (die < u_ctime) become zero-area triangles. */
 static const char spart_gpu_vert[] =
 	"#version 430 core\n"
+	GLSL_UNIFORM_BLOCKS
 	"\n"
 	"struct GpuParticle {\n"
 	"    vec4 pos_die;  /* xyz=position, w=die_time */\n"
@@ -807,15 +761,6 @@ static const char spart_gpu_vert[] =
 	"    GpuParticle particles[];\n"
 	"};\n"
 	"\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform mat4 u_modelview;\n"
-	"uniform vec3 u_pup;\n"
-	"uniform vec3 u_pright;\n"
-	"uniform vec3 u_vpn;\n"
-	"uniform vec3 u_origin;\n"
-	"uniform float u_ctime;\n"
-	"uniform float u_fog_density;\n"
-	"uniform vec3 u_fog_color;\n"
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
@@ -874,6 +819,7 @@ static const char spart_gpu_vert[] =
 #ifndef USE_GLES
 static const char salias_inst_vert[] =
 	"#version 430 core\n"
+	GLSL_UNIFORM_BLOCKS
 	"\n"
 	"struct InstanceData {\n"
 	"    vec4 WorldMatrix0;\n"
@@ -904,10 +850,6 @@ static const char salias_inst_vert[] =
 	"\n"
 	"in vec2 a_texcoord;\n"
 	"\n"
-	"uniform mat4 u_viewproj;\n"
-	"uniform int u_inst_base;\n"
-	"uniform vec3 u_eyepos;\n"
-	"uniform int u_poseverttype;\n"  /* 0=PV_QUAKE1, 1=PV_MD3 */
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
@@ -987,12 +929,11 @@ static const char salias_inst_vert[] =
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
 static const char ssky_vert[] =
 	GLSL_VERT_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
 	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"uniform vec3 u_eyepos;\n"
 	"out vec3 v_dir;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec2 v_lmcoord;\n"
@@ -1009,14 +950,9 @@ static const char ssky_vert[] =
 
 static const char ssky_frag[] =
 	GLSL_FRAG_HEADER
+	GLSL_UNIFORM_BLOCKS
 	"uniform sampler2D u_texture0;\n"
 	"uniform sampler2D u_texture1;\n"
-	"uniform vec3 u_fog_color;\n"
-	"uniform float u_fog_density;\n"
-	"uniform vec4 u_skyfog;\n"
-	"uniform float u_time;\n"
-	"uniform float u_alpha_threshold;\n"
-	"uniform vec2 u_wind;\n"
 	"in vec3 v_dir;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
@@ -1051,26 +987,20 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	}
 	GL_InitProgramUniforms(p);
 
-	/* bind texture unit defaults */
+	/* Bind texture unit defaults.  These are the only loose uniforms left:
+	 * samplers cannot live in a uniform block, and they are link-time
+	 * constants rather than per-draw state.  Everything the old code seeded
+	 * here -- the zero alpha threshold, zero fog density, and the identity
+	 * model matrix that keeps v_worldxy meaningful (uhexen2-0gn3) -- is now
+	 * seeded once for every program in R_Uniforms_Init. */
 	R_UseProgram (p->program);
 	if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 	if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
-	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
-	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
 	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —
 	 * gl_shader_alias has no u_texture1 — so the depth snapshot can sit
 	 * there permanently and only the sprite path ever binds to it. */
 	if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);
-	/* GL zero-initialises mat4 uniforms, which would collapse every vertex
-	 * to world (0,0).  Identity keeps v_worldxy meaningful for the batches
-	 * that submit world-space positions directly.  uhexen2-0gn3. */
-	if (p->u_alias_model >= 0)
-	{
-		float ident[16];
-		Mat4_Identity(ident);
-		glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
-	}
 	R_UseProgram (0);
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
@@ -1088,17 +1018,9 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 	}
 	GL_InitProgramUniforms(&p->base);
 
-	/* Look up extra uniforms */
-	p->u_pup    = glGetUniformLocation_fp(p->base.program, "u_pup");
-	p->u_pright = glGetUniformLocation_fp(p->base.program, "u_pright");
-	p->u_vpn    = glGetUniformLocation_fp(p->base.program, "u_vpn");
-	p->u_origin = glGetUniformLocation_fp(p->base.program, "u_origin");
-	p->u_ctime  = glGetUniformLocation_fp(p->base.program, "u_ctime");
-
 	/* Bind texture unit defaults */
 	R_UseProgram (p->base.program);
 	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
-	if (p->base.u_fog_density >= 0) glUniform1f_fp(p->base.u_fog_density, 0.0f);
 	R_UseProgram (0);
 
 	Con_SafePrintf("  shader 'particle_gpu' loaded (program %u)\n", p->base.program);
@@ -1106,35 +1028,6 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 }
 #endif /* !USE_GLES */
 
-void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
-				  const float *pup, const float *pright,
-				  const float *vpn, const float *origin,
-				  float ctime)
-{
-	float mvp[16], mv[16];
-
-	GL_GetMVP(mvp);
-	GL_GetModelview(mv);
-
-	if (prog->base.u_mvp >= 0)
-		glUniformMatrix4fv_fp(prog->base.u_mvp, 1, GL_FALSE, mvp);
-	if (prog->base.u_modelview >= 0)
-		glUniformMatrix4fv_fp(prog->base.u_modelview, 1, GL_FALSE, mv);
-	if (prog->base.u_fog_density >= 0)
-		glUniform1f_fp(prog->base.u_fog_density, r_fog_density);
-	if (prog->base.u_fog_color >= 0)
-		glUniform3f_fp(prog->base.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-	if (prog->u_pup >= 0)
-		glUniform3f_fp(prog->u_pup,    pup[0],    pup[1],    pup[2]);
-	if (prog->u_pright >= 0)
-		glUniform3f_fp(prog->u_pright, pright[0], pright[1], pright[2]);
-	if (prog->u_vpn >= 0)
-		glUniform3f_fp(prog->u_vpn,    vpn[0],    vpn[1],    vpn[2]);
-	if (prog->u_origin >= 0)
-		glUniform3f_fp(prog->u_origin, origin[0], origin[1], origin[2]);
-	if (prog->u_ctime >= 0)
-		glUniform1f_fp(prog->u_ctime, ctime);
-}
 
 gl_alias_inst_prog_t gl_shader_alias_inst;
 
@@ -1178,15 +1071,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 
 	memset(p, 0, sizeof(*p));
 	p->program = prog;
-	p->u_fog_density = glGetUniformLocation_fp(prog, "u_fog_density");
-	p->u_fog_color = glGetUniformLocation_fp(prog, "u_fog_color");
-	p->u_alpha_threshold = glGetUniformLocation_fp(prog, "u_alpha_threshold");
-	p->u_viewproj = glGetUniformLocation_fp(prog, "u_viewproj");
-	p->u_inst_base = glGetUniformLocation_fp(prog, "u_inst_base");
-	p->u_eyepos = glGetUniformLocation_fp(prog, "u_eyepos");
-	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
-	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
-	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
+	R_BindProgramBlocks (prog);
 
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);

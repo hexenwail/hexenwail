@@ -24,6 +24,7 @@
 
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -1233,19 +1234,11 @@ void R_DrawWorldCulled (void)
 		R_UseProgram (prog->program);
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		if (prog->u_mvp >= 0)
-			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
-		if (prog->u_modelview >= 0)
-			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
-		if (prog->u_fog_density >= 0)
-			glUniform1f_fp(prog->u_fog_density, r_fog_density);
-		if (prog->u_fog_color >= 0)
-			glUniform3f_fp(prog->u_fog_color,
-				       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
-		if (prog->u_alpha_threshold >= 0)
-			glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
-		if (prog->u_overbright >= 0)
-			glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+		R_SetMVP (mvp);
+		R_SetModelView (mv);
+		R_SetFog (r_fog_density, r_fog_color);
+		R_SetAlphaThresholdU (0.01f);
+		R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
 	}
 
 	/* Bind lightmap atlas on unit 1, default fb null at unit 2 */
@@ -1272,7 +1265,7 @@ void R_DrawWorldCulled (void)
 		glActiveTexture_fp(GL_TEXTURE0);
 
 		/* Issue indirect draw for this bucket */
-		glDrawElementsIndirect_fp(GL_TRIANGLES, GL_UNSIGNED_INT,
+		R_DrawElementsIndirect (GL_TRIANGLES, GL_UNSIGNED_INT,
 					  (void *)((size_t)i * sizeof(gpu_indirect_cmd_t)));
 	}
 

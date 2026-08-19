@@ -28,6 +28,7 @@
 #include "gl_vbo.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_uniforms.h"
 #include "sbar.h"
 #include "sdl_inc.h"
 

@@ -19,6 +19,7 @@
 #include "gl_matrix.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "draw.h"
 
@@ -1376,7 +1377,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 	/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
 	glBindVertexArray_fp(oit_resolve_vao);
-	glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+	R_DrawArrays (GL_TRIANGLES, 0, 3);
 	glBindVertexArray_fp(0);
 
 	if (cull_was_on)
@@ -2022,7 +2023,7 @@ void GL_PostProcess_EndFrame (void)
 		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
 		if (bloom_bright_loc_threshold >= 0) glUniform1f_fp(bloom_bright_loc_threshold, r_bloom_threshold.value);
 		if (bloom_bright_loc_rcpframe >= 0) glUniform2f_fp(bloom_bright_loc_rcpframe, 1.0f / bloom_src_w, 1.0f / bloom_src_h);
-		glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+		R_DrawArrays (GL_TRIANGLES, 0, 3);
 
 		/* Downsample chain: level 0 → 1 → 2 → 3 */
 		for (i = 1; i < BLOOM_LEVELS; i++)
@@ -2034,7 +2035,7 @@ void GL_PostProcess_EndFrame (void)
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i-1]);
 			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
 			if (bloom_down_loc_rcpframe >= 0) glUniform2f_fp(bloom_down_loc_rcpframe, 1.0f / bloom_w[i-1], 1.0f / bloom_h[i-1]);
-			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+			R_DrawArrays (GL_TRIANGLES, 0, 3);
 		}
 
 		/* Upsample + additive blend: level 3 → 2 → 1 → 0.
@@ -2054,7 +2055,7 @@ void GL_PostProcess_EndFrame (void)
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
 			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
 			if (bloom_up_loc_rcpframe >= 0) glUniform2f_fp(bloom_up_loc_rcpframe, 1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1]);
-			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
+			R_DrawArrays (GL_TRIANGLES, 0, 3);
 		}
 		R_SetBlend (false);
 
