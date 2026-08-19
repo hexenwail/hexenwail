@@ -472,6 +472,31 @@ static void Draw_TextureMode_f (cvar_t *var)
 {
 	int	i;
 
+	/* GL_NEAREST is the one entry whose minification filter has no mipmap
+	 * component, so a minified texture point-samples level 0 and every
+	 * screen pixel lands on whichever texel it happens to hit.  On dense
+	 * distant geometry that sparkles: capture_white_tipped_trees.rdc caught
+	 * SoT mill.bsp's pine crowns speckled with the brightest texels of
+	 * models/pine_1.tga, 2.55% of visible pixels above 100 in all channels
+	 * against 0.37% for the same skin box-filtered.  Ironwail's classic mode
+	 * is GL_NEAREST_MIPMAP_LINEAR for exactly this reason and it offers no
+	 * un-mipmapped rung at all.
+	 *
+	 * Magnification is GL_NEAREST in both modes, so the crunchy up-close
+	 * look is untouched -- only minification changes.  Redirect rather than
+	 * reject so an existing config keeps loading, and because the resolved
+	 * name is written back to the cvar the setting heals itself on the next
+	 * config write.  Nothing in the menus or the display presets can reach
+	 * this entry; only a hand-set cvar gets here.  uhexen2-kl6w. */
+	if (!q_strcasecmp (gl_texmodes[0].name, var->string))
+	{
+		Con_Printf ("%s has no mipmapped minification (distant detail "
+			    "sparkles); using %s\n",
+			    gl_texmodes[0].name, gl_texmodes[2].name);
+		Cvar_SetQuick (var, gl_texmodes[2].name);
+		return;
+	}
+
 	for (i = 0; i < NUM_GL_FILTERS; i++)
 	{
 		if (!strcmp (gl_texmodes[i].name, var->string))
