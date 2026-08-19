@@ -22,8 +22,19 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # Same gate ci.yml runs, called from here so it applies to the tag too.
+  # ci.yml is `tags-ignore: **`, so shellcheck, the metainfo validation and
+  # the bare-EMSCRIPTEN guard used to be skipped on the one build that
+  # reaches users -- covered only by the convention that a tag sits on a
+  # commit master already saw, which nothing enforced.  uhexen2-5zei.
+  lint:
+    uses: ./.github/workflows/lint.yml
+
   flatpak:
     runs-on: ubuntu-latest
+    # Gated on lint so a red gate costs seconds, not a full flatpak-builder
+    # run -- and, through publish's needs, cannot reach a published release.
+    needs: [lint]
     # Observed runtime is well under a minute to a few minutes; this is a
     # "something is stuck" threshold, not a target, and is sized to leave
     # room for a cold cache.  Without it the job inherits GitHub's 6-hour
@@ -130,6 +141,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    needs: [lint]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
