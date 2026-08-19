@@ -378,6 +378,7 @@ extern	cvar_t	leak_color;
 extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
 extern	cvar_t	r_alphasort;
+extern	cvar_t	r_vm_watch;	/* log viewmodel draw-state transitions (uhexen2-ac4c) */
 extern	cvar_t	r_texture_external;
 extern	cvar_t	r_texture_external_hud;
 
