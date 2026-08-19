@@ -202,3 +202,97 @@ WASM build now links successfully! Next steps:
 - Phone-mode touch controls have only been exercised through the Node DOM tests;
   stick feel, look sensitivity and the auto-gate's behavior on real phones and on
   an iPad with a keyboard/trackpad still need hardware QA
+
+## Headless browser verification (2026-08-19)
+
+First run of the assembled PWA artifact in a real browser. Method: headless
+Chromium 151 with ANGLE/SwiftShader, driven over CDP; both `WEB_RENDERER`
+configurations assembled with `scripts/wasm-assemble-artifact.sh` and served
+over `http://127.0.0.1` (localhost is a secure context, so OPFS and the service
+worker behave as they do on Pages); retail `pak0.pak` + `pak1.pak` +
+`PROGS.DAT` + `PROGS2.DAT` + `Strings.txt` imported through the launcher's own
+ZIP path as a 49 MB deflate archive rooted at `data1/`.
+
+### Now confirmed in a browser, both `webgl2` and `software`
+- ZIP import completes (5 files, ~1 s), OPFS backend selected, and the files
+  land in the runtime filesystem at their exact sizes under `/persistent/data1/`
+- **The `fe379df22` `-basedir` fix works.** The engine logs
+  `FS_Init: basedir changed to: /persistent`, then
+  `Added packfile /persistent/data1/pak0.pak (696 files)` and
+  `Added packfile /persistent/data1/pak1.pak (523 files)`, then
+  `Playing the registered version.` — not the shareware fallback, and no
+  "Unable to find a proper Hexen II installation"
+- Engine reaches `======== Hexen II Initialized =========` with no `Sys_Error`
+  and no structural diagnostic block; the launch button's trusted click starts
+  the engine and the status line settles on "Hexenwail running"
+- Both renderers put a real frame on the canvas: the Hexen II console over the
+  title art at startup, and the main menu (SINGLE PLAYER / MULTIPLAYER /
+  OPTIONS / MODS / HELP / INTRO / QUIT) after Escape. The `webgl2` self-test
+  reports 11 shaders and a passing RGBA8 FBO; the `software` build reports
+  `400 x 300` rasterised and presented through the palette blit
+- Escape opens and closes the menu identically in both configurations
+  (~7 % / ~10 % of canvas pixels change per toggle), and an idle console frame
+  still ticks — the blinking cursor moves ~0.02 % of pixels between captures
+- `requestAnimationFrame` runs at 58–60 Hz in both configurations, i.e. the
+  engine's per-frame work is not blocking the page (SwiftShader numbers are
+  proof of life, not performance data)
+- The launcher's own persistence plumbing round-trips: a file written under
+  `/persistent/data1/s0/` is synced to OPFS on `pagehide`, survives a full page
+  reload, and is restored into the runtime filesystem, with the paks still
+  detected and the service worker reporting "Offline shell ready"
+
+### Found by this pass (not fixed here)
+- **Engine savegames and `config.cfg` are written outside the synced tree.**
+  `DO_USERDIRS` is 1 on Emscripten (`engine/h2shared/sys.h:82` only disables it
+  for Windows/OS2), so `parms.userdir` resolves to `/home/web_user/.hexen2`
+  (`engine/hexen2/sys_unix.c:624`), `fs_userdir` becomes
+  `/home/web_user/.hexen2/data1` (`engine/h2shared/quakefs.c:2009`), and every
+  save path goes through `FS_MakePath(FS_USERDIR, ...)`
+  (`engine/hexen2/host_cmd.c:678` and friends). `web/app.js` only ever walks
+  `BASE_DIR` (`web/app.js:270`), so none of it is persisted. Confirmed at
+  runtime: after a launch, `/home/web_user/.hexen2/data1/config.cfg` and
+  `/home/web_user/.hexen2/qconsole.log` exist while `/persistent` still holds
+  only the five imported files. The Storage panel's claim that saves are
+  "written by the engine under your imported data1/ folder and are synced" does
+  not hold, and "Export saves" would find nothing.
+- **A paks-only import leaves the engine with no key bindings.** `hexen.rc` is
+  not inside `pak0.pak` or `pak1.pak` (they carry `default.cfg` and no `.rc`),
+  so `exec hexen.rc` (`engine/hexen2/host.c:1124`) fails — the runtime log shows
+  `couldn't exec hexen.rc` — and with it the whole `default.cfg` → `config.cfg`
+  → `autoexec.cfg` → `stuffcmds` chain. `Key_Init` binds only console, pause and
+  gamepad keys (`engine/hexen2/keys.c:1181`), so nothing moves the player.
+  Meanwhile `mapImportedPath` rejects a loose `hexen.rc`
+  (`web/lib/paths.js:52`), the file input's `accept` list is `.pak,.ogg,.zip`,
+  and the requirements line asks only for `pak0.pak` + `pak1.pak`. Importing the
+  `data1/` folder, or a ZIP rooted at `data1/` that includes `hexen.rc`, does
+  work.
+- **`GL_TEXTURE_LOD_BIAS` is not a valid `texParameter` enum on WebGL2/ES 3.0.**
+  A direct probe confirms `0x8501` returns `INVALID_ENUM` while
+  `GL_TEXTURE_MAX_ANISOTROPY_EXT` is accepted. `engine/h2shared/gl_draw.c:577`,
+  `:2403` and `:2552` call it unconditionally, so the `webgl2` build logs
+  `GL error GL_INVALID_ENUM (0x0500) detected at end of frame` and `gl_lodbias`
+  silently does nothing there. Pre-existing engine code; this pass only made it
+  visible, because the PWA now surfaces the engine's log.
+- **The game canvas is not bounded by the window outside phone mode.** `body`
+  uses `min-height: 100vh` with no height cap and only the phone-mode rule pins
+  `height: 100dvh` + `overflow: hidden` (`web/index.html:37`), so the `1fr`
+  viewport row grows to the control panel's content height. In a 1280x720
+  window the engine reports `Drawable: 832x2371` and the canvas is mostly below
+  the fold.
+
+### Still unverifiable this way
+- Real-GPU behaviour: SwiftShader is a CPU rasteriser, so driver-specific
+  rendering, actual frame rates and compressed-texture paths are untested
+- iOS/iPadOS install, standalone-mode lifecycle and Pointer Lock limitations
+- Touch controls and the touch-only auto-gate, which key off trusted touch
+  events on real hardware
+- Audio output (headless Chromium has no ALSA device; the engine reports the
+  SDL emscripten driver opening successfully but nothing was heard)
+
+Harness notes for whoever repeats this: `Page.captureScreenshot` with a `clip`
+returns a stale or black surface for the WebGL canvas — capture the whole
+viewport with `captureBeyondViewport: false` and crop afterwards. Key events
+injected with `Input.dispatchKeyEvent` are consumed before page-level capture
+listeners see them, so "no keydown observed" is not evidence that input failed;
+drive the engine through its `Hexenwail_TouchKey` export when a pixel-independent
+signal is needed.
