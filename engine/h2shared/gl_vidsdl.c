@@ -368,9 +368,13 @@ static void GL_InitRendererCaps (void)
 #else
 	gl_renderer_caps.profile = GL_RENDERER_DESKTOP_43;
 	gl_renderer_caps.profile_name = "Desktop OpenGL 4.3";
-	gl_renderer_caps.anisotropy =
-		SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic") ||
-		SDL_GL_ExtensionSupported("GL_ARB_texture_filter_anisotropic");
+	/* Asserted, not probed.  This tier already requires GL 4.3, where the EXT
+	 * is universal (and the ARB spelling is core in 4.6) -- but a driver is
+	 * not obliged to advertise both strings, and a probe that came back false
+	 * would silently drop anisotropy everywhere and hide the Options row.
+	 * Trading a guarantee for a query is not worth it on the tier that has the
+	 * guarantee; the ES arm above is where the probe is load-bearing. */
+	gl_renderer_caps.anisotropy = true;
 	gl_renderer_caps.float_color_buffer = true;	/* core since GL 3.0 */
 	gl_renderer_caps.shader_storage = (glBindBufferBase_fp != NULL);
 	gl_renderer_caps.compute_shaders =
