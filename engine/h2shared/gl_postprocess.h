@@ -38,6 +38,9 @@ void GL_PostProcess_EndFrame (void);
 /* Returns true if post-processing is currently active. */
 qboolean GL_PostProcess_Active (void);
 
+/* Returns true if the post-process chain initialized successfully at all. */
+qboolean GL_PostProcess_Available (void);
+
 /* Request a brief waterwarp preview animation (duration in seconds). */
 void GL_PostProcess_RequestWaterwarpPreview (float duration);
 void GL_PostProcess_ResetWaterwarpPreview (void);

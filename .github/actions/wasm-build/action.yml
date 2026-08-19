@@ -39,6 +39,14 @@ runs:
       shell: bash
       run: node --test web/test/*.test.js
 
+    # Compiles the engine's real GLSL through software WebGL2, so an ES 3.00
+    # regression in a shader fails here rather than as a black canvas in
+    # somebody's browser.  Also before the emsdk install: it needs only the
+    # Chrome the runner image already ships.
+    - name: Run headless WebGL2 renderer smoke test
+      shell: bash
+      run: ./scripts/webgl-smoke-test.sh
+
     # Caching emsdk also caches its ports directory, which is where the built
     # SDL3 port lands -- that is the expensive half.
     - name: Cache emsdk

@@ -166,6 +166,7 @@ GLuint	lm_atlas_texture;	/* non-static — accessed by gl_worldcull.c */
 static int	lm_pages_used;		/* lightmap pages the current map filled */
 static int	lm_atlas_rows;		/* atlas rows covering lm_pages_used */
 static int	lm_atlas_height;	/* lm_atlas_rows * BLOCK_HEIGHT */
+static size_t	lm_atlas_lit_texels;	/* non-black texels in the last stitch */
 qboolean	lm_atlas_enabled;	/* false = fall back to per-surface binds */
 
 /*
@@ -3451,6 +3452,7 @@ R_DrawWorld
 void R_DrawWorld (void)
 {
 	double t0;
+	static qboolean first_world_draw = true;
 #define DW_BEGIN()	(t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0)
 #define DW_END(slot)	do { if (r_speeds.integer >= 2) (slot) = Sys_DoubleTime() - t0; } while (0)
 
@@ -3533,6 +3535,13 @@ void R_DrawWorld (void)
 	DW_BEGIN();
 	DrawTextureChains (&r_worldentity);
 	DW_END(rprof_cpu_chains);
+	/* Marks the boundary between "renderer never got that far" and "renderer
+	 * drew something you cannot see" in a user's console log.  d2c46f078. */
+	if (first_world_draw)
+	{
+		Con_SafePrintf ("[RENDERER] First world draw completed\n");
+		first_world_draw = false;
+	}
 	gpu_cull_active = false;
 #undef DW_BEGIN
 #undef DW_END
@@ -3883,15 +3892,19 @@ static qboolean LM_StitchAtlas (void)
 {
 	byte	*atlas;
 	int	page, row, col, y;
+	size_t	i, atlas_size;
 	int	page_stride = BLOCK_WIDTH * lightmap_bytes;
 	int	atlas_stride = LM_ATLAS_WIDTH * lightmap_bytes;
+
+	lm_atlas_lit_texels = 0;
 
 	if (!lm_atlas_enabled)
 		return false;
 	if (lm_atlas_rows < 1 || !lightmaps)
 		return false;		/* nothing allocated yet — no map loaded */
 
-	atlas = (byte *) calloc(1, (size_t)LM_ATLAS_WIDTH * lm_atlas_height * lightmap_bytes);
+	atlas_size = (size_t)LM_ATLAS_WIDTH * lm_atlas_height * lightmap_bytes;
+	atlas = (byte *) calloc(1, atlas_size);
 	if (!atlas)
 	{
 		Con_Printf ("Lightmap atlas: out of memory for a %dx%d staging buffer\n",
@@ -3911,6 +3924,15 @@ static qboolean LM_StitchAtlas (void)
 					  + col * page_stride;
 			memcpy(dst, src, page_stride);
 		}
+	}
+
+	/* Counted so `renderer_status` and the warning in GL_BuildLightmaps can
+	 * tell an all-black world apart from an atlas that never got uploaded --
+	 * they look identical on screen but need opposite fixes.  d2c46f078. */
+	for (i = 0; i + lightmap_bytes <= atlas_size; i += lightmap_bytes)
+	{
+		if (atlas[i] || (lightmap_bytes == 4 && (atlas[i + 1] || atlas[i + 2])))
+			lm_atlas_lit_texels++;
 	}
 
 	if (!lm_atlas_texture)
@@ -4153,7 +4175,32 @@ void GL_BuildLightmaps (void)
 	else
 		Con_SafePrintf ("\n");
 
+	if (lm_atlas_enabled && lm_pages_used > 0 && !lm_atlas_lit_texels)
+		Con_Printf ("[RENDERER] WARNING: lightmap atlas contains no lit texels\n");
+
 	glActiveTexture_fp (GL_TEXTURE0);
+}
+
+
+/*
+===============
+GL_ReportLightmapStatus
+
+Backs `renderer_status`.  A dark world has several unrelated causes that all
+look the same on screen -- the atlas never uploaded, the atlas uploaded but is
+all zeroes, or a legacy lightmap format silently migrated -- and this separates
+them.  Ported from alextnewman/hexenwail d2c46f078.
+===============
+*/
+void GL_ReportLightmapStatus (void)
+{
+	Con_Printf ("[RENDERER] lightmaps: format=%s internal=0x%x bytes=%d "
+		    "atlas=%s texture=%u pages=%d lit-texels=%lu\n",
+		    gl_lightmap_format == GL_RGBA ? "RGBA8" : "other",
+		    (unsigned int)lightmap_internalformat, lightmap_bytes,
+		    lm_atlas_enabled ? "enabled" : "per-page fallback",
+		    (unsigned int)lm_atlas_texture, lm_pages_used,
+		    (unsigned long)lm_atlas_lit_texels);
 }
 
 

@@ -242,6 +242,42 @@ extern	int		gl_max_samples;	/* GL_MAX_SAMPLES; bounds both the Options
 extern	qboolean	have_stencil;
 extern	qboolean	gl_clipcontrol_able;	/* reversed-Z when true */
 
+/* Renderer capability summary, filled in by GL_InitRendererCaps in GL_Init.
+ *
+ * The individual `gl_*_able` flags above and the USE_GLES compile-time tier
+ * remain authoritative for the code paths that branch on them -- this is the
+ * one place that collects the answers so `renderer_status` can print them and
+ * the Options menu can hide controls whose backing feature is missing.  It is
+ * reporting and gating, not a second source of truth: do not reimplement an
+ * existing `#ifdef USE_GLES` or entry-point probe as a lookup here.
+ * Ported from alextnewman/hexenwail d2c46f078. */
+typedef enum
+{
+	GL_RENDERER_DESKTOP_43,
+	GL_RENDERER_GLES3
+} gl_renderer_profile_t;
+
+typedef struct
+{
+	gl_renderer_profile_t	profile;
+	const char		*profile_name;
+	qboolean		anisotropy;
+	qboolean		float_color_buffer;	/* RGBA16F render targets, i.e. HDR */
+	qboolean		shader_storage;
+	qboolean		compute_shaders;
+	qboolean		indirect_draw;
+	qboolean		indexed_blending;	/* glBlendFunci, i.e. WBOIT */
+	qboolean		gpu_particles;
+	qboolean		skeletal_animation;
+	qboolean		oit;
+	qboolean		postprocess;
+	qboolean		fbo_selftest;
+} gl_renderer_caps_t;
+
+extern	gl_renderer_caps_t	gl_renderer_caps;
+
+void	GL_ReportLightmapStatus (void);
+
 /* Block-compressed texture families backing the DDS/KTX loader
  * (engine/h2shared/img_dds.c, uhexen2-0vgo.5).  Probed in GL_Init.  The three
  * ship independently: S3TC (BC1-3) is an extension on every driver and never
