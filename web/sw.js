@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'hexenwail-pwa-v1';
+const CACHE_VERSION = 'hexenwail-pwa-v2';
 const CORE_ASSETS = [
   './',
   './index.html',

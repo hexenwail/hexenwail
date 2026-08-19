@@ -6,10 +6,12 @@ import {
 import { PhoneControls, PHONE_CONTROL_KEYCODES } from './lib/phone-controls.js';
 
 const BASE_DIR = '/persistent';
+const ENGINE_ARGUMENTS = ['-basedir', BASE_DIR];
 const STORAGE_ROOT = 'hexenwail';
 const PREFERENCES_KEY = 'hexenwail-pwa-preferences-v1';
 const SAVE_SYNC_INTERVAL_MS = 10000;
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_RUNTIME_LOG_ENTRIES = 200;
 const PHONE_VIEWPORT_QUERY = '(pointer: coarse) and (hover: none) and (max-width: 820px), (pointer: coarse) and (hover: none) and (max-height: 820px)';
 
 const state = {
@@ -26,6 +28,7 @@ const state = {
   lastStatus: 'Preparing launcher…',
   runtimeExited: false,
   quitInProgress: false,
+  runtimeLogEntries: [],
   phoneControls: null,
   preferences: {
     touchControls: 'auto',
@@ -51,7 +54,7 @@ function getModule() {
     globalThis.Module = {
       preRun: [],
       postRun: [],
-      arguments: ['-basedir', BASE_DIR],
+      arguments: [...ENGINE_ARGUMENTS],
       noInitialRun: true,
       locateFile: (path) => new URL(path, document.baseURI).toString(),
     };
@@ -65,6 +68,7 @@ function getFS() {
 
 function setStatus(message, kind = 'info') {
   state.lastStatus = message;
+  appendRuntimeLog('[status]', message);
   if (ui.statusText) {
     ui.statusText.textContent = message;
   }
@@ -80,8 +84,30 @@ function setEngineState(engineState) {
   }
 }
 
+function renderRuntimeLog() {
+  if (!ui.runtimeLog) return;
+  const followTail = ui.runtimeLog.scrollHeight - ui.runtimeLog.scrollTop - ui.runtimeLog.clientHeight <= 8;
+  ui.runtimeLog.textContent = state.runtimeLogEntries.join('\n');
+  if (followTail) {
+    ui.runtimeLog.scrollTop = ui.runtimeLog.scrollHeight;
+  }
+}
+
+function appendRuntimeLog(prefix, message) {
+  const timestamp = new Date().toISOString().slice(11, 19);
+  const lines = String(message ?? '').split(/\r?\n/).filter(Boolean);
+  for (const line of lines) {
+    state.runtimeLogEntries.push(`${timestamp} ${prefix} ${line}`);
+  }
+  if (state.runtimeLogEntries.length > MAX_RUNTIME_LOG_ENTRIES) {
+    state.runtimeLogEntries.splice(0, state.runtimeLogEntries.length - MAX_RUNTIME_LOG_ENTRIES);
+  }
+  renderRuntimeLog();
+}
+
 function logToConsole(prefix, message, error = false) {
   const text = typeof message === 'string' ? message : String(message ?? '');
+  appendRuntimeLog(prefix, text);
   if (error) {
     console.error(prefix, text);
   } else {
@@ -757,7 +783,15 @@ async function maybeStartEngine() {
   scheduleCanvasResize();
   setStatus('Starting Hexenwail…');
   try {
-    getModule().callMain?.([]);
+    const Module = getModule();
+    if (typeof Module.callMain !== 'function') {
+      throw new Error('Engine runtime did not expose callMain.');
+    }
+    const exitStatus = Module.callMain([...ENGINE_ARGUMENTS]);
+    if (state.quitInProgress || state.runtimeExited) return;
+    if (typeof exitStatus === 'number' && exitStatus !== 0) {
+      throw new Error(`Engine exited during startup with status ${exitStatus}.`);
+    }
     scheduleCanvasResize();
     setStatus('Hexenwail running. Tap the canvas to focus input.');
   } catch (error) {
@@ -766,7 +800,6 @@ async function maybeStartEngine() {
     state.runtimeExited = true;
     setEngineState('fatal');
     setStatus(`Engine start failed: ${error.message}`, 'error');
-    throw error;
   }
 }
 
@@ -1047,6 +1080,7 @@ function bindUi() {
     statusPanel: document.getElementById('status-panel'),
     statusText: document.getElementById('status-text'),
     progressText: document.getElementById('progress-text'),
+    runtimeLog: document.getElementById('runtime-log'),
     importMessage: document.getElementById('import-message'),
     rejectedList: document.getElementById('rejected-list'),
     launchButton: document.getElementById('launch-button'),
@@ -1079,6 +1113,7 @@ function bindUi() {
     phoneEscapeButton: document.getElementById('phone-escape-button'),
     phoneRestartButton: document.getElementById('phone-restart-button'),
   });
+  appendRuntimeLog('[launcher]', state.lastStatus);
 
   state.phoneControls = new PhoneControls(ui.phoneControlsRoot, {
     key: engineKey,
@@ -1182,7 +1217,7 @@ function bindBootCallbacks() {
   const Module = getModule();
   const previousOnRuntimeInitialized = Module.onRuntimeInitialized;
   Module.canvas = ui.canvas;
-  Module.arguments = ['-basedir', BASE_DIR];
+  Module.arguments = [...ENGINE_ARGUMENTS];
   Module.noInitialRun = true;
   Module.locateFile = (path) => new URL(path, document.baseURI).toString();
   Module.print = (text) => {
@@ -1190,11 +1225,12 @@ function bindBootCallbacks() {
     boot.lastPrint = text;
   };
   Module.printErr = (text) => {
-    if (!hasRequiredBaseAssets([...state.storedPaths]) && String(text).includes('Unable to find a proper Hexen II installation')) {
-      return;
-    }
     logToConsole('[hexenwail:error]', text, true);
   };
+  for (const entry of boot.earlyLog ?? []) {
+    logToConsole(entry.prefix, entry.message, entry.error);
+  }
+  boot.earlyLog = [];
   Module.setStatus = (text) => {
     if (text) {
       setStatus(text);
