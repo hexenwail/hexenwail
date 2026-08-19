@@ -175,7 +175,12 @@ WASM build now links successfully! Next steps:
   - `-sFORCE_FILESYSTEM=1`
   - `-sINVOKE_RUN=0`
   - `-sNO_EXIT_RUNTIME=1`
-  - `-sEXPORTED_RUNTIME_METHODS=['FS','callMain']`
+  - `-sEXPORTED_RUNTIME_METHODS=['FS','callMain','ccall']`
+  - `-sEXPORTED_FUNCTIONS=['_main','_Hexenwail_TouchKey','_Hexenwail_TouchLook','_Hexenwail_ResizeCanvas']`
+- `ccall` and the three `Hexenwail_*` exports exist for the phone-mode touch
+  controls: naming a function in `EXPORTED_FUNCTIONS` is what keeps
+  `EMSCRIPTEN_KEEPALIVE` from being dead-stripped at link time, and `ccall` is
+  how the launcher reaches them.
 - The browser shell still uses a custom `--shell-file`, now aligned with the new PWA launcher structure.
 
 ### Verified on port into this tree (2026-08-19)
@@ -184,7 +189,13 @@ WASM build now links successfully! Next steps:
   PWA shell is substituted into `hexenwail.html`
 - Desktop `nix build` stays green — the new flags live inside `if(EMSCRIPTEN)` and do not reach it
 - `node --test web/test/*.test.js` passes (8/8)
+- Phone-mode touch controls: `hexenwail.js` really exports `Hexenwail_TouchKey`,
+  `Hexenwail_TouchLook` and `Hexenwail_ResizeCanvas`, so the launcher's `ccall`
+  bridge resolves against a linked symbol rather than a stripped one
 
 ### Still not fully verified here
 - Real GitHub Pages deployment still requires the repo setting **Settings → Pages → Source → GitHub Actions**
 - Actual iPadOS hardware validation (install flow, storage persistence behavior, Pointer Lock limitations in practice) remains follow-up QA work
+- Phone-mode touch controls have only been exercised through the Node DOM tests;
+  stick feel, look sensitivity and the auto-gate's behavior on real phones and on
+  an iPad with a keyboard/trackpad still need hardware QA

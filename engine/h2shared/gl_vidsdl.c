@@ -44,6 +44,10 @@
 #include "gl_vbo.h"
 #include "filenames.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
+
 
 /* GL 4.3 debug message callback */
 #ifndef GL_DEBUG_OUTPUT
@@ -377,6 +381,34 @@ qboolean VID_IsMinimized (void)
 	/* SDL3: SDL_WINDOW_SHOWN removed; check SDL_WINDOW_MINIMIZED instead */
 	return (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0;
 }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE void Hexenwail_ResizeCanvas (int css_width, int css_height)
+{
+	int dw, dh;
+
+	if (!window || css_width <= 0 || css_height <= 0)
+		return;
+
+	SDL_SetWindowSize(window, css_width, css_height);
+	SDL_SyncWindow(window);
+	SDL_GetWindowSizeInPixels(window, &dw, &dh);
+	if (dw <= 0 || dh <= 0)
+		return;
+
+	if (WRWidth == dw && WRHeight == dh)
+		return;
+
+	WRWidth = dw;
+	WRHeight = dh;
+	vid.width = vid.conwidth = WRWidth;
+	vid.height = vid.conheight = WRHeight;
+	Cvar_SetValueQuick (&vid_config_glx, WRWidth);
+	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
+	vid.recalc_refdef = 1;
+	glViewport_fp(0, 0, WRWidth, WRHeight);
+}
+#endif
 
 
 //====================================

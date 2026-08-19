@@ -27,6 +27,9 @@
 #include "quakedef.h"
 
 #include <math.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
 
 static qboolean	prev_gamekey;
 
@@ -39,6 +42,23 @@ static cvar_t	m_rawinput = {"m_rawinput", "1", CVAR_ARCHIVE};
 static qboolean	rawinput_active;
 
 static int	mouse_x, mouse_y, old_mouse_x, old_mouse_y;
+#ifdef __EMSCRIPTEN__
+static float	touch_look_x, touch_look_y;
+
+EMSCRIPTEN_KEEPALIVE int Hexenwail_TouchKey (int key, int down)
+{
+	if (key <= 0 || key > K_GP_DPAD_RIGHT)
+		return 0;
+	Key_Event(key, down ? true : false);
+	return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE void Hexenwail_TouchLook (double dx, double dy)
+{
+	touch_look_x += (float)dx;
+	touch_look_y += (float)dy;
+}
+#endif
 
 /* Menu cursor position (screen coordinates) */
 int		menu_mouse_x, menu_mouse_y;
@@ -994,6 +1014,9 @@ static void IN_DiscardMove (void)
 		old_mouse_x = old_mouse_y = 0;
 		SDL_GetRelativeMouseState (NULL, NULL);
 	}
+#ifdef __EMSCRIPTEN__
+	touch_look_x = touch_look_y = 0;
+#endif
 }
 
 void IN_UpdateViewAngles (void)
@@ -1026,6 +1049,18 @@ void IN_Move (usercmd_t *cmd)
 		x = (int)fx;
 		y = (int)fy;
 	}
+#ifdef __EMSCRIPTEN__
+	if (touch_look_x <= -1.0f || touch_look_x >= 1.0f ||
+	    touch_look_y <= -1.0f || touch_look_y >= 1.0f)
+	{
+		int tx = (int)touch_look_x;
+		int ty = (int)touch_look_y;
+		touch_look_x -= tx;
+		touch_look_y -= ty;
+		x += tx;
+		y += ty;
+	}
+#endif
 	if (x != 0 || y != 0)
 		IN_MouseMove (cmd, x, y);
 

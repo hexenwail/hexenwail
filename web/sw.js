@@ -3,6 +3,7 @@ const CORE_ASSETS = [
   './',
   './index.html',
   './app.js',
+  './lib/phone-controls.js',
   './manifest.webmanifest',
   './sw.js',
   './icons/icon.svg',
