@@ -32,6 +32,45 @@ test('launcher blocks startup on a failed renderer self-test', async () => {
   assert.match(app, /\[renderer:error\]/);
 });
 
+test('pixel-quality failures warn, structural failures throw', async () => {
+  const diagnostics = await readFile(new URL('../lib/webgl-diagnostics.js', import.meta.url), 'utf8');
+
+  // Structural: nothing can render, so refuse to start.
+  assert.match(diagnostics, /throw new Error\('WebGL2 context creation failed'\)/);
+  assert.match(diagnostics, /throw new Error\(`\$\{family\} shader compilation failed/);
+  assert.match(diagnostics, /throw new Error\(`\$\{family\} shader link failed/);
+  assert.match(diagnostics, /throw new Error\(`RGBA8 framebuffer incomplete/);
+
+  // Quality: the engine is probably playable, so do not lock the user out.
+  // d2c46f078 threw for all four of these.
+  for (const probe of [
+    /warnings\.push\(`generated world draw is predominantly black/,
+    /warnings\.push\(`generated world draw returned/,
+    /warnings\.push\(`gamma post-process returned/,
+    /warnings\.push\(`palette post-process returned/,
+    /warnings\.push\(`WebGL2 error after self-test/,
+  ]) {
+    assert.match(diagnostics, probe);
+  }
+});
+
+test('the launcher proceeds on warnings but CI does not', async () => {
+  const [app, smoke] = await Promise.all([
+    readFile(new URL('../app.js', import.meta.url), 'utf8'),
+    readFile(new URL('./webgl-smoke.html', import.meta.url), 'utf8'),
+  ]);
+
+  // The launcher logs warnings and keeps going: rendererReady is only ever
+  // cleared in the catch block, never on a non-empty warnings array.
+  assert.match(app, /\[renderer:warn\]/);
+  assert.doesNotMatch(app, /warnings\.length[\s\S]{0,80}rendererReady = false/);
+
+  // CI runs a pinned software rasterizer, so there a moved pixel is a
+  // regression and must fail the gate.
+  assert.match(smoke, /report\.warnings\.length > 0/);
+  assert.match(smoke, /dataset\.result = 'fail'/);
+});
+
 test('framebuffer self-test validates a generated world draw', async () => {
   const diagnostics = await readFile(new URL('../lib/webgl-diagnostics.js', import.meta.url), 'utf8');
   assert.match(diagnostics, /gl\.clearColor\(0, 0, 0, 1\)/);
