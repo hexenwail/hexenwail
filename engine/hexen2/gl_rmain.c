@@ -125,6 +125,7 @@ static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnosti
  * on its last pass.  Recorded at the draw rather than recomputed in the dump,
  * so the diagnostic cannot drift away from the branch chain it is reporting
  * on -- the whole point is to find out which branch really ran. */
+cvar_t	r_vm_watch = {"r_vm_watch", "0", CVAR_NONE};	/* log viewmodel draw-state transitions */
 static const char *r_vm_branch		= "(not drawn yet)";
 static const char *r_vm_model		= "(none)";
 static unsigned int r_vm_mflags		= 0;
@@ -1372,16 +1373,7 @@ static void R_DrawAliasModel (entity_t *e)
 	VectorAdd (e->origin, clmodel->maxs, maxs);
 
 	if (!AlwaysDrawModel && R_CullBox (mins, maxs))
-	{
-		/* Depth-mask invariant (documented at the blend branch chain
-		 * below): every exit hands the mask back ON, including the ones
-		 * that draw nothing.  R_DrawTransEntitiesOnList tracks the mask
-		 * from that guarantee and cannot see that we culled.
-		 * uhexen2-gwtq. */
-		if (!OIT_InPass())
-			R_SetDepthMask (true);
 		return;
-	}
 
 	VectorCopy (e->origin, r_entorigin);
 	VectorSubtract (r_origin, r_entorigin, modelorg);
@@ -1645,38 +1637,22 @@ static void R_DrawAliasModel (entity_t *e)
 	/* Blend state pokes gated for OIT pass (OIT_BeginTranslucency owns
 	 * blend and depth inside its pass).
 	 *
-	 * DEPTH-MASK INVARIANT (uhexen2-gwtq): outside an OIT pass this
-	 * function owns the depth mask for the whole draw and always returns
-	 * with it back ON.  Every branch below therefore sets the mask it
-	 * needs rather than inheriting the caller's, and the restore near the
-	 * bottom of the function puts it back.  Callers must not set it up
-	 * beforehand and must not assume it survived the call.
+	 * NO BRANCH BELOW TOUCHES THE DEPTH MASK.  uhexen2-gwtq gave this
+	 * function ownership of it and had the blended branches call
+	 * glDepthMask(0) so a mod's mist would composite instead of clumping;
+	 * that was reverted wholesale in uhexen2-130w after two rounds of
+	 * field regressions (uhexen2-fc1c, uhexen2-g842) failed to contain
+	 * the fallout.  The mask is the caller's again: R_DrawEntitiesOnList
+	 * draws with it on, R_DrawTransEntitiesOnList forces it on for every
+	 * mod_alias entity, and R_DrawViewModel inherits it on.  The only
+	 * pokes left in here are the fullbright and shadow passes, which turn
+	 * it off for their own additive draw and put it straight back.
 	 *
-	 * Alpha-blended alias geometry must NOT write depth.  A mod's mist is
-	 * one .mdl drawn eight times per frame; with depth writes on, each
-	 * instance depth-rejects the next wherever they overlap, so the
-	 * overlap is replaced wholesale instead of composited and the cloud
-	 * breaks into hard-edged clumps.  Sorting can't rescue it:
-	 * r_alphasort orders back-to-front by squared distance to entity
-	 * ORIGIN, which says nothing useful about interpenetrating instances.
-	 * Same discipline R_RenderBrushPoly already follows for translucent
-	 * brush surfaces (uhexen2-t4kt, uhexen2-j001).
+	 * If the mist is ever worth another attempt, do NOT reach for a
+	 * blanket depth-write ban again -- see uhexen2-t9uv for what it
+	 * actually needs.
 	 *
-	 * THE VIEWMODEL IS THE EXCEPTION (uhexen2-fc1c).  The rule above is
-	 * about compositing SEPARATE instances that overlap; it says nothing
-	 * about a single mesh resolving against ITSELF, which still needs the
-	 * depth buffer.  The mist is eight entities and reads correctly with
-	 * writes off; a weapon is one entity whose own back and interior
-	 * faces must stay hidden behind its front ones, and with writes off
-	 * they blend straight through -- the gun goes see-through.  Costs
-	 * nothing elsewhere: R_DrawViewModel gives cl.viewent a private depth
-	 * slice (the upper 30% under reversed-Z) and restores the full range
-	 * afterwards, so these writes never meet world geometry.  This is
-	 * also what shipped before uhexen2-gwtq, when
-	 * R_DrawTransEntitiesOnList forced the mask on for every mod_alias
-	 * entity and the viewmodel inherited it.
-	 *
-	 * THE VIEWMODEL ALSO IGNORES ITS MODEL'S TRANSLUCENCY FLAGS
+	 * THE VIEWMODEL IGNORES ITS MODEL'S TRANSLUCENCY FLAGS
 	 * (uhexen2-ac4c).  Hexen II keeps an alias model's translucency in
 	 * the palette INDEX of every texel, and GL_Upload8 turns an ODD index
 	 * into r_wateralpha.  uhexen2-93a8 started applying that same rule to
@@ -1711,7 +1687,6 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-			R_SetDepthMask (false);	/* blended: no depth write (viewmodel cannot reach here) */
 		}
 		model_constant_alpha = 1.0f;
 		R_SetCull (false);
@@ -1724,7 +1699,6 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (viewmodel);	/* blended: no depth write, except the viewmodel */
 		}
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
@@ -1739,7 +1713,6 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (false);	/* blended: no depth write (viewmodel cannot reach here) */
 		}
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1750,12 +1723,6 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlend (false);
-			/* Alpha TEST, not blending: surviving fragments are fully
-			 * opaque and must keep occluding.  Asserted rather than
-			 * inherited because EF_HOLEY entities are routed through
-			 * the translucent list, which no longer pre-enables the
-			 * mask for us.  uhexen2-gwtq. */
-			R_SetDepthMask (true);
 		}
 		/* Same cutout threshold the brush fence path uses
 		 * (R_RenderBrushPoly / R_DrawSequentialPoly in gl_rsurf.c) and
@@ -1788,11 +1755,6 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			/* An explicit alpha of 1.0 still composites to an opaque
-			 * result, so only genuinely translucent alphas drop the
-			 * depth write — same predicate the fullbright and blend
-			 * restores below use. */
-			R_SetDepthMask (viewmodel || ENTALPHA_OPAQUE(e->alpha));
 		}
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1811,7 +1773,6 @@ static void R_DrawAliasModel (entity_t *e)
 		{
 			R_SetBlend (false);
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (true);	/* opaque: writes depth */
 		}
 		branch_taken = "opaque";
 		model_constant_alpha = 1.0f;
@@ -1839,6 +1800,38 @@ static void R_DrawAliasModel (entity_t *e)
 		r_vm_depthmask	= R_GetDepthMask();
 		r_vm_fullbright	= false;
 		R_GetDepthRange (&r_vm_depth_near, &r_vm_depth_far);
+
+		/* A one-shot dump can only ever catch the weapon at rest, and
+		 * the reports that matter are about the instant it fires --
+		 * svc_set_view_flags can drop DRF_TRANSLUCENT onto cl.viewent
+		 * for exactly the frames a projectile is in the air, which is
+		 * indistinguishable from "the effect draws in front of the
+		 * weapon" and lasts far too briefly to hit a key on.  Watch
+		 * the recorded state instead and print only transitions, so
+		 * the log holds the moment rather than a sample near it. */
+		if (r_vm_watch.integer)
+		{
+			static const char *was_branch;
+			static unsigned int was_drawflags = ~0u;
+			static qboolean was_blend, was_depthmask, first = true;
+
+			if (first || was_branch != r_vm_branch
+			    || was_drawflags != r_vm_drawflags
+			    || was_blend != r_vm_blend
+			    || was_depthmask != r_vm_depthmask)
+			{
+				Con_Printf("vm: %-20s drawflags=0x%02x alpha=%.3f blend=%s depth=%s  %s\n",
+					   r_vm_branch, r_vm_drawflags, r_vm_alpha,
+					   r_vm_blend ? "ON " : "off",
+					   r_vm_depthmask ? "ON " : "off",
+					   r_vm_model);
+				was_branch	= r_vm_branch;
+				was_drawflags	= r_vm_drawflags;
+				was_blend	= r_vm_blend;
+				was_depthmask	= r_vm_depthmask;
+				first		= false;
+			}
+		}
 	}
 
 	skinnum = e->skinnum;
@@ -1978,14 +1971,6 @@ static void R_DrawAliasModel (entity_t *e)
 			R_SetAlphaToCoverage (false);
 	}
 
-	/* Close out the depth-mask invariant documented at the branch chain
-	 * above: whatever a translucent branch turned off, hand back ON.  The
-	 * fullbright and shadow passes below/above already restore to 1
-	 * themselves, so every exit from here leaves the same state and no
-	 * caller has to track it.  uhexen2-gwtq. */
-	if (!OIT_InPass())
-		R_SetDepthMask (true);
-
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
 	/* uhexen2-khsa r13 fixup: restore to 0 (preserve color.a) — that's
 	 * the safer default for any subsequent immediate-mode batch that
@@ -2001,10 +1986,9 @@ static void R_DrawAliasModel (entity_t *e)
 	 * (uhexen2-9bte).  Nothing leaks today: `caustics` is assigned once at
 	 * the top of the function and never reassigned, so set and reset read
 	 * the same value and an entity either does both or neither.  What that
-	 * safety rests on is the absence of any early return between the two --
-	 * and uhexen2-gwtq has since added one to this very function.  Writing
-	 * the resting state unconditionally costs two stores to CPU-side shadow
-	 * variables that the dirty-compare in GL_ImmEnd then skips,
+	 * safety rests on is the absence of any early return between the two.
+	 * Writing the resting state unconditionally costs two stores to
+	 * CPU-side shadow variables that the dirty-compare in GL_ImmEnd skips,
 	 * and in exchange the pairing invariant stops being something the next
 	 * `return` has to know about. */
 	{
@@ -3891,18 +3875,13 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		switch (e->model->type)
 		{
 		case mod_alias:
-			/* No depth-mask poke here: R_DrawAliasModel picks the
-			 * mask its own branch needs (blended alias geometry
-			 * draws with writes OFF -- uhexen2-gwtq) and returns
-			 * with the mask back ON.  The shadow variable is
-			 * therefore updated from that guarantee AFTER the call
-			 * instead of from an assumption made before it; the
-			 * callee also flips the mask internally for its
-			 * fullbright and shadow passes, so anything this loop
-			 * believed beforehand would be stale by now. */
-			R_DrawAliasModel (e);
-			if (!OIT_InPass())
+			/* depth-write toggle gated for OIT pass */
+			if (!depthMaskWrite && !OIT_InPass())
+			{
 				depthMaskWrite = 1;
+				R_SetDepthMask (true);
+			}
+			R_DrawAliasModel (e);
 			break;
 		case mod_brush:
 			if (!depthMaskWrite && !OIT_InPass())
