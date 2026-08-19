@@ -151,6 +151,21 @@
     #save-message[data-kind="error"] { color: var(--err); }
     #status-panel[data-kind="warn"] #status-text { color: var(--warn); }
     .muted { color: var(--text-dim); }
+    .runtime-log {
+      min-height: 6rem;
+      max-height: 14rem;
+      margin: 0;
+      overflow: auto;
+      padding: 0.7rem;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.42);
+      color: var(--text-dim);
+      font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      -webkit-user-select: text;
+      user-select: text;
+    }
     .viewport {
       position: relative;
       min-width: 0;
@@ -355,7 +370,14 @@
   </style>
   <script>
     window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = false;
-    window.HexenwailBoot = { runtimeInitialized: false };
+    window.HexenwailBoot = {
+      runtimeInitialized: false,
+      earlyLog: [],
+      capture(prefix, message, error = false) {
+        this.earlyLog.push({ prefix, message: String(message ?? ''), error });
+        if (this.earlyLog.length > 200) this.earlyLog.shift();
+      }
+    };
     window.Module = {
       preRun: [],
       postRun: [],
@@ -364,8 +386,14 @@
       locateFile(path) { return new URL(path, document.baseURI).toString(); },
       onRuntimeInitialized() { window.HexenwailBoot.runtimeInitialized = true; },
       setStatus(text) { window.HexenwailBoot.lastStatus = text; },
-      print(text) { console.log('[hexenwail]', text); },
-      printErr(text) { console.error('[hexenwail:error]', text); }
+      print(text) {
+        window.HexenwailBoot.capture('[hexenwail]', text);
+        console.log('[hexenwail]', text);
+      },
+      printErr(text) {
+        window.HexenwailBoot.capture('[hexenwail:error]', text, true);
+        console.error('[hexenwail:error]', text);
+      }
     };
   </script>
 </head>
@@ -386,6 +414,10 @@
             <div id="status-text">Preparing launcher…</div>
             <small id="progress-text" class="muted">No imported assets yet.</small>
           </div>
+        </section>
+        <section class="card">
+          <h2>Runtime log</h2>
+          <pre id="runtime-log" class="runtime-log" role="log" aria-live="polite">Waiting for launcher output…</pre>
         </section>
         <section class="card">
           <h2>Import Hexen II assets</h2>

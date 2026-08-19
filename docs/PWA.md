@@ -286,6 +286,12 @@ Practical ways to confirm readiness:
 
 ## Troubleshooting
 
+### Launcher says “running” but the canvas stays black
+
+Use the **Runtime log** card in the launcher. It keeps the latest engine startup
+status plus stdout and stderr in the page, including failures that would otherwise
+only be visible in browser developer tools.
+
 ### “Unable to find a proper Hexen II installation”
 
 You have not imported a valid registered Hexen II data set yet. Import at least:
