@@ -55,7 +55,6 @@ int			c_brush_polys, c_alias_polys;
 
 qboolean	r_cache_thrash;			// compatability
 
-GLuint			currenttexture = GL_UNUSED_TEXTURE;	// to avoid unnecessary texture sets
 
 GLuint			particletexture;	// little dot for particles
 GLuint			playertextures[MAX_CLIENTS];	// up to MAX_CLIENTS color translated skins
@@ -725,9 +724,7 @@ static void R_DrawSpriteModel (entity_t *e)
 		/* Unit 1 is bound by hand rather than through GL_Bind, which only
 		 * tracks unit 0.  Restore the active unit immediately so the
 		 * GL_Bind below still lands where it expects to. */
-		glActiveTexture_fp (GL_TEXTURE1);
-		glBindTexture_fp (GL_TEXTURE_2D, GL_SoftDepth_GetTex());
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureSlot (1, GL_SoftDepth_GetTex());
 		GL_SetSoftParticles (soft_inv, soft_za, soft_zb);
 	}
 
@@ -793,9 +790,7 @@ static void R_DrawSpriteModel (entity_t *e)
 		/* Back to the resting state before any alias / warp / brush batch
 		 * picks up this program.  uhexen2-mf9u. */
 		GL_SetSoftParticles (0.0f, 0.0f, 0.0f);
-		glActiveTexture_fp (GL_TEXTURE1);
-		glBindTexture_fp (GL_TEXTURE_2D, 0);
-		glActiveTexture_fp (GL_TEXTURE0);
+		R_BindTextureSlot (1, 0);
 	}
 
 // restore tex parms
@@ -2389,10 +2384,8 @@ static void R_DispatchBrushInstancedPass (
 			 * sworld_frag sample picks it up for this (instance, tex)
 			 * group.  Leave TU0 sticky for the diffuse bind below.
 			 * uhexen2-61bb. */
-			glActiveTexture_fp(GL_TEXTURE2);
-			glBindTexture_fp(GL_TEXTURE_2D, cur_fb);
-			glActiveTexture_fp(GL_TEXTURE0);
-			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
+			R_BindTextureSlot (2, cur_fb);
+			R_BindTextureSlot (0, cur_tex);
 			while (i < num_keys && keys[i].instance == inst &&
 			       keys[i].tex == cur_tex)
 			{
@@ -2461,16 +2454,13 @@ void R_DrawBrushInstanced (void)
 	 * so the same invariance covers cross-program coplanar joins too. */
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	R_BindTextureSlot (1, lm_atlas_texture);
 	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
 	 * rebinds per (instance, texture) group using the per-key fb_tex stored
 	 * by R_CollectBrushInstances, so any brush ent that wraps a miptex with
 	 * fullbright pixels (e.g. a torch tex on a func_train) gets the same
 	 * additive contribution as the matching world surface.  uhexen2-61bb. */
-	glActiveTexture_fp(GL_TEXTURE2);
-	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureSlot (2, gl_null_fb_texture);
 	GL_ImmInvalidateState();
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
@@ -3057,7 +3047,6 @@ static void R_DrawAliasInstanced (void)
 			continue;
 
 		/* Bind skin texture to unit 0 */
-		glActiveTexture_fp(GL_TEXTURE0);
 		GL_Bind(batch->skin_tex);
 
 		/* Bind pose SSBO only if changed from last batch */
@@ -3206,7 +3195,6 @@ static void R_DrawAliasInstanced (void)
 				if (!gm || !gm->valid || !gm->ssbo_pose)
 					continue;
 
-				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
 				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
 				R_SetInstBase (batch->first);

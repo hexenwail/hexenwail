@@ -207,21 +207,20 @@ typedef struct
    ================================================================== */
 
 /* gl texture objects */
-extern	GLuint		currenttexture;
 extern	GLuint		particletexture;
 extern	GLuint		lightmap_textures[MAX_LIGHTMAPS];
 extern	GLuint		playertextures[MAX_CLIENTS];
 extern	GLuint		gl_extra_textures[MAX_EXTRA_TEXTURES];	// generic textures for models
 
-/* the GL_Bind macro */
-#define GL_Bind(texnum)							\
-	do {								\
-		if (currenttexture != (texnum))				\
-		{							\
-			currenttexture = (texnum);			\
-			glBindTexture_fp(GL_TEXTURE_2D,currenttexture);	\
-		}							\
-	} while (0)
+#include "gl_texbind.h"
+
+/* GL_Bind is now just "bind to slot 0".  It used to carry its own one-entry
+ * cache keyed on a currenttexture global, which tracked unit 0 but was called
+ * from blocks that had made unit 1 active -- so it could both bind to the wrong
+ * unit and cache-hit its way out of a bind it genuinely needed.  gl_texbind.c
+ * shadows every unit separately and there is nothing left to get wrong.
+ * uhexen2-p4ln.3. */
+#define GL_Bind(texnum)		R_BindTextureSlot (0, (texnum))
 
 extern	int		gl_texlevel;
 extern	int		numgltextures;
