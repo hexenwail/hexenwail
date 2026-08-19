@@ -1,9 +1,10 @@
 name: 'Build the WebAssembly client and PWA artifact'
 description: >-
   Installs a pinned Emscripten SDK (cached), runs the Node PWA tests, builds
-  the WebAssembly client and assembles the static PWA artifact.  Shared by the
-  PR "PWA / WebAssembly" check and the Pages deployment so a green PR and a
-  green deploy mean the same build.
+  the WebAssembly client in both renderer configurations and assembles the
+  static PWA artifact from the shipping (webgl2) one.  Shared by the PR "PWA /
+  WebAssembly" check and the Pages deployment so a green PR and a green deploy
+  mean the same build.
 
 inputs:
   emsdk-version:
@@ -68,12 +69,23 @@ runs:
         ./emsdk install "${{ inputs.emsdk-version }}"
         ./emsdk activate "${{ inputs.emsdk-version }}"
 
-    - name: Build WebAssembly client
+    - name: Build WebAssembly client (webgl2 renderer, shipping default)
       shell: bash
       run: |
         set -euo pipefail
         source "$PWD/emsdk/emsdk_env.sh"
-        ./scripts/wasm-build.sh
+        ./scripts/wasm-build.sh webgl2 engine/build
+
+    # The restored 8bpp software renderer is opt-in, so nothing else would ever
+    # compile it -- and a renderer that stops compiling is a renderer that has
+    # been deleted with extra steps.  Built here, into its own directory, so the
+    # artifact assembled below is unambiguously the shipping one.
+    - name: Build WebAssembly client (software renderer, regression guard)
+      shell: bash
+      run: |
+        set -euo pipefail
+        source "$PWD/emsdk/emsdk_env.sh"
+        ./scripts/wasm-build.sh software engine/build-software
 
     - name: Assemble PWA artifact
       shell: bash

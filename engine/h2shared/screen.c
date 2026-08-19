@@ -100,6 +100,14 @@ static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
 static	cvar_t	scr_showfps = {"showfps", "0", CVAR_NONE};
+#if defined(WEBSOFT)
+/* Owned by gl_screen.c in every GL build; the software renderer draws its 2D
+ * through this screen module, so it owns them here.
+ * scr_centerprintbg: 0 = off, 1 = full-width thin dim strip, 2 = text-width dim box.
+ * scr_menubgstyle:   0 = no dim, 1 = simple dim, 2 = dim + translucent menu-area box. */
+cvar_t		scr_centerprintbg = {"scr_centerprintbg", "2", CVAR_ARCHIVE};
+cvar_t		scr_menubgstyle = {"scr_menubgstyle", "1", CVAR_ARCHIVE};
+#endif
 
 #if !defined(H2W)
 static qboolean	scr_drawloading;
@@ -483,6 +491,10 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showturtle);
 	Cvar_RegisterVariable (&scr_showpause);
 	Cvar_RegisterVariable (&scr_showfps);
+#if defined(WEBSOFT)
+	Cvar_RegisterVariable (&scr_centerprintbg);
+	Cvar_RegisterVariable (&scr_menubgstyle);
+#endif
 	Cvar_RegisterVariable (&scr_centertime);
 
 	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f);
@@ -1162,8 +1174,16 @@ static void I_Print (int cx, int cy, const char *str, int flags)
 }
 
 #if FULLSCREEN_INTERMISSIONS
+# if defined(WEBQUAKE)
+/* The web builds publish the GL build's intermission API (draw_soft_web.c
+ * supplies it for the 8bpp path), so they stretch at draw time rather than
+ * caching a pre-resized copy. */
+#	define	Load_IntermissionPic_FN(X,Y,Z)	Draw_CachePicNoTrans((X))
+#	define	Draw_IntermissionPic_FN(X,Y,Z)	Draw_IntermissionPic((Z))
+# else
 #	define	Load_IntermissionPic_FN(X,Y,Z)	Draw_CachePicResize((X),(Y),(Z))
 #	define	Draw_IntermissionPic_FN(X,Y,Z)	Draw_Pic(0,0,(Z))
+# endif
 #else
 #	define	Load_IntermissionPic_FN(X,Y,Z)	Draw_CachePic((X))
 #	define	Draw_IntermissionPic_FN(X,Y,Z)	Draw_Pic((X),(Y),(Z))

@@ -24,9 +24,11 @@
 #include "q_ctype.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#if defined(GLQUAKE)
 #include "gl_postprocess.h"
 #include "gl_vbo.h"
 #include "gl_shader.h"
+#endif
 #include "sbar.h"
 #include "sdl_inc.h"
 
@@ -2830,6 +2832,33 @@ static qboolean M_Rendering_IsSkip (int i)
 {
 	if (i < 0 || i >= REND_ITEMS)
 		return true;
+#if defined(WEBSOFT)
+	/* GPU-only rows have no counterpart in the software rasterizer.  Their
+	 * cvars still exist (r_soft_web.c registers them) so configs written by
+	 * the GL build round-trip, but a slider that cannot move anything does
+	 * not belong in the menu. */
+	switch (i)
+	{
+	case REND_RENDERSCALE:
+	case REND_SOFTEMU:
+	case REND_DITHER:
+	case REND_TEXFILTER:
+	case REND_ANISOTROPY:
+	case REND_LMBICUBIC:
+	case REND_SOFTPARTICLES:
+	case REND_FULLBRIGHTS:
+	case REND_WATERCOLOR:
+	case REND_WATERALPHA:
+	case REND_LIQUIDWARP:
+	case REND_FXAA:
+	case REND_MOTIONBLUR:
+	case REND_HDR:
+	case REND_HDR_EXPOSURE:
+		return true;
+	default:
+		break;
+	}
+#else
 	/* Hide controls whose backing GL feature this context does not have,
 	 * rather than offering a slider that silently does nothing.  On the ES
 	 * tier both of these are extensions that a browser may not expose.
@@ -2838,6 +2867,7 @@ static qboolean M_Rendering_IsSkip (int i)
 		return true;
 	if ((i == REND_HDR || i == REND_HDR_EXPOSURE) && !gl_renderer_caps.float_color_buffer)
 		return true;
+#endif
 	return M_Filter_Active() && !M_Filter_Matches(rend_labels[i]);
 }
 
@@ -5336,7 +5366,7 @@ static void M_Menu_Help_f (void)
 
 
 #if FULLSCREEN_INTERMISSIONS
-#	ifdef GLQUAKE
+#	if defined(GLQUAKE) || defined(WEBQUAKE)
 #		define	Load_HelpPic_FN(X,Y,Z)	Draw_CachePicNoTrans((X))
 #		define	Draw_HelpPic_FN(X,Y,Z)	Draw_IntermissionPic((Z))
 #	else
@@ -7204,19 +7234,12 @@ void M_Draw (void)
 			 * menus draw items in roughly y=80..168). Ironwail parity. */
 			if (scr_menubgstyle.integer >= 2)
 			{
-				const float bg_x0 = 32, bg_y0 = 80;
-				const float bg_x1 = 288, bg_y1 = 168;
+				const int bg_x0 = 32, bg_y0 = 80;
+				const int bg_x1 = 288, bg_y1 = 168;
 				GL_SetCanvas (CANVAS_MENU);
-				Draw_FlushCharBatch ();
-				glEnable_fp (GL_BLEND);
-				GL_ImmBegin ();
-				GL_ImmColor4f (0.0f, 0.0f, 0.0f, 0.5f);
-				GL_ImmVertex2f (bg_x0, bg_y0);
-				GL_ImmVertex2f (bg_x1, bg_y0);
-				GL_ImmVertex2f (bg_x1, bg_y1);
-				GL_ImmVertex2f (bg_x0, bg_y1);
-				GL_ImmEnd (GL_QUADS, &gl_shader_flat);
-				glDisable_fp (GL_BLEND);
+				Draw_FillAlpha (bg_x0, bg_y0,
+					bg_x1 - bg_x0, bg_y1 - bg_y0,
+					0.0f, 0.0f, 0.0f, 0.5f);
 			}
 		}
 		if (scr_viewsize.integer < 110)

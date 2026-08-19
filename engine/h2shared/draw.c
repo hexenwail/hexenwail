@@ -297,6 +297,10 @@ void Draw_Init (void)
 
 	if (!draw_reinit)
 		Hash_Allocate (&hash_cachepics, MAX_CACHED_PICS);
+
+#if defined(WEBSOFT)
+	Draw_SoftWebInit ();
+#endif
 }
 
 /*
