@@ -171,11 +171,26 @@ function createSolidTexture(gl, unit, color) {
   return texture;
 }
 
-function createPaletteTexture(gl, unit, color) {
+// Encodes each texel's own grid coordinate, deliberately permuted across the
+// channels: R carries z, G carries x, B carries y, each with a distinct small
+// bias.  A LUT filled with one flat colour would return the expected value even
+// if the index arithmetic, the 3D dimensions, the row stride, or the channel
+// order within a texel were all wrong -- which is precisely the machinery this
+// test exists to cover.  The permutation also keeps the expected output clear
+// of the scene colour, so a LUT that is never sampled at all still fails.
+export function paletteProbeColor(x, y, z) {
+  return [z * 8 + 1, x * 8 + 2, y * 8 + 3];
+}
+
+function createPaletteTexture(gl, unit) {
   const texture = gl.createTexture();
   const pixels = new Uint8Array(32 * 32 * 32 * 3);
-  for (let offset = 0; offset < pixels.length; offset += 3) {
-    pixels.set(color, offset);
+  for (let z = 0; z < 32; z += 1) {
+    for (let y = 0; y < 32; y += 1) {
+      for (let x = 0; x < 32; x += 1) {
+        pixels.set(paletteProbeColor(x, y, z), ((z * 32 + y) * 32 + x) * 3);
+      }
+    }
   }
   gl.activeTexture(gl.TEXTURE0 + unit);
   gl.bindTexture(gl.TEXTURE_3D, texture);
@@ -272,9 +287,11 @@ function framebufferSelfTest(gl, worldProgram) {
 function postprocessSelfTest(gl, postprocessProgram) {
   const width = 8;
   const height = 8;
-  const sceneTexture = createSolidTexture(gl, 0, [128, 96, 64, 255]);
-  const paletteColor = [40, 80, 120];
-  const paletteTexture = createPaletteTexture(gl, 1, paletteColor);
+  const scene = [128, 96, 64];
+  const sceneTexture = createSolidTexture(gl, 0, [...scene, 255]);
+  const paletteTexture = createPaletteTexture(gl, 1);
+  // Mirrors the engine's `ivec3(clamp(c, 0.0, 1.0) * 31.0 + 0.5)`.
+  const paletteIndex = scene.map((channel) => Math.trunc((channel / 255) * 31 + 0.5));
   const targetTexture = gl.createTexture();
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, targetTexture);
@@ -335,7 +352,7 @@ function postprocessSelfTest(gl, postprocessProgram) {
   if (gammaSample.some((channel, index) => Math.abs(channel - expectedGamma[index]) > 2)) {
     throw new Error(`gamma post-process returned ${gammaSample.join(',')}, expected ${expectedGamma.join(',')}`);
   }
-  const expectedPalette = [...paletteColor, 255];
+  const expectedPalette = [...paletteProbeColor(...paletteIndex), 255];
   if (paletteSample.some((channel, index) => Math.abs(channel - expectedPalette[index]) > 2)) {
     throw new Error(`palette post-process returned ${paletteSample.join(',')}, expected ${expectedPalette.join(',')}`);
   }

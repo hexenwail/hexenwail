@@ -2841,14 +2841,6 @@ static qboolean M_Rendering_IsSkip (int i)
 	return M_Filter_Active() && !M_Filter_Matches(rend_labels[i]);
 }
 
-static int M_Rendering_VisualRow (int i)
-{
-	int row = 0;
-	for (int j = 0; j < i; j++)
-		if (!M_Rendering_IsSkip(j))
-			row++;
-	return row;
-}
 
 static void M_Menu_Rendering_f (void)
 {
@@ -3187,8 +3179,14 @@ static void M_Rendering_Draw (void)
 		if (h >= 0 && !M_Rendering_IsSkip(h))
 			rendering_cursor = h;
 	}
+	/* Raw index, not a compacted visual row: every label above draws at
+	 * `92 + 8*REND_x` and M_MouseToMenuItem hit-tests the same raw stride, so
+	 * a hidden row leaves a gap rather than closing one up.  Compacting only
+	 * the cursor put the glyph one row above the item it controls for every
+	 * row below a hidden one -- previously only visible while a search filter
+	 * was typed, but permanent once a capability check can hide a row. */
 	if (!M_Rendering_IsSkip(rendering_cursor))
-		M_DrawCharacter (64, 92 + M_Rendering_VisualRow(rendering_cursor)*8, 12+((int)(realtime*4)&1));
+		M_DrawCharacter (64, 92 + 8*rendering_cursor, 12+((int)(realtime*4)&1));
 
 	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
 	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));

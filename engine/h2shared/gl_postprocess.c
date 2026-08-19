@@ -1573,14 +1573,14 @@ void GL_PostProcess_Init (void)
 	Cvar_SetCallback(&r_hdr, PP_FormatChanged);
 	Cvar_SetCallback(&r_bloom, PP_FormatChanged);
 
-	/* An archived r_hdr 1 carried over from a desktop config would otherwise
-	 * ask a browser without EXT_color_buffer_float for an RGBA16F target on
-	 * every map load.  d2c46f078. */
+	/* Report only -- deliberately NOT Cvar_Set("r_hdr", "0"), which is what
+	 * d2c46f078 did here.  PP_HDRActive() already gates every functional
+	 * reader, so an archived r_hdr 1 cannot reach an RGBA16F allocation on a
+	 * context without EXT_color_buffer_float; resetting the cvar would only
+	 * rewrite the config of somebody who also plays on a desktop.  Same
+	 * reasoning as the r_oit note directly below. */
 	if (r_hdr.integer && !gl_renderer_caps.float_color_buffer)
-	{
-		Con_SafePrintf("[RENDERER] Floating-point render targets unavailable; disabling HDR\n");
-		Cvar_Set("r_hdr", "0");
-	}
+		Con_SafePrintf("[RENDERER] Floating-point render targets unavailable; HDR inactive\n");
 
 	/* r_oit used to be force-reset to 0 here, discarding an archived 1 on
 	 * every startup, because OIT rendered nothing at all.  That was
