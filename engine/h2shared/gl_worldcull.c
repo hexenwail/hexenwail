@@ -805,7 +805,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 
 	if (hiz_pyramid_tex)
 	{
-		glDeleteTextures_fp(1, &hiz_pyramid_tex);
+		R_DeleteTextures (1, &hiz_pyramid_tex);
 		hiz_pyramid_tex = 0;
 	}
 
@@ -814,13 +814,13 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	hiz_mip_count = R_HiZ_MipCount(scene_w, scene_h);
 
 	glGenTextures_fp(1, &hiz_pyramid_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
+	R_BindTextureSlot (0, hiz_pyramid_tex);
 	glTexStorage2D_fp(GL_TEXTURE_2D, hiz_mip_count, GL_R32F, scene_w, scene_h);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureSlot (0, 0);
 
 	if (!hiz_copy_prog)
 		hiz_copy_prog = R_CompileComputeProgram(hiz_copy_src, "hiz_copy");
@@ -850,11 +850,11 @@ void R_BuildHiZ (void)
 void R_FreeHiZ (void)
 {
 	R_PipelineForgetProgram ();	/* GL reuses program names */
-	if (hiz_pyramid_tex)   { glDeleteTextures_fp(1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
+	if (hiz_pyramid_tex)   { R_DeleteTextures (1, &hiz_pyramid_tex); hiz_pyramid_tex = 0; }
 	if (hiz_copy_prog)     { glDeleteProgram_fp(hiz_copy_prog);        hiz_copy_prog = 0; }
 	if (hiz_reduce_prog)   { glDeleteProgram_fp(hiz_reduce_prog);      hiz_reduce_prog = 0; }
 	if (hiz_resolve_fbo)       { glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);   hiz_resolve_fbo = 0; }
-	if (hiz_resolve_depth_tex) { glDeleteTextures_fp(1, &hiz_resolve_depth_tex); hiz_resolve_depth_tex = 0; }
+	if (hiz_resolve_depth_tex) { R_DeleteTextures (1, &hiz_resolve_depth_tex); hiz_resolve_depth_tex = 0; }
 	hiz_resolve_w = hiz_resolve_h = 0;
 	hiz_width = hiz_height = hiz_mip_count = 0;
 	hiz_prev_mvp_valid = false;
@@ -882,7 +882,7 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 
 	if (hiz_resolve_depth_tex)
 	{
-		glDeleteTextures_fp(1, &hiz_resolve_depth_tex);
+		R_DeleteTextures (1, &hiz_resolve_depth_tex);
 		hiz_resolve_depth_tex = 0;
 	}
 	if (hiz_resolve_fbo)
@@ -892,7 +892,7 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 	}
 
 	glGenTextures_fp(1, &hiz_resolve_depth_tex);
-	glBindTexture_fp(GL_TEXTURE_2D, hiz_resolve_depth_tex);
+	R_BindTextureSlot (0, hiz_resolve_depth_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
 			scene_w, scene_h, 0,
 			GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
@@ -900,7 +900,7 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureSlot (0, 0);
 
 	glGenFramebuffers_fp(1, &hiz_resolve_fbo);
 	glBindFramebuffer_fp(GL_DRAW_FRAMEBUFFER, hiz_resolve_fbo);
@@ -920,7 +920,7 @@ static GLuint R_HiZ_ResolveStandaloneDepth (int scene_w, int scene_h)
 	{
 		Con_DPrintf("Hi-Z standalone resolve FBO incomplete (0x%x)\n", status);
 		glDeleteFramebuffers_fp(1, &hiz_resolve_fbo);
-		glDeleteTextures_fp(1, &hiz_resolve_depth_tex);
+		R_DeleteTextures (1, &hiz_resolve_depth_tex);
 		hiz_resolve_fbo = 0;
 		hiz_resolve_depth_tex = 0;
 		return 0;
@@ -991,8 +991,7 @@ void R_BuildHiZForNextFrame (void)
 
 	/* Copy scene depth -> mip 0 */
 	R_UseProgram (hiz_copy_prog);
-	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(GL_TEXTURE_2D, scene_depth_tex);
+	R_BindTextureSlot (0, scene_depth_tex);
 	glBindImageTexture_fp(0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
 	{
 		GLint loc = glGetUniformLocation_fp(hiz_copy_prog, "u_size");
@@ -1003,8 +1002,7 @@ void R_BuildHiZForNextFrame (void)
 
 	/* Reduce mip N -> mip N+1 */
 	R_UseProgram (hiz_reduce_prog);
-	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
+	R_BindTextureSlot (0, hiz_pyramid_tex);
 	{
 		GLint loc_src_size = glGetUniformLocation_fp(hiz_reduce_prog, "u_src_size");
 		GLint loc_dst_size = glGetUniformLocation_fp(hiz_reduce_prog, "u_dst_size");
@@ -1029,8 +1027,7 @@ void R_BuildHiZForNextFrame (void)
 	}
 
 	R_UseProgram (0);
-	glActiveTexture_fp(GL_TEXTURE0);
-	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_BindTextureSlot (0, 0);
 }
 
 qboolean R_WorldCullAvailable (void)
@@ -1114,9 +1111,7 @@ void R_DispatchWorldCull (void)
 			glUniform1i_fp(cull_mark_u_hiz_mip_count, hiz_mip_count);
 		if (hiz_on)
 		{
-			glActiveTexture_fp(GL_TEXTURE1);
-			glBindTexture_fp(GL_TEXTURE_2D, hiz_pyramid_tex);
-			glActiveTexture_fp(GL_TEXTURE0);
+			R_BindTextureSlot (1, hiz_pyramid_tex);
 		}
 	}
 
@@ -1242,11 +1237,8 @@ void R_DrawWorldCulled (void)
 	}
 
 	/* Bind lightmap atlas on unit 1, default fb null at unit 2 */
-	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
-	glActiveTexture_fp(GL_TEXTURE2);
-	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureSlot (1, lm_atlas_texture);
+	R_BindTextureSlot (2, gl_null_fb_texture);
 
 	/* Draw each texture bucket via indirect commands */
 	glBindBuffer_fp(GL_DRAW_INDIRECT_BUFFER, cull_indirect_buf);
@@ -1259,10 +1251,7 @@ void R_DrawWorldCulled (void)
 
 		/* Bind diffuse texture + matching fullbright mask (uhexen2-sjvf) */
 		GL_Bind(t->gl_texturenum);
-		glActiveTexture_fp(GL_TEXTURE2);
-		glBindTexture_fp(GL_TEXTURE_2D,
-			t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
-		glActiveTexture_fp(GL_TEXTURE0);
+		R_BindTextureSlot (2, t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
 
 		/* Issue indirect draw for this bucket */
 		R_DrawElementsIndirect (GL_TRIANGLES, GL_UNSIGNED_INT,

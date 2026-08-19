@@ -63,8 +63,6 @@ extern void TexMgr_FreeTexture (gltexture_t *kill);
 #define TEXPREF_TRANSPARENT		0x2000
 
 // Multitexture functions from gl_texmgr.h
-extern void GL_EnableMultitexture (void);
-extern void GL_DisableMultitexture (void);
 
 // Undef the GL_Bind macro so we can use the function from gl_texmgr
 #undef GL_Bind
@@ -1361,7 +1359,7 @@ void Sky_DrawSkyBox (void)
 			continue;
 
 		// Bind the actual skybox texture
-		glBindTexture_fp(GL_TEXTURE_2D, skybox_texnums[skytexorder[i]]);
+		R_BindTextureSlot (0, skybox_texnums[skytexorder[i]]);
 
 		skymins[0][i] = -1;
 		skymins[1][i] = -1;
@@ -1477,9 +1475,13 @@ void Sky_DrawFaceQuad (glpoly_t *p)
 	float	skyfog_alpha;
 	float	*fog_color;
 
-	GL_Bind (solidskytexture);
-	GL_EnableMultitexture();
-	GL_Bind (alphaskytexture);
+	{
+		const GLuint sky_layers[2] = {
+			solidskytexture ? solidskytexture->texnum : 0,
+			alphaskytexture ? alphaskytexture->texnum : 0
+		};
+		R_BindTextures (0, 2, sky_layers);
+	}
 
 	GL_ImmColor3f(1, 1, 1);
 
@@ -1503,8 +1505,6 @@ void Sky_DrawFaceQuad (glpoly_t *p)
 	}
 
 	GL_ImmEnd(GL_QUADS, &gl_shader_sky);
-
-	GL_DisableMultitexture();
 
 	rs_skypolys++;
 	rs_skypasses++;

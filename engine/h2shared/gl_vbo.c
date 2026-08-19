@@ -429,10 +429,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
 	R_UseProgram (0);
 
-	/* ensure texture unit 0 is active after draw */
-	if (glActiveTexture_fp)
-		glActiveTexture_fp(GL_TEXTURE0);
-
 	imm_count = 0;
 }
 
