@@ -13,8 +13,13 @@
 
 /* Shader compilation helpers */
 GLuint	GL_CompileShader (GLenum type, const char *source);
+/* Multi-chunk form: GL concatenates the parts itself, which is how the dialect
+ * header stays out of the shader files in engine/shaders/.  uhexen2-p4ln.4. */
+GLuint	GL_CompileShaderParts (GLenum type, int count, const char **parts);
 GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
 GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
+GLuint	GL_LoadProgramEx (const char *vert_src, const char *frag_src,
+			  const char *frag_prefix);
 
 /* Shader programs.
  *
