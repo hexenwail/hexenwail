@@ -1,5 +1,8 @@
 import { extractZipEntries } from './lib/zip.js';
 import { hasRequiredBaseAssets, mapImportedPath } from './lib/paths.js';
+import {
+  createSaveBundle, getPakCompatibilityWarnings, isSavePath, planSaveImport, sha256, validateSaveBundle,
+} from './lib/save-bundle.js';
 
 const BASE_DIR = '/persistent';
 const STORAGE_ROOT = 'hexenwail';
@@ -13,6 +16,8 @@ const state = {
   storageReady: false,
   engineStarted: false,
   syncing: false,
+  syncPromise: null,
+  applyingSaveImport: false,
   storedPaths: new Set(),
   runtimeSnapshot: new Map(),
   lastStatus: 'Preparing launcher…',
@@ -94,6 +99,13 @@ function setImportMessage(message, kind = 'info') {
   if (ui.importMessage) {
     ui.importMessage.textContent = message;
     ui.importMessage.dataset.kind = kind;
+  }
+}
+
+function setSaveMessage(message, kind = 'info') {
+  if (ui.saveMessage) {
+    ui.saveMessage.textContent = message;
+    ui.saveMessage.dataset.kind = kind;
   }
 }
 
@@ -217,12 +229,13 @@ function removeRuntimeTree(path) {
 }
 
 async function syncRuntimeToStorage() {
-  if (!state.runtimeReady || !state.storageReady || state.syncing) {
-    return;
+  if (!state.runtimeReady || !state.storageReady || state.syncing || state.applyingSaveImport) {
+    return state.syncPromise;
   }
 
-  state.syncing = true;
-  try {
+  state.syncPromise = (async () => {
+    state.syncing = true;
+    try {
     const FS = getFS();
     const present = new Set();
     const runtimeFiles = walkRuntimeFiles();
@@ -247,11 +260,13 @@ async function syncRuntimeToStorage() {
         state.storedPaths.delete(relativePath);
       }
     }
-  } finally {
-    state.syncing = false;
-    updateLaunchState();
-    updateStorageIndicator();
-  }
+    } finally {
+      state.syncing = false;
+      updateLaunchState();
+      updateStorageIndicator();
+    }
+  })();
+  return state.syncPromise;
 }
 
 async function loadStoredFilesIntoRuntime() {
@@ -406,6 +421,140 @@ async function handleImportedFiles(fileList) {
     ui.rejectedList.textContent = `Ignored ${rejected.length} item(s): ${rejected.slice(0, 8).join(', ')}${rejected.length > 8 ? '…' : ''}`;
   } else if (ui.rejectedList) {
     ui.rejectedList.textContent = '';
+  }
+}
+
+async function getInstalledPaks(gameDirectories) {
+  const paks = [];
+  const normalizedDirs = gameDirectories ? gameDirectories.map(d => d.toLowerCase()) : null;
+  for (const entry of await state.storage.listFiles()) {
+    if (!/^(?:data1|portals|hw)\/.*\.pak$/i.test(entry.path)) continue;
+    if (normalizedDirs && !normalizedDirs.includes(entry.path.split('/')[0].toLowerCase())) continue;
+    const bytes = await state.storage.readFile(entry.path);
+    paks.push({ path: entry.path, size: bytes.byteLength, sha256: await sha256(bytes) });
+  }
+  return paks;
+}
+
+async function exportSaves() {
+  try {
+    setSaveMessage('Syncing recent saves to local storage…');
+    await syncRuntimeToStorage();
+    const stored = await state.storage.listFiles();
+    const saveEntries = [];
+    for (const entry of stored) {
+      if (!isSavePath(entry.path)) continue;
+      saveEntries.push({ path: entry.path, bytes: await state.storage.readFile(entry.path) });
+    }
+    if (!saveEntries.length) {
+      setSaveMessage('No save files were found. Save a game first, then return to the launcher and export.', 'error');
+      return;
+    }
+    setSaveMessage(`Preparing ${saveEntries.length} save file(s)…`);
+    const { bytes } = await createSaveBundle(saveEntries, {
+      build: globalThis.HEXENWAIL_BUILD,
+      requiredPaks: await getInstalledPaks([...new Set(saveEntries.map((entry) => entry.path.split('/')[0]))]),
+    });
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `hexenwail-saves-${date}.hexenwail-save.zip`;
+    const file = new File([bytes], filename, { type: 'application/zip' });
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Hexenwail save bundle' });
+        setSaveMessage(`Exported ${saveEntries.length} save file(s), ${formatBytes(bytes.byteLength)}.`, 'success');
+        return;
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          setSaveMessage('Save export was cancelled.');
+          return;
+        }
+      }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(file);
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    setSaveMessage(`Downloaded ${saveEntries.length} save file(s), ${formatBytes(bytes.byteLength)}. Use Files or iCloud Drive to move it.`, 'success');
+  } catch (error) {
+    setSaveMessage(`Save export failed: ${error.message}`, 'error');
+  }
+}
+
+async function deleteRuntimeFile(relativePath) {
+  if (!state.runtimeReady) return;
+  try {
+    getFS().unlink(`${BASE_DIR}/${relativePath}`);
+  } catch (error) {
+    if (!String(error).includes('No such file')) throw error;
+  }
+  state.runtimeSnapshot.delete(relativePath);
+}
+
+async function applySaveImport(bundle, mode) {
+  await syncRuntimeToStorage();
+  state.applyingSaveImport = true;
+  try {
+    const existing = (await state.storage.listFiles()).map((entry) => entry.path);
+    const { writes, deletes } = planSaveImport(existing, bundle.files, mode);
+    const affected = [...new Set([...writes, ...deletes])];
+    const before = new Map();
+    for (const path of affected) {
+      if (existing.includes(path)) before.set(path, await state.storage.readFile(path));
+    }
+    try {
+      for (const file of bundle.files) {
+        if (!writes.includes(file.path)) continue;
+        await state.storage.writeFile(file.path, file.bytes, { size: file.bytes.byteLength, mtimeMs: Date.now() });
+        state.storedPaths.add(file.path);
+      }
+      for (const path of deletes) {
+        await state.storage.deleteFile(path);
+        state.storedPaths.delete(path);
+      }
+    } catch (error) {
+      for (const path of affected) {
+        if (before.has(path)) {
+          const bytes = before.get(path);
+          await state.storage.writeFile(path, bytes, { size: bytes.byteLength, mtimeMs: Date.now() }).catch(() => {});
+          state.storedPaths.add(path);
+        } else {
+          await state.storage.deleteFile(path).catch(() => {});
+          state.storedPaths.delete(path);
+        }
+      }
+      throw new Error(`Save import could not be committed; prior saves were restored (${error.message})`);
+    }
+    try {
+      for (const file of bundle.files) {
+        if (!writes.includes(file.path)) continue;
+        await writeRuntimeFile(file.path, file.bytes);
+      }
+      for (const path of deletes) await deleteRuntimeFile(path);
+    } catch (error) {
+      console.warn('Imported saves will be loaded after reload', error);
+    }
+    return { writes, deletes };
+  } finally {
+    state.applyingSaveImport = false;
+  }
+}
+
+async function importSaveBundle(file) {
+  try {
+    if (file.size > 256 * 1024 * 1024) throw new Error('Save bundle is too large.');
+    setSaveMessage('Checking save bundle…');
+    const bundle = await validateSaveBundle(new Uint8Array(await file.arrayBuffer()));
+    const warnings = getPakCompatibilityWarnings(bundle.manifest.requiredPaks, await getInstalledPaks(bundle.manifest.gameDirectories));
+    const size = bundle.files.reduce((total, entry) => total + entry.bytes.byteLength, 0);
+    const mode = ui.saveImportMode?.value === 'replace' ? 'replace' : 'merge';
+    const summary = `Import ${bundle.files.length} save file(s) (${formatBytes(size)}) from ${new Date(bundle.manifest.createdAt).toLocaleString()} for ${bundle.manifest.gameDirectories.join(', ')}?\n\nMode: ${mode === 'replace' ? 'Replace saves (all existing save slots are removed)' : 'Merge (only matching save paths are replaced)'}${warnings.length ? `\n\nCompatibility warnings:\n${warnings.join('\n')}` : ''}`;
+    setSaveMessage(`Ready to import ${bundle.files.length} save file(s) from ${new Date(bundle.manifest.createdAt).toLocaleString()}.${warnings.length ? ` ${warnings.join(' ')}` : ''}`);
+    if (!confirm(summary)) return;
+    const result = await applySaveImport(bundle, mode);
+    setSaveMessage(`Imported ${result.writes.length} save file(s)${result.deletes.length ? ` and removed ${result.deletes.length} existing save file(s)` : ''}.${state.engineStarted ? ' Restart/reload before loading saves to avoid an active-game race.' : ''}`, 'success');
+  } catch (error) {
+    setSaveMessage(`Save import failed: ${error.message}`, 'error');
   }
 }
 
@@ -712,6 +861,11 @@ function bindUi() {
     fullscreenButton: document.getElementById('fullscreen-button'),
     clearButton: document.getElementById('clear-button'),
     fileInput: document.getElementById('file-input'),
+    saveFileInput: document.getElementById('save-file-input'),
+    exportSavesButton: document.getElementById('export-saves-button'),
+    importSavesButton: document.getElementById('import-saves-button'),
+    saveImportMode: document.getElementById('save-import-mode'),
+    saveMessage: document.getElementById('save-message'),
     directoryInput: document.getElementById('directory-input'),
     dropZone: document.getElementById('drop-zone'),
     storageText: document.getElementById('storage-text'),
@@ -733,6 +887,13 @@ function bindUi() {
   });
   ui.launchButton?.addEventListener('click', () => maybeStartEngine());
   ui.clearButton?.addEventListener('click', () => clearImportedData());
+  ui.exportSavesButton?.addEventListener('click', () => exportSaves());
+  ui.importSavesButton?.addEventListener('click', () => ui.saveFileInput?.click());
+  ui.saveFileInput?.addEventListener('change', async (event) => {
+    const [file] = event.target.files;
+    if (file) await importSaveBundle(file);
+    event.target.value = '';
+  });
   ui.fullscreenButton?.addEventListener('click', () => requestFullscreenForCanvas());
   ui.canvas?.addEventListener('click', tryCaptureInput);
 

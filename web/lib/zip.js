@@ -59,6 +59,8 @@ export function parseZipCentralDirectory(bytes, limitOverrides) {
     assertZip(cursor + 46 <= bytes.byteLength, 'ZIP central directory entry truncated');
     assertZip(readUInt32(view, cursor) === CENTRAL_DIR_SIGNATURE, 'ZIP central directory entry signature mismatch');
 
+    const versionMadeBy = readUInt16(view, cursor + 4);
+    const flags = readUInt16(view, cursor + 8);
     const compressionMethod = readUInt16(view, cursor + 10);
     const compressedSize = readUInt32(view, cursor + 20);
     const uncompressedSize = readUInt32(view, cursor + 24);
@@ -67,6 +69,7 @@ export function parseZipCentralDirectory(bytes, limitOverrides) {
     const commentLength = readUInt16(view, cursor + 32);
     const localHeaderOffset = readUInt32(view, cursor + 42);
     const crc32 = readUInt32(view, cursor + 16);
+    const externalAttributes = readUInt32(view, cursor + 38);
 
     assertZip(compressedSize !== 0xffffffff && uncompressedSize !== 0xffffffff, 'ZIP64 entries are not supported');
     assertZip(uncompressedSize <= limits.maxSingleEntrySize, `ZIP entry is too large (${uncompressedSize} bytes)`);
@@ -81,11 +84,14 @@ export function parseZipCentralDirectory(bytes, limitOverrides) {
     entries.push({
       rawName,
       name: sanitizeRelativePath(rawName),
+      versionMadeBy,
+      flags,
       compressionMethod,
       compressedSize,
       uncompressedSize,
       localHeaderOffset,
       crc32,
+      externalAttributes,
       isDirectory: rawName.endsWith('/'),
     });
 

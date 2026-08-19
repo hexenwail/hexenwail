@@ -172,6 +172,43 @@ Caveats:
   along with everything else; requesting persistent storage via the Storage panel reduces
   but does not eliminate this risk
 
+## Portable save bundles
+
+The launcher’s **Saves & Backup** section can move save games between devices without
+an account, upload, cloud service, or backend:
+
+1. After saving, return to the launcher and choose **Export saves**. The launcher first
+   completes its runtime-to-browser-storage sync.
+2. Use the iPadOS Share sheet to save the dated `.hexenwail-save.zip` file to **Files** or
+   **iCloud Drive** (desktop browsers download the same file).
+3. On the other device, import your legally acquired matching game data first, then choose
+   **Import saves** and select the bundle from Files/iCloud Drive.
+4. Review the date, game directories, file count, size, and any compatibility warning,
+   then confirm the import. Reload before loading an imported save if the engine is already
+   running.
+
+Bundles are ordinary ZIP files with a versioned `hexenwail-save.json` manifest and save
+files under `saves/data1/`, `saves/portals/`, or `saves/hw/`. They contain only recognized
+engine save-slot files (such as `s0/info.dat` and `.gip` state), never PAKs, OGG music,
+runtime binaries, caches, or other imported commercial game data. The manifest records
+file SHA-256 hashes and sizes and records local PAK paths, sizes, and hashes for comparison
+only; it does not embed PAKs.
+
+Choose **Merge saves** to replace only bundle paths that already exist, or **Replace saves**
+to delete existing recognized save files before adding the bundle. Neither mode deletes PAKs,
+music, or other assets. The importer verifies the manifest, ZIP safety limits, paths,
+duplicates, file sizes, and SHA-256 hashes before writing anything. It rejects unsupported
+future formats and unsafe, unexpected, or undeclared ZIP entries. If persistent storage
+cannot complete a write, affected save files are restored from a local rollback snapshot.
+
+Compatibility warnings mean that required base-game or expansion PAKs are absent or differ
+from the exporting device. They do not put commercial data in the bundle: import matching
+legal assets separately. A bundle can be exported and imported entirely offline; browser
+storage and iCloud Drive/Files behavior remain subject to their own available space and
+sync timing. Because abrupt app termination can interrupt the normal ten-second save sync,
+export from the launcher after switching away from play rather than relying on a force-quit
+to preserve the most recent save.
+
 ## Offline readiness
 
 The service worker caches the launcher shell and WASM runtime files. Imported user assets live separately in OPFS / IndexedDB and are not part of the service worker cache.
