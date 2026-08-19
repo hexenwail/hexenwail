@@ -535,7 +535,55 @@ int R_LightPoint (vec3_t p)
 }
 
 
-static int RecursiveLightPointColor (vec3_t color, mnode_t *node, vec3_t start, vec3_t end)
+/*
+=============
+InterpolateLightmap
+
+Bilinear lightmap sample at (ds,dt) on surf, accumulated into color.
+Split out of RecursiveLightPointColor so the light cache can replay it
+every frame from a stored (surface, ds, dt) without re-walking the BSP --
+that is what keeps animated lightstyles live on a cache hit.
+Ironwail e2f39505.
+=============
+*/
+static void InterpolateLightmap (vec3_t color, msurface_t *surf, int ds, int dt)
+{
+	byte	*lightmap;
+	float	scale;
+	int	maps, line3,
+		dsfrac = ds & 15,
+		dtfrac = dt & 15,
+		r00 = 0, g00 = 0, b00 = 0,
+		r01 = 0, g01 = 0, b01 = 0,
+		r10 = 0, g10 = 0, b10 = 0,
+		r11 = 0, g11 = 0, b11 = 0;
+
+	line3 = ((surf->extents[0]>>4) + 1) * 3;
+	lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4) + 1) + (ds>>4)) * 3;
+	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+	{
+		scale = (float) d_lightstylevalue[surf->styles[maps]] * 1.0 / 256.0;
+		r00 += (float) lightmap[0] * scale;
+		g00 += (float) lightmap[1] * scale;
+		b00 += (float) lightmap[2] * scale;
+		r01 += (float) lightmap[3] * scale;
+		g01 += (float) lightmap[4] * scale;
+		b01 += (float) lightmap[5] * scale;
+		r10 += (float) lightmap[line3+0] * scale;
+		g10 += (float) lightmap[line3+1] * scale;
+		b10 += (float) lightmap[line3+2] * scale;
+		r11 += (float) lightmap[line3+3] * scale;
+		g11 += (float) lightmap[line3+4] * scale;
+		b11 += (float) lightmap[line3+5] * scale;
+		lightmap += ((surf->extents[0] >> 4) + 1) * ((surf->extents[1] >> 4) + 1) * 3;
+	}
+
+	color[0] += (float) ((int) ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)));
+	color[1] += (float) ((int) ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)));
+	color[2] += (float) ((int) ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)));
+}
+
+static int RecursiveLightPointColor (lightcache_t *cache, mnode_t *node, vec3_t start, vec3_t end)
 {
 	float		front, back, frac;
 	vec3_t		mid;
@@ -568,7 +616,7 @@ loc0:
 	mid[2] = start[2] + (end[2] - start[2])*frac;
 
 // go down front side
-	if (RecursiveLightPointColor (color, node->children[front < 0], start, mid))
+	if (RecursiveLightPointColor (cache, node->children[front < 0], start, mid))
 		return true;	// hit something
 	else
 	{
@@ -591,54 +639,49 @@ loc0:
 
 			if (ds > surf->extents[0] || dt > surf->extents[1])
 				continue;
+			/* Store the trace result instead of the colour: the
+			 * caller replays InterpolateLightmap() every frame so
+			 * lightstyle animation survives a cache hit.
+			 * surfidx <0 marks a surface with no lightmap samples
+			 * (contributes nothing), matching Ironwail's use of -1
+			 * for "hit, but do not interpolate". */
 			if (surf->samples)
 			{
-				// LordHavoc: enhanced to interpolate lighting
-				byte	*lightmap;
-				float	scale;
-				int	maps, line3,
-					dsfrac = ds & 15,
-					dtfrac = dt & 15,
-					r00 = 0, g00 = 0, b00 = 0,
-					r01 = 0, g01 = 0, b01 = 0,
-					r10 = 0, g10 = 0, b10 = 0,
-					r11 = 0, g11 = 0, b11 = 0;
-
-				line3 = ((surf->extents[0]>>4) + 1) * 3;
-				lightmap = surf->samples + ((dt>>4) * ((surf->extents[0]>>4) + 1) + (ds>>4)) * 3;
-				for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
-				{
-					scale = (float) d_lightstylevalue[surf->styles[maps]] * 1.0 / 256.0;
-					r00 += (float) lightmap[0] * scale;
-					g00 += (float) lightmap[1] * scale;
-					b00 += (float) lightmap[2] * scale;
-					r01 += (float) lightmap[3] * scale;
-					g01 += (float) lightmap[4] * scale;
-					b01 += (float) lightmap[5] * scale;
-					r10 += (float) lightmap[line3+0] * scale;
-					g10 += (float) lightmap[line3+1] * scale;
-					b10 += (float) lightmap[line3+2] * scale;
-					r11 += (float) lightmap[line3+3] * scale;
-					g11 += (float) lightmap[line3+4] * scale;
-					b11 += (float) lightmap[line3+5] * scale;
-					lightmap += ((surf->extents[0]>>4) + 1) * ((surf->extents[1]>>4) + 1) * 3;
-				}
-				color[0] += (float) ((int) ((((((((r11-r10) * dsfrac) >> 4) + r10)-((((r01-r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01-r00) * dsfrac) >> 4) + r00)));
-				color[1] += (float) ((int) ((((((((g11-g10) * dsfrac) >> 4) + g10)-((((g01-g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01-g00) * dsfrac) >> 4) + g00)));
-				color[2] += (float) ((int) ((((((((b11-b10) * dsfrac) >> 4) + b10)-((((b01-b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01-b00) * dsfrac) >> 4) + b00)));
+				cache->surfidx = (int)(surf - cl.worldmodel->surfaces) + 1;
+				cache->ds = ds;
+				cache->dt = dt;
+			}
+			else
+			{
+				cache->surfidx = -1;
 			}
 			return true; // success
 		}
 	// go down back side
-		return RecursiveLightPointColor (color, node->children[front >= 0], mid, end);
+		return RecursiveLightPointColor (cache, node->children[front >= 0], mid, end);
 	}
 }
 
 vec3_t			lightcolor;
 
-float R_LightPointColor (vec3_t p)
+/*
+=============
+R_LightPointColor
+
+Samples world lighting at p, leaving the result in the global lightcolor[]
+and returning its average.  `cache` may be NULL for one-off samples that are
+not tied to a stable position (surface probes, debug dumps); pass an entity's
+&e->lightcache to memoize the BSP downtrace across frames.
+
+Ironwail e2f39505.  The cache holds the *trace* (which surface/texel), never
+the colour, so lightstyle animation still runs on a hit -- see
+InterpolateLightmap.  It is invalidated by movement of >=1 unit on any axis.
+=============
+*/
+float R_LightPointColor (vec3_t p, lightcache_t *cache)
 {
 	vec3_t		end;
+	lightcache_t	scratch;
 
 	if (!cl.worldmodel->lightdata)
 	{
@@ -646,12 +689,42 @@ float R_LightPointColor (vec3_t p)
 		return 255.0;
 	}
 
-	end[0] = p[0];
-	end[1] = p[1];
-	end[2] = p[2] - 2048;
+	if (!cache)
+	{
+		scratch.surfidx = 0;
+		cache = &scratch;
+	}
 
 	lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
-	RecursiveLightPointColor (lightcolor, cl.worldmodel->nodes, p, end);
+
+	if (cache->surfidx <= 0	/* no cache, or a surface with no samples */
+		|| cache->surfidx > cl.worldmodel->numsurfaces
+		|| fabs (cache->pos[0] - p[0]) >= 1.0
+		|| fabs (cache->pos[1] - p[1]) >= 1.0
+		|| fabs (cache->pos[2] - p[2]) >= 1.0)
+	{
+		cache->surfidx = 0;
+		VectorCopy (p, cache->pos);
+
+		end[0] = p[0];
+		end[1] = p[1];
+		end[2] = p[2] - 2048;
+
+		RecursiveLightPointColor (cache, cl.worldmodel->nodes, p, end);
+
+		/* lightspot is a side effect of the walk; keep it with the trace
+		 * so a cache hit can hand GL_DrawAliasShadow() the same floor
+		 * height a fresh trace would have. */
+		VectorCopy (lightspot, cache->spot);
+	}
+	else
+	{
+		VectorCopy (cache->spot, lightspot);
+	}
+
+	if (cache->surfidx > 0)
+		InterpolateLightmap (lightcolor, cl.worldmodel->surfaces + cache->surfidx - 1, cache->ds, cache->dt);
+
 	return (lightcolor[0] + lightcolor[1] + lightcolor[2]) / 3.0;
 }
 

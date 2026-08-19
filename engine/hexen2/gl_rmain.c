@@ -1302,7 +1302,7 @@ static void AliasModelGetLightInfo (entity_t *e)
 
 	VectorCopy(e->origin, adjust_origin);
 	adjust_origin[2] += (e->model->mins[2] + e->model->maxs[2]) / 2;
-	ambientlight = shadelight = R_LightPointColor (adjust_origin);
+	ambientlight = shadelight = R_LightPointColor (adjust_origin, &e->lightcache);
 }
 
 /*
@@ -3336,7 +3336,9 @@ static void R_DumpAliasInfo (void)
 		VectorCopy(e->origin, adjust_origin);
 		adjust_origin[2] += (e->model->mins[2] + e->model->maxs[2]) / 2;
 		lightcolor[0] = lightcolor[1] = lightcolor[2] = 0;
-		amb = R_LightPointColor(adjust_origin);
+		/* NULL cache: a debug dump must not seed or disturb the
+		 * entity's real light cache. */
+		amb = R_LightPointColor(adjust_origin, NULL);
 
 		Con_Printf("%3d %4d %-30s %-30s (%7.1f %7.1f %7.1f) amb=%6.1f lc=(%6.1f %6.1f %6.1f)\n",
 			   i, (int)(e - cl_entities), e->model->name, fbuf,
@@ -4055,7 +4057,7 @@ static void R_DrawViewModel (void)
 	if (!e->model)
 		return;
 
-	ambientlight = R_LightPointColor (e->origin);
+	ambientlight = R_LightPointColor (e->origin, &e->lightcache);
 	if (lightcolor[0] < 24)
 		lightcolor[0] = 24;
 	if (lightcolor[1] < 24)

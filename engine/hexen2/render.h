@@ -45,6 +45,27 @@ typedef struct efrag_s
 #define LERP_RESETANIM	(1<<2)	// reset animation lerp
 #define LERP_RESETANIM2	(1<<3)	// defer animation lerp one more pose change (Ironwail)
 
+/*
+ * Alias light-trace cache (Ironwail e2f39505, adapted).
+ *
+ * Caches the *result of the BSP downtrace* -- which lightmap texel the
+ * entity's sample point landed on -- not the resulting colour.  The
+ * interpolation is still re-run every frame from d_lightstylevalue, so
+ * flickering/pulsing lightstyles keep animating on a cache hit.
+ *
+ * `spot` is the Hexenwail-specific part: upstream has no lightspot at all,
+ * but GL_DrawAliasShadow() consumes it as the floor height under the model.
+ * Skipping the trace would leave the global holding some other entity's
+ * floor, so the value is saved with the trace and restored on a hit.
+ */
+typedef struct lightcache_s
+{
+	int			surfidx;	// <0: surface with no samples; 0: no cache; >0: 1+index into worldmodel->surfaces
+	vec3_t			pos;		// sample point the trace was run from
+	vec3_t			spot;		// lightspot as of that trace (feeds GL_DrawAliasShadow)
+	int			ds, dt;		// lightmap texel coords within the surface
+} lightcache_t;
+
 typedef struct entity_s
 {
 	qboolean		forcelink;	// model changed
@@ -99,6 +120,8 @@ typedef struct entity_s
 	int			currentpose;
 	float			lerpstart;	// animation lerp start time
 	float			lerptime;	// animation lerp duration
+
+	lightcache_t		lightcache;	// alias light trace cache (uhexen2-ayrn)
 } entity_t;
 
 

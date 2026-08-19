@@ -937,7 +937,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 				float lv;
 				VectorCopy(lightcolor, saved_lc);
 				mid[0] = v[0]; mid[1] = v[1]; mid[2] = v[2];
-				R_LightPointColor(mid);
+				R_LightPointColor(mid, NULL);
 				lv = (lightcolor[0] + lightcolor[1] + lightcolor[2]) / (3.0f * 200.0f);
 				if (lv > 1.0f) lv = 1.0f;
 				if (lv < 0.15f) lv = 0.15f;

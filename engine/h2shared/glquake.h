@@ -540,7 +540,7 @@ void R_RenderDlights (void);
 void R_MarkLights (dlight_t *light, int bit, mnode_t *node);
 void R_AnimateLight(void);
 int R_LightPoint (vec3_t p);
-float R_LightPointColor (vec3_t p);
+float R_LightPointColor (vec3_t p, lightcache_t *cache);
 void GL_BuildLightmaps (void);
 void R_BuildWorldVBO (void);
 void R_FreeWorldVBO (void);
