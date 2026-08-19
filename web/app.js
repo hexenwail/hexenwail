@@ -4,6 +4,7 @@ import {
   createSaveBundle, getPakCompatibilityWarnings, isSavePath, planSaveImport, sha256, validateSaveBundle,
 } from './lib/save-bundle.js';
 import { PhoneControls, PHONE_CONTROL_KEYCODES } from './lib/phone-controls.js';
+import { runWebGLDiagnostics } from './lib/webgl-diagnostics.js';
 
 const BASE_DIR = '/persistent';
 const ENGINE_ARGUMENTS = ['-basedir', BASE_DIR];
@@ -18,6 +19,7 @@ const state = {
   storage: null,
   runtimeReady: false,
   runtimeLoaded: false,
+  rendererReady: false,
   storageReady: false,
   engineStarted: false,
   syncing: false,
@@ -117,23 +119,38 @@ function logToConsole(prefix, message, error = false) {
   }
 }
 
+// The runtime becoming ready does not make the game launchable if the renderer
+// self-test failed, and saying "Engine ready" would paper over the real reason
+// the launch button is disabled.
+function announceEngineReady() {
+  if (!state.rendererReady) {
+    return;
+  }
+  setStatus('Engine ready. Start the game when ready.');
+}
+
 function updateLaunchState() {
   const ready = hasRequiredBaseAssets([...state.storedPaths]);
   if (ui.launchButton) {
-    ui.launchButton.disabled = !ready || (state.engineStarted && !state.runtimeExited);
-    ui.launchButton.textContent = state.runtimeExited
-      ? 'Restart game'
-      : state.engineStarted
-        ? 'Running'
-        : ready ? 'Start game' : 'Import pak0.pak + pak1.pak first';
+    ui.launchButton.disabled = !state.rendererReady || !ready
+      || (state.engineStarted && !state.runtimeExited);
+    ui.launchButton.textContent = !state.rendererReady
+      ? 'WebGL2 unavailable'
+      : state.runtimeExited
+        ? 'Restart game'
+        : state.engineStarted
+          ? 'Running'
+          : ready ? 'Start game' : 'Import pak0.pak + pak1.pak first';
   }
   if (ui.exitButton) {
     ui.exitButton.disabled = !state.engineStarted || state.runtimeExited;
   }
   if (ui.requirementsText) {
-    ui.requirementsText.textContent = ready
-      ? 'Required base game assets detected.'
-      : 'Required: data1/pak0.pak and data1/pak1.pak from a legal Hexen II installation.';
+    ui.requirementsText.textContent = !state.rendererReady
+      ? 'WebGL2 renderer self-test failed. See the runtime log.'
+      : ready
+        ? 'Required base game assets detected.'
+        : 'Required: data1/pak0.pak and data1/pak1.pak from a legal Hexen II installation.';
   }
 }
 
@@ -772,7 +789,8 @@ async function handleEngineQuit(kind = 'quit', message = '') {
 }
 
 async function startEngineFromUserAction() {
-  if (state.engineStarted || !state.runtimeReady || !state.storageReady || !hasRequiredBaseAssets([...state.storedPaths])) {
+  if (state.engineStarted || !state.rendererReady || !state.runtimeReady || !state.storageReady
+      || !hasRequiredBaseAssets([...state.storedPaths])) {
     return;
   }
   state.engineStarted = true;
@@ -1276,7 +1294,7 @@ function bindBootCallbacks() {
     boot.runtimeInitialized = true;
     setStatus('Engine runtime ready. Restoring persistent data…');
     await loadStoredFilesIntoRuntime();
-    setStatus('Engine ready. Start the game when ready.');
+    announceEngineReady();
     updateLaunchState();
   };
   boot.onQuit = (detail) => handleEngineQuit(detail?.kind ?? 'quit', detail?.message ?? '');
@@ -1285,7 +1303,7 @@ function bindBootCallbacks() {
     queueMicrotask(async () => {
       state.runtimeReady = true;
       await loadStoredFilesIntoRuntime();
-      setStatus('Engine ready. Start the game when ready.');
+      announceEngineReady();
       updateLaunchState();
     });
   }
@@ -1294,6 +1312,25 @@ function bindBootCallbacks() {
 async function init() {
   loadPreferences();
   bindUi();
+  // Before anything expensive: a browser that cannot compile the renderer's
+  // shader families or read back an RGBA8 FBO will start the engine and then
+  // render a black canvas with no diagnosable symptom.  Refusing to launch and
+  // saying why is the only useful outcome, and it costs one throwaway context.
+  try {
+    const report = runWebGLDiagnostics();
+    state.rendererReady = true;
+    logToConsole('[renderer]', `${report.profile}; GLSL ${report.shadingLanguage}; `
+      + `shaders=${report.shaders.length}; RGBA8-FBO=${report.framebuffer.width}x${report.framebuffer.height}; `
+      + `visible=${(report.framebuffer.nonBlackRatio * 100).toFixed(0)}%; `
+      + `postprocess=gamma/palette pass; `
+      + `HDR=${report.extensions.colorBufferFloat ? 'available' : 'disabled'}; `
+      + `OIT=${report.extensions.indexedBlend ? 'extension present' : 'sorted fallback'}`);
+  } catch (error) {
+    state.rendererReady = false;
+    setEngineState('fatal');
+    logToConsole('[renderer:error]', error.message, true);
+    setStatus(`WebGL2 renderer self-test failed: ${error.message}`, 'error');
+  }
   updateTouchOnlyEnvironment();
   bindBootCallbacks();
   updateLaunchState();
@@ -1304,9 +1341,13 @@ async function init() {
   await updateStorageIndicator();
   await registerServiceWorker();
   await ensureEngineScriptLoaded();
+  // Still restore stored files when the renderer self-test failed: the save
+  // panel is driven by that state, and somebody whose browser cannot render
+  // should still be able to export their saves.  announceEngineReady is what
+  // keeps the status from claiming the engine is ready when it is not.
   if (state.runtimeReady) {
     await loadStoredFilesIntoRuntime();
-    setStatus('Engine ready. Start the game when ready.');
+    announceEngineReady();
     updateLaunchState();
   }
 

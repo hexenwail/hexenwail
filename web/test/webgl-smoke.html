@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hexenwail WebGL2 smoke test</title>
+</head>
+<body data-result="pending">
+  <pre id="result">pending</pre>
+  <script type="module">
+    import { runWebGLDiagnostics } from '../lib/webgl-diagnostics.js';
+
+    const output = document.getElementById('result');
+    try {
+      const report = runWebGLDiagnostics();
+      document.body.dataset.result = 'pass';
+      output.textContent = JSON.stringify(report);
+    } catch (error) {
+      document.body.dataset.result = 'fail';
+      output.textContent = error.stack || error.message;
+    }
+  </script>
+</body>
+</html>

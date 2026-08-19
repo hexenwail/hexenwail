@@ -68,8 +68,7 @@
  * so it must be stated.  int is declared mediump there, which is as little as
  * 16 bits -- not enough for bayer16's 32-bit shifts below -- hence highp int.
  * sampler3D likewise has no default (only sampler2D and samplerCube do), and
- * softemu's palette LUT is a sampler3D whose .r is scaled by 255 to index the
- * palette, so it wants the full range too. */
+ * softemu's palette LUT is a sampler3D, so it wants a stated precision too. */
 #ifdef USE_GLES
 #define PP_ES_PRECISION	"precision highp float;\nprecision highp int;\nprecision highp sampler3D;\n"
 #define PP_VERT_HEADER	"#version 300 es\n" PP_ES_PRECISION
@@ -151,7 +150,6 @@ static GLint	pp_loc_mvp;
 static GLint	pp_loc_softemu;
 static GLint	pp_loc_dither;
 static GLint	pp_loc_paletteLUT;
-static GLint	pp_loc_palette;
 static GLint	pp_loc_scale;
 static GLint	pp_loc_waterwarp;
 static GLint	pp_loc_time;
@@ -198,6 +196,15 @@ cvar_t	r_bloom_threshold = {"r_bloom_threshold", "1.0", CVAR_ARCHIVE};	/* lumina
  * hard rectangular cut while leaving the flame at close to full brightness. */
 cvar_t	r_softparticles = {"r_softparticles", "0", CVAR_ARCHIVE};
 cvar_t	r_softparticles_scale = {"r_softparticles_scale", "8", CVAR_ARCHIVE};
+
+/* r_hdr wants RGBA16F colour attachments, which are core on the desktop tier
+ * but need EXT_color_buffer_float on ES/WebGL2.  Without it the FBO comes back
+ * incomplete and the whole post-process chain falls over, so read the cvar
+ * through here rather than directly.  d2c46f078. */
+static qboolean PP_HDRActive (void)
+{
+	return r_hdr.integer && gl_renderer_caps.float_color_buffer;
+}
 
 /* ------------------------------------------------------------------ */
 /* Order-Independent Transparency (McGuire & Bavoil WBOIT)            */
@@ -357,7 +364,7 @@ static qboolean PP_NeedsPostProcess (void)
 		return true;
 	if (Cvar_VariableValue("r_motionblur") > 0)
 		return true;
-	if (r_hdr.integer)
+	if (PP_HDRActive())
 		return true;
 	/* OIT's accum/revealage FBO is built as a sibling of the scene FBO
 	 * in PP_CreateFBO and shares its depth/stencil attachment, so the
@@ -431,14 +438,14 @@ static qboolean PP_CreateNativeFBO (int width, int height)
 	 * runtime toggle must reallocate even at an unchanged resolution.
 	 * uhexen2-3p6p. */
 	if (width == pp_native_w && height == pp_native_h && pp_native_fbo &&
-	    pp_native_fmt == (GLenum)(r_hdr.integer ? GL_RGBA16F : GL_RGBA8))
+	    pp_native_fmt == (GLenum)(PP_HDRActive() ? GL_RGBA16F : GL_RGBA8))
 		return true;	/* already correct size and format */
 
 	PP_DeleteNativeFBO();
 
 	{
-	GLenum native_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
-	GLenum native_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
+	GLenum native_fmt = PP_HDRActive() ? GL_RGBA16F : GL_RGBA8;
+	GLenum native_type = PP_HDRActive() ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_native_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_native_color_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, native_fmt, width, height, 0,
@@ -496,8 +503,8 @@ static qboolean PP_CreateBloomFBOs (int width, int height)
 	if (!r_bloom.integer)
 		return true;	/* bloom disabled, skip allocation */
 
-	color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
-	color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
+	color_fmt = PP_HDRActive() ? GL_RGBA16F : GL_RGBA8;
+	color_type = PP_HDRActive() ? GL_FLOAT : GL_UNSIGNED_BYTE;
 
 	for (i = 0; i < BLOOM_LEVELS; i++)
 	{
@@ -561,8 +568,8 @@ static qboolean PP_CreateFBO (int width, int height)
 
 	/* resolve texture (always non-multisampled — this is what the shader reads) */
 	{
-		GLenum color_fmt = r_hdr.integer ? GL_RGBA16F : GL_RGBA8;
-		GLenum color_type = r_hdr.integer ? GL_FLOAT : GL_UNSIGNED_BYTE;
+		GLenum color_fmt = PP_HDRActive() ? GL_RGBA16F : GL_RGBA8;
+		GLenum color_type = PP_HDRActive() ? GL_FLOAT : GL_UNSIGNED_BYTE;
 	glGenTextures_fp(1, &pp_color_tex);
 	glBindTexture_fp(GL_TEXTURE_2D, pp_color_tex);
 	glTexImage2D_fp(GL_TEXTURE_2D, 0, color_fmt, width, height, 0,
@@ -701,7 +708,6 @@ static const char pp_frag_src[] =
 	"uniform int softemu;\n"
 	"uniform float dither;\n"
 	"uniform sampler3D paletteLUT;\n"
-	"uniform vec3 palette[256];\n"
 	"uniform float scale;\n"
 	"uniform float waterwarp;\n"
 	"uniform float time;\n"
@@ -791,8 +797,7 @@ static const char pp_frag_src[] =
 	"            c += d * dither / 16.0;\n"
 	"        }\n"
 	"        ivec3 idx = ivec3(clamp(c, 0.0, 1.0) * 31.0 + 0.5);\n"
-	"        int palIdx = int(texelFetch(paletteLUT, idx, 0).r * 255.0);\n"
-	"        color.rgb = palette[palIdx];\n"
+	"        color.rgb = texelFetch(paletteLUT, idx, 0).rgb;\n"
 	"    }\n"
 	"\n"
 	"    fragColor = color;\n"
@@ -863,7 +868,6 @@ static qboolean PP_InitShader (void)
 	pp_loc_softemu = glGetUniformLocation_fp(pp_program, "softemu");
 	pp_loc_dither = glGetUniformLocation_fp(pp_program, "dither");
 	pp_loc_paletteLUT = glGetUniformLocation_fp(pp_program, "paletteLUT");
-	pp_loc_palette = glGetUniformLocation_fp(pp_program, "palette");
 	pp_loc_scale = glGetUniformLocation_fp(pp_program, "scale");
 	pp_loc_waterwarp = glGetUniformLocation_fp(pp_program, "waterwarp");
 	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
@@ -939,15 +943,40 @@ extern unsigned int d_8to24table[256];
 /* ITU-R BT.601 luma, fixed point: (r*77 + g*151 + b*28) >> 8 spans 0..255. */
 #define PP_LUMA(r,g,b)	((((r) * 77) + ((g) * 151) + ((b) * 28)) >> 8)
 
+/* Takes a 32^3 grid of palette *indices* -- which is what both builders below
+ * compute -- and uploads it as resolved RGB8 colour.
+ *
+ * The shader used to fetch the index and look it up in a `uniform vec3
+ * palette[256]`.  That array alone is 256 uniform vectors, over the 224 a
+ * WebGL2 implementation is only required to offer a fragment shader, so the
+ * entire post-process program could fail to link on a conforming browser or
+ * mobile GL ES driver -- taking gamma, contrast, FXAA and render scale down
+ * with softemu.  Resolving the colour here costs 96 KB of texture per LUT
+ * instead, and drops a per-frame 768-float uniform upload on every tier.
+ *
+ * Safe to bake because d_8to24table is built once in VID_InitPalette and never
+ * mutated afterwards; palette flashes go through v_blend, not this table.
+ * Ported from alextnewman/hexenwail d2c46f078. */
 static GLuint PP_UploadLUT (const unsigned char *lut)
 {
+	/* static: 96 KB, too much for the stack on Windows */
+	static unsigned char rgb[32 * 32 * 32 * 3];
 	GLuint tex = 0;
+	int i;
+
+	for (i = 0; i < 32 * 32 * 32; i++)
+	{
+		unsigned int c = d_8to24table[lut[i]];
+		rgb[i * 3 + 0] = (c >>  0) & 0xff;
+		rgb[i * 3 + 1] = (c >>  8) & 0xff;
+		rgb[i * 3 + 2] = (c >> 16) & 0xff;
+	}
 
 	glGenTextures_fp(1, &tex);
 	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, tex);
-	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_R8, 32, 32, 32, 0,
-			GL_RED, GL_UNSIGNED_BYTE, lut);
+	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGB8, 32, 32, 32, 0,
+			GL_RGB, GL_UNSIGNED_BYTE, rgb);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1544,6 +1573,15 @@ void GL_PostProcess_Init (void)
 	Cvar_SetCallback(&r_hdr, PP_FormatChanged);
 	Cvar_SetCallback(&r_bloom, PP_FormatChanged);
 
+	/* An archived r_hdr 1 carried over from a desktop config would otherwise
+	 * ask a browser without EXT_color_buffer_float for an RGBA16F target on
+	 * every map load.  d2c46f078. */
+	if (r_hdr.integer && !gl_renderer_caps.float_color_buffer)
+	{
+		Con_SafePrintf("[RENDERER] Floating-point render targets unavailable; disabling HDR\n");
+		Cvar_Set("r_hdr", "0");
+	}
+
 	/* r_oit used to be force-reset to 0 here, discarding an archived 1 on
 	 * every startup, because OIT rendered nothing at all.  That was
 	 * uhexen2-z4r1: the resolve's fullscreen triangle was front-face culled,
@@ -2112,7 +2150,7 @@ apply_shader:
 	if (pp_loc_contrast >= 0)
 		glUniform1f_fp(pp_loc_contrast, v_contrast.value);
 	if (pp_loc_hdr_exposure >= 0)
-		glUniform1f_fp(pp_loc_hdr_exposure, r_hdr.integer ? r_hdr_exposure.value : 0.0f);
+		glUniform1f_fp(pp_loc_hdr_exposure, PP_HDRActive() ? r_hdr_exposure.value : 0.0f);
 
 	/* softemu uniforms */
 	if (pp_loc_softemu >= 0)
@@ -2125,19 +2163,6 @@ apply_shader:
 		if (scale < 0.25f) scale = 0.25f;
 		if (scale > 1.0f) scale = 1.0f;
 		glUniform1f_fp(pp_loc_scale, scale);
-	}
-	if ((int)r_softemu.value > 0 && pp_loc_palette >= 0 && glUniform3fv_fp)
-	{
-		float pal[256 * 3];
-		int i;
-		for (i = 0; i < 256; i++)
-		{
-			unsigned int c = d_8to24table[i];
-			pal[i * 3 + 0] = ((c >>  0) & 0xff) / 255.0f;
-			pal[i * 3 + 1] = ((c >>  8) & 0xff) / 255.0f;
-			pal[i * 3 + 2] = ((c >> 16) & 0xff) / 255.0f;
-		}
-		glUniform3fv_fp(pp_loc_palette, 256, pal);
 	}
 
 	/* Warp and blur: already baked into pp_native_color_tex when pp_native_active.
@@ -2238,6 +2263,13 @@ apply_shader:
 qboolean GL_PostProcess_Active (void)
 {
 	return pp_active;
+}
+
+/* Active is "post-processing ran this frame"; Available is "the shader linked
+ * and the chain could run at all".  `renderer_status` wants the second.  */
+qboolean GL_PostProcess_Available (void)
+{
+	return pp_initialized;
 }
 
 void GL_PostProcess_RequestWaterwarpPreview (float duration)
