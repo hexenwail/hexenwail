@@ -66,6 +66,7 @@
 #include "quakedef.h"
 #include "gl_postprocess.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
 #if !defined(SERVERONLY) && !defined(H2W)
@@ -307,7 +308,7 @@ static void SCR_DrawCenterString (void)
 		}
 
 		Draw_FlushCharBatch();	/* GL_ImmBegin reuses the imm buffer; flush queued glyphs first */
-		glEnable_fp(GL_BLEND);
+		R_SetBlend (true);
 		GL_ImmBegin();
 		GL_ImmColor4f(0.0f, 0.0f, 0.0f, alpha);
 		GL_ImmVertex2f(bg_x, bg_y);
@@ -315,7 +316,7 @@ static void SCR_DrawCenterString (void)
 		GL_ImmVertex2f(bg_x + bg_w, bg_y + bg_h);
 		GL_ImmVertex2f(bg_x, bg_y + bg_h);
 		GL_ImmEnd(GL_QUADS, &gl_shader_flat);
-		glDisable_fp(GL_BLEND);
+		R_SetBlend (false);
 	}
 
 	for (i = 0; i < lines; i++, by += 8)

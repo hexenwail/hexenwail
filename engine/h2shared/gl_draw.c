@@ -25,6 +25,7 @@
 #include "hashindex.h"
 #include "img_load.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
@@ -1176,8 +1177,8 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 
 	Draw_FlushCharBatch ();
 	gl = (glpic_t *)pic->data;
-	glEnable_fp (GL_BLEND);
-	glCullFace_fp(GL_FRONT);
+	R_SetBlend (true);
+	R_SetCullFace (GL_FRONT);
 	GL_Bind (gl->texnum);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1194,7 +1195,7 @@ void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha)
 	GL_ImmTexCoord2f (gl->sl, gl->th);
 	GL_ImmVertex2f (x, y+pic->height);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -1558,8 +1559,8 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	if (bright > 4.0f) bright = 4.0f;	/* sane upper bound */
 
 	Draw_FlushCharBatch ();
-	glEnable_fp (GL_BLEND);
-	glCullFace_fp(GL_FRONT);
+	R_SetBlend (true);
+	R_SetCullFace (GL_FRONT);
 	GL_Bind (num);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1577,7 +1578,7 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	GL_ImmVertex2f (0, lines);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
 
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -1601,7 +1602,7 @@ boot-time identification still works on the main menu.
 void Draw_MenuBackdrop (void)
 {
 	Draw_FlushCharBatch ();
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 	GL_Bind (conback);
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1724,7 +1725,7 @@ void Draw_FadeScreen (void)
 	int		c;
 
 	Draw_FlushCharBatch ();
-	glEnable_fp (GL_BLEND);
+	R_SetBlend (true);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.1);
@@ -1758,7 +1759,7 @@ void Draw_FadeScreen (void)
 		GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 	}
 
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 
 	Sbar_Changed();
 }
@@ -1772,7 +1773,7 @@ Draws a filled rectangle with color and alpha
 void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, float a)
 {
 	Draw_FlushCharBatch ();
-	glEnable_fp (GL_BLEND);
+	R_SetBlend (true);
 
 	GL_ImmBegin();
 	GL_ImmColor4f (r, g, b, a);
@@ -1782,7 +1783,7 @@ void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, floa
 	GL_ImmVertex2f (x, y + h);
 	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 }
 
 //=============================================================================
@@ -1944,9 +1945,9 @@ void GL_Set2D (void)
 	currentcanvas = CANVAS_INVALID;	/* force re-set */
 	GL_SetCanvas (CANVAS_DEFAULT);
 
-	glDisable_fp (GL_DEPTH_TEST);
-	glDisable_fp (GL_CULL_FACE);
-	glDisable_fp (GL_BLEND);
+	R_SetDepthTest (false);
+	R_SetCull (false);
+	R_SetBlend (false);
 
 	/* enable alpha test for 2D draws (menu text, HUD) */
 	GL_SetAlphaThreshold(0.666f);

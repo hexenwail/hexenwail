@@ -18,6 +18,7 @@
 #include "gl_postprocess.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
 
@@ -874,7 +875,7 @@ static qboolean PP_InitShader (void)
 	pp_loc_hdr_exposure = glGetUniformLocation_fp(pp_program, "hdr_exposure");
 
 	/* bind samplers once */
-	glUseProgram_fp(pp_program);
+	R_UseProgram (pp_program);
 	loc = pp_loc_scene;
 	if (loc >= 0) glUniform1i_fp(loc, 0);	/* texture unit 0 */
 	loc = pp_loc_paletteLUT;
@@ -882,7 +883,7 @@ static qboolean PP_InitShader (void)
 	pp_loc_bloom_tex = glGetUniformLocation_fp(pp_program, "u_bloom");
 	pp_loc_bloom_strength = glGetUniformLocation_fp(pp_program, "u_bloom_strength");
 	if (pp_loc_bloom_tex >= 0) glUniform1i_fp(pp_loc_bloom_tex, 2);	/* texture unit 2 */
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	/* Bloom shaders */
 	vs = PP_CompileShader(GL_VERTEX_SHADER, bloom_vert_src);
@@ -1289,12 +1290,12 @@ void OIT_BeginTranslucency (void)
 	glClearBufferfv_fp(GL_COLOR, 1, ones);
 
 	/* Per-buffer blending for WBOIT */
-	glEnable_fp(GL_BLEND);
-	glBlendFunci_fp(0, GL_ONE, GL_ONE);			/* accum: additive */
-	glBlendFunci_fp(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR);	/* revealage: multiplicative */
+	R_SetBlend (true);
+	R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);			/* accum: additive */
+	R_SetBlendFuncIndexed (1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR);	/* revealage: multiplicative */
 
 	/* Translucent geometry reads depth but doesn't write it */
-	glDepthMask_fp(0);
+	R_SetDepthMask (false);
 }
 
 void OIT_EndTranslucency (GLuint scene_fbo)
@@ -1302,7 +1303,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	GLenum textarget;
 	GLuint prog;
 	GLint loc_accum, loc_reveal;
-	GLboolean cull_was_on;
+	qboolean cull_was_on;
 	GLint saved_viewport[4];
 
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
@@ -1315,17 +1316,17 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 	oit_in_pass = false;
 
-	cull_was_on = glIsEnabled_fp(GL_CULL_FACE);
+	cull_was_on = R_GetCull();
 	glGetIntegerv_fp(GL_VIEWPORT, saved_viewport);
 
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, scene_fbo);
 
-	glUseProgram_fp(prog);
+	R_UseProgram (prog);
 
-	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glEnable_fp(GL_BLEND);
-	glDepthMask_fp(0);
-	glDisable_fp(GL_DEPTH_TEST);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetBlend (true);
+	R_SetDepthMask (false);
+	R_SetDepthTest (false);
 
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(textarget, oit_accum_tex);
@@ -1352,7 +1353,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	 * their own.  Queried rather than recomputed so a caller that arrives with
 	 * some other viewport gets its own back. */
 	glViewport_fp(0, 0, pp_width, pp_height);
-	glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	R_SetColorMask (true, true, true, true);
 
 	/* The resolve triangle is counter-clockwise in NDC, i.e. front-facing,
 	 * and this engine culls FRONT faces (gl_vidsdl.c :: GL_Init(), and
@@ -1368,9 +1369,10 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	 *
 	 * Restored rather than left off, because unlike those two this runs
 	 * mid-frame -- R_DrawAllGlows, R_DrawViewModel and R_Mirror all draw
-	 * after it and expect the scene's cull state.  Queried rather than
-	 * assumed, since gl_cull 0 legitimately leaves it off. */
-	glDisable_fp(GL_CULL_FACE);
+	 * after it and expect the scene's cull state.  Read back rather than
+	 * assumed, since gl_cull 0 legitimately leaves it off; the read is off
+	 * gl_pipeline.c's shadow, which knows it exactly and for free. */
+	R_SetCull (false);
 
 	/* GL 4.3 core profile requires a VAO bound for glDrawArrays. */
 	glBindVertexArray_fp(oit_resolve_vao);
@@ -1378,7 +1380,7 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glBindVertexArray_fp(0);
 
 	if (cull_was_on)
-		glEnable_fp(GL_CULL_FACE);
+		R_SetCull (true);
 
 	glViewport_fp(saved_viewport[0], saved_viewport[1],
 		      saved_viewport[2], saved_viewport[3]);
@@ -1386,10 +1388,10 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glActiveTexture_fp(GL_TEXTURE1);
 	glBindTexture_fp(textarget, 0);
 	glActiveTexture_fp(GL_TEXTURE0);
-	glUseProgram_fp(0);
-	glEnable_fp(GL_DEPTH_TEST);
-	glDepthMask_fp(1);
-	glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_UseProgram (0);
+	R_SetDepthTest (true);
+	R_SetDepthMask (true);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 qboolean OIT_Active (void)
@@ -1625,6 +1627,7 @@ void GL_PostProcess_Init (void)
 
 void GL_PostProcess_Shutdown (void)
 {
+	R_PipelineForgetProgram ();	/* GL reuses program names */
 	OIT_DeleteFBO();
 	if (oit_resolve_prog) { glDeleteProgram_fp(oit_resolve_prog); oit_resolve_prog = 0; }
 	if (oit_resolve_prog_msaa) { glDeleteProgram_fp(oit_resolve_prog_msaa); oit_resolve_prog_msaa = 0; }
@@ -1717,9 +1720,9 @@ void GL_PostProcess_BeginFrame (void)
  * Uses identity gamma/contrast/fxaa — 3D-scene effects only. */
 static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, float blur, float scale)
 {
-	glDisable_fp(GL_DEPTH_TEST);
-	glDisable_fp(GL_BLEND);
-	glDisable_fp(GL_CULL_FACE);
+	R_SetDepthTest (false);
+	R_SetBlend (false);
+	R_SetCull (false);
 
 	GL_MatrixMode(GL_MAT_PROJECTION);
 	GL_PushMatrix();
@@ -1735,7 +1738,7 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	glUseProgram_fp(pp_program);
+	R_UseProgram (pp_program);
 	if (pp_loc_mvp >= 0)
 	{
 		float mvp[16];
@@ -1789,14 +1792,14 @@ static void PP_BlitWith3DEffects (GLuint src_tex, int w, int h, float warp, floa
 	GL_ImmTexCoord2f(0, 1); GL_ImmVertex2f(0, 1);
 	GL_ImmDraw(GL_QUADS);
 
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	GL_MatrixMode(GL_MAT_PROJECTION);
 	GL_PopMatrix();
 	GL_MatrixMode(GL_MAT_MODELVIEW);
 	GL_PopMatrix();
 
-	glEnable_fp(GL_DEPTH_TEST);
+	R_SetDepthTest (true);
 }
 
 void GL_PostProcess_End3D (void)
@@ -2013,7 +2016,7 @@ void GL_PostProcess_EndFrame (void)
 		/* Bright pass: extract overbright pixels */
 		glViewport_fp(0, 0, bloom_w[0], bloom_h[0]);
 		glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[0]);
-		glUseProgram_fp(bloom_bright_prog);
+		R_UseProgram (bloom_bright_prog);
 		glActiveTexture_fp(GL_TEXTURE0);
 		glBindTexture_fp(GL_TEXTURE_2D, bloom_src);
 		if (bloom_bright_loc_scene >= 0) glUniform1i_fp(bloom_bright_loc_scene, 0);
@@ -2026,7 +2029,7 @@ void GL_PostProcess_EndFrame (void)
 		{
 			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
 			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
-			glUseProgram_fp(bloom_down_prog);
+			R_UseProgram (bloom_down_prog);
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i-1]);
 			if (bloom_down_loc_scene >= 0) glUniform1i_fp(bloom_down_loc_scene, 0);
@@ -2040,20 +2043,20 @@ void GL_PostProcess_EndFrame (void)
 		 * downsampled content already in bloom_tex[i] via the ROP,
 		 * avoiding the feedback loop that arose from sampling
 		 * bloom_tex[i] in the shader while also rendering to it. */
-		glEnable_fp(GL_BLEND);
-		glBlendFunc_fp(GL_ONE, GL_ONE);
+		R_SetBlend (true);
+		R_SetBlendFunc (GL_ONE, GL_ONE);
 		for (i = BLOOM_LEVELS - 2; i >= 0; i--)
 		{
 			glViewport_fp(0, 0, bloom_w[i], bloom_h[i]);
 			glBindFramebuffer_fp(GL_FRAMEBUFFER, bloom_fbo[i]);
-			glUseProgram_fp(bloom_up_prog);
+			R_UseProgram (bloom_up_prog);
 			glActiveTexture_fp(GL_TEXTURE0);
 			glBindTexture_fp(GL_TEXTURE_2D, bloom_tex[i + 1]);
 			if (bloom_up_loc_scene >= 0) glUniform1i_fp(bloom_up_loc_scene, 0);
 			if (bloom_up_loc_rcpframe >= 0) glUniform2f_fp(bloom_up_loc_rcpframe, 1.0f / bloom_w[i+1], 1.0f / bloom_h[i+1]);
 			glDrawArrays_fp(GL_TRIANGLES, 0, 3);
 		}
-		glDisable_fp(GL_BLEND);
+		R_SetBlend (false);
 
 		glBindVertexArray_fp(0);
 		/* bloom_tex[0] now contains the final bloom result at 1/2 scene res */
@@ -2067,9 +2070,9 @@ apply_shader:
 	glViewport_fp(0, 0, glwidth, glheight);
 
 	/* disable depth test, blending, etc. for the blit */
-	glDisable_fp(GL_DEPTH_TEST);
-	glDisable_fp(GL_BLEND);
-	glDisable_fp(GL_CULL_FACE);
+	R_SetDepthTest (false);
+	R_SetBlend (false);
+	R_SetCull (false);
 
 	/* set up orthographic projection for full-screen quad */
 	GL_MatrixMode(GL_MAT_PROJECTION);
@@ -2100,7 +2103,7 @@ apply_shader:
 	}
 
 	/* activate shader and set all uniforms before drawing */
-	glUseProgram_fp(pp_program);
+	R_UseProgram (pp_program);
 	if (pp_loc_mvp >= 0)
 	{
 		float mvp[16];
@@ -2215,7 +2218,7 @@ apply_shader:
 	GL_ImmTexCoord2f(0, 1); GL_ImmVertex2f(0, 1);
 	GL_ImmDraw(GL_QUADS);	/* draw without changing shader */
 
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	/* unbind palette LUT from unit 1 to avoid interfering with lightmap binds */
 	if ((int)r_softemu.value > 0 && pp_lut_built)
@@ -2232,7 +2235,7 @@ apply_shader:
 	GL_PopMatrix();
 
 	/* re-enable depth test (it's normally on) */
-	glEnable_fp(GL_DEPTH_TEST);
+	R_SetDepthTest (true);
 }
 
 qboolean GL_PostProcess_Active (void)

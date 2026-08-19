@@ -22,6 +22,7 @@
 
 #include "quakedef.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 
 static int	r_dlightframecount;
@@ -204,10 +205,10 @@ void R_RenderDlights (void)
 
 	r_dlightframecount = r_framecount + 1;	// because the count hasn't
 						//  advanced yet for this frame
-	glDepthMask_fp (0);
-	glEnable_fp (GL_BLEND);
+	R_SetDepthMask (false);
+	R_SetBlend (true);
 	GL_SetAlphaThreshold(0.0f);
-	glBlendFunc_fp (GL_ONE, GL_ONE);
+	R_SetBlendFunc (GL_ONE, GL_ONE);
 
 	l = cl_dlights;
 	for (i = 0; i < MAX_DLIGHTS; i++, l++)
@@ -218,9 +219,9 @@ void R_RenderDlights (void)
 	}
 
 	GL_SetAlphaThreshold(0.01f);
-	glDisable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthMask_fp (1);
+	R_SetBlend (false);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetDepthMask (true);
 }
 
 
