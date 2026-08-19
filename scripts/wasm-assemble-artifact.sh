@@ -7,18 +7,26 @@
 # the two used to be able to drift: a file that exists in the deploy but not
 # in the check is a file no PR ever tests.
 #
-# Usage: scripts/wasm-assemble-artifact.sh [dist-dir]
+# Usage: scripts/wasm-assemble-artifact.sh [dist-dir] [build-version]
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 DIST_DIR="${1:-dist}"
+BUILD_VERSION="${2:-${GITHUB_SHA:-$(git rev-parse --verify HEAD)}}"
 BUILD_BIN="engine/build/bin"
+
+if [[ ! "$BUILD_VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+	echo "Invalid PWA build version: $BUILD_VERSION" >&2
+	exit 1
+fi
 
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 cp -r web/. "$DIST_DIR/"
+sed -i.bak "s/__HEXENWAIL_BUILD_VERSION__/$BUILD_VERSION/g" "$DIST_DIR/sw.js"
+rm -f "$DIST_DIR/sw.js.bak"
 
 cp "$BUILD_BIN/hexenwail.js" "$DIST_DIR/"
 cp "$BUILD_BIN/hexenwail.wasm" "$DIST_DIR/"

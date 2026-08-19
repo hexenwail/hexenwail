@@ -451,6 +451,7 @@
           <h2>Launch</h2>
           <div class="buttons">
             <button id="launch-button" class="primary" disabled>Import pak0.pak + pak1.pak first</button>
+            <button id="exit-button" disabled>Exit to launcher</button>
             <button id="fullscreen-button">Request fullscreen</button>
           </div>
           <small id="pointer-lock-hint" class="muted">Tap/click the canvas after launch to focus keyboard input and request mouse capture where supported.</small>
@@ -487,6 +488,7 @@
             <li>Install via Safari → Share → <strong>Add to Home Screen</strong>.</li>
             <li>Pointer Lock is currently unavailable on iPadOS Safari; external keyboards and mice still help.</li>
             <li>Standalone mode is the practical target on iPadOS; it is close to fullscreen but still obeys system safe areas.</li>
+            <li>Updates install when the launcher opens or returns to the foreground. Imported game data and saves are preserved.</li>
             <li>Storage persistence is best-effort; avoid clearing Safari website data for this app, and periodically confirm persistence in the Storage panel above.</li>
           </ul>
         </section>
@@ -518,7 +520,7 @@
           <div class="buttons">
             <button id="phone-resume-button" class="primary" type="button">Resume</button>
             <button id="phone-escape-button" type="button">Send Esc/Menu</button>
-            <button id="phone-restart-button" type="button">Sync &amp; restart to launcher</button>
+            <button id="phone-exit-button" type="button">Sync &amp; exit to launcher</button>
           </div>
         </div>
       </div>

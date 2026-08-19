@@ -122,6 +122,8 @@ test('phone mode DOM includes playing layout, touch visibility rules, and quit h
   const app = readFileSync(join(repoRoot, 'web/app.js'), 'utf8');
   assert.match(html, /body\[data-engine-state="running"\]/);
   assert.match(html, /id="phone-controls"/);
+  assert.match(html, /id="exit-button"/);
+  assert.match(html, /id="phone-exit-button"/);
   assert.match(html, /data-touch-only="true"/);
   assert.match(html, /data-phone-mode="true"/);
   assert.match(html, /@media \(pointer: coarse\) and \(hover: none\) and \(max-width: 820px\), \(pointer: coarse\) and \(hover: none\) and \(max-height: 820px\)/);
@@ -131,4 +133,8 @@ test('phone mode DOM includes playing layout, touch visibility rules, and quit h
   assert.match(app, /gamepadconnected/);
   assert.match(app, /hexenwailquit/);
   assert.match(app, /Hexenwail_ResizeCanvas/);
+  assert.match(app, /const hadController = Boolean\(navigator\.serviceWorker\.controller\)/);
+  assert.match(app, /addEventListener\('pageshow', checkForServiceWorkerUpdate\)/);
+  assert.equal([...app.matchAll(/startEngineFromUserAction\(/g)].length, 2,
+    'engine startup should only be defined and invoked by the launch-button handler');
 });

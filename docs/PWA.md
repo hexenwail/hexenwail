@@ -122,6 +122,8 @@ All launcher URLs are relative (`./...`) so the site works under project Pages p
    - loose `.pak` / `.ogg` files
    - a directory selected with the folder picker (where supported)
    - or a `.zip` archive
+6. Press **Start game**. Importing assets never starts the engine on its own, so
+   the launcher stays reachable and a pending shell update can install first.
 
 Use assets from your own copy of Hexen II / Portal of Praevus, for example from GOG or Steam. This project does **not** include game data.
 
@@ -135,9 +137,11 @@ SDL/WebAssembly renderer. Landscape is strongly recommended on iPhone because it
 leaves room for the game view plus touch controls.
 
 The in-game **☰** button opens a small phone overlay. It can resume play, send
-Escape to the engine menu, or **Sync & restart to launcher**. The latter first
+Escape to the engine menu, or **Sync & exit to launcher**. The latter first
 syncs the runtime filesystem to browser storage and then reloads the page to get
-a fresh WebAssembly runtime.
+a fresh WebAssembly runtime. The launcher's own **Exit to launcher** button does
+the same thing from a desktop or tablet layout, and is enabled only while the
+engine is running.
 
 Selecting **Quit** inside Hexen II uses a browser-specific Emscripten path: the
 engine performs its normal shutdown, cancels the browser main loop, notifies the
@@ -266,6 +270,13 @@ to preserve the most recent save.
 
 The service worker caches the launcher shell and WASM runtime files. Imported user assets live separately in OPFS / IndexedDB and are not part of the service worker cache.
 
+The cache name is versioned per deployment: `web/sw.js` ships the placeholder
+`__HEXENWAIL_BUILD_VERSION__`, and `scripts/wasm-assemble-artifact.sh`
+substitutes the commit SHA when it assembles `dist/`. Activation deletes every
+older `hexenwail-pwa-` cache, so a deploy cannot be served a mix of old and new
+shell files. `scripts/wasm-validate-artifact.sh` fails the build if the
+placeholder survives into the artifact.
+
 Practical ways to confirm readiness:
 
 - the in-app offline status text reports when the service worker has taken control
@@ -301,7 +312,15 @@ You have not imported a valid registered Hexen II data set yet. Import at least:
 
 ### Service worker updates seem stuck
 
-Reload once while online so the new shell version can install, then reload again to let the updated worker control the page.
+The launcher checks for an update whenever it opens and whenever it returns to
+the foreground (`pageshow` and `visibilitychange`), which is what an installed
+iOS PWA does instead of a page load. When a new worker takes control while the
+launcher is idle the page reloads itself; if the engine is running, the offline
+status text reports that the update installs on the next exit to the launcher.
+
+If it still looks stale, exit to the launcher while online and background/restore
+the app once. Imported game data and saves are outside the service worker cache
+and are never affected by a shell update.
 
 ### Browser storage problems
 

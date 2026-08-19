@@ -49,6 +49,13 @@ require "lib/save-bundle.js"
 require "icons/icon-192.png"
 require "icons/icon-512.png"
 
+# An unsubstituted placeholder means every deploy shares one cache name, so
+# installed clients would never see an upgrade.
+if grep -q '__HEXENWAIL_BUILD_VERSION__' "$DIST_DIR/sw.js"; then
+	echo "INVALID: $DIST_DIR/sw.js still contains the build-version placeholder" >&2
+	missing=1
+fi
+
 # .data / .worker.js depend on build options (preloaded game data, pthreads),
 # so their absence is normal for the default browser build -- report only.
 for optional in hexenwail.data hexenwail.worker.js; do
