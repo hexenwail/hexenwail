@@ -36,6 +36,12 @@
  * refers to them unconditionally. */
 extern int	glwidth, glheight;
 
+/* Origin of the 2D canvas selected by GL_SetCanvas, in framebuffer
+ * pixels. Every 2D primitive in draw.c adds it, which is what puts the
+ * status bar canvas at the bottom of the screen and centres the menu
+ * canvas. Defined in draw_soft_web.c. */
+extern int	draw_canvas_x, draw_canvas_y;
+
 /* Player colour-translation table, loaded by R_Init() in r_main.c and
  * consumed by cl_parse.c / menu.c / sbar.c. */
 extern byte		*playerTranslation;

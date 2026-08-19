@@ -130,6 +130,15 @@ typedef enum {
 
 void GL_SetCanvas (canvastype newcanvas);
 
+/* Logical size of the fixed 320-wide UI canvases, in canvas units.
+   CANVAS_SBAR is anchored to the bottom of the screen and horizontally
+   centred; CANVAS_MENU is anchored to the top and horizontally centred.
+   The status bar canvas is tall enough for the bumps above the main bar
+   and for the lower info bar that drops down on showinfo -- it must match
+   BAR_BUMP_HEIGHT + BAR_TOP_HEIGHT + BAR_BOTTOM_HEIGHT in sbar.c. */
+#define UI_CANVAS_WIDTH		320
+#define UI_SBAR_CANVAS_HEIGHT	(23 + 46 + 98)
+
 extern cvar_t scr_sbarscale;
 extern cvar_t scr_menuscale;
 extern cvar_t scr_crosshairscale;
