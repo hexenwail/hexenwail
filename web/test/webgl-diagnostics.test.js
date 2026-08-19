@@ -66,9 +66,56 @@ test('the launcher proceeds on warnings but CI does not', async () => {
   assert.doesNotMatch(app, /warnings\.length[\s\S]{0,80}rendererReady = false/);
 
   // CI runs a pinned software rasterizer, so there a moved pixel is a
-  // regression and must fail the gate.
-  assert.match(smoke, /report\.warnings\.length > 0/);
+  // regression and must fail the gate -- from either renderer's self-test.
+  assert.match(smoke, /const warnings = \[\.\.\.report\.warnings, \.\.\.presenter\.warnings\]/);
+  assert.match(smoke, /warnings\.length > 0/);
   assert.match(smoke, /dataset\.result = 'fail'/);
+});
+
+test('the launcher gates on the renderer its artifact was built with', async () => {
+  const [app, assemble, cmake] = await Promise.all([
+    readFile(new URL('../app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/wasm-assemble-artifact.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../engine/CMakeLists.txt', import.meta.url), 'utf8'),
+  ]);
+
+  // Build stamp, not sniffing: CMake writes the renderer name, the assembler
+  // substitutes it, and the launcher reads the substituted constant.
+  assert.match(cmake, /OUTPUT \$\{CMAKE_RUNTIME_OUTPUT_DIRECTORY\}\/hexenwail-renderer\.txt/);
+  assert.match(assemble, /__HEXENWAIL_RENDERER__/);
+  assert.match(app, /const BUILD_RENDERER_STAMP = '__HEXENWAIL_RENDERER__'/);
+
+  // An unsubstituted placeholder is the development case and must behave
+  // exactly as it did before the software renderer existed.
+  assert.match(app, /BUILD_RENDERER_STAMP === 'software' \? 'software' : 'webgl2'/);
+
+  // The software artifact never runs the GL renderer's self-test: it has no
+  // world or post-process shaders to compile.
+  assert.match(app, /ENGINE_RENDERER === 'software'\s*\n\s*\? runPresenterDiagnostics\(\)\s*\n\s*: runWebGLDiagnostics\(\)/);
+});
+
+test('the presenter self-test mirrors the engine palette blit', async () => {
+  const [diagnostics, presenter] = await Promise.all([
+    readFile(new URL('../lib/webgl-diagnostics.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../engine/h2shared/web_canvas_gl2.c', import.meta.url), 'utf8'),
+  ]);
+
+  // The C presenter is the thing being gated, so the probe has to sample the
+  // same way it does: an R8UI source expanded through a 256x1 RGBA8 LUT.
+  for (const shared of [
+    /usampler2D u_indexed/,
+    /texelFetch\(u_palette, ivec2\(int\(idx\), 0\), 0\)\.rgb/,
+  ]) {
+    assert.match(diagnostics, shared);
+    assert.match(presenter, shared);
+  }
+  assert.match(presenter, /GL_R8UI/);
+  assert.match(diagnostics, /gl\.R8UI/);
+
+  // Structural for the software build: no context, or a blit program that
+  // will not build, means nothing reaches the canvas.
+  assert.match(diagnostics, /throw new Error\('WebGL2 context creation failed'\)/);
+  assert.match(diagnostics, /warnings\.push\(`palette blit returned/);
 });
 
 test('framebuffer self-test validates a generated world draw', async () => {

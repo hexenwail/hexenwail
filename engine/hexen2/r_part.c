@@ -20,6 +20,9 @@
  */
 
 #include "quakedef.h"
+#if defined(WEBSOFT)
+#include "r_local.h"	/* D_DrawParticle and the software particle state */
+#endif
 #ifdef GLQUAKE
 #include "gl_shader.h"
 #include "gl_vbo.h"

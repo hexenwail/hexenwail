@@ -56,6 +56,14 @@ if grep -q '__HEXENWAIL_BUILD_VERSION__' "$DIST_DIR/sw.js"; then
 	missing=1
 fi
 
+# Likewise the renderer stamp: unsubstituted, the launcher falls back to the
+# WebGL2 gate, which would refuse to start a perfectly good software build on a
+# device whose GPU cannot compile the GL renderer's shaders.
+if grep -q '__HEXENWAIL_RENDERER__' "$DIST_DIR/app.js"; then
+	echo "INVALID: $DIST_DIR/app.js still contains the renderer placeholder" >&2
+	missing=1
+fi
+
 # .data / .worker.js depend on build options (preloaded game data, pthreads),
 # so their absence is normal for the default browser build -- report only.
 for optional in hexenwail.data hexenwail.worker.js; do

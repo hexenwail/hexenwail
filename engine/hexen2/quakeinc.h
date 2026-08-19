@@ -80,7 +80,15 @@
 #include "q_sound.h"
 #include "client.h"
 
-#if defined(GLQUAKE)
+#if defined(WEBSOFT)
+/* Web software renderer: the classic 8bpp rasterizer on an accelerated
+ * canvas.  Uses the historical model layer, not gl_model.h -- the surface
+ * cache, sprite pixel data and skin descriptors it needs were dropped from
+ * the GL model layer years ago.  See docs/web/SOFTWARE_RENDERER.md. */
+#include "model.h"
+#include "d_iface.h"
+#include "soft_web.h"
+#elif defined(GLQUAKE)
 #include "glheader.h"
 #include "gl_model.h"
 #include "glquake.h"

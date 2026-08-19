@@ -4,7 +4,14 @@ import {
   createSaveBundle, getPakCompatibilityWarnings, isSavePath, planSaveImport, sha256, validateSaveBundle,
 } from './lib/save-bundle.js';
 import { PhoneControls, PHONE_CONTROL_KEYCODES } from './lib/phone-controls.js';
-import { runWebGLDiagnostics } from './lib/webgl-diagnostics.js';
+import { runPresenterDiagnostics, runWebGLDiagnostics } from './lib/webgl-diagnostics.js';
+
+// Stamped by scripts/wasm-assemble-artifact.sh from the CMake build (see
+// WEB_RENDERER in engine/CMakeLists.txt).  Served straight from web/ during
+// development the placeholder survives, which is the WebGL2 case -- the
+// software renderer only ever reaches a browser through an assembled artifact.
+const BUILD_RENDERER_STAMP = '__HEXENWAIL_RENDERER__';
+const ENGINE_RENDERER = BUILD_RENDERER_STAMP === 'software' ? 'software' : 'webgl2';
 
 const BASE_DIR = '/persistent';
 const ENGINE_ARGUMENTS = ['-basedir', BASE_DIR];
@@ -1317,14 +1324,24 @@ async function init() {
   // render a black canvas with no diagnosable symptom.  Refusing to launch and
   // saying why is the only useful outcome, and it costs one throwaway context.
   try {
-    const report = runWebGLDiagnostics();
+    // Which self-test runs follows the build stamp, not preference: the
+    // software artifact rasterizes on the CPU and asks the GPU only for the
+    // palette blit, so gating it on the GL renderer's shader families would
+    // refuse to launch on exactly the devices it exists to serve.
+    const report = ENGINE_RENDERER === 'software'
+      ? runPresenterDiagnostics()
+      : runWebGLDiagnostics();
     state.rendererReady = true;
-    logToConsole('[renderer]', `${report.profile}; GLSL ${report.shadingLanguage}; `
-      + `shaders=${report.shaders.length}; RGBA8-FBO=${report.framebuffer.width}x${report.framebuffer.height}; `
-      + `visible=${(report.framebuffer.nonBlackRatio * 100).toFixed(0)}%; `
-      + `postprocess=gamma/palette pass; `
-      + `HDR=${report.extensions.colorBufferFloat ? 'available' : 'disabled'}; `
-      + `OIT=${report.extensions.indexedBlend ? 'extension present' : 'sorted fallback'}`);
+    logToConsole('[renderer]', ENGINE_RENDERER === 'software'
+      ? `${report.profile}; GLSL ${report.shadingLanguage}; `
+        + `renderer=software rasterizer; `
+        + `presenter=palette blit ${report.presenter.width}x${report.presenter.height} pass`
+      : `${report.profile}; GLSL ${report.shadingLanguage}; `
+        + `shaders=${report.shaders.length}; RGBA8-FBO=${report.framebuffer.width}x${report.framebuffer.height}; `
+        + `visible=${(report.framebuffer.nonBlackRatio * 100).toFixed(0)}%; `
+        + `postprocess=gamma/palette pass; `
+        + `HDR=${report.extensions.colorBufferFloat ? 'available' : 'disabled'}; `
+        + `OIT=${report.extensions.indexedBlend ? 'extension present' : 'sorted fallback'}`);
     // Quality warnings, not structural failures -- the renderer works well
     // enough to start.  Surface them so a "the colours look wrong" report
     // arrives with the evidence already in the log, but do not block launch on

@@ -434,3 +434,125 @@ export function runWebGLDiagnostics({ canvas = null } = {}) {
     gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 }
+
+/*
+ * The software-renderer artifact's presenter, mirrored from
+ * engine/h2shared/web_canvas_gl2.c.  That build rasterizes on the CPU and
+ * asks the GPU for exactly one thing: expand an R8UI framebuffer through a
+ * 256-entry RGBA8 palette and scale it to the canvas.  So it must be gated on
+ * that, and only that -- running the engine's world/post-process families
+ * against it would refuse to launch on a device the software renderer exists
+ * to serve.
+ */
+const PRESENTER_VERTEX = `#version 300 es
+out vec2 v_uv;
+void main(){
+ vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+ v_uv = vec2(p.x, 1.0 - p.y);
+ gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const PRESENTER_FRAGMENT = `#version 300 es
+precision highp float;
+precision highp int;
+uniform highp usampler2D u_indexed;
+uniform highp sampler2D u_palette;
+uniform vec2 u_srcsize;
+in vec2 v_uv;
+out vec4 frag_color;
+void main(){
+ vec2 pixel = v_uv * u_srcsize;
+ ivec2 c = clamp(ivec2(floor(pixel)), ivec2(0), ivec2(u_srcsize) - 1);
+ uint idx = texelFetch(u_indexed, c, 0).r;
+ frag_color = vec4(texelFetch(u_palette, ivec2(int(idx), 0), 0).rgb, 1.0);
+}`;
+
+/*
+ * Same two-class contract as runWebGLDiagnostics: throws when nothing can be
+ * presented, warns when the pixels came back wrong.
+ */
+export function runPresenterDiagnostics({ canvas = null } = {}) {
+  const target = canvas || document.createElement('canvas');
+  target.width = 2;
+  target.height = 2;
+  const gl = target.getContext('webgl2', {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    preserveDrawingBuffer: true,
+  });
+  if (!gl) throw new Error('WebGL2 context creation failed');
+
+  let program = null;
+  try {
+    program = compileProgram(gl, 'presenter', PRESENTER_VERTEX, PRESENTER_FRAGMENT);
+
+    // One indexed texel per canvas pixel, so the draw is an exact 1:1 blit and
+    // any mismatch is a real lookup failure rather than a filtering artifact.
+    const indexed = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, indexed);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    // A single index everywhere: this gate is about whether the palette
+    // expansion happens at all, and a uniform source keeps the expected
+    // readback independent of the vertical flip the vertex shader applies.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, 2, 2, 0, gl.RED_INTEGER,
+      gl.UNSIGNED_BYTE, new Uint8Array([2, 2, 2, 2]));
+
+    const palette = new Uint8Array(256 * 4);
+    palette.set([0, 0, 0, 255], 0);
+    palette.set([255, 0, 0, 255], 4);
+    palette.set([0, 255, 0, 255], 8);
+    const paletteTexture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, paletteTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA,
+      gl.UNSIGNED_BYTE, palette);
+    gl.activeTexture(gl.TEXTURE0);
+
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    gl.viewport(0, 0, 2, 2);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_indexed'), 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_palette'), 1);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_srcsize'), 2, 2);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    const pixels = new Uint8Array(4 * 4);
+    gl.readPixels(0, 0, 2, 2, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    gl.deleteVertexArray(vao);
+    gl.deleteTexture(indexed);
+    gl.deleteTexture(paletteTexture);
+
+    const warnings = [];
+    const sample = Array.from(pixels.subarray(0, 3));
+    const expected = [0, 255, 0];	// palette entry 2
+    if (sample.some((channel, index) => Math.abs(channel - expected[index]) > 2)) {
+      warnings.push(`palette blit returned ${sample.join(',')}, expected ${expected.join(',')}`);
+    }
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      warnings.push(`WebGL2 error after presenter self-test: 0x${error.toString(16)}`);
+    }
+
+    return {
+      ok: true,
+      warnings,
+      profile: gl.getParameter(gl.VERSION),
+      renderer: gl.getParameter(gl.RENDERER),
+      shadingLanguage: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+      shaders: ['presenter'],
+      presenter: { width: 2, height: 2, sample },
+    };
+  } finally {
+    if (program) gl.deleteProgram(program);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+  }
+}

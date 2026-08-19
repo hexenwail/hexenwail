@@ -604,18 +604,9 @@ void R_NetGraph (void);
 void R_InitNetgraphTexture (void);
 #endif
 
-/* Map leak path from maps/<map>.pts, loaded by the `pointfile` command and
- * drawn as direction arrows by R_ShowPointFile (Ironwail 26902e0e2).  The
- * cap is on stored points, which R_ReadPointFile_f has already collapsed
- * along straight runs, so it bounds direction changes rather than raw file
- * lines. */
-#define MAX_POINTFILE_POINTS	16384
-extern vec3_t	r_pointfile[MAX_POINTFILE_POINTS];
-extern int	r_numpointfile;
-/* True only for the `pointfile leak` auto-load R_NewMap issues on a world
- * with no visdata, i.e. when the path is known to be a real leak rather than
- * a stale .pts a mapper asked for by hand.  Gates the on-screen label. */
-extern qboolean	r_pointfile_isleak;
+/* The pointfile path itself is stored in r_part.c, which every renderer
+ * compiles, so its declarations live in r_part.h.  Only the drawing below is
+ * GL-specific. */
 
 void R_ReadPointFile_f (void);
 void R_ClearPointFile (void);
