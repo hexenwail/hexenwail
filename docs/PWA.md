@@ -1,11 +1,11 @@
 # Hexenwail PWA / GitHub Pages build
 
-This repository now includes a GitHub-Pages-deployable, installable PWA shell for the WebAssembly build of Hexenwail.
+This repository now includes a GitHub-Pages-deployable, installable PWA shell for the WebAssembly build of Hexenwail, including a rudimentary phone mode for iPhone/iOS Safari.
 
 ## Goals
 
 - same-origin deployment (no CDN/runtime fetches)
-- installable on iPadOS via **Add to Home Screen**
+- installable on iPadOS/iOS via **Add to Home Screen**
 - fully offline play after the first online load plus local asset import
 - no cross-origin isolation requirement (single-threaded WASM; no pthreads / SharedArrayBuffer)
 
@@ -112,7 +112,7 @@ All launcher URLs are relative (`./...`) so the site works under project Pages p
 
 - `https://<user>.github.io/hexenwail/`
 
-## Installing on iPadOS
+## Installing on iPadOS / iOS
 
 1. Open the deployed site in Safari.
 2. Wait for the first online load to finish.
@@ -124,6 +124,59 @@ All launcher URLs are relative (`./...`) so the site works under project Pages p
    - or a `.zip` archive
 
 Use assets from your own copy of Hexen II / Portal of Praevus, for example from GOG or Steam. This project does **not** include game data.
+
+## Phone mode
+
+On phone-sized coarse-pointer devices, starting the engine switches the page from
+the launcher into a game-focused viewport: the header and import panels disappear,
+the canvas fills the visual viewport, safe-area insets are honored, page scrolling
+is disabled only while playing, and resize/rotation events are forwarded to the
+SDL/WebAssembly renderer. Landscape is strongly recommended on iPhone because it
+leaves room for the game view plus touch controls.
+
+The in-game **☰** button opens a small phone overlay. It can resume play, send
+Escape to the engine menu, or **Sync & restart to launcher**. The latter first
+syncs the runtime filesystem to browser storage and then reloads the page to get
+a fresh WebAssembly runtime.
+
+Selecting **Quit** inside Hexen II uses a browser-specific Emscripten path: the
+engine performs its normal shutdown, cancels the browser main loop, notifies the
+launcher, and the launcher syncs saves before returning to a stopped launcher
+state. The current WASM runtime is treated as not safely restartable after this
+shutdown, so the launcher shows **Restart game**, which performs the same
+sync-then-reload flow. Fatal engine errors are reported separately and also ask
+for a clean restart.
+
+### Touch mappings
+
+In auto mode, touch controls are shown only when the launcher believes the device
+is a touch-only phone environment: a coarse pointer with no hover/fine pointer,
+no connected gamepad, and a viewport short side no larger than 820 CSS pixels.
+If a touchpad/mouse, physical keyboard activity, pen, wheel, or controller is
+detected, auto mode hides the overlay and releases all held touch inputs. The
+launcher setting can choose auto/on/off behavior, left- or right-handed layout,
+and look sensitivity; **Always show** displays the controls on any running
+device.
+Preferences are stored in local browser storage, separate from imported game
+assets and saves.
+
+Default mappings reuse existing engine input bindings:
+
+- left virtual stick: `W` / `S` forward and back, `A` / `D` strafe left and right
+- right look region: relative mouse-look deltas through a small JS-to-C bridge
+- **Atk**: primary attack (`MOUSE1`)
+- **Jump**: jump (`SPACE`)
+- **Use**: lift/use interaction (`K_GP_LTHUMB`, default `impulse 13`)
+- **◀ / ▶**: previous/next weapon (`K_GP_LSHOULDER` / `K_GP_RSHOULDER`)
+- phone overlay **Send Esc/Menu**: Escape
+
+The controls use Pointer Events and track each touch by pointer ID, so moving,
+looking, and firing can happen at the same time. Held keys/buttons are released
+on cancellation, backgrounding, orientation changes, overlay opening, and quit to
+avoid stuck movement or fire.
+
+Hardware keyboard, mouse, and physical gamepad support are preserved. On iPad
+and desktop, touch controls stay hidden by default unless explicitly enabled.
 
 ## Import behavior
 
@@ -223,7 +276,9 @@ Practical ways to confirm readiness:
 ## Browser / iPadOS limitations
 
 - **Pointer Lock:** not currently available on iPadOS Safari, so true desktop-style mouselook is limited there
+- **Phone look:** iPhone/iOS Safari also lacks Pointer Lock; phone mode feeds relative drag deltas through an explicit engine bridge instead of relying on browser mouse capture
 - **Display mode:** installed iPadOS PWAs use `standalone`; this is effectively edge-to-edge but not true unrestricted fullscreen
+- **Restart after Quit:** after the engine's normal Quit, the page returns to the launcher but reloads before starting a new game because the same WebAssembly runtime is not assumed to be restartable
 - **Storage persistence:** `navigator.storage.persist()` is requested, but Safari can still evict data under storage pressure
 - **Renderer feature gap vs desktop:** WebGL2 / ES 3.0 has no SSBOs, so `r_alias_gpu` remains disabled in WASM builds
 - **Import size limits:** large ZIP archives can still hit memory/storage constraints on tablets
@@ -250,6 +305,6 @@ Use **Clear imported data** in the launcher, then re-import the assets. If Safar
 
 The archive may contain unsupported paths, exceed the configured resource caps, or contain formats outside the recognized Hexen II layout.
 
-### Mouse capture is incomplete on iPad
+### Mouse capture is incomplete on iPad/iPhone
 
-That is expected today. Pointer Lock is the main blocker on iPadOS Safari. External keyboards remain recommended, and virtual touch controls are future work.
+That is expected today. Pointer Lock is the main blocker on iPadOS Safari. External keyboards, mice, and physical controllers remain supported; iPhone phone mode adds explicit touch controls for movement, looking, attack, jump, use, weapon switching, and menu access.

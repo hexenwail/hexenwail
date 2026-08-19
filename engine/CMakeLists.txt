@@ -647,7 +647,8 @@ if(EMSCRIPTEN)
         -sINVOKE_RUN=0
         -sMODULARIZE=0
         -sNO_EXIT_RUNTIME=1
-        -sEXPORTED_RUNTIME_METHODS=['FS','callMain']
+        -sEXPORTED_FUNCTIONS=['_main','_Hexenwail_TouchKey','_Hexenwail_TouchLook','_Hexenwail_ResizeCanvas']
+        -sEXPORTED_RUNTIME_METHODS=['FS','callMain','ccall']
         -sUSE_SDL=3
         --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
     )

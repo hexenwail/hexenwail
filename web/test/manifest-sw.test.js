@@ -25,4 +25,5 @@ test('service worker precaches repo-managed launcher assets', () => {
   }
   assert.ok(matches.includes('hexenwail.js'));
   assert.ok(matches.includes('hexenwail.wasm'));
+  assert.ok(matches.includes('lib/phone-controls.js'));
 });
