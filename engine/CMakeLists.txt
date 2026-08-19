@@ -189,11 +189,14 @@ set(SHADER_SRC_DIR ${ENGINE_TOP}/shaders)
 set(SHADERS_GEN_H ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders_gen.h)
 file(GLOB SHADER_SOURCES ${SHADER_SRC_DIR}/*.glsl ${SHADER_SRC_DIR}/*.inc)
 
+set(SHADERS_VK_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/vk)
+
 add_custom_command(
     OUTPUT ${SHADERS_GEN_H}
     COMMAND ${CMAKE_COMMAND}
             -DSHADER_DIR=${SHADER_SRC_DIR}
             -DOUT_FILE=${SHADERS_GEN_H}
+            -DVK_DIR=${SHADERS_VK_DIR}
             -P ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
     DEPENDS ${SHADER_SOURCES} ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
     COMMENT "Embedding GLSL shaders"
@@ -201,11 +204,25 @@ add_custom_command(
 )
 add_custom_target(shaders_gen DEPENDS ${SHADERS_GEN_H})
 
-# Compile the same sources to SPIR-V when a validator is available.  Nothing
-# consumes the .spv yet -- the SDL_GPU backend (uhexen2-p4ln.5) is what will --
-# but running the compile keeps the shaders honest against a second frontend,
-# and a build without glslang simply skips it.
+# SPIR-V, for the SDL_GPU backend that does not exist yet (uhexen2-p4ln.5).
+# Deliberately NOT part of ALL: nothing links the .spv, and a build rule whose
+# output nobody consumes has no business being able to fail the default build.
+# Run it with `make shaders_spirv`, or use tools/glsl_check.py, which does the
+# same compile plus both GL dialects and the cross-stage link.  It becomes part
+# of the build when the backend starts consuming the output.
 find_program(GLSLANG_VALIDATOR glslangValidator)
+if(GLSLANG_VALIDATOR)
+    add_custom_target(shaders_spirv
+        COMMAND ${CMAKE_COMMAND}
+                -DVK_DIR=${SHADERS_VK_DIR}
+                -DSPV_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/spirv
+                -DGLSLANG=${GLSLANG_VALIDATOR}
+                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CompileSpirv.cmake
+        DEPENDS ${SHADERS_GEN_H}
+        COMMENT "Compiling shaders to SPIR-V"
+        VERBATIM
+    )
+endif()
 
 # Windows-specific includes
 if(WIN32)

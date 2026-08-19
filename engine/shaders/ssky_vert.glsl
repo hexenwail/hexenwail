@@ -1,12 +1,12 @@
 #include "uniforms.inc"
-in vec3 a_position;
-in vec2 a_texcoord;
-in vec2 a_lmcoord;
-in vec4 a_color;
-out vec3 v_dir;
-out vec2 v_texcoord;
-out vec2 v_lmcoord;
-out vec4 v_color;
+ATTR(0) in vec3 a_position;
+ATTR(1) in vec2 a_texcoord;
+ATTR(2) in vec2 a_lmcoord;
+ATTR(3) in vec4 a_color;
+VARY(5) out vec3 v_dir;
+VARY(0) out vec2 v_texcoord;
+VARY(2) out vec2 v_lmcoord;
+VARY(1) out vec4 v_color;
 void main() {
     vec3 dir = a_position - u_eyepos;
     dir.z *= 3.0;

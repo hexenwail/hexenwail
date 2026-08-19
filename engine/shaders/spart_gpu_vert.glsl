@@ -5,14 +5,14 @@ struct GpuParticle {
     vec4 color;    /* rgba, pre-converted from palette */
 };
 
-layout(std430, binding = 0) readonly buffer GpuParticleBuffer {
+SSBO(0) readonly buffer GpuParticleBuffer {
     GpuParticle particles[];
 };
 
 
-out vec2 v_texcoord;
-out vec4 v_color;
-out float v_fogdist;
+VARY(0) out vec2 v_texcoord;
+VARY(1) out vec4 v_color;
+VARY(3) out float v_fogdist;
 
 /* Default particle texcoords (ptex_coord[0] from r_part.c) */
 const vec2 ptc[3] = vec2[3](

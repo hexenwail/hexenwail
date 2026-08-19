@@ -5,15 +5,15 @@ layout(location=2) in vec2 a_texcoord;
 layout(location=3) in vec4 a_weights;
 layout(location=4) in uvec4 a_indices;
 
-layout(std430, binding=4) restrict readonly buffer BoneBuffer {
+SSBO(4) restrict readonly buffer BoneBuffer {
     mat3x4 bones[];
 };
 
 
-out vec2 v_texcoord;
-out vec4 v_color;
-out float v_fogdist;
-out vec2 v_worldxy;
+VARY(0) out vec2 v_texcoord;
+VARY(1) out vec4 v_color;
+VARY(3) out float v_fogdist;
+VARY(4) out vec2 v_worldxy;
 invariant gl_Position;
 
 void main() {

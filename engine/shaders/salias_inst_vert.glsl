@@ -11,29 +11,29 @@ struct InstanceData {
     int ShadedotRow;
 };
 
-layout(std430, binding=0) restrict readonly buffer InstanceBuffer {
+SSBO(0) restrict readonly buffer InstanceBuffer {
     InstanceData instances[];
 };
 
-layout(std430, binding=1) restrict readonly buffer PoseBuffer {
+SSBO(1) restrict readonly buffer PoseBuffer {
     uint pose_data[];
 };
 
-layout(std430, binding=2) restrict readonly buffer ShadeDots {
+SSBO(2) restrict readonly buffer ShadeDots {
     float shadedots[4096];
 };
 
-layout(std430, binding=3) restrict readonly buffer MD3PoseBuffer {
+SSBO(3) restrict readonly buffer MD3PoseBuffer {
     uvec2 md3_pose_data[];
 };
 
-in vec2 a_texcoord;
+ATTR(1) in vec2 a_texcoord;
 
 
-out vec2 v_texcoord;
-out vec4 v_color;
-out float v_fogdist;
-out vec2 v_worldxy;
+VARY(0) out vec2 v_texcoord;
+VARY(1) out vec4 v_color;
+VARY(3) out float v_fogdist;
+VARY(4) out vec2 v_worldxy;
 
 invariant gl_Position;
 

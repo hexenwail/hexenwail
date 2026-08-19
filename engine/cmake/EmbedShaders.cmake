@@ -15,6 +15,10 @@
 # header holds the fully expanded text.  That also means glslangValidator and
 # the GL driver see the same bytes.  uhexen2-p4ln.4.
 
+if(VK_DIR)
+    file(MAKE_DIRECTORY "${VK_DIR}")
+endif()
+
 if(NOT SHADER_DIR OR NOT OUT_FILE)
     message(FATAL_ERROR "EmbedShaders: SHADER_DIR and OUT_FILE are required")
 endif()
@@ -47,6 +51,8 @@ foreach(shader ${SHADER_FILES})
         message(FATAL_ERROR "EmbedShaders: ${name} has unresolved or cyclic includes")
     endif()
 
+    set(expanded "${body}")
+
     # C string escaping, then one literal per source line so a shader compile
     # log's line numbers still mean something.
     string(REPLACE "\\" "\\\\" body "${body}")
@@ -54,6 +60,23 @@ foreach(shader ${SHADER_FILES})
     string(REPLACE "\n" "\\n\"\n\t\"" body "${body}")
 
     string(APPEND GENERATED "static const char ${name}[] =\n\t\"${body}\";\n\n")
+
+    # Optionally also drop the expanded source, with a Vulkan-flavoured version
+    # header, where glslangValidator can reach it.  Nothing in the normal build
+    # consumes the SPIR-V yet -- the SDL_GPU backend (uhexen2-p4ln.5) is what
+    # will -- so this is opt-in via the shaders_spirv target.
+    if(VK_DIR)
+        if(name MATCHES "_vert$")
+            set(vkext "vert")
+        else()
+            set(vkext "frag")
+        endif()
+        set(vkhdr "#version 450 core\n")
+        if(name STREQUAL "sworld_frag_opaque")
+            string(APPEND vkhdr "layout(early_fragment_tests) in;\n")
+        endif()
+        file(WRITE "${VK_DIR}/${name}.${vkext}" "${vkhdr}${expanded}")
+    endif()
 endforeach()
 
 string(APPEND GENERATED "#endif /* SHADERS_GEN_H */\n")

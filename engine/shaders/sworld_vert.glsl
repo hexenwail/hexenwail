@@ -1,13 +1,13 @@
 #include "uniforms.inc"
-in vec3 a_position;
-in vec2 a_texcoord;
-in vec2 a_lmcoord;
-in vec4 a_color;
-out vec2 v_texcoord;
-out vec2 v_lmcoord;
-out vec4 v_color;
-out float v_fogdist;
-out vec2 v_worldxy;
+ATTR(0) in vec3 a_position;
+ATTR(1) in vec2 a_texcoord;
+ATTR(2) in vec2 a_lmcoord;
+ATTR(3) in vec4 a_color;
+VARY(0) out vec2 v_texcoord;
+VARY(2) out vec2 v_lmcoord;
+VARY(1) out vec4 v_color;
+VARY(3) out float v_fogdist;
+VARY(4) out vec2 v_worldxy;
 invariant gl_Position;
 void main() {
     v_texcoord = a_texcoord;
