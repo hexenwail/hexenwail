@@ -2563,6 +2563,85 @@ GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width, int h
 
 /*
 ===============
+Mod_RestoreIndexAlpha
+
+EF_TRANSPARENT and EF_SPECIAL_TRANS do not store a model's translucency in the
+skin's colours -- they store it in the palette INDEX of every texel, and
+GL_Upload8 turns that index into alpha: 0 becomes a hole, an odd index becomes
+r_wateralpha, everything else stays solid, and EF_SPECIAL_TRANS reads its ramp
+out of ColorPercent[].  An RGBA replacement skin has no indices left, so the
+external branch of Mod_LoadAllSkins could only carry EF_HOLEY across and the
+other two modes were dropped on the floor: every one of those models drew
+fully opaque once a replacement pack was installed.  92 models in data1 +
+SoT declare EF_TRANSPARENT and 6 declare EF_SPECIAL_TRANS -- flames, fog,
+waterfalls, curtains, webs, blood pools, and the Necromancer's spellbook,
+whose translucent cover turned into a black slab across the open page and
+whose translucent hand glow turned into solid magenta.
+
+Rebuild the alpha channel from the embedded skin the replacement displaced and
+keep the replacement's colour.  The index map is point-sampled even when the
+replacement is larger: alpha here is a per-texel classification, not a
+continuous signal, and filtering between "solid" and "hole" would invent a
+translucency the model never had.  EF_SPECIAL_TRANS's vanilla RGB substitution
+(a 16-entry ramp through ColorIndex[]) is deliberately NOT reapplied -- the
+replacement's colour is the entire reason a pack is installed; only the
+translucency it could not express is restored.
+
+Returns false, having freed *rep, when the mode cannot be honoured at all: a
+block-compressed container's payload goes to the driver untouched, so there
+are no texels to rewrite.  The caller then falls back to the embedded skin,
+because a correct low-res flame beats an opaque high-res one.
+===============
+*/
+static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
+				       int skinw, int skinh, int mdl_flags)
+{
+	int	x, y, wateralpha, mode;
+
+	/* Mirrors the tex_mode chain in Mod_LoadAllSkins, so a model carrying
+	 * two bits resolves to the same mode on both paths.  EF_HOLEY needs
+	 * nothing from us: the replacement branch already passes TEX_HOLEY
+	 * down and the file's own alpha is the cutout. */
+	if (mdl_flags & EF_TRANSPARENT)
+		mode = EF_TRANSPARENT;
+	else if (mdl_flags & EF_HOLEY)
+		return true;
+	else if (mdl_flags & EF_SPECIAL_TRANS)
+		mode = EF_SPECIAL_TRANS;
+	else
+		return true;
+
+	if (!rep->rgba || rep->blocks || skinw < 1 || skinh < 1
+	    || rep->width < 1 || rep->height < 1)
+	{
+		IMG_FreeReplacement (rep);
+		return false;
+	}
+
+	wateralpha = (int)(255.0f * r_wateralpha.value) & 0xff;
+
+	for (y = 0; y < rep->height; y++)
+	{
+		const byte	*row = skin + (y * skinh / rep->height) * skinw;
+		byte		*dst = rep->rgba + (size_t)y * rep->width * 4 + 3;
+
+		for (x = 0; x < rep->width; x++, dst += 4)
+		{
+			int	p = row[x * skinw / rep->width];
+
+			if (mode == EF_TRANSPARENT)
+				*dst = (p == 0) ? 0 : (p & 1) ? (byte)wateralpha : 255;
+			else
+				*dst = (byte)(ColorPercent[p & 15] & 0xff);
+		}
+	}
+
+	rep->has_alpha = true;
+	return true;
+}
+
+/*
+===============
 Mod_LoadAllSkins
 ===============
 */
@@ -2650,8 +2729,17 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins over
 		// the skin embedded in the MDL.
 		imgreplace_t	rep;
+		qboolean	have_rep;
 
-		if (IMG_LoadReplacement (name, NULL, &rep))
+		/* A replacement that cannot carry the model's palette-index
+		 * transparency is rejected outright -- see Mod_RestoreIndexAlpha. */
+		have_rep = IMG_LoadReplacement (name, NULL, &rep);
+		if (have_rep)
+			have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype + 1),
+							  pheader->skinwidth,
+							  pheader->skinheight, mdl_flags);
+
+		if (have_rep)
 		{
 			int skin_tex_mode = TEX_MIPMAP;
 			if (mdl_flags & EF_HOLEY)
@@ -2729,8 +2817,15 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins
 			// over the skin embedded in the MDL.
 			imgreplace_t	rep;
+			qboolean	have_rep;
 
-			if (IMG_LoadReplacement (name, NULL, &rep))
+			have_rep = IMG_LoadReplacement (name, NULL, &rep);
+			if (have_rep)
+				have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype),
+								  pheader->skinwidth,
+								  pheader->skinheight, mdl_flags);
+
+			if (have_rep)
 			{
 				int skin_tex_mode = TEX_MIPMAP;
 				if (mdl_flags & EF_HOLEY)
