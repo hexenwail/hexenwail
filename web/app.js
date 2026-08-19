@@ -1325,6 +1325,16 @@ async function init() {
       + `postprocess=gamma/palette pass; `
       + `HDR=${report.extensions.colorBufferFloat ? 'available' : 'disabled'}; `
       + `OIT=${report.extensions.indexedBlend ? 'extension present' : 'sorted fallback'}`);
+    // Quality warnings, not structural failures -- the renderer works well
+    // enough to start.  Surface them so a "the colours look wrong" report
+    // arrives with the evidence already in the log, but do not block launch on
+    // a driver whose rounding differs by a few levels.
+    // Log only, deliberately no setStatus: announceEngineReady overwrites the
+    // status line as soon as the runtime finishes loading, so a warning there
+    // would flash and vanish.  The runtime log keeps them.
+    for (const warning of report.warnings) {
+      logToConsole('[renderer:warn]', warning, true);
+    }
   } catch (error) {
     state.rendererReady = false;
     setEngineState('fatal');

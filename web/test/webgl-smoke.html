@@ -12,8 +12,17 @@
     const output = document.getElementById('result');
     try {
       const report = runWebGLDiagnostics();
-      document.body.dataset.result = 'pass';
-      output.textContent = JSON.stringify(report);
+      // Stricter than the PWA launcher on purpose.  runWebGLDiagnostics only
+      // throws for structural failures, because a real user's driver rounding a
+      // pixel differently should not lock them out of the game.  CI runs a
+      // pinned software rasterizer, so here a moved pixel is a regression.
+      if (report.warnings.length > 0) {
+        document.body.dataset.result = 'fail';
+        output.textContent = report.warnings.join('\n');
+      } else {
+        document.body.dataset.result = 'pass';
+        output.textContent = JSON.stringify(report);
+      }
     } catch (error) {
       document.body.dataset.result = 'fail';
       output.textContent = error.stack || error.message;

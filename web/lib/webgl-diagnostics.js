@@ -272,15 +272,18 @@ function framebufferSelfTest(gl, worldProgram) {
   gl.deleteFramebuffer(framebuffer);
   gl.deleteTexture(targetTexture);
 
+  // Quality checks, not structural ones: see the policy note on
+  // runWebGLDiagnostics.  Collected rather than thrown.
+  const warnings = [];
   if (ratio < 0.9) {
-    throw new Error(`generated world draw is predominantly black (${(ratio * 100).toFixed(1)}% visible)`);
+    warnings.push(`generated world draw is predominantly black (${(ratio * 100).toFixed(1)}% visible)`);
   }
   const expected = [112, 80, 52, 255];
   if (sample.some((channel, index) => Math.abs(channel - expected[index]) > 2)) {
-    throw new Error(`generated world draw returned ${sample.join(',')}, expected ${expected.join(',')}`);
+    warnings.push(`generated world draw returned ${sample.join(',')}, expected ${expected.join(',')}`);
   }
   return {
-    width, height, draw: 'textured world triangle', nonBlackRatio: ratio, sample,
+    width, height, draw: 'textured world triangle', nonBlackRatio: ratio, sample, warnings,
   };
 }
 
@@ -348,18 +351,39 @@ function postprocessSelfTest(gl, postprocessProgram) {
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, null);
 
+  const warnings = [];
   const expectedGamma = [64, 36, 16, 255];
   if (gammaSample.some((channel, index) => Math.abs(channel - expectedGamma[index]) > 2)) {
-    throw new Error(`gamma post-process returned ${gammaSample.join(',')}, expected ${expectedGamma.join(',')}`);
+    warnings.push(`gamma post-process returned ${gammaSample.join(',')}, expected ${expectedGamma.join(',')}`);
   }
   const expectedPalette = [...paletteProbeColor(...paletteIndex), 255];
   if (paletteSample.some((channel, index) => Math.abs(channel - expectedPalette[index]) > 2)) {
-    throw new Error(`palette post-process returned ${paletteSample.join(',')}, expected ${expectedPalette.join(',')}`);
+    warnings.push(`palette post-process returned ${paletteSample.join(',')}, expected ${expectedPalette.join(',')}`);
   }
 
-  return { gammaSample, paletteSample };
+  return { gammaSample, paletteSample, warnings };
 }
 
+/*
+ * Two classes of result, deliberately:
+ *
+ *   throw   - structural.  No WebGL2 context, a shader that will not compile or
+ *             link, an incomplete framebuffer.  Nothing can render; the caller
+ *             should refuse to start.
+ *   warning - quality.  An exact-pixel comparison off by more than 2, a frame
+ *             that came back mostly black, a stray GL error.  Something is
+ *             probably wrong, but the engine may well be perfectly playable.
+ *
+ * d2c46f078 threw for both, which meant a driver whose rounding differed by 3,
+ * or that raised one benign error, permanently disabled the launcher for a user
+ * whose game would have run.  That is the same trade the engine already refuses
+ * to make in GL_RunFramebufferSelfTest (gl_vidsdl.c), and it should not be
+ * decided differently here just because this half is easier to fail loudly.
+ *
+ * Consumers pick their own policy from `warnings`: the PWA launcher logs them
+ * and proceeds, while the CI smoke page treats any warning as a failure -- on a
+ * pinned software rasterizer a pixel that moved IS a regression.
+ */
 export function runWebGLDiagnostics({ canvas = null } = {}) {
   const target = canvas || document.createElement('canvas');
   target.width = 32;
@@ -382,12 +406,14 @@ export function runWebGLDiagnostics({ canvas = null } = {}) {
     const postprocessProgram = programs.find(([family]) => family === 'postprocess')?.[1];
     const framebuffer = framebufferSelfTest(gl, worldProgram);
     const postprocess = postprocessSelfTest(gl, postprocessProgram);
+    const warnings = [...framebuffer.warnings, ...postprocess.warnings];
     const error = gl.getError();
     if (error !== gl.NO_ERROR) {
-      throw new Error(`WebGL2 error after self-test: 0x${error.toString(16)}`);
+      warnings.push(`WebGL2 error after self-test: 0x${error.toString(16)}`);
     }
     return {
       ok: true,
+      warnings,
       profile: gl.getParameter(gl.VERSION),
       renderer: gl.getParameter(gl.RENDERER),
       shadingLanguage: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
