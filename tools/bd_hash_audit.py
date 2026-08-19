@@ -26,7 +26,10 @@ Each cited hash lands in one of four buckets:
 Usage:  tools/bd_hash_audit.py [--all]
         --all also lists hashes cited only by closed beads (noise, mostly)
 
-Exits 1 if any open bead cites a rewritten or dangling hash.
+Exits 1 if any open bead cites a rewritten or dangling hash that has not
+been acknowledged.  Acknowledge by naming the survivor in the bead, or by
+writing 'HASH CORRECTION' / 'HASH CHECKED' into it when there is nothing
+to point at (dangling) or nothing to fix (a deliberate archive ref).
 """
 
 import collections
@@ -39,6 +42,13 @@ import sys
 JSONL = os.path.join(os.path.dirname(__file__), "..", ".beads", "issues.jsonl")
 TEXT_FIELDS = ("description", "notes", "design", "close_reason",
                "acceptance_criteria", "resolution")
+
+# A bead carrying one of these is treated as already reviewed, whatever
+# state its hashes are in.  Needed because a dangling hash has no survivor
+# to name and a deliberate archive reference has nothing to fix -- without
+# an opt-out both would be reported forever.  Write one into the bead when
+# you have looked and decided.
+ACK_MARKERS = ("HASH CORRECTION", "HASH CHECKED")
 
 # 7-40 hex chars.  Pure digits are excluded because the tracker is full of
 # CRCs (17499, 38488, ...) that would otherwise be tested as abbreviated
@@ -103,12 +113,20 @@ def main():
         """True if this bead already records the correction.
 
         The fix for a stale hash is a note naming the survivor, which leaves
-        the stale hash in the text -- so a bead that has been corrected would
-        otherwise be reported forever and the check would never go green.
-        Treat a bead as handled once the survivor hash appears alongside."""
+        the stale hash in the text -- so a corrected bead would otherwise be
+        reported forever and the check could never go green.  Two ways to be
+        handled:
+
+          - the survivor hash appears in the bead as well (rewritten case), or
+          - the bead carries one of ACK_MARKERS, which is the only option for
+            a dangling hash (no survivor to name) or for an archive reference
+            that is deliberate.
+        """
+        blob = blobs.get(bead_id, "")
+        if any(m in blob for m in ACK_MARKERS):
+            return True
         if not survivor:
             return False
-        blob = blobs.get(bead_id, "")
         return any(survivor.startswith(h) or h.startswith(survivor[:9])
                    for h in HASH_RE.findall(blob))
 
