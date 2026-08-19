@@ -1343,9 +1343,11 @@ static void R_DrawAliasModel (entity_t *e)
 	int		mls;
 	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
 	float		caustics = R_CausticsIntensity();
-	/* uhexen2-fc1c: the one alias entity that keeps writing depth even
-	 * when it draws blended.  Rationale at the branch chain below. */
-	qboolean	viewmodel_depth_write = (e == &cl.viewent);
+	/* uhexen2-fc1c / uhexen2-ac4c: the viewmodel is the one alias entity
+	 * that keeps writing depth when it draws blended, and the one that
+	 * ignores its model's own translucency flags entirely.  Rationale at
+	 * the branch chain below. */
+	qboolean	viewmodel = (e == &cl.viewent);
 
 	clmodel = e->model;
 
@@ -1655,14 +1657,43 @@ static void R_DrawAliasModel (entity_t *e)
 	 * afterwards, so these writes never meet world geometry.  This is
 	 * also what shipped before uhexen2-gwtq, when
 	 * R_DrawTransEntitiesOnList forced the mask on for every mod_alias
-	 * entity and the viewmodel inherited it. */
-	if (e->model->flags & EF_SPECIAL_TRANS)
+	 * entity and the viewmodel inherited it.
+	 *
+	 * THE VIEWMODEL ALSO IGNORES ITS MODEL'S TRANSLUCENCY FLAGS
+	 * (uhexen2-ac4c).  Hexen II keeps an alias model's translucency in
+	 * the palette INDEX of every texel, and GL_Upload8 turns an ODD index
+	 * into r_wateralpha.  uhexen2-93a8 started applying that same rule to
+	 * external replacement skins, which had been escaping it and using
+	 * the pack's own opaque alpha -- correct for the Necromancer's
+	 * spellbook, and ruinous for the gun in your hand: Shadows of Turmoil
+	 * ships its own weapon viewmodels flagged EF_TRANSPARENT where the
+	 * base-game copies carry no flags at all, and pins r_wateralpha 0.5,
+	 * so 10-45% of every weapon's texels went from alpha 255 to 128 and
+	 * the weapons turned to glass.
+	 *
+	 * The texture cannot tell the two apart -- odd-index-means-translucent
+	 * is one rule and both cases go through it -- so the discrimination
+	 * has to happen here, where we know whether we are drawing a world
+	 * model or the player's own weapon.  A first-person weapon is held
+	 * against the camera and reads as part of the HUD; vanilla draws it
+	 * opaque because the base-game weapon models declare no transparency
+	 * mode at all, and this restores that for the flagged ones too.
+	 *
+	 * Only the MODEL-flag branches are skipped.  DRF_TRANSLUCENT below is
+	 * entity state the server sets on cl.viewent through
+	 * svc_set_view_flags, which is how the invisibility ring fades the
+	 * weapon, so that branch stays live and deliberate translucency still
+	 * works.  Index-0 holes survive too: the opaque branch asserts the
+	 * 0.01 alpha threshold and salias_frag.glsl discards below it BEFORE
+	 * u_force_opaque_alpha rewrites the output alpha, so a hole is still
+	 * a hole and only the 50% class is lost. */
+	if ((e->model->flags & EF_SPECIAL_TRANS) && !viewmodel)
 	{
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-			R_SetDepthMask (viewmodel_depth_write);	/* blended: no depth write, except the viewmodel */
+			R_SetDepthMask (false);	/* blended: no depth write (viewmodel cannot reach here) */
 		}
 		model_constant_alpha = 1.0f;
 		R_SetCull (false);
@@ -1674,7 +1705,7 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (viewmodel_depth_write);	/* blended: no depth write, except the viewmodel */
+			R_SetDepthMask (viewmodel);	/* blended: no depth write, except the viewmodel */
 		}
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
@@ -1682,13 +1713,13 @@ static void R_DrawAliasModel (entity_t *e)
 			model_constant_alpha = r_wateralpha.value;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
-	else if (e->model->flags & EF_TRANSPARENT)
+	else if ((e->model->flags & EF_TRANSPARENT) && !viewmodel)
 	{
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			R_SetDepthMask (viewmodel_depth_write);	/* blended: no depth write, except the viewmodel */
+			R_SetDepthMask (false);	/* blended: no depth write (viewmodel cannot reach here) */
 		}
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1739,7 +1770,7 @@ static void R_DrawAliasModel (entity_t *e)
 			 * result, so only genuinely translucent alphas drop the
 			 * depth write — same predicate the fullbright and blend
 			 * restores below use. */
-			R_SetDepthMask (viewmodel_depth_write || ENTALPHA_OPAQUE(e->alpha));
+			R_SetDepthMask (viewmodel || ENTALPHA_OPAQUE(e->alpha));
 		}
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1761,6 +1792,12 @@ static void R_DrawAliasModel (entity_t *e)
 			R_SetDepthMask (true);	/* opaque: writes depth */
 		}
 		model_constant_alpha = 1.0f;
+		/* Asserted, not inherited (uhexen2-ac4c).  A skin can still carry
+		 * index-0 holes on this path -- the viewmodel now arrives here
+		 * with one whenever its model declares EF_TRANSPARENT -- and the
+		 * shader's discard is the only thing that keeps them, because
+		 * u_force_opaque_alpha rewrites the output alpha afterwards. */
+		GL_SetAlphaThreshold(0.01f);
 		GL_SetForceOpaqueAlpha(1.0f);	/* opaque alias path */
 	}
 
@@ -1873,16 +1910,20 @@ static void R_DrawAliasModel (entity_t *e)
 
 	model_constant_alpha = 1.0f;
 
+	/* Mirrors the branch chain's predicates exactly, viewmodel exemption
+	 * included (uhexen2-ac4c): a restore that fires for a branch that
+	 * never ran is how an EF_SPECIAL_TRANS viewmodel would come back with
+	 * culling re-enabled that nothing had disabled. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
-	    (e->model->flags & EF_SPECIAL_TRANS) ||
-	    (e->model->flags & EF_TRANSPARENT) ||
+	    (!viewmodel && (e->model->flags & EF_SPECIAL_TRANS)) ||
+	    (!viewmodel && (e->model->flags & EF_TRANSPARENT)) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		if (!OIT_InPass())
 			R_SetBlend (false);
 	}
 
-	if (e->model->flags & EF_SPECIAL_TRANS)
+	if ((e->model->flags & EF_SPECIAL_TRANS) && !viewmodel)
 	{
 		if (!OIT_InPass())
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
