@@ -2167,16 +2167,19 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 
 	if (needs_bleed)
 	{
-		int i, s, pass;
+		int i, s, x, y, w, h;
 		byte *rgba;
 		unsigned int *cleaned_data;
+		unsigned short *bleed_dist;
 
 		if (!mark)
 			mark = Hunk_LowMark();
 		cleaned_data = (unsigned int *) Hunk_AllocName(glt->width * glt->height * sizeof(unsigned int), "texbuf_fence");
 		memcpy(cleaned_data, data, glt->width * glt->height * sizeof(unsigned int));
 
-		s = glt->width * glt->height;
+		w = glt->width;
+		h = glt->height;
+		s = w * h;
 		rgba = (byte *)cleaned_data;
 
 		// Step 1: Binarize alpha at threshold 128 (cutout textures only)
@@ -2189,51 +2192,73 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 			}
 		}
 
-		// Step 2: Flood RGB from opaque neighbors into transparent pixels.
-		// This prevents black fringes when texture filtering samples across
-		// the opaque/transparent boundary. Run multiple passes to propagate
-		// colors inward from edges. Donors are pixels with alpha==255;
-		// translucent skins with no fully-opaque pixels at all (rare) get
-		// no benefit — fine, since their fringe blend is already gentle.
-		for (pass = 0; pass < 4; pass++)
-		{
-			for (i = 0; i < s; i++)
-			{
-				int offset = i * 4;
-				if (rgba[offset + 3] != 0)
-					continue;
+		/* Step 2: flood RGB from the opaque texels into *every* transparent
+		 * texel, nearest donor first.  Filtering that samples across a
+		 * cutout boundary picks up whatever RGB sits under alpha=0, and in
+		 * Hexen II that is usually white -- palette index 255, the
+		 * transparent index, is (252,252,252), and an exported replacement
+		 * skin inherits it (SoT's models/pine_1.tga carries 40850 pure-white
+		 * alpha=0 texels right against the frond art).  Every texel the
+		 * flood fails to reach bleeds white into the mip chain and frosts
+		 * the tips of distant foliage.
+		 *
+		 * The loop this replaces ran four passes but only ever accepted
+		 * alpha==255 donors, and a flooded texel keeps alpha 0 -- so it
+		 * never became a donor and passes 2-4 recomputed the same one-texel
+		 * ring.  Real reach was one texel, against white regions dozens of
+		 * texels across.
+		 *
+		 * Two-pass city-block distance transform instead: the forward scan
+		 * carries each texel's nearest donor down and right, the backward
+		 * scan up and left, which is exact for 4-neighbour L1 distance in
+		 * O(w*h) with no pass count to tune.  Texels with fractional alpha
+		 * are visible, so they neither donate nor receive -- they act as
+		 * walls and the flood goes around them.  uhexen2-nkj1, pcd1. */
+		bleed_dist = (unsigned short *) Hunk_AllocName(s * sizeof(unsigned short), "texbuf_bleed");
+		for (i = 0; i < s; i++)
+			bleed_dist[i] = (rgba[i * 4 + 3] == 255) ? 0 : 0xFFFF;
 
-				// Check 4 neighbors for an opaque pixel to copy RGB from
-				if (i >= glt->width && rgba[(i - glt->width) * 4 + 3] == 255)
-				{
-					int n = (i - glt->width) * 4;
-					rgba[offset+0] = rgba[n+0];
-					rgba[offset+1] = rgba[n+1];
-					rgba[offset+2] = rgba[n+2];
-				}
-				else if (i + glt->width < s && rgba[(i + glt->width) * 4 + 3] == 255)
-				{
-					int n = (i + glt->width) * 4;
-					rgba[offset+0] = rgba[n+0];
-					rgba[offset+1] = rgba[n+1];
-					rgba[offset+2] = rgba[n+2];
-				}
-				else if (i > 0 && rgba[(i - 1) * 4 + 3] == 255)
-				{
-					int n = (i - 1) * 4;
-					rgba[offset+0] = rgba[n+0];
-					rgba[offset+1] = rgba[n+1];
-					rgba[offset+2] = rgba[n+2];
-				}
-				else if (i + 1 < s && rgba[(i + 1) * 4 + 3] == 255)
-				{
-					int n = (i + 1) * 4;
-					rgba[offset+0] = rgba[n+0];
-					rgba[offset+1] = rgba[n+1];
-					rgba[offset+2] = rgba[n+2];
-				}
+#define BLEED_FROM(neighbor)						\
+		do {							\
+			int n_ = (neighbor);				\
+			if (bleed_dist[n_] + 1 < bleed_dist[i])		\
+			{						\
+				bleed_dist[i] = bleed_dist[n_] + 1;	\
+				rgba[i * 4 + 0] = rgba[n_ * 4 + 0];	\
+				rgba[i * 4 + 1] = rgba[n_ * 4 + 1];	\
+				rgba[i * 4 + 2] = rgba[n_ * 4 + 2];	\
+			}						\
+		} while (0)
+
+		for (y = 0; y < h; y++)
+		{
+			for (x = 0; x < w; x++)
+			{
+				i = y * w + x;
+				if (rgba[i * 4 + 3] != 0)
+					continue;	/* donor or wall */
+				if (y > 0)
+					BLEED_FROM(i - w);
+				if (x > 0)
+					BLEED_FROM(i - 1);
 			}
 		}
+
+		for (y = h - 1; y >= 0; y--)
+		{
+			for (x = w - 1; x >= 0; x--)
+			{
+				i = y * w + x;
+				if (rgba[i * 4 + 3] != 0)
+					continue;
+				if (y < h - 1)
+					BLEED_FROM(i + w);
+				if (x < w - 1)
+					BLEED_FROM(i + 1);
+			}
+		}
+
+#undef BLEED_FROM
 
 		data = cleaned_data;
 	}
