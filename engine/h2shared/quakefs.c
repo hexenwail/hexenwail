@@ -2020,7 +2020,8 @@ static void Host_Game_f (void)
 	M_BuildBindList ();
 
 	/* clean slate: reload binds, aliases, and configs from new mod */
-	Cbuf_AddText ("unbindall\nunaliasall\nexec hexen.rc\n");
+	Cbuf_AddText ("unbindall\nunaliasall\n");
+	Cbuf_AddText (Cmd_StartupScript ());
 	Con_Printf ("\ngame changed to \"%s\"\n", dir);
 }
 #endif	/* !SERVERONLY */
