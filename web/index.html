@@ -121,7 +121,8 @@
     }
     #drop-zone[data-drag="true"] { background: rgba(204, 173, 99, 0.13); }
     #status-panel[data-kind="error"] #status-text, #import-message[data-kind="error"] { color: var(--err); }
-    #import-message[data-kind="success"] { color: var(--ok); }
+    #import-message[data-kind="success"], #save-message[data-kind="success"] { color: var(--ok); }
+    #save-message[data-kind="error"] { color: var(--err); }
     #status-panel[data-kind="warn"] #status-text { color: var(--warn); }
     .muted { color: var(--text-dim); }
     .viewport {
@@ -205,6 +206,20 @@
           <input id="directory-input" type="file" webkitdirectory directory multiple>
           <small id="import-message" class="muted"></small>
           <small id="rejected-list" class="muted"></small>
+        </section>
+        <section class="card">
+          <h2>Saves &amp; Backup</h2>
+          <p>Save bundles contain only game saves, never PAKs, music, or other commercial game data.</p>
+          <div class="buttons">
+            <button id="export-saves-button">Export saves</button>
+            <button id="import-saves-button">Import saves</button>
+            <select id="save-import-mode" aria-label="Save import mode">
+              <option value="merge">Merge saves</option>
+              <option value="replace">Replace saves</option>
+            </select>
+          </div>
+          <input id="save-file-input" type="file" accept=".hexenwail-save.zip,.zip,application/zip">
+          <small id="save-message" class="muted">Export a compact local backup to Files or iCloud Drive.</small>
         </section>
         <section class="card">
           <h2>Launch</h2>
