@@ -11,6 +11,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_pipeline.h"
+#include "gl_uniforms.h"
 
 /* glBlendFunci is GL 4.0 and is not in WebGL2, where gl_func.h makes it a
  * no-op function-like macro that cannot be tested as a value.  Same shape as
@@ -228,8 +229,18 @@ void R_SetPolygonOffsetFill (qboolean enable, float factor, float units)
 	}
 }
 
+/* GL_POLYGON_OFFSET_LINE does not exist on the ES tier -- there is no
+ * GLES/WebGL2 equivalent, and referencing the token there is a compile error,
+ * not a runtime one.  The entry point stays declared on both tiers so callers
+ * need no #ifdef; on ES it does nothing, which is exactly right given the only
+ * callers are the #if 0 fixed-function zfix leftovers in gl_rsurf.c. */
 void R_SetPolygonOffsetLine (qboolean enable, float factor, float units)
 {
+#ifdef USE_GLES
+	(void) enable;
+	(void) factor;
+	(void) units;
+#else
 	if (!enable)
 	{
 		factor = 0.0f;
@@ -250,6 +261,7 @@ void R_SetPolygonOffsetLine (qboolean enable, float factor, float units)
 		rp.poly_units = units;
 		glPolygonOffset_fp (factor, units);
 	}
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -357,6 +369,47 @@ void R_BindPipeline (const rpipeline_t *p)
 	R_SetCull (p->cull);
 
 	R_SetAlphaToCoverage (p->alpha_to_coverage);
+}
+
+/* ------------------------------------------------------------------ */
+/* Draws                                                               */
+/* ------------------------------------------------------------------ */
+
+/* The flush is here and nowhere else on purpose: uniform state is set by
+ * whoever is about to draw, and the draw is the last thing that happens, so
+ * this is the one point every path passes through with its values final. */
+
+void R_DrawArrays (GLenum mode, GLint first, GLsizei count)
+{
+	R_FlushUniforms ();
+	glDrawArrays_fp (mode, first, count);
+}
+
+void R_DrawElements (GLenum mode, GLsizei count, GLenum type,
+		     const void *indices)
+{
+	R_FlushUniforms ();
+	glDrawElements_fp (mode, count, type, indices);
+}
+
+void R_DrawElementsInstanced (GLenum mode, GLsizei count, GLenum type,
+			      const void *indices, GLsizei primcount)
+{
+	R_FlushUniforms ();
+	glDrawElementsInstanced_fp (mode, count, type, indices, primcount);
+}
+
+void R_DrawElementsIndirect (GLenum mode, GLenum type, const void *indirect)
+{
+	R_FlushUniforms ();
+	glDrawElementsIndirect_fp (mode, type, indirect);
+}
+
+void R_MultiDrawElementsIndirect (GLenum mode, GLenum type, const void *indirect,
+				  GLsizei drawcount, GLsizei stride)
+{
+	R_FlushUniforms ();
+	glMultiDrawElementsIndirect_fp (mode, type, indirect, drawcount, stride);
 }
 
 /* ------------------------------------------------------------------ */

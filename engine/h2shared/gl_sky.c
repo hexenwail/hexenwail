@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "img_load.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_sky.h"
 
@@ -1494,11 +1495,11 @@ void Sky_DrawFaceQuad (glpoly_t *p)
 	{
 		fog_color = Fog_GetColor();
 		skyfog_alpha = CLAMP(0.0, skyfog, 1.0);
-		glUniform4f_fp(gl_shader_sky.u_skyfog, fog_color[0], fog_color[1], fog_color[2], skyfog_alpha);
+		R_SetSkyFog (fog_color[0], fog_color[1], fog_color[2], skyfog_alpha);
 	}
 	else
 	{
-		glUniform4f_fp(gl_shader_sky.u_skyfog, 0.0, 0.0, 0.0, 0.0);
+		R_SetSkyFog (0.0f, 0.0f, 0.0f, 0.0f);
 	}
 
 	GL_ImmEnd(GL_QUADS, &gl_shader_sky);
