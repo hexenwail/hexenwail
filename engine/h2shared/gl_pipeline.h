@@ -101,6 +101,9 @@ void	R_PipelineForgetProgram (void);
 /* Shadow readback, for the handful of save-and-restore sites.  Exact by
  * construction and free, unlike the glIsEnabled round trip it replaces. */
 qboolean R_GetCull (void);
+qboolean R_GetBlend (void);
+qboolean R_GetDepthMask (void);
+void	R_GetDepthRange (double *znear, double *zfar);
 
 /* Draw entry points.  Every one flushes the std140 uniform blocks first, which
  * is the only reason no draw path has to remember to -- a missed flush would
