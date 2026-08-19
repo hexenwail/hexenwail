@@ -24,55 +24,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Extracted to a reusable workflow so release.yml runs the same gate.
+  # This workflow carries `tags-ignore: **`, so before uhexen2-5zei the tag
+  # build -- the one that reaches users -- ran no lint at all.
   lint:
-    runs-on: ubuntu-latest
-    # Observed runtime is well under a minute to a few minutes; this is a
-    # "something is stuck" threshold, not a target, and is sized to leave
-    # room for a cold cache.  Without it the job inherits GitHub's 6-hour
-    # default.  uhexen2-bvei.
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install shellcheck and appstream
-        run: |
-          # The flatpak job below updates before installing; this one did not,
-          # so it worked only for as long as the runner image's index stayed
-          # fresh enough to still resolve these versions.  uhexen2-bvei.
-          sudo apt-get update
-          sudo apt-get install -y shellcheck appstream
-
-      - name: Shellcheck
-        run: shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh
-
-      # The metainfo is what GNOME Software and KDE Discover read, and Flathub
-      # rejects a submission whose metainfo does not validate.  Nothing checked
-      # it before, so breakage would only have surfaced at publish time.
-      # Note this validates structure, not currency — release.yml is what keeps
-      # the <releases> block from going stale.
-      #
-      # --no-net for the same reason release.yml carries it (327bd5510):
-      # appstreamcli otherwise fetches every <url> in the file and treats an
-      # unreachable one as a warning it exits non-zero on, so this step went
-      # red when github.com had a bad minute rather than when the file was
-      # wrong.  That is what failed release r5.  Structure is what we want
-      # checked here.  uhexen2-vm9w, uhexen2-bvei.
-      - name: Validate AppStream metainfo
-        run: appstreamcli validate --no-net --explain flatpak/io.github.hexenwail.hexenwail.metainfo.xml
-
-      # emscripten.h defines a bare EMSCRIPTEN alias under a deprecation
-      # pragma, so a guard spelled that way only works in translation units
-      # that happen to include the header — it fails silently rather than
-      # loudly, and would compile the desktop branch on WASM.  uhexen2-uf5s.
-      # The if(EMSCRIPTEN) uses in engine/CMakeLists.txt are CMake variables,
-      # not C macros, so this is deliberately scoped to C sources.
-      - name: No bare EMSCRIPTEN guards in C sources
-        run: |
-          if grep -rnE '(^|[^_A-Za-z])EMSCRIPTEN([^_A-Za-z]|$)' \
-               --include='*.c' --include='*.h' engine/; then
-            echo "::error::use __EMSCRIPTEN__, not the deprecated bare EMSCRIPTEN"
-            exit 1
-          fi
+    uses: ./.github/workflows/lint.yml
 
   build:
     runs-on: ubuntu-latest
