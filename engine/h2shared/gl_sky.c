@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "image.h"
 #include "img_load.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_sky.h"
 
@@ -1346,11 +1347,10 @@ void Sky_DrawSkyBox (void)
 
 	// Force skybox to render at maximum depth (always behind everything).
 	// Reversed-Z: max-depth is 0.0; standard: 1.0.
-	glDepthRange_fp(gl_clipcontrol_able ? 0.0f : 1.0f,
-	                gl_clipcontrol_able ? 0.0f : 1.0f);
+	R_SetDepthRange (gl_clipcontrol_able ? 0.0f : 1.0f, gl_clipcontrol_able ? 0.0f : 1.0f);
 
 	// Disable face culling so faces are visible from inside
-	glDisable_fp(GL_CULL_FACE);
+	R_SetCull (false);
 
 	GL_SetAlphaThreshold (1.0f);	/* single-layer skybox mode */
 
@@ -1383,7 +1383,7 @@ void Sky_DrawSkyBox (void)
 			float *c;
 
 			c = Fog_GetColor();
-			glEnable_fp(GL_BLEND);
+			R_SetBlend (true);
 			GL_ImmColor4f (c[0],c[1],c[2], CLAMP(0.0,skyfog,1.0));
 
 			GL_ImmBegin();
@@ -1395,15 +1395,15 @@ void Sky_DrawSkyBox (void)
 			GL_ImmEnd(GL_QUADS, &gl_shader_flat);
 
 			GL_ImmColor3f(1, 1, 1);
-			glDisable_fp(GL_BLEND);
+			R_SetBlend (false);
 
 			rs_skypasses++;
 		}
 	}
 
 	// Restore GL state — full window-Z range is symmetric, no flip needed
-	glDepthRange_fp(0.0, 1.0);
-	glEnable_fp(GL_CULL_FACE);
+	R_SetDepthRange (0.0, 1.0);
+	R_SetCull (true);
 	GL_SetAlphaThreshold (saved_threshold);
 }
 
@@ -1621,7 +1621,7 @@ void Sky_DrawSky (void)
 	//
 	if (!r_fastsky.value && !(Fog_GetDensity() > 0 && skyfog >= 1))
 	{
-		glDisable_fp(GL_BLEND);
+		R_SetBlend (false);
 		GL_ImmColor4f(1, 1, 1, 1);
 		if (have_stencil)
 		{
@@ -1649,24 +1649,24 @@ void Sky_DrawSky (void)
 			 * stencil-limited colour fill, and the pinned far-plane
 			 * depth range would otherwise fail the test against the
 			 * wall depth the pre-pass just wrote. */
-			glEnable_fp(GL_STENCIL_TEST);
-			glStencilFunc_fp(GL_EQUAL, 1, 0xFF);
-			glStencilOp_fp(GL_KEEP, GL_KEEP, GL_KEEP);
-			glDepthFunc_fp(GL_ALWAYS);
-			glDepthMask_fp(0);
+			R_SetStencilTest (true);
+			R_SetStencilFunc (GL_EQUAL, 1, 0xFF);
+			R_SetStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
+			R_SetDepthFunc (GL_ALWAYS);
+			R_SetDepthMask (false);
 		}
 		else
 		{
-			glDepthFunc_fp(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
-			glDepthMask_fp(0);
+			R_SetDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+			R_SetDepthMask (false);
 		}
 
 		Sky_DrawSkyBox ();
 
-		glDepthMask_fp(1);
-		glDepthFunc_fp(gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+		R_SetDepthMask (true);
+		R_SetDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 		if (have_stencil)
-			glDisable_fp(GL_STENCIL_TEST);
+			R_SetStencilTest (false);
 	}
 
 	Fog_EnableGFog ();

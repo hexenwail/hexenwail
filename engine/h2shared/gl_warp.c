@@ -20,6 +20,7 @@
 
 #include "quakedef.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_postprocess.h"
 
@@ -719,7 +720,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 
 		/* pass 2: alpha (front) layer, blended at r_skyalpha */
 		GL_Bind (alphaskytexture);
-		glEnable_fp(GL_BLEND);
+		R_SetBlend (true);
 
 		for (p = fa->polys ; p ; p = p->next)
 		{
@@ -746,7 +747,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
 		}
 
-		glDisable_fp(GL_BLEND);
+		R_SetBlend (false);
 	}
 
 	GL_SetAlphaThreshold (saved_threshold);
@@ -931,9 +932,9 @@ void R_DrawSkyChain (msurface_t *s)
 
 		/* pass 2: front layer, blended at r_skyalpha */
 		GL_Bind (alphaskytexture);
-		glEnable_fp (GL_BLEND);
+		R_SetBlend (true);
 		EMIT_LOOP (SKYWARP_VERT_FRONT, GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
-		glDisable_fp (GL_BLEND);
+		R_SetBlend (false);
 	}
 
 	GL_SetAlphaThreshold (saved_threshold);
@@ -1645,9 +1646,9 @@ void R_DrawSkyBox (void)
 	int		i;
 
 #if 0
-	glEnable_fp (GL_BLEND);
+	R_SetBlend (true);
 	GL_ImmColor4f (1,1,1,0.5);
-	glDisable_fp (GL_DEPTH_TEST);
+	R_SetDepthTest (false);
 #endif
 	for (i = 0; i < 6; i++)
 	{
@@ -1669,9 +1670,9 @@ void R_DrawSkyBox (void)
 		GL_ImmEnd (GL_QUADS, &gl_shader_world);
 	}
 #if 0
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 	GL_ImmColor4f (1,1,1,0.5);
-	glEnable_fp (GL_DEPTH_TEST);
+	R_SetDepthTest (true);
 #endif
 }
 

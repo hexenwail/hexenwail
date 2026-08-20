@@ -25,6 +25,7 @@
 #endif
 #ifdef GLQUAKE
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -1709,12 +1710,12 @@ void R_DrawParticles (void)
      * no-op and gives square mode the flat particle it is asking for.
      * Reported against SoT by Garrett; uhexen2-2rxl. */
     GL_Bind(square ? gl_solid_white_texture : particletexture);
-    glEnable_fp(GL_BLEND);
+    R_SetBlend (true);
     /* Inside an OIT pass, OIT_BeginTranslucency already configured the
      * per-buffer blend funcs (accum: ONE/ONE, reveal: ZERO/ONE_MINUS_SRC_COLOR).
      * Overriding with a single-buffer glBlendFunc would break WBOIT. */
     if (!OIT_InPass())
-        glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL_SetAlphaThreshold(0.0f);
 
     VectorScale(vup, 1.5, r_pup);
@@ -1837,7 +1838,7 @@ void R_DrawParticles (void)
     /* OIT_EndTranslucency will restore blend state; don't yank GL_BLEND
      * mid-pass or subsequent OIT draws lose their MRT contribution. */
     if (!OIT_InPass())
-        glDisable_fp(GL_BLEND);
+        R_SetBlend (false);
 }
 
 #else	/* !GLQUAKE */

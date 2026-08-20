@@ -12,6 +12,7 @@
 #include "sdl_inc.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 
 extern float	r_fog_density;
 extern float	r_fog_color[3];
@@ -226,7 +227,7 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 	{
 		GL_InitProgramUniforms(p);
 		/* bind texture unit defaults (mirrors GL_InitProgram) */
-		glUseProgram_fp(p->program);
+		R_UseProgram (p->program);
 		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
@@ -237,7 +238,7 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 			Mat4_Identity(ident);
 			glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
 		}
-		glUseProgram_fp(0);
+		R_UseProgram (0);
 		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
 	else
@@ -1051,7 +1052,7 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	GL_InitProgramUniforms(p);
 
 	/* bind texture unit defaults */
-	glUseProgram_fp(p->program);
+	R_UseProgram (p->program);
 	if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 	if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
@@ -1070,7 +1071,7 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 		Mat4_Identity(ident);
 		glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
 	}
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
 	return true;
@@ -1095,10 +1096,10 @@ static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 	p->u_ctime  = glGetUniformLocation_fp(p->base.program, "u_ctime");
 
 	/* Bind texture unit defaults */
-	glUseProgram_fp(p->base.program);
+	R_UseProgram (p->base.program);
 	if (p->base.u_texture0 >= 0) glUniform1i_fp(p->base.u_texture0, 0);
 	if (p->base.u_fog_density >= 0) glUniform1f_fp(p->base.u_fog_density, 0.0f);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	Con_SafePrintf("  shader 'particle_gpu' loaded (program %u)\n", p->base.program);
 	return true;
@@ -1188,13 +1189,13 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
 
 	/* Bind skin texture to unit 0 */
-	glUseProgram_fp(prog);
+	R_UseProgram (prog);
 	{
 		GLint u_tex = glGetUniformLocation_fp(prog, "u_texture0");
 		if (u_tex >= 0)
 			glUniform1i_fp(u_tex, 0);
 	}
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	/* Create and fill shadedots SSBO (static data, upload once).
 	 * Uses binding=2 to match the non-instanced GPU alias shader. */
@@ -1219,6 +1220,7 @@ void GL_AliasInst_Init (void)
 
 void GL_AliasInst_Shutdown (void)
 {
+	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (gl_shader_alias_inst.program)
 		glDeleteProgram_fp(gl_shader_alias_inst.program);
 	if (gl_shader_alias_inst.ubo_shadedots)
@@ -1346,6 +1348,7 @@ void GL_Shaders_Shutdown (void)
 	};
 	int i;
 
+	R_PipelineForgetProgram ();	/* GL reuses program names */
 	for (i = 0; i < (int)(sizeof(progs)/sizeof(progs[0])); i++)
 	{
 		if (progs[i]->program)

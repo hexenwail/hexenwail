@@ -11,6 +11,7 @@
 #include "quakedef.h"
 #include "sdl_inc.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_matrix.h"
 #include "gl_vbo.h"
 #include "gl_sky.h"
@@ -390,7 +391,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 
 	/* activate shader; reset uniform cache when the program changes
 	 * because uniform locations are per-program */
-	glUseProgram_fp(shader->program);
+	R_UseProgram (shader->program);
 	if (shader != imm_cache_shader)
 	{
 		imm_cache_shader = shader;
@@ -539,11 +540,17 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	/* A global glEnable(GL_BLEND) in the translucent draw paths resets the
 	 * per-buffer blend funcs to the global default on some drivers, which
 	 * breaks the WBOIT revealage buffer (geometry vanishes).  Re-assert the
-	 * OIT blend funcs immediately before every draw inside the OIT pass. */
+	 * OIT blend funcs immediately before every draw inside the OIT pass.
+	 *
+	 * These are re-asserts, so they look exactly like the redundant calls
+	 * gl_pipeline.c exists to drop.  They survive because R_SetBlend marks
+	 * the indexed funcs unknown whenever it actually issues glEnable(GL_BLEND)
+	 * -- the only thing that can clobber them -- so the pair below reaches GL
+	 * on precisely the draws that need it and folds away on the rest. */
 	if (OIT_InPass())
 	{
-		glBlendFunci_fp(0, GL_ONE, GL_ONE);
-		glBlendFunci_fp(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+		R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
+		R_SetBlendFuncIndexed (1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
 	}
 
 	/* draw */
@@ -566,7 +573,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 
 	glBindVertexArray_fp(0);
 	glBindBuffer_fp(GL_ARRAY_BUFFER, 0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 
 	/* ensure texture unit 0 is active after draw */
 	if (glActiveTexture_fp)

@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "gl_sky.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -819,15 +820,15 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (e->drawflags & DRF_TRANSLUCENT)
 	{
-		glEnable_fp (GL_BLEND);
+		R_SetBlend (true);
 		/* Translucent surfaces must not write depth — otherwise the
 		 * alpha-blended brush ent occludes anything drawn after it
 		 * (e.g. world lava in the R_DrawWaterSurfaces pass behind a
 		 * func_illusionary).  uhexen2-t4kt.  Blend func gated for OIT
 		 * pass. */
 		if (!OIT_InPass())
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glDepthMask_fp(0);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		R_SetDepthMask (false);
 		alpha_val = r_wateralpha.value;
 	}
 	{
@@ -861,8 +862,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		 * draw call.  uhexen2-j001.  Gated for OIT pass. */
 		if ((e->drawflags & DRF_TRANSLUCENT) && !OIT_InPass())
 		{
-			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
+			R_SetDepthMask (true);
+			R_SetBlend (false);
 		}
 		return;
 	}
@@ -894,10 +895,10 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		 * continuation of 479f1304f. */
 		if (turb_blend)
 		{
-			glEnable_fp (GL_BLEND);
+			R_SetBlend (true);
 			if (!OIT_InPass())
-				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDepthMask_fp(0);
+				R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			R_SetDepthMask (false);
 		}
 		else if (!OIT_InPass())
 		{
@@ -907,8 +908,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			 * alpha override means this surface is actually opaque
 			 * and must occlude geometry behind it.  uhexen2-j001.
 			 * Gated for OIT pass. */
-			glDisable_fp (GL_BLEND);
-			glDepthMask_fp(1);
+			R_SetBlend (false);
+			R_SetDepthMask (true);
 		}
 		alpha_val = turb_alpha;
 		/* Self-emissive turb textures (lava, teleporters, custom mod
@@ -981,8 +982,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		 * uhexen2-j001.  Gated for OIT pass. */
 		if (!OIT_InPass())
 		{
-			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
+			R_SetDepthMask (true);
+			R_SetBlend (false);
 		}
 		return;
 	}
@@ -995,12 +996,12 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		 * pass. */
 		if (!OIT_InPass())
 		{
-			glDisable_fp(GL_BLEND);
-			glDepthMask_fp(1);
+			R_SetBlend (false);
+			R_SetDepthMask (true);
 		}
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
-			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (true);
 	}
 
 	/* MLS_ABSLIGHT skip restored from pre-90265f406. Brush entities with
@@ -1072,8 +1073,8 @@ dynamic:
 		/* gated for OIT pass */
 		if (!OIT_InPass())
 		{
-			glDepthMask_fp(1);
-			glDisable_fp (GL_BLEND);
+			R_SetDepthMask (true);
+			R_SetBlend (false);
 		}
 	}
 
@@ -1081,7 +1082,7 @@ dynamic:
 	{
 		GL_SetAlphaThreshold(0.01f);
 		if (r_alphatocoverage.integer)
-			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (false);
 	}
 }
 
@@ -1107,7 +1108,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 	/* KIERO: Seems it's enabled when we enter here.  Gated for OIT pass. */
 	if (!OIT_InPass())
-		glDisable_fp (GL_BLEND);
+		R_SetBlend (false);
 
 	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
@@ -1117,7 +1118,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWTURB)
 	{
 		if (!OIT_InPass())
-			glDisable_fp (GL_BLEND);
+			R_SetBlend (false);
 		glActiveTexture_fp(GL_TEXTURE1);
 		glActiveTexture_fp(GL_TEXTURE0);
 
@@ -1148,12 +1149,12 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		/* uhexen2-t4kt — see R_RenderBrushPoly.  Gated for OIT pass. */
 		if (!OIT_InPass())
 		{
-			glDisable_fp(GL_BLEND);
-			glDepthMask_fp(1);
+			R_SetBlend (false);
+			R_SetDepthMask (true);
 		}
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
-			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (true);
 	}
 
 	if (fa->flags & SURF_DRAWTURB)
@@ -1161,18 +1162,18 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		float turb_alpha = R_LiquidAlpha(fa->texinfo->texture);
 		if (turb_alpha < 1.0f && alpha_val >= 1.0f)
 		{
-			glEnable_fp (GL_BLEND);
+			R_SetBlend (true);
 			if (!OIT_InPass())
-				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDepthMask_fp(0);
+				R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			R_SetDepthMask (false);
 		}
 		GL_ImmColor4f(1.0f, 1.0f, 1.0f, turb_alpha < 1.0f ? turb_alpha : alpha_val);
 		EmitWaterPolys (fa);
 		if (turb_alpha < 1.0f && !OIT_InPass())
 		{
 			/* See R_RenderBrushPoly's matching cleanup. */
-			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
+			R_SetDepthMask (true);
+			R_SetBlend (false);
 		}
 		//return;
 	}
@@ -1234,7 +1235,7 @@ dynamic1:
 	{
 		GL_SetAlphaThreshold(0.01f);
 		if (r_alphatocoverage.integer)
-			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (false);
 	}
 
 	glActiveTexture_fp(GL_TEXTURE1);
@@ -1378,18 +1379,18 @@ void R_DrawWaterSurfaces (int phase)
 		if (is_opaque)
 		{
 			/* opaque liquid (e.g. lava): draw without blend */
-			glDisable_fp (GL_BLEND);
-			glDepthMask_fp(1);
+			R_SetBlend (false);
+			R_SetDepthMask (true);
 			GL_ImmColor4f (1,1,1,1);
 		}
 		else
 		{
 			/* translucent liquid: draw with blend, no depth write.
 			 * Blend func gated for OIT pass. */
-			glEnable_fp (GL_BLEND);
+			R_SetBlend (true);
 			if (!OIT_InPass())
-				glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDepthMask_fp(0);
+				R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			R_SetDepthMask (false);
 			GL_ImmColor4f (1,1,1, a);
 		}
 
@@ -1410,8 +1411,8 @@ void R_DrawWaterSurfaces (int phase)
 	/* Blend/depth-mask cleanup gated for OIT pass. */
 	if (!OIT_InPass())
 	{
-		glDisable_fp (GL_BLEND);
-		glDepthMask_fp (1);
+		R_SetBlend (false);
+		R_SetDepthMask (true);
 	}
 }
 
@@ -1551,7 +1552,7 @@ void R_DrawBrushModelSpecialOnly (entity_t *e)
 		return;
 	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry (same fix as
 	 * R_DrawBrushModel). Prevent stale blending state from world rendering. */
-	glDisable_fp(GL_BLEND);
+	R_SetBlend (false);
 	rotated = (e->angles[0] || e->angles[1] || e->angles[2]) ? true : false;
 
 	VectorSubtract (r_refdef.vieworg, e->origin, modelorg_local);
@@ -1644,7 +1645,7 @@ void R_BeginBrushBatch (void)
 	 * variant for Hi-Z.  uhexen2-5c6r. */
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glUseProgram_fp(gl_shader_world_opaque.program);
+	R_UseProgram (gl_shader_world_opaque.program);
 	if (gl_shader_world_opaque.u_fog_density >= 0)
 		glUniform1f_fp(gl_shader_world_opaque.u_fog_density, r_fog_density);
 	if (gl_shader_world_opaque.u_fog_color >= 0)
@@ -1667,7 +1668,7 @@ void R_EndBrushBatch (void)
 	if (!brush_batch_active)
 		return;
 	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 	brush_batch_active = false;
 }
 
@@ -1706,7 +1707,7 @@ static void DrawTextureChains_BindWorldState (void)
 	glprogram_t *prog = &gl_shader_world_opaque;
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	glUseProgram_fp(prog->program);
+	R_UseProgram (prog->program);
 	GL_GetMVP(mvp);
 	GL_GetModelview(mv);
 	if (prog->u_mvp >= 0)
@@ -1867,7 +1868,7 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 	{
 		float mvp[16];
 		glBindVertexArray_fp(sky_stencil_vao);
-		glUseProgram_fp(gl_shader_flat.program);
+		R_UseProgram (gl_shader_flat.program);
 		GL_GetMVP(mvp);
 		if (gl_shader_flat.u_mvp >= 0)
 			glUniformMatrix4fv_fp(gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
@@ -1990,7 +1991,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			/* Bind world VBO + shader once. */
 			glBindVertexArray_fp(world_vao);
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-			glUseProgram_fp(gl_shader_world.program);
+			R_UseProgram (gl_shader_world.program);
 			{
 				float mvp[16], mv[16];
 				GL_GetMVP(mvp);
@@ -2029,9 +2030,9 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 	if (gl_shader_world.u_alpha_threshold >= 0) \
 		glUniform1f_fp(gl_shader_world.u_alpha_threshold, (ALPHA_T)); \
 	if (A2C_ON) \
-		glEnable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE); \
+		R_SetAlphaToCoverage (true); \
 	else \
-		glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE); \
+		R_SetAlphaToCoverage (false); \
 	texture_t *cur_tex_ = NULL; \
 	int run_first_ = 0, run_total_ = 0, count_run_ = 0; \
 	int kk_; \
@@ -2073,9 +2074,9 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 #undef EMIT_BATCH
 
 			/* Tear down */
-			glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (false);
 			glBindVertexArray_fp(0);
-			glUseProgram_fp(0);
+			R_UseProgram (0);
 		}
 	}
 	else
@@ -2151,11 +2152,11 @@ static void DrawTextureChains (entity_t *e)
 		msurface_t *sky;
 		int	ti;
 		_t0 = (r_speeds.integer >= 2) ? Sys_DoubleTime() : 0;
-		glEnable_fp(GL_STENCIL_TEST);
-		glStencilFunc_fp(GL_ALWAYS, 1, 0xFF);
-		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
-		glDepthMask_fp(1);	/* ensure depth writes are on */
-		glColorMask_fp(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		R_SetStencilTest (true);
+		R_SetStencilFunc (GL_ALWAYS, 1, 0xFF);
+		R_SetStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
+		R_SetDepthMask (true);	/* ensure depth writes are on */
+		R_SetColorMask (false, false, false, false);
 
 		if (sky_stencil_vao && sky_stencil_ibo && sky_stencil_total_indices > 0)
 		{
@@ -2191,7 +2192,7 @@ static void DrawTextureChains (entity_t *e)
 			if (sky_bound)
 			{
 				glBindVertexArray_fp(0);
-				glUseProgram_fp(0);
+				R_UseProgram (0);
 				GL_ImmInvalidateState();
 				/* Force the chain loop's hoisted world-state bind to redo
 				 * itself; we just stomped on VAO + program. */
@@ -2233,12 +2234,12 @@ static void DrawTextureChains (entity_t *e)
 			GL_ImmEnd(GL_TRIANGLES, &gl_shader_flat);
 		}
 
-		glColorMask_fp(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		R_SetColorMask (true, true, true, true);
 		/* Leave stencil test ON: any world geometry that draws
 		 * closer than the sky surface resets stencil to 0,
 		 * so the skybox only fills truly visible sky pixels. */
-		glStencilFunc_fp(GL_ALWAYS, 0, 0xFF);
-		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_REPLACE);
+		R_SetStencilFunc (GL_ALWAYS, 0, 0xFF);
+		R_SetStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
 		if (r_speeds.integer >= 2 && e == &r_worldentity)
 			rprof_cpu_chains_skystencil = Sys_DoubleTime() - _t0;
 	}
@@ -2288,7 +2289,7 @@ static void DrawTextureChains (entity_t *e)
 				if (world_state_set)
 				{
 					glBindVertexArray_fp(0);
-					glUseProgram_fp(0);
+					R_UseProgram (0);
 					world_state_set = false;
 				}
 				R_DrawSkyChain (s);
@@ -2304,7 +2305,7 @@ static void DrawTextureChains (entity_t *e)
 			if (world_state_set)
 			{
 				glBindVertexArray_fp(0);
-				glUseProgram_fp(0);
+				R_UseProgram (0);
 				world_state_set = false;
 			}
 			R_MirrorChain (s);
@@ -2328,7 +2329,7 @@ static void DrawTextureChains (entity_t *e)
 				if (world_state_set)
 				{
 					glBindVertexArray_fp(0);
-					glUseProgram_fp(0);
+					R_UseProgram (0);
 					world_state_set = false;
 				}
 				for ( ; s ; s = s->texturechain)
@@ -2394,7 +2395,7 @@ static void DrawTextureChains (entity_t *e)
 							 * state, so re-establish both the world state
 							 * and this chain's diffuse bind afterwards. */
 							glBindVertexArray_fp(0);
-							glUseProgram_fp(0);
+							R_UseProgram (0);
 							world_state_set = false;
 							DrawTextureChains_DrawDeferred (e, world_deferred, world_deferred_count);
 							world_deferred_count = 0;
@@ -2487,7 +2488,7 @@ static void DrawTextureChains (entity_t *e)
 				if (world_state_set)
 				{
 					glBindVertexArray_fp(0);
-					glUseProgram_fp(0);
+					R_UseProgram (0);
 					world_state_set = false;
 				}
 				/* ImmBegin fallback for non-world brush entities */
@@ -2531,7 +2532,7 @@ static void DrawTextureChains (entity_t *e)
 				if (world_state_set)
 				{
 					glBindVertexArray_fp(0);
-					glUseProgram_fp(0);
+					R_UseProgram (0);
 					world_state_set = false;
 				}
 				/* No atlas — per-surface lightmap binds */
@@ -2559,7 +2560,7 @@ static void DrawTextureChains (entity_t *e)
 		if (world_state_set)
 		{
 			glBindVertexArray_fp(0);
-			glUseProgram_fp(0);
+			R_UseProgram (0);
 			world_state_set = false;
 		}
 
@@ -2573,7 +2574,7 @@ static void DrawTextureChains (entity_t *e)
 	if (world_state_set)
 	{
 		glBindVertexArray_fp(0);
-		glUseProgram_fp(0);
+		R_UseProgram (0);
 		world_state_set = false;
 	}
 
@@ -2586,7 +2587,7 @@ static void DrawTextureChains (entity_t *e)
 	glActiveTexture_fp(GL_TEXTURE0);
 
 	if (have_stencil)
-		glDisable_fp(GL_STENCIL_TEST);
+		R_SetStencilTest (false);
 }
 
 /*
@@ -2611,7 +2612,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	 * visible from the current angle. Without this reset, brush entities
 	 * inherit stale blending state and render with view-dependent artifacts
 	 * (transparency changing as you rotate the camera). */
-	glDisable_fp(GL_BLEND);
+	R_SetBlend (false);
 
 	clmodel = e->model;
 
@@ -2751,7 +2752,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		 * early_fragment_tests variant.  uhexen2-5c6r. */
 		glprogram_t *prog = &gl_shader_world_opaque;
 		glBindVertexArray_fp(world_vao);
-		glUseProgram_fp(prog->program);
+		R_UseProgram (prog->program);
 		glActiveTexture_fp(GL_TEXTURE1);
 		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 		/* Default fb to null sentinel — brush ent fast path doesn't
@@ -2950,7 +2951,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		if (!brush_batch_active)
 		{
 			glBindVertexArray_fp(0);
-			glUseProgram_fp(0);
+			R_UseProgram (0);
 		}
 
 		/* Legacy path for any special surfaces marked above */

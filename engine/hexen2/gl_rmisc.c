@@ -302,6 +302,7 @@ void R_Init (void)
 	{ extern cvar_t r_speeds_gpufinish; Cvar_RegisterVariable (&r_speeds_gpufinish); }
 	Cvar_RegisterVariable (&r_wholeframe);
 	Cvar_RegisterVariable (&r_alphasort);
+	Cvar_RegisterVariable (&r_vm_watch);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_SetCallback (&r_clearcolor, R_SetClearColor_f);
 	Cvar_RegisterVariable (&r_texture_external);
