@@ -125,6 +125,12 @@ void Cmd_StuffCmds_f (void);
 // Executes the commandline parameters with a leading "+" as script
 // statements.
 
+const char *Cmd_StartupScript (void);
+// Command text that runs the current gamedir's startup script: normally
+// just "exec hexen.rc". Feed it to whichever of Cbuf_InsertText /
+// Cbuf_AddText the caller was already using -- the result is a drop-in
+// replacement for the literal, not a queueing decision of its own.
+
 int ListCommands (const char *prefix, const char **buf, int pos);
 int ListCvars (const char *prefix, const char **buf, int pos);
 int ListAlias (const char *prefix, const char **buf, int pos);

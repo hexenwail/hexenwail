@@ -45,6 +45,11 @@
 #include "gl_vbo.h"
 #include "filenames.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#include <emscripten/html5_webgl.h>
+#endif
+
 
 /* GL 4.3 debug message callback */
 #ifndef GL_DEBUG_OUTPUT
@@ -284,6 +289,7 @@ static const char	*gl_version;
 
 GLint		gl_max_size = 256;
 GLfloat		gl_max_anisotropy;
+gl_renderer_caps_t gl_renderer_caps;
 qboolean	gl_have_s3tc = false;
 qboolean	gl_have_rgtc = false;
 qboolean	gl_have_bptc = false;
@@ -317,6 +323,201 @@ cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_ARCHIVE};	/* read by gl_l
 
 // stencil buffer
 qboolean	have_stencil = false;
+
+/*
+================
+GL_InitRendererCaps
+
+Collect what this context can actually do into gl_renderer_caps, for
+`renderer_status` and for the Options menu's feature gating.  Every answer here
+is read from the tier the rest of the engine already branches on -- the ES tier
+has no SSBOs, compute, indirect draw or per-draw-buffer blending at all, and on
+the desktop the corresponding entry points are the same ones gl_buffer.c and
+gl_postprocess.c probe.  Nothing here decides anything those files do not
+already decide for themselves.
+
+Ported from alextnewman/hexenwail d2c46f078.
+================
+*/
+static void GL_InitRendererCaps (void)
+{
+	memset(&gl_renderer_caps, 0, sizeof(gl_renderer_caps));
+
+#ifdef USE_GLES
+	gl_renderer_caps.profile = GL_RENDERER_GLES3;
+	gl_renderer_caps.profile_name = "OpenGL ES 3.0 / WebGL2";
+	/* Anisotropy and float color buffers are extensions on this tier.  In
+	 * the browser they must be *enabled* on the context before the enums
+	 * become legal, which SDL_GL_ExtensionSupported does not do -- a bare
+	 * support query would leave the later glGetFloatv raising
+	 * GL_INVALID_ENUM. */
+#ifdef __EMSCRIPTEN__
+	{
+		EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = emscripten_webgl_get_current_context();
+
+		gl_renderer_caps.anisotropy = ctx > 0 &&
+			emscripten_webgl_enable_extension(ctx, "EXT_texture_filter_anisotropic") != 0;
+		gl_renderer_caps.float_color_buffer = ctx > 0 &&
+			emscripten_webgl_enable_extension(ctx, "EXT_color_buffer_float") != 0;
+	}
+#else
+	gl_renderer_caps.anisotropy =
+		SDL_GL_ExtensionSupported("GL_EXT_texture_filter_anisotropic");
+	gl_renderer_caps.float_color_buffer =
+		SDL_GL_ExtensionSupported("GL_EXT_color_buffer_float");
+#endif
+#else
+	gl_renderer_caps.profile = GL_RENDERER_DESKTOP_43;
+	gl_renderer_caps.profile_name = "Desktop OpenGL 4.3";
+	/* Asserted, not probed.  This tier already requires GL 4.3, where the EXT
+	 * is universal (and the ARB spelling is core in 4.6) -- but a driver is
+	 * not obliged to advertise both strings, and a probe that came back false
+	 * would silently drop anisotropy everywhere and hide the Options row.
+	 * Trading a guarantee for a query is not worth it on the tier that has the
+	 * guarantee; the ES arm above is where the probe is load-bearing. */
+	gl_renderer_caps.anisotropy = true;
+	gl_renderer_caps.float_color_buffer = true;	/* core since GL 3.0 */
+	gl_renderer_caps.shader_storage = (glBindBufferBase_fp != NULL);
+	gl_renderer_caps.compute_shaders =
+		(glDispatchCompute_fp != NULL) && (glMemoryBarrier_fp != NULL);
+	gl_renderer_caps.indirect_draw =
+		(glDrawElementsIndirect_fp != NULL) && (glMultiDrawElementsIndirect_fp != NULL);
+	gl_renderer_caps.indexed_blending =
+		(glBlendFunci_fp != NULL) && (glDrawBuffers_fp != NULL) && (glClearBufferfv_fp != NULL);
+	gl_renderer_caps.gpu_particles = gl_renderer_caps.shader_storage;
+	gl_renderer_caps.skeletal_animation = gl_renderer_caps.shader_storage;
+	gl_renderer_caps.oit =
+		gl_renderer_caps.indexed_blending && gl_renderer_caps.float_color_buffer;
+#endif
+
+	Con_SafePrintf("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
+	Con_SafePrintf("[RENDERER] Features: HDR-targets=%s SSBO=%s compute=%s "
+		       "indirect=%s OIT=%s\n",
+		       gl_renderer_caps.float_color_buffer ? "yes" : "no",
+		       gl_renderer_caps.shader_storage ? "yes" : "CPU fallback",
+		       gl_renderer_caps.compute_shaders ? "yes" : "CPU fallback",
+		       gl_renderer_caps.indirect_draw ? "yes" : "sorted draws",
+		       gl_renderer_caps.oit ? "yes" : "sorted transparency");
+}
+
+/*
+================
+GL_RunFramebufferSelfTest
+
+Render-to-texture is load-bearing for the whole post-process chain, and a
+driver (or a browser's WebGL2 implementation) that silently refuses an RGBA8
+color attachment produces a black screen with no other symptom.  Clear a 2x2
+RGBA8 FBO to a known colour and read one texel back.
+
+Diagnostic only: a failure is reported and recorded in gl_renderer_caps, not
+fatal.  Bricking startup on a self-test false negative would be worse than the
+degraded rendering it is warning about, and the PWA launcher runs its own
+WebGL2 gate (web/lib/webgl-diagnostics.js) before it will start the engine at
+all -- which, unlike a Sys_Error here, can put the reason in front of the user.
+
+Ported from alextnewman/hexenwail d2c46f078.
+================
+*/
+static qboolean GL_RunFramebufferSelfTest (void)
+{
+	GLuint		texture = 0, framebuffer = 0;
+	GLenum		status;
+	GLint		old_fbo = 0, old_texture = 0, old_active = GL_TEXTURE0, old_viewport[4];
+	GLfloat		old_clear[4];
+	unsigned char	pixel[4] = {0, 0, 0, 0};
+	qboolean	passed;
+
+	glGetIntegerv_fp(GL_FRAMEBUFFER_BINDING, &old_fbo);
+	glGetIntegerv_fp(GL_ACTIVE_TEXTURE, &old_active);
+	glGetIntegerv_fp(GL_VIEWPORT, old_viewport);
+	glGetFloatv_fp(GL_COLOR_CLEAR_VALUE, old_clear);
+
+	/* Select the unit *before* reading its 2D binding: GL_TEXTURE_BINDING_2D
+	 * is per-unit, so querying it first and restoring it after the switch
+	 * would copy the entry unit's binding onto unit 0. */
+	glActiveTexture_fp(GL_TEXTURE0);
+	glGetIntegerv_fp(GL_TEXTURE_BINDING_2D, &old_texture);
+	glGenTextures_fp(1, &texture);
+	glBindTexture_fp(GL_TEXTURE_2D, texture);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	glGenFramebuffers_fp(1, &framebuffer);
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, framebuffer);
+	glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				  GL_TEXTURE_2D, texture, 0);
+	status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
+	if (status == GL_FRAMEBUFFER_COMPLETE)
+	{
+		glViewport_fp(0, 0, 2, 2);
+		glClearColor_fp(0.25f, 0.5f, 0.75f, 1.0f);
+		glClear_fp(GL_COLOR_BUFFER_BIT);
+		glReadPixels_fp(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+	}
+
+	/* +/-2 on each channel: the clear colour lands between 8-bit steps
+	 * (0.25*255 = 63.75) and rounding is the driver's to choose. */
+	passed = (status == GL_FRAMEBUFFER_COMPLETE) &&
+		 pixel[0] >= 62 && pixel[0] <= 66 &&
+		 pixel[1] >= 126 && pixel[1] <= 129 &&
+		 pixel[2] >= 190 && pixel[2] <= 193 &&
+		 pixel[3] == 255;
+
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, (GLuint)old_fbo);
+	glDeleteFramebuffers_fp(1, &framebuffer);
+	glBindTexture_fp(GL_TEXTURE_2D, (GLuint)old_texture);
+	glDeleteTextures_fp(1, &texture);
+	glActiveTexture_fp((GLenum)old_active);
+	glViewport_fp(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
+	glClearColor_fp(old_clear[0], old_clear[1], old_clear[2], old_clear[3]);
+	/* Bound behind GL_Bind's back above; tell the cache what is bound now. */
+	currenttexture = GL_UNUSED_TEXTURE;
+
+	gl_renderer_caps.fbo_selftest = passed;
+	Con_SafePrintf("[RENDERER] RGBA8 texture/FBO self-test: %s "
+		       "(status=0x%x pixel=%u,%u,%u,%u)\n",
+		       passed ? "PASS" : "FAIL", (unsigned int)status,
+		       pixel[0], pixel[1], pixel[2], pixel[3]);
+	if (!passed)
+		Con_SafePrintf("[RENDERER] WARNING: render-to-texture looks broken; "
+			       "post-processing and render scale will not work.\n");
+	return passed;
+}
+
+static void GL_RendererStatus_f (void)
+{
+	Con_Printf("[RENDERER] %s | GL=%s | GLSL=%s\n",
+		   gl_renderer_caps.profile_name, gl_version,
+		   (const char *)glGetString_fp(GL_SHADING_LANGUAGE_VERSION));
+	Con_Printf("[RENDERER] drawable=%dx%d viewport=%d,%d %dx%d\n",
+		   WRWidth, WRHeight, glx, gly, glwidth, glheight);
+	Con_Printf("[RENDERER] postprocess=%s HDR-targets=%s OIT=%s SSBO=%s "
+		   "anisotropy=%s FBO-test=%s\n",
+		   gl_renderer_caps.postprocess ? "ready" : "unavailable",
+		   gl_renderer_caps.float_color_buffer ? "yes" : "no",
+		   gl_renderer_caps.oit ? "yes" : "sorted fallback",
+		   gl_renderer_caps.shader_storage ? "yes" : "CPU fallback",
+		   gl_renderer_caps.anisotropy ? "yes" : "no",
+		   gl_renderer_caps.fbo_selftest ? "pass" : "fail");
+	GL_ReportShaderStatus();
+	GL_ReportLightmapStatus();
+}
+
+static void GL_RendererSafe_f (void)
+{
+	Cvar_Set("r_hdr", "0");
+	Cvar_Set("r_oit", "0");
+	Cvar_Set("r_bloom", "0");
+	Cvar_Set("r_scale", "1");
+	Cvar_Set("r_softemu", "0");
+	Cvar_Set("gl_fxaa", "0");
+	Cvar_Set("r_motionblur", "0");
+	Cvar_Set("gl_lightmapfmt", "GL_RGBA");
+	Cvar_Set("gl_lmatlas", "1");
+	Con_Printf("[RENDERER] Safe graphics defaults applied; reload the map if one is running.\n");
+}
 
 // this is useless: things aren't like those in quake
 //static qboolean	fullsbardraw = false;
@@ -378,6 +579,36 @@ qboolean VID_IsMinimized (void)
 	/* SDL3: SDL_WINDOW_SHOWN removed; check SDL_WINDOW_MINIMIZED instead */
 	return (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0;
 }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE void Hexenwail_ResizeCanvas (int css_width, int css_height)
+{
+	int dw, dh;
+
+	if (!window || css_width <= 0 || css_height <= 0)
+		return;
+
+	SDL_SetWindowSize(window, css_width, css_height);
+	SDL_SyncWindow(window);
+	SDL_GetWindowSizeInPixels(window, &dw, &dh);
+	if (dw <= 0 || dh <= 0)
+		return;
+
+	if (WRWidth == dw && WRHeight == dh)
+		return;
+
+	WRWidth = dw;
+	WRHeight = dh;
+	vid.width = vid.conwidth = WRWidth;
+	vid.height = vid.conheight = WRHeight;
+	Cvar_SetValueQuick (&vid_config_glx, WRWidth);
+	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
+	vid.recalc_refdef = 1;
+	glViewport_fp(0, 0, WRWidth, WRHeight);
+	Con_SafePrintf("[RENDERER] Canvas synchronized: CSS=%dx%d drawable=%dx%d\n",
+		       css_width, css_height, WRWidth, WRHeight);
+}
+#endif
 
 
 //====================================
@@ -953,6 +1184,10 @@ static void GL_Init (void)
 
 	gl_version = (const char *)glGetString_fp (GL_VERSION);
 	Con_SafePrintf ("GL_VERSION: %s\n", gl_version);
+	Con_SafePrintf ("GLSL_VERSION: %s\n",
+			(const char *)glGetString_fp (GL_SHADING_LANGUAGE_VERSION));
+	Con_SafePrintf ("[RENDERER] Drawable: %dx%d, logical video: %dx%d\n",
+			WRWidth, WRHeight, vid.width, vid.height);
 
 	glGetIntegerv_fp(GL_MAX_TEXTURE_SIZE, &gl_max_size);
 	if (gl_max_size < 256)	// Refuse to work when less than 256
@@ -975,11 +1210,6 @@ static void GL_Init (void)
 	/* Emscripten: use direct function call */
 	glActiveTexture(GL_TEXTURE0);
 #endif
-
-	/* GL 4.3: anisotropic filtering is always available */
-	gl_max_anisotropy = 1;
-	glGetFloatv_fp(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &gl_max_anisotropy);
-	Con_SafePrintf("Anisotropic filtering: max %.1f\n", gl_max_anisotropy);
 
 	/* NPOT textures: always available on GL 4.3 */
 	Con_SafePrintf("NPOT textures enabled\n");
@@ -1029,16 +1259,34 @@ static void GL_Init (void)
 	Con_SafePrintf("GL error polling enabled (no KHR_debug on the ES tier)\n");
 #endif
 
+	/* After GL_LoadFunctionPointers: the desktop half of this reads the
+	 * entry points it just resolved. */
+	GL_InitRendererCaps();
+
+	/* Anisotropy is core on the desktop tier and an extension on ES, where
+	 * querying the max without the extension enabled is a GL_INVALID_ENUM
+	 * rather than a zero. */
+	gl_max_anisotropy = 1;
+	if (gl_renderer_caps.anisotropy)
+		glGetFloatv_fp(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &gl_max_anisotropy);
+	Con_SafePrintf("Anisotropic filtering: %s (max %.1f)\n",
+		       gl_renderer_caps.anisotropy ? "enabled" : "unavailable",
+		       gl_max_anisotropy);
+
 	/* Force the draw state to a known value and seed the pipeline shadow
 	 * from it.  Everything below sets state through gl_pipeline.c, which
 	 * drops calls that would not change anything -- so it has to start from
 	 * a state it actually knows.  Once per context, i.e. here and again
-	 * after every vid_restart.  uhexen2-p4ln.1. */
+	 * after every vid_restart.  uhexen2-p4ln.1.
+	 * After GL_InitRendererCaps, which only queries -- so it cannot have
+	 * moved any state out from under the shadow being seeded here. */
 	R_PipelineResetState ();
 
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
+	gl_renderer_caps.postprocess = GL_PostProcess_Available();
+	GL_RunFramebufferSelfTest();
 
 	/* Init does a lot of texture and shader work; drain before the first
 	 * frame so anything it raised is attributed here rather than to the
@@ -1720,6 +1968,8 @@ void	VID_Init (const unsigned char *palette)
 	Cmd_AddCommand ("vid_listmodes", VID_ListModes_f);
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
 	Cmd_AddCommand ("vid_restart", VID_Restart_f);
+	Cmd_AddCommand ("renderer_status", GL_RendererStatus_f);
+	Cmd_AddCommand ("renderer_safe", GL_RendererSafe_f);
 
 	VID_InitPalette (palette);
 

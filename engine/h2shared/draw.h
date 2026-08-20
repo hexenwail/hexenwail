@@ -51,23 +51,27 @@ void Draw_TransPicCropped (int x, int y, qpic_t *pic);
 void Draw_ConsoleBackground (int lines);
 void Draw_Crosshair (void);
 
-#if defined(GLQUAKE)
+/* The web builds publish the same extended 2D API as the GL build: the WebGL2
+ * configuration because it *is* the GL renderer, the software configuration
+ * because draw_soft_web.c reimplements it on the 8bpp framebuffer.  That is
+ * what keeps console.c / menu.c / sbar.c free of renderer #ifdefs. */
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 void Draw_AlphaPic (int x, int y, qpic_t *pic, float alpha);
-#endif	/*  GLQUAKE */
+#endif	/*  GLQUAKE || WEBQUAKE */
 
 void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p_class);
 					/* Only used for the player color selection menu */
 
 #if FULLSCREEN_INTERMISSIONS
-# if defined(GLQUAKE)
+# if defined(GLQUAKE) || defined(WEBQUAKE)
 qpic_t *Draw_CachePicNoTrans (const char *path);
 void Draw_IntermissionPic (qpic_t *pic);
-# else	/* !GLQUAKE */
+# else	/* !GLQUAKE && !WEBQUAKE */
 qpic_t *Draw_CachePicResize (const char *path, int targetWidth, int targetHeight);
-# endif	/*  GLQUAKE */
+# endif	/*  GLQUAKE || WEBQUAKE */
 #endif	/*  FULLSCREEN_INTERMISSIONS */
 
-#if defined(GLQUAKE)
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 #undef DRAW_LOADINGSKULL
 #endif
 
@@ -82,7 +86,7 @@ void Draw_EndDisc (void);
 void Draw_TileClear (int x, int y, int w, int h);
 void Draw_Fill (int x, int y, int w, int h, int c);
 void Draw_FadeScreen (void);
-#if defined(GLQUAKE)
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, float a);
 void Draw_MenuBackdrop (void);	/* full-screen conback for main-menu backdrop */
 #else
@@ -97,7 +101,7 @@ void Draw_SmallString (int x, int y, const char *str);
 void Draw_RedString (int x, int y, const char *str);
 void Draw_BigCharacter (int x, int y, int num);
 
-#if defined(GLQUAKE)
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 /* Flush any pending batched glyph quads. Called automatically by every
  * other Draw_* function and at the 2D-phase boundary; rarely needed
  * directly. */
@@ -110,7 +114,7 @@ void Draw_FlushCharBatch (void);
 #define GAME_MOD_NAME		ENGINE_NAME
 #define ENGINE_WATERMARK	GAME_MOD_NAME " " HW_VERSION " (" PLATFORM_STRING ")"
 
-#if defined(GLQUAKE)
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 /* Multi-canvas 2D scaling (Ironwail-parity).
    Each canvas has its own ortho projection and viewport so HUD,
    menu and crosshair can be scaled independently for high-DPI. */
@@ -126,6 +130,15 @@ typedef enum {
 
 void GL_SetCanvas (canvastype newcanvas);
 
+/* Logical size of the fixed 320-wide UI canvases, in canvas units.
+   CANVAS_SBAR is anchored to the bottom of the screen and horizontally
+   centred; CANVAS_MENU is anchored to the top and horizontally centred.
+   The status bar canvas is tall enough for the bumps above the main bar
+   and for the lower info bar that drops down on showinfo -- it must match
+   BAR_BUMP_HEIGHT + BAR_TOP_HEIGHT + BAR_BOTTOM_HEIGHT in sbar.c. */
+#define UI_CANVAS_WIDTH		320
+#define UI_SBAR_CANVAS_HEIGHT	(23 + 46 + 98)
+
 extern cvar_t scr_sbarscale;
 extern cvar_t scr_menuscale;
 extern cvar_t scr_crosshairscale;
@@ -139,7 +152,7 @@ float SCR_CalcUIScale (cvar_t *user);
  * be NULL.  The debug readouts anchor to this canvas' edges, so they have to ask
  * for its size rather than assume vid.width/vid.height. */
 float SCR_InfoCanvasSize (int *w, int *h);
-#endif	/* GLQUAKE */
+#endif	/* GLQUAKE || WEBQUAKE */
 
 #endif	/* __HX2_DRAW_H */
 

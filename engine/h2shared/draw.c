@@ -297,6 +297,10 @@ void Draw_Init (void)
 
 	if (!draw_reinit)
 		Hash_Allocate (&hash_cachepics, MAX_CACHED_PICS);
+
+#if defined(WEBSOFT)
+	Draw_SoftWebInit ();
+#endif
 }
 
 /*
@@ -341,6 +345,9 @@ void Draw_Character (int x, int y, unsigned int num)
 	byte		*source;
 	int		drawline;
 	int		row, col;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	num &= 511;
 
@@ -497,6 +504,9 @@ void Draw_RedString (int x, int y, const char *str)
 
 static void Draw_Pixel (int x, int y, const byte color)
 {
+	x += draw_canvas_x;
+	y += draw_canvas_y;
+
 	if (r_pixbytes == 1)
 	{
 		byte *dest = vid.conbuffer + y*vid.conrowbytes + x;
@@ -554,6 +564,9 @@ void Draw_SmallCharacter (int x, int y, int num)
 {
 	byte		*source;
 	int		height, row, col;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if (num < 32)
 	{
@@ -733,6 +746,9 @@ void Draw_BigCharacter (int x, int y, int num)
 	byte	*dest;
 	byte	*source;
 
+	x += draw_canvas_x;
+	y += draw_canvas_y;
+
 	p = Draw_CachePic ("gfx/menu/bigfont.lmp");
 	source = p->data + ((num % 8) * 20) + (num / 8 * p->width * 20);
 
@@ -761,6 +777,9 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 {
 	byte		*source;
 	int		v, u;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if ((x < 0) || (x + pic->width > vid.width) ||
 	    (y < 0) || (y + pic->height > vid.height))
@@ -811,6 +830,9 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 {
 	byte		*source;
 	int		v, u, height;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if ((x < 0) || (x+pic->width > (int)vid.width))
 	{
@@ -904,6 +926,9 @@ void Draw_TransPic (int x, int y, qpic_t *pic)
 	byte		*source, tbyte;
 	int		v, u;
 
+	x += draw_canvas_x;
+	y += draw_canvas_y;
+
 	if (x < 0 || (x + pic->width) > vid.width ||
 	    y < 0 || (y + pic->height) > vid.height)
 	{
@@ -993,6 +1018,9 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 {
 	byte		*source;
 	int		v, u, height;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if ((x < 0) || (x+pic->width > vid.width))
 	{
@@ -1093,6 +1121,9 @@ void Draw_TransPicCropped (int x, int y, qpic_t *pic)
 {
 	byte		*source, tbyte;
 	int		v, u, height;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if ((x < 0) || (x+pic->width > vid.width))
 	{
@@ -1292,6 +1323,9 @@ void Draw_SubPic (int x, int y, qpic_t *pic, int srcx, int srcy, int width, int 
 	byte		*source;
 	int		v, u;
 
+	x += draw_canvas_x;
+	y += draw_canvas_y;
+
 	if ((x < 0) || (x + width > vid.width) ||
 	    (y < 0) || (y + height > vid.height))
 	{
@@ -1336,6 +1370,9 @@ void Draw_TransPicTranslate (int x, int y, qpic_t *pic, byte *translation, int p
 {
 	byte		*source, tbyte;
 	int		v, u;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if (x < 0 || (x + pic->width) > vid.width ||
 	    y < 0 || (y + pic->height) > vid.height)
@@ -1666,6 +1703,9 @@ void Draw_TileClear (int x, int y, int w, int h)
 	byte	*psrc;
 	vrect_t	vr;
 
+	x += draw_canvas_x;
+	y += draw_canvas_y;
+
 	r_rectdesc.rect.x = x;
 	r_rectdesc.rect.y = y;
 	r_rectdesc.rect.width = w;
@@ -1735,6 +1775,9 @@ Fills a box of pixels with a single color
 void Draw_Fill (int x, int y, int w, int h, int c)
 {
 	int		u, v;
+
+	x += draw_canvas_x;
+	y += draw_canvas_y;
 
 	if (x < 0 || x + w > vid.width ||
 	    y < 0 || y + h > vid.height)

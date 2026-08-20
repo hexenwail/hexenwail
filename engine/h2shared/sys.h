@@ -79,8 +79,14 @@ void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length);
 /* user directories */
 
 /* disable user directories on platforms where they
- * are not necessary or not possible. */
-#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_OS2)
+ * are not necessary or not possible.
+ *
+ * Emscripten: the browser build has exactly one durable directory, the IDBFS
+ * mount the PWA passes as -basedir (/persistent).  Everything else, $HOME
+ * included, is MEMFS and dies with the tab.  A separate userdir would put
+ * config.cfg and every savegame there, i.e. nowhere -- so let FS_Init's
+ * !DO_USERDIRS path point userdir at -basedir and keep one persistence root. */
+#if defined(PLATFORM_WINDOWS) || defined(PLATFORM_OS2) || defined(__EMSCRIPTEN__)
 #undef	DO_USERDIRS
 #define	DO_USERDIRS	0
 #endif	/* DO_USERDIRS  */

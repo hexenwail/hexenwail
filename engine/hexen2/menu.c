@@ -24,10 +24,12 @@
 #include "q_ctype.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#if defined(GLQUAKE)
 #include "gl_postprocess.h"
 #include "gl_vbo.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#endif
 #include "sbar.h"
 #include "sdl_inc.h"
 
@@ -2831,17 +2833,45 @@ static qboolean M_Rendering_IsSkip (int i)
 {
 	if (i < 0 || i >= REND_ITEMS)
 		return true;
+#if defined(WEBSOFT)
+	/* GPU-only rows have no counterpart in the software rasterizer.  Their
+	 * cvars still exist (r_soft_web.c registers them) so configs written by
+	 * the GL build round-trip, but a slider that cannot move anything does
+	 * not belong in the menu. */
+	switch (i)
+	{
+	case REND_RENDERSCALE:
+	case REND_SOFTEMU:
+	case REND_DITHER:
+	case REND_TEXFILTER:
+	case REND_ANISOTROPY:
+	case REND_LMBICUBIC:
+	case REND_SOFTPARTICLES:
+	case REND_FULLBRIGHTS:
+	case REND_WATERCOLOR:
+	case REND_WATERALPHA:
+	case REND_LIQUIDWARP:
+	case REND_FXAA:
+	case REND_MOTIONBLUR:
+	case REND_HDR:
+	case REND_HDR_EXPOSURE:
+		return true;
+	default:
+		break;
+	}
+#else
+	/* Hide controls whose backing GL feature this context does not have,
+	 * rather than offering a slider that silently does nothing.  On the ES
+	 * tier both of these are extensions that a browser may not expose.
+	 * d2c46f078. */
+	if (i == REND_ANISOTROPY && !gl_renderer_caps.anisotropy)
+		return true;
+	if ((i == REND_HDR || i == REND_HDR_EXPOSURE) && !gl_renderer_caps.float_color_buffer)
+		return true;
+#endif
 	return M_Filter_Active() && !M_Filter_Matches(rend_labels[i]);
 }
 
-static int M_Rendering_VisualRow (int i)
-{
-	int row = 0;
-	for (int j = 0; j < i; j++)
-		if (!M_Rendering_IsSkip(j))
-			row++;
-	return row;
-}
 
 static void M_Menu_Rendering_f (void)
 {
@@ -3180,8 +3210,14 @@ static void M_Rendering_Draw (void)
 		if (h >= 0 && !M_Rendering_IsSkip(h))
 			rendering_cursor = h;
 	}
+	/* Raw index, not a compacted visual row: every label above draws at
+	 * `92 + 8*REND_x` and M_MouseToMenuItem hit-tests the same raw stride, so
+	 * a hidden row leaves a gap rather than closing one up.  Compacting only
+	 * the cursor put the glyph one row above the item it controls for every
+	 * row below a hidden one -- previously only visible while a search filter
+	 * was typed, but permanent once a capability check can hide a row. */
 	if (!M_Rendering_IsSkip(rendering_cursor))
-		M_DrawCharacter (64, 92 + M_Rendering_VisualRow(rendering_cursor)*8, 12+((int)(realtime*4)&1));
+		M_DrawCharacter (64, 92 + 8*rendering_cursor, 12+((int)(realtime*4)&1));
 
 	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
 	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));
@@ -5332,7 +5368,7 @@ static void M_Menu_Help_f (void)
 
 
 #if FULLSCREEN_INTERMISSIONS
-#	ifdef GLQUAKE
+#	if defined(GLQUAKE) || defined(WEBQUAKE)
 #		define	Load_HelpPic_FN(X,Y,Z)	Draw_CachePicNoTrans((X))
 #		define	Draw_HelpPic_FN(X,Y,Z)	Draw_IntermissionPic((Z))
 #	else
@@ -7200,19 +7236,12 @@ void M_Draw (void)
 			 * menus draw items in roughly y=80..168). Ironwail parity. */
 			if (scr_menubgstyle.integer >= 2)
 			{
-				const float bg_x0 = 32, bg_y0 = 80;
-				const float bg_x1 = 288, bg_y1 = 168;
+				const int bg_x0 = 32, bg_y0 = 80;
+				const int bg_x1 = 288, bg_y1 = 168;
 				GL_SetCanvas (CANVAS_MENU);
-				Draw_FlushCharBatch ();
-				R_SetBlend (true);
-				GL_ImmBegin ();
-				GL_ImmColor4f (0.0f, 0.0f, 0.0f, 0.5f);
-				GL_ImmVertex2f (bg_x0, bg_y0);
-				GL_ImmVertex2f (bg_x1, bg_y0);
-				GL_ImmVertex2f (bg_x1, bg_y1);
-				GL_ImmVertex2f (bg_x0, bg_y1);
-				GL_ImmEnd (GL_QUADS, &gl_shader_flat);
-				R_SetBlend (false);
+				Draw_FillAlpha (bg_x0, bg_y0,
+					bg_x1 - bg_x0, bg_y1 - bg_y0,
+					0.0f, 0.0f, 0.0f, 0.5f);
 			}
 		}
 		if (scr_viewsize.integer < 110)

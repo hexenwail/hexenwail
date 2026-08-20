@@ -1954,6 +1954,10 @@ void SB_ViewSizeChanged(void)
 #define SBAR_TOTAL_HEIGHT	(BAR_BUMP_HEIGHT + BAR_TOP_HEIGHT + BAR_BOTTOM_HEIGHT)
 #define SBAR_Y(y)		((y) + (int)(SBAR_TOTAL_HEIGHT - BarHeight))
 
+/* GL_SetCanvas places the status bar canvas on the screen from its own copy
+ * of these dimensions; the two must not drift apart. */
+COMPILE_TIME_ASSERT(sbar_canvas, (int)SBAR_TOTAL_HEIGHT == UI_SBAR_CANVAS_HEIGHT);
+
 static void Sbar_DrawPic(int x, int y, qpic_t *pic)
 {
 	GL_SetCanvas (CANVAS_SBAR);

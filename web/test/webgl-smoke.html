@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hexenwail WebGL2 smoke test</title>
+</head>
+<body data-result="pending">
+  <pre id="result">pending</pre>
+  <script type="module">
+    import { runPresenterDiagnostics, runWebGLDiagnostics } from '../lib/webgl-diagnostics.js';
+
+    const output = document.getElementById('result');
+    try {
+      const report = runWebGLDiagnostics();
+      // Both web renderer configurations are built in CI, so both are gated
+      // here: the GL families above, and the palette blit the software
+      // renderer's artifact presents through.
+      const presenter = runPresenterDiagnostics();
+      const warnings = [...report.warnings, ...presenter.warnings];
+      // Stricter than the PWA launcher on purpose.  runWebGLDiagnostics only
+      // throws for structural failures, because a real user's driver rounding a
+      // pixel differently should not lock them out of the game.  CI runs a
+      // pinned software rasterizer, so here a moved pixel is a regression.
+      if (warnings.length > 0) {
+        document.body.dataset.result = 'fail';
+        output.textContent = warnings.join('\n');
+      } else {
+        document.body.dataset.result = 'pass';
+        output.textContent = JSON.stringify({ ...report, presenter });
+      }
+    } catch (error) {
+      document.body.dataset.result = 'fail';
+      output.textContent = error.stack || error.message;
+    }
+  </script>
+</body>
+</html>

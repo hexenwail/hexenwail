@@ -2,7 +2,13 @@ all_output.txt
 result
 .flatpak-builder/
 audit.md
-engine/build/
+# engine/build/ is the default; the second renderer configuration needs its own
+# CMake cache, so the whole family is ignored (scripts/wasm-build.sh takes the
+# build directory as its second argument).
+engine/build*/
+# Assembled by scripts/wasm-assemble-artifact.sh -- engine/build/bin output
+# copied over web/, i.e. entirely derived and multi-MB.
+/dist/
 *.o
 *.d
 

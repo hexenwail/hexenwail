@@ -15,6 +15,12 @@
 
 #include "quakedef.h"
 #include "sdl_inc.h"
+#ifdef __EMSCRIPTEN__
+/* Sys_MainLoop hands the frame to requestAnimationFrame.  Included here
+ * rather than relied on transitively: the software-renderer web build never
+ * pulls in glheader.h, which is where this used to arrive from. */
+#include <emscripten/emscripten.h>
+#endif
 
 #include <time.h>
 

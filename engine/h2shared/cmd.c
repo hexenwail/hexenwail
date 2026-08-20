@@ -337,6 +337,53 @@ static const char cmd_engine_defaults[] =
 	"alias zoom_out \"togglezoom\"\n"
 ;
 
+#ifdef __EMSCRIPTEN__
+/*
+ * Fallback for a missing hexen.rc, which on the web is the normal case.
+ *
+ * hexen.rc is a loose file in every retail install and is in none of the paks,
+ * so the browser build only gets one if the player imports a whole data1 folder
+ * -- a ZIP of the paks, which is what the launcher asks for, carries no such
+ * file.  Losing it is not a small degradation: nothing execs default.cfg, so
+ * Key_Init's console/pause/gamepad binds are the entire keyboard and the game
+ * cannot be played, and nothing execs config.cfg, so last session's settings
+ * are written and never read back.
+ *
+ * This is retail data1/hexen.rc verbatim, less the startdemos line that ships
+ * commented out there (and in the mission pack's copy) -- the web build has no
+ * more business autoplaying demos at startup than the desktop one does.
+ * uhexen2-g2i8
+ */
+static const char cmd_builtin_hexenrc[] =
+	"developer 0\n"
+	"exec default.cfg\n"
+	"exec config.cfg\n"
+	"exec autoexec.cfg\n"
+	"menu_main\n"
+	"stuffcmds\n"
+;
+#endif	/* __EMSCRIPTEN__ */
+
+/*
+===============
+Cmd_StartupScript
+===============
+*/
+const char *Cmd_StartupScript (void)
+{
+#ifdef __EMSCRIPTEN__
+/* Asked of the current searchpath, so a player who did import a real hexen.rc
+ * still gets theirs, and a gamedir change re-asks for the new gamedir (the
+ * mission pack ships its own copy next to pak3.pak). */
+	if (!FS_FileExists("hexen.rc", NULL))
+	{
+		Con_Printf ("couldn't exec hexen.rc, using built-in startup script\n");
+		return cmd_builtin_hexenrc;
+	}
+#endif
+	return "exec hexen.rc\n";
+}
+
 /*
 ===============
 Cmd_Exec_f

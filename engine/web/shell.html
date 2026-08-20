@@ -1,319 +1,230 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hexenwail</title>
-<style>
-  body { margin: 0; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
-  canvas { display: block; margin: 0 auto; }
-  #status { color: #fff; font-family: monospace; text-align: center; padding: 10px; }
-  #gameContainer { width: 100%; height: 100vh; display: flex; flex-direction: column; }
-  #uploadPanel {
-    background: #1a1a1a; color: #fff; padding: 20px; text-align: center;
-    border: 2px dashed #666; margin: 20px; border-radius: 8px;
-    display: flex; flex-direction: column; gap: 10px; align-items: center;
-  }
-  #uploadPanel.hidden { display: none; }
-  #uploadPanel.drag-over { border-color: #0f0; background: #0a1a0a; }
-  #fileInput { display: none; }
-  #selectButton, #clearCacheButton {
-    background: #0066cc; color: #fff; border: none; padding: 10px 20px;
-    border-radius: 4px; cursor: pointer; font-size: 14px;
-  }
-  #selectButton:hover, #clearCacheButton:hover { background: #0052a3; }
-  #gameContainer.playing #uploadPanel { display: none; }
-  canvas { flex: 1; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#2b2242">
+  <meta name="description" content="Installable offline-capable Hexenwail WebAssembly launcher for iPadOS and desktop browsers.">
+  <title>Hexenwail PWA</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/icon-180.png">
+  <style>
+    :root {
+      color-scheme: dark;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --chrome-bg: rgba(12, 10, 18, 0.94);
+      --panel-bg: rgba(24, 19, 37, 0.92);
+      --panel-border: rgba(255, 255, 255, 0.1);
+      --text-dim: #c3bed5;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: radial-gradient(circle at top, #2a2142 0%, #15111f 45%, #06070c 100%);
+      color: #f7f5fb;
+      overscroll-behavior: none;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      min-height: 100vh;
+      padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: var(--chrome-bg);
+      border-bottom: 1px solid var(--panel-border);
+      backdrop-filter: blur(14px);
+    }
+    .topbar h1 { margin: 0; font-size: 1rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .topbar small, .muted, .card p, .card li, .card code, .card small { color: var(--text-dim); }
+    .shell { display: grid; grid-template-columns: minmax(18rem, 28rem) 1fr; min-height: 0; }
+    #control-panel {
+      background: var(--panel-bg);
+      border-right: 1px solid var(--panel-border);
+      padding: 1rem;
+      overflow: auto;
+      backdrop-filter: blur(10px);
+    }
+    .stack { display: grid; gap: 0.9rem; }
+    .card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 1rem;
+    }
+    .card h2 { margin: 0 0 0.55rem; font-size: 0.95rem; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    button {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      padding: 0.75rem 1rem;
+      font: inherit;
+      color: white;
+      background: rgba(255, 255, 255, 0.08);
+      cursor: pointer;
+    }
+    button.primary { background: linear-gradient(135deg, #6e569b, #49376e); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    #drop-zone {
+      min-height: 9rem;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      border: 2px dashed rgba(204, 173, 99, 0.45);
+      border-radius: 18px;
+      padding: 1rem;
+      background: rgba(204, 173, 99, 0.06);
+    }
+    #drop-zone[data-drag="true"] { background: rgba(204, 173, 99, 0.13); }
+    #status-panel[data-kind="error"] #status-text, #import-message[data-kind="error"] { color: #ff7e7e; }
+    #import-message[data-kind="success"] { color: #8dd890; }
+    .runtime-log {
+      min-height: 6rem;
+      max-height: 14rem;
+      margin: 0;
+      overflow: auto;
+      padding: 0.7rem;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.42);
+      color: var(--text-dim);
+      font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    .viewport { position: relative; min-width: 0; min-height: 0; background: black; }
+    #canvas { display: block; width: 100%; height: 100%; background: black; touch-action: none; outline: none; }
+    .canvas-hint {
+      position: absolute;
+      inset: auto 1rem 1rem 1rem;
+      z-index: 2;
+      padding: 0.7rem 0.85rem;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.62);
+      color: #f0eef6;
+      max-width: 34rem;
+      font-size: 0.92rem;
+      pointer-events: none;
+    }
+    input[type="file"] { display: none; }
+    ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @media (max-width: 1024px) {
+      .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(18rem, 1fr); }
+      #control-panel { border-right: 0; border-bottom: 1px solid var(--panel-border); }
+    }
+  </style>
+  <script>
+    window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = true;
+    window.HexenwailBoot = {
+      runtimeInitialized: false,
+      earlyLog: [],
+      capture(prefix, message, error = false) {
+        this.earlyLog.push({ prefix, message: String(message ?? ''), error });
+        if (this.earlyLog.length > 200) this.earlyLog.shift();
+      }
+    };
+    window.Module = {
+      preRun: [],
+      postRun: [],
+      arguments: ['-basedir', '/persistent'],
+      noInitialRun: true,
+      locateFile(path) { return new URL(path, document.baseURI).toString(); },
+      onRuntimeInitialized() { window.HexenwailBoot.runtimeInitialized = true; },
+      setStatus(text) { window.HexenwailBoot.lastStatus = text; },
+      print(text) {
+        window.HexenwailBoot.capture('[hexenwail]', text);
+        console.log('[hexenwail]', text);
+      },
+      printErr(text) {
+        window.HexenwailBoot.capture('[hexenwail:error]', text, true);
+        console.error('[hexenwail:error]', text);
+      }
+    };
+  </script>
 </head>
-<body>
-<div id="gameContainer">
-  <div id="uploadPanel">
-    <h2>Hexen II Game Data Required</h2>
-    <p>Upload your Hexen II <code>data1</code> folder to play (pak0.pak, pak1.pak)</p>
-    <input type="file" id="fileInput" multiple accept=".pak,.dat,.cfg,.rc,.txt" />
-    <button id="selectButton">Select Game Files</button>
-    <p style="font-size: 12px; color: #aaa;">or drag and drop files here</p>
-    <button id="clearCacheButton">Clear Cached Data</button>
-    <div id="uploadStatus" style="font-size: 12px; color: #aaa;"></div>
-  </div>
-  <div id="status">Loading engine...</div>
-  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
-</div>
-<script>
-  // Game data management (IndexedDB cache + VFS mounting)
-  const DB_NAME = 'HexenwailGameData';
-  const STORE_NAME = 'pak_files';
-  let gameDataReady = false;
-
-  async function loadFromCache() {
-    try {
-      const db = await new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-        req.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME, { keyPath: 'name' });
-      });
-
-      const tx = db.transaction(STORE_NAME);
-      const files = await new Promise((resolve, reject) => {
-        const req = tx.objectStore(STORE_NAME).getAll();
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-
-      if (files.length > 0) {
-        document.getElementById('uploadStatus').innerText = `Loaded ${files.length} cached PAK files`;
-        document.getElementById('clearCacheButton').style.display = 'block';
-        return files;
-      }
-    } catch (e) {
-      console.warn('Cache unavailable:', e);
-    }
-    return null;
-  }
-
-  async function saveToCache(files) {
-    try {
-      const db = await new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-
-      // Read all buffers first
-      const filesToWrite = [];
-      for (const f of files) {
-        const buf = await f.arrayBuffer();
-        filesToWrite.push({ name: f.name, data: buf });
-      }
-
-      // Write all in a single transaction
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-
-        let pending = filesToWrite.length;
-        for (const item of filesToWrite) {
-          const req = store.put(item);
-          req.onerror = () => reject(req.error);
-          req.onsuccess = () => {
-            pending--;
-            if (pending === 0) resolve();
-          };
-        }
-
-        tx.onerror = () => reject(tx.error);
-        tx.oncomplete = () => {
-          if (pending === 0) resolve();
-        };
-      });
-    } catch (e) {
-      console.warn('Cache save failed:', e);
-    }
-  }
-
-  async function mountGameData(fileList) {
-    // Wait for FS to be available (WASM module must be initialized)
-    let attempts = 0;
-    while (typeof FS === 'undefined' && attempts < 100) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-      attempts++;
-    }
-
-    if (typeof FS === 'undefined') {
-      console.error('Emscripten FS timeout - WASM module failed to initialize');
-      return false;
-    }
-
-    console.log('FS available, mounting pak files...');
-
-    // Mount files to Emscripten VFS at /data1/
-    try {
-      try {
-        FS.mkdir('/data1');
-      } catch (e) {
-        // Directory may already exist
-      }
-    } catch (e) {
-      console.warn('Could not set up /data1:', e);
-    }
-
-    for (const f of fileList) {
-      let buf;
-      if (f.data instanceof ArrayBuffer) {
-        // Cached file from IndexedDB
-        buf = new Uint8Array(f.data);
-      } else if (f instanceof File) {
-        // File from file picker
-        buf = new Uint8Array(await f.arrayBuffer());
-      } else {
-        console.warn('Unknown file type:', f);
-        continue;
-      }
-      try {
-        FS.writeFile('/data1/' + f.name, buf);
-        console.log('Mounted:', f.name);
-      } catch (e) {
-        console.error('Failed to write', f.name, ':', e);
-      }
-    }
-
-    gameDataReady = true;
-    document.getElementById('gameContainer').classList.add('playing');
-    console.log('Game data ready! Calling _main()...');
-
-    // Call the C main function directly
-    if (typeof Module !== 'undefined' && typeof Module._main === 'function') {
-      try {
-        console.log('Calling Module._main()...');
-        Module._main();
-        console.log('Module._main() completed');
-      } catch (e) {
-        console.error('_main error:', e);
-      }
-    } else {
-      console.error('Module._main not available!');
-      console.error('Module._main type:', typeof Module !== 'undefined' ? typeof Module._main : 'Module undefined');
-    }
-
-    return true;
-  }
-
-  // File upload handlers
-  document.getElementById('selectButton').addEventListener('click', () => {
-    document.getElementById('fileInput').click();
-  });
-
-  document.getElementById('fileInput').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-
-    document.getElementById('uploadStatus').innerText = `Uploading ${files.length} files...`;
-    await saveToCache(files);
-    await mountGameData(files);
-    document.getElementById('uploadStatus').innerText = '';
-
-    // Start game after files are mounted
-    if (typeof Module !== 'undefined' && Module.callMain && !gameDataReady) {
-      Module.callMain();
-    }
-  });
-
-  document.getElementById('clearCacheButton').addEventListener('click', async () => {
-    try {
-      const db = await new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-      await new Promise((resolve, reject) => {
-        const req = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).clear();
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
-      document.getElementById('uploadStatus').innerText = 'Cache cleared. Reload page.';
-      document.getElementById('clearCacheButton').style.display = 'none';
-    } catch (e) {
-      document.getElementById('uploadStatus').innerText = 'Failed to clear cache';
-    }
-  });
-
-  // Drag and drop
-  const panel = document.getElementById('uploadPanel');
-  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(evt => {
-    panel.addEventListener(evt, (e) => e.preventDefault());
-  });
-  panel.addEventListener('dragover', () => panel.classList.add('drag-over'));
-  panel.addEventListener('dragleave', () => panel.classList.remove('drag-over'));
-  panel.addEventListener('drop', async (e) => {
-    panel.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files);
-    const gameFiles = files.filter(f => {
-      const ext = f.name.toLowerCase();
-      return ext.endsWith('.pak') || ext.endsWith('.dat');
-    });
-    if (gameFiles.length > 0) {
-      document.getElementById('uploadStatus').innerText = `Uploading ${gameFiles.length} files...`;
-      await saveToCache(gameFiles);
-      await mountGameData(gameFiles);
-      document.getElementById('uploadStatus').innerText = '';
-
-      // Start game after files are mounted
-      if (typeof Module !== 'undefined' && Module.callMain && !gameDataReady) {
-        Module.callMain();
-      }
-    }
-  });
-
-  // Restore from cache on startup (but don't auto-start)
-  (async () => {
-    const cached = await loadFromCache();
-    if (cached) {
-      console.log('Cached game data found. Click "Start Game" to begin.');
-      // Don't auto-start - let user control when game starts
-    }
-  })();
-
-  var Module = {
-    canvas: (function() { return document.getElementById('canvas'); })(),
-    print: function(text) {
-      console.log('[ENGINE]', text);
-    },
-    printErr: function(text) {
-      // Suppress "Unable to find Hexen II installation" if game data not loaded yet
-      if (!gameDataReady && text.includes('Unable to find')) {
-        return;  // Don't log this error
-      }
-      console.error('[ENGINE ERROR]', text);
-    },
-    onRuntimeInitialized: function() {
-      console.log('✓ Emscripten runtime initialized');
-      // If game data is already loaded, start the game now
-      if (gameDataReady && Module.callMain) {
-        console.log('Game data ready, starting engine...');
-        try {
-          Module.callMain();
-        } catch (e) {
-          console.error('callMain error:', e);
-        }
-      }
-    },
-    setStatus: function(text) {
-      if (gameDataReady || !text) {
-        document.getElementById('status').innerText = text;
-        if (!text) document.getElementById('status').style.display = 'none';
-      }
-    },
-    monitorRunDependencies: function(left) {
-      if (gameDataReady || !left) {
-        if (left) Module.setStatus('Loading... (' + left + ' files remaining)');
-        else Module.setStatus('');
-      }
-    }
-  };
-  window.onerror = function() {
-    Module.setStatus('Exception thrown, see JavaScript console');
-  };
-
-  // Wrapper to prevent auto-execution if gameDataReady is false
-  window.startGame = function() {
-    if (typeof Module !== 'undefined' && Module.callMain) {
-      try {
-        Module.callMain();
-      } catch (e) {
-        console.error('Game startup error:', e);
-      }
-    }
-  };
-</script>
-{{{ SCRIPT }}}
-<script>
-  // If game data was in cache, start now; otherwise wait for upload
-  if (!gameDataReady) {
-    // Emscripten tried to start, suppress the error
-    console.info('Waiting for pak files...');
-  }
-</script>
+<body data-engine-state="ready">
+  <header class="topbar">
+    <div>
+      <h1>Hexenwail PWA</h1>
+      <small>Install once, import your legal game data locally, then play offline.</small>
+    </div>
+    <small id="offline-text">Offline shell not installed yet.</small>
+  </header>
+  <main class="shell">
+    <aside id="control-panel">
+      <div class="stack">
+        <section class="card">
+          <h2>Status</h2>
+          <div id="status-panel" data-kind="info">
+            <div id="status-text">Preparing launcher…</div>
+            <small id="progress-text" class="muted">No imported assets yet.</small>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Runtime log</h2>
+          <pre id="runtime-log" class="runtime-log" role="log" aria-live="polite">Waiting for launcher output…</pre>
+        </section>
+        <section class="card">
+          <h2>Import Hexen II assets</h2>
+          <p id="requirements-text">Required: data1/pak0.pak and data1/pak1.pak from a legal Hexen II installation.</p>
+          <div id="drop-zone">Drop <code>.pak</code>, <code>.ogg</code>, or <code>.zip</code> files here.</div>
+          <div class="buttons">
+            <button id="import-button" class="primary">Choose files</button>
+            <button id="directory-button">Choose folder</button>
+            <button id="clear-button">Clear imported data &amp; saves</button>
+          </div>
+          <input id="file-input" type="file" multiple accept=".pak,.ogg,.zip,application/zip">
+          <input id="directory-input" type="file" webkitdirectory directory multiple>
+          <small id="import-message" class="muted"></small>
+          <small id="rejected-list" class="muted"></small>
+        </section>
+        <section class="card">
+          <h2>Launch</h2>
+          <div class="buttons">
+            <button id="launch-button" class="primary" disabled>Import pak0.pak + pak1.pak first</button>
+            <button id="fullscreen-button">Request fullscreen</button>
+          </div>
+          <small id="pointer-lock-hint" class="muted">Tap/click the canvas after launch to focus keyboard input and request mouse capture where supported.</small>
+        </section>
+        <section class="card">
+          <h2>Storage</h2>
+          <small id="storage-backend-text" class="muted">Storage backend: probing…</small><br>
+          <small id="storage-text" class="muted">Browser storage estimate unavailable.</small>
+        </section>
+        <section class="card">
+          <h2>Notes for iPadOS</h2>
+          <ul>
+            <li>Install via Safari → Share → <strong>Add to Home Screen</strong>.</li>
+            <li>Pointer Lock is currently unavailable on iPadOS Safari; external keyboards and mice still help.</li>
+            <li>Standalone mode is the practical target on iPadOS; it is close to fullscreen but still obeys system safe areas.</li>
+          </ul>
+        </section>
+      </div>
+    </aside>
+    <section class="viewport">
+      <canvas id="canvas" tabindex="0" aria-label="Hexenwail game canvas"></canvas>
+      <div class="canvas-hint">Tap/click the canvas to focus input. On platforms without Pointer Lock (notably iPadOS Safari), mouselook remains limited.</div>
+    </section>
+  </main>
+  {{{ SCRIPT }}}
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

@@ -113,5 +113,6 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);
+void	GL_ReportShaderStatus (void);	/* `renderer_status` diagnostic (d2c46f078) */
 
 #endif /* GL_SHADER_H */
