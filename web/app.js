@@ -1,5 +1,5 @@
 import { extractZipEntries } from './lib/zip.js';
-import { hasRequiredBaseAssets, mapImportedPath } from './lib/paths.js';
+import { getBaseAssetStatus, mapImportedPath } from './lib/paths.js';
 import {
   createSaveBundle, getPakCompatibilityWarnings, isSavePath, planSaveImport, sha256, validateSaveBundle,
 } from './lib/save-bundle.js';
@@ -137,7 +137,8 @@ function announceEngineReady() {
 }
 
 function updateLaunchState() {
-  const ready = hasRequiredBaseAssets([...state.storedPaths]);
+  const assets = getBaseAssetStatus([...state.storedPaths]);
+  const ready = assets !== 'none';
   if (ui.launchButton) {
     ui.launchButton.disabled = !state.rendererReady || !ready
       || (state.engineStarted && !state.runtimeExited);
@@ -147,7 +148,9 @@ function updateLaunchState() {
         ? 'Restart game'
         : state.engineStarted
           ? 'Running'
-          : ready ? 'Start game' : 'Import pak0.pak + pak1.pak first';
+          : assets === 'full'
+            ? 'Start game'
+            : assets === 'pak0-only' ? 'Start game (demo)' : 'Import pak0.pak first';
   }
   if (ui.exitButton) {
     ui.exitButton.disabled = !state.engineStarted || state.runtimeExited;
@@ -155,9 +158,11 @@ function updateLaunchState() {
   if (ui.requirementsText) {
     ui.requirementsText.textContent = !state.rendererReady
       ? 'WebGL2 renderer self-test failed. See the runtime log.'
-      : ready
+      : assets === 'full'
         ? 'Required base game assets detected.'
-        : 'Required: data1/pak0.pak and data1/pak1.pak from a legal Hexen II installation.';
+        : assets === 'pak0-only'
+          ? 'data1/pak0.pak detected — enough to play the demo. Import data1/pak1.pak too for the full game.'
+          : 'Required: data1/pak0.pak from a legal Hexen II installation. The demo runs on pak0.pak alone; the full game also needs data1/pak1.pak.';
   }
 }
 
@@ -797,7 +802,7 @@ async function handleEngineQuit(kind = 'quit', message = '') {
 
 async function startEngineFromUserAction() {
   if (state.engineStarted || !state.rendererReady || !state.runtimeReady || !state.storageReady
-      || !hasRequiredBaseAssets([...state.storedPaths])) {
+      || getBaseAssetStatus([...state.storedPaths]) === 'none') {
     return;
   }
   state.engineStarted = true;

@@ -421,14 +421,16 @@
         </section>
         <section class="card">
           <h2>Import Hexen II assets</h2>
-          <p id="requirements-text">Required: data1/pak0.pak and data1/pak1.pak from a legal Hexen II installation.</p>
-          <div id="drop-zone">Drop <code>.pak</code>, <code>.ogg</code>, or <code>.zip</code> files here.</div>
+          <p id="requirements-text">Required: data1/pak0.pak from a legal Hexen II installation. The demo runs on pak0.pak alone; the full game also needs data1/pak1.pak.</p>
+          <!-- One grid item: #drop-zone is a centering grid, so unwrapped inline
+               children would each become a row of their own. -->
+          <div id="drop-zone"><span>Drop <code>.pak</code>, <code>.dat</code>, <code>.ogg</code>, or <code>.zip</code> files here.</span></div>
           <div class="buttons">
             <button id="import-button" class="primary">Choose files</button>
             <button id="directory-button">Choose folder</button>
             <button id="clear-button">Clear imported data &amp; saves</button>
           </div>
-          <input id="file-input" type="file" multiple accept=".pak,.ogg,.zip,application/zip">
+          <input id="file-input" type="file" multiple accept=".pak,.dat,.ogg,.zip,application/zip">
           <input id="directory-input" type="file" webkitdirectory directory multiple>
           <small id="import-message" class="muted"></small>
           <small id="rejected-list" class="muted"></small>
@@ -450,7 +452,7 @@
         <section class="card">
           <h2>Launch</h2>
           <div class="buttons">
-            <button id="launch-button" class="primary" disabled>Import pak0.pak + pak1.pak first</button>
+            <button id="launch-button" class="primary" disabled>Import pak0.pak first</button>
             <button id="exit-button" disabled>Exit to launcher</button>
             <button id="fullscreen-button">Request fullscreen</button>
           </div>
