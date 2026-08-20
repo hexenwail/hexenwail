@@ -429,6 +429,11 @@ int R_GetPimpFlags (entity_t *e, float **gsettings_out);
 #define XF_TORCH_GLOW_EGYPT	(1 << 30)	/* glowing torches, egypt			*/
 #define XF_GLOW			(1 << 1 )	/* other glows					*/
 #define XF_MISSILE_GLOW		(1 << 2 )	/* missile glows				*/
+/* Suppress the dynamic light a placed light-source model would otherwise cast.
+ * Set from misc_modelpimp spawnflag 64.  Kept in step with gl_model.h -- the
+ * software/WebAssembly build reads this header, the GL build reads that one,
+ * and cl_main.c is shared between them.  uhexen2-kd3g */
+#define XF_NO_DLIGHT		(1 << 8 )	/* don't cast a dynamic light			*/
 
 typedef struct qmodel_s
 {
