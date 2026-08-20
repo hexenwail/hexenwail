@@ -1860,6 +1860,23 @@ static void R_DrawAliasModel (entity_t *e)
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
+	else if ((e->model->flags & EF_HOLEY) && e->model->skin_soft_alpha)
+	{
+		/* EF_HOLEY, but the replacement skin turned out to carry an
+		 * authored translucency ramp rather than a cutout mask, so the
+		 * alpha test below would throw most of it away and draw the
+		 * remainder solid.  Blend it like EF_TRANSPARENT instead; the
+		 * upload already withheld TEX_HOLEY so the ramp survived.
+		 * SoT's mist.mdl is the case this exists for.  uhexen2-5zv5 */
+		branch_taken = "EF_HOLEY (soft alpha -> blend)";
+		R_SetBlend (true);
+		if (!OIT_InPass())
+		{
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		}
+		model_constant_alpha = 1.0f;
+		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
+	}
 	else if (e->model->flags & EF_HOLEY)
 	{
 		branch_taken = "EF_HOLEY (alpha test)";
@@ -2024,7 +2041,29 @@ static void R_DrawAliasModel (entity_t *e)
 		}
 	}
 
-	R_SetupAliasFrame (e, paliashdr);
+	/* A skin with no opaque texels in it cannot occlude anything, and SoT
+	 * draws its mist eight times over the same volume -- with depth writes
+	 * on, each instance's own faint edge hard-rejects the next and the
+	 * volume collapses into flat slabs.  Suppress the write for exactly
+	 * this class.
+	 *
+	 * This is the content-driven, per-model opt-out uhexen2-t9uv asks for,
+	 * NOT the blanket ban on depth writes for every blended alias draw --
+	 * that was uhexen2-gwtq, and uhexen2-g842 reverted it because it cost
+	 * weapons and attack effects their self-occlusion.  Those have solid
+	 * skins and so are not soft-alpha; nothing outside this class changes.
+	 * uhexen2-5zv5 */
+	{
+		qboolean soft = (e->model->flags & EF_HOLEY) && e->model->skin_soft_alpha;
+
+		if (soft && !OIT_InPass())
+			R_SetDepthMask (false);
+
+		R_SetupAliasFrame (e, paliashdr);
+
+		if (soft && !OIT_InPass())
+			R_SetDepthMask (true);
+	}
 
 	// Fullbright pass: render fullbright pixels with additive blending.
 	// Skip for translucent models and inside the OIT pass (handled by
@@ -2102,7 +2141,7 @@ static void R_DrawAliasModel (entity_t *e)
 		R_SetCull (true);
 	}
 
-	if (e->model->flags & EF_HOLEY)
+	if ((e->model->flags & EF_HOLEY) && !e->model->skin_soft_alpha)
 	{
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (false);
