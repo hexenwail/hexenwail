@@ -41,6 +41,7 @@
 #include "sdl_inc.h"
 #include "gl_postprocess.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "filenames.h"
 
@@ -1272,6 +1273,15 @@ static void GL_Init (void)
 		       gl_renderer_caps.anisotropy ? "enabled" : "unavailable",
 		       gl_max_anisotropy);
 
+	/* Force the draw state to a known value and seed the pipeline shadow
+	 * from it.  Everything below sets state through gl_pipeline.c, which
+	 * drops calls that would not change anything -- so it has to start from
+	 * a state it actually knows.  Once per context, i.e. here and again
+	 * after every vid_restart.  uhexen2-p4ln.1.
+	 * After GL_InitRendererCaps, which only queries -- so it cannot have
+	 * moved any state out from under the shadow being seeded here. */
+	R_PipelineResetState ();
+
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
@@ -1320,14 +1330,14 @@ static void GL_Init (void)
 	if (gl_clipcontrol_able)
 	{
 		glClipControl_fp (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
-		glDepthFunc_fp (GL_GEQUAL);
+		R_SetDepthFunc (GL_GEQUAL);
 		glClearDepth (0.0);
 		Con_SafePrintf ("Reversed-Z depth buffer enabled (ARB_clip_control)\n");
 	}
 #endif
 
 //	glClearColor_fp(1,0,0,0);
-	glCullFace_fp(GL_FRONT);
+	R_SetCullFace (GL_FRONT);
 #if 0 /* causes side effects at least in 16 bpp.  */
 	/* Get rid of Z-fighting for textures by offsetting the
 	 * drawing of entity models compared to normal polygons.
@@ -1341,7 +1351,7 @@ static void GL_Init (void)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	if (multisample)
 	{

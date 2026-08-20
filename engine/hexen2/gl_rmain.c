@@ -21,6 +21,7 @@
 #include "quakedef.h"
 #include "gl_sky.h"
 #include "gl_shader.h"
+#include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -119,6 +120,23 @@ cvar_t	r_alphatocoverage = {"r_alphatocoverage", "0", CVAR_ARCHIVE};
  * player-floor value; 0 disables. */
 cvar_t	r_alias_minlight = {"r_alias_minlight", "24", CVAR_ARCHIVE};
 static qboolean	r_aliasinfo_request = false;	/* uhexen2-khsa: one-shot diagnostic flag */
+
+/* uhexen2-ac4c follow-up: what R_DrawAliasModel actually did to the viewmodel
+ * on its last pass.  Recorded at the draw rather than recomputed in the dump,
+ * so the diagnostic cannot drift away from the branch chain it is reporting
+ * on -- the whole point is to find out which branch really ran. */
+cvar_t	r_vm_watch = {"r_vm_watch", "0", CVAR_NONE};	/* log viewmodel draw-state transitions */
+static const char *r_vm_branch		= "(not drawn yet)";
+static const char *r_vm_model		= "(none)";
+static unsigned int r_vm_mflags		= 0;
+static unsigned int r_vm_drawflags	= 0;
+static unsigned int r_vm_entalpha	= 0;
+static float	r_vm_alpha		= 1.0f;
+static qboolean	r_vm_blend		= false;
+static qboolean	r_vm_depthmask		= true;
+static qboolean	r_vm_fullbright		= false;
+static double	r_vm_depth_near		= 0.0;
+static double	r_vm_depth_far		= 1.0;
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_NONE};
@@ -709,13 +727,13 @@ static void R_DrawSpriteModel (entity_t *e)
 	if ((e->drawflags & DRF_TRANSLUCENT) || (e->model->flags & EF_TRANSPARENT) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)) || soft_active)
 	{
-		glEnable_fp (GL_BLEND);
+		R_SetBlend (true);
 		if (!OIT_InPass())
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 	else if (!OIT_InPass())
 	{
-		glDisable_fp (GL_BLEND);
+		R_SetBlend (false);
 	}
 
 	if (soft_active)
@@ -780,13 +798,11 @@ static void R_DrawSpriteModel (entity_t *e)
 	 * looking half-eaten by the wall (uhexen2-rsy9).  Sign flips with
 	 * reversed-Z, matching the alias fullbright pass. */
 	float spr_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
-	glEnable_fp (GL_POLYGON_OFFSET_FILL);
-	glPolygonOffset_fp (spr_offset, spr_offset);
+	R_SetPolygonOffsetFill (true, spr_offset, spr_offset);
 
 	GL_ImmEnd (GL_QUADS, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
 
-	glDisable_fp (GL_POLYGON_OFFSET_FILL);
-	glPolygonOffset_fp (0.0f, 0.0f);
+	R_SetPolygonOffsetFill (false, 0.0f, 0.0f);
 
 	if (soft_active)
 	{
@@ -807,7 +823,7 @@ static void R_DrawSpriteModel (entity_t *e)
 	 * restore state — disabling it here would break a later draw in
 	 * the same OIT pass. */
 	if (!OIT_InPass())
-		glDisable_fp (GL_BLEND);
+		R_SetBlend (false);
 }
 
 
@@ -1069,9 +1085,9 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 
 	if (have_stencil)
 	{
-		glEnable_fp(GL_STENCIL_TEST);
-		glStencilFunc_fp(GL_EQUAL, 1, 2);
-		glStencilOp_fp(GL_KEEP, GL_KEEP, GL_INCR);
+		R_SetStencilTest (true);
+		R_SetStencilFunc (GL_EQUAL, 1, 2);
+		R_SetStencilOp (GL_KEEP, GL_KEEP, GL_INCR);
 	}
 
 	while (1)
@@ -1111,7 +1127,7 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 	}
 
 	if (have_stencil)
-		glDisable_fp(GL_STENCIL_TEST);
+		R_SetStencilTest (false);
 }
 
 
@@ -1348,6 +1364,12 @@ static void R_DrawAliasModel (entity_t *e)
 	int		mls;
 	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
 	float		caustics = R_CausticsIntensity();
+	/* uhexen2-fc1c / uhexen2-ac4c: the viewmodel is the one alias entity
+	 * that keeps writing depth when it draws blended, and the one that
+	 * ignores its model's own translucency flags entirely.  Rationale at
+	 * the branch chain below. */
+	qboolean	viewmodel = (e == &cl.viewent);
+	const char	*branch_taken = "(none)";	/* for r_aliasinfo */
 
 	clmodel = e->model;
 
@@ -1355,16 +1377,7 @@ static void R_DrawAliasModel (entity_t *e)
 	VectorAdd (e->origin, clmodel->maxs, maxs);
 
 	if (!AlwaysDrawModel && R_CullBox (mins, maxs))
-	{
-		/* Depth-mask invariant (documented at the blend branch chain
-		 * below): every exit hands the mask back ON, including the ones
-		 * that draw nothing.  R_DrawTransEntitiesOnList tracks the mask
-		 * from that guarantee and cannot see that we culled.
-		 * uhexen2-gwtq. */
-		if (!OIT_InPass())
-			glDepthMask_fp (1);
 		return;
-	}
 
 	VectorCopy (e->origin, r_entorigin);
 	VectorSubtract (r_origin, r_entorigin, modelorg);
@@ -1628,41 +1641,68 @@ static void R_DrawAliasModel (entity_t *e)
 	/* Blend state pokes gated for OIT pass (OIT_BeginTranslucency owns
 	 * blend and depth inside its pass).
 	 *
-	 * DEPTH-MASK INVARIANT (uhexen2-gwtq): outside an OIT pass this
-	 * function owns the depth mask for the whole draw and always returns
-	 * with it back ON.  Every branch below therefore sets the mask it
-	 * needs rather than inheriting the caller's, and the restore near the
-	 * bottom of the function puts it back.  Callers must not set it up
-	 * beforehand and must not assume it survived the call.
+	 * NO BRANCH BELOW TOUCHES THE DEPTH MASK.  uhexen2-gwtq gave this
+	 * function ownership of it and had the blended branches call
+	 * glDepthMask(0) so a mod's mist would composite instead of clumping;
+	 * that was reverted wholesale in uhexen2-130w after two rounds of
+	 * field regressions (uhexen2-fc1c, uhexen2-g842) failed to contain
+	 * the fallout.  The mask is the caller's again: R_DrawEntitiesOnList
+	 * draws with it on, R_DrawTransEntitiesOnList forces it on for every
+	 * mod_alias entity, and R_DrawViewModel inherits it on.  The only
+	 * pokes left in here are the fullbright and shadow passes, which turn
+	 * it off for their own additive draw and put it straight back.
 	 *
-	 * Alpha-blended alias geometry must NOT write depth.  A mod's mist is
-	 * one .mdl drawn eight times per frame; with depth writes on, each
-	 * instance depth-rejects the next wherever they overlap, so the
-	 * overlap is replaced wholesale instead of composited and the cloud
-	 * breaks into hard-edged clumps.  Sorting can't rescue it:
-	 * r_alphasort orders back-to-front by squared distance to entity
-	 * ORIGIN, which says nothing useful about interpenetrating instances.
-	 * Same discipline R_RenderBrushPoly already follows for translucent
-	 * brush surfaces (uhexen2-t4kt, uhexen2-j001). */
+	 * If the mist is ever worth another attempt, do NOT reach for a
+	 * blanket depth-write ban again -- see uhexen2-t9uv for what it
+	 * actually needs.
+	 *
+	 * THE VIEWMODEL IGNORES ITS MODEL'S TRANSLUCENCY FLAGS
+	 * (uhexen2-ac4c).  Hexen II keeps an alias model's translucency in
+	 * the palette INDEX of every texel, and GL_Upload8 turns an ODD index
+	 * into r_wateralpha.  uhexen2-93a8 started applying that same rule to
+	 * external replacement skins, which had been escaping it and using
+	 * the pack's own opaque alpha -- correct for the Necromancer's
+	 * spellbook, and ruinous for the gun in your hand: Shadows of Turmoil
+	 * ships its own weapon viewmodels flagged EF_TRANSPARENT where the
+	 * base-game copies carry no flags at all, and pins r_wateralpha 0.5,
+	 * so 10-45% of every weapon's texels went from alpha 255 to 128 and
+	 * the weapons turned to glass.
+	 *
+	 * The texture cannot tell the two apart -- odd-index-means-translucent
+	 * is one rule and both cases go through it -- so the discrimination
+	 * has to happen here, where we know whether we are drawing a world
+	 * model or the player's own weapon.  A first-person weapon is held
+	 * against the camera and reads as part of the HUD; vanilla draws it
+	 * opaque because the base-game weapon models declare no transparency
+	 * mode at all, and this restores that for the flagged ones too.
+	 *
+	 * Only the MODEL-flag branches are skipped.  DRF_TRANSLUCENT below is
+	 * entity state the server sets on cl.viewent through
+	 * svc_set_view_flags, which is how the invisibility ring fades the
+	 * weapon, so that branch stays live and deliberate translucency still
+	 * works.  Index-0 holes survive too: the opaque branch asserts the
+	 * 0.01 alpha threshold and salias_frag.glsl discards below it BEFORE
+	 * u_force_opaque_alpha rewrites the output alpha, so a hole is still
+	 * a hole and only the 50% class is lost. */
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
-		glEnable_fp (GL_BLEND);
+		branch_taken = "EF_SPECIAL_TRANS";
+		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
-			glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-			glDepthMask_fp (0);	/* blended: no depth write */
+			R_SetBlendFunc (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
 		}
 		model_constant_alpha = 1.0f;
-		glDisable_fp (GL_CULL_FACE);
+		R_SetCull (false);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else if (e->drawflags & DRF_TRANSLUCENT)
 	{
-		glEnable_fp (GL_BLEND);
+		branch_taken = "DRF_TRANSLUCENT";
+		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDepthMask_fp (0);	/* blended: no depth write */
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		if (e->alpha != ENTALPHA_DEFAULT)
 			model_constant_alpha = ENTALPHA_DECODE(e->alpha);
@@ -1672,26 +1712,21 @@ static void R_DrawAliasModel (entity_t *e)
 	}
 	else if (e->model->flags & EF_TRANSPARENT)
 	{
-		glEnable_fp (GL_BLEND);
+		branch_taken = "EF_TRANSPARENT";
+		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDepthMask_fp (0);	/* blended: no depth write */
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
 	else if (e->model->flags & EF_HOLEY)
 	{
+		branch_taken = "EF_HOLEY (alpha test)";
 		if (!OIT_InPass())
 		{
-			glDisable_fp (GL_BLEND);
-			/* Alpha TEST, not blending: surviving fragments are fully
-			 * opaque and must keep occluding.  Asserted rather than
-			 * inherited because EF_HOLEY entities are routed through
-			 * the translucent list, which no longer pre-enables the
-			 * mask for us.  uhexen2-gwtq. */
-			glDepthMask_fp (1);
+			R_SetBlend (false);
 		}
 		/* Same cutout threshold the brush fence path uses
 		 * (R_RenderBrushPoly / R_DrawSequentialPoly in gl_rsurf.c) and
@@ -1713,21 +1748,17 @@ static void R_DrawAliasModel (entity_t *e)
 		 * move all three together or not at all. */
 		GL_SetAlphaThreshold(0.666f);
 		if (r_alphatocoverage.integer)
-			glEnable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (true);
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(1.0f);	/* cutout survivors are opaque */
 	}
 	else if (e->alpha != ENTALPHA_DEFAULT)
 	{
-		glEnable_fp (GL_BLEND);
+		branch_taken = "per-entity ENTALPHA";
+		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			/* An explicit alpha of 1.0 still composites to an opaque
-			 * result, so only genuinely translucent alphas drop the
-			 * depth write — same predicate the fullbright and blend
-			 * restores below use. */
-			glDepthMask_fp (ENTALPHA_OPAQUE(e->alpha) ? 1 : 0);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		model_constant_alpha = ENTALPHA_DECODE(e->alpha);
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
@@ -1744,12 +1775,61 @@ static void R_DrawAliasModel (entity_t *e)
 		 * is leak-proof regardless of what drew before it. */
 		if (!OIT_InPass())
 		{
-			glDisable_fp (GL_BLEND);
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDepthMask_fp (1);	/* opaque: writes depth */
+			R_SetBlend (false);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		}
+		branch_taken = "opaque";
 		model_constant_alpha = 1.0f;
 		GL_SetForceOpaqueAlpha(1.0f);	/* opaque alias path */
+	}
+
+	/* r_aliasinfo capture (uhexen2-ac4c follow-up).  Read back from the
+	 * pipeline shadow rather than inferred from the branch, so the dump
+	 * reports the state the GPU will actually see. */
+	if (viewmodel)
+	{
+		r_vm_branch	= branch_taken;
+		r_vm_model	= e->model->name;
+		r_vm_mflags	= (unsigned int) e->model->flags;
+		r_vm_drawflags	= (unsigned int) e->drawflags;
+		r_vm_entalpha	= (unsigned int) e->alpha;
+		r_vm_alpha	= model_constant_alpha;
+		r_vm_blend	= R_GetBlend();
+		r_vm_depthmask	= R_GetDepthMask();
+		r_vm_fullbright	= false;
+		R_GetDepthRange (&r_vm_depth_near, &r_vm_depth_far);
+
+		/* A one-shot dump can only ever catch the weapon at rest, and
+		 * the reports that matter are about the instant it fires --
+		 * svc_set_view_flags can drop DRF_TRANSLUCENT onto cl.viewent
+		 * for exactly the frames a projectile is in the air, which is
+		 * indistinguishable from "the effect draws in front of the
+		 * weapon" and lasts far too briefly to hit a key on.  Watch
+		 * the recorded state instead and print only transitions, so
+		 * the log holds the moment rather than a sample near it. */
+		if (r_vm_watch.integer)
+		{
+			static const char *was_branch;
+			static unsigned int was_drawflags = ~0u;
+			static qboolean was_blend, was_depthmask, first = true;
+
+			if (first || was_branch != r_vm_branch
+			    || was_drawflags != r_vm_drawflags
+			    || was_blend != r_vm_blend
+			    || was_depthmask != r_vm_depthmask)
+			{
+				Con_Printf("vm: %-20s drawflags=0x%02x alpha=%.3f blend=%s depth=%s  %s\n",
+					   r_vm_branch, r_vm_drawflags, r_vm_alpha,
+					   r_vm_blend ? "ON " : "off",
+					   r_vm_depthmask ? "ON " : "off",
+					   r_vm_model);
+				was_branch	= r_vm_branch;
+				was_drawflags	= r_vm_drawflags;
+				was_blend	= r_vm_blend;
+				was_depthmask	= r_vm_depthmask;
+				first		= false;
+			}
+		}
 	}
 
 	skinnum = e->skinnum;
@@ -1832,11 +1912,10 @@ static void R_DrawAliasModel (entity_t *e)
 			 * uhexen2-iir3. */
 			float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
 			GL_Bind(fb_tex);
-			glEnable_fp (GL_BLEND);
-			glBlendFunc_fp (GL_ONE, GL_ONE);	// additive
-			glDepthMask_fp (0);
-			glEnable_fp (GL_POLYGON_OFFSET_FILL);
-			glPolygonOffset_fp (fb_offset, fb_offset);
+			R_SetBlend (true);
+			R_SetBlendFunc (GL_ONE, GL_ONE);	// additive
+			R_SetDepthMask (false);
+			R_SetPolygonOffsetFill (true, fb_offset, fb_offset);
 			GL_SetAlphaThreshold(0.01f);
 
 			/* Additive blend: fog must fade to black, or the fog color
@@ -1847,14 +1926,15 @@ static void R_DrawAliasModel (entity_t *e)
 			model_fullbright_pass = true;
 			R_SetupAliasFrame (e, paliashdr);
 			model_fullbright_pass = false;
+			if (viewmodel)
+				r_vm_fullbright = true;
 
 			Fog_StopAdditive ();
 
-			glDisable_fp (GL_POLYGON_OFFSET_FILL);
-			glPolygonOffset_fp (0.0f, 0.0f);
-			glDepthMask_fp (1);
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDisable_fp (GL_BLEND);
+			R_SetPolygonOffsetFill (false, 0.0f, 0.0f);
+			R_SetDepthMask (true);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			R_SetBlend (false);
 			GL_SetAlphaThreshold(0.01f);	/* restore default */
 		}
 	}
@@ -1863,35 +1943,31 @@ static void R_DrawAliasModel (entity_t *e)
 
 	model_constant_alpha = 1.0f;
 
+	/* Mirrors the branch chain's predicates exactly, viewmodel exemption
+	 * included (uhexen2-ac4c): a restore that fires for a branch that
+	 * never ran is how an EF_SPECIAL_TRANS viewmodel would come back with
+	 * culling re-enabled that nothing had disabled. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
 	    (e->model->flags & EF_SPECIAL_TRANS) ||
 	    (e->model->flags & EF_TRANSPARENT) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		if (!OIT_InPass())
-			glDisable_fp (GL_BLEND);
+			R_SetBlend (false);
 	}
 
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		if (!OIT_InPass())
-			glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glEnable_fp (GL_CULL_FACE);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		R_SetCull (true);
 	}
 
 	if (e->model->flags & EF_HOLEY)
 	{
 		if (r_alphatocoverage.integer)
-			glDisable_fp (GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (false);
 	}
-
-	/* Close out the depth-mask invariant documented at the branch chain
-	 * above: whatever a translucent branch turned off, hand back ON.  The
-	 * fullbright and shadow passes below/above already restore to 1
-	 * themselves, so every exit from here leaves the same state and no
-	 * caller has to track it.  uhexen2-gwtq. */
-	if (!OIT_InPass())
-		glDepthMask_fp (1);
 
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
 	/* uhexen2-khsa r13 fixup: restore to 0 (preserve color.a) — that's
@@ -1908,10 +1984,9 @@ static void R_DrawAliasModel (entity_t *e)
 	 * (uhexen2-9bte).  Nothing leaks today: `caustics` is assigned once at
 	 * the top of the function and never reassigned, so set and reset read
 	 * the same value and an entity either does both or neither.  What that
-	 * safety rests on is the absence of any early return between the two --
-	 * and uhexen2-gwtq has since added one to this very function.  Writing
-	 * the resting state unconditionally costs two stores to CPU-side shadow
-	 * variables that the dirty-compare in GL_ImmEnd then skips,
+	 * safety rests on is the absence of any early return between the two.
+	 * Writing the resting state unconditionally costs two stores to
+	 * CPU-side shadow variables that the dirty-compare in GL_ImmEnd skips,
 	 * and in exchange the pairing invariant stops being something the next
 	 * `return` has to know about. */
 	{
@@ -1928,11 +2003,11 @@ static void R_DrawAliasModel (entity_t *e)
 	{
 		GL_PushMatrix();
 		R_RotateForEntity2(e);
-		glEnable_fp (GL_BLEND);
-		glDepthMask_fp (0);
+		R_SetBlend (true);
+		R_SetDepthMask (false);
 		GL_DrawAliasShadow (e, paliashdr, lastposenum);
-		glDepthMask_fp (1);
-		glDisable_fp (GL_BLEND);
+		R_SetDepthMask (true);
+		R_SetBlend (false);
 		GL_PopMatrix();
 	}
 }
@@ -2469,8 +2544,7 @@ void R_DrawBrushInstanced (void)
 	{
 		float mag = r_brush_inst_offset.value;
 		float fb_offset = gl_clipcontrol_able ? mag : -mag;
-		glEnable_fp(GL_POLYGON_OFFSET_FILL);
-		glPolygonOffset_fp(fb_offset, fb_offset);
+		R_SetPolygonOffsetFill (true, fb_offset, fb_offset);
 	}
 
 	/* Opaque pass: opaque program (early_fragment_tests), threshold near
@@ -2478,7 +2552,7 @@ void R_DrawBrushInstanced (void)
 	 * no A2C. */
 	if (num_world_surf_keys > 0)
 	{
-		glUseProgram_fp(prog_opaque->program);
+		R_UseProgram (prog_opaque->program);
 		if (prog_opaque->u_fog_density >= 0)
 			glUniform1f_fp(prog_opaque->u_fog_density, r_fog_density);
 		if (prog_opaque->u_fog_color >= 0)
@@ -2494,7 +2568,7 @@ void R_DrawBrushInstanced (void)
 	/* Fence pass: cutout program (has discard), threshold 0.666, optional A2C. */
 	if (num_world_surf_keys_fence > 0)
 	{
-		glUseProgram_fp(prog_cutout->program);
+		R_UseProgram (prog_cutout->program);
 		if (prog_cutout->u_fog_density >= 0)
 			glUniform1f_fp(prog_cutout->u_fog_density, r_fog_density);
 		if (prog_cutout->u_fog_color >= 0)
@@ -2507,20 +2581,19 @@ void R_DrawBrushInstanced (void)
 		if (prog_cutout->u_force_opaque_alpha >= 0)
 			glUniform1f_fp(prog_cutout->u_force_opaque_alpha, 1.0f);
 		if (r_alphatocoverage.integer)
-			glEnable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (true);
 		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog_cutout);
 		if (r_alphatocoverage.integer)
-			glDisable_fp(GL_SAMPLE_ALPHA_TO_COVERAGE);
+			R_SetAlphaToCoverage (false);
 	}
 
 	if (r_brush_inst_offset.value != 0.0f)
 	{
-		glDisable_fp(GL_POLYGON_OFFSET_FILL);
-		glPolygonOffset_fp(0.0f, 0.0f);
+		R_SetPolygonOffsetFill (false, 0.0f, 0.0f);
 	}
 
 	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 #endif /* !USE_GLES */
 }
 
@@ -2998,7 +3071,7 @@ static void R_DrawAliasInstanced (void)
 			   inst_buf, inst_ofs, inst_bytes);
 
 	/* Activate instanced shader */
-	glUseProgram_fp(prog->program);
+	R_UseProgram (prog->program);
 
 	/* Set uniforms (view-proj, fog, alpha threshold, eye position) */
 	if (prog->u_viewproj >= 0)
@@ -3046,8 +3119,8 @@ static void R_DrawAliasInstanced (void)
 	 * turn every fragment in the batch into dst (the wall behind). */
 	if (!OIT_InPass())
 	{
-		glDisable_fp (GL_BLEND);
-		glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		R_SetBlend (false);
+		R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}
 
 	/* Draw each batch */
@@ -3104,7 +3177,7 @@ static void R_DrawAliasInstanced (void)
 
 	/* Restore state */
 	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
@@ -3139,11 +3212,11 @@ static void R_DrawAliasInstanced (void)
 
 			GL_PushMatrix();
 			R_RotateForEntity2(se);
-			glEnable_fp(GL_BLEND);
-			glDepthMask_fp(0);
+			R_SetBlend (true);
+			R_SetDepthMask (false);
 			GL_DrawAliasShadow(se, shdr, spose);
-			glDepthMask_fp(1);
-			glDisable_fp(GL_BLEND);
+			R_SetDepthMask (true);
+			R_SetBlend (false);
 			GL_PopMatrix();
 		}
 	}
@@ -3184,7 +3257,7 @@ static void R_DrawAliasInstanced (void)
 						   fb_buf, fb_ofs, fb_bytes);
 			}
 
-			glUseProgram_fp(prog->program);
+			R_UseProgram (prog->program);
 			if (prog->u_viewproj >= 0)
 				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
 						      alias_inst_view_proj);
@@ -3204,15 +3277,14 @@ static void R_DrawAliasInstanced (void)
 				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
-			glEnable_fp(GL_BLEND);
-			glBlendFunc_fp(GL_ONE, GL_ONE);	/* additive */
-			glDepthMask_fp(0);
+			R_SetBlend (true);
+			R_SetBlendFunc (GL_ONE, GL_ONE);	/* additive */
+			R_SetDepthMask (false);
 			/* Polygon-offset backstop for the gl_Position non-invariance
 			 * z-fight. See R_DrawAliasModel fullbright pass. uhexen2-iir3. */
 			{
 				float fb_offset = gl_clipcontrol_able ? 1.0f : -1.0f;
-				glEnable_fp(GL_POLYGON_OFFSET_FILL);
-				glPolygonOffset_fp(fb_offset, fb_offset);
+				R_SetPolygonOffsetFill (true, fb_offset, fb_offset);
 			}
 			GL_SetAlphaThreshold(0.01f);
 
@@ -3239,14 +3311,13 @@ static void R_DrawAliasInstanced (void)
 							   GL_UNSIGNED_SHORT, NULL, batch->count);
 			}
 
-			glDisable_fp(GL_POLYGON_OFFSET_FILL);
-			glPolygonOffset_fp(0.0f, 0.0f);
-			glDepthMask_fp(1);
-			glBlendFunc_fp(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			glDisable_fp(GL_BLEND);
+			R_SetPolygonOffsetFill (false, 0.0f, 0.0f);
+			R_SetDepthMask (true);
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			R_SetBlend (false);
 
 			glBindVertexArray_fp(0);
-			glUseProgram_fp(0);
+			R_UseProgram (0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
@@ -3393,6 +3464,79 @@ static void R_DumpAliasInfo (void)
 		VectorCopy(saved_lc, lightcolor);
 		count++;
 	}
+
+	/* The viewmodel is not in cl_visedicts, so the loop above has never
+	 * covered it -- and it is the entity every weapon-transparency report
+	 * has actually been about.  These fields are recorded by
+	 * R_DrawAliasModel itself (uhexen2-ac4c follow-up) rather than
+	 * recomputed here, so they cannot drift from the branch chain.
+	 *
+	 * One frame stale: R_DumpAliasInfo runs from R_DrawEntitiesOnList,
+	 * which is earlier in the frame than R_DrawViewModel, so this reports
+	 * the previous frame's draw.  Harmless -- none of it changes at frame
+	 * rate -- but it is why the model can read "(not drawn yet)" if you
+	 * dump on the very first frame after a map load. */
+	Con_Printf("\n--- viewmodel (cl.viewent) ---\n");
+	if (!cl.viewent.model)
+	{
+		Con_Printf("  no viewmodel (chase/dead/r_drawviewmodel 0?)\n");
+	}
+	else
+	{
+		char	vbuf[160], dbuf[160];
+
+		vbuf[0] = '\0';
+		if (r_vm_mflags & EF_TRANSPARENT)   q_strlcat(vbuf, "TRANSPARENT ", sizeof(vbuf));
+		if (r_vm_mflags & EF_HOLEY)         q_strlcat(vbuf, "HOLEY ", sizeof(vbuf));
+		if (r_vm_mflags & EF_SPECIAL_TRANS) q_strlcat(vbuf, "SPECIAL_TRANS ", sizeof(vbuf));
+		if (!vbuf[0]) q_strlcpy(vbuf, "(none) ", sizeof(vbuf));
+
+		dbuf[0] = '\0';
+		if (r_vm_drawflags & DRF_TRANSLUCENT) q_strlcat(dbuf, "TRANSLUCENT ", sizeof(dbuf));
+		switch (r_vm_drawflags & MLS_MASKIN)
+		{
+			case MLS_NONE:       break;
+			case MLS_FULLBRIGHT: q_strlcat(dbuf, "MLS_FULLBRIGHT ", sizeof(dbuf)); break;
+			case MLS_POWERMODE:  q_strlcat(dbuf, "MLS_POWERMODE ", sizeof(dbuf));  break;
+			case MLS_TORCH:      q_strlcat(dbuf, "MLS_TORCH ", sizeof(dbuf));      break;
+			case MLS_TOTALDARK:  q_strlcat(dbuf, "MLS_TOTALDARK ", sizeof(dbuf));  break;
+			case MLS_ABSLIGHT:   q_strlcat(dbuf, "MLS_ABSLIGHT ", sizeof(dbuf));   break;
+			default:             q_strlcat(dbuf, "MLS_? ", sizeof(dbuf));          break;
+		}
+		if (!dbuf[0]) q_strlcpy(dbuf, "(none) ", sizeof(dbuf));
+
+		Con_Printf("  model      %s\n", r_vm_model);
+		Con_Printf("  mflags     0x%08x [%s]\n", r_vm_mflags, vbuf);
+		Con_Printf("  drawflags  0x%02x [%s]\n", r_vm_drawflags, dbuf);
+		Con_Printf("  e->alpha   0x%02x (=%.3f%s)\n", r_vm_entalpha,
+			   ENTALPHA_DECODE(r_vm_entalpha),
+			   (r_vm_entalpha == ENTALPHA_DEFAULT) ? " DEFAULT" : "");
+		Con_Printf("  branch     %s\n", r_vm_branch);
+		Con_Printf("  alpha      %.3f\n", r_vm_alpha);
+		Con_Printf("  blend      %s\n", r_vm_blend ? "ON  <-- weapon is translucent" : "off (opaque)");
+		Con_Printf("  depthmask  %s\n", r_vm_depthmask ? "ON (writes depth)" : "off  <-- no self-occlusion");
+		Con_Printf("  depthrange [%.3f, %.3f]\n", r_vm_depth_near, r_vm_depth_far);
+		Con_Printf("  fullbright %s\n", r_vm_fullbright ? "pass ran (additive overlay)" : "skipped");
+	}
+
+	/* Effects that draw before the viewmodel can only appear in front of
+	 * it if the viewmodel is blended -- R_DrawViewModel is the last thing
+	 * in R_RenderScene.  Anything drawn AFTER it is listed here so a
+	 * "glow on top of the weapon" report has somewhere to land. */
+	Con_Printf("\n--- frame context ---\n");
+	Con_Printf("  r_oit %d (active %d)  r_shadows %d\n",
+		   r_oit.integer, OIT_Active() ? 1 : 0, r_shadows.integer);
+	Con_Printf("  glows: gl_glows %d  gl_missile_glows %d  gl_other_glows %d\n",
+		   gl_glows.integer, gl_missile_glows.integer, gl_other_glows.integer);
+	Con_Printf("  viewmodel gates: r_drawviewmodel %d  scr_viewsize %d  chase %d  health %d\n",
+		   r_drawviewmodel.integer, scr_viewsize.integer,
+		   chase_active.integer, (int)cl.v.health);
+	Con_Printf("  r_wateralpha %.3f  r_alphasort %d\n",
+		   r_wateralpha.value, r_alphasort.integer);
+	Con_Printf("  draw order is: particles -> trans ents -> OIT resolve -> glows\n");
+	Con_Printf("                 -> VIEWMODEL -> mirror -> polyblend\n");
+	Con_Printf("  so an effect can only paint over an OPAQUE viewmodel if it is\n");
+	Con_Printf("  drawn after it; check 'blend' above before suspecting ordering.\n");
 
 	Con_Printf("=== end r_aliasinfo (%d alias ents) ===\n\n", count);
 	r_aliasinfo_request = false;
@@ -3662,7 +3806,7 @@ static void R_DrawEntitiesOnList (void)
 
 	/* Clean up GPU alias state left bound across entities */
 	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 }
 
 
@@ -3753,7 +3897,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 	if (r_alphasort.integer)
 		R_AlphaSortRadix (theents, numents);
 
-	glDepthMask_fp(0);
+	R_SetDepthMask (false);
 	for (i = 0; i < numents; i++)
 	{
 		e = theents[i].ent;
@@ -3764,24 +3908,19 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		switch (e->model->type)
 		{
 		case mod_alias:
-			/* No depth-mask poke here: R_DrawAliasModel picks the
-			 * mask its own branch needs (blended alias geometry
-			 * draws with writes OFF -- uhexen2-gwtq) and returns
-			 * with the mask back ON.  The shadow variable is
-			 * therefore updated from that guarantee AFTER the call
-			 * instead of from an assumption made before it; the
-			 * callee also flips the mask internally for its
-			 * fullbright and shadow passes, so anything this loop
-			 * believed beforehand would be stale by now. */
-			R_DrawAliasModel (e);
-			if (!OIT_InPass())
+			/* depth-write toggle gated for OIT pass */
+			if (!depthMaskWrite && !OIT_InPass())
+			{
 				depthMaskWrite = 1;
+				R_SetDepthMask (true);
+			}
+			R_DrawAliasModel (e);
 			break;
 		case mod_brush:
 			if (!depthMaskWrite && !OIT_InPass())
 			{
 				depthMaskWrite = 1;
-				glDepthMask_fp(1);
+				R_SetDepthMask (true);
 			}
 			R_DrawBrushModel (e, true);
 			break;
@@ -3789,7 +3928,7 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 			if (depthMaskWrite && !OIT_InPass())
 			{
 				depthMaskWrite = 0;
-				glDepthMask_fp(0);
+				R_SetDepthMask (false);
 			}
 			R_DrawSpriteModel (e);
 			break;
@@ -3797,11 +3936,11 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 	}
 
 	if (!depthMaskWrite && !OIT_InPass())
-		glDepthMask_fp(1);
+		R_SetDepthMask (true);
 
 	/* Clean up GPU alias state left bound across entities */
 	glBindVertexArray_fp(0);
-	glUseProgram_fp(0);
+	R_UseProgram (0);
 }
 
 //=============================================================================
@@ -4029,9 +4168,9 @@ static void R_DrawAllGlows (void)
 	if (!r_drawentities.integer)
 		return;
 
-	glDepthMask_fp (0);
-	glEnable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_ONE, GL_ONE);
+	R_SetDepthMask (false);
+	R_SetBlend (true);
+	R_SetBlendFunc (GL_ONE, GL_ONE);
 
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
@@ -4041,9 +4180,9 @@ static void R_DrawAllGlows (void)
 			R_DrawGlow (e);
 	}
 
-	glDisable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthMask_fp (1);
+	R_SetBlend (false);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetDepthMask (true);
 }
 
 //=============================================================================
@@ -4117,9 +4256,9 @@ skip_dlights:
 	// Reversed-Z: near is gldepthmax (1.0), so the viewmodel slice sits
 	// at the upper 30% of the range instead of the lower 30%.
 	if (gl_clipcontrol_able)
-		glDepthRange_fp (gldepthmax - 0.3*(gldepthmax-gldepthmin), gldepthmax);
+		R_SetDepthRange (gldepthmax - 0.3*(gldepthmax-gldepthmin), gldepthmax);
 	else
-		glDepthRange_fp (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
+		R_SetDepthRange (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
 
 	/* override projection for weapon FOV if set */
 	if (r_viewmodel_fov.value > 0)
@@ -4149,7 +4288,7 @@ skip_dlights:
 		GL_MatrixMode(GL_MAT_MODELVIEW);
 	}
 
-	glDepthRange_fp (gldepthmin, gldepthmax);
+	R_SetDepthRange (gldepthmin, gldepthmax);
 }
 
 //=============================================================================
@@ -4224,7 +4363,7 @@ static void GL_DoGamma (void)
 	if (v_gamma.value >= 1)
 		return;
 
-	glBlendFunc_fp (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetBlendFunc (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
 
 	GL_ImmBegin ();
 	GL_ImmColor4f (1, 1, 1, v_gamma.value);
@@ -4234,7 +4373,7 @@ static void GL_DoGamma (void)
 	GL_ImmVertex3f (10, 100, -100);
 	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
 
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 #endif
 
@@ -4251,8 +4390,8 @@ static void R_PolyBlend (void)
 	if (!v_blend[3])
 		return;
 
-	glEnable_fp (GL_BLEND);
-	glDisable_fp (GL_DEPTH_TEST);
+	R_SetBlend (true);
+	R_SetDepthTest (false);
 	GL_SetAlphaThreshold(0.0f);
 
 	GL_LoadIdentity();
@@ -4273,7 +4412,7 @@ static void R_PolyBlend (void)
 
 	/*GL_DoGamma ();*/
 
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 }
 
 //=============================================================================
@@ -4382,12 +4521,12 @@ static void R_SetupFrame (void)
 		float t = (float)cl.time;
 		if (gl_shader_world.program && gl_shader_world.u_caustics >= 0)
 		{
-			glUseProgram_fp(gl_shader_world.program);
+			R_UseProgram (gl_shader_world.program);
 			glUniform2f_fp(gl_shader_world.u_caustics, intensity, t);
 		}
 		if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_caustics >= 0)
 		{
-			glUseProgram_fp(gl_shader_world_opaque.program);
+			R_UseProgram (gl_shader_world_opaque.program);
 			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
 		}
 		/* Translucent world surfaces are drawn with gl_shader_world_oit
@@ -4397,7 +4536,7 @@ static void R_SetupFrame (void)
 		 * uhexen2-uxpp. */
 		if (gl_shader_world_oit.program && gl_shader_world_oit.u_caustics >= 0)
 		{
-			glUseProgram_fp(gl_shader_world_oit.program);
+			R_UseProgram (gl_shader_world_oit.program);
 			glUniform2f_fp(gl_shader_world_oit.u_caustics, intensity, t);
 		}
 		/* Per-frame world overbright (Ironwail-style).  Pushing it once
@@ -4413,17 +4552,17 @@ static void R_SetupFrame (void)
 			float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
 			if (gl_shader_world.program && gl_shader_world.u_overbright >= 0)
 			{
-				glUseProgram_fp(gl_shader_world.program);
+				R_UseProgram (gl_shader_world.program);
 				glUniform1f_fp(gl_shader_world.u_overbright, ob);
 			}
 			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_overbright >= 0)
 			{
-				glUseProgram_fp(gl_shader_world_opaque.program);
+				R_UseProgram (gl_shader_world_opaque.program);
 				glUniform1f_fp(gl_shader_world_opaque.u_overbright, ob);
 			}
 			if (gl_shader_world_oit.program && gl_shader_world_oit.u_overbright >= 0)
 			{
-				glUseProgram_fp(gl_shader_world_oit.program);
+				R_UseProgram (gl_shader_world_oit.program);
 				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
 			}
 		}
@@ -4441,17 +4580,17 @@ static void R_SetupFrame (void)
 			ld[1] = r_lightmap.integer ? 1.0f : 0.0f;
 			if (gl_shader_world.program && gl_shader_world.u_lightdebug >= 0)
 			{
-				glUseProgram_fp(gl_shader_world.program);
+				R_UseProgram (gl_shader_world.program);
 				glUniform2f_fp(gl_shader_world.u_lightdebug, ld[0], ld[1]);
 			}
 			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightdebug >= 0)
 			{
-				glUseProgram_fp(gl_shader_world_opaque.program);
+				R_UseProgram (gl_shader_world_opaque.program);
 				glUniform2f_fp(gl_shader_world_opaque.u_lightdebug, ld[0], ld[1]);
 			}
 			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightdebug >= 0)
 			{
-				glUseProgram_fp(gl_shader_world_oit.program);
+				R_UseProgram (gl_shader_world_oit.program);
 				glUniform2f_fp(gl_shader_world_oit.u_lightdebug, ld[0], ld[1]);
 			}
 		}
@@ -4463,21 +4602,21 @@ static void R_SetupFrame (void)
 			float bicubic = r_lightmap_bicubic.integer ? 1.0f : 0.0f;
 			if (gl_shader_world.program && gl_shader_world.u_lightmap_bicubic >= 0)
 			{
-				glUseProgram_fp(gl_shader_world.program);
+				R_UseProgram (gl_shader_world.program);
 				glUniform1f_fp(gl_shader_world.u_lightmap_bicubic, bicubic);
 			}
 			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightmap_bicubic >= 0)
 			{
-				glUseProgram_fp(gl_shader_world_opaque.program);
+				R_UseProgram (gl_shader_world_opaque.program);
 				glUniform1f_fp(gl_shader_world_opaque.u_lightmap_bicubic, bicubic);
 			}
 			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightmap_bicubic >= 0)
 			{
-				glUseProgram_fp(gl_shader_world_oit.program);
+				R_UseProgram (gl_shader_world_oit.program);
 				glUniform1f_fp(gl_shader_world_oit.u_lightmap_bicubic, bicubic);
 			}
 		}
-		glUseProgram_fp(0);
+		R_UseProgram (0);
 	}
 
 	r_cache_thrash = false;
@@ -4549,10 +4688,10 @@ static void R_SetupGL (void)
 			GL_Scalef(1, -1, 1);
 		else
 			GL_Scalef(-1, 1, 1);
-		glCullFace_fp(GL_BACK);
+		R_SetCullFace (GL_BACK);
 	}
 	else
-		glCullFace_fp(GL_FRONT);
+		R_SetCullFace (GL_FRONT);
 
 	GL_MatrixMode(GL_MAT_MODELVIEW);
 	GL_LoadIdentity();
@@ -4569,12 +4708,12 @@ static void R_SetupGL (void)
 	// set drawing parms
 	//
 	if (gl_cull.integer)
-		glEnable_fp(GL_CULL_FACE);
+		R_SetCull (true);
 	else
-		glDisable_fp(GL_CULL_FACE);
+		R_SetCull (false);
 
-	glDisable_fp(GL_BLEND);
-	glEnable_fp(GL_DEPTH_TEST);
+	R_SetBlend (false);
+	R_SetDepthTest (true);
 }
 
 /*
@@ -4688,7 +4827,7 @@ static void R_Clear (void)
 			gldepthmin = 0.0f;
 			gldepthmax = 0.5f;
 		}
-		glDepthFunc_fp (dfunc);
+		R_SetDepthFunc (dfunc);
 	}
 	else
 	{
@@ -4698,10 +4837,10 @@ static void R_Clear (void)
 			glClear_fp (GL_DEPTH_BUFFER_BIT);
 		gldepthmin = 0;
 		gldepthmax = 1;
-		glDepthFunc_fp (dfunc);
+		R_SetDepthFunc (dfunc);
 	}
 
-	glDepthRange_fp (gldepthmin, gldepthmax);
+	R_SetDepthRange (gldepthmin, gldepthmax);
 
 	if (have_stencil)
 	{
@@ -4756,8 +4895,8 @@ static void R_Mirror (void)
 		gldepthmin = 0.5f;
 		gldepthmax = 1.0f;
 	}
-	glDepthRange_fp (gldepthmin, gldepthmax);
-	glDepthFunc_fp (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	R_SetDepthRange (gldepthmin, gldepthmax);
+	R_SetDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	R_RenderScene ();
 
@@ -4765,7 +4904,7 @@ static void R_Mirror (void)
 	 * depth range, and R_SoftParticleParams reads both live.  uhexen2-mf9u. */
 	GL_SoftDepth_Capture ();
 
-	glDepthMask_fp(0);
+	R_SetDepthMask (false);
 
 	R_DrawParticles ();
 
@@ -4786,17 +4925,17 @@ static void R_Mirror (void)
 		gldepthmin = 0.0f;
 		gldepthmax = 0.5f;
 	}
-	glDepthRange_fp (gldepthmin, gldepthmax);
-	glDepthFunc_fp (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
+	R_SetDepthRange (gldepthmin, gldepthmax);
+	R_SetDepthFunc (gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL);
 
 	// blend on top
-	glEnable_fp (GL_BLEND);
+	R_SetBlend (true);
 	GL_MatrixMode(GL_MAT_PROJECTION);
 	if (mirror_plane->normal[2])
 		GL_Scalef (1,-1,1);
 	else
 		GL_Scalef (-1,1,1);
-	glCullFace_fp(GL_FRONT);
+	R_SetCullFace (GL_FRONT);
 	GL_MatrixMode(GL_MAT_MODELVIEW);
 
 	GL_LoadMatrixf (r_base_world_matrix);
@@ -4805,7 +4944,7 @@ static void R_Mirror (void)
 	for ( ; s ; s = s->texturechain)
 		R_RenderBrushPoly (&r_worldentity, s, true);
 	cl.worldmodel->textures[mirrortexturenum]->texturechain = NULL;
-	glDisable_fp (GL_BLEND);
+	R_SetBlend (false);
 }
 
 
@@ -4967,9 +5106,9 @@ static void R_ShowBoundingBoxes (void)
 	}
 
 	/* Save and disable depth test so boxes show through walls */
-	glDisable_fp (GL_DEPTH_TEST);
-	glEnable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	R_SetDepthTest (false);
+	R_SetBlend (true);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	/* Pass 2: draw, with color overrides for focused / target-linked
 	 * entities and a reddish tint for entities with health. */
@@ -5142,8 +5281,8 @@ static void R_ShowBoundingBoxes (void)
 		GL_ImmEnd (GL_LINES, &gl_shader_flat);
 	}
 
-	glEnable_fp (GL_DEPTH_TEST);
-	glDisable_fp (GL_BLEND);
+	R_SetDepthTest (true);
+	R_SetBlend (false);
 }
 
 
@@ -5285,9 +5424,9 @@ static void R_ShowPointFile (void)
 	frac = (float)(realtime - floor (realtime));
 
 	if (!r_pointfile_depthtest.integer)
-		glDisable_fp (GL_DEPTH_TEST);
-	glEnable_fp (GL_BLEND);
-	glBlendFunc_fp (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		R_SetDepthTest (false);
+	R_SetBlend (true);
+	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	GL_ImmBegin ();
 	GL_ImmColor4f (r, g, b, 0.9f);
@@ -5305,8 +5444,8 @@ static void R_ShowPointFile (void)
 	}
 	GL_ImmEnd (GL_LINES, &gl_shader_flat);
 
-	glEnable_fp (GL_DEPTH_TEST);
-	glDisable_fp (GL_BLEND);
+	R_SetDepthTest (true);
+	R_SetBlend (false);
 }
 
 
@@ -5512,7 +5651,7 @@ void R_RenderView (void)
 	 * layering onto it.  uhexen2-mf9u. */
 	GL_SoftDepth_Capture ();
 
-	glDepthMask_fp(0);
+	R_SetDepthMask (false);
 
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_WATER);
 

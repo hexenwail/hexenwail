@@ -82,8 +82,16 @@ Planned:
 - HUD / menu / crosshair / console scale sliders (auto by framebuffer height)
 - Console alpha + brightness sliders
 
-![Overbright lighting](docs/gloverbright.png)
-*Overbright world lighting (`gl_overbright`, default on) — lightmaps are built one bit dimmer and doubled back in the shader, so brightly lit surfaces keep their color instead of clipping to white.*
+<table>
+<tr>
+<td width="50%"><img src="docs/gloverbright.png" alt="Overbright world lighting with software colormap emulation" width="100%"></td>
+<td width="50%"><img src="docs/softwarecomparison.png" alt="The same corridor with software emulation off" width="100%"></td>
+</tr>
+<tr>
+<td align="center"><em>Overbright world lighting (<code>gl_overbright</code>, default on) under software colormap emulation (<code>r_softemu 3</code>) — lightmaps are built one bit dimmer and doubled back in the shader, so brightly lit surfaces keep their color instead of clipping to white.</em></td>
+<td align="center"><em>The same corridor (captured from the web version in a Google Chrome tab) with emulation off (<code>r_softemu 0</code>) — filtered textures and unquantized lighting, the same overbright range without the 8-bit palette and point sampling.</em></td>
+</tr>
+</table>
 
 ### Input
 - WASD + mouselook defaults
