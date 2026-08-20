@@ -107,6 +107,9 @@ echo "window id: [$WID] after ${i}s"
 sleep 10
 
 shot()  { sleep 2; import -window root "$OUT/$1.png" 2>/dev/null; echo "  shot $1"; }
+# Like shot(), minus the settling sleep: for sampling a lightstyle as a TIME
+# SERIES rather than at 2s intervals, where a 10Hz style aliases into noise.
+shotf() { import -window root "$OUT/$1.png" 2>/dev/null; }
 key()   { xdotool key --clearmodifiers "$1"; sleep 0.7; }
 keyn()  { for _ in $(seq 1 "$2"); do xdotool key --clearmodifiers "$1"; sleep 0.5; done; }
 # type without submitting -- needed to test TAB, where pressing Return would
@@ -281,6 +284,122 @@ case "$SCEN" in
     #    it must still behave identically to shot 01.
     typn "map eido";      key Tab; shot 08-repeat-after-many
     wipe
+    ;;
+
+  # uhexen2-ayrn: Ironwail's alias light-trace cache (e2f39505).  Two claims to
+  # confirm, both about the CACHE HIT path in R_LightPointColor (gl_rlight.c:682):
+  #   1. cache->spot is copied back into lightspot BEFORE InterpolateLightmap
+  #      runs, so GL_DrawAliasShadow still lands the shadow on the floor rather
+  #      than at the model's origin or a stale height.
+  #   2. InterpolateLightmap (gl_rlight.c:550) re-reads d_lightstylevalue[] on
+  #      every hit, so a model that never moves -- and therefore hits the cache
+  #      every single frame -- keeps reacting to a flickering torch instead of
+  #      freezing at the brightness of its first trace.
+  #
+  # The player in chase cam IS the stationary alias model under test: it is a
+  # normal entity, so it lights through AliasModelGetLightInfo -> the cached
+  # path, not the R_DrawViewModel special case.
+  #
+  # SEND NO INPUT during the burst.  Any movement invalidates the cache via the
+  # fabs(cache->pos - adjust_origin) test, which would re-trace every frame and
+  # make the run pass for the wrong reason -- it would prove nothing about the
+  # hit path, which is the only thing this bead is about.
+  ayrn_lightcache)
+    sleep 25
+    key grave; sleep 1
+    typ "god"; typ "notarget"
+    typ "r_shadows 1"
+    typ "chase_active 1"
+    key grave; sleep 3
+    shot 30-chase-r_shadows1
+    # Burst with zero input in between: the player entity's lightcache is hit
+    # on every frame of all of these.
+    for i in 1 2 3 4 5 6 7 8 9 10; do shot "31-still-$i"; done
+    # Control: same scene with shadows off, to tell a shadow apart from a dark
+    # lightmap patch when reading 30-chase-r_shadows1.
+    key grave; sleep 1
+    typ "r_shadows 0"
+    key grave; sleep 3
+    shot 32-chase-r_shadows0
+    ;;
+
+  # uhexen2-ayrn, part 2: the lightstyle-liveness half, run somewhere it can
+  # actually fail.  The first pass (ayrn_lightcache) put the player at demo1's
+  # spawn and proved nothing: a frame-to-frame diff there was pin-black over the
+  # whole world, because every floor face under the spawn carries style 0.  With
+  # nothing animating, a cache that correctly re-interpolates and a cache frozen
+  # at its first trace render identically.
+  #
+  # So teleport onto a floor face that a BSP scan says is lit by style 4 --
+  # "mamamamamama", the fast strobe, which swings between full and black and is
+  # therefore the largest signal available in this map.  Face centroid
+  # (-1612.5, 1548.0, 67.3) in maps/demo1.bsp, the biggest style-4 floor in the
+  # map; 54 floor faces there carry a style in 1..11, and only those 11 styles
+  # animate (32+ are switchable lights, static until triggered).
+  #
+  # Land, let the player settle, then send NOTHING.  Same reasoning as part 1:
+  # any movement re-traces instead of hitting the cache, and would test the
+  # wrong path.
+  ayrn_strobe)
+    sleep 25
+    key grave; sleep 1
+    typ "god"; typ "notarget"
+    typ "r_shadows 1"
+    typ "chase_active 1"
+    typ "setpos -1612 1548 107"
+    key grave; sleep 5      # land and settle before the burst
+    shot 40-strobe-landed
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do shot "41-strobe-$i"; done
+    ;;
+
+  # uhexen2-ayrn, part 3.  Parts 1 and 2 were both inconclusive, for opposite
+  # reasons, and both failures are easy to repeat by accident:
+  #   - part 1 (ayrn_lightcache) sat at demo1's spawn, where every floor face is
+  #     style 0.  Nothing in the world could animate, so a frozen cache and a
+  #     live one render identically.  A frame diff there is pin-black except for
+  #     the scrolling sky and the model's own idle animation.
+  #   - part 2 (ayrn_strobe) reached a style-4 floor but sampled at 2s
+  #     intervals, which aliases a 10Hz strobe into noise, and its floor
+  #     reference patch was not on the animated surface -- it pinned to one
+  #     exact value for 7 consecutive frames once the player stopped settling.
+  #
+  # There is a third failure mode underneath both of those, and it invalidated
+  # the targets they used: dface_t puts styles[] at byte 12 and lightofs at 16,
+  # and the scan that picked those spots read them at 14 and 18.  Every style
+  # number it reported was two bytes off -- it was reading styles[2], styles[3]
+  # and half of lightofs.  Corrected, demo1 has ZERO floor faces carrying an
+  # animated style, so no spot in that map can test this claim at all, and the
+  # "style 4" and "style 2" floors parts 1-2 aimed at are both plain style 0.
+  #
+  # So switch map.  A corrected scan of all 42 stock maps ranks eidolon first:
+  # 21 animated-style floor faces, the largest being face #24 at centroid
+  # (1817.6, 32.0, 0.0), styles[] = [2, 0, 255, 255].  Style 2 is
+  # "abcdefghijklmnopqrstuvwxyzyxwvutsrqponmlkjihgfedcba" -- 50 frames at 10Hz,
+  # a 5-second full sweep from black to full bright: the largest amplitude
+  # available and slow enough to sample honestly.
+  #
+  # MUST be run with "+map eidolon", not demo1.
+  #
+  # Two things part 2 lacked:
+  #   - `viewpos` into the console log, so the position the player ACTUALLY
+  #     settled at can be pushed back through a BSP downtrace offline and the
+  #     surface under its feet identified by style.  Otherwise "did we land on
+  #     the animated face" is guesswork.
+  #   - a real time series: 30 back-to-back frames, no settling sleep, covering
+  #     roughly one full style-2 cycle.
+  ayrn_pulse)
+    sleep 25
+    key grave; sleep 1
+    typ "god"; typ "notarget"
+    typ "r_shadows 1"
+    typ "chase_active 1"
+    typ "setpos 1817 32 40"
+    sleep 5
+    typ "viewpos"          # lands in qconsole.log; read it back offline
+    key grave; sleep 5     # settle fully -- a moving player re-traces
+    shot 50-pulse-landed
+    for i in $(seq -w 1 30); do shotf "51-pulse-$i"; sleep 0.15; done
+    echo "  fast burst done"
     ;;
 
   *)
