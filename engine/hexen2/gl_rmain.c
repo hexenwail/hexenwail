@@ -51,6 +51,7 @@ int			r_framecount;		// used for dlight push checking
 mplane_t	frustum[4];
 
 int			c_brush_polys, c_alias_polys;
+int			c_texbinds;	/* glBindTexture calls that survived the redundancy filter (uhexen2-im9g) */
 
 qboolean	r_cache_thrash;			// compatability
 
@@ -4761,6 +4762,7 @@ static void R_SetupFrame (void)
 
 	c_brush_polys = 0;
 	c_alias_polys = 0;
+	c_texbinds = 0;
 }
 
 
@@ -5639,6 +5641,7 @@ static qboolean	rprof_available;	/* queries have been allocated */
 static double	rprof_cpu_world;	/* CPU wall-clock for R_RenderScene */
 /* sub-pass breakdown — declarations hoisted above R_RenderScene */
 static int	rprof_wpoly, rprof_epoly; /* saved from previous frame */
+static int	rprof_texbinds;		  /* ditto (uhexen2-im9g) */
 
 static void R_ProfileInit (void)
 {
@@ -5689,7 +5692,7 @@ static void R_ProfileReport (void)
 		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f\n"
 		   "  draw: bsp %.1f  lmup %.1f  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
 		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
-		   "  %4i wpoly  %4i epoly\n",
+		   "  %4i wpoly  %4i epoly  %4i texbind\n",
 		   total, rprof_cpu_world * 1000.0,
 		   ms[RPROF_WORLD], ms[RPROF_PARTICLES], ms[RPROF_WATER],
 		   ms[RPROF_TRANS], ms[RPROF_VM], ms[RPROF_MIRROR],
@@ -5730,7 +5733,7 @@ static void R_ProfileReport (void)
 		   rprof_cpu_chains_surfwalk * 1000.0,
 		   rprof_chains_n_lmrebuilt,
 		   rprof_cpu_chains_lmbuild * 1000.0,
-		   rprof_wpoly, rprof_epoly);
+		   rprof_wpoly, rprof_epoly, rprof_texbinds);
 
 	rprof_pending = false;
 }
@@ -5756,8 +5759,10 @@ void R_RenderView (void)
 		/* Save counters before reset — GPU profiler reports 1 frame delayed */
 		rprof_wpoly = c_brush_polys;
 		rprof_epoly = c_alias_polys;
+		rprof_texbinds = c_texbinds;
 		c_brush_polys = 0;
 		c_alias_polys = 0;
+		c_texbinds = 0;
 	}
 
 	if (r_speeds.integer >= 2)
