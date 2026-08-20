@@ -2973,6 +2973,44 @@ Callers must invoke this BEFORE Hunk_FreeToLowMark in the load path,
 while the poseverts[] global still points into the working buffer.
 =================
 */
+/*
+=================
+Mod_FramesAreSequential  uhexen2-aqm0
+
+True if `b' is the next frame of the same animation as `a' -- same stem, and a
+trailing number one higher.  Hexen II frame names are <stem><number>
+("pain13", "pain14", "deathA22", "draw1"), and the QC steps self.frame through
+one such run at a time.
+
+Mod_ComputeFlipbookRatio needs this because the frames of every animation a
+model has sit end-to-end in one array, so "frame f and frame f+1" silently
+includes the seam between the last frame of one animation and the first of the
+next -- poses that are never blended into each other at runtime and that differ
+about as much as two unrelated models would.
+=================
+*/
+static qboolean Mod_FramesAreSequential (const char *a, const char *b)
+{
+	size_t	na, nb;
+
+	if (!a || !b || !*a || !*b)
+		return false;
+
+	na = strlen(a);
+	nb = strlen(b);
+	while (na > 0 && a[na-1] >= '0' && a[na-1] <= '9') na--;
+	while (nb > 0 && b[nb-1] >= '0' && b[nb-1] <= '9') nb--;
+
+	/* No trailing number on either side means it isn't part of a run. */
+	if (na == strlen(a) || nb == strlen(b))
+		return false;
+
+	if (na != nb || strncmp(a, b, na))
+		return false;		/* different animation */
+
+	return (atoi(b + nb) == atoi(a + na) + 1);
+}
+
 static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 {
 	extern trivertx_t *poseverts[];
@@ -3011,10 +3049,18 @@ static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 			/* Multi-pose group: pose K -> K+1, with wrap. */
 			pairs = n;
 		}
-		else if (f + 1 < hdr->numframes && hdr->frames[f+1].numposes == 1)
+		else if (f + 1 < hdr->numframes && hdr->frames[f+1].numposes == 1 &&
+			 Mod_FramesAreSequential (hdr->frames[f].name,
+						  hdr->frames[f+1].name))
 		{
-			/* Single pose, next frame also single: typical sequential
-			 * frame anim (QC ticks self.frame each think). */
+			/* Single pose, next frame also single, and the two are
+			 * consecutive frames of one named animation: a tick target
+			 * the QC actually steps through.  Without the name check
+			 * this also measured animation seams, which are not
+			 * blended and which dominate the max -- models/archer.mdl
+			 * scored 0.410 on deathA22 -> draw1 alone and lost frame
+			 * interpolation entirely, against 0.242 for its worst real
+			 * pair (fire1 -> fire2).  uhexen2-aqm0 */
 			pairs = 1;
 		}
 		else
