@@ -1,5 +1,7 @@
 export const KNOWN_GAME_ROOTS = ['data1', 'portals', 'hw'];
+export const MAX_GAMEDIR_LENGTH = 32;
 const WINDOWS_DRIVE_RE = /^[a-zA-Z]:/;
+const GAMEDIR_RE = /^[a-z0-9_-]+$/;
 
 function normalizeSlashes(input) {
   return String(input ?? '').replace(/\\+/g, '/').replace(/\/+/g, '/');
@@ -26,6 +28,32 @@ export function sanitizeRelativePath(inputPath) {
   }
 
   return cleaned.length ? cleaned.join('/') : null;
+}
+
+/*
+ * A gamedir reaches the engine twice: as a bare argv token after -game, and as
+ * a single path component (FS_Gamedir refuses any name holding '/', '\\', ':'
+ * or '..', and fatals when it is handed one at startup).  A folder name picked
+ * out of a file dialog satisfies neither by construction, so it is folded down
+ * to the one shape both accept before it is ever stored or launched with.
+ */
+export function normalizeGamedirName(rawName) {
+  const raw = normalizeSlashes(rawName).split('/').filter(Boolean).at(-1) ?? '';
+  const folded = raw.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/-{2,}/g, '-');
+  const trimmed = folded.replace(/^-+/, '').slice(0, MAX_GAMEDIR_LENGTH).replace(/-+$/, '');
+  return GAMEDIR_RE.test(trimmed) ? trimmed : null;
+}
+
+// The base game's own directories are not mods: FS_Gamedir silently ignores
+// "data1" and "portals" and warns that "hw" belongs to HexenWorld, so letting
+// one be imported or selected would offer a control that cannot do anything.
+export function sanitizeGamedirName(rawName) {
+  const name = normalizeGamedirName(rawName);
+  return name && !KNOWN_GAME_ROOTS.includes(name) ? name : null;
+}
+
+export function isGamedirName(value) {
+  return typeof value === 'string' && sanitizeGamedirName(value) === value;
 }
 
 export function mapImportedPath(inputPath) {

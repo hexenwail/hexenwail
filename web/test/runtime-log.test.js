@@ -21,7 +21,10 @@ test('launcher chrome exposes bounded runtime diagnostics in both shells', () =>
 
 test('manual WASM launch keeps configured arguments and fails explicitly', () => {
   assert.match(app, /const ENGINE_ARGUMENTS = \['-basedir', BASE_DIR\]/);
-  assert.match(app, /Module\.callMain\(\[\.\.\.ENGINE_ARGUMENTS\]\)/);
+  // The mod selector may append a -game pair; ENGINE_ARGUMENTS stays the base.
+  assert.match(app, /Module\.callMain\(engineArguments\)/);
+  assert.match(app, /buildEngineArguments\(ENGINE_ARGUMENTS, getActiveMod\(\)\)/);
+  assert.match(app, /engine arguments: \$\{engineArguments\.join\(' '\)\}/);
   assert.match(app, /Engine runtime did not expose callMain/);
   assert.match(app, /Engine exited during startup with status/);
   assert.doesNotMatch(app, /callMain\?\.\(\[\]\)/);

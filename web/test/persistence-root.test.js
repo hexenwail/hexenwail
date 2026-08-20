@@ -21,7 +21,17 @@ test('the launcher syncs the same root it hands the engine as -basedir', () => {
   assert.match(appText, /const ENGINE_ARGUMENTS = \['-basedir', BASE_DIR\];/);
   // Persistence walks BASE_DIR, so anything written outside it is never stored.
   assert.match(appText, /function walkRuntimeFiles\(path = BASE_DIR/);
-  assert.match(appText, /Module\.callMain\(\[\.\.\.ENGINE_ARGUMENTS\]\)/);
+  // The launched argv is ENGINE_ARGUMENTS plus at most a -game pair; nothing
+  // else may reach callMain, or the basedir contract above stops holding.
+  assert.match(appText, /const engineArguments = buildEngineArguments\(ENGINE_ARGUMENTS, getActiveMod\(\)\);/);
+  assert.match(appText, /Module\.callMain\(engineArguments\)/);
+});
+
+test('an imported gamedir is persisted and restored like the base game', () => {
+  // walkRuntimeFiles recurses from BASE_DIR itself rather than a list of known
+  // directories, so /persistent/<gamedir> rides the same sync as data1.
+  assert.match(appText, /for \(const name of FS\.readdir\(path\)\)/);
+  assert.match(appText, /state\.storedPaths = new Set\(files\.map\(\(file\) => file\.path\)\)/);
 });
 
 test('the Emscripten build keeps one persistence root by disabling user directories', () => {

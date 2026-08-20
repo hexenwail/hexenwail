@@ -44,6 +44,7 @@ require "lib/paths.js"
 require "lib/zip.js"
 require "lib/save-bundle.js"
 require "lib/demo-fetch.js"
+require "lib/mods.js"
 
 # Icons the manifest names.  An install prompt with no icon is a soft failure
 # browsers do not report.

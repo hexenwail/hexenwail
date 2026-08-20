@@ -1,4 +1,4 @@
-import { sanitizeRelativePath, KNOWN_GAME_ROOTS } from './paths.js';
+import { sanitizeRelativePath, isGamedirName, KNOWN_GAME_ROOTS } from './paths.js';
 import { extractZipEntries, parseZipCentralDirectory } from './zip.js';
 
 export const SAVE_BUNDLE_FORMAT = 'hexenwail-save';
@@ -29,11 +29,28 @@ export async function sha256(bytes) {
   return hex(new Uint8Array(digest));
 }
 
+/*
+ * The engine writes saves to <basedir>/<gamedir>/s<N>/, and with -game the
+ * gamedir is an imported mod's, so the allowlist cannot be a fixed list of
+ * three names.  It stays an allowlist all the same: a root is either part of
+ * the base game or has the shape a gamedir is allowed to have, which bounds
+ * what a bundle can address to <safe-name>/s<N>/<non-asset-file>.
+ */
+export function isSaveRoot(name) {
+  const root = String(name ?? '').toLowerCase();
+  return KNOWN_GAME_ROOTS.includes(root) || isGamedirName(root);
+}
+
 export function isSavePath(path) {
   const safe = sanitizeRelativePath(path);
   if (!safe || EXCLUDED_SAVE_FILE.test(safe)) return false;
   const parts = safe.split('/');
-  return KNOWN_GAME_ROOTS.includes(parts[0].toLowerCase()) && parts.length >= 3 && SAVE_SLOT.test(parts[1]);
+  return isSaveRoot(parts[0]) && parts.length >= 3 && SAVE_SLOT.test(parts[1]);
+}
+
+export function isPakCompatibilityPath(path) {
+  const parts = String(path ?? '').split('/');
+  return parts.length >= 2 && isSaveRoot(parts[0]) && /^[^/]+\.pak$/i.test(parts.at(-1));
 }
 
 export function saveBundlePath(path) {
@@ -147,13 +164,13 @@ export async function validateSaveBundle(bytes) {
   assertBundle(manifest?.format === SAVE_BUNDLE_FORMAT, 'Unsupported save bundle format');
   assertBundle(Number.isInteger(manifest.formatVersion) && manifest.formatVersion === SAVE_BUNDLE_VERSION, `Unsupported save bundle version: ${manifest?.formatVersion}`);
   assertBundle(typeof manifest.createdAt === 'string' && !Number.isNaN(Date.parse(manifest.createdAt)), 'Save bundle manifest has an invalid creation date');
-  assertBundle(Array.isArray(manifest.gameDirectories) && manifest.gameDirectories.every((dir) => typeof dir === 'string' && KNOWN_GAME_ROOTS.includes(dir.toLowerCase())) && new Set(manifest.gameDirectories.map((dir) => dir.toLowerCase())).size === manifest.gameDirectories.length, 'Save bundle manifest has invalid game directories');
+  assertBundle(Array.isArray(manifest.gameDirectories) && manifest.gameDirectories.every((dir) => typeof dir === 'string' && isSaveRoot(dir)) && new Set(manifest.gameDirectories.map((dir) => dir.toLowerCase())).size === manifest.gameDirectories.length, 'Save bundle manifest has invalid game directories');
   manifest.gameDirectories = manifest.gameDirectories.map((dir) => dir.toLowerCase());
   assertBundle(Array.isArray(manifest.requiredPaks) && Array.isArray(manifest.files) && manifest.files.length > 0 && manifest.files.length <= SAVE_BUNDLE_LIMITS.maxFiles, 'Save bundle manifest is invalid');
   const pakPaths = new Set();
   for (const pak of manifest.requiredPaks) {
     const path = sanitizeRelativePath(pak?.path);
-    assertBundle(path === pak?.path && /^(?:data1|portals|hw)\/.+\.pak$/i.test(path) && Number.isInteger(pak.size) && pak.size >= 0 && (!('sha256' in pak) || validDigest(pak.sha256)), 'Save bundle manifest contains invalid PAK compatibility data');
+    assertBundle(path === pak?.path && isPakCompatibilityPath(path) && Number.isInteger(pak.size) && pak.size >= 0 && (!('sha256' in pak) || validDigest(pak.sha256)), 'Save bundle manifest contains invalid PAK compatibility data');
     assertBundle(!pakPaths.has(path), `Duplicate PAK compatibility path: ${path}`);
     pakPaths.add(path);
   }

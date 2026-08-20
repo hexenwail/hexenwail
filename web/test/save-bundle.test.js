@@ -4,6 +4,7 @@ import {
   createSaveBundle,
   createStoredZip,
   getPakCompatibilityWarnings,
+  isPakCompatibilityPath,
   isSavePath,
   planSaveImport,
   validateSaveBundle,
@@ -18,6 +19,54 @@ test('classifies engine save slots while excluding commercial assets', () => {
   assert.equal(isSavePath('data1/pak0.pak'), false);
   assert.equal(isSavePath('data1/music/track01.ogg'), false);
   assert.equal(isSavePath('data1/progs.dat'), false);
+});
+
+test('an imported mod saves under its own gamedir, and only in that shape', () => {
+  // -game puts fs_userdir at <basedir>/<gamedir>, so a mod's saves are never
+  // under data1 and the allowlist cannot be three fixed names.
+  assert.equal(isSavePath('testmod/s0/info.dat'), true);
+  assert.equal(isSavePath('testmod/ms3/clients.gip'), true);
+  // A mod's own content is not a save: only s<N>/ms<N> slots are exported.
+  assert.equal(isSavePath('testmod/pak0.pak'), false);
+  assert.equal(isSavePath('testmod/maps/e1m1.bsp'), false);
+  assert.equal(isSavePath('testmod/progs.dat'), false);
+  // Still an allowlist: the root has to have a gamedir's shape.
+  assert.equal(isSavePath('../testmod/s0/info.dat'), false);
+  assert.equal(isSavePath('My Mod/s0/info.dat'), false);
+  assert.equal(isSavePath('testmod/notaslot/info.dat'), false);
+  assert.equal(isPakCompatibilityPath('testmod/pak0.pak'), true);
+  assert.equal(isPakCompatibilityPath('data1/pak0.pak'), true);
+  assert.equal(isPakCompatibilityPath('My Mod/pak0.pak'), false);
+  assert.equal(isPakCompatibilityPath('testmod/progs.dat'), false);
+});
+
+test('a save bundle round-trips an imported mod gamedir', async () => {
+  const modSave = { path: 'testmod/s0/clients.gip', bytes: new TextEncoder().encode('mod save state') };
+  const { bytes, manifest } = await createSaveBundle([modSave], {
+    createdAt: '2026-08-20T00:00:00.000Z',
+    requiredPaks: [{ path: 'testmod/pak0.pak', size: 12 }],
+  });
+  assert.deepEqual(manifest.gameDirectories, ['testmod']);
+  const restored = await validateSaveBundle(bytes);
+  assert.deepEqual(restored.files[0], modSave);
+  assert.deepEqual(restored.manifest.gameDirectories, ['testmod']);
+});
+
+test('a save bundle cannot declare a game directory that is not a gamedir', async () => {
+  const modSave = { path: 'testmod/s0/clients.gip', bytes: new TextEncoder().encode('mod save state') };
+  const { manifest } = await createSaveBundle([modSave], { createdAt: '2026-08-20T00:00:00.000Z' });
+  const escaped = structuredClone(manifest);
+  escaped.gameDirectories = ['../etc'];
+  await assert.rejects(() => validateSaveBundle(createStoredZip([
+    { name: 'hexenwail-save.json', bytes: new TextEncoder().encode(JSON.stringify(escaped)) },
+    { name: 'saves/testmod/s0/clients.gip', bytes: modSave.bytes },
+  ])), /invalid game directories/);
+  const mismatched = structuredClone(manifest);
+  mismatched.gameDirectories = ['othermod'];
+  await assert.rejects(() => validateSaveBundle(createStoredZip([
+    { name: 'hexenwail-save.json', bytes: new TextEncoder().encode(JSON.stringify(mismatched)) },
+    { name: 'saves/testmod/s0/clients.gip', bytes: modSave.bytes },
+  ])), /do not match its files/);
 });
 
 test('creates and validates a versioned ZIP save bundle', async () => {

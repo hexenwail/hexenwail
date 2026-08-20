@@ -202,6 +202,9 @@ ZIP imports are extracted entirely client-side in the browser. The importer reje
 
 Re-importing a file with the same logical path overwrites the previous local copy.
 
+Mods are imported separately and are *not* mapped into `data1/` — see [Playing
+mods](#playing-mods).
+
 ## Getting the free demo
 
 When no `data1/pak0.pak` has been imported yet, the launcher shows a **Get the free
@@ -263,6 +266,75 @@ never leaves your origin — useful for offline or air-gapped deployments. The Z
 digests above; anything else is rejected. The public Pages deploy does not ship this file
 and the service worker never precaches it.
 
+## Playing mods
+
+The **Mods** panel is the browser's version of the command line's `-game`:
+
+```
+hexen2 -basedir /path/to/hexen2 -game mymod     # desktop
+Import mod folder -> pick "mymod" -> Active mod: mymod -> Start   # launcher
+```
+
+**Import mod folder** opens a directory picker. The folder you pick *is* the gamedir: its
+name becomes the directory the engine is launched with, and its contents are stored under
+that name with their internal structure intact (`mymod/progs.dat`, `mymod/maps/e1m1.bsp`,
+`mymod/pak0.pak`, …). Pick the mod's own folder — if a download wraps the mod in an extra
+directory, descend into it first, or the wrapper becomes the gamedir instead.
+
+Unlike the base-game importer, nothing here is flattened into `data1/`: that mapper exists
+to turn a retail install into the layout the engine expects, and a mod's whole meaning is
+that its files sit *above* `data1` in the search path.
+
+### Gamedir names
+
+The folder name is folded down to what the engine accepts as a single path component
+(`FS_Gamedir` refuses any name containing `/`, `\`, `:` or `..`): lowercased, anything
+outside `a-z 0-9 _ -` replaced with `-`, and truncated to 32 characters. `Keep 2.0!`
+becomes `keep-2-0`. `data1`, `portals` and `hw` are refused — the engine ignores `-game`
+for all three, so importing one as a mod would create a control that cannot do anything.
+
+### Which files are imported
+
+Mod content is accepted by file type, since a mod's payload is whatever its `progs.dat`
+asks for:
+
+`.pak` · `.dat` `.cfg` `.rc` `.lst` `.txt` · `.bsp` `.lit` `.ent` · `.mdl` `.spr` ·
+`.lmp` `.wad` `.pcx` `.tga` `.png` `.jpg` `.jpeg` `.dds` `.ktx` ·
+`.wav` `.ogg` `.mp3` `.flac` `.opus` `.mid` `.it` `.s3m` `.umx` · `.dem`
+
+Anything else — archives, installers, scripts, `.gip`/`.hsv` savegames — is ignored and
+listed under the panel. ZIP archives are not unpacked by the mod importer; extract the mod
+first and import the resulting folder.
+
+### Full game only
+
+`-game` requires a registered install. On a demo install the engine fatals at startup with
+*"You must have the full version of Hexen II to play modified games"*, so the launcher does
+not pass the flag without `data1/pak1.pak`: an imported mod stays selected and listed, the
+panel says why it will not load, and the demo still launches unmodded. Should the engine
+refuse a gamedir for any other reason, its own message is what the runtime log shows.
+
+Passing `-game` also folds `portals/` into the search path below the mod, because mods
+commonly depend on mission pack models. With no mission pack installed the engine prints
+`Missing or invalid mission pack installation` once and continues — that line is expected,
+not a failed launch. Launching the mission pack *itself* is a different flag (`-portals`)
+and is not offered by this panel yet.
+
+### Removing a mod
+
+**Remove** deletes the selected gamedir from both the runtime filesystem and persistent
+storage, **including any save games stored under it**. Nothing else is touched; "Clear
+imported data & saves" remains the way to remove everything at once.
+
+### Mods and saves
+
+Save bundles follow the gamedir. With `-game mymod` the engine writes to
+`/persistent/mymod/s0/…`, and the exporter, the manifest and the importer all accept an
+imported gamedir alongside `data1`, `portals` and `hw` — with the same allowlist shape, so
+a bundle can still only address `<gamedir>/s<N>/`. Importing a bundle whose gamedir is not
+installed here warns before it commits: the files land, but nothing loads them until the
+mod is imported too.
+
 ## Save game persistence
 
 Local save games are just as important to keep offline as the imported PAK/OGG assets, so the
@@ -270,7 +342,8 @@ launcher treats the whole runtime data directory (`/persistent`, mounted at the 
 `-basedir`) as a single persisted tree — not only the files you explicitly imported:
 
 - the engine writes save games (`.hsv`, `clients.gip`, etc.) under the same `data1/`
-  tree as the imported PAK files, via its normal `save`/`load` console commands
+  tree as the imported PAK files, via its normal `save`/`load` console commands — or
+  under `<gamedir>/` when a mod is active, since `-game` moves the userdir with it
 - the launcher periodically diffs the in-memory runtime filesystem against persistent
   browser storage (every ~10 seconds during play) and writes back anything new or changed,
   including save games created since the last sync
