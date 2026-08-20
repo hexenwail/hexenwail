@@ -1,0 +1,28 @@
+MD5Version 10
+commandline ""
+
+numJoints 3
+numMeshes 1
+
+joints {
+	"root"	-1 ( 0 0 0 ) ( 0 0 0 )		//
+	"mid"	0 ( 0 0 10 ) ( 0 0 0 )		// root
+	"tip"	1 ( 0 0 20 ) ( 0 0 0 )		// mid
+}
+
+mesh {
+	shader "models/test/chain"
+
+	numverts 3
+	vert 0 ( 0 0 ) 0 1
+	vert 1 ( 0 1 ) 1 1
+	vert 2 ( 1 1 ) 2 1
+
+	numtris 1
+	tri 0 0 1 2
+
+	numweights 3
+	weight 0 0 1.0 ( 0 0 0 )
+	weight 1 1 1.0 ( 0 0 0 )
+	weight 2 2 1.0 ( 0 0 0 )
+}

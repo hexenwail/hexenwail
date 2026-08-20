@@ -50,12 +50,20 @@ float	GL_GetAlphaThreshold (void);
  * preserve color.a (ENTALPHA / DRF_TRANSLUCENT translucent paths).  Negative
  * leaves shader default.  uhexen2-khsa r13. */
 void	GL_SetForceOpaqueAlpha (float v);
+/* Current value, for the same reason GL_GetAlphaThreshold exists: a draw path
+ * that sets its uniforms by hand must apply what the caller decided, not the
+ * shader default.  uhexen2-7ok0.3. */
+float	GL_GetForceOpaqueAlpha (void);
 /* Underwater caustics for subsequent alias batches.  intensity 0 = off (the
  * default, and what every non-alias user of gl_shader_alias leaves it at).
  * The model matrix is the entity's model-only transform; salias_vert needs it
  * to recover world XY because u_modelview is view*model.  uhexen2-0gn3. */
 void	GL_SetAliasCaustics (float intensity, float time);
 void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
+/* Read back the current values, for draw paths that bypass GL_ImmEnd and must
+ * apply the identical state by hand (the PV_IQM skeletal path, uhexen2-7ok0.3). */
+void	GL_GetAliasModelMatrix (float *out);		/* 16 floats */
+void	GL_GetAliasCaustics (float *out2);		/* 2 floats: intensity, time */
 /* Soft-particle depth fade for subsequent sprite batches (uhexen2-mf9u).
  * inv_dist is the reciprocal of the fade distance in world units, 0 = off
  * (the default, and what every non-sprite user of gl_shader_alias leaves it

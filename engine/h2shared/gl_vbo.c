@@ -225,6 +225,11 @@ void GL_SetForceOpaqueAlpha (float v)
 	imm_force_opaque_alpha = v;
 }
 
+float GL_GetForceOpaqueAlpha (void)
+{
+	return imm_force_opaque_alpha;
+}
+
 /* uhexen2-0gn3: intensity 0 disables the caustics overlay entirely. */
 void GL_SetAliasCaustics (float intensity, float time)
 {
@@ -244,6 +249,23 @@ void GL_SetSoftParticles (float inv_dist, float za, float zb)
 void GL_SetAliasModelMatrix (const float *m)
 {
 	memcpy(imm_alias_model, m, sizeof(imm_alias_model));
+}
+
+/* Read back what R_DrawAliasModel last pushed.  The skeletal draw path
+ * (uhexen2-7ok0.3) sets its uniforms directly rather than through GL_ImmEnd,
+ * so it needs the same two values the immediate path would have applied —
+ * recomputing them there would mean replaying the whole entity transform
+ * chain a third time and risking a different answer than the batch beside
+ * it. */
+void GL_GetAliasModelMatrix (float *out)
+{
+	memcpy(out, imm_alias_model, sizeof(imm_alias_model));
+}
+
+void GL_GetAliasCaustics (float *out2)
+{
+	out2[0] = imm_alias_caustics[0];
+	out2[1] = imm_alias_caustics[1];
 }
 
 void GL_ImmColor4f (float r, float g, float b, float a)

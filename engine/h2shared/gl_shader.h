@@ -51,6 +51,13 @@ typedef struct glprogram_s {
 	 * the fade, so the enable lives in the uniform rather than the program. */
 	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 */
 	GLint	u_soft_params;	    /* alias FS: vec3(1/fade_distance, zparam_a, zparam_b); x=0 disables */
+	/* Skeletal (PV_IQM) VS only — -1 on every other program.  uhexen2-7ok0.3. */
+	GLint	u_pose_base;	    /* current pose's first bone index (pose * numbones) */
+	GLint	u_pose_base2;	    /* pose being blended away from, same scaling */
+	GLint	u_skel_blend;	    /* 0 = fully pose_base2, 1 = fully pose_base */
+	GLint	u_shadevector;	    /* model-space light direction for the shadedots expression */
+	GLint	u_lightcolor;	    /* vec4(light rgb with tint+scale folded in, entity alpha) */
+	GLint	u_fullbright;	    /* 1.0 during the additive fullbright re-draw */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */
@@ -70,6 +77,7 @@ extern glprogram_t	gl_shader_2d;		/* orthographic textured quads */
 extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color */
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
+extern glprogram_t	gl_shader_skeletal;	/* PV_IQM bone-weighted skinning (desktop GL 4.3 only) */
 
 extern GLuint		gl_null_fb_texture;	/* 1x1 black sentinel for u_texture2 (uhexen2-sjvf) */
 extern GLuint		gl_solid_white_texture;	/* 1x1 opaque white, for untextured imm batches */
@@ -78,6 +86,7 @@ extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particle
 /* OIT variants — same shaders but output to MRT accum+revealage */
 extern glprogram_t	gl_shader_world_oit;
 extern glprogram_t	gl_shader_alias_oit;
+extern glprogram_t	gl_shader_skeletal_oit;
 extern glprogram_t	gl_shader_particle_oit;
 
 /* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs) */

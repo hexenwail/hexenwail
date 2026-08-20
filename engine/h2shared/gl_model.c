@@ -306,39 +306,69 @@ void Mod_TouchModel (const char *name)
 ==================
 Mod_SetMD5Bounds
 
-Derives mod->mins/maxs from the MD5 rest-pose vertices.  Without this the
-model keeps the all-zero bbox from Mod_ClearAll and R_CullBox rejects it
-from every view.  Padded like the native alias loaders do.  uhexen2-zjux.
+Derives mod->mins/maxs from the MD5 rest-pose vertices, then unions in the
+animated bounds the .md5anim declared (all-zero when it had none).  Without
+this the model keeps the all-zero bbox from Mod_ClearAll and R_CullBox
+rejects it from every view; without the anim half, a limb that swings past
+the rest silhouette pops the whole model out of view at the frame it does.
+Padded like the native alias loaders do.  uhexen2-zjux / uhexen2-7ok0.2.
 ==================
 */
-static void Mod_SetMD5Bounds (qmodel_t *mod, const aliashdr_t *hdr)
+static void Mod_SetMD5Bounds (qmodel_t *mod, const aliashdr_t *hdr,
+			      const vec3_t anim_mins, const vec3_t anim_maxs)
 {
 	const iqmvert_t	*v;
 	vec3_t		mins, maxs;
+	qboolean	have_anim;
 	int		i, j;
+
+	/* An all-zero pair is the loader's "no animated bounds" signal, and it
+	 * is also the one degenerate box that can never be a real extent. */
+	have_anim = !VectorCompare (anim_mins, anim_maxs);
 
 	if (hdr->numverts <= 0 || !hdr->posedata)
 	{
-		mod->mins[0] = mod->mins[1] = mod->mins[2] = -16;
-		mod->maxs[0] = mod->maxs[1] = mod->maxs[2] = 16;
-		mod->radius = 0;
-		return;
-	}
-
-	v = (const iqmvert_t *)((const byte *)hdr + hdr->posedata);
-
-	mins[0] = maxs[0] = v[0].xyz[0];
-	mins[1] = maxs[1] = v[0].xyz[1];
-	mins[2] = maxs[2] = v[0].xyz[2];
-
-	for (i = 1; i < hdr->numverts; i++)
-	{
-		for (j = 0; j < 3; j++)
+		if (have_anim)
 		{
-			if (v[i].xyz[j] < mins[j])
-				mins[j] = v[i].xyz[j];
-			if (v[i].xyz[j] > maxs[j])
-				maxs[j] = v[i].xyz[j];
+			VectorCopy (anim_mins, mins);
+			VectorCopy (anim_maxs, maxs);
+		}
+		else
+		{
+			mod->mins[0] = mod->mins[1] = mod->mins[2] = -16;
+			mod->maxs[0] = mod->maxs[1] = mod->maxs[2] = 16;
+			mod->radius = 0;
+			return;
+		}
+	}
+	else
+	{
+		v = (const iqmvert_t *)((const byte *)hdr + hdr->posedata);
+
+		mins[0] = maxs[0] = v[0].xyz[0];
+		mins[1] = maxs[1] = v[0].xyz[1];
+		mins[2] = maxs[2] = v[0].xyz[2];
+
+		for (i = 1; i < hdr->numverts; i++)
+		{
+			for (j = 0; j < 3; j++)
+			{
+				if (v[i].xyz[j] < mins[j])
+					mins[j] = v[i].xyz[j];
+				if (v[i].xyz[j] > maxs[j])
+					maxs[j] = v[i].xyz[j];
+			}
+		}
+
+		if (have_anim)
+		{
+			for (j = 0; j < 3; j++)
+			{
+				if (anim_mins[j] < mins[j])
+					mins[j] = anim_mins[j];
+				if (anim_maxs[j] > maxs[j])
+					maxs[j] = anim_maxs[j];
+			}
 		}
 	}
 
@@ -411,7 +441,12 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	const char *ext = COM_FileGetExtension(mod->name);
 	if (ext && !strcmp(ext, "md5mesh"))
 	{
-		aliashdr_t *ahdr = MD5_LoadMesh(mod->name, (byte *)buf, 1024*1024);
+		vec3_t		anim_mins, anim_maxs;
+		aliashdr_t	*ahdr;
+
+		VectorClear (anim_mins);
+		VectorClear (anim_maxs);
+		ahdr = MD5_LoadMesh(mod->name, (byte *)buf, 1024*1024, anim_mins, anim_maxs);
 		if (!ahdr)
 		{
 			mod->type = mod_brush;
@@ -420,7 +455,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		mod->type = mod_alias;
 		mod->cache_is_hunk = true;
 		loadmodel->cache.data = (void *)ahdr;
-		Mod_SetMD5Bounds (mod, ahdr);
+		Mod_SetMD5Bounds (mod, ahdr, anim_mins, anim_maxs);
 		mod->flags = 0;
 		mod->numframes = ahdr->numframes;
 		mod->synctype = ST_SYNC;
@@ -604,7 +639,10 @@ bsp_tex_internal:
 			imgreplace_t	rep;
 			int		rep_flags;
 
-			if (IMG_LoadReplacement (mt->name, loadmodel->name, &rep))
+			/* true: a '{' fence is recognized inside the loader, which
+			 * declines the compressed container for it (uhexen2-r7zu).
+			 * Nothing else about a world miptex is alpha-tested. */
+			if (IMG_LoadReplacement (mt->name, loadmodel->name, true, &rep))
 			{
 				/* IMG_LoadReplacement already named the winning file.
 				 * Add what only this caller knows: the BSP shipped its
@@ -2651,7 +2689,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		// the skin embedded in the MDL.
 		imgreplace_t	rep;
 
-		if (IMG_LoadReplacement (name, NULL, &rep))
+		if (IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep))
 		{
 			int skin_tex_mode = TEX_MIPMAP;
 			if (mdl_flags & EF_HOLEY)
@@ -2730,7 +2768,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			// over the skin embedded in the MDL.
 			imgreplace_t	rep;
 
-			if (IMG_LoadReplacement (name, NULL, &rep))
+			if (IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep))
 			{
 				int skin_tex_mode = TEX_MIPMAP;
 				if (mdl_flags & EF_HOLEY)
