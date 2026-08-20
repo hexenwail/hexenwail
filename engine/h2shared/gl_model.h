@@ -656,6 +656,13 @@ int R_GetEntityModelFlags (entity_t *e);
 #define XF_TORCH_GLOW_EGYPT	(1 << 30)	/* glowing torches, egypt			*/
 #define XF_GLOW			(1 << 1 )	/* other glows					*/
 #define XF_MISSILE_GLOW		(1 << 2 )	/* missile glows				*/
+/* Suppress the dynamic light a placed light-source model would otherwise cast.
+ * Hexen II's dlights do not test occlusion, so a torch or cast-light near a
+ * wall spills onto whatever is behind it; with no shadow-casting in the engine
+ * (see uhexen2-kd3g) the only lever a mapper has is to take a specific light
+ * out of the dlight set and let the baked lightmap carry it.  Set from
+ * misc_modelpimp spawnflag 64.  uhexen2-kd3g */
+#define XF_NO_DLIGHT		(1 << 8 )	/* don't cast a dynamic light			*/
 
 typedef struct qmodel_s
 {
@@ -741,6 +748,27 @@ typedef struct qmodel_s
 	 * interpolation smears them — MOD_NOLERP suppresses the blend.  Zero
 	 * for non-alias models or models with one pose.  uhexen2-f807. */
 	float		flipbook_max_ratio;
+
+	/* True when this model is EF_HOLEY but its replacement skin carries
+	 * authored, graduated alpha rather than a binary cutout mask.
+	 *
+	 * EF_HOLEY means "index 0 is a hole" -- a genuinely binary statement
+	 * about an 8-bit palette skin, and the two places that act on it treat
+	 * it as such: GL_Upload32 binarizes alpha at 128 for TEX_HOLEY|TEX_RGBA
+	 * so the mask is clean, and R_DrawAliasModel draws the model with
+	 * blending off behind a 0.666 alpha test.  Both are right for a cutout
+	 * and destroy a translucent skin.  An RGBA replacement has no palette
+	 * indices left, so a pack is free to ship soft alpha under an EF_HOLEY
+	 * header, and SoT's sot/models/mist_0.tga does exactly that: 123 alpha
+	 * levels, 85% of texels partially transparent, and not one fully
+	 * opaque texel in the image (max alpha 183).  Run through the cutout
+	 * path it lost 95% of itself and drew the remainder solid.
+	 *
+	 * Set at skin load by Mod_LoadAllSkins, which then withholds TEX_HOLEY
+	 * (keeping TEX_ALPHA) so the upload leaves the ramp alone, and read by
+	 * R_DrawAliasModel to take the blended branch instead of the alpha
+	 * test.  uhexen2-5zv5. */
+	qboolean	skin_soft_alpha;
 
 	/* Snapshot of the model's load-time flags / ex_flags / glow_settings,
 	 * captured at the end of Mod_LoadAliasModel{,New}.  PimpModel writes

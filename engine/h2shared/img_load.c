@@ -676,6 +676,51 @@ qboolean IMG_LoadReplacement (const char *name, const char *modelname,
 
 /*
 =================
+IMG_ReplacementHasSoftAlpha
+
+True when a decoded replacement carries an authored translucency ramp rather
+than a cutout mask.
+
+The test is deliberately narrow, because getting it wrong in the permissive
+direction turns a cutout into a blended surface and changes how it sorts.  A
+cutout -- foliage, a grate, a fence -- is mostly solid interior with a thin
+antialiased rim, so it has a large population at alpha 255.  An authored
+translucent skin has the opposite shape: most texels partially transparent and
+essentially nothing fully opaque.  Requiring both conditions separates them
+with a wide margin rather than a tuned cutoff.  SoT's mist reads 85% partial /
+0% opaque; a cutout reads a few percent partial against a solid core.
+
+Compressed containers are not inspected -- there are no texels to count until
+the codec runs -- so those keep the cutout treatment they had.  In practice the
+caller has already declined compression for anything it means to alpha-test.
+uhexen2-5zv5.
+=================
+*/
+qboolean IMG_ReplacementHasSoftAlpha (const imgreplace_t *r)
+{
+	int	i, n, partial = 0, opaque = 0;
+
+	if (!r || !r->rgba || !r->has_alpha)
+		return false;
+
+	n = r->width * r->height;
+	if (n <= 0)
+		return false;
+
+	for (i = 0; i < n; i++)
+	{
+		byte a = r->rgba[i*4 + 3];
+		if (a == 255)
+			opaque++;
+		else if (a != 0)
+			partial++;
+	}
+
+	return (partial * 10 >= n) && (opaque * 20 <= n);
+}
+
+/*
+=================
 IMG_LoadReplacementGlow
 
 Resolve the fullbright sidecar for a texture.

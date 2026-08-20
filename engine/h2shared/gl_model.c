@@ -2617,6 +2617,10 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 
 	skin = (byte *)(pskintype + 1);
 
+	/* Recomputed below from whatever skin actually wins; a reload must not
+	 * inherit the previous verdict.  uhexen2-5zv5 */
+	loadmodel->skin_soft_alpha = false;
+
 	if (numskins < 1 || numskins > MAX_SKINS)
 		Sys_Error ("%s: Invalid # of skins: %d", __thisfunc__, numskins);
 
@@ -2693,7 +2697,21 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		{
 			int skin_tex_mode = TEX_MIPMAP;
 			if (mdl_flags & EF_HOLEY)
-				skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
+			{
+				/* An RGBA replacement has no palette indices, so a
+				 * pack can ship a real translucency ramp under an
+				 * EF_HOLEY header.  Withhold TEX_HOLEY for those:
+				 * it is what makes GL_Upload32 binarize alpha at
+				 * 128.  TEX_ALPHA still gets the RGB bleed.
+				 * uhexen2-5zv5. */
+				if (IMG_ReplacementHasSoftAlpha (&rep))
+				{
+					skin_tex_mode |= TEX_ALPHA;
+					loadmodel->skin_soft_alpha = true;
+				}
+				else
+					skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
+			}
 			pheader->gl_texturenum[i][0] =
 			pheader->gl_texturenum[i][1] =
 			pheader->gl_texturenum[i][2] =
@@ -2772,7 +2790,17 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			{
 				int skin_tex_mode = TEX_MIPMAP;
 				if (mdl_flags & EF_HOLEY)
-					skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
+				{
+					/* Same soft-alpha escape as the single-skin
+					 * branch above.  uhexen2-5zv5 */
+					if (IMG_ReplacementHasSoftAlpha (&rep))
+					{
+						skin_tex_mode |= TEX_ALPHA;
+						loadmodel->skin_soft_alpha = true;
+					}
+					else
+						skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
+				}
 				pheader->gl_texturenum[i][j&3] =
 					GL_LoadReplacement (name, &rep, skin_tex_mode);
 				IMG_FreeReplacement (&rep);

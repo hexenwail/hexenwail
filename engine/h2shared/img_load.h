@@ -59,6 +59,15 @@ typedef struct imgreplace_s
 qboolean IMG_LoadReplacement (const char *name, const char *modelname,
 			      qboolean allow_compressed, imgreplace_t *out);
 
+/*
+ * True when a decoded replacement carries an authored translucency ramp rather
+ * than a cutout mask: most texels partially transparent and essentially none
+ * fully opaque.  Lets an EF_HOLEY model whose replacement skin is really soft
+ * escape the binarize-and-alpha-test cutout path.  False for compressed
+ * containers, which have no texels to count yet.  uhexen2-5zv5.
+ */
+qboolean IMG_ReplacementHasSoftAlpha (const imgreplace_t *r);
+
 /* Same, for the fullbright/glow sidecar of a texture: <name>_glow, then
  * <name>_luma.  Kept separate so callers do not have to build the suffix. */
 qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgreplace_t *out);
