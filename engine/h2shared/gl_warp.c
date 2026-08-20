@@ -96,6 +96,13 @@ static void BoundPoly (int numverts, float *verts, vec3_t mins, vec3_t maxs)
 	}
 }
 
+/* Tile counters for the gl_subdivide_size sweep (uhexen2-9o7u).  The sample
+ * rate is the only knob on the warp's aliasing, and its whole cost is the
+ * vertex count these report -- so the sweep needs both halves, and the perf
+ * half should not require a profiler or a tool.  Load a map at each setting
+ * with `developer 1` and compare the line GL_ReportSubdivision prints. */
+static int	subdiv_surfaces, subdiv_polys, subdiv_verts;
+
 static void SubdividePolygon (int numverts, float *verts)
 {
 	int		i, j, k;
@@ -170,6 +177,8 @@ static void SubdividePolygon (int numverts, float *verts)
 	poly->next = warpface->polys;
 	warpface->polys = poly;
 	poly->numverts = numverts;
+	subdiv_polys++;
+	subdiv_verts += numverts;
 	for (i = 0; i < numverts; i++, verts += 3)
 	{
 		VectorCopy (verts, poly->verts[i]);
@@ -213,6 +222,8 @@ can be done reasonably.
 */
 void GL_SubdivideSurface (qmodel_t *mod, msurface_t *fa)
 {
+	subdiv_surfaces++;
+
 	vec3_t		verts[64];
 	int		numverts;
 	int		i;
@@ -358,6 +369,33 @@ void EmitWaterPolys (msurface_t *fa)
 
 /*
 =============
+GL_ReportSubdivision  (uhexen2-9o7u)
+
+Print what the current gl_subdivide_size actually cost this model, then reset.
+Called once per model right before the T-junction pass, so it covers exactly
+the surfaces GL_SubdivideSurface just processed.
+
+Verts per period is the number that matters: the warp's spatial period is
+16*pi ~= 50.3 texture units, so anything below 2 is under Nyquist and the
+piecewise-linear interpolation between tile corners aliases the sine instead
+of reconstructing it.  The stock 64 gives 0.79.
+=============
+*/
+static void GL_ReportSubdivision (qmodel_t *mod)
+{
+	float	size = R_SubdivideSize ();
+
+	if (subdiv_surfaces)
+		Con_DPrintf ("subdivide %s: size %g -> %d turb surfaces, %d polys, %d verts "
+			     "(%.2f samples/period)\n",
+			     mod->name, size, subdiv_surfaces, subdiv_polys, subdiv_verts,
+			     50.265f / size);
+
+	subdiv_surfaces = subdiv_polys = subdiv_verts = 0;
+}
+
+/*
+=============
 GL_HealTurbTJunctions  (uhexen2-9o7u)
 
 Each turb surface is subdivided independently by GL_SubdivideSurface, so
@@ -412,6 +450,7 @@ void GL_HealTurbTJunctions (qmodel_t *mod)
 	int		nverts = 0;
 	int		healed_edges = 0;
 	int		healed_polys = 0;
+	GL_ReportSubdivision (mod);
 
 	vec3_t		*pts = NULL;
 	int		*pts_next = NULL;
