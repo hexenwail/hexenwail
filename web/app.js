@@ -1,4 +1,5 @@
 import { extractZipEntries } from './lib/zip.js';
+import { downloadHexen2Demo, isDemoDecompressionSupported } from './lib/demo-fetch.js';
 import { getBaseAssetStatus, mapImportedPath } from './lib/paths.js';
 import {
   createSaveBundle, getPakCompatibilityWarnings, isSavePath, planSaveImport, sha256, validateSaveBundle,
@@ -32,6 +33,8 @@ const state = {
   syncing: false,
   syncPromise: null,
   applyingSaveImport: false,
+  demoInstalling: false,
+  demoSupported: true,
   storedPaths: new Set(),
   runtimeSnapshot: new Map(),
   lastStatus: 'Preparing launcher…',
@@ -154,6 +157,18 @@ function updateLaunchState() {
   }
   if (ui.exitButton) {
     ui.exitButton.disabled = !state.engineStarted || state.runtimeExited;
+  }
+  if (ui.demoButton) {
+    // Nothing to offer once pak0.pak is here, whichever edition it came from.
+    ui.demoButton.hidden = assets !== 'none';
+    ui.demoButton.disabled = state.demoInstalling || !state.demoSupported || !state.storageReady;
+    ui.demoButton.textContent = state.demoInstalling ? 'Downloading demo…' : 'Get the free demo (13 MB)';
+    ui.demoButton.title = state.demoSupported
+      ? 'Downloads the Nov 1997 three-level Hexen II demo from archive.org and verifies it before installing.'
+      : 'This browser cannot decompress the demo archive (DecompressionStream is unavailable).';
+  }
+  if (ui.demoNote) {
+    ui.demoNote.hidden = assets !== 'none';
   }
   if (ui.requirementsText) {
     ui.requirementsText.textContent = !state.rendererReady
@@ -393,6 +408,27 @@ function collectLooseFiles(fileList) {
   }));
 }
 
+/*
+ * The one path by which imported bytes reach persistent storage and the running
+ * runtime.  Hand-picked files, ZIP entries and the demo download all come
+ * through here so that an install is the same operation whatever produced it.
+ */
+async function storeImportedFiles(items, onStored) {
+  let storedBytes = 0;
+  let storedCount = 0;
+  for (const item of items) {
+    await state.storage.writeFile(item.path, item.bytes, { size: item.bytes.byteLength, mtimeMs: Date.now() });
+    state.storedPaths.add(item.path);
+    if (state.runtimeReady) {
+      await writeRuntimeFile(item.path, item.bytes);
+    }
+    storedBytes += item.bytes.byteLength;
+    storedCount += 1;
+    onStored?.({ storedCount, storedBytes, item });
+  }
+  return storedBytes;
+}
+
 async function importFileBatch(entries) {
   let processedBytes = 0;
   const accepted = [];
@@ -412,13 +448,7 @@ async function importFileBatch(entries) {
     }
   }
 
-  for (const item of accepted) {
-    await state.storage.writeFile(item.path, item.bytes, { size: item.bytes.byteLength, mtimeMs: Date.now() });
-    state.storedPaths.add(item.path);
-    if (state.runtimeReady) {
-      await writeRuntimeFile(item.path, item.bytes);
-    }
-  }
+  await storeImportedFiles(accepted);
 
   return { accepted, rejected };
 }
@@ -448,18 +478,11 @@ async function importZipFile(file) {
     accepted.push({ path: mappedPath, bytes: entry.data });
   }
 
-  let processedBytes = 0;
-  for (const item of accepted) {
-    processedBytes += item.bytes.byteLength;
-    await state.storage.writeFile(item.path, item.bytes, { size: item.bytes.byteLength, mtimeMs: Date.now() });
-    state.storedPaths.add(item.path);
-    if (state.runtimeReady) {
-      await writeRuntimeFile(item.path, item.bytes);
-    }
+  await storeImportedFiles(accepted, ({ storedBytes }) => {
     if (ui.progressText) {
-      ui.progressText.textContent = `Stored ${accepted.length} extracted files (${formatBytes(processedBytes)})`;
+      ui.progressText.textContent = `Stored ${accepted.length} extracted files (${formatBytes(storedBytes)})`;
     }
-  }
+  });
 
   return { accepted, rejected };
 }
@@ -505,6 +528,67 @@ async function handleImportedFiles(fileList) {
     ui.rejectedList.textContent = `Ignored ${rejected.length} item(s): ${rejected.slice(0, 8).join(', ')}${rejected.length > 8 ? '…' : ''}`;
   } else if (ui.rejectedList) {
     ui.rejectedList.textContent = '';
+  }
+}
+
+function describeDemoStage(event) {
+  if (event.stage === 'downloading') {
+    const received = formatBytes(event.receivedBytes ?? 0);
+    return event.totalBytes
+      ? `Downloading the demo from ${event.source.label}: ${received} / ${formatBytes(event.totalBytes)}`
+      : `Downloading the demo from ${event.source.label}: ${received}`;
+  }
+  if (event.stage === 'extracting') {
+    return 'Extracting the demo archive…';
+  }
+  return 'Verifying the demo files…';
+}
+
+async function installDemo() {
+  if (state.demoInstalling || getBaseAssetStatus([...state.storedPaths]) !== 'none') {
+    return;
+  }
+  state.demoInstalling = true;
+  updateLaunchState();
+  setImportMessage('Fetching the Hexen II demo…');
+
+  try {
+    const result = await downloadHexen2Demo({
+      onStage: (event) => {
+        if (ui.progressText) {
+          ui.progressText.textContent = describeDemoStage(event);
+        }
+      },
+    });
+    for (const warning of result.warnings) {
+      logToConsole('[demo:warn]', warning, true);
+    }
+    if (ui.progressText) {
+      ui.progressText.textContent = 'Installing the demo…';
+    }
+    const storedBytes = await storeImportedFiles(result.files, ({ storedCount }) => {
+      if (ui.progressText) {
+        ui.progressText.textContent = `Installing the demo: ${storedCount}/${result.files.length} files`;
+      }
+    });
+    logToConsole('[demo]', `installed ${result.files.length} verified file(s) from ${result.source.url}`);
+    if (ui.progressText) {
+      ui.progressText.textContent = `Installed ${result.files.length} demo files (${formatBytes(storedBytes)})`;
+    }
+    setImportMessage(`Installed the Hexen II demo from ${result.source.label}. Start the game when ready.`, 'success');
+    await updateStorageIndicator();
+  } catch (error) {
+    // Verification failures leave nothing behind: files are only written after
+    // every digest in the manifest has matched, so a failed attempt is safe to
+    // simply retry.
+    logToConsole('[demo:error]', error.message, true);
+    if (ui.progressText) {
+      ui.progressText.textContent = 'Demo install failed; nothing was written.';
+    }
+    setImportMessage(`Demo download failed: ${error.message}`, 'error');
+  } finally {
+    state.demoInstalling = false;
+    updateLaunchState();
   }
 }
 
@@ -1141,6 +1225,8 @@ function bindUi() {
     launchButton: document.getElementById('launch-button'),
     exitButton: document.getElementById('exit-button'),
     importButton: document.getElementById('import-button'),
+    demoButton: document.getElementById('demo-button'),
+    demoNote: document.getElementById('demo-note'),
     directoryButton: document.getElementById('directory-button'),
     fullscreenButton: document.getElementById('fullscreen-button'),
     clearButton: document.getElementById('clear-button'),
@@ -1177,7 +1263,9 @@ function bindUi() {
   }, { lookSensitivity: state.preferences.lookSensitivity });
   state.phoneControls.attach();
 
+  state.demoSupported = isDemoDecompressionSupported();
   ui.importButton?.addEventListener('click', () => ui.fileInput?.click());
+  ui.demoButton?.addEventListener('click', () => installDemo());
   ui.directoryButton?.addEventListener('click', () => ui.directoryInput?.click());
   ui.fileInput?.addEventListener('change', async (event) => {
     await handleImportedFiles(event.target.files);
@@ -1370,6 +1458,9 @@ async function init() {
   await requestPersistentStorage();
   await initStorageBackend();
   state.storageReady = true;
+  // The demo button writes through the storage backend, so it stays disabled
+  // until there is one; nothing else refreshes the buttons this early.
+  updateLaunchState();
   await updateStorageIndicator();
   await registerServiceWorker();
   await ensureEngineScriptLoaded();

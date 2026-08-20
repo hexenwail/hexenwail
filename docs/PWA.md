@@ -202,6 +202,67 @@ ZIP imports are extracted entirely client-side in the browser. The importer reje
 
 Re-importing a file with the same logical path overwrites the previous local copy.
 
+## Getting the free demo
+
+When no `data1/pak0.pak` has been imported yet, the launcher shows a **Get the free
+demo (13 MB)** button next to the import controls. It downloads Raven's November 1997
+three-level Hexen II demo, verifies it, and installs it through the same import path a
+hand-picked file takes; the launch button then reads **Start game (demo)**. The button
+disappears once any `pak0.pak` is present.
+
+Hexenwail hosts no game data. The button points the browser at a third party exactly as
+`scripts/get_demo.sh` does from a shell — see `assets/demo/README.md` for why the project
+does not mirror Raven's data itself.
+
+### Where the bytes come from
+
+`web/lib/demo-fetch.js` holds every host-specific value in one `HEXEN2_DEMO_SOURCE`
+object. Two sources are tried in order:
+
+1. `./demo/hexen2demo.zip` on the site's own origin, probed with a `HEAD` request.
+   Absent from the public Pages deploy; see below.
+2. `https://archive.org/cors/hexen2demo_nov1997-linux-x86_64/hexen2demo_nov1997-linux-x86_64.tgz`.
+   archive.org's `/cors/` endpoint echoes the requesting `Origin`, which is what makes it
+   fetchable from a page at all. SourceForge, the upstream home of the same tarball, sends
+   no CORS headers and serves browser user-agents an interstitial.
+
+Gzip is decompressed with `DecompressionStream('gzip')` and the tar is unpacked by a small
+parser in the same file; there are no third-party libraries. A browser without
+`DecompressionStream` disables the button with an explanatory tooltip — the same constraint
+already applies to ZIP import, which needs the later `deflate-raw` format.
+
+### What is verified
+
+Every file the button installs is pinned by size and SHA-256:
+
+| Install path | Bytes | SHA-256 |
+|---|---|---|
+| `data1/pak0.pak` | 27,750,257 | `0d4aa01a9909771dfa8e5be27db5d6628dc92f1406998c1a89c27d4748aaf151` |
+| `data1/progs.dat` | 886,592 | `6981e0076329c95fbf41ff2c62767d4ea02e277eee888323bbe0a1ece4a8f62a` |
+| `data1/hexen.rc` | 340 | `fd30dba85635d879f5d72043e8a914c5465ea77068950c38513d95cde21ce339` |
+| `data1/default.cfg` | 1,875 | `8199a001d204cf6b0ac20627143b0febc317054ea28ccda548d45418ee250536` |
+| `data1/autoexec.cfg` | 1 | `01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b` |
+| `data1/maps/demo2.txt` | 572 | `5a07f04b94bce17625e200774d2e414553624bcd38c0971c8085ba957ae8af7a` |
+| `data1/maps/demo2.ent` | 55,132 | `7823ecb49d00fde6101412975f8df2a91f4c37232696c3c0c8a3d78340aad35b` |
+
+`pak0.pak` and `progs.dat` are required — the demo `pak0.pak` contains no gamecode, so the
+loose `progs.dat` is not optional. `pak0.pak`'s MD5 (`8e598d82bf53436ed7a0e133aa4b9f09`) is
+also the engine's own genuine-demo fingerprint in `engine/h2shared/quakefs.c`.
+
+Nothing else in the archive is installed: the 1997 engine binaries and the bundled docs
+tree are ignored. Files are written only after every digest has matched, so a failed
+download or a mismatch leaves nothing behind and can simply be retried. The pinned
+tarball SHA-256 (`e26e0f2d…`) is advisory: a mismatch is logged, not fatal, because other
+packagings of the same demo carry identical game files in a different container.
+
+### Self-hosting the archive
+
+Publish `demo/hexen2demo.zip` beside the launcher and it wins the probe, so the download
+never leaves your origin — useful for offline or air-gapped deployments. The ZIP needs a
+`data1/` layout (or any layout the normal importer recognizes) and its files must match the
+digests above; anything else is rejected. The public Pages deploy does not ship this file
+and the service worker never precaches it.
+
 ## Save game persistence
 
 Local save games are just as important to keep offline as the imported PAK/OGG assets, so the
@@ -335,6 +396,14 @@ Use **Clear imported data** in the launcher, then re-import the assets. If Safar
 ### ZIP import failed
 
 The archive may contain unsupported paths, exceed the configured resource caps, or contain formats outside the recognized Hexen II layout.
+
+### The demo download failed
+
+The status line names the reason. A network or CORS error means archive.org was
+unreachable from this browser; a verification failure means the bytes that arrived were
+not the Nov 1997 demo, and nothing was written either way — press the button again. If the
+button is disabled with a tooltip about `DecompressionStream`, the browser is too old for
+either the demo download or ZIP import; import `pak0.pak` as a loose file instead.
 
 ### Mouse capture is incomplete on iPad/iPhone
 
