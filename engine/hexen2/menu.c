@@ -4596,6 +4596,16 @@ static int		keys_numcommands;
 
 #define KEYS_SIZE 14
 
+/* Bind-conflict report (uhexen2-yae).  Binding a key that another action
+ * already owns silently takes it away -- the old owner's row just reverts to
+ * "???", and if it is on another page of this scrolling list, or bound to
+ * something with no row at all (a console command, a default from
+ * default.cfg), nothing on screen says the key moved.  Players discover it
+ * mid-game.  Record what was displaced and say so under the list. */
+static char		keys_conflict_msg[64];
+static double		keys_conflict_time;
+#define KEYS_CONFLICT_SECONDS	4.0
+
 static int		keys_cursor;
 static int		keys_top = 0;
 static qboolean		keys_tap = false;	// TAB toggles tap binding mode
@@ -4899,7 +4909,23 @@ static void M_Keys_Draw (void)
 	}
 	else
 	{
-		M_Print (18, 64, "Enter to change, backspace to clear");
+		/* Conflict notice takes over the instruction line for a few seconds
+		 * after a bind that displaced another action.  Here rather than
+		 * below the list because the list is KEYS_SIZE rows tall and the
+		 * menu canvas is only guaranteed 200 logical units, so a line under
+		 * the last row would sit on the edge; and white rather than the
+		 * menu's gold so it reads as a notification and not another row.
+		 * Timed out rather than sticky: it describes an edit that already
+		 * happened, and would go stale at the next rebind.  uhexen2-yae. */
+		if (keys_conflict_msg[0] &&
+		    realtime - keys_conflict_time < KEYS_CONFLICT_SECONDS)
+		{
+			int len = (int) strlen (keys_conflict_msg);
+			M_PrintWhite ((320 - len*8) / 2, 64, keys_conflict_msg);
+		}
+		else
+			M_Print (18, 64, "Enter to change, backspace to clear");
+
 		M_DrawCharacter (130, 80 + (keys_cursor-keys_top)*8, 12+((int)(realtime*4)&1));
 	}
 }
@@ -7386,6 +7412,53 @@ void M_Draw (void)
 }
 
 
+/*
+================
+M_Keys_NoteConflict
+
+Called just before a bind is issued.  If `key` already carries a different
+command in the table this bind will write to, remember what is about to lose
+it, preferring the bindlist's human label over the raw command string.
+
+Same-command rebinds are not conflicts: Hexen II allows two keys per action,
+so pressing a key that already runs this action is a no-op worth staying
+quiet about.
+================
+*/
+static void M_Keys_NoteConflict (int key, const char *command)
+{
+	const char	*prev;
+	const char	*label;
+	int		i;
+
+	keys_conflict_msg[0] = '\0';
+
+	/* The caller hands us whatever keycode arrived, and the gamepad alt
+	 * remap above shifts it; bound before indexing either table. */
+	if (key < 0 || key >= MAX_KEYS)
+		return;
+
+	prev = keys_tap ? doublebindings[key] : keybindings[key];
+	if (!prev || !*prev)
+		return;
+	if (!strcmp (prev, command))
+		return;
+
+	label = prev;
+	for (i = 0; i < keys_numcommands; i++)
+	{
+		if (!strcmp (keys_bindlist[i][0], prev))
+		{
+			label = keys_bindlist[i][1];
+			break;
+		}
+	}
+
+	q_snprintf (keys_conflict_msg, sizeof(keys_conflict_msg), "%s taken from %s",
+		    Key_KeynumToDisplayString (key), label);
+	keys_conflict_time = realtime;
+}
+
 void M_Keybind (int key)
 {
 	char	cmd[80];
@@ -7406,6 +7479,10 @@ void M_Keybind (int key)
 			    key >= K_GP_A && key <= K_GP_START)
 				key += K_GP_ALT_OFFSET;
 		}
+		/* After the alt-modifier remap above, so the reported key is the
+		 * one actually being written. */
+		M_Keys_NoteConflict (key, command);
+
 		q_snprintf (cmd, sizeof(cmd), "%s \"%s\" \"%s\"\n",
 			    keys_tap ? "bind2" : "bind",
 			    Key_KeynumToString (key), command);
