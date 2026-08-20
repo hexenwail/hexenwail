@@ -11,9 +11,11 @@ Just as [Ironwail](https://github.com/andrei-drexler/ironwail) took sezero's [Qu
 
 Raven Software released the Hexen II source code in 2000. [Hammer of Thyrion](http://uhexen2.sourceforge.net/) (2004–2018) by O. Sezer became the definitive cross-platform engine. [uHexen2](https://github.com/sezero/uhexen2) continued the work with graphical enhancements and mod support — notably Shanjaq and Inky's contributions. Hexenwail (2025) began when [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) shipped without a buildable Linux client, and grew into a full GL 4.3 modernization.
 
-Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak`; it is auto-included when you launch with `-game modname` / `-mod modname` (use `-noportals` to opt out), and is toggleable from the Mods menu.
+Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii) or [Steam](https://store.steampowered.com/app/9060/HeXen_II/). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak`; it is auto-included when you launch with `-game modname` / `-mod modname` (use `-noportals` to opt out), and is toggleable from the Mods menu.
 
 ### Just want to try it?
+
+**[Play it in your browser](https://hexenwail.github.io/hexenwail/)** — nothing to install. The launcher fetches Raven's free November 1997 three-level demo (13 MB, from archive.org) on one click, or you can import your own `data1` for the full game. It keeps working offline after the first load and installs to the home screen on iOS and Android.
 
 The free three-level demo Raven released in November 1997 runs on Hexenwail, and a fetch helper ships beside the executable in every release. Unpack the release, then from that directory:
 
@@ -119,16 +121,10 @@ Planned:
 
 <table>
 <tr>
-<td width="25%"><img src="docs/WheelofKarma.png" alt="Wheel of Karma opening text over a Himalayan backdrop" width="100%"></td>
-<td width="25%"><img src="docs/stormoverthyrion.png" alt="Storm over Thyrion menu over the approach to a castle" width="100%"></td>
-<td width="25%"><img src="docs/shadowofchaos.png" alt="Shadow of Chaos menu over a frozen gate with Portal of Praevus title art" width="100%"></td>
-<td width="25%"><img src="docs/gameoftomes.png" alt="Game of Tomes title screen with a throne of swords" width="100%"></td>
-</tr>
-<tr>
-<td align="center"><em><a href="https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey">Wheel of Karma</a> (<code>-game karma2</code>) — the opening crawl over the mod's photographic backdrop, dithered into the Hexen II palette.</em></td>
-<td align="center"><em><a href="https://www.moddb.com/mods/storm-over-thyrion">Storm over Thyrion</a> (<code>-game sot</code>) — the mod whose missing Linux client started this project.</em></td>
-<td align="center"><em>Shadow of Chaos (<code>-game soc</code>) — a Portal of Praevus expansion, menu drawn over its own live map.</em></td>
-<td align="center"><em>Game of Tomes (<code>-game GameOfTomes</code>) — custom title art and replacement gamecode.</em></td>
+<td width="25%"><a href="https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey"><img src="docs/WheelofKarma.png" alt="Wheel of Karma" width="100%"></a></td>
+<td width="25%"><a href="https://www.moddb.com/mods/storm-over-thyrion"><img src="docs/stormoverthyrion.png" alt="Storm over Thyrion" width="100%"></a></td>
+<td width="25%"><a href="https://www.moddb.com/mods/hexen-ii-shadows-of-chaos"><img src="docs/shadowofchaos.png" alt="Shadows of Chaos" width="100%"></a></td>
+<td width="25%"><a href="https://www.moddb.com/mods/game-of-tomes"><img src="docs/gameoftomes.png" alt="Game of Tomes" width="100%"></a></td>
 </tr>
 </table>
 
