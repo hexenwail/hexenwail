@@ -213,12 +213,24 @@ extern	GLuint		lightmap_textures[MAX_LIGHTMAPS];
 extern	GLuint		playertextures[MAX_CLIENTS];
 extern	GLuint		gl_extra_textures[MAX_EXTRA_TEXTURES];	// generic textures for models
 
+/* Real glBindTexture calls issued this frame -- the ones that survive the
+ * redundancy filter below.  Reported by r_speeds 2.
+ *
+ * This exists to answer uhexen2-im9g, whose first condition for reconsidering
+ * ARB_bindless_texture is "profile first and show that per-draw texture
+ * binding is actually a dominant bucket".  There was no way to show that:
+ * every other cost in the frame has an rprof_ counter and this one had none,
+ * so the question could only be argued, not measured.  A counter is not the
+ * feature; it is what the decision was waiting on. */
+extern	int		c_texbinds;
+
 /* the GL_Bind macro */
 #define GL_Bind(texnum)							\
 	do {								\
 		if (currenttexture != (texnum))				\
 		{							\
 			currenttexture = (texnum);			\
+			c_texbinds++;					\
 			glBindTexture_fp(GL_TEXTURE_2D,currenttexture);	\
 		}							\
 	} while (0)
