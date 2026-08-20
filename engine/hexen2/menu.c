@@ -204,8 +204,20 @@ static int M_ScreenYToCanvasY (int screen_y);
  * search prompt sits at y=252. */
 static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int num_items)
 {
-	int vy = M_ScreenYToCanvasY (screen_y);
-	int idx = (vy - first_y) / item_height;
+	int vy, idx;
+
+	/* Only answer when the pointer actually moved (or was clicked) this
+	 * frame.  Every caller does `h = M_MouseToMenuItem(...); if (h >= 0)
+	 * cursor = h;` unconditionally, so answering on a stationary mouse
+	 * re-pins the cursor to whatever row the pointer happens to rest on,
+	 * every frame -- the arrow keys then appear to do nothing at all.
+	 * Gating here rather than at the fifteen call sites keeps the two
+	 * input devices from fighting in one place.  uhexen2-u4iz. */
+	if (!menu_mouse_moved)
+		return -1;
+
+	vy = M_ScreenYToCanvasY (screen_y);
+	idx = (vy - first_y) / item_height;
 	if (idx < 0) idx = -1;
 	if (idx >= num_items) idx = -1;
 	return idx;
@@ -4910,11 +4922,10 @@ static void M_Keys_Draw (void)
 	else
 	{
 		/* Conflict notice takes over the instruction line for a few seconds
-		 * after a bind that displaced another action.  Here rather than
-		 * below the list because the list is KEYS_SIZE rows tall and the
-		 * menu canvas is only guaranteed 200 logical units, so a line under
-		 * the last row would sit on the edge; and white rather than the
-		 * menu's gold so it reads as a notification and not another row.
+		 * after a bind that displaced another action.  On the instruction
+		 * line because that is where this menu already talks to the user,
+		 * and white rather than the menu's gold so it reads as a
+		 * notification and not another row.
 		 * Timed out rather than sticky: it describes an edit that already
 		 * happened, and would go stale at the next rebind.  uhexen2-yae. */
 		if (keys_conflict_msg[0] &&
@@ -7393,6 +7404,12 @@ void M_Draw (void)
 		M_ServerList_Draw ();
 		break;
 	}
+
+	/* Consume the motion flag now that every hover test for this frame has
+	 * run.  Held rather than cleared at the event, because input is
+	 * processed before the draw and clearing it there would mean no hover
+	 * test ever saw it.  uhexen2-u4iz. */
+	menu_mouse_moved = false;
 
 	m_canvas_active = false;
 	GL_SetCanvas (CANVAS_DEFAULT);

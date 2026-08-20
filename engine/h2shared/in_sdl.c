@@ -1381,6 +1381,10 @@ void IN_SendKeyEvents (void)
 				SDL_GetMouseState(&mx, &my);
 				menu_mouse_x = (int)mx;
 				menu_mouse_y = (int)my;
+				/* A click is a positioning event too: without this the
+				 * hover test would ignore it (it is gated on the moved
+				 * flag) and a click-without-motion could not select. */
+				menu_mouse_moved = true;
 				if (event.button.button == 1)  /* left click */
 					Key_Event(K_MOUSE1, event.button.down);
 				break;
@@ -1470,6 +1474,24 @@ void IN_SendKeyEvents (void)
 				float mx, my;
 				SDL_GetMouseState(&mx, &my);
 				Con_MouseMove((int)mx, (int)my);
+			}
+			/* Feed menu hover.  Without this, menu_mouse_x/y only ever
+			 * changed in the button handler below, so the menus' hover
+			 * test followed clicks rather than the pointer: moving the
+			 * mouse over a row did nothing, and the first click on a row
+			 * activated whatever was selected BEFORE it (the cursor moves
+			 * in M_Draw, which runs after K_MOUSE1 has already been
+			 * dispatched as Enter).  uhexen2-u4iz. */
+			else if (Key_GetDest() & key_menu)
+			{
+				float mx, my;
+				SDL_GetMouseState(&mx, &my);
+				if ((int)mx != menu_mouse_x || (int)my != menu_mouse_y)
+				{
+					menu_mouse_x = (int)mx;
+					menu_mouse_y = (int)my;
+					menu_mouse_moved = true;
+				}
 			}
 			break;
 
