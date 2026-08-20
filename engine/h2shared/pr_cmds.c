@@ -414,6 +414,7 @@ static void PF_setpuzzlemodel (void)
 #define	PIMP_SF_ILLUMINATE	8	/* grant EF_ILLUMINATE (cast light) */
 #define	PIMP_SF_SELFONLY	16	/* keep glow/light on this entity only */
 #define	PIMP_SF_SHAREMOTION	32	/* share spin/float with siblings too */
+#define	PIMP_SF_NODLIGHT	64	/* cast no dynamic light (see XF_NO_DLIGHT) */
 
 /*
 =================
@@ -493,6 +494,8 @@ static void PF_pimpmodel (void)
 		pimp->ex_flags |= EF_GLOW;
 	if (spawnflags & PIMP_SF_ILLUMINATE)
 		pimp->ex_flags |= EF_ILLUMINATE;
+	if (spawnflags & PIMP_SF_NODLIGHT)
+		pimp->ex_flags |= XF_NO_DLIGHT;
 
 	/* Per-map shared write to mod->flags so every entity using this
 	 * model on the current map sees the override (Komi / Shanjaq
@@ -607,7 +610,7 @@ static void PF_pimpmodel (void)
 	 *   uhexen2-oq0a / regression fix uhexen2-oq0a-followup. */
 	if (!(spawnflags & PIMP_SF_SELFONLY))
 	{
-		mod->ex_flags |= (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE));
+		mod->ex_flags |= (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE | XF_NO_DLIGHT));
 		if (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE))
 		{
 			memcpy(mod->glow_settings, pimp->glow_settings,
