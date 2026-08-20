@@ -69,6 +69,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "draw.h"
+#include "image.h"
 #if !defined(SERVERONLY) && !defined(H2W)
 #include "cl_csqc.h"
 #endif
@@ -1121,10 +1122,33 @@ static const char scr_shotprefix[] = "shots/hw";
 
 static void SCR_ScreenShot_f (void)
 {
+	char	ext[8];
 	char	filename[80];
 	char	fullpath[MAX_OSPATH];
-	int	i, size;
-	byte	*buffer;
+	byte	*rgba;
+	int	i, npix, quality;
+	qboolean	ok;
+
+	/* Ironwail's contract: "screenshot [png|tga|jpg] [quality]".  The format
+	 * is per-invocation rather than a cvar, and png is the default. */
+	q_strlcpy (ext, "png", sizeof(ext));
+	if (Cmd_Argc() >= 2)
+	{
+		q_strlcpy (ext, Cmd_Argv(1), sizeof(ext));
+		if (q_strcasecmp(ext, "png") && q_strcasecmp(ext, "tga") &&
+							q_strcasecmp(ext, "jpg"))
+		{
+			Con_Printf ("usage: screenshot [png|tga|jpg] [quality]\n");
+			return;
+		}
+	}
+	quality = 90;
+	if (Cmd_Argc() >= 3)
+	{
+		quality = atoi (Cmd_Argv(2));
+		if (quality < 1 || quality > 100)
+			quality = 90;
+	}
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), "shots");
 	Sys_mkdir (fullpath, false);
@@ -1132,44 +1156,48 @@ static void SCR_ScreenShot_f (void)
 	/* Find next available slot (0-9999, up from old limit of 99) */
 	for (i = 0; i <= 9999; i++)
 	{
-		q_snprintf (filename, sizeof(filename), "%s%04d.tga", scr_shotprefix, i);
+		q_snprintf (filename, sizeof(filename), "%s%04d.%s", scr_shotprefix, i, ext);
 		FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
 		if (Sys_FileType(fullpath) == FS_ENT_NONE)
 			break;
 	}
 	if (i > 9999) { Con_Printf ("Screenshot: too many files\n"); return; }
 
-	size = glwidth * glheight * 3 + 18;
-	buffer = (byte *) malloc(size);
-	if (!buffer) { Con_Printf("Screenshot: out of memory\n"); return; }
-
-	memset (buffer, 0, 18);
-	buffer[2] = 2;		/* uncompressed type */
-	buffer[12] = glwidth & 255;
-	buffer[13] = glwidth >> 8;
-	buffer[14] = glheight & 255;
-	buffer[15] = glheight >> 8;
-	buffer[16] = 24;	/* pixel size */
-
 	/* GL ES 3.0 guarantees exactly one glReadPixels format/type pair --
 	 * GL_RGBA/GL_UNSIGNED_BYTE -- plus one implementation-chosen pair that
 	 * has to be queried.  GL_RGB is a desktop-only spelling, and asking for
 	 * it on the ES tier wrote a stride-mismatched green smear instead of the
 	 * frame.  Desktop GL accepts RGBA just as happily, so read RGBA on both
-	 * tiers and pack down to the TGA's 24-bit BGR here rather than fork the
-	 * path.  uhexen2-3cke. */
-	{
-		byte	*rgba = (byte *) malloc((size_t)glwidth * glheight * 4);
-		int	npix = glwidth * glheight;
+	 * tiers and pack down here rather than fork the path.  uhexen2-3cke. */
+	npix = glwidth * glheight;
+	rgba = (byte *) malloc((size_t)npix * 4);
+	if (!rgba) { Con_Printf("Screenshot: out of memory\n"); return; }
 
-		if (!rgba)
+	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
+	glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+	if (!q_strcasecmp(ext, "tga"))
+	{
+		/* Hand-rolled rather than routed through Image_WriteTGA: a bottom-up
+		 * origin is native to TGA, so the rows glReadPixels returns go down
+		 * verbatim with no flip copy. */
+		int	size = npix * 3 + 18;
+		byte	*buffer = (byte *) malloc(size);
+
+		if (!buffer)
 		{
-			free(buffer);
+			free(rgba);
 			Con_Printf("Screenshot: out of memory\n");
 			return;
 		}
-		glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
-		glReadPixels_fp (glx, gly, glwidth, glheight, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+		memset (buffer, 0, 18);
+		buffer[2] = 2;		/* uncompressed type */
+		buffer[12] = glwidth & 255;
+		buffer[13] = glwidth >> 8;
+		buffer[14] = glheight & 255;
+		buffer[15] = glheight >> 8;
+		buffer[16] = 24;	/* pixel size */
 
 		for (i = 0; i < npix; i++)
 		{
@@ -1177,15 +1205,44 @@ static void SCR_ScreenShot_f (void)
 			buffer[18 + i*3 + 1] = rgba[i*4 + 1];	/* G */
 			buffer[18 + i*3 + 2] = rgba[i*4 + 0];	/* R */
 		}
-		free(rgba);
+
+		ok = (FS_WriteFile (filename, buffer, size) == 0);
+		free(buffer);
+	}
+	else
+	{
+		/* stb wants top-down RGB.  glReadPixels hands back bottom-up rows,
+		 * so pack to RGB here and let the writer do the vertical flip. */
+		byte	*rgb = (byte *) malloc((size_t)npix * 3);
+
+		if (!rgb)
+		{
+			free(rgba);
+			Con_Printf("Screenshot: out of memory\n");
+			return;
+		}
+
+		for (i = 0; i < npix; i++)
+		{
+			rgb[i*3 + 0] = rgba[i*4 + 0];	/* R */
+			rgb[i*3 + 1] = rgba[i*4 + 1];	/* G */
+			rgb[i*3 + 2] = rgba[i*4 + 2];	/* B */
+		}
+
+		if (!q_strcasecmp(ext, "png"))
+			ok = Image_WritePNG (fullpath, rgb, glwidth, glheight, 24, false);
+		else
+			ok = Image_WriteJPG (fullpath, rgb, glwidth, glheight, 24, quality, false);
+
+		free(rgb);
 	}
 
-	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
-	i = FS_WriteFile (filename, buffer, size);
-	free(buffer);
+	free(rgba);
 
-	if (i == 0)
+	if (ok)
 		Con_Printf ("Wrote %s\n", filename);
+	else
+		Con_Printf ("Couldn't write %s\n", filename);
 }
 
 /* uhexen2-8pzr: visual-regression gate for Hi-Z acceptance sweep.  FNV-1a

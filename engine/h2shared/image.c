@@ -545,13 +545,16 @@ static byte *CopyFlipped(const byte *data, int width, int height, int bpp)
 ============
 Image_WriteJPG -- writes using stb_image_write
 
+`name' is a full filesystem path and the caller owns creating the directory.
+QuakeSpasm prefixes com_gamedir here, but this engine's fs_gamedir_nopath holds
+only the gamedir *name* ("data1"), so prefixing it wrote CWD-relative.
+
 returns true if successful
 ============
 */
 qboolean Image_WriteJPG (const char *name, byte *data, int width, int height, int bpp, int quality, qboolean upsidedown)
 {
 	unsigned error;
-	char	pathname[MAX_OSPATH];
 	byte	*flipped;
 	int	bytes_per_pixel;
 
@@ -559,9 +562,6 @@ qboolean Image_WriteJPG (const char *name, byte *data, int width, int height, in
 		Sys_Error ("bpp not 24 or 32");
 
 	bytes_per_pixel = bpp / 8;
-
-	Sys_mkdir (fs_gamedir_nopath, false); //if we've switched to a nonexistant gamedir, create it now so we don't crash
-	q_snprintf (pathname, sizeof(pathname), "%s/%s", fs_gamedir_nopath, name);
 
 	if (!upsidedown)
 	{
@@ -572,7 +572,7 @@ qboolean Image_WriteJPG (const char *name, byte *data, int width, int height, in
 	else
 		flipped = data;
 
-	error = stbi_write_jpg (pathname, width, height, bytes_per_pixel, flipped, quality);
+	error = stbi_write_jpg (name, width, height, bytes_per_pixel, flipped, quality);
 	if (!upsidedown)
 		free (flipped);
 
@@ -580,12 +580,38 @@ qboolean Image_WriteJPG (const char *name, byte *data, int width, int height, in
 }
 
 /*
-Image_WritePNG -- not implemented.  Nothing calls this; the screenshot path
-writes JPG.  stb_image_write, already included above, exposes stbi_write_png
-if a PNG writer is ever wanted -- see Image_WriteJPG for the flip handling.
+============
+Image_WritePNG -- writes using stb_image_write
+
+Same full-path contract as Image_WriteJPG.
+
+returns true if successful
+============
 */
 qboolean Image_WritePNG (const char *name, byte *data, int width, int height, int bpp, qboolean upsidedown)
 {
-	Con_Printf("PNG writing not supported in this build\n");
-	return false;
+	unsigned error;
+	byte	*flipped;
+	int	bytes_per_pixel;
+
+	if (!(bpp == 32 || bpp == 24))
+		Sys_Error ("bpp not 24 or 32");
+
+	bytes_per_pixel = bpp / 8;
+
+	if (!upsidedown)
+	{
+		flipped = CopyFlipped (data, width, height, bpp);
+		if (!flipped)
+			return false;
+	}
+	else
+		flipped = data;
+
+	error = stbi_write_png (name, width, height, bytes_per_pixel, flipped,
+							width * bytes_per_pixel);
+	if (!upsidedown)
+		free (flipped);
+
+	return (error != 0);
 }
