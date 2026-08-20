@@ -115,6 +115,23 @@ Planned:
 - Ships its own rebuilt `progs.dat`/`progs2.dat`/`portals/progs.dat` beside the executable and prefers it to your Hexen II install's copy — nothing is copied or overwritten on either platform, and a mod's own `progs.dat` (or anything you place in `~/.hexen2`) always wins over ours. **Options → Game → Gamecode from** picks the source by *place*: `Bundled`, `Loose` (your install's own gamedir) or `Pak` (the pak copy specifically, offered when a loose file is shadowing it). `-vanillaprogs` outranks all three and opts back out to Raven's 1997 gamecode. The console names both the file and whose code it turned out to be at every map load. See `gamecode/README.txt`.
 - Mods can add their own rows to the Key Setup menu via `bindlist.lst`, merged alongside the engine's own key bindings
 
+### Mod showcase
+
+<table>
+<tr>
+<td width="25%"><img src="docs/WheelofKarma.png" alt="Wheel of Karma opening text over a Himalayan backdrop" width="100%"></td>
+<td width="25%"><img src="docs/stormoverthyrion.png" alt="Storm over Thyrion menu over the approach to a castle" width="100%"></td>
+<td width="25%"><img src="docs/shadowofchaos.png" alt="Shadow of Chaos menu over a frozen gate with Portal of Praevus title art" width="100%"></td>
+<td width="25%"><img src="docs/gameoftomes.png" alt="Game of Tomes title screen with a throne of swords" width="100%"></td>
+</tr>
+<tr>
+<td align="center"><em><a href="https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey">Wheel of Karma</a> (<code>-game karma2</code>) — the opening crawl over the mod's photographic backdrop, dithered into the Hexen II palette.</em></td>
+<td align="center"><em><a href="https://www.moddb.com/mods/storm-over-thyrion">Storm over Thyrion</a> (<code>-game sot</code>) — the mod whose missing Linux client started this project.</em></td>
+<td align="center"><em>Shadow of Chaos (<code>-game soc</code>) — a Portal of Praevus expansion, menu drawn over its own live map.</em></td>
+<td align="center"><em>Game of Tomes (<code>-game GameOfTomes</code>) — custom title art and replacement gamecode.</em></td>
+</tr>
+</table>
+
 ### Audio
 - OGG Vorbis, Opus, MP3, FLAC, WAV music (CD track fallback)
 - Tracker music via libxmp (MOD/S3M/XM/IT) and UMX containers
