@@ -66,6 +66,11 @@ export function mapImportedPath(inputPath) {
   if (lowerBase.endsWith('.pak')) {
     return `data1/${basename}`;
   }
+  // The demo ships its gamecode loose next to pak0 instead of inside a pak, so
+  // a file-by-file import of a demo install has to be able to take it.
+  if (/^progs2?\.dat$/.test(lowerBase)) {
+    return `data1/${basename}`;
+  }
 
   return null;
 }
@@ -74,7 +79,14 @@ export function isRecognizedImportPath(inputPath) {
   return mapImportedPath(inputPath) !== null;
 }
 
-export function hasRequiredBaseAssets(paths) {
+// 'full' and 'pak0-only' both launch: pak0 alone is the entire Nov-1997 demo,
+// and the engine does its own version detection (and fatals with a clear
+// message when a registered pak0 has no pak1), so the launcher reports what it
+// can see rather than guessing which edition the file is.
+export function getBaseAssetStatus(paths) {
   const set = new Set(paths.map((value) => sanitizeRelativePath(value)?.toLowerCase()).filter(Boolean));
-  return set.has('data1/pak0.pak') && set.has('data1/pak1.pak');
+  if (!set.has('data1/pak0.pak')) {
+    return 'none';
+  }
+  return set.has('data1/pak1.pak') ? 'full' : 'pak0-only';
 }

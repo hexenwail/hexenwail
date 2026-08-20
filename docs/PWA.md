@@ -122,8 +122,9 @@ All launcher URLs are relative (`./...`) so the site works under project Pages p
    - loose `.pak` / `.ogg` files
    - a directory selected with the folder picker (where supported)
    - or a `.zip` archive
-6. Press **Start game**. Importing assets never starts the engine on its own, so
-   the launcher stays reachable and a pending shell update can install first.
+6. Press **Start game** (**Start game (demo)** when only `pak0.pak` is present).
+   Importing assets never starts the engine on its own, so the launcher stays
+   reachable and a pending shell update can install first.
 
 Use assets from your own copy of Hexen II / Portal of Praevus, for example from GOG or Steam. This project does **not** include game data.
 
@@ -188,6 +189,8 @@ Recognized inputs include:
 
 - `pak0.pak`, `pak1.pak`, `pak2.pak`
 - `pak3.pak` (mapped to `portals/`)
+- loose `progs.dat` / `progs2.dat` (mapped to `data1/`; the demo ships its
+  gamecode outside the pak)
 - files already inside `data1/`, `portals/`, `hw/`, or `music/`
 - `.ogg` music files (loose files default to `data1/music/`)
 
@@ -305,10 +308,13 @@ only be visible in browser developer tools.
 
 ### “Unable to find a proper Hexen II installation”
 
-You have not imported a valid registered Hexen II data set yet. Import at least:
+The engine did not recognize the data you imported as any Hexen II edition.
+Import a complete set for the edition you own:
 
-- `data1/pak0.pak`
-- `data1/pak1.pak`
+- full game: `data1/pak0.pak` **and** `data1/pak1.pak`. A registered `pak0.pak`
+  on its own is not a playable subset and stops with exactly this message.
+- Nov 1997 demo: its `data1/pak0.pak` plus the loose `data1/progs.dat` that
+  ships beside it.
 
 ### Service worker updates seem stuck
 
