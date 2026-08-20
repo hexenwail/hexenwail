@@ -820,7 +820,8 @@ static void CL_RelinkEntities (void)
 		{
 			float *gs;
 			int pflags = R_GetPimpFlags(ent, &gs);
-			if (gl_torch_dlight.integer && (pflags & XF_TORCH_GLOW))
+			if (gl_torch_dlight.integer && (pflags & XF_TORCH_GLOW) &&
+			    !(pflags & XF_NO_DLIGHT))
 			{
 				dl = CL_AllocDlight (i);
 				VectorCopy (ent->origin, dl->origin);
@@ -838,7 +839,7 @@ static void CL_RelinkEntities (void)
 		{
 			float *gs;
 			int pflags = R_GetPimpFlags(ent, &gs);
-			if (pflags & EF_ILLUMINATE)
+			if ((pflags & EF_ILLUMINATE) && !(pflags & XF_NO_DLIGHT))
 			{
 				int k, l;
 				float intensity;
