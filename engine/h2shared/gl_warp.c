@@ -30,7 +30,51 @@ static GLuint	solidskytexture, alphaskytexture;
 
 static msurface_t	*warpface;
 
-#define	SUBDIVIDE_SIZE	64
+/*
+=============
+R_SubdivideSize
+
+Tile size for liquid subdivision, which is also the spacing at which
+EmitWaterPolys samples the warp.
+
+Why this is tunable (uhexen2-9o7u).  The warp is
+    s = os + amount * turbsin[(int)((ot*0.125 + time) * TURBSCALE) & 255]
+with TURBSCALE = 256/2pi, so one full period of turbsin spans
+    256 / (0.125 * 256/2pi) = 16pi ~= 50.3 texture units,
+which on a standard 1:1 brush is ~50 world units.  Sampling a 50-unit
+sinusoid every 64 units is 0.79 samples per period -- below Nyquist, so the
+piecewise-linear interpolation between tile corners does not reconstruct the
+wave at all, it aliases it.  This is why the artifact does not need small
+brushes to appear; small brushes only make it obvious, because
+SubdividePolygon's 8-unit sliver guard means a face that no grid line crosses
+by at least 8 units is never cut and gets warp samples at its four corners
+and nowhere else.
+
+Nyquist wants <= 25; 16 gives ~3.1 samples per period.  The cost is vertex
+count on liquid surfaces, which is why this is a cvar with the historical
+value as its default rather than a changed constant -- the right setting is
+a measurement on real content, not a guess.
+
+Clamped to [16, 256].  The lower bound is not arbitrary: SubdividePolygon
+refuses a cut that lands within 8 units of the polygon's own bounds, so below
+16 that guard starts rejecting most of the grid and the extra subdivision
+does not materialise.
+
+Read once per surface rather than cached, and only at map load -- this runs
+from GL_SubdivideSurface, so a mid-game change does nothing until the next
+load.
+=============
+*/
+static float R_SubdivideSize (void)
+{
+	float	v = gl_subdivide_size.value;
+
+	if (v < 16.0f)
+		return 16.0f;
+	if (v > 256.0f)
+		return 256.0f;
+	return v;
+}
 
 static void BoundPoly (int numverts, float *verts, vec3_t mins, vec3_t maxs)
 {
@@ -57,6 +101,7 @@ static void SubdividePolygon (int numverts, float *verts)
 	int		i, j, k;
 	vec3_t	mins, maxs;
 	float	m;
+	float	subdivide = R_SubdivideSize ();
 	float	*v;
 	vec3_t	front[64], back[64];
 	int		f, b;
@@ -73,7 +118,7 @@ static void SubdividePolygon (int numverts, float *verts)
 	for (i = 0; i < 3; i++)
 	{
 		m = (mins[i] + maxs[i]) * 0.5;
-		m = SUBDIVIDE_SIZE * floor (m/SUBDIVIDE_SIZE + 0.5);
+		m = subdivide * floor (m/subdivide + 0.5);
 		if (maxs[i] - m < 8)
 			continue;
 		if (m - mins[i] < 8)
@@ -331,7 +376,11 @@ Memory: replaced polys allocate a new glpoly_t on the hunk; the old poly
 becomes unreachable (hunk doesn't free, but this runs once at map load).
 =============
 */
-#define TJ_CELL_BITS	6				/* 64 units = SUBDIVIDE_SIZE */
+/* Spatial-hash cell size for the T-junction search below.  Independent of
+ * gl_subdivide_size: the edge query walks every cell its bounding box spans
+ * (plus a margin), so a finer or coarser subdivision only changes how many
+ * points land per bucket, never whether one is found. */
+#define TJ_CELL_BITS	6				/* 64 units */
 #define TJ_CELL		(1 << TJ_CELL_BITS)
 #define TJ_HASH_BITS	14
 #define TJ_HASH_SIZE	(1 << TJ_HASH_BITS)

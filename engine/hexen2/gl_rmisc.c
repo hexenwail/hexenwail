@@ -329,6 +329,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&gl_playermip);
 	Cvar_RegisterVariable (&gl_nocolors);
 	Cvar_RegisterVariable (&gl_waterripple);
+	Cvar_RegisterVariable (&gl_subdivide_size);
 	Cvar_RegisterVariable (&gl_waterwarp_speed);
 	Cvar_RegisterVariable (&gl_waterwarp_amount);
 	Cvar_RegisterVariable (&gl_particles);
