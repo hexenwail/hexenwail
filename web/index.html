@@ -36,7 +36,15 @@
       overscroll-behavior: none;
     }
     body {
+      /* A definite height, not merely a minimum.  The shell lives in a `1fr`
+         row, and an `auto` height body lets the launcher column's content --
+         about 2400px of cards -- size that row instead of the window.  The
+         canvas then grows with it, and the software renderer's centred 4:3
+         image lands hundreds of pixels below the fold (uhexen2-o6js).
+         100vh first for browsers without dvh. */
       min-height: 100vh;
+      height: 100dvh;
+      min-height: 100dvh;
       padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
       touch-action: pan-y;
       -webkit-user-select: none;
@@ -92,6 +100,10 @@
     .shell {
       display: grid;
       grid-template-columns: minmax(18rem, 28rem) 1fr;
+      /* Pin the row to the shell's own height so #control-panel's overflow
+         has something to scroll against; an auto row would size to the
+         panel's content and take the canvas up with it. */
+      grid-template-rows: minmax(0, 1fr);
       min-height: 0;
     }
     #control-panel {
