@@ -578,6 +578,9 @@ static void CL_RelinkEntities (void)
 	vec3_t		delta;
 	vec3_t		oldorg;
 	dlight_t	*dl;
+	float		*pimp_gs;
+	int		pflags;
+	qboolean	nodlight;
 
 // determine partial update time
 	frac = CL_LerpPoint ();
@@ -753,6 +756,26 @@ static void CL_RelinkEntities (void)
 		if (ent->effects & EF_DARKFIELD)
 			R_DarkFieldParticles (ent);
 
+		/* Per-entity dynamic-light gate, hoisted above the whole dlight run
+		 * below.  XF_NO_DLIGHT is misc_modelpimp spawnflag 64, documented as
+		 * "cast no dynamic light at all" -- but until uhexen2-vyfi it was only
+		 * tested by the torch-glow and EF_ILLUMINATE branches, so a mapper who
+		 * set it on a model whose entities also carry EF_LIGHT or EF_DIMLIGHT
+		 * still got a light, with nothing to explain why.
+		 *
+		 * EF_MUZZLEFLASH is deliberately NOT gated.  The flag exists so a
+		 * mapper can stop a prop's standing light from bleeding through a wall;
+		 * a muzzle flash is a 0.1s event belonging to the act of firing, not to
+		 * the model's own lighting, and it already has its own switch in
+		 * gl_missile_glows.  Suppressing it would change weapon feel for any
+		 * model that happens to be pimped.  Revisit if a mapper asks.
+		 *
+		 * One lookup serves every branch; pimp_gs is the glow_settings block
+		 * the torch and cast-light branches read their colour and radius from.
+		 */
+		pflags = R_GetPimpFlags (ent, &pimp_gs);
+		nodlight = (pflags & XF_NO_DLIGHT) != 0;
+
 		if ((ent->effects & EF_MUZZLEFLASH) && gl_missile_glows.integer)
 		{
 			vec3_t		fv, rv, uv;
@@ -771,7 +794,7 @@ static void CL_RelinkEntities (void)
 			dl->color[2] = 0.5;
 			dl->color[3] = 0.7;
 		}
-		if (ent->effects & EF_BRIGHTLIGHT)
+		if ((ent->effects & EF_BRIGHTLIGHT) && !nodlight)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
@@ -783,7 +806,7 @@ static void CL_RelinkEntities (void)
 			dl->color[2] = 1.0;
 			dl->color[3] = 0.7;
 		}
-		if (ent->effects & EF_DIMLIGHT)
+		if ((ent->effects & EF_DIMLIGHT) && !nodlight)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
@@ -795,7 +818,7 @@ static void CL_RelinkEntities (void)
 			dl->color[3] = 0.7;
 		}
 
-		if (ent->effects & EF_DARKLIGHT)
+		if ((ent->effects & EF_DARKLIGHT) && !nodlight)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
@@ -803,7 +826,7 @@ static void CL_RelinkEntities (void)
 			dl->die = cl.time + 0.001;
 			dl->dark = true;
 		}
-		if (ent->effects & EF_LIGHT)
+		if ((ent->effects & EF_LIGHT) && !nodlight)
 		{
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
@@ -818,10 +841,8 @@ static void CL_RelinkEntities (void)
 		/* Wall torch dynamic lights — cast small dlight for
 		 * torch-flagged models so they illuminate nearby entities */
 		{
-			float *gs;
-			int pflags = R_GetPimpFlags(ent, &gs);
-			if (gl_torch_dlight.integer && (pflags & XF_TORCH_GLOW) &&
-			    !(pflags & XF_NO_DLIGHT))
+			float *gs = pimp_gs;
+			if (gl_torch_dlight.integer && (pflags & XF_TORCH_GLOW) && !nodlight)
 			{
 				dl = CL_AllocDlight (i);
 				VectorCopy (ent->origin, dl->origin);
@@ -837,9 +858,8 @@ static void CL_RelinkEntities (void)
 
 		/* Inky: misc_modelpimp cast light */
 		{
-			float *gs;
-			int pflags = R_GetPimpFlags(ent, &gs);
-			if ((pflags & EF_ILLUMINATE) && !(pflags & XF_NO_DLIGHT))
+			float *gs = pimp_gs;
+			if ((pflags & EF_ILLUMINATE) && !nodlight)
 			{
 				int k, l;
 				float intensity;
