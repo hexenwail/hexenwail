@@ -392,6 +392,29 @@ static void PF_setpuzzlemodel (void)
 	}
 }
 
+/* misc_modelpimp spawnflags.  1-8 are Inky's originals and pick which effects
+ * the controller grants; 16 and 32 choose how far those effects reach.
+ *
+ * By default an effect's reach is fixed and asymmetric: EF_GLOW/EF_ILLUMINATE
+ * are written through to the *shared model*, so every entity using that model
+ * on the map lights up, while EF_SPIN/EF_FLOAT stay on the controller entity
+ * alone, so siblings never move.  That asymmetry is deliberate -- SoT-style
+ * mods put down a hidden misc_modelpimp specifically to light all the
+ * map-placed misc_models sharing a model (demo1's intro has six display items
+ * each casting from their own position) -- but it is also exactly backwards for
+ * a mapper who wants one glowing prop, or a set of siblings that all spin.
+ * Field-reported as "misc_model casts glow even without the needed spawnflag"
+ * and "rotation is not working" in the same breath.
+ *
+ * Both new bits default to off, so every map that relied on the old fixed
+ * behaviour keeps it.  uhexen2-nna4; original contract in uhexen2-oq0a. */
+#define	PIMP_SF_SPIN		1	/* grant EF_SPIN */
+#define	PIMP_SF_FLOAT		2	/* grant EF_FLOAT */
+#define	PIMP_SF_GLOW		4	/* grant EF_GLOW (orb) */
+#define	PIMP_SF_ILLUMINATE	8	/* grant EF_ILLUMINATE (cast light) */
+#define	PIMP_SF_SELFONLY	16	/* keep glow/light on this entity only */
+#define	PIMP_SF_SHAREMOTION	32	/* share spin/float with siblings too */
+
 /*
 =================
 PF_pimpmodel
@@ -462,13 +485,13 @@ static void PF_pimpmodel (void)
 	spawnflags = (int)ref_ent->v.spawnflags;
 
 	/* Apply spawnflags to per-entity ex_flags */
-	if (spawnflags & 1)	/* Spin */
+	if (spawnflags & PIMP_SF_SPIN)
 		pimp->ex_flags |= EF_SPIN;
-	if (spawnflags & 2)	/* Float */
+	if (spawnflags & PIMP_SF_FLOAT)
 		pimp->ex_flags |= EF_FLOAT;
-	if (spawnflags & 4)	/* Glow orb */
+	if (spawnflags & PIMP_SF_GLOW)
 		pimp->ex_flags |= EF_GLOW;
-	if (spawnflags & 8)	/* Cast light */
+	if (spawnflags & PIMP_SF_ILLUMINATE)
 		pimp->ex_flags |= EF_ILLUMINATE;
 
 	/* Per-map shared write to mod->flags so every entity using this
@@ -582,12 +605,23 @@ static void PF_pimpmodel (void)
 	 *   i_btmana's red PULSE_STYLE are preserved across maps via the
 	 *   Mod_RestoreAliasModelDefaults snapshot.
 	 *   uhexen2-oq0a / regression fix uhexen2-oq0a-followup. */
-	mod->ex_flags |= (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE));
-	if (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE))
+	if (!(spawnflags & PIMP_SF_SELFONLY))
 	{
-		memcpy(mod->glow_settings, pimp->glow_settings,
-		       sizeof(mod->glow_settings));
+		mod->ex_flags |= (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE));
+		if (pimp->ex_flags & (EF_GLOW | EF_ILLUMINATE))
+		{
+			memcpy(mod->glow_settings, pimp->glow_settings,
+			       sizeof(mod->glow_settings));
+		}
 	}
+
+	/* SHAREMOTION is the other half of the same control: it opts the
+	 * motion flags *into* the sharing that glow/illuminate get by
+	 * default, so sibling misc_models spin and bob with the controller
+	 * rather than standing still while it moves.  Also default-off, so
+	 * nothing shipped starts moving that wasn't already.  uhexen2-nna4 */
+	if (spawnflags & PIMP_SF_SHAREMOTION)
+		mod->ex_flags |= (pimp->ex_flags & (EF_SPIN | EF_FLOAT));
 
 	G_INT(OFS_RETURN) = 1;
 }
