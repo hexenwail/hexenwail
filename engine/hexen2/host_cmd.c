@@ -356,7 +356,19 @@ static void Host_Map_f (void)
 	SV_SpawnServer (name, NULL);
 
 	if (!sv.active)
+	{
+		/* We set key_dest to key_game above on the assumption the map
+		 * would load.  It didn't, so there is no game to have focus:
+		 * cls.state is ca_disconnected, con_forcedup is true, and the
+		 * console is what's actually on screen.  Leaving key_dest at
+		 * key_game made the console key take Con_ToggleConsole_f's
+		 * "already up, close it" branch and drop the user into the main
+		 * menu instead, from where the console was then unreachable.
+		 * Point key_dest at what is being drawn so the error above is
+		 * both visible and dismissable.  uhexen2-k490 */
+		Key_SetDest (key_console);
 		return;
+	}
 
 	if (cls.state != ca_dedicated)
 	{
