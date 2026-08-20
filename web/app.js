@@ -1,8 +1,12 @@
 import { extractZipEntries } from './lib/zip.js';
 import { downloadHexen2Demo, isDemoDecompressionSupported } from './lib/demo-fetch.js';
-import { getBaseAssetStatus, mapImportedPath } from './lib/paths.js';
+import { getBaseAssetStatus, mapImportedPath, normalizeGamedirName, sanitizeGamedirName } from './lib/paths.js';
 import {
-  createSaveBundle, getPakCompatibilityWarnings, isSavePath, planSaveImport, sha256, validateSaveBundle,
+  buildEngineArguments, detectModGamedirs, mapModImportPath, modImportRoot, modOwnedPath,
+} from './lib/mods.js';
+import {
+  createSaveBundle, getPakCompatibilityWarnings, isPakCompatibilityPath, isSavePath, planSaveImport, sha256,
+  validateSaveBundle,
 } from './lib/save-bundle.js';
 import { PhoneControls, PHONE_CONTROL_KEYCODES } from './lib/phone-controls.js';
 import { runPresenterDiagnostics, runWebGLDiagnostics } from './lib/webgl-diagnostics.js';
@@ -49,7 +53,9 @@ const state = {
     handedness: 'right',
     lookSensitivity: 1,
     phoneHintSeen: false,
+    mod: '',
   },
+  modOptionSignature: '',
   touchOnlyEnvironment: false,
   phoneMode: false,
 };
@@ -139,9 +145,68 @@ function announceEngineReady() {
   setStatus('Engine ready. Start the game when ready.');
 }
 
+function getDetectedMods() {
+  return detectModGamedirs([...state.storedPaths]);
+}
+
+// A mod only reaches the engine when the install can actually load one: -game
+// on a demo install is a startup fatal ("You must have the full version of
+// Hexen II to play modified games"), and passing it there would trade a
+// playable demo for an error message.
+function modsAreLaunchable() {
+  return getBaseAssetStatus([...state.storedPaths]) === 'full';
+}
+
+// What the dropdown shows: an imported mod stays selected even on an install
+// that cannot launch it, so it can still be managed and comes back the moment
+// the missing pak1 does.
+function getSelectedMod() {
+  const mod = state.preferences.mod;
+  return mod && getDetectedMods().includes(mod) ? mod : '';
+}
+
+// What the engine is actually launched with.
+function getActiveMod() {
+  return modsAreLaunchable() ? getSelectedMod() : '';
+}
+
+function renderMods() {
+  const mods = getDetectedMods();
+  const selected = getSelectedMod();
+  const busy = state.engineStarted && !state.runtimeExited;
+  if (ui.modSelect) {
+    // Rebuilt only when the set changes: this runs from every launch-state
+    // refresh, including the ten-second save sync, and replacing the options
+    // under an open dropdown would close it mid-selection.
+    const signature = mods.join(' ');
+    if (signature !== state.modOptionSignature) {
+      state.modOptionSignature = signature;
+      ui.modSelect.replaceChildren(new Option('None (Hexen II)', ''), ...mods.map((mod) => new Option(mod, mod)));
+    }
+    ui.modSelect.value = selected;
+    ui.modSelect.disabled = !mods.length || busy;
+  }
+  if (ui.modRemoveButton) {
+    ui.modRemoveButton.disabled = !selected || busy;
+    ui.modRemoveButton.textContent = selected ? `Remove “${selected}”` : 'Remove mod';
+  }
+  if (ui.modImportButton) {
+    ui.modImportButton.disabled = !state.storageReady || busy;
+  }
+  if (ui.modRequirements) {
+    ui.modRequirements.textContent = !mods.length
+      ? 'No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game <folder>.'
+      : selected && !modsAreLaunchable()
+        ? `“${selected}” is selected but will not load: the engine refuses -game without the full game's data1/pak1.pak, so this install starts unmodded.`
+        : `Imported mods: ${mods.join(', ')}. The selected mod is passed to the engine as -game.`;
+  }
+}
+
 function updateLaunchState() {
   const assets = getBaseAssetStatus([...state.storedPaths]);
   const ready = assets !== 'none';
+  renderMods();
+  const activeMod = getActiveMod();
   if (ui.launchButton) {
     ui.launchButton.disabled = !state.rendererReady || !ready
       || (state.engineStarted && !state.runtimeExited);
@@ -152,7 +217,7 @@ function updateLaunchState() {
         : state.engineStarted
           ? 'Running'
           : assets === 'full'
-            ? 'Start game'
+            ? activeMod ? `Start game — ${activeMod}` : 'Start game'
             : assets === 'pak0-only' ? 'Start game (demo)' : 'Import pak0.pak first';
   }
   if (ui.exitButton) {
@@ -199,6 +264,13 @@ function setImportMessage(message, kind = 'info') {
   if (ui.importMessage) {
     ui.importMessage.textContent = message;
     ui.importMessage.dataset.kind = kind;
+  }
+}
+
+function setModMessage(message, kind = 'info') {
+  if (ui.modMessage) {
+    ui.modMessage.textContent = message;
+    ui.modMessage.dataset.kind = kind;
   }
 }
 
@@ -531,6 +603,132 @@ async function handleImportedFiles(fileList) {
   }
 }
 
+/*
+ * The launcher's -game: the folder the user picks becomes the gamedir, and its
+ * contents are stored under that name with their internal structure intact.
+ * Nothing here goes through mapImportedPath -- a mod is rooted at its own
+ * directory, and flattening its files into data1/ would destroy exactly the
+ * distinction the gamedir exists to make.
+ */
+async function handleModDirectoryImport(fileList) {
+  const entries = collectLooseFiles(fileList ?? []);
+  if (!entries.length) {
+    return;
+  }
+
+  const root = modImportRoot(entries.map((entry) => entry.sourcePath));
+  if (!root) {
+    setModMessage('Pick a single mod folder — loose files have no folder name to use as the gamedir.', 'error');
+    return;
+  }
+  const gamedir = sanitizeGamedirName(root);
+  if (!gamedir) {
+    setModMessage(normalizeGamedirName(root)
+      ? `“${root}” is reserved for the base game and the mission pack, so it cannot be imported as a mod.`
+      : `“${root}” has no usable gamedir name. Rename the folder using letters, digits, “-” or “_”.`, 'error');
+    return;
+  }
+
+  setModMessage(`Importing the “${gamedir}” mod…`);
+  const accepted = [];
+  const rejected = [];
+  let processedBytes = 0;
+  try {
+    for (const entry of entries) {
+      const mappedPath = mapModImportPath(gamedir, entry.sourcePath);
+      if (!mappedPath) {
+        rejected.push(entry.sourcePath);
+        continue;
+      }
+      if (processedBytes + entry.file.size > MAX_IMPORT_BYTES) {
+        throw new Error(`Mod folder is too large for browser storage (over ${formatBytes(MAX_IMPORT_BYTES)}).`);
+      }
+      const bytes = new Uint8Array(await entry.file.arrayBuffer());
+      processedBytes += bytes.byteLength;
+      accepted.push({ path: mappedPath, bytes });
+      if (ui.progressText) {
+        ui.progressText.textContent = `Reading ${gamedir}: ${accepted.length} files (${formatBytes(processedBytes)})`;
+      }
+    }
+
+    if (!accepted.length) {
+      setModMessage(`No mod files were recognized in “${root}”. Mods are imported by file type; see the PWA notes for the accepted list.`, 'error');
+      return;
+    }
+
+    const storedBytes = await storeImportedFiles(accepted, ({ storedCount }) => {
+      if (ui.progressText) {
+        ui.progressText.textContent = `Installing ${gamedir}: ${storedCount}/${accepted.length} files`;
+      }
+    });
+    state.preferences.mod = gamedir;
+    savePreferences();
+    if (ui.progressText) {
+      ui.progressText.textContent = `Installed ${accepted.length} files into ${gamedir}/ (${formatBytes(storedBytes)})`;
+    }
+    logToConsole('[mod]', `imported ${accepted.length} file(s) into ${gamedir}/`);
+    setModMessage(modsAreLaunchable()
+      ? `Imported “${gamedir}” and selected it. Start the game to play with -game ${gamedir}.`
+      : `Imported “${gamedir}”. It stays selected but cannot launch until the full game's data1/pak1.pak is imported.`, 'success');
+  } catch (error) {
+    setModMessage(`Mod import failed: ${error.message}`, 'error');
+  } finally {
+    await updateStorageIndicator();
+    updateLaunchState();
+    if (ui.modRejectedList) {
+      ui.modRejectedList.textContent = rejected.length
+        ? `Ignored ${rejected.length} unsupported file(s): ${rejected.slice(0, 8).join(', ')}${rejected.length > 8 ? '…' : ''}`
+        : '';
+    }
+  }
+}
+
+async function removeMod(gamedir) {
+  const dir = sanitizeGamedirName(gamedir);
+  if (!dir || !getDetectedMods().includes(dir)) {
+    return;
+  }
+  if (!confirm(`Remove the “${dir}” mod and everything stored under ${dir}/, including its save games? This cannot be undone.`)) {
+    return;
+  }
+  try {
+    // The runtime tree goes first: the periodic sync copies anything still
+    // sitting in it back into storage, so clearing storage alone would put the
+    // mod straight back within ten seconds.
+    if (state.runtimeReady) {
+      const FS = getFS();
+      const root = `${BASE_DIR}/${dir}`;
+      try {
+        removeRuntimeTree(root);
+        FS.rmdir(root);
+      } catch (error) {
+        if (!String(error).includes('No such file')) throw error;
+      }
+    }
+    let removed = 0;
+    for (const path of [...state.storedPaths]) {
+      if (!modOwnedPath(dir, path)) continue;
+      await state.storage.deleteFile(path);
+      state.storedPaths.delete(path);
+      removed += 1;
+    }
+    for (const path of [...state.runtimeSnapshot.keys()]) {
+      if (modOwnedPath(dir, path)) state.runtimeSnapshot.delete(path);
+    }
+    if (state.preferences.mod === dir) {
+      state.preferences.mod = '';
+      savePreferences();
+    }
+    logToConsole('[mod]', `removed ${removed} file(s) from ${dir}/`);
+    setModMessage(`Removed “${dir}” (${removed} file(s)).`, 'success');
+  } catch (error) {
+    setModMessage(`Could not remove “${dir}”: ${error.message}`, 'error');
+  } finally {
+    await updateStorageIndicator();
+    updateLaunchState();
+  }
+}
+
 function describeDemoStage(event) {
   if (event.stage === 'downloading') {
     const received = formatBytes(event.receivedBytes ?? 0);
@@ -596,7 +794,7 @@ async function getInstalledPaks(gameDirectories) {
   const paks = [];
   const normalizedDirs = gameDirectories ? gameDirectories.map(d => d.toLowerCase()) : null;
   for (const entry of await state.storage.listFiles()) {
-    if (!/^(?:data1|portals|hw)\/.*\.pak$/i.test(entry.path)) continue;
+    if (!isPakCompatibilityPath(entry.path)) continue;
     if (normalizedDirs && !normalizedDirs.includes(entry.path.split('/')[0].toLowerCase())) continue;
     const bytes = await state.storage.readFile(entry.path);
     paks.push({ path: entry.path, size: bytes.byteLength, sha256: await sha256(bytes) });
@@ -714,6 +912,12 @@ async function importSaveBundle(file) {
     setSaveMessage('Checking save bundle…');
     const bundle = await validateSaveBundle(new Uint8Array(await file.arrayBuffer()));
     const warnings = getPakCompatibilityWarnings(bundle.manifest.requiredPaks, await getInstalledPaks(bundle.manifest.gameDirectories));
+    // A bundle can carry saves for a gamedir this browser has never seen; the
+    // files import fine, but nothing will load them until the mod is here too.
+    const presentDirectories = new Set([...state.storedPaths].map((path) => path.split('/')[0].toLowerCase()));
+    for (const dir of bundle.manifest.gameDirectories) {
+      if (!presentDirectories.has(dir)) warnings.push(`No “${dir}” game directory is installed here; import that mod to use its saves.`);
+    }
     const size = bundle.files.reduce((total, entry) => total + entry.bytes.byteLength, 0);
     const mode = ui.saveImportMode?.value === 'replace' ? 'replace' : 'merge';
     const summary = `Import ${bundle.files.length} save file(s) (${formatBytes(size)}) from ${new Date(bundle.manifest.createdAt).toLocaleString()} for ${bundle.manifest.gameDirectories.join(', ')}?\n\nMode: ${mode === 'replace' ? 'Replace saves (all existing save slots are removed)' : 'Merge (only matching save paths are replaced)'}${warnings.length ? `\n\nCompatibility warnings:\n${warnings.join('\n')}` : ''}`;
@@ -734,6 +938,7 @@ function loadPreferences() {
     const sensitivity = Number(saved.lookSensitivity);
     if (Number.isFinite(sensitivity) && sensitivity >= 0.5 && sensitivity <= 2) state.preferences.lookSensitivity = sensitivity;
     state.preferences.phoneHintSeen = Boolean(saved.phoneHintSeen);
+    state.preferences.mod = sanitizeGamedirName(saved.mod) ?? '';
   } catch (error) {
     console.warn('Could not load launcher preferences', error);
   }
@@ -904,7 +1109,9 @@ async function startEngineFromUserAction() {
     if (typeof Module.callMain !== 'function') {
       throw new Error('Engine runtime did not expose callMain.');
     }
-    const exitStatus = Module.callMain([...ENGINE_ARGUMENTS]);
+    const engineArguments = buildEngineArguments(ENGINE_ARGUMENTS, getActiveMod());
+    logToConsole('[launcher]', `engine arguments: ${engineArguments.join(' ')}`);
+    const exitStatus = Module.callMain(engineArguments);
     if (state.quitInProgress || state.runtimeExited) return;
     if (typeof exitStatus === 'number' && exitStatus !== 0) {
       throw new Error(`Engine exited during startup with status ${exitStatus}.`);
@@ -947,7 +1154,11 @@ async function clearImportedData() {
   }
   state.engineStarted = false;
   setEngineState(state.runtimeExited ? 'stopped' : 'ready');
+  state.preferences.mod = '';
+  savePreferences();
   setImportMessage('Imported browser data cleared.', 'success');
+  setModMessage('');
+  if (ui.modRejectedList) ui.modRejectedList.textContent = '';
   if (ui.rejectedList) ui.rejectedList.textContent = '';
   if (ui.progressText) ui.progressText.textContent = 'No imported assets yet.';
   updateLaunchState();
@@ -1237,6 +1448,13 @@ function bindUi() {
     saveImportMode: document.getElementById('save-import-mode'),
     saveMessage: document.getElementById('save-message'),
     directoryInput: document.getElementById('directory-input'),
+    modSelect: document.getElementById('mod-select'),
+    modImportButton: document.getElementById('mod-import-button'),
+    modRemoveButton: document.getElementById('mod-remove-button'),
+    modInput: document.getElementById('mod-input'),
+    modMessage: document.getElementById('mod-message'),
+    modRejectedList: document.getElementById('mod-rejected-list'),
+    modRequirements: document.getElementById('mod-requirements'),
     dropZone: document.getElementById('drop-zone'),
     viewport: document.querySelector('.viewport'),
     storageText: document.getElementById('storage-text'),
@@ -1274,6 +1492,20 @@ function bindUi() {
   ui.directoryInput?.addEventListener('change', async (event) => {
     await handleImportedFiles(event.target.files);
     event.target.value = '';
+  });
+  ui.modImportButton?.addEventListener('click', () => ui.modInput?.click());
+  ui.modInput?.addEventListener('change', async (event) => {
+    await handleModDirectoryImport(event.target.files);
+    event.target.value = '';
+  });
+  ui.modSelect?.addEventListener('change', () => {
+    state.preferences.mod = sanitizeGamedirName(ui.modSelect.value) ?? '';
+    savePreferences();
+    updateLaunchState();
+  });
+  ui.modRemoveButton?.addEventListener('click', () => {
+    const target = getSelectedMod();
+    if (target) removeMod(target);
   });
   ui.launchButton?.addEventListener('click', () => {
     if (state.runtimeExited) {
