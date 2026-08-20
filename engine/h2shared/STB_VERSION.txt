@@ -1,0 +1,15 @@
+stb - single-header public domain libraries by Sean Barrett (nothings)
+https://github.com/nothings/stb
+
+  stb_image.h        v2.30   (image loader)
+  stb_image_write.h  v1.16   (image writer)
+
+stb_image_write.h fetched from master, 2026-08-20
+  sha256 cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05
+
+The copy this replaced was a v1.07 subset carrying only the JPEG writer -- the
+PNG/BMP/TGA/HDR encoders and stb's zlib compressor had been stripped, so
+stbi_write_png was declared in the header comment but had no implementation.
+Restored in full so the screenshot command can write PNG.
+
+License: Public domain or MIT (dual, see end of each file)
