@@ -608,7 +608,7 @@ void D_ClearOpenGLTextures (int last_tex)
 			Con_Printf ("[texgen]    drop %lu '%s'\n",
 				    (unsigned long)gltextures[i].texnum,
 				    gltextures[i].identifier);
-		R_DeleteTextures (1, &(gltextures[i].texnum));
+		glDeleteTextures_fp(1, &(gltextures[i].texnum));
 		key = Hash_GenerateKeyString (&hash_gltextures, gltextures[i].identifier, true);
 		Hash_Remove(&hash_gltextures, key, i);
 	}
@@ -616,11 +616,8 @@ void D_ClearOpenGLTextures (int last_tex)
 	memset(&(gltextures[last_tex]), 0, (numgltextures - last_tex) * sizeof(gltexture_t));
 	numgltextures = last_tex;
 
-	/* Names below last_tex have just been deleted, so anything the binding
-	 * shadow still believes is bound may be gone.  The old test compared a
-	 * texture NAME against an index into gltextures[], which is not the same
-	 * space; forgetting everything is both correct and cheap here. */
-	R_ResetTextureBindings ();
+	if (currenttexture >= (GLuint)last_tex)
+		currenttexture = GL_UNUSED_TEXTURE;
 
 	// Clear menu pic cache
 	memset(menu_cachepics, 0, menu_numcachepics * sizeof(cachepic_t));

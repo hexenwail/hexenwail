@@ -398,7 +398,7 @@ void GL_FreeAliasGPUMeshes (void)
 		if (gm->ssbo_pose)     { glDeleteBuffers_fp(1, &gm->ssbo_pose); }
 		if (gm->ssbo_pose_md3) { glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
 		if (gm->ssbo_bones)    { glDeleteBuffers_fp(1, &gm->ssbo_bones); }
-		if (gm->tex_pose)      { R_DeleteTextures (1, &gm->tex_pose); }
+		if (gm->tex_pose)      { glDeleteTextures_fp(1, &gm->tex_pose); }
 	}
 	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
 	memset(alias_gpu_owners, 0, sizeof(alias_gpu_owners));
@@ -682,7 +682,7 @@ iqm_gpu_setup:
 		/* Pose texture (ES 3.0 compatible) — R32UI, width=poseverts, height=numposes.
 		 * Each texel packs one trivertx_t as: v[0] | v[1]<<8 | v[2]<<16 | ni<<24 */
 		glGenTextures_fp(1, &gm->tex_pose);
-		R_BindTextureSlot (0, gm->tex_pose);
+		glBindTexture_fp(GL_TEXTURE_2D, gm->tex_pose);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -690,7 +690,7 @@ iqm_gpu_setup:
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_R32UI,
 				hdr->poseverts, hdr->numposes, 0,
 				GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
-		R_BindTextureSlot (0, 0);
+		glBindTexture_fp(GL_TEXTURE_2D, 0);
 	}
 
 	gm->num_indices = vi;

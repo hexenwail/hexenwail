@@ -26,7 +26,6 @@
 #include "img_load.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 
@@ -679,7 +678,7 @@ void Draw_ReInit (void)
 
 	D_ClearOpenGLTextures(0);
 	if (lightmap_textures[0])
-		R_DeleteTextures (MAX_LIGHTMAPS, lightmap_textures);
+		glDeleteTextures_fp (MAX_LIGHTMAPS, lightmap_textures);
 	memset (lightmap_textures, 0, sizeof(lightmap_textures));
 	// make sure all of alias models are cleared
 	Draw_ClearAllModels ();
@@ -2815,7 +2814,9 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 					else
 						Con_DPrintf ("Texture cache mismatch: %lu, %s, creating new entry\n",
 								    (unsigned long)old_texnum, identifier);
-					R_DeleteTextures (1, &old_texnum);
+					glDeleteTextures_fp (1, &old_texnum);
+					if (currenttexture == old_texnum)
+						currenttexture = GL_UNUSED_TEXTURE;
 					Hash_Remove (&hash_gltextures, key, i);
 					glt->identifier[0] = '\0';	/* mark entry stale */
 					/* GL_UNUSED_TEXTURE is the marker GL_ClaimStaleTexture

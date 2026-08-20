@@ -13,35 +13,54 @@
 
 /* Shader compilation helpers */
 GLuint	GL_CompileShader (GLenum type, const char *source);
-/* Multi-chunk form: GL concatenates the parts itself, which is how the dialect
- * header stays out of the shader files in engine/shaders/.  uhexen2-p4ln.4. */
-GLuint	GL_CompileShaderParts (GLenum type, int count, const char **parts);
 GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
 GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
-GLuint	GL_LoadProgramEx (const char *vert_src, const char *frag_src,
-			  const char *frag_prefix);
 
-/* Shader programs.
- *
- * Only sampler bindings live here now.  Everything else -- matrices, fog, the
- * alpha threshold, the world lighting knobs -- moved into the two std140
- * blocks in gl_uniforms.h, because loose uniforms are per-PROGRAM state and a
- * value like fog density had to be re-pushed once per program that wanted it.
- * Samplers cannot go in a uniform block, and they are set once at link time
- * rather than per draw, so they stay.  uhexen2-p4ln.2. */
+/* Shader programs */
 typedef struct glprogram_s {
 	GLuint	program;
+	GLint	u_mvp;
 	GLint	u_texture0;
 	GLint	u_texture1;
 	GLint	u_texture2;	/* fullbright mask sampler for world (uhexen2-sjvf) */
-	GLint	u_soft_depth;	/* alias FS: opaque-scene depth snapshot, texture unit 1 (uhexen2-mf9u) */
+	GLint	u_color;
+	GLint	u_fog_density;
+	GLint	u_fog_color;
+	GLint	u_alpha_threshold;
+	GLint	u_modelview;
+	GLint	u_time;
+	GLint	u_skyfog;
+	GLint	u_eyepos;
+	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
+	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
+	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
+	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
+	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
+	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
+	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
+	 * gl_shader_alias is the generic textured+vertex-color program and is
+	 * also used for sprites, warp polys and unlit brush polys, so its
+	 * caustics value is per-batch state pushed by GL_ImmEnd.  A shared name
+	 * would make GL_ImmEnd clobber the per-frame world u_caustics that
+	 * R_SetupFrame uploads. */
+	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
+	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
+	/* Soft particles (uhexen2-mf9u).  Same per-batch-state reasoning as
+	 * u_alias_caustics: gl_shader_alias is shared by sprites, warp polys,
+	 * unlit brush polys and alias models, and only the sprite path wants
+	 * the fade, so the enable lives in the uniform rather than the program. */
+	GLint	u_soft_depth;	    /* alias FS: opaque-scene depth snapshot, texture unit 1 */
+	GLint	u_soft_params;	    /* alias FS: vec3(1/fade_distance, zparam_a, zparam_b); x=0 disables */
 } glprogram_t;
 
-/* Extended program for GPU particle SSBO rendering.  The billboard basis it
- * used to carry (u_pup / u_pright / u_vpn / u_origin / u_ctime) is per-frame
- * data and now lives in the PerFrame block. */
+/* Extended program for GPU particle SSBO rendering */
 typedef struct {
-	glprogram_t base;
+	glprogram_t base;       /* standard uniforms (u_mvp, u_modelview, u_fog_density, u_fog_color) */
+	GLint   u_pup;          /* r_pup billboard-up vector */
+	GLint   u_pright;       /* r_pright billboard-right vector */
+	GLint   u_vpn;          /* view forward vector (for distance-based scale) */
+	GLint   u_origin;       /* camera origin (for distance-based scale) */
+	GLint   u_ctime;        /* current cl.time (for dead particle culling) */
 } gl_particle_gpu_prog_t;
 
 extern glprogram_t	gl_shader_world;	/* textured + lightmap, fog (cutout: has discard) */
@@ -61,22 +80,30 @@ extern glprogram_t	gl_shader_world_oit;
 extern glprogram_t	gl_shader_alias_oit;
 extern glprogram_t	gl_shader_particle_oit;
 
-/* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs).
- *
- * Its uniforms are all in the shared blocks now: the view-projection and eye
- * position in PerFrame, the instance base / pose vertex type / fog / alpha
- * threshold / caustics in PerDraw.  Note it never needed a model matrix --
- * the per-instance world matrix in the SSBO already yields world space
- * (uhexen2-0gn3). */
+/* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs) */
 typedef struct {
 	GLuint	program;	/* shader program handle */
 	GLuint	ubo_shadedots;	/* SSBO handle for shadedots table */
+	GLint	u_fog_density;	/* fragment fog uniforms */
+	GLint	u_fog_color;
+	GLint	u_alpha_threshold;
+	GLint	u_viewproj;	/* view-projection matrix (uhexen2-8pc2) */
+	GLint	u_inst_base;	/* base instance index for gl_InstanceID offset */
+	GLint	u_eyepos;	/* camera position for fog distance */
+	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
+	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
+	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
 
 void	GL_AliasInst_Init (void);
 void	GL_AliasInst_Shutdown (void);
+
+void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
+				     const float *pup, const float *pright,
+				     const float *vpn, const float *origin,
+				     float ctime);
 
 /* Vertex attribute locations (fixed, shared across all programs) */
 #define ATTR_POSITION	0
