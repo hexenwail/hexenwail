@@ -108,7 +108,11 @@ typedef struct
 	qboolean	demoplayback;
 	qboolean	timedemo;
 	int		forcetrack;		// -1 = use normal cd track
-	FILE		*demofile;
+	FILE		*demofile;	/* recording only -- writes need a stream */
+	/* Playback reads through this instead, so a demo can live in a deflated
+	 * .pk3 entry, which has no FILE * to hand back.  Recording still writes a
+	 * loose file, which is why the two are not one field.  uhexen2-pzha. */
+	fshandle_t	demofh;
 //	FILE		*introdemofile;
 	int		td_lastframe;		// to meter out one message a frame
 	int		td_startframe;		// host_framecount at start

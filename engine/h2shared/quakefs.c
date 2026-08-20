@@ -1441,6 +1441,85 @@ long FS_OpenFile_Silent (const char *filename, FILE **file, unsigned int *path_i
 	return FS_OpenFile_Internal (filename, file, path_id, true, false);
 }
 
+
+/*
+===========
+FS_OpenFileHandle
+
+FS_OpenFile() for callers that want to read incrementally rather than slurp the
+whole file.  Fills in the fshandle_t they would otherwise have had to populate
+by hand, and -- the reason it exists -- transparently covers DEFLATED .pk3
+entries, which FS_OpenFile() cannot express because there is no FILE * position
+holding the decompressed bytes.
+
+A loose file, a pak member and a STORED archive entry all come back FILE-backed
+and behave exactly as before.  A deflated entry is inflated once here into a
+malloc'd buffer that FS_fclose() frees.
+===========
+*/
+static long FS_OpenFileHandle_Internal (const char *filename, fshandle_t *fh,
+					unsigned int *path_id, qboolean silent)
+{
+	FILE	*f;
+	long	len;
+
+	if (!fh)
+		return -1;
+
+	memset (fh, 0, sizeof(*fh));
+
+	len = silent ? FS_OpenFile_Silent (filename, &f, path_id)
+		     : FS_OpenFile (filename, &f, path_id);
+	if (len < 0)
+		return -1;
+
+	if (f)
+	{
+		fh->file = f;
+		fh->pak = (file_from_pak != 0);
+		fh->start = ftell (f);
+		fh->length = len;
+		fh->pos = 0;
+		return len;
+	}
+
+	/* deflated archive entry */
+	fh->data = (byte *) malloc ((size_t)len + 1);
+	if (!fh->data)
+	{
+		Sys_Printf ("%s: out of memory for %s\n", __thisfunc__, filename);
+		return -1;
+	}
+	fh->data[len] = 0;
+
+	if (!FS_ZipReadEntry (fs_lastzip, fs_lastzipentry, fh->data))
+	{
+		Sys_Printf ("%s: corrupt deflate stream for %s in %s\n",
+			    __thisfunc__, filename, fs_lastzip->filename);
+		free (fh->data);
+		fh->data = NULL;
+		return -1;
+	}
+
+	fh->pak = true;		/* it came out of packaged content */
+	fh->start = 0;
+	fh->length = len;
+	fh->pos = 0;
+	return len;
+}
+
+long FS_OpenFileHandle (const char *filename, fshandle_t *fh, unsigned int *path_id)
+{
+	return FS_OpenFileHandle_Internal (filename, fh, path_id, false);
+}
+
+/* ...and the quiet form, for optional content whose absence is normal:
+ * external texture replacements, DDS/KTX sidecars. */
+long FS_OpenFileHandle_Silent (const char *filename, fshandle_t *fh, unsigned int *path_id)
+{
+	return FS_OpenFileHandle_Internal (filename, fh, path_id, true);
+}
+
 /*
 ===========
 FS_FileExists
@@ -2322,20 +2401,23 @@ Sets the registered flag.
 */
 static int CheckRegistered (void)
 {
-	FILE	*h;
+	fshandle_t	fh;
 	unsigned short	check[128];
 	int	i;
 
-	FS_OpenFile("gfx/pop.lmp", &h, NULL);
-	if (!h)
+	/* Through the handle, not a raw FILE *: an install repacked as a .pk3 --
+	 * which is the whole point of uhexen2-pzha -- keeps pop.lmp in a deflated
+	 * entry, and FS_OpenFile() hands back a NULL FILE * for those.  Reading it
+	 * the old way silently demoted a registered install to shareware. */
+	if (FS_OpenFileHandle ("gfx/pop.lmp", &fh, NULL) < 0)
 		return -1;
 
-	if (fread (check, 1, sizeof(check), h) != sizeof(check))
+	if (FS_fread (check, 1, sizeof(check), &fh) != sizeof(check))
 	{
-		fclose (h);
+		FS_fclose (&fh);
 		return -1;
 	}
-	fclose (h);
+	FS_fclose (&fh);
 
 	for (i = 0; i < 128; i++)
 	{
@@ -2943,7 +3025,12 @@ size_t FS_fread(void *ptr, size_t size, size_t nmemb, fshandle_t *fh)
 	byte_size = nmemb * size;
 	if (byte_size > fh->length - fh->pos)	/* just read to end */
 		byte_size = fh->length - fh->pos;
-	bytes_read = fread(ptr, 1, byte_size, fh->file);
+	if (fh->data) {		/* inflated archive entry, already in memory */
+		memcpy(ptr, fh->data + fh->pos, (size_t)byte_size);
+		bytes_read = byte_size;
+	} else {
+		bytes_read = fread(ptr, 1, byte_size, fh->file);
+	}
 	fh->pos += bytes_read;
 
 	/* fread() must return the number of elements read,
@@ -2993,9 +3080,11 @@ int FS_fseek(fshandle_t *fh, long offset, int whence)
 	if (offset > fh->length)	/* just seek to end */
 		offset = fh->length;
 
-	ret = fseek(fh->file, fh->start + offset, SEEK_SET);
-	if (ret < 0)
-		return ret;
+	if (!fh->data) {
+		ret = fseek(fh->file, fh->start + offset, SEEK_SET);
+		if (ret < 0)
+			return ret;
+	}
 
 	fh->pos = offset;
 	return 0;
@@ -3006,6 +3095,11 @@ int FS_fclose(fshandle_t *fh)
 	if (!fh) {
 		errno = EBADF;
 		return -1;
+	}
+	if (fh->data) {
+		free(fh->data);
+		fh->data = NULL;
+		return 0;
 	}
 	return fclose(fh->file);
 }
@@ -3022,8 +3116,10 @@ long FS_ftell(fshandle_t *fh)
 void FS_rewind(fshandle_t *fh)
 {
 	if (!fh) return;
-	clearerr(fh->file);
-	fseek(fh->file, fh->start, SEEK_SET);
+	if (!fh->data) {
+		clearerr(fh->file);
+		fseek(fh->file, fh->start, SEEK_SET);
+	}
 	fh->pos = 0;
 }
 
@@ -3044,6 +3140,8 @@ int FS_ferror(fshandle_t *fh)
 		errno = EBADF;
 		return -1;
 	}
+	if (fh->data)	/* a memory-backed handle has no stream to fault */
+		return 0;
 	return ferror(fh->file);
 }
 
@@ -3055,6 +3153,8 @@ int FS_fgetc(fshandle_t *fh)
 	}
 	if (fh->pos >= fh->length)
 		return EOF;
+	if (fh->data)
+		return (int) fh->data[fh->pos++];
 	fh->pos += 1;
 	return fgetc(fh->file);
 }
@@ -3068,6 +3168,22 @@ char *FS_fgets(char *s, int size, fshandle_t *fh)
 
 	if (size > (fh->length - fh->pos) + 1)
 		size = (fh->length - fh->pos) + 1;
+
+	if (fh->data) {
+		/* same contract as fgets(): copy up to and including the first
+		 * newline, stop at size-1 bytes, always NUL-terminate. */
+		int i = 0;
+
+		if (size < 2)
+			return NULL;
+		while (i < size - 1 && fh->pos < fh->length) {
+			s[i] = (char) fh->data[fh->pos++];
+			if (s[i++] == '\n')
+				break;
+		}
+		s[i] = '\0';
+		return i ? s : NULL;
+	}
 
 	ret = fgets(s, size, fh->file);
 	fh->pos = ftell(fh->file) - fh->start;

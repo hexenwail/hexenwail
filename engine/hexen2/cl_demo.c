@@ -72,9 +72,9 @@ void CL_StopPlayback (void)
 	intro_playing = false;
 //	num_intro_msg = 0;
 
-	fclose (cls.demofile);
+	FS_fclose (&cls.demofh);
+	memset (&cls.demofh, 0, sizeof(cls.demofh));
 	cls.demoplayback = false;
-	cls.demofile = NULL;
 	cls.state = ca_disconnected;
 
 	// Execute end config if one exists for this demo
@@ -187,14 +187,10 @@ static int CL_GetDemoMessage (void)
 		goto skipit;
 	}
 	*/
-	fread (&net_message.cursize, 4, 1, cls.demofile);
-	if (ferror(cls.demofile))
-	{
-		Con_DPrintf("CL_GetDemoMessage: Error reading message size\n");
-		CL_StopPlayback();
-		return 0;
-	}
-	if (feof(cls.demofile))
+	/* Checked on the read count rather than through ferror/feof: a
+	 * memory-backed handle has no stream to fault, and a short read is the
+	 * same "demo ended or is truncated" answer either way. */
+	if (FS_fread (&net_message.cursize, 4, 1, &cls.demofh) != 1)
 	{
 		Con_DPrintf("CL_GetDemoMessage: EOF reached after %d messages\n", demo_msg_count);
 		CL_StopPlayback();
@@ -204,7 +200,7 @@ static int CL_GetDemoMessage (void)
 	VectorCopy (cl.mviewangles[0], cl.mviewangles[1]);
 	for (i = 0 ; i < 3 ; i++)
 	{
-		r = fread (&f, 4, 1, cls.demofile);
+		r = FS_fread (&f, 4, 1, &cls.demofh);
 		cl.mviewangles[0][i] = LittleFloat (f);
 	}
 
@@ -213,7 +209,7 @@ static int CL_GetDemoMessage (void)
 	if (net_message.cursize > MAX_MSGLEN)
 		Sys_Error ("Demo message > MAX_MSGLEN");
 
-	r = fread (net_message.data, net_message.cursize, 1, cls.demofile);
+	r = FS_fread (net_message.data, net_message.cursize, 1, &cls.demofh);
 	if (r != 1)
 	{
 		CL_StopPlayback ();
@@ -434,8 +430,7 @@ void CL_PlayDemo_f (void)
 	}
 	*/
 
-	FS_OpenFile (name, &cls.demofile, NULL);
-	if (!cls.demofile)
+	if (FS_OpenFileHandle (name, &cls.demofh, NULL) < 0)
 	{
 		Con_Printf ("ERROR: couldn't open %s\n", name);
 		cls.demonum = -1;	// stop demo loop
@@ -448,13 +443,31 @@ void CL_PlayDemo_f (void)
 // O.S.: if a space character e.g. 0x20 (' ') follows '\n',
 // fscanf skips that byte too and screws up further reads.
 //	fscanf (cls.demofile, "%i\n", &cls.forcetrack);
-	if (fscanf (cls.demofile, "%i", &cls.forcetrack) != 1 || fgetc (cls.demofile) != '\n')
 	{
-		fclose (cls.demofile);
-		cls.demofile = NULL;
-		cls.demonum = -1;	// stop demo loop
-		Con_Printf ("ERROR: demo \"%s\" is invalid\n", name);
-		return;
+		/* Hand-rolled rather than fscanf: there is no FS_fscanf, and the
+		 * comment above is right that fscanf was the wrong tool anyway.
+		 * The header is one optionally-signed integer then a newline. */
+		int	c, digits = 0, sign = 1;
+
+		cls.forcetrack = 0;
+		c = FS_fgetc (&cls.demofh);
+		if (c == '-') { sign = -1; c = FS_fgetc (&cls.demofh); }
+		while (c >= '0' && c <= '9')
+		{
+			cls.forcetrack = cls.forcetrack * 10 + (c - '0');
+			digits++;
+			c = FS_fgetc (&cls.demofh);
+		}
+		cls.forcetrack *= sign;
+
+		if (!digits || c != '\n')
+		{
+			FS_fclose (&cls.demofh);
+			memset (&cls.demofh, 0, sizeof(cls.demofh));
+			cls.demonum = -1;	// stop demo loop
+			Con_Printf ("ERROR: demo \"%s\" is invalid\n", name);
+			return;
+		}
 	}
 
 	Con_DPrintf("CL_PlayDemo_f: CD track = %d\n", cls.forcetrack);
@@ -526,7 +539,7 @@ void CL_TimeDemo_f (void)
 	Con_DPrintf("CL_TimeDemo_f: Starting timedemo '%s'\n", Cmd_Argv(1));
 
 	CL_PlayDemo_f ();
-	if (!cls.demofile)
+	if (!cls.demoplayback)
 		return;
 
 // cls.td_starttime will be grabbed at the second frame of the demo, so

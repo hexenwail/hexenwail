@@ -277,13 +277,14 @@ int S_CodecReadStream (snd_stream_t *stream, int bytes, void *buffer)
 snd_stream_t *S_CodecUtilOpen(const char *filename, snd_codec_t *codec, qboolean loop)
 {
 	snd_stream_t *stream;
-	FILE *handle;
-	qboolean pak;
+	fshandle_t fh;
 	long length;
 
-	/* Try to open the file */
-	length = FS_OpenFile(filename, &handle, NULL);
-	pak = file_from_pak;
+	/* Try to open the file.  FS_OpenFileHandle rather than FS_OpenFile: the
+	 * codecs read incrementally through the fshandle_t, and going through it
+	 * here is what lets a track come out of a deflated .pk3 entry as well as
+	 * a pak member or a loose file.  uhexen2-pzha. */
+	length = FS_OpenFileHandle(filename, &fh, NULL);
 	if (length < 0)
 	{
 		Con_DPrintf("Couldn't open %s\n", filename);
@@ -294,11 +295,8 @@ snd_stream_t *S_CodecUtilOpen(const char *filename, snd_codec_t *codec, qboolean
 	stream = (snd_stream_t *) Z_Malloc(sizeof(snd_stream_t), Z_MAINZONE);
 	stream->codec = codec;
 	stream->loop = loop;
-	stream->fh.file = handle;
-	stream->fh.start = ftell(handle);
-	stream->fh.pos = 0;
-	stream->fh.length = length;
-	stream->fh.pak = stream->pak = pak;
+	stream->fh = fh;
+	stream->pak = fh.pak;
 	q_strlcpy(stream->name, filename, MAX_QPATH);
 
 	return stream;
@@ -306,7 +304,10 @@ snd_stream_t *S_CodecUtilOpen(const char *filename, snd_codec_t *codec, qboolean
 
 void S_CodecUtilClose(snd_stream_t **stream)
 {
-	fclose((*stream)->fh.file);
+	/* FS_fclose, not fclose: a stream opened out of a deflated .pk3 entry is
+	 * memory-backed, so fh.file is NULL and the inflated buffer is what has to
+	 * be released.  uhexen2-pzha. */
+	FS_fclose(&(*stream)->fh);
 	Z_Free(*stream);
 	*stream = NULL;
 }

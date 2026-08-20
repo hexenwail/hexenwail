@@ -79,20 +79,9 @@ static void ShowTrackError (track_state_t *ts, const char *msg)
 
 static int MID2STREAM_fileopen(const char *filename)
 {
-	FILE *handle;
-	qboolean pak;
-	long length;
-
-	length = FS_OpenFile(filename, &handle, NULL);
-	pak = file_from_pak;
-	if (length < 0)
+	if (FS_OpenFileHandle(filename, &midi_fh, NULL) < 0)
 		return -1;
 
-	midi_fh.file = handle;
-	midi_fh.start = ftell(handle);
-	midi_fh.pos = 0;
-	midi_fh.length = length;
-	midi_fh.pak = pak;
 	return 0;
 }
 

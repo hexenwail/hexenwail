@@ -29,7 +29,7 @@ Returns allocated buffer, caller must free.
 */
 byte *IMG_LoadPCX (const char *filename, int *width, int *height)
 {
-	FILE	*f;
+	fshandle_t	fh;
 	byte	*rawdata;
 	byte	*palette;
 	byte	*rgba;
@@ -40,25 +40,25 @@ byte *IMG_LoadPCX (const char *filename, int *width, int *height)
 	int	run_length;
 	int		src, dst;
 
-	size = FS_OpenFile_Silent (filename, &f, NULL);
-	if (!f || size < 0)
+	size = FS_OpenFileHandle_Silent (filename, &fh, NULL);
+	if (size < 0)
 		return NULL;
 
 	if (size < 128 + 769)	// minimum: header + 1 pixel + palette
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
 	rawdata = (byte *) malloc (size);
 	if (!rawdata)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
-	fread (rawdata, 1, size, f);
-	fclose (f);
+	FS_fread(rawdata, 1, size, &fh);
+	FS_fclose(&fh);
 
 	// Verify PCX header
 	if (rawdata[0] != 0x0A)
@@ -235,7 +235,7 @@ Returns allocated buffer, caller must free.
 */
 byte *IMG_LoadTGA (const char *filename, int *width, int *height, int *has_alpha)
 {
-	FILE	*f;
+	fshandle_t	fh;
 	byte	*data;
 	byte	*rgba = NULL;
 	int		x, y, i;
@@ -247,33 +247,33 @@ byte *IMG_LoadTGA (const char *filename, int *width, int *height, int *has_alpha
 	int		flip_vert;
 	long	size;
 
-	size = FS_OpenFile_Silent (filename, &f, NULL);
-	if (!f || size < 0)
+	size = FS_OpenFileHandle_Silent (filename, &fh, NULL);
+	if (size < 0)
 		return NULL;
 
 	if (size < 18)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
 	// Read TGA header
-	id_len = fgetc (f);
-	cmap_type = fgetc (f);
-	image_type = fgetc (f);
+	id_len = FS_fgetc(&fh);
+	cmap_type = FS_fgetc(&fh);
+	image_type = FS_fgetc(&fh);
 
 	// Skip colormap spec (5 bytes) and origin (4 bytes) = 9 bytes total
-	fseek (f, 9, SEEK_CUR);
+	FS_fseek(&fh, 9, SEEK_CUR);
 
 	// Now at byte 12: width, height, bpp, descriptor
-	img_w = fgetc (f); img_w |= fgetc (f) << 8;
-	img_h = fgetc (f); img_h |= fgetc (f) << 8;
-	bpp = fgetc (f);
-	descriptor = fgetc (f);
+	img_w = FS_fgetc(&fh); img_w |= FS_fgetc(&fh) << 8;
+	img_h = FS_fgetc(&fh); img_h |= FS_fgetc(&fh) << 8;
+	bpp = FS_fgetc(&fh);
+	descriptor = FS_fgetc(&fh);
 
 	if (img_w <= 0 || img_h <= 0 || img_w > 4096 || img_h > 4096)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
@@ -283,13 +283,13 @@ byte *IMG_LoadTGA (const char *filename, int *width, int *height, int *has_alpha
 	// Check image type - support uncompressed RGB/RGBA
 	if (image_type != 2)	// 2 = uncompressed RGB
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
 	if (bpp != 24 && bpp != 32)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
@@ -299,16 +299,16 @@ byte *IMG_LoadTGA (const char *filename, int *width, int *height, int *has_alpha
 	data = (byte *) malloc (img_w * img_h * pixel_size);
 	if (!data)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
 	// Skip image ID and colormap if present
 	if (id_len > 0)
-		fseek (f, id_len, SEEK_CUR);
+		FS_fseek(&fh, id_len, SEEK_CUR);
 
-	fread (data, 1, img_w * img_h * pixel_size, f);
-	fclose (f);
+	FS_fread(data, 1, img_w * img_h * pixel_size, &fh);
+	FS_fclose(&fh);
 
 	// Convert to RGBA
 	rgba = (byte *) malloc (img_w * img_h * 4);
@@ -352,23 +352,23 @@ byte *IMG_LoadPNG (const char *filename, int *width, int *height, int *has_alpha
 {
 	int		channels;
 	byte	*rgba;
-	FILE	*f;
+	fshandle_t	fh;
 	byte	*file_data;
 	long	size;
 
-	size = FS_OpenFile_Silent (filename, &f, NULL);
-	if (!f || size < 0)
+	size = FS_OpenFileHandle_Silent (filename, &fh, NULL);
+	if (size < 0)
 		return NULL;
 
 	file_data = (byte *) malloc (size);
 	if (!file_data)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
-	fread (file_data, 1, size, f);
-	fclose (f);
+	FS_fread(file_data, 1, size, &fh);
+	FS_fclose(&fh);
 
 	rgba = stbi_load_from_memory (file_data, size, width, height, &channels, 4);
 	free (file_data);

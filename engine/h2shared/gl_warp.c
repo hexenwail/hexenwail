@@ -1039,7 +1039,7 @@ static byte	*pcx_rgb;
 LoadPCX
 ============
 */
-void LoadPCX (FILE *f)
+void LoadPCX (fshandle_t *f)
 {
 	pcx_t	*pcx, pcxbuf;
 	byte	palette[768];
@@ -1051,7 +1051,7 @@ void LoadPCX (FILE *f)
 //
 // parse the PCX file
 //
-	fread (&pcxbuf, 1, sizeof(pcxbuf), f);
+	FS_fread(&pcxbuf, 1, sizeof(pcxbuf), f);
 
 	pcx = &pcxbuf;
 
@@ -1067,10 +1067,10 @@ void LoadPCX (FILE *f)
 	}
 
 	// seek to palette
-	fseek (f, -768, SEEK_END);
-	fread (palette, 1, 768, f);
+	FS_fseek(f, -768, SEEK_END);
+	FS_fread(palette, 1, 768, f);
 
-	fseek (f, sizeof(pcxbuf) - 4, SEEK_SET);
+	FS_fseek(f, sizeof(pcxbuf) - 4, SEEK_SET);
 
 	count = (pcx->xmax + 1) * (pcx->ymax + 1);
 	pcx_rgb = Hunk_AllocName(count * 4, "pcxfile_data");
@@ -1080,12 +1080,12 @@ void LoadPCX (FILE *f)
 		pix = pcx_rgb + 4*y*(pcx->xmax + 1);
 		for (x = 0 ; x <= pcx->ymax ; )
 		{
-			dataByte = fgetc(f);
+			dataByte = FS_fgetc(f);
 
 			if ((dataByte & 0xC0) == 0xC0)
 			{
 				runLength = dataByte & 0x3F;
-				dataByte = fgetc(f);
+				dataByte = FS_fgetc(f);
 			}
 			else
 				runLength = 1;
@@ -1123,24 +1123,24 @@ typedef struct _TargaHeader
 static TargaHeader	targa_header;
 static byte		*targa_rgba;
 
-int fgetLittleShort (FILE *f)
+static int fgetLittleShort (fshandle_t *f)
 {
 	byte	b1, b2;
 
-	b1 = fgetc(f);
-	b2 = fgetc(f);
+	b1 = FS_fgetc(f);
+	b2 = FS_fgetc(f);
 
 	return (short)(b1 + b2*256);
 }
 
-int fgetLittleLong (FILE *f)
+static int fgetLittleLong (fshandle_t *f)
 {
 	byte	b1, b2, b3, b4;
 
-	b1 = fgetc(f);
-	b2 = fgetc(f);
-	b3 = fgetc(f);
-	b4 = fgetc(f);
+	b1 = FS_fgetc(f);
+	b2 = FS_fgetc(f);
+	b3 = FS_fgetc(f);
+	b4 = FS_fgetc(f);
 
 	return b1 + (b2<<8) + (b3<<16) + (b4<<24);
 }
@@ -1151,25 +1151,25 @@ int fgetLittleLong (FILE *f)
 LoadTGA
 =============
 */
-void LoadTGA (FILE *fin)
+void LoadTGA (fshandle_t *fin)
 {
 	int		columns, rows, numPixels;
 	byte	*pixbuf;
 	int		row, column;
 
-	targa_header.id_length = fgetc(fin);
-	targa_header.colormap_type = fgetc(fin);
-	targa_header.image_type = fgetc(fin);
+	targa_header.id_length = FS_fgetc(fin);
+	targa_header.colormap_type = FS_fgetc(fin);
+	targa_header.image_type = FS_fgetc(fin);
 
 	targa_header.colormap_index = fgetLittleShort(fin);
 	targa_header.colormap_length = fgetLittleShort(fin);
-	targa_header.colormap_size = fgetc(fin);
+	targa_header.colormap_size = FS_fgetc(fin);
 	targa_header.x_origin = fgetLittleShort(fin);
 	targa_header.y_origin = fgetLittleShort(fin);
 	targa_header.width = fgetLittleShort(fin);
 	targa_header.height = fgetLittleShort(fin);
-	targa_header.pixel_size = fgetc(fin);
-	targa_header.attributes = fgetc(fin);
+	targa_header.pixel_size = FS_fgetc(fin);
+	targa_header.attributes = FS_fgetc(fin);
 
 	if (targa_header.image_type != 2 && targa_header.image_type != 10)
 		Sys_Error ("%s: Only type 2 and 10 targa RGB images supported", __thisfunc__);
@@ -1185,7 +1185,7 @@ void LoadTGA (FILE *fin)
 	targa_rgba = Hunk_AllocName(numPixels * 4, "tgafile_data");
 
 	if (targa_header.id_length != 0)	// skip TARGA image comment
-		fseek(fin, targa_header.id_length, SEEK_CUR);
+		FS_fseek(fin, targa_header.id_length, SEEK_CUR);
 
 	if (targa_header.image_type == 2)
 	{
@@ -1199,19 +1199,19 @@ void LoadTGA (FILE *fin)
 				switch (targa_header.pixel_size)
 				{
 				case 24:
-					blue = getc(fin);
-					green = getc(fin);
-					red = getc(fin);
+					blue = FS_fgetc(fin);
+					green = FS_fgetc(fin);
+					red = FS_fgetc(fin);
 					*pixbuf++ = red;
 					*pixbuf++ = green;
 					*pixbuf++ = blue;
 					*pixbuf++ = 255;
 					break;
 				case 32:
-					blue = getc(fin);
-					green = getc(fin);
-					red = getc(fin);
-					alphabyte = getc(fin);
+					blue = FS_fgetc(fin);
+					green = FS_fgetc(fin);
+					red = FS_fgetc(fin);
+					alphabyte = FS_fgetc(fin);
 					*pixbuf++ = red;
 					*pixbuf++ = green;
 					*pixbuf++ = blue;
@@ -1231,23 +1231,23 @@ void LoadTGA (FILE *fin)
 			pixbuf = targa_rgba + row*columns*4;
 			for (column = 0 ; column < columns ; )
 			{
-				packetHeader = getc(fin);
+				packetHeader = FS_fgetc(fin);
 				packetSize = 1 + (packetHeader & 0x7f);
 				if (packetHeader & 0x80)
 				{	// run-length packet
 					switch (targa_header.pixel_size)
 					{
 					case 24:
-						blue = getc(fin);
-						green = getc(fin);
-						red = getc(fin);
+						blue = FS_fgetc(fin);
+						green = FS_fgetc(fin);
+						red = FS_fgetc(fin);
 						alphabyte = 255;
 						break;
 					case 32:
-						blue = getc(fin);
-						green = getc(fin);
-						red = getc(fin);
-						alphabyte = getc(fin);
+						blue = FS_fgetc(fin);
+						green = FS_fgetc(fin);
+						red = FS_fgetc(fin);
+						alphabyte = FS_fgetc(fin);
 						break;
 					}
 
@@ -1276,19 +1276,19 @@ void LoadTGA (FILE *fin)
 						switch (targa_header.pixel_size)
 						{
 						case 24:
-							blue = getc(fin);
-							green = getc(fin);
-							red = getc(fin);
+							blue = FS_fgetc(fin);
+							green = FS_fgetc(fin);
+							red = FS_fgetc(fin);
 							*pixbuf++ = red;
 							*pixbuf++ = green;
 							*pixbuf++ = blue;
 							*pixbuf++ = 255;
 							break;
 						case 32:
-							blue = getc(fin);
-							green = getc(fin);
-							red = getc(fin);
-							alphabyte = getc(fin);
+							blue = FS_fgetc(fin);
+							green = FS_fgetc(fin);
+							red = FS_fgetc(fin);
+							alphabyte = FS_fgetc(fin);
 							*pixbuf++ = red;
 							*pixbuf++ = green;
 							*pixbuf++ = blue;
@@ -1312,7 +1312,7 @@ void LoadTGA (FILE *fin)
 		}
 	}
 
-	fclose(fin);
+	FS_fclose(fin);
 }
 
 
@@ -1327,22 +1327,21 @@ static char	*suf[6] = {"rt", "bk", "lf", "ft", "up", "dn"};
 void R_LoadSkys (void)
 {
 	int	i, mark;
-	FILE	*f;
+	fshandle_t	fh;
 	char	name[64], texname[20];
 
 	for (i = 0; i < 6; i++)
 	{
 		q_snprintf (name, sizeof(name), "gfx/env/bkgtst%s.tga", suf[i]);
-		FS_OpenFile (name, &f, NULL);
-		if (!f)
+		if (FS_OpenFileHandle (name, &fh, NULL) < 0)
 		{
 			Con_Printf ("Couldn't load %s\n", name);
 			continue;
 		}
 
 		mark = Hunk_LowMark();
-		LoadTGA (f);
-	//	LoadPCX (f);
+		LoadTGA (&fh);
+	//	LoadPCX (&fh);
 
 		q_snprintf(texname, sizeof(texname), "skybox%i", i);
 		sky_tex[i] = GL_LoadTexture(texname, targa_rgba, 256, 256, TEX_RGBA|TEX_LINEAR);
