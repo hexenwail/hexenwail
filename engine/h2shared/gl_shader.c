@@ -21,6 +21,7 @@ glprogram_t	gl_shader_world;
 glprogram_t	gl_shader_world_opaque;	/* uhexen2-5c6r: early_fragment_tests, no discard */
 glprogram_t	gl_shader_alias;
 glprogram_t	gl_shader_skeletal;
+glprogram_t	gl_shader_skeletal_oit;
 glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
@@ -292,6 +293,13 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
 	p->u_soft_params      = glGetUniformLocation_fp(p->program, "u_soft_params");
+	/* Skeletal-only (uhexen2-7ok0.3); -1 on every other program. */
+	p->u_pose_base        = glGetUniformLocation_fp(p->program, "u_pose_base");
+	p->u_pose_base2       = glGetUniformLocation_fp(p->program, "u_pose_base2");
+	p->u_skel_blend       = glGetUniformLocation_fp(p->program, "u_skel_blend");
+	p->u_shadevector      = glGetUniformLocation_fp(p->program, "u_shadevector");
+	p->u_lightcolor       = glGetUniformLocation_fp(p->program, "u_lightcolor");
+	p->u_fullbright       = glGetUniformLocation_fp(p->program, "u_fullbright");
 }
 
 /* ------------------------------------------------------------------ */
@@ -725,7 +733,25 @@ static const char sskeletal_vert[] =
 	"uniform mat4 u_mvp;\n"
 	"uniform mat4 u_modelview;\n"
 	"uniform mat4 u_alias_model;\n"	/* see salias_vert (uhexen2-0gn3) */
+	/* Pose selection.  Two bases rather than one so an MD5 model lerps
+	 * between keyframes like every other alias model does: u_pose_base is
+	 * the pose R_AliasResolveLerp resolved as current, u_pose_base2 the one
+	 * it is blending away from, and u_skel_blend runs 0..1 from the latter
+	 * to the former.  Both are already multiplied by numbones CPU-side.
+	 * uhexen2-7ok0.3. */
 	"uniform int u_pose_base;\n"
+	"uniform int u_pose_base2;\n"
+	"uniform float u_skel_blend;\n"
+	/* Lighting.  The legacy path looks up shadedots[lightnormalindex],
+	 * a table of `1.0 + dot(normal, shadevector)` with negative dots scaled
+	 * by 0.3.  A skinned vertex has a real normal rather than an index into
+	 * Quake's 162-normal set, so evaluate the same expression directly and
+	 * the two paths agree on the same model to within the table's
+	 * quantization.  u_shadevector is in MODEL space, matching the
+	 * -e->angles[1] construction in R_DrawAliasModel. */
+	"uniform vec3 u_shadevector;\n"
+	"uniform vec4 u_lightcolor;\n"	/* rgb = light (tint + scale folded in), a = entity alpha */
+	"uniform float u_fullbright;\n"	/* 1.0 during the additive fullbright re-draw */
 	"\n"
 	"out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
@@ -733,18 +759,33 @@ static const char sskeletal_vert[] =
 	"out vec2 v_worldxy;\n"
 	"invariant gl_Position;\n"
 	"\n"
+	/* Bone matrix for influence `i`, already blended across the two poses.
+	 * mat3x4 supports scalar multiply and matrix add, so the blend is a
+	 * plain linear combination -- mix() is genType-only and does not accept
+	 * matrices.  Linear blending of two adjacent keyframes' skinning
+	 * matrices is the standard approximation and is what the equivalent
+	 * vertex-lerp does on the trivertx path. */
+	"mat3x4 BonePose(uint i) {\n"
+	"    return bones[u_pose_base  + int(i)] * u_skel_blend +\n"
+	"           bones[u_pose_base2 + int(i)] * (1.0 - u_skel_blend);\n"
+	"}\n"
+	"\n"
 	"void main() {\n"
-	"    mat3x4 blend = bones[u_pose_base + int(a_indices.x)] * a_weights.x;\n"
-	"    if (a_weights.y > 0.01) blend += bones[u_pose_base + int(a_indices.y)] * a_weights.y;\n"
-	"    if (a_weights.z > 0.01) blend += bones[u_pose_base + int(a_indices.z)] * a_weights.z;\n"
-	"    if (a_weights.w > 0.01) blend += bones[u_pose_base + int(a_indices.w)] * a_weights.w;\n"
+	"    mat3x4 blend = BonePose(a_indices.x) * a_weights.x;\n"
+	"    if (a_weights.y > 0.0) blend += BonePose(a_indices.y) * a_weights.y;\n"
+	"    if (a_weights.z > 0.0) blend += BonePose(a_indices.z) * a_weights.z;\n"
+	"    if (a_weights.w > 0.0) blend += BonePose(a_indices.w) * a_weights.w;\n"
 	"\n"
 	"    mat4x3 mat_3x4 = transpose(blend);\n"
 	"    vec3 skinned_pos = mat_3x4 * vec4(a_position, 1.0);\n"
 	"    vec3 skinned_normal = normalize(mat_3x4 * vec4(a_normal.xyz, 0.0));\n"
 	"\n"
+	"    float d = dot(skinned_normal, u_shadevector);\n"
+	"    if (d < 0.0) d *= 0.3;\n"
+	"    vec3 lit = u_lightcolor.rgb * (1.0 + d);\n"
+	"\n"
 	"    v_texcoord = a_texcoord;\n"
-	"    v_color = vec4(skinned_normal * 0.5 + 0.5, 1.0);\n"
+	"    v_color = vec4(mix(lit, vec3(1.0), u_fullbright), u_lightcolor.a);\n"
 	"    v_worldxy = (u_alias_model * vec4(skinned_pos, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(skinned_pos, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
@@ -1307,6 +1348,7 @@ void GL_Shaders_Init (void)
 #ifndef USE_GLES
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
 	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
+	GL_InitOITProgram(&gl_shader_skeletal_oit, "skeletal", sskeletal_vert, salias_frag);
 	GL_InitOITProgram(&gl_shader_particle_oit, "particle", spart_vert,  spart_frag);
 #endif
 
@@ -1344,7 +1386,8 @@ void GL_Shaders_Shutdown (void)
 		&gl_shader_world_opaque,
 		&gl_shader_alias, &gl_shader_skeletal, &gl_shader_particle, &gl_shader_sky,
 		&gl_shader_particle_gpu.base,
-		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_particle_oit
+		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_skeletal_oit,
+		&gl_shader_particle_oit
 	};
 	int i;
 

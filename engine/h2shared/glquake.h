@@ -508,6 +508,13 @@ GLuint GL_LoadTexture (const char *identifier, byte *data,
 #define	TEX_FENCE		(1 << 16)	/* Fence texture (binary transparency)		*/
 #define	TEX_SPECIAL_TRANS	(1 << 15)	/* Translucency through the particle table	*/
 #define	TEX_EMBEDDED_MIPS	(1 << 17)	/* Data contains all 4 BSP mip levels		*/
+/* Never pick a block-compressed internal format for this texture, whatever
+ * gl_compress_textures says.  BC7 is a lossy 4x4-block codec: on text glyphs
+ * and HUD art the block boundaries are visible at 1:1 magnification, and on an
+ * alpha-tested cutout the interpolated alpha inside a block fringes the edge
+ * the alpha test is supposed to make crisp.  Ironwail 1011ff8 / 74d8e74;
+ * uhexen2-r7zu. */
+#define	TEX_UNCOMPRESSED	(1 << 18)
 
 /* Block-compressed internal formats, for the DDS/KTX replacement path
  * (uhexen2-0vgo.5).  Spelled out here rather than taken from the system GL

@@ -632,7 +632,8 @@ does format preference decide, and there the pre-compressed one is strictly
 better -- no CPU decode, a quarter of the VRAM, and its own mip chain.
 =================
 */
-qboolean IMG_LoadReplacement (const char *name, const char *modelname, imgreplace_t *out)
+qboolean IMG_LoadReplacement (const char *name, const char *modelname,
+			      qboolean allow_compressed, imgreplace_t *out)
 {
 	char		paths[IMG_MAX_CANDIDATES][MAX_OSPATH];
 	char		winner[MAX_OSPATH];
@@ -641,11 +642,16 @@ qboolean IMG_LoadReplacement (const char *name, const char *modelname, imgreplac
 
 	memset (out, 0, sizeof(*out));
 
+	/* A '{' name is alpha-tested by definition, so it never wants a
+	 * block-compressed source whatever the caller passed.  uhexen2-r7zu. */
+	if (is_fence)
+		allow_compressed = false;
+
 	n = IMG_BuildCandidates (name, modelname, paths);
 
 	for (i = 0; i < n; i++)
 	{
-		if (IMG_TryCompressed (paths[i], out, winner, sizeof(winner)))
+		if (allow_compressed && IMG_TryCompressed (paths[i], out, winner, sizeof(winner)))
 		{
 			if (is_fence)
 				out->has_alpha = true;
@@ -687,12 +693,16 @@ qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgre
 {
 	char	buf[MAX_QPATH];
 
+	/* Compression stays allowed on a glow sidecar even when its parent is
+	 * alpha-tested: the mask is sampled for an ADDITIVE pass, never for an
+	 * alpha test, so a block-interpolated edge dims a fringe rather than
+	 * punching a ragged hole in the silhouette.  uhexen2-r7zu. */
 	q_snprintf (buf, sizeof(buf), "%s_glow", name);
-	if (IMG_LoadReplacement (buf, modelname, out))
+	if (IMG_LoadReplacement (buf, modelname, true, out))
 		return true;
 
 	q_snprintf (buf, sizeof(buf), "%s_luma", name);
-	return IMG_LoadReplacement (buf, modelname, out);
+	return IMG_LoadReplacement (buf, modelname, true, out);
 }
 
 /*

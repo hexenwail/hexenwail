@@ -869,6 +869,133 @@ static int	lastposenum;
 
 /*
 =============
+GL_DrawAliasSkeletal -- PV_IQM (MD5mesh) draw dispatch.  uhexen2-7ok0.3.
+
+Bone-weighted skinning happens entirely in gl_shader_skeletal: the VAO built
+by GL_MakeAliasGPUMesh supplies position / normal / uv / weights / indices,
+and ssbo_bones (binding 4) supplies numposes x numbones 3x4 matrices, each
+already folded to `anim_world * inv_rest_world` by the loader.  So this
+function's whole job is state: pick the pose pair R_AliasResolveLerp
+resolved, hand the shader the same lighting and fog the immediate path would
+have applied, and issue one indexed draw.
+
+Deliberately NOT routed through GL_ImmEnd.  That path streams CPU vertices
+into the shared ring buffer and binds gl_shader_alias; there is no vertex
+data to stream here and the program is a different one.
+=============
+*/
+#ifndef USE_GLES
+static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
+				  int posenum, int prevposenum, float lerpfrac)
+{
+	alias_gpu_mesh_t	*gm;
+	const glprogram_t	*prog;
+	float			mvp[16], mv[16], model[16], caustics[2];
+	float			r, g, b;
+	byte			ColorShade;
+	extern float		r_fog_density;
+	extern float		r_fog_color[3];
+
+	gm = GL_GetAliasGPUMesh (paliashdr);
+	if (!gm || !gm->valid || !gm->ssbo_bones || !gm->num_indices)
+		return;
+
+	prog = OIT_InPass() ? &gl_shader_skeletal_oit : &gl_shader_skeletal;
+	if (!prog->program)
+		return;
+
+	lastposenum = posenum;
+
+	/* Clamp before scaling: the pose indices come from entity state the
+	 * server drives, and a stale e->currentpose from a model swap would
+	 * index past the SSBO.  Out-of-bounds SSBO reads are undefined, not
+	 * merely wrong-looking. */
+	if (posenum     < 0 || posenum     >= gm->numposes) posenum     = 0;
+	if (prevposenum < 0 || prevposenum >= gm->numposes) prevposenum = posenum;
+
+	ColorShade = e->colorshade;
+	if (ColorShade)
+	{
+		r = RTint[ColorShade];
+		g = GTint[ColorShade];
+		b = BTint[ColorShade];
+	}
+	else
+		r = g = b = 1;
+
+	GL_GetMVP (mvp);
+	GL_GetModelview (mv);
+	GL_GetAliasModelMatrix (model);
+	GL_GetAliasCaustics (caustics);
+
+	R_UseProgram (prog->program);
+
+	if (prog->u_mvp >= 0)
+		glUniformMatrix4fv_fp (prog->u_mvp, 1, GL_FALSE, mvp);
+	if (prog->u_modelview >= 0)
+		glUniformMatrix4fv_fp (prog->u_modelview, 1, GL_FALSE, mv);
+	if (prog->u_alias_model >= 0)
+		glUniformMatrix4fv_fp (prog->u_alias_model, 1, GL_FALSE, model);
+
+	if (prog->u_pose_base >= 0)
+		glUniform1i_fp (prog->u_pose_base, posenum * gm->numbones);
+	if (prog->u_pose_base2 >= 0)
+		glUniform1i_fp (prog->u_pose_base2, prevposenum * gm->numbones);
+	if (prog->u_skel_blend >= 0)
+		glUniform1f_fp (prog->u_skel_blend, lerpfrac);
+
+	if (prog->u_shadevector >= 0)
+		glUniform3f_fp (prog->u_shadevector,
+				shadevector[0], shadevector[1], shadevector[2]);
+	/* lightcolor already carries R_AliasLightScale's /200 (and the overbright
+	 * boost); the per-entity colorshade tint is the one factor the immediate
+	 * path applies per vertex, so fold it in here instead. */
+	if (prog->u_lightcolor >= 0)
+		glUniform4f_fp (prog->u_lightcolor,
+				lightcolor[0] * r, lightcolor[1] * g, lightcolor[2] * b,
+				model_constant_alpha);
+	if (prog->u_fullbright >= 0)
+		glUniform1f_fp (prog->u_fullbright, model_fullbright_pass ? 1.0f : 0.0f);
+
+	if (prog->u_fog_density >= 0)
+		glUniform1f_fp (prog->u_fog_density, r_fog_density);
+	if (prog->u_fog_color >= 0)
+		glUniform3f_fp (prog->u_fog_color,
+				r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (prog->u_alpha_threshold >= 0)
+		glUniform1f_fp (prog->u_alpha_threshold, GL_GetAlphaThreshold());
+	if (prog->u_force_opaque_alpha >= 0)
+		glUniform1f_fp (prog->u_force_opaque_alpha, GL_GetForceOpaqueAlpha());
+	if (prog->u_alias_caustics >= 0)
+		glUniform2f_fp (prog->u_alias_caustics, caustics[0], caustics[1]);
+	/* Shared with the sprite path through salias_frag; nothing here wants
+	 * the soft-particle fade, and leaving a hot value would dissolve the
+	 * model against whatever is behind it. */
+	if (prog->u_soft_params >= 0)
+		glUniform3f_fp (prog->u_soft_params, 0.0f, 0.0f, 0.0f);
+
+	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones);
+
+	glBindVertexArray_fp (gm->vao);
+	glDrawElements_fp (GL_TRIANGLES, gm->num_indices, GL_UNSIGNED_SHORT, NULL);
+	glBindVertexArray_fp (0);
+
+	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, 0);
+	R_UseProgram (0);
+}
+#else
+static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
+				  int posenum, int prevposenum, float lerpfrac)
+{
+	/* No shader storage blocks on the ES tier, so gl_shader_skeletal was
+	 * never compiled there and there is nothing to dispatch to.  See
+	 * GL_Shaders_Init and uhexen2-dfay. */
+	(void)e; (void)paliashdr; (void)posenum; (void)prevposenum; (void)lerpfrac;
+}
+#endif	/* USE_GLES */
+
+/*
+=============
 GL_DrawAliasFrame
 =============
 */
@@ -884,16 +1011,12 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 
 	/* Skeletal meshes carry no GL command list (commands == 0) and store
 	 * iqmvert_t, not trivertx_t — walking them here would treat the header
-	 * itself as a command stream.  Drop them until the IQM draw dispatch
-	 * lands (uhexen2-7ok0.3).  uhexen2-zjux. */
+	 * itself as a command stream.  R_SetupAliasFrame routes them to
+	 * GL_DrawAliasSkeletal before we get here; this stays as the backstop
+	 * for any other caller.  uhexen2-zjux / uhexen2-7ok0.3. */
 	if (paliashdr->poseverttype == PV_IQM)
 	{
-		static qboolean warned = false;
-		if (!warned)
-		{
-			warned = true;
-			Con_DPrintf ("GL_DrawAliasFrame: skipping skeletal model (no legacy draw path)\n");
-		}
+		GL_DrawAliasSkeletal (e, paliashdr, posenum, prevposenum, lerpfrac);
 		return;
 	}
 
@@ -1297,6 +1420,16 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 	float	blend;
 
 	R_AliasResolveLerp (e, paliashdr, &prevpose, &pose, &blend);
+
+	/* Skeletal models blend their two poses inside the shader, so they take
+	 * the resolved pair as-is rather than going through the three-way
+	 * GL_DrawAliasFrame call below (which exists to normalize the trivertx
+	 * path's pose selection).  uhexen2-7ok0.3. */
+	if (paliashdr->poseverttype == PV_IQM)
+	{
+		GL_DrawAliasSkeletal (e, paliashdr, pose, prevpose, blend);
+		return;
+	}
 
 	if (blend > 0.0f && blend < 1.0f && prevpose != pose)
 		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, blend);

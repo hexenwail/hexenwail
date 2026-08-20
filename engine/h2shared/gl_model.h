@@ -521,8 +521,12 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 void GL_FreeAliasGPUMeshes (void);
 extern	aliashdr_t	*pheader;
 
-/* MD5mesh skeletal model loader */
-aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size);
+/* MD5mesh skeletal model loader.  out_mins/out_maxs receive the union of the
+ * sibling .md5anim's per-frame bounds, or an all-zero box when the model has
+ * no animation (or the anim carried no bounds block) — the caller then falls
+ * back to the rest-pose vertex extent.  Both may be NULL. */
+aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size,
+                         vec3_t out_mins, vec3_t out_maxs);
 extern	stvert_t	stverts[MAXALIASVERTS];
 extern	mtriangle_t	triangles[MAXALIASTRIS];
 extern	trivertx_t	*poseverts[MAXALIASFRAMES];

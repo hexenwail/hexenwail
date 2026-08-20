@@ -1,0 +1,35 @@
+MD5Version 10
+commandline "hexenwail synthetic test"
+
+numFrames 3
+numJoints 2
+frameRate 10
+numAnimatedComponents 6
+
+hierarchy {
+	"root"	-1 0 0	//
+	"arm"	0 63 0	// root
+}
+
+bounds {
+	( -20 -20 -4 ) ( 20 20 24 )
+	( -20 -20 -4 ) ( 20 20 24 )
+	( -20 -20 -4 ) ( 20 20 24 )
+}
+
+baseframe {
+	( 0 0 0 ) ( 0 0 0 )
+	( 0 0 16 ) ( 0 0 0 )
+}
+
+frame 0 {
+	0 0 16 -0.000000 -0.000000 -0.000000
+}
+
+frame 1 {
+	0 0 16 -0.382683 -0.000000 -0.000000
+}
+
+frame 2 {
+	0 0 16 -0.707107 -0.000000 -0.000000
+}

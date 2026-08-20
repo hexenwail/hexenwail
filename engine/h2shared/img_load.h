@@ -44,9 +44,20 @@ typedef struct imgreplace_s
  * modelname is the owning model's path (e.g. "maps/demo1.bsp") and may be
  * NULL; it only selects the per-map search directory.
  *
+ * Pass allow_compressed = false for a texture the engine will alpha-test.
+ * BC1/BC3/BC7 interpolate alpha inside each 4x4 block, so a cutout mask comes
+ * back out of the codec with intermediate values along every edge and the
+ * alpha test cuts a ragged line through them -- the fringing Ironwail 1011ff8
+ * and 74d8e74 avoid by never compressing these.  The engine cannot re-encode
+ * what the pack shipped, so the only lever is to decline the container and
+ * take the decoded image instead; that decision has to happen here, because
+ * this is the last point where the decoded alternative is still reachable.
+ * A '{' fence name is recognized without being told.  uhexen2-r7zu.
+ *
  * Returns false and leaves *out untouched when nothing is on disk.
  */
-qboolean IMG_LoadReplacement (const char *name, const char *modelname, imgreplace_t *out);
+qboolean IMG_LoadReplacement (const char *name, const char *modelname,
+			      qboolean allow_compressed, imgreplace_t *out);
 
 /* Same, for the fullbright/glow sidecar of a texture: <name>_glow, then
  * <name>_luma.  Kept separate so callers do not have to build the suffix. */

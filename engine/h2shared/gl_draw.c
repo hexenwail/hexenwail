@@ -59,6 +59,11 @@ static cvar_t	r_embeddedmipmaps = {"r_embeddedmipmaps", "0", CVAR_ARCHIVE};
 static cvar_t	gl_constretch = {"gl_constretch", "0", CVAR_ARCHIVE};
 static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
 cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "8", CVAR_ARCHIVE};
+/* Compress engine-generated textures to BC7 on upload.  Default off, matching
+ * Ironwail: the codec is lossy, the driver does the encoding at load time (so
+ * it costs startup for a VRAM win rather than the other way round), and the
+ * quality varies by driver.  uhexen2-8dks. */
+cvar_t	gl_compress_textures = {"gl_compress_textures", "0", CVAR_ARCHIVE};
 /* Per-texture LOD bias for mipmapped textures (uhexen2-dax2).  Numeric
  * value applied directly; the special string "auto" scales by current
  * MSAA sample count: 0/1 → 0, 2x → -0.25, 4x → -0.5, 8x → -0.75,
@@ -222,7 +227,7 @@ qpic_t *Draw_PicFromFile (const char *name)
 		ext_data = IMG_LoadExternalTexture (extname, &ext_w, &ext_h, &has_alpha);
 		if (ext_data)
 		{
-			unsigned int flags = TEX_RGBA | TEX_NEAREST;
+			unsigned int flags = TEX_RGBA | TEX_NEAREST | TEX_UNCOMPRESSED;
 			if (has_alpha)
 				flags |= TEX_ALPHA;
 
@@ -320,7 +325,7 @@ qpic_t	*Draw_CachePic (const char *path)
 		ext_data = IMG_LoadExternalTexture (extname, &ext_w, &ext_h, &has_alpha);
 		if (ext_data)
 		{
-			unsigned int flags = TEX_RGBA | TEX_NEAREST;
+			unsigned int flags = TEX_RGBA | TEX_NEAREST | TEX_UNCOMPRESSED;
 			if (has_alpha)
 				flags |= TEX_ALPHA;
 
@@ -725,6 +730,7 @@ void Draw_Init (void)
 		gl_texturemode.string = gl_texmodes[gl_filter_idx].name;
 		Cvar_RegisterVariable (&gl_texturemode);
 		Cvar_RegisterVariable (&gl_texture_anisotropy);
+		Cvar_RegisterVariable (&gl_compress_textures);
 		Cvar_RegisterVariable (&gl_lodbias);
 		Cvar_RegisterVariable (&scr_sbarscale);
 		Cvar_RegisterVariable (&scr_menuscale);
@@ -804,7 +810,7 @@ void Draw_Init (void)
 			chars[i] = 255;	// proper transparent color
 	}
 	char_texture = GL_LoadTexture ("charset", chars, CONCHARS_W, CONCHARS_H,
-				       TEX_ALPHA|TEX_NEAREST);
+				       TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
 	/* Set CLAMP_TO_EDGE on charset atlas to prevent edge sampling artifacts */
 	GL_Bind (char_texture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -817,7 +823,8 @@ void Draw_Init (void)
 		if (chars[i] == 0)
 			chars[i] = 255;	// proper transparent color
 	}
-	char_smalltexture = GL_LoadTexture ("smallcharset", chars, 128, 32, TEX_ALPHA|TEX_NEAREST);
+	char_smalltexture = GL_LoadTexture ("smallcharset", chars, 128, 32,
+					    TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
 	GL_Bind (char_smalltexture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -833,7 +840,8 @@ void Draw_Init (void)
 		if (p->data[i] == 0)
 			p->data[i] = 255;	// proper transparent color
 	}
-	char_menufonttexture = GL_LoadTexture ("menufont", p->data, p->width, p->height, TEX_ALPHA|TEX_LINEAR);
+	char_menufonttexture = GL_LoadTexture ("menufont", p->data, p->width, p->height,
+					       TEX_ALPHA|TEX_LINEAR|TEX_UNCOMPRESSED);
 	GL_Bind (char_menufonttexture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -842,7 +850,8 @@ void Draw_Init (void)
 	p = (qpic_t *)FS_LoadTempFile ("gfx/menu/conback.lmp", NULL);
 	Draw_PicCheckError (p, "gfx/menu/conback.lmp");
 	SwapPic (p);
-	conback = GL_LoadTexture ("conback", p->data, p->width, p->height, TEX_LINEAR);
+	conback = GL_LoadTexture ("conback", p->data, p->width, p->height,
+				  TEX_LINEAR|TEX_UNCOMPRESSED);
 
 	// load the backtile
 	p = (qpic_t *)FS_LoadTempFile ("gfx/menu/backtile.lmp", NULL);
@@ -2151,6 +2160,49 @@ static void GL_MipMap (const byte *in, byte *out, int *width, int *height, int d
 
 /*
 ===============
+GL_InternalFormat
+
+Internal format for an engine-generated texture: BC7 when compression is on
+and this texture is eligible, otherwise the caller's uncompressed choice.
+The driver does the encoding -- we hand it ordinary RGBA and it compresses --
+so nothing else about the upload changes.
+
+Exemptions, following Ironwail 1011ff8 and 74d8e74 (uhexen2-r7zu):
+
+  - Alpha-tested skins (TEX_FENCE / TEX_HOLEY).  BC7 interpolates alpha
+    within each 4x4 block, so the binary mask GL_Upload32 works to keep
+    crisp -- it re-binarizes alpha at every mip level for exactly this
+    reason -- comes back out of the codec with intermediate values along
+    every edge, and the alpha test then cuts a ragged line through them.
+    Checked here rather than at the call sites so a new cutout caller
+    cannot forget the flag.
+
+  - 2D and HUD art (TEX_UNCOMPRESSED, set by the conchars / menu font /
+    conback loaders).  These are drawn unscaled at 1:1, where block
+    artifacts are not hidden by minification the way a world texture's are.
+
+  - Lightmaps never reach this function; gl_rsurf.c uploads them directly
+    with lightmap_internalformat.
+
+BC7 is core GL 4.2 and this engine requires 4.3, so gl_have_bptc is true on
+any context that got this far -- but it is still checked, because the ES tier
+shares this file and has no BPTC at all.
+===============
+*/
+static int GL_InternalFormat (const gltexture_t *glt, int uncompressed)
+{
+	if (!gl_compress_textures.value)
+		return uncompressed;
+	if (!gl_have_bptc)
+		return uncompressed;
+	if (glt->flags & (TEX_UNCOMPRESSED | TEX_FENCE | TEX_HOLEY))
+		return uncompressed;
+
+	return GL_COMPRESSED_RGBA_BPTC_UNORM;
+}
+
+/*
+===============
 GL_Upload32
 ===============
 */
@@ -2295,6 +2347,11 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 	// some Mesa/Intel drivers. GL_RGBA8 explicitly requires 8-bit RGBA.
 	if (glt->flags & (TEX_FENCE | TEX_HOLEY))
 		samples = 0x8058; /* GL_RGBA8 */
+
+	/* After the alpha-tested override, not before: GL_InternalFormat
+	 * exempts those textures anyway, so the order only matters if that
+	 * ever changes -- and this way the exemption wins either way. */
+	samples = GL_InternalFormat (glt, samples);
 
 	if (scaled_width == glt->width && scaled_height == glt->height)
 	{
@@ -2497,7 +2554,7 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	unsigned int	*conv;
 	int		mark;
 
-	samples = (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format;
+	samples = GL_InternalFormat (glt, (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format);
 	start_mip = gl_picmip.integer;
 	if (start_mip < 0) start_mip = 0;
 	if (start_mip > 3) start_mip = 3;
@@ -2952,6 +3009,11 @@ GL_LoadPicTexture
 */
 GLuint GL_LoadPicTexture (qpic_t *pic)
 {
-	return GL_LoadTexture ("", pic->data, pic->width, pic->height, TEX_ALPHA|TEX_NEAREST);
+	/* Every HUD/menu pic funnels through here, and all of them are drawn
+	 * unscaled -- so they get the same compression exemption the named 2D
+	 * textures above do.  Ironwail's commits name only conchars and
+	 * conback, but the reason applies to the whole 2D layer. */
+	return GL_LoadTexture ("", pic->data, pic->width, pic->height,
+			       TEX_ALPHA|TEX_NEAREST|TEX_UNCOMPRESSED);
 }
 
