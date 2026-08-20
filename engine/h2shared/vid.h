@@ -121,13 +121,13 @@ void VID_HandlePause (qboolean paused);
 void VID_ToggleFullscreen (void);	// from Steven
 // toggles between windowed/fullscreen modes. for unix/sdl
 
-#if defined(GLQUAKE)
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 void VID_ChangeConsize (int dir);
 // changes effective console size. callback for the opengl features menu
 
 float VID_ReportConsize(void);
 // returns console size scale for the opengl features menu.
-#endif	/* ! GLQUAKE */
+#endif	/* GLQUAKE || WEBQUAKE */
 
 void D_ShowLoadingSize (void);
 // displays progress bars while loading a map. (not used in hexenworld.)
@@ -136,7 +136,7 @@ extern void (*vid_menudrawfn)(void);
 extern void (*vid_menukeyfn)(int key);
 // video menu function pointers
 
-#if defined(GLQUAKE)
+#if defined(GLQUAKE) || defined(WEBQUAKE)
 /* Video menu helpers for combined Display menu */
 void VID_MenuInit (void);		/* call on menu enter */
 qboolean VID_MenuNeedApply (void);	/* true if settings changed */

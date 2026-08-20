@@ -50,6 +50,31 @@ option(BUILD_DEDICATED "Also build the h2ded dedicated server" OFF)
 # route to macOS/Metal without a Mac.  uhexen2-0py6.
 option(USE_GLES "Target the OpenGL ES 3.0 render path instead of desktop GL 4.3" OFF)
 
+# Which renderer the browser build links.  Emscripten-only; ignored elsewhere.
+#
+#   webgl2   -- the shipping configuration.  Hexenwail's own GL 4.3-derived
+#               renderer compiled for the ES 3.0 tier, i.e. the desktop engine
+#               in a browser.
+#   software -- uHexen2's classic 8bpp rasterizer, presented through a WebGL2
+#               palette-LUT blit.  Restored so the original renderer stays
+#               compiled and runnable instead of only living in git history.
+#               See docs/web/SOFTWARE_RENDERER.md.
+#
+# Ported from alextnewman/hexenwail 0b1906add, which defaults to software.
+# Hexenwail's identity is Ironwail-parity GPU rendering, so webgl2 is the
+# default here and software is the opt-in alternative.
+set(WEB_RENDERER "webgl2" CACHE STRING "Web renderer: webgl2 or software")
+set_property(CACHE WEB_RENDERER PROPERTY STRINGS webgl2 software)
+if(NOT WEB_RENDERER STREQUAL "webgl2" AND NOT WEB_RENDERER STREQUAL "software")
+    message(FATAL_ERROR "WEB_RENDERER must be 'webgl2' or 'software' (got '${WEB_RENDERER}')")
+endif()
+if(EMSCRIPTEN)
+    message(STATUS "Web renderer: ${WEB_RENDERER}")
+elseif(NOT WEB_RENDERER STREQUAL "webgl2")
+    message(WARNING "WEB_RENDERER only applies to Emscripten builds - ignoring '${WEB_RENDERER}'")
+    set(WEB_RENDERER "webgl2")
+endif()
+
 # Bundled gamecode (docs/BUNDLED_GAMECODE.md).  Third and last lookup layer,
 # for distribution packagers who install the data somewhere neither
 # <exedir>/gamecode/ nor <exedir>/../share/hexenwail/ finds.  Unset by default:
@@ -131,14 +156,28 @@ endif()
 # into every target in this directory.
 if(EMSCRIPTEN)
     add_definitions(-D__EMSCRIPTEN__)
-    # The browser has no GL to dlsym: WebGL2 entry points are linked in
-    # statically, which is exactly what USE_GLES selects below.
-    set(USE_GLES ON)
-    set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE NO_SPLASHES)
+    if(WEB_RENDERER STREQUAL "software")
+        # WEBQUAKE marks the browser *platform*; WEBSOFT marks the software
+        # *renderer*.  They are separate because the shared 2D API guards in
+        # draw.h/vid.h are platform questions while the rasterizer guards are
+        # renderer questions.  SDLQUAKE stays: only the renderer is swapped,
+        # the SDL3 input/sound/system layer is the same one the desktop uses.
+        set(CLIENT_DEFINITIONS WEBQUAKE WEBSOFT SDLQUAKE NO_SPLASHES)
+    else()
+        # The browser has no GL to dlsym: WebGL2 entry points are linked in
+        # statically, which is exactly what USE_GLES selects below.
+        set(USE_GLES ON)
+        set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE NO_SPLASHES)
+    endif()
     set(USE_ALSA OFF)
     set(USE_CODEC_FLAC OFF)
     set(USE_CODEC_OPUS OFF)
     set(USE_CODEC_XMP OFF)
+    # -sUSE_SDL=3 is already on the link line, but Emscripten's SDL3 port only
+    # puts SDL3/*.h on the include path when the flag is present at *compile*
+    # time too.  Without it the SDL include search below is what has to find
+    # headers, and the only thing it can find is the host's.
+    add_compile_options(-sUSE_SDL=3)
 elseif(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
     set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE GL_DLSYM NO_SPLASHES)
@@ -200,27 +239,17 @@ if(WIN32)
     set(SDL_FOUND TRUE)
 else()
     if(EMSCRIPTEN)
-        # Emscripten: find SDL3 via both find_package and pkg-config
-        set(SDL_FOUND TRUE)  # Assume SDL3 is available
-        find_package(SDL3 QUIET)
-        if(SDL3_FOUND)
-            set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
-        else()
-            # Try pkg-config as fallback
-            find_package(PkgConfig QUIET)
-            if(PKG_CONFIG_FOUND)
-                pkg_check_modules(SDL3 QUIET sdl3)
-                if(SDL3_FOUND)
-                    set(SDL_INCLUDE_DIR ${SDL3_INCLUDE_DIRS})
-                else()
-                    message(WARNING "SDL3 not found via pkg-config, trying system paths")
-                    set(SDL_INCLUDE_DIR "/usr/include")
-                endif()
-            else()
-                message(WARNING "pkg-config not found, using system paths for SDL3")
-                set(SDL_INCLUDE_DIR "/usr/include")
-            endif()
-        endif()
+        # Emscripten ships SDL3 itself, headers and all, behind -sUSE_SDL=3.
+        # Never search for a native SDL3 here: find_package/pkg-config resolve
+        # against the *host*, and every one of the old fallbacks -- nixpkgs
+        # sdl3-dev via pkg-config, or a bare /usr/include -- puts host glibc
+        # headers into the cross-compile sysroot.  On a runner with no SDL3 at
+        # all that reached /usr/include and died in glibc's features-time64.h
+        # ("bits/wordsize.h" not found); under shell-wasm.nix it silently
+        # compiled the browser build against native SDL3 headers instead of
+        # the port's, which is the same bug wearing a hat.
+        set(SDL_FOUND TRUE)
+        set(SDL_INCLUDE_DIR "")
         set(SDL_LIBRARY "")  # Link flag is set in target_link_options (-sUSE_SDL=3)
     else()
         find_package(SDL3 QUIET)
@@ -358,6 +387,53 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/img_dds.c
 )
 
+# Classic 8bpp software renderer (WEB_RENDERER=software).  Restored verbatim
+# from the pre-GL tree; the only new files are the four adapters that bridge it
+# to the browser: r_soft_web.c (renderer-owned cvars and hooks the shared client
+# expects), draw_soft_web.c (extended 2D API on top of the 8bpp framebuffer),
+# vid_soft_web.c (framebuffer + resolution ladder) and web_canvas_gl2.c (the
+# palette-LUT presenter).  Do not reformat the restored files: their value is
+# being byte-identical to the renderer that shipped.
+set(SOFT_RENDERER_SOURCES
+    # From hexen2 (client-specific software renderer)
+    ${ENGINE_TOP}/hexen2/r_main.c
+    ${ENGINE_TOP}/hexen2/r_alias.c
+    ${ENGINE_TOP}/hexen2/r_misc.c
+    ${ENGINE_TOP}/hexen2/r_part.c
+    ${ENGINE_TOP}/hexen2/r_soft_web.c
+    # From h2shared -- scene traversal
+    ${COMMONDIR}/r_aclip.c
+    ${COMMONDIR}/r_bsp.c
+    ${COMMONDIR}/r_draw.c
+    ${COMMONDIR}/r_edge.c
+    ${COMMONDIR}/r_efrag.c
+    ${COMMONDIR}/r_light.c
+    ${COMMONDIR}/r_sky.c
+    ${COMMONDIR}/r_sprite.c
+    ${COMMONDIR}/r_surf.c
+    ${COMMONDIR}/r_vars.c
+    # From h2shared -- rasterization
+    ${COMMONDIR}/d_edge.c
+    ${COMMONDIR}/d_fill.c
+    ${COMMONDIR}/d_init.c
+    ${COMMONDIR}/d_modech.c
+    ${COMMONDIR}/d_part.c
+    ${COMMONDIR}/d_polyse.c
+    ${COMMONDIR}/d_scan.c
+    ${COMMONDIR}/d_sky.c
+    ${COMMONDIR}/d_sprite.c
+    ${COMMONDIR}/d_surf.c
+    ${COMMONDIR}/d_vars.c
+    ${COMMONDIR}/d_zpoint.c
+    # From h2shared -- 8bpp model layer and 2D
+    ${COMMONDIR}/model.c
+    ${COMMONDIR}/draw.c
+    ${COMMONDIR}/screen.c
+    # Browser adapters
+    ${COMMONDIR}/draw_soft_web.c
+    ${COMMONDIR}/web_canvas_gl2.c
+)
+
 # Client sources from hexen2
 set(CLIENT_SOURCES
     ${ENGINE_TOP}/hexen2/cl_demo.c
@@ -487,9 +563,16 @@ endif()
 # Platform-Specific Sources
 #============================================================================
 if(EMSCRIPTEN)
-    # Video / Input / System — same SDL3 backends as Unix
+    # Video / Input / System — same SDL3 backends as Unix.  The software
+    # renderer swaps only the video backend: it owns the framebuffer and the
+    # presentation canvas, but the SDL3 window, input and system layers are
+    # shared with every other target.
+    if(WEB_RENDERER STREQUAL "software")
+        list(APPEND PLATFORM_SOURCES ${COMMONDIR}/vid_soft_web.c)
+    else()
+        list(APPEND PLATFORM_SOURCES ${COMMONDIR}/gl_vidsdl.c)
+    endif()
     list(APPEND PLATFORM_SOURCES
-        ${COMMONDIR}/gl_vidsdl.c
         ${COMMONDIR}/in_sdl.c
         ${ENGINE_TOP}/hexen2/sys_unix.c
         ${COMMONDIR}/sys_sdl.c
@@ -625,8 +708,14 @@ endif()
 # Create Executable
 #============================================================================
 # Combine all sources
+if(EMSCRIPTEN AND WEB_RENDERER STREQUAL "software")
+    set(RENDERER_SOURCES ${SOFT_RENDERER_SOURCES})
+else()
+    set(RENDERER_SOURCES ${GL_RENDERER_SOURCES})
+endif()
+
 set(ALL_SOURCES
-    ${GL_RENDERER_SOURCES}
+    ${RENDERER_SOURCES}
     ${CLIENT_SOURCES}
     ${COMMON_SOURCES}
     ${SOUND_SOURCES}
@@ -638,13 +727,31 @@ set(ALL_SOURCES
 if(EMSCRIPTEN)
     set(EXECUTABLE_NAME hexenwail)
     add_executable(${EXECUTABLE_NAME} ${ALL_SOURCES})
+    # Build stamp for the PWA launcher.  web/app.js has to know which renderer
+    # is inside the .wasm so it can gate on what that renderer actually needs,
+    # and the build is the only thing that knows for certain -- sniffing it from
+    # the artifact would be guessing.  scripts/wasm-assemble-artifact.sh
+    # substitutes this into app.js.
+    file(GENERATE
+        OUTPUT ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hexenwail-renderer.txt
+        CONTENT "${WEB_RENDERER}")
     # Emscripten link flags: WebGL2, memory growth, shell template
     # For pure Nix builds, use: nix develop -f shell-wasm.nix
+    # callMain MUST stay in EXPORTED_RUNTIME_METHODS: the launcher defers main()
+    # until the user's imported paks are in the FS, and INVOKE_RUN=0 otherwise
+    # leaves no callMain wrapper for it to call at all.
     target_link_options(${EXECUTABLE_NAME} PRIVATE
         -sFULL_ES3=1
         -sALLOW_MEMORY_GROWTH=1
         -sINITIAL_MEMORY=134217728
         -sSTACK_SIZE=2097152
+        -sENVIRONMENT=web
+        -sFORCE_FILESYSTEM=1
+        -sINVOKE_RUN=0
+        -sMODULARIZE=0
+        -sNO_EXIT_RUNTIME=1
+        -sEXPORTED_FUNCTIONS=['_main','_Hexenwail_TouchKey','_Hexenwail_TouchLook','_Hexenwail_ResizeCanvas']
+        -sEXPORTED_RUNTIME_METHODS=['FS','callMain','ccall']
         -sUSE_SDL=3
         --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
     )
@@ -668,9 +775,15 @@ target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
 #============================================================================
 # Link Libraries
 #============================================================================
-# SDL is always required
-target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${SDL_LIBRARY})
-target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL_INCLUDE_DIR})
+# SDL is always required.  Both may legitimately be empty on Emscripten, where
+# SDL arrives through -sUSE_SDL=3 rather than a path; an empty entry is a hard
+# error for target_include_directories, not a no-op.
+if(SDL_LIBRARY)
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${SDL_LIBRARY})
+endif()
+if(SDL_INCLUDE_DIR)
+    target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL_INCLUDE_DIR})
+endif()
 
 # Platform-specific linking
 if(EMSCRIPTEN)

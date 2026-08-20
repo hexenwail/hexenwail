@@ -1,0 +1,92 @@
+name: 'Build the WebAssembly client and PWA artifact'
+description: >-
+  Installs a pinned Emscripten SDK (cached), runs the Node PWA tests, builds
+  the WebAssembly client in both renderer configurations and assembles the
+  static PWA artifact from the shipping (webgl2) one.  Shared by the PR "PWA /
+  WebAssembly" check and the Pages deployment so a green PR and a green deploy
+  mean the same build.
+
+inputs:
+  emsdk-version:
+    description: 'Pinned emsdk/Emscripten version to install.  Never "latest".'
+    required: true
+  dist-dir:
+    description: 'Directory to assemble the static PWA artifact into.'
+    required: false
+    default: 'dist'
+
+outputs:
+  dist-dir:
+    description: 'Directory containing the assembled PWA artifact.'
+    value: ${{ inputs.dist-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ubuntu-latest ships all three, but the runner image's contents are not a
+    # contract; naming them is what keeps a future image change from being our
+    # outage.  --no-install-recommends for the reason ci.yml's flatpak job
+    # spells out at length.
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cmake make python3
+
+    # First, and outside the emsdk cache: they take seconds and they are the
+    # only check here that fails fast.  A broken web/lib module should not
+    # cost a full Emscripten toolchain install before it says so.
+    - name: Run PWA tests
+      shell: bash
+      run: node --test web/test/*.test.js
+
+    # Compiles the engine's real GLSL through software WebGL2, so an ES 3.00
+    # regression in a shader fails here rather than as a black canvas in
+    # somebody's browser.  Also before the emsdk install: it needs only the
+    # Chrome the runner image already ships.
+    - name: Run headless WebGL2 renderer smoke test
+      shell: bash
+      run: ./scripts/webgl-smoke-test.sh
+
+    # Caching emsdk also caches its ports directory, which is where the built
+    # SDL3 port lands -- that is the expensive half.
+    - name: Cache emsdk
+      id: cache-emsdk
+      uses: actions/cache@v4
+      with:
+        path: emsdk
+        key: emsdk-${{ runner.os }}-${{ inputs.emsdk-version }}
+
+    - name: Install emsdk
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -d emsdk/.git ]; then
+          rm -rf emsdk
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git emsdk
+        fi
+        cd emsdk
+        ./emsdk install "${{ inputs.emsdk-version }}"
+        ./emsdk activate "${{ inputs.emsdk-version }}"
+
+    - name: Build WebAssembly client (webgl2 renderer, shipping default)
+      shell: bash
+      run: |
+        set -euo pipefail
+        source "$PWD/emsdk/emsdk_env.sh"
+        ./scripts/wasm-build.sh webgl2 engine/build
+
+    # The restored 8bpp software renderer is opt-in, so nothing else would ever
+    # compile it -- and a renderer that stops compiling is a renderer that has
+    # been deleted with extra steps.  Built here, into its own directory, so the
+    # artifact assembled below is unambiguously the shipping one.
+    - name: Build WebAssembly client (software renderer, regression guard)
+      shell: bash
+      run: |
+        set -euo pipefail
+        source "$PWD/emsdk/emsdk_env.sh"
+        ./scripts/wasm-build.sh software engine/build-software
+
+    - name: Assemble PWA artifact
+      shell: bash
+      run: ./scripts/wasm-assemble-artifact.sh "${{ inputs.dist-dir }}"

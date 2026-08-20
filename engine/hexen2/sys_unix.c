@@ -40,6 +40,9 @@
 #include <fnmatch.h>
 #include <time.h>
 #include <utime.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
 
 
 #define MIN_MEM_ALLOC	0x4000000	/* 64 mb */
@@ -341,6 +344,17 @@ void Sys_Error (const char *error, ...)
 
 	Host_Shutdown ();
 
+#ifdef __EMSCRIPTEN__
+	emscripten_cancel_main_loop();
+	EM_ASM({
+		const message = UTF8ToString($0);
+		dispatchEvent(new CustomEvent('hexenwailquit', { detail: { kind: 'fatal', message } }));
+		if (globalThis.HexenwailBoot && typeof globalThis.HexenwailBoot.onQuit === 'function') {
+			globalThis.HexenwailBoot.onQuit({ kind: 'fatal', message });
+		}
+	}, text);
+#endif
+
 	for (p = (const unsigned char *) text2; *p; p++)
 		putc (*p, stderr);
 	for (p = (const unsigned char *) text ; *p; p++)
@@ -367,6 +381,16 @@ void Sys_PrintTerm (const char *msgtxt)
 void Sys_Quit (void)
 {
 	Host_Shutdown();
+
+#ifdef __EMSCRIPTEN__
+	emscripten_cancel_main_loop();
+	EM_ASM({
+		dispatchEvent(new CustomEvent('hexenwailquit', { detail: { kind: 'quit' } }));
+		if (globalThis.HexenwailBoot && typeof globalThis.HexenwailBoot.onQuit === 'function') {
+			globalThis.HexenwailBoot.onQuit({ kind: 'quit' });
+		}
+	});
+#endif
 
 	exit (0);
 }

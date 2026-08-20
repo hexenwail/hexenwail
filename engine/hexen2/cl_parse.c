@@ -23,9 +23,12 @@
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#if defined(GLQUAKE)
 #include "gl_postprocess.h"
+#endif
 
-/* gl_fog.c */
+/* svc_fog handler, supplied by the active renderer: gl_fog.c on GL,
+ * r_soft_web.c in the web software build. */
 void Fog_ParseServerMessage (void);
 /* gl_sky.c */
 void Sky_LoadSkyBox (const char *name);

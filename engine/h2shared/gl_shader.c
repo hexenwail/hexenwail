@@ -1259,7 +1259,7 @@ void GL_Shaders_Init (void)
 		static const unsigned char black_pixel[4] = {0, 0, 0, 255};
 		glGenTextures_fp(1, &gl_null_fb_texture);
 		glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0,
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1275,7 +1275,7 @@ void GL_Shaders_Init (void)
 		static const unsigned char white_pixel[4] = {255, 255, 255, 255};
 		glGenTextures_fp(1, &gl_solid_white_texture);
 		glBindTexture_fp(GL_TEXTURE_2D, gl_solid_white_texture);
-		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0,
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1316,6 +1316,27 @@ void GL_Shaders_Init (void)
 	GL_AliasInst_Init();
 }
 
+/* Backs `renderer_status`.  A program that failed to link is a zero here, and
+ * on the ES tier several are deliberately never built at all -- so "disabled"
+ * and "FAILED" are different answers.  Ported from alextnewman/hexenwail
+ * d2c46f078. */
+void GL_ReportShaderStatus (void)
+{
+	Con_Printf("[RENDERER] shaders: 2d=%s flat=%s world=%s world_opaque=%s "
+		   "alias=%s particle=%s sky=%s skeletal=%s OIT=%s/%s/%s\n",
+		   gl_shader_2d.program ? "ok" : "FAILED",
+		   gl_shader_flat.program ? "ok" : "FAILED",
+		   gl_shader_world.program ? "ok" : "FAILED",
+		   gl_shader_world_opaque.program ? "ok" : "FAILED",
+		   gl_shader_alias.program ? "ok" : "FAILED",
+		   gl_shader_particle.program ? "ok" : "FAILED",
+		   gl_shader_sky.program ? "ok" : "FAILED",
+		   gl_shader_skeletal.program ? "ok" : "disabled",
+		   gl_shader_world_oit.program ? "ok" : "disabled",
+		   gl_shader_alias_oit.program ? "ok" : "disabled",
+		   gl_shader_particle_oit.program ? "ok" : "disabled");
+}
+
 void GL_Shaders_Shutdown (void)
 {
 	glprogram_t *progs[] = {
@@ -1337,4 +1358,19 @@ void GL_Shaders_Shutdown (void)
 		}
 	}
 	GL_AliasInst_Shutdown();
+
+	/* The two 1x1 sentinels GL_Shaders_Init creates are regenerated on the
+	 * next init, so leaving them bound here leaked one pair per vid_restart.
+	 * d2c46f078. */
+	if (gl_null_fb_texture)
+	{
+		glDeleteTextures_fp(1, &gl_null_fb_texture);
+		gl_null_fb_texture = 0;
+	}
+	if (gl_solid_white_texture)
+	{
+		glDeleteTextures_fp(1, &gl_solid_white_texture);
+		gl_solid_white_texture = 0;
+	}
+	currenttexture = GL_UNUSED_TEXTURE;
 }

@@ -141,8 +141,14 @@ typedef int64_t  GLint64;
 #define GL_READ_FRAMEBUFFER			0x8CA8
 #define GL_DRAW_FRAMEBUFFER			0x8CA9
 #endif
+#ifndef GL_FRAMEBUFFER_BINDING
+#define GL_FRAMEBUFFER_BINDING			0x8CA6
+#endif
 #ifndef GL_RGBA8
 #define GL_RGBA8				0x8058
+#endif
+#ifndef GL_RGB8
+#define GL_RGB8					0x8051
 #endif
 #ifndef GL_RENDERBUFFER
 #define GL_RENDERBUFFER				0x8D41
@@ -170,6 +176,9 @@ typedef int64_t  GLint64;
 #endif
 #ifndef GL_LINK_STATUS
 #define GL_LINK_STATUS				0x8B82
+#endif
+#ifndef GL_SHADING_LANGUAGE_VERSION
+#define GL_SHADING_LANGUAGE_VERSION		0x8B8C
 #endif
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE			0x812F

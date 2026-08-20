@@ -1121,7 +1121,7 @@ void Host_Init (void)
  * by sending "stuffcmds". */
 	if (cls.state != ca_dedicated)
 	{
-		Cbuf_InsertText ("exec hexen.rc\n");
+		Cbuf_InsertText (Cmd_StartupScript ());
 		if (!setjmp(host_abort))		/* in case exec fails with a longjmp(), e.g. Host_Error() */
 			Cbuf_Execute ();
 	}

@@ -1,0 +1,66 @@
+name: Pages PWA
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Pinned, and never "latest": the deploy and ci.yml's PR check have to agree
+  # on a toolchain or the check is not checking the thing that ships.  Keep
+  # the two literals in sync.  SDL3 via -sUSE_SDL=3 needs >= 3.1.73.
+  EMSDK_VERSION: '4.0.23'
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The recipe lives in .github/actions/wasm-build so ci.yml's PR check
+      # runs byte-for-byte the same one.  Inlined here, the two copies drift
+      # and the check stops meaning anything about the deploy.
+      - name: Build WebAssembly client + assemble PWA artifact
+        uses: ./.github/actions/wasm-build
+        with:
+          emsdk-version: ${{ env.EMSDK_VERSION }}
+          dist-dir: dist
+
+      # Publishing an incomplete artifact is worse than failing to publish:
+      # the old deploy stays up, the new one silently loses a module.
+      - name: Validate assembled Pages artifact
+        run: ./scripts/wasm-validate-artifact.sh dist
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Repository Settings → Pages → Source must be set to “GitHub Actions”.
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

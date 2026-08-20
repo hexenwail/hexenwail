@@ -246,6 +246,16 @@ void R_SetPolygonOffsetFill (qboolean enable, float factor, float units)
 
 void R_SetPolygonOffsetLine (qboolean enable, float factor, float units)
 {
+#ifdef USE_GLES
+	/* The ES tier has no polygon offset for line rasterization -- unlike
+	 * glBlendFunci above, which gl_func.h can stub, GL_POLYGON_OFFSET_LINE
+	 * is not even an enum in <GLES3/gl3.h>, so this has to be compiled out
+	 * rather than skipped at runtime.  Nothing calls this yet; it exists
+	 * for the desktop wireframe paths. */
+	(void) enable;
+	(void) factor;
+	(void) units;
+#else
 	if (!enable)
 	{
 		factor = 0.0f;
@@ -266,6 +276,7 @@ void R_SetPolygonOffsetLine (qboolean enable, float factor, float units)
 		rp.poly_units = units;
 		glPolygonOffset_fp (factor, units);
 	}
+#endif	/* USE_GLES */
 }
 
 /* ------------------------------------------------------------------ */

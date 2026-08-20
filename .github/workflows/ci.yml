@@ -8,6 +8,11 @@ on:
   pull_request:
     branches: [master]
 
+env:
+  # Pinned, never "latest".  Must match pages.yml: the PR check is only worth
+  # running if it uses the toolchain the deploy will use.
+  EMSDK_VERSION: '4.0.23'
+
 # Nothing here writes to the repository -- it builds, lints and throws the
 # result away.  security-scan.yml has always scoped itself this way; these
 # jobs simply never did, and inherited whatever the repository default is.
@@ -29,6 +34,39 @@ jobs:
   # build -- the one that reaches users -- ran no lint at all.
   lint:
     uses: ./.github/workflows/lint.yml
+
+  # The browser build has its own compiler, its own GL tier (USE_GLES) and its
+  # own set of things that are compile-time no-op macros rather than function
+  # pointers, so none of the seven native targets below can catch a regression
+  # in it.  Until this existed the only thing that built WASM was pages.yml,
+  # which runs on push to master -- i.e. the web client broke after merge, on
+  # the deploy, with nothing red on the PR that did it.
+  #
+  # Same composite action pages.yml uses, so this is the deploy's build minus
+  # the upload.
+  pwa:
+    name: PWA / WebAssembly
+    runs-on: ubuntu-latest
+    # Cold, this is an emsdk install plus a full engine compile; warm it is
+    # the compile alone.  A "something is stuck" bound, not a target.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build WebAssembly client + assemble PWA artifact
+        uses: ./.github/actions/wasm-build
+        with:
+          emsdk-version: ${{ env.EMSDK_VERSION }}
+          dist-dir: dist
+
+      # Assembled and checked, never uploaded -- publishing is pages.yml's job
+      # and this workflow has no pages: write to do it with.
+      - name: Validate assembled PWA artifact
+        run: ./scripts/wasm-validate-artifact.sh dist
 
   build:
     runs-on: ubuntu-latest

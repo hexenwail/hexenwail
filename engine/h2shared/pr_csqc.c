@@ -146,8 +146,12 @@ static void PF_csqc_drawsetcliparea (void)
 	float w = G_FLOAT(OFS_PARM2);
 	float h = G_FLOAT(OFS_PARM3);
 
+#if defined(GLQUAKE)
 	glEnable (GL_SCISSOR_TEST);
 	glScissor ((int)x, (int)(vid.height - y - h), (int)w, (int)h);
+#else	/* software rasterizer: the 2D layer has no scissor */
+	(void) x; (void) y; (void) w; (void) h;
+#endif
 	G_FLOAT(OFS_RETURN) = 0;
 }
 
@@ -160,7 +164,9 @@ void drawresetcliparea(void)
 */
 static void PF_csqc_drawresetcliparea (void)
 {
+#if defined(GLQUAKE)
 	glDisable (GL_SCISSOR_TEST);
+#endif
 }
 
 
