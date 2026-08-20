@@ -2507,6 +2507,23 @@ void SV_SpawnServer (const char *server, const char *startspot)
 #if !defined(SERVERONLY)
 		total_loading_size = 0;
 		loading_stage = 0;
+		/* Every caller reaches us through a SCR_BeginLoadingPlaque, which
+		 * sets scr_disabled_for_loading and makes SCR_UpdateScreen a no-op
+		 * until someone ends the plaque.  Bailing out here without ending
+		 * it left the window painting nothing at all: the "Couldn't spawn
+		 * server" line above went to a console that was never drawn, the
+		 * game looked hung, and the only way out was SCR_UpdateScreen's
+		 * 25-second watchdog, which finally re-enabled drawing and printed
+		 * "load timeout." on top.  Field-reported as a ~1 minute freeze on
+		 * `map <name>` for a map the current gamedir doesn't have.
+		 *
+		 * Note this needs the GL screen path to bite: h2shared/screen.c's
+		 * SCR_BeginLoadingPlaque still keeps vanilla's
+		 * (cls.state != ca_connected) bail, so the flag never got set
+		 * there.  gl_screen.c dropped that guard deliberately -- "callers
+		 * know when they want a plaque" -- which is what turned a silent
+		 * no-op into a visible hang.  uhexen2-h9zy */
+		SCR_EndLoadingPlaque ();
 #endif
 		return;
 	}

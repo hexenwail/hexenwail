@@ -45,6 +45,12 @@ static qboolean	menubound[MAX_KEYS];		// if true, can't be rebound while in menu
 static int	keyshift[MAX_KEYS];		// key to map to if shift held down in console
 static int	key_repeats[MAX_KEYS];	// if > 1, it is autorepeating
 static qboolean	keyreserved[MAX_KEYS];	// hardcoded, can't be rebound by the user
+/* Layout-independent defaults for consolekeys/menubound, snapshotted at the end
+ * of Key_Init.  Whichever key is bound to "toggleconsole" gets its entries
+ * overridden (see Key_UpdateToggleConsole); unbinding it restores these.
+ * uhexen2-slhi. */
+static qboolean	consolekeys_default[MAX_KEYS];
+static qboolean	menubound_default[MAX_KEYS];
 static qboolean	keydown[MAX_KEYS];
 static double	key_lastdown[MAX_KEYS];	// realtime timestamp of last key-down for each key
 static qboolean	key_doubletap_active[MAX_KEYS]; // true if doublebinding +cmd is currently active
@@ -864,6 +870,50 @@ const char *Key_KeynumToString (int keynum)
 
 /*
 ===================
+Key_IsToggleConsole
+
+True if this key's binding is the console toggle.  The console has to treat
+that key as a command rather than as text no matter which character it happens
+to produce on the user's layout -- see Key_UpdateToggleConsole.
+===================
+*/
+static qboolean Key_IsToggleConsole (int keynum)
+{
+	if (keynum < 0 || keynum >= MAX_KEYS)
+		return false;
+	return keybindings[keynum] && !strcmp(keybindings[keynum], "toggleconsole");
+}
+
+/*
+===================
+Key_UpdateToggleConsole
+
+Re-derive consolekeys[]/menubound[] for one key from its current binding.
+
+The console toggle has to escape two filters to work as a toggle.  Key_Event
+only dispatches a binding while the console is up when !consolekeys[key]
+(otherwise the key is console text), and only dispatches while a menu is up
+when menubound[key].  Both used to be hardcoded for '`' and '~' alone, so any
+other key bound to "toggleconsole" -- the console key on a great many non-US
+layouts -- would open the console and then be typed into the input line instead
+of closing it again.  uhexen2-slhi, and the same defect as uhexen2-7nf, which
+was fixed for the two characters rather than for the binding.
+===================
+*/
+static void Key_UpdateToggleConsole (int keynum)
+{
+	qboolean	toggle;
+
+	if (keynum < 0 || keynum >= MAX_KEYS)
+		return;
+
+	toggle = Key_IsToggleConsole (keynum);
+	consolekeys[keynum] = toggle ? false : consolekeys_default[keynum];
+	menubound[keynum]   = toggle ? true  : menubound_default[keynum];
+}
+
+/*
+===================
 Key_SetBinding
 ===================
 */
@@ -884,6 +934,10 @@ void Key_SetBinding (int keynum, const char *binding)
 // allocate memory for new binding
 	if (binding)
 		keybindings[keynum] = Z_Strdup(binding);
+
+// binding "toggleconsole" onto a key (or off it) changes how the console and
+// the menu have to filter that key.  uhexen2-slhi
+	Key_UpdateToggleConsole (keynum);
 
 // Host_WriteConfiguration emits bindings alongside the archived cvars, so a
 // rebind makes config.cfg stale just as a cvar change does.  uhexen2-ghv0
@@ -1141,8 +1195,6 @@ void Key_Init (void)
 	consolekeys[K_SHIFT] = true;
 	consolekeys[K_MWHEELUP] = true;
 	consolekeys[K_MWHEELDOWN] = true;
-	consolekeys['`'] = false;
-	consolekeys['~'] = false;
 
 	for (i = 0; i < MAX_KEYS; i++)
 		keyshift[i] = i;
@@ -1171,10 +1223,18 @@ void Key_Init (void)
 	keyshift['\\'] = '|';
 
 	menubound[K_ESCAPE] = true;
-	menubound['`'] = true;
-	menubound['~'] = true;
 	for (i = 0; i < 12; i++)
 		menubound[K_F1+i] = true;
+
+/* Snapshot the layout-independent defaults before any binding exists, then
+ * re-derive every key.  From here on the "is this the console toggle" entries
+ * in consolekeys[]/menubound[] follow the binding table, so '`' and '~' get
+ * theirs from the Key_SetBinding calls just below exactly like a user's own
+ * rebind would.  uhexen2-slhi */
+	memcpy (consolekeys_default, consolekeys, sizeof(consolekeys_default));
+	memcpy (menubound_default, menubound, sizeof(menubound_default));
+	for (i = 0; i < MAX_KEYS; i++)
+		Key_UpdateToggleConsole (i);
 
 	memset (key_repeats, 0, sizeof(key_repeats));
 
@@ -1470,8 +1530,11 @@ void Key_CharEvent (const char *text)
 		if (ch < 32 || ch > 127)
 			continue;
 
-		/* don't insert the console toggle key as text input */
-		if ((ch == '`' || ch == '~') && key_dest == key_console)
+		/* Don't insert the console toggle key as text input.  Keyed off
+		 * the binding rather than off '`'/'~' so a layout whose console
+		 * key produces some other character still closes the console
+		 * instead of typing into it.  uhexen2-slhi */
+		if (key_dest == key_console && Key_IsToggleConsole (ch))
 			continue;
 
 		if (key_dest == key_console)
