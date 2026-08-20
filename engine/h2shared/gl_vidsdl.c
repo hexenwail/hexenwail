@@ -42,7 +42,6 @@
 #include "gl_postprocess.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "filenames.h"
 
@@ -785,7 +784,6 @@ static void GL_LoadFunctionPointers (void)
 	/* UBO functions (GL 3.1 / ES 3.0) */
 	glGetUniformBlockIndex_fp = (glGetUniformBlockIndex_f) SDL_GL_GetProcAddress("glGetUniformBlockIndex");
 	glUniformBlockBinding_fp = (glUniformBlockBinding_f) SDL_GL_GetProcAddress("glUniformBlockBinding");
-	glGetActiveUniformBlockiv_fp = (glGetActiveUniformBlockiv_f) SDL_GL_GetProcAddress("glGetActiveUniformBlockiv");
 	glBindBufferRange_fp = (glBindBufferRange_f) SDL_GL_GetProcAddress("glBindBufferRange");
 
 	glUniform4fv_fp = (glUniform4fv_f) SDL_GL_GetProcAddress("glUniform4fv");
@@ -972,10 +970,11 @@ static void GL_Init (void)
 	glActiveTexture_fp = (glActiveTexture_f) SDL_GL_GetProcAddress("glActiveTexture");
 	if (!glActiveTexture_fp)
 		Sys_Error("glActiveTexture not found");
+	glActiveTexture_fp(GL_TEXTURE0);
+#else
+	/* Emscripten: use direct function call */
+	glActiveTexture(GL_TEXTURE0);
 #endif
-	/* Seeds the binding shadow and puts the active unit where gl_texbind.c
-	 * promises to keep it. */
-	R_TexBind_Init ();
 
 	/* GL 4.3: anisotropic filtering is always available */
 	gl_max_anisotropy = 1;
@@ -1036,10 +1035,6 @@ static void GL_Init (void)
 	 * a state it actually knows.  Once per context, i.e. here and again
 	 * after every vid_restart.  uhexen2-p4ln.1. */
 	R_PipelineResetState ();
-
-	/* Before the shaders: GL_InitProgram calls R_BindProgramBlocks on every
-	 * program it links, and the blocks have to exist to be bound. */
-	R_Uniforms_Init ();
 
 	GL_Shaders_Init();
 	GL_VBO_Init();
@@ -1387,8 +1382,6 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_ImmInvalidateState();
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
-	R_Uniforms_Shutdown();
-	R_TexBind_Shutdown();
 	GL_Shaders_Shutdown();
 #ifndef USE_GLES
 	GL_DeleteFrameResources ();

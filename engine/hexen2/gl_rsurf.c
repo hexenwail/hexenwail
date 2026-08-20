@@ -24,7 +24,6 @@
 #include "gl_sky.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -212,12 +211,19 @@ static qboolean LM_EnsurePages (unsigned int pages)
 
 static inline void GL_BindDiffuse (GLuint texnum)
 {
-	R_BindTextureSlot (0, texnum);
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	/* GL_Bind's cache tracks TU0, which is exactly what we just bound.
+	 * Without this a later GL_Bind can cache-hit on a stale value and
+	 * draw with this texture still bound. */
+	currenttexture = texnum;
 }
 
 static inline void GL_BindFullbright (GLuint texnum)
 {
-	R_BindTextureSlot (2, texnum);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	glActiveTexture_fp(GL_TEXTURE0);
 }
 
 /*
@@ -717,6 +723,8 @@ void R_UpdateLightmaps (qboolean Translucent)
 	if (r_fullbright.integer)
 		return;
 
+	glActiveTexture_fp (GL_TEXTURE1);
+
 	if (! lightmap_textures[0])
 	{
 		// if lightmaps were hosed in a video mode change, make
@@ -760,7 +768,7 @@ void R_UpdateLightmaps (qboolean Translucent)
 				{
 					int col = i % LM_ATLAS_COLS;
 					int row = i / LM_ATLAS_COLS;
-					R_BindTextureSlot (0, lm_atlas_texture);
+					glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 					glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, BLOCK_WIDTH);
 					glTexSubImage2D_fp(GL_TEXTURE_2D, 0,
 							col * BLOCK_WIDTH + rx,
@@ -768,7 +776,7 @@ void R_UpdateLightmaps (qboolean Translucent)
 							rw, rh,
 							gl_lightmap_format, GL_UNSIGNED_BYTE, src);
 					glPixelStorei_fp(GL_UNPACK_ROW_LENGTH, 0);
-					R_ResetTextureBindings ();
+					currenttexture = GL_UNUSED_TEXTURE;
 				}
 			}
 			else
@@ -784,6 +792,7 @@ void R_UpdateLightmaps (qboolean Translucent)
 		}
 	}
 
+	glActiveTexture_fp (GL_TEXTURE0);
 }
 
 
@@ -803,6 +812,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	c_brush_polys++;
 
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	intensity = 1.0f;
 	alpha_val = 1.0f;
@@ -866,7 +876,10 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	 * additive contribution that world surfaces of the same miptex get).
 	 * Harmless on the turb early-return below (EmitWaterPolys uses
 	 * gl_shader_alias, which doesn't sample u_texture2).  uhexen2-61bb. */
-	R_BindTextureSlot (2, t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	if (fa->flags & SURF_DRAWTURB)
 	{	// warp texture — apply per-liquid alpha + light tinting
@@ -1013,14 +1026,19 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	}
 	else
 	{
-		R_BindTextureSlot (1, lm_atlas_texture ? lm_atlas_texture :
-				      lightmap_textures[fa->lightmaptexturenum]);
+		glActiveTexture_fp(GL_TEXTURE1);
+
+		if (lm_atlas_texture)
+			glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+		else
+			GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
 
 		if (fa->flags & SURF_UNDERWATER)
 			DrawGLWaterPolyMTexLM (fa->polys);
 		else
 			DrawGLPolyMTex (fa->polys);
 
+		glActiveTexture_fp(GL_TEXTURE0);
 	}
 
 	// add the poly to the proper lightmap chain
@@ -1082,6 +1100,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	 * removed in uhexen2-a5es. */
 	c_brush_polys++;
 
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	intensity = 1.0f;
 	alpha_val = 1.0f;
@@ -1099,6 +1118,8 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	{
 		if (!OIT_InPass())
 			R_SetBlend (false);
+		glActiveTexture_fp(GL_TEXTURE1);
+		glActiveTexture_fp(GL_TEXTURE0);
 
 		intensity = 1.0;
 	}
@@ -1112,11 +1133,15 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		return;
 	}
 
+	glActiveTexture_fp(GL_TEXTURE0);
 	t = R_TextureAnimation (e, fa->texinfo->texture);
 	GL_Bind (t->gl_texturenum);
 	/* Bind per-miptex fullbright mask at TU2 — same rationale as the
 	 * sibling in R_RenderBrushPoly.  uhexen2-61bb. */
-	R_BindTextureSlot (2, t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
@@ -1157,6 +1182,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		 * R_RenderBrushPoly for the full reasoning. uhexen2-mxkm. */
 		if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 		{
+			glActiveTexture_fp(GL_TEXTURE0);
 
 			if (fa->flags & SURF_UNDERWATER)
 				DrawGLWaterPoly (fa->polys);
@@ -1165,8 +1191,11 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		}
 		else
 		{
-			R_BindTextureSlot (1, lm_atlas_texture ? lm_atlas_texture :
-					      lightmap_textures[fa->lightmaptexturenum]);
+			glActiveTexture_fp(GL_TEXTURE1);
+			if (lm_atlas_texture)
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+			else
+				GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
 
 			if (fa->flags & SURF_UNDERWATER)
 				DrawGLWaterPolyMTexLM (fa->polys);
@@ -1174,6 +1203,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 				DrawGLPolyMTex (fa->polys);
 		}
 
+		glActiveTexture_fp(GL_TEXTURE1);
 
 		// add the poly to the proper lightmap chain
 		fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
@@ -1198,6 +1228,7 @@ dynamic1:
 		}
 	}
 
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
@@ -1206,6 +1237,7 @@ dynamic1:
 			R_SetAlphaToCoverage (false);
 	}
 
+	glActiveTexture_fp(GL_TEXTURE1);
 }
 
 
@@ -1613,11 +1645,19 @@ void R_BeginBrushBatch (void)
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 	R_UseProgram (gl_shader_world_opaque.program);
-	R_SetFog (r_fog_density, r_fog_color);
-	R_SetAlphaThresholdU (0.01f);
-	R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
-	R_BindTextureSlot (1, lm_atlas_texture);
-	R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
+	if (gl_shader_world_opaque.u_fog_density >= 0)
+		glUniform1f_fp(gl_shader_world_opaque.u_fog_density, r_fog_density);
+	if (gl_shader_world_opaque.u_fog_color >= 0)
+		glUniform3f_fp(gl_shader_world_opaque.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (gl_shader_world_opaque.u_alpha_threshold >= 0)
+		glUniform1f_fp(gl_shader_world_opaque.u_alpha_threshold, 0.01f);
+	if (gl_shader_world_opaque.u_overbright >= 0)
+		glUniform1f_fp(gl_shader_world_opaque.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+	glActiveTexture_fp(GL_TEXTURE1);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);	/* sjvf: default fb */
+	glActiveTexture_fp(GL_TEXTURE0);
 	GL_ImmInvalidateState();
 	brush_batch_active = true;
 }
@@ -1669,18 +1709,29 @@ static void DrawTextureChains_BindWorldState (void)
 	R_UseProgram (prog->program);
 	GL_GetMVP(mvp);
 	GL_GetModelview(mv);
-	R_SetMVP (mvp);
-	R_SetModelView (mv);
-	R_SetFog (r_fog_density, r_fog_color);
-	R_SetAlphaThresholdU (0.01f);
-	R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
-	R_BindTextureSlot (1, lm_atlas_texture);
+	if (prog->u_mvp >= 0)
+		glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
+	if (prog->u_modelview >= 0)
+		glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
+	if (prog->u_fog_density >= 0)
+		glUniform1f_fp(prog->u_fog_density, r_fog_density);
+	if (prog->u_fog_color >= 0)
+		glUniform3f_fp(prog->u_fog_color,
+			       r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+	if (prog->u_alpha_threshold >= 0)
+		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+	if (prog->u_overbright >= 0)
+		glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+	glActiveTexture_fp(GL_TEXTURE1);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* TU2 is the fullbright mask sampled by sworld_frag.  Default to the
 	 * 1x1 black sentinel so unit 2 always has SOMETHING bound when the
 	 * shader samples; per-texture transitions in DrawTextureChains will
 	 * override with the real fullbright mask when the diffuse has fb
 	 * pixels.  uhexen2-sjvf. */
-	R_BindTextureSlot (2, gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE0);	/* leave TU0 sticky for diffuse */
 	/* These uploads bypass GL_ImmEnd's uniform cache. If the next
 	 * GL_ImmEnd reuses gl_shader_world (e.g. fallback brush path),
 	 * its cache must miss so it re-uploads the right values. */
@@ -1722,7 +1773,7 @@ static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_co
 		{
 			if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 			{
-				R_DrawElements (GL_TRIANGLES,
+				glDrawElements_fp(GL_TRIANGLES,
 						  run_total_idx,
 						  GL_UNSIGNED_INT,
 						  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
@@ -1735,7 +1786,7 @@ static void DrawTextureChains_FlushBatch (msurface_t **batch_surfs, int batch_co
 	}
 	if (run_first_idx + run_total_idx <= world_num_indices && run_first_idx >= 0 && run_total_idx > 0)
 	{
-		R_DrawElements (GL_TRIANGLES,
+		glDrawElements_fp(GL_TRIANGLES,
 				  run_total_idx,
 				  GL_UNSIGNED_INT,
 				  (void *)((size_t)run_first_idx * sizeof(unsigned int)));
@@ -1818,7 +1869,8 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 		glBindVertexArray_fp(sky_stencil_vao);
 		R_UseProgram (gl_shader_flat.program);
 		GL_GetMVP(mvp);
-		R_SetMVP (mvp);
+		if (gl_shader_flat.u_mvp >= 0)
+			glUniformMatrix4fv_fp(gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
 		/* a_color attribute disabled in this VAO -> uses generic value */
 		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 		*bound = true;
@@ -1834,12 +1886,12 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 				run_count += runs[j].count;
 				continue;
 			}
-			R_DrawElements (GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+			glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 					  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
 			run_first = runs[j].first;
 			run_count = runs[j].count;
 		}
-		R_DrawElements (GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+		glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 				  (const void *)(uintptr_t)(run_first * sizeof(unsigned int)));
 	}
 }
@@ -1943,13 +1995,22 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 				float mvp[16], mv[16];
 				GL_GetMVP(mvp);
 				GL_GetModelview(mv);
-				R_SetMVP (mvp);
-				R_SetModelView (mv);
+				if (gl_shader_world.u_mvp >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_mvp, 1, GL_FALSE, mvp);
+				if (gl_shader_world.u_modelview >= 0)
+					glUniformMatrix4fv_fp(gl_shader_world.u_modelview, 1, GL_FALSE, mv);
 			}
-			R_SetFog (r_fog_density, r_fog_color);
-			R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
-			R_BindTextureSlot (1, lm_atlas_texture);
-			R_BindTextureSlot (2, gl_null_fb_texture);	/* sjvf: default fb */
+			if (gl_shader_world.u_fog_density >= 0)
+				glUniform1f_fp(gl_shader_world.u_fog_density, r_fog_density);
+			if (gl_shader_world.u_fog_color >= 0)
+				glUniform3f_fp(gl_shader_world.u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+			if (gl_shader_world.u_overbright >= 0)
+				glUniform1f_fp(gl_shader_world.u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
+			glActiveTexture_fp(GL_TEXTURE1);
+			glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+			glActiveTexture_fp(GL_TEXTURE2);
+			glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);	/* sjvf: default fb */
+			glActiveTexture_fp(GL_TEXTURE0);
 			GL_ImmInvalidateState();
 
 			/* Emit one batched draw per texture run.  When the
@@ -1958,12 +2019,15 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			 * fullbright mask at TU2.  uhexen2-sjvf. */
 #define BIND_TEX_WITH_FB(_T_) do { \
 	GL_Bind((_T_)->gl_texturenum); \
-	R_BindTextureSlot (2, \
+	glActiveTexture_fp(GL_TEXTURE2); \
+	glBindTexture_fp(GL_TEXTURE_2D, \
 		(_T_)->gl_fb_texturenum ? (_T_)->gl_fb_texturenum : gl_null_fb_texture); \
+	glActiveTexture_fp(GL_TEXTURE0); \
 } while (0)
 #define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
 	if ((N) <= 0) break; \
-	R_SetAlphaThresholdU ((ALPHA_T)); \
+	if (gl_shader_world.u_alpha_threshold >= 0) \
+		glUniform1f_fp(gl_shader_world.u_alpha_threshold, (ALPHA_T)); \
 	if (A2C_ON) \
 		R_SetAlphaToCoverage (true); \
 	else \
@@ -1986,7 +2050,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 		if (cur_tex_ && run_total_ > 0) \
 		{ \
 			BIND_TEX_WITH_FB(cur_tex_); \
-			R_DrawElements (GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+			glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 			    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 			c_brush_polys += count_run_; \
 		} \
@@ -1998,7 +2062,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 	if (cur_tex_ && run_total_ > 0) \
 	{ \
 		BIND_TEX_WITH_FB(cur_tex_); \
-		R_DrawElements (GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
+		glDrawElements_fp(GL_TRIANGLES, run_total_, GL_UNSIGNED_INT, \
 		    (void *)((size_t)run_first_ * sizeof(unsigned int))); \
 		c_brush_polys += count_run_; \
 	} \
@@ -2429,11 +2493,14 @@ static void DrawTextureChains (entity_t *e)
 				/* ImmBegin fallback for non-world brush entities */
 				GL_ImmColor4f (1, 1, 1, 1);
 
+				glActiveTexture_fp(GL_TEXTURE0);
 				{
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_Bind (tt->gl_texturenum);
 				}
-				R_BindTextureSlot (1, lm_atlas_texture);
+				glActiveTexture_fp(GL_TEXTURE1);
+				glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+				glActiveTexture_fp(GL_TEXTURE0);
 
 				GL_ImmBegin ();
 
@@ -2446,6 +2513,7 @@ static void DrawTextureChains (entity_t *e)
 						R_RenderBrushPolyMTex (e, s, false);
 						{
 							texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
+							glActiveTexture_fp(GL_TEXTURE0);
 							GL_Bind (tt->gl_texturenum);
 						}
 						GL_ImmBegin ();
@@ -2513,7 +2581,9 @@ static void DrawTextureChains (entity_t *e)
 	 * paths that reuse gl_shader_world (brush-ent legacy R_RenderBrushPoly,
 	 * sky stencil pre-pass) won't pick up a stale per-texture fb mask
 	 * from the chain we just finished.  uhexen2-sjvf. */
-	R_BindTextureSlot (2, gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
 
 	if (have_stencil)
 		R_SetStencilTest (false);
@@ -2534,7 +2604,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	qmodel_t	*clmodel;
 	qboolean	rotated;
 
-	R_ResetTextureBindings ();
+	currenttexture = GL_UNUSED_TEXTURE;
 	GL_ImmResetState();
 	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry. Different
 	 * world surfaces leave GL_BLEND in different states depending on what's
@@ -2682,23 +2752,33 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		glprogram_t *prog = &gl_shader_world_opaque;
 		glBindVertexArray_fp(world_vao);
 		R_UseProgram (prog->program);
-		R_BindTextureSlot (1, lm_atlas_texture);
+		glActiveTexture_fp(GL_TEXTURE1);
+		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 		/* Default fb to null sentinel — brush ent fast path doesn't
 		 * carry per-texture fb info, so brush ents render without fb
 		 * additive contribution.  uhexen2-sjvf. */
-		R_BindTextureSlot (2, gl_null_fb_texture);
+		glActiveTexture_fp(GL_TEXTURE2);
+		glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+		glActiveTexture_fp(GL_TEXTURE0);
 		if (!brush_batch_active)
 		{
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-			R_SetFog (r_fog_density, r_fog_color);
-			R_SetAlphaThresholdU (0.01f);
-			R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
+			if (prog->u_fog_density >= 0)
+				glUniform1f_fp(prog->u_fog_density, r_fog_density);
+			if (prog->u_fog_color >= 0)
+				glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+			if (prog->u_alpha_threshold >= 0)
+				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
+			if (prog->u_overbright >= 0)
+				glUniform1f_fp(prog->u_overbright, gl_overbright.integer ? 2.0f : 1.0f);
 			GL_ImmInvalidateState();
 		}
 		GL_GetMVP(mvp);
 		GL_GetModelview(mv);
-		R_SetMVP (mvp);
-		R_SetModelView (mv);
+		if (prog->u_mvp >= 0)
+			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE, mvp);
+		if (prog->u_modelview >= 0)
+			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE, mv);
 
 		/* Claim an id for this pass's special-surface handoff.  Ids stay
 		 * negative so they never collide with the r_framecount stamp the
@@ -2752,7 +2832,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total += batch_surfs[kk]->vbo_numtris * 3;
 					else
 					{
-						R_DrawElements (GL_TRIANGLES, run_total,
+						glDrawElements_fp(GL_TRIANGLES, run_total,
 						    GL_UNSIGNED_INT,
 						    (void *)((size_t)run_first * sizeof(unsigned int)));
 						c_brush_polys += (kk - run_start);
@@ -2761,7 +2841,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total = batch_surfs[kk]->vbo_numtris * 3;
 					}
 				}
-				R_DrawElements (GL_TRIANGLES, run_total,
+				glDrawElements_fp(GL_TRIANGLES, run_total,
 				    GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys += (batch_count - run_start);
@@ -2817,7 +2897,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total += batch_surfs[kk]->vbo_numtris * 3;
 					else
 					{
-						R_DrawElements (GL_TRIANGLES, run_total,
+						glDrawElements_fp(GL_TRIANGLES, run_total,
 						    GL_UNSIGNED_INT,
 						    (void *)((size_t)run_first * sizeof(unsigned int)));
 						c_brush_polys += (kk - run_start);
@@ -2826,7 +2906,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 						run_total = batch_surfs[kk]->vbo_numtris * 3;
 					}
 				}
-				R_DrawElements (GL_TRIANGLES, run_total,
+				glDrawElements_fp(GL_TRIANGLES, run_total,
 				    GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys += (batch_count - run_start);
@@ -2850,7 +2930,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 					run_total += batch_surfs[kk]->vbo_numtris * 3;
 				else
 				{
-					R_DrawElements (GL_TRIANGLES, run_total,
+					glDrawElements_fp(GL_TRIANGLES, run_total,
 					    GL_UNSIGNED_INT,
 					    (void *)((size_t)run_first * sizeof(unsigned int)));
 					c_brush_polys += (kk - run_start);
@@ -2859,7 +2939,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 					run_total = batch_surfs[kk]->vbo_numtris * 3;
 				}
 			}
-			R_DrawElements (GL_TRIANGLES, run_total,
+			glDrawElements_fp(GL_TRIANGLES, run_total,
 			    GL_UNSIGNED_INT,
 			    (void *)((size_t)run_first * sizeof(unsigned int)));
 			c_brush_polys += (batch_count - run_start);
@@ -3230,7 +3310,7 @@ void R_FreeWorldVBO (void)
 	if (world_ibo) { glDeleteBuffers_fp(1, &world_ibo); world_ibo = 0; }
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
 	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
-	if (lm_atlas_texture) { R_DeleteTextures (1, &lm_atlas_texture); lm_atlas_texture = 0; }
+	if (lm_atlas_texture) { glDeleteTextures_fp(1, &lm_atlas_texture); lm_atlas_texture = 0; }
 	lm_atlas_enabled = false;
 	world_num_verts = 0;
 	world_num_indices = 0;
@@ -3377,7 +3457,7 @@ void R_DrawWorld (void)
 
 	VectorCopy (r_refdef.vieworg, modelorg);
 
-	R_ResetTextureBindings ();
+	currenttexture = GL_UNUSED_TEXTURE;
 
 	GL_ImmColor4f (1.0f,1.0f,1.0f,1.0f);
 	memset (lightmap_polys, 0, sizeof(lightmap_polys));
@@ -3459,6 +3539,8 @@ void R_DrawWorld (void)
 #undef DW_END
 
 	// reset to texture unit 0
+	glActiveTexture_fp (GL_TEXTURE1);
+	glActiveTexture_fp (GL_TEXTURE0);
 
 #ifdef QUAKE2
 	R_DrawSkyBox ();
@@ -3834,7 +3916,7 @@ static qboolean LM_StitchAtlas (void)
 
 	if (!lm_atlas_texture)
 		glGenTextures_fp(1, &lm_atlas_texture);
-	R_BindTextureSlot (0, lm_atlas_texture);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -3862,17 +3944,17 @@ static qboolean LM_StitchAtlas (void)
 	{
 		Con_Printf ("Lightmap atlas: driver rejected a %dx%d texture\n",
 			    LM_ATLAS_WIDTH, lm_atlas_height);
-		R_ResetTextureBindings ();
+		currenttexture = GL_UNUSED_TEXTURE;
 		return false;
 	}
 
 	/* The raw glBindTexture above leaves lm_atlas_texture bound on the
 	 * current unit without updating the GL_Bind cache.  The bare call from
 	 * R_RebuildAllLightmaps (live gl_overbright toggle) has no surrounding
-	 * glActiveTexture churn to mask it, so a stale binding shadow could let
+	 * glActiveTexture churn to mask it, so a stale currenttexture could let
 	 * the next frame's first GL_Bind skip its bind and draw a surface with
 	 * the atlas wrongly bound.  Invalidate the cache like R_UpdateLightmaps. */
-	R_ResetTextureBindings ();
+	currenttexture = GL_UNUSED_TEXTURE;
 
 	return true;
 }
@@ -3951,6 +4033,7 @@ void GL_BuildLightmaps (void)
 		lm_atlas_rows = 1;	/* keep the UV divisor sane on a lightmap-less map */
 	lm_atlas_height = lm_atlas_rows * BLOCK_HEIGHT;
 
+	glActiveTexture_fp (GL_TEXTURE1);
 
 	/* The atlas is now only as tall as the map needs, so on a big enough map
 	 * it can outgrow what the driver will accept.  512 pages 8 to a row of
@@ -3989,9 +4072,9 @@ void GL_BuildLightmaps (void)
 		lm_atlas_enabled = false;
 		if (lm_atlas_texture)
 		{
-			R_DeleteTextures (1, &lm_atlas_texture);
+			glDeleteTextures_fp (1, &lm_atlas_texture);
 			lm_atlas_texture = 0;
-			R_ResetTextureBindings ();
+			currenttexture = GL_UNUSED_TEXTURE;
 		}
 	}
 
@@ -4071,6 +4154,7 @@ void GL_BuildLightmaps (void)
 	else
 		Con_SafePrintf ("\n");
 
+	glActiveTexture_fp (GL_TEXTURE0);
 }
 
 

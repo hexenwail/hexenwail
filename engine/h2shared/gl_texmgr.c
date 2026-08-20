@@ -21,6 +21,8 @@ of the License, or (at your option) any later version.
  * We provide compatibility functions for gl_sky.c and gl_fog.c.
  */
 
+extern GLuint currenttexture;
+
 /* Palette tables - these are defined elsewhere in uhexen2 */
 extern unsigned int d_8to24table[256];
 extern unsigned int d_8to24table_fbright[256];
@@ -85,7 +87,9 @@ void TexMgr_FreeTexture (gltexture_t *kill)
 		return;
 	if (kill->texnum)
 	{
-		R_DeleteTextures (1, &kill->texnum);
+		if (currenttexture == kill->texnum)
+			currenttexture = GL_UNUSED_TEXTURE;
+		glDeleteTextures_fp (1, &kill->texnum);
 		kill->texnum = 0;	/* sentinel: TexMgr_LoadImage recycles slots
 					 * with texnum == 0.  glGenTextures never
 					 * returns 0, so this can't collide with a
@@ -187,7 +191,8 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int heigh
 
 	/* Generate and upload the texture */
 	glGenTextures_fp(1, &texnum);
-	R_BindTextureSlot (0, texnum);
+	glBindTexture_fp(GL_TEXTURE_2D, texnum);
+	currenttexture = texnum;
 
 	if (flags & TEXPREF_NEAREST)
 	{
@@ -256,12 +261,37 @@ int TexMgr_PadConditional(int s)
 
 /*
 ================
-GL_Bind - gltexture_t overload; the GLuint form is a macro in glquake.h
+GL_Bind - implementation using uhexen2's currenttexture
 ================
 */
 void GL_Bind (gltexture_t *texture)
 {
 	if (!texture)
 		return;
-	R_BindTextureSlot (0, texture->texnum);
+
+	if (currenttexture != texture->texnum)
+	{
+		currenttexture = texture->texnum;
+		glBindTexture_fp(GL_TEXTURE_2D, currenttexture);
+	}
+}
+
+/*
+================
+GL_EnableMultitexture
+================
+*/
+void GL_EnableMultitexture(void)
+{
+	glActiveTexture_fp(GL_TEXTURE1);
+}
+
+/*
+================
+GL_DisableMultitexture
+================
+*/
+void GL_DisableMultitexture(void)
+{
+	glActiveTexture_fp(GL_TEXTURE0);
 }

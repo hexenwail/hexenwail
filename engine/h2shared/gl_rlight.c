@@ -23,7 +23,6 @@
 #include "quakedef.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 
 static int	r_dlightframecount;

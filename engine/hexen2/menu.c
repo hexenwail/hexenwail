@@ -28,7 +28,6 @@
 #include "gl_vbo.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "sbar.h"
 #include "sdl_inc.h"
 
@@ -4506,6 +4505,7 @@ static const char *bindnames[][2] =
 	{"+lookup",		"look up"},
 	{"+lookdown",		"look down"},
 	{"centerview",		"center view"},
+	{"togglechase",		"3rd person"},
 	{"+moveup",		"swim up"},
 	{"+movedown",		"swim down"},
 	{"impulse 13",		"lift object"},

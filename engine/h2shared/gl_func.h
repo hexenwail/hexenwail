@@ -397,7 +397,6 @@ GL_FUNCTION_OPT(void, glVertexAttribIPointer, (GLuint, GLint, GLenum, GLsizei, c
 /* UBO (OpenGL 3.1 / ES 3.0) */
 GL_FUNCTION_OPT(GLuint, glGetUniformBlockIndex, (GLuint, const char *))
 GL_FUNCTION_OPT(void, glUniformBlockBinding, (GLuint, GLuint, GLuint))
-GL_FUNCTION_OPT(void, glGetActiveUniformBlockiv, (GLuint, GLuint, GLenum, GLint *))
 GL_FUNCTION_OPT(void, glBindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr))
 
 /* Compute shader (OpenGL 4.3) */
@@ -548,7 +547,6 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glVertexAttribIPointer_fp	glVertexAttribIPointer
 #define glGetUniformBlockIndex_fp	glGetUniformBlockIndex
 #define glUniformBlockBinding_fp	glUniformBlockBinding
-#define glGetActiveUniformBlockiv_fp	glGetActiveUniformBlockiv
 #define glBindBufferRange_fp		glBindBufferRange
 #define glTexImage3D_fp			glTexImage3D
 #define glUniform3fv_fp			glUniform3fv

@@ -22,7 +22,6 @@
 #include "gl_sky.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
@@ -55,6 +54,7 @@ int			c_brush_polys, c_alias_polys;
 
 qboolean	r_cache_thrash;			// compatability
 
+GLuint			currenttexture = GL_UNUSED_TEXTURE;	// to avoid unnecessary texture sets
 
 GLuint			particletexture;	// little dot for particles
 GLuint			playertextures[MAX_CLIENTS];	// up to MAX_CLIENTS color translated skins
@@ -741,7 +741,9 @@ static void R_DrawSpriteModel (entity_t *e)
 		/* Unit 1 is bound by hand rather than through GL_Bind, which only
 		 * tracks unit 0.  Restore the active unit immediately so the
 		 * GL_Bind below still lands where it expects to. */
-		R_BindTextureSlot (1, GL_SoftDepth_GetTex());
+		glActiveTexture_fp (GL_TEXTURE1);
+		glBindTexture_fp (GL_TEXTURE_2D, GL_SoftDepth_GetTex());
+		glActiveTexture_fp (GL_TEXTURE0);
 		GL_SetSoftParticles (soft_inv, soft_za, soft_zb);
 	}
 
@@ -807,7 +809,9 @@ static void R_DrawSpriteModel (entity_t *e)
 		/* Back to the resting state before any alias / warp / brush batch
 		 * picks up this program.  uhexen2-mf9u. */
 		GL_SetSoftParticles (0.0f, 0.0f, 0.0f);
-		R_BindTextureSlot (1, 0);
+		glActiveTexture_fp (GL_TEXTURE1);
+		glBindTexture_fp (GL_TEXTURE_2D, 0);
+		glActiveTexture_fp (GL_TEXTURE0);
 	}
 
 // restore tex parms
@@ -1680,7 +1684,7 @@ static void R_DrawAliasModel (entity_t *e)
 	 * 0.01 alpha threshold and salias_frag.glsl discards below it BEFORE
 	 * u_force_opaque_alpha rewrites the output alpha, so a hole is still
 	 * a hole and only the 50% class is lost. */
-	if ((e->model->flags & EF_SPECIAL_TRANS) && !viewmodel)
+	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		branch_taken = "EF_SPECIAL_TRANS";
 		R_SetBlend (true);
@@ -1706,7 +1710,7 @@ static void R_DrawAliasModel (entity_t *e)
 			model_constant_alpha = r_wateralpha.value;
 		GL_SetForceOpaqueAlpha(0.0f);	/* needs blend-stage src.a */
 	}
-	else if ((e->model->flags & EF_TRANSPARENT) && !viewmodel)
+	else if (e->model->flags & EF_TRANSPARENT)
 	{
 		branch_taken = "EF_TRANSPARENT";
 		R_SetBlend (true);
@@ -1776,12 +1780,6 @@ static void R_DrawAliasModel (entity_t *e)
 		}
 		branch_taken = "opaque";
 		model_constant_alpha = 1.0f;
-		/* Asserted, not inherited (uhexen2-ac4c).  A skin can still carry
-		 * index-0 holes on this path -- the viewmodel now arrives here
-		 * with one whenever its model declares EF_TRANSPARENT -- and the
-		 * shader's discard is the only thing that keeps them, because
-		 * u_force_opaque_alpha rewrites the output alpha afterwards. */
-		GL_SetAlphaThreshold(0.01f);
 		GL_SetForceOpaqueAlpha(1.0f);	/* opaque alias path */
 	}
 
@@ -1950,15 +1948,15 @@ static void R_DrawAliasModel (entity_t *e)
 	 * never ran is how an EF_SPECIAL_TRANS viewmodel would come back with
 	 * culling re-enabled that nothing had disabled. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
-	    (!viewmodel && (e->model->flags & EF_SPECIAL_TRANS)) ||
-	    (!viewmodel && (e->model->flags & EF_TRANSPARENT)) ||
+	    (e->model->flags & EF_SPECIAL_TRANS) ||
+	    (e->model->flags & EF_TRANSPARENT) ||
 	    (e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha)))
 	{
 		if (!OIT_InPass())
 			R_SetBlend (false);
 	}
 
-	if ((e->model->flags & EF_SPECIAL_TRANS) && !viewmodel)
+	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		if (!OIT_InPass())
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -2441,8 +2439,12 @@ static void R_DispatchBrushInstancedPass (
 	while (i < num_keys)
 	{
 		GLuint inst = keys[i].instance;
-		R_SetMVP (world_instances[inst].mvp);
-		R_SetModelView (world_instances[inst].mv);
+		if (prog->u_mvp >= 0)
+			glUniformMatrix4fv_fp(prog->u_mvp, 1, GL_FALSE,
+					      world_instances[inst].mvp);
+		if (prog->u_modelview >= 0)
+			glUniformMatrix4fv_fp(prog->u_modelview, 1, GL_FALSE,
+					      world_instances[inst].mv);
 		while (i < num_keys && keys[i].instance == inst)
 		{
 			GLuint cur_tex = keys[i].tex;
@@ -2451,8 +2453,10 @@ static void R_DispatchBrushInstancedPass (
 			 * sworld_frag sample picks it up for this (instance, tex)
 			 * group.  Leave TU0 sticky for the diffuse bind below.
 			 * uhexen2-61bb. */
-			R_BindTextureSlot (2, cur_fb);
-			R_BindTextureSlot (0, cur_tex);
+			glActiveTexture_fp(GL_TEXTURE2);
+			glBindTexture_fp(GL_TEXTURE_2D, cur_fb);
+			glActiveTexture_fp(GL_TEXTURE0);
+			glBindTexture_fp(GL_TEXTURE_2D, cur_tex);
 			while (i < num_keys && keys[i].instance == inst &&
 			       keys[i].tex == cur_tex)
 			{
@@ -2466,7 +2470,7 @@ static void R_DispatchBrushInstancedPass (
 					run_count += keys[i].count;
 					i++;
 				}
-				R_DrawElements (GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
+				glDrawElements_fp(GL_TRIANGLES, run_count, GL_UNSIGNED_INT,
 				    (void *)((size_t)run_first * sizeof(unsigned int)));
 				c_brush_polys++;
 			}
@@ -2521,13 +2525,16 @@ void R_DrawBrushInstanced (void)
 	 * so the same invariance covers cross-program coplanar joins too. */
 	glBindVertexArray_fp(world_vao);
 	glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
-	R_BindTextureSlot (1, lm_atlas_texture);
+	glActiveTexture_fp(GL_TEXTURE1);
+	glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
 	/* Seed TU2 with the null fullbright sentinel.  R_DispatchBrushInstancedPass
 	 * rebinds per (instance, texture) group using the per-key fb_tex stored
 	 * by R_CollectBrushInstances, so any brush ent that wraps a miptex with
 	 * fullbright pixels (e.g. a torch tex on a func_train) gets the same
 	 * additive contribution as the matching world surface.  uhexen2-61bb. */
-	R_BindTextureSlot (2, gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
 	GL_ImmInvalidateState();
 
 	/* Optional polygon offset — kept as a tunable safety net (default 0).
@@ -2546,10 +2553,15 @@ void R_DrawBrushInstanced (void)
 	if (num_world_surf_keys > 0)
 	{
 		R_UseProgram (prog_opaque->program);
-		R_SetFog (r_fog_density, r_fog_color);
-		R_SetAlphaThresholdU (0.01f);
+		if (prog_opaque->u_fog_density >= 0)
+			glUniform1f_fp(prog_opaque->u_fog_density, r_fog_density);
+		if (prog_opaque->u_fog_color >= 0)
+			glUniform3f_fp(prog_opaque->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		if (prog_opaque->u_alpha_threshold >= 0)
+			glUniform1f_fp(prog_opaque->u_alpha_threshold, 0.01f);
 		/* uhexen2-khsa r13: world opaque pass forces fragColor.a=1. */
-		R_SetForceOpaqueAlphaU (1.0f);
+		if (prog_opaque->u_force_opaque_alpha >= 0)
+			glUniform1f_fp(prog_opaque->u_force_opaque_alpha, 1.0f);
 		R_DispatchBrushInstancedPass(world_surf_keys, num_world_surf_keys, prog_opaque);
 	}
 
@@ -2557,12 +2569,17 @@ void R_DrawBrushInstanced (void)
 	if (num_world_surf_keys_fence > 0)
 	{
 		R_UseProgram (prog_cutout->program);
-		R_SetFog (r_fog_density, r_fog_color);
-		R_SetAlphaThresholdU (0.666f);
+		if (prog_cutout->u_fog_density >= 0)
+			glUniform1f_fp(prog_cutout->u_fog_density, r_fog_density);
+		if (prog_cutout->u_fog_color >= 0)
+			glUniform3f_fp(prog_cutout->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
+		if (prog_cutout->u_alpha_threshold >= 0)
+			glUniform1f_fp(prog_cutout->u_alpha_threshold, 0.666f);
 		/* uhexen2-khsa r13: surviving fence/cutout fragments are opaque
 		 * (the alpha-test discard killed transparent ones), so force
 		 * fragColor.a=1 too. */
-		R_SetForceOpaqueAlphaU (1.0f);
+		if (prog_cutout->u_force_opaque_alpha >= 0)
+			glUniform1f_fp(prog_cutout->u_force_opaque_alpha, 1.0f);
 		if (r_alphatocoverage.integer)
 			R_SetAlphaToCoverage (true);
 		R_DispatchBrushInstancedPass(world_surf_keys_fence, num_world_surf_keys_fence, prog_cutout);
@@ -3030,11 +3047,13 @@ static void R_DrawAliasInstanced (void)
 	GLintptr	inst_ofs;
 	size_t		inst_bytes;
 	static GLuint last_pose_ssbo = 0;
+	static int last_poseverttype = -1;
 
 	if (num_alias_instances == 0 || !prog->program)
 	{
 		/* Reset SSBO cache on early exit */
 		last_pose_ssbo = 0;
+		last_poseverttype = -1;
 		return;
 	}
 
@@ -3055,25 +3074,35 @@ static void R_DrawAliasInstanced (void)
 	R_UseProgram (prog->program);
 
 	/* Set uniforms (view-proj, fog, alpha threshold, eye position) */
-	R_SetViewProj (alias_inst_view_proj);
+	if (prog->u_viewproj >= 0)
+		glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
+				      alias_inst_view_proj);
 	/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw Fog_GetDensity() */
-	R_SetFog (r_fog_density, r_fog_color);
-	R_SetEyePos (r_origin);
+	if (prog->u_fog_density >= 0)
+		glUniform1f_fp(prog->u_fog_density, r_fog_density);
+	if (prog->u_eyepos >= 0)
+		glUniform3f_fp(prog->u_eyepos, r_origin[0], r_origin[1], r_origin[2]);
+	if (prog->u_fog_color >= 0)
+		glUniform3f_fp(prog->u_fog_color, r_fog_color[0], r_fog_color[1], r_fog_color[2]);
 	/* R_CollectAliasInstance filters out EF_HOLEY/EF_TRANSPARENT/translucent
 	 * entities, so every batch here is opaque. Use the inert 0.01 threshold
 	 * (matches Ironwail's ALPHATEST=0 shader variant for non-holey alias) —
 	 * a global 0.666 would discard skin pixels whose alpha dips below 2/3 due
 	 * to bilinear filtering of palette index 255 or PNG alpha edges, even on
 	 * models that were never tagged as cutouts. uhexen2-6eab. */
-	R_SetAlphaThresholdU (0.01f);
+	if (prog->u_alpha_threshold >= 0)
+		glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 	/* uhexen2-khsa r13: instanced alias batch is opaque-only (collector
 	 * filters out DRF_TRANSLUCENT / EF_TRANSPARENT / EF_HOLEY / non-default
 	 * ENTALPHA), so we can force fragColor.a=1 unconditionally here. */
-	R_SetForceOpaqueAlphaU (1.0f);
+	if (prog->u_force_opaque_alpha >= 0)
+		glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 	/* Underwater caustics.  Same intensity source as the world and legacy
 	 * alias paths; the instance world matrix already puts v_worldxy in world
 	 * space, so nothing else is needed here.  uhexen2-0gn3. */
-	R_SetAliasCaustics (R_CausticsIntensity(), (float)cl.time);
+	if (prog->u_alias_caustics >= 0)
+		glUniform2f_fp(prog->u_alias_caustics,
+			       R_CausticsIntensity(), (float)cl.time);
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -3114,6 +3143,7 @@ static void R_DrawAliasInstanced (void)
 			continue;
 
 		/* Bind skin texture to unit 0 */
+		glActiveTexture_fp(GL_TEXTURE0);
 		GL_Bind(batch->skin_tex);
 
 		/* Bind pose SSBO only if changed from last batch */
@@ -3126,19 +3156,22 @@ static void R_DrawAliasInstanced (void)
 			last_pose_ssbo = pose_ssbo;
 		}
 
-		/* The last_poseverttype bookkeeping that used to guard this is
-		 * gone: R_SetPoseVertType already folds away an unchanged value,
-		 * and does it against the block rather than per program. */
-		R_SetPoseVertType (gm->poseverttype);
+		/* Set poseverttype uniform only if changed from last batch */
+		if (gm->poseverttype != last_poseverttype && prog->u_poseverttype >= 0)
+		{
+			glUniform1i_fp(prog->u_poseverttype, gm->poseverttype);
+			last_poseverttype = gm->poseverttype;
+		}
 
 		/* Set base instance offset for this batch */
-		R_SetInstBase (batch->first);
+		if (prog->u_inst_base >= 0)
+			glUniform1i_fp(prog->u_inst_base, batch->first);
 
 		/* Use model's VAO (texcoords + IBO already set up) */
 		glBindVertexArray_fp(gm->vao);
 
 		/* Draw! */
-		R_DrawElementsInstanced (GL_TRIANGLES, gm->num_indices,
+		glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
 					   GL_UNSIGNED_SHORT, NULL, batch->count);
 	}
 
@@ -3153,6 +3186,7 @@ static void R_DrawAliasInstanced (void)
 
 	/* Reset SSBO cache for next frame */
 	last_pose_ssbo = 0;
+	last_poseverttype = -1;
 
 	/* Shadow pass — drawn individually per entity */
 	if (r_shadows.integer)
@@ -3224,19 +3258,23 @@ static void R_DrawAliasInstanced (void)
 			}
 
 			R_UseProgram (prog->program);
-			R_SetViewProj (alias_inst_view_proj);
+			if (prog->u_viewproj >= 0)
+				glUniformMatrix4fv_fp(prog->u_viewproj, 1, GL_FALSE,
+						      alias_inst_view_proj);
 			/* Use r_fog_density (pre-scaled by Fog_SetupFrame) not raw
 			 * Fog_GetDensity(). This pass blends GL_ONE,GL_ONE, so fog
 			 * must fade to black — a non-black fog color would be ADDED
 			 * over the whole silhouette. See Fog_StartAdditive. */
-			{
-				static const float black[3] = { 0.0f, 0.0f, 0.0f };
-				R_SetFog (r_fog_density, black);
-			}
-			R_SetAlphaThresholdU (0.01f);
+			if (prog->u_fog_density >= 0)
+				glUniform1f_fp(prog->u_fog_density, r_fog_density);
+			if (prog->u_fog_color >= 0)
+				glUniform3f_fp(prog->u_fog_color, 0.0f, 0.0f, 0.0f);
+			if (prog->u_alpha_threshold >= 0)
+				glUniform1f_fp(prog->u_alpha_threshold, 0.01f);
 			/* uhexen2-khsa r13: fullbright pass is additive and we don't
 			 * want fragColor.a to leak garbage into FB.a. */
-			R_SetForceOpaqueAlphaU (1.0f);
+			if (prog->u_force_opaque_alpha >= 0)
+				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
 
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			R_SetBlend (true);
@@ -3262,12 +3300,14 @@ static void R_DrawAliasInstanced (void)
 				if (!gm || !gm->valid || !gm->ssbo_pose)
 					continue;
 
+				glActiveTexture_fp(GL_TEXTURE0);
 				GL_Bind(batch->fb_tex);
 				GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, gm->ssbo_pose);
-				R_SetInstBase (batch->first);
+				if (prog->u_inst_base >= 0)
+					glUniform1i_fp(prog->u_inst_base, batch->first);
 				glBindVertexArray_fp(gm->vao);
 
-				R_DrawElementsInstanced (GL_TRIANGLES, gm->num_indices,
+				glDrawElementsInstanced_fp(GL_TRIANGLES, gm->num_indices,
 							   GL_UNSIGNED_SHORT, NULL, batch->count);
 			}
 
@@ -3275,13 +3315,6 @@ static void R_DrawAliasInstanced (void)
 			R_SetDepthMask (true);
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			R_SetBlend (false);
-			/* Put the real fog colour back.  The black above used to be
-			 * written into this program's own u_fog_color and could not
-			 * reach anything else; PerFrame is shared, so without this
-			 * restore the next pass to draw before something else set fog
-			 * would fade to black.  Same shape as Fog_StopAdditive after
-			 * the non-instanced fullbright pass. */
-			R_SetFog (r_fog_density, r_fog_color);
 
 			glBindVertexArray_fp(0);
 			R_UseProgram (0);
@@ -4478,21 +4511,113 @@ static void R_SetupFrame (void)
 	V_SetContentsColor (r_viewleaf->contents);
 	V_CalcBlend ();
 
-	/* Per-frame world uniforms.  This used to be nine glUniform calls --
-	 * caustics, overbright, the light-debug pair and the bicubic flag, each
-	 * pushed separately onto gl_shader_world, gl_shader_world_opaque and
-	 * gl_shader_world_oit, because loose uniform state is per-program and
-	 * the OIT and brush-batch paths do not route through GL_ImmEnd.  They
-	 * are one block write now, and the three programs read the same block.
-	 * uhexen2-6bfm, uhexen2-f29y, uhexen2-isq7, uhexen2-b2f0, uhexen2-uxpp. */
-	R_SetWorldCaustics (R_CausticsIntensity(), (float)cl.time);
-	/* r_fullbright forces the overbright multiplier back to 1: it replaces
-	 * the lightmap sample with white, and overbright would then double a
-	 * white lightmap and blow every surface out.  uhexen2-isq7. */
-	R_SetOverbright ((gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f);
-	R_SetLightDebug (r_fullbright.integer ? 1.0f : 0.0f,
-			 r_lightmap.integer ? 1.0f : 0.0f);
-	R_SetLightmapBicubic (r_lightmap_bicubic.integer ? 1.0f : 0.0f);
+	/* Upload caustics uniform on all three world programs.  GL uniform state
+	 * is per-program and persists across glUseProgram cycles, so setting once
+	 * per frame (immediately after r_viewleaf updates) is enough — every
+	 * subsequent world-shader draw this frame picks up the right value
+	 * without per-bind plumbing.  uhexen2-6bfm. */
+	{
+		float intensity = R_CausticsIntensity();
+		float t = (float)cl.time;
+		if (gl_shader_world.program && gl_shader_world.u_caustics >= 0)
+		{
+			R_UseProgram (gl_shader_world.program);
+			glUniform2f_fp(gl_shader_world.u_caustics, intensity, t);
+		}
+		if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_caustics >= 0)
+		{
+			R_UseProgram (gl_shader_world_opaque.program);
+			glUniform2f_fp(gl_shader_world_opaque.u_caustics, intensity, t);
+		}
+		/* Translucent world surfaces are drawn with gl_shader_world_oit
+		 * while an OIT pass is active (gl_rsurf.c DrawGLWaterPoly /
+		 * DrawGLPolyMTex), so it needs the same value or those surfaces
+		 * render uncausticked next to causticked opaque ones.
+		 * uhexen2-uxpp. */
+		if (gl_shader_world_oit.program && gl_shader_world_oit.u_caustics >= 0)
+		{
+			R_UseProgram (gl_shader_world_oit.program);
+			glUniform2f_fp(gl_shader_world_oit.u_caustics, intensity, t);
+		}
+		/* Per-frame world overbright (Ironwail-style).  Pushing it once
+		 * per frame here covers the OIT and brush-batch paths that don't
+		 * route through GL_ImmEnd or the per-binding-site uploads.
+		 * uhexen2-f29y. */
+		{
+			/* r_fullbright forces the multiplier back to 1: it replaces the
+			 * lightmap sample with white, and overbright would then double a
+			 * value that is already at full scale, blowing every surface to
+			 * pure white and hiding the very texture detail the mode exists
+			 * to show.  uhexen2-isq7. */
+			float ob = (gl_overbright.integer && !r_fullbright.integer) ? 2.0f : 1.0f;
+			if (gl_shader_world.program && gl_shader_world.u_overbright >= 0)
+			{
+				R_UseProgram (gl_shader_world.program);
+				glUniform1f_fp(gl_shader_world.u_overbright, ob);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_overbright >= 0)
+			{
+				R_UseProgram (gl_shader_world_opaque.program);
+				glUniform1f_fp(gl_shader_world_opaque.u_overbright, ob);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_overbright >= 0)
+			{
+				R_UseProgram (gl_shader_world_oit.program);
+				glUniform1f_fp(gl_shader_world_oit.u_overbright, ob);
+			}
+		}
+		/* Per-frame world lighting-debug switches.  Same plumbing again:
+		 * r_fullbright whites out the lightmap sample, r_lightmap whites out
+		 * the diffuse sample and suppresses the fullbright mask, so the two
+		 * halves of a world fragment can be looked at separately.  Both were
+		 * previously inert for brush surfaces -- r_fullbright reached only the
+		 * alias fullbright pass and r_lightmap was registered and never read,
+		 * which quietly invalidated any "is this lighting or texture" test
+		 * anyone ran with them.  uhexen2-isq7. */
+		{
+			float ld[2];
+			ld[0] = r_fullbright.integer ? 1.0f : 0.0f;
+			ld[1] = r_lightmap.integer ? 1.0f : 0.0f;
+			if (gl_shader_world.program && gl_shader_world.u_lightdebug >= 0)
+			{
+				R_UseProgram (gl_shader_world.program);
+				glUniform2f_fp(gl_shader_world.u_lightdebug, ld[0], ld[1]);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightdebug >= 0)
+			{
+				R_UseProgram (gl_shader_world_opaque.program);
+				glUniform2f_fp(gl_shader_world_opaque.u_lightdebug, ld[0], ld[1]);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightdebug >= 0)
+			{
+				R_UseProgram (gl_shader_world_oit.program);
+				glUniform2f_fp(gl_shader_world_oit.u_lightdebug, ld[0], ld[1]);
+			}
+		}
+		/* Per-frame world bicubic lightmap toggle.  Same plumbing as
+		 * u_overbright above: set on all three world program variants so
+		 * the OIT and brush-batch paths pick it up without per-bind
+		 * uploads.  uhexen2-b2f0. */
+		{
+			float bicubic = r_lightmap_bicubic.integer ? 1.0f : 0.0f;
+			if (gl_shader_world.program && gl_shader_world.u_lightmap_bicubic >= 0)
+			{
+				R_UseProgram (gl_shader_world.program);
+				glUniform1f_fp(gl_shader_world.u_lightmap_bicubic, bicubic);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_lightmap_bicubic >= 0)
+			{
+				R_UseProgram (gl_shader_world_opaque.program);
+				glUniform1f_fp(gl_shader_world_opaque.u_lightmap_bicubic, bicubic);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_lightmap_bicubic >= 0)
+			{
+				R_UseProgram (gl_shader_world_oit.program);
+				glUniform1f_fp(gl_shader_world_oit.u_lightmap_bicubic, bicubic);
+			}
+		}
+		R_UseProgram (0);
+	}
 
 	r_cache_thrash = false;
 

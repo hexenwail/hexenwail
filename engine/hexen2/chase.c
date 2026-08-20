@@ -26,6 +26,37 @@ cvar_t		chase_active = {"chase_active", "0", CVAR_NONE};
 
 static	vec3_t	chase_dest;
 
+/* Set only by +chase, so -chase knows whether it owns the mode.  Holding the
+ * peek key while chase_active was already on must NOT drop you back to first
+ * person on release -- the hold has to restore what it found, not zero it. */
+static	qboolean	chase_held = false;
+
+
+static void Chase_Toggle_f (void)
+{
+	/* A toggle wins outright over a stuck hold: if +chase never saw its
+	 * -chase (menu opened under the key, focus lost), the stale flag would
+	 * otherwise let the next key release undo this deliberate switch. */
+	chase_held = false;
+	Cvar_Set ("chase_active", chase_active.integer ? "0" : "1");
+}
+
+static void Chase_Down_f (void)
+{
+	if (chase_active.integer)
+		return;			/* already chasing: leave it to the toggle */
+	chase_held = true;
+	Cvar_Set ("chase_active", "1");
+}
+
+static void Chase_Up_f (void)
+{
+	if (!chase_held)
+		return;
+	chase_held = false;
+	Cvar_Set ("chase_active", "0");
+}
+
 
 void Chase_Init (void)
 {
@@ -33,6 +64,12 @@ void Chase_Init (void)
 	Cvar_RegisterVariable (&chase_up);
 	Cvar_RegisterVariable (&chase_right);
 	Cvar_RegisterVariable (&chase_active);
+
+	/* Mirrors the zoom triplet in h2shared/gl_screen.c: a hold for a quick
+	 * look behind, a toggle for staying in third person. */
+	Cmd_AddCommand ("+chase", Chase_Down_f);
+	Cmd_AddCommand ("-chase", Chase_Up_f);
+	Cmd_AddCommand ("togglechase", Chase_Toggle_f);
 }
 
 void Chase_Reset (void)

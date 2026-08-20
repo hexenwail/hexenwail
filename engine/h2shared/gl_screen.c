@@ -67,7 +67,6 @@
 #include "gl_postprocess.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "draw.h"
 #if !defined(SERVERONLY) && !defined(H2W)

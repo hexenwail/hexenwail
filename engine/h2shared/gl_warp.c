@@ -21,7 +21,6 @@
 #include "quakedef.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
-#include "gl_uniforms.h"
 #include "gl_vbo.h"
 #include "gl_postprocess.h"
 
@@ -650,10 +649,11 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	{
 		/* single-pass multitexture: blend both layers in the shader */
 		GL_SetAlphaThreshold (0.0f);	/* two-layer sky mode */
-		{
-			const GLuint sky_layers[2] = { solidskytexture, alphaskytexture };
-			R_BindTextures (0, 2, sky_layers);
-		}
+		GL_Bind (solidskytexture);
+
+		glActiveTexture_fp (GL_TEXTURE1);
+		GL_Bind (alphaskytexture);
+		glActiveTexture_fp (GL_TEXTURE0);
 
 		for (p = fa->polys ; p ; p = p->next)
 		{
@@ -915,10 +915,10 @@ void R_DrawSkyChain (msurface_t *s)
 	{
 		/* single-pass: shader blends both layers using TU0/TU1 */
 		GL_SetAlphaThreshold (0.0f);
-		{
-			const GLuint sky_layers[2] = { solidskytexture, alphaskytexture };
-			R_BindTextures (0, 2, sky_layers);
-		}
+		GL_Bind (solidskytexture);
+		glActiveTexture_fp (GL_TEXTURE1);
+		GL_Bind (alphaskytexture);
+		glActiveTexture_fp (GL_TEXTURE0);
 		EMIT_LOOP (SKYWARP_VERT_MULTI, GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f));
 	}
 	else
