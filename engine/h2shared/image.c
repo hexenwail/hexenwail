@@ -27,7 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define STB_IMAGE_WRITE_STATIC
 #include "stb_image_write.h"
 
-/* lodepng not available in this build */
 #include "q_stdinc.h"
 
 byte *Image_LoadTGA(fshandle_t *f, int *width, int *height);
@@ -580,10 +579,13 @@ qboolean Image_WriteJPG (const char *name, byte *data, int width, int height, in
 	return (error != 0);
 }
 
-/* PNG write stub - lodepng implementation not available in this build */
+/*
+Image_WritePNG -- not implemented.  Nothing calls this; the screenshot path
+writes JPG.  stb_image_write, already included above, exposes stbi_write_png
+if a PNG writer is ever wanted -- see Image_WriteJPG for the flip handling.
+*/
 qboolean Image_WritePNG (const char *name, byte *data, int width, int height, int bpp, qboolean upsidedown)
 {
-	/* lodepng functions are not implemented - PNG writing disabled */
 	Con_Printf("PNG writing not supported in this build\n");
 	return false;
 }

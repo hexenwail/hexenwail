@@ -215,13 +215,28 @@ Contributions are welcome — bug reports, code cleanup, and documentation are a
 
 GPL-2.0-or-later. See [LICENSE](LICENSE).
 
-Bundled third-party libraries:
+### Bundled
+
+Vendored in this tree and compiled into the binary, so their notices ship with it:
+
 - [dr_libs](https://github.com/mackron/dr_libs) (public domain / MIT-0) — MP3, FLAC, WAV decoders
+- [miniz](https://github.com/richgel999/miniz) (MIT, with a public-domain dedication) — deflate/inflate and ZIP reading; backs `.pk3`/`.zip` searchpath mounting
+- [stb_image / stb_image_write](https://github.com/nothings/stb) (public domain / MIT) — image loading and JPG screenshot writing
+- [libTiMidity](http://libtimidity.sourceforge.net/) (LGPL-2.1) — MIDI fallback codec in `libs/timidity`, built when `USE_CODEC_TIMIDITY` is on (the default)
+
+### Linked at build time
+
+Resolved from the system or the Nix flake rather than vendored:
+
 - [SDL3](https://www.libsdl.org/) (Zlib) — platform abstraction
 - [libogg/libvorbis](https://xiph.org/) (BSD-3) — OGG Vorbis audio
 - [libopus/opusfile](https://opus-codec.org/) (BSD-3) — Opus audio
 - [libxmp](https://github.com/libxmp/libxmp) (MIT) — tracker music (MOD, S3M, XM, IT)
-- [FluidSynth](https://www.fluidsynth.org/) (LGPL-2.1) — MIDI synthesis
+- [FluidSynth](https://www.fluidsynth.org/) (LGPL-2.1) — MIDI synthesis, pulling [libsndfile](https://libsndfile.github.io/libsndfile/) (LGPL-2.1) and [FLAC](https://xiph.org/flac/) (BSD-3) through pkg-config
+- [ALSA](https://www.alsa-project.org/) (LGPL-2.1) — Linux audio output
+- zlib (Zlib) and the system OpenGL loader
+
+Windows builds link prebuilt SDL3 and ogg/vorbis from `oslibs/windows/`, each shipped with its own license file. The Nix package additionally installs `soundfont-fluid` (MIT) as a General MIDI soundfont for FluidSynth — data rather than code, and not linked into the binary.
 
 ## Credits
 
