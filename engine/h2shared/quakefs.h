@@ -240,7 +240,24 @@ typedef struct _fshandle_t
 	long start;	/* file or data start position */
 	long length;	/* file or data size */
 	long pos;	/* current position relative to start */
+	/* Memory backing, used when the file came from a DEFLATED .pk3 entry:
+	 * there is no offset in the archive that holds the decompressed bytes, so
+	 * the entry is inflated once on open and served from `data' afterwards.
+	 * `file' is NULL in that case and every FS_f*() below branches on `data'.
+	 * FS_fclose() frees it.  A STORED archive entry does not come through
+	 * here -- it is contiguous in the archive and stays FILE-backed, exactly
+	 * like a pak member.  uhexen2-pzha. */
+	byte *data;
 } fshandle_t;
+
+/* Open through the searchpath and fill in fh.  Handles loose files, pak
+ * members and both kinds of .pk3 entry, so callers that used to take a raw
+ * FILE * from FS_OpenFile() should use this instead -- a deflated archive
+ * entry is invisible to the FILE * path.  Returns the file length, or -1.
+ * Leaves fs_filesize / file_from_pak / FS_LastFileSource() set as FS_OpenFile
+ * does. */
+long FS_OpenFileHandle (const char *filename, fshandle_t *fh, unsigned int *path_id);
+long FS_OpenFileHandle_Silent (const char *filename, fshandle_t *fh, unsigned int *path_id);
 
 size_t FS_fread(void *ptr, size_t size, size_t nmemb, fshandle_t *fh);
 int FS_fseek(fshandle_t *fh, long offset, int whence);

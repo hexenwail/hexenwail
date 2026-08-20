@@ -200,7 +200,7 @@ static void FMIDI_Shutdown (void)
 
 static void *FMIDI_Open (const char *filename)
 {
-	FILE		*f;
+	fshandle_t	fh;
 	long		len;
 	void		*buf;
 	int		ret;
@@ -227,24 +227,24 @@ static void *FMIDI_Open (const char *filename)
 	}
 
 	/* read the MIDI file through the engine's filesystem */
-	ret = FS_OpenFile(filename, &f, NULL);
-	if (!f || ret < 0)
+	ret = FS_OpenFileHandle(filename, &fh, NULL);
+	if (ret < 0)
 		return NULL;
 
 	len = ret;
 	buf = malloc(len);
 	if (!buf)
 	{
-		fclose(f);
+		FS_fclose(&fh);
 		return NULL;
 	}
-	if ((long)fread(buf, 1, len, f) != len)
+	if ((long)FS_fread(buf, 1, len, &fh) != len)
 	{
 		free(buf);
-		fclose(f);
+		FS_fclose(&fh);
 		return NULL;
 	}
-	fclose(f);
+	FS_fclose(&fh);
 
 	fs_player = new_fluid_player(fs_synth);
 	if (!fs_player)

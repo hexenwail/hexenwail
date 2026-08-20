@@ -238,33 +238,35 @@ malloc'd contents and writes the length to *outsize, or NULL.
 */
 static byte *IMG_ReadWholeFile (const char *filename, size_t *outsize)
 {
-	FILE	*f;
+	fshandle_t	fh;
 	byte	*data;
 	long	size;
 
-	size = FS_OpenFile_Silent (filename, &f, NULL);
-	if (!f || size <= 0)
+	/* FS_OpenFileHandle: a DDS/KTX replacement shipped in a deflated .pk3
+	 * entry has no FILE * to read from.  uhexen2-pzha. */
+	size = FS_OpenFileHandle_Silent (filename, &fh, NULL);
+	if (size <= 0)
 	{
-		if (f)
-			fclose (f);
+		if (size == 0)
+			FS_fclose (&fh);
 		return NULL;
 	}
 
 	data = (byte *) malloc ((size_t)size);
 	if (!data)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		return NULL;
 	}
 
-	if (fread (data, 1, (size_t)size, f) != (size_t)size)
+	if (FS_fread(data, 1, (size_t)size, &fh) != (size_t)size)
 	{
-		fclose (f);
+		FS_fclose(&fh);
 		free (data);
 		return NULL;
 	}
 
-	fclose (f);
+	FS_fclose(&fh);
 	*outsize = (size_t)size;
 	return data;
 }

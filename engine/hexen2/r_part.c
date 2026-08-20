@@ -344,7 +344,8 @@ confirmed leak so R_ShowPointFile labels its origin on screen.
 */
 void R_ReadPointFile_f (void)
 {
-	FILE	*f;
+	fshandle_t	fh;
+	char	line[128];
 	vec3_t	org;
 	int		r;
 	int		c;
@@ -361,8 +362,9 @@ void R_ReadPointFile_f (void)
 
 	q_snprintf (name, sizeof(name), "maps/%s.pts", cl.mapname);
 
-	FS_OpenFile (name, &f, NULL);
-	if (!f)
+	/* FS_OpenFileHandle, not FS_OpenFile: a .pts leak file shipped inside a
+	 * deflated .pk3 has no FILE * to hand back.  uhexen2-pzha. */
+	if (FS_OpenFileHandle (name, &fh, NULL) < 0)
 	{
 		if (!autoload)
 			Con_Printf ("couldn't open %s\n", name);
@@ -375,7 +377,11 @@ void R_ReadPointFile_f (void)
 	VectorClear (org); // silence pesky compiler warnings
 	for ( ;; )
 	{
-		r = fscanf (f,"%f %f %f\n", &org[0], &org[1], &org[2]);
+		/* fscanf() has no fshandle_t equivalent, and does not need one:
+		 * the file is one "x y z" triple per line. */
+		if (!FS_fgets (line, sizeof(line), &fh))
+			break;
+		r = sscanf (line, "%f %f %f", &org[0], &org[1], &org[2]);
 		if (r != 3)
 			break;
 		c++;
@@ -401,7 +407,7 @@ void R_ReadPointFile_f (void)
 		}
 	}
 
-	fclose (f);
+	FS_fclose (&fh);
 	Con_Printf ("%i points read (%i significant)\n", c, r_numpointfile);
 	if (truncated)
 		Con_Printf ("pointfile truncated at %i stored points, leak path is incomplete\n",

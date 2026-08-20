@@ -30,8 +30,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /* lodepng not available in this build */
 #include "q_stdinc.h"
 
-byte *Image_LoadTGA(FILE *f, int *width, int *height);
-byte *Image_LoadPCX(FILE *f, int *width, int *height);
+byte *Image_LoadTGA(fshandle_t *f, int *width, int *height);
+byte *Image_LoadPCX(fshandle_t *f, int *width, int *height);
 byte *Image_LoadImage(const char *name, int *width, int *height);
 
 
@@ -68,13 +68,13 @@ void Sys_FileClose(int handle)
 }
 
 typedef struct stdio_buffer_s {
-	FILE *f;
+	fshandle_t *f;
 	unsigned char buffer[1024];
 	int size;
 	int pos;
 } stdio_buffer_t;
 
-static stdio_buffer_t *Buf_Alloc(FILE *f)
+static stdio_buffer_t *Buf_Alloc(fshandle_t *f)
 {
 	stdio_buffer_t *buf = (stdio_buffer_t *) calloc(1, sizeof(stdio_buffer_t));
 	buf->f = f;
@@ -90,7 +90,7 @@ static inline int Buf_GetC(stdio_buffer_t *buf)
 {
 	if (buf->pos >= buf->size)
 	{
-		buf->size = fread(buf->buffer, 1, sizeof(buf->buffer), buf->f);
+		buf->size = FS_fread(buf->buffer, 1, sizeof(buf->buffer), buf->f);
 		buf->pos = 0;
 		
 		if (buf->size == 0)
@@ -111,7 +111,7 @@ TODO: search order: tga png jpg pcx lmp
 */
 byte *Image_LoadImage (const char *name, int *width, int *height/*, qboolean *malloced*/)
 {
-	FILE	*f;
+	fshandle_t	fh;
 
 	//*malloced = false; //for PNG loading
 
@@ -121,14 +121,12 @@ byte *Image_LoadImage (const char *name, int *width, int *height/*, qboolean *ma
 		return Image_LoadPNG(f, width, height, malloced);*/
 
 	q_snprintf (loadfilename, sizeof(loadfilename), "%s.tga", name);
-	FS_OpenFile (loadfilename, &f, NULL);
-	if (f)
-		return Image_LoadTGA (f, width, height);
+	if (FS_OpenFileHandle (loadfilename, &fh, NULL) >= 0)
+		return Image_LoadTGA (&fh, width, height);
 
 	q_snprintf (loadfilename, sizeof(loadfilename), "%s.pcx", name);
-	FS_OpenFile (loadfilename, &f, NULL);
-	if (f)
-		return Image_LoadPCX (f, width, height);
+	if (FS_OpenFileHandle (loadfilename, &fh, NULL) >= 0)
+		return Image_LoadPCX (&fh, width, height);
 
 	return NULL;
 }
@@ -151,24 +149,24 @@ typedef struct targaheader_s {
 
 targaheader_t targa_header;
 
-int fgetLittleShort (FILE *f)
+static int fgetLittleShort (fshandle_t *f)
 {
 	byte	b1, b2;
 
-	b1 = fgetc(f);
-	b2 = fgetc(f);
+	b1 = FS_fgetc(f);
+	b2 = FS_fgetc(f);
 
 	return (short)(b1 + b2*256);
 }
 
-int fgetLittleLong (FILE *f)
+static int fgetLittleLong (fshandle_t *f)
 {
 	byte	b1, b2, b3, b4;
 
-	b1 = fgetc(f);
-	b2 = fgetc(f);
-	b3 = fgetc(f);
-	b4 = fgetc(f);
+	b1 = FS_fgetc(f);
+	b2 = FS_fgetc(f);
+	b3 = FS_fgetc(f);
+	b4 = FS_fgetc(f);
 
 	return b1 + (b2<<8) + (b3<<16) + (b4<<24);
 }
@@ -227,7 +225,7 @@ qboolean Image_WriteTGA (const char *name, byte *data, int width, int height, in
 Image_LoadTGA
 =============
 */
-byte *Image_LoadTGA (FILE *fin, int *width, int *height)
+byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 {
 	int				columns, rows, numPixels;
 	byte			*pixbuf;
@@ -237,19 +235,19 @@ byte *Image_LoadTGA (FILE *fin, int *width, int *height)
 	qboolean		upside_down; //johnfitz -- fix for upside-down targas
 	stdio_buffer_t	*buf;
 
-	targa_header.id_length = fgetc(fin);
-	targa_header.colormap_type = fgetc(fin);
-	targa_header.image_type = fgetc(fin);
+	targa_header.id_length = FS_fgetc(fin);
+	targa_header.colormap_type = FS_fgetc(fin);
+	targa_header.image_type = FS_fgetc(fin);
 
 	targa_header.colormap_index = fgetLittleShort(fin);
 	targa_header.colormap_length = fgetLittleShort(fin);
-	targa_header.colormap_size = fgetc(fin);
+	targa_header.colormap_size = FS_fgetc(fin);
 	targa_header.x_origin = fgetLittleShort(fin);
 	targa_header.y_origin = fgetLittleShort(fin);
 	targa_header.width = fgetLittleShort(fin);
 	targa_header.height = fgetLittleShort(fin);
-	targa_header.pixel_size = fgetc(fin);
-	targa_header.attributes = fgetc(fin);
+	targa_header.pixel_size = FS_fgetc(fin);
+	targa_header.attributes = FS_fgetc(fin);
 
 	if (targa_header.image_type!=2 && targa_header.image_type!=10)
 		Sys_Error ("Image_LoadTGA: %s is not a type 2 or type 10 targa\n", loadfilename);
@@ -265,7 +263,7 @@ byte *Image_LoadTGA (FILE *fin, int *width, int *height)
 	targa_rgba = (byte *) Hunk_Alloc (numPixels*4);
 
 	if (targa_header.id_length != 0)
-		fseek(fin, targa_header.id_length, SEEK_CUR);  // skip TARGA image comment
+		FS_fseek(fin, targa_header.id_length, SEEK_CUR);  // skip TARGA image comment
 
 	buf = Buf_Alloc(fin);
 
@@ -408,7 +406,7 @@ byte *Image_LoadTGA (FILE *fin, int *width, int *height)
 	}
 
 	Buf_Free(buf);
-	fclose(fin);
+	FS_fclose(fin);
 
 	*width = (int)(targa_header.width);
 	*height = (int)(targa_header.height);
@@ -442,7 +440,7 @@ typedef struct
 Image_LoadPCX
 ============
 */
-byte *Image_LoadPCX (FILE *f, int *width, int *height)
+byte *Image_LoadPCX (fshandle_t *f, int *width, int *height)
 {
 	pcxheader_t	pcx;
 	int			x, y, w, h, readbyte, runlength, start;
@@ -450,9 +448,12 @@ byte *Image_LoadPCX (FILE *f, int *width, int *height)
 	byte		palette[768];
 	stdio_buffer_t  *buf;
 
-	start = ftell (f); //save start of file (since we might be inside a pak file, SEEK_SET might not be the start of the pcx)
+	/* fshandle_t positions are relative to the start of the member, so the
+	 * old "remember ftell() because a pak member does not begin at 0" dance
+	 * is gone -- offset 0 is the start of the pcx on every backing. */
+	start = 0;
 
-	fread(&pcx, sizeof(pcx), 1, f);
+	FS_fread(&pcx, sizeof(pcx), 1, f);
 	pcx.xmin = (unsigned short)LittleShort (pcx.xmin);
 	pcx.ymin = (unsigned short)LittleShort (pcx.ymin);
 	pcx.xmax = (unsigned short)LittleShort (pcx.xmax);
@@ -474,11 +475,11 @@ byte *Image_LoadPCX (FILE *f, int *width, int *height)
 	data = (byte *) Hunk_Alloc((w*h+1)*4); //+1 to allow reading padding byte on last line
 
 	//load palette
-	fseek (f, start + fs_filesize - 768, SEEK_SET);
-	fread (palette, 1, 768, f);
+	FS_fseek (f, start + FS_filelength(f) - 768, SEEK_SET);
+	FS_fread(palette, 1, 768, f);
 
 	//back to start of image data
-	fseek (f, start + sizeof(pcx), SEEK_SET);
+	FS_fseek (f, start + sizeof(pcx), SEEK_SET);
 
 	buf = Buf_Alloc(f);
 
@@ -511,7 +512,7 @@ byte *Image_LoadPCX (FILE *f, int *width, int *height)
 	}
 
 	Buf_Free(buf);
-	fclose(f);
+	FS_fclose(f);
 
 	*width = w;
 	*height = h;

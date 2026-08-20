@@ -2397,9 +2397,8 @@ static const char maplist_name[] = "maplist.txt";
 	unsigned int	id0, id1;
 	fshandle_t	FH;
 
-	FH.length = FS_OpenFile (maplist_name, & FH.file, &id1);
-	FH.pak = file_from_pak;
-	if (FH.file == NULL)
+	FH.length = FS_OpenFileHandle (maplist_name, &FH, &id1);
+	if (FH.length < 0)
 		return def_progname;
 	else if (FS_FileExists(def_progname, &id0) && id1 < id0)
 	{
@@ -2411,8 +2410,6 @@ static const char maplist_name[] = "maplist.txt";
 		char	build[256], *test;
 		int	entries;
 
-		FH.pos = 0;
-		FH.start = ftell(FH.file);
 
 		if (!FS_fgets(build, sizeof(build), &FH))
 			goto _fail;
