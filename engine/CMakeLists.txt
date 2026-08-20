@@ -482,6 +482,7 @@ set(COMMON_SOURCES
     ${COMMONDIR}/hashindex.c
     ${COMMONDIR}/zone.c
     ${COMMONDIR}/quakefs.c
+    ${COMMONDIR}/miniz.c
     ${COMMONDIR}/debuglog.c
     ${COMMONDIR}/host_string.c
     ${COMMONDIR}/cfgfile.c

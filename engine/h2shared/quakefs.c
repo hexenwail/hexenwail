@@ -32,6 +32,7 @@
 #endif
 #include "filenames.h"
 #include "hashindex.h"
+#include "miniz.h"
 
 /* Open file with UTF-8 path support on Windows */
 static FILE *FS_FOpen (const char *path, const char *mode)
@@ -68,13 +69,59 @@ typedef struct pack_s
 	hashindex_t	hash;
 } pack_t;
 
+/* A .pk3/.zip searchpath entry.  Deliberately shaped like pack_t so the two
+ * lookup paths in FS_OpenFile_Internal stay recognisably the same code.
+ *
+ * The split that matters is per entry, not per archive: a STORED entry (method
+ * 0) is a contiguous uncompressed run inside the archive, so it is served
+ * exactly like a .pak entry -- reopen the archive, fseek to the data, hand back
+ * the FILE *.  Costs nothing and keeps O(1) streaming for the case that needs
+ * it most, since already-compressed media (ogg/mp3/opus) is what people store
+ * rather than deflate.  A DEFLATED entry has no byte offset to seek to and must
+ * be inflated into memory. */
+/* Cap on archives mounted from one gamedir.  Generous next to how many pk3s a
+ * Hexen II install would plausibly carry, and it keeps the scan buffer off the
+ * heap without risking a silent truncation nobody notices. */
+#define MAX_PK3_PER_DIR		64
+
+/* Entry-count ceiling for one archive.  MAX_FILES_IN_PACK is the .pak
+ * equivalent; a pk3 has no format limit, so this is ours.  Refusing the whole
+ * archive rather than truncating it keeps the failure loud -- a half-mounted
+ * archive would fail lookups that the file listing says should work. */
+#define MAX_FILES_IN_ZIP	65536
+
+static int FS_CompareZipNames (const void *a, const void *b)
+{
+	return q_strcasecmp ((const char *) a, (const char *) b);
+}
+
+typedef struct
+{
+	char	name[MAX_QPATH];
+	mz_uint	index;		/* miniz central-directory index */
+	int	filelen;	/* uncompressed size */
+	int	filepos;	/* data offset for STORED entries, -1 until resolved,
+				 * -2 for entries that must be inflated */
+} zipfiles_t;
+
+typedef struct zippack_s
+{
+	char	filename[MAX_OSPATH];
+	FILE	*handle;
+	mz_zip_archive	archive;
+	int	numfiles;
+	zipfiles_t	*files;
+	hashindex_t	hash;
+} zippack_t;
+
 typedef struct searchpath_s
 {
 	unsigned int	path_id;	/* identifier assigned to the game directory
 					 *	Note that <install_dir>/game1 and
 					 *	<userdir>/game1 have the same id. */
 	char		filename[MAX_OSPATH];
-	struct pack_s		*pack;	/* only one of filename / pack will be used */
+	struct pack_s		*pack;	/* only one of filename / pack / zip is used */
+	struct zippack_s	*zip;
 	struct searchpath_s	*next;
 } searchpath_t;
 
@@ -88,6 +135,19 @@ static searchpath_t	*fs_base_searchpaths;	/* without gamedirs */
  * instead and re-adds portals only when the destination wants it.
  * uhexen2-5vb6. */
 static searchpath_t	*fs_base_nomp_searchpaths;
+
+/* State left behind by the most recent FS_OpenFile_Internal(), in the same
+ * "read it immediately after the call" idiom as fs_filesize, file_from_pak and
+ * fs_lastfile_source.
+ *
+ * Set only when the lookup landed on a DEFLATED archive entry, which is the one
+ * case that cannot be handed back as a FILE * -- there is no byte offset in the
+ * archive that holds the decompressed bytes.  FS_OpenFile then returns the
+ * uncompressed length with *file == NULL, and the caller inflates via
+ * FS_ReadZipIntoBuffer() instead of reading.  NULL for every other outcome,
+ * including a STORED archive entry, which is served like a pak member. */
+static zippack_t	*fs_lastzip;
+static const zipfiles_t	*fs_lastzipentry;
 
 static const char	*fs_basedir;
 static char	fs_gamedir[MAX_OSPATH];
@@ -387,6 +447,226 @@ pak_error:
 
 /*
 ================
+FS_ZipRead
+
+miniz I/O callback.  We do not use miniz's own stdio layer: Ironwail's trimmed
+copy is built with MINIZ_NO_STDIO, and we want FS_FOpen anyway so that UTF-8
+archive paths keep working on Windows.
+================
+*/
+static size_t FS_ZipRead (void *opaque, mz_uint64 ofs, void *buf, size_t n)
+{
+	FILE	*f = (FILE *) opaque;
+
+	if (fseek (f, (long) ofs, SEEK_SET) != 0)
+		return 0;
+	return fread (buf, 1, n, f);
+}
+
+
+/*
+================
+FS_ZipDataOffset
+
+Resolve where a STORED entry's bytes actually start.
+
+The central directory records the offset of the entry's *local* header, not of
+its data, and the local header carries its own name and extra-field lengths
+which are permitted to differ from the central copies -- so the data offset
+cannot be computed from central-directory information alone.  Read the 30-byte
+local header and use its lengths.
+
+Done lazily on first open rather than for every entry at mount time: a large
+pk3 would otherwise pay thousands of seeks up front for entries the map may
+never touch.
+================
+*/
+#define ZIP_LOCALHDR_SIZE	30
+#define ZIP_LOCALHDR_SIG	0x04034b50
+
+static int FS_ZipDataOffset (zippack_t *zip, mz_uint64 localhdr)
+{
+	byte	hdr[ZIP_LOCALHDR_SIZE];
+	unsigned int	sig;
+	unsigned int	namelen, extralen;
+
+	if (fseek (zip->handle, (long) localhdr, SEEK_SET) != 0)
+		return -1;
+	if (fread (hdr, 1, ZIP_LOCALHDR_SIZE, zip->handle) != ZIP_LOCALHDR_SIZE)
+		return -1;
+
+	/* little-endian on the wire regardless of host byte order */
+	sig = (unsigned int)hdr[0] | ((unsigned int)hdr[1] << 8) |
+	      ((unsigned int)hdr[2] << 16) | ((unsigned int)hdr[3] << 24);
+	if (sig != ZIP_LOCALHDR_SIG)
+		return -1;
+
+	namelen  = (unsigned int)hdr[26] | ((unsigned int)hdr[27] << 8);
+	extralen = (unsigned int)hdr[28] | ((unsigned int)hdr[29] << 8);
+
+	localhdr += ZIP_LOCALHDR_SIZE + namelen + extralen;
+	if (localhdr > (mz_uint64) 0x7fffffff)
+		return -1;	/* past what fseek()/filepos can address; inflate instead */
+
+	return (int) localhdr;
+}
+
+
+/*
+================
+FS_LoadZipFile
+
+Mount a .pk3/.zip as a searchpath.  Returns NULL (quietly enough) on anything
+malformed -- a bad archive should cost the user a warning, not a Sys_Error,
+because unlike pak0.pak these are optional content the engine never shipped.
+================
+*/
+static zippack_t *FS_LoadZipFile (const char *zipfile)
+{
+	zippack_t	*zip;
+	FILE		*handle;
+	long		filesize;
+	mz_uint		i, numentries;
+	int		numfiles, hashsize, key;
+	zipfiles_t	*newfiles;
+	mz_zip_archive_file_stat	stat;
+
+	handle = FS_FOpen (zipfile, "rb");
+	if (!handle)
+		return NULL;
+
+	if (fseek (handle, 0, SEEK_END) != 0)
+		goto zip_error;
+	filesize = ftell (handle);
+	if (filesize <= 0)
+		goto zip_error;
+
+	zip = (zippack_t *) Z_Malloc (sizeof(zippack_t), Z_MAINZONE);
+	memset (zip, 0, sizeof(zippack_t));
+	zip->handle = handle;
+	zip->archive.m_pRead = FS_ZipRead;
+	zip->archive.m_pIO_opaque = handle;
+
+	if (!mz_zip_reader_init (&zip->archive, (mz_uint64) filesize, 0))
+	{
+		Sys_Printf ("WARNING: %s is not a valid zip archive, ignored\n", zipfile);
+		Z_Free (zip);
+		goto zip_error;
+	}
+
+	/* mz_zip_reader_get_num_files() sits inside a large block Ironwail
+	 * disabled; m_total_files is the public field it would have returned. */
+	numentries = zip->archive.m_total_files;
+	if (!numentries)
+	{
+		Sys_Printf ("WARNING: %s has no files, ignored\n", zipfile);
+		mz_zip_reader_end (&zip->archive);
+		Z_Free (zip);
+		goto zip_error;
+	}
+	if (numentries > MAX_FILES_IN_ZIP)
+	{
+		Sys_Printf ("WARNING: %s has %u files (max. allowed is %i), ignored\n",
+				zipfile, (unsigned int) numentries, MAX_FILES_IN_ZIP);
+		mz_zip_reader_end (&zip->archive);
+		Z_Free (zip);
+		goto zip_error;
+	}
+
+	newfiles = (zipfiles_t *) Z_Malloc (numentries * sizeof(zipfiles_t), Z_MAINZONE);
+
+	/* smallest power of two that covers the entry count, floor of 16 */
+	for (hashsize = 16; (mz_uint) hashsize < numentries; hashsize <<= 1)
+		;
+	Hash_Allocate (&zip->hash, hashsize);
+
+	numfiles = 0;
+	for (i = 0; i < numentries; i++)
+	{
+		if (!mz_zip_reader_file_stat (&zip->archive, i, &stat))
+			continue;
+		if (stat.m_is_directory)
+			continue;
+		if (!stat.m_is_supported)
+		{	/* encrypted, or a compression method miniz cannot decode */
+			Sys_Printf ("WARNING: %s: unsupported entry %s, skipped\n",
+					zipfile, stat.m_filename);
+			continue;
+		}
+		if (stat.m_uncomp_size > (mz_uint64) 0x7fffffff)
+		{
+			Sys_Printf ("WARNING: %s: entry %s too large, skipped\n",
+					zipfile, stat.m_filename);
+			continue;
+		}
+		if (strlen(stat.m_filename) >= MAX_QPATH)
+		{	/* a name we could never look up: every FS entry point takes a
+			 * MAX_QPATH buffer, so this entry is unreachable by design */
+			Sys_Printf ("WARNING: %s: entry name too long, skipped: %s\n",
+					zipfile, stat.m_filename);
+			continue;
+		}
+
+		q_strlcpy (newfiles[numfiles].name, stat.m_filename, MAX_QPATH);
+		newfiles[numfiles].index = i;
+		newfiles[numfiles].filelen = (int) stat.m_uncomp_size;
+		/* STORED entries get a real offset resolved on first open; anything
+		 * else is flagged as needing inflation.  -1 means "not yet resolved". */
+		newfiles[numfiles].filepos = (stat.m_method == 0) ? -1 : -2;
+
+		/* Hash_GenerateKeyString(caseSensitive=false) matches how the pak path
+		 * indexes, so a pk3 authored on a case-sensitive filesystem resolves
+		 * the same way a pak does. */
+		key = Hash_GenerateKeyString (&zip->hash, newfiles[numfiles].name, false);
+		Hash_Add (&zip->hash, key, numfiles);
+		numfiles++;
+	}
+
+	if (!numfiles)
+	{
+		Sys_Printf ("WARNING: %s has no usable files, ignored\n", zipfile);
+		Hash_Free (&zip->hash);
+		Z_Free (newfiles);
+		mz_zip_reader_end (&zip->archive);
+		Z_Free (zip);
+		goto zip_error;
+	}
+
+	q_strlcpy (zip->filename, zipfile, MAX_OSPATH);
+	zip->numfiles = numfiles;
+	zip->files = newfiles;
+
+	/* A pk3 is by definition content the original game never shipped. */
+	gameflags |= GAME_MODIFIED;
+
+	Sys_Printf ("Added archive %s (%i files)\n", zipfile, numfiles);
+	return zip;
+
+zip_error:
+	fclose (handle);
+	return NULL;
+}
+
+
+/*
+================
+FS_ZipReadEntry
+
+Inflate a DEFLATED entry straight into a caller-supplied buffer.  buf must hold
+entry->filelen bytes.  Returns false on a corrupt stream.
+================
+*/
+static qboolean FS_ZipReadEntry (zippack_t *zip, const zipfiles_t *entry, void *buf)
+{
+	if (!entry->filelen)
+		return true;	/* nothing to do; an empty entry is not an error */
+	return mz_zip_reader_extract_to_mem (&zip->archive, entry->index, buf,
+						(size_t) entry->filelen, 0) ? true : false;
+}
+
+
+/*
+================
 FS_UnwindSearchpaths
 
 Pops and frees every searchpath entry above `mark', leaving fs_searchpaths
@@ -414,6 +694,16 @@ static void FS_UnwindSearchpaths (searchpath_t *mark, qboolean verbose)
 			Z_Free (fs_searchpaths->pack->files);
 			Hash_Free(&fs_searchpaths->pack->hash);
 			Z_Free (fs_searchpaths->pack);
+		}
+		else if (fs_searchpaths->zip)
+		{
+			if (verbose)
+				Sys_Printf ("Removed archive %s\n", fs_searchpaths->zip->filename);
+			mz_zip_reader_end (&fs_searchpaths->zip->archive);
+			fclose (fs_searchpaths->zip->handle);
+			Z_Free (fs_searchpaths->zip->files);
+			Hash_Free(&fs_searchpaths->zip->hash);
+			Z_Free (fs_searchpaths->zip);
 		}
 		else if (verbose)
 		{
@@ -482,6 +772,61 @@ add_pakfile:
 		search->pack = pak;
 		search->next = fs_searchpaths;
 		fs_searchpaths = search;
+	}
+
+/* add any .pk3 archives in this directory, alphabetically.
+ *
+ * Pushed after the numbered paks and before the loose directory, so the
+ * resulting search order is: loose files, then pk3s, then paks.  That mirrors
+ * QSS and FTE -- an archive can override pak content, a loose file can override
+ * both -- and it is the order people already expect from Quake engines.
+ *
+ * Load order within the pk3s is ascending by name, which (because each is
+ * pushed onto the head) makes the alphabetically *last* archive win.  Same
+ * convention as pak1 overriding pak0.  uhexen2-pzha.
+ */
+	{
+		fsfind_t	find;
+		const char	*findname;
+		char		zipnames[MAX_PK3_PER_DIR][MAX_QPATH];
+		int		numzips = 0, j;
+		const char	*scandir = (do_userdir) ? fs_userdir : fs_gamedir;
+
+		findname = Sys_FindFirstFile (&find, scandir, "*.pk3");
+		while (findname)
+		{
+			if (numzips == MAX_PK3_PER_DIR)
+			{
+				Sys_Printf ("WARNING: more than %i pk3 files in %s, ignoring the rest\n",
+						MAX_PK3_PER_DIR, scandir);
+				break;
+			}
+			q_strlcpy (zipnames[numzips], findname, MAX_QPATH);
+			numzips++;
+			findname = Sys_FindNextFile (&find);
+		}
+		Sys_FindClose (&find);
+
+		/* Sys_FindFirstFile makes no ordering promise -- readdir order is
+		 * filesystem order, not alphabetical -- so sort rather than assume. */
+		if (numzips > 1)
+			qsort (zipnames, numzips, MAX_QPATH, FS_CompareZipNames);
+
+		for (j = 0; j < numzips; j++)
+		{
+			zippack_t	*zip;
+
+			FSERR_MakePath_VABUF (__thisfunc__, __LINE__,
+						(do_userdir) ? FS_USERDIR : FS_GAMEDIR,
+						pakfile, sizeof(pakfile), "%s", zipnames[j]);
+			zip = FS_LoadZipFile (pakfile);
+			if (!zip) continue;
+			search = (searchpath_t *) Z_Malloc (sizeof(searchpath_t), Z_MAINZONE);
+			search->path_id = path_id;
+			search->zip = zip;
+			search->next = fs_searchpaths;
+			fs_searchpaths = search;
+		}
 	}
 
 /* add the directory itself to the search path.  unlike Quake,
@@ -923,6 +1268,8 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 	int	i, key;
 
 	file_from_pak = 0;
+	fs_lastzip = NULL;
+	fs_lastzipentry = NULL;
 
 	/* search through the path, one element at a time */
 	for (search = fs_searchpaths ; search ; search = search->next)
@@ -948,6 +1295,58 @@ static long FS_OpenFile_Internal (const char *filename, FILE **file, unsigned in
 				if (!*file)
 					Sys_Error ("Couldn't reopen %s", pak->filename);
 				fseek (*file, pak->files[i].filepos, SEEK_SET);
+				return fs_filesize;
+			}
+		}
+		else if (search->zip)	/* look through a mounted .pk3 */
+		{
+			zippack_t	*zip = search->zip;
+
+			key = Hash_GenerateKeyString (&zip->hash, filename, false);
+			for (i = Hash_First(&zip->hash, key); i != -1; i = Hash_Next(&zip->hash, i))
+			{
+				if (q_strcasecmp(zip->files[i].name, filename) != 0)
+					continue;
+				/* found it! */
+				fs_filesize = zip->files[i].filelen;
+				/* An archive member is "from a pak" for every purpose that
+				 * asks: gamedir provenance, progs substitution, the modified
+				 * -content check.  The question those callers are really
+				 * asking is "did this come from packaged content rather than
+				 * a loose file", and it did. */
+				file_from_pak = 1;
+				q_strlcpy (fs_lastfile_source, zip->filename, sizeof(fs_lastfile_source));
+				if (path_id)
+					*path_id = search->path_id;
+				if (!file) /* for FS_FileExists() */
+					return fs_filesize;
+
+				if (zip->files[i].filepos == -1)
+				{	/* STORED, offset not resolved yet */
+					mz_zip_archive_file_stat	st;
+					int	ofs = -2;
+
+					if (mz_zip_reader_file_stat (&zip->archive, zip->files[i].index, &st))
+						ofs = FS_ZipDataOffset (zip, st.m_local_header_ofs);
+					/* A local header we cannot parse demotes the entry to the
+					 * inflate path rather than failing the lookup: miniz can
+					 * still decode it, we just cannot shortcut it. */
+					zip->files[i].filepos = (ofs < 0) ? -2 : ofs;
+				}
+
+				if (zip->files[i].filepos >= 0)
+				{	/* STORED: contiguous plain bytes, serve it like a pak member */
+					*file = FS_FOpen (zip->filename, "rb");
+					if (!*file)
+						Sys_Error ("Couldn't reopen %s", zip->filename);
+					fseek (*file, zip->files[i].filepos, SEEK_SET);
+					return fs_filesize;
+				}
+
+				/* DEFLATED: no FILE * can represent this. */
+				*file = NULL;
+				fs_lastzip = zip;
+				fs_lastzipentry = &zip->files[i];
 				return fs_filesize;
 			}
 		}
@@ -1171,11 +1570,14 @@ static int		zone_num;
 
 /* Allocate-and-read tail, shared by the searchpath loader below and by
  * FS_LoadHunkFileFromOSPath().  Consumes `h': it is closed either way. */
-static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len)
+/* Allocation half of FS_ReadIntoBuffer(), split out so the archive path can
+ * obtain a destination buffer by exactly the same rules before inflating into
+ * it -- same hunk tags, same LOADFILE_STACK reuse, same Sys_Error on failure.
+ * uhexen2-pzha. */
+static byte *FS_AllocLoadBuffer (const char *path, int usehunk, long len)
 {
 	byte	*buf;
 	char	base[32];
-	size_t	nread;
 
 /* extract the file's base name for hunk tag */
 	COM_FileBase (path, base, sizeof(base));
@@ -1215,6 +1617,16 @@ static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len
 
 	((byte *)buf)[len] = 0;
 
+	return buf;
+}
+
+static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len)
+{
+	byte	*buf;
+	size_t	nread;
+
+	buf = FS_AllocLoadBuffer (path, usehunk, len);
+
 	Draw_BeginDisc ();
 	nread = fread (buf, 1, (size_t)len, h);
 	fclose (h);
@@ -1243,6 +1655,39 @@ static byte *FS_ReadIntoBuffer (FILE *h, const char *path, int usehunk, long len
 	return buf;
 }
 
+
+/*
+===========
+FS_ReadZipIntoBuffer
+
+Inflate the DEFLATED archive entry that the preceding FS_OpenFile() landed on.
+
+Called instead of FS_ReadIntoBuffer() when that lookup returned a length with a
+NULL FILE *; see the fs_lastzip commentary above.  Allocates by the same rules,
+so from the caller's side the only difference is where the bytes came from.
+===========
+*/
+static byte *FS_ReadZipIntoBuffer (const char *path, int usehunk, long len)
+{
+	byte	*buf;
+
+	buf = FS_AllocLoadBuffer (path, usehunk, len);
+
+	Draw_BeginDisc ();
+	if (!FS_ZipReadEntry (fs_lastzip, fs_lastzipentry, buf))
+	{
+		/* Matches FS_ReadIntoBuffer's short-read contract rather than
+		 * erroring: callers size their parsing from fs_filesize, so the
+		 * buffer has to be fully defined either way. */
+		memset (buf, 0, (size_t)len);
+		Sys_Printf ("WARNING: %s: corrupt deflate stream for %s in %s\n",
+			    __thisfunc__, path, fs_lastzip->filename);
+	}
+	Draw_EndDisc ();
+
+	return buf;
+}
+
 static byte *FS_LoadFile (const char *path, int usehunk, unsigned int *path_id)
 {
 	FILE	*h;
@@ -1252,6 +1697,9 @@ static byte *FS_LoadFile (const char *path, int usehunk, unsigned int *path_id)
 	len = FS_OpenFile (path, &h, path_id);
 	if (len < 0)
 		return NULL;
+
+	if (!h)		/* deflated archive entry -- inflate rather than read */
+		return FS_ReadZipIntoBuffer (path, usehunk, len);
 
 	return FS_ReadIntoBuffer (h, path, usehunk, len);
 }
@@ -1293,6 +1741,9 @@ byte *FS_LoadHunkFileFromPak (const char *path, unsigned int *path_id)
 	len = FS_OpenFileInPak (path, &h, path_id);
 	if (len < 0)
 		return NULL;
+
+	if (!h)		/* deflated archive entry -- inflate rather than read */
+		return FS_ReadZipIntoBuffer (path, LOADFILE_HUNK, len);
 
 	/* FS_OpenFileInPak has already left fs_filesize, file_from_pak and
 	 * fs_lastfile_source describing the pak member, exactly as FS_OpenFile
@@ -1733,6 +2184,9 @@ definition of "mod directory" -- the mods menu uses it too.
 qboolean FS_IsGamedir (const char *basedir, const char *dir)
 {
 	char	path[MAX_OSPATH];
+	fsfind_t	find;
+	const char	*findname;
+	qboolean	found;
 	int	i;
 
 	q_snprintf (path, sizeof(path), "%s/%s/progs.dat", basedir, dir);
@@ -1746,7 +2200,16 @@ qboolean FS_IsGamedir (const char *basedir, const char *dir)
 			return true;
 	}
 
-	return false;
+	/* ...or any .pk3.  A mod shipped as a single archive is still a mod, and
+	 * without this it would mount correctly but never appear in the mods menu
+	 * or in "game" tab-completion.  Unlike the pak probe above this cannot be
+	 * a fixed set of names, since pk3s carry arbitrary ones.  uhexen2-pzha. */
+	q_snprintf (path, sizeof(path), "%s/%s", basedir, dir);
+	findname = Sys_FindFirstFile (&find, path, "*.pk3");
+	found = (findname != NULL);
+	Sys_FindClose (&find);
+
+	return found;
 }
 
 /*
