@@ -442,6 +442,7 @@ extern	cvar_t	gl_reporttjunctions;
 extern	cvar_t	gl_flashblend;
 extern	cvar_t	gl_nocolors;
 extern	cvar_t	gl_waterripple;
+extern	cvar_t		gl_subdivide_size;
 extern	cvar_t	gl_waterwarp_speed;
 extern	cvar_t	gl_waterwarp_amount;
 float R_WaterWarpSpeed (void);

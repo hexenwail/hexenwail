@@ -303,6 +303,11 @@ cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
  * because the stock warp reads as seasick on a modern framerate and a
  * large liquid surface.  Not to be confused with r_waterwarp, which is the
  * fullscreen distortion applied while the camera is submerged. */
+/* Tile size GL_SubdivideSurface cuts liquid surfaces into, and therefore how
+ * often the per-vertex warp in EmitWaterPolys is sampled.  Takes effect on the
+ * next map load, since the subdivision happens there.  See R_SubdivideSize in
+ * gl_warp.c for why 64 is short of Nyquist.  uhexen2-9o7u. */
+cvar_t	gl_subdivide_size = {"gl_subdivide_size", "64", CVAR_ARCHIVE};
 cvar_t	gl_waterwarp_speed = {"gl_waterwarp_speed", "0.5", CVAR_ARCHIVE};
 cvar_t	gl_waterwarp_amount = {"gl_waterwarp_amount", "0.5", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};	// 0=square, 1=round (default)
