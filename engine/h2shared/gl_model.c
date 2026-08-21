@@ -3043,6 +3043,7 @@ static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 {
 	extern trivertx_t *poseverts[];
 	int   f, i, v, numverts;
+	int   pass, measured = 0;
 	float max_ratio = 0.0f;
 	float bbox_diag, dx, dy, dz;
 	float sx, sy, sz;
@@ -3066,77 +3067,104 @@ static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 	sz = hdr->scale[2];
 	numverts = hdr->numverts;
 
-	for (f = 0; f < hdr->numframes; f++)
+	/* Pass 0 measures only pose pairs the QC can actually blend.  Pass 1
+	 * repeats without the sequential-name requirement, and runs ONLY when
+	 * pass 0 found nothing at all to measure.
+	 *
+	 * A model with animations always yields something in pass 0: any run
+	 * of two or more <stem><number> frames is a sequential pair.  Zero
+	 * measurable pairs therefore means the model has no animation runs --
+	 * every frame is a standalone state, and adjacent standalone states
+	 * are exactly what a flipbook is.  Skipping them left such models
+	 * reporting a ratio of 0.0, indistinguishable from "measured, and
+	 * perfectly smooth", so they silently gained interpolation they had
+	 * never had: models/barrel.mdl is ['resting1', 'onside1'], an upright
+	 * barrel and a knocked-over one, and scores 0.469 across that pair --
+	 * blending it morphs the barrel as it tips.  SoT's
+	 * stalactite_ice2.mdl (['frame01', 'Key 2'], 0.659) is the same shape.
+	 * uhexen2-aqm0 */
+	for (pass = 0; pass < 2; pass++)
 	{
-		int first = hdr->frames[f].firstpose;
-		int n     = hdr->frames[f].numposes;
-		int pairs;
+		if (pass == 1 && measured > 0)
+			break;
 
-		if (n > 1)
+		for (f = 0; f < hdr->numframes; f++)
 		{
-			/* Multi-pose group: pose K -> K+1, with wrap. */
-			pairs = n;
-		}
-		else if (f + 1 < hdr->numframes && hdr->frames[f+1].numposes == 1 &&
-			 Mod_FramesAreSequential (hdr->frames[f].name,
-						  hdr->frames[f+1].name))
-		{
-			/* Single pose, next frame also single, and the two are
-			 * consecutive frames of one named animation: a tick target
-			 * the QC actually steps through.  Without the name check
-			 * this also measured animation seams, which are not
-			 * blended and which dominate the max -- models/archer.mdl
-			 * scored 0.410 on deathA22 -> draw1 alone and lost frame
-			 * interpolation entirely, against 0.242 for its worst real
-			 * pair (fire1 -> fire2).  uhexen2-aqm0 */
-			pairs = 1;
-		}
-		else
-		{
-			continue;
-		}
-
-		for (i = 0; i < pairs; i++)
-		{
-			int a, b;
-			trivertx_t *va, *vb;
-			float max_d2 = 0.0f;
-			float ratio;
+			int first = hdr->frames[f].firstpose;
+			int n     = hdr->frames[f].numposes;
+			int pairs;
 
 			if (n > 1)
 			{
-				a = first + i;
-				b = first + ((i + 1) % n);
+				/* Multi-pose group: pose K -> K+1, with wrap. */
+				pairs = n;
+			}
+			else if (f + 1 < hdr->numframes &&
+				 hdr->frames[f+1].numposes == 1 &&
+				 (pass == 1 ||
+				  Mod_FramesAreSequential (hdr->frames[f].name,
+							   hdr->frames[f+1].name)))
+			{
+				/* Single pose, next frame also single, and the two
+				 * are consecutive frames of one named animation: a
+				 * tick target the QC actually steps through.
+				 * Without the name check this also measured
+				 * animation seams, which are never blended and
+				 * which dominate the max -- models/archer.mdl
+				 * scored 0.410 on deathA22 -> draw1 alone and lost
+				 * frame interpolation across every animation it
+				 * plays, against 0.242 for its worst real pair
+				 * (fire1 -> fire2).  uhexen2-aqm0 */
+				pairs = 1;
 			}
 			else
 			{
-				a = first;
-				b = hdr->frames[f+1].firstpose;
-			}
-			va = poseverts[a];
-			vb = poseverts[b];
-			if (!va || !vb)
 				continue;
-
-			for (v = 0; v < numverts; v++)
-			{
-				float ax = (float)va[v].v[0] * sx;
-				float ay = (float)va[v].v[1] * sy;
-				float az = (float)va[v].v[2] * sz;
-				float bx = (float)vb[v].v[0] * sx;
-				float by = (float)vb[v].v[1] * sy;
-				float bz = (float)vb[v].v[2] * sz;
-				float dvx = bx - ax;
-				float dvy = by - ay;
-				float dvz = bz - az;
-				float d2  = dvx*dvx + dvy*dvy + dvz*dvz;
-				if (d2 > max_d2)
-					max_d2 = d2;
 			}
 
-			ratio = sqrtf (max_d2) / bbox_diag;
-			if (ratio > max_ratio)
-				max_ratio = ratio;
+			for (i = 0; i < pairs; i++)
+			{
+				int a, b;
+				trivertx_t *va, *vb;
+				float max_d2 = 0.0f;
+				float ratio;
+
+				if (n > 1)
+				{
+					a = first + i;
+					b = first + ((i + 1) % n);
+				}
+				else
+				{
+					a = first;
+					b = hdr->frames[f+1].firstpose;
+				}
+				va = poseverts[a];
+				vb = poseverts[b];
+				if (!va || !vb)
+					continue;
+
+				for (v = 0; v < numverts; v++)
+				{
+					float ax = (float)va[v].v[0] * sx;
+					float ay = (float)va[v].v[1] * sy;
+					float az = (float)va[v].v[2] * sz;
+					float bx = (float)vb[v].v[0] * sx;
+					float by = (float)vb[v].v[1] * sy;
+					float bz = (float)vb[v].v[2] * sz;
+					float dvx = bx - ax;
+					float dvy = by - ay;
+					float dvz = bz - az;
+					float d2  = dvx*dvx + dvy*dvy + dvz*dvz;
+					if (d2 > max_d2)
+						max_d2 = d2;
+				}
+
+				ratio = sqrtf (max_d2) / bbox_diag;
+				measured++;
+				if (ratio > max_ratio)
+					max_ratio = ratio;
+			}
 		}
 	}
 
