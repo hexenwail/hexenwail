@@ -89,8 +89,23 @@ def subdivide(verts, size, acc):
     acc[0] += 1
     acc[1] += len(verts)
 
+BSPVERSION  = 29
+BSP2VERSION = (ord('B')) | (ord('S') << 8) | (ord('P') << 16) | (ord('2') << 24)
+
 def scan_bsp(name, b, sizes):
-    if len(b) < 4 + 15*8 or struct.unpack_from('<i', b, 0)[0] != 29:
+    if len(b) < 4 + 15*8:
+        return None
+    ver = struct.unpack_from('<i', b, 0)[0]
+    if ver == BSPVERSION:
+        bsp2 = False
+    elif ver == BSP2VERSION:
+        # BSP2 (common/bspfile.h): dedge2_t widens the vertex numbers to
+        # uint32 and dface2_t widens planenum/side/numedges/texinfo to int32,
+        # so both lumps have different strides.  Shadows of Turmoil and Wheel
+        # of Karma ship BSP2, and skipping it meant this tool silently
+        # reported "no maps found" for the mod content the bead is about.
+        bsp2 = True
+    else:
         return None
     L = [struct.unpack_from('<ii', b, 4 + i*8) for i in range(15)]
 
@@ -111,20 +126,28 @@ def scan_bsp(name, b, sizes):
     vofs, vlen = L[3]				# LUMP_VERTEXES, 12 bytes
     verts = [struct.unpack_from('<fff', b, vofs + i*12) for i in range(vlen // 12)]
 
-    eofs, elen = L[12]				# LUMP_EDGES, 4 bytes
-    edges = [struct.unpack_from('<HH', b, eofs + i*4) for i in range(elen // 4)]
+    eofs, elen = L[12]				# LUMP_EDGES
+    if bsp2:					# dedge2_t: 2 x uint32
+        edges = [struct.unpack_from('<II', b, eofs + i*8) for i in range(elen // 8)]
+    else:					# dedge_t:  2 x uint16
+        edges = [struct.unpack_from('<HH', b, eofs + i*4) for i in range(elen // 4)]
 
     sofs, slen = L[13]				# LUMP_SURFEDGES, 4 bytes
     surfedges = [struct.unpack_from('<i', b, sofs + i*4)[0] for i in range(slen // 4)]
 
-    fofs, flen = L[7]				# LUMP_FACES, 20 bytes
+    fofs, flen = L[7]				# LUMP_FACES
+    # dface_t is 20 bytes (firstedge int32 @4, numedges int16 @8, texinfo
+    # int16 @10); dface2_t is 28 (firstedge int32 @8, numedges int32 @12,
+    # texinfo int32 @16).
+    fsz, f_fe, f_ne, f_ti, ne_fmt, ti_fmt = \
+        (28, 8, 12, 16, '<i', '<i') if bsp2 else (20, 4, 8, 10, '<h', '<h')
     out = {sz: [0, 0] for sz in sizes}		# size -> [polys, verts], turb+sky
     turbout = {sz: [0, 0] for sz in sizes}	# size -> [polys, verts], turb only
     n_turb = n_sky = 0
-    for i in range(flen // 20):
-        firstedge = struct.unpack_from('<i', b, fofs + i*20 + 4)[0]
-        numedges  = struct.unpack_from('<h', b, fofs + i*20 + 8)[0]
-        ti        = struct.unpack_from('<h', b, fofs + i*20 + 10)[0]
+    for i in range(flen // fsz):
+        firstedge = struct.unpack_from('<i',    b, fofs + i*fsz + f_fe)[0]
+        numedges  = struct.unpack_from(ne_fmt,  b, fofs + i*fsz + f_ne)[0]
+        ti        = struct.unpack_from(ti_fmt,  b, fofs + i*fsz + f_ti)[0]
         if not (0 <= ti < len(ti_miptex)):
             continue
         mt = ti_miptex[ti]
@@ -179,6 +202,18 @@ def main(argv):
                 if r:
                     r['pak'] = os.path.join(os.path.basename(root), os.path.basename(pak))
                     rows.append(r)
+        # Loose maps/*.bsp as well.  Most mod content ships unpacked -- Shadows
+        # of Turmoil and Wheel of Karma both do -- and scanning only .pak files
+        # reported "no maps found" for exactly the content this bead is about.
+        for bsp in sorted(glob.glob(os.path.join(root, 'maps', '*.bsp'))):
+            nm = 'maps/' + os.path.basename(bsp)
+            if only and only not in nm:
+                continue
+            with open(bsp, 'rb') as f:
+                r = scan_bsp(nm, f.read(), sizes)
+            if r:
+                r['pak'] = os.path.basename(root) + '/maps'
+                rows.append(r)
     if not rows:
         print("no maps with turb or sky surfaces found", file=sys.stderr)
         return 1
