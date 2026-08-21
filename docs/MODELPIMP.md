@@ -145,6 +145,47 @@ the software build, including the `WEB_RENDERER=software` web build. Glow orbs
 are likewise GL-only; `EF_ILLUMINATE` does work, because the dlight is
 allocated in `cl_main.c`, which both renderers share.
 
+## Adding your own light-casting models: `r_dlight_model_list`
+
+`pimpmodel` is per-entity, which is the wrong shape when a light fixture is
+assembled from several models rather than being one pimped prop. There is no
+spawnflag that can describe "these six models together are a lamp", because the
+flag lives on a model.
+
+Separately from `pimpmodel`, the engine carries a built-in group of models that
+cast a dynamic light — the `rflmtrch` / `cflmtrch` / `castrch` / `rometrch` /
+`egtorch` / `flame` family, assigned in `Mod_SetAliasModelExtraFlags`
+(`engine/h2shared/gl_model.c`). That group was hardcoded in C, so a mod could
+not join it.
+
+`r_dlight_model_list` opens it up, on the same pattern as `r_nolerp_list`:
+
+```
+r_dlight_model_list "models/mylamp.mdl,models/mysconce.mdl"
+```
+
+- **Additive.** The built-in group is unchanged and always wins; this only adds
+  models the engine did not already know about. Empty by default, so nothing
+  shipped changes.
+- **Whole names, case-insensitive**, exactly like `r_nolerp_list` —
+  `models/mylamp.mdl`, not a prefix.
+- **Read at model load.** Set it from your mod's `autoexec.cfg`; changing it
+  mid-session takes effect on the next map load.
+- Entries get the built-in torch treatment, colour and `TORCH_STYLE` flicker
+  included. Per-model colour and radius remain the `misc_modelpimp` route —
+  this is the "make it a light" switch, not a lighting editor.
+- `gl_torch_dlight 0` still switches the whole group off, built-in and listed
+  alike.
+
+To confirm an entry took, `mcache` reports the group per model:
+
+```
+ 757 (0x...): models/puzzle/chalice.mdl TORCH_GLOW
+```
+
+A missing `TORCH_GLOW` there means the name did not match — check the path and
+extension before looking for the light elsewhere.
+
 ## `misc_model` spawnflags are a different vocabulary
 
 A recurring source of confusion, and the reason a field report reads as an

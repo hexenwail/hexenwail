@@ -3582,6 +3582,32 @@ static void Mod_SetAliasModelExtraFlags (qmodel_t *mod)
 		mod->glow_settings[COLOR_A] = 0.5f;
 		mod->glow_settings[LIGHT_STYLE] = 6; //MISSILE_STYLE
 	}
+	/* Modder-supplied dynamic-light group (uhexen2-vdmz).  Checked last, so
+	 * every built-in rule above wins and shipped content is untouched: this
+	 * only ever adds models the engine did not already know about.
+	 *
+	 * The built-in torch group is a hardcoded C list, which is exactly the
+	 * problem Mathuzzz reported -- his light fixtures are built from several
+	 * models rather than one pimped model, so no per-model spawnflag can
+	 * describe them, and he asked for "this group of models that produce
+	 * dynamic lights ... we modders could add our own", on the r_nolerp_list
+	 * pattern.  This is that list.
+	 *
+	 * Entries get the same treatment as the built-in torch family, colour and
+	 * TORCH_STYLE flicker included, so CL_RelinkEntities' XF_TORCH_GLOW branch
+	 * lights them with no further plumbing.  Per-model colour remains the
+	 * misc_modelpimp route; this is the "make it a light" switch, not a
+	 * lighting editor. */
+	else if (r_dlight_model_list.string[0] &&
+		 nameInList (r_dlight_model_list.string, mod->name))
+	{
+		mod->ex_flags |= XF_TORCH_GLOW;
+		mod->glow_settings[COLOR_R] = 0.8f;
+		mod->glow_settings[COLOR_G] = 0.4f;
+		mod->glow_settings[COLOR_B] = 0.1f;
+		mod->glow_settings[COLOR_A] = 1.0f;
+		mod->glow_settings[LIGHT_STYLE] = 1; //TORCH_STYLE
+	}
 }
 
 
@@ -4219,6 +4245,18 @@ static void Mod_Print (void)
 			MOD_Printf (FH, " flipratio=%.3f", mod->flipbook_max_ratio);
 		if (mod->type == mod_alias && (mod->flags & MOD_NOLERP))
 			MOD_Printf (FH, " NOLERP");
+		/* Engine-assigned light/glow group, so a modder can confirm an
+		 * r_dlight_model_list entry actually took -- without this there is
+		 * no way to tell a mistyped model name from a light that is being
+		 * suppressed elsewhere.  uhexen2-vdmz */
+		if (mod->type == mod_alias && mod->ex_flags)
+		{
+			if (mod->ex_flags & XF_TORCH_GLOW)	MOD_Printf (FH, " TORCH_GLOW");
+			if (mod->ex_flags & XF_GLOW)		MOD_Printf (FH, " GLOW");
+			if (mod->ex_flags & XF_MISSILE_GLOW)	MOD_Printf (FH, " MISSILE_GLOW");
+			if (mod->ex_flags & EF_ILLUMINATE)	MOD_Printf (FH, " ILLUMINATE");
+			if (mod->ex_flags & XF_NO_DLIGHT)	MOD_Printf (FH, " NO_DLIGHT");
+		}
 		MOD_Printf (FH, "\n");
 	}
 	if (FH)
