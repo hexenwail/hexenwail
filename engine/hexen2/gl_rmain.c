@@ -198,6 +198,31 @@ cvar_t	r_lerp_complete = {"r_lerp_complete", "1", CVAR_ARCHIVE};
 /* Comma-separated list of model names that bypass animation lerp — torches
  * and self-animating flames want discrete pose switching to keep the flame
  * shape; v_weapons rely on snap-back on attack frames.  Ironwail johnfitz. */
+/* Comma-separated list of extra model names that cast a dynamic light, on top
+ * of the engine's built-in group (the rflmtrch / castrch / rometrch / egtorch /
+ * flame family in Mod_SetAliasModelExtraFlags).  Empty by default, so nothing
+ * shipped changes.
+ *
+ * This exists because that built-in group is hardcoded in C and a mod cannot
+ * join it.  Mathuzzz hit the wall from the other side (uhexen2-vdmz): his light
+ * fixtures are assembled from several models rather than being one pimped
+ * model, so a per-model spawnflag can never describe them -- "the spawnflag
+ * shouldn't be model dependent... similarly to the nolerp group, we could have
+ * this group of models that produce dynamic lights.  Vanilla game would have
+ * the models mentioned above, but we modders could add our own."
+ *
+ * Deliberately additive rather than a replacement: the built-in list keeps
+ * working untouched, and an entry here grants the same treatment the built-in
+ * torch group gets, including its colour and TORCH_STYLE flicker.  A model that
+ * already matches a built-in rule keeps that rule's own settings.
+ *
+ * Entries are whole model names matched case-insensitively, exactly like
+ * r_nolerp_list -- "models/mylamp.mdl", not a prefix.  Read at model load, so
+ * set it from the mod's autoexec.cfg; changing it mid-session takes effect on
+ * the next map load.  gl_torch_dlight 0 still switches the whole group off.
+ * uhexen2-vdmz */
+cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
+
 cvar_t	r_nolerp_list = {"r_nolerp_list",
 	/* uhexen2-43f8: comprehensive list of flame/torch/candle/fire
 	 * variants across H2 + SoT + PoP + soc + later.  These models
