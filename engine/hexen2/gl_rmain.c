@@ -1503,10 +1503,11 @@ static void R_DrawAliasModel (entity_t *e)
 	int		mls;
 	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
 	float		caustics = R_CausticsIntensity();
-	/* uhexen2-fc1c / uhexen2-ac4c: the viewmodel is the one alias entity
-	 * that keeps writing depth when it draws blended, and the one that
-	 * ignores its model's own translucency flags entirely.  Rationale at
-	 * the branch chain below. */
+	/* uhexen2-fc1c: the viewmodel is the one alias entity that keeps
+	 * writing depth when it draws blended.  It does NOT ignore its
+	 * model's translucency flags -- that was uhexen2-ac4c, reverted; see
+	 * the branch chain below.  Otherwise used only for r_aliasinfo /
+	 * r_vm_watch capture. */
 	qboolean	viewmodel = (e == &cl.viewent);
 	const char	*branch_taken = "(none)";	/* for r_aliasinfo */
 
@@ -1795,34 +1796,40 @@ static void R_DrawAliasModel (entity_t *e)
 	 * blanket depth-write ban again -- see uhexen2-t9uv for what it
 	 * actually needs.
 	 *
-	 * THE VIEWMODEL IGNORES ITS MODEL'S TRANSLUCENCY FLAGS
-	 * (uhexen2-ac4c).  Hexen II keeps an alias model's translucency in
-	 * the palette INDEX of every texel, and GL_Upload8 turns an ODD index
-	 * into r_wateralpha.  uhexen2-93a8 started applying that same rule to
+	 * THE VIEWMODEL HONOURS ITS MODEL'S TRANSLUCENCY FLAGS, and the
+	 * branches below are deliberately NOT gated on `viewmodel`
+	 * (uhexen2-ac4c, uhexen2-lbkn).  They were, briefly; do not put that
+	 * back without reading this.
+	 *
+	 * Hexen II keeps an alias model's translucency in the palette INDEX
+	 * of every texel, and GL_Upload8 turns an ODD index into
+	 * r_wateralpha.  uhexen2-93a8 started applying that same rule to
 	 * external replacement skins, which had been escaping it and using
 	 * the pack's own opaque alpha -- correct for the Necromancer's
 	 * spellbook, and ruinous for the gun in your hand: Shadows of Turmoil
-	 * ships its own weapon viewmodels flagged EF_TRANSPARENT where the
-	 * base-game copies carry no flags at all, and pins r_wateralpha 0.5,
-	 * so 10-45% of every weapon's texels went from alpha 255 to 128 and
-	 * the weapons turned to glass.
+	 * pins r_wateralpha 0.5, so 10-45% of every weapon's texels went from
+	 * alpha 255 to 128 and the weapons turned to glass.
 	 *
-	 * The texture cannot tell the two apart -- odd-index-means-translucent
-	 * is one rule and both cases go through it -- so the discrimination
-	 * has to happen here, where we know whether we are drawing a world
-	 * model or the player's own weapon.  A first-person weapon is held
-	 * against the camera and reads as part of the HUD; vanilla draws it
-	 * opaque because the base-game weapon models declare no transparency
-	 * mode at all, and this restores that for the flagged ones too.
+	 * ac4c answered that by making cl.viewent skip the model-flag
+	 * branches and fall through to the opaque path.  That was the wrong
+	 * layer.  It assumed a viewmodel's EF_TRANSPARENT is always the
+	 * index rule leaking through a replacement skin -- but SoT flags
+	 * sot/models/ravenstf.mdl (Cleric weapon 4) EF_TRANSPARENT
+	 * deliberately, where the base-game pak1 copy carries no flags at
+	 * all.  Forcing it opaque made the parts meant to be see-through
+	 * solid: the exact inverse of the bug ac4c was written to fix, and a
+	 * confirmed independent cause of uhexen2-gnhh.
 	 *
-	 * Only the MODEL-flag branches are skipped.  DRF_TRANSLUCENT below is
-	 * entity state the server sets on cl.viewent through
-	 * svc_set_view_flags, which is how the invisibility ring fades the
-	 * weapon, so that branch stays live and deliberate translucency still
-	 * works.  Index-0 holes survive too: the opaque branch asserts the
-	 * 0.01 alpha threshold and salias_frag.glsl discards below it BEFORE
-	 * u_force_opaque_alpha rewrites the output alpha, so a hole is still
-	 * a hole and only the 50% class is lost. */
+	 * The model flag is authoritative and the skin alpha is derived, so
+	 * the discrimination belongs on the SKIN side, at upload, where
+	 * "this model declares transparency" and "this skin acquired
+	 * transparency from the index rebuild" are still distinguishable.
+	 * By the time we are here they are not.  See uhexen2-93a8 for the
+	 * blast radius that still needs bounding there.
+	 *
+	 * DRF_TRANSLUCENT below is entity state the server sets on
+	 * cl.viewent through svc_set_view_flags -- how the invisibility ring
+	 * fades the weapon -- and is independent of all of the above. */
 	if (e->model->flags & EF_SPECIAL_TRANS)
 	{
 		branch_taken = "EF_SPECIAL_TRANS";
@@ -2121,10 +2128,12 @@ static void R_DrawAliasModel (entity_t *e)
 
 	model_constant_alpha = 1.0f;
 
-	/* Mirrors the branch chain's predicates exactly, viewmodel exemption
-	 * included (uhexen2-ac4c): a restore that fires for a branch that
-	 * never ran is how an EF_SPECIAL_TRANS viewmodel would come back with
-	 * culling re-enabled that nothing had disabled. */
+	/* Mirrors the branch chain's predicates exactly -- including the
+	 * absence of any viewmodel exemption, which the chain above no longer
+	 * has (uhexen2-lbkn).  These two predicate sets must be changed
+	 * together: a restore that fires for a branch that never ran is how
+	 * an EF_SPECIAL_TRANS viewmodel comes back with culling re-enabled
+	 * that nothing had disabled. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
 	    (e->model->flags & EF_SPECIAL_TRANS) ||
 	    (e->model->flags & EF_TRANSPARENT) ||
