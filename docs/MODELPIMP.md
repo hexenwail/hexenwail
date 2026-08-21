@@ -42,7 +42,25 @@ flames.
 is treated as 0..255 and divided down. All-zero keeps the model's own colours.
 
 A colour given without spawnflag 4 or 8 auto-enables the orb, because older QC
-(SoT's `obj_evileyes`) calls `pimpmodel` with just a colour and expects one.
+(SoT's `obj_evileyes`) calls `pimpmodel` with just a colour and expects one —
+**but only on entities that set none of the r15 reach flags (16, 32, 64).**
+
+That inference cannot simply be deleted: 40 of the 151 `misc_modelpimp`
+entities shipped across Shadows of Turmoil and Wheel of Karma depend on it,
+almost all of them spinning puzzle keys and items that set `glow_color`,
+`health` and `style` but never spawnflag 4. Requiring bit 4 unconditionally
+puts every one of them out.
+
+It is equally wrong for anyone writing against this document, where spawnflag 4
+is the thing that grants the orb. So the two populations are split by the one
+signal that separates them: no content written before 0.8.0-beta.r15 can set
+16, 32 or 64. **Touch any reach flag and the strict contract applies — the orb
+comes from spawnflag 4 and nowhere else.** Set no reach flag and the legacy
+inference stands.
+
+If you want a cast light whose colour is not also an orb, set the reach flag
+you need (or 16, which is a no-op for a lone entity) and the colour will be
+left to the light.
 
 ## Spawnflags
 
@@ -180,6 +198,11 @@ That gives two things to enumerate before adding a spawnflag bit:
    passing 0, 4, 8 or 12.
 
 Neither set touches bits 16, 32 or 64, which is why r15 changed nothing that
-shipped. Note that 1796 and 3332 do carry high bits — 256, 512, 1024 and 2048 —
+shipped, and why using one of those bits is a safe signal that a map was
+written against r15 or later — the discriminator the orb inference above relies
+on. Re-running the enumeration today over both mods' `.bsp` files gives 151
+`misc_modelpimp` entities with spawnflags 0, 1, 4, 5, 8, 12, 13, 29, 1796 and
+3332; the single entity carrying a reach bit is sf=29 (`1|4|8|16`) in
+`karma2/testmod_mathuz.bsp`, which sets bit 4 as well and so is unaffected. Note that 1796 and 3332 do carry high bits — 256, 512, 1024 and 2048 —
 that the engine currently never tests, and so silently ignores. A future
 spawnflag must not claim one of those.

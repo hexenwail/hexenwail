@@ -416,6 +416,12 @@ static void PF_setpuzzlemodel (void)
 #define	PIMP_SF_SHAREMOTION	32	/* share spin/float with siblings too */
 #define	PIMP_SF_NODLIGHT	64	/* cast no dynamic light (see XF_NO_DLIGHT) */
 
+/* The reach flags introduced in 0.8.0-beta.r15.  No content written before r15
+ * can be using them, so their presence is a reliable signal that the mapper is
+ * working from the current documented spawnflag contract rather than from the
+ * pre-r15 conventions -- see the colour/orb inference below. */
+#define	PIMP_SF_R15_MASK	(PIMP_SF_SELFONLY | PIMP_SF_SHAREMOTION | PIMP_SF_NODLIGHT)
+
 /*
 =================
 PF_pimpmodel
@@ -570,12 +576,39 @@ static void PF_pimpmodel (void)
 		}
 		/* else (color '0 0 0'): keep model defaults */
 
-		/* If a color was given but no glow/illuminate effect was selected
+		/* If a colour was given but no glow/illuminate effect was selected
 		 * via spawnflags, auto-enable the orb. Old QC patterns (e.g. SoT
-		 * obj_evileyes) call pimpmodel with just a color expecting an orb,
+		 * obj_evileyes) call pimpmodel with just a colour expecting an orb,
 		 * without setting spawnflag 4. Don't fire when the QC explicitly
-		 * chose EF_ILLUMINATE (8) — that color is for the dlight. */
-		if (color_set && !(spawnflags & (4 | 8)))
+		 * chose EF_ILLUMINATE (8) — that colour is for the dlight.
+		 *
+		 * ...but only for content that predates the r15 reach flags.
+		 *
+		 * The inference is load-bearing for shipped maps: of the 151
+		 * misc_modelpimp entities across Shadows of Turmoil and Wheel of
+		 * Karma, 40 rely on it for their orb — spawnflags 0 and 1, chiefly
+		 * the spinning puzzle keys and items that set glow_color, health
+		 * (orb radius) and style but never spawnflag 4. Requiring bit 4
+		 * unconditionally would put all 40 out.
+		 *
+		 * It is also wrong for anyone writing against the current contract,
+		 * where spawnflag 4 is documented as the thing that grants the orb.
+		 * Mathuzzz hit this on r15: a misc_modelpimp carrying a colour meant
+		 * for its cast light, plus one of the new reach flags, was handed an
+		 * orb it never asked for ("it still creates the glow even without
+		 * the spawnflag 4, which was supposed to be required for the glow").
+		 *
+		 * Split the two populations by the only thing that reliably tells
+		 * them apart: use of the reach flags added in r15. Nothing written
+		 * before r15 can set 16, 32 or 64, and nothing shipped does without
+		 * also setting bit 4 — verified across every .bsp in both mods, the
+		 * sole hit being sf=29 (1|4|8|16), which has bit 4 anyway. So an
+		 * entity that touches PIMP_SF_R15_MASK is demonstrably written
+		 * against the r15 documentation and gets the strict contract; every
+		 * legacy entity keeps the inference and its orb.
+		 * uhexen2-nna4. */
+		if (color_set && !(spawnflags & (PIMP_SF_GLOW | PIMP_SF_ILLUMINATE))
+				&& !(spawnflags & PIMP_SF_R15_MASK))
 			pimp->ex_flags |= EF_GLOW;
 	}
 
