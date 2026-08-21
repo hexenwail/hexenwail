@@ -290,6 +290,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
+	p->u_turb             = glGetUniformLocation_fp(p->program, "u_turb");
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
 	p->u_soft_params      = glGetUniformLocation_fp(p->program, "u_soft_params");
@@ -632,6 +633,7 @@ static const char salias_frag[] =
 	"uniform float u_alpha_threshold;\n"
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
+	"uniform vec2 u_turb;\n"		/* x=warp amplitude in texture units (0=off), y=time (uhexen2-9o7u) */
 	/* Soft particles (uhexen2-mf9u).  Explicitly highp: GLSL_FRAG_HEADER
 	 * defaults the ES tier to mediump, whose 10-bit mantissa cannot tell
 	 * two window-space depths apart, and the whole fade is a difference of
@@ -645,7 +647,46 @@ static const char salias_frag[] =
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
 	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	/* Per-pixel liquid warp (uhexen2-9o7u).  Off unless C sets u_turb.x, which
+	 * only EmitWaterPolys does, and only under r_water_pixel_warp 1 -- every
+	 * other user of this program (models, sprites, brush polys) leaves it 0.
+	 *
+	 * WHY THIS IS NOT JUST sin().  The legacy CPU warp evaluates the same sine
+	 * at tile corners and lets the rasteriser interpolate linearly.  That
+	 * reconstructs the sine badly -- 93% peak error even at gl_subdivide_size
+	 * 24, see tools/warp_recon.py -- but it is inherently band-limited: it
+	 * cannot alias in screen space, because the samples are fixed in world
+	 * space.  Evaluating the true sine per pixel fixes the shape and forfeits
+	 * that protection: at a glancing angle one pixel can span many warp
+	 * periods and the sine aliases into banding.  That is what sank the first
+	 * attempt (uhexen2-tlsh) and its fwidth-threshold follow-up (uhexen2-famb).
+	 *
+	 * The band-limit here is analytic rather than a threshold.  The box average
+	 * of sin(k*x) over a footprint of width W is sin(k*x)*sinc(k*W/2), so
+	 * scaling the amplitude by that sinc IS the filtered signal: full throw up
+	 * close, smoothly to zero as the footprint grows, reaching zero precisely
+	 * when one pixel covers one whole warp period (k*W/2 = pi).  Clamped at the
+	 * first zero so the sinc's negative lobes cannot bring back a
+	 * phase-inverted ripple further out.
+	 *
+	 * s is displaced by a sine of t and vice versa (EmitWaterPolys), so each
+	 * axis is attenuated by the OTHER axis' footprint. */
+	"    vec2 uv = v_texcoord;\n"
+	"    if (u_turb.x > 0.0) {\n"
+	"        const float K = 0.125;\n"
+	"        const float TAU = 6.2831853;\n"
+	"        vec2 raw = uv * 64.0;\n"
+	"        vec2 fw  = fwidth(raw);\n"
+	"        vec2 z   = 0.5 * K * vec2(fw.y, fw.x);\n"
+	"        vec2 att = vec2(z.x > 1e-4 ? sin(z.x) / z.x : 1.0,\n"
+	"                        z.y > 1e-4 ? sin(z.y) / z.y : 1.0);\n"
+	"        att = clamp(att, 0.0, 1.0);\n"
+	"        float as = mod(K * raw.y + u_turb.y, TAU);\n"
+	"        float at = mod(K * raw.x + u_turb.y, TAU);\n"
+	"        raw += u_turb.x * vec2(att.x * sin(as), att.y * sin(at));\n"
+	"        uv = raw * (1.0 / 64.0);\n"
+	"    }\n"
+	"    vec4 tex = texture(u_texture0, uv);\n"
 	"    vec4 color = tex * v_color;\n"
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
 	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
