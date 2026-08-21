@@ -316,9 +316,18 @@ void EmitWaterPolys (msurface_t *fa)
 	float		ripple = gl_waterripple.value;
 	float		warpamt = R_WaterWarpAmount();
 	float		wtime = realtime * R_WaterWarpSpeed();
+	/* uhexen2-9o7u: hand the UV warp to the fragment shader, which evaluates
+	 * the same sine per pixel with an analytic band-limit instead of sampling
+	 * it at tile corners and interpolating linearly.  The Z ripple below stays
+	 * here either way -- it displaces the vertex itself, so there is nothing
+	 * per-pixel about it.  turbsin's amplitude is 8 texture units; the shader
+	 * takes that folded into u_turb.x. */
+	qboolean	pixelwarp = (r_water_pixel_warp.integer != 0);
 
 	if (ripple < 0) ripple = 0;
 	else if (ripple > 10) ripple = 10;
+
+	GL_SetTurb (pixelwarp ? warpamt * 8.0f : 0.0f, wtime);
 
 	/* Batch all polygons as triangles in one draw call */
 	GL_ImmBegin ();
@@ -353,10 +362,18 @@ void EmitWaterPolys (msurface_t *fa)
 					 * that flatten whenever that constant term crosses zero. */
 					nz += ripple * warpamt * sin(v[0]*0.05 + wtime) * sin(v[1]*0.05 + wtime);
 
-				s = os + warpamt * turbsin[(int)((ot*0.125 + wtime) * TURBSCALE) & 255];
-				s *= (1.0/64);
-				t = ot + warpamt * turbsin[(int)((os*0.125 + wtime) * TURBSCALE) & 255];
-				t *= (1.0/64);
+				if (pixelwarp)
+				{	/* raw coords; the shader warps them */
+					s = os * (1.0/64);
+					t = ot * (1.0/64);
+				}
+				else
+				{
+					s = os + warpamt * turbsin[(int)((ot*0.125 + wtime) * TURBSCALE) & 255];
+					s *= (1.0/64);
+					t = ot + warpamt * turbsin[(int)((os*0.125 + wtime) * TURBSCALE) & 255];
+					t *= (1.0/64);
+				}
 
 				GL_ImmTexCoord2f (s, t);
 				GL_ImmVertex3f (v[0], v[1], nz);
@@ -364,6 +381,11 @@ void EmitWaterPolys (msurface_t *fa)
 		}
 	}
 	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+
+	/* Back to rest before anything else draws.  gl_shader_alias is shared with
+	 * models, sprites and brush polys, and a hot u_turb would warp their
+	 * texture lookups too.  uhexen2-9o7u */
+	GL_SetTurb (0.0f, 0.0f);
 }
 
 

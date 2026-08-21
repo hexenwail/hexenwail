@@ -223,6 +223,22 @@ cvar_t	r_lerp_complete = {"r_lerp_complete", "1", CVAR_ARCHIVE};
  * uhexen2-vdmz */
 cvar_t	r_dlight_model_list = {"r_dlight_model_list", "", CVAR_ARCHIVE};
 
+/* Evaluate the liquid warp per pixel in the fragment shader instead of per
+ * vertex on the CPU (uhexen2-9o7u).  Default 0 = the legacy per-vertex path.
+ *
+ * The per-vertex warp samples the sine at gl_subdivide_size tile corners and
+ * interpolates linearly, which is a poor reconstruction at any affordable tile
+ * size -- 165% peak error at the shipped 64, still 93% at 24, and 24 already
+ * costs ~4.9x the turb geometry (tools/warp_recon.py, tools/bsp_subdiv.py).
+ * Per-pixel has no reconstruction error at all and makes gl_subdivide_size
+ * irrelevant for turb surfaces.
+ *
+ * Default-off because this has been reverted twice on visual grounds
+ * (uhexen2-tlsh, uhexen2-famb) and the band-limiting rewrite that answers both
+ * reports has not yet been judged on real content by a human on real hardware.
+ * Turn it on, look at sot/Arena's lava at a glancing angle, and compare. */
+cvar_t	r_water_pixel_warp = {"r_water_pixel_warp", "0", CVAR_ARCHIVE};
+
 cvar_t	r_nolerp_list = {"r_nolerp_list",
 	/* uhexen2-43f8: comprehensive list of flame/torch/candle/fire
 	 * variants across H2 + SoT + PoP + soc + later.  These models
@@ -1004,6 +1020,11 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	 * model against whatever is behind it. */
 	if (prog->u_soft_params >= 0)
 		glUniform3f_fp (prog->u_soft_params, 0.0f, 0.0f, 0.0f);
+	/* Same reasoning for the liquid warp: this program is shared with
+	 * EmitWaterPolys, and this path sets its uniforms directly rather than
+	 * through GL_ImmEnd, so it must clear it itself.  uhexen2-9o7u */
+	if (prog->u_turb >= 0)
+		glUniform2f_fp (prog->u_turb, 0.0f, 0.0f);
 
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones);
 

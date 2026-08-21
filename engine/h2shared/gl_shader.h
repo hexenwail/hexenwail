@@ -44,6 +44,7 @@ typedef struct glprogram_s {
 	 * would make GL_ImmEnd clobber the per-frame world u_caustics that
 	 * R_SetupFrame uploads. */
 	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
+	GLint	u_turb;            /* alias FS: vec2(warp amplitude in texture units, time); x=0 disables (uhexen2-9o7u) */
 	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
 	/* Soft particles (uhexen2-mf9u).  Same per-batch-state reasoning as
 	 * u_alias_caustics: gl_shader_alias is shared by sprites, warp polys,

@@ -60,6 +60,7 @@ static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
  * they finish so sprites / warp polys / brush polys sharing gl_shader_alias
  * never inherit the effect. */
 static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
+static float	imm_turb[2] = { 0.0f, 0.0f };	/* uhexen2-9o7u: x=amplitude (0=off), y=time */
 /* Soft-particle fade for sprite batches (uhexen2-mf9u).  Like the caustics
  * pair above, 0 intensity is the resting state rather than a -1 sentinel, and
  * R_DrawSpriteModel restores it after each sprite so the alias / warp / brush
@@ -237,6 +238,15 @@ void GL_SetAliasCaustics (float intensity, float time)
 	imm_alias_caustics[1] = time;
 }
 
+/* uhexen2-9o7u.  amplitude 0 disables the per-pixel liquid warp, which is the
+ * resting state for every batch that is not a turb surface under
+ * r_water_pixel_warp 1. */
+void GL_SetTurb (float amplitude, float time)
+{
+	imm_turb[0] = amplitude;
+	imm_turb[1] = time;
+}
+
 /* uhexen2-mf9u.  inv_dist 0 disables the fade entirely; za/zb are the
  * window-depth -> view-distance coefficients for the live projection. */
 void GL_SetSoftParticles (float inv_dist, float za, float zb)
@@ -346,6 +356,7 @@ static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
+static float	imm_cache_turb[2] = { -1.0f, -1.0f };	/* uhexen2-9o7u */
 static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
 static float	imm_cache_alias_model[16];
 static qboolean	imm_cache_alias_model_set;
@@ -478,6 +489,17 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 			       imm_alias_caustics[0], imm_alias_caustics[1]);
 		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
 		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
+	}
+
+	/* uhexen2-9o7u.  Resting amplitude is 0, so with r_water_pixel_warp off
+	 * this fires once per program switch and never again -- same shape as the
+	 * caustics push above. */
+	if (shader->u_turb >= 0 &&
+	    (imm_turb[0] != imm_cache_turb[0] || imm_turb[1] != imm_cache_turb[1]))
+	{
+		glUniform2f_fp(shader->u_turb, imm_turb[0], imm_turb[1]);
+		imm_cache_turb[0] = imm_turb[0];
+		imm_cache_turb[1] = imm_turb[1];
 	}
 
 	/* uhexen2-mf9u.  Resting value is 0 intensity, so on a build with
