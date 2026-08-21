@@ -962,6 +962,7 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 	entity_state2_t	*ref_ent, *set_ent, build_ent;
 	qboolean		FoundInList,DoRemove,DoPlayer,DoMonsters,DoMissiles,DoMisc,IgnoreEnt;
 	short			RemoveList[MAX_CLIENT_STATES],NumToRemove;
+	int			NumDeferred;
 
 	client_num = client-svs.clients;
 	state = &sv.states[client_num];
@@ -1031,6 +1032,7 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 	client->last_frame = CLIENT_FRAME_RESET;
 
 	NumToRemove = 0;
+	NumDeferred = 0;
 	MSG_WriteByte (msg, svc_reference);
 	MSG_WriteByte (msg, client->current_frame);
 	MSG_WriteByte (msg, client->current_sequence);
@@ -1125,14 +1127,26 @@ skipA:
 			FoundInList = true;
 			if (DoRemove)
 			{
-				RemoveList[NumToRemove] = e;
-				NumToRemove++;
-				continue;
+				if (NumToRemove < MAX_CLEAR_EDICTS_PER_MSG)
+				{
+					RemoveList[NumToRemove] = e;
+					NumToRemove++;
+					continue;
+				}
+
+				/* Remove list is full for this message.  svc_clear_edicts
+				 * describes its count in one byte, so removals past
+				 * MAX_CLEAR_EDICTS_PER_MSG cannot be expressed on the wire.
+				 * Fall through as if the entity were merely ignored: it is
+				 * kept in the build list, so it survives in the client's
+				 * reference frame and is removed by a later message.
+				 * Dropping it here instead would leave it out of the
+				 * reference with BE_ON still set on the client, stranding it
+				 * as a permanent ghost. */
+				NumDeferred++;
+				IgnoreEnt = true;
 			}
-			else
-			{
-				ref_ent = &reference->states[position];
-			}
+			ref_ent = &reference->states[position];
 		}
 		else
 		{
@@ -1346,6 +1360,19 @@ skipA:
 		if (build->count >= MAX_CLIENT_STATES)
 			break;
 	}
+
+	/* The loop above caps NumToRemove precisely because this count goes out
+	 * as a byte while the entries go out as shorts.  Clamp again here so the
+	 * two writes can never disagree: a truncated count followed by the full
+	 * run of shorts desynchronises every later message in the packet, which
+	 * reaches the player as an "Illegible server message" host error rather
+	 * than as anything diagnosable (uhexen2-6ugh). */
+	if (NumToRemove > MAX_CLEAR_EDICTS_PER_MSG)
+		NumToRemove = MAX_CLEAR_EDICTS_PER_MSG;
+
+	if (NumDeferred)
+		Con_DPrintf ("%s: remove list full, %d edict(s) deferred\n",
+				__thisfunc__, NumDeferred);
 
 	MSG_WriteByte (msg, svc_clear_edicts);
 	MSG_WriteByte (msg, NumToRemove);
