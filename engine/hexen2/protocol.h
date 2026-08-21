@@ -353,6 +353,17 @@ typedef struct
 #define MAX_FRAMES		5
 #define CLEAR_LIMIT		2
 
+/* svc_clear_edicts carries its entry count in a SINGLE BYTE, followed by that
+ * many shorts.  The server must therefore never queue more than 255 removals
+ * into one message: writing a truncated count and then the untruncated number
+ * of shorts leaves the client reading the leftover shorts as command bytes,
+ * desynchronising the rest of the packet.  That surfaced as
+ *   Host_Error: CL_ParseServerMessage: Illegible server message <garbage>
+ * on entity-heavy maps, where more than 255 edicts can leave the PVS in a
+ * single frame (uhexen2-6ugh).  Excess removals are deferred to later
+ * messages rather than dropped -- see SV_PrepareClientEntities. */
+#define MAX_CLEAR_EDICTS_PER_MSG	255
+
 #define ENT_STATE_ON		1
 #define ENT_CLEARED		2
 
