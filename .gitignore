@@ -37,6 +37,10 @@ engine/build*/
 # legitimately ships an .xml is unaffected.
 /*.rdc
 /*.xml
+# A part-downloaded capture is still a capture, and the frame images
+# extracted out of one are the same disposable scratch.
+/*.crdownload
+/capture*_frame*
 
 # Beads / Dolt files (added by bd init)
 .dolt/
