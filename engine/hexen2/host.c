@@ -67,7 +67,8 @@ byte		*host_basepal;
 byte		*host_colormap;
 long		host_colormapsize;
 
-cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};
+cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};		// dedicated server frame interval only
+cvar_t		sv_physfps = {"sv_physfps", "72", CVAR_ARCHIVE};		// server/physics tick rate
 static	cvar_t	sys_adaptive = {"sys_adaptive", "1", CVAR_ARCHIVE};
 static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for slow motion
 cvar_t		host_maxfps = {"host_maxfps", "72", CVAR_ARCHIVE};		// cap client framerate
@@ -383,6 +384,7 @@ static void Host_InitLocal (void)
 
 	Cvar_RegisterVariable (&sys_ticrate);
 	Cvar_RegisterVariable (&sys_adaptive);
+	Cvar_RegisterVariable (&sv_physfps);
 
 	Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_maxfps);
@@ -902,17 +904,35 @@ static void _Host_Frame (float time)
 		IN_Move (&cl.pendingcmd);
 	}
 
-// fixed-timestep accumulator for server/physics
-	phys_interval = sys_ticrate.value;
-	if (phys_interval < 0.01)
-		phys_interval = 0.01;
+// Fixed-timestep accumulator for the server/physics tick.
+//
+// This is deliberately NOT sys_ticrate.  sys_ticrate is the dedicated-server
+// frame interval -- sys_sdl.c only reads it under isDedicated -- and its 0.05
+// default meant the listen server thought at 20 Hz.  That is a third of the
+// rate the game was written for and it is visible in play: SV_RunThink runs at
+// most one think per server frame, so every chain scheduled shorter than the
+// interval (the common "nextthink = time" mod idiom, monster attack frames)
+// got capped at 20 Hz; and SV_AirAccelerate clamps wishspd to 30 and gains at
+// most addspeed per tick, a figure that does not scale with frametime, so
+// strafe-jump acceleration is directly proportional to the tick count.
+//
+// Upstream uHexen2 ran Host_ServerFrame once per render frame at the real
+// frametime, i.e. up to host_maxfps.  Raven's own FPS_20 arm above substeps
+// the world "while (temp_host_frametime > 1.0/72.0)".  72 Hz is the historical
+// rate; it also keeps SV_SendClientMessages at the vanilla packet rate, which
+// a faster tick would not.  uhexen2-skjv
+	phys_interval = 1.0 / CLAMP(10.0, sv_physfps.value, 250.0);
 
 	render_frametime = host_frametime;
 	phys_accum += host_frametime;
 
-	// cap accumulator to prevent spiral of death
-	if (phys_accum > phys_interval * 5)
-		phys_accum = phys_interval * 5;
+	// Host_FilterTime already clamps one frame's contribution to 0.1s, so the
+	// accumulator can gain at most that per frame.  Cap just above it: cutting
+	// closer would silently dilate game time on every hitch, and this still
+	// bounds one render frame's catch-up (~9 ticks at 72 Hz), which drains
+	// more simulated time than a clamped frame can add.
+	if (phys_accum > 0.1 + phys_interval)
+		phys_accum = 0.1 + phys_interval;
 
 	while (phys_accum >= phys_interval)
 	{
