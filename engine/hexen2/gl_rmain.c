@@ -1349,8 +1349,10 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 	 * elapsed time between pose changes (computed below on transition).
 	 * Updating it here every frame would corrupt an in-flight blend, so
 	 * keep the previous measurement until the next pose change.  Falls
-	 * back to 0.05f (Hexen II 20 Hz server tick) when no measurement
-	 * exists yet — set in the reset path. */
+	 * back to 0.05f when no measurement exists yet — set in the reset
+	 * path.  That default is the usual Hexen II animation frame length
+	 * the progs schedule, not the server tick rate (sv_physfps): do not
+	 * "correct" it to the tick interval. */
 
 	/* Treat stale lerp state as an implicit reset.  Entities that come
 	 * (back) into PVS after being hidden keep their old previouspose +

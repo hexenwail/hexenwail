@@ -37,9 +37,10 @@ cvar_t	cl_shownet = {"cl_shownet", "0", CVAR_NONE};	// can be 0, 1, or 2
 cvar_t	cl_nolerp = {"cl_nolerp", "0", CVAR_NONE};
 /* Render-time movement lerp for step-movers (MOVETYPE_STEP monsters,
  * doors, plats — flagged with U_NOLERP in the network protocol).  These
- * entities think every 0.1s but the server tick runs at 0.05s, so the
- * default per-tick msg_origins lerp leaves them idle every other tick
- * (visible as "move-pause-move-pause" stutter, especially at 144 Hz).
+ * entities think every 0.1s, which is several server ticks (sv_physfps
+ * defaults to 72), so the default per-tick msg_origins lerp leaves them
+ * idle for most of them — visible as "move-pause-move-pause" stutter,
+ * especially at 144 Hz.
  * When enabled, those entities skip the cl_main msg_origins path and
  * instead use a fixed 0.1s render-time lerp window that detects origin
  * changes between server pushes and smooths over whatever multi-tick
@@ -633,9 +634,9 @@ static void CL_RelinkEntities (void)
 		}
 		else if (r_lerpmove.integer && (ent->lerpflags & LERP_MOVESTEP) && i != cl.viewentity)
 		{	// Step-mover (MOVETYPE_STEP — monsters, doors, plats).  These
-			// only think every 0.1s while the server tick runs at 0.05s,
-			// so the per-tick msg_origins lerp would sit idle every other
-			// tick and produce visible "move-pause-move-pause" stutter.
+			// only think every 0.1s, several server ticks apart, so the
+			// per-tick msg_origins lerp would sit idle for most of them
+			// and produce visible "move-pause-move-pause" stutter.
 			// Use a fixed-window render-time lerp (Ironwail's approach):
 			// detect msg_origins changes here, lerp over 0.1s.  Whatever
 			// multi-tick gap exists between actual server-side moves, the
