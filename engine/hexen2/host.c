@@ -69,6 +69,7 @@ long		host_colormapsize;
 
 cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};		// dedicated server frame interval only
 cvar_t		sv_physfps = {"sv_physfps", "72", CVAR_ARCHIVE};		// server/physics tick rate
+cvar_t		cl_fixangle_hold = {"cl_fixangle_hold", "0.06", CVAR_ARCHIVE};	// how long a forced view angle survives render-rate input; 0 = off
 static	cvar_t	sys_adaptive = {"sys_adaptive", "1", CVAR_ARCHIVE};
 static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for slow motion
 cvar_t		host_maxfps = {"host_maxfps", "72", CVAR_ARCHIVE};		// cap client framerate
@@ -385,6 +386,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_ticrate);
 	Cvar_RegisterVariable (&sys_adaptive);
 	Cvar_RegisterVariable (&sv_physfps);
+	Cvar_RegisterVariable (&cl_fixangle_hold);
 
 	Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_maxfps);
@@ -870,6 +872,7 @@ static void _Host_Frame (float time)
 	static double		phys_accum = 0;
 	double			phys_interval;
 	double			render_frametime;
+	double			fixangle_hold;
 
 	if (setjmp(host_abort))
 		return;			// something bad happened, or the server disconnected
@@ -896,14 +899,6 @@ static void _Host_Frame (float time)
 // check for commands typed to the host
 	Host_GetConsoleCommands ();
 
-// sample input every render frame for smooth view angles
-// movement deltas accumulate into cl.pendingcmd (merged at physics tick)
-	if (cls.signon == SIGNONS && Key_GetDest() == key_game)
-	{
-		CL_AdjustAngles ();
-		IN_Move (&cl.pendingcmd);
-	}
-
 // Fixed-timestep accumulator for the server/physics tick.
 //
 // This is deliberately NOT sys_ticrate.  sys_ticrate is the dedicated-server
@@ -922,6 +917,29 @@ static void _Host_Frame (float time)
 // rate; it also keeps SV_SendClientMessages at the vanilla packet rate, which
 // a faster tick would not.  uhexen2-skjv
 	phys_interval = 1.0 / CLAMP(10.0, sv_physfps.value, 250.0);
+
+// Sample input every render frame for smooth view angles; movement deltas
+// accumulate into cl.pendingcmd and merge at the physics tick.
+//
+// A view the server is forcing with .fixangle has to survive that sampling.
+// svc_setangle only arrives when the server sends, and the QC that asks for
+// it thinks at its own cadence, so between two forces there are render frames
+// with no setangle to overwrite what the mouse just did -- and the camera a
+// mod meant to pin drifts instead.  Re-apply the latched angle rather than
+// suppressing the input, so pendingcmd still gets its movement deltas: it is
+// the view that is pinned, not the player.  uhexen2-g8lb
+	if (cls.signon == SIGNONS && Key_GetDest() == key_game)
+	{
+		CL_AdjustAngles ();
+		IN_Move (&cl.pendingcmd);
+
+		fixangle_hold = cl_fixangle_hold.value;
+		if (fixangle_hold > 0 && fixangle_hold < 2.0 * phys_interval)
+			fixangle_hold = 2.0 * phys_interval;	/* never shorter than the tick it spans */
+
+		if (CL_FixAngleHeld (fixangle_hold))
+			VectorCopy (cl.fixangle_angles, cl.viewangles);
+	}
 
 	render_frametime = host_frametime;
 	phys_accum += host_frametime;

@@ -48,6 +48,7 @@ extern	qboolean	isDedicated;
 
 extern	cvar_t		sys_ticrate;
 extern	cvar_t		sv_physfps;
+extern	cvar_t		cl_fixangle_hold;
 extern	cvar_t		sys_throttle;
 extern	cvar_t		host_maxfps;
 extern	cvar_t		sys_nostdout;
