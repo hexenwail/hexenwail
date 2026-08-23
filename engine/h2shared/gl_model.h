@@ -770,6 +770,22 @@ typedef struct qmodel_s
 	 * test.  uhexen2-5zv5. */
 	qboolean	skin_soft_alpha;
 
+	/* True when this model's skin came from an external RGBA replacement
+	 * rather than the palette-indexed skin in the .mdl.
+	 *
+	 * It exists for EF_SPECIAL_TRANS.  That flag means "translucency through
+	 * the particle table": the 8-bit upload writes ColorPercent[] into the
+	 * alpha channel, and ColorPercent is a TRANSPARENCY, so the draw path
+	 * pairs it with a reversed blend func (GL_ONE_MINUS_SRC_ALPHA,
+	 * GL_SRC_ALPHA).  The two halves agree and Raven's content looks right.
+	 *
+	 * A replacement TGA/PNG carries the universal convention instead --
+	 * alpha is OPACITY, 255 means opaque -- so the same reversed func renders
+	 * it inside out.  That is BloodShot's "tga alpha channels are inverted
+	 * for these flags", and why EF_HOLEY models were unaffected: only
+	 * EF_SPECIAL_TRANS reverses the func.  uhexen2-4y6w. */
+	qboolean	skin_replaced;
+
 	/* Snapshot of the model's load-time flags / ex_flags / glow_settings,
 	 * captured at the end of Mod_LoadAliasModel{,New}.  PimpModel writes
 	 * through to mod->flags etc. so misc_modelpimp can change rendering

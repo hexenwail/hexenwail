@@ -2620,6 +2620,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 	/* Recomputed below from whatever skin actually wins; a reload must not
 	 * inherit the previous verdict.  uhexen2-5zv5 */
 	loadmodel->skin_soft_alpha = false;
+	loadmodel->skin_replaced   = false;
 
 	if (numskins < 1 || numskins > MAX_SKINS)
 		Sys_Error ("%s: Invalid # of skins: %d", __thisfunc__, numskins);
@@ -2712,6 +2713,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 				else
 					skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
 			}
+			loadmodel->skin_replaced = true;	/* uhexen2-4y6w */
 			pheader->gl_texturenum[i][0] =
 			pheader->gl_texturenum[i][1] =
 			pheader->gl_texturenum[i][2] =
@@ -2801,6 +2803,7 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 					else
 						skin_tex_mode |= (TEX_ALPHA | TEX_HOLEY);
 				}
+				loadmodel->skin_replaced = true;	/* uhexen2-4y6w */
 				pheader->gl_texturenum[i][j&3] =
 					GL_LoadReplacement (name, &rep, skin_tex_mode);
 				IMG_FreeReplacement (&rep);
