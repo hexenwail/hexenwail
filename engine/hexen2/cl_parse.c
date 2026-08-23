@@ -1003,6 +1003,20 @@ static void CL_ParseClientdata (int bits)
 //rjr		else	cl.mvelocity[0][i] = 0;
 	}
 
+	/* Keep the last two punchangle values so V_CalcRefdef can blend
+	 * between them.  Ported from Ironwail / QuakeSpasm (johnfitz), whose
+	 * CL_ParseClientdata does exactly this.  punchangle arrives as whole
+	 * degrees in a char, so without the blend the view snaps in integer
+	 * steps.  uhexen2-g7a9 */
+	if (v_punchangles[0][0] != cl.punchangle[0] ||
+	    v_punchangles[0][1] != cl.punchangle[1] ||
+	    v_punchangles[0][2] != cl.punchangle[2])
+	{
+		VectorCopy (v_punchangles[0], v_punchangles[1]);
+		VectorCopy (cl.punchangle, v_punchangles[0]);
+		cl.punchtime = cl.time;
+	}
+
 	/*
 	if (bits & SU_ITEMS)
 		i = MSG_ReadLong ();

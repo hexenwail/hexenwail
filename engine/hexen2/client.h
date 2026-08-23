@@ -178,6 +178,7 @@ typedef struct
 	vec3_t		velocity;		// lerped between mvelocity[0] and [1]
 
 	vec3_t		punchangle;		// temporary offset
+	double		punchtime;		// cl.time of the last punchangle change, for v_gunkick 2
 
 	float		idealroll;
 	float		rollvel;
@@ -452,6 +453,8 @@ void CL_ClearEffects (void);
 void CL_EndEffect (void);
 void CL_ParseEffect (void);
 void CL_UpdateEffects (void);
+extern	cvar_t	v_gunkick;
+extern	vec3_t	v_punchangles[2];
 void CL_LatchFixAngle (void);
 qboolean CL_FixAngleHeld (double hold);
 

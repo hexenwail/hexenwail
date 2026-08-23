@@ -60,6 +60,18 @@ cvar_t	cl_crossx = {"cl_crossx", "0", CVAR_ARCHIVE};
 cvar_t	cl_crossy = {"cl_crossy", "0", CVAR_ARCHIVE};
 cvar_t	crosshaircolor = {"crosshaircolor", "75", CVAR_ARCHIVE}; // 79 seemed too bright
 
+/* v_gunkick -- ported from Ironwail / QuakeSpasm (johnfitz).  uhexen2-g7a9
+ *   0  no weapon kick at all
+ *   1  vanilla: add cl.punchangle straight to the view
+ *   2  blend between the last two punchangle values over 0.1s
+ * The server sends punchangle as whole degrees in a char, so mode 1 steps the
+ * view in integer jumps; mode 2 is what smooths that out.  Default 2 to match
+ * upstream -- the value people's configs and expectations already carry. */
+cvar_t	v_gunkick = {"v_gunkick", "2", CVAR_ARCHIVE};
+
+/* Copied from cl.punchangle by CL_ParseClientdata: [0] current, [1] previous. */
+vec3_t	v_punchangles[2];
+
 
 //=============================================================================
 
@@ -1068,7 +1080,23 @@ static void V_CalcRefdef (void)
 		view->drawflags = (view->drawflags & MLS_MASKOUT) | 0;
 
 	// set up the refresh position
-	VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
+	if (v_gunkick.value == 1)		/* vanilla kick */
+		VectorAdd (r_refdef.viewangles, cl.punchangle, r_refdef.viewangles);
+	else if (v_gunkick.value == 2)		/* blended kick */
+	{
+		float	punchblend = (float)((cl.time - cl.punchtime) / 0.1);
+		int	i;
+
+		if (punchblend < 0.0f)
+			punchblend = 0.0f;
+		if (punchblend > 1.0f)
+			punchblend = 1.0f;
+
+		for (i = 0; i < 3; i++)
+			r_refdef.viewangles[i] += v_punchangles[1][i] +
+				(v_punchangles[0][i] - v_punchangles[1][i]) * punchblend;
+	}
+	/* v_gunkick 0 adds nothing.  uhexen2-g7a9 */
 
 	// smooth out stair step ups
 	if (cl.onground && ent->origin[2] - oldz > 0)
@@ -1159,6 +1187,7 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_ipitch_level);
 
 	Cvar_RegisterVariable (&v_idlescale);
+	Cvar_RegisterVariable (&v_gunkick);
 	Cvar_RegisterVariable (&crosshair);
 	Cvar_RegisterVariable (&cl_crossx);
 	Cvar_RegisterVariable (&cl_crossy);
