@@ -647,6 +647,15 @@ qboolean IMG_LoadReplacement (const char *name, const char *modelname,
 	if (is_fence)
 		allow_compressed = false;
 
+	/* r_texture_external used to gate only the Quake II .wal loader, which
+	 * h2config.h #undefs, so it was a dead cvar whose name promised exactly
+	 * the feature people ask about -- and it read 0, which made it look like
+	 * the reason a pack was not showing up.  It now gates what it claims to,
+	 * defaulting to 1 so nothing changes for anyone who never touched it and
+	 * a pack can actually be switched off.  uhexen2-dbnh */
+	if (!r_texture_external.integer)
+		return false;
+
 	n = IMG_BuildCandidates (name, modelname, paths);
 
 	for (i = 0; i < n; i++)

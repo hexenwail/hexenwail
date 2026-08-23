@@ -165,7 +165,7 @@ cvar_t	r_aliastransadj = {"r_aliastransadj", "100", CVAR_NONE};
 cvar_t	r_aliasmip = {"r_aliasmip", "80", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_transwater = {"r_transwater", "1", CVAR_ARCHIVE};
-cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
+cvar_t	r_texture_external = {"r_texture_external", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh */
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_NONE};
 
 //void CreatePassages (void);
