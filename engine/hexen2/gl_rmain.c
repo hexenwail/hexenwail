@@ -324,7 +324,7 @@ cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "0", CVAR_NONE};	/* 1 = h
 cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw line segments from the focused edict's entity-typed QC fields to their targets, and from edicts referencing the focused one back to it (uhexen2-4ej9) */
 cvar_t	r_pointfile_depthtest = {"r_pointfile_depthtest", "1", CVAR_NONE};	/* 0 = draw the `pointfile` leak arrows through world geometry (uhexen2-nwx1) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
-cvar_t	r_texture_external = {"r_texture_external", "0", CVAR_ARCHIVE};
+cvar_t	r_texture_external = {"r_texture_external", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh */
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
 
 cvar_t	gl_clear = {"gl_clear", "1", CVAR_NONE};
