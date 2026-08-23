@@ -166,6 +166,13 @@ typedef struct
 						// between these
 	vec3_t		viewangles;
 
+	/* Last view angle the server forced with svc_setangle, and when it
+	 * arrived.  QC that sets .fixangle every frame means to pin the view;
+	 * the client has to hold that between messages now that input is
+	 * sampled at render rate.  uhexen2-g8lb */
+	vec3_t		fixangle_angles;
+	double		fixangle_time;
+
 	vec3_t		mvelocity[2];		// update by server, used for lean+bob
 						// (0 is newest)
 	vec3_t		velocity;		// lerped between mvelocity[0] and [1]
@@ -445,6 +452,8 @@ void CL_ClearEffects (void);
 void CL_EndEffect (void);
 void CL_ParseEffect (void);
 void CL_UpdateEffects (void);
+void CL_LatchFixAngle (void);
+qboolean CL_FixAngleHeld (double hold);
 
 //
 // cl_tent

@@ -1535,6 +1535,7 @@ void CL_ParseServerMessage (void)
 		case svc_setangle:
 			for (i = 0; i < 3; i++)
 				cl.viewangles[i] = MSG_ReadAngle ();
+			CL_LatchFixAngle ();
 			break;
 
 		case svc_setangle_interpolate:
@@ -1574,6 +1575,10 @@ void CL_ParseServerMessage (void)
 				else if (cl.viewangles[i] < -180)
 					cl.viewangles[i] += 360;
 			}
+			/* Latch here too: each message advances the 1/8 step, and
+			 * holding the result between them keeps render-rate mouse
+			 * input from fighting the interpolation.  uhexen2-g8lb */
+			CL_LatchFixAngle ();
 			break;
 
 		case svc_setview:

@@ -1088,6 +1088,53 @@ int CL_ReadFromServer (void)
 
 /*
 =================
+CL_LatchFixAngle
+
+Remember the view angle the server just forced, and when.
+
+QC sets .fixangle to pin the view -- death cams, scripted cameras, custom
+menus -- and it does so once per QC think, which is every HX_FRAME_TIME
+(0.05s) at best.  The engine samples mouse, pad and gyro every render frame
+now, so between two forces there are several frames of unopposed input that
+the renderer sees.  Vanilla could not hit this: one server frame per render
+frame meant a setangle landed after input on every frame.  uhexen2-g8lb
+=================
+*/
+void CL_LatchFixAngle (void)
+{
+	VectorCopy (cl.viewangles, cl.fixangle_angles);
+	cl.fixangle_time = realtime;
+}
+
+/*
+=================
+CL_FixAngleHeld
+
+True while a forced angle is still in force, i.e. recent enough that the
+server is presumed to still be setting .fixangle rather than to have set it
+once and stopped.
+
+`hold` is a duration, not a tick count, and it deliberately exceeds one
+server tick: the forces arrive at the QC think cadence (0.05s), not at the
+tick rate, so a window of one or two ticks would expire between them at any
+sv_physfps above 20 and let the view drift -- which is the bug.  It is a
+heuristic because the protocol carries no "still forcing" state: QC sets the
+field per think and the engine clears it on send, so neither end knows the
+intended duration.  Erring long costs a one-shot fixangle (a teleport) a few
+tens of milliseconds of held view, which is what vanilla's 20 Hz server frame
+did anyway.
+=================
+*/
+qboolean CL_FixAngleHeld (double hold)
+{
+	if (hold <= 0 || cl.fixangle_time <= 0)
+		return false;
+
+	return (realtime - cl.fixangle_time) < hold;
+}
+
+/*
+=================
 CL_SendCmd
 =================
 */
