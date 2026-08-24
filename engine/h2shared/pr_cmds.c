@@ -1251,6 +1251,11 @@ static void PF_ambientsound (void)
 	}
 
 // add an svc_spawnambient command to the level signon packet
+	#ifndef H2W
+	/* svc + 3*coord + soundnum (byte or short) + vol + attenuation = 11,
+	 * rounded up.  uhexen2-z5wt. */
+	SV_ReserveSignonSpace (16);
+	#endif
 	MSG_WriteByte (&sv.signon,svc_spawnstaticsound);
 	for (i = 0; i < 3; i++)
 		MSG_WriteCoord(&sv.signon, pos[i]);
@@ -2947,6 +2952,15 @@ static sizebuf_t *WriteDest (void)
 		#ifdef H2W
 		if (sv.state != ss_loading)
 			PR_RunError ("%s: MSG_INIT can only be written in spawn functions", __thisfunc__);
+		#else
+		/* QC writing signon data.  The record's real length is not
+		 * visible from here -- every PF_Write* arrives separately -- so
+		 * reserve enough that any single one of them fits whole, long
+		 * strings included.  A record QC assembles from several writes
+		 * could still land either side of a buffer boundary; nothing
+		 * shipped writes to MSG_INIT, and what this replaces was a
+		 * fatal overflow.  uhexen2-z5wt. */
+		SV_ReserveSignonSpace (1024);
 		#endif
 		return &sv.signon;
 
@@ -3012,6 +3026,11 @@ static void PF_makestatic (void)
 
 	ent = G_EDICT(OFS_PARM0);
 
+	#ifndef H2W
+	/* svc + modelindex + 6 single-byte fields + 3*(coord 2 + angle 1) = 18,
+	 * rounded up.  uhexen2-z5wt. */
+	SV_ReserveSignonSpace (24);
+	#endif
 	MSG_WriteByte (&sv.signon,svc_spawnstatic);
 
 	MSG_WriteShort(&sv.signon, SV_ModelIndex(PR_GetString(ent->v.model)));

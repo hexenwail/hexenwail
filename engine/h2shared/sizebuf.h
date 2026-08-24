@@ -27,6 +27,10 @@ typedef struct sizebuf_s
 	byte		*data;
 	int		maxsize;
 	int		cursize;
+	const char	*name;		// for overflow messages; optional, SZ_Init
+					// leaves it NULL.  Worth setting on any
+					// buffer whose overflow is fatal, so the
+					// error names which one it was.
 } sizebuf_t;
 
 void SZ_Init (sizebuf_t *buf, byte *data, int length);

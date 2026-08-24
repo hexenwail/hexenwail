@@ -54,14 +54,26 @@ void *SZ_GetSpace (sizebuf_t *buf, int length)
 
 	if (buf->cursize + length > buf->maxsize)
 	{
+		/* Say which buffer and by how much.  This branch kills the process,
+		 * so the numbers the branch below prints are exactly the ones nobody
+		 * gets to see when it matters -- a bare "overflow without
+		 * allowoverflow set" cost a full round trip with a field tester
+		 * before anyone could even say which buffer had filled up
+		 * (uhexen2-z5wt).  Same figures, same order, both paths. */
 		if (!buf->allowoverflow)
-			Sys_Error ("%s: overflow without allowoverflow set", __thisfunc__);
+			Sys_Error ("%s: overflow without allowoverflow set\n"
+				   "%s: currently %d of %d, requested %d",
+				__thisfunc__, buf->name ? buf->name : "unnamed buffer",
+				buf->cursize, buf->maxsize, length);
 
 		if (length > buf->maxsize)
-			Sys_Error ("%s: %i is > full buffer size", __thisfunc__, length);
+			Sys_Error ("%s: %i is > full buffer size (%s, %d)", __thisfunc__,
+				length, buf->name ? buf->name : "unnamed buffer",
+				buf->maxsize);
 
-		Sys_Printf ("%s: overflow\nCurrently %d of %d, requested %d\n",
-				__thisfunc__, buf->cursize, buf->maxsize, length);
+		Sys_Printf ("%s: overflow\n%s: currently %d of %d, requested %d\n",
+				__thisfunc__, buf->name ? buf->name : "unnamed buffer",
+				buf->cursize, buf->maxsize, length);
 		SZ_Clear (buf);
 		buf->overflowed = true;
 	}
