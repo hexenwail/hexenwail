@@ -390,8 +390,11 @@ static void GL_InitRendererCaps (void)
 		gl_renderer_caps.indexed_blending && gl_renderer_caps.float_color_buffer;
 #endif
 
-	Con_SafePrintf("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
-	Con_SafePrintf("[RENDERER] Features: HDR-targets=%s SSBO=%s compute=%s "
+	/* Capability dump is a diagnostic, not news for a player.  Reachable
+	 * on demand at any time via the "renderer_status" command, which is
+	 * deliberately NOT gated. */
+	Con_SafeDPrintf("[RENDERER] Profile: %s\n", gl_renderer_caps.profile_name);
+	Con_SafeDPrintf("[RENDERER] Features: HDR-targets=%s SSBO=%s compute=%s "
 		       "indirect=%s OIT=%s\n",
 		       gl_renderer_caps.float_color_buffer ? "yes" : "no",
 		       gl_renderer_caps.shader_storage ? "yes" : "CPU fallback",
@@ -476,10 +479,16 @@ static qboolean GL_RunFramebufferSelfTest (void)
 	currenttexture = GL_UNUSED_TEXTURE;
 
 	gl_renderer_caps.fbo_selftest = passed;
-	Con_SafePrintf("[RENDERER] RGBA8 texture/FBO self-test: %s "
-		       "(status=0x%x pixel=%u,%u,%u,%u)\n",
-		       passed ? "PASS" : "FAIL", (unsigned int)status,
-		       pixel[0], pixel[1], pixel[2], pixel[3]);
+	/* Quiet when it passes, loud when it does not: the pixel/status detail
+	 * is what a broken-render report needs, and is worth nothing otherwise. */
+	if (passed)
+		Con_SafeDPrintf("[RENDERER] RGBA8 texture/FBO self-test: PASS "
+				"(status=0x%x pixel=%u,%u,%u,%u)\n", (unsigned int)status,
+				pixel[0], pixel[1], pixel[2], pixel[3]);
+	else
+		Con_SafePrintf("[RENDERER] RGBA8 texture/FBO self-test: FAIL "
+			       "(status=0x%x pixel=%u,%u,%u,%u)\n", (unsigned int)status,
+			       pixel[0], pixel[1], pixel[2], pixel[3]);
 	if (!passed)
 		Con_SafePrintf("[RENDERER] WARNING: render-to-texture looks broken; "
 			       "post-processing and render scale will not work.\n");
@@ -605,7 +614,7 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_ResizeCanvas (int css_width, int css_height)
 	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
 	vid.recalc_refdef = 1;
 	glViewport_fp(0, 0, WRWidth, WRHeight);
-	Con_SafePrintf("[RENDERER] Canvas synchronized: CSS=%dx%d drawable=%dx%d\n",
+	Con_SafeDPrintf("[RENDERER] Canvas synchronized: CSS=%dx%d drawable=%dx%d\n",
 		       css_width, css_height, WRWidth, WRHeight);
 }
 #endif
@@ -1186,7 +1195,7 @@ static void GL_Init (void)
 	Con_SafePrintf ("GL_VERSION: %s\n", gl_version);
 	Con_SafePrintf ("GLSL_VERSION: %s\n",
 			(const char *)glGetString_fp (GL_SHADING_LANGUAGE_VERSION));
-	Con_SafePrintf ("[RENDERER] Drawable: %dx%d, logical video: %dx%d\n",
+	Con_SafeDPrintf ("[RENDERER] Drawable: %dx%d, logical video: %dx%d\n",
 			WRWidth, WRHeight, vid.width, vid.height);
 
 	glGetIntegerv_fp(GL_MAX_TEXTURE_SIZE, &gl_max_size);
