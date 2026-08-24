@@ -1734,10 +1734,12 @@ static void Host_PreSpawn_f (void)
 		return;
 	}
 
-	SZ_Write (&host_client->message, sv.signon.data, sv.signon.cursize);
-	MSG_WriteByte (&host_client->message, svc_signonnum);
-	MSG_WriteByte (&host_client->message, 2);
-	host_client->sendsignon = true;
+	/* Start the signon list.  SV_SendSignonBuffer writes this one and
+	 * SV_SendClientMessages walks out the rest, one reliable message each,
+	 * appending svc_signonnum after the last -- so the client's state only
+	 * advances once it has the whole thing.  uhexen2-z5wt. */
+	host_client->signon_buffer = 0;
+	SV_SendSignonBuffer (host_client);
 }
 
 /*

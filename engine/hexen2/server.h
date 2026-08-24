@@ -59,6 +59,35 @@ typedef struct ex_inventory_page_s
 	//struct ex_inventory_page_s	*next2;
 } ex_inventory_page_t;
 
+/*
+ * Signon buffers.
+ *
+ * The signon is everything a joining client needs to reproduce the map's
+ * starting state: an svc_spawnbaseline per model-bearing edict (20 bytes),
+ * an svc_spawnstatic per makestatic (18), an svc_spawnstaticsound per
+ * ambientsound (11), plus whatever QC writes to MSG_INIT.
+ *
+ * It used to be a single NET_MAXMESSAGE buffer with allowoverflow false, so
+ * the first write past 32 KB was a Sys_Error straight to desktop.  That
+ * described about 1600 baselines against a MAX_EDICTS of 8192 -- the engine
+ * was advertising an entity budget it could not hand to a client -- and the
+ * shipped SoT maps already sat around two thirds of it, so a dense community
+ * map went over (uhexen2-z5wt, BloodShot's tristram).
+ *
+ * So: a list, filled one buffer at a time and sent one reliable message at a
+ * time.  A record must never straddle two buffers, because the client parses
+ * each message on its own and half a record at the end of one would desync
+ * the stream -- that is what SV_ReserveSignonSpace is for.  Call it with the
+ * size of the record you are about to write, before writing any of it.
+ *
+ * MAX_SIGNON_SIZE is half of NET_MAXMESSAGE rather than all of it: each
+ * buffer gets copied into client->message, which is MAX_MSGLEN and may
+ * already be carrying unrelated reliable data, so exactly filling it would
+ * trade this crash for an overflowed-client drop.
+ */
+#define	MAX_SIGNON_SIZE		(NET_MAXMESSAGE / 2)
+#define	MAX_SIGNON_BUFFERS	24
+
 typedef struct
 {
 	qboolean	active;		// false if only a net client
@@ -105,8 +134,16 @@ typedef struct
 	sizebuf_t	reliable_datagram;	// copied to all clients at end of frame
 	byte		reliable_datagram_buf[NET_MAXMESSAGE];
 
+	/* Signon data: entity baselines, static entities, static sounds, and
+	 * anything QC writes to MSG_INIT.  A list of buffers rather than one,
+	 * see MAX_SIGNON_SIZE above.  num_signon_buffers counts the COMPLETED
+	 * ones; the buffer being filled is signon_bufs[num_signon_buffers] and
+	 * its length lives in sv.signon.cursize, not in signon_size[], because
+	 * QC can still write to MSG_INIT after the map has spawned. */
 	sizebuf_t	signon;
-	byte		signon_buf[NET_MAXMESSAGE];
+	int		num_signon_buffers;
+	int		signon_size[MAX_SIGNON_BUFFERS];
+	byte		signon_bufs[MAX_SIGNON_BUFFERS][MAX_SIGNON_SIZE];
 	ex_item_t	*ex_items;
 	int			next_page_id;
 	ex_inventory_page_t	*ex_inventory_pages;
@@ -123,6 +160,10 @@ typedef struct client_s
 	qboolean	spawned;	// false = don't send datagrams
 	qboolean	dropasap;	// has been told to go to another level
 	qboolean	sendsignon;	// only valid before spawned
+	int		signon_buffer;	// next signon buffer owed to this client,
+					// -1 when none is pending.  The list goes
+					// out one per reliable message; see
+					// SV_SendSignonBuffer.
 
 	double		last_message;	// reliable messages must be sent
 					// periodically
@@ -316,6 +357,10 @@ void SV_DropClient (qboolean crash);
 void SV_Edicts (const char *Name);
 
 void SV_SendClientMessages (void);
+/* Call before writing a signon record, with the record's size in bytes, so it
+ * cannot end up split across two signon buffers.  See MAX_SIGNON_SIZE. */
+void SV_ReserveSignonSpace (int length);
+void SV_SendSignonBuffer (struct client_s *client);
 void SV_ClearDatagram (void);
 
 int SV_ModelIndex (const char *name);

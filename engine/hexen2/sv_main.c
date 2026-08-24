@@ -793,6 +793,7 @@ static void SV_ConnectClient (int clientnum)
 	strcpy (client->name, "unconnected");
 	client->active = true;
 	client->spawned = false;
+	client->signon_buffer = -1;	/* nothing owed until prespawn asks */
 	client->edict = ent;
 
 	client->ex_inventory = SV_ClientInventoryPage (clientnum);
@@ -2072,6 +2073,15 @@ void SV_SendClientMessages (void)
 		// send a full message when the next signon stage has been requested
 		// some other message data (name changes, etc) may accumulate
 		// between signon stages
+
+			/* Feed out the signon list, one buffer per reliable
+			 * message.  Only once the previous one has actually
+			 * gone -- a signon buffer is half of client->message,
+			 * so stacking two, or one on top of queued name/colour
+			 * updates, would overflow it.  uhexen2-z5wt. */
+			if (host_client->signon_buffer >= 0 && !host_client->message.cursize)
+				SV_SendSignonBuffer (host_client);
+
 			if (!host_client->sendsignon)
 			{
 				if (realtime - host_client->last_message > 5)
@@ -2155,6 +2165,100 @@ int SV_ModelIndex (const char *name)
 
 /*
 ================
+SV_SignonBufferCount
+SV_SignonBufferSize
+
+How many signon buffers there are and how long each one is.  The buffer being
+filled is the last, and its length is sv.signon.cursize rather than an entry in
+signon_size[] -- QC can still write to MSG_INIT after the map has spawned, so
+sealing the length at spawn time would short a client that connected later.
+================
+*/
+static int SV_SignonBufferCount (void)
+{
+	return sv.num_signon_buffers + 1;
+}
+
+static int SV_SignonBufferSize (int i)
+{
+	return (i < sv.num_signon_buffers) ? sv.signon_size[i] : sv.signon.cursize;
+}
+
+/*
+================
+SV_ReserveSignonSpace
+
+Make room for a signon record of `length' bytes in one piece, starting a new
+signon buffer if the current one cannot hold it.  Call it BEFORE writing any
+part of the record: a client parses each reliable message on its own, so a
+record split across two buffers would desync the stream.
+
+Being generous with `length' is free -- over-reserving wastes at most the
+difference once per buffer boundary, and never splits anything.
+================
+*/
+void SV_ReserveSignonSpace (int length)
+{
+	if (length > MAX_SIGNON_SIZE)
+		Sys_Error ("%s: %d byte record does not fit a %d byte signon buffer",
+				__thisfunc__, length, MAX_SIGNON_SIZE);
+
+	if (sv.signon.cursize + length <= sv.signon.maxsize)
+		return;
+
+	if (sv.num_signon_buffers + 1 >= MAX_SIGNON_BUFFERS)
+		Host_Error ("Too much signon data for this map: %d buffers of %d "
+			    "bytes are full.  Raise MAX_SIGNON_BUFFERS (server.h) "
+			    "or cut static entities / ambient sounds.",
+				MAX_SIGNON_BUFFERS, MAX_SIGNON_SIZE);
+
+	sv.signon_size[sv.num_signon_buffers] = sv.signon.cursize;
+	sv.num_signon_buffers++;
+	SZ_Init (&sv.signon, sv.signon_bufs[sv.num_signon_buffers], MAX_SIGNON_SIZE);
+	sv.signon.name = "sv.signon";
+}
+
+/*
+================
+SV_SendSignonBuffer
+
+Hand a client the next signon buffer it is owed, and the signon-stage marker
+once the last one has gone.  One buffer per reliable message: they do not all
+fit in client->message at once, and the client is happy to take baselines and
+statics spread over several messages -- only svc_signonnum advances its state.
+
+Called from Host_PreSpawn_f for the first buffer and from SV_SendClientMessages
+for the rest.
+================
+*/
+void SV_SendSignonBuffer (client_t *client)
+{
+	int	i = client->signon_buffer;
+
+	if (i < 0 || i >= SV_SignonBufferCount())
+	{
+		client->signon_buffer = -1;
+		return;
+	}
+
+	SZ_Write (&client->message, sv.signon_bufs[i], SV_SignonBufferSize(i));
+
+	if (i + 1 < SV_SignonBufferCount())
+	{
+		client->signon_buffer = i + 1;
+	}
+	else
+	{
+		client->signon_buffer = -1;
+		MSG_WriteByte (&client->message, svc_signonnum);
+		MSG_WriteByte (&client->message, 2);
+	}
+
+	client->sendsignon = true;
+}
+
+/*
+================
 SV_CreateBaseline
 
 ================
@@ -2204,6 +2308,9 @@ static void SV_CreateBaseline (void)
 	//
 	// add to the message
 	//
+		/* svc + entnum + modelindex + 6 single-byte fields +
+		 * 3 * (WriteCoord 2 + WriteAngle 1) = 20; rounded up. */
+		SV_ReserveSignonSpace (24);
 		MSG_WriteByte (&sv.signon,svc_spawnbaseline);
 		MSG_WriteShort (&sv.signon,entnum);
 
@@ -2497,8 +2604,14 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	sv.edicts = (edict_t *) Hunk_AllocName (MAX_EDICTS*pr_edict_size, "edicts");
 
 	SZ_Init (&sv.datagram, sv.datagram_buf, sizeof(sv.datagram_buf));
+	sv.datagram.name = "sv.datagram";
 	SZ_Init (&sv.reliable_datagram, sv.reliable_datagram_buf, sizeof(sv.reliable_datagram_buf));
-	SZ_Init (&sv.signon, sv.signon_buf, sizeof(sv.signon_buf));
+	sv.reliable_datagram.name = "sv.reliable_datagram";
+	/* Start the signon list over: buffer 0 is the one being filled, and
+	 * nothing is completed yet.  SV_ReserveSignonSpace adds the rest. */
+	sv.num_signon_buffers = 0;
+	SZ_Init (&sv.signon, sv.signon_bufs[0], MAX_SIGNON_SIZE);
+	sv.signon.name = "sv.signon";
 
 // leave slots at start for clients only
 	sv.num_edicts = svs.maxclients + 1 + max_temp_edicts.integer;
@@ -2642,6 +2755,18 @@ void SV_SpawnServer (const char *server, const char *startspot)
 
 // create a baseline for more efficient communications
 	SV_CreateBaseline ();
+
+	/* How much of the signon budget this map actually used.  Worth having
+	 * a number for: the shipped SoT maps already need more than one buffer,
+	 * and the only warning anyone got before was a crash.  uhexen2-z5wt. */
+	{
+		int	total = 0;
+		for (i = 0; i < sv.num_signon_buffers; i++)
+			total += sv.signon_size[i];
+		total += sv.signon.cursize;
+		Con_DPrintf ("Signon: %d bytes in %d/%d buffers\n",
+				total, sv.num_signon_buffers + 1, MAX_SIGNON_BUFFERS);
+	}
 
 // send serverinfo to all connected clients
 	for (i = 0, host_client = svs.clients; i < svs.maxclients; i++, host_client++)
