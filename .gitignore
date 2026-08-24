@@ -41,6 +41,7 @@ engine/build*/
 # extracted out of one are the same disposable scratch.
 /*.crdownload
 /capture*_frame*
+/torch_glow_ab*
 
 # Beads / Dolt files (added by bd init)
 .dolt/

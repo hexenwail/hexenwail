@@ -442,15 +442,18 @@ static void SCR_PublishEffectiveFov (void)
 
 static void SCR_CalcRefdef (void)
 {
+	float	size;
+	int	h;
+
 	scr_fullupdate = 0;		// force a background redraw
 
-// bound viewsize. The legacy <100 path shrunk the 3D vrect inside a
-// letterbox — a Pentium-era perf knob no modern Quake-family engine
-// uses. We clamp at 100 so the 3D viewport is always full-screen and
-// viewsize purely controls Hexen status-bar visibility (110+ hides
-// progressively more of the bar; see sbar.c).
-	if (scr_viewsize.integer < 100)
-		Cvar_SetQuick (&scr_viewsize, "100");
+// bound viewsize.  Below 100 the 3D viewport is inset and SCR_TileClear
+// fills the border; 110 and above progressively hides the Hexen status bar
+// (see sbar.c).  The sub-100 range was clamped away once as a Pentium-era
+// perf knob, which missed that it also sets the frame a mod's world-space
+// menus are sized against.  uhexen2-461l
+	if (scr_viewsize.integer < 30)
+		Cvar_SetQuick (&scr_viewsize, "30");
 	else if (scr_viewsize.integer > 140)
 		Cvar_SetQuick (&scr_viewsize, "140");
 
@@ -483,12 +486,33 @@ static void SCR_CalcRefdef (void)
 	if (cl.intermission)
 		sb_lines = 0;		// intermission is always full screen
 
-	/* 3D viewport always fills the screen above the HUD strip. The
-	 * legacy <100 viewsize letterbox is gone (clamped above). */
-	r_refdef.vrect.x = 0;
-	r_refdef.vrect.y = 0;
-	r_refdef.vrect.width = vid.width;
-	r_refdef.vrect.height = vid.height - sb_lines;
+	/* Below 100, viewsize insets the 3D viewport and SCR_TileClear fills
+	 * the border -- the vanilla behaviour, restored after being clamped
+	 * away as "a Pentium-era perf knob".  It is not only a perf knob: a mod
+	 * that draws menus as world geometry in front of the player sizes them
+	 * against the viewport, so removing the inset made Shadows of Chaos's
+	 * pop-ups go edge to edge instead of sitting in a frame.  100 and above
+	 * is unchanged, so nobody's current setup moves.  uhexen2-461l */
+	size = scr_viewsize.integer > 100 ? 100.0f : (float) scr_viewsize.integer;
+	if (cl.intermission)
+		size = 100.0f;		// intermission is always full screen
+	size /= 100.0f;
+
+	h = vid.height - sb_lines;
+
+	r_refdef.vrect.width = (int)(vid.width * size);
+	if (r_refdef.vrect.width < 96)
+	{
+		size = 96.0f / vid.width;
+		r_refdef.vrect.width = 96;	// min for icons
+	}
+
+	r_refdef.vrect.height = (int)(vid.height * size);
+	if (r_refdef.vrect.height > h)
+		r_refdef.vrect.height = h;
+
+	r_refdef.vrect.x = (vid.width - r_refdef.vrect.width) / 2;
+	r_refdef.vrect.y = (h - r_refdef.vrect.height) / 2;
 
 	{
 		float fov, zoom;
