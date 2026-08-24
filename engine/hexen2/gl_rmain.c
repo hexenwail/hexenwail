@@ -4706,32 +4706,53 @@ static void TurnVector (vec3_t out, const vec3_t forward, const vec3_t side, flo
 	out[2] = scale_forward*forward[2] + scale_side*side[2];
 }
 
-static void R_SetFrustum (void)
+/*
+===============
+R_BuildFrustum
+
+The four side planes for one camera, written into `out' instead of into the
+frustum[] global.
+
+Split out of R_SetFrustum for R_PushDlights, which has to cull against THIS
+frame's camera and runs before R_SetupFrame and R_SetFrustum have written
+r_origin and frustum[] -- see the comment there.  Kept as one implementation so
+the dlight cull cannot drift away from the planes the renderer actually uses.
+uhexen2-137k
+===============
+*/
+void R_BuildFrustum (const vec3_t origin, const vec3_t pn, const vec3_t right,
+		     const vec3_t up, float fov_x, float fov_y, mplane_t out[4])
 {
 	int		i;
 
-	if (r_refdef.fov_x == 90)
+	if (fov_x == 90)
 	{
 		// front side is visible
-		VectorAdd (vpn, vright, frustum[0].normal);
-		VectorSubtract (vpn, vright, frustum[1].normal);
-		VectorAdd (vpn, vup, frustum[2].normal);
-		VectorSubtract (vpn, vup, frustum[3].normal);
+		VectorAdd (pn, right, out[0].normal);
+		VectorSubtract (pn, right, out[1].normal);
+		VectorAdd (pn, up, out[2].normal);
+		VectorSubtract (pn, up, out[3].normal);
 	}
 	else
 	{
-		TurnVector(frustum[0].normal, vpn, vright, r_refdef.fov_x/2 - 90); // left plane
-		TurnVector(frustum[1].normal, vpn, vright, 90 - r_refdef.fov_x/2); // right plane
-		TurnVector(frustum[2].normal, vpn, vup,    90 - r_refdef.fov_y/2); // bottom plane
-		TurnVector(frustum[3].normal, vpn, vup,    r_refdef.fov_y/2 - 90); // top plane
+		TurnVector(out[0].normal, pn, right, fov_x/2 - 90);	// left plane
+		TurnVector(out[1].normal, pn, right, 90 - fov_x/2);	// right plane
+		TurnVector(out[2].normal, pn, up,    90 - fov_y/2);	// bottom plane
+		TurnVector(out[3].normal, pn, up,    fov_y/2 - 90);	// top plane
 	}
 
 	for (i = 0; i < 4; i++)
 	{
-		frustum[i].type = PLANE_ANYZ;
-		frustum[i].dist = DotProduct (r_origin, frustum[i].normal);
-		frustum[i].signbits = SignbitsForPlane (&frustum[i]);
+		out[i].type = PLANE_ANYZ;
+		out[i].dist = DotProduct (origin, out[i].normal);
+		out[i].signbits = SignbitsForPlane (&out[i]);
 	}
+}
+
+static void R_SetFrustum (void)
+{
+	R_BuildFrustum (r_origin, vpn, vright, vup,
+			r_refdef.fov_x, r_refdef.fov_y, frustum);
 }
 
 

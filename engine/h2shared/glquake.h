@@ -601,6 +601,10 @@ int R_GetEntityModelFlags (entity_t *e);
 
 void R_RenderDlights (void);
 void R_MarkLights (dlight_t *light, int bit, mnode_t *node);
+/* Side planes for an arbitrary camera, into the caller's array rather than
+ * frustum[].  R_PushDlights needs them before R_SetFrustum runs.  uhexen2-137k */
+void R_BuildFrustum (const vec3_t origin, const vec3_t pn, const vec3_t right,
+		     const vec3_t up, float fov_x, float fov_y, mplane_t out[4]);
 void R_AnimateLight(void);
 int R_LightPoint (vec3_t p);
 float R_LightPointColor (vec3_t p, lightcache_t *cache);
