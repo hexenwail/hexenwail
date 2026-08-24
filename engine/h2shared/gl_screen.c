@@ -100,6 +100,23 @@ int		trans_level = 0;
 cvar_t		scr_viewsize = {"viewsize", "110", CVAR_ARCHIVE};
 cvar_t		scr_fov = {"fov", "90", CVAR_NONE};	// 10 - 170
 cvar_t		scr_fov_adapt = {"fov_adapt", "1", CVAR_ARCHIVE};	// "Hor+" scaling
+
+/* Read-only mirrors of the field of view the engine actually renders with,
+ * published for gamecode: cvar("fov_effective") / cvar("fov_effective_y").
+ *
+ * QC could previously only read "fov", which is the unadapted 4:3 value.  The
+ * renderer runs it through AdaptFovx for the display aspect and blends it
+ * toward scr_zoomfov while zooming, and neither result was visible to a mod.
+ * Anything placed at a fixed distance to cover a fixed slice of the screen was
+ * therefore tuned for one aspect ratio and wrong everywhere else -- Shadows of
+ * Chaos puts its pop-up menus at eye + v_forward * (25.5 - 0.15 * fov), which
+ * fills the width exactly on 16:9 and overflows by 18% on 4:3.  uhexen2-vsxi
+ *
+ * Deliberately not named fov_adapted: one character from the fov_adapt toggle,
+ * and a mod that reached for the wrong one would silently get 1 instead of a
+ * field of view. */
+cvar_t		scr_fov_effective = {"fov_effective", "90", CVAR_ROM};
+cvar_t		scr_fov_effective_y = {"fov_effective_y", "73.74", CVAR_ROM};
 static	cvar_t	scr_zoomfov = {"zoom_fov", "30", CVAR_ARCHIVE};
 static	cvar_t	scr_zoomspeed = {"zoom_speed", "8", CVAR_ARCHIVE};
 cvar_t		scr_contrans = {"contrans", "0", CVAR_ARCHIVE};
@@ -405,6 +422,24 @@ Must be called whenever vid changes
 Internal use only
 =================
 */
+/*
+====================
+SCR_PublishEffectiveFov
+
+Mirror the rendered field of view into the read-only cvars gamecode can see.
+Guarded on change: the values only move when fov, the window aspect or the
+zoom does, so the usual frame does a float compare and nothing else.
+uhexen2-vsxi
+====================
+*/
+static void SCR_PublishEffectiveFov (void)
+{
+	if (scr_fov_effective.value != r_refdef.fov_x)
+		Cvar_SetValueROM ("fov_effective", r_refdef.fov_x);
+	if (scr_fov_effective_y.value != r_refdef.fov_y)
+		Cvar_SetValueROM ("fov_effective_y", r_refdef.fov_y);
+}
+
 static void SCR_CalcRefdef (void)
 {
 	scr_fullupdate = 0;		// force a background redraw
@@ -463,6 +498,8 @@ static void SCR_CalcRefdef (void)
 		r_refdef.fov_x = AdaptFovx (fov, r_refdef.vrect.width, r_refdef.vrect.height);
 		r_refdef.fov_y = CalcFovy (r_refdef.fov_x, r_refdef.vrect.width, r_refdef.vrect.height);
 	}
+
+	SCR_PublishEffectiveFov ();
 
 	scr_vrect = r_refdef.vrect;
 }
@@ -565,6 +602,8 @@ void SCR_Init (void)
 	Cvar_SetCallback (&scr_fov_adapt, SCR_Callback_refdef);
 	Cvar_SetCallback (&scr_viewsize, SCR_Callback_refdef);
 	Cvar_RegisterVariable (&scr_fov);
+	Cvar_RegisterVariable (&scr_fov_effective);
+	Cvar_RegisterVariable (&scr_fov_effective_y);
 	Cvar_RegisterVariable (&scr_fov_adapt);
 	Cvar_RegisterVariable (&scr_viewsize);
 	Cvar_RegisterVariable (&scr_zoomfov);
