@@ -364,38 +364,70 @@ void R_PushDlights (void)
 {
 	int		i;
 	dlight_t	*l;
+	vec3_t		eye, pn, right, up;
+	mplane_t	cull[4];
 
 	if (gl_flashblend.integer)
 		return;
 
 	r_dlightframecount = r_framecount + 1;	// because the count hasn't
 						//  advanced yet for this frame
+
+	/* Cull against THIS frame's camera, not the last one's.
+	 *
+	 * V_RenderView calls us before R_RenderView, and r_origin / frustum[]
+	 * are written inside R_RenderScene by R_SetupFrame and R_SetFrustum --
+	 * that is, after we run.  Culling against those globals judges every
+	 * light by the previous frame's eye and view planes, so a light at a
+	 * boundary winks out for a frame whenever the view turns, which is the
+	 * "changes view angle" half of the field report.  r_refdef is already
+	 * current here: SCR_CalcRefdef and V_CalcRefdef both ran before
+	 * V_RenderView, so build the camera from it.  Into locals, because
+	 * R_SetFrustum owns frustum[] and fills it for real a moment later.
+	 * uhexen2-137k */
+	VectorCopy (r_refdef.vieworg, eye);
+	AngleVectors (r_refdef.viewangles, pn, right, up);
+	R_BuildFrustum (eye, pn, right, up, r_refdef.fov_x, r_refdef.fov_y, cull);
+
 	l = cl_dlights;
 
 	for (i = 0; i < MAX_DLIGHTS; i++, l++)
 	{
-		float dx, dy, dz, dist_sq;
+		float reach;
 		int side;
 		qboolean culled;
 		if (l->die < cl.time || !l->radius)
 			continue;
-		/* Skip lights too far from view to see */
-		dx = l->origin[0] - r_origin[0];
-		dy = l->origin[1] - r_origin[1];
-		dz = l->origin[2] - r_origin[2];
-		dist_sq = dx*dx + dy*dy + dz*dz;
-		if (dist_sq > (l->radius + 1024) * (l->radius + 1024))
-			continue;
-		/* Frustum cull: skip lights whose illumination sphere
-		 * (radius = max range) is fully outside any view plane.
-		 * Saves the BSP walk + lightmap-dirty work for off-screen
-		 * spell dlights during boss fights. */
+
+		/* Frustum cull: skip lights whose illumination sphere (radius =
+		 * max range) is fully outside any view plane.  Nothing such a
+		 * light touches can be on screen -- R_AddDynamicLights only
+		 * reaches luxels within radius of it -- so this skips the BSP
+		 * walk and the lightmap dirtying at no visible cost.  That is
+		 * the whole of what uhexen2-si07 was after.
+		 *
+		 * There is deliberately NO distance cull any more.  It used to
+		 * drop any light further than radius + 1024 from the eye, which
+		 * is not a correctness test at all: a torch far down a hall
+		 * lights the wall beside it and the player can see that wall.
+		 * With a torch radius of 150 the cutoff landed at 1174 units --
+		 * room scale -- so vanilla's torch lighting snapped on and off
+		 * across ordinary play distances.  Removing it costs almost
+		 * nothing, because R_MarkLights only descends into nodes within
+		 * the light's own radius: a distant light is a short walk, not
+		 * an expensive one.  uhexen2-137k
+		 *
+		 * fabs() on the radius because EF_SPIT allocates dark lights
+		 * with a negative one (cl_main.c), for which (d < -l->radius)
+		 * reads as (d < +120) and culls exactly the lights that are
+		 * inside the frustum. */
+		reach = fabs(l->radius);
 		culled = false;
 		for (side = 0; side < 4; side++)
 		{
-			float d = DotProduct(l->origin, frustum[side].normal)
-				- frustum[side].dist;
-			if (d < -l->radius)
+			float d = DotProduct(l->origin, cull[side].normal)
+				- cull[side].dist;
+			if (d < -reach)
 			{
 				culled = true;
 				break;
