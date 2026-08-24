@@ -1063,8 +1063,16 @@ static void Plaque_Draw (const char *message, qboolean AlwaysDraw)
 	int	bx, by;
 	char	temp[80];
 
-	if (scr_con_current == vid.height && !AlwaysDraw)
-		return;		// console is full screen
+	/* Any visible console, not just a full-screen one.  The old test only
+	 * caught scr_con_current == vid.height, so the ordinary half-height
+	 * drop-down let the plaque draw straight over the console text --
+	 * BloodShot's "overriding the sprints", with a wall of gold plaque text
+	 * across the lines he was trying to read.  Centerprints already behave
+	 * this way (SCR_CheckDrawCenterString2 bails on key_dest != key_game);
+	 * this makes the plaque agree with them.  AlwaysDraw still wins, which
+	 * is what keeps the modal notify plaques visible.  uhexen2-u1n6 */
+	if (scr_con_current > 0 && !AlwaysDraw)
+		return;
 
 	if (!*message)
 		return;
@@ -1093,8 +1101,10 @@ static void Info_Plaque_Draw (const char *message)
 	int	bx, by;
 	char	temp[80];
 
-	if (scr_con_current == vid.height)
-		return;		// console is full screen
+	/* Same as Plaque_Draw: suppress for any visible console, not only a
+	 * full-screen one.  uhexen2-u1n6 */
+	if (scr_con_current > 0)
+		return;
 
 	if (!info_string_count || !*message)
 		return;
