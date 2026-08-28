@@ -580,24 +580,18 @@ static void R_RotateForEntity2 (entity_t *e)
 	else
 		GL_Translatef(e->origin[0], e->origin[1], e->origin[2]);
 
-	if (ismenu || (e->model->flags & EF_FACE_VIEW))
+	/* Orientation is deliberately left to the mod.  Forcing the panel's +X
+	 * toward the viewer -- the EF_FACE_VIEW treatment -- assumes the model is
+	 * authored front-on along +X, and menuoptn.mdl is not EF_FACE_VIEW: the
+	 * mod orients it explicitly with e->angles, so its front need not be +X
+	 * at all.  Overriding it turned a zero-thickness billboard edge-on or
+	 * backfacing, i.e. invisible.  Position is pinned, orientation is not.
+	 * uhexen2-461l */
+	if (e->model->flags & EF_FACE_VIEW)
 	{
-		if (ismenu)
-		{
-			/* Pinned on the view axis, so the direction back to the eye is
-			 * exactly -vpn.  Taking the facing from the live view vector
-			 * rather than from e->angles is the other half of holding the
-			 * panel still: the networked angles are a server tick behind
-			 * the mouse, so a panel oriented from them visibly swings as
-			 * you turn.  uhexen2-461l */
-			VectorNegate(vpn, angles);
-		}
-		else
-		{
 		VectorSubtract(e->origin,r_origin,angles);
 		VectorSubtract(r_origin,e->origin,angles);
 		VectorNormalize(angles);
-		}
 
 		if (angles[1] == 0 && angles[0] == 0)
 		{
