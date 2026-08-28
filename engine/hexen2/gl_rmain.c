@@ -151,6 +151,10 @@ cvar_t	r_viewmodel_fov = {"r_viewmodel_fov", "0", CVAR_ARCHIVE};
 /* Distance, in units, to re-project a mod's in-view menu panel to.  0 = off,
  * which is vanilla behaviour and the default.  See R_MenuPanelOrigin. */
 cvar_t	r_menupanel_dist = {"r_menupanel_dist", "24", CVAR_ARCHIVE};
+/* How far above the view centre the panel sits, as a fraction of screen
+ * height.  Held in screen terms rather than units so it stays put across fov,
+ * aspect and resolution changes.  See R_MenuPanelOrigin. */
+cvar_t	r_menupanel_lift = {"r_menupanel_lift", "0.1", CVAR_ARCHIVE};
 cvar_t	cl_gun_fovscale = {"cl_gun_fovscale", "1", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
@@ -551,10 +555,31 @@ version carried the bob offset as a permanent tilt.
 */
 static qboolean R_MenuPanelOrigin (entity_t *e, vec3_t out)
 {
+	float	lift;
+
 	if (!R_IsMenuPanel(e))
 		return false;
 
 	VectorMA(r_refdef.vieworg, r_menupanel_dist.value, vpn, out);
+
+	/* Dead centre reads low, because a menu wants to sit above the weapon
+	 * rather than behind it.  r_menupanel_lift is a fraction of SCREEN
+	 * height, converted here to the world offset that subtends it at this
+	 * distance: a point h units up at distance d covers h/(d*tan(fov_y/2))
+	 * of half the screen, so a lift of f full-heights needs
+	 * h = 2*d*tan(fov_y/2)*f.  Expressed this way it holds still across fov,
+	 * aspect and resolution instead of drifting with them.
+	 *
+	 * Offset along vup rather than world Z so it stays a constant screen
+	 * position when the player looks up or down; the panel is pinned to the
+	 * view axis, and this keeps it pinned. */
+	if (r_menupanel_lift.value != 0.0f)
+	{
+		lift = 2.0f * r_menupanel_dist.value
+		     * (float)tan(r_refdef.fov_y * M_PI / 360.0)
+		     * r_menupanel_lift.value;
+		VectorMA(out, lift, vup, out);
+	}
 	return true;
 }
 
