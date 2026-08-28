@@ -3689,24 +3689,43 @@ static void R_DumpAliasInfo (void)
 		 * (see the entScale decode in R_RotateForEntity2), which is why
 		 * the byte is shown next to the decoded factor. */
 		{
-			vec3_t	d;
+			/* Both alias loaders store mod->mins/maxs with a 10-unit pad
+			 * on every side (gl_model.c, "mod->mins[i] = aliasmins[i] - 10").
+			 * Undo it or every model reads 20 units fatter than it draws --
+			 * which is small on a tree and decisive on a menu panel. */
+			#define ALIAS_BBOX_PAD	10.0f
+			vec3_t	d, ext;
 			float	entScale = (e->scale != 0 && e->scale != 100) ?
 					   (float)e->scale / 100.0f : 1.0f;
-			float	wide = (e->model->maxs[0] - e->model->mins[0]) * entScale;
-			float	tall = (e->model->maxs[2] - e->model->mins[2]) * entScale;
-			float	dist, subtend;
+			float	dist, tx, tz;
+			int	k;
+
+			for (k = 0; k < 3; k++)
+			{
+				ext[k] = (e->model->maxs[k] - e->model->mins[k]) - 2.0f*ALIAS_BBOX_PAD;
+				if (ext[k] < 0.0f)
+					ext[k] = 0.0f;	/* flat billboard: pad was the whole box */
+				ext[k] *= entScale;
+			}
 
 			VectorSubtract(e->origin, r_refdef.vieworg, d);
 			dist = VectorLength(d);
-			subtend = (dist > 0.01f) ?
-				  (float)(2.0 * atan((wide * 0.5) / dist) * 180.0 / M_PI) : 0.0f;
 
-			Con_Printf("       scale=%d (x%.3f)  extent=%.1fw x %.1fh  dist=%.1f  subtends %.1f deg vs fov_x %.1f -> %.0f%% of view\n",
-				   (int)e->scale, entScale, wide, tall, dist, subtend,
-				   r_refdef.fov_x,
-				   (r_refdef.fov_x > 0.01f) ?
-				   100.0f * (float)(tan(subtend * M_PI / 360.0) /
-						    tan(r_refdef.fov_x * M_PI / 360.0)) : 0.0f);
+			/* Screen coverage is a ratio of tangents, not of angles.  Model
+			 * Y is screen-horizontal and Z screen-vertical for a model that
+			 * faces the viewer, so those are the two that can overflow.
+			 * Under Hor+ fov_y is a constant 2*atan(0.75) at a given fov,
+			 * so the vertical figure does not move with aspect or viewsize.
+			 * uhexen2-461l */
+			tx = (dist > 0.01f) ? (ext[1]*0.5f) / (dist * (float)tan(r_refdef.fov_x*M_PI/360.0)) : 0.0f;
+			tz = (dist > 0.01f) ? (ext[2]*0.5f) / (dist * (float)tan(r_refdef.fov_y*M_PI/360.0)) : 0.0f;
+
+			Con_Printf("       scale=%d (x%.3f)  size=%.1fw x %.1fd x %.1fh  dist=%.1f  covers %.0f%% wide / %.0f%% tall  (fov %.1f/%.1f)\n",
+				   (int)e->scale, entScale,
+				   ext[1], ext[0], ext[2], dist,
+				   100.0f*tx, 100.0f*tz,
+				   r_refdef.fov_x, r_refdef.fov_y);
+			#undef ALIAS_BBOX_PAD
 		}
 
 		/* uhexen2-khsa r10: entity-level fields that route R_DrawAliasModel
