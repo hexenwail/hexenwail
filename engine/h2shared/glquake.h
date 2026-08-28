@@ -400,6 +400,7 @@ extern	cvar_t	r_farclip;
 extern	cvar_t	r_entdist;
 extern	cvar_t	r_viewmodel_fov;
 extern	cvar_t	r_menupanel_dist;
+qboolean R_IsMenuPanel (entity_t *e);
 extern	cvar_t	cl_gun_fovscale;
 extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_slimealpha;
