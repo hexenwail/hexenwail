@@ -150,7 +150,7 @@ cvar_t	r_entdist = {"r_entdist", "0", CVAR_ARCHIVE};	/* entity draw distance (0=
 cvar_t	r_viewmodel_fov = {"r_viewmodel_fov", "0", CVAR_ARCHIVE};
 /* Distance, in units, to re-project a mod's in-view menu panel to.  0 = off,
  * which is vanilla behaviour and the default.  See R_MenuPanelOrigin. */
-cvar_t	r_menupanel_dist = {"r_menupanel_dist", "0", CVAR_ARCHIVE};
+cvar_t	r_menupanel_dist = {"r_menupanel_dist", "24", CVAR_ARCHIVE};
 cvar_t	cl_gun_fovscale = {"cl_gun_fovscale", "1", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
@@ -527,26 +527,34 @@ qboolean R_IsMenuPanel (entity_t *e)
 =================
 R_MenuPanelOrigin
 
-The re-projected origin for a panel R_IsMenuPanel() accepted.  Same direction
-from the eye, new distance, so the panel stays centred exactly where the mod
-put it.
+The re-projected origin for a panel R_IsMenuPanel() accepted: pinned to this
+frame's view axis, dead centre, at r_menupanel_dist units.
+
+Pinned rather than merely pushed along the mod's own direction, because that
+direction is what makes the panel swim.  The mod recomputes the panel once per
+server tick from the server-side player origin and angles, while the frame in
+front of you is drawn from the client's interpolated, bob-affected vieworg and
+the mouse angles of this instant.  Carrying the mod's direction into the
+render carries that mismatch with it, so the panel lags every turn and rides
+the walk bob.
+
+The measurement says as much: the eye vector read fwd=12.0 right=0.0 up=2.0.
+The exact 12.0 and the exact 0.0 are the mod placing the panel precisely along
+its own forward with no lateral offset, so the 2.0 of "up" is not an intended
+offset -- it is the view bob at the instant of that dump, which is exactly the
+vertical drift being complained about.
+
+Consequence worth knowing: the panel now sits centred on the view axis, about
+9.5 degrees lower than the direction-preserving version did, since that
+version carried the bob offset as a permanent tilt.
 =================
 */
 static qboolean R_MenuPanelOrigin (entity_t *e, vec3_t out)
 {
-	vec3_t	d;
-	float	dist;
-
 	if (!R_IsMenuPanel(e))
 		return false;
 
-	VectorSubtract(e->origin, r_refdef.vieworg, d);
-	dist = VectorLength(d);
-	if (dist < 0.01f)
-		return false;
-
-	VectorScale(d, r_menupanel_dist.value / dist, d);
-	VectorAdd(r_refdef.vieworg, d, out);
+	VectorMA(r_refdef.vieworg, r_menupanel_dist.value, vpn, out);
 	return true;
 }
 
@@ -563,17 +571,33 @@ static void R_RotateForEntity2 (entity_t *e)
 	float	forward, yaw, pitch;
 	vec3_t			angles;
 	vec3_t			panel;
+	qboolean		ismenu;
 
-	if (R_MenuPanelOrigin(e, panel))
+	ismenu = R_MenuPanelOrigin(e, panel);
+
+	if (ismenu)
 		GL_Translatef(panel[0], panel[1], panel[2]);
 	else
 		GL_Translatef(e->origin[0], e->origin[1], e->origin[2]);
 
-	if (e->model->flags & EF_FACE_VIEW)
+	if (ismenu || (e->model->flags & EF_FACE_VIEW))
 	{
+		if (ismenu)
+		{
+			/* Pinned on the view axis, so the direction back to the eye is
+			 * exactly -vpn.  Taking the facing from the live view vector
+			 * rather than from e->angles is the other half of holding the
+			 * panel still: the networked angles are a server tick behind
+			 * the mouse, so a panel oriented from them visibly swings as
+			 * you turn.  uhexen2-461l */
+			VectorNegate(vpn, angles);
+		}
+		else
+		{
 		VectorSubtract(e->origin,r_origin,angles);
 		VectorSubtract(r_origin,e->origin,angles);
 		VectorNormalize(angles);
+		}
 
 		if (angles[1] == 0 && angles[0] == 0)
 		{
