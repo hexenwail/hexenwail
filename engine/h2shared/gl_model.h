@@ -79,6 +79,12 @@ typedef struct texture_s
 	unsigned int	width, height;
 	GLuint			gl_texturenum;
 	GLuint			gl_fb_texturenum;	// fullbright mask, 0 if no fullbright pixels (uhexen2-sjvf)
+	/* Material-map sidecars, 0 when the pack shipped none.  Only ever set
+	 * on the external-replacement path: a BSP miptex is 8-bit indexed and
+	 * carries no surface detail to recover, so there is nothing to derive
+	 * these from without a replacement.  uhexen2-mfql. */
+	GLuint			gl_norm_texturenum;	// tangent-space normal map (_norm / _bump)
+	GLuint			gl_gloss_texturenum;	// specular mask (_gloss)
 	struct msurface_s	*texturechain;	// for gl_texsort drawing
 	int		anim_total;		// total tenths in sequence ( 0 = no)
 	int		anim_min, anim_max;	// time for this frame min <=time< max
@@ -816,6 +822,11 @@ typedef struct qmodel_s
 
 void	Mod_Init (void);
 void	Mod_ClearAll (void);
+
+/* True when any loaded brush model has a _norm/_bump or _gloss sidecar.
+ * Sampled once per map by R_NewMap to decide whether the world shader's
+ * material path runs at all.  uhexen2-mfql. */
+qboolean Mod_MaterialMapsPresent (void);
 void	Mod_SaveAliasModelDefaults (qmodel_t *mod);	/* uhexen2-oq0a */
 void	Mod_RestoreAliasModelDefaults (void);		/* uhexen2-oq0a */
 void	Mod_SetExtraFlags (qmodel_t *mod);		/* Ironwail r_nolerp_list */

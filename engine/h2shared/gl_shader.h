@@ -23,6 +23,9 @@ typedef struct glprogram_s {
 	GLint	u_texture0;
 	GLint	u_texture1;
 	GLint	u_texture2;	/* fullbright mask sampler for world (uhexen2-sjvf) */
+	GLint	u_texture3;	/* normal-map sampler for world (uhexen2-mfql) */
+	GLint	u_texture4;	/* gloss-map sampler for world (uhexen2-mfql) */
+	GLint	u_material;	/* world FS: vec3(normalmap intensity, gloss intensity, gloss exponent).  x and y both 0 disables the whole path. */
 	GLint	u_color;
 	GLint	u_fog_density;
 	GLint	u_fog_color;
@@ -81,6 +84,8 @@ extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 extern glprogram_t	gl_shader_skeletal;	/* PV_IQM bone-weighted skinning (desktop GL 4.3 only) */
 
 extern GLuint		gl_null_fb_texture;	/* 1x1 black sentinel for u_texture2 (uhexen2-sjvf) */
+extern GLuint		gl_flat_normal_texture;	/* 1x1 (128,128,255) flat normal, sentinel for u_texture3 (uhexen2-mfql) */
+extern GLuint		gl_null_gloss_texture;	/* 1x1 black sentinel for u_texture4 (uhexen2-mfql) */
 extern GLuint		gl_solid_white_texture;	/* 1x1 opaque white, for untextured imm batches */
 extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particles */
 

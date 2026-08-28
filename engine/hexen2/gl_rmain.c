@@ -334,6 +334,23 @@ cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_texture_external = {"r_texture_external", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh */
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
 
+/* Material maps -- _norm / _bump / _gloss sidecars.  uhexen2-mfql.
+ *
+ * r_materialmaps gates both the load (Mod_LoadTextures) and the shader, so
+ * turning it off stops the effect at once and reclaims the VRAM at the next
+ * map load.  Default 1 to match _glow, which is also on by default: a pack
+ * that ships these files expects them used, and nothing loads for a pack
+ * that does not ship them.  Note it sits behind r_texture_external -- with
+ * no replacement texture there is no sidecar to find.
+ *
+ * The three tuning knobs are live and cost nothing when a map has no
+ * material maps at all, since the C side skips the uniform upload entirely
+ * for a texture with no sidecar. */
+cvar_t	r_materialmaps = {"r_materialmaps", "1", CVAR_ARCHIVE};
+cvar_t	r_normalmap_intensity = {"r_normalmap_intensity", "1", CVAR_ARCHIVE};
+cvar_t	r_gloss_intensity = {"r_gloss_intensity", "1", CVAR_ARCHIVE};
+cvar_t	r_gloss_exponent = {"r_gloss_exponent", "16", CVAR_ARCHIVE};
+
 cvar_t	gl_clear = {"gl_clear", "1", CVAR_NONE};
 cvar_t	gl_cull = {"gl_cull", "1", CVAR_NONE};
 cvar_t	gl_zfix = {"gl_zfix", "1", CVAR_ARCHIVE};
@@ -5057,6 +5074,31 @@ static void R_SetupFrame (void)
 		{
 			R_UseProgram (gl_shader_world_oit.program);
 			glUniform2f_fp(gl_shader_world_oit.u_caustics, intensity, t);
+		}
+
+		/* Material maps ride the same once-per-frame channel, and for
+		 * exactly the reason spelled out above: uniform state is
+		 * per-program and persists, so one upload here reaches every
+		 * world draw this frame without threading a program pointer
+		 * through the dozen per-texture binding sites in gl_rsurf.c.
+		 * All three programs, because a translucent surface picks the
+		 * OIT variant and would otherwise render flat next to a
+		 * normal-mapped opaque one -- the same trap uhexen2-uxpp
+		 * documents for caustics.  uhexen2-mfql. */
+		if (gl_shader_world.program)
+		{
+			R_UseProgram (gl_shader_world.program);
+			GL_MaterialUniform (&gl_shader_world);
+		}
+		if (gl_shader_world_opaque.program)
+		{
+			R_UseProgram (gl_shader_world_opaque.program);
+			GL_MaterialUniform (&gl_shader_world_opaque);
+		}
+		if (gl_shader_world_oit.program)
+		{
+			R_UseProgram (gl_shader_world_oit.program);
+			GL_MaterialUniform (&gl_shader_world_oit);
 		}
 		/* Per-frame world overbright (Ironwail-style).  Pushing it once
 		 * per frame here covers the OIT and brush-batch paths that don't

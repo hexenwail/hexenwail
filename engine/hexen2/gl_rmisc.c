@@ -309,6 +309,10 @@ void R_Init (void)
 	Cvar_SetCallback (&r_clearcolor, R_SetClearColor_f);
 	Cvar_RegisterVariable (&r_texture_external);
 	Cvar_RegisterVariable (&r_texture_external_hud);
+	Cvar_RegisterVariable (&r_materialmaps);
+	Cvar_RegisterVariable (&r_normalmap_intensity);
+	Cvar_RegisterVariable (&r_gloss_intensity);
+	Cvar_RegisterVariable (&r_gloss_exponent);
 
 	Cvar_RegisterVariable (&gl_clear);
 	{
@@ -517,6 +521,13 @@ void R_NewMap (void)
 
 	memset (&r_worldentity, 0, sizeof(r_worldentity));
 	r_worldentity.model = cl.worldmodel;
+
+	/* Ask once per map whether the world shader's material path has any
+	 * work to do.  Placed here rather than at texture-load time because a
+	 * map's textures arrive across several Mod_LoadTextures calls (the
+	 * world plus any .bsp entity models), and this runs after all of them.
+	 * uhexen2-mfql. */
+	gl_materialmaps_present = Mod_MaterialMapsPresent ();
 
 	if (!cl.worldmodel) {
 		return;

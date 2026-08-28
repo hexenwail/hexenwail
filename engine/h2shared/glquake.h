@@ -435,6 +435,17 @@ extern	cvar_t	r_alphasort;
 extern	cvar_t	r_vm_watch;	/* log viewmodel draw-state transitions (uhexen2-ac4c) */
 extern	cvar_t	r_texture_external;
 extern	cvar_t	r_texture_external_hud;
+extern	cvar_t	r_materialmaps;		/* _norm/_bump/_gloss sidecars (uhexen2-mfql) */
+extern	cvar_t	r_normalmap_intensity;
+extern	cvar_t	r_gloss_intensity;
+extern	cvar_t	r_gloss_exponent;
+
+/* True when the loaded map has any _norm/_bump/_gloss sidecar; set once per
+ * map by R_NewMap.  Gates the world shader's material path so a map without
+ * them never enters it.  uhexen2-mfql. */
+extern	qboolean gl_materialmaps_present;
+struct glprogram_s;
+void	GL_MaterialUniform (const struct glprogram_s *prog);
 
 #if defined(H2W)
 extern	cvar_t	r_netgraph;
