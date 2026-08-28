@@ -3734,12 +3734,25 @@ static void R_DumpAliasInfo (void)
 			wfrac = (vid.width  > 0) ? (float)r_refdef.vrect.width  / (float)vid.width  : 1.0f;
 			hfrac = (vid.height > 0) ? (float)r_refdef.vrect.height / (float)vid.height : 1.0f;
 
-			Con_Printf("       scale=%d (x%.3f)  size=%.1fw x %.1fd x %.1fh  dist=%.1f  covers %.0f%%/%.0f%% of view, %.0f%%/%.0f%% of window  (fov %.1f/%.1f)\n",
+			Con_Printf("       scale=%d (x%.3f)  size=%.1fw x %.1fd x %.1fh (native %.0fx%.0f)  dist=%.1f  covers %.0f%%/%.0f%% of view, %.0f%%/%.0f%% of window  (fov %.1f/%.1f)\n",
 				   (int)e->scale, entScale,
-				   ext[1], ext[0], ext[2], dist,
+				   ext[1], ext[0], ext[2],
+				   (entScale > 0.0f) ? ext[1]/entScale : 0.0f,
+				   (entScale > 0.0f) ? ext[2]/entScale : 0.0f,
+				   dist,
 				   100.0f*tx, 100.0f*tz,
 				   100.0f*tx*wfrac, 100.0f*tz*hfrac,
 				   r_refdef.fov_x, r_refdef.fov_y);
+
+			/* Decompose the eye->entity vector in view axes.  A panel the mod
+			 * parks in front of the player should be almost pure forward with
+			 * right/up near zero; anything else means it is anchored somewhere
+			 * other than the eye, which changes what "distance" even means
+			 * here.  Never actually verified before -- the eye+v_forward*d
+			 * placement came from a progs decompile.  uhexen2-461l */
+			Con_Printf("         eye->ent: fwd=%.1f right=%.1f up=%.1f   vieworg=(%.1f %.1f %.1f)\n",
+				   DotProduct(d, vpn), DotProduct(d, vright), DotProduct(d, vup),
+				   r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 			#undef ALIAS_BBOX_PAD
 		}
 
