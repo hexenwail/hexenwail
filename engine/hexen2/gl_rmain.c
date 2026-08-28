@@ -148,6 +148,9 @@ cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};
 cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};
 cvar_t	r_entdist = {"r_entdist", "0", CVAR_ARCHIVE};	/* entity draw distance (0=unlimited) */
 cvar_t	r_viewmodel_fov = {"r_viewmodel_fov", "0", CVAR_ARCHIVE};
+/* Distance, in units, to re-project a mod's in-view menu panel to.  0 = off,
+ * which is vanilla behaviour and the default.  See R_MenuPanelOrigin. */
+cvar_t	r_menupanel_dist = {"r_menupanel_dist", "0", CVAR_ARCHIVE};
 cvar_t	cl_gun_fovscale = {"cl_gun_fovscale", "1", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
@@ -447,6 +450,81 @@ void R_RotateForEntity (entity_t *e)
 	GL_Rotatef (-e->angles[2], 1, 0, 0);
 }
 
+/* How far out we still consider a panel to be "in your face" and therefore a
+ * candidate.  Shadows of Chaos's Menu_Project tops out at 25.5 units, so this
+ * covers its whole range with room to spare and still excludes ordinary world
+ * geometry.  uhexen2-461l */
+#define MENUPANEL_MAXDIST	32.0f
+
+/*
+=================
+R_MenuPanelOrigin
+
+Shadows of Chaos builds its pop-up menus as world geometry parked directly in
+front of the eye: Menu_Project puts a flat, fullbright billboard at
+eye + v_forward * (25.5 - 0.15 * fov), which is exactly 12.0 units at the
+default fov.  menuoptn.mdl is 128 units wide natively and 32 after its 0.25
+entity scale, so at 12 units it subtends 110% of the viewport on both axes and
+the menu clips its own text off both margins.
+
+All four terms are measured rather than inferred -- r_aliasinfo reports
+scale=25, native 128x80, dist=12.1, fwd=12.0 right=0.0 -- and none of them
+differ from what r6303 computes: the entity-scale decode, the alias bbox pad,
+the fov cvar and the fov_adapt default are byte-identical between the trees.
+Nothing in the projection is wrong; the engine draws precisely what the mod
+asks for.  uhexen2-461l
+
+The mod cannot be edited from here, so this re-projects such a panel further
+along the same view ray.  The direction from the eye is preserved exactly, so
+the panel stays centred where the mod put it and only its apparent size
+changes -- at r_menupanel_dist 24 a 32-unit panel drops from 110% of the view
+to about 55%, which is the framing SoC's other menus already have.
+
+The signature is deliberately narrow, because this must not touch ordinary
+entities that happen to be near the camera: a flat (zero-depth) fullbright
+alias model, within arm's reach, dead ahead.  A monster in your face fails
+both the flatness and the fullbright test; an item underfoot fails the on-axis
+test; and the panel is never pulled closer than the mod placed it.
+=================
+*/
+static qboolean R_MenuPanelOrigin (entity_t *e, vec3_t out)
+{
+	vec3_t	d;
+	float	dist, fwd, side, up, depth;
+
+	if (r_menupanel_dist.value <= 0)
+		return false;
+	if (!e->model || e->model->type != mod_alias)
+		return false;
+	if ((e->drawflags & MLS_MASKIN) != MLS_FULLBRIGHT)
+		return false;
+
+	/* Flat billboard?  Both alias loaders pad mod->mins/maxs by 10 a side
+	 * (gl_model.c), so a zero-thickness model reads as exactly 20 deep. */
+	depth = (e->model->maxs[0] - e->model->mins[0]) - 20.0f;
+	if (depth > 1.0f)
+		return false;
+
+	VectorSubtract(e->origin, r_refdef.vieworg, d);
+	dist = VectorLength(d);
+	if (dist < 0.01f || dist > MENUPANEL_MAXDIST)
+		return false;
+	if (r_menupanel_dist.value <= dist)
+		return false;		/* never pull a panel closer in */
+
+	fwd  = DotProduct(d, vpn);
+	side = DotProduct(d, vright);
+	up   = DotProduct(d, vup);
+	if (fwd <= 0.0f)
+		return false;
+	if (fabs(side) > 0.5f*fwd || fabs(up) > 0.5f*fwd)
+		return false;		/* not dead ahead: not a menu panel */
+
+	VectorScale(d, r_menupanel_dist.value / dist, d);
+	VectorAdd(r_refdef.vieworg, d, out);
+	return true;
+}
+
 /*
 =================
 R_RotateForEntity2
@@ -459,8 +537,12 @@ static void R_RotateForEntity2 (entity_t *e)
 {
 	float	forward, yaw, pitch;
 	vec3_t			angles;
+	vec3_t			panel;
 
-	GL_Translatef(e->origin[0], e->origin[1], e->origin[2]);
+	if (R_MenuPanelOrigin(e, panel))
+		GL_Translatef(panel[0], panel[1], panel[2]);
+	else
+		GL_Translatef(e->origin[0], e->origin[1], e->origin[2]);
 
 	if (e->model->flags & EF_FACE_VIEW)
 	{
