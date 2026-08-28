@@ -3678,6 +3678,37 @@ static void R_DumpAliasInfo (void)
 			   amb,
 			   lightcolor[0], lightcolor[1], lightcolor[2]);
 
+		/* uhexen2-461l: the size chain, measured rather than inferred.
+		 * A mod that puts a panel in front of the eye to act as a menu
+		 * (Shadows of Chaos) is only correct if scale, model extent and
+		 * eye distance combine to subtend less than the rendered fov_x.
+		 * All three were previously argued from a progs decompile; print
+		 * them so the arithmetic can be checked against a live frame.
+		 *
+		 * Note e->scale is the raw network byte: 0 and 100 BOTH mean 1.0
+		 * (see the entScale decode in R_RotateForEntity2), which is why
+		 * the byte is shown next to the decoded factor. */
+		{
+			vec3_t	d;
+			float	entScale = (e->scale != 0 && e->scale != 100) ?
+					   (float)e->scale / 100.0f : 1.0f;
+			float	wide = (e->model->maxs[0] - e->model->mins[0]) * entScale;
+			float	tall = (e->model->maxs[2] - e->model->mins[2]) * entScale;
+			float	dist, subtend;
+
+			VectorSubtract(e->origin, r_refdef.vieworg, d);
+			dist = VectorLength(d);
+			subtend = (dist > 0.01f) ?
+				  (float)(2.0 * atan((wide * 0.5) / dist) * 180.0 / M_PI) : 0.0f;
+
+			Con_Printf("       scale=%d (x%.3f)  extent=%.1fw x %.1fh  dist=%.1f  subtends %.1f deg vs fov_x %.1f -> %.0f%% of view\n",
+				   (int)e->scale, entScale, wide, tall, dist, subtend,
+				   r_refdef.fov_x,
+				   (r_refdef.fov_x > 0.01f) ?
+				   100.0f * (float)(tan(subtend * M_PI / 360.0) /
+						    tan(r_refdef.fov_x * M_PI / 360.0)) : 0.0f);
+		}
+
 		/* uhexen2-khsa r10: entity-level fields that route R_DrawAliasModel
 		 * down translucent / lightstyle branches before the shader ever
 		 * sees the model.  If e->alpha != 0 (ENTALPHA_DEFAULT), or
