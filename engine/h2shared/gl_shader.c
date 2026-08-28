@@ -32,6 +32,8 @@ glprogram_t	gl_shader_sky;
  * sworld_frag unconditionally sample u_texture2 and add the result
  * (zero contribution) instead of branching per-fragment.  uhexen2-sjvf. */
 GLuint		gl_null_fb_texture;
+GLuint		gl_flat_normal_texture;	/* uhexen2-mfql */
+GLuint		gl_null_gloss_texture;	/* uhexen2-mfql */
 
 /* Solid white 1x1 RGBA.  The shaders that back the immediate-mode batches
  * all sample a texture unconditionally and multiply it into the vertex
@@ -232,6 +234,8 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 		if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
+		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
+		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
 		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
 		{
@@ -275,6 +279,9 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_texture0        = glGetUniformLocation_fp(p->program, "u_texture0");
 	p->u_texture1        = glGetUniformLocation_fp(p->program, "u_texture1");
 	p->u_texture2        = glGetUniformLocation_fp(p->program, "u_texture2");
+	p->u_texture3        = glGetUniformLocation_fp(p->program, "u_texture3");
+	p->u_texture4        = glGetUniformLocation_fp(p->program, "u_texture4");
+	p->u_material        = glGetUniformLocation_fp(p->program, "u_material");
 	p->u_color           = glGetUniformLocation_fp(p->program, "u_color");
 	p->u_fog_density     = glGetUniformLocation_fp(p->program, "u_fog_density");
 	p->u_fog_color       = glGetUniformLocation_fp(p->program, "u_fog_color");
@@ -390,7 +397,7 @@ static const char sworld_vert[] =
 	"in vec4 a_color;\n"
 	"uniform mat4 u_mvp;\n"
 	"uniform mat4 u_modelview;\n"
-	"out vec2 v_texcoord;\n"
+	"out highp vec2 v_texcoord;\n"	/* highp: the material tangent frame differentiates this; see v_eyepos (uhexen2-mfql) */
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
@@ -401,6 +408,25 @@ static const char sworld_vert[] =
 	 * local frame, which is acceptable for moving func_* ents (the effect
 	 * is subtle and rarely visible mid-motion).  uhexen2-6bfm. */
 	"out vec2 v_worldxy;\n"
+	/* Eye-space position, for the material-map tangent frame (uhexen2-mfql).
+	 * EYE space and not world: the frame, the view vector and the geometric
+	 * normal all have to live in one space, and eye space is the only one
+	 * this shader can produce for BOTH world surfaces and brush ents.  For a
+	 * brush ent the entity transform is inside u_modelview and never reaches
+	 * a_position -- which is exactly why v_worldxy above is documented as
+	 * wrong for brush ents -- so anything derived from a_position directly
+	 * would put a rotating platform's relief in its own local frame.  In eye
+	 * space the camera sits at the origin, so the view vector is just
+	 * -normalize(v_eyepos), and no eye-position uniform is needed. */
+	/* highp explicitly.  The ES tier's fragment stage runs at mediump by
+	 * default (GLSL_FRAG_HEADER), and mediump carries about 10 bits of
+	 * mantissa -- fine for a colour, useless for a position that can be
+	 * thousands of world units from the camera, whose screen-space
+	 * derivative is then the difference of two badly-rounded large numbers.
+	 * That is precisely the quantity the tangent frame is built from, so
+	 * without this the WebGL2 build gets a frame made of noise.  Desktop
+	 * GLSL accepts and ignores the qualifier.  uhexen2-mfql. */
+	"out highp vec3 v_eyepos;\n"
 	/* invariant gl_Position: pin position math so within-shader vertex
 	 * transforms produce stable depth across draw calls.  Brush ents
 	 * share this same compiled program (uhexen2-mf45), so the
@@ -413,6 +439,7 @@ static const char sworld_vert[] =
 	"    v_color = a_color;\n"
 	"    v_worldxy = a_position.xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
+	"    v_eyepos = eyepos.xyz;\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
@@ -463,12 +490,101 @@ static const char sworld_vert[] =
 	"    return pow(max(c1 * c2 * 0.5 + 0.5, 0.0), 4.0);\n" \
 	"}\n"
 
+
+/* Material maps -- tangent-space normal + specular from _norm/_bump/_gloss
+ * sidecars.  uhexen2-mfql.
+ *
+ * TANGENT FRAME WITHOUT TANGENTS.  BSP surfaces carry no tangent attribute,
+ * and adding one would mean a vertex-format change plus a generation pass
+ * over every surface at load.  It is not needed: a tangent frame is fully
+ * determined by how the texture coordinate varies across the surface, and
+ * the fragment stage can read that straight off the screen-space derivatives
+ * of position and UV (Christian Schuler's cotangent frame).  That costs a
+ * handful of ALU, needs no new vertex data, and works unchanged for world
+ * surfaces, brush ents and any other geometry that reaches this program.
+ *
+ * The geometric normal comes from cross(dFdx(p), dFdy(p)) rather than a
+ * vertex normal, which is exact here -- every BSP surface is planar by
+ * construction, so the face normal IS the surface normal with no
+ * interpolation error.  Its sign follows triangle winding, so it is flipped
+ * to face the viewer; in eye space "toward the viewer" is just -p.
+ *
+ * FAKE DELUXEMAPPING.  Hexen II bakes all lighting, dynamic lights included,
+ * into the lightmap on the CPU (R_AddDynamicLights), so at this point there
+ * is no light DIRECTION anywhere in the frame -- only an irradiance value.
+ * Real per-pixel normal mapping needs one, and the ways to get it are a
+ * deluxemap (which Hexen II BSPs do not have) or realtime lights (a far
+ * larger project than this).  DarkPlaces hits the same wall and answers it
+ * with r_glsl_deluxemapping 2, a fixed light vector in tangent space; this
+ * is the same trick.  It is not physically correct and is not claimed to be:
+ * it makes surface relief legible, which is the thing the feature was asked
+ * for, and it does so consistently because the tangent frame is anchored to
+ * the texture's own axes.
+ *
+ * BRIGHTNESS IS PRESERVED BY CONSTRUCTION.  The N.L term is divided by the
+ * response a FLAT normal would have produced, so a flat region of a normal
+ * map yields exactly 1.0 and multiplies the lightmap by nothing.  Only
+ * deviation from flat shades.  This is what stops installing a normal-map
+ * pack from globally darkening a map -- the naive form multiplies everything
+ * by L.z and quietly dims the whole level.
+ */
+#define GLSL_MATERIAL_FN \
+	"const vec3 MAT_LIGHTDIR = vec3(-0.35, -0.35, 0.868);\n" \
+	"mat3 CotangentFrame(highp vec3 N, highp vec3 p, highp vec2 uv) {\n" \
+	"    highp vec3 dp1 = dFdx(p);\n" \
+	"    highp vec3 dp2 = dFdy(p);\n" \
+	"    highp vec2 duv1 = dFdx(uv);\n" \
+	"    highp vec2 duv2 = dFdy(uv);\n" \
+	"    highp vec3 dp2perp = cross(dp2, N);\n" \
+	"    highp vec3 dp1perp = cross(N, dp1);\n" \
+	"    highp vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;\n" \
+	"    highp vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;\n" \
+	/* Degenerate UVs (a zero-area triangle, or a surface seen exactly
+	 * edge-on) make both T and B zero and inversesqrt(0) infinite.  The
+	 * max() floor keeps the frame finite; the normal it produces is
+	 * meaningless there, but the fragment is sub-pixel and the alternative
+	 * is a NaN that propagates into the final colour as a black or white
+	 * speck. */ \
+	"    highp float d = max(dot(T,T), dot(B,B));\n" \
+	"    highp float invmax = (d > 0.0) ? inversesqrt(d) : 0.0;\n" \
+	"    return mat3(T * invmax, B * invmax, N);\n" \
+	"}\n" \
+	/* Returns vec4(diffuse scale, specular rgb): .x multiplies the lightmap,
+	 * .yzw is added after it.  One call rather than two so the cutout and
+	 * opaque fragment variants cannot drift apart. */ \
+	"vec4 MaterialShade(sampler2D normtex, sampler2D glosstex, highp vec2 uv,\n" \
+	"                   highp vec3 p, vec2 params, float glossexp) {\n" \
+	"    highp vec3 Ng = normalize(cross(dFdx(p), dFdy(p)));\n" \
+	"    if (dot(Ng, p) > 0.0) Ng = -Ng;\n" \
+	"    mat3 TBN = CotangentFrame(Ng, p, uv);\n" \
+	/* Decode [0,1] -> [-1,1].  A pack that ships a flat 128,128,255 map,
+	 * or the sentinel bound when it ships none, decodes to (0,0,1). */ \
+	"    vec3 n = texture(normtex, uv).xyz * 2.0 - 1.0;\n" \
+	"    n = normalize(mix(vec3(0.0, 0.0, 1.0), n, params.x));\n" \
+	"    float ndotl = max(dot(n, MAT_LIGHTDIR), 0.0);\n" \
+	/* Divide out the flat response so flat == no change.  MAT_LIGHTDIR.z
+	 * is a nonzero literal, so no guard is needed. */ \
+	"    float diffuse = ndotl / MAT_LIGHTDIR.z;\n" \
+	"    vec3 spec = vec3(0.0);\n" \
+	"    if (params.y > 0.0) {\n" \
+	/* Camera is at the eye-space origin, so the view vector is -p. */ \
+	"        highp vec3 V = normalize(-p) * TBN;\n" \
+	"        vec3 H = normalize(MAT_LIGHTDIR + V);\n" \
+	"        float s = pow(max(dot(n, H), 0.0), glossexp);\n" \
+	"        spec = texture(glosstex, uv).rgb * s * params.y;\n" \
+	"    }\n" \
+	"    return vec4(diffuse, spec);\n" \
+	"}\n"
+
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask (uhexen2-sjvf) */
+	"uniform sampler2D u_texture3;\n"	/* normal map, flat sentinel when absent (uhexen2-mfql) */
+	"uniform sampler2D u_texture4;\n"	/* gloss map, black sentinel when absent (uhexen2-mfql) */
+	"uniform vec3 u_material;\n"		/* x=normalmap intensity, y=gloss intensity, z=gloss exponent; x=y=0 disables */
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"
@@ -477,14 +593,16 @@ static const char sworld_frag[] =
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
-	"in vec2 v_texcoord;\n"
+	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	"in highp vec3 v_eyepos;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
+	GLSL_MATERIAL_FN
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
@@ -507,10 +625,29 @@ static const char sworld_frag[] =
 	 * fullbright pixels the engine binds a 1x1 black sentinel at unit 2
 	 * so the sample contributes 0.  uhexen2-9a1l. */
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb * (1.0 - u_lightdebug.y);\n"
+	/* Material maps.  Branch is uniform-static and therefore coherent across
+	 * the whole draw, so a map with no _norm/_bump/_gloss anywhere -- or a
+	 * user with r_materialmaps 0 -- pays one scalar compare per fragment and
+	 * skips the derivatives, the frame build and both texture fetches.
+	 * uhexen2-mfql. */
+	"    vec3 matspec = vec3(0.0);\n"
+	"    if (u_material.x > 0.0 || u_material.y > 0.0) {\n"
+	"        vec4 m = MaterialShade(u_texture3, u_texture4, v_texcoord,\n"
+	"                               v_eyepos, u_material.xy, u_material.z);\n"
+	/* Weight the highlight by the lightmap BEFORE the relief term is folded
+	 * into it.  Relief redistributes the light that is already arriving;
+	 * applying it to the specular as well would count it twice and make lit
+	 * bumps bloom.  The r_lightmap debug view (u_lightdebug.y) drops the
+	 * highlight entirely, for the same reason it drops the fullbright add --
+	 * that view is meant to show lighting alone. */
+	"        matspec = m.yzw * lm.rgb * (1.0 - u_lightdebug.y);\n"
+	"        lm.rgb *= m.x;\n"
+	"    }\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"    if (color.a < u_alpha_threshold) discard;\n"
 	"    color.rgb += fb;\n"
+	"    color.rgb += matspec;\n"
 	/* Underwater caustics: gated by u_caustics.x (set to 0 by C when the
 	 * view leaf is not CONTENTS_WATER or the cvar is off, otherwise to
 	 * r_caustics_intensity).  Applied as a brightness multiplier so dark
@@ -552,6 +689,9 @@ static const char sworld_frag_opaque[] =
 	"uniform sampler2D u_texture0;\n"	/* diffuse */
 	"uniform sampler2D u_texture1;\n"	/* lightmap atlas */
 	"uniform sampler2D u_texture2;\n"	/* fullbright mask */
+	"uniform sampler2D u_texture3;\n"	/* normal map, flat sentinel when absent (uhexen2-mfql) */
+	"uniform sampler2D u_texture4;\n"	/* gloss map, black sentinel when absent (uhexen2-mfql) */
+	"uniform vec3 u_material;\n"		/* x=normalmap intensity, y=gloss intensity, z=gloss exponent; x=y=0 disables */
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
 	"uniform float u_alpha_threshold;\n"	/* unused but kept for layout parity */
@@ -559,14 +699,16 @@ static const char sworld_frag_opaque[] =
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
-	"in vec2 v_texcoord;\n"
+	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	"in highp vec3 v_eyepos;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
+	GLSL_MATERIAL_FN
 	"void main() {\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
@@ -574,10 +716,29 @@ static const char sworld_frag_opaque[] =
 	"        : texture(u_texture1, v_lmcoord);\n"
 	"    lm.rgb = mix(lm.rgb, vec3(1.0), u_lightdebug.x);\n"	/* uhexen2-isq7 */
 	"    tex.rgb = mix(tex.rgb, vec3(1.0), u_lightdebug.y);\n"
+	/* Material maps.  Branch is uniform-static and therefore coherent across
+	 * the whole draw, so a map with no _norm/_bump/_gloss anywhere -- or a
+	 * user with r_materialmaps 0 -- pays one scalar compare per fragment and
+	 * skips the derivatives, the frame build and both texture fetches.
+	 * uhexen2-mfql. */
+	"    vec3 matspec = vec3(0.0);\n"
+	"    if (u_material.x > 0.0 || u_material.y > 0.0) {\n"
+	"        vec4 m = MaterialShade(u_texture3, u_texture4, v_texcoord,\n"
+	"                               v_eyepos, u_material.xy, u_material.z);\n"
+	/* Weight the highlight by the lightmap BEFORE the relief term is folded
+	 * into it.  Relief redistributes the light that is already arriving;
+	 * applying it to the specular as well would count it twice and make lit
+	 * bumps bloom.  The r_lightmap debug view (u_lightdebug.y) drops the
+	 * highlight entirely, for the same reason it drops the fullbright add --
+	 * that view is meant to show lighting alone. */
+	"        matspec = m.yzw * lm.rgb * (1.0 - u_lightdebug.y);\n"
+	"        lm.rgb *= m.x;\n"
+	"    }\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
 	"    vec3 fb = texture(u_texture2, v_texcoord).rgb * (1.0 - u_lightdebug.y);\n"
 	"    color.rgb += fb;\n"
+	"    color.rgb += matspec;\n"
 	"    if (u_caustics.x > 0.0) {\n"
 	"        float c = Caustics(v_worldxy, u_caustics.y);\n"
 	"        color.rgb += color.rgb * c * u_caustics.x;\n"
@@ -1138,6 +1299,8 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	if (p->u_texture0 >= 0) glUniform1i_fp(p->u_texture0, 0);
 	if (p->u_texture1 >= 0) glUniform1i_fp(p->u_texture1, 1);
 	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
+		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
+		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
 	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —
@@ -1349,6 +1512,38 @@ void GL_Shaders_Init (void)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	}
 
+	/* Material-map sentinels, bound at units 3 and 4 for any surface whose
+	 * pack shipped no _norm/_bump/_gloss.  Both fetches are unconditional
+	 * inside the material branch, so the sentinels have to be the identity
+	 * for that maths: (128,128,255) decodes to (0,0,1), a normal pointing
+	 * straight out of the surface, which yields exactly the flat response
+	 * the shader divides by and therefore no change; black gloss multiplies
+	 * the highlight to nothing.  This is the same shape as gl_null_fb_texture
+	 * above, and for the same reason -- one program, no per-surface variant.
+	 * uhexen2-mfql. */
+	{
+		static const unsigned char flat_normal_pixel[4] = {128, 128, 255, 255};
+		static const unsigned char black_pixel2[4] = {0, 0, 0, 255};
+
+		glGenTextures_fp(1, &gl_flat_normal_texture);
+		glBindTexture_fp(GL_TEXTURE_2D, gl_flat_normal_texture);
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, flat_normal_pixel);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+		glGenTextures_fp(1, &gl_null_gloss_texture);
+		glBindTexture_fp(GL_TEXTURE_2D, gl_null_gloss_texture);
+		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel2);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
+
 	/* Companion to the above: 1x1 opaque white, so an immediate-mode batch
 	 * can draw flat vertex colour through a shader that always samples a
 	 * texture.  R_DrawParticles' square mode is the first caller.
@@ -1450,6 +1645,16 @@ void GL_Shaders_Shutdown (void)
 	{
 		glDeleteTextures_fp(1, &gl_null_fb_texture);
 		gl_null_fb_texture = 0;
+	}
+	if (gl_flat_normal_texture)
+	{
+		glDeleteTextures_fp(1, &gl_flat_normal_texture);
+		gl_flat_normal_texture = 0;
+	}
+	if (gl_null_gloss_texture)
+	{
+		glDeleteTextures_fp(1, &gl_null_gloss_texture);
+		gl_null_gloss_texture = 0;
 	}
 	if (gl_solid_white_texture)
 	{

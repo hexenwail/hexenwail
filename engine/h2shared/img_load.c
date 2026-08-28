@@ -761,6 +761,171 @@ qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgre
 
 /*
 =================
+IMG_HeightToNormal
+
+Convert a decoded greyscale height map in place into a tangent-space normal
+map, keeping the height in the alpha channel.
+
+This exists because _bump ships a HEIGHT field, not a normal, and the shader
+wants a normal.  DarkPlaces does the same conversion at load
+(Mod_LoadTextures -> the "bumpmap" branch) rather than asking pack authors to
+pre-convert, and packs in the wild rely on that -- a _bump-only pack is common
+because height maps are what a painter naturally produces.
+
+Central-difference rather than a full Sobel: the 3x3 Sobel's diagonal taps buy
+nothing on a field that is already a low-frequency height, and the 4-tap form
+keeps this O(n) with two texel reads per axis.  Wrap-around addressing, because
+a world texture tiles -- clamping would put a seam of flat normal down two
+edges of every wall.
+
+The alpha channel keeps the original height.  DarkPlaces documents that
+convention (darkplaces.txt:212-235: "_norm ... alpha channel may carry bumpmap
+height for offset/relief mapping"), so preserving it here means a later offset
+or relief mapping pass needs no second sidecar, and a real _norm file that
+already carries height in alpha takes the same path.
+=================
+*/
+/* Height-to-normal gradient gain.  A central difference over adjacent texels
+ * gets weaker as a height map gets bigger -- the same relief spread over more
+ * texels means a smaller step between neighbours -- so the raw slope alone
+ * produces almost-flat normals on the 512px maps packs actually ship.
+ * DarkPlaces solves it with r_shadow_bumpscale_bumpmap, default 4; matching
+ * that number is what makes a DP-authored _bump look here the way its author
+ * saw it.  Relief strength stays adjustable at runtime through
+ * r_normalmap_intensity, which scales the decoded normal in the shader --
+ * doing it there rather than here means the knob is live instead of needing
+ * a map reload to re-convert. */
+#define IMG_BUMPSCALE	4.0f
+
+static void IMG_HeightToNormal (byte *rgba, int width, int height, float scale)
+{
+	byte	*out;
+	int	x, y;
+
+	if (width < 2 || height < 2)
+		return;		/* no gradient to take */
+
+	out = (byte *) malloc ((size_t)width * height * 4);
+	if (!out)
+		return;		/* leave the height map alone rather than half-convert */
+
+	for (y = 0; y < height; y++)
+	{
+		int	yn = (y - 1 + height) % height;
+		int	yp = (y + 1) % height;
+
+		for (x = 0; x < width; x++)
+		{
+			int	xn = (x - 1 + width) % width;
+			int	xp = (x + 1) % width;
+			const byte *l = rgba + (((size_t)y  * width + xn) * 4);
+			const byte *r = rgba + (((size_t)y  * width + xp) * 4);
+			const byte *u = rgba + (((size_t)yn * width + x ) * 4);
+			const byte *d = rgba + (((size_t)yp * width + x ) * 4);
+			const byte *c = rgba + (((size_t)y  * width + x ) * 4);
+			byte	*o = out + (((size_t)y * width + x) * 4);
+			float	hl, hr, hu, hd, nx, ny, nz, inv;
+
+			/* Rec.601 luma.  A height map is normally already grey,
+			 * but a pack that saved one as a colour PNG must not
+			 * come out with a different relief per channel. */
+			hl = (0.299f*l[0] + 0.587f*l[1] + 0.114f*l[2]) * (1.0f/255.0f);
+			hr = (0.299f*r[0] + 0.587f*r[1] + 0.114f*r[2]) * (1.0f/255.0f);
+			hu = (0.299f*u[0] + 0.587f*u[1] + 0.114f*u[2]) * (1.0f/255.0f);
+			hd = (0.299f*d[0] + 0.587f*d[1] + 0.114f*d[2]) * (1.0f/255.0f);
+
+			/* Gradient points downhill, so the surface normal takes
+			 * its negation in X and Y.  scale sets how pronounced
+			 * the relief is; 1.0 keeps the raw slope. */
+			nx = -(hr - hl) * scale;
+			ny = -(hd - hu) * scale;
+			nz = 1.0f;
+
+			inv = 1.0f / sqrt (nx*nx + ny*ny + nz*nz);
+			nx *= inv; ny *= inv; nz *= inv;
+
+			/* Encode [-1,1] -> [0,255]. */
+			o[0] = (byte) q_max (0, q_min (255, (int)((nx * 0.5f + 0.5f) * 255.0f + 0.5f)));
+			o[1] = (byte) q_max (0, q_min (255, (int)((ny * 0.5f + 0.5f) * 255.0f + 0.5f)));
+			o[2] = (byte) q_max (0, q_min (255, (int)((nz * 0.5f + 0.5f) * 255.0f + 0.5f)));
+			o[3] = (byte) q_max (0, q_min (255, (int)((0.299f*c[0] + 0.587f*c[1] + 0.114f*c[2]) + 0.5f)));
+		}
+	}
+
+	memcpy (rgba, out, (size_t)width * height * 4);
+	free (out);
+}
+
+/*
+=================
+IMG_LoadReplacementNormal
+
+Resolve the normal-map sidecar for a texture: <name>_norm, else <name>_bump
+converted from height.
+
+The precedence is not ours to choose.  DarkPlaces documents it
+(darkplaces.txt:212-235) and FTE follows it: _norm is a real normal map and
+wins outright; _bump is a height map and is "not loaded if a normal map is
+present".  Every pack in the wild was authored against that rule, so probing
+_bump first -- or merging the two -- would render existing packs wrong.
+
+_norm takes the compressed path.  Block compression of a normal map is
+lossier than of a diffuse (the codec interpolates X and Y independently and
+the result is no longer unit length), but the shader renormalises, and
+declining a DDS the pack deliberately shipped would cost four times the VRAM
+to second-guess the author.  _bump cannot: the height-to-normal conversion
+needs texels, and a block payload has none until the driver has it.
+=================
+*/
+qboolean IMG_LoadReplacementNormal (const char *name, const char *modelname, imgreplace_t *out)
+{
+	char	buf[MAX_QPATH];
+
+	q_snprintf (buf, sizeof(buf), "%s_norm", name);
+	if (IMG_LoadReplacement (buf, modelname, true, out))
+		return true;
+
+	q_snprintf (buf, sizeof(buf), "%s_bump", name);
+	if (!IMG_LoadReplacement (buf, modelname, false, out))
+		return false;
+
+	/* allow_compressed was false, so this is decoded RGBA by construction.
+	 * Assert the invariant rather than trusting it: a future change to
+	 * IMG_LoadReplacement that returned blocks here would otherwise walk
+	 * a NULL rgba. */
+	if (!out->rgba)
+	{
+		IMG_FreeReplacement (out);
+		return false;
+	}
+
+	IMG_HeightToNormal (out->rgba, out->width, out->height, IMG_BUMPSCALE);
+	out->has_alpha = true;		/* alpha now carries height */
+	return true;
+}
+
+/*
+=================
+IMG_LoadReplacementGloss
+
+Resolve the specular sidecar: <name>_gloss.  One suffix, no alias -- DarkPlaces
+(model_shared.c:2459, darkplaces.txt:264) and FTE both spell it this way and
+nothing else is in circulation.
+
+Compression is allowed.  A gloss map is a low-frequency mask feeding a
+multiply, which is the case block compression damages least.
+=================
+*/
+qboolean IMG_LoadReplacementGloss (const char *name, const char *modelname, imgreplace_t *out)
+{
+	char	buf[MAX_QPATH];
+
+	q_snprintf (buf, sizeof(buf), "%s_gloss", name);
+	return IMG_LoadReplacement (buf, modelname, true, out);
+}
+
+/*
+=================
 IMG_FreeReplacement
 =================
 */

@@ -709,6 +709,56 @@ bsp_tex_internal:
 						fbname, (byte *)(tx+1), tx->width, tx->height);
 				}
 			}
+
+			/* Material-map sidecars.  Outside the replaced/embedded
+			 * branch above on purpose: unlike the glow, which the
+			 * embedded path can recover from palette indices, there
+			 * is no in-BSP source for relief or specular, so the
+			 * sidecar is the ONLY source either way.  A pack that
+			 * adds rtex001_norm.tga to sharpen a stock wall, without
+			 * repainting the wall itself, is a normal thing to ship
+			 * and DarkPlaces honours it; requiring a diffuse
+			 * replacement first would silently ignore that pack.
+			 *
+			 * Excluded exactly where the world shader does not
+			 * run: sky has its own program, and '*' turb goes
+			 * through EmitWaterPolys on gl_shader_alias.  A '{'
+			 * fence is NOT excluded -- it renders through
+			 * gl_shader_world like any other wall and a grate
+			 * with relief is a normal thing for a pack to ship.
+			 *
+			 * r_materialmaps gates the load so a machine that
+			 * cannot afford the VRAM does not pay for it; the
+			 * cvar also gates the shader, so toggling it off
+			 * mid-game stops the effect immediately, while the
+			 * memory comes back at the next map load.
+			 * uhexen2-mfql. */
+			if (mt->name[0] != '*' &&
+			    strncmp(mt->name, "sky", 3) != 0 &&
+			    r_materialmaps.integer)
+			{
+				imgreplace_t	mat;
+				char		matname[MAX_QPATH];
+
+				if (IMG_LoadReplacementNormal (mt->name, loadmodel->name, &mat))
+				{
+					q_snprintf (matname, sizeof(matname), "%s_norm", mt->name);
+					/* TEX_ALPHA because the _bump path parks
+					 * the height field in alpha and a future
+					 * offset-mapping pass wants it kept. */
+					tx->gl_norm_texturenum = GL_LoadReplacement (matname, &mat,
+									TEX_MIPMAP | TEX_ALPHA);
+					IMG_FreeReplacement (&mat);
+				}
+
+				if (IMG_LoadReplacementGloss (mt->name, loadmodel->name, &mat))
+				{
+					q_snprintf (matname, sizeof(matname), "%s_gloss", mt->name);
+					tx->gl_gloss_texturenum = GL_LoadReplacement (matname, &mat,
+									TEX_MIPMAP);
+					IMG_FreeReplacement (&mat);
+				}
+			}
 		}
 	}
 
@@ -902,6 +952,49 @@ void Mod_ReloadTextures (void)
 		}
 		#endif
 	}
+}
+
+/*
+=================
+Mod_MaterialMapsPresent
+
+Whether any loaded brush model carries a _norm/_bump or _gloss sidecar.
+
+The world fragment shader has one material path for every surface, so the
+decision to run it at all is per-frame rather than per-texture.  Asking the
+question here, once at R_NewMap, means a map whose pack ships no material maps
+never enters that branch -- no derivatives, no tangent frame, no two extra
+texture fetches -- while a map that ships some pays for them on every surface,
+including the ones without maps, which then sample the flat sentinels and come
+out unchanged.
+
+Scanning rather than tracking a load-time counter because brush models come
+and go independently (a .bsp entity model is its own qmodel_t with its own
+texture list) and a counter would have to be decremented on unload, which
+nothing currently does.  A scan is exact and runs once per map.
+=================
+*/
+qboolean Mod_MaterialMapsPresent (void)
+{
+	int	i, j;
+
+	for (i = 0; i < mod_numknown; i++)
+	{
+		qmodel_t *m = &mod_known[i];
+
+		if (m->type != mod_brush || m->needload != NL_PRESENT || !m->textures)
+			continue;
+
+		for (j = 0; j < m->numtextures; j++)
+		{
+			texture_t *tx = m->textures[j];
+
+			if (tx && (tx->gl_norm_texturenum || tx->gl_gloss_texturenum))
+				return true;
+		}
+	}
+
+	return false;
 }
 
 /*

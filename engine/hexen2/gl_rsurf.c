@@ -227,6 +227,85 @@ static inline void GL_BindFullbright (GLuint texnum)
 	glActiveTexture_fp(GL_TEXTURE0);
 }
 
+/* Set once per map by R_NewMap.  See Mod_MaterialMapsPresent for why the
+ * question is asked per map rather than per texture.  uhexen2-mfql. */
+qboolean gl_materialmaps_present;
+
+/*
+===============
+GL_MaterialUniform
+
+Upload the world shader's vec3(normalmap intensity, gloss intensity, gloss
+exponent).  Both intensities zero switches the whole material path off inside
+the shader, which is the state every map without material maps runs in.
+
+Called once per frame per program from R_SetupFrame, not per texture: the
+intensities are global cvars, and whether a PARTICULAR texture has maps is
+expressed by what is bound at units 3 and 4 -- the flat-normal and black-gloss
+sentinels are the identity for this maths, so a texture without maps comes out
+unchanged without needing its own uniform upload.  Uniform state is per-program
+and persists across glUseProgram, which is what makes one upload enough.
+uhexen2-mfql.
+===============
+*/
+void GL_MaterialUniform (const glprogram_t *prog)
+{
+	float	nrm, gls;
+
+	if (prog->u_material < 0)
+		return;
+
+	if (gl_materialmaps_present && r_materialmaps.integer)
+	{
+		nrm = r_normalmap_intensity.value;
+		gls = r_gloss_intensity.value;
+		if (nrm < 0.0f) nrm = 0.0f;
+		if (gls < 0.0f) gls = 0.0f;
+	}
+	else
+	{
+		nrm = gls = 0.0f;
+	}
+
+	/* pow() with a zero or negative exponent returns 1 for every angle, so
+	 * a mistyped r_gloss_exponent would flood the screen with flat white
+	 * specular rather than doing nothing.  Floor it at 1. */
+	glUniform3f_fp(prog->u_material, nrm, gls,
+		       q_max(1.0f, r_gloss_exponent.value));
+}
+
+/*
+===============
+GL_BindMaterialMaps
+
+Bind a texture's normal and gloss maps at units 3 and 4, falling back to the
+sentinels when the pack shipped none.  Leaves TU0 active, like its fullbright
+sibling above.  uhexen2-mfql.
+===============
+*/
+static inline void GL_BindMaterialMaps (const texture_t *t)
+{
+	glActiveTexture_fp(GL_TEXTURE3);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_norm_texturenum ? t->gl_norm_texturenum : gl_flat_normal_texture);
+	glActiveTexture_fp(GL_TEXTURE4);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_gloss_texturenum ? t->gl_gloss_texturenum : gl_null_gloss_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
+}
+
+/* Sentinels at units 3 and 4, for the world-state setup sites.  Every fragment
+ * samples both when the material path is live, so something has to be bound
+ * even before the first per-texture transition.  uhexen2-mfql. */
+static inline void GL_BindMaterialDefaults (void)
+{
+	glActiveTexture_fp(GL_TEXTURE3);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_flat_normal_texture);
+	glActiveTexture_fp(GL_TEXTURE4);
+	glBindTexture_fp(GL_TEXTURE_2D, gl_null_gloss_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
+}
+
 /*
 ===============
 R_AddDynamicLights
@@ -881,6 +960,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	glBindTexture_fp(GL_TEXTURE_2D,
 		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
 	glActiveTexture_fp(GL_TEXTURE0);
+	GL_BindMaterialMaps (t);		/* uhexen2-mfql */
 
 	if (fa->flags & SURF_DRAWTURB)
 	{	// warp texture — apply per-liquid alpha + light tinting
@@ -1143,6 +1223,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	glBindTexture_fp(GL_TEXTURE_2D,
 		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
 	glActiveTexture_fp(GL_TEXTURE0);
+	GL_BindMaterialMaps (t);		/* uhexen2-mfql */
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
@@ -1659,6 +1740,7 @@ void R_BeginBrushBatch (void)
 	glActiveTexture_fp(GL_TEXTURE2);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);	/* sjvf: default fb */
 	glActiveTexture_fp(GL_TEXTURE0);
+	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 	GL_ImmInvalidateState();
 	brush_batch_active = true;
 }
@@ -1733,6 +1815,7 @@ static void DrawTextureChains_BindWorldState (void)
 	glActiveTexture_fp(GL_TEXTURE2);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTexture_fp(GL_TEXTURE0);	/* leave TU0 sticky for diffuse */
+	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 	/* These uploads bypass GL_ImmEnd's uniform cache. If the next
 	 * GL_ImmEnd reuses gl_shader_world (e.g. fallback brush path),
 	 * its cache must miss so it re-uploads the right values. */
@@ -2012,6 +2095,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 			glActiveTexture_fp(GL_TEXTURE2);
 			glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);	/* sjvf: default fb */
 			glActiveTexture_fp(GL_TEXTURE0);
+			GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 			GL_ImmInvalidateState();
 
 			/* Emit one batched draw per texture run.  When the
@@ -2024,6 +2108,7 @@ static void DrawTextureChains_DrawDeferred (entity_t *e, msurface_t **deferred, 
 	glBindTexture_fp(GL_TEXTURE_2D, \
 		(_T_)->gl_fb_texturenum ? (_T_)->gl_fb_texturenum : gl_null_fb_texture); \
 	glActiveTexture_fp(GL_TEXTURE0); \
+	GL_BindMaterialMaps (_T_);	/* uhexen2-mfql */ \
 } while (0)
 #define EMIT_BATCH(BUF, N, ALPHA_T, A2C_ON) do { \
 	if ((N) <= 0) break; \
@@ -2376,6 +2461,7 @@ static void DrawTextureChains (entity_t *e)
 					texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 					GL_BindDiffuse(tt->gl_texturenum);
 					GL_BindFullbright(tt->gl_fb_texturenum ? tt->gl_fb_texturenum : gl_null_fb_texture);
+					GL_BindMaterialMaps (tt);	/* uhexen2-mfql */
 				}
 
 				{
@@ -2406,6 +2492,7 @@ static void DrawTextureChains (entity_t *e)
 								texture_t *tt = R_TextureAnimation (e, s->texinfo->texture);
 								GL_BindDiffuse(tt->gl_texturenum);
 								GL_BindFullbright(tt->gl_fb_texturenum ? tt->gl_fb_texturenum : gl_null_fb_texture);
+					GL_BindMaterialMaps (tt);	/* uhexen2-mfql */
 							}
 						}
 						world_deferred[world_deferred_count++] = s;
@@ -2585,6 +2672,7 @@ static void DrawTextureChains (entity_t *e)
 	glActiveTexture_fp(GL_TEXTURE2);
 	glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 	glActiveTexture_fp(GL_TEXTURE0);
+	GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 
 	if (have_stencil)
 		R_SetStencilTest (false);
@@ -2761,6 +2849,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 		glActiveTexture_fp(GL_TEXTURE2);
 		glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
 		glActiveTexture_fp(GL_TEXTURE0);
+		GL_BindMaterialDefaults ();		/* uhexen2-mfql */
 		if (!brush_batch_active)
 		{
 			glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);

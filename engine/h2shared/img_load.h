@@ -72,6 +72,18 @@ qboolean IMG_ReplacementHasSoftAlpha (const imgreplace_t *r);
  * <name>_luma.  Kept separate so callers do not have to build the suffix. */
 qboolean IMG_LoadReplacementGlow (const char *name, const char *modelname, imgreplace_t *out);
 
+/* Normal-map sidecar: <name>_norm, else <name>_bump converted from height.
+ * The order is DarkPlaces' documented precedence (darkplaces.txt:212-235),
+ * which FTE follows and every pack in the wild was authored against -- _norm
+ * is a real normal map and wins outright, _bump is a height field and is only
+ * consulted when no normal map exists.  On the _bump path the height is
+ * converted in place and kept in the alpha channel. */
+qboolean IMG_LoadReplacementNormal (const char *name, const char *modelname, imgreplace_t *out);
+
+/* Specular sidecar: <name>_gloss.  No alias -- unlike _glow/_luma, only one
+ * spelling is in circulation. */
+qboolean IMG_LoadReplacementGloss (const char *name, const char *modelname, imgreplace_t *out);
+
 void IMG_FreeReplacement (imgreplace_t *r);
 
 /* Load external texture with automatic format detection (PNG/TGA/PCX only).
