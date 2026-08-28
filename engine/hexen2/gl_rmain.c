@@ -3635,6 +3635,14 @@ static void R_DumpAliasInfo (void)
 		   gl_lightmap_format, GL_RGBA,
 		   (cl.worldmodel && cl.worldmodel->lightdata) ? "present" : "NULL (fullbright map)");
 	Con_Printf("frame=%d  cl_numvisedicts=%d\n", r_framecount, cl_numvisedicts);
+	/* The 3D viewport, which is what world-space geometry is sized against.
+	 * Below viewsize 100 it is inset inside the window, so a panel that
+	 * covers 110%% of the VIEW can still be a small floating rectangle on
+	 * screen -- the two percentages below exist to tell those apart. */
+	Con_Printf("vrect=%dx%d at (%d,%d)  window=%dx%d  viewsize=%d  sb_lines=%d\n",
+		   r_refdef.vrect.width, r_refdef.vrect.height,
+		   r_refdef.vrect.x, r_refdef.vrect.y,
+		   vid.width, vid.height, scr_viewsize.integer, sb_lines);
 	Con_Printf("idx slot model                          flags                          origin                       ambient  lightcolor(r,g,b)\n");
 
 	for (i = 0; i < cl_numvisedicts; i++)
@@ -3697,7 +3705,7 @@ static void R_DumpAliasInfo (void)
 			vec3_t	d, ext;
 			float	entScale = (e->scale != 0 && e->scale != 100) ?
 					   (float)e->scale / 100.0f : 1.0f;
-			float	dist, tx, tz;
+			float	dist, tx, tz, wfrac, hfrac;
 			int	k;
 
 			for (k = 0; k < 3; k++)
@@ -3720,10 +3728,17 @@ static void R_DumpAliasInfo (void)
 			tx = (dist > 0.01f) ? (ext[1]*0.5f) / (dist * (float)tan(r_refdef.fov_x*M_PI/360.0)) : 0.0f;
 			tz = (dist > 0.01f) ? (ext[2]*0.5f) / (dist * (float)tan(r_refdef.fov_y*M_PI/360.0)) : 0.0f;
 
-			Con_Printf("       scale=%d (x%.3f)  size=%.1fw x %.1fd x %.1fh  dist=%.1f  covers %.0f%% wide / %.0f%% tall  (fov %.1f/%.1f)\n",
+			/* Of the VIEW is what the mod controls through geometry; of the
+			 * WINDOW is what the player actually sees, and the two diverge
+			 * exactly when viewsize insets the viewport. */
+			wfrac = (vid.width  > 0) ? (float)r_refdef.vrect.width  / (float)vid.width  : 1.0f;
+			hfrac = (vid.height > 0) ? (float)r_refdef.vrect.height / (float)vid.height : 1.0f;
+
+			Con_Printf("       scale=%d (x%.3f)  size=%.1fw x %.1fd x %.1fh  dist=%.1f  covers %.0f%%/%.0f%% of view, %.0f%%/%.0f%% of window  (fov %.1f/%.1f)\n",
 				   (int)e->scale, entScale,
 				   ext[1], ext[0], ext[2], dist,
 				   100.0f*tx, 100.0f*tz,
+				   100.0f*tx*wfrac, 100.0f*tz*hfrac,
 				   r_refdef.fov_x, r_refdef.fov_y);
 			#undef ALIAS_BBOX_PAD
 		}
