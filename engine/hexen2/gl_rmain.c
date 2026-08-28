@@ -487,7 +487,7 @@ both the flatness and the fullbright test; an item underfoot fails the on-axis
 test; and the panel is never pulled closer than the mod placed it.
 =================
 */
-static qboolean R_MenuPanelOrigin (entity_t *e, vec3_t out)
+qboolean R_IsMenuPanel (entity_t *e)
 {
 	vec3_t	d;
 	float	dist, fwd, side, up, depth;
@@ -519,6 +519,31 @@ static qboolean R_MenuPanelOrigin (entity_t *e, vec3_t out)
 		return false;
 	if (fabs(side) > 0.5f*fwd || fabs(up) > 0.5f*fwd)
 		return false;		/* not dead ahead: not a menu panel */
+
+	return true;
+}
+
+/*
+=================
+R_MenuPanelOrigin
+
+The re-projected origin for a panel R_IsMenuPanel() accepted.  Same direction
+from the eye, new distance, so the panel stays centred exactly where the mod
+put it.
+=================
+*/
+static qboolean R_MenuPanelOrigin (entity_t *e, vec3_t out)
+{
+	vec3_t	d;
+	float	dist;
+
+	if (!R_IsMenuPanel(e))
+		return false;
+
+	VectorSubtract(e->origin, r_refdef.vieworg, d);
+	dist = VectorLength(d);
+	if (dist < 0.01f)
+		return false;
 
 	VectorScale(d, r_menupanel_dist.value / dist, d);
 	VectorAdd(r_refdef.vieworg, d, out);
@@ -4325,7 +4350,26 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 				depthMaskWrite = 1;
 				R_SetDepthMask (true);
 			}
-			R_DrawAliasModel (e);
+			/* A mod's in-view menu panel is UI wearing world geometry's
+			 * clothes, so it has to read like UI: never occluded.  Once
+			 * r_menupanel_dist pushes it away from the eye it is far enough
+			 * out to intersect a wall in tight geometry, and the depth test
+			 * would swallow the menu exactly when the player opened it.
+			 * Depth test off for the panel, depth write off with it so the
+			 * hole it would otherwise punch does not eat anything drawn
+			 * afterwards.  uhexen2-461l */
+			if (R_IsMenuPanel(e))
+			{
+				R_SetDepthTest (false);
+				R_SetDepthMask (false);
+				R_DrawAliasModel (e);
+				R_SetDepthTest (true);
+				R_SetDepthMask (depthMaskWrite ? true : false);
+			}
+			else
+			{
+				R_DrawAliasModel (e);
+			}
 			break;
 		case mod_brush:
 			if (!depthMaskWrite && !OIT_InPass())
