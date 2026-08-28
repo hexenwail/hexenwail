@@ -76,18 +76,46 @@ function glesBranchDefining(source, name) {
   }
 }
 
+// Is a block comment still open at the end of `line`?  `/*` inside a string
+// literal does not open one, which is why this walks the line rather than
+// running a regex over it.
+function blockCommentOpenAfter(line, inComment) {
+  let inString = false;
+  for (let i = 0; i < line.length; i += 1) {
+    if (inComment) {
+      if (line[i] === '*' && line[i + 1] === '/') { inComment = false; i += 1; }
+      continue;
+    }
+    if (inString) {
+      if (line[i] === '\\') { i += 1; continue; }
+      if (line[i] === '"') inString = false;
+      continue;
+    }
+    if (line[i] === '"') { inString = true; continue; }
+    if (line[i] === '/' && line[i + 1] === '*') { inComment = true; i += 1; continue; }
+    if (line[i] === '/' && line[i + 1] === '/') break;
+  }
+  return inComment;
+}
+
 function readDefine(source, name, macros) {
   const lines = source.split('\n');
   const start = lines.findIndex((line) => new RegExp(`^\\s*#define\\s+${name}\\b`).test(line));
   if (start < 0) throw new Error(`missing shader macro ${name}`);
 
   const parts = [];
+  let inComment = false;
   for (let index = start; index < lines.length; index += 1) {
     let line = lines[index];
     if (index === start) line = line.replace(new RegExp(`^\\s*#define\\s+${name}\\b`), '');
-    const continued = /\\\s*$/.test(line);
+    inComment = blockCommentOpenAfter(line, inComment);
     parts.push(line.replace(/\\\s*$/, ''));
-    if (!continued) break;
+    // A block comment carries the definition across newlines by itself: the C
+    // preprocessor replaces the whole comment with a single space in phase 3,
+    // so the interior newlines never terminate the directive and the interior
+    // lines carry no backslashes.  GLSL_MATERIAL_FN is written that way.
+    if (inComment) continue;
+    if (!/\\\s*$/.test(line)) break;
   }
   return evaluateCStringExpression(parts.join('\n'), macros);
 }
@@ -150,7 +178,7 @@ export async function extractEngineWebGLPrograms() {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros));
   }
   // Tier-independent GLSL helper functions.
-  for (const name of ['GLSL_BICUBIC_LM_FN', 'GLSL_CAUSTICS_FN']) {
+  for (const name of ['GLSL_BICUBIC_LM_FN', 'GLSL_CAUSTICS_FN', 'GLSL_MATERIAL_FN']) {
     macros.set(name, readDefine(shaderSource, name, macros));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
