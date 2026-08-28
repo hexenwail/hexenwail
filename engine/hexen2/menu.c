@@ -5051,19 +5051,188 @@ static void M_Video_Key (int key)
 //=============================================================================
 /* MODS MENU */
 
-#define	MODS_MAX		128
+#define	MODS_MAX		256
 #define	MODS_LIST_TOP		60
 #define	MODS_LIST_X		64
 #define	MODS_CURSOR_X		56
-#define	MODS_ACTIVE_X		232
 #define	MODS_SCROLLBAR_X	252
-#define	MODS_FOOTER_RESERVE	24	/* px reserved below the list for the portals toggle */
+#define	MODS_FOOTER_RESERVE	32	/* px reserved below the list: portals toggle + search line */
 
-static char	mods_list[MODS_MAX][MAX_QPATH];
+/* Status tags ("<-", "[HW]") are right-aligned to end here, which keeps them
+ * clear of the scrollbar at MODS_SCROLLBAR_X.  Labels get everything to the
+ * left of the widest tag, so the two can never collide. */
+#define	MODS_TAG_RIGHT		248
+#define	MODS_LABEL_MAX		19	/* characters, from MODS_LIST_X to 216 */
+
+typedef enum
+{
+	MOD_BASE = 0,	/* data1 */
+	MOD_PORTALS,	/* portals */
+	MOD_CUSTOM
+} modkind_t;
+
+typedef struct
+{
+	char		dir[MAX_QPATH];		/* what `game' takes */
+	char		label[MAX_QPATH];	/* display name; falls back to dir */
+	modkind_t	kind;
+	qboolean	installed;		/* false only for a missing portals row */
+	qboolean	hexenworld;		/* hwprogs.dat gamecode: not playable here */
+} modentry_t;
+
+static modentry_t	mods_list[MODS_MAX];
 static int	mods_count;
-static int	mods_cursor;
-static int	mods_top;		/* first visible item — scroll offset */
+
+/* Indices into mods_list that pass the search filter.  The cursor and the
+ * scroll offset index THIS, never mods_list.  That distinction is the whole
+ * safety story for filtering: the old code compared mods_cursor against
+ * MODS_FIXED_PORTALS and friends as raw list positions, and every one of those
+ * comparisons goes wrong the moment a filter hides a row above it.  Entry kind
+ * is carried per-entry instead, so nothing here depends on a row number.
+ * Same bug shape as uhexen2-8uc1 (Graphics submenu drew the cursor at the
+ * compacted row while hit-testing the raw enum index). */
+static int	mods_view[MODS_MAX];
+static int	mods_view_count;
+static int	mods_cursor;		/* index into mods_view */
+static int	mods_top;		/* first visible view row — scroll offset */
+
 static qboolean	mods_portals_toggle;	/* "with Portals" for custom mods */
+static qboolean	mods_have_portals;
+static qboolean	mods_truncated;		/* scan ran out of MODS_MAX slots */
+
+/* Display names for the hexenworld.org add-on corpus, transcribed from that
+ * archive's readme -- see docs/MODS_CORPUS.md, which is the authority for this
+ * table.  The corpus is ~40 mods whose directory names ("rvnlrd", "sprgnth",
+ * "fo4d", "tt") tell a player nothing, which is the whole reason this exists.
+ * A mod that is not listed here still works: the lookup falls back to the
+ * directory name, and a modinfo.txt in the mod overrides both. */
+typedef struct
+{
+	const char	*dir;
+	const char	*title;
+} modname_t;
+
+static const modname_t mods_known[] =
+{
+	{ "acorn",	"Magic Acorn" },
+	{ "ahumado",	"Ahumado's Skull" },
+	{ "apocbot",	"Apocalypse Bots" },
+	{ "bigspdrs",	"Spiders!" },
+	{ "black",	"Black Plague" },
+	{ "bodies",	"Bodies" },
+	{ "db",		"DungeonBreak" },
+	{ "eyeofra",	"The Eye of Ra" },
+	{ "ffmus",	"Final Fantasy Music" },
+	{ "fo4d",	"Fortress of Four Doors" },
+	{ "h2ctf",	"HexDev Hexen II CTF" },
+	{ "hcbots",	"CronosBot" },
+	{ "hexarena",	"HexArena" },
+	{ "hwctf",	"HexenWorld CTF" },
+	{ "hwcycle",	"Map cycling for HW" },
+	{ "leech",	"Weapon Leech" },
+	{ "lightng",	"Lightning Sorcery" },
+	{ "mpbyrino",	"Mission Pack by Rino" },
+	{ "mpbyrino2",	"Mission Pack by Rino 2" },
+	{ "ndm",	"DM pak for Hexen II" },
+	{ "orbmeek",	"The Orb of the Meek" },
+	{ "ovinoimp",	"Ovinomancer Imp" },
+	{ "peanut",	"Project Peanut" },
+	{ "q2sounds",	"Quake 2 Sound Pack" },
+	{ "quake",	"Quake Sounds & Weapons" },
+	{ "qweapons",	"Quake Weapons" },
+	{ "raven",	"Ravenhurst" },
+	{ "redmed",	"Red Medusa" },
+	{ "rk",		"Rival Kingdoms" },
+	{ "rvnlrd",	"RavenLord" },
+	{ "siege",	"Siege" },
+	{ "speeed",	"Speeeed's Imagination" },
+	{ "spiders",	"Arachnophobia" },
+	{ "spike",	"Deadly Sheep" },
+	{ "sprgnth",	"Super Gauntlets" },
+	{ "SuperNecro",	"SuperNecro" },
+	{ "thebarongastonehousebyrino",	"The Baron Gastone House" },
+	{ "tt",		"The Tyrant's Tome" },
+	{ "xability",	"Extra Abilities" }
+};
+
+static const char *M_Mods_KnownTitle (const char *dir)
+{
+	size_t	i;
+
+	for (i = 0; i < sizeof(mods_known) / sizeof(mods_known[0]); i++)
+	{
+		if (!q_strcasecmp(dir, mods_known[i].dir))
+			return mods_known[i].title;
+	}
+	return NULL;
+}
+
+/*
+Read a display name out of <basedir>/<dir>/modinfo.txt: the first line that is
+not blank and not a # or ; comment.  Deliberately plain stdio -- at scan time
+the mod is not on the searchpath, and mounting every candidate just to read a
+title would be far more work than the menu is worth.  Returns false and leaves
+`out' untouched when there is nothing usable to read.
+*/
+static qboolean M_Mods_ReadModinfo (const char *basedir, const char *dir,
+				    char *out, size_t outsize)
+{
+	char	path[MAX_OSPATH];
+	char	line[256];
+	char	*p, *end;
+	FILE	*f;
+
+	q_snprintf (path, sizeof(path), "%s/%s/modinfo.txt", basedir, dir);
+	f = fopen (path, "rt");
+	if (!f)
+		return false;
+
+	while (fgets(line, sizeof(line), f))
+	{
+		p = line;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p == 0 || *p == '\n' || *p == '\r' || *p == '#' || *p == ';')
+			continue;
+
+		end = p + strlen(p);
+		while (end > p && (end[-1] == '\n' || end[-1] == '\r' ||
+				   end[-1] == ' '  || end[-1] == '\t'))
+			*--end = 0;
+		if (end == p)
+			continue;
+
+		q_strlcpy (out, p, outsize);
+		fclose (f);
+		return true;
+	}
+
+	fclose (f);
+	return false;
+}
+
+/*
+A mod carrying hwprogs.dat and no progs.dat is HexenWorld gamecode.  It still
+satisfies FS_IsGamedir (it has paks, or a pk3), so it lists here -- but the
+Hexen II client cannot run it, and offering it would just hand the player a
+broken switch.  The corpus has at least three (hwctf, hwcycle, siege).
+
+Loose files only: catching an hwprogs.dat packed inside a .pak would mean
+opening every candidate archive during a menu scan.  A mod that hides its
+gamecode that way is listed as playable and fails at launch, which is exactly
+what happens today.
+*/
+static qboolean M_Mods_IsHexenWorld (const char *basedir, const char *dir)
+{
+	char	path[MAX_OSPATH];
+
+	q_snprintf (path, sizeof(path), "%s/%s/progs.dat", basedir, dir);
+	if (Sys_FileType(path) == FS_ENT_FILE)
+		return false;
+
+	q_snprintf (path, sizeof(path), "%s/%s/hwprogs.dat", basedir, dir);
+	return (Sys_FileType(path) == FS_ENT_FILE);
+}
 
 /* Visible rows fit between MODS_LIST_TOP and (200 - MODS_FOOTER_RESERVE) on the
  * 320x200 menu canvas. When the separator is drawn (between fixed and custom
@@ -5076,46 +5245,75 @@ static int M_Mods_VisibleRows (void)
 	return rows;
 }
 
-static int mods_strcmp (const void *a, const void *b)
+static int mods_sortcmp (const void *a, const void *b)
 {
-	return q_strcasecmp ((const char *)a, (const char *)b);
+	const modentry_t *ea = (const modentry_t *)a;
+	const modentry_t *eb = (const modentry_t *)b;
+
+	return q_strcasecmp (ea->dir, eb->dir);
 }
 
 /* Fixed entries at top of mods list */
-#define MODS_FIXED_HEXEN2	0
-#define MODS_FIXED_PORTALS	1
 #define MODS_FIXED_COUNT	2	/* base game + portals */
 
-static qboolean	mods_have_portals;
+static void M_Mods_SetEntry (modentry_t *e, const char *basedir,
+			     const char *dir, modkind_t kind,
+			     const char *forced_label)
+{
+	const char	*title;
+	char		info[MAX_QPATH];
+
+	memset (e, 0, sizeof(*e));
+	q_strlcpy (e->dir, dir, sizeof(e->dir));
+	e->kind = kind;
+	e->installed = true;
+
+	if (forced_label)
+	{
+		q_strlcpy (e->label, forced_label, sizeof(e->label));
+		return;
+	}
+
+	title = M_Mods_KnownTitle (dir);
+	q_strlcpy (e->label, title ? title : dir, sizeof(e->label));
+
+	/* a mod that describes itself outranks our shipped table */
+	if (M_Mods_ReadModinfo (basedir, dir, info, sizeof(info)))
+		q_strlcpy (e->label, info, sizeof(e->label));
+}
 
 static void M_ScanMods (void)
 {
-	char	alldirs[MODS_MAX][MAX_QPATH];
+	static char	alldirs[MODS_MAX][MAX_QPATH];
 	char	path[MAX_OSPATH];
 	const char	*basedir;
-	int	numdirs, i, custom_count;
-
-	mods_count = MODS_FIXED_COUNT;
+	int	numdirs, i;
 
 	/* FS_GetBasedir(), not host_parms->basedir: -basedir moves fs_basedir and
 	 * never touches host_parms->basedir, so scanning the latter would list a
 	 * different set of mods than the ones Host_Game_f (quakefs.c) and the
 	 * `game' tab completer will actually accept.  uhexen2-jk53. */
 	basedir = FS_GetBasedir ();
+	mods_truncated = false;
 
 	/* check if portals directory exists */
 	q_snprintf (path, sizeof(path), "%s/portals", basedir);
 	mods_have_portals = (Sys_FileType(path) == FS_ENT_DIRECTORY);
 
-	/* fixed entries */
-	q_strlcpy (mods_list[MODS_FIXED_HEXEN2], "data1", MAX_QPATH);
-	q_strlcpy (mods_list[MODS_FIXED_PORTALS], "portals", MAX_QPATH);
+	/* fixed entries — labelled by hand, they are not "mods" the player installed */
+	mods_count = 0;
+	M_Mods_SetEntry (&mods_list[mods_count], basedir, "data1", MOD_BASE, "Hexen II");
+	mods_count++;
+	M_Mods_SetEntry (&mods_list[mods_count], basedir, "portals", MOD_PORTALS, "Portal of Praevus");
+	mods_list[mods_count].installed = mods_have_portals;
+	mods_count++;
 
 	/* scan for custom mods */
 	numdirs = Sys_ListDirectories (basedir, alldirs, MODS_MAX);
-	custom_count = 0;
+	if (numdirs >= MODS_MAX)
+		mods_truncated = true;
 
-	for (i = 0; i < numdirs && (MODS_FIXED_COUNT + custom_count) < MODS_MAX; i++)
+	for (i = 0; i < numdirs; i++)
 	{
 		if (!q_strcasecmp(alldirs[i], "data1"))
 			continue;
@@ -5126,31 +5324,130 @@ static void M_ScanMods (void)
 		if (!FS_IsGamedir(basedir, alldirs[i]))
 			continue;
 
-		q_strlcpy (mods_list[MODS_FIXED_COUNT + custom_count], alldirs[i], MAX_QPATH);
-		custom_count++;
+		if (mods_count >= MODS_MAX)
+		{
+			mods_truncated = true;
+			break;
+		}
+
+		M_Mods_SetEntry (&mods_list[mods_count], basedir, alldirs[i], MOD_CUSTOM, NULL);
+		mods_list[mods_count].hexenworld = M_Mods_IsHexenWorld (basedir, alldirs[i]);
+		mods_count++;
 	}
 
-	/* sort only the custom mods (after the fixed entries) */
-	if (custom_count > 1)
-		qsort (&mods_list[MODS_FIXED_COUNT], custom_count, sizeof(mods_list[0]), mods_strcmp);
+	/* Fail loudly.  A silently truncated list reads as "that mod is not
+	 * installed", which sends the player looking in the wrong place. */
+	if (mods_truncated)
+		Con_Printf ("Mods: more than %d game directories in %s, list truncated\n",
+			    MODS_MAX, basedir);
 
-	mods_count = MODS_FIXED_COUNT + custom_count;
+	/* sort only the custom mods (after the fixed entries) */
+	if (mods_count - MODS_FIXED_COUNT > 1)
+		qsort (&mods_list[MODS_FIXED_COUNT], mods_count - MODS_FIXED_COUNT,
+		       sizeof(mods_list[0]), mods_sortcmp);
 }
 
-static qboolean M_Mods_IsActive (int idx)
+static qboolean M_Mods_IsActive (const modentry_t *e)
 {
-	if (idx == MODS_FIXED_HEXEN2)
-		return !q_strcasecmp(fs_gamedir_nopath, "data1");
-	if (idx == MODS_FIXED_PORTALS)
-		return !q_strcasecmp(fs_gamedir_nopath, "portals");
-	return !q_strcasecmp(fs_gamedir_nopath, mods_list[idx]);
+	return !q_strcasecmp(fs_gamedir_nopath, e->dir);
+}
+
+/* Rebuild the filtered view.  Matches the search buffer against both the
+ * display name and the directory name, because a player may know a mod as
+ * "sprgnth" or as "Super Gauntlets" and both should find it. */
+static void M_Mods_BuildView (void)
+{
+	int	i;
+
+	mods_view_count = 0;
+	for (i = 0; i < mods_count; i++)
+	{
+		if (M_Filter_Active() &&
+		    !M_Filter_Matches(mods_list[i].label) &&
+		    !M_Filter_Matches(mods_list[i].dir))
+			continue;
+		mods_view[mods_view_count++] = i;
+	}
+
+	if (mods_cursor >= mods_view_count)
+		mods_cursor = mods_view_count - 1;
+	if (mods_cursor < 0)
+		mods_cursor = 0;
+}
+
+/* Can this view row be activated?  A missing Portals row and HexenWorld-only
+ * mods are drawn (hiding them reads as a bug) but cannot be chosen. */
+static qboolean M_Mods_Selectable (int view_idx)
+{
+	const modentry_t	*e;
+
+	if (view_idx < 0 || view_idx >= mods_view_count)
+		return false;
+	e = &mods_list[mods_view[view_idx]];
+	return e->installed && !e->hexenworld;
+}
+
+/* Step the cursor by one row in `dir', skipping what cannot be activated.
+ * Bounded by the view size: a filter that matches only unselectable rows must
+ * terminate, not spin. */
+static void M_Mods_MoveCursor (int dir)
+{
+	int	i;
+
+	if (mods_view_count <= 0)
+		return;
+
+	for (i = 0; i < mods_view_count; i++)
+	{
+		mods_cursor += dir;
+		if (mods_cursor >= mods_view_count)
+			mods_cursor = 0;
+		else if (mods_cursor < 0)
+			mods_cursor = mods_view_count - 1;
+		if (M_Mods_Selectable(mods_cursor))
+			return;
+	}
+	/* nothing selectable anywhere: the walk returns the cursor where it began */
+}
+
+/* After a jump (paging, Home/End, a filter change) pull the cursor onto the
+ * nearest selectable row, trying `prefer' first and then the other way. */
+static void M_Mods_SnapSelectable (int prefer)
+{
+	int	i;
+
+	if (mods_view_count <= 0)
+		return;
+	if (mods_cursor < 0)
+		mods_cursor = 0;
+	if (mods_cursor >= mods_view_count)
+		mods_cursor = mods_view_count - 1;
+	if (M_Mods_Selectable(mods_cursor))
+		return;
+
+	for (i = mods_cursor; i >= 0 && i < mods_view_count; i += prefer)
+	{
+		if (M_Mods_Selectable(i))
+		{
+			mods_cursor = i;
+			return;
+		}
+	}
+	for (i = mods_cursor; i >= 0 && i < mods_view_count; i -= prefer)
+	{
+		if (M_Mods_Selectable(i))
+		{
+			mods_cursor = i;
+			return;
+		}
+	}
 }
 
 /* Keep mods_cursor within the visible window by adjusting mods_top. */
 static void M_Mods_EnsureVisible (void)
 {
 	int visible = M_Mods_VisibleRows ();
-	if (mods_count <= visible)
+	if (mods_view_count <= visible)
 	{
 		mods_top = 0;
 		return;
@@ -5161,8 +5458,45 @@ static void M_Mods_EnsureVisible (void)
 		mods_top = mods_cursor - visible + 1;
 	if (mods_top < 0)
 		mods_top = 0;
-	if (mods_top > mods_count - visible)
-		mods_top = mods_count - visible;
+	if (mods_top > mods_view_count - visible)
+		mods_top = mods_view_count - visible;
+}
+
+/* Re-seat the cursor and scroll after the filter changed. */
+static void M_Mods_FilterChanged (void)
+{
+	M_Mods_BuildView ();
+	mods_cursor = 0;
+	mods_top = 0;
+	M_Mods_SnapSelectable (1);
+	M_Mods_EnsureVisible ();
+}
+
+/* Fit a label into the label column, ellipsising what does not go.  The corpus
+ * carries a 27-character directory name (thebarongastonehousebyrino), so this
+ * is a real case and not defensive padding. */
+static const char *M_Mods_FitLabel (const char *label)
+{
+	static char	buf[MODS_LABEL_MAX + 1];
+
+	if (strlen(label) <= MODS_LABEL_MAX)
+		return label;
+
+	q_strlcpy (buf, label, MODS_LABEL_MAX - 3 + 1);
+	q_strlcat (buf, "...", sizeof(buf));
+	return buf;
+}
+
+/* Right-align a status tag so it ends at MODS_TAG_RIGHT, clear of both the
+ * label column and the scrollbar. */
+static void M_Mods_DrawTag (int y, const char *tag, qboolean white)
+{
+	int	x = MODS_TAG_RIGHT - (int)strlen(tag) * 8;
+
+	if (white)
+		M_PrintWhite (x, y, tag);
+	else
+		M_Print (x, y, tag);
 }
 
 static void M_Menu_Mods_f (void)
@@ -5173,33 +5507,34 @@ static void M_Menu_Mods_f (void)
 	m_state = m_mods;
 	m_entersound = true;
 
-	M_ScanMods ();
+	/* the search buffer is shared with the other filtered submenus */
+	M_Filter_Clear ();
 
-	/* place cursor on the active mod */
+	M_ScanMods ();
+	M_Mods_BuildView ();
+
+	/* start on the running mod */
 	mods_cursor = 0;
-	for (i = 0; i < mods_count; i++)
+	for (i = 0; i < mods_view_count; i++)
 	{
-		if (M_Mods_IsActive(i))
+		if (M_Mods_IsActive(&mods_list[mods_view[i]]))
 		{
 			mods_cursor = i;
 			break;
 		}
 	}
-
-	/* scroll the active entry into view */
 	mods_top = 0;
+	M_Mods_SnapSelectable (1);
 	M_Mods_EnsureVisible ();
 
-	/* default portals toggle to current state */
 	mods_portals_toggle = mods_have_portals;
 }
 
 static void M_Mods_Draw (void)
 {
-	int		i, y, cursor_y;
+	int		i, y, cursor_y, yf;
 	int		visible, last_visible;
-	const char	*label;
-	qboolean	active;
+	const modentry_t	*e;
 
 	ScrollTitle("gfx/menu/title0.lmp");
 
@@ -5207,46 +5542,37 @@ static void M_Mods_Draw (void)
 	M_Mods_EnsureVisible ();
 
 	last_visible = mods_top + visible;
-	if (last_visible > mods_count)
-		last_visible = mods_count;
+	if (last_visible > mods_view_count)
+		last_visible = mods_view_count;
 
 	cursor_y = -1;
 	y = MODS_LIST_TOP;
 	for (i = mods_top; i < last_visible; i++)
 	{
-		if (i == mods_cursor)
-			cursor_y = y;
-
-		active = M_Mods_IsActive(i);
-
-		/* display names for fixed entries */
-		if (i == MODS_FIXED_HEXEN2)
-			label = "Hexen II";
-		else if (i == MODS_FIXED_PORTALS)
-			label = "Portal of Praevus";
-		else
-			label = mods_list[i];
+		e = &mods_list[mods_view[i]];
 
 		if (i == mods_cursor)
-			M_PrintWhite (MODS_LIST_X, y, label);
-		else
-			M_Print (MODS_LIST_X, y, label);
-
-		if (active)
-			M_PrintWhite (MODS_ACTIVE_X, y, "<-");
-
-		/* dim the portals entry if not installed */
-		if (i == MODS_FIXED_PORTALS && !mods_have_portals)
 		{
-			M_Print (MODS_LIST_X, y, "Portal of Praevus");
-			M_Print (MODS_ACTIVE_X, y, "(not found)");
+			cursor_y = y;
+			M_PrintWhite (MODS_LIST_X, y, M_Mods_FitLabel(e->label));
 		}
+		else
+			M_Print (MODS_LIST_X, y, M_Mods_FitLabel(e->label));
+
+		if (!e->installed)
+			M_Mods_DrawTag (y, "(none)", false);
+		else if (e->hexenworld)
+			M_Mods_DrawTag (y, "[HW]", false);
+		else if (M_Mods_IsActive(e))
+			M_Mods_DrawTag (y, "<-", true);
 
 		y += 8;
 
-		/* separator between fixed and custom — draw only when both
-		 * sides of the divide are within the visible window. */
-		if (i == MODS_FIXED_COUNT - 1 && i + 1 < last_visible)
+		/* separator between the fixed rows and the scanned ones, drawn only
+		 * when both sides of the divide are on screen.  Keyed off entry kind
+		 * rather than a row number, because the filter renumbers rows. */
+		if (e->kind != MOD_CUSTOM && i + 1 < last_visible &&
+		    mods_list[mods_view[i + 1]].kind == MOD_CUSTOM)
 		{
 			y += 4;
 			M_DrawCharacter (MODS_LIST_X, y, '-' + 128);
@@ -5256,19 +5582,22 @@ static void M_Mods_Draw (void)
 		}
 	}
 
+	if (mods_view_count == 0)
+		M_Print (MODS_LIST_X, MODS_LIST_TOP, "No mods match");
+
 	/* up/down scroll indicators */
 	if (mods_top > 0)
 		M_DrawCharacter (MODS_LIST_X - 16, MODS_LIST_TOP, 128);
-	if (last_visible < mods_count)
+	if (last_visible < mods_view_count)
 		M_DrawCharacter (MODS_LIST_X - 16, MODS_LIST_TOP + (visible - 1) * 8, 129);
 
 	/* proportional scrollbar on right edge */
-	if (mods_count > visible)
+	if (mods_view_count > visible)
 	{
 		int track_y = MODS_LIST_TOP;
 		int track_h = visible * 8;
-		int thumb_h = (visible * track_h) / mods_count;
-		int thumb_y = track_y + (mods_top * track_h) / mods_count;
+		int thumb_h = (visible * track_h) / mods_view_count;
+		int thumb_y = track_y + (mods_top * track_h) / mods_view_count;
 		int j;
 		if (thumb_h < 8) thumb_h = 8;
 		for (j = 0; j < track_h; j += 8)
@@ -5281,16 +5610,20 @@ static void M_Mods_Draw (void)
 		}
 	}
 
-	/* portals toggle — only show for custom mods when portals is installed */
-	if (mods_have_portals && mods_cursor >= MODS_FIXED_COUNT)
+	yf = MODS_LIST_TOP + visible * 8 + 8;
+
+	/* portals toggle — only for custom mods, and only when portals is installed */
+	if (mods_have_portals && mods_view_count > 0 &&
+	    mods_list[mods_view[mods_cursor]].kind == MOD_CUSTOM)
 	{
-		int yf = MODS_LIST_TOP + visible * 8 + 12;
 		M_Print (MODS_LIST_X, yf, "Portals data:");
 		if (mods_portals_toggle)
 			M_PrintWhite (176, yf, "ON");
 		else
 			M_Print (176, yf, "off");
 	}
+
+	M_Filter_Draw (MODS_LIST_X, yf + 10);
 
 	/* blinking cursor on the active row */
 	if (cursor_y >= 0)
@@ -5299,71 +5632,78 @@ static void M_Mods_Draw (void)
 
 static void M_Mods_Key (int key)
 {
-	int visible = M_Mods_VisibleRows ();
+	int	visible = M_Mods_VisibleRows ();
+	const modentry_t	*e;
+
+	/* Search input first.  M_Filter_HandleKey only claims printable ASCII and
+	 * backspace, so escape (27), enter (13), the arrows (128+) and the gamepad
+	 * codes (243+) all fall through to navigation below. */
+	if (M_Filter_HandleKey (key))
+	{
+		M_Mods_FilterChanged ();
+		return;
+	}
 
 	switch (key)
 	{
 	case K_ESCAPE:
 	case K_GP_B:
+		/* first press drops the filter, second leaves the menu */
+		if (M_Filter_Active ())
+		{
+			S_LocalSound ("raven/menu2.wav");
+			M_Filter_Clear ();
+			M_Mods_FilterChanged ();
+			break;
+		}
 		M_Menu_Main_f ();
 		break;
 
 	case K_DOWNARROW:
 		S_LocalSound ("raven/menu1.wav");
-		if (++mods_cursor >= mods_count)
-			mods_cursor = 0;
-		/* skip portals if not installed */
-		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
-			if (++mods_cursor >= mods_count)
-				mods_cursor = 0;
+		M_Mods_MoveCursor (1);
 		M_Mods_EnsureVisible ();
 		break;
 
 	case K_UPARROW:
 		S_LocalSound ("raven/menu1.wav");
-		if (--mods_cursor < 0)
-			mods_cursor = mods_count - 1;
-		/* skip portals if not installed */
-		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
-			if (--mods_cursor < 0)
-				mods_cursor = mods_count - 1;
+		M_Mods_MoveCursor (-1);
 		M_Mods_EnsureVisible ();
 		break;
 
 	case K_PGUP:
 		S_LocalSound ("raven/menu1.wav");
 		mods_cursor -= visible;
-		if (mods_cursor < 0) mods_cursor = 0;
-		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
-			mods_cursor = MODS_FIXED_HEXEN2;
+		M_Mods_SnapSelectable (-1);
 		M_Mods_EnsureVisible ();
 		break;
 
 	case K_PGDN:
 		S_LocalSound ("raven/menu1.wav");
 		mods_cursor += visible;
-		if (mods_cursor >= mods_count) mods_cursor = mods_count - 1;
-		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
-			mods_cursor = MODS_FIXED_PORTALS + 1;
+		M_Mods_SnapSelectable (1);
 		M_Mods_EnsureVisible ();
 		break;
 
 	case K_HOME:
 		S_LocalSound ("raven/menu1.wav");
-		mods_cursor = MODS_FIXED_HEXEN2;
+		mods_cursor = 0;
+		M_Mods_SnapSelectable (1);
 		M_Mods_EnsureVisible ();
 		break;
 
 	case K_END:
 		S_LocalSound ("raven/menu1.wav");
-		mods_cursor = mods_count - 1;
+		mods_cursor = mods_view_count - 1;
+		M_Mods_SnapSelectable (-1);
 		M_Mods_EnsureVisible ();
 		break;
 
 	case K_LEFTARROW:
 	case K_RIGHTARROW:
 		/* toggle portals for custom mods only */
-		if (mods_have_portals && mods_cursor >= MODS_FIXED_COUNT)
+		if (mods_have_portals && mods_view_count > 0 &&
+		    mods_list[mods_view[mods_cursor]].kind == MOD_CUSTOM)
 		{
 			S_LocalSound ("raven/menu1.wav");
 			mods_portals_toggle = !mods_portals_toggle;
@@ -5372,16 +5712,16 @@ static void M_Mods_Key (int key)
 
 	case K_ENTER:
 	case K_GP_A:
-		if (mods_count == 0)
+		if (!M_Mods_Selectable(mods_cursor))
 			break;
-		if (mods_cursor == MODS_FIXED_PORTALS && !mods_have_portals)
-			break;	/* can't select missing portals */
-		if (M_Mods_IsActive(mods_cursor))
-			break;	/* already active */
+		e = &mods_list[mods_view[mods_cursor]];
+		if (M_Mods_IsActive(e))
+			break;	/* already running */
 		m_entersound = true;
 		Key_SetDest (key_game);
 		m_state = m_none;
-		Cbuf_AddText (va("game \"%s\" %d\n", mods_list[mods_cursor],
+		M_Filter_Clear ();
+		Cbuf_AddText (va("game \"%s\" %d\n", e->dir,
 				mods_portals_toggle ? 1 : 0));
 		break;
 	}

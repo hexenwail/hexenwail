@@ -2255,9 +2255,14 @@ int ListSaves (const char *prefix, const char **buf, int pos)
 /*
 ===========
 FS_IsGamedir
-Is basedir/dir a game data directory, i.e. does it hold a
-progs.dat or any of pak0.pak through pak9.pak? This is the one
-definition of "mod directory" -- the mods menu uses it too.
+Is basedir/dir a game data directory? This is the one definition of
+"mod directory" -- the mods menu and "game" tab-completion both use it.
+
+It answers "would a player call this a mod", not "can the engine mount
+it": Host_Game_f mounts any directory that exists and never consults
+this, so a directory rejected here is not unusable, only undiscoverable.
+That distinction is why the test is deliberately generous -- a mod that
+fails it is one the player installed and then cannot find.
 ===========
 */
 qboolean FS_IsGamedir (const char *basedir, const char *dir)
@@ -2269,6 +2274,19 @@ qboolean FS_IsGamedir (const char *basedir, const char *dir)
 	int	i;
 
 	q_snprintf (path, sizeof(path), "%s/%s/progs.dat", basedir, dir);
+	if (Sys_FileType(path) == FS_ENT_FILE)
+		return true;
+
+	/* ...or hwprogs.dat.  A HexenWorld mod carries gamecode just as much as a
+	 * Hexen II one does.  Six of the thirty-nine mods in the reference corpus
+	 * (docs/MODS_CORPUS.md) ship a loose hwprogs.dat and nothing this function
+	 * used to recognise -- db, hexarena, hwctf, hwcycle, rk and siege -- so
+	 * every one of them was invisible to the mods menu and to "game"
+	 * tab-completion while "game <dir>" accepted it without complaint.
+	 * The Hexen II client still cannot run them; the mods menu tags them and
+	 * refuses to select them.  Being listed and marked beats not existing.
+	 * uhexen2-3m0h. */
+	q_snprintf (path, sizeof(path), "%s/%s/hwprogs.dat", basedir, dir);
 	if (Sys_FileType(path) == FS_ENT_FILE)
 		return true;
 
@@ -2285,6 +2303,23 @@ qboolean FS_IsGamedir (const char *basedir, const char *dir)
 	 * a fixed set of names, since pk3s carry arbitrary ones.  uhexen2-pzha. */
 	q_snprintf (path, sizeof(path), "%s/%s", basedir, dir);
 	findname = Sys_FindFirstFile (&find, path, "*.pk3");
+	found = (findname != NULL);
+	Sys_FindClose (&find);
+	if (found)
+		return true;
+
+	/* ...or a maps/ directory holding at least one .bsp.  A pure map pack
+	 * ships no gamecode and no archive -- it runs on the base game's
+	 * progs.dat -- but it is still a mod the player dropped in and expects to
+	 * see listed.  fo4d (a seventeen-level mission) and tt in the corpus are
+	 * exactly this shape, and both were invisible.  The .bsp probe matters:
+	 * a bare maps/ directory, or one holding only .lit or .ent sidecars, is
+	 * not a map pack.  uhexen2-3m0h. */
+	q_snprintf (path, sizeof(path), "%s/%s/maps", basedir, dir);
+	if (Sys_FileType(path) != FS_ENT_DIRECTORY)
+		return false;
+
+	findname = Sys_FindFirstFile (&find, path, "*.bsp");
 	found = (findname != NULL);
 	Sys_FindClose (&find);
 
