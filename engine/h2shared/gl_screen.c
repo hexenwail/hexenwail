@@ -267,6 +267,65 @@ static void FindTextBreaks (const char *message, int Width)
 
 /*
 ==============
+SCR_CenterPrintToConsole
+
+Echo a centerprint to the console in the form the PLAQUE actually shows.
+
+con_logcenterprint arrived from Ironwail, where a centerprint is plain text
+whose line breaks are newlines.  Hexen II encodes the same message differently
+and the port did not account for it, so the raw string reached the console with
+its encoding still in it.  Two things are in there:
+
+  '@'          Raven's line break.  FindTextBreaks above treats EVERY '@' as
+               one, so a literal '@' can never reach the plaque -- which is
+               what makes translating all of them correct here rather than a
+               guess about intent.
+  "\1".."\4"   charset selects, consumed by M_Print (menu.c:271-290) and never
+               drawn.
+
+Shadows of Chaos' welcome message is the case that showed this up: the plaque
+reads as eight tidy lines while qconsole.log got one 250-character run --
+"Welcome to Hexen II: Shadows of Chaos@@Damage & abilities improve as you
+level@@@Default bindings (autoexec.cfg):@Altfire: right mouse@..."
+
+Done here rather than at the svc_centerprint parse site on purpose: the plaque
+path indexes into the original string through StartC/EndC, so that payload has
+to stay byte-exact.  This takes a private copy instead.
+
+The result is never longer than the input -- each '@' becomes one newline and
+each escape pair is dropped -- so the centerprint buffer's size bounds it.
+==============
+*/
+static void SCR_CenterPrintToConsole (const char *str)
+{
+	char	buf[sizeof(scr_centerstring)];
+	size_t	n = 0;
+
+	while (*str && n < sizeof(buf) - 1)
+	{
+		if (str[0] == '\\' && str[1] >= '1' && str[1] <= '4')
+		{
+			str += 2;
+			continue;
+		}
+
+		buf[n++] = (*str == '@') ? '\n' : *str;
+		str++;
+	}
+
+	/* A message ending in '@' -- or in a run of them, which is how mods
+	 * space out sections -- would otherwise stack blank lines on top of the
+	 * newline CON_Printf adds below. */
+	while (n > 0 && buf[n - 1] == '\n')
+		n--;
+	buf[n] = '\0';
+
+	if (n)
+		CON_Printf (_PRINT_NONOTIFY, "%s\n", buf);
+}
+
+/*
+==============
 SCR_CenterPrint
 
 Called for important messages that should stay in the center of the screen
@@ -287,7 +346,7 @@ void SCR_CenterPrint (const char *str)
 	scr_center_lines = lines;
 
 	if (con_logcenterprint.integer && str[0] != '_')
-		CON_Printf (_PRINT_NONOTIFY, "%s\n", str);
+		SCR_CenterPrintToConsole (str);
 }
 
 static void SCR_DrawCenterString (void)
