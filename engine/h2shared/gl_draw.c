@@ -2719,7 +2719,16 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 			{
 				p = data[i];
 				trans[i] = d_8to24table[ColorIndex[p>>4]] & MASK_rgb;
-				trans[i] |= (( int )ColorPercent[p&15] & 0xff) << SHIFT_a;
+				/* ColorPercent is a TRANSPARENCY -- higher means less of
+				 * the model survives.  Store its complement so this
+				 * channel means opacity, which is what every consumer of
+				 * an alpha channel already assumes: the ordinary blend
+				 * func, and weighted-blended OIT, which has no func to
+				 * reverse and so silently composited these models by
+				 * their inverse.  The non-OIT result is unchanged --
+				 * src*(1-CP/255) + dst*(CP/255) either way, see the
+				 * matching note in R_DrawAliasModel.  uhexen2-3z3e */
+				trans[i] |= ((255 - (( int )ColorPercent[p&15] & 0xff)) & 0xff) << SHIFT_a;
 			}
 		}
 

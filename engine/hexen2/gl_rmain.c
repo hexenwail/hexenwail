@@ -2051,23 +2051,21 @@ static void R_DrawAliasModel (entity_t *e)
 		R_SetBlend (true);
 		if (!OIT_InPass())
 		{
-			/* The reversed func belongs to the palette path, not to the
-			 * flag.  EF_SPECIAL_TRANS means "translucency through the
-			 * particle table", and the 8-bit upload writes ColorPercent[]
-			 * into alpha -- a TRANSPARENCY -- so reversing the func is what
-			 * makes Raven's content read right.
+			/* One func for both skin sources now.  This used to reverse to
+			 * (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA) for legacy skins,
+			 * because the 8-bit upload wrote ColorPercent[] -- a
+			 * TRANSPARENCY -- into alpha, and keyed on skin_replaced so a
+			 * replacement TGA, which carries opacity, was not rendered
+			 * inside out (uhexen2-4y6w).
 			 *
-			 * A replacement TGA/PNG carries the opposite convention: alpha
-			 * is opacity, 255 is opaque. Reversing it there renders the skin
-			 * inside out, which is BloodShot's report, and is why his
-			 * EF_HOLEY models were fine -- only this branch reverses.
-			 *
-			 * Keyed on where the skin came from rather than on the flag, so
-			 * the legacy path is untouched. uhexen2-4y6w */
-			if (e->model->skin_replaced)
-				R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			else
-				R_SetBlendFunc (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
+			 * The upload now stores 255 - ColorPercent, so alpha means
+			 * opacity whatever the skin came from and the ordinary func is
+			 * correct for both.  Algebraically identical here --
+			 * src*(1-CP/255) + dst*(CP/255) either way -- and it fixes the
+			 * OIT path for free: weighted-blended OIT has no blend func to
+			 * reverse, so it was compositing every legacy EF_SPECIAL_TRANS
+			 * model by its inverse.  uhexen2-3z3e */
+			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		}
 		model_constant_alpha = 1.0f;
 		R_SetCull (false);
@@ -2160,13 +2158,13 @@ static void R_DrawAliasModel (entity_t *e)
 	else
 	{
 		/* uhexen2-khsa r12: defensively reset blend state for opaque draws.
-		 * The translucent branches above all enable GL_BLEND, two of them
-		 * (EF_SPECIAL_TRANS at line 1383, EF_HOLEY at 1411) set non-default
-		 * blend funcs.  An opaque draw that inherits GL_BLEND=on with the
-		 * EF_SPECIAL_TRANS func (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA) at
-		 * src.a=1 evaluates to dst — the wall behind shows through every
-		 * pixel.  Explicitly disable and reset the func so the opaque path
-		 * is leak-proof regardless of what drew before it. */
+		 * The translucent branches above all enable GL_BLEND, and EF_HOLEY
+		 * still sets a non-default func.  EF_SPECIAL_TRANS no longer does
+		 * (uhexen2-3z3e retired the reversed func), but an opaque draw that
+		 * inherits GL_BLEND=on with someone else's func can still evaluate
+		 * to dst — the wall behind showing through every pixel.  Explicitly
+		 * disable and reset the func so the opaque path is leak-proof
+		 * regardless of what drew before it. */
 		if (!OIT_InPass())
 		{
 			R_SetBlend (false);
@@ -3545,8 +3543,10 @@ static void R_DrawAliasInstanced (void)
 	 * so the only state that can leak in here comes from the world /
 	 * brush passes or from a frame-prior OIT teardown.  Either way we
 	 * want a clean opaque baseline before this batch fires — without
-	 * it, a stale GL_BLEND + EF_SPECIAL_TRANS-style inverted func can
-	 * turn every fragment in the batch into dst (the wall behind). */
+	 * it, a stale GL_BLEND plus an inherited non-default func can turn
+	 * every fragment in the batch into dst (the wall behind).  The
+	 * EF_SPECIAL_TRANS inverted func that first motivated this is gone
+	 * (uhexen2-3z3e); EF_HOLEY still sets one, so the reset stays. */
 	if (!OIT_InPass())
 	{
 		R_SetBlend (false);
