@@ -5645,7 +5645,7 @@ static void M_Mods_MouseHover (int n, const int *ys)
 static void M_Mods_Draw (void)
 {
 	int		i, k, y, cursor_y, yf;
-	int		visible, last_visible, nrows;
+	int		visible, last_visible, nrows, list_bottom;
 	int		row_y[MODS_MAX];
 	const modentry_t	*e;
 
@@ -5700,17 +5700,26 @@ static void M_Mods_Draw (void)
 	if (mods_view_count == 0)
 		M_Print (MODS_LIST_X, MODS_LIST_TOP, "No mods match");
 
+	/* Bottom of the drawn list, from the layout rather than from
+	 * MODS_LIST_TOP + visible * 8.  Those two are not the same number: the
+	 * separator adds a row's worth of height, so the naive formula leaves the
+	 * scrollbar, the down arrow and the footer 8 pixels short whenever the
+	 * divide is on screen -- visible as a scrollbar that stops one row above
+	 * the last entry.  Third place that geometry has to come from one source;
+	 * see M_Mods_LayoutRows. */
+	list_bottom = nrows ? row_y[nrows - 1] + 8 : MODS_LIST_TOP;
+
 	/* up/down scroll indicators */
 	if (mods_top > 0)
 		M_DrawCharacter (MODS_LIST_X - 16, MODS_LIST_TOP, 128);
-	if (last_visible < mods_view_count)
-		M_DrawCharacter (MODS_LIST_X - 16, MODS_LIST_TOP + (visible - 1) * 8, 129);
+	if (last_visible < mods_view_count && nrows)
+		M_DrawCharacter (MODS_LIST_X - 16, row_y[nrows - 1], 129);
 
 	/* proportional scrollbar on right edge */
 	if (mods_view_count > visible)
 	{
 		int track_y = MODS_LIST_TOP;
-		int track_h = visible * 8;
+		int track_h = list_bottom - MODS_LIST_TOP;
 		int thumb_h = (visible * track_h) / mods_view_count;
 		int thumb_y = track_y + (mods_top * track_h) / mods_view_count;
 		int j;
@@ -5725,7 +5734,7 @@ static void M_Mods_Draw (void)
 		}
 	}
 
-	yf = MODS_LIST_TOP + visible * 8 + 8;
+	yf = list_bottom + 8;
 
 	/* portals toggle — only for custom mods, and only when portals is installed */
 	if (mods_have_portals && mods_view_count > 0 &&
