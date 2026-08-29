@@ -720,7 +720,7 @@ static mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 	 * rather than loading an empty sprite.  So a zero here means the
 	 * msprite_t we are looking at is not the loaded one -- a stale or flushed
 	 * model cache entry still referenced by a live entity.  That root cause is
-	 * uhexen2-p9wq; this guard only stops it being undefined behaviour.
+	 * uhexen2-iwdt; this guard only stops it being undefined behaviour.
 	 * uhexen2-hv68 */
 	if (psprite->numframes <= 0)
 	{
