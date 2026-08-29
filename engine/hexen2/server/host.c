@@ -537,7 +537,15 @@ static void Host_GetConsoleCommands (void)
 		cmd = Sys_ConsoleInput ();
 		if (!cmd)
 			break;
+	// Terminate it.  Sys_ConsoleInput hands back one line with the newline
+	// already stripped, and this loop drains every line stdin has buffered
+	// before the frame's next Cbuf_Execute -- so with a pipe rather than a
+	// terminal on stdin, every command in the pipe lands in cmd_text glued
+	// to the next one.  "map demo1\nstatus\nquit\n" became the single
+	// command "map demo1statusquit": a scripted server ran the wrong thing
+	// and only said so if the mangled name happened to be invalid.
 		Cbuf_AddText (cmd);
+		Cbuf_AddText ("\n");
 	}
 }
 
