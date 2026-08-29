@@ -5582,10 +5582,71 @@ static void M_Menu_Mods_f (void)
 	mods_portals_toggle = mods_have_portals;
 }
 
+/* Does a separator follow view row `i'?  One rule, read by both the layout
+ * walk and the draw loop, because a list whose rows are drawn somewhere other
+ * than where they are hit-tested is precisely the uhexen2-8uc1 failure. */
+static qboolean M_Mods_SeparatorAfter (int i, int last_visible)
+{
+	return (mods_list[mods_view[i]].kind != MOD_CUSTOM &&
+		i + 1 < last_visible &&
+		mods_list[mods_view[i + 1]].kind == MOD_CUSTOM);
+}
+
+/* Canvas Y of every row in the visible window, in view order from mods_top.
+ * Returns how many were laid out.  The separator costs a row's worth of space
+ * (4 above the dashes and 4 below), which is why a plain MODS_LIST_TOP + n*8
+ * hit test would drift by 8 pixels for every row below the divide. */
+static int M_Mods_LayoutRows (int last_visible, int *ys)
+{
+	int	i, y = MODS_LIST_TOP, n = 0;
+
+	for (i = mods_top; i < last_visible; i++)
+	{
+		ys[n++] = y;
+		y += 8;
+		if (M_Mods_SeparatorAfter (i, last_visible))
+			y += 8;
+	}
+	return n;
+}
+
+/* Mouse hover: move the cursor to the row under the pointer.
+ *
+ * Gated on menu_mouse_moved for the same reason M_MouseToMenuItem is -- a
+ * stationary pointer that re-pins the cursor every frame makes the arrow keys
+ * look dead (uhexen2-u4iz).  Unselectable rows are ignored rather than
+ * hovered, matching what M_Mods_MoveCursor does with the arrows: an [HW] mod
+ * or an uninstalled Portals row is drawn, but is not a place the cursor rests.
+ *
+ * Wheel and click need nothing here: M_Keydown already maps K_MWHEELUP/DOWN to
+ * the arrows and K_MOUSE1 to Enter for every menu, so pointing at a row and
+ * clicking activates that row.  Dragging the scrollbar thumb is NOT
+ * implemented -- the menu is handed a position and a moved flag and no button
+ * state at all (in_sdl.c:64), so a drag cannot be told from a hover. */
+static void M_Mods_MouseHover (int n, const int *ys)
+{
+	int	vy, k;
+
+	if (!menu_mouse_moved)
+		return;
+
+	vy = M_ScreenYToCanvasY (menu_mouse_y);
+	for (k = 0; k < n; k++)
+	{
+		if (vy >= ys[k] && vy < ys[k] + 8)
+		{
+			if (M_Mods_Selectable (mods_top + k))
+				mods_cursor = mods_top + k;
+			return;
+		}
+	}
+}
+
 static void M_Mods_Draw (void)
 {
-	int		i, y, cursor_y, yf;
-	int		visible, last_visible;
+	int		i, k, y, cursor_y, yf;
+	int		visible, last_visible, nrows;
+	int		row_y[MODS_MAX];
 	const modentry_t	*e;
 
 	ScrollTitle("gfx/menu/title0.lmp");
@@ -5597,10 +5658,17 @@ static void M_Mods_Draw (void)
 	if (last_visible > mods_view_count)
 		last_visible = mods_view_count;
 
+	/* Lay the window out, then let the pointer pick a row, then draw -- so the
+	 * highlight and the blinking cursor agree with the hover within one frame
+	 * rather than trailing it by one. */
+	nrows = M_Mods_LayoutRows (last_visible, row_y);
+	M_Mods_MouseHover (nrows, row_y);
+
 	cursor_y = -1;
-	y = MODS_LIST_TOP;
-	for (i = mods_top; i < last_visible; i++)
+	for (k = 0; k < nrows; k++)
 	{
+		i = mods_top + k;
+		y = row_y[k];
 		e = &mods_list[mods_view[i]];
 
 		if (i == mods_cursor)
@@ -5618,19 +5686,14 @@ static void M_Mods_Draw (void)
 		else if (M_Mods_IsActive(e))
 			M_Mods_DrawTag (y, "<-", true);
 
-		y += 8;
-
 		/* separator between the fixed rows and the scanned ones, drawn only
 		 * when both sides of the divide are on screen.  Keyed off entry kind
 		 * rather than a row number, because the filter renumbers rows. */
-		if (e->kind != MOD_CUSTOM && i + 1 < last_visible &&
-		    mods_list[mods_view[i + 1]].kind == MOD_CUSTOM)
+		if (M_Mods_SeparatorAfter (i, last_visible))
 		{
-			y += 4;
-			M_DrawCharacter (MODS_LIST_X, y, '-' + 128);
-			M_DrawCharacter (MODS_LIST_X + 8, y, '-' + 128);
-			M_DrawCharacter (MODS_LIST_X + 16, y, '-' + 128);
-			y += 4;
+			M_DrawCharacter (MODS_LIST_X, y + 12, '-' + 128);
+			M_DrawCharacter (MODS_LIST_X + 8, y + 12, '-' + 128);
+			M_DrawCharacter (MODS_LIST_X + 16, y + 12, '-' + 128);
 		}
 	}
 
