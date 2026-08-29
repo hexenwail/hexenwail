@@ -117,7 +117,7 @@ typedef struct msurface_s
 	int		visframe;	// should be drawn when node is crossed
 
 	int		dlightframe;
-	unsigned long long		dlightbits;	/* one bit per dlight; MAX_DLIGHTS <= 64. uhexen2-liqz */
+	unsigned int		dlightbits[4];	/* one bit per dlight, MAX_DLIGHTS bits; see DLIGHTBIT_* in client.h. uhexen2-liqz */
 
 	mplane_t	*plane;
 	int		flags;

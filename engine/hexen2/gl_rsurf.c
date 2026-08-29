@@ -329,14 +329,18 @@ static void R_AddDynamicLights (msurface_t *surf)
 	tmax = (surf->extents[1] >> 4) + 1;
 	tex = surf->texinfo;
 
-	/* Stop as soon as no higher bit is set rather than always walking
-	 * MAX_DLIGHTS -- the scan is now proportional to the highest light
-	 * actually touching this surface, which matters more since the pool
-	 * doubled (uhexen2-liqz).  The lnum < MAX_DLIGHTS term must stay first:
-	 * shifting a 64-bit value by 64 is undefined. */
-	for (lnum = 0; lnum < MAX_DLIGHTS && (surf->dlightbits >> lnum); lnum++)
+	/* Skip 32 lights at a time over empty words rather than testing every
+	 * bit: with MAX_DLIGHTS at 128 most surfaces are touched by a handful
+	 * of lights, so the scan should cost what the surface actually uses,
+	 * not what the pool could hold.  uhexen2-liqz */
+	for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 	{
-		if ( !(surf->dlightbits & (1ULL<<lnum)) )
+		if (!(lnum & 31) && !surf->dlightbits[lnum >> 5])
+		{
+			lnum += 31;		// whole word empty
+			continue;
+		}
+		if ( !DLIGHTBIT_TEST (surf->dlightbits, lnum) )
 			continue;		// not lit by this light
 
 		rad = cl_dlights[lnum].radius;
@@ -2779,12 +2783,12 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				transformedlight.origin[1] = -DotProduct(temp, right);
 				transformedlight.origin[2] = DotProduct(temp, up);
 
-				R_MarkLights(&transformedlight, 1ULL<<k,
+				R_MarkLights (&transformedlight, k,
 						clmodel->nodes + clmodel->hulls[0].firstclipnode);
 			}
 			else
 			{
-				R_MarkLights(&cl_dlights[k], 1ULL<<k,
+				R_MarkLights (&cl_dlights[k], k,
 						clmodel->nodes + clmodel->hulls[0].firstclipnode);
 			}
 		}

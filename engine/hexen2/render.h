@@ -95,7 +95,7 @@ typedef struct entity_s
 						// found in an active leaf
 
 	int			dlightframe;	// dynamic lighting
-	unsigned long long			dlightbits;	/* one bit per dlight; MAX_DLIGHTS <= 64. uhexen2-liqz */
+	unsigned int		dlightbits[4];	/* one bit per dlight, MAX_DLIGHTS bits; see DLIGHTBIT_* in client.h. uhexen2-liqz */
 
 // FIXME: could turn these into a union
 	int			trivial_accept;

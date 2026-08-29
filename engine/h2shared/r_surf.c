@@ -87,11 +87,16 @@ static void R_AddDynamicLights (void)
 	tmax = (surf->extents[1]>>4)+1;
 	tex = surf->texinfo;
 
-	/* Bounded by the highest set bit rather than MAX_DLIGHTS; see the
-	 * matching note in gl_rsurf.c.  uhexen2-liqz */
-	for (lnum = 0; lnum < MAX_DLIGHTS && (surf->dlightbits >> lnum); lnum++)
+	/* Word-at-a-time skip; see the matching note in gl_rsurf.c.
+	 * uhexen2-liqz */
+	for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
 	{
-		if ( !(surf->dlightbits & (1ULL<<lnum) ) )
+		if (!(lnum & 31) && !surf->dlightbits[lnum >> 5])
+		{
+			lnum += 31;		// whole word empty
+			continue;
+		}
+		if ( !DLIGHTBIT_TEST (surf->dlightbits, lnum) )
 			continue;		// not lit by this light
 
 		rad = fabs(cl_dlights[lnum].radius);
