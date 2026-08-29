@@ -456,6 +456,24 @@ static void SetPal (int i)
 #endif
 }
 
+/* A handover is only allowed between two clearly separated populations: a
+ * newcomer must be inside DLIGHT_NEAR, and the incumbent it displaces must be
+ * outside DLIGHT_FAR.  The gap between them is what makes the exchange
+ * one-way.  A simple "is the newcomer nearer?" test -- with or without a
+ * dead-band -- cannot work here: demand on a map like meso is 74 lights for
+ * 32 slots, so every light a newcomer displaces becomes a newcomer itself on
+ * the very next frame and wins the slot back off someone else.  The set then
+ * rotates forever and the torches stutter.  That is cache thrashing, and the
+ * cure is not a bigger margin but a rule the displaced light cannot satisfy:
+ * having just been evicted for being beyond DLIGHT_FAR, it cannot re-enter
+ * until it is inside DLIGHT_NEAR, which needs real movement, not jitter.
+ *
+ * Lights between the two thresholds neither evict nor are evicted, so the
+ * mid-field is completely stable.  Once no incumbent is left beyond
+ * DLIGHT_FAR, eviction stops happening at all.  uhexen2-ck6h */
+#define DLIGHT_NEAR	600.0f
+#define DLIGHT_FAR	1200.0f
+
 /* Handed back when a light loses the contest for a slot outright.  It is
  * deliberately NOT part of cl_dlights[], so R_PushDlights never sees it and
  * the caller can fill it in exactly as it would a real light.  Every caller
@@ -549,11 +567,10 @@ dlight_t *CL_AllocDlight (int key)
 	 * entity's origin has already been interpolated for this frame by the
 	 * time we are called, so the newcomer's position is known exactly --
 	 * unlike its radius, which the caller fills in after we return.  Judge
-	 * it on distance alone against the incumbent's distance, and if it is
-	 * the further of the two, throw the newcomer away and leave the
-	 * incumbent in place.  Without this the two furthest lights simply
-	 * trade the same slot every frame, which is the old churn in
-	 * miniature.
+	 * it on distance alone: it may only take the slot if it is itself
+	 * inside DLIGHT_NEAR and the incumbent it would displace is outside
+	 * DLIGHT_FAR (see above for why the gap, rather than a margin, is what
+	 * stops the set rotating).
 	 *
 	 * key 0 means a temporary entity (explosions, impacts); those are
 	 * brief and always near something the player just did, so they are
@@ -561,7 +578,7 @@ dlight_t *CL_AllocDlight (int key)
 	if (key > 0 && key < cl.num_entities)
 	{
 		VectorSubtract (cl_entities[key].origin, r_origin, delta);
-		if (VectorLength (delta) > worst_dist)
+		if (VectorLength (delta) > DLIGHT_NEAR || worst_dist < DLIGHT_FAR)
 		{
 			dl = &cl_dlight_discard;
 			goto done;
