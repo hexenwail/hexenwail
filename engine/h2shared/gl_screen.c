@@ -448,6 +448,12 @@ static float AdaptFovx (float fov_x, float width, float height)
 
 	if (!scr_fov_adapt.integer)
 		return fov_x;
+	/* Hor+ is a statement about the shape of the PICTURE, so it has to run
+	 * on the displayed width, not the pixel count.  They differ whenever
+	 * pixels are not square -- a 320x200 mode shown as 4:3 is the classic
+	 * case, and using 1.6 there instead of 1.3333 overstates the field of
+	 * view by about ten degrees.  uhexen2-c01c */
+	width *= VID_PixelAspect ();
 	if ((x = height / width) == 0.75)
 		return fov_x;
 	a = atan(0.75 / x * tan(fov_x / 360 * M_PI));
@@ -467,6 +473,12 @@ static float CalcFovy (float fov_x, float width, float height)
 	if (fov_x < 1 || fov_x > 179)
 		Sys_Error ("Bad fov: %f", fov_x);
 
+	/* Same correction as AdaptFovx: fov_y is the vertical angle of the
+	 * displayed picture, so the horizontal term is the displayed width.
+	 * Without this a non-square-pixel mode gets a vertical FOV that does
+	 * not match its own horizontal one, and the view is subtly stretched
+	 * rather than merely too wide.  uhexen2-c01c */
+	width *= VID_PixelAspect ();
 	x = width / tan(fov_x / 360 * M_PI);
 	a = atan(height / x);
 	a = a * 360 / M_PI;
