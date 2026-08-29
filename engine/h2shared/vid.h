@@ -93,6 +93,10 @@ extern	unsigned int	d_8to24TranslucentTable[256];
 
 extern	cvar_t		_enable_mouse;
 
+float VID_PixelAspect (void);
+// displayed pixel width / height; 1.0 unless a fullscreen mode is being
+// stretched, or vid_pixelaspect overrides it.  See uhexen2-c01c.
+
 void VID_SetPalette (const unsigned char *palette);
 // called at startup and after any gamma correction
 

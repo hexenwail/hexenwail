@@ -167,8 +167,19 @@ static void GL_PollErrors (const char *tag)
 #define MAXWIDTH		10000
 #define MAXHEIGHT		10000
 #define MIN_WIDTH		320
-//#define MIN_HEIGHT		200
+/* Two different floors, deliberately.  MIN_HEIGHT gates which video modes are
+ * offered at all and someone raised it from 200 to 240 (the commented-out line
+ * that used to be here).  MIN_CONHEIGHT gates how far the console/HUD canvas
+ * may be scaled down, and has always been 200 -- it was spelled as a bare
+ * literal with a comment beside it naming MIN_HEIGHT, a macro that no longer
+ * held that value.
+ *
+ * Whether the mode floor should come back down to 200 is a separate question:
+ * Spoike's point is that 320x200 is the minimum Quake and WinHexen2 define, so
+ * a 240 floor is arguably already wrong.  That needs someone to confirm the
+ * menus still render at 200 before it changes.  uhexen2-c01c */
 #define MIN_HEIGHT		240
+#define MIN_CONHEIGHT		200
 #define MAX_DESC		33
 
 typedef struct {
@@ -265,6 +276,11 @@ static cvar_t	vid_window_y = {"vid_window_y", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_vsync = {"vid_vsync", "0", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
 extern cvar_t	gl_texture_anisotropy;	/* defined in gl_draw.c */
 static cvar_t	vid_borderless = {"vid_borderless", "0", CVAR_ARCHIVE};
+/* Pixel aspect ratio: displayed pixel width / height.  0 means derive it
+ * from the video mode, see VID_PixelAspect.  Set it explicitly for a
+ * display whose scaling the engine cannot see -- a CRT, a scaler box, or
+ * a panel forcing its own aspect.  uhexen2-c01c */
+static cvar_t	vid_pixelaspect = {"vid_pixelaspect", "0", CVAR_ARCHIVE};
 // cvars for compatibility with the software version
 static cvar_t	vid_config_swx = {"vid_config_swx", "320", CVAR_ARCHIVE};
 static cvar_t	vid_config_swy = {"vid_config_swy", "240", CVAR_ARCHIVE};
@@ -696,7 +712,7 @@ static void VID_ConWidth (int modenum)
 		w = modelist[modenum].width;
 
 	h = w * modelist[modenum].height / modelist[modenum].width;
-	if (h < 200 /* MIN_HEIGHT */ ||
+	if (h < MIN_CONHEIGHT ||
 	    h > modelist[modenum].height || w > modelist[modenum].width)
 	{
 		vid_conscale = false;
@@ -735,7 +751,7 @@ void VID_ChangeConsize (int dir)
 	}
 
 	h = w * modelist[vid_modenum].height / modelist[vid_modenum].width;
-	if (h < 200)
+	if (h < MIN_CONHEIGHT)
 		return;
 	vid.width = vid.conwidth = w;
 	vid.height = vid.conheight = h;
@@ -749,6 +765,63 @@ void VID_ChangeConsize (int dir)
 float VID_ReportConsize(void)
 {
 	return (float)modelist[vid_modenum].width/vid.conwidth;
+}
+
+
+/*
+================
+VID_PixelAspect
+
+Displayed width of one pixel divided by its height.  1.0 on any display that
+shows the framebuffer at its own resolution; below 1.0 when a wide pixel count
+is squeezed into a narrower picture.
+
+This exists because a resolution does not tell you the shape of the picture.
+320x200 in a window on a modern panel really is 16:10 with square pixels, but
+the same 320x200 as an exclusive fullscreen mode is stretched over whatever the
+panel is, and on the VGA hardware the mode came from it was 4:3 -- pixel aspect
+0.8333, which is exactly the number r_main.c has carried in the software
+renderer since Raven wrote it ("proper 320*200 pixelAspect = 0.8333333").  The
+GL path never had it, so it computed the field of view for the pixel rectangle
+rather than the picture.
+
+Windowed is square by construction: the window's pixels are the desktop's
+pixels.  Fullscreen is the stretch the display applies, taken as the desktop
+mode's shape over the mode we are actually rendering -- which yields 1.0 for
+fullscreen-desktop, where those are the same thing.
+
+A display whose scaling we cannot see (a CRT, a scaler, a panel forcing its own
+aspect) is what vid_pixelaspect is for; any positive value wins outright.
+uhexen2-c01c
+================
+*/
+float VID_PixelAspect (void)
+{
+	const SDL_DisplayMode	*dm;
+	float			par;
+
+	if (vid_pixelaspect.value > 0.0f)
+		return vid_pixelaspect.value;
+
+	if (modestate != MS_FULLDIB || !window)
+		return 1.0f;
+
+	if (WRWidth <= 0 || WRHeight <= 0)
+		return 1.0f;
+
+	dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+	if (!dm || dm->w <= 0 || dm->h <= 0)
+		return 1.0f;
+
+	par = (((float)dm->w / (float)dm->h) /
+	       ((float)WRWidth / (float)WRHeight));
+
+	/* Anything outside this is a mode/desktop pair we have misread rather
+	 * than a real display; square is the safer answer than a wrong FOV. */
+	if (par < 0.25f || par > 4.0f)
+		return 1.0f;
+
+	return par;
 }
 
 
@@ -1964,6 +2037,7 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&vid_window_y);
 	Cvar_RegisterVariable (&vid_vsync);
 	Cvar_RegisterVariable (&vid_borderless);
+	Cvar_RegisterVariable (&vid_pixelaspect);
 	Cvar_RegisterVariable (&vid_config_swy);
 	Cvar_RegisterVariable (&vid_config_swx);
 	Cvar_RegisterVariable (&vid_config_gly);
