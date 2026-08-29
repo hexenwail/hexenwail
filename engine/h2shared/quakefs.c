@@ -2357,7 +2357,16 @@ int ListGames (const char *prefix, const char **buf, int pos)
 			addListName ("portals");
 	}
 
+	/* Both roots, for the same reason the mods menu walks both: a gamedir
+	 * under the userdir mounts exactly as one under the basedir does, and
+	 * Host_Game_f accepts it.  addListName de-duplicates case-insensitively,
+	 * so a mod present in both is offered once.  The second pass is skipped
+	 * where the two are the same directory (every !DO_USERDIRS platform).
+	 * uhexen2-3m0h. */
 	numdirs = Sys_ListDirectories (fs_basedir, alldirs, MAX_GAMEDIRS);
+	if (strcmp(fs_basedir, host_parms->userdir))
+		numdirs += Sys_ListDirectories (host_parms->userdir, alldirs + numdirs,
+						MAX_GAMEDIRS - numdirs);
 
 	for (i = 0; i < numdirs; i++)
 	{
@@ -2367,7 +2376,8 @@ int ListGames (const char *prefix, const char **buf, int pos)
 			continue;
 		if (preLen && q_strncasecmp(prefix, alldirs[i], preLen) != 0)
 			continue;
-		if (!FS_IsGamedir(fs_basedir, alldirs[i]))
+		if (!FS_IsGamedir(fs_basedir, alldirs[i]) &&
+		    !FS_IsGamedir(host_parms->userdir, alldirs[i]))
 			continue;
 		if (addListName(alldirs[i]) < 0)
 			break;
@@ -2520,8 +2530,20 @@ static void Host_Game_f (void)
 		q_snprintf (path, sizeof(path), "%s/%s", fs_basedir, dir);
 		if (Sys_FileType(path) != FS_ENT_DIRECTORY)
 		{
-			Con_Printf ("Game directory \"%s\" not found\n", dir);
-			return;
+			/* ...or under the userdir.  FS_AddGameDirectory mounts
+			 * <basedir>/<dir> and <userdir>/<dir> both and requires
+			 * neither to exist, so a mod installed only under
+			 * ~/.hexen2/<dir> loads perfectly well -- this probe was the
+			 * only thing rejecting it, which made the mod unreachable
+			 * from the console and from the mods menu alike.  The menu
+			 * now lists both roots, so refusing here would leave it
+			 * offering rows that cannot be chosen.  uhexen2-3m0h. */
+			q_snprintf (path, sizeof(path), "%s/%s", host_parms->userdir, dir);
+			if (Sys_FileType(path) != FS_ENT_DIRECTORY)
+			{
+				Con_Printf ("Game directory \"%s\" not found\n", dir);
+				return;
+			}
 		}
 	}
 

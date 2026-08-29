@@ -5282,18 +5282,93 @@ static void M_Mods_SetEntry (modentry_t *e, const char *basedir,
 		q_strlcpy (e->label, info, sizeof(e->label));
 }
 
-static void M_ScanMods (void)
+/*
+Scan one filesystem root for mod directories and merge what it finds into
+mods_list.  Called once for the basedir and again for the userdir, because
+FS_AddGameDirectory mounts <basedir>/<dir> AND <userdir>/<dir> for every
+gamedir it is handed -- so a mod dropped into ~/.hexen2/<mod> has always been
+fully playable and was simply never listed anywhere the player could find it.
+uhexen2-3m0h.
+
+Fails loudly on truncation: a silently shortened list reads as "that mod is
+not installed", which sends the player looking in the wrong place.
+*/
+static void M_Mods_ScanRoot (const char *root)
 {
 	static char	alldirs[MODS_MAX][MAX_QPATH];
 	char	path[MAX_OSPATH];
-	const char	*basedir;
-	int	numdirs, i;
+	char	info[MAX_QPATH];
+	int	numdirs, i, j;
+
+	numdirs = Sys_ListDirectories (root, alldirs, MODS_MAX);
+	if (numdirs >= MODS_MAX)
+	{
+		mods_truncated = true;
+		Con_Printf ("Mods: more than %d game directories in %s, list truncated\n",
+			    MODS_MAX, root);
+	}
+
+	for (i = 0; i < numdirs; i++)
+	{
+		if (!q_strcasecmp(alldirs[i], "data1"))
+			continue;
+		if (!q_strcasecmp(alldirs[i], "portals"))
+			continue;
+		if (!q_strcasecmp(alldirs[i], "hw"))
+			continue;
+		if (!FS_IsGamedir(root, alldirs[i]))
+			continue;
+
+		for (j = MODS_FIXED_COUNT; j < mods_count; j++)
+		{
+			if (!q_strcasecmp(mods_list[j].dir, alldirs[i]))
+				break;
+		}
+		if (j < mods_count)
+		{
+			/* Installed under both roots: one mod, one row.  Both copies
+			 * mount, and the userdir's is pushed onto the searchpath after
+			 * the basedir's, so the userdir is the copy whose content the
+			 * player actually gets -- its modinfo.txt wins the label.  A
+			 * loose progs.dat in EITHER root likewise makes the mod
+			 * playable by this client, so it clears an [HW] tag the other
+			 * root earned; the reverse does not hold, which is why this
+			 * probes progs.dat rather than re-running
+			 * M_Mods_IsHexenWorld (that would also answer false for a
+			 * root holding neither progs.dat nor hwprogs.dat). */
+			if (M_Mods_ReadModinfo (root, alldirs[i], info, sizeof(info)))
+				q_strlcpy (mods_list[j].label, info, sizeof(mods_list[j].label));
+			q_snprintf (path, sizeof(path), "%s/%s/progs.dat", root, alldirs[i]);
+			if (Sys_FileType(path) == FS_ENT_FILE)
+				mods_list[j].hexenworld = false;
+			continue;
+		}
+
+		if (mods_count >= MODS_MAX)
+		{
+			mods_truncated = true;
+			Con_Printf ("Mods: more than %d mods installed, list truncated\n",
+				    MODS_MAX);
+			break;
+		}
+
+		M_Mods_SetEntry (&mods_list[mods_count], root, alldirs[i], MOD_CUSTOM, NULL);
+		mods_list[mods_count].hexenworld = M_Mods_IsHexenWorld (root, alldirs[i]);
+		mods_count++;
+	}
+}
+
+static void M_ScanMods (void)
+{
+	char	path[MAX_OSPATH];
+	const char	*basedir, *userbase;
 
 	/* FS_GetBasedir(), not host_parms->basedir: -basedir moves fs_basedir and
 	 * never touches host_parms->basedir, so scanning the latter would list a
 	 * different set of mods than the ones Host_Game_f (quakefs.c) and the
 	 * `game' tab completer will actually accept.  uhexen2-jk53. */
 	basedir = FS_GetBasedir ();
+	userbase = FS_GetUserbase ();
 	mods_truncated = false;
 
 	/* check if portals directory exists */
@@ -5308,38 +5383,15 @@ static void M_ScanMods (void)
 	mods_list[mods_count].installed = mods_have_portals;
 	mods_count++;
 
-	/* scan for custom mods */
-	numdirs = Sys_ListDirectories (basedir, alldirs, MODS_MAX);
-	if (numdirs >= MODS_MAX)
-		mods_truncated = true;
-
-	for (i = 0; i < numdirs; i++)
-	{
-		if (!q_strcasecmp(alldirs[i], "data1"))
-			continue;
-		if (!q_strcasecmp(alldirs[i], "portals"))
-			continue;
-		if (!q_strcasecmp(alldirs[i], "hw"))
-			continue;
-		if (!FS_IsGamedir(basedir, alldirs[i]))
-			continue;
-
-		if (mods_count >= MODS_MAX)
-		{
-			mods_truncated = true;
-			break;
-		}
-
-		M_Mods_SetEntry (&mods_list[mods_count], basedir, alldirs[i], MOD_CUSTOM, NULL);
-		mods_list[mods_count].hexenworld = M_Mods_IsHexenWorld (basedir, alldirs[i]);
-		mods_count++;
-	}
-
-	/* Fail loudly.  A silently truncated list reads as "that mod is not
-	 * installed", which sends the player looking in the wrong place. */
-	if (mods_truncated)
-		Con_Printf ("Mods: more than %d game directories in %s, list truncated\n",
-			    MODS_MAX, basedir);
+	/* Scan for custom mods.  Basedir first, because the merge in
+	 * M_Mods_ScanRoot lets the second root override the first's label and that
+	 * is the precedence the searchpath itself uses.  The userdir pass is
+	 * skipped where the two roots are the same directory, which is every
+	 * !DO_USERDIRS platform (Windows, OS/2, Emscripten): there FS_Init points
+	 * the userdir at the basedir, and -basedir moves both together. */
+	M_Mods_ScanRoot (basedir);
+	if (strcmp(basedir, userbase))
+		M_Mods_ScanRoot (userbase);
 
 	/* sort only the custom mods (after the fixed entries) */
 	if (mods_count - MODS_FIXED_COUNT > 1)
