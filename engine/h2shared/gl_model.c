@@ -2694,6 +2694,138 @@ GLuint Mod_LoadFullbrightTexture (const char *name, byte *data, int width, int h
 
 /*
 ===============
+Mod_ReplacementIsFullyOpaque
+
+Does this replacement say anything at all about the model's transparency?
+
+"Anything" is deliberately weak: a single texel below 255.  A pack that shipped
+a fully opaque skin for a model the author flagged EF_TRANSPARENT has expressed
+nothing, and rebuilding its alpha from the palette gives it back the
+translucency the format could not carry.  A pack that shipped so much as one
+partial texel has made a choice, and we must not overwrite it.
+
+Deliberately NOT IMG_ReplacementHasSoftAlpha, which asks a different and much
+stricter question -- at least a tenth of the image partial AND at most a
+twentieth opaque -- because it exists to decide whether a whole EF_HOLEY skin
+is a translucency ramp rather than a cutout.  A spellbook whose cover is
+translucent on an otherwise opaque skin fails that test, and so would a pack
+that put real alpha on a third of its texels; using it here would clobber
+exactly the authors we are trying to respect.  uhexen2-5dit
+===============
+*/
+static qboolean Mod_ReplacementIsFullyOpaque (const imgreplace_t *r)
+{
+	int	i, n;
+
+	if (!r || !r->rgba)
+		return false;		/* nothing we can inspect or rewrite */
+	if (!r->has_alpha)
+		return true;		/* no alpha channel at all: says nothing */
+
+	n = r->width * r->height;
+	if (n <= 0)
+		return false;
+
+	for (i = 0; i < n; i++)
+	{
+		if (r->rgba[i*4 + 3] != 255)
+			return false;
+	}
+	return true;
+}
+
+
+/*
+===============
+Mod_RestoreIndexAlpha
+
+Hexen II does not store an alias model's translucency in its skin COLOURS, it
+stores it in the palette INDEX of every texel, and GL_Upload8 turns that index
+into alpha: 0 is a hole, an odd index is r_wateralpha, everything else is
+solid, and EF_SPECIAL_TRANS reads a ramp out of ColorPercent[].  An RGBA
+replacement has no indices left, so the external branch of Mod_LoadAllSkins
+carries only EF_HOLEY across and the other two modes are dropped: those models
+draw fully opaque once a replacement pack is installed.  That is the
+Necromancer spellbook's cover drawing as a black slab across the open page and
+its hand glow as solid magenta, both confirmed texel by texel from
+capture_black_page_rectangle_purple_hand.rdc.
+
+Rebuild the alpha channel from the embedded skin the replacement displaced and
+keep the replacement's colour.  The index map is point-sampled even against a
+larger replacement: alpha here is a per-texel classification, not a continuous
+signal, and filtering between "solid" and "hole" would invent a translucency
+the model never had.  EF_SPECIAL_TRANS's vanilla RGB substitution is
+deliberately NOT reapplied -- the replacement's colour is the whole reason a
+pack is installed; only the translucency it could not express is restored.
+
+Returns false, having freed *rep, when the mode cannot be honoured: a
+block-compressed container's payload goes to the driver untouched, so there are
+no texels to rewrite.  The caller falls back to the embedded skin, because a
+correct low-res flame beats an opaque high-res one.
+
+Originally uhexen2-93a8 / 6ac3f19c7, which applied this to every replacement
+and so changed 82 models on a data1+portals+sot install.  It was then lost off
+master as collateral in 3b98a4d4f (see uhexen2-7ujj -- a revert whose message
+claims to be about the chase camera).  Re-landed here behind
+Mod_ReplacementIsFullyOpaque, which is what bounds the blast radius: only a
+pack that expressed nothing gets rewritten.  uhexen2-5dit
+===============
+*/
+static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
+				       int skinw, int skinh, int mdl_flags)
+{
+	int	x, y, wateralpha, mode;
+
+	/* Mirrors the tex_mode chain in Mod_LoadAllSkins, so a model carrying
+	 * two bits resolves to the same mode on both paths.  EF_HOLEY needs
+	 * nothing from us: the replacement branch already passes TEX_HOLEY
+	 * down and the file's own alpha is the cutout. */
+	if (mdl_flags & EF_TRANSPARENT)
+		mode = EF_TRANSPARENT;
+	else if (mdl_flags & EF_HOLEY)
+		return true;
+	else if (mdl_flags & EF_SPECIAL_TRANS)
+		mode = EF_SPECIAL_TRANS;
+	else
+		return true;
+
+	if (!rep->rgba || rep->blocks || skinw < 1 || skinh < 1
+	    || rep->width < 1 || rep->height < 1)
+	{
+		IMG_FreeReplacement (rep);
+		return false;
+	}
+
+	wateralpha = (int)(255.0f * r_wateralpha.value) & 0xff;
+
+	for (y = 0; y < rep->height; y++)
+	{
+		const byte	*row = skin + (y * skinh / rep->height) * skinw;
+		byte		*dst = rep->rgba + (size_t)y * rep->width * 4 + 3;
+
+		for (x = 0; x < rep->width; x++, dst += 4)
+		{
+			int	p = row[x * skinw / rep->width];
+
+			if (mode == EF_TRANSPARENT)
+				*dst = (p == 0) ? 0 : (p & 1) ? (byte)wateralpha : 255;
+			else
+				/* Complemented, because alpha means OPACITY
+				 * since uhexen2-3z3e -- ColorPercent is a
+				 * transparency and the 8-bit upload now stores
+				 * 255 - it.  Writing the raw value here would
+				 * hand the blender the inverse. */
+				*dst = (byte)(255 - (ColorPercent[p & 15] & 0xff));
+		}
+	}
+
+	rep->has_alpha = true;
+	return true;
+}
+
+
+/*
+===============
 Mod_LoadAllSkins
 ===============
 */
@@ -2786,8 +2918,18 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins over
 		// the skin embedded in the MDL.
 		imgreplace_t	rep;
+		qboolean	have_rep;
 
-		if (IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep))
+		have_rep = IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep);
+		/* Only rewrite a replacement that expressed nothing about
+		 * transparency; a pack that put any partial alpha in the file
+		 * keeps it.  uhexen2-5dit */
+		if (have_rep && Mod_ReplacementIsFullyOpaque (&rep))
+			have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype + 1),
+							  pheader->skinwidth,
+							  pheader->skinheight, mdl_flags);
+
+		if (have_rep)
 		{
 			int skin_tex_mode = TEX_MIPMAP;
 			if (mdl_flags & EF_HOLEY)
@@ -2880,8 +3022,18 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins
 			// over the skin embedded in the MDL.
 			imgreplace_t	rep;
+			qboolean	have_rep;
 
-			if (IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep))
+			have_rep = IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep);
+			/* Only rewrite a replacement that expressed nothing about
+			 * transparency; a pack that put any partial alpha in the file
+			 * keeps it.  uhexen2-5dit */
+			if (have_rep && Mod_ReplacementIsFullyOpaque (&rep))
+				have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype),
+										  pheader->skinwidth,
+										  pheader->skinheight, mdl_flags);
+
+			if (have_rep)
 			{
 				int skin_tex_mode = TEX_MIPMAP;
 				if (mdl_flags & EF_HOLEY)
