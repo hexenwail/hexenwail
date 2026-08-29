@@ -78,7 +78,7 @@ DYNAMIC LIGHTS
 R_MarkLights
 =============
 */
-void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	float		dist;
@@ -95,12 +95,12 @@ void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 	{
 		if (dist > light->radius)
 		{
-			R_MarkLights (light, bit, node->children[0]);
+			R_MarkLights (light, lnum, node->children[0]);
 			return;
 		}
 		if (dist < -light->radius)
 		{
-			R_MarkLights (light, bit, node->children[1]);
+			R_MarkLights (light, lnum, node->children[1]);
 			return;
 		}
 	}
@@ -108,12 +108,12 @@ void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 	{
 		if (dist > -light->radius)
 		{
-			R_MarkLights (light, bit, node->children[0]);
+			R_MarkLights (light, lnum, node->children[0]);
 			return;
 		}
 		if (dist < light->radius)
 		{
-			R_MarkLights (light, bit, node->children[1]);
+			R_MarkLights (light, lnum, node->children[1]);
 			return;
 		}
 	}
@@ -124,14 +124,14 @@ void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 	{
 		if (surf->dlightframe != r_dlightframecount)
 		{
-			surf->dlightbits = 0;
+			DLIGHTBITS_CLEAR (surf->dlightbits);
 			surf->dlightframe = r_dlightframecount;
 		}
-		surf->dlightbits |= bit;
+		DLIGHTBIT_SET (surf->dlightbits, lnum);
 	}
 
-	R_MarkLights (light, bit, node->children[0]);
-	R_MarkLights (light, bit, node->children[1]);
+	R_MarkLights (light, lnum, node->children[0]);
+	R_MarkLights (light, lnum, node->children[1]);
 }
 
 
@@ -156,7 +156,7 @@ void R_PushDlights (void)
 	{
 		if (l->die < cl.time || !l->radius)
 			continue;
-		R_MarkLights ( l, 1ULL<<i, cl.worldmodel->nodes );
+		R_MarkLights (l, i, cl.worldmodel->nodes );
 	}
 }
 

@@ -2550,7 +2550,7 @@ static qboolean		world_inst_collected[MAX_VISEDICTS];
 static qboolean		world_inst_needs_legacy[MAX_VISEDICTS];
 
 extern qboolean		R_CullBox (vec3_t mins, vec3_t maxs);
-extern void		R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node);
+extern void		R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
 extern int		c_brush_polys;
 extern GLuint		world_vao;
 extern GLuint		world_ibo;
@@ -2713,12 +2713,12 @@ void R_CollectBrushInstances (void)
 					tdl.origin[0] =  DotProduct (tmp, fwd);
 					tdl.origin[1] = -DotProduct (tmp, rt);
 					tdl.origin[2] =  DotProduct (tmp, up);
-					R_MarkLights (&tdl, 1ULL<<k,
+					R_MarkLights (&tdl, k,
 					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
 				}
 				else
 				{
-					R_MarkLights (dl, 1ULL<<k,
+					R_MarkLights (dl, k,
 					    clmodel->nodes + clmodel->hulls[0].firstclipnode);
 				}
 			}

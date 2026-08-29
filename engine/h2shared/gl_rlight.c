@@ -239,7 +239,13 @@ R_MarkLights
 =============
 */
 #if 0	/* the original version from ID */
-void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
+/* msurface_t::dlightbits is spelled with a literal 4 in render.h, model.h
+ * and gl_model.h, which cannot see MAX_DLIGHTS.  This is what keeps them
+ * honest: raising the pool past 128 without adding words there would
+ * overflow the array silently.  uhexen2-liqz */
+COMPILE_TIME_ASSERT(dlightbits, DLIGHTBITS_WORDS <= 4);
+
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	float		dist;
@@ -254,12 +260,12 @@ void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 
 	if (dist > light->radius)
 	{
-		R_MarkLights (light, bit, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0]);
 		return;
 	}
 	if (dist < -light->radius)
 	{
-		R_MarkLights (light, bit, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1]);
 		return;
 	}
 
@@ -269,17 +275,17 @@ void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 	{
 		if (surf->dlightframe != r_dlightframecount)
 		{
-			surf->dlightbits = 0;
+			DLIGHTBITS_CLEAR (surf->dlightbits);
 			surf->dlightframe = r_dlightframecount;
 		}
-		surf->dlightbits |= bit;
+		DLIGHTBIT_SET (surf->dlightbits, lnum);
 	}
 
-	R_MarkLights (light, bit, node->children[0]);
-	R_MarkLights (light, bit, node->children[1]);
+	R_MarkLights (light, lnum, node->children[0]);
+	R_MarkLights (light, lnum, node->children[1]);
 }
 #else	/* the major speedup version by Lord Havoc */
-void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	float		l, dist, maxdist;
@@ -339,18 +345,19 @@ loc0:
 		{
 			if (surf->dlightframe != r_dlightframecount)
 			{	// not dynamic until now
-				surf->dlightbits = bit;
+				DLIGHTBITS_CLEAR (surf->dlightbits);
+				DLIGHTBIT_SET (surf->dlightbits, lnum);
 				surf->dlightframe = r_dlightframecount;
 			}
 			else	// already dynamic
-				surf->dlightbits |= bit;
+				DLIGHTBIT_SET (surf->dlightbits, lnum);
 		}
 	}
 
 	if (node->children[0]->contents >= 0)
-		R_MarkLights (light, bit, node->children[0]);
+		R_MarkLights (light, lnum, node->children[0]);
 	if (node->children[1]->contents >= 0)
-		R_MarkLights (light, bit, node->children[1]);
+		R_MarkLights (light, lnum, node->children[1]);
 }
 #endif	/* end of 2 R_MarkLights versions */
 
@@ -435,7 +442,7 @@ void R_PushDlights (void)
 		}
 		if (culled)
 			continue;
-		R_MarkLights ( l, 1ULL<<i, cl.worldmodel->nodes );
+		R_MarkLights (l, i, cl.worldmodel->nodes );
 	}
 }
 

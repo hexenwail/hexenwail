@@ -614,7 +614,7 @@ int R_GetPimpFlags (entity_t *e, float **gsettings_out);
 int R_GetEntityModelFlags (entity_t *e);
 
 void R_RenderDlights (void);
-void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node);
+void R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
 /* Side planes for an arbitrary camera, into the caller's array rather than
  * frustum[].  R_PushDlights needs them before R_SetFrustum runs.  uhexen2-137k */
 void R_BuildFrustum (const vec3_t origin, const vec3_t pn, const vec3_t right,
