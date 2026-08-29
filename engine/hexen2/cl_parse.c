@@ -1384,6 +1384,61 @@ static void CL_DumpPacket (void)
 }
 #endif	/* CL_DumpPacket */
 
+/*
+===============
+CL_DumpMessageContext
+
+Hex and ASCII of the bytes around a parse failure, bounded to a window rather
+than the whole packet (which can be NET_MAXMESSAGE and would scroll the console
+away from the thing worth reading).  The failing offset is marked.
+
+The ASCII column is the point.  A desynchronised parser reads the middle of a
+string payload as command bytes, so the dump of a genuine desync reads as
+plain English text -- which is what tells you the stream slipped rather than
+that the server sent something exotic.
+===============
+*/
+static void CL_DumpMessageContext (int badpos)
+{
+	const unsigned char	*packet = (const unsigned char *) net_message.data;
+	int	start, end, pos, i;
+
+	start = (badpos - 32) & ~15;
+	if (start < 0)
+		start = 0;
+	end = badpos + 32;
+	if (end > net_message.cursize)
+		end = net_message.cursize;
+
+	Con_Printf ("  packet is %d bytes; showing %d..%d\n",
+		    net_message.cursize, start, end - 1);
+
+	for (pos = start; pos < end; pos += 16)
+	{
+		Con_Printf ("  %5i ", pos);
+		for (i = 0; i < 16; i++)
+		{
+			if (pos + i >= end)
+				Con_Printf ("   ");
+			else if (pos + i == badpos)
+				Con_Printf (">%02x", packet[pos + i]);
+			else
+				Con_Printf (" %02x", packet[pos + i]);
+		}
+		Con_Printf ("  ");
+		for (i = 0; i < 16; i++)
+		{
+			if (pos + i >= end)
+				break;
+			if (packet[pos + i] >= 32 && packet[pos + i] < 127)
+				Con_Printf ("%c", packet[pos + i]);
+			else
+				Con_Printf (".");
+		}
+		Con_Printf ("\n");
+	}
+}
+
 #define SHOWNET(S)						\
 do {								\
 	if (cl_shownet.integer == 2)				\
@@ -1402,6 +1457,12 @@ void CL_ParseServerMessage (void)
 	int		EntityCount = 0;
 	int		EntitySize = 0;
 	int		before;
+	/* The message parsed immediately before the current one, kept so that a
+	 * parse failure can name what ran off the rails.  A desync is always the
+	 * fault of the PRECEDING message reading the wrong number of bytes, so the
+	 * failing command byte on its own points at the wrong place. */
+	int		prev_cmd = -1, prev_pos = 0;
+	int		cur_cmd = -1, cur_pos = 0;
 	static		double lasttime;
 	static		qboolean packet_loss = false;
 	entity_t	*ent;
@@ -1437,7 +1498,12 @@ void CL_ParseServerMessage (void)
 		if (msg_badread)
 			Host_Error ("%s: Bad server message", __thisfunc__);
 
+		prev_cmd = cur_cmd;
+		prev_pos = cur_pos;
+		cur_pos = msg_readcount;
+
 		cmd = MSG_ReadByte ();
+		cur_cmd = cmd;
 
 		if (cmd == -1)
 		{
@@ -1451,6 +1517,9 @@ void CL_ParseServerMessage (void)
 		if (cmd & 128)
 		{
 			before = msg_readcount;
+			/* not an svc code -- flag it so a later parse failure reports
+			 * "entity fast update" rather than a meaningless byte value */
+			cur_cmd = -2;
 			SHOWNET("fast update");
 			if (packet_loss)
 				CL_ParseUpdate2 (cmd & 127);
@@ -1469,19 +1538,42 @@ void CL_ParseServerMessage (void)
 		switch (cmd)
 		{
 		default:
-		//	CL_DumpPacket ();
-			// FIXME: SoT mod uses custom protocol messages (0, 33, 80, 84, 89, 97-101, 105, 108, 110, 115-117, 121)
-			// Try to handle unknown messages gracefully
-			if (cmd == 0 || cmd == 33 || cmd >= 80)
-			{
-				// Try reading 1 byte - many simple messages have just a byte parameter
-				// If this is wrong, the stream will desync, but it's better than crashing
-				byte skip_byte = MSG_ReadByte();
-				Con_Printf("[DEMO] WARNING: Unknown server message %d at readcount=%d, skipped byte 0x%02x\n",
-					cmd, msg_readcount-2, skip_byte);
-				break;
-			}
-			Con_Printf("[DEMO] ERROR: Illegible server message %d at readcount=%d\n", cmd, msg_readcount);
+			/* There is no such thing as an unknown-but-skippable message, and
+			 * the code that used to be here made things strictly worse.  It read
+			 * and discarded one byte for cmd 0, cmd 33 and anything >= 80, under
+			 * a comment claiming those were "SoT custom protocol messages"
+			 * (0, 33, 80, 84, 89, 97-101, 105, 108, 110, 115-117, 121).
+			 *
+			 * Decode that list as ASCII and it reads: NUL ! P T Y a b c d e i l
+			 * n s t u y.  Those are letters -- the common ones, plus a string
+			 * terminator and some capitals.  They are not a protocol.  They are
+			 * what a parser sees when it has slipped into the middle of a string
+			 * payload and is reading English text as command bytes.  This
+			 * engine's svc space stops at svc_fog (56) and its server emits
+			 * nothing above that, so a byte >= 80 arriving here can only be
+			 * garbage.
+			 *
+			 * So the "graceful" skip was inventing a one-byte payload for a
+			 * message that does not exist, guaranteeing the stream stayed
+			 * desynchronised for the rest of the packet -- silently misapplied
+			 * entity state instead of a diagnosable error.  The desync that
+			 * produced the observed bytes was uhexen2-6ugh (svc_clear_edicts
+			 * count width), fixed in f048c3394.  uhexen2-48vd.
+			 *
+			 * Fail loudly, and say enough to find the real culprit: the command
+			 * that ran off the rails is the one BEFORE this byte, not this byte.
+			 */
+			Con_Printf ("Illegible server message: %d (0x%02x) at offset %d\n",
+				    cmd, cmd, cur_pos);
+			if (prev_cmd >= 0)
+				Con_Printf ("  previous message: %s (%d) at offset %d, %d bytes\n",
+					    (prev_cmd < (int)NUM_SVC_STRINGS) ?
+						svc_strings[prev_cmd] : "<unnamed>",
+					    prev_cmd, prev_pos, cur_pos - prev_pos);
+			else if (prev_cmd == -2)
+				Con_Printf ("  previous message: entity fast update at offset %d\n",
+					    prev_pos);
+			CL_DumpMessageContext (cur_pos);
 			Host_Error ("%s: Illegible server message %d", __thisfunc__, cmd);
 			break;
 
