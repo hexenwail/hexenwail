@@ -2611,15 +2611,31 @@ static void Host_Game_f (void)
 		FS_MakePath_BUF (FS_USERBASE, NULL, fs_userdir, sizeof(fs_userdir), "data1");
 	}
 
-	/* flush non-persistent GL textures and reload menu/HUD graphics */
-#ifdef GLQUAKE
-	{ extern void TexMgr_NewGame (void); TexMgr_NewGame (); }
-#endif
-	Draw_ReInit ();
-	BGM_Stop ();	/* stop music from previous game */
+	/* Reload the client's view of the new mod: GL textures, menu/HUD graphics,
+	 * music, key-bind list.  Skipped entirely when running dedicated, which
+	 * initialised none of it -- Host_Init guards the matching VID_Init /
+	 * Draw_Init / S_Init / CL_Init block with the same test.  Draw_ReInit is
+	 * the one that used to be fatal: it pulls conchars, the loading disc and
+	 * backtile through FS_LoadZoneFile(..., Z_SECZONE), and Memory_Init only
+	 * creates the secondary zone for a non-dedicated process, so every runtime
+	 * "game <dir>" on a dedicated server died on "Z_Malloc: Bad zone id 2".
+	 * uhexen2-jjmb. */
+	{
+		extern qboolean isDedicated;
 
-	/* re-read bindlist.lst so the previous mod's Key Setup rows don't linger */
-	M_BuildBindList ();
+		if (!isDedicated)
+		{
+#ifdef GLQUAKE
+			{ extern void TexMgr_NewGame (void); TexMgr_NewGame (); }
+#endif
+			Draw_ReInit ();
+			BGM_Stop ();	/* stop music from previous game */
+
+			/* re-read bindlist.lst so the previous mod's Key Setup rows
+			 * don't linger */
+			M_BuildBindList ();
+		}
+	}
 
 	/* clean slate: reload binds, aliases, and configs from new mod */
 	Cbuf_AddText ("unbindall\nunaliasall\n");
