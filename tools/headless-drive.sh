@@ -16,6 +16,7 @@
 #   WORK      scratch dir for the sandboxed HOME (default: <outdir>/work)
 #   DISPLAY_N X display number           (default: first free >= 99)
 #   W, H      window size                (default: 800x600)
+#   STEPS     step file, for the `script` scenario only (see below)
 #
 # Example:
 #   nix build .#default
@@ -23,12 +24,35 @@
 #
 # Requires: Xvfb, xdotool, bwrap (bubblewrap), ImageMagick `import`.
 #
-# Scenarios below are the ones written for uhexen2-uh5c; they are examples.
-# The reusable parts are the harness and the shot/key/keyn/typ helpers.
+# THE `script` SCENARIO is the general-purpose one, and the one to reach for
+# when you just want to see some part of the engine: it reads its steps from
+# $STEPS instead of needing a new case arm here.  One verb per line:
+#
+#   shot NAME          screenshot to <outdir>/NAME.png (settles 2s first)
+#   shotf NAME         screenshot with no settle, for sampling a time series
+#   key KEYSYM         one X key press (Return, Down, Escape, grave, ...)
+#   keyn KEYSYM N      that key N times
+#   type TEXT          type TEXT, do NOT press Return
+#   enter TEXT         type TEXT and press Return
+#   console            toggle the console (the grave key)
+#   cmd TEXT           console + enter TEXT + console: run one console command
+#   hold KEYSYM SECS   keydown, wait, keyup -- movement, unlike `key`
+#   mouse X Y          warp the pointer
+#   click [BUTTON]     click (default button 1)
+#   wipe               clear the console line
+#   sleep SECS         wait
+#   # ...              comment; blank lines ignored
+#
+# Anything else is a hard error rather than a skipped line: a typo'd verb in
+# the middle of a run would otherwise leave you reading screenshots of a menu
+# that never got navigated, which looks exactly like a pass.
+#
+# The other scenarios below are the ones written for uhexen2-uh5c; they are
+# examples, kept because their comments record what each was proving.
 #
 set -uo pipefail
 
-usage() { sed -n '2,28p' "$0"; exit 2; }
+usage() { sed -n '2,52p' "$0"; exit 2; }
 [ $# -ge 3 ] || usage
 
 SCEN="$1"; shift
@@ -47,8 +71,13 @@ done
 
 # Resolve through symlinks: ./result is a symlink into /nix/store, and the
 # store path is outside $HOME, which the bwrap below replaces wholesale.
+# BASEDIR needs the SAME treatment, not a plain `cd && pwd`: `nix build
+# .#demodata -o somewhere` hands you a path whose last components live behind a
+# symlink into the read-only store, and bwrap refuses such a --ro-bind target
+# with "Can't mkdir parents for ..." -- it cannot create the mount point under
+# a symlink it did not resolve.
 ENGINE=$(readlink -f "$ENGINE")
-BASEDIR=$(cd "$BASEDIR" && pwd)
+BASEDIR=$(readlink -f "$BASEDIR")
 ENGINE_DIR=$(dirname "$ENGINE")
 
 rm -rf "$OUT"; mkdir -p "$OUT"
@@ -157,6 +186,41 @@ ingame() {
 xdotool mousemove $((W/2)) $((H-1)); sleep 1   # park pointer below every menu item
 
 case "$SCEN" in
+
+  # General-purpose: drive whatever $STEPS says.  Add cases below only when a
+  # run needs real logic; anything that is a flat sequence of keys and shots
+  # belongs in a step file, not in this script.
+  script)
+    [ -n "${STEPS:-}" ] || { echo "headless-drive: script scenario needs STEPS=<file>" >&2; exit 2; }
+    [ -r "$STEPS" ]     || { echo "headless-drive: cannot read STEPS=$STEPS" >&2; exit 2; }
+    lineno=0
+    # No `eval`: the verb is dispatched by name so a step file cannot reach
+    # past the helpers, and an unknown verb stops the run instead of being
+    # silently skipped.
+    while IFS= read -r line || [ -n "$line" ]; do
+      lineno=$((lineno+1))
+      case "$line" in ''|'#'*) continue;; esac
+      verb=${line%% *}
+      rest=${line#"$verb"}; rest=${rest# }
+      case "$verb" in
+        shot)    shot "$rest" ;;
+        shotf)   shotf "$rest" ;;
+        key)     key "$rest" ;;
+        keyn)    keyn "${rest%% *}" "${rest##* }" ;;
+        type)    typn "$rest" ;;
+        enter)   typ "$rest" ;;
+        console) key grave; sleep 1 ;;
+        cmd)     key grave; sleep 1; typ "$rest"; key grave; sleep 2 ;;
+        hold)    xdotool keydown "${rest%% *}"; sleep "${rest##* }"
+                 xdotool keyup "${rest%% *}"; sleep 1 ;;
+        mouse)   xdotool mousemove ${rest}; sleep 0.5 ;;
+        click)   xdotool click "${rest:-1}"; sleep 0.7 ;;
+        wipe)    wipe ;;
+        sleep)   sleep "$rest" ;;
+        *) echo "headless-drive: $STEPS:$lineno: unknown verb '$verb'" >&2; exit 2 ;;
+      esac
+    done < "$STEPS"
+    ;;
 
   oldmission_demoness)
     shot 01-main

@@ -1,5 +1,8 @@
 all_output.txt
+# `result` is the default nix build link; the run skill also asks for
+# result-h2ded and result-demodata, and a release build drops result-<target>.
 result
+result-*
 .flatpak-builder/
 audit.md
 # engine/build/ is the default; the second renderer configuration needs its own

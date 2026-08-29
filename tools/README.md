@@ -15,6 +15,7 @@ These are plain scripts, run directly. The Python ones need only stock
 | `edict_pick.py` | pull entities of interest out of an `edicts` console dump |
 | `headless-cfg.sh` | generate a scripted-run config that emits those dumps |
 | `headless-drive.sh` | drive the engine's menus under Xvfb with real key events |
+| `serve.sh` | drive the dedicated server (`h2ded`) on stdin, with no X at all |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
@@ -178,6 +179,39 @@ which fields are printed and in what order.
 
 ---
 
+## serve.sh — the dedicated server on stdin
+
+The fast lane, and the one to try first. `h2ded` is the `SERVERONLY` half of
+the engine: no renderer, video, sound or input, linking only libm and libc. It
+boots in about a second and takes console commands on stdin, so anything below
+the renderer — gamecode, physics, savegames, protocol, filesystem, cvars —
+gets answered in seconds instead of the minutes `headless-drive.sh` costs. It
+needs `bwrap` and nothing else; no X server is involved.
+
+```sh
+nix build .#h2ded-bundled -o result-h2ded
+nix build .#demodata      -o result-demodata
+printf 'map demo1\nwait 3\nstatus\nedicts\n' | \
+  tools/serve.sh /tmp/out result-demodata/share/hexenwail
+```
+
+One console command per line. `wait N` sleeps N seconds before the next line —
+the engine's own `wait` yields a single frame, which is never enough for a map
+load — and a final `quit` is appended, without which the server runs forever.
+
+Read `<outdir>/qconsole.log`. **h2ded prints nothing to stdout when stdout is
+not a tty**, so the `engine.stdout` beside it is normally empty; `-condebug` is
+passed for you. Like `headless-drive.sh`, the run is sandboxed with a throwaway
+`$HOME`, and both the basedir and the binary are `readlink -f`'d first: bwrap
+cannot create a `--ro-bind` mount point underneath an unresolved symlink, and
+`nix build -o` hands you exactly such a path. The failure is the misleading
+`Can't mkdir parents for <path>: No such file or directory`.
+
+What it cannot do is tell you what anything *looks* like. That is the other
+half of the pair, below.
+
+---
+
 ## headless-drive.sh — menu testing without a second machine
 
 Runs the engine under Xvfb and sends **real X key events** with `xdotool`, so
@@ -196,9 +230,12 @@ Requires `Xvfb`, `xdotool`, `bwrap` and `import`; it checks for all four and
 fails with a clear message rather than hanging. On a machine without them:
 
 ```sh
-nix shell nixpkgs#xvfb nixpkgs#xdotool --command \
+nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubblewrap --command \
   env ENGINE=result/bin/glhexen2 tools/headless-drive.sh noportals /tmp/out ~/hexen2
 ```
+
+There is no `nixpkgs#xvfb`: `Xvfb` ships inside `xorg-server`, and
+`nixpkgs#xorg.xorgserver` still resolves but warns that it has been renamed.
 
 The run is wrapped in `bwrap` with a throwaway directory bound over `$HOME`, so
 it cannot touch your real `~/.hexen2` config or savegames, and with the basedir
@@ -213,8 +250,26 @@ The scenarios in the `case` block (`noportals`, `oldmission_paladin`,
 `oldmission_demoness`, `demoness_skin`, `newmission`) are the ones written for
 `uhexen2-uh5c`; `console_tab` was written for `uhexen2-q6ap`. Treat them as
 worked examples — the reusable parts are the harness itself and the `shot` /
-`key` / `keyn` / `typ` / `typn` / `wipe` helpers. Add a scenario rather than
-rewriting the setup.
+`key` / `keyn` / `typ` / `typn` / `wipe` helpers.
+
+Most runs need no new scenario at all. **`script` is the general-purpose arm**:
+it reads its steps from `$STEPS`, one verb per line, so a flat sequence of keys
+and screenshots costs a file rather than an edit here.
+
+```sh
+printf 'shot 01-main\nkeyn Down 3\nkey Return\nshot 02-mods\n' > /tmp/steps.txt
+STEPS=/tmp/steps.txt tools/headless-drive.sh script /tmp/out ~/hexen2
+```
+
+Verbs: `shot` / `shotf` / `key` / `keyn` / `type` / `enter` / `console` / `cmd`
+/ `hold` / `mouse` / `click` / `wipe` / `sleep`, plus `#` comments. `type`
+types without submitting and `enter` submits; `cmd` wraps one console command
+in the grave-key toggle either side. An unrecognised verb aborts the run — a
+typo that merely skipped its line would leave you reading screenshots of a menu
+that was never navigated, which is indistinguishable from a pass.
+
+Add a `case` arm only when a run needs real logic (a burst loop, a control
+condition), and give it the comment explaining what it is proving.
 
 Timings are deliberately generous (the engine gets 25 s to load a map). It is
 slow, and that is the tradeoff for driving a real event loop.
