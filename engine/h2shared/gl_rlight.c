@@ -239,7 +239,7 @@ R_MarkLights
 =============
 */
 #if 0	/* the original version from ID */
-void R_MarkLights (dlight_t *light, int bit, mnode_t *node)
+void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	float		dist;
@@ -279,7 +279,7 @@ void R_MarkLights (dlight_t *light, int bit, mnode_t *node)
 	R_MarkLights (light, bit, node->children[1]);
 }
 #else	/* the major speedup version by Lord Havoc */
-void R_MarkLights (dlight_t *light, int bit, mnode_t *node)
+void R_MarkLights (dlight_t *light, unsigned long long bit, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	float		l, dist, maxdist;
@@ -435,7 +435,7 @@ void R_PushDlights (void)
 		}
 		if (culled)
 			continue;
-		R_MarkLights ( l, 1<<i, cl.worldmodel->nodes );
+		R_MarkLights ( l, 1ULL<<i, cl.worldmodel->nodes );
 	}
 }
 

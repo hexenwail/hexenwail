@@ -156,7 +156,7 @@ typedef struct msurface_s
 
 // lighting info
 	int		dlightframe;
-	int		dlightbits;
+	unsigned long long		dlightbits;	/* one bit per dlight; MAX_DLIGHTS <= 64. uhexen2-liqz */
 
 	unsigned int	lightmaptexturenum;
 	byte		styles[MAXLIGHTMAPS];

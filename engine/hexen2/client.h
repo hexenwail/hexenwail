@@ -54,7 +54,18 @@ typedef struct
 
 #define	SIGNONS			4	// signon messages to receive before connected
 
-#define	MAX_DLIGHTS		32
+/* Raised from 32 (uhexen2-liqz).  Measured peak CL_AllocDlight demand on SoT
+ * is 74/frame on meso, 32 on palace, 26 on keep; at 32 the pool was saturated
+ * permanently on meso and every over-quota light was dropped, which is the
+ * flicker in uhexen2-ck6h.  64 clears palace and keep outright and cuts meso's
+ * shortfall from 42 to 10.
+ *
+ * 64 is the ceiling for the current mask: surf->dlightbits is one 64-bit word
+ * and R_MarkLights is passed a bit, not an index, so MAX_DLIGHTS exactly
+ * saturates it.  Going further needs a multi-word mask or an index-passing
+ * R_MarkLights -- see uhexen2-liqz.  Do NOT raise this alone; the mask
+ * overflow is silent. */
+#define	MAX_DLIGHTS		64
 typedef struct
 {
 	vec3_t		origin;
