@@ -3318,6 +3318,18 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	 * with v0 = pose0 (current) and v1 = pose1 (previous), so blend=1
 	 * yields the current pose. */
 	inst->blend = lerpfrac;
+	/* Clamp before scaling, exactly as the skeletal path does above.
+	 * R_AliasResolveLerp validates e->frame against the CURRENT model, but
+	 * on its lerping branch it returns e->previouspose / e->currentpose --
+	 * entity state carried from earlier frames, which a model swap leaves
+	 * pointing at poses the new model does not have.  These are scaled and
+	 * handed to the vertex shader as a raw SSBO offset, so a stale index is
+	 * an out-of-bounds read: undefined, not merely wrong-looking, and on
+	 * NVIDIA it faults inside the driver rather than returning garbage.
+	 * uhexen2-5krx */
+	if (pose     < 0 || pose     >= gm->numposes) pose     = 0;
+	if (prevpose < 0 || prevpose >= gm->numposes) prevpose = pose;
+
 	inst->pose0 = pose * gm->poseverts;	/* pre-multiply for direct SSBO indexing */
 	inst->pose1 = prevpose * gm->poseverts;
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);

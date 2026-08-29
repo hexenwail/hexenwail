@@ -638,6 +638,29 @@ iqm_gpu_setup:
 		glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 #endif
 
+	/* Refuse a mesh with no pose data.  Everything downstream indexes the
+	 * pose SSBO as pose*poseverts + vertex, so numposes or poseverts of 0
+	 * means a zero-byte buffer that every vertex then reads past.  Nothing
+	 * else catches it: glBufferData with size 0 still returns a live buffer
+	 * name, so the "if (!pose_ssbo) continue" guard in R_DrawAliasInstanced
+	 * sees a perfectly good buffer and draws.  The read is out of bounds and
+	 * therefore undefined -- llvmpipe absorbs it, the NVIDIA driver
+	 * segfaults inside its own vertex fetch with a stack naming only the
+	 * draw call.
+	 *
+	 * Checked here rather than on entry because hdr->poseverts is filled in
+	 * by the strip builder above, not by the model loader.  Leaving valid
+	 * clear covers every consumer at once: GL_GetAliasGPUMesh only hands
+	 * back meshes with valid set, so the model draws as nothing instead of
+	 * taking the process down.  uhexen2-5krx */
+		if (hdr->numposes <= 0 || hdr->poseverts <= 0)
+		{
+			Con_DPrintf ("GL_MakeAliasGPUMesh: no pose data (numposes=%d poseverts=%d), model will not be drawn\n",
+						hdr->numposes, hdr->poseverts);
+			Hunk_FreeToLowMark(mark);
+			return;
+		}
+
 		gm->num_indices = vi;
 		gm->poseverts = hdr->poseverts;
 		gm->numposes = hdr->numposes;
@@ -691,6 +714,29 @@ iqm_gpu_setup:
 				hdr->poseverts, hdr->numposes, 0,
 				GL_RED_INTEGER, GL_UNSIGNED_INT, pose_packed);
 		glBindTexture_fp(GL_TEXTURE_2D, 0);
+	}
+
+	/* Refuse a mesh with no pose data.  Everything downstream indexes the
+	 * pose SSBO as pose*poseverts + vertex, so numposes or poseverts of 0
+	 * means a zero-byte buffer that every vertex then reads past.  Nothing
+	 * else catches it: glBufferData with size 0 still returns a live buffer
+	 * name, so the "if (!pose_ssbo) continue" guard in R_DrawAliasInstanced
+	 * sees a perfectly good buffer and draws.  The read is out of bounds and
+	 * therefore undefined -- llvmpipe absorbs it, the NVIDIA driver
+	 * segfaults inside its own vertex fetch with a stack naming only the
+	 * draw call.
+	 *
+	 * Checked here rather than on entry because hdr->poseverts is filled in
+	 * by the strip builder above, not by the model loader.  Leaving valid
+	 * clear covers every consumer at once: GL_GetAliasGPUMesh only hands
+	 * back meshes with valid set, so the model draws as nothing instead of
+	 * taking the process down.  uhexen2-5krx */
+	if (hdr->numposes <= 0 || hdr->poseverts <= 0)
+	{
+		Con_DPrintf ("GL_MakeAliasGPUMesh: no pose data (numposes=%d poseverts=%d), model will not be drawn\n",
+					hdr->numposes, hdr->poseverts);
+		Hunk_FreeToLowMark(mark);
+		return;
 	}
 
 	gm->num_indices = vi;
