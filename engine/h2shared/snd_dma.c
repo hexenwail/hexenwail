@@ -71,7 +71,15 @@ int		s_rawend;
 portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
 
 
-#define	MAX_SFX		1024
+/* Sound names live here for the whole process: num_sfx is reset in S_Init and
+ * nowhere else, and S_ClearPrecache is a stub, so every map transition appends
+ * that map's new names and releases none.  1024 was not enough for a large mod
+ * played end to end -- Storm over Thyrion's readme warns its players outright
+ * that "if you would run through all the maps in one run, you may encounter
+ * 'S_FindName: out of sfx_t'".  4096 is 288 KB of hunk against a 512 MB heap
+ * and buys the headroom that report asks for; it does NOT fix the underlying
+ * leak, which is uhexen2-2die. */
+#define	MAX_SFX		4096
 static sfx_t	*known_sfx = NULL;	// hunk allocated [MAX_SFX]
 static int	num_sfx;
 static hashindex_t	hash_sfx;
@@ -417,7 +425,25 @@ static sfx_t *S_FindName (const char *name)
 	}
 
 	if (num_sfx == MAX_SFX)
-		Sys_Error ("%s: out of sfx_t", __thisfunc__);
+	{
+		/* Drop the sound instead of killing the session.  NULL is already a
+		 * supported return the whole way up -- S_PrecacheSound returns it for
+		 * nosound, S_StartSound and S_LocalSound both test for it -- so a
+		 * player who exhausts the table loses individual sounds rather than
+		 * the playthrough.  Warned once: it fires per missing sound after
+		 * that, and a console filling with the same line is how the original
+		 * crash's diagnostic value gets lost. */
+		static qboolean	warned = false;
+
+		if (!warned)
+		{
+			warned = true;
+			Con_Printf ("WARNING: out of sfx_t (%d sounds), dropping \"%s\" "
+				    "and any further new sounds this session\n",
+				    MAX_SFX, name);
+		}
+		return NULL;
+	}
 
 	Hash_Add (&hash_sfx, key, num_sfx);
 	sfx = &known_sfx[num_sfx];
@@ -443,6 +469,8 @@ void S_TouchSound (const char *name)
 		return;
 
 	sfx = S_FindName (name);
+	if (!sfx)
+		return;
 	Cache_Check (&sfx->cache);
 }
 
@@ -460,6 +488,8 @@ sfx_t *S_PrecacheSound (const char *name)
 		return NULL;
 
 	sfx = S_FindName (name);
+	if (!sfx)
+		return NULL;
 
 // cache it in
 	if (precache.integer)
