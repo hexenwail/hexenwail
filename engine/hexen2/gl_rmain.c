@@ -706,6 +706,28 @@ static mspriteframe_t *R_GetSpriteFrame (entity_t *e)
 	psprite = (msprite_t *) e->model->cache.data;
 	frame = e->frame;
 
+	/* A sprite reporting no frames cannot be clamped into range: frame 0 does
+	 * not exist either, so the code below would read psprite->frames[0] past
+	 * the end of the array and then chase frameptr into whatever it found.
+	 * That is an out-of-bounds read followed by a wild pointer dereference --
+	 * the same shape as uhexen2-5krx, where an alias mesh with numposes 0 was
+	 * clamped to pose 0 and indexed an empty SSBO.
+	 *
+	 * Observed on sot/models/waterfalls.spr, which logs "no such frame 0" --
+	 * and "frame 0 does not exist" can only mean numframes is 0.  Note the
+	 * FILE is fine: it is IDSP version 1 (matching SPRITE_VERSION) with
+	 * numframes 8, and Mod_LoadSpriteModel Sys_Errors on a version mismatch
+	 * rather than loading an empty sprite.  So a zero here means the
+	 * msprite_t we are looking at is not the loaded one -- a stale or flushed
+	 * model cache entry still referenced by a live entity.  That root cause is
+	 * uhexen2-p9wq; this guard only stops it being undefined behaviour.
+	 * uhexen2-hv68 */
+	if (psprite->numframes <= 0)
+	{
+		Con_DPrintf ("%s: %s has no frames, not drawing\n", __thisfunc__, e->model->name);
+		return NULL;
+	}
+
 	if ((frame >= psprite->numframes) || (frame < 0))
 	{
 		Con_DPrintf ("%s: no such frame %d for %s\n", __thisfunc__, frame, e->model->name);
@@ -823,6 +845,8 @@ static void R_DrawSpriteModel (entity_t *e)
 	qboolean	soft_active;
 
 	frame = R_GetSpriteFrame (e);
+	if (!frame)
+		return;		/* sprite carries no frames; uhexen2-hv68 */
 	psprite = (msprite_t *) e->model->cache.data;
 
 	if (psprite->type == SPR_FACING_UPRIGHT)
