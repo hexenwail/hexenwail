@@ -754,6 +754,13 @@ static void SV_SendServerinfo (client_t *client)
 
 	client->sendsignon = true;
 	client->spawned = false;	// need prespawn, spawn, etc
+	/* Void anything the previous map's signon list still owed this client.
+	 * We have just told it to start over (svc_signonnum 1), and its next
+	 * prespawn sets the index to 0; leaving a stale index here would make a
+	 * changelevel that lands between prespawn and spawn feed the new list
+	 * from the middle, silently dropping the baselines and static entities
+	 * in the buffers it skipped.  uhexen2-z5wt. */
+	client->signon_buffer = -1;
 }
 
 /*

@@ -234,6 +234,14 @@ void CL_SignonReply (void)
 		break;
 
 	case 2:
+		/* Everything the signon list carried has arrived by now: the
+		 * server appends svc_signonnum 2 after the last buffer.  Pair
+		 * this with the server's "Signon: %d bytes in %d/%d buffers"
+		 * line -- together they say whether a client actually received
+		 * what was built for it, which is the one question a signon
+		 * report cannot otherwise answer.  uhexen2-z5wt. */
+		Con_DPrintf ("Signon received: %d static entities\n", cl.num_statics);
+
 		MSG_WriteByte (&cls.message, clc_stringcmd);
 		MSG_WriteString (&cls.message, va("name \"%s\"\n", cl_name.string));
 
