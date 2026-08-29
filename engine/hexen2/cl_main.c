@@ -456,9 +456,20 @@ static void SetPal (int i)
 #endif
 }
 
+/* Handed back when a light loses the contest for a slot outright.  It is
+ * deliberately NOT part of cl_dlights[], so R_PushDlights never sees it and
+ * the caller can fill it in exactly as it would a real light.  Every caller
+ * writes to the returned pointer and drops it, so nothing observes that the
+ * light went nowhere.  uhexen2-ck6h */
+static dlight_t	cl_dlight_discard;
+
 /*
 ===============
 CL_AllocDlight
+
+A slot is reserved by key, so an entity that already owns a light keeps it
+from frame to frame.  That stability is what stops the visible set churning,
+and everything below is about preserving it when the pool runs out.
 
 ===============
 */
@@ -466,6 +477,9 @@ dlight_t *CL_AllocDlight (int key)
 {
 	int		i;
 	dlight_t	*dl;
+	int		victim;
+	float		worst_score, worst_dist;
+	vec3_t		delta;
 
 // first look for an exact key match
 	dl = cl_dlights;
@@ -486,7 +500,75 @@ dlight_t *CL_AllocDlight (int key)
 			goto done;
 	}
 
-	dl = &cl_dlights[0];
+	/* Every slot is live.  The historical behaviour here was
+	 *
+	 *	dl = &cl_dlights[0];
+	 *
+	 * which is not a choice at all.  On a map with more light-emitting
+	 * entities than slots -- SoT's meso sits at 32/32 permanently and
+	 * overflows this path about 1200 times a second -- every over-quota
+	 * entity in turn stomps slot 0, so slot 0's owner changes several
+	 * dozen times per frame, each new owner's key match fails on the next
+	 * frame, and which lights survive keeps changing.  That churn is the
+	 * flicker, and because slot 0 is picked blindly it will drop the torch
+	 * at the player's feet as readily as one across the map.  uhexen2-ck6h
+	 *
+	 * Evict the least useful light instead, scored as the eye's distance
+	 * outside the light's own reach.  A light whose sphere still contains
+	 * the eye scores negative and is effectively immune; a small light far
+	 * away scores highest and goes first.  The nearby lights then hold
+	 * their slots frame after frame, which turns a flicker into a stable
+	 * omission of the lights least likely to be missed.
+	 *
+	 * r_origin is the previous frame's eye, and that is fine here in a way
+	 * it was NOT in R_PushDlights (uhexen2-137k): this only ranks
+	 * candidates, so a frame of lag can pick a slightly wrong victim but
+	 * can never make a light wink out on its own. */
+	victim = 0;
+	VectorSubtract (cl_dlights[0].origin, r_origin, delta);
+	worst_dist = VectorLength (delta);
+	worst_score = worst_dist - fabs (cl_dlights[0].radius);
+
+	for (i = 1; i < MAX_DLIGHTS; i++)
+	{
+		float	dist, score;
+
+		VectorSubtract (cl_dlights[i].origin, r_origin, delta);
+		dist = VectorLength (delta);
+		score = dist - fabs (cl_dlights[i].radius);
+		if (score > worst_score)
+		{
+			worst_score = score;
+			worst_dist = dist;
+			victim = i;
+		}
+	}
+
+	/* Don't let a newcomer evict something better than itself.  key is the
+	 * entity index for every light CL_RelinkEntities allocates, and that
+	 * entity's origin has already been interpolated for this frame by the
+	 * time we are called, so the newcomer's position is known exactly --
+	 * unlike its radius, which the caller fills in after we return.  Judge
+	 * it on distance alone against the incumbent's distance, and if it is
+	 * the further of the two, throw the newcomer away and leave the
+	 * incumbent in place.  Without this the two furthest lights simply
+	 * trade the same slot every frame, which is the old churn in
+	 * miniature.
+	 *
+	 * key 0 means a temporary entity (explosions, impacts); those are
+	 * brief and always near something the player just did, so they are
+	 * never refused. */
+	if (key > 0 && key < cl.num_entities)
+	{
+		VectorSubtract (cl_entities[key].origin, r_origin, delta);
+		if (VectorLength (delta) > worst_dist)
+		{
+			dl = &cl_dlight_discard;
+			goto done;
+		}
+	}
+
+	dl = &cl_dlights[victim];
 done:
 	memset (dl, 0, sizeof(*dl));
 	dl->key = key;
