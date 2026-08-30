@@ -85,7 +85,11 @@ feed() {
   sleep 1          # let quit be read before stdin hits EOF
 }
 
-# h2ded writes config and qconsole.log to $HOME/.hexen2.  Bind a throwaway dir
+# h2ded writes config and qconsole.log under the userdir, which for a fresh
+# throwaway $HOME is now $HOME/.local/share/hexen2 -- uhexen2-7b1s moved it
+# there and the legacy $HOME/.hexen2 only wins when it already exists, which it
+# never does here.  XDG_DATA_HOME is pinned below so a host value cannot
+# redirect the run out of the sandbox.  Bind a throwaway dir
 # over $HOME so a run cannot touch the real one, then re-bind the data and the
 # binary read-only ON TOP: a source checkout usually puts both inside $HOME,
 # and without this the sandbox hides the very files it is about to open.
@@ -94,12 +98,12 @@ feed | timeout "$TIMEOUT" \
         --bind "$OUT/home" "$HOME" \
         --ro-bind "$BASEDIR" "$BASEDIR" \
         --ro-bind "$ENGINE_DIR" "$ENGINE_DIR" \
-    env HOME="$HOME" \
+    env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" \
     "$ENGINE" -basedir "$BASEDIR" -condebug "$@" \
   > "$OUT/engine.stdout" 2>&1
 rc=$?
 
-cp "$OUT/home/.hexen2/qconsole.log" "$OUT/qconsole.log" 2>/dev/null
+cp "$OUT/home/.local/share/hexen2/qconsole.log" "$OUT/qconsole.log" 2>/dev/null
 if [ $rc -eq 124 ]; then
   echo "serve: TIMED OUT after ${TIMEOUT}s -- the server never quit." >&2
   echo "       see $OUT/qconsole.log" >&2

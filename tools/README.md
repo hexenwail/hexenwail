@@ -238,10 +238,14 @@ There is no `nixpkgs#xvfb`: `Xvfb` ships inside `xorg-server`, and
 `nixpkgs#xorg.xorgserver` still resolves but warns that it has been renamed.
 
 The run is wrapped in `bwrap` with a throwaway directory bound over `$HOME`, so
-it cannot touch your real `~/.hexen2` config or savegames, and with the basedir
+it cannot touch your real config or savegames — wherever they live, `~/.hexen2`
+or `~/.local/share/hexen2` — and with the basedir
 re-bound **read-only on top** — the bind order matters, because the game data
 usually lives inside `$HOME` and would otherwise be hidden by the first bind.
-The sandboxed `~/.hexen2/qconsole.log` is copied into the output directory.
+The sandboxed `~/.local/share/hexen2/qconsole.log` is copied into the output
+directory. A throwaway `$HOME` has no `~/.hexen2`, so the run always takes the
+XDG path (uhexen2-7b1s); `XDG_DATA_HOME` is pinned to the sandbox so a host
+value cannot redirect it.
 
 Output goes to `<outdir>`: numbered PNGs, `engine.stdout`, `xvfb.log`,
 `qconsole.log`, and the sandbox HOME under `work/`.
