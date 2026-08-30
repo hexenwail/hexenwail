@@ -513,11 +513,80 @@ static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 }
 
 #if DO_USERDIRS
+#if defined(USE_XDG_USERDIR)
+/* $XDG_DATA_HOME's default, per the XDG Base Directory spec. */
+#define	XDG_DATA_HOME_FALLBACK	".local/share"
+
+/*
+=================
+Sys_MakeParentDirs
+
+Creates every component of path except the last one, ignoring failures.
+
+Sys_mkdir() is a single mkdir() and must stay that way for its other callers,
+but the XDG userdir's parents (~/.local, ~/.local/share) need not exist on a
+fresh account or in a bare container.  Errors are swallowed on purpose: the
+caller still creates the leaf itself with crash=true, so a genuinely unusable
+path is reported through the existing Sys_Error() rather than twice.
+=================
+*/
+static void Sys_MakeParentDirs (const char *path)
+{
+	char	tmp[MAX_OSPATH];
+	char	*p;
+	size_t	len;
+
+	len = strlen(path);
+	if (len >= sizeof(tmp))
+		return;
+	memcpy (tmp, path, len + 1);
+
+	/* begin past any leading '/', so that we never mkdir("") */
+	for (p = tmp + 1; *p != '\0'; p++)
+	{
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		Sys_mkdir (tmp, false);
+		*p = '/';
+	}
+}
+
+/*
+=================
+Sys_GetXDGDataHome
+
+$XDG_DATA_HOME, or $HOME/.local/share when it is unset, empty, or -- as the
+spec demands -- not an absolute path.  Returns NULL when the fallback wouldn't
+fit in buf, which leaves the caller on the legacy $HOME location.
+=================
+*/
+static const char *Sys_GetXDGDataHome (const char *home_dir, char *buf, size_t bufsize)
+{
+	const char	*xdg_data_home = getenv("XDG_DATA_HOME");
+
+	if (xdg_data_home != NULL && xdg_data_home[0] == '/')
+		return xdg_data_home;
+
+	if (strlen(home_dir) + strlen(XDG_DATA_HOME_FALLBACK) + 2 > bufsize)
+		return NULL;
+	q_snprintf (buf, bufsize, "%s/%s", home_dir, XDG_DATA_HOME_FALLBACK);
+	return buf;
+}
+#endif	/* USE_XDG_USERDIR */
+
 static int Sys_GetUserdir (char *dst, size_t dstsize)
 {
 	size_t		n;
 	const char	*home_dir = NULL;
+	const char	*base_dir, *sub_dir;
 	struct passwd	*pwent;
+#if defined(USE_XDG_USERDIR)
+	const char	*xdg_data_home;
+	char		legacy_dir[MAX_OSPATH];
+	char		xdg_base[MAX_OSPATH];
+	qboolean	using_xdg = false;
+#endif
 
 	pwent = getpwuid(getuid());
 	if (pwent == NULL)
@@ -528,18 +597,48 @@ static int Sys_GetUserdir (char *dst, size_t dstsize)
 	if (home_dir == NULL)
 		return 1;
 
+	base_dir = home_dir;
+	sub_dir = AOT_USERDIR;
+
+#if defined(USE_XDG_USERDIR)
+/* An already existing $HOME/AOT_USERDIR always wins, so that an upgrading user
+ * keeps their savegames, configs and dropped-in mods exactly where they are:
+ * nothing is ever migrated.  Only a fresh install lands in the XDG data dir.
+ */
+	if (strlen(home_dir) + strlen(AOT_USERDIR) + 2 > sizeof(legacy_dir))
+		legacy_dir[0] = '\0';	/* cannot exist if it cannot be named */
+	else	q_snprintf (legacy_dir, sizeof(legacy_dir), "%s/%s", home_dir, AOT_USERDIR);
+
+	if (Sys_FileType(legacy_dir) != FS_ENT_DIRECTORY)
+	{
+		xdg_data_home = Sys_GetXDGDataHome (home_dir, xdg_base, sizeof(xdg_base));
+		if (xdg_data_home != NULL)
+		{
+			base_dir = xdg_data_home;
+			sub_dir = AOT_USERDIR_XDG;
+			using_xdg = true;
+		}
+	}
+#endif	/* USE_XDG_USERDIR */
+
 /* what would be a maximum path for a file in the user's directory...
- * $HOME/AOT_USERDIR/game_dir/dirname1/dirname2/dirname3/filename.ext
+ * base_dir/sub_dir/game_dir/dirname1/dirname2/dirname3/filename.ext
  * still fits in the MAX_OSPATH == 256 definition, but just in case.
  */
-	n = strlen(home_dir) + strlen(AOT_USERDIR) + 50;
+	n = strlen(base_dir) + strlen(sub_dir) + 50;
 	if (n >= dstsize)
 	{
 		Sys_Error ("%s: Insufficient bufsize %d. Need at least %d.",
 					__thisfunc__, (int)dstsize, (int)n);
 	}
 
-	q_snprintf (dst, dstsize, "%s/%s", home_dir, AOT_USERDIR);
+	q_snprintf (dst, dstsize, "%s/%s", base_dir, sub_dir);
+
+#if defined(USE_XDG_USERDIR)
+	if (using_xdg)
+		Sys_MakeParentDirs (dst);
+#endif
+
 	return 0;
 }
 #endif	/* DO_USERDIRS */
