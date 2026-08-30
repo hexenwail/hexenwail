@@ -27,12 +27,14 @@
  * the same machine peacefully */
 #define	SYS_USERDIR_OSX		"Library/Application Support/Hexen2 Demo"
 #define	SYS_USERDIR_UNIX	".hexen2demo"
+#define	SYS_USERDIR_XDG		"hexen2demo"
 #define	SYS_USERDIR_HAIKU	"config/settings/hexen2demo"
 
 #else	/* for retail version: */
 
 #define	SYS_USERDIR_OSX		"Library/Application Support/Hexen2"
 #define	SYS_USERDIR_UNIX	".hexen2"
+#define	SYS_USERDIR_XDG		"hexen2"
 #define	SYS_USERDIR_HAIKU	"config/settings/hexen2"
 
 #endif
@@ -44,6 +46,14 @@
 #define	AOT_USERDIR		SYS_USERDIR_HAIKU
 #else	/* unix: */
 #define	AOT_USERDIR		SYS_USERDIR_UNIX
+/* Plain unix follows the XDG Base Directory spec: a fresh install lands in
+ * $XDG_DATA_HOME/AOT_USERDIR_XDG instead of cluttering $HOME.  OS X and Haiku
+ * have their own conventions and are deliberately left out -- this header is
+ * the only place the platform split happens, sys_unix.c carries no platform
+ * ifdefs of its own.  An already existing $HOME/AOT_USERDIR still wins at
+ * runtime; see Sys_GetUserdir(). */
+#define	USE_XDG_USERDIR		1
+#define	AOT_USERDIR_XDG		SYS_USERDIR_XDG
 #endif
 
 #endif	/* __USERDIR_H */
