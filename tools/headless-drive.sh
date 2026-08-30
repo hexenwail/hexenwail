@@ -105,7 +105,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The engine writes config/savegames/qconsole.log under $HOME/.hexen2.  Bind a
+# The engine writes config/savegames/qconsole.log under the userdir, which for
+# a fresh throwaway $HOME is now $HOME/.local/share/hexen2 -- uhexen2-7b1s moved
+# it there and the legacy $HOME/.hexen2 only wins when it already exists, which
+# it never does here.  XDG_DATA_HOME is pinned below so a host value cannot
+# redirect the run out of the sandbox.  Bind a
 # throwaway dir over $HOME so a run cannot touch the real one, then re-bind the
 # game data read-only *on top* -- the basedir usually lives inside $HOME, so
 # the order matters: the ro-bind must come after the HOME bind or it is hidden.
@@ -118,7 +122,8 @@ bwrap --dev-bind / / \
       --bind "$WORK/home" "$HOME" \
       --ro-bind "$BASEDIR" "$BASEDIR" \
       --ro-bind "$ENGINE_DIR" "$ENGINE_DIR" \
-  env DISPLAY="$DISP" HOME="$HOME" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
+  env DISPLAY="$DISP" HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" \
+      SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
   "$ENGINE" -basedir "$BASEDIR" -width "$W" -height "$H" -window -nosound "$@" \
   >"$OUT/engine.stdout" 2>&1 &
 GPID=$!
@@ -474,5 +479,5 @@ case "$SCEN" in
 esac
 
 sleep 2
-cp "$WORK/home/.hexen2/qconsole.log" "$OUT/qconsole.log" 2>/dev/null
+cp "$WORK/home/.local/share/hexen2/qconsole.log" "$OUT/qconsole.log" 2>/dev/null
 echo "done -> $OUT"
