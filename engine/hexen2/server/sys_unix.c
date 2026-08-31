@@ -513,10 +513,6 @@ static int Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 }
 
 #if DO_USERDIRS
-#if defined(USE_XDG_USERDIR)
-/* $XDG_DATA_HOME's default, per the XDG Base Directory spec. */
-#define	XDG_DATA_HOME_FALLBACK	".local/share"
-
 /*
 =================
 Sys_MakeParentDirs
@@ -525,9 +521,10 @@ Creates every component of path except the last one, ignoring failures.
 
 Sys_mkdir() is a single mkdir() and must stay that way for its other callers,
 but the XDG userdir's parents (~/.local, ~/.local/share) need not exist on a
-fresh account or in a bare container.  Errors are swallowed on purpose: the
-caller still creates the leaf itself with crash=true, so a genuinely unusable
-path is reported through the existing Sys_Error() rather than twice.
+fresh account or in a bare container -- and neither need the parents of a
+-userdir a caller just made up.  Errors are swallowed on purpose: the caller
+still creates the leaf itself with crash=true, so a genuinely unusable path is
+reported through the existing Sys_Error() rather than twice.
 =================
 */
 static void Sys_MakeParentDirs (const char *path)
@@ -551,6 +548,10 @@ static void Sys_MakeParentDirs (const char *path)
 		*p = '/';
 	}
 }
+
+#if defined(USE_XDG_USERDIR)
+/* $XDG_DATA_HOME's default, per the XDG Base Directory spec. */
+#define	XDG_DATA_HOME_FALLBACK	".local/share"
 
 /*
 =================
@@ -578,6 +579,7 @@ static const char *Sys_GetXDGDataHome (const char *home_dir, char *buf, size_t b
 static int Sys_GetUserdir (char *dst, size_t dstsize)
 {
 	size_t		n;
+	int		parm;
 	const char	*home_dir = NULL;
 	const char	*base_dir, *sub_dir;
 	struct passwd	*pwent;
@@ -587,6 +589,43 @@ static int Sys_GetUserdir (char *dst, size_t dstsize)
 	char		xdg_base[MAX_OSPATH];
 	qboolean	using_xdg = false;
 #endif
+
+/* -userdir <path> wins over everything below, and is used verbatim: no
+ * AOT_USERDIR is appended, so what you name is what you get.
+ *
+ * It exists because nothing else can redirect the userdir here.  The home
+ * directory comes from getpwuid(), not from $HOME, so exporting HOME does
+ * nothing; and an already existing $HOME/AOT_USERDIR deliberately beats the
+ * XDG location, so on a box that has one -- any box upgraded from an older
+ * release -- XDG_DATA_HOME does nothing either.  A sandboxed or throwaway run
+ * therefore had no way to keep its config.cfg, savegames and qconsole.log out
+ * of the developer's real userdir short of bind-mounting over $HOME, which is
+ * why tools/serve.sh and tools/headless-drive.sh both need bubblewrap.  This
+ * makes that a flag instead (uhexen2-stbe).
+ *
+ * host_parms->argv is already set by the time main() calls us, which is what
+ * makes COM_CheckParm usable this early.
+ */
+	parm = COM_CheckParm ("-userdir");
+	if (parm != 0)
+	{
+		const char	*path = (parm < com_argc - 1) ? com_argv[parm + 1] : NULL;
+
+	/* Reject a leading '-' rather than swallowing the next switch: "-userdir
+	 * -dedicated" would otherwise put the userdir in a directory called
+	 * "-dedicated" and silently drop the option that was meant to follow. */
+		if (path == NULL || path[0] == '\0' || path[0] == '-')
+			Sys_Error ("-userdir requires a directory path");
+
+	/* Same headroom the computed path reserves below, for
+	 * userdir/game_dir/dirname1/dirname2/dirname3/filename.ext. */
+		if (strlen(path) + 50 >= dstsize)
+			Sys_Error ("-userdir path is too long (max %d)", (int)(dstsize - 50));
+
+		q_snprintf (dst, dstsize, "%s", path);
+		Sys_MakeParentDirs (dst);	/* the leaf is created by our caller */
+		return 0;
+	}
 
 	pwent = getpwuid(getuid());
 	if (pwent == NULL)
@@ -660,6 +699,9 @@ static const char *help_strings[] = {
 #endif
 	"     [-heapsize Bytes]       Heapsize (memory to allocate)",
 	"     [-vanillaprogs]         Ignore the bundled gamecode, use the game's own",
+#if DO_USERDIRS
+	"     [-userdir DIR]          Write configs and savegames to DIR",
+#endif
 	NULL
 };
 
