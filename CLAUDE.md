@@ -31,21 +31,54 @@ bd close <id>         # Complete work
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **Check cited commit hashes** - `python3 tools/bd_hash_audit.py`
+   ```bash
+   python3 tools/bd_hash_audit.py        # exits 1 if an open bead cites a dead hash
+   python3 tools/bd_hash_audit.py --fix  # applies the mechanical corrections
+   ```
+   Quiet when everything is fine. It reads `bd export`, so run it before
+   committing and it still sees what you just wrote. See below for why.
+5. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
    bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+6. **Clean up** - Clear stashes, prune remote branches
+7. **Verify** - All changes committed AND pushed
+8. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
+
+## Citing commits in beads
+
+**Write the commit SUBJECT, not just the hash.** A hash you record before its
+beads commit is squashed into the code commit is not occasionally stale, it is
+*guaranteed* stale — squashing replaces the commit and its hash with a new one.
+That is the house workflow, so it happens every time; the audit found 76
+rewritten and 23 dangling hashes accumulated this way (uhexen2-zq7w).
+
+Subjects survive a rebase, hashes do not. So write:
+
+> fixed in `feat(server): sv_netsort decides who survives a full datagram`
+> (4724daf2c at time of writing)
+
+and the reader can always find it with `git log --grep`, whatever the hash
+became. Step 4 above is the backstop, not the plan.
+
+Note the squash keeps the subject of whichever commit came *first*, which is
+routinely unrelated work — the MD5 `.md5anim` parser lives inside a commit
+titled after BC7 texture compression. `bd_hash_audit.py` matches those on the
+diff and prints the survivor.
+
+**`bd update --notes` REPLACES the notes field.** Use `--append-notes` to add to
+it, or you will silently destroy an existing investigation. Same for
+`--description` and `--design`. Every prior version is recoverable from
+`git show <commit>:.beads/issues.jsonl` if you do.
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
