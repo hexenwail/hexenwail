@@ -1,0 +1,98 @@
+# GNU Makefile for hexen2 mapping tools using GCC.
+#
+# To cross-compile for Win32 on Unix: either pass the W32BUILD=1
+# argument to make, or export it.  Also see build_cross_win32.sh.
+# Requires: a mingw or mingw-w64 compiler toolchain.
+#
+# To cross-compile for Win64 on Unix: either pass the W64BUILD=1
+# argument to make, or export it. Also see build_cross_win64.sh.
+# Requires: a mingw-w64 compiler toolchain.
+#
+#
+# To build a debug version:		make DEBUG=1 [other stuff]
+#
+
+# Path settings:
+UHEXEN2_TOP:=../..
+UTILS_TOP:=..
+COMMONDIR:=$(UTILS_TOP)/common
+UHEXEN2_SHARED:=$(UHEXEN2_TOP)/common
+LIBS_DIR:=$(UHEXEN2_TOP)/libs
+OSLIBS:=$(UHEXEN2_TOP)/oslibs
+
+# include the common dirty stuff
+include $(UHEXEN2_TOP)/scripts/makefile.inc
+
+# Names of the binaries
+MAPSEARCH:=mapsearch$(exe_ext)
+
+# Compiler flags
+
+# Overrides for the default CPUFLAGS
+ifeq ($(MACH_TYPE),x86)
+CPU_X86=-march=i586
+endif
+CPUFLAGS=$(CPU_X86)
+
+CFLAGS += -Wall
+CFLAGS += $(CPUFLAGS)
+ifndef DEBUG
+CFLAGS += -O2 -DNDEBUG=1
+else
+CFLAGS += -g
+endif
+
+LDFLAGS =
+LDLIBS  =
+INCLUDES= -I. -I$(COMMONDIR) -I$(UHEXEN2_SHARED)
+
+# Other build flags
+
+ifeq ($(TARGET_OS),win32)
+CFLAGS  += -DWIN32_LEAN_AND_MEAN
+INCLUDES+= -I$(OSLIBS)/windows/misc/include
+CFLAGS  += -m32
+LDFLAGS += -m32 -mconsole
+endif
+ifeq ($(TARGET_OS),win64)
+CFLAGS  += -DWIN32_LEAN_AND_MEAN
+INCLUDES+= -I$(OSLIBS)/windows/misc/include
+CFLAGS  += -m64
+LDFLAGS += -m64 -mconsole
+endif
+ifeq ($(TARGET_OS),unix)
+# nothing extra is needed
+endif
+
+# Targets
+all : $(MAPSEARCH)
+
+# Rules for turning source files into .o files
+%.o: %.c
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+%.o: $(COMMONDIR)/%.c
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+%.o: $(UHEXEN2_SHARED)/%.c
+	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
+
+# Objects.  No bspfile.o/byteordr.o here: mapsearch reads .map text, never
+# a compiled .bsp, so nothing in it cares about byte order.
+OBJ_MAPSEARCH= qsnprint.o \
+	strlcat.o \
+	strlcpy.o \
+	cmdlib.o \
+	util_io.o \
+	pathutil.o \
+	ms_regex.o \
+	ms_map.o \
+	ms_config.o \
+	mapsearch.o
+
+$(MAPSEARCH) : $(OBJ_MAPSEARCH)
+	$(LINKER) $(OBJ_MAPSEARCH) $(LDFLAGS) $(LDLIBS) -o $@
+
+clean:
+	rm -f *.o core
+distclean: clean
+	rm -f $(MAPSEARCH)
+
