@@ -35,6 +35,12 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 
+/* Sidecar .vis, same as the GL loader's.  It matters more here than it looks:
+ * a dedicated server uses vis for PVS entity culling (Mod_LeafPVS below, via
+ * SV_AddToFatPVS), so a map with broken vis culls entities wrongly for every
+ * connected client, not merely draws wrongly for one. */
+static cvar_t	external_vis  = {"external_vis", "1", CVAR_ARCHIVE};
+
 static byte	mod_novis[MAX_MAP_LEAFS/8];
 static int	*surfedges;
 static medge_t	*edges;
@@ -52,6 +58,7 @@ Mod_Init
 void Mod_Init (void)
 {
 	Cvar_RegisterVariable (&external_ents);
+	Cvar_RegisterVariable (&external_vis);
 
 	memset (mod_novis, 0xff, sizeof(mod_novis));
 }
@@ -823,16 +830,16 @@ static void Mod_LoadLeafs_BSP2(lump_t *l)
 }
 #endif
 
-static void Mod_LoadLeafs_V29 (lump_t *l)
+/* Split out so external .vis leafs, which arrive in a buffer rather than at an
+ * offset into the BSP, go through the same conversion. */
+static void Mod_ProcessLeafs_V29 (dleaf_t *in, int filelen)
 {
-	dleaf_t		*in;
 	mleaf_t		*out;
 	int			i, count, p;
 
-	in = (dleaf_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
+	if (filelen % sizeof(*in))
 		Host_Error ("%s: funny lump size in %s", __thisfunc__, loadmodel->name);
-	count = l->filelen / sizeof(*in);
+	count = filelen / sizeof(*in);
 	out = (mleaf_t *) Hunk_AllocName (count * sizeof(*out), "leafs");
 
 	loadmodel->leafs = out;
@@ -849,6 +856,129 @@ static void Mod_LoadLeafs_V29 (lump_t *l)
 		else
 			out->compressed_vis = loadmodel->visdata + p;
 	}
+}
+
+static void Mod_LoadLeafs_V29 (lump_t *l)
+{
+	Mod_ProcessLeafs_V29 ((dleaf_t *)(mod_base + l->fileofs), l->filelen);
+}
+
+/*
+=================
+External .vis support -- see the matching block in gl_model.c for the format.
+=================
+*/
+typedef struct vispatch_s
+{
+	char	mapname[32];
+	int	filelen;
+} vispatch_t;
+#define VISPATCH_HEADER_LEN	36
+
+static FILE *Mod_FindVisibilityExternal (void)
+{
+	vispatch_t	header;
+	char		visfilename[MAX_QPATH];
+	const char	*shortname;
+	unsigned int	path_id;
+	FILE		*f;
+	long		pos;
+	size_t		r;
+
+	q_snprintf (visfilename, sizeof(visfilename), "maps/%s.vis", loadname);
+	if (FS_OpenFile (visfilename, &f, &path_id) < 0)
+	{
+		q_snprintf (visfilename, sizeof(visfilename), "%s.vis", fs_gamedir_nopath);
+		if (FS_OpenFile (visfilename, &f, &path_id) < 0)
+		{
+			Con_DPrintf ("external vis not found\n");
+			return NULL;
+		}
+	}
+
+	if (path_id < loadmodel->path_id)
+	{
+		fclose (f);
+		Con_DPrintf ("ignored %s from a gamedir with lower priority\n", visfilename);
+		return NULL;
+	}
+
+	Con_DPrintf ("Found external VIS %s\n", visfilename);
+
+	shortname = COM_SkipPath (loadmodel->name);
+	pos = 0;
+	while ((r = fread (&header, 1, VISPATCH_HEADER_LEN, f)) == VISPATCH_HEADER_LEN)
+	{
+		header.filelen = LittleLong (header.filelen);
+		if (header.filelen <= 0)
+		{
+			fclose (f);
+			return NULL;
+		}
+		header.mapname[sizeof(header.mapname) - 1] = '\0';
+		if (!q_strcasecmp (header.mapname, shortname))
+			break;
+		pos += header.filelen + VISPATCH_HEADER_LEN;
+		fseek (f, pos, SEEK_SET);
+	}
+
+	if (r != VISPATCH_HEADER_LEN)
+	{
+		fclose (f);
+		Con_DPrintf ("%s not found in %s\n", shortname, visfilename);
+		return NULL;
+	}
+
+	return f;
+}
+
+static byte *Mod_LoadVisibilityExternal (FILE *f)
+{
+	int	mark, filelen;
+	byte	*visdata;
+
+	filelen = 0;
+	if (fread (&filelen, 4, 1, f) != 1)
+		return NULL;
+	filelen = LittleLong (filelen);
+	if (filelen <= 0)
+		return NULL;
+
+	Con_DPrintf ("...%d bytes visibility data\n", filelen);
+	mark = Hunk_LowMark ();
+	visdata = (byte *) Hunk_AllocName (filelen, "EXT_VIS");
+	if (fread (visdata, filelen, 1, f) != 1)
+	{
+		Hunk_FreeToLowMark (mark);
+		return NULL;
+	}
+	return visdata;
+}
+
+static void Mod_LoadLeafsExternal (FILE *f)
+{
+	int	mark, filelen;
+	void	*in;
+
+	filelen = 0;
+	if (fread (&filelen, 4, 1, f) != 1)
+	{
+		Con_Printf ("Couldn't read external leaf data length\n");
+		return;
+	}
+	filelen = LittleLong (filelen);
+	if (filelen <= 0)
+		return;
+
+	Con_DPrintf ("...%d bytes leaf data\n", filelen);
+	mark = Hunk_LowMark ();
+	in = Hunk_AllocName (filelen, "EXT_LEAF");
+	if (fread (in, filelen, 1, f) != 1)
+	{
+		Hunk_FreeToLowMark (mark);
+		return;
+	}
+	Mod_ProcessLeafs_V29 ((dleaf_t *)in, filelen);
 }
 
 /*
@@ -1156,8 +1286,46 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
 	surfedges = NULL;
 	edges = NULL;
-	Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
-	Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+	/* Try the sidecar before the embedded lumps -- the hunk has no
+	 * free-in-the-middle, so loading first would strand them.  See the
+	 * matching block in gl_model.c. */
+	{
+		qboolean	got_external = false;
+
+		if (!bsp2 && external_vis.integer
+		    && sv.modelname[0] && !q_strcasecmp (loadname, sv.name))
+		{
+			FILE	*fvis;
+
+			Con_DPrintf ("trying to open external vis file\n");
+			fvis = Mod_FindVisibilityExternal ();
+			if (fvis)
+			{
+				int	mark = Hunk_LowMark ();
+
+				loadmodel->leafs = NULL;
+				loadmodel->numleafs = 0;
+				loadmodel->visdata = Mod_LoadVisibilityExternal (fvis);
+				if (loadmodel->visdata)
+					Mod_LoadLeafsExternal (fvis);
+				fclose (fvis);
+
+				if (loadmodel->visdata && loadmodel->leafs && loadmodel->numleafs)
+					got_external = true;
+				else
+				{
+					Hunk_FreeToLowMark (mark);
+					Con_DPrintf ("External VIS data failed, using standard vis.\n");
+				}
+			}
+		}
+
+		if (!got_external)
+		{
+			Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
+			Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+		}
+	}
 	Mod_LoadNodes (&header->lumps[LUMP_NODES], bsp2);
 	Mod_LoadClipnodes (&header->lumps[LUMP_CLIPNODES], bsp2);
 	Mod_LoadEntities (&header->lumps[LUMP_ENTITIES]);
