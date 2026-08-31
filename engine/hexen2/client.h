@@ -143,6 +143,15 @@ typedef struct
 	 * .pk3 entry, which has no FILE * to hand back.  Recording still writes a
 	 * loose file, which is why the two are not one field.  uhexen2-pzha. */
 	fshandle_t	demofh;
+	/* Basename of the demo being played, extension stripped.  Drives the
+	 * per-demo start/end configs and the scr_demobar_timeout overlay, both
+	 * of which want a name and not a file handle.  Empty when idle. */
+	char		demofilename[MAX_DEMONAME];
+	/* realtime of the last viewer keypress during playback.  Only the demo
+	 * bar reads it; it is what "no interaction" in scr_demobar_timeout
+	 * measures from.  Lives here rather than in the renderer so keys.c can
+	 * set it without the software build needing a demo bar of its own. */
+	double		demoactivity;
 //	FILE		*introdemofile;
 	int		td_lastframe;		// to meter out one message a frame
 	int		td_startframe;		// host_framecount at start

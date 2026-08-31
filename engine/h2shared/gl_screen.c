@@ -97,6 +97,11 @@ float		scr_conlines;		// lines of console to display
 
 int		trans_level = 0;
 
+/* scr_demobar_timeout -- Ironwail (Quake/gl_screen.c, same slot in this block).
+ * Negative hides the demo playback bar entirely, 0 pins it up for the whole
+ * demo, positive is how many seconds it stays up after the last playback
+ * event before it fades out.  See SCR_DrawDemoBar. */
+cvar_t		scr_demobar_timeout = {"scr_demobar_timeout", "1", CVAR_ARCHIVE};
 cvar_t		scr_viewsize = {"viewsize", "110", CVAR_ARCHIVE};
 cvar_t		scr_fov = {"fov", "90", CVAR_NONE};	// 10 - 170
 cvar_t		scr_fov_adapt = {"fov_adapt", "1", CVAR_ARCHIVE};	// "Hor+" scaling
@@ -721,6 +726,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_fov_effective_y);
 	Cvar_RegisterVariable (&scr_fov_adapt);
 	Cvar_RegisterVariable (&scr_viewsize);
+	Cvar_RegisterVariable (&scr_demobar_timeout);
 	Cvar_RegisterVariable (&scr_zoomfov);
 	Cvar_RegisterVariable (&scr_zoomspeed);
 	Cvar_RegisterVariable (&con_logcenterprint);
@@ -1017,6 +1023,149 @@ static void SCR_DrawSpeed (void)
 	Draw_String (x, y, st);
 }
 
+
+/*
+==============
+SCR_DrawDemoBar -- Ironwail
+
+Playback position readout during demo playback: a seek rail with a cursor,
+the demo name, the play/pause state, and the elapsed map time above the
+cursor.  Ported from Ironwail's SCR_DrawDemoControls (Quake/gl_screen.c);
+the half of that function that drives demo speed and scrubbing has nothing
+to drive here yet -- uHexen2 has no demo speed control -- so this is the
+readout without the controls.
+
+The position is approximated from the demo file offset rather than from a
+time index: a .dem carries no duration in its header, and walking it to
+find one would mean reading the whole file up front.  fshandle_t.pos is
+already relative to the data start, so a demo inside a pak or a .pk3 needs
+no extra bookkeeping (Ironwail carries cls.demofilestart for exactly that).
+
+Drawn in CANVAS_SBAR so it scales with the status bar and sits just above
+the Hexen II bar's top bumps, or in CANVAS_MENU during intermission, where
+there is no status bar to clear.
+==============
+*/
+#define DEMOBAR_CHARS	38	/* Ironwail's TIMEBAR_CHARS */
+#define DEMOBAR_FADE	0.5f	/* seconds of fade-out at the end of the timeout */
+
+static void SCR_DrawDemoBar (void)
+{
+	static float	showtime = 0.0f;
+	static double	lastframe = 0.0;
+	static double	lastactivity = 0.0;
+	static qboolean	wasplaying = false;
+	static qboolean	waspaused = false;
+	int		i, x, y, cursor, mins, secs;
+	float		frac, alpha, s;
+	const char	*str, *colon;
+	double		dt;
+
+	if (!cls.demoplayback || scr_demobar_timeout.value < 0.0f)
+	{
+		showtime = 0.0f;
+		wasplaying = false;
+		lastframe = realtime;
+		lastactivity = cls.demoactivity;
+		return;
+	}
+
+	dt = realtime - lastframe;
+	lastframe = realtime;
+	if (dt < 0.0 || dt > 1.0)
+		dt = 0.0;	/* loading hitch or clock reset: don't eat the timeout */
+
+	/* Re-arm the timeout on anything the viewer can cause.  Ironwail keys off
+	 * demo speed changes, which we have no control for; what we have is the
+	 * demo starting, the pause state flipping, and any keypress (keys.c
+	 * stamps cls.demoactivity). */
+	if (!wasplaying || cl.paused != waspaused ||
+	    cls.demoactivity != lastactivity || scr_demobar_timeout.value == 0.0f)
+	{
+		wasplaying = true;
+		waspaused = cl.paused;
+		lastactivity = cls.demoactivity;
+		showtime = (scr_demobar_timeout.value > 0.0f) ? scr_demobar_timeout.value : 1.0f;
+	}
+	else
+	{
+		showtime -= (float) dt;
+		if (showtime <= 0.0f)
+		{
+			showtime = 0.0f;
+			return;
+		}
+	}
+
+	alpha = (showtime < DEMOBAR_FADE) ? showtime / DEMOBAR_FADE : 1.0f;
+
+	frac = (cls.demofh.length > 0)
+		? (float)(cls.demofh.pos / (double) cls.demofh.length) : 0.0f;
+	if (frac < 0.0f) frac = 0.0f;
+	else if (frac > 1.0f) frac = 1.0f;
+
+	if (cl.intermission)
+	{
+		GL_SetCanvas (CANVAS_MENU);
+		/* CANVAS_MENU is 320 wide and as tall as the screen divided by the
+		 * menu scale; mirror GL_SetCanvas's own math to find the bottom.
+		 * Ironwail sits the bar 1/8 of the way up from there. */
+		s = SCR_CalcUIScale (&scr_menuscale);
+		if (s > (float)glwidth / (float)UI_CANVAS_WIDTH)
+			s = (float)glwidth / (float)UI_CANVAS_WIDTH;
+		if (s < 0.0001f)
+			s = 1.0f;
+		y = (int)((float)glheight / s) * 7 / 8;
+	}
+	else
+	{
+		GL_SetCanvas (CANVAS_SBAR);
+		/* Canvas y grows downward to the screen bottom at UI_SBAR_CANVAS_HEIGHT.
+		 * The status bar's top bumps start 69 units above that (BAR_TOP_HEIGHT +
+		 * BAR_BUMP_HEIGHT), so 89 leaves the name row clear of them. */
+		y = UI_SBAR_CANVAS_HEIGHT - 89;
+	}
+	x = (UI_CANVAS_WIDTH - DEMOBAR_CHARS * 8) / 2;
+
+	/* Backdrop for the whole readout: time label at y-19, rail at y-8, name
+	 * row at y, each 8 tall -- padded 4 all round. */
+	Draw_FillAlpha (x - 8, y - 23, DEMOBAR_CHARS * 8 + 16, 35,
+			0.0f, 0.0f, 0.0f, 0.5f * alpha);
+
+	Draw_SetCharacterAlpha (alpha);
+
+	/* Playback state on the left, demo name centered. */
+	Draw_String (x, y, cl.paused ? "II" : ">");
+	if (cls.demofilename[0])
+		Draw_String ((UI_CANVAS_WIDTH - (int)strlen(cls.demofilename) * 8) / 2,
+			     y, cls.demofilename);
+
+	/* Seek rail and cursor.  256..259 are Hexen II's slider glyphs -- the
+	 * same ones M_DrawSlider uses, not Quake's 128..131. */
+	cursor = x + (int)((DEMOBAR_CHARS - 1) * 8 * frac);
+	y -= 8;
+	Draw_Character (x - 8, y, 256);
+	for (i = 0; i < DEMOBAR_CHARS; i++)
+		Draw_Character (x + i * 8, y, 257);
+	Draw_Character (x + i * 8, y, 258);
+	Draw_Character (cursor, y, 259);
+
+	/* Elapsed map time above the cursor, ':' aligned with it. */
+	y -= 11;
+	secs = (int) cl.time;
+	mins = secs / 60;
+	secs %= 60;
+	str = va ("%i:%02i", mins, secs);
+	colon = strchr (str, ':');
+	x = cursor - (int)(colon - str) * 8;
+	if (x < 0)
+		x = 0;
+	else if (x + (int)strlen(str) * 8 > UI_CANVAS_WIDTH)
+		x = UI_CANVAS_WIDTH - (int)strlen(str) * 8;
+	Draw_String (x, y, str);
+
+	Draw_SetCharacterAlpha (1.0f);
+}
 
 /*
 ==============
@@ -1974,6 +2123,7 @@ void SCR_UpdateScreen (void)
 	{
 #if !defined(H2W)
 		SB_IntermissionOverlay();
+		SCR_DrawDemoBar ();
 		if (!(cl.intermission_flags & INTERMISSION_NO_MENUS))
 		{
 			SCR_DrawConsole();
@@ -2025,6 +2175,7 @@ void SCR_UpdateScreen (void)
 			if (!CSQC_DrawHud ())
 #endif
 				Sbar_Draw();
+			SCR_DrawDemoBar ();
 		}
 		/* Debug readouts on their own canvas so scr_infoscale can size
 		 * them without moving the HUD, and vice versa (uhexen2-r9qj). */
