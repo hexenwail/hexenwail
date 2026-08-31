@@ -49,6 +49,19 @@ static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
  * cooperation from whoever built the BSP. */
 static cvar_t	external_vis  = {"external_vis", "1", CVAR_ARCHIVE};
 
+/* Spoike, Discord 2026-08-31: "replacement textures should be replacement
+ * textures, nothing more", "exporters won't be aware of hexen2's rules".
+ * Set 0 to take him at his word -- Mod_RestoreIndexAlpha never runs and a
+ * replacement skin's own alpha is always what reaches the GPU.
+ *
+ * Default 1 keeps current behaviour.  This exists to MEASURE what the
+ * reconstruction is holding up, because the answer is not obvious: the
+ * branch that looks least defensible (a 24-bit file, which could not have
+ * expressed alpha) has two dependents, while the one that looks like a
+ * clear author statement (32-bit, uniformly opaque) is load-bearing for
+ * eleven models including base-game data1 content.  uhexen2-4y6w */
+static cvar_t	r_replacement_restore_alpha = {"r_replacement_restore_alpha", "1", CVAR_ARCHIVE};
+
 static byte	mod_novis[MAX_MAP_LEAFS/8];
 
 // 650 should be enough with model handle recycling, but.. (Pa3PyX)
@@ -75,6 +88,7 @@ void Mod_Init (void)
 {
 	Cvar_RegisterVariable (&external_ents);
 	Cvar_RegisterVariable (&external_vis);
+	Cvar_RegisterVariable (&r_replacement_restore_alpha);
 	Cmd_AddCommand ("mcache", Mod_Print);
 
 	memset (mod_novis, 0xff, sizeof(mod_novis));
@@ -3051,6 +3065,16 @@ static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 	}
 
 	rep->has_alpha = true;
+
+	/* Which models the reconstruction is actually holding up is the whole
+	 * question on uhexen2-4y6w, and it is not answerable by looking at a
+	 * frame: the affected models are transient weapon effects.  Name them
+	 * as they load so a developer-mode run produces the list directly. */
+	Con_DPrintf ("Mod_RestoreIndexAlpha: %s (%s, %dx%d <- skin %dx%d)\n",
+		     loadmodel->name,
+		     (mode == EF_TRANSPARENT) ? "EF_TRANSPARENT" : "EF_SPECIAL_TRANS",
+		     rep->width, rep->height, skinw, skinh);
+
 	return true;
 }
 
@@ -3155,7 +3179,8 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		/* Only rewrite a replacement that expressed nothing about
 		 * transparency; a pack that put any partial alpha in the file
 		 * keeps it.  uhexen2-5dit */
-		if (have_rep && Mod_ReplacementIsFullyOpaque (&rep))
+		if (have_rep && r_replacement_restore_alpha.integer &&
+		    Mod_ReplacementIsFullyOpaque (&rep))
 			have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype + 1),
 							  pheader->skinwidth,
 							  pheader->skinheight, mdl_flags);
@@ -3259,7 +3284,8 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			/* Only rewrite a replacement that expressed nothing about
 			 * transparency; a pack that put any partial alpha in the file
 			 * keeps it.  uhexen2-5dit */
-			if (have_rep && Mod_ReplacementIsFullyOpaque (&rep))
+			if (have_rep && r_replacement_restore_alpha.integer &&
+			    Mod_ReplacementIsFullyOpaque (&rep))
 				have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype),
 										  pheader->skinwidth,
 										  pheader->skinheight, mdl_flags);
