@@ -1563,6 +1563,16 @@ void R_SnowEffect (vec3_t org1, vec3_t org2, int flags, vec3_t alldir, int count
 	particle_t	*p;
 	mleaf_t		*l;
 
+	/* Every spawn below has to ask the world whether its point is solid, and
+	 * the caller can get here without one: CL_UpdateEffects runs from
+	 * CL_ReadFromServer straight after CL_ParseServerMessage, which reaches it
+	 * with cl.worldmodel still NULL whenever CL_ParseServerInfo took one of its
+	 * early returns.  Skipping a batch of flakes costs nothing -- the effect
+	 * fires again on the next tick -- and R_PickRainSpawn next door already
+	 * declines the same way.  uhexen2-3hts. */
+	if (!cl.worldmodel)
+		return;
+
 	count *= snow_active.integer;
 	count = R_WeatherCount (count, &r_snowintensity);
 	for (i = 0; i < count; i++)
@@ -1960,6 +1970,24 @@ void R_UpdateParticles (void)
 //	qboolean	in_solid;
 
 	if (cls.state == ca_disconnected)
+		return;
+
+	/* Particles outlive a level change.  Neither CL_ClearState nor
+	 * Host_ClearMemory touches the active list -- the only R_ClearParticles
+	 * calls are R_NewMap, CL_Disconnect and Host_Restart_f -- and R_NewMap runs
+	 * at the very END of CL_ParseServerInfo.  So between Host_ClearMemory's
+	 * memset of cl and the new map's serverinfo there is a window with no world
+	 * and the previous map's particles still on the list.  cls is not memset
+	 * across a changelevel, so cls.state stays ca_connected right through it
+	 * and the test above lets the loop run.
+	 *
+	 * Three sites below then ask Mod_PointInLeaf about a NULL model -- rain
+	 * collision under r_raincollide (default on), and both halves of the snow
+	 * melt -- which is a Sys_Error to desktop on any map with weather, on level
+	 * change.  Nothing can draw a particle without a world anyway, and R_NewMap
+	 * clears the list on arrival, so the whole pass is dead work here.
+	 * uhexen2-3hts. */
+	if (!cl.worldmodel)
 		return;
 
 	frametime = host_frametime;
