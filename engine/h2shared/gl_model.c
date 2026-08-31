@@ -62,6 +62,11 @@ static cvar_t	external_vis  = {"external_vis", "1", CVAR_ARCHIVE};
  * eleven models including base-game data1 content.  uhexen2-4y6w */
 static cvar_t	r_replacement_restore_alpha = {"r_replacement_restore_alpha", "1", CVAR_ARCHIVE};
 
+/* Read an EF_SPECIAL_TRANS replacement skin's alpha as a TRANSPARENCY, the way
+ * every engine before uhexen2-3z3e did.  Off by default; see
+ * Mod_LegacySpecialTransAlpha.  uhexen2-4y6w */
+static cvar_t	r_legacy_special_trans_alpha = {"r_legacy_special_trans_alpha", "0", CVAR_ARCHIVE};
+
 static byte	mod_novis[MAX_MAP_LEAFS/8];
 
 // 650 should be enough with model handle recycling, but.. (Pa3PyX)
@@ -89,6 +94,7 @@ void Mod_Init (void)
 	Cvar_RegisterVariable (&external_ents);
 	Cvar_RegisterVariable (&external_vis);
 	Cvar_RegisterVariable (&r_replacement_restore_alpha);
+	Cvar_RegisterVariable (&r_legacy_special_trans_alpha);
 	Cmd_AddCommand ("mcache", Mod_Print);
 
 	memset (mod_novis, 0xff, sizeof(mod_novis));
@@ -3018,6 +3024,64 @@ pack that expressed nothing gets rewritten.  uhexen2-5dit
 */
 /*
 ===============
+Mod_LegacySpecialTransAlpha
+
+r6303 -- and every engine before uhexen2-3z3e -- drew EF_SPECIAL_TRANS with a
+REVERSED blend func:
+
+    glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);   r6303 gl_rmain.c:963
+
+The source factor is then (1 - srcAlpha), so for those engines a replacement
+skin's alpha meant TRANSPARENCY: 0 drew opaque, 255 drew invisible.  uhexen2-3z3e
+moved to the ordinary func so alpha means OPACITY, which is what every exporter
+writes and the only thing weighted-blended OIT can composite -- OIT has no blend
+func to reverse, so the old convention could not survive it.
+
+The destination is right.  The migration was silent, and it inverted every
+EF_SPECIAL_TRANS replacement skin authored against the old behaviour.  That is
+BloodShot's sword: his file is alpha 0 across 94.5% of the model's UV coverage,
+which r6303 drew solid and current master draws away to nothing.  Confirmed by
+complementing his channel and changing nothing else, which restores the model
+exactly.  uhexen2-4y6w
+
+Complement at load so the rest of the pipeline sees opacity and needs no further
+special case.  Note this runs BEFORE Mod_ReplacementIsFullyOpaque, so the guard
+and any rebuild downstream reason about a channel that already means what they
+assume it means.
+
+OFF BY DEFAULT, and deliberately a switch rather than a heuristic.  Nothing in
+the file distinguishes a legacy alpha from a current one -- an all-zero channel
+is "fully opaque" under one reading and "fully invisible" under the other -- and
+this bead's own strongest finding is that such intent is not recoverable from the
+data.  Guessing would break correctly authored packs to rescue legacy ones.  So
+the player running a legacy pack says so.
+
+Skipped for a file that carries no alpha at all.  A 24-bit replacement has none;
+IMG_LoadTGA fills it with 255, and complementing that would turn a file that
+expressed nothing into a wholly invisible model.
+===============
+*/
+static void Mod_LegacySpecialTransAlpha (imgreplace_t *rep, int mdl_flags)
+{
+	int	i, n;
+
+	if (!r_legacy_special_trans_alpha.integer)
+		return;
+	if (!(mdl_flags & EF_SPECIAL_TRANS))
+		return;
+	/* blocks: a block-compressed payload goes to the driver untouched, so
+	 * there are no texels here to complement. */
+	if (!rep || !rep->rgba || rep->blocks || !rep->has_alpha)
+		return;
+
+	n = rep->width * rep->height;
+	for (i = 0; i < n; i++)
+		rep->rgba[i*4 + 3] = (byte)(255 - rep->rgba[i*4 + 3]);
+}
+
+
+/*
+===============
 Mod_SkinIsHole
 
 Is this skin texel index 0 -- a hole -- with strictly isolated specks removed?
@@ -3237,6 +3301,10 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		qboolean	have_rep;
 
 		have_rep = IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep);
+		/* Normalise a legacy EF_SPECIAL_TRANS channel to opacity BEFORE
+		 * anything downstream inspects it.  uhexen2-4y6w */
+		if (have_rep)
+			Mod_LegacySpecialTransAlpha (&rep, mdl_flags);
 		/* Only rewrite a replacement that expressed nothing about
 		 * transparency; a pack that put any partial alpha in the file
 		 * keeps it.  uhexen2-5dit */
@@ -3342,6 +3410,10 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			qboolean	have_rep;
 
 			have_rep = IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep);
+			/* Same legacy normalisation as the single-skin branch
+			 * above.  uhexen2-4y6w */
+			if (have_rep)
+				Mod_LegacySpecialTransAlpha (&rep, mdl_flags);
 			/* Only rewrite a replacement that expressed nothing about
 			 * transparency; a pack that put any partial alpha in the file
 			 * keeps it.  uhexen2-5dit */
