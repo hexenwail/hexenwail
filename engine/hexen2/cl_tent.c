@@ -114,9 +114,19 @@ static sfx_t *cl_sfx_rail;
 //
 //==========================================================================
 
-void CL_InitTEnts(void)
+/*
+=================
+CL_PrecacheTEntSounds
+
+Split out of CL_InitTEnts so it can be re-run.  These handles are file-static
+and are taken ONCE at startup, which makes them the thing most likely to be
+left dangling by S_ClearPrecache dropping the sound table -- they are not in
+cl.sound_precache, so nothing else re-takes them.  Must be called again after
+every clear.  CL_InitTEnts itself cannot be re-run: it registers a cvar.
+=================
+*/
+void CL_PrecacheTEntSounds (void)
 {
-	Cvar_RegisterVariable (&cl_truelightning);
 	cl_sfx_tink1 = S_PrecacheSound ("weapons/tink1.wav");
 	cl_sfx_ric1 = S_PrecacheSound ("weapons/ric1.wav");
 	cl_sfx_ric2 = S_PrecacheSound ("weapons/ric2.wav");
@@ -126,6 +136,12 @@ void CL_InitTEnts(void)
 	cl_sfx_imp = S_PrecacheSound ("shambler/sattck1.wav");
 	cl_sfx_rail = S_PrecacheSound ("weapons/lstart.wav");
 #endif
+}
+
+void CL_InitTEnts(void)
+{
+	Cvar_RegisterVariable (&cl_truelightning);
+	CL_PrecacheTEntSounds ();
 }
 
 //==========================================================================
