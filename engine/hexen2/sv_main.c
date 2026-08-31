@@ -35,6 +35,12 @@ static	cvar_t	sv_update_monsters	= {"sv_update_monsters", "1", CVAR_ARCHIVE};
 static	cvar_t	sv_update_missiles	= {"sv_update_missiles", "1", CVAR_ARCHIVE};
 static	cvar_t	sv_update_misc		= {"sv_update_misc", "1", CVAR_ARCHIVE};
 
+/* Ironwail's sv_netsort.  Decides WHICH entity updates survive when a frame's
+ * deltas do not all fit in the datagram: nearest-and-largest first rather than
+ * whatever happened to come last in edict order.  0 restores the edict-order
+ * truncation, for comparison.  Not archived, as upstream. */
+static	cvar_t	sv_netsort		= {"sv_netsort", "1", CVAR_NONE};
+
 /* Deliberately not CVAR_ARCHIVE, as upstream: a ceiling silently persisted
  * into a config is how you get a mod that only fails on one machine.  Takes
  * effect at the next map load, since sv.edicts is sized once there.
@@ -142,6 +148,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_update_monsters);
 	Cvar_RegisterVariable (&sv_update_missiles);
 	Cvar_RegisterVariable (&sv_update_misc);
+	Cvar_RegisterVariable (&sv_netsort);
 	Cvar_RegisterVariable (&sv_ce_scale);
 	Cvar_RegisterVariable (&sv_ce_max_size);
 
@@ -1037,6 +1044,52 @@ static int SV_EntityUpdateSize (int bits)
 	return len;
 }
 
+/* Largest value SV_EntityUpdateSize() can return, i.e. every optional field
+ * present at once.  Used only to decide, before doing any work, whether this
+ * frame could possibly overflow the datagram at all. */
+#define NETSORT_MAX_UPDATE	24
+
+/* Ironwail compresses the priority key into 256 bins so a counting sort can
+ * order the whole entity list in one pass.  We cannot sort the write order
+ * (see SV_PrepareClientEntities), but the same 256 bins give us the cutoff. */
+#define NETSORT_BINS		256
+
+/*
+ * Ironwail's entity priority key, from SV_WriteEntitiesToClient: the scaled
+ * fourth root of (squared distance from the viewer to the entity's bounding
+ * box) over (the box's squared diagonal), so that a large distant brush entity
+ * -- a lift, a rotator -- outranks a small nearby gib.  The fourth root is
+ * what squeezes a map-sized range of distances into 0..255.
+ *
+ * Lower is more important.  The client's own entity is pinned at 0.
+ */
+static int SV_EntityPriority (edict_t *ent, const vec3_t org, qboolean is_clent)
+{
+	float	dist, size, delta;
+	int	i;
+
+	if (is_clent)
+		return 0;
+
+	dist = size = 0.0f;
+	for (i = 0; i < 3; i++)
+	{
+		delta = CLAMP(ent->v.absmin[i], org[i], ent->v.absmax[i]) - org[i];
+		dist += delta * delta;
+		delta = ent->v.absmax[i] - ent->v.absmin[i];
+		size += delta * delta;
+	}
+
+	if (size < 1.0f)
+		size = 1.0f;
+
+	dist = 8.0f * sqrt(sqrt(dist / size));
+	if (dist >= (float)(NETSORT_BINS - 1))
+		return NETSORT_BINS - 1;
+
+	return (int) dist;
+}
+
 static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_t *msg)
 {
 	int		e, i;
@@ -1057,6 +1110,12 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 	short			RemoveList[MAX_CLIENT_STATES],NumToRemove;
 	int			NumDeferred;
 	int			NumShed;
+	int			NumSorted;
+	int			ShedNearest;
+	qboolean		measuring;
+	int			netsort_cutoff, bcount, cursize, prio, bytes;
+	int			binbytes[NETSORT_BINS];
+	entity_state2_t		scratch_ref, scratch_set;
 
 	client_num = client-svs.clients;
 	state = &sv.states[client_num];
@@ -1125,9 +1184,6 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 	memset(build, 0, sizeof(*build));
 	client->last_frame = CLIENT_FRAME_RESET;
 
-	NumToRemove = 0;
-	NumDeferred = 0;
-	NumShed = 0;
 	MSG_WriteByte (msg, svc_reference);
 	MSG_WriteByte (msg, client->current_frame);
 	MSG_WriteByte (msg, client->current_sequence);
@@ -1142,6 +1198,56 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 		VectorAdd (clent->v.origin, clent->v.view_ofs, org);
 
 	pvs = SV_FatPVS (org);
+
+	/*
+	 * sv_netsort.  Ironwail counting-sorts the entities by priority and then
+	 * writes them best-first, so the packet filling up IS the cutoff.  We
+	 * cannot do that: this is a reference-frame delta protocol, the walk over
+	 * reference->states[] below is a monotonic cursor, and build->states[]
+	 * becomes the next reference -- both have to stay in ascending edict
+	 * order.  The write order is not ours to choose.
+	 *
+	 * The membership is.  So the loop below runs twice when the frame might
+	 * overflow: once measuring, which commits nothing -- no writes to msg, no
+	 * ENT_CLEARED rewrite of the reference frame, no build->states[] -- and
+	 * only totals the exact byte cost of every update per priority bin; then
+	 * once for real, shedding the entities whose bin falls past the point
+	 * where those totals ran out of datagram.
+	 *
+	 * Measuring is skipped when the frame cannot overflow even if every edict
+	 * sent its largest possible update, which is the ordinary case.  The
+	 * cutoff then stays past the last bin, nothing is shed for priority, and
+	 * the write pass is byte-for-byte what it was before -- as it also is
+	 * under sv_netsort 0.
+	 *
+	 * Only whole bins are admitted.  Letting the bin the budget runs out in
+	 * through as well and leaning on the guard to truncate it measurably
+	 * loses entities that netsort is there to keep: its members are the worst
+	 * of the admitted set, and any of them early in edict order spends budget
+	 * that a better entity later in edict order then has to be shed for.
+	 * Stopping a bin short instead leaves a sliver of the datagram unused,
+	 * which costs nothing anyone can see.
+	 *
+	 * The exact per-entity guard further down remains the backstop either
+	 * way, and carries the one case the bins cannot help with: a first bin
+	 * that overflows the budget on its own, where there is nothing to choose
+	 * between the candidates and edict order is as fair a tiebreak as any.
+	 */
+	netsort_cutoff = NETSORT_BINS;
+	measuring = sv_netsort.integer &&
+			msg->cursize + sv.num_edicts * NETSORT_MAX_UPDATE
+				+ DATAGRAM_TRAILER_RESERVE > msg->maxsize;
+
+restart:
+	NumToRemove = 0;
+	NumDeferred = 0;
+	NumShed = 0;
+	NumSorted = 0;
+	ShedNearest = NETSORT_BINS;
+	position = 0;
+	bcount = 0;
+	cursize = msg->cursize;
+	memset (binbytes, 0, sizeof(binbytes));
 
 	// send over all entities (except the client) that touch the pvs
 	ent = NEXT_EDICT(sv.edicts);
@@ -1242,6 +1348,13 @@ skipA:
 				IgnoreEnt = true;
 			}
 			ref_ent = &reference->states[position];
+			if (measuring)
+			{	/* Off a copy: the ENT_CLEARED rewrite below must not reach
+				 * the real reference frame from a pass whose updates are
+				 * never sent. */
+				scratch_ref = *ref_ent;
+				ref_ent = &scratch_ref;
+			}
 		}
 		else
 		{
@@ -1277,8 +1390,8 @@ skipA:
 		 * describing what the client actually holds. */
 		saved_ref = *ref_ent;
 
-		set_ent = &build->states[build->count];
-		build->count++;
+		set_ent = measuring ? &scratch_set : &build->states[bcount];
+		bcount++;
 		if (ent->baseline.ClearCount[client_num] < CLEAR_LIMIT)
 		{
 			memset(ref_ent, 0, sizeof(*ref_ent));
@@ -1395,7 +1508,7 @@ skipA:
 
 		if (!bits && FoundInList)
 		{
-			if (build->count >= MAX_CLIENT_STATES)
+			if (bcount >= MAX_CLIENT_STATES)
 				break;
 
 			continue;
@@ -1410,10 +1523,34 @@ skipA:
 		if (bits >= 65536)
 			bits |= U_MOREBITS2;
 
-		/* Datagram size guard.  The buffer is a fixed NET_MAXMESSAGE stack
-		 * buffer with allowoverflow false, so without this the first delta
-		 * that does not fit takes the server down inside SZ_GetSpace.  Shed
-		 * the entity instead.
+		bytes = SV_EntityUpdateSize(bits);
+
+		/* Only worth the two square roots when it can change the outcome:
+		 * while measuring, or when measuring came back with a real cutoff. */
+		prio = (measuring || netsort_cutoff < NETSORT_BINS)
+			? SV_EntityPriority (ent, org, ent == clent) : 0;
+
+		if (measuring)
+		{
+			/* Total the demand; do not truncate it.  The cutoff can only be
+			 * computed from what the frame actually wants to send, so this
+			 * pass deliberately runs past the point where the datagram is
+			 * full. */
+			binbytes[prio] += bytes;
+
+			if (bcount >= MAX_CLIENT_STATES)
+				break;
+
+			continue;
+		}
+
+		/* Datagram size guard, and the netsort cutoff that decides who meets
+		 * it first.  The buffer is a fixed NET_MAXMESSAGE stack buffer with
+		 * allowoverflow false, so without the size test the first delta that
+		 * does not fit takes the server down inside SZ_GetSpace.  Shed the
+		 * entity instead -- and prefer to shed it for being unimportant,
+		 * while there is still room to spare, over shedding whoever happens
+		 * to arrive once the datagram is already full.
 		 *
 		 * This has to undo the build->states[] bookkeeping in the same breath
 		 * as it skips the write: build->states[] is the client's next
@@ -1437,15 +1574,25 @@ skipA:
 		 *
 		 * DATAGRAM_TRAILER_RESERVE keeps room for the svc_clear_edicts trailer
 		 * written after the loop. */
-		if (msg->cursize + SV_EntityUpdateSize(bits) +
-					DATAGRAM_TRAILER_RESERVE > msg->maxsize)
+		if (prio >= netsort_cutoff ||
+			cursize + bytes + DATAGRAM_TRAILER_RESERVE > msg->maxsize)
 		{
 			*ref_ent = saved_ref;
 			NumShed++;
+			if (prio >= netsort_cutoff)
+				NumSorted++;
+			/* The whole point of the sort, as one number: the best-priority
+			 * entity this frame threw away.  Under sv_netsort it tracks the
+			 * cutoff bin, since whole bins are admitted and the guard is left
+			 * with nothing to do; under sv_netsort 0 it is whatever edict
+			 * order happened to leave until last, which is routinely
+			 * something in the player's face. */
+			if (prio < ShedNearest)
+				ShedNearest = prio;
 
 			if (!FoundInList)
 			{
-				build->count--;
+				bcount--;
 				continue;
 			}
 
@@ -1454,7 +1601,7 @@ skipA:
 			 * as a delivered clear by the ClearCount bookkeeping above. */
 			set_ent->flags &= ~ENT_CLEARED;
 
-			if (build->count >= MAX_CLIENT_STATES)
+			if (bcount >= MAX_CLIENT_STATES)
 				break;
 
 			continue;
@@ -1508,9 +1655,46 @@ skipA:
 		if (bits & U_ALPHA)
 			MSG_WriteByte (msg, set_ent->alpha);
 
-		if (build->count >= MAX_CLIENT_STATES)
+		/* Resync rather than add: this keeps SV_EntityUpdateSize() a
+		 * prediction the guard makes, not a second source of truth for how
+		 * much of the datagram is gone. */
+		cursize = msg->cursize;
+
+		if (bcount >= MAX_CLIENT_STATES)
 			break;
 	}
+
+	if (measuring)
+	{
+		int	budget, total;
+
+		/* Nothing was written, so msg->cursize is still just the
+		 * svc_reference header: everything after it, less the trailer, is
+		 * what the entity updates have to fit into. */
+		budget = msg->maxsize - DATAGRAM_TRAILER_RESERVE - msg->cursize;
+
+		/* netsort_cutoff ends as the number of whole bins that fit, so the
+		 * write pass sheds everything from that bin outwards.  Reaching
+		 * NETSORT_BINS means the frame fits after all and nothing is shed
+		 * for priority, which is the same write pass as sv_netsort 0. */
+		total = 0;
+		for (netsort_cutoff = 0; netsort_cutoff < NETSORT_BINS; netsort_cutoff++)
+		{
+			if (total + binbytes[netsort_cutoff] > budget)
+				break;
+			total += binbytes[netsort_cutoff];
+		}
+
+		/* Admit the nearest bin even when it alone does not fit: shedding the
+		 * whole frame would be worse than letting the guard truncate it. */
+		if (netsort_cutoff == 0)
+			netsort_cutoff = 1;
+
+		measuring = false;
+		goto restart;
+	}
+
+	build->count = bcount;
 
 	/* The loop above caps NumToRemove precisely because this count goes out
 	 * as a byte while the entries go out as shorts.  Clamp again here so the
@@ -1526,8 +1710,10 @@ skipA:
 				__thisfunc__, NumDeferred);
 
 	if (NumShed)
-		Con_DPrintf ("%s: datagram full at %d bytes, %d edict(s) shed\n",
-				__thisfunc__, msg->cursize, NumShed);
+		Con_DPrintf ("%s: datagram full at %d/%d bytes, %d edict(s) shed "
+				"(%d by netsort, cutoff bin %d), nearest shed bin %d\n",
+				__thisfunc__, msg->cursize, msg->maxsize, NumShed,
+				NumSorted, netsort_cutoff, ShedNearest);
 
 	MSG_WriteByte (msg, svc_clear_edicts);
 	MSG_WriteByte (msg, NumToRemove);
