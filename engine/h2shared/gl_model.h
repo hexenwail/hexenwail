@@ -624,6 +624,7 @@ typedef enum {mod_brush, mod_sprite, mod_alias} modtype_t;
  * the on-disk MDL flags read into qmodel_t->flags by Mod_LoadAliasModel*).
  * Set by Mod_SetExtraFlags via the r_nolerp_list cvar; Ironwail port. */
 #define	MOD_NOLERP		(1 << 25)	/* don't lerp animation (torches, flames, v_weapons) */
+#define	MOD_NOSHADOW		(1 << 26)	/* excluded from r_shadows by r_noshadow_list */
 
 #define	EF_SPIN			(1 << 4)	/* Inky: Rotate without floating upside down */
 #define	EF_FLOAT			(1 << 5)	/* Inky: Float upside down without rotating */

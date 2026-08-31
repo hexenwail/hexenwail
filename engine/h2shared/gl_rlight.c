@@ -61,6 +61,18 @@ void R_AnimateLight (void)
 			d_lightstylevalue[i] = 256;
 			continue;
 		}
+		/* r_flatlightstyles: hold the style at a constant level instead of
+		 * animating it -- 1 = its mean frame, 2 = its brightest.  Both come
+		 * off the precomputed fields (CL_SetLightstyleLevels), which is also
+		 * where the '1'/'2'/'3' rate-prefix character is stripped, so this
+		 * needs no knowledge of the two map layouts below.  uhexen2-a5nn.11. */
+		if (r_flatlightstyles.integer == 1 || r_flatlightstyles.integer == 2)
+		{
+			c = (r_flatlightstyles.integer == 2) ? cl_lightstyle[i].peak
+							     : cl_lightstyle[i].average;
+			d_lightstylevalue[i] = (c - 'a') * 22;
+			continue;
+		}
 		c = cl_lightstyle[i].map[0];
 		if (c == '1' || c == '2' || c == '3')
 		{ /* Explicit anim rate */

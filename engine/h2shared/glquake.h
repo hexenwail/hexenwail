@@ -396,6 +396,9 @@ extern	cvar_t	r_wateralpha;
 extern	cvar_t	r_skyalpha;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_lerplightstyles;
+extern	cvar_t	r_flatlightstyles;	/* uhexen2-a5nn.11 */
+extern	cvar_t	r_oldskyleaf;		/* uhexen2-a5nn.11 */
+extern	cvar_t	r_drawparticles;	/* uhexen2-a5nn.11 */
 extern	cvar_t	r_farclip;
 extern	cvar_t	r_entdist;
 extern	cvar_t	r_viewmodel_fov;
@@ -418,6 +421,7 @@ extern	cvar_t	r_lerpmodels;
 extern	cvar_t	r_lerp_viewmodel;
 extern	cvar_t	r_lerp_complete;
 extern	cvar_t	r_nolerp_list;
+extern	cvar_t	r_noshadow_list;	/* per-model r_shadows exclusion, uhexen2-a5nn.11 */
 extern	cvar_t	r_dlight_model_list;	/* uhexen2-vdmz */
 extern	cvar_t	r_water_pixel_warp;	/* uhexen2-9o7u */
 extern	cvar_t	r_lerp_autodetect;

@@ -94,6 +94,13 @@ typedef struct
 {
 	int		length;
 	char		map[MAX_STYLESTRING];
+	/* Precomputed by CL_SetLightstyle for r_flatlightstyles, which holds a
+	 * style at a constant level instead of animating it.  Both are the raw
+	 * 'a'..'z' map characters, not the *22 light values, and both are
+	 * computed once when the style arrives rather than per frame.
+	 * uhexen2-a5nn.11. */
+	char		average;
+	char		peak;
 } lightstyle_t;
 
 #define	MAX_EFRAGS		32768
@@ -358,6 +365,7 @@ void	CL_DecayLights (void);
 void CL_Init (void);
 
 void CL_ClearState (void);
+void CL_SetLightstyleLevels (lightstyle_t *ls);	/* r_flatlightstyles, uhexen2-a5nn.11 */
 
 void CL_EstablishConnection (const char *host);
 void CL_SignonReply (void);

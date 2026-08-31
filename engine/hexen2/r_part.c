@@ -1715,6 +1715,15 @@ void R_DrawParticles (void)
     if (!active_particles)
         return;
 
+    /* The off switch (uhexen2-a5nn.11).  Deliberately not spelled
+     * r_particles: see the cvar's own comment in gl_rmain.c for why
+     * importing upstream's numbering would collide with gl_particles and
+     * walk back into uhexen2-2rxl.  Particles still SIMULATE with this off,
+     * so toggling it mid-flight does not desync anything -- only the draw
+     * is skipped. */
+    if (!r_drawparticles.integer)
+        return;
+
     /* Square mode draws flat colour, so it must NOT sample particletexture.
      * That texture is a 2x2 atlas of four flake/spark sprites, and the one
      * texcoord the point path can supply -- (0.5, 0.5) -- lands exactly on
@@ -1865,6 +1874,13 @@ void R_DrawParticles (void)
 	int		i;
 	float		vel0, vel1, vel2;
 	vec3_t		save_org;
+	/* File-local extern, matching sv_gravity above: the software build's
+	 * header set has no glquake.h to declare it, and the cvar itself lives
+	 * in r_soft_web.c with the renderer's other owned cvars. */
+	extern	cvar_t	r_drawparticles;
+
+	if (!r_drawparticles.integer)
+		return;
 
 	D_StartParticles ();
 

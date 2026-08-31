@@ -141,6 +141,42 @@ static double	r_vm_depth_far		= 1.0;
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_lightmap = {"r_lightmap", "0", CVAR_NONE};
 cvar_t	r_shadows = {"r_shadows", "0", CVAR_NONE};
+/* Ironwail parity toggles, uhexen2-a5nn.11.
+ *
+ * r_drawworld suppresses the world DRAW only.  R_RecursiveWorldNode and the
+ * lightmap upload still run, because the BSP walk is what stores efrags and so
+ * decides which entities are visible at all -- skipping it would take the
+ * entities with the world and leave nothing to look at, which is the opposite
+ * of what the switch is for.  Upstream can skip its whole R_DrawWorld because
+ * its marking lives in a separate R_MarkSurfaces; ours does not.
+ *
+ * NOT cheat-gated, unlike upstream's r_drawworld_cheatsafe.  This engine has
+ * no cheat-safe cvar mechanism at all (the one reference to the idea is a
+ * commented-out line in gl_sky.c), and inventing one for a single debug toggle
+ * is its own decision, not a side effect of this port.  It is a listen-server
+ * and single-player engine in practice; anyone who wants to see through walls
+ * already has notarget and noclip. */
+cvar_t	r_drawworld = {"r_drawworld", "1", CVAR_NONE};
+/* 0 = animate lightstyles normally, 1 = hold each style at its average level,
+ * 2 = hold it at its peak.  Flattens the ANIMATION, which is a different thing
+ * from r_drawflat (flat-shaded surfaces) and from r_lerplightstyles (smooth
+ * the animation); all three exist and none of them is the other. */
+cvar_t	r_flatlightstyles = {"r_flatlightstyles", "0", CVAR_NONE};
+/* 1 restores the pre-FitzQuake behaviour of marking the surfaces of leaves
+ * whose contents are CONTENTS_SKY.  Default 0 skips them, as upstream does. */
+cvar_t	r_oldskyleaf = {"r_oldskyleaf", "0", CVAR_NONE};
+/* The particle OFF switch, which this engine genuinely lacked.
+ *
+ * Deliberately NOT named r_particles.  Upstream's r_particles is 0=off,
+ * 1/2=style; ours is gl_particles, 0=square, 1=round, with no off state.
+ * Importing upstream's name would leave two cvars disagreeing about what 0
+ * means, and routing 0 to "off" through the existing path walks straight back
+ * into uhexen2-2rxl -- square mode sampled particletexture at the (0.5,0.5)
+ * seam and discarded every point, so gl_particles 0 drew no rain, snow, blood
+ * or sparks at all.  Garrett reported that against SoT and it is fixed by
+ * binding solid white; do not undo it.  A separate boolean adds the missing
+ * capability without touching the fixed one. */
+cvar_t	r_drawparticles = {"r_drawparticles", "1", CVAR_ARCHIVE};
 cvar_t	r_mirroralpha = {"r_mirroralpha", "1", CVAR_NONE};
 cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
@@ -311,6 +347,94 @@ cvar_t	r_nolerp_list = {"r_nolerp_list",
 	"models/waterfall.mdl,"
 	"models/waterfall_90.mdl,"
 	"models/waterfallt.mdl",
+	CVAR_NONE};
+
+/* Per-model exclusion from r_shadows, Ironwail's r_noshadow_list.
+ *
+ * Upstream's default is six Quake paths (progs/flame*.mdl, progs/bolt*.mdl,
+ * progs/laser.mdl) which match nothing in this tree, so the list below is
+ * curated from data1's own progs.  Two kinds of model are in it, on one
+ * principle: GL_DrawAliasShadow projects the mesh flat onto lightspot, the
+ * floor height under the entity, so it only ever looks right for something
+ * that is standing on that floor and is opaque.
+ *
+ *   Light sources -- flames, torches, candles, firepots.  A flame is the thing
+ *   casting the light; giving it its own black silhouette on the floor beneath
+ *   is backwards, and these are exactly the models r_nolerp_list already names
+ *   for the related reason that they are flipbooks rather than meshes.
+ *
+ *   Airborne projectiles and spell effects.  These are metres above the floor
+ *   with nothing under them, so the projection lands as a detached blob that
+ *   slides around independently of the thing casting it.
+ *
+ * models/xhair.mdl is here because the crosshair is not in the world at all.
+ *
+ * Not exhaustive and not meant to be: mission-pack and mod projectiles are not
+ * listed, and the way to add one is this cvar, which is why it exists.  Entries
+ * are whole names matched case-insensitively by nameInList, and the flag is
+ * applied by Mod_SetExtraFlags at load and on change. */
+cvar_t	r_noshadow_list = {"r_noshadow_list",
+	/* flames and fires */
+	"models/flame.mdl,"
+	"models/flame1.mdl,"
+	"models/flame2.mdl,"
+	"models/flaming.mdl,"
+	"models/fireball.mdl,"
+	"models/lavaball.mdl,"
+	"models/purfir1.mdl,"
+	"models/firepot.mdl,"
+	"models/firepot2.mdl,"
+	/* torches */
+	"models/torch.mdl,"
+	"models/a_torch.mdl,"
+	"models/castrch.mdl,"
+	"models/cflmtrch.mdl,"
+	"models/eflmtrch.mdl,"
+	"models/egtorch.mdl,"
+	"models/mesotrch.mdl,"
+	"models/mflmtrch.mdl,"
+	"models/rflmtrch.mdl,"
+	"models/rometrch.mdl,"
+	/* candles */
+	"models/candle.mdl,"
+	"models/candle1.mdl,"
+	"models/candle2.mdl,"
+	"models/candle3.mdl,"
+	"models/skullcandle.mdl,"
+	/* airborne projectiles and spell effects */
+	"models/ball.mdl,"
+	"models/star.mdl,"
+	"models/glowball.mdl,"
+	"models/handfx.mdl,"
+	"models/blast.mdl,"
+	"models/balbolt.mdl,"
+	"models/birdmisl.mdl,"
+	"models/birdmsl2.mdl,"
+	"models/bonefx.mdl,"
+	"models/boneshot.mdl,"
+	"models/boneshrd.mdl,"
+	"models/drgnball.mdl,"
+	"models/dthball.mdl,"
+	"models/eidoball.mdl,"
+	"models/fambeam.mdl,"
+	"models/famshot.mdl,"
+	"models/faspell.mdl,"
+	"models/golemmis.mdl,"
+	"models/iceshot1.mdl,"
+	"models/iceshot2.mdl,"
+	"models/meteor.mdl,"
+	"models/mumshot.mdl,"
+	"models/pestshot.mdl,"
+	"models/skulshot.mdl,"
+	"models/soulball.mdl,"
+	"models/spit.mdl,"
+	"models/vindsht1.mdl,"
+	"models/vorpshot.mdl,"
+	"models/vorpshk2.mdl,"
+	"models/teleport.mdl,"
+	"models/gemlight.mdl,"
+	/* not in the world at all */
+	"models/xhair.mdl",
 	CVAR_NONE};
 /* uhexen2-f807: replace the maintenance treadmill of r_nolerp_list with
  * a geometry heuristic — at load each alias model's max pose-pair
@@ -2438,8 +2562,10 @@ static void R_DrawAliasModel (entity_t *e)
 
 	GL_PopMatrix();
 
-	/* Projected mesh shadow — skipped inside the OIT pass. */
-	if (r_shadows.integer && e != &cl.viewent && !OIT_InPass())
+	/* Projected mesh shadow — skipped inside the OIT pass, and for models
+	 * r_noshadow_list excludes (MOD_NOSHADOW; flames, airborne projectiles). */
+	if (r_shadows.integer && e != &cl.viewent && !OIT_InPass() &&
+	    !(e->model->flags & MOD_NOSHADOW))
 	{
 		GL_PushMatrix();
 		R_RotateForEntity2(e);
@@ -3652,6 +3778,12 @@ static void R_DrawAliasInstanced (void)
 			int spose = inst_entities[i].pose;
 			float an;
 
+			/* r_noshadow_list, same exclusion the per-entity path
+			 * applies -- both draw shadows, so both must honour it
+			 * or the toggle depends on which path an entity took. */
+			if (se->model && (se->model->flags & MOD_NOSHADOW))
+				continue;
+
 			/* GL_DrawAliasShadow consumes two per-entity globals:
 			 * lightspot (floor height, a side effect of R_LightPoint*)
 			 * and shadevector. Collection leaves lightspot holding the
@@ -3868,6 +4000,13 @@ static void R_DumpAliasInfo (void)
 		if (mflags & EF_FACE_VIEW)     q_strlcat(fbuf, "FACE_VIEW ", sizeof(fbuf));
 		if (mflags & EF_ROTATE)        q_strlcat(fbuf, "ROTATE ", sizeof(fbuf));
 		if (mflags & EF_NODRAW)        q_strlcat(fbuf, "NODRAW ", sizeof(fbuf));
+		/* Engine-set bits, not on-disk MDL flags: which cvar list the
+		 * model landed in.  Printed here because r_nolerp_list and
+		 * r_noshadow_list are otherwise write-only -- there was no way
+		 * to ask whether an entry had actually matched a loaded model,
+		 * which is the first thing to check when a list looks ignored. */
+		if (mflags & MOD_NOLERP)       q_strlcat(fbuf, "NOLERP ", sizeof(fbuf));
+		if (mflags & MOD_NOSHADOW)     q_strlcat(fbuf, "NOSHADOW ", sizeof(fbuf));
 		if (!fbuf[0]) q_strlcpy(fbuf, "(none) ", sizeof(fbuf));
 
 		/* Replicate AliasModelGetLightInfo's sample so we can dump the
@@ -4648,6 +4787,20 @@ static void R_DrawGlow (entity_t *e)
 				i = (int)(cl.time*10);
 				if (!cl_lightstyle[style].length) {
 					j = 256;
+				}
+				else if (r_flatlightstyles.integer == 1 ||
+					 r_flatlightstyles.integer == 2)
+				{
+					/* The corona flicker is a lightstyle animation
+					 * like any other, so r_flatlightstyles has to
+					 * still it too -- a player who set the cvar to
+					 * stop things flashing would not accept "except
+					 * the torch flares".  This glow path is ours,
+					 * not Ironwail's, so upstream has nothing here
+					 * to copy. */
+					j = ((r_flatlightstyles.integer == 2
+						? cl_lightstyle[style].peak
+						: cl_lightstyle[style].average) - 'a') * 22;
 				}
 				else
 				{

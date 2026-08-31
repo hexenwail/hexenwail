@@ -237,8 +237,8 @@ static void R_SetClearColor_f (cvar_t *var)
 ===============
 R_Model_ExtraFlags_List_f -- Ironwail (johnfitz)
 
-Re-apply engine-set extra flags (MOD_NOLERP) to every cached model
-when r_nolerp_list changes at runtime.
+Re-apply engine-set extra flags (MOD_NOLERP, MOD_NOSHADOW) to every
+cached model when r_nolerp_list or r_noshadow_list changes at runtime.
 ===============
 */
 static void R_Model_ExtraFlags_List_f (cvar_t *var)
@@ -271,6 +271,15 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_lerplightstyles);
+	/* Ironwail parity toggles, uhexen2-a5nn.11 */
+	Cvar_RegisterVariable (&r_drawworld);
+	Cvar_RegisterVariable (&r_flatlightstyles);
+	Cvar_RegisterVariable (&r_oldskyleaf);
+	Cvar_RegisterVariable (&r_drawparticles);
+	Cvar_RegisterVariable (&r_noshadow_list);
+	/* Same callback r_nolerp_list uses: it re-runs Mod_SetExtraFlags over
+	 * every cached model, and Mod_SetExtraFlags now resolves both lists. */
+	Cvar_SetCallback (&r_noshadow_list, R_Model_ExtraFlags_List_f);
 	Cvar_RegisterVariable (&r_farclip);
 	Cvar_RegisterVariable (&r_entdist);
 	Cvar_RegisterVariable (&r_viewmodel_fov);

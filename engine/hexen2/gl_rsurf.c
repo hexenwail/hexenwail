@@ -3152,6 +3152,20 @@ static void R_RecursiveWorldNode (mnode_t *node)
 		pleaf = (mleaf_t *)node;
 		mark = pleaf->firstmarksurface;
 		c = pleaf->nummarksurfaces;
+		/* r_oldskyleaf 0 (default, and upstream's) skips the surfaces of
+		 * a CONTENTS_SKY leaf.  Those faces bound the sky volume, which
+		 * the player cannot stand inside, and every one of them that is
+		 * visible from playable space is also referenced by the leaf on
+		 * the other side of it -- so this drops work, not geometry.  1
+		 * restores the pre-FitzQuake behaviour for a map that turns out
+		 * to depend on it.  uhexen2-a5nn.11.
+		 *
+		 * The GPU cull path needs no matching gate: it already excludes
+		 * SURF_DRAWSKY from its marksurface list at build time
+		 * (gl_worldcull.c), and the non-sky faces of a sky leaf reach it
+		 * through their other leaf. */
+		if (pleaf->contents == CONTENTS_SKY && !r_oldskyleaf.integer)
+			c = 0;
 		if (c)
 		{
 			do
@@ -3618,7 +3632,8 @@ void R_DrawWorld (void)
 	 * per-page lightmaps and wants exactly the page-local UVs it has.
 	 * uhexen2-qt7s. */
 	gpu_cull_active = R_WorldCullAvailable() && r_gpucull.integer &&
-			  lm_atlas_enabled && lm_atlas_texture;
+			  lm_atlas_enabled && lm_atlas_texture &&
+			  r_drawworld.integer;
 	if (gpu_cull_active)
 	{
 		/* GPU compute culling draws solid world surfaces.
@@ -3631,8 +3646,16 @@ void R_DrawWorld (void)
 #endif
 	DW_END(rprof_cpu_gpucull);
 
+	/* r_drawworld gates the DRAW, not the walk.  R_RecursiveWorldNode above
+	 * is what stores efrags, and efrags are what decide which entities are
+	 * visible -- skipping it would take the entities away with the world and
+	 * leave an empty screen, which is the opposite of what a "hide the world
+	 * so I can see the entities" switch is for.  Upstream can skip its whole
+	 * R_DrawWorld because its marking lives in a separate R_MarkSurfaces.
+	 * uhexen2-a5nn.11. */
 	DW_BEGIN();
-	DrawTextureChains (&r_worldentity);
+	if (r_drawworld.integer)
+		DrawTextureChains (&r_worldentity);
 	DW_END(rprof_cpu_chains);
 	/* Marks the boundary between "renderer never got that far" and "renderer
 	 * drew something you cannot see" in a user's console log.  d2c46f078.

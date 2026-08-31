@@ -56,6 +56,20 @@ unsigned int	SHIFT_a;
 qboolean	draw_reinit = false;
 
 static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
+#ifdef __SSE2__
+/* Ironwail's r_simd, uhexen2-a5nn.11.  Only exists on a build that HAS a SIMD
+ * path to switch off, which upstream also does (#if defined(USE_SIMD)); a cvar
+ * that could only ever read 0 would be worse than absent.
+ *
+ * Our one SIMD path is the mipmap reduction in GL_MipMap_W / GL_MipMap_H, and
+ * the two implementations are meant to be bit-identical: _mm_avg_epu8 computes
+ * (a + b + 1) >> 1 per byte, which is exactly what the scalar loops below it
+ * write out.  So this is a bisection tool -- if turning it off changes a
+ * rendered pixel, the SIMD path has a bug -- not a quality or compatibility
+ * setting, and there is no reason for a player to touch it.  Read at upload
+ * time, so set it before the map loads. */
+cvar_t		r_simd = {"r_simd", "1", CVAR_NONE};
+#endif
 static cvar_t	r_embeddedmipmaps = {"r_embeddedmipmaps", "0", CVAR_ARCHIVE};
 static cvar_t	gl_constretch = {"gl_constretch", "0", CVAR_ARCHIVE};
 static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
@@ -928,6 +942,9 @@ void Draw_Init (void)
 	if (!draw_reinit)
 	{
 		Cvar_RegisterVariable (&gl_picmip);
+#ifdef __SSE2__
+		Cvar_RegisterVariable (&r_simd);
+#endif
 		Cvar_RegisterVariable (&r_embeddedmipmaps);
 		Cvar_RegisterVariable (&gl_constretch);
 		gl_texturemode.string = gl_texmodes[gl_filter_idx].name;
@@ -2262,7 +2279,7 @@ static void GL_MipMap_W (byte *data, int width, int height)
 	total = (width >> 1) * height;	/* output pixel count */
 
 #ifdef __SSE2__
-	while (total >= 4)
+	while (r_simd.integer && total >= 4)
 	{
 		__m128i v0 = _mm_loadu_si128 ((const __m128i *) in);
 		__m128i v1 = _mm_loadu_si128 ((const __m128i *) (in + 16));
@@ -2310,7 +2327,7 @@ static void GL_MipMap_H (byte *data, int width, int height)
 	{
 		j = 0;
 #ifdef __SSE2__
-		while (j + 16 <= row_bytes)
+		while (r_simd.integer && j + 16 <= row_bytes)
 		{
 			__m128i a = _mm_loadu_si128 ((const __m128i *) (in + j));
 			__m128i b = _mm_loadu_si128 ((const __m128i *) (in + row_bytes + j));

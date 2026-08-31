@@ -46,6 +46,9 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0", CVAR_ARCHIVE};
 cvar_t	r_lightmap_bicubic = {"r_lightmap_bicubic", "0", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};
+/* The particle off switch (uhexen2-a5nn.11).  Real here, not just for
+ * linkage: the software R_DrawParticles honours it too. */
+cvar_t	r_drawparticles = {"r_drawparticles", "1", CVAR_ARCHIVE};
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};
 cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
@@ -88,6 +91,7 @@ void R_SoftWebInitCvars (void)
 	Cvar_RegisterVariable (&r_dither);
 	Cvar_RegisterVariable (&r_lightmap_bicubic);
 	Cvar_RegisterVariable (&gl_particles);
+	Cvar_RegisterVariable (&r_drawparticles);
 	Cvar_RegisterVariable (&gl_fullbrights);
 	Cvar_RegisterVariable (&r_wateralpha);
 	Cvar_RegisterVariable (&gl_glows);
