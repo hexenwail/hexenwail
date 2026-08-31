@@ -1159,13 +1159,13 @@ edict_t *ED_Alloc (void)
 	}
 
 #if !defined(H2W)
-	if (i == MAX_EDICTS)
+	if (i == sv_max_edicts)
 	{
 		SV_Edicts("edicts.txt");
 		Host_Error ("%s: no free edicts", __thisfunc__);
 	}
 #else
-	if (i == MAX_EDICTS)
+	if (i == sv_max_edicts)
 	{
 		Con_Printf ("WARNING: %s: no free edicts\n", __thisfunc__);
 		i--;	// step on whatever is the last edict

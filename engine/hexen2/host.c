@@ -72,6 +72,12 @@ cvar_t		sv_physfps = {"sv_physfps", "72", CVAR_ARCHIVE};		// server/physics tick
 cvar_t		cl_fixangle_hold = {"cl_fixangle_hold", "0.06", CVAR_ARCHIVE};	// how long a forced view angle survives render-rate input; 0 = off
 static	cvar_t	sys_adaptive = {"sys_adaptive", "1", CVAR_ARCHIVE};
 static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for slow motion
+/* Slow motion / fast forward as a MULTIPLIER, which is the intuitive knob
+ * host_framerate is not: 0.25 is quarter speed at whatever the real framerate
+ * happens to be, where host_framerate pins the step to an absolute value and so
+ * couples speed to frame rate.  0 means OFF, not "time stops" -- matching
+ * upstream, and the reason it is not simply multiplied unconditionally. */
+static	cvar_t	host_timescale = {"host_timescale", "0", CVAR_NONE};
 cvar_t		host_maxfps = {"host_maxfps", "72", CVAR_ARCHIVE};		// cap client framerate
 static	cvar_t	host_speeds = {"host_speeds", "0", CVAR_NONE};		// set for running times
 
@@ -389,6 +395,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&cl_fixangle_hold);
 
 	Cvar_RegisterVariable (&host_framerate);
+	Cvar_RegisterVariable (&host_timescale);
 	Cvar_RegisterVariable (&host_maxfps);
 	Cvar_RegisterVariable (&host_speeds);
 
@@ -744,6 +751,11 @@ static qboolean Host_FilterTime (float time)
 		if (host_frametime > 0.1)
 			host_frametime = 0.1;
 	}
+
+	/* After the clamp, so slow motion is not silently capped and fast forward
+	 * is not re-clamped back down to 0.1s. */
+	if (host_timescale.value > 0)
+		host_frametime *= host_timescale.value;
 
 	return true;
 }

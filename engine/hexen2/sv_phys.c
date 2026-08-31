@@ -53,6 +53,10 @@ cvar_t	sv_walkpitch		= { "sv_walkpitch", "0", CVAR_NONE };
 /* 0 = off, 1 = clients only, 2 = all entities.  See SV_PushMove. */
 cvar_t	sv_gameplayfix_elevators = { "sv_gameplayfix_elevators", "1", CVAR_ARCHIVE };
 
+/* Freeze everything that is not a player: physics and think chains stop, and
+ * so does server time, so a scene can be inspected mid-motion. */
+cvar_t	sv_freezenonclients = { "sv_freezenonclients", "0", CVAR_NONE };
+
 #ifdef QUAKE2
 static	vec3_t	vec_origin = {0.0, 0.0, 0.0};
 #endif
@@ -2179,6 +2183,7 @@ SV_Physics
 void SV_Physics (void)
 {
 	int		i, c, originMoved;
+	int		entity_cap;
 	edict_t	*ent, *ent2;
 	vec3_t	oldOrigin, oldAngle;
 
@@ -2196,7 +2201,12 @@ void SV_Physics (void)
 	ent = sv.edicts;
 	VectorClear(oldOrigin);	// avoid compiler warning
 	VectorClear(oldAngle);	// avoid compiler warning	
-	for (i = 0; i < sv.num_edicts; i++, ent = NEXT_EDICT(ent))
+	/* Edict 0 is the world and 1..maxclients are the players, so capping the
+	 * walk there runs physics for clients only. */
+	entity_cap = sv_freezenonclients.integer ? svs.maxclients + 1 : sv.num_edicts;
+	if (entity_cap > sv.num_edicts)
+		entity_cap = sv.num_edicts;	/* never walk past what is allocated */
+	for (i = 0; i < entity_cap; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
 			continue;
@@ -2277,7 +2287,10 @@ void SV_Physics (void)
 	if (*sv_globals.force_retouch)
 		(*sv_globals.force_retouch)--;
 
-	sv.time += host_frametime;
+	/* Hold server time too, or frozen entities still age: think times fall
+	 * behind sv.time and every one of them fires at once on unfreeze. */
+	if (!sv_freezenonclients.integer)
+		sv.time += host_frametime;
 }
 
 

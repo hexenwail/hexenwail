@@ -82,6 +82,13 @@
 //
 // per-level limits
 //
+/* MIN_EDICTS/MAX_EDICTS bound the runtime `max_edicts` cvar; MAX_EDICTS is
+ * still a hard compile-time ceiling because several arrays are sized by it --
+ * cl_entities (2.75 MB) and pimp_overrides (448 KB) in BSS, and, more sharply,
+ * moved_edict[]/moved_from[] in SV_PushMove, which are 160 KB of *stack* at
+ * 8192.  Raising the ceiling is therefore not a one-line change; see
+ * uhexen2-a5nn.9's notes. */
+#define	MIN_EDICTS	256
 #define	MAX_EDICTS	8192
 #define	MAX_LIGHTSTYLES	256
 
