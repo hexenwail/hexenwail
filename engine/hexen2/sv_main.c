@@ -39,6 +39,8 @@ cvar_t	sv_ce_scale		= {"sv_ce_scale", "0", CVAR_ARCHIVE};
 cvar_t	sv_ce_max_size		= {"sv_ce_max_size", "0", CVAR_ARCHIVE};
 
 extern	cvar_t	sv_maxvelocity;
+extern	cvar_t	sv_gameplayfix_elevators;	/* sv_phys.c */
+extern	cvar_t	sv_gameplayfix_random;		/* pr_cmds.c */
 extern	cvar_t	sv_gravity;
 extern	cvar_t	sv_nostep;
 extern	cvar_t	sv_friction;
@@ -93,6 +95,8 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_aim);
 	Cvar_RegisterVariable (&sv_nostep);
 	Cvar_RegisterVariable (&sv_walkpitch);
+	Cvar_RegisterVariable (&sv_gameplayfix_elevators);
+	Cvar_RegisterVariable (&sv_gameplayfix_random);
 	Cvar_RegisterVariable (&sv_flypitch);
 	Cvar_RegisterVariable (&sv_debugmovestep);
 	Cvar_SetCallback (&sv_debugmovestep, SV_DebugMoveStep_Changed);

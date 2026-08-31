@@ -1117,11 +1117,45 @@ Returns a number from 0 <= num < 1
 random()
 =================
 */
+cvar_t	sv_gameplayfix_random = {"sv_gameplayfix_random", "1", CVAR_ARCHIVE};
+
+/*
+=================
+PR_RandomFloat
+
+The distribution behind random() and the other rolling builtins.  Switchable
+because correcting it changes every roll a mod makes, so a mod authored against
+the old one can put it back.
+
+  0  what this engine shipped before: rand() * (1.0 / RAND_MAX).  Closed on
+     BOTH ends -- it returns exactly 0.0 and exactly 1.0 -- and its resolution
+     follows RAND_MAX, which is 31 bits on glibc and 15 on MSVC.  So a mod gets
+     a different grain of randomness depending on which build the player is
+     running, and the common `floor(random() * n)` idiom yields n itself once
+     every 32768 calls on Windows, indexing one past the end of whatever it was
+     choosing from.
+
+  1  Ironwail's: ((rand() & 0x7fff) + 0.5) / 0x8000.  Open on both ends, which
+     is what this builtin has always documented ("Returns a number from
+     0 < num < 1"), in 32768 equal buckets on every platform.
+
+Note the 1.0 below is deliberately double, as it was before, so setting the
+cvar to 0 restores the old values bit for bit rather than approximately.
+=================
+*/
+static float PR_RandomFloat (void)
+{
+	if (sv_gameplayfix_random.value)
+		return (float) (((rand() & 0x7fff) + 0.5) * (1.0 / 0x8000));
+
+	return (float) (rand() * (1.0 / RAND_MAX));
+}
+
 static void PF_random (void)
 {
 	float		num;
 
-	num = rand() * (1.0 / RAND_MAX);
+	num = PR_RandomFloat ();
 
 	G_FLOAT(OFS_RETURN) = num;
 }
@@ -4028,11 +4062,11 @@ static void PF_v_factorrange(void)
 	minv = G_VECTOR(OFS_PARM0);
 	maxv = G_VECTOR(OFS_PARM1);
 
-	num = rand() * (1.0 / RAND_MAX);
+	num = PR_RandomFloat ();
 	result[0] = ((maxv[0] - minv[0]) * num) + minv[0];
-	num = rand() * (1.0 / RAND_MAX);
+	num = PR_RandomFloat ();
 	result[1] = ((maxv[1] - minv[1]) * num) + minv[1];
-	num = rand() * (1.0 / RAND_MAX);
+	num = PR_RandomFloat ();
 	result[2] = ((maxv[2] - minv[2]) * num) + minv[2];
 
 	r2[0] = ((*sv_globals.v_right)[0] * result[0]) +
