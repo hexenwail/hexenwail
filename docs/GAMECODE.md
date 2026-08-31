@@ -565,3 +565,13 @@ platform** and the fix reaches every player who unzips a release.
 different gamecode still wins. The design analysis, including the two
 mechanisms that look obvious and are both wrong, is in
 [BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md).
+
+## Writing HexenC against Hexenwail
+
+One engine change carries a contract for anyone writing or porting HexenC: the
+server and physics run at 72 Hz (`sv_physfps`), not the 20 Hz the stock listen
+server used. Think intervals and effect durations are unaffected, and the shipped
+`h2/` gamecode was audited clean, but a per-frame controller written as
+`velocity = delta * 20` was a hardcoded `1 / frametime` and no longer snaps.
+[MODDING_TICKRATE.md](MODDING_TICKRATE.md) has the mechanism, the correct idioms,
+the audit, and the escape hatches for a mod that cannot be changed.
