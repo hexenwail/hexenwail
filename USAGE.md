@@ -152,6 +152,23 @@ That happens on installs where an older release's gamecode was hand-copied into
 retail `PROGS.DAT` inside `pak0.pak` is unreachable while it is there — either
 remove it, or use the `Pak` setting.
 
+## Server tick rate
+
+The server and physics run at 72 Hz, set by `sv_physfps` (default `72`, clamped
+to `10`–`250`). The stock engine's listen server ran at 20 Hz, which capped every
+QC think chain scheduled shorter than a tick, coarsened monster attack cadence,
+and broke strafe-jump acceleration.
+
+`sys_ticrate` is a *different*, dedicated-server-only cvar and does not affect a
+listen server or single player.
+
+Almost all mods are unaffected, but one HexenC idiom — `velocity = delta * 20`,
+where the `20` is really a hardcoded `1 / frametime` — silently changes from an
+exact snap into a lagging follow. If a mod's held or per-frame-positioned entity
+trails the player and is *exact* at `sv_physfps 20`, that is the cause. See
+[docs/MODDING_TICKRATE.md](docs/MODDING_TICKRATE.md) for the mechanism, what to
+write instead, and how to tell it apart from client-side interpolation.
+
 ## Steam Deck
 
 Add Hexenwail to Steam, then right-click it → Properties → Controller → set the override to **Gamepad** (or "Gamepad with Joystick Trackpad"). The default Desktop layout emulates keyboard input instead of passing the controller through to SDL.
