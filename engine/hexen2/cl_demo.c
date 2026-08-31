@@ -34,9 +34,6 @@ qboolean	skip_start = false;
 int		num_intro_msg = 0;
 #endif
 
-/* demo config file support */
-static char current_demo_name[MAX_DEMONAME] = "";
-
 /*
 ==============================================================================
 
@@ -78,13 +75,13 @@ void CL_StopPlayback (void)
 	cls.state = ca_disconnected;
 
 	// Execute end config if one exists for this demo
-	if (current_demo_name[0])
+	if (cls.demofilename[0])
 	{
 		char cfg[MAX_OSPATH];
-		q_snprintf(cfg, sizeof(cfg), "%send.cfg", current_demo_name);
+		q_snprintf(cfg, sizeof(cfg), "%send.cfg", cls.demofilename);
 		Con_DPrintf("CL_StopPlayback: Executing demo end config '%s' if it exists\n", cfg);
 		Cbuf_InsertText(va("exec %s\n", cfg));
-		current_demo_name[0] = '\0';
+		cls.demofilename[0] = '\0';
 	}
 
 	if (cls.timedemo)
@@ -484,7 +481,7 @@ void CL_PlayDemo_f (void)
 
 		q_strlcpy(base, Cmd_Argv(1), sizeof(base));
 		COM_StripExtension(base, base, sizeof(base));
-		q_strlcpy(current_demo_name, base, sizeof(current_demo_name));
+		q_strlcpy(cls.demofilename, base, sizeof(cls.demofilename));
 
 		q_snprintf(cfg, sizeof(cfg), "%sstart.cfg", base);
 		Con_DPrintf("CL_PlayDemo_f: Executing demo config '%s' if it exists\n", cfg);
