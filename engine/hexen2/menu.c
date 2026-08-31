@@ -3355,15 +3355,6 @@ static qboolean M_Graphics_IsSkip (int i)
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
 }
 
-static int M_Graphics_VisualRow (int i)
-{
-	int row = 0;
-	for (int j = 0; j < i; j++)
-		if (!M_Graphics_IsSkip(j))
-			row++;
-	return row;
-}
-
 static void M_Menu_Graphics_f (void)
 {
 	Key_SetDest (key_menu);
@@ -3624,8 +3615,14 @@ static void M_Graphics_Draw (void)
 		if (h >= 0 && !M_Graphics_IsSkip(h))
 			graphics_cursor = h;
 	}
+	/* Raw index, like every label above and like the hit-test just above that.
+	 * The cursor used to walk a COMPACTED row count instead, which put the
+	 * glyph one row too high for every item below a hidden one -- rows are not
+	 * closed up when they are hidden, so there was no compacted layout for it
+	 * to point into.  Same defect the Rendering submenu carries a note about.
+	 * uhexen2-8uc1. */
 	if (!M_Graphics_IsSkip(graphics_cursor))
-		M_DrawCharacter (64, 92 + M_Graphics_VisualRow(graphics_cursor)*8, 12+((int)(realtime*4)&1));
+		M_DrawCharacter (64, 92 + 8*graphics_cursor, 12+((int)(realtime*4)&1));
 
 	M_Filter_Draw (76, 92 + 8*(GFX_ITEMS + 1));
 }
