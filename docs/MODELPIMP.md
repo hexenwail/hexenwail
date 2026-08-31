@@ -4,7 +4,7 @@
 alias models with engine-side effects — an orb glow, a cast light, spin, float,
 and the trail/transparency flags an MDL header would normally carry. It is the
 only route by which map-placed props get those effects, and it is the mechanism
-behind Shadows of Turmoil's and Wheel of Karma's lighting.
+behind Storm over Thyrion's and Wheel of Karma's lighting.
 
 This document is the contract: which entity's fields the engine reads, which
 effects are per-entity and which are shared across every model of the same
@@ -24,7 +24,7 @@ float pimpmodel(entity ref, vector glow_color)
 Everything else is read off `ref` — **the entity passed as the first argument,
 not the entity that made the call.** That distinction matters: gamecode is free
 to build a throwaway entity, stuff fields onto it and pimp that instead, and
-Shadows of Turmoil's `entity_fx()` does exactly this for missiles and torch
+Storm over Thyrion's `entity_fx()` does exactly this for missiles and torch
 flames.
 
 | Field on `ref` | Meaning |
@@ -46,7 +46,7 @@ A colour given without spawnflag 4 or 8 auto-enables the orb, because older QC
 **but only on entities that set none of the r15 reach flags (16, 32, 64).**
 
 That inference cannot simply be deleted: 40 of the 151 `misc_modelpimp`
-entities shipped across Shadows of Turmoil and Wheel of Karma depend on it,
+entities shipped across Storm over Thyrion and Wheel of Karma depend on it,
 almost all of them spinning puzzle keys and items that set `glow_color`,
 `health` and `style` but never spawnflag 4. Requiring bit 4 unconditionally
 puts every one of them out.
@@ -194,7 +194,7 @@ engine bug when it is not: **a plain `misc_model` never reaches
 `misc_modelpimp`; both are gamecode, and the spawnflags a mapper sets on a
 `misc_model` are interpreted entirely by the mod.
 
-In Shadows of Turmoil (`progs.dat` crc 26905) the `misc_model` spawn function
+In Storm over Thyrion (`progs.dat` crc 26905) the `misc_model` spawn function
 never calls `pimpmodel` at all. Its spawnflags mean:
 
 | Bit | Effect in SoT gamecode |
@@ -224,7 +224,7 @@ gamecode decision.
 ## Verifying a change against shipped content
 
 The reach flags were added without breaking shipped maps, and the check is
-repeatable. Of the locally available content, only Shadows of Turmoil and Wheel
+repeatable. Of the locally available content, only Storm over Thyrion and Wheel
 of Karma bind builtin #111 at all — `data1`, `portals`, Shadows of Chaos and
 Game of Tomes never call it. Within those two, `pimpmodel` is reached from
 exactly three QC functions: `modelpimp_think` and `modelpimp_showcase`, both

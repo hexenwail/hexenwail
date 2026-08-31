@@ -101,7 +101,7 @@ def scan_bsp(name, b, sizes):
     elif ver == BSP2VERSION:
         # BSP2 (common/bspfile.h): dedge2_t widens the vertex numbers to
         # uint32 and dface2_t widens planenum/side/numedges/texinfo to int32,
-        # so both lumps have different strides.  Shadows of Turmoil and Wheel
+        # so both lumps have different strides.  Storm over Thyrion and Wheel
         # of Karma ship BSP2, and skipping it meant this tool silently
         # reported "no maps found" for the mod content the bead is about.
         bsp2 = True

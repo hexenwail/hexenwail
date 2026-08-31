@@ -2204,7 +2204,7 @@ static void R_DrawAliasModel (entity_t *e)
 	 * r_wateralpha.  uhexen2-93a8 started applying that same rule to
 	 * external replacement skins, which had been escaping it and using
 	 * the pack's own opaque alpha -- correct for the Necromancer's
-	 * spellbook, and ruinous for the gun in your hand: Shadows of Turmoil
+	 * spellbook, and ruinous for the gun in your hand: Storm over Thyrion
 	 * pins r_wateralpha 0.5, so 10-45% of every weapon's texels went from
 	 * alpha 255 to 128 and the weapons turned to glass.
 	 *
