@@ -87,6 +87,12 @@ typedef struct cvar_s
 	int		integer;
 	cvarcallback_t	callback;
 	struct cvar_s	*next;
+	/* Captured by Cvar_RegisterVariable from the value the declaration was
+	 * written with, so `resetcfg` / `resetall` have something to go back to.
+	 * Last on purpose: every cvar_t in the tree is brace-initialised
+	 * positionally as { name, string, flags }, so a field added anywhere
+	 * earlier would silently become one of those three. */
+	const char	*default_string;
 } cvar_t;
 
 void	Cvar_RegisterVariable (cvar_t *variable);
@@ -100,6 +106,16 @@ void	Cvar_Set (const char *var_name, const char *value);
 // equivelant to "<name> <variable>" typed at the console
 
 void	Cvar_SetValue (const char *var_name, const float value);
+
+void	Cvar_Reset (const char *name);
+// restore a cvar to the value its declaration was written with
+
+qboolean Cvar_HasValue (const cvar_t *var, const char *value);
+// does this cvar currently hold `value`, compared numerically when both
+// sides look like numbers and textually otherwise
+
+void	Cvar_Init (void);
+// registers the cvar-manipulation commands (cycle/cycleback/inc/reset*)
 // expands value to a string and calls Cvar_Set
 
 void	Cvar_SetROM (const char *var_name, const char *value);

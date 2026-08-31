@@ -78,6 +78,49 @@ static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for sl
  * couples speed to frame rate.  0 means OFF, not "time stops" -- matching
  * upstream, and the reason it is not simply multiplied unconditionally. */
 static	cvar_t	host_timescale = {"host_timescale", "0", CVAR_NONE};
+
+/*
+================
+Host_WriteConfig_f
+
+writeconfig [name] -- flush the config now rather than waiting for the
+debounce in _Host_Frame or for shutdown.  Useful when you are about to make
+the engine crash on purpose.
+================
+*/
+static void Host_WriteConfig_f (void)
+{
+	char	name[MAX_QPATH];
+
+	q_strlcpy (name, (Cmd_Argc() >= 2) ? Cmd_Argv(1) : "config.cfg", sizeof(name));
+	if (!strstr(name, "."))
+		q_strlcat (name, ".cfg", sizeof(name));
+
+	Host_WriteConfiguration (name);
+	Con_Printf ("Wrote %s\n", name);
+}
+
+/*
+================
+Host_Mapname_f
+================
+*/
+static void Host_Mapname_f (void)
+{
+	if (sv.active)
+	{
+		Con_Printf ("\"mapname\" is \"%s\"\n", sv.name);
+		return;
+	}
+
+	if (cls.state == ca_connected)
+	{
+		Con_Printf ("\"mapname\" is \"%s\"\n", cl.mapname);
+		return;
+	}
+
+	Con_Printf ("no map loaded\n");
+}
 cvar_t		host_maxfps = {"host_maxfps", "72", CVAR_ARCHIVE};		// cap client framerate
 static	cvar_t	host_speeds = {"host_speeds", "0", CVAR_NONE};		// set for running times
 
@@ -396,6 +439,8 @@ static void Host_InitLocal (void)
 
 	Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterVariable (&host_timescale);
+	Cmd_AddCommand ("writeconfig", Host_WriteConfig_f);
+	Cmd_AddCommand ("mapname", Host_Mapname_f);
 	Cvar_RegisterVariable (&host_maxfps);
 	Cvar_RegisterVariable (&host_speeds);
 

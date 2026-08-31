@@ -325,6 +325,11 @@ void Cvar_RegisterVariable (cvar_t *variable)
 	q_strlcpy (value, variable->string, sizeof(value));
 	variable->string = NULL;
 
+// remember it, so resetcfg/resetall have somewhere to go back to.  Z_Strdup
+// rather than keeping the caller's pointer: most are string literals and would
+// be fine, but a few cvars are registered from generated names.
+	variable->default_string = Z_Strdup (value);
+
 	if (!(variable->flags & CVAR_CALLBACK))
 		variable->callback = NULL;
 
@@ -343,6 +348,151 @@ Cvar_SetCallback
 Set a callback function to the var
 ============
 */
+/*
+============
+Cvar_Reset
+
+Restore one cvar to the value its declaration carried.
+============
+*/
+void Cvar_Reset (const char *name)
+{
+	cvar_t	*var = Cvar_FindVar (name);
+
+	if (!var)
+	{
+		Con_Printf ("Cvar_Reset: variable %s not found\n", name);
+		return;
+	}
+	if (!var->default_string)
+		return;		/* registered before defaults were captured */
+
+	Cvar_SetQuick (var, var->default_string);
+}
+
+/*
+============
+Cvar_HasValue
+
+Compare numerically when both sides parse as numbers, so `cycle r_scale 1 2`
+still matches a cvar currently reading "1.000".  Fall back to a textual
+compare for the string cvars, where "1.0" and "1" are genuinely different.
+============
+*/
+qboolean Cvar_HasValue (const cvar_t *var, const char *value)
+{
+	char	*endvar, *endval;
+	double	a, b;
+
+	if (!var || !value)
+		return false;
+
+	a = strtod (var->string, &endvar);
+	b = strtod (value, &endval);
+
+	if (endvar != var->string && *endvar == 0 && endval != value && *endval == 0)
+		return a == b;
+
+	return !strcmp (var->string, value);
+}
+
+/*
+============
+Cvar_Cycle_f
+
+cycle/cycleback <cvar> <value> [value ...]
+============
+*/
+static void Cvar_Cycle_f (void)
+{
+	int		i;
+	cvar_t	*var;
+
+	if (Cmd_Argc() < 3)
+	{
+		Con_Printf ("%s <cvar> <value list>: cycle a cvar through a list of values\n", Cmd_Argv(0));
+		return;
+	}
+
+	var = Cvar_FindVar (Cmd_Argv(1));
+	if (!var)
+	{
+		Con_Printf ("Cvar \"%s\" not found\n", Cmd_Argv(1));
+		return;
+	}
+
+	/* Find where we are in the list and step off it.  A list that repeats a
+	 * value sticks on the first copy; upstream has the same hole and it is not
+	 * worth the ambiguity of guessing which one was meant. */
+	if (!q_strcasecmp (Cmd_Argv(0), "cycle"))
+	{
+		for (i = 2; i < Cmd_Argc(); i++)
+			if (Cvar_HasValue (var, Cmd_Argv(i)))
+				break;
+		if (++i >= Cmd_Argc())
+			i = 2;
+	}
+	else
+	{
+		for (i = Cmd_Argc() - 1; i >= 2; i--)
+			if (Cvar_HasValue (var, Cmd_Argv(i)))
+				break;
+		if (--i < 2)
+			i = Cmd_Argc() - 1;
+	}
+
+	Cvar_SetQuick (var, Cmd_Argv(i));
+}
+
+/*
+============
+Cvar_Inc_f
+
+inc <cvar> [amount]
+============
+*/
+static void Cvar_Inc_f (void)
+{
+	switch (Cmd_Argc())
+	{
+	case 2:
+		Cvar_SetValue (Cmd_Argv(1), Cvar_VariableValue(Cmd_Argv(1)) + 1);
+		break;
+	case 3:
+		Cvar_SetValue (Cmd_Argv(1), Cvar_VariableValue(Cmd_Argv(1)) + atof(Cmd_Argv(2)));
+		break;
+	default:
+		Con_Printf ("inc <cvar> [amount] : increment a cvar\n");
+		break;
+	}
+}
+
+static void Cvar_ResetAll_f (void)
+{
+	cvar_t	*var;
+
+	for (var = cvar_vars; var; var = var->next)
+		Cvar_Reset (var->name);
+}
+
+static void Cvar_ResetCfg_f (void)
+{
+	cvar_t	*var;
+
+	for (var = cvar_vars; var; var = var->next)
+		if (var->flags & CVAR_ARCHIVE)
+			Cvar_Reset (var->name);
+}
+
+void Cvar_Init (void)
+{
+	Cmd_AddCommand ("cycle", Cvar_Cycle_f);
+	Cmd_AddCommand ("cycleback", Cvar_Cycle_f);
+	Cmd_AddCommand ("inc", Cvar_Inc_f);
+	Cmd_AddCommand ("resetall", Cvar_ResetAll_f);
+	Cmd_AddCommand ("resetcfg", Cvar_ResetCfg_f);
+}
+
 void Cvar_SetCallback (cvar_t *var, cvarcallback_t func)
 {
 	var->callback = func;

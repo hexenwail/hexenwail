@@ -511,6 +511,41 @@ static qboolean GL_RunFramebufferSelfTest (void)
 	return passed;
 }
 
+/*
+===============
+GL_Info_f
+
+gl_info -- the driver identification a bug report needs.
+
+renderer_status already reports our capability decisions, but it deliberately
+says nothing about WHO the driver is, and vendor/renderer is the first thing
+you want when a report is "it looks wrong on my machine".  Kept separate rather
+than folded into renderer_status because the extension list is long and you do
+not want it every time you check whether OIT came up.
+===============
+*/
+static void GL_Info_f (void)
+{
+	Con_Printf ("GL_VENDOR:   %s\n", gl_vendor ? gl_vendor : "(unknown)");
+	Con_Printf ("GL_RENDERER: %s\n", gl_renderer ? gl_renderer : "(unknown)");
+	Con_Printf ("GL_VERSION:  %s\n", gl_version ? gl_version : "(unknown)");
+	Con_Printf ("GLSL:        %s\n",
+		    (const char *) glGetString_fp (GL_SHADING_LANGUAGE_VERSION));
+	Con_Printf ("max texture size: %d\n", (int) gl_max_size);
+	Con_Printf ("max anisotropy:   %g\n", (double) gl_max_anisotropy);
+
+	Con_Printf ("texture compression: S3TC=%s RGTC=%s BPTC=%s\n",
+		    gl_have_s3tc ? "yes" : "no",
+		    gl_have_rgtc ? "yes" : "no",
+		    gl_have_bptc ? "yes" : "no");
+	Con_Printf ("(renderer_status reports the capability decisions built on these)\n");
+
+	/* No extension listing: this engine never enumerates them.  Extensions are
+	 * probed by name through SDL_GL_ExtensionSupported, and dumping the whole
+	 * list would mean adding glGetStringi to the loader purely for a debug
+	 * command.  The named flags above are the ones any decision here turns on. */
+}
+
 static void GL_RendererStatus_f (void)
 {
 	Con_Printf("[RENDERER] %s | GL=%s | GLSL=%s\n",
@@ -2052,6 +2087,7 @@ void	VID_Init (const unsigned char *palette)
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
 	Cmd_AddCommand ("vid_restart", VID_Restart_f);
 	Cmd_AddCommand ("renderer_status", GL_RendererStatus_f);
+	Cmd_AddCommand ("gl_info", GL_Info_f);
 	Cmd_AddCommand ("renderer_safe", GL_RendererSafe_f);
 
 	VID_InitPalette (palette);

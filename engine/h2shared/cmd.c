@@ -1077,6 +1077,63 @@ static void Cmd_WriteCommands_f (void)
 Cmd_Init
 ============
 */
+/*
+============
+Cmd_Apropos_f
+
+apropos / find <substring> -- one search across commands, aliases and cvars.
+
+We already had cmdlist / cvarlist / aliaslist, each filtering its own list.
+The reason this earns its own command is triage: when you ask a field tester
+what a setting is called, you do not know which of the three it lives in, and
+asking them to run three commands and paste three outputs is how you get one
+output pasted.
+============
+*/
+static void Cmd_Apropos_f (void)
+{
+	const char	*substr = Cmd_Argv(1);
+	cmd_function_t	*cmd;
+	cmdalias_t	*a;
+	cvar_t		*var;
+	int		count = 0;
+
+	if (!*substr)
+	{
+		Con_Printf ("%s <substring> : search commands, aliases and cvars\n", Cmd_Argv(0));
+		return;
+	}
+
+	for (cmd = cmd_functions; cmd; cmd = cmd->next)
+	{
+		if (strstr(cmd->name, substr))
+		{
+			Con_Printf ("  command %s\n", cmd->name);
+			count++;
+		}
+	}
+
+	for (a = cmd_alias; a; a = a->next)
+	{
+		if (strstr(a->name, substr))
+		{
+			Con_Printf ("  alias   %s\n", a->name);
+			count++;
+		}
+	}
+
+	for (var = Cvar_FindVarAfter ("", CVAR_NONE); var; var = var->next)
+	{
+		if (strstr(var->name, substr))
+		{
+			Con_Printf ("  cvar    %s \"%s\"\n", var->name, var->string);
+			count++;
+		}
+	}
+
+	Con_Printf ("%d match(es) for \"%s\"\n", count, substr);
+}
+
 void Cmd_Init (void)
 {
 //
@@ -1096,6 +1153,14 @@ void Cmd_Init (void)
 	Cmd_AddCommand ("aliaslist", Cmd_ListAlias_f);
 #endif
 
+	/* Registered outside the SERVERONLY guard above: these need only the
+	 * command/cvar lists, which h2ded has, and a server operator wants them
+	 * as much as a player does. */
+	Cmd_AddCommand ("apropos", Cmd_Apropos_f);
+	Cmd_AddCommand ("find", Cmd_Apropos_f);
+
 	Cvar_RegisterVariable (&cfg_enginedefaults);
+
+	Cvar_Init ();
 }
 

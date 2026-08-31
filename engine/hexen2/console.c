@@ -232,6 +232,64 @@ void Con_CheckResize (void)
 
 /*
 ================
+Con_Dump_f
+
+condump [filename] -- write the console scrollback to a file.
+
+The point of this one is that Discord bug reports currently arrive as video.
+A tester who can type `condump` hands us text we can grep instead.
+
+con->text holds a char in the low byte and an attribute mask in the high byte,
+so each cell is masked down before writing.  Trailing spaces are trimmed
+because the buffer is space-filled to con_linewidth and would otherwise pad
+every line out to the console width.
+================
+*/
+static void Con_Dump_f (void)
+{
+	char	name[MAX_OSPATH];
+	char	line[1024];
+	FILE	*f;
+	int	l, x, n;
+	const short	*text;
+
+	q_snprintf (name, sizeof(name), "%s", (Cmd_Argc() > 1) ? Cmd_Argv(1) : "condump.txt");
+	if (!strstr(name, "."))
+		q_strlcat (name, ".txt", sizeof(name));
+
+	f = fopen (FS_MakePath(FS_USERDIR, NULL, name), "w");
+	if (!f)
+	{
+		Con_Printf ("Could not open %s\n", name);
+		return;
+	}
+
+	/* Walk from the oldest retained line to the newest.  Skip leading blanks so
+	 * a mostly-empty scrollback does not produce a file of newlines. */
+	for (l = con->current - con_totallines + 1; l <= con->current; l++)
+	{
+		if (l < 0)
+			continue;
+		text = con->text + (l % con_totallines) * con_linewidth;
+
+		n = con_linewidth;
+		if (n > (int)sizeof(line) - 1)
+			n = (int)sizeof(line) - 1;
+		for (x = 0; x < n; x++)
+			line[x] = (char)(text[x] & 0xff);
+		line[n] = 0;
+		while (n > 0 && line[n - 1] == ' ')
+			line[--n] = 0;
+
+		fprintf (f, "%s\n", line);
+	}
+
+	fclose (f);
+	Con_Printf ("Dumped console text to %s\n", name);
+}
+
+/*
+================
 Con_Init
 ================
 */
@@ -252,6 +310,7 @@ void Con_Init (void)
 	Cmd_AddCommand ("messagemode", Con_MessageMode_f);
 	Cmd_AddCommand ("messagemode2", Con_MessageMode2_f);
 	Cmd_AddCommand ("clear", Con_Clear_f);
+	Cmd_AddCommand ("condump", Con_Dump_f);
 
 	con_initialized = true;
 }

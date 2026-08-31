@@ -226,6 +226,27 @@ void Host_Callback_Notify (cvar_t *var)
 }
 
 /*
+================
+Host_Mapname_f
+
+The dedicated server's counterpart of the one in hexen2/host.c, which this file
+supersedes.  It can only consult the server, there being no client state to
+fall back to.
+
+No writeconfig here to match: Host_WriteConfiguration is defined only in
+hexen2/host.c, which h2ded excludes, so the dedicated server has no config
+writer to call.  Giving it one is a separate job.
+================
+*/
+static void Host_Mapname_f (void)
+{
+	if (sv.active)
+		Con_Printf ("\"mapname\" is \"%s\"\n", sv.name);
+	else
+		Con_Printf ("no map loaded\n");
+}
+
+/*
 =======================
 Host_InitLocal
 ======================
@@ -233,6 +254,9 @@ Host_InitLocal
 static void Host_InitLocal (void)
 {
 	Cmd_AddCommand ("version", Host_Version_f);
+	/* What a server operator wants when they attach to a running h2ded and
+	 * need to know what it is serving. */
+	Cmd_AddCommand ("mapname", Host_Mapname_f);
 
 	Host_InitCommands ();
 
