@@ -46,14 +46,54 @@ function tokenize(expression) {
   return expression.match(/"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*|[A-Za-z_]\w*/g) || [];
 }
 
-function evaluateCStringExpression(expression, macros) {
+// How many times `name` is #defined in `source`.  One means the macro has a
+// single spelling and can be resolved without anyone deciding anything; more
+// than one means it has a USE_GLES arm and a desktop arm, and which one this
+// extractor wants is a judgement it must not make on its own.
+function countDefines(source, name) {
+  const matches = source.match(new RegExp(`^\\s*#define\\s+${name}\\b`, 'gm'));
+  return matches ? matches.length : 0;
+}
+
+// Resolve a macro nobody registered.  uhexen2-rnzi: the registered set used to
+// be a hardcoded list, so every new GLSL helper macro broke the PWA/WASM CI
+// job with "unknown C string macro" until someone added its name -- and it did
+// break twice, GLSL_MATERIAL_FN on 0.8.0-beta.r21 being the second, found
+// after the tag because native and wasm builds both compile such a macro
+// fine and only this test sees it.  Discovering it here turns that class of
+// break into a no-op.  The tier-specific macros stay explicitly registered:
+// picking the ES arm over the desktop one is exactly the judgement above, so a
+// multiply-defined macro is still an error, just an actionable one.
+function resolveMacro(name, macros, ctx) {
+  if (macros.has(name)) return macros.get(name);
+  if (ctx.resolving.has(name)) throw new Error(`shader macro ${name} is defined in terms of itself`);
+
+  const found = countDefines(ctx.source, name);
+  if (found === 0) throw new Error(`unknown C string macro ${name}: no #define in ${ctx.name}`);
+  if (found > 1) {
+    throw new Error(
+      `shader macro ${name} is #defined ${found} times in ${ctx.name}, so it has tier-specific `
+      + 'arms; register it in the tier-specific list in extractEngineWebGLPrograms() so the '
+      + 'USE_GLES spelling is the one that gets used');
+  }
+
+  ctx.resolving.add(name);
+  try {
+    const value = readDefine(ctx.source, name, macros, ctx);
+    macros.set(name, value);
+    return value;
+  } finally {
+    ctx.resolving.delete(name);
+  }
+}
+
+function evaluateCStringExpression(expression, macros, ctx) {
   let value = '';
   for (const token of tokenize(expression)) {
     if (token.startsWith('"')) {
       value += JSON.parse(token);
     } else if (!token.startsWith('/*') && !token.startsWith('//')) {
-      if (!macros.has(token)) throw new Error(`unknown C string macro ${token}`);
-      value += macros.get(token);
+      value += resolveMacro(token, macros, ctx);
     }
   }
   return value;
@@ -98,7 +138,10 @@ function blockCommentOpenAfter(line, inComment) {
   return inComment;
 }
 
-function readDefine(source, name, macros) {
+// `source` is the text to find the #define in -- for a tier-specific macro that
+// is one preprocessor arm, not the whole file.  `ctx` is what any macro NESTED
+// inside the body resolves against, and that must stay the whole file.
+function readDefine(source, name, macros, ctx) {
   const lines = source.split('\n');
   const start = lines.findIndex((line) => new RegExp(`^\\s*#define\\s+${name}\\b`).test(line));
   if (start < 0) throw new Error(`missing shader macro ${name}`);
@@ -117,7 +160,7 @@ function readDefine(source, name, macros) {
     if (inComment) continue;
     if (!/\\\s*$/.test(line)) break;
   }
-  return evaluateCStringExpression(parts.join('\n'), macros);
+  return evaluateCStringExpression(parts.join('\n'), macros, ctx);
 }
 
 function readArrayExpression(source, name) {
@@ -166,31 +209,46 @@ function readArrayExpression(source, name) {
   throw new Error(`unterminated shader source ${name}`);
 }
 
+// Exported for the tests only.  extractEngineWebGLPrograms() reads the real
+// engine files at fixed paths, so proving that a NEW helper macro resolves
+// without being registered needs a seam that takes synthetic source.
+export function expandShaderExpression(expression, source, sourceName = 'test source') {
+  return evaluateCStringExpression(expression, new Map(),
+    { name: sourceName, source, resolving: new Set() });
+}
+
 export async function extractEngineWebGLPrograms() {
   const [shaderSource, postprocessSource] = await Promise.all([
     readFile(SHADER_SOURCE, 'utf8'),
     readFile(POSTPROCESS_SOURCE, 'utf8'),
   ]);
 
+  // One shared macro table, as before: the two files' macro namespaces are
+  // disjoint in practice (GLSL_* in gl_shader.c, PP_* in gl_postprocess.c) and
+  // a name already in the table is never looked up again.
   const macros = new Map();
-  // Tier-specific: read from the USE_GLES arm, not the desktop one.
+  const shaderCtx = { name: 'gl_shader.c', source: shaderSource, resolving: new Set() };
+  const postprocessCtx = { name: 'gl_postprocess.c', source: postprocessSource, resolving: new Set() };
+
+  // THE ONLY MACROS THAT STILL HAVE TO BE NAMED HERE are the tier-specific
+  // ones -- those with both a USE_GLES arm and a desktop arm, where this
+  // extractor has to say which spelling it wants.  Everything else is found on
+  // demand by resolveMacro(), so a new GLSL helper needs no edit to this file.
   for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE']) {
-    macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros));
-  }
-  // Tier-independent GLSL helper functions.
-  for (const name of ['GLSL_BICUBIC_LM_FN', 'GLSL_CAUSTICS_FN', 'GLSL_MATERIAL_FN']) {
-    macros.set(name, readDefine(shaderSource, name, macros));
+    macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
-  for (const name of ['PP_ES_PRECISION', 'PP_VERT_HEADER', 'PP_FRAG_HEADER', 'PP_BITFIELD_REVERSE']) {
-    macros.set(name, readDefine(glesBranchDefining(postprocessSource, name), name, macros));
+  for (const name of ['PP_VERT_HEADER', 'PP_FRAG_HEADER', 'PP_BITFIELD_REVERSE']) {
+    macros.set(name, readDefine(glesBranchDefining(postprocessSource, name), name, macros, postprocessCtx));
   }
 
-  const sources = { shader: shaderSource, postprocess: postprocessSource };
+  const contexts = { shader: shaderCtx, postprocess: postprocessCtx };
   return PROGRAM_SPECS.map(([name, family, vertexName, fragmentName]) => ({
     name,
-    vertex: evaluateCStringExpression(readArrayExpression(sources[family], vertexName), macros),
-    fragment: evaluateCStringExpression(readArrayExpression(sources[family], fragmentName), macros),
+    vertex: evaluateCStringExpression(
+      readArrayExpression(contexts[family].source, vertexName), macros, contexts[family]),
+    fragment: evaluateCStringExpression(
+      readArrayExpression(contexts[family].source, fragmentName), macros, contexts[family]),
   }));
 }
 
