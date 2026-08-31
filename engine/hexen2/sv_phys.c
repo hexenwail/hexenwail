@@ -554,6 +554,7 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 	vec3_t		mins, maxs, move;
 	vec3_t		entorig, pushorig;
 	int			num_moved;
+	float		solid_backup;
 	/* Static, not automatic: at MAX_EDICTS 8192 these are 64 KB + 96 KB = 160 KB
 	 * in a single stack frame, which is already large and would reach 625 KB if
 	 * the edict ceiling were raised (uhexen2-gyul).  That is a real overflow risk
@@ -640,9 +641,19 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 		num_moved++;
 
 		// try moving the contacted entity
+		/* Restore what the pusher ACTUALLY was, not a hardcoded SOLID_BSP.
+		 * Writing the literal silently promoted any pusher that was not
+		 * SOLID_BSP the first time it moved anything, and the change stuck.
+		 *
+		 * Ironwail additionally SKIPS the push unless the pusher is BSP, BBOX
+		 * or SLIDEBOX (the quake-info-pool movetype_push fix).  That is not
+		 * done here: it changes which entities get pushed at all, which is a
+		 * gameplay change for 1997 content and wants its own decision, while
+		 * this is just a bug.  uhexen2-3aus */
+		solid_backup = pusher->v.solid;
 		pusher->v.solid = SOLID_NOT;
 		SV_PushEntity (check, move);
-		pusher->v.solid = SOLID_BSP;
+		pusher->v.solid = solid_backup;
 
 		// if it is still inside the pusher, block
 		block = SV_TestEntityPosition (check);
@@ -960,6 +971,7 @@ static void SV_PushRotate (edict_t *pusher, float movetime)
 //	vec3_t		amove_norm;
 	vec3_t		entorig, pushorig, pushorigangles;
 	int			num_moved;
+	float		solid_backup;
 	/* Static, not automatic: at MAX_EDICTS 8192 these are 64 KB + 96 KB = 160 KB
 	 * in a single stack frame, which is already large and would reach 625 KB if
 	 * the edict ceiling were raised (uhexen2-gyul).  That is a real overflow risk
@@ -1245,13 +1257,15 @@ static void SV_PushRotate (edict_t *pusher, float movetime)
 			if (t != 3)
 			{
 			//THIS IS VERY BAD BAD HACK...
+				/* see the note in SV_PushMove -- uhexen2-3aus */
+				solid_backup = pusher->v.solid;
 				pusher->v.solid = SOLID_NOT;
 				SV_PushEntity (check, move3);
 			//@@TODO: do we ever want to do anybody's angles?  maybe just yaw???
 			//	if (!((int)check->v.flags & (FL_CLIENT | FL_MONSTER)))
 			//		VectorAdd (check->v.angles, amove, check->v.angles);
 				check->v.angles[YAW] += amove[YAW];
-				pusher->v.solid = SOLID_BSP;
+				pusher->v.solid = solid_backup;
 			}
 			// if it is still inside the pusher, block
 			block = SV_TestEntityPosition (check);
