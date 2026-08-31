@@ -231,6 +231,99 @@ qboolean Image_WriteTGA (const char *name, byte *data, int width, int height, in
 Image_LoadTGA
 =============
 */
+/*
+============
+Targa_ReadPixel
+
+Read ONE source pixel in whatever format the header declares and expand it to
+RGBA.  Factored out of the four places that used to carry their own copy of a
+pixel_size switch -- uncompressed, RLE run, RLE literal, and the RLE run's
+compiler-warning default -- because widening the format matrix meant editing
+all four in step, which is how a decoder acquires a variant it handles in three
+places out of four.  Everything below now goes through here.
+
+FORMATS AND THE TWO DECISIONS THEY NEEDED (uhexen2-qqis):
+
+  24 / 32 bit true colour, BGR(A) on disk.  Unchanged.
+
+  15 and 16 bit true colour, A1R5G5B5 little-endian.  Channels are expanded by
+  BIT REPLICATION -- (v << 3) | (v >> 2) -- not by a bare shift: a bare shift
+  maps 31 to 248 rather than 255, so a white pixel comes out slightly grey and
+  a fully-lit skybox face reads as dingy.
+  DECISION: at 15 bits the top bit is undefined padding and alpha is always
+  opaque.  At 16 bits the top bit is alpha, but ONLY when the header's
+  attribute-bits field (attributes & 0x0F) says the file actually carries an
+  alpha channel.  Many writers emit 16-bit with that field zero and the top bit
+  clear, and honouring the bit unconditionally turns every such image fully
+  transparent -- which looks exactly like a broken loader.  Believe the header
+  over the bit.
+
+  Grayscale (image types 3 and 11), 8 or 16 bit.
+  DECISION: 16-bit grayscale is read as LUMINANCE8 + ALPHA8, not as
+  luminance16.  Both readings are defensible from the spec; this one matches
+  FTE, which Spoike confirmed on Discord 2026-08-31 ("fte's tga loader has
+  16bit type 11 tgas as being luminance8_alpha8 instead of luminance16").
+  Content authored against FTE is the content that actually exists, so matching
+  FTE is worth more than picking the other reading.
+============
+*/
+static void Targa_ReadPixel (stdio_buffer_t *buf, byte *out)
+{
+	int	lo, hi;
+
+	switch (targa_header.pixel_size)
+	{
+	case 8:		/* grayscale */
+		out[0] = out[1] = out[2] = Buf_GetC(buf);
+		out[3] = 255;
+		break;
+
+	case 15:
+	case 16:
+		lo = Buf_GetC(buf);
+		hi = Buf_GetC(buf);
+		if (targa_header.image_type == 3 || targa_header.image_type == 11)
+		{	/* luminance8 + alpha8, FTE's reading */
+			out[0] = out[1] = out[2] = (byte)lo;
+			out[3] = (byte)hi;
+		}
+		else
+		{	/* A1R5G5B5 */
+			int	v = lo | (hi << 8);
+			int	r = (v >> 10) & 0x1f;
+			int	g = (v >>  5) & 0x1f;
+			int	b =  v        & 0x1f;
+			out[0] = (byte)((r << 3) | (r >> 2));
+			out[1] = (byte)((g << 3) | (g >> 2));
+			out[2] = (byte)((b << 3) | (b >> 2));
+			if (targa_header.pixel_size == 16 && (targa_header.attributes & 0x0f))
+				out[3] = (v & 0x8000) ? 255 : 0;
+			else
+				out[3] = 255;
+		}
+		break;
+
+	case 24:
+		out[2] = Buf_GetC(buf);		/* blue  */
+		out[1] = Buf_GetC(buf);		/* green */
+		out[0] = Buf_GetC(buf);		/* red   */
+		out[3] = 255;
+		break;
+
+	case 32:
+		out[2] = Buf_GetC(buf);
+		out[1] = Buf_GetC(buf);
+		out[0] = Buf_GetC(buf);
+		out[3] = Buf_GetC(buf);
+		break;
+
+	default:	/* rejected by the header check; keeps the compiler quiet */
+		out[0] = out[1] = out[2] = 0;
+		out[3] = 255;
+		break;
+	}
+}
+
 byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 {
 	int				columns, rows, numPixels;
@@ -256,19 +349,47 @@ byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 	targa_header.attributes = FS_fgetc(fin);
 
 	/* An unsupported-but-legal targa is not a fatal condition: decline it and
-	 * let the caller fall back, the way IMG_LoadTGA already does.  Type 1/3/9/11
-	 * and 8/15/16-bit files are ordinary variants that other engines load, and
-	 * aborting on one takes the whole engine down over a single texture. */
-	if (targa_header.image_type!=2 && targa_header.image_type!=10)
+	 * let the caller fall back, the way IMG_LoadTGA already does.  uhexen2-4w4n
+	 * made that graceful; uhexen2-qqis is the follow-on that decodes the
+	 * variants instead of declining them.
+	 *
+	 * NOW ACCEPTED: 2/10 (true colour, uncompressed and RLE) at 15, 16, 24 or
+	 * 32 bits, and 3/11 (grayscale, uncompressed and RLE) at 8 or 16.
+	 * STILL DECLINED: 1/9, the colour-mapped types, which need the palette
+	 * read and applied rather than a wider pixel reader -- a different job, and
+	 * one no content in this tree is asking for.  Anything else is declined the
+	 * same way it always was. */
+	if (targa_header.image_type != 2 && targa_header.image_type != 10 &&
+	    targa_header.image_type != 3 && targa_header.image_type != 11)
 	{
-		Con_Printf ("Image_LoadTGA: %s is not a type 2 or type 10 targa, skipped\n", loadfilename);
+		Con_Printf ("Image_LoadTGA: %s is targa type %d (only 2/3/10/11 supported), skipped\n",
+			    loadfilename, targa_header.image_type);
 		FS_fclose (fin);
 		return NULL;
 	}
 
-	if (targa_header.colormap_type !=0 || (targa_header.pixel_size!=32 && targa_header.pixel_size!=24))
+	if (targa_header.colormap_type != 0)
 	{
-		Con_Printf ("Image_LoadTGA: %s is not a 24bit or 32bit targa, skipped\n", loadfilename);
+		Con_Printf ("Image_LoadTGA: %s is colour-mapped, skipped\n", loadfilename);
+		FS_fclose (fin);
+		return NULL;
+	}
+
+	if (targa_header.image_type == 3 || targa_header.image_type == 11)
+	{
+		if (targa_header.pixel_size != 8 && targa_header.pixel_size != 16)
+		{
+			Con_Printf ("Image_LoadTGA: %s is %d-bit grayscale (only 8 or 16), skipped\n",
+				    loadfilename, targa_header.pixel_size);
+			FS_fclose (fin);
+			return NULL;
+		}
+	}
+	else if (targa_header.pixel_size != 15 && targa_header.pixel_size != 16 &&
+		 targa_header.pixel_size != 24 && targa_header.pixel_size != 32)
+	{
+		Con_Printf ("Image_LoadTGA: %s is %d-bit (only 15/16/24/32), skipped\n",
+			    loadfilename, targa_header.pixel_size);
 		FS_fclose (fin);
 		return NULL;
 	}
@@ -293,7 +414,7 @@ byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 
 	buf = Buf_Alloc(fin);
 
-	if (targa_header.image_type==2) // Uncompressed, RGB images
+	if (targa_header.image_type==2 || targa_header.image_type==3) // Uncompressed
 	{
 		for(row=rows-1; row>=0; row--)
 		{
@@ -303,35 +424,15 @@ byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 			//johnfitz
 			for(column=0; column<columns; column++)
 			{
-				unsigned char red,green,blue,alphabyte;
-				switch (targa_header.pixel_size)
-				{
-				case 24:
-					blue = Buf_GetC(buf);
-					green = Buf_GetC(buf);
-					red = Buf_GetC(buf);
-					*pixbuf++ = red;
-					*pixbuf++ = green;
-					*pixbuf++ = blue;
-					*pixbuf++ = 255;
-					break;
-				case 32:
-					blue = Buf_GetC(buf);
-					green = Buf_GetC(buf);
-					red = Buf_GetC(buf);
-					alphabyte = Buf_GetC(buf);
-					*pixbuf++ = red;
-					*pixbuf++ = green;
-					*pixbuf++ = blue;
-					*pixbuf++ = alphabyte;
-					break;
-				}
+				Targa_ReadPixel (buf, pixbuf);
+				pixbuf += 4;
 			}
 		}
 	}
-	else if (targa_header.image_type==10) // Runlength encoded RGB images
+	else // Runlength encoded (types 10 and 11)
 	{
-		unsigned char red,green,blue,alphabyte,packetHeader,packetSize,j;
+		unsigned char packetHeader,packetSize,j;
+		byte	rle_pixel[4];
 		for(row=rows-1; row>=0; row--)
 		{
 			//johnfitz -- fix for upside-down targas
@@ -344,30 +445,14 @@ byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 				packetSize = 1 + (packetHeader & 0x7f);
 				if (packetHeader & 0x80) // run-length packet
 				{
-					switch (targa_header.pixel_size)
-					{
-					case 24:
-						blue = Buf_GetC(buf);
-						green = Buf_GetC(buf);
-						red = Buf_GetC(buf);
-						alphabyte = 255;
-						break;
-					case 32:
-						blue = Buf_GetC(buf);
-						green = Buf_GetC(buf);
-						red = Buf_GetC(buf);
-						alphabyte = Buf_GetC(buf);
-						break;
-					default: /* avoid compiler warnings */
-						blue = red = green = alphabyte = 0;
-					}
+					Targa_ReadPixel (buf, rle_pixel);
 
 					for(j=0;j<packetSize;j++)
 					{
-						*pixbuf++=red;
-						*pixbuf++=green;
-						*pixbuf++=blue;
-						*pixbuf++=alphabyte;
+						*pixbuf++=rle_pixel[0];
+						*pixbuf++=rle_pixel[1];
+						*pixbuf++=rle_pixel[2];
+						*pixbuf++=rle_pixel[3];
 						column++;
 						if (column==columns) // run spans across rows
 						{
@@ -387,30 +472,8 @@ byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 				{
 					for(j=0;j<packetSize;j++)
 					{
-						switch (targa_header.pixel_size)
-						{
-						case 24:
-							blue = Buf_GetC(buf);
-							green = Buf_GetC(buf);
-							red = Buf_GetC(buf);
-							*pixbuf++ = red;
-							*pixbuf++ = green;
-							*pixbuf++ = blue;
-							*pixbuf++ = 255;
-							break;
-						case 32:
-							blue = Buf_GetC(buf);
-							green = Buf_GetC(buf);
-							red = Buf_GetC(buf);
-							alphabyte = Buf_GetC(buf);
-							*pixbuf++ = red;
-							*pixbuf++ = green;
-							*pixbuf++ = blue;
-							*pixbuf++ = alphabyte;
-							break;
-						default: /* avoid compiler warnings */
-							blue = red = green = alphabyte = 0;
-						}
+						Targa_ReadPixel (buf, pixbuf);
+						pixbuf += 4;
 						column++;
 						if (column==columns) // pixel packet run spans across rows
 						{
