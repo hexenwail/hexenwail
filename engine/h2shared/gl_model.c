@@ -435,7 +435,17 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 //
 
 // call the apropriate loader
-	mod->needload = NL_PRESENT;
+	/* NL_PRESENT is set once a loader has actually finished, never before it
+	 * starts.  Marking the slot loaded up front means any exit that does not
+	 * complete the load -- a Host_Error longjmp out of a lump loader, an early
+	 * return -- leaves it cached forever as a model that claims to be present
+	 * and holds nothing: ->nodes is still NULL, and the NL_PRESENT early-out
+	 * at the top of this function hands the same empty struct to every later
+	 * Mod_ForName for that name.  The first thing to touch it dies with
+	 * "Mod_PointInLeaf: model w/o nodes", which names neither the real failure
+	 * nor the load it came from -- the player sees it on the NEXT entry to the
+	 * map, typically arriving from another level, long after the actual error
+	 * scrolled off.  Field-reported that way.  uhexen2-pc83. */
 
 	/* Check for MD5mesh skeletal format */
 	const char *ext = COM_FileGetExtension(mod->name);
@@ -449,8 +459,14 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		ahdr = MD5_LoadMesh(mod->name, (byte *)buf, 1024*1024, anim_mins, anim_maxs);
 		if (!ahdr)
 		{
-			mod->type = mod_brush;
-			return mod;
+			/* Same answer the not-found path above gives: the slot stays
+			 * unloaded and the caller is told so.  It used to return the
+			 * model tagged mod_brush and NL_PRESENT, which is a permanent
+			 * nodeless brush model -- the brush render path dereferences
+			 * ->surfaces and ->nodes on those.  uhexen2-pc83. */
+			if (crash)
+				Sys_Error ("%s: %s is not a valid md5mesh", __thisfunc__, mod->name);
+			return NULL;
 		}
 		mod->type = mod_alias;
 		mod->cache_is_hunk = true;
@@ -459,6 +475,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		mod->flags = 0;
 		mod->numframes = ahdr->numframes;
 		mod->synctype = ST_SYNC;
+		mod->needload = NL_PRESENT;
 		return mod;
 	}
 
@@ -478,6 +495,8 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		Mod_LoadBrushModel (mod, buf);
 		break;
 	}
+
+	mod->needload = NL_PRESENT;
 
 	return mod;
 }
@@ -2386,6 +2405,12 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 			loadmodel = Mod_FindName (name);
 			*loadmodel = *mod;
 			strcpy (loadmodel->name, name);
+			/* The submodels are finished right here; nobody loads them
+			 * again.  Mod_LoadModel only marks the model it was handed,
+			 * and Mod_FindName just set these to NL_NEEDS_LOADED, so say
+			 * so explicitly -- otherwise a later Mod_ForName("*1") tries
+			 * to open a file called "*1" and returns NULL.  uhexen2-pc83. */
+			loadmodel->needload = NL_PRESENT;
 			mod = loadmodel;
 		}
 	}

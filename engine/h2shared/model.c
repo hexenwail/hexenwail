@@ -370,7 +370,11 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 //
 
 // call the apropriate loader
-	mod->needload = NL_PRESENT;
+	/* NL_PRESENT is set once a loader has actually finished, never before it
+	 * starts: marking the slot loaded up front leaves any load that does not
+	 * complete cached forever as a model that claims to be present and holds
+	 * nothing, and the NL_PRESENT early-out above then hands that empty struct
+	 * to every later Mod_ForName for the name.  uhexen2-pc83. */
 
 	mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
 	switch (mod_type)
@@ -390,6 +394,8 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		Mod_LoadBrushModel (mod, buf);
 		break;
 	}
+
+	mod->needload = NL_PRESENT;
 
 	return mod;
 }
@@ -1788,6 +1794,9 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 			loadmodel = Mod_FindName (name);
 			*loadmodel = *mod;
 			strcpy (loadmodel->name, name);
+			/* Finished right here; nobody loads a submodel again, and
+			 * Mod_FindName just set it to NL_NEEDS_LOADED.  uhexen2-pc83. */
+			loadmodel->needload = NL_PRESENT;
 			mod = loadmodel;
 		}
 	}
