@@ -108,6 +108,11 @@ GL_FUNCTION(void, glPolygonOffset, (GLfloat,GLfloat))
 GL_FUNCTION(void, glDrawBuffer, (GLenum))
 #endif
 GL_FUNCTION(void, glReadPixels, (GLint,GLint,GLsizei,GLsizei,GLenum,GLenum, GLvoid *))
+/* Readback of a texture rather than of the framebuffer: `imagedump' only.
+ * Desktop GL 1.0 core, but absent from GL ES / WebGL2 entirely -- which is why
+ * it is declared in this branch and the plain-desktop one below, and NOT in the
+ * USE_GLES branch between them.  Every use must sit behind !defined(USE_GLES). */
+GL_FUNCTION(void, glGetTexImage, (GLenum,GLint,GLenum,GLenum,GLvoid *))
 GL_FUNCTION(void, glPixelStorei, (GLenum,GLint))
 GL_FUNCTION(void, glHint, (GLenum,GLenum))
 GL_FUNCTION(void, glCullFace, (GLenum))
@@ -275,6 +280,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 
 #define glDrawBuffer_fp		glDrawBuffer
 #define glReadPixels_fp		glReadPixels
+#define glGetTexImage_fp	glGetTexImage	/* desktop only -- see the note above */
 #define glPixelStorei_fp	glPixelStorei
 #define glHint_fp		glHint
 #define glCullFace_fp		glCullFace

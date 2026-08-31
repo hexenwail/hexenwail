@@ -412,6 +412,58 @@ void CL_Viewpos_f (void)
 #endif
 }
 
+/*
+=============
+CL_Tracepos_f -- FitzQuake's tracepos, by way of Ironwail
+
+viewpos answers "where am I"; tracepos answers "what am I looking at" -- it
+traces the view forward against the world hull and prints where it stopped.
+That is the coordinate to ask a field tester for when the report is "there is
+a hole in the wall over here" and all you have otherwise is a screenshot.
+
+World hull only (hull 0 of cl.worldmodel), so brush models, monsters and items
+are not hit.  That is upstream's behaviour and the useful one: the question is
+almost always about level geometry.
+
+Not routed through chase.c's TraceLine, which memsets the trace and passes it
+straight in.  SV_RecursiveHullCheck returns early on a miss without ever
+writing endpos or fraction, so that helper reports a miss as the world origin
+and cannot distinguish it from a real hit there.  The trace is initialised the
+way SV_ClipMoveToEntity initialises it instead, and the miss is read off
+fraction, which is what fraction is for.
+=============
+*/
+static void CL_Tracepos_f (void)
+{
+	vec3_t	forward, end;
+	trace_t	trace;
+
+	if (cls.state != ca_connected || !cl.worldmodel)
+	{
+		Con_Printf ("Tracepos: not connected\n");
+		return;
+	}
+
+	AngleVectors (cl.viewangles, forward, NULL, NULL);
+	VectorMA (r_refdef.vieworg, 8192, forward, end);
+
+	memset (&trace, 0, sizeof(trace));
+	trace.fraction = 1;
+	trace.allsolid = true;
+	VectorCopy (end, trace.endpos);
+
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1,
+			       r_refdef.vieworg, end, &trace);
+
+	if (trace.fraction == 1)
+		Con_Printf ("Tracepos: trace didn't hit anything\n");
+	else
+		Con_Printf ("Tracepos: (%i %i %i)\n",
+			    (int)trace.endpos[0],
+			    (int)trace.endpos[1],
+			    (int)trace.endpos[2]);
+}
+
 
 /*
 ===============
@@ -1365,5 +1417,6 @@ void CL_Init (void)
 
 	Cmd_AddCommand ("viewpos", CL_Viewpos_f);
 	Cmd_AddCommand ("r_pos", CL_Viewpos_f);
+	Cmd_AddCommand ("tracepos", CL_Tracepos_f);
 }
 
