@@ -3016,6 +3016,58 @@ Mod_ReplacementIsFullyOpaque, which is what bounds the blast radius: only a
 pack that expressed nothing gets rewritten.  uhexen2-5dit
 ===============
 */
+/*
+===============
+Mod_SkinIsHole
+
+Is this skin texel index 0 -- a hole -- with strictly isolated specks removed?
+
+The cutout is point-sampled from a low-res index map onto a replacement that
+is typically a 4x upscale, so ONE stray texel in the original becomes a 4x4
+block in the result.  models/vorpshok.mdl is the case that matters: its
+300x139 skin carries 1014 strictly isolated texels, which at 4x paint about
+16k texels of black confetti around the Vorpal shockwave and pinhole the
+lightning.  The other affected skins are nearly clean (vorpswip 0, axblade 0,
+xhair 1), so this is one noisy piece of source art rather than a systemic
+flaw, but it is the noisiest of the six and it is the one on screen.
+
+STRICTLY isolated -- every in-bounds neighbour disagrees -- and not a 3x3
+majority, which was the first thing tried and is wrong here.  A majority
+filter erases any one-texel-wide feature, and these skins are lightning: a
+lone filament has 8 disagreeing neighbours in a 3x3 window and would vanish.
+Requiring ALL FOUR orthogonal neighbours to disagree cannot erase a connected
+feature, because any texel with a like neighbour is left alone.
+
+Out-of-bounds neighbours are skipped rather than counted as disagreeing, or a
+corner texel with only two real neighbours could be called isolated on the
+strength of the two that do not exist.  uhexen2-4y6w
+===============
+*/
+static qboolean Mod_SkinIsHole (const byte *skin, int skinw, int skinh,
+				int sx, int sy)
+{
+	static const int	nx[4] = {  1, -1,  0,  0 };
+	static const int	ny[4] = {  0,  0,  1, -1 };
+	qboolean	me = (skin[(size_t)sy * skinw + sx] == 0);
+	int		i, seen = 0, agree = 0;
+
+	for (i = 0; i < 4; i++)
+	{
+		int	ax = sx + nx[i], ay = sy + ny[i];
+
+		if (ax < 0 || ay < 0 || ax >= skinw || ay >= skinh)
+			continue;
+		seen++;
+		if ((skin[(size_t)ay * skinw + ax] == 0) == me)
+			agree++;
+	}
+
+	if (seen > 0 && agree == 0)
+		return !me;	/* a speck: flip it into its surroundings */
+	return me;
+}
+
+
 static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 				       int skinw, int skinh, int mdl_flags)
 {
@@ -3045,15 +3097,24 @@ static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 
 	for (y = 0; y < rep->height; y++)
 	{
-		const byte	*row = skin + (y * skinh / rep->height) * skinw;
+		int		sy  = y * skinh / rep->height;
+		const byte	*row = skin + (size_t)sy * skinw;
 		byte		*dst = rep->rgba + (size_t)y * rep->width * 4 + 3;
 
 		for (x = 0; x < rep->width; x++, dst += 4)
 		{
-			int	p = row[x * skinw / rep->width];
+			int	sx = x * skinw / rep->width;
+			int	p  = row[sx];
 
 			if (mode == EF_TRANSPARENT)
-				*dst = (p == 0) ? 0 : (p & 1) ? (byte)wateralpha : 255;
+				/* Despeckled hole test rather than a bare
+				 * p == 0: see Mod_SkinIsHole.  The wateralpha
+				 * arm is NOT despeckled -- that is a per-texel
+				 * translucency classification, not a cutout,
+				 * and smoothing it would invent a translucency
+				 * the model never had. */
+				*dst = Mod_SkinIsHole (skin, skinw, skinh, sx, sy) ? 0
+				     : (p & 1) ? (byte)wateralpha : 255;
 			else
 				/* Complemented, because alpha means OPACITY
 				 * since uhexen2-3z3e -- ColorPercent is a
