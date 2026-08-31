@@ -585,6 +585,10 @@ GLuint GL_LoadReplacement (const char *identifier, const struct imgreplace_s *r,
 GLuint GL_LoadPicTexture (qpic_t *pic);
 void D_ClearOpenGLTextures (int last_tex);
 
+/* gl_texmgr.c: uploads the notexture/nulltexture placeholders and binds
+ * notexture to r_notexture_mip.  Must run after R_InitTextures. */
+void TexMgr_Init (void);
+
 qboolean R_CullBox (vec3_t mins, vec3_t maxs);
 void R_DrawBrushModel (entity_t *e, qboolean Translucent);
 void R_DrawWorld (void);

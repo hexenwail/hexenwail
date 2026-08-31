@@ -374,6 +374,7 @@ void R_Init (void)
 
 	R_InitBubble();
 
+	TexMgr_Init ();
 	R_InitParticles ();
 	R_InitParticleTexture ();
 	R_InitExtraTextures ();

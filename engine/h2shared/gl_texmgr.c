@@ -120,20 +120,44 @@ void TexMgr_NewGame (void)
 	TexMgr_LoadPalette ();
 }
 
+/* Ironwail's placeholder pixels, byte for byte (Quake/gl_texmgr.c). */
+static byte notexture_data[16] = {159,91,83,255,0,0,0,255,0,0,0,255,159,91,83,255}; //black and pink checker
+static byte nulltexture_data[16] = {127,191,255,255,0,0,0,255,0,0,0,255,127,191,255,255}; //black and blue checker
+
+/* Deliberately not routed through TexMgr_LoadImage: notexture and
+ * nulltexture must stay the static objects that TexMgr_FreeTexture and
+ * gl_sky.c compare against by pointer, and pool slots are scarce enough
+ * that the skybox cache (16 entries x 6 faces) needs all of them. */
+static void TexMgr_UploadPlaceholder (gltexture_t *tex, const char *name, const byte *rgba)
+{
+	if (tex->texnum)
+		return;
+
+	glGenTextures_fp (1, &tex->texnum);
+	glBindTexture_fp (GL_TEXTURE_2D, tex->texnum);
+	currenttexture = tex->texnum;
+
+	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	glTexImage2D_fp (GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+	tex->width = 2;
+	tex->height = 2;
+	tex->flags = TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP;
+	q_strlcpy (tex->identifier, name, sizeof(tex->identifier));
+}
+
 void TexMgr_Init (void)
 {
-	/* Initialize placeholder textures */
-	notexture->texnum = 0;
-	strcpy(notexture->identifier, "notexture");
-	notexture->width = 2;
-	notexture->height = 2;
-	notexture->flags = 0;
+	TexMgr_UploadPlaceholder (notexture, "notexture", notexture_data);
+	TexMgr_UploadPlaceholder (nulltexture, "nulltexture", nulltexture_data);
 
-	nulltexture->texnum = 0;
-	strcpy(nulltexture->identifier, "nulltexture");
-	nulltexture->width = 2;
-	nulltexture->height = 2;
-	nulltexture->flags = 0;
+	/* R_InitTextures runs before the renderer has a GL context, so it
+	 * cannot bind this itself. */
+	r_notexture_mip->gl_texturenum = notexture->texnum;
 }
 
 /* TexMgr_LoadImage - simplified for uhexen2 compatibility */
