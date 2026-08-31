@@ -173,6 +173,42 @@ and `fog` spellings are still accepted for maps that already ship them, and
 neither spelling produces an `'sky' is not a field` warning any more. `sky
 <name>` also works from the console.
 
+### Entity search for mappers
+`entsearch`, in the [`utils/`](utils/entsearch) toolchain, searches `.map`
+sources for entities by classname, property name and value — for when you need
+to know what value someone else put in a property, which classnames actually
+use it, and whether the thing you are about to try has been done before. All
+three arguments are regexes, and each has to match a whole name or value:
+
+```
+entsearch "*" spawnflags 64                  # anything with the 64 box checked
+entsearch "*" "*" ".*\.wav"                  # every sound reference, anywhere
+entsearch light_torch.* light "*"            # every torch and its light value
+entsearch func_door.* classname              # one line per door, both variants
+```
+
+An integer value is also matched against the *bits* of spawnflags and its kin,
+so `2` finds everything with at least that box checked — whatever else is
+checked alongside it — and every hit prints its decomposition plus coordinates
+to paste into TrenchBroom's *Move Camera to...* box:
+
+```
+Line 15132: (trigger_teleport)   spawnflags          == 131 [1][2][128]  at -768 -1872 176
+Line 21642: (func_door_rotating) opendraw.spawnflags == 98 [2][32][64]   at -112 -264 -12
+```
+
+`+p` writes a `.pts` point file beside each matching map so you can step from
+one hit to the next in the editor. Search paths, exclusions and the list of
+flag properties live in `entsearch-config.xml`.
+
+The design is [Inky](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)'s
+— his **MapSearch** is the reference implementation and the one to use on
+Windows. `entsearch` shares none of its code and exists so the toolchain has an
+entity search that builds from source alongside qbsp and light on every
+platform we ship. It reads `.map` text, so decompile your `.bsp` first
+(`utils/bsp2map` does it). Build it with `nix build .#utils`; full
+documentation is in [`utils/entsearch/README`](utils/entsearch/README).
+
 ### Platform
 - SDL3 on Linux and Windows
 - CMake build, Nix flake (reproducible builds + Windows cross-compilation), Flatpak

@@ -1,7 +1,7 @@
-/* ms_regex.c -- a small self-contained regular expression engine.
+/* es_regex.c -- a small self-contained regular expression engine.
  * Copyright (C) 2026  uHexen2 developers
  *
- * See mapsearch.h for the supported syntax.  Matching is whole-string and
+ * See entsearch.h for the supported syntax.  Matching is whole-string and
  * backtracking; both the patterns (a command line argument) and the subjects
  * (an entity property name or value) are short enough that nothing cleverer
  * is called for.  A step budget covers the pathological cases anyway.
@@ -26,7 +26,7 @@
 #include "compiler.h"
 #include "arch_def.h"
 #include "cmdlib.h"
-#include "mapsearch.h"
+#include "entsearch.h"
 
 #define	RE_INF		0x7fffffff
 #define	RE_MAXSTEPS	4000000L
@@ -59,7 +59,7 @@ typedef struct
 	int		numbranches;
 } renode_t;
 
-struct msregex_s
+struct esregex_s
 {
 	renode_t	*nodes;
 	int		numnodes;
@@ -76,7 +76,7 @@ struct msregex_s
 
 typedef struct
 {
-	msregex_t	*re;
+	esregex_t	*re;
 	const char	*start;
 	const char	*p;
 	char		*err;
@@ -85,12 +85,12 @@ typedef struct
 } reparse_t;
 
 /* locale independent, unlike <ctype.h> */
-static int ms_lower (int c)
+static int es_lower (int c)
 {
 	return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
 }
 
-static int ms_upper (int c)
+static int es_upper (int c)
 {
 	return (c >= 'a' && c <= 'z') ? c - ('a' - 'A') : c;
 }
@@ -111,7 +111,7 @@ static void re_error (reparse_t *ps, const char *fmt, ...)
 
 static int re_newnode (reparse_t *ps, int type)
 {
-	msregex_t	*re = ps->re;
+	esregex_t	*re = ps->re;
 	renode_t	*n;
 
 	if (re->numnodes == re->maxnodes)
@@ -152,7 +152,7 @@ static void re_setchar (reparse_t *ps, int nodeidx, int c)
 	set[c >> 3] |= 1 << (c & 7);
 	if (ps->re->ignorecase)
 	{
-		int	other = (c == ms_lower(c)) ? ms_upper(c) : ms_lower(c);
+		int	other = (c == es_lower(c)) ? es_upper(c) : es_lower(c);
 		set[other >> 3] |= 1 << (other & 7);
 	}
 }
@@ -172,7 +172,7 @@ static qboolean re_setshorthand (reparse_t *ps, int nodeidx, int letter)
 	unsigned char	*set = ps->re->nodes[nodeidx].set;
 	int		c;
 	qboolean	negate = false;
-	int		lower = ms_lower (letter);
+	int		lower = es_lower (letter);
 	unsigned char	tmp[32];
 
 	if (lower != 'd' && lower != 'w' && lower != 's')
@@ -387,7 +387,7 @@ static int re_parse_atom (reparse_t *ps)
 	}
 
 	idx = re_newnode (ps, RE_CHAR);
-	ps->re->nodes[idx].ch = ps->re->ignorecase ? ms_lower (c) : c;
+	ps->re->nodes[idx].ch = ps->re->ignorecase ? es_lower (c) : c;
 	return idx;
 }
 
@@ -548,10 +548,10 @@ static int re_parse_alt (reparse_t *ps)
 	return idx;
 }
 
-msregex_t *MS_RegexCompile (const char *pattern, qboolean ignorecase,
+esregex_t *ES_RegexCompile (const char *pattern, qboolean ignorecase,
 			    char *errbuf, size_t errlen)
 {
-	msregex_t	*re;
+	esregex_t	*re;
 	reparse_t	ps;
 
 	if (!pattern)
@@ -559,7 +559,7 @@ msregex_t *MS_RegexCompile (const char *pattern, qboolean ignorecase,
 	if (errbuf && errlen)
 		*errbuf = '\0';
 
-	re = (msregex_t *) SafeMalloc (sizeof(msregex_t));
+	re = (esregex_t *) SafeMalloc (sizeof(esregex_t));
 	memset (re, 0, sizeof(*re));
 	re->ignorecase = ignorecase;
 	re->head = -1;
@@ -577,13 +577,13 @@ msregex_t *MS_RegexCompile (const char *pattern, qboolean ignorecase,
 
 	if (ps.failed)
 	{
-		MS_RegexFree (re);
+		ES_RegexFree (re);
 		return NULL;
 	}
 	return re;
 }
 
-void MS_RegexFree (msregex_t *re)
+void ES_RegexFree (esregex_t *re)
 {
 	int	i;
 
@@ -621,11 +621,11 @@ typedef struct recont_s
 	const struct recont_s	*k;
 } recont_t;
 
-static qboolean re_from (msregex_t *re, int idx, const char *s, const recont_t *k);
-static qboolean re_repeat (msregex_t *re, int idx, int count, const char *s,
+static qboolean re_from (esregex_t *re, int idx, const char *s, const recont_t *k);
+static qboolean re_repeat (esregex_t *re, int idx, int count, const char *s,
 			   const char *iterstart, const recont_t *k);
 
-static qboolean re_cont (msregex_t *re, const char *s, const recont_t *k)
+static qboolean re_cont (esregex_t *re, const char *s, const recont_t *k)
 {
 	if (!k)
 		return (*s == '\0');	/* the whole subject must be consumed */
@@ -644,7 +644,7 @@ static const recont_t *re_push (int next, const recont_t *k, recont_t *frame)
 	return frame;
 }
 
-static qboolean re_node (msregex_t *re, int idx, const char *s, const recont_t *k)
+static qboolean re_node (esregex_t *re, int idx, const char *s, const recont_t *k)
 {
 	const renode_t	*n = &re->nodes[idx];
 	const recont_t	*kk;
@@ -659,7 +659,7 @@ static qboolean re_node (msregex_t *re, int idx, const char *s, const recont_t *
 		if (!c)
 			return false;
 		if (re->ignorecase)
-			c = (unsigned char) ms_lower (c);
+			c = (unsigned char) es_lower (c);
 		if (c != n->ch)
 			return false;
 		return re_from (re, n->next, s + 1, k);
@@ -703,7 +703,7 @@ static qboolean re_node (msregex_t *re, int idx, const char *s, const recont_t *
 	return false;
 }
 
-static qboolean re_from (msregex_t *re, int idx, const char *s, const recont_t *k)
+static qboolean re_from (esregex_t *re, int idx, const char *s, const recont_t *k)
 {
 	qboolean	result;
 
@@ -722,7 +722,7 @@ static qboolean re_from (msregex_t *re, int idx, const char *s, const recont_t *
 	return result;
 }
 
-static qboolean re_repeat (msregex_t *re, int idx, int count, const char *s,
+static qboolean re_repeat (esregex_t *re, int idx, int count, const char *s,
 			   const char *iterstart, const recont_t *k)
 {
 	const renode_t	*n = &re->nodes[idx];
@@ -763,7 +763,7 @@ static qboolean re_repeat (msregex_t *re, int idx, int count, const char *s,
 	return false;
 }
 
-qboolean MS_RegexMatch (msregex_t *re, const char *text)
+qboolean ES_RegexMatch (esregex_t *re, const char *text)
 {
 	if (!re || !text)
 		return false;

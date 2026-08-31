@@ -43,3 +43,11 @@ dcc	: An old progs.dat decompiler (and compiler) for Hexen2 by
 	  Eric Hobbs. It may be of interest due to its decompiler
 	  facilities.
 
+entsearch: Searches .map sources for entities by classname and by
+	  property name and value, with regexes, and decomposes
+	  integer values against spawnflags and the other flag
+	  properties. Optionally writes TrenchBroom .pts point files
+	  to step through the hits. The design follows Inky's
+	  MapSearch, which is the reference implementation; see
+	  entsearch/README.
+
