@@ -3052,7 +3052,7 @@ assume it means.
 
 ON BY DEFAULT, because every EF_SPECIAL_TRANS replacement skin measured on a
 retail data1 + SoT install is authored to the legacy convention, and none to the
-current one.  Shadows of Turmoil is the case that decides it: ray1.mdl (12 skins)
+current one.  Storm over Thyrion is the case that decides it: ray1.mdl (12 skins)
 and ray2.mdl (2) carry alpha ~236-246 where the art is BLACK and ~91-143 where it
 is BRIGHT, which is a transparency, and on current master they therefore draw a
 near-opaque black quad with the light shaft faint inside it.  The same pack's
@@ -3888,7 +3888,7 @@ only shows up for players running the base game without the mission pack.
 Patch the flag in at load time so both configurations match.
 
 Applied only when the loaded copy declares no transparency mode at all, so a
-mod shipping its own ball.mdl -- already fixed like Shadows of Turmoil's, or
+mod shipping its own ball.mdl -- already fixed like Storm over Thyrion's, or
 deliberately using a different mode -- is left alone.  Must run before
 Mod_LoadAllSkins, which reads mod->flags to choose the skin's tex_mode.
 =================
