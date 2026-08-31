@@ -56,6 +56,10 @@ cvar_t	sv_cheats		= {"sv_cheats", "0", CVAR_NONE};
  * cvar, so a mid-map change cannot outrun the allocation. */
 int	sv_max_edicts = MAX_EDICTS;
 
+/* Set when QC filled sv.datagram past the point where the next write would be
+ * fatal.  Cleared every frame by SV_ClearDatagram.  See WriteDest in pr_cmds.c. */
+qboolean	sv_datagram_dropped = false;
+
 cvar_t	sv_ce_scale		= {"sv_ce_scale", "0", CVAR_ARCHIVE};
 cvar_t	sv_ce_max_size		= {"sv_ce_max_size", "0", CVAR_ARCHIVE};
 
@@ -919,6 +923,7 @@ SV_ClearDatagram
 void SV_ClearDatagram (void)
 {
 	SZ_Clear (&sv.datagram);
+	sv_datagram_dropped = false;
 }
 
 /*
