@@ -63,9 +63,10 @@ static cvar_t	external_vis  = {"external_vis", "1", CVAR_ARCHIVE};
 static cvar_t	r_replacement_restore_alpha = {"r_replacement_restore_alpha", "1", CVAR_ARCHIVE};
 
 /* Read an EF_SPECIAL_TRANS replacement skin's alpha as a TRANSPARENCY, the way
- * every engine before uhexen2-3z3e did.  Off by default; see
- * Mod_LegacySpecialTransAlpha.  uhexen2-4y6w */
-static cvar_t	r_legacy_special_trans_alpha = {"r_legacy_special_trans_alpha", "0", CVAR_ARCHIVE};
+ * every engine before uhexen2-3z3e did.  ON by default, because that is what
+ * the installed base was authored against; see Mod_LegacySpecialTransAlpha.
+ * Set 0 for a pack authored against current semantics.  uhexen2-4y6w */
+static cvar_t	r_legacy_special_trans_alpha = {"r_legacy_special_trans_alpha", "1", CVAR_ARCHIVE};
 
 static byte	mod_novis[MAX_MAP_LEAFS/8];
 
@@ -3049,12 +3050,26 @@ special case.  Note this runs BEFORE Mod_ReplacementIsFullyOpaque, so the guard
 and any rebuild downstream reason about a channel that already means what they
 assume it means.
 
-OFF BY DEFAULT, and deliberately a switch rather than a heuristic.  Nothing in
-the file distinguishes a legacy alpha from a current one -- an all-zero channel
-is "fully opaque" under one reading and "fully invisible" under the other -- and
-this bead's own strongest finding is that such intent is not recoverable from the
-data.  Guessing would break correctly authored packs to rescue legacy ones.  So
-the player running a legacy pack says so.
+ON BY DEFAULT, because every EF_SPECIAL_TRANS replacement skin measured on a
+retail data1 + SoT install is authored to the legacy convention, and none to the
+current one.  Shadows of Turmoil is the case that decides it: ray1.mdl (12 skins)
+and ray2.mdl (2) carry alpha ~236-246 where the art is BLACK and ~91-143 where it
+is BRIGHT, which is a transparency, and on current master they therefore draw a
+near-opaque black quad with the light shaft faint inside it.  The same pack's
+ray3.mdl is EF_TRANSPARENT and is authored the other way round -- alpha 6 where
+dark, 86 where bright, an opacity -- and this function does not touch it.  One
+author, one era, each flag matched to the blend func it had in r6303.
+
+3z3e is recent, so content authored against the current convention is the case
+that barely exists yet; the installed base predates it.  A pack that does want
+opacity semantics sets this to 0.
+
+Deliberately still a switch rather than a heuristic.  Nothing in an individual
+file distinguishes the two readings -- an all-zero channel is "fully opaque"
+under one and "fully invisible" under the other -- and this bead's own strongest
+finding is that such intent is not recoverable from the data.  The dark-vs-bright
+correlation above is evidence about a corpus, not a per-file test worth wiring
+into the loader.
 
 Skipped for a file that carries no alpha at all.  A 24-bit replacement has none;
 IMG_LoadTGA fills it with 255, and complementing that would turn a file that
