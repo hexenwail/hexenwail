@@ -144,6 +144,11 @@ static float sky_box_scroll; // UV scroll offset applied each frame in Sky_DrawS
 static float skywind_dist   = 0.0f;	/* amplitude, clamped to [-2, 2] (0 = wind off) */
 static float skywind_yaw    = 45.0f;	/* horizontal direction, degrees */
 static float skywind_period = 30.0f;	/* seconds per oscillation cycle */
+/* Parsed, stored and written back out, but NOT used when drawing: our sky
+ * scroll is 2D, so pitch has no effect here.  It is kept anyway so that a
+ * wind.cfg authored through these commands round-trips losslessly, both
+ * through us and through Ironwail, which does use it. */
+static float skywind_pitch  = 0.0f;	/* vertical direction, degrees */
 
 /* Per-frame wind UV offset, consumed by GL_ImmFlush -> u_wind on gl_shader_sky. */
 float sky_wind_uv[2] = { 0.0f, 0.0f };
@@ -694,6 +699,176 @@ void Sky_LoadSkyBox (const char *name)
 
 /*
 ==================
+Sky_NormalizeWind
+
+Ironwail's ranges, applied on every path that can change these, so a file we
+write is one their loader accepts unchanged and vice versa.
+==================
+*/
+static void Sky_NormalizeWind (void)
+{
+	skywind_dist  = CLAMP(-2.0f, skywind_dist, 2.0f);
+	skywind_yaw   = (float) fmod (skywind_yaw, 360.0);
+	skywind_pitch = (float) (fmod (skywind_pitch + 90.0, 180.0) - 90.0);
+}
+
+/* Every skywind command needs a sky to attach the numbers to. */
+static qboolean Sky_WindReady (void)
+{
+	if (!skybox_name[0])
+	{
+		Con_Printf ("No skybox loaded\n");
+		return false;
+	}
+	return true;
+}
+
+/*
+==================
+Skywind_f -- print or set the wind parameters live
+==================
+*/
+static void Skywind_f (void)
+{
+	if (!Sky_WindReady())
+		return;
+
+	if (Cmd_Argc() < 2)
+	{
+		Con_Printf ("usage: %s <distance> [yaw] [period] [pitch]\n"
+			    "current values:\n"
+			    "   distance is %g\n"
+			    "   yaw      is %g\n"
+			    "   period   is %g\n"
+			    "   pitch    is %g  (stored and saved, but not drawn with)\n",
+			    Cmd_Argv(0), skywind_dist, skywind_yaw, skywind_period, skywind_pitch);
+		return;
+	}
+
+	skywind_dist = (float) atof (Cmd_Argv(1));
+	if (Cmd_Argc() >= 3) skywind_yaw    = (float) atof (Cmd_Argv(2));
+	if (Cmd_Argc() >= 4) skywind_period = (float) atof (Cmd_Argv(3));
+	if (Cmd_Argc() >= 5) skywind_pitch  = (float) atof (Cmd_Argv(4));
+	Sky_NormalizeWind ();
+}
+
+/*
+==================
+Skywind_LookDir_f -- take the direction from where the camera is pointing
+
+The point of the whole command set: aim the view the way you want the clouds
+to travel, then skywind_save.  The yaw is inverted so the clouds come TOWARDS
+the player rather than receding, which is what "looking into the wind" means.
+==================
+*/
+static void Skywind_LookDir_f (void)
+{
+	if (cls.state != ca_connected || !Sky_WindReady())
+		return;
+
+	skywind_yaw   = (float) (cl.viewangles[YAW] + 180.0);
+	skywind_pitch = -cl.viewangles[PITCH];
+
+	if (Cmd_Argc() >= 2)
+		skywind_period = (float) atof (Cmd_Argv(1));
+	else if (skywind_period == 0.0f)
+		skywind_period = 30.0f;
+
+	if (Cmd_Argc() >= 3)
+		skywind_dist = (float) atof (Cmd_Argv(2));
+	else if (skywind_dist == 0.0f)
+		skywind_dist = 1.0f;
+
+	Sky_NormalizeWind ();
+	Con_Printf ("skywind: dist=%g yaw=%g period=%g pitch=%g\n",
+		    skywind_dist, skywind_yaw, skywind_period, skywind_pitch);
+}
+
+/*
+==================
+Skywind_Rotate_f -- nudge the direction without retyping it
+==================
+*/
+static void Skywind_Rotate_f (void)
+{
+	if (!Sky_WindReady())
+		return;
+
+	if (Cmd_Argc() < 2)
+	{
+		Con_Printf ("usage: %s <yawdelta> [pitchdelta]\n", Cmd_Argv(0));
+		return;
+	}
+
+	skywind_yaw += (float) atof (Cmd_Argv(1));
+	if (Cmd_Argc() >= 3)
+		skywind_pitch += (float) atof (Cmd_Argv(2));
+	Sky_NormalizeWind ();
+	Con_Printf ("skywind: yaw=%g pitch=%g\n", skywind_yaw, skywind_pitch);
+}
+
+/*
+==================
+Skywind_Save_f -- write the current parameters back out
+
+Writes under the USERDIR copy of the gamedir, not the game directory itself:
+the latter is frequently read-only (a pak, or a store path), and the userdir
+is both writable and on the search path, so Skywind_Load_f finds what this
+wrote.  The full path is printed so an author can copy it next to their
+skybox when they are happy with it.
+==================
+*/
+static void Skywind_Save_f (void)
+{
+	char	dir[MAX_OSPATH];
+	char	relname[MAX_QPATH];
+	char	path[MAX_OSPATH];
+	FILE	*f;
+
+	if (!Sky_WindReady())
+		return;
+
+	q_strlcpy (dir, FS_MakePath (FS_USERDIR, NULL, "gfx"), sizeof(dir));
+	Sys_mkdir (dir, false);
+	q_strlcpy (dir, FS_MakePath (FS_USERDIR, NULL, "gfx/env"), sizeof(dir));
+	Sys_mkdir (dir, false);
+
+	q_snprintf (relname, sizeof(relname), "gfx/env/%swind.cfg", skybox_name);
+	q_strlcpy (path, FS_MakePath (FS_USERDIR, NULL, relname), sizeof(path));
+
+	f = fopen (path, "wt");
+	if (!f)
+	{
+		Con_Printf ("Couldn't write '%s'\n", path);
+		return;
+	}
+
+	/* Same line shape Ironwail writes and both engines parse. */
+	fprintf (f, "// distance yaw period pitch\n"
+		    "skywind %g %g %g %g\n",
+		 skywind_dist, skywind_yaw, skywind_period, skywind_pitch);
+	fclose (f);
+
+	Con_Printf ("Wrote %s\n", path);
+}
+
+/*
+==================
+Skywind_Load_f -- re-read the cfg for the current skybox
+==================
+*/
+static void Skywind_Load_f (void)
+{
+	if (!Sky_WindReady())
+		return;
+
+	Sky_LoadWindCfg (skybox_name);
+	Con_Printf ("skywind: dist=%g yaw=%g period=%g pitch=%g\n",
+		    skywind_dist, skywind_yaw, skywind_period, skywind_pitch);
+}
+
+/*
+==================
 Sky_LoadWindCfg
 
 Loads gfx/env/<name>wind.cfg if present (Ironwail format):
@@ -716,6 +891,7 @@ void Sky_LoadWindCfg (const char *name)
 	skywind_dist   = 0.0f;
 	skywind_yaw    = 45.0f;
 	skywind_period = 30.0f;
+	skywind_pitch  = 0.0f;
 	sky_wind_uv[0] = sky_wind_uv[1] = 0.0f;
 
 	if (!name || !name[0])
@@ -733,10 +909,11 @@ void Sky_LoadWindCfg (const char *name)
 		if ((p = COM_Parse(p)) != NULL) skywind_dist   = (float)atof(com_token);
 		if ((p = COM_Parse(p)) != NULL) skywind_yaw    = (float)atof(com_token);
 		if ((p = COM_Parse(p)) != NULL) skywind_period = (float)atof(com_token);
-		/* fourth token = pitch; consumed but ignored */
-		skywind_dist = CLAMP(-2.0f, skywind_dist, 2.0f);
-		Con_DPrintf ("Sky wind: dist=%g yaw=%g period=%g (from %s)\n",
-			     skywind_dist, skywind_yaw, skywind_period, filename);
+		/* fourth token = pitch: stored for round-tripping, not drawn with */
+		if ((p = COM_Parse(p)) != NULL) skywind_pitch  = (float)atof(com_token);
+		Sky_NormalizeWind ();
+		Con_DPrintf ("Sky wind: dist=%g yaw=%g period=%g pitch=%g (from %s)\n",
+			     skywind_dist, skywind_yaw, skywind_period, skywind_pitch, filename);
 	}
 	else
 	{
@@ -919,6 +1096,11 @@ void Sky_Init (void)
 	Cvar_RegisterVariable (&r_skywind);
 
 	Cmd_AddCommand ("sky",Sky_SkyCommand_f);
+	Cmd_AddCommand ("skywind", Skywind_f);
+	Cmd_AddCommand ("skywind_load", Skywind_Load_f);
+	Cmd_AddCommand ("skywind_save", Skywind_Save_f);
+	Cmd_AddCommand ("skywind_rotate", Skywind_Rotate_f);
+	Cmd_AddCommand ("skywind_lookdir", Skywind_LookDir_f);
 
 	for (i=0; i<6; i++)
 	{
