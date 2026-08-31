@@ -634,7 +634,7 @@ static void PF_pimpmodel (void)
 		 * ...but only for content that predates the r15 reach flags.
 		 *
 		 * The inference is load-bearing for shipped maps: of the 151
-		 * misc_modelpimp entities across Shadows of Turmoil and Wheel of
+		 * misc_modelpimp entities across Storm over Thyrion and Wheel of
 		 * Karma, 40 rely on it for their orb — spawnflags 0 and 1, chiefly
 		 * the spinning puzzle keys and items that set glow_color, health
 		 * (orb radius) and style but never spawnflag 4. Requiring bit 4

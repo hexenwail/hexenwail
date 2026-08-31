@@ -130,9 +130,9 @@ at the time, and the defect is intermittent per map load.
 
 ---
 
-# Addendum — map identified: SoT (Shadows of Turmoil) Egypt (2026-08-18)
+# Addendum — map identified: SoT (Storm over Thyrion) Egypt (2026-08-18)
 
-Reporter confirms the map is Shadows of Turmoil's Egypt. `sot/maps/egypt.bsp`
+Reporter confirms the map is Storm over Thyrion's Egypt. `sot/maps/egypt.bsp`
 and `egypt2.bsp` are present on the dev box, so the entity lumps were parsed
 directly.
 
