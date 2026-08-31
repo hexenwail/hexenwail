@@ -113,6 +113,53 @@ extern	qboolean menu_disabled_mouse;
 
 //=============================================================================
 
+/*
+===============
+CL_SetLightstyleLevels
+
+Precompute the constant levels r_flatlightstyles holds a style at: the mean of
+its frames and the brightest of them.  Ironwail computes these where the style
+arrives, and so does this, because they change only when the style does.
+
+The first character needs care that upstream's does not.  This engine gives a
+style an explicit animation rate by prefixing '1', '2' or '3' (10/20/30 Hz, see
+R_AnimateLight); that character is a rate selector, not a light level, and
+averaging it in would drag the level towards ('1' - 'a') -- a large negative
+number -- for every style that uses one.
+===============
+*/
+void CL_SetLightstyleLevels (lightstyle_t *ls)
+{
+	const char	*map = ls->map;
+	int		len = ls->length;
+	int		total = 0, i;
+	char		peak;
+
+	if (len > 0 && (map[0] == '1' || map[0] == '2' || map[0] == '3'))
+	{
+		map++;
+		len--;
+	}
+
+	if (len <= 0)
+	{	/* no frames, or a rate prefix and nothing after it.  256 is what
+		 * R_AnimateLight uses for "no style def", and 'a' + 256/22 is
+		 * past 'z', so name the level that maps back onto it. */
+		ls->average = ls->peak = 'a' + (256 / 22);
+		return;
+	}
+
+	peak = map[0];
+	for (i = 0; i < len; i++)
+	{
+		total += map[i];
+		if (map[i] > peak)
+			peak = map[i];
+	}
+
+	ls->average = (char)(total / len);
+	ls->peak = peak;
+}
 
 /*
 ===============
@@ -1707,6 +1754,7 @@ void CL_ParseServerMessage (void)
 				Sys_Error ("svc_lightstyle > MAX_LIGHTSTYLES");
 			q_strlcpy (cl_lightstyle[i].map, MSG_ReadString(), MAX_STYLESTRING);
 			cl_lightstyle[i].length = strlen(cl_lightstyle[i].map);
+			CL_SetLightstyleLevels (&cl_lightstyle[i]);
 			break;
 
 		case svc_sound:

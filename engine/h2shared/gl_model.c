@@ -3669,15 +3669,23 @@ void Mod_SetExtraFlags (qmodel_t *mod)
 	extern cvar_t r_nolerp_list;
 	extern cvar_t r_lerp_autodetect;
 	extern cvar_t r_lerp_autodetect_threshold;
+	extern cvar_t r_noshadow_list;
 
 	if (!mod || mod->type != mod_alias)
 		return;
 
 	/* Strip prior engine-set bits (preserve everything in the EF_* range). */
-	mod->flags &= ~MOD_NOLERP;
+	mod->flags &= ~(MOD_NOLERP | MOD_NOSHADOW);
 
 	if (nameInList (r_nolerp_list.string, mod->name))
 		mod->flags |= MOD_NOLERP;
+
+	/* Ironwail's r_noshadow_list, uhexen2-a5nn.11.  Resolved here rather
+	 * than compared per draw: the two shadow call sites run once per
+	 * shadow-casting entity per frame, and this runs once per model per
+	 * load or cvar change. */
+	if (nameInList (r_noshadow_list.string, mod->name))
+		mod->flags |= MOD_NOSHADOW;
 
 	if (r_lerp_autodetect.integer &&
 	    mod->flipbook_max_ratio > r_lerp_autodetect_threshold.value)
