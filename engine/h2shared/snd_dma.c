@@ -110,6 +110,18 @@ cvar_t		loadas8bit = {"loadas8bit", "0", CVAR_NONE};
  * not a bug fix, and this one has been reverted once already. */
 cvar_t		snd_resample = {"snd_resample", "0", CVAR_ARCHIVE | CVAR_CALLBACK};
 
+/* Output mix rate.  Deliberately NOT archived, as upstream: a value the device
+ * cannot open would otherwise persist into a config and leave someone with no
+ * audio and no obvious way back.
+ *
+ * S_Init runs before hexen.rc, config.cfg and stuffcmds (host.c), so setting
+ * this from a config or a `+snd_mixspeed` argument cannot reach the device
+ * open -- the cvar would still read its default when the device is created,
+ * and there is no snd_restart to apply it afterwards.  That is why Ironwail
+ * pairs it with a -mixspeed switch, and why this does too: the cvar is the
+ * storage and the reporting surface, the switch is how you actually set it. */
+cvar_t		snd_mixspeed = {"snd_mixspeed", "44100", CVAR_NONE};
+
 static	cvar_t	sfx_mutedvol = {"sfx_mutedvol", "0", CVAR_ARCHIVE};
 static	cvar_t	bgm_mutedvol = {"bgm_mutedvol", "0", CVAR_ARCHIVE};
 
@@ -145,21 +157,43 @@ static void S_ProcessCmdline (void)
 {
 	int		i, tmp;
 
+	/* -sndspeed keeps its whitelist: it predates snd_mixspeed and someone's
+	   launcher may already carry it, so its behaviour is left alone beyond
+	   routing the result through the cvar. */
 	tmp = COM_CheckParm("-sndspeed");
 	if (tmp != 0 && tmp < com_argc - 1)
 	{
-	/* I won't rely on users' precision in typing or their needs
-	   here. If you know what you're doing, then change this. */
 		tmp = atoi(com_argv[tmp + 1]);
 		for (i = 0; i < MAX_TRYRATES; i++)
 		{
 			if (tmp == tryrates[i])
 			{
-				desired_speed = tmp;
+				Cvar_SetValueQuick (&snd_mixspeed, (float) tmp);
 				break;
 			}
 		}
 	}
+
+	/* -mixspeed is Ironwail's spelling and takes any rate the device will
+	   accept, not just one off the tryrates list.  It wins over -sndspeed
+	   when both are given, being the explicit one. */
+	tmp = COM_CheckParm("-mixspeed");
+	if (tmp != 0 && tmp < com_argc - 1)
+		Cvar_SetQuick (&snd_mixspeed, com_argv[tmp + 1]);
+
+	/* Whatever set it, the cvar is what the device open uses.  Range-checked
+	   rather than trusted: the driver would otherwise be asked for something
+	   absurd, and the backends only warn about a MISMATCH, not a nonsense
+	   request. */
+	tmp = snd_mixspeed.integer;
+	if (tmp < 8000 || tmp > 192000)
+	{
+		Con_Printf ("snd_mixspeed %d out of range (8000..192000), using %d\n",
+			    tmp, desired_speed);
+		Cvar_SetValueQuick (&snd_mixspeed, (float) desired_speed);
+	}
+	else
+		desired_speed = tmp;
 
 	tmp = COM_CheckParm("-sndbits");
 	if (tmp != 0 && tmp < com_argc - 1)
@@ -298,6 +332,7 @@ void S_Init (void)
 	Cvar_RegisterVariable(&sfx_mutedvol);
 	Cvar_RegisterVariable(&loadas8bit);
 	Cvar_RegisterVariable(&snd_resample);
+	Cvar_RegisterVariable(&snd_mixspeed);
 	Cvar_SetCallback(&snd_resample, S_ResampleChanged);
 	Cvar_RegisterVariable(&bgmvolume);
 	Cvar_RegisterVariable(&bgm_mutedvol);
