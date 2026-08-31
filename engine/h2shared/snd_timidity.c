@@ -139,12 +139,21 @@ static qboolean S_TIMIDITY_CodecInitialize (void)
 	if (sf2)
 	{
 		Con_DPrintf("Timidity: setting soundfont: %s\n", sf2);
-		/* Records the path only; the file is opened at mid_song_load time,
-		 * and once set it suppresses cfg parsing for good -- so there is no
-		 * meaningful failure to fall back from here. */
-		mid_set_soundfont(sf2);
-		err = mid_init(NULL);
-		goto _finish;
+		/* Since upstream ae66583df this opens and parses the font instead of
+		 * just recording the path, so it can fail -- and it leaves no font set
+		 * when it does.  Unlike upstream, our sf2 may have come from the
+		 * automatic search rather than from the env var, so a font we cannot
+		 * load is not grounds for failing the codec: fall through to the
+		 * timidity.cfg tiers below. */
+		if (mid_set_soundfont(sf2) < 0)
+		{
+			Con_Printf("Timidity: could not load soundfont %s\n", sf2);
+		}
+		else
+		{
+			err = mid_init(NULL);
+			goto _finish;
+		}
 	}
 	#endif
 	timi_env = getenv("TIMIDITY_CFG");

@@ -3,7 +3,7 @@
  * Public License: see COPYING for details.
  * Copyright (C) 1995 Tuukka Toivonen <toivonen@clinet.fi>
  * Copyright (C) 2004 Konstantin Korikov <lostclus@ua.fm>
- * Copyright (C) 2014 O.Sezer <sezero@users.sourceforge.net>
+ * Copyright (C) 2014-2026 O.Sezer <sezero@users.sourceforge.net>
  *
  * Note that the included TiMidity source, based on timidity-0.2i, was
  * originally licensed under the GPL, but the author extended it so it
@@ -35,6 +35,7 @@
 #ifndef LIBTIMIDITY_H
 #define LIBTIMIDITY_H
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -61,21 +62,37 @@ extern "C" {
 #define MID_AUDIO_S16MSB  0x9010  /* As above, but big-endian byte order */
 #define MID_AUDIO_U16     MID_AUDIO_U16LSB
 #define MID_AUDIO_S16     MID_AUDIO_S16LSB
+#define MID_AUDIO_S32LSB  0x8020  /* Signed 32-bit integer samples */
+#define MID_AUDIO_S32MSB  0x9020  /* As above, but big-endian byte order */
+#define MID_AUDIO_S32     MID_AUDIO_S32LSB
+#define MID_AUDIO_F32LSB  0x8120  /* 32-bit floating point samples */
+#define MID_AUDIO_F32MSB  0x9120  /* As above, but big-endian byte order */
+#define MID_AUDIO_F32     MID_AUDIO_F32LSB
 
 /* Core Library Types
  */
-#ifndef __amigaos4__
+#if defined B_BEOS_VERSION
+#include <SupportDefs.h>
+  typedef int8  sint8;
+  typedef int16 sint16;
+  typedef int32 sint32;
+#elif defined __amigaos4__
+#include <exec/types.h>
+  typedef int8  sint8;
+  typedef int16 sint16;
+  typedef int32 sint32;
+#elif defined _arch_dreamcast
+#include <arch/types.h>
+  typedef int8  sint8;
+  typedef int16 sint16;
+  typedef int32 sint32;
+#else /* generic case */
   typedef unsigned char uint8;
   typedef signed char sint8;
   typedef unsigned short uint16;
   typedef signed short sint16;
   typedef unsigned int uint32;
   typedef signed int sint32;
-#else
-#include <exec/types.h>
-  typedef int8  sint8;
-  typedef int16 sint16;
-  typedef int32 sint32;
 #endif
 
   typedef size_t (*MidIStreamReadFunc) (void *ctx, void *ptr, size_t size, size_t nmemb);
@@ -116,7 +133,7 @@ extern "C" {
 # elif defined(TIMIDITY_BUILD) || defined(TIMIDITY_STATIC) /* building or using static libtimidity for windows */
 #   define TIMI_EXPORT
 # else
-#   define TIMI_EXPORT __declspec(dllimport)                   /* using libtimidity dll for windows */
+#   define TIMI_EXPORT __declspec(dllimport)              /* using libtimidity dll for windows */
 # endif
 #elif defined(__OS2__) && defined(__WATCOMC__)
 # if defined(TIMIDITY_BUILD) && defined(__SW_BD)          /* building libtimidity as a dll for os/2 */
@@ -126,7 +143,7 @@ extern "C" {
 # endif
 /* SYM_VISIBILITY should be defined if both the compiler
  * and the target support the visibility attributes. the
- * configury does that automatically. for any standalone
+ * configury does that automatically. For any standalone
  * makefiles, etc, the developer should add the required
  * flags, i.e.:  -DSYM_VISIBILITY -fvisibility=hidden  */
 #elif defined(TIMIDITY_BUILD) && defined(SYM_VISIBILITY)
@@ -143,8 +160,10 @@ extern "C" {
  */
   TIMI_EXPORT extern long mid_get_version (void);
 
-/* Set the full path of a soundfont (sf2) to use.
- * Must be called before mid_init().
+/* Set the full path of a soundfont (sf2) to use, and do a
+ * preliminary load of the specified file:  MUST BE called
+ * before mid_init(). If loading fails, the soundfont will
+ * NOT be set.
  * If a soundfont is set, config file will not be parsed
  * by mid_init().
  */
