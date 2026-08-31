@@ -55,6 +55,12 @@ qboolean NET_CanSendMessage (struct qsocket_s *sock);
 // Returns true or false if the given qsocket can currently accept a
 // message to be transmitted.
 
+int	NET_MaxUnreliableMessage (struct qsocket_s *sock);
+// Largest unreliable message this connection can actually carry.  Build into
+// this, not into NET_MAXMESSAGE: the datagram driver copies the caller's
+// sizebuf into a fixed MAX_DATAGRAM packet buffer, so an oversized message
+// does not merely fail to send, it runs off the end of that buffer.
+
 int	NET_GetMessage (struct qsocket_s *sock);
 // returns data in net_message sizebuf
 // returns 0 if no data is waiting

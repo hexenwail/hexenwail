@@ -2277,8 +2277,18 @@ static qboolean SV_SendClientDatagram (client_t *client)
 {
 	byte		buf[NET_MAXMESSAGE];
 	sizebuf_t	msg;
+	int		wire, pending;
 
-	SZ_Init (&msg, buf, sizeof(buf));
+	/* Build into what this connection can actually carry, not into the size
+	 * of the stack buffer.  Datagram_SendUnreliableMessage memcpys the result
+	 * straight into a fixed MAX_DATAGRAM packet buffer and its only bounds
+	 * check is compiled out of release builds, so the 32 KB that sizeof(buf)
+	 * would authorise is not a generous limit -- it is memory corruption
+	 * eight times over.  SV_PrepareClientEntities sheds entities to fit,
+	 * worst-priority first, instead. */
+	wire = NET_MaxUnreliableMessage (client->netconnection);
+	SZ_Init (&msg, buf, wire);
+	msg.name = "client datagram";
 
 	MSG_WriteByte (&msg, svc_time);
 	MSG_WriteFloat (&msg, sv.time);
@@ -2286,7 +2296,20 @@ static qboolean SV_SendClientDatagram (client_t *client)
 // add the client specific data to the datagram
 	SV_WriteClientdataToMessage (client, client->edict, &msg);
 
+	/* Hold room for the two datagrams appended below before handing the rest
+	 * to the entity deltas.  Entity state is re-sent every frame and survives
+	 * being shed; a temp entity or a sound is sent once and is simply gone if
+	 * it does not fit.  Never squeeze the entity section below half, though:
+	 * QC that keeps sv.datagram permanently full would otherwise freeze the
+	 * visible world rather than lose an effect. */
+	pending = sv.datagram.cursize + client->datagram.cursize;
+	if (pending > wire / 2)
+		pending = wire / 2;
+	msg.maxsize = wire - pending;
+
 	SV_PrepareClientEntities (client, client->edict, &msg);
+
+	msg.maxsize = wire;
 
 /*	if ((rand() & 0xff) < 200)
 	{
