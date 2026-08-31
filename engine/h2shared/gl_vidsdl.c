@@ -2022,6 +2022,57 @@ static void VID_NumModes_f (void)
 	Con_Printf ("%d video modes in current list\n", *nummodes);
 }
 
+/*
+=================
+VID_DescribeCurrentMode_f
+
+Ironwail's vid_describecurrentmode.  vid_listmodes already answers "what modes
+are there", and vid_nummodes "how many" -- but nothing answered "what am I in
+right now" after the fact: VID_SetMode prints the mode once, as it sets it, and
+by the time a tester is being asked what they are running, that line is a
+thousand lines up the scrollback if it is still there at all.
+
+Prints more than the mode entry because on a modern display the mode entry is
+no longer the whole answer: the drawable can differ from the requested size
+under HiDPI scaling, and the console is scaled separately again, so all three
+are reported.  The refresh rate is read from SDL rather than from the mode
+list, which does not carry one.
+=================
+*/
+static void VID_DescribeCurrentMode_f (void)
+{
+	const SDL_DisplayMode	*dm;
+	const char		*screenmode;
+	int			depth = 0;
+
+	if (!vid_initialized || vid_modenum < 0)
+	{
+		Con_Printf ("Video mode not set yet\n");
+		return;
+	}
+
+	switch (vid_config_fscr.integer)
+	{
+	case 0:  screenmode = "windowed";	break;
+	case 1:  screenmode = "borderless";	break;
+	default: screenmode = "fullscreen";	break;
+	}
+
+	SDL_GL_GetAttribute (SDL_GL_BUFFER_SIZE, &depth);
+
+	Con_Printf ("mode %d: %d x %d x %d %s\n", vid_modenum,
+		    modelist[vid_modenum].width, modelist[vid_modenum].height,
+		    depth, screenmode);
+	Con_Printf ("drawable  : %d x %d\n", WRWidth, WRHeight);
+	Con_Printf ("console   : %d x %d\n", vid.conwidth, vid.conheight);
+
+	dm = SDL_GetCurrentDisplayMode (SDL_GetDisplayForWindow (window));
+	if (dm && dm->refresh_rate > 0.0f)
+		Con_Printf ("refresh   : %.4g Hz\n", dm->refresh_rate);
+	else
+		Con_Printf ("refresh   : unknown\n");
+}
+
 static SDL_Cursor *vid_cursors[MCURSOR_COUNT];
 static mousecursor_t vid_cursor_current;
 
@@ -2085,6 +2136,7 @@ void	VID_Init (const unsigned char *palette)
 
 	Cmd_AddCommand ("vid_listmodes", VID_ListModes_f);
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
+	Cmd_AddCommand ("vid_describecurrentmode", VID_DescribeCurrentMode_f);
 	Cmd_AddCommand ("vid_restart", VID_Restart_f);
 	Cmd_AddCommand ("renderer_status", GL_RendererStatus_f);
 	Cmd_AddCommand ("gl_info", GL_Info_f);

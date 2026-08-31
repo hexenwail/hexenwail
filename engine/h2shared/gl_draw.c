@@ -28,6 +28,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
+#include "image.h"	/* imagedump's writer */
 
 #ifdef __SSE2__
 #include <emmintrin.h>
@@ -530,6 +531,208 @@ static void Draw_TextureMode_f (cvar_t *var)
 	Cvar_SetQuick (var, gl_texmodes[gl_filter_idx].name);
 }
 
+/*
+================
+GL_DescribeTextureModes_f
+
+Ironwail's gl_describetexturemodes.  gl_texturemode takes a GL enum spelling
+rather than an index, so without this the only way to learn the accepted
+strings is to read gl_texmodes[] in the source -- which is not a thing a field
+tester can do.  Marks the active one, because the pair of questions is always
+"what can I set it to" and "what is it now".
+================
+*/
+static void GL_DescribeTextureModes_f (void)
+{
+	int	i;
+
+	for (i = 0; i < NUM_GL_FILTERS; i++)
+		Con_SafePrintf ("%s %d: %s\n",
+				(i == gl_filter_idx) ? "->" : "  ",
+				i + 1, gl_texmodes[i].name);
+
+	Con_Printf ("%d modes; gl_texturemode is %s\n",
+		    NUM_GL_FILTERS, gl_texmodes[gl_filter_idx].name);
+}
+
+/*
+================
+GL_TextureFlagString
+
+The flag column for `imagelist`, one letter per flag that changed how the
+texture was uploaded or is sampled.  Fixed width and fixed order so a few
+hundred rows can be scanned for the odd one out, which is what the command is
+for.  Returns a static buffer: one call per printf argument list.
+================
+*/
+static const char *GL_TextureFlagString (int flags)
+{
+	static char	buf[8];
+
+	buf[0] = (flags & TEX_MIPMAP)	? 'm' : '-';
+	buf[1] = (flags & TEX_ALPHA)	? 'a' : '-';
+	buf[2] = (flags & TEX_RGBA)	? 'r' : '-';
+	buf[3] = (flags & TEX_FENCE)	? 'f' : '-';
+	buf[4] = (flags & TEX_HOLEY)	? 'h' : '-';
+	buf[5] = '\0';
+
+	return buf;
+}
+
+/*
+================
+GL_ImageList_f
+
+Ironwail's imagelist, over gltextures[] instead of its linked list.  Takes an
+optional name prefix, which upstream's does not: model skins and world
+textures carry their path in the identifier and outnumber everything else
+several hundred to one, so `imagelist models/` is the difference between an
+answer and four screens of scrollback.  (Menu and HUD pics are the exception
+-- they are identified by lump name, "conback", "+0pyr" -- which is why the
+prefix is matched, not required.)
+
+Two things this has to get right that upstream's does not.  numgltextures is a
+high-water mark over the slot array, not a live count -- GL_LoadTextureEx
+retires a slot by setting texnum to GL_UNUSED_TEXTURE and clearing the
+identifier, leaving it in place for GL_ClaimStaleTexture to recycle -- so
+retired slots are skipped and the live count is counted, not read off.  And the
+totals cover every live texture even when the listing is filtered, because the
+question the totals answer ("how much texture memory is this map costing")
+is not the question the filter asks.
+================
+*/
+static void GL_ImageList_f (void)
+{
+	const char	*prefix = NULL;
+	size_t		preLen = 0;
+	gltexture_t	*glt;
+	double		texels = 0;
+	int		i, live = 0, shown = 0;
+
+	if (Cmd_Argc() > 1)
+	{
+		prefix = Cmd_Argv(1);
+		preLen = strlen (prefix);
+	}
+
+	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
+	{
+		if (glt->texnum == GL_UNUSED_TEXTURE || !glt->identifier[0])
+			continue;	/* retired slot awaiting reuse */
+
+		live++;
+		/* A full mip chain is 4/3 of the base level, the same estimate
+		 * upstream makes.  Compressed uploads occupy less than this;
+		 * the number is a texel count, not a VRAM measurement. */
+		texels += (glt->flags & TEX_MIPMAP)
+				? (double)glt->width * glt->height * 4.0 / 3.0
+				: (double)glt->width * glt->height;
+
+		if (preLen && q_strncasecmp (prefix, glt->identifier, preLen) != 0)
+			continue;
+
+		shown++;
+		Con_SafePrintf ("%6u %s %4i x%4i  %s\n", (unsigned int)glt->texnum,
+				GL_TextureFlagString (glt->flags),
+				glt->width, glt->height, glt->identifier);
+	}
+
+	/* texels stays a double all the way to the printf: upstream truncates
+	 * it to int, which wraps somewhere north of two billion texels, and a
+	 * heavily retextured mod is not that far off. */
+	Con_Printf ("%d of %d textures listed; %.0f texels, %.1f megabytes\n",
+		    shown, live, texels, texels * 4 / 0x100000);
+	Con_Printf ("flags: m=mipmap a=alpha r=rgba f=fence h=holey\n");
+}
+
+/*
+================
+GL_ImageDump_f
+
+Ironwail's imagedump: every live texture written out as an image, for when a
+report is "the wrong texture is on that wall" and you need to see what the
+engine actually uploaded rather than what is on disk.
+
+PNG rather than upstream's TGA because Image_WriteTGA prefixes fs_gamedir_nopath
+-- a bare gamedir NAME in this tree, so it writes CWD-relative -- while
+Image_WritePNG takes a full path, which is what lets the dump land beside the
+screenshots in the userdir instead of in the install.  Level 0 comes back in
+upload order, i.e. top-down, which is the writer's upsidedown=true.
+================
+*/
+#if defined(USE_GLES)
+static void GL_ImageDump_f (void)
+{
+	/* glGetTexImage does not exist in GL ES 3.0 / WebGL2.  Reproducing it
+	 * would mean drawing each texture into an FBO and glReadPixels'ing that
+	 * back, which is a real feature and not a debug command's worth of work.
+	 * Say so rather than silently writing nothing. */
+	Con_Printf ("imagedump needs glGetTexImage, which this GL ES build has no equivalent of\n");
+}
+#else
+static void GL_ImageDump_f (void)
+{
+	char		dirpath[MAX_OSPATH], filepath[MAX_OSPATH];
+	char		safename[MAX_QPATH];
+	gltexture_t	*glt;
+	byte		*buffer;
+	char		*c;
+	int		i, written = 0, failed = 0;
+
+	FS_MakePath_BUF (FS_USERDIR, NULL, dirpath, sizeof(dirpath), "imagedump");
+	Sys_mkdir (dirpath, false);
+
+	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
+	{
+		if (glt->texnum == GL_UNUSED_TEXTURE || !glt->identifier[0])
+			continue;	/* retired slot awaiting reuse */
+		if (glt->width <= 0 || glt->height <= 0)
+			continue;
+
+		/* Identifiers are paths, and some are synthesised with ':' or
+		 * '*' in them (the warp textures, the per-face skybox names).
+		 * Flatten every separator to '_' so the result is one filename
+		 * in one directory on every platform.  Two identifiers that
+		 * differ only in a flattened character therefore land on the
+		 * same file and the second wins; that is upstream's behaviour
+		 * too, and the alternative -- a directory tree mirroring the
+		 * gamedir -- is worse to grep through, which is what the dump
+		 * is for. */
+		q_strlcpy (safename, glt->identifier, sizeof(safename));
+		for (c = safename; *c; c++)
+		{
+			if (strchr ("/\\:*?\"<>|", *c))
+				*c = '_';
+		}
+
+		q_snprintf (filepath, sizeof(filepath), "%s/%s.png", dirpath, safename);
+
+		buffer = (byte *) malloc ((size_t)glt->width * glt->height * 4);
+		if (!buffer)
+		{
+			Con_Printf ("imagedump: out of memory\n");
+			break;
+		}
+
+		GL_Bind (glt->texnum);
+		glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
+		glGetTexImage_fp (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+
+		if (Image_WritePNG (filepath, buffer, glt->width, glt->height, 32, true))
+			written++;
+		else
+			failed++;
+
+		free (buffer);
+	}
+
+	Con_Printf ("imagedump: wrote %d texture%s to %s\n",
+		    written, (written == 1) ? "" : "s", dirpath);
+	if (failed)
+		Con_Printf ("imagedump: %d could not be written\n", failed);
+}
+#endif	/* USE_GLES */
+
 static void Draw_TouchMipmapFilterModes (void)
 {
 	gltexture_t	*glt;
@@ -741,6 +944,9 @@ void Draw_Init (void)
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
 		Cvar_SetCallback (&gl_texture_anisotropy, Draw_Anisotropy_f);
 		Cvar_SetCallback (&gl_lodbias, Draw_LodBias_f);
+		Cmd_AddCommand ("imagelist", GL_ImageList_f);
+		Cmd_AddCommand ("imagedump", GL_ImageDump_f);
+		Cmd_AddCommand ("gl_describetexturemodes", GL_DescribeTextureModes_f);
 		Hash_Allocate (&hash_cachepics, MAX_CACHED_PICS);
 		Hash_Allocate (&hash_gltextures, MAX_GLTEXTURES);
 	}

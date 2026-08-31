@@ -2577,6 +2577,131 @@ static void FS_Maplist_f (void)
 
 /*
 ===========
+FS_RandMap_f
+
+Ironwail's randmap: pick one of the installed maps and start it.  Takes the
+same optional prefix maplist does, which upstream's does not -- `randmap
+romeric` is the difference between a random map and a random map from the
+episode you are actually testing.
+===========
+*/
+static void FS_RandMap_f (void)
+{
+	const char	*prefix;
+	size_t		preLen;
+	unsigned int	which;
+
+	if (Cmd_Argc() > 1)
+	{
+		prefix = Cmd_Argv(1);
+		preLen = strlen(prefix);
+	}
+	else
+	{
+		preLen = 0;
+		prefix = NULL;
+	}
+
+	FS_ScanFiles ("maps", ".bsp", prefix, preLen);
+
+	if (!listname_count)
+	{
+		Con_Printf ("No maps found.\n");
+		return;
+	}
+
+	/* rand() is never seeded anywhere in this engine, and the callers that
+	 * matter -- cl_tent.c's debris angles, everything downstream of the
+	 * gamecode's RNG -- are written against that determinism.  Seeding it
+	 * from a console command would change all of them, which is far outside
+	 * what this command is allowed to do.  Mix the clock in locally instead:
+	 * two randmaps in one session differ and nothing else is touched. */
+	which = ((unsigned int)rand() + (unsigned int)(Sys_DoubleTime() * 1000.0))
+			% (unsigned int)listname_count;
+
+	Con_Printf ("Starting map %s...\n", listnames[which]);
+	Cbuf_AddText (va("map %s\n", listnames[which]));
+
+	FS_FreeNameList ();
+}
+
+/*
+===========
+FS_Skies_f
+
+Lists the skyboxes `sky` will accept, the way maplist lists maps.
+
+A skybox is not one file but six -- <name>_rt, _bk, _lf, _ft, _up, _dn -- in
+either gfx/env/ or skies/, with .png, .tga or .pcx all accepted (gl_sky.c's
+Sky_LoadSkyBox tries exactly that set, in that order, in those two places).
+Listing the directory would therefore print six rows per skybox with the wrong
+names on them.
+
+The dedup falls out of the scan rather than needing a pass of its own: the
+`ext` argument of FS_ScanFilesEx is a suffix that must match and is then
+stripped, so scanning for "_rt.tga" hands addFileName the base name directly,
+and addListName drops the repeats when the other faces, extensions and
+directories come round.  That is 36 scans, each a readdir of one small
+directory or a walk of the already-open pak directories, for a command a human
+runs by hand.
+===========
+*/
+static void FS_Skies_f (void)
+{
+	/* gl_sky.c's suf[] and its two search directories, restated here
+	 * because quakefs.c is renderer-independent and is also compiled into
+	 * the software client, which has no gl_sky.c to extern them from. */
+	static const char *const skyfaces[6] = { "rt", "bk", "lf", "ft", "up", "dn" };
+	static const char *const skyexts[3] = { ".png", ".tga", ".pcx" };
+	static const char *const skydirs[2] = { "gfx/env", "skies" };
+	const char	*prefix;
+	size_t		preLen;
+	char		suffix[16];
+	qboolean	reset = true;
+	int		d, f, e;
+
+	if (Cmd_Argc() > 1)
+	{
+		prefix = Cmd_Argv(1);
+		preLen = strlen(prefix);
+	}
+	else
+	{
+		preLen = 0;
+		prefix = NULL;
+	}
+
+	for (d = 0; d < 2; d++)
+	{
+		for (f = 0; f < 6; f++)
+		{
+			for (e = 0; e < 3; e++)
+			{
+				q_snprintf (suffix, sizeof(suffix), "_%s%s",
+					    skyfaces[f], skyexts[e]);
+				FS_ScanFilesEx (skydirs[d], suffix, prefix, preLen, reset);
+				reset = false;
+			}
+		}
+	}
+
+	if (!listname_count)
+	{
+		Con_Printf ("No skyboxes found.\n\n");
+		return;
+	}
+
+	Con_Printf ("Found %d skyboxes:\n\n", listname_count);
+	if (listname_count > 1)
+		qsort (listnames, listname_count, sizeof(char *), COM_StrCompare);
+	Con_ShowList (listname_count, (const char**)listnames);
+	Con_Printf ("\n");
+
+	FS_FreeNameList ();
+}
+
+/*
+===========
 FS_Games_f
 
 Prints the gamedirs `game` will accept.  ListGames already knows how to find
@@ -2854,6 +2979,8 @@ void FS_Init (void)
 	Cmd_AddCommand ("path", FS_Path_f);
 #if !defined(SERVERONLY)
 	Cmd_AddCommand ("maplist", FS_Maplist_f);
+	Cmd_AddCommand ("randmap", FS_RandMap_f);
+	Cmd_AddCommand ("skies", FS_Skies_f);
 	Cmd_AddCommand ("games", FS_Games_f);
 	Cmd_AddCommand ("game", Host_Game_f);
 #endif
