@@ -44,6 +44,11 @@ static void Mod_Print (void);
 
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 
+/* Load visibility from a sidecar .vis when the map's own is missing or wrong.
+ * The standard remedy for an unvised third-party map, and it needs no
+ * cooperation from whoever built the BSP. */
+static cvar_t	external_vis  = {"external_vis", "1", CVAR_ARCHIVE};
+
 static byte	mod_novis[MAX_MAP_LEAFS/8];
 
 // 650 should be enough with model handle recycling, but.. (Pa3PyX)
@@ -69,6 +74,7 @@ Mod_Init
 void Mod_Init (void)
 {
 	Cvar_RegisterVariable (&external_ents);
+	Cvar_RegisterVariable (&external_vis);
 	Cmd_AddCommand ("mcache", Mod_Print);
 
 	memset (mod_novis, 0xff, sizeof(mod_novis));
@@ -1856,19 +1862,22 @@ static void Mod_LoadLeafs_BSP2(lump_t *l)
 }
 #endif
 
-static void Mod_LoadLeafs_V29 (lump_t *l)
+/* Split out of Mod_LoadLeafs_V29 so an external .vis file, whose leafs arrive
+ * in a malloc'd buffer rather than at an offset into the BSP, can go through
+ * exactly the same conversion.  Keeping one copy matters: the unsigned
+ * marksurface handling and the underwater-warp pass below are easy to get
+ * subtly wrong twice. */
+static void Mod_ProcessLeafs_V29 (dleaf_t *in, int filelen)
 {
-	dleaf_t		*in;
 	mleaf_t		*out;
 	int	i, j, count, p;
 	#ifdef H2W
 	qboolean isnotmap = Mod_isnotmap();
 	#endif
 
-	in = (dleaf_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
+	if (filelen % sizeof(*in))
 		Sys_Error ("%s: funny lump size in %s", __thisfunc__, loadmodel->name);
-	count = l->filelen / sizeof(*in);
+	count = filelen / sizeof(*in);
 	out = (mleaf_t *) Hunk_AllocName (count * sizeof(*out), "leafs");
 
 	loadmodel->leafs = out;
@@ -1915,6 +1924,155 @@ static void Mod_LoadLeafs_V29 (lump_t *l)
 		}
 		#endif
 	}
+}
+
+static void Mod_LoadLeafs_V29 (lump_t *l)
+{
+	Mod_ProcessLeafs_V29 ((dleaf_t *)(mod_base + l->fileofs), l->filelen);
+}
+
+/*
+=================
+External .vis support -- the "vispatch" format
+
+A .vis file is a flat concatenation of per-map records:
+
+    char mapname[32]; int filelen;      <- 36-byte header
+    int visdatalen;   byte visdata[];
+    int leafdatalen;  dleaf_t leafs[];
+
+so one file can patch a whole episode.  filelen counts everything after the
+header, which is how we skip to the next record while searching.
+
+Note this replaces the LEAF ARRAY as well as the visdata, not just the vis:
+leaf visofs values index into the vis data, so patched vis is meaningless
+against the BSP's original leafs.  That is why Mod_ProcessLeafs_V29 exists.
+=================
+*/
+typedef struct vispatch_s
+{
+	char	mapname[32];
+	int	filelen;
+} vispatch_t;
+#define VISPATCH_HEADER_LEN	36
+
+/*
+=================
+Mod_FindVisibilityExternal
+
+Locate this map's record and leave the handle positioned at its payload.
+Tries maps/<name>.vis first, then <gamedir>.vis for the episode-wide form.
+=================
+*/
+static FILE *Mod_FindVisibilityExternal (void)
+{
+	vispatch_t	header;
+	char		visfilename[MAX_QPATH];
+	const char	*shortname;
+	unsigned int	path_id;
+	FILE		*f;
+	long		pos;
+	size_t		r;
+
+	q_snprintf (visfilename, sizeof(visfilename), "maps/%s.vis", loadname);
+	if (FS_OpenFile (visfilename, &f, &path_id) < 0)
+	{
+		Con_DPrintf ("%s not found, trying ", visfilename);
+		q_snprintf (visfilename, sizeof(visfilename), "%s.vis", fs_gamedir_nopath);
+		Con_DPrintf ("%s\n", visfilename);
+		if (FS_OpenFile (visfilename, &f, &path_id) < 0)
+		{
+			Con_DPrintf ("external vis not found\n");
+			return NULL;
+		}
+	}
+
+	/* Same rule external_ents uses: only honour a patch from the map's own
+	 * gamedir or one ranked above it, so a stale file in data1 cannot
+	 * override a mod's own map. */
+	if (path_id < loadmodel->path_id)
+	{
+		fclose (f);
+		Con_DPrintf ("ignored %s from a gamedir with lower priority\n", visfilename);
+		return NULL;
+	}
+
+	Con_DPrintf ("Found external VIS %s\n", visfilename);
+
+	shortname = COM_SkipPath (loadmodel->name);
+	pos = 0;
+	while ((r = fread (&header, 1, VISPATCH_HEADER_LEN, f)) == VISPATCH_HEADER_LEN)
+	{
+		header.filelen = LittleLong (header.filelen);
+		if (header.filelen <= 0)
+		{	/* a bad record means the rest of the chain is unreachable */
+			fclose (f);
+			return NULL;
+		}
+		header.mapname[sizeof(header.mapname) - 1] = '\0';
+		if (!q_strcasecmp (header.mapname, shortname))
+			break;
+		pos += header.filelen + VISPATCH_HEADER_LEN;
+		fseek (f, pos, SEEK_SET);
+	}
+
+	if (r != VISPATCH_HEADER_LEN)
+	{
+		fclose (f);
+		Con_DPrintf ("%s not found in %s\n", shortname, visfilename);
+		return NULL;
+	}
+
+	return f;
+}
+
+static byte *Mod_LoadVisibilityExternal (FILE *f)
+{
+	int	mark, filelen;
+	byte	*visdata;
+
+	filelen = 0;
+	if (fread (&filelen, 4, 1, f) != 1)
+		return NULL;
+	filelen = LittleLong (filelen);
+	if (filelen <= 0)
+		return NULL;
+
+	Con_DPrintf ("...%d bytes visibility data\n", filelen);
+	mark = Hunk_LowMark ();
+	visdata = (byte *) Hunk_AllocName (filelen, "EXT_VIS");
+	if (fread (visdata, filelen, 1, f) != 1)
+	{
+		Hunk_FreeToLowMark (mark);
+		return NULL;
+	}
+	return visdata;
+}
+
+static void Mod_LoadLeafsExternal (FILE *f)
+{
+	int	mark, filelen;
+	void	*in;
+
+	filelen = 0;
+	if (fread (&filelen, 4, 1, f) != 1)
+	{
+		Con_Printf ("Couldn't read external leaf data length\n");
+		return;
+	}
+	filelen = LittleLong (filelen);
+	if (filelen <= 0)
+		return;
+
+	Con_DPrintf ("...%d bytes leaf data\n", filelen);
+	mark = Hunk_LowMark ();
+	in = Hunk_AllocName (filelen, "EXT_LEAF");
+	if (fread (in, filelen, 1, f) != 1)
+	{
+		Hunk_FreeToLowMark (mark);
+		return;
+	}
+	Mod_ProcessLeafs_V29 ((dleaf_t *)in, filelen);
 }
 
 /*
@@ -2303,8 +2461,56 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadTexinfo (&header->lumps[LUMP_TEXINFO]);
 	Mod_LoadFaces (&header->lumps[LUMP_FACES], bsp2);
 	Mod_LoadMarksurfaces (&header->lumps[LUMP_MARKSURFACES], bsp2);
-	Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
-	Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+	/* An external .vis replaces both the visdata AND the leaf array -- leaf
+	 * visofs values index into the vis data, so patched vis against the BSP's
+	 * own leafs is meaningless.  Try it BEFORE the embedded lumps rather than
+	 * loading them and overwriting: the hunk has no free-in-the-middle, so
+	 * loading first would strand the embedded copies for the map's lifetime.
+	 *
+	 * Only for the world model of the map the server is actually running: the
+	 * format keys on map name, so a submodel or a precached-but-inactive map
+	 * would match the wrong record.  Guarded on !bsp2 because the format's
+	 * leaf records are dleaf_t and it has no way to say it carries dleaf2_t. */
+	{
+		qboolean	got_external = false;
+
+		if (!bsp2 && external_vis.integer
+		    && sv.modelname[0] && !q_strcasecmp (loadname, sv.name))
+		{
+			FILE	*fvis;
+
+			Con_DPrintf ("trying to open external vis file\n");
+			fvis = Mod_FindVisibilityExternal ();
+			if (fvis)
+			{
+				int	mark = Hunk_LowMark ();
+
+				loadmodel->leafs = NULL;
+				loadmodel->numleafs = 0;
+				Con_DPrintf ("found valid external .vis file for map\n");
+				loadmodel->visdata = Mod_LoadVisibilityExternal (fvis);
+				if (loadmodel->visdata)
+					Mod_LoadLeafsExternal (fvis);
+				fclose (fvis);
+
+				if (loadmodel->visdata && loadmodel->leafs && loadmodel->numleafs)
+					got_external = true;
+				else
+				{
+					/* Half a patch is worse than none, so give the hunk
+					 * back and fall through to the map's own lumps. */
+					Hunk_FreeToLowMark (mark);
+					Con_DPrintf ("External VIS data failed, using standard vis.\n");
+				}
+			}
+		}
+
+		if (!got_external)
+		{
+			Mod_LoadVisibility (&header->lumps[LUMP_VISIBILITY]);
+			Mod_LoadLeafs (&header->lumps[LUMP_LEAFS], bsp2);
+		}
+	}
 
 	/* Classify turb textures by liquid CONTENTS of the leaves that use
 	 * them.  Lets R_LiquidAlpha disambiguate textures whose names alone
