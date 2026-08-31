@@ -640,6 +640,27 @@ int NET_SendMessage (qsocket_t *sock, sizebuf_t *data)
 }
 
 
+/*
+==================
+NET_MaxUnreliableMessage
+
+The datagram driver copies straight into a fixed MAX_DATAGRAM packet buffer
+(Datagram_SendUnreliableMessage), with the only bounds check compiled out of
+release builds, so anything larger corrupts memory rather than failing.  The
+loop driver hands the message to the client in place and has the full
+NET_MAXMESSAGE.  Callers that build an unreliable message must size their
+sizebuf by this rather than by the buffer they happen to have on the stack.
+==================
+*/
+int NET_MaxUnreliableMessage (qsocket_t *sock)
+{
+	if (!sock)
+		return MAX_DATAGRAM;
+
+	return IS_LOOP_DRIVER(sock->driver) ? NET_MAXMESSAGE : MAX_DATAGRAM;
+}
+
+
 int NET_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 {
 	int		r;
