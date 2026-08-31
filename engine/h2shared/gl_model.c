@@ -49,6 +49,25 @@ static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
  * cooperation from whoever built the BSP. */
 static cvar_t	external_vis  = {"external_vis", "1", CVAR_ARCHIVE};
 
+/* Spoike, Discord 2026-08-31: "replacement textures should be replacement
+ * textures, nothing more", "exporters won't be aware of hexen2's rules".
+ * Set 0 to take him at his word -- Mod_RestoreIndexAlpha never runs and a
+ * replacement skin's own alpha is always what reaches the GPU.
+ *
+ * Default 1 keeps current behaviour.  This exists to MEASURE what the
+ * reconstruction is holding up, because the answer is not obvious: the
+ * branch that looks least defensible (a 24-bit file, which could not have
+ * expressed alpha) has two dependents, while the one that looks like a
+ * clear author statement (32-bit, uniformly opaque) is load-bearing for
+ * eleven models including base-game data1 content.  uhexen2-4y6w */
+static cvar_t	r_replacement_restore_alpha = {"r_replacement_restore_alpha", "1", CVAR_ARCHIVE};
+
+/* Read an EF_SPECIAL_TRANS replacement skin's alpha as a TRANSPARENCY, the way
+ * every engine before uhexen2-3z3e did.  ON by default, because that is what
+ * the installed base was authored against; see Mod_LegacySpecialTransAlpha.
+ * Set 0 for a pack authored against current semantics.  uhexen2-4y6w */
+static cvar_t	r_legacy_special_trans_alpha = {"r_legacy_special_trans_alpha", "1", CVAR_ARCHIVE};
+
 static byte	mod_novis[MAX_MAP_LEAFS/8];
 
 // 650 should be enough with model handle recycling, but.. (Pa3PyX)
@@ -75,6 +94,8 @@ void Mod_Init (void)
 {
 	Cvar_RegisterVariable (&external_ents);
 	Cvar_RegisterVariable (&external_vis);
+	Cvar_RegisterVariable (&r_replacement_restore_alpha);
+	Cvar_RegisterVariable (&r_legacy_special_trans_alpha);
 	Cmd_AddCommand ("mcache", Mod_Print);
 
 	memset (mod_novis, 0xff, sizeof(mod_novis));
@@ -3002,6 +3023,130 @@ Mod_ReplacementIsFullyOpaque, which is what bounds the blast radius: only a
 pack that expressed nothing gets rewritten.  uhexen2-5dit
 ===============
 */
+/*
+===============
+Mod_LegacySpecialTransAlpha
+
+r6303 -- and every engine before uhexen2-3z3e -- drew EF_SPECIAL_TRANS with a
+REVERSED blend func:
+
+    glBlendFunc_fp (GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);   r6303 gl_rmain.c:963
+
+The source factor is then (1 - srcAlpha), so for those engines a replacement
+skin's alpha meant TRANSPARENCY: 0 drew opaque, 255 drew invisible.  uhexen2-3z3e
+moved to the ordinary func so alpha means OPACITY, which is what every exporter
+writes and the only thing weighted-blended OIT can composite -- OIT has no blend
+func to reverse, so the old convention could not survive it.
+
+The destination is right.  The migration was silent, and it inverted every
+EF_SPECIAL_TRANS replacement skin authored against the old behaviour.  That is
+BloodShot's sword: his file is alpha 0 across 94.5% of the model's UV coverage,
+which r6303 drew solid and current master draws away to nothing.  Confirmed by
+complementing his channel and changing nothing else, which restores the model
+exactly.  uhexen2-4y6w
+
+Complement at load so the rest of the pipeline sees opacity and needs no further
+special case.  Note this runs BEFORE Mod_ReplacementIsFullyOpaque, so the guard
+and any rebuild downstream reason about a channel that already means what they
+assume it means.
+
+ON BY DEFAULT, because every EF_SPECIAL_TRANS replacement skin measured on a
+retail data1 + SoT install is authored to the legacy convention, and none to the
+current one.  Storm over Thyrion is the case that decides it: ray1.mdl (12 skins)
+and ray2.mdl (2) carry alpha ~236-246 where the art is BLACK and ~91-143 where it
+is BRIGHT, which is a transparency, and on current master they therefore draw a
+near-opaque black quad with the light shaft faint inside it.  The same pack's
+ray3.mdl is EF_TRANSPARENT and is authored the other way round -- alpha 6 where
+dark, 86 where bright, an opacity -- and this function does not touch it.  One
+author, one era, each flag matched to the blend func it had in r6303.
+
+3z3e is recent, so content authored against the current convention is the case
+that barely exists yet; the installed base predates it.  A pack that does want
+opacity semantics sets this to 0.
+
+Deliberately still a switch rather than a heuristic.  Nothing in an individual
+file distinguishes the two readings -- an all-zero channel is "fully opaque"
+under one and "fully invisible" under the other -- and this bead's own strongest
+finding is that such intent is not recoverable from the data.  The dark-vs-bright
+correlation above is evidence about a corpus, not a per-file test worth wiring
+into the loader.
+
+Skipped for a file that carries no alpha at all.  A 24-bit replacement has none;
+IMG_LoadTGA fills it with 255, and complementing that would turn a file that
+expressed nothing into a wholly invisible model.
+===============
+*/
+static void Mod_LegacySpecialTransAlpha (imgreplace_t *rep, int mdl_flags)
+{
+	int	i, n;
+
+	if (!r_legacy_special_trans_alpha.integer)
+		return;
+	if (!(mdl_flags & EF_SPECIAL_TRANS))
+		return;
+	/* blocks: a block-compressed payload goes to the driver untouched, so
+	 * there are no texels here to complement. */
+	if (!rep || !rep->rgba || rep->blocks || !rep->has_alpha)
+		return;
+
+	n = rep->width * rep->height;
+	for (i = 0; i < n; i++)
+		rep->rgba[i*4 + 3] = (byte)(255 - rep->rgba[i*4 + 3]);
+}
+
+
+/*
+===============
+Mod_SkinIsHole
+
+Is this skin texel index 0 -- a hole -- with strictly isolated specks removed?
+
+The cutout is point-sampled from a low-res index map onto a replacement that
+is typically a 4x upscale, so ONE stray texel in the original becomes a 4x4
+block in the result.  models/vorpshok.mdl is the case that matters: its
+300x139 skin carries 1014 strictly isolated texels, which at 4x paint about
+16k texels of black confetti around the Vorpal shockwave and pinhole the
+lightning.  The other affected skins are nearly clean (vorpswip 0, axblade 0,
+xhair 1), so this is one noisy piece of source art rather than a systemic
+flaw, but it is the noisiest of the six and it is the one on screen.
+
+STRICTLY isolated -- every in-bounds neighbour disagrees -- and not a 3x3
+majority, which was the first thing tried and is wrong here.  A majority
+filter erases any one-texel-wide feature, and these skins are lightning: a
+lone filament has 8 disagreeing neighbours in a 3x3 window and would vanish.
+Requiring ALL FOUR orthogonal neighbours to disagree cannot erase a connected
+feature, because any texel with a like neighbour is left alone.
+
+Out-of-bounds neighbours are skipped rather than counted as disagreeing, or a
+corner texel with only two real neighbours could be called isolated on the
+strength of the two that do not exist.  uhexen2-4y6w
+===============
+*/
+static qboolean Mod_SkinIsHole (const byte *skin, int skinw, int skinh,
+				int sx, int sy)
+{
+	static const int	nx[4] = {  1, -1,  0,  0 };
+	static const int	ny[4] = {  0,  0,  1, -1 };
+	qboolean	me = (skin[(size_t)sy * skinw + sx] == 0);
+	int		i, seen = 0, agree = 0;
+
+	for (i = 0; i < 4; i++)
+	{
+		int	ax = sx + nx[i], ay = sy + ny[i];
+
+		if (ax < 0 || ay < 0 || ax >= skinw || ay >= skinh)
+			continue;
+		seen++;
+		if ((skin[(size_t)ay * skinw + ax] == 0) == me)
+			agree++;
+	}
+
+	if (seen > 0 && agree == 0)
+		return !me;	/* a speck: flip it into its surroundings */
+	return me;
+}
+
+
 static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 				       int skinw, int skinh, int mdl_flags)
 {
@@ -3031,15 +3176,24 @@ static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 
 	for (y = 0; y < rep->height; y++)
 	{
-		const byte	*row = skin + (y * skinh / rep->height) * skinw;
+		int		sy  = y * skinh / rep->height;
+		const byte	*row = skin + (size_t)sy * skinw;
 		byte		*dst = rep->rgba + (size_t)y * rep->width * 4 + 3;
 
 		for (x = 0; x < rep->width; x++, dst += 4)
 		{
-			int	p = row[x * skinw / rep->width];
+			int	sx = x * skinw / rep->width;
+			int	p  = row[sx];
 
 			if (mode == EF_TRANSPARENT)
-				*dst = (p == 0) ? 0 : (p & 1) ? (byte)wateralpha : 255;
+				/* Despeckled hole test rather than a bare
+				 * p == 0: see Mod_SkinIsHole.  The wateralpha
+				 * arm is NOT despeckled -- that is a per-texel
+				 * translucency classification, not a cutout,
+				 * and smoothing it would invent a translucency
+				 * the model never had. */
+				*dst = Mod_SkinIsHole (skin, skinw, skinh, sx, sy) ? 0
+				     : (p & 1) ? (byte)wateralpha : 255;
 			else
 				/* Complemented, because alpha means OPACITY
 				 * since uhexen2-3z3e -- ColorPercent is a
@@ -3051,6 +3205,16 @@ static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 	}
 
 	rep->has_alpha = true;
+
+	/* Which models the reconstruction is actually holding up is the whole
+	 * question on uhexen2-4y6w, and it is not answerable by looking at a
+	 * frame: the affected models are transient weapon effects.  Name them
+	 * as they load so a developer-mode run produces the list directly. */
+	Con_DPrintf ("Mod_RestoreIndexAlpha: %s (%s, %dx%d <- skin %dx%d)\n",
+		     loadmodel->name,
+		     (mode == EF_TRANSPARENT) ? "EF_TRANSPARENT" : "EF_SPECIAL_TRANS",
+		     rep->width, rep->height, skinw, skinh);
+
 	return true;
 }
 
@@ -3152,10 +3316,15 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		qboolean	have_rep;
 
 		have_rep = IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep);
+		/* Normalise a legacy EF_SPECIAL_TRANS channel to opacity BEFORE
+		 * anything downstream inspects it.  uhexen2-4y6w */
+		if (have_rep)
+			Mod_LegacySpecialTransAlpha (&rep, mdl_flags);
 		/* Only rewrite a replacement that expressed nothing about
 		 * transparency; a pack that put any partial alpha in the file
 		 * keeps it.  uhexen2-5dit */
-		if (have_rep && Mod_ReplacementIsFullyOpaque (&rep))
+		if (have_rep && r_replacement_restore_alpha.integer &&
+		    Mod_ReplacementIsFullyOpaque (&rep))
 			have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype + 1),
 							  pheader->skinwidth,
 							  pheader->skinheight, mdl_flags);
@@ -3256,10 +3425,15 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 			qboolean	have_rep;
 
 			have_rep = IMG_LoadReplacement (name, NULL, !(mdl_flags & EF_HOLEY), &rep);
+			/* Same legacy normalisation as the single-skin branch
+			 * above.  uhexen2-4y6w */
+			if (have_rep)
+				Mod_LegacySpecialTransAlpha (&rep, mdl_flags);
 			/* Only rewrite a replacement that expressed nothing about
 			 * transparency; a pack that put any partial alpha in the file
 			 * keeps it.  uhexen2-5dit */
-			if (have_rep && Mod_ReplacementIsFullyOpaque (&rep))
+			if (have_rep && r_replacement_restore_alpha.integer &&
+			    Mod_ReplacementIsFullyOpaque (&rep))
 				have_rep = Mod_RestoreIndexAlpha (&rep, (const byte *)(pskintype),
 										  pheader->skinwidth,
 										  pheader->skinheight, mdl_flags);
@@ -3714,7 +3888,7 @@ only shows up for players running the base game without the mission pack.
 Patch the flag in at load time so both configurations match.
 
 Applied only when the loaded copy declares no transparency mode at all, so a
-mod shipping its own ball.mdl -- already fixed like Shadows of Turmoil's, or
+mod shipping its own ball.mdl -- already fixed like Storm over Thyrion's, or
 deliberately using a different mode -- is left alone.  Must run before
 Mod_LoadAllSkins, which reads mod->flags to choose the skin's tex_mode.
 =================
