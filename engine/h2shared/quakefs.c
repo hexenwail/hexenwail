@@ -90,6 +90,32 @@ typedef struct pack_s
  * archive would fail lookups that the file listing says should work. */
 #define MAX_FILES_IN_ZIP	65536
 
+/*
+ * Ceiling on what a single DEFLATED entry may inflate to.
+ *
+ * A deflated entry has no offset in the archive holding its decompressed
+ * bytes, so it is inflated whole on open -- into malloc for FS_OpenFileHandle,
+ * into the hunk or zone for FS_LoadFile.  The archive merely *states* its
+ * uncompressed size in the directory, and deflate's ratio is unbounded, so
+ * without a limit the size of a .pk3 tells you nothing about what opening one
+ * costs.  Measured: a 261 KB archive holding one compressible entry took peak
+ * RSS from 296 MB to 558 MB, a ~1000x amplification, with no diagnostic and no
+ * failure -- it simply worked, expensively.
+ *
+ * STORED entries are exempt and must stay exempt: they are contiguous in the
+ * archive and stay FILE-backed, streaming exactly like a pak member at no
+ * memory cost, so the only bound they need is the 2 GB one above that keeps
+ * the length in a long.
+ *
+ * 64 MB against a largest-shipped-file of 2.3 MB (egypt1.bsp) leaves any
+ * plausible mod ample room, and is already half the WASM build's 128 MB
+ * initial heap (engine/CMakeLists.txt:747) -- that is the platform that
+ * decides where the line has to be, not the desktop.  Refused at mount rather
+ * than at open, so it costs one warning naming the archive instead of a lookup
+ * that mysteriously fails much later.  uhexen2-k4lc.
+ */
+#define MAX_ZIP_INFLATE		(64 * 1024 * 1024)
+
 static int FS_CompareZipNames (const void *a, const void *b)
 {
 	return q_strcasecmp ((const char *) a, (const char *) b);
@@ -762,6 +788,18 @@ static zippack_t *FS_LoadZipFile (const char *zipfile, qboolean base_fs)
 		{
 			Sys_Printf ("WARNING: %s: entry %s too large, skipped\n",
 					zipfile, stat.m_filename);
+			continue;
+		}
+		if (stat.m_method != 0 && stat.m_uncomp_size > (mz_uint64) MAX_ZIP_INFLATE)
+		{
+			Sys_Printf ("WARNING: %s: deflated entry %s inflates to %u MB, "
+					"over the %u MB limit -- skipped\n",
+					zipfile, stat.m_filename,
+					/* round up, so an entry a little over the
+					 * limit cannot print as equal to it */
+					(unsigned int) ((stat.m_uncomp_size
+						+ (1 << 20) - 1) >> 20),
+					(unsigned int) (MAX_ZIP_INFLATE >> 20));
 			continue;
 		}
 		if (strlen(stat.m_filename) >= MAX_QPATH)
