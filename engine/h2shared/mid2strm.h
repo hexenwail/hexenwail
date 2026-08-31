@@ -30,6 +30,16 @@
 #define MID2STRM_H
 
 #define TRACK_BUFFER_SIZE	2048
+
+/* Ceiling on a MIDI file's track count.  ConverterInit takes one
+ * TRACK_BUFFER_SIZE buffer PER TRACK out of the fixed zone, and numtracks is a
+ * 16-bit field straight out of the file header, so an unvalidated 65535-track
+ * header asks the 2 MB pool for 128 MB and Z_Malloc's failure is a Sys_Error,
+ * not a NULL return.  Even 1024 tracks exhausts it.  Real type-0 files have
+ * one track and real type-1 files have a few dozen; refusing the file is loud
+ * and recoverable (the music does not play), which an abort is not.
+ * uhexen2-mm4l */
+#define MAX_MIDI_TRACKS		256
 #define OUT_BUFFER_SIZE		2048	/* max stream buffer size in bytes */
 #define BUFFER_TIME_LENGTH	2000	/* amount to fill, in milliseconds */
 

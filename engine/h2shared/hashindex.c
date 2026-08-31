@@ -41,10 +41,21 @@ void Hash_Allocate(hashindex_t *hi, int hashSize)
 	if (hi->hash != NULL)
 		Sys_Error("%s: hash is already initialized", __thisfunc__);
 
+	/* malloc, NOT Z_Malloc.  uhexen2-mm4l, and the same lesson as uhexen2-oq51:
+	 * the zone is a small FIXED pool -- 2 MB on the client, 1 MB on h2ded --
+	 * and Z_Malloc's failure is a Sys_Error, not a NULL return.  hashSize is
+	 * content-scaled at two of this function's call sites: FS_LoadPackFile and
+	 * FS_LoadZipFile size it to the archive's entry count, so a pk3 at the
+	 * MAX_FILES_IN_ZIP ceiling asks for 2 * 65536 * 4 = 512 KB of a 2 MB pool
+	 * for its hash alone.  Nothing here needs zone semantics; the arrays live
+	 * exactly as long as the hashindex_t and Hash_Free is their only release.
+	 * The two memsets below are why calloc buys nothing. */
 	hi->hashSize = hashSize;
-	hi->hash = (int *) Z_Malloc(sizeof(int) * hi->hashSize, Z_MAINZONE);
+	hi->hash = (int *) malloc(sizeof(int) * hi->hashSize);
+	hi->indexChain = (int *) malloc(sizeof(int) * hi->hashSize);
+	if (!hi->hash || !hi->indexChain)
+		Sys_Error("%s: out of memory for %d entries", __thisfunc__, hashSize);
 	memset(hi->hash, NULL_INDEX, hi->hashSize * sizeof(hi->hash[0]));
-	hi->indexChain = (int *) Z_Malloc(sizeof(int) * hi->hashSize, Z_MAINZONE);
 	memset(hi->indexChain, NULL_INDEX, hi->hashSize * sizeof(hi->indexChain[0]));
 	hi->hashMask = hashSize - 1;
 }
@@ -59,11 +70,11 @@ free allocated memory
 void Hash_Free(hashindex_t *hi)
 {
 	if (hi->hash != NULL) {
-		Z_Free(hi->hash);
+		free(hi->hash);
 		hi->hash = NULL;
 	}
 	if (hi->indexChain != NULL) {
-		Z_Free(hi->indexChain);
+		free(hi->indexChain);
 		hi->indexChain = NULL;
 	}
 }

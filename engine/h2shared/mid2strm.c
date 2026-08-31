@@ -171,6 +171,8 @@ int ConverterInit (const char *filename)
 		goto Init_Cleanup;
 	if (mfs.format == 0 && mfs.numtracks != 1)
 		goto Init_Cleanup;
+	if (mfs.numtracks > MAX_MIDI_TRACKS)	/* uhexen2-mm4l: see mid2strm.h */
+		goto Init_Cleanup;
 
 /* We know how many tracks there are; allocate structures for them
  * and parse them. The parse merely looks at the MTrk signature and

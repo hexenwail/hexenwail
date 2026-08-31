@@ -541,7 +541,14 @@ static pack_t *FS_LoadPackFile (const char *packfile, int paknum, qboolean base_
 		goto pak_error;
 	}
 
-	newfiles = (pakfiles_t *) Z_Malloc (numpackfiles * sizeof(pakfiles_t), Z_MAINZONE);
+	/* malloc, NOT Z_Malloc -- see the note on the zip directory below.
+	 * MAX_FILES_IN_PACK * sizeof(pakfiles_t) is 2048 * 72 = 144 KB, so ONE
+	 * full pak is 7% of the client's 2 MB zone and a mod shipping a dozen
+	 * exhausts it outright.  Every field is written by the parse loop below,
+	 * so nothing depends on Z_Malloc's zeroing.  uhexen2-mm4l */
+	newfiles = (pakfiles_t *) malloc (numpackfiles * sizeof(pakfiles_t));
+	if (!newfiles)
+		Sys_Error ("%s: out of memory for %i pak entries", __thisfunc__, numpackfiles);
 
 	fseek (packhandle, header.dirofs, SEEK_SET);
 	fread (info,  1, header.dirlen, packhandle);
@@ -716,7 +723,22 @@ static zippack_t *FS_LoadZipFile (const char *zipfile, qboolean base_fs)
 		goto zip_error;
 	}
 
-	newfiles = (zipfiles_t *) Z_Malloc (numentries * sizeof(zipfiles_t), Z_MAINZONE);
+	/* malloc, NOT Z_Malloc.  uhexen2-mm4l, same failure shape as uhexen2-oq51:
+	 * the zone is a fixed 2 MB (1 MB on h2ded) carved once at startup, and
+	 * Z_Malloc aborts rather than returning NULL when it runs dry.  This array
+	 * is sized by the archive, and the ceiling we set ourselves is 2.5x the
+	 * whole pool -- MAX_FILES_IN_ZIP * sizeof(zipfiles_t) is 65536 * 76 =
+	 * 4.75 MB -- so the entry-count check above was passing archives the
+	 * allocator could not possibly serve.  Worse, the searchpath list holds
+	 * every mounted archive at once (up to MAX_PK3_PER_DIR = 64 per gamedir),
+	 * so even modest pk3s add up: 64 archives of 400 files each is already
+	 * 1.9 MB of a 2 MB zone, and the abort would land wherever the NEXT zone
+	 * allocation happened to be.  Only entries [0, numfiles) are ever read and
+	 * the loop below writes each one in full, so the zeroing is not missed. */
+	newfiles = (zipfiles_t *) malloc (numentries * sizeof(zipfiles_t));
+	if (!newfiles)
+		Sys_Error ("%s: out of memory for %u zip entries", __thisfunc__,
+				(unsigned int) numentries);
 
 	/* smallest power of two that covers the entry count, floor of 16 */
 	for (hashsize = 16; (mz_uint) hashsize < numentries; hashsize <<= 1)
@@ -769,7 +791,7 @@ static zippack_t *FS_LoadZipFile (const char *zipfile, qboolean base_fs)
 	{
 		Sys_Printf ("WARNING: %s has no usable files, ignored\n", zipfile);
 		Hash_Free (&zip->hash);
-		Z_Free (newfiles);
+		free (newfiles);
 		mz_zip_reader_end (&zip->archive);
 		Z_Free (zip);
 		goto zip_error;
@@ -840,7 +862,7 @@ static void FS_UnwindSearchpaths (searchpath_t *mark, qboolean verbose)
 			if (verbose)
 				Sys_Printf ("Removed packfile %s\n", fs_searchpaths->pack->filename);
 			fclose (fs_searchpaths->pack->handle);
-			Z_Free (fs_searchpaths->pack->files);
+			free (fs_searchpaths->pack->files);
 			Hash_Free(&fs_searchpaths->pack->hash);
 			Z_Free (fs_searchpaths->pack);
 		}
@@ -850,7 +872,7 @@ static void FS_UnwindSearchpaths (searchpath_t *mark, qboolean verbose)
 				Sys_Printf ("Removed archive %s\n", fs_searchpaths->zip->filename);
 			mz_zip_reader_end (&fs_searchpaths->zip->archive);
 			fclose (fs_searchpaths->zip->handle);
-			Z_Free (fs_searchpaths->zip->files);
+			free (fs_searchpaths->zip->files);
 			Hash_Free(&fs_searchpaths->zip->hash);
 			Z_Free (fs_searchpaths->zip);
 		}
