@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { nonBlackPixelRatio } from '../lib/webgl-diagnostics.js';
-import { extractEngineWebGLPrograms } from '../../scripts/webgl-engine-shader-smoke.mjs';
+import { extractEngineWebGLPrograms, expandShaderExpression } from '../../scripts/webgl-engine-shader-smoke.mjs';
 
 test('black-frame detector distinguishes visible and dark frames', () => {
   // Guard cases: null, undefined, empty, and a buffer shorter than one pixel.
@@ -186,4 +186,56 @@ test('headless smoke gate compiles the actual engine WebGL shader sources', asyn
     assert.doesNotMatch(program.vertex, /#version 430/);
     assert.doesNotMatch(program.fragment, /#version 430/);
   }
+});
+
+// uhexen2-rnzi.  The extractor used to carry a hardcoded list of the GLSL
+// helper macros it knew about, so adding a helper to gl_shader.c and
+// referencing it from a shader turned the PWA/WASM CI job red with "unknown C
+// string macro" until someone remembered to add the name here.  It broke twice
+// that way -- native and wasm both compile such a macro fine, so nothing local
+// catches it.  These four tests pin the discovery that replaced the list, and
+// the one case it still deliberately refuses.
+test('a new GLSL helper macro resolves without being registered', () => {
+  const source = [
+    '#define GLSL_BRAND_NEW_FN \\',
+    '"vec3 brandnew(vec3 c) { return c; }\\n"',
+    '',
+  ].join('\n');
+  assert.equal(expandShaderExpression('"pre\\n" GLSL_BRAND_NEW_FN "post\\n"', source),
+    'pre\nvec3 brandnew(vec3 c) { return c; }\npost\n');
+});
+
+test('a discovered macro may itself reference another discovered macro', () => {
+  const source = [
+    '#define GLSL_INNER "inner\\n"',
+    '#define GLSL_OUTER "before\\n" GLSL_INNER "after\\n"',
+    '',
+  ].join('\n');
+  assert.equal(expandShaderExpression('GLSL_OUTER', source), 'before\ninner\nafter\n');
+});
+
+test('a tier-specific macro is refused with the fix, not a bare "unknown"', () => {
+  const source = [
+    '#ifdef USE_GLES',
+    '#define GLSL_HEADER "es\\n"',
+    '#else',
+    '#define GLSL_HEADER "desktop\\n"',
+    '#endif',
+    '',
+  ].join('\n');
+  // Two arms means the extractor would have to CHOOSE, which is the one thing
+  // discovery must not do silently -- picking the desktop spelling would ship
+  // a shader the ES tier never compiles.
+  assert.throws(() => expandShaderExpression('GLSL_HEADER', source, 'gl_shader.c'),
+    /#defined 2 times in gl_shader\.c.*register it in the tier-specific list/s);
+});
+
+test('a macro with no #define at all still fails, and names the file', () => {
+  assert.throws(() => expandShaderExpression('GLSL_NOT_THERE', '#define GLSL_OTHER "x"\n', 'gl_shader.c'),
+    /unknown C string macro GLSL_NOT_THERE: no #define in gl_shader\.c/);
+});
+
+test('a self-referential macro reports itself instead of hanging', () => {
+  assert.throws(() => expandShaderExpression('GLSL_LOOP', '#define GLSL_LOOP "a" GLSL_LOOP\n'),
+    /GLSL_LOOP is defined in terms of itself/);
 });
