@@ -111,6 +111,7 @@ TODO: search order: tga png jpg pcx lmp
 byte *Image_LoadImage (const char *name, int *width, int *height/*, qboolean *malloced*/)
 {
 	fshandle_t	fh;
+	byte		*data;
 
 	//*malloced = false; //for PNG loading
 
@@ -121,7 +122,13 @@ byte *Image_LoadImage (const char *name, int *width, int *height/*, qboolean *ma
 
 	q_snprintf (loadfilename, sizeof(loadfilename), "%s.tga", name);
 	if (FS_OpenFileHandle (loadfilename, &fh, NULL) >= 0)
-		return Image_LoadTGA (&fh, width, height);
+	{
+		data = Image_LoadTGA (&fh, width, height);
+		if (data)
+			return data;
+		/* the .tga exists but we cannot decode it -- keep looking rather
+		 * than reporting the whole image missing */
+	}
 
 	q_snprintf (loadfilename, sizeof(loadfilename), "%s.pcx", name);
 	if (FS_OpenFileHandle (loadfilename, &fh, NULL) >= 0)
@@ -248,14 +255,34 @@ byte *Image_LoadTGA (fshandle_t *fin, int *width, int *height)
 	targa_header.pixel_size = FS_fgetc(fin);
 	targa_header.attributes = FS_fgetc(fin);
 
+	/* An unsupported-but-legal targa is not a fatal condition: decline it and
+	 * let the caller fall back, the way IMG_LoadTGA already does.  Type 1/3/9/11
+	 * and 8/15/16-bit files are ordinary variants that other engines load, and
+	 * aborting on one takes the whole engine down over a single texture. */
 	if (targa_header.image_type!=2 && targa_header.image_type!=10)
-		Sys_Error ("Image_LoadTGA: %s is not a type 2 or type 10 targa\n", loadfilename);
+	{
+		Con_Printf ("Image_LoadTGA: %s is not a type 2 or type 10 targa, skipped\n", loadfilename);
+		FS_fclose (fin);
+		return NULL;
+	}
 
 	if (targa_header.colormap_type !=0 || (targa_header.pixel_size!=32 && targa_header.pixel_size!=24))
-		Sys_Error ("Image_LoadTGA: %s is not a 24bit or 32bit targa\n", loadfilename);
+	{
+		Con_Printf ("Image_LoadTGA: %s is not a 24bit or 32bit targa, skipped\n", loadfilename);
+		FS_fclose (fin);
+		return NULL;
+	}
 
 	columns = targa_header.width;
 	rows = targa_header.height;
+
+	if (columns <= 0 || rows <= 0)
+	{
+		Con_Printf ("Image_LoadTGA: %s has bogus dimensions %dx%d, skipped\n", loadfilename, columns, rows);
+		FS_fclose (fin);
+		return NULL;
+	}
+
 	numPixels = columns * rows;
 	upside_down = !(targa_header.attributes & 0x20); //johnfitz -- fix for upside-down targas
 
@@ -459,17 +486,37 @@ byte *Image_LoadPCX (fshandle_t *f, int *width, int *height)
 	pcx.ymax = (unsigned short)LittleShort (pcx.ymax);
 	pcx.bytes_per_line = (unsigned short)LittleShort (pcx.bytes_per_line);
 
+	/* Same contract as Image_LoadTGA above: decline, do not abort. */
 	if (pcx.signature != 0x0A)
-		Sys_Error ("'%s' is not a valid PCX file", loadfilename);
+	{
+		Con_Printf ("Image_LoadPCX: '%s' is not a valid PCX file, skipped\n", loadfilename);
+		FS_fclose (f);
+		return NULL;
+	}
 
 	if (pcx.version != 5)
-		Sys_Error ("'%s' is version %i, should be 5", loadfilename, pcx.version);
+	{
+		Con_Printf ("Image_LoadPCX: '%s' is version %i, should be 5, skipped\n", loadfilename, pcx.version);
+		FS_fclose (f);
+		return NULL;
+	}
 
 	if (pcx.encoding != 1 || pcx.bits_per_pixel != 8 || pcx.color_planes != 1)
-		Sys_Error ("'%s' has wrong encoding or bit depth", loadfilename);
+	{
+		Con_Printf ("Image_LoadPCX: '%s' has wrong encoding or bit depth, skipped\n", loadfilename);
+		FS_fclose (f);
+		return NULL;
+	}
 
 	w = pcx.xmax - pcx.xmin + 1;
 	h = pcx.ymax - pcx.ymin + 1;
+
+	if (w <= 0 || h <= 0)
+	{
+		Con_Printf ("Image_LoadPCX: '%s' has bogus dimensions %dx%d, skipped\n", loadfilename, w, h);
+		FS_fclose (f);
+		return NULL;
+	}
 
 	data = (byte *) Hunk_Alloc((w*h+1)*4); //+1 to allow reading padding byte on last line
 
