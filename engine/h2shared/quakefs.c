@@ -220,6 +220,63 @@ static pakdata_t old_pakdata[] =
 							 *	MD5: 7708da4323f668cf9c71f99315704baa	*/
 };
 
+/* A CONTAINER-AGNOSTIC fingerprint: member files, by name and exact
+ * uncompressed size, that together identify one of Raven's shipped content
+ * sets no matter what kind of archive delivered it.  See check_known_zip().
+ *
+ * Sizes read from Raven's v1.11 pak0.pak, pak1.pak and pak3.pak.  The small
+ * text files carry the most edition-specific byte counts: maplist.txt names
+ * the ten progs2.dat levels, none of which the demo has, and puzzles.txt names
+ * all 54 puzzle pieces across the four hubs.  The maps are there for weight --
+ * a coincidental match on six exact sizes at once is not a thing that happens.
+ */
+typedef struct
+{
+	const char	*name;
+	int		filelen;
+} contentmark_t;
+
+static const contentmark_t mark_data1_pak0[] =
+{
+	{ "maplist.txt",	193	},
+	{ "puzzles.txt",	1131	},
+	{ "default.cfg",	2793	},
+	{ "gfx.wad",		10732	},
+	{ "gfx/palette.lmp",	768	},
+	{ "maps/demo1.bsp",	1896452	}
+};
+
+static const contentmark_t mark_data1_pak1[] =
+{
+	{ "gfx/pop.lmp",	256	},
+	{ "maps/eidolon.bsp",	528796	},
+	{ "maps/cath.bsp",	2013328	},
+	{ "maps/egypt1.bsp",	2338472	}
+};
+
+static const contentmark_t mark_portals[] =
+{
+	{ "default.cfg",	3164	},
+	{ "maps/keep1.bsp",	2500124	},
+	{ "maps/tibet1.bsp",	2463304	},
+	{ "maps/tibet7.bsp",	2749412	}
+};
+
+static const struct
+{
+	const contentmark_t	*marks;
+	int			nummarks;
+	const char		*dirname;
+	unsigned int		gameflag;
+} contentdata[] =
+{
+	{ mark_data1_pak0, (int)(sizeof(mark_data1_pak0)/sizeof(mark_data1_pak0[0])), "data1",   GAME_REGISTERED0 },
+	{ mark_data1_pak1, (int)(sizeof(mark_data1_pak1)/sizeof(mark_data1_pak1[0])), "data1",   GAME_REGISTERED1 },
+	{ mark_portals,    (int)(sizeof(mark_portals)   /sizeof(mark_portals[0])),    "portals", GAME_PORTALS     }
+};
+
+#define	MAX_CONTENTDATA	(int)(sizeof(contentdata)/sizeof(contentdata[0]))
+
 /* this graphic needs to be in the pak file to use registered features */
 static const unsigned short pop[] =
 {
@@ -345,6 +402,92 @@ static unsigned int check_known_paks (int paknum, int numfiles, unsigned short c
 	}
 
 	return GAME_MODIFIED;	/* we shouldn't reach here */
+}
+
+/*
+=================
+zip_has_marks
+
+Does this ONE archive hold every listed member, each at its exact size?
+=================
+*/
+static qboolean zip_has_marks (zippack_t *zip, const contentmark_t *marks, int nummarks)
+{
+	int		i, j, key;
+	qboolean	found;
+
+	for (i = 0; i < nummarks; i++)
+	{
+		found = false;
+		key = Hash_GenerateKeyString (&zip->hash, marks[i].name, false);
+		for (j = Hash_First (&zip->hash, key); j != -1; j = Hash_Next (&zip->hash, j))
+		{
+			if (q_strcasecmp (zip->files[j].name, marks[i].name) != 0)
+				continue;
+			/* Right name, wrong size is a NO rather than a keep-looking:
+			 * whatever this archive is, it is not the edition being asked
+			 * about, and a duplicate entry further down the chain that did
+			 * match would describe a repack we cannot vouch for. */
+			if (zip->files[j].filelen != marks[i].filelen)
+				return false;
+			found = true;
+			break;
+		}
+		if (!found)
+			return false;	/* not in this archive at all */
+	}
+
+	return true;
+}
+
+/*
+=================
+check_known_zip
+
+The container-agnostic half of check_known_paks.
+
+check_known_paks fingerprints the CONTAINER: a CRC over the .pak directory plus
+its file count.  A .pk3 has an entirely different directory format, so no
+archive can ever produce a matching CRC.  An install repacked as archives --
+which is the point of pk3 support, and about half the disk -- therefore mounted
+every one of its files correctly and then identified as nothing at all, which
+is not merely quiet: FS_Init ends by refusing to start without an edition
+(uhexen2-f1i7).
+
+So ask what is INSIDE instead.  That is a fair trade because these flags answer
+"which edition's data is this", never "is this licensed": every reader of them
+is a version or content-availability check -- PR_GamecodeAvailable declines the
+bundled 1.11 gamecode for other editions, precache_sound2..4 skip assets an
+edition lacks, GAME_PORTALS decides which player classes exist, and the rest
+print or reject mix'n'match installs.  The engine even runs the free 1997 demo
+as a first-class case and points a user with no data at a download helper.
+
+Matched within ONE archive rather than across the searchpath.  That keeps the
+per-container attribution the pak path has -- pak0's content and pak1's content
+stay separate flags, so mixing editions is still detectable -- and it means a
+mod that happens to override a marker file cannot demote a real install.
+
+Only the v1.11 content sets are listed.  The pre-1.11 editions, the demo and
+the OEM bundle keep their pak-only identification: nobody is repacking a 1997
+demo, and a table that cannot be tested against real data is worse than no
+table.  An unrecognised archive falls through to GAME_MODIFIED, exactly as
+every archive did before.
+=================
+*/
+static unsigned int check_known_zip (zippack_t *zip)
+{
+	unsigned int	flags = 0;
+	int		i;
+
+	for (i = 0; i < MAX_CONTENTDATA; i++)
+	{
+		if (strcmp(fs_gamedir_nopath, contentdata[i].dirname) != 0)
+			continue;	/* Raven didn't ship it there */
+		if (zip_has_marks (zip, contentdata[i].marks, contentdata[i].nummarks))
+			flags |= contentdata[i].gameflag;
+	}
+
+	return flags;
 }
 
 /*
@@ -521,7 +664,7 @@ malformed -- a bad archive should cost the user a warning, not a Sys_Error,
 because unlike pak0.pak these are optional content the engine never shipped.
 ================
 */
-static zippack_t *FS_LoadZipFile (const char *zipfile)
+static zippack_t *FS_LoadZipFile (const char *zipfile, qboolean base_fs)
 {
 	zippack_t	*zip;
 	FILE		*handle;
@@ -636,8 +779,14 @@ static zippack_t *FS_LoadZipFile (const char *zipfile)
 	zip->numfiles = numfiles;
 	zip->files = newfiles;
 
-	/* A pk3 is by definition content the original game never shipped. */
+	/* An archive still counts as content the original game never shipped --
+	 * that has one reader, the "modified games need the full version" check at
+	 * the end of FS_Init, and a registered install satisfies it either way, so
+	 * leaving it set keeps every existing install bit-identical.  What is new
+	 * is that an archive can now ALSO be identified as Raven's own content. */
 	gameflags |= GAME_MODIFIED;
+	if (base_fs)
+		gameflags |= check_known_zip (zip);
 
 	Sys_Printf ("Added archive %s (%i files)\n", zipfile, numfiles);
 	return zip;
@@ -819,7 +968,7 @@ add_pakfile:
 			FSERR_MakePath_VABUF (__thisfunc__, __LINE__,
 						(do_userdir) ? FS_USERDIR : FS_GAMEDIR,
 						pakfile, sizeof(pakfile), "%s", zipnames[j]);
-			zip = FS_LoadZipFile (pakfile);
+			zip = FS_LoadZipFile (pakfile, base_fs);
 			if (!zip) continue;
 			search = (searchpath_t *) Z_Malloc (sizeof(searchpath_t), Z_MAINZONE);
 			search->path_id = path_id;
