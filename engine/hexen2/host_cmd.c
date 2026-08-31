@@ -41,9 +41,19 @@ Host_Quit_f
 ==================
 */
 
+/* Ironwail's cl_confirmquit (uhexen2-a5nn.16).  1 keeps the confirmation
+ * prompt; 0 quits immediately from anywhere.
+ *
+ * Worth having beyond parity: the prompt only appears when connected AND not
+ * at the console, so a `quit` issued from a script, a bind or the command line
+ * silently opens a menu and leaves the engine running instead of exiting.
+ * That is exactly the case where nobody is watching to answer it. */
+cvar_t	cl_confirmquit = {"cl_confirmquit", "1", CVAR_ARCHIVE};
+
 void Host_Quit_f (void)
 {
-	if (Key_GetDest() != key_console && 
+	if (cl_confirmquit.integer &&
+	    Key_GetDest() != key_console && 
 	    /* quit without asking if we aren't connected  -- Steve */
 	    /* cls.state != ca_dedicated */ cls.state == ca_connected)
 	{
@@ -2387,6 +2397,7 @@ void Host_InitCommands (void)
 {
 	Cmd_AddCommand ("status", Host_Status_f);
 	Cmd_AddCommand ("quit", Host_Quit_f);
+	Cvar_RegisterVariable (&cl_confirmquit);
 	Cmd_AddCommand ("god", Host_God_f);
 	Cmd_AddCommand ("notarget", Host_Notarget_f);
 	Cmd_AddCommand ("map", Host_Map_f);

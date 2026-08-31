@@ -286,6 +286,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_menupanel_dist);
 	Cvar_RegisterVariable (&r_menupanel_lift);
 	Cvar_RegisterVariable (&cl_gun_fovscale);
+	Cvar_RegisterVariable (&cl_gun_x);	/* uhexen2-a5nn.16 */
+	Cvar_RegisterVariable (&cl_gun_y);
+	Cvar_RegisterVariable (&cl_gun_z);
 	Cvar_RegisterVariable (&r_lavaalpha);
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_telealpha);

@@ -406,6 +406,9 @@ extern	cvar_t	r_menupanel_dist;
 extern	cvar_t	r_menupanel_lift;
 qboolean R_IsMenuPanel (entity_t *e);
 extern	cvar_t	cl_gun_fovscale;
+extern	cvar_t	cl_gun_x;		/* viewmodel offsets, uhexen2-a5nn.16 */
+extern	cvar_t	cl_gun_y;
+extern	cvar_t	cl_gun_z;
 extern	cvar_t	r_lavaalpha;
 extern	cvar_t	r_slimealpha;
 extern	cvar_t	r_telealpha;

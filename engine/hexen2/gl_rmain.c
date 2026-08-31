@@ -192,6 +192,27 @@ cvar_t	r_menupanel_dist = {"r_menupanel_dist", "24", CVAR_ARCHIVE};
  * aspect and resolution changes.  See R_MenuPanelOrigin. */
 cvar_t	r_menupanel_lift = {"r_menupanel_lift", "0.1", CVAR_ARCHIVE};
 cvar_t	cl_gun_fovscale = {"cl_gun_fovscale", "1", CVAR_ARCHIVE};
+/* Viewmodel position offsets, Ironwail parity (uhexen2-a5nn.16).  Named in
+ * SCREEN terms, as upstream's are: x = right, y = up, z = forward.
+ *
+ * Upstream displaces lerpdata.origin in world space with three VectorMAs along
+ * vright/vup/vpn.  We have no origin to displace at that point -- the viewmodel
+ * is positioned by rewriting the translation column of its transform (see the
+ * cl_gun_fovscale block in R_SetupAliasFrame's caller) -- so the offsets go
+ * into that column instead, in the entity-local frame R_RotateForEntity2 has
+ * already established.  In that frame Quake's model axes are +X forward, +Y
+ * LEFT and +Z up, so vright is -Y, vup is +Z and vpn is +X: the three cvars do
+ * not land on the matching matrix index and the sign on x is negative.
+ *
+ * The scale[] index pairing is upstream's, NOT the axis it moves along:
+ * cl_gun_x is multiplied by scale[0] even though it displaces along local Y.
+ * That is deliberate -- it is what makes a given number produce the same
+ * offset here as it does in Ironwail, which is the whole point of taking the
+ * names.  The fovscale asymmetry is upstream's too: x and y are corrected for
+ * FOV, z is not. */
+cvar_t	cl_gun_x = {"cl_gun_x", "0", CVAR_ARCHIVE};
+cvar_t	cl_gun_y = {"cl_gun_y", "0", CVAR_ARCHIVE};
+cvar_t	cl_gun_z = {"cl_gun_z", "0", CVAR_ARCHIVE};
 cvar_t	r_lavaalpha = {"r_lavaalpha", "0", CVAR_ARCHIVE};
 cvar_t	r_slimealpha = {"r_slimealpha", "0", CVAR_ARCHIVE};
 cvar_t	r_telealpha = {"r_telealpha", "0", CVAR_ARCHIVE};
@@ -2090,28 +2111,42 @@ static void R_DrawAliasModel (entity_t *e)
 		tmatrix[2][3] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
 	}
 
-	if (e == &cl.viewent && scr_fov.value > 90.f && cl_gun_fovscale.value)
 	{
 		/* Ironwail-style viewmodel distortion correction: blend factor
 		 * 0 = no correction (gun stretches with FOV), 1 = full correction
-		 * (gun stays same apparent size as at 90 FOV). */
-		float fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
-		fovscale = 1.f + (fovscale - 1.f) * cl_gun_fovscale.value;
+		 * (gun stays same apparent size as at 90 FOV).  Hoisted out of the
+		 * old if/else so cl_gun_x/y below can reuse the same number: their
+		 * FOV correction has to be the same one the gun itself got, or the
+		 * offset and the model disagree about where "the same place" is. */
+		float fovscale = 1.f;
+
+		if (e == &cl.viewent && scr_fov.value > 90.f && cl_gun_fovscale.value)
+		{
+			fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
+			fovscale = 1.f + (fovscale - 1.f) * cl_gun_fovscale.value;
+		}
+
 		mdl_t[0] = tmatrix[0][3];
 		mdl_t[1] = tmatrix[1][3] * fovscale;
 		mdl_t[2] = tmatrix[2][3] * fovscale;
 		mdl_s[0] = tmatrix[0][0];
 		mdl_s[1] = tmatrix[1][1] * fovscale;
 		mdl_s[2] = tmatrix[2][2] * fovscale;
-	}
-	else
-	{
-		mdl_t[0] = tmatrix[0][3];
-		mdl_t[1] = tmatrix[1][3];
-		mdl_t[2] = tmatrix[2][3];
-		mdl_s[0] = tmatrix[0][0];
-		mdl_s[1] = tmatrix[1][1];
-		mdl_s[2] = tmatrix[2][2];
+
+		/* cl_gun_x/y/z (uhexen2-a5nn.16).  See the cvars' comment for why
+		 * screen right is local -Y, screen up is local +Z and forward is
+		 * local +X, and for why the scale[] indices are upstream's pairing
+		 * rather than the axis each one moves along.
+		 *
+		 * Added to the translation column AFTER the fovscale multiply
+		 * above, because upstream applies fovscale to the offsets and not
+		 * to the offsets-plus-everything-else. */
+		if (e == &cl.viewent)
+		{
+			mdl_t[1] -= cl_gun_x.value * paliashdr->scale[0] * fovscale;
+			mdl_t[2] += cl_gun_y.value * paliashdr->scale[1] * fovscale;
+			mdl_t[0] += cl_gun_z.value * paliashdr->scale[2];
+		}
 	}
 
 	GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);

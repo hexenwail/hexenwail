@@ -684,6 +684,26 @@ static void SCR_UpdateZoom (void)
 SCR_Init
 ==================
 */
+/* Ironwail's cl_screenshotname (uhexen2-a5nn.16): a filename TEMPLATE with
+ * %map%, %date% and %time% tokens, expanded at capture time.
+ *
+ * This one earns its place here more than it does upstream.  Field reports
+ * arrive as a folder of screenshots whose map has to be supplied from memory,
+ * and hexen0007.png does not say which one it was.
+ *
+ * The default diverges from upstream's "screenshots/%map%_%date%_%time%" only
+ * in the directory, which is shots/ in this tree (and where the menu, the
+ * README and every existing user's folder already look).  A template with no
+ * time-varying token in it -- "shots/hexen" -- gives back a stable name and
+ * the numbered series that follows it: shots/hexen.png, then hexen_0000.png,
+ * hexen_0001.png and so on. */
+#if !defined(H2W)
+static cvar_t cl_screenshotname = {"cl_screenshotname", "shots/%map%_%date%_%time%", CVAR_ARCHIVE};
+#else
+static cvar_t cl_screenshotname = {"cl_screenshotname", "shots/hw_%map%_%date%_%time%", CVAR_ARCHIVE};
+#endif
+
+
 void SCR_Init (void)
 {
 	scr_ram = Draw_PicFromWad ("ram");
@@ -716,6 +736,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_menubgstyle);
 	Cvar_RegisterVariable (&scr_showclock);
 	Cvar_RegisterVariable (&scr_centertime);
+	Cvar_RegisterVariable (&cl_screenshotname);
 //	Cvar_RegisterVariable (&gl_triplebuffer);
 
 	Cmd_AddCommand ("screenshot",SCR_ScreenShot_f);
@@ -1254,10 +1275,79 @@ static const char scr_shotprefix[] = "shots/hexen";
 static const char scr_shotprefix[] = "shots/hw";
 #endif
 
+/*
+==================
+SCR_ExpandShotName
+
+Expand cl_screenshotname's tokens, then make the result safe to hand to the
+filesystem.  The sanitising pass is not paranoia about the cvar: %map% carries
+whatever the map is called, and mod maps do contain spaces and punctuation.
+'/' survives it so the template can name a subdirectory, which is the whole
+reason upstream's default starts with one.
+==================
+*/
+static void SCR_ExpandShotName (const char *tmpl, char *out, size_t outsize)
+{
+	char		stamp[24], datebuf[16], timebuf[16], mapbuf[MAX_QPATH];
+	const char	*sub;
+	size_t		n = 0;
+	int		i;
+
+	/* Sys_DateTimeString gives "MM/DD/YYYY HH:MM:SS" -- slashes and colons,
+	 * neither of which belongs in a filename -- so split it into two
+	 * filename-safe halves rather than sanitising it after substitution,
+	 * where '/' has to stay legal for the directory part. */
+	Sys_DateTimeString (stamp);
+	memcpy (datebuf, stamp, 10);	datebuf[10] = '\0';
+	memcpy (timebuf, stamp + 11, 8); timebuf[8] = '\0';
+	for (i = 0; datebuf[i]; i++) if (datebuf[i] == '/') datebuf[i] = '-';
+	for (i = 0; timebuf[i]; i++) if (timebuf[i] == ':') timebuf[i] = '-';
+
+	if (cl.worldmodel && cl.worldmodel->name[0])
+		COM_FileBase (cl.worldmodel->name, mapbuf, sizeof(mapbuf));
+	else
+		q_strlcpy (mapbuf, "nomap", sizeof(mapbuf));
+
+	while (*tmpl && n + 1 < outsize)
+	{
+		if (*tmpl == '%')
+		{
+			sub = NULL;
+			if (!q_strncasecmp (tmpl, "%map%", 5))       { sub = mapbuf;  tmpl += 5; }
+			else if (!q_strncasecmp (tmpl, "%date%", 6)) { sub = datebuf; tmpl += 6; }
+			else if (!q_strncasecmp (tmpl, "%time%", 6)) { sub = timebuf; tmpl += 6; }
+			if (sub)
+			{
+				while (*sub && n + 1 < outsize)
+					out[n++] = *sub++;
+				continue;
+			}
+			/* an unrecognised %something% is copied through verbatim
+			 * rather than eaten, so a typo shows up in the filename
+			 * instead of silently vanishing */
+		}
+		out[n++] = *tmpl++;
+	}
+	out[n] = '\0';
+
+	for (i = 0; out[i]; i++)
+	{
+		char c = out[i];
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		      (c >= '0' && c <= '9') || c == '_' || c == '-' ||
+		      c == '.' || c == '/'))
+			out[i] = '_';
+	}
+
+	if (!out[0])
+		q_strlcpy (out, scr_shotprefix, outsize);
+}
+
 static void SCR_ScreenShot_f (void)
 {
 	char	ext[8];
-	char	filename[80];
+	char	shotname[MAX_QPATH];
+	char	filename[MAX_QPATH + 16];
 	char	fullpath[MAX_OSPATH];
 	byte	*rgba;
 	int	i, npix, quality;
@@ -1284,18 +1374,45 @@ static void SCR_ScreenShot_f (void)
 			quality = 90;
 	}
 
-	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), "shots");
-	Sys_mkdir (fullpath, false);
+	/* Expand the template, then find a free name.  The unsuffixed name is
+	 * tried FIRST: with the default template a %time% at one-second
+	 * resolution already makes collisions rare, and "demo1_08-31-2026_10-42-13.png"
+	 * reads better than the same thing with a redundant _0000 on it.  The
+	 * numbered fallback covers two shots inside the same second, and carries
+	 * the series when the template has no time-varying token in it. */
+	SCR_ExpandShotName (cl_screenshotname.string, shotname, sizeof(shotname));
 
-	/* Find next available slot (0-9999, up from old limit of 99) */
-	for (i = 0; i <= 9999; i++)
+	/* Create the directory the TEMPLATE names, not a hardcoded "shots":
+	 * the template is allowed to keep '/' precisely so it can put shots
+	 * somewhere else, and a fixed mkdir would leave that case writing into
+	 * a directory that does not exist. */
 	{
-		q_snprintf (filename, sizeof(filename), "%s%04d.%s", scr_shotprefix, i, ext);
-		FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
-		if (Sys_FileType(fullpath) == FS_ENT_NONE)
-			break;
+		char	dir[MAX_QPATH];
+		char	*slash;
+
+		q_strlcpy (dir, shotname, sizeof(dir));
+		slash = strrchr (dir, '/');
+		if (slash)
+		{
+			*slash = '\0';
+			FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), dir);
+			Sys_mkdir (fullpath, false);
+		}
 	}
-	if (i > 9999) { Con_Printf ("Screenshot: too many files\n"); return; }
+
+	q_snprintf (filename, sizeof(filename), "%s.%s", shotname, ext);
+	FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
+	if (Sys_FileType(fullpath) != FS_ENT_NONE)
+	{
+		for (i = 0; i <= 9999; i++)
+		{
+			q_snprintf (filename, sizeof(filename), "%s_%04d.%s", shotname, i, ext);
+			FS_MakePath_BUF (FS_USERDIR, NULL, fullpath, sizeof(fullpath), filename);
+			if (Sys_FileType(fullpath) == FS_ENT_NONE)
+				break;
+		}
+		if (i > 9999) { Con_Printf ("Screenshot: too many files\n"); return; }
+	}
 
 	/* GL ES 3.0 guarantees exactly one glReadPixels format/type pair --
 	 * GL_RGBA/GL_UNSIGNED_BYTE -- plus one implementation-chosen pair that

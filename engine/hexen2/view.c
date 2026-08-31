@@ -302,6 +302,26 @@ cshift_t	cshift_water = { {130,80,50}, 128 };
 cshift_t	cshift_slime = { {0,25,5}, 150 };
 cshift_t	cshift_lava = { {255,80,0}, 150 };
 
+/* Per-source colour-shift scalars, Ironwail parity (uhexen2-a5nn.16).  The
+ * existing gl_cshiftpercent is a MASTER on the combined blend, applied late
+ * (gl_rmain.c, scaling v_blend[3]); these four scale one source each, applied
+ * in V_CalcBlend BEFORE the sources are combined.  Different knobs, both
+ * wanted: the point of these is to kill the damage flash without also losing
+ * the underwater tint, which one global cannot express.
+ *
+ * HEXEN II HAS FIVE COLOUR SHIFTS, NOT QUAKE'S FOUR.  CSHIFT_INTERVENTION
+ * (client.h) is Raven's own -- Divine Intervention -- and has no upstream
+ * counterpart, so upstream's four names cover indices 0..3 and index 4 has
+ * none.  It is deliberately left governed only by the master gl_cshiftpercent:
+ * inventing a fifth name that no Ironwail config or guide would ever mention
+ * buys nothing, and Divine Intervention is a scripted one-shot rather than a
+ * repeated flash anyone would want to suppress.  Recorded as a choice rather
+ * than left to be discovered as an oversight. */
+static	cvar_t	gl_cshiftpercent_contents = {"gl_cshiftpercent_contents", "100", CVAR_ARCHIVE};
+static	cvar_t	gl_cshiftpercent_damage = {"gl_cshiftpercent_damage", "100", CVAR_ARCHIVE};
+static	cvar_t	gl_cshiftpercent_bonus = {"gl_cshiftpercent_bonus", "100", CVAR_ARCHIVE};
+static	cvar_t	gl_cshiftpercent_powerup = {"gl_cshiftpercent_powerup", "100", CVAR_ARCHIVE};
+
 cvar_t		v_gamma = {"gamma", "1", CVAR_ARCHIVE};
 cvar_t		v_contrast = {"contrast", "1", CVAR_ARCHIVE};
 static cvar_t	r_watercolor = {"r_watercolor", "0", CVAR_ARCHIVE};
@@ -579,7 +599,20 @@ void V_CalcBlend (void)
 		}
 
 		a2 = cl.cshifts[j].percent / 255.0;
-		if (!a2)
+
+		/* Scale this source before it is combined (uhexen2-a5nn.16).
+		 * CSHIFT_INTERVENTION has no cvar on purpose -- see the block
+		 * where these are declared. */
+		switch (j)
+		{
+		case CSHIFT_CONTENTS: a2 *= gl_cshiftpercent_contents.value / 100.0; break;
+		case CSHIFT_DAMAGE:   a2 *= gl_cshiftpercent_damage.value   / 100.0; break;
+		case CSHIFT_BONUS:    a2 *= gl_cshiftpercent_bonus.value    / 100.0; break;
+		case CSHIFT_POWERUP:  a2 *= gl_cshiftpercent_powerup.value  / 100.0; break;
+		default: break;
+		}
+
+		if (a2 <= 0)
 			continue;
 
 		a = a + a2*(1-a);
@@ -1175,6 +1208,10 @@ void V_Init (void)
 
 	Cmd_AddCommand ("centerview", V_StartPitchDrift);
 
+	Cvar_RegisterVariable (&gl_cshiftpercent_contents);
+	Cvar_RegisterVariable (&gl_cshiftpercent_damage);
+	Cvar_RegisterVariable (&gl_cshiftpercent_bonus);
+	Cvar_RegisterVariable (&gl_cshiftpercent_powerup);
 	Cvar_RegisterVariable (&v_centermove);
 	Cvar_RegisterVariable (&v_centerspeed);
 	Cvar_RegisterVariable (&v_centerrollspeed);
