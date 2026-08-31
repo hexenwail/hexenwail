@@ -2425,8 +2425,52 @@ static void FS_Maplist_f (void)
 
 	FS_FreeNameList ();
 }
-#endif	/* SERVERONLY */
 
+/*
+===========
+FS_Games_f
+
+Prints the gamedirs `game` will accept.  ListGames already knows how to find
+them -- it is the tab-completion lister -- and it leaves its results in the
+shared name list, so this is the same scan rendered to the console instead of
+into a completion buffer.  fillMatches returns early on a NULL buffer, which
+is what makes passing NULL here safe.
+===========
+*/
+static void FS_Games_f (void)
+{
+	const char	*prefix;
+	size_t		preLen;
+
+	if (Cmd_Argc() > 1)
+	{
+		prefix = Cmd_Argv(1);
+		preLen = strlen(prefix);
+	}
+	else
+	{
+		preLen = 0;
+		prefix = NULL;
+	}
+	(void) preLen;
+
+	ListGames (prefix, NULL, 0);
+
+	if (!listname_count)
+	{
+		Con_Printf ("No game directories found.\n\n");
+		return;
+	}
+
+	Con_Printf ("Found %d game directories:\n\n", listname_count);
+	if (listname_count > 1)
+		qsort (listnames, listname_count, sizeof(char *), COM_StrCompare);
+	Con_ShowList (listname_count, (const char**)listnames);
+	Con_Printf ("\n");
+
+	FS_FreeNameList ();
+}
+#endif	/* SERVERONLY */
 
 /*
 ==============================================================================
@@ -2661,6 +2705,7 @@ void FS_Init (void)
 	Cmd_AddCommand ("path", FS_Path_f);
 #if !defined(SERVERONLY)
 	Cmd_AddCommand ("maplist", FS_Maplist_f);
+	Cmd_AddCommand ("games", FS_Games_f);
 	Cmd_AddCommand ("game", Host_Game_f);
 #endif
 
