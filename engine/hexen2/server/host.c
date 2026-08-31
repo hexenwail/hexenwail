@@ -43,6 +43,9 @@ client_t	*host_client;			// current client
 
 cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};
 static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for slow motion
+/* See the note in hexen2/host.c: a multiplier rather than an absolute step,
+ * and 0 means off. */
+static	cvar_t	host_timescale = {"host_timescale", "0", CVAR_NONE};
 
 static	cvar_t	serverprofile = {"serverprofile", "0", CVAR_NONE};
 
@@ -245,6 +248,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_ticrate);
 
 	Cvar_RegisterVariable (&host_framerate);
+	Cvar_RegisterVariable (&host_timescale);
 
 	Cvar_RegisterVariable (&serverprofile);
 
@@ -604,6 +608,9 @@ static void _Host_Frame (float time)
 		else if (host_frametime < 0.001)
 			host_frametime = 0.001;
 	}
+
+	if (host_timescale.value > 0)
+		host_frametime *= host_timescale.value;
 
 // process console commands
 	Cbuf_Execute ();

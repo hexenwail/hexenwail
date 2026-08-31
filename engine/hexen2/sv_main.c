@@ -35,11 +35,33 @@ static	cvar_t	sv_update_monsters	= {"sv_update_monsters", "1", CVAR_ARCHIVE};
 static	cvar_t	sv_update_missiles	= {"sv_update_missiles", "1", CVAR_ARCHIVE};
 static	cvar_t	sv_update_misc		= {"sv_update_misc", "1", CVAR_ARCHIVE};
 
+/* Deliberately not CVAR_ARCHIVE, as upstream: a ceiling silently persisted
+ * into a config is how you get a mod that only fails on one machine.  Takes
+ * effect at the next map load, since sv.edicts is sized once there.
+ *
+ * MAX_EDICTS is still the hard ceiling this clamps into, so today this can only
+ * lower the limit, not raise it past 8192.  Raising the hard cap is a separate
+ * decision with real costs -- see the note on MIN_EDICTS in quakedef.h. */
+cvar_t	max_edicts		= {"max_edicts", "8192", CVAR_NONE};
+
+/* Registered but never read by the engine, exactly as upstream, where it exists
+ * so the 2021 rerelease's progs find a cvar to query rather than nothing.  No
+ * Hexen II gamecode reads it either; it is here for parity and for a mod that
+ * wants somewhere to hang the convention.  Hexen II's own cheat gate is the
+ * deathmatch/coop/skill test inside each cheat command, and this does not
+ * change it. */
+cvar_t	sv_cheats		= {"sv_cheats", "0", CVAR_NONE};
+
+/* max_edicts resolved and clamped, latched at map load.  Read this, not the
+ * cvar, so a mid-map change cannot outrun the allocation. */
+int	sv_max_edicts = MAX_EDICTS;
+
 cvar_t	sv_ce_scale		= {"sv_ce_scale", "0", CVAR_ARCHIVE};
 cvar_t	sv_ce_max_size		= {"sv_ce_max_size", "0", CVAR_ARCHIVE};
 
 extern	cvar_t	sv_maxvelocity;
 extern	cvar_t	sv_gameplayfix_elevators;	/* sv_phys.c */
+extern	cvar_t	sv_freezenonclients;		/* sv_phys.c */
 extern	cvar_t	sv_gameplayfix_random;		/* pr_cmds.c */
 extern	cvar_t	sv_gravity;
 extern	cvar_t	sv_nostep;
@@ -69,6 +91,13 @@ extern float	scr_centertime_off;
 
 static void Sv_Edicts_f(void);
 
+static void Max_Edicts_f (cvar_t *var)
+{
+	(void) var;
+	if (sv.active)
+		Con_Printf ("max_edicts will not take effect until the next map load.\n");
+}
+
 /*
 ===============
 SV_Init
@@ -96,6 +125,10 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_nostep);
 	Cvar_RegisterVariable (&sv_walkpitch);
 	Cvar_RegisterVariable (&sv_gameplayfix_elevators);
+	Cvar_RegisterVariable (&sv_freezenonclients);
+	Cvar_RegisterVariable (&max_edicts);
+	Cvar_SetCallback (&max_edicts, Max_Edicts_f);
+	Cvar_RegisterVariable (&sv_cheats);
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
 	Cvar_RegisterVariable (&sv_flypitch);
 	Cvar_RegisterVariable (&sv_debugmovestep);
@@ -2612,7 +2645,14 @@ void SV_SpawnServer (const char *server, const char *startspot)
 // allocate server memory
 	/* Host_ClearMemory() called above already cleared the whole sv structure */
 	sv.states = (client_state2_t *) Hunk_AllocName (svs.maxclients * sizeof(client_state2_t), "states");
-	sv.edicts = (edict_t *) Hunk_AllocName (MAX_EDICTS*pr_edict_size, "edicts");
+	/* Latch the ceiling for this map before anything can allocate against it. */
+	sv_max_edicts = (int) max_edicts.value;
+	if (sv_max_edicts < MIN_EDICTS)
+		sv_max_edicts = MIN_EDICTS;
+	if (sv_max_edicts > MAX_EDICTS)
+		sv_max_edicts = MAX_EDICTS;
+
+	sv.edicts = (edict_t *) Hunk_AllocName (sv_max_edicts*pr_edict_size, "edicts");
 
 	SZ_Init (&sv.datagram, sv.datagram_buf, sizeof(sv.datagram_buf));
 	sv.datagram.name = "sv.datagram";
