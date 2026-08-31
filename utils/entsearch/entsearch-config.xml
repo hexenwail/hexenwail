@@ -11,10 +11,18 @@
     Without one, entsearch searches "." recursively with the built-in list
     of flag properties and every output option switched off.
 
-    The parser is loose on purpose: element names are matched without
-    regard to case, the root element is ignored, and so are the names of
-    the leaves inside the three list sections -- <Path>, <Dir> and
-    <string> all work.  So if you already keep a config for Inky's
+    The parser is loose on purpose.  Element names are matched without
+    regard to case, the root element is ignored, and a value may be written
+    any of these ways:
+
+      <SearchIn>path</SearchIn>            text in the section, one per line
+      <SearchIn><Path>p</Path></SearchIn>  a leaf holding text; name ignored
+      <FlagsProperties><spawnflags/>       a leaf whose NAME is the value,
+                                           with exclude="true" to park it
+      <Output MakePts="true" />            settings as attributes
+
+    Those last two are how the sample config Inky ships writes its flag
+    properties and its output settings, so if you already keep a config for
     MapSearch, copying it to entsearch-config.xml is the whole migration.
 -->
 <EntSearch>
@@ -58,6 +66,7 @@
     <FlagsProperties>
         <Property>spawnflags</Property>
         <Property>flags</Property>
+        <Property>flags2</Property>
         <Property>effects</Property>
         <Property>items</Property>
         <Property>items2</Property>

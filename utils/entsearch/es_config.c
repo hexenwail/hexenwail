@@ -1,12 +1,19 @@
 /* es_config.c -- the entsearch configuration file.
  * Copyright (C) 2026  uHexen2 developers
  *
- * The original tool keeps its settings in an XML file, so this reads the
- * same shape.  It is not a general XML parser and does not pretend to be:
- * it walks elements, tracks which of the three known sections encloses the
- * text it finds, and treats anything else as an output option named after
- * its element.  That tolerance is deliberate -- a config written for the
- * original, whatever it calls the leaves inside <SearchIn>, still loads.
+ * Inky's MapSearch keeps its settings in an XML file and this reads the same
+ * shape, so a config written for it loads here unchanged.  It is not a
+ * general XML parser and does not pretend to be; it walks elements and
+ * accepts a datum written any of the four ways those configs use it:
+ *
+ *   <SearchIn>path</SearchIn>          text inside the section, one per line
+ *   <SearchIn><Path>p</Path></...>     a leaf holding text; its name is ignored
+ *   <FlagsProperties><spawnflags/>     a leaf whose NAME is the datum, with
+ *                                      exclude="true" to park it
+ *   <Output LogToFile="true" />        settings as attributes, not elements
+ *
+ * The last two are not hypothetical: they are how the sample config Inky
+ * ships writes its flag properties and its output settings.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -46,6 +53,7 @@ static const char *const default_flagsprops[] =
 {
 	"spawnflags",
 	"flags",
+	"flags2",
 	"effects",
 	"items",
 	"items2",
@@ -168,12 +176,13 @@ static strlist_t *section_list (const char *name, essettings_t *set)
 /* An element that is not inside a list section names an output option. */
 static qboolean apply_option (const char *name, const char *value, essettings_t *set)
 {
-	if (!q_strcasecmp (name, "Log") || !q_strcasecmp (name, "WriteLog"))
+	if (!q_strcasecmp (name, "Log") || !q_strcasecmp (name, "WriteLog") ||
+	    !q_strcasecmp (name, "LogToFile"))
 		return parse_bool (value, &set->opt_log);
 	if (!q_strcasecmp (name, "SortByLine") || !q_strcasecmp (name, "SortByLineNumber"))
 		return parse_bool (value, &set->opt_sortbyline);
 	if (!q_strcasecmp (name, "Pts") || !q_strcasecmp (name, "WritePts") ||
-	    !q_strcasecmp (name, "PtsFiles"))
+	    !q_strcasecmp (name, "PtsFiles") || !q_strcasecmp (name, "MakePts"))
 		return parse_bool (value, &set->opt_pts);
 	if (!q_strcasecmp (name, "IgnoreCase") || !q_strcasecmp (name, "CaseInsensitive"))
 		return parse_bool (value, &set->opt_ignorecase);
@@ -190,6 +199,106 @@ static qboolean apply_option (const char *name, const char *value, essettings_t 
 		return true;
 	}
 	return false;
+}
+
+/* Walks the name="value" pairs in the attribute span of a tag.  Returns the
+ * position after the pair, or NULL when there are none left.  Bare and
+ * single-quoted attributes are both tolerated. */
+static const char *next_attr (const char *p, const char *end,
+			      char *name, size_t namesize,
+			      char *value, size_t valuesize)
+{
+	size_t	n;
+	char	quote = 0;
+
+	*name = *value = '\0';
+	while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+		p++;
+	if (p >= end || *p == '/' || *p == '>')
+		return NULL;
+
+	n = 0;
+	while (p < end && *p != '=' && *p != ' ' && *p != '\t' &&
+	       *p != '/' && *p != '>')
+	{
+		if (n + 1 < namesize)
+			name[n++] = *p;
+		p++;
+	}
+	name[n] = '\0';
+	if (!n)
+		return NULL;		/* no progress; stop rather than spin */
+
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	if (p >= end || *p != '=')
+		return p;		/* valueless attribute */
+	p++;
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	if (p < end && (*p == '"' || *p == '\''))
+		quote = *p++;
+
+	n = 0;
+	while (p < end && (quote ? (*p != quote)
+				 : (*p != ' ' && *p != '\t' && *p != '/' && *p != '>')))
+	{
+		if (n + 1 < valuesize)
+			value[n++] = *p;
+		p++;
+	}
+	value[n] = '\0';
+	if (quote && p < end && *p == quote)
+		p++;
+	return p;
+}
+
+static int list_index (const strlist_t *list, const essettings_t *set)
+{
+	if (list == &set->searchin)
+		return 0;
+	if (list == &set->exclude)
+		return 1;
+	return 2;
+}
+
+/* A section named in the config replaces the built-in list rather than
+ * extending it, so the first entry of each clears it. */
+static void list_add (strlist_t *list, essettings_t *set, const char *entry,
+		      qboolean *cleared)
+{
+	int	which = list_index (list, set);
+
+	if (!cleared[which])
+	{
+		ES_StrListFree (list);
+		cleared[which] = true;
+	}
+	ES_StrListAdd (list, entry);
+}
+
+/* Text inside a list section is one entry per line: that is how the config
+ * for Inky's MapSearch writes its search and exclude paths, and it is the
+ * obvious reading of a section written across several lines whatever wrote
+ * it.  Taking the whole block as a single entry would silently produce one
+ * nonsense path instead of three real ones. */
+static void list_add_lines (strlist_t *list, essettings_t *set, char *text,
+			    qboolean *cleared)
+{
+	char	*line = text;
+
+	while (line && *line)
+	{
+		char	*nl = strchr (line, '\n');
+
+		if (nl)
+			*nl = '\0';
+		trim (line);
+		decode_entities (line);
+		if (*line)
+			list_add (list, set, line, cleared);
+		line = nl ? nl + 1 : NULL;
+	}
 }
 
 qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
@@ -291,29 +400,21 @@ qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
 			name[n] = '\0';
 			p = close + 1;
 
-			trim (text);
-			decode_entities (text);
+			/* text sitting straight inside a section element, or
+			 * inside a leaf whose parent is one */
+			list = section_list (name, set);
+			if (!list && depth >= 2)
+				list = section_list (stack[depth - 2], set);
 
-			if (*text)
+			if (list)
 			{
-				/* text sitting straight inside a section element,
-				 * or inside a leaf whose parent is one */
-				list = section_list (name, set);
-				if (!list && depth >= 2)
-					list = section_list (stack[depth - 2], set);
-
-				if (list)
-				{
-					int	which = (list == &set->searchin) ? 0 :
-							(list == &set->exclude) ? 1 : 2;
-					if (!cleared_defaults[which])
-					{
-						ES_StrListFree (list);
-						cleared_defaults[which] = true;
-					}
-					ES_StrListAdd (list, text);
-				}
-				else if (!apply_option (name, text, set))
+				list_add_lines (list, set, text, cleared_defaults);
+			}
+			else
+			{
+				trim (text);
+				decode_entities (text);
+				if (*text && !apply_option (name, text, set))
 				{
 					if (errbuf && !*errbuf)
 						q_snprintf (errbuf, errlen,
@@ -335,6 +436,11 @@ qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
 			size_t	n = 0;
 			qboolean selfclosing;
 
+			const char	*ap;
+			char		aname[CFG_MAXNAME], aval[512];
+			qboolean	attr_exclude = false;
+			strlist_t	*leaflist;
+
 			if (!close)
 				break;
 			p++;
@@ -343,6 +449,32 @@ qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
 				name[n++] = *p++;
 			name[n] = '\0';
 			selfclosing = (close > p && close[-1] == '/');
+
+			/* Attributes carry settings in the config Inky's tool
+			 * ships: <Output LogToFile="true" MakePts="false" />,
+			 * and exclude="true" to park a flag property without
+			 * deleting the line. */
+			ap = p;
+			while ((ap = next_attr (ap, close, aname, sizeof(aname),
+						aval, sizeof(aval))) != NULL)
+			{
+				if (!q_strcasecmp (aname, "exclude"))
+					parse_bool (aval, &attr_exclude);
+				else
+					apply_option (aname, aval, set);
+			}
+
+			/* <spawnflags/> inside <FlagsProperties>: the element
+			 * name is the datum.  Without this such a section
+			 * clears the built-in list and adds nothing, and bit
+			 * matching quietly stops working. */
+			if (selfclosing && depth >= 1)
+			{
+				leaflist = section_list (stack[depth - 1], set);
+				if (leaflist && !attr_exclude)
+					list_add (leaflist, set, name, cleared_defaults);
+			}
+
 			p = close + 1;
 
 			textlen = 0;
@@ -369,6 +501,12 @@ qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
 	/* An empty <SearchIn> section would otherwise leave nothing to walk. */
 	if (set->searchin.count == 0)
 		ES_StrListAdd (&set->searchin, ".");
+
+	/* Worth saying out loud: with no flag properties left, an integer
+	 * search silently stops matching bits and only matches exactly. */
+	if (set->flagsprops.count == 0 && errbuf && !*errbuf)
+		q_snprintf (errbuf, errlen, "no flag properties are left; "
+			    "an integer value will only match exactly");
 
 	return true;
 }

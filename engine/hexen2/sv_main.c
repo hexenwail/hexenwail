@@ -994,6 +994,49 @@ static byte *SV_FatPVS (vec3_t org)
 #define CLIENT_FRAME_INIT	255
 #define CLIENT_FRAME_RESET	254
 
+/*
+ * Room held back at the end of the per-frame datagram for the svc_clear_edicts
+ * trailer that SV_PrepareClientEntities always writes: the opcode, the count
+ * byte, and up to MAX_CLEAR_EDICTS_PER_MSG shorts.  Removals are collected all
+ * through the entity loop, so the worst case has to be reserved up front --
+ * by the time the list is full the message is already written.
+ */
+#define DATAGRAM_TRAILER_RESERVE	(2 + 2 * MAX_CLEAR_EDICTS_PER_MSG)
+
+/*
+ * Exact size of the entity update that the writer below emits for `bits`.
+ * Computed rather than estimated: U_SKIN and U_SCALE carry two bytes each,
+ * U_LONGENTITY and the U_MOREBITS chain change the header length, and every
+ * optional field is independently present or absent, so a single worst-case
+ * number would shed entities that would have fit.  Must be kept in step with
+ * the write block in SV_PrepareClientEntities.
+ */
+static int SV_EntityUpdateSize (int bits)
+{
+	int	len;
+
+	len = 1;					/* bits | U_SIGNAL */
+	if (bits & U_MOREBITS)		len += 1;
+	if (bits & U_MOREBITS2)		len += 1;
+	len += (bits & U_LONGENTITY) ? 2 : 1;	/* entity number */
+
+	if (bits & U_MODEL)		len += 2;
+	if (bits & U_FRAME)		len += 1;
+	if (bits & U_COLORMAP)		len += 1;
+	if (bits & U_SKIN)		len += 2;	/* skin + drawflags */
+	if (bits & U_EFFECTS)		len += 1;
+	if (bits & U_ORIGIN1)		len += 2;
+	if (bits & U_ANGLE1)		len += 1;
+	if (bits & U_ORIGIN2)		len += 2;
+	if (bits & U_ANGLE2)		len += 1;
+	if (bits & U_ORIGIN3)		len += 2;
+	if (bits & U_ANGLE3)		len += 1;
+	if (bits & U_SCALE)		len += 2;	/* scale + abslight */
+	if (bits & U_ALPHA)		len += 1;
+
+	return len;
+}
+
 static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_t *msg)
 {
 	int		e, i;
@@ -1009,10 +1052,11 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 	int			client_num;
 	client_frames_t	*reference, *build;
 	client_state2_t	*state;
-	entity_state2_t	*ref_ent, *set_ent, build_ent;
+	entity_state2_t	*ref_ent, *set_ent, build_ent, saved_ref;
 	qboolean		FoundInList,DoRemove,DoPlayer,DoMonsters,DoMissiles,DoMisc,IgnoreEnt;
 	short			RemoveList[MAX_CLIENT_STATES],NumToRemove;
 	int			NumDeferred;
+	int			NumShed;
 
 	client_num = client-svs.clients;
 	state = &sv.states[client_num];
@@ -1083,6 +1127,7 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 
 	NumToRemove = 0;
 	NumDeferred = 0;
+	NumShed = 0;
 	MSG_WriteByte (msg, svc_reference);
 	MSG_WriteByte (msg, client->current_frame);
 	MSG_WriteByte (msg, client->current_sequence);
@@ -1226,6 +1271,12 @@ skipA:
 			FoundInList = false;
 		}
 
+		/* Snapshot the reference entry before the ENT_CLEARED memset below
+		 * rewrites it: if this entity's update turns out not to fit in the
+		 * datagram, nothing was sent, so the reference has to go back to
+		 * describing what the client actually holds. */
+		saved_ref = *ref_ent;
+
 		set_ent = &build->states[build->count];
 		build->count++;
 		if (ent->baseline.ClearCount[client_num] < CLEAR_LIMIT)
@@ -1359,6 +1410,56 @@ skipA:
 		if (bits >= 65536)
 			bits |= U_MOREBITS2;
 
+		/* Datagram size guard.  The buffer is a fixed NET_MAXMESSAGE stack
+		 * buffer with allowoverflow false, so without this the first delta
+		 * that does not fit takes the server down inside SZ_GetSpace.  Shed
+		 * the entity instead.
+		 *
+		 * This has to undo the build->states[] bookkeeping in the same breath
+		 * as it skips the write: build->states[] is the client's next
+		 * reference frame and must record exactly the set that went out.
+		 * Recording a delta that was never written desynchronises the
+		 * reference and reaches the player as "Illegible server message"
+		 * (uhexen2-6ugh).  How it is undone depends on whether the client
+		 * already knows the entity:
+		 *
+		 *   FoundInList  - it is in the client's reference and may later need
+		 *                  an svc_clear_edicts removal, which only happens for
+		 *                  entities still in the reference.  Keep it, holding
+		 *                  its unmodified reference state, exactly as the
+		 *                  IgnoreEnt path does.  Dropping it would strand it
+		 *                  as a permanent ghost.
+		 *   !FoundInList - the client has never heard of it.  Drop it, so the
+		 *                  next frame offers it again as a new entity.  Keeping
+		 *                  it would claim the client holds it at baseline, and
+		 *                  a subsequent zero-delta frame would then skip it and
+		 *                  leave it invisible until it next changed.
+		 *
+		 * DATAGRAM_TRAILER_RESERVE keeps room for the svc_clear_edicts trailer
+		 * written after the loop. */
+		if (msg->cursize + SV_EntityUpdateSize(bits) +
+					DATAGRAM_TRAILER_RESERVE > msg->maxsize)
+		{
+			*ref_ent = saved_ref;
+			NumShed++;
+
+			if (!FoundInList)
+			{
+				build->count--;
+				continue;
+			}
+
+			*set_ent = saved_ref;
+			/* No U_CLEAR_ENT went out, so this frame must not be counted
+			 * as a delivered clear by the ClearCount bookkeeping above. */
+			set_ent->flags &= ~ENT_CLEARED;
+
+			if (build->count >= MAX_CLIENT_STATES)
+				break;
+
+			continue;
+		}
+
 	//
 	// write the message
 	//
@@ -1423,6 +1524,10 @@ skipA:
 	if (NumDeferred)
 		Con_DPrintf ("%s: remove list full, %d edict(s) deferred\n",
 				__thisfunc__, NumDeferred);
+
+	if (NumShed)
+		Con_DPrintf ("%s: datagram full at %d bytes, %d edict(s) shed\n",
+				__thisfunc__, msg->cursize, NumShed);
 
 	MSG_WriteByte (msg, svc_clear_edicts);
 	MSG_WriteByte (msg, NumToRemove);
