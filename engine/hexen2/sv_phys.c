@@ -554,8 +554,19 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 	vec3_t		mins, maxs, move;
 	vec3_t		entorig, pushorig;
 	int			num_moved;
-	edict_t		*moved_edict[MAX_EDICTS];
-	vec3_t		moved_from[MAX_EDICTS];
+	/* Static, not automatic: at MAX_EDICTS 8192 these are 64 KB + 96 KB = 160 KB
+	 * in a single stack frame, which is already large and would reach 625 KB if
+	 * the edict ceiling were raised (uhexen2-gyul).  That is a real overflow risk
+	 * for the WASM build and for the 1 MB default thread stack on Windows.
+	 *
+	 * Safe because neither pusher routine is re-entrant: SV_PushMove is reached
+	 * only from SV_Physics_Pusher, itself only from SV_Physics, which walks
+	 * entities strictly sequentially.  QC does run inside the loop -- SV_PushEntity
+	 * reaches SV_Impact which executes touch functions, and a blocked pusher
+	 * executes its own blocked function -- but no QC builtin re-enters the physics
+	 * walk, so the buffer cannot be clobbered mid-use. */
+	static edict_t	*moved_edict[MAX_EDICTS];
+	static vec3_t	moved_from[MAX_EDICTS];
 	qboolean	riding;
 
 	if (!pusher->v.velocity[0] && !pusher->v.velocity[1] && !pusher->v.velocity[2])
@@ -949,8 +960,19 @@ static void SV_PushRotate (edict_t *pusher, float movetime)
 //	vec3_t		amove_norm;
 	vec3_t		entorig, pushorig, pushorigangles;
 	int			num_moved;
-	edict_t		*moved_edict[MAX_EDICTS];
-	vec3_t		moved_from[MAX_EDICTS];
+	/* Static, not automatic: at MAX_EDICTS 8192 these are 64 KB + 96 KB = 160 KB
+	 * in a single stack frame, which is already large and would reach 625 KB if
+	 * the edict ceiling were raised (uhexen2-gyul).  That is a real overflow risk
+	 * for the WASM build and for the 1 MB default thread stack on Windows.
+	 *
+	 * Safe because neither pusher routine is re-entrant: SV_PushMove is reached
+	 * only from SV_Physics_Pusher, itself only from SV_Physics, which walks
+	 * entities strictly sequentially.  QC does run inside the loop -- SV_PushEntity
+	 * reaches SV_Impact which executes touch functions, and a blocked pusher
+	 * executes its own blocked function -- but no QC builtin re-enters the physics
+	 * walk, so the buffer cannot be clobbered mid-use. */
+	static edict_t	*moved_edict[MAX_EDICTS];
+	static vec3_t	moved_from[MAX_EDICTS];
 	vec3_t		org, org2, check_center;
 	vec3_t		forward, right, up;
 	edict_t		*ground;
