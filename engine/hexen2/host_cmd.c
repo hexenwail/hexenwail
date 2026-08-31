@@ -906,7 +906,25 @@ static void Host_Loadgame_f (void)
 	}
 
 	if (LoadGamestate(mapname, NULL, 2) != 0)
+	{
+		/* Same trap Host_Map_f had, and the same fix (uhexen2-k490).  We set
+		 * key_dest to key_game at the top on the assumption the save would
+		 * load; it didn't, so cls.state is disconnected, con_forcedup is true,
+		 * and the console -- carrying the "Couldn't load map" LoadGamestate
+		 * just printed -- is what is actually on screen, full height.  Leaving
+		 * key_dest at key_game meant every keystroke went to a game that does
+		 * not exist: the user got a console filling the screen with an error
+		 * and no way to type into it, which is exactly how it was reported.
+		 * uhexen2-lx4m
+		 *
+		 * Only here, not inside LoadGamestate: Host_Changelevel2_f and
+		 * Host_Restart_f treat a nonzero return as recoverable and go on to
+		 * SV_SpawnServer themselves, so pinning key_dest down there would
+		 * strand a player in the console mid-campaign after a successful
+		 * recovery. */
+		Key_SetDest (key_console);
 		return;
+	}
 
 	SV_SaveSpawnparms ();
 
