@@ -485,6 +485,7 @@ qboolean CL_FixAngleHeld (double hold);
 // cl_tent
 //
 void CL_InitTEnts (void);
+void CL_PrecacheTEntSounds (void);
 void CL_ClearTEnts (void);
 void CL_ParseTEnt (void);
 void CL_UpdateTEnts (void);

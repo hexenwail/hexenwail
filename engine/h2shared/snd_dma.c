@@ -1354,8 +1354,47 @@ void S_LocalSound (const char *name)
 }
 
 
+/*
+=================
+S_ClearPrecache
+
+Drop the previous map's sound names.  num_sfx was reset in S_Init and nowhere
+else, so the table grew for the whole process and a long playthrough across
+enough maps hit MAX_SFX -- reported by the author of Storm over Thyrion in the
+mod's own readme.  uhexen2-2die.
+
+Three things hold a slot and all three must be broken before it can be handed
+to a different sound:
+  - playing channels point straight into known_sfx, so stop them first;
+  - the cache holds a back-pointer to the cache_user_t embedded in each sfx_t,
+    so each cached entry must be freed rather than orphaned (Cache_Free
+    Sys_Errors on a user that was never allocated, hence the data test);
+  - the name hash maps names to indices, so it must be emptied too.
+
+The CALLER additionally has to re-take any sfx_t* it cached, which is why
+cl_parse.c calls CL_PrecacheTEntSounds after this: those handles are
+file-static in cl_tent.c, taken once at startup, and are not in
+cl.sound_precache for the precache loop to rebuild.
+=================
+*/
 void S_ClearPrecache (void)
 {
+	int	i;
+
+	if (!known_sfx)
+		return;
+
+	S_StopAllSounds (true);
+
+	for (i = 0; i < num_sfx; i++)
+	{
+		if (known_sfx[i].cache.data)
+			Cache_Free (&known_sfx[i].cache);
+	}
+
+	memset (known_sfx, 0, MAX_SFX * sizeof(sfx_t));
+	num_sfx = 0;
+	Hash_Clear (&hash_sfx);
 }
 
 

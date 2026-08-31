@@ -604,6 +604,11 @@ static void CL_ParseServerInfo (void)
 		}
 	}
 
+	/* Release the previous map's sound names before taking this map's, or the
+	 * table grows for the whole process and a long playthrough dies on
+	 * "S_FindName: out of sfx_t".  uhexen2-2die. */
+	S_ClearPrecache ();
+
 	S_BeginPrecaching ();
 	for (i = 1; i < numsounds; i++)
 	{
@@ -617,6 +622,11 @@ static void CL_ParseServerInfo (void)
 		CL_KeepaliveMessage ();
 	}
 	S_EndPrecaching ();
+
+	/* S_ClearPrecache above invalidated the temp-entity sound handles, which are
+	 * file-static in cl_tent.c and are not part of cl.sound_precache, so the
+	 * loop above did not rebuild them.  Re-take them now. */
+	CL_PrecacheTEntSounds ();
 
 	total_loading_size = 0;
 	loading_stage = 0;
