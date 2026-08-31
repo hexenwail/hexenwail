@@ -322,6 +322,7 @@ extern	cvar_t	timelimit;
 
 extern	server_static_t	svs;		// persistant server info
 extern	int		sv_max_edicts;	// max_edicts, clamped and latched at map load
+extern	qboolean	sv_datagram_dropped;	// this frame's broadcast datagram was abandoned
 extern	server_t	sv;		// local server
 
 extern	int		sv_protocol;	// protocol version to use

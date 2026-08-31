@@ -75,6 +75,55 @@ extern int	d_lightstylevalue[256];
 #endif
 static sizebuf_t *WriteDest (void);
 
+#ifndef H2W
+/* Sink for QC broadcast writes after the datagram has been abandoned for this
+ * frame.  allowoverflow so it can never itself be the thing that dies; it is
+ * SZ_Clear'd whenever it is handed out, so a single record cannot outgrow it
+ * either. */
+#define QC_DATAGRAM_RESERVE	1024
+static byte		qc_datagram_bin_buf[NET_MAXMESSAGE];
+static sizebuf_t	qc_datagram_bin = {
+	true,			/* allowoverflow */
+	false,			/* overflowed */
+	qc_datagram_bin_buf,
+	NET_MAXMESSAGE,		/* maxsize */
+	0,			/* cursize */
+	"qc_datagram_bin"
+};
+
+/*
+=================
+SV_BroadcastDest
+
+The guarded destination for everything QC can put in sv.datagram.  Returns the
+real datagram while there is room, and a bin once there is not.
+
+Callers with a KNOWN record size should take this ONCE and write every field to
+what it returns: the reserve below is far larger than any single engine record,
+so once this hands back the real datagram the whole record is guaranteed to
+fit.  Re-calling it per field could hand back the bin midway and truncate.
+=================
+*/
+static sizebuf_t *SV_BroadcastDest (void)
+{
+	if (sv_datagram_dropped)
+		return &qc_datagram_bin;
+
+	if (sv.datagram.cursize + QC_DATAGRAM_RESERVE > sv.datagram.maxsize)
+	{
+		Con_Printf ("%s: broadcast datagram full (%d of %d), dropping this "
+			    "frame's broadcast data\n", __thisfunc__,
+			    sv.datagram.cursize, sv.datagram.maxsize);
+		SZ_Clear (&sv.datagram);
+		sv_datagram_dropped = true;
+		SZ_Clear (&qc_datagram_bin);
+		return &qc_datagram_bin;
+	}
+
+	return &sv.datagram;
+}
+#endif
+
 
 /*
 ===============================================================================
@@ -2970,7 +3019,28 @@ static sizebuf_t *WriteDest (void)
 	switch (dest)
 	{
 	case MSG_BROADCAST:
+		#ifndef H2W
+		/* sv.datagram has allowoverflow false, so the first QC write past the
+		 * end is Sys_Error straight to desktop.  The engine's own datagram
+		 * writers all test cursize before writing (sv_main.c) and drop the
+		 * effect; QC never went through any such check.  uhexen2-1izo.
+		 *
+		 * Threshold is the BUFFER end, not MAX_DATAGRAM.  MAX_DATAGRAM is
+		 * 4096 and is what the engine's own writers respect, but the buffer
+		 * is NET_MAXMESSAGE (32 KB) and QC writing between the two currently
+		 * WORKS -- clamping to 4096 would break mods that do it today.  Only
+		 * the case that currently crashes is changed.
+		 *
+		 * Once tripped, everything else this frame goes to the bin and the
+		 * datagram is abandoned rather than truncated.  A half-written record
+		 * left in sv.datagram would reach the client as a malformed svc and
+		 * cost it the connection with "Illegible server message" -- no better
+		 * than the crash.  Dropping the whole frame's broadcast traffic is
+		 * one hitch of missing effects and is protocol-valid. */
+		return SV_BroadcastDest ();
+		#else
 		return &sv.datagram;
+		#endif
 
 	case MSG_ONE:
 		ent = PROG_TO_EDICT(*sv_globals.msg_entity);
@@ -3450,17 +3520,20 @@ static void PF_rain_go (void)
 	y_dir = dir[1];
 
 	#ifndef H2W
-	MSG_WriteByte (&sv.datagram, svc_raineffect);
-	MSG_WriteCoord (&sv.datagram, org[0]);
-	MSG_WriteCoord (&sv.datagram, org[1]);
-	MSG_WriteCoord (&sv.datagram, org[2]);
-	MSG_WriteCoord (&sv.datagram, e_size[0]);
-	MSG_WriteCoord (&sv.datagram, e_size[1]);
-	MSG_WriteCoord (&sv.datagram, e_size[2]);
-	MSG_WriteAngle (&sv.datagram, x_dir);
-	MSG_WriteAngle (&sv.datagram, y_dir);
-	MSG_WriteShort (&sv.datagram, color);
-	MSG_WriteShort (&sv.datagram, count);
+	{
+	sizebuf_t *dg = SV_BroadcastDest ();
+	MSG_WriteByte (dg, svc_raineffect);
+	MSG_WriteCoord (dg, org[0]);
+	MSG_WriteCoord (dg, org[1]);
+	MSG_WriteCoord (dg, org[2]);
+	MSG_WriteCoord (dg, e_size[0]);
+	MSG_WriteCoord (dg, e_size[1]);
+	MSG_WriteCoord (dg, e_size[2]);
+	MSG_WriteAngle (dg, x_dir);
+	MSG_WriteAngle (dg, y_dir);
+	MSG_WriteShort (dg, color);
+	MSG_WriteShort (dg, count);
+	}
 	#else
 	SV_StartRainEffect (org,org2,x_dir,y_dir,color,count);
 	#endif
@@ -3476,13 +3549,21 @@ static void PF_particleexplosion (void)
 	radius = G_FLOAT(OFS_PARM2);
 	counter = G_FLOAT(OFS_PARM3);
 
-	MSG_WriteByte(&sv.datagram, svc_particle_explosion);
-	MSG_WriteCoord(&sv.datagram, org[0]);
-	MSG_WriteCoord(&sv.datagram, org[1]);
-	MSG_WriteCoord(&sv.datagram, org[2]);
-	MSG_WriteShort(&sv.datagram, color);
-	MSG_WriteShort(&sv.datagram, radius);
-	MSG_WriteShort(&sv.datagram, counter);
+	#ifndef H2W
+	{
+	sizebuf_t *dg = SV_BroadcastDest ();
+	#else
+	sizebuf_t *dg = &sv.datagram;
+	{
+	#endif
+	MSG_WriteByte(dg, svc_particle_explosion);
+	MSG_WriteCoord(dg, org[0]);
+	MSG_WriteCoord(dg, org[1]);
+	MSG_WriteCoord(dg, org[2]);
+	MSG_WriteShort(dg, color);
+	MSG_WriteShort(dg, radius);
+	MSG_WriteShort(dg, counter);
+	}
 }
 
 static void PF_movestep (void)
