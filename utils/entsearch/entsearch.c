@@ -1,11 +1,16 @@
-/* mapsearch.c -- search .map sources for entities by classname and property.
+/* entsearch.c -- search .map sources for entities by classname and property.
  * Copyright (C) 2026  uHexen2 developers
  *
- * A reimplementation of Inky's MapSearch (http://earthday.free.fr/), which
- * answers the questions that come up constantly while mapping: how is this
- * property actually used, and where did Raven use it?  The original is a
- * closed Windows binary; this is a native uHexen2 utility that builds
- * everywhere the rest of the toolchain does.
+ * Answers the questions that come up constantly while mapping: how is this
+ * property actually used, and where did Raven use it?
+ *
+ * The idea is not ours.  Inky's MapSearch does this, and does it well:
+ *   http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/
+ * His is the reference implementation and the one to use on Windows.  This
+ * is a separate tool that borrows his design -- the three-argument search,
+ * the bit matching against flag properties, the point files -- and none of
+ * his code, so that the uHexen2 toolchain has an entity search that builds
+ * from source everywhere the rest of it does.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,7 +34,7 @@
 #include "cmdlib.h"
 #include "util_io.h"
 #include "pathutil.h"
-#include "mapsearch.h"
+#include "entsearch.h"
 
 #include <errno.h>
 
@@ -58,12 +63,12 @@ typedef struct
 
 typedef struct
 {
-	mssettings_t	*set;
+	essettings_t	*set;
 
-	msregex_t	*re_class;
-	msregex_t	*re_prop;
-	msregex_t	*re_value;
-	msregex_t	**re_exclude;
+	esregex_t	*re_class;
+	esregex_t	*re_prop;
+	esregex_t	*re_value;
+	esregex_t	**re_exclude;
 	int		numexclude;
 
 	qboolean	value_is_int;
@@ -128,9 +133,9 @@ static void dev (const char *fmt, ...)
 static void usage (void)
 {
 	printf (
-"mapsearch %s -- search Quake/Hexen II .map sources for entities.\n"
+"entsearch %s -- search Quake/Hexen II .map sources for entities.\n"
 "\n"
-"usage: mapsearch CLASSNAME [PROPERTY] [VALUE] [OPTIONS]\n"
+"usage: entsearch CLASSNAME [PROPERTY] [VALUE] [OPTIONS]\n"
 "\n"
 "CLASSNAME, PROPERTY and VALUE are regular expressions and must match a\n"
 "whole name or value, not a part of one -- which is why \"func_train.*\" is\n"
@@ -157,21 +162,21 @@ static void usage (void)
 "  --version       version information\n"
 "\n"
 "Where to search, what to skip and which properties hold bit flags all come\n"
-"from mapsearch-config.xml; without one, the current directory is searched\n"
-"recursively.  See the README in this directory.\n"
+"from entsearch-config.xml; without one, the current directory is searched\n"
+"recursively.  See utils/entsearch/README for the whole story.\n"
 "\n"
 "Note for Unix shells: quote the '*' shorthand, or the shell will expand it\n"
-"to the file names in the current directory before mapsearch ever sees it.\n"
+"to the file names in the current directory before entsearch ever sees it.\n"
 "\n"
 "examples:\n"
-"  mapsearch '*' spawnflags 64        entities with the 64 box checked\n"
-"  mapsearch '*' light 250            any classname whose light value is 250\n"
-"  mapsearch '*' '*' '.*\\.wav'        any property naming a wav file\n"
-"  mapsearch func_monsterspawner spawnflags 16    spawners set to spiders\n"
-"  mapsearch monster_fallen_angel_lord classname  one line per angel lord\n"
+"  entsearch '*' spawnflags 64        entities with the 64 box checked\n"
+"  entsearch '*' light 250            any classname whose light value is 250\n"
+"  entsearch '*' '*' '.*\\.wav'        any property naming a wav file\n"
+"  entsearch func_monsterspawner spawnflags 16    spawners set to spiders\n"
+"  entsearch monster_fallen_angel_lord classname  one line per angel lord\n"
 "\n"
 "exit status: 0 if something matched, 1 if nothing did, 2 on error.\n",
-	MAPSEARCH_VERSION);
+	ENTSEARCH_VERSION);
 }
 
 /*
@@ -208,7 +213,7 @@ static qboolean value_as_long (const char *s, long *out)
 	return true;
 }
 
-static qboolean is_flags_prop (const mssettings_t *set, const char *key)
+static qboolean is_flags_prop (const essettings_t *set, const char *key)
 {
 	int	i;
 
@@ -305,7 +310,7 @@ static qboolean entity_cb (const mapentity_t *ent, void *userdata)
 	s->entities_scanned++;
 	s->entseq++;
 
-	if (!MS_RegexMatch (s->re_class, ent->classname))
+	if (!ES_RegexMatch (s->re_class, ent->classname))
 		return true;
 
 	for (i = 0; i < ent->numprops; i++)
@@ -315,13 +320,13 @@ static qboolean entity_cb (const mapentity_t *ent, void *userdata)
 		long		flagsval = 0;
 		qboolean	hit;
 
-		if (!MS_RegexMatch (s->re_prop, prop->key))
+		if (!ES_RegexMatch (s->re_prop, prop->key))
 			continue;
 
 		isflags = is_flags_prop (s->set, prop->key) &&
 			  value_as_long (prop->value, &flagsval);
 
-		hit = MS_RegexMatch (s->re_value, prop->value);
+		hit = ES_RegexMatch (s->re_value, prop->value);
 		if (!hit && isflags && s->value_is_int && s->value_int != 0)
 		{
 			/* every bit the search asks for is checked here, and
@@ -388,7 +393,7 @@ static void write_pts (search_t *s, const char *mapfile)
 	f = fopen (path, "w");
 	if (!f)
 	{
-		fprintf (stderr, "mapsearch: cannot write %s: %s\n", path, strerror(errno));
+		fprintf (stderr, "entsearch: cannot write %s: %s\n", path, strerror(errno));
 		return;
 	}
 
@@ -431,6 +436,7 @@ static void report_file (search_t *s, const char *mapfile)
 	for (i = 0; i < s->nummatches; i++)
 	{
 		const match_t	*m = &s->matches[i];
+		char		cname[128];
 		char		qual[512];
 		char		flagstr[FLAGSTR_SIZE];
 		char		originstr[128];
@@ -450,9 +456,10 @@ static void report_file (search_t *s, const char *mapfile)
 		}
 
 		origin_string (m->origin, originstr, sizeof(originstr));
+		q_snprintf (cname, sizeof(cname), "(%s)", m->classname);
 
-		out ("    Line %6d:  (%-22s)  %-28s == %s%s   at  %s%s\n",
-		     m->line, m->classname, qual, m->value, flagstr, originstr,
+		out ("    Line %6d:  %-24s %-30s == %s%s   at  %s%s\n",
+		     m->line, cname, qual, m->value, flagstr, originstr,
 		     m->has_origin ? "" : "  [brush]");
 	}
 }
@@ -490,9 +497,9 @@ static qboolean is_excluded (search_t *s, const char *path, const char *name)
 
 	for (i = 0; i < s->numexclude; i++)
 	{
-		if (MS_RegexMatch (s->re_exclude[i], fwd) ||
-		    MS_RegexMatch (s->re_exclude[i], back) ||
-		    (name && MS_RegexMatch (s->re_exclude[i], name)))
+		if (ES_RegexMatch (s->re_exclude[i], fwd) ||
+		    ES_RegexMatch (s->re_exclude[i], back) ||
+		    (name && ES_RegexMatch (s->re_exclude[i], name)))
 			return true;
 	}
 	return false;
@@ -513,13 +520,13 @@ static void scan_file (search_t *s, const char *path)
 	s->entseq = 0;
 	free_matches (s);
 
-	if (!MS_ScanMapFile (path, entity_cb, s, errbuf, sizeof(errbuf)))
+	if (!ES_ScanMapFile (path, entity_cb, s, errbuf, sizeof(errbuf)))
 	{
-		fprintf (stderr, "mapsearch: %s: %s\n", path, errbuf);
+		fprintf (stderr, "entsearch: %s: %s\n", path, errbuf);
 		return;
 	}
 	if (errbuf[0])
-		fprintf (stderr, "mapsearch: %s: %s\n", path, errbuf);
+		fprintf (stderr, "entsearch: %s: %s\n", path, errbuf);
 
 	report_file (s, path);
 	free_matches (s);
@@ -541,7 +548,7 @@ static void list_directory (const char *dir, strlist_t *names)
 	do
 	{
 		if (strcmp (data.cFileName, ".") && strcmp (data.cFileName, ".."))
-			MS_StrListAdd (names, data.cFileName);
+			ES_StrListAdd (names, data.cFileName);
 	} while (FindNextFile (handle, &data));
 	FindClose (handle);
 #else
@@ -553,7 +560,7 @@ static void list_directory (const char *dir, strlist_t *names)
 	while ((ent = readdir (d)) != NULL)
 	{
 		if (strcmp (ent->d_name, ".") && strcmp (ent->d_name, ".."))
-			MS_StrListAdd (names, ent->d_name);
+			ES_StrListAdd (names, ent->d_name);
 	}
 	closedir (d);
 #endif
@@ -571,7 +578,7 @@ static void walk_dir (search_t *s, const char *dir, int depth)
 
 	if (depth > MAX_WALK_DEPTH)
 	{
-		fprintf (stderr, "mapsearch: %s: too deep, not descending further\n", dir);
+		fprintf (stderr, "entsearch: %s: too deep, not descending further\n", dir);
 		return;
 	}
 
@@ -609,7 +616,7 @@ static void walk_dir (search_t *s, const char *dir, int depth)
 		}
 	}
 
-	MS_StrListFree (&names);
+	ES_StrListFree (&names);
 }
 
 /*
@@ -626,15 +633,15 @@ static const char *pattern_or_any (const char *arg)
 	return arg;
 }
 
-static msregex_t *compile_or_die (const char *pattern, qboolean ignorecase,
+static esregex_t *compile_or_die (const char *pattern, qboolean ignorecase,
 				  const char *what)
 {
 	char		err[256];
-	msregex_t	*re = MS_RegexCompile (pattern, ignorecase, err, sizeof(err));
+	esregex_t	*re = ES_RegexCompile (pattern, ignorecase, err, sizeof(err));
 
 	if (!re)
 	{
-		fprintf (stderr, "mapsearch: bad %s pattern \"%s\": %s\n",
+		fprintf (stderr, "entsearch: bad %s pattern \"%s\": %s\n",
 			 what, pattern, err);
 		exit (2);
 	}
@@ -719,27 +726,22 @@ static qboolean config_beside_exe (const char *argv0, char *out_path, size_t siz
 	StripFilename (dir);
 	if (!dir[0])
 		return false;
-	q_snprintf (out_path, size, "%s/mapsearch-config.xml", dir);
+	q_snprintf (out_path, size, "%s/entsearch-config.xml", dir);
 	return (Q_FileType (out_path) == FS_ENT_FILE);
 }
 
 static qboolean find_config (const char *argv0, char *out_path, size_t size)
 {
-	const char	*env = getenv ("MAPSEARCH_CONFIG");
+	const char	*env = getenv ("ENTSEARCH_CONFIG");
 
 	if (env && *env)
 	{
 		q_strlcpy (out_path, env, size);
 		return true;
 	}
-	if (Q_FileType ("mapsearch-config.xml") == FS_ENT_FILE)
+	if (Q_FileType ("entsearch-config.xml") == FS_ENT_FILE)
 	{
-		q_strlcpy (out_path, "mapsearch-config.xml", size);
-		return true;
-	}
-	if (Q_FileType ("MapSearch-config.xml") == FS_ENT_FILE)
-	{
-		q_strlcpy (out_path, "MapSearch-config.xml", size);
+		q_strlcpy (out_path, "entsearch-config.xml", size);
 		return true;
 	}
 	return config_beside_exe (argv0, out_path, size);
@@ -747,7 +749,7 @@ static qboolean find_config (const char *argv0, char *out_path, size_t size)
 
 int main (int argc, char **argv)
 {
-	mssettings_t	settings;
+	essettings_t	settings;
 	search_t	search;
 	const char	*positional[3];
 	int		numpositional = 0;
@@ -771,8 +773,9 @@ int main (int argc, char **argv)
 		}
 		if (!strcmp (arg, "--version"))
 		{
-			printf ("mapsearch %s (uHexen2 utilities)\n", MAPSEARCH_VERSION);
-			printf ("after MapSearch by Inky -- http://earthday.free.fr/\n");
+			printf ("entsearch %s (uHexen2 utilities)\n", ENTSEARCH_VERSION);
+			printf ("search design after Inky's MapSearch --\n");
+			printf ("http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/\n");
 			return 0;
 		}
 		if (!strncmp (arg, "--config=", 9))
@@ -792,7 +795,7 @@ int main (int argc, char **argv)
 		}
 		if (looks_like_option (arg))
 		{
-			fprintf (stderr, "mapsearch: unknown option \"%s\"; "
+			fprintf (stderr, "entsearch: unknown option \"%s\"; "
 					 "option letters are [%s]\n", arg, OPT_LETTERS);
 			return 2;
 		}
@@ -802,7 +805,7 @@ int main (int argc, char **argv)
 		}
 		else
 		{
-			fprintf (stderr, "mapsearch: unexpected argument \"%s\"\n", arg);
+			fprintf (stderr, "entsearch: unexpected argument \"%s\"\n", arg);
 			return 2;
 		}
 	}
@@ -819,7 +822,7 @@ int main (int argc, char **argv)
 	while (numpositional < 3)
 		positional[numpositional++] = "";
 
-	MS_ConfigDefaults (&settings);
+	ES_ConfigDefaults (&settings);
 
 	if (configarg)
 		q_strlcpy (configpath, configarg, sizeof(configpath));
@@ -828,9 +831,9 @@ int main (int argc, char **argv)
 
 	if (configpath[0])
 	{
-		if (!MS_ConfigLoad (configpath, &settings, errbuf, sizeof(errbuf)))
+		if (!ES_ConfigLoad (configpath, &settings, errbuf, sizeof(errbuf)))
 		{
-			fprintf (stderr, "mapsearch: %s: %s\n", configpath, errbuf);
+			fprintf (stderr, "entsearch: %s: %s\n", configpath, errbuf);
 			if (configarg)		/* asked for by name: do not guess */
 				return 2;
 		}
@@ -838,7 +841,7 @@ int main (int argc, char **argv)
 		{
 			dev ("config: %s\n", configpath);
 			if (errbuf[0])
-				fprintf (stderr, "mapsearch: %s: %s\n", configpath, errbuf);
+				fprintf (stderr, "entsearch: %s: %s\n", configpath, errbuf);
 		}
 	}
 
@@ -872,8 +875,8 @@ int main (int argc, char **argv)
 
 	if (settings.exclude.count)
 	{
-		search.re_exclude = (msregex_t **)
-			SafeMalloc (settings.exclude.count * sizeof(msregex_t *));
+		search.re_exclude = (esregex_t **)
+			SafeMalloc (settings.exclude.count * sizeof(esregex_t *));
 		for (i = 0; i < settings.exclude.count; i++)
 		{
 			search.re_exclude[i] =
@@ -888,16 +891,16 @@ int main (int argc, char **argv)
 		logfp = fopen (settings.logfile, "w");
 		if (!logfp)
 		{
-			fprintf (stderr, "mapsearch: cannot write %s: %s\n",
+			fprintf (stderr, "entsearch: cannot write %s: %s\n",
 				 settings.logfile, strerror(errno));
 			return 2;
 		}
 	}
 
-	out ("mapsearch: classname \"%s\", property \"%s\", value \"%s\"%s\n",
+	out ("entsearch: classname \"%s\", property \"%s\", value \"%s\"%s\n",
 	     pattern_or_any (positional[0]), pattern_or_any (positional[1]),
 	     pattern_or_any (positional[2]),
-	     search.value_is_int ? " (also matched as flag bits)" : "");
+	     search.value_is_int ? "  (an integer: also matched against flag bits)" : "");
 
 	for (i = 0; i < settings.searchin.count; i++)
 	{
@@ -916,7 +919,7 @@ int main (int argc, char **argv)
 		}
 		else
 		{
-			fprintf (stderr, "mapsearch: %s: no such directory\n", dir);
+			fprintf (stderr, "entsearch: %s: no such directory\n", dir);
 		}
 	}
 
@@ -930,22 +933,22 @@ int main (int argc, char **argv)
 	{
 		fclose (logfp);
 		logfp = NULL;
-		fprintf (stderr, "mapsearch: results also written to %s\n", settings.logfile);
+		fprintf (stderr, "entsearch: results also written to %s\n", settings.logfile);
 	}
 
 	free_matches (&search);
 	if (search.matches)
 		free (search.matches);
-	MS_RegexFree (search.re_class);
-	MS_RegexFree (search.re_prop);
-	MS_RegexFree (search.re_value);
+	ES_RegexFree (search.re_class);
+	ES_RegexFree (search.re_prop);
+	ES_RegexFree (search.re_value);
 	for (i = 0; i < search.numexclude; i++)
-		MS_RegexFree (search.re_exclude[i]);
+		ES_RegexFree (search.re_exclude[i]);
 	if (search.re_exclude)
 		free (search.re_exclude);
-	MS_StrListFree (&settings.searchin);
-	MS_StrListFree (&settings.exclude);
-	MS_StrListFree (&settings.flagsprops);
+	ES_StrListFree (&settings.searchin);
+	ES_StrListFree (&settings.exclude);
+	ES_StrListFree (&settings.flagsprops);
 
 	return search.total_matches ? 0 : 1;
 }

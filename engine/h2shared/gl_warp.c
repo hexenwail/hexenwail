@@ -504,11 +504,35 @@ void GL_HealTurbTJunctions (qmodel_t *mod)
 	if (total_verts == 0)
 		return;
 
-	pts       = (vec3_t *) Z_Malloc (total_verts * sizeof(vec3_t), Z_MAINZONE);
-	pts_next  = (int *)    Z_Malloc (total_verts * sizeof(int),    Z_MAINZONE);
-	cell_head = (int *)    Z_Malloc (TJ_HASH_SIZE * sizeof(int),   Z_MAINZONE);
+	/* malloc, NOT Z_Malloc, and NOT the hunk either.  uhexen2-oq51.
+	 *
+	 * These three are scratch, freed at the cleanup label below, but the
+	 * first two are sized by the model's TOTAL TURB VERTEX COUNT -- and the
+	 * zone is a small fixed pool (ZONE_DEFSIZE, 2 MB on the client) carved
+	 * once at startup for small persistent allocations.  Putting a
+	 * geometry-proportional array in it makes map loading fail as a function
+	 * of gl_subdivide_size: on sot/egypt.bsp at size 24 one model reaches
+	 * 118678 turb verts, so pts takes 1.42 MB of the 2 MB zone and pts_next's
+	 * 474712 bytes then cannot fit, and Z_Malloc's failure is FATAL.  The
+	 * engine died on a value R_SubdivideSize above documents as legal (the
+	 * range is [16,256]).
+	 *
+	 * The hunk is not the answer either, tempting as Hunk_LowMark /
+	 * Hunk_FreeToLowMark looks: this function Hunk_AllocName's replacement
+	 * glpoly_t storage further down that MUST survive the call, and a
+	 * FreeToLowMark taken before that would take the healed polys with it.
+	 * malloc has no interaction with either allocator and these buffers do
+	 * not outlive the function. */
+	pts       = (vec3_t *) malloc (total_verts * sizeof(vec3_t));
+	pts_next  = (int *)    malloc (total_verts * sizeof(int));
+	cell_head = (int *)    malloc (TJ_HASH_SIZE * sizeof(int));
 	if (!pts || !pts_next || !cell_head)
+	{
+		Con_Printf ("GL_HealTurbTJunctions: out of memory for %d turb verts, "
+			    "skipping T-junction heal on %s\n",
+			    total_verts, mod->name ? mod->name : "(unnamed)");
 		goto cleanup;
+	}
 	for (i = 0; i < TJ_HASH_SIZE; i++)
 		cell_head[i] = -1;
 
@@ -726,9 +750,9 @@ void GL_HealTurbTJunctions (qmodel_t *mod)
 		total_polys, healed_edges, healed_polys);
 
 cleanup:
-	if (pts)       Z_Free (pts);
-	if (pts_next)  Z_Free (pts_next);
-	if (cell_head) Z_Free (cell_head);
+	if (pts)       free (pts);
+	if (pts_next)  free (pts_next);
+	if (cell_head) free (cell_head);
 }
 
 

@@ -1,4 +1,4 @@
-/* ms_map.c -- a tolerant reader for Quake/Hexen II .map sources.
+/* es_map.c -- a tolerant reader for Quake/Hexen II .map sources.
  * Copyright (C) 2026  uHexen2 developers
  *
  * Only what a search needs is extracted: the key/value pairs of every
@@ -28,7 +28,7 @@
 #include "arch_def.h"
 #include "cmdlib.h"
 #include "util_io.h"
-#include "mapsearch.h"
+#include "entsearch.h"
 
 #include <errno.h>
 
@@ -216,7 +216,7 @@ static void finish_entity (mapentity_t *ent)
 	}
 }
 
-qboolean MS_ScanMapFile (const char *filename, mapentity_cb callback,
+qboolean ES_ScanMapFile (const char *filename, mapentity_cb callback,
 			 void *userdata, char *errbuf, size_t errlen)
 {
 	FILE		*f;

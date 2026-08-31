@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    entsearch configuration.
+
+    entsearch looks for this file, in order, at:
+      the path given by  --config=FILE
+      the path in the    ENTSEARCH_CONFIG  environment variable
+      ./entsearch-config.xml
+      entsearch-config.xml next to the entsearch binary
+
+    Without one, entsearch searches "." recursively with the built-in list
+    of flag properties and every output option switched off.
+
+    The parser is loose on purpose: element names are matched without
+    regard to case, the root element is ignored, and so are the names of
+    the leaves inside the three list sections -- <Path>, <Dir> and
+    <string> all work.  So if you already keep a config for Inky's
+    MapSearch, copying it to entsearch-config.xml is the whole migration.
+-->
+<EntSearch>
+
+    <!-- Where the .map files are.  Each entry is walked recursively.
+         "." is the current directory, not the directory the binary lives
+         in; that is the one difference from the original.  Naming a single
+         .map file instead of a directory works too. -->
+    <SearchIn>
+        <Path>.</Path>
+        <!-- <Path>/home/you/hexen2/mapsrc</Path> -->
+        <!-- <Path>C:\hexen2\maps</Path> -->
+    </SearchIn>
+
+    <!-- What to skip.  Each entry is a regular expression that has to match
+         the whole thing, tried against the full path with '/' separators,
+         the full path with '\' separators, and the bare file or directory
+         name.  Skipping a directory skips everything under it.
+
+         So a bare "autosave" drops every directory of that name, wherever
+         it is and whichever platform wrote this file -- which is the point
+         of trying the name on its own. -->
+    <Exclude>
+        <Path>autosave</Path>
+        <!-- <Path>.*/backups?</Path> -->
+        <!-- <Path>.*\\old\\.*</Path> -->
+    </Exclude>
+
+    <!-- Properties whose value is a set of check boxes rather than a plain
+         number.  Searching for an integer in one of these matches any value
+         with at least those bits set, and every matching line is printed
+         with its bits spelled out: 32960 [64][128][32768].
+
+         Listing the section at all replaces the built-in list, so this is
+         also how you take a property OUT.  Dropping spawnflags from here is
+         the documented trick for forcing an exact-value search on it.
+
+         Everything below is either spawnflags, which every editor draws as
+         check boxes, or a field the Hexen II HexenC source combines with
+         the (+) bitwise-or operator. -->
+    <FlagsProperties>
+        <Property>spawnflags</Property>
+        <Property>flags</Property>
+        <Property>effects</Property>
+        <Property>items</Property>
+        <Property>items2</Property>
+        <Property>drawflags</Property>
+        <Property>artifact_flags</Property>
+    </FlagsProperties>
+
+    <!-- Defaults for the things [OPTIONS] switches on the command line.
+         A letter given on the command line overrides what is set here; a
+         letter left out keeps it. -->
+    <Output>
+        <!-- l: also write the results to LogFile -->
+        <Log>false</Log>
+        <LogFile>mapsearch.log</LogFile>
+
+        <!-- n: sort by line number instead of classname/targetname/property -->
+        <SortByLine>false</SortByLine>
+
+        <!-- p: write a TrenchBroom .pts point file per matching map -->
+        <Pts>false</Pts>
+        <!-- empty: beside the .map file itself -->
+        <PtsOutputDirectory></PtsOutputDirectory>
+
+        <!-- i: match without regard to case.  The original is case
+             sensitive; this is on here because map keys are conventionally
+             lower case but their values are not. -->
+        <IgnoreCase>true</IgnoreCase>
+    </Output>
+
+</EntSearch>

@@ -1,4 +1,4 @@
-/* ms_config.c -- the mapsearch configuration file.
+/* es_config.c -- the entsearch configuration file.
  * Copyright (C) 2026  uHexen2 developers
  *
  * The original tool keeps its settings in an XML file, so this reads the
@@ -29,7 +29,7 @@
 #include "arch_def.h"
 #include "cmdlib.h"
 #include "util_io.h"
-#include "mapsearch.h"
+#include "entsearch.h"
 
 #include <errno.h>
 
@@ -54,7 +54,7 @@ static const char *const default_flagsprops[] =
 	NULL
 };
 
-void MS_StrListAdd (strlist_t *list, const char *str)
+void ES_StrListAdd (strlist_t *list, const char *str)
 {
 	if (list->count == list->max)
 	{
@@ -69,7 +69,7 @@ void MS_StrListAdd (strlist_t *list, const char *str)
 	list->items[list->count++] = SafeStrdup (str);
 }
 
-void MS_StrListFree (strlist_t *list)
+void ES_StrListFree (strlist_t *list)
 {
 	int	i;
 
@@ -81,17 +81,17 @@ void MS_StrListFree (strlist_t *list)
 	list->count = list->max = 0;
 }
 
-void MS_ConfigDefaults (mssettings_t *set)
+void ES_ConfigDefaults (essettings_t *set)
 {
 	int	i;
 
 	memset (set, 0, sizeof(*set));
-	MS_StrListAdd (&set->searchin, ".");
+	ES_StrListAdd (&set->searchin, ".");
 	for (i = 0; default_flagsprops[i]; i++)
-		MS_StrListAdd (&set->flagsprops, default_flagsprops[i]);
+		ES_StrListAdd (&set->flagsprops, default_flagsprops[i]);
 
 	set->opt_ignorecase = true;
-	q_strlcpy (set->logfile, "mapsearch.log", sizeof(set->logfile));
+	q_strlcpy (set->logfile, "entsearch.log", sizeof(set->logfile));
 }
 
 static void trim (char *s)
@@ -154,7 +154,7 @@ static qboolean parse_bool (const char *s, qboolean *out)
 }
 
 /* Which of the three list sections is this element, if any? */
-static strlist_t *section_list (const char *name, mssettings_t *set)
+static strlist_t *section_list (const char *name, essettings_t *set)
 {
 	if (!q_strcasecmp (name, "SearchIn") || !q_strcasecmp (name, "SearchIns"))
 		return &set->searchin;
@@ -166,7 +166,7 @@ static strlist_t *section_list (const char *name, mssettings_t *set)
 }
 
 /* An element that is not inside a list section names an output option. */
-static qboolean apply_option (const char *name, const char *value, mssettings_t *set)
+static qboolean apply_option (const char *name, const char *value, essettings_t *set)
 {
 	if (!q_strcasecmp (name, "Log") || !q_strcasecmp (name, "WriteLog"))
 		return parse_bool (value, &set->opt_log);
@@ -192,7 +192,7 @@ static qboolean apply_option (const char *name, const char *value, mssettings_t 
 	return false;
 }
 
-qboolean MS_ConfigLoad (const char *filename, mssettings_t *set,
+qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
 			char *errbuf, size_t errlen)
 {
 	FILE		*f;
@@ -308,10 +308,10 @@ qboolean MS_ConfigLoad (const char *filename, mssettings_t *set,
 							(list == &set->exclude) ? 1 : 2;
 					if (!cleared_defaults[which])
 					{
-						MS_StrListFree (list);
+						ES_StrListFree (list);
 						cleared_defaults[which] = true;
 					}
-					MS_StrListAdd (list, text);
+					ES_StrListAdd (list, text);
 				}
 				else if (!apply_option (name, text, set))
 				{
@@ -368,7 +368,7 @@ qboolean MS_ConfigLoad (const char *filename, mssettings_t *set,
 
 	/* An empty <SearchIn> section would otherwise leave nothing to walk. */
 	if (set->searchin.count == 0)
-		MS_StrListAdd (&set->searchin, ".");
+		ES_StrListAdd (&set->searchin, ".");
 
 	return true;
 }

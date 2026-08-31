@@ -386,7 +386,7 @@
           # at all, so this needs neither buildInputs nor pkg-config, and
           # skipping the engine keeps SDL3/OpenGL/ALSA out of the closure.
           # install(TARGETS) in the two CMakeLists means the stock installPhase
-          # already places all 18 binaries in $out/bin.
+          # already places all 19 binaries in $out/bin.
           utils = pkgs.stdenv.mkDerivation {
             pname = "hexenwail-utils";
             inherit version;

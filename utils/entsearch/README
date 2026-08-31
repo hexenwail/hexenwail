@@ -1,0 +1,218 @@
+entsearch -- search .map sources for entities
+=============================================
+
+What it is for
+--------------
+Mapping runs on precedent. You want to know what value someone else put in a
+property, which classnames actually use it, and whether the combination you
+are about to try has been done before. That answer lives in .map sources --
+Raven's, the mission pack's, whatever you have decompiled -- and it is spread
+across thousands of entities in dozens of files, which is exactly the shape of
+question a text editor's find box is bad at.
+
+entsearch takes three regular expressions -- a classname, a property name and
+a value -- and prints every entity in every map that matches all three, with
+the file, the line, the coordinates, and flag values broken out into the boxes
+an editor would draw.
+
+
+Credit
+------
+The design is not ours. Inky's MapSearch does this, and it is where every idea
+here comes from: the three-argument search, matching an integer against the
+bits of spawnflags, the .pts point files, the shape of the config.
+
+    http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/
+
+His is the reference implementation. If you are on Windows, use it -- it is
+his tool, he maintains it, and it is the one that will keep getting his
+attention. entsearch exists because the uHexen2 toolchain wants an entity
+search that builds from source next to qbsp and light on every platform we
+ship, and it shares no code with his.
+
+
+Command line
+------------
+    entsearch CLASSNAME [PROPERTY] [VALUE] [OPTIONS]
+
+Only CLASSNAME is required. The more of the three you give, the narrower the
+search. All three are regular expressions.
+
+Leave one out, or pass "*" or ".*", to accept anything.
+
+  IMPORTANT on a Unix shell: quote the "*", or the shell expands it to the
+  names of the files in the current directory before entsearch sees it.
+  Write 'entsearch "*" spawnflags 64', not 'entsearch * spawnflags 64'.
+
+A pattern has to match the WHOLE name or value, not a part of it. So
+"func_door" does not find func_door_rotating; "func_door.*" does. Likewise a
+sound reference is ".*\.wav", not "\.wav".
+
+Supported syntax:
+
+    .              any character
+    [abc] [^a-z]   character classes, with ranges and negation
+    \d \D          a digit / anything else
+    \w \W          a word character ([A-Za-z0-9_]) / anything else
+    \s \S          whitespace / anything else
+    \. \\ \* ...   any punctuation character, taken literally
+    \t \n \r       tab, newline, carriage return
+    (...)          grouping; (?:...) is accepted and means the same
+    a|b            alternation
+    ^ $            start and end of the value
+    * + ?          zero or more, one or more, zero or one
+    {n} {n,} {n,m} counted repetition
+    *? +? ?? {}?   the lazy forms of all of the above
+
+Case is ignored by default. Turn that off with the "i" option or in the config
+file, and "light_torch_castle" stops finding an entity spelled
+Light_Torch_Castle.
+
+When VALUE is an integer it is matched two ways: literally, and as a set of
+checked boxes inside the flag properties (see FlagsProperties below). So
+
+    entsearch "*" spawnflags 2
+
+finds every entity with AT LEAST the 2 box checked -- in the siege maps that
+turns up values 2, 3, 34, 35, 66, 67, 98 and 131, because none of the other
+boxes are being asked about. There is no direct way to ask for exactly one
+combination and nothing else; either post-filter the output, or take
+spawnflags out of the FlagsProperties list in the config, which turns it back
+into a plain integer that only matches exactly.
+
+
+[OPTIONS]
+---------
+A run of the letters below, each switched on by a preceding "+" (assumed if
+you write neither) or off by a "-". A letter you leave out keeps whatever the
+config file says.
+
+    l   also write the results to a log file
+    n   sort by line number, instead of classname then targetname then
+        property name
+    p   write a .pts point file for each map with results, named after the
+        map and beside it. Open it in TrenchBroom to walk from one hit to
+        the next.
+    i   ignore case (on unless the config says otherwise)
+    d   developer mode: report on stderr what is being read and skipped
+
+    +l-p    write a log, no point files, default sort order
+    -p+l    the same
+    l-p     the same again, since "+" is assumed
+    lnp     switch on l, n and p
+
+A bare run of letters like "lnp" is only read as options once CLASSNAME,
+PROPERTY and VALUE have all been given; before that it would be one of them.
+Anything starting with "+" or "-" is read as options wherever it appears --
+except a negative number, so searching for the value -1 works.
+
+Three arguments are not options:
+
+    --config=FILE   read this config file instead of looking for one
+    --help          the built-in usage summary
+    --version       version information
+
+Exit status is 0 if anything matched, 1 if nothing did, and 2 on an error, so
+this drops into a script or a shell loop without parsing the output.
+
+
+entsearch-config.xml
+--------------------
+The settings you do not want to retype on every run. entsearch looks for it,
+in order, at:
+
+    the path given by --config=FILE
+    the path in the ENTSEARCH_CONFIG environment variable
+    ./entsearch-config.xml
+    entsearch-config.xml next to the entsearch binary
+
+Without one, "." is searched recursively with the built-in flag property list
+and every output option off. A commented sample sits next to this README. It
+holds four things:
+
+1) SearchIn -- the directories to walk, each one recursively. "." is the
+   current directory. Naming a single .map file instead of a directory also
+   works.
+
+2) Exclude -- paths to skip, each a regular expression that has to match the
+   whole thing. Every entry is tried three ways: against the full path with
+   "/" separators, against the full path with "\" separators, and against the
+   bare file or directory name. Skipping a directory skips everything below
+   it. Trying the bare name is what lets a plain "autosave" drop
+   TrenchBroom's autosave folders wherever they are, on either platform,
+   without a pattern that only works on one of them.
+
+3) FlagsProperties -- the properties whose value is a set of check boxes
+   rather than a number, spawnflags being the obvious one. These are what an
+   integer VALUE is bit-matched against, and their values are printed with
+   the bits spelled out. Listing the section replaces the built-in list
+   rather than adding to it, which is how you take a property out.
+
+   The built-in list is spawnflags plus the fields the Hexen II HexenC source
+   actually combines with the (+) bitwise-or operator: flags, effects, items,
+   items2, drawflags and artifact_flags. Change it for another game.
+
+4) The output options -- the same set as [OPTIONS] above, plus the log file
+   name and a directory to put .pts files in if you would rather not write
+   them next to the maps.  A letter on the command line beats what is here.
+
+The parser is loose on purpose: element names are matched without regard to
+case, the root element is ignored, and so are the names of the leaves inside
+the three list sections, so <Path>, <Dir> and <string> are all the same to it.
+If you already keep a config for Inky's MapSearch, copying it over is the
+whole migration.
+
+
+A note about origins
+--------------------
+Every match is printed with the x y z of its entity, so you can paste it into
+TrenchBroom's Menu > View > Camera > Move Camera to... box.
+
+For a point entity those are the coordinates in its "origin" property. A brush
+entity has no origin property, so the coordinates are the first point of the
+first plane of its first brush, and such a line is marked [brush]. A .map
+brush is stored as a set of planes, each given by three points, and nothing
+requires those points to sit on the finished brush -- they only have to define
+the plane. So the coordinate is a neighbourhood, not a position, and it can
+land well outside the brush it belongs to. It is close enough to be useful far
+more often than not, which is the only defence it needs.
+
+
+Examples
+--------
+    entsearch "*" spawnflags 64
+Every entity, whatever its classname, with the 64 box checked in spawnflags.
+65 and 192 match too: the other boxes are not asked about.
+
+    entsearch "*" "*" ".*\.wav"
+Every property of every entity that names a wav file -- the fastest way to
+find out which sounds a map actually references.
+
+    entsearch light_torch.* light "*"
+Every torch variant and the light value it was given. Swapping in "*" for the
+classname is how you find out whether anything else in the map carries a
+light key, which is not always what you expect.
+
+    entsearch "*" spawnflags 2
+Bit matching in practice. Run against the siege maps in gamecode/hc-unused,
+this returns 33 results across values 2, 3, 34, 35, 66, 67, 98 and 131 --
+every entity with that box checked, whatever else is checked with it:
+
+    Line  15132:  (trigger_teleport)     spawnflags          == 131 [1][2][128]   at  -768 -1872 176  [brush]
+    Line  21642:  (func_door_rotating)   opendraw.spawnflags == 98 [2][32][64]    at  -112 -264 -12   [brush]
+    Line  19810:  (art_cubeofforce)      spawnflags          == 2 [2]             at  62 418 723
+
+    entsearch func_door.* classname
+Every func_door and func_door_rotating, one line each. "classname" is the one
+property that always exists, so naming it is how you ask for one line per
+entity rather than one line per property.
+
+    entsearch func_door_rotating
+Name no property at all and you get every property of every match, which is
+the quickest way to read an unfamiliar entity's full setup.
+
+    entsearch "*" "*" 128 +p
+Anything set to 128 anywhere, plus a .pts file per map so you can step through
+the hits in TrenchBroom. Flag properties and plain numbers both answer: a
+spawnflags of 160 matches on its 128 bit and prints [32][128], while a lip of
+128 matches only because it is exactly 128.

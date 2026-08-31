@@ -151,12 +151,12 @@ if(WIN32)
     target_link_options(jsh2colour PRIVATE -Wl,--stack,4194304)
 endif()
 
-# mapsearch -- entity search across .map sources, after Inky's MapSearch.
-# Brings its own regex engine and directory walk: mingw ships no <regex.h>,
-# and utils/common's Q_FindFirstFile hides the directories a recursive walk
-# has to descend into.
-add_util_tool(mapsearch mapsearch SOURCES
-    mapsearch.c ms_config.c ms_map.c ms_regex.c)
+# entsearch -- entity search across .map sources; the design follows Inky's
+# MapSearch.  Brings its own regex engine and directory walk: mingw ships no
+# <regex.h>, and utils/common's Q_FindFirstFile hides the directories a
+# recursive walk has to descend into.
+add_util_tool(entsearch entsearch SOURCES
+    entsearch.c es_config.c es_map.c es_regex.c)
 
 add_util_tool(bsp2map bsp2map FASTMATH SOURCES bsp2map.c)
 add_util_tool(bspinfo bspinfo FASTMATH SOURCES bspinfo.c)
@@ -180,4 +180,4 @@ add_util_tool(lmp2pcx texutils/lmp2pcx SOURCES lmp2pcx.c)
 #                         Makefile and no build script.
 
 message(STATUS "uhexen2 utils: hcc dhcc qbsp light vis jsh2colour bsp2map bspinfo "
-               "genmodel mapsearch qfiles pakx paklist bsp2wal lmp2pcx")
+               "genmodel entsearch qfiles pakx paklist bsp2wal lmp2pcx")
