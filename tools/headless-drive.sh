@@ -14,7 +14,7 @@
 # Environment:
 #   ENGINE    path to the engine binary  (default: ./result/bin/glhexen2)
 #   WORK      scratch dir for the sandboxed HOME (default: <outdir>/work)
-#   DISPLAY_N X display number           (default: first free >= 99)
+#   DISPLAY_N X display number           (default: let Xvfb pick a free one)
 #   W, H      window size                (default: 800x600)
 #   STEPS     step file, for the `script` scenario only (see below)
 #
@@ -23,6 +23,12 @@
 #   ./tools/headless-drive.sh noportals /tmp/out ~/hexen2
 #
 # Requires: Xvfb, xdotool, bwrap (bubblewrap), ImageMagick `import`.
+#
+# Every run gets its OWN X display, claimed atomically by Xvfb itself, so runs
+# may be started concurrently.  A run that finds the display already occupied
+# aborts rather than screenshotting somebody else's engine.  <outdir>/pids
+# records the display and the Xvfb/engine pids for a run that has to be
+# debugged or reaped by hand.
 #
 # THE `script` SCENARIO is the general-purpose one, and the one to reach for
 # when you just want to see some part of the engine: it reads its steps from
@@ -52,7 +58,7 @@
 #
 set -uo pipefail
 
-usage() { sed -n '2,52p' "$0"; exit 2; }
+usage() { sed -n '2,58p' "$0"; exit 2; }
 [ $# -ge 3 ] || usage
 
 SCEN="$1"; shift
@@ -85,25 +91,108 @@ OUT=$(cd "$OUT" && pwd)
 WORK=${WORK:-$OUT/work}
 rm -rf "$WORK"; mkdir -p "$WORK/home"
 
-# Pick a free display rather than assuming :99 is idle.
-if [ -n "${DISPLAY_N:-}" ]; then
-  DISP=":$DISPLAY_N"
-else
-  for n in $(seq 99 120); do
-    [ -e "/tmp/.X11-unix/X$n" ] || { DISP=":$n"; break; }
-  done
-fi
-echo "display $DISP, engine $ENGINE, basedir $BASEDIR"
-
-Xvfb "$DISP" -screen 0 "${W}x${H}x24" -nolisten tcp >"$OUT/xvfb.log" 2>&1 &
-XPID=$!
-sleep 2
+# Set before the trap, and checked inside it: cleanup can fire between Xvfb
+# starting and the engine starting, and under `set -u` an unset $GPID there
+# would abort the trap before it ever reached Xvfb.
+XPID=""; GPID=""; DISP=""
 
 cleanup() {
-  kill $GPID 2>/dev/null; sleep 3; kill -9 $GPID 2>/dev/null
-  kill $XPID 2>/dev/null; sleep 1; kill -9 $XPID 2>/dev/null
+  trap - EXIT INT TERM HUP
+  [ -n "$GPID" ] && { kill "$GPID" 2>/dev/null; command sleep 3; kill -9 "$GPID" 2>/dev/null; }
+  [ -n "$XPID" ] && { kill "$XPID" 2>/dev/null; command sleep 1; kill -9 "$XPID" 2>/dev/null; }
+  return 0
 }
+# INT/TERM/HUP as well as EXIT.  The usual way this script dies is an outer
+# `timeout`, which sends TERM; with EXIT alone the engine and Xvfb outlived the
+# run, and those strays are what let the next run collide (uhexen2-fwal).  The
+# signal arms need their own `exit`: a bare trap returns into the middle of the
+# scenario and goes on driving an engine that is already being torn down.
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
+
+# Bash runs a trap only once the current FOREGROUND command returns, and this
+# script is mostly sleeps -- a `sleep 120` in a step file would sit on that TERM
+# for two minutes before cleaning up.  `wait` is one of the few things bash will
+# break out of to run a trap, so route every sleep through it.  Shadowing the
+# name rather than renaming the calls covers the scenarios below too, which are
+# where the long sleeps actually live.
+sleep() { command sleep "$@" & wait $!; }
+
+# Claim the display ATOMICALLY.  The old scan -- take the first :N with no
+# /tmp/.X11-unix/XN socket -- was a test with no claim attached: the socket
+# does not exist until Xvfb has finished starting, so two runs launched within
+# a second of each other both saw :99 free and both took it.  The second
+# engine then drew into the first one's display, `xdotool search` could return
+# either window, and `import -window root` photographed whichever was on top.
+# Observed: three engines alive on :99, and a 15-frame burst with standard
+# deviation exactly 0.000 because it was photographing a stale idle window from
+# an earlier run.  That reads as a clean pass (uhexen2-fwal).
+#
+# -displayfd is the purpose-built fix: the X server itself walks the display
+# numbers, binds one, and writes back the number it actually got.  Search and
+# claim are the same operation inside the server, so there is no gap for a
+# second run to squeeze into.  It starts from :0 rather than the :99 this
+# script used to prefer, which costs nothing -- an occupied display fails to
+# bind and is skipped, never stolen.
+#
+# Xvfb goes behind the same --die-with-parent guard as the engine does further
+# down, for the same reason: a `kill -9` of this script runs no trap, and an
+# orphaned X server sits there holding its display.  bwrap is already required
+# here, so this costs no new dependency, and it passes fd 3 through untouched,
+# which is what -displayfd needs.
+#
+# Spell bwrap out in both arms rather than wrapping it in a helper function: a
+# backgrounded function runs in a SUBSHELL, which would become bwrap's parent
+# and leave --die-with-parent watching a process that outlives this script.
+if [ -n "${DISPLAY_N:-}" ]; then
+  DISP=":$DISPLAY_N"
+  bwrap --dev-bind / / --die-with-parent \
+    Xvfb "$DISP" -screen 0 "${W}x${H}x24" -nolisten tcp >"$OUT/xvfb.log" 2>&1 &
+  XPID=$!
+else
+  DFD="$OUT/displayfd"
+  : >"$DFD"
+  bwrap --dev-bind / / --die-with-parent \
+    Xvfb -displayfd 3 -screen 0 "${W}x${H}x24" -nolisten tcp \
+    3>"$DFD" >"$OUT/xvfb.log" 2>&1 &
+  XPID=$!
+  for _ in $(seq 1 100); do
+    [ -s "$DFD" ] && break
+    kill -0 "$XPID" 2>/dev/null || break
+    sleep 0.2
+  done
+  DISP=":$(tr -d '[:space:]' <"$DFD")"
+  [ "$DISP" != ":" ] || {
+    echo "headless-drive: Xvfb never reported a display; see $OUT/xvfb.log" >&2; exit 3; }
+fi
+export DISPLAY=$DISP
+
+# Wait for the server to actually answer instead of the old fixed `sleep 2`,
+# which would carry on regardless and let every xdotool below talk to whatever
+# else happened to own $DISPLAY.
+XUP=""
+for _ in $(seq 1 100); do
+  kill -0 "$XPID" 2>/dev/null || {
+    echo "headless-drive: Xvfb died on $DISP; see $OUT/xvfb.log" >&2; exit 3; }
+  xdotool getdisplaygeometry >/dev/null 2>&1 && { XUP=1; break; }
+  sleep 0.2
+done
+[ -n "$XUP" ] || {
+  echo "headless-drive: Xvfb on $DISP never came up; see $OUT/xvfb.log" >&2; exit 3; }
+
+# The display has to be OURS ALONE, and the cheap proof is that nothing is on
+# it yet: a bare Xvfb has no named toplevel windows.  Any hit here means we are
+# sharing with another run, and every screenshot from this point would be
+# suspect -- stop, rather than return a confident wrong answer.  This is the
+# property the whole harness rests on, and until now nothing verified it.
+STRAY=$(xdotool search --name "." 2>/dev/null | tr '\n' ' ')
+[ -z "$STRAY" ] || {
+  echo "headless-drive: $DISP is not exclusive, windows already present: $STRAY" >&2
+  exit 3; }
+
+echo "display $DISP, engine $ENGINE, basedir $BASEDIR"
 
 # The engine writes config/savegames/qconsole.log under the userdir, which for
 # a fresh throwaway $HOME is now $HOME/.local/share/hexen2 -- uhexen2-7b1s moved
@@ -118,7 +207,11 @@ trap cleanup EXIT
 # checkout under $HOME puts ./result there too, and without this the sandbox
 # hides the very binary it is about to exec.  Harmless when ENGINE_DIR is
 # already outside $HOME (a /nix/store path binds over itself).
+# --die-with-parent, as on Xvfb above: if this script is killed too hard to run
+# its traps, bwrap still tears the sandbox down (PDEATHSIG down the chain)
+# instead of leaving an engine holding the display.
 bwrap --dev-bind / / \
+      --die-with-parent \
       --bind "$WORK/home" "$HOME" \
       --ro-bind "$BASEDIR" "$BASEDIR" \
       --ro-bind "$ENGINE_DIR" "$ENGINE_DIR" \
@@ -128,15 +221,27 @@ bwrap --dev-bind / / \
   >"$OUT/engine.stdout" 2>&1 &
 GPID=$!
 
-export DISPLAY=$DISP
-WID=""
+# For a human debugging a hung run, and for anyone reaping after a hard kill.
+printf 'display=%s\nxvfb=%s\nengine=%s\n' "$DISP" "$XPID" "$GPID" >"$OUT/pids"
+
+WIDS=""
 for i in $(seq 1 90); do
-  WID=$(xdotool search --name "." 2>/dev/null | tail -1)
-  [ -n "$WID" ] && break
+  WIDS=$(xdotool search --name "." 2>/dev/null)
+  [ -n "$WIDS" ] && break
   kill -0 $GPID 2>/dev/null || { echo "engine exited early; see $OUT/engine.stdout" >&2; exit 4; }
   sleep 1
 done
-[ -n "$WID" ] || { echo "no window after 90s; see $OUT/engine.stdout" >&2; exit 4; }
+[ -n "$WIDS" ] || { echo "no window after 90s; see $OUT/engine.stdout" >&2; exit 4; }
+# The display was empty before the engine started, so one window here means it
+# is the engine's.  More than one means something else arrived on $DISPLAY
+# mid-run and `import -window root` may well be photographing it, so fail
+# instead of picking one and calling it the engine.
+if [ "$(printf '%s\n' "$WIDS" | wc -l)" -ne 1 ]; then
+  echo "headless-drive: $DISP has $(printf '%s\n' "$WIDS" | wc -l) windows, expected 1:" >&2
+  printf '  %s\n' $WIDS >&2
+  exit 4
+fi
+WID=$WIDS
 echo "window id: [$WID] after ${i}s"
 sleep 10
 
