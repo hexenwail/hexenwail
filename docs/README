@@ -34,7 +34,8 @@ Features
 * Fully network-compatible with Raven's 1.11 Windows version.
 * Same binary handles base game and mission pack.
 * Per-demo configuration files (see DEMO_CONFIG.md).
-* Full user directories (~/.hexen2) for saves and config.
+* Full user directories for saves and config (see 1.6), redirectable with
+  -userdir.
 
 
 Changes from upstream uHexen2 v1.5.10
@@ -125,6 +126,8 @@ Command-line switches:
  -port N                Network port (default: 26900)
  -developer             Developer mode
  -condebug              Log console output
+ -userdir DIR           Write configs and savegames to DIR instead of the
+                        default userdir (Unix only)
  -v | -version          Show version
  -h | -help             Show help
 
@@ -145,10 +148,19 @@ connect to a Hexenwail server, start with "-protocol 18".
 
 1.6 Game Saves and Configuration
 
-Stored under ~/.hexen2 (Linux) or the game directory (Windows).
-  Hexen II:       ~/.hexen2/data1
-  Mission Pack:   ~/.hexen2/portals
-  Demo:           ~/.hexen2demo
+On Linux a fresh install stores these under $XDG_DATA_HOME/hexen2 (that is
+~/.local/share/hexen2 unless XDG_DATA_HOME says otherwise).  An already
+existing ~/.hexen2 keeps winning, so an upgrade finds its savegames, configs
+and dropped-in mods exactly where it left them; nothing is ever migrated.
+Windows uses the game directory.
+  Hexen II:       <userdir>/data1
+  Mission Pack:   <userdir>/portals
+  Demo:           ~/.hexen2demo or $XDG_DATA_HOME/hexen2demo
+
+-userdir DIR overrides all of that and is used verbatim, which is the only way
+to redirect it: the home directory comes from the passwd database rather than
+$HOME, so setting HOME does nothing, and XDG_DATA_HOME has no effect once a
+~/.hexen2 exists.
 
 
 1.7 Fullscreen/Windowed and Mouse
