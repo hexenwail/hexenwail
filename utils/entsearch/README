@@ -149,18 +149,29 @@ holds four things:
    rather than adding to it, which is how you take a property out.
 
    The built-in list is spawnflags plus the fields the Hexen II HexenC source
-   actually combines with the (+) bitwise-or operator: flags, effects, items,
-   items2, drawflags and artifact_flags. Change it for another game.
+   actually combines with the (+) bitwise-or operator: flags, flags2,
+   effects, items, items2, drawflags and artifact_flags. Change it for
+   another game.
 
 4) The output options -- the same set as [OPTIONS] above, plus the log file
    name and a directory to put .pts files in if you would rather not write
    them next to the maps.  A letter on the command line beats what is here.
 
-The parser is loose on purpose: element names are matched without regard to
-case, the root element is ignored, and so are the names of the leaves inside
-the three list sections, so <Path>, <Dir> and <string> are all the same to it.
-If you already keep a config for Inky's MapSearch, copying it over is the
-whole migration.
+The parser is loose on purpose. Element names are matched without regard to
+case, the root element is ignored, and a value may be written any of four
+ways:
+
+    <SearchIn>path</SearchIn>            text in the section, one per line
+    <SearchIn><Path>p</Path></SearchIn>  a leaf holding text; its name ignored
+    <FlagsProperties><spawnflags/>       a leaf whose NAME is the value, with
+                                         exclude="true" to park it
+    <Output MakePts="true" />            settings written as attributes
+
+The last two are how the sample config Inky ships writes its flag properties
+and its output settings. So if you already keep a config for MapSearch,
+copying it to entsearch-config.xml is the whole migration -- that is tested,
+not assumed: his sample config loads here and produces the same results his
+tool does.
 
 
 A note about origins
