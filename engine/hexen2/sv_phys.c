@@ -50,6 +50,9 @@ cvar_t	sv_friction		= { "sv_friction", "4", CVAR_NOTIFY|CVAR_SERVERINFO };
 cvar_t	sv_flypitch		= { "sv_flypitch", "20", CVAR_NONE };
 cvar_t	sv_walkpitch		= { "sv_walkpitch", "0", CVAR_NONE };
 
+/* 0 = off, 1 = clients only, 2 = all entities.  See SV_PushMove. */
+cvar_t	sv_gameplayfix_elevators = { "sv_gameplayfix_elevators", "1", CVAR_ARCHIVE };
+
 #ifdef QUAKE2
 static	vec3_t	vec_origin = {0.0, 0.0, 0.0};
 #endif
@@ -549,6 +552,7 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 	int			num_moved;
 	edict_t		*moved_edict[MAX_EDICTS];
 	vec3_t		moved_from[MAX_EDICTS];
+	qboolean	riding;
 
 	if (!pusher->v.velocity[0] && !pusher->v.velocity[1] && !pusher->v.velocity[2])
 	{
@@ -605,7 +609,11 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 		// see if the ent's bbox is inside the pusher's final position
 			if (!SV_TestEntityPosition (check))
 				continue;
+
+			riding = false;
 		}
+		else
+			riding = true;
 
 		// remove the onground flag for non-players
 		if (check->v.movetype != MOVETYPE_WALK)
@@ -632,6 +640,33 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 				check->v.mins[0] = check->v.mins[1] = 0;
 				VectorCopy (check->v.mins, check->v.maxs);
 				continue;
+			}
+
+			/* Standing ON the pusher and blocked BY that same pusher is the
+			 * lift case: the rider ends the tick a hair inside the platform that
+			 * just carried it, the move fails, and the platform stalls or
+			 * stutters under its own passenger.  Lifting the rider by one
+			 * collision epsilon resolves it, and if that frees the entity we let
+			 * the pusher keep going rather than blocking it.
+			 *
+			 * Opt-out-able per Ironwail and for Ironwail's reason: "fix it for
+			 * everything" changes how content authored around the stall behaves.
+			 * 1 restricts the nudge to players, which is the case anyone
+			 * actually notices; 2 extends it to monsters and objects.
+			 * uhexen2-a5nn.7 */
+			if (riding && block == pusher
+				&& (sv_gameplayfix_elevators.value >= 2.0f
+				    || (sv_gameplayfix_elevators.value && e <= svs.maxclients)))
+			{
+				check->v.origin[2] += DIST_EPSILON;
+				if (!SV_TestEntityPosition (check))
+				{
+					Con_DPrintf ("sv_gameplayfix_elevators nudged %s #%d above %s #%d\n",
+						PR_GetString (check->v.classname), NUM_FOR_EDICT (check),
+						PR_GetString (pusher->v.classname), NUM_FOR_EDICT (pusher));
+					continue;
+				}
+				/* nudge did not help; the restore below undoes it */
 			}
 
 			VectorCopy (entorig, check->v.origin);

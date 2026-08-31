@@ -1,7 +1,53 @@
 # Agent Instructions
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
-Prefer doing work in worktree. 
+
+## Work in a worktree
+
+More than one agent session runs against this checkout at a time. A git checkout
+has **one index, one HEAD and one `MERGE_HEAD`** — so concurrent sessions do not
+merely race on files, they can commit each other's work.
+
+That is not hypothetical. On 2026-08-31 one session was mid-merge of
+`sezero/master` (conflicts resolved and staged, not yet committed) when another
+session ran `git commit` for an unrelated documentation pass. Git had no way to
+tell the two apart. The result is `914114182`: a **merge commit** whose second
+parent is upstream `46c12d854`, carrying the resolved `snd_timidity.c` and the
+entire `libs/timidity` sync, under the message
+`docs(parity): structural audit against Ironwail v0.8.2`. Right content, wrong
+commit — and not separable afterwards without rewriting history under a session
+that is still working in it.
+
+Sharp edges in the same shared checkout:
+
+- `git merge` **refuses to start** while anything is staged, even a path the
+  merge does not touch (`Your local changes to the following files would be
+  overwritten by merge`). bd re-stages `.beads/issues.jsonl` after every write,
+  on its own schedule, so this fires unpredictably.
+- Stashing to clear that is itself a race — bd can re-export and re-stage
+  between the `git stash` and the `git merge`.
+- `git stash`, `git rebase`, `git bisect` and `git checkout` are all
+  checkout-wide. Another session's working tree changes underneath it with no
+  warning.
+
+So: **do the work in a worktree.**
+
+```bash
+git worktree add .claude/worktrees/<slug> -b worktree-<slug>
+cd .claude/worktrees/<slug>
+# ... edit, build, commit ...
+git worktree remove .claude/worktrees/<slug>   # once the branch has landed
+```
+
+`.claude/worktrees/<slug>` on a `worktree-<slug>` branch is the convention
+already in use here.
+
+**Beads is the exception, and it does not move.** `.gitignore` tracks only
+`.beads/issues.jsonl`; the Dolt database, `config.yaml` and the server lock
+files are ignored, so a fresh worktree gets the JSONL and nothing that can read
+it. Run `bd` from the main checkout — one database, one writer. Code work goes
+to the worktree; issue work stays home.
+
 ## First-time setup (fresh clone)
 
 The issue history is version-controlled in `.beads/issues.jsonl`; the local Dolt
