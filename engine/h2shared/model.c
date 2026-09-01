@@ -471,7 +471,7 @@ static void Mod_LoadTextures (lump_t *l)
 		for (j = 0; j < MIPLEVELS; j++)
 			mt->offsets[j] = LittleLong (mt->offsets[j]);
 #ifdef WAL_TEXTURES
-		if (!r_texture_external.integer)
+		if (!r_external_textures.integer)
 			goto bsp_tex_internal;
 		// try an external wal texture file first
 		q_snprintf (texname, sizeof(texname), "textures/%s.wal", mt->name);

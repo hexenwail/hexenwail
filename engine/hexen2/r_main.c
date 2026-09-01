@@ -165,7 +165,31 @@ cvar_t	r_aliastransadj = {"r_aliastransadj", "100", CVAR_NONE};
 cvar_t	r_aliasmip = {"r_aliasmip", "80", CVAR_NONE};
 cvar_t	r_wholeframe = {"r_wholeframe", "1", CVAR_ARCHIVE};
 cvar_t	r_transwater = {"r_transwater", "1", CVAR_ARCHIVE};
-cvar_t	r_texture_external = {"r_texture_external", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh */
+cvar_t	r_external_textures = {"r_external_textures", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh, renamed uhexen2-yz1b */
+cvar_t	r_texture_external  = {"r_texture_external", "1", CVAR_NONE};		/* deprecated; uhexen2-yz1b */
+
+/* uhexen2-yz1b: r_texture_external was a DEAD cvar defaulting to 0 -- it gated
+ * only the Quake II .wal loader, which h2config.h #undefs -- and it was
+ * CVAR_ARCHIVE, so every config.cfg written before 4b47643cf (2026-08-23)
+ * saved a meaningless "0".  That commit raised the default to 1 and gave the
+ * cvar teeth in the same change, turning all those stale zeroes into a silent
+ * "disable every replacement texture in this gamedir".
+ *
+ * Renaming is the only remedy that is not a heuristic: an archived value cannot
+ * be told apart from a deliberate one, so the new name simply does not inherit
+ * it.  The old name stays registered so an old config does not spew "Unknown
+ * command", but it is CVAR_NONE -- never written back -- so the stale line
+ * disappears from config.cfg the first time it is rewritten, and it gates
+ * nothing.  The callback is the point: it says the old setting was dropped. */
+static void R_TextureExternal_Deprecated (cvar_t *var)
+{
+	Con_Printf ("r_texture_external is deprecated and no longer does anything.\n");
+	Con_Printf ("  Use r_external_textures (currently %d) instead.\n",
+		    r_external_textures.integer);
+	if (!var->integer)
+		Con_Printf ("  Your old value of 0 was IGNORED; replacement textures stay on.\n");
+}
+
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_NONE};
 
 //void CreatePassages (void);
@@ -268,7 +292,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_aliasmip);
 	Cvar_RegisterVariable (&r_wholeframe);
 	Cvar_RegisterVariable (&r_transwater);
-	Cvar_RegisterVariable (&r_texture_external);
+	Cvar_RegisterVariable (&r_external_textures);
+	Cvar_RegisterVariable (&r_texture_external);	/* deprecated; uhexen2-yz1b */
+	Cvar_SetCallback (&r_texture_external, R_TextureExternal_Deprecated);
 	Cvar_RegisterVariable (&r_dynamic);
 
 	Cvar_SetValueQuick (&r_maxedges, (float)NUMSTACKEDGES);
