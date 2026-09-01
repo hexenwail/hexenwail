@@ -38,11 +38,35 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer);
 static float RadiusFromBounds (const vec3_t mins, const vec3_t maxs);
+static void Mod_FixupMissingModelFlags (qmodel_t *mod);
+static void Mod_SetAliasModelExtraFlags (qmodel_t *mod);
+static void Mod_EnhancedModels_f (cvar_t *cvar);
+static qboolean Mod_SetupMD5Model (qmodel_t *mod, const char *srcname,
+				   const byte *data, int mdlflags,
+				   synctype_t synctype);
+static qboolean Mod_TryEnhancedModel (qmodel_t *mod, const mdl_t *mdlhdr);
 /* Mod_LoadFullbrightTexture: prototype now in gl_model.h (uhexen2-sjvf) */
 
 static void Mod_Print (void);
 
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
+
+/* -------------------------------------------------------------------------
+ * Enhanced model substitution (Ironwail parity, uhexen2-a5nn.6)
+ *
+ * QuakeC names progs/foo.mdl and nothing else, so an .md5mesh sitting beside
+ * it was unreachable by content no matter how complete the loader was.  With
+ * this, loading a .mdl first looks for an enhanced sibling and takes that
+ * instead.  Names, defaults and archive flags are Ironwail's (Quake/gl_model.c
+ * :42-43) so a config means the same thing in both engines.
+ *
+ * r_enhancedmodels_priority defaults to Ironwail's "md3,md5" even though md3
+ * cannot win here: this tree has the MD3 *vertex format* (PV_MD3, its SSBO
+ * path and shader decode) but no MD3 file loader, so the md3 entry below is
+ * absent rather than dead code.  Adding one is a two-line change to the table.
+ * ------------------------------------------------------------------------- */
+static cvar_t	r_enhancedmodels = {"r_enhancedmodels", "1", CVAR_ARCHIVE};
+static cvar_t	r_enhancedmodels_prio = {"r_enhancedmodels_priority", "md3,md5", CVAR_ARCHIVE};
 
 /* Load visibility from a sidecar .vis when the map's own is missing or wrong.
  * The standard remedy for an unvised third-party map, and it needs no
@@ -87,12 +111,58 @@ static qboolean	spr_reload_only = false;
 
 /*
 ===============
+Mod_EnhancedModels_f -- r_enhancedmodels / _priority changed
+
+Ironwail's R_ENHANCEDMODELS_f (Quake/gl_model.c:59).  Substitution is decided
+once, at load, so a change has to invalidate what is already loaded or it does
+nothing until the next map -- which is the whole point of the callback.
+
+Only alias models are touched; nothing else can be substituted.  Note the cost
+on the hunk-backed ones: a substituted MD5 lives in the hunk, which cannot be
+freed piecemeal, so each toggle away from and back to a substituted model
+leaves one model-sized block behind until Host_ClearMemory resets the hunk at
+the next map load.  That is bounded and it is the price of honouring the
+cvar immediately; it is not a reason to make the user reload the map.
+===============
+*/
+static void Mod_EnhancedModels_f (cvar_t *cvar)
+{
+	int		i;
+	qmodel_t	*mod;
+
+	(void) cvar;
+
+	/* Registration order puts this callback in place before config.cfg is
+	 * executed, and there is nothing loaded to invalidate at that point. */
+	if (!host_initialized)
+		return;
+
+	GL_FreeAliasGPUMeshes ();
+
+	for (i = 0, mod = mod_known; i < mod_numknown; i++, mod++)
+	{
+		if (mod->type != mod_alias || !mod->name[0])
+			continue;
+		if (!mod->cache_is_hunk && Cache_Check (&mod->cache))
+			Cache_Free (&mod->cache);
+		mod->cache_is_hunk = false;
+		mod->cache.data = NULL;
+		mod->needload = NL_NEEDS_LOADED;
+	}
+}
+
+/*
+===============
 Mod_Init
 ===============
 */
 void Mod_Init (void)
 {
 	Cvar_RegisterVariable (&external_ents);
+	Cvar_RegisterVariable (&r_enhancedmodels);
+	Cvar_RegisterVariable (&r_enhancedmodels_prio);
+	Cvar_SetCallback (&r_enhancedmodels, Mod_EnhancedModels_f);
+	Cvar_SetCallback (&r_enhancedmodels_prio, Mod_EnhancedModels_f);
 	Cvar_RegisterVariable (&external_vis);
 	Cvar_RegisterVariable (&r_replacement_restore_alpha);
 	Cvar_RegisterVariable (&r_legacy_special_trans_alpha);
@@ -410,6 +480,161 @@ static void Mod_SetMD5Bounds (qmodel_t *mod, const aliashdr_t *hdr,
 
 /*
 ==================
+Mod_SetupMD5Model
+
+Parse an .md5mesh image and install it on `mod`.  Shared by the direct load of
+a .md5mesh QuakeC named itself and by the substitution path; they differ only
+in where the flags come from, since a direct load has no .mdl to inherit any.
+`srcname` is the file actually being parsed, which is what the sibling
+.md5anim lookup and every diagnostic inside the parser key off.
+==================
+*/
+static qboolean Mod_SetupMD5Model (qmodel_t *mod, const char *srcname,
+				   const byte *data, int mdlflags,
+				   synctype_t synctype)
+{
+	vec3_t		anim_mins, anim_maxs;
+	aliashdr_t	*ahdr;
+
+	VectorClear (anim_mins);
+	VectorClear (anim_maxs);
+	ahdr = MD5_LoadMesh (srcname, data, 1024*1024, anim_mins, anim_maxs);
+	if (!ahdr)
+		return false;
+
+	mod->type = mod_alias;
+	mod->cache_is_hunk = true;
+	mod->cache.data = (void *) ahdr;
+	Mod_SetMD5Bounds (mod, ahdr, anim_mins, anim_maxs);
+	mod->flags = mdlflags;
+	/* The replacement's frame count, not the .mdl's.  The two need not agree
+	 * and QuakeC still sends frame numbers meant for the .mdl, so a
+	 * mis-authored pair shows up as R_AliasResolveLerp clamping to frame 0
+	 * and saying so under `developer 1` -- which is the right failure. */
+	mod->numframes = ahdr->numframes;
+	mod->synctype = synctype;
+	return true;
+}
+
+/*
+==================
+Enhanced model substitution (uhexen2-a5nn.6)
+
+Ironwail's loader shuffle, Quake/gl_model.c:3236-3370.
+==================
+*/
+typedef qboolean (*mod_enhancedload_t) (qmodel_t *mod, const char *path,
+					const mdl_t *mdlhdr);
+
+typedef struct {
+	const char		*token;	/* as written in r_enhancedmodels_priority */
+	const char		*ext;
+	mod_enhancedload_t	load;
+} mod_enhanced_t;
+
+static qboolean Mod_LoadMD5Replacement (qmodel_t *mod, const char *path,
+					const mdl_t *mdlhdr)
+{
+	byte		*text;
+	qboolean	ok;
+
+	/* The malloc loader on purpose: the .mdl this is standing in for is
+	 * still live on the temp hunk (FS_LoadStackFile spills there past 1KB)
+	 * and a second temp-hunk load would hand back the same memory. */
+	text = FS_LoadMallocFile (path, NULL);
+	if (!text)
+		return false;
+
+	Mod_SetAliasModelExtraFlags (mod);	/* ex_flags, keyed on the model name */
+	ok = Mod_SetupMD5Model (mod, path, text,
+				LittleLong (mdlhdr->flags),
+				(synctype_t) LittleLong (mdlhdr->synctype));
+	free (text);
+	if (!ok)
+		return false;
+
+	/* The .mdl's flags and the two fixups the .mdl path applies to them.
+	 * These have to be inherited: the flags live in the .mdl header and an
+	 * .md5mesh has nowhere to carry them, so dropping them stops a
+	 * substituted torch spinning and leaves a substituted gib un-holey. */
+	Mod_FixupMissingModelFlags (mod);	/* Raven's missing EF_HOLEY */
+	Mod_SetExtraFlags (mod);		/* Ironwail r_nolerp_list */
+	Mod_SaveAliasModelDefaults (mod);	/* PimpModel restore, uhexen2-oq0a */
+	return true;
+}
+
+static const mod_enhanced_t mod_enhanced_loaders[] = {
+	{ "md5", ".md5mesh", Mod_LoadMD5Replacement },
+	/* { "md3", ".md3", Mod_LoadMD3Replacement }, once an MD3 *file* loader
+	 * exists -- this tree has PV_MD3 and its shader decode, not a parser. */
+};
+
+static qboolean Mod_TryEnhancedModel (qmodel_t *mod, const mdl_t *mdlhdr)
+{
+	char		base[MAX_QPATH], path[MAX_QPATH];
+	const char	*p;
+
+	if (r_enhancedmodels.integer != 1)
+		return false;
+
+	COM_StripExtension (mod->name, base, sizeof(base));
+
+	/* Walk the priority string left to right.  Upstream instead sorts its
+	 * loader table by the address strstr() returns inside that string --
+	 * the same order by a longer route.  Going through the string directly
+	 * also means a token naming no loader here is simply skipped, rather
+	 * than needing a dead table entry to absorb it, which is what "md3" in
+	 * the default value is until this tree has an MD3 parser. */
+	for (p = r_enhancedmodels_prio.string; *p; )
+	{
+		char	token[16];
+		size_t	len = 0, i;
+
+		while (*p == ',' || *p == ' ')
+			p++;
+		while (*p && *p != ',' && *p != ' ' && len < sizeof(token) - 1)
+			token[len++] = *p++;
+		token[len] = 0;
+		while (*p && *p != ',')		/* tail of an over-long token */
+			p++;
+		if (!len)
+			continue;
+
+		for (i = 0; i < sizeof(mod_enhanced_loaders)/sizeof(mod_enhanced_loaders[0]); i++)
+		{
+			unsigned int	path_id;
+
+			if (q_strcasecmp (token, mod_enhanced_loaders[i].token))
+				continue;
+
+			q_snprintf (path, sizeof(path), "%s%s",
+				    base, mod_enhanced_loaders[i].ext);
+
+			/* Accept only from the .mdl's own gamedir or a later one.
+			 * Without this a replacement shipped with the base game
+			 * would override a mod's own .mdl, which is backwards --
+			 * the mod is the more specific answer.  Ironwail applies
+			 * the same test (`md5_path_id >= mod->path_id`). */
+			if (!FS_FileExists (path, &path_id) || path_id < mod->path_id)
+				break;
+
+			if (mod_enhanced_loaders[i].load (mod, path, mdlhdr))
+			{
+				Con_DPrintf ("%s: %s substituted for %s\n",
+					     __thisfunc__, path, mod->name);
+				return true;
+			}
+			break;	/* the file is there and would not load; do not
+				 * fall through to a lower-priority format, which
+				 * would hide a broken asset behind a working one */
+		}
+	}
+
+	return false;
+}
+
+/*
+==================
 Mod_LoadModel
 
 Loads a model into the cache
@@ -478,13 +703,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	const char *ext = COM_FileGetExtension(mod->name);
 	if (ext && !strcmp(ext, "md5mesh"))
 	{
-		vec3_t		anim_mins, anim_maxs;
-		aliashdr_t	*ahdr;
-
-		VectorClear (anim_mins);
-		VectorClear (anim_maxs);
-		ahdr = MD5_LoadMesh(mod->name, (byte *)buf, 1024*1024, anim_mins, anim_maxs);
-		if (!ahdr)
+		if (!Mod_SetupMD5Model (mod, mod->name, buf, 0, ST_SYNC))
 		{
 			/* Same answer the not-found path above gives: the slot stays
 			 * unloaded and the caller is told so.  It used to return the
@@ -495,18 +714,23 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 				Sys_Error ("%s: %s is not a valid md5mesh", __thisfunc__, mod->name);
 			return NULL;
 		}
-		mod->type = mod_alias;
-		mod->cache_is_hunk = true;
-		loadmodel->cache.data = (void *)ahdr;
-		Mod_SetMD5Bounds (mod, ahdr, anim_mins, anim_maxs);
-		mod->flags = 0;
-		mod->numframes = ahdr->numframes;
-		mod->synctype = ST_SYNC;
 		mod->needload = NL_PRESENT;
 		return mod;
 	}
 
 	mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
+
+	/* Enhanced model substitution (uhexen2-a5nn.6).  A .mdl may be stood in
+	 * for by an enhanced sibling of the same base name.  Ahead of the switch
+	 * rather than inside one loader, because both header idents reach the
+	 * same place: newmdl_t is mdl_t plus a trailing field, so flags and
+	 * synctype sit at the same offset in either and one read serves both. */
+	if ((mod_type == RAPOLYHEADER || mod_type == IDPOLYHEADER) &&
+	    Mod_TryEnhancedModel (mod, (const mdl_t *)buf))
+	{
+		mod->needload = NL_PRESENT;
+		return mod;
+	}
 	switch (mod_type)
 	{
 	case RAPOLYHEADER:
