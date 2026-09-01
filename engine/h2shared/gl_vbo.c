@@ -61,6 +61,10 @@ static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
  * never inherit the effect. */
 static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
 static float	imm_turb[2] = { 0.0f, 0.0f };	/* uhexen2-9o7u: x=amplitude (0=off), y=time */
+/* Its cache lives up here beside it rather than down with the other
+ * imm_cache_* values, because GL_ClearTurb below needs both and sits with
+ * GL_SetTurb.  -1 is the "never pushed" sentinel; see GL_ImmEnd. */
+static float	imm_cache_turb[2] = { -1.0f, -1.0f };
 /* Soft-particle fade for sprite batches (uhexen2-mf9u).  Like the caustics
  * pair above, 0 intensity is the resting state rather than a -1 sentinel, and
  * R_DrawSpriteModel restores it after each sprite so the alias / warp / brush
@@ -247,6 +251,24 @@ void GL_SetTurb (float amplitude, float time)
 	imm_turb[1] = time;
 }
 
+/* Put one program's warp back to rest RIGHT NOW rather than at the next
+ * GL_ImmEnd.  gl_shader_world is shared by the liquid pass and by the opaque
+ * world paths, and those set their uniforms by hand -- the MDI dispatch, the
+ * DrawTextureChains fast path -- so they never push a u_turb of their own.  A
+ * hot value left behind by lit water would warp the entire map from the next
+ * draw on.  Clearing the cache too forces the next batch to push whatever it
+ * wants, whichever program it turns out to use.  uhexen2-a5nn.2. */
+void GL_ClearTurb (const glprogram_t *shader)
+{
+	imm_turb[0] = imm_turb[1] = 0.0f;
+	if (shader && shader->u_turb >= 0)
+	{
+		R_UseProgram (shader->program);
+		glUniform2f_fp (shader->u_turb, 0.0f, 0.0f);
+	}
+	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
+}
+
 /* uhexen2-mf9u.  inv_dist 0 disables the fade entirely; za/zb are the
  * window-depth -> view-distance coefficients for the live projection. */
 void GL_SetSoftParticles (float inv_dist, float za, float zb)
@@ -356,7 +378,6 @@ static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
-static float	imm_cache_turb[2] = { -1.0f, -1.0f };	/* uhexen2-9o7u */
 static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
 static float	imm_cache_alias_model[16];
 static qboolean	imm_cache_alias_model_set;
@@ -384,6 +405,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
 	imm_cache_alias_model_set = false;
 	imm_cache_fog_density = -1.0f;
@@ -431,6 +453,13 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	/* Uniform state is per-program, so a cached value proves nothing about the
+	 * program we are about to use.  Every other cache here is reset for that
+	 * reason; u_turb was missed, and it stopped mattering only because
+	 * gl_shader_alias was the one program that had one.  Lit water gives the
+	 * world program a u_turb too (uhexen2-a5nn.2), and a stale cache would
+	 * then leave one of the two unwarped. */
+	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
 	imm_cache_alias_model_set = false;
 		imm_cache_fog_density = -1.0f;

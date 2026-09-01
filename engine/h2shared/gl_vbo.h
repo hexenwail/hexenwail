@@ -60,6 +60,11 @@ float	GL_GetForceOpaqueAlpha (void);
  * to recover world XY because u_modelview is view*model.  uhexen2-0gn3. */
 void	GL_SetAliasCaustics (float intensity, float time);
 void	GL_SetTurb (float amplitude, float time);	/* uhexen2-9o7u */
+/* Zero the warp on ONE program immediately, and force the next batch to push
+ * its own value.  Needed because gl_shader_world carries a u_turb for lit
+ * water but is drawn by paths that upload their uniforms by hand.
+ * uhexen2-a5nn.2. */
+void	GL_ClearTurb (const struct glprogram_s *shader);
 void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
 /* Read back the current values, for draw paths that bypass GL_ImmEnd and must
  * apply the identical state by hand (the PV_IQM skeletal path, uhexen2-7ok0.3). */

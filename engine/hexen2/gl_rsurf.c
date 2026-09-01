@@ -308,6 +308,77 @@ static inline void GL_BindMaterialDefaults (void)
 
 /*
 ===============
+R_LitWaterSurface
+
+Does this liquid face render through the lightmapped world program?
+
+DRAWTURB without DRAWTILED is precisely "liquid face that kept its lightmap":
+Mod_SetDrawingFlags is the only place that decides it, GL_CreateSurfaceLightmap
+packs exactly that set, and GL_BuildLightmaps bakes UVs for exactly that set.
+Asking the surface rather than the model keeps a brush model loaded from its own
+.bsp honest -- cl.worldmodel->haslitwater says nothing about that one.
+uhexen2-a5nn.2.
+===============
+*/
+qboolean R_LitWaterSurface (const msurface_t *fa)
+{
+	if (!r_litwater.integer)
+		return false;
+	if ((fa->flags & (SURF_DRAWTURB | SURF_DRAWTILED)) != SURF_DRAWTURB)
+		return false;
+	/* Turning the atlas off is a fallback, not a mode: the per-page texture
+	 * is still bound below, so this only guards the case where lightmap
+	 * building failed outright and there is nothing to sample. */
+	return lightmap_textures[0] != 0 || lm_atlas_texture != 0;
+}
+
+/*
+===============
+R_LitWaterBindTextures
+
+Units 1..4 for a lit liquid face, the same set the world program gets from
+DrawTextureChains.  Called from EmitWaterPolys rather than from its three
+callers, so every path that emits a liquid surface is bound the same way and
+none of them has to know which program was chosen.  Leaves TU0 active, like its
+siblings above -- the diffuse is the caller's business.  uhexen2-a5nn.2.
+===============
+*/
+void R_LitWaterBindTextures (const msurface_t *fa)
+{
+	const texture_t *t = fa->texinfo->texture;
+
+	glActiveTexture_fp(GL_TEXTURE1);
+	if (lm_atlas_texture)
+		glBindTexture_fp(GL_TEXTURE_2D, lm_atlas_texture);
+	else
+		GL_Bind (lightmap_textures[fa->lightmaptexturenum]);
+
+	/* The animated frame is not consulted for the mask.  R_DrawWaterSurfaces
+	 * binds the chain's own texture at TU0 without animating it either, and
+	 * a liquid miptex with an animation group is not a thing Hexen II ships. */
+	glActiveTexture_fp(GL_TEXTURE2);
+	glBindTexture_fp(GL_TEXTURE_2D,
+		t->gl_fb_texturenum ? t->gl_fb_texturenum : gl_null_fb_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
+	GL_BindMaterialMaps (t);
+}
+
+/*
+===============
+R_LitWaterReleaseTextures
+
+Hand TU2 back in the state DrawTextureChains' teardown leaves it in.  TU1 is
+deliberately left holding the lightmap, which is what every world path wants
+anyway.  uhexen2-a5nn.2.
+===============
+*/
+void R_LitWaterReleaseTextures (void)
+{
+	GL_BindFullbright (gl_null_fb_texture);
+}
+
+/*
+===============
 R_AddDynamicLights
 ===============
 */
@@ -891,6 +962,7 @@ R_RenderBrushPoly
 ================
 */
 static float R_LiquidAlpha (const texture_t *t); /* forward decl */
+void R_LightmapRebuildIfDirty (msurface_t *surf);	/* defined below */
 
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 {
@@ -1024,7 +1096,15 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			qboolean self_emissive =
 				(_t->name[0] == '*' && !is_water);
 
-			if (fa->polys && !r_fullbright.integer &&
+			/* Lit water already carries the light it should have.  The
+			 * point-sample tint below is the stand-in for exactly the
+			 * lightmap this face now has, so running both multiplies
+			 * the surrounding brightness in twice.  uhexen2-a5nn.2. */
+			if (R_LitWaterSurface (fa))
+			{
+				GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha_val);
+			}
+			else if (fa->polys && !r_fullbright.integer &&
 			    intensity >= 1.0f && !self_emissive)
 			{
 				extern vec3_t lightcolor;
@@ -1438,6 +1518,39 @@ void R_DrawWaterSurfaces (int phase)
 	//
 	GL_LoadMatrixf (r_world_matrix);
 
+	/* Lit water samples the atlas like any other lit surface, so a dlight or
+	 * a lightstyle that touched a liquid face has to reach the atlas before
+	 * that face is drawn.  It cannot ride the world's update: R_UpdateLightmaps
+	 * has already run for this frame by the time the liquid pass starts, so a
+	 * rebuild issued inside the draw loop below would land a frame late and
+	 * the highlight would trail the light source.  Rebuild first, upload, then
+	 * draw -- the same shape R_DrawBrushInstanced uses for its own late
+	 * surfaces.  Skipped entirely on a map without lit water.  uhexen2-a5nn.2. */
+	if (r_litwater.integer && cl.worldmodel->haslitwater)
+	{
+		qboolean	any = false;
+
+		for (i = 0; i < cl.worldmodel->numtextures; i++)
+		{
+			t = cl.worldmodel->textures[i];
+			if (!t)
+				continue;
+			for (s = t->texturechain; s; s = s->texturechain)
+			{
+				/* Per surface, not per texture: lit-ness comes
+				 * from the face's own lightofs, and one miptex can
+				 * carry both a lit face and an unlit one. */
+				if (!R_LitWaterSurface (s))
+					continue;
+				R_LightmapRebuildIfDirty (s);
+				any = true;
+			}
+		}
+
+		if (any)
+			R_UpdateLightmaps (false);
+	}
+
 	GL_SetAlphaThreshold(0.0f);	/* don't discard translucent water */
 
 	for (i = 0; i < cl.worldmodel->numtextures; i++)
@@ -1471,6 +1584,7 @@ void R_DrawWaterSurfaces (int phase)
 			/* opaque liquid (e.g. lava): draw without blend */
 			R_SetBlend (false);
 			R_SetDepthMask (true);
+			GL_SetForceOpaqueAlpha (1.0f);
 			GL_ImmColor4f (1,1,1,1);
 		}
 		else
@@ -1481,6 +1595,14 @@ void R_DrawWaterSurfaces (int phase)
 			if (!OIT_InPass())
 				R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 			R_SetDepthMask (false);
+			/* Said rather than inherited.  The blend stage needs the
+			 * real src.a, and the last program-level value could have
+			 * come from anywhere -- the brush-instanced fence pass sets
+			 * gl_shader_world's to 1 by hand, and lit water draws
+			 * through that very program (uhexen2-a5nn.2).  Inert in the
+			 * OIT pass, which ignores the uniform, but the mirror path
+			 * runs this outside OIT. */
+			GL_SetForceOpaqueAlpha (0.0f);
 			GL_ImmColor4f (1,1,1, a);
 		}
 
@@ -1498,6 +1620,7 @@ void R_DrawWaterSurfaces (int phase)
 
 	GL_ImmColor4f (1,1,1,1);
 	GL_SetAlphaThreshold(0.01f);	/* restore default */
+	GL_SetForceOpaqueAlpha (0.0f);	/* ...and the value it was paired with */
 	/* Blend/depth-mask cleanup gated for OIT pass. */
 	if (!OIT_InPass())
 	{
@@ -3989,7 +4112,13 @@ static void GL_CreateSurfaceLightmap (msurface_t *surf)
 	int	smax, tmax;
 	byte	*base;
 
-	if (surf->flags & (SURF_DRAWSKY|SURF_DRAWTURB))
+	/* SURF_DRAWTILED, not (DRAWSKY|DRAWTURB): the two used to be the same
+	 * set, and are not since lit water (uhexen2-a5nn.2).  DRAWTILED is the
+	 * flag that actually means "no lightmap, ever" -- it still covers sky and
+	 * every unlit liquid face, and now correctly lets a lit one through.
+	 * Those carry real extents, so the smax/tmax below are the surface's own
+	 * luxel dimensions rather than the 1025x1025 placeholder. */
+	if (surf->flags & SURF_DRAWTILED)
 		return;
 
 	smax = (surf->extents[0] >> 4) + 1;
@@ -4252,7 +4381,18 @@ void GL_BuildLightmaps (void)
 		for (i = 0; i < m->numsurfaces; i++)
 		{
 			if (m->surfaces[i].flags & SURF_DRAWTURB)
+			{
+				/* A lit liquid face already HAS its polygons --
+				 * GL_SubdivideSurface built them at load, because the
+				 * warp needs them cut up whether or not they are lit.
+				 * What SubdividePolygon does not fill is verts[5..6]:
+				 * light_s / light_t and the atlas decision are both
+				 * settled only here.  So bake onto the existing chain
+				 * rather than building a second one.  uhexen2-a5nn.2. */
+				if (!(m->surfaces[i].flags & SURF_DRAWTILED))
+					LM_RebakeSurfaceLightmapUVs (m->surfaces + i);
 				continue;
+			}
 #ifndef QUAKE2
 			if (m->surfaces[i].flags & SURF_DRAWSKY)
 				continue;

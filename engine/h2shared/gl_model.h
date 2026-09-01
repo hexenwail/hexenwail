@@ -689,6 +689,11 @@ typedef struct qmodel_s
 	int		flags;
 	int		ex_flags;
 	qboolean	has_sky_surf;	/* cached at load: any surface in this submodel has SURF_DRAWSKY */
+	/* Any liquid face in this model carries lightmap samples -- i.e. the map
+	 * was compiled with lit water (ericw-tools, on by default since 2019).
+	 * Ironwail gl_model.h:504.  Cached so the draw path can ask the question
+	 * once per map instead of per surface.  uhexen2-a5nn.2. */
+	qboolean	haslitwater;
 
 //
 // volume occupied by the model graphics

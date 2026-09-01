@@ -491,6 +491,49 @@ static const char sworld_vert[] =
 	"}\n"
 
 
+/* Analytic band-limited liquid UV warp (uhexen2-9o7u), shared by the alias
+ * and world fragment shaders so an unlit liquid and a lit one ripple
+ * identically -- lit water renders through the WORLD program (uhexen2-a5nn.2),
+ * and two hand-copies of this would be free to drift apart.  Callers gate the
+ * call on turb.x > 0.0, which keeps the fwidth() below inside uniform control
+ * flow and costs a non-liquid draw nothing.
+ *
+ * WHY THIS IS NOT JUST sin().  The legacy CPU warp evaluates the same sine at
+ * tile corners and lets the rasteriser interpolate linearly.  That reconstructs
+ * the sine badly -- 93% peak error even at gl_subdivide_size 24, see
+ * tools/warp_recon.py -- but it is inherently band-limited: it cannot alias in
+ * screen space, because the samples are fixed in world space.  Evaluating the
+ * true sine per pixel fixes the shape and forfeits that protection: at a
+ * glancing angle one pixel can span many warp periods and the sine aliases into
+ * banding.  That is what sank the first attempt (uhexen2-tlsh) and its
+ * fwidth-threshold follow-up (uhexen2-famb).
+ *
+ * The band-limit here is analytic rather than a threshold.  The box average of
+ * sin(k*x) over a footprint of width W is sin(k*x)*sinc(k*W/2), so scaling the
+ * amplitude by that sinc IS the filtered signal: full throw up close, smoothly
+ * to zero as the footprint grows, reaching zero precisely when one pixel covers
+ * one whole warp period (k*W/2 = pi).  Clamped at the first zero so the sinc's
+ * negative lobes cannot bring back a phase-inverted ripple further out.
+ *
+ * s is displaced by a sine of t and vice versa (EmitWaterPolys), so each axis
+ * is attenuated by the OTHER axis' footprint. */
+#define GLSL_TURB_UV_FN \
+	"vec2 TurbUV(vec2 uv, vec2 turb) {\n" \
+	"    const float K = 0.125;\n" \
+	"    const float TAU = 6.2831853;\n" \
+	"    vec2 raw = uv * 64.0;\n" \
+	"    vec2 fw  = fwidth(raw);\n" \
+	"    vec2 z   = 0.5 * K * vec2(fw.y, fw.x);\n" \
+	"    vec2 att = vec2(z.x > 1e-4 ? sin(z.x) / z.x : 1.0,\n" \
+	"                    z.y > 1e-4 ? sin(z.y) / z.y : 1.0);\n" \
+	"    att = clamp(att, 0.0, 1.0);\n" \
+	"    float as = mod(K * raw.y + turb.y, TAU);\n" \
+	"    float at = mod(K * raw.x + turb.y, TAU);\n" \
+	"    raw += turb.x * vec2(att.x * sin(as), att.y * sin(at));\n" \
+	"    return raw * (1.0 / 64.0);\n" \
+	"}\n"
+
+
 /* Material maps -- tangent-space normal + specular from _norm/_bump/_gloss
  * sidecars.  uhexen2-mfql.
  *
@@ -590,6 +633,7 @@ static const char sworld_frag[] =
 	"uniform float u_alpha_threshold;\n"
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform vec2 u_caustics;\n"		/* x=intensity (0=off), y=time (uhexen2-6bfm) */
+	"uniform vec2 u_turb;\n"		/* liquid warp: x=amplitude in texture units (0=off), y=time */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
@@ -602,9 +646,19 @@ static const char sworld_frag[] =
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
+	GLSL_TURB_UV_FN
 	GLSL_MATERIAL_FN
 	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	/* Lit water rides this program (uhexen2-a5nn.2), so the liquid warp has
+	 * to live here too.  u_turb.x is 0 for every other draw -- only
+	 * EmitWaterPolys raises it, and only under r_water_pixel_warp 1 -- so uv
+	 * is v_texcoord untouched for the whole world.  Everything keyed to the
+	 * diffuse texture space follows uv; the lightmap deliberately does not,
+	 * because warping the light along with the texture would drag the
+	 * shoreline shading around with the ripple. */
+	"    vec2 uv = v_texcoord;\n"
+	"    if (u_turb.x > 0.0) uv = TurbUV(v_texcoord, u_turb);\n"
+	"    vec4 tex = texture(u_texture0, uv);\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
 	/* r_fullbright / r_lightmap.  Applied to the samples rather than to the
@@ -624,7 +678,7 @@ static const char sworld_frag[] =
 	 * at full intensity regardless of lightmap.  For surfaces with no
 	 * fullbright pixels the engine binds a 1x1 black sentinel at unit 2
 	 * so the sample contributes 0.  uhexen2-9a1l. */
-	"    vec3 fb = texture(u_texture2, v_texcoord).rgb * (1.0 - u_lightdebug.y);\n"
+	"    vec3 fb = texture(u_texture2, uv).rgb * (1.0 - u_lightdebug.y);\n"
 	/* Material maps.  Branch is uniform-static and therefore coherent across
 	 * the whole draw, so a map with no _norm/_bump/_gloss anywhere -- or a
 	 * user with r_materialmaps 0 -- pays one scalar compare per fragment and
@@ -632,7 +686,7 @@ static const char sworld_frag[] =
 	 * uhexen2-mfql. */
 	"    vec3 matspec = vec3(0.0);\n"
 	"    if (u_material.x > 0.0 || u_material.y > 0.0) {\n"
-	"        vec4 m = MaterialShade(u_texture3, u_texture4, v_texcoord,\n"
+	"        vec4 m = MaterialShade(u_texture3, u_texture4, uv,\n"
 	"                               v_eyepos, u_material.xy, u_material.z);\n"
 	/* Weight the highlight by the lightmap BEFORE the relief term is folded
 	 * into it.  Relief redistributes the light that is already arriving;
@@ -807,46 +861,16 @@ static const char salias_frag[] =
 	"in vec2 v_worldxy;\n"
 	"out vec4 fragColor;\n"
 	GLSL_CAUSTICS_FN
+	GLSL_TURB_UV_FN
 	"void main() {\n"
 	/* Per-pixel liquid warp (uhexen2-9o7u).  Off unless C sets u_turb.x, which
 	 * only EmitWaterPolys does, and only under r_water_pixel_warp 1 -- every
 	 * other user of this program (models, sprites, brush polys) leaves it 0.
-	 *
-	 * WHY THIS IS NOT JUST sin().  The legacy CPU warp evaluates the same sine
-	 * at tile corners and lets the rasteriser interpolate linearly.  That
-	 * reconstructs the sine badly -- 93% peak error even at gl_subdivide_size
-	 * 24, see tools/warp_recon.py -- but it is inherently band-limited: it
-	 * cannot alias in screen space, because the samples are fixed in world
-	 * space.  Evaluating the true sine per pixel fixes the shape and forfeits
-	 * that protection: at a glancing angle one pixel can span many warp
-	 * periods and the sine aliases into banding.  That is what sank the first
-	 * attempt (uhexen2-tlsh) and its fwidth-threshold follow-up (uhexen2-famb).
-	 *
-	 * The band-limit here is analytic rather than a threshold.  The box average
-	 * of sin(k*x) over a footprint of width W is sin(k*x)*sinc(k*W/2), so
-	 * scaling the amplitude by that sinc IS the filtered signal: full throw up
-	 * close, smoothly to zero as the footprint grows, reaching zero precisely
-	 * when one pixel covers one whole warp period (k*W/2 = pi).  Clamped at the
-	 * first zero so the sinc's negative lobes cannot bring back a
-	 * phase-inverted ripple further out.
-	 *
-	 * s is displaced by a sine of t and vice versa (EmitWaterPolys), so each
-	 * axis is attenuated by the OTHER axis' footprint. */
+	 * The maths, and why it is not just sin(), live on GLSL_TURB_UV_FN; a lit
+	 * liquid face takes the world program instead of this one and has to
+	 * ripple identically, so the two share one copy.  uhexen2-a5nn.2. */
 	"    vec2 uv = v_texcoord;\n"
-	"    if (u_turb.x > 0.0) {\n"
-	"        const float K = 0.125;\n"
-	"        const float TAU = 6.2831853;\n"
-	"        vec2 raw = uv * 64.0;\n"
-	"        vec2 fw  = fwidth(raw);\n"
-	"        vec2 z   = 0.5 * K * vec2(fw.y, fw.x);\n"
-	"        vec2 att = vec2(z.x > 1e-4 ? sin(z.x) / z.x : 1.0,\n"
-	"                        z.y > 1e-4 ? sin(z.y) / z.y : 1.0);\n"
-	"        att = clamp(att, 0.0, 1.0);\n"
-	"        float as = mod(K * raw.y + u_turb.y, TAU);\n"
-	"        float at = mod(K * raw.x + u_turb.y, TAU);\n"
-	"        raw += u_turb.x * vec2(att.x * sin(as), att.y * sin(at));\n"
-	"        uv = raw * (1.0 / 64.0);\n"
-	"    }\n"
+	"    if (u_turb.x > 0.0) uv = TurbUV(v_texcoord, u_turb);\n"
 	"    vec4 tex = texture(u_texture0, uv);\n"
 	"    vec4 color = tex * v_color;\n"
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the

@@ -1870,11 +1870,39 @@ static void Mod_SetDrawingFlags(msurface_t *out)
 
 	if (out->texinfo->texture->name[0] == '*')		// turbulent
 	{
-		out->flags |= (SURF_DRAWTURB | SURF_DRAWTILED);
-		for (i = 0; i < 2; i++)
+		out->flags |= SURF_DRAWTURB;
+
+		/* Lit water.  SURF_DRAWTILED means "no lightmap, ever", and it
+		 * used to be set on every liquid face unconditionally -- so a map
+		 * compiled with lit water (ericw-tools; on unless -nolitwater)
+		 * carried lightmap samples for its liquid faces that this engine
+		 * could never reach, and rendered them flat.  Ironwail sets it only
+		 * for TEX_SPECIAL (Quake/gl_model.c:1382), which is what vanilla
+		 * qbsp marks a liquid face with when it wrote no lightmap for it.
+		 * The samples test is the belt to that braces: a non-special liquid
+		 * face with lightofs -1 has nothing to sample either.
+		 * uhexen2-a5nn.2. */
+		if ((out->texinfo->flags & TEX_SPECIAL) || !out->samples)
+			out->flags |= SURF_DRAWTILED;
+		else
 		{
-			out->extents[i] = 16384;
-			out->texturemins[i] = -8192;
+			if (!loadmodel->haslitwater)
+				Con_DPrintf ("Map has lit water\n");
+			loadmodel->haslitwater = true;
+		}
+
+		/* The placeholder extents exist so a lightmap-less liquid face
+		 * cannot be mistaken for one with a 1025x1025-luxel lightmap (see
+		 * R_BuildLightMap).  A lit liquid face has a real lightmap and must
+		 * keep the real extents CalcSurfaceExtents just measured, or
+		 * AllocBlock would be asked for a page a thousand luxels wide. */
+		if (out->flags & SURF_DRAWTILED)
+		{
+			for (i = 0; i < 2; i++)
+			{
+				out->extents[i] = 16384;
+				out->texturemins[i] = -8192;
+			}
 		}
 
 		GL_SubdivideSurface (loadmodel, out);	// cut up polygon for warps
@@ -2697,6 +2725,10 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 		((int *)header)[i] = LittleLong ( ((int *)header)[i]);
 
 // load into heap
+	/* Mod_SetDrawingFlags raises this while reading the faces below; a
+	 * reused mod_known slot may still carry the previous map's answer. */
+	loadmodel->haslitwater = false;
+
 	Mod_LoadVertexes (&header->lumps[LUMP_VERTEXES]);
 	Mod_LoadEdges (&header->lumps[LUMP_EDGES], bsp2);
 	Mod_LoadSurfedges (&header->lumps[LUMP_SURFEDGES]);

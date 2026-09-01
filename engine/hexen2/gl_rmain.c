@@ -179,6 +179,12 @@ cvar_t	r_oldskyleaf = {"r_oldskyleaf", "0", CVAR_NONE};
 cvar_t	r_drawparticles = {"r_drawparticles", "1", CVAR_ARCHIVE};
 cvar_t	r_mirroralpha = {"r_mirroralpha", "1", CVAR_NONE};
 cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
+/* Lightmapped liquid surfaces.  Ironwail default and value set (CVAR_NONE, 1
+ * = on).  A map only has lit water if it was compiled with it, so on a vanilla
+ * Hexen II map this switch reaches nothing: Mod_SetDrawingFlags leaves every
+ * liquid face SURF_DRAWTILED and the unlit path is the only one there is.
+ * uhexen2-a5nn.2. */
+cvar_t	r_litwater = {"r_litwater", "1", CVAR_NONE};
 cvar_t	r_skyalpha = {"r_skyalpha", "0.67", CVAR_ARCHIVE};
 cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};
 cvar_t	r_farclip = {"r_farclip", "4096", CVAR_ARCHIVE};

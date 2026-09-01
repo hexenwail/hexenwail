@@ -323,6 +323,24 @@ void EmitWaterPolys (msurface_t *fa)
 	 * per-pixel about it.  turbsin's amplitude is 8 texture units; the shader
 	 * takes that folded into u_turb.x. */
 	qboolean	pixelwarp = (r_water_pixel_warp.integer != 0);
+	/* Lit water (uhexen2-a5nn.2): a liquid face that kept its lightmap draws
+	 * through the WORLD program instead of the alias one, exactly as Ironwail
+	 * does it (Quake/r_world.c:556 picks a third variant of the world shader
+	 * rather than tweaking the water shader).  Everything else about the
+	 * surface -- the subdivision, the Z ripple, the UV warp, the per-liquid
+	 * alpha the caller set -- is unchanged; the only differences are that the
+	 * lightmap coordinate goes down the pipe and that the fragment multiplies
+	 * by the lightmap it names. */
+	qboolean	lit = R_LitWaterSurface (fa);
+	const glprogram_t *prog;
+
+	if (lit)
+	{
+		R_LitWaterBindTextures (fa);
+		prog = OIT_InPass() ? &gl_shader_world_oit : &gl_shader_world;
+	}
+	else
+		prog = OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias;
 
 	if (ripple < 0) ripple = 0;
 	else if (ripple > 10) ripple = 10;
@@ -339,7 +357,7 @@ void EmitWaterPolys (msurface_t *fa)
 		/* Check buffer space: (numverts-2)*3 triangle verts */
 		if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, prog);
 			GL_ImmBegin ();
 		}
 
@@ -376,16 +394,34 @@ void EmitWaterPolys (msurface_t *fa)
 				}
 
 				GL_ImmTexCoord2f (s, t);
+				/* Baked by GL_BuildLightmaps, from the vertex's
+				 * UNwarped position -- the ripple below moves the
+				 * water, not the light falling on it. */
+				if (lit)
+					GL_ImmLMCoord2f (v[5], v[6]);
 				GL_ImmVertex3f (v[0], v[1], nz);
 			}
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, prog);
 
 	/* Back to rest before anything else draws.  gl_shader_alias is shared with
 	 * models, sprites and brush polys, and a hot u_turb would warp their
-	 * texture lookups too.  uhexen2-9o7u */
-	GL_SetTurb (0.0f, 0.0f);
+	 * texture lookups too.  uhexen2-9o7u
+	 *
+	 * The world program needs more than the CPU-side reset: the opaque world
+	 * paths upload their uniforms by hand and never push a u_turb, so leaving
+	 * one hot there would warp the map itself.  GL_ClearTurb zeroes it on the
+	 * program now.  Only worth doing when there is something to clear, which
+	 * is why it is gated on the warp actually having been armed.
+	 * uhexen2-a5nn.2. */
+	if (lit && pixelwarp)
+		GL_ClearTurb (prog);
+	else
+		GL_SetTurb (0.0f, 0.0f);
+
+	if (lit)
+		R_LitWaterReleaseTextures ();
 }
 
 

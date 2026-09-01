@@ -393,6 +393,7 @@ extern	cvar_t	r_lightmap;
 extern	cvar_t	r_shadows;
 extern	cvar_t	r_mirroralpha;
 extern	cvar_t	r_wateralpha;
+extern	cvar_t	r_litwater;
 extern	cvar_t	r_skyalpha;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_lerplightstyles;
@@ -619,6 +620,11 @@ void R_ClearSkyBox (void);
 void GL_SubdivideSurface (qmodel_t *m, msurface_t *fa);
 void GL_HealTurbTJunctions (qmodel_t *mod);
 void EmitWaterPolys (msurface_t *fa);
+/* Lit water (uhexen2-a5nn.2).  Defined in gl_rsurf.c, where the lightmap
+ * atlas and the texture-binding helpers live; used by EmitWaterPolys. */
+qboolean R_LitWaterSurface (const msurface_t *fa);
+void R_LitWaterBindTextures (const msurface_t *fa);
+void R_LitWaterReleaseTextures (void);
 void EmitBothSkyLayers (msurface_t *fa);
 void R_DrawSkyChain (msurface_t *s);
 /* phase: ALL = both (mirror path), OPAQUE = opaque liquids only,
