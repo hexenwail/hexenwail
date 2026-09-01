@@ -39,6 +39,18 @@ void (*vid_menukeyfn)(int key);
 
 enum m_state_e	m_state;
 
+/* -------------------------------------------------------------------------
+ * ui_* menu interaction cvars (Ironwail parity, uhexen2-a5nn.14)
+ *
+ * Names, defaults and archive flags are Ironwail's (Quake/menu.c:31-34)
+ * verbatim, so a config.cfg written by either engine means the same thing in
+ * both.  What each one governs here is documented at its use site.
+ * ------------------------------------------------------------------------- */
+static cvar_t	ui_live_preview   = {"ui_live_preview",   "1",   CVAR_ARCHIVE};
+static cvar_t	ui_mouse_sound    = {"ui_mouse_sound",    "0",   CVAR_ARCHIVE};
+static cvar_t	ui_sound_throttle = {"ui_sound_throttle", "0.1", CVAR_ARCHIVE};
+static cvar_t	ui_search_timeout = {"ui_search_timeout", "1",   CVAR_ARCHIVE};
+
 void M_Menu_Main_f (void);
 static void M_Menu_SinglePlayer_f (void);
 static void M_Menu_Load_f (void);
@@ -198,6 +210,57 @@ extern qboolean	menu_mouse_moved;
  * CANVAS_MENU is active, accounting for centering offset and scale. */
 static int M_ScreenYToCanvasY (int screen_y);
 
+/* ui_sound_throttle -- rate-limit a *repeated* menu sound.  Keyed on the
+ * sample name, as upstream is (Ironwail Quake/menu.c:226): two different
+ * sounds back to back are both wanted (a move followed by a confirm), but the
+ * same one fired frame after frame is a pointer being dragged down a list,
+ * and that machine-guns the channel.  0 disables the throttle. */
+static char	m_lastsound[MAX_QPATH];
+static double	m_lastsoundtime;
+
+static void M_ThrottledSound (const char *sample)
+{
+	if (m_lastsoundtime > realtime)
+		m_lastsoundtime = 0.0;	/* realtime restarted; re-arm */
+
+	if (!strcmp (m_lastsound, sample) &&
+	    realtime - m_lastsoundtime < ui_sound_throttle.value)
+		return;
+
+	q_strlcpy (m_lastsound, sample, sizeof(m_lastsound));
+	m_lastsoundtime = realtime;
+	S_LocalSound (sample);
+}
+
+/* ui_mouse_sound -- audible feedback as the pointer crosses rows.  Off by
+ * default, which is both upstream's default and the right one for a menu
+ * that is driven with the mouse and the arrow keys interchangeably. */
+static void M_MouseSound (const char *sample)
+{
+	if (!ui_mouse_sound.integer)
+		return;
+	M_ThrottledSound (sample);
+}
+
+/* Sound once per row the pointer *enters*, not once per frame it rests there.
+ * Keyed on (m_state, row) so that the same row index in a different menu still
+ * counts as a new row, and so that leaving the rows entirely (item < 0) re-arms
+ * without sounding.  Every caller is already gated on menu_mouse_moved, so a
+ * stationary pointer cannot retrigger this. */
+static void M_HoverSound (int item)
+{
+	static int	last_state = -1;
+	static int	last_item = -1;
+
+	if (item == last_item && (int)m_state == last_state)
+		return;
+	last_item = item;
+	last_state = (int)m_state;
+
+	if (item >= 0)
+		M_MouseSound ("raven/menu1.wav");
+}
+
 /* Convert screen mouse position to menu-local coordinates.
  * Menu items are drawn at (76 + offset, 92 + cursor*8) in a viewport that is
  * 320 logical units wide and centered on screen.  It is NOT 200 tall: see
@@ -223,6 +286,8 @@ static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int nu
 	idx = (vy - first_y) / item_height;
 	if (idx < 0) idx = -1;
 	if (idx >= num_items) idx = -1;
+
+	M_HoverSound (idx);
 	return idx;
 }
 
@@ -1984,6 +2049,7 @@ static void M_Gamepad_Key (int k);
 #define M_SEARCH_BUFLEN	24
 static char m_search_buf[M_SEARCH_BUFLEN];
 static int  m_search_len = 0;
+static double m_search_time = 0.0;	/* realtime of the last edit; see M_Filter_Think */
 
 static qboolean M_Filter_Active (void)
 {
@@ -1994,6 +2060,7 @@ static void M_Filter_Clear (void)
 {
 	m_search_buf[0] = 0;
 	m_search_len = 0;
+	m_search_time = 0.0;
 }
 
 /* Case-insensitive substring match.  Always-true when search inactive
@@ -2033,6 +2100,7 @@ static qboolean M_Filter_HandleKey (int k)
 		if (m_search_len <= 0)
 			return false;	/* let ESC/etc. propagate when buffer empty */
 		m_search_buf[--m_search_len] = 0;
+		m_search_time = realtime;
 		S_LocalSound ("raven/menu2.wav");
 		return true;
 	}
@@ -2042,6 +2110,7 @@ static qboolean M_Filter_HandleKey (int k)
 		{
 			m_search_buf[m_search_len++] = (char)k;
 			m_search_buf[m_search_len] = 0;
+			m_search_time = realtime;
 			S_LocalSound ("raven/menu2.wav");
 		}
 		return true;
@@ -5686,10 +5755,16 @@ static void M_Mods_MouseHover (int n, const int *ys)
 		if (vy >= ys[k] && vy < ys[k] + 8)
 		{
 			if (M_Mods_Selectable (mods_top + k))
+			{
 				mods_cursor = mods_top + k;
+				M_HoverSound (mods_cursor);
+			}
+			else
+				M_HoverSound (-1);	/* drawn but not a stop */
 			return;
 		}
 	}
+	M_HoverSound (-1);
 }
 
 static void M_Mods_Draw (void)
@@ -7942,9 +8017,11 @@ static void M_Maps_MouseHover (int nrows)
 		if (vy >= y && vy < y + 8)
 		{
 			maps_cursor = maps_top + k;
+			M_HoverSound (maps_cursor);
 			return;
 		}
 	}
+	M_HoverSound (-1);
 }
 
 static void M_Maps_Draw (void)
@@ -8162,6 +8239,83 @@ static void M_Search_Key (int key)
 {
 }
 
+/* -------------------------------------------------------------------------
+ * ui_search_timeout -- expire the type-ahead filter buffer.
+ *
+ * Ironwail runs the same countdown in M_List_Update (Quake/menu.c:880): the
+ * type-ahead buffer is a jump aid, not a mode, so it lapses a fixed time after
+ * the last keystroke rather than holding until dismissed.  0 disables expiry
+ * and restores the pre-a5nn.14 behaviour, where the filter held until ESC.
+ *
+ * Called once per frame from M_Draw ahead of the per-menu draw, so no menu can
+ * draw a filtered view whose buffer has already lapsed.
+ *
+ * The mods and maps menus index a filtered *view* array, so dropping the filter
+ * renumbers every row beneath the cursor.  Their ESC path accepts that and
+ * resets to the top -- the user asked for it.  A timeout did not, so here the
+ * selection is carried across the rebuild by absolute list index and only falls
+ * back to the top when the selected entry is gone.
+ * ------------------------------------------------------------------------- */
+static void M_Filter_Think (void)
+{
+	int	sel, i;
+
+	if (m_search_len <= 0)
+		return;
+	if (ui_search_timeout.value <= 0)
+		return;
+	if (m_search_time > realtime)
+		m_search_time = realtime;	/* realtime restarted; re-arm */
+	if (realtime - m_search_time < ui_search_timeout.value)
+		return;
+
+	switch (m_state)
+	{
+	case m_maps:
+		sel = (maps_cursor >= 0 && maps_cursor < maps_view_count) ?
+				maps_view[maps_cursor] : -1;
+		M_Filter_Clear ();
+		M_Maps_BuildView ();
+		maps_cursor = 0;
+		for (i = 0; i < maps_view_count; i++)
+		{
+			if (maps_view[i] == sel)
+			{
+				maps_cursor = i;
+				break;
+			}
+		}
+		M_Maps_ClampCursor ();
+		M_Maps_EnsureVisible ();
+		break;
+
+	case m_mods:
+		sel = (mods_cursor >= 0 && mods_cursor < mods_view_count) ?
+				mods_view[mods_cursor] : -1;
+		M_Filter_Clear ();
+		M_Mods_BuildView ();
+		mods_cursor = 0;
+		for (i = 0; i < mods_view_count; i++)
+		{
+			if (mods_view[i] == sel)
+			{
+				mods_cursor = i;
+				break;
+			}
+		}
+		M_Mods_SnapSelectable (1);
+		M_Mods_EnsureVisible ();
+		break;
+
+	default:
+		/* Label-filtered submenus keep absolute row indices whether or
+		 * not a row is hidden, so the cursor stays on the same setting
+		 * and only the neighbours reappear. */
+		M_Filter_Clear ();
+		break;
+	}
+}
+
 //=============================================================================
 /* SLIST MENU */
 
@@ -8269,6 +8423,11 @@ void M_Init (void)
 
 	M_BuildBindList ();
 
+	Cvar_RegisterVariable (&ui_live_preview);
+	Cvar_RegisterVariable (&ui_mouse_sound);
+	Cvar_RegisterVariable (&ui_sound_throttle);
+	Cvar_RegisterVariable (&ui_search_timeout);
+
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
 	Cmd_AddCommand ("menu_main", M_Menu_Main_f);
@@ -8296,6 +8455,8 @@ void M_Draw (void)
 	if (m_state == m_none || !(Key_GetDest() & key_menu))
 		return;
 
+	M_Filter_Think ();
+
 	if (!m_recursiveDraw)
 	{
 		scr_copyeverything = 1;
@@ -8310,10 +8471,18 @@ void M_Draw (void)
 		else if (scr_menubgstyle.integer >= 1)
 		{
 			/* Demo/game world is behind — dim it with the amber fade.
-			 * Display submenus skip the fade so settings preview
-			 * against a clean game view. */
-			if (m_state != m_display && m_state != m_video
-			    && m_state != m_rendering && m_state != m_graphics)
+			 *
+			 * ui_live_preview: the Display submenus skip the fade so
+			 * a setting is judged against a clean game view while it
+			 * is being adjusted.  This is the same trade Ironwail's
+			 * cvar makes (Quake/menu.c:3575) — it fades the *menu*
+			 * out over the live scene there, and holds the scene
+			 * undimmed here — legibility of the menu against
+			 * visibility of the thing being changed.  Turning it off
+			 * dims these submenus like every other menu. */
+			if (!ui_live_preview.integer
+			    || (m_state != m_display && m_state != m_video
+			        && m_state != m_rendering && m_state != m_graphics))
 				Draw_FadeScreen ();
 
 			/* Mode 2: also draw a translucent backdrop quad over the
