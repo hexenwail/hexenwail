@@ -162,10 +162,30 @@ static GLint	pp_loc_hdr_exposure;
 static GLint	pp_loc_bloom_tex;
 static GLint	pp_loc_bloom_strength;
 
-/* Palette LUT state */
-static GLuint	pp_palette_lut;		/* 32x32x32 3D texture, nearest-colour (r_softemu 1/2) */
-static GLuint	pp_colormap_lut;	/* 32x32x32 3D texture, via gfx/colormap.lmp (r_softemu 3) */
+/* Palette LUT state.  LUT_DIM^3 grid, RGBA8 -- see PP_UploadLUT for why the
+ * colour is baked rather than looked up from a palette uniform, and why RGBA
+ * and not RGB (rgba8 is an image-storable format; rgb8 is not, and the compute
+ * builder writes into this same texture). */
+#define PP_LUT_DIM	32
+#define PP_LUT_TEXELS	(PP_LUT_DIM * PP_LUT_DIM * PP_LUT_DIM)
+
+/* Colour-distance functions the nearest-colour search can minimise, in
+ * upstream's order -- r_softemu_metric indexes this directly, and the compute
+ * variants are compiled with MODE set to it (Ironwail gl_shaders.c:379).
+ * uhexen2-h8yy. */
+typedef enum {
+	SOFTEMU_METRIC_NAIVE     = 0,	/* Euclidean, straight on sRGB */
+	SOFTEMU_METRIC_RIEMERSMA = 1,	/* compuphase.com/cmetric.htm, on linear RGB */
+	SOFTEMU_METRIC_OKLAB     = 2,	/* bottosson.github.io/posts/oklab */
+	SOFTEMU_METRIC_COUNT
+} softemu_metric_t;
+
+static GLuint	pp_palette_lut;		/* nearest-colour LUT (r_softemu 1/2) */
+static GLuint	pp_colormap_lut;	/* via gfx/colormap.lmp (r_softemu 3) */
 static qboolean	pp_lut_built;
+/* Which metric pp_palette_lut currently holds.  COUNT is the "nothing valid
+ * yet" sentinel, so the first PP_UpdatePaletteLUT always builds. */
+static softemu_metric_t	pp_lut_metric = SOFTEMU_METRIC_COUNT;
 
 static qboolean	pp_initialized;
 static qboolean	pp_active;		/* true when scene is being rendered to FBO this frame */
@@ -193,6 +213,18 @@ cvar_t	r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_AR
 /* -1 = follow the mode (on at r_softemu 3), 0 = never, > 0 = always.  The one
  * softemu sub-cvar Ironwail puts in its menu. */
 cvar_t	r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
+/* Which colour-distance function the nearest-colour LUT minimises: -1 auto,
+ * 0 naive RGB, 1 Riemersma, 2 OKLab.  Upstream's name, default and archive
+ * flag (Ironwail gl_texmgr.c:41).  uhexen2-h8yy.
+ *
+ * APPLIES TO r_softemu 1 AND 2 ONLY.  Mode 3 resolves through gfx/colormap.lmp,
+ * an authored table with no distance function anywhere in it -- see the essay
+ * on PP_BuildColormapLUT -- so this changes nothing there.  The one exception
+ * is a game with no colormap.lmp, where mode 3 falls back to the nearest-colour
+ * table and the metric starts mattering again; PP_SelectMetric treats exactly
+ * that case as upstream's BANDED.  PP_MetricChanged says so on the console
+ * rather than let somebody set it under mode 3 and watch nothing happen. */
+cvar_t	r_softemu_metric = {"r_softemu_metric", "-1", CVAR_ARCHIVE};
 
 /*
 ===============
@@ -1045,40 +1077,27 @@ extern unsigned int d_8to24table[256];
 /* ITU-R BT.601 luma, fixed point: (r*77 + g*151 + b*28) >> 8 spans 0..255. */
 #define PP_LUMA(r,g,b)	((((r) * 77) + ((g) * 151) + ((b) * 28)) >> 8)
 
-/* Takes a 32^3 grid of palette *indices* -- which is what both builders below
- * compute -- and uploads it as resolved RGB8 colour.
+/* The grid coordinate -> 8-bit channel value the LUT is built against.
  *
- * The shader used to fetch the index and look it up in a `uniform vec3
- * palette[256]`.  That array alone is 256 uniform vectors, over the 224 a
- * WebGL2 implementation is only required to offer a fragment shader, so the
- * entire post-process program could fail to link on a conforming browser or
- * mobile GL ES driver -- taking gamma, contrast, FXAA and render scale down
- * with softemu.  Resolving the colour here costs 96 KB of texture per LUT
- * instead, and drops a per-frame 768-float uniform upload on every tier.
- *
- * Safe to bake because d_8to24table is built once in VID_InitPalette and never
- * mutated afterwards; palette flashes go through v_blend, not this table.
- * Ported from alextnewman/hexenwail d2c46f078. */
-static GLuint PP_UploadLUT (const unsigned char *lut)
-{
-	/* static: 96 KB, too much for the stack on Windows */
-	static unsigned char rgb[32 * 32 * 32 * 3];
-	GLuint tex = 0;
-	int i;
+ * Integer, and shared verbatim with the compute builder, because the two have
+ * to agree exactly: a float (gid * 255/31) rounds 31 to 254.99998 on some
+ * drivers and the top corner of the cube would then disagree between tiers. */
+#define PP_GRID_TO_8BIT(i)	(((i) * 255) / (PP_LUT_DIM - 1))
 
-	for (i = 0; i < 32 * 32 * 32; i++)
-	{
-		unsigned int c = d_8to24table[lut[i]];
-		rgb[i * 3 + 0] = (c >>  0) & 0xff;
-		rgb[i * 3 + 1] = (c >>  8) & 0xff;
-		rgb[i * 3 + 2] = (c >> 16) & 0xff;
-	}
+/* Creates the empty 3D texture both LUT routes fill: CPU builders through
+ * PP_UploadLUT, the compute builder by imageStore.  Binds on unit 1, where the
+ * post-process shader expects the LUT, and leaves GL_TEXTURE0 active with
+ * nothing newly bound. */
+static GLuint PP_CreateLUTTexture (void)
+{
+	GLuint tex = 0;
 
 	glGenTextures_fp(1, &tex);
 	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, tex);
-	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGB8, 32, 32, 32, 0,
-			GL_RGB, GL_UNSIGNED_BYTE, rgb);
+	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
+			PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1088,6 +1107,222 @@ static GLuint PP_UploadLUT (const unsigned char *lut)
 	glActiveTexture_fp(GL_TEXTURE0);
 
 	return tex;
+}
+
+/* Takes a LUT_DIM^3 grid of palette *indices* -- which is what both CPU
+ * builders below compute -- and uploads it as resolved RGBA8 colour into
+ * *tex, creating the texture on first use.
+ *
+ * The shader used to fetch the index and look it up in a `uniform vec3
+ * palette[256]`.  That array alone is 256 uniform vectors, over the 224 a
+ * WebGL2 implementation is only required to offer a fragment shader, so the
+ * entire post-process program could fail to link on a conforming browser or
+ * mobile GL ES driver -- taking gamma, contrast, FXAA and render scale down
+ * with softemu.  Resolving the colour here costs 128 KB of texture per LUT
+ * instead, and drops a per-frame 768-float uniform upload on every tier.
+ *
+ * RGBA rather than RGB purely so the compute builder can write the same
+ * texture: rgba8 is one of the image formats GL 4.3 requires, rgb8 is not.
+ * The alpha byte is never read -- the post-process shader takes .rgb.
+ *
+ * Safe to bake because d_8to24table is built once in VID_InitPalette and never
+ * mutated afterwards; palette flashes go through v_blend, not this table.
+ * Ported from alextnewman/hexenwail d2c46f078. */
+static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
+{
+	/* static: 128 KB, too much for the stack on Windows */
+	static unsigned char rgba[PP_LUT_TEXELS * 4];
+	int i;
+
+	if (!*tex)
+	{
+		*tex = PP_CreateLUTTexture();
+		if (!*tex)
+			return false;
+	}
+
+	for (i = 0; i < PP_LUT_TEXELS; i++)
+	{
+		unsigned int c = d_8to24table[lut[i]];
+		rgba[i * 4 + 0] = (c >>  0) & 0xff;
+		rgba[i * 4 + 1] = (c >>  8) & 0xff;
+		rgba[i * 4 + 2] = (c >> 16) & 0xff;
+		rgba[i * 4 + 3] = 255;
+	}
+
+	glActiveTexture_fp(GL_TEXTURE0 + 1);
+	glBindTexture_fp(GL_TEXTURE_3D, *tex);
+	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
+			PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	glBindTexture_fp(GL_TEXTURE_3D, 0);
+	glActiveTexture_fp(GL_TEXTURE0);
+
+	return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Colour metrics (uhexen2-h8yy)                                       */
+/*                                                                     */
+/* Transliterated from Ironwail's palette_init compute shader          */
+/* (Quake/gl_shaders.h, NormalizeColor / ColorDistanceSquared), which  */
+/* the GPU builder further down compiles very nearly verbatim.  Two    */
+/* implementations of one function is a drift hazard, so they are kept */
+/* adjacent, in the same order, with the same constants, and the       */
+/* compute source quotes the C by structure rather than paraphrasing   */
+/* it.  The CPU copy is the authoritative one: it is what the ES /     */
+/* WebGL2 tier runs, and what the GPU path falls back to.              */
+/*                                                                     */
+/* Checked against the retail palette rather than assumed.  Under the  */
+/* naive metric this reproduces the exact integer nearest-colour table */
+/* over all 32768 grid points -- zero worse choices.                   */
+/*                                                                     */
+/* The two implementations were then diffed against each other on a    */
+/* real driver (GL 4.3, NVIDIA 580): Riemersma byte-identical over the */
+/* whole grid, OKLab one texel apart, naive 260 texels apart.  Every   */
+/* one of those is a TIE -- two palette entries at identical distance, */
+/* with `dist < bestdist` keeping whichever it reached first, and      */
+/* float rounding deciding which that is.  Zero cells where one side   */
+/* picked a genuinely worse colour, and zero cells the compute pass    */
+/* left unwritten.  Ties are the only thing the two may split on, and  */
+/* they are common under the naive metric precisely because plain RGB  */
+/* distance is the one with no perceptual tie-breaking in it.          */
+/*                                                                     */
+/* Measured mean CIELAB dE over the grid -- a yardstick none of the    */
+/* three optimises for -- is naive 26.4, Riemersma 25.3, OKLab 22.6,   */
+/* worst case 126.1 / 96.0 / 72.9.  That is why -1 resolves to OKLab.  */
+/* ------------------------------------------------------------------ */
+
+static float PP_SRGBToLinear (float v)
+{
+	return (v > 0.04045f) ? powf((v + 0.055f) / 1.055f, 2.4f) : (v / 12.92f);
+}
+
+/* 8-bit sRGB triple -> the space `metric` measures distance in. */
+static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, float out[3])
+{
+	float c[3];
+
+	c[0] = (float)r8 * (1.0f / 255.0f);
+	c[1] = (float)g8 * (1.0f / 255.0f);
+	c[2] = (float)b8 * (1.0f / 255.0f);
+
+	if (metric >= SOFTEMU_METRIC_RIEMERSMA)
+	{
+		c[0] = PP_SRGBToLinear(c[0]);
+		c[1] = PP_SRGBToLinear(c[1]);
+		c[2] = PP_SRGBToLinear(c[2]);
+
+		if (metric >= SOFTEMU_METRIC_OKLAB)
+		{
+			/* A perceptual color space for image processing -- Bjorn
+			 * Ottosson.  https://bottosson.github.io/posts/oklab/ */
+			float l = 0.4122214708f * c[0] + 0.5363325363f * c[1] + 0.0514459929f * c[2];
+			float m = 0.2119034982f * c[0] + 0.6806995451f * c[1] + 0.1073969566f * c[2];
+			float s = 0.0883024619f * c[0] + 0.2817188376f * c[1] + 0.6299787005f * c[2];
+
+			/* powf, not cbrtf: the shader has no cbrt and uses pow, and
+			 * the two paths matching matters more here than the last ulp.
+			 * Linear RGB is non-negative, so pow is well defined. */
+			float l_ = powf(l, 1.0f / 3.0f);
+			float m_ = powf(m, 1.0f / 3.0f);
+			float s_ = powf(s, 1.0f / 3.0f);
+
+			c[0] = 0.2104542553f * l_ + 0.7936177850f * m_ - 0.0040720468f * s_;
+			c[1] = 1.9779984951f * l_ - 2.4285922050f * m_ + 0.4505937099f * s_;
+			c[2] = 0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_;
+		}
+	}
+
+	out[0] = c[0];
+	out[1] = c[1];
+	out[2] = c[2];
+}
+
+static float PP_ColorDistanceSquared (softemu_metric_t metric, const float c0[3], const float c1[3])
+{
+	float d0 = c1[0] - c0[0];
+	float d1 = c1[1] - c0[1];
+	float d2 = c1[2] - c0[2];
+
+	if (metric == SOFTEMU_METRIC_RIEMERSMA)
+	{
+		/* Colour metric -- Thiadmer Riemersma.
+		 * https://www.compuphase.com/cmetric.htm */
+		float rmean = (c0[0] + c1[0]) * 0.5f;
+		return d0 * d0 * (2.0f + rmean) + d1 * d1 * 4.0f + d2 * d2 * (3.0f - rmean);
+	}
+	if (metric == SOFTEMU_METRIC_OKLAB)
+	{
+		d0 *= 1.25f;	/* lightness */
+		d2 *= 1.5f;	/* blue-yellow */
+	}
+	return d0 * d0 + d1 * d1 + d2 * d2;
+}
+
+static const char *PP_MetricName (softemu_metric_t metric)
+{
+	switch (metric)
+	{
+	case SOFTEMU_METRIC_NAIVE:	return "naive RGB";
+	case SOFTEMU_METRIC_RIEMERSMA:	return "Riemersma";
+	case SOFTEMU_METRIC_OKLAB:	return "OKLab";
+	default:			return "?";
+	}
+}
+
+/*
+===============
+PP_SelectMetric
+
+Which metric the nearest-colour LUT should be built with right now.
+
+r_softemu_metric >= 0 names one outright.  The shipped -1 defers, and Ironwail
+(gl_texmgr.c:2030-2042) then picks naive RGB in exactly one situation: its
+BANDED mode on a connected map with no .lit file, where reproducing the 1997
+image is the whole point and a perceptual metric would improve it away from
+that.  Everywhere else it takes OKLab, which simply matches better.
+
+Translating the condition rather than the code: our BANDED-equivalent is
+r_softemu 3 (see R_SoftEmuParams), and mode 3 does not normally consult a
+distance metric at all -- it reads the colormap LUT, which is authored.  The
+only way mode 3 reaches this table is a game shipping no gfx/colormap.lmp, and
+that fallback is precisely upstream's case, so it is the one that gets naive.
+
+The .lit half of upstream's test has no counterpart here: coloured lighting is
+not what the metric is choosing between, and we carry no per-model litfile
+flag to test anyway.
+===============
+*/
+static softemu_metric_t PP_SelectMetric (void)
+{
+	int m;
+
+	if (r_softemu_metric.value < 0.0f)
+	{
+		if (r_softemu.integer == 3 && !pp_colormap_lut)
+			return SOFTEMU_METRIC_NAIVE;
+		return SOFTEMU_METRIC_OKLAB;
+	}
+
+	m = (int)r_softemu_metric.value;
+	if (m < 0)
+		m = 0;
+	if (m >= SOFTEMU_METRIC_COUNT)
+		m = SOFTEMU_METRIC_COUNT - 1;
+	return (softemu_metric_t)m;
+}
+
+/* The cvar is live -- PP_UpdatePaletteLUT notices the change on the next frame
+ * and rebuilds -- but at r_softemu 3 with a colormap present the rebuilt table
+ * is not the one that gets bound, so the screen does not change and the
+ * setting looks broken.  Say why instead. */
+static void PP_MetricChanged (cvar_t *var)
+{
+	(void) var;
+	if (r_softemu.integer == 3 && pp_colormap_lut)
+		Con_Printf("r_softemu_metric has no effect at r_softemu 3: that mode resolves\n"
+			   "through gfx/colormap.lmp, which is authored, not searched.\n");
 }
 
 /* r_softemu 3 -- quantize the way the 1997 rasterizer did.
@@ -1120,7 +1355,7 @@ static GLuint PP_UploadLUT (const unsigned char *lut)
 static qboolean PP_BuildColormapLUT (void)
 {
 	/* static: ~114 KB of tables, too much for the stack on Windows */
-	static unsigned char lut[32 * 32 * 32];
+	static unsigned char lut[PP_LUT_TEXELS];
 	static unsigned char rampluma[VID_GRADES][256];	/* [light][texel] -> luma */
 	static unsigned char bestlevel[256][256];	/* [texel][target luma] -> light */
 	const byte *cmap = host_colormap;
@@ -1199,62 +1434,400 @@ static qboolean PP_BuildColormapLUT (void)
 		}
 	}
 
-	pp_colormap_lut = PP_UploadLUT(lut);
-	return pp_colormap_lut != 0;
+	return PP_UploadLUT(&pp_colormap_lut, lut);
 }
 
-static void PP_BuildPaletteLUT (void)
+/*
+===============
+PP_BuildPaletteLUT_CPU
+
+The nearest-colour table, built under `metric`.  Runs on every tier; on the ES
+/ WebGL2 one it is the only route, since that tier has no compute shaders.
+
+~8.4M distance evaluations (32^3 grid x 255 candidates), which is tens of
+milliseconds -- fine at load and at a settings change, and the reason the GPU
+path below is a nicety here rather than the necessity it is upstream, where
+the grid is 128^3 and the same loop is 537M evaluations.
+===============
+*/
+static qboolean PP_BuildPaletteLUT_CPU (softemu_metric_t metric)
 {
-	unsigned char lut[32 * 32 * 32];
-	int r, g, b, i;
+	/* static: 32 KB of indices + 3 KB of transformed palette, and this is
+	 * called from the frame path when the metric changes */
+	static unsigned char	lut[PP_LUT_TEXELS];
+	static float		palcolors[256][3];
+	int	r, g, b, i;
 
 	if (!glTexImage3D_fp)
-		return;
+		return false;
 
-	/* for each point in the 32^3 grid, find the nearest palette color */
-	for (b = 0; b < 32; b++)
+	/* transform the palette once, not once per grid point */
+	for (i = 0; i < 255; i++)
 	{
-		for (g = 0; g < 32; g++)
-		{
-			for (r = 0; r < 32; r++)
-			{
-				int tr = (r * 255) / 31;
-				int tg = (g * 255) / 31;
-				int tb = (b * 255) / 31;
-				int best = 0;
-				int bestdist = 0x7fffffff;
+		unsigned int pal = d_8to24table[i];
+		PP_NormalizeColor(metric,
+				  (int)((pal >>  0) & 0xff),
+				  (int)((pal >>  8) & 0xff),
+				  (int)((pal >> 16) & 0xff),
+				  palcolors[i]);
+	}
 
-				/* skip index 255 (transparent / fullbright) */
+	for (b = 0; b < PP_LUT_DIM; b++)
+	{
+		for (g = 0; g < PP_LUT_DIM; g++)
+		{
+			for (r = 0; r < PP_LUT_DIM; r++)
+			{
+				float	target[3];
+				int	best = 0;
+				float	bestdist = 1e+30f;
+
+				PP_NormalizeColor(metric,
+						  PP_GRID_TO_8BIT(r),
+						  PP_GRID_TO_8BIT(g),
+						  PP_GRID_TO_8BIT(b),
+						  target);
+
+				/* skip index 255 (transparent / fullbright).
+				 * Upstream searches all 256 -- Quake's last entry
+				 * is an ordinary colour, ours is the transparency
+				 * key, and emitting it would paint holes. */
 				for (i = 0; i < 255; i++)
 				{
-					unsigned int pal = d_8to24table[i];
-					int pr = (pal >>  0) & 0xff;
-					int pg = (pal >>  8) & 0xff;
-					int pb = (pal >> 16) & 0xff;
-					int dr = tr - pr;
-					int dg = tg - pg;
-					int db = tb - pb;
-					int dist = dr*dr + dg*dg + db*db;
+					float dist = PP_ColorDistanceSquared(metric, target, palcolors[i]);
 					if (dist < bestdist)
 					{
 						bestdist = dist;
 						best = i;
 					}
 				}
-				lut[b * 32 * 32 + g * 32 + r] = (unsigned char)best;
+				lut[(b * PP_LUT_DIM + g) * PP_LUT_DIM + r] = (unsigned char)best;
 			}
 		}
 	}
 
-	pp_palette_lut = PP_UploadLUT(lut);
+	return PP_UploadLUT(&pp_palette_lut, lut);
+}
 
-	pp_lut_built = true;
-	Con_SafePrintf("PostProcess: palette LUT built\n");
+/* ------------------------------------------------------------------ */
+/* GPU palette LUT (uhexen2-h8yy)                                      */
+/*                                                                     */
+/* Ironwail generates this table with a compute pass and three         */
+/* compile-time metric variants (gl_shaders.c:379).  Desktop GL 4.3    */
+/* only: the ES / WebGL2 tier has no compute shaders at all, so it     */
+/* keeps PP_BuildPaletteLUT_CPU, and this is an accelerator rather     */
+/* than the sole route.  Both must agree, which is why the maths below */
+/* is line-for-line the C above it -- same order, same constants, same */
+/* index-255 skip, same integer grid mapping.                          */
+/* ------------------------------------------------------------------ */
 
+static qboolean	pp_lut_gpu_built;	/* whether the live table came from the GPU */
+
+#ifndef USE_GLES
+
+static GLuint	pp_palette_init_prog[SOFTEMU_METRIC_COUNT];
+static GLint	pp_palette_init_loc_palette[SOFTEMU_METRIC_COUNT];
+static GLint	pp_palette_init_loc_dim[SOFTEMU_METRIC_COUNT];
+static GLuint	pp_palette_tex;		/* 256x1 RGBA8, index -> colour */
+static qboolean	pp_lut_gpu_failed;	/* compile failed once; do not keep trying */
+
+/* Transliterated from Ironwail's palette_init_compute_shader
+ * (Quake/gl_shaders.h).  Differences, all of them ours and all deliberate:
+ *
+ *  - the palette arrives as a 256x1 texture rather than an SSBO, which drops a
+ *    capability this pass would otherwise need for 1 KB of data;
+ *  - the search skips index 255, Hexen II's transparency key, exactly as
+ *    PP_BuildPaletteLUT_CPU does and for the same reason;
+ *  - it stores resolved colour, not the index, because our post-process
+ *    fragment shader has no palette to resolve one with (see PP_UploadLUT);
+ *  - the grid coordinate is mapped to 8 bits with integer arithmetic, matching
+ *    PP_GRID_TO_8BIT, rather than upstream's bit-twiddled 128-step version. */
+static const char pp_palette_init_body[] =
+	"layout(local_size_x = 8, local_size_y = 8, local_size_z = 4) in;\n"
+	"\n"
+	"layout(rgba8, binding = 0) uniform writeonly image3D u_lut;\n"
+	"uniform sampler2D u_palette;\n"
+	"uniform int u_dim;\n"
+	"\n"
+	"vec3 sRGBToLinearRGB(vec3 v)\n"
+	"{\n"
+	"    return mix(v / 12.92, pow((v + 0.055) / 1.055, vec3(2.4)), greaterThan(v, vec3(0.04045)));\n"
+	"}\n"
+	"\n"
+	"// A perceptual color space for image processing - Bjorn Ottosson\n"
+	"// https://bottosson.github.io/posts/oklab/\n"
+	"vec3 LinearRGBToOKLab(vec3 c)\n"
+	"{\n"
+	"    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;\n"
+	"    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;\n"
+	"    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;\n"
+	"\n"
+	"    float l_ = pow(l, 1./3.);\n"
+	"    float m_ = pow(m, 1./3.);\n"
+	"    float s_ = pow(s, 1./3.);\n"
+	"\n"
+	"    return vec3(\n"
+	"        0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_,\n"
+	"        1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_,\n"
+	"        0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_\n"
+	"    );\n"
+	"}\n"
+	"\n"
+	"vec3 NormalizeColor(vec3 clr)\n"
+	"{\n"
+	"#if MODE >= 1\n"
+	"    clr = sRGBToLinearRGB(clr);\n"
+	"    #if MODE >= 2\n"
+	"        clr = LinearRGBToOKLab(clr);\n"
+	"    #endif\n"
+	"#endif\n"
+	"    return clr;\n"
+	"}\n"
+	"\n"
+	"float ColorDistanceSquared(vec3 c0, vec3 c1)\n"
+	"{\n"
+	"    vec3 delta = c1 - c0;\n"
+	"#if MODE == 1\n"
+	"    // Colour metric - Thiadmer Riemersma\n"
+	"    // https://www.compuphase.com/cmetric.htm\n"
+	"    float rmean = (c0.r + c1.r) * 0.5;\n"
+	"    return dot(delta * delta, vec3(2. + rmean, 4., 3. - rmean));\n"
+	"#elif MODE == 2\n"
+	"    delta.x *= 1.25; // lightness\n"
+	"    delta.z *= 1.5;  // blue-yellow\n"
+	"#endif\n"
+	"    return dot(delta, delta);\n"
+	"}\n"
+	"\n"
+	"shared vec3 palsrgb[256];\n"
+	"shared vec3 palmetric[256];\n"
+	"\n"
+	"void main()\n"
+	"{\n"
+	"    uint groupsize = gl_WorkGroupSize.x * gl_WorkGroupSize.y * gl_WorkGroupSize.z;\n"
+	"    uint i, ofs;\n"
+	"    for (ofs = 0u; ofs < 256u; ofs += groupsize)\n"
+	"    {\n"
+	"        uint idx = gl_LocalInvocationIndex + ofs;\n"
+	"        if (idx < 256u)\n"
+	"        {\n"
+	"            vec3 c = texelFetch(u_palette, ivec2(int(idx), 0), 0).rgb;\n"
+	"            palsrgb[idx] = c;\n"
+	"            palmetric[idx] = NormalizeColor(c);\n"
+	"        }\n"
+	"    }\n"
+	"    memoryBarrierShared();\n"
+	"    barrier();\n"
+	"\n"
+	"    ivec3 gid = ivec3(gl_GlobalInvocationID);\n"
+	"    ivec3 t8 = (gid * 255) / (u_dim - 1);\n"
+	"    vec3 target = NormalizeColor(vec3(t8) * (1. / 255.));\n"
+	"\n"
+	"    uint bestidx = 0u;\n"
+	"    float bestdist = 1e+30;\n"
+	"    for (i = 0u; i < 255u; i++)\n"
+	"    {\n"
+	"        float dist = ColorDistanceSquared(target, palmetric[i]);\n"
+	"        if (dist < bestdist)\n"
+	"        {\n"
+	"            bestidx = i;\n"
+	"            bestdist = dist;\n"
+	"        }\n"
+	"    }\n"
+	"    imageStore(u_lut, gid, vec4(palsrgb[bestidx], 1.));\n"
+	"}\n";
+
+/* d_8to24table as a 256x1 texture, so the compute pass can read it without an
+ * SSBO.  Built once; the table is fixed after VID_InitPalette. */
+static GLuint PP_CreatePaletteTexture (void)
+{
+	unsigned char	rgba[256 * 4];
+	GLuint		tex = 0;
+	int		i;
+
+	for (i = 0; i < 256; i++)
+	{
+		unsigned int c = d_8to24table[i];
+		rgba[i * 4 + 0] = (c >>  0) & 0xff;
+		rgba[i * 4 + 1] = (c >>  8) & 0xff;
+		rgba[i * 4 + 2] = (c >> 16) & 0xff;
+		rgba[i * 4 + 3] = 255;
+	}
+
+	glGenTextures_fp(1, &tex);
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, tex);
+	glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+
+	return tex;
+}
+
+static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
+{
+	char	header[64];
+
+	pp_lut_gpu_built = false;
+
+	if (pp_lut_gpu_failed || !glTexImage3D_fp)
+		return false;
+	if (!gl_renderer_caps.compute_shaders || !glBindImageTexture_fp)
+		return false;
+
+	if (!pp_palette_init_prog[metric])
+	{
+		q_snprintf(header, sizeof(header), "#version 430 core\n#define MODE %d\n", (int)metric);
+		pp_palette_init_prog[metric] =
+			GL_LoadComputeProgram(header, pp_palette_init_body, "palette init");
+		if (!pp_palette_init_prog[metric])
+		{
+			/* One failure means the driver rejects the pass, not this
+			 * variant of it -- do not recompile it every frame. */
+			pp_lut_gpu_failed = true;
+			return false;
+		}
+		pp_palette_init_loc_palette[metric] =
+			glGetUniformLocation_fp(pp_palette_init_prog[metric], "u_palette");
+		pp_palette_init_loc_dim[metric] =
+			glGetUniformLocation_fp(pp_palette_init_prog[metric], "u_dim");
+	}
+
+	if (!pp_palette_tex)
+	{
+		pp_palette_tex = PP_CreatePaletteTexture();
+		if (!pp_palette_tex)
+			return false;
+	}
+
+	if (!pp_palette_lut)
+	{
+		pp_palette_lut = PP_CreateLUTTexture();
+		if (!pp_palette_lut)
+			return false;
+	}
+
+	R_UseProgram (pp_palette_init_prog[metric]);
+	glActiveTexture_fp(GL_TEXTURE0);
+	glBindTexture_fp(GL_TEXTURE_2D, pp_palette_tex);
+	if (pp_palette_init_loc_palette[metric] >= 0)
+		glUniform1i_fp(pp_palette_init_loc_palette[metric], 0);
+	if (pp_palette_init_loc_dim[metric] >= 0)
+		glUniform1i_fp(pp_palette_init_loc_dim[metric], PP_LUT_DIM);
+
+	glBindImageTexture_fp(0, pp_palette_lut, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	glDispatchCompute_fp(PP_LUT_DIM / 8, PP_LUT_DIM / 8, PP_LUT_DIM / 4);
+	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT);
+
+	glBindImageTexture_fp(0, 0, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA8);
+	glBindTexture_fp(GL_TEXTURE_2D, 0);
+	R_UseProgram (0);
+
+	pp_lut_gpu_built = true;
+	return true;
+}
+
+static void PP_FreePaletteGPU (void)
+{
+	int i;
+
+	for (i = 0; i < SOFTEMU_METRIC_COUNT; i++)
+	{
+		if (pp_palette_init_prog[i])
+		{
+			glDeleteProgram_fp(pp_palette_init_prog[i]);
+			pp_palette_init_prog[i] = 0;
+		}
+	}
+	if (pp_palette_tex)
+	{
+		glDeleteTextures_fp(1, &pp_palette_tex);
+		pp_palette_tex = 0;
+	}
+	pp_lut_gpu_failed = false;
+	pp_lut_gpu_built = false;
+}
+
+#else	/* USE_GLES: no compute shaders on this tier at all */
+
+static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
+{
+	(void)metric;
+	pp_lut_gpu_built = false;
+	return false;
+}
+
+static void PP_FreePaletteGPU (void)
+{
+	pp_lut_gpu_built = false;
+}
+
+#endif	/* !USE_GLES */
+
+/*
+===============
+PP_UpdatePaletteLUT
+
+Rebuilds the nearest-colour LUT when the metric it was built under stops being
+the one PP_SelectMetric wants -- an r_softemu_metric change, or a mode change
+that moves the automatic choice.  Cheap to call every frame: the common case
+is one comparison.
+
+Mirrors Ironwail's cached_softemu_metric early-out (gl_texmgr.c:2049).  It also
+compares the palette itself there; we do not, because d_8to24table is fixed
+after VID_InitPalette here -- the same invariant PP_UploadLUT bakes colour on.
+===============
+*/
+static void PP_UpdatePaletteLUT (void)
+{
+	softemu_metric_t metric = PP_SelectMetric();
+
+	if (metric == pp_lut_metric)
+		return;
+
+	/* Recorded either way, so a failure is not retried on every single frame
+	 * -- the CPU builder is tens of milliseconds and this runs from the frame
+	 * path.  Changing the cvar moves the metric and buys one more attempt. */
+	pp_lut_metric = metric;
+
+	if (PP_BuildPaletteLUT_GPU(metric) || PP_BuildPaletteLUT_CPU(metric))
+	{
+		pp_lut_built = true;
+		Con_DPrintf("PostProcess: palette LUT rebuilt, %s metric (%s)\n",
+			    PP_MetricName(metric), pp_lut_gpu_built ? "GPU" : "CPU");
+	}
+	else
+	{
+		/* Nothing to bind: GL_PostProcess_EndFrame tests pp_lut_built before
+		 * it binds a LUT, so softemu goes inert rather than sampling a stale
+		 * or absent table. */
+		pp_lut_built = false;
+		Con_DPrintf("PostProcess: palette LUT build failed (%s metric)\n", PP_MetricName(metric));
+	}
+}
+
+static void PP_BuildPaletteLUT (void)
+{
+	/* Colormap first: PP_SelectMetric asks whether it exists, because a game
+	 * with no gfx/colormap.lmp is the one case where r_softemu 3 falls
+	 * through to the nearest-colour table and wants upstream's naive RGB. */
 	if (PP_BuildColormapLUT())
 		Con_SafePrintf("PostProcess: colormap LUT built\n");
 	else
 		Con_SafePrintf("PostProcess: no colormap, r_softemu 3 falls back to nearest-colour\n");
+
+	PP_UpdatePaletteLUT();
+
+	if (pp_lut_built)
+		Con_SafePrintf("PostProcess: palette LUT built (%s metric, %s)\n",
+			       PP_MetricName(pp_lut_metric),
+			       pp_lut_gpu_built ? "GPU" : "CPU");
+	else
+		Con_SafePrintf("PostProcess: palette LUT unavailable, r_softemu inactive\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -1668,6 +2241,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_softemu_dither_texture);
 	Cvar_RegisterVariable(&r_softemu_lightmap_banding);
 	Cvar_RegisterVariable(&r_softemu_mdl_warp);
+	Cvar_RegisterVariable(&r_softemu_metric);
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
@@ -1679,6 +2253,7 @@ void GL_PostProcess_Init (void)
 
 	Cvar_SetCallback(&r_hdr, PP_FormatChanged);
 	Cvar_SetCallback(&r_bloom, PP_FormatChanged);
+	Cvar_SetCallback(&r_softemu_metric, PP_MetricChanged);
 
 	/* Report only -- deliberately NOT Cvar_Set("r_hdr", "0"), which is what
 	 * d2c46f078 did here.  PP_HDRActive() already gates every functional
@@ -1792,7 +2367,9 @@ void GL_PostProcess_Shutdown (void)
 		glDeleteTextures_fp(1, &pp_colormap_lut);
 		pp_colormap_lut = 0;
 	}
+	PP_FreePaletteGPU();
 	pp_lut_built = false;
+	pp_lut_metric = SOFTEMU_METRIC_COUNT;
 	pp_initialized = false;
 	pp_active = false;
 	pp_native_active = false;
@@ -2211,6 +2788,11 @@ void GL_PostProcess_EndFrame (void)
 apply_shader:
 	/* set full viewport for the blit */
 	glViewport_fp(0, 0, glwidth, glheight);
+
+	/* Before anything is bound: this may dispatch a compute pass and will
+	 * clobber unit 0.  No-op unless the metric actually changed. */
+	if ((int)r_softemu.value > 0)
+		PP_UpdatePaletteLUT();
 
 	/* disable depth test, blending, etc. for the blit */
 	R_SetDepthTest (false);

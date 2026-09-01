@@ -55,6 +55,10 @@ extern cvar_t r_softemu_dither_screen;
 extern cvar_t r_softemu_dither_texture;
 extern cvar_t r_softemu_lightmap_banding;
 extern cvar_t r_softemu_mdl_warp;
+/* -1 auto, 0 naive RGB, 1 Riemersma, 2 OKLab.  Selects the colour-distance
+ * function the r_softemu 1/2 nearest-colour LUT minimises; inert at
+ * r_softemu 3 unless the game ships no gfx/colormap.lmp.  uhexen2-h8yy. */
+extern cvar_t r_softemu_metric;
 /* The four floats the world shader's u_softemu wants; see the definition in
  * gl_postprocess.c for how our r_softemu ladder maps onto Ironwail's.
  * uhexen2-a5nn.3. */

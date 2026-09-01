@@ -15,6 +15,12 @@
 GLuint	GL_CompileShader (GLenum type, const char *source);
 GLuint	GL_LinkProgram (GLuint vert, GLuint frag);
 GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
+/* Compute program from a two-part source: `header` carries the #version line
+ * and any #defines, `body` the shader itself, so one body can be compiled as
+ * several variants without splicing strings.  `name` only labels the log.
+ * Desktop GL 4.3 only -- the ES tier has no compute stage; callers gate on
+ * gl_renderer_caps.compute_shaders.  uhexen2-h8yy. */
+GLuint	GL_LoadComputeProgram (const char *header, const char *body, const char *name);
 
 /* Shader programs */
 typedef struct glprogram_s {

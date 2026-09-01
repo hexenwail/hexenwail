@@ -78,3 +78,13 @@ jobs:
       - name: Software-renderer menu parity
         run: python3 tools/menu_soft_parity.py
 
+      # ARE_WE_IRONWAIL_YET.md carries a summary table over rows kept further
+      # down the same file, and the two drift every time somebody flips a row
+      # by hand.  The file records this happening in 2026-08-20 and twice on
+      # 2026-08-31; the parser was written the second time and committed the
+      # third, "so the next edit cannot skip it".  It was skipped anyway --
+      # two flips reached the rows and not the header -- because nothing ran
+      # it.  Now something does.
+      - name: Ironwail scorecard matches its own rows
+        run: python3 tools/ironwail_scorecard.py --check
+

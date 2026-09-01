@@ -88,6 +88,47 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	return shader;
 }
 
+GLuint GL_LoadComputeProgram (const char *header, const char *body, const char *name)
+{
+	const char	*sources[2];
+	GLuint		shader, prog;
+	GLint		status;
+	char		log[2048];
+
+	sources[0] = header;
+	sources[1] = body;
+
+	shader = glCreateShader_fp(GL_COMPUTE_SHADER);
+	glShaderSource_fp(shader, 2, sources, NULL);
+	glCompileShader_fp(shader);
+	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
+	if (!status)
+	{
+		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
+		Con_Printf("[SHADER] COMPUTE COMPILE ERROR (%s):\n%s\n", name, log);
+		glDeleteShader_fp(shader);
+		return 0;
+	}
+
+	prog = glCreateProgram_fp();
+	glAttachShader_fp(prog, shader);
+	glLinkProgram_fp(prog);
+	glDeleteShader_fp(shader);	/* flagged for deletion; the program holds it */
+
+	glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
+	if (!status)
+	{
+		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
+		Con_Printf("[SHADER] COMPUTE LINK ERROR (%s):\n%s\n", name, log);
+		glDeleteProgram_fp(prog);
+		return 0;
+	}
+
+	if (developer.integer)
+		Con_SafePrintf("[SHADER] compute program '%s' linked OK (id=%u)\n", name, prog);
+	return prog;
+}
+
 GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 {
 	GLuint prog;
@@ -1649,8 +1690,15 @@ GL_InitProgram with a preamble spliced into both stages, so one source can be
 compiled as more than one program.  Only the alias NOPERSP variants use it;
 it delegates rather than duplicating GL_InitProgram's uniform and sampler
 setup, which the variants must share exactly.  uhexen2-ktjv.
+
+Desktop-only, with the same guard as GL_SpliceDefines that it calls and as the
+two call sites in GL_Shaders_Init: `noperspective` is not in the GLSL ES 3.00
+language at all, so the ES tier compiles no NOPERSP variant to need this.
+Without the guard the ES tier failed to build outright -- the definition was
+visible there while its callee was not.
 ===============
 */
+#ifndef USE_GLES
 static void GL_InitProgramDefines (glprogram_t *p, const char *name,
 				   const char *vert_src, const char *frag_src,
 				   const char *defines)
@@ -1665,6 +1713,7 @@ static void GL_InitProgramDefines (glprogram_t *p, const char *name,
 	free (v);
 	free (f);
 }
+#endif	/* !USE_GLES */
 
 #ifndef USE_GLES
 static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)

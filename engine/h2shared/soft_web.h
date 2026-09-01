@@ -58,6 +58,7 @@ extern cvar_t	r_softemu_mdl_warp;	/* uhexen2-a5nn.3: menu.c reads this one */
 extern cvar_t	r_softemu_dither_screen;
 extern cvar_t	r_softemu_dither_texture;
 extern cvar_t	r_softemu_lightmap_banding;
+extern cvar_t	r_softemu_metric;
 extern cvar_t	r_dither;
 extern cvar_t	r_lightmap_bicubic;
 extern cvar_t	gl_particles;

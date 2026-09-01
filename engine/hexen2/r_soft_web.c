@@ -46,12 +46,13 @@ cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0", CVAR_ARCHIVE};
 /* The r_softemu sub-cvars (uhexen2-a5nn.3).  Only the one with a menu row
  * has to be here for linkage -- menu.c reads it to draw that row -- but all
- * four are registered so a config written by the GL build round-trips through
+ * five are registered so a config written by the GL build round-trips through
  * this one unchanged, which is the same reason r_softemu itself is here. */
 cvar_t	r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
 cvar_t	r_softemu_dither_screen = {"r_softemu_dither_screen", "1.0", CVAR_ARCHIVE};
 cvar_t	r_softemu_dither_texture = {"r_softemu_dither_texture", "1.0", CVAR_ARCHIVE};
 cvar_t	r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_ARCHIVE};
+cvar_t	r_softemu_metric = {"r_softemu_metric", "-1", CVAR_ARCHIVE};
 cvar_t	r_lightmap_bicubic = {"r_lightmap_bicubic", "0", CVAR_ARCHIVE};
 cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};
 /* The particle off switch (uhexen2-a5nn.11).  Real here, not just for
@@ -107,6 +108,7 @@ void R_SoftWebInitCvars (void)
 	Cvar_RegisterVariable (&r_softemu_dither_screen);
 	Cvar_RegisterVariable (&r_softemu_dither_texture);
 	Cvar_RegisterVariable (&r_softemu_lightmap_banding);
+	Cvar_RegisterVariable (&r_softemu_metric);
 	Cvar_RegisterVariable (&r_lightmap_bicubic);
 	Cvar_RegisterVariable (&gl_particles);
 	Cvar_RegisterVariable (&r_drawparticles);
