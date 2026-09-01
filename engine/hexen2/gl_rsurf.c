@@ -27,6 +27,7 @@
 #include "gl_vbo.h"
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
+#include "gl_lightcluster.h"
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -90,6 +91,17 @@ static unsigned int	blocklightscolor[BLOCK_WIDTH*BLOCK_HEIGHT*3];	// colored lig
 
 static glpoly_t	*lightmap_polys[MAX_LIGHTMAPS];
 static qboolean	lightmap_modified[MAX_LIGHTMAPS];
+
+/* Atlas pages pushed to the GPU this frame; reported by r_speeds 2 beside
+ * the `lmup` timer.  This is the acceptance measure for clustered dynamic
+ * lighting (uhexen2-26bm): with the froxel path shading the world a torch
+ * no longer dirties a lightmap page, so a scene whose only moving light is
+ * dynamic reads 0 here where it used to read a page per torch per frame.
+ * A count and not just the timer beside it because "is it zero" is the
+ * question and 0.0 ms rounds.  Defined here rather than with the other
+ * rprof_* counters further down because R_UpdateLightmaps writes it and
+ * comes first in the file.  Read by gl_rmain.c via extern. */
+int	rprof_lm_pages_uploaded;
 
 /* Dirty rect per lightmap page for sub-image uploads */
 static int	lightmap_rectmin[MAX_LIGHTMAPS][2]; /* x, y */
@@ -916,6 +928,7 @@ void R_UpdateLightmaps (qboolean Translucent)
 			if (ry + rh > BLOCK_HEIGHT) rh = BLOCK_HEIGHT - ry;
 
 			lightmap_modified[i] = false;
+			rprof_lm_pages_uploaded++;	/* uhexen2-26bm */
 
 			src = lightmaps + i*BLOCK_WIDTH*BLOCK_HEIGHT*lightmap_bytes
 			    + ry * BLOCK_WIDTH * lightmap_bytes
@@ -1899,6 +1912,9 @@ double	rprof_cpu_chains_loop;
 double	rprof_cpu_chains_deferred;
 int	rprof_chains_n_surfwalk;
 int	rprof_chains_n_lmrebuilt;
+/* rprof_lm_pages_uploaded belongs to this set but is defined up with the
+ * lightmap page state instead: R_UpdateLightmaps writes it and sits above
+ * here in the file. */
 double	rprof_cpu_chains_lmbuild;
 double	rprof_cpu_chains_surfwalk;
 double	rprof_cpu_chains_gpufinish;
@@ -2885,7 +2901,15 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 
 // calculate dynamic lighting for bmodel if it's not an
 // instanced model
-	if (clmodel->firstmodelsurface != 0 && !gl_flashblend.integer)
+	/* R_LightCluster_ShadesWorld: the froxel grid lights brush entities too
+	 * -- they draw through the same world programs -- so marking here would
+	 * double-light them and re-dirty their lightmap pages.  It does it
+	 * BETTER, in fact: this path transforms the light into the entity's
+	 * local frame to cope with rotation, whereas the shader works from the
+	 * fragment's real world position and needs no such correction.
+	 * uhexen2-26bm. */
+	if (clmodel->firstmodelsurface != 0 && !gl_flashblend.integer &&
+	    !R_LightCluster_ShadesWorld ())
 	{
 		for (k = 0; k < MAX_DLIGHTS; k++)
 		{
@@ -3734,6 +3758,10 @@ void R_DrawWorld (void)
 
 	/* Upload any dirty lightmap rects BEFORE drawing — the GPU cull path
 	 * and VBO batch path both read the atlas texture directly. */
+	/* Counter reset lives here rather than with its siblings in
+	 * DrawTextureChains: that runs after this pass and would zero the
+	 * very uploads it is meant to report.  uhexen2-26bm. */
+	rprof_lm_pages_uploaded = 0;
 	DW_BEGIN();
 	R_UpdateLightmaps (false);
 	DW_END(rprof_cpu_lmupload);

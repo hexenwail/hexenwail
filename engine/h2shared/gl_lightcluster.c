@@ -16,10 +16,15 @@
  * only the handful of lights their pixel's froxel names, instead of the engine
  * rewriting lightmap blocks on the CPU every frame.
  *
- * NOTHING CONSUMES THE GRID YET.  That is phase B.  This lands alone because it
- * is a self-contained thing that can be proved on its own -- see the
- * `lightcluster_verify` command at the bottom, which reads the grid back and
- * checks it against a CPU implementation of the same test.
+ * THE CONSUMER IS THE WORLD FRAGMENT SHADER (phase B, uhexen2-26bm): see
+ * GLSL_DLIGHT_FN in gl_shader.c, which reads a fragment's froxel out of this
+ * grid and evaluates only the lights whose bits are set in it.  Alias models
+ * are NOT a consumer and stay on the CPU term -- finding 2 on uhexen2-a5nn.1.
+ *
+ * `lightcluster_verify` at the bottom reads the grid back and checks it against
+ * a CPU implementation of the same test.  It predates the consumer and is kept:
+ * "the picture looks right" cannot separate a clustering bug from a shading
+ * one, and this can.
  *
  * THREE WAYS THIS DEPARTS FROM UPSTREAM, all forced:
  *
@@ -42,9 +47,20 @@
  * 3. HEXEN II HAS SUBTRACTIVE DLIGHTS.  dlight_t carries `dark` (client.h),
  *    and Quake has no equivalent, so upstream's Light struct has nowhere to put
  *    it.  Clustering does not care -- a dark light occupies exactly the same
- *    sphere as a bright one -- so phase A carries the colour negated and lets
- *    phase B decide what to do with it at shading time.  Recorded here so that
- *    decision is not made by accident.
+ *    sphere as a bright one -- so the colour rides negated, and the shading
+ *    side accumulates with a clamp at zero, which is what the CPU path does
+ *    (gl_rsurf.c, the `dark` arm of R_AddDynamicLights).  Decided in phase B;
+ *    see GLSL_DLIGHT_FN.
+ *
+ * A NOTE ON NEGATIVE RADII, which look like a fourth case and are not.
+ * EF_SPIT allocates a dlight with radius -120 (cl_main.c) and leaves `dark`
+ * false.  Such a light lights nothing today: R_MarkLights compares dist against
+ * light->radius and, with the radius negative, always descends one child and
+ * marks no surface, and R_AddDynamicLights would reject it anyway once
+ * rad -= fabs(dist) drives it below minlight.  The alias path rejects it too
+ * (add = radius - dist is never positive).  The gather below drops them for the
+ * same reason, so the GPU path inherits exactly the existing behaviour rather
+ * than lighting the world with something that has never lit it.
  */
 
 #include "quakedef.h"
@@ -88,6 +104,13 @@ static float		lc_view[16];
 static float		lc_tproj[16];
 static float		lc_zlogscale, lc_zlogbias;
 
+/* The viewport the grid was clustered against, as the fragment side needs it:
+ * xy = origin in window coordinates, zw = froxels per window pixel.  Read back
+ * from GL rather than recomputed from r_refdef, because render scale and the
+ * "fudge around because of frac screen scale" nudges in R_SetupGL both move it
+ * and a second derivation of the same rectangle is a second thing to get wrong. */
+static float		lc_vp[4];
+
 static void LC_UploadAndDispatch (void);
 
 /* ------------------------------------------------------------------ */
@@ -105,7 +128,7 @@ static const char lc_compute_body[] =
 	"    float minlight;\n"
 	"};\n"
 	"\n"
-	"layout(std430, binding = 0) restrict readonly buffer LightBuffer\n"
+	"layout(std430, binding = LIGHT_SSBO_BINDING) restrict readonly buffer LightBuffer\n"
 	"{\n"
 	"    float LightStyles[MAX_LIGHTSTYLES];\n"
 	"    Light Lights[];\n"
@@ -257,15 +280,35 @@ static qboolean R_LightCluster_Build (void)
 	if (!glBindImageTexture_fp || !glTexImage3D_fp || !glBindBufferBase_fp)
 		return false;
 
+	/* LIGHT_SSBO_BINDING is above the 8 bindings GL 4.3 guarantees, because
+	 * gl_worldcull.c's compute pass claims every index below it and does not
+	 * restore them -- see the header.  Refuse rather than silently bind to an
+	 * index the driver does not have: the failure mode of getting this wrong
+	 * is dynamic lights that do nothing, which reads as "the port doesn't
+	 * work" and not as "this driver is short of binding points". */
+	{
+		GLint maxbind = 0;
+		glGetIntegerv_fp (GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &maxbind);
+		if (maxbind <= LIGHT_SSBO_BINDING)
+		{
+			Con_SafePrintf ("LightCluster: disabled, driver has %d shader "
+					"storage bindings and this needs %d\n",
+					(int)maxbind, LIGHT_SSBO_BINDING + 1);
+			lc_failed = true;
+			return false;
+		}
+	}
+
 	q_snprintf (header, sizeof(header),
 		    "#version 430 core\n"
 		    "#define LIGHT_TILES_X %d\n"
 		    "#define LIGHT_TILES_Y %d\n"
 		    "#define LIGHT_TILES_Z %d\n"
 		    "#define MAX_LIGHTS %d\n"
-		    "#define MAX_LIGHTSTYLES %d\n",
+		    "#define MAX_LIGHTSTYLES %d\n"
+		    "#define LIGHT_SSBO_BINDING %d\n",
 		    LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z,
-		    MAX_DLIGHTS, MAX_LIGHTSTYLES);
+		    MAX_DLIGHTS, MAX_LIGHTSTYLES, LIGHT_SSBO_BINDING);
 
 	lc_prog = GL_LoadComputeProgram (header, lc_compute_body, "light cluster");
 	if (!lc_prog)
@@ -281,11 +324,11 @@ static qboolean R_LightCluster_Build (void)
 	lc_loc_numlights = glGetUniformLocation_fp (lc_prog, "u_numlights");
 
 	glGenBuffers_fp (1, &lc_ssbo);
-	glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER, lc_ssbo);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, lc_ssbo);
 	glBufferData_fp (GL_SHADER_STORAGE_BUFFER,
 			 (GLsizeiptr)(MAX_LIGHTSTYLES * sizeof(float) + sizeof(lc_lights)),
 			 NULL, GL_DYNAMIC_DRAW);
-	glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER, 0);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	glGenTextures_fp (1, &lc_grid);
 	glActiveTexture_fp (GL_TEXTURE0);
@@ -324,6 +367,24 @@ static void R_LightCluster_GatherLights (void)
 	int	i;
 
 	lc_numlights = 0;
+
+	/* The two switches that make the CPU path contribute nothing, honoured
+	 * here so the GPU path contributes nothing either.  Getting this wrong
+	 * is not a subtle brightness difference, it is dynamic lights appearing
+	 * in the two configurations that exist to suppress them:
+	 *
+	 *   r_dynamic 0    -- R_BuildLightMap simply does not call
+	 *                     R_AddDynamicLights (gl_rsurf.c).
+	 *   gl_flashblend  -- R_PushDlights returns before marking anything and
+	 *                     R_RenderDlights draws blend bubbles instead, so no
+	 *                     dlight reaches a lightmap at all.
+	 *
+	 * Clearing the light list rather than refusing to run leaves the grid
+	 * valid and empty, which keeps R_LightCluster_ShadesWorld true and so
+	 * keeps the CPU marking suppressed -- both paths dark, one of them free. */
+	if (!r_dynamic.integer || gl_flashblend.integer)
+		return;
+
 	for (i = 0; i < MAX_DLIGHTS && lc_numlights < MAX_DLIGHTS; i++)
 	{
 		dlight_t	*dl = &cl_dlights[i];
@@ -351,6 +412,7 @@ void R_LightCluster_Update (void)
 {
 	float	proj[16];
 	float	znear, zfar;
+	GLint	vp[4];
 	int	i;
 
 	lc_valid_this_frame = false;
@@ -361,6 +423,18 @@ void R_LightCluster_Update (void)
 		return;
 
 	R_LightCluster_GatherLights ();
+
+	/* Window rect -> froxel column/row, for the fragment side.  A zero
+	 * dimension would make this a division by zero and every lookup a NaN;
+	 * it should not happen (R_SetupGL always leaves a non-empty viewport)
+	 * but a minimised window is exactly the sort of thing that produces one. */
+	glGetIntegerv_fp (GL_VIEWPORT, vp);
+	if (vp[2] <= 0 || vp[3] <= 0)
+		return;
+	lc_vp[0] = (float)vp[0];
+	lc_vp[1] = (float)vp[1];
+	lc_vp[2] = (float)LIGHT_TILES_X / (float)vp[2];
+	lc_vp[3] = (float)LIGHT_TILES_Y / (float)vp[3];
 
 	GL_GetModelview (lc_view);
 	GL_GetProjection (proj);
@@ -397,7 +471,7 @@ static void LC_UploadAndDispatch (void)
 
 	/* Styles ride in the same buffer as upstream's do, so phase B's shading
 	 * can read a style without a second binding.  Nothing reads them yet. */
-	glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER, lc_ssbo);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, lc_ssbo);
 	{
 		float styles[MAX_LIGHTSTYLES];
 		for (i = 0; i < MAX_LIGHTSTYLES; i++)
@@ -408,8 +482,8 @@ static void LC_UploadAndDispatch (void)
 					    (GLsizeiptr)(lc_numlights * sizeof(gpulight_t)),
 					    lc_lights);
 	}
-	glBindBufferBase_fp (GL_SHADER_STORAGE_BUFFER, 0, lc_ssbo);
-	glBindBuffer_fp (GL_SHADER_STORAGE_BUFFER, 0);
+	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, LIGHT_SSBO_BINDING, lc_ssbo);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
 
 	R_UseProgram (lc_prog);
 	if (lc_loc_view >= 0)      glUniformMatrix4fv_fp (lc_loc_view, 1, GL_FALSE, lc_view);
@@ -429,6 +503,111 @@ static void LC_UploadAndDispatch (void)
 qboolean R_LightCluster_Available (void)
 {
 	return lc_valid_this_frame;
+}
+
+qboolean R_LightCluster_ShadesWorld (void)
+{
+	/* DELIBERATELY NOT `lc_ready`.  The resources are built lazily, inside
+	 * the first R_LightCluster_Update -- and Update runs from R_SetupGL,
+	 * which is AFTER R_PushDlights.  Keying off lc_ready would therefore
+	 * answer false to the CPU gate on the frame the grid is first built and
+	 * true to the shading gate a moment later in the same frame, which is
+	 * the one combination that must never happen: the surfaces would be lit
+	 * by both paths at once.
+	 *
+	 * So this answers from state that cannot change mid-frame.  Every input
+	 * is either a cvar (console commands run between frames) or a fact
+	 * settled at context creation.  lc_failed is the exception and it only
+	 * ever goes false -> true, at Update time; the frame that trips it has
+	 * already stood the CPU path down, so it renders once with no dynamic
+	 * light and every frame after takes the CPU path.  Losing dlights for a
+	 * frame on a driver that could not build the program is a better failure
+	 * than double-lighting the world on every healthy one. */
+	return r_lightclusters.integer != 0 && !lc_failed &&
+	       gl_renderer_caps.compute_shaders && gl_renderer_caps.shader_storage;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase B: handing the grid to the world fragment shaders             */
+/* ------------------------------------------------------------------ */
+
+/* One program's worth of the froxel-lookup state.  Split out because the three
+ * world programs -- cutout, opaque and OIT -- are three separately linked
+ * programs with three sets of uniform locations, and a surface that misses one
+ * of them renders next to its neighbours with different lighting.  The same
+ * trap uhexen2-uxpp documents for caustics and uhexen2-mfql for material maps. */
+static void LC_SetWorldUniforms (const glprogram_t *p, float scale)
+{
+	if (!p->program)
+		return;
+	R_UseProgram (p->program);
+	if (p->u_dlight_scale >= 0)
+		glUniform1f_fp (p->u_dlight_scale, scale);
+	if (scale <= 0.0f)
+		return;		/* the shader takes no other branch; skip the rest */
+	if (p->u_lightview >= 0)
+		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
+	if (p->u_lightgrid_xy >= 0)
+		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
+	if (p->u_lightgrid_z >= 0)
+		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
+}
+
+void R_LightCluster_BindForWorld (void)
+{
+	float	scale;
+
+	/* Zero switches the whole path off inside the shader with one
+	 * uniform-static compare, which is also what happens on every frame the
+	 * grid is not valid -- so a driver that failed to build the compute
+	 * program renders the CPU path and nothing here has to know. */
+	scale = 0.0f;
+	/* lc_numlights == 0 is worth its own test rather than letting the shader
+	 * discover an empty mask: with no live dlights the grid is all zeros and
+	 * the froxel path provably adds nothing, so switching it off here saves
+	 * every fragment in the frame a texelFetch and the two derivatives the
+	 * geometric normal costs.  r_dynamic 0 and gl_flashblend both land here
+	 * too -- the gather returns an empty list for them. */
+	if (lc_valid_this_frame && lc_numlights > 0 && !r_fullbright.integer)
+	{
+		/* Blocklight units to lightmap units, so a GPU-lit luxel lands
+		 * exactly where the CPU path would have put it.
+		 *
+		 * R_AddDynamicLights accumulates brightness * colour * 256 into
+		 * blocklightscolor; R_BuildLightMap then stores that >> lmshift,
+		 * clamped to 255, and the sampler divides by 255.  lmshift is
+		 * 7 + gl_overbright, the extra bit being the headroom the
+		 * shader's u_overbright multiply spends again (uhexen2-f29y).
+		 * So the same colour arrives on screen either way, and toggling
+		 * gl_overbright does not change dynamic-light brightness -- which
+		 * is the property that makes an A/B across that cvar meaningful. */
+		int lmshift = 7 + (gl_overbright.integer ? 1 : 0);
+		scale = 256.0f / (255.0f * (float)(1 << lmshift));
+	}
+
+	LC_SetWorldUniforms (&gl_shader_world, scale);
+	LC_SetWorldUniforms (&gl_shader_world_opaque, scale);
+	LC_SetWorldUniforms (&gl_shader_world_oit, scale);
+	R_UseProgram (0);
+
+	if (scale <= 0.0f)
+		return;
+
+	/* Bound here as well as in LC_UploadAndDispatch, and not merely out of
+	 * caution: the fragment shaders read this binding for the whole world
+	 * draw, which is far longer than any other SSBO in the engine has to
+	 * survive.  LIGHT_SSBO_BINDING is chosen above everything gl_worldcull.c
+	 * claims precisely so nothing between here and the last world surface
+	 * can take it back -- see the header for what happened when it wasn't. */
+	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, LIGHT_SSBO_BINDING, lc_ssbo);
+
+	glActiveTexture_fp (GL_TEXTURE0 + LIGHT_GRID_TMU);
+	glBindTexture_fp (GL_TEXTURE_3D, lc_grid);
+	/* Back to unit 0, which every other binding site in the renderer both
+	 * expects on entry and leaves behind.  `currenttexture` is untouched:
+	 * it caches GL_TEXTURE_2D on unit 0 and nothing above went through
+	 * GL_Bind. */
+	glActiveTexture_fp (GL_TEXTURE0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -609,5 +788,7 @@ void R_LightCluster_Init (void) {}
 void R_LightCluster_Shutdown (void) {}
 void R_LightCluster_Update (void) {}
 qboolean R_LightCluster_Available (void) { return false; }
+qboolean R_LightCluster_ShadesWorld (void) { return false; }
+void R_LightCluster_BindForWorld (void) {}
 
 #endif	/* !USE_GLES */

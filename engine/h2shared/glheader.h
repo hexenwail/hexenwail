@@ -227,6 +227,12 @@ typedef int64_t  GLint64;
 #ifndef GL_SHADER_STORAGE_BUFFER
 #define GL_SHADER_STORAGE_BUFFER		0x90D2
 #endif
+/* How many indexed SSBO binding points the driver has.  4.3 guarantees only 8,
+ * and gl_worldcull.c's cull pass already claims all eight, so the clustered
+ * light buffer has to ask (uhexen2-26bm). */
+#ifndef GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS
+#define GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS	0x90DD
+#endif
 
 /* Compute shader (OpenGL 4.3) */
 #ifndef GL_COMPUTE_SHADER

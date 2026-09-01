@@ -24,6 +24,7 @@
 #include "gl_shader.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
+#include "gl_lightcluster.h"
 
 static int	r_dlightframecount;
 
@@ -387,6 +388,26 @@ void R_PushDlights (void)
 	mplane_t	cull[4];
 
 	if (gl_flashblend.integer)
+		return;
+
+	/* The world fragment shaders are taking dynamic light from the froxel
+	 * grid this frame, so none of the below must happen: marking a surface
+	 * sets surf->dlightframe, which makes R_BuildLightMap rewrite its
+	 * lightmap block and R_UploadLightmaps push the page to the GPU again.
+	 * Doing that as well as shading from the grid would light every surface
+	 * twice AND pay the per-frame upload the port exists to remove.
+	 *
+	 * This is the whole of the CPU-side gate.  It is enough because
+	 * dlightframe is the only way a dlight reaches a world lightmap:
+	 * R_AddDynamicLights is called from exactly one place and only when
+	 * surf->dlightframe == r_framecount.  The two brush-entity marking loops
+	 * (R_DrawBrushModel in gl_rsurf.c and its MDI twin in gl_rmain.c) carry
+	 * the same check for the same reason.
+	 *
+	 * Alias models are NOT affected -- their dlight term is a separate CPU
+	 * accumulation in R_SetupAliasLighting that never touches a lightmap.
+	 * uhexen2-26bm. */
+	if (R_LightCluster_ShadesWorld ())
 		return;
 
 	r_dlightframecount = r_framecount + 1;	// because the count hasn't

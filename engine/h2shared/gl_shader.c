@@ -13,6 +13,16 @@
 #include "gl_matrix.h"
 #include "gl_shader.h"
 #include "gl_pipeline.h"
+#include "gl_lightcluster.h"	/* froxel grid dimensions and binding points (uhexen2-26bm) */
+
+/* Paste an integer macro into a GLSL source string.  The froxel grid's
+ * dimensions and binding points have to agree between the compute pass that
+ * fills the grid and the fragment shaders that read it, and the only way to
+ * guarantee that is for both to say LIGHT_TILES_X rather than 32.  The compute
+ * side gets them as #defines in a generated header (gl_lightcluster.c); the
+ * world shaders are fixed strings, so they get them spliced in here. */
+#define GLSL_STR_(x)	#x
+#define GLSL_STR(x)	GLSL_STR_(x)
 
 extern float	r_fog_density;
 extern float	r_fog_color[3];
@@ -352,6 +362,7 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
 		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
 		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
+		if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
 		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
 		{
@@ -414,6 +425,13 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
 	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
 	p->u_softemu         = glGetUniformLocation_fp(p->program, "u_softemu");
+	/* Clustered dynamic lighting (uhexen2-26bm); -1 on every non-world
+	 * program and on the whole ES tier. */
+	p->u_dlight_scale    = glGetUniformLocation_fp(p->program, "u_dlight_scale");
+	p->u_lightview       = glGetUniformLocation_fp(p->program, "u_lightview");
+	p->u_lightgrid_xy    = glGetUniformLocation_fp(p->program, "u_lightgrid_xy");
+	p->u_lightgrid_z     = glGetUniformLocation_fp(p->program, "u_lightgrid_z");
+	p->u_lightgrid       = glGetUniformLocation_fp(p->program, "u_lightgrid");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
 	p->u_turb             = glGetUniformLocation_fp(p->program, "u_turb");
@@ -810,6 +828,156 @@ static const char sworld_vert[] =
 	"    return vec4(diffuse, spec);\n" \
 	"}\n"
 
+/* CLUSTERED GPU DYNAMIC LIGHTING, the shading half.  uhexen2-26bm, phase B of
+ * uhexen2-a5nn.1; gl_lightcluster.c is the half that fills the grid.
+ *
+ * Every fragment finds the froxel it sits in, reads that froxel's 128-bit light
+ * mask, and evaluates the handful of lights the mask names.  What it replaces
+ * is R_AddDynamicLights: a CPU walk that rewrote lightmap blocks and re-uploaded
+ * every dirtied atlas page, every frame, for every torch.
+ *
+ * DESKTOP GL 4.3 ONLY, and not by choice.  The whole thing needs an SSBO and a
+ * compute pass to fill the grid, and the ES/WebGL2 tier has neither (WebGL2 is
+ * GLSL ES 3.00: no shader storage blocks, no findLSB).  The macros below are
+ * therefore empty strings on that tier and the CPU path stays live there
+ * permanently -- finding 1 on uhexen2-a5nn.1, and the reason this is an
+ * ADDITIONAL path rather than a replacement.
+ *
+ * THE MATH IS R_AddDynamicLights, PER PIXEL.  Same shape: reduce the radius by
+ * the light's distance to the surface plane, drop the light if what remains is
+ * under its minlight, project the light onto the plane, and fall off linearly
+ * from there.  Three differences, all of which make the GPU version the more
+ * correct one, and the first of which is VISIBLE and worth knowing about:
+ *
+ *   - THE DISTANCE IS MEASURED IN WORLD UNITS.  The CPU path measures it in
+ *     TEXTURE units: its `local` comes from DotProduct(impact, tex->vecs[i]),
+ *     and a surface's texture vectors are the texture axes divided by its
+ *     texture scale, so they are only unit length at scale 1.  The falloff then
+ *     compares that texture-space distance against a radius in world units.
+ *     The upshot is a dynamic light whose SIZE DEPENDS ON THE TEXTURE SCALE of
+ *     whatever it lands on -- measured on demo1's corridor floor, |vecs| is
+ *     0.6667 (scale 1.5), so the CPU pool there is half again as wide as the
+ *     light's actual radius, and correspondingly brighter at any given point.
+ *     This is inherited Quake behaviour, not something Hexen II added, and
+ *     Ironwail's per-pixel path does not reproduce it.  Neither does this.
+ *     EXPECT DYNAMIC LIGHTS TO TIGHTEN on scaled-texture surfaces; that is the
+ *     bug being removed, and it is the bulk of what an A/B between the two
+ *     paths shows.
+ *   - THE IN-PLANE DISTANCE IS EUCLIDEAN, not the CPU's `max + min/2` octagon,
+ *     a software-rasteriser trick for dodging a square root per luxel.  It
+ *     over-estimates diagonal distance by about 6%, so it draws lights very
+ *     slightly octagonal.  Small next to the above, and the opposite sign.
+ *   - IT IS EVALUATED PER PIXEL, not per 16-unit luxel and interpolated.  Close
+ *     up against a wall this is the visible win: the light no longer has a
+ *     lattice.
+ *
+ * THE NORMAL COMES FROM SCREEN-SPACE DERIVATIVES of the eye-space position,
+ * which is exact here -- every BSP face is planar by construction, so the face
+ * normal IS the surface normal with no interpolation error.  Same reasoning as
+ * the material-map tangent frame above, and the same reason neither needs a
+ * normal attribute on the vertex.  Its sign follows triangle winding and does
+ * NOT need correcting: the plane distance below is used through abs(), and the
+ * projection N * dot(lpos - p, N) is unchanged when N flips.
+ *
+ * IT WORKS IN EYE SPACE, so lights are transformed by u_lightview per light per
+ * fragment.  The froxel grid is defined in eye space, v_eyepos is the one
+ * position this shader has that is correct for BOTH world surfaces and brush
+ * ents (the entity transform lives inside u_modelview and never reaches
+ * a_position), and one space for the lookup and the shading is one space to get
+ * right.  u_lightview is the view matrix WITHOUT the entity transform, which is
+ * exactly the matrix the grid was clustered with.
+ *
+ * A NOTE ON WHY THE NORMAL IS COMPUTED BEFORE THE MASK IS TESTED.  It is
+ * tempting to bail out early on an empty mask, and wrong: derivatives are
+ * undefined in non-uniform control flow, neighbouring pixels in a 2x2 quad
+ * routinely fall in different froxels, and the resulting garbage normal would
+ * show up as speckle along froxel boundaries.  The only branch this may sit
+ * behind is `u_dlight_scale > 0.0`, which is uniform across the draw.
+ */
+#ifndef USE_GLES
+#define GLSL_DLIGHT_DECL \
+	"struct Light { vec3 origin; float radius; vec3 color; float minlight; };\n" \
+	/* Layout and binding must match gl_lightcluster.c's compute pass.  The
+	 * LightStyles array is not read here -- light styles are a static
+	 * lightmap concern and the CPU has already applied them -- but it has
+	 * to be declared or std430 puts Lights[] at the wrong offset. */ \
+	"layout(std430, binding = " GLSL_STR(LIGHT_SSBO_BINDING) ") restrict readonly buffer LightBuffer {\n" \
+	"    float LightStyles[" GLSL_STR(MAX_LIGHTSTYLES) "];\n" \
+	"    Light Lights[];\n" \
+	"};\n" \
+	"uniform usampler3D u_lightgrid;\n"	/* per-froxel light bitmasks */ \
+	"uniform mat4 u_lightview;\n"		/* world -> eye, no entity transform */ \
+	"uniform vec4 u_lightgrid_xy;\n"	/* xy viewport origin, zw froxels per pixel */ \
+	"uniform vec2 u_lightgrid_z;\n"		/* zlogscale, zlogbias */ \
+	"uniform float u_dlight_scale;\n"	/* blocklight -> lightmap units; 0 = path off */
+
+#define GLSL_DLIGHT_FN \
+	"vec3 ClusteredDlight(vec3 lm, highp vec3 p) {\n" \
+	/* Geometric normal first -- see the header comment on derivatives. */ \
+	"    highp vec3 N = normalize(cross(dFdx(p), dFdy(p)));\n" \
+	"    vec3 tile;\n" \
+	"    tile.xy = (gl_FragCoord.xy - u_lightgrid_xy.xy) * u_lightgrid_xy.zw;\n" \
+	/* The inverse of the compute pass's slice mapping, which reads
+	 * d = exp2((slice - bias) / scale).  Any drift between the two shows up
+	 * as lights that switch on a froxel early or late along the view axis.
+	 * max() guards log2 of a non-positive depth: geometry at or behind the
+	 * near plane is clipped, but a fragment exactly on it is not. */ \
+	"    tile.z = log2(max(-p.z, 1.0)) * u_lightgrid_z.x + u_lightgrid_z.y;\n" \
+	"    ivec3 t = clamp(ivec3(tile), ivec3(0), ivec3(" \
+		GLSL_STR(LIGHT_TILES_X) " - 1, " GLSL_STR(LIGHT_TILES_Y) " - 1, " \
+		GLSL_STR(LIGHT_TILES_Z) " - 1));\n" \
+	"    uvec4 mask = texelFetch(u_lightgrid, t, 0);\n" \
+	"    for (int w = 0; w < 4; w++) {\n" \
+	"        uint bits = mask[w];\n" \
+	"        while (bits != 0u) {\n" \
+	"            int i = (w << 5) + findLSB(bits);\n" \
+	"            bits &= bits - 1u;\n"	/* clear that bit before any continue */ \
+	"            vec3 lpos = (u_lightview * vec4(Lights[i].origin, 1.0)).xyz;\n" \
+	"            float pdist = dot(lpos - p, N);\n" \
+	"            float rad = Lights[i].radius - abs(pdist);\n" \
+	"            float ml = Lights[i].minlight;\n" \
+	"            if (rad < ml) continue;\n" \
+	"            float d = length((lpos - N * pdist) - p);\n" \
+	"            if (d >= rad - ml) continue;\n" \
+	/* Hexen II's subtractive lights (dlight_t.dark, EF_DARKLIGHT) ride
+	 * with the colour negated by the gather in gl_lightcluster.c, so one
+	 * accumulate serves both.  The clamp at zero is not decoration: it is
+	 * what the `dark` arm of R_AddDynamicLights does, clamping against the
+	 * running total rather than the final one, which is why this clamps
+	 * inside the loop and not after it.  Lights are visited in ascending
+	 * index order -- findLSB within a word, words in order -- which is the
+	 * order the CPU applies them in, so the two agree even where a dark
+	 * light and a bright one overlap.
+	 *
+	 * ONE PLACE THEY CANNOT AGREE, and it is not fixable here.  The CPU
+	 * subtracts from a 32-bit blocklight accumulator that has not been
+	 * clamped yet, so on a surface whose static light already exceeds full
+	 * scale a dark light eats headroom the player never sees and appears to
+	 * do nothing.  All this shader has is the atlas texel, which was clamped
+	 * to 255 on the way in, so the same dark light visibly darkens.  Ours is
+	 * the behaviour the effect was presumably after; recording it because it
+	 * is a genuine difference an A/B in a very bright room will show, not a
+	 * bug to go hunting for.  Reproducing the CPU exactly would mean
+	 * carrying the unclamped sum, which the 8-bit atlas cannot. */ \
+	"            lm = max(lm + (rad - d) * u_dlight_scale * Lights[i].color, vec3(0.0));\n" \
+	"        }\n" \
+	"    }\n" \
+	/* R_BuildLightMap clamps the blocklight sum at 255 before it reaches the
+	 * atlas, so the CPU path cannot exceed a full lightmap either.  Matching
+	 * it keeps the A/B honest.  There IS headroom to be had here -- nothing
+	 * forces a GPU-evaluated light through an 8-bit texel -- but taking it
+	 * would be a brightness change dressed up as a port. */ \
+	"    return min(lm, vec3(1.0));\n" \
+	"}\n"
+
+#define GLSL_DLIGHT_APPLY \
+	"    if (u_dlight_scale > 0.0) lm.rgb = ClusteredDlight(lm.rgb, v_eyepos);\n"
+#else	/* ES/WebGL2: no SSBO, no findLSB, no compute pass to fill the grid */
+#define GLSL_DLIGHT_DECL	""
+#define GLSL_DLIGHT_FN		""
+#define GLSL_DLIGHT_APPLY	""
+#endif
+
 static const char sworld_frag[] =
 	GLSL_FRAG_HEADER
 	GLSL_EARLY_Z
@@ -838,6 +1006,7 @@ static const char sworld_frag[] =
 	 *       DITHER axis on the world program; a uniform-static branch costs
 	 *       one compare and saves three more programs. */
 	"uniform vec4 u_softemu;\n"
+	GLSL_DLIGHT_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -850,6 +1019,7 @@ static const char sworld_frag[] =
 	GLSL_TURB_UV_FN
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
+	GLSL_DLIGHT_FN
 	"void main() {\n"
 	/* Lit water rides this program (uhexen2-a5nn.2), so the liquid warp has
 	 * to live here too.  u_turb.x is 0 for every other draw -- only
@@ -882,6 +1052,11 @@ static const char sworld_frag[] =
 	 * value.  rgb only on the diffuse: tex.a still gates the alpha test, so
 	 * r_lightmap must not turn a fence into a solid sheet.  uhexen2-isq7. */
 	"        : texture(u_texture1, lmuv);\n"
+	/* Clustered dynamic lights, added to the static lightmap sample before
+	 * anything downstream sees it -- the CPU path they replace baked into
+	 * exactly this value, so banding, the debug views, overbright and the
+	 * material weighting all have to keep acting on the sum.  uhexen2-26bm. */
+	GLSL_DLIGHT_APPLY
 	/* 64 light levels, which is what colormap.lmp had.  Upstream folds its
 	 * overbright doubling into the same expression; ours stays separate in
 	 * u_overbright, so the scale here is 1/63 rather than 2/63. */
@@ -1004,6 +1179,7 @@ static const char sworld_frag_opaque[] =
 	 * uhexen2-a5nn.3. */
 	"uniform vec4 u_softemu;\n"
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
+	GLSL_DLIGHT_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -1015,6 +1191,7 @@ static const char sworld_frag_opaque[] =
 	GLSL_CAUSTICS_FN
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
+	GLSL_DLIGHT_FN
 	"void main() {\n"
 	"    float lodbias = (u_softemu.w > 0.0) ? ((u_softemu.y > 0.0) ? -1.0 : -0.5) : 0.0;\n"
 	"    vec4 tex = texture(u_texture0, v_texcoord, lodbias);\n"
@@ -1025,6 +1202,7 @@ static const char sworld_frag_opaque[] =
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, lmuv)\n"
 	"        : texture(u_texture1, lmuv);\n"
+	GLSL_DLIGHT_APPLY	/* before banding and the debug views; see sworld_frag */
 	"    if (u_softemu.y > 0.0)\n"
 	"        lm.rgb = floor(lm.rgb * 63.0 + 0.5) * (1.0/63.0);\n"
 	"    lm.rgb = mix(lm.rgb, vec3(1.0), u_lightdebug.x);\n"	/* uhexen2-isq7 */
@@ -1795,6 +1973,7 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	if (p->u_texture2 >= 0) glUniform1i_fp(p->u_texture2, 2);
 		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
 		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
+	if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
 	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —

@@ -3163,8 +3163,11 @@ void R_CollectBrushInstances (void)
 		}
 
 		/* Mark dlights against this submodel's BSP — only when
-		 * a dlight is actually live this frame. */
-		if (clmodel->firstmodelsurface != 0)
+		 * a dlight is actually live this frame.  Skipped entirely when
+		 * the froxel grid is shading the world programs these surfaces
+		 * draw through; see the twin of this loop in gl_rsurf.c's
+		 * R_DrawBrushModel.  uhexen2-26bm. */
+		if (clmodel->firstmodelsurface != 0 && !R_LightCluster_ShadesWorld ())
 		{
 			for (k = 0; k < MAX_DLIGHTS; k++)
 			{
@@ -5810,8 +5813,13 @@ static void R_SetupGL (void)
 	R_SetDepthTest (true);
 
 	/* The view and projection are final here, which is what the froxel grid
-	 * needs.  Nothing shades from it yet -- phase A of uhexen2-a5nn.1. */
+	 * needs (uhexen2-a5nn.1).  The bind immediately after hands the finished
+	 * grid to the three world programs, and has to follow the update in the
+	 * same breath: the froxel lookup constants it uploads describe the very
+	 * viewport and depth-slice mapping the grid was just clustered against.
+	 * uhexen2-26bm. */
 	R_LightCluster_Update ();
+	R_LightCluster_BindForWorld ();
 }
 
 /*
@@ -5840,6 +5848,7 @@ extern double	rprof_cpu_chains_loop;
 extern double	rprof_cpu_chains_deferred;
 extern int	rprof_chains_n_surfwalk;
 extern int	rprof_chains_n_lmrebuilt;
+extern int	rprof_lm_pages_uploaded;	/* uhexen2-26bm */
 extern double	rprof_cpu_chains_lmbuild;
 extern double	rprof_cpu_chains_surfwalk;
 extern double	rprof_cpu_chains_gpufinish;
@@ -7078,7 +7087,7 @@ static void R_ProfileReport (void)
 
 	Con_Printf("GPU %.1f  CPU %.1f | world %.1f  part %.1f  water %.1f  trans %.1f  vm %.1f  mirr %.1f\n"
 		   "  CPU: marklv %.1f  draw %.1f  sky %.1f  ents %.1f (collect %.1f, inst %.1f, loop %.1f [bC=%.1f bD=%.1f p1=%.1f p2=%.1f] a=%d/%.1fms b=%d bL=%d/%.1fms inst[op=%d fc=%d])  glows %.1f  dlt %.1f\n"
-		   "  draw: bsp %.1f  lmup %.1f  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
+		   "  draw: bsp %.1f  lmup %.1f (%d pages)  gcull %.1f  chains %.1f (gpufin %.1f, sky-stencil %.1f, sky-proc %.1f, loop %.1f, defer %.1f)\n"
 		   "  chains: fast=%d imm=%d slow=%d skypolys=%d  walk=%d (%.1f ms)  lmrebuild=%d (%.1f ms)\n"
 		   "  %4i wpoly  %4i epoly  %4i texbind\n",
 		   total, rprof_cpu_world * 1000.0,
@@ -7106,6 +7115,7 @@ static void R_ProfileReport (void)
 		   rprof_cpu_dlights * 1000.0,
 		   rprof_cpu_bsp * 1000.0,
 		   rprof_cpu_lmupload * 1000.0,
+		   rprof_lm_pages_uploaded,
 		   rprof_cpu_gpucull * 1000.0,
 		   rprof_cpu_chains * 1000.0,
 		   rprof_cpu_chains_gpufinish * 1000.0,

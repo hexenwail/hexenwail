@@ -48,6 +48,14 @@ typedef struct glprogram_s {
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
 	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
 	GLint	u_softemu;	/* world shader: vec4(texture dither, lightmap banding, screen dither, any stage live).  All zero unless r_softemu is on.  uhexen2-a5nn.3. */
+	/* Clustered GPU dynamic lighting, world programs only; -1 everywhere
+	 * else and on the ES tier, which has neither compute nor SSBOs and so
+	 * never sees this half of the shader at all.  uhexen2-26bm. */
+	GLint	u_dlight_scale;	/* blocklight units -> lightmap units; 0 switches the whole froxel path off */
+	GLint	u_lightview;	/* world -> eye, WITHOUT the entity transform u_modelview carries, so world-space light origins land in the same space as v_eyepos */
+	GLint	u_lightgrid_xy;	/* vec4(viewport x, viewport y, froxel columns per pixel, froxel rows per pixel) */
+	GLint	u_lightgrid_z;	/* vec2(zlogscale, zlogbias) -- the depth-slice mapping, which must match gl_lightcluster.c exactly */
+	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU */
 	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
 	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
 	 * gl_shader_alias is the generic textured+vertex-color program and is
