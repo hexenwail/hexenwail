@@ -2977,6 +2977,7 @@ static qboolean M_Rendering_IsSkip (int i)
 	{
 	case REND_RENDERSCALE:
 	case REND_SOFTEMU:
+	case REND_MDLWARP:
 	case REND_DITHER:
 	case REND_TEXFILTER:
 	case REND_ANISOTROPY:

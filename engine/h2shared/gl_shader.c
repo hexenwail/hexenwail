@@ -1838,13 +1838,23 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
+#ifndef USE_GLES
 	/* Affine-mapping twin (uhexen2-ktjv).  Same sources, NOPERSP defined:
 	 * an interpolation qualifier cannot be switched by a uniform, so this
 	 * is the one r_softemu stage that costs a program.  Compiled whether or
 	 * not r_softemu is on -- building it lazily would put a shader compile
-	 * inside a frame the first time someone flipped the cvar. */
+	 * inside a frame the first time someone flipped the cvar.
+	 *
+	 * DESKTOP ONLY.  GLSL ES 3.00 has `smooth` and `flat` and nothing else:
+	 * `noperspective` is a reserved word there, not a qualifier, so this
+	 * would be a guaranteed compile failure logged on every WebGL2 startup.
+	 * R_AliasProgram falls back to the perspective-correct program when the
+	 * twin has no program, so the ES tier simply does not get the effect --
+	 * which is the same answer the ES tier already gives for skeletal
+	 * models (uhexen2-dfay). */
 	GL_InitProgramDefines(&gl_shader_alias_np, "alias_np", salias_vert, salias_frag,
 			      "#define NOPERSP 1\n");
+#endif
 #ifndef USE_GLES
 	/* Skipped on the ES tier: sskeletal_vert reads its bone matrices from a
 	 * `layout(std430) buffer`, and shader storage blocks are GLSL ES 3.10,
