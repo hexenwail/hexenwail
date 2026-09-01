@@ -2635,6 +2635,158 @@ static void FS_Maplist_f (void)
 	FS_FreeNameList ();
 }
 
+
+/*
+===========
+FS_BuildMapList
+
+The scan maplist and randmap already do, exposed so the maps browser menu
+can drive it too (uhexen2-a5nn.13).  Sorted, and takes the same optional
+name prefix.  Returns the count.
+
+The names live in the shared scan storage, so they stay valid only until
+FS_FreeNameList() or the next FS_* scan of any kind -- a caller that keeps
+one must copy it.
+===========
+*/
+int FS_BuildMapList (const char *prefix)
+{
+	FS_ScanFiles ("maps", ".bsp", prefix, (prefix == NULL) ? 0 : strlen(prefix));
+
+	if (listname_count > 1)
+		qsort (listnames, listname_count, sizeof(char *), COM_StrCompare);
+
+	return listname_count;
+}
+
+const char *FS_MapListName (int i)
+{
+	if (i < 0 || i >= listname_count)
+		return NULL;
+	return listnames[i];
+}
+
+/*
+===========
+FS_GetMapTitle
+
+The worldspawn "message" key of maps/<name>.bsp -- what the browser lists
+instead of a filename.  Ironwail reads the same key in ExtraMaps_GetMessage.
+
+Only the entity lump is touched, and the header that locates it is identical
+in both BSP formats this engine loads: version 29 and BSP2 differ in the
+width of node, leaf and edge records, never in the header
+(common/bspfile.h:55-92).  So one reader covers both, and an unrecognised
+version yields "no title" rather than an error -- a map we cannot summarise
+should still be listed and still be loadable.
+
+Reads only the head of the lump, because worldspawn is the first entity and
+a whole entity lump can be megabytes; the parse stops at worldspawn's
+closing brace so a "message" on some later trigger cannot be mistaken for
+the map title.
+
+Returns true if a title was found.  `out' is always NUL-terminated.
+===========
+*/
+static const char *FS_MapTitle_Quoted (const char *p, char *out, size_t outsize)
+{
+	size_t	n = 0;
+
+	/* stop at '}' so we never walk out of worldspawn into the next entity */
+	while (*p && *p != '"' && *p != '}')
+		p++;
+	if (*p != '"')
+		return NULL;
+	p++;
+	while (*p && *p != '"')
+	{
+		if (n + 1 < outsize)
+			out[n++] = *p;
+		p++;
+	}
+	if (*p != '"')
+		return NULL;
+	out[n] = '\0';
+	return p + 1;
+}
+
+qboolean FS_GetMapTitle (const char *mapname, char *out, size_t outsize)
+{
+	char		path[MAX_QPATH];
+	char		buf[8192];
+	char		key[64], val[256];
+	fshandle_t	fh;
+	dheader_t	header;
+	const char	*p;
+	int		version, ofs, len;
+	size_t		got;
+
+	if (!out || outsize == 0)
+		return false;
+	out[0] = '\0';
+	if (!mapname || !*mapname)
+		return false;
+
+	q_snprintf (path, sizeof(path), "maps/%s.bsp", mapname);
+	if (FS_OpenFileHandle_Silent (path, &fh, NULL) < 0)
+		return false;
+
+	if (FS_fread (&header, 1, sizeof(header), &fh) != sizeof(header))
+	{
+		FS_fclose (&fh);
+		return false;
+	}
+
+	version = LittleLong (header.version);
+	if (version != BSPVERSION && version != BSP2VERSION)
+	{
+		FS_fclose (&fh);
+		return false;
+	}
+
+	ofs = LittleLong (header.lumps[LUMP_ENTITIES].fileofs);
+	len = LittleLong (header.lumps[LUMP_ENTITIES].filelen);
+	if (ofs < 0 || len <= 0)
+	{
+		FS_fclose (&fh);
+		return false;
+	}
+	if (len > (int)sizeof(buf) - 1)
+		len = (int)sizeof(buf) - 1;
+
+	if (FS_fseek (&fh, ofs, SEEK_SET) != 0)
+	{
+		FS_fclose (&fh);
+		return false;
+	}
+	got = FS_fread (buf, 1, (size_t)len, &fh);
+	FS_fclose (&fh);
+	if (got == 0)
+		return false;
+	buf[got] = '\0';
+
+	p = buf;
+	while (*p && *p != '{')
+		p++;
+	if (!*p)
+		return false;
+	p++;
+
+	while ((p = FS_MapTitle_Quoted (p, key, sizeof(key))) != NULL)
+	{
+		p = FS_MapTitle_Quoted (p, val, sizeof(val));
+		if (!p)
+			break;
+		if (!q_strcasecmp (key, "message"))
+		{
+			q_strlcpy (out, val, outsize);
+			return out[0] != '\0';
+		}
+	}
+
+	return false;
+}
+
 /*
 ===========
 FS_RandMap_f

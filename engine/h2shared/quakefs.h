@@ -173,6 +173,13 @@ int ListSaves (const char *prefix, const char **buf, int pos);
 	 * read.  Not limited to the menu's fixed s0..sN slots. */
 
 void FS_FreeNameList (void);
+
+/* Map enumeration for the maps browser menu (uhexen2-a5nn.13).  Same scan
+ * maplist and randmap use; names are only valid until FS_FreeNameList() or
+ * the next FS_* scan, so copy anything you keep. */
+int FS_BuildMapList (const char *prefix);
+const char *FS_MapListName (int i);
+qboolean FS_GetMapTitle (const char *mapname, char *out, size_t outsize);
 	/* Releases the names a preceding List*() handed out.  Safe to call when
 	 * there is no outstanding list.  */
 
