@@ -3476,6 +3476,14 @@ static const char *gfx_labels[GFX_ITEMS] = {
 static qboolean M_Graphics_IsSkip (int i)
 {
 	if (i < 0 || i >= GFX_ITEMS) return true;
+#if defined(WEBSOFT)
+	/* The demo bar is drawn by gl_screen.c, which this build swaps out for
+	 * screen.c, so there is no bar for the row to configure.  Same trade as
+	 * M_Rendering_IsSkip: the cvar stays registered (r_soft_web.c) so a
+	 * config round-trips, but the row does not belong in the menu. */
+	if (i == GFX_DEMOBAR)
+		return true;
+#endif
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
 }
 
