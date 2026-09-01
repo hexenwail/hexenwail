@@ -4003,12 +4003,14 @@ enum
 	GAME_USEMOUSE,
 	GAME_RAWINPUT,
 	GAME_MFILTER,
+	GAME_UIMOUSESND,
 	GAME_CROSSHAIR,
 	GAME_CHASE,
 	GAME_VIEWBOB,
 	GAME_VIEWROLL,
 	GAME_ANIMSMOOTH,
 	GAME_LERPVIEWMDL,
+	GAME_UIPREVIEW,
 	GAME_CONTRANS,
 	GAME_GAMECODE,
 	GAME_ITEMS
@@ -4026,12 +4028,14 @@ static const char *game_labels[GAME_ITEMS] = {
 	"Use Mouse     :",	/* GAME_USEMOUSE */
 	"Raw Input     :",	/* GAME_RAWINPUT */
 	"Mouse Filter  :",	/* GAME_MFILTER */
+	"Mouse Sounds  :",	/* GAME_UIMOUSESND */
 	"Crosshair     :",	/* GAME_CROSSHAIR */
 	"Chase Mode    :",	/* GAME_CHASE */
 	"View Bob      :",	/* GAME_VIEWBOB */
 	"View Roll     :",	/* GAME_VIEWROLL */
 	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
 	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
+	"Live Preview  :",	/* GAME_UIPREVIEW */
 	"Console Alpha :",	/* GAME_CONTRANS */
 	"Gamecode from :",	/* GAME_GAMECODE */
 };
@@ -4111,6 +4115,16 @@ static void M_Game_AdjustSliders (int dir)
 	case GAME_MFILTER:
 		Cvar_SetValue ("m_filter", !m_filter.integer);
 		break;
+	/* Ironwail folds this into a tri-state "UI mouse" row -- Off / Quiet /
+	 * Noisy (M_Options_GetUIMouse, Quake/menu.c:3659) -- where Off means its
+	 * ui_mouse cvar has disabled menu pointer support entirely.  We have no
+	 * such cvar: menu mouse handling here is unconditional (in_sdl.c feeds
+	 * menu_mouse_x/y whenever key_menu is the destination), so the Off state
+	 * has nothing to switch off and the row degenerates to the two states
+	 * that remain.  uhexen2-n592. */
+	case GAME_UIMOUSESND:
+		Cvar_SetValue ("ui_mouse_sound", !ui_mouse_sound.integer);
+		break;
 	case GAME_CROSSHAIR:
 		Cvar_Set ("crosshair", crosshair.integer ? "0" : "1");
 		break;
@@ -4134,6 +4148,14 @@ static void M_Game_AdjustSliders (int dir)
 		break;
 	case GAME_LERPVIEWMDL:
 		Cvar_SetValue ("r_lerp_viewmodel", !Cvar_VariableValue("r_lerp_viewmodel"));
+		break;
+	/* Governs the *other* submenus, not this one: with it on, Display /
+	 * Video / Rendering / Graphics skip the amber fade so a setting is
+	 * judged against a clean game view while it is being adjusted (M_Draw).
+	 * Ironwail carries the same switch as a plain checkbox in its Options
+	 * menu (OPT_PREVIEW, Quake/menu.c:4346). */
+	case GAME_UIPREVIEW:
+		Cvar_SetValue ("ui_live_preview", !ui_live_preview.integer);
 		break;
 	case GAME_CONTRANS:
 		f = Cvar_VariableValue("contrans") + dir * 1;
@@ -4264,6 +4286,12 @@ static void M_Game_Draw (void)
 		M_DrawCheckbox (220, 92 + 8*GAME_MFILTER, m_filter.integer);
 	}
 
+	if (!M_Game_IsSkip(GAME_UIMOUSESND))
+	{
+		M_Print (76, 92 + 8*GAME_UIMOUSESND, game_labels[GAME_UIMOUSESND]);
+		M_DrawCheckbox (220, 92 + 8*GAME_UIMOUSESND, ui_mouse_sound.integer);
+	}
+
 	if (!M_Game_IsSkip(GAME_CROSSHAIR))
 	{
 		M_Print (76, 92 + 8*GAME_CROSSHAIR, game_labels[GAME_CROSSHAIR]);
@@ -4300,6 +4328,12 @@ static void M_Game_Draw (void)
 	{
 		M_Print (76, 92 + 8*GAME_LERPVIEWMDL, game_labels[GAME_LERPVIEWMDL]);
 		M_DrawCheckbox (220, 92 + 8*GAME_LERPVIEWMDL, (int)Cvar_VariableValue("r_lerp_viewmodel"));
+	}
+
+	if (!M_Game_IsSkip(GAME_UIPREVIEW))
+	{
+		M_Print (76, 92 + 8*GAME_UIPREVIEW, game_labels[GAME_UIPREVIEW]);
+		M_DrawCheckbox (220, 92 + 8*GAME_UIPREVIEW, ui_live_preview.integer);
 	}
 
 	if (!M_Game_IsSkip(GAME_CONTRANS))
