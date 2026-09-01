@@ -234,7 +234,8 @@ export async function extractEngineWebGLPrograms() {
   // ones -- those with both a USE_GLES arm and a desktop arm, where this
   // extractor has to say which spelling it wants.  Everything else is found on
   // demand by resolveMacro(), so a new GLSL helper needs no edit to this file.
-  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE']) {
+  for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE',
+                      'GLSL_BITFIELD_REVERSE']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
