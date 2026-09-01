@@ -6261,7 +6261,7 @@ DrawTextureChains a keep-chains mode -- which would preserve and re-walk
 per-texture linked lists purely so a second pass could throw the texture
 information away.
 
-Two known gaps, both deliberate, tracked as uhexen2-4x8k:
+Two known gaps, both deliberate, tracked as uhexen2-jxte:
   * Alias models, sprites and particles are not outlined.  Everything drawn
     here lives in the world VBO and shares one mechanism; those three do not,
     and each needs its own re-issue with its own batching to think about.
@@ -6333,12 +6333,17 @@ static void R_ShowTris (void)
 	R_SetBlend (false);
 
 	/* Mode 2 draws the lines over the very surfaces that wrote the depth
-	 * they are being tested against, so without the offset they z-fight
-	 * into a dashed mess. */
+	 * they are being tested against, so without an offset they z-fight into
+	 * a dashed mess.  Upstream's OFFSET_SHOWTRIS is -3 units at factor -1,
+	 * with the sign flipped under reversed depth -- which this engine also
+	 * uses, so the flip is not optional here either. */
 	if (r_showtris.value != 1)
 	{
+		extern qboolean	gl_clipcontrol_able;
+		float		units = gl_clipcontrol_able ? 3.0f : -3.0f;
+
 		glEnable_fp (GL_POLYGON_OFFSET_LINE);
-		glPolygonOffset_fp (-1.0f, -1.0f);
+		glPolygonOffset_fp (units < 0 ? -1.0f : 1.0f, units);
 	}
 	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_LINE);
 
