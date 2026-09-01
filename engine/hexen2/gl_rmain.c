@@ -21,6 +21,7 @@
 #include "quakedef.h"
 #include "gl_sky.h"
 #include "gl_shader.h"
+#include "gl_lightcluster.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
@@ -5807,6 +5808,10 @@ static void R_SetupGL (void)
 
 	R_SetBlend (false);
 	R_SetDepthTest (true);
+
+	/* The view and projection are final here, which is what the froxel grid
+	 * needs.  Nothing shades from it yet -- phase A of uhexen2-a5nn.1. */
+	R_LightCluster_Update ();
 }
 
 /*

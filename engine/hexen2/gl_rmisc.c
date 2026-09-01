@@ -20,6 +20,7 @@
  */
 
 #include "quakedef.h"
+#include "gl_lightcluster.h"
 #include "hashindex.h"
 #include "img_load.h"
 #include "gl_sky.h"
@@ -271,6 +272,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_litwater);
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);
+	R_LightCluster_Init ();	/* uhexen2-a5nn.1 phase A */
 	Cvar_RegisterVariable (&r_lerplightstyles);
 	/* Ironwail parity toggles, uhexen2-a5nn.11 */
 	Cvar_RegisterVariable (&r_drawworld);

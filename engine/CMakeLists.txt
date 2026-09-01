@@ -378,6 +378,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_texmgr.c
     ${COMMONDIR}/gl_postprocess.c
     ${COMMONDIR}/gl_worldcull.c
+    ${COMMONDIR}/gl_lightcluster.c
     ${COMMONDIR}/gl_matrix.c
     ${COMMONDIR}/gl_shader.c
     ${COMMONDIR}/gl_pipeline.c

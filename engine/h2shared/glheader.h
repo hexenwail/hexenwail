@@ -248,6 +248,15 @@ typedef int64_t  GLint64;
 #define GL_DRAW_INDIRECT_BUFFER			0x8F3F
 #endif
 
+/* Integer texture formats (core GL 3.0) -- the light-cluster froxel grid is
+ * an RGBA32UI 3D image (gl_lightcluster.c).  uhexen2-a5nn.1. */
+#ifndef GL_RGBA32UI
+#define GL_RGBA32UI				0x8D70
+#endif
+#ifndef GL_RGBA_INTEGER
+#define GL_RGBA_INTEGER				0x8D99
+#endif
+
 /* Cubemap textures (core GL 1.3, and core in GLES 3.0 / WebGL2, so the
  * cubemap skybox path reaches every tier).  MinGW's <GL/gl.h> ships only
  * GL 1.1 constants, so the Windows cross-compile needs these.  uhexen2-ctk9. */

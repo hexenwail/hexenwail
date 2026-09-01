@@ -41,6 +41,7 @@
 #include "sdl_inc.h"
 #include "gl_postprocess.h"
 #include "gl_shader.h"
+#include "gl_lightcluster.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "filenames.h"
@@ -1747,6 +1748,7 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_ImmInvalidateState();
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
+	R_LightCluster_Shutdown();	/* before the shader manager: GL reuses program names */
 	GL_Shaders_Shutdown();
 #ifndef USE_GLES
 	GL_DeleteFrameResources ();
