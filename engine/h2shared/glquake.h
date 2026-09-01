@@ -431,6 +431,7 @@ extern	cvar_t	r_lerp_autodetect;
 extern	cvar_t	r_lerp_autodetect_threshold;
 extern	cvar_t	r_showbboxes;
 extern	cvar_t	r_showskel;
+extern	cvar_t	r_showtris;
 extern	cvar_t	r_showbboxes_think;
 extern	cvar_t	r_showbboxes_health;
 extern	cvar_t	r_showbboxes_targets;

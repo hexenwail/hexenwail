@@ -480,6 +480,7 @@ cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw 
  * SCR_DrawShowFields.  r_showfields_align: 0 = at the entity, 1 = bottom-right. */
 cvar_t	r_showfields = {"r_showfields", "0", CVAR_NONE};
 cvar_t	r_showskel = {"r_showskel", "0", CVAR_NONE};
+cvar_t	r_showtris = {"r_showtris", "0", CVAR_NONE};
 cvar_t	r_showfields_align = {"r_showfields_align", "1", CVAR_ARCHIVE};
 /* Edict index the crosshair is on, republished every frame by
  * R_ShowBoundingBoxes for SCR_DrawShowFields.  0 = nothing focused. */
@@ -6232,6 +6233,165 @@ static void R_ShowBoundingBoxes (void)
 
 /*
 ================
+R_ShowTris -- Ironwail's r_showtris, uhexen2-a5nn.10
+
+Wireframe overlay.  1 draws through walls, 2 only where geometry is visible,
+matching upstream's two modes; both carry its multiplayer lockout, because a
+wireframe through walls is a wallhack.
+
+NOT a straight port, and the reason is worth recording.  Ironwail's R_ShowTris
+re-issues the whole frame from cl_sorted_visedicts with glPolygonMode(GL_LINE),
+which it can because its draw is a pure function of that list -- it even puts
+worldspawn in the list as the first brush entity so the world comes along.
+Ours cannot be replayed that way: DrawTextureChains CONSUMES its input
+(`t->texturechain = NULL` at gl_rsurf.c:2394 and :2640), R_DrawWorld cannot be
+re-run because its walk also stores efrags and accumulates sky bounds, and
+R_DrawEntitiesOnList re-collects the translucent lists.
+
+So this does not re-issue the world *draw*, it re-issues the world *geometry*.
+The world VBO is static, every surface already records its span in the shared
+index buffer (surf->vbo_firstindex / vbo_numtris), and R_RecursiveWorldNode
+already stamps surf->visframe = r_framecount on every marksurface of every
+visible leaf (gl_rsurf.c:3175).  That is the visible set, sitting there
+unconsumed, so the pass reads it and issues its own draws over the existing
+IBO with the flat shader.  Nothing in DrawTextureChains changes.
+
+This is strictly better than the alternative the bead weighed -- teaching
+DrawTextureChains a keep-chains mode -- which would preserve and re-walk
+per-texture linked lists purely so a second pass could throw the texture
+information away.
+
+Two known gaps, both deliberate, tracked as uhexen2-4x8k:
+  * Alias models, sprites and particles are not outlined.  Everything drawn
+    here lives in the world VBO and shares one mechanism; those three do not,
+    and each needs its own re-issue with its own batching to think about.
+  * glPolygonMode does not exist on GLES/WebGL (gl_func.h:212 compiles it to
+    a no-op), so this is desktop GL only.  Making it work there means emitting
+    real line geometry, which is a different feature.
+================
+*/
+static void R_ShowTris_DrawSurfaceRuns (const msurface_t *surfaces, int first,
+					int count, int framemark)
+{
+	int	i;
+	int	run_first = -1, run_total = 0;
+
+	/* Consecutive surfaces are usually consecutive in the index buffer too,
+	 * so coalesce them: the wireframe of a big open room becomes one draw
+	 * call rather than several hundred. */
+	for (i = 0; i < count; i++)
+	{
+		const msurface_t *surf = &surfaces[first + i];
+		qboolean	take = (surf->vbo_numtris > 0) &&
+				       (framemark < 0 || surf->visframe == framemark);
+
+		if (take && run_first >= 0 &&
+		    surf->vbo_firstindex == run_first + run_total)
+		{
+			run_total += surf->vbo_numtris * 3;
+			continue;
+		}
+
+		if (run_total > 0)
+			glDrawElements_fp (GL_TRIANGLES, run_total, GL_UNSIGNED_INT,
+					   (void *)(intptr_t)(run_first * sizeof(unsigned int)));
+
+		if (take)
+		{
+			run_first = surf->vbo_firstindex;
+			run_total = surf->vbo_numtris * 3;
+		}
+		else
+		{
+			run_first = -1;
+			run_total = 0;
+		}
+	}
+
+	if (run_total > 0)
+		glDrawElements_fp (GL_TRIANGLES, run_total, GL_UNSIGNED_INT,
+				   (void *)(intptr_t)(run_first * sizeof(unsigned int)));
+}
+
+static void R_ShowTris (void)
+{
+	extern GLuint	world_vao, world_ibo;
+	float		mvp[16];
+	int		i;
+
+	if (r_showtris.value < 1 || r_showtris.value > 2)
+		return;
+	if (cl.maxclients > 1)
+		return;
+	if (!cl.worldmodel || !world_vao || !world_ibo)
+		return;
+
+	/* Mode 1 is the see-through-walls one.  Upstream squashes the depth
+	 * range to ZRANGE_NEAR for it; dropping the depth test is the same
+	 * result and is what R_ShowBoundingBoxes here already does. */
+	R_SetDepthTest (r_showtris.value != 1);
+	R_SetBlend (false);
+
+	/* Mode 2 draws the lines over the very surfaces that wrote the depth
+	 * they are being tested against, so without the offset they z-fight
+	 * into a dashed mess. */
+	if (r_showtris.value != 1)
+	{
+		glEnable_fp (GL_POLYGON_OFFSET_LINE);
+		glPolygonOffset_fp (-1.0f, -1.0f);
+	}
+	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_LINE);
+
+	glBindVertexArray_fp (world_vao);
+	R_UseProgram (gl_shader_flat.program);
+	glVertexAttrib4f_fp (ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
+
+	/* World.  visframe was stamped by this frame's R_RecursiveWorldNode. */
+	GL_GetMVP (mvp);
+	if (gl_shader_flat.u_mvp >= 0)
+		glUniformMatrix4fv_fp (gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+	R_ShowTris_DrawSurfaceRuns (cl.worldmodel->surfaces, 0,
+				    cl.worldmodel->nummodelsurfaces, r_framecount);
+
+	/* Brush entities.  Their surfaces live in the same VBO; only the matrix
+	 * differs.  Backface state is not consulted -- for a wireframe the far
+	 * side of a door is information, not an artifact. */
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		entity_t	*e = cl_visedicts[i];
+		qmodel_t	*clmodel;
+
+		if (!e || !e->model || e->model->type != mod_brush)
+			continue;
+		clmodel = e->model;
+		if (clmodel->nummodelsurfaces <= 0 || !clmodel->surfaces)
+			continue;
+
+		GL_PushMatrix ();
+		R_RotateForEntity (e);
+		GL_GetMVP (mvp);
+		GL_PopMatrix ();
+		if (gl_shader_flat.u_mvp >= 0)
+			glUniformMatrix4fv_fp (gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+
+		R_ShowTris_DrawSurfaceRuns (clmodel->surfaces, clmodel->firstmodelsurface,
+					    clmodel->nummodelsurfaces, -1);
+	}
+
+	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
+	if (r_showtris.value != 1)
+	{
+		glPolygonOffset_fp (0.0f, 0.0f);
+		glDisable_fp (GL_POLYGON_OFFSET_LINE);
+	}
+	glBindVertexArray_fp (0);
+	R_UseProgram (0);
+	GL_ImmInvalidateState ();
+	R_SetDepthTest (true);
+}
+
+/*
+================
 R_ShowSkeletons -- Ironwail's r_showskel (upstream 4349da96), uhexen2-a5nn.10
 
 Draws the bone hierarchy of every visible MD5mesh entity as a wireframe, so a
@@ -6770,6 +6930,8 @@ void R_RenderView (void)
 	R_ShowBoundingBoxes ();
 
 	R_ShowSkeletons ();
+
+	R_ShowTris ();
 
 	R_ShowPointFile ();
 

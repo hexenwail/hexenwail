@@ -3116,6 +3116,28 @@ static void Host_Game_f (void)
 	 * uhexen2-5vb6. */
 	FS_UnwindSearchpaths (fs_base_nomp_searchpaths, false);
 	fs_base_searchpaths = fs_base_nomp_searchpaths;
+
+	/* The unwind above just took pak3/pak4 off the searchpath, so drop the
+	 * flag that says they are on it.  gameflags is accumulate-only -- every
+	 * other bit in it describes the paks found at startup and is true forever
+	 * -- but GAME_PORTALS is the one bit that also gets read as "portals
+	 * content is reachable right now", and a runtime switch away from the
+	 * mission pack falsified it with nothing to set it right again.
+	 *
+	 * It is re-set below the moment portals is genuinely re-added, because
+	 * FS_AddGameDirectory -> check_known_paks returns GAME_PORTALS for pak3
+	 * of the "portals" gamedir, so this stays self-correcting.
+	 *
+	 * Left stale it is fatal, not cosmetic: CL_ParseServerInfo calls
+	 * CL_LoadInfoStrings whenever the bit is set, and that Host_Errors on a
+	 * missing infolist.txt in the middle of a map load.  Reported as
+	 * "Host_Error: CL_LoadInfoStrings: couldn't load infolist.txt" on
+	 * Blackmarsh -- a data1 map, i.e. exactly the map you reach after
+	 * switching away from portals.  The quieter symptoms were the mission
+	 * pack's three extra player classes staying in the class menu and
+	 * models/succubus.mdl still being precached under data1.  uhexen2-lx4m. */
+	gameflags &= ~GAME_PORTALS;
+
 	Cache_Flush ();
 
 	/* optionally add portals as base for custom mods */

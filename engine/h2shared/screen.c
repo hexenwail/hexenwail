@@ -815,6 +815,15 @@ static void SCR_SetUpToDrawConsole (void)
 	con_forcedup = cls.state != ca_active;
 #endif	/* H2W */
 
+	/* con_forcedup is decided here and nowhere else, and it is half of what
+	 * decides where typed characters go -- so re-sync SDL text input with it
+	 * here rather than leaving it to whoever last called Key_SetDest.  A
+	 * Host_Error during a map load is the path that gets reported: it longjmps
+	 * out with key_dest still key_game, the console comes up full height
+	 * carrying the error, and without this the player can press Enter and the
+	 * arrows but cannot type a single letter into it.  uhexen2-lx4m */
+	Key_UpdateTextInputMode ();
+
 // decide on the height of the console
 	if (con_forcedup)
 	{

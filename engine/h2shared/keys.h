@@ -230,6 +230,7 @@ int Key_GetChatMsgLen (void);
 
 void Key_CharEvent (const char *text);
 void Key_SetTextInputMode (qboolean on);
+void Key_UpdateTextInputMode (void);
 
 #endif	/* __HX2_KEYS_H */
 

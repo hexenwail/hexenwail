@@ -1530,9 +1530,15 @@ void Key_CharEvent (const char *text)
 	int		i;
 	char		*workline;
 	size_t		len;
+	qboolean	to_console;
 
 	if (!text)
 		return;
+
+	/* key_game with con_forcedup is the forced-up console: no world to draw,
+	 * console at full height, key_dest never updated because nothing on the
+	 * way in had reason to.  Typing has to land there too.  uhexen2-lx4m */
+	to_console = (key_dest == key_console || (key_dest == key_game && con_forcedup));
 
 	for (i = 0; text[i]; i++)
 	{
@@ -1546,10 +1552,10 @@ void Key_CharEvent (const char *text)
 		 * the binding rather than off '`'/'~' so a layout whose console
 		 * key produces some other character still closes the console
 		 * instead of typing into it.  uhexen2-slhi */
-		if (key_dest == key_console && Key_IsToggleConsole (ch))
+		if (to_console && Key_IsToggleConsole (ch))
 			continue;
 
-		if (key_dest == key_console)
+		if (to_console)
 		{
 			workline = key_lines[edit_line];
 			if (key_linepos < MAXCMDLINE - 1)
@@ -1588,17 +1594,60 @@ void Key_CharEvent (const char *text)
 
 /*
 ===================
+Key_ConsoleTakesText
+
+True when a typed character belongs to the console or the chat line.
+
+The forced-up console counts, and that is the whole point of this helper.
+con_forcedup is set by the renderer whenever there is no world to draw
+(gl_screen.c SCR_SetUpToDrawConsole), and in that state key_dest is normally
+still key_game -- nothing on the way in has any reason to change it.  Key_Event
+already routes consolekeys there on exactly that condition, so text entry has
+to follow the same rule or the console accepts Enter, Backspace and the arrow
+keys but silently drops every letter.  uhexen2-lx4m.
+===================
+*/
+static qboolean Key_ConsoleTakesText (void)
+{
+	return (key_dest == key_console || key_dest == key_message ||
+		(key_dest == key_game && con_forcedup));
+}
+
+/*
+===================
 Key_SetTextInputMode
 
 Enable or disable SDL text input events.  Called when key_dest
 changes to/from console or message mode.
+
+SDL3 does not start text input for us the way SDL2 did: without an explicit
+SDL_StartTextInput there are no SDL_EVENT_TEXT_INPUT events at all, and since
+Key_CharEvent is the only path printable characters have, that reads to the
+player as a dead keyboard.
+
+Guarded on the current state because Key_UpdateTextInputMode runs once a frame:
+SDL_RaiseWindow on every frame would fight the window manager for focus.  The
+guard is keyed on the window as well as the flag -- a vid_restart destroys the
+window and builds a new one whose text input starts off again, so a cached
+"already on" from the old window would leave the new one mute.
 ===================
 */
 void Key_SetTextInputMode (qboolean on)
 {
+	static qboolean		text_input_on = false;
+	static SDL_Window	*text_input_window = NULL;
 	SDL_Window *w = VID_GetWindow();
+
 	if (!w)
+	{
+		text_input_window = NULL;
 		return;
+	}
+	if (on == text_input_on && w == text_input_window)
+		return;
+	text_input_on = on;
+	text_input_window = w;
+
 	if (on)
 	{
 		/* Ensure window has input focus and is capable of receiving text input */
@@ -1609,6 +1658,25 @@ void Key_SetTextInputMode (qboolean on)
 	{
 		SDL_StopTextInput(w);
 	}
+}
+
+/*
+===================
+Key_UpdateTextInputMode
+
+Re-sync SDL text input with what is actually on screen.
+
+Key_SetDest alone is not enough.  con_forcedup is owned by the renderer and
+changes without anyone touching key_dest -- a Host_Error mid-load is the case
+that gets reported, because it longjmps out with key_dest still at key_game and
+leaves a full-height console holding the error message.  Called from
+SCR_SetUpToDrawConsole, right where con_forcedup is decided, so the two can
+never disagree for longer than the frame that changed it.
+===================
+*/
+void Key_UpdateTextInputMode (void)
+{
+	Key_SetTextInputMode (Key_ConsoleTakesText());
 }
 
 /*
@@ -1642,10 +1710,7 @@ void Key_SetDest (keydest_t dest)
 	key_dest = dest;
 
 	/* enable SDL text input for console and chat, disable otherwise */
-	if (dest == key_console || dest == key_message)
-		Key_SetTextInputMode(true);
-	else
-		Key_SetTextInputMode(false);
+	Key_UpdateTextInputMode ();
 
 	if ((key_gamekey = Key_IsGameKey()) != prev_gamekey)
 	{
