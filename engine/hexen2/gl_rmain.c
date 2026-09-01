@@ -479,6 +479,7 @@ cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw 
  * it works with r_showbboxes off; the overlay itself is 2D and is drawn from
  * SCR_DrawShowFields.  r_showfields_align: 0 = at the entity, 1 = bottom-right. */
 cvar_t	r_showfields = {"r_showfields", "0", CVAR_NONE};
+cvar_t	r_showskel = {"r_showskel", "0", CVAR_NONE};
 cvar_t	r_showfields_align = {"r_showfields_align", "1", CVAR_ARCHIVE};
 /* Edict index the crosshair is on, republished every frame by
  * R_ShowBoundingBoxes for SCR_DrawShowFields.  0 = nothing focused. */
@@ -6231,6 +6232,150 @@ static void R_ShowBoundingBoxes (void)
 
 /*
 ================
+R_ShowSkeletons -- Ironwail's r_showskel (upstream 4349da96), uhexen2-a5nn.10
+
+Draws the bone hierarchy of every visible MD5mesh entity as a wireframe, so a
+skeleton can be looked at instead of inferred.  The MD5 work (uhexen2-7ok0) and
+the winding question uhexen2-2t38 were both verified against synthetic models
+and a correlation test precisely because there was no way to just look.
+
+The bone matrices the GPU gets are anim_world x inv_rest_world -- they map a
+vertex from its rest position to its animated one, which is what skinning
+needs and is useless on its own for finding where a joint *is*.  Multiplying
+one by the bind pose cancels the inverse factor and leaves anim_world, whose
+translation column is the joint position.  That is why the loader now keeps
+the bind pose (md5mesh.c, hdr->bindpose); before this it was freed with
+rest_world.
+================
+*/
+static void R_ShowSkel_JointPos (float root[3][4], const bonepose_t *bind,
+				 const bonepose_t *anim, vec3_t out)
+{
+	float	local[3][4], object[3][4], world[3][4];
+
+	memcpy (local, anim->mat, sizeof(local));
+	memcpy (object, bind->mat, sizeof(object));
+	R_ConcatTransforms (local, object, world);
+	memcpy (object, world, sizeof(object));
+	R_ConcatTransforms (root, object, world);
+
+	out[0] = world[0][3];
+	out[1] = world[1][3];
+	out[2] = world[2][3];
+}
+
+/* Blend the two poses the draw path picked.  Lerping the positions is exactly
+ * equivalent to lerping the matrices the way gl_shader_skeletal does -- matrix
+ * product is bilinear and the joint position is a plain translation column --
+ * so this cannot drift from what is on screen. */
+static void R_ShowSkel_LerpedJointPos (float root[3][4], const bonepose_t *bind,
+				       const bonepose_t *prev, const bonepose_t *cur,
+				       float blend, vec3_t out)
+{
+	vec3_t	a, b;
+	int	k;
+
+	R_ShowSkel_JointPos (root, bind, prev, a);
+	R_ShowSkel_JointPos (root, bind, cur, b);
+	for (k = 0; k < 3; k++)
+		out[k] = a[k] + blend * (b[k] - a[k]);
+}
+
+static void R_ShowSkel_Entity (entity_t *e)
+{
+	aliashdr_t		*hdr;
+	const bonepose_t	*bind, *animdata, *prevframe, *curframe;
+	const boneinfo_t	*boneinfo;
+	float			mv[16];
+	float			root[3][4];
+	int			prevpose, pose, i;
+	float			blend;
+
+	if (!e || !e->model || e->model->type != mod_alias)
+		return;
+	hdr = (aliashdr_t *) Mod_Extradata (e->model);
+	if (!hdr || hdr->poseverttype != PV_IQM || hdr->numbones <= 0 || !hdr->bindpose)
+		return;
+
+	R_AliasResolveLerp (e, hdr, &prevpose, &pose, &blend);
+
+	/* Take the entity transform from the code the draw path uses rather
+	 * than rebuilding it: R_RotateForEntity2 carries EF_ROTATE, the
+	 * EF_FACE_VIEW billboarding and the menu-panel reprojection, and a
+	 * hand-rolled copy here would drift from all three the first time one
+	 * of them changed.  Identity first, so what comes back is the entity
+	 * transform alone and not view x entity -- the debug lines are handed
+	 * to GL_ImmEnd in world space, like R_ShowBoundingBoxes' boxes. */
+	GL_PushMatrix ();
+	GL_LoadIdentity ();
+	R_RotateForEntity2 (e);
+	GL_GetModelview (mv);
+	GL_PopMatrix ();
+
+	/* Column-major 4x4 -> row-major 3x4, which is what R_ConcatTransforms
+	 * and bonepose_t both speak. */
+	root[0][0] = mv[0]; root[0][1] = mv[4]; root[0][2] = mv[8];  root[0][3] = mv[12];
+	root[1][0] = mv[1]; root[1][1] = mv[5]; root[1][2] = mv[9];  root[1][3] = mv[13];
+	root[2][0] = mv[2]; root[2][1] = mv[6]; root[2][2] = mv[10]; root[2][3] = mv[14];
+
+	bind      = (const bonepose_t *)((const byte *)hdr + hdr->bindpose);
+	boneinfo  = (const boneinfo_t *)((const byte *)hdr + hdr->boneinfo);
+	animdata  = (const bonepose_t *)((const byte *)hdr + hdr->boneposedata);
+	prevframe = animdata + hdr->numbones * prevpose;
+	curframe  = animdata + hdr->numbones * pose;
+
+	for (i = 0; i < hdr->numbones; i++)
+	{
+		vec3_t	pos, parentpos;
+		int	parent = boneinfo[i].parent;
+
+		if (parent < 0)
+			continue;
+		/* Upstream skips segments hanging directly off the root, and it
+		 * is right to: on a model whose parts all attach there the
+		 * starburst of lines back to the origin hides the skeleton it
+		 * is meant to show. */
+		if (boneinfo[parent].parent < 0)
+			continue;
+
+		R_ShowSkel_LerpedJointPos (root, bind + i,
+					   prevframe + i, curframe + i, blend, pos);
+		R_ShowSkel_LerpedJointPos (root, bind + parent,
+					   prevframe + parent, curframe + parent, blend, parentpos);
+
+		GL_ImmVertex3f (pos[0], pos[1], pos[2]);
+		GL_ImmVertex3f (parentpos[0], parentpos[1], parentpos[2]);
+	}
+}
+
+static void R_ShowSkeletons (void)
+{
+	int	i;
+
+	if (!r_showskel.integer)
+		return;
+	/* Upstream's multiplayer lockout: a wireframe through walls is a
+	 * wallhack, so it stays a single-player tool. */
+	if (cl.maxclients > 1)
+		return;
+
+	/* Through walls, like the bounding boxes -- a skeleton you can only see
+	 * when the mesh is already in front of you shows nothing the mesh did
+	 * not. */
+	R_SetDepthTest (false);
+	R_SetBlend (false);
+
+	GL_ImmBegin ();
+	GL_ImmColor4f (1.0f, 0.0f, 1.0f, 1.0f);	/* magenta, upstream's 0xFFFF00FF */
+	for (i = 0; i < cl_numvisedicts; i++)
+		R_ShowSkel_Entity (cl_visedicts[i]);
+	GL_ImmEnd (GL_LINES, &gl_shader_flat);
+
+	R_SetDepthTest (true);
+}
+
+/*
+================
 R_ShowPointFile
 
 Draw the map leak path loaded by the `pointfile` command as a chain of
@@ -6623,6 +6768,8 @@ void R_RenderView (void)
 	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_MIRROR);
 
 	R_ShowBoundingBoxes ();
+
+	R_ShowSkeletons ();
 
 	R_ShowPointFile ();
 

@@ -1054,15 +1054,17 @@ aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size
 	}
 
 	/* Hunk layout: header (whose trailing frames[] is sized for numframes),
-	 * then boneinfo array, then bonepose data (numposes × numbones
-	 * matrices), then the vertex array, then triangle indices.
+	 * then boneinfo array, then the bind pose (numbones matrices), then
+	 * bonepose data (numposes × numbones matrices), then the vertex array,
+	 * then triangle indices.
 	 * Storing OFFSETs in the header (not stack pointers) is critical —
 	 * the old code stored (stack_addr - hunk_addr) which both leaked the
 	 * stack across the function boundary AND made the subsequent memcpy
 	 * write back onto the stack rather than into the hunk. */
 	int header_size     = sizeof(aliashdr_t) + (numframes - 1) * sizeof(maliasframedesc_t);
 	int boneinfo_off    = header_size;
-	int boneposedata_off = boneinfo_off + numbones * sizeof(boneinfo_t);
+	int bindpose_off    = boneinfo_off + numbones * (int)sizeof(boneinfo_t);
+	int boneposedata_off = bindpose_off + numbones * (int)sizeof(bonepose_t);
 	int posedata_off    = boneposedata_off + numposes * numbones * (int)sizeof(bonepose_t);
 	int tridata_off     = posedata_off + numverts * (int)sizeof(iqmvert_t);
 	int hunksize        = tridata_off + numtris * 3 * (int)sizeof(unsigned short);
@@ -1082,6 +1084,7 @@ aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size
 	hdr->poseverttype  = PV_IQM;
 	hdr->numbones      = numbones;
 	hdr->boneinfo      = boneinfo_off;
+	hdr->bindpose      = bindpose_off;
 	hdr->boneposedata  = boneposedata_off;
 	hdr->posedata      = posedata_off;
 	hdr->triangledata  = tridata_off;
@@ -1106,6 +1109,23 @@ aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size
 	}
 
 	memcpy((byte *)hdr + boneinfo_off, bones, numbones * sizeof(boneinfo_t));
+
+	/* Rest-pose world transform per bone, kept rather than discarded with
+	 * rest_world.  Nothing in the draw path needs it -- the GPU gets
+	 * anim_world x inv_rest_world and the vertices are already in rest
+	 * world space -- but r_showskel does: multiplying a bone matrix by
+	 * this cancels the inv_rest_world factor and recovers the animated
+	 * joint position, which is the only thing there is to draw a line
+	 * between.  Ironwail made the same change in 4349da96, moving its
+	 * outposes from Z_Malloc to the hunk for exactly this.  A bonepose_t
+	 * is a bare float[12], but copy through .mat rather than memcpy the
+	 * block, so a future field on the struct cannot silently misalign it. */
+	{
+		bonepose_t *bindposes = (bonepose_t *)((byte *)hdr + bindpose_off);
+
+		for (int b = 0; b < numbones; b++)
+			memcpy(bindposes[b].mat, rest_world[b], sizeof(float[12]));
+	}
 	memcpy((byte *)hdr + posedata_off, verts, numverts * sizeof(iqmvert_t));
 	/* Persist triangle indices as unsigned short (numverts <= MD5_MAX_VERTS=4096 < 65536). */
 	{

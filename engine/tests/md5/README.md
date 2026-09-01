@@ -29,6 +29,25 @@ vertices land at `(0,0,0)`, `(0,0,10)` and `(0,-10,10)`.
 
 The parser has no engine dependencies beyond the console, hunk, filesystem and
 texture entry points, so `md5mesh.c` links against a handful of stubs and runs
-standalone.  There is no committed harness — see the uhexen2-7ok0.2 bead notes
-for the stub set that was used, or load the models in the engine with
-`developer 1` and read the `MD5_LoadMesh:` line.
+standalone.  `md5check.c` is that harness, committed as of uhexen2-a5nn.10 —
+it was written by hand twice before that and thrown away both times.
+
+```bash
+nix develop --command gcc -o /tmp/md5check \
+    engine/tests/md5/md5check.c engine/h2shared/md5mesh.c \
+    common/strlcpy.c common/qsnprint.c \
+    -Iengine/hexen2 -Iengine/h2shared -Icommon \
+    -DGLQUAKE -DSDLQUAKE -DGL_DLSYM -D_GNU_SOURCE=1 -D_REENTRANT \
+    $(pkg-config --cflags sdl3) -w -lm
+/tmp/md5check engine/tests/md5      # exits 1 on any mismatch
+```
+
+It loads `chain` and checks every joint's world position in both frames
+against the values the geometry above forces.  What it is really checking is
+the `bindpose` block `md5mesh.c` keeps for `r_showskel`: joint position is
+`bone_matrix x bindpose`, so a wrong offset or a stale bind pose moves the
+joints and nothing else in the engine would notice — the GPU never reads that
+block.
+
+Alternatively, load the models in the engine with `developer 1` and read the
+`MD5_LoadMesh:` line.

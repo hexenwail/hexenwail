@@ -457,6 +457,10 @@ typedef struct {
 	/* Skeletal animation data (PV_IQM only) */
 	int		numbones;	// number of bones (0 if not skeletal)
 	int		boneinfo;	// offset to boneinfo_t array (numbones entries)
+	int		bindpose;	// offset to bonepose_t array (numbones entries): rest-pose
+					// world transform per bone.  boneposedata is already
+					// multiplied by its inverse, so this is what puts an
+					// animated bone back into model space -- see R_ShowSkeletons.
 	int		boneposedata;	// offset to bonepose_t array (numposes*numbones entries)
 	int		triangledata;	// offset to unsigned short[numtris*3] triangle indices (PV_IQM; 0 if not skeletal)
 
