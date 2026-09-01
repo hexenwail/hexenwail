@@ -758,6 +758,28 @@ void M_Menu_Main_f (void)
 }
 
 
+/*
+================
+M_RendererName
+
+The renderer this build actually runs, for the main-menu footer.  Keyed off the
+same macros quakeinc.h keys its header set off, because gl_renderer_caps only
+exists on the GLQUAKE side of that split.
+================
+*/
+static const char *M_RendererName (void)
+{
+#if defined(WEBSOFT)
+	return "Software 8bpp";
+#elif defined(GLQUAKE)
+	return gl_renderer_caps.profile_name ? gl_renderer_caps.profile_name
+					     : "OpenGL";
+#else
+	return "Unknown renderer";
+#endif
+}
+
+
 static void M_Main_Draw (void)
 {
 	int		f;
@@ -780,6 +802,13 @@ static void M_Main_Draw (void)
 
 	f = (int)(realtime * 10)%8;
 	M_DrawTransPicCropped (43, 54 + m_main_cursor * 20, Draw_CachePic( va("gfx/menu/menudot%i.lmp", f+1 ) ) );
+
+	/* Which renderer this binary is.  The three client configurations are
+	 * indistinguishable on screen until something is wrong, and a bug report
+	 * that says "the water looks flat" is a different bug on each of them.
+	 * Bottom-left of the 320x200 menu space; M_Print adds the centering
+	 * offset itself. */
+	M_Print (8, 192, M_RendererName());
 }
 
 
@@ -2949,6 +2978,13 @@ static qboolean M_Rendering_IsSkip (int i)
 	default:
 		break;
 	}
+	/* The complement, spelled out so tools/menu_soft_parity.py can hold
+	 * every row to a decision.  These do reach something real in the
+	 * software build; the script checks that claim against the cvars each
+	 * row writes and the sources CMake compiles into it.
+	 *
+	 * soft-ok: REND_PARTICLES, REND_DYNLIGHT, REND_WATERWARP, REND_GLOWS,
+	 *          REND_FLASHINTENSITY */
 #else
 	/* Hide controls whose backing GL feature this context does not have,
 	 * rather than offering a slider that silently does nothing.  On the ES
@@ -3477,12 +3513,37 @@ static qboolean M_Graphics_IsSkip (int i)
 {
 	if (i < 0 || i >= GFX_ITEMS) return true;
 #if defined(WEBSOFT)
-	/* The demo bar is drawn by gl_screen.c, which this build swaps out for
-	 * screen.c, so there is no bar for the row to configure.  Same trade as
-	 * M_Rendering_IsSkip: the cvar stays registered (r_soft_web.c) so a
-	 * config round-trips, but the row does not belong in the menu. */
-	if (i == GFX_DEMOBAR)
+	/* Rows whose cvar is only ever read by a gl_*.c file.  This build swaps
+	 * gl_draw.c/gl_screen.c/gl_rmain.c out for draw_soft_web.c/screen.c and
+	 * the 8bpp rasterizer, so nothing on this side consumes them: the demo
+	 * bar has no bar, the three UI scales cannot apply (draw_soft_web.c's
+	 * SCR_CalcUIScale returns 1 unconditionally and says why), and the rest
+	 * reach no code at all.  Their cvars stay registered in r_soft_web.c so
+	 * a config written by the GL build round-trips unharmed; what does not
+	 * belong here is the row offering to move something it cannot.
+	 *
+	 * Found by tools/menu_soft_parity.py, which now holds this list to that
+	 * standard on every push.  uhexen2-ibnq.2.
+	 */
+	switch (i)
+	{
+	case GFX_CENTERPRINTBG:
+	case GFX_HUDSCALE:
+	case GFX_MENUSCALE:
+	case GFX_CROSSHAIRSCALE:
+	case GFX_CONALPHA:
+	case GFX_CONBRIGHT:
+	case GFX_OVERBRIGHT:
+	case GFX_COLORED_LM:
+	case GFX_GLOW_INTENSITY:
+	case GFX_SHOWSPEED:
+	case GFX_SHOWCLOCK:
+	case GFX_DEMOBAR:
 		return true;
+	default:
+		break;
+	}
+	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT */
 #endif
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
 }

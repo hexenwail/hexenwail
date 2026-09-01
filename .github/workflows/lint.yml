@@ -68,3 +68,13 @@ jobs:
             exit 1
           fi
 
+      # The linker already guarantees the software build *defines* every
+      # renderer cvar shared code touches -- r_soft_web.c exists for that, and
+      # CI builds the WEBSOFT config on every PR.  What nothing catches is a
+      # menu row whose cvar no software translation unit ever reads: it links,
+      # it draws, and it moves nothing.  This holds every row in a submenu
+      # with a WEBSOFT arm to an explicit hidden/soft-ok decision, and checks
+      # the soft-ok claims against the sources CMake actually compiles.
+      - name: Software-renderer menu parity
+        run: python3 tools/menu_soft_parity.py
+
