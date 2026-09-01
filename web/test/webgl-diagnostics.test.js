@@ -155,10 +155,15 @@ test('post-process palette stays inside the WebGL2 fragment uniform budget', asy
   // A vec3[256] is 256 uniform vectors on its own, over the 224 a WebGL2
   // implementation is only required to offer a fragment shader -- the whole
   // post-process program can fail to link.  The palette LUT carries resolved
-  // RGB instead.  d2c46f078.
+  // colour instead.  d2c46f078.
   assert.doesNotMatch(postprocess, /uniform vec3 palette\[/);
   assert.match(postprocess, /texelFetch\(paletteLUT, idx, 0\)\.rgb/);
-  assert.match(postprocess, /GL_RGB8, 32, 32, 32, 0,\s+GL_RGB,/);
+  // RGBA8, not RGB8: the compute LUT builder writes into this same texture
+  // through glBindImageTexture, and rgb8 is not an image-storable format.
+  // `feat(renderer): r_softemu_metric and a GPU palette LUT with three colour
+  // metrics` (bc3d77b7e at time of writing).
+  assert.match(postprocess,
+    /GL_RGBA8,\s+PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,\s+GL_RGBA,/);
 });
 
 test('brush-entity instancing stays off on the ES tier', async () => {
