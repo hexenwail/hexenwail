@@ -319,7 +319,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_vm_watch);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_SetCallback (&r_clearcolor, R_SetClearColor_f);
-	Cvar_RegisterVariable (&r_texture_external);
+	Cvar_RegisterVariable (&r_external_textures);
+	Cvar_RegisterVariable (&r_texture_external);	/* deprecated; uhexen2-yz1b */
+	Cvar_SetCallback (&r_texture_external, R_TextureExternal_Deprecated);
 	Cvar_RegisterVariable (&r_texture_external_hud);
 	Cvar_RegisterVariable (&r_materialmaps);
 	Cvar_RegisterVariable (&r_normalmap_intensity);
