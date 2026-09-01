@@ -1026,6 +1026,108 @@ static void SCR_DrawSpeed (void)
 
 /*
 ==============
+SCR_DrawShowFields -- Ironwail
+
+Live QC field inspector for the entity under the crosshair.  Ironwail's
+r_showfields (Quake/gl_rmain.c:108) draws this alongside r_showbboxes; here
+the pick happens in R_ShowBoundingBoxes, during the 3D pass, and is handed
+over as an edict index in r_showfields_edict.  Splitting it that way keeps
+the text on the 2D canvas where it can be read at any r_infoscale, and lets
+the overlay work with r_showbboxes off.
+
+r_showfields_align 0 pins the list to the entity's screen position, 1 (the
+default, as in Ironwail) to the bottom-right corner.
+
+Only fields ED_Print would show are listed -- ED_FieldValueString applies
+that rule -- so an entity with 200 mostly-zero fields prints the dozen that
+carry state.
+==============
+*/
+#define SHOWFIELDS_MAX_LINES	40
+
+static void SCR_DrawShowFields (void)
+{
+	char		lines[SHOWFIELDS_MAX_LINES][64];
+	edict_t		*ed;
+	int		i, n = 0, nfd;
+	int		x, y, w, h, widest = 0;
+
+	if (!r_showfields.integer)
+		return;
+	if (!sv.active || cls.state != ca_active)
+		return;
+	if (r_showfields_edict <= 0 || r_showfields_edict >= sv.num_edicts)
+		return;
+
+	ed = EDICT_NUM (r_showfields_edict);
+	if (!ed || ed->free)
+		return;
+
+	nfd = ED_NumFieldDefs ();
+
+	q_snprintf (lines[n++], sizeof(lines[0]), "edict %d", r_showfields_edict);
+
+	for (i = 1; i < nfd && n < SHOWFIELDS_MAX_LINES; i++)
+	{
+		ddef_t		*d = ED_FieldDefAt (i);
+		const char	*name, *val;
+
+		if (!d)
+			continue;
+		/* ED_FieldValueString hands back PR_ValueString's static buffer,
+		 * so it has to be consumed before the next iteration calls it. */
+		val = ED_FieldValueString (ed, d);
+		if (!val)
+			continue;	/* hidden component, or still all-zero */
+		name = PR_GetString (d->s_name);
+		if (!name)
+			continue;
+		q_snprintf (lines[n++], sizeof(lines[0]), "%s %s", name, val);
+	}
+
+	if (n >= SHOWFIELDS_MAX_LINES)
+		q_strlcpy (lines[SHOWFIELDS_MAX_LINES - 1], "...", sizeof(lines[0]));
+
+	for (i = 0; i < n; i++)
+	{
+		int len = (int) strlen (lines[i]);
+		if (len > widest)
+			widest = len;
+	}
+
+	GL_SetCanvas (CANVAS_INFO);
+	SCR_InfoCanvasSize (&w, &h);
+
+	if (r_showfields_align.integer)
+	{
+		/* SCR_InfoCorner, not the raw canvas, so the list clears the
+		 * status bar; then stack above whichever one-line readouts are
+		 * also on, the way SCR_DrawSpeed stacks above SCR_DrawClock. */
+		SCR_InfoCorner (&x, &y);
+		if (scr_showfps.integer)   y -= 8;
+		if (scr_showclock.integer) y -= 8;
+		if (scr_showspeed.integer) y -= 8;
+		x -= widest * 8 + 8;
+		y -= n * 8 + 8;
+	}
+	else
+	{
+		/* At the entity: r_showfields_edict was picked by a ray through
+		 * the screen centre, so that is where it is, by construction. */
+		x = w / 2 + 8;
+		y = h / 2;
+	}
+	if (x < 0) x = 0;
+	if (y < 0) y = 0;
+
+	Draw_FillAlpha (x - 4, y - 4, widest * 8 + 8, n * 8 + 8,
+			0.0f, 0.0f, 0.0f, 0.5f);
+	for (i = 0; i < n; i++)
+		Draw_String (x, y + i * 8, lines[i]);
+}
+
+/*
+==============
 SCR_DrawDemoBar -- Ironwail
 
 Playback position readout during demo playback: a seek rail with a cursor,
@@ -2183,6 +2285,7 @@ void SCR_UpdateScreen (void)
 		SCR_DrawFPS();
 		SCR_DrawClock();
 		SCR_DrawSpeed();
+		SCR_DrawShowFields();
 
 		GL_SetCanvas (CANVAS_DEFAULT);
 		Plaque_Draw(plaquemessage, false);

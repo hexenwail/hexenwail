@@ -474,6 +474,15 @@ cvar_t	r_showbboxes_think = {"r_showbboxes_think", "0", CVAR_NONE};	/* >0 = thin
 cvar_t	r_showbboxes_health = {"r_showbboxes_health", "0", CVAR_NONE};	/* >0 = health>0 only, <0 = health<=0 only (Ironwail parity) */
 cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "0", CVAR_NONE};	/* 1 = highlight target/targetname matches of the focused entity (Ironwail parity) */
 cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw line segments from the focused edict's entity-typed QC fields to their targets, and from edicts referencing the focused one back to it (uhexen2-4ej9) */
+/* r_showfields -- Ironwail (Quake/gl_rmain.c:108).  Live field inspector for
+ * the entity under the crosshair.  Shares R_ShowBoundingBoxes' focus pick, so
+ * it works with r_showbboxes off; the overlay itself is 2D and is drawn from
+ * SCR_DrawShowFields.  r_showfields_align: 0 = at the entity, 1 = bottom-right. */
+cvar_t	r_showfields = {"r_showfields", "0", CVAR_NONE};
+cvar_t	r_showfields_align = {"r_showfields_align", "1", CVAR_ARCHIVE};
+/* Edict index the crosshair is on, republished every frame by
+ * R_ShowBoundingBoxes for SCR_DrawShowFields.  0 = nothing focused. */
+int	r_showfields_edict = 0;
 cvar_t	r_pointfile_depthtest = {"r_pointfile_depthtest", "1", CVAR_NONE};	/* 0 = draw the `pointfile` leak arrows through world geometry (uhexen2-nwx1) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
 cvar_t	r_external_textures = {"r_external_textures", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh, renamed uhexen2-yz1b */
@@ -5856,10 +5865,124 @@ static qboolean RayVsAABB (const vec3_t origin, const vec3_t dir,
 	return true;
 }
 
+/*
+================
+R_ShowBBoxes_Filter -- Ironwail
+
+    r_showbboxes_filter artifact =trigger_secret #42
+
+Substring by default; '=' anchors an exact classname; '#' matches the edict
+index.  Terms are stored back to back as NUL-separated strings, and an empty
+filter passes everything.  r_showbboxes_filter_clear resets it.
+================
+*/
+static char	showbboxes_filter[1024];
+static qboolean	showbboxes_filter_byindex;
+
+static qboolean R_ShowBBoxes_Filter (edict_t *ed)
+{
+	char		entnum[16] = "";
+	const char	*classname = NULL;
+	const char	*p;
+
+	if (!showbboxes_filter[0])
+		return true;
+
+	if (showbboxes_filter_byindex)
+		q_snprintf (entnum, sizeof(entnum), "%d", NUM_FOR_EDICT (ed));
+
+	if (ed->v.classname)
+		classname = PR_GetString (ed->v.classname);
+
+	for (p = showbboxes_filter; *p; p += strlen (p) + 1)
+	{
+		if (*p == '#')
+		{
+			if (!strcmp (entnum, p + 1))
+				return true;
+			continue;
+		}
+		if (!classname)
+			continue;
+		if (*p == '=')
+		{
+			if (!strcmp (classname, p + 1))
+				return true;
+			continue;
+		}
+		if (strstr (classname, p) != NULL)
+			return true;
+	}
+
+	return false;
+}
+
+static void R_ShowBBoxesFilter_f (void)
+{
+	int	i, argc = Cmd_Argc ();
+	size_t	used = 0;
+
+	if (argc < 2)
+	{
+		const char *p;
+		if (!showbboxes_filter[0])
+		{
+			Con_Printf ("r_showbboxes_filter <term> ... : filter shown bboxes\n");
+			Con_Printf ("  term      classname substring\n");
+			Con_Printf ("  =term     exact classname\n");
+			Con_Printf ("  #n        edict index\n");
+			Con_Printf ("no filter set\n");
+			return;
+		}
+		Con_Printf ("filter:");
+		for (p = showbboxes_filter; *p; p += strlen (p) + 1)
+			Con_Printf (" %s", p);
+		Con_Printf ("\n");
+		return;
+	}
+
+	showbboxes_filter[0] = '\0';
+	showbboxes_filter_byindex = false;
+
+	for (i = 1; i < argc; i++)
+	{
+		const char	*a = Cmd_Argv (i);
+		size_t		len = strlen (a);
+
+		if (!len)
+			continue;
+		/* +1 for this term's NUL, +1 for the list terminator */
+		if (used + len + 2 > sizeof(showbboxes_filter))
+		{
+			Con_Printf ("r_showbboxes_filter: too many terms, ignoring the rest\n");
+			break;
+		}
+		memcpy (showbboxes_filter + used, a, len + 1);
+		used += len + 1;
+		if (*a == '#')
+			showbboxes_filter_byindex = true;
+	}
+	showbboxes_filter[used] = '\0';
+}
+
+static void R_ShowBBoxesFilterClear_f (void)
+{
+	showbboxes_filter[0] = '\0';
+	showbboxes_filter_byindex = false;
+}
+
+void R_ShowBBoxes_InitCommands (void)
+{
+	Cmd_AddCommand ("r_showbboxes_filter", R_ShowBBoxesFilter_f);
+	Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowBBoxesFilterClear_f);
+}
+
 /* Pass kind for ShowBBoxes_GetColor — first pass surveys, second draws. */
 static qboolean ShowBBoxes_EdictPasses (edict_t *ed, vec3_t mins, vec3_t maxs)
 {
 	if (!ed || ed->free)
+		return false;
+	if (!R_ShowBBoxes_Filter (ed))
 		return false;
 	if (r_showbboxes_think.value && (ed->v.nextthink <= 0) == (r_showbboxes_think.value > 0))
 		return false;
@@ -5884,7 +6007,10 @@ static void R_ShowBoundingBoxes (void)
 	float		bestdist = 1e30f;
 	const char	*focus_target = "", *focus_targetname = "";
 
-	if (!r_showbboxes.integer)
+	/* Ironwail runs this whole pass when either cvar is on, because
+	 * r_showfields needs the focus pick and nothing else here. */
+	r_showfields_edict = 0;
+	if (!r_showbboxes.integer && !r_showfields.integer)
 		return;
 	if (cls.state != ca_active)
 		return;
@@ -5907,6 +6033,12 @@ static void R_ShowBoundingBoxes (void)
 		}
 	}
 
+	/* Hand the pick to the 2D pass; NUM_FOR_EDICT rather than the pointer
+	 * so a server frame between here and SCR_DrawShowFields cannot leave
+	 * the overlay holding a freed edict. */
+	if (focused)
+		r_showfields_edict = NUM_FOR_EDICT (focused);
+
 	if (focused && r_showbboxes_targets.integer)
 	{
 		focus_target     = PR_GetString (focused->v.target);
@@ -5921,8 +6053,9 @@ static void R_ShowBoundingBoxes (void)
 	R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	/* Pass 2: draw, with color overrides for focused / target-linked
-	 * entities and a reddish tint for entities with health. */
-	for (i = 1; i < sv.num_edicts; i++)
+	 * entities and a reddish tint for entities with health.  Skipped when
+	 * only r_showfields is on -- that wants the pick, not the boxes. */
+	for (i = 1; r_showbboxes.integer && i < sv.num_edicts; i++)
 	{
 		qboolean is_focused, is_linked;
 
