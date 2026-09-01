@@ -178,6 +178,83 @@ static float	pp_waterwarp_preview_end;	/* cl.time when waterwarp preview should 
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
 cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
 cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};	/* dither strength (0-2), reduced to avoid AMD noise artifacts */
+/* Ironwail's per-stage decomposition of r_softemu (uhexen2-a5nn.3).  Names,
+ * defaults and archive flags are upstream's (Quake/gl_texmgr.c:41-45) so a
+ * config means the same thing in both engines.  r_dither stays the master
+ * strength and these scale it, exactly as upstream multiplies the two.
+ *
+ * The ladders are not identical and the mapping is written down in
+ * R_SoftEmuParams below, because our r_softemu 0-3 is Off / Dithered / Banded
+ * / Colormap and upstream's is OFF / FINE / COARSE / BANDED. */
+cvar_t	r_softemu_dither_screen  = {"r_softemu_dither_screen",  "1.0", CVAR_ARCHIVE};
+cvar_t	r_softemu_dither_texture = {"r_softemu_dither_texture", "1.0", CVAR_ARCHIVE};
+/* -1 = follow the mode (on at r_softemu 3), 0 = never, > 0 = always. */
+cvar_t	r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_ARCHIVE};
+
+/*
+===============
+R_SoftEmuParams
+
+The four floats the world fragment shader's u_softemu carries.  All zero at
+r_softemu 0, which is the default, so a stock configuration reaches none of
+the stages.
+
+WHERE OUR LADDER AND UPSTREAM'S DIVERGE.  Ironwail runs OFF / FINE / COARSE /
+BANDED; ours runs Off / Dithered / Banded / Colormap, and the names line up
+badly.  What matters is which of upstream's shader variants each of ours
+corresponds to:
+
+  r_softemu 1 "Dithered" ~ FINE   -- screen-space dither, and upstream does it
+                                     in the POSTPROCESS pass, not in the world
+                                     shader.  So nothing here is live; the
+                                     scale still applies, in GL_PostProcess.
+  r_softemu 2 "Banded"   ~ COARSE -- upstream's DITHER == 1: luxel-snapped
+                                     lightmap UVs, a negative LOD bias, and
+                                     the two-noise texture dither.
+  r_softemu 3 "Colormap" ~ BANDED -- upstream's DITHER >= 2: the same snap and
+                                     a harder LOD bias, the lightmap quantised
+                                     to 64 levels, and NO dithering at all.
+                                     Ours additionally routes the result
+                                     through gfx/colormap.lmp downstream,
+                                     which upstream has no equivalent for.
+
+NOISESCALE is upstream's 9/255 (Quake/gl_rmain.c), the amplitude one dither
+step covers at 8 bits.
+===============
+*/
+void R_SoftEmuParams (float out[4])
+{
+	static const float NOISESCALE = 9.0f / 255.0f;
+	const int	mode = r_softemu.integer;
+	float		noise;
+	qboolean	banding;
+
+	out[0] = out[1] = out[2] = out[3] = 0.0f;
+
+	/* -1, the shipped value, means "follow the mode"; 0 never, > 0 always.
+	 * "Always" has to raise the live flag too, or the banded lightmap would
+	 * be sampled off the luxel grid and read as a posterised gradient. */
+	banding = (r_softemu_lightmap_banding.value < 0.0f)
+		? (mode == 3)
+		: (r_softemu_lightmap_banding.value > 0.0f);
+
+	if (mode < 2 && !banding)
+		return;
+
+	out[3] = 1.0f;
+	out[1] = banding ? 1.0f : 0.0f;
+
+	/* Upstream's BANDED variant carries no noise: the point of it is the
+	 * bands.  Dithering them back out again would undo the mode. */
+	if (mode == 2 && !banding)
+	{
+		noise = NOISESCALE * r_dither.value;
+		out[0] = noise * r_softemu_dither_texture.value;
+		out[2] = noise * r_softemu_dither_screen.value;
+		if (out[0] < 0.0f) out[0] = 0.0f;
+		if (out[2] < 0.0f) out[2] = 0.0f;
+	}
+}
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
 cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
@@ -1563,6 +1640,9 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_scale);
 	Cvar_RegisterVariable(&r_softemu);
 	Cvar_RegisterVariable(&r_dither);
+	Cvar_RegisterVariable(&r_softemu_dither_screen);
+	Cvar_RegisterVariable(&r_softemu_dither_texture);
+	Cvar_RegisterVariable(&r_softemu_lightmap_banding);
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);
@@ -2159,7 +2239,18 @@ apply_shader:
 	if (pp_loc_softemu >= 0)
 		glUniform1i_fp(pp_loc_softemu, (int)r_softemu.value);
 	if (pp_loc_dither >= 0)
-		glUniform1f_fp(pp_loc_dither, r_dither.value);
+	{
+		/* r_softemu_dither_screen scales the master strength, which is what
+		 * upstream does with the same pair (Quake/gl_rmain.c: NOISESCALE *
+		 * r_dither.value * r_softemu_dither_screen.value).  This is the FINE
+		 * half of the split -- the screen dither upstream applies here in the
+		 * postprocess rather than in the world shader.  Default 1.0, so the
+		 * shipped behaviour is unchanged.  uhexen2-a5nn.3. */
+		float d = r_dither.value * r_softemu_dither_screen.value;
+		if (d < 0.0f)
+			d = 0.0f;
+		glUniform1f_fp(pp_loc_dither, d);
+	}
 	if (pp_loc_scale >= 0)
 	{
 		float scale = r_scale.value;

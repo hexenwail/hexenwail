@@ -51,6 +51,13 @@ extern cvar_t r_scale;
 /* Software rendering emulation (0=off, 1=dithered, 2=banded) */
 extern cvar_t r_softemu;
 extern cvar_t r_dither;
+extern cvar_t r_softemu_dither_screen;
+extern cvar_t r_softemu_dither_texture;
+extern cvar_t r_softemu_lightmap_banding;
+/* The four floats the world shader's u_softemu wants; see the definition in
+ * gl_postprocess.c for how our r_softemu ladder maps onto Ironwail's.
+ * uhexen2-a5nn.3. */
+void R_SoftEmuParams (float out[4]);
 
 /* HDR rendering (0=off, 1=ACES tonemapping) */
 extern cvar_t r_hdr;

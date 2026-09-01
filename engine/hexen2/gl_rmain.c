@@ -5641,6 +5641,30 @@ static void R_SetupFrame (void)
 				glUniform1f_fp(gl_shader_world_oit.u_lightmap_bicubic, bicubic);
 			}
 		}
+		/* Per-frame software-emulation stage scales (uhexen2-a5nn.3).  Same
+		 * plumbing again, and for the same reason: the MDI dispatch and the
+		 * DrawTextureChains fast path upload their own uniforms and would
+		 * otherwise never see these.  R_SoftEmuParams returns all zeros at
+		 * r_softemu 0, which is the default. */
+		{
+			float se[4];
+			R_SoftEmuParams (se);
+			if (gl_shader_world.program && gl_shader_world.u_softemu >= 0)
+			{
+				R_UseProgram (gl_shader_world.program);
+				glUniform4f_fp(gl_shader_world.u_softemu, se[0], se[1], se[2], se[3]);
+			}
+			if (gl_shader_world_opaque.program && gl_shader_world_opaque.u_softemu >= 0)
+			{
+				R_UseProgram (gl_shader_world_opaque.program);
+				glUniform4f_fp(gl_shader_world_opaque.u_softemu, se[0], se[1], se[2], se[3]);
+			}
+			if (gl_shader_world_oit.program && gl_shader_world_oit.u_softemu >= 0)
+			{
+				R_UseProgram (gl_shader_world_oit.program);
+				glUniform4f_fp(gl_shader_world_oit.u_softemu, se[0], se[1], se[2], se[3]);
+			}
+		}
 		R_UseProgram (0);
 	}
 

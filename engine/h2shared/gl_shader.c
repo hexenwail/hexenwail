@@ -295,6 +295,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
 	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
+	p->u_softemu         = glGetUniformLocation_fp(p->program, "u_softemu");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
 	p->u_turb             = glGetUniformLocation_fp(p->program, "u_turb");
@@ -321,6 +322,16 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 /* GLSL ES 3.00 doesn't support early_fragment_tests */
 #define GLSL_EARLY_Z		""
 #define GLSL_EARLY_Z_OPAQUE	""
+/* bitfieldReverse is GLSL 4.00 / ES 3.10; the ES tier is 3.00.  Same fallback
+ * gl_postprocess.c carries for its own copy of the Bayer matrix. */
+#define GLSL_BITFIELD_REVERSE \
+	"uint bitfieldReverse(uint v) {\n" \
+	"    v = ((v & 0x55555555u) << 1) | ((v >> 1) & 0x55555555u);\n" \
+	"    v = ((v & 0x33333333u) << 2) | ((v >> 2) & 0x33333333u);\n" \
+	"    v = ((v & 0x0F0F0F0Fu) << 4) | ((v >> 4) & 0x0F0F0F0Fu);\n" \
+	"    v = ((v & 0x00FF00FFu) << 8) | ((v >> 8) & 0x00FF00FFu);\n" \
+	"    return (v << 16) | (v >> 16);\n" \
+	"}\n"
 #else
 #define GLSL_VERT_HEADER	"#version 430 core\n"
 #define GLSL_FRAG_HEADER	"#version 430 core\n"
@@ -337,6 +348,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
  * recovers Hi-Z on the world bucket (+0.34ms regression measured in
  * uhexen2-23a9).  Used by gl_shader_world_opaque (uhexen2-5c6r). */
 #define GLSL_EARLY_Z_OPAQUE	"layout(early_fragment_tests) in;\n"
+#define GLSL_BITFIELD_REVERSE	""
 #endif
 
 /* --- shader_2d: orthographic HUD/text rendering --- */
@@ -534,6 +546,67 @@ static const char sworld_vert[] =
 	"}\n"
 
 
+/* Software-emulation noise, ported from Ironwail (Quake/gl_shaders.h,
+ * NOISE_FUNCTIONS).  uhexen2-a5nn.3.
+ *
+ * bayer01 is the same ALU-only 16x16 ordered matrix gl_postprocess.c already
+ * carries -- that one returns it centred on zero, this one in [0,1) because
+ * tri() wants it that way.  tri() reshapes a uniform distribution into a
+ * triangular one, which is what makes ordered dither read as film grain rather
+ * than as a visible checker.
+ *
+ * whitenoise01 is "Hash without Sine", https://www.shadertoy.com/view/4djSRW
+ *
+ *   Copyright (c) 2014 David Hoskins.
+ *
+ *   Permission is hereby granted, free of charge, to any person obtaining a
+ *   copy of this software and associated documentation files (the "Software"),
+ *   to deal in the Software without restriction, including without limitation
+ *   the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ *   and/or sell copies of the Software, and to permit persons to whom the
+ *   Software is furnished to do so, subject to the following conditions:
+ *
+ *   The above copyright notice and this permission notice shall be included in
+ *   all copies or substantial portions of the Software.
+ *
+ *   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ *   THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ *   DEALINGS IN THE SOFTWARE.
+ */
+#define GLSL_SOFTEMU_NOISE_FN \
+	GLSL_BITFIELD_REVERSE \
+	"float bayer01(ivec2 coord) {\n" \
+	"    coord &= 15;\n" \
+	"    coord.y ^= coord.x;\n" \
+	"    uint v = uint(coord.y | (coord.x << 8));\n" \
+	"    v = (v ^ (v << 2)) & 0x3333u;\n" \
+	"    v = (v ^ (v << 1)) & 0x5555u;\n" \
+	"    v |= v >> 7;\n" \
+	"    v = bitfieldReverse(v) >> 24;\n" \
+	"    return float(v) * (1.0/256.0);\n" \
+	"}\n" \
+	"float whitenoise01(vec2 p) {\n" \
+	"    vec3 p3 = fract(vec3(p.xyx) * 0.1031);\n" \
+	"    p3 += dot(p3, p3.yzx + 33.33);\n" \
+	"    return fract((p3.x + p3.y) * p3.z);\n" \
+	"}\n" \
+	/* Uniform [0,1] -> triangular [-1,1].  Based on
+	 * https://www.shadertoy.com/view/4t2SDh */ \
+	"float tri(float x) {\n" \
+	"    float orig = x * 2.0 - 1.0;\n" \
+	"    uint signbit = floatBitsToUint(orig) & 0x80000000u;\n" \
+	"    x = sqrt(abs(orig)) - 1.0;\n" \
+	"    x = uintBitsToFloat(floatBitsToUint(x) ^ signbit);\n" \
+	"    return x;\n" \
+	"}\n" \
+	"#define SCREEN_NOISE()     tri(bayer01(ivec2(floor(gl_FragCoord.xy) + 0.5)))\n" \
+	"#define SUPPRESS_BANDING() (bayer01(ivec2(gl_FragCoord.xy)) - 0.5)\n"
+
+
 /* Material maps -- tangent-space normal + specular from _norm/_bump/_gloss
  * sidecars.  uhexen2-mfql.
  *
@@ -637,6 +710,16 @@ static const char sworld_frag[] =
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
+	/* Software emulation, decomposed the way Ironwail decomposes it
+	 * (uhexen2-a5nn.3).  All four are 0 unless r_softemu is on, which it is
+	 * not by default, so a stock configuration pays four scalar compares.
+	 *   x = r_softemu_dither_texture scale (0 = off)
+	 *   y = 1 when the lightmap is banded to 64 levels (r_softemu_lightmap_banding)
+	 *   z = r_softemu_dither_screen scale for the far-field noise (0 = off)
+	 *   w = 1 when any softemu stage is live.  Upstream expresses this as a
+	 *       DITHER axis on the world program; a uniform-static branch costs
+	 *       one compare and saves three more programs. */
+	"uniform vec4 u_softemu;\n"
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
@@ -647,6 +730,7 @@ static const char sworld_frag[] =
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
 	GLSL_TURB_UV_FN
+	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	"void main() {\n"
 	/* Lit water rides this program (uhexen2-a5nn.2), so the liquid warp has
@@ -658,15 +742,33 @@ static const char sworld_frag[] =
 	 * shoreline shading around with the ripple. */
 	"    vec2 uv = v_texcoord;\n"
 	"    if (u_turb.x > 0.0) uv = TurbUV(v_texcoord, u_turb);\n"
-	"    vec4 tex = texture(u_texture0, uv);\n"
+	/* Negative LOD bias under softemu, as upstream: the 1997 rasteriser had
+	 * no trilinear blend, so biasing toward the sharper mip is closer to it
+	 * than letting the hardware pick.  -1 where the lightmap is banded too,
+	 * -0.5 otherwise; 0 (a no-op) when softemu is off. */
+	"    float lodbias = (u_softemu.w > 0.0) ? ((u_softemu.y > 0.0) ? -1.0 : -0.5) : 0.0;\n"
+	"    vec4 tex = texture(u_texture0, uv, lodbias);\n"
+	/* Snap the lightmap coordinate to the luxel grid at 1/16 texel, which is
+	 * the resolution the software renderer interpolated light at.  Without
+	 * it the banded lightmap below still fades smoothly between luxels and
+	 * the effect reads as a posterised gradient rather than as bands. */
+	"    vec2 lmsize = vec2(textureSize(u_texture1, 0)) * 16.0;\n"
+	"    vec2 lmuv = v_lmcoord;\n"
+	"    if (u_softemu.w > 0.0)\n"
+	"        lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
-	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
+	"        ? BicubicLightmap(u_texture1, lmuv)\n"
 	/* r_fullbright / r_lightmap.  Applied to the samples rather than to the
 	 * final colour so everything downstream -- overbright, the fullbright
 	 * mask, caustics, fog, the alpha test -- keeps seeing a well-formed
 	 * value.  rgb only on the diffuse: tex.a still gates the alpha test, so
 	 * r_lightmap must not turn a fence into a solid sheet.  uhexen2-isq7. */
-	"        : texture(u_texture1, v_lmcoord);\n"
+	"        : texture(u_texture1, lmuv);\n"
+	/* 64 light levels, which is what colormap.lmp had.  Upstream folds its
+	 * overbright doubling into the same expression; ours stays separate in
+	 * u_overbright, so the scale here is 1/63 rather than 2/63. */
+	"    if (u_softemu.y > 0.0)\n"
+	"        lm.rgb = floor(lm.rgb * 63.0 + 0.5) * (1.0/63.0);\n"
 	"    lm.rgb = mix(lm.rgb, vec3(1.0), u_lightdebug.x);\n"
 	"    tex.rgb = mix(tex.rgb, vec3(1.0), u_lightdebug.y);\n"
 	/* Sample the fullbright mask BEFORE the alpha-test discard.  texture()
@@ -713,6 +815,30 @@ static const char sworld_frag[] =
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* Texture-space dither.  Two noises blended by how much world space one
+	 * pixel covers: up close, white noise keyed to the LIGHTMAP coordinate,
+	 * so the grain sticks to the surface the way the software renderer's
+	 * per-luxel quantisation did; far away, where that grain would alias
+	 * into a shimmer, an ordered screen-space pattern instead.  Both are
+	 * applied in gamma space (the sqrt/square pair) because that is where
+	 * the palette quantisation downstream happens.  Ironwail
+	 * Quake/gl_shaders.h, the DITHER == 1 tail of its world shader.
+	 *
+	 * fwidth of the EYE-space position, not the world one upstream uses:
+	 * eye space is a rigid transform of world space, so the magnitude this
+	 * asks for is the same, and v_eyepos is the position this shader
+	 * actually has for a brush entity. */
+	"    if (u_softemu.x > 0.0 || u_softemu.z > 0.0) {\n"
+	"        vec3 dpos = fwidth(v_eyepos);\n"
+	"        float farblend = clamp(max(dpos.x, max(dpos.y, dpos.z)) * 0.5 - 0.125, 0.0, 1.0);\n"
+	"        farblend *= farblend;\n"
+	"        color.rgb = sqrt(max(color.rgb, vec3(0.0)));\n"
+	"        float luma = dot(color.rgb, vec3(0.25, 0.625, 0.125));\n"
+	"        float nearnoise = tri(whitenoise01(lmuv * lmsize)) * luma * u_softemu.x;\n"
+	"        float farnoise = (u_fog_density > 0.0) ? SCREEN_NOISE() * u_softemu.z : 0.0;\n"
+	"        color.rgb += mix(nearnoise, farnoise, farblend);\n"
+	"        color.rgb *= color.rgb;\n"
+	"    }\n"
 	/* For cutout alpha-test (threshold > 0.5 = fence/holey, A2C enabled):
 	 * surviving fragments are by definition opaque, so force alpha=1 to
 	 * stop A2C from dithering their coverage based on the noisy
@@ -752,6 +878,13 @@ static const char sworld_frag_opaque[] =
 	"uniform vec2 u_caustics;\n"		/* x=intensity, y=time (uhexen2-6bfm) */
 	"uniform float u_overbright;\n"		/* lightmap multiplier: 1.0=off, 2.0=on (uhexen2-f29y) */
 	"uniform float u_lightmap_bicubic;\n"	/* 0=bilinear, 1=4-tap B-spline bicubic (uhexen2-b2f0) */
+	/* Same uniform layout as sworld_frag, deliberately: the two are switched
+	 * between by glUseProgram plus a re-upload and no call site knows which
+	 * it has.  Most of the world draws through THIS one -- the MDI dispatch
+	 * and the DrawTextureChains fast path -- so leaving softemu out of it
+	 * would have meant the modes reached only fences and brush ents.
+	 * uhexen2-a5nn.3. */
+	"uniform vec4 u_softemu;\n"
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in vec2 v_lmcoord;\n"
@@ -762,12 +895,20 @@ static const char sworld_frag_opaque[] =
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
+	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
+	"    float lodbias = (u_softemu.w > 0.0) ? ((u_softemu.y > 0.0) ? -1.0 : -0.5) : 0.0;\n"
+	"    vec4 tex = texture(u_texture0, v_texcoord, lodbias);\n"
+	"    vec2 lmsize = vec2(textureSize(u_texture1, 0)) * 16.0;\n"
+	"    vec2 lmuv = v_lmcoord;\n"
+	"    if (u_softemu.w > 0.0)\n"
+	"        lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
-	"        ? BicubicLightmap(u_texture1, v_lmcoord)\n"
-	"        : texture(u_texture1, v_lmcoord);\n"
+	"        ? BicubicLightmap(u_texture1, lmuv)\n"
+	"        : texture(u_texture1, lmuv);\n"
+	"    if (u_softemu.y > 0.0)\n"
+	"        lm.rgb = floor(lm.rgb * 63.0 + 0.5) * (1.0/63.0);\n"
 	"    lm.rgb = mix(lm.rgb, vec3(1.0), u_lightdebug.x);\n"	/* uhexen2-isq7 */
 	"    tex.rgb = mix(tex.rgb, vec3(1.0), u_lightdebug.y);\n"
 	/* Material maps.  Branch is uniform-static and therefore coherent across
@@ -800,6 +941,18 @@ static const char sworld_frag_opaque[] =
 	"    float fogfac = u_fog_density * v_fogdist;\n"
 	"    float fog = exp(-fogfac * fogfac);\n"
 	"    color.rgb = mix(u_fog_color, color.rgb, clamp(fog, 0.0, 1.0));\n"
+	/* The DITHER == 1 tail; see sworld_frag for what the two noises are for. */
+	"    if (u_softemu.x > 0.0 || u_softemu.z > 0.0) {\n"
+	"        vec3 dpos = fwidth(v_eyepos);\n"
+	"        float farblend = clamp(max(dpos.x, max(dpos.y, dpos.z)) * 0.5 - 0.125, 0.0, 1.0);\n"
+	"        farblend *= farblend;\n"
+	"        color.rgb = sqrt(max(color.rgb, vec3(0.0)));\n"
+	"        float luma = dot(color.rgb, vec3(0.25, 0.625, 0.125));\n"
+	"        float nearnoise = tri(whitenoise01(lmuv * lmsize)) * luma * u_softemu.x;\n"
+	"        float farnoise = (u_fog_density > 0.0) ? SCREEN_NOISE() * u_softemu.z : 0.0;\n"
+	"        color.rgb += mix(nearnoise, farnoise, farblend);\n"
+	"        color.rgb *= color.rgb;\n"
+	"    }\n"
 	"    fragColor = vec4(color.rgb, 1.0);\n"
 	"}\n";
 
