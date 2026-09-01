@@ -806,9 +806,23 @@ static void M_Main_Draw (void)
 	/* Which renderer this binary is.  The three client configurations are
 	 * indistinguishable on screen until something is wrong, and a bug report
 	 * that says "the water looks flat" is a different bug on each of them.
-	 * Bottom-left of the 320x200 menu space; M_Print adds the centering
-	 * offset itself. */
-	M_Print (8, 192, M_RendererName());
+	 *
+	 * Mirrors the version watermark Draw_ConsoleVersionInfo pins to the
+	 * bottom-right (gl_draw.c), so the two boot-time identifiers sit at
+	 * opposite ends of the same baseline.  That means the console canvas,
+	 * not CANVAS_MENU: the menu canvas is only 320 wide and centred, so
+	 * drawing here would land the label mid-screen on anything widescreen.
+	 * Same 11px inset and 14px lift off the bottom as the watermark, and
+	 * the same |0x100 charset. */
+	{
+		const char *r = M_RendererName();
+		int i, y = vid.conheight - 14;
+
+		GL_SetCanvas (CANVAS_DEFAULT);
+		for (i = 0; r[i]; i++)
+			Draw_Character (11 + i*8, y, r[i] | 0x100);
+		GL_SetCanvas (CANVAS_MENU);
+	}
 }
 
 
