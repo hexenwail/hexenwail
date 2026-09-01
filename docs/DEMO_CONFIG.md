@@ -69,7 +69,35 @@ bgmvolume 1.0
 ## Available CVars
 
 - `hide_hud` — Hide status bar and HUD elements (0=show, 1=hide, default 0)
+- `scr_demobar_timeout` — Playback bar idle timeout, in seconds (default 1).
+  Negative hides the bar entirely, 0 pins it up for the whole demo.
 - Standard cvars: `fov`, `host_maxfps`, `gamma`, `contrast`, `bgmvolume`, `volume`, etc.
+
+## The Playback Bar
+
+During playback the engine draws a bar above the status bar showing the demo
+name, the play/pause state, how far through the file playback has reached, and
+the elapsed map time. It appears when the demo starts and whenever you press a
+key, then fades out after `scr_demobar_timeout` seconds of no input.
+
+Position is derived from the demo file offset, not from a time index, so it is
+an approximation: a stretch of the demo where little happens produces few bytes
+and the cursor crawls through it. A `.dem` header carries no duration, and
+finding one would mean reading the whole file before playback could start.
+
+For clean cutscene footage, suppress it alongside the HUD:
+
+**t9start.cfg**:
+```
+hide_hud 1
+scr_demobar_timeout -1
+```
+
+**t9end.cfg**:
+```
+hide_hud 0
+scr_demobar_timeout 1
+```
 
 ## File Location
 
