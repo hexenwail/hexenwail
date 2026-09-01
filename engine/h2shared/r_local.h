@@ -83,6 +83,7 @@ extern cvar_t	r_transwater;
 #ifdef H2W
 extern cvar_t	r_teamcolor;
 #endif
+extern cvar_t	r_external_textures;
 extern cvar_t	r_texture_external;
 extern cvar_t	r_dynamic;
 

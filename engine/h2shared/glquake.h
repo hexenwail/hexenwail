@@ -440,6 +440,8 @@ extern	cvar_t	r_wholeframe;
 extern	cvar_t	r_clearcolor;
 extern	cvar_t	r_alphasort;
 extern	cvar_t	r_vm_watch;	/* log viewmodel draw-state transitions (uhexen2-ac4c) */
+extern	cvar_t	r_external_textures;
+void R_TextureExternal_Deprecated (cvar_t *var);	/* uhexen2-yz1b */
 extern	cvar_t	r_texture_external;
 extern	cvar_t	r_texture_external_hud;
 extern	cvar_t	r_materialmaps;		/* _norm/_bump/_gloss sidecars (uhexen2-mfql) */

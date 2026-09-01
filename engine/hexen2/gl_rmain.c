@@ -476,7 +476,31 @@ cvar_t	r_showbboxes_targets = {"r_showbboxes_targets", "0", CVAR_NONE};	/* 1 = h
 cvar_t	r_showbboxes_links = {"r_showbboxes_links", "0", CVAR_NONE};	/* 1 = draw line segments from the focused edict's entity-typed QC fields to their targets, and from edicts referencing the focused one back to it (uhexen2-4ej9) */
 cvar_t	r_pointfile_depthtest = {"r_pointfile_depthtest", "1", CVAR_NONE};	/* 0 = draw the `pointfile` leak arrows through world geometry (uhexen2-nwx1) */
 cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};
-cvar_t	r_texture_external = {"r_texture_external", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh */
+cvar_t	r_external_textures = {"r_external_textures", "1", CVAR_ARCHIVE};	/* HD replacement textures; uhexen2-dbnh, renamed uhexen2-yz1b */
+cvar_t	r_texture_external  = {"r_texture_external", "1", CVAR_NONE};		/* deprecated; uhexen2-yz1b */
+
+/* uhexen2-yz1b: r_texture_external was a DEAD cvar defaulting to 0 -- it gated
+ * only the Quake II .wal loader, which h2config.h #undefs -- and it was
+ * CVAR_ARCHIVE, so every config.cfg written before 4b47643cf (2026-08-23)
+ * saved a meaningless "0".  That commit raised the default to 1 and gave the
+ * cvar teeth in the same change, turning all those stale zeroes into a silent
+ * "disable every replacement texture in this gamedir".
+ *
+ * Renaming is the only remedy that is not a heuristic: an archived value cannot
+ * be told apart from a deliberate one, so the new name simply does not inherit
+ * it.  The old name stays registered so an old config does not spew "Unknown
+ * command", but it is CVAR_NONE -- never written back -- so the stale line
+ * disappears from config.cfg the first time it is rewritten, and it gates
+ * nothing.  The callback is the point: it says the old setting was dropped. */
+void R_TextureExternal_Deprecated (cvar_t *var)
+{
+	Con_Printf ("r_texture_external is deprecated and no longer does anything.\n");
+	Con_Printf ("  Use r_external_textures (currently %d) instead.\n",
+		    r_external_textures.integer);
+	if (!var->integer)
+		Con_Printf ("  Your old value of 0 was IGNORED; replacement textures stay on.\n");
+}
+
 cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
 
 /* Material maps -- _norm / _bump / _gloss sidecars.  uhexen2-mfql.
@@ -485,7 +509,7 @@ cvar_t	r_texture_external_hud = {"r_texture_external_hud", "0", CVAR_ARCHIVE};
  * turning it off stops the effect at once and reclaims the VRAM at the next
  * map load.  Default 1 to match _glow, which is also on by default: a pack
  * that ships these files expects them used, and nothing loads for a pack
- * that does not ship them.  Note it sits behind r_texture_external -- with
+ * that does not ship them.  Note it sits behind r_external_textures -- with
  * no replacement texture there is no sidecar to find.
  *
  * The three tuning knobs are live and cost nothing when a map has no

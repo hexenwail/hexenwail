@@ -207,7 +207,7 @@
    Affects:	model.c, gl_model.c (opengl & software renderers both.)
 
    Support for loading external wal mip textures instead of the ones
-   embedded in the mdl. (cvar: r_texture_external.)
+   embedded in the mdl. (cvar: r_external_textures.)
    ================================================================== */
 #undef	WAL_TEXTURES
 
