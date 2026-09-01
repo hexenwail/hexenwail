@@ -54,6 +54,7 @@ void M_Menu_Quit_f (void);
 static void M_Menu_LanConfig_f (void);
 static void M_Menu_GameOptions_f (void);
 static void M_Menu_Mods_f (void);
+static void M_Menu_Maps_f (void);
 static void M_Menu_Search_f (void);
 static void M_Menu_ServerList_f (void);
 
@@ -68,6 +69,7 @@ static void M_Options_Draw (void);
 static void M_Keys_Draw (void);
 static void M_Video_Draw (void);
 static void M_Mods_Draw (void);
+static void M_Maps_Draw (void);
 static void M_Help_Draw (void);
 static void M_Quit_Draw (void);
 static void M_LanConfig_Draw (void);
@@ -86,6 +88,7 @@ static void M_Options_Key (int key);
 static void M_Keys_Key (int key);
 static void M_Video_Key (int key);
 static void M_Mods_Key (int key);
+static void M_Maps_Key (int key);
 static void M_Help_Key (int key);
 static void M_Quit_Key (int key);
 static void M_LanConfig_Key (int key);
@@ -7586,6 +7589,539 @@ static void M_Menu_Search_f (void)
 }
 
 
+/*
+=============================================================================
+
+MAPS BROWSER MENU -- Ironwail's M_Menu_Maps_f / ExtraMaps (uhexen2-a5nn.13)
+
+Loading a third-party map used to mean knowing its bsp name and typing
+`map <name>` at the console.  This lists what is installed, by title rather
+than by filename, which is the difference between a browsable list and a
+directory dump.
+
+Titles come from each map's worldspawn "message" via FS_GetMapTitle; a map
+without one, or one we cannot read, is listed under its filename rather than
+hidden.  The scan itself is the one maplist and randmap already use, so this
+adds a view, not a second enumeration.
+
+Structurally this is M_Mods_* with the parts it does not need removed: no
+separator row, no unselectable rows, no per-row toggle.  The cursor and the
+scroll offset index maps_view, never maps_list -- same rule as the mods menu,
+and for the same reason (uhexen2-8uc1).
+
+=============================================================================
+*/
+
+#define	MAPS_MAX		1024
+#define	MAPS_LIST_TOP		60
+#define	MAPS_LIST_X		32
+#define	MAPS_CURSOR_X		24
+#define	MAPS_SCROLLBAR_X	284
+#define	MAPS_FOOTER_RESERVE	24	/* px below the list: search line */
+#define	MAPS_TAG_RIGHT		280
+#define	MAPS_LABEL_MAX		28	/* characters between MAPS_LIST_X and the tag */
+
+typedef struct
+{
+	char		name[MAX_QPATH];	/* bsp basename -- what `map' takes */
+	char		title[64];		/* worldspawn message, "" if none */
+	qboolean	is_start;
+} mapentry_t;
+
+static mapentry_t	maps_list[MAPS_MAX];
+static int	maps_count;
+static int	maps_view[MAPS_MAX];
+static int	maps_view_count;
+static int	maps_cursor;		/* index into maps_view */
+static int	maps_top;		/* first visible view row */
+static qboolean	maps_truncated;
+
+/* A start map is where you enter an episode, so it is worth pointing at in a
+ * list of eighty.  "start" and "startNN" are the community convention Ironwail
+ * encodes (ExtraMaps_IsStart); demo1 is here because it is Hexen II's own
+ * campaign entry -- New Game runs exactly `map demo1' (menu.c:887). */
+static qboolean M_Maps_IsStart (const char *name)
+{
+	int	i;
+
+	if (!q_strcasecmp (name, "demo1"))
+		return true;
+	if (q_strncasecmp (name, "start", 5) != 0)
+		return false;
+	for (i = 5; name[i]; i++)
+	{
+		if (name[i] < '0' || name[i] > '9')
+			return false;
+	}
+	return true;
+}
+
+/*
+Hexen II keeps level titles in strings.txt and puts only the INDEX in
+worldspawn's message -- "325", not "The Cathedral".  Quake stores the text,
+which is why this step has no counterpart in Ironwail's ExtraMaps and why a
+straight port of it lists a column of three-digit numbers.
+
+The engine's own table (Host_LoadStrings / Host_GetString) is NOT usable
+here.  It is loaded only when a map spawns -- cl_parse.c:687, sv_main.c:2958,
+cl_inlude.c:141, and nowhere in Host_Init -- so at the main menu, which is
+exactly where you browse for a map to load, host_string_count is 0.  Calling
+Host_LoadStrings from the menu to fix that would be worse: it allocates on
+the hunk, which the next map load resets underneath it, and it Host_Errors on
+a missing file, which is not an acceptable way for a menu to behave.
+
+So the menu reads the file itself, once per scan, into malloc'd storage it
+owns and frees.  It is one file read alongside the N bsp headers the scan
+already does.
+*/
+static char	*maps_strings;		/* strings.txt, newlines -> NUL */
+static char	**maps_string_line;
+static int	maps_string_count;
+
+static void M_Maps_FreeStrings (void)
+{
+	if (maps_string_line)
+	{
+		free (maps_string_line);
+		maps_string_line = NULL;
+	}
+	if (maps_strings)
+	{
+		free (maps_strings);
+		maps_strings = NULL;
+	}
+	maps_string_count = 0;
+}
+
+static void M_Maps_LoadStrings (void)
+{
+	byte	*data;
+	char	*p;
+	int	n, i;
+
+	M_Maps_FreeStrings ();
+
+	data = FS_LoadMallocFile ("strings.txt", NULL);
+	if (!data)
+		return;		/* no titles; rows fall back to filenames */
+	maps_strings = (char *)data;
+
+	/* Count lines, then index them.  Both CR and LF terminate a line and a
+	 * CRLF pair must not count twice, which is the same rule
+	 * Host_LoadStrings applies. */
+	n = 1;
+	for (p = maps_strings; *p; p++)
+	{
+		if (*p == '\r' || *p == '\n')
+		{
+			if (p[0] == '\r' && p[1] == '\n')
+				p++;
+			n++;
+		}
+	}
+
+	maps_string_line = (char **) malloc (sizeof(char *) * (size_t)n);
+	if (!maps_string_line)
+	{
+		M_Maps_FreeStrings ();
+		return;
+	}
+
+	i = 0;
+	maps_string_line[i++] = maps_strings;
+	for (p = maps_strings; *p && i < n; p++)
+	{
+		if (*p == '\r' || *p == '\n')
+		{
+			qboolean crlf = (p[0] == '\r' && p[1] == '\n');
+			*p = '\0';
+			if (crlf)
+				*(++p) = '\0';
+			maps_string_line[i++] = p + 1;
+		}
+	}
+	maps_string_count = i;
+}
+
+/*
+Third-party maps write a literal title as often as an index, so a message
+that is not all digits is taken at face value.  An index outside the table
+yields no title and the row falls back to its filename.
+*/
+static void M_Maps_ResolveTitle (const char *raw, char *out, size_t outsize)
+{
+	int	i, idx;
+
+	out[0] = '\0';
+	if (!raw || !*raw)
+		return;
+
+	for (i = 0; raw[i]; i++)
+	{
+		if (raw[i] < '0' || raw[i] > '9')
+		{
+			q_strlcpy (out, raw, outsize);
+			return;
+		}
+	}
+
+	idx = atoi (raw);
+	if (idx < 0 || idx >= maps_string_count || !maps_string_line)
+		return;
+	q_strlcpy (out, maps_string_line[idx], outsize);
+}
+
+static void M_ScanMaps (void)
+{
+	int	i, n;
+	char	raw[64];
+
+	maps_count = 0;
+	maps_truncated = false;
+
+	M_Maps_LoadStrings ();
+
+	n = FS_BuildMapList (NULL);
+	for (i = 0; i < n; i++)
+	{
+		const char	*name = FS_MapListName (i);
+		mapentry_t	*e;
+
+		if (!name || !*name)
+			continue;
+		if (maps_count >= MAPS_MAX)
+		{
+			maps_truncated = true;
+			break;
+		}
+		e = &maps_list[maps_count++];
+		q_strlcpy (e->name, name, sizeof(e->name));
+		e->is_start = M_Maps_IsStart (e->name);
+		/* One bsp header read per map.  Only the entity lump's head is
+		 * touched, and this runs once when the menu opens, not per frame. */
+		if (FS_GetMapTitle (e->name, raw, sizeof(raw)))
+			M_Maps_ResolveTitle (raw, e->title, sizeof(e->title));
+		else
+			e->title[0] = '\0';
+	}
+
+	FS_FreeNameList ();
+	M_Maps_FreeStrings ();
+
+	if (maps_truncated)
+		Con_Printf ("maps menu: more than %d maps installed, listing the first %d\n",
+			    MAPS_MAX, MAPS_MAX);
+}
+
+/* What the row shows: the title when the map has one, the filename otherwise.
+ * Ironwail lists the message for the same reason -- "Blackmarsh" is findable,
+ * "demo1" is not. */
+static const char *M_Maps_Label (const mapentry_t *e)
+{
+	static char	buf[MAPS_LABEL_MAX + 1];
+	const char	*src = e->title[0] ? e->title : e->name;
+
+	q_strlcpy (buf, src, sizeof(buf));
+	return buf;
+}
+
+static int M_Maps_VisibleRows (void)
+{
+	int	rows = (200 - MAPS_LIST_TOP - MAPS_FOOTER_RESERVE) / 8;
+
+	if (rows < 4)
+		rows = 4;
+	return rows;
+}
+
+static void M_Maps_BuildView (void)
+{
+	int	i;
+
+	maps_view_count = 0;
+	for (i = 0; i < maps_count; i++)
+	{
+		/* filter on both, so a tester who knows either the title or the
+		 * bsp name finds the row */
+		if (M_Filter_Active() &&
+		    !M_Filter_Matches(maps_list[i].title) &&
+		    !M_Filter_Matches(maps_list[i].name))
+			continue;
+		maps_view[maps_view_count++] = i;
+	}
+
+	if (maps_cursor >= maps_view_count)
+		maps_cursor = maps_view_count - 1;
+	if (maps_cursor < 0)
+		maps_cursor = 0;
+}
+
+static void M_Maps_EnsureVisible (void)
+{
+	int	visible = M_Maps_VisibleRows ();
+
+	if (maps_cursor < maps_top)
+		maps_top = maps_cursor;
+	else if (maps_cursor >= maps_top + visible)
+		maps_top = maps_cursor - visible + 1;
+	if (maps_top > maps_view_count - visible)
+		maps_top = maps_view_count - visible;
+	if (maps_top < 0)
+		maps_top = 0;
+}
+
+static void M_Maps_ClampCursor (void)
+{
+	if (maps_view_count <= 0)
+	{
+		maps_cursor = 0;
+		maps_top = 0;
+		return;
+	}
+	if (maps_cursor >= maps_view_count)
+		maps_cursor = maps_view_count - 1;
+	if (maps_cursor < 0)
+		maps_cursor = 0;
+	M_Maps_EnsureVisible ();
+}
+
+static void M_Maps_FilterChanged (void)
+{
+	M_Maps_BuildView ();
+	maps_cursor = 0;
+	maps_top = 0;
+	M_Maps_ClampCursor ();
+}
+
+static void M_Menu_Maps_f (void)
+{
+	int	i;
+
+	Key_SetDest (key_menu);
+	m_state = m_maps;
+	m_entersound = true;
+
+	/* the search buffer is shared with the other filtered submenus */
+	M_Filter_Clear ();
+
+	M_ScanMaps ();
+	M_Maps_BuildView ();
+
+	/* open on the running map when there is one, so the list is a place you
+	 * can orient yourself rather than always starting at the top */
+	maps_cursor = 0;
+	if (cl.worldmodel && cls.state == ca_active)
+	{
+		char	cur[MAX_QPATH];
+
+		COM_FileBase (cl.worldmodel->name, cur, sizeof(cur));
+		for (i = 0; i < maps_view_count; i++)
+		{
+			if (!q_strcasecmp (maps_list[maps_view[i]].name, cur))
+			{
+				maps_cursor = i;
+				break;
+			}
+		}
+	}
+	maps_top = 0;
+	M_Maps_ClampCursor ();
+}
+
+static void M_Maps_MouseHover (int nrows)
+{
+	int	vy, k;
+
+	if (!menu_mouse_moved)
+		return;
+
+	vy = M_ScreenYToCanvasY (menu_mouse_y);
+	for (k = 0; k < nrows; k++)
+	{
+		int y = MAPS_LIST_TOP + k * 8;
+		if (vy >= y && vy < y + 8)
+		{
+			maps_cursor = maps_top + k;
+			return;
+		}
+	}
+}
+
+static void M_Maps_Draw (void)
+{
+	int	i, k, y, cursor_y, yf;
+	int	visible, last_visible, nrows, list_bottom;
+
+	ScrollTitle("gfx/menu/title0.lmp");
+
+	visible = M_Maps_VisibleRows ();
+	M_Maps_EnsureVisible ();
+
+	last_visible = maps_top + visible;
+	if (last_visible > maps_view_count)
+		last_visible = maps_view_count;
+	nrows = last_visible - maps_top;
+	if (nrows < 0)
+		nrows = 0;
+
+	/* hover before draw, so highlight and blinking cursor agree with the
+	 * pointer in the same frame rather than trailing it by one */
+	M_Maps_MouseHover (nrows);
+
+	cursor_y = -1;
+	for (k = 0; k < nrows; k++)
+	{
+		const mapentry_t *e;
+
+		i = maps_top + k;
+		y = MAPS_LIST_TOP + k * 8;
+		e = &maps_list[maps_view[i]];
+
+		if (i == maps_cursor)
+		{
+			cursor_y = y;
+			M_PrintWhite (MAPS_LIST_X, y, M_Maps_Label(e));
+		}
+		else
+			M_Print (MAPS_LIST_X, y, M_Maps_Label(e));
+
+		if (e->is_start)
+		{
+			const char *tag = "start";
+			M_Print (MAPS_TAG_RIGHT - (int)strlen(tag) * 8, y, tag);
+		}
+	}
+
+	if (maps_view_count == 0)
+		M_Print (MAPS_LIST_X, MAPS_LIST_TOP,
+			 maps_count ? "No maps match" : "No maps found");
+
+	list_bottom = MAPS_LIST_TOP + (nrows ? nrows : 1) * 8;
+
+	/* up/down scroll indicators */
+	if (maps_top > 0)
+		M_DrawCharacter (MAPS_LIST_X - 16, MAPS_LIST_TOP, 128);
+	if (last_visible < maps_view_count && nrows)
+		M_DrawCharacter (MAPS_LIST_X - 16, MAPS_LIST_TOP + (nrows - 1) * 8, 129);
+
+	/* proportional scrollbar on the right edge */
+	if (maps_view_count > visible)
+	{
+		int	track_y = MAPS_LIST_TOP;
+		int	track_h = list_bottom - MAPS_LIST_TOP;
+		int	thumb_h = (visible * track_h) / maps_view_count;
+		int	thumb_y = track_y + (maps_top * track_h) / maps_view_count;
+		int	j;
+
+		if (thumb_h < 8)
+			thumb_h = 8;
+		for (j = 0; j < track_h; j += 8)
+		{
+			int cy = track_y + j;
+			if (cy >= thumb_y && cy < thumb_y + thumb_h)
+				M_DrawCharacter (MAPS_SCROLLBAR_X, cy, 11);
+			else
+				M_DrawCharacter (MAPS_SCROLLBAR_X, cy, '-');
+		}
+	}
+
+	yf = list_bottom + 4;
+
+	/* The bsp name under the list: the title is what you search by, but the
+	 * filename is what you would type at the console, and a tester filing a
+	 * report needs that one. */
+	if (maps_view_count > 0)
+	{
+		const mapentry_t *e = &maps_list[maps_view[maps_cursor]];
+		if (e->title[0])
+			M_Print (MAPS_LIST_X, yf, va("(%s)", e->name));
+	}
+
+	M_Filter_Draw (MAPS_LIST_X, yf + 10);
+
+	if (cursor_y >= 0)
+		M_DrawCharacter (MAPS_CURSOR_X, cursor_y, 12 + ((int)(realtime * 4) & 1));
+}
+
+static void M_Maps_Key (int key)
+{
+	int	visible = M_Maps_VisibleRows ();
+
+	/* Search first.  M_Filter_HandleKey claims only printable ASCII and
+	 * backspace, so escape, enter, the arrows and the gamepad codes all fall
+	 * through to navigation. */
+	if (M_Filter_HandleKey (key))
+	{
+		M_Maps_FilterChanged ();
+		return;
+	}
+
+	switch (key)
+	{
+	case K_ESCAPE:
+	case K_GP_B:
+		/* first press drops the filter, second leaves the menu */
+		if (M_Filter_Active ())
+		{
+			S_LocalSound ("raven/menu2.wav");
+			M_Filter_Clear ();
+			M_Maps_FilterChanged ();
+			break;
+		}
+		M_Menu_Main_f ();
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (maps_view_count > 0)
+			maps_cursor = (maps_cursor + 1) % maps_view_count;
+		M_Maps_EnsureVisible ();
+		break;
+
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (maps_view_count > 0)
+			maps_cursor = (maps_cursor + maps_view_count - 1) % maps_view_count;
+		M_Maps_EnsureVisible ();
+		break;
+
+	case K_PGUP:
+		S_LocalSound ("raven/menu1.wav");
+		maps_cursor -= visible;
+		M_Maps_ClampCursor ();
+		break;
+
+	case K_PGDN:
+		S_LocalSound ("raven/menu1.wav");
+		maps_cursor += visible;
+		M_Maps_ClampCursor ();
+		break;
+
+	case K_HOME:
+		S_LocalSound ("raven/menu1.wav");
+		maps_cursor = 0;
+		M_Maps_ClampCursor ();
+		break;
+
+	case K_END:
+		S_LocalSound ("raven/menu1.wav");
+		maps_cursor = maps_view_count - 1;
+		M_Maps_ClampCursor ();
+		break;
+
+	case K_ENTER:
+	case K_GP_A:
+		if (maps_view_count <= 0)
+			break;
+		m_entersound = true;
+		Key_SetDest (key_game);
+		m_state = m_none;
+		M_Filter_Clear ();
+		Cbuf_AddText (va("map %s\n", maps_list[maps_view[maps_cursor]].name));
+		break;
+	}
+}
+
 static void M_Search_Draw (void)
 {
 	int x;
@@ -7746,6 +8282,7 @@ void M_Init (void)
 	Cmd_AddCommand ("menu_video", M_Menu_Video_f);
 	Cmd_AddCommand ("help", M_Menu_Help_f);
 	Cmd_AddCommand ("menu_mods", M_Menu_Mods_f);
+	Cmd_AddCommand ("menu_maps", M_Menu_Maps_f);
 	Cmd_AddCommand ("menu_quit", M_Menu_Quit_f);
 	Cmd_AddCommand ("menu_class", M_Menu_Class2_f);
 
@@ -7882,6 +8419,10 @@ void M_Draw (void)
 
 	case m_mods:
 		M_Mods_Draw ();
+		break;
+
+	case m_maps:
+		M_Maps_Draw ();
 		break;
 
 	case m_help:
@@ -8167,6 +8708,10 @@ void M_Keydown (int key, qboolean repeat)
 
 	case m_mods:
 		M_Mods_Key (key);
+		return;
+
+	case m_maps:
+		M_Maps_Key (key);
 		return;
 
 	case m_help:

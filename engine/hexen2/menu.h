@@ -51,7 +51,8 @@ enum m_state_e
 	m_difficulty,
 	m_mload,
 	m_msave,
-	m_mods
+	m_mods,
+	m_maps
 };
 
 extern	enum m_state_e	m_state;
