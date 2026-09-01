@@ -1400,17 +1400,24 @@ void Key_Event (int key, qboolean down)
 		return;
 	}
 
-// any keypress during demo playback re-arms the playback bar's timeout,
-// which is what scr_demobar_timeout measures "no interaction" from
-	if (cls.demoplayback && down)
-		cls.demoactivity = realtime;
-
 // during demo playback, most keys bring up the main menu
 	if (cls.demoplayback && down && consolekeys[key] && key_dest == key_game)
 	{
 		M_ToggleMenu_f ();
 		return;
 	}
+
+// Input that stays with the demo re-arms the playback bar's timeout, which is
+// what scr_demobar_timeout measures "no interaction" from.  This sits BELOW the
+// menu toggle above on purpose, and requires key_dest == key_game: during
+// playback most keys open the main menu, so counting the key that opens it --
+// or the navigation that follows, which arrives with key_dest == key_menu --
+// pops the bar up underneath the menu and re-arms it on every keystroke, which
+// reads as blinking (uhexen2-tkn5).  What is left is the non-consolekey input
+// that the demo itself keeps, mouse buttons chiefly.  Key-up events returned
+// above, so reaching here means a keydown.
+	if (cls.demoplayback && key_dest == key_game)
+		cls.demoactivity = realtime;
 
 	if (cl.intermission == 12 && down)
 	{

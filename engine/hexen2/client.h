@@ -147,10 +147,12 @@ typedef struct
 	 * per-demo start/end configs and the scr_demobar_timeout overlay, both
 	 * of which want a name and not a file handle.  Empty when idle. */
 	char		demofilename[MAX_DEMONAME];
-	/* realtime of the last viewer keypress during playback.  Only the demo
-	 * bar reads it; it is what "no interaction" in scr_demobar_timeout
-	 * measures from.  Lives here rather than in the renderer so keys.c can
-	 * set it without the software build needing a demo bar of its own. */
+	/* realtime of the last viewer input that reached the demo during playback
+	 * -- key_dest == key_game only, so the menu and console keys that most of
+	 * a demo's keypresses turn into do not count (keys.c).  Only the demo bar
+	 * reads it; it is what "no interaction" in scr_demobar_timeout measures
+	 * from.  Lives here rather than in the renderer so keys.c can set it
+	 * without the software build needing a demo bar of its own. */
 	double		demoactivity;
 //	FILE		*introdemofile;
 	int		td_lastframe;		// to meter out one message a frame

@@ -77,8 +77,13 @@ bgmvolume 1.0
 
 During playback the engine draws a bar above the status bar showing the demo
 name, the play/pause state, how far through the file playback has reached, and
-the elapsed map time. It appears when the demo starts and whenever you press a
-key, then fades out after `scr_demobar_timeout` seconds of no input.
+the elapsed map time. It appears when the demo starts and whenever input
+reaches the demo -- a mouse click, say -- then fades out after
+`scr_demobar_timeout` seconds of no interaction.
+
+Menu and console keys deliberately do not count. During playback most keys open
+the main menu, so counting them would pop the bar up underneath the menu and
+re-arm it on every keystroke of the navigation that follows.
 
 Position is derived from the demo file offset, not from a time index, so it is
 an approximation: a stretch of the demo where little happens produces few bytes
