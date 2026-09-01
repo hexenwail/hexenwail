@@ -311,6 +311,9 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_showbboxes_health);
 	Cvar_RegisterVariable (&r_showbboxes_targets);
 	Cvar_RegisterVariable (&r_showbboxes_links);
+	Cvar_RegisterVariable (&r_showfields);
+	Cvar_RegisterVariable (&r_showfields_align);
+	R_ShowBBoxes_InitCommands ();
 	Cvar_RegisterVariable (&r_pointfile_depthtest);
 	Cvar_RegisterVariable (&r_speeds);
 	{ extern cvar_t r_speeds_gpufinish; Cvar_RegisterVariable (&r_speeds_gpufinish); }
