@@ -2796,6 +2796,8 @@ enum
 	REND_DITHER,
 	REND_TEXFILTER,
 	REND_ANISOTROPY,
+	REND_EXTTEXTURES,
+	REND_LEGACYALPHA,
 	REND_LMBICUBIC,
 	REND_PARTICLES,
 	REND_SOFTPARTICLES,
@@ -2824,6 +2826,8 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Dither Amount :",	/* REND_DITHER */
 	"Textures      :",	/* REND_TEXFILTER */
 	"Anisotropy    :",	/* REND_ANISOTROPY */
+	"HD Textures   :",	/* REND_EXTTEXTURES */
+	"Old Skin Alpha:",	/* REND_LEGACYALPHA */
 	"Smooth Lmaps  :",	/* REND_LMBICUBIC */
 	"Particles     :",	/* REND_PARTICLES */
 	"Soft Sprites  :",	/* REND_SOFTPARTICLES */
@@ -2857,6 +2861,8 @@ static qboolean M_Rendering_IsSkip (int i)
 	case REND_DITHER:
 	case REND_TEXFILTER:
 	case REND_ANISOTROPY:
+	case REND_EXTTEXTURES:
+	case REND_LEGACYALPHA:
 	case REND_LMBICUBIC:
 	case REND_SOFTPARTICLES:
 	case REND_FULLBRIGHTS:
@@ -2948,6 +2954,14 @@ static void M_Rendering_AdjustSliders (int dir)
 		break;
 	case REND_FULLBRIGHTS:
 		Cvar_SetValue ("gl_fullbrights", !gl_fullbrights.integer);
+		break;
+	case REND_EXTTEXTURES:
+		Cvar_SetValue ("r_external_textures",
+			       Cvar_VariableValue("r_external_textures") ? 0 : 1);
+		break;
+	case REND_LEGACYALPHA:
+		Cvar_SetValue ("r_legacy_special_trans_alpha",
+			       Cvar_VariableValue("r_legacy_special_trans_alpha") ? 0 : 1);
 		break;
 	case REND_DYNLIGHT:
 		Cvar_SetValue ("r_dynamic", r_dynamic.integer ? 0 : 1);
@@ -3113,6 +3127,20 @@ static void M_Rendering_Draw (void)
 		M_DrawCheckbox (220, 92 + 8*REND_SOFTPARTICLES, r_softparticles.integer);
 	}
 
+	if (!M_Rendering_IsSkip(REND_EXTTEXTURES))
+	{
+		M_Print (76, 92 + 8*REND_EXTTEXTURES, rend_labels[REND_EXTTEXTURES]);
+		M_DrawCheckbox (220, 92 + 8*REND_EXTTEXTURES,
+				(int)Cvar_VariableValue("r_external_textures"));
+	}
+
+	if (!M_Rendering_IsSkip(REND_LEGACYALPHA))
+	{
+		M_Print (76, 92 + 8*REND_LEGACYALPHA, rend_labels[REND_LEGACYALPHA]);
+		M_DrawCheckbox (220, 92 + 8*REND_LEGACYALPHA,
+				(int)Cvar_VariableValue("r_legacy_special_trans_alpha"));
+	}
+
 	if (!M_Rendering_IsSkip(REND_FULLBRIGHTS))
 	{
 		M_Print (76, 92 + 8*REND_FULLBRIGHTS, rend_labels[REND_FULLBRIGHTS]);
@@ -3230,6 +3258,14 @@ static void M_Rendering_Draw (void)
 	 * was typed, but permanent once a capability check can hide a row. */
 	if (!M_Rendering_IsSkip(rendering_cursor))
 		M_DrawCharacter (64, 92 + 8*rendering_cursor, 12+((int)(realtime*4)&1));
+
+	/* Both replacement-skin rows are read by Mod_LoadAllSkins, so toggling
+	 * one changes nothing until models are reloaded.  Without this the row
+	 * reads as broken -- the checkbox moves and the world does not.  Drawn
+	 * only while the cursor is on one of them; row REND_ITEMS is free,
+	 * REND_ITEMS+1 belongs to the search prompt.  uhexen2-b0kv */
+	if (rendering_cursor == REND_EXTTEXTURES || rendering_cursor == REND_LEGACYALPHA)
+		M_Print (76, 92 + 8*REND_ITEMS, "applies on next map load");
 
 	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
 	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));
