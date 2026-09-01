@@ -20,6 +20,11 @@ extern float	r_fog_color[3];
 glprogram_t	gl_shader_world;
 glprogram_t	gl_shader_world_opaque;	/* uhexen2-5c6r: early_fragment_tests, no discard */
 glprogram_t	gl_shader_alias;
+/* Affine-mapping twins, compiled from the same sources with NOPERSP defined.
+ * Selected per draw by R_SoftEmuMdlWarp; unused and inert at r_softemu 0,
+ * which is the default.  uhexen2-ktjv. */
+glprogram_t	gl_shader_alias_np;
+glprogram_t	gl_shader_skeletal_np;
 glprogram_t	gl_shader_skeletal;
 glprogram_t	gl_shader_skeletal_oit;
 glprogram_t	gl_shader_2d;
@@ -44,6 +49,8 @@ GLuint		gl_solid_white_texture;
 /* OIT variants of translucent shaders */
 glprogram_t	gl_shader_world_oit;
 glprogram_t	gl_shader_alias_oit;
+glprogram_t	gl_shader_alias_np_oit;
+glprogram_t	gl_shader_skeletal_np_oit;
 glprogram_t	gl_shader_particle_oit;
 gl_particle_gpu_prog_t	gl_shader_particle_gpu;
 
@@ -127,6 +134,72 @@ GLuint GL_LinkProgram (GLuint vert, GLuint frag)
 /* Compile an OIT variant of a fragment shader.
  * Injects `#define OIT 1` and OIT MRT outputs after the #version line,
  * replacing the `out vec4 fragColor;` declaration. */
+/*
+===============
+GL_SpliceDefines
+
+Return a malloc'd copy of `src` with `defines` inserted where a #define is
+legal: after the #version line, and after any default-precision declarations
+that follow it.  GLSL ES requires `precision <qual> <type>;` before the first
+use of that type, so splicing directly under #version is not safe in general --
+the OIT splice below learned that the hard way (uhexen2-g63k).
+
+Caller frees.  NULL on a source with no newline at all, which cannot be a
+valid shader.  uhexen2-ktjv.
+===============
+*/
+static char *GL_SpliceDefines (const char *src, const char *defines)
+{
+	const char	*rest = strchr (src, '\n');
+	size_t		head_len, total;
+	char		*buf;
+
+	if (!rest)
+		return NULL;
+	rest++;
+
+	while (!strncmp (rest, "precision ", 10))
+	{
+		const char *eol = strchr (rest, '\n');
+		if (!eol)
+			return NULL;
+		rest = eol + 1;
+	}
+
+	head_len = (size_t)(rest - src);
+	total = head_len + strlen (defines) + strlen (rest) + 1;
+	buf = (char *) malloc (total);
+	if (!buf)
+		Sys_Error ("%s: out of memory", __thisfunc__);
+
+	memcpy (buf, src, head_len);
+	memcpy (buf + head_len, defines, strlen (defines));
+	strcpy (buf + head_len + strlen (defines), rest);
+	return buf;
+}
+
+/*
+===============
+GL_CompileShaderDefines
+
+GL_CompileShader with a preamble spliced in.  One source, several variants --
+which is how a `noperspective` qualifier gets to be optional, since an
+interpolation qualifier cannot be switched by a uniform the way the softemu
+stages in the world shader can.  uhexen2-ktjv.
+===============
+*/
+static GLuint GL_CompileShaderDefines (GLenum type, const char *src, const char *defines)
+{
+	char	*buf = GL_SpliceDefines (src, defines);
+	GLuint	shader;
+
+	if (!buf)
+		return 0;
+	shader = GL_CompileShader (type, buf);
+	free (buf);
+	return shader;
+}
+
 static GLuint GL_CompileOITFragShader (const char *frag_src)
 {
 	/* The OIT output block (inserted after #version, before the rest).
@@ -966,6 +1039,16 @@ static const char sworld_frag_opaque[] =
  * the fullbright pass also enables polygon offset as a backstop. */
 static const char salias_vert[] =
 	GLSL_VERT_HEADER
+	/* Affine texture mapping, the way the software rasteriser did it
+	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
+	 * can switch, so this is a compile-time variant -- the only stage of
+	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
+	 * defined, so the qualifier simply is not there. */
+	"#ifdef NOPERSP\n"
+	"#define TCQUAL noperspective\n"
+	"#else\n"
+	"#define TCQUAL\n"
+	"#endif\n"
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec4 a_color;\n"
@@ -979,7 +1062,7 @@ static const char salias_vert[] =
 	 * / brush-poly batches that share this program (which submit world-space
 	 * positions already) stay correct.  uhexen2-0gn3. */
 	"uniform mat4 u_alias_model;\n"
-	"out vec2 v_texcoord;\n"
+	"TCQUAL out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
@@ -995,6 +1078,16 @@ static const char salias_vert[] =
 
 static const char salias_frag[] =
 	GLSL_FRAG_HEADER
+	/* Affine texture mapping, the way the software rasteriser did it
+	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
+	 * can switch, so this is a compile-time variant -- the only stage of
+	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
+	 * defined, so the qualifier simply is not there. */
+	"#ifdef NOPERSP\n"
+	"#define TCQUAL noperspective\n"
+	"#else\n"
+	"#define TCQUAL\n"
+	"#endif\n"
 	"uniform sampler2D u_texture0;\n"
 	"uniform float u_fog_density;\n"
 	"uniform vec3 u_fog_color;\n"
@@ -1008,7 +1101,7 @@ static const char salias_frag[] =
 	 * two of them.  Desktop GLSL accepts the qualifier and ignores it. */
 	"uniform highp sampler2D u_soft_depth;\n"
 	"uniform highp vec3 u_soft_params;\n"	/* x=1/fade distance (0=off), yz=depth linearization */
-	"in vec2 v_texcoord;\n"
+	"TCQUAL in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
@@ -1024,7 +1117,16 @@ static const char salias_frag[] =
 	 * ripple identically, so the two share one copy.  uhexen2-a5nn.2. */
 	"    vec2 uv = v_texcoord;\n"
 	"    if (u_turb.x > 0.0) uv = TurbUV(v_texcoord, u_turb);\n"
+	/* Point-sample one mip, offset half a texel.  The qualifier alone is not
+	 * the look: the rasteriser had no mip chain and no bilinear blend, and
+	 * upstream's variant takes both away too (Ironwail gl_shaders.h, the
+	 * ALIASSHADER_NOPERSP branch).  uhexen2-ktjv. */
+	"#ifdef NOPERSP\n"
+	"    uv -= 0.5 / vec2(textureSize(u_texture0, 0));\n"
+	"    vec4 tex = textureLod(u_texture0, uv, 0.0);\n"
+	"#else\n"
 	"    vec4 tex = texture(u_texture0, uv);\n"
+	"#endif\n"
 	"    vec4 color = tex * v_color;\n"
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
 	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
@@ -1093,6 +1195,16 @@ static const char salias_frag[] =
 #ifndef USE_GLES
 static const char sskeletal_vert[] =
 	GLSL_VERT_HEADER
+	/* Affine texture mapping, the way the software rasteriser did it
+	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
+	 * can switch, so this is a compile-time variant -- the only stage of
+	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
+	 * defined, so the qualifier simply is not there. */
+	"#ifdef NOPERSP\n"
+	"#define TCQUAL noperspective\n"
+	"#else\n"
+	"#define TCQUAL\n"
+	"#endif\n"
 	/* Explicit locations, because the IQM VAO (GL_CreateAliasGPUMesh in
 	 * gl_mesh.c) hardcodes this layout and it does not match the generic
 	 * a_position/a_texcoord/a_lmcoord/a_color bindings GL_LoadProgram
@@ -1132,7 +1244,7 @@ static const char sskeletal_vert[] =
 	"uniform vec4 u_lightcolor;\n"	/* rgb = light (tint + scale folded in), a = entity alpha */
 	"uniform float u_fullbright;\n"	/* 1.0 during the additive fullbright re-draw */
 	"\n"
-	"out vec2 v_texcoord;\n"
+	"TCQUAL out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
@@ -1294,6 +1406,16 @@ static const char spart_gpu_vert[] =
 #ifndef USE_GLES
 static const char salias_inst_vert[] =
 	"#version 430 core\n"
+	/* Affine texture mapping, the way the software rasteriser did it
+	 * (uhexen2-ktjv).  An interpolation qualifier is not something a uniform
+	 * can switch, so this is a compile-time variant -- the only stage of
+	 * r_softemu that needs one.  Empty object-like macro when NOPERSP is not
+	 * defined, so the qualifier simply is not there. */
+	"#ifdef NOPERSP\n"
+	"#define TCQUAL noperspective\n"
+	"#else\n"
+	"#define TCQUAL\n"
+	"#endif\n"
 	"\n"
 	"struct InstanceData {\n"
 	"    vec4 WorldMatrix0;\n"
@@ -1329,7 +1451,7 @@ static const char salias_inst_vert[] =
 	"uniform vec3 u_eyepos;\n"
 	"uniform int u_poseverttype;\n"  /* 0=PV_QUAKE1, 1=PV_MD3 */
 	"\n"
-	"out vec2 v_texcoord;\n"
+	"TCQUAL out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
@@ -1519,6 +1641,31 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 	return true;
 }
 
+/*
+===============
+GL_InitProgramDefines
+
+GL_InitProgram with a preamble spliced into both stages, so one source can be
+compiled as more than one program.  Only the alias NOPERSP variants use it;
+it delegates rather than duplicating GL_InitProgram's uniform and sampler
+setup, which the variants must share exactly.  uhexen2-ktjv.
+===============
+*/
+static void GL_InitProgramDefines (glprogram_t *p, const char *name,
+				   const char *vert_src, const char *frag_src,
+				   const char *defines)
+{
+	char	*v = GL_SpliceDefines (vert_src, defines);
+	char	*f = GL_SpliceDefines (frag_src, defines);
+
+	if (v && f)
+		GL_InitProgram (p, name, v, f);
+	else
+		Con_SafePrintf ("  %s: FAILED (preamble splice)\n", name);
+	free (v);
+	free (f);
+}
+
 #ifndef USE_GLES
 static qboolean GL_InitParticleGPUProgram (gl_particle_gpu_prog_t *p)
 {
@@ -1579,17 +1726,23 @@ void GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 }
 
 gl_alias_inst_prog_t gl_shader_alias_inst;
+gl_alias_inst_prog_t gl_shader_alias_inst_np;	/* affine twin, uhexen2-ktjv */
 
 /* Shadedots table — defined in gl_rmain.c */
 extern float r_avertexnormal_dots[16][256];
 
 #ifndef USE_GLES
-static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
+static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *name,
+					 const char *defines)
 {
 	GLuint vs, fs, prog;
 
-	vs = GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
-	fs = GL_CompileShader(GL_FRAGMENT_SHADER, salias_frag);
+	/* `defines` is NULL for the ordinary program and "#define NOPERSP 1" for
+	 * the affine twin -- one source, two programs.  uhexen2-ktjv. */
+	vs = defines ? GL_CompileShaderDefines(GL_VERTEX_SHADER, salias_inst_vert, defines)
+		     : GL_CompileShader(GL_VERTEX_SHADER, salias_inst_vert);
+	fs = defines ? GL_CompileShaderDefines(GL_FRAGMENT_SHADER, salias_frag, defines)
+		     : GL_CompileShader(GL_FRAGMENT_SHADER, salias_frag);
 	if (!vs || !fs) {
 		if (vs) glDeleteShader_fp(vs);
 		if (fs) glDeleteShader_fp(fs);
@@ -1612,7 +1765,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 		if (!status) {
 			char log[1024];
 			glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-			Sys_Printf("alias_instanced link failed: %s\n", log);
+			Sys_Printf("%s link failed: %s\n", name, log);
 			glDeleteProgram_fp(prog);
 			return false;
 		}
@@ -1647,7 +1800,7 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 			r_avertexnormal_dots, GL_STATIC_DRAW);
 	glBindBuffer_fp(GL_SHADER_STORAGE_BUFFER, 0);
 
-	Sys_Printf("  alias_instanced: OK (prog=%u, ubo=%u)\n", prog, p->ubo_shadedots);
+	Sys_Printf("  %s: OK (prog=%u, ubo=%u)\n", name, prog, p->ubo_shadedots);
 	return true;
 }
 #endif /* !USE_GLES */
@@ -1655,7 +1808,8 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p)
 void GL_AliasInst_Init (void)
 {
 #ifndef USE_GLES
-	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst))
+	GL_InitAliasInstProgram(&gl_shader_alias_inst_np, "alias_instanced_np", "#define NOPERSP 1\n");
+	if (!GL_InitAliasInstProgram(&gl_shader_alias_inst, "alias_instanced", NULL))
 		Sys_Printf("WARNING: instanced alias shader failed to init\n");
 #endif
 }
@@ -1668,6 +1822,11 @@ void GL_AliasInst_Shutdown (void)
 	if (gl_shader_alias_inst.ubo_shadedots)
 		glDeleteBuffers_fp(1, &gl_shader_alias_inst.ubo_shadedots);
 	memset(&gl_shader_alias_inst, 0, sizeof(gl_shader_alias_inst));
+	if (gl_shader_alias_inst_np.program)
+		glDeleteProgram_fp(gl_shader_alias_inst_np.program);
+	if (gl_shader_alias_inst_np.ubo_shadedots)
+		glDeleteBuffers_fp(1, &gl_shader_alias_inst_np.ubo_shadedots);
+	memset(&gl_shader_alias_inst_np, 0, sizeof(gl_shader_alias_inst_np));
 }
 
 void GL_Shaders_Init (void)
@@ -1679,6 +1838,13 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);
+	/* Affine-mapping twin (uhexen2-ktjv).  Same sources, NOPERSP defined:
+	 * an interpolation qualifier cannot be switched by a uniform, so this
+	 * is the one r_softemu stage that costs a program.  Compiled whether or
+	 * not r_softemu is on -- building it lazily would put a shader compile
+	 * inside a frame the first time someone flipped the cvar. */
+	GL_InitProgramDefines(&gl_shader_alias_np, "alias_np", salias_vert, salias_frag,
+			      "#define NOPERSP 1\n");
 #ifndef USE_GLES
 	/* Skipped on the ES tier: sskeletal_vert reads its bone matrices from a
 	 * `layout(std430) buffer`, and shader storage blocks are GLSL ES 3.10,
@@ -1689,6 +1855,8 @@ void GL_Shaders_Init (void)
 	 * that up owns giving the ES tier a UBO or texture-buffer skinning
 	 * path, or leaving skeletal models unsupported there.  uhexen2-dfay. */
 	GL_InitProgram(&gl_shader_skeletal, "skeletal", sskeletal_vert, salias_frag);
+	GL_InitProgramDefines(&gl_shader_skeletal_np, "skeletal_np", sskeletal_vert, salias_frag,
+			      "#define NOPERSP 1\n");
 #endif
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
@@ -1781,7 +1949,23 @@ void GL_Shaders_Init (void)
 #ifndef USE_GLES
 	GL_InitOITProgram(&gl_shader_world_oit,    "world",    sworld_vert, sworld_frag);
 	GL_InitOITProgram(&gl_shader_alias_oit,    "alias",    salias_vert, salias_frag);
+	{
+		char *v = GL_SpliceDefines (salias_vert, "#define NOPERSP 1\n");
+		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
+		if (v && f)
+			GL_InitOITProgram(&gl_shader_alias_np_oit, "alias_np", v, f);
+		free (v);
+		free (f);
+	}
 	GL_InitOITProgram(&gl_shader_skeletal_oit, "skeletal", sskeletal_vert, salias_frag);
+	{
+		char *v = GL_SpliceDefines (sskeletal_vert, "#define NOPERSP 1\n");
+		char *f = GL_SpliceDefines (salias_frag, "#define NOPERSP 1\n");
+		if (v && f)
+			GL_InitOITProgram(&gl_shader_skeletal_np_oit, "skeletal_np", v, f);
+		free (v);
+		free (f);
+	}
 	GL_InitOITProgram(&gl_shader_particle_oit, "particle", spart_vert,  spart_frag);
 #endif
 
@@ -1819,7 +2003,9 @@ void GL_Shaders_Shutdown (void)
 		&gl_shader_world_opaque,
 		&gl_shader_alias, &gl_shader_skeletal, &gl_shader_particle, &gl_shader_sky,
 		&gl_shader_particle_gpu.base,
+		&gl_shader_alias_np, &gl_shader_skeletal_np,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_skeletal_oit,
+		&gl_shader_alias_np_oit, &gl_shader_skeletal_np_oit,
 		&gl_shader_particle_oit
 	};
 	int i;

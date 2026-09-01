@@ -1274,6 +1274,46 @@ static vec3_t	shadevector;
 
 /*
 =================
+R_AliasProgram / R_SkeletalProgram
+
+Which alias program this draw takes.  Four of them, on two axes: the OIT pass
+needs its own fragment output, and r_softemu_mdl_warp needs affine texture
+interpolation, which is a qualifier and therefore a separate compiled program
+rather than a uniform.  Falls back to the perspective-correct twin if the
+affine one failed to build, so a shader problem costs the effect and not the
+models.  uhexen2-ktjv.
+=================
+*/
+static const glprogram_t *R_AliasProgram (void)
+{
+	qboolean oit = OIT_InPass();
+
+	if (R_SoftEmuMdlWarp())
+	{
+		const glprogram_t *np = oit ? &gl_shader_alias_np_oit : &gl_shader_alias_np;
+		if (np->program)
+			return np;
+	}
+	return oit ? &gl_shader_alias_oit : &gl_shader_alias;
+}
+
+#ifndef USE_GLES
+static const glprogram_t *R_SkeletalProgram (void)
+{
+	qboolean oit = OIT_InPass();
+
+	if (R_SoftEmuMdlWarp())
+	{
+		const glprogram_t *np = oit ? &gl_shader_skeletal_np_oit : &gl_shader_skeletal_np;
+		if (np->program)
+			return np;
+	}
+	return oit ? &gl_shader_skeletal_oit : &gl_shader_skeletal;
+}
+#endif
+
+/*
+=================
 R_AliasLightScale
 
 The divisor that turns 0..255 lighting into the shader's 0..1-ish range,
@@ -1324,7 +1364,7 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	if (!gm || !gm->valid || !gm->ssbo_bones || !gm->num_indices)
 		return;
 
-	prog = OIT_InPass() ? &gl_shader_skeletal_oit : &gl_shader_skeletal;
+	prog = R_SkeletalProgram();
 	if (!prog->program)
 		return;
 
@@ -1565,7 +1605,7 @@ static void GL_DrawAliasFrameMD3 (entity_t *e, aliashdr_t *paliashdr,
 
 		if (GL_ImmCount() + (count - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, R_AliasProgram());
 			GL_ImmBegin ();
 		}
 
@@ -1604,7 +1644,7 @@ static void GL_DrawAliasFrameMD3 (entity_t *e, aliashdr_t *paliashdr,
 #undef EMIT_VERT
 	}
 
-	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, R_AliasProgram());
 }
 
 /*
@@ -1736,7 +1776,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		/* Check buffer space */
 		if (GL_ImmCount() + (count - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
 		{
-			GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+			GL_ImmEnd (GL_TRIANGLES, R_AliasProgram());
 			GL_ImmBegin ();
 		}
 
@@ -1777,7 +1817,7 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		}
 	}
 
-	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+	GL_ImmEnd (GL_TRIANGLES, R_AliasProgram());
 	}
 }
 
@@ -3893,7 +3933,10 @@ Draw all collected alias instances in batches.
 static void R_DrawAliasInstanced (void)
 {
 	int	b, i;
-	gl_alias_inst_prog_t *prog = &gl_shader_alias_inst;
+	/* uhexen2-ktjv: the affine twin when r_softemu_mdl_warp asks for it, and
+	 * only if it built. */
+	gl_alias_inst_prog_t *prog = (R_SoftEmuMdlWarp() && gl_shader_alias_inst_np.program)
+				   ? &gl_shader_alias_inst_np : &gl_shader_alias_inst;
 	extern float r_fog_density;
 	extern float r_fog_color[3];
 	GLuint		inst_buf;

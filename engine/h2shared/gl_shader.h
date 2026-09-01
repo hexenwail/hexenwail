@@ -83,6 +83,10 @@ extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color *
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
 extern glprogram_t	gl_shader_skeletal;	/* PV_IQM bone-weighted skinning (desktop GL 4.3 only) */
+/* NOPERSP twins: affine texture mapping for r_softemu_mdl_warp.  Selected per
+ * draw by R_SoftEmuMdlWarp; identical to their siblings otherwise.  uhexen2-ktjv. */
+extern glprogram_t	gl_shader_alias_np;
+extern glprogram_t	gl_shader_skeletal_np;
 
 extern GLuint		gl_null_fb_texture;	/* 1x1 black sentinel for u_texture2 (uhexen2-sjvf) */
 extern GLuint		gl_flat_normal_texture;	/* 1x1 (128,128,255) flat normal, sentinel for u_texture3 (uhexen2-mfql) */
@@ -94,6 +98,8 @@ extern gl_particle_gpu_prog_t gl_shader_particle_gpu; /* SSBO billboard particle
 extern glprogram_t	gl_shader_world_oit;
 extern glprogram_t	gl_shader_alias_oit;
 extern glprogram_t	gl_shader_skeletal_oit;
+extern glprogram_t	gl_shader_alias_np_oit;
+extern glprogram_t	gl_shader_skeletal_np_oit;
 extern glprogram_t	gl_shader_particle_oit;
 
 /* Instanced alias program (GL 4.3 SSBO — pose + instances in SSBOs) */
@@ -112,6 +118,7 @@ typedef struct {
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
+extern gl_alias_inst_prog_t gl_shader_alias_inst_np;	/* affine twin, uhexen2-ktjv */
 
 void	GL_AliasInst_Init (void);
 void	GL_AliasInst_Shutdown (void);

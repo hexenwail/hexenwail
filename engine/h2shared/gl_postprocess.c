@@ -190,6 +190,9 @@ cvar_t	r_softemu_dither_screen  = {"r_softemu_dither_screen",  "1.0", CVAR_ARCHI
 cvar_t	r_softemu_dither_texture = {"r_softemu_dither_texture", "1.0", CVAR_ARCHIVE};
 /* -1 = follow the mode (on at r_softemu 3), 0 = never, > 0 = always. */
 cvar_t	r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_ARCHIVE};
+/* -1 = follow the mode (on at r_softemu 3), 0 = never, > 0 = always.  The one
+ * softemu sub-cvar Ironwail puts in its menu. */
+cvar_t	r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
 
 /*
 ===============
@@ -254,6 +257,27 @@ void R_SoftEmuParams (float out[4])
 		if (out[0] < 0.0f) out[0] = 0.0f;
 		if (out[2] < 0.0f) out[2] = 0.0f;
 	}
+}
+
+/*
+===============
+R_SoftEmuMdlWarp
+
+Whether alias models draw with affine (non-perspective-correct) texture
+mapping this frame.
+
+Upstream's ladder, translated (Ironwail r_alias.c:327-339): under its BANDED
+mode any nonzero value turns it on, so the shipped -1 does; under anything
+else it takes an explicitly positive one.  Ours is the same test against our
+own top mode -- see R_SoftEmuParams for why r_softemu 3 is the one that
+corresponds.  uhexen2-ktjv.
+===============
+*/
+qboolean R_SoftEmuMdlWarp (void)
+{
+	if (r_softemu.integer == 3)
+		return r_softemu_mdl_warp.value != 0.0f;
+	return r_softemu_mdl_warp.value > 0.0f;
 }
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
@@ -1643,6 +1667,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_softemu_dither_screen);
 	Cvar_RegisterVariable(&r_softemu_dither_texture);
 	Cvar_RegisterVariable(&r_softemu_lightmap_banding);
+	Cvar_RegisterVariable(&r_softemu_mdl_warp);
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
 	Cvar_RegisterVariable(&r_oit);

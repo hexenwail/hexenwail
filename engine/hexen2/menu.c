@@ -266,8 +266,10 @@ static void M_HoverSound (int item)
  * 320 logical units wide and centered on screen.  It is NOT 200 tall: see
  * CANVAS_MENU in gl_draw.c, whose ortho height is glheight/scale, so the
  * visible Y range is at least 480 at every automatic scale.  Submenus longer
- * than 200 units rely on that: Rendering's 19 rows end at y=236 and its
- * search prompt sits at y=252. */
+ * than 200 units rely on that: Rendering is the longest and its search prompt
+ * currently sits at y=284, which is well inside 480.  (Written as "19 rows,
+ * y=252" when the note went in; the list has grown twice since, which is why
+ * the bound and not the count is what matters here.) */
 static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int num_items)
 {
 	int vy, idx;
@@ -2086,7 +2088,7 @@ static void M_Gamepad_Key (int k);
  * provides a `const char *labels[ITEMS]` table; while m_search_len > 0
  * the menu's IsSkip helper hides rows whose label doesn't contain the
  * (case-insensitive) search buffer.  Initial integration: Rendering
- * submenu (REND_ITEMS == 19, biggest list).  Pattern propagates to other
+ * submenu (REND_ITEMS, the biggest list).  Pattern propagates to other
  * submenus by adding a labels table + IsSkip + search hooks in *_Key.
  * ------------------------------------------------------------------------- */
 #define M_SEARCH_BUFLEN	24
@@ -2908,6 +2910,7 @@ enum
 {
 	REND_RENDERSCALE = 0,
 	REND_SOFTEMU,
+	REND_MDLWARP,
 	REND_DITHER,
 	REND_TEXFILTER,
 	REND_ANISOTROPY,
@@ -2938,6 +2941,7 @@ static int	rendering_cursor;
 static const char *rend_labels[REND_ITEMS] = {
 	"Render Scale  :",	/* REND_RENDERSCALE */
 	"Retro Mode    :",	/* REND_SOFTEMU */
+	"Model Warp    :",	/* REND_MDLWARP */
 	"Dither Amount :",	/* REND_DITHER */
 	"Textures      :",	/* REND_TEXFILTER */
 	"Anisotropy    :",	/* REND_ANISOTROPY */
@@ -3049,6 +3053,22 @@ static void M_Rendering_AdjustSliders (int dir)
 		if (v < 0) v = 3;
 		if (v > 3) v = 0;
 		Cvar_SetValue ("r_softemu", v);
+		break;
+	}
+	/* The affine texture mapping the software rasteriser had on models.
+	 * Tri-state because the shipped -1 is not a boolean: it means "follow
+	 * Retro Mode", which turns it on at Colormap and leaves it off below.
+	 * The one softemu sub-cvar Ironwail exposes too.  uhexen2-ktjv. */
+	case REND_MDLWARP:
+	{
+		float	v = r_softemu_mdl_warp.value;
+		int	state = (v < 0.0f) ? 0 : (v == 0.0f) ? 1 : 2;
+
+		state = (state + dir) % 3;
+		if (state < 0)
+			state += 3;
+		Cvar_Set ("r_softemu_mdl_warp",
+			  state == 0 ? "-1" : state == 1 ? "0" : "1");
 		break;
 	}
 	case REND_DITHER:
@@ -3205,6 +3225,14 @@ static void M_Rendering_Draw (void)
 			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Colormap");
 		else
 			M_PrintWhite (220, 92 + 8*REND_SOFTEMU, "Off");
+	}
+
+	if (!M_Rendering_IsSkip(REND_MDLWARP))
+	{
+		float v = r_softemu_mdl_warp.value;
+		M_Print (76, 92 + 8*REND_MDLWARP, rend_labels[REND_MDLWARP]);
+		M_PrintWhite (220, 92 + 8*REND_MDLWARP,
+			(v < 0.0f) ? "Auto" : (v == 0.0f) ? "Off" : "On");
 	}
 
 	if (!M_Rendering_IsSkip(REND_DITHER))

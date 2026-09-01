@@ -54,10 +54,14 @@ extern cvar_t r_dither;
 extern cvar_t r_softemu_dither_screen;
 extern cvar_t r_softemu_dither_texture;
 extern cvar_t r_softemu_lightmap_banding;
+extern cvar_t r_softemu_mdl_warp;
 /* The four floats the world shader's u_softemu wants; see the definition in
  * gl_postprocess.c for how our r_softemu ladder maps onto Ironwail's.
  * uhexen2-a5nn.3. */
 void R_SoftEmuParams (float out[4]);
+/* True when alias models should draw through the noperspective shader
+ * variant this frame.  uhexen2-ktjv. */
+qboolean R_SoftEmuMdlWarp (void);
 
 /* HDR rendering (0=off, 1=ACES tonemapping) */
 extern cvar_t r_hdr;
