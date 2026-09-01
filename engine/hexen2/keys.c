@@ -1400,6 +1400,11 @@ void Key_Event (int key, qboolean down)
 		return;
 	}
 
+// any keypress during demo playback re-arms the playback bar's timeout,
+// which is what scr_demobar_timeout measures "no interaction" from
+	if (cls.demoplayback && down)
+		cls.demoactivity = realtime;
+
 // during demo playback, most keys bring up the main menu
 	if (cls.demoplayback && down && consolekeys[key] && key_dest == key_game)
 	{
