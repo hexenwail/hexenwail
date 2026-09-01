@@ -1077,8 +1077,10 @@ static void SCR_DrawDemoBar (void)
 
 	/* Re-arm the timeout on anything the viewer can cause.  Ironwail keys off
 	 * demo speed changes, which we have no control for; what we have is the
-	 * demo starting, the pause state flipping, and any keypress (keys.c
-	 * stamps cls.demoactivity). */
+	 * demo starting, the pause state flipping, and input that reaches the demo
+	 * rather than the menu (keys.c stamps cls.demoactivity for key_dest ==
+	 * key_game only -- counting menu keys left the bar blinking underneath the
+	 * menu that a keypress during playback opens, uhexen2-tkn5). */
 	if (!wasplaying || cl.paused != waspaused ||
 	    cls.demoactivity != lastactivity || scr_demobar_timeout.value == 0.0f)
 	{
