@@ -209,6 +209,10 @@ void ED_ClearEdict (edict_t *e);
  * comparing against ev_* values from pr_comp.h. */
 int ED_NumFieldDefs (void);
 ddef_t *ED_FieldDefAt (int i);
+const char *ED_FieldValueString (edict_t *ed, ddef_t *d);
+	/* Formatted value of one field, or NULL for the fields ED_Print also
+	 * hides (vector _x/_y/_z aliases, and anything still all-zero).
+	 * Returns a static buffer -- copy before the next call.  a5nn.10 */
 
 void ED_Print (edict_t *ed);
 const char *ED_GetProperty (edict_t *ed, char *propname);

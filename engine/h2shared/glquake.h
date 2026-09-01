@@ -434,6 +434,10 @@ extern	cvar_t	r_showbboxes_think;
 extern	cvar_t	r_showbboxes_health;
 extern	cvar_t	r_showbboxes_targets;
 extern	cvar_t	r_showbboxes_links;
+extern	cvar_t	r_showfields;
+extern	cvar_t	r_showfields_align;
+extern	int	r_showfields_edict;	/* focused edict index, 0 = none (a5nn.10) */
+void R_ShowBBoxes_InitCommands (void);
 extern	cvar_t	r_pointfile_depthtest;
 extern	cvar_t	leak_color;
 extern	cvar_t	r_wholeframe;
