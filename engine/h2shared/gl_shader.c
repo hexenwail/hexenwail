@@ -1193,9 +1193,15 @@ static const char salias_inst_vert[] =
 	"    return vec3(x, y, z) / 64.0;\n"
 	"}\n"
 	"\n"
+	/* Byte 6 is longitude and byte 7 is latitude: the file stores one
+	 * little-endian short whose LOW byte is longitude (Quake III
+	 * tr_surface.c, lat = normal >> 8).  This had the two the wrong way
+	 * round, which nothing caught because until uhexen2-2ah9 no loader
+	 * existed to reach it.  md3mesh.c's MD3_DecodeNormal is the CPU twin
+	 * of this and must stay in step. */
 	"vec3 MD3_DecodeNormal(uvec2 vdata) {\n"
-	"    uint latbyte = (vdata.y >> 16) & 0xFFu;\n"
-	"    uint lngbyte = (vdata.y >> 24) & 0xFFu;\n"
+	"    uint lngbyte = (vdata.y >> 16) & 0xFFu;\n"
+	"    uint latbyte = (vdata.y >> 24) & 0xFFu;\n"
 	"    float lat = float(latbyte) * (3.14159265 / 128.0);\n"
 	"    float lng = float(lngbyte) * (3.14159265 / 128.0);\n"
 	"    float sinlng = sin(lng);\n"
@@ -1231,9 +1237,23 @@ static const char salias_inst_vert[] =
 	"    vec3 world_pos = world * vec4(local_pos, 1.0);\n"
 	"\n"
 	"    float sdot;\n"
+	/* MD3 carries a real normal instead of an index into the 256-entry
+	 * anorm table, so the shadedots row cannot be looked up -- but the row
+	 * IS the quantized entity yaw, which is the only thing that table
+	 * varies by, so rebuild the light vector from it and evaluate the same
+	 * function the table holds: 1 + d, with d scaled by 0.3 where it faces
+	 * away.  That is what r_avertexnormal_dots is, and it is what
+	 * md5mesh.c's skeletal shader and md3mesh.c's CPU path both compute --
+	 * the three have to agree or one model lights differently depending on
+	 * r_alias_gpu and on which format it was shipped in.  The scaffolding
+	 * this replaces used max(world_normal.z, 0), a top-down world light
+	 * that matched none of them.  uhexen2-2ah9. */
 	"    if (u_poseverttype == 1) {\n"  /* MD3: use decoded normal */
-	"        vec3 world_normal = normalize((mat3(inst.WorldMatrix0.xyz, inst.WorldMatrix1.xyz, inst.WorldMatrix2.xyz)) * normal);\n"
-	"        sdot = max(world_normal.z, 0.0);\n"
+	"        float an = float(inst.ShadedotRow) * (6.28318531 / 16.0);\n"
+	"        vec3 sv = normalize(vec3(cos(-an), sin(-an), 1.0));\n"
+	"        float d = dot(normalize(normal), sv);\n"
+	"        if (d < 0.0) d *= 0.3;\n"
+	"        sdot = max(1.0 + d, 0.0);\n"
 	"    } else {\n"  /* QUAKE1: use shadedots table */
 	"        int sdot_idx = inst.ShadedotRow * 256 + int(ni);\n"
 	"        sdot = shadedots[sdot_idx];\n"

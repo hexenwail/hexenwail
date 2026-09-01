@@ -374,6 +374,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_mesh.c
     ${COMMONDIR}/gl_model.c
     ${COMMONDIR}/md5mesh.c
+    ${COMMONDIR}/md3mesh.c
     ${COMMONDIR}/gl_texmgr.c
     ${COMMONDIR}/gl_postprocess.c
     ${COMMONDIR}/gl_worldcull.c

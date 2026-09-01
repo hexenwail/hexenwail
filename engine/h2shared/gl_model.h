@@ -331,7 +331,13 @@ typedef enum {
 } poseverttype_t;
 
 /* MD3 model format constants */
-#define MD3_IDENT			(('3'<<24)+('D'<<16)+('M'<<8)+'M')	/* "MD3M" */
+/* "IDP3", as a little-endian int read of the four bytes an .md3 starts with.
+ * The value here used to spell "MMD3", which no MD3 file has ever begun with;
+ * the structs below were wrong too (no name[64], no num_frames, and the
+ * surface header missing its ident).  Nothing noticed, because until
+ * uhexen2-2ah9 nothing in this tree had ever parsed one -- the MD3 work that
+ * landed in 2026-05 was the GPU vertex format and its shader decode. */
+#define MD3_IDENT			(('3'<<24)+('P'<<16)+('D'<<8)+'I')	/* "IDP3" */
 #define MD3_VERSION			15
 #define MD3_XYZ_SCALE		(1.0f/64.0f)
 #define MD3_MAX_FRAMES		1024
@@ -345,14 +351,15 @@ typedef enum {
 typedef struct {
 	int		ident;		/* MD3_IDENT */
 	int		version;	/* MD3_VERSION */
-	int		name_len;	/* length of model name */
-	int		frameoffset;	/* byte offset of first frame */
-	int		num_tags;	/* number of tags per frame */
+	char		name[64];	/* model name, as the exporter wrote it */
+	int		flags;		/* unused */
+	int		num_frames;	/* animation frames */
+	int		num_tags;	/* tags per frame (attachment points; unused here) */
 	int		num_surfaces;	/* number of surfaces */
-	int		num_skins;	/* number of skins (unused, use surface skins) */
-	int		ofs_frames;	/* offset to frame data */
+	int		num_skins;	/* unused; the surfaces carry the shaders */
+	int		ofs_frames;	/* offset to md3Frame_t[num_frames] */
 	int		ofs_tags;	/* offset to tag data */
-	int		ofs_surfaces;	/* offset to surface data */
+	int		ofs_surfaces;	/* offset to the first md3Surface_t */
 	int		ofs_end;	/* end of file */
 } md3Header_t;
 
@@ -363,18 +370,22 @@ typedef struct {
 	char		name[16];	/* frame name */
 } md3Frame_t;
 
+/* Every offset in here is relative to the START OF THE SURFACE, not to the
+ * file -- including ofs_end, which is both this surface's length and where
+ * the next one begins. */
 typedef struct {
+	int		ident;		/* MD3_IDENT again */
 	char		name[64];	/* surface name */
 	int		flags;		/* unused */
-	int		num_frames;	/* number of animation frames */
+	int		num_frames;	/* must match the header's */
 	int		num_shaders;	/* number of shaders */
-	int		num_verts;	/* number of vertices */
+	int		num_verts;	/* vertices per frame */
 	int		num_triangles;	/* number of triangles */
-	int		ofs_triangles;	/* offset to triangle data */
-	int		ofs_shaders;	/* offset to shader data */
-	int		ofs_st;		/* offset to s/t coord data */
-	int		ofs_verts;	/* offset to vertex data */
-	int		ofs_next;	/* offset to next surface */
+	int		ofs_triangles;	/* offset to md3Triangle_t[num_triangles] */
+	int		ofs_shaders;	/* offset to md3Shader_t[num_shaders] */
+	int		ofs_st;		/* offset to md3St_t[num_verts] */
+	int		ofs_verts;	/* offset to md3Vertex_t[num_frames*num_verts] */
+	int		ofs_end;	/* surface length; offset to the next surface */
 } md3Surface_t;
 
 typedef struct {
@@ -390,9 +401,13 @@ typedef struct {
 	float		s, t;		/* texture coordinates */
 } md3St_t;
 
+/* On disk the normal is one little-endian short, low byte longitude and high
+ * byte latitude (Quake III tr_surface.c).  Split into two bytes here so the
+ * SSBO the GPU reads is byte-for-byte the file's, in the order both decoders
+ * expect: normal[0] longitude, normal[1] latitude. */
 typedef struct {
-	short		xyz[3];		/* position (XYZ_SCALE to get float) */
-	unsigned char	normal[2];	/* spherical normal (in 8 bits, x=lon, y=lat) */
+	short		xyz[3];		/* position (MD3_XYZ_SCALE to get float) */
+	unsigned char	normal[2];	/* [0] = longitude, [1] = latitude */
 } md3Vertex_t;
 
 /* IQM (skeletal) vertex and bone data structures */
@@ -537,6 +552,11 @@ extern	aliashdr_t	*pheader;
  * back to the rest-pose vertex extent.  Both may be NULL. */
 aliashdr_t *MD5_LoadMesh(const char *name, const unsigned char *buffer, int size,
                          vec3_t out_mins, vec3_t out_maxs);
+/* md3mesh.c -- uhexen2-2ah9.  Produces a PV_MD3 aliashdr_t; out_mins/out_maxs
+ * receive the union of the file's own per-frame bounding boxes. */
+aliashdr_t *MD3_LoadMesh (const char *name, const byte *buffer, int size,
+			  vec3_t out_mins, vec3_t out_maxs);
+void MD3_DecodeNormal (const md3Vertex_t *v, vec3_t out);
 extern	stvert_t	stverts[MAXALIASVERTS];
 extern	mtriangle_t	triangles[MAXALIASTRIS];
 extern	trivertx_t	*poseverts[MAXALIASFRAMES];

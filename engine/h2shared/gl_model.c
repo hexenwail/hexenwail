@@ -60,10 +60,9 @@ static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
  * instead.  Names, defaults and archive flags are Ironwail's (Quake/gl_model.c
  * :42-43) so a config means the same thing in both engines.
  *
- * r_enhancedmodels_priority defaults to Ironwail's "md3,md5" even though md3
- * cannot win here: this tree has the MD3 *vertex format* (PV_MD3, its SSBO
- * path and shader decode) but no MD3 file loader, so the md3 entry below is
- * absent rather than dead code.  Adding one is a two-line change to the table.
+ * r_enhancedmodels_priority is Ironwail's "md3,md5", and as of uhexen2-2ah9
+ * both tokens name a real loader -- md3 was a dead token for as long as this
+ * tree had the MD3 vertex format and no parser for the file.
  * ------------------------------------------------------------------------- */
 static cvar_t	r_enhancedmodels = {"r_enhancedmodels", "1", CVAR_ARCHIVE};
 static cvar_t	r_enhancedmodels_prio = {"r_enhancedmodels_priority", "md3,md5", CVAR_ARCHIVE};
@@ -518,6 +517,44 @@ static qboolean Mod_SetupMD5Model (qmodel_t *mod, const char *srcname,
 
 /*
 ==================
+Mod_SetupMD3Model
+
+The .md3 twin of Mod_SetupMD5Model.  Bounds come from the file rather than
+from the decoded vertices: MD3 stores a box per frame, so the union of them
+covers frames the caller has not asked for yet, which is exactly what culling
+a model that is about to animate needs.  uhexen2-2ah9.
+==================
+*/
+static qboolean Mod_SetupMD3Model (qmodel_t *mod, const char *srcname,
+				   const byte *data, int datasize, int mdlflags,
+				   synctype_t synctype)
+{
+	vec3_t		mins, maxs;
+	aliashdr_t	*ahdr;
+
+	VectorClear (mins);
+	VectorClear (maxs);
+	ahdr = MD3_LoadMesh (srcname, data, datasize, mins, maxs);
+	if (!ahdr)
+		return false;
+
+	mod->type = mod_alias;
+	mod->cache_is_hunk = true;
+	mod->cache.data = (void *) ahdr;
+	VectorCopy (mins, mod->mins);
+	VectorCopy (maxs, mod->maxs);
+	mod->radius = RadiusFromBounds (mod->mins, mod->maxs);
+	mod->flags = mdlflags;
+	/* The replacement's frame count, not the .mdl's -- see Mod_SetupMD5Model
+	 * for why a disagreement is the author's bug to see rather than ours to
+	 * paper over. */
+	mod->numframes = ahdr->numframes;
+	mod->synctype = synctype;
+	return true;
+}
+
+/*
+==================
 Enhanced model substitution (uhexen2-a5nn.6)
 
 Ironwail's loader shuffle, Quake/gl_model.c:3236-3370.
@@ -563,10 +600,42 @@ static qboolean Mod_LoadMD5Replacement (qmodel_t *mod, const char *path,
 	return true;
 }
 
+static qboolean Mod_LoadMD3Replacement (qmodel_t *mod, const char *path,
+					const mdl_t *mdlhdr)
+{
+	byte		*data;
+	long		datasize;
+	qboolean	ok;
+
+	/* The malloc loader for the same reason the MD5 sibling uses it: the
+	 * .mdl this stands in for is still live on the temp hunk. */
+	data = FS_LoadMallocFile (path, NULL);
+	if (!data)
+		return false;
+	datasize = fs_filesize;		/* describes the call above and nothing else */
+
+	Mod_SetAliasModelExtraFlags (mod);	/* ex_flags, keyed on the model name */
+	ok = Mod_SetupMD3Model (mod, path, data, (int) datasize,
+				LittleLong (mdlhdr->flags),
+				(synctype_t) LittleLong (mdlhdr->synctype));
+	free (data);
+	if (!ok)
+		return false;
+
+	/* Same three fixups the .md5mesh path inherits from the .mdl, and for
+	 * the same reason: an .md3 has nowhere to carry Hexen II's model flags,
+	 * so a substituted torch would stop spinning without them. */
+	Mod_FixupMissingModelFlags (mod);
+	Mod_SetExtraFlags (mod);
+	Mod_SaveAliasModelDefaults (mod);
+	return true;
+}
+
+/* Order here does not decide anything -- Mod_TryEnhancedModel walks
+ * r_enhancedmodels_priority and looks each token up in this table. */
 static const mod_enhanced_t mod_enhanced_loaders[] = {
 	{ "md5", ".md5mesh", Mod_LoadMD5Replacement },
-	/* { "md3", ".md3", Mod_LoadMD3Replacement }, once an MD3 *file* loader
-	 * exists -- this tree has PV_MD3 and its shader decode, not a parser. */
+	{ "md3", ".md3",     Mod_LoadMD3Replacement },
 };
 
 static qboolean Mod_TryEnhancedModel (qmodel_t *mod, const mdl_t *mdlhdr)
@@ -583,8 +652,9 @@ static qboolean Mod_TryEnhancedModel (qmodel_t *mod, const mdl_t *mdlhdr)
 	 * loader table by the address strstr() returns inside that string --
 	 * the same order by a longer route.  Going through the string directly
 	 * also means a token naming no loader here is simply skipped, rather
-	 * than needing a dead table entry to absorb it, which is what "md3" in
-	 * the default value is until this tree has an MD3 parser. */
+	 * than needing a dead table entry to absorb it -- which is what "md3"
+	 * needed until uhexen2-2ah9, and what the next format named in a config
+	 * from a newer upstream will need again. */
 	for (p = r_enhancedmodels_prio.string; *p; )
 	{
 		char	token[16];
@@ -645,6 +715,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	byte	*buf;
 	byte	stackbuf[1024];		// avoid dirtying the cache heap
 	int	mod_type;
+	long	filesize;
 
 	// allow recycling of models (Pa3PyX)
 	if (mod->type == mod_alias && !mod->cache_is_hunk)
@@ -668,6 +739,9 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 // load the file
 //
 	buf = FS_LoadStackFile (mod->name, stackbuf, sizeof(stackbuf), & mod->path_id);
+	/* fs_filesize describes the call above and nothing else; the enhanced-model
+	 * substitution below opens files of its own.  Take the copy now. */
+	filesize = fs_filesize;
 	if (!buf)
 	{
 		if (crash)
@@ -738,6 +812,20 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		break;
 	case IDPOLYHEADER:
 		Mod_LoadAliasModel (mod, buf);
+		break;
+	case MD3_IDENT:
+		/* A QuakeC-named .md3, as opposed to one standing in for a .mdl
+		 * through r_enhancedmodels.  No .mdl to inherit flags from, so
+		 * the same zero the .md5mesh direct load passes.  uhexen2-2ah9. */
+		if (!Mod_SetupMD3Model (mod, mod->name, buf, (int) filesize, 0, ST_SYNC))
+		{
+			/* Not tagged loaded, for the reason spelled out on the
+			 * .md5mesh path above: a half-loaded slot cached as
+			 * NL_PRESENT is a permanent nodeless brush model. */
+			if (crash)
+				Sys_Error ("%s: %s is not a valid md3", __thisfunc__, mod->name);
+			return NULL;
+		}
 		break;
 	case IDSPRITEHEADER:
 		Mod_LoadSpriteModel (mod, buf);

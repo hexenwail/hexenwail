@@ -386,7 +386,14 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		Mod_LoadAliasModel (mod, buf);
 		break;
 	case MD3_IDENT:
+		/* Reachable as of uhexen2-2ah9, which corrected MD3_IDENT: it
+		 * used to spell "MMD3" and matched nothing, so an .md3 reaching
+		 * here was loaded as a brush model.  The GL client has a loader
+		 * now (md3mesh.c); this rasterizer does not, and saying so is
+		 * better than the silent misparse it used to get.  break, not
+		 * fall through -- the old code fell into the sprite case. */
 		Sys_Error ("%s: MD3 models are not supported by the classic web port", mod->name);
+		break;
 	case IDSPRITEHEADER:
 		Mod_LoadSpriteModel (mod, buf);
 		break;

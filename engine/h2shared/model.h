@@ -32,7 +32,12 @@
  * d_iface.h caps skin height at 480, which is the limit the restored skin
  * cache was written against, and r_local.h owns the rest. */
 #define ALIAS_VERSION_H2	8
-#define MD3_IDENT		(('3'<<24)+('D'<<16)+('M'<<8)+'M')
+/* "IDP3".  Was ('3'<<24)+('D'<<16)+('M'<<8)+'M' -- "MMD3" -- so the switch in
+ * model.c that refuses an .md3 never actually fired on one; an .md3 handed to
+ * the software loader fell through to Mod_LoadBrushModel instead.  Corrected
+ * alongside the GL-side loader (uhexen2-2ah9); the refusal here stands, the
+ * classic rasterizer has no MD3 path. */
+#define MD3_IDENT		(('3'<<24)+('P'<<16)+('D'<<8)+'I')
 
 /*
 

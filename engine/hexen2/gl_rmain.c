@@ -1425,6 +1425,190 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 
 /*
 =============
+GL_DrawAliasFrameMD3
+
+The CPU streaming path for PV_MD3.  Same command list, same batching, same
+strip/fan expansion as GL_DrawAliasFrame -- only the vertex record differs, so
+this exists rather than a per-vertex branch inside that loop.
+
+It is not a fallback anyone can opt out of: r_alias_gpu is forced to 0 on the
+ES tier (no SSBOs in WebGL2), and even on the desktop the instanced collector
+turns away EF_HOLEY, EF_TRANSPARENT and translucent entities.  An .md3 standing
+in for one of those would otherwise be drawn by reading its 8-byte vertices as
+4-byte trivertx_t.  uhexen2-2ah9.
+=============
+*/
+static void GL_DrawAliasFrameMD3 (entity_t *e, aliashdr_t *paliashdr,
+				  int posenum, int prevposenum, float lerpfrac)
+{
+	const md3Vertex_t	*verts, *verts_prev;
+	int			*order;
+	int			count;
+	float			r, g, b;
+	byte			ColorShade;
+	qboolean		do_lerp;
+	static float		tmp_tc[128][2];
+	static float		tmp_color[128][4];
+	static float		tmp_pos[128][3];
+	int			vi;
+
+	lastposenum = posenum;
+
+	verts = (const md3Vertex_t *)((byte *)paliashdr + paliashdr->posedata);
+	verts += posenum * paliashdr->poseverts;
+
+	do_lerp = (lerpfrac > 0.0f && lerpfrac < 1.0f && prevposenum != posenum);
+	verts_prev = do_lerp
+		? (const md3Vertex_t *)((byte *)paliashdr + paliashdr->posedata)
+		  + prevposenum * paliashdr->poseverts
+		: NULL;
+
+	order = (int *)((byte *)paliashdr + paliashdr->commands);
+
+	ColorShade = e->colorshade;
+	if (ColorShade)
+	{
+		r = RTint[ColorShade];
+		g = GTint[ColorShade];
+		b = BTint[ColorShade];
+	}
+	else
+		r = g = b = 1;
+
+	GL_ImmBegin ();
+
+	while (1)
+	{
+		qboolean is_fan;
+
+		count = *order++;
+		if (!count)
+			break;
+		if (count < 0)
+		{
+			count = -count;
+			is_fan = true;
+		}
+		else
+			is_fan = false;
+
+		if (count > 128) count = 128;
+
+		for (vi = 0; vi < count; vi++)
+		{
+			tmp_tc[vi][0] = ((float *)order)[0];
+			tmp_tc[vi][1] = ((float *)order)[1];
+			order += 2;
+
+			if (model_fullbright_pass)
+			{
+				tmp_color[vi][0] = tmp_color[vi][1] =
+				tmp_color[vi][2] = tmp_color[vi][3] = 1;
+			}
+			else
+			{
+				/* The same 1 + d that r_avertexnormal_dots holds for
+				 * the trivertx path, evaluated instead of looked up:
+				 * MD3 stores a normal, not an index into the anorm
+				 * table.  shadevector is already in model space and
+				 * already carries the entity yaw.  The instanced
+				 * shader and md5mesh.c's skeletal shader compute the
+				 * identical thing. */
+				vec3_t	n;
+				float	d, l;
+
+				MD3_DecodeNormal (&verts[0], n);
+				if (do_lerp)
+				{
+					/* Blend the two poses' normals, as the
+					 * instanced shader does -- taking only the
+					 * near pose's would pop the shading a frame
+					 * before the geometry catches up. */
+					vec3_t	np;
+					int	k;
+
+					MD3_DecodeNormal (&verts_prev[0], np);
+					for (k = 0; k < 3; k++)
+						n[k] = np[k] + (n[k] - np[k]) * lerpfrac;
+					VectorNormalize (n);
+				}
+				d = DotProduct (n, shadevector);
+				if (d < 0.0f)
+					d *= 0.3f;
+				l = 1.0f + d;
+				if (l < 0.0f)
+					l = 0.0f;
+
+				tmp_color[vi][0] = l * lightcolor[0] * r;
+				tmp_color[vi][1] = l * lightcolor[1] * g;
+				tmp_color[vi][2] = l * lightcolor[2] * b;
+				tmp_color[vi][3] = model_constant_alpha;
+			}
+
+			if (do_lerp)
+			{
+				int k;
+				for (k = 0; k < 3; k++)
+					tmp_pos[vi][k] = (verts_prev->xyz[k] +
+							  (verts->xyz[k] - verts_prev->xyz[k]) * lerpfrac)
+							 * MD3_XYZ_SCALE;
+				verts_prev++;
+			}
+			else
+			{
+				int k;
+				for (k = 0; k < 3; k++)
+					tmp_pos[vi][k] = verts->xyz[k] * MD3_XYZ_SCALE;
+			}
+			verts++;
+		}
+
+		if (GL_ImmCount() + (count - 2) * 3 >= GL_IMM_MAX_VERTS - 6)
+		{
+			GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+			GL_ImmBegin ();
+		}
+
+#define EMIT_VERT(idx) do { \
+	GL_ImmTexCoord2f(tmp_tc[idx][0], tmp_tc[idx][1]); \
+	GL_ImmColor4f(tmp_color[idx][0], tmp_color[idx][1], tmp_color[idx][2], tmp_color[idx][3]); \
+	GL_ImmVertex3f(tmp_pos[idx][0], tmp_pos[idx][1], tmp_pos[idx][2]); \
+} while(0)
+		if (is_fan)
+		{
+			for (vi = 2; vi < count; vi++)
+			{
+				EMIT_VERT(0);
+				EMIT_VERT(vi - 1);
+				EMIT_VERT(vi);
+			}
+		}
+		else
+		{
+			for (vi = 2; vi < count; vi++)
+			{
+				if (vi & 1)
+				{
+					EMIT_VERT(vi);
+					EMIT_VERT(vi - 1);
+					EMIT_VERT(vi - 2);
+				}
+				else
+				{
+					EMIT_VERT(vi - 2);
+					EMIT_VERT(vi - 1);
+					EMIT_VERT(vi);
+				}
+			}
+		}
+#undef EMIT_VERT
+	}
+
+	GL_ImmEnd (GL_TRIANGLES, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+}
+
+/*
+=============
 GL_DrawAliasFrame
 =============
 */
@@ -1446,6 +1630,14 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 	if (paliashdr->poseverttype == PV_IQM)
 	{
 		GL_DrawAliasSkeletal (e, paliashdr, posenum, prevposenum, lerpfrac);
+		return;
+	}
+	/* Same reasoning one format over: an md3Vertex_t is eight bytes, a
+	 * trivertx_t is four, and the command list is shared -- so this walk
+	 * would read the right stream at the wrong stride.  uhexen2-2ah9. */
+	if (paliashdr->poseverttype == PV_MD3)
+	{
+		GL_DrawAliasFrameMD3 (e, paliashdr, posenum, prevposenum, lerpfrac);
 		return;
 	}
 
@@ -1624,8 +1816,12 @@ static void GL_DrawAliasShadow (entity_t *e, aliashdr_t *paliashdr, int posenum)
 	float		height, lheight;
 	int		count;
 
-	/* No command list on skeletal meshes -- see GL_DrawAliasFrame. uhexen2-zjux. */
-	if (paliashdr->poseverttype == PV_IQM)
+	/* No command list on skeletal meshes -- see GL_DrawAliasFrame. uhexen2-zjux.
+	 * MD3 has one, but at the wrong vertex stride for the trivertx walk
+	 * below.  A projected blob shadow is worth less than the work to decode
+	 * a second format for it, so an .md3 casts none -- the same call the
+	 * skeletal path already made.  uhexen2-2ah9. */
+	if (paliashdr->poseverttype == PV_IQM || paliashdr->poseverttype == PV_MD3)
 		return;
 
 	lheight = e->origin[2] - lightspot[2];
@@ -1861,6 +2057,9 @@ static void R_SetupAliasFrame (entity_t *e, aliashdr_t *paliashdr)
 		GL_DrawAliasSkeletal (e, paliashdr, pose, prevpose, blend);
 		return;
 	}
+	/* MD3 blends its two poses the same way the trivertx path does, so it
+	 * takes the three-way call below rather than needing its own -- it only
+	 * differs in how a vertex is read.  uhexen2-2ah9. */
 
 	if (blend > 0.0f && blend < 1.0f && prevpose != pose)
 		GL_DrawAliasFrame(e, paliashdr, pose, prevpose, blend);
