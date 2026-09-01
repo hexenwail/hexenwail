@@ -3267,6 +3267,20 @@ static void M_Rendering_Draw (void)
 	if (rendering_cursor == REND_EXTTEXTURES || rendering_cursor == REND_LEGACYALPHA)
 		M_Print (76, 92 + 8*REND_ITEMS, "applies on next map load");
 
+	/* r_wateralpha is split-brained and the row cannot say just one thing.
+	 * World water reads it per frame, so the slider is immediate there.  But
+	 * GL_Upload8 bakes it into an EF_TRANSPARENT alias skin's alpha at upload
+	 * (gl_draw.c, the `p & 1` arm) and Mod_RestoreIndexAlpha does the same for
+	 * a rebuilt replacement, so those models keep whatever was current when
+	 * they loaded.  That is 12 of the 13 EF_TRANSPARENT models in retail
+	 * content, 22% of their skin texels on average and nearly all of
+	 * stclrbm.mdl and boss/bone3.mdl -- visible enough to be worth saying.
+	 * uhexen2-xaon, which also records why deferring the factor to draw time
+	 * is not cheap: alpha already encodes three states, so there is no spare
+	 * room for a class marker that survives filtering. */
+	if (rendering_cursor == REND_WATERALPHA)
+		M_Print (76, 92 + 8*REND_ITEMS, "water now; models on map load");
+
 	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
 	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));
 }
