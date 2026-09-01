@@ -1622,6 +1622,50 @@ void ED_Print (edict_t *ed)
 
 /*
 =============
+ED_FieldValueString
+
+One formatted field value for the r_showfields overlay (uhexen2-a5nn.10).
+
+Returns NULL for exactly the fields ED_Print hides -- the _x/_y/_z aliases
+that shadow a vector, and anything still all-zero -- so a caller can skip a
+NULL rather than restate that rule.  The result is PR_ValueString's static
+buffer: copy it before calling again.
+=============
+*/
+const char *ED_FieldValueString (edict_t *ed, ddef_t *d)
+{
+	const char	*name;
+	int		*v;
+	int		j, l, type;
+
+	if (!ed || ed->free || !d)
+		return NULL;
+
+	name = PR_GetString (d->s_name);
+	if (!name)
+		return NULL;
+	l = strlen (name);
+	j = l - 1;
+	if (j > 0 && name[j-1] == '_' && name[j] >= 'x' && name[j] <= 'z')
+		return NULL;	/* skip _x, _y, _z vars */
+
+	v = (int *)((char *)&ed->v + d->ofs*4);
+	type = d->type & ~DEF_SAVEGLOBAL;
+	if (type < 0 || type >= (int)(sizeof(type_size)/sizeof(type_size[0])))
+		return NULL;
+	for (j = 0; j < type_size[type]; j++)
+	{
+		if (v[j])
+			break;
+	}
+	if (j == type_size[type])
+		return NULL;	/* still all zero */
+
+	return PR_ValueString (d->type, (eval_t *)v);
+}
+
+/*
+=============
 ED_GetProperty
 
 Get the value of an edict property by name
