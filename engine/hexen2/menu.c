@@ -3449,6 +3449,7 @@ enum
 	GFX_GLOW_INTENSITY,
 	GFX_SHOWSPEED,
 	GFX_SHOWCLOCK,
+	GFX_DEMOBAR,
 	GFX_ITEMS
 };
 
@@ -3469,6 +3470,7 @@ static const char *gfx_labels[GFX_ITEMS] = {
 	"Glow Intensity  :",	/* GFX_GLOW_INTENSITY */
 	"Show Speed      :",	/* GFX_SHOWSPEED */
 	"Show Clock      :",	/* GFX_SHOWCLOCK */
+	"Demo Bar        :",	/* GFX_DEMOBAR */
 };
 
 static qboolean M_Graphics_IsSkip (int i)
@@ -3596,6 +3598,26 @@ static void M_Graphics_AdjustSliders (int dir)
 		if (v < 0) v = 3;
 		if (v > 3) v = 0;
 		Cvar_SetValue ("showclock", v);
+		break;
+	}
+	/* Three states over a cvar that is really a float: below zero the bar
+	 * never draws, zero draws it for as long as the demo runs, and anything
+	 * positive is how many seconds of no interaction it survives.  The row
+	 * rotates between the two flags and the shipped 1 second, and READS any
+	 * other positive value truthfully -- but rotating away from a
+	 * hand-tuned 2.5 and back lands on 1, because the row has nowhere to
+	 * keep the old number.  Same trade the sibling rotations here make.
+	 * uhexen2-itie. */
+	case GFX_DEMOBAR:
+	{
+		float	v = scr_demobar_timeout.value;
+		int	state = (v < 0.0f) ? 0 : (v == 0.0f) ? 1 : 2;
+
+		state = (state + dir) % 3;
+		if (state < 0)
+			state += 3;
+		Cvar_Set ("scr_demobar_timeout",
+			  state == 0 ? "-1" : state == 1 ? "0" : "1");
 		break;
 	}
 	}
@@ -3730,6 +3752,21 @@ static void M_Graphics_Draw (void)
 			v == 3 ? "Wall HH:MM:SS" :
 			v == 2 ? "Wall HH:MM" :
 			v == 1 ? "Game Time" : "Off");
+	}
+
+	if (!M_Graphics_IsSkip(GFX_DEMOBAR))
+	{
+		float	v = scr_demobar_timeout.value;
+		char	buf[16];
+
+		M_Print (76, 92 + 8*GFX_DEMOBAR, gfx_labels[GFX_DEMOBAR]);
+		if (v < 0.0f)
+			q_strlcpy (buf, "Off", sizeof(buf));
+		else if (v == 0.0f)
+			q_strlcpy (buf, "Always", sizeof(buf));
+		else
+			q_snprintf (buf, sizeof(buf), "%g sec", v);
+		M_PrintWhite (220, 92 + 8*GFX_DEMOBAR, buf);
 	}
 
 	{
