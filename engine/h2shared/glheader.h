@@ -248,6 +248,25 @@ typedef int64_t  GLint64;
 #define GL_DRAW_INDIRECT_BUFFER			0x8F3F
 #endif
 
+/* Cubemap textures (core GL 1.3, and core in GLES 3.0 / WebGL2, so the
+ * cubemap skybox path reaches every tier).  MinGW's <GL/gl.h> ships only
+ * GL 1.1 constants, so the Windows cross-compile needs these.  uhexen2-ctk9. */
+#ifndef GL_TEXTURE_CUBE_MAP
+#define GL_TEXTURE_CUBE_MAP			0x8513
+#endif
+#ifndef GL_TEXTURE_CUBE_MAP_POSITIVE_X
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X		0x8515
+#endif
+#ifndef GL_TEXTURE_BINDING_CUBE_MAP
+#define GL_TEXTURE_BINDING_CUBE_MAP		0x8514
+#endif
+/* Desktop-only (GL 3.2 / ARB_seamless_cube_map).  Not in GLES 3.0, where
+ * seamless filtering is instead mandatory behaviour -- so the ES tier gets
+ * for free what this enum buys on the desktop. */
+#ifndef GL_TEXTURE_CUBE_MAP_SEAMLESS
+#define GL_TEXTURE_CUBE_MAP_SEAMLESS		0x884F
+#endif
+
 /* GL_ARB_shader_image_load_store (core 4.2) — image bindings used by the
  * Hi-Z pyramid build (gl_worldcull.c).  MinGW's <GL/gl.h> ships only GL
  * 1.1 constants, so the Windows cross-compile needs these explicitly. */

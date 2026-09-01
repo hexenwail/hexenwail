@@ -121,8 +121,15 @@ cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_ARCHIVE};	/* back/solid s
 cvar_t r_skyspeed_front = {"r_skyspeed_front", "16", CVAR_ARCHIVE};	/* front/alpha sky scroll speed */
 cvar_t r_skybox_speed = {"r_skybox_speed", "0", CVAR_NONE};
 cvar_t r_skywind = {"r_skywind", "1", CVAR_ARCHIVE};			/* per-skybox wind speed multiplier (uhexen2-typa) */
+/* Draw skyboxes through the cubemap program rather than six 2D quads.  Ships
+ * on because it is the one that gets the wind right across face edges; 0 is
+ * the escape hatch if a driver mishandles the cubemap.  uhexen2-ctk9. */
+cvar_t r_skycubemap = {"r_skycubemap", "1", CVAR_ARCHIVE};
 
 static float sky_box_scroll; // UV scroll offset applied each frame in Sky_DrawSkyBox
+/* The same scroll as a yaw angle, for the cubemap path.  One face width is a
+ * quarter turn, so a scroll of 1.0 is pi/2.  uhexen2-ctk9. */
+float sky_box_rot = 0.0f;
 
 /* Per-skybox wind state, set by Sky_LoadWindCfg from gfx/env/<name>wind.cfg.
    Defaults disable wind (dist=0) so behavior matches pre-typa builds. */
@@ -138,6 +145,16 @@ static float skywind_pitch  = 0.0f;	/* vertical direction, degrees */
 /* Per-frame wind UV offset.  GL_ImmFlush pushes it to u_wind on whichever
  * program declares one, which is both sky programs (uhexen2-a5nn.4). */
 float sky_wind_uv[2] = { 0.0f, 0.0f };
+/* The same wind as an offset applied to the cubemap sample direction, in the
+ * shader's swizzled space.  uhexen2-ctk9. */
+float sky_wind_vec[3] = { 0.0f, 0.0f, 0.0f };
+
+/* The six faces as a cubemap, built alongside the 2D faces when they all came
+ * in at the same square size.  Zero means the skybox draws the old way. */
+static GLuint	skybox_cubemap;
+static byte	*sky_cube_face[6];	/* RGBA, malloc'd, freed once uploaded */
+static int	sky_cube_size;		/* edge length, 0 until a face arrives */
+static qboolean	sky_cube_mismatch;	/* a face disagreed; give up on the cubemap */
 
 /* Skybox cache — Ironwail 0603c2bb — elimates stutter when maps precache skyboxes */
 typedef struct skybox_s {
@@ -145,6 +162,7 @@ typedef struct skybox_s {
 	char name[32];
 	gltexture_t *textures[6];
 	GLuint texnums[6];
+	GLuint cubemap;		/* 0 when the faces would not make one (uhexen2-ctk9) */
 } skybox_t;
 
 static skybox_t *skybox_cache = NULL;
@@ -364,7 +382,7 @@ Sky_CacheAdd
 Add a skybox to cache. Evicts oldest entry if cache is full.
 ==================
 */
-static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *texnums)
+static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *texnums, GLuint cubemap)
 {
 	skybox_t *entry, *keep, *kill;
 	int count, i;
@@ -376,6 +394,7 @@ static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *
 	q_strlcpy(entry->name, name, sizeof(entry->name));
 	memcpy(entry->textures, textures, sizeof(entry->textures));
 	memcpy(entry->texnums, texnums, sizeof(entry->texnums));
+	entry->cubemap = cubemap;
 	entry->next = skybox_cache;
 	skybox_cache = entry;
 
@@ -403,6 +422,10 @@ static skybox_t *Sky_CacheAdd(const char *name, gltexture_t **textures, GLuint *
 			if (kill->textures[i] && kill->textures[i] != notexture)
 				TexMgr_FreeTexture(kill->textures[i]);
 		}
+		/* The cache owns the cubemap exactly as it owns the faces, so this
+		 * is the only place an evicted one may be deleted (uhexen2-ctk9). */
+		if (kill->cubemap)
+			glDeleteTextures_fp (1, &kill->cubemap);
 		free(kill);
 		kill = next;
 	}
@@ -430,6 +453,8 @@ void Sky_CacheFlush(void)
 			if (entry->textures[i] && entry->textures[i] != notexture)
 				TexMgr_FreeTexture(entry->textures[i]);
 		}
+		if (entry->cubemap)
+			glDeleteTextures_fp (1, &entry->cubemap);
 		free(entry);
 	}
 	skybox_cache = NULL;
@@ -439,6 +464,7 @@ void Sky_CacheFlush(void)
 	 * and the next Sky_LoadSkyBox(skybox_name) would early-return on the
 	 * name match without ever reloading.  uhexen2-mxx5.3. */
 	skybox_name[0] = 0;
+	skybox_cubemap = 0;	/* aliased an entry we just deleted */
 	for (i = 0; i < 6; i++)
 	{
 		skybox_textures[i] = NULL;
@@ -496,6 +522,122 @@ static const char *Sky_RecallForMap (void)
 }
 
 /*
+==============
+Sky_ResetCubemapBuild / Sky_StashCubeFace / Sky_BuildCubemap
+
+The skybox as a single cubemap, assembled from the same six images the 2D
+faces come from.  uhexen2-ctk9.
+
+WHY: r_skywind animates a skybox by sliding a UV offset across six independent
+2D faces (uhexen2-typa), and a 2D slide cannot stay continuous across a cube
+edge -- the offset that is correct on +X is not the same offset on +Y, so the
+seams pull apart the moment the wind is non-zero.  Sampling one cubemap by
+direction has no seams to pull apart.  It also lets skywind_pitch mean
+something: it has been parsed and clamped since uhexen2-typa and then dropped
+on the floor, because a 2D offset has nowhere to put a vertical component.
+
+FACE ORDER is Ironwail's cubemap_order (Quake/gl_sky.c), which is valid here
+because our st_to_vec puts the faces on the same world axes theirs does:
+rt/lf on +X/-X, bk/ft on +Y/-Y, up/dn on +Z/-Z.  No rotation or flip -- the
+straight copy upstream does is right for us too, and the shader's axis swizzle
+absorbs the rest.
+
+Built only when all six faces arrived at the same square size, which is the
+same condition upstream imposes; anything else keeps the 2D path.
+==============
+*/
+/* Drops the active handle and any half-collected staging pixels.  Does NOT
+ * delete the texture: the skybox cache owns it, exactly as it owns the six
+ * face textures, and deleting here would dangle a cache entry -- the mistake
+ * uhexen2-mxx5.2 records for the faces. */
+static void Sky_ResetCubemapBuild (void)
+{
+	int i;
+
+	skybox_cubemap = 0;
+	for (i = 0; i < 6; i++)
+	{
+		free (sky_cube_face[i]);
+		sky_cube_face[i] = NULL;
+	}
+	sky_cube_size = 0;
+	sky_cube_mismatch = false;
+}
+
+/* Keep a copy of one face's RGBA while the loader still has it.  The loader
+ * frees or hunk-drops `data` immediately after uploading the 2D texture, and
+ * reading it back off the GPU is not an option on the ES tier. */
+static void Sky_StashCubeFace (int face, const byte *rgba, int width, int height)
+{
+	size_t bytes;
+
+	if (sky_cube_mismatch || !rgba || face < 0 || face > 5)
+		return;
+
+	if (width != height)		/* cube faces must be square */
+	{
+		sky_cube_mismatch = true;
+		return;
+	}
+	if (sky_cube_size == 0)
+		sky_cube_size = width;
+	else if (width != sky_cube_size)	/* and all the same size */
+	{
+		sky_cube_mismatch = true;
+		return;
+	}
+
+	bytes = (size_t)width * (size_t)height * 4;
+	free (sky_cube_face[face]);
+	sky_cube_face[face] = (byte *) malloc (bytes);
+	if (!sky_cube_face[face])
+	{
+		sky_cube_mismatch = true;
+		return;
+	}
+	memcpy (sky_cube_face[face], rgba, bytes);
+}
+
+static void Sky_BuildCubemap (void)
+{
+	/* GL cube face i takes skybox face cubemap_order[i]: ft bk up dn rt lf. */
+	static const int cubemap_order[6] = { 3, 1, 4, 5, 0, 2 };
+	int i;
+
+	for (i = 0; i < 6; i++)
+		if (!sky_cube_face[i])
+			sky_cube_mismatch = true;
+
+	if (sky_cube_mismatch || sky_cube_size <= 0)
+	{
+		Con_DPrintf ("Sky: no cubemap (faces differ in size or are incomplete), using 2D faces\n");
+		goto done;
+	}
+
+	glGenTextures_fp (1, &skybox_cubemap);
+	glBindTexture_fp (GL_TEXTURE_CUBE_MAP, skybox_cubemap);
+	for (i = 0; i < 6; i++)
+		glTexImage2D_fp (GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA8,
+				 sky_cube_size, sky_cube_size, 0,
+				 GL_RGBA, GL_UNSIGNED_BYTE, sky_cube_face[cubemap_order[i]]);
+	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameterf_fp (GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture_fp (GL_TEXTURE_CUBE_MAP, 0);
+
+	Con_DPrintf ("Sky: cubemap built, %dx%d per face\n", sky_cube_size, sky_cube_size);
+
+done:
+	/* The pixels have served their purpose either way. */
+	for (i = 0; i < 6; i++)
+	{
+		free (sky_cube_face[i]);
+		sky_cube_face[i] = NULL;
+	}
+}
+
+/*
 ==================
 Sky_LoadSkyBox
 ==================
@@ -520,6 +662,7 @@ void Sky_LoadSkyBox (const char *name)
 		q_strlcpy(skybox_name, cached->name, sizeof(skybox_name));
 		memcpy(skybox_textures, cached->textures, sizeof(skybox_textures));
 		memcpy(skybox_texnums, cached->texnums, sizeof(skybox_texnums));
+		skybox_cubemap = cached->cubemap;
 		Sky_LoadWindCfg(name);
 		Sky_RememberForMap(name);
 		return;
@@ -538,6 +681,10 @@ void Sky_LoadSkyBox (const char *name)
 		skybox_textures[i] = NULL;
 		skybox_texnums[i] = 0;
 	}
+	/* Same ownership rule as the faces above: the cache owns it, so drop the
+	 * handle without deleting.  Also resets the staging state a previous
+	 * failed build may have left behind.  uhexen2-ctk9. */
+	Sky_ResetCubemapBuild ();
 
 	//turn off skybox if sky is set to ""
 	if (name[0] == 0)
@@ -584,6 +731,7 @@ void Sky_LoadSkyBox (const char *name)
 			q_snprintf(texname, sizeof(texname), "%s_face%d", filepath, i);
 			skybox_textures[i] = TexMgr_LoadImage (cl.worldmodel, texname, width, height, SRC_RGBA, data, filepath, 0, TEXPREF_NONE);
 			skybox_texnums[i] = skybox_textures[i]->texnum; // Save texnum before next call overwrites it
+			Sky_StashCubeFace (i, data, width, height);
 			Con_DPrintf("  -> texture[%d] = %p, texnum = %u\n", i, (void*)skybox_textures[i], skybox_texnums[i]);
 			free(data);
 			nonefound = false;
@@ -601,6 +749,7 @@ void Sky_LoadSkyBox (const char *name)
 				q_snprintf(texname, sizeof(texname), "%s_face%d", filepath, i);
 				skybox_textures[i] = TexMgr_LoadImage (cl.worldmodel, texname, width, height, SRC_RGBA, data, filepath, 0, TEXPREF_NONE);
 				skybox_texnums[i] = skybox_textures[i]->texnum; // Save texnum before next call overwrites it
+				Sky_StashCubeFace (i, data, width, height);
 				Con_DPrintf("  -> texture[%d] = %p, texnum = %u\n", i, (void*)skybox_textures[i], skybox_texnums[i]);
 				free(data);
 				nonefound = false;
@@ -618,6 +767,7 @@ void Sky_LoadSkyBox (const char *name)
 					q_snprintf(texname, sizeof(texname), "%s_face%d", filepath, i);
 					skybox_textures[i] = TexMgr_LoadImage (cl.worldmodel, texname, width, height, SRC_RGBA, data, filepath, 0, TEXPREF_NONE);
 					skybox_texnums[i] = skybox_textures[i]->texnum; // Save texnum before next call overwrites it
+					Sky_StashCubeFace (i, data, width, height);
 					Con_DPrintf("  -> texture[%d] = %p, texnum = %u\n", i, (void*)skybox_textures[i], skybox_texnums[i]);
 					free(data);
 					nonefound = false;
@@ -630,6 +780,7 @@ void Sky_LoadSkyBox (const char *name)
 					{
 						skybox_textures[i] = TexMgr_LoadImage (cl.worldmodel, filename, width, height, SRC_RGBA, data, filename, 0, TEXPREF_NONE);
 						skybox_texnums[i] = skybox_textures[i]->texnum;
+						Sky_StashCubeFace (i, data, width, height);
 						nonefound = false;
 					}
 					else
@@ -645,6 +796,7 @@ void Sky_LoadSkyBox (const char *name)
 						{
 							skybox_textures[i] = TexMgr_LoadImage(cl.worldmodel, filename, width, height, SRC_RGBA, data, filename, 0, TEXPREF_NONE);
 							skybox_texnums[i] = skybox_textures[i]->texnum;
+							Sky_StashCubeFace (i, data, width, height);
 							nonefound = false;
 						}
 						else
@@ -671,14 +823,17 @@ void Sky_LoadSkyBox (const char *name)
 		}
 		skybox_name[0] = 0;
 		Sky_LoadWindCfg ("");
+		Sky_ResetCubemapBuild ();
 		return;
 	}
+
+	Sky_BuildCubemap ();
 
 	q_strlcpy(skybox_name, name, sizeof(skybox_name));
 	Sky_LoadWindCfg (skybox_name);
 
 	/* Add to cache for future loads */
-	Sky_CacheAdd(name, skybox_textures, skybox_texnums);
+	Sky_CacheAdd(name, skybox_textures, skybox_texnums, skybox_cubemap);
 
 	Sky_RememberForMap(name);
 }
@@ -879,6 +1034,7 @@ void Sky_LoadWindCfg (const char *name)
 	skywind_period = 30.0f;
 	skywind_pitch  = 0.0f;
 	sky_wind_uv[0] = sky_wind_uv[1] = 0.0f;
+	sky_wind_vec[0] = sky_wind_vec[1] = sky_wind_vec[2] = 0.0f;
 
 	if (!name || !name[0])
 		return;
@@ -936,6 +1092,30 @@ void Sky_UpdateWind (void)
 	cy = cosf (yaw_rad);
 	sky_wind_uv[0] = (float)(dist * cy * phase);
 	sky_wind_uv[1] = (float)(dist * sy * phase);
+
+	/* The same wind as a direction offset for the cubemap path (uhexen2-ctk9).
+	 *
+	 * This is where skywind_pitch finally does something.  It has been parsed,
+	 * clamped and written back out since uhexen2-typa, and then dropped --
+	 * a 2D UV offset has nowhere to put a vertical component, so the cfg field
+	 * round-tripped through the engine without ever reaching the screen.
+	 *
+	 * Built in world axes and then swizzled the way ssky_cube_vert swizzles
+	 * the view direction, so the offset lands in the same space as the vector
+	 * it is added to. */
+	{
+		float	pitch_rad = (float)(skywind_pitch * (M_PI / 180.0));
+		float	cp = cosf (pitch_rad);
+		float	sp = sinf (pitch_rad);
+		float	amt = (float)(dist * phase);
+		float	wx = amt * cy * cp;	/* world +X */
+		float	wy = amt * sy * cp;	/* world +Y */
+		float	wz = amt * sp;		/* world +Z */
+
+		sky_wind_vec[0] = -wy;
+		sky_wind_vec[1] =  wz;
+		sky_wind_vec[2] =  wx;
+	}
 }
 
 /*
@@ -1080,6 +1260,7 @@ void Sky_Init (void)
 	Cvar_RegisterVariable (&r_skyspeed_front);
 	Cvar_RegisterVariable (&r_skybox_speed);
 	Cvar_RegisterVariable (&r_skywind);
+	Cvar_RegisterVariable (&r_skycubemap);
 
 	Cmd_AddCommand ("sky",Sky_SkyCommand_f);
 	Cmd_AddCommand ("skywind", Skywind_f);
@@ -1499,6 +1680,8 @@ FIXME: eliminate cracks by adding an extra vert on tjuncs
 void Sky_DrawSkyBox (void)
 {
 	int		i;
+	qboolean	use_cubemap;
+	glprogram_t	*skyprog = &gl_shader_sky_boxside;
 
 	/* This function used to save, set and restore u_alpha_threshold, because
 	 * the one sky program branched on it and that uniform is engine-global
@@ -1513,6 +1696,7 @@ void Sky_DrawSkyBox (void)
 
 	// update UV scroll offset (same unit as r_skyspeed_*: scroll units/sec, 128 = full texture)
 	sky_box_scroll = (float)fmod(cl.time * r_skybox_speed.value * (1.0 / 128.0), 1.0);
+	sky_box_rot = sky_box_scroll * (float)(M_PI * 0.5);
 
 	// Force skybox to render at maximum depth (always behind everything).
 	// Reversed-Z: max-depth is 0.0; standard: 1.0.
@@ -1521,13 +1705,26 @@ void Sky_DrawSkyBox (void)
 	// Disable face culling so faces are visible from inside
 	R_SetCull (false);
 
+	/* The cubemap path draws the same six quads, but every one of them samples
+	 * one cubemap by direction instead of its own 2D face, so there is no
+	 * per-face bind and -- the point of it -- no seam for r_skywind to pull
+	 * apart.  Falls back to the 2D faces when the images would not make a
+	 * cubemap, or when r_skycubemap is off.  uhexen2-ctk9. */
+	use_cubemap = (skybox_cubemap != 0) && r_skycubemap.integer &&
+		      (gl_shader_sky_cubemap.program != 0);
+	if (use_cubemap)
+	{
+		glBindTexture_fp(GL_TEXTURE_CUBE_MAP, skybox_cubemap);
+		skyprog = &gl_shader_sky_cubemap;
+	}
+
 	for (i=0 ; i<6 ; i++)
 	{
-		if (!skybox_texnums[skytexorder[i]])
+		if (!use_cubemap && !skybox_texnums[skytexorder[i]])
 			continue;
 
-		// Bind the actual skybox texture
-		glBindTexture_fp(GL_TEXTURE_2D, skybox_texnums[skytexorder[i]]);
+		if (!use_cubemap)	/* Bind the actual skybox texture */
+			glBindTexture_fp(GL_TEXTURE_2D, skybox_texnums[skytexorder[i]]);
 
 		skymins[0][i] = -1;
 		skymins[1][i] = -1;
@@ -1540,7 +1737,7 @@ void Sky_DrawSkyBox (void)
 		Sky_EmitSkyBoxVertex (skymaxs[0][i], skymins[1][i], i);
 		Sky_EmitSkyBoxVertex (skymaxs[0][i], skymaxs[1][i], i);
 		Sky_EmitSkyBoxVertex (skymins[0][i], skymaxs[1][i], i);
-		GL_ImmEnd(GL_QUADS, &gl_shader_sky_boxside);
+		GL_ImmEnd(GL_QUADS, skyprog);
 
 		rs_skypolys++;
 		rs_skypasses++;
@@ -1569,6 +1766,8 @@ void Sky_DrawSkyBox (void)
 	}
 
 	// Restore GL state — full window-Z range is symmetric, no flip needed
+	if (use_cubemap)
+		glBindTexture_fp(GL_TEXTURE_CUBE_MAP, 0);
 	R_SetDepthRange (0.0, 1.0);
 	R_SetCull (true);
 }

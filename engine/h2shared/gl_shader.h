@@ -41,6 +41,8 @@ typedef struct glprogram_s {
 	GLint	u_skyfog;
 	GLint	u_eyepos;
 	GLint	u_wind;		/* sky shader: per-skybox wind UV offset (uhexen2-typa) */
+	GLint	u_wind3;	/* sky cubemap: the same wind as a direction offset (uhexen2-ctk9) */
+	GLint	u_skyrot;	/* sky cubemap: r_skybox_speed as a yaw angle (uhexen2-ctk9) */
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
@@ -89,6 +91,7 @@ extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color *
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
 extern glprogram_t	gl_shader_sky_layers;	/* two scrolling cloud layers (uhexen2-a5nn.4) */
 extern glprogram_t	gl_shader_sky_boxside;	/* one sky texture, UVs from the vertex */
+extern glprogram_t	gl_shader_sky_cubemap;	/* skybox as a cubemap, by direction (uhexen2-ctk9) */
 extern glprogram_t	gl_shader_skeletal;	/* PV_IQM bone-weighted skinning (desktop GL 4.3 only) */
 /* NOPERSP twins: affine texture mapping for r_softemu_mdl_warp.  Selected per
  * draw by R_SoftEmuMdlWarp; identical to their siblings otherwise.  uhexen2-ktjv. */

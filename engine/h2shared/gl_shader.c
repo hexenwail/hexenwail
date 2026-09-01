@@ -32,6 +32,7 @@ glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
 glprogram_t	gl_shader_sky_layers;	/* two scrolling cloud layers (uhexen2-a5nn.4) */
 glprogram_t	gl_shader_sky_boxside;	/* one sky texture, UVs from the vertex */
+glprogram_t	gl_shader_sky_cubemap;	/* skybox as a cubemap, sampled by direction (uhexen2-ctk9) */
 
 /* null fullbright texture: 1x1 black RGBA bound at unit 2 for world
  * surfaces whose diffuse texture has no fullbright pixels.  Lets
@@ -406,6 +407,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_skyfog          = glGetUniformLocation_fp(p->program, "u_skyfog");
 	p->u_eyepos          = glGetUniformLocation_fp(p->program, "u_eyepos");
 	p->u_wind            = glGetUniformLocation_fp(p->program, "u_wind");
+	p->u_wind3           = glGetUniformLocation_fp(p->program, "u_wind3");
+	p->u_skyrot          = glGetUniformLocation_fp(p->program, "u_skyrot");
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
@@ -1674,6 +1677,65 @@ static const char ssky_layers_frag[] =
 	"    fragColor = vec4(color, 1.0) * v_color;\n"
 	"}\n";
 
+/* The skybox as a cubemap, sampled by view direction.  Ironwail's skycubemap
+ * (Quake/gl_shaders.h sky_cubemap_*).  uhexen2-ctk9.
+ *
+ * WHY THIS EXISTS WHEN skyboxside ALREADY DRAWS SKYBOXES.  It is not about the
+ * six draws; it is about the wind.  r_skywind animates a skybox by sliding a
+ * UV offset across six independent 2D faces (uhexen2-typa), and a 2D slide
+ * cannot be continuous across a cube edge -- the offset that is right on +X is
+ * not the same offset on +Y, so the seams pull apart as soon as the wind is
+ * anything but zero.  Rotating a direction vector has no seams to pull apart.
+ *
+ * The axis swizzle is upstream's, and it is not arbitrary: our st_to_vec in
+ * gl_sky.c puts rt/lf on world +X/-X, bk/ft on +Y/-Y and up/dn on +Z/-Z, which
+ * is exactly the convention Ironwail's cubemap_order was written against, so
+ * the two agree face for face.
+ *
+ * ONE DIVERGENCE FROM UPSTREAM, ON PURPOSE.  Ironwail's ANIM arm samples the
+ * cubemap twice at two phases and cross-fades them, weighting by the faces'
+ * alpha channel over an opaque base.  That is the right shape for a wind that
+ * drifts one way forever and has to hide a wrap.  Ours does not: Sky_UpdateWind
+ * runs a triangle wave that reverses smoothly and never wraps, so the crossfade
+ * would be hiding a discontinuity that is not there, and the alpha weighting
+ * assumes cloud-layer skyboxes we do not ship.  A single rotated sample is the
+ * exact 3D analogue of the 2D slide it replaces, which is what keeps this a
+ * seam fix rather than a change of look. */
+static const char ssky_cube_vert[] =
+	GLSL_VERT_HEADER
+	"in vec3 a_position;\n"
+	"in vec4 a_color;\n"
+	"uniform mat4 u_mvp;\n"
+	"uniform vec3 u_eyepos;\n"
+	"out vec3 v_dir;\n"
+	"out vec4 v_color;\n"
+	"void main() {\n"
+	"    vec3 d = a_position - u_eyepos;\n"
+	"    v_dir = vec3(-d.y, d.z, d.x);\n"
+	"    v_color = a_color;\n"
+	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
+	"}\n";
+
+static const char ssky_cube_frag[] =
+	GLSL_FRAG_HEADER
+	"uniform samplerCube u_texture0;\n"
+	"uniform vec3 u_wind3;\n"
+	"uniform float u_skyrot;\n"
+	"in vec3 v_dir;\n"
+	"in vec4 v_color;\n"
+	"out vec4 fragColor;\n"
+	"void main() {\n"
+	"    vec3 dir = normalize(v_dir);\n"
+	/* r_skybox_speed is a horizontal scroll.  On six 2D faces that is a UV
+	 * slide per face; on a cubemap the honest equivalent is a yaw rotation of
+	 * the sample direction, which is also the one that does not tear at the
+	 * face edges.  World +Z is v_dir.y after the vertex swizzle, so yaw lives
+	 * in the (x, z) plane. */
+	"    float cs = cos(u_skyrot), sn = sin(u_skyrot);\n"
+	"    dir.xz = vec2(dir.x * cs - dir.z * sn, dir.x * sn + dir.z * cs);\n"
+	"    fragColor = texture(u_texture0, dir + u_wind3) * v_color;\n"
+	"}\n";
+
 /* One sky texture, UVs supplied by the caller.  Ironwail's skyboxside
  * (Quake/gl_shaders.h sky_boxside_*), and the six faces of a loaded skybox are
  * what it draws there.
@@ -1992,6 +2054,7 @@ void GL_Shaders_Init (void)
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
 	GL_InitProgram(&gl_shader_sky_layers,  "sky_layers",  ssky_layers_vert, ssky_layers_frag);
 	GL_InitProgram(&gl_shader_sky_boxside, "sky_boxside", ssky_side_vert,   ssky_side_frag);
+	GL_InitProgram(&gl_shader_sky_cubemap, "sky_cubemap", ssky_cube_vert,  ssky_cube_frag);
 
 	/* Create the 1x1 black sentinel texture used as u_texture2 in
 	 * gl_shader_world for surfaces with no fullbright pixels.  Sampled
@@ -2114,7 +2177,7 @@ void GL_Shaders_Init (void)
 void GL_ReportShaderStatus (void)
 {
 	Con_Printf("[RENDERER] shaders: 2d=%s flat=%s world=%s world_opaque=%s "
-		   "alias=%s particle=%s sky_layers=%s sky_boxside=%s "
+		   "alias=%s particle=%s sky_layers=%s sky_boxside=%s sky_cubemap=%s "
 		   "skeletal=%s OIT=%s/%s/%s\n",
 		   gl_shader_2d.program ? "ok" : "FAILED",
 		   gl_shader_flat.program ? "ok" : "FAILED",
@@ -2124,6 +2187,7 @@ void GL_ReportShaderStatus (void)
 		   gl_shader_particle.program ? "ok" : "FAILED",
 		   gl_shader_sky_layers.program ? "ok" : "FAILED",
 		   gl_shader_sky_boxside.program ? "ok" : "FAILED",
+		   gl_shader_sky_cubemap.program ? "ok" : "FAILED",
 		   gl_shader_skeletal.program ? "ok" : "disabled",
 		   gl_shader_world_oit.program ? "ok" : "disabled",
 		   gl_shader_alias_oit.program ? "ok" : "disabled",
@@ -2136,7 +2200,7 @@ void GL_Shaders_Shutdown (void)
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_world_opaque,
 		&gl_shader_alias, &gl_shader_skeletal, &gl_shader_particle,
-		&gl_shader_sky_layers, &gl_shader_sky_boxside,
+		&gl_shader_sky_layers, &gl_shader_sky_boxside, &gl_shader_sky_cubemap,
 		&gl_shader_particle_gpu.base,
 		&gl_shader_alias_np, &gl_shader_skeletal_np,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_skeletal_oit,

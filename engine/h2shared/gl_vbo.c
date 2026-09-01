@@ -386,6 +386,8 @@ static float	imm_cache_fog_color[3] = { -1.0f, -1.0f, -1.0f };
 static float	imm_cache_time = -1.0f;
 static float	imm_cache_eyepos[3] = { -99999.0f, -99999.0f, -99999.0f };
 static float	imm_cache_wind[2] = { -99999.0f, -99999.0f };
+static float	imm_cache_wind3[3] = { -99999.0f, -99999.0f, -99999.0f };
+static float	imm_cache_skyrot = -99999.0f;
 static float	imm_cache_overbright = -1.0f;	/* uhexen2-f29y */
 static qboolean	imm_cache_mvp_set;
 static qboolean	imm_cache_mv_set;
@@ -413,6 +415,8 @@ void GL_ImmInvalidateState (void)
 	imm_cache_time = -1.0f;
 	imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
 	imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
+	imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
+	imm_cache_skyrot = -99999.0f;
 	imm_cache_overbright = -1.0f;
 	imm_cache_mvp_set = false;
 	imm_cache_mv_set = false;
@@ -467,6 +471,8 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_time = -1.0f;
 		imm_cache_eyepos[0] = imm_cache_eyepos[1] = imm_cache_eyepos[2] = -99999.0f;
 		imm_cache_wind[0] = imm_cache_wind[1] = -99999.0f;
+		imm_cache_wind3[0] = imm_cache_wind3[1] = imm_cache_wind3[2] = -99999.0f;
+		imm_cache_skyrot = -99999.0f;
 		imm_cache_overbright = -1.0f;
 		imm_cache_mvp_set = false;
 		imm_cache_mv_set = false;
@@ -595,6 +601,26 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		glUniform2f_fp(shader->u_wind, sky_wind_uv[0], sky_wind_uv[1]);
 		imm_cache_wind[0] = sky_wind_uv[0];
 		imm_cache_wind[1] = sky_wind_uv[1];
+	}
+
+	/* The same wind as a direction offset, for the cubemap sky.  Only
+	 * gl_shader_sky_cubemap declares it, so this folds away everywhere else.
+	 * uhexen2-ctk9. */
+	if (shader->u_skyrot >= 0 && sky_box_rot != imm_cache_skyrot)
+	{
+		glUniform1f_fp(shader->u_skyrot, sky_box_rot);
+		imm_cache_skyrot = sky_box_rot;
+	}
+
+	if (shader->u_wind3 >= 0 &&
+	    (sky_wind_vec[0] != imm_cache_wind3[0] ||
+	     sky_wind_vec[1] != imm_cache_wind3[1] ||
+	     sky_wind_vec[2] != imm_cache_wind3[2]))
+	{
+		glUniform3f_fp(shader->u_wind3, sky_wind_vec[0], sky_wind_vec[1], sky_wind_vec[2]);
+		imm_cache_wind3[0] = sky_wind_vec[0];
+		imm_cache_wind3[1] = sky_wind_vec[1];
+		imm_cache_wind3[2] = sky_wind_vec[2];
 	}
 
 	if (shader->u_overbright >= 0)
