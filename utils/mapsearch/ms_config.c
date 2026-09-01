@@ -1,4 +1,4 @@
-/* es_config.c -- the entsearch configuration file.
+/* ms_config.c -- the mapsearch configuration file.
  * Copyright (C) 2026  uHexen2 developers
  *
  * Inky's MapSearch keeps its settings in an XML file and this reads the same
@@ -36,7 +36,7 @@
 #include "arch_def.h"
 #include "cmdlib.h"
 #include "util_io.h"
-#include "entsearch.h"
+#include "mapsearch.h"
 
 #include <errno.h>
 
@@ -62,7 +62,7 @@ static const char *const default_flagsprops[] =
 	NULL
 };
 
-void ES_StrListAdd (strlist_t *list, const char *str)
+void MS_StrListAdd (strlist_t *list, const char *str)
 {
 	if (list->count == list->max)
 	{
@@ -77,7 +77,7 @@ void ES_StrListAdd (strlist_t *list, const char *str)
 	list->items[list->count++] = SafeStrdup (str);
 }
 
-void ES_StrListFree (strlist_t *list)
+void MS_StrListFree (strlist_t *list)
 {
 	int	i;
 
@@ -89,17 +89,17 @@ void ES_StrListFree (strlist_t *list)
 	list->count = list->max = 0;
 }
 
-void ES_ConfigDefaults (essettings_t *set)
+void MS_ConfigDefaults (mssettings_t *set)
 {
 	int	i;
 
 	memset (set, 0, sizeof(*set));
-	ES_StrListAdd (&set->searchin, ".");
+	MS_StrListAdd (&set->searchin, ".");
 	for (i = 0; default_flagsprops[i]; i++)
-		ES_StrListAdd (&set->flagsprops, default_flagsprops[i]);
+		MS_StrListAdd (&set->flagsprops, default_flagsprops[i]);
 
 	set->opt_ignorecase = true;
-	q_strlcpy (set->logfile, "entsearch.log", sizeof(set->logfile));
+	q_strlcpy (set->logfile, "mapsearch.log", sizeof(set->logfile));
 }
 
 static void trim (char *s)
@@ -162,7 +162,7 @@ static qboolean parse_bool (const char *s, qboolean *out)
 }
 
 /* Which of the three list sections is this element, if any? */
-static strlist_t *section_list (const char *name, essettings_t *set)
+static strlist_t *section_list (const char *name, mssettings_t *set)
 {
 	if (!q_strcasecmp (name, "SearchIn") || !q_strcasecmp (name, "SearchIns"))
 		return &set->searchin;
@@ -174,7 +174,7 @@ static strlist_t *section_list (const char *name, essettings_t *set)
 }
 
 /* An element that is not inside a list section names an output option. */
-static qboolean apply_option (const char *name, const char *value, essettings_t *set)
+static qboolean apply_option (const char *name, const char *value, mssettings_t *set)
 {
 	if (!q_strcasecmp (name, "Log") || !q_strcasecmp (name, "WriteLog") ||
 	    !q_strcasecmp (name, "LogToFile"))
@@ -253,7 +253,7 @@ static const char *next_attr (const char *p, const char *end,
 	return p;
 }
 
-static int list_index (const strlist_t *list, const essettings_t *set)
+static int list_index (const strlist_t *list, const mssettings_t *set)
 {
 	if (list == &set->searchin)
 		return 0;
@@ -264,17 +264,17 @@ static int list_index (const strlist_t *list, const essettings_t *set)
 
 /* A section named in the config replaces the built-in list rather than
  * extending it, so the first entry of each clears it. */
-static void list_add (strlist_t *list, essettings_t *set, const char *entry,
+static void list_add (strlist_t *list, mssettings_t *set, const char *entry,
 		      qboolean *cleared)
 {
 	int	which = list_index (list, set);
 
 	if (!cleared[which])
 	{
-		ES_StrListFree (list);
+		MS_StrListFree (list);
 		cleared[which] = true;
 	}
-	ES_StrListAdd (list, entry);
+	MS_StrListAdd (list, entry);
 }
 
 /* Text inside a list section is one entry per line: that is how the config
@@ -282,7 +282,7 @@ static void list_add (strlist_t *list, essettings_t *set, const char *entry,
  * obvious reading of a section written across several lines whatever wrote
  * it.  Taking the whole block as a single entry would silently produce one
  * nonsense path instead of three real ones. */
-static void list_add_lines (strlist_t *list, essettings_t *set, char *text,
+static void list_add_lines (strlist_t *list, mssettings_t *set, char *text,
 			    qboolean *cleared)
 {
 	char	*line = text;
@@ -301,7 +301,7 @@ static void list_add_lines (strlist_t *list, essettings_t *set, char *text,
 	}
 }
 
-qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
+qboolean MS_ConfigLoad (const char *filename, mssettings_t *set,
 			char *errbuf, size_t errlen)
 {
 	FILE		*f;
@@ -500,7 +500,7 @@ qboolean ES_ConfigLoad (const char *filename, essettings_t *set,
 
 	/* An empty <SearchIn> section would otherwise leave nothing to walk. */
 	if (set->searchin.count == 0)
-		ES_StrListAdd (&set->searchin, ".");
+		MS_StrListAdd (&set->searchin, ".");
 
 	/* Worth saying out loud: with no flag properties left, an integer
 	 * search silently stops matching bits and only matches exactly. */

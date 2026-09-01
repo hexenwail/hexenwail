@@ -173,18 +173,18 @@ and `fog` spellings are still accepted for maps that already ship them, and
 neither spelling produces an `'sky' is not a field` warning any more. `sky
 <name>` also works from the console.
 
-### Entity search for mappers
-`entsearch`, in the [`utils/`](utils/entsearch) toolchain, searches `.map`
+### MapSearch — entity search for mappers
+`mapsearch`, in the [`utils/`](utils/mapsearch) toolchain, searches `.map`
 sources for entities by classname, property name and value — for when you need
 to know what value someone else put in a property, which classnames actually
 use it, and whether the thing you are about to try has been done before. All
 three arguments are regexes, and each has to match a whole name or value:
 
 ```
-entsearch "*" spawnflags 64                  # anything with the 64 box checked
-entsearch "*" "*" ".*\.wav"                  # every sound reference, anywhere
-entsearch light_torch.* light "*"            # every torch and its light value
-entsearch func_door.* classname              # one line per door, both variants
+mapsearch "*" spawnflags 64                  # anything with the 64 box checked
+mapsearch "*" "*" ".*\.wav"                  # every sound reference, anywhere
+mapsearch light_torch.* light "*"            # every torch and its light value
+mapsearch func_door.* classname              # one line per door, both variants
 ```
 
 An integer value is also matched against the *bits* of spawnflags and its kin,
@@ -199,15 +199,21 @@ Line 21642: (func_door_rotating) opendraw.spawnflags == 98 [2][32][64]   at -112
 
 `+p` writes a `.pts` point file beside each matching map so you can step from
 one hit to the next in the editor. Search paths, exclusions and the list of
-flag properties live in `entsearch-config.xml`.
+flag properties live in `mapsearch-config.xml`.
 
-The design is [Inky](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)'s
-— his **MapSearch** is the reference implementation and the one to use on
-Windows. `entsearch` shares none of its code and exists so the toolchain has an
-entity search that builds from source alongside qbsp and light on every
-platform we ship. It reads `.map` text, so decompile your `.bsp` first
-(`utils/bsp2map` does it). Build it with `nix build .#utils`; full
-documentation is in [`utils/entsearch/README`](utils/entsearch/README).
+**MapSearch is [Inky](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)'s
+tool**, and thanks are due to him for it — the three-argument search, the
+bit-matching against spawnflags, the `.pts` point files and the config format
+are all his design, used here with his blessing and keeping his name at his
+request. **Please see [his site](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)
+for the full documentation and a Windows build for your mapping assistance** —
+his is the original, and the one that keeps getting his attention.
+
+This build shares none of his code. It exists so the toolchain has an entity
+search that compiles from source alongside qbsp and light on every platform we
+ship, including headless Linux. It reads `.map` text, so decompile your `.bsp`
+first (`utils/bsp2map` does it). Build it with `nix build .#utils`; full
+documentation is in [`utils/mapsearch/README`](utils/mapsearch/README).
 
 ### Platform
 - SDL3 on Linux and Windows
@@ -284,6 +290,9 @@ Incorporates code and techniques from the Quake engine modernization community:
 - [Ironwail](https://github.com/andrei-drexler/ironwail) — GL 4.3 shader pipeline approach, software rendering emulation (palette dithering), render scale, gamepad input, scancode-based keyboard input, sound channel management
 - [QuakeSpasm](https://sourceforge.net/projects/quakespasm/) — texture manager, fog system, console infrastructure
 - [QuakeSpasm-Spiked](https://github.com/Shpoike/Quakespasm) — protocol extensions, mod compatibility patterns
+
+Mapping tools:
+- [MapSearch](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/) by Inky — the entity search in `utils/mapsearch` is his design, carried into the uHexen2 toolchain with his permission and under his name. See [Inky's Hexen II Mapping Corner](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/) for the original, a Windows build, and the rest of his mapping documentation — also the source of the [PimpModel](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/mapping-tricks-pimp.html) trick we implement, and of [Wheel of Karma](https://www.moddb.com/mods/wheel-of-karma-a-tulku-odyssey).
 
 Gamecode fixes:
 - [jsHexen2-progs](https://github.com/KoMiKoZa/jsHexen2-progs) by KoMiKoZa — a curated bugfix fork of the Portal of Praevus HexenC source. Its diagnosis of `RandomMonsterGoodies` rolling monster loot onto the corpse instead of onto the dropped item — the root cause behind "Bad backpack!", present since Raven shipped it in 1997 — is the basis of our fix in `gamecode/hc/portals/items.hc`. Where its choices differ from ours, ours are the ones recorded in `gamecode/README`.

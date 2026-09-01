@@ -1,9 +1,10 @@
-/* entsearch.h -- shared declarations for the entsearch utility.
+/* mapsearch.h -- shared declarations for the mapsearch utility.
  * Copyright (C) 2026  uHexen2 developers
  *
  * Searches Quake/Hexen II .map sources for entities by classname, property
- * name and property value.  The design follows Inky's MapSearch, which is
- * the reference implementation:
+ * name and property value.  MapSearch is Inky's tool: this is his design,
+ * under his name and with his permission, and shares none of his code.  His
+ * original and a Windows build are at
  *   http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/
  *
  * This program is free software; you can redistribute it and/or modify
@@ -22,14 +23,14 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#ifndef __ENTSEARCH_H
-#define __ENTSEARCH_H
+#ifndef __MAPSEARCH_H
+#define __MAPSEARCH_H
 
-#define	ENTSEARCH_VERSION	"1.0"
+#define	MAPSEARCH_VERSION	"1.0"
 
 /*
  * ==========================================================================
- * Regular expressions (es_regex.c)
+ * Regular expressions (ms_regex.c)
  *
  * A small self-contained backtracking engine.  It exists because there is no
  * portable system regex: POSIX <regex.h> is absent from the mingw CRTs this
@@ -49,16 +50,16 @@
  * ==========================================================================
  */
 
-typedef struct esregex_s	esregex_t;
+typedef struct msregex_s	msregex_t;
 
-esregex_t	*ES_RegexCompile (const char *pattern, qboolean ignorecase,
+msregex_t	*MS_RegexCompile (const char *pattern, qboolean ignorecase,
 				  char *errbuf, size_t errlen);
-qboolean	ES_RegexMatch (esregex_t *re, const char *text);
-void		ES_RegexFree (esregex_t *re);
+qboolean	MS_RegexMatch (msregex_t *re, const char *text);
+void		MS_RegexFree (msregex_t *re);
 
 /*
  * ==========================================================================
- * .map parsing (es_map.c)
+ * .map parsing (ms_map.c)
  * ==========================================================================
  */
 
@@ -88,12 +89,12 @@ typedef qboolean (*mapentity_cb) (const mapentity_t *ent, void *userdata);
 /* Returns false on I/O failure (reason left in errbuf).  A truncated or
  * malformed file still reports the entities parsed before the damage, and
  * describes the damage in errbuf. */
-qboolean	ES_ScanMapFile (const char *filename, mapentity_cb callback,
+qboolean	MS_ScanMapFile (const char *filename, mapentity_cb callback,
 				void *userdata, char *errbuf, size_t errlen);
 
 /*
  * ==========================================================================
- * Configuration (es_config.c)
+ * Configuration (ms_config.c)
  * ==========================================================================
  */
 
@@ -104,8 +105,8 @@ typedef struct
 	int	max;
 } strlist_t;
 
-void	ES_StrListAdd (strlist_t *list, const char *str);
-void	ES_StrListFree (strlist_t *list);
+void	MS_StrListAdd (strlist_t *list, const char *str);
+void	MS_StrListFree (strlist_t *list);
 
 typedef struct
 {
@@ -121,11 +122,11 @@ typedef struct
 
 	char		logfile[1024];
 	char		ptsdir[1024];
-} essettings_t;
+} mssettings_t;
 
-void		ES_ConfigDefaults (essettings_t *set);
+void		MS_ConfigDefaults (mssettings_t *set);
 /* Returns false if the file could not be read or parsed; errbuf says why. */
-qboolean	ES_ConfigLoad (const char *filename, essettings_t *set,
+qboolean	MS_ConfigLoad (const char *filename, mssettings_t *set,
 			       char *errbuf, size_t errlen);
 
-#endif	/* __ENTSEARCH_H */
+#endif	/* __MAPSEARCH_H */

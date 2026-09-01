@@ -1,4 +1,4 @@
-entsearch -- search .map sources for entities
+mapsearch -- search .map sources for entities
 =============================================
 
 What it is for
@@ -10,7 +10,7 @@ Raven's, the mission pack's, whatever you have decompiled -- and it is spread
 across thousands of entities in dozens of files, which is exactly the shape of
 question a text editor's find box is bad at.
 
-entsearch takes three regular expressions -- a classname, a property name and
+mapsearch takes three regular expressions -- a classname, a property name and
 a value -- and prints every entity in every map that matches all three, with
 the file, the line, the coordinates, and flag values broken out into the boxes
 an editor would draw.
@@ -18,22 +18,27 @@ an editor would draw.
 
 Credit
 ------
-The design is not ours. Inky's MapSearch does this, and it is where every idea
-here comes from: the three-argument search, matching an integer against the
-bits of spawnflags, the .pts point files, the shape of the config.
+MapSearch is Inky's tool, and thanks are due to him for it. The design is not
+ours -- it is where every idea here comes from: the three-argument search,
+matching an integer against the bits of spawnflags, the .pts point files, the
+shape of the config. It carries his name at his request, and with his
+permission.
 
     http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/
 
-His is the reference implementation. If you are on Windows, use it -- it is
-his tool, he maintains it, and it is the one that will keep getting his
-attention. entsearch exists because the uHexen2 toolchain wants an entity
-search that builds from source next to qbsp and light on every platform we
-ship, and it shares no code with his.
+Please see his site for the full documentation and a Windows build for your
+mapping assistance. His is the original: he maintains it, and it is the one
+that will keep getting his attention. It is also where PimpModel and the rest
+of his mapping documentation live.
+
+This build shares none of his code. It exists because the uHexen2 toolchain
+wants an entity search that compiles from source next to qbsp and light on
+every platform we ship, including headless Linux.
 
 
 Command line
 ------------
-    entsearch CLASSNAME [PROPERTY] [VALUE] [OPTIONS]
+    mapsearch CLASSNAME [PROPERTY] [VALUE] [OPTIONS]
 
 Only CLASSNAME is required. The more of the three you give, the narrower the
 search. All three are regular expressions.
@@ -41,8 +46,8 @@ search. All three are regular expressions.
 Leave one out, or pass "*" or ".*", to accept anything.
 
   IMPORTANT on a Unix shell: quote the "*", or the shell expands it to the
-  names of the files in the current directory before entsearch sees it.
-  Write 'entsearch "*" spawnflags 64', not 'entsearch * spawnflags 64'.
+  names of the files in the current directory before mapsearch sees it.
+  Write 'mapsearch "*" spawnflags 64', not 'mapsearch * spawnflags 64'.
 
 A pattern has to match the WHOLE name or value, not a part of it. So
 "func_door" does not find func_door_rotating; "func_door.*" does. Likewise a
@@ -71,7 +76,7 @@ Light_Torch_Castle.
 When VALUE is an integer it is matched two ways: literally, and as a set of
 checked boxes inside the flag properties (see FlagsProperties below). So
 
-    entsearch "*" spawnflags 2
+    mapsearch "*" spawnflags 2
 
 finds every entity with AT LEAST the 2 box checked -- in the siege maps that
 turns up values 2, 3, 34, 35, 66, 67, 98 and 131, because none of the other
@@ -116,15 +121,15 @@ Exit status is 0 if anything matched, 1 if nothing did, and 2 on an error, so
 this drops into a script or a shell loop without parsing the output.
 
 
-entsearch-config.xml
+mapsearch-config.xml
 --------------------
-The settings you do not want to retype on every run. entsearch looks for it,
+The settings you do not want to retype on every run. mapsearch looks for it,
 in order, at:
 
     the path given by --config=FILE
-    the path in the ENTSEARCH_CONFIG environment variable
-    ./entsearch-config.xml
-    entsearch-config.xml next to the entsearch binary
+    the path in the MAPSEARCH_CONFIG environment variable
+    ./mapsearch-config.xml
+    mapsearch-config.xml next to the mapsearch binary
 
 Without one, "." is searched recursively with the built-in flag property list
 and every output option off. A commented sample sits next to this README. It
@@ -168,10 +173,10 @@ ways:
     <Output MakePts="true" />            settings written as attributes
 
 The last two are how the sample config Inky ships writes its flag properties
-and its output settings. So if you already keep a config for MapSearch,
-copying it to entsearch-config.xml is the whole migration -- that is tested,
-not assumed: his sample config loads here and produces the same results his
-tool does.
+and its output settings. So if you already keep a config for his build, copying
+it over as mapsearch-config.xml is the whole migration -- that is tested, not
+assumed: his sample config (MapSearch1-config.xml) loads here and produces the
+same results his tool does.
 
 
 A note about origins
@@ -191,20 +196,20 @@ more often than not, which is the only defence it needs.
 
 Examples
 --------
-    entsearch "*" spawnflags 64
+    mapsearch "*" spawnflags 64
 Every entity, whatever its classname, with the 64 box checked in spawnflags.
 65 and 192 match too: the other boxes are not asked about.
 
-    entsearch "*" "*" ".*\.wav"
+    mapsearch "*" "*" ".*\.wav"
 Every property of every entity that names a wav file -- the fastest way to
 find out which sounds a map actually references.
 
-    entsearch light_torch.* light "*"
+    mapsearch light_torch.* light "*"
 Every torch variant and the light value it was given. Swapping in "*" for the
 classname is how you find out whether anything else in the map carries a
 light key, which is not always what you expect.
 
-    entsearch "*" spawnflags 2
+    mapsearch "*" spawnflags 2
 Bit matching in practice. Run against the siege maps in gamecode/hc-unused,
 this returns 33 results across values 2, 3, 34, 35, 66, 67, 98 and 131 --
 every entity with that box checked, whatever else is checked with it:
@@ -213,16 +218,16 @@ every entity with that box checked, whatever else is checked with it:
     Line  21642:  (func_door_rotating)   opendraw.spawnflags == 98 [2][32][64]    at  -112 -264 -12   [brush]
     Line  19810:  (art_cubeofforce)      spawnflags          == 2 [2]             at  62 418 723
 
-    entsearch func_door.* classname
+    mapsearch func_door.* classname
 Every func_door and func_door_rotating, one line each. "classname" is the one
 property that always exists, so naming it is how you ask for one line per
 entity rather than one line per property.
 
-    entsearch func_door_rotating
+    mapsearch func_door_rotating
 Name no property at all and you get every property of every match, which is
 the quickest way to read an unfamiliar entity's full setup.
 
-    entsearch "*" "*" 128 +p
+    mapsearch "*" "*" 128 +p
 Anything set to 128 anywhere, plus a .pts file per map so you can step through
 the hits in TrenchBroom. Flag properties and plain numbers both answer: a
 spawnflags of 160 matches on its 128 bit and prints [32][128], while a lip of

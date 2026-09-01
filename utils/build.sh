@@ -17,7 +17,7 @@ if test "$1" = "strip"; then
 		pak/paklist$exe_ext		\
 		genmodel/genmodel$exe_ext	\
 		jsh2color/jsh2colour$exe_ext	\
-		entsearch/entsearch$exe_ext	\
+		mapsearch/mapsearch$exe_ext	\
 		texutils/bsp2wal/bsp2wal$exe_ext	\
 		texutils/lmp2pcx/lmp2pcx$exe_ext
 	exit 0
@@ -43,7 +43,7 @@ if test "$1" = "clean"; then
 	$MAKE_CMD -s -C pak clean
 	$MAKE_CMD -s -C dcc clean
 	$MAKE_CMD -s -C jsh2color clean
-	$MAKE_CMD -s -C entsearch clean
+	$MAKE_CMD -s -C mapsearch clean
 	$MAKE_CMD -s -C texutils/bsp2wal clean
 	$MAKE_CMD -s -C texutils/lmp2pcx clean
 	exit 0
@@ -71,8 +71,8 @@ echo "" && echo "Now building dhcc, a progs.dat decompiler.."
 $MAKE_CMD -C dcc $* || exit 1
 echo "" && echo "Now building jsh2colour, a lit file generator.."
 $MAKE_CMD -C jsh2color $* || exit 1
-echo "" && echo "Now building entsearch, a .map entity search tool.."
-$MAKE_CMD -C entsearch $* || exit 1
+echo "" && echo "Now building mapsearch, a .map entity search tool.."
+$MAKE_CMD -C mapsearch $* || exit 1
 echo "" && echo "Now building the texutils.."
 $MAKE_CMD -C texutils/bsp2wal $* || exit 1
 $MAKE_CMD -C texutils/lmp2pcx $* || exit 1

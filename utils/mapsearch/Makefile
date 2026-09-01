@@ -24,7 +24,7 @@ OSLIBS:=$(UHEXEN2_TOP)/oslibs
 include $(UHEXEN2_TOP)/scripts/makefile.inc
 
 # Names of the binaries
-ENTSEARCH:=entsearch$(exe_ext)
+MAPSEARCH:=mapsearch$(exe_ext)
 
 # Compiler flags
 
@@ -65,7 +65,7 @@ ifeq ($(TARGET_OS),unix)
 endif
 
 # Targets
-all : $(ENTSEARCH)
+all : $(MAPSEARCH)
 
 # Rules for turning source files into .o files
 %.o: %.c
@@ -75,24 +75,24 @@ all : $(ENTSEARCH)
 %.o: $(UHEXEN2_SHARED)/%.c
 	$(CC) -c $(CFLAGS) $(INCLUDES) -o $@ $<
 
-# Objects.  No bspfile.o/byteordr.o here: entsearch reads .map text, never
+# Objects.  No bspfile.o/byteordr.o here: mapsearch reads .map text, never
 # a compiled .bsp, so nothing in it cares about byte order.
-OBJ_ENTSEARCH= qsnprint.o \
+OBJ_MAPSEARCH= qsnprint.o \
 	strlcat.o \
 	strlcpy.o \
 	cmdlib.o \
 	util_io.o \
 	pathutil.o \
-	es_regex.o \
-	es_map.o \
-	es_config.o \
-	entsearch.o
+	ms_regex.o \
+	ms_map.o \
+	ms_config.o \
+	mapsearch.o
 
-$(ENTSEARCH) : $(OBJ_ENTSEARCH)
-	$(LINKER) $(OBJ_ENTSEARCH) $(LDFLAGS) $(LDLIBS) -o $@
+$(MAPSEARCH) : $(OBJ_MAPSEARCH)
+	$(LINKER) $(OBJ_MAPSEARCH) $(LDFLAGS) $(LDLIBS) -o $@
 
 clean:
 	rm -f *.o core
 distclean: clean
-	rm -f $(ENTSEARCH)
+	rm -f $(MAPSEARCH)
 

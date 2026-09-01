@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    entsearch configuration.
+    mapsearch configuration.
 
-    entsearch looks for this file, in order, at:
+    mapsearch looks for this file, in order, at:
       the path given by  --config=FILE
-      the path in the    ENTSEARCH_CONFIG  environment variable
-      ./entsearch-config.xml
-      entsearch-config.xml next to the entsearch binary
+      the path in the    MAPSEARCH_CONFIG  environment variable
+      ./mapsearch-config.xml
+      mapsearch-config.xml next to the mapsearch binary
 
-    Without one, entsearch searches "." recursively with the built-in list
+    Without one, mapsearch searches "." recursively with the built-in list
     of flag properties and every output option switched off.
 
     The parser is loose on purpose.  Element names are matched without
@@ -23,9 +23,12 @@
 
     Those last two are how the sample config Inky ships writes its flag
     properties and its output settings, so if you already keep a config for
-    MapSearch, copying it to entsearch-config.xml is the whole migration.
+    his build, copying it over as mapsearch-config.xml is the whole migration.
+
+    MapSearch is Inky's tool.  His original, a Windows build and his mapping
+    documentation:  http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/
 -->
-<EntSearch>
+<MapSearch>
 
     <!-- Where the .map files are.  Each entry is walked recursively.
          "." is the current directory, not the directory the binary lives
@@ -96,4 +99,4 @@
         <IgnoreCase>true</IgnoreCase>
     </Output>
 
-</EntSearch>
+</MapSearch>
