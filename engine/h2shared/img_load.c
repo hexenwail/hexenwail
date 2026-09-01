@@ -647,14 +647,31 @@ qboolean IMG_LoadReplacement (const char *name, const char *modelname,
 	if (is_fence)
 		allow_compressed = false;
 
-	/* r_texture_external used to gate only the Quake II .wal loader, which
-	 * h2config.h #undefs, so it was a dead cvar whose name promised exactly
-	 * the feature people ask about -- and it read 0, which made it look like
-	 * the reason a pack was not showing up.  It now gates what it claims to,
-	 * defaulting to 1 so nothing changes for anyone who never touched it and
-	 * a pack can actually be switched off.  uhexen2-dbnh */
-	if (!r_texture_external.integer)
+	/* This gate was r_texture_external, which used to cover only the Quake II
+	 * .wal loader that h2config.h #undefs -- a dead cvar whose name promised
+	 * exactly the feature people ask about, defaulting to 0.  uhexen2-dbnh
+	 * gave it teeth and raised the default, but it was CVAR_ARCHIVE, so every
+	 * config.cfg already holding the old meaningless 0 silently lost every
+	 * replacement texture in that gamedir.  Renamed here, because an archived
+	 * value cannot be told apart from a deliberate one.  uhexen2-yz1b */
+	if (!r_external_textures.integer)
+	{
+		/* Say so, once.  The predecessor of this cvar spent seven months
+		 * silently refusing every replacement pack on installs whose
+		 * config.cfg had archived a then-meaningless 0, and the absence of
+		 * any message is what made that expensive to diagnose rather than
+		 * the value itself.  uhexen2-yz1b */
+		static qboolean	told = false;
+
+		if (!told)
+		{
+			told = true;
+			Con_Printf ("r_external_textures is 0: replacement textures are disabled,\n"
+				    "  so models and world textures will use their embedded art.\n"
+				    "  Set r_external_textures 1 to load an installed HD pack.\n");
+		}
 		return false;
+	}
 
 	n = IMG_BuildCandidates (name, modelname, paths);
 
