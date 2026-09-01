@@ -6547,8 +6547,7 @@ static void R_ShowTris (void)
 		extern qboolean	gl_clipcontrol_able;
 		float		units = gl_clipcontrol_able ? 3.0f : -3.0f;
 
-		glEnable_fp (GL_POLYGON_OFFSET_LINE);
-		glPolygonOffset_fp (units < 0 ? -1.0f : 1.0f, units);
+		R_SetPolygonOffsetLine (true, units < 0 ? -1.0f : 1.0f, units);
 	}
 	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_LINE);
 
@@ -6591,8 +6590,7 @@ static void R_ShowTris (void)
 	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
 	if (r_showtris.value != 1)
 	{
-		glPolygonOffset_fp (0.0f, 0.0f);
-		glDisable_fp (GL_POLYGON_OFFSET_LINE);
+		R_SetPolygonOffsetLine (false, 0.0f, 0.0f);
 	}
 	glBindVertexArray_fp (0);
 	R_UseProgram (0);
