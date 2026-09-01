@@ -87,7 +87,8 @@ extern glprogram_t	gl_shader_alias;	/* vertex-colored, textured, fog */
 extern glprogram_t	gl_shader_2d;		/* orthographic textured quads */
 extern glprogram_t	gl_shader_particle;	/* textured triangles, per-vertex color */
 extern glprogram_t	gl_shader_flat;		/* untextured, vertex-colored */
-extern glprogram_t	gl_shader_sky;		/* textured quads for skybox */
+extern glprogram_t	gl_shader_sky_layers;	/* two scrolling cloud layers (uhexen2-a5nn.4) */
+extern glprogram_t	gl_shader_sky_boxside;	/* one sky texture, UVs from the vertex */
 extern glprogram_t	gl_shader_skeletal;	/* PV_IQM bone-weighted skinning (desktop GL 4.3 only) */
 /* NOPERSP twins: affine texture mapping for r_softemu_mdl_warp.  Selected per
  * draw by R_SoftEmuMdlWarp; identical to their siblings otherwise.  uhexen2-ktjv. */

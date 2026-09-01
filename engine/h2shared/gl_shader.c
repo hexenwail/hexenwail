@@ -30,7 +30,8 @@ glprogram_t	gl_shader_skeletal_oit;
 glprogram_t	gl_shader_2d;
 glprogram_t	gl_shader_particle;
 glprogram_t	gl_shader_flat;
-glprogram_t	gl_shader_sky;
+glprogram_t	gl_shader_sky_layers;	/* two scrolling cloud layers (uhexen2-a5nn.4) */
+glprogram_t	gl_shader_sky_boxside;	/* one sky texture, UVs from the vertex */
 
 /* null fullbright texture: 1x1 black RGBA bound at unit 2 for world
  * surfaces whose diffuse texture has no fullbright pixels.  Lets
@@ -1588,55 +1589,126 @@ static const char salias_inst_vert[] =
 #endif /* !USE_GLES */
 
 /* --- shader_sky: two-layer scrolling sky (solid + alpha) --- */
-static const char ssky_vert[] =
+/* THE SKY PROGRAMS (uhexen2-a5nn.4).
+ *
+ * One program used to serve every sky mode, branching on u_alpha_threshold:
+ * over 0.5 meant "one texture, UVs from the vertex", under it meant "two
+ * scrolling layers, UVs from the view direction".  Ironwail compiles four
+ * specialised programs instead (Quake/glquake.h:541-544) and we now compile
+ * two of them, which is every mode we actually have.
+ *
+ * THE BRANCH WAS NOT FREE, AND NOT ONLY BECAUSE OF THE BRANCH.
+ * u_alpha_threshold is engine-global alpha-test state shared with every other
+ * program, so borrowing it as a mode switch meant three call sites had to
+ * save it, set it and restore it around their draws.  Each is a documented
+ * bug: uhexen2-khsa (leaving it hot at 1.0 turned the next entity's discard
+ * into `if (color.a < 1.0)`, which on NVIDIA killed about half the fragments
+ * of a fully opaque skin -- the screen-door), uhexen2-sp7v (the skybox path
+ * had no save/restore at all) and uhexen2-nudx (a brush entity with a sky
+ * face discarding its own translucent faces).  Two programs delete the borrow
+ * rather than documenting it a fourth time.
+ *
+ * WHAT IS DELIBERATELY NOT PORTED.  Upstream carries a [dither] axis on three
+ * of its four sky programs; our softemu screen dither lives in the
+ * post-process pass instead (see R_SoftEmuParams, uhexen2-a5nn.3), so there is
+ * no axis here to compile.  skystencil has no counterpart either -- our sky
+ * surfaces reach the depth buffer through the ordinary world chain.
+ * skycubemap, including its [anim] variant, is the one real gap and is not
+ * here: we have no cubemap sky path at all to hang it on.
+ */
+
+/* Two scrolling cloud layers blended in one pass.  Ironwail's skylayers
+ * (Quake/gl_shaders.h sky_layers_*).
+ *
+ * ONE DIVERGENCE FROM UPSTREAM, WHICH FIXES A BUG.  Upstream derives the layer
+ * UVs in the fragment shader from the view direction and scrolls them at a
+ * hardcoded Time/16 and Time/8, and so did the branch this replaces.  But our
+ * callers in gl_warp.c already compute those UVs per vertex -- they have to,
+ * because the two-pass path below needs them -- and they compute them from
+ * r_skyspeed_back and r_skyspeed_front.  The shader ignoring them meant those
+ * two archived cvars silently did nothing whenever r_skyalpha reached 1.0, and
+ * worked at every other value.  Taking the vertex UVs makes them live on both
+ * paths and deletes the duplicated direction maths.
+ *
+ * The two agreed at stock settings, which is why it went unnoticed: the CPU
+ * normalises the direction to length 6*63 and divides by 128, giving the same
+ * 189/64 scale the shader used, and r_skyspeed_back 8 / r_skyspeed_front 16
+ * over 128 are exactly the /16 and /8 it hardcoded.
+ *
+ * It also settles which clock the sky runs on.  The vertex UVs use realtime,
+ * as QuakeSpasm's sky always has; the branch this replaces used u_time
+ * (cl.time), so the sky used to stop scrolling on pause at r_skyalpha 1.0 and
+ * keep scrolling at every other value.  Now it is realtime throughout. */
+static const char ssky_layers_vert[] =
 	GLSL_VERT_HEADER
 	"in vec3 a_position;\n"
 	"in vec2 a_texcoord;\n"
 	"in vec2 a_lmcoord;\n"
 	"in vec4 a_color;\n"
 	"uniform mat4 u_mvp;\n"
-	"uniform vec3 u_eyepos;\n"
-	"out vec3 v_dir;\n"
 	"out vec2 v_texcoord;\n"
 	"out vec2 v_lmcoord;\n"
 	"out vec4 v_color;\n"
 	"void main() {\n"
-	"    vec3 dir = a_position - u_eyepos;\n"
-	"    dir.z *= 3.0;\n"
-	"    v_dir = dir;\n"
 	"    v_texcoord = a_texcoord;\n"
 	"    v_lmcoord = a_lmcoord;\n"
 	"    v_color = a_color;\n"
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
 
-static const char ssky_frag[] =
+static const char ssky_layers_frag[] =
 	GLSL_FRAG_HEADER
-	"uniform sampler2D u_texture0;\n"
-	"uniform sampler2D u_texture1;\n"
-	"uniform vec3 u_fog_color;\n"
-	"uniform float u_fog_density;\n"
+	"uniform sampler2D u_texture0;\n"	/* solid / back layer */
+	"uniform sampler2D u_texture1;\n"	/* alpha / front layer */
 	"uniform vec4 u_skyfog;\n"
-	"uniform float u_time;\n"
-	"uniform float u_alpha_threshold;\n"
 	"uniform vec2 u_wind;\n"
-	"in vec3 v_dir;\n"
 	"in vec2 v_texcoord;\n"
 	"in vec2 v_lmcoord;\n"
 	"in vec4 v_color;\n"
 	"out vec4 fragColor;\n"
 	"void main() {\n"
-	"    if (u_alpha_threshold > 0.5) {\n"
-	"        vec4 solid = texture(u_texture0, v_texcoord + u_wind);\n"
-	"        fragColor = solid * v_color;\n"
-	"    } else {\n"
-	"        vec2 uv = normalize(v_dir).xy * (189.0 / 64.0);\n"
-	"        vec4 solid = texture(u_texture0, uv + u_time / 16.0 + u_wind);\n"
-	"        vec4 layer = texture(u_texture1, uv + u_time / 8.0 + u_wind);\n"
-	"        vec3 color = mix(solid.rgb, layer.rgb, layer.a);\n"
-	"        color = mix(color, u_skyfog.rgb, u_skyfog.a);\n"
-	"        fragColor = vec4(color, 1.0) * v_color;\n"
-	"    }\n"
+	"    vec4 solid = texture(u_texture0, v_texcoord + u_wind);\n"
+	"    vec4 layer = texture(u_texture1, v_lmcoord + u_wind);\n"
+	"    vec3 color = mix(solid.rgb, layer.rgb, layer.a);\n"
+	"    color = mix(color, u_skyfog.rgb, u_skyfog.a);\n"
+	"    fragColor = vec4(color, 1.0) * v_color;\n"
+	"}\n";
+
+/* One sky texture, UVs supplied by the caller.  Ironwail's skyboxside
+ * (Quake/gl_shaders.h sky_boxside_*), and the six faces of a loaded skybox are
+ * what it draws there.
+ *
+ * Ours additionally serves the two-pass cloud path, which upstream has no
+ * equivalent of: at r_skyalpha < 1 -- which is our shipped default of 0.67 --
+ * gl_warp.c draws the back layer opaque and the front layer blended, and each
+ * pass is exactly this, one texture with vertex UVs modulated by v_color.
+ *
+ * No u_skyfog here on purpose.  The skybox path fogs with a second flat pass
+ * over the same quad (Sky_DrawSkyBox), not in this shader, and the cloud
+ * passes take their fog the same way the surface did before them. */
+static const char ssky_side_vert[] =
+	GLSL_VERT_HEADER
+	"in vec3 a_position;\n"
+	"in vec2 a_texcoord;\n"
+	"in vec4 a_color;\n"
+	"uniform mat4 u_mvp;\n"
+	"out vec2 v_texcoord;\n"
+	"out vec4 v_color;\n"
+	"void main() {\n"
+	"    v_texcoord = a_texcoord;\n"
+	"    v_color = a_color;\n"
+	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
+	"}\n";
+
+static const char ssky_side_frag[] =
+	GLSL_FRAG_HEADER
+	"uniform sampler2D u_texture0;\n"
+	"uniform vec2 u_wind;\n"
+	"in vec2 v_texcoord;\n"
+	"in vec4 v_color;\n"
+	"out vec4 fragColor;\n"
+	"void main() {\n"
+	"    fragColor = texture(u_texture0, v_texcoord + u_wind) * v_color;\n"
 	"}\n";
 
 /* ------------------------------------------------------------------ */
@@ -1918,7 +1990,8 @@ void GL_Shaders_Init (void)
 			      "#define NOPERSP 1\n");
 #endif
 	GL_InitProgram(&gl_shader_particle, "particle", spart_vert,  spart_frag);
-	GL_InitProgram(&gl_shader_sky,      "sky",      ssky_vert,   ssky_frag);
+	GL_InitProgram(&gl_shader_sky_layers,  "sky_layers",  ssky_layers_vert, ssky_layers_frag);
+	GL_InitProgram(&gl_shader_sky_boxside, "sky_boxside", ssky_side_vert,   ssky_side_frag);
 
 	/* Create the 1x1 black sentinel texture used as u_texture2 in
 	 * gl_shader_world for surfaces with no fullbright pixels.  Sampled
@@ -2041,14 +2114,16 @@ void GL_Shaders_Init (void)
 void GL_ReportShaderStatus (void)
 {
 	Con_Printf("[RENDERER] shaders: 2d=%s flat=%s world=%s world_opaque=%s "
-		   "alias=%s particle=%s sky=%s skeletal=%s OIT=%s/%s/%s\n",
+		   "alias=%s particle=%s sky_layers=%s sky_boxside=%s "
+		   "skeletal=%s OIT=%s/%s/%s\n",
 		   gl_shader_2d.program ? "ok" : "FAILED",
 		   gl_shader_flat.program ? "ok" : "FAILED",
 		   gl_shader_world.program ? "ok" : "FAILED",
 		   gl_shader_world_opaque.program ? "ok" : "FAILED",
 		   gl_shader_alias.program ? "ok" : "FAILED",
 		   gl_shader_particle.program ? "ok" : "FAILED",
-		   gl_shader_sky.program ? "ok" : "FAILED",
+		   gl_shader_sky_layers.program ? "ok" : "FAILED",
+		   gl_shader_sky_boxside.program ? "ok" : "FAILED",
 		   gl_shader_skeletal.program ? "ok" : "disabled",
 		   gl_shader_world_oit.program ? "ok" : "disabled",
 		   gl_shader_alias_oit.program ? "ok" : "disabled",
@@ -2060,7 +2135,8 @@ void GL_Shaders_Shutdown (void)
 	glprogram_t *progs[] = {
 		&gl_shader_2d, &gl_shader_flat, &gl_shader_world,
 		&gl_shader_world_opaque,
-		&gl_shader_alias, &gl_shader_skeletal, &gl_shader_particle, &gl_shader_sky,
+		&gl_shader_alias, &gl_shader_skeletal, &gl_shader_particle,
+		&gl_shader_sky_layers, &gl_shader_sky_boxside,
 		&gl_shader_particle_gpu.base,
 		&gl_shader_alias_np, &gl_shader_skeletal_np,
 		&gl_shader_world_oit, &gl_shader_alias_oit, &gl_shader_skeletal_oit,

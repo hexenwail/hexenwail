@@ -176,7 +176,8 @@ test('headless smoke gate compiles the actual engine WebGL shader sources', asyn
   const byName = Object.fromEntries(programs.map((program) => [program.name, program]));
 
   assert.deepEqual(programs.map(({ name }) => name), [
-    '2d', 'flat', 'world', 'world_opaque', 'alias', 'particle', 'sky',
+    '2d', 'flat', 'world', 'world_opaque', 'alias', 'particle',
+    'sky_layers', 'sky_boxside',
     'postprocess', 'bloom_bright', 'bloom_down', 'bloom_up',
   ]);
   // Spot-check that macro expansion actually happened rather than silently

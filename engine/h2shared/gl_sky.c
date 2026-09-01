@@ -90,21 +90,6 @@ static qboolean R_CullModelForEntity(entity_t *e)
 GLfloat Fog_GetDensity(void);
 GLfloat *Fog_GetColor(void);
 
-// DrawGLPoly is static in gl_rsurf.c, so provide local implementation
-static void DrawGLPoly(glpoly_t *p)
-{
-	int	i;
-	float	*v;
-
-	GL_ImmBegin();
-	v = p->verts[0];
-	for (i = 0; i < p->numverts; i++, v+= VERTEXSIZE)
-	{
-		GL_ImmTexCoord2f(v[3], v[4]);
-		GL_ImmVertex3f(v[0], v[1], v[2]);
-	}
-	GL_ImmEnd(GL_POLYGON, &gl_shader_sky);
-}
 
 int	rs_skypolys; //for r_speeds readout
 int rs_skypasses; //for r_speeds readout
@@ -150,7 +135,8 @@ static float skywind_period = 30.0f;	/* seconds per oscillation cycle */
  * through us and through Ironwail, which does use it. */
 static float skywind_pitch  = 0.0f;	/* vertical direction, degrees */
 
-/* Per-frame wind UV offset, consumed by GL_ImmFlush -> u_wind on gl_shader_sky. */
+/* Per-frame wind UV offset.  GL_ImmFlush pushes it to u_wind on whichever
+ * program declares one, which is both sky programs (uhexen2-a5nn.4). */
 float sky_wind_uv[2] = { 0.0f, 0.0f };
 
 /* Skybox cache — Ironwail 0603c2bb — elimates stutter when maps precache skyboxes */
@@ -929,7 +915,7 @@ Sky_UpdateWind
 Computes the per-frame wind UV offset from the parsed per-skybox params
 and the global r_skywind scalar.  Phase oscillates as a triangle wave
 so wind blows one way, then reverses.  Result is stashed in sky_wind_uv
-for GL_ImmFlush to push to u_wind on gl_shader_sky.  Called once per
+for GL_ImmFlush to push to u_wind on the sky programs.  Called once per
 frame from Sky_DrawSky (only path that uses skyboxes).
 ==================
 */
@@ -1513,16 +1499,17 @@ FIXME: eliminate cracks by adding an extra vert on tjuncs
 void Sky_DrawSkyBox (void)
 {
 	int		i;
-	/* The sky shader borrows u_alpha_threshold as a layer-mode switch, and
-	 * that uniform is engine-global state shared with every other program.
-	 * Leaving it hot at 1.0 turned the next entity's discard into
-	 * "if (color.a < 1.0)", which on NVIDIA kills roughly half the
-	 * fragments of a fully opaque skin: its texture filter returns values
-	 * a hair under 1.0 for most sub-texel positions, where AMD's returns
-	 * exactly 1.0.  That was uhexen2-khsa -- the screen-door.  Both
-	 * EmitSkyPolysMulti and the turb sky path in gl_warp.c already
-	 * save/restore around the same borrow; this one did not.  uhexen2-sp7v. */
-	float		saved_threshold = GL_GetAlphaThreshold ();
+
+	/* This function used to save, set and restore u_alpha_threshold, because
+	 * the one sky program branched on it and that uniform is engine-global
+	 * alpha-test state.  Getting it wrong here was uhexen2-khsa: left hot at
+	 * 1.0 it turned the next entity's discard into "if (color.a < 1.0)",
+	 * which on NVIDIA killed roughly half the fragments of a fully opaque
+	 * skin -- its texture filter returns values a hair under 1.0 for most
+	 * sub-texel positions where AMD's returns exactly 1.0.  The screen-door.
+	 * uhexen2-sp7v added the save/restore this had been missing; uhexen2-a5nn.4
+	 * removes the need for one, since gl_shader_sky_boxside has no mode to
+	 * switch. */
 
 	// update UV scroll offset (same unit as r_skyspeed_*: scroll units/sec, 128 = full texture)
 	sky_box_scroll = (float)fmod(cl.time * r_skybox_speed.value * (1.0 / 128.0), 1.0);
@@ -1533,8 +1520,6 @@ void Sky_DrawSkyBox (void)
 
 	// Disable face culling so faces are visible from inside
 	R_SetCull (false);
-
-	GL_SetAlphaThreshold (1.0f);	/* single-layer skybox mode */
 
 	for (i=0 ; i<6 ; i++)
 	{
@@ -1555,7 +1540,7 @@ void Sky_DrawSkyBox (void)
 		Sky_EmitSkyBoxVertex (skymaxs[0][i], skymins[1][i], i);
 		Sky_EmitSkyBoxVertex (skymaxs[0][i], skymaxs[1][i], i);
 		Sky_EmitSkyBoxVertex (skymins[0][i], skymaxs[1][i], i);
-		GL_ImmEnd(GL_QUADS, &gl_shader_sky);
+		GL_ImmEnd(GL_QUADS, &gl_shader_sky_boxside);
 
 		rs_skypolys++;
 		rs_skypasses++;
@@ -1586,7 +1571,6 @@ void Sky_DrawSkyBox (void)
 	// Restore GL state — full window-Z range is symmetric, no flip needed
 	R_SetDepthRange (0.0, 1.0);
 	R_SetCull (true);
-	GL_SetAlphaThreshold (saved_threshold);
 }
 
 //==============================================================================
@@ -1595,175 +1579,25 @@ void Sky_DrawSkyBox (void)
 //
 //==============================================================================
 
-/*
-==============
-Sky_SetBoxVert
-==============
-*/
-void Sky_SetBoxVert (float s, float t, int axis, vec3_t v)
-{
-	vec3_t		b;
-	int			j, k;
-
-	// Use modest distance that works without clipping issues
-	float skybox_distance = 1000.0;
-	b[0] = s * skybox_distance / sqrt(3.0);
-	b[1] = t * skybox_distance / sqrt(3.0);
-	b[2] = skybox_distance / sqrt(3.0);
-
-	for (j=0 ; j<3 ; j++)
-	{
-		k = st_to_vec[axis][j];
-		if (k < 0)
-			v[j] = -b[-k - 1];
-		else
-			v[j] = b[k - 1];
-		v[j] += r_origin[j];
-	}
-}
-
-/*
-=============
-Sky_GetTexCoord
-=============
-*/
-void Sky_GetTexCoord (vec3_t v, float speed, float *s, float *t)
-{
-	vec3_t	dir;
-	float	length, scroll;
-
-	VectorSubtract(v, r_origin, dir);
-	dir[2] *= 3;	// flatten the sphere
-
-	length = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-	length = sqrt(length);
-	length = 6 * 63 / length;
-
-	scroll = cl.time*speed;
-	scroll -= (int)scroll & ~127;
-
-	*s = (scroll + dir[0] * length) * (1.0 / 128);
-	*t = (scroll + dir[1] * length) * (1.0 / 128);
-}
-
-/*
-===============
-Sky_DrawFaceQuad
-===============
-*/
-void Sky_DrawFaceQuad (glpoly_t *p)
-{
-	float	*v;
-	int		i;
-	float	skyfog_alpha;
-	float	*fog_color;
-
-	GL_Bind (solidskytexture);
-	GL_EnableMultitexture();
-	GL_Bind (alphaskytexture);
-
-	GL_ImmColor3f(1, 1, 1);
-
-	GL_ImmBegin();
-	for (i=0, v=p->verts[0] ; i<4 ; i++, v+=VERTEXSIZE)
-	{
-		GL_ImmVertex3f (v[0], v[1], v[2]);
-	}
-
-	/* Set sky fog uniform for the shader */
-	skyfog_alpha = 0.0;
-	if (Fog_GetDensity() > 0 && skyfog > 0)
-	{
-		fog_color = Fog_GetColor();
-		skyfog_alpha = CLAMP(0.0, skyfog, 1.0);
-		glUniform4f_fp(gl_shader_sky.u_skyfog, fog_color[0], fog_color[1], fog_color[2], skyfog_alpha);
-	}
-	else
-	{
-		glUniform4f_fp(gl_shader_sky.u_skyfog, 0.0, 0.0, 0.0, 0.0);
-	}
-
-	GL_ImmEnd(GL_QUADS, &gl_shader_sky);
-
-	GL_DisableMultitexture();
-
-	rs_skypolys++;
-	rs_skypasses++;
-}
-
-/*
-==============
-Sky_DrawFace
-==============
-*/
-
-void Sky_DrawFace (int axis)
-{
-	glpoly_t	*p;
-	vec3_t		verts[4];
-	int			i, j, start;
-	float		di, qi, dj, qj;
-	vec3_t		vup, vright, temp, temp2;
-
-	Sky_SetBoxVert(-1.0, -1.0, axis, verts[0]);
-	Sky_SetBoxVert(-1.0, 1.0, axis, verts[1]);
-	Sky_SetBoxVert(1.0, 1.0, axis, verts[2]);
-	Sky_SetBoxVert(1.0, -1.0, axis, verts[3]);
-
-	start = Hunk_LowMark();
-	p = (glpoly_t *)Hunk_Alloc(sizeof(glpoly_t));
-
-	VectorSubtract(verts[2], verts[3], vup);
-	VectorSubtract(verts[2], verts[1], vright);
-
-	di = q_max((int)r_sky_quality.value, 1);
-	qi = 1.0 / di;
-	dj = (axis < 4) ? di * 2 : di; //subdivide vertically more than horizontally on skybox sides
-	qj = 1.0 / dj;
-
-	for (i = 0; i < di; i++)
-	{
-		for (j = 0; j < dj; j++)
-		{
-			if (i*qi < skymins[0][axis] / 2 + 0.5 - qi || i * qi > skymaxs[0][axis] / 2 + 0.5 ||
-				j * qj < skymins[1][axis] / 2 + 0.5 - qj || j * qj > skymaxs[1][axis] / 2 + 0.5)
-				continue;
-
-			//if (i&1 ^ j&1) continue; //checkerboard test
-			VectorScale(vright, qi*i, temp);
-			VectorScale(vup, qj*j, temp2);
-			VectorAdd(temp, temp2, temp);
-			VectorAdd(verts[0], temp, p->verts[0]);
-
-			VectorScale(vup, qj, temp);
-			VectorAdd(p->verts[0], temp, p->verts[1]);
-
-			VectorScale(vright, qi, temp);
-			VectorAdd(p->verts[1], temp, p->verts[2]);
-
-			VectorAdd(p->verts[0], temp, p->verts[3]);
-
-			Sky_DrawFaceQuad(p);
-		}
-	}
-	Hunk_FreeToLowMark(start);
-}
-
-/*
-==============
-Sky_DrawSkyLayers
-
-draws the old-style scrolling cloud layers
-==============
-*/
-void Sky_DrawSkyLayers (void)
-{
-	int i;
-
-	for (i=0 ; i<6 ; i++)
-		if (skymins[0][i] < skymaxs[0][i] && skymins[1][i] < skymaxs[1][i])
-			Sky_DrawFace (i);
-}
+/* REMOVED 2026-09-01 (uhexen2-a5nn.4): Sky_SetBoxVert, Sky_GetTexCoord,
+ * Sky_DrawFaceQuad, Sky_DrawFace and Sky_DrawSkyLayers, plus the local
+ * DrawGLPoly further up.
+ *
+ * QuakeSpasm's subdivided sky-face path, which nothing has called here for a
+ * long time: Sky_DrawSkyLayers had no caller and no declaration in any header,
+ * and it was the only route to the other four.  The compiler had been saying
+ * so about DrawGLPoly the whole time -- "defined but not used" -- and nobody
+ * was reading the warning.  The scrolling sky reaches the screen through
+ * R_DrawSkyChain in gl_warp.c instead, and skyboxes through Sky_DrawSkyBox.
+ *
+ * Deleted rather than ported because splitting the sky program would otherwise
+ * have meant deciding which of the two new programs unreachable code wanted.
+ * It also carried a real defect for whoever revived it: Sky_DrawFaceQuad
+ * called glUniform4f on gl_shader_sky.u_skyfog while a different program was
+ * still current -- uniform writes land on the bound program, and GL 4.3 core
+ * raises GL_INVALID_OPERATION with none bound -- so its sky fog could never
+ * have worked. Recover from git history if it is ever wanted; it will need
+ * that fixed and a program chosen. */
 
 /*
 ==============

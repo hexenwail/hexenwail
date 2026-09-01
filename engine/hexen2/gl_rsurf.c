@@ -2962,8 +2962,8 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 
 		/* Always re-bind VAO + shader + lightmap atlas: the legacy
 		 * fall-through pass for special surfaces (sky / turb /
-		 * fence / underwater) inside this very function may bind
-		 * gl_shader_sky and leave it active when it returns.  Mesa
+		 * fence / underwater) inside this very function may bind one of
+		 * the sky programs and leave it active when it returns.  Mesa
 		 * fast-paths redundant binds to the same object so this is
 		 * cheap when nothing changed.  When a brush batch is active
 		 * we still skip the program-resident fog/alpha/color uniform

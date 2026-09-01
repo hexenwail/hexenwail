@@ -35,7 +35,10 @@ const PROGRAM_SPECS = [
   ['world_opaque', 'shader', 'sworld_vert', 'sworld_frag_opaque'],
   ['alias', 'shader', 'salias_vert', 'salias_frag'],
   ['particle', 'shader', 'spart_vert', 'spart_frag'],
-  ['sky', 'shader', 'ssky_vert', 'ssky_frag'],
+  // Two programs since uhexen2-a5nn.4 split the one that branched on
+  // u_alpha_threshold; both must still compile on the ES tier.
+  ['sky_layers', 'shader', 'ssky_layers_vert', 'ssky_layers_frag'],
+  ['sky_boxside', 'shader', 'ssky_side_vert', 'ssky_side_frag'],
   ['postprocess', 'postprocess', 'pp_vert_src', 'pp_frag_src'],
   ['bloom_bright', 'postprocess', 'bloom_vert_src', 'bloom_bright_frag_src'],
   ['bloom_down', 'postprocess', 'bloom_vert_src', 'bloom_down_frag_src'],

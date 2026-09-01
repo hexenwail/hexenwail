@@ -809,16 +809,15 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 	float		bspeed = r_skyspeed_back.value;
 	float		fspeed = r_skyspeed_front.value;
-	/* The sky shader abuses the alpha threshold as a mode switch, so it is
-	 * load-bearing here but must not leak into whatever draws next.  A brush
-	 * entity with a sky face would otherwise discard its own translucent
-	 * faces at threshold 1.0.  uhexen2-nudx. */
-	float		saved_threshold = GL_GetAlphaThreshold ();
+
+	/* No alpha-threshold save/restore any more.  The sky used to be one
+	 * program branching on that engine-global uniform, so this function had to
+	 * borrow it and hand it back; uhexen2-nudx is what happened when it did
+	 * not.  Two programs now, one per mode -- uhexen2-a5nn.4. */
 
 	if (alpha >= 1.0f)
 	{
 		/* single-pass multitexture: blend both layers in the shader */
-		GL_SetAlphaThreshold (0.0f);	/* two-layer sky mode */
 		GL_Bind (solidskytexture);
 
 		glActiveTexture_fp (GL_TEXTURE1);
@@ -851,14 +850,13 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 				GL_ImmLMCoord2f (ss, tt);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
 			}
-			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
+			GL_ImmEnd (GL_POLYGON, &gl_shader_sky_layers);
 		}
 	}
 	else
 	{
 		/* two-pass: draw back layer opaque, then front layer blended
 		 * with r_skyalpha controlling the front layer's opacity */
-		GL_SetAlphaThreshold (1.0f);	/* single-texture mode */
 
 		/* pass 1: solid (back) layer, fully opaque */
 		GL_Bind (solidskytexture);
@@ -885,7 +883,7 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 				GL_ImmTexCoord2f (s, t);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
 			}
-			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
+			GL_ImmEnd (GL_POLYGON, &gl_shader_sky_boxside);
 		}
 
 		/* pass 2: alpha (front) layer, blended at r_skyalpha */
@@ -914,13 +912,11 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 				GL_ImmTexCoord2f (ss, tt);
 				GL_ImmVertex3f (v[0], v[1], v[2]);
 			}
-			GL_ImmEnd (GL_POLYGON, &gl_shader_sky);
+			GL_ImmEnd (GL_POLYGON, &gl_shader_sky_boxside);
 		}
 
 		R_SetBlend (false);
 	}
-
-	GL_SetAlphaThreshold (saved_threshold);
 }
 
 /*
@@ -1031,12 +1027,9 @@ void R_DrawSkyChain (msurface_t *s)
 	float		alpha = CLAMP(0.0f, r_skyalpha.value, 1.0f);
 	float		bspeed = r_skyspeed_back.value;
 	float		fspeed = r_skyspeed_front.value;
-	/* See EmitSkyPolysMulti: the threshold doubles as the sky shader's mode
-	 * switch and must be handed back untouched.  uhexen2-nudx. */
-	float		saved_threshold = GL_GetAlphaThreshold ();
 
 	/* Per-surface bbox cull: skip surfaces fully outside the view. */
-#define EMIT_LOOP(VERT_MACRO, COLOR_SETUP) \
+#define EMIT_LOOP(PROG, VERT_MACRO, COLOR_SETUP) \
 	do { \
 		GL_ImmBegin (); \
 		COLOR_SETUP; \
@@ -1067,7 +1060,7 @@ void R_DrawSkyChain (msurface_t *s)
 			{ \
 				if (p->numverts < 3) continue; \
 				if (GL_ImmCount() + (p->numverts - 2) * 3 >= GL_IMM_MAX_VERTS - 6) { \
-					GL_ImmEnd (GL_TRIANGLES, &gl_shader_sky); \
+					GL_ImmEnd (GL_TRIANGLES, (PROG)); \
 					GL_ImmBegin (); \
 					COLOR_SETUP; \
 				} \
@@ -1078,36 +1071,36 @@ void R_DrawSkyChain (msurface_t *s)
 				} \
 			} \
 		} \
-		GL_ImmEnd (GL_TRIANGLES, &gl_shader_sky); \
+		GL_ImmEnd (GL_TRIANGLES, (PROG)); \
 	} while (0)
 
 	if (alpha >= 1.0f)
 	{
 		/* single-pass: shader blends both layers using TU0/TU1 */
-		GL_SetAlphaThreshold (0.0f);
 		GL_Bind (solidskytexture);
 		glActiveTexture_fp (GL_TEXTURE1);
 		GL_Bind (alphaskytexture);
 		glActiveTexture_fp (GL_TEXTURE0);
-		EMIT_LOOP (SKYWARP_VERT_MULTI, GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f));
+		EMIT_LOOP (&gl_shader_sky_layers, SKYWARP_VERT_MULTI,
+			   GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f));
 	}
 	else
 	{
-		/* two-pass: opaque back, then alpha-blended front */
-		GL_SetAlphaThreshold (1.0f);
+		/* two-pass: opaque back, then alpha-blended front.  Each pass is one
+		 * texture with vertex UVs, which is the boxside program. */
 
 		/* pass 1: back layer, opaque */
 		GL_Bind (solidskytexture);
-		EMIT_LOOP (SKYWARP_VERT_BACK, GL_ImmColor3f(1.0f, 1.0f, 1.0f));
+		EMIT_LOOP (&gl_shader_sky_boxside, SKYWARP_VERT_BACK,
+			   GL_ImmColor3f(1.0f, 1.0f, 1.0f));
 
 		/* pass 2: front layer, blended at r_skyalpha */
 		GL_Bind (alphaskytexture);
 		R_SetBlend (true);
-		EMIT_LOOP (SKYWARP_VERT_FRONT, GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
+		EMIT_LOOP (&gl_shader_sky_boxside, SKYWARP_VERT_FRONT,
+			   GL_ImmColor4f(1.0f, 1.0f, 1.0f, alpha));
 		R_SetBlend (false);
 	}
-
-	GL_SetAlphaThreshold (saved_threshold);
 
 #undef EMIT_LOOP
 }
