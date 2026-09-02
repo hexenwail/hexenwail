@@ -467,6 +467,57 @@ static void Cvar_Inc_f (void)
 	}
 }
 
+/*
+============
+Cvar_Toggle_f
+
+`toggle <cvar>` -- zero becomes 1, anything else becomes 0.
+
+The one command in this family we never had, and the one most likely to be in
+somebody's config: `bind x "toggle r_wateralpha"` is how a mod or a player
+writes a switch, and without it that bind silently did nothing.  Found by
+inventory-diffing Ironwail's cvar.c command set against ours rather than by
+diffing commit logs -- it predates any window we have compared.  uhexen2-a5nn.24.
+============
+*/
+static void Cvar_Toggle_f (void)
+{
+	switch (Cmd_Argc())
+	{
+	case 2:
+		if (Cvar_VariableValue (Cmd_Argv(1)))
+			Cvar_Set (Cmd_Argv(1), "0");
+		else
+			Cvar_Set (Cmd_Argv(1), "1");
+		break;
+	default:
+		Con_Printf ("toggle <cvar> : toggle a cvar between 0 and 1\n");
+		break;
+	}
+}
+
+/*
+============
+Cvar_Reset_f
+
+`reset <cvar>` -- the single-cvar form of resetall, which we had without it.
+Cvar_Reset itself has been here all along; only the way to reach it from the
+console was missing.  uhexen2-a5nn.24.
+============
+*/
+static void Cvar_Reset_f (void)
+{
+	switch (Cmd_Argc())
+	{
+	case 2:
+		Cvar_Reset (Cmd_Argv(1));
+		break;
+	default:
+		Con_Printf ("reset <cvar> : reset a cvar to its default value\n");
+		break;
+	}
+}
+
 static void Cvar_ResetAll_f (void)
 {
 	cvar_t	*var;
@@ -489,6 +540,8 @@ void Cvar_Init (void)
 	Cmd_AddCommand ("cycle", Cvar_Cycle_f);
 	Cmd_AddCommand ("cycleback", Cvar_Cycle_f);
 	Cmd_AddCommand ("inc", Cvar_Inc_f);
+	Cmd_AddCommand ("toggle", Cvar_Toggle_f);	/* uhexen2-a5nn.24 */
+	Cmd_AddCommand ("reset", Cvar_Reset_f);		/* uhexen2-a5nn.24 */
 	Cmd_AddCommand ("resetall", Cvar_ResetAll_f);
 	Cmd_AddCommand ("resetcfg", Cvar_ResetCfg_f);
 }
