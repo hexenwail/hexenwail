@@ -184,6 +184,73 @@ void R_RunParticleEffect4 (vec3_t org, float radius, int color, ptype_t effect, 
 R_InitParticles
 ===============
 */
+/*
+===============
+r_particles -- upstream's spelling, which conflates two knobs this engine
+keeps apart.
+
+Ironwail has ONE cvar: 0 off, 1 round, 2 square (its default).  We have two,
+and deliberately -- r_drawparticles is the off switch and gl_particles is the
+style, because routing "off" through the style cvar is exactly what
+uhexen2-2rxl was: gl_particles 0 sampled particletexture at the (0.5,0.5) seam
+of a 2x2 atlas, discarded every point, and drew no rain, snow, blood or sparks
+at all.  Garrett reported that against Shadows of Chaos.  See the comment on
+r_drawparticles in gl_rmain.c; that split is not up for renaming.
+
+So this is an adapter rather than an alias.  It maps both ways and touches
+neither cvar's meaning:
+
+	r_particles 0		->  r_drawparticles 0   (style left alone)
+	r_particles 1		->  r_drawparticles 1, gl_particles 1 (round)
+	r_particles 2		->  r_drawparticles 1, gl_particles 0 (square)
+	back:  off ? 0 : (round ? 1 : 2)
+
+Turning particles off deliberately leaves gl_particles where the player left
+it, for the same reason vid_desktopfullscreen survives going windowed: the
+style is a preference about next time, not a statement about now.
+
+Not archived -- r_drawparticles and gl_particles are the archived pair, and
+config.cfg should carry one spelling of a setting.  An imported config saying
+`r_particles 2` still lands, because it is read like any other cvar.
+uhexen2-a5nn.33
+===============
+*/
+cvar_t	r_particles = {"r_particles", "1", CVAR_NONE};
+
+static qboolean	r_particles_syncing;
+
+static void R_ParticlesCompat_f (cvar_t *var)
+{
+	qboolean	saved = r_particles_syncing;
+
+	if (saved)
+		return;
+	r_particles_syncing = true;
+
+	if (var == &r_particles)
+	{
+		int	n = r_particles.integer;
+
+		if (n <= 0)
+		{
+			Cvar_SetQuick (&r_drawparticles, "0");
+		}
+		else
+		{
+			Cvar_SetQuick (&r_drawparticles, "1");
+			Cvar_SetQuick (&gl_particles, (n == 2) ? "0" : "1");
+		}
+	}
+	else
+	{
+		Cvar_SetQuick (&r_particles,
+			       !r_drawparticles.integer ? "0" :
+			       (gl_particles.integer ? "1" : "2"));
+	}
+
+	r_particles_syncing = false;
+}
+
 void R_InitParticles (void)
 {
 	int		i;
@@ -202,6 +269,14 @@ void R_InitParticles (void)
 	}
 
 	particles = (particle_t *) Hunk_AllocName (r_numparticles * sizeof(particle_t), "particles");
+
+	Cvar_RegisterVariable (&r_particles);
+	/* Callbacks after every registration, and the seed after those: a
+	 * mirror that fires against an unregistered twin is dropped silently. */
+	Cvar_SetCallback (&r_particles, R_ParticlesCompat_f);
+	Cvar_SetCallback (&r_drawparticles, R_ParticlesCompat_f);
+	Cvar_SetCallback (&gl_particles, R_ParticlesCompat_f);
+	R_ParticlesCompat_f (&r_drawparticles);	/* seed from what we actually are */
 
 	Cvar_RegisterVariable (&leak_color);
 	//JFM: snow test

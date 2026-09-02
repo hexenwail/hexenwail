@@ -62,6 +62,7 @@ extern cvar_t	r_softemu_metric;
 extern cvar_t	r_dither;
 extern cvar_t	r_lightmap_bicubic;
 extern cvar_t	gl_particles;
+extern cvar_t	r_drawparticles;	/* the off switch; gl_particles is the style */
 extern cvar_t	gl_fullbrights;
 extern cvar_t	r_wateralpha;
 extern cvar_t	gl_glows;
