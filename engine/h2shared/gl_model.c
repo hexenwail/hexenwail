@@ -28,6 +28,7 @@
 #include "hwal.h"
 #include "img_load.h"
 #include "gl_sky.h"
+#include "mod_placeholder.h"
 
 static qmodel_t*	loadmodel;
 static char	loadname[MAX_QPATH];	/* for hunk tags */
@@ -376,6 +377,11 @@ qmodel_t *Mod_FindName (const char *name)
 	}
 	q_strlcpy (mod->name, name, MAX_QPATH);
 	mod->needload = NL_NEEDS_LOADED;
+	/* Reached only for a fresh or recycled slot, never for a name already
+	 * known.  A recycled slot must not inherit the previous model's verdict:
+	 * a stale flag would quietly placeholder a genuinely broken engine asset
+	 * that Mod_ForName(..., true) is supposed to die on. */
+	mod->is_placeholder = false;
 	return mod;
 }
 
@@ -705,6 +711,25 @@ static qboolean Mod_TryEnhancedModel (qmodel_t *mod, const mdl_t *mdlhdr)
 
 /*
 ==================
+Mod_LoadPlaceholder
+
+Stands a checkerboard box in for a model that is not on disk.  Feeds the
+ordinary alias loader a synthesised IDPO image, so the result is an ordinary
+mod_alias and no server, client or render path needs to know the difference.
+==================
+*/
+static void Mod_LoadPlaceholder (qmodel_t *mod)
+{
+	/* Mod_LoadAliasModel reads both of these, and the caller reaches us
+	 * before Mod_LoadModel's own assignments further down. */
+	COM_FileBase (mod->name, loadname, sizeof(loadname));
+	loadmodel = mod;
+
+	Mod_LoadAliasModel (mod, Mod_SynthPlaceholderMDL ());
+}
+
+/*
+==================
 Mod_LoadModel
 
 Loads a model into the cache
@@ -744,6 +769,16 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	filesize = fs_filesize;
 	if (!buf)
 	{
+		/* Flagged by Mod_ForNamePlaceholder, and still set on every later
+		 * load of the same slot: the file will never appear, so a cache
+		 * eviction or a Mod_ReloadModels pass has to regenerate the mesh
+		 * rather than come back here and fail. */
+		if (mod->is_placeholder)
+		{
+			Mod_LoadPlaceholder (mod);
+			mod->needload = NL_PRESENT;
+			return mod;
+		}
 		if (crash)
 			Sys_Error ("%s: %s not found", __thisfunc__, mod->name);
 		return NULL;
@@ -856,6 +891,39 @@ qmodel_t *Mod_ForName (const char *name, qboolean crash)
 	return Mod_LoadModel (mod, crash);
 }
 
+/*
+==================
+Mod_ForNamePlaceholder
+
+Mod_ForName for content the gamecode precached: a map built against a mod the
+player does not have must still come up, with the gaps named on the console,
+the way ED_LoadFromFile already reports entities it has no spawn function for.
+
+Only for gamecode-driven precaches.  Engine assets (cl_tent.c, cl_effect.c)
+keep Mod_ForName(..., true): one of those missing means the install's own
+data1 is broken, and a checkerboard would hide that.
+==================
+*/
+qmodel_t *Mod_ForNamePlaceholder (const char *name)
+{
+	qmodel_t	*mod;
+
+	mod = Mod_FindName (name);
+
+	if (!mod->is_placeholder)
+	{
+		qmodel_t	*loaded = Mod_LoadModel (mod, false);
+
+		if (loaded)
+			return loaded;
+
+		/* Said once per model, not once per entity using it. */
+		Con_Printf ("Warning: model \"%s\" not found, using placeholder\n", name);
+		mod->is_placeholder = true;
+	}
+
+	return Mod_LoadModel (mod, false);
+}
 
 /*
 ===============================================================================

@@ -840,6 +840,12 @@ typedef struct qmodel_s
 	 * cache.data and splice the LRU chain through them, so they must not
 	 * run on a hunk pointer.  uhexen2-zjux. */
 	qboolean	cache_is_hunk;
+
+	/* This slot stands in for a file that is not on disk.  Set by
+	 * Mod_ForNamePlaceholder and honoured by Mod_LoadModel so that a cache
+	 * eviction regenerates the mesh instead of retrying the missing file. */
+	qboolean	is_placeholder;
+
 	cache_user_t	cache;		// only access through Mod_Extradata
 } qmodel_t;
 
@@ -861,6 +867,10 @@ void	Mod_SaveAliasModelDefaults (qmodel_t *mod);	/* uhexen2-oq0a */
 void	Mod_RestoreAliasModelDefaults (void);		/* uhexen2-oq0a */
 void	Mod_SetExtraFlags (qmodel_t *mod);		/* Ironwail r_nolerp_list */
 qmodel_t *Mod_ForName (const char *name, qboolean crash);
+/* For gamecode-driven precaches only: substitutes a checkerboard box and
+ * warns instead of dying when the file is absent.  Engine assets keep
+ * Mod_ForName(..., true) -- see the note on the definition. */
+qmodel_t *Mod_ForNamePlaceholder (const char *name);
 qmodel_t *Mod_FindName (const char *name);
 void	*Mod_Extradata (qmodel_t *mod);	// handles caching
 void	Mod_TouchModel (const char *name);

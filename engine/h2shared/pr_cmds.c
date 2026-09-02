@@ -374,12 +374,16 @@ static void PF_setmodel (void)
 	/* This applies mod->mins/maxs to EVERY model type, alias included, so
 	 * the loader's box is the entity's physics box until the progs calls
 	 * setsize().  h2ded and the listen server disagree about what that box
-	 * is for a .mdl: PF_precache_model()'s Mod_ForName() is #ifndef
-	 * SERVERONLY, so on h2ded sv.models[] stays NULL for progs-precached
-	 * models and the vec3_origin branch below runs, giving '0 0 0' where a
-	 * listen server gives the mesh extents padded by 10.  Latent, because
-	 * stock gamecode always calls setsize() after setmodel().  Do not
-	 * "reconcile" the two without checking real mod behaviour first --
+	 * is for a .mdl: PF_precache_model()'s Mod_ForNamePlaceholder() is
+	 * #ifndef SERVERONLY, so on h2ded sv.models[] stays NULL for
+	 * progs-precached models and the vec3_origin branch below runs, giving
+	 * '0 0 0' where a listen server gives the mesh extents padded by 10.
+	 * A model that is missing altogether now takes the same route on the
+	 * listen server, with the placeholder box's extents rather than the
+	 * absent mesh's -- it used to be a Sys_Error, so nothing regresses.
+	 * Latent either way, because stock gamecode always calls setsize()
+	 * after setmodel().  Do not "reconcile" the two without checking real
+	 * mod behaviour first --
 	 * see docs/SrcNotes.txt, "Alias model bounds: h2ded vs. the listen
 	 * server" (uhexen2-3coq). */
 	mod = sv.models[ (int)e->v.modelindex];	// Mod_ForName (m, true);
@@ -422,7 +426,7 @@ static void PF_setpuzzlemodel (void)
 			sv.model_precache[i] = m;
 			e->v.model = PR_SetEngineString(m);
 			#ifndef SERVERONLY
-			sv.models[i] = Mod_ForName (m, true);
+			sv.models[i] = Mod_ForNamePlaceholder (m);
 			#endif
 		}
 		else
@@ -2431,7 +2435,7 @@ static void PF_precache_model (void)
 		{
 			sv.model_precache[i] = s;
 			#ifndef SERVERONLY
-			sv.models[i] = Mod_ForName (s, true);
+			sv.models[i] = Mod_ForNamePlaceholder (s);
 			#endif
 			return;
 		}
@@ -2487,7 +2491,7 @@ static void PF_precache_puzzle_model (void)
 			s = (const char *)Hunk_Strdup(temp, "puzzlemodel");
 			sv.model_precache[i] = s;
 			#ifndef SERVERONLY
-			sv.models[i] = Mod_ForName (s, true);
+			sv.models[i] = Mod_ForNamePlaceholder (s);
 			#endif
 			return;
 		}

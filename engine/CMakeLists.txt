@@ -373,6 +373,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_fog.c
     ${COMMONDIR}/gl_mesh.c
     ${COMMONDIR}/gl_model.c
+    ${COMMONDIR}/mod_placeholder.c
     ${COMMONDIR}/md5mesh.c
     ${COMMONDIR}/md3mesh.c
     ${COMMONDIR}/gl_texmgr.c
@@ -429,6 +430,7 @@ set(SOFT_RENDERER_SOURCES
     ${COMMONDIR}/d_zpoint.c
     # From h2shared -- 8bpp model layer and 2D
     ${COMMONDIR}/model.c
+    ${COMMONDIR}/mod_placeholder.c
     ${COMMONDIR}/draw.c
     ${COMMONDIR}/screen.c
     # Browser adapters
