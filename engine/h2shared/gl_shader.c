@@ -432,6 +432,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lightgrid_xy    = glGetUniformLocation_fp(p->program, "u_lightgrid_xy");
 	p->u_lightgrid_z     = glGetUniformLocation_fp(p->program, "u_lightgrid_z");
 	p->u_lightgrid       = glGetUniformLocation_fp(p->program, "u_lightgrid");
+	p->u_alias_dlight    = glGetUniformLocation_fp(p->program, "u_alias_dlight");	/* uhexen2-waum */
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
 	p->u_turb             = glGetUniformLocation_fp(p->program, "u_turb");
@@ -895,7 +896,12 @@ static const char sworld_vert[] =
  * behind is `u_dlight_scale > 0.0`, which is uniform across the draw.
  */
 #ifndef USE_GLES
-#define GLSL_DLIGHT_DECL \
+/* Everything a consumer of the froxel grid needs except its own scale uniform.
+ * Shared by the world programs and, since uhexen2-waum, by the alias family --
+ * one copy of the SSBO layout and one copy of the slice mapping, because two
+ * copies drifting is a bug that renders as "some things take dynamic light a
+ * froxel early" rather than as anything obviously wrong. */
+#define GLSL_LIGHTGRID_DECL \
 	"struct Light { vec3 origin; float radius; vec3 color; float minlight; };\n" \
 	/* Layout and binding must match gl_lightcluster.c's compute pass.  The
 	 * LightStyles array is not read here -- light styles are a static
@@ -908,25 +914,36 @@ static const char sworld_vert[] =
 	"uniform usampler3D u_lightgrid;\n"	/* per-froxel light bitmasks */ \
 	"uniform mat4 u_lightview;\n"		/* world -> eye, no entity transform */ \
 	"uniform vec4 u_lightgrid_xy;\n"	/* xy viewport origin, zw froxels per pixel */ \
-	"uniform vec2 u_lightgrid_z;\n"		/* zlogscale, zlogbias */ \
-	"uniform float u_dlight_scale;\n"	/* blocklight -> lightmap units; 0 = path off */
+	"uniform vec2 u_lightgrid_z;\n"	/* zlogscale, zlogbias */
 
-#define GLSL_DLIGHT_FN \
-	"vec3 ClusteredDlight(vec3 lm, highp vec3 p) {\n" \
-	/* Geometric normal first -- see the header comment on derivatives. */ \
-	"    highp vec3 N = normalize(cross(dFdx(p), dFdy(p)));\n" \
+/* Which froxel an eye-space position falls in, and that froxel's 128-bit light
+ * mask.  Both consumers call this rather than each inlining the mapping: the
+ * z term is the exact inverse of the compute pass's `d = exp2((slice - bias) /
+ * scale)`, and the whole feature is only correct while the three agree.
+ *
+ * max() guards log2 of a non-positive depth.  Geometry at or behind the near
+ * plane is clipped, but a fragment exactly on it is not. */
+#define GLSL_LIGHTGRID_FETCH_FN \
+	"uvec4 LightGridMask(highp vec3 p) {\n" \
 	"    vec3 tile;\n" \
 	"    tile.xy = (gl_FragCoord.xy - u_lightgrid_xy.xy) * u_lightgrid_xy.zw;\n" \
-	/* The inverse of the compute pass's slice mapping, which reads
-	 * d = exp2((slice - bias) / scale).  Any drift between the two shows up
-	 * as lights that switch on a froxel early or late along the view axis.
-	 * max() guards log2 of a non-positive depth: geometry at or behind the
-	 * near plane is clipped, but a fragment exactly on it is not. */ \
 	"    tile.z = log2(max(-p.z, 1.0)) * u_lightgrid_z.x + u_lightgrid_z.y;\n" \
 	"    ivec3 t = clamp(ivec3(tile), ivec3(0), ivec3(" \
 		GLSL_STR(LIGHT_TILES_X) " - 1, " GLSL_STR(LIGHT_TILES_Y) " - 1, " \
 		GLSL_STR(LIGHT_TILES_Z) " - 1));\n" \
-	"    uvec4 mask = texelFetch(u_lightgrid, t, 0);\n" \
+	"    return texelFetch(u_lightgrid, t, 0);\n" \
+	"}\n"
+
+#define GLSL_DLIGHT_DECL \
+	GLSL_LIGHTGRID_DECL \
+	"uniform float u_dlight_scale;\n"	/* blocklight -> lightmap units; 0 = path off */
+
+#define GLSL_DLIGHT_FN \
+	GLSL_LIGHTGRID_FETCH_FN \
+	"vec3 ClusteredDlight(vec3 lm, highp vec3 p) {\n" \
+	/* Geometric normal first -- see the header comment on derivatives. */ \
+	"    highp vec3 N = normalize(cross(dFdx(p), dFdy(p)));\n" \
+	"    uvec4 mask = LightGridMask(p);\n" \
 	"    for (int w = 0; w < 4; w++) {\n" \
 	"        uint bits = mask[w];\n" \
 	"        while (bits != 0u) {\n" \
@@ -972,10 +989,144 @@ static const char sworld_vert[] =
 
 #define GLSL_DLIGHT_APPLY \
 	"    if (u_dlight_scale > 0.0) lm.rgb = ClusteredDlight(lm.rgb, v_eyepos);\n"
+
+/* --- the alias family's half of the same grid (uhexen2-waum, phase C) ---
+ *
+ * WHAT THIS REPLACES.  Every alias model used to take the whole frame's
+ * dynamic light as ONE number, computed once at the entity's ORIGIN
+ * (R_DrawAliasModel's `add = radius - VectorLengthFast(e->origin - dl->origin)`
+ * loop) and folded flat into the vertex colour.  A torch at a monster's feet
+ * lit its head exactly as much as its boots, and a model straddling a light's
+ * edge either took all of it or none.  This evaluates the same expression per
+ * pixel instead, from the froxel grid phase A builds.
+ *
+ * IT IS NOT A REUSE OF ClusteredDlight ABOVE, and the bead that filed this
+ * expected it to be.  Two reasons, both structural:
+ *
+ *  - THE FALLOFF IS A DIFFERENT FUNCTION.  The world one is R_AddDynamicLights'
+ *    -- project the light onto the surface plane, subtract the perpendicular
+ *    distance from the radius, then subtract the in-plane distance.  That shape
+ *    exists because a lightmap luxel IS a point on a plane.  The alias CPU term
+ *    this replaces is a plain `radius - distance`, and matching it is the whole
+ *    point: the only thing phase C is meant to change is WHERE the expression
+ *    is evaluated, not what it computes.
+ *  - THE NORMAL WOULD BE WRONG.  ClusteredDlight recovers its plane from
+ *    screen-space derivatives, which is exact for world surfaces because every
+ *    BSP face is planar.  An alias model is not, so the same trick yields the
+ *    flat triangle normal and the light would break into visible facets on
+ *    exactly the low-poly meshes Hexen II is made of.
+ *
+ * WHAT DELIBERATELY DOES NOT CARRY OVER FROM THE CPU TERM.  There, the dlight
+ * sum is added to the entity's static light BEFORE the vertex is multiplied by
+ * the shadedots table (Quake's fake directional shading, keyed to the entity's
+ * quantized yaw) and by the colorshade tint.  Here it is added after, so a
+ * dynamic light is neither modulated by a fake light direction that has nothing
+ * to do with where the torch actually is, nor tinted by a palette recolour that
+ * belongs to the skin.  Both are defensible the other way; what is NOT
+ * defensible is having the three alias paths disagree, and the shadedot is
+ * recoverable in only two of them -- the legacy path streams a finished colour
+ * through GL_ImmColor4f with the dot already multiplied in.  Uniformity decided
+ * it.  Expect dynamic light on models to sit slightly flatter across a surface
+ * and slightly stronger on faces turned away from the shadevector.
+ *
+ * u_alias_dlight is per-BATCH state and named apart from the world's
+ * u_dlight_scale for the reason u_alias_caustics is named apart from
+ * u_caustics: this fragment shader also serves sprites, particles, warp polys
+ * and unlit brush polys through GL_ImmEnd, and a shared name would let one
+ * path's value leak into another's draw.  It is a VERTEX-stage uniform -- the
+ * fragment stage reads the scale off v_dlightscale instead, for the reason
+ * below.
+ *
+ * v_dlightscale, not u_alias_dlight.x, is what the loop is gated on.  The
+ * instanced path batches entities whose CPU lighting came from DIFFERENT arms
+ * of R_DrawAliasModel's branch chain -- an MLS_ABSLIGHT model and an ordinary
+ * one can share a draw call -- and only the ordinary arm ever accumulated
+ * dlights.  A uniform cannot distinguish them; a flat varying the vertex shader
+ * fills from the instance record can.  The other two paths set it from the
+ * uniform unchanged. */
+#define GLSL_ALIAS_DLIGHT_DECL \
+	GLSL_LIGHTGRID_DECL
+
+#define GLSL_ALIAS_DLIGHT_FN \
+	GLSL_LIGHTGRID_FETCH_FN \
+	"vec3 ClusteredAliasDlight(vec3 lit, highp vec3 p, float scale) {\n" \
+	"    uvec4 mask = LightGridMask(p);\n" \
+	"    for (int w = 0; w < 4; w++) {\n" \
+	"        uint bits = mask[w];\n" \
+	"        while (bits != 0u) {\n" \
+	"            int i = (w << 5) + findLSB(bits);\n" \
+	"            bits &= bits - 1u;\n"	/* clear that bit before any continue */ \
+	"            vec3 lpos = (u_lightview * vec4(Lights[i].origin, 1.0)).xyz;\n" \
+	"            float add = Lights[i].radius - distance(lpos, p);\n" \
+	"            if (add <= 0.0) continue;\n" \
+	/* Subtractive lights (dlight_t.dark) arrive with their colour negated by
+	 * the gather in gl_lightcluster.c, so one accumulate serves both kinds.
+	 * The clamp is inside the loop and against the RUNNING total, which is
+	 * what the CPU term did -- its dark arm clamps each channel at zero as it
+	 * subtracts, so a dark light cannot bank negative headroom that a later
+	 * bright one spends.  Ascending light index is the CPU's order too
+	 * (findLSB within a word, words in order), so the two agree even where a
+	 * dark light and a bright one overlap the same pixel. */ \
+	"            lit = max(lit + add * scale * Lights[i].color, vec3(0.0));\n" \
+	"        }\n" \
+	"    }\n" \
+	/* NO UPPER CLAMP, and that is a decision rather than an omission.
+	 * gl_overbright_models 0 makes the CPU clamp each lightcolor channel at
+	 * 192 after its dlight loop -- but it does that BEFORE the shadedots
+	 * multiply, and `lit` here is already past it: v_color carries
+	 * static * shadedot * tint, and shadedot runs to 2.0.  Re-applying the
+	 * same ceiling on this side of that multiply would cap a legitimately
+	 * bright vertex at 0.96 and visibly darken models that took no dynamic
+	 * light at all.  The faithful expression, min(static + dlight, 192) *
+	 * shadedot, needs the two factors separately and the legacy path has
+	 * already multiplied them together in GL_ImmColor4f.
+	 *
+	 * Leaving it off is consistent with the shadedot decision above -- a
+	 * dlight that is not modulated by the fake light direction has no reason
+	 * to be bounded by a ceiling derived from it -- and it costs little:
+	 * gl_overbright_models defaults to on, where the CPU path has no ceiling
+	 * either, and even at the worst case (a full-radius light one unit away)
+	 * the term adds about 1.0, which is where the CPU's own clamped result
+	 * lands too. */ \
+	"    return lit;\n" \
+	"}\n"
+
+/* Replaces `vec4 color = tex * v_color;` outright rather than adding a line
+ * after it, so the ES arm below can be that statement verbatim and the two
+ * tiers stay provably identical when the path is off. */
+#define GLSL_ALIAS_DLIGHT_APPLY \
+	"    vec3 lit = v_color.rgb;\n" \
+	"    if (v_dlightscale > 0.0) lit = ClusteredAliasDlight(lit, v_eyepos, v_dlightscale);\n" \
+	"    vec4 color = vec4(tex.rgb * lit, tex.a * v_color.a);\n"
+
+/* The varying pair the above needs, declared on both sides of the link.  Kept
+ * out of the ES arm entirely: an `in` with no matching `out` is a link error,
+ * and there is nothing on that tier to fill them. */
+#define GLSL_ALIAS_DLIGHT_VS_OUT \
+	"out highp vec3 v_eyepos;\n" \
+	"flat out float v_dlightscale;\n" \
+	"uniform float u_alias_dlight;\n"	/* blocklight -> vertex-colour scale; 0 = path off */
+#define GLSL_ALIAS_DLIGHT_FS_IN \
+	"in highp vec3 v_eyepos;\n" \
+	"flat in float v_dlightscale;\n"
+
+/* Fills them, for the two vertex shaders that already have `eyepos` in hand.
+ * salias_inst_vert does its own -- it works in world space and has a per-
+ * instance switch to consult, so it has neither of this line's inputs. */
+#define GLSL_ALIAS_DLIGHT_VS_CALC \
+	"    v_eyepos = eyepos.xyz;\n" \
+	"    v_dlightscale = u_alias_dlight;\n"
+
 #else	/* ES/WebGL2: no SSBO, no findLSB, no compute pass to fill the grid */
 #define GLSL_DLIGHT_DECL	""
 #define GLSL_DLIGHT_FN		""
 #define GLSL_DLIGHT_APPLY	""
+#define GLSL_ALIAS_DLIGHT_DECL	""
+#define GLSL_ALIAS_DLIGHT_FN	""
+#define GLSL_ALIAS_DLIGHT_APPLY	"    vec4 color = tex * v_color;\n"
+#define GLSL_ALIAS_DLIGHT_VS_OUT	""
+#define GLSL_ALIAS_DLIGHT_FS_IN		""
+#define GLSL_ALIAS_DLIGHT_VS_CALC	""
 #endif
 
 static const char sworld_frag[] =
@@ -1289,6 +1440,7 @@ static const char salias_vert[] =
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
+	GLSL_ALIAS_DLIGHT_VS_OUT
 	"invariant gl_Position;\n"
 	"void main() {\n"
 	"    v_texcoord = a_texcoord;\n"
@@ -1296,6 +1448,7 @@ static const char salias_vert[] =
 	"    v_worldxy = (u_alias_model * vec4(a_position, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
+	GLSL_ALIAS_DLIGHT_VS_CALC
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
 
@@ -1328,9 +1481,12 @@ static const char salias_frag[] =
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	GLSL_ALIAS_DLIGHT_FS_IN
 	"out vec4 fragColor;\n"
+	GLSL_ALIAS_DLIGHT_DECL
 	GLSL_CAUSTICS_FN
 	GLSL_TURB_UV_FN
+	GLSL_ALIAS_DLIGHT_FN
 	"void main() {\n"
 	/* Per-pixel liquid warp (uhexen2-9o7u).  Off unless C sets u_turb.x, which
 	 * only EmitWaterPolys does, and only under r_water_pixel_warp 1 -- every
@@ -1350,7 +1506,7 @@ static const char salias_frag[] =
 	"#else\n"
 	"    vec4 tex = texture(u_texture0, uv);\n"
 	"#endif\n"
-	"    vec4 color = tex * v_color;\n"
+	GLSL_ALIAS_DLIGHT_APPLY
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
 	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
 	 * Confirmed via bisect (bobberb): some alias models route through
@@ -1471,6 +1627,7 @@ static const char sskeletal_vert[] =
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
+	GLSL_ALIAS_DLIGHT_VS_OUT
 	"invariant gl_Position;\n"
 	"\n"
 	/* Bone matrix for influence `i`, already blended across the two poses.
@@ -1503,6 +1660,7 @@ static const char sskeletal_vert[] =
 	"    v_worldxy = (u_alias_model * vec4(skinned_pos, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(skinned_pos, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
+	GLSL_ALIAS_DLIGHT_VS_CALC
 	"    gl_Position = u_mvp * vec4(skinned_pos, 1.0);\n"
 	"}\n";
 #endif /* !USE_GLES */
@@ -1673,11 +1831,19 @@ static const char salias_inst_vert[] =
 	"uniform int u_inst_base;\n"
 	"uniform vec3 u_eyepos;\n"
 	"uniform int u_poseverttype;\n"  /* 0=PV_QUAKE1, 1=PV_MD3 */
+	/* World -> eye, the same matrix gl_lightcluster.c clustered the grid
+	 * with.  This path has no u_modelview to fall out of: it builds
+	 * gl_Position straight from u_viewproj and a world-space vertex, so eye
+	 * space has to be reconstructed explicitly for the froxel lookup.  Shared
+	 * by name with salias_frag's copy, which is one uniform after linking.
+	 * uhexen2-waum. */
+	"uniform mat4 u_lightview;\n"
 	"\n"
 	"TCQUAL out vec2 v_texcoord;\n"
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
+	GLSL_ALIAS_DLIGHT_VS_OUT
 	"\n"
 	"invariant gl_Position;\n"
 	"\n"
@@ -1746,14 +1912,19 @@ static const char salias_inst_vert[] =
 	 * r_alias_gpu and on which format it was shipped in.  The scaffolding
 	 * this replaces used max(world_normal.z, 0), a top-down world light
 	 * that matched none of them.  uhexen2-2ah9. */
+	/* Bit 8 of ShadedotRow is the per-instance dynamic-light switch, not part
+	 * of the row -- see ALIAS_INST_SHADEDOT_ROW_MASK in gl_shader.h.  The row
+	 * itself is 0..15, so masking costs nothing and keeps the 80-byte
+	 * InstanceData layout unchanged.  uhexen2-waum. */
+	"    int sdot_row = inst.ShadedotRow & " GLSL_STR(ALIAS_INST_SHADEDOT_ROW_MASK) ";\n"
 	"    if (u_poseverttype == 1) {\n"  /* MD3: use decoded normal */
-	"        float an = float(inst.ShadedotRow) * (6.28318531 / 16.0);\n"
+	"        float an = float(sdot_row) * (6.28318531 / 16.0);\n"
 	"        vec3 sv = normalize(vec3(cos(-an), sin(-an), 1.0));\n"
 	"        float d = dot(normalize(normal), sv);\n"
 	"        if (d < 0.0) d *= 0.3;\n"
 	"        sdot = max(1.0 + d, 0.0);\n"
 	"    } else {\n"  /* QUAKE1: use shadedots table */
-	"        int sdot_idx = inst.ShadedotRow * 256 + int(ni);\n"
+	"        int sdot_idx = sdot_row * 256 + int(ni);\n"
 	"        sdot = shadedots[sdot_idx];\n"
 	"        sdot = max(sdot, 0.0);\n"
 	"    }\n"
@@ -1765,6 +1936,13 @@ static const char salias_inst_vert[] =
 	 * change to the 80-byte InstanceData layout.  uhexen2-0gn3. */
 	"    v_worldxy = world_pos.xy;\n"
 	"    v_fogdist = distance(world_pos, u_eyepos);\n"
+	"    v_eyepos = (u_lightview * vec4(world_pos, 1.0)).xyz;\n"
+	/* Per instance, because one instanced draw mixes entities whose CPU
+	 * lighting came from different arms of R_DrawAliasModel's branch chain
+	 * and only the ordinary arm ever took dynamic light.  An MLS_ABSLIGHT or
+	 * EF_ROTATE entity carries the bit clear and shades exactly as before. */
+	"    v_dlightscale = ((inst.ShadedotRow & " GLSL_STR(ALIAS_INST_DLIGHT_BIT) ") != 0)\n"
+	"                  ? u_alias_dlight : 0.0;\n"
 	"    gl_Position = u_viewproj * vec4(world_pos, 1.0);\n"
 	"}\n";
 #endif /* !USE_GLES */
@@ -2144,6 +2322,12 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
 	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
+	/* uhexen2-waum */
+	p->u_alias_dlight = glGetUniformLocation_fp(prog, "u_alias_dlight");
+	p->u_lightview = glGetUniformLocation_fp(prog, "u_lightview");
+	p->u_lightgrid_xy = glGetUniformLocation_fp(prog, "u_lightgrid_xy");
+	p->u_lightgrid_z = glGetUniformLocation_fp(prog, "u_lightgrid_z");
+	p->u_lightgrid = glGetUniformLocation_fp(prog, "u_lightgrid");
 
 	/* Bind skin texture to unit 0 */
 	R_UseProgram (prog);
@@ -2152,6 +2336,10 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 		if (u_tex >= 0)
 			glUniform1i_fp(u_tex, 0);
 	}
+	/* The froxel grid lives on its own unit for the whole world+entity draw;
+	 * GL_InitProgram does this for every other program that declares it. */
+	if (p->u_lightgrid >= 0)
+		glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-waum */
 	R_UseProgram (0);
 
 	/* Create and fill shadedots SSBO (static data, upload once).

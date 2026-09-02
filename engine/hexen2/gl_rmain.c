@@ -68,6 +68,13 @@ mplane_t	*mirror_plane;
 
 static float	model_constant_alpha;
 static qboolean	model_fullbright_pass;	// true during fullbright overlay pass
+/* Set by R_DrawAliasModel's lighting chain: true when THIS entity's dynamic
+ * light was left to the froxel grid instead of being accumulated into
+ * lightcolor here.  Only the ordinary arm of that chain ever accumulated any --
+ * EF_ROTATE, MLS_ABSLIGHT, model-lightstyle and viewmodel entities take a fixed
+ * or separately-computed brightness and never saw a dlight -- so the flag also
+ * carries "this entity is eligible at all".  uhexen2-waum. */
+static qboolean	model_dlight_gpu;
 
 static float	r_time1;
 static float	r_lasttime1 = 0;
@@ -1330,6 +1337,24 @@ static float R_AliasLightScale (void)
 	return boost * (1.0f / 200.0f);
 }
 
+/*
+=================
+R_AliasDlightScale
+
+What GL_SetAliasDlight should carry for an entity whose lighting chain left its
+dynamic light to the froxel grid (`want`), or 0 for one that did not and for
+every frame the grid holds nothing worth reading.  Both alias lighting setups
+call it so the legacy and instanced paths cannot drift on brightness, the same
+reason R_AliasLightScale exists.  uhexen2-waum.
+=================
+*/
+static float R_AliasDlightScale (qboolean want)
+{
+	if (!want || !R_LightCluster_AliasActive ())
+		return 0.0f;
+	return R_AliasLightScale ();
+}
+
 static int	lastposenum;
 
 /*
@@ -1433,6 +1458,13 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 		glUniform1f_fp (prog->u_force_opaque_alpha, GL_GetForceOpaqueAlpha());
 	if (prog->u_alias_caustics >= 0)
 		glUniform2f_fp (prog->u_alias_caustics, caustics[0], caustics[1]);
+	/* uhexen2-waum.  This path bypasses GL_ImmEnd -- there is no streamed
+	 * vertex data to end -- so it owns pushing the per-batch state itself, the
+	 * same way it already does for caustics, turb and the soft-particle fade.
+	 * The froxel-lookup constants come from R_LightCluster_BindForAlias once a
+	 * frame; only the scale travels with the draw. */
+	if (prog->u_alias_dlight >= 0)
+		glUniform1f_fp (prog->u_alias_dlight, GL_GetAliasDlight ());
 	/* Shared with the sprite path through salias_frag; nothing here wants
 	 * the soft-particle fade, and leaving a hot value would dissolve the
 	 * model against whatever is behind it. */
@@ -2193,6 +2225,12 @@ static void R_DrawAliasModel (entity_t *e)
 	if (r_shadows.integer && e != &cl.viewent)
 		AliasModelGetLightInfo (e);
 
+	/* Cleared before the chain, set by the one arm that takes dlights.  The
+	 * viewmodel never reaches that arm -- R_DrawViewModel lit it already, and
+	 * its own dlight loop is what feeds cl.light_level to monster AI, so it
+	 * stays on the CPU path deliberately.  uhexen2-waum. */
+	model_dlight_gpu = false;
+
 	mls = e->drawflags & MLS_MASKIN;
 	if ((e->model->flags & EF_ROTATE) ||
 	    (R_GetPimpFlags(e, NULL) & (EF_SPIN | EF_FLOAT)))
@@ -2227,7 +2265,22 @@ static void R_DrawAliasModel (entity_t *e)
 		if (!r_shadows.integer)
 			AliasModelGetLightInfo (e);
 
-		for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
+		/* THE ONE ARM OF THIS CHAIN THAT TAKES DYNAMIC LIGHT, and so the
+		 * only one phase C can move to the GPU (uhexen2-waum).  When the
+		 * froxel path is shading models this loop stands down entirely and
+		 * salias_frag adds the same lights per pixel instead.
+		 *
+		 * ambientlight consequently stops seeing dlights too, which is
+		 * deliberate and has one visible consequence: the r_alias_minlight
+		 * floor below is applied to the static sample alone, so a model
+		 * standing in the dark next to a torch now gets BOTH the floor's
+		 * lift and the torch, where before the torch could push it past the
+		 * floor and suppress the lift.  Reproducing that would mean knowing
+		 * the per-pixel result on the CPU, which is the entire thing this
+		 * change exists to stop doing.  r_alias_minlight defaults to 0. */
+		model_dlight_gpu = R_LightCluster_ShadesAlias ();
+
+		for (lnum = 0; !model_dlight_gpu && lnum < MAX_DLIGHTS; lnum++)
 		{
 			if (cl_dlights[lnum].die >= cl.time)
 			{
@@ -2456,6 +2509,13 @@ static void R_DrawAliasModel (entity_t *e)
 		GL_SetAliasModelMatrix(model_matrix);
 		GL_SetAliasCaustics(caustics, (float)cl.time);
 	}
+
+	/* uhexen2-waum.  Unconditional, unlike the caustics push above: this is
+	 * per-entity state on a program shared with sprites and particles, and
+	 * "the last model happened to set it" is not a state an entity that takes
+	 * no dynamic light may inherit.  Zero for every entity whose lighting came
+	 * from another arm of the chain, and for every frame the grid is empty. */
+	GL_SetAliasDlight (R_AliasDlightScale (model_dlight_gpu));
 
 	/* Blend state pokes gated for OIT pass (OIT_BeginTranslucency owns
 	 * blend and depth inside its pass).
@@ -2801,6 +2861,12 @@ static void R_DrawAliasModel (entity_t *e)
 			 * uploads r_fog_color, which this temporarily blacks. */
 			Fog_StartAdditive ();
 
+			/* The re-draw blends additively over a base pass that has
+			 * already taken the dynamic light, and its vertex colour is
+			 * a flat white the shader would then add to a second time.
+			 * uhexen2-waum. */
+			GL_SetAliasDlight (0.0f);
+
 			model_fullbright_pass = true;
 			R_SetupAliasFrame (e, paliashdr);
 			model_fullbright_pass = false;
@@ -2874,6 +2940,7 @@ static void R_DrawAliasModel (entity_t *e)
 		Mat4_Identity(ident);
 		GL_SetAliasCaustics(0.0f, 0.0f);
 		GL_SetAliasModelMatrix(ident);
+		GL_SetAliasDlight(0.0f);	/* uhexen2-waum, same reasoning */
 	}
 
 	GL_PopMatrix();
@@ -3582,6 +3649,13 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	if (r_shadows.integer)
 		AliasModelGetLightInfo(e);
 
+	/* Mirror of the flag R_DrawAliasModel's chain sets, for the mirror of
+	 * that chain below.  It rides to the shader in the instance record
+	 * rather than in a uniform, because one instanced draw call batches
+	 * entities from DIFFERENT arms of this chain and only this one takes
+	 * dynamic light.  uhexen2-waum. */
+	model_dlight_gpu = false;
+
 	mls = e->drawflags & MLS_MASKIN;
 	if ((clmodel->flags & EF_ROTATE) ||
 	    (R_GetPimpFlags(e, NULL) & (EF_SPIN | EF_FLOAT)))
@@ -3605,7 +3679,11 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		if (!r_shadows.integer)
 			AliasModelGetLightInfo(e);
 
-		for (lnum = 0; lnum < MAX_DLIGHTS; lnum++)
+		/* See the twin of this loop in R_DrawAliasModel for why it stands
+		 * down and what that costs.  uhexen2-waum. */
+		model_dlight_gpu = R_LightCluster_ShadesAlias ();
+
+		for (lnum = 0; !model_dlight_gpu && lnum < MAX_DLIGHTS; lnum++)
 		{
 			if (cl_dlights[lnum].die >= cl.time)
 			{
@@ -3800,6 +3878,12 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	inst->pose0 = pose * gm->poseverts;	/* pre-multiply for direct SSBO indexing */
 	inst->pose1 = prevpose * gm->poseverts;
 	inst->shadedot_row = ((int)(e->angles[1] * (SHADEDOT_QUANT / 360.0))) & (SHADEDOT_QUANT - 1);
+	/* Bit 8 rides along in the same int rather than widening the 80-byte
+	 * instance record, which salias_inst_vert's struct layout hardcodes.  The
+	 * row is 0..15, so there is nothing to collide with; the shader masks it
+	 * off before indexing the shadedots table.  uhexen2-waum. */
+	if (model_dlight_gpu)
+		inst->shadedot_row |= ALIAS_INST_DLIGHT_BIT;
 
 	/* Save entity info + resolved skin for shadow/batch passes.
 	 * Resolve skin HERE while paliashdr is valid — a second
@@ -4003,6 +4087,12 @@ static void R_DrawAliasInstanced (void)
 	if (prog->u_alias_caustics >= 0)
 		glUniform2f_fp(prog->u_alias_caustics,
 			       R_CausticsIntensity(), (float)cl.time);
+	/* Clustered dynamic light (uhexen2-waum).  One value for the whole draw:
+	 * WHETHER a given instance takes it is bit 8 of its shadedot_row, so what
+	 * this carries is only the scale and ceiling, and true is the right
+	 * argument here -- the per-entity decision was made in the collector. */
+	if (prog->u_alias_dlight >= 0)
+		glUniform1f_fp(prog->u_alias_dlight, R_AliasDlightScale (true));
 
 	/* Bind shadedots SSBO at binding 2 (matches non-instanced GPU alias path) */
 	GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
@@ -4183,6 +4273,13 @@ static void R_DrawAliasInstanced (void)
 			 * want fragColor.a to leak garbage into FB.a. */
 			if (prog->u_force_opaque_alpha >= 0)
 				glUniform1f_fp(prog->u_force_opaque_alpha, 1.0f);
+			/* This pass reuses the main pass's program, and every uniform
+			 * it does not overwrite is still hot.  The dynamic light was
+			 * already added underneath by that pass, and this one's vertex
+			 * colour is a flat white the shader would add to a second
+			 * time.  uhexen2-waum. */
+			if (prog->u_alias_dlight >= 0)
+				glUniform1f_fp(prog->u_alias_dlight, 0.0f);
 
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			R_SetBlend (true);
@@ -5820,6 +5917,7 @@ static void R_SetupGL (void)
 	 * uhexen2-26bm. */
 	R_LightCluster_Update ();
 	R_LightCluster_BindForWorld ();
+	R_LightCluster_BindForAlias ();	/* uhexen2-waum, phase C */
 }
 
 /*

@@ -67,6 +67,7 @@
 #include "sdl_inc.h"
 #include "gl_matrix.h"
 #include "gl_shader.h"
+#include "gl_vbo.h"		/* GL_ImmInvalidateState -- see R_LightCluster_BindForAlias */
 #include "gl_pipeline.h"
 #include "gl_sky.h"		/* gl_farclip -- the projection far plane lives there */
 #include "gl_lightcluster.h"
@@ -85,6 +86,13 @@ typedef struct {
 } gpulight_t;
 
 cvar_t	r_lightclusters = {"r_lightclusters", "1", CVAR_ARCHIVE};
+/* Phase C's own switch (uhexen2-waum).  Separate from r_lightclusters because
+ * the two changes are visible in different places and want separate A/Bs: the
+ * world one moves dynamic light off the lightmap atlas, this one changes how
+ * EVERY alias model in the game is lit.  Turning this off leaves world surfaces
+ * on the GPU path and puts models back on the flat per-entity term; turning
+ * r_lightclusters off takes both.  Both default on. */
+cvar_t	r_lightclusters_models = {"r_lightclusters_models", "1", CVAR_ARCHIVE};
 
 static GLuint		lc_prog;
 static GLuint		lc_ssbo;
@@ -527,6 +535,28 @@ qboolean R_LightCluster_ShadesWorld (void)
 	       gl_renderer_caps.compute_shaders && gl_renderer_caps.shader_storage;
 }
 
+qboolean R_LightCluster_ShadesAlias (void)
+{
+	/* Everything ShadesWorld answers from, plus this feature's own switch.
+	 * Same contract as ShadesWorld and for the same reason: R_DrawAliasModel
+	 * decides whether to run the CPU accumulation loop long before the draw
+	 * that would consume the grid, so the answer has to be stable across the
+	 * whole frame or a model gets lit twice. */
+	return r_lightclusters_models.integer != 0 && R_LightCluster_ShadesWorld ();
+}
+
+qboolean R_LightCluster_AliasActive (void)
+{
+	/* The per-draw question, as opposed to the per-frame one above: is there
+	 * anything in the grid worth a texelFetch.  An empty light list makes the
+	 * shader path provably a no-op, so C pushes a zero scale and every alias
+	 * fragment in the frame skips the lookup -- the same saving
+	 * R_LightCluster_BindForWorld takes for world surfaces.  r_fullbright
+	 * excluded on the same grounds it is there: nothing is lit at all. */
+	return R_LightCluster_ShadesAlias () && lc_valid_this_frame &&
+	       lc_numlights > 0 && !r_fullbright.integer;
+}
+
 /* ------------------------------------------------------------------ */
 /* Phase B: handing the grid to the world fragment shaders             */
 /* ------------------------------------------------------------------ */
@@ -608,6 +638,93 @@ void R_LightCluster_BindForWorld (void)
 	 * it caches GL_TEXTURE_2D on unit 0 and nothing above went through
 	 * GL_Bind. */
 	glActiveTexture_fp (GL_TEXTURE0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase C: handing the same grid to the alias family (uhexen2-waum)    */
+/* ------------------------------------------------------------------ */
+
+/* The froxel-lookup constants only.  The SCALE is deliberately not set here:
+ * it is per-batch state that R_DrawAliasModel drives through GL_SetAliasDlight
+ * and GL_ImmEnd pushes, because one entity may take dynamic light and the
+ * sprite drawn after it must not.  These three change once a frame and are
+ * read only when the scale is non-zero, so pushing them here costs one
+ * R_UseProgram per program per frame and saves the draw path from caring. */
+static void LC_SetAliasUniforms (const glprogram_t *p)
+{
+	if (!p->program)
+		return;
+	/* Nothing to say to a program that did not link this half of the shader:
+	 * every one of these is -1 on the ES tier, where the macros expand to
+	 * nothing, and on the plain 2d / flat / sky programs. */
+	if (p->u_lightview < 0 && p->u_lightgrid_xy < 0 && p->u_lightgrid_z < 0)
+		return;
+	R_UseProgram (p->program);
+	if (p->u_lightview >= 0)
+		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
+	if (p->u_lightgrid_xy >= 0)
+		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
+	if (p->u_lightgrid_z >= 0)
+		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
+}
+
+/* The instanced programs are a different struct with their own location table
+ * -- see the note on gl_alias_inst_prog_t.  Same three uniforms, same values. */
+static void LC_SetAliasInstUniforms (const gl_alias_inst_prog_t *p)
+{
+	if (!p->program)
+		return;
+	R_UseProgram (p->program);
+	if (p->u_lightview >= 0)
+		glUniformMatrix4fv_fp (p->u_lightview, 1, GL_FALSE, lc_view);
+	if (p->u_lightgrid_xy >= 0)
+		glUniform4f_fp (p->u_lightgrid_xy, lc_vp[0], lc_vp[1], lc_vp[2], lc_vp[3]);
+	if (p->u_lightgrid_z >= 0)
+		glUniform2f_fp (p->u_lightgrid_z, lc_zlogscale, lc_zlogbias);
+}
+
+void R_LightCluster_BindForAlias (void)
+{
+	if (!R_LightCluster_AliasActive ())
+		return;
+
+	/* EVERY PROGRAM THAT LINKS salias_frag, not just the ones that draw
+	 * models today.  A model reaches the screen through the plain program,
+	 * its NOPERSP twin under r_softemu_mdl_warp, either of their OIT variants
+	 * when translucent, the skeletal program for MD5, and the instanced
+	 * program when r_alias_gpu is on -- which of those it takes depends on
+	 * cvars and on the format the model shipped in.  Missing one shows up as
+	 * "this monster is lit differently from that identical monster", which is
+	 * the trap uhexen2-uxpp documents for caustics and uhexen2-mfql for
+	 * material maps. */
+	LC_SetAliasUniforms (&gl_shader_alias);
+	LC_SetAliasUniforms (&gl_shader_alias_np);
+	LC_SetAliasUniforms (&gl_shader_alias_oit);
+	LC_SetAliasUniforms (&gl_shader_alias_np_oit);
+	LC_SetAliasUniforms (&gl_shader_skeletal);
+	LC_SetAliasUniforms (&gl_shader_skeletal_np);
+	LC_SetAliasUniforms (&gl_shader_skeletal_oit);
+	LC_SetAliasUniforms (&gl_shader_skeletal_np_oit);
+	LC_SetAliasInstUniforms (&gl_shader_alias_inst);
+	LC_SetAliasInstUniforms (&gl_shader_alias_inst_np);
+	R_UseProgram (0);
+
+	/* GL_ImmEnd caches uniform values per program and did not see any of the
+	 * above.  Its cache keys on the program pointer, so without this the next
+	 * batch on a program we just touched would trust a stale entry.  In
+	 * practice the three uniforms here are not ones GL_ImmEnd tracks, but the
+	 * rule in this engine is that anything setting uniforms behind its back
+	 * says so -- see the header comment on GL_ImmInvalidateState. */
+	GL_ImmInvalidateState ();
+
+	/* The SSBO and the grid texture are already bound for the frame by
+	 * R_LightCluster_BindForWorld, which runs immediately before this, and
+	 * nothing between there and the last alias draw takes either back:
+	 * LIGHT_SSBO_BINDING sits above everything gl_worldcull.c and the
+	 * alias/skeletal/particle paths claim (0..4), and LIGHT_GRID_TMU is the
+	 * only user of texture unit 5 in the renderer.  Rebinding here would be
+	 * harmless but would also hide a future collision, so it is left to the
+	 * one place that owns it. */
 }
 
 /* ------------------------------------------------------------------ */
@@ -767,6 +884,7 @@ static void R_LightCluster_Verify_f (void)
 void R_LightCluster_Init (void)
 {
 	Cvar_RegisterVariable (&r_lightclusters);
+	Cvar_RegisterVariable (&r_lightclusters_models);
 	Cmd_AddCommand ("lightcluster_verify", R_LightCluster_Verify_f);
 }
 
@@ -789,6 +907,9 @@ void R_LightCluster_Shutdown (void) {}
 void R_LightCluster_Update (void) {}
 qboolean R_LightCluster_Available (void) { return false; }
 qboolean R_LightCluster_ShadesWorld (void) { return false; }
+qboolean R_LightCluster_ShadesAlias (void) { return false; }
+qboolean R_LightCluster_AliasActive (void) { return false; }
 void R_LightCluster_BindForWorld (void) {}
+void R_LightCluster_BindForAlias (void) {}
 
 #endif	/* !USE_GLES */

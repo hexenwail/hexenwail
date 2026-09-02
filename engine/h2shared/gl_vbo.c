@@ -60,6 +60,12 @@ static float	imm_force_opaque_alpha = -1.0f;	/* -1 = use shader default */
  * they finish so sprites / warp polys / brush polys sharing gl_shader_alias
  * never inherit the effect. */
 static float	imm_alias_caustics[2] = { 0.0f, 0.0f };
+/* Clustered dynamic light for the alias family (uhexen2-waum).  Resting
+ * state is 0 scale, which is what every sprite / particle / warp-poly /
+ * unlit-brush-poly batch that shares gl_shader_alias must see: they have no
+ * business taking a model's dynamic light, and R_DrawAliasModel puts this
+ * back to zero on the way out for exactly that reason. */
+static float	imm_alias_dlight = 0.0f;
 static float	imm_turb[2] = { 0.0f, 0.0f };	/* uhexen2-9o7u: x=amplitude (0=off), y=time */
 /* Its cache lives up here beside it rather than down with the other
  * imm_cache_* values, because GL_ClearTurb below needs both and sits with
@@ -236,6 +242,11 @@ float GL_GetForceOpaqueAlpha (void)
 }
 
 /* uhexen2-0gn3: intensity 0 disables the caustics overlay entirely. */
+void GL_SetAliasDlight (float scale)
+{
+	imm_alias_dlight = scale;
+}
+
 void GL_SetAliasCaustics (float intensity, float time)
 {
 	imm_alias_caustics[0] = intensity;
@@ -292,6 +303,11 @@ void GL_SetAliasModelMatrix (const float *m)
 void GL_GetAliasModelMatrix (float *out)
 {
 	memcpy(out, imm_alias_model, sizeof(imm_alias_model));
+}
+
+float GL_GetAliasDlight (void)
+{
+	return imm_alias_dlight;
 }
 
 void GL_GetAliasCaustics (float *out2)
@@ -378,6 +394,7 @@ static float	imm_cache_mv[16];
 static float	imm_cache_alpha = -2.0f;
 static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
+static float	imm_cache_alias_dlight = -1.0f;	/* uhexen2-waum */
 static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
 static float	imm_cache_alias_model[16];
 static qboolean	imm_cache_alias_model_set;
@@ -407,6 +424,7 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_alias_dlight = -1.0f;
 	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
 	imm_cache_alias_model_set = false;
@@ -457,6 +475,7 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
 	imm_cache_alias_caustics[0] = imm_cache_alias_caustics[1] = -1.0f;
+	imm_cache_alias_dlight = -1.0f;
 	/* Uniform state is per-program, so a cached value proves nothing about the
 	 * program we are about to use.  Every other cache here is reset for that
 	 * reason; u_turb was missed, and it stopped mattering only because
@@ -524,6 +543,15 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 			       imm_alias_caustics[0], imm_alias_caustics[1]);
 		imm_cache_alias_caustics[0] = imm_alias_caustics[0];
 		imm_cache_alias_caustics[1] = imm_alias_caustics[1];
+	}
+
+	/* uhexen2-waum.  Same shape again: zero at rest, so with r_lightclusters
+	 * off or no dlights alive this fires once per program switch and never
+	 * per batch. */
+	if (shader->u_alias_dlight >= 0 && imm_alias_dlight != imm_cache_alias_dlight)
+	{
+		glUniform1f_fp(shader->u_alias_dlight, imm_alias_dlight);
+		imm_cache_alias_dlight = imm_alias_dlight;
 	}
 
 	/* uhexen2-9o7u.  Resting amplitude is 0, so with r_water_pixel_warp off

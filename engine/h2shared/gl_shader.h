@@ -56,6 +56,12 @@ typedef struct glprogram_s {
 	GLint	u_lightgrid_xy;	/* vec4(viewport x, viewport y, froxel columns per pixel, froxel rows per pixel) */
 	GLint	u_lightgrid_z;	/* vec2(zlogscale, zlogbias) -- the depth-slice mapping, which must match gl_lightcluster.c exactly */
 	GLint	u_lightgrid;	/* usampler3D of per-froxel light bitmasks, texture unit LIGHT_GRID_TMU */
+	/* The alias family's half of the same grid (uhexen2-waum).  Per-BATCH,
+	 * unlike the world uniforms above, and named apart from u_dlight_scale
+	 * for the reason u_alias_caustics is named apart from u_caustics: this
+	 * program is also the sprite / particle / warp-poly / unlit-brush-poly
+	 * program, and those batches must not inherit a model's value. */
+	GLint	u_alias_dlight;	/* alias VS: blocklight -> vertex-colour scale; 0 disables.  The FS reads it off the v_dlightscale varying, which the instanced path fills per instance. */
 	GLint	u_force_opaque_alpha; /* alias/world FS: when > 0.5, fragColor.a is forced to 1.0 regardless of color.a.  Set to 1 by C for confirmed-opaque draws, to 0 for ENTALPHA / DRF_TRANSLUCENT / OIT translucent paths that need color.a preserved for blend.  uhexen2-khsa r13. */
 	/* Alias caustics (uhexen2-0gn3).  Deliberately NOT named u_caustics:
 	 * gl_shader_alias is the generic textured+vertex-color program and is
@@ -133,6 +139,15 @@ typedef struct {
 	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
 	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
 	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
+	/* Clustered dynamic lighting (uhexen2-waum).  Same four names and the
+	 * same meanings as on glprogram_t; duplicated because this program is a
+	 * separate struct with its own location table, and a program that misses
+	 * one of them draws its models next to identical ones lit differently. */
+	GLint	u_alias_dlight;	/* blocklight -> vertex-colour scale; 0 disables */
+	GLint	u_lightview;	/* world -> eye; this path has no u_modelview to derive it from */
+	GLint	u_lightgrid_xy;
+	GLint	u_lightgrid_z;
+	GLint	u_lightgrid;
 } gl_alias_inst_prog_t;
 
 extern gl_alias_inst_prog_t gl_shader_alias_inst;
@@ -145,6 +160,17 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 				     const float *pup, const float *pright,
 				     const float *vpn, const float *origin,
 				     float ctime);
+
+/* InstanceData.ShadedotRow carries two things, because widening the record
+ * would change the 80-byte layout salias_inst_vert and R_CollectAliasInstance
+ * both hardcode.  The low bits are the quantized-yaw row into the shadedots
+ * table (0..15); bit 8 says this entity's CPU lighting came from the arm of
+ * R_DrawAliasModel's branch chain that accumulates dynamic light, and so may
+ * take it per-pixel from the froxel grid.  MLS_ABSLIGHT, model-lightstyle and
+ * EF_ROTATE entities carry it clear and shade exactly as they did before --
+ * they never took dlights on the CPU either.  uhexen2-waum. */
+#define ALIAS_INST_SHADEDOT_ROW_MASK	255
+#define ALIAS_INST_DLIGHT_BIT		256
 
 /* Vertex attribute locations (fixed, shared across all programs) */
 #define ATTR_POSITION	0

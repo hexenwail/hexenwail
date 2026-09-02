@@ -15,10 +15,13 @@
  * fills it; phase B (uhexen2-26bm) made the WORLD fragment shaders shade from
  * it, so a dynamic light no longer rewrites lightmap blocks on the CPU.
  *
- * ALIAS MODELS ARE STILL ON THE CPU PATH.  They take dlights as a single flat
- * per-entity term (gl_rmain.c, R_SetupAliasLighting), which is a separate
- * consumer with its own visual character and wants its own A/B -- finding 2 on
- * uhexen2-a5nn.1.  Nothing here touches it.
+ * ALIAS MODELS FOLLOWED IN PHASE C (uhexen2-waum).  They used to take the whole
+ * frame's dynamic light as one number computed at the entity's origin; they now
+ * evaluate it per pixel from the same grid, behind their own r_lightclusters_models
+ * switch so the two changes can be A/B'd apart.  Upstream Ironwail does NOT do
+ * this -- its alias shader has no froxel lookup at all and its models keep the
+ * CPU term (Quake/gl_shaders.h alias_vertex_shader, Quake/r_alias.c:295) -- so
+ * this half is ours, and r_lightclusters_models 0 is the way back to parity.
  *
  * Desktop GL 4.3 only, gated on gl_renderer_caps.compute_shaders and
  * .shader_storage.  The ES/WebGL2 tier has neither, which is why the CPU dlight
@@ -85,11 +88,35 @@ qboolean R_LightCluster_Available (void);
  * uhexen2-26bm. */
 qboolean R_LightCluster_ShadesWorld (void);
 
+/* The same question for alias models, and the same contract: stable for the
+ * whole frame, answered from cvars and context facts only.  R_DrawAliasModel
+ * asks it to decide whether to run its CPU dlight accumulation, which happens
+ * well before the draw that would read the grid -- so an answer that could
+ * change in between would light a model twice.  uhexen2-waum. */
+qboolean R_LightCluster_ShadesAlias (void);
+
+/* Narrower, and per draw rather than per frame: ShadesAlias AND this frame's
+ * grid actually holds lights worth looking up.  False makes the alias draw
+ * paths push a zero scale, which switches the froxel lookup off inside the
+ * shader with one uniform-static compare.  uhexen2-waum. */
+qboolean R_LightCluster_AliasActive (void);
+
 /* Binds the light SSBO and the froxel grid where the world fragment shaders
  * expect them, and pushes the froxel-lookup constants into the three world
  * programs.  Call once per frame, after R_LightCluster_Update: the lookup
  * constants come out of the same view setup the grid was clustered against.
  * No-op when the GPU path is not shading. */
 void R_LightCluster_BindForWorld (void);
+
+/* The same lookup constants, pushed into every program that links salias_frag:
+ * the plain alias program, its NOPERSP twin, both OIT variants, the four
+ * skeletal ones and the two instanced ones.  Call once per frame, immediately
+ * after R_LightCluster_BindForWorld -- it relies on that call having bound the
+ * light SSBO and the grid texture, and on the same view setup.
+ *
+ * The SCALE is not set here.  It is per-batch state, because gl_shader_alias is
+ * also the sprite / particle / warp-poly / unlit-brush-poly program: it travels
+ * with the draw through GL_SetAliasDlight, not with the frame.  uhexen2-waum. */
+void R_LightCluster_BindForAlias (void);
 
 #endif	/* __GL_LIGHTCLUSTER_H */

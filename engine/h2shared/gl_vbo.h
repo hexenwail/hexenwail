@@ -59,6 +59,13 @@ float	GL_GetForceOpaqueAlpha (void);
  * The model matrix is the entity's model-only transform; salias_vert needs it
  * to recover world XY because u_modelview is view*model.  uhexen2-0gn3. */
 void	GL_SetAliasCaustics (float intensity, float time);
+/* Clustered dynamic lighting for the alias family, per batch (uhexen2-waum).
+ * Converts blocklight units to the vertex-colour scale the alias programs work
+ * in (R_AliasLightScale's /200 and the overbright boost); 0 switches the path
+ * off.  Zero at rest -- every batch that is not an alias model needs it that
+ * way, since gl_shader_alias is also the sprite / particle / warp-poly /
+ * unlit-brush-poly program. */
+void	GL_SetAliasDlight (float scale);
 void	GL_SetTurb (float amplitude, float time);	/* uhexen2-9o7u */
 /* Zero the warp on ONE program immediately, and force the next batch to push
  * its own value.  Needed because gl_shader_world carries a u_turb for lit
@@ -70,6 +77,7 @@ void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
  * apply the identical state by hand (the PV_IQM skeletal path, uhexen2-7ok0.3). */
 void	GL_GetAliasModelMatrix (float *out);		/* 16 floats */
 void	GL_GetAliasCaustics (float *out2);		/* 2 floats: intensity, time */
+float	GL_GetAliasDlight (void);		/* uhexen2-waum */
 /* Soft-particle depth fade for subsequent sprite batches (uhexen2-mf9u).
  * inv_dist is the reciprocal of the fade distance in world units, 0 = off
  * (the default, and what every non-sprite user of gl_shader_alias leaves it

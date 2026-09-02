@@ -103,21 +103,47 @@ function evaluateCStringExpression(expression, macros, ctx) {
   return value;
 }
 
-// Slice the `#ifdef USE_GLES` arm that defines `name`, so readDefine below picks
-// up the ES spelling of a macro that also has a desktop one.
+// Slice the arm that a USE_GLES build takes, out of the conditional that
+// defines `name`, so readDefine below picks up the ES spelling of a macro that
+// also has a desktop one.
+//
+// BOTH SPELLINGS OF THE CONDITIONAL, because gl_shader.c uses both and which
+// one a given macro got is a matter of what read better where it was written:
+//
+//   #ifdef USE_GLES  <- ES arm    #ifndef USE_GLES  <- desktop arm
+//   #else            <- desktop   #else             <- ES arm
+//   #endif                        #endif
+//
+// This used to understand only the first, which is why it could not resolve
+// GLSL_DLIGHT_DECL and friends: it walked past their `#ifndef` looking for an
+// `#ifdef` that was not there, ran off the end of the file and reported "no
+// #ifdef USE_GLES branch defines ...".  That surfaced as the registration
+// error instead, because a caller only reaches here after countDefines has
+// already found the macro twice.  uhexen2-waum.
+//
+// Deliberately naive about nesting -- it takes the first #else/#endif after
+// the opener, so a conditional nested inside one of these arms would slice
+// wrong.  None of the tier-specific macro blocks in gl_shader.c or
+// gl_postprocess.c have one, and a wrong slice fails loudly (the #define is
+// not in it) rather than silently picking the desktop text.
 function glesBranchDefining(source, name) {
   const define = new RegExp(`^\\s*#define\\s+${name}\\b`, 'm');
-  let from = 0;
-  for (;;) {
-    const start = source.indexOf('#ifdef USE_GLES', from);
-    if (start < 0) throw new Error(`no #ifdef USE_GLES branch defines ${name}`);
+  const opener = /^#(ifdef|ifndef)\s+USE_GLES\b/gm;
+  for (let match = opener.exec(source); match; match = opener.exec(source)) {
+    const start = match.index;
     const elseAt = source.indexOf('\n#else', start);
     const endAt = source.indexOf('\n#endif', start);
-    const stop = elseAt >= 0 && (endAt < 0 || elseAt < endAt) ? elseAt : endAt;
-    const branch = source.slice(start, stop < 0 ? source.length : stop);
+    const hasElse = elseAt >= 0 && (endAt < 0 || elseAt < endAt);
+    // `#ifdef` puts the ES text first, `#ifndef` puts it in the #else arm --
+    // and a bare `#ifndef USE_GLES` with no #else contributes nothing at all
+    // to an ES build, which is a real shape here (whole blocks of desktop-only
+    // shaders) but never one that defines a macro the ES tier then references.
+    const branch = match[1] === 'ifdef'
+      ? source.slice(start, hasElse ? elseAt : (endAt < 0 ? source.length : endAt))
+      : (hasElse ? source.slice(elseAt, endAt < 0 ? source.length : endAt) : '');
     if (define.test(branch)) return branch;
-    from = start + 1;
   }
+  throw new Error(`no USE_GLES branch defines ${name}`);
 }
 
 // Is a block comment still open at the end of `line`?  `/*` inside a string
@@ -238,8 +264,18 @@ export async function extractEngineWebGLPrograms() {
   // ones -- those with both a USE_GLES arm and a desktop arm, where this
   // extractor has to say which spelling it wants.  Everything else is found on
   // demand by resolveMacro(), so a new GLSL helper needs no edit to this file.
+  // Clustered dynamic lighting (uhexen2-26bm world, uhexen2-waum alias) is
+  // desktop-only -- it needs a compute shader and an SSBO, and the ES tier has
+  // neither -- so every one of its macros has an empty ES arm and has to be
+  // named here.  The alias ones include the varying declarations, because an
+  // `in` with no matching `out` is a link error and the ES tier has nothing to
+  // fill them with.
   for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE',
-                      'GLSL_BITFIELD_REVERSE']) {
+                      'GLSL_BITFIELD_REVERSE',
+                      'GLSL_DLIGHT_DECL', 'GLSL_DLIGHT_FN', 'GLSL_DLIGHT_APPLY',
+                      'GLSL_ALIAS_DLIGHT_DECL', 'GLSL_ALIAS_DLIGHT_FN', 'GLSL_ALIAS_DLIGHT_APPLY',
+                      'GLSL_ALIAS_DLIGHT_VS_OUT', 'GLSL_ALIAS_DLIGHT_FS_IN',
+                      'GLSL_ALIAS_DLIGHT_VS_CALC']) {
     macros.set(name, readDefine(glesBranchDefining(shaderSource, name), name, macros, shaderCtx));
   }
   // gl_postprocess.c keeps its own headers; PP_ES_PRECISION feeds the other two.
