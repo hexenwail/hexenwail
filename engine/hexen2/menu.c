@@ -4926,6 +4926,49 @@ static qboolean		keys_tap = false;	// TAB toggles tap binding mode
 
 /*
 ================
+M_BindCommandIsUsable
+
+Would this bindlist.lst row actually DO anything in this engine?
+
+A .lst is written for whatever engine the modder had, and the format is shared
+with QSS and Keep -- so rows routinely name commands we do not have.  Ironwail
+has filtered these since it gained the feature (Quake/menu.c, the +voip case in
+Mjolnir's bindlist.lst) and we did not port that half with uhexen2-7aok, so
+until now such a row appeared in Key Setup as an ordinary, bindable line that
+silently bound a key to nothing.  uhexen2-a5nn.22.
+
+Only the FIRST token is tested, which is what makes "impulse 23" work: the
+command is `impulse` and the rest is its argument.
+
+CVARS COUNT, where upstream tests only commands and aliases.  Typing a cvar
+name at the console is a legitimate thing to bind -- it prints or sets it --
+so treating `viewsize` as unusable would drop a row that works.  Erring toward
+keeping a row is the right direction here: a kept row that does nothing is a
+cosmetic wart, a dropped row is mod content the player cannot rebind.
+================
+*/
+static qboolean M_BindCommandIsUsable (const char *cmd)
+{
+	const char	*data;
+
+	data = COM_Parse (cmd);
+	(void) data;	/* COM_Parse reports emptiness through com_token, not its return */
+	if (!com_token[0])
+		return false;
+
+	/* NO DEPRECATED-NAME LIST, though upstream has one.  Its entries are
+	 * `+klook` and `+mlook`, deprecated because IRONWAIL REMOVED THEM; this
+	 * engine still registers both (cl_input.c) and menu.c issues `+mlook`
+	 * itself, so copying that list would drop two rows that work.  The
+	 * existence test below is the whole filter, and it gets those right by
+	 * construction -- which is the argument for testing what the engine has
+	 * rather than transcribing what upstream lacks. */
+	return Cmd_Exists (com_token) || Cmd_AliasExists (com_token) ||
+	       Cvar_FindVar (com_token) != NULL;
+}
+
+/*
+================
 M_BuildBindList
 
 Rebuilds the Key Setup rows: the engine defaults, then any extra rows from
@@ -4935,6 +4978,9 @@ used by QSS and Keep.
 Ported from Ironwail 096c3d952, which deliberately differs from QSS here:
 the mod's rows are MERGED after the engine's rather than replacing them, so
 a mod that lists three of its own commands doesn't lose the movement rows.
+
+Rows naming something this engine cannot run are dropped -- see
+M_BindCommandIsUsable, the half of upstream's handling uhexen2-7aok missed.
 
 Also called on a gamedir switch, so a previous mod's rows can't survive into
 the next one even if the Key Setup menu is on screen at the time.
@@ -4973,6 +5019,16 @@ void M_BuildBindList (void)
 
 		if (!modbinds[n].command[0] || !modbinds[n].label[0])
 			continue;		/* empty quoted token: skip the pair, reuse the slot */
+
+		if (!M_BindCommandIsUsable (modbinds[n].command))
+		{
+			/* Named so the modder can find it: this is the only signal
+			 * that a row they wrote is not showing up.  Upstream prints
+			 * the same thing at the same verbosity. */
+			Con_DPrintf ("Skipping unsupported key binding: \"%s\" \"%s\"\n",
+				     modbinds[n].command, modbinds[n].label);
+			continue;		/* nothing here would run it; reuse the slot */
+		}
 
 		keys_bindlist[keys_numcommands][0] = modbinds[n].command;
 		keys_bindlist[keys_numcommands][1] = modbinds[n].label;

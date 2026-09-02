@@ -90,6 +90,7 @@ void	Cmd_AddCommand (const char *cmd_name, xcommand_t function);
 // instead of being executed locally
 
 qboolean Cmd_Exists (const char *cmd_name);
+qboolean Cmd_AliasExists (const char *alias_name);	/* uhexen2-a5nn.22 */
 // used by the cvar code to check for cvar / command name overlap
 
 qboolean Cmd_CheckCommand (const char *partial);

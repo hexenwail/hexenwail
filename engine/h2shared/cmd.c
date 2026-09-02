@@ -725,6 +725,30 @@ qboolean Cmd_Exists (const char *cmd_name)
 	return false;
 }
 
+/*
+============
+Cmd_AliasExists
+
+Companion to Cmd_Exists for the alias table, which is otherwise private here.
+Wanted by the Key Setup menu, which has to tell "this bindlist.lst row names
+something this engine can actually run" from "this row would bind a key to
+nothing" -- and a mod's own aliases are a legitimate thing to bind.
+uhexen2-a5nn.22.
+============
+*/
+qboolean Cmd_AliasExists (const char *alias_name)
+{
+	cmdalias_t	*a;
+
+	for (a = cmd_alias ; a ; a = a->next)
+	{
+		if ( !q_strcasecmp(alias_name, a->name) )
+			return true;
+	}
+
+	return false;
+}
+
 
 /*
 ============
