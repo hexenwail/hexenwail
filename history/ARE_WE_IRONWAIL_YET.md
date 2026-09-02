@@ -162,6 +162,9 @@ The one ❌ that survives from the old count is bindless textures, and it remain
 
 | Feature | Status | Notes |
 |---|---|---|
+| Menu mouse toggle (`ui_mouse`) | ✅ | **uhexen2-a5nn.36.**  Mouse-driven menus were always on; `ui_mouse 0` now turns the pointer off in menus entirely — no hover, no click.  Declared in `menu.c` beside the other `ui_*` cvars, read in `in_sdl.c` at the two places the menu's mouse state comes from (the `SDL_EVENT_MOUSE_MOTION` handler that feeds hover, and the button handler that feeds `K_MOUSE1`).  Default 1 preserves existing behaviour.  Verified headless by hovering OPTIONS on the main menu and pressing Enter: with 1 the Options menu opens, with 0 the keyboard selection wins and Single Player opens instead. |
+| Key-event debug (`in_debugkeys`) | ✅ | **uhexen2-a5nn.36.**  Echoes every key event with its SDL scancode, its SDL keycode and the Quake keynum the two resolve to, plus text-input events.  Printed *after* the mapping, because the useful fact is which Quake key the scancode landed on — and `<unmapped>` is itself the answer when a bind that should work does not.  Standing answer to a recurring support question: a tester reporting "this bind does nothing" cannot otherwise tell a key the engine never saw from one it saw and mapped elsewhere. |
+| `joy_always_active` | ❌ | Not a rename and not ported.  Upstream defaults it to 0 and gates the pad on "was the pad the last input type"; this engine reads the pad unconditionally, so it already behaves as `joy_always_active 1` and the cvar's *default* value is the one we cannot express.  Porting it honestly means first building the focus / last-input-type gating we do not have — a behaviour change with a default flip, not a name.  uhexen2-a5nn.34. |
 | Full gamepad support | ✅ | SDL game controller API |
 | Controller rumble | ✅ | `joy_rumble` |
 | Analog stick deadzone/easing | ✅ | Inner deadzone + power-curve easing (`joy_deadzone_look/move`, `joy_exponent`/`_move`) |

@@ -39,6 +39,13 @@ static qboolean	prev_gamekey;
 
 cvar_t		m_filter = {"m_filter", "1", CVAR_ARCHIVE};
 static cvar_t	m_rawinput = {"m_rawinput", "1", CVAR_ARCHIVE};
+/* Echoes every key event with its scancode, its keycode and the Quake keynum
+ * the two resolve to.  Not archived, and not a feature so much as an answer to
+ * a recurring support question: a field tester reporting "this bind does
+ * nothing" cannot otherwise tell a key the engine never saw from a key it saw
+ * and mapped somewhere else, and neither can we.  uhexen2-a5nn.36 */
+static cvar_t	in_debugkeys = {"in_debugkeys", "0", CVAR_NONE};
+extern cvar_t	ui_mouse;	/* declared in menu.c, next to the menus it governs */
 static qboolean	rawinput_active;
 
 static int	mouse_x, mouse_y, old_mouse_x, old_mouse_y;
@@ -887,6 +894,7 @@ void IN_Init (void)
 	/* mouse */
 	Cvar_RegisterVariable (&m_filter);
 	Cvar_RegisterVariable (&m_rawinput);
+	Cvar_RegisterVariable (&in_debugkeys);
 
 	/* gamepad */
 	Cvar_RegisterVariable (&in_gamepad);
@@ -1336,6 +1344,8 @@ void IN_SendKeyEvents (void)
 			break;
 
 		case SDL_EVENT_TEXT_INPUT:
+			if (in_debugkeys.integer)
+				Con_Printf ("in_debugkeys: text \"%s\"\n", event.text.text);
 			/* feed printable characters to console/chat input */
 			Key_CharEvent(event.text.text);
 			break;
@@ -1368,6 +1378,17 @@ void IN_SendKeyEvents (void)
 				sym = IN_SDLScancodeToQuakeKey(event.key.scancode, modstate);
 			else
 				sym = IN_SDLKeyToQuakeKey(event.key.key, gamekey, modstate);
+			if (in_debugkeys.integer)
+			{
+				/* Printed after the mapping, not before it: the useful
+				 * fact is which Quake key the scancode landed on, and
+				 * "0 (unmapped)" is itself the answer when a bind that
+				 * should work does not. */
+				Con_Printf ("in_debugkeys: %s scancode %d keycode 0x%X -> %s\n",
+					    state ? "down" : "up  ",
+					    (int)event.key.scancode, (unsigned)event.key.key,
+					    sym ? Key_KeynumToString (sym) : "<unmapped>");
+			}
 			if (sym)
 				Key_Event(sym, state);
 			break;
@@ -1375,7 +1396,7 @@ void IN_SendKeyEvents (void)
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
 			/* In menu mode, allow mouse clicks even when mouse is "inactive" */
-			if (Key_GetDest() & key_menu)
+			if ((Key_GetDest() & key_menu) && ui_mouse.integer)
 			{
 				float mx, my;
 				SDL_GetMouseState(&mx, &my);
@@ -1482,7 +1503,7 @@ void IN_SendKeyEvents (void)
 			 * activated whatever was selected BEFORE it (the cursor moves
 			 * in M_Draw, which runs after K_MOUSE1 has already been
 			 * dispatched as Enter).  uhexen2-u4iz. */
-			else if (Key_GetDest() & key_menu)
+			else if ((Key_GetDest() & key_menu) && ui_mouse.integer)
 			{
 				float mx, my;
 				SDL_GetMouseState(&mx, &my);

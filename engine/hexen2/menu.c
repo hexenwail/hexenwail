@@ -46,6 +46,12 @@ enum m_state_e	m_state;
  * verbatim, so a config.cfg written by either engine means the same thing in
  * both.  What each one governs here is documented at its use site.
  * ------------------------------------------------------------------------- */
+/* Mouse-driven menus, on by default because that is what this engine has always
+ * done.  0 turns the pointer off in menus entirely -- no hover, no click -- for
+ * anyone playing on a pad or a couch, or whose trackpad keeps moving the
+ * selection out from under them.  in_sdl.c reads it at both entry points, which
+ * is where the menu's mouse state comes from.  uhexen2-a5nn.36 */
+cvar_t		ui_mouse          = {"ui_mouse",          "1",   CVAR_ARCHIVE};
 static cvar_t	ui_live_preview   = {"ui_live_preview",   "1",   CVAR_ARCHIVE};
 static cvar_t	ui_mouse_sound    = {"ui_mouse_sound",    "0",   CVAR_ARCHIVE};
 static cvar_t	ui_sound_throttle = {"ui_sound_throttle", "0.1", CVAR_ARCHIVE};
@@ -8662,6 +8668,7 @@ void M_Init (void)
 
 	M_BuildBindList ();
 
+	Cvar_RegisterVariable (&ui_mouse);
 	Cvar_RegisterVariable (&ui_live_preview);
 	Cvar_RegisterVariable (&ui_mouse_sound);
 	Cvar_RegisterVariable (&ui_sound_throttle);
