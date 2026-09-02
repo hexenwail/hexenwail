@@ -110,6 +110,79 @@ static void Max_Edicts_f (cvar_t *var)
 
 /*
 ===============
+SV_ProtocolName
+
+The four protocols this engine speaks, or NULL for anything else.  Shared by
+SV_Init and SV_Protocol_f so the accepted set is stated once: a list that
+disagrees with itself is how a value gets accepted at the console and then
+Sys_Errors on the next launch from the same config.
+===============
+*/
+static const char *SV_ProtocolName (int protocol)
+{
+	switch (protocol)
+	{
+	case PROTOCOL_RAVEN_111:	return "Raven/H2/1.11";
+	case PROTOCOL_RAVEN_112:	return "Raven/MP/1.12";
+	case PROTOCOL_UQE_113:		return "UQE/1.13";
+	case PROTOCOL_UH2_114:		return "Raven/MP/1.14";
+	default:			return NULL;
+	}
+}
+
+/*
+===============
+SV_Protocol_f
+
+Ironwail's sv_protocol verb.  -protocol has always been able to pick the wire
+format, but only at launch, which on a dedicated server means restarting the
+server to record a demo an older client can play back.
+
+Not a cvar, and deliberately not archived, for the same reason it is not one
+upstream: the value is written into the signon at SV_SendServerinfo and read
+back out of it by every client for the life of the map, so it is a property of
+the running server rather than a preference.  A change lands at the next map
+load -- announced, because pretending otherwise is worse than useless here:
+SV_MaxSounds() is derived from sv_protocol and is consulted at PRECACHE time,
+so a mid-map change would put the sound indices already handed out past what
+the protocol can express.  sv_main.c's svc_sound path carries the matching
+guard and says so.
+===============
+*/
+static void SV_Protocol_f (void)
+{
+	int	i;
+
+	switch (Cmd_Argc())
+	{
+	case 1:
+		Con_Printf ("\"sv_protocol\" is \"%i\" (%s)\n",
+			    sv_protocol, SV_ProtocolName (sv_protocol));
+		break;
+
+	case 2:
+		i = atoi (Cmd_Argv(1));
+		if (!SV_ProtocolName (i))
+		{
+			Con_Printf ("sv_protocol must be %i, %i, %i or %i\n",
+				    PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112,
+				    PROTOCOL_UQE_113, PROTOCOL_UH2_114);
+			break;
+		}
+		sv_protocol = i;
+		Con_Printf ("sv_protocol set to %i (%s)\n", i, SV_ProtocolName (i));
+		if (sv.active)
+			Con_Printf ("changes will not take effect until the next map load.\n");
+		break;
+
+	default:
+		Con_SafePrintf ("usage: sv_protocol <protocol>\n");
+		break;
+	}
+}
+
+/*
+===============
 SV_Init
 ===============
 */
@@ -155,6 +228,7 @@ void SV_Init (void)
 	SV_UserInit ();
 
 	Cmd_AddCommand ("sv_edicts", Sv_Edicts_f);	
+	Cmd_AddCommand ("sv_protocol", SV_Protocol_f);
 
 	for (i = 0; i < MAX_MODELS; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -165,21 +239,13 @@ void SV_Init (void)
 	i = COM_CheckParm ("-protocol");
 	if (i && i < com_argc - 1)
 		sv_protocol = atoi (com_argv[i + 1]);
-	switch (sv_protocol)
+	p = SV_ProtocolName (sv_protocol);
+	if (!p)
 	{
-	case PROTOCOL_RAVEN_111:
-		p = "Raven/H2/1.11";
-		break;
-	case PROTOCOL_RAVEN_112:
-		p = "Raven/MP/1.12";
-		break;
-	case PROTOCOL_UQE_113:
-		p = "UQE/1.13";
-		break;
-	case PROTOCOL_UH2_114:
-		p = "Raven/MP/1.14";
-		break;
-	default:
+		/* Still fatal at startup, unlike the console verb: a bad
+		 * -protocol means the operator asked for a wire format we cannot
+		 * speak, and coming up on a different one would silently hand
+		 * every connecting client the wrong answer. */
 		Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i, %i.",
 				sv_protocol, PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113, PROTOCOL_UH2_114);
 		return; /* silence compiler */
