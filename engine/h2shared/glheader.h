@@ -134,6 +134,13 @@ typedef int64_t  GLint64;
 #endif
 
 /* FBO (framebuffer object) enums */
+/* GL 4.0 / GL_ARB_sample_shading -- vid_fsaamode.  Defined here because the
+ * system GL header on an older SDK may predate 4.0 even where the driver has
+ * the entry point; the enum is stable.  uhexen2-a5nn.27 */
+#ifndef GL_SAMPLE_SHADING
+#define GL_SAMPLE_SHADING			0x8C36
+#endif
+
 #ifndef GL_FRAMEBUFFER
 #define GL_FRAMEBUFFER				0x8D40
 #endif

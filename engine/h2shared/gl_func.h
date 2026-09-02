@@ -453,6 +453,11 @@ GL_FUNCTION_OPT(void, glGetQueryObjectiv, (GLuint, GLenum, GLint *))
  * the extension are present. */
 GL_FUNCTION_OPT(void, glClipControl, (GLenum, GLenum))
 
+/* Per-sample fragment shading (GL 4.0 / GL_ARB_sample_shading).  Optional:
+ * absent on the ES tier entirely, and gated on the pointer on desktop.
+ * uhexen2-a5nn.27 */
+GL_FUNCTION_OPT(void, glMinSampleShading, (GLfloat))
+
 /* Per-buffer blending + MRT (GL 4.0 / GL_ARB_draw_buffers_blend) */
 GL_FUNCTION_OPT(void, glBlendFunci, (GLuint, GLenum, GLenum))
 GL_FUNCTION_OPT(void, glDrawBuffers, (GLsizei, const GLenum *))
@@ -542,6 +547,7 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glQueryCounter_fp(id,t)		((void)0)
 #define glGetQueryObjectui64v_fp(id,p,v) ((void)0)
 #define glGetQueryObjectiv_fp(id,p,v)	((void)0)
+#define glMinSampleShading_fp(v)	((void)0)
 #define glBlendFunci_fp(b,s,d)		((void)0)
 #define glClipControl_fp(o,d)		((void)0)
 #define glDrawBuffers_fp		glDrawBuffers

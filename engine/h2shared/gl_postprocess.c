@@ -345,6 +345,7 @@ static qboolean PP_HDRActive (void)
 /* ------------------------------------------------------------------ */
 
 extern cvar_t	vid_config_fsaa;	/* MSAA sample count (drives the GL context) */
+extern cvar_t	vid_fsaamode;		/* per-sample shading fraction, uhexen2-a5nn.27 */
 
 static GLuint	oit_accum_tex;		/* RGBA16F accumulation */
 static GLuint	oit_revealage_tex;	/* RGBA16F revealage (.r used) */
@@ -2379,6 +2380,71 @@ void GL_PostProcess_Shutdown (void)
 	pp_copyback_w = pp_copyback_h = 0;
 }
 
+/*
+=================
+PP_ApplySampleShading
+
+vid_fsaamode, applied to the scene FBO for the 3D pass only.
+
+Three conditions, and all three are load-bearing.  The driver has to have
+glMinSampleShading at all (GL 4.0; the ES/WebGL2 tier has neither the entry
+point nor the extension, which is why gl_renderer_caps carries the answer
+rather than this file guessing).  The target has to be genuinely multisampled,
+because GL_SAMPLE_SHADING against a single-sample framebuffer is a no-op that
+still costs a state change every frame.  And the player has to have asked,
+because shading every sample is supersampling and priced like it.
+
+Turned off again in End3D rather than left on: the resolve blit and everything
+2D draw after it render to single-sample targets, where the state is dead
+weight at best.
+=================
+*/
+static void PP_ApplySampleShading (void)
+{
+#ifndef USE_GLES
+	static float	pp_reported_frac = -1.0f;
+	float		frac;
+
+	if (!gl_renderer_caps.sample_shading || pp_samples <= 1)
+		return;
+
+	frac = vid_fsaamode.value;
+	if (frac < 0.0f)
+		frac = 0.0f;
+	else if (frac > 1.0f)
+		frac = 1.0f;
+
+	if (frac > 0.0f)
+	{
+		glEnable_fp (GL_SAMPLE_SHADING);
+		glMinSampleShading_fp (frac);
+	}
+	else
+	{
+		glDisable_fp (GL_SAMPLE_SHADING);
+	}
+
+	/* Reported on change only -- per frame it would be a wall of text, and
+	 * never reported at all leaves no way to tell "the cvar did nothing"
+	 * from "the cvar was never reached", which are different bugs.  The
+	 * three preconditions above are all silent failures otherwise. */
+	if (frac != pp_reported_frac)
+	{
+		pp_reported_frac = frac;
+		Con_DPrintf ("[RENDERER] sample shading %s (%.2f of %d samples)\n",
+			     (frac > 0.0f) ? "on" : "off", frac, pp_samples);
+	}
+#endif
+}
+
+static void PP_EndSampleShading (void)
+{
+#ifndef USE_GLES
+	if (gl_renderer_caps.sample_shading)
+		glDisable_fp (GL_SAMPLE_SHADING);
+#endif
+}
+
 void GL_PostProcess_BeginFrame (void)
 {
 	int w, h;
@@ -2433,6 +2499,7 @@ void GL_PostProcess_BeginFrame (void)
 
 	/* bind scene FBO */
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, pp_fbo);
+	PP_ApplySampleShading ();
 	pp_active = true;
 }
 
@@ -2530,6 +2597,8 @@ void GL_PostProcess_End3D (void)
 
 	if (!pp_active)
 		return;
+
+	PP_EndSampleShading ();
 
 	if (pp_fbo_failed)
 	{

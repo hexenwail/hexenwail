@@ -397,6 +397,17 @@ static qboolean	sdl_has_multisample = false;
 int		gl_max_samples = 0;	/* GL_MAX_SAMPLES query, populated post-context-init */
 cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_NONE};	/* read by gl_lodbias auto-scale */
 static cvar_t	vid_fsaa = {"vid_fsaa", "4", CVAR_ARCHIVE};	/* upstream spelling; mirrors vid_config_fsaa */
+/* Per-sample shading inside the multisampled scene FBO, as a fraction of the
+ * samples: 0 = off (one shade per pixel, MSAA smooths geometry edges only),
+ * 1 = shade every sample, which is supersampling within the MSAA target and
+ * therefore also attacks the aliasing MSAA cannot see -- specular, alpha test,
+ * high-frequency textures.  Expensive in proportion.
+ *
+ * Means nothing unless the scene FBO is actually multisampled (vid_fsaa >= 2)
+ * and the driver has glMinSampleShading; gl_postprocess.c checks both.  The
+ * ES/WebGL2 tier has neither the entry point nor the extension, so this reads
+ * back and archives there and simply never applies.  uhexen2-a5nn.27 */
+cvar_t	vid_fsaamode = {"vid_fsaamode", "0", CVAR_ARCHIVE};
 
 // stencil buffer
 qboolean	have_stencil = false;
@@ -461,6 +472,7 @@ static void GL_InitRendererCaps (void)
 		(glDrawElementsIndirect_fp != NULL) && (glMultiDrawElementsIndirect_fp != NULL);
 	gl_renderer_caps.indexed_blending =
 		(glBlendFunci_fp != NULL) && (glDrawBuffers_fp != NULL) && (glClearBufferfv_fp != NULL);
+	gl_renderer_caps.sample_shading = (glMinSampleShading_fp != NULL);
 	gl_renderer_caps.gpu_particles = gl_renderer_caps.shader_storage;
 	gl_renderer_caps.skeletal_animation = gl_renderer_caps.shader_storage;
 	gl_renderer_caps.oit =
@@ -615,13 +627,14 @@ static void GL_RendererStatus_f (void)
 	Con_Printf("[RENDERER] drawable=%dx%d viewport=%d,%d %dx%d\n",
 		   WRWidth, WRHeight, glx, gly, glwidth, glheight);
 	Con_Printf("[RENDERER] postprocess=%s HDR-targets=%s OIT=%s SSBO=%s "
-		   "anisotropy=%s FBO-test=%s\n",
+		   "anisotropy=%s FBO-test=%s sample-shading=%s\n",
 		   gl_renderer_caps.postprocess ? "ready" : "unavailable",
 		   gl_renderer_caps.float_color_buffer ? "yes" : "no",
 		   gl_renderer_caps.oit ? "yes" : "sorted fallback",
 		   gl_renderer_caps.shader_storage ? "yes" : "CPU fallback",
 		   gl_renderer_caps.anisotropy ? "yes" : "no",
-		   gl_renderer_caps.fbo_selftest ? "pass" : "fail");
+		   gl_renderer_caps.fbo_selftest ? "pass" : "fail",
+		   gl_renderer_caps.sample_shading ? "yes" : "no");
 	GL_ReportShaderStatus();
 	GL_ReportLightmapStatus();
 }
@@ -927,6 +940,24 @@ float VID_PixelAspect (void)
 	return par;
 }
 
+
+/*
+=================
+VID_FSAAMode_f
+
+Clamp into the range glMinSampleShading will apply anyway.  GL silently clamps
+to [0,1], so without this `vid_fsaamode 5` reads back 5 for the rest of the
+session while behaving as 1 -- a cvar reporting a number that is not what it is
+doing.  Upstream leaves it to GL; the readback is worth the four lines.
+=================
+*/
+static void VID_FSAAMode_f (cvar_t *var)
+{
+	if (var->value < 0.0f)
+		Cvar_SetQuick (var, "0");
+	else if (var->value > 1.0f)
+		Cvar_SetQuick (var, "1");
+}
 
 /*
 =================
@@ -1475,6 +1506,9 @@ static void GL_LoadFunctionPointers (void)
 
 	/* SSBO functions (GL 4.3 core) */
 	glBindBufferBase_fp = (glBindBufferBase_f) SDL_GL_GetProcAddress("glBindBufferBase");
+
+	/* Per-sample fragment shading (GL 4.0) — vid_fsaamode */
+	glMinSampleShading_fp = (glMinSampleShading_f) SDL_GL_GetProcAddress("glMinSampleShading");
 
 	/* Per-buffer blending + MRT (GL 4.0) */
 	glBlendFunci_fp = (glBlendFunci_f) SDL_GL_GetProcAddress("glBlendFunci");
@@ -2586,6 +2620,8 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&vid_desktopfullscreen);
 	Cvar_RegisterVariable (&vid_refreshrate);
 	Cvar_RegisterVariable (&vid_fsaa);
+	Cvar_RegisterVariable (&vid_fsaamode);
+	Cvar_SetCallback (&vid_fsaamode, VID_FSAAMode_f);
 
 	/* Set after every registration above, so that wiring the mirrors cannot
 	 * fire a callback against a twin that is not registered yet --

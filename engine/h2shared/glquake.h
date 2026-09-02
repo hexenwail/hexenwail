@@ -279,6 +279,7 @@ typedef struct
 	qboolean		compute_shaders;
 	qboolean		indirect_draw;
 	qboolean		indexed_blending;	/* glBlendFunci, i.e. WBOIT */
+	qboolean		sample_shading;		/* glMinSampleShading, i.e. vid_fsaamode */
 	qboolean		gpu_particles;
 	qboolean		skeletal_animation;
 	qboolean		oit;
