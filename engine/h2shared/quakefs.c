@@ -3189,9 +3189,17 @@ static void Host_Game_f (void)
 		}
 	}
 
-	/* clean slate: reload binds, aliases, and configs from new mod */
+	/* clean slate: reload binds, aliases, and configs from new mod.
+	 *
+	 * The mod's config.cfg carries its own vid_width / vid_height /
+	 * vid_fullscreen, and those are archived cvars like any other, so
+	 * exec'ing it would hand the incoming mod the player's resolution.  Hold
+	 * the mode across the exec and release it behind, which is ericw's
+	 * arrangement in QuakeSpasm and Ironwail verbatim.  uhexen2-a5nn.26 */
+	VID_Lock ();
 	Cbuf_AddText ("unbindall\nunaliasall\n");
 	Cbuf_AddText (Cmd_StartupScript ());
+	Cbuf_AddText ("vid_unlock\n");
 	Con_Printf ("\ngame changed to \"%s\"\n", dir);
 }
 #endif	/* !SERVERONLY */

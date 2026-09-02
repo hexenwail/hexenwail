@@ -269,9 +269,15 @@ qboolean	in_mode_set = false;
 // VID_SetMode, VID_ChangeVideoMode or VID_Restart_f
 static cvar_t	vid_mode = {"vid_mode", "0", CVAR_NONE};
 static cvar_t	vid_config_consize = {"vid_config_consize", "640", CVAR_ARCHIVE};
-static cvar_t	vid_config_glx = {"vid_config_glx", "640", CVAR_ARCHIVE};
-static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_ARCHIVE};
-static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_ARCHIVE};	/* 0=windowed, 1=borderless, 2=fullscreen */
+/* Not archived any more: vid_width / vid_height / vid_fullscreen /
+ * vid_desktopfullscreen below are the archived spelling now, and these three
+ * mirror to them.  Writing both would put two names for one setting in
+ * config.cfg, where a hand-edit of one and not the other resolves by file
+ * order.  An older config.cfg that still carries these reads back fine --
+ * reading one sets its twin.  uhexen2-a5nn.26 */
+static cvar_t	vid_config_glx = {"vid_config_glx", "640", CVAR_NONE};
+static cvar_t	vid_config_gly = {"vid_config_gly", "480", CVAR_NONE};
+static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_NONE};	/* 0=windowed, 1=borderless, 2=fullscreen */
 static cvar_t	vid_window_x = {"vid_window_x", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_window_y = {"vid_window_y", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_vsync = {"vid_vsync", "0", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
@@ -285,6 +291,59 @@ static cvar_t	vid_pixelaspect = {"vid_pixelaspect", "0", CVAR_ARCHIVE};
 // cvars for compatibility with the software version
 static cvar_t	vid_config_swx = {"vid_config_swx", "320", CVAR_ARCHIVE};
 static cvar_t	vid_config_swy = {"vid_config_swy", "240", CVAR_ARCHIVE};
+
+/* --- the Quake-lineage spelling of the mode ------------------------------
+ *
+ * Every engine in this family since FitzQuake calls it vid_width /
+ * vid_height / vid_fullscreen, and that is what a shipped autoexec.cfg, a
+ * mod's cfg or a wiki page tells a player to write.  uHexen2 calls the same
+ * three things vid_config_glx / vid_config_gly / vid_config_fscr, so all of
+ * that landed on nothing at all: `vid_width 800` in a cfg was inert and the
+ * only way to ask for a resolution was -width on the command line.
+ *
+ * This is not a second mode system.  It is the front door onto the one that
+ * is already here -- each vid_config_* cvar mirrors to the upstream-named
+ * one and back, so whichever name a config, a mod or the menu writes, both
+ * agree afterwards.  Nothing outside this file ever read vid_config_glx.
+ *
+ * vid_fullscreen and vid_desktopfullscreen are two booleans over our one
+ * tri-state vid_config_fscr:
+ *
+ *	fscr 0 = windowed	<->  vid_fullscreen 0
+ *	fscr 1 = borderless	<->  vid_fullscreen 1, vid_desktopfullscreen 1
+ *	fscr 2 = exclusive	<->  vid_fullscreen 1, vid_desktopfullscreen 0
+ *
+ * Going windowed deliberately leaves vid_desktopfullscreen alone: it says
+ * how to go fullscreen next time, not what is happening now.  Upstream's
+ * VID_SyncCvars carries the same note.
+ *
+ * uhexen2-a5nn.26, item 2 of the a5nn.23 inventory diff.
+ */
+static cvar_t	vid_width = {"vid_width", "640", CVAR_ARCHIVE};
+static cvar_t	vid_height = {"vid_height", "480", CVAR_ARCHIVE};
+static cvar_t	vid_fullscreen = {"vid_fullscreen", "1", CVAR_ARCHIVE};
+static cvar_t	vid_desktopfullscreen = {"vid_desktopfullscreen", "1", CVAR_ARCHIVE};
+/* 0 = whatever the display is already doing, which is also what the mode list
+ * gives us because it carries no refresh rate at all.  Nonzero picks the
+ * nearest advertised rate at the requested size in exclusive fullscreen;
+ * either way VID_SetMode writes back what was actually obtained. */
+static cvar_t	vid_refreshrate = {"vid_refreshrate", "0", CVAR_ARCHIVE};
+
+/* A mode cvar is a request, not a setting: nothing moves until vid_restart,
+ * the same contract as upstream.  vid_locked suppresses both the reminder and
+ * the restart itself, and is held across a gamedir switch so the incoming
+ * mod's config.cfg cannot yank the player's resolution out from under them
+ * (Host_Game_f queues `vid_unlock` behind the exec).
+ *
+ * vid_internal_change marks a write the engine made rather than the player --
+ * a mirror propagating to its twin, or a writeback of the size actually
+ * obtained.  Those must neither print the reminder nor arm vid_changed. */
+static qboolean	vid_locked = false;
+static qboolean	vid_changed = false;
+static qboolean	vid_internal_change = false;
+/* One reserved, reused mode-list slot for a size the display never advertised;
+ * see VID_ModeForSize. */
+static int	vid_usermode = -1;
 
 byte		globalcolormap[VID_GRADES*256];
 float		RTint[256], GTint[256], BTint[256];
@@ -336,7 +395,8 @@ static int	multisample = 0; // do not set this if SDL cannot multisample
 static int	vid_menu_fsaa = 0;	/* menu-pending sample count, not yet applied */
 static qboolean	sdl_has_multisample = false;
 int		gl_max_samples = 0;	/* GL_MAX_SAMPLES query, populated post-context-init */
-cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_ARCHIVE};	/* read by gl_lodbias auto-scale */
+cvar_t	vid_config_fsaa = {"vid_config_fsaa", "4", CVAR_NONE};	/* read by gl_lodbias auto-scale */
+static cvar_t	vid_fsaa = {"vid_fsaa", "4", CVAR_ARCHIVE};	/* upstream spelling; mirrors vid_config_fsaa */
 
 // stencil buffer
 qboolean	have_stencil = false;
@@ -662,8 +722,15 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_ResizeCanvas (int css_width, int css_height)
 	WRHeight = dh;
 	vid.width = vid.conwidth = WRWidth;
 	vid.height = vid.conheight = WRHeight;
-	Cvar_SetValueQuick (&vid_config_glx, WRWidth);
-	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
+	{
+		/* The browser resized us; the player did not ask for anything, so
+		 * do not tell them a vid_restart is pending. */
+		qboolean saved = vid_internal_change;
+		vid_internal_change = true;
+		Cvar_SetValueQuick (&vid_config_glx, WRWidth);
+		Cvar_SetValueQuick (&vid_config_gly, WRHeight);
+		vid_internal_change = saved;
+	}
 	vid.recalc_refdef = 1;
 	glViewport_fp(0, 0, WRWidth, WRHeight);
 	Con_SafeDPrintf("[RENDERER] Canvas synchronized: CSS=%dx%d drawable=%dx%d\n",
@@ -861,6 +928,236 @@ float VID_PixelAspect (void)
 }
 
 
+/*
+=================
+VID_Changed_f
+
+Upstream's reminder that a mode cvar is a request and nothing has moved yet.
+Silent for changes the engine made itself -- a mirror propagating to its twin,
+or VID_SetMode writing back the size it actually got -- because those are not
+pending anything.
+=================
+*/
+static void VID_Changed_f (cvar_t *var)
+{
+	if (vid_internal_change || in_mode_set)
+		return;
+	vid_changed = true;
+	if (vid_initialized && !vid_locked)
+		Con_Printf ("%s %s will be applied after a vid_restart\n",
+			    var->name, var->string);
+}
+
+/*
+=================
+VID_MirrorSize_f
+VID_MirrorFullscreen_f
+VID_MirrorFSAA_f
+
+Keep each uHexen2-named mode cvar and its Quake-lineage twin equal, whichever
+one was written.  Recursion is not a hazard: Cvar_SetQuick returns without
+touching the callback when the value is already what it is being set to, so
+the mirror bottoms out on the first hop back.  The guard is for the reminder,
+not for termination -- without it a `vid_fullscreen 1` would print a line
+naming vid_config_fscr too.
+=================
+*/
+static void VID_MirrorSize_f (cvar_t *var)
+{
+	qboolean	saved = vid_internal_change;
+
+	vid_internal_change = true;
+	if (var == &vid_width)
+		Cvar_SetValueQuick (&vid_config_glx, var->value);
+	else if (var == &vid_config_glx)
+		Cvar_SetValueQuick (&vid_width, var->value);
+	else if (var == &vid_height)
+		Cvar_SetValueQuick (&vid_config_gly, var->value);
+	else
+		Cvar_SetValueQuick (&vid_height, var->value);
+	vid_internal_change = saved;
+
+	VID_Changed_f (var);
+}
+
+static void VID_MirrorFullscreen_f (cvar_t *var)
+{
+	qboolean	saved = vid_internal_change;
+
+	vid_internal_change = true;
+	if (var == &vid_config_fscr)
+	{
+		Cvar_SetQuick (&vid_fullscreen, vid_config_fscr.integer ? "1" : "0");
+		/* Only a fullscreen mode says anything about which kind; staying
+		 * windowed leaves the preference where the player left it. */
+		if (vid_config_fscr.integer)
+			Cvar_SetQuick (&vid_desktopfullscreen,
+				       (vid_config_fscr.integer == 1) ? "1" : "0");
+	}
+	else
+	{
+		int	fscr = 0;
+		if (vid_fullscreen.integer)
+			fscr = vid_desktopfullscreen.integer ? 1 : 2;
+		Cvar_SetValueQuick (&vid_config_fscr, fscr);
+	}
+	vid_internal_change = saved;
+
+	VID_Changed_f (var);
+}
+
+static void VID_MirrorFSAA_f (cvar_t *var)
+{
+	qboolean	saved = vid_internal_change;
+
+	vid_internal_change = true;
+	Cvar_SetValueQuick ((var == &vid_fsaa) ? &vid_config_fsaa : &vid_fsaa,
+			    var->value);
+	vid_internal_change = saved;
+
+	/* Sample count changes need a restart here even though upstream can do
+	 * it live: the scene FBO is reallocated at the new count, which is what
+	 * VID_MenuNeedApply already tells the menu. */
+	VID_Changed_f (var);
+}
+
+/*
+=================
+VID_ModeCvar_f
+
+vid_mode is the mode-list index, and `vid_mode N; vid_restart` is the old
+uHexen2 idiom -- the Display menu's Apply uses it too.  Resolve it back into a
+size so that the request the restart reads is the one that was just made,
+rather than the size left over from the mode before it.
+=================
+*/
+static void VID_ModeCvar_f (cvar_t *var)
+{
+	qboolean	saved;
+
+	if (!nummodes || !modelist || var->integer < 0 || var->integer >= *nummodes)
+		return;
+
+	saved = vid_internal_change;
+	vid_internal_change = true;
+	Cvar_SetValueQuick (&vid_width, modelist[var->integer].width);
+	Cvar_SetValueQuick (&vid_height, modelist[var->integer].height);
+	vid_internal_change = saved;
+}
+
+/*
+=================
+VID_ModeForSize
+
+Index of the mode-list entry at this size, or -1.
+
+A size the display never advertised is accepted anyway if it fits inside the
+largest one that was, which is how -width/-height has always behaved: an
+ultrawide or a letterboxed window is a legitimate thing to ask for and no
+driver enumerates one.  ONE slot is reserved for that and reused, because
+unlike the command line, `vid_width N; vid_restart` can be typed again with a
+different N all evening, and appending each time would walk off the end of the
+list -- fmodelist has exactly one entry of slack past MAX_MODE_LIST.
+=================
+*/
+static int VID_ModeForSize (int width, int height)
+{
+	int	i, limit;
+
+	if (!nummodes || !modelist)
+		return -1;
+
+	for (i = 0; i < *nummodes; i++)
+	{
+		if (modelist[i].width == width && modelist[i].height == height)
+			return i;
+	}
+
+	if (width < MIN_WIDTH || height < MIN_HEIGHT)
+		return -1;
+	if ((width > vid_maxwidth || height > vid_maxheight) && !COM_CheckParm("-force"))
+		return -1;
+
+	limit = (modelist == fmodelist) ? MAX_MODE_LIST : (int)MAX_STDMODES;
+	i = (vid_usermode >= 0) ? vid_usermode : *nummodes;
+	if (i > limit)
+		return -1;
+
+	modelist[i].width = width;
+	modelist[i].height = height;
+	modelist[i].halfscreen = 0;
+	modelist[i].fullscreen = 1;
+	modelist[i].bpp = 32;
+	q_snprintf (modelist[i].modedesc, MAX_DESC, "%d x %d (user mode)", width, height);
+	if (vid_usermode < 0)
+	{
+		vid_usermode = i;
+		(*nummodes)++;
+	}
+
+	return i;
+}
+
+/*
+=================
+VID_SyncCvars
+
+Put the mode cvars back in line with the mode that is actually running, so a
+player reading them back sees what is on screen rather than what they asked
+for and did not get.  Clears the pending flag with them.
+=================
+*/
+static void VID_SyncCvars (void)
+{
+	qboolean	saved = vid_internal_change;
+
+	if (!window || vid_modenum < 0)
+		return;
+
+	vid_internal_change = true;
+	Cvar_SetValueQuick (&vid_config_glx, WRWidth);
+	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
+	/* Written as vid_fullscreen rather than vid_config_fscr so the mirror
+	 * decides borderless-vs-exclusive from the stored preference: whether we
+	 * are fullscreen is a fact about the window, but which KIND to use next
+	 * time is the player's, and upstream's VID_SyncCvars leaves it alone for
+	 * the same reason.  vid_fsaa is left alone too -- nothing here has
+	 * changed the sample count, only queued one for the next restart. */
+	Cvar_SetQuick (&vid_fullscreen,
+		       (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) ? "1" : "0");
+	{
+		const SDL_DisplayMode *dm =
+			SDL_GetCurrentDisplayMode (SDL_GetDisplayForWindow (window));
+		if (dm && dm->refresh_rate > 0.0f)
+			Cvar_SetValueQuick (&vid_refreshrate,
+					    (float)(int)(dm->refresh_rate + 0.5f));
+	}
+	vid_internal_change = saved;
+
+	vid_changed = false;
+}
+
+/*
+================
+VID_Lock -- ericw, via Ironwail
+
+Hold every mode change until `vid_unlock`.  Used across a gamedir switch: the
+incoming mod's config.cfg is about to be exec'd and it carries its own
+vid_width / vid_height / vid_fullscreen, which must not move the window the
+player is looking at.  Host_Game_f queues the unlock behind the exec.
+================
+*/
+void VID_Lock (void)
+{
+	vid_locked = true;
+}
+
+static void VID_Unlock_f (void)
+{
+	VID_SyncCvars ();
+	vid_locked = false;
+}
+
 /* Apply vsync setting, falling back from adaptive to normal if needed */
 static void VID_ApplyVSync (void)
 {
@@ -873,6 +1170,12 @@ static void VID_ApplyVSync (void)
 			SDL_GL_SetSwapInterval(1);
 		}
 	}
+}
+
+static float VID_RefreshDelta (float have, float want)
+{
+	float	d = have - want;
+	return (d < 0.0f) ? -d : d;
 }
 
 static qboolean VID_SetMode (int modenum)
@@ -969,14 +1272,29 @@ static qboolean VID_SetMode (int modenum)
 			if (modes)
 			{
 				int j;
+				/* SDL lists modes highest-refresh-first, so the first
+				 * match is already the best one when the player has
+				 * expressed no preference.  vid_refreshrate > 0 asks
+				 * for a specific rate: take the nearest advertised,
+				 * because an exact-match requirement would silently
+				 * drop the whole request to borderless on a panel
+				 * reporting 59.94 for what its box calls 60. */
+				float want = vid_refreshrate.value;
 				for (j = 0; j < num_modes; j++)
 				{
-					if (modes[j]->w == modelist[modenum].width &&
-					    modes[j]->h == modelist[modenum].height)
+					if (modes[j]->w != modelist[modenum].width ||
+					    modes[j]->h != modelist[modenum].height)
+						continue;
+					if (!best)
 					{
 						best = modes[j];
-						break;
+						if (want <= 0.0f)
+							break;
+						continue;
 					}
+					if (VID_RefreshDelta(modes[j]->refresh_rate, want) <
+					    VID_RefreshDelta(best->refresh_rate, want))
+						best = modes[j];
 				}
 				if (best)
 					SDL_SetWindowFullscreenMode(window, best);
@@ -1024,6 +1342,13 @@ static qboolean VID_SetMode (int modenum)
 	Cvar_SetValueQuick (&vid_config_gly, WRHeight);
 	if (!is_fullscreen && vid_config_fscr.integer != 0)
 		Cvar_SetValueQuick (&vid_config_fscr, 0);
+	/* Report the rate we ended up on, not the one that was asked for.  The
+	 * mode list carries no refresh rate, so SDL is the only source. */
+	{
+		const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode (SDL_GetDisplayForWindow (window));
+		if (dm && dm->refresh_rate > 0.0f)
+			Cvar_SetValueQuick (&vid_refreshrate, (float)(int)(dm->refresh_rate + 0.5f));
+	}
 	vid.width = vid.conwidth = WRWidth;
 	vid.height = vid.conheight = WRHeight;
 
@@ -1833,15 +2158,47 @@ static void VID_ChangeVideoMode (int newmode)
 
 static void VID_Restart_f (void)
 {
-	if (vid_mode.integer < 0 || vid_mode.integer >= *nummodes)
+	int	newmode;
+
+	if (vid_locked)
 	{
-		Con_Printf ("Bad video mode %d\n", vid_mode.integer);
-		Cvar_SetValueQuick (&vid_mode, vid_modenum);
+		Con_Printf ("Video settings are locked; \"vid_unlock\" to apply them\n");
 		return;
 	}
 
+	/* vid_width / vid_height are the request; vid_mode is the mode-list
+	 * index that satisfies it.  Keep the index when it already does, so the
+	 * Display menu (which picks an index, and whose vid_mode write has
+	 * already updated the size through VID_ModeCvar_f) lands exactly where
+	 * it meant to, while a console `vid_width 1280` still resolves.  Written
+	 * in either order the later one wins, because whichever is set second
+	 * puts the two out of agreement.
+	 *
+	 * The one case this cannot see is `vid_mode N` where N is the mode
+	 * already running: Cvar_SetQuick returns without calling the callback
+	 * when a set changes nothing, so there is no write to notice, and a size
+	 * typed earlier still wins.  Retyping the current mode index asks for
+	 * nothing, so that is a fair reading, but it is not the obvious one. */
+	newmode = vid_mode.integer;
+	if (newmode < 0 || newmode >= *nummodes ||
+	    modelist[newmode].width != vid_width.integer ||
+	    modelist[newmode].height != vid_height.integer)
+	{
+		newmode = VID_ModeForSize (vid_width.integer, vid_height.integer);
+		if (newmode < 0)
+		{
+			Con_Printf ("%d x %d is not a valid mode\n",
+				    vid_width.integer, vid_height.integer);
+			Cvar_SetValueQuick (&vid_mode, vid_modenum);
+			VID_SyncCvars ();
+			return;
+		}
+		Cvar_SetValueQuick (&vid_mode, newmode);
+	}
+
 	Con_Printf ("Re-initializing video:\n");
-	VID_ChangeVideoMode (vid_mode.integer);
+	VID_ChangeVideoMode (newmode);
+	VID_SyncCvars ();
 }
 
 static int sort_modes (const void *arg1, const void *arg2)
@@ -2116,7 +2473,18 @@ void	VID_Init (const unsigned char *palette)
 				"vid_config_consize",
 				"gl_lightmapfmt",
 				"gl_reversed_z",
-				"vid_vsync" };
+				"vid_vsync",
+				/* The archived spelling of the mode, plus
+				 * vid_refreshrate.  Both spellings have to be
+				 * read this early or a config carrying only the
+				 * new names would be seen after the mode had
+				 * already been set.  uhexen2-a5nn.26 */
+				"vid_width",
+				"vid_height",
+				"vid_fullscreen",
+				"vid_desktopfullscreen",
+				"vid_refreshrate",
+				"vid_fsaa" };
 #define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
 	Cvar_RegisterVariable (&vid_config_fsaa);
@@ -2135,11 +2503,35 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&_enable_mouse);
 	Cvar_RegisterVariable (&gl_lightmapfmt);
 	Cvar_RegisterVariable (&gl_reversed_z);
+	Cvar_RegisterVariable (&vid_width);
+	Cvar_RegisterVariable (&vid_height);
+	Cvar_RegisterVariable (&vid_fullscreen);
+	Cvar_RegisterVariable (&vid_desktopfullscreen);
+	Cvar_RegisterVariable (&vid_refreshrate);
+	Cvar_RegisterVariable (&vid_fsaa);
+
+	/* Set after every registration above, so that wiring the mirrors cannot
+	 * fire a callback against a twin that is not registered yet --
+	 * Cvar_SetQuick drops writes to an unregistered cvar on the floor. */
+	Cvar_SetCallback (&vid_width, VID_MirrorSize_f);
+	Cvar_SetCallback (&vid_height, VID_MirrorSize_f);
+	Cvar_SetCallback (&vid_config_glx, VID_MirrorSize_f);
+	Cvar_SetCallback (&vid_config_gly, VID_MirrorSize_f);
+	Cvar_SetCallback (&vid_fullscreen, VID_MirrorFullscreen_f);
+	Cvar_SetCallback (&vid_desktopfullscreen, VID_MirrorFullscreen_f);
+	Cvar_SetCallback (&vid_config_fscr, VID_MirrorFullscreen_f);
+	Cvar_SetCallback (&vid_fsaa, VID_MirrorFSAA_f);
+	Cvar_SetCallback (&vid_config_fsaa, VID_MirrorFSAA_f);
+	Cvar_SetCallback (&vid_refreshrate, VID_Changed_f);
+	Cvar_SetCallback (&vid_mode, VID_ModeCvar_f);
 
 	Cmd_AddCommand ("vid_listmodes", VID_ListModes_f);
+	/* Ironwail's name for the same listing. */
+	Cmd_AddCommand ("vid_describemodes", VID_ListModes_f);
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
 	Cmd_AddCommand ("vid_describecurrentmode", VID_DescribeCurrentMode_f);
 	Cmd_AddCommand ("vid_restart", VID_Restart_f);
+	Cmd_AddCommand ("vid_unlock", VID_Unlock_f);
 	Cmd_AddCommand ("renderer_status", GL_RendererStatus_f);
 	Cmd_AddCommand ("gl_info", GL_Info_f);
 	Cmd_AddCommand ("renderer_safe", GL_RendererSafe_f);
@@ -2247,37 +2639,18 @@ void	VID_Init (const unsigned char *palette)
 	}
 
 	// user requested a mode either from the config or from the
-	// command line
-	// scan existing modes to see if this is already available
-	// if not, add this as the last "valid" video mode and set
-	// vid_mode to it only if it doesn't go beyond vid_maxwidth
-	i = 0;
-	while (i < *nummodes)
-	{
-		if (modelist[i].width == width && modelist[i].height == height)
-			break;
-		i++;
-	}
-	if (i < *nummodes)
+	// command line; VID_ModeForSize scans the list and, failing that,
+	// appends a user mode -- the same rule vid_restart now goes through
+	i = VID_ModeForSize (width, height);
+	if (i >= 0)
 	{
 		Cvar_SetValueQuick (&vid_mode, i);
-	}
-	else if ( (width <= vid_maxwidth && width >= MIN_WIDTH &&
-		   height <= vid_maxheight && height >= MIN_HEIGHT) ||
-		  COM_CheckParm("-force") )
-	{
-		modelist[*nummodes].width = width;
-		modelist[*nummodes].height = height;
-		modelist[*nummodes].halfscreen = 0;
-		modelist[*nummodes].fullscreen = 1;
-		modelist[*nummodes].bpp = 32;
-		q_snprintf (modelist[*nummodes].modedesc, MAX_DESC, "%d x %d (user mode)", width, height);
-		Cvar_SetValueQuick (&vid_mode, *nummodes);
-		(*nummodes)++;
 	}
 	else
 	{
 		Con_SafePrintf ("ignoring invalid -width and/or -height arguments\n");
+		width = modelist[vid_mode.integer].width;
+		height = modelist[vid_mode.integer].height;
 	}
 
 	if (!vid_conscale)
@@ -2360,6 +2733,9 @@ void	VID_Init (const unsigned char *palette)
 		Cvar_LockVar (read_vars[i]);
 
 	vid_initialized = true;
+	/* The config read above armed vid_changed; the mode it asked for is now
+	 * the mode that is running, so nothing is pending. */
+	VID_SyncCvars ();
 	scr_disabled_for_loading = temp;
 	vid.recalc_refdef = 1;
 

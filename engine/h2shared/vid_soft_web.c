@@ -569,6 +569,8 @@ void VID_HandlePause (qboolean paused)
 /* Fullscreen on the web is the browser's business: web/app.js drives the
  * Fullscreen API on the canvas element. */
 void VID_ToggleFullscreen (void) {}
+/* No mode cvars on this renderer, so nothing to hold back. */
+void VID_Lock (void) {}
 void D_ShowLoadingSize (void) {}
 void VID_InitMouseCursors (void) {}
 void VID_SetMouseCursor (mousecursor_t cursor) { (void)cursor; }

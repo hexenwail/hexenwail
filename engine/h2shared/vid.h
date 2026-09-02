@@ -125,6 +125,11 @@ void VID_HandlePause (qboolean paused);
 void VID_ToggleFullscreen (void);	// from Steven
 // toggles between windowed/fullscreen modes. for unix/sdl
 
+void VID_Lock (void);
+// hold every mode change until the "vid_unlock" command. Host_Game_f wraps the
+// incoming mod's config.cfg in this so its vid_width / vid_height / vid_fullscreen
+// cannot move the window the player is looking at. uhexen2-a5nn.26
+
 #if defined(GLQUAKE) || defined(WEBQUAKE)
 void VID_ChangeConsize (int dir);
 // changes effective console size. callback for the opengl features menu
