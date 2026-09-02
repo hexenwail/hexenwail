@@ -2345,6 +2345,16 @@ static void Host_Startdemos_f (void)
 	if (!sv.active && cls.demonum != -1 && !cls.demoplayback)
 	{
 		cls.demonum = 0;
+		if (!cl_startdemos.integer)
+		{
+			/* Straight to the menu.  Inserted rather than appended so it
+			 * runs ahead of whatever else the startup script queued behind
+			 * this command, which is where the demo would otherwise have
+			 * started from.  uhexen2-a5nn.34 */
+			cls.demonum = -1;
+			Cbuf_InsertText ("menu_main\n");
+			return;
+		}
 		CL_NextDemo ();
 	}
 	else

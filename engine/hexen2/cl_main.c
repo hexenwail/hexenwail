@@ -64,6 +64,22 @@ cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
  * not a porting one.  uhexen2-a5nn.25
  */
 cvar_t	freelook = {"freelook", "0", CVAR_ARCHIVE};
+/* Whether the startup demo loop runs at all: 0 goes straight to the main menu
+ * instead.  QuakeSpasm's customization, carried by Ironwail, and the name a
+ * config from either of them uses.
+ *
+ * Narrower here than it is upstream, and worth saying so.  Retail Hexen II
+ * ships the `startdemos` line in data1/hexen.rc COMMENTED OUT -- in the
+ * mission pack's copy too -- so this engine does not autoplay demos by default
+ * and never has (see cmd.c, which reproduces that file for the browser build
+ * and keeps the line out for the same reason).  What this gates is the case
+ * where the loop IS enabled: a player who uncommented it, or a mod shipping
+ * its own hexen.rc that starts one.  There, turning it off used to mean
+ * editing a .rc file.
+ *
+ * Costs nothing when the loop is off, and an imported config that says
+ * `cl_startdemos 0` stops being an "Unknown command".  uhexen2-a5nn.34 */
+cvar_t	cl_startdemos = {"cl_startdemos", "1", CVAR_ARCHIVE};
 cvar_t	lookspring = {"lookspring", "0", CVAR_ARCHIVE};
 cvar_t	lookstrafe = {"lookstrafe", "0", CVAR_ARCHIVE};
 cvar_t	sensitivity = {"sensitivity", "3", CVAR_ARCHIVE};
@@ -1408,6 +1424,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&freelook);
+	Cvar_RegisterVariable (&cl_startdemos);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);
