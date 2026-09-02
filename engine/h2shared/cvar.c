@@ -556,6 +556,126 @@ void Cvar_SetCallback (cvar_t *var, cvarcallback_t func)
 
 /*
 ============
+Second spellings.
+
+The structural fact behind most of the Ironwail parity queue is that this
+engine and the Quake-lineage engines it is compared against name the SAME
+setting differently, so a config or a mod written for one of them sets a name
+that exists nowhere here and nothing happens.  gl_vidsdl.c does the vid_*
+family by hand because vid_fullscreen + vid_desktopfullscreen over the
+tri-state vid_config_fscr is not a 1:1 mapping and no facility could express
+it.  The 1:1 ones are these.  uhexen2-a5nn.32
+============
+*/
+#define MAX_CVAR_ALIASES	32
+
+typedef struct {
+	cvar_t		*alias;
+	cvar_t		*target;
+	cvarcallback_t	target_callback;	/* the target's own, chained below ours */
+} cvaralias_t;
+
+static cvaralias_t	cvar_aliases[MAX_CVAR_ALIASES];
+static int		num_cvar_aliases;
+
+static cvaralias_t *Cvar_FindAlias (const cvar_t *var)
+{
+	int	i;
+
+	for (i = 0; i < num_cvar_aliases; i++)
+	{
+		if (cvar_aliases[i].alias == var || cvar_aliases[i].target == var)
+			return &cvar_aliases[i];
+	}
+
+	return NULL;
+}
+
+static void Cvar_AliasCallback (cvar_t *var)
+{
+	cvaralias_t	*a = Cvar_FindAlias (var);
+
+	if (!a)
+		return;
+
+	/* Not a recursion hazard: Cvar_SetQuick returns without touching the
+	 * callback when the value is already what it is being set to, so the
+	 * mirror bottoms out on the first hop back. */
+	if (var == a->alias)
+	{
+		Cvar_SetQuick (a->target, var->string);
+	}
+	else
+	{
+		Cvar_SetQuick (a->alias, var->string);
+		/* Chained rather than replaced.  Aliasing a cvar that already had
+		 * a callback must not silently stop it firing -- that failure is
+		 * invisible at the console, where both names would still read
+		 * back correctly while whatever the callback did stopped
+		 * happening. */
+		if (a->target_callback)
+			a->target_callback (var);
+	}
+}
+
+/*
+============
+Cvar_RegisterAlias
+
+Register `alias` as a second spelling of `target`: both names exist, both read
+back the same value, and setting either sets both.  `target` must already be
+registered; `alias` must not be.
+
+The alias is forced CVAR_NONE whatever the caller's initializer said, so
+config.cfg carries exactly one name for the setting.  Which one that is stays
+the target's business.
+============
+*/
+void Cvar_RegisterAlias (cvar_t *alias, cvar_t *target)
+{
+	cvaralias_t	*a;
+
+	if (!(target->flags & CVAR_REGISTERED))
+	{
+		Con_Printf ("%s: %s is not registered\n", __thisfunc__, target->name);
+		return;
+	}
+	if (Cvar_FindAlias (target) || Cvar_FindAlias (alias))
+	{
+		/* Refused rather than supported: a chain would make the ping-pong
+		 * above ambiguous, and two spellings is the problem to solve, not
+		 * a thing to have more of. */
+		Con_Printf ("%s: %s is already aliased\n", __thisfunc__, target->name);
+		return;
+	}
+	if (num_cvar_aliases == MAX_CVAR_ALIASES)
+	{
+		Con_Printf ("%s: too many cvar aliases\n", __thisfunc__);
+		return;
+	}
+
+	alias->flags &= ~CVAR_ARCHIVE;
+	/* Seeded from the target's DEFAULT, not its current value, so that
+	 * resetall and resetcfg send both names to the same place.  Cvar_Set
+	 * below then brings it to the target's current value. */
+	alias->string = target->default_string;
+	Cvar_RegisterVariable (alias);
+	if (!(alias->flags & CVAR_REGISTERED))
+		return;		/* name clash: Cvar_RegisterVariable already said so */
+
+	a = &cvar_aliases[num_cvar_aliases++];
+	a->alias = alias;
+	a->target = target;
+	a->target_callback = target->callback;
+
+	Cvar_SetCallback (alias, Cvar_AliasCallback);
+	Cvar_SetCallback (target, Cvar_AliasCallback);
+
+	Cvar_SetQuick (alias, target->string);
+}
+
+/*
+============
 Cvar_Command
 
 Handles variable inspection and changing from the console

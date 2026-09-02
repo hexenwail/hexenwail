@@ -141,6 +141,14 @@ static	cvar_t	scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
  * Default 1 preserves the previous scr_menufade=1 default. */
 cvar_t		scr_menubgstyle = {"scr_menubgstyle", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showclock = {"showclock", "0", CVAR_ARCHIVE};
+/* Second spellings, for a config or mod written against the Quake-lineage
+ * names.  Both are 1:1 with ours including the default; showclock's modes 2
+ * and 3 are wall-clock readouts upstream does not have, which the alias does
+ * not disturb because upstream only ever tests scr_clock for ==1 and for
+ * truthiness.  Registered through Cvar_RegisterAlias, so they are never
+ * archived and config.cfg keeps carrying showfps / showclock.  uhexen2-a5nn.32 */
+static	cvar_t	alias_scr_showfps = {"scr_showfps", "0", CVAR_NONE};
+static	cvar_t	alias_scr_clock = {"scr_clock", "0", CVAR_NONE};
 //static	cvar_t	gl_triplebuffer = {"gl_triplebuffer", "0", CVAR_ARCHIVE};
 
 #if !defined(H2W)
@@ -741,6 +749,8 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showspeed);
 	Cvar_RegisterVariable (&scr_menubgstyle);
 	Cvar_RegisterVariable (&scr_showclock);
+	Cvar_RegisterAlias (&alias_scr_showfps, &scr_showfps);
+	Cvar_RegisterAlias (&alias_scr_clock, &scr_showclock);
 	Cvar_RegisterVariable (&scr_centertime);
 	Cvar_RegisterVariable (&cl_screenshotname);
 //	Cvar_RegisterVariable (&gl_triplebuffer);

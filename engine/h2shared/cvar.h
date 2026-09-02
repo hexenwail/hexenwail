@@ -102,6 +102,12 @@ void	Cvar_RegisterVariable (cvar_t *variable);
 void Cvar_SetCallback (cvar_t *var, cvarcallback_t func);
 // set a callback function to the var
 
+void Cvar_RegisterAlias (cvar_t *alias, cvar_t *target);
+// register `alias` as a second spelling of the already-registered `target`:
+// both names exist, both read back the same value, setting either sets both.
+// The alias is never archived, so config.cfg keeps one name for the setting.
+// For the Quake-lineage names this engine spells differently. uhexen2-a5nn.32
+
 void	Cvar_Set (const char *var_name, const char *value);
 // equivelant to "<name> <variable>" typed at the console
 
