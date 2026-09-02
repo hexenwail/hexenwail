@@ -1953,14 +1953,25 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (void)
 {
+	extern cvar_t	scr_menubgalpha;
 	int		bx, by, ex, ey;
 	int		c;
+	float		dim = scr_menubgalpha.value;
+
+	/* Nothing to draw at all rather than forty transparent quads.  Also the
+	 * only place the cvar can express "no dim" without the caller having to
+	 * know about it, which matters because Draw_FadeScreen has callers other
+	 * than the menu (the y/n modal draws through it too). */
+	if (dim <= 0.0f)
+		return;
+	if (dim > 1.0f)
+		dim = 1.0f;
 
 	Draw_FlushCharBatch ();
 	R_SetBlend (true);
 
 	GL_ImmBegin();
-	GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.1);
+	GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.1 * dim);
 	GL_ImmVertex2f (0,0);
 	GL_ImmVertex2f (vid.width, 0);
 	GL_ImmVertex2f (vid.width, vid.height);
@@ -1983,7 +1994,7 @@ void Draw_FadeScreen (void)
 			ey = vid.height;
 
 		GL_ImmBegin();
-		GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.018);
+		GL_ImmColor4f (248.0/255.0, 220.0/255.0, 120.0/255.0, 0.018 * dim);
 		GL_ImmVertex2f (bx, by);
 		GL_ImmVertex2f (ex, by);
 		GL_ImmVertex2f (ex, ey);

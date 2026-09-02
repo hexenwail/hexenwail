@@ -124,6 +124,16 @@ static	cvar_t	scr_showfps = {"showfps", "0", CVAR_NONE};
  * scr_menubgstyle:   0 = no dim, 1 = simple dim, 2 = dim + translucent menu-area box. */
 cvar_t		scr_centerprintbg = {"scr_centerprintbg", "2", CVAR_ARCHIVE};
 cvar_t		scr_menubgstyle = {"scr_menubgstyle", "1", CVAR_ARCHIVE};
+/* Same name and default as the GL renderer's, and it has to exist here or
+ * menu.c does not link for the 8bpp/WEBSOFT target -- the three renderer
+ * pathways share menu.c and only this file or gl_screen.c is compiled.
+ *
+ * What it can express here is narrower, and deliberately so: the software fade
+ * is a palette translation through mainTransTable, not a blend, so there is no
+ * alpha to scale.  0 means no dim and anything above it means the classic
+ * Hexen II fade.  Interpolating the translation table to get intermediate
+ * levels would change a look that is deliberate.  uhexen2-a5nn.33 */
+cvar_t		scr_menubgalpha = {"scr_menubgalpha", "1", CVAR_ARCHIVE};
 #endif
 
 #if !defined(H2W)
@@ -533,6 +543,7 @@ void SCR_Init (void)
 #if defined(WEBSOFT)
 	Cvar_RegisterVariable (&scr_centerprintbg);
 	Cvar_RegisterVariable (&scr_menubgstyle);
+	Cvar_RegisterVariable (&scr_menubgalpha);
 #endif
 	Cvar_RegisterVariable (&scr_centertime);
 

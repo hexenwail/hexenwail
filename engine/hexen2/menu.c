@@ -2330,6 +2330,7 @@ enum
 	DISP_MAXFPS,
 	DISP_SHOWFPS,
 	DISP_MENUFADE,
+	DISP_MENUFADEALPHA,
 	DISP_SEP2,		/* separator before apply */
 	DISP_APPLY,
 	DISP_ITEMS
@@ -2358,6 +2359,7 @@ static const char *disp_labels[DISP_ITEMS] = {
 	"FPS Limit     :",	/* DISP_MAXFPS */
 	"Show FPS      :",	/* DISP_SHOWFPS */
 	"Menu Backdrop :",	/* DISP_MENUFADE */
+	"Backdrop Dim  :",	/* DISP_MENUFADEALPHA */
 	NULL,			/* DISP_SEP2 */
 	"APPLY CHANGES",	/* DISP_APPLY */
 };
@@ -2655,6 +2657,14 @@ static void M_Display_AdjustSliders (int dir)
 		Cvar_SetValue ("scr_menubgstyle", val);
 		break;
 	}
+	case DISP_MENUFADEALPHA:
+	{
+		float val = scr_menubgalpha.value + dir * 0.1f;
+		if (val < 0.0f) val = 0.0f;
+		if (val > 1.0f) val = 1.0f;
+		Cvar_SetValue ("scr_menubgalpha", val);
+		break;
+	}
 #endif
 	}
 }
@@ -2782,6 +2792,12 @@ static void M_Display_Draw (void)
 				scr_menubgstyle.integer == 2 ? "Menu Box" :
 				scr_menubgstyle.integer == 1 ? "Simple" : "Off");
 		}
+		if (!M_Display_IsSkip(DISP_MENUFADEALPHA))
+		{
+			M_Print (76, 92 + 8*DISP_MENUFADEALPHA, disp_labels[DISP_MENUFADEALPHA]);
+			M_DrawSliderValue (220, 92 + 8*DISP_MENUFADEALPHA,
+				scr_menubgalpha.value, "%.1f", scr_menubgalpha.value);
+		}
 
 		if (!M_Display_IsSkip(DISP_APPLY) && VID_MenuNeedApply ())
 			M_Print (76, 92 + 8*DISP_APPLY, disp_labels[DISP_APPLY]);
@@ -2811,6 +2827,10 @@ static qboolean M_Display_IsSkip (int cursor)
 	if (cursor == DISP_APPLY && !VID_MenuNeedApply ())
 		return true;
 #endif
+	/* Nothing to dim when the backdrop is off, and a slider that visibly
+	 * does nothing is worse than an absent one. */
+	if (cursor == DISP_MENUFADEALPHA && scr_menubgstyle.integer < 1)
+		return true;
 	if (M_Filter_Active() && !M_Filter_Matches(disp_labels[cursor]))
 		return true;
 	return false;
@@ -8739,9 +8759,13 @@ void M_Draw (void)
 				const int bg_x0 = 32, bg_y0 = 80;
 				const int bg_x1 = 288, bg_y1 = 168;
 				GL_SetCanvas (CANVAS_MENU);
+				/* Scaled by the same cvar as the fade behind it,
+				 * or the box would stay solid while the world
+				 * behind it brightened. */
 				Draw_FillAlpha (bg_x0, bg_y0,
 					bg_x1 - bg_x0, bg_y1 - bg_y0,
-					0.0f, 0.0f, 0.0f, 0.5f);
+					0.0f, 0.0f, 0.0f,
+					0.5f * CLAMP(0.0f, scr_menubgalpha.value, 1.0f));
 			}
 		}
 		if (scr_viewsize.integer < 110)

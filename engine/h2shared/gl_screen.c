@@ -140,6 +140,16 @@ static	cvar_t	scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
 /* scr_menubgstyle: 0 = no dim, 1 = simple dim (Draw_FadeScreen), 2 = dim + translucent menu-area box (Ironwail parity).
  * Default 1 preserves the previous scr_menufade=1 default. */
 cvar_t		scr_menubgstyle = {"scr_menubgstyle", "1", CVAR_ARCHIVE};
+/* How strongly the engine dims the world behind an overlay, as a multiplier on
+ * whatever Draw_FadeScreen and the menu-box quad would otherwise use.  Ironwail
+ * spells it the same and defaults it to 0.7; this defaults to 1 so a existing
+ * config sees exactly the dim it has always had, and 0..1 dials it down without
+ * turning the backdrop off entirely (scr_menubgstyle 0 does that).
+ *
+ * Applied inside Draw_FadeScreen rather than at the menu call site, which is
+ * upstream's arrangement too: every overlay that dims the world -- the menus
+ * and the y/n modal alike -- should agree about how much.  uhexen2-a5nn.33 */
+cvar_t		scr_menubgalpha = {"scr_menubgalpha", "1", CVAR_ARCHIVE};
 static	cvar_t	scr_showclock = {"showclock", "0", CVAR_ARCHIVE};
 /* Second spellings, for a config or mod written against the Quake-lineage
  * names.  Both are 1:1 with ours including the default; showclock's modes 2
@@ -748,6 +758,7 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showfps);
 	Cvar_RegisterVariable (&scr_showspeed);
 	Cvar_RegisterVariable (&scr_menubgstyle);
+	Cvar_RegisterVariable (&scr_menubgalpha);
 	Cvar_RegisterVariable (&scr_showclock);
 	Cvar_RegisterAlias (&alias_scr_showfps, &scr_showfps);
 	Cvar_RegisterAlias (&alias_scr_clock, &scr_showclock);

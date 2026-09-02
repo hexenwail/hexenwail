@@ -1843,9 +1843,16 @@ Draw_FadeScreen
 */
 void Draw_FadeScreen (void)
 {
+	extern cvar_t	scr_menubgalpha;
 	int			x, y;
 	byte		*pbuf;
 	int temp[2048], *pos;
+
+	/* On/off only on this renderer.  The fade below is a palette translation
+	 * through mainTransTable rather than a blend, so there is no alpha to
+	 * scale -- see the cvar's comment in screen.c. */
+	if (scr_menubgalpha.value <= 0.0f)
+		return;
 
 	VID_UnlockBuffer ();
 	S_ExtraUpdate ();
