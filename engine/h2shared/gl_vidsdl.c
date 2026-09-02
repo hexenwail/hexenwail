@@ -2201,6 +2201,83 @@ static void VID_Restart_f (void)
 	VID_SyncCvars ();
 }
 
+/*
+================
+VID_Test_f
+
+vid_restart with a way back.  Ironwail/QuakeSpasm's safety net for the one
+failure a player cannot talk their way out of: a mode that comes up black, or
+outside what the monitor will display, on a machine where the console they
+would fix it from is on that same screen.
+
+The four values are captured BEFORE the restart, not read back after it.
+VID_SetMode rewrites vid_config_fscr itself when SDL declines the fullscreen it
+was asked for, and it writes the achieved drawable size over vid_config_glx and
+vid_config_gly -- so after the restart there is nothing left that says what the
+player had.  vid_mode goes with them because the size cvars alone would not
+distinguish two entries of the same size.
+
+SCR_ModalMessage's timeout is what makes this worth having over vid_restart:
+five seconds of silence counts as no.
+================
+*/
+static void VID_Test_f (void)
+{
+	int	old_mode, old_width, old_height, old_fscr;
+
+	if (vid_locked)
+	{
+		Con_Printf ("Video settings are locked; \"vid_unlock\" to apply them\n");
+		return;
+	}
+
+	/* Before the restart, not after it.  vid_restart happily restarts into
+	 * the mode already running, so without this `vid_test` on its own would
+	 * tear the GL context down and build it back up to ask the player
+	 * whether they like a change nobody made. */
+	if (!vid_changed)
+	{
+		Con_Printf ("no pending video mode change to test\n");
+		return;
+	}
+
+	/* What is RUNNING, not what was requested.  vid_width and vid_height
+	 * already hold the request by the time this is called -- that is the
+	 * whole point of the command -- so reading them here would "revert" to
+	 * the very mode being tested.  The mode list is the only honest source,
+	 * and vid_config_fscr has to come from here too because VID_SetMode
+	 * rewrites it when SDL declines the fullscreen it was asked for. */
+	old_mode = vid_modenum;
+	old_width = modelist[vid_modenum].width;
+	old_height = modelist[vid_modenum].height;
+	old_fscr = vid_config_fscr.integer;
+
+	VID_Restart_f ();
+
+	/* Nothing moved after all -- an invalid size, say.  Asking the player to
+	 * confirm a change that did not happen is a prompt they cannot answer
+	 * wrongly and should not see. */
+	if (vid_config_fscr.integer == old_fscr &&
+	    modelist[vid_modenum].width == old_width &&
+	    modelist[vid_modenum].height == old_height)
+		return;
+
+	if (SCR_ModalMessage ("Keep this video mode?\n(y/n -- reverting in 5 seconds)\n", 5.0f))
+		return;
+
+	Con_Printf ("Reverting to %d x %d\n", old_width, old_height);
+	Cvar_SetValueQuick (&vid_config_fscr, old_fscr);
+	/* vid_mode first, then the size.  Restoring the index alone is not
+	 * enough: VID_ModeForSize reuses ONE slot for sizes the display never
+	 * advertised, so the index can be unchanged while the entry under it now
+	 * describes the mode being reverted away from.  Setting the size after
+	 * lets VID_Restart_f notice the disagreement and resolve it properly. */
+	Cvar_SetValueQuick (&vid_mode, old_mode);
+	Cvar_SetValueQuick (&vid_width, old_width);
+	Cvar_SetValueQuick (&vid_height, old_height);
+	VID_Restart_f ();
+}
+
 static int sort_modes (const void *arg1, const void *arg2)
 {
 	const vmode_t *a1, *a2;
@@ -2531,6 +2608,7 @@ void	VID_Init (const unsigned char *palette)
 	Cmd_AddCommand ("vid_nummodes", VID_NumModes_f);
 	Cmd_AddCommand ("vid_describecurrentmode", VID_DescribeCurrentMode_f);
 	Cmd_AddCommand ("vid_restart", VID_Restart_f);
+	Cmd_AddCommand ("vid_test", VID_Test_f);
 	Cmd_AddCommand ("vid_unlock", VID_Unlock_f);
 	Cmd_AddCommand ("renderer_status", GL_RendererStatus_f);
 	Cmd_AddCommand ("gl_info", GL_Info_f);

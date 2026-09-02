@@ -37,7 +37,9 @@ void SCR_EndLoadingPlaque (void);
 void SCR_DrawLoading (void);	// for the Loading plaque
 
 void SCR_SetPlaqueMessage (const char *msg);	// set pointer to current plaque message
-int SCR_ModalMessage (const char *text);
+int SCR_ModalMessage (const char *text, float timeout);
+// y/n prompt.  timeout is in seconds; 0 waits forever, which is what every
+// caller but vid_test wants.  A timed-out prompt answers no.  uhexen2-x5e6
 
 #ifndef H2W
 extern	int			total_loading_size;	// global vars for

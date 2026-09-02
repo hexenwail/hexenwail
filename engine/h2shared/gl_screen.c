@@ -1848,8 +1848,10 @@ Displays a text string in the center of the screen
 and waits for a Y or N keypress.
 ==================
 */
-int SCR_ModalMessage (const char *text)
+int SCR_ModalMessage (const char *text, float timeout)
 {
+	double	deadline;
+
 #if !defined(H2W)
 	if (cls.state == ca_dedicated)
 		return true;
@@ -1864,10 +1866,22 @@ int SCR_ModalMessage (const char *text)
 
 	S_ClearBuffer ();		// so dma doesn't loop current sound
 
+	/* A timeout answers no.  Nothing needed one until vid_test, and vid_test
+	 * needs it for the case the whole command exists to cover: a mode that
+	 * comes up black, or outside what the monitor will display, where the
+	 * player cannot read the prompt they are being asked to answer.  Waiting
+	 * forever there is waiting forever.  uhexen2-x5e6 */
+	deadline = (timeout > 0.0f) ? Sys_DoubleTime () + timeout : 0.0;
+
 	do
 	{
 		key_count = -1;		// wait for a key down and up
 		Sys_SendKeyEvents ();
+		/* Sys_SendKeyEvents alone spins a core flat.  16 ms is a frame at
+		 * 60 Hz and is imperceptible on a prompt nobody answers instantly. */
+		Sys_Sleep (16);
+		if (deadline > 0.0 && Sys_DoubleTime () > deadline)
+			return false;
 	} while (key_lastpress != 'y' && key_lastpress != 'n' && key_lastpress != K_ESCAPE);
 
 	scr_fullupdate = 0;

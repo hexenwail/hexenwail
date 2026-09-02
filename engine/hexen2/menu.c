@@ -1225,7 +1225,7 @@ static void M_SinglePlayer_Key (int key)
 				m_enter_portals = 1;
 		case 3:
 			if (sv.active)
-				if (!SCR_ModalMessage("Are you sure you want to\nstart a new game?\n"))
+				if (!SCR_ModalMessage("Are you sure you want to\nstart a new game?\n", 0.0f))
 					break;
 			Key_SetDest (key_game);
 			if (sv.active)
@@ -1364,7 +1364,7 @@ static void M_Load_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n"))
+		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
 			return;
 		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "s%i", load_cursor);
 		Host_DeleteSave (savefile);
@@ -1418,7 +1418,7 @@ static void M_Save_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n"))
+		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
 			return;
 		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "s%i", load_cursor);
 		Host_DeleteSave (savefile);
@@ -1527,7 +1527,7 @@ static void M_MLoad_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n"))
+		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
 			return;
 		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "ms%i", load_cursor);
 		Host_DeleteSave (savefile);
@@ -1585,7 +1585,7 @@ static void M_MSave_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n"))
+		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
 			return;
 		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "ms%i", load_cursor);
 		Host_DeleteSave (savefile);
