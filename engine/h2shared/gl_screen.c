@@ -1131,11 +1131,11 @@ static void SCR_DrawShowFields (void)
 SCR_DrawDemoBar -- Ironwail
 
 Playback position readout during demo playback: a seek rail with a cursor,
-the demo name, the play/pause state, and the elapsed map time above the
-cursor.  Ported from Ironwail's SCR_DrawDemoControls (Quake/gl_screen.c);
-the half of that function that drives demo speed and scrubbing has nothing
-to drive here yet -- uHexen2 has no demo speed control -- so this is the
-readout without the controls.
+the demo name, the playback state, the base speed, and the elapsed map time
+above the cursor.  Ported from Ironwail's SCR_DrawDemoControls
+(Quake/gl_screen.c).  The speed half was added by uhexen2-ofl9 once there was
+a speed to read; what is still missing is upstream's rewind, so the state
+indicator never shows the mirrored arrow (uhexen2-i9y6).
 
 The position is approximated from the demo file offset rather than from a
 time index: a .dem carries no duration in its header, and walking it to
@@ -1158,6 +1158,8 @@ static void SCR_DrawDemoBar (void)
 	static double	lastactivity = 0.0;
 	static qboolean	wasplaying = false;
 	static qboolean	waspaused = false;
+	static float	prevspeed = -1.0f;
+	static float	prevbasespeed = -1.0f;
 	int		i, x, y, cursor, mins, secs;
 	float		frac, alpha, s;
 	const char	*str, *colon;
@@ -1177,17 +1179,23 @@ static void SCR_DrawDemoBar (void)
 	if (dt < 0.0 || dt > 1.0)
 		dt = 0.0;	/* loading hitch or clock reset: don't eat the timeout */
 
-	/* Re-arm the timeout on anything the viewer can cause.  Ironwail keys off
-	 * demo speed changes, which we have no control for; what we have is the
-	 * demo starting, the pause state flipping, and input that reaches the demo
-	 * rather than the menu (keys.c stamps cls.demoactivity for key_dest ==
-	 * key_game only -- counting menu keys left the bar blinking underneath the
-	 * menu that a keypress during playback opens, uhexen2-tkn5). */
+	/* Re-arm the timeout on anything the viewer can cause.  Upstream's two
+	 * triggers -- the speed changing, and any speed above the base one, which
+	 * keeps the bar up for as long as fast-forward is held -- arrived with
+	 * uhexen2-ofl9.  Ours additionally covers the demo starting, the pause
+	 * state flipping, and input that reaches the demo rather than the menu
+	 * (keys.c stamps cls.demoactivity for key_dest == key_game only --
+	 * counting menu keys left the bar blinking underneath the menu that a
+	 * keypress during playback opens, uhexen2-tkn5). */
 	if (!wasplaying || cl.paused != waspaused ||
+	    cls.demospeed != prevspeed || cls.basedemospeed != prevbasespeed ||
+	    cls.demospeed > cls.basedemospeed ||
 	    cls.demoactivity != lastactivity || scr_demobar_timeout.value == 0.0f)
 	{
 		wasplaying = true;
 		waspaused = cl.paused;
+		prevspeed = cls.demospeed;
+		prevbasespeed = cls.basedemospeed;
 		lastactivity = cls.demoactivity;
 		showtime = (scr_demobar_timeout.value > 0.0f) ? scr_demobar_timeout.value : 1.0f;
 	}
@@ -1238,8 +1246,28 @@ static void SCR_DrawDemoBar (void)
 
 	Draw_SetCharacterAlpha (alpha);
 
-	/* Playback state on the left, demo name centered. */
-	Draw_String (x, y, cl.paused ? "II" : ">");
+	/* Playback state on the left, base speed on the right, demo name centered.
+	 * The state comes from the speed this frame is actually running at, so
+	 * holding the fast-forward key shows ">>" without disturbing the base
+	 * speed the right-hand readout reports.  uhexen2-ofl9. */
+	if (cls.demospeed == 0.0f)
+		str = "II";
+	else if (cls.demospeed > 1.0f)
+		str = ">>";
+	else
+		str = ">";
+	Draw_String (x, y, str);
+
+	/* "2x", or "1/4x" below unity -- upstream's spelling, which reads better
+	 * than "0.25x" for the ladder the down arrow walks. */
+	if (cls.basedemospeed >= 1.0f)
+		str = va ("%gx", cls.basedemospeed);
+	else if (cls.basedemospeed > 0.0f)
+		str = va ("1/%gx", 1.0f / cls.basedemospeed);
+	else
+		str = "";
+	Draw_String (x + (DEMOBAR_CHARS - (int)strlen(str)) * 8, y, str);
+
 	if (cls.demofilename[0])
 		Draw_String ((UI_CANVAS_WIDTH - (int)strlen(cls.demofilename) * 8) / 2,
 			     y, cls.demofilename);

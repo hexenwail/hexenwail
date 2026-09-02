@@ -1117,6 +1117,23 @@ Key_WriteBindings
 Key_IsGamepadAltModifier / Key_GetGamepadAltModifierState
 ============
 */
+/*
+===================
+Key_IsDown
+
+Live state of one key, for callers that need to know a key is HELD rather than
+that it was pressed.  keydown[] stays static here; demo speed control is the
+one consumer so far and it queries per frame precisely so it never has to track
+transitions itself (cl_demo.c, CL_UpdateDemoSpeed).  uhexen2-ofl9.
+===================
+*/
+qboolean Key_IsDown (int keynum)
+{
+	if ((unsigned int) keynum >= MAX_KEYS)
+		return false;
+	return keydown[keynum];
+}
+
 qboolean Key_IsGamepadAltModifier (int keynum)
 {
 	return keybindings[keynum] && !strcmp(keybindings[keynum], "+altmodifier");
@@ -1398,6 +1415,65 @@ void Key_Event (int key, qboolean down)
 			key_doubletap_active[key] = false;
 		}
 		return;
+	}
+
+// Demo playback controls (uhexen2-ofl9), Ironwail's block in the same slot --
+// ABOVE the menu toggle below, which would otherwise swallow all of them: the
+// arrows and space are consolekeys, so during playback they open the main menu.
+	if (cls.demoplayback && key_dest == key_game)
+	{
+		switch (key)
+		{
+		case K_SPACE:
+			/* Fresh press only, never an autorepeat -- a held down-arrow
+			 * would otherwise walk the speed ladder all the way to
+			 * paused.  The early return above already drops autorepeats
+			 * for key_dest == key_game, but not while con_forcedup, so
+			 * the test is here rather than assumed. */
+			if (down && key_repeats[key] <= 1)
+				cls.demopaused = !cls.demopaused;
+			return;
+
+		case K_UPARROW:
+			/* Double the speed, or resume from pause without also
+			 * doubling -- so up after a pause plays at the speed you
+			 * paused at, which is what the down-arrow ladder below
+			 * expects to be able to walk back up. */
+			if (down && key_repeats[key] <= 1)
+			{
+				if (!cls.demopaused)
+					cls.basedemospeed = CLAMP (0.25f, cls.basedemospeed * 2.0f, 8.0f);
+				cls.demopaused = false;
+			}
+			return;
+
+		case K_DOWNARROW:
+			/* Halve, and pause when the ladder bottoms out, so repeated
+			 * presses walk 1x -> 1/2 -> 1/4 -> stopped. */
+			if (down && key_repeats[key] <= 1)
+			{
+				cls.basedemospeed *= 0.5f;
+				if (cls.basedemospeed < 0.25f)
+				{
+					cls.basedemospeed = 0.25f;
+					cls.demopaused = true;
+				}
+			}
+			return;
+
+		case K_LEFTARROW:
+		case K_RIGHTARROW:
+		case K_SHIFT:
+		case K_CTRL:
+			/* Held modifiers, read per frame by CL_UpdateDemoSpeed
+			 * rather than acted on here.  Swallowed so they do not open
+			 * the menu, and so that phase B's rewind (uhexen2-i9y6) is
+			 * a change to that function alone and not to this one. */
+			return;
+
+		default:
+			break;
+		}
 	}
 
 // during demo playback, most keys bring up the main menu

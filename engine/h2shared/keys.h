@@ -198,6 +198,7 @@ extern	char	*keybindings[MAX_KEYS];
 extern	char	*doublebindings[MAX_KEYS];
 
 extern	qboolean	joy_altmodifier_pressed;
+qboolean Key_IsDown (int keynum);	/* live held-state of one key (uhexen2-ofl9) */
 qboolean Key_IsGamepadAltModifier (int keynum);
 qboolean Key_GetGamepadAltModifierState (void);
 extern	int		key_count;			/* incremented every key event */

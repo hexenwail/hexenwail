@@ -73,6 +73,11 @@ void CL_StopPlayback (void)
 	memset (&cls.demofh, 0, sizeof(cls.demofh));
 	cls.demoplayback = false;
 	cls.state = ca_disconnected;
+	/* Leave basedemospeed alone -- see CL_PlayDemo_f.  These two are the
+	 * per-playback state, and a stale 0 demospeed would freeze the next
+	 * demo's signon reads.  uhexen2-ofl9. */
+	cls.demopaused = false;
+	cls.demospeed = 1.0f;
 
 	// Execute end config if one exists for this demo
 	if (cls.demofilename[0])
@@ -118,6 +123,89 @@ static void CL_WriteDemoMessage (void)
 
 /*
 ====================
+CL_UpdateDemoSpeed
+
+Recomputes cls.demospeed for this frame from live key state.  Ported from
+Ironwail's function of the same name (Quake/cl_demo.c).  uhexen2-ofl9.
+
+QUERIED PER FRAME RATHER THAN LATCHED ON KEY TRANSITIONS, and that is the point
+of the design: the fast-forward keys are held, not pressed, so latching would
+have to track every way a key can stop being held -- including pressing escape
+while still holding the right arrow, which delivers no key-up to the demo at
+all.  Reading keydown[] each frame has no state to get out of step.
+
+CLAMPED AT ZERO, where upstream allows negative.  A negative speed is rewind,
+and rewinding needs the recorded-frame ring phase B adds (uhexen2-i9y6); until
+then the left arrow holds playback still, which is the same thing Ironwail's
+demo_rewind.backstop does when it has no frames left to go back to.
+====================
+*/
+static void CL_UpdateDemoSpeed (void)
+{
+	int	adjust;
+
+	/* Not while the menu or console owns input: the arrows are navigation
+	 * there, and a demo left fast-forwarding under an open menu is exactly
+	 * the stuck state the per-frame query exists to prevent. */
+	if (Key_GetDest () != key_game)
+	{
+		cls.demospeed = cls.demopaused ? 0.0f : cls.basedemospeed;
+		return;
+	}
+
+	adjust = Key_IsDown (K_RIGHTARROW) - Key_IsDown (K_LEFTARROW);
+
+	if (adjust > 0)
+	{
+		/* Upstream's 5x, scaled by the base speed so fast-forward stays
+		 * relative to the speed the viewer picked.  Overrides pause, so
+		 * the right arrow also serves as "nudge forward while paused". */
+		cls.demospeed = 5.0f * (cls.basedemospeed ? cls.basedemospeed : 1.0f);
+	}
+	else if (adjust < 0)
+	{
+		cls.demospeed = 0.0f;	/* rewind is uhexen2-i9y6; hold instead */
+	}
+	else
+	{
+		cls.demospeed = cls.demopaused ? 0.0f : cls.basedemospeed;
+	}
+
+	/* Either modifier quarters whatever the above chose, which turns
+	 * fast-forward into a slow crawl for frame-hunting and ordinary playback
+	 * into slow motion. */
+	if (Key_IsDown (K_SHIFT) || Key_IsDown (K_CTRL))
+		cls.demospeed *= 0.25f;
+}
+
+/*
+====================
+CL_AdvanceTime
+
+Moves cl.time on for this frame.  Split out of CL_ReadFromServer so demo
+playback can run the clock at cls.demospeed instead of realtime, which is the
+whole mechanism behind pause, slow motion and fast-forward: nothing else in the
+client knows the demo is being scrubbed, it just sees cl.time move at a
+different rate and CL_GetDemoMessage feed it messages to match.  uhexen2-ofl9.
+====================
+*/
+void CL_AdvanceTime (void)
+{
+	cl.oldtime = cl.time;
+
+	if (cls.demoplayback)
+	{
+		CL_UpdateDemoSpeed ();
+		cl.time += cls.demospeed * host_frametime;
+	}
+	else
+	{
+		cl.time += host_frametime;
+	}
+}
+
+/*
+====================
 CL_GetDemoMessage
 ====================
 */
@@ -140,6 +228,13 @@ static int CL_GetDemoMessage (void)
 			if (host_framecount == cls.td_startframe + 1)
 				cls.td_starttime = realtime;
 		}
+		/* Frozen: paused, or the left arrow held with no rewind to give
+		 * it (uhexen2-ofl9).  Tested before the cl.time comparison rather
+		 * than left to it: at the instant of pausing cl.time can still be
+		 * ahead of cl.mtime[0], and letting that read one more message
+		 * would advance the world a frame AFTER the viewer paused it. */
+		else if (cls.demospeed == 0.0f)
+			return 0;
 		else if (/* cl.time > 0 && */ cl.time <= cl.mtime[0])
 			return 0;	// don't need another message yet
 	}
@@ -471,6 +566,15 @@ void CL_PlayDemo_f (void)
 
 	cls.demoplayback = true;
 	cls.state = ca_connected;
+	/* uhexen2-ofl9.  demospeed starts live so the signon messages are read
+	 * at full rate whatever the previous demo ended at, but basedemospeed is
+	 * only seeded when it has never been set: Ironwail keeps the viewer's
+	 * chosen speed across demos in a loop, so a demo reel watched at 2x stays
+	 * at 2x when it rolls over. */
+	cls.demopaused = false;
+	cls.demospeed = 1.0f;
+	if (!cls.basedemospeed)
+		cls.basedemospeed = 1.0f;
 
 	Con_DPrintf("CL_PlayDemo_f: Demo playback started, state=%d\n", cls.state);
 

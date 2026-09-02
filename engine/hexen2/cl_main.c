@@ -1219,8 +1219,9 @@ int CL_ReadFromServer (void)
 {
 	int	ret;
 
-	cl.oldtime = cl.time;
-	cl.time += host_frametime;
+	/* Demo playback runs this clock at cls.demospeed, which is what pause,
+	 * slow motion and fast-forward actually are.  uhexen2-ofl9. */
+	CL_AdvanceTime ();
 
 	do
 	{

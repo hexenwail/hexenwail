@@ -154,6 +154,26 @@ typedef struct
 	 * from.  Lives here rather than in the renderer so keys.c can set it
 	 * without the software build needing a demo bar of its own. */
 	double		demoactivity;
+	/* Playback speed (uhexen2-ofl9), Ironwail's cls.demospeed /
+	 * .basedemospeed / .demopaused.
+	 *
+	 * basedemospeed is what the viewer chose with the up/down arrows: 0.25
+	 * to 8, halving and doubling.  demospeed is what THIS frame actually
+	 * runs at -- base while nothing is held, 5x base while fast-forwarding,
+	 * a quarter of either with shift or ctrl down, and 0 while paused.  It
+	 * is recomputed every frame from live key state rather than latched on
+	 * key transitions, which is why holding right and then opening the menu
+	 * cannot leave playback stuck at 5x (Ironwail's note on the same code).
+	 *
+	 * NEVER NEGATIVE HERE, though upstream's is: a negative speed means
+	 * rewind, and rewinding a .dem means being able to get back to a frame
+	 * you have already consumed.  That needs the recorded frame ring phase B
+	 * adds; until then the left arrow clamps to 0, which freezes playback --
+	 * exactly what Ironwail's demo_rewind.backstop does when it runs out of
+	 * recorded frames, just permanently.  uhexen2-i9y6. */
+	float		demospeed;
+	float		basedemospeed;
+	qboolean	demopaused;
 //	FILE		*introdemofile;
 	int		td_lastframe;		// to meter out one message a frame
 	int		td_startframe;		// host_framecount at start
@@ -428,6 +448,7 @@ void CL_SendMove (const usercmd_t *cmd);
 // cl_demo.c
 //
 void CL_StopPlayback (void);
+void CL_AdvanceTime (void);	/* moves cl.time on, at cls.demospeed during playback (uhexen2-ofl9) */
 int CL_GetMessage (void);
 
 void CL_Stop_f (void);
