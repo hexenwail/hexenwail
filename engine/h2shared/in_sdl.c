@@ -976,18 +976,21 @@ static void IN_MouseMove (usercmd_t *cmd, int mx, int my)
 	mouse_x *= sensitivity.value;
 	mouse_y *= sensitivity.value;
 
-	if ( (in_strafe.state & 1) || (lookstrafe.integer && (in_mlook.state & 1) ))
+	/* CL_MouseLookActive, not the button state: freelook means the same thing
+	 * to all three of these tests, and reading the raw state at any one of
+	 * them is how the three drift apart.  uhexen2-a5nn.25 */
+	if ( (in_strafe.state & 1) || (lookstrafe.integer && CL_MouseLookActive()) )
 		cmd->sidemove += m_side.value * mouse_x;
 	else
 		cl.viewangles[YAW] -= m_yaw.value * mouse_x;
 
-	if (in_mlook.state & 1)
+	if (CL_MouseLookActive())
 	{
 		if (mx || my)
 			V_StopPitchDrift ();
 	}
 
-	if ( (in_mlook.state & 1) && !(in_strafe.state & 1))
+	if ( CL_MouseLookActive() && !(in_strafe.state & 1))
 	{
 		cl.viewangles[PITCH] += m_pitch.value * mouse_y;
 		if (cl.viewangles[PITCH] > 80)

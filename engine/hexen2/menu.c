@@ -4276,10 +4276,22 @@ static void M_Game_AdjustSliders (int dir)
 		Cvar_SetValue ("m_pitch", -m_pitch.value);
 		break;
 	case GAME_MLOOK:
-		if (in_mlook.state & 1)
-			Cbuf_AddText("-mlook");
+		/* Drives the cvar, as upstream's row does.  Toggling the BUTTON
+		 * could never untick this box for a player whose mouselook came
+		 * from a config rather than from a held key -- there is no key to
+		 * release.  The bare -mlook still goes out when the button really
+		 * is latched, both to clear it and because that form now clears
+		 * the cvar too.  uhexen2-a5nn.25 */
+		if (CL_MouseLookActive())
+		{
+			Cvar_SetValue ("freelook", 0);
+			if (in_mlook.state & 1)
+				Cbuf_AddText ("-mlook\n");
+		}
 		else
-			Cbuf_AddText("+mlook");
+		{
+			Cvar_SetValue ("freelook", 1);
+		}
 		break;
 	case GAME_USEMOUSE:
 		Cvar_Set ("_enable_mouse", _enable_mouse.integer ? "0" : "1");
@@ -4440,7 +4452,7 @@ static void M_Game_Draw (void)
 	if (!M_Game_IsSkip(GAME_MLOOK))
 	{
 		M_Print (76, 92 + 8*GAME_MLOOK, game_labels[GAME_MLOOK]);
-		M_DrawCheckbox (220, 92 + 8*GAME_MLOOK, in_mlook.state & 1);
+		M_DrawCheckbox (220, 92 + 8*GAME_MLOOK, CL_MouseLookActive());
 	}
 
 	if (!M_Game_IsSkip(GAME_USEMOUSE))

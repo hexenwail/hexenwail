@@ -51,6 +51,19 @@ cvar_t	cl_showunbound = {"cl_showunbound", "0", CVAR_ARCHIVE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
+/* Always-on mouselook, the name every Quake-lineage engine uses.  A config or
+ * mod written for one of them says `freelook 1` and, until now, got "Unknown
+ * command" and no mouselook setting at all.
+ *
+ * DEFAULT 0, not upstream's 1, and deliberately.  Quake's shipped behaviour is
+ * always-on mouselook; Hexen II's is hold-MOUSE3, and this engine has shipped
+ * that for its whole life.  Defaulting to 1 would silently change how the game
+ * controls for every existing player, while defaulting to 0 closes the compat
+ * gap just as completely -- a config that asks for freelook 1 now gets it.
+ * Whether to follow upstream and flip the default is a field-tester question,
+ * not a porting one.  uhexen2-a5nn.25
+ */
+cvar_t	freelook = {"freelook", "0", CVAR_ARCHIVE};
 cvar_t	lookspring = {"lookspring", "0", CVAR_ARCHIVE};
 cvar_t	lookstrafe = {"lookstrafe", "0", CVAR_ARCHIVE};
 cvar_t	sensitivity = {"sensitivity", "3", CVAR_ARCHIVE};
@@ -1394,6 +1407,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
 	Cvar_RegisterVariable (&r_lerpmove);
+	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);

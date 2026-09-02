@@ -432,6 +432,11 @@ typedef struct
 } kbutton_t;
 
 extern	kbutton_t	in_mlook, in_klook;
+extern	cvar_t		freelook;
+qboolean CL_MouseLookActive (void);
+// "is the mouse looking right now" -- the +mlook button held, or freelook set.
+// One predicate so the input, lookspring and menu paths cannot drift apart.
+// uhexen2-a5nn.25
 extern	kbutton_t	in_strafe;
 extern	kbutton_t	in_speed;
 

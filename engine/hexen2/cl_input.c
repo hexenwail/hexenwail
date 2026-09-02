@@ -128,15 +128,43 @@ static void IN_KLookUp (void)
 	KeyUp(&in_klook);
 }
 
+qboolean CL_MouseLookActive (void)
+{
+	return ((in_mlook.state & 1) != 0) || (freelook.integer != 0);
+}
+
+/*
+ * The BARE form of these -- no key number in argv(1) -- is not a key being
+ * held.  It is either typed at the console or, far more often, the line
+ * host.c used to append to config.cfg to persist mouselook before freelook
+ * existed ("if mlook was down, keep it that way").
+ *
+ * Latching the button for it is what makes freelook impossible to add
+ * naively: in_mlook.state would come up 1 on every existing player's config,
+ * the Options row would draw ticked, and unticking it could not clear a key
+ * that was never pressed.  Routing the bare form to the cvar instead makes
+ * every such config migrate itself on first run -- freelook is archived, the
+ * "+mlook" line is no longer written, and the setting is expressible and
+ * reversible from then on.  uhexen2-a5nn.25
+ */
 static void IN_MLookDown (void)
 {
+	if (!Cmd_Argv(1)[0])
+	{
+		Cvar_SetQuick (&freelook, "1");
+		return;
+	}
 	KeyDown(&in_mlook);
 }
 
 static void IN_MLookUp (void)
 {
+	if (!Cmd_Argv(1)[0])
+		Cvar_SetQuick (&freelook, "0");
+	/* KeyUp runs either way: the bare form is also the unstick path, and a
+	 * key genuinely stuck down still has to clear. */
 	KeyUp(&in_mlook);
-	if (!(in_mlook.state & 1) && lookspring.integer)
+	if (!CL_MouseLookActive() && lookspring.integer)
 		V_StartPitchDrift();
 }
 

@@ -508,9 +508,14 @@ void Host_WriteConfiguration (const char *fname)
 
 		Key_WriteBindings (f);
 		Cvar_WriteVariables (f);
-		// if mlook was down, keep it that way:
-		if (in_mlook.state & 1)
-			fprintf (f, "+mlook\n");
+		/* No "+mlook" line any more.  Mouselook is the archived `freelook`
+		 * cvar now, which Cvar_WriteVariables has just emitted; appending
+		 * the command as well would set a state the Options row cannot
+		 * clear on the next run, which is precisely the trap that kept
+		 * freelook from being addable at all.  An older config that still
+		 * carries the line migrates itself: the bare form now sets the
+		 * cvar (cl_input.c, IN_MLookDown) and the line is not rewritten.
+		 * uhexen2-a5nn.25 */
 
 		err = ferror (f);
 		if (fclose (f) != 0)
