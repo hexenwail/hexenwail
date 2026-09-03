@@ -256,6 +256,56 @@ int NUM_FOR_EDICT(edict_t*);
 #define	E_VECTOR(e,o)		(&((float*)&e->v)[o])
 #define	E_STRING(e,o)		(PR_GetString(*(string_t *)&((float*)&e->v)[o]))
 
+/* --- QuakeC extension negotiation ----------------------------------------
+ *
+ * Spike's checkextension: QuakeC asks the engine by NAME whether an extension
+ * is present and branches on the answer, instead of calling a builtin number
+ * and finding out by crashing.  Ironwail's registry, names verbatim -- they
+ * are FTE's and DP's before they are anyone's, and inventing spellings would
+ * defeat the point.  uhexen2-a5nn.35
+ *
+ * The registry is a list of names this engine RECOGNISES, which is not the
+ * same as a list it implements.  Ironwail advertises exactly one of these and
+ * we advertise none; see PF_csqc_checkextension for why. */
+#define QCEXTENSIONS_ALL					\
+	QCEXTENSION(FRIK_FILE)					\
+	QCEXTENSION(FTE_STRINGS)				\
+	QCEXTENSION(FTE_QC_CHECKCOMMAND)			\
+	QCEXTENSION(DP_QC_ETOS)					\
+	QCEXTENSION(DP_QC_MINMAXBOUND)				\
+	QCEXTENSION(DP_QC_SINCOSSQRTPOW)			\
+	QCEXTENSION(DP_QC_ASINACOSATANATAN2TAN)			\
+	QCEXTENSION(DP_QC_VECTORVECTORS)			\
+	QCEXTENSION(DP_QC_STRING_CASE_FUNCTIONS)		\
+	QCEXTENSION(DP_QC_SPRINTF)				\
+	QCEXTENSION(DP_QC_TOKENIZE_CONSOLE)			\
+	QCEXTENSION(DP_QC_STRFTIME)				\
+	QCEXTENSION(KRIMZON_SV_PARSECLIENTCOMMAND)		\
+
+typedef enum
+{
+	STD_QC,			/* 0 -- also "name not in the registry" */
+
+	#define QCEXTENSION(name)	name,
+	QCEXTENSIONS_ALL
+	#undef QCEXTENSION
+
+	QCEXT_COUNT
+} qcextension_t;
+
+int PR_FindExtensionByName (const char *name);
+	/* Registry index, or 0 (STD_QC) for a name we do not recognise. */
+
+void PR_ExtensionAsked (int extnum, const char *rawname);
+	/* Record that QuakeC asked about an extension, so `developer 1` can say
+	 * what a mod wanted -- which is the whole return on this while we
+	 * advertise nothing.  rawname is logged when extnum is 0. */
+
+void PR_ResetExtensionQueries (void);
+	/* Called on progs load; the answers are per-mod. */
+
+extern	cvar_t	pr_checkextension;	/* 0 blocks the lot.  pr_cmds.c */
+
 extern const builtin_t *pr_builtins;
 extern int pr_numbuiltins;
 

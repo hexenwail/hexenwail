@@ -3304,6 +3304,11 @@ void PR_LoadProgs (void)
 	for (i = 0; i < GEFV_CACHESIZE; i++)
 		gefvCache[i].field[0] = 0;
 
+	/* What extensions a mod asks about is a property of that mod, so the
+	 * "already reported this one" set does not survive the next one.
+	 * uhexen2-a5nn.35 */
+	PR_ResetExtensionQueries ();
+
 	progname = PR_GetProgFilename();
 	progs = NULL;
 #if !defined(H2W)

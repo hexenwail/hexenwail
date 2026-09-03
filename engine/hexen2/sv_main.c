@@ -73,6 +73,7 @@ extern	cvar_t	sv_maxvelocity;
 extern	cvar_t	sv_gameplayfix_elevators;	/* sv_phys.c */
 extern	cvar_t	sv_freezenonclients;		/* sv_phys.c */
 extern	cvar_t	sv_gameplayfix_random;		/* pr_cmds.c */
+/* pr_checkextension is declared in progs.h, next to the registry it gates. */
 extern	cvar_t	sv_gravity;
 extern	cvar_t	sv_nostep;
 extern	cvar_t	sv_friction;
@@ -213,6 +214,7 @@ void SV_Init (void)
 	Cvar_SetCallback (&max_edicts, Max_Edicts_f);
 	Cvar_RegisterVariable (&sv_cheats);
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
+	Cvar_RegisterVariable (&pr_checkextension);
 	Cvar_RegisterVariable (&sv_flypitch);
 	Cvar_RegisterVariable (&sv_debugmovestep);
 	Cvar_SetCallback (&sv_debugmovestep, SV_DebugMoveStep_Changed);

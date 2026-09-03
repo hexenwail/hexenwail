@@ -439,6 +439,49 @@ static void PF_csqc_localcmd (void)
 
 /*
 ==================
+PF_csqc_checkextension -- #99
+float checkextension(string extname)
+
+Spike's extension negotiation, on the DP/FTE builtin number, which is safe to
+take here because this table is already written against that numbering (the
+drawing builtins at #316-#328 are Ironwail's).  The SSQC side is NOT this
+number -- Hexen II spends #99 on matchAngleToSlope -- and is left to
+uhexen2-a5nn.35 to decide.
+
+ANSWERS NO TO EVERYTHING, and that is the port rather than a shortcut.
+Ironwail answers no to all thirteen names in its own registry too, bar one:
+it advertises FTE_QC_CHECKCOMMAND so that Arcane Dimensions takes its FTE
+branch instead of a DP branch that was buggy in AD 1.42.  That is a Quake mod
+working around a Quake mod bug; there is no Hexen II counterpart, and we have
+no checkcommand builtin to back the claim with, so advertising it here would be
+the exact failure the whole mechanism exists to prevent -- a mod taking the
+branch that assumes a thing works.
+
+A truthful no is still worth having.  Without this builtin a mod cannot ask at
+all: it calls a number and finds out by crashing or by silently doing nothing.
+With it, the mod takes its fallback path, and `developer 1` prints what it
+wanted -- which is what tells us which extension to implement first.
+==================
+*/
+static void PF_csqc_checkextension (void)
+{
+	const char	*extname = G_STRING(OFS_PARM0);
+	int		ext = PR_FindExtensionByName (extname);
+
+	if (!pr_checkextension.value)
+	{
+		/* The master switch is off: do not even record the question. */
+		G_FLOAT(OFS_RETURN) = 0;
+		return;
+	}
+
+	PR_ExtensionAsked (ext, extname);
+	G_FLOAT(OFS_RETURN) = 0;
+}
+
+
+/*
+==================
 PF_csqc_strlen_bi -- #114 (distinct from the C stdlib strlen)
 float strlen(string s)
 ==================
@@ -529,6 +572,7 @@ void CSQC_InitBuiltins (void)
 	csqc_builtin_table[27] = PF_csqc_vtos;		/* vtos */
 	csqc_builtin_table[45] = PF_csqc_cvar;		/* cvar */
 	csqc_builtin_table[46] = PF_csqc_localcmd;	/* localcmd */
+	csqc_builtin_table[99] = PF_csqc_checkextension;	/* checkextension */
 	csqc_builtin_table[114] = PF_csqc_strlen_bi;	/* strlen */
 	csqc_builtin_table[115] = PF_csqc_strcat;	/* strcat */
 	csqc_builtin_table[116] = PF_csqc_substring;	/* substring */

@@ -1245,3 +1245,93 @@ void PR_Profile_f (void)
 	}
 }
 
+
+/*
+===============================================================================
+
+QUAKEC EXTENSION REGISTRY
+
+Ironwail's pr_extnames / PR_FindExtensionByName, plus the bookkeeping that
+makes a negotiation nobody answers "yes" to worth having.  uhexen2-a5nn.35
+
+===============================================================================
+*/
+
+static const char *const pr_extnames[QCEXT_COUNT] =
+{
+	"STD_QC",
+
+	#define QCEXTENSION(name)	#name,
+	QCEXTENSIONS_ALL
+	#undef QCEXTENSION
+};
+
+/* One bit per registry entry: did this mod ask about it?  A file static rather
+ * than a field on a qcvm, because this engine has no qcvm_t -- the progs state
+ * is still globals, so the reset hangs off PR_LoadProgs instead. */
+static unsigned int	pr_asked_ext[(QCEXT_COUNT + 31) / 32];
+static qboolean		pr_asked_unknown;
+
+/*
+=================
+PR_FindExtensionByName
+=================
+*/
+int PR_FindExtensionByName (const char *name)
+{
+	int	i;
+
+	if (!name)
+		return STD_QC;
+	for (i = 1; i < QCEXT_COUNT; i++)
+		if (!strcmp (name, pr_extnames[i]))
+			return i;
+	return STD_QC;
+}
+
+/*
+=================
+PR_ResetExtensionQueries
+=================
+*/
+void PR_ResetExtensionQueries (void)
+{
+	memset (pr_asked_ext, 0, sizeof(pr_asked_ext));
+	pr_asked_unknown = false;
+}
+
+/*
+=================
+PR_ExtensionAsked
+
+Log what a mod wanted, once each.
+
+This is the entire practical return while we advertise nothing, and it is not
+a small one: it turns "the mod does not work" into a list of the extensions it
+looked for, which is the input to deciding what to implement next.  A name we
+do not recognise is worth more than one we do -- it is either a typo or an
+extension nobody has told this engine about.
+=================
+*/
+void PR_ExtensionAsked (int extnum, const char *rawname)
+{
+	if (extnum > STD_QC && extnum < QCEXT_COUNT)
+	{
+		if (pr_asked_ext[extnum >> 5] & (1u << (extnum & 31)))
+			return;
+		pr_asked_ext[extnum >> 5] |= 1u << (extnum & 31);
+		Con_DPrintf ("checkextension: progs asked for %s (not provided)\n",
+				pr_extnames[extnum]);
+		return;
+	}
+
+	/* Unrecognised names are not deduplicated by name -- one line the first
+	 * time is enough to say "go look", and keeping a set of arbitrary
+	 * strings to suppress the rest would cost more than it saves. */
+	if (!pr_asked_unknown)
+	{
+		pr_asked_unknown = true;
+		Con_DPrintf ("checkextension: progs asked for \"%s\", which is not in the registry\n",
+				rawname ? rawname : "");
+	}
+}

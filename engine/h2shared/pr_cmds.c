@@ -1172,6 +1172,12 @@ random()
 */
 cvar_t	sv_gameplayfix_random = {"sv_gameplayfix_random", "1", CVAR_ARCHIVE};
 
+/* Spike's master switch over QuakeC extension negotiation.  Ironwail's name
+ * and default verbatim; 0 makes checkextension answer "no" to everything
+ * including anything we might later advertise, which is the one place to reach
+ * for when a mod misreads the answer.  uhexen2-a5nn.35 */
+cvar_t	pr_checkextension = {"pr_checkextension", "1", CVAR_NONE};
+
 /*
 =================
 PR_RandomFloat
