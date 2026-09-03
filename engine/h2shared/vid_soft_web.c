@@ -599,6 +599,10 @@ qboolean VID_IsMinimized (void)
  * console size to scale -- these exist for the shared menu code. */
 void VID_ChangeConsize (int dir) { (void)dir; }
 float VID_ReportConsize (void) { return (float)vid.conwidth; }
+/* Nothing to derive: this target picks its console straight off the resolution
+ * ladder and has no width or multiplier cvar to put a number into.  Present so
+ * the declaration in vid.h holds for every target that includes it. */
+void VID_AutoConScale (void) { }
 
 void VID_MenuInit (void) { vid_menu_mode = vid_current_mode; }
 qboolean VID_MenuNeedApply (void) { return false; }

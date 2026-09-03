@@ -269,6 +269,38 @@ qboolean	in_mode_set = false;
 // VID_SetMode, VID_ChangeVideoMode or VID_Restart_f
 static cvar_t	vid_mode = {"vid_mode", "0", CVAR_NONE};
 static cvar_t	vid_config_consize = {"vid_config_consize", "640", CVAR_ARCHIVE};
+/* --- the console canvas, in Ironwail's two spellings ---------------------
+ *
+ * Upstream has a pair: scr_conwidth is an absolute width and wins when it is
+ * set, scr_conscale is a divisor over the framebuffer width and takes over
+ * when the width is unset (zero).  We had only the absolute half, spelled
+ * vid_config_consize, and no way at all to say "console at half the mode",
+ * which is the form that survives a resolution change.
+ *
+ * scr_conwidth is a plain alias of vid_config_consize: same value space, same
+ * clamps.  vid_config_consize stays the archived name -- it is what every
+ * existing config carries, and it is read out of config.cfg early by name
+ * (read_vars below) because VID_Init needs it before the mode is set.
+ *
+ * Zero is upstream's "unset", and taking it that way costs nothing here: the
+ * old code clamped a zero up to MIN_WIDTH, so it produced the same console as
+ * 320 and could not have meant anything else.
+ *
+ * The one place we cannot follow upstream is the default.  Theirs is
+ * conwidth 0 / conscale 1, so their multiplier is live out of the box; ours
+ * has been an absolute 640 since long before this, and changing that would
+ * move the console and HUD scale under every player at once.  So the width
+ * keeps its default and wins, which would leave `scr_conscale 2` looking
+ * broken -- setting the multiplier therefore hands it the console by zeroing
+ * the width (VID_ConSize_f), which is exactly the state upstream ships in.
+ *
+ * uhexen2-a5nn.33
+ */
+static cvar_t	alias_scr_conwidth = {"scr_conwidth", "640", CVAR_NONE};
+static cvar_t	scr_conscale = {"scr_conscale", "0", CVAR_ARCHIVE};
+/* Raised around every engine-side write to the pair, so a writeback cannot
+ * re-enter the callback that produced it. */
+static qboolean	vid_consize_recalc = false;
 /* Not archived any more: vid_width / vid_height / vid_fullscreen /
  * vid_desktopfullscreen below are the archived spelling now, and these three
  * mirror to them.  Writing both would put two names for one setting in
@@ -810,36 +842,172 @@ static void VID_SetIcon (void)
 #endif /* !OSX */
 }
 
+/*
+================
+VID_StoreConWidth
+
+Keep the archived width in step with the console we actually built -- but only
+when that cvar is what asked for it.  A console driven by scr_conscale must
+leave the width at zero: the first writeback would freeze it at whatever the
+current mode made it, and the multiplier would never be read again.
+================
+*/
+static void VID_StoreConWidth (int w)
+{
+	if (vid_config_consize.integer <= 0)
+		return;
+	vid_consize_recalc = true;
+	Cvar_SetValueQuick (&vid_config_consize, w);
+	vid_consize_recalc = false;
+}
+
+/*
+================
+VID_ResolveConWidth
+
+The requested console width at a given mode width, in upstream's precedence
+order: an explicit width wins, else the multiplier, else 1:1 with the mode.
+================
+*/
+static int VID_ResolveConWidth (int modewidth)
+{
+	if (vid_config_consize.integer > 0)
+		return vid_config_consize.integer;
+	if (scr_conscale.value > 0.0f)
+		return (int)(modewidth / scr_conscale.value);
+	return modewidth;
+}
+
 static void VID_ConWidth (int modenum)
 {
-	int	w, h;
+	const int	modewidth = modelist[modenum].width;
+	int		w, h;
 
-	if (!vid_conscale)
+	if (vid_config_consize.integer > 0)
 	{
-		Cvar_SetValueQuick (&vid_config_consize, modelist[modenum].width);
+		/* An absolute width, and vid_conscale says whether it is really
+		 * in force.  At 1:1 the archived width only tracks the mode, so
+		 * honouring it at the next, larger mode would silently re-shrink
+		 * a console the player had just put back to full size. */
+		if (!vid_conscale)
+		{
+			VID_StoreConWidth (modewidth);
+			return;
+		}
+		w = vid_config_consize.integer;
+	}
+	else if (scr_conscale.value > 0.0f)
+	{
+		/* A ratio needs no such guard -- meaning the same thing at every
+		 * mode is the whole reason to have it. */
+		w = (int)(modewidth / scr_conscale.value);
+	}
+	else
+	{
+		/* Neither knob set: 1:1, and nothing archived to keep in step.
+		 * Leave vid.width/vid.conwidth where the caller put them, which
+		 * on a HiDPI backing store is the drawable size rather than
+		 * modelist[] width. */
+		vid_conscale = false;
 		return;
 	}
 
-	w = vid_config_consize.integer;
 	w &= ~7; /* make it a multiple of eight */
 	if (w < MIN_WIDTH)
 		w = MIN_WIDTH;
-	else if (w > modelist[modenum].width)
-		w = modelist[modenum].width;
+	else if (w > modewidth)
+		w = modewidth;
 
-	h = w * modelist[modenum].height / modelist[modenum].width;
-	if (h < MIN_CONHEIGHT ||
-	    h > modelist[modenum].height || w > modelist[modenum].width)
+	h = w * modelist[modenum].height / modewidth;
+	if (h < MIN_CONHEIGHT || h > modelist[modenum].height)
 	{
 		vid_conscale = false;
-		Cvar_SetValueQuick (&vid_config_consize, modelist[modenum].width);
+		VID_StoreConWidth (modewidth);
 		return;
 	}
 	vid.width = vid.conwidth = w;
 	vid.height = vid.conheight = h;
-	if (w != modelist[modenum].width)
+	vid_conscale = (w != modewidth);
+}
+
+/*
+================
+VID_AutoConScale
+
+Put the console on a multiplier chosen from the mode, which is the half of
+upstream's scr_autoscale that has anything to do here.  The formula is theirs
+(SCR_AutoScale_f): the smaller of the two axes' multiples of 640x480, never
+below 1, so a window narrower than it is tall does not get a console that
+overflows it.
+
+The other four scales that command sets already have this built in -- ours read
+0 as "auto" and re-derive on every resolution change, where upstream's are
+plain numbers it has to bake.  Only the console width had no auto to fall back
+on, and now it has scr_conscale.  uhexen2-a5nn.33
+================
+*/
+void VID_AutoConScale (void)
+{
+	float	scale;
+
+	if (!vid_initialized || vid_modenum < 0)
+		return;
+
+	scale = (float)WRWidth / 640.0f;
+	if ((float)WRHeight / 480.0f < scale)
+		scale = (float)WRHeight / 480.0f;
+	if (scale < 1.0f)
+		scale = 1.0f;
+
+	Cvar_SetValueQuick (&scr_conscale, scale);
+}
+
+/*
+================
+VID_ConSize_f
+
+Callback on both halves of the pair.  Two jobs.
+
+First, keep the precedence honest.  scr_conwidth wins when it is set, and here
+it is set by default, so a player who typed scr_conscale and saw nothing happen
+would be right to call it broken; the multiplier therefore takes the width to
+zero, and an explicit width takes the multiplier to zero.  Whichever one was
+typed last is the one in charge, which is the only rule that reads the same
+from the console as it does from a config file.
+
+Second, apply it now.  vid_config_consize was only ever read at mode set, so
+setting it did nothing until the next vid_restart.  Upstream's pair applies
+immediately (SCR_Conwidth_f), and these are ordinary cvars a player types.
+================
+*/
+static void VID_ConSize_f (cvar_t *var)
+{
+	if (vid_consize_recalc)
+		return;
+	vid_consize_recalc = true;
+
+	if (var == &scr_conscale)
+	{
+		if (var->value > 0.0f)
+			Cvar_SetValueQuick (&vid_config_consize, 0);
+	}
+	else if (vid_config_consize.integer > 0)
+	{
+		Cvar_SetValueQuick (&scr_conscale, 0);
+	}
+
+	if (vid_initialized && vid_modenum >= 0)
+	{
+		vid.width = vid.conwidth = WRWidth;
+		vid.height = vid.conheight = WRHeight;
+		/* The player just said what they want; the "do not re-shrink at
+		 * a bigger mode" guard is about mode changes, not about this. */
 		vid_conscale = true;
-	else	vid_conscale = false;
+		VID_ConWidth (vid_modenum);
+		vid.recalc_refdef = 1;
+	}
+
+	vid_consize_recalc = false;
 }
 
 void VID_ChangeConsize (int dir)
@@ -871,7 +1039,14 @@ void VID_ChangeConsize (int dir)
 		return;
 	vid.width = vid.conwidth = w;
 	vid.height = vid.conheight = h;
+	/* The menu's +/- is an explicit width, so it moves the console onto
+	 * vid_config_consize and takes scr_conscale out of the picture.  Leaving
+	 * the multiplier set would win it back at the next mode change and the
+	 * player's adjustment would evaporate. */
+	vid_consize_recalc = true;
+	Cvar_SetValueQuick (&scr_conscale, 0);
 	Cvar_SetValueQuick (&vid_config_consize, vid.conwidth);
+	vid_consize_recalc = false;
 	vid.recalc_refdef = 1;
 	if (vid.conwidth != modelist[vid_modenum].width)
 		vid_conscale = true;
@@ -2582,6 +2757,13 @@ void	VID_Init (const unsigned char *palette)
 				"vid_config_glx",
 				"vid_config_gly",
 				"vid_config_consize",
+				/* Both new spellings of the same thing.  They
+				 * have to be read this early for the same
+				 * reason vid_config_consize does: VID_Init
+				 * builds the console canvas below, before the
+				 * config proper is ever exec'd.  uhexen2-a5nn.33 */
+				"scr_conwidth",
+				"scr_conscale",
 				"gl_lightmapfmt",
 				"gl_reversed_z",
 				"vid_vsync",
@@ -2610,6 +2792,13 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&vid_config_gly);
 	Cvar_RegisterVariable (&vid_config_glx);
 	Cvar_RegisterVariable (&vid_config_consize);
+	Cvar_RegisterVariable (&scr_conscale);
+	/* Callbacks before the alias: Cvar_RegisterAlias captures the target's
+	 * callback to chain it, so one installed afterwards would be replaced
+	 * outright and silently stop firing. */
+	Cvar_SetCallback (&vid_config_consize, VID_ConSize_f);
+	Cvar_SetCallback (&scr_conscale, VID_ConSize_f);
+	Cvar_RegisterAlias (&alias_scr_conwidth, &vid_config_consize);
 	Cvar_RegisterVariable (&vid_mode);
 	Cvar_RegisterVariable (&_enable_mouse);
 	Cvar_RegisterVariable (&gl_lightmapfmt);
@@ -2768,18 +2957,28 @@ void	VID_Init (const unsigned char *palette)
 	}
 
 	if (!vid_conscale)
-		Cvar_SetValueQuick (&vid_config_consize, width);
+		VID_StoreConWidth (width);
 
 	// This will display a bigger hud and readable fonts at high
 	// resolutions. The fonts will be somewhat distorted, though
 	i = COM_CheckParm("-conwidth");
 	if (i != 0 && i < com_argc-1)
-		i = atoi(com_argv[i + 1]);
-	else	i = vid_config_consize.integer;
+	{
+		/* An explicit width on the command line is an explicit width: it
+		 * goes into the same cvar the console spells scr_conwidth, and
+		 * so takes scr_conscale out of the picture for this run.  A zero
+		 * here now means what it means everywhere else -- unset. */
+		vid_consize_recalc = true;
+		Cvar_SetValueQuick (&vid_config_consize, atoi(com_argv[i + 1]));
+		if (vid_config_consize.integer > 0)
+			Cvar_SetValueQuick (&scr_conscale, 0);
+		vid_consize_recalc = false;
+	}
+	i = VID_ResolveConWidth (width);
 	if (i < MIN_WIDTH)	i = MIN_WIDTH;
 	else if (i > width)	i = width;
-	Cvar_SetValueQuick(&vid_config_consize, i);
-	if (vid_config_consize.integer != width)
+	VID_StoreConWidth (i);
+	if (i != width)
 		vid_conscale = true;
 
 	/* -fsaa overrides the archived sample count.  It feeds vid_config_fsaa,

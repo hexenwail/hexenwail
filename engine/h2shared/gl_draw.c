@@ -922,6 +922,35 @@ void Draw_ReInit (void)
 }
 
 /*
+================
+SCR_AutoScale_f
+
+Ironwail's scr_autoscale: one gesture that makes the 2D interface a sensible
+size for the resolution.  It means something slightly different here, and the
+difference is in our favour.
+
+Upstream's four scale cvars are plain numbers with no auto, so its command
+computes one from the mode and writes it into all four -- a snapshot, correct
+until the player changes resolution and then quietly wrong.  Ours read zero as
+"auto" and re-derive from glheight every time they are asked (SCR_CalcUIScale),
+so putting them back to zero is both what the command is for and strictly
+better than baking the number.
+
+The console is the exception: it has no auto, only an absolute width or a
+multiplier, so that one does get a number, computed by upstream's formula in
+VID_AutoConScale.  uhexen2-a5nn.33
+================
+*/
+static void SCR_AutoScale_f (void)
+{
+	Cvar_SetValueQuick (&scr_sbarscale, 0);
+	Cvar_SetValueQuick (&scr_menuscale, 0);
+	Cvar_SetValueQuick (&scr_crosshairscale, 0);
+	Cvar_SetValueQuick (&scr_infoscale, 0);
+	VID_AutoConScale ();
+}
+
+/*
 ===============
 Draw_Init
 ===============
@@ -961,6 +990,7 @@ void Draw_Init (void)
 		Cvar_SetCallback (&gl_texturemode, Draw_TextureMode_f);
 		Cvar_SetCallback (&gl_texture_anisotropy, Draw_Anisotropy_f);
 		Cvar_SetCallback (&gl_lodbias, Draw_LodBias_f);
+		Cmd_AddCommand ("scr_autoscale", SCR_AutoScale_f);
 		Cmd_AddCommand ("imagelist", GL_ImageList_f);
 		Cmd_AddCommand ("imagedump", GL_ImageDump_f);
 		Cmd_AddCommand ("gl_describetexturemodes", GL_DescribeTextureModes_f);

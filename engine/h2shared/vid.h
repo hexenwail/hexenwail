@@ -136,6 +136,10 @@ void VID_ChangeConsize (int dir);
 
 float VID_ReportConsize(void);
 // returns console size scale for the opengl features menu.
+
+void VID_AutoConScale (void);
+// puts the console on a multiplier derived from the current mode -- the
+// console half of the scr_autoscale command.  uhexen2-a5nn.33
 #endif	/* GLQUAKE || WEBQUAKE */
 
 void D_ShowLoadingSize (void);
