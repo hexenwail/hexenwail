@@ -295,6 +295,8 @@ typedef struct
 	int num_ex_items;
 	int next_page_id;
 
+	float		wheel_pitch;		// banked by cl_mwheelpitch, paid out
+						// over the next frames by CL_AdjustAngles
 	char		mapname[40];
 	char		levelname[40];		// for display on solo scoreboard
 	int		viewentity;		// cl_entitites[cl.viewentity] = player
@@ -351,6 +353,7 @@ extern	cvar_t	cl_minpitch;
 
 extern	cvar_t	cl_yawspeed;
 extern	cvar_t	cl_pitchspeed;
+extern	cvar_t	cl_mwheelpitch;
 
 extern	cvar_t	cl_anglespeedkey;
 

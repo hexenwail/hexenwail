@@ -233,9 +233,39 @@ static void IN_LookupDown (void)
 	KeyDown(&in_lookup);
 }
 
+/*
+================
+IN_AccumMWheelPitch
+
+Bank pitch for a wheel notch, on the key-up half of a +lookup / +lookdown pair.
+
+Only for the wheel: bound to an ordinary key the same commands must keep
+behaving as a held look, and a release there would otherwise add a kick on top
+of the hold.  The key number arrives as the command's argument, the same one
+KeyUp matches against b->down[], so this can tell the two cases apart.
+================
+*/
+static void IN_AccumMWheelPitch (float amt)
+{
+	int	key;
+
+	if (Key_GetDest() != key_game || Cmd_Argc() < 2)
+		return;
+	key = atoi (Cmd_Argv(1));
+	if (key != K_MWHEELUP && key != K_MWHEELDOWN)
+		return;
+
+	cl.wheel_pitch += amt;
+	if (cl.wheel_pitch < -90.0f)
+		cl.wheel_pitch = -90.0f;
+	else if (cl.wheel_pitch > 90.0f)
+		cl.wheel_pitch = 90.0f;
+}
+
 static void IN_LookupUp (void)
 {
 	KeyUp(&in_lookup);
+	IN_AccumMWheelPitch (-cl_mwheelpitch.value);
 }
 
 static void IN_LookdownDown (void)
@@ -246,6 +276,7 @@ static void IN_LookdownDown (void)
 static void IN_LookdownUp (void)
 {
 	KeyUp(&in_lookdown);
+	IN_AccumMWheelPitch (cl_mwheelpitch.value);
 }
 
 static void IN_MoveleftDown (void)
@@ -429,6 +460,22 @@ cvar_t	cl_minpitch = {"cl_minpitch", "-70", CVAR_ARCHIVE};	/* min look-up pitch 
 cvar_t	cl_yawspeed = {"cl_yawspeed", "140", CVAR_NONE};
 cvar_t	cl_pitchspeed = {"cl_pitchspeed", "150", CVAR_NONE};
 cvar_t	cl_anglespeedkey = {"cl_anglespeedkey", "1.5", CVAR_NONE};
+/* Degrees of pitch one wheel notch is worth when +lookup / +lookdown are bound
+ * to MWHEELUP / MWHEELDOWN.  The wheel has no held state -- it delivers a down
+ * and an up in the same instant -- so cl_pitchspeed, which is degrees per
+ * second of holding a key, has nothing to work with.  Ironwail's answer is to
+ * bank an amount on the release and pay it out over the following frames at
+ * cl_pitchspeed, so the wheel and the keyboard feel like the same control.
+ * Name and default (5) verbatim.
+ *
+ * Zero does NOT make the wheel inert, here or upstream, and that is worth
+ * knowing before someone reports it as broken.  A notch is a press and a
+ * release inside one frame, which CL_KeyState scores 0.25, so the ordinary
+ * held-look path still turns the view by 0.25 * frametime * cl_pitchspeed --
+ * measured at about a degree per notch on the headless box.  cl_mwheelpitch
+ * controls the banked amount on top of that; unbind the wheel to make it do
+ * nothing at all.  uhexen2-a5nn.34 */
+cvar_t	cl_mwheelpitch = {"cl_mwheelpitch", "5", CVAR_ARCHIVE};
 
 
 /*
@@ -487,8 +534,30 @@ void CL_AdjustAngles (void)
 	cl.viewangles[PITCH] -= speed*cl_pitchspeed.value * up;
 	cl.viewangles[PITCH] += speed*cl_pitchspeed.value * down;
 
-	if (up || down)
+	if (up || down || cl.wheel_pitch)
 		V_StopPitchDrift ();
+
+	/* Pay out whatever the wheel banked, at the same rate a held key turns,
+	 * so a notch is a short smooth sweep rather than a snap. */
+	if (cl.wheel_pitch)
+	{
+		float	delta = speed*cl_pitchspeed.value;
+
+		if (cl.wheel_pitch > 0.0f)
+		{
+			cl.viewangles[PITCH] += (delta < cl.wheel_pitch) ? delta : cl.wheel_pitch;
+			cl.wheel_pitch -= delta;
+			if (cl.wheel_pitch < 0.0f)
+				cl.wheel_pitch = 0.0f;
+		}
+		else
+		{
+			cl.viewangles[PITCH] -= (delta < -cl.wheel_pitch) ? delta : -cl.wheel_pitch;
+			cl.wheel_pitch += delta;
+			if (cl.wheel_pitch > 0.0f)
+				cl.wheel_pitch = 0.0f;
+		}
+	}
 
 	if (cl.viewangles[PITCH] > cl_maxpitch.value)
 		cl.viewangles[PITCH] = cl_maxpitch.value;

@@ -1419,6 +1419,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_minpitch);
 	Cvar_RegisterVariable (&cl_yawspeed);
 	Cvar_RegisterVariable (&cl_pitchspeed);
+	Cvar_RegisterVariable (&cl_mwheelpitch);
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);
