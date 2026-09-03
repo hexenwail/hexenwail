@@ -14,7 +14,7 @@ here.
 ## P2 — worth doing (70)
 
 - **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
-- **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: https://claude.ai/code/artifact/5a704911-f106-4bb7-9a10-cf481a7c92f…
+- **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him.
 - **r_fastsky does nothing for the classic scrolling sky (only the skybox path honours it)** `uhexen2-371n` — Found 2026-09-01 while A/B-verifying the sky shader split (uhexen2-a5nn.4); pre-existing, not caused by it, and deliberately left alone there to keep that change to one subject.
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
 - **SoT: missing sounds (muckexit, artiup, douse)** `uhexen2-40e` *(blocked)* — Three audio assets are genuinely absent from the SoT pak tree (data1/pak1.pak and sot/* hierarchy): - sound/fx/muckexit.wav - sound/misc/douse.wav - sound/items/artiup.wav
