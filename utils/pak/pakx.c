@@ -33,28 +33,34 @@
 
 static int ExtractFile (pack_t *pak, const char *filename, const char *destdir)
 {
-	char	dest[1024], *dptr;
-	int	i;
+	char   dest[MAX_OSPATH], *dptr;
+	size_t filenamelen = 0;
+	int    fileisdir = 0, i;
+
+	if (filename)
+	{
+		filenamelen = strlen(filename);
+		if (filenamelen)
+			fileisdir = filename[filenamelen - 1] == '/';
+	}
 
 	if (!destdir || !*destdir)
-	{
 		dptr = dest;
-	}
+
 	else
 	{
 		strcpy (dest, destdir);
-		i = strlen (destdir);
-		if (!IS_DIR_SEPARATOR(dest[i - 1]))
-		{
-			dest[i] = DIR_SEPARATOR_CHAR;
-			dest[i + 1] = '\0';
-		}
 		dptr = strchr(dest, '\0');
+		if (!IS_DIR_SEPARATOR(*(dptr - 1)))
+			*dptr++ = DIR_SEPARATOR_CHAR;
 	}
+
+	*dptr = '\0';
 
 	for (i = 0; i < pak->numfiles; i++)
 	{
-		if (!filename)
+		if (!filename || (!strncmp (pak->files[i].name, filename, filenamelen) &&
+			(fileisdir || pak->files[i].name[filenamelen] == '\0')))
 		{
 			fseek (pak->handle, pak->files[i].filepos, SEEK_SET);
 			strcpy (dptr, pak->files[i].name);
@@ -62,20 +68,12 @@ static int ExtractFile (pack_t *pak, const char *filename, const char *destdir)
 			printf ("%s --> %s\n", pak->files[i].name, dest);
 			if (Q_WriteFileFromHandle(pak->handle, dest, pak->files[i].filelen) != 0)
 				COM_Error ("I/O errors during copy.");
-			continue;
-		}
-		if (!strcmp (pak->files[i].name, filename))
-		{
-			fseek (pak->handle, pak->files[i].filepos, SEEK_SET);
-			strcpy (dptr, pak->files[i].name);
-			dest[sizeof(dest) - 1] = '\0';
-			printf ("%s --> %s\n", pak->files[i].name, dest);
-			if (Q_WriteFileFromHandle(pak->handle, dest, pak->files[i].filelen) != 0)
-				COM_Error ("I/O errors during copy.");
-			break;
+
+			if (filename && !fileisdir)
+				break;
 		}
 	}
-	if (filename != NULL && i == pak->numfiles)
+	if (filename && *dptr == '\0')
 	{
 		fprintf (stderr, "** %s not in %s\n", filename, pak->filename);
 		return 1;
