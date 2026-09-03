@@ -53,6 +53,7 @@ extern	cvar_t		sys_throttle;
 extern	cvar_t		host_maxfps;
 extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
+extern	cvar_t		map_checks;	/* mapper mode; see host.c.  uhexen2-a5nn.34 */
 
 extern	cvar_t		pausable;
 

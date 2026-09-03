@@ -134,6 +134,19 @@ cvar_t	samelevel = {"samelevel", "0", CVAR_NONE};
 cvar_t	noexit = {"noexit", "0", CVAR_NOTIFY|CVAR_SERVERINFO};
 
 cvar_t	developer = {"developer", "0", CVAR_ARCHIVE};
+/* Mapper mode: stop hiding authoring mistakes.  Ironwail's map_checks, name
+ * and default (0, CVAR_NONE) verbatim.
+ *
+ * The interesting half is not extra warnings, it is the three renderer
+ * workarounds it switches OFF.  gl_zfix, order-independent transparency and
+ * alpha sorting all exist to make a map with coplanar faces or badly ordered
+ * translucent surfaces look acceptable anyway -- which is the opposite of what
+ * the person authoring that map needs to see.  With this on, the mapper gets
+ * the raw picture their brushwork actually produces.
+ *
+ * Not archived, and deliberately: it is a mode you turn on for a session, not
+ * a setting.  uhexen2-a5nn.34 */
+cvar_t	map_checks = {"map_checks", "0", CVAR_NONE};
 
 cvar_t	skill = {"skill", "1", CVAR_NONE};		// 0 - 3
 cvar_t	startmap = {"startmap", "", CVAR_NONE};	// mods can override in autoexec.cfg
@@ -246,6 +259,25 @@ error_out:
 
 
 //============================================================================
+
+/*
+================
+Map_Checks_f -- called when map_checks changes
+
+Says once what the mode costs.  Three cvars silently reading back a value they
+are no longer being asked for is exactly the shape of a bug report about
+gl_zfix being broken.
+================
+*/
+static void Map_Checks_f (cvar_t *var)
+{
+	static qboolean	showed_message = false;
+
+	if (!var->integer || showed_message)
+		return;
+	showed_message = true;
+	Con_SafePrintf ("Note: %s overrides gl_zfix, r_oit and r_alphasort\n", var->name);
+}
 
 /*
 ================
@@ -432,6 +464,8 @@ static void Host_InitLocal (void)
 	Host_InitCommands ();
 
 	Cvar_RegisterVariable (&developer);
+	Cvar_RegisterVariable (&map_checks);
+	Cvar_SetCallback (&map_checks, Map_Checks_f);
 	if (COM_CheckParm("-developer"))
 	{
 		Cvar_Set ("developer", "1");

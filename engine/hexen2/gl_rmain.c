@@ -4621,8 +4621,14 @@ static void R_DumpAliasInfo (void)
 	Con_Printf("  viewmodel gates: r_drawviewmodel %d  scr_viewsize %d  chase %d  health %d\n",
 		   r_drawviewmodel.integer, scr_viewsize.integer,
 		   chase_active.integer, (int)cl.v.health);
-	Con_Printf("  r_wateralpha %.3f  r_alphasort %d\n",
-		   r_wateralpha.value, r_alphasort.integer);
+	Con_Printf("  r_wateralpha %.3f  r_alphasort %d%s\n",
+		   r_wateralpha.value, r_alphasort.integer,
+		   map_checks.integer ? " (suppressed by map_checks)" : "");
+	/* Says so here as well as in the one-shot note, because this readout is
+	 * where someone lands when the cvar's value and the picture disagree --
+	 * which under map_checks they deliberately do.  uhexen2-a5nn.34 */
+	if (map_checks.integer)
+		Con_Printf("  map_checks 1: gl_zfix, r_oit and r_alphasort are overridden off\n");
 	Con_Printf("  draw order is: particles -> trans ents -> OIT resolve -> glows\n");
 	Con_Printf("                 -> VIEWMODEL -> mirror -> polyblend\n");
 	Con_Printf("  so an effect can only paint over an OPAQUE viewmodel if it is\n");
@@ -4984,7 +4990,10 @@ static void R_DrawTransEntitiesOnList (qboolean inwater)
 		theents[i].len = (result[0] * result[0]) + (result[1] * result[1]) + (result[2] * result[2]);
 	}
 
-	if (r_alphasort.integer)
+	/* map_checks turns the sort off so a mapper sees the draw order their
+	 * translucent brushwork actually produces, rather than the one the
+	 * engine rescued.  uhexen2-a5nn.34 */
+	if (r_alphasort.integer && !map_checks.integer)
 		R_AlphaSortRadix (theents, numents);
 
 	R_SetDepthMask (false);

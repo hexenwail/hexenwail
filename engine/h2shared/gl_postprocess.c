@@ -2100,6 +2100,12 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 
 qboolean OIT_Active (void)
 {
+	/* map_checks suppresses the pass without tearing the pipeline down, so
+	 * the mapper sees unordered translucency the way a plain blend gives it
+	 * and toggling the mode back off restores OIT with no vid_restart.
+	 * uhexen2-a5nn.34 */
+	if (map_checks.integer)
+		return false;
 	return oit_available && r_oit.integer && HW_OIT_HAS_BLEND_FUNCI;
 }
 

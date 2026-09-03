@@ -687,9 +687,19 @@ static void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time)
 				check->v.origin[2] += DIST_EPSILON;
 				if (!SV_TestEntityPosition (check))
 				{
-					Con_DPrintf ("sv_gameplayfix_elevators nudged %s #%d above %s #%d\n",
-						PR_GetString (check->v.classname), NUM_FOR_EDICT (check),
-						PR_GetString (pusher->v.classname), NUM_FOR_EDICT (pusher));
+					/* An entity the pusher would otherwise have
+					 * blocked on is authoring information, so
+					 * map_checks promotes it out of developer
+					 * spam -- upstream gates the same notice on
+					 * `map_checks || developer`.  uhexen2-a5nn.34 */
+					if (map_checks.integer)
+						Con_Printf ("sv_gameplayfix_elevators nudged %s #%d above %s #%d\n",
+							PR_GetString (check->v.classname), NUM_FOR_EDICT (check),
+							PR_GetString (pusher->v.classname), NUM_FOR_EDICT (pusher));
+					else
+						Con_DPrintf ("sv_gameplayfix_elevators nudged %s #%d above %s #%d\n",
+							PR_GetString (check->v.classname), NUM_FOR_EDICT (check),
+							PR_GetString (pusher->v.classname), NUM_FOR_EDICT (pusher));
 					continue;
 				}
 				/* nudge did not help; the restore below undoes it */

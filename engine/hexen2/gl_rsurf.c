@@ -2840,6 +2840,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	mplane_t	*pplane;
 	qmodel_t	*clmodel;
 	qboolean	rotated;
+	qboolean	zfix;
 
 	currenttexture = GL_UNUSED_TEXTURE;
 	GL_ImmResetState();
@@ -2945,8 +2946,15 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	e->angles[0] = -e->angles[0];	// stupid quake bug
 	e->angles[2] = -e->angles[2];	// stupid quake bug
 	/* hack the origin to prevent bmodel z-fighting
-	 * http://forums.inside3d.com/viewtopic.php?t=1350 */
-	if (gl_zfix.integer)
+	 * http://forums.inside3d.com/viewtopic.php?t=1350
+	 *
+	 * map_checks turns this off: the nudge is there to hide a brush that a
+	 * mapper placed exactly coplanar with the world, and hiding it from the
+	 * mapper is the one case where it is the wrong thing to do.  Held in a
+	 * local so the un-hack below cannot disagree with the hack above if the
+	 * cvar moves between them.  uhexen2-a5nn.34 */
+	zfix = gl_zfix.integer && !map_checks.integer;
+	if (zfix)
 	{
 		e->origin[0] -= DIST_EPSILON;
 		e->origin[1] -= DIST_EPSILON;
@@ -2954,7 +2962,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	}
 	R_RotateForEntity (e);
 	/* un-hack the origin */
-	if (gl_zfix.integer)
+	if (zfix)
 	{
 		e->origin[0] += DIST_EPSILON;
 		e->origin[1] += DIST_EPSILON;

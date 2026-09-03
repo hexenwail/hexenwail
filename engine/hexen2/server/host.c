@@ -57,6 +57,11 @@ cvar_t	samelevel = {"samelevel", "0", CVAR_NONE};
 cvar_t	noexit = {"noexit", "0", CVAR_NOTIFY|CVAR_SERVERINFO};
 
 cvar_t	developer = {"developer", "0", CVAR_ARCHIVE};
+/* Same cvar as the client's, and it has to exist here too: sv_phys.c consults
+ * it and is in both builds.  No callback -- the three renderer workarounds it
+ * overrides there do not exist in a dedicated server, so there is nothing to
+ * warn about.  uhexen2-a5nn.34 */
+cvar_t	map_checks = {"map_checks", "0", CVAR_NONE};
 
 cvar_t	skill = {"skill", "1", CVAR_NONE};		// 0 - 3
 cvar_t	coop = {"coop", "0", CVAR_NONE};		// 0 or 1
@@ -261,6 +266,7 @@ static void Host_InitLocal (void)
 	Host_InitCommands ();
 
 	Cvar_RegisterVariable (&developer);
+	Cvar_RegisterVariable (&map_checks);
 	if (COM_CheckParm("-developer"))
 	{
 		Cvar_Set ("developer", "1");
