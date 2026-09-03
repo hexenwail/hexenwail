@@ -1180,6 +1180,44 @@ cvar_t	pr_checkextension = {"pr_checkextension", "1", CVAR_NONE};
 
 /*
 =================
+PF_checkextension -- #130
+float checkextension(string extname)
+
+The server-side half of uhexen2-a5nn.35.  Same answer as the CSQC builtin in
+pr_csqc.c and for the same reasons -- it records the question and returns 0,
+because we advertise nothing and a name we cannot back is worse than no answer.
+See the comment on PF_csqc_checkextension for why, including why Ironwail's one
+advertised name does not carry over.
+
+#130 RATHER THAN #99, WHICH IS THE DP/FTE NUMBER.  Hexen II spends #99 on
+matchAngleToSlope, and every number near the end of the table already means
+different things in different builds: #113 is PF_Fixme in the shipping build,
+PF_cos under QUAKE2 and PF_name_print in HexenWorld, and H2W runs up to #120.
+So there is no free slot that means one thing everywhere, and the number a mod
+writes `= :N` against has to.  #130 opens a Hexenwail extension range above all
+of Raven's numbering, with 114-129 left as padding so the gap reads as
+deliberate and the next extension has somewhere obvious to go.
+=================
+*/
+static void PF_checkextension (void)
+{
+	const char	*extname = G_STRING(OFS_PARM0);
+	int		ext;
+
+	if (!pr_checkextension.value)
+	{
+		/* Master switch off: do not even record the question. */
+		G_FLOAT(OFS_RETURN) = 0;
+		return;
+	}
+
+	ext = PR_FindExtensionByName (extname);
+	PR_ExtensionAsked (ext, extname);
+	G_FLOAT(OFS_RETURN) = 0;
+}
+
+/*
+=================
 PR_RandomFloat
 
 The distribution behind random() and the other rolling builtins.  Switchable
@@ -4612,6 +4650,19 @@ static builtin_t pr_builtin[] =
 	PF_TraceToss,		// 116
 	PF_etos,		// 117
 	PF_WaterMove,		// 118
+	/* 119-129 reserved: the Hexenwail extension range starts at #130.
+	 * uhexen2-a5nn.35 */
+	PF_Fixme,		// 119
+	PF_Fixme,		// 120
+	PF_Fixme,		// 121
+	PF_Fixme,		// 122
+	PF_Fixme,		// 123
+	PF_Fixme,		// 124
+	PF_Fixme,		// 125
+	PF_Fixme,		// 126
+	PF_Fixme,		// 127
+	PF_Fixme,		// 128
+	PF_Fixme,		// 129
 #else
 	PF_set_extra_flags,	// void(string model, int flags) set_extra_flags	= #107
 	PF_set_fx_color,	// void(string model, float r, float g, float b, float a) set_fx_color	= #108
@@ -4620,6 +4671,24 @@ static builtin_t pr_builtin[] =
 	PF_pimpmodel,		// float(entity e, vector glow_color) pimpmodel = #111
 	PF_update_ex_item,	// float (entity forent, float id, float amount)	= #112
 	PF_Fixme,		// 113
+	/* 114-129 reserved: the Hexenwail extension range starts at #130.
+	 * uhexen2-a5nn.35 */
+	PF_Fixme,		// 114
+	PF_Fixme,		// 115
+	PF_Fixme,		// 116
+	PF_Fixme,		// 117
+	PF_Fixme,		// 118
+	PF_Fixme,		// 119
+	PF_Fixme,		// 120
+	PF_Fixme,		// 121
+	PF_Fixme,		// 122
+	PF_Fixme,		// 123
+	PF_Fixme,		// 124
+	PF_Fixme,		// 125
+	PF_Fixme,		// 126
+	PF_Fixme,		// 127
+	PF_Fixme,		// 128
+	PF_Fixme,		// 129
 #endif
 
 #else  /* H2W: */
@@ -4647,7 +4716,22 @@ static builtin_t pr_builtin[] =
 	PF_precache_file,	// 118
 	PF_setsiegeteam,	// 119
 	PF_updateSiegeInfo,	// 120
+	/* 121-129 reserved: the Hexenwail extension range starts at #130.
+	 * uhexen2-a5nn.35 */
+	PF_Fixme,		// 121
+	PF_Fixme,		// 122
+	PF_Fixme,		// 123
+	PF_Fixme,		// 124
+	PF_Fixme,		// 125
+	PF_Fixme,		// 126
+	PF_Fixme,		// 127
+	PF_Fixme,		// 128
+	PF_Fixme,		// 129
 #endif /* H2W */
+
+	/* Common to every build, which is the whole point of the number.
+	 * uhexen2-a5nn.35 */
+	PF_checkextension,	// 130
 };
 
 const builtin_t *pr_builtins = pr_builtin;
