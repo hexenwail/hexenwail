@@ -141,6 +141,14 @@ float SCR_CalcUIScale (cvar_t *user)
 	return 1.0f;
 }
 
+/* No scr_pixelaspect on this target (see vid_soft_web.c), so the gui extent is
+ * the framebuffer.  uhexen2-a5nn.37 */
+void SCR_GuiSize (int *w, int *h)
+{
+	if (w) *w = vid.width;
+	if (h) *h = vid.height;
+}
+
 /*
 ================
 Draw_FlushCharBatch

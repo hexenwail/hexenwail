@@ -1268,10 +1268,17 @@ void Draw_Crosshair (void)
 	 * scr_crosshairscale, so map scr_vrect from vid space into the
 	 * canvas's logical pixels. */
 	s = SCR_CalcUIScale (&scr_crosshairscale);
-	s = q_min (s, (float)glwidth / 32.0f);
-	s = q_min (s, (float)glheight / 32.0f);
-	canvas_w = (int)(glwidth / s);
-	canvas_h = (int)(glheight / s);
+	{
+		/* Same numbers GL_SetCanvas just used for CANVAS_CROSSHAIR; they
+		 * have to agree or the crosshair leaves the view centre.
+		 * uhexen2-a5nn.37 */
+		int	gw, gh;
+		SCR_GuiSize (&gw, &gh);
+		s = q_min (s, (float)gw / 32.0f);
+		s = q_min (s, (float)gh / 32.0f);
+		canvas_w = (int)(gw / s);
+		canvas_h = (int)(gh / s);
+	}
 
 	x = (scr_vrect.x + scr_vrect.width/2)  * canvas_w / vid.width  + (int)cl_crossx.value;
 	y = (scr_vrect.y + scr_vrect.height/2) * canvas_h / vid.height + (int)cl_crossy.value;
@@ -1833,9 +1840,9 @@ static void Draw_ConsolePic (int lines, float ofs, GLuint num, float alpha)
 	GL_ImmTexCoord2f (0, 0 + ofs);
 	GL_ImmVertex2f (0, 0);
 	GL_ImmTexCoord2f (1, 0 + ofs);
-	GL_ImmVertex2f (vid.conwidth, 0);
+	GL_ImmVertex2f (vid.width, 0);
 	GL_ImmTexCoord2f (1, 1);
-	GL_ImmVertex2f (vid.conwidth, lines);
+	GL_ImmVertex2f (vid.width, lines);
 	GL_ImmTexCoord2f (0, 1);
 	GL_ImmVertex2f (0, lines);
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
@@ -1886,14 +1893,17 @@ void Draw_MenuBackdrop (void)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
 	/* Pin watermark to the bottom-right of the visible canvas. */
-	Draw_ConsoleVersionInfo (vid.conheight);
+	Draw_ConsoleVersionInfo (vid.height);
 }
 
 static void Draw_ConsoleVersionInfo (int lines)
 {
 	static const char ver[] = ENGINE_WATERMARK;
 	const char *ptr = ver;
-	int x = vid.conwidth - (strlen(ver) * 8 + 11);
+	/* CANVAS_DEFAULT coordinates: vid.width/vid.height, which carry the
+	 * scr_pixelaspect squash; conwidth/conheight are the console's own
+	 * unsquashed geometry and are not a canvas extent.  uhexen2-a5nn.37 */
+	int x = vid.width - (strlen(ver) * 8 + 11);
 	int y = lines - 14;
 	for (; *ptr; ++ptr)
 		Draw_Character (x + (int)(ptr - ver) * 8, y, *ptr | 0x100);
@@ -1905,7 +1915,7 @@ void Draw_ConsoleBackground (int lines)
 	float	ofs, alpha, cap;
 
 	y = (vid.height * 3) >> 2;
-	ofs = (gl_constretch.integer) ? 0.0f : (vid.conheight - lines) / (float) vid.conheight;
+	ofs = (gl_constretch.integer) ? 0.0f : (vid.height - lines) / (float) vid.height;
 	alpha = (lines > y) ? 1.0f : 1.1f * lines / y;
 
 	/* User-configurable cap on fully-down alpha. Clamp to a sane range
@@ -2063,6 +2073,33 @@ void Draw_FillAlpha (int x, int y, int w, int h, float r, float g, float b, floa
 
 /*
 ================
+SCR_GuiSize
+
+The framebuffer squashed by scr_pixelaspect -- the logical extent the four
+scaled canvases size themselves against, where they used to use glwidth and
+glheight directly.  Ironwail's vid.guiwidth / vid.guiheight, computed here
+rather than cached because gl_postprocess.c reassigns glwidth for the duration
+of a scaled 3D pass and a cached copy would disagree with it.  uhexen2-a5nn.37
+
+At the default aspect of 1 both are exactly glwidth and glheight, so every
+caller below is unchanged at the default -- which is the property the whole
+change is verified on.
+================
+*/
+void SCR_GuiSize (int *w, int *h)
+{
+	float	a = vid.guipixelaspect;
+
+	if (a <= 0.0f)
+		a = 1.0f;
+	*w = (int)((float)glwidth  / q_max (a, 1.0f));
+	*h = (int)((float)glheight * q_min (a, 1.0f));
+	if (*w < 1) *w = 1;
+	if (*h < 1) *h = 1;
+}
+
+/*
+================
 SCR_CalcUIScale
 
 Resolves a UI scale cvar. Zero (default) means "auto" — picks an
@@ -2076,12 +2113,19 @@ float SCR_CalcUIScale (cvar_t *user)
 	float s = (user) ? user->value : 0.0f;
 	if (s <= 0.0f)
 	{
-		/* auto: 1x up to 480p, 2x at 960p, 3x at 1440p, ... */
-		s = floorf ((float)glheight / 480.0f);
+		/* auto: 1x up to 480p, 2x at 960p, 3x at 1440p, ...
+		 * Off the SQUASHED height, so a stretched interface does not keep
+		 * a scale chosen for the room it no longer has.  Upstream's scale
+		 * clamps read vid.guiheight for the same reason.  uhexen2-a5nn.37 */
+		int	gw, gh;
+		SCR_GuiSize (&gw, &gh);
+		(void) gw;
+		s = floorf ((float)gh / 480.0f);
 		if (s < 1.0f) s = 1.0f;
 	}
 	return s;
 }
+
 
 /*
 ================
@@ -2100,16 +2144,19 @@ rather than to a readout with its right half off-screen.
 float SCR_InfoCanvasSize (int *w, int *h)
 {
 	float	s = SCR_CalcUIScale (&scr_infoscale);
+	int	gw, gh;
 
-	s = q_min (s, (float)glwidth / 320.0f);
-	s = q_min (s, (float)glheight / 240.0f);
+	SCR_GuiSize (&gw, &gh);
+
+	s = q_min (s, (float)gw / 320.0f);
+	s = q_min (s, (float)gh / 240.0f);
 	if (s < 1.0f)
 		s = 1.0f;
 
 	if (w)
-		*w = (int)((float)glwidth / s);
+		*w = (int)((float)gw / s);
 	if (h)
-		*h = (int)((float)glheight / s);
+		*h = (int)((float)gh / s);
 	return s;
 }
 
@@ -2128,9 +2175,18 @@ void GL_SetCanvas (canvastype newcanvas)
 {
 	float	s;
 	int	w, h;
+	/* The canvas's logical extent is the framebuffer squashed by
+	 * scr_pixelaspect; its VIEWPORT is still in real pixels.  px/py convert
+	 * between the two, and are 1 at the default aspect.  uhexen2-a5nn.37 */
+	int	gw, gh;
+	float	px, py;
 
 	if (newcanvas == currentcanvas)
 		return;
+
+	SCR_GuiSize (&gw, &gh);
+	px = (float)glwidth  / (float)gw;
+	py = (float)glheight / (float)gh;
 
 	/* Flush any pending glyph quads under the OLD projection before
 	 * we reload the matrices for the new canvas. */
@@ -2150,9 +2206,9 @@ void GL_SetCanvas (canvastype newcanvas)
 	case CANVAS_SBAR:
 		s = SCR_CalcUIScale (&scr_sbarscale);
 		/* clamp so the canvas always fits horizontally */
-		s = q_min (s, (float)glwidth / (float)SBAR_CANVAS_W);
-		w = (int)((float)SBAR_CANVAS_W * s);
-		h = (int)((float)(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H) * s);
+		s = q_min (s, (float)gw / (float)SBAR_CANVAS_W);
+		w = (int)((float)SBAR_CANVAS_W * s * px);
+		h = (int)((float)(SBAR_CANVAS_BUMP_H + SBAR_CANVAS_TOP_H + SBAR_CANVAS_BOT_H) * s * py);
 		/* viewport anchored to the bottom of the screen, centered horizontally */
 		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
 		/* logical y: [0, total_h]. y=0 is the top of the canvas (top of bumps
@@ -2166,8 +2222,8 @@ void GL_SetCanvas (canvastype newcanvas)
 	case CANVAS_MENU:
 		s = SCR_CalcUIScale (&scr_menuscale);
 		/* Clamp horizontally so the 320-wide canvas fits the screen. */
-		s = q_min (s, (float)glwidth / 320.0f);
-		w = (int)(320.0f * s);
+		s = q_min (s, (float)gw / 320.0f);
+		w = (int)(320.0f * s * px);
 		/* Canvas fills the screen vertically — same convention as the
 		 * pre-canvas menu (logical y maps 1:1 onto pixel y at scale=1,
 		 * grows with scale). Logical height = glheight / s so items
@@ -2177,7 +2233,7 @@ void GL_SetCanvas (canvastype newcanvas)
 		 * left) the canvas covers the full screen height. */
 		h = glheight;
 		glViewport_fp (glx + (glwidth - w) / 2, gly, w, h);
-		GL_Ortho (0, 320, (float)glheight / s, 0, -99999, 99999);
+		GL_Ortho (0, 320, (float)gh / s, 0, -99999, 99999);
 		break;
 	case CANVAS_INFO:
 		SCR_InfoCanvasSize (&w, &h);
@@ -2186,10 +2242,10 @@ void GL_SetCanvas (canvastype newcanvas)
 		break;
 	case CANVAS_CROSSHAIR:
 		s = SCR_CalcUIScale (&scr_crosshairscale);
-		s = q_min (s, (float)glwidth / 32.0f);
-		s = q_min (s, (float)glheight / 32.0f);
-		w = (int)(glwidth / s);
-		h = (int)(glheight / s);
+		s = q_min (s, (float)gw / 32.0f);
+		s = q_min (s, (float)gh / 32.0f);
+		w = (int)(gw / s);
+		h = (int)(gh / s);
 		glViewport_fp (glx, gly, glwidth, glheight);
 		/* keep crosshair coords aligned with vrect (3D viewport) */
 		GL_Ortho (0, w, h, 0, -99999, 99999);

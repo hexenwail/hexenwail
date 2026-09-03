@@ -266,6 +266,11 @@ static void VID_SetSoftMode (int mode)
 
 	vid.width = vid.conwidth = width;
 	vid.height = vid.conheight = height;
+	/* The 8bpp target has no scaled canvases and draws into a real pixel
+	 * buffer, so scr_pixelaspect is not registered here (an inert archived
+	 * cvar is the uhexen2-a5nn.38 bug).  Square is the standing answer for
+	 * anything shared that asks.  uhexen2-a5nn.37 */
+	vid.guipixelaspect = 1.0f;
 	vid.rowbytes = vid.conrowbytes = width;
 	vid.buffer = vid.conbuffer = vid.direct = vid_framebuffer;
 	vid.aspect = ((float)height / (float)width) * (320.0f / 240.0f);

@@ -298,6 +298,23 @@ static cvar_t	vid_config_consize = {"vid_config_consize", "640", CVAR_ARCHIVE};
  */
 static cvar_t	alias_scr_conwidth = {"scr_conwidth", "640", CVAR_NONE};
 static cvar_t	scr_conscale = {"scr_conscale", "0", CVAR_ARCHIVE};
+/* --- the 2D pixel aspect -------------------------------------------------
+ *
+ * Ironwail's scr_pixelaspect, name and default verbatim.  Displayed pixel
+ * width / height for the INTERFACE: 1 is square, and "5:6" is the 320x200
+ * stretched over 4:3 look the original games were authored for.  Accepts
+ * either a "num:denom" string or a plain number, clamped to 0.5..2, all of
+ * which is upstream's VID_RecalcInterfaceSize verbatim.
+ *
+ * NOT the same knob as vid_pixelaspect (uhexen2-c01c), which answers the same
+ * question for the 3D field of view and has nothing to do with the 2D canvas.
+ * The names are this close because the concept is the same and the two things
+ * it is applied to are not; each cvar's comment points at the other, which is
+ * the one case where two similar names beats renaming either.
+ *
+ * uhexen2-a5nn.37
+ */
+static cvar_t	scr_pixelaspect = {"scr_pixelaspect", "1", CVAR_ARCHIVE};
 /* Raised around every engine-side write to the pair, so a writeback cannot
  * re-enter the callback that produced it. */
 static qboolean	vid_consize_recalc = false;
@@ -787,6 +804,7 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_ResizeCanvas (int css_width, int css_height)
 	WRHeight = dh;
 	vid.width = vid.conwidth = WRWidth;
 	vid.height = vid.conheight = WRHeight;
+	VID_RecalcInterfaceSize ();
 	{
 		/* The browser resized us; the player did not ask for anything, so
 		 * do not tell them a vid_restart is pending. */
@@ -898,6 +916,70 @@ static int VID_ResolveConWidth (int modewidth)
 	return modewidth;
 }
 
+/*
+================
+VID_RecalcInterfaceSize
+
+Resolves scr_pixelaspect and re-derives the 2D canvas from the console
+geometry.  Ironwail's VID_RecalcInterfaceSize: same parser, same 0.5..2 clamp,
+same two formulas.  uhexen2-a5nn.37
+
+What it is applied to is where this diverges.  Upstream squashes the
+framebuffer and derives the console FROM the result; here the console size is
+computed first, by machinery (VID_ConWidth, VID_ChangeConsize,
+vid_config_consize) that clamps against modelist[] and archives what it
+settles on, and squashing its inputs would put a non-integral height into
+arithmetic that round-trips through a cvar.  So conwidth/conheight stay the
+console's own geometry and vid.width/vid.height become that geometry squashed
+-- which is what CANVAS_DEFAULT orthos to and what every 2D draw call already
+reads, so the whole console-scaled half of the interface follows with no call
+site changed.
+
+Derived, never accumulated: it always recomputes from conwidth/conheight, so
+setting the cvar twice does not squash twice.
+================
+*/
+void VID_RecalcInterfaceSize (void)
+{
+	float	num, denom, a = 1.0f;
+
+	if (scr_pixelaspect.string && *scr_pixelaspect.string)
+	{
+		if (sscanf (scr_pixelaspect.string, "%f:%f", &num, &denom) == 2)
+		{
+			if (num != 0.0f && denom != 0.0f)
+				a = q_max (0.5f, q_min (num / denom, 2.0f));
+		}
+		else if (scr_pixelaspect.value != 0.0f)
+			a = q_max (0.5f, q_min (scr_pixelaspect.value, 2.0f));
+	}
+	vid.guipixelaspect = a;
+
+	if (vid.conwidth > 0 && vid.conheight > 0)
+	{
+		vid.width  = (int)((float)vid.conwidth  / q_max (a, 1.0f));
+		vid.height = (int)((float)vid.conheight * q_min (a, 1.0f));
+		if (vid.width < 1)  vid.width = 1;
+		if (vid.height < 1) vid.height = 1;
+	}
+}
+
+/*
+================
+VID_PixelAspect_f -- called when scr_pixelaspect changes
+
+Applies immediately, the way scr_conwidth and scr_conscale do -- this is an
+ordinary cvar a player types, and one that did nothing until the next
+vid_restart would be indistinguishable from one nothing reads.
+================
+*/
+static void VID_PixelAspect_f (cvar_t *var)
+{
+	(void) var;
+	VID_RecalcInterfaceSize ();
+	vid.recalc_refdef = 1;
+}
+
 static void VID_ConWidth (int modenum)
 {
 	const int	modewidth = modelist[modenum].width;
@@ -947,6 +1029,7 @@ static void VID_ConWidth (int modenum)
 	}
 	vid.width = vid.conwidth = w;
 	vid.height = vid.conheight = h;
+	VID_RecalcInterfaceSize ();
 	vid_conscale = (w != modewidth);
 }
 
@@ -1020,6 +1103,7 @@ static void VID_ConSize_f (cvar_t *var)
 	{
 		vid.width = vid.conwidth = WRWidth;
 		vid.height = vid.conheight = WRHeight;
+		VID_RecalcInterfaceSize ();
 		/* The player just said what they want; the "do not re-shrink at
 		 * a bigger mode" guard is about mode changes, not about this. */
 		vid_conscale = true;
@@ -1059,6 +1143,7 @@ void VID_ChangeConsize (int dir)
 		return;
 	vid.width = vid.conwidth = w;
 	vid.height = vid.conheight = h;
+	VID_RecalcInterfaceSize ();
 	/* The menu's +/- is an explicit width, so it moves the console onto
 	 * vid_config_consize and takes scr_conscale out of the picture.  Leaving
 	 * the multiplier set would win it back at the next mode change and the
@@ -1577,6 +1662,7 @@ static qboolean VID_SetMode (int modenum)
 	}
 	vid.width = vid.conwidth = WRWidth;
 	vid.height = vid.conheight = WRHeight;
+	VID_RecalcInterfaceSize ();
 
 	// setup the effective console width
 	VID_ConWidth(modenum);
@@ -2818,6 +2904,8 @@ void	VID_Init (const unsigned char *palette)
 	 * outright and silently stop firing. */
 	Cvar_SetCallback (&vid_config_consize, VID_ConSize_f);
 	Cvar_SetCallback (&scr_conscale, VID_ConSize_f);
+	Cvar_RegisterVariable (&scr_pixelaspect);
+	Cvar_SetCallback (&scr_pixelaspect, VID_PixelAspect_f);
 	Cvar_RegisterAlias (&alias_scr_conwidth, &vid_config_consize);
 	Cvar_RegisterVariable (&vid_mode);
 	Cvar_RegisterVariable (&_enable_mouse);
@@ -3159,6 +3247,7 @@ void VID_ToggleFullscreen (void)
 		WRHeight = dh;
 		vid.width = vid.conwidth = WRWidth;
 		vid.height = vid.conheight = WRHeight;
+		VID_RecalcInterfaceSize ();
 		Cvar_SetValueQuick (&vid_config_glx, WRWidth);
 		Cvar_SetValueQuick (&vid_config_gly, WRHeight);
 		Cvar_SetValueQuick(&vid_config_fscr, vid_menu_fs);

@@ -74,6 +74,26 @@ typedef struct
 	int		conrowbytes;
 	int		conwidth;
 	int		conheight;
+	/* Displayed pixel width / height for the 2D INTERFACE -- scr_pixelaspect
+	 * resolved to a number, 1 being square.  uhexen2-a5nn.37.
+	 *
+	 * Unrelated to VID_PixelAspect(), which answers the same question for
+	 * the 3D field of view; see vid_pixelaspect and the comment on
+	 * scr_pixelaspect in gl_vidsdl.c, each of which points at the other.
+	 *
+	 * Only the scalar is stored, deliberately.  The two squashed sizes it
+	 * implies have different lifetimes: vid.width/vid.height above are the
+	 * console canvas squashed and are recomputed with it (conwidth and
+	 * conheight keep the unsquashed geometry the VID_ConWidth machinery
+	 * clamps and archives), while the four scaled canvases squash
+	 * glwidth/glheight -- which gl_postprocess.c reassigns for the duration
+	 * of a scaled 3D pass.  Caching that one would make render scale and
+	 * the interface disagree for part of a frame, so GL_SetCanvas derives
+	 * it where it uses it.
+	 *
+	 * At the default both derivations are identities, which is what makes
+	 * this verifiable: scr_pixelaspect 1 has to be pixel-identical. */
+	float		guipixelaspect;
 	int		maxwarpwidth;
 	int		maxwarpheight;
 	pixel_t		*direct;	// direct drawing to framebuffer,
@@ -92,6 +112,10 @@ extern	unsigned int	d_8to24table[256];
 extern	unsigned int	d_8to24TranslucentTable[256];
 
 extern	cvar_t		_enable_mouse;
+
+void VID_RecalcInterfaceSize (void);
+// resolve scr_pixelaspect into vid.guipixelaspect and re-derive vid.width /
+// vid.height from the console geometry.  uhexen2-a5nn.37
 
 float VID_PixelAspect (void);
 // displayed pixel width / height; 1.0 unless a fullscreen mode is being

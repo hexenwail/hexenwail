@@ -1291,12 +1291,17 @@ static void SCR_DrawDemoBar (void)
 		/* CANVAS_MENU is 320 wide and as tall as the screen divided by the
 		 * menu scale; mirror GL_SetCanvas's own math to find the bottom.
 		 * Ironwail sits the bar 1/8 of the way up from there. */
+		/* Mirrors CANVAS_MENU's own sizing, so it has to square the same
+		 * way: logical extent is the framebuffer squashed by
+		 * scr_pixelaspect.  uhexen2-a5nn.37 */
+		int	gw, gh;
+		SCR_GuiSize (&gw, &gh);
 		s = SCR_CalcUIScale (&scr_menuscale);
-		if (s > (float)glwidth / (float)UI_CANVAS_WIDTH)
-			s = (float)glwidth / (float)UI_CANVAS_WIDTH;
+		if (s > (float)gw / (float)UI_CANVAS_WIDTH)
+			s = (float)gw / (float)UI_CANVAS_WIDTH;
 		if (s < 0.0001f)
 			s = 1.0f;
-		y = (int)((float)glheight / s) * 7 / 8;
+		y = (int)((float)gh / s) * 7 / 8;
 	}
 	else
 	{
@@ -2201,7 +2206,7 @@ SCR_TileClear
 */
 static void SCR_TileClear (void)
 {
-    if (vid.conwidth > 320) {
+    if (vid.width > 320) {	/* canvas extent, not console geometry (a5nn.37) */
 	if (r_refdef.vrect.x > 0)
 	{
 		// left

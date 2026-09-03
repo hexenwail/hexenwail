@@ -824,7 +824,7 @@ static void M_Main_Draw (void)
 	 * the same |0x100 charset. */
 	{
 		const char *r = M_RendererName();
-		int i, y = vid.conheight - 14;
+		int i, y = vid.height - 14;	/* CANVAS_DEFAULT extent (a5nn.37) */
 
 		GL_SetCanvas (CANVAS_DEFAULT);
 		for (i = 0; r[i]; i++)
@@ -2318,6 +2318,7 @@ enum
 	DISP_CONTRAST,
 #ifdef GLQUAKE
 	DISP_CONSCALE,
+	DISP_PIXELASPECT,
 #endif
 	DISP_SCRSIZE,
 	DISP_RENDERING,	/* enters rendering submenu */
@@ -2347,6 +2348,7 @@ static const char *disp_labels[DISP_ITEMS] = {
 	"Contrast      :",	/* DISP_CONTRAST */
 #ifdef GLQUAKE
 	"Console Scale :",	/* DISP_CONSCALE */
+	"2D Aspect     :",	/* DISP_PIXELASPECT */
 #endif
 	"HUD Layout    :",	/* DISP_SCRSIZE */
 	"Rendering",		/* DISP_RENDERING */
@@ -2596,6 +2598,12 @@ static void M_Display_AdjustSliders (int dir)
 	case DISP_CONSCALE:
 		VID_ChangeConsize(dir);
 		break;
+	case DISP_PIXELASPECT:
+		/* Upstream's two values and its toggle, not a slider: the point of
+		 * the setting is the 320x200-over-4:3 look, and the values between
+		 * are a way to get neither.  uhexen2-a5nn.37 */
+		Cvar_Set ("scr_pixelaspect", vid.guipixelaspect == 1.0f ? "5:6" : "1");
+		break;
 #endif
 	case DISP_SCRSIZE:
 	{
@@ -2705,6 +2713,13 @@ static void M_Display_Draw (void)
 		M_Print (76, 92 + 8*DISP_CONSCALE, disp_labels[DISP_CONSCALE]);
 		r = VID_ReportConsize();
 		M_DrawSliderValue (220, 92 + 8*DISP_CONSCALE, (r-1)/2, "%.2fx", r);
+	}
+
+	if (!M_Display_IsSkip(DISP_PIXELASPECT))
+	{
+		M_Print (76, 92 + 8*DISP_PIXELASPECT, disp_labels[DISP_PIXELASPECT]);
+		M_Print (220, 92 + 8*DISP_PIXELASPECT,
+			 vid.guipixelaspect == 1.0f ? "Square" : "Stretched");
 	}
 #endif
 

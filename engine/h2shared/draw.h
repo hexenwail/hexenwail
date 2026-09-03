@@ -146,6 +146,11 @@ extern cvar_t scr_infoscale;
 extern cvar_t scr_conalpha;
 extern cvar_t scr_conbrightness;
 
+/* The framebuffer squashed by scr_pixelaspect -- the logical extent the scaled
+ * canvases size themselves against, and what SCR_CalcUIScale's auto reads.
+ * Both are exactly glwidth/glheight at the default aspect.  uhexen2-a5nn.37 */
+void SCR_GuiSize (int *w, int *h);
+
 float SCR_CalcUIScale (cvar_t *user);
 
 /* CANVAS_INFO's logical size, and the scale it resolved to.  Either pointer may
