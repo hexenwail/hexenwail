@@ -15,21 +15,12 @@ engine/build*/
 *.o
 *.d
 
-# bv (beads viewer) local config and caches
+# The beads (bd) issue tracker is retired; nothing under .beads/ is tracked any
+# more, including the issues.jsonl export that used to be.  The rules stay so a
+# leftover local install -- the Dolt database alone runs to ~100 MB -- cannot
+# walk back into the history it was just taken out of.
+.beads/
 .bv/
-
-# .beads/* rather than .beads/, so that the one tracked file in there can be
-# re-included below.  bd stages .beads/issues.jsonl itself after every
-# mutating command, and `git add` refuses any path underneath an ignored
-# *directory* -- even a tracked one, and even when the file itself matches no
-# ignore rule.  With the directory ignored, every bd command ended in
-# "Warning: auto-export: git add failed: exit status 1" and the export had to
-# be staged by hand with `git add -u`.  Ignoring the contents instead leaves
-# the directory visible, so the negation works and bd stages cleanly.
-# Everything else under .beads/ (the Dolt database, server pid/log/port
-# files, ephemeral sqlite, backups) stays ignored by the glob.
-.beads/*
-!.beads/issues.jsonl
 
 # RenderDoc captures and the artifacts of picking one apart.  A .rdc is tens
 # to hundreds of MB (the three sitting in this tree when the rule was widened
@@ -46,7 +37,7 @@ engine/build*/
 /capture*_frame*
 /torch_glow_ab*
 
-# Beads / Dolt files (added by bd init)
+# Dolt working files, left behind by the retired beads tracker.
 .dolt/
 *.db
 .beads-credential-key

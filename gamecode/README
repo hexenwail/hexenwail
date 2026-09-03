@@ -8,8 +8,8 @@ Everything from 2022-06-12 (1.29c) down is Raven's and uHexen2's history.
 Above it are the Hexenwail fork's own divergences from 1.29c, newest first.
 The policy is that our .hc wins and every divergence gets recorded here, so
 that anyone auditing why our progs.dat differs from Raven's can read this file
-instead of diffing.  Bracketed ids are beads issues; run "bd show <id>" for the
-full investigation.
+instead of diffing.  Bracketed ids are issues from the retired tracker; search
+the git log for one to find the commit that carries the full investigation.
 
 Sibling forks are vendored under gamecode/vendor/ as submodules, so that "what
 have they found that we have not looked at?" is answerable with git log.  They
