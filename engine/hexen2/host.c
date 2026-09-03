@@ -145,6 +145,15 @@ cvar_t	pausable = {"pausable", "1", CVAR_NONE};
 
 cvar_t	temp1 = {"temp1", "0", CVAR_NONE};
 
+/* Puts the level, the skill and the kill/secret counts in the window title, so
+ * a second monitor or a taskbar entry says where you are without the game
+ * having to be visible.  Ironwail's name, default and CVAR_ARCHIVE verbatim, so
+ * a config written by either engine means the same thing in both.
+ *
+ * The bead that queued this called it a "stats readout on the title/demo
+ * screens"; it is the OS window title.  uhexen2-a5nn.34 */
+cvar_t	cl_titlestats = {"cl_titlestats", "1", CVAR_ARCHIVE};
+
 
 /*
 ===============================================================================
@@ -456,6 +465,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&noexit);
 	Cvar_SetCallback (&noexit, Host_Callback_Notify);
 	Cvar_RegisterVariable (&skill);
+	Cvar_RegisterVariable (&cl_titlestats);
 	Cvar_RegisterVariable (&startmap);
 	Cvar_RegisterVariable (&coop);
 	Cvar_RegisterVariable (&deathmatch);
@@ -925,6 +935,97 @@ Host_Frame
 Runs all active servers
 ==================
 */
+/*
+==================
+Host_PlainText
+
+Copies a game string into a buffer an OS window title can carry.  Two things
+have to go: the high bit, which in this lineage's charset selects the second
+(gold) glyph row rather than a different character, and anything below space,
+which a title bar has no way to draw.  Everything else passes through, so a
+level name reaches the taskbar as the words the map author wrote.
+==================
+*/
+static void Host_PlainText (char *dst, size_t dstsize, const char *src)
+{
+	size_t	n = 0;
+
+	if (!dstsize)
+		return;
+	while (*src && n + 1 < dstsize)
+	{
+		int c = *(const unsigned char *)src++ & 0x7f;
+		dst[n++] = (c < ' ') ? ' ' : (char)c;
+	}
+	dst[n] = '\0';
+}
+
+/*
+==================
+Host_UpdateWindowTitle
+
+Ironwail's cl_titlestats.  Rebuilt at most eight times a second and written
+only when the text actually changes: SDL_SetWindowTitle is a round trip to the
+window manager on X11, and the numbers behind it move on kill and secret
+pickups, not on frames.
+
+Hexen II carries all four of the stats upstream shows -- STAT_MONSTERS /
+STAT_TOTALMONSTERS / STAT_SECRETS / STAT_TOTALSECRETS are written by the server
+in host_cmd.c and bumped on the client by svc_killedmonster / svc_foundsecret --
+so this is a straight port rather than an adaptation.  The secrets pair is kept
+even though Hexen II leans on puzzle pieces instead: a map that sets no secrets
+reads 0/0, which is the truth about that map.
+
+`skill` is the local cvar, so on a remote server it is what this client last
+asked for rather than what that server is running.  Upstream has the same hole
+and it is not worth a protocol field.
+==================
+*/
+static void Host_UpdateWindowTitle (void)
+{
+	static float	timeleft = 0.0f;
+	static char	last[1024];
+	char		title[1024];
+
+	timeleft -= (float)host_frametime;
+	if (timeleft > 0.0f)
+		return;
+	timeleft = 0.125f;
+
+	if (!cl_titlestats.integer || cls.state != ca_connected ||
+	    cls.signon != SIGNONS || !cl.mapname[0])
+	{
+		title[0] = '\0';
+	}
+	else
+	{
+		char	levelname[sizeof(cl.levelname)];
+
+		Host_PlainText (levelname, sizeof(levelname), cl.levelname);
+		if (levelname[0])
+			q_snprintf (title, sizeof(title),
+				    "%s (%s)  |  skill %d  |  %d/%d kills  |  %d/%d secrets  -  ",
+				    levelname, cl.mapname, skill.integer,
+				    cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS],
+				    cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+		else
+			q_snprintf (title, sizeof(title),
+				    "%s  |  skill %d  |  %d/%d kills  |  %d/%d secrets  -  ",
+				    cl.mapname, skill.integer,
+				    cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS],
+				    cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
+	}
+
+	if (!strcmp (title, last))
+		return;
+	q_strlcpy (last, title, sizeof(last));
+
+	/* The build's own name is the tail, and the empty string means "nothing
+	 * but that name" -- which is the video layer's business, not ours, since
+	 * HexenWorld and Hexen II do not share it. */
+	VID_SetWindowTitle (title[0] ? title : NULL);
+}
+
 static void _Host_Frame (float time)
 {
 	static double		time1 = 0;
@@ -1071,6 +1172,8 @@ static void _Host_Frame (float time)
 		Host_WriteConfiguration ("config.cfg");
 		config_flush_time = realtime;
 	}
+
+	Host_UpdateWindowTitle ();
 
 	if (host_speeds.integer)
 	{

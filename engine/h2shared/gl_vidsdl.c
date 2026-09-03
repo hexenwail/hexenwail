@@ -730,6 +730,26 @@ void VID_HandlePause (qboolean paused)
 	}
 }
 
+/*
+================
+VID_SetWindowTitle
+================
+*/
+void VID_SetWindowTitle (const char *title)
+{
+	char	buf[1024];
+
+	if (!window)
+		return;
+	if (!title || !*title)
+	{
+		SDL_SetWindowTitle (window, WM_TITLEBAR_TEXT);
+		return;
+	}
+	q_snprintf (buf, sizeof(buf), "%s%s", title, WM_TITLEBAR_TEXT);
+	SDL_SetWindowTitle (window, buf);
+}
+
 SDL_Window *VID_GetWindow (void)
 {
 	return window;
@@ -1529,7 +1549,7 @@ static qboolean VID_SetMode (int modenum)
 	}
 
 	VID_SetIcon();
-	SDL_SetWindowTitle(window, WM_TITLEBAR_TEXT);
+	VID_SetWindowTitle (NULL);
 
 	VID_ApplyVSync();
 

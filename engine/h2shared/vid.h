@@ -179,6 +179,12 @@ void VID_MenuAdjustAnisotropy (int dir);
 qboolean VID_HasMouseOrInputFocus (void);
 qboolean VID_IsMinimized (void);
 struct SDL_Window *VID_GetWindow (void);
+
+void VID_SetWindowTitle (const char *title);
+// Sets the window title bar.  The build's own name is appended, and NULL means
+// "just that name" -- HexenWorld and Hexen II do not share it, so the caller
+// must not have to know which one this is.  cl_titlestats drives it from the
+// client.  uhexen2-a5nn.34
 void VID_InitMouseCursors (void);
 void VID_SetMouseCursor (mousecursor_t cursor);
 #endif

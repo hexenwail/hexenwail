@@ -575,6 +575,21 @@ void D_ShowLoadingSize (void) {}
 void VID_InitMouseCursors (void) {}
 void VID_SetMouseCursor (mousecursor_t cursor) { (void)cursor; }
 
+void VID_SetWindowTitle (const char *title)
+{
+	char	buf[1024];
+
+	if (!sdl_window)
+		return;
+	if (!title || !*title)
+	{
+		SDL_SetWindowTitle (sdl_window, "Hexen II");
+		return;
+	}
+	q_snprintf (buf, sizeof(buf), "%sHexen II", title);
+	SDL_SetWindowTitle (sdl_window, buf);
+}
+
 SDL_Window *VID_GetWindow (void)
 {
 	return sdl_window;
