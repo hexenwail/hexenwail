@@ -149,6 +149,20 @@ typedef struct
 	ex_inventory_page_t	*ex_inventory_pages;
 	int			num_ex_items;
 
+	/* Autosave scoring state.  Ironwail's sv.autosave, minus prev_secrets'
+	 * hexen2_mode indirection -- found_secrets is a real global here.
+	 * uhexen2-a5nn.31 */
+	struct
+	{
+		float	secret_boost;
+		float	prev_health;
+		float	prev_secrets;
+		double	time;		/* last autosave */
+		double	hurt_time;
+		double	shoot_time;
+		double	cheat;		/* seconds spent noclipping or godmoded */
+	}		autosave;
+
 	/* map_checks bookkeeping, counted by ED_LoadFromFile and reported by
 	 * SV_PrintMapChecklist.  Ironwail's mapchecks_t; the counters are the
 	 * same, the classnames they count are audited for Hexen II in

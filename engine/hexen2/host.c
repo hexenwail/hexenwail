@@ -148,6 +148,17 @@ cvar_t	developer = {"developer", "0", CVAR_ARCHIVE};
  * a setting.  uhexen2-a5nn.34 */
 cvar_t	map_checks = {"map_checks", "0", CVAR_NONE};
 
+/* Autosave.  Ironwail's names and defaults verbatim.  It does not save on a
+ * timer -- see Host_CheckAutosave for what the interval actually scales.
+ * uhexen2-a5nn.31
+ *
+ * sv_autoload is deliberately NOT here.  Upstream's third cvar reloads the
+ * last save on death, and that half has not been written; registering it now
+ * would archive a value that reads back correctly and does nothing, which is
+ * the exact thing uhexen2-a5nn.38 had to go back and fix. */
+cvar_t	sv_autosave = {"sv_autosave", "1", CVAR_ARCHIVE};
+cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
+
 cvar_t	skill = {"skill", "1", CVAR_NONE};		// 0 - 3
 cvar_t	startmap = {"startmap", "", CVAR_NONE};	// mods can override in autoexec.cfg
 cvar_t	coop = {"coop", "0", CVAR_NONE};		// 0 or 1
@@ -466,6 +477,8 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&developer);
 	Cvar_RegisterVariable (&map_checks);
 	Cvar_SetCallback (&map_checks, Map_Checks_f);
+	Cvar_RegisterVariable (&sv_autosave);
+	Cvar_RegisterVariable (&sv_autosave_interval);
 	if (COM_CheckParm("-developer"))
 	{
 		Cvar_Set ("developer", "1");
@@ -879,6 +892,159 @@ static void Host_GetConsoleCommands (void)
 }
 
 
+/*
+==================
+Host_CheckAutosave
+
+Ironwail's autosave, which is not a timer.  It scores the moment and saves when
+the score crosses 1, so it lands when you are standing still with your health
+up rather than mid-fight, and sv_autosave_interval scales that score rather
+than counting down to anything.  uhexen2-a5nn.31
+
+THE ARMOUR TERM IS THE ONE REAL ADAPTATION, and it is the difference between
+porting this and appearing to.  Upstream weights the score by
+health + armortype * armorvalue.  Both fields exist in our entvars because they
+are inherited from Quake, and Raven's gamecode never writes either: Hexen II
+armour is four independent additive pieces (armor_amulet, armor_bracer,
+armor_breastplate, armor_helmet), which is why Sbar draws four "+N"s.  Ported
+literally the term is always zero, the score collapses to health/100, and the
+"save less often while hurt and unarmoured" behaviour disappears without
+anything looking wrong.  So the four are summed instead.
+
+Upstream already special-cases Hexen II here for found_secrets and did NOT do
+so for armour, so this is not something that could have been copied across.
+found_secrets needs no indirection on our side -- it is a real global.
+
+The autosave never waits on the threaded save path.  A save already in flight
+means this turn is skipped, not stalled: the score will cross again in a
+moment, and a server frame blocking on disk is a worse outcome than a save that
+happens two seconds later.
+==================
+*/
+static void Host_CheckAutosave (void)
+{
+	float	health_change, speed, armour;
+	double	elapsed;
+	float	score;
+	edict_t	*ply;
+
+	if (!sv.active || !sv_autosave.integer || sv_autosave_interval.value <= 0.0f)
+		return;
+	if (svs.maxclients != 1 || sv.paused || cl.intermission)
+		return;
+
+	ply = sv_player;
+	if (!ply || ply->free || ply->v.health <= 0.0f)
+		return;
+
+	if (cls.signon == SIGNONS)
+	{
+		/* Track new secrets */
+		if (*sv_globals.found_secrets != sv.autosave.prev_secrets)
+		{
+			sv.autosave.prev_secrets = *sv_globals.found_secrets;
+			sv.autosave.secret_boost = 1.0f;
+		}
+		else
+			sv.autosave.secret_boost = q_max (0.0f,
+				sv.autosave.secret_boost - (float)host_frametime / 1.5f);
+	}
+
+	/* Track health changes */
+	if (!sv.autosave.prev_health)
+		sv.autosave.prev_health = ply->v.health;
+	health_change = ply->v.health - sv.autosave.prev_health;
+	if (health_change < 0.0f)
+	{
+		if (health_change < -3.0f || ply->v.health < 100.0f ||
+		    ply->v.watertype == CONTENTS_SLIME || ply->v.watertype == CONTENTS_LAVA)
+			sv.autosave.hurt_time = sv.time;
+	}
+	sv.autosave.prev_health = ply->v.health;
+
+	/* Track attacking */
+	if (ply->v.button0)
+		sv.autosave.shoot_time = sv.time;
+
+	/* Time spent with cheats active doesn't count */
+	if (ply->v.movetype == MOVETYPE_NOCLIP || ((int)ply->v.flags & (FL_GODMODE|FL_NOTARGET)))
+	{
+		sv.autosave.cheat += host_frametime;
+		return;
+	}
+
+	/* Don't save if the player has been hurt recently */
+	if (sv.time - sv.autosave.hurt_time < 3.0)
+		return;
+
+	/* Don't save if the player has fired recently */
+	if (sv.time - sv.autosave.shoot_time < 3.0)
+		return;
+
+	/* Only save when the player slows down a bit */
+	speed = VectorLength (ply->v.velocity);
+	if (speed > 100.0f)
+		return;
+
+	/* Copper's func_void holds the player at the bottom for a bit before
+	 * inflicting damage, so being no longer in the air is not proof it is
+	 * safe to save. */
+	if ((int)ply->v.movetype == MOVETYPE_NONE)
+		return;
+
+	/* Don't save too often */
+	elapsed = sv.time - sv.autosave.time - sv.autosave.cheat;
+	if (elapsed < 3.0)
+		return;
+
+	/* A save already running: skip this turn rather than block the frame. */
+	if (Host_IsSaving())
+		return;
+
+	/* Base value is the fraction of the autosave interval already passed */
+	score = (float)elapsed / sv_autosave_interval.value;
+	/* Scale down when health + armour is below 100 (save less often when hurt).
+	 * The four Hexen II pieces in place of Quake's armortype * armorvalue. */
+	armour = ply->v.armor_amulet + ply->v.armor_bracer +
+		 ply->v.armor_breastplate + ply->v.armor_helmet;
+	score *= q_min (100.0f, ply->v.health + armour) / 100.0f;
+	/* Boost right after picking up health */
+	score += q_max (0.0f, health_change) / 100.0f;
+	/* Lower a bit with speed (favour standing still) */
+	score -= (speed / 100.0f) * 0.25f;
+	/* Boost after finding a secret */
+	score += sv.autosave.secret_boost * 0.25f;
+	/* Boost after teleporting */
+	{
+		float	tele = 1.0f - (float)(sv.time - ply->v.teleport_time) / 1.5f;
+		score += q_max (0.0f, q_min (tele, 1.0f)) * 0.5f;
+	}
+
+	if (score < 1.0f)
+		return;
+
+	sv.autosave.time = sv.time;
+	sv.autosave.cheat = 0;
+
+	/* A save is a DIRECTORY here, not a file, and Sys_mkdir does not make
+	 * parents -- so "autosave/<map>" needs its parent first or the save
+	 * fails on a clean userdir every time. */
+	{
+		char	dir[MAX_OSPATH], name[MAX_QPATH];
+		int	err;
+
+		FS_MakePath_BUF (FS_USERDIR, &err, dir, sizeof(dir), "autosave");
+		if (err)
+			return;
+		Sys_mkdir (dir, false);	/* may already exist; the save below reports real failures */
+
+		q_snprintf (name, sizeof(name), "autosave/%s", sv.name);
+		if (Host_SaveGameToName (name, true))
+			Con_DPrintf ("Autosaved to %s (score %.2f)\n", name, score);
+	}
+}
+
+
 //#define FPS_20
 
 /*
@@ -933,6 +1099,8 @@ static void Host_ServerFrame (void)
 
 // send all messages to the clients
 	SV_SendClientMessages ();
+
+	Host_CheckAutosave ();
 }
 
 #else
@@ -958,6 +1126,8 @@ static void Host_ServerFrame (void)
 
 // send all messages to the clients
 	SV_SendClientMessages ();
+
+	Host_CheckAutosave ();
 }
 
 #endif

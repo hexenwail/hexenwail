@@ -634,14 +634,109 @@ static void Host_SavegameComment (char *text)
 
 /*
 ===============
+Host_SaveGameToName
+
+The body of the save command, addressed by name rather than by Cmd_Argv, so
+something other than a player at the console can ask for a save.  Split out for
+the autosave (uhexen2-a5nn.31), which wants exactly this and no second argument
+-- upstream's autosave passes one to its own save command, and growing ours to
+match would put an argument at the console that nobody asked for.
+
+Returns false and says why if it declines.  `quiet` suppresses the "Saving game
+to ..." line only; refusals are always printed, because a save that did not
+happen is worth a line whoever asked for it.
+===============
+*/
+qboolean Host_SaveGameToName (const char *p, qboolean quiet)
+{
+	int		i, error_state;
+
+	if (!p || !*p || *p == '.' || strstr(p, ".."))
+	{
+		Con_Printf ("Invalid save name.\n");
+		return false;
+	}
+
+	for (i = 0; i < svs.maxclients; i++)
+	{
+		if (svs.clients[i].active && (svs.clients[i].edict->v.health <= 0) )
+		{
+			Con_Printf ("Can't savegame with a dead player\n");
+			return false;
+		}
+	}
+
+	if (Host_IsSaving()) {
+		Con_Printf ("Save: waiting for previous save to finish...\n");
+		Host_WaitForSaveThread();
+	}
+
+	error_state = SaveGamestate (false);
+	// don't bother doing more if SaveGamestate failed
+	if (error_state)
+		return false;
+
+	FS_MakePath_BUF (FS_USERDIR, &error_state, savename, sizeof(savename), p);
+	if (error_state)
+	{
+		Con_Printf ("%s: save directory name too long\n", __thisfunc__);
+		return false;
+	}
+	if (Sys_mkdir(savename, false) != 0)
+	{
+		Con_Printf ("Unable to create save directory\n");
+		return false;
+	}
+
+	/* Unlink stale clients.gip before worker copies */
+	{
+		char tmppath[MAX_OSPATH];
+		FS_MakePath_BUF(FS_USERDIR, NULL, tmppath, sizeof(tmppath), "clients.gip");
+		Sys_unlink(tmppath);
+	}
+
+	FS_MakePath_BUF (FS_USERDIR, NULL, savedest, sizeof(savedest), p);
+	if (!quiet)
+		Con_Printf ("Saving game to %s...\n", savedest);
+
+	{
+		savedata_t sd;
+		memset(&sd, 0, sizeof(sd));
+		sd.version        = SAVEGAME_VERSION;
+		Host_SavegameComment(sd.comment);
+		for (i = 0; i < NUM_SPAWN_PARMS; i++)
+			sd.spawn_parms[i] = svs.clients->spawn_parms[i];
+		sd.current_skill  = current_skill;
+		q_strlcpy(sd.mapname, sv.name, sizeof(sd.mapname));
+		sd.sv_time        = (float)sv.time;
+		sd.maxclients     = svs.maxclients;
+		sd.deathmatch_val = deathmatch.value;
+		sd.coop_val       = coop.value;
+		sd.teamplay_val   = teamplay.value;
+		sd.randomclass_val= randomclass.value;
+		sd.playerclass_val= cl_playerclass.value;
+		sd.info_mask      = info_mask;
+		sd.info_mask2     = info_mask2;
+		/* Client-side inventory selection: not an entity field, so this adds
+		 * nothing to the .gip entity data and leaves gamecode/fieldsets alone.
+		 * The writers append it as the last line of info.dat.  uhexen2-1knr. */
+		sd.inv_artifact   = SB_GetSelectedArtifact();
+		FS_MakePath_BUF(FS_USERDIR, NULL, sd.savedest, sizeof(sd.savedest), p);
+		q_strlcpy(sd.userdir, FS_GetUserdir(), sizeof(sd.userdir));
+		Host_SubmitSave(&sd);
+	}
+
+	return true;
+}
+
+
+/*
+===============
 Host_Savegame_f
 ===============
 */
 static void Host_Savegame_f (void)
 {
-	int		i, error_state;
-	const char	*p;
-
 	if (cmd_source != src_command)
 		return;
 
@@ -671,80 +766,7 @@ static void Host_Savegame_f (void)
 		return;
 	}
 
-	p = Cmd_Argv(1);
-	if (*p == '.' || strstr(p, ".."))
-	{
-		Con_Printf ("Invalid save name.\n");
-		return;
-	}
-
-	for (i = 0; i < svs.maxclients; i++)
-	{
-		if (svs.clients[i].active && (svs.clients[i].edict->v.health <= 0) )
-		{
-			Con_Printf ("Can't savegame with a dead player\n");
-			return;
-		}
-	}
-
-	if (Host_IsSaving()) {
-		Con_Printf ("Save: waiting for previous save to finish...\n");
-		Host_WaitForSaveThread();
-	}
-
-	error_state = SaveGamestate (false);
-	// don't bother doing more if SaveGamestate failed
-	if (error_state)
-		return;
-
-	FS_MakePath_BUF (FS_USERDIR, &error_state, savename, sizeof(savename), p);
-	if (error_state)
-	{
-		Con_Printf ("%s: save directory name too long\n", __thisfunc__);
-		return;
-	}
-	if (Sys_mkdir(savename, false) != 0)
-	{
-		Con_Printf ("Unable to create save directory\n");
-		return;
-	}
-
-	/* Unlink stale clients.gip before worker copies */
-	{
-		char tmppath[MAX_OSPATH];
-		FS_MakePath_BUF(FS_USERDIR, NULL, tmppath, sizeof(tmppath), "clients.gip");
-		Sys_unlink(tmppath);
-	}
-
-	FS_MakePath_BUF (FS_USERDIR, NULL, savedest, sizeof(savedest), p);
-	Con_Printf ("Saving game to %s...\n", savedest);
-
-	{
-		savedata_t sd;
-		memset(&sd, 0, sizeof(sd));
-		sd.version        = SAVEGAME_VERSION;
-		Host_SavegameComment(sd.comment);
-		for (i = 0; i < NUM_SPAWN_PARMS; i++)
-			sd.spawn_parms[i] = svs.clients->spawn_parms[i];
-		sd.current_skill  = current_skill;
-		q_strlcpy(sd.mapname, sv.name, sizeof(sd.mapname));
-		sd.sv_time        = (float)sv.time;
-		sd.maxclients     = svs.maxclients;
-		sd.deathmatch_val = deathmatch.value;
-		sd.coop_val       = coop.value;
-		sd.teamplay_val   = teamplay.value;
-		sd.randomclass_val= randomclass.value;
-		sd.playerclass_val= cl_playerclass.value;
-		sd.info_mask      = info_mask;
-		sd.info_mask2     = info_mask2;
-		/* Client-side inventory selection: not an entity field, so this adds
-		 * nothing to the .gip entity data and leaves gamecode/fieldsets alone.
-		 * The writers append it as the last line of info.dat.  uhexen2-1knr. */
-		sd.inv_artifact   = SB_GetSelectedArtifact();
-		FS_MakePath_BUF(FS_USERDIR, NULL, sd.savedest, sizeof(sd.savedest), p);
-		q_strlcpy(sd.userdir, FS_GetUserdir(), sizeof(sd.userdir));
-		Host_SubmitSave(&sd);
-	}
+	Host_SaveGameToName (Cmd_Argv(1), false);
 }
 
 

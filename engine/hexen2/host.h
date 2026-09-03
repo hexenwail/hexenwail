@@ -54,6 +54,12 @@ extern	cvar_t		host_maxfps;
 extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 extern	cvar_t		map_checks;	/* mapper mode; see host.c.  uhexen2-a5nn.34 */
+extern	cvar_t		sv_autosave;		/* see Host_CheckAutosave.  uhexen2-a5nn.31 */
+extern	cvar_t		sv_autosave_interval;
+
+qboolean Host_SaveGameToName (const char *name, qboolean quiet);
+	/* The save command's body, addressed by name.  Blocks on a save already in
+	 * flight, so a caller that must not stall checks Host_IsSaving() first. */
 
 extern	cvar_t		pausable;
 
