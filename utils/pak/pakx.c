@@ -31,7 +31,7 @@
 
 //======================================================================
 
-static void ExtractFile (pack_t *pak, const char *filename, const char *destdir)
+static int ExtractFile (pack_t *pak, const char *filename, const char *destdir)
 {
 	char	dest[1024], *dptr;
 	int	i;
@@ -76,7 +76,11 @@ static void ExtractFile (pack_t *pak, const char *filename, const char *destdir)
 		}
 	}
 	if (filename != NULL && i == pak->numfiles)
+	{
 		fprintf (stderr, "** %s not in %s\n", filename, pak->filename);
+		return 1;
+	}
+	return 0;
 }
 
 FUNC_NORETURN static void usage (int ret) {
@@ -92,7 +96,7 @@ int main (int argc, char **argv)
 {
 	pack_t 	*pak;
 	const char	*destdir;
-	int	i;
+	int	i, res = 0;
 
 	if (argc < 2)
 		usage (1);
@@ -125,12 +129,12 @@ int main (int argc, char **argv)
 	if (!pak->numfiles)
 		COM_Error ("%s has no files.", pak->filename);
 	if (++i >= argc)
-		ExtractFile (pak, NULL, destdir);
+		res |= ExtractFile (pak, NULL, destdir);
 	else
 	{
 		for ( ; i < argc; i++)
-			ExtractFile (pak, argv[i], destdir);
+			res |= ExtractFile (pak, argv[i], destdir);
 	}
 
-	return 0;
+	return res;
 }
