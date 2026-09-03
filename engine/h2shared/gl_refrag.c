@@ -72,6 +72,7 @@ void R_RemoveEfrags (entity_t *ent)
 	// put it on the free list
 		old->entnext = cl.free_efrags;
 		cl.free_efrags = old;
+		cl.num_efrags--;	/* devstats; uhexen2-a5nn.34 */
 	}
 
 	ent->efrag = NULL;
@@ -111,6 +112,7 @@ static void R_SplitEntityOnNode (mnode_t *node)
 			return;		// no free fragments...
 		}
 		cl.free_efrags = cl.free_efrags->entnext;
+		cl.num_efrags++;	/* devstats; uhexen2-a5nn.34 */
 
 		ef->entity = r_addent;
 

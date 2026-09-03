@@ -996,6 +996,33 @@ static void Host_PlainText (char *dst, size_t dstsize, const char *src)
 
 /*
 ==================
+Host_UpdateDevEdicts
+
+The one devstats counter that belongs to the server: how many edicts are alive
+rather than merely allocated.  Walked once a frame and only while the overlay
+is on, because sv.num_edicts is a ceiling that max_edicts raised to 8192 and
+this is a linear scan of it.
+
+Left at its last value when no local server is running, which is the honest
+answer for a client connected to a remote one: this process does not know.
+==================
+*/
+static void Host_UpdateDevEdicts (void)
+{
+	int	i, active;
+
+	if (!devstats.integer || !sv.active)
+		return;
+
+	for (i = active = 0; i < sv.num_edicts; i++)
+		if (!EDICT_NUM(i)->free)
+			active++;
+
+	dev_stats.edicts = active;
+}
+
+/*
+==================
 Host_UpdateWindowTitle
 
 Ironwail's cl_titlestats.  Rebuilt at most eight times a second and written
@@ -1208,6 +1235,7 @@ static void _Host_Frame (float time)
 	}
 
 	Host_UpdateWindowTitle ();
+	Host_UpdateDevEdicts ();
 
 	if (host_speeds.integer)
 	{

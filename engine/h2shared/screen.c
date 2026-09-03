@@ -620,6 +620,50 @@ static void SCR_DrawNet (void)
 	Draw_Pic (scr_vrect.x+64, scr_vrect.y, scr_net);
 }
 
+/*
+==============
+SCR_DrawDevStats
+
+The 8bpp pathway's copy of the devstats overlay.  Present because `devstats`
+itself is declared in cl_main.c, which both clients compile -- a cvar that
+exists on this target and draws nothing would be worse than no cvar at all.
+
+Same rows and the same reading as the GL one (gl_screen.c), minus the canvas:
+this renderer has no CANVAS_INFO and no scr_infoscale, so the overlay is 8px
+text at a fixed corner, which is what everything else here is.
+uhexen2-a5nn.34
+==============
+*/
+static void SCR_DrawDevStats (void)
+{
+	const int	x = 8;
+	char	str[48];
+	int	y = 8;
+
+	if (!devstats.integer)
+		return;
+
+	sprintf (str, "devstats | Curr  Peak");
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "---------+-----------");
+	Draw_String (x, y, str);	y += 8;
+
+	sprintf (str, "Edicts   |%5i %5i", dev_stats.edicts, dev_peakstats.edicts);
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "Packet   |%5i %5i", dev_stats.packetsize, dev_peakstats.packetsize);
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "Visedicts|%5i %5i", dev_stats.visedicts, dev_peakstats.visedicts);
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "Efrags   |%5i %5i", dev_stats.efrags, dev_peakstats.efrags);
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "Dlights  |%5i %5i", dev_stats.dlights, dev_peakstats.dlights);
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "Effects  |%5i %5i", dev_stats.effects, dev_peakstats.effects);
+	Draw_String (x, y, str);	y += 8;
+	sprintf (str, "Streams  |%5i %5i", dev_stats.streams, dev_peakstats.streams);
+	Draw_String (x, y, str);
+}
+
 static void SCR_DrawFPS (void)
 {
 	static double	oldtime = 0;
@@ -1506,6 +1550,7 @@ void SCR_UpdateScreen (void)
 		GL_SetCanvas (CANVAS_DEFAULT);
 		SCR_CheckDrawCenterString();
 		SCR_DrawFPS();
+		SCR_DrawDevStats();
 
 		Plaque_Draw(plaquemessage, false);
 		SCR_DrawConsole();

@@ -101,6 +101,11 @@ lightstyle_t	cl_lightstyle[MAX_LIGHTSTYLES];
 dlight_t	cl_dlights[MAX_DLIGHTS];
 
 int		cl_numvisedicts;
+
+devstats_t	dev_stats, dev_peakstats;
+/* Not archived: a diagnostic overlay you switch on to answer a question, the
+ * same as r_speeds.  uhexen2-a5nn.34 */
+cvar_t		devstats = {"devstats", "0", CVAR_NONE};
 entity_t	*cl_visedicts[MAX_VISEDICTS];
 
 
@@ -1239,6 +1244,53 @@ static void CL_RelinkEntities (void)
 
 /*
 ===============
+CL_UpdateDevStats
+
+Sample the per-frame client counts, and remember the high-water mark.
+
+Sampled here rather than at each pool's own update because that is the one
+point where all of them have finished moving for this frame -- CL_UpdateEffects
+and CL_UpdateTEnts are what create and retire effects and streams, so counting
+before them would report last frame's numbers under this frame's name.
+
+The efrag and stream counts come from the code that owns those pools
+(r_efrag.c, cl_tent.c); only the ones that are a plain walk of a fixed array
+are counted here.  The server's two -- edicts and packet size -- are filled in
+by the server, and stay at their last value while a client is connected to a
+remote one, which is the truth about what this process knows.
+===============
+*/
+static void CL_UpdateDevStats (void)
+{
+	int	i, effects, dlights;
+
+	if (!devstats.integer)
+		return;
+
+	for (i = effects = 0; i < MAX_EFFECTS; i++)
+		if (cl.Effects[i].type)
+			effects++;
+
+	for (i = dlights = 0; i < MAX_DLIGHTS; i++)
+		if (cl_dlights[i].die >= cl.time && cl_dlights[i].radius)
+			dlights++;
+
+	dev_stats.visedicts = cl_numvisedicts;
+	dev_stats.effects   = effects;
+	dev_stats.dlights   = dlights;
+	dev_stats.efrags    = cl.num_efrags;
+
+	if (dev_stats.visedicts > dev_peakstats.visedicts) dev_peakstats.visedicts = dev_stats.visedicts;
+	if (dev_stats.effects   > dev_peakstats.effects)   dev_peakstats.effects   = dev_stats.effects;
+	if (dev_stats.dlights   > dev_peakstats.dlights)   dev_peakstats.dlights   = dev_stats.dlights;
+	if (dev_stats.efrags    > dev_peakstats.efrags)    dev_peakstats.efrags    = dev_stats.efrags;
+	if (dev_stats.streams   > dev_peakstats.streams)   dev_peakstats.streams   = dev_stats.streams;
+	if (dev_stats.edicts    > dev_peakstats.edicts)    dev_peakstats.edicts    = dev_stats.edicts;
+	if (dev_stats.packetsize > dev_peakstats.packetsize) dev_peakstats.packetsize = dev_stats.packetsize;
+}
+
+/*
+===============
 CL_ReadFromServer
 
 Read all incoming data from the server
@@ -1270,6 +1322,8 @@ int CL_ReadFromServer (void)
 	CL_RelinkEntities ();
 	CL_UpdateEffects ();
 	CL_UpdateTEnts ();
+
+	CL_UpdateDevStats ();
 
 // bring the links up to date
 	return 0;
@@ -1420,6 +1474,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&cl_yawspeed);
 	Cvar_RegisterVariable (&cl_pitchspeed);
 	Cvar_RegisterVariable (&cl_mwheelpitch);
+	Cvar_RegisterVariable (&devstats);
 	Cvar_RegisterVariable (&cl_anglespeedkey);
 	Cvar_RegisterVariable (&cl_shownet);
 	Cvar_RegisterVariable (&cl_nolerp);

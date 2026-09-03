@@ -295,6 +295,7 @@ typedef struct
 	int num_ex_items;
 	int next_page_id;
 
+	int		num_efrags;		// live efrags, for devstats
 	float		wheel_pitch;		// banked by cl_mwheelpitch, paid out
 						// over the next frames by CL_AdjustAngles
 	char		mapname[40];
@@ -354,6 +355,32 @@ extern	cvar_t	cl_minpitch;
 extern	cvar_t	cl_yawspeed;
 extern	cvar_t	cl_pitchspeed;
 extern	cvar_t	cl_mwheelpitch;
+
+/* Ironwail's devstats: per-frame counts of the things that vary every frame,
+ * each with the peak it has reached this session.  Complements r_speeds, which
+ * measures the renderer's own work -- these are client and server OBJECT
+ * counts, and nothing here tracked their peaks before.
+ *
+ * ADAPTED, not 1:1.  Upstream's row list is Quake's: its "beams" are the
+ * lightning-bolt system Hexen II does not have, and its "GL upload" is a
+ * counter our r_speeds 2 already covers from the other side.  In their place go
+ * the two per-frame object pools Hexen II does have and Quake does not --
+ * cl.Effects (rain, snow, sheepinator trails; MAX_EFFECTS) and cl_Streams
+ * (the lightning-like stream entities; MAX_STREAMS), which is what Hexen II's
+ * CL_UpdateTEnts drives.  uhexen2-a5nn.34 */
+typedef struct
+{
+	int		packetsize;
+	int		edicts;
+	int		visedicts;
+	int		efrags;
+	int		effects;
+	int		streams;
+	int		dlights;
+} devstats_t;
+
+extern	devstats_t	dev_stats, dev_peakstats;
+extern	cvar_t		devstats;
 
 extern	cvar_t	cl_anglespeedkey;
 

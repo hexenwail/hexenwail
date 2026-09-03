@@ -2398,6 +2398,18 @@ static qboolean SV_SendClientDatagram (client_t *client)
 	}
 */
 
+#ifndef SERVERONLY
+	/* devstats: the size this client's datagram actually reached, next to
+	 * the wire limit it was built against.  There is already a commented-out
+	 * "packet size is %i" warning just above from whoever wanted this
+	 * number; this is the version you can leave on.
+	 *
+	 * Client build only, and not an oversight: devstats_t lives in client.h,
+	 * which the dedicated build does not compile, and a dedicated server has
+	 * no overlay to put the number on.  uhexen2-a5nn.34 */
+	dev_stats.packetsize = msg.cursize;
+#endif
+
 // send the datagram
 	if (NET_SendUnreliableMessage (client->netconnection, &msg) == -1)
 	{

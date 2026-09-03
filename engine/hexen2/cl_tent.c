@@ -462,6 +462,13 @@ void CL_UpdateTEnts(void)
 	float	yaw, pitch, forward;
 
 	// Update streams
+	/* devstats, handed over here rather than by exporting StreamEntityCount,
+	 * which is static to this file.  Read immediately BEFORE the reset, so
+	 * it reports what the previous pass finished with -- one frame behind,
+	 * and deliberately: this loop has an early return when the entity list
+	 * fills, so a write at the end of the function would silently skip
+	 * exactly the frames worth looking at.  uhexen2-a5nn.34 */
+	dev_stats.streams = StreamEntityCount;
 	StreamEntityCount = 0;
 	for (i = 0, stream = cl_Streams; i < MAX_STREAMS; i++, stream++)
 	{

@@ -902,6 +902,54 @@ static void SCR_InfoCorner (int *right, int *bottom)
 	*bottom = h - (sb_lines * h + vid.height - 1) / vid.height;
 }
 
+/*
+==============
+SCR_DrawDevStats
+
+Ironwail's devstats overlay: what each per-frame pool holds right now, and the
+most it has held this session.  The peak column is the point -- a spike that
+lasts two frames is invisible in a live number and is exactly what a "it
+stutters when the golems come through the door" report is about.
+
+Top-left of CANVAS_INFO, not upstream's bottom-left: our bottom corner is where
+showfps / showclock / showspeed / showfields already stack up from, and this is
+nine lines tall.  Sharing CANVAS_INFO means scr_infoscale sizes it with the rest
+of the debug text rather than leaving it 8px tall on a 4K panel.
+
+Two rows are Hexen II's rather than Quake's -- see devstats_t in client.h for
+why beams and GL upload are not here.  uhexen2-a5nn.34
+==============
+*/
+static void SCR_DrawDevStats (void)
+{
+	const int	x = 8;
+	char	str[48];
+	int	y = 8;
+
+	if (!devstats.integer)
+		return;
+
+	q_snprintf (str, sizeof(str), "devstats | Curr  Peak");
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "---------+-----------");
+	Draw_String (x, y, str);	y += 8;
+
+	q_snprintf (str, sizeof(str), "Edicts   |%5i %5i", dev_stats.edicts, dev_peakstats.edicts);
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "Packet   |%5i %5i", dev_stats.packetsize, dev_peakstats.packetsize);
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "Visedicts|%5i %5i", dev_stats.visedicts, dev_peakstats.visedicts);
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "Efrags   |%5i %5i", dev_stats.efrags, dev_peakstats.efrags);
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "Dlights  |%5i %5i", dev_stats.dlights, dev_peakstats.dlights);
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "Effects  |%5i %5i", dev_stats.effects, dev_peakstats.effects);
+	Draw_String (x, y, str);	y += 8;
+	q_snprintf (str, sizeof(str), "Streams  |%5i %5i", dev_stats.streams, dev_peakstats.streams);
+	Draw_String (x, y, str);
+}
+
 static void SCR_DrawFPS (void)
 {
 	static double	oldtime = 0;
@@ -2360,6 +2408,7 @@ void SCR_UpdateScreen (void)
 		SCR_DrawClock();
 		SCR_DrawSpeed();
 		SCR_DrawShowFields();
+		SCR_DrawDevStats();
 
 		GL_SetCanvas (CANVAS_DEFAULT);
 		Plaque_Draw(plaquemessage, false);
