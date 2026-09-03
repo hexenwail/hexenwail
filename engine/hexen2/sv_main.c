@@ -2934,6 +2934,342 @@ void INV_SavePages(FILE *FH)
 }
 
 /*
+==============================================================================
+
+MAP CHECKLIST
+
+Ironwail's map_checks report, printed once per map load when map_checks (or
+developer) is on.  The counting half lives in ED_LoadFromFile; this is the
+readout.  uhexen2-a5nn.40
+
+Ironwail's version is Quake's, and four of its lines do not survive contact
+with Hexen II unchanged.  Each divergence is argued at its own check below,
+because the whole value of a checklist is that a mapper trusts it: one line
+that is always wrong makes the other ten unread.
+
+Markers are ASCII rather than upstream's \xDB/\xDD box glyphs -- those are
+Quake charset code points, and Hexen II's conchars are a different font.
+
+==============================================================================
+*/
+
+typedef enum
+{
+	MAPCHECK_FAILED,
+	MAPCHECK_PARTIAL,
+	MAPCHECK_OK,
+	MAPCHECK_NA		/* passes because it does not apply here */
+} mapcheck_t;
+
+
+/*
+================
+SV_MapCheckThresh
+================
+*/
+static mapcheck_t SV_MapCheckThresh (int current, int target)
+{
+	if (current <= 0)
+		return MAPCHECK_FAILED;
+	if (current >= target)
+		return MAPCHECK_OK;
+	return MAPCHECK_PARTIAL;
+}
+
+/*
+================
+SV_PrintMapCheck
+================
+*/
+static void SV_PrintMapCheck (mapcheck_t status, const char *format, ...)
+{
+	char		str[1024];
+	va_list		argptr;
+	char		mark;
+
+	va_start (argptr, format);
+	q_vsnprintf (str, sizeof(str), format, argptr);
+	va_end (argptr);
+
+	switch (status)
+	{
+	case MAPCHECK_OK:	mark = 'x'; break;
+	case MAPCHECK_NA:	mark = '-'; break;
+	case MAPCHECK_PARTIAL:	mark = '~'; break;
+	default:		mark = ' '; break;
+	}
+
+	Con_SafePrintf ("[%c] %s\n", mark, str);
+
+	if (status == MAPCHECK_FAILED || status == MAPCHECK_PARTIAL)
+		sv.mapchecks.numwarnings++;
+}
+
+/*
+================
+SV_MapCheckTitle
+
+Squeezes a levelname onto one console line.  Hexen II's titles come out of
+strings.txt, which is authored as display text and can carry newlines.
+================
+*/
+static void SV_MapCheckTitle (char *out, size_t outsize, const char *in)
+{
+	size_t	n = 0;
+
+	if (!in)
+		in = "";
+	while (*in && n + 1 < outsize)
+	{
+		byte c = (byte)*in++;
+		if (c < 32 || c == 127)
+		{
+			if (!n || out[n - 1] == ' ')
+				continue;	/* no leading or doubled space */
+			c = ' ';
+		}
+		out[n++] = (char)c;
+	}
+	while (n > 0 && out[n - 1] == ' ')
+		n--;
+	out[n] = '\0';
+}
+
+/*
+================
+SV_PrintMapChecklist
+================
+*/
+static void SV_PrintMapChecklist (void)
+{
+	const int	MIN_DM_SPAWN_POINTS = 5;
+	const int	MIN_COOP_SPAWN_POINTS = 3;
+
+	qboolean	skill_levels;
+	char		buf[1024];
+	int		warnings;
+
+	//
+	// header
+	//
+	Con_SafePrintf ("\n");
+	Con_SafePrintf ("=====================================\n");
+	Con_SafePrintf ("\n");
+	Con_SafePrintf ("Map checklist (%s):\n\n", COM_SkipPath (sv.modelname));
+
+	//
+	// light data
+	//
+	SV_PrintMapCheck (sv.worldmodel->lightdata != NULL ? MAPCHECK_OK : MAPCHECK_FAILED, "lightmap data");
+
+	//
+	// vis data
+	//
+	if (!sv.worldmodel->visdata)
+	{
+		char pointfile[MAX_OSPATH];
+		q_snprintf (pointfile, sizeof(pointfile), "maps/%s.pts", sv.name);
+		if (FS_FileExists (pointfile, NULL))
+			SV_PrintMapCheck (MAPCHECK_FAILED, "vis data (unsealed map? %s exists)", pointfile);
+		else
+			SV_PrintMapCheck (MAPCHECK_FAILED, "vis data");
+	}
+	else
+		SV_PrintMapCheck (MAPCHECK_OK, "vis data");
+
+	//
+	// changelevel trigger
+	//
+	if (!sv.mapchecks.trigger_changelevel)
+		SV_PrintMapCheck (MAPCHECK_FAILED, "trigger_changelevel");
+	else if (sv.mapchecks.trigger_changelevel == 1)
+	{
+		if (sv.mapchecks.valid_changelevel == sv.mapchecks.trigger_changelevel)
+		{
+			/* The startspot is what makes this a hub link rather than a
+			 * plain exit, so it is worth showing when there is one. */
+			if (sv.mapchecks.changespot[0])
+				SV_PrintMapCheck (MAPCHECK_OK, "trigger_changelevel (%s, startspot \"%s\")",
+					sv.mapchecks.changelevel, sv.mapchecks.changespot);
+			else
+				SV_PrintMapCheck (MAPCHECK_OK, "trigger_changelevel (%s)", sv.mapchecks.changelevel);
+		}
+		else
+			SV_PrintMapCheck (MAPCHECK_PARTIAL, "trigger_changelevel (missing \"map\" key)");
+	}
+	else
+	{
+		if (sv.mapchecks.valid_changelevel == sv.mapchecks.trigger_changelevel)
+			SV_PrintMapCheck (MAPCHECK_OK, "trigger_changelevel (%d)", sv.mapchecks.trigger_changelevel);
+		else
+			SV_PrintMapCheck (MAPCHECK_PARTIAL, "trigger_changelevel (%d/%d missing \"map\" key)",
+				sv.mapchecks.trigger_changelevel - sv.mapchecks.valid_changelevel,
+				sv.mapchecks.trigger_changelevel
+			);
+	}
+
+	//
+	// intermission camera
+	//
+	// DIVERGES FROM UPSTREAM, twice.  Quake runs the intermission on every
+	// level exit, so Ironwail fails a map that has no camera.  Hexen II does
+	// not: changelevel_touch calls GotoNextMap() outright when deathmatch is
+	// 0 (client.hc, and the comment above it records that the
+	// NO_INTERMISSION spawnflag was removed rather than made conditional).
+	// The camera is reachable only in deathmatch.  Failing every
+	// single-player map for lacking one is the noise that gets a checklist
+	// ignored, so single player reports it as not applicable.
+	//
+	// Nor is it fatal for a deathmatch map: FindIntermission falls back to
+	// info_player_start.  This line therefore never counts as a warning,
+	// which was arrived at empirically -- with it warning on any map that
+	// had deathmatch spawns, all seven official maps tested lit it up,
+	// because Raven put deathmatch spawns in the single-player campaign and
+	// intermission cameras in none of it.  A line that is always yellow is
+	// the thing that gets a checklist stopped being read.
+	//
+	if (sv.mapchecks.intermission)
+		SV_PrintMapCheck (MAPCHECK_OK, "info_intermission (%d)", sv.mapchecks.intermission);
+	else if (sv.mapchecks.dm_spawns > 0)
+		SV_PrintMapCheck (MAPCHECK_NA, "info_intermission (none: deathmatch views the round end from info_player_start)");
+	else
+		SV_PrintMapCheck (MAPCHECK_NA, "info_intermission (n/a: Hexen II shows the intermission in deathmatch only)");
+
+	//
+	// skill levels
+	//
+	skill_levels = sv.mapchecks.skill_triggers > 0 ||
+		(sv.mapchecks.skill_ents[0] != sv.mapchecks.skill_ents[1] || sv.mapchecks.skill_ents[1] != sv.mapchecks.skill_ents[2]);
+	SV_PrintMapCheck (skill_levels ? MAPCHECK_OK : MAPCHECK_FAILED, "skill spawnflags/triggers");
+
+	//
+	// single player spawn point
+	//
+	// NOT IN UPSTREAM.  Hexen II's SelectSpawnPoint ends in
+	// error("PutClientInServer: no info_player_start on level"), which drops
+	// the player to the console with a QC stack trace the moment the map
+	// loads.  Naming it on the checklist is cheaper than reading that.
+	//
+	SV_PrintMapCheck (sv.mapchecks.sp_spawns > 0 ? MAPCHECK_OK : MAPCHECK_FAILED,
+		"info_player_start (%d)", sv.mapchecks.sp_spawns);
+
+	//
+	// coop spawn points
+	//
+	SV_PrintMapCheck (SV_MapCheckThresh (sv.mapchecks.coop_spawns, MIN_COOP_SPAWN_POINTS),
+		"info_player_coop (%d/%d+)", sv.mapchecks.coop_spawns, MIN_COOP_SPAWN_POINTS);
+
+	//
+	// deathmatch spawn points
+	//
+	// Upstream's threshold kept.  The consequence is harsher here than in
+	// Quake: Hexen II's SelectSpawnPoint scans info_player_deathmatch in an
+	// unbounded `loop`, so a map started in deathmatch with none of them
+	// hangs the server rather than picking a fallback.
+	//
+	SV_PrintMapCheck (SV_MapCheckThresh (sv.mapchecks.dm_spawns, MIN_DM_SPAWN_POINTS),
+		"info_player_deathmatch (%d/%d+)%s", sv.mapchecks.dm_spawns, MIN_DM_SPAWN_POINTS,
+		sv.mapchecks.dm_spawns ? "" : " -- deathmatch on this map would hang the spawn search");
+
+	//
+	// music track
+	//
+	// DIVERGES FROM UPSTREAM, and not by a rename.  Quake's music track is
+	// worldspawn's "sounds", read through entvars.  Hexen II has neither:
+	// ED_ParseEdict intercepts the worldspawn keys "CD" and "MIDI" by name
+	// before the field lookup and stores them in sv.cd_track / sv.midi_name,
+	// so there is no progs field to read.  (Hexen II's entvars DO have a
+	// float named soundtype, which is unrelated -- it picks the sound set on
+	// doors and platforms.  Reading it here would be reporting a door.)
+	//
+	if (sv.midi_name[0] && sv.cd_track)
+		SV_PrintMapCheck (MAPCHECK_OK, "music (MIDI \"%s\", CD track %d)", sv.midi_name, sv.cd_track);
+	else if (sv.midi_name[0])
+		SV_PrintMapCheck (MAPCHECK_OK, "music (MIDI \"%s\")", sv.midi_name);
+	else if (sv.cd_track)
+		SV_PrintMapCheck (MAPCHECK_OK, "music (CD track %d)", sv.cd_track);
+	else
+		SV_PrintMapCheck (MAPCHECK_FAILED, "music (worldspawn \"MIDI\" or \"CD\" key)");
+
+	//
+	// map title
+	//
+	// DIVERGES FROM UPSTREAM.  Quake's worldspawn "message" is the title
+	// string itself; Hexen II's is a 1-based index into strings.txt, with
+	// "netname" as the literal-string escape hatch for maps that would
+	// rather not edit strings.txt.  SV_GetLevelname already resolves both.
+	//
+	SV_MapCheckTitle (buf, sizeof(buf), SV_GetLevelname ());
+	if (buf[0])
+		SV_PrintMapCheck (MAPCHECK_OK, "map title (%s)", buf);
+	else if ((int)sv.edicts->v.message > 0)
+		SV_PrintMapCheck (MAPCHECK_PARTIAL, "map title (worldspawn \"message\" is %d, past the end of strings.txt)",
+			(int)sv.edicts->v.message);
+	else
+		SV_PrintMapCheck (MAPCHECK_FAILED, "map title (worldspawn \"message\" index or \"netname\" string)");
+
+#ifndef SERVERONLY
+	//
+	// Sky textures.  Upstream warns about maps with more than one sky, of
+	// which other engines render only the last, and about sky textures that
+	// are not 256 x 128, which older engines could crash on.  Both apply
+	// unchanged to Hexen II BSPs -- what changes is the lookup: there is no
+	// TEXTYPE_SKY bucket here, so the world texture list is scanned for the
+	// "sky" name prefix, which is what the loader itself keys on.
+	//
+	// Client-only: h2ded builds against sv_model.h, which loads brush
+	// geometry without textures and has no numtextures to walk.
+	//
+	{
+		int	i, numskies = 0, oddsized = 0;
+
+		for (i = 0; i < sv.worldmodel->numtextures; i++)
+		{
+			texture_t *tex = sv.worldmodel->textures[i];
+			if (!tex || strncmp (tex->name, "sky", 3) != 0)
+				continue;
+			numskies++;
+			if (tex->width != 256 || tex->height != 128)
+				oddsized++;
+		}
+
+		if (numskies > 1 || oddsized > 0)
+		{
+			SV_PrintMapCheck (MAPCHECK_FAILED, "compat: single %ssky texture (%d found)",
+				oddsized > 0 ? "256 x 128 " : "", numskies);
+			for (i = 0; i < sv.worldmodel->numtextures; i++)
+			{
+				texture_t *tex = sv.worldmodel->textures[i];
+				if (!tex || strncmp (tex->name, "sky", 3) != 0)
+					continue;
+				if (tex->width != 256 || tex->height != 128)
+					Con_SafePrintf ("      %s (%u x %u)\n", tex->name, tex->width, tex->height);
+				else
+					Con_SafePrintf ("      %s\n", tex->name);
+			}
+		}
+	}
+#endif	/* !SERVERONLY */
+
+	//
+	// footer
+	//
+	// Upstream counts warnings and never prints the total.  We do: the list
+	// is long enough that "did anything fail?" is a real question, and a
+	// counter nothing reads is its own small bug (uhexen2-a5nn.38).
+	//
+	warnings = sv.mapchecks.numwarnings;
+	Con_SafePrintf ("\n");
+	if (warnings)
+		Con_SafePrintf ("%d item%s to look at.\n", warnings, warnings == 1 ? "" : "s");
+	else
+		Con_SafePrintf ("Nothing to look at.\n");
+	Con_SafePrintf ("=====================================\n");
+	Con_SafePrintf ("\n");
+}
+
+
+/*
 ================
 SV_SpawnServer
 
@@ -2996,6 +3332,13 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	q_strlcpy (sv.name, server, sizeof(sv.name));
 	if (startspot)
 		q_strlcpy(sv.startspot, startspot, sizeof(sv.startspot));
+
+	/* Has to be set before ED_LoadFromFile runs, which is where the census
+	 * happens.  developer turns it on too, the way it does upstream: the
+	 * checklist is a strict superset of what a developer build wants to
+	 * know about a map it just loaded.  uhexen2-a5nn.40 */
+	if (map_checks.integer || developer.integer)
+		sv.mapchecks.active = true;
 
 // load progs to get entity field count
 #if !defined(SERVERONLY)
@@ -3226,6 +3569,9 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	svs.changelevel_issued = false;		// now safe to issue another
 
 	Con_DPrintf ("Server spawned.\n");
+
+	if (sv.mapchecks.active)
+		SV_PrintMapChecklist ();
 
 #if !defined(SERVERONLY)
 	total_loading_size = 0;

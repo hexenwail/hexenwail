@@ -2249,6 +2249,30 @@ extern int entity_file_size;
 
 /*
 ================
+ED_IsSkillSelector
+
+Ironwail's ED_IsSkillSelector, audited for Hexen II.
+
+Upstream also matches target_setskill and an info_command whose message reads
+"skill N"; both are Arcane Dimensions conventions with no counterpart here, so
+they are dropped rather than carried as dead comparisons.  trigger_setskill
+does survive the port -- Hexen II keeps the QUAKED comment in triggers.hc so
+editors still offer it -- but note its implementation there is commented out,
+which is why a Hexen II map that has one still gets "no spawn function".  It is
+counted anyway: the checklist is asking what the AUTHOR expressed, not what the
+progs will do with it.  uhexen2-a5nn.40
+================
+*/
+static qboolean ED_IsSkillSelector (const edict_t *ent)
+{
+	const char *classname = PR_GetString (ent->v.classname);
+
+	return strcmp (classname, "trigger_setskill") == 0;
+}
+
+
+/*
+================
 ED_LoadFromFile
 
 The entities are directly placed in the array, rather than allocated with
@@ -2307,6 +2331,72 @@ void ED_LoadFromFile (const char *data)
 			Host_Error ("invalid SpawnFlags on World!!!\n");
 		}
 #endif
+
+		/* map_checks census.  Deliberately BEFORE the inhibit filters
+		 * below: the checklist reports what the mapper put in the .bsp,
+		 * and every filter under this comment is a reason an entity is
+		 * absent from THIS session -- skill, class, coop, deathmatch.
+		 * Counting after them would tell a mapper their coop spawns are
+		 * missing because they happen to be playing single player.
+		 *
+		 * Ironwail's block from ED_LoadFromFile, with the classnames
+		 * checked against Hexen II gamecode.  uhexen2-a5nn.40 */
+		if (sv.mapchecks.active && ent->v.classname)
+		{
+			const char	*classname = PR_GetString (ent->v.classname);
+			int		skillflags = (int)ent->v.spawnflags &
+					(SPAWNFLAG_NOT_EASY|SPAWNFLAG_NOT_MEDIUM|SPAWNFLAG_NOT_HARD);
+
+			if (!(skillflags & SPAWNFLAG_NOT_EASY))
+				sv.mapchecks.skill_ents[0]++;
+			if (!(skillflags & SPAWNFLAG_NOT_MEDIUM))
+				sv.mapchecks.skill_ents[1]++;
+			if (!(skillflags & SPAWNFLAG_NOT_HARD))
+				sv.mapchecks.skill_ents[2]++;
+
+			if (strcmp (classname, "trigger_changelevel") == 0)
+			{
+				ddef_t	*mapfield = ED_FindField ("map");
+
+				sv.mapchecks.trigger_changelevel++;
+				/* "map" is not an entvars_t field -- it is declared
+				 * by the progs (entity.hc: `.string map;`), so it has
+				 * to be looked up rather than read off ent->v. */
+				if (mapfield && (mapfield->type & ~DEF_SAVEGLOBAL) == ev_string)
+				{
+					eval_t		*val = (eval_t *)((char *)&ent->v + mapfield->ofs * 4);
+					const char	*map = PR_GetString (val->string);
+
+					while (*map == ' ' || *map == '\t')
+						map++;
+					if (*map)
+					{
+						q_strlcpy (sv.mapchecks.changelevel, map,
+							sizeof(sv.mapchecks.changelevel));
+						/* Hexen II's changelevel_touch reads the
+						 * startspot off "target", not off a key
+						 * named "startspot" -- that is a QC global,
+						 * not a field.  It is optional: with none,
+						 * the destination spawns the player at the
+						 * info_player_start carrying spawnflag 1. */
+						q_strlcpy (sv.mapchecks.changespot,
+							PR_GetString (ent->v.target),
+							sizeof(sv.mapchecks.changespot));
+						sv.mapchecks.valid_changelevel++;
+					}
+				}
+			}
+			else if (ED_IsSkillSelector (ent))
+				sv.mapchecks.skill_triggers++;
+			else if (strcmp (classname, "info_intermission") == 0)
+				sv.mapchecks.intermission++;
+			else if (strcmp (classname, "info_player_coop") == 0)
+				sv.mapchecks.coop_spawns++;
+			else if (strcmp (classname, "info_player_deathmatch") == 0)
+				sv.mapchecks.dm_spawns++;
+			else if (strcmp (classname, "info_player_start") == 0)
+				sv.mapchecks.sp_spawns++;
+		}
 
 		// remove things from different skill levels or deathmatch
 		if (deathmatch.integer)

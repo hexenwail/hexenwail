@@ -148,6 +148,29 @@ typedef struct
 	int			next_page_id;
 	ex_inventory_page_t	*ex_inventory_pages;
 	int			num_ex_items;
+
+	/* map_checks bookkeeping, counted by ED_LoadFromFile and reported by
+	 * SV_PrintMapChecklist.  Ironwail's mapchecks_t; the counters are the
+	 * same, the classnames they count are audited for Hexen II in
+	 * pr_edict.c.  uhexen2-a5nn.40 */
+	struct
+	{
+		qboolean	active;
+		int		numwarnings;
+
+		/* Copied, not pointed at: these come out of PR_GetString and
+		 * the checklist prints them after the two settle frames. */
+		char		changelevel[MAX_QPATH];	/* "map" key of the last valid one */
+		char		changespot[64];		/* its "target", if it has one */
+		int		trigger_changelevel;
+		int		valid_changelevel;
+		int		intermission;
+		int		skill_triggers;
+		int		coop_spawns;
+		int		dm_spawns;
+		int		sp_spawns;
+		int		skill_ents[3];
+	}		mapchecks;
 } server_t;
 
 
