@@ -46,7 +46,12 @@ static cvar_t	m_rawinput = {"m_rawinput", "1", CVAR_ARCHIVE};
  * and mapped somewhere else, and neither can we.  uhexen2-a5nn.36 */
 static cvar_t	in_debugkeys = {"in_debugkeys", "0", CVAR_NONE};
 extern cvar_t	ui_mouse;	/* declared in menu.c, next to the menus it governs */
+extern cvar_t	mwheelthreshold;	/* declared in cl_main.c, with the other mouse knobs */
 static qboolean	rawinput_active;
+
+/* Wheel travel banked but not yet paid out as key events, in WHEEL_DELTA
+ * units.  See IN_MouseWheel below.  uhexen2-a5nn.38 */
+static float	mwheel_accum;
 
 static int	mouse_x, mouse_y, old_mouse_x, old_mouse_y;
 #ifdef __EMSCRIPTEN__
@@ -1309,6 +1314,76 @@ static int IN_SDLKeyToQuakeKey (SDL_Keycode sym, qboolean gamekey, SDL_Keymod mo
 }
 
 
+/*
+================
+IN_MouseWheel
+
+Turns one SDL wheel event into zero or more K_MWHEELUP / K_MWHEELDOWN pairs.
+
+This is what `mwheelthreshold` was always supposed to do.  It has been declared
+and archived here since forever, defaulting to 120, and read by nothing -- a
+value that reads back correctly and changes nothing, which is the exact failure
+mode uhexen2-a5nn.34 rejected `sndspeed` for.  uhexen2-a5nn.38.
+
+120 is WHEEL_DELTA, the conventional units-per-detent, so the cvar's long
+standing default means "one key event per full notch".  SDL3 reports wheel
+travel in notches as a FLOAT, and a precision wheel or a trackpad sends
+fractions of one -- so the travel is banked here and paid out a notch at a
+time.  A classic detented wheel sends exactly 1.0 per event and therefore gets
+byte-identical behaviour to the code this replaces, which is the property that
+matters: nobody's mouse changes.  The people this is for are on laptops, and
+on the web build especially, where a browser wheel event is whatever the
+touchpad felt like.
+
+Below 120 the wheel gets finer (60 = two events per notch); above it, coarser.
+Zero and negative mean "no threshold", i.e. one event per SDL event whatever
+its magnitude -- not "wheel off", which is the reading a5nn.34 had to correct
+for cl_mwheelpitch and is worth stating twice.
+
+The direction reset matters on a trackpad: without it, scrolling half a notch
+up and then down would owe a notch of debt in the new direction before
+anything happened.
+================
+*/
+static void IN_MouseWheel (float notches)
+{
+	const int	MAX_EVENTS_PER_WHEEL = 16;	/* a fling is not 400 keypresses */
+	float		threshold;
+	int		key, sent;
+
+	if (notches == 0.0f)
+		return;
+
+	key = (notches > 0.0f) ? K_MWHEELUP : K_MWHEELDOWN;
+
+	threshold = mwheelthreshold.value;
+	if (threshold <= 0.0f)
+	{
+		/* No threshold: the pre-a5nn.38 behaviour, one pair per event. */
+		Key_Event (key, true);
+		Key_Event (key, false);
+		return;
+	}
+
+	if ((mwheel_accum > 0.0f) != (notches > 0.0f))
+		mwheel_accum = 0.0f;
+
+	mwheel_accum += notches * 120.0f;
+
+	for (sent = 0; fabsf(mwheel_accum) >= threshold; sent++)
+	{
+		if (sent >= MAX_EVENTS_PER_WHEEL)
+		{
+			mwheel_accum = 0.0f;
+			break;
+		}
+		mwheel_accum -= (notches > 0.0f) ? threshold : -threshold;
+		Key_Event (key, true);
+		Key_Event (key, false);
+	}
+}
+
+
 /* ================================================================
    SDL3 event loop
    ================================================================ */
@@ -1436,16 +1511,7 @@ void IN_SendKeyEvents (void)
 			if (in_mode_set)
 				break;
 			/* Allow wheel in menus even when mouse is deactivated */
-			if (event.wheel.y > 0)
-			{
-				Key_Event(K_MWHEELUP, true);
-				Key_Event(K_MWHEELUP, false);
-			}
-			else if (event.wheel.y < 0)
-			{
-				Key_Event(K_MWHEELDOWN, true);
-				Key_Event(K_MWHEELDOWN, false);
-			}
+			IN_MouseWheel (event.wheel.y);
 			break;
 
 		/* SDL3 Gamepad button events */

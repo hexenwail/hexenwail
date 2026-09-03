@@ -83,6 +83,32 @@ it, or you will silently destroy an existing investigation. Same for
 <!-- END BEADS INTEGRATION -->
 
 
+## Reading Ironwail
+
+The parity work reads upstream constantly.  **Read it by ref, never by path.**
+
+    git -C ../ironwail show origin/master:Quake/gl_screen.c
+    git -C ../ironwail grep <sym> origin/master -- Quake
+
+The checkout at `../ironwail` has two remotes.  `origin` is pristine Ironwail;
+its checked-out HEAD is `bobberb/ironwail`, a **Hexen II fork** ~190 commits
+and 18k lines ahead of upstream, with a dirty working tree on top.  So a read
+of the *worktree* can hand you the fork's Hexen II adaptation and look like
+upstream — and it will look *more* plausible than the real thing precisely
+because it already speaks Hexen II.
+
+Caught live: reading `SV_PrintMapChecklist` out of the worktree returns a
+`hexen2_mode ? "soundtype" : "sounds"` music-track check.  That is the fork's
+guess, and it is also wrong for this engine — Hexen II's music comes from the
+worldspawn `CD` / `MIDI` keys, which `ED_ParseEdict` intercepts by name, and
+`soundtype` is the field that picks a door's sound set.  Porting from that read
+would have shipped someone else's mistake under Ironwail's name.
+
+The fork is still worth reading as **prior art** — someone else's answer to the
+same adaptation question.  Cite it as "bobberb/ironwail fork", never as
+"Ironwail", and treat what you take as a design borrowed rather than parity
+achieved.  uhexen2-a5nn.39
+
 ## Build & Test
 
 _Add your build and test commands here_

@@ -83,6 +83,13 @@ cvar_t	cl_startdemos = {"cl_startdemos", "1", CVAR_ARCHIVE};
 cvar_t	lookspring = {"lookspring", "0", CVAR_ARCHIVE};
 cvar_t	lookstrafe = {"lookstrafe", "0", CVAR_ARCHIVE};
 cvar_t	sensitivity = {"sensitivity", "3", CVAR_ARCHIVE};
+/* Wheel travel, in WHEEL_DELTA units, that has to accumulate before one
+ * K_MWHEELUP / K_MWHEELDOWN pair is emitted.  Read by IN_MouseWheel in
+ * in_sdl.c -- which it was NOT until uhexen2-a5nn.38: it had been declared
+ * and archived here for years with no reader at all, so setting it did
+ * nothing while reading it back told you it had worked.  120 is one detent,
+ * so the default reproduces a plain wheel exactly; the setting is for the
+ * precision wheels and trackpads that send fractions of one. */
 cvar_t	mwheelthreshold = {"mwheelthreshold", "120", CVAR_ARCHIVE};
 
 cvar_t	m_pitch = {"m_pitch", "0.022", CVAR_ARCHIVE};
