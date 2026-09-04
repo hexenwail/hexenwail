@@ -107,15 +107,10 @@ Write the body to explain **why**, not what — the diff already says what. If t
 change is subtle or the obvious alternative is wrong, say so; that comment is the
 one future readers will need.
 
-You will see a trailing `(uhexen2-xxxx)` on many commits. Those are internal
-[beads](https://github.com/steveyegge/beads) issue IDs used by the maintainers.
-**You do not need one**, and you should not invent one.
-
-## A note on `.beads/`
-
-The issue tracker's state is version-controlled in `.beads/issues.jsonl`. It is
-generated — do not hand-edit it, and if a rebase leaves it conflicted, take either
-side and let the tooling re-export. Everything else under `.beads/` is git-ignored.
+You will see a trailing `(uhexen2-xxxx)` on many commits. Those are ids from an
+issue tracker the maintainers have since retired, kept because they are the thread
+back to why a change was made. **You do not need one**, and you should not invent
+one.
 
 ## Pull requests
 
