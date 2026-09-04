@@ -11,10 +11,10 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (70)
+## P2 — worth doing (69)
 
 - **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
-- **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him.
+- **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
 - **r_fastsky does nothing for the classic scrolling sky (only the skybox path honours it)** `uhexen2-371n` — Found 2026-09-01 while A/B-verifying the sky shader split (uhexen2-a5nn.4); pre-existing, not caused by it, and deliberately left alone there to keep that change to one subject.
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
 - **SoT: missing sounds (muckexit, artiup, douse)** `uhexen2-40e` *(blocked)* — Three audio assets are genuinely absent from the SoT pak tree (data1/pak1.pak and sot/* hierarchy): - sound/fx/muckexit.wav - sound/misc/douse.wav - sound/items/artiup.wav
@@ -36,8 +36,7 @@ here.
 - **WebAssembly/Emscripten port** `uhexen2-a7l4` — WASM/WebGL2 build is PROVEN (shell-wasm.nix, 1.4 MB .wasm, since 2026-03-26). Remaining scope is productionization for distribution and CI coverage.
 - **Menu: per-item description/tooltip text** `uhexen2-8y3o` — Last substantial gap from uhexen2-yae's Ironwail menu list. Hexenwail menus have no description text: an item's name is all the player gets, and names like 'Render Scale', 'Dither', 'Overbri…
 - **WASM port: productionize the working WebGL2 build** `uhexen2-91t4` — The engine builds and runs under Emscripten/WebGL2 via shell-wasm.nix (proven 2026-03-26), but it's a dev-shell artifact, not a shippable port.
-- **Autosave trio (sv_autosave, sv_autosave_interval, sv_autoload) — the port is the Hexen II adaptation, not the cvars** `uhexen2-a5nn.31` — Item 4 of the uhexen2-a5nn.23 inventory queue, scoped 2026-09-02 against both trees rather than ported, because the interesting half is what does NOT transfer.
-- **checkextension: we have 373 builtins and no way for a mod to ask what any of them are** `uhexen2-a5nn.35` — Found while triaging uhexen2-a5nn.23 item 8, where pr_checkextension appeared in the cvar diff as if it were another missing toggle. It is not: the cvar gates a mechanism we do not have.
+- **Autosave trio (sv_autosave, sv_autosave_interval, sv_autoload) — the port is the Hexen II adaptation, not the cvars** `uhexen2-a5nn.31` *(in_progress)* — Item 4 of the uhexen2-a5nn.23 inventory queue, scoped 2026-09-02 against both trees rather than ported, because the interesting half is what does NOT transfer.
 - **No-dynamic-light control is keyed to the model, which does not scale past a few custom light models** `uhexen2-aywo` — Raised by Mathuzzz: 'regarding the lights, it shouldn't be model dependent as I use like 2 dozens of additional models for light sources.
 - **Mission Pack (Portals of Praevus) launch support in web launcher** `uhexen2-cxfn` — -game portals is deliberate no-op in engine (FS_Gamedir ignores it); Mission Pack launches via separate -portals/-missionpack/-h2mp flag.
 - **Water surface warp is too fast/strong: add gl_waterwarp_speed and gl_waterwarp_amount** `uhexen2-fouc` — Bob asked for the liquid surface warp to be slowed down and made less aggressive. Vanilla Hexen II hardcodes it: EmitWaterPolys (gl_warp.c) scrolls the texcoord turb at realtime with the ful…
@@ -84,11 +83,12 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (60)
+## P3 — someday (61)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
 - **Browser fatal error gives desktop-only advice (get_demo.sh / nix run)** `uhexen2-bmj9` — When the fatal 'Unable to find a proper Hexen II installation' is triggered in the browser (quakefs.c:2129-2139), the error message directs users to run './get_demo.sh' or 'nix run .#get-dem…
+- **HCC-built csprogs.dat can be rejected by PR_CheckProgsExtents when the last global sits within a vector of the end** `uhexen2-el9i` — Found 2026-09-03 while building a test csprogs.dat for uhexen2-a5nn.35.
 - **sw.js offline shell precaches almost no lib/ modules — offline boot broken** `uhexen2-f2zb` — CORE_ASSET_URLS precaches only lib/phone-controls.js; paths.js, zip.js, save-bundle.js, webgl-diagnostics.js, demo-fetch.js, mods.js absent (list keeps growing), so 'offline-capable' shell c…
 - **Coarse-pointer layout can still push the game canvas off-screen (iPad-class, phone-mode off)** `uhexen2-fxmf` — web/index.html's @media (pointer: coarse) ... 820px branch still uses grid-template-rows: auto minmax(18rem,1fr) — the same failure shape 721c218b2 fixed for default layout, on the fork's ac…
 - **host_framerate no longer produces slow motion — the physics accumulator speeds it up instead** `uhexen2-i1hz` — host_framerate is the classic Quake slow-motion / fixed-step demo knob: Host_FilterTime overrides host_frametime with its value instead of the real elapsed time.
