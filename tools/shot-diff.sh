@@ -9,8 +9,8 @@
 #   flat in BOTH images before comparing, so animated widgets do not register
 #   as differences.  Pass none to compare whole frames.
 #
-# Example — the 2D/menu sweep, masking the animated menu cursor:
-#   ./tools/shot-diff.sh /tmp/ref /tmp/new 25x20+291+60
+# Example — the 2D/menu sweep, masking the menu cursor and the console one:
+#   ./tools/shot-diff.sh /tmp/ref /tmp/new 34x62+288+56 12x12+20+572
 #
 # Requires ImageMagick:
 #   nix shell nixpkgs#imagemagick --command ./tools/shot-diff.sh ...
@@ -21,6 +21,11 @@
 # all four frames with 0 differing pixels, and run C of the SAME BINARY
 # disagreed with A by 26, 16 and 23 pixels on three of them.  Every differing
 # pixel fell inside 25x20+291+60.
+#
+# The console input cursor (console.c, (int)(realtime*4)&1) is the same problem
+# with a nastier sampling profile: it is a two-state blink rather than a
+# multi-frame animation, so a handful of runs can all land on one state and
+# then a later run flips.  See tools/sweep-2d.steps.
 #
 # So "0 differing pixels" from a single pair of runs proves nothing on its own.
 # Either mask the animated region, or establish the reference from at least

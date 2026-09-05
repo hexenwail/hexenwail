@@ -14,6 +14,7 @@
 #include "gl_shader.h"
 #include "gl_pipeline.h"
 #include "gl_lightcluster.h"	/* froxel grid dimensions and binding points (uhexen2-26bm) */
+#include "gl_uniforms.h"	/* the two shared std140 blocks (uhexen2-p4ln) */
 
 /* Generated from the .glsl files in engine/shaders by EmbedShaders.cmake.
  * Embedded rather than loaded at runtime: the engine has no shader search
@@ -431,55 +432,6 @@ GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
 /* Helper to look up all common uniforms                               */
 /* ------------------------------------------------------------------ */
 
-/*
-===============
-GL_BindUniformBlock
-
-Look a uniform block up and pin it to a binding point, returning its index or
--1 if this program has no such block.
-
-The pinning cannot be expressed in the shader: layout(binding=) on a uniform
-block is GL 4.2 / GLSL ES 3.10, and the ES tier runs ES 3.00.  So this call is
-the only place the point is chosen, and UBO_BINDING_* in gl_shader.h is the
-only place the pusher in GL_ImmEnd can read it back.
-
-Unlike the Hi-Z block, which sits at binding 0 and so would survive the call
-being skipped (0 is also GL's default), these do not -- two blocks in one
-program cannot share a point, so at least one must be moved.  Missing entry
-points are therefore reported rather than shrugged off; the alternative is a
-HUD that silently draws with whatever the buffer last held.
-===============
-*/
-static GLint GL_BindUniformBlock (GLuint prog, const char *name, GLuint binding)
-{
-	GLuint		index;
-
-#ifndef USE_GLES
-	/* Only the desktop loader table can come up short here; the ES tier
-	 * calls both of these directly (gl_func.h), so testing them for NULL
-	 * there is a comparison the compiler can see through. */
-	static qboolean	warned = false;
-
-	if (!glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
-	{
-		if (!warned)
-		{
-			warned = true;
-			Con_Printf("[SHADER] no uniform block entry points; "
-				   "block-backed shaders will not render\n");
-		}
-		return -1;
-	}
-#endif
-
-	index = glGetUniformBlockIndex_fp(prog, name);
-	if (index == GL_INVALID_INDEX)
-		return -1;
-
-	glUniformBlockBinding_fp(prog, index, binding);
-	return (GLint) index;
-}
-
 static void GL_InitProgramUniforms (glprogram_t *p)
 {
 	p->u_mvp             = glGetUniformLocation_fp(p->program, "u_mvp");
@@ -529,15 +481,13 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lightcolor       = glGetUniformLocation_fp(p->program, "u_lightcolor");
 	p->u_fullbright       = glGetUniformLocation_fp(p->program, "u_fullbright");
 
-	/* Uniform blocks, for the shaders that have moved to engine/shaders/.
-	 * Looked up on every program the same way the skeletal-only and
-	 * alias-only uniforms above are, and -1 on the ones that have no such
-	 * block.  Whichever u_* fields the block absorbed came back -1 just
-	 * now, which is what makes GL_ImmEnd take the buffer path instead. */
-	p->ub_s2d_vert        = GL_BindUniformBlock(p->program, "S2DVertParams",
-						    UBO_BINDING_VERT);
-	p->ub_s2d_frag        = GL_BindUniformBlock(p->program, "S2DFragParams",
-						    UBO_BINDING_FRAG);
+	/* The two shared uniform blocks, for the shaders that have moved to
+	 * engine/shaders/.  Looked up on every program the same way the
+	 * skeletal-only and alias-only uniforms above are, and -1 on the ones
+	 * that declare no such block.  Whichever u_* fields a block absorbed
+	 * came back -1 just now, which is what makes GL_ImmEnd take the block
+	 * path instead. */
+	R_BindProgramBlocks(p->program, &p->ub_vert, &p->ub_frag);
 }
 
 /* ------------------------------------------------------------------ */
@@ -588,25 +538,13 @@ static void GL_InitProgramUniforms (glprogram_t *p)
  * u_mvp and u_alpha_threshold sit inside uniform blocks there rather than
  * being loose uniforms, which is the one thing Vulkan GLSL will not have. */
 
-/* --- shader_flat: untextured, vertex-colored (dlights, blendpoly) --- */
-static const char sflat_vert[] =
-	GLSL_VERT_HEADER
-	"in vec3 a_position;\n"
-	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"out vec4 v_color;\n"
-	"void main() {\n"
-	"    v_color = a_color;\n"
-	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-	"}\n";
-
-static const char sflat_frag[] =
-	GLSL_FRAG_HEADER
-	"in vec4 v_color;\n"
-	"out vec4 fragColor;\n"
-	"void main() {\n"
-	"    fragColor = v_color;\n"
-	"}\n";
+/* --- shader_flat: untextured, vertex-colored (dlights, blendpoly) ---
+ * Lives in engine/shaders/sflat_vert.glsl and sflat_frag.glsl, and reaches us
+ * as sflat_vert[] / sflat_frag[] via shaders_gen.h.  Same arrangement as s2d
+ * above: u_mvp is a member of the shared VertParams block rather than a loose
+ * uniform, so gl_shader_flat.u_mvp is now -1 -- and the two paths that used to
+ * upload it by hand (the sky stencil pass in gl_rsurf.c and r_showtris in
+ * gl_rmain.c) go through R_SetMVP + R_FlushUniforms instead. */
 
 /* --- shader_world: textured + lightmap multitexture, with fog --- */
 static const char sworld_vert[] =
@@ -2608,7 +2546,8 @@ void GL_Shaders_Init (void)
 
 	GL_InitProgramSplit(&gl_shader_2d,  "2d",       GLSL_VERT_HEADER, s2d_vert,
 							GLSL_FRAG_HEADER, s2d_frag);
-	GL_InitProgram(&gl_shader_flat,     "flat",     sflat_vert,  sflat_frag);
+	GL_InitProgramSplit(&gl_shader_flat, "flat",    GLSL_VERT_HEADER, sflat_vert,
+							GLSL_FRAG_HEADER, sflat_frag);
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);
 	GL_InitProgram(&gl_shader_alias,    "alias",    salias_vert, salias_frag);

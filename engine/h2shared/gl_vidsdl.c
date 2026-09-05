@@ -44,6 +44,7 @@
 #include "gl_lightcluster.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
+#include "gl_uniforms.h"
 #include "filenames.h"
 
 #ifdef __EMSCRIPTEN__
@@ -1770,6 +1771,7 @@ static void GL_LoadFunctionPointers (void)
 	/* UBO functions (GL 3.1 / ES 3.0) */
 	glGetUniformBlockIndex_fp = (glGetUniformBlockIndex_f) SDL_GL_GetProcAddress("glGetUniformBlockIndex");
 	glUniformBlockBinding_fp = (glUniformBlockBinding_f) SDL_GL_GetProcAddress("glUniformBlockBinding");
+	glGetActiveUniformBlockiv_fp = (glGetActiveUniformBlockiv_f) SDL_GL_GetProcAddress("glGetActiveUniformBlockiv");
 	glBindBufferRange_fp = (glBindBufferRange_f) SDL_GL_GetProcAddress("glBindBufferRange");
 
 	glUniform4fv_fp = (glUniform4fv_f) SDL_GL_GetProcAddress("glUniform4fv");
@@ -2043,6 +2045,10 @@ static void GL_Init (void)
 	 * moved any state out from under the shadow being seeded here. */
 	R_PipelineResetState ();
 
+	/* Before GL_Shaders_Init: linking a program is what looks its blocks up
+	 * and reports whether the driver agrees with the C mirror's size, and
+	 * that check wants the buffers to already exist.  uhexen2-p4ln. */
+	R_Uniforms_Init();
 	GL_Shaders_Init();
 	GL_VBO_Init();
 	GL_PostProcess_Init();
@@ -2393,6 +2399,7 @@ static void VID_ChangeVideoMode (int newmode)
 	R_GPU_Particles_Shutdown();
 	R_LightCluster_Shutdown();	/* before the shader manager: GL reuses program names */
 	GL_Shaders_Shutdown();
+	R_Uniforms_Shutdown();
 #ifndef USE_GLES
 	GL_DeleteFrameResources ();
 #endif

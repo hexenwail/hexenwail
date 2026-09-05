@@ -21,6 +21,7 @@
 #include "quakedef.h"
 #include "gl_sky.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"
 #include "gl_lightcluster.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
@@ -6970,10 +6971,12 @@ static void R_ShowTris (void)
 	R_UseProgram (gl_shader_flat.program);
 	glVertexAttrib4f_fp (ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 
-	/* World.  visframe was stamped by this frame's R_RecursiveWorldNode. */
+	/* World.  visframe was stamped by this frame's R_RecursiveWorldNode.
+	 * sflat's u_mvp lives in the shared VertParams block, so there is no
+	 * loose location to write; this path draws by hand and must flush it. */
 	GL_GetMVP (mvp);
-	if (gl_shader_flat.u_mvp >= 0)
-		glUniformMatrix4fv_fp (gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+	R_SetMVP (mvp);
+	R_FlushUniforms ();
 	R_ShowTris_DrawSurfaceRuns (cl.worldmodel->surfaces, 0,
 				    cl.worldmodel->nummodelsurfaces, r_framecount);
 
@@ -6995,8 +6998,8 @@ static void R_ShowTris (void)
 		R_RotateForEntity (e);
 		GL_GetMVP (mvp);
 		GL_PopMatrix ();
-		if (gl_shader_flat.u_mvp >= 0)
-			glUniformMatrix4fv_fp (gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+		R_SetMVP (mvp);
+		R_FlushUniforms ();
 
 		R_ShowTris_DrawSurfaceRuns (clmodel->surfaces, clmodel->firstmodelsurface,
 					    clmodel->nummodelsurfaces, -1);

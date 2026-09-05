@@ -9,6 +9,8 @@
  * offline SPIR-V compile.
  */
 #include "layout.inc"
+#define UNIFORMS_VERT
+#include "uniforms.inc"
 
 /* Locations are ATTR_POSITION / ATTR_TEXCOORD / ATTR_COLOR from gl_shader.h.
  * ATTR_LMCOORD (2) is skipped: the immediate-mode vertex carries it, this
@@ -16,13 +18,6 @@
 VERT_IN(0) in vec3 a_position;
 VERT_IN(1) in vec2 a_texcoord;
 VERT_IN(3) in vec4 a_color;
-
-/* u_mvp is a block member rather than a loose uniform because Vulkan GLSL has
- * no loose non-opaque uniforms at all.  A mat4 is already std140-clean, so
- * unlike a scalar there is no padding here to get wrong. */
-VERT_UBO(0) uniform S2DVertParams {
-    mat4 u_mvp;
-};
 
 VERT_OUT(0) out vec2 v_texcoord;
 VERT_OUT(1) out vec4 v_color;

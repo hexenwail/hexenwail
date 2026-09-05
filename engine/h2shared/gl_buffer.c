@@ -504,7 +504,12 @@ void GL_BindBufferRange (GLenum target, GLuint index,
 	(void)target; (void)index; (void)buffer; (void)offset; (void)size;
 }
 
-/* No range cache to keep in sync here, but callers still need the bind. */
+/* No binding cache to keep in sync here, but callers still need the binds. */
+void GL_BindBuffer (GLenum target, GLuint buffer)
+{
+	glBindBuffer_fp (target, buffer);
+}
+
 void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
 {
 	glBindBufferBase_fp (target, index, buffer);

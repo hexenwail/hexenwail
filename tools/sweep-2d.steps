@@ -9,10 +9,10 @@
 #     env STEPS=tools/sweep-2d.steps \
 #     ./tools/headless-drive.sh script /tmp/2d-new result-demodata/share/hexenwail
 #
-# Compare against a reference run of the unmodified build, MASKING the cursor:
+# Compare against a reference run of the unmodified build, MASKING BOTH cursors:
 #
 #   nix shell nixpkgs#imagemagick --command \
-#     ./tools/shot-diff.sh /tmp/2d-ref /tmp/2d-new 34x62+288+56
+#     ./tools/shot-diff.sh /tmp/2d-ref /tmp/2d-new 34x62+288+56 12x12+20+572
 #
 # Unlike the world-culling sweep, this path IS visible, so pixels are the right
 # gate here rather than a numeric proxy.
@@ -25,9 +25,19 @@
 # Every differing pixel lay inside 25x20+291+60 (frame 01) or 15x19+295+80
 # (frame 02, cursor one row down).  34x62+288+56 covers both.
 #
+# THERE ARE TWO BLINKING CURSORS HERE, NOT ONE, and the second one was found the
+# expensive way -- as a 15.78-pixel "regression" in a change that had none.  The
+# two Escapes before frame 04 close the menu outright, so 04 is the CONSOLE, and
+# console.c:595 draws the input-line cursor only while (int)(realtime*4)&1.  It
+# is a two-state blink, not a slow animation, so it hides from a small sample:
+# four runs of one binary produced BOTH states, and one of them was byte-exact
+# against a reference taken before the change.  Region 12x12+20+572, measured as
+# a 9x9+21+574 bounding box.
+#
 # So a gate calibrated on ONE pair of runs can look perfect and be worthless.
 # If you add frames here, re-derive the mask from at least three runs of the
-# SAME binary before trusting a zero.
+# SAME binary before trusting a zero -- and note that agreeing runs prove
+# nothing either, since a two-state blink can land the same way twice.
 
 sleep 6
 shot 01-main-menu

@@ -23,6 +23,7 @@
 #include "quakedef.h"
 #include "gl_sky.h"
 #include "gl_shader.h"
+#include "gl_uniforms.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
@@ -2101,8 +2102,12 @@ static void R_EmitSkyStencilRuns (skyrun_t *runs, int n_runs, qboolean *bound)
 		glBindVertexArray_fp(sky_stencil_vao);
 		R_UseProgram (gl_shader_flat.program);
 		GL_GetMVP(mvp);
-		if (gl_shader_flat.u_mvp >= 0)
-			glUniformMatrix4fv_fp(gl_shader_flat.u_mvp, 1, GL_FALSE, mvp);
+		/* sflat's u_mvp is a member of the shared VertParams block, so
+		 * there is no loose location to write and glGetUniformLocation
+		 * reports -1.  This path draws with glDrawElements rather than
+		 * GL_ImmEnd, so it has to flush the block itself. */
+		R_SetMVP(mvp);
+		R_FlushUniforms();
 		/* a_color attribute disabled in this VAO -> uses generic value */
 		glVertexAttrib4f_fp(ATTR_COLOR, 1.0f, 1.0f, 1.0f, 1.0f);
 		*bound = true;

@@ -92,15 +92,17 @@ typedef struct glprogram_s {
 	GLint	u_shadevector;	    /* model-space light direction for the shadedots expression */
 	GLint	u_lightcolor;	    /* vec4(light rgb with tint+scale folded in, entity alpha) */
 	GLint	u_fullbright;	    /* 1.0 during the additive fullbright re-draw */
-	/* Uniform BLOCK indices, for the shaders that have moved out of C string
-	 * literals into engine/shaders/.  Those declare their non-opaque uniforms
-	 * inside a block, because Vulkan GLSL has no loose ones at all and the
-	 * SDL_GPU backend consumes SPIR-V.  A block member has no
-	 * glGetUniformLocation, so the matching u_* field above comes back -1 and
-	 * GL_ImmEnd pushes a buffer instead.  -1 on every program that still uses
-	 * loose uniforms, which today is all of them but the 2D one. */
-	GLint	ub_s2d_vert;	    /* S2DVertParams: u_mvp */
-	GLint	ub_s2d_frag;	    /* S2DFragParams: u_alpha_threshold */
+	/* Indices of the two SHARED uniform blocks (gl_uniforms.h), for the
+	 * shaders that have moved out of C string literals into engine/shaders/.
+	 * Those declare their non-opaque uniforms inside a block, because Vulkan
+	 * GLSL has no loose ones at all and the SDL_GPU backend consumes SPIR-V.
+	 * A block member has no glGetUniformLocation, so whichever u_* fields
+	 * above the block absorbed come back -1 and GL_ImmEnd takes the block
+	 * path instead -- which is why the dual path is keyed on these two and
+	 * never on shader identity.  -1 on every program that still uses loose
+	 * uniforms, and on any stage that declares no block at all. */
+	GLint	ub_vert;	    /* VertParams, at UBO_BINDING_VERT */
+	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */
