@@ -1049,11 +1049,11 @@ void IN_Move (usercmd_t *cmd)
 	int	x, y;
 	qboolean app_active;
 
-	/* Cleared here, not on send, so the stick's contribution is a fresh
-	 * sample every render frame and goes to zero the moment the pad is
-	 * unplugged, the window loses focus, or a menu takes input -- every one
-	 * of which is a path that returns before IN_GPMove writes anything. */
-	cl.analogmove.forwardmove = cl.analogmove.sidemove = cl.analogmove.upmove = 0;
+	/* cl.analogmove is cleared by the caller, NOT here -- see _Host_Frame.
+	 * Clearing it in this function would only cover the frames this function
+	 * runs on, and the frames that matter are the ones it does not: host.c
+	 * calls IN_Move only while key_dest is key_game, so a menu or console
+	 * would leave the last sample standing and the player walking. */
 
 	if (cl.v.cameramode)
 	{

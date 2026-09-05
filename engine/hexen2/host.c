@@ -1370,6 +1370,19 @@ static void _Host_Frame (float time)
 // mod meant to pin drifts instead.  Re-apply the latched angle rather than
 // suppressing the input, so pendingcmd still gets its movement deltas: it is
 // the view that is pinned, not the player.  uhexen2-g8lb
+// Cleared HERE rather than inside IN_Move, and the guard below is the reason.
+//
+// cl.analogmove holds the sticks' latest deflection and survives being consumed
+// by a tick, because a deflection is a level rather than a delta (client.h says
+// why).  But "survives a tick" must not become "survives not being sampled":
+// IN_Move only runs while key_dest is key_game, so clearing inside it would
+// cover exactly the frames that do not matter and miss the ones that do -- open
+// the menu with the stick held and the last sample would stand for as long as
+// the menu was up, walking the player around behind it.  Zeroing before the
+// guard makes "not sampling" mean "no analog contribution", which is what the
+// memset in CL_SendCmd used to give us for free.
+	cl.analogmove.forwardmove = cl.analogmove.sidemove = cl.analogmove.upmove = 0;
+
 	if (cls.signon == SIGNONS && Key_GetDest() == key_game)
 	{
 		CL_AdjustAngles ();
