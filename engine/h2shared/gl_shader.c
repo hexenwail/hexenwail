@@ -15,6 +15,11 @@
 #include "gl_pipeline.h"
 #include "gl_lightcluster.h"	/* froxel grid dimensions and binding points (uhexen2-26bm) */
 
+/* Generated from the .glsl files in engine/shaders by EmbedShaders.cmake.
+ * Embedded rather than loaded at runtime: the engine has no shader search
+ * path, so a missing file would be an unrecoverable black screen. */
+#include "shaders_gen.h"
+
 /* Paste an integer macro into a GLSL source string.  The froxel grid's
  * dimensions and binding points have to agree between the compute pass that
  * fills the grid and the fragment shaders that read it, and the only way to
@@ -73,16 +78,29 @@ static void GL_InitProgramUniforms (glprogram_t *p);
 /* Shader compilation helpers                                          */
 /* ------------------------------------------------------------------ */
 
-GLuint GL_CompileShader (GLenum type, const char *source)
+/* `header` carries the #version line and, on the ES tier, the default
+ * precision declarations that must precede it; NULL for a source that still
+ * spells its own.  Kept a separate glShaderSource chunk rather than spliced
+ * because the files in engine/shaders deliberately have no #version: one file
+ * has to serve the desktop tier, the ES tier and the offline SPIR-V compile,
+ * and those want three different ones. */
+static GLuint GL_CompileShaderSplit (GLenum type, const char *header,
+				     const char *source)
 {
 	GLuint shader;
 	GLint status;
 	char log[2048];
 	const char *type_name = (type == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
+	const char *chunks[2];
+	GLsizei nchunks = 0;
+
+	if (header)
+		chunks[nchunks++] = header;
+	chunks[nchunks++] = source;
 
 	shader = glCreateShader_fp(type);
 
-	glShaderSource_fp(shader, 1, &source, NULL);
+	glShaderSource_fp(shader, nchunks, chunks, NULL);
 
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
@@ -98,6 +116,11 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 	if (developer.integer)
 		Con_SafePrintf("[SHADER] %s shader compiled OK (id=%u)\n", type_name, shader);
 	return shader;
+}
+
+GLuint GL_CompileShader (GLenum type, const char *source)
+{
+	return GL_CompileShaderSplit (type, NULL, source);
 }
 
 GLuint GL_LoadComputeProgram (const char *header, const char *body, const char *name)
@@ -381,13 +404,16 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 #endif	/* !USE_GLES */
 
 
-GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
+/* GL_LoadProgram where each stage is a (header, body) pair; see
+ * GL_CompileShaderSplit for why the header is kept separate. */
+static GLuint GL_LoadProgramSplit (const char *vert_header, const char *vert_src,
+				   const char *frag_header, const char *frag_src)
 {
 	GLuint vs, fs, prog;
 
-	vs = GL_CompileShader(GL_VERTEX_SHADER, vert_src);
+	vs = GL_CompileShaderSplit(GL_VERTEX_SHADER, vert_header, vert_src);
 	if (!vs) return 0;
-	fs = GL_CompileShader(GL_FRAGMENT_SHADER, frag_src);
+	fs = GL_CompileShaderSplit(GL_FRAGMENT_SHADER, frag_header, frag_src);
 	if (!fs) { glDeleteShader_fp(vs); return 0; }
 
 	prog = GL_LinkProgram(vs, fs);
@@ -396,9 +422,63 @@ GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
 	return prog;
 }
 
+GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
+{
+	return GL_LoadProgramSplit (NULL, vert_src, NULL, frag_src);
+}
+
 /* ------------------------------------------------------------------ */
 /* Helper to look up all common uniforms                               */
 /* ------------------------------------------------------------------ */
+
+/*
+===============
+GL_BindUniformBlock
+
+Look a uniform block up and pin it to a binding point, returning its index or
+-1 if this program has no such block.
+
+The pinning cannot be expressed in the shader: layout(binding=) on a uniform
+block is GL 4.2 / GLSL ES 3.10, and the ES tier runs ES 3.00.  So this call is
+the only place the point is chosen, and UBO_BINDING_* in gl_shader.h is the
+only place the pusher in GL_ImmEnd can read it back.
+
+Unlike the Hi-Z block, which sits at binding 0 and so would survive the call
+being skipped (0 is also GL's default), these do not -- two blocks in one
+program cannot share a point, so at least one must be moved.  Missing entry
+points are therefore reported rather than shrugged off; the alternative is a
+HUD that silently draws with whatever the buffer last held.
+===============
+*/
+static GLint GL_BindUniformBlock (GLuint prog, const char *name, GLuint binding)
+{
+	GLuint		index;
+
+#ifndef USE_GLES
+	/* Only the desktop loader table can come up short here; the ES tier
+	 * calls both of these directly (gl_func.h), so testing them for NULL
+	 * there is a comparison the compiler can see through. */
+	static qboolean	warned = false;
+
+	if (!glGetUniformBlockIndex_fp || !glUniformBlockBinding_fp)
+	{
+		if (!warned)
+		{
+			warned = true;
+			Con_Printf("[SHADER] no uniform block entry points; "
+				   "block-backed shaders will not render\n");
+		}
+		return -1;
+	}
+#endif
+
+	index = glGetUniformBlockIndex_fp(prog, name);
+	if (index == GL_INVALID_INDEX)
+		return -1;
+
+	glUniformBlockBinding_fp(prog, index, binding);
+	return (GLint) index;
+}
 
 static void GL_InitProgramUniforms (glprogram_t *p)
 {
@@ -448,6 +528,16 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_shadevector      = glGetUniformLocation_fp(p->program, "u_shadevector");
 	p->u_lightcolor       = glGetUniformLocation_fp(p->program, "u_lightcolor");
 	p->u_fullbright       = glGetUniformLocation_fp(p->program, "u_fullbright");
+
+	/* Uniform blocks, for the shaders that have moved to engine/shaders/.
+	 * Looked up on every program the same way the skeletal-only and
+	 * alias-only uniforms above are, and -1 on the ones that have no such
+	 * block.  Whichever u_* fields the block absorbed came back -1 just
+	 * now, which is what makes GL_ImmEnd take the buffer path instead. */
+	p->ub_s2d_vert        = GL_BindUniformBlock(p->program, "S2DVertParams",
+						    UBO_BINDING_VERT);
+	p->ub_s2d_frag        = GL_BindUniformBlock(p->program, "S2DFragParams",
+						    UBO_BINDING_FRAG);
 }
 
 /* ------------------------------------------------------------------ */
@@ -490,34 +580,13 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 #define GLSL_BITFIELD_REVERSE	""
 #endif
 
-/* --- shader_2d: orthographic HUD/text rendering --- */
-static const char s2d_vert[] =
-	GLSL_VERT_HEADER
-	"in vec3 a_position;\n"
-	"in vec2 a_texcoord;\n"
-	"in vec4 a_color;\n"
-	"uniform mat4 u_mvp;\n"
-	"out vec2 v_texcoord;\n"
-	"out vec4 v_color;\n"
-	"void main() {\n"
-	"    v_texcoord = a_texcoord;\n"
-	"    v_color = a_color;\n"
-	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-	"}\n";
-
-static const char s2d_frag[] =
-	GLSL_FRAG_HEADER
-	"uniform sampler2D u_texture0;\n"
-	"uniform float u_alpha_threshold;\n"
-	"in vec2 v_texcoord;\n"
-	"in vec4 v_color;\n"
-	"out vec4 fragColor;\n"
-	"void main() {\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord);\n"
-	"    vec4 color = tex * v_color;\n"
-	"    if (color.a < u_alpha_threshold) discard;\n"
-	"    fragColor = color;\n"
-	"}\n";
+/* --- shader_2d: orthographic HUD/text rendering ---
+ * Lives in engine/shaders/s2d_vert.glsl and s2d_frag.glsl, and reaches us as
+ * s2d_vert[] / s2d_frag[] via shaders_gen.h.  Their #version headers are
+ * supplied separately, as a second glShaderSource chunk, so the files stay
+ * tier-agnostic; GL_InitProgramSplit below is what pairs them up.
+ * u_mvp and u_alpha_threshold sit inside uniform blocks there rather than
+ * being loose uniforms, which is the one thing Vulkan GLSL will not have. */
 
 /* --- shader_flat: untextured, vertex-colored (dlights, blendpoly) --- */
 static const char sflat_vert[] =
@@ -2264,10 +2333,15 @@ static const char ssky_side_frag[] =
 /* Init / Shutdown                                                     */
 /* ------------------------------------------------------------------ */
 
-static qboolean GL_InitProgram (glprogram_t *p, const char *name,
-				const char *vert_src, const char *frag_src)
+/* Each stage is a (header, body) pair; pass NULL headers for a source that
+ * carries its own #version, which is every shader still written as a C string
+ * literal below.  GL_InitProgram is the wrapper that does exactly that. */
+static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
+				     const char *vert_header, const char *vert_src,
+				     const char *frag_header, const char *frag_src)
 {
-	p->program = GL_LoadProgram(vert_src, frag_src);
+	p->program = GL_LoadProgramSplit(vert_header, vert_src,
+					 frag_header, frag_src);
 	if (!p->program)
 	{
 		Con_Printf("Failed to load shader: %s\n", name);
@@ -2302,6 +2376,12 @@ static qboolean GL_InitProgram (glprogram_t *p, const char *name,
 
 	Con_SafePrintf("  shader '%s' loaded (program %u)\n", name, p->program);
 	return true;
+}
+
+static qboolean GL_InitProgram (glprogram_t *p, const char *name,
+				const char *vert_src, const char *frag_src)
+{
+	return GL_InitProgramSplit (p, name, NULL, vert_src, NULL, frag_src);
 }
 
 /*
@@ -2526,7 +2606,8 @@ void GL_Shaders_Init (void)
 {
 	Con_SafePrintf("Initializing shaders...\n");
 
-	GL_InitProgram(&gl_shader_2d,       "2d",       s2d_vert,    s2d_frag);
+	GL_InitProgramSplit(&gl_shader_2d,  "2d",       GLSL_VERT_HEADER, s2d_vert,
+							GLSL_FRAG_HEADER, s2d_frag);
 	GL_InitProgram(&gl_shader_flat,     "flat",     sflat_vert,  sflat_frag);
 	GL_InitProgram(&gl_shader_world,    "world",    sworld_vert, sworld_frag);
 	GL_InitProgram(&gl_shader_world_opaque, "world_opaque", sworld_vert, sworld_frag_opaque);

@@ -1,0 +1,44 @@
+# sweep-2d.steps -- render-regression sweep for the 2D path: every HUD element,
+# menu and console line, all drawn through gl_shader_2d (engine/h2shared/gl_draw.c).
+#
+# Needs no map and no game data beyond the demo, so it is the cheap one (~25s):
+#
+#   nix build .#demodata -o result-demodata
+#   nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
+#             nixpkgs#bubblewrap --command \
+#     env STEPS=tools/sweep-2d.steps \
+#     ./tools/headless-drive.sh script /tmp/2d-new result-demodata/share/hexenwail
+#
+# Compare against a reference run of the unmodified build, MASKING the cursor:
+#
+#   nix shell nixpkgs#imagemagick --command \
+#     ./tools/shot-diff.sh /tmp/2d-ref /tmp/2d-new 34x62+288+56
+#
+# Unlike the world-culling sweep, this path IS visible, so pixels are the right
+# gate here rather than a numeric proxy.
+#
+# THE MASK IS NOT OPTIONAL, AND THE REASON IS A TRAP WORTH KNOWING.  The menu
+# cursor is an animated sprite whose position also tracks the selected row, so
+# a frame is only reproducible when two runs sample the same animation phase.
+# Measured on an unmodified binary: runs A and B agreed on all four frames with
+# 0 differing pixels -- and run C disagreed with A by 26, 16 and 23 pixels.
+# Every differing pixel lay inside 25x20+291+60 (frame 01) or 15x19+295+80
+# (frame 02, cursor one row down).  34x62+288+56 covers both.
+#
+# So a gate calibrated on ONE pair of runs can look perfect and be worthless.
+# If you add frames here, re-derive the mask from at least three runs of the
+# SAME binary before trusting a zero.
+
+sleep 6
+shot 01-main-menu
+key Down
+sleep 1
+shot 02-menu-moved
+key Return
+sleep 2
+shot 03-submenu
+key Escape
+sleep 1
+key Escape
+sleep 1
+shot 04-back-to-main

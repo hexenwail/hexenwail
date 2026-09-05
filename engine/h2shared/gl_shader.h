@@ -92,6 +92,15 @@ typedef struct glprogram_s {
 	GLint	u_shadevector;	    /* model-space light direction for the shadedots expression */
 	GLint	u_lightcolor;	    /* vec4(light rgb with tint+scale folded in, entity alpha) */
 	GLint	u_fullbright;	    /* 1.0 during the additive fullbright re-draw */
+	/* Uniform BLOCK indices, for the shaders that have moved out of C string
+	 * literals into engine/shaders/.  Those declare their non-opaque uniforms
+	 * inside a block, because Vulkan GLSL has no loose ones at all and the
+	 * SDL_GPU backend consumes SPIR-V.  A block member has no
+	 * glGetUniformLocation, so the matching u_* field above comes back -1 and
+	 * GL_ImmEnd pushes a buffer instead.  -1 on every program that still uses
+	 * loose uniforms, which today is all of them but the 2D one. */
+	GLint	ub_s2d_vert;	    /* S2DVertParams: u_mvp */
+	GLint	ub_s2d_frag;	    /* S2DFragParams: u_alpha_threshold */
 } glprogram_t;
 
 /* Extended program for GPU particle SSBO rendering */
@@ -185,11 +194,28 @@ void	GL_ParticleGPU_SetUniforms (const gl_particle_gpu_prog_t *prog,
 #define ALIAS_INST_SHADEDOT_ROW_MASK	255
 #define ALIAS_INST_DLIGHT_BIT		256
 
-/* Vertex attribute locations (fixed, shared across all programs) */
+/* Vertex attribute locations (fixed, shared across all programs).  The
+ * file-backed shaders in engine/shaders/ repeat these as layout(location=)
+ * qualifiers, which OVERRIDE the glBindAttribLocation calls in GL_LinkProgram
+ * rather than conflicting with them -- so the two lists have to agree. */
 #define ATTR_POSITION	0
 #define ATTR_TEXCOORD	1
 #define ATTR_LMCOORD	2
 #define ATTR_COLOR	3
+
+/* GL_UNIFORM_BUFFER binding points.  One global index space per context,
+ * shared with the compute pipeline -- 0 is gl_worldcull.c's Hi-Z HizParams,
+ * so the graphics blocks start at 1.  Keyed by stage rather than by program:
+ * only one program is bound at a time, so each program's own vertex-stage
+ * block is pinned to the same point rather than every program claiming a new
+ * one.  A driver need only guarantee a handful of these.
+ *
+ * The shader source cannot name them -- layout(binding=) on a uniform block
+ * is GL 4.2 / ES 3.10 and the ES tier is ES 3.00 -- so glUniformBlockBinding
+ * in GL_InitProgramUniforms is where they are actually decided, and these
+ * defines are the only place the two sides meet. */
+#define UBO_BINDING_VERT	1
+#define UBO_BINDING_FRAG	2
 
 void	GL_Shaders_Init (void);
 void	GL_Shaders_Shutdown (void);
