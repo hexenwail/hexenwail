@@ -62,6 +62,40 @@ Then change exactly these, and check each one:
 Leave **Downloads**, **Compiled gamecode**, **Reporting a crash** and
 **Requirements** alone unless something in them actually changed.
 
+### The copied file names THREE versions, not one
+
+This is the trap. A global `s/<prev>/<new>/g` over the copy looks like it does
+the job and quietly gets two lines wrong, because the file you copied refers to
+**the release before it** as well as to itself:
+
+| Names | Copied from r28 says | r29 must say |
+|---|---|---|
+| this release — badges ×3, compare right side | `r28` | `r29` |
+| the previous release — `Changes from` heading **and its link**, compare left side | `r27` | `r28` |
+
+So it is two substitutions, and **the order is load-bearing**: bump the newer
+one first, or the second expression eats what the first just wrote.
+
+```bash
+PREVPREV=0.8.0-beta.r27 PREV=0.8.0-beta.r28 NEW=0.8.0-beta.r29
+sed -i -e "s|$PREV|$NEW|g" -e "s|$PREVPREV|$PREV|g" docs/release-notes/$NEW.md
+```
+
+`sed` applies expressions in order per line, so `compare/r27...r28` becomes
+`compare/r27...r29` and then `compare/r28...r29`. Reverse the two and you get
+`compare/r29...r29`.
+
+Then read it back, every hit, before writing any bullets:
+
+```bash
+grep -nE '0\.8\.0-beta\.r[0-9]+' docs/release-notes/$NEW.md
+```
+
+`$NEW` in the badges and on the right of `compare`. `$PREV` in exactly two
+places: the `Changes from` heading and the left of `compare`. Anything older is
+a miss. This bit r29 — the global sed left `Changes from [r27]` standing and
+produced `compare/r27...r29`, both fixed by hand afterwards.
+
 ### Voice
 
 Imitates Ironwail's release notes. Flat list, past tense, verb first:
@@ -176,13 +210,15 @@ gh release create 0.8.0-beta.r28 --notes-file docs/release-notes/0.8.0-beta.r28.
 ## The whole thing, on one screen
 
 ```bash
-PREV=0.8.0-beta.r27 NEW=0.8.0-beta.r28
+PREVPREV=0.8.0-beta.r27 PREV=0.8.0-beta.r28 NEW=0.8.0-beta.r29
 
 grep -n HW_BASE_VERSION engine/hexen2/quakedef.h
 git log --format='%s' $PREV..HEAD | grep -vE '^(chore|docs)'
 git rev-list --count $PREV..HEAD
 cp docs/release-notes/$PREV.md docs/release-notes/$NEW.md
-#   ... edit notes, then edit quakedef.h line 29 ...
+sed -i -e "s|$PREV|$NEW|g" -e "s|$PREVPREV|$PREV|g" docs/release-notes/$NEW.md   # order matters
+grep -nE '0\.8\.0-beta\.r[0-9]+' docs/release-notes/$NEW.md                      # read every hit
+#   ... write bullets, then edit quakedef.h line 29 ...
 nix build .#default && ./result/bin/glhexen2 -version
 git add engine/hexen2/quakedef.h docs/release-notes/$NEW.md
 git commit -m "version(bump) $NEW"

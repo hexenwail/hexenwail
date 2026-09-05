@@ -750,7 +750,7 @@ static void R_LightCluster_Verify_f (void)
 
 	if (!lc_ready || !lc_valid_this_frame)
 	{
-		Con_Printf ("lightcluster_verify: no grid this frame "
+		CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: no grid this frame "
 			    "(r_lightclusters %d, built %d)\n",
 			    r_lightclusters.integer, lc_ready);
 		return;
@@ -790,11 +790,11 @@ static void R_LightCluster_Verify_f (void)
 		}
 		lc_numlights = want;
 		LC_UploadAndDispatch ();
-		Con_Printf ("lightcluster_verify: clustering %d synthetic lights\n", want);
+		CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: clustering %d synthetic lights\n", want);
 	}
 	if (!glGetTexImage_fp)
 	{
-		Con_Printf ("lightcluster_verify: glGetTexImage unavailable\n");
+		CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: glGetTexImage unavailable\n");
 		return;
 	}
 
@@ -872,12 +872,12 @@ static void R_LightCluster_Verify_f (void)
 		}
 	}
 
-	Con_Printf ("lightcluster_verify: %d lights, %d/%d froxels occupied, "
+	CON_Printf (_PRINT_NONOTIFY, "lightcluster_verify: %d lights, %d/%d froxels occupied, "
 		    "%d light-refs, %d of %d mask words disagree with the CPU\n",
 		    lc_numlights, occupied, LIGHT_FROXELS, bits,
 		    mismatch, LIGHT_FROXELS * 4);
 	if (mismatch)
-		Con_Printf ("  non-zero is a bug: the two sides derive the froxel bounds "
+		CON_Printf (_PRINT_NONOTIFY, "  non-zero is a bug: the two sides derive the froxel bounds "
 			    "differently but must still agree\n");
 }
 

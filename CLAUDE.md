@@ -4,13 +4,13 @@ This file provides instructions and context for AI coding agents working on this
 
 ## Issue tracking
 
-There is no in-tree issue tracker.  This project used **bd (beads)** until it was
-retired; you will still see `(uhexen2-xxxx)` ids on older commits and in the docs
-under `history/`.  Those are historical references — read them as breadcrumbs into
-the reasoning behind a change, not as live issues you can look up.  Do not add new
-ones, and do not reintroduce `.beads/` to the tree.
+This project uses **GitHub Issues** for tracking bugs, features, and work items.
+See [issues](https://github.com/alextnewman/hexenwail/issues) to report or browse.
 
-Track work for the current session however the session calls for it.
+You will still see `(uhexen2-xxxx)` ids on older commits and in the docs under
+`history/`. Those are historical references from the retired **bd (beads)** tracker
+— read them as breadcrumbs into the reasoning behind a change, not as live issues.
+Do not reintroduce `.beads/` to the tree.
 
 ## Session Completion
 
