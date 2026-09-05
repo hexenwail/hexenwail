@@ -2639,7 +2639,7 @@ void GL_PostProcess_End3D (void)
 				pp_copyback_h = h;
 			}
 			glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
-			glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+			glCopyTexSubImage2D_fp(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
 
 			/* Apply warp+blur, writing the processed 3D back into the default framebuffer */
 			glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
@@ -2758,7 +2758,7 @@ void GL_PostProcess_EndFrame (void)
 			pp_copyback_h = h;
 		}
 		glBindTexture_fp(GL_TEXTURE_2D, pp_copyback_tex);
-		glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+		glCopyTexSubImage2D_fp(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
 		blit_tex = pp_copyback_tex;
 		blit_w = w;
 		blit_h = h;
