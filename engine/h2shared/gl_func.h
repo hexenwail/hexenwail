@@ -60,6 +60,7 @@ GL_FUNCTION(void, glTexEnvf, (GLenum,GLenum,GLfloat))
 GL_FUNCTION(void, glScalef, (GLfloat,GLfloat,GLfloat))
 GL_FUNCTION(void, glTexImage2D, (GLenum,GLint,GLint,GLsizei,GLsizei,GLint,GLenum,GLenum,const GLvoid*))
 GL_FUNCTION(void, glTexSubImage2D, (GLenum,GLint,GLint,GLint,GLsizei,GLsizei,GLenum,GLenum,const GLvoid *))
+GL_FUNCTION(void, glCopyTexSubImage2D, (GLenum,GLint,GLint,GLint,GLint,GLint,GLsizei,GLsizei))
 /* GL 1.3; must be resolved at runtime because Windows' opengl32.dll still
  * only exports the GL 1.1 entry points.  Used by the DDS/KTX replacement
  * texture path (uhexen2-0vgo.5). */
@@ -98,10 +99,14 @@ GL_FUNCTION(void, glAlphaFunc, (GLenum,GLclampf))
 GL_FUNCTION(void, glBlendFunc, (GLenum,GLenum))
 GL_FUNCTION(void, glShadeModel, (GLenum))
 GL_FUNCTION(void, glPolygonMode, (GLenum,GLenum))
+GL_FUNCTION(void, glPointSize, (GLfloat))
 GL_FUNCTION(void, glColorMask, (GLboolean,GLboolean,GLboolean,GLboolean))
 GL_FUNCTION(void, glDepthMask, (GLboolean))
 GL_FUNCTION(void, glDepthRange, (GLclampd,GLclampd))
 GL_FUNCTION(void, glDepthFunc, (GLenum))
+/* GLclampd, not GLfloat: the double-precision spelling is the desktop one.
+ * ES has only glClearDepthf -- see the USE_GLES branch below. */
+GL_FUNCTION(void, glClearDepth, (GLclampd))
 GL_FUNCTION(void, glPolygonOffset, (GLfloat,GLfloat))
 
 #if defined(DRAW_PROGRESSBARS) /* D_ShowLoadingSize() */
@@ -123,6 +128,7 @@ GL_FUNCTION(void, glTranslatef, (GLfloat,GLfloat,GLfloat))
 GL_FUNCTION(void, glOrtho, (GLdouble,GLdouble,GLdouble,GLdouble,GLdouble,GLdouble))
 GL_FUNCTION(void, glFrustum, (GLdouble,GLdouble,GLdouble,GLdouble,GLdouble,GLdouble))
 GL_FUNCTION(void, glViewport, (GLint,GLint,GLsizei,GLsizei))
+GL_FUNCTION(void, glScissor, (GLint,GLint,GLsizei,GLsizei))
 GL_FUNCTION(void, glPushMatrix, (void))
 GL_FUNCTION(void, glPopMatrix, (void))
 GL_FUNCTION(void, glLoadIdentity, (void))
@@ -172,11 +178,13 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glDepthMask_fp		glDepthMask
 #define glDepthFunc_fp		glDepthFunc
 #define glDepthRange_fp		glDepthRangef	/* ES3 uses float version */
+#define glClearDepth_fp		glClearDepthf	/* ES3 uses float version */
 #define glReadPixels_fp		glReadPixels
 #define glPixelStorei_fp	glPixelStorei
 #define glHint_fp		glHint
 #define glCullFace_fp		glCullFace
 #define glViewport_fp		glViewport
+#define glScissor_fp		glScissor
 #define glPolygonOffset_fp	glPolygonOffset
 #define glGetString_fp		glGetString
 #define glGetFloatv_fp		glGetFloatv
@@ -220,8 +228,9 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glLoadIdentity_fp()	((void)0)
 #define glMatrixMode_fp(m)	((void)0)
 #define glLoadMatrixf_fp(m)	((void)0)
+/* No glPointSize in ES: point size comes from the vertex shader's
+ * gl_PointSize output, so square-particle mode draws at 1px there. */
 #define glPointSize_fp(s)	((void)0)
-#define glPointSize(s)		((void)0)	/* Direct function call, not _fp variant */
 
 #endif	/* GL_FUNC_H */
 
@@ -273,10 +282,12 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glBlendFunc_fp		glBlendFunc
 #define glShadeModel_fp		glShadeModel
 #define glPolygonMode_fp	glPolygonMode
+#define glPointSize_fp		glPointSize
 #define glColorMask_fp		glColorMask
 #define glDepthMask_fp		glDepthMask
 #define glDepthRange_fp		glDepthRange
 #define glDepthFunc_fp		glDepthFunc
+#define glClearDepth_fp		glClearDepth
 
 #define glDrawBuffer_fp		glDrawBuffer
 #define glReadPixels_fp		glReadPixels
@@ -291,6 +302,7 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glOrtho_fp		glOrtho
 #define glFrustum_fp		glFrustum
 #define glViewport_fp		glViewport
+#define glScissor_fp		glScissor
 #define glPushMatrix_fp		glPushMatrix
 #define glPopMatrix_fp		glPopMatrix
 #define glLoadIdentity_fp	glLoadIdentity

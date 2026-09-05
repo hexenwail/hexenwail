@@ -1836,12 +1836,15 @@ static void GL_LoadFunctionPointers (void)
 #ifdef GL_DLSYM
 static qboolean GL_OpenLibrary (const char *name)
 {
-	int	ret;
+	/* SDL3 returns bool -- true on success.  SDL2 returned int, -1 on
+	 * failure, and a bool is never -1: the old test read every failed
+	 * load as a success and made the basedir retry below unreachable. */
+	bool	ret;
 	char	gl_liblocal[MAX_OSPATH];
 
 	ret = SDL_GL_LoadLibrary(name);
 
-	if (ret == -1)
+	if (!ret)
 	{
 		// In case of user-specified gl library, look for it under the
 		// installation directory, too: the user may forget providing
@@ -1859,7 +1862,7 @@ static qboolean GL_OpenLibrary (const char *name)
 					"Trying to load %s\n", name, gl_liblocal);
 
 			ret = SDL_GL_LoadLibrary(gl_liblocal);
-			if (ret == -1)
+			if (!ret)
 				return false;
 
 			Con_SafePrintf("Using GL library: %s\n", gl_liblocal);
@@ -2089,7 +2092,7 @@ static void GL_Init (void)
 	{
 		glClipControl_fp (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 		R_SetDepthFunc (GL_GEQUAL);
-		glClearDepth (0.0);
+		glClearDepth_fp (0.0);
 		Con_SafePrintf ("Reversed-Z depth buffer enabled (ARB_clip_control)\n");
 	}
 #endif

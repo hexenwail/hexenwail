@@ -1828,7 +1828,7 @@ void R_DrawParticles (void)
     if (square)
     {
         /* Square/point mode: batch points, flush when buffer nears full */
-        glPointSize(2.0f);
+        glPointSize_fp(2.0f);
         GL_ImmBegin();
         for (p = active_particles; p; p = p->next)
         {
@@ -1846,7 +1846,7 @@ void R_DrawParticles (void)
             GL_ImmVertex3f(p->org[0], p->org[1], p->org[2]);
         }
         GL_ImmEnd(GL_POINTS, prog);
-        glPointSize(1.0f);
+        glPointSize_fp(1.0f);
     }
     else
     {
