@@ -515,6 +515,7 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/gl_shader.c
     ${COMMONDIR}/gl_pipeline.c
     ${COMMONDIR}/gl_buffer.c
+    ${COMMONDIR}/gl_uniforms.c
     ${COMMONDIR}/gl_vbo.c
     ${COMMONDIR}/image.c
     ${COMMONDIR}/img_load.c

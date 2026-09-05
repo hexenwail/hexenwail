@@ -229,6 +229,9 @@ typedef int64_t  GLint64;
 #ifndef GL_INVALID_INDEX
 #define GL_INVALID_INDEX			0xFFFFFFFFu
 #endif
+#ifndef GL_UNIFORM_BLOCK_DATA_SIZE
+#define GL_UNIFORM_BLOCK_DATA_SIZE		0x8A40
+#endif
 
 /* SSBO (Shader Storage Buffer Object) — OpenGL 4.3 */
 #ifndef GL_SHADER_STORAGE_BUFFER

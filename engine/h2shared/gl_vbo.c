@@ -16,6 +16,7 @@
 #include "gl_vbo.h"
 #include "gl_sky.h"
 #include "gl_postprocess.h"
+#include "gl_uniforms.h"
 
 /* fog globals from gl_fog.c */
 extern float r_fog_density;
@@ -88,19 +89,6 @@ static float	imm_cur_tc[2];
 static float	imm_cur_lm[2];
 static float	imm_cur_color[4] = { 1, 1, 1, 1 };
 
-/* Uniform-block slots GL_ImmEnd knows how to fill.  One per shader stage,
- * matching the descriptor sets SDL_GPU gives a graphics pipeline (vertex UBOs
- * in set 1, fragment UBOs in set 3), so the split survives the move to the
- * second backend.  The contents are per-program; what is shared is only the
- * binding point, since one program is bound at a time. */
-#define IMM_UBO_VERT		0
-#define IMM_UBO_FRAG		1
-#define IMM_UBO_SLOTS		2
-
-static const GLuint imm_ubo_binding[IMM_UBO_SLOTS] = {
-	UBO_BINDING_VERT, UBO_BINDING_FRAG
-};
-
 /* GPU objects.  On desktop GL the VBO is gone — vertex data is streamed
  * through GL_Upload's frame ring and bound per-draw via glBindVertexBuffer.
  * On WebGL2 (no ARB_vertex_attrib_binding, no buffer_storage / ring) we
@@ -109,12 +97,6 @@ static const GLuint imm_ubo_binding[IMM_UBO_SLOTS] = {
 static GLuint	imm_vao;
 #ifdef USE_GLES
 static GLuint	imm_vbo;
-/* Uniform blocks for the file-backed shaders, one buffer per binding point.
- * Desktop streams these through GL_Upload's frame ring like everything else,
- * but that ring does not exist on the ES tier (gl_buffer.c stubs it out), so
- * here each push orphans a whole buffer -- and two blocks sharing one buffer
- * would each clobber the other's contents. */
-static GLuint	imm_ubo[IMM_UBO_SLOTS];
 #endif
 
 /* Index buffer for quad-to-triangle conversion */
@@ -153,8 +135,6 @@ void GL_VBO_Init (void)
 	glEnableVertexAttribArray_fp(ATTR_COLOR);
 	glVertexAttribPointer_fp(ATTR_COLOR, 4, GL_FLOAT, GL_FALSE,
 				  IMM_STRIDE, (void *)(size_t)IMM_OFF_COLOR);
-
-	glGenBuffers_fp(IMM_UBO_SLOTS, imm_ubo);
 #else
 	/* Desktop GL 4.3: separate vertex attribute bindings.  Format is
 	 * recorded in the VAO once; the source buffer + offset is rebound
@@ -209,8 +189,6 @@ void GL_VBO_Shutdown (void)
 	if (imm_quad_ibo) { glDeleteBuffers_fp(1, &imm_quad_ibo); imm_quad_ibo = 0; }
 #ifdef USE_GLES
 	if (imm_vbo)      { glDeleteBuffers_fp(1, &imm_vbo); imm_vbo = 0; }
-	if (imm_ubo[0])   { glDeleteBuffers_fp(IMM_UBO_SLOTS, imm_ubo);
-			    memset(imm_ubo, 0, sizeof(imm_ubo)); }
 #endif
 	if (imm_vao)      { glDeleteVertexArrays_fp(1, &imm_vao); imm_vao = 0; }
 }
@@ -439,35 +417,50 @@ void GL_ImmResetState (void)
 
 /*
 ===============
-GL_ImmPushUniformBlock
+GL_ImmPushBlocks
 
-Hand one uniform block's contents to the GPU and bind them for the draw about
-to be issued.
+The block-backed half of GL_ImmEnd's dual path, for the shaders that have moved
+into engine/shaders/ and declare their non-opaque uniforms inside one of the
+two shared std140 blocks (gl_uniforms.h).
 
-Deliberately not cached the way the loose uniforms below are.  A loose uniform
-is per-PROGRAM state: once written it stays written, so "we already sent this"
-is a fact about the program.  A block's contents live in a buffer bound to a
-context-wide point, and every push here hands over storage it has just taken
-fresh -- so the previous push proves nothing about what that point holds now.
+Push granularity is per-BLOCK, which is why the values go through the shadow in
+gl_uniforms.c rather than being handed over here one at a time.  A per-uniform
+push takes fresh storage and rebinds for each value, so a second value either
+lands in a range the first one is no longer bound to, or silently orphans the
+first -- an arrangement that only works while a block has exactly one member.
+
+Nothing is cached against the program the way the loose uniforms below are.  A
+loose uniform is per-PROGRAM state, so "we already sent this" is a fact about
+the program; a block is context-wide, so the only meaningful question is
+whether the CONTENTS changed, and that is exactly what the shadow's dirty flags
+answer.  Each half is gated on its own block index so a program declaring only
+one of the two (sflat's fragment stage reads nothing) pushes only that one.
 ===============
 */
-static void GL_ImmPushUniformBlock (int slot, const void *data, size_t size)
+static void GL_ImmPushBlocks (const glprogram_t *shader, const float *mvp)
 {
-#ifdef USE_GLES
-	/* No frame ring on this tier; orphan-and-refill, the same shape the
-	 * vertex upload in GL_ImmEnd uses. */
-	glBindBuffer_fp(GL_UNIFORM_BUFFER, imm_ubo[slot]);
-	glBufferData_fp(GL_UNIFORM_BUFFER, (GLsizeiptr)size, data, GL_STREAM_DRAW);
-	glBindBufferBase_fp(GL_UNIFORM_BUFFER, imm_ubo_binding[slot], imm_ubo[slot]);
-	glBindBuffer_fp(GL_UNIFORM_BUFFER, 0);
-#else
-	GLuint		buf;
-	GLintptr	ofs;
+	if (shader->ub_vert >= 0)
+		R_SetMVP (mvp);
 
-	GL_Upload(GL_UNIFORM_BUFFER, data, size, &buf, &ofs);
-	GL_BindBufferRange(GL_UNIFORM_BUFFER, imm_ubo_binding[slot],
-			   buf, ofs, (GLsizeiptr)size);
-#endif
+	if (shader->ub_frag >= 0)
+	{
+		/* The -1 sentinels mean "leave the shader default alone", which
+		 * was a coherent thing to say only while these were loose
+		 * uniforms: a program's own copy started at zero and
+		 * GL_InitProgram never wrote another value, so the default was
+		 * observable and per-program.  A shared block has no per-program
+		 * default to fall back to -- skipping the write would inherit
+		 * whatever the last unrelated batch left in the block -- so the
+		 * sentinel is resolved here to the value it used to stand for.
+		 *
+		 * Set as a PAIR, always.  Half of this pair going unwritten,
+		 * with the other half inheriting a stranger's value, is the
+		 * defect that got the first attempt at uniform blocks reverted. */
+		R_SetAlphaMask (imm_alpha_threshold >= 0.0f ? imm_alpha_threshold : 0.0f,
+				imm_force_opaque_alpha >= 0.0f ? imm_force_opaque_alpha : 0.0f);
+	}
+
+	R_FlushUniforms ();
 }
 
 /* Force the cache to miss on the next GL_ImmEnd. Call after any
@@ -476,6 +469,11 @@ static void GL_ImmPushUniformBlock (int slot, const void *data, size_t size)
  * shader handles. */
 void GL_ImmInvalidateState (void)
 {
+	/* The blocks have no per-program state to drop, but they do have a
+	 * binding this cannot see being moved, so re-assert rather than assume.
+	 * A redundant flush is one glBufferData of a few hundred bytes. */
+	R_InvalidateUniforms ();
+
 	imm_cache_shader = NULL;
 	imm_cache_alpha = -2.0f;
 	imm_cache_force_opaque_alpha = -2.0f;
@@ -554,20 +552,21 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	}
 
 	GL_GetMVP(mvp);
+
+	/* Dual path, keyed on whether this program has a block index and never
+	 * on which shader it is.  gl_shader_world, gl_shader_sky_boxside and
+	 * gl_shader_sky_layers still declare loose uniforms and must keep
+	 * working through the glUniform* half below while the migrated programs
+	 * take the block half. */
+	if (shader->ub_vert >= 0 || shader->ub_frag >= 0)
+		GL_ImmPushBlocks(shader, mvp);
+
 	if (shader->u_mvp >= 0 &&
 	    (!imm_cache_mvp_set || memcmp(mvp, imm_cache_mvp, sizeof(mvp)) != 0))
 	{
 		glUniformMatrix4fv_fp(shader->u_mvp, 1, GL_FALSE, mvp);
 		memcpy(imm_cache_mvp, mvp, sizeof(mvp));
 		imm_cache_mvp_set = true;
-	}
-	else if (shader->ub_s2d_vert >= 0)
-	{
-		/* Same matrix, delivered as a block because the shader is one
-		 * of the file-backed ones and Vulkan GLSL has no loose
-		 * non-opaque uniforms for it to be.  u_mvp came back -1 above,
-		 * which is how we got here. */
-		GL_ImmPushUniformBlock(IMM_UBO_VERT, mvp, sizeof(mvp));
 	}
 
 	if (shader->u_modelview >= 0)
@@ -587,20 +586,6 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	{
 		glUniform1f_fp(shader->u_alpha_threshold, imm_alpha_threshold);
 		imm_cache_alpha = imm_alpha_threshold;
-	}
-	else if (shader->ub_s2d_frag >= 0)
-	{
-		/* The block form of the same threshold.  0.0 stands in for the
-		 * -1 sentinel because that is what the loose uniform held: a
-		 * program's uniforms start at zero and GL_InitProgram never
-		 * wrote another value, so "use the shader default" meant 0.0
-		 * until the first GL_SetAlphaThreshold call.  Padded to a vec4
-		 * to match the std140 block. */
-		float params[4];
-
-		params[0] = (imm_alpha_threshold >= 0.0f) ? imm_alpha_threshold : 0.0f;
-		params[1] = params[2] = params[3] = 0.0f;
-		GL_ImmPushUniformBlock(IMM_UBO_FRAG, params, sizeof(params));
 	}
 
 	if (imm_force_opaque_alpha >= 0.0f && shader->u_force_opaque_alpha >= 0 &&
