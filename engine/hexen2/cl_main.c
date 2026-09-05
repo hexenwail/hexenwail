@@ -1400,11 +1400,21 @@ void CL_SendCmd (void)
 	// get basic movement from keyboard
 		CL_BaseMove (&cmd);
 
-	// merge accumulated mouse/gamepad movement from render-rate sampling
+	// merge accumulated mouse movement from render-rate sampling, then the
+	// analog sticks' latest sample.  The two are drained differently on
+	// purpose: pendingcmd holds deltas, so a tick consumes them and they are
+	// cleared; analogmove holds a rate, so it is added and LEFT ALONE, and
+	// IN_Move re-samples it each render frame.  Clearing it here would make
+	// the commanded speed depend on render_fps / sv_physfps -- see the field
+	// comment in client.h.
 		cmd.forwardmove += cl.pendingcmd.forwardmove;
 		cmd.sidemove += cl.pendingcmd.sidemove;
 		cmd.upmove += cl.pendingcmd.upmove;
 		memset (&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
+
+		cmd.forwardmove += cl.analogmove.forwardmove;
+		cmd.sidemove += cl.analogmove.sidemove;
+		cmd.upmove += cl.analogmove.upmove;
 
 	// send the unreliable message
 		CL_SendMove (&cmd);

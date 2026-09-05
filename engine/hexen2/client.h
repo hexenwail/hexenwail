@@ -280,6 +280,31 @@ typedef struct
 
 	usercmd_t	pendingcmd;		// accumulated movement between physics ticks
 
+	/* The analog sticks' contribution, RESAMPLED every render frame rather
+	 * than accumulated into pendingcmd, and deliberately not cleared when a
+	 * tick consumes it.
+	 *
+	 * The two kinds of input the render-rate sampling collects are not the
+	 * same kind of quantity.  A mouse reports a DELTA, so summing the frames
+	 * between two ticks is exactly right -- the total is how far the mouse
+	 * moved.  A stick reports a DEFLECTION, which IN_GPMove turns into a
+	 * speed; summing those adds up the same rate N times and asks the server
+	 * to move N times as fast, where N is render_fps / sv_physfps.  At the
+	 * matched 72/72 defaults N is 1 and it never shows; uncap host_maxfps or
+	 * raise the FPS cap and analog movement scales straight up with it.
+	 *
+	 * Not cleared on send because a deflection is a level that stays true
+	 * until the next sample: when the renderer runs SLOWER than the tick,
+	 * one host frame feeds several ticks, and the ticks after the first
+	 * would otherwise see a stick that had snapped to centre.
+	 *
+	 * Upstream Ironwail has neither problem for the same reason it has no
+	 * fix to port: it drains pendingcmd every host frame (Quake/cl_main.c),
+	 * so its sample and its send are the same event.  Our physics tick is
+	 * decoupled from the render frame, which is what opens the gap.
+	 */
+	usercmd_t	analogmove;		// latest analog-stick sample (a rate, not a delta)
+
 	float		zoom;		/* 0=normal FOV, 1=fully zoomed to zoom_fov */
 	float		zoomdir;	/* +1=zooming in, -1=zooming out, 0=stopped */
 

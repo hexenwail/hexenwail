@@ -408,7 +408,7 @@ static void IN_ShutdownGamepad (void)
 IN_GPMove -- gamepad analog stick input
 ===========
 */
-static void IN_GPMove (usercmd_t *cmd)
+static void IN_GPMove (void)
 {
 	float		speed;
 	stickpair_t	move_raw, look_raw;
@@ -475,9 +475,12 @@ static void IN_GPMove (usercmd_t *cmd)
 	gp_old_move = move;
 	gp_old_look = look;
 
-	/* movement */
-	cmd->sidemove += move.x * speed * 225;
-	cmd->forwardmove -= move.y * speed * 200;
+	/* Movement.  ASSIGNED, not accumulated, and into cl.analogmove rather
+	 * than the caller's cmd: this is a deflection sampled at render rate and
+	 * consumed at tick rate, so summing it would scale the commanded speed
+	 * by render_fps / sv_physfps.  See the field's comment in client.h. */
+	cl.analogmove.sidemove = move.x * speed * 225;
+	cl.analogmove.forwardmove = -(move.y * speed * 200);
 
 	/* look — yaw via flick stick if enabled, else conventional analog.
 	 * Pitch always uses the conventional path. */
@@ -1046,6 +1049,12 @@ void IN_Move (usercmd_t *cmd)
 	int	x, y;
 	qboolean app_active;
 
+	/* Cleared here, not on send, so the stick's contribution is a fresh
+	 * sample every render frame and goes to zero the moment the pad is
+	 * unplugged, the window loses focus, or a menu takes input -- every one
+	 * of which is a path that returns before IN_GPMove writes anything. */
+	cl.analogmove.forwardmove = cl.analogmove.sidemove = cl.analogmove.upmove = 0;
+
 	if (cl.v.cameramode)
 	{
 		memset (cmd, 0, sizeof(*cmd));
@@ -1081,7 +1090,7 @@ void IN_Move (usercmd_t *cmd)
 		IN_MouseMove (cmd, x, y);
 
 	if (app_active)
-		IN_GPMove (cmd);
+		IN_GPMove ();
 }
 
 void IN_Commands (void)
