@@ -11,22 +11,26 @@
 // vectors WebGL2 is only required to offer.  Both compiled fine on the desktop
 // and both silently disabled the entire post-process chain in a browser.
 //
-// The C is parsed, not preprocessed, so this understands exactly one shape:
-// `static const char <name>[] = <string literals and object-like macros>;`
-// with the tier-specific header macros living in an `#ifdef USE_GLES` block.
-// Anything fancier should make this file fail loudly rather than guess.
+// The C is parsed, not preprocessed, so this understands exactly two shapes.
+// The original one is `static const char <name>[] = <string literals and
+// object-like macros>;` with the tier-specific header macros living in an
+// `#ifdef USE_GLES` block.  The second is a stage that has moved out to
+// engine/shaders/<name>.glsl and reaches the engine through shaders_gen.h --
+// see readFileBackedShaders() below.  Anything fancier should make this file
+// fail loudly rather than guess.
 //
 // Ported from alextnewman/hexenwail d2c46f078, adapted to this tree's macro
 // layout (USE_GLES rather than __EMSCRIPTEN__, and PP_* headers local to
 // gl_postprocess.c).
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHADER_SOURCE = resolve(ROOT, 'engine/h2shared/gl_shader.c');
 const POSTPROCESS_SOURCE = resolve(ROOT, 'engine/h2shared/gl_postprocess.c');
+const SHADER_FILE_DIR = resolve(ROOT, 'engine/shaders');
 
 const PROGRAM_SPECS = [
   ['2d', 'shader', 's2d_vert', 's2d_frag'],
@@ -193,9 +197,12 @@ function readDefine(source, name, macros, ctx) {
   return evaluateCStringExpression(parts.join('\n'), macros, ctx);
 }
 
+function arrayMarker(name) {
+  return new RegExp(`static\\s+const\\s+char\\s+${name}\\s*\\[\\s*\\]\\s*=`, 'm');
+}
+
 function readArrayExpression(source, name) {
-  const marker = new RegExp(`static\\s+const\\s+char\\s+${name}\\s*\\[\\s*\\]\\s*=`, 'm');
-  const match = marker.exec(source);
+  const match = arrayMarker(name).exec(source);
   if (!match) throw new Error(`missing shader source ${name}`);
 
   let inString = false;
@@ -247,10 +254,90 @@ export function expandShaderExpression(expression, source, sourceName = 'test so
     { name: sourceName, source, resolving: new Set() });
 }
 
+// --- the file route ----------------------------------------------------
+//
+// A stage's GLSL used to live only in the C, as a string-literal array.  Since
+// `render: prove the shader-to-SPIR-V route on one 12-line compute shader` it
+// may instead live in engine/shaders/<name>.glsl and reach the engine as a
+// <name>[] symbol in shaders_gen.h, generated at build time by
+// engine/cmake/EmbedShaders.cmake.  This gate has to follow, or it stops
+// covering every shader that moves -- silently, since a spec whose symbol has
+// gone reads here exactly like one that was never right.  It went red that way
+// on s2d_vert the first time two programs moved.
+
+// Resolve #include the way EmbedShaders.cmake resolves it: plain text
+// substitution, bounded passes so a cycle fails instead of hanging.  Matching
+// its behaviour matters more than doing includes properly -- a difference
+// between the two would make this a gate on text that no build ever sees.
+// (GLSL has no #include of its own: ARB_shading_language_include is not core
+// and does not exist in GLSL ES at all, which is why the expansion is offline.)
+async function expandShaderIncludes(name, body) {
+  for (let pass = 0; pass <= 8; pass += 1) {
+    const match = /#include "([^"]+)"/.exec(body);
+    if (!match) break;
+    let included;
+    try {
+      included = await readFile(resolve(SHADER_FILE_DIR, match[1]), 'utf8');
+    } catch {
+      throw new Error(`shader ${name} includes missing ${match[1]}`);
+    }
+    body = body.replaceAll(`#include "${match[1]}"\n`, included);
+  }
+  if (/#include "/.test(body))
+    throw new Error(`shader ${name} has unresolved or cyclic includes`);
+  return body;
+}
+
+// Every stage that lives in engine/shaders, keyed by the C symbol it becomes.
+// That key is just the basename: EmbedShaders.cmake names the symbol after the
+// file, so s2d_vert.glsl is the s2d_vert[] the C compiles.
+async function readFileBackedShaders() {
+  const files = (await readdir(SHADER_FILE_DIR)).filter((f) => f.endsWith('.glsl')).sort();
+  const sources = new Map();
+  for (const file of files) {
+    const name = file.slice(0, -'.glsl'.length);
+    sources.set(name, await expandShaderIncludes(
+      name, await readFile(resolve(SHADER_FILE_DIR, file), 'utf8')));
+  }
+  return sources;
+}
+
+// Which #version header the engine compiles a file-backed stage with.
+//
+// The .glsl files carry no #version line on purpose -- the GL side passes one
+// as a separate glShaderSource chunk because the desktop and ES tiers want
+// different ones, and EmbedShaders.cmake prepends its own for the offline
+// SPIR-V compile -- so this has to supply the ES one or hand the browser a
+// shader with no version at all.
+//
+// READ OUT OF THE CALL SITE, not inferred from the _vert/_frag suffix.  The
+// pairing is a fact about the engine, stated by the argument order of the
+// GL_InitProgramSplit() call; inferring it would be this file quietly deciding
+// something it is the engine's business to say -- the same judgement
+// resolveMacro() already refuses to make for a tier-specific macro.
+function splitHeaderFor(ctx, symbol) {
+  const call = /GL_InitProgramSplit\s*\(([^;]*)\)\s*;/g;
+  for (let match = call.exec(ctx.source); match; match = call.exec(ctx.source)) {
+    const args = match[1]
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '')
+      .split(',')
+      .map((arg) => arg.trim());
+    /* (program, name, vert_header, vert_src, frag_header, frag_src) */
+    if (args[3] === symbol) return args[2];
+    if (args[5] === symbol) return args[4];
+  }
+  throw new Error(
+    `engine/shaders/${symbol}.glsl exists but no GL_InitProgramSplit() call in `
+    + `${ctx.name} names ${symbol}, so there is no way to know which #version `
+    + 'header the engine compiles it with');
+}
+
 export async function extractEngineWebGLPrograms() {
-  const [shaderSource, postprocessSource] = await Promise.all([
+  const [shaderSource, postprocessSource, fileBacked] = await Promise.all([
     readFile(SHADER_SOURCE, 'utf8'),
     readFile(POSTPROCESS_SOURCE, 'utf8'),
+    readFileBackedShaders(),
   ]);
 
   // One shared macro table, as before: the two files' macro namespaces are
@@ -284,12 +371,32 @@ export async function extractEngineWebGLPrograms() {
   }
 
   const contexts = { shader: shaderCtx, postprocess: postprocessCtx };
+
+  // A stage is a C array or a file, and the two routes have to stay exclusive:
+  // both at once means a moved shader left its old copy behind, and the C one
+  // is what the engine would still compile while this gate read the new file.
+  const stage = (family, symbol) => {
+    const ctx = contexts[family];
+    const inC = arrayMarker(symbol).test(ctx.source);
+    const inFile = fileBacked.has(symbol);
+    if (inC && inFile) {
+      throw new Error(
+        `${symbol} is both a string-literal array in ${ctx.name} and `
+        + `engine/shaders/${symbol}.glsl; delete whichever one the engine no longer builds`);
+    }
+    if (inC)
+      return evaluateCStringExpression(readArrayExpression(ctx.source, symbol), macros, ctx);
+    if (inFile)
+      return resolveMacro(splitHeaderFor(ctx, symbol), macros, ctx) + fileBacked.get(symbol);
+    throw new Error(
+      `missing shader source ${symbol}: no array in ${ctx.name} and no `
+      + `engine/shaders/${symbol}.glsl`);
+  };
+
   return PROGRAM_SPECS.map(([name, family, vertexName, fragmentName]) => ({
     name,
-    vertex: evaluateCStringExpression(
-      readArrayExpression(contexts[family].source, vertexName), macros, contexts[family]),
-    fragment: evaluateCStringExpression(
-      readArrayExpression(contexts[family].source, fragmentName), macros, contexts[family]),
+    vertex: stage(family, vertexName),
+    fragment: stage(family, fragmentName),
   }));
 }
 
