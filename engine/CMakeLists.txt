@@ -99,6 +99,11 @@ elseif(WIN32)
         set(TARGET_OS "win32")
         set(ARCH_DIR "x86")
     endif()
+elseif(APPLE)
+    # Ahead of UNIX deliberately: CMake sets both APPLE and UNIX on macOS, so
+    # without this arm Darwin silently configures as generic unix and inherits
+    # a GL/ALSA/dlsym setup that cannot work here.  uhexen2-q88b.
+    set(TARGET_OS "macos")
 elseif(UNIX)
     set(TARGET_OS "unix")
 else()
@@ -181,6 +186,38 @@ if(EMSCRIPTEN)
 elseif(WIN32)
     add_definitions(-DWIN32_LEAN_AND_MEAN)
     set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE GL_DLSYM NO_SPLASHES)
+    set(USE_ALSA OFF)
+elseif(APPLE)
+    # The ES 3.0 tier is the only route macOS has *today*, not the one it is
+    # meant to keep.  Apple's OpenGL stops at 4.1 Core and its compatibility
+    # profile stops at 2.1, while this renderer requests 4.3 COMPATIBILITY
+    # (gl_vidsdl.c) and uses compute dispatches and SSBOs that 4.1 does not
+    # have at all.  So the desktop tier cannot merely run slowly here; the
+    # context cannot be created.  ANGLE translates GLES 3.0 to Metal and backs
+    # this path -- sourcing and bundling it is uhexen2-6wj4.
+    #
+    # Understand what that costs before treating it as done.  ES 3.0 has no
+    # compute and no SSBOs, so three subsystems compile out entirely on this
+    # tier: GPU world culling (gl_worldcull.c), clustered lighting
+    # (gl_lightcluster.c, R_LightCluster_Available() returns false) and GPU
+    # skeletal animation (gl_rmain.c, R_SkeletalProgram).  macOS therefore
+    # lands at the browser build's feature level, a tier below Linux and
+    # Windows.  Closing that gap is the second render backend (uhexen2-p4ln),
+    # not anything reachable from here -- ANGLE's Metal backend is ES 3.0 and
+    # its ES 3.1 compute support is still future work upstream.
+    #
+    # Forced rather than defaulted: -DUSE_GLES=OFF would configure cleanly and
+    # then die at context creation, which is a worse failure than not being
+    # offered the switch.
+    set(USE_GLES ON)
+    set(CLIENT_DEFINITIONS GLQUAKE SDLQUAKE)
+    # No -D_GNU_SOURCE: it is a glibc feature-test macro that libSystem does
+    # not honour.  No -D_REENTRANT either -- Darwin's libc is unconditionally
+    # thread-safe and the macro selects nothing there.
+    #
+    # ALSA is Linux's audio API; SDL3 uses CoreAudio on this platform and
+    # needs no help finding it.  Cleared here so the REQUIRED alsa
+    # pkg_check_modules below is never reached with a stale default of ON.
     set(USE_ALSA OFF)
 elseif(UNIX)
     add_definitions(-D_GNU_SOURCE=1 -D_REENTRANT)
@@ -267,7 +304,56 @@ else()
 endif()
 
 if(NOT EMSCRIPTEN)
-    if(UNIX)
+    if(APPLE)
+        # Ahead of the UNIX arm for the same reason the detection block is:
+        # macOS is UNIX to CMake, and every lookup in that arm is wrong here.
+        #
+        # pkg-config is wanted but not required.  On Linux it is how the GL
+        # tier itself is found, so its absence is fatal there; on macOS the
+        # renderer comes from ANGLE below and pkg-config is left to the
+        # optional codecs, which already degrade gracefully when it is absent.
+        find_package(PkgConfig QUIET)
+
+        # ANGLE supplies the ES 3.0 tier.  Searched by header and library
+        # rather than through pkg-config: macOS ships no GLES of any kind and
+        # ANGLE installs no .pc file, so there is no module to check for.
+        # ANGLE_ROOT points at a tree holding include/GLES3/gl3.h and
+        # lib/libGLESv2.dylib -- a built ANGLE checkout, Homebrew's angle, or
+        # the vendored copy uhexen2-6wj4 will place under oslibs/macos/.
+        find_path(ANGLE_INCLUDE_DIR GLES3/gl3.h
+            HINTS ${ANGLE_ROOT} ENV ANGLE_ROOT
+            PATH_SUFFIXES include)
+        find_library(ANGLE_GLESV2_LIBRARY NAMES GLESv2 libGLESv2
+            HINTS ${ANGLE_ROOT} ENV ANGLE_ROOT
+            PATH_SUFFIXES lib)
+        # libEGL is ANGLE's entry point.  SDL3 dlopens it rather than linking
+        # it, so a missing one is not a configure error -- but when it is
+        # found, recording the path is what lets the packaging step bundle it
+        # next to the binary instead of hunting for it again.
+        find_library(ANGLE_EGL_LIBRARY NAMES EGL libEGL
+            HINTS ${ANGLE_ROOT} ENV ANGLE_ROOT
+            PATH_SUFFIXES lib)
+
+        if(NOT ANGLE_INCLUDE_DIR OR NOT ANGLE_GLESV2_LIBRARY)
+            message(FATAL_ERROR
+                "macOS requires ANGLE: the system OpenGL framework caps at 4.1 "
+                "Core and cannot create the context this renderer needs. "
+                "Pass -DANGLE_ROOT=<dir> pointing at a tree that contains "
+                "include/GLES3/gl3.h and lib/libGLESv2.dylib.")
+        endif()
+
+        # Reuse the names the ES tier is already linked through, so the shared
+        # UNIX link arm below covers macOS unchanged.
+        set(GLESV2_INCLUDE_DIRS ${ANGLE_INCLUDE_DIR})
+        set(GLESV2_LIBRARIES ${ANGLE_GLESV2_LIBRARY})
+        message(STATUS "ANGLE GLESv2: ${ANGLE_GLESV2_LIBRARY}")
+
+        find_library(M_LIBRARY m)
+        # DL_LIBRARY is deliberately left unset: Darwin has no libdl, dlopen
+        # lives in libSystem and every target links that already.  The link
+        # step guards on if(DL_LIBRARY), so unset is the correct value rather
+        # than a gap -- searching would only cache a NOTFOUND.
+    elseif(UNIX)
         # Find packages using pkg-config.  Hoisted above the GL lookup because
         # the ES tier is discovered through it (there is no find_package(GLES)).
         find_package(PkgConfig QUIET)
