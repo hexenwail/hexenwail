@@ -381,6 +381,13 @@ void SV_UserInit (void);
  * and the sounds simply go missing at runtime. */
 int SV_MaxSounds (void);
 
+/* The wire sizes the negotiated protocol allows us to SEND, as opposed to the
+ * MAX_DATAGRAM / MAX_MSGLEN buffers this engine can build and receive.  The
+ * peer sized its receive buffers from its own source's constants and neither
+ * path bounds-checks on the way in; see quakedef.h and protocol.h. */
+int SV_MaxDatagram (void);
+int SV_MaxReliableMessage (void);
+
 void SV_StartParticle (vec3_t org, vec3_t dir, int color, int count);
 void SV_StartParticle2 (vec3_t org, vec3_t dmin, vec3_t dmax, int color, int effect, int count);
 void SV_StartParticle3 (vec3_t org, vec3_t box, int color, int effect, int count);

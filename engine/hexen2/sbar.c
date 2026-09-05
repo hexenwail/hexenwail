@@ -234,7 +234,7 @@ void Sbar_Draw(void)
 		return;
 
 	/* Protocol 21 demos: hide HUD for cinematic playback */
-	if (cls.demoplayback && cl_protocol == PROTOCOL_UH2_114)
+	if (cls.demoplayback && cl_protocol >= PROTOCOL_UH2_114)
 		return;
 
 	if (scr_con_current == vid.height)	// console is full screen
@@ -1186,7 +1186,7 @@ void Inv_Update(qboolean force)
 	{
 		if (cl.inv_selected >= 0 && cl.inv_count > 0)
 		{
-			if (cl_protocol == PROTOCOL_UH2_114)
+			if (cl_protocol >= PROTOCOL_UH2_114)
 				cl.v.inventory = cl.ex_inventory->item_id[cl.ex_inventory->inv_order[cl.inv_selected]];
 			else
 			{
@@ -1235,7 +1235,7 @@ int SB_GetSelectedArtifact (void)
 	 * id space that the sticky machinery does not track (same scope as the
 	 * level-change fix).  Report "nothing remembered" rather than a number
 	 * that would be misread as a standard artifact id on load. */
-	if (cl_protocol == PROTOCOL_UH2_114)
+	if (cl_protocol >= PROTOCOL_UH2_114)
 		return -1;
 
 	/* Prefer the live selection.  sb_sticky_artifact is only written when
@@ -1269,7 +1269,7 @@ static void DrawBarArtifactIcon(int x, int y, int position)
 {
 	int	j, i;
 
-	if (cl_protocol != PROTOCOL_UH2_114)
+	if (cl_protocol < PROTOCOL_UH2_114)
 	{
 		/* Standard path: position is index into inv_order,
 		 * inv_order[position] is the artifact number (0-14) */
@@ -1568,7 +1568,7 @@ void SB_InvChanged(void)
 	int		counter, position;
 	qboolean	ForceUpdate = false;
 
-	if (cl_protocol != PROTOCOL_UH2_114)
+	if (cl_protocol < PROTOCOL_UH2_114)
 	{
 		/* Standard inventory path (protocols 18-20):
 		 * read item counts directly from cl.v.cnt_* */

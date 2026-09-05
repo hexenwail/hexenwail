@@ -92,6 +92,16 @@ extern void SV_DebugMoveStep_Changed (cvar_t *var);
 
 int		current_skill;
 int		sv_protocol = PROTOCOL_VERSION;	/* protocol version to use */
+
+/* Whether sv_protocol got its value from the operator (-protocol or the
+ * console verb) rather than from the default.  The auto-detect in
+ * SV_SpawnServer used to test `sv_protocol == PROTOCOL_VERSION` for this,
+ * which cannot distinguish "nobody chose" from "chose 19 on purpose" -- so
+ * asking a server for maximum compatibility silently got you upgraded off it
+ * again by the first mod whose progs tripped the sniff.  That is the exact
+ * failure this protocol split exists to remove, so it has to be a separate
+ * bit rather than an inference from the value. */
+static qboolean	sv_protocol_userset = false;
 int		sv_kingofhill;		/* mission pack, king of the hill. */
 unsigned int	info_mask, info_mask2;	/* mission pack, objectives */
 
@@ -127,6 +137,7 @@ static const char *SV_ProtocolName (int protocol)
 	case PROTOCOL_RAVEN_112:	return "Raven/MP/1.12";
 	case PROTOCOL_UQE_113:		return "UQE/1.13";
 	case PROTOCOL_UH2_114:		return "Raven/MP/1.14";
+	case PROTOCOL_HEXENWAIL_1:	return "Hexenwail/1";
 	default:			return NULL;
 	}
 }
@@ -165,12 +176,14 @@ static void SV_Protocol_f (void)
 		i = atoi (Cmd_Argv(1));
 		if (!SV_ProtocolName (i))
 		{
-			Con_Printf ("sv_protocol must be %i, %i, %i or %i\n",
+			Con_Printf ("sv_protocol must be %i, %i, %i, %i or %i\n",
 				    PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112,
-				    PROTOCOL_UQE_113, PROTOCOL_UH2_114);
+				    PROTOCOL_UQE_113, PROTOCOL_UH2_114,
+				    PROTOCOL_HEXENWAIL_1);
 			break;
 		}
 		sv_protocol = i;
+		sv_protocol_userset = true;
 		Con_Printf ("sv_protocol set to %i (%s)\n", i, SV_ProtocolName (i));
 		if (sv.active)
 			Con_Printf ("changes will not take effect until the next map load.\n");
@@ -240,7 +253,10 @@ void SV_Init (void)
 
 	i = COM_CheckParm ("-protocol");
 	if (i && i < com_argc - 1)
+	{
 		sv_protocol = atoi (com_argv[i + 1]);
+		sv_protocol_userset = true;
+	}
 	p = SV_ProtocolName (sv_protocol);
 	if (!p)
 	{
@@ -248,8 +264,9 @@ void SV_Init (void)
 		 * -protocol means the operator asked for a wire format we cannot
 		 * speak, and coming up on a different one would silently hand
 		 * every connecting client the wrong answer. */
-		Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i, %i.",
-				sv_protocol, PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113, PROTOCOL_UH2_114);
+		Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i, %i, %i.",
+				sv_protocol, PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113,
+				PROTOCOL_UH2_114, PROTOCOL_HEXENWAIL_1);
 		return; /* silence compiler */
 	}
 	Sys_Printf ("Server using protocol %i (%s)\n", sv_protocol, p);
@@ -531,6 +548,47 @@ int SV_MaxSounds (void)
 
 /*
 ==================
+SV_MaxDatagram
+
+Largest unreliable message the CLIENT can receive, which is not the same
+question as how big a packet we can build.  Each engine sized its socket
+receive buffer from its own MAX_DATAGRAM at compile time, and an oversized
+UDP datagram is truncated by recvfrom rather than rejected, so the client
+parses a packet whose tail is simply missing and reports the failure against
+whatever message it happened to stop inside.  See protocol.h.
+==================
+*/
+int SV_MaxDatagram (void)
+{
+	if (sv_protocol < PROTOCOL_UH2_114)
+		return MAX_DATAGRAM_OLD;	/* 18-20: upstream uHexen2	*/
+	if (sv_protocol < PROTOCOL_HEXENWAIL_1)
+		return MAX_DATAGRAM_114;	/* 21: Shanjaq			*/
+	return MAX_DATAGRAM;
+}
+
+/*
+==================
+SV_MaxReliableMessage
+
+Largest reliable message the client can reassemble.  Worse than the datagram
+case: the fragment reassembly in Datagram_GetMessage memcpys into
+qsocket_t::receiveMessage[NET_MAXMESSAGE] without a bounds check -- upstream
+has never had one -- so going over does not desynchronise the peer, it writes
+past the end of its socket structure.  Upstream sizes that buffer at 16384;
+Shanjaq at 65000, which is above our own MAX_MSGLEN, so 21 and 100 are both
+bounded by what we can build rather than by what they can hold.
+==================
+*/
+int SV_MaxReliableMessage (void)
+{
+	if (sv_protocol < PROTOCOL_UH2_114)
+		return MAX_MSGLEN_OLD;
+	return MAX_MSGLEN;
+}
+
+/*
+==================
 SV_StartSound
 
 Each entity can have eight independant sound sources, like voice,
@@ -786,6 +844,20 @@ static void SV_SendServerinfo (client_t *client)
 	sprintf (message, "%c\nVERSION %4.2f SERVER (%i CRC)", 2, ENGINE_VERSION, pr_crc);
 	MSG_WriteString (&client->message,message);
 
+	/* Say what this connection is actually allowed to carry.  The wire
+	 * limits are the peer's, not ours, and when they are wrong the symptom
+	 * reaches the player as a truncated packet several messages later with
+	 * nothing to point at -- so record the numbers at the one moment they
+	 * are decided.  Local connections are exempt (see SV_SendClientDatagram). */
+	Con_DPrintf ("%s: %s, protocol %i (%s), datagram %i, reliable %i\n",
+		     __thisfunc__,
+		     NET_IsLocalConnection (client->netconnection) ? "local" : "remote",
+		     sv_protocol, SV_ProtocolName (sv_protocol),
+		     NET_IsLocalConnection (client->netconnection) ?
+			     NET_MaxUnreliableMessage (client->netconnection) : SV_MaxDatagram (),
+		     NET_IsLocalConnection (client->netconnection) ?
+			     MAX_MSGLEN : SV_MaxReliableMessage ());
+
 	MSG_WriteByte (&client->message, svc_serverinfo);
 	MSG_WriteLong (&client->message, sv_protocol);
 	MSG_WriteByte (&client->message, svs.maxclients);
@@ -812,7 +884,7 @@ static void SV_SendServerinfo (client_t *client)
 		MSG_WriteString (&client->message, *s);
 	MSG_WriteByte (&client->message, 0);
 
-	if (sv_protocol == PROTOCOL_UH2_114)
+	if (sv_protocol >= PROTOCOL_UH2_114)
 	{
 		// send model effects
 		for (i = 1, s = sv.model_precache + 1; i < MAX_MODELS && *s; s++)
@@ -1557,6 +1629,13 @@ skipA:
 			set_ent->abslight = (int)(ent->v.abslight * 255.0) & 255;
 		}
 
+		/* Protocols 18-21 have no U_ALPHA -- Shanjaq's 21 stops at
+		 * U_COLORMAP exactly like 19 does -- and a client that does not
+		 * know to consume the alpha byte reads the next entity's bits out
+		 * of the middle of this one.  Note the reference frame still
+		 * carries alpha either way, so nothing has to be re-derived when
+		 * a listen server is restarted on protocol 100. */
+		if (sv_protocol >= PROTOCOL_HEXENWAIL_1)
 		{
 			byte newalpha;
 			eval_t *val = GetEdictFieldValue(ent, "alpha");
@@ -1980,7 +2059,7 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 	else
 	{
 		sc1 = sc2 = 0;
-		if (sv_protocol == PROTOCOL_UH2_114)
+		if (sv_protocol >= PROTOCOL_UH2_114)
 		{
 			sc3 = host_client->ex_inventory->changed_items;
 			sc4 = host_client->ex_inventory->new_items;
@@ -2275,7 +2354,7 @@ void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg
 	}
 
 // extended inventory
-	if (sv_protocol == PROTOCOL_UH2_114)
+	if (sv_protocol >= PROTOCOL_UH2_114)
 	{
 		//shan page loop here
 		ex_inventory_page_t *page = host_client->ex_inventory;
@@ -2355,6 +2434,18 @@ static qboolean SV_SendClientDatagram (client_t *client)
 	 * eight times over.  SV_PrepareClientEntities sheds entities to fit,
 	 * worst-priority first, instead. */
 	wire = NET_MaxUnreliableMessage (client->netconnection);
+
+	/* ...and no larger than the negotiated protocol lets this client
+	 * receive.  Skipped for a local connection: both ends are this process,
+	 * so there is no other build's buffer to fit inside and single player
+	 * keeps the full entity budget whatever sv_protocol says. */
+	if (!NET_IsLocalConnection (client->netconnection))
+	{
+		int max = SV_MaxDatagram ();
+		if (wire > max)
+			wire = max;
+	}
+
 	SZ_Init (&msg, buf, wire);
 	msg.name = "client datagram";
 
@@ -2553,6 +2644,24 @@ void SV_SendClientMessages (void)
 
 			if (host_client->dropasap)
 				SV_DropClient (false);	// went to another level
+			else if (!NET_IsLocalConnection (host_client->netconnection) &&
+				 host_client->message.cursize > SV_MaxReliableMessage ())
+			{
+				/* Sending this would overrun the far end's
+				 * receiveMessage[] rather than merely fail, so drop
+				 * the client instead -- the same outcome the
+				 * overflowed check above produces, but named, and
+				 * before the damage rather than after.  QC writing
+				 * this much reliable data in one frame is the usual
+				 * cause; sv_protocol 100 raises the ceiling from
+				 * 16 KB to 32 KB for clients that can take it. */
+				Con_Printf ("%s: %d byte reliable message exceeds the "
+					    "%d byte limit of protocol %i; dropping %s\n",
+					    __thisfunc__, host_client->message.cursize,
+					    SV_MaxReliableMessage (), sv_protocol,
+					    host_client->name);
+				SV_DropClient (true);
+			}
 			else
 			{
 				if (NET_SendMessage (host_client->netconnection,
@@ -3354,7 +3463,7 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	/* Auto-detect protocol: scan progs for extended builtins (107-112)
 	 * that require protocol 21 (UH2_114). If none found, use the
 	 * default protocol (19/RAVEN_112) for maximum compatibility. */
-	if (sv_protocol == PROTOCOL_VERSION && PROTOCOL_VERSION < PROTOCOL_UH2_114)
+	if (!sv_protocol_userset)
 	{
 		int fi;
 		qboolean needs_114 = false;
@@ -3371,6 +3480,18 @@ void SV_SpawnServer (const char *server, const char *startspot)
 		{
 			sv_protocol = PROTOCOL_UH2_114;
 			Con_Printf ("Progs uses extended builtins — auto-upgraded to protocol %d\n", sv_protocol);
+		}
+
+		/* Same sniff, one protocol further up: U_ALPHA is ours, so a mod
+		 * that declares .alpha needs PROTOCOL_HEXENWAIL_1 or the field is
+		 * simply never transmitted.  Doing it here rather than defaulting
+		 * the engine to 100 keeps a stock game byte-identical to upstream
+		 * on the wire -- the extension costs compatibility only for the
+		 * content that actually asked for it. */
+		if (PR_HasField ("alpha"))
+		{
+			sv_protocol = PROTOCOL_HEXENWAIL_1;
+			Con_Printf ("Progs uses .alpha — auto-upgraded to protocol %d\n", sv_protocol);
 		}
 	}
 

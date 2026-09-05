@@ -61,6 +61,12 @@ int	NET_MaxUnreliableMessage (struct qsocket_s *sock);
 // sizebuf into a fixed MAX_DATAGRAM packet buffer, so an oversized message
 // does not merely fail to send, it runs off the end of that buffer.
 
+qboolean NET_IsLocalConnection (struct qsocket_s *sock);
+// True when both ends of this connection are this process (loopback driver),
+// so nothing it carries has to fit a limit some other build chose.  The
+// server uses this to decide whether the negotiated protocol's wire sizes
+// apply -- see SV_MaxDatagram().
+
 int	NET_GetMessage (struct qsocket_s *sock);
 // returns data in net_message sizebuf
 // returns 0 if no data is waiting

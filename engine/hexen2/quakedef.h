@@ -77,6 +77,26 @@
 #define	MAX_MSGLEN	32768		// max length of a reliable message
 #define	MAX_DATAGRAM	4096		// max length of unreliable message
 
+/* MAX_MSGLEN and MAX_DATAGRAM above size *our* buffers, i.e. the most this
+ * engine can build or receive.  What we are allowed to SEND is a property of
+ * the negotiated protocol, because the peer sized its own buffers from the
+ * constants its own source shipped with, and neither the datagram path nor
+ * the reliable path notices the difference on the way in:
+ *
+ *   unreliable -- Datagram_GetMessage reads into a NET_DATAGRAMSIZE buffer,
+ *      so recvfrom truncates anything larger and the parser walks off the end
+ *      of a short packet ("Illegible server message").
+ *   reliable   -- the fragment reassembly at the bottom of Datagram_GetMessage
+ *      memcpys into qsocket_t::receiveMessage[NET_MAXMESSAGE] with no bounds
+ *      check at all, upstream included, so an oversized reliable message is
+ *      not a desync, it is a write past the end of the peer's socket struct.
+ *
+ * Hence SV_MaxDatagram() and SV_MaxReliableMessage() in sv_main.c, which is
+ * where these are actually consulted -- same shape as SV_MaxSounds(). */
+#define	MAX_DATAGRAM_OLD	1024	/* protocols 18-20: upstream uHexen2 MAX_DATAGRAM	*/
+#define	MAX_DATAGRAM_114	2048	/* protocol 21: Shanjaq's MAX_DATAGRAM_114		*/
+#define	MAX_MSGLEN_OLD		16384	/* protocols 18-20: upstream uHexen2 NET_MAXMESSAGE	*/
+
 #define MAX_PRINTMSG	4096		// maximum allowed print message length
 
 //

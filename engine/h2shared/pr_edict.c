@@ -1327,6 +1327,20 @@ static ddef_t *ED_FindField (const char *name)
 
 /*
 ============
+PR_HasField
+
+Does the loaded progs declare this entity field at all?  Used to decide,
+before any edict exists, whether a mod uses an engine extension -- see the
+protocol auto-detect in SV_SpawnServer.
+============
+*/
+qboolean PR_HasField (const char *name)
+{
+	return ED_FindField (name) != NULL;
+}
+
+/*
+============
 ED_FindGlobal
 ============
 */

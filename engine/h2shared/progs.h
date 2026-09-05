@@ -332,6 +332,7 @@ void ED_PrintEdicts (void);
 void ED_PrintNum (int ent);
 
 eval_t *GetEdictFieldValue(edict_t *ed, const char *field);
+qboolean PR_HasField (const char *name);
 
 extern	cvar_t		max_temp_edicts;
 

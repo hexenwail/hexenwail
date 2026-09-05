@@ -30,10 +30,34 @@
 #define	PROTOCOL_RAVEN_112		19	/* 1.12, mission pack */
 #define	PROTOCOL_UQE_113		20	/* Korax UQE patch 1.13 */
 #define	PROTOCOL_UH2_114		21	/* Shanjaq uHexen 1.14 update */
+#define	PROTOCOL_HEXENWAIL_1		100	/* this engine's own extensions -- see below */
  /* the default protocol: mission pack 1.12 for base game + portals.
   * mods that need extended inventory (SoT, Karma) should set
   * sv_protocol 21 in their autoexec.cfg */
 #define	PROTOCOL_VERSION		(PROTOCOL_RAVEN_112)
+
+/*
+ * PROTOCOL_HEXENWAIL_1 exists because 18/19/20/21 are other people's wire
+ * formats and we do not get to add fields to them.  Everything this engine
+ * puts on the wire that Raven, Korax and Shanjaq did not is gated on it:
+ *
+ *   - U_ALPHA in the entity delta (below).  Shanjaq's 21 stops at U_COLORMAP
+ *     exactly like 19 does, so 21 is NOT a place to put this.
+ *   - the 4096-byte unreliable datagram (SV_MaxDatagram, sv_main.c).  Stock
+ *     uHexen2 sizes its receive buffer at MAX_DATAGRAM 1024 and Shanjaq at
+ *     MAX_DATAGRAM_114 2048; a bigger packet is silently truncated by
+ *     recvfrom on the way in, which reaches the player as "Illegible server
+ *     message" with nothing to point at.
+ *   - reliable messages above 16384 bytes (SV_MaxReliableMessage).
+ *
+ * The number is 100 rather than 22 on purpose: 22 is the next value a Raven,
+ * UQE or Shanjaq descendant would reach for, and a silent collision between
+ * two protocols that both claim "22" is undiagnosable from the client end.
+ *
+ * NOT the default.  A server left alone speaks PROTOCOL_RAVEN_112 and is
+ * byte-for-byte an upstream uHexen2 server on the wire; the extensions are
+ * opt-in via "sv_protocol 100", the same way SoT and Karma opt into 21.
+ */
 
 //=========================================
 
@@ -149,6 +173,9 @@
 #define	U_EFFECTS	(1<<17)
 #define	U_SCALE		(1<<18)
 #define	U_COLORMAP	(1<<19)
+/* PROTOCOL_HEXENWAIL_1 only.  Sending this to a client that negotiated 18-21
+ * desynchronises the delta: it does not know to consume the alpha byte, so it
+ * reads the next entity's bits out of the middle of this one's payload. */
 #define	U_ALPHA		(1<<20)
 
 #define	BE_ON		(1<<0)

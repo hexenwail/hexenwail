@@ -661,6 +661,17 @@ int NET_MaxUnreliableMessage (qsocket_t *sock)
 }
 
 
+/*
+==================
+NET_IsLocalConnection
+==================
+*/
+qboolean NET_IsLocalConnection (qsocket_t *sock)
+{
+	return (sock && IS_LOOP_DRIVER(sock->driver)) ? true : false;
+}
+
+
 int NET_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 {
 	int		r;
