@@ -1434,6 +1434,22 @@ EOF
             gcc
             gnumake
             cmake
+
+            # Shader toolchain.  Present in the dev shell only, deliberately:
+            # nothing in the build consumes it yet, because every shader in the
+            # tree is still an inline C string literal and there are zero .glsl
+            # files for it to act on (uhexen2-p4ln.4 is what changes that).
+            #
+            # It is here ahead of that work because without it there is no way
+            # to validate a single shader -- the repo's own shader-validator
+            # agent shells out to glslangValidator and currently cannot run at
+            # all.  glslang compiles GLSL to SPIR-V, which is the form SDL_GPU
+            # consumes; spirv-tools supplies the validator and disassembler for
+            # inspecting the result; spirv-cross transpiles SPIR-V onward to
+            # MSL and HLSL, which is how the Metal and D3D12 backends are fed.
+            glslang
+            spirv-tools
+            spirv-cross
           ];
 
           shellHook = ''
