@@ -435,6 +435,8 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_alias_dlight    = glGetUniformLocation_fp(p->program, "u_alias_dlight");	/* uhexen2-waum */
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(p->program, "u_force_opaque_alpha");
 	p->u_alias_caustics   = glGetUniformLocation_fp(p->program, "u_alias_caustics");
+	p->u_alias_material   = glGetUniformLocation_fp(p->program, "u_alias_material");	/* uhexen2-4kcb */
+	p->u_alias_lightdir   = glGetUniformLocation_fp(p->program, "u_alias_lightdir");
 	p->u_turb             = glGetUniformLocation_fp(p->program, "u_turb");
 	p->u_alias_model      = glGetUniformLocation_fp(p->program, "u_alias_model");
 	p->u_soft_depth       = glGetUniformLocation_fp(p->program, "u_soft_depth");
@@ -783,6 +785,18 @@ static const char sworld_vert[] =
  */
 #define GLSL_MATERIAL_FN \
 	"const vec3 MAT_LIGHTDIR = vec3(-0.35, -0.35, 0.868);\n" \
+	/* Below this much light-facing, relief fades out rather than dividing by
+	 * a vanishing flat response.  Only the model half can reach it -- see
+	 * MaterialShadeCore.  0.35 is ~70 degrees off the surface normal, past
+	 * which a bump's lit face and its shadowed face are nearly the same
+	 * brightness anyway, so there is little relief left to lose. */ \
+	"const float MAT_GRAZE = 0.35;\n" \
+	/* Ceiling on the relief gain.  Only the model half can approach it; the
+	 * world half's fixed light tops out at 1/0.868 = 1.15, so this leaves it
+	 * bit-identical.  4 is a safety net against the divide running away near
+	 * edge-on light, not a shaper -- the fade above has already taken most of
+	 * the term out by the time it binds. */ \
+	"const float MAT_MAXGAIN = 4.0;\n" \
 	"mat3 CotangentFrame(highp vec3 N, highp vec3 p, highp vec2 uv) {\n" \
 	"    highp vec3 dp1 = dFdx(p);\n" \
 	"    highp vec3 dp2 = dFdy(p);\n" \
@@ -802,31 +816,83 @@ static const char sworld_vert[] =
 	"    highp float invmax = (d > 0.0) ? inversesqrt(d) : 0.0;\n" \
 	"    return mat3(T * invmax, B * invmax, N);\n" \
 	"}\n" \
-	/* Returns vec4(diffuse scale, specular rgb): .x multiplies the lightmap,
-	 * .yzw is added after it.  One call rather than two so the cutout and
-	 * opaque fragment variants cannot drift apart. */ \
-	"vec4 MaterialShade(sampler2D normtex, sampler2D glosstex, highp vec2 uv,\n" \
-	"                   highp vec3 p, vec2 params, float glossexp) {\n" \
+	/* The tangent frame for a camera-relative position, with the geometric
+	 * normal recovered from its derivatives.  Split out of MaterialShade so
+	 * the directional variant below can build the frame once and still hand
+	 * it to the shared core.  uhexen2-4kcb. */ \
+	"mat3 MaterialFrame(highp vec3 p, highp vec2 uv) {\n" \
 	"    highp vec3 Ng = normalize(cross(dFdx(p), dFdy(p)));\n" \
 	"    if (dot(Ng, p) > 0.0) Ng = -Ng;\n" \
-	"    mat3 TBN = CotangentFrame(Ng, p, uv);\n" \
+	"    return CotangentFrame(Ng, p, uv);\n" \
+	"}\n" \
+	/* Returns vec4(diffuse scale, specular rgb): .x multiplies the lightmap,
+	 * .yzw is added after it.  One call rather than two so the cutout and
+	 * opaque fragment variants cannot drift apart.
+	 *
+	 * `Lt` is the light direction ALREADY IN TANGENT SPACE.  The world half
+	 * passes the MAT_LIGHTDIR constant straight through; the model half
+	 * (uhexen2-4kcb) rotates a real direction into the frame first. */ \
+	"vec4 MaterialShadeCore(sampler2D normtex, sampler2D glosstex, highp vec2 uv,\n" \
+	"                       mat3 TBN, highp vec3 p, vec3 Lt,\n" \
+	"                       vec2 params, float glossexp) {\n" \
 	/* Decode [0,1] -> [-1,1].  A pack that ships a flat 128,128,255 map,
 	 * or the sentinel bound when it ships none, decodes to (0,0,1). */ \
 	"    vec3 n = texture(normtex, uv).xyz * 2.0 - 1.0;\n" \
 	"    n = normalize(mix(vec3(0.0, 0.0, 1.0), n, params.x));\n" \
-	"    float ndotl = max(dot(n, MAT_LIGHTDIR), 0.0);\n" \
-	/* Divide out the flat response so flat == no change.  MAT_LIGHTDIR.z
-	 * is a nonzero literal, so no guard is needed. */ \
-	"    float diffuse = ndotl / MAT_LIGHTDIR.z;\n" \
+	"    float ndotl = max(dot(n, Lt), 0.0);\n" \
+	/* Divide out the flat response so flat == no change.  Lt.z IS that
+	 * response, because a flat normal is (0,0,1), which is why the ratio is
+	 * EXACTLY 1.0 for a flat normal at any light angle -- the numerator and
+	 * the denominator are the same quantity.  That identity is what stops a
+	 * normal-map pack from globally darkening the scene, and it is why the
+	 * guard below bounds the RATIO rather than the divisor: flooring Lt.z
+	 * instead would make the two differ, and a flat map would come out at
+	 * Lt.z/MAT_GRAZE < 1 -- darkening every model the light merely grazes,
+	 * including models with no sidecar at all, which sample the flat
+	 * sentinel and must be pixel-identical to the path being off.
+	 *
+	 * The world half's Lt is the MAT_LIGHTDIR constant, whose .z is 0.868, so
+	 * `w` is 1 and the cap (max ratio 1/0.868 = 1.15) never binds: this
+	 * reduces to the plain ndotl/MAT_LIGHTDIR.z it has always computed.  The
+	 * model half's Lt varies per fragment, and on a surface the light grazes
+	 * or backfaces its .z falls to 0, where the ratio runs away.  Cap it, and
+	 * fade the whole term back to flat as the light goes edge-on: relief is a
+	 * redistribution of arriving light, and no light arrives at a face turned
+	 * away from the source.  uhexen2-4kcb. */ \
+	"    float w = smoothstep(0.0, MAT_GRAZE, Lt.z);\n" \
+	"    float ratio = min(ndotl / max(Lt.z, 1e-4), MAT_MAXGAIN);\n" \
+	"    float diffuse = mix(1.0, ratio, w);\n" \
 	"    vec3 spec = vec3(0.0);\n" \
 	"    if (params.y > 0.0) {\n" \
-	/* Camera is at the eye-space origin, so the view vector is -p. */ \
+	/* Camera is at the origin of p's frame, so the view vector is -p. */ \
 	"        highp vec3 V = normalize(-p) * TBN;\n" \
-	"        vec3 H = normalize(MAT_LIGHTDIR + V);\n" \
+	"        vec3 H = normalize(Lt + V);\n" \
 	"        float s = pow(max(dot(n, H), 0.0), glossexp);\n" \
-	"        spec = texture(glosstex, uv).rgb * s * params.y;\n" \
+	/* Same fade as the diffuse term, and for the same reason: a highlight
+	 * on a face the light cannot reach is light invented from nothing. */ \
+	"        spec = texture(glosstex, uv).rgb * s * params.y * w;\n" \
 	"    }\n" \
 	"    return vec4(diffuse, spec);\n" \
+	"}\n" \
+	/* World surfaces: a fixed tangent-space direction, anchored to the
+	 * texture's own axes because a BSP face carries no light direction. */ \
+	"vec4 MaterialShade(sampler2D normtex, sampler2D glosstex, highp vec2 uv,\n" \
+	"                   highp vec3 p, vec2 params, float glossexp) {\n" \
+	"    return MaterialShadeCore(normtex, glosstex, uv, MaterialFrame(p, uv), p,\n" \
+	"                             MAT_LIGHTDIR, params, glossexp);\n" \
+	"}\n" \
+	/* Alias models: `L` arrives in the SAME frame as `p` -- eye space on the
+	 * immediate and skeletal paths, world space on the instanced one -- and
+	 * is rotated into tangent space here.  The two frames differ by a pure
+	 * rotation, under which the whole tangent-space computation is invariant,
+	 * so each vertex shader can stay in whatever frame it already had.
+	 * TBN is orthonormal, so the transpose is the inverse and `L * TBN` is
+	 * that rotation; the same trick already moves V above.  uhexen2-4kcb. */ \
+	"vec4 MaterialShadeDir(sampler2D normtex, sampler2D glosstex, highp vec2 uv,\n" \
+	"                      highp vec3 p, vec3 L, vec2 params, float glossexp) {\n" \
+	"    mat3 TBN = MaterialFrame(p, uv);\n" \
+	"    return MaterialShadeCore(normtex, glosstex, uv, TBN, p,\n" \
+	"                             normalize(L * TBN), params, glossexp);\n" \
 	"}\n"
 
 /* CLUSTERED GPU DYNAMIC LIGHTING, the shading half.  uhexen2-26bm, phase B of
@@ -1440,6 +1506,10 @@ static const char salias_vert[] =
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
+	/* EYE space -- u_modelview is view*model, so whatever entity transform
+	 * preceded it, this lands camera-relative with the camera at the origin.
+	 * u_alias_lightdir is uploaded in the matching frame.  uhexen2-4kcb. */
+	"out highp vec3 v_matpos;\n"
 	GLSL_ALIAS_DLIGHT_VS_OUT
 	"invariant gl_Position;\n"
 	"void main() {\n"
@@ -1448,6 +1518,7 @@ static const char salias_vert[] =
 	"    v_worldxy = (u_alias_model * vec4(a_position, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(a_position, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
+	"    v_matpos = eyepos.xyz;\n"
 	GLSL_ALIAS_DLIGHT_VS_CALC
 	"    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
 	"}\n";
@@ -1477,15 +1548,37 @@ static const char salias_frag[] =
 	 * two of them.  Desktop GLSL accepts the qualifier and ignores it. */
 	"uniform highp sampler2D u_soft_depth;\n"
 	"uniform highp vec3 u_soft_params;\n"	/* x=1/fade distance (0=off), yz=depth linearization */
+	/* Material maps on model skins (uhexen2-4kcb).  Named apart from the
+	 * world's u_material for exactly the reason u_alias_caustics is named
+	 * apart from u_caustics: this program is also the sprite / particle /
+	 * warp-poly / unlit-brush-poly program, its value is per-batch state
+	 * pushed by GL_ImmEnd, and a shared name would let that clobber the
+	 * per-frame world value R_SetupFrame uploads. */
+	"uniform sampler2D u_texture3;\n"	/* normal map, flat sentinel when absent */
+	"uniform sampler2D u_texture4;\n"	/* gloss map, black sentinel when absent */
+	"uniform vec3 u_alias_material;\n"	/* xy=(normalmap, gloss) intensity (both 0 = off), z=gloss exponent */
+	/* The model light direction, in the same frame as v_matpos.  C rotates
+	 * it per frame per program: eye space for this program and the skeletal
+	 * one, world space for the instanced one.  See R_AliasMaterialLightDir. */
+	"uniform vec3 u_alias_lightdir;\n"
 	"TCQUAL in vec2 v_texcoord;\n"
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
+	/* Camera-relative position for the material tangent frame.  Deliberately
+	 * NOT v_eyepos: that one is declared inside GLSL_ALIAS_DLIGHT_VS_OUT, so
+	 * it does not exist on the ES/WebGL2 tier at all, and on the instanced
+	 * path it is eye space via u_lightview -- a matrix only gl_lightcluster.c
+	 * uploads, and only when clustered lighting is live.  This one is filled
+	 * unconditionally by all three vertex shaders, each in its own native
+	 * frame.  uhexen2-4kcb. */
+	"in highp vec3 v_matpos;\n"
 	GLSL_ALIAS_DLIGHT_FS_IN
 	"out vec4 fragColor;\n"
 	GLSL_ALIAS_DLIGHT_DECL
 	GLSL_CAUSTICS_FN
 	GLSL_TURB_UV_FN
+	GLSL_MATERIAL_FN
 	GLSL_ALIAS_DLIGHT_FN
 	"void main() {\n"
 	/* Per-pixel liquid warp (uhexen2-9o7u).  Off unless C sets u_turb.x, which
@@ -1507,6 +1600,30 @@ static const char salias_frag[] =
 	"    vec4 tex = texture(u_texture0, uv);\n"
 	"#endif\n"
 	GLSL_ALIAS_DLIGHT_APPLY
+	/* Material maps on the skin (uhexen2-4kcb).  Uniform-static branch, so a
+	 * model with no _norm/_bump/_gloss sidecar -- or r_materialmaps 0, or any
+	 * of the sprite / particle / warp / brush batches that share this program
+	 * and leave the uniform at its resting zero -- skips the derivatives, the
+	 * frame build and both texture fetches.
+	 *
+	 * Runs BEFORE the alpha-test discard, for the same reason sworld_frag
+	 * samples its fullbright mask early: this reads textures and takes
+	 * derivatives, and both are undefined in a 2x2 quad where some lanes have
+	 * already discarded.  Sampling after the discard draws dark outlines
+	 * along every cutout edge (Ironwail 017fdd2). */
+	"    vec3 matspec = vec3(0.0);\n"
+	"    if (u_alias_material.x > 0.0 || u_alias_material.y > 0.0) {\n"
+	"        vec4 m = MaterialShadeDir(u_texture3, u_texture4, uv, v_matpos,\n"
+	"                                  u_alias_lightdir,\n"
+	"                                  u_alias_material.xy, u_alias_material.z);\n"
+	/* Weight the highlight by the light that reaches the model, not by the
+	 * shaded colour, so a bright skin does not get a brighter highlight than
+	 * a dark one under the same lamp.  v_color.rgb is this path's analogue of
+	 * the lightmap sworld_frag weights by: the static light with shadedots
+	 * and the entity tint already folded in. */
+	"        matspec = m.yzw * v_color.rgb;\n"
+	"        color.rgb *= m.x;\n"
+	"    }\n"
 	/* uhexen2-khsa r20: revert r15's threshold gate.  r15 only ran the
 	 * discard for u_alpha_threshold > 0.5, exempting opaque batches.
 	 * Confirmed via bisect (bobberb): some alias models route through
@@ -1517,6 +1634,9 @@ static const char salias_frag[] =
 	 * path), which looked like the cutout area was filled in.  Restore
 	 * the r14 behavior. */
 	"    if (color.a < u_alpha_threshold) discard;\n"
+	/* Added rather than multiplied, and after the alpha test, exactly where
+	 * sworld_frag adds its own.  uhexen2-4kcb. */
+	"    color.rgb += matspec;\n"
 	/* Underwater caustics, same formula and same pre-fog position in the
 	 * chain as sworld_frag so a model and the floor it stands on receive
 	 * the identical highlight band.  v_worldxy is world space on every
@@ -1627,6 +1747,7 @@ static const char sskeletal_vert[] =
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
+	"out highp vec3 v_matpos;\n"	/* eye space, as salias_vert (uhexen2-4kcb) */
 	GLSL_ALIAS_DLIGHT_VS_OUT
 	"invariant gl_Position;\n"
 	"\n"
@@ -1660,6 +1781,7 @@ static const char sskeletal_vert[] =
 	"    v_worldxy = (u_alias_model * vec4(skinned_pos, 1.0)).xy;\n"
 	"    vec4 eyepos = u_modelview * vec4(skinned_pos, 1.0);\n"
 	"    v_fogdist = length(eyepos.xyz);\n"
+	"    v_matpos = eyepos.xyz;\n"
 	GLSL_ALIAS_DLIGHT_VS_CALC
 	"    gl_Position = u_mvp * vec4(skinned_pos, 1.0);\n"
 	"}\n";
@@ -1843,6 +1965,14 @@ static const char salias_inst_vert[] =
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	"out vec2 v_worldxy;\n"
+	/* WORLD space here, not eye -- this path has no u_modelview, and the one
+	 * eye-space vector it does build (v_eyepos) goes through u_lightview,
+	 * which only gl_lightcluster.c uploads and only while clustered lighting
+	 * is live.  u_eyepos is unconditional, so camera-relative world space is
+	 * the frame that is always correct.  C uploads u_alias_lightdir in world
+	 * space for this program to match; the tangent-space maths is invariant
+	 * under the pure rotation between the two frames.  uhexen2-4kcb. */
+	"out highp vec3 v_matpos;\n"
 	GLSL_ALIAS_DLIGHT_VS_OUT
 	"\n"
 	"invariant gl_Position;\n"
@@ -1936,6 +2066,7 @@ static const char salias_inst_vert[] =
 	 * change to the 80-byte InstanceData layout.  uhexen2-0gn3. */
 	"    v_worldxy = world_pos.xy;\n"
 	"    v_fogdist = distance(world_pos, u_eyepos);\n"
+	"    v_matpos = world_pos - u_eyepos;\n"
 	"    v_eyepos = (u_lightview * vec4(world_pos, 1.0)).xyz;\n"
 	/* Per instance, because one instanced draw mixes entities whose CPU
 	 * lighting came from different arms of R_DrawAliasModel's branch chain
@@ -2322,6 +2453,8 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 	p->u_poseverttype = glGetUniformLocation_fp(prog, "u_poseverttype");
 	p->u_force_opaque_alpha = glGetUniformLocation_fp(prog, "u_force_opaque_alpha");
 	p->u_alias_caustics = glGetUniformLocation_fp(prog, "u_alias_caustics");
+	p->u_alias_material = glGetUniformLocation_fp(prog, "u_alias_material");	/* uhexen2-4kcb */
+	p->u_alias_lightdir = glGetUniformLocation_fp(prog, "u_alias_lightdir");
 	/* uhexen2-waum */
 	p->u_alias_dlight = glGetUniformLocation_fp(prog, "u_alias_dlight");
 	p->u_lightview = glGetUniformLocation_fp(prog, "u_lightview");
@@ -2335,6 +2468,16 @@ static qboolean GL_InitAliasInstProgram (gl_alias_inst_prog_t *p, const char *na
 		GLint u_tex = glGetUniformLocation_fp(prog, "u_texture0");
 		if (u_tex >= 0)
 			glUniform1i_fp(u_tex, 0);
+		/* Material maps on units 3 and 4, matching the world program and
+		 * what GL_InitProgram does for every other user of salias_frag.
+		 * Without this both samplers default to unit 0 and every model
+		 * would read its own skin as a normal map.  uhexen2-4kcb. */
+		u_tex = glGetUniformLocation_fp(prog, "u_texture3");
+		if (u_tex >= 0)
+			glUniform1i_fp(u_tex, 3);
+		u_tex = glGetUniformLocation_fp(prog, "u_texture4");
+		if (u_tex >= 0)
+			glUniform1i_fp(u_tex, 4);
 	}
 	/* The froxel grid lives on its own unit for the whole world+entity draw;
 	 * GL_InitProgram does this for every other program that declares it. */

@@ -76,7 +76,14 @@ void	GL_SetAliasModelMatrix (const float *m);	/* 16 floats, column-major */
 /* Read back the current values, for draw paths that bypass GL_ImmEnd and must
  * apply the identical state by hand (the PV_IQM skeletal path, uhexen2-7ok0.3). */
 void	GL_GetAliasModelMatrix (float *out);		/* 16 floats */
-void	GL_GetAliasCaustics (float *out2);		/* 2 floats: intensity, time */
+void	GL_GetAliasCaustics (float *out2);
+/* Material maps on alias skins (uhexen2-4kcb).  Both intensities 0 is the
+ * resting state and disables the path; dir3 is the light direction in the
+ * frame that program's v_matpos uses. */
+void	GL_SetAliasMaterial (float nrm, float gloss, float glossexp);
+void	GL_SetAliasLightDir (const float *dir3);
+void	GL_GetAliasMaterial (float *out3);
+void	GL_GetAliasLightDir (float *out3);		/* 2 floats: intensity, time */
 float	GL_GetAliasDlight (void);		/* uhexen2-waum */
 /* Soft-particle depth fade for subsequent sprite batches (uhexen2-mf9u).
  * inv_dist is the reciprocal of the fade distance in world units, 0 = off

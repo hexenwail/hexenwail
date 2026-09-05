@@ -3633,6 +3633,55 @@ static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 
 /*
 ===============
+Mod_LoadAliasMaterialMaps
+
+Resolve the _norm/_bump and _gloss sidecars for one alias skin.  uhexen2-4kcb.
+
+Called on both the replacement and the embedded-skin path, and deliberately
+NOT conditioned on a diffuse replacement having been found: a pack that adds
+paladin_norm.tga to sharpen the stock skin without repainting the skin itself
+is a normal thing to ship, DarkPlaces honours it, and requiring a replacement
+first would silently ignore that pack.  Same call the world half makes from
+Mod_LoadTextures, for the same reasons.
+
+`name` is the skin name the diffuse was looked up under, so the sidecar lands
+next to it and IMG_BuildCandidates applies the identical per-map-then-shared
+path search.  Writes 0 into both outputs when nothing is found, which is what
+the render path reads as "bind the flat-normal and black-gloss sentinels".
+===============
+*/
+static void Mod_LoadAliasMaterialMaps (const char *name, GLuint *norm_out, GLuint *gloss_out)
+{
+	imgreplace_t	mat;
+	char		matname[MAX_QPATH];
+
+	*norm_out = *gloss_out = 0;
+
+	/* r_materialmaps gates the load as well as the shader, so a machine that
+	 * cannot afford the VRAM does not pay for it; toggling the cvar off stops
+	 * the effect at once and reclaims the memory at the next map load. */
+	if (!r_materialmaps.integer)
+		return;
+
+	if (IMG_LoadReplacementNormal (name, NULL, &mat))
+	{
+		q_snprintf (matname, sizeof(matname), "%s_norm", name);
+		/* TEX_ALPHA because the _bump path parks the height field in
+		 * alpha and a future offset-mapping pass wants it kept. */
+		*norm_out = GL_LoadReplacement (matname, &mat, TEX_MIPMAP | TEX_ALPHA);
+		IMG_FreeReplacement (&mat);
+	}
+
+	if (IMG_LoadReplacementGloss (name, NULL, &mat))
+	{
+		q_snprintf (matname, sizeof(matname), "%s_gloss", name);
+		*gloss_out = GL_LoadReplacement (matname, &mat, TEX_MIPMAP);
+		IMG_FreeReplacement (&mat);
+	}
+}
+
+/*
+===============
 Mod_LoadAllSkins
 ===============
 */
@@ -3816,6 +3865,22 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 								pheader->skinwidth, pheader->skinheight);
 			}
 		}
+		/* Outside the replaced/embedded branch on purpose -- see
+		 * Mod_LoadAliasMaterialMaps.  uhexen2-4kcb. */
+		{
+			GLuint	nrm, gls;
+
+			Mod_LoadAliasMaterialMaps (name, &nrm, &gls);
+			pheader->gl_norm_texturenum[i][0] =
+			pheader->gl_norm_texturenum[i][1] =
+			pheader->gl_norm_texturenum[i][2] =
+			pheader->gl_norm_texturenum[i][3] = nrm;
+			pheader->gl_gloss_texturenum[i][0] =
+			pheader->gl_gloss_texturenum[i][1] =
+			pheader->gl_gloss_texturenum[i][2] =
+			pheader->gl_gloss_texturenum[i][3] = gls;
+		}
+
 		pskintype = (daliasskintype_t *)((byte *)(pskintype+1) + s);
 
 	    } else /*if (k == ALIAS_SKIN_GROUP)*/
@@ -3902,12 +3967,19 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 							pheader->skinwidth, pheader->skinheight);
 				}
 			}
+			/* Outside the replaced/embedded branch, as above. */
+			Mod_LoadAliasMaterialMaps (name,
+						   &pheader->gl_norm_texturenum[i][j&3],
+						   &pheader->gl_gloss_texturenum[i][j&3]);
+
 			pskintype = (daliasskintype_t *)((byte *)(pskintype) + s);
 		}
 		for (k = j; j < 4; j++)
 		{
 			pheader->gl_texturenum[i][j&3] = pheader->gl_texturenum[i][j - k];
 			pheader->gl_fb_texturenum[i][j&3] = pheader->gl_fb_texturenum[i][j - k];
+			pheader->gl_norm_texturenum[i][j&3] = pheader->gl_norm_texturenum[i][j - k];
+			pheader->gl_gloss_texturenum[i][j&3] = pheader->gl_gloss_texturenum[i][j - k];
 		}
 	    }
 	}

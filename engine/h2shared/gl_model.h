@@ -481,6 +481,14 @@ typedef struct {
 
 	GLuint		gl_texturenum[MAX_SKINS][4];
 	GLuint		gl_fb_texturenum[MAX_SKINS][4];	// fullbright mask textures
+	/* Material-map sidecars, 0 when the pack ships none (uhexen2-4kcb).
+	 * Filled on BOTH the replacement and the embedded-skin path, unlike the
+	 * fullbright mask beside them: an embedded MDL skin can still recover its
+	 * glow from palette indices >= vid.fullbright, but there is no in-MDL
+	 * source for relief or specular, so a sidecar is the only source either
+	 * way.  Same reasoning Mod_LoadTextures uses on the world half. */
+	GLuint		gl_norm_texturenum[MAX_SKINS][4];	// _norm / _bump normal map
+	GLuint		gl_gloss_texturenum[MAX_SKINS][4];	// _gloss specular map
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 
@@ -533,6 +541,12 @@ typedef struct {
 	aliashdr_t	*hdr;		/* model -- determines VAO + pose texture */
 	GLuint		skin_tex;	/* resolved skin texture */
 	GLuint		fb_tex;		/* fullbright texture (0 if none) */
+	/* Material sidecars for this batch's skin, 0 when the pack ships none.
+	 * They need no batch-break condition of their own: a batch is already
+	 * keyed on (model, skin_tex), and these are a function of exactly that
+	 * pair.  uhexen2-4kcb. */
+	GLuint		norm_tex;
+	GLuint		gloss_tex;
 	int		first;		/* first instance index */
 	int		count;		/* number of instances */
 } alias_batch_t;

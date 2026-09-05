@@ -1475,6 +1475,23 @@ static void GL_DrawAliasSkeletal (entity_t *e, aliashdr_t *paliashdr,
 	 * through GL_ImmEnd, so it must clear it itself.  uhexen2-9o7u */
 	if (prog->u_turb >= 0)
 		glUniform2f_fp (prog->u_turb, 0.0f, 0.0f);
+	/* Material maps.  Unlike the three above this is PASSED THROUGH rather
+	 * than cleared: R_DrawAliasModel armed it for this entity's skin just
+	 * before dispatching here, and the skeletal program's v_matpos is eye
+	 * space exactly like salias_vert's, so the direction it staged applies
+	 * unchanged.  Read back rather than recomputed for the same reason
+	 * GL_GetAliasModelMatrix exists -- replaying the derivation here risks a
+	 * different answer than the batch beside it.  uhexen2-4kcb. */
+	{
+		float	mat[3], dir[3];
+
+		GL_GetAliasMaterial (mat);
+		GL_GetAliasLightDir (dir);
+		if (prog->u_alias_material >= 0)
+			glUniform3f_fp (prog->u_alias_material, mat[0], mat[1], mat[2]);
+		if (prog->u_alias_lightdir >= 0)
+			glUniform3f_fp (prog->u_alias_lightdir, dir[0], dir[1], dir[2]);
+	}
 
 	GL_BindBufferBase (GL_SHADER_STORAGE_BUFFER, 4, gm->ssbo_bones);
 
@@ -2184,6 +2201,125 @@ static float R_CausticsIntensity (void)
 	return r_caustics_intensity.value;
 }
 
+/*
+===============
+R_AliasMaterialLightDir
+
+The direction alias-model relief is lit from.  uhexen2-4kcb.
+
+MODELS HAVE A LIGHT DIRECTION AND WORLD SURFACES DO NOT, which is the whole
+reason this is not simply the world half's fixed tangent-space MAT_LIGHTDIR.
+An alias model is already shaded per vertex through shadedots, whose direction
+is shadevector; lighting its relief from somewhere else would put the bumps and
+the shading they sit in at odds on the same surface.
+
+The direction turns out to be a CONSTANT, not per-entity data.  R_DrawAliasModel
+builds shadevector as (cos(-yaw), sin(-yaw), 1) normalized, which looks
+per-entity but is only yaw-dependent because it is expressed in MODEL space:
+rotate it back out by the entity's own yaw and every entity gives (1, 0, 1).
+Ironwail reaches the identical vector from the other direction, deriving it in
+the vertex shader as (worldX + worldZ)/sqrt(2) from the instance's own world
+matrix (gl_shaders.h, alias_vertex_shader) rather than uploading it at all.
+
+That is what makes this cheap enough to do properly.  There is nothing to widen
+the instance SSBO with and nothing to upload per entity -- just one constant,
+expressed in whichever frame the drawing path's v_matpos already works in:
+world for the instanced path, eye for the other two.
+===============
+*/
+static void R_AliasMaterialLightDirWorld (vec3_t out)
+{
+	/* normalize(1, 0, 1) -- see above.  Written as the construction rather
+	 * than as two literals so the derivation stays checkable. */
+	out[0] = 1.0f;
+	out[1] = 0.0f;
+	out[2] = 1.0f;
+	VectorNormalize (out);
+}
+
+static void R_AliasMaterialLightDirEye (vec3_t out)
+{
+	vec3_t	w;
+
+	R_AliasMaterialLightDirWorld (w);
+
+	/* Rotate by the view matrix only.  r_world_matrix is captured in
+	 * R_SetupGL after the view transform and before any entity transform,
+	 * so it is exactly world -> eye; using u_modelview here instead would
+	 * fold in whichever entity happened to be drawing.  Column-major, and
+	 * the translation row is skipped because this is a direction. */
+	out[0] = r_world_matrix[0]*w[0] + r_world_matrix[4]*w[1] + r_world_matrix[8]*w[2];
+	out[1] = r_world_matrix[1]*w[0] + r_world_matrix[5]*w[1] + r_world_matrix[9]*w[2];
+	out[2] = r_world_matrix[2]*w[0] + r_world_matrix[6]*w[1] + r_world_matrix[10]*w[2];
+	VectorNormalize (out);
+}
+
+/*
+===============
+R_SetAliasMaterial
+
+Bind one skin's material maps at units 3 and 4 and arm the shader path, or
+leave it at rest when there is nothing to show.  uhexen2-4kcb.
+
+Returns with the material uniform state staged for the next GL_ImmEnd; the
+caller is responsible for calling R_ClearAliasMaterial on the way out, the
+same contract GL_SetAliasCaustics and GL_SetAliasDlight already have.
+
+`eyeframe` picks which frame the light direction is uploaded in, and must match
+the v_matpos the program's vertex shader fills: true for the immediate and
+skeletal programs, false (world space) for the instanced one.
+===============
+*/
+static qboolean R_SetAliasMaterial (GLuint norm, GLuint gloss, qboolean eyeframe)
+{
+	vec3_t	dir;
+	float	nrm, gls;
+
+	if (!r_materialmaps.integer || (!norm && !gloss))
+	{
+		GL_SetAliasMaterial (0.0f, 0.0f, 1.0f);
+		return false;
+	}
+
+	nrm = r_normalmap_intensity.value;
+	gls = r_gloss_intensity.value;
+	if (nrm < 0.0f) nrm = 0.0f;
+	if (gls < 0.0f) gls = 0.0f;
+	if (nrm == 0.0f && gls == 0.0f)
+	{
+		GL_SetAliasMaterial (0.0f, 0.0f, 1.0f);
+		return false;
+	}
+
+	/* One or the other may be missing -- a pack that ships relief but no
+	 * specular is the common case -- so each falls back to the sentinel that
+	 * is the identity for this maths.  Both are bound whenever the path is
+	 * armed, because the shader samples both unconditionally once inside the
+	 * branch.  Leaves TU0 active, like GL_BindMaterialMaps in gl_rsurf.c. */
+	glActiveTexture_fp(GL_TEXTURE3);
+	glBindTexture_fp(GL_TEXTURE_2D, norm ? norm : gl_flat_normal_texture);
+	glActiveTexture_fp(GL_TEXTURE4);
+	glBindTexture_fp(GL_TEXTURE_2D, gloss ? gloss : gl_null_gloss_texture);
+	glActiveTexture_fp(GL_TEXTURE0);
+
+	if (eyeframe)
+		R_AliasMaterialLightDirEye (dir);
+	else
+		R_AliasMaterialLightDirWorld (dir);
+	GL_SetAliasLightDir (dir);
+
+	/* pow() with a zero or negative exponent returns 1 for every angle, so a
+	 * mistyped r_gloss_exponent would flood the model with flat white rather
+	 * than doing nothing.  Floor it at 1, as GL_MaterialUniform does. */
+	GL_SetAliasMaterial (nrm, gls, q_max(1.0f, r_gloss_exponent.value));
+	return true;
+}
+
+static void R_ClearAliasMaterial (void)
+{
+	GL_SetAliasMaterial (0.0f, 0.0f, 1.0f);
+}
+
 static void R_DrawAliasModel (entity_t *e)
 {
 	int		i;
@@ -2801,6 +2937,22 @@ static void R_DrawAliasModel (entity_t *e)
 		}
 	}
 
+	/* Material maps for this skin (uhexen2-4kcb).  The stone-skin branch above
+	 * (skinnum >= 100) draws from gfx/skin*.lmp, which is not a model skin and
+	 * has no sidecar to find, so it stays at rest.  R_SetupAliasFrame is what
+	 * consumes this, through GL_ImmEnd on the immediate and instanced paths or
+	 * the direct uniform push on the skeletal one. */
+	if (skinnum >= 0 && skinnum < 100 && skinnum < paliashdr->numskins)
+	{
+		int	anim_mat = (int)(cl.time*10) & 3;
+
+		R_SetAliasMaterial (paliashdr->gl_norm_texturenum[skinnum][anim_mat],
+				    paliashdr->gl_gloss_texturenum[skinnum][anim_mat],
+				    true);
+	}
+	else
+		R_ClearAliasMaterial ();
+
 	/* A skin with no opaque texels in it cannot occlude anything, and SoT
 	 * draws its mist eight times over the same volume -- with depth writes
 	 * on, each instance's own faint edge hard-rejects the next and the
@@ -2866,6 +3018,14 @@ static void R_DrawAliasModel (entity_t *e)
 			 * a flat white the shader would then add to a second time.
 			 * uhexen2-waum. */
 			GL_SetAliasDlight (0.0f);
+			/* Same argument for the relief: this pass adds a glow
+			 * mask over a base pass that has already been shaded by
+			 * the material, and its vertex colour is a flat white
+			 * that carries no light for a highlight to be weighted
+			 * by.  Running it again here would scale the glow by the
+			 * relief and add the specular a second time.
+			 * uhexen2-4kcb. */
+			R_ClearAliasMaterial ();
 
 			model_fullbright_pass = true;
 			R_SetupAliasFrame (e, paliashdr);
@@ -2941,6 +3101,7 @@ static void R_DrawAliasModel (entity_t *e)
 		GL_SetAliasCaustics(0.0f, 0.0f);
 		GL_SetAliasModelMatrix(ident);
 		GL_SetAliasDlight(0.0f);	/* uhexen2-waum, same reasoning */
+		R_ClearAliasMaterial();		/* uhexen2-4kcb, same reasoning */
 	}
 
 	GL_PopMatrix();
@@ -3001,6 +3162,8 @@ typedef struct {
 	int		pose;
 	GLuint		skin_tex;	/* resolved skin texture */
 	GLuint		fb_tex;		/* fullbright texture (0 if none) */
+	GLuint		norm_tex;	/* material sidecars, 0 if none (uhexen2-4kcb) */
+	GLuint		gloss_tex;
 } inst_entity_t;
 static inst_entity_t	inst_entities[MAX_ALIAS_INSTANCES];
 static int		num_inst_entities;
@@ -3011,6 +3174,8 @@ typedef struct {
 	size_t	model_key;	/* aliashdr_t pointer as integer */
 	GLuint	skin_tex;
 	GLuint	fb_tex;
+	GLuint	norm_tex;	/* uhexen2-4kcb */
+	GLuint	gloss_tex;
 } inst_sort_t;
 
 /*
@@ -3896,6 +4061,13 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		if (!ftex) ftex = paliashdr->gl_fb_texturenum[skinnum][0];
 		inst_entities[num_alias_instances].skin_tex = stex;
 		inst_entities[num_alias_instances].fb_tex = ftex;
+		/* Resolved here for the same reason as the two above: paliashdr is
+		 * known good at this instant, and a later Mod_Extradata could hand
+		 * back a different pointer.  uhexen2-4kcb. */
+		inst_entities[num_alias_instances].norm_tex =
+			paliashdr->gl_norm_texturenum[skinnum][anim];
+		inst_entities[num_alias_instances].gloss_tex =
+			paliashdr->gl_gloss_texturenum[skinnum][anim];
 	}
 	inst_entities[num_alias_instances].ent = e;
 	inst_entities[num_alias_instances].hdr = paliashdr;
@@ -3956,6 +4128,8 @@ static void R_CollectAndBatchAliasInstances (void)
 				inst_sort_keys[idx].model_key = (size_t)inst_entities[idx].hdr;
 				inst_sort_keys[idx].skin_tex = inst_entities[idx].skin_tex;
 				inst_sort_keys[idx].fb_tex = inst_entities[idx].fb_tex;
+				inst_sort_keys[idx].norm_tex = inst_entities[idx].norm_tex;
+				inst_sort_keys[idx].gloss_tex = inst_entities[idx].gloss_tex;
 			}
 		}
 	}
@@ -3985,6 +4159,8 @@ static void R_CollectAndBatchAliasInstances (void)
 		batch->hdr = hdr;
 		batch->skin_tex = inst_sort_keys[0].skin_tex;
 		batch->fb_tex = inst_sort_keys[0].fb_tex;
+		batch->norm_tex = inst_sort_keys[0].norm_tex;
+		batch->gloss_tex = inst_sort_keys[0].gloss_tex;
 		batch->first = 0;
 		batch->count = 1;
 		num_alias_batches = 1;
@@ -4004,6 +4180,8 @@ static void R_CollectAndBatchAliasInstances (void)
 				batch->hdr = (aliashdr_t *)(size_t)inst_sort_keys[i].model_key;
 				batch->skin_tex = inst_sort_keys[i].skin_tex;
 				batch->fb_tex = inst_sort_keys[i].fb_tex;
+				batch->norm_tex = inst_sort_keys[i].norm_tex;
+				batch->gloss_tex = inst_sort_keys[i].gloss_tex;
 				batch->first = i;
 				batch->count = 1;
 			}
@@ -4137,6 +4315,47 @@ static void R_DrawAliasInstanced (void)
 		/* Bind skin texture to unit 0 */
 		glActiveTexture_fp(GL_TEXTURE0);
 		GL_Bind(batch->skin_tex);
+
+		/* Material maps at units 3 and 4 (uhexen2-4kcb).  Per batch rather
+		 * than per frame because a batch IS one (model, skin) pair, which is
+		 * exactly the granularity these vary at.
+		 *
+		 * WORLD space here, unlike the other two alias paths: this program's
+		 * v_matpos is world_pos - u_eyepos, because it has no u_modelview and
+		 * its only eye-space vector rides u_lightview, which gl_lightcluster.c
+		 * uploads only while clustered lighting is live. */
+		if (prog->u_alias_material >= 0)
+		{
+			if (r_materialmaps.integer &&
+			    (batch->norm_tex || batch->gloss_tex))
+			{
+				float	nrm = r_normalmap_intensity.value;
+				float	gls = r_gloss_intensity.value;
+				vec3_t	dir;
+
+				if (nrm < 0.0f) nrm = 0.0f;
+				if (gls < 0.0f) gls = 0.0f;
+
+				glActiveTexture_fp(GL_TEXTURE3);
+				glBindTexture_fp(GL_TEXTURE_2D,
+					batch->norm_tex ? batch->norm_tex : gl_flat_normal_texture);
+				glActiveTexture_fp(GL_TEXTURE4);
+				glBindTexture_fp(GL_TEXTURE_2D,
+					batch->gloss_tex ? batch->gloss_tex : gl_null_gloss_texture);
+				glActiveTexture_fp(GL_TEXTURE0);
+
+				glUniform3f_fp (prog->u_alias_material, nrm, gls,
+						q_max(1.0f, r_gloss_exponent.value));
+				if (prog->u_alias_lightdir >= 0)
+				{
+					R_AliasMaterialLightDirWorld (dir);
+					glUniform3f_fp (prog->u_alias_lightdir,
+							dir[0], dir[1], dir[2]);
+				}
+			}
+			else
+				glUniform3f_fp (prog->u_alias_material, 0.0f, 0.0f, 1.0f);
+		}
 
 		/* Bind pose SSBO only if changed from last batch */
 		if (pose_ssbo != last_pose_ssbo)
@@ -4280,6 +4499,14 @@ static void R_DrawAliasInstanced (void)
 			 * time.  uhexen2-waum. */
 			if (prog->u_alias_dlight >= 0)
 				glUniform1f_fp(prog->u_alias_dlight, 0.0f);
+			/* Same argument again for the relief, and it matters more here
+			 * than it does for the dlight: the per-batch loop below never
+			 * writes u_alias_material, so without this the last batch of the
+			 * MAIN pass leaves its value hot for every glow batch.  That
+			 * would scale the glow mask by the relief and add the specular a
+			 * second time.  uhexen2-4kcb. */
+			if (prog->u_alias_material >= 0)
+				glUniform3f_fp(prog->u_alias_material, 0.0f, 0.0f, 1.0f);
 
 			GL_BindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, prog->ubo_shadedots);
 			R_SetBlend (true);

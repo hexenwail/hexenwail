@@ -76,6 +76,20 @@ static float	imm_cache_turb[2] = { -1.0f, -1.0f };
  * R_DrawSpriteModel restores it after each sprite so the alias / warp / brush
  * batches that share gl_shader_alias never inherit the fade. */
 static float	imm_soft[3] = { 0.0f, 0.0f, 0.0f };
+/* Material maps on alias skins (uhexen2-4kcb).  Same shape as the caustics and
+ * dlight pairs above and for the same reason: gl_shader_alias is shared with
+ * sprites, particles, warp polys and unlit brush polys, and zero intensity is
+ * the resting state they must all see.  Because the resting state IS zero,
+ * those batches need no explicit clear of their own -- only the alias paths
+ * ever raise it, and they put it back on the way out.  The exponent rests at
+ * 1, which is the shader's own floor, so a stale value can never be read as a
+ * divide-by-nothing.
+ *
+ * lightdir is the direction relief is lit from, in the frame that program's
+ * v_matpos uses.  Its resting value is +Z, a unit vector, so the shader's
+ * normalize() is safe even on a batch that never sets it. */
+static float	imm_alias_material[3] = { 0.0f, 0.0f, 1.0f };
+static float	imm_alias_lightdir[3] = { 0.0f, 0.0f, 1.0f };
 static float	imm_alias_model[16] = {
 	1.0f, 0.0f, 0.0f, 0.0f,
 	0.0f, 1.0f, 0.0f, 0.0f,
@@ -316,6 +330,38 @@ void GL_GetAliasCaustics (float *out2)
 	out2[1] = imm_alias_caustics[1];
 }
 
+/* uhexen2-4kcb.  Both intensities 0 disables the material path in the shader,
+ * which is the resting state every non-alias user of gl_shader_alias sees. */
+void GL_SetAliasMaterial (float nrm, float gloss, float glossexp)
+{
+	imm_alias_material[0] = nrm;
+	imm_alias_material[1] = gloss;
+	imm_alias_material[2] = glossexp;
+}
+
+void GL_SetAliasLightDir (const float *dir3)
+{
+	imm_alias_lightdir[0] = dir3[0];
+	imm_alias_lightdir[1] = dir3[1];
+	imm_alias_lightdir[2] = dir3[2];
+}
+
+/* Read back for the skeletal path, which sets its uniforms directly rather
+ * than through GL_ImmEnd -- the same reason GL_GetAliasModelMatrix exists. */
+void GL_GetAliasMaterial (float *out3)
+{
+	out3[0] = imm_alias_material[0];
+	out3[1] = imm_alias_material[1];
+	out3[2] = imm_alias_material[2];
+}
+
+void GL_GetAliasLightDir (float *out3)
+{
+	out3[0] = imm_alias_lightdir[0];
+	out3[1] = imm_alias_lightdir[1];
+	out3[2] = imm_alias_lightdir[2];
+}
+
 void GL_ImmColor4f (float r, float g, float b, float a)
 {
 	imm_cur_color[0] = r;
@@ -396,6 +442,10 @@ static float	imm_cache_force_opaque_alpha = -2.0f;
 static float	imm_cache_alias_caustics[2] = { -1.0f, -1.0f };	/* uhexen2-0gn3 */
 static float	imm_cache_alias_dlight = -1.0f;	/* uhexen2-waum */
 static float	imm_cache_soft[3] = { -1.0f, -1.0f, -1.0f };	/* uhexen2-mf9u */
+/* uhexen2-4kcb.  -1 is unreachable for an intensity (clamped at 0) and for a
+ * unit direction component, so it is a safe "never pushed" sentinel for both. */
+static float	imm_cache_alias_material[3] = { -1.0f, -1.0f, -1.0f };
+static float	imm_cache_alias_lightdir[3] = { -2.0f, -2.0f, -2.0f };
 static float	imm_cache_alias_model[16];
 static qboolean	imm_cache_alias_model_set;
 static float	imm_cache_fog_density = -1.0f;
@@ -427,6 +477,8 @@ void GL_ImmInvalidateState (void)
 	imm_cache_alias_dlight = -1.0f;
 	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
+	imm_cache_alias_material[0] = imm_cache_alias_material[1] = imm_cache_alias_material[2] = -1.0f;
+	imm_cache_alias_lightdir[0] = imm_cache_alias_lightdir[1] = imm_cache_alias_lightdir[2] = -2.0f;
 	imm_cache_alias_model_set = false;
 	imm_cache_fog_density = -1.0f;
 	imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
@@ -484,6 +536,8 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 	 * then leave one of the two unwarped. */
 	imm_cache_turb[0] = imm_cache_turb[1] = -1.0f;
 	imm_cache_soft[0] = imm_cache_soft[1] = imm_cache_soft[2] = -1.0f;
+	imm_cache_alias_material[0] = imm_cache_alias_material[1] = imm_cache_alias_material[2] = -1.0f;
+	imm_cache_alias_lightdir[0] = imm_cache_alias_lightdir[1] = imm_cache_alias_lightdir[2] = -2.0f;
 	imm_cache_alias_model_set = false;
 		imm_cache_fog_density = -1.0f;
 		imm_cache_fog_color[0] = imm_cache_fog_color[1] = imm_cache_fog_color[2] = -1.0f;
@@ -578,6 +632,37 @@ void GL_ImmEnd (GLenum mode, const glprogram_t *shader)
 		imm_cache_soft[0] = imm_soft[0];
 		imm_cache_soft[1] = imm_soft[1];
 		imm_cache_soft[2] = imm_soft[2];
+	}
+
+	/* uhexen2-4kcb.  Resting intensity is 0, so on a build with no material
+	 * sidecars anywhere -- or r_materialmaps 0 -- this fires once per program
+	 * switch and never again, the same shape as the caustics push above.  The
+	 * light direction only moves when the camera does, so it costs one push
+	 * per program per frame while any model is actually wearing a sidecar. */
+	if (shader->u_alias_material >= 0 &&
+	    (imm_alias_material[0] != imm_cache_alias_material[0] ||
+	     imm_alias_material[1] != imm_cache_alias_material[1] ||
+	     imm_alias_material[2] != imm_cache_alias_material[2]))
+	{
+		glUniform3f_fp(shader->u_alias_material,
+			       imm_alias_material[0], imm_alias_material[1],
+			       imm_alias_material[2]);
+		imm_cache_alias_material[0] = imm_alias_material[0];
+		imm_cache_alias_material[1] = imm_alias_material[1];
+		imm_cache_alias_material[2] = imm_alias_material[2];
+	}
+
+	if (shader->u_alias_lightdir >= 0 &&
+	    (imm_alias_lightdir[0] != imm_cache_alias_lightdir[0] ||
+	     imm_alias_lightdir[1] != imm_cache_alias_lightdir[1] ||
+	     imm_alias_lightdir[2] != imm_cache_alias_lightdir[2]))
+	{
+		glUniform3f_fp(shader->u_alias_lightdir,
+			       imm_alias_lightdir[0], imm_alias_lightdir[1],
+			       imm_alias_lightdir[2]);
+		imm_cache_alias_lightdir[0] = imm_alias_lightdir[0];
+		imm_cache_alias_lightdir[1] = imm_alias_lightdir[1];
+		imm_cache_alias_lightdir[2] = imm_alias_lightdir[2];
 	}
 
 	if (shader->u_alias_model >= 0 &&

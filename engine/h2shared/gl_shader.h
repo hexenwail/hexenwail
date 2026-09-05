@@ -70,6 +70,13 @@ typedef struct glprogram_s {
 	 * would make GL_ImmEnd clobber the per-frame world u_caustics that
 	 * R_SetupFrame uploads. */
 	GLint	u_alias_caustics;   /* alias FS: vec2(intensity, time); x=0 disables */
+	/* Material maps on model skins (uhexen2-4kcb).  Named apart from the
+	 * world's u_material for the same reason u_alias_caustics is named apart
+	 * from u_caustics: this program is shared with sprites, particles, warp
+	 * polys and unlit brush polys, so the value is per-batch state pushed by
+	 * GL_ImmEnd rather than the per-frame world value R_SetupFrame uploads. */
+	GLint	u_alias_material;   /* alias FS: vec3(normalmap intensity, gloss intensity, gloss exponent); xy both 0 disables */
+	GLint	u_alias_lightdir;   /* alias FS: model light direction, in v_matpos's frame (eye space on this program) */
 	GLint	u_turb;            /* alias FS: vec2(warp amplitude in texture units, time); x=0 disables (uhexen2-9o7u) */
 	GLint	u_alias_model;	    /* alias VS: model-only matrix (no view), needed because u_modelview is view*model and caustics must be sampled in world XY */
 	/* Soft particles (uhexen2-mf9u).  Same per-batch-state reasoning as
@@ -139,6 +146,12 @@ typedef struct {
 	GLint	u_poseverttype;	/* vertex format: 0=PV_QUAKE1, 1=PV_MD3 */
 	GLint	u_force_opaque_alpha; /* uhexen2-khsa r13 */
 	GLint	u_alias_caustics; /* uhexen2-0gn3 — vec2(intensity, time); no model matrix needed, the instance world matrix already yields world space */
+	/* uhexen2-4kcb.  Same two names and meanings as on glprogram_t, except
+	 * that u_alias_lightdir is uploaded in WORLD space here because this
+	 * program's v_matpos is world space.  Duplicated for the same reason the
+	 * clustered-lighting four are: separate struct, separate location table. */
+	GLint	u_alias_material;
+	GLint	u_alias_lightdir;
 	/* Clustered dynamic lighting (uhexen2-waum).  Same four names and the
 	 * same meanings as on glprogram_t; duplicated because this program is a
 	 * separate struct with its own location table, and a program that misses
