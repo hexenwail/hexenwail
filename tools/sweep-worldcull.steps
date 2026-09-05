@@ -1,0 +1,80 @@
+# sweep-worldcull.steps -- render-regression sweep for the GPU world-culling
+# and Hi-Z occlusion path (engine/h2shared/gl_worldcull.c).
+#
+# Drive it with tools/headless-drive.sh, against a FULL install and village1:
+#
+#   nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
+#             nixpkgs#bubblewrap --command \
+#     env STEPS=tools/sweep-worldcull.steps \
+#     ./tools/headless-drive.sh script /tmp/out ~/hexen2 +map village1
+#
+#   grep "hiz_stats:" /tmp/out/qconsole.log | sed 's/hiz_stats: //' | sort -u
+#
+# THE GATE IS THE NUMBERS, NOT THE SCREENSHOTS.  Correct occlusion culling is
+# pixel-invisible by design, and a Hi-Z broken into culling nothing is *also*
+# pixel-invisible -- measured mean frame brightness differs by 0.0005 between
+# culling on and off.  A screenshot diff cannot tell "working" from "silently
+# doing nothing", which is the failure this path actually has.  The shots are
+# corroboration only.
+#
+# DO NOT run this on the demo maps.  demo1/demo2 are too open to occlude
+# anything and yield hiz=0 at every viewpoint, so the whole sweep passes while
+# observing nothing.  village1 (Blackmarsh) is the cheapest map that culls.
+#
+# Every viewpoint is placed with setpos rather than by holding a turn key.
+# A timed `hold Left 1` lands on a different yaw each run -- measured
+# frust=372/hiz=39 against frust=382/hiz=34 from the SAME binary -- so a
+# timed camera produces false regressions forever.  Static cameras are
+# bit-deterministic here: ~700 consecutive samples per phase, all identical.
+#
+# Baseline on 0.8.0-beta.r29, village1, 800x600 (recorded 2026-09-05).
+# Verified byte-identical across two independent runs:
+#   yaw  90 : total=5572 pvs=4953 flags=46 frust=2   hiz=118 accepted=390 dedup=63
+#   cull off: total=5572 pvs=4953 flags=46 frust=2   hiz=0   accepted=503 dedup=68
+#   yaw 180 : total=5572 pvs=4953 flags=46 frust=314 hiz=147 accepted=88  dedup=24
+#   yaw 270 : total=5572 pvs=4953 flags=46 frust=469 hiz=0   accepted=88  dedup=16
+#
+# yaw 270 culling nothing is not a fault -- it is why more than one viewpoint
+# is sampled.  A single camera that happens to occlude nothing would pass a
+# broken Hi-Z silently, which is exactly how this path fails.
+
+sleep 25
+cmd god
+cmd notarget
+sleep 2
+
+# --- viewpoint A: spawn, facing yaw 90 (the default spawn orientation) ---
+cmd setpos 200 -784 30 0 90 0
+sleep 2
+shot 01-yaw090-cull-on
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+
+# --- same viewpoint, culling disabled: proves the sweep observes THIS path ---
+cmd gl_hiz_cull 0
+sleep 2
+shot 02-yaw090-cull-off
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+cmd gl_hiz_cull 1
+sleep 2
+
+# --- viewpoint B: same origin, yaw 180 ---
+cmd setpos 200 -784 30 0 180 0
+sleep 2
+shot 03-yaw180-cull-on
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0
+sleep 1
+
+# --- viewpoint C: same origin, yaw 270 ---
+cmd setpos 200 -784 30 0 270 0
+sleep 2
+shot 04-yaw270-cull-on
+cmd gl_hiz_stats 1
+sleep 4
+cmd gl_hiz_stats 0

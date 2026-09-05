@@ -28,6 +28,11 @@
 #include "gl_matrix.h"
 #include "gl_postprocess.h"
 
+/* Generated from engine/shaders/*.glsl by engine/cmake/EmbedShaders.cmake.
+ * Embedded rather than loaded at runtime: the engine has no shader search
+ * path, so a missing file would be an unrecoverable black screen. */
+#include "shaders_gen.h"
+
 /* ------------------------------------------------------------------ */
 /* Data structures matching GLSL std430 layout                         */
 /* ------------------------------------------------------------------ */
@@ -377,21 +382,23 @@ static const char cull_mark_src[] =
 /* Hi-Z compute shaders                                                */
 /* ------------------------------------------------------------------ */
 
-/* Copy the (sampled) scene depth into mip 0 of the R32F pyramid.
- * Reads via sampler2D — DEPTH24_STENCIL8 with TEXTURE_COMPARE_MODE = NONE
- * returns the raw depth value in [0,1] from the .r channel. */
-static const char hiz_copy_src[] =
-	"#version 430 core\n"
-	"layout(local_size_x = 8, local_size_y = 8) in;\n"
-	"layout(binding = 0) uniform sampler2D u_scene_depth;\n"
-	"layout(binding = 0, r32f) uniform writeonly image2D u_dst;\n"
-	"uniform ivec2 u_size;\n"
-	"void main() {\n"
-	"    ivec2 p = ivec2(gl_GlobalInvocationID.xy);\n"
-	"    if (p.x >= u_size.x || p.y >= u_size.y) return;\n"
-	"    float d = texelFetch(u_scene_depth, p, 0).r;\n"
-	"    imageStore(u_dst, p, vec4(d, 0.0, 0.0, 0.0));\n"
-	"}\n";
+/* hiz_copy lives in engine/shaders/hiz_copy_comp.glsl and reaches us as
+ * hiz_copy_comp[] via shaders_gen.h.  Its #version is supplied separately, as
+ * a second glShaderSource chunk, so the file itself stays tier-agnostic. */
+#define HIZ_COMPUTE_VERSION	"#version 430 core\n"
+
+/* Uniform-block binding point for HizParams.  GLSL ES 3.00 cannot put
+ * layout(binding=) on a block, so the shader does not name this and
+ * glUniformBlockBinding assigns it here; keep the two in step by hand.
+ * Independent of the SSBO binding points above -- different target, different
+ * index space. */
+#define HIZ_PARAMS_UBO_BINDING	0
+
+/* Mirrors the std140 HizParams block.  ivec4 rather than ivec2 so the padding
+ * is explicit in both languages. */
+typedef struct {
+	GLint	size[4];	/* xy = scene extent, zw unused */
+} hiz_params_t;
 
 /* 2x2 reduction from mip N -> mip N+1.  Under reversed-Z (u_reverse_z!=0)
  * the conservative occluder (the farthest point in eye space) has the
@@ -445,14 +452,23 @@ static const char hiz_reduce_src[] =
 /* Compile helper                                                      */
 /* ------------------------------------------------------------------ */
 
-static GLuint R_CompileComputeProgram (const char *source, const char *name)
+/* header may be NULL for a body that still carries its own #version; the
+ * file-backed shaders pass one so the .glsl stays free of a tier decision. */
+static GLuint R_CompileComputeProgram (const char *header, const char *source,
+				       const char *name)
 {
 	GLuint shader, prog;
 	GLint status;
 	char log[1024];
+	const char *chunks[2];
+	GLsizei nchunks = 0;
+
+	if (header)
+		chunks[nchunks++] = header;
+	chunks[nchunks++] = source;
 
 	shader = glCreateShader_fp(GL_COMPUTE_SHADER);
-	glShaderSource_fp(shader, 1, &source, NULL);
+	glShaderSource_fp(shader, nchunks, chunks, NULL);
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
 	if (!status)
@@ -499,8 +515,8 @@ void R_BuildWorldCull (void)
 	R_FreeWorldCull();
 
 	/* Compile compute shaders */
-	cull_clear_prog = R_CompileComputeProgram(clear_indirect_src, "clear_indirect");
-	cull_mark_prog = R_CompileComputeProgram(cull_mark_src, "cull_mark");
+	cull_clear_prog = R_CompileComputeProgram(NULL, clear_indirect_src, "clear_indirect");
+	cull_mark_prog = R_CompileComputeProgram(NULL, cull_mark_src, "cull_mark");
 	if (!cull_clear_prog || !cull_mark_prog)
 	{
 		Con_Printf("GPU world culling: compute shaders failed, using CPU path\n");
@@ -822,9 +838,23 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 	glBindTexture_fp(GL_TEXTURE_2D, 0);
 
 	if (!hiz_copy_prog)
-		hiz_copy_prog = R_CompileComputeProgram(hiz_copy_src, "hiz_copy");
+	{
+		hiz_copy_prog = R_CompileComputeProgram(HIZ_COMPUTE_VERSION,
+							hiz_copy_comp, "hiz_copy");
+		/* Safe to skip: an unassigned block already defaults to binding
+		 * point 0, which is the point we ask for. */
+		if (hiz_copy_prog && glGetUniformBlockIndex_fp &&
+		    glUniformBlockBinding_fp)
+		{
+			GLuint blk = glGetUniformBlockIndex_fp(hiz_copy_prog,
+							       "HizParams");
+			if (blk != GL_INVALID_INDEX)
+				glUniformBlockBinding_fp(hiz_copy_prog, blk,
+							 HIZ_PARAMS_UBO_BINDING);
+		}
+	}
 	if (!hiz_reduce_prog)
-		hiz_reduce_prog = R_CompileComputeProgram(hiz_reduce_src, "hiz_reduce");
+		hiz_reduce_prog = R_CompileComputeProgram(NULL, hiz_reduce_src, "hiz_reduce");
 
 	if (!hiz_copy_prog || !hiz_reduce_prog)
 	{
@@ -994,8 +1024,21 @@ void R_BuildHiZForNextFrame (void)
 	glBindTexture_fp(GL_TEXTURE_2D, scene_depth_tex);
 	glBindImageTexture_fp(0, hiz_pyramid_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
 	{
-		GLint loc = glGetUniformLocation_fp(hiz_copy_prog, "u_size");
-		if (loc >= 0) glUniform2i_fp(loc, scene_w, scene_h);
+		/* Pushed unconditionally every dispatch.  u_size used to be a
+		 * loose uniform, which is per-PROGRAM state and so survived
+		 * between frames on its own; a block member is global and any
+		 * future writer of this binding point would silently win. */
+		hiz_params_t params;
+		GLuint ubo;
+		GLintptr ofs;
+
+		params.size[0] = scene_w;
+		params.size[1] = scene_h;
+		params.size[2] = 0;
+		params.size[3] = 0;
+		GL_Upload(GL_UNIFORM_BUFFER, &params, sizeof(params), &ubo, &ofs);
+		GL_BindBufferRange(GL_UNIFORM_BUFFER, HIZ_PARAMS_UBO_BINDING,
+				   ubo, ofs, sizeof(params));
 	}
 	glDispatchCompute_fp((scene_w + 7) / 8, (scene_h + 7) / 8, 1);
 	glMemoryBarrier_fp(GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);

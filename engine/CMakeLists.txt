@@ -251,7 +251,52 @@ include_directories(
     ${ENGINE_TOP}/hexen2
     ${COMMONDIR}
     ${UHEXEN2_SHARED}
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+
+#============================================================================
+# GLSL -> C string literals
+#============================================================================
+# engine/shaders/*.glsl is the source of truth for the shaders that have been
+# moved out of C literals so far.  A CMake script expands their #includes and
+# emits one header of string literals, which the renderer sources consume.
+# Done in CMake rather than with a host tool because this has to work
+# identically under the native, mingw-w64 and emscripten toolchains.
+set(SHADER_SRC_DIR ${ENGINE_TOP}/shaders)
+set(SHADERS_GEN_H ${CMAKE_CURRENT_BINARY_DIR}/generated/shaders_gen.h)
+set(SHADERS_VK_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/vk)
+file(GLOB SHADER_SOURCES ${SHADER_SRC_DIR}/*.glsl ${SHADER_SRC_DIR}/*.inc)
+
+add_custom_command(
+    OUTPUT ${SHADERS_GEN_H}
+    COMMAND ${CMAKE_COMMAND}
+            -DSHADER_DIR=${SHADER_SRC_DIR}
+            -DOUT_FILE=${SHADERS_GEN_H}
+            -DVK_DIR=${SHADERS_VK_DIR}
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
+    DEPENDS ${SHADER_SOURCES} ${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedShaders.cmake
+    COMMENT "Embedding GLSL shaders"
+    VERBATIM
+)
+add_custom_target(shaders_gen DEPENDS ${SHADERS_GEN_H})
+
+# SPIR-V, for the SDL_GPU backend that does not exist yet.  Deliberately NOT
+# part of ALL: nothing links the .spv, and a build rule whose output nobody
+# consumes has no business being able to fail the default build.  Run it with
+# `make shaders_spirv`.  It joins ALL when the backend starts reading it.
+find_program(GLSLANG_VALIDATOR glslangValidator)
+if(GLSLANG_VALIDATOR)
+    add_custom_target(shaders_spirv
+        COMMAND ${CMAKE_COMMAND}
+                -DVK_DIR=${SHADERS_VK_DIR}
+                -DSPV_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/spirv
+                -DGLSLANG=${GLSLANG_VALIDATOR}
+                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CompileSpirv.cmake
+        DEPENDS ${SHADERS_GEN_H}
+        COMMENT "Compiling shaders to SPIR-V"
+        VERBATIM
+    )
+endif()
 
 # Windows-specific includes
 if(WIN32)
@@ -863,6 +908,7 @@ else()
 endif()
 
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
+add_dependencies(${EXECUTABLE_NAME} shaders_gen)
 
 #============================================================================
 # Link Libraries
