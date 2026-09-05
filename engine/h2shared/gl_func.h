@@ -575,21 +575,3 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glWaitSync_fp(s,fl,t)			((void)0)
 #define glBindBuffersRange_fp(t,f,c,b,o,sz)	((void)0)
 #endif /* USE_GLES */
-
-
-/* typedefs for functions linked to locally at runtime
- */
-#ifndef GL_FUNC_TYPEDEFS
-#define GL_FUNC_TYPEDEFS
-
-/* this one doesn't seem to in amiga opengl libs :( */
-typedef void (APIENTRY *glGetTexParameterfv_f) (GLenum,GLenum,GLfloat *);
-
-/* GL_EXT_shared_texture_palette */
-typedef void (APIENTRY *glColorTableEXT_f) (GLenum, GLenum, GLsizei, GLenum, GLenum, const GLvoid *);
-
-/* 3DFX_set_global_palette (NOTE: the PowerVR equivalent is
-   POWERVR_set_global_palette / glSetGlobalPalettePOWERVR) */
-typedef void (APIENTRY *gl3DfxSetPaletteEXT_f) (GLuint *);
-
-#endif /* GL_FUNC_TYPEDEFS */
