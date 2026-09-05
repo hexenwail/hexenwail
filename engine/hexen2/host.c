@@ -68,7 +68,32 @@ byte		*host_colormap;
 long		host_colormapsize;
 
 cvar_t		sys_ticrate = {"sys_ticrate", "0.05", CVAR_NONE};		// dedicated server frame interval only
-cvar_t		sv_physfps = {"sv_physfps", "72", CVAR_ARCHIVE};		// server/physics tick rate
+/* Server/physics tick rate.  NOT ARCHIVED, and that is the point of it.
+ *
+ * 72 reproduces r6303's movement and physics exactly: r6303 runs one
+ * Host_ServerFrame per render frame at the real frametime, capped by
+ * host_maxfps, whose default is also 72 (its sys_adaptive arm only substeps
+ * once a frame exceeds 0.05s, which 72 fps never does).  Every movement cvar
+ * we ship matches r6303's default and flags, and sv_user.c is its file
+ * verbatim, so at the defaults the feel is upstream's by construction.
+ *
+ * It is a knob game feel depends on, though, because parts of the movement
+ * code count TICKS rather than seconds -- SV_AirAccelerate gains at most
+ * `addspeed` per tick, a figure that does not scale with frametime, so air
+ * acceleration is directly proportional to the rate.  A value that survives
+ * into config.cfg therefore changes how the game plays, silently, forever,
+ * and nobody reads a config.cfg to find out why running feels wrong.  It got
+ * there the easy way once already: a headless session set it, the debounced
+ * config flush (uhexen2-ghv0) wrote it out, and every launch after that was a
+ * 250 Hz world nobody asked for.
+ *
+ * So it is session-scoped, like map_checks and sv_protocol and for the same
+ * reason: a mode you put the engine in for a reason you currently have, not a
+ * preference. Both escape hatches in docs/MODDING_TICKRATE.md still work --
+ * a mod's own .cfg and cvar_set() both set it for as long as that mod is
+ * loaded -- they just cannot leak into the player's config any more.
+ * uhexen2-skjv */
+cvar_t		sv_physfps = {"sv_physfps", "72", CVAR_NONE};		// server/physics tick rate
 cvar_t		cl_fixangle_hold = {"cl_fixangle_hold", "0.06", CVAR_ARCHIVE};	// how long a forced view angle survives render-rate input; 0 = off
 static	cvar_t	sys_adaptive = {"sys_adaptive", "1", CVAR_ARCHIVE};
 static	cvar_t	host_framerate = {"host_framerate", "0", CVAR_NONE};	// set for slow motion
@@ -292,6 +317,28 @@ static void Map_Checks_f (cvar_t *var)
 
 /*
 ================
+SV_PhysFPS_f -- called when sv_physfps changes
+
+Says that a non-default tick is a gameplay change, because nothing else does.
+
+Air acceleration is proportional to the tick count -- SV_AirAccelerate gains at
+most `addspeed` per tick and that figure does not scale with frametime -- so
+moving this cvar moves how the game plays.  The report it produces is "running
+feels wrong", which points at nothing, and the value can arrive from a mod's
+cfg or a console line typed an hour ago.  One line in the console is the whole
+difference between that and a question with an answer.
+================
+*/
+static void SV_PhysFPS_f (cvar_t *var)
+{
+	if (var->value == 72.0f)
+		return;
+	Con_SafePrintf ("Note: sv_physfps %s is not the stock tick; "
+			"movement and physics feel differs from 72\n", var->string);
+}
+
+/*
+================
 Host_EndGame
 
 Does not return either due to Sys_Error() or longjmp()
@@ -491,6 +538,7 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&sys_ticrate);
 	Cvar_RegisterVariable (&sys_adaptive);
 	Cvar_RegisterVariable (&sv_physfps);
+	Cvar_SetCallback (&sv_physfps, SV_PhysFPS_f);
 	Cvar_RegisterVariable (&cl_fixangle_hold);
 
 	Cvar_RegisterVariable (&host_framerate);

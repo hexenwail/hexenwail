@@ -2,8 +2,24 @@
 
 Hexenwail runs the server and physics at **72 Hz by default**, not the 20 Hz that
 the stock engine's listen server used. The cvar is `sv_physfps`
-(`engine/hexen2/host.c:71`, `CVAR_ARCHIVE`, default `72`, clamped to
-`[10, 250]` at `engine/hexen2/host.c:919`).
+(`engine/hexen2/host.c`, `CVAR_NONE`, default `72`, clamped to `[10, 250]` in
+`_Host_Frame`).
+
+72 is r6303's rate, not a new number: r6303 runs one `Host_ServerFrame` per
+render frame at the real frametime, capped by `host_maxfps`, whose default is
+also 72. Its `sys_adaptive` arm only substeps once a frame exceeds 0.05 s, which
+72 fps never does. Every movement and physics cvar here matches r6303's default
+and flags, and `sv_user.c` is r6303's file verbatim, so **at the defaults the
+game feel is upstream's by construction and nobody has to set anything.**
+
+> **`sv_physfps` IS NOT ARCHIVED, deliberately.** It is session-scoped, like
+> `map_checks` and `sv_protocol`: a mode you put the engine in for a reason you
+> currently have, not a preference. Because air acceleration counts ticks rather
+> than seconds (see below), a value that survived into `config.cfg` would change
+> how the game plays silently and permanently — which is exactly what happened
+> once, when a headless session set it and the debounced config flush wrote it
+> out. Setting it still works from anywhere; it just cannot outlive the session.
+> Changing it also prints a note, so the cause is on screen rather than in a file.
 
 Almost all HexenC is unaffected. One idiom is not, and it fails in a distinctive
 way. This page says which, why, and what to write instead.
@@ -112,7 +128,9 @@ not a shipped-content bug.
 
 ## Escape hatches for a mod that cannot be changed
 
-Either works; the first is preferable because it is visible to the player.
+Either works; the first is preferable because it is visible to the player. Both
+last only as long as the mod is loaded — the cvar is not archived, so neither
+can follow the player back to the base game or into their `config.cfg`.
 
 1. Ship a `.cfg` in the mod directory containing `sv_physfps 20`.
 2. Call it from QC — `cvar_set` is builtin #72, declared at `h2/builtin.hc:148`
