@@ -147,7 +147,11 @@ jobs:
             echo "hwsv exited $status; expected 1 from Sys_Error"
             exit 1
           fi
-          grep -q 'FATAL ERROR: Unable to find a proper Hexen II installation' hwsv-smoke.log
+          if ! grep -q 'FATAL ERROR: Unable to find a proper Hexen II installation' hwsv-smoke.log; then
+            echo "hwsv exited 1, but not at the FS_Init data1 gate -- see the log above."
+            echo "Sys_Error exits 1 for every fatal, so the exit code alone proves nothing."
+            exit 1
+          fi
 
       - name: Build Windows
         run: nix build .#win64 --print-build-logs

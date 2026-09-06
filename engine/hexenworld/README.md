@@ -3,9 +3,13 @@
 Raven's QuakeWorld-derived multiplayer fork of Hexen II.  It is a *separate
 engine* that shares `h2shared` with Hexen II — its own protocol, its own
 gamecode (`hwprogs.dat`), its own client prediction and master server — not a
-mode of the Hexen II server.  Only the dedicated server (`hwsv`) is restored in
-this tree; the HexenWorld client (`hwcl` / `glhwcl`) and master (`hwmaster`) are
-not.
+mode of the Hexen II server.
+
+`engine/hexenworld/` holds only the dedicated server (`hwsv`); the HexenWorld
+client (`hwcl` / `glhwcl`) is not restored.  The master server and its helper
+tools *are* built, but from `hw_utils/` rather than here — `hwmaster`,
+`hwmquery`, `hwrcon` and `hwterm` all come out of `nix build .#utils`, which
+CI already runs.
 
 ## Building
 
@@ -98,8 +102,9 @@ before `Host_Init`.
 
 See GitHub issue #35.
 
-- Two `hwsv` instances discovering each other (heartbeat / `hwmaster`) —
-  `hwmaster` is not built in this tree.
+- Two `hwsv` instances discovering each other via `hwmaster`.  Not blocked on
+  building anything — `hwmaster` already ships in `.#utils`.  What is missing is
+  a harness that starts a master plus two servers and asserts the heartbeat.
 - A real HexenWorld client completing the connectionless handshake — `hwcl` is
   not built in this tree; needs an upstream or community client.
 - Whether this engine's modern wire extensions ride over the HexenWorld protocol
