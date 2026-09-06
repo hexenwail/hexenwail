@@ -283,6 +283,46 @@ static void SV_EmitPackedEntities(sizebuf_t *msg)
 
 //=============================================================================
 
+/* Offset of the progs-declared "alpha" field, in floats from &ent->v, or -1
+ * when the loaded gamecode declares no such field (stock hwprogs does not).
+ * Resolved once per map instead of calling GetEdictFieldValue(ent, "alpha")
+ * per entity per client per frame: that helper memoises only GEFV_CACHESIZE
+ * names and GEFV_CACHESIZE is 2 (h2shared/pr_edict.c), while this server
+ * already rotates "gravity" and "maxspeed" through the same two slots every
+ * frame (sv_user.c, sv_send.c).  A third name would therefore be evicted every
+ * frame and cost a full ED_FindField walk of progs->numfielddefs -- 531 entries
+ * for stock hwprogs.dat -- per client per frame, on a server that may have no
+ * protocol-100 client on it at all. */
+static int sv_alpha_field_ofs = -1;
+
+/*
+==================
+SV_ResolveAlphaField
+
+Find the gamecode's "alpha" field once, after PR_LoadProgs has built the field
+table.  Called from SV_SpawnServer; the result is only valid for the progs that
+were loaded, so it must be re-resolved on every map change.
+==================
+*/
+void SV_ResolveAlphaField (void)
+{
+	int		i, n;
+	ddef_t		*d;
+
+	sv_alpha_field_ofs = -1;
+
+	n = ED_NumFieldDefs ();
+	for (i = 0; i < n; i++)
+	{
+		d = ED_FieldDefAt (i);
+		if (d && !strcmp (PR_GetString (d->s_name), "alpha"))
+		{
+			sv_alpha_field_ofs = d->ofs;
+			return;
+		}
+	}
+}
+
 /*
 ==================
 SV_WriteDelta
@@ -1421,7 +1461,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	edict_t	*clent;
 	client_frame_t	*frame;
 	entity_state_t	*state;
-	eval_t		*val;
+	float		alpha_val;
 
 	// this is the frame we are creating
 	frame = &client->frames[client->netchan.incoming_sequence & UPDATE_MASK];
@@ -1489,12 +1529,18 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		state->drawflags = ent->v.drawflags;
 		state->abslight = (int)(ent->v.abslight * 255.0) & 255;
 		/* Filled in for every client, not just PROTOCOL_VERSION_HEXENWAIL_1 ones,
-		 * so that the whole protocol decision lives at the single gate in
-		 * SV_WriteDelta and this stays a plain field like its neighbours.  hwprogs
-		 * has no native "alpha" field, so this is a progs-defined one and val is
-		 * NULL (-> ENTALPHA_DEFAULT) for gamecode that does not declare it. */
-		val = GetEdictFieldValue(ent, "alpha");
-		state->alpha = val ? ENTALPHA_ENCODE(val->_float) : ENTALPHA_DEFAULT;
+		 * so that the whole protocol decision stays at the single gate in
+		 * SV_WriteDelta.  "alpha" is progs-declared rather than a native entvars_t
+		 * field, so it is read through the offset SV_ResolveAlphaField() found at
+		 * map load; gamecode that declares no such field leaves every entity at
+		 * ENTALPHA_DEFAULT. */
+		if (sv_alpha_field_ofs >= 0)
+		{
+			alpha_val = ((eval_t *)((char *)&ent->v + sv_alpha_field_ofs * 4))->_float;
+			state->alpha = ENTALPHA_ENCODE(alpha_val);
+		}
+		else
+			state->alpha = ENTALPHA_DEFAULT;
 		//clear sound so it doesn't send twice
 		state->wpn_sound = ent->v.wpn_sound;
 	}

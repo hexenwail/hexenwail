@@ -497,6 +497,7 @@ void SV_EndRedirect (void);
 //
 // sv_ents.c
 //
+void SV_ResolveAlphaField (void);
 void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg);
 void SV_WriteInventory (client_t *host_cl, edict_t *ent, sizebuf_t *msg);
 

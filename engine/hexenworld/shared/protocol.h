@@ -36,6 +36,15 @@
  *     client that negotiated 24-26 does not know to consume the alpha byte
  *     and would read the next entity's bits out of the middle of this one.
  *
+ * Known gap, so nobody assumes parity with the Hexen II arm: this covers
+ * packet entities only, never players.  SV_WriteEntitiesToClient's loop starts
+ * at MAX_CLIENTS+1 (sv_ents.c); players go out through
+ * SV_WritePlayersToClient as svc_playerinfo, whose pflags word is full --
+ * PF_SOUND is already bit 15 (below).  So ".alpha" on a player edict silently
+ * does nothing here, whereas on the Hexen II arm players are ordinary delta
+ * entities and do get it.  Closing that needs another wire-format change, not
+ * one more spare bit.
+ *
  * The number is 100 rather than 27 on purpose, for the same reason the Hexen
  * II arm chose 100 over 22 (see engine/hexen2/protocol.h): 27 is the next
  * value a Raven, UQE or Shanjaq descendant would reach for, and a silent
