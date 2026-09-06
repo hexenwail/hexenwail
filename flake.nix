@@ -380,6 +380,49 @@
             };
           });
 
+          # HexenWorld dedicated server (hwsv) — Raven's QuakeWorld-derived
+          # multiplayer fork.  A separate engine that shares h2shared, not a
+          # mode of h2ded, so h2ded's coverage buys it nothing: this is the
+          # only build anywhere that compiles engine/hexenworld/{server,shared}
+          # or the -DH2W flavour of the shared sources.  Ungated it rots, which
+          # is what it had been doing.  GitHub #35.
+          hwsv = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
+            pname = "hexenwail-hwsv";
+
+            # BUILD_HEXENWORLD is not h2ded's story with a different name.  It
+            # gates whether add_executable(hwsv) is reached at all, so the flag
+            # has to be set at *configure* time; buildFlags alone would ask for
+            # a target that the generated build system does not contain.  Both
+            # are needed -- the flag to create the target, buildFlags to build
+            # that one and not the client.
+            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DBUILD_HEXENWORLD=ON" ];
+            buildFlags = [ "hwsv" ];
+
+            installPhase = ''
+              runHook preInstall
+
+              install -Dm755 bin/hwsv $out/bin/hwsv
+
+              runHook postInstall
+            '';
+
+            meta = linuxBuildAttrs.meta // {
+              description = "Hexenwail HexenWorld dedicated server (headless hwsv)";
+              longDescription = ''
+                Headless HexenWorld server, built with -DH2W -DSERVERONLY from
+                engine/hexenworld plus the shared engine sources: its own
+                protocol, its own gamecode and its own client prediction, with
+                no renderer, video, sound or input.
+
+                Note: you still need the original game data files (pak0.pak,
+                pak1.pak) from the commercial game, and additionally the
+                official HexenWorld data (hw/pak4.pak) -- the engine refuses to
+                start without it.
+              '';
+              mainProgram = "hwsv";
+            };
+          });
+
           # Map/model toolchain (utils/) and HexenWorld servers (hw_utils/).
           # Configures the repo root rather than engine/, with the engine
           # switched off: the tools are plain C with no external dependencies
