@@ -38,6 +38,7 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 # Off by default so `nix build` keeps producing exactly the client it does
 # today; the server is a separate, rarely-wanted artifact.
 option(BUILD_DEDICATED "Also build the h2ded dedicated server" OFF)
+option(BUILD_HEXENWORLD "Also build the hwsv HexenWorld dedicated server" OFF)
 
 # The GL ES 3.0 render tier.  Emscripten/WebGL2 is one *instance* of it, not
 # the definition of it: everything the ES path does differently -- statically
@@ -931,6 +932,96 @@ else()
     message(STATUS "Dedicated server: h2ded enabled")
 endif()
 endif()
+
+#============================================================================
+# HexenWorld Dedicated Server (hwsv)
+#============================================================================
+# Raven's QuakeWorld-derived multiplayer fork: its own protocol, its own
+# gamecode (hwprogs.dat), client-side prediction, a master server.  It is a
+# SEPARATE engine that happens to share h2shared with Hexen II -- not a mode of
+# the Hexen II server -- so it gets its own source list rather than a subset of
+# COMMON_SOURCES.  Built with H2W as well as SERVERONLY; hexenworld/shared
+# carries its own quakedef.h, protocol.h and progdefs.h, and must precede
+# h2shared on the include path so those shadow the Hexen II versions.
+#
+# Needs the official HexenWorld data (hw/pak4.pak) at runtime; the engine
+# refuses to start without it.  See FS_Init's GAME_HEXENWORLD gate.
+if(BUILD_HEXENWORLD)
+if(EMSCRIPTEN OR (NOT UNIX AND NOT WIN32))
+    message(WARNING "BUILD_HEXENWORLD is only wired up for Unix and Windows hosts - skipping hwsv")
+else()
+    set(HW_TOP ${ENGINE_TOP}/hexenworld)
+
+    set(HWSV_SOURCES
+        # portable bits shared with every other target
+        ${UHEXEN2_SHARED}/q_endian.c
+        ${UHEXEN2_SHARED}/strlcat.c
+        ${UHEXEN2_SHARED}/strlcpy.c
+        ${UHEXEN2_SHARED}/qsnprint.c
+        ${UHEXEN2_SHARED}/crc.c
+        # h2shared, compiled here with -DH2W
+        ${COMMONDIR}/link_ops.c
+        ${COMMONDIR}/sizebuf.c
+        ${COMMONDIR}/msg_io.c
+        ${COMMONDIR}/common.c
+        ${COMMONDIR}/quakefs.c
+        ${COMMONDIR}/miniz.c
+        ${COMMONDIR}/cmd.c
+        ${COMMONDIR}/cvar.c
+        ${COMMONDIR}/host_string.c
+        ${COMMONDIR}/mathlib.c
+        ${COMMONDIR}/zone.c
+        ${COMMONDIR}/hashindex.c
+        ${COMMONDIR}/sv_model.c
+        ${COMMONDIR}/pr_cmds.c
+        ${COMMONDIR}/pr_edict.c
+        ${COMMONDIR}/pr_exec.c
+        # HexenWorld's own shared layer
+        ${HW_TOP}/shared/info_str.c
+        ${HW_TOP}/shared/huffman.c
+        ${HW_TOP}/shared/net_udp.c
+        ${HW_TOP}/shared/net_chan.c
+        ${HW_TOP}/shared/pmove.c
+        ${HW_TOP}/shared/pmovetst.c
+        # the server proper
+        ${HW_TOP}/server/sv_effect.c
+        ${HW_TOP}/server/sv_ccmds.c
+        ${HW_TOP}/server/sv_ents.c
+        ${HW_TOP}/server/sv_init.c
+        ${HW_TOP}/server/sv_main.c
+        ${HW_TOP}/server/sv_move.c
+        ${HW_TOP}/server/sv_phys.c
+        ${HW_TOP}/server/sv_send.c
+        ${HW_TOP}/server/sv_user.c
+        ${HW_TOP}/server/world.c
+    )
+    if(WIN32)
+        list(APPEND HWSV_SOURCES ${HW_TOP}/server/sys_win.c)
+    else()
+        list(APPEND HWSV_SOURCES ${HW_TOP}/server/sys_unix.c)
+    endif()
+
+    add_executable(hwsv ${HWSV_SOURCES})
+    target_compile_definitions(hwsv PRIVATE H2W SERVERONLY)
+    # Order matters: hexenworld/shared shadows h2shared for quakedef.h et al.
+    target_include_directories(hwsv BEFORE PRIVATE
+        ${HW_TOP}/server
+        ${HW_TOP}/shared
+        ${COMMONDIR}
+        ${UHEXEN2_SHARED}
+    )
+    if(WIN32)
+        target_link_libraries(hwsv PRIVATE ws2_32 winmm)
+    else()
+        target_link_libraries(hwsv PRIVATE ${M_LIBRARY})
+    endif()
+
+    install(TARGETS hwsv RUNTIME DESTINATION bin)
+
+    message(STATUS "HexenWorld server: hwsv enabled")
+endif()
+endif()
+
 
 #============================================================================
 # Summary

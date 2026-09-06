@@ -2346,6 +2346,7 @@ void ED_LoadFromFile (const char *data)
 		}
 #endif
 
+#if !defined(H2W)	/* map_checks is a Hexen II feature; HexenWorld has no sv.mapchecks */
 		/* map_checks census.  Deliberately BEFORE the inhibit filters
 		 * below: the checklist reports what the mapper put in the .bsp,
 		 * and every filter under this comment is a reason an entity is
@@ -2411,6 +2412,7 @@ void ED_LoadFromFile (const char *data)
 			else if (strcmp (classname, "info_player_start") == 0)
 				sv.mapchecks.sp_spawns++;
 		}
+#endif	/* !H2W */
 
 		// remove things from different skill levels or deathmatch
 		if (deathmatch.integer)

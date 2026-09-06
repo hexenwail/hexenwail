@@ -4444,6 +4444,10 @@ static void PF_strhash(void)
 	G_FLOAT(OFS_RETURN) = (float)hash;
 }
 
+#if !defined(H2W)
+/* Extended inventory (protocol 21).  Hexen II only: HexenWorld has no
+ * sv.ex_items, no client_t::ex_inventory, and its own builtin numbering --
+ * see the H2W arm of pr_builtin[] below, which never names these. */
 static void PF_register_ex_item(void)
 {
 	const char	*item_img;
@@ -4503,6 +4507,7 @@ static void PF_update_ex_item(void)
 	G_FLOAT(OFS_RETURN) = result;
 	//PR_RunError("%s: overflow", __thisfunc__);
 }
+#endif	/* !H2W */
 
 
 static builtin_t pr_builtin[] =
