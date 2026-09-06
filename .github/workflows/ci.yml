@@ -109,6 +109,46 @@ jobs:
       - name: Build dedicated server
         run: nix build .#h2ded --print-build-logs
 
+      # BUILD_HEXENWORLD defaults OFF and no other target sets it, so until
+      # this step the whole of engine/hexenworld/{server,shared} -- and the
+      # -DH2W compile of the shared sources underneath it -- was gated by
+      # nothing at all.  h2ded above does not cover it: HexenWorld is a
+      # separate engine sharing h2shared, not a mode of the Hexen II server,
+      # so a change to quakefs.c or pr_edict.c can pass every step above and
+      # still break the only build that compiles them with H2W defined.  #35.
+      - name: Build HexenWorld dedicated server
+        run: nix build .#hwsv --print-build-logs
+
+      # Compiling hwsv does not prove it can reach main().  This runs it with
+      # no game data and asserts it dies at the FS_Init gate with a diagnostic
+      # -- exit code exactly 1, which is Sys_Error's exit(1), so a segfault
+      # (139) or a wedge that -k 5 has to kill (124) fails the step instead of
+      # passing as "nonzero".
+      #
+      # NOTE what this does NOT cover.  #35 asks for a smoke on the HexenWorld
+      # pak gate, Sys_Error("You must have the HexenWorld data installed") in
+      # engine/h2shared/quakefs.c.  That gate is unreachable here: FS_Init
+      # demands a valid Hexen II installation first, and a runner has no game
+      # data at all, so hwsv dies on the earlier data1/pak0.pak check and never
+      # looks for hw/pak4.pak.  Reaching the HexenWorld gate needs real data1
+      # present with hw/pak4.pak absent, and data1 is licensed content that
+      # cannot go in CI.  A green check here means hwsv starts and fails
+      # cleanly; it says nothing about HexenWorld data handling.
+      #
+      # -k 5 for the same reason as the Smoke test step above: the engine
+      # ignores SIGTERM during shutdown.
+      - name: Smoke test HexenWorld dedicated server
+        run: |
+          set -euo pipefail
+          status=0
+          timeout -k 5 30 nix run .#hwsv > hwsv-smoke.log 2>&1 || status=$?
+          head -20 hwsv-smoke.log
+          if [ "$status" -ne 1 ]; then
+            echo "hwsv exited $status; expected 1 from Sys_Error"
+            exit 1
+          fi
+          grep -q 'FATAL ERROR: Unable to find a proper Hexen II installation' hwsv-smoke.log
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 
