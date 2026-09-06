@@ -25,6 +25,39 @@
 #define	OLD_PROTOCOL_VERSION	24
 #define	PROTOCOL_VERSION	25
 #define	PROTOCOL_VERSION_EXT	26
+#define	PROTOCOL_VERSION_HEXENWAIL_1	100	/* this engine's own extensions -- see below */
+
+/*
+ * PROTOCOL_VERSION_HEXENWAIL_1 exists because 24/25/26 are Raven's and
+ * uHexen2's wire formats and we do not get to add fields to them.  What it
+ * buys over 26 today is one thing:
+ *
+ *   - U_ALPHA in the entity delta (below).  26 stops at U_ABSLIGHT, so a
+ *     client that negotiated 24-26 does not know to consume the alpha byte
+ *     and would read the next entity's bits out of the middle of this one.
+ *
+ * Known gap, so nobody assumes parity with the Hexen II arm: this covers
+ * packet entities only, never players.  SV_WriteEntitiesToClient's loop starts
+ * at MAX_CLIENTS+1 (sv_ents.c); players go out through
+ * SV_WritePlayersToClient as svc_playerinfo, whose pflags word is full --
+ * PF_SOUND is already bit 15 (below).  So ".alpha" on a player edict silently
+ * does nothing here, whereas on the Hexen II arm players are ordinary delta
+ * entities and do get it.  Closing that needs another wire-format change, not
+ * one more spare bit.
+ *
+ * The number is 100 rather than 27 on purpose, for the same reason the Hexen
+ * II arm chose 100 over 22 (see engine/hexen2/protocol.h): 27 is the next
+ * value a Raven, UQE or Shanjaq descendant would reach for, and a silent
+ * collision between two protocols that both claim "27" is undiagnosable from
+ * the client end.  100 also matches PROTOCOL_HEXENWAIL_1 on the Hexen II
+ * side, so "protocol 100 is this engine's extensions" is one fact, not two.
+ *
+ * NOT the default.  A server left alone negotiates exactly what it negotiates
+ * today: 26 for a client that advertises the "c" capability, 25 otherwise
+ * (SVC_DirectConnect, sv_main.c).  100 is reached only when the client
+ * advertises the "A" capability, or when the operator forces it with
+ * "-protocol 100".
+ */
 
 //=========================================
 
@@ -238,6 +271,23 @@
 #define	U_SOUND		(1<<17)
 #define	U_DRAWFLAGS	(1<<18)
 #define	U_ABSLIGHT	(1<<19)
+/* PROTOCOL_VERSION_HEXENWAIL_1 only.  Deliberately the same bit value as the
+ * Hexen II arm's U_ALPHA so the two entity deltas stay readable side by side.
+ * Bits 21-23 of the 3rd byte are still free, so nothing here needs a
+ * U_MOREBITS3 yet. */
+#define	U_ALPHA		(1<<20)
+
+/* Alpha encoding, copied verbatim from engine/hexen2/protocol.h so both arms
+ * of this engine put the same byte on the wire for the same "alpha" field.
+ * A reader wanting the float back uses ENTALPHA_DECODE. */
+#ifndef CLAMP
+#define CLAMP(minval,x,maxval) ((x) < (minval) ? (minval) : ((x) > (maxval) ? (maxval) : (x)))
+#endif
+#define ENTALPHA_DEFAULT	0	//entity's alpha is "default" -- must be zero so zeroed out memory works
+#define ENTALPHA_ZERO		1	//entity is invisible (lowest possible alpha)
+#define ENTALPHA_ONE		255	//entity is fully opaque (highest possible alpha)
+#define ENTALPHA_ENCODE(a)	(((a)==0)?ENTALPHA_DEFAULT:Q_rint(CLAMP(1,(a)*254.0f+1,255)))	//server convert to byte to send to client
+#define ENTALPHA_DECODE(a)	(((a)==ENTALPHA_DEFAULT)?1.0f:((float)(a)-1)/(254))	//client convert to float for rendering
 
 
 //==============================================
@@ -439,6 +489,8 @@ typedef struct
 	int		drawflags;		// for Alias models
 	int		abslight;		// for Alias models
 	int		wpn_sound;		// for cheap playing of sounds
+	byte		alpha;			// ENTALPHA encoding; only ever put on the wire
+					// for PROTOCOL_VERSION_HEXENWAIL_1 clients
 } entity_state_t;
 
 

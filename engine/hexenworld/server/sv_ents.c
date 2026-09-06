@@ -283,6 +283,46 @@ static void SV_EmitPackedEntities(sizebuf_t *msg)
 
 //=============================================================================
 
+/* Offset of the progs-declared "alpha" field, in floats from &ent->v, or -1
+ * when the loaded gamecode declares no such field (stock hwprogs does not).
+ * Resolved once per map instead of calling GetEdictFieldValue(ent, "alpha")
+ * per entity per client per frame: that helper memoises only GEFV_CACHESIZE
+ * names and GEFV_CACHESIZE is 2 (h2shared/pr_edict.c), while this server
+ * already rotates "gravity" and "maxspeed" through the same two slots every
+ * frame (sv_user.c, sv_send.c).  A third name would therefore be evicted every
+ * frame and cost a full ED_FindField walk of progs->numfielddefs -- 531 entries
+ * for stock hwprogs.dat -- per client per frame, on a server that may have no
+ * protocol-100 client on it at all. */
+static int sv_alpha_field_ofs = -1;
+
+/*
+==================
+SV_ResolveAlphaField
+
+Find the gamecode's "alpha" field once, after PR_LoadProgs has built the field
+table.  Called from SV_SpawnServer; the result is only valid for the progs that
+were loaded, so it must be re-resolved on every map change.
+==================
+*/
+void SV_ResolveAlphaField (void)
+{
+	int		i, n;
+	ddef_t		*d;
+
+	sv_alpha_field_ofs = -1;
+
+	n = ED_NumFieldDefs ();
+	for (i = 0; i < n; i++)
+	{
+		d = ED_FieldDefAt (i);
+		if (d && !strcmp (PR_GetString (d->s_name), "alpha"))
+		{
+			sv_alpha_field_ofs = d->ofs;
+			return;
+		}
+	}
+}
+
 /*
 ==================
 SV_WriteDelta
@@ -369,6 +409,19 @@ static void SV_WriteDelta (entity_state_t *from, entity_state_t *to, sizebuf_t *
 		bits |= U_ABSLIGHT;
 	}
 
+	/* Protocols 24-26 have no U_ALPHA -- 26 stops at U_ABSLIGHT -- and a client
+	 * that does not know to consume the alpha byte reads the next entity's bits
+	 * out of the middle of this one.  The gate is on the bit, not on the byte:
+	 * with U_ALPHA never set, `bits` is bit-for-bit what it is today, so the
+	 * U_MOREBITS2 test below and every write that follows behave identically for
+	 * a client on 24-26.  to->alpha is filled in regardless (see
+	 * SV_WriteEntitiesToClient), so a client that does negotiate
+	 * PROTOCOL_VERSION_HEXENWAIL_1 needs nothing re-derived. */
+	if (client->protocol >= PROTOCOL_VERSION_HEXENWAIL_1 && to->alpha != from->alpha)
+	{
+		bits |= U_ALPHA;
+	}
+
 	if (to->wpn_sound)
 	{	//not delta'ed, sound gets cleared after send
 		bits |= U_SOUND;
@@ -436,6 +489,16 @@ static void SV_WriteDelta (entity_state_t *from, entity_state_t *to, sizebuf_t *
 		MSG_WriteByte (msg, to->scale);
 	if (bits & U_ABSLIGHT)
 		MSG_WriteByte (msg, to->abslight);
+	/* No HexenWorld client in this tree reads this, so the position of the alpha
+	 * byte is being *defined* here rather than matched -- whoever writes the
+	 * reader must use this order.  Between U_ABSLIGHT and U_SOUND because it is
+	 * the one adjacency in this function that respects the bit order (U_ABSLIGHT
+	 * is bit 19, U_ALPHA bit 20 -- U_SOUND at bit 17 is already written out of
+	 * order), and because it puts alpha directly after the scale/abslight
+	 * appearance pair exactly as the Hexen II arm does in SV_WriteEntitiesToClient
+	 * (engine/hexen2/sv_main.c). */
+	if (bits & U_ALPHA)
+		MSG_WriteByte (msg, to->alpha);
 	if (bits & U_SOUND)
 		MSG_WriteShort (msg, to->wpn_sound);
 }
@@ -1398,6 +1461,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	edict_t	*clent;
 	client_frame_t	*frame;
 	entity_state_t	*state;
+	float		alpha_val;
 
 	// this is the frame we are creating
 	frame = &client->frames[client->netchan.incoming_sequence & UPDATE_MASK];
@@ -1464,6 +1528,19 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		state->scale = (int)(ent->v.scale * 100.0) & 255;
 		state->drawflags = ent->v.drawflags;
 		state->abslight = (int)(ent->v.abslight * 255.0) & 255;
+		/* Filled in for every client, not just PROTOCOL_VERSION_HEXENWAIL_1 ones,
+		 * so that the whole protocol decision stays at the single gate in
+		 * SV_WriteDelta.  "alpha" is progs-declared rather than a native entvars_t
+		 * field, so it is read through the offset SV_ResolveAlphaField() found at
+		 * map load; gamecode that declares no such field leaves every entity at
+		 * ENTALPHA_DEFAULT. */
+		if (sv_alpha_field_ofs >= 0)
+		{
+			alpha_val = ((eval_t *)((char *)&ent->v + sv_alpha_field_ofs * 4))->_float;
+			state->alpha = ENTALPHA_ENCODE(alpha_val);
+		}
+		else
+			state->alpha = ENTALPHA_DEFAULT;
 		//clear sound so it doesn't send twice
 		state->wpn_sound = ent->v.wpn_sound;
 	}

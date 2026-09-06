@@ -123,6 +123,27 @@ static void SV_CreateBaseline (void)
 		svent->baseline.scale = (int)(svent->v.scale*100.0)&255;
 		svent->baseline.drawflags = svent->v.drawflags;
 		svent->baseline.abslight = (int)(svent->v.abslight*255.0)&255;
+
+		/* DO NOT add "svent->baseline.alpha = ..." here.  The Hexen II arm does
+		 * exactly that (engine/hexen2/sv_main.c, SV_CreateBaseline) and copying it
+		 * for symmetry with the three lines above silently breaks entity alpha on
+		 * this arm.
+		 *
+		 * Why: the baseline goes into the one shared sv.signon buffer, which every
+		 * client replays verbatim, so it cannot be gated per client the way the
+		 * delta in SV_WriteDelta can -- and svc_spawnbaseline below carries no
+		 * alpha byte, because adding one would change the wire for stock 24-26
+		 * clients too.  So a client builds its baseline with alpha zeroed, and the
+		 * server's copy has to agree: baseline.alpha must stay 0
+		 * (== ENTALPHA_DEFAULT, which is why that constant is 0).  Hunk_AllocName
+		 * zeroes sv.edicts on every SV_SpawnServer and nothing else writes the
+		 * field, so today it does.
+		 *
+		 * Set it, and an entity with .alpha 0.5 standing in the map at load time
+		 * has to->alpha == from->alpha on its first delta, U_ALPHA never gets set,
+		 * and every protocol-100 client renders it opaque for the whole map.  There
+		 * is no HexenWorld client in this tree to catch that. */
+
 		//
 		// flush the signon message out to a seperate buffer if
 		// nearly full
@@ -333,6 +354,7 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	// load progs to get entity field count
 	// which determines how big each edict is
 	PR_LoadProgs ();
+	SV_ResolveAlphaField ();	// must follow PR_LoadProgs: reads the field table
 	Host_LoadStrings();
 
 	// allocate edicts

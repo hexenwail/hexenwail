@@ -648,7 +648,28 @@ static void SVC_DirectConnect (void)
 		newcl->protocol = sv_protocol;
 	else {
 		s = Info_ValueForKey(userinfo, "*cap");
-		if (strstr(s, "c"))
+		/* "A" advertises PROTOCOL_VERSION_HEXENWAIL_1, and is tested before "c"
+		 * because 100 supersedes 26 -- a client claiming "A" is claiming every
+		 * behaviour 26 has (the chunked modellist/soundlist in sv_user.c gates on
+		 * >= PROTOCOL_VERSION_EXT and will fire for it) plus U_ALPHA.  A client
+		 * that advertises neither still lands on 25, exactly as before, and
+		 * Info_ValueForKey returns "" rather than NULL when the key is absent, so
+		 * strstr always has a string to walk.
+		 *
+		 * The stock client sets this key to exactly "c" -- one lowercase char, see
+		 * the since-deleted engine/hexenworld/client/cl_main.c in "hexenworld: if
+		 * the client sends '*caps' userinfo with a 'c', the server now returns
+		 * protocol 26 instead of 25..." (13b511e88 at time of writing) -- so it
+		 * cannot reach this branch.  What makes a *third-party* client safe is not
+		 * the choice of letter: SV_New_f puts host_client->protocol into
+		 * svc_serverdata (sv_user.c), and that client's CL_ParseServerData accepts
+		 * only 24/25/26 and calls Host_EndGame("Server returned unsupported
+		 * protocol %i") otherwise.  So a client that somehow advertised "A" without
+		 * meaning it gets a loud disconnect at connect time, before a single entity
+		 * delta is parsed -- never a silently corrupted one. */
+		if (strstr(s, "A"))
+			newcl->protocol = PROTOCOL_VERSION_HEXENWAIL_1;
+		else if (strstr(s, "c"))
 			newcl->protocol = PROTOCOL_VERSION_EXT;
 		else	newcl->protocol = PROTOCOL_VERSION;
 	}
@@ -1631,14 +1652,20 @@ void SV_Init (void)
 
 	i = COM_CheckParm ("-protocol");
 	if (i && i < com_argc - 1) {
+		/* -protocol forces the value on every client regardless of what it
+		 * advertised, so -protocol 100 will break a stock 25/26 client the same
+		 * way -protocol 26 already breaks a 25-only one.  It stays an explicit
+		 * operator action; the default (sv_protocol 0) negotiates from "*cap". */
 		switch ((sv_protocol = atoi (com_argv[i + 1]))) {
+		case PROTOCOL_VERSION_HEXENWAIL_1:
 		case PROTOCOL_VERSION_EXT:
 		case PROTOCOL_VERSION:
 			Sys_Printf ("Server using protocol %i\n", sv_protocol);
 			break;
 		default:
-			Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i.",
-					sv_protocol, PROTOCOL_VERSION, PROTOCOL_VERSION_EXT);
+			Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i.",
+					sv_protocol, PROTOCOL_VERSION, PROTOCOL_VERSION_EXT,
+					PROTOCOL_VERSION_HEXENWAIL_1);
 		}
 	}
 
