@@ -369,6 +369,19 @@ static void SV_WriteDelta (entity_state_t *from, entity_state_t *to, sizebuf_t *
 		bits |= U_ABSLIGHT;
 	}
 
+	/* Protocols 24-26 have no U_ALPHA -- 26 stops at U_ABSLIGHT -- and a client
+	 * that does not know to consume the alpha byte reads the next entity's bits
+	 * out of the middle of this one.  The gate is on the bit, not on the byte:
+	 * with U_ALPHA never set, `bits` is bit-for-bit what it is today, so the
+	 * U_MOREBITS2 test below and every write that follows behave identically for
+	 * a client on 24-26.  to->alpha is filled in regardless (see
+	 * SV_WriteEntitiesToClient), so a client that does negotiate
+	 * PROTOCOL_VERSION_HEXENWAIL_1 needs nothing re-derived. */
+	if (client->protocol >= PROTOCOL_VERSION_HEXENWAIL_1 && to->alpha != from->alpha)
+	{
+		bits |= U_ALPHA;
+	}
+
 	if (to->wpn_sound)
 	{	//not delta'ed, sound gets cleared after send
 		bits |= U_SOUND;
@@ -436,6 +449,16 @@ static void SV_WriteDelta (entity_state_t *from, entity_state_t *to, sizebuf_t *
 		MSG_WriteByte (msg, to->scale);
 	if (bits & U_ABSLIGHT)
 		MSG_WriteByte (msg, to->abslight);
+	/* No HexenWorld client in this tree reads this, so the position of the alpha
+	 * byte is being *defined* here rather than matched -- whoever writes the
+	 * reader must use this order.  Between U_ABSLIGHT and U_SOUND because it is
+	 * the one adjacency in this function that respects the bit order (U_ABSLIGHT
+	 * is bit 19, U_ALPHA bit 20 -- U_SOUND at bit 17 is already written out of
+	 * order), and because it puts alpha directly after the scale/abslight
+	 * appearance pair exactly as the Hexen II arm does in SV_WriteEntitiesToClient
+	 * (engine/hexen2/sv_main.c). */
+	if (bits & U_ALPHA)
+		MSG_WriteByte (msg, to->alpha);
 	if (bits & U_SOUND)
 		MSG_WriteShort (msg, to->wpn_sound);
 }
@@ -1398,6 +1421,7 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	edict_t	*clent;
 	client_frame_t	*frame;
 	entity_state_t	*state;
+	eval_t		*val;
 
 	// this is the frame we are creating
 	frame = &client->frames[client->netchan.incoming_sequence & UPDATE_MASK];
@@ -1464,6 +1488,13 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 		state->scale = (int)(ent->v.scale * 100.0) & 255;
 		state->drawflags = ent->v.drawflags;
 		state->abslight = (int)(ent->v.abslight * 255.0) & 255;
+		/* Filled in for every client, not just PROTOCOL_VERSION_HEXENWAIL_1 ones,
+		 * so that the whole protocol decision lives at the single gate in
+		 * SV_WriteDelta and this stays a plain field like its neighbours.  hwprogs
+		 * has no native "alpha" field, so this is a progs-defined one and val is
+		 * NULL (-> ENTALPHA_DEFAULT) for gamecode that does not declare it. */
+		val = GetEdictFieldValue(ent, "alpha");
+		state->alpha = val ? ENTALPHA_ENCODE(val->_float) : ENTALPHA_DEFAULT;
 		//clear sound so it doesn't send twice
 		state->wpn_sound = ent->v.wpn_sound;
 	}

@@ -648,7 +648,17 @@ static void SVC_DirectConnect (void)
 		newcl->protocol = sv_protocol;
 	else {
 		s = Info_ValueForKey(userinfo, "*cap");
-		if (strstr(s, "c"))
+		/* "A" advertises PROTOCOL_VERSION_HEXENWAIL_1, and is tested before "c"
+		 * because 100 supersedes 26 -- a client claiming "A" is claiming every
+		 * behaviour 26 has (the chunked modellist/soundlist in sv_user.c gates on
+		 * >= PROTOCOL_VERSION_EXT and will fire for it) plus U_ALPHA.  Uppercase
+		 * on purpose: capability letters in the QuakeWorld/uHexen2 lineage are
+		 * lowercase and Info_SetValueForStarKey preserves case, so an uppercase
+		 * letter cannot arrive from a client that meant something else by it.
+		 * A client that advertises neither still lands on 25, exactly as before. */
+		if (strstr(s, "A"))
+			newcl->protocol = PROTOCOL_VERSION_HEXENWAIL_1;
+		else if (strstr(s, "c"))
 			newcl->protocol = PROTOCOL_VERSION_EXT;
 		else	newcl->protocol = PROTOCOL_VERSION;
 	}
@@ -1631,14 +1641,20 @@ void SV_Init (void)
 
 	i = COM_CheckParm ("-protocol");
 	if (i && i < com_argc - 1) {
+		/* -protocol forces the value on every client regardless of what it
+		 * advertised, so -protocol 100 will break a stock 25/26 client the same
+		 * way -protocol 26 already breaks a 25-only one.  It stays an explicit
+		 * operator action; the default (sv_protocol 0) negotiates from "*cap". */
 		switch ((sv_protocol = atoi (com_argv[i + 1]))) {
+		case PROTOCOL_VERSION_HEXENWAIL_1:
 		case PROTOCOL_VERSION_EXT:
 		case PROTOCOL_VERSION:
 			Sys_Printf ("Server using protocol %i\n", sv_protocol);
 			break;
 		default:
-			Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i.",
-					sv_protocol, PROTOCOL_VERSION, PROTOCOL_VERSION_EXT);
+			Sys_Error ("Bad protocol version request %i. Accepted values: %i, %i, %i.",
+					sv_protocol, PROTOCOL_VERSION, PROTOCOL_VERSION_EXT,
+					PROTOCOL_VERSION_HEXENWAIL_1);
 		}
 	}
 
