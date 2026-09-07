@@ -13,6 +13,7 @@
 #define HW_PORT_SERVER 26950
 #define HW_S2C_CONNECTION 'j'
 #define HW_A2C_PRINT 'n'
+#define HW_CLC_MOVE 3
 #define HW_CLC_STRINGCMD 4
 
 /* Keep this protocol namespace separate from Hexen II's protocol.h, which is
@@ -144,10 +145,69 @@ static struct
 	hwcl_entity_state_t players[HWCL_MAX_CLIENTS];
 } hwcl_server_state;
 
+typedef struct
+{
+	vec3_t angles;
+	int forwardmove;
+	int sidemove;
+	int upmove;
+	int buttons;
+	int impulse;
+	int msec;
+} hwcl_usercmd_t;
+
+static hwcl_usercmd_t hwcl_cmd_history[3];
+static qboolean hwcl_have_cmd_history;
+
 static void HWCL_StringCmd (const char *command)
 {
 	MSG_WriteByte (&hwcl_netchan.message, HW_CLC_STRINGCMD);
 	MSG_WriteString (&hwcl_netchan.message, command);
+}
+
+static void HWCL_WriteAngle16 (sizebuf_t *buf, float angle)
+{
+	int value;
+
+	if (angle >= 0)
+		value = (int)(angle * (65536.0f / 360.0f) + 0.5f);
+	else
+		value = (int)(angle * (65536.0f / 360.0f) - 0.5f);
+	MSG_WriteShort (buf, value & 65535);
+}
+
+static int HWCL_QuantizeMove (int move)
+{
+	if (move > 508)
+		return 127;
+	if (move < -512)
+		return -128;
+	return (int)(move * 0.25f);
+}
+
+static void HWCL_WriteUsercmd (sizebuf_t *buf, const hwcl_usercmd_t *cmd)
+{
+	int bits = 0;
+
+	if (cmd->angles[0]) bits |= (1 << 0);
+	if (cmd->angles[2]) bits |= (1 << 1);
+	if (cmd->forwardmove) bits |= (1 << 2);
+	if (cmd->sidemove) bits |= (1 << 3);
+	if (cmd->upmove) bits |= (1 << 4);
+	if (cmd->buttons) bits |= (1 << 5);
+	if (cmd->impulse) bits |= (1 << 6);
+	if (cmd->msec) bits |= (1 << 7);
+
+	MSG_WriteByte (buf, bits);
+	if (bits & (1 << 0)) HWCL_WriteAngle16 (buf, cmd->angles[0]);
+	HWCL_WriteAngle16 (buf, cmd->angles[1]);
+	if (bits & (1 << 1)) HWCL_WriteAngle16 (buf, cmd->angles[2]);
+	if (bits & (1 << 2)) MSG_WriteChar (buf, HWCL_QuantizeMove (cmd->forwardmove));
+	if (bits & (1 << 3)) MSG_WriteChar (buf, HWCL_QuantizeMove (cmd->sidemove));
+	if (bits & (1 << 4)) MSG_WriteChar (buf, HWCL_QuantizeMove (cmd->upmove));
+	if (bits & (1 << 5)) MSG_WriteByte (buf, cmd->buttons);
+	if (bits & (1 << 6)) MSG_WriteByte (buf, cmd->impulse);
+	if (bits & (1 << 7)) MSG_WriteByte (buf, cmd->msec);
 }
 
 static qboolean HWCL_ValidProtocol (int protocol)
@@ -643,6 +703,7 @@ static void HWCL_ParseServerMessage (void)
 			hwcl_server_state.viewangles[0] = MSG_ReadAngle ();
 			hwcl_server_state.viewangles[1] = MSG_ReadAngle ();
 			hwcl_server_state.viewangles[2] = MSG_ReadAngle ();
+			VectorCopy (hwcl_server_state.viewangles, cl.viewangles);
 			break;
 		case HW_SVC_LIGHTSTYLE:
 			MSG_ReadByte ();
@@ -829,6 +890,7 @@ static void HWCL_ParseServerMessage (void)
 					/* Skin download/translation is not wired up yet, but it must
 					 * not hold the transport handshake hostage. */
 					HWCL_StringCmd (va ("begin %d", hwcl_servercount));
+					cls.signon = SIGNONS;
 					Con_Printf ("HexenWorld signon complete; awaiting state adapter.\n");
 				}
 			}
@@ -899,6 +961,61 @@ qboolean HWCL_Active (void)
 	return hwcl_state != hwcl_disconnected;
 }
 
+void HWCL_SendCmd (const usercmd_t *cmd)
+{
+	hwcl_usercmd_t current;
+	hwcl_usercmd_t oldest;
+	hwcl_usercmd_t oldcmd;
+	sizebuf_t buf;
+	byte data[128];
+	int i;
+	int msec;
+
+	if (hwcl_state != hwcl_connected || hwcl_protocol == 0 ||
+			!HWNetchan_CanPacket (&hwcl_netchan))
+		return;
+
+	memset (&current, 0, sizeof(current));
+	VectorCopy (cl.viewangles, current.angles);
+	current.forwardmove = (int)cmd->forwardmove;
+	current.sidemove = (int)cmd->sidemove;
+	current.upmove = (int)cmd->upmove;
+	current.buttons = CL_GetButtonBits ();
+	current.impulse = CL_GetImpulse ();
+	msec = (int)(host_frametime * 1000.0 + 0.5);
+	if (msec < 1)
+		msec = 1;
+	if (msec > 255)
+		msec = 255;
+	current.msec = msec;
+
+	if (!hwcl_have_cmd_history)
+	{
+		hwcl_cmd_history[0] = current;
+		hwcl_cmd_history[1] = current;
+		hwcl_cmd_history[2] = current;
+		hwcl_have_cmd_history = true;
+	}
+
+	oldest = hwcl_cmd_history[0];
+	oldcmd = hwcl_cmd_history[1];
+	/* Impulses are one-shot commands.  Replaying them from the two backup
+	 * commands would fire a weapon or select an item multiple times. */
+	oldest.impulse = 0;
+	oldcmd.impulse = 0;
+
+	SZ_Init (&buf, data, sizeof(data));
+	MSG_WriteByte (&buf, HW_CLC_MOVE);
+	HWCL_WriteUsercmd (&buf, &oldest);
+	HWCL_WriteUsercmd (&buf, &oldcmd);
+	HWCL_WriteUsercmd (&buf, &current);
+	HWNetchan_Transmit (&hwcl_netchan, buf.cursize, buf.data);
+
+	for (i = 0; i < 2; i++)
+		hwcl_cmd_history[i] = hwcl_cmd_history[i + 1];
+	hwcl_cmd_history[2] = current;
+}
+
 void HWCL_Disconnect (void)
 {
 	static const byte drop[] = {HW_CLC_STRINGCMD, 'd', 'r', 'o', 'p', 0};
@@ -906,7 +1023,10 @@ void HWCL_Disconnect (void)
 	hwcl_protocol = 0;
 	hwcl_servercount = 0;
 	hwcl_entity_sequence = -1;
+	hwcl_have_cmd_history = false;
+	memset (hwcl_cmd_history, 0, sizeof(hwcl_cmd_history));
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
+	cls.signon = 0;
 	if (hwcl_state == hwcl_connected)
 	{
 		HWNetchan_Transmit (&hwcl_netchan, sizeof(drop), (byte *)drop);

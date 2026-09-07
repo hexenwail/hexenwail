@@ -1417,6 +1417,25 @@ void CL_SendCmd (void)
 {
 	usercmd_t	cmd;
 
+#if defined(H2W_INTEGRATED)
+	if (HWCL_Active ())
+	{
+		if (cls.signon != SIGNONS)
+			return;
+
+		CL_BaseMove (&cmd);
+		cmd.forwardmove += cl.pendingcmd.forwardmove;
+		cmd.sidemove += cl.pendingcmd.sidemove;
+		cmd.upmove += cl.pendingcmd.upmove;
+		memset (&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
+		cmd.forwardmove += cl.analogmove.forwardmove;
+		cmd.sidemove += cl.analogmove.sidemove;
+		cmd.upmove += cl.analogmove.upmove;
+		HWCL_SendCmd (&cmd);
+		return;
+	}
+#endif
+
 	if (cls.state != ca_connected)
 		return;
 

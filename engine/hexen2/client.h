@@ -503,6 +503,8 @@ void CL_InitInput (void);
 void CL_SendCmd (void);
 void CL_AdjustAngles (void);
 void CL_BaseMove (usercmd_t *cmd);
+int CL_GetButtonBits (void);
+int CL_GetImpulse (void);
 void CL_SendMove (const usercmd_t *cmd);
 
 //
