@@ -21,7 +21,39 @@
 #ifndef __H2W_NET_H
 #define __H2W_NET_H
 
-#define	PORT_ANY	-1
+/* HexenWorld's QuakeWorld-derived transport now also links into the main
+ * Hexenwail client.  Keep every external symbol in its own namespace there
+ * so it can coexist with Hexen II's qsocket networking in one executable.
+ * hwsv retains the historical symbols because h2shared's message reader
+ * refers to net_message directly. */
+#ifdef H2W_INTEGRATED
+#define net_local_adr			hw_net_local_adr
+#define net_loopback_adr		hw_net_loopback_adr
+#define net_from			hw_net_from
+#define net_message			hw_net_message
+#define net_drop			hw_net_drop
+#define NET_Init			HWNET_Init
+#define NET_Shutdown			HWNET_Shutdown
+#define NET_GetPacket			HWNET_GetPacket
+#define NET_SendPacket			HWNET_SendPacket
+#define NET_CheckReadTimeout		HWNET_CheckReadTimeout
+#define NET_CompareAdr			HWNET_CompareAdr
+#define NET_CompareBaseAdr		HWNET_CompareBaseAdr
+#define NET_AdrToString			HWNET_AdrToString
+#define NET_BaseAdrToString		HWNET_BaseAdrToString
+#define NET_StringToAdr			HWNET_StringToAdr
+#define Netchan_Init			HWNetchan_Init
+#define Netchan_Transmit		HWNetchan_Transmit
+#define Netchan_OutOfBand		HWNetchan_OutOfBand
+#define Netchan_OutOfBandPrint		HWNetchan_OutOfBandPrint
+#define Netchan_Process			HWNetchan_Process
+#define Netchan_Setup			HWNetchan_Setup
+#define Netchan_CanPacket		HWNetchan_CanPacket
+#define Netchan_CanReliable		HWNetchan_CanReliable
+#endif
+
+#define	PORT_ANY		-1
+#define	HWNET_MAX_MSGLEN	7500
 
 typedef struct
 {
@@ -89,10 +121,10 @@ typedef struct
 
 	// reliable staging and holding areas
 	sizebuf_t	message;		// writing buffer to send to server
-	byte		message_buf[MAX_MSGLEN];
+	byte		message_buf[HWNET_MAX_MSGLEN];
 
 	int	reliable_length;
-	byte	reliable_buf[MAX_MSGLEN];	// unacked reliable message
+	byte	reliable_buf[HWNET_MAX_MSGLEN];	// unacked reliable message
 
 	// time and size data to calculate bandwidth
 	int	outgoing_size[MAX_LATENT];

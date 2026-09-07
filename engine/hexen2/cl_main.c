@@ -24,6 +24,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "cl_csqc.h"
+#include "cl_hw.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -169,6 +170,9 @@ This is also called on Host_Error, so it shouldn't cause any errors
 */
 void CL_Disconnect (void)
 {
+#if defined(H2W_INTEGRATED)
+	HWCL_Disconnect ();
+#endif
 // don't get stuck in chat mode
 	if (Key_GetDest() == key_message)
 		Key_EndChat ();
@@ -240,6 +244,16 @@ void CL_EstablishConnection (const char *host)
 		return;
 
 	CL_Disconnect ();
+
+#if defined(H2W_INTEGRATED)
+	/* The URI makes protocol selection explicit; ordinary host names retain
+	 * Hexen II's qsocket handshake. */
+	if (!q_strncasecmp(host, "hw://", 5))
+	{
+		HWCL_Connect (host + 5);
+		return;
+	}
+#endif
 
 	cls.netcon = NET_Connect (host);
 	if (!cls.netcon)
@@ -1306,6 +1320,17 @@ Read all incoming data from the server
 int CL_ReadFromServer (void)
 {
 	int	ret;
+
+#if defined(H2W_INTEGRATED)
+	HWCL_Frame ();
+	if (HWCL_Active ())
+	{
+		/* HexenWorld owns its socket and netchan; do not ask the Hexen II
+		 * qsocket layer to read a null cls.netcon. */
+		CL_AdvanceTime ();
+		return 0;
+	}
+#endif
 
 	/* Demo playback runs this clock at cls.demospeed, which is what pause,
 	 * slow motion and fast-forward actually are.  uhexen2-ofl9. */

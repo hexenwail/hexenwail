@@ -5,9 +5,11 @@ engine* that shares `h2shared` with Hexen II — its own protocol, its own
 gamecode (`hwprogs.dat`), its own client prediction and master server — not a
 mode of the Hexen II server.
 
-`engine/hexenworld/` holds only the dedicated server (`hwsv`); the HexenWorld
-client (`hwcl` / `glhwcl`) is not restored.  The master server and its helper
-tools *are* built, but from `hw_utils/` rather than here — `hwmaster`,
+`engine/hexenworld/` holds the dedicated server (`hwsv`) and the shared
+HexenWorld protocol/transport.  There is deliberately no restored `hwcl` or
+`glhwcl` executable: HexenWorld client networking is being integrated as a
+protocol mode of Hexenwail itself.  The master server and its helper tools
+*are* built, but from `hw_utils/` rather than here — `hwmaster`,
 `hwmquery`, `hwrcon` and `hwterm` all come out of `nix build .#utils`, which
 CI already runs.
 
@@ -20,6 +22,16 @@ CI already runs.
 or via the flake:
 
     nix build .#hwsv
+
+Hexenwail includes the namespaced HexenWorld UDP, Huffman and netchan transport
+by default (`-DUSE_HEXENWORLD_CLIENT=OFF` disables it). Start that protocol path
+explicitly with:
+
+    connect hw://server.example:26950
+
+The integrated path currently completes the connectionless acceptance and
+establishes the sequenced netchan.  Server-message parsing and gameplay state
+still need to be routed into the shared Hexenwail client.
 
 The flag is required at *configure* time — it gates whether `add_executable(hwsv)`
 is reached at all, so `make hwsv` without it asks for a target the generated
@@ -110,8 +122,9 @@ See GitHub issue #35.
 - Two `hwsv` instances discovering each other via `hwmaster`.  Not blocked on
   building anything — `hwmaster` already ships in `.#utils`.  What is missing is
   a harness that starts a master plus two servers and asserts the heartbeat.
-- A real HexenWorld client completing the connectionless handshake — `hwcl` is
-  not built in this tree; needs an upstream or community client.
+- Complete parsing of HexenWorld server messages in the integrated Hexenwail
+  client.  The connectionless handshake and sequenced netchan are in-tree; the
+  old standalone `hwcl` executable will not be restored.
 - Whether this engine's modern wire extensions ride over the HexenWorld protocol
   at all, or are Hexen II only.  Undecided; `hwsv` must not silently drop
   clients that advertise them.

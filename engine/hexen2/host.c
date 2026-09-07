@@ -26,6 +26,7 @@
 #include "cfgfile.h"
 #include "debuglog.h"
 #include "bgmusic.h"
+#include "cl_hw.h"
 
 extern int VID_MenuGetVSync (void);
 #include "cdaudio.h"
@@ -1429,7 +1430,11 @@ static void _Host_Frame (float time)
 	R_UpdateParticles ();
 
 // read from server and interpolate entities every render frame
-	if (cls.state == ca_connected)
+	if (cls.state == ca_connected
+#if defined(H2W_INTEGRATED)
+	    || HWCL_Active ()
+#endif
+	   )
 		CL_ReadFromServer ();
 
 // update video
@@ -1672,6 +1677,9 @@ void Host_Shutdown(void)
 
 	Host_WriteConfiguration ("config.cfg");
 
+#if defined(H2W_INTEGRATED)
+	HWCL_Shutdown ();
+#endif
 	NET_Shutdown ();
 
 	if (cls.state != ca_dedicated)

@@ -35,10 +35,13 @@ option(USE_FLUIDSYNTH "Use FluidSynth as the MIDI driver when available" ON)
 # tier 1 (no FluidSynth, or WASM).  FluidSynth always wins where present.
 option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" ON)
 
-# Off by default so `nix build` keeps producing exactly the client it does
-# today; the server is a separate, rarely-wanted artifact.
+# Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
+# networking, by contrast, is part of Hexenwail itself; there is deliberately
+# no separate hwcl executable.  Emscripten is excluded below because this UDP
+# transport cannot run in a browser.
 option(BUILD_DEDICATED "Also build the h2ded dedicated server" OFF)
 option(BUILD_HEXENWORLD "Also build the hwsv HexenWorld dedicated server" OFF)
+option(USE_HEXENWORLD_CLIENT "Include HexenWorld networking in Hexenwail" ON)
 
 # The GL ES 3.0 render tier.  Emscripten/WebGL2 is one *instance* of it, not
 # the definition of it: everything the ES path does differently -- statically
@@ -852,6 +855,21 @@ else()
     set(RENDERER_SOURCES ${GL_RENDERER_SOURCES})
 endif()
 
+# HexenWorld uses a QuakeWorld-style UDP/netchan stack rather than Hexen II's
+# qsocket stack.  Compile that transport into Hexenwail under a namespace so
+# both protocols can live in the same process.  Client handshake and packet
+# parsing build on this layer; a standalone hwcl target is intentionally not
+# created.
+if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
+    set(HW_CLIENT_NET_SOURCES
+        ${ENGINE_TOP}/hexen2/cl_hw.c
+        ${ENGINE_TOP}/hexenworld/shared/huffman.c
+        ${ENGINE_TOP}/hexenworld/shared/net_udp.c
+        ${ENGINE_TOP}/hexenworld/shared/net_chan.c
+    )
+    list(APPEND CLIENT_DEFINITIONS H2W_INTEGRATED)
+endif()
+
 set(ALL_SOURCES
     ${RENDERER_SOURCES}
     ${CLIENT_SOURCES}
@@ -859,6 +877,7 @@ set(ALL_SOURCES
     ${SOUND_SOURCES}
     ${SOUNDFONT_SOURCES}
     ${PLATFORM_SOURCES}
+    ${HW_CLIENT_NET_SOURCES}
 )
 
 # Create the executable

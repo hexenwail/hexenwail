@@ -20,7 +20,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#ifdef H2W_INTEGRATED
+#include "../../hexen2/quakedef.h"
+#include "net.h"
+#else
 #include "quakedef.h"
+#endif
 
 #define	PACKET_HEADER	8
 
@@ -96,7 +101,7 @@ Sends an out-of-band datagram
 void Netchan_OutOfBand (const netadr_t *adr, int length, byte *data)
 {
 	sizebuf_t	senddata;
-	byte		send_buf[MAX_MSGLEN + PACKET_HEADER];
+	byte		send_buf[HWNET_MAX_MSGLEN + PACKET_HEADER];
 
 // write the packet header
 	SZ_Init (&senddata, send_buf, sizeof(send_buf));
@@ -194,7 +199,7 @@ A 0 length will still generate a packet and deal with the reliable messages.
 void Netchan_Transmit (netchan_t *chan, int length, byte *data)
 {
 	sizebuf_t	senddata;
-	byte		send_buf[MAX_MSGLEN + PACKET_HEADER];
+	byte		send_buf[HWNET_MAX_MSGLEN + PACKET_HEADER];
 	qboolean	send_reliable;
 	unsigned int	w1, w2;
 	int		i;
@@ -290,7 +295,11 @@ qboolean Netchan_Process (netchan_t *chan)
 	}
 
 // get sequence numbers
+#ifdef H2W_INTEGRATED
+	MSG_BeginReadingFrom (&net_message);
+#else
 	MSG_BeginReading ();
+#endif
 	sequence = MSG_ReadLong ();
 	sequence_ack = MSG_ReadLong ();
 
