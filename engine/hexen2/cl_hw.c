@@ -592,16 +592,43 @@ static void HWCL_SkipUsercmd (void)
 static void HWCL_ParseSound (void)
 {
 	int channel;
+	int sound_num;
+	int volume = 255;
+	float attenuation = 1.0f;
+	vec3_t origin;
 	int i;
 
 	channel = MSG_ReadShort ();
 	if (channel & HW_SND_VOLUME)
-		MSG_ReadByte ();
+		volume = MSG_ReadByte ();
 	if (channel & HW_SND_ATTENUATION)
-		MSG_ReadByte ();
-	MSG_ReadByte (); /* sound index */
+		attenuation = MSG_ReadByte () / 32.0f;
+	sound_num = MSG_ReadByte ();
 	for (i = 0; i < 3; i++)
-		MSG_ReadCoord ();
+		origin[i] = MSG_ReadCoord ();
+	if (!msg_badread && sound_num > 0 && sound_num < MAX_SOUNDS &&
+			cl.sound_precache[sound_num])
+		S_StartSound (channel >> 3, channel & 7, cl.sound_precache[sound_num],
+				origin, volume / 255.0f, attenuation);
+}
+
+static void HWCL_ParseStaticSound (void)
+{
+	vec3_t origin;
+	int sound_num;
+	int volume;
+	int attenuation;
+
+	origin[0] = MSG_ReadCoord ();
+	origin[1] = MSG_ReadCoord ();
+	origin[2] = MSG_ReadCoord ();
+	sound_num = MSG_ReadByte ();
+	volume = MSG_ReadByte ();
+	attenuation = MSG_ReadByte ();
+	if (!msg_badread && sound_num > 0 && sound_num < MAX_SOUNDS &&
+			cl.sound_precache[sound_num])
+		S_StaticSound (cl.sound_precache[sound_num], origin, volume / 255.0f,
+				attenuation / 32.0f);
 }
 
 static void HWCL_ParseDownload (void)
@@ -623,6 +650,14 @@ static void HWCL_SkipCoords (int count)
 
 	for (i = 0; i < count; i++)
 		MSG_ReadCoord ();
+}
+
+static void HWCL_ReadCoords (vec3_t coords)
+{
+	int i;
+
+	for (i = 0; i < 3; i++)
+		coords[i] = MSG_ReadCoord ();
 }
 
 static void HWCL_SkipAngles (int count)
@@ -739,9 +774,7 @@ static const char *HWCL_InfoValue (const char *info, const char *key)
 
 static void HWCL_ParseDamage (void)
 {
-	MSG_ReadByte (); /* armor damage */
-	MSG_ReadByte (); /* blood damage */
-	HWCL_SkipCoords (3);
+	V_ParseDamage ();
 }
 
 static void HWCL_SkipXbowBolts (int turned)
@@ -1248,10 +1281,21 @@ static void HWCL_ParseServerMessage (void)
 			hwcl_server_state.viewangles[1] = MSG_ReadAngle ();
 			hwcl_server_state.viewangles[2] = MSG_ReadAngle ();
 			VectorCopy (hwcl_server_state.viewangles, cl.viewangles);
+			CL_LatchFixAngle ();
 			break;
 		case HW_SVC_LIGHTSTYLE:
-			MSG_ReadByte ();
-			MSG_ReadString ();
+			{
+				int style = MSG_ReadByte ();
+				const char *map = MSG_ReadString ();
+				if (style >= 0 && style < MAX_LIGHTSTYLES)
+				{
+					q_strlcpy (cl_lightstyle[style].map, map,
+							sizeof(cl_lightstyle[style].map));
+					cl_lightstyle[style].length = strlen (
+						cl_lightstyle[style].map);
+					CL_SetLightstyleLevels (&cl_lightstyle[style]);
+				}
+			}
 			break;
 		case HW_SVC_SOUND:
 			HWCL_ParseSound ();
@@ -1265,7 +1309,10 @@ static void HWCL_ParseServerMessage (void)
 			}
 			break;
 		case HW_SVC_STOPSOUND:
-			MSG_ReadShort ();
+			{
+				int channel = MSG_ReadShort ();
+				S_StopSound (channel >> 3, channel & 7);
+			}
 			break;
 		case HW_SVC_PARTICLE:
 			HWCL_ParseParticle ();
@@ -1274,11 +1321,13 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParseDamage ();
 			break;
 		case HW_SVC_SET_VIEW_TINT:
-			MSG_ReadByte ();
+			cl.viewent.colorshade = MSG_ReadByte ();
 			break;
 		case HW_SVC_SET_VIEW_FLAGS:
+			cl.viewent.drawflags |= MSG_ReadByte ();
+			break;
 		case HW_SVC_CLEAR_VIEW_FLAGS:
-			MSG_ReadByte ();
+			cl.viewent.drawflags &= ~MSG_ReadByte ();
 			break;
 		case HW_SVC_START_EFFECT:
 			if (!HWCL_ParseStartEffect ())
@@ -1288,7 +1337,7 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadByte ();
 			break;
 		case HW_SVC_CENTERPRINT:
-			MSG_ReadString ();
+			SCR_CenterPrint (MSG_ReadString ());
 			break;
 		case HW_SVC_KILLEDMONSTER:
 		case HW_SVC_FOUNDSECRET:
@@ -1297,17 +1346,14 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_BIGKICK:
 			break;
 		case HW_SVC_SPAWNSTATICSOUND:
-			HWCL_SkipCoords (3);
-			MSG_ReadByte ();
-			MSG_ReadByte ();
-			MSG_ReadByte ();
+			HWCL_ParseStaticSound ();
 			break;
 		case HW_SVC_INTERMISSION:
 			HWCL_SkipCoords (3);
 			HWCL_SkipAngles (3);
 			break;
 		case HW_SVC_FINALE:
-			MSG_ReadString ();
+			SCR_CenterPrint (MSG_ReadString ());
 			break;
 		case HW_SVC_CDTRACK:
 			hwcl_server_state.cdtrack = MSG_ReadByte ();
@@ -1426,16 +1472,30 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadByte (); /* player slot */
 			break;
 		case HW_SVC_SOUND_UPDATE_POS:
-			MSG_ReadShort ();
-			HWCL_SkipCoords (3);
+			{
+				vec3_t origin;
+				int channel = MSG_ReadShort ();
+				HWCL_ReadCoords (origin);
+				if (!msg_badread)
+					S_UpdateSoundPos (channel >> 3, channel & 7, origin);
+			}
 			break;
 		case HW_SVC_UPDATE_PIV:
 			hwcl_server_state.piv = MSG_ReadLong ();
 			break;
 		case HW_SVC_PLAYER_SOUND:
-			MSG_ReadByte ();
-			HWCL_SkipCoords (3);
-			MSG_ReadShort ();
+			{
+				vec3_t origin;
+				int slot = MSG_ReadByte ();
+				int sound_num;
+				HWCL_ReadCoords (origin);
+				sound_num = MSG_ReadShort ();
+				if (!msg_badread && slot >= 0 && slot < cl.maxclients &&
+						sound_num > 0 && sound_num < MAX_SOUNDS &&
+						cl.sound_precache[sound_num])
+					S_StartSound (slot + 1, 2, cl.sound_precache[sound_num],
+							origin, 1.0f, 1.0f);
+			}
 			break;
 		case HW_SVC_UPDATEPCLASS:
 			{
