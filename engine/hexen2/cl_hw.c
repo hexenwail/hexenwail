@@ -21,9 +21,13 @@
 #define HW_PROTOCOL_VERSION 25
 #define HW_PROTOCOL_VERSION_EXT 26
 #define HW_PROTOCOL_VERSION_HEXENWAIL_1 100
+#define HW_SVC_DISCONNECT 2
+#define HW_SVC_UPDATESTAT 3
+#define HW_SVC_SETVIEW 5
 #define HW_SVC_TIME 7
 #define HW_SVC_PRINT 8
 #define HW_SVC_STUFFTEXT 9
+#define HW_SVC_SETANGLE 10
 #define HW_SVC_SERVERDATA 11
 #define HW_SVC_LIGHTSTYLE 12
 #define HW_SVC_SPAWNBASELINE 22
@@ -56,6 +60,18 @@ static double hwcl_connect_time;
 static qboolean hwcl_received_packet;
 static int hwcl_protocol;
 static int hwcl_servercount;
+
+/* This is deliberately protocol state rather than cl: Hexen II's cl is tied
+ * to its qsocket session and renderer.  Keeping the values here lets the
+ * eventual adapter map them deliberately instead of corrupting a concurrent
+ * Hexen II connection. */
+static struct
+{
+	double server_time;
+	vec3_t viewangles;
+	int viewentity;
+	int stats[MAX_CL_STATS];
+} hwcl_server_state;
 
 static void HWCL_StringCmd (const char *command)
 {
@@ -129,6 +145,7 @@ static void HWCL_ParseServerData (void)
 		return;
 	}
 	hwcl_servercount = MSG_ReadLong ();
+	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
 	playernum = MSG_ReadByte ();
 	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
@@ -271,11 +288,30 @@ static void HWCL_ParseServerMessage (void)
 			if (!msg_badread)
 				Con_Printf ("%s", text);
 			break;
+		case HW_SVC_DISCONNECT:
+			Con_Printf ("HexenWorld server disconnected.\n");
+			HWCL_Disconnect ();
+			return;
+		case HW_SVC_UPDATESTAT:
+			command = MSG_ReadByte ();
+			if (command >= 0 && command < MAX_CL_STATS)
+				hwcl_server_state.stats[command] = MSG_ReadByte ();
+			else
+				MSG_ReadByte ();
+			break;
+		case HW_SVC_SETVIEW:
+			hwcl_server_state.viewentity = MSG_ReadShort ();
+			break;
 		case HW_SVC_SERVERDATA:
 			HWCL_ParseServerData ();
 			break;
 		case HW_SVC_TIME:
-			MSG_ReadFloat ();
+			hwcl_server_state.server_time = MSG_ReadFloat ();
+			break;
+		case HW_SVC_SETANGLE:
+			hwcl_server_state.viewangles[0] = MSG_ReadAngle ();
+			hwcl_server_state.viewangles[1] = MSG_ReadAngle ();
+			hwcl_server_state.viewangles[2] = MSG_ReadAngle ();
 			break;
 		case HW_SVC_LIGHTSTYLE:
 			MSG_ReadByte ();
@@ -290,8 +326,11 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadFloat ();
 			break;
 		case HW_SVC_UPDATESTATLONG:
-			MSG_ReadByte ();
-			MSG_ReadLong ();
+			command = MSG_ReadByte ();
+			if (command >= 0 && command < MAX_CL_STATS)
+				hwcl_server_state.stats[command] = MSG_ReadLong ();
+			else
+				MSG_ReadLong ();
 			break;
 		case HW_SVC_UPDATEUSERINFO:
 			MSG_ReadByte ();
@@ -423,6 +462,7 @@ void HWCL_Disconnect (void)
 
 	hwcl_protocol = 0;
 	hwcl_servercount = 0;
+	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	if (hwcl_state == hwcl_connected)
 	{
 		HWNetchan_Transmit (&hwcl_netchan, sizeof(drop), (byte *)drop);
