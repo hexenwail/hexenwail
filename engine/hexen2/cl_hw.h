@@ -6,6 +6,7 @@
 qboolean HWCL_Connect (const char *host);
 void HWCL_SendCmd (const usercmd_t *cmd);
 void HWCL_ApplyState (void);
+void HWCL_PredictUsercmd (const usercmd_t *cmd);
 qboolean HWCL_Active (void);
 void HWCL_Disconnect (void);
 void HWCL_Frame (void);

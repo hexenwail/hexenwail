@@ -1439,6 +1439,7 @@ void CL_SendCmd (void)
 		cmd.forwardmove += cl.analogmove.forwardmove;
 		cmd.sidemove += cl.analogmove.sidemove;
 		cmd.upmove += cl.analogmove.upmove;
+		HWCL_PredictUsercmd (&cmd);
 		HWCL_SendCmd (&cmd);
 		return;
 	}

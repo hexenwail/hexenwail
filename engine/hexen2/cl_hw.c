@@ -224,6 +224,10 @@ typedef struct
 
 static hwcl_usercmd_t hwcl_cmd_history[3];
 static qboolean hwcl_have_cmd_history;
+static qboolean hwcl_predicted_origin_valid;
+static vec3_t hwcl_predicted_origin;
+static vec3_t hwcl_predicted_velocity;
+static int hwcl_predicted_onground;
 static char hwcl_model_names[MAX_MODELS][MAX_QPATH];
 static char hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
 static int hwcl_model_count;
@@ -237,6 +241,9 @@ static void HWCL_StringCmd (const char *command)
 	MSG_WriteByte (&hwcl_netchan.message, HW_CLC_STRINGCMD);
 	MSG_WriteString (&hwcl_netchan.message, command);
 }
+
+static const vec3_t hwcl_player_mins = {-16, -16, 0};
+static const vec3_t hwcl_player_maxs = {16, 16, 56};
 
 static void HWCL_WriteAngle16 (sizebuf_t *buf, float angle)
 {
@@ -1672,6 +1679,167 @@ qboolean HWCL_Connect (const char *host)
 qboolean HWCL_Active (void)
 {
 	return hwcl_state != hwcl_disconnected;
+}
+
+static int HWCL_LocalPlayerSlot (void)
+{
+	int viewentity = hwcl_server_state.viewentity;
+	if (viewentity < 1 || viewentity > HWCL_MAX_CLIENTS)
+		return -1;
+	return viewentity - 1;
+}
+
+void HWCL_PredictUsercmd (const usercmd_t *cmd)
+{
+	entity_t *ent;
+	int slot;
+	float forward[3], right[3], up[3];
+	vec3_t wishvel;
+	float wishspeed;
+	float fmove, smove;
+	float maxspeed;
+	float dt;
+	int buttons;
+	int i;
+	vec3_t mins;
+	trace_t trace;
+	vec3_t start, end;
+
+	slot = HWCL_LocalPlayerSlot ();
+	if (slot < 0)
+		return;
+	if (!cl.worldmodel)
+		return;
+	if (cls.signon != SIGNONS)
+		return;
+	ent = &cl_entities[hwcl_server_state.viewentity];
+	if (!ent->model)
+		return;
+
+	if (!hwcl_predicted_origin_valid)
+	{
+		VectorCopy (ent->baseline.origin, hwcl_predicted_origin);
+		VectorCopy (ent->msg_origins[0], hwcl_predicted_origin);
+		VectorClear (hwcl_predicted_velocity);
+		hwcl_predicted_onground = -1;
+		hwcl_predicted_origin_valid = true;
+	}
+
+	dt = host_frametime;
+	if (dt < 0.001f) dt = 0.001f;
+	if (dt > 0.1f) dt = 0.1f;
+	buttons = CL_GetButtonBits ();
+	(void)CL_GetImpulse ();
+
+	maxspeed = (hwcl_server_state.maxspeed > 0) ?
+			hwcl_server_state.maxspeed : 320.0f;
+
+	AngleVectors (cl.viewangles, forward, right, up);
+
+	fmove = cmd->forwardmove;
+	smove = cmd->sidemove;
+	if (fmove > maxspeed) fmove = maxspeed;
+	else if (fmove < -maxspeed) fmove = -maxspeed;
+	if (smove > maxspeed) smove = maxspeed;
+	else if (smove < -maxspeed) smove = -maxspeed;
+
+	VectorClear (wishvel);
+	for (i = 0; i < 3; i++)
+		wishvel[i] = forward[i] * fmove + right[i] * smove;
+	wishvel[2] = 0;
+	wishspeed = VectorLength (wishvel);
+	if (wishspeed > maxspeed)
+	{
+		VectorScale (wishvel, maxspeed / wishspeed, wishvel);
+		wishspeed = maxspeed;
+	}
+
+	if (wishspeed > 0 && hwcl_predicted_onground != -1)
+	{
+		float currentspeed = VectorLength (hwcl_predicted_velocity);
+		float addspeed = wishspeed - currentspeed;
+		if (addspeed > 0)
+		{
+			float accelspeed = 10.0f * addspeed * dt;
+			if (accelspeed > addspeed) accelspeed = addspeed;
+			for (i = 0; i < 2; i++)
+			{
+				hwcl_predicted_velocity[i] +=
+					accelspeed * wishvel[i] / wishspeed;
+			}
+		}
+		float friction = 4.0f;
+		float control = (currentspeed < 100.0f) ? 100.0f : currentspeed;
+		float drop = control * friction * dt;
+		float newspeed = currentspeed - drop;
+		if (newspeed < 0) newspeed = 0;
+		newspeed /= currentspeed;
+		hwcl_predicted_velocity[0] *= newspeed;
+		hwcl_predicted_velocity[1] *= newspeed;
+	}
+	else if (wishspeed > 0)
+	{
+		float addspeed = wishspeed;
+		float accelspeed = 0.1f * addspeed * dt;
+		if (accelspeed > addspeed) accelspeed = addspeed;
+		for (i = 0; i < 2; i++)
+			hwcl_predicted_velocity[i] +=
+				accelspeed * wishvel[i] / wishspeed;
+	}
+
+	hwcl_predicted_velocity[2] -= 800.0f * dt;
+	if (hwcl_predicted_velocity[2] < -2000.0f)
+		hwcl_predicted_velocity[2] = -2000.0f;
+	if (buttons & 2) /* BUTTON_JUMP */
+	{
+		if (hwcl_predicted_onground != -1)
+			hwcl_predicted_velocity[2] = 270.0f;
+	}
+
+	for (i = 0; i < 3; i++)
+		mins[i] = hwcl_player_mins[i];
+
+	VectorCopy (hwcl_predicted_origin, start);
+	start[2] += mins[2] + 1;
+	end[0] = start[0];
+	end[1] = start[1];
+	end[2] = start[2] - 2;
+	memset (&trace, 0, sizeof(trace));
+	trace.fraction = 1.0f;
+	trace.allsolid = true;
+	VectorCopy (end, trace.endpos);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, start, end, &trace);
+	hwcl_predicted_onground = (trace.fraction < 1.0f) ? 0 : -1;
+
+	VectorCopy (hwcl_predicted_origin, start);
+	for (i = 0; i < 3; i++)
+		end[i] = start[i] + hwcl_predicted_velocity[i] * dt;
+	memset (&trace, 0, sizeof(trace));
+	trace.fraction = 1.0f;
+	trace.allsolid = true;
+	VectorCopy (end, trace.endpos);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, start, end, &trace);
+	if (trace.fraction < 1.0f)
+	{
+		for (i = 0; i < 3; i++)
+			hwcl_predicted_velocity[i] *= trace.fraction;
+		VectorCopy (trace.endpos, hwcl_predicted_origin);
+	}
+	else
+	{
+		VectorCopy (end, hwcl_predicted_origin);
+	}
+
+	cl.onground = (hwcl_predicted_onground != -1);
+	cl.velocity[0] = hwcl_predicted_velocity[0];
+	cl.velocity[1] = hwcl_predicted_velocity[1];
+	cl.velocity[2] = hwcl_predicted_velocity[2];
+
+	ent->baseline.origin[0] = hwcl_predicted_origin[0];
+	ent->baseline.origin[1] = hwcl_predicted_origin[1];
+	ent->baseline.origin[2] = hwcl_predicted_origin[2];
+	VectorCopy (hwcl_predicted_origin, ent->msg_origins[0]);
+	ent->msgtime = cl.mtime[0];
 }
 
 void HWCL_SendCmd (const usercmd_t *cmd)
