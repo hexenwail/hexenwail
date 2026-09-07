@@ -341,6 +341,31 @@
                 -t $out/share/hexenwail/portals
             '';
 
+          # HexenWorld dedicated server with bundled gamecode.  hwsv needs
+          # hw/hwprogs.dat to start -- see FS_Init's GAME_HEXENWORLD gate.
+          # A bare .#hwsv has the same gap as .#h2ded vs Raven's progs.dat,
+          # and hwprogs.dat has no retail equivalent a user could supply
+          # instead -- it only ever came from Raven's free release, compiled
+          # from source in this tree.  uhexen2-9die.
+          hwsv-bundled =
+            let
+              hwsvPkg = self.packages.${system}.hwsv;
+              gamecodePkg = self.packages.${system}.gamecode;
+            in pkgs.runCommand "hexenwail-hwsv-bundled-${hwsvPkg.version}" {
+              meta = hwsvPkg.meta // {
+                description = "${hwsvPkg.meta.description} (with bundled gamecode)";
+              };
+              passthru = { inherit (hwsvPkg) version; };
+            } ''
+              mkdir -p $out/bin
+              cp ${hwsvPkg}/bin/hwsv $out/bin/hwsv
+              chmod +w $out/bin/hwsv
+
+              install -Dm644 \
+                ${gamecodePkg}/share/hexenwail/hw/hwprogs.dat \
+                -t $out/share/hexenwail/hw
+            '';
+
           default = self.packages.${system}.nixos-bundled;
 
           # Dedicated server (h2ded) — headless, links only libm/libc.

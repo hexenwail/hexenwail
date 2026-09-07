@@ -64,8 +64,13 @@ above), and the older 0.11 and 0.09 betas.  Prefer 0.15.
 
 ### 3. HexenWorld gamecode — `hw/hwprogs.dat`
 
-Built from source in this tree, so no acquisition problem — but nothing installs
-it into a game directory for you:
+Built from source in this tree, so no acquisition problem. Install via the bundled package:
+
+    nix build .#hwsv-bundled
+
+This creates a complete installation with both the `hwsv` binary and `hw/hwprogs.dat` in the correct location.
+
+Alternatively, you can install the gamecode manually from the gamecode package:
 
     nix build .#gamecode
     install -Dm644 result/share/hexenwail/hw/hwprogs.dat <gamedir>/hw/hwprogs.dat
