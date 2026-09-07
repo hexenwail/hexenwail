@@ -1407,7 +1407,19 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParseDownload ();
 			break;
 		case HW_SVC_PLAYERINFO:
-			HWCL_ParsePlayerInfo ();
+			{
+				int slot = hwcl_server_state.viewentity - 1;
+				HWCL_ParsePlayerInfo ();
+				if (slot >= 0 && slot < HWCL_MAX_CLIENTS &&
+					hwcl_server_state.players[slot].active)
+				{
+					entity_t *ent = &cl_entities[cl.viewentity];
+					const hwcl_entity_state_t *state =
+						&hwcl_server_state.players[slot];
+					VectorCopy (state->origin, ent->baseline.origin);
+					ent->baseline.flags |= BE_ON;
+				}
+			}
 			break;
 		case HW_SVC_NAILS:
 			HWCL_ParseNails ();
@@ -1501,10 +1513,12 @@ static void HWCL_ParseServerMessage (void)
 			{
 				int slot = MSG_ReadByte ();
 				int packed = MSG_ReadByte ();
-				if (slot >= 0 && slot < HWCL_MAX_CLIENTS)
+				if (slot >= 0 && slot < HWCL_MAX_CLIENTS && cl.scores)
 				{
 					hwcl_server_state.playerclass[slot] = (packed >> 5) & 7;
 					hwcl_server_state.playerlevel[slot] = packed & 31;
+					cl.scores[slot].playerclass =
+						(float)hwcl_server_state.playerclass[slot];
 				}
 			}
 			break;
