@@ -35,6 +35,7 @@
 #define HW_SVC_UPDATEFRAGS 14
 #define HW_SVC_STOPSOUND 16
 #define HW_SVC_PARTICLE 18
+#define HW_SVC_DAMAGE 19
 #define HW_SVC_SPAWNBASELINE 22
 #define HW_SVC_CENTERPRINT 26
 #define HW_SVC_KILLEDMONSTER 27
@@ -53,6 +54,7 @@
 #define HW_SVC_UPDATEUSERINFO 40
 #define HW_SVC_DOWNLOAD 41
 #define HW_SVC_PLAYERINFO 42
+#define HW_SVC_NAILS 43
 #define HW_SVC_CHOKECOUNT 44
 #define HW_SVC_MODELLIST 45
 #define HW_SVC_SOUNDLIST 46
@@ -468,6 +470,23 @@ static void HWCL_ParsePackedMissiles (void)
 		MSG_ReadByte ();
 }
 
+static void HWCL_ParseNails (void)
+{
+	int count;
+	int i;
+
+	count = MSG_ReadByte ();
+	for (i = 0; i < count * 6; i++)
+		MSG_ReadByte ();
+}
+
+static void HWCL_ParseDamage (void)
+{
+	MSG_ReadByte (); /* armor damage */
+	MSG_ReadByte (); /* blood damage */
+	HWCL_SkipCoords (3);
+}
+
 static void HWCL_ParseInventoryUpdate (void)
 {
 	unsigned int sc1 = 0;
@@ -642,6 +661,9 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_PARTICLE:
 			HWCL_ParseParticle ();
 			break;
+		case HW_SVC_DAMAGE:
+			HWCL_ParseDamage ();
+			break;
 		case HW_SVC_CENTERPRINT:
 			MSG_ReadString ();
 			break;
@@ -699,6 +721,9 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_PLAYERINFO:
 			HWCL_ParsePlayerInfo ();
+			break;
+		case HW_SVC_NAILS:
+			HWCL_ParseNails ();
 			break;
 		case HW_SVC_PACKETENTITIES:
 			HWCL_ParsePacketEntities (false);
