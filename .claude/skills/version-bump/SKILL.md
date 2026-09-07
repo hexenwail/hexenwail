@@ -149,20 +149,22 @@ the annotation is gone — delete and redo.
 
 ## 5. Push
 
-**The remote is `hexenwail`, not `origin`.**
+**The remote is `origin`.**  It was named `hexenwail` until the 2026-09-05 org
+move renamed it; older notes and transcripts still say `hexenwail`, and every
+such command now fails with `'hexenwail' does not appear to be a git repository`.
 
 ```bash
-git fetch hexenwail master
-git log --oneline hexenwail/master -3        # see step 5a before assuming
-git push hexenwail master
-git push hexenwail 0.8.0-beta.r28
+git fetch origin master
+git log --oneline origin/master -3        # see step 5a before assuming
+git push origin master
+git push origin 0.8.0-beta.r28
 ```
 
 Confirm both landed:
 
 ```bash
-git rev-list --left-right --count hexenwail/master...HEAD    # want: 0  0
-git ls-remote --tags hexenwail | grep r28                    # want: 2 lines
+git rev-list --left-right --count origin/master...HEAD    # want: 0  0
+git ls-remote --tags origin | grep r28                    # want: 2 lines
 ```
 
 Two lines is correct for an annotated tag — the tag object and its `^{}`
@@ -171,7 +173,7 @@ dereference.
 ### 5a. This worktree is shared. Check before you assume.
 
 Other Claude sessions commit and push here. A branch push from any of them
-carries **your** unpushed commits along with theirs, so `git log hexenwail/master`
+carries **your** unpushed commits along with theirs, so `git log origin/master`
 can already contain work you never pushed. Read the remote log before saying what
 you are about to push, or you will report pushing three commits when only one
 was yours.
@@ -183,12 +185,12 @@ session. **Stage by explicit path, never `git add -A` or `git commit -a`.**
 
 ```
 ! [rejected] shanjaq-r6303-archive-2026-05-31 -> ... (would clobber existing tag)
-error: could not fetch hexenwail
+error: could not fetch origin
 ```
 
 Local and remote disagree about the two `shanjaq-r6303-archive-*` tags. This is
 pre-existing and unrelated to any release. Fetch the branch by name — `git fetch
-hexenwail master` — and move on. Do not `--force` the tags to get past it; those
+origin master` — and move on. Do not `--force` the tags to get past it; those
 archive markers are the r6303 reference point and which side is right has not
 been decided.
 
@@ -223,7 +225,7 @@ nix build .#default && ./result/bin/glhexen2 -version
 git add engine/hexen2/quakedef.h docs/release-notes/$NEW.md
 git commit -m "version(bump) $NEW"
 git tag -a $NEW -F docs/release-notes/$NEW.md
-git fetch hexenwail master && git log --oneline hexenwail/master -3
-git push hexenwail master && git push hexenwail $NEW
-git rev-list --left-right --count hexenwail/master...HEAD
+git fetch origin master && git log --oneline origin/master -3
+git push origin master && git push origin $NEW
+git rev-list --left-right --count origin/master...HEAD
 ```

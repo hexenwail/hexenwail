@@ -21,50 +21,46 @@ User-imported assets are mirrored into the runtime filesystem before `main()` is
 
 ## Local build
 
-A working dev-shell path already exists in `WASM_BUILD_STATUS.md`. Outside Nix, a plain emsdk install is also fine.
-
-### Option A: existing Nix dev shell
-
-```bash
-nix develop . -f shell-wasm.nix
-cd engine
-mkdir -p build
-cd build
-emcmake cmake -DCMAKE_BUILD_TYPE=Release -DUSE_CODEC_VORBIS=OFF -DUSE_ALSA=OFF -DUSE_SDL3_STATIC=ON ..
-emmake make
-```
-
-### Option B: direct emsdk install
+**Use the scripts.** `scripts/wasm-build.sh` and `scripts/wasm-assemble-artifact.sh`
+exist precisely so that the PR check, the Pages deploy and a human at a terminal
+cannot drift apart — see the header of `scripts/wasm-build.sh`. Hand-rolled
+`emcmake` lines in this document drifted twice before they were removed; do not
+reintroduce them here.
 
 ```bash
-git clone https://github.com/emscripten-core/emsdk.git
-cd emsdk
-./emsdk install latest
-./emsdk activate latest
-source ./emsdk_env.sh
-
-cd /path/to/hexenwail/engine
-mkdir -p build
-cd build
-emcmake cmake -DCMAKE_BUILD_TYPE=Release -DUSE_CODEC_VORBIS=OFF -DUSE_ALSA=OFF -DUSE_SDL3_STATIC=ON ..
-emmake make
+./scripts/wasm-build.sh                 # engine -> engine/build/bin/
+./scripts/wasm-assemble-artifact.sh dist
+./scripts/wasm-validate-artifact.sh dist
 ```
 
-Build output lands in `engine/build/bin/`.
+Build output lands in `engine/build/bin/`; the assembled site lands in `dist/`.
+
+### The two web renderers
+
+`WEB_RENDERER` selects which one you get, and there are two:
+
+| Value | Define | What it is |
+|---|---|---|
+| `webgl2` (default) | `USE_GLES` | the GLES3 / WebGL2 tier — see [`WEBGL_RENDERER.md`](WEBGL_RENDERER.md) |
+| `software` | `WEBSOFT` | the restored classic 8bpp rasterizer |
+
+CI builds **both** on every PR (`.github/actions/wasm-build/action.yml`).
+`wasm-assemble-artifact.sh` reads the `hexenwail-renderer.txt` build stamp and
+refuses anything that is not one of those two.
+
+### Without the scripts
+
+If you need to drive `emcmake` yourself, read `scripts/wasm-build.sh` for the
+current flag set rather than copying an older recipe — the flags have changed,
+and options that used to be here (`-DUSE_SDL3_STATIC=ON`) no longer exist.
 
 ## Assemble a local PWA site
 
-Copy the PWA shell plus engine artifacts into one directory:
-
-```bash
-mkdir -p dist
-cp -r web/. dist/
-cp engine/build/bin/hexenwail.js dist/
-cp engine/build/bin/hexenwail.wasm dist/
-cp engine/build/bin/hexenwail.html dist/engine-shell-debug.html
-```
-
-If Emscripten emits optional extra files such as `hexenwail.data` or `hexenwail.worker.js`, copy them too.
+`scripts/wasm-assemble-artifact.sh dist` does this. Do **not** assemble by hand
+with `cp`: `web/sw.js` ships the placeholder `__HEXENWAIL_BUILD_VERSION__`, the
+assemble script is what substitutes it, and `scripts/wasm-validate-artifact.sh`
+fails the build if the placeholder survives. A hand-copied `dist/` is an
+artifact the validator is designed to reject.
 
 ## Local testing
 
@@ -84,6 +80,24 @@ Recommended checks:
 3. reload
 4. disconnect networking / use airplane mode
 5. reload again and verify the shell plus imported assets still work
+
+### Driving it headlessly (CDP)
+
+Two traps cost real time the first time someone automated this, so they are
+written down rather than rediscovered:
+
+- **`Page.captureScreenshot` with a `clip` returns a stale or black surface for
+  the WebGL canvas.** Capture the whole viewport with
+  `captureBeyondViewport: false` and crop afterwards.
+- **Key events injected with `Input.dispatchKeyEvent` are consumed before
+  page-level capture listeners see them.** "No keydown observed" is therefore
+  *not* evidence that input failed. When you need a pixel-independent signal,
+  drive the engine through its `Hexenwail_TouchKey` export instead.
+
+What a headless run cannot tell you: audio (headless Chromium has no ALSA
+device — the SDL emscripten driver reports opening successfully and nothing is
+heard), real-hardware frame rates, iOS standalone-mode lifecycle, and the touch
+controls, which key off trusted touch events.
 
 ## GitHub Pages deployment
 

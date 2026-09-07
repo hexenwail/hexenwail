@@ -10,7 +10,7 @@
 ```bash
 # One-time setup
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak install --user flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 
 # Build and install
 flatpak-builder --user --install --force-clean build-dir flatpak/io.github.hexenwail.hexenwail.yml

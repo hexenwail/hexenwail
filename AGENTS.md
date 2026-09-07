@@ -12,25 +12,23 @@ merely race on files, they can commit each other's work.
 
 That is not hypothetical. On 2026-08-31 one session was mid-merge of
 `sezero/master` (conflicts resolved and staged, not yet committed) when another
-session ran `git commit` for an unrelated documentation pass. Git had no way to
-tell the two apart. The result is `914114182`: a **merge commit** whose second
-parent is upstream `46c12d854`, carrying the resolved `snd_timidity.c` and the
-entire `libs/timidity` sync, under the message
-`docs(parity): structural audit against Ironwail v0.8.2`. Right content, wrong
-commit — and not separable afterwards without rewriting history under a session
-that is still working in it.
+session ran `git commit` for an unrelated documentation pass. Result:
+`914114182` — a **merge commit** whose second parent is upstream `46c12d854`,
+carrying the resolved `snd_timidity.c` and the entire `libs/timidity` sync, under
+the message `docs(parity): structural audit against Ironwail v0.8.2`. Right
+content, wrong commit — not separable afterwards without rewriting history under a
+session still working in it.
 
-Sharp edges in the same shared checkout:
+Sharp edges in a shared checkout:
 
-- `git merge` **refuses to start** while anything is staged, even a path the
-  merge does not touch (`Your local changes to the following files would be
-  overwritten by merge`). Any tool that stages on its own schedule — and any
-  other session touching the index — makes this fire unpredictably.
-- Stashing to clear that is itself a race, if something can re-stage between
-  the `git stash` and the `git merge`.
+- `git merge` **refuses to start** while anything is staged, even a path the merge
+  does not touch — `Your local changes to the following files would be overwritten
+  by merge`. Any tool that stages on its own schedule, and any other session
+  touching the index, makes this fire unpredictably.
+- Stashing to clear that is itself a race, if something can re-stage between the
+  `git stash` and the `git merge`.
 - `git stash`, `git rebase`, `git bisect` and `git checkout` are all
-  checkout-wide. Another session's working tree changes underneath it with no
-  warning.
+  checkout-wide. Another session's working tree changes underneath with no warning.
 
 So: **do the work in a worktree.**
 
@@ -46,23 +44,23 @@ already in use here.
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT
+complete until `git push` succeeds.
 
 **MANDATORY WORKFLOW:**
 
-1. **Run quality gates** (if code changed) - Tests, linters, builds
-2. **PUSH TO REMOTE** - This is MANDATORY:
+1. **Run quality gates** (if code changed) — tests, linters, builds
+2. **PUSH TO REMOTE** — this is MANDATORY:
    ```bash
    git pull --rebase
    git push
    git status  # MUST show "up to date with origin"
    ```
-3. **Clean up** - Clear stashes, prune remote branches
-4. **Verify** - All changes committed AND pushed
-5. **Hand off** - Provide context for next session
+3. **Clean up** — clear stashes, prune remote branches
+4. **Verify** — all changes committed AND pushed
+5. **Hand off** — provide context for next session
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
+- NEVER stop before pushing — that leaves work stranded locally
 - If push fails, resolve and retry until it succeeds

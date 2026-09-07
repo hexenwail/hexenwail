@@ -135,14 +135,21 @@ script, so the path is discoverable from the failure itself. Delivered under
 The distinction is deliberate and is the whole basis of the decision: pointing
 a user at a URL is not distribution; serving them the bytes is. We do the
 former. The demo tarball in this directory is a local working copy — it is
-gitignored, it is not a build input, and no flake output references it.
+gitignored and it is not a build input. No flake output reads *this* file:
+`packages.demodata` fetches its own copy from SourceForge against a pinned
+hash, so the bytes never enter the repository or a derivation from here.
 
 ### Consequences for `uhexen2-menr`
 
 Deliverable 1 (this directory) stands. Deliverables 2–5 do not ship as written:
 
-- `demodata` / `demo-linux` / `demo-windows` flake outputs — dropped
-  (`menr.3`–`menr.5`).
+- `demo-linux` / `demo-windows` flake outputs — dropped (`menr.4`, `menr.5`).
+  `demodata` **was kept** (`flake.nix:1054`): it fetches the tarball from
+  SourceForge itself, against the SRI hash recorded above, and installs `data1`
+  to `$out/share/hexenwail`. It is marked unfree on purpose, so it is opt-in
+  rather than part of any default build, and it is the basedir the headless
+  run/test tooling uses. What was dropped is *bundling* it — no release
+  artifact ships it.
 - `demo-wasm` — dropped (`menr.6`). A browser build cannot shell out to a
   fetch script, so the ES tier's answer is user-supplied data instead; see
   `uhexen2-4zzm`.

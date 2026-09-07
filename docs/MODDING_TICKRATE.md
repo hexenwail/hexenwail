@@ -76,10 +76,12 @@ self.velocity = self.velocity - 0.8*self.waterlevel*frametime*self.velocity;
 ```
 
 `frametime` is declared in `h2/global.hc:12` and written by the engine on every
-server tick (`*sv_globals.frametime = host_frametime` at
-`engine/hexen2/host.c:837`, where `host_frametime` has just been set to the tick
-interval `1 / sv_physfps` at `engine/hexen2/host.c:957`). It is therefore always
-authoritative and always tracks the cvar. Read it; never assume its value.
+server tick: `engine/hexen2/host.c` assigns `*sv_globals.frametime =
+host_frametime` at each of its three server-frame entry points, and
+`host_frametime` has by then been set to the tick interval — `phys_interval`,
+computed as `1.0 / CLAMP(10.0, sv_physfps.value, 250.0)` in
+`engine/hexen2/host.c :: Host_Frame()`. It is therefore always authoritative and
+always tracks the cvar. Read it; never assume its value.
 
 | Intent | Write this | Not this |
 |---|---|---|

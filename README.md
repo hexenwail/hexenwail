@@ -50,7 +50,7 @@ There are three living branches of the Hexen II engine, depending on what you wa
 |----------|----------|-----------|--------|
 | 64-bit Linux / SDL3 | OpenGL 4.3 | Nix, Flatpak, tarball | Supported |
 | 64-bit Windows / SDL3 | OpenGL 4.3 | ZIP (cross-compiled from Nix) | Supported |
-| Web / WASM (Emscripten) | WebGL2 | dev shell (`shell-wasm.nix`) | Builds and runs; hosting, data delivery, and save persistence in progress |
+| Web / WASM (Emscripten) | WebGL2, or the classic 8bpp software rasterizer | PWA, deployed to GitHub Pages | Supported — [play it in a browser](https://hexenwail.github.io/hexenwail/) |
 
 Planned:
 

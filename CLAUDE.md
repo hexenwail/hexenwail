@@ -5,7 +5,7 @@ This file provides instructions and context for AI coding agents working on this
 ## Issue tracking
 
 This project uses **GitHub Issues** for tracking bugs, features, and work items.
-See [issues](https://github.com/alextnewman/hexenwail/issues) to report or browse.
+See [issues](https://github.com/hexenwail/hexenwail/issues) to report or browse.
 
 You will still see `(uhexen2-xxxx)` ids on older commits and in the docs under
 `history/`. Those are historical references from the retired **bd (beads)** tracker
@@ -81,18 +81,46 @@ achieved.  uhexen2-a5nn.39
 
 ## Build & Test
 
-_Add your build and test commands here_
+Always build through nix, never raw `cmake`/`make` — the flake pins the
+toolchain the CI targets are built with.
 
 ```bash
-# Example:
-# npm install
-# npm test
+nix build .#default          # desktop GL client (glhexen2)
+nix build .#h2ded            # dedicated server
+nix build .#hwsv             # HexenWorld dedicated server
+nix build .#wasm             # WebAssembly/WebGL2 client
+nix develop                  # dev shell, incl. the shader toolchain
 ```
+
+`CONTRIBUTING.md` has the full target list and what CI checks.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+`engine/h2shared/` is compiled by **both** Hexen II and HexenWorld. A change
+there has to be right for both, or fenced `#ifndef H2W` — see issue #42 for
+what has already drifted and how it was resolved.
+
+Rendering is **GL 4.3 core**: no immediate mode, no fixed-function matrix
+stack. There are **three renderer pathways**, and shared client code must clear
+all three:
+
+| Pathway | Guard | Notes |
+|---|---|---|
+| desktop GL 4.3 | `GLQUAKE` + `GL_DLSYM` | the reference path |
+| GLES3 / WebGL2 | `USE_GLES` | also what a desktop `-DUSE_GLES=ON` build takes |
+| 8bpp software | `WEBSOFT` | restored classic rasterizer; failure mode is a **link error** |
+
+Server and physics tick rate is the `sv_physfps` cvar, default **72 Hz**.
+`sys_ticrate` is dedicated-server only — anything describing a 20 Hz client
+tick is stale.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Default to **Ironwail's** approach for rendering features, and read it by ref
+  (see "Reading Ironwail" above), never from the local worktree.
+- Cite commits by **subject**, not hash (see "Citing commits" above).
+- Concurrent sessions share this checkout — read `AGENTS.md` before any
+  `merge`, `rebase`, `stash`, `bisect` or `checkout`.
+- Lower-priority work carried over from the retired tracker lives in
+  [`docs/BACKLOG.md`](docs/BACKLOG.md); anything actively being worked on is a
+  GitHub issue.

@@ -32,6 +32,8 @@ but breaks a shipped mod is a regression.
 ## Building
 
 Full instructions are in [docs/COMPILE](docs/COMPILE).
+[`docs/INDEX.md`](docs/INDEX.md) says what every other document in `docs/` is
+for, and which ones are contracts that code depends on.
 
 ```bash
 nix build              # NixOS
@@ -58,12 +60,24 @@ from a retail copy to run anything.
 Every PR against `master` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 Running the equivalent locally before you push saves a round trip:
 
-- **Seven build targets**, not just the one you tested:
-  `.#nixos`, `.#h2ded` (dedicated server), `.#win64`, `.#h2ded-win64`, `.#utils`
-  (map/model toolchain), `.#utils-win64`, and the Flatpak bundle. The server and
+- **Eight build targets**, not just the one you tested:
+  `.#nixos`, `.#h2ded` (dedicated server), `.#hwsv` (HexenWorld server),
+  `.#win64`, `.#h2ded-win64`, `.#utils` (map/model toolchain), `.#utils-win64`
+  and `.#gamecode` — plus the Flatpak bundle in its own job. The server and
   tools targets exist because they link no SDL, GL or codecs and therefore rot
-  silently when someone edits shared code.
-- **`shellcheck`** on `scripts/mkrelease.sh` and `flatpak/hexenwail.sh`.
+  silently when someone edits shared code; `.#hwsv` is there because
+  `engine/h2shared/` is compiled by HexenWorld too, and a change that is right
+  for Hexen II can fail to build for it (see issue #42).
+- **The PWA / WebAssembly job**, which builds the WebAssembly client and runs
+  `scripts/wasm-validate-artifact.sh` over the assembled artifact. Native
+  targets cannot catch a browser regression, which is the entire reason this
+  job exists.
+- **`shellcheck`** on `scripts/mkrelease.sh`, `flatpak/hexenwail.sh` and the
+  four `scripts/wasm-*.sh` / `scripts/webgl-smoke-test.sh` helpers.
+- **AppStream metainfo validation** (`appstreamcli validate`), because that file
+  is what GNOME Software and KDE Discover read.
+- **Software-renderer menu parity** (`tools/menu_soft_parity.py`) and the
+  **Ironwail scorecard** self-check (`tools/ironwail_scorecard.py --check`).
 - **No bare `EMSCRIPTEN` in C sources.** Use `__EMSCRIPTEN__`. `emscripten.h`
   defines a bare `EMSCRIPTEN` alias under a deprecation pragma, so a guard spelled
   that way only works in translation units that happen to include the header — it
@@ -82,7 +96,7 @@ file, and the naming conventions of the subsystem you are editing. If a file is
 inherited upstream code, keep your diff minimal and surgical so it can still be
 compared against `sezero/uhexen2`.
 
-Two hard rules:
+Three hard rules:
 
 - **No legacy OpenGL.** The renderer is GL 4.3 core: no immediate mode
   (`glBegin`/`glEnd`), no fixed-function state, no hardware matrix stack
@@ -90,6 +104,14 @@ Two hard rules:
   software and matrices are passed to shaders as uniforms.
 - **C11, no compiler-specific extensions** beyond what the tree already relies on.
   The same sources must build under GCC, Clang and mingw-w64.
+- **Shared client code must clear all three renderer pathways.** They are
+  desktop GL 4.3 (`GLQUAKE` + `GL_DLSYM`), GLES3 / WebGL2 (`USE_GLES`, which a
+  desktop `-DUSE_GLES=ON` build also takes) and the restored 8bpp software
+  rasterizer (`WEBSOFT`). Shared code references renderer cvars by symbol, so
+  the software pathway's failure mode is a **link error** rather than a visual
+  one — it will not show up in a desktop build. Likewise `engine/h2shared/` is
+  compiled by both Hexen II and HexenWorld; a Hexen II-only field or builtin
+  added there needs an `#ifndef H2W` fence (issue #42 has the worked examples).
 
 ## Commit messages
 
@@ -110,7 +132,16 @@ one future readers will need.
 You will see a trailing `(uhexen2-xxxx)` on many commits. Those are ids from an
 issue tracker the maintainers have since retired, kept because they are the thread
 back to why a change was made. **You do not need one**, and you should not invent
-one.
+one. There is no tracker left to look them up in; the lower-priority items that
+were open when it was retired are listed in [`docs/BACKLOG.md`](docs/BACKLOG.md),
+one line each, and everything active is a [GitHub issue](https://github.com/hexenwail/hexenwail/issues).
+
+## Looking for something to work on
+
+[GitHub Issues](https://github.com/hexenwail/hexenwail/issues) is the live list.
+Beyond that, [`docs/BACKLOG.md`](docs/BACKLOG.md) holds 177 lower-priority items
+carried over from the retired tracker — real work, just not queued. If you pick
+one up, open a GitHub issue for it and delete the line.
 
 ## Pull requests
 

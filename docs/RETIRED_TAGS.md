@@ -9,18 +9,18 @@ describes, and they are meant to stay visible in the chain.
 | Prefix | Count | Span | What it is |
 |---|---|---|---|
 | `uhexen2-*` | 19 | 2006-04-20 → 2018-06-02 | Upstream Hammer of Thyrion / uHexen2 release history (1.3.1 → 1.5.9), inherited with the fork. `uhexen2-1.5.9` is the final upstream release. |
-| `shanjaq-*` | 2 | 2026-05-31 | Archive markers for the Shanjaq r6303 lineage. Both currently point at the same commit, `86535f664`. |
+| `shanjaq-*` | 2 | 2026-05-31, 2026-06-18 | Archive markers for the Shanjaq r6303 lineage. Both currently point at the same commit, `196718d3e`. |
 
 Unlike the retired `26.03-alpha.*` series below, these do not break version
 sorting — they are not numeric-leading, so nothing compares them against the
-current `0.7.x` scheme. They are clutter only if you consider provenance
+current `0.8.x` scheme. They are clutter only if you consider provenance
 clutter. Leave them alone.
 
 ## Retired: the 26.03-alpha series
 
 The 26.03-alpha.* calendar-scheme tags were retired on 2026-08-11 and deleted
 from the tag list. AppStream and version-sorting tools compare numerically, so
-26.03 outranks every version the current scheme can produce (0.7.x now, 1.x
+26.03 outranks every version the current scheme can produce (0.8.x now, 1.x
 later) — the scheme could never sort correctly alongside its successor.
 
 Nothing was destroyed. Every tag below was first pushed to `refs/archive/`,
@@ -30,9 +30,9 @@ them.
 
 ```bash
 # list the archived refs
-git ls-remote hexenwail 'refs/archive/*'
+git ls-remote origin 'refs/archive/*'
 # fetch them all locally
-git fetch hexenwail 'refs/archive/*:refs/archive/*'
+git fetch origin 'refs/archive/*:refs/archive/*'
 # restore one as a tag
 git tag 26.03-alpha.7i $(git rev-parse refs/archive/26.03-alpha.7i)
 ```

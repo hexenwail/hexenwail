@@ -1,6 +1,16 @@
 # Hi-Z Occlusion-Cull Acceptance Sweep — Runbook (uhexen2-8pzr)
 
-Goal: validate gates 1–4 before flipping `gl_hiz_cull` default from 0 to 1.
+> **This sweep was run and it passed.** `gl_hiz_cull` now defaults to `1`
+> (`engine/h2shared/gl_worldcull.c:86`), and the sweep measured a 44–58% cull
+> rate — see the Hi-Z row in `history/ARE_WE_IRONWAIL_YET.md`. The document is
+> kept because the four gates below are the reusable part: run them again after
+> any change to the culling path, or to re-qualify the default on new hardware.
+>
+> `uhexen2-8pzr` was an id in the **beads** tracker, which is retired. It is a
+> breadcrumb, not a ticket.
+
+Goal, as originally written: validate gates 1–4 before flipping `gl_hiz_cull`
+default from 0 to 1.
 
 ## Prereqs
 - Build at HEAD with `screenhash` command (commit `e140b4c3d` or later).
@@ -57,5 +67,11 @@ developer 1
 **PASS if no `glGetError` or framebuffer-incomplete log lines appear.**
 
 ## Result handling
-- All 4 PASS → edit `engine/h2shared/gl_worldcull.c:80`, change `gl_hiz_cull` default `"0"` → `"1"`, commit, close uhexen2-8pzr.
-- Any FAIL → record the failing gate + numbers in the bead's notes and keep default at 0.
+- All 4 PASS → set the `gl_hiz_cull` default to `"1"` in
+  `engine/h2shared/gl_worldcull.c` and commit. *(Done: the default is `"1"` as
+  of the sweep that closed this out.)*
+- Any FAIL → record the failing gate and its numbers alongside the sweep, and
+  leave the default at 0.
+
+If you are re-running these gates, open a GitHub issue to carry the result;
+there is no beads tracker to record it in any more.

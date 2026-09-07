@@ -34,7 +34,7 @@ When you run `playdemo t9`, the HUD is hidden during playback and restored after
 
 Configure any cvar per-demo:
 
-**mydemo_start.cfg**:
+**mydemostart.cfg**:
 ```
 fov 120
 host_maxfps 60
@@ -42,7 +42,7 @@ hide_hud 1
 gamma 0.8
 ```
 
-**mydemo_end.cfg**:
+**mydemoend.cfg**:
 ```
 fov 90
 host_maxfps 0
@@ -54,13 +54,13 @@ gamma 1.0
 
 Execute console commands before/after demos:
 
-**intro_start.cfg**:
+**introstart.cfg**:
 ```
 // Pre-demo setup
 bgmvolume 0.5
 ```
 
-**intro_end.cfg**:
+**introend.cfg**:
 ```
 // Post-demo cleanup
 bgmvolume 1.0
@@ -106,22 +106,27 @@ scr_demobar_timeout 1
 
 ## File Location
 
-Place config files in the same directory as the demo:
+Put the config beside the demo, on the engine's search path — in practice your
+**gamedir**: `data1/` for the base game, `portals/` for Portals of Praevus, or
+the mod's own directory. The engine resolves it the same way it resolves any
+other file, so a loose file in your gamedir wins over a packed one.
 
-- **Hexen II**: `gamecode/res/h2/`
-- **Hexen II: Portals**: `gamecode/res/portals/`
-- **Other mods**: Appropriate mod data directory
+The paths under `gamecode/res/` are **repository sources**, not runtime
+locations: they are where the shipped configs are authored before packaging.
+`gamecode/res/portals/` holds the only pair that ships (`t9start.cfg` and
+`t9end.cfg`); `gamecode/res/h2/` contains no demo configs at all. Do not tell a
+player to put files there.
 
 ## Example: Clean Demo Footage
 
 To record a demo without HUD:
 
-1. Create `mydemo_start.cfg`:
+1. Create `mydemostart.cfg`:
    ```
    hide_hud 1
    ```
 
-2. Create `mydemo_end.cfg`:
+2. Create `mydemoend.cfg`:
    ```
    hide_hud 0
    ```
@@ -140,4 +145,6 @@ The HUD will be hidden during playback and automatically restored.
 - If both start and end configs don't exist, the system gracefully handles this
 - Settings are not archived—they reset when the engine restarts
 
-For more information, see `engine/hexen2/cl_demo.c` and `engine/hexen2/sbar.c`.
+For more information, see `engine/hexen2/cl_demo.c` (the start/end config
+lookup), `engine/hexen2/sbar.c :: hide_hud`, and — for the playback bar
+documented above — `engine/h2shared/gl_screen.c :: SCR_DrawDemoBar()`.

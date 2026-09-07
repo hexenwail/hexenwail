@@ -1,10 +1,18 @@
 # tools/
 
-Developer analysis tooling. Nothing here is a build input — `tools/` is
-deliberately absent from `filteredSrc`'s allowlist in `flake.nix`, so editing
-anything in this directory leaves the engine's derivation hash untouched and
-invalidates nobody's cached build. Keep it that way: if something in here ever
-needs to run during a build, move it to `scripts/` instead.
+Developer analysis tooling. `tools/` is deliberately absent from
+`filteredSrc`'s allowlist in `flake.nix`, so editing anything here leaves the
+**engine's** derivation hash untouched and invalidates nobody's cached build.
+
+**Two files are exceptions.** `gamecodeSrc` admits `tools/qcdis.py` and
+`tools/check_progs_fields.py` (`flake.nix:144-146`) and the `.#gamecode`
+derivation *runs* them in its check phase (`flake.nix:531`, `:535`, `:579`).
+Editing either one rebuilds `.#gamecode`. If you add a third build-time tool,
+add it to that allowlist and to this paragraph — or put it in `scripts/`
+instead, which is where things that run during a build belong.
+
+Two more are CI gates rather than build inputs: `menu_soft_parity.py` and
+`ironwail_scorecard.py --check` both run in `.github/workflows/lint.yml`.
 
 These are plain scripts, run directly. The Python ones need only stock
 `python3` (no third-party modules) except `pak_extract.py`, which needs Pillow.

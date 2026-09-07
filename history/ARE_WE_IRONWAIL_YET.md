@@ -2,7 +2,7 @@
 
 Feature parity tracker: **Hexenwail** vs **Ironwail**
 
-Last updated: 2026-08-31 
+Last updated: 2026-09-03
 
 Legend: ✅ Ported | 🔶 Partial | ❌ Missing | ➖ N/A (Quake-specific or irrelevant)
 
@@ -260,7 +260,21 @@ Recent Ironwail bug fixes assessed for Hexenwail applicability:
 
 ---
 
-## Bead Coverage
+## Tracker Coverage
+
+> **This section is a record from the retired beads tracker.** The `bd`
+> commands and priority mechanics it describes no longer exist; the
+> `(uhexen2-xxxx)` ids are breadcrumbs, and there is nothing to look them up
+> in. It is kept because the *reasoning* — why bindless was declined, why the
+> light-trace verification passed vacuously three times, why the scorecard must
+> be recounted mechanically — is still the reasoning, and re-deriving it costs
+> more than reading it.
+>
+> **The standing rule survives the tracker.** Ironwail parity work is filed at
+> **P0**, no exemptions. On GitHub that is the `P0` label plus the `epic`
+> umbrella at
+> [#11](https://github.com/hexenwail/hexenwail/issues/11); "surfaced in
+> `bd ready`" below now means "appears in an open P0 issue".
 
 **Superseded 2026-08-31 — the paragraph below was accurate about the rows that existed and wrong about the rows that did not.**  The structural audit added 22 ❌ rows and demoted one ✅ to 🔶, so "no feature is partial" and "no open Ironwail port remains" are both false as of 2026-08-31; 19 children are open under the reopened uhexen2-a5nn.  The rest of this paragraph is left standing because its individual claims about bindless, MSAA and the pointfile are still correct.
 
@@ -290,9 +304,9 @@ When porting a parity item, implement it and update the matching row here to ✅
 1. **Bindless textures** — ❌ genuine parity gap, **declined 2026-08-20** (uhexen2-im9g closed).  The removal in `bbf4a97a5` was correct — the scaffolding could never execute — and the conclusion first drawn from it was not: Ironwail *does* use `ARB_bindless_texture`, on the world draw path, gated on a real extension probe.  So the gap is real.  What settled it was the bead's own first precondition, a measured need: there isn't one.  The world pass binds once per texture chain, so map content caps it at 119 binds/frame worst case across everything shipped, mean 58 (`tools/bsp_texcount.py`).  The second precondition — hardware that can test it — is unmet anyway, since llvmpipe has no `ARB_bindless_texture`.  Nothing is queued against this; reopen the bead if a profile on real hardware contradicts the ceiling, and note the first thing to try is sorting the bmodel surface walk, which needs no extension.
 
 ### Resolved — light-trace cache for alias models (was P1)
-1. **Light-trace cache for alias models** — ✅ Ironwail `e2f39505` (uhexen2-ayrn), **verified and closed 2026-08-20**.  Static audit found no defect; the visual check it was gated on then passed headless on both of its claims — shadow floor height on a cache hit, and lightstyle animation surviving a hit.  See Bead Coverage above for the measurement and for why three earlier attempts passed vacuously.  Closing this closed the umbrella epic uhexen2-a5nn.
+1. **Light-trace cache for alias models** — ✅ Ironwail `e2f39505` (uhexen2-ayrn), **verified and closed 2026-08-20**.  Static audit found no defect; the visual check it was gated on then passed headless on both of its claims — shadow floor height on a cache hit, and lightstyle animation surviving a hit.  See Tracker Coverage above for the measurement and for why three earlier attempts passed vacuously.  Closing this closed the umbrella epic uhexen2-a5nn.
 
-### P0 — All of it (standing rule; see Bead Coverage)
+### P0 — All of it (standing rule; see Tracker Coverage)
 
 *The "Empty" that stood here until 2026-08-31 was true of the queue and false of the gap.*  19 children are open under the reopened umbrella epic uhexen2-a5nn.  Since the standing rule files every Ironwail item at P0, priority no longer discriminates between them — so what follows is a **sequencing** recommendation, which is the thing P0-for-everything throws away.
 
