@@ -45,6 +45,7 @@
 #define HW_SVC_UPDATESIEGETEAM 77
 #define HW_SVC_UPDATESIEGELOSSES 78
 #define HWCL_MAX_ENTITIES 768
+#define HWCL_MAX_CLIENTS 32
 
 typedef enum
 {
@@ -74,6 +75,7 @@ typedef struct
 	int frame;
 	int colormap;
 	int skinnum;
+	int weaponframe;
 	int scale;
 	int drawflags;
 	int abslight;
@@ -81,6 +83,7 @@ typedef struct
 	int effects;
 	vec3_t origin;
 	vec3_t angles;
+	vec3_t velocity;
 } hwcl_entity_state_t;
 
 static struct
@@ -91,6 +94,7 @@ static struct
 	int stats[MAX_CL_STATS];
 	hwcl_entity_state_t baselines[HWCL_MAX_ENTITIES];
 	hwcl_entity_state_t entities[HWCL_MAX_ENTITIES];
+	hwcl_entity_state_t players[HWCL_MAX_CLIENTS];
 } hwcl_server_state;
 
 static void HWCL_StringCmd (const char *command)
@@ -310,29 +314,45 @@ static void HWCL_SkipUsercmd (void)
 	if (bits & (1 << 7)) MSG_ReadByte ();
 }
 
-static void HWCL_SkipPlayerInfo (void)
+static void HWCL_ParsePlayerInfo (void)
 {
+	hwcl_entity_state_t discard = {0};
+	hwcl_entity_state_t *state;
 	int flags;
+	int playernum;
 	int i;
 
-	MSG_ReadByte (); /* player slot */
+	playernum = MSG_ReadByte ();
+	state = playernum >= 0 && playernum < HWCL_MAX_CLIENTS ?
+		&hwcl_server_state.players[playernum] : &discard;
 	flags = (unsigned short)MSG_ReadShort ();
+	state->active = true;
 	for (i = 0; i < 3; i++)
-		MSG_ReadCoord ();
-	MSG_ReadByte (); /* frame */
+		state->origin[i] = MSG_ReadCoord ();
+	state->frame = MSG_ReadByte ();
 	if (flags & (1 << 0)) MSG_ReadByte (); /* msec */
 	if (flags & (1 << 1)) HWCL_SkipUsercmd ();
 	for (i = 0; i < 3; i++)
-		if (flags & (1 << (2 + i))) MSG_ReadShort ();
-	if (flags & (1 << 5)) MSG_ReadShort ();
-	if (flags & (1 << 6)) MSG_ReadByte ();
-	if (flags & (1 << 7)) MSG_ReadByte ();
-	if (flags & (1 << 11)) MSG_ReadByte ();
-	if (flags & (1 << 8)) MSG_ReadByte ();
-	if (flags & (1 << 12)) MSG_ReadByte ();
-	if (flags & (1 << 13)) MSG_ReadByte ();
-	if (flags & (1 << 14)) MSG_ReadByte ();
-	if (flags & (1 << 15)) MSG_ReadShort ();
+	{
+		if (flags & (1 << (2 + i)))
+			state->velocity[i] = MSG_ReadShort ();
+		else
+			state->velocity[i] = 0;
+	}
+	if (flags & (1 << 5)) state->modelindex = MSG_ReadShort ();
+	if (flags & (1 << 6)) state->skinnum = MSG_ReadByte ();
+	if (flags & (1 << 7)) state->effects = MSG_ReadByte ();
+	else state->effects = 0;
+	if (flags & (1 << 11)) state->effects |= MSG_ReadByte () << 8;
+	if (flags & (1 << 8)) state->weaponframe = MSG_ReadByte ();
+	else state->weaponframe = 0;
+	if (flags & (1 << 12)) state->drawflags = MSG_ReadByte ();
+	else state->drawflags = 0;
+	if (flags & (1 << 13)) state->scale = MSG_ReadByte ();
+	else state->scale = 0;
+	if (flags & (1 << 14)) state->abslight = MSG_ReadByte ();
+	else state->abslight = 0;
+	if (flags & (1 << 15)) MSG_ReadShort (); /* weapon-channel sound */
 }
 
 static void HWCL_ParseServerMessage (void)
@@ -401,7 +421,7 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadString ();
 			break;
 		case HW_SVC_PLAYERINFO:
-			HWCL_SkipPlayerInfo ();
+			HWCL_ParsePlayerInfo ();
 			break;
 		case HW_SVC_PACKETENTITIES:
 			HWCL_ParsePacketEntities (false);
