@@ -31,8 +31,11 @@
 #define HW_SVC_UPDATEENTERTIME 37
 #define HW_SVC_UPDATESTATLONG 38
 #define HW_SVC_UPDATEUSERINFO 40
+#define HW_SVC_PLAYERINFO 42
 #define HW_SVC_MODELLIST 45
 #define HW_SVC_SOUNDLIST 46
+#define HW_SVC_PACKETENTITIES 47
+#define HW_SVC_DELTAPACKETENTITIES 48
 #define HW_SVC_UPDATEDMINFO 75
 #define HW_SVC_UPDATESIEGEINFO 76
 #define HW_SVC_UPDATESIEGETEAM 77
@@ -159,6 +162,99 @@ static void HWCL_SkipBaseline (void)
 	}
 }
 
+/* Consume an entity delta without retaining it.  This keeps the packet stream
+ * synchronised until the state adapter can map these records to Hexenwail's
+ * client entities. */
+static void HWCL_SkipEntityDelta (int bits)
+{
+	/* The low nine bits are the entity number, not flags. */
+	bits &= ~511;
+	if (bits & (1 << 15))
+		bits |= MSG_ReadByte ();
+	if (bits & (1 << 7))
+		bits |= MSG_ReadByte () << 16;
+	if (bits & (1 << 16))
+	{
+		if (bits & (1 << 6))
+			MSG_ReadShort ();
+		else
+			MSG_ReadByte ();
+	}
+	if (bits & (1 << 13)) MSG_ReadByte ();
+	if (bits & (1 << 3)) MSG_ReadByte ();
+	if (bits & (1 << 4)) MSG_ReadByte ();
+	if (bits & (1 << 18)) MSG_ReadByte ();
+	if (bits & (1 << 5)) MSG_ReadLong ();
+	if (bits & (1 << 9)) MSG_ReadCoord ();
+	if (bits & (1 << 0)) MSG_ReadAngle ();
+	if (bits & (1 << 10)) MSG_ReadCoord ();
+	if (bits & (1 << 12)) MSG_ReadAngle ();
+	if (bits & (1 << 11)) MSG_ReadCoord ();
+	if (bits & (1 << 1)) MSG_ReadAngle ();
+	if (bits & (1 << 2)) MSG_ReadByte ();
+	if (bits & (1 << 19)) MSG_ReadByte ();
+	if (bits & (1 << 17)) MSG_ReadShort ();
+	if (bits & (1 << 20)) MSG_ReadByte ();
+}
+
+static void HWCL_SkipPacketEntities (qboolean delta)
+{
+	int bits;
+
+	if (delta)
+		MSG_ReadByte (); /* source sequence */
+	for (;;)
+	{
+		bits = (unsigned short)MSG_ReadShort ();
+		if (!bits || msg_badread)
+			return;
+		if (!(bits & (1 << 14))) /* U_REMOVE has no payload */
+			HWCL_SkipEntityDelta (bits);
+		if (msg_badread)
+			return;
+	}
+}
+
+static void HWCL_SkipUsercmd (void)
+{
+	int bits = MSG_ReadByte ();
+
+	if (bits & (1 << 0)) MSG_ReadShort ();
+	MSG_ReadShort (); /* angle 2 is always present */
+	if (bits & (1 << 1)) MSG_ReadShort ();
+	if (bits & (1 << 2)) MSG_ReadChar ();
+	if (bits & (1 << 3)) MSG_ReadChar ();
+	if (bits & (1 << 4)) MSG_ReadChar ();
+	if (bits & (1 << 5)) MSG_ReadByte ();
+	if (bits & (1 << 6)) MSG_ReadByte ();
+	if (bits & (1 << 7)) MSG_ReadByte ();
+}
+
+static void HWCL_SkipPlayerInfo (void)
+{
+	int flags;
+	int i;
+
+	MSG_ReadByte (); /* player slot */
+	flags = (unsigned short)MSG_ReadShort ();
+	for (i = 0; i < 3; i++)
+		MSG_ReadCoord ();
+	MSG_ReadByte (); /* frame */
+	if (flags & (1 << 0)) MSG_ReadByte (); /* msec */
+	if (flags & (1 << 1)) HWCL_SkipUsercmd ();
+	for (i = 0; i < 3; i++)
+		if (flags & (1 << (2 + i))) MSG_ReadShort ();
+	if (flags & (1 << 5)) MSG_ReadShort ();
+	if (flags & (1 << 6)) MSG_ReadByte ();
+	if (flags & (1 << 7)) MSG_ReadByte ();
+	if (flags & (1 << 11)) MSG_ReadByte ();
+	if (flags & (1 << 8)) MSG_ReadByte ();
+	if (flags & (1 << 12)) MSG_ReadByte ();
+	if (flags & (1 << 13)) MSG_ReadByte ();
+	if (flags & (1 << 14)) MSG_ReadByte ();
+	if (flags & (1 << 15)) MSG_ReadShort ();
+}
+
 static void HWCL_ParseServerMessage (void)
 {
 	int command;
@@ -201,6 +297,15 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadByte ();
 			MSG_ReadLong ();
 			MSG_ReadString ();
+			break;
+		case HW_SVC_PLAYERINFO:
+			HWCL_SkipPlayerInfo ();
+			break;
+		case HW_SVC_PACKETENTITIES:
+			HWCL_SkipPacketEntities (false);
+			break;
+		case HW_SVC_DELTAPACKETENTITIES:
+			HWCL_SkipPacketEntities (true);
 			break;
 		case HW_SVC_UPDATEDMINFO:
 			MSG_ReadByte ();
