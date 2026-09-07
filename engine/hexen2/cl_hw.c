@@ -34,6 +34,7 @@
 #define HW_SVC_LIGHTSTYLE 12
 #define HW_SVC_UPDATEFRAGS 14
 #define HW_SVC_STOPSOUND 16
+#define HW_SVC_PARTICLE 18
 #define HW_SVC_SPAWNBASELINE 22
 #define HW_SVC_CENTERPRINT 26
 #define HW_SVC_KILLEDMONSTER 27
@@ -60,7 +61,12 @@
 #define HW_SVC_MAXSPEED 49
 #define HW_SVC_ENTGRAVITY 50
 #define HW_SVC_UPDATE_INV 58
+#define HW_SVC_PARTICLE2 59
+#define HW_SVC_PARTICLE3 60
+#define HW_SVC_PARTICLE4 61
 #define HW_SVC_MIDI_NAME 65
+#define HW_SVC_RAINEFFECT 66
+#define HW_SVC_PACKMISSILE 67
 #define HW_SVC_TARGETUPDATE 69
 #define HW_SVC_SOUND_UPDATE_POS 71
 #define HW_SVC_UPDATE_PIV 72
@@ -397,6 +403,71 @@ static void HWCL_SkipAngles (int count)
 		MSG_ReadAngle ();
 }
 
+static void HWCL_SkipFloats (int count)
+{
+	int i;
+
+	for (i = 0; i < count; i++)
+		MSG_ReadFloat ();
+}
+
+static void HWCL_ParseParticle (void)
+{
+	HWCL_SkipCoords (3);
+	MSG_ReadChar ();
+	MSG_ReadChar ();
+	MSG_ReadChar ();
+	MSG_ReadByte (); /* count */
+	MSG_ReadByte (); /* color */
+}
+
+static void HWCL_ParseParticle2 (void)
+{
+	HWCL_SkipCoords (3);
+	HWCL_SkipFloats (6); /* dmin, dmax */
+	MSG_ReadShort (); /* color */
+	MSG_ReadByte (); /* count */
+	MSG_ReadByte (); /* effect */
+}
+
+static void HWCL_ParseParticle3 (void)
+{
+	HWCL_SkipCoords (3);
+	MSG_ReadByte (); /* box x */
+	MSG_ReadByte (); /* box y */
+	MSG_ReadByte (); /* box z */
+	MSG_ReadShort (); /* color */
+	MSG_ReadByte (); /* count */
+	MSG_ReadByte (); /* effect */
+}
+
+static void HWCL_ParseParticle4 (void)
+{
+	HWCL_SkipCoords (3);
+	MSG_ReadByte (); /* radius */
+	MSG_ReadShort (); /* color */
+	MSG_ReadByte (); /* count */
+	MSG_ReadByte (); /* effect */
+}
+
+static void HWCL_ParseRainEffect (void)
+{
+	HWCL_SkipCoords (6); /* origin, size */
+	HWCL_SkipAngles (2); /* x/y direction */
+	MSG_ReadShort (); /* color */
+	MSG_ReadShort (); /* count */
+}
+
+static void HWCL_ParsePackedMissiles (void)
+{
+	int count;
+	int i;
+
+	count = MSG_ReadByte ();
+	for (i = 0; i < count * 5; i++)
+		MSG_ReadByte ();
+}
+
 static void HWCL_ParseInventoryUpdate (void)
 {
 	unsigned int sc1 = 0;
@@ -568,6 +639,9 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_STOPSOUND:
 			MSG_ReadShort ();
 			break;
+		case HW_SVC_PARTICLE:
+			HWCL_ParseParticle ();
+			break;
 		case HW_SVC_CENTERPRINT:
 			MSG_ReadString ();
 			break;
@@ -643,6 +717,21 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_UPDATE_INV:
 			HWCL_ParseInventoryUpdate ();
+			break;
+		case HW_SVC_PARTICLE2:
+			HWCL_ParseParticle2 ();
+			break;
+		case HW_SVC_PARTICLE3:
+			HWCL_ParseParticle3 ();
+			break;
+		case HW_SVC_PARTICLE4:
+			HWCL_ParseParticle4 ();
+			break;
+		case HW_SVC_RAINEFFECT:
+			HWCL_ParseRainEffect ();
+			break;
+		case HW_SVC_PACKMISSILE:
+			HWCL_ParsePackedMissiles ();
 			break;
 		case HW_SVC_TARGETUPDATE:
 			MSG_ReadByte ();
