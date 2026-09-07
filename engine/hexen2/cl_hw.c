@@ -21,29 +21,61 @@
 #define HW_PROTOCOL_VERSION 25
 #define HW_PROTOCOL_VERSION_EXT 26
 #define HW_PROTOCOL_VERSION_HEXENWAIL_1 100
+#define HW_SVC_NOP 1
 #define HW_SVC_DISCONNECT 2
 #define HW_SVC_UPDATESTAT 3
 #define HW_SVC_SETVIEW 5
+#define HW_SVC_SOUND 6
 #define HW_SVC_TIME 7
 #define HW_SVC_PRINT 8
 #define HW_SVC_STUFFTEXT 9
 #define HW_SVC_SETANGLE 10
 #define HW_SVC_SERVERDATA 11
 #define HW_SVC_LIGHTSTYLE 12
+#define HW_SVC_UPDATEFRAGS 14
+#define HW_SVC_STOPSOUND 16
 #define HW_SVC_SPAWNBASELINE 22
+#define HW_SVC_CENTERPRINT 26
+#define HW_SVC_KILLEDMONSTER 27
+#define HW_SVC_FOUNDSECRET 28
+#define HW_SVC_SPAWNSTATICSOUND 29
+#define HW_SVC_INTERMISSION 30
+#define HW_SVC_FINALE 31
+#define HW_SVC_CDTRACK 32
+#define HW_SVC_SELLSCREEN 33
+#define HW_SVC_SMALLKICK 34
+#define HW_SVC_BIGKICK 35
 #define HW_SVC_UPDATEPING 36
 #define HW_SVC_UPDATEENTERTIME 37
 #define HW_SVC_UPDATESTATLONG 38
+#define HW_SVC_MUZZLEFLASH 39
 #define HW_SVC_UPDATEUSERINFO 40
+#define HW_SVC_DOWNLOAD 41
 #define HW_SVC_PLAYERINFO 42
+#define HW_SVC_CHOKECOUNT 44
 #define HW_SVC_MODELLIST 45
 #define HW_SVC_SOUNDLIST 46
 #define HW_SVC_PACKETENTITIES 47
 #define HW_SVC_DELTAPACKETENTITIES 48
+#define HW_SVC_MAXSPEED 49
+#define HW_SVC_ENTGRAVITY 50
+#define HW_SVC_MIDI_NAME 65
+#define HW_SVC_TARGETUPDATE 69
+#define HW_SVC_SOUND_UPDATE_POS 71
+#define HW_SVC_UPDATE_PIV 72
+#define HW_SVC_PLAYER_SOUND 73
+#define HW_SVC_UPDATEPCLASS 74
 #define HW_SVC_UPDATEDMINFO 75
 #define HW_SVC_UPDATESIEGEINFO 76
 #define HW_SVC_UPDATESIEGETEAM 77
 #define HW_SVC_UPDATESIEGELOSSES 78
+#define HW_SVC_HASKEY 79
+#define HW_SVC_NONEHASKEY 80
+#define HW_SVC_ISDOC 81
+#define HW_SVC_NODOC 82
+#define HW_SVC_PLAYERSKIPPED 83
+#define HW_SND_VOLUME (1 << 15)
+#define HW_SND_ATTENUATION (1 << 14)
 #define HWCL_MAX_ENTITIES 768
 #define HWCL_MAX_CLIENTS 32
 
@@ -92,6 +124,12 @@ static struct
 	vec3_t viewangles;
 	int viewentity;
 	int stats[MAX_CL_STATS];
+	int cdtrack;
+	int chokecount;
+	int piv;
+	float maxspeed;
+	float entgravity;
+	char midi_name[MAX_QPATH];
 	hwcl_entity_state_t baselines[HWCL_MAX_ENTITIES];
 	hwcl_entity_state_t entities[HWCL_MAX_ENTITIES];
 	hwcl_entity_state_t players[HWCL_MAX_CLIENTS];
@@ -314,6 +352,50 @@ static void HWCL_SkipUsercmd (void)
 	if (bits & (1 << 7)) MSG_ReadByte ();
 }
 
+static void HWCL_ParseSound (void)
+{
+	int channel;
+	int i;
+
+	channel = MSG_ReadShort ();
+	if (channel & HW_SND_VOLUME)
+		MSG_ReadByte ();
+	if (channel & HW_SND_ATTENUATION)
+		MSG_ReadByte ();
+	MSG_ReadByte (); /* sound index */
+	for (i = 0; i < 3; i++)
+		MSG_ReadCoord ();
+}
+
+static void HWCL_ParseDownload (void)
+{
+	int size;
+	int i;
+
+	size = MSG_ReadShort ();
+	MSG_ReadByte (); /* percent */
+	if (size <= 0 || msg_badread)
+		return;
+	for (i = 0; i < size; i++)
+		MSG_ReadByte ();
+}
+
+static void HWCL_SkipCoords (int count)
+{
+	int i;
+
+	for (i = 0; i < count; i++)
+		MSG_ReadCoord ();
+}
+
+static void HWCL_SkipAngles (int count)
+{
+	int i;
+
+	for (i = 0; i < count; i++)
+		MSG_ReadAngle ();
+}
+
 static void HWCL_ParsePlayerInfo (void)
 {
 	hwcl_entity_state_t discard = {0};
@@ -365,6 +447,8 @@ static void HWCL_ParseServerMessage (void)
 		command = MSG_ReadByte ();
 		switch (command)
 		{
+		case HW_SVC_NOP:
+			break;
 		case HW_SVC_PRINT:
 			MSG_ReadByte (); /* print level */
 			text = MSG_ReadString ();
@@ -400,6 +484,45 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadByte ();
 			MSG_ReadString ();
 			break;
+		case HW_SVC_SOUND:
+			HWCL_ParseSound ();
+			break;
+		case HW_SVC_UPDATEFRAGS:
+			MSG_ReadByte ();
+			MSG_ReadShort ();
+			break;
+		case HW_SVC_STOPSOUND:
+			MSG_ReadShort ();
+			break;
+		case HW_SVC_CENTERPRINT:
+			MSG_ReadString ();
+			break;
+		case HW_SVC_KILLEDMONSTER:
+		case HW_SVC_FOUNDSECRET:
+		case HW_SVC_SELLSCREEN:
+		case HW_SVC_SMALLKICK:
+		case HW_SVC_BIGKICK:
+			break;
+		case HW_SVC_SPAWNSTATICSOUND:
+			HWCL_SkipCoords (3);
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			break;
+		case HW_SVC_INTERMISSION:
+			HWCL_SkipCoords (3);
+			HWCL_SkipAngles (3);
+			break;
+		case HW_SVC_FINALE:
+			MSG_ReadString ();
+			break;
+		case HW_SVC_CDTRACK:
+			hwcl_server_state.cdtrack = MSG_ReadByte ();
+			break;
+		case HW_SVC_MIDI_NAME:
+			q_strlcpy (hwcl_server_state.midi_name, MSG_ReadString (),
+					sizeof(hwcl_server_state.midi_name));
+			break;
 		case HW_SVC_UPDATEPING:
 			MSG_ReadByte ();
 			MSG_ReadShort ();
@@ -415,10 +538,16 @@ static void HWCL_ParseServerMessage (void)
 			else
 				MSG_ReadLong ();
 			break;
+		case HW_SVC_MUZZLEFLASH:
+			MSG_ReadShort ();
+			break;
 		case HW_SVC_UPDATEUSERINFO:
 			MSG_ReadByte ();
 			MSG_ReadLong ();
 			MSG_ReadString ();
+			break;
+		case HW_SVC_DOWNLOAD:
+			HWCL_ParseDownload ();
 			break;
 		case HW_SVC_PLAYERINFO:
 			HWCL_ParsePlayerInfo ();
@@ -428,6 +557,46 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_DELTAPACKETENTITIES:
 			HWCL_ParsePacketEntities (true);
+			break;
+		case HW_SVC_CHOKECOUNT:
+			hwcl_server_state.chokecount = MSG_ReadByte ();
+			break;
+		case HW_SVC_MAXSPEED:
+			hwcl_server_state.maxspeed = MSG_ReadFloat ();
+			break;
+		case HW_SVC_ENTGRAVITY:
+			hwcl_server_state.entgravity = MSG_ReadFloat ();
+			break;
+		case HW_SVC_TARGETUPDATE:
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			break;
+		case HW_SVC_SOUND_UPDATE_POS:
+			MSG_ReadShort ();
+			HWCL_SkipCoords (3);
+			break;
+		case HW_SVC_UPDATE_PIV:
+			hwcl_server_state.piv = MSG_ReadLong ();
+			break;
+		case HW_SVC_PLAYER_SOUND:
+			MSG_ReadByte ();
+			HWCL_SkipCoords (3);
+			MSG_ReadShort ();
+			break;
+		case HW_SVC_UPDATEPCLASS:
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			break;
+		case HW_SVC_HASKEY:
+		case HW_SVC_NONEHASKEY:
+		case HW_SVC_ISDOC:
+		case HW_SVC_NODOC:
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			break;
+		case HW_SVC_PLAYERSKIPPED:
+			MSG_ReadByte ();
 			break;
 		case HW_SVC_UPDATEDMINFO:
 			MSG_ReadByte ();
