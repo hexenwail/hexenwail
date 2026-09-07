@@ -1326,10 +1326,17 @@ int CL_ReadFromServer (void)
 	if (HWCL_Active ())
 	{
 		/* HexenWorld owns its socket and netchan; do not ask the Hexen II
-		 * qsocket layer to read a null cls.netcon. */
-		CL_AdvanceTime ();
+		 * qsocket layer to read a null cls.netcon.  Its retained snapshots
+		 * feed the maintained renderer through the same relink path as H2. */
+		HWCL_ApplyState ();
+		CL_RelinkEntities ();
+		CL_UpdateEffects ();
+		CL_UpdateTEnts ();
+		CL_UpdateDevStats ();
 		return 0;
 	}
+	if (!cls.netcon)
+		return 0;
 #endif
 
 	/* Demo playback runs this clock at cls.demospeed, which is what pause,

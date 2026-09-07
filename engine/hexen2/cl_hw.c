@@ -200,6 +200,8 @@ static struct
 	int cdtrack;
 	int chokecount;
 	int piv;
+	int playerclass[HWCL_MAX_CLIENTS];
+	int playerlevel[HWCL_MAX_CLIENTS];
 	float maxspeed;
 	float entgravity;
 	char midi_name[MAX_QPATH];
@@ -221,6 +223,13 @@ typedef struct
 
 static hwcl_usercmd_t hwcl_cmd_history[3];
 static qboolean hwcl_have_cmd_history;
+static char hwcl_model_names[MAX_MODELS][MAX_QPATH];
+static char hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
+static int hwcl_model_count;
+static int hwcl_sound_count;
+static int hwcl_playernum;
+
+extern qmodel_t *player_models[MAX_PLAYER_CLASS];
 
 static void HWCL_StringCmd (const char *command)
 {
@@ -281,21 +290,85 @@ static qboolean HWCL_ValidProtocol (int protocol)
 		protocol == HW_PROTOCOL_VERSION_HEXENWAIL_1;
 }
 
-/* Consume a chunked (protocol 26+) or classic precache list.  Asset loading
- * remains a later integration layer; consuming the lists here is still
- * important because it advances the reliable signon handshake. */
+static void HWCL_LoadModels (void)
+{
+	static const char *player_names[MAX_PLAYER_CLASS] = {
+		"models/paladin.mdl", "models/crusader.mdl", "models/necro.mdl",
+		"models/assassin.mdl", "models/succubus.mdl"
+	};
+	qmodel_t *model;
+	int i;
+
+	memset (cl.model_precache, 0, sizeof(cl.model_precache));
+	for (i = 1; i < hwcl_model_count; i++)
+	{
+		if (!hwcl_model_names[i][0])
+			continue;
+		model = Mod_ForName (hwcl_model_names[i], false);
+		if (!model)
+		{
+			Con_DPrintf ("HexenWorld model %d unavailable: %s\n", i,
+					hwcl_model_names[i]);
+			continue;
+		}
+		cl.model_precache[i] = model;
+	}
+
+	for (i = 0; i < MAX_PLAYER_CLASS; i++)
+		if (!player_models[i])
+			player_models[i] = Mod_ForName (player_names[i], false);
+
+	if (!cl.model_precache[1])
+	{
+		Con_Printf ("HexenWorld world model unavailable: %s\n",
+				hwcl_model_names[1]);
+		return;
+	}
+
+	cl.worldmodel = cl_entities[0].model = cl.model_precache[1];
+	COM_FileBase (hwcl_model_names[1], cl.mapname, sizeof(cl.mapname));
+	R_NewMap ();
+}
+
+static void HWCL_LoadSounds (void)
+{
+	int i;
+
+	S_ClearPrecache ();
+	memset (cl.sound_precache, 0, sizeof(cl.sound_precache));
+	S_BeginPrecaching ();
+	for (i = 1; i < hwcl_sound_count; i++)
+	{
+		if (hwcl_sound_names[i][0])
+			cl.sound_precache[i] = S_PrecacheSound (hwcl_sound_names[i]);
+	}
+	S_EndPrecaching ();
+	CL_PrecacheTEntSounds ();
+}
+
+/* Consume a chunked (protocol 26+) or classic precache list and retain its
+ * indices.  The chunk command uses zero-based offsets, while wire indices
+ * start at one. */
 static void HWCL_ParsePrecacheList (qboolean models)
 {
-	int index = 0;
+	int index = 1;
+	int next;
 	const char *entry;
 
 	if (hwcl_protocol >= HW_PROTOCOL_VERSION_EXT)
-		index = MSG_ReadLong ();
+		index = MSG_ReadLong () + 1;
 	for (;;)
 	{
 		entry = MSG_ReadString ();
 		if (!entry[0] || msg_badread)
 			break;
+		if (index > 0 && (models ? index < MAX_MODELS : index < MAX_SOUNDS))
+		{
+			if (models)
+				q_strlcpy (hwcl_model_names[index], entry, MAX_QPATH);
+			else
+				q_strlcpy (hwcl_sound_names[index], entry, MAX_QPATH);
+		}
 		index++;
 	}
 	if (msg_badread)
@@ -303,24 +376,30 @@ static void HWCL_ParsePrecacheList (qboolean models)
 
 	if (hwcl_protocol >= HW_PROTOCOL_VERSION_EXT)
 	{
-		index = MSG_ReadLong ();
+		next = MSG_ReadLong ();
 		if (msg_badread)
 			return;
-		if (index)
+		if (next)
 		{
 			HWCL_StringCmd (va ("%slist %d %d", models ? "model" : "sound",
-					hwcl_servercount, index));
+					hwcl_servercount, next));
 			return;
 		}
 	}
 
 	if (models)
 	{
+		hwcl_model_count = index > hwcl_model_count ? index : hwcl_model_count;
+		HWCL_LoadModels ();
 		Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
 		HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
 	}
 	else
+	{
+		hwcl_sound_count = index > hwcl_sound_count ? index : hwcl_sound_count;
+		HWCL_LoadSounds ();
 		HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
+	}
 }
 
 static void HWCL_ParseServerData (void)
@@ -346,9 +425,35 @@ static void HWCL_ParseServerData (void)
 	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
 	if (hwcl_protocol >= HW_PROTOCOL_VERSION)
 		for (i = 0; i < 10; i++)
-			MSG_ReadFloat ();
+		{
+			float movevar = MSG_ReadFloat ();
+			if (i == 2)
+				hwcl_server_state.maxspeed = movevar;
+			if (i == 9)
+				hwcl_server_state.entgravity = movevar;
+		}
 	if (msg_badread)
 		return;
+
+	CL_ClearState ();
+	cls.signon = 0;
+	memset (hwcl_model_names, 0, sizeof(hwcl_model_names));
+	memset (hwcl_sound_names, 0, sizeof(hwcl_sound_names));
+	hwcl_model_count = 1;
+	hwcl_sound_count = 1;
+	hwcl_playernum = playernum & 127;
+	q_strlcpy (cl.levelname, levelname, sizeof(cl.levelname));
+	q_strlcpy (cl.mod_name, gamedir, sizeof(cl.mod_name));
+	cl.maxclients = HWCL_MAX_CLIENTS;
+	cl.scores = (scoreboard_t *)Hunk_AllocName (
+			cl.maxclients * sizeof(*cl.scores), "hw_scores");
+	memset (cl.scores, 0, cl.maxclients * sizeof(*cl.scores));
+	cl.gametype = GAME_DEATHMATCH;
+	cl.viewentity = hwcl_playernum + 1;
+	hwcl_server_state.viewentity = cl.viewentity;
+	if (hwcl_playernum >= 0 && hwcl_playernum < HWCL_MAX_CLIENTS)
+		hwcl_server_state.playerclass[hwcl_playernum] =
+			(int)cl_playerclass.value;
 
 	Con_Printf ("HexenWorld protocol %d, game %s, level %s (player %d%s).\n",
 			hwcl_protocol, gamedir, levelname, playernum & 127,
@@ -603,6 +708,35 @@ static void HWCL_ParseNails (void)
 		MSG_ReadByte ();
 }
 
+static const char *HWCL_InfoValue (const char *info, const char *key)
+{
+	static char value[512];
+	char current[512];
+	const char *p = info;
+	int i;
+
+	if (*p == '\\')
+		p++;
+	while (*p)
+	{
+		i = 0;
+		while (*p && *p != '\\' && i < (int)sizeof(current) - 1)
+			current[i++] = *p++;
+		current[i] = 0;
+		if (*p == '\\')
+			p++;
+		i = 0;
+		while (*p && *p != '\\' && i < (int)sizeof(value) - 1)
+			value[i++] = *p++;
+		value[i] = 0;
+		if (!strcmp (current, key))
+			return value;
+		if (*p == '\\')
+			p++;
+	}
+	return "";
+}
+
 static void HWCL_ParseDamage (void)
 {
 	MSG_ReadByte (); /* armor damage */
@@ -839,6 +973,124 @@ static qboolean HWCL_ParseMultiEffect (void)
 	return !msg_badread;
 }
 
+static qmodel_t *HWCL_ModelForEntity (const hwcl_entity_state_t *state,
+		qboolean player)
+{
+	int playerclass;
+
+	if (state->modelindex > 0 && state->modelindex < MAX_MODELS)
+		return cl.model_precache[state->modelindex];
+	if (!player)
+		return NULL;
+
+	playerclass = hwcl_server_state.playerclass[state - hwcl_server_state.players];
+	if (playerclass < 1 || playerclass > MAX_PLAYER_CLASS)
+		playerclass = 1;
+	return player_models[playerclass - 1];
+}
+
+static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
+		qboolean player)
+{
+	entity_t *ent = &cl_entities[entitynum];
+	qmodel_t *model;
+	qboolean was_on;
+	qboolean model_changed;
+
+	model = HWCL_ModelForEntity (state, player);
+	was_on = (ent->baseline.flags & BE_ON) != 0;
+	model_changed = ent->model != model;
+	if (model_changed && ent->efrag)
+		R_RemoveEfrags (ent);
+	if (!was_on || model_changed)
+		ent->forcelink = true;
+
+	ent->baseline.flags = BE_ON;
+	ent->baseline.modelindex = state->modelindex;
+	ent->baseline.frame = state->frame;
+	ent->baseline.colormap = state->colormap;
+	ent->baseline.skin = state->skinnum;
+	ent->baseline.effects = state->effects;
+	ent->baseline.scale = state->scale;
+	ent->baseline.drawflags = state->drawflags;
+	ent->baseline.abslight = state->abslight;
+	ent->baseline.alpha = (byte)state->alpha;
+
+	if (was_on)
+	{
+		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
+		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
+	}
+	VectorCopy (state->origin, ent->msg_origins[0]);
+	VectorCopy (state->angles, ent->msg_angles[0]);
+	ent->msgtime = cl.mtime[0];
+	ent->model = model;
+	ent->frame = state->frame;
+	ent->colormap = vid.colormap;
+	ent->sourcecolormap = vid.colormap;
+	ent->skinnum = state->skinnum;
+	ent->effects = state->effects;
+	ent->scale = state->scale;
+	ent->drawflags = state->drawflags;
+	ent->abslight = state->abslight;
+	ent->alpha = (byte)state->alpha;
+
+	if (model_changed && model && cl.worldmodel)
+		R_AddEfrags (ent);
+}
+
+static void HWCL_ClearEntity (int entitynum)
+{
+	entity_t *ent = &cl_entities[entitynum];
+
+	if (ent->efrag)
+		R_RemoveEfrags (ent);
+	memset (ent, 0, sizeof(*ent));
+}
+
+void HWCL_ApplyState (void)
+{
+	const hwcl_entity_state_t *state;
+	int i;
+	int highest = 0;
+	int viewentity;
+
+	cl.mtime[1] = cl.mtime[0];
+	cl.mtime[0] = hwcl_server_state.server_time;
+	cl.time = cl.mtime[0];
+	for (i = 0; i < MAX_CL_STATS; i++)
+		cl.stats[i] = hwcl_server_state.stats[i];
+
+	for (i = 1; i < HWCL_MAX_ENTITIES; i++)
+	{
+		if (i <= HWCL_MAX_CLIENTS)
+			state = &hwcl_server_state.players[i - 1];
+		else
+			state = &hwcl_server_state.entities[i];
+
+		if (state->active)
+		{
+			HWCL_CopyEntity (i, state, i <= HWCL_MAX_CLIENTS);
+			highest = i;
+		}
+		else if (cl_entities[i].baseline.flags & BE_ON)
+			HWCL_ClearEntity (i);
+	}
+
+	viewentity = hwcl_server_state.viewentity;
+	if (viewentity < 1 || viewentity >= HWCL_MAX_ENTITIES)
+		viewentity = hwcl_playernum + 1;
+	cl.viewentity = viewentity;
+	if (viewentity <= HWCL_MAX_CLIENTS)
+	{
+		state = &hwcl_server_state.players[viewentity - 1];
+		VectorCopy (state->velocity, cl.velocity);
+	}
+	cl.num_entities = highest + 1;
+	if (cl.num_entities < 1)
+		cl.num_entities = 1;
+}
+
 static void HWCL_ParseInventoryUpdate (void)
 {
 	unsigned int sc1 = 0;
@@ -1005,8 +1257,12 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParseSound ();
 			break;
 		case HW_SVC_UPDATEFRAGS:
-			MSG_ReadByte ();
-			MSG_ReadShort ();
+			{
+				int slot = MSG_ReadByte ();
+				int frags = MSG_ReadShort ();
+				if (slot >= 0 && slot < cl.maxclients && cl.scores)
+					cl.scores[slot].frags = frags;
+			}
 			break;
 		case HW_SVC_STOPSOUND:
 			MSG_ReadShort ();
@@ -1065,8 +1321,12 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadShort ();
 			break;
 		case HW_SVC_UPDATEENTERTIME:
-			MSG_ReadByte ();
-			MSG_ReadFloat ();
+			{
+				int slot = MSG_ReadByte ();
+				float entertime = MSG_ReadFloat ();
+				if (slot >= 0 && slot < cl.maxclients && cl.scores)
+					cl.scores[slot].entertime = entertime;
+			}
 			break;
 		case HW_SVC_UPDATESTATLONG:
 			command = MSG_ReadByte ();
@@ -1079,9 +1339,23 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadShort ();
 			break;
 		case HW_SVC_UPDATEUSERINFO:
-			MSG_ReadByte ();
-			MSG_ReadLong ();
-			MSG_ReadString ();
+			{
+				int slot = MSG_ReadByte ();
+				int uid = MSG_ReadLong ();
+				const char *userinfo = MSG_ReadString ();
+				const char *name;
+				(void)uid;
+				if (slot >= 0 && slot < cl.maxclients && cl.scores)
+				{
+					name = HWCL_InfoValue (userinfo, "name");
+					q_strlcpy (cl.scores[slot].name, name,
+							sizeof(cl.scores[slot].name));
+					cl.scores[slot].colors = atoi (
+						HWCL_InfoValue (userinfo, "topcolor")) << 4;
+					cl.scores[slot].colors |= atoi (
+						HWCL_InfoValue (userinfo, "bottomcolor"));
+				}
+			}
 			break;
 		case HW_SVC_DOWNLOAD:
 			HWCL_ParseDownload ();
@@ -1164,8 +1438,15 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadShort ();
 			break;
 		case HW_SVC_UPDATEPCLASS:
-			MSG_ReadByte ();
-			MSG_ReadByte ();
+			{
+				int slot = MSG_ReadByte ();
+				int packed = MSG_ReadByte ();
+				if (slot >= 0 && slot < HWCL_MAX_CLIENTS)
+				{
+					hwcl_server_state.playerclass[slot] = (packed >> 5) & 7;
+					hwcl_server_state.playerlevel[slot] = packed & 31;
+				}
+			}
 			break;
 		case HW_SVC_HASKEY:
 		case HW_SVC_NONEHASKEY:
@@ -1278,6 +1559,8 @@ qboolean HWCL_Connect (const char *host)
 	if (!hwcl_server.port)
 		hwcl_server.port = BigShort (HW_PORT_SERVER);
 
+	CL_ClearState ();
+	cls.state = ca_connected;
 	hwcl_state = hwcl_connecting;
 	HWCL_SendConnectPacket ();
 	return true;
@@ -1362,6 +1645,7 @@ void HWCL_Disconnect (void)
 	}
 	hwcl_state = hwcl_disconnected;
 	hwcl_received_packet = false;
+	cls.state = ca_disconnected;
 }
 
 static void HWCL_ConnectionlessPacket (void)
