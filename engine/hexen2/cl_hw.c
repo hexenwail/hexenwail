@@ -15,6 +15,18 @@
 #define HW_A2C_PRINT 'n'
 #define HW_CLC_STRINGCMD 4
 
+/* Keep this protocol namespace separate from Hexen II's protocol.h, which is
+ * already included through quakedef.h. */
+#define HW_OLD_PROTOCOL_VERSION 24
+#define HW_PROTOCOL_VERSION 25
+#define HW_PROTOCOL_VERSION_EXT 26
+#define HW_PROTOCOL_VERSION_HEXENWAIL_1 100
+#define HW_SVC_PRINT 8
+#define HW_SVC_STUFFTEXT 9
+#define HW_SVC_SERVERDATA 11
+#define HW_SVC_MODELLIST 45
+#define HW_SVC_SOUNDLIST 46
+
 typedef enum
 {
 	hwcl_disconnected,
@@ -28,6 +40,141 @@ static netadr_t hwcl_server;
 static netchan_t hwcl_netchan;
 static double hwcl_connect_time;
 static qboolean hwcl_received_packet;
+static int hwcl_protocol;
+static int hwcl_servercount;
+
+static void HWCL_StringCmd (const char *command)
+{
+	MSG_WriteByte (&hwcl_netchan.message, HW_CLC_STRINGCMD);
+	MSG_WriteString (&hwcl_netchan.message, command);
+}
+
+static qboolean HWCL_ValidProtocol (int protocol)
+{
+	return protocol == HW_OLD_PROTOCOL_VERSION ||
+		protocol == HW_PROTOCOL_VERSION ||
+		protocol == HW_PROTOCOL_VERSION_EXT ||
+		protocol == HW_PROTOCOL_VERSION_HEXENWAIL_1;
+}
+
+/* Consume a chunked (protocol 26+) or classic precache list.  Asset loading
+ * remains a later integration layer; consuming the lists here is still
+ * important because it advances the reliable signon handshake. */
+static void HWCL_ParsePrecacheList (qboolean models)
+{
+	int index = 0;
+	const char *entry;
+
+	if (hwcl_protocol >= HW_PROTOCOL_VERSION_EXT)
+		index = MSG_ReadLong ();
+	for (;;)
+	{
+		entry = MSG_ReadString ();
+		if (!entry[0] || msg_badread)
+			break;
+		index++;
+	}
+	if (msg_badread)
+		return;
+
+	if (hwcl_protocol >= HW_PROTOCOL_VERSION_EXT)
+	{
+		index = MSG_ReadLong ();
+		if (msg_badread)
+			return;
+		if (index)
+		{
+			HWCL_StringCmd (va ("%slist %d %d", models ? "model" : "sound",
+					hwcl_servercount, index));
+			return;
+		}
+	}
+
+	if (models)
+	{
+		Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
+		HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
+	}
+	else
+		HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
+}
+
+static void HWCL_ParseServerData (void)
+{
+	int i;
+	int playernum;
+	char gamedir[MAX_QPATH];
+	char levelname[1024];
+
+	hwcl_protocol = MSG_ReadLong ();
+	if (!HWCL_ValidProtocol (hwcl_protocol))
+	{
+		Con_Printf ("HexenWorld server returned unsupported protocol %d.\n",
+				hwcl_protocol);
+		HWCL_Disconnect ();
+		return;
+	}
+	hwcl_servercount = MSG_ReadLong ();
+	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
+	playernum = MSG_ReadByte ();
+	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
+	if (hwcl_protocol >= HW_PROTOCOL_VERSION)
+		for (i = 0; i < 10; i++)
+			MSG_ReadFloat ();
+	if (msg_badread)
+		return;
+
+	Con_Printf ("HexenWorld protocol %d, game %s, level %s (player %d%s).\n",
+			hwcl_protocol, gamedir, levelname, playernum & 127,
+			(playernum & 128) ? ", spectator" : "");
+	HWCL_StringCmd (va ("soundlist %d 0", hwcl_servercount));
+}
+
+static void HWCL_ParseServerMessage (void)
+{
+	int command;
+	const char *text;
+
+	while (msg_readcount < hw_net_message.cursize)
+	{
+		command = MSG_ReadByte ();
+		switch (command)
+		{
+		case HW_SVC_PRINT:
+			MSG_ReadByte (); /* print level */
+			text = MSG_ReadString ();
+			if (!msg_badread)
+				Con_Printf ("%s", text);
+			break;
+		case HW_SVC_SERVERDATA:
+			HWCL_ParseServerData ();
+			break;
+		case HW_SVC_SOUNDLIST:
+			HWCL_ParsePrecacheList (false);
+			break;
+		case HW_SVC_MODELLIST:
+			HWCL_ParsePrecacheList (true);
+			break;
+		case HW_SVC_STUFFTEXT:
+			text = MSG_ReadString ();
+			if (!msg_badread)
+				Con_DPrintf ("HexenWorld server command: %s", text);
+			break;
+		default:
+			/* Do not desynchronise the reader by guessing unknown message sizes.
+			 * Baselines, entities, and presentation messages are parsed by the
+			 * next client-state adapter layer. */
+			Con_DPrintf ("HexenWorld server message %d awaits state adapter.\n",
+					command);
+			return;
+		}
+		if (msg_badread)
+		{
+			Con_Printf ("Malformed HexenWorld server message.\n");
+			return;
+		}
+	}
+}
 
 static void HWCL_InitNet (void)
 {
@@ -83,6 +230,8 @@ void HWCL_Disconnect (void)
 {
 	static const byte drop[] = {HW_CLC_STRINGCMD, 'd', 'r', 'o', 'p', 0};
 
+	hwcl_protocol = 0;
+	hwcl_servercount = 0;
 	if (hwcl_state == hwcl_connected)
 	{
 		HWNetchan_Transmit (&hwcl_netchan, sizeof(drop), (byte *)drop);
@@ -143,14 +292,13 @@ void HWCL_Frame (void)
 		if (!HWNetchan_Process (&hwcl_netchan))
 			continue;
 
-		/* The channel is live.  Server-message parsing is the next protocol
-		 * layer; keep acknowledging packets so reliable setup can progress. */
 		if (!hwcl_received_packet)
 		{
 			Con_Printf ("HexenWorld netchan established (%d payload bytes).\n",
 					hw_net_message.cursize - msg_readcount);
 			hwcl_received_packet = true;
 		}
+		HWCL_ParseServerMessage ();
 	}
 
 	/* Drive acknowledgements and reliable retransmission even when the server
