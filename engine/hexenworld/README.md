@@ -30,10 +30,10 @@ explicitly with:
     connect hw://server.example:26950
 
 The integrated path completes connectionless acceptance, establishes the
-sequenced netchan, validates protocol 24/25/26/100 server data, and advances
-the sound/model-list and baseline signon exchange.  Gameplay state, assets,
-and presentation messages still need to be routed into the shared Hexenwail
-client.
+sequenced netchan, validates protocol 24/25/26/100 server data, and completes
+the sound/model-list, baseline, spawn, and begin transport handshake.
+Gameplay state, assets, and presentation messages still need to be routed into
+the shared Hexenwail client.
 
 The flag is required at *configure* time — it gates whether `add_executable(hwsv)`
 is reached at all, so `make hwsv` without it asks for a target the generated

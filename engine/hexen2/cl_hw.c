@@ -21,12 +21,22 @@
 #define HW_PROTOCOL_VERSION 25
 #define HW_PROTOCOL_VERSION_EXT 26
 #define HW_PROTOCOL_VERSION_HEXENWAIL_1 100
+#define HW_SVC_TIME 7
 #define HW_SVC_PRINT 8
 #define HW_SVC_STUFFTEXT 9
 #define HW_SVC_SERVERDATA 11
+#define HW_SVC_LIGHTSTYLE 12
 #define HW_SVC_SPAWNBASELINE 22
+#define HW_SVC_UPDATEPING 36
+#define HW_SVC_UPDATEENTERTIME 37
+#define HW_SVC_UPDATESTATLONG 38
+#define HW_SVC_UPDATEUSERINFO 40
 #define HW_SVC_MODELLIST 45
 #define HW_SVC_SOUNDLIST 46
+#define HW_SVC_UPDATEDMINFO 75
+#define HW_SVC_UPDATESIEGEINFO 76
+#define HW_SVC_UPDATESIEGETEAM 77
+#define HW_SVC_UPDATESIEGELOSSES 78
 
 typedef enum
 {
@@ -168,6 +178,44 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_SERVERDATA:
 			HWCL_ParseServerData ();
 			break;
+		case HW_SVC_TIME:
+			MSG_ReadFloat ();
+			break;
+		case HW_SVC_LIGHTSTYLE:
+			MSG_ReadByte ();
+			MSG_ReadString ();
+			break;
+		case HW_SVC_UPDATEPING:
+			MSG_ReadByte ();
+			MSG_ReadShort ();
+			break;
+		case HW_SVC_UPDATEENTERTIME:
+			MSG_ReadByte ();
+			MSG_ReadFloat ();
+			break;
+		case HW_SVC_UPDATESTATLONG:
+			MSG_ReadByte ();
+			MSG_ReadLong ();
+			break;
+		case HW_SVC_UPDATEUSERINFO:
+			MSG_ReadByte ();
+			MSG_ReadLong ();
+			MSG_ReadString ();
+			break;
+		case HW_SVC_UPDATEDMINFO:
+			MSG_ReadByte ();
+			MSG_ReadShort ();
+			MSG_ReadByte ();
+			break;
+		case HW_SVC_UPDATESIEGEINFO:
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			break;
+		case HW_SVC_UPDATESIEGETEAM:
+		case HW_SVC_UPDATESIEGELOSSES:
+			MSG_ReadByte ();
+			MSG_ReadByte ();
+			break;
 		case HW_SVC_SOUNDLIST:
 			HWCL_ParsePrecacheList (false);
 			break;
@@ -189,6 +237,13 @@ static void HWCL_ParseServerMessage (void)
 					!q_strncasecmp (text, "cmd spawn ", 10) ||
 					!q_strncasecmp (text, "cmd begin", 9))
 					HWCL_StringCmd (text + 4);
+				else if (!q_strcasecmp (text, "skins\n"))
+				{
+					/* Skin download/translation is not wired up yet, but it must
+					 * not hold the transport handshake hostage. */
+					HWCL_StringCmd (va ("begin %d", hwcl_servercount));
+					Con_Printf ("HexenWorld signon complete; awaiting state adapter.\n");
+				}
 			}
 			break;
 		default:
