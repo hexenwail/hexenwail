@@ -24,6 +24,7 @@
 #define HW_SVC_PRINT 8
 #define HW_SVC_STUFFTEXT 9
 #define HW_SVC_SERVERDATA 11
+#define HW_SVC_SPAWNBASELINE 22
 #define HW_SVC_MODELLIST 45
 #define HW_SVC_SOUNDLIST 46
 
@@ -130,6 +131,24 @@ static void HWCL_ParseServerData (void)
 	HWCL_StringCmd (va ("soundlist %d 0", hwcl_servercount));
 }
 
+/* Signon buffers contain baseline records before their svc_stufftext request.
+ * Consume their wire representation now; retaining baselines for entity delta
+ * reconstruction belongs with the client-state adapter. */
+static void HWCL_SkipBaseline (void)
+{
+	int i;
+
+	MSG_ReadShort (); /* entity number */
+	MSG_ReadShort (); /* model */
+	for (i = 0; i < 6; i++)
+		MSG_ReadByte (); /* frame through absolute light */
+	for (i = 0; i < 3; i++)
+	{
+		MSG_ReadCoord ();
+		MSG_ReadAngle ();
+	}
+}
+
 static void HWCL_ParseServerMessage (void)
 {
 	int command;
@@ -155,10 +174,22 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_MODELLIST:
 			HWCL_ParsePrecacheList (true);
 			break;
+		case HW_SVC_SPAWNBASELINE:
+			HWCL_SkipBaseline ();
+			break;
 		case HW_SVC_STUFFTEXT:
 			text = MSG_ReadString ();
 			if (!msg_badread)
+			{
 				Con_DPrintf ("HexenWorld server command: %s", text);
+				/* This is a server-directed signon request, not console text: the
+				 * Hexen II command buffer uses a different transport.  Restrict it
+				 * to the three documented handshake commands. */
+				if (!q_strncasecmp (text, "cmd prespawn ", 13) ||
+					!q_strncasecmp (text, "cmd spawn ", 10) ||
+					!q_strncasecmp (text, "cmd begin", 9))
+					HWCL_StringCmd (text + 4);
+			}
 			break;
 		default:
 			/* Do not desynchronise the reader by guessing unknown message sizes.
