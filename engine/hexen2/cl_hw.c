@@ -59,6 +59,7 @@
 #define HW_SVC_DELTAPACKETENTITIES 48
 #define HW_SVC_MAXSPEED 49
 #define HW_SVC_ENTGRAVITY 50
+#define HW_SVC_UPDATE_INV 58
 #define HW_SVC_MIDI_NAME 65
 #define HW_SVC_TARGETUPDATE 69
 #define HW_SVC_SOUND_UPDATE_POS 71
@@ -396,6 +397,79 @@ static void HWCL_SkipAngles (int count)
 		MSG_ReadAngle ();
 }
 
+static void HWCL_ParseInventoryUpdate (void)
+{
+	unsigned int sc1 = 0;
+	unsigned int sc2 = 0;
+	int groups;
+
+	groups = MSG_ReadByte ();
+	if (groups & 1) sc1 |= (unsigned int)MSG_ReadByte ();
+	if (groups & 2) sc1 |= (unsigned int)MSG_ReadByte () << 8;
+	if (groups & 4) sc1 |= (unsigned int)MSG_ReadByte () << 16;
+	if (groups & 8) sc1 |= (unsigned int)MSG_ReadByte () << 24;
+	if (groups & 16) sc2 |= (unsigned int)MSG_ReadByte ();
+	if (groups & 32) sc2 |= (unsigned int)MSG_ReadByte () << 8;
+	if (groups & 64) sc2 |= (unsigned int)MSG_ReadByte () << 16;
+	if (groups & 128) sc2 |= (unsigned int)MSG_ReadByte () << 24;
+
+	if (sc1 & (1u << 0)) MSG_ReadShort (); /* health */
+	if (sc1 & (1u << 1)) MSG_ReadByte (); /* level */
+	if (sc1 & (1u << 2)) MSG_ReadByte (); /* intelligence */
+	if (sc1 & (1u << 3)) MSG_ReadByte (); /* wisdom */
+	if (sc1 & (1u << 4)) MSG_ReadByte (); /* strength */
+	if (sc1 & (1u << 5)) MSG_ReadByte (); /* dexterity */
+	/* Bit 6 is SC1_TELEPORT_TIME in the protocol header, but this server's
+	 * writer does not serialize a payload for it. */
+	if (sc1 & (1u << 7)) MSG_ReadByte (); /* bluemana */
+	if (sc1 & (1u << 8)) MSG_ReadByte (); /* greenmana */
+	if (sc1 & (1u << 9)) MSG_ReadLong (); /* experience */
+	if (sc1 & (1u << 10)) MSG_ReadByte (); /* cnt_torch */
+	if (sc1 & (1u << 11)) MSG_ReadByte (); /* cnt_h_boost */
+	if (sc1 & (1u << 12)) MSG_ReadByte (); /* cnt_sh_boost */
+	if (sc1 & (1u << 13)) MSG_ReadByte (); /* cnt_mana_boost */
+	if (sc1 & (1u << 14)) MSG_ReadByte (); /* cnt_teleport */
+	if (sc1 & (1u << 15)) MSG_ReadByte (); /* cnt_tome */
+	if (sc1 & (1u << 16)) MSG_ReadByte (); /* cnt_summon */
+	if (sc1 & (1u << 17)) MSG_ReadByte (); /* cnt_invisibility */
+	if (sc1 & (1u << 18)) MSG_ReadByte (); /* cnt_glyph */
+	if (sc1 & (1u << 19)) MSG_ReadByte (); /* cnt_haste */
+	if (sc1 & (1u << 20)) MSG_ReadByte (); /* cnt_blast */
+	if (sc1 & (1u << 21)) MSG_ReadByte (); /* cnt_polymorph */
+	if (sc1 & (1u << 22)) MSG_ReadByte (); /* cnt_flight */
+	if (sc1 & (1u << 23)) MSG_ReadByte (); /* cnt_cubeofforce */
+	if (sc1 & (1u << 24)) MSG_ReadByte (); /* cnt_invincibility */
+	if (sc1 & (1u << 25)) MSG_ReadByte (); /* artifact_active */
+	if (sc1 & (1u << 26)) MSG_ReadByte (); /* artifact_low */
+	if (sc1 & (1u << 27)) MSG_ReadByte (); /* movetype */
+	if (sc1 & (1u << 28)) MSG_ReadByte (); /* cameramode */
+	if (sc1 & (1u << 29)) MSG_ReadFloat (); /* hasted */
+	if (sc1 & (1u << 30)) MSG_ReadByte (); /* inventory */
+	if (sc1 & (1u << 31)) MSG_ReadByte (); /* rings_active */
+
+	if (sc2 & (1u << 0)) MSG_ReadByte (); /* rings_low */
+	if (sc2 & (1u << 1)) MSG_ReadByte (); /* armor_amulet */
+	if (sc2 & (1u << 2)) MSG_ReadByte (); /* armor_bracer */
+	if (sc2 & (1u << 3)) MSG_ReadByte (); /* armor_breastplate */
+	if (sc2 & (1u << 4)) MSG_ReadByte (); /* armor_helmet */
+	if (sc2 & (1u << 5)) MSG_ReadByte (); /* ring_flight */
+	if (sc2 & (1u << 6)) MSG_ReadByte (); /* ring_water */
+	if (sc2 & (1u << 7)) MSG_ReadByte (); /* ring_turning */
+	if (sc2 & (1u << 8)) MSG_ReadByte (); /* ring_regeneration */
+	/* Bits 9 and 10 are declared but not serialized by this server. */
+	if (sc2 & (1u << 11)) MSG_ReadString (); /* puzzle_inv1 */
+	if (sc2 & (1u << 12)) MSG_ReadString (); /* puzzle_inv2 */
+	if (sc2 & (1u << 13)) MSG_ReadString (); /* puzzle_inv3 */
+	if (sc2 & (1u << 14)) MSG_ReadString (); /* puzzle_inv4 */
+	if (sc2 & (1u << 15)) MSG_ReadString (); /* puzzle_inv5 */
+	if (sc2 & (1u << 16)) MSG_ReadString (); /* puzzle_inv6 */
+	if (sc2 & (1u << 17)) MSG_ReadString (); /* puzzle_inv7 */
+	if (sc2 & (1u << 18)) MSG_ReadString (); /* puzzle_inv8 */
+	if (sc2 & (1u << 19)) MSG_ReadShort (); /* max_health */
+	if (sc2 & (1u << 20)) MSG_ReadByte (); /* max_mana */
+	if (sc2 & (1u << 21)) MSG_ReadFloat (); /* flags */
+}
+
 static void HWCL_ParsePlayerInfo (void)
 {
 	hwcl_entity_state_t discard = {0};
@@ -566,6 +640,9 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_ENTGRAVITY:
 			hwcl_server_state.entgravity = MSG_ReadFloat ();
+			break;
+		case HW_SVC_UPDATE_INV:
+			HWCL_ParseInventoryUpdate ();
 			break;
 		case HW_SVC_TARGETUPDATE:
 			MSG_ReadByte ();
