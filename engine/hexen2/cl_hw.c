@@ -44,6 +44,7 @@
 #define HW_SVC_UPDATESIEGEINFO 76
 #define HW_SVC_UPDATESIEGETEAM 77
 #define HW_SVC_UPDATESIEGELOSSES 78
+#define HWCL_MAX_ENTITIES 768
 
 typedef enum
 {
@@ -60,17 +61,36 @@ static double hwcl_connect_time;
 static qboolean hwcl_received_packet;
 static int hwcl_protocol;
 static int hwcl_servercount;
+static int hwcl_entity_sequence = -1;
 
 /* This is deliberately protocol state rather than cl: Hexen II's cl is tied
  * to its qsocket session and renderer.  Keeping the values here lets the
  * eventual adapter map them deliberately instead of corrupting a concurrent
  * Hexen II connection. */
+typedef struct
+{
+	qboolean active;
+	int modelindex;
+	int frame;
+	int colormap;
+	int skinnum;
+	int scale;
+	int drawflags;
+	int abslight;
+	int alpha;
+	int effects;
+	vec3_t origin;
+	vec3_t angles;
+} hwcl_entity_state_t;
+
 static struct
 {
 	double server_time;
 	vec3_t viewangles;
 	int viewentity;
 	int stats[MAX_CL_STATS];
+	hwcl_entity_state_t baselines[HWCL_MAX_ENTITIES];
+	hwcl_entity_state_t entities[HWCL_MAX_ENTITIES];
 } hwcl_server_state;
 
 static void HWCL_StringCmd (const char *command)
@@ -145,6 +165,7 @@ static void HWCL_ParseServerData (void)
 		return;
 	}
 	hwcl_servercount = MSG_ReadLong ();
+	hwcl_entity_sequence = -1;
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
 	playernum = MSG_ReadByte ();
@@ -161,75 +182,117 @@ static void HWCL_ParseServerData (void)
 	HWCL_StringCmd (va ("soundlist %d 0", hwcl_servercount));
 }
 
-/* Signon buffers contain baseline records before their svc_stufftext request.
- * Consume their wire representation now; retaining baselines for entity delta
- * reconstruction belongs with the client-state adapter. */
-static void HWCL_SkipBaseline (void)
+/* Signon buffers contain baseline records.  Keep them because a full packet
+ * delta-compresses each entity from its baseline. */
+static void HWCL_ParseBaseline (void)
 {
+	hwcl_entity_state_t *state;
+	int entitynum;
 	int i;
 
-	MSG_ReadShort (); /* entity number */
-	MSG_ReadShort (); /* model */
-	for (i = 0; i < 6; i++)
-		MSG_ReadByte (); /* frame through absolute light */
+	entitynum = MSG_ReadShort ();
+	if (entitynum < 0 || entitynum >= HWCL_MAX_ENTITIES)
+	{
+		/* Consume the record without indexing outside our protocol state. */
+		MSG_ReadShort ();
+		for (i = 0; i < 6; i++) MSG_ReadByte ();
+		for (i = 0; i < 3; i++) { MSG_ReadCoord (); MSG_ReadAngle (); }
+		return;
+	}
+	state = &hwcl_server_state.baselines[entitynum];
+	memset (state, 0, sizeof(*state));
+	state->active = true;
+	state->modelindex = MSG_ReadShort ();
+	state->frame = MSG_ReadByte ();
+	state->colormap = MSG_ReadByte ();
+	state->skinnum = MSG_ReadByte ();
+	state->scale = MSG_ReadByte ();
+	state->drawflags = MSG_ReadByte ();
+	state->abslight = MSG_ReadByte ();
 	for (i = 0; i < 3; i++)
 	{
-		MSG_ReadCoord ();
-		MSG_ReadAngle ();
+		state->origin[i] = MSG_ReadCoord ();
+		state->angles[i] = MSG_ReadAngle ();
 	}
 }
 
-/* Consume an entity delta without retaining it.  This keeps the packet stream
- * synchronised until the state adapter can map these records to Hexenwail's
- * client entities. */
-static void HWCL_SkipEntityDelta (int bits)
+static void HWCL_ParseEntityDelta (const hwcl_entity_state_t *from,
+		hwcl_entity_state_t *to, int bits)
 {
-	/* The low nine bits are the entity number, not flags. */
-	bits &= ~511;
-	if (bits & (1 << 15))
-		bits |= MSG_ReadByte ();
-	if (bits & (1 << 7))
-		bits |= MSG_ReadByte () << 16;
+	bits &= ~511; /* low nine bits are the entity number */
+	*to = *from;
+	if (bits & (1 << 15)) bits |= MSG_ReadByte ();
+	if (bits & (1 << 7)) bits |= MSG_ReadByte () << 16;
 	if (bits & (1 << 16))
-	{
-		if (bits & (1 << 6))
-			MSG_ReadShort ();
-		else
-			MSG_ReadByte ();
-	}
-	if (bits & (1 << 13)) MSG_ReadByte ();
-	if (bits & (1 << 3)) MSG_ReadByte ();
-	if (bits & (1 << 4)) MSG_ReadByte ();
-	if (bits & (1 << 18)) MSG_ReadByte ();
-	if (bits & (1 << 5)) MSG_ReadLong ();
-	if (bits & (1 << 9)) MSG_ReadCoord ();
-	if (bits & (1 << 0)) MSG_ReadAngle ();
-	if (bits & (1 << 10)) MSG_ReadCoord ();
-	if (bits & (1 << 12)) MSG_ReadAngle ();
-	if (bits & (1 << 11)) MSG_ReadCoord ();
-	if (bits & (1 << 1)) MSG_ReadAngle ();
-	if (bits & (1 << 2)) MSG_ReadByte ();
-	if (bits & (1 << 19)) MSG_ReadByte ();
-	if (bits & (1 << 17)) MSG_ReadShort ();
-	if (bits & (1 << 20)) MSG_ReadByte ();
+		to->modelindex = (bits & (1 << 6)) ? MSG_ReadShort () : MSG_ReadByte ();
+	if (bits & (1 << 13)) to->frame = MSG_ReadByte ();
+	if (bits & (1 << 3)) to->colormap = MSG_ReadByte ();
+	if (bits & (1 << 4)) to->skinnum = MSG_ReadByte ();
+	if (bits & (1 << 18)) to->drawflags = MSG_ReadByte ();
+	if (bits & (1 << 5)) to->effects = MSG_ReadLong ();
+	if (bits & (1 << 9)) to->origin[0] = MSG_ReadCoord ();
+	if (bits & (1 << 0)) to->angles[0] = MSG_ReadAngle ();
+	if (bits & (1 << 10)) to->origin[1] = MSG_ReadCoord ();
+	if (bits & (1 << 12)) to->angles[1] = MSG_ReadAngle ();
+	if (bits & (1 << 11)) to->origin[2] = MSG_ReadCoord ();
+	if (bits & (1 << 1)) to->angles[2] = MSG_ReadAngle ();
+	if (bits & (1 << 2)) to->scale = MSG_ReadByte ();
+	if (bits & (1 << 19)) to->abslight = MSG_ReadByte ();
+	if (bits & (1 << 17)) MSG_ReadShort (); /* sound index, routed later */
+	if (bits & (1 << 20)) to->alpha = MSG_ReadByte (); /* protocol 100 */
+	to->active = true;
 }
 
-static void HWCL_SkipPacketEntities (qboolean delta)
+static void HWCL_ParsePacketEntities (qboolean delta)
 {
+	hwcl_entity_state_t discard = {0};
 	int bits;
+	int entitynum;
+	int source = -1;
+	qboolean apply;
 
 	if (delta)
-		MSG_ReadByte (); /* source sequence */
+	{
+		source = MSG_ReadByte ();
+		apply = hwcl_entity_sequence >= 0 &&
+			source == (hwcl_entity_sequence & 255);
+	}
+	else
+	{
+		apply = true;
+		memset (hwcl_server_state.entities, 0, sizeof(hwcl_server_state.entities));
+	}
 	for (;;)
 	{
 		bits = (unsigned short)MSG_ReadShort ();
-		if (!bits || msg_badread)
+		if (msg_badread)
 			return;
-		if (!(bits & (1 << 14))) /* U_REMOVE has no payload */
-			HWCL_SkipEntityDelta (bits);
+		if (!bits)
+			break;
+		entitynum = bits & 511;
+		if (entitynum >= HWCL_MAX_ENTITIES)
+		{
+			if (!(bits & (1 << 14)))
+				HWCL_ParseEntityDelta (&discard, &discard, bits);
+			continue;
+		}
+		if (bits & (1 << 14))
+		{
+			if (apply)
+				hwcl_server_state.entities[entitynum].active = false;
+			continue;
+		}
+		if (apply)
+			HWCL_ParseEntityDelta (delta ? &hwcl_server_state.entities[entitynum] :
+					&hwcl_server_state.baselines[entitynum],
+					&hwcl_server_state.entities[entitynum], bits);
+		else
+			HWCL_ParseEntityDelta (&discard, &discard, bits);
 		if (msg_badread)
 			return;
 	}
+	if (apply)
+		hwcl_entity_sequence = hwcl_netchan.incoming_sequence;
 }
 
 static void HWCL_SkipUsercmd (void)
@@ -341,10 +404,10 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_SkipPlayerInfo ();
 			break;
 		case HW_SVC_PACKETENTITIES:
-			HWCL_SkipPacketEntities (false);
+			HWCL_ParsePacketEntities (false);
 			break;
 		case HW_SVC_DELTAPACKETENTITIES:
-			HWCL_SkipPacketEntities (true);
+			HWCL_ParsePacketEntities (true);
 			break;
 		case HW_SVC_UPDATEDMINFO:
 			MSG_ReadByte ();
@@ -367,7 +430,7 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParsePrecacheList (true);
 			break;
 		case HW_SVC_SPAWNBASELINE:
-			HWCL_SkipBaseline ();
+			HWCL_ParseBaseline ();
 			break;
 		case HW_SVC_STUFFTEXT:
 			text = MSG_ReadString ();
@@ -462,6 +525,7 @@ void HWCL_Disconnect (void)
 
 	hwcl_protocol = 0;
 	hwcl_servercount = 0;
+	hwcl_entity_sequence = -1;
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	if (hwcl_state == hwcl_connected)
 	{
