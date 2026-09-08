@@ -1424,6 +1424,9 @@ CL_SendCmd
 void CL_SendCmd (void)
 {
 	usercmd_t	cmd;
+#if defined(H2W_INTEGRATED)
+	int		buttons, impulse;
+#endif
 
 #if defined(H2W_INTEGRATED)
 	if (HWCL_Active ())
@@ -1439,8 +1442,11 @@ void CL_SendCmd (void)
 		cmd.forwardmove += cl.analogmove.forwardmove;
 		cmd.sidemove += cl.analogmove.sidemove;
 		cmd.upmove += cl.analogmove.upmove;
-		HWCL_PredictUsercmd (&cmd);
-		HWCL_SendCmd (&cmd);
+		/* Sampled once: both of these clear the input state they read. */
+		buttons = CL_GetButtonBits ();
+		impulse = CL_GetImpulse ();
+		HWCL_PredictUsercmd (&cmd, buttons, impulse);
+		HWCL_SendCmd (&cmd, buttons, impulse);
 		return;
 	}
 #endif
