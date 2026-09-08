@@ -22,8 +22,21 @@
 #include "huffman.h"
 /* h2w engine includes */
 #undef	USE_INTEL_ASM
-/* use Hunk_Alloc or malloc : */
+/* use Hunk_Alloc or malloc :
+ *
+ * hwsv builds this tree once at startup and never clears the hunk under it,
+ * so the hunk is free.  The integrated Hexenwail client cannot use it: it
+ * calls HuffInit from HWCL_InitNet, and CL_ClearState -> Host_ClearMemory
+ * then does Hunk_FreeToLowMark and takes the tree with it, leaving HuffTree
+ * dangling.  Connectionless packets take HuffDecode's raw 0xff path and never
+ * notice; the first sequenced packet walks the freed tree and segfaults --
+ * or does not, depending on whether anything has reused the memory yet.
+ * A one-shot malloc for the life of the process is what this actually wants. */
+#ifdef H2W_INTEGRATED
+#define USE_HUNKMEM	0
+#else
 #define USE_HUNKMEM	1
+#endif
 #include "arch_def.h"
 #include "sys.h"
 #include "printsys.h"
