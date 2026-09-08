@@ -1328,6 +1328,7 @@ int CL_ReadFromServer (void)
 		/* HexenWorld owns its socket and netchan; do not ask the Hexen II
 		 * qsocket layer to read a null cls.netcon.  Its retained snapshots
 		 * feed the maintained renderer through the same relink path as H2. */
+		CL_AdvanceTime ();
 		HWCL_ApplyState ();
 		CL_RelinkEntities ();
 		CL_UpdateEffects ();

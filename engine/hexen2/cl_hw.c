@@ -219,6 +219,7 @@ typedef struct
 	int buttons;
 	int impulse;
 	int msec;
+	int lightlevel;
 } hwcl_usercmd_t;
 
 static hwcl_usercmd_t hwcl_cmd_history[3];
@@ -257,7 +258,12 @@ static int HWCL_QuantizeMove (int move)
 	return (int)(move * 0.25f);
 }
 
-static void HWCL_WriteUsercmd (sizebuf_t *buf, const hwcl_usercmd_t *cmd)
+/* The third command in a clc_move is the "long" form: SV_ReadClientMessage
+ * reads it with MSG_ReadUsercmd(..., true), which consumes a light_level byte
+ * straight after the bits byte.  Omitting it shifts every following field and
+ * desynchronises the server's read of the whole packet. */
+static void HWCL_WriteUsercmd (sizebuf_t *buf, const hwcl_usercmd_t *cmd,
+		qboolean long_msg)
 {
 	int bits = 0;
 
@@ -271,6 +277,8 @@ static void HWCL_WriteUsercmd (sizebuf_t *buf, const hwcl_usercmd_t *cmd)
 	if (cmd->msec) bits |= (1 << 7);
 
 	MSG_WriteByte (buf, bits);
+	if (long_msg)
+		MSG_WriteByte (buf, cmd->lightlevel);
 	if (bits & (1 << 0)) HWCL_WriteAngle16 (buf, cmd->angles[0]);
 	HWCL_WriteAngle16 (buf, cmd->angles[1]);
 	if (bits & (1 << 1)) HWCL_WriteAngle16 (buf, cmd->angles[2]);
@@ -351,25 +359,41 @@ static void HWCL_LoadSounds (void)
  * start at one. */
 static void HWCL_ParsePrecacheList (qboolean models)
 {
+	int limit = models ? MAX_MODELS : MAX_SOUNDS;
 	int index = 1;
 	int next;
 	const char *entry;
 
+	/* Protocol 26+ prefixes the chunk with its zero-based start offset.  It
+	 * comes straight off the wire, so clamp it before it can be used as a
+	 * count: storing is bounds-checked below, but the retained *_count feeds
+	 * the HWCL_Load* loops, which index cl.model_precache / cl.sound_precache
+	 * directly. */
 	if (hwcl_protocol >= HW_PROTOCOL_VERSION_EXT)
+	{
 		index = MSG_ReadLong () + 1;
+		if (index < 1 || index > limit)
+		{
+			Con_Printf ("HexenWorld %s list offset out of range.\n",
+					models ? "model" : "sound");
+			HWCL_Disconnect ();
+			return;
+		}
+	}
 	for (;;)
 	{
 		entry = MSG_ReadString ();
 		if (!entry[0] || msg_badread)
 			break;
-		if (index > 0 && (models ? index < MAX_MODELS : index < MAX_SOUNDS))
+		if (index > 0 && index < limit)
 		{
 			if (models)
 				q_strlcpy (hwcl_model_names[index], entry, MAX_QPATH);
 			else
 				q_strlcpy (hwcl_sound_names[index], entry, MAX_QPATH);
 		}
-		index++;
+		if (index < limit)
+			index++;
 	}
 	if (msg_badread)
 		return;
@@ -389,14 +413,16 @@ static void HWCL_ParsePrecacheList (qboolean models)
 
 	if (models)
 	{
-		hwcl_model_count = index > hwcl_model_count ? index : hwcl_model_count;
+		if (index > hwcl_model_count)
+			hwcl_model_count = index;
 		HWCL_LoadModels ();
 		Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
 		HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
 	}
 	else
 	{
-		hwcl_sound_count = index > hwcl_sound_count ? index : hwcl_sound_count;
+		if (index > hwcl_sound_count)
+			hwcl_sound_count = index;
 		HWCL_LoadSounds ();
 		HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
 	}
@@ -1088,9 +1114,10 @@ void HWCL_ApplyState (void)
 	int highest = 0;
 	int viewentity;
 
-	cl.mtime[1] = cl.mtime[0];
-	cl.mtime[0] = hwcl_server_state.server_time;
-	cl.time = cl.mtime[0];
+	/* cl.mtime is shifted by HW_SVC_TIME and cl.time is advanced by
+	 * CL_AdvanceTime, exactly as on the Hexen II path.  Re-shifting mtime
+	 * here every rendered frame and pinning cl.time to mtime[0] would hold
+	 * the lerp fraction at 1 and make every entity snap between updates. */
 	for (i = 0; i < MAX_CL_STATS; i++)
 		cl.stats[i] = hwcl_server_state.stats[i];
 
@@ -1275,6 +1302,8 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_TIME:
 			hwcl_server_state.server_time = MSG_ReadFloat ();
+			cl.mtime[1] = cl.mtime[0];
+			cl.mtime[0] = hwcl_server_state.server_time;
 			break;
 		case HW_SVC_SETANGLE:
 			hwcl_server_state.viewangles[0] = MSG_ReadAngle ();
@@ -1666,6 +1695,7 @@ void HWCL_SendCmd (const usercmd_t *cmd)
 	current.upmove = (int)cmd->upmove;
 	current.buttons = CL_GetButtonBits ();
 	current.impulse = CL_GetImpulse ();
+	current.lightlevel = cmd->lightlevel;
 	msec = (int)(host_frametime * 1000.0 + 0.5);
 	if (msec < 1)
 		msec = 1;
@@ -1681,8 +1711,13 @@ void HWCL_SendCmd (const usercmd_t *cmd)
 		hwcl_have_cmd_history = true;
 	}
 
-	oldest = hwcl_cmd_history[0];
-	oldcmd = hwcl_cmd_history[1];
+	/* history[2] is the previous frame's command and history[1] the one
+	 * before it -- SV_ReadClientMessage replays oldest at net_drop > 1 and
+	 * oldcmd at net_drop > 0, so these must be cmd[n-2] and cmd[n-1].
+	 * Reading [0]/[1] here skipped the most recent backup, which is exactly
+	 * the command a single dropped packet needs to recover. */
+	oldest = hwcl_cmd_history[1];
+	oldcmd = hwcl_cmd_history[2];
 	/* Impulses are one-shot commands.  Replaying them from the two backup
 	 * commands would fire a weapon or select an item multiple times. */
 	oldest.impulse = 0;
@@ -1690,9 +1725,9 @@ void HWCL_SendCmd (const usercmd_t *cmd)
 
 	SZ_Init (&buf, data, sizeof(data));
 	MSG_WriteByte (&buf, HW_CLC_MOVE);
-	HWCL_WriteUsercmd (&buf, &oldest);
-	HWCL_WriteUsercmd (&buf, &oldcmd);
-	HWCL_WriteUsercmd (&buf, &current);
+	HWCL_WriteUsercmd (&buf, &oldest, false);
+	HWCL_WriteUsercmd (&buf, &oldcmd, false);
+	HWCL_WriteUsercmd (&buf, &current, true);
 	HWNetchan_Transmit (&hwcl_netchan, buf.cursize, buf.data);
 
 	for (i = 0; i < 2; i++)
@@ -1717,9 +1752,15 @@ void HWCL_Disconnect (void)
 		HWNetchan_Transmit (&hwcl_netchan, sizeof(drop), (byte *)drop);
 		HWNetchan_Transmit (&hwcl_netchan, sizeof(drop), (byte *)drop);
 	}
+	/* CL_Disconnect calls this unconditionally, so only touch cls.state when
+	 * HexenWorld actually owned the connection.  Clearing it for a plain
+	 * Hexen II session skips CL_Disconnect's own ca_connected block, which is
+	 * what sends clc_disconnect, closes the qsocket, shuts down a listen
+	 * server and removes the .gip files. */
+	if (hwcl_state != hwcl_disconnected)
+		cls.state = ca_disconnected;
 	hwcl_state = hwcl_disconnected;
 	hwcl_received_packet = false;
-	cls.state = ca_disconnected;
 }
 
 static void HWCL_ConnectionlessPacket (void)
@@ -1744,8 +1785,15 @@ static void HWCL_ConnectionlessPacket (void)
 		return;
 	}
 
-	if (command == HW_A2C_PRINT && hw_net_message.cursize > 5)
-		Con_Printf ("%s", (char *)hw_net_message.data + 5);
+	if (command == HW_A2C_PRINT)
+	{
+		/* NET_GetPacket sets cursize from the Huffman decode and never
+		 * terminates the buffer, so the payload must be read through the
+		 * bounds-checked reader rather than as a bare C string. */
+		const char *text = MSG_ReadString ();
+		if (!msg_badread)
+			Con_Printf ("%s", text);
+	}
 }
 
 void HWCL_Frame (void)

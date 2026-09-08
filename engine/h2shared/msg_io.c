@@ -201,7 +201,10 @@ void MSG_WriteUsercmd (sizebuf_t *buf, const usercmd_t *cmd, qboolean long_msg)
 //
 int		msg_readcount;
 qboolean	msg_badread;
-static sizebuf_t	*msg_readbuf;
+/* Defaults to net_message so a read that reaches the reader before any
+ * MSG_BeginReading behaves as it did when net_message was referenced
+ * directly, rather than dereferencing NULL. */
+static sizebuf_t	*msg_readbuf = &net_message;
 
 void MSG_BeginReadingFrom (sizebuf_t *message)
 {
