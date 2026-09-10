@@ -34,8 +34,9 @@ Hexen II asset, the first image sits about 11 dB below full scale.  That is
 the grit you hear on loud 8-bit sfx.
 
 snd_resample 1 replaces the nearest-sample pick with a Blackman-windowed sinc
-polyphase filter.  Measured against a 128-tap double-precision reference over
-all 285 8-bit mono sounds in pak0:
+polyphase filter.  snd_filterquality selects the tap count on Ironwail's 1..5
+quality ladder; the default 5 is the original 16-tap path.  Measured against a
+128-tap double-precision reference over all 285 8-bit mono sounds in pak0:
 
     point sampling (legacy)      10.66 dB SNR
     Catmull-Rom (reverted r5)    22.29 dB SNR
@@ -67,11 +68,13 @@ alone and reopened after a listening test.  uhexen2-edqp tracks the flip.
 ===============================================================================
 */
 
-#define	SND_RESAMPLE_TAPS	16
+#define	SND_RESAMPLE_MAX_TAPS	16
 #define	SND_RESAMPLE_PHASES	128
 
-static float	snd_rs_bank[SND_RESAMPLE_PHASES][SND_RESAMPLE_TAPS];
+static float	snd_rs_bank[SND_RESAMPLE_PHASES][SND_RESAMPLE_MAX_TAPS];
 static float	snd_rs_builtfor = 0.0f;	/* stepscale the bank holds, 0 = none */
+static int	snd_rs_quality = 0;	/* snd_filterquality the bank holds */
+static int	snd_rs_taps = SND_RESAMPLE_MAX_TAPS;
 
 static double SND_Sinc (double x)
 {
@@ -79,6 +82,23 @@ static double SND_Sinc (double x)
 		return 1.0;
 	x *= M_PI;
 	return sin(x) / x;
+}
+
+static int SND_FilterQuality (void)
+{
+	int q = snd_filterquality.integer;
+
+	if (q < 1)
+		q = 1;
+	else if (q > 5)
+		q = 5;
+	return q;
+}
+
+static int SND_FilterTaps (int quality)
+{
+	/* Even tap counts, highest quality preserving the measured 16-tap path. */
+	return 6 + quality * 2;
 }
 
 /*
@@ -94,10 +114,12 @@ static void SND_BuildResampleBank (float stepscale)
 	/* Cut off at the lower of the two Nyquists so that downsampling
 	 * band-limits instead of aliasing -- the legacy path never did. */
 	double	fc = (stepscale > 1.0f) ? 0.5 / stepscale : 0.5;
-	double	halfw = SND_RESAMPLE_TAPS / 2.0;
+	int	quality = SND_FilterQuality ();
+	int	taps = SND_FilterTaps (quality);
+	double	halfw = taps / 2.0;
 	int	p, t;
 
-	if (snd_rs_builtfor == stepscale)
+	if (snd_rs_builtfor == stepscale && snd_rs_quality == quality)
 		return;
 
 	for (p = 0; p < SND_RESAMPLE_PHASES; p++)
@@ -105,7 +127,7 @@ static void SND_BuildResampleBank (float stepscale)
 		double	frac = (double)p / SND_RESAMPLE_PHASES;
 		double	sum = 0.0;
 
-		for (t = 0; t < SND_RESAMPLE_TAPS; t++)
+		for (t = 0; t < taps; t++)
 		{
 			double	x = (t - (halfw - 1)) - frac;
 			double	u = (x + halfw) / (2.0 * halfw);
@@ -121,12 +143,14 @@ static void SND_BuildResampleBank (float stepscale)
 		 * ripple between phases shows up as a level wobble. */
 		if (sum != 0.0)
 		{
-			for (t = 0; t < SND_RESAMPLE_TAPS; t++)
+			for (t = 0; t < taps; t++)
 				snd_rs_bank[p][t] = (float)(snd_rs_bank[p][t] / sum);
 		}
 	}
 
 	snd_rs_builtfor = stepscale;
+	snd_rs_quality = quality;
+	snd_rs_taps = taps;
 }
 
 /* Source fetch, clamped at both ends, normalised to 16-bit. */
@@ -208,15 +232,16 @@ static void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 			int		ph = (int)((pos - s) * SND_RESAMPLE_PHASES);
 			const float	*k;
 			float		acc = 0.0f;
-			int		t;
+			int		t, half;
 
 			if (ph >= SND_RESAMPLE_PHASES)
 				ph = SND_RESAMPLE_PHASES - 1;
 			k = snd_rs_bank[ph];
-			for (t = 0; t < SND_RESAMPLE_TAPS; t++)
+			half = snd_rs_taps / 2 - 1;
+			for (t = 0; t < snd_rs_taps; t++)
 			{
 				acc += k[t] * (float)SND_FetchSample (data, inwidth, insamples,
-						s + t - (SND_RESAMPLE_TAPS / 2 - 1));
+						s + t - half);
 			}
 
 			/* Round, don't truncate.  Clamp the inter-sample peaks. */
