@@ -7176,12 +7176,17 @@ static void M_Quit_Draw (void)
 //=============================================================================
 
 static int	lanConfig_cursor = -1;
-static const int	lanConfig_cursor_table[] = {100, 120, 140, 172};
-#define NUM_LANCONFIG_CMDS	4
+static const int	lanConfig_cursor_table[] = {100, 120, 140, 172, 188};
+#define NUM_LANCONFIG_CMDS	5
 
 static int	lanConfig_port;
 static char	lanConfig_portname[6];
 static char	lanConfig_joinname[30];
+/* 0 = Hexen II protocol 19 (the legacy TCP/IP master-server join), 1 = the
+ * HexenWorld QuakeWorld-style join.  When set, the join field issues
+ * connect hw://<addr> instead of connect <addr>, so bare ip:port addresses
+ * reach HexenWorld servers without the player typing the scheme. */
+static qboolean	lanConfig_hwjoin;
 
 static void M_Menu_LanConfig_f (void)
 {
@@ -7256,6 +7261,9 @@ static void M_LanConfig_Draw (void)
 		M_Print (basex, 156, "Join game at:");
 		M_DrawTextBox (basex, lanConfig_cursor_table[3]-8, 30, 1);
 		M_Print (basex+8, lanConfig_cursor_table[3], lanConfig_joinname);
+
+		M_Print (basex, lanConfig_cursor_table[4],
+			 lanConfig_hwjoin ? "Join as: HexenWorld" : "Join as: Hexen II (TCP/IP)");
 	}
 	else
 	{
@@ -7338,7 +7346,17 @@ static void M_LanConfig_Key (int key)
 			m_return_onerror = true;
 			Key_SetDest (key_game);
 			m_state = m_none;
-			Cbuf_AddText ( va ("connect \"%s\"\n", lanConfig_joinname) );
+			if (lanConfig_hwjoin)
+				Cbuf_AddText ( va ("connect \"hw://%s\"\n", lanConfig_joinname) );
+			else
+				Cbuf_AddText ( va ("connect \"%s\"\n", lanConfig_joinname) );
+			break;
+		}
+
+		if (lanConfig_cursor == 4)
+		{
+			/* Protocol toggle: switching must not start a join. */
+			lanConfig_hwjoin = !lanConfig_hwjoin;
 			break;
 		}
 
@@ -7360,10 +7378,15 @@ static void M_LanConfig_Key (int key)
 		break;
 
 	case K_LEFTARROW:
-		if (lanConfig_cursor != 1 || !JoiningGame)
+		if (!JoiningGame || (lanConfig_cursor != 1 && lanConfig_cursor != 4))
 			break;
 
 		S_LocalSound ("raven/menu3.wav");
+		if (lanConfig_cursor == 4)
+		{
+			lanConfig_hwjoin = !lanConfig_hwjoin;
+			break;
+		}
 #if ENABLE_OLD_DEMO
 		if (gameflags & GAME_OLD_DEMO)
 		{
@@ -7379,10 +7402,15 @@ static void M_LanConfig_Key (int key)
 		break;
 
 	case K_RIGHTARROW:
-		if (lanConfig_cursor != 1 || !JoiningGame)
+		if (!JoiningGame || (lanConfig_cursor != 1 && lanConfig_cursor != 4))
 			break;
 
 		S_LocalSound ("raven/menu3.wav");
+		if (lanConfig_cursor == 4)
+		{
+			lanConfig_hwjoin = !lanConfig_hwjoin;
+			break;
+		}
 #if ENABLE_OLD_DEMO
 		if (gameflags & GAME_OLD_DEMO)
 		{
@@ -7424,7 +7452,7 @@ static void M_LanConfig_Key (int key)
 		}
 	}
 
-	if (StartingGame && lanConfig_cursor == 2)
+	if (StartingGame && lanConfig_cursor >= 2)
 	{
 		if (key == K_UPARROW)
 			lanConfig_cursor = 1;
