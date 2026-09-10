@@ -91,6 +91,7 @@
 #define HW_SVC_STOPSOUND 16
 #define HW_SVC_PARTICLE 18
 #define HW_SVC_DAMAGE 19
+#define HW_SVC_SPAWNSTATIC 20
 #define HW_SVC_SPAWNBASELINE 22
 #define HW_SVC_CENTERPRINT 26
 #define HW_SVC_KILLEDMONSTER 27
@@ -117,6 +118,8 @@
 #define HW_SVC_DELTAPACKETENTITIES 48
 #define HW_SVC_MAXSPEED 49
 #define HW_SVC_ENTGRAVITY 50
+#define HW_SVC_PLAQUE 51
+#define HW_SVC_PARTICLE_EXPLOSION 52
 #define HW_SVC_SET_VIEW_TINT 53
 #define HW_SVC_START_EFFECT 54
 #define HW_SVC_END_EFFECT 55
@@ -673,6 +676,75 @@ static void HWCL_ParseSound (void)
 				origin, volume / 255.0f, attenuation);
 }
 
+/*
+=================
+HWCL_ParseStatic
+
+HexenWorld sends a static entity's baseline without the entity number that
+HWCL_ParseBaseline consumes.  It comes in the prespawn reliable stream, before
+"cmd spawn"; failing to consume this record leaves that trailing command in the
+reader and prevents signon from ever completing.
+=================
+*/
+static void HWCL_ParseStatic (void)
+{
+	entity_t *ent;
+	int i;
+
+	if (cl.num_statics >= MAX_STATIC_ENTITIES)
+	{
+		/* Keep the packet reader aligned even when the renderer cannot retain
+		 * another static.  The wire record is the v24/25/26 baseline shape. */
+		MSG_ReadShort ();
+		for (i = 0; i < 6; i++) MSG_ReadByte ();
+		for (i = 0; i < 3; i++)
+		{
+			MSG_ReadCoord ();
+			MSG_ReadAngle ();
+		}
+		Con_Printf ("Too many HexenWorld static entities\n");
+		return;
+	}
+
+	ent = &cl_static_entities[cl.num_statics++];
+	memset (ent, 0, sizeof(*ent));
+	ent->baseline.modelindex = MSG_ReadShort ();
+	ent->baseline.frame = MSG_ReadByte ();
+	ent->baseline.colormap = MSG_ReadByte ();
+	ent->baseline.skin = MSG_ReadByte ();
+	ent->baseline.scale = MSG_ReadByte ();
+	ent->baseline.drawflags = MSG_ReadByte ();
+	ent->baseline.abslight = MSG_ReadByte ();
+	ent->baseline.alpha = ENTALPHA_DEFAULT;
+	for (i = 0; i < 3; i++)
+	{
+		ent->baseline.origin[i] = MSG_ReadCoord ();
+		ent->baseline.angles[i] = MSG_ReadAngle ();
+	}
+	if (msg_badread)
+		return;
+	if (ent->baseline.modelindex < 0 || ent->baseline.modelindex >= MAX_MODELS)
+	{
+		Con_Printf ("HexenWorld static has bad model index %d\n",
+				ent->baseline.modelindex);
+		return;
+	}
+
+	ent->model = cl.model_precache[ent->baseline.modelindex];
+	ent->frame = ent->baseline.frame;
+	ent->colormap = vid.colormap;
+	ent->sourcecolormap = vid.colormap;
+	ent->skinnum = ent->baseline.skin;
+	ent->scale = ent->baseline.scale;
+	ent->drawflags = ent->baseline.drawflags;
+	ent->abslight = ent->baseline.abslight;
+	ent->alpha = ent->baseline.alpha;
+	VectorCopy (ent->baseline.origin, ent->origin);
+	VectorCopy (ent->baseline.angles, ent->angles);
+	if (ent->model && cl.worldmodel)
+		R_AddEfrags (ent);
+}
+
 static void HWCL_ParseStaticSound (void)
 {
 	vec3_t origin;
@@ -690,6 +762,33 @@ static void HWCL_ParseStaticSound (void)
 			cl.sound_precache[sound_num])
 		S_StaticSound (cl.sound_precache[sound_num], origin, volume / 255.0f,
 				attenuation / 32.0f);
+}
+
+static void HWCL_ParsePlaque (void)
+{
+	int index = MSG_ReadShort ();
+
+	if (index > 0 && index <= host_string_count)
+		SCR_SetPlaqueMessage (Host_GetString (index - 1));
+	else
+		SCR_SetPlaqueMessage ("");
+}
+
+static void HWCL_ParseParticleExplosion (void)
+{
+	vec3_t origin;
+	int color;
+	int radius;
+	int counter;
+
+	origin[0] = MSG_ReadCoord ();
+	origin[1] = MSG_ReadCoord ();
+	origin[2] = MSG_ReadCoord ();
+	color = MSG_ReadShort ();
+	radius = MSG_ReadShort ();
+	counter = MSG_ReadShort ();
+	if (!msg_badread)
+		R_ColoredParticleExplosion (origin, color, radius, counter);
 }
 
 static void HWCL_ParseDownload (void)
@@ -1406,6 +1505,9 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_DAMAGE:
 			HWCL_ParseDamage ();
 			break;
+		case HW_SVC_SPAWNSTATIC:
+			HWCL_ParseStatic ();
+			break;
 		case HW_SVC_SET_VIEW_TINT:
 			cl.viewent.colorshade = MSG_ReadByte ();
 			break;
@@ -1526,6 +1628,12 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_ENTGRAVITY:
 			hwcl_server_state.entgravity = MSG_ReadFloat ();
 			movevars.entgravity = hwcl_server_state.entgravity;
+			break;
+		case HW_SVC_PLAQUE:
+			HWCL_ParsePlaque ();
+			break;
+		case HW_SVC_PARTICLE_EXPLOSION:
+			HWCL_ParseParticleExplosion ();
 			break;
 		case HW_SVC_UPDATE_INV:
 			HWCL_ParseInventoryUpdate ();
