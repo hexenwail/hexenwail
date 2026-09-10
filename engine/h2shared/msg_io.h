@@ -38,6 +38,7 @@ void MSG_WriteUsercmd (sizebuf_t *sb, const struct usercmd_s *cmd, qboolean long
 #endif	/* H2W */
 
 void MSG_BeginReading (void);
+void MSG_BeginReadingFrom (sizebuf_t *message);
 int MSG_ReadChar (void);
 int MSG_ReadByte (void);
 int MSG_ReadShort (void);

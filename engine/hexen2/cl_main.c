@@ -24,6 +24,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "cl_csqc.h"
+#include "cl_hw.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -169,6 +170,9 @@ This is also called on Host_Error, so it shouldn't cause any errors
 */
 void CL_Disconnect (void)
 {
+#if defined(H2W_INTEGRATED)
+	HWCL_Disconnect ();
+#endif
 // don't get stuck in chat mode
 	if (Key_GetDest() == key_message)
 		Key_EndChat ();
@@ -240,6 +244,16 @@ void CL_EstablishConnection (const char *host)
 		return;
 
 	CL_Disconnect ();
+
+#if defined(H2W_INTEGRATED)
+	/* The URI makes protocol selection explicit; ordinary host names retain
+	 * Hexen II's qsocket handshake. */
+	if (!q_strncasecmp(host, "hw://", 5))
+	{
+		HWCL_Connect (host + 5);
+		return;
+	}
+#endif
 
 	cls.netcon = NET_Connect (host);
 	if (!cls.netcon)
@@ -1307,6 +1321,25 @@ int CL_ReadFromServer (void)
 {
 	int	ret;
 
+#if defined(H2W_INTEGRATED)
+	HWCL_Frame ();
+	if (HWCL_Active ())
+	{
+		/* HexenWorld owns its socket and netchan; do not ask the Hexen II
+		 * qsocket layer to read a null cls.netcon.  Its retained snapshots
+		 * feed the maintained renderer through the same relink path as H2. */
+		CL_AdvanceTime ();
+		HWCL_ApplyState ();
+		CL_RelinkEntities ();
+		CL_UpdateEffects ();
+		CL_UpdateTEnts ();
+		CL_UpdateDevStats ();
+		return 0;
+	}
+	if (!cls.netcon)
+		return 0;
+#endif
+
 	/* Demo playback runs this clock at cls.demospeed, which is what pause,
 	 * slow motion and fast-forward actually are.  uhexen2-ofl9. */
 	CL_AdvanceTime ();
@@ -1391,6 +1424,25 @@ CL_SendCmd
 void CL_SendCmd (void)
 {
 	usercmd_t	cmd;
+
+#if defined(H2W_INTEGRATED)
+	if (HWCL_Active ())
+	{
+		if (cls.signon != SIGNONS)
+			return;
+
+		CL_BaseMove (&cmd);
+		cmd.forwardmove += cl.pendingcmd.forwardmove;
+		cmd.sidemove += cl.pendingcmd.sidemove;
+		cmd.upmove += cl.pendingcmd.upmove;
+		memset (&cl.pendingcmd, 0, sizeof(cl.pendingcmd));
+		cmd.forwardmove += cl.analogmove.forwardmove;
+		cmd.sidemove += cl.analogmove.sidemove;
+		cmd.upmove += cl.analogmove.upmove;
+		HWCL_SendCmd (&cmd);
+		return;
+	}
+#endif
 
 	if (cls.state != ca_connected)
 		return;

@@ -636,6 +636,29 @@ void CL_BaseMove (usercmd_t *cmd)
 }
 
 
+int CL_GetButtonBits (void)
+{
+	int bits = 0;
+
+	if (in_attack.state & 3)
+		bits |= 1;
+	in_attack.state &= ~2;
+	if (in_jump.state & 3)
+		bits |= 2;
+	in_jump.state &= ~2;
+	if (in_crouch.state & 1)
+		bits |= 4;
+	return bits;
+}
+
+int CL_GetImpulse (void)
+{
+	int impulse = in_impulse;
+
+	in_impulse = 0;
+	return impulse;
+}
+
 /*
 ==============
 CL_SendMove
@@ -668,23 +691,9 @@ void CL_SendMove (const usercmd_t *cmd)
 	MSG_WriteShort (&buf, cmd->upmove);
 
 // send button bits
-	bits = 0;
-
-	if (in_attack.state & 3)
-		bits |= 1;
-	in_attack.state &= ~2;
-
-	if (in_jump.state & 3)
-		bits |= 2;
-	in_jump.state &= ~2;
-
-	if (in_crouch.state & 1)
-		bits |= 4;
-
+	bits = CL_GetButtonBits ();
 	MSG_WriteByte (&buf, bits);
-
-	MSG_WriteByte (&buf, in_impulse);
-	in_impulse = 0;
+	MSG_WriteByte (&buf, CL_GetImpulse ());
 
 // light level
 	MSG_WriteByte (&buf, cmd->lightlevel);

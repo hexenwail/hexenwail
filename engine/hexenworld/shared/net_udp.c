@@ -23,7 +23,12 @@
 #include "q_stdinc.h"
 #include "arch_def.h"
 #include "net_sys.h"
+#ifdef H2W_INTEGRATED
+#include "../../hexen2/quakedef.h"
+#include "net.h"
+#else
 #include "quakedef.h"
+#endif
 #include "huffman.h"
 
 //=============================================================================
@@ -45,7 +50,7 @@ struct Library	*SocketBase;
 static WSADATA	winsockdata;
 #endif
 
-#define	MAX_UDP_PACKET	(MAX_MSGLEN + 9)	/* one more than msg + header */
+#define	MAX_UDP_PACKET	(HWNET_MAX_MSGLEN + 9)	/* one more than msg + header */
 static byte	net_message_buffer[MAX_UDP_PACKET];
 
 

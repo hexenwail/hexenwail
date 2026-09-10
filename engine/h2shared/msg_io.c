@@ -201,12 +201,27 @@ void MSG_WriteUsercmd (sizebuf_t *buf, const usercmd_t *cmd, qboolean long_msg)
 //
 int		msg_readcount;
 qboolean	msg_badread;
+/* Defaults to net_message so a read that reaches the reader before any
+ * MSG_BeginReading behaves as it did when net_message was referenced
+ * directly, rather than dereferencing NULL. */
+static sizebuf_t	*msg_readbuf = &net_message;
 
-void MSG_BeginReading (void)
+void MSG_BeginReadingFrom (sizebuf_t *message)
 {
+	msg_readbuf = message;
 	msg_readcount = 0;
 	msg_badread = false;
 }
+
+void MSG_BeginReading (void)
+{
+	MSG_BeginReadingFrom (&net_message);
+}
+
+/* Keep the established reader implementation below, but route it through the
+ * selected buffer.  This lets Hexen II and HexenWorld transports coexist in
+ * one client without copying packet payloads between their globals. */
+#define net_message (*msg_readbuf)
 
 // returns -1 and sets msg_badread if no more characters are available
 int MSG_ReadChar (void)
