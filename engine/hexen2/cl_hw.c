@@ -243,6 +243,9 @@ static char hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
 static int hwcl_model_count;
 static int hwcl_sound_count;
 static int hwcl_playernum;
+/* Players whose spawn we have already announced this signon.  Cleared on every
+ * svc_serverdata so a reconnect can be seen happening. */
+static qboolean hwcl_players_seen[HWCL_MAX_CLIENTS];
 
 extern qmodel_t *player_models[MAX_PLAYER_CLASS];
 
@@ -460,7 +463,6 @@ static void HWCL_ParsePrecacheList (qboolean models)
 
 static void HWCL_ParseServerData (void)
 {
-	int i;
 	int playernum;
 	char gamedir[MAX_QPATH];
 	char levelname[1024];
@@ -512,6 +514,11 @@ static void HWCL_ParseServerData (void)
 	cls.signon = 0;
 	memset (hwcl_model_names, 0, sizeof(hwcl_model_names));
 	memset (hwcl_sound_names, 0, sizeof(hwcl_sound_names));
+	/* The static list is NOT part of cl, so CL_ClearState's memset leaves the
+	 * previous map's statics (and their now-wiped efrag handles) behind.  Drop
+	 * them here; the new map's svc_spawnstatic records re-populate the list. */
+	memset (cl_static_entities, 0, sizeof(cl_static_entities));
+	memset (hwcl_players_seen, 0, sizeof(hwcl_players_seen));
 	hwcl_model_count = 1;
 	hwcl_sound_count = 1;
 	hwcl_playernum = playernum & 127;
@@ -662,6 +669,45 @@ static void HWCL_SkipUsercmd (void)
 	if (bits & (1 << 7)) MSG_ReadByte ();
 }
 
+/*
+=================
+HWCL_Changing / HWCL_Reconnect
+
+SV_Map_f broadcasts "changing\n" then "reconnect\n" as server commands before
+and after it spawns the next level (sv_ccmds.c).  The original HexenWorld
+client executes these as console commands; the integrated client has no HW
+command namespace, so handle them here.  "reconnect" re-arms the signon dance
+by sending the same clc_stringcmd "new" the connect handshake used.
+=================
+*/
+static void HWCL_SendConnectPacket (void);	/* defined below, with HWCL_Connect */
+
+static void HWCL_Changing (void)
+{
+	S_StopAllSounds (true);
+	cl.intermission = 0;
+	cls.state = ca_connected;	/* not active anymore, but not disconnected */
+	Con_Printf ("\nChanging map...\n");
+}
+
+static void HWCL_Reconnect (void)
+{
+	S_StopAllSounds (true);
+
+	if (hwcl_state == hwcl_connected)
+	{
+		Con_Printf ("reconnecting...\n");
+		HWCL_StringCmd ("new");
+		return;
+	}
+
+	/* No live connection: redo the whole handshake from the stored address. */
+	Con_Printf ("reconnecting...\n");
+	HWCL_Disconnect ();
+	hwcl_state = hwcl_connecting;
+	HWCL_SendConnectPacket ();
+}
+
 static void HWCL_ParseSound (void)
 {
 	int channel;
@@ -738,6 +784,9 @@ static void HWCL_ParseStatic (void)
 				ent->baseline.modelindex);
 		return;
 	}
+	Con_DPrintf ("HexenWorld static %d: model %d frame %d scale %d\n",
+			cl.num_statics, ent->baseline.modelindex, ent->baseline.frame,
+			ent->baseline.scale);
 
 	ent->model = cl.model_precache[ent->baseline.modelindex];
 	ent->frame = ent->baseline.frame;
@@ -1267,7 +1316,15 @@ void HWCL_ApplyState (void)
 	for (i = 1; i < HWCL_MAX_ENTITIES; i++)
 	{
 		if (i <= HWCL_MAX_CLIENTS)
-			state = &hwcl_server_state.players[i - 1];
+		{
+			int slot = i - 1;
+			state = &hwcl_server_state.players[slot];
+			if (state->active && !hwcl_players_seen[slot])
+			{
+				hwcl_players_seen[slot] = true;
+				Con_DPrintf ("HexenWorld player %d spawned.\n", slot);
+			}
+		}
 		else
 			state = &hwcl_server_state.entities[i];
 
@@ -1780,6 +1837,16 @@ static void HWCL_ParseServerMessage (void)
 					cls.signon = SIGNONS;
 					Con_Printf ("HexenWorld signon complete; awaiting state adapter.\n");
 				}
+				else if (!q_strcasecmp (text, "changing\n"))
+				{
+					/* Broadcast before the new level is spawned. */
+					HWCL_Changing ();
+				}
+				else if (!q_strcasecmp (text, "reconnect\n"))
+				{
+					/* Broadcast after the new level is spawned; re-enter signon. */
+					HWCL_Reconnect ();
+				}
 			}
 			break;
 		default:
@@ -1800,12 +1867,22 @@ static void HWCL_ParseServerMessage (void)
 
 static void HWCL_InitNet (void)
 {
+	int port = HW_PORT_CLIENT;
+	int i;
+
 	if (hwcl_net_initialized)
 		return;
 
+	/* Allow several headless clients on one host (smoke tests, bots) by
+	 * giving each its own UDP source port.  The default matches the original
+	 * HexenWorld client. */
+	i = COM_CheckParm ("-hwport");
+	if (i && i < com_argc - 1)
+		port = atoi (com_argv[i + 1]);
+
 	HuffInit ();
 	HWNetchan_Init ();
-	HWNET_Init (HW_PORT_CLIENT);
+	HWNET_Init (port);
 	hwcl_net_initialized = true;
 }
 
