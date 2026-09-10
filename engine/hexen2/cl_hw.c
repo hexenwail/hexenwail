@@ -8,6 +8,7 @@
 #include "cl_hw.h"
 #include "../hexenworld/shared/net.h"
 #include "../hexenworld/shared/huffman.h"
+#include "../hexenworld/shared/pmove.h"
 
 /* quakedef.h already includes Hexen II's effects.h.  HexenWorld uses the
  * same names for a different numeric table, so keep the values local to this
@@ -90,6 +91,7 @@
 #define HW_SVC_STOPSOUND 16
 #define HW_SVC_PARTICLE 18
 #define HW_SVC_DAMAGE 19
+#define HW_SVC_SPAWNSTATIC 20
 #define HW_SVC_SPAWNBASELINE 22
 #define HW_SVC_CENTERPRINT 26
 #define HW_SVC_KILLEDMONSTER 27
@@ -116,6 +118,8 @@
 #define HW_SVC_DELTAPACKETENTITIES 48
 #define HW_SVC_MAXSPEED 49
 #define HW_SVC_ENTGRAVITY 50
+#define HW_SVC_PLAQUE 51
+#define HW_SVC_PARTICLE_EXPLOSION 52
 #define HW_SVC_SET_VIEW_TINT 53
 #define HW_SVC_START_EFFECT 54
 #define HW_SVC_END_EFFECT 55
@@ -224,6 +228,16 @@ typedef struct
 
 static hwcl_usercmd_t hwcl_cmd_history[3];
 static qboolean hwcl_have_cmd_history;
+static qboolean hwcl_pmove_ready;
+static int hwcl_pmove_oldbuttons;
+static qboolean hwcl_predicted_valid;
+static vec3_t hwcl_predicted_origin;
+static vec3_t hwcl_predicted_velocity;
+static qboolean hwcl_predicted_onground;
+static int hwcl_local_movetype = MOVETYPE_WALK;
+static float hwcl_local_hasted = 1.0f;
+static qboolean hwcl_local_dead;
+static qboolean hwcl_local_crouched;
 static char hwcl_model_names[MAX_MODELS][MAX_QPATH];
 static char hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
 static int hwcl_model_count;
@@ -288,6 +302,22 @@ static void HWCL_WriteUsercmd (sizebuf_t *buf, const hwcl_usercmd_t *cmd,
 	if (bits & (1 << 5)) MSG_WriteByte (buf, cmd->buttons);
 	if (bits & (1 << 6)) MSG_WriteByte (buf, cmd->impulse);
 	if (bits & (1 << 7)) MSG_WriteByte (buf, cmd->msec);
+}
+
+/* Protocol 24 sends no movevars, and a zeroed movevars_t means no gravity and
+ * a maxspeed of zero.  These are hwsv's own cvar defaults (sv_phys.c). */
+static void HWCL_DefaultMoveVars (void)
+{
+	movevars.gravity = 800.0f;
+	movevars.stopspeed = 100.0f;
+	movevars.maxspeed = 360.0f;
+	movevars.spectatormaxspeed = 500.0f;
+	movevars.accelerate = 10.0f;
+	movevars.airaccelerate = 0.7f;
+	movevars.wateraccelerate = 10.0f;
+	movevars.friction = 4.0f;
+	movevars.waterfriction = 1.0f;
+	movevars.entgravity = 1.0f;
 }
 
 static qboolean HWCL_ValidProtocol (int protocol)
@@ -449,15 +479,23 @@ static void HWCL_ParseServerData (void)
 	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
 	playernum = MSG_ReadByte ();
 	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
+	HWCL_DefaultMoveVars ();
 	if (hwcl_protocol >= HW_PROTOCOL_VERSION)
-		for (i = 0; i < 10; i++)
-		{
-			float movevar = MSG_ReadFloat ();
-			if (i == 2)
-				hwcl_server_state.maxspeed = movevar;
-			if (i == 9)
-				hwcl_server_state.entgravity = movevar;
-		}
+	{
+		/* SV_New_f writes these in movevars_t field order. */
+		movevars.gravity = MSG_ReadFloat ();
+		movevars.stopspeed = MSG_ReadFloat ();
+		movevars.maxspeed = MSG_ReadFloat ();
+		movevars.spectatormaxspeed = MSG_ReadFloat ();
+		movevars.accelerate = MSG_ReadFloat ();
+		movevars.airaccelerate = MSG_ReadFloat ();
+		movevars.wateraccelerate = MSG_ReadFloat ();
+		movevars.friction = MSG_ReadFloat ();
+		movevars.waterfriction = MSG_ReadFloat ();
+		movevars.entgravity = MSG_ReadFloat ();
+		hwcl_server_state.maxspeed = movevars.maxspeed;
+		hwcl_server_state.entgravity = movevars.entgravity;
+	}
 	if (msg_badread)
 		return;
 
@@ -638,6 +676,75 @@ static void HWCL_ParseSound (void)
 				origin, volume / 255.0f, attenuation);
 }
 
+/*
+=================
+HWCL_ParseStatic
+
+HexenWorld sends a static entity's baseline without the entity number that
+HWCL_ParseBaseline consumes.  It comes in the prespawn reliable stream, before
+"cmd spawn"; failing to consume this record leaves that trailing command in the
+reader and prevents signon from ever completing.
+=================
+*/
+static void HWCL_ParseStatic (void)
+{
+	entity_t *ent;
+	int i;
+
+	if (cl.num_statics >= MAX_STATIC_ENTITIES)
+	{
+		/* Keep the packet reader aligned even when the renderer cannot retain
+		 * another static.  The wire record is the v24/25/26 baseline shape. */
+		MSG_ReadShort ();
+		for (i = 0; i < 6; i++) MSG_ReadByte ();
+		for (i = 0; i < 3; i++)
+		{
+			MSG_ReadCoord ();
+			MSG_ReadAngle ();
+		}
+		Con_Printf ("Too many HexenWorld static entities\n");
+		return;
+	}
+
+	ent = &cl_static_entities[cl.num_statics++];
+	memset (ent, 0, sizeof(*ent));
+	ent->baseline.modelindex = MSG_ReadShort ();
+	ent->baseline.frame = MSG_ReadByte ();
+	ent->baseline.colormap = MSG_ReadByte ();
+	ent->baseline.skin = MSG_ReadByte ();
+	ent->baseline.scale = MSG_ReadByte ();
+	ent->baseline.drawflags = MSG_ReadByte ();
+	ent->baseline.abslight = MSG_ReadByte ();
+	ent->baseline.alpha = ENTALPHA_DEFAULT;
+	for (i = 0; i < 3; i++)
+	{
+		ent->baseline.origin[i] = MSG_ReadCoord ();
+		ent->baseline.angles[i] = MSG_ReadAngle ();
+	}
+	if (msg_badread)
+		return;
+	if (ent->baseline.modelindex < 0 || ent->baseline.modelindex >= MAX_MODELS)
+	{
+		Con_Printf ("HexenWorld static has bad model index %d\n",
+				ent->baseline.modelindex);
+		return;
+	}
+
+	ent->model = cl.model_precache[ent->baseline.modelindex];
+	ent->frame = ent->baseline.frame;
+	ent->colormap = vid.colormap;
+	ent->sourcecolormap = vid.colormap;
+	ent->skinnum = ent->baseline.skin;
+	ent->scale = ent->baseline.scale;
+	ent->drawflags = ent->baseline.drawflags;
+	ent->abslight = ent->baseline.abslight;
+	ent->alpha = ent->baseline.alpha;
+	VectorCopy (ent->baseline.origin, ent->origin);
+	VectorCopy (ent->baseline.angles, ent->angles);
+	if (ent->model && cl.worldmodel)
+		R_AddEfrags (ent);
+}
+
 static void HWCL_ParseStaticSound (void)
 {
 	vec3_t origin;
@@ -655,6 +762,33 @@ static void HWCL_ParseStaticSound (void)
 			cl.sound_precache[sound_num])
 		S_StaticSound (cl.sound_precache[sound_num], origin, volume / 255.0f,
 				attenuation / 32.0f);
+}
+
+static void HWCL_ParsePlaque (void)
+{
+	int index = MSG_ReadShort ();
+
+	if (index > 0 && index <= host_string_count)
+		SCR_SetPlaqueMessage (Host_GetString (index - 1));
+	else
+		SCR_SetPlaqueMessage ("");
+}
+
+static void HWCL_ParseParticleExplosion (void)
+{
+	vec3_t origin;
+	int color;
+	int radius;
+	int counter;
+
+	origin[0] = MSG_ReadCoord ();
+	origin[1] = MSG_ReadCoord ();
+	origin[2] = MSG_ReadCoord ();
+	color = MSG_ReadShort ();
+	radius = MSG_ReadShort ();
+	counter = MSG_ReadShort ();
+	if (!msg_badread)
+		R_ColoredParticleExplosion (origin, color, radius, counter);
 }
 
 static void HWCL_ParseDownload (void)
@@ -1146,6 +1280,21 @@ void HWCL_ApplyState (void)
 		state = &hwcl_server_state.players[viewentity - 1];
 		VectorCopy (state->velocity, cl.velocity);
 	}
+
+	/* _Host_Frame calls CL_SendCmd -- and so HWCL_PredictUsercmd -- before
+	 * CL_ReadFromServer, so the HWCL_CopyEntity pass above has just written
+	 * the server's origin over the predicted one.  Re-apply it here, last,
+	 * or prediction has no effect on what is drawn at all. */
+	if (hwcl_predicted_valid && viewentity >= 1 && viewentity < HWCL_MAX_ENTITIES)
+	{
+		entity_t *pent = &cl_entities[viewentity];
+
+		VectorCopy (hwcl_predicted_origin, pent->msg_origins[0]);
+		VectorCopy (hwcl_predicted_origin, pent->baseline.origin);
+		VectorCopy (hwcl_predicted_velocity, cl.velocity);
+		cl.onground = hwcl_predicted_onground;
+	}
+
 	cl.num_entities = highest + 1;
 	if (cl.num_entities < 1)
 		cl.num_entities = 1;
@@ -1195,9 +1344,9 @@ static void HWCL_ParseInventoryUpdate (void)
 	if (sc1 & (1u << 24)) MSG_ReadByte (); /* cnt_invincibility */
 	if (sc1 & (1u << 25)) MSG_ReadByte (); /* artifact_active */
 	if (sc1 & (1u << 26)) MSG_ReadByte (); /* artifact_low */
-	if (sc1 & (1u << 27)) MSG_ReadByte (); /* movetype */
+	if (sc1 & (1u << 27)) hwcl_local_movetype = MSG_ReadByte ();
 	if (sc1 & (1u << 28)) MSG_ReadByte (); /* cameramode */
-	if (sc1 & (1u << 29)) MSG_ReadFloat (); /* hasted */
+	if (sc1 & (1u << 29)) hwcl_local_hasted = MSG_ReadFloat ();
 	if (sc1 & (1u << 30)) MSG_ReadByte (); /* inventory */
 	if (sc1 & (1u << 31)) MSG_ReadByte (); /* rings_active */
 
@@ -1240,6 +1389,13 @@ static void HWCL_ParsePlayerInfo (void)
 	for (i = 0; i < 3; i++)
 		state->origin[i] = MSG_ReadCoord ();
 	state->frame = MSG_ReadByte ();
+	/* PF_DEAD and PF_CROUCH carry no payload, but PlayerMove needs both:
+	 * dead stops movement input and crouched selects the short hull. */
+	if (playernum == hwcl_playernum)
+	{
+		hwcl_local_dead = (flags & (1 << 9)) != 0;
+		hwcl_local_crouched = (flags & (1 << 10)) != 0;
+	}
 	if (flags & (1 << 0)) MSG_ReadByte (); /* msec */
 	if (flags & (1 << 1)) HWCL_SkipUsercmd ();
 	for (i = 0; i < 3; i++)
@@ -1348,6 +1504,9 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_DAMAGE:
 			HWCL_ParseDamage ();
+			break;
+		case HW_SVC_SPAWNSTATIC:
+			HWCL_ParseStatic ();
 			break;
 		case HW_SVC_SET_VIEW_TINT:
 			cl.viewent.colorshade = MSG_ReadByte ();
@@ -1464,9 +1623,17 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_MAXSPEED:
 			hwcl_server_state.maxspeed = MSG_ReadFloat ();
+			movevars.maxspeed = hwcl_server_state.maxspeed;
 			break;
 		case HW_SVC_ENTGRAVITY:
 			hwcl_server_state.entgravity = MSG_ReadFloat ();
+			movevars.entgravity = hwcl_server_state.entgravity;
+			break;
+		case HW_SVC_PLAQUE:
+			HWCL_ParsePlaque ();
+			break;
+		case HW_SVC_PARTICLE_EXPLOSION:
+			HWCL_ParseParticleExplosion ();
 			break;
 		case HW_SVC_UPDATE_INV:
 			HWCL_ParseInventoryUpdate ();
@@ -1674,7 +1841,107 @@ qboolean HWCL_Active (void)
 	return hwcl_state != hwcl_disconnected;
 }
 
-void HWCL_SendCmd (const usercmd_t *cmd)
+static int HWCL_LocalPlayerSlot (void)
+{
+	int viewentity = hwcl_server_state.viewentity;
+	if (viewentity < 1 || viewentity > HWCL_MAX_CLIENTS)
+		return -1;
+	return viewentity - 1;
+}
+
+/*
+ * Local movement prediction.
+ *
+ * This runs hexenworld/shared/pmove.c -- the same PlayerMove() hwsv runs from
+ * SV_RunCmd -- rather than an approximation of it.  Anything hand-rolled here
+ * diverges from the server by construction: acceleration, friction, water,
+ * stairs, the class hulls and the crouch box are all decisions pmove already
+ * makes, and it makes them the way the authority does.
+ *
+ * The seed is the last server state for the local player, advanced by the
+ * command being sent this frame.  Re-simulating every unacknowledged command
+ * from the acknowledged snapshot is the next step and wants a command ring
+ * keyed on netchan sequence; the physics below is already the server's.
+ */
+void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse)
+{
+	const hwcl_entity_state_t *state;
+	entity_t *ent;
+	int slot;
+	int msec;
+
+	slot = HWCL_LocalPlayerSlot ();
+	if (slot < 0 || !cl.worldmodel || cls.signon != SIGNONS)
+		return;
+	state = &hwcl_server_state.players[slot];
+	if (!state->active)
+		return;
+	ent = &cl_entities[hwcl_server_state.viewentity];
+	if (!ent->model)
+		return;
+
+	if (!hwcl_pmove_ready)
+	{
+		Pmove_Init ();
+		hwcl_pmove_ready = true;
+	}
+
+	msec = (int)(host_frametime * 1000.0 + 0.5);
+	if (msec < 1)
+		msec = 1;
+	if (msec > 255)
+		msec = 255;
+
+	memset (&pmove, 0, sizeof(pmove));
+	VectorCopy (state->origin, pmove.origin);
+	VectorCopy (state->velocity, pmove.velocity);
+	VectorCopy (cl.viewangles, pmove.angles);
+	pmove.oldbuttons = hwcl_pmove_oldbuttons;
+	pmove.dead = hwcl_local_dead;
+	pmove.crouched = hwcl_local_crouched;
+	pmove.movetype = hwcl_local_movetype;
+	/* hasted multiplies maxspeed, so it is 1 and never 0 when unset. */
+	pmove.hasted = (hwcl_local_hasted > 0) ? hwcl_local_hasted : 1.0f;
+	pmove.spectator = 0;
+
+	/* physent 0 is the world.  Brush-model movers are not tracked yet, so
+	 * prediction sees the static world only and the server corrects the
+	 * rest -- it never sees a *wrong* world. */
+	pmove.numphysent = 1;
+	pmove.physents[0].model = cl.worldmodel;
+	VectorClear (pmove.physents[0].origin);
+	VectorClear (pmove.physents[0].angles);
+	pmove.physents[0].info = 0;
+
+	pmove.cmd.msec = msec;
+	VectorCopy (cl.viewangles, pmove.cmd.angles);
+	pmove.cmd.forwardmove = (short)cmd->forwardmove;
+	pmove.cmd.sidemove = (short)cmd->sidemove;
+	pmove.cmd.upmove = (short)cmd->upmove;
+	pmove.cmd.buttons = (byte)buttons;
+	pmove.cmd.impulse = (byte)impulse;
+	pmove.cmd.light_level = cmd->lightlevel;
+
+	PlayerMove ();
+
+	hwcl_pmove_oldbuttons = pmove.oldbuttons;
+
+	VectorCopy (pmove.origin, hwcl_predicted_origin);
+	VectorCopy (pmove.velocity, hwcl_predicted_velocity);
+	hwcl_predicted_onground = (onground != -1);
+	hwcl_predicted_valid = true;
+
+	cl.onground = hwcl_predicted_onground;
+	VectorCopy (hwcl_predicted_velocity, cl.velocity);
+	VectorCopy (hwcl_predicted_origin, ent->msg_origins[0]);
+	VectorCopy (hwcl_predicted_origin, ent->baseline.origin);
+	ent->msgtime = cl.mtime[0];
+}
+
+/* buttons and impulse are sampled by the caller and passed in: CL_GetButtonBits
+ * clears the edge-triggered bit of in_attack/in_jump and CL_GetImpulse zeroes
+ * in_impulse, so calling either twice in a frame loses the input. */
+void HWCL_SendCmd (const usercmd_t *cmd, int buttons, int impulse)
 {
 	hwcl_usercmd_t current;
 	hwcl_usercmd_t oldest;
@@ -1693,8 +1960,8 @@ void HWCL_SendCmd (const usercmd_t *cmd)
 	current.forwardmove = (int)cmd->forwardmove;
 	current.sidemove = (int)cmd->sidemove;
 	current.upmove = (int)cmd->upmove;
-	current.buttons = CL_GetButtonBits ();
-	current.impulse = CL_GetImpulse ();
+	current.buttons = buttons;
+	current.impulse = impulse;
 	current.lightlevel = cmd->lightlevel;
 	msec = (int)(host_frametime * 1000.0 + 0.5);
 	if (msec < 1)
@@ -1743,6 +2010,12 @@ void HWCL_Disconnect (void)
 	hwcl_servercount = 0;
 	hwcl_entity_sequence = -1;
 	hwcl_have_cmd_history = false;
+	hwcl_pmove_oldbuttons = 0;
+	hwcl_predicted_valid = false;
+	hwcl_local_movetype = MOVETYPE_WALK;
+	hwcl_local_hasted = 1.0f;
+	hwcl_local_dead = false;
+	hwcl_local_crouched = false;
 	memset (hwcl_cmd_history, 0, sizeof(hwcl_cmd_history));
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	cls.signon = 0;

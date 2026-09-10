@@ -20,7 +20,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#ifdef H2W_INTEGRATED
+#include "../../hexen2/quakedef.h"
+#include "pmove.h"
+#else
 #include "quakedef.h"
+#endif
 
 
 movevars_t	movevars;

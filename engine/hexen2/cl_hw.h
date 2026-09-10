@@ -4,8 +4,9 @@
 
 #if defined(H2W_INTEGRATED)
 qboolean HWCL_Connect (const char *host);
-void HWCL_SendCmd (const usercmd_t *cmd);
+void HWCL_SendCmd (const usercmd_t *cmd, int buttons, int impulse);
 void HWCL_ApplyState (void);
+void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse);
 qboolean HWCL_Active (void);
 void HWCL_Disconnect (void);
 void HWCL_Frame (void);
