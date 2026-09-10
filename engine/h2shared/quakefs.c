@@ -1132,6 +1132,14 @@ void FS_Gamedir (const char *dir)
 	 * whatever the previous mod it was running and went back to
 	 * pure hw. weird.. do as he wishes anyway and adjust our variables. */
 		set_hw_dir ();
+#elif defined(H2W_INTEGRATED)
+	/* The HexenWorld client lives inside a plain Hexenwail launch whose
+	 * base searchpaths were built for data1 (+ portals).  The H2W server
+	 * keeps hw in its base because it was started with -game hw; this
+	 * client was not, so the server-directed gamedir must be mounted now
+	 * or every model/sound/map it references (hw/pak4.pak especially) is
+	 * unresolvable -- the world itself included. */
+		FS_AddGameDirectory (dir, false);
 #else	/* hexen2 case: */
 	/* hw is reserved for hexenworld only. hexen2 shouldn't use it */
 		Con_Printf ("WARNING: Gamedir not set to hw :\n"
