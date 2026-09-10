@@ -29,6 +29,16 @@ explicitly with:
 
     connect hw://server.example:26950
 
+or from the menu: Multiplayer → Join a Game → HexenWorld.  That screen lists
+the servers this client has reached (the archived `hw_server1`..`hw_server8`
+cvars; an address is added when a server accepts the connection, not when it
+is typed), opens a connect dialog for a new address, and reaches the shared
+player setup, where the Hostname row becomes a Spectator toggle
+(`hw_spectator`, read by the server only at connect, and not archived because
+its value doubles as the spectator password).  It is not a live browser: the
+client has no master-server or status query yet.  While connected, `name`, `color` and `playerclass` reach
+the server as `setinfo`.
+
 The integrated path completes connectionless acceptance, establishes the
 sequenced netchan, validates protocol 24/25/26/100 server data, and completes
 the sound/model-list, baseline, spawn, and begin transport handshake.

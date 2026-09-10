@@ -24,6 +24,7 @@
 #include "q_ctype.h"
 #include "bgmusic.h"
 #include "cdaudio.h"
+#include "cl_hw.h"
 #if defined(GLQUAKE)
 #include "gl_postprocess.h"
 #include "gl_vbo.h"
@@ -114,6 +115,15 @@ static void M_GameOptions_Key (int key);
 static void M_Search_Key (int key);
 static void M_ServerList_Key (int key);
 
+#if defined(H2W_INTEGRATED)
+static void M_Menu_HWServers_f (void);
+static void M_Menu_HWConnect_f (void);
+static void M_HWServers_Draw (void);
+static void M_HWConnect_Draw (void);
+static void M_HWServers_Key (int key);
+static void M_HWConnect_Key (int key);
+#endif
+
 
 static qboolean	m_entersound;		// play after drawing a frame, so caching
 					// won't disrupt the sound
@@ -142,6 +152,7 @@ static void M_ConfigureNetSubsystem(void);
 #define JoiningGame		(m_multiplayer_cursor == 0)
 
 #define	_item_net_tcp		0	/* order of TCP menu entry */
+#define	_item_net_hw		1	/* HexenWorld: join only, no listen server */
 
 #define	TCPIPConfig		(m_net_cursor == _item_net_tcp)
 
@@ -1733,6 +1744,13 @@ static int		setup_oldtop;
 static int		setup_oldbottom;
 static int		setup_top;
 static int		setup_bottom;
+/* Entered from the HexenWorld server list: the Hostname row (a listen-server
+ * setting) becomes the Spectator flag, and the screen returns there. */
+static qboolean	setup_hw;
+static qboolean	setup_spectator;
+#if defined(H2W_INTEGRATED)
+static qboolean	setup_oldspectator;
+#endif
 
 #define	NUM_SETUP_CMDS	6
 
@@ -1741,6 +1759,7 @@ static void M_Menu_Setup_f (void)
 	Key_SetDest (key_menu);
 	m_state = m_setup;
 	m_entersound = true;
+	setup_hw = false;
 	q_strlcpy(setup_myname, cl_name.string, sizeof(setup_myname));
 	q_strlcpy(setup_hostname, hostname.string, sizeof(setup_hostname));
 	setup_top = setup_oldtop = (cl_color.integer >> 4) & 15;
@@ -1763,6 +1782,31 @@ static void M_Menu_Setup_f (void)
 	}
 }
 
+#if defined(H2W_INTEGRATED)
+/* Name, class and colours are the same _cl_* cvars both protocols read; the
+ * name/color/playerclass commands relay them to a HexenWorld server as
+ * setinfo when one is connected. */
+static void M_Menu_HWSetup_f (void)
+{
+	M_Menu_Setup_f ();
+	setup_hw = true;
+	setup_spectator = setup_oldspectator =
+		(hw_spectator.string[0] && strcmp (hw_spectator.string, "0"));
+}
+#endif
+
+static void M_Setup_Return (void)
+{
+#if defined(H2W_INTEGRATED)
+	if (setup_hw)
+	{
+		M_Menu_HWServers_f ();
+		return;
+	}
+#endif
+	M_Menu_MultiPlayer_f ();
+}
+
 
 static void M_DrawTransPicTranslate (int x, int y, qpic_t *pic, int p_class)
 {
@@ -1775,9 +1819,19 @@ static void M_Setup_Draw (void)
 
 	ScrollTitle("gfx/menu/title4.lmp");
 
-	M_Print (64, 40, "Hostname");
-	M_DrawTextBox (160, 32, 16, 1);
-	M_Print (168, 40, setup_hostname);
+	if (setup_hw)
+	{
+		M_Print (64, 40, "Spectator");
+		M_Print (168, 40, setup_spectator ? "Yes" : "No");
+		/* Below the class picture, which reaches y=186. */
+		M_PrintWhite ((320 - 33*8) / 2, 192, "Spectator takes effect on connect");
+	}
+	else
+	{
+		M_Print (64, 40, "Hostname");
+		M_DrawTextBox (160, 32, 16, 1);
+		M_Print (168, 40, setup_hostname);
+	}
 
 	M_Print (64, 56, "Your name");
 	M_DrawTextBox (160, 48, 16, 1);
@@ -1800,7 +1854,7 @@ static void M_Setup_Draw (void)
 
 	M_DrawCharacter (56, setup_cursor_table [setup_cursor], 12+((int)(realtime*4)&1));
 
-	if (setup_cursor == 0)
+	if (setup_cursor == 0 && !setup_hw)
 		M_DrawCharacter (168 + 8*strlen(setup_hostname), setup_cursor_table [setup_cursor], 10+((int)(realtime*4)&1));
 
 	if (setup_cursor == 1)
@@ -1815,10 +1869,12 @@ static void M_Setup_Key (int k)
 	switch (k)
 	{
 	case K_ESCAPE:
-		M_Menu_MultiPlayer_f ();
+		M_Setup_Return ();
 		break;
 
 	case K_ENTER:
+		if (setup_cursor == 0 && setup_hw)
+			goto forward;
 		if (setup_cursor == 0 || setup_cursor == 1)
 			return;
 
@@ -1827,17 +1883,22 @@ static void M_Setup_Key (int k)
 
 		if (strcmp(cl_name.string, setup_myname) != 0)
 			Cbuf_AddText ( va ("name \"%s\"\n", setup_myname) );
-		if (strcmp(hostname.string, setup_hostname) != 0)
+		if (!setup_hw && strcmp(hostname.string, setup_hostname) != 0)
 			Cvar_Set("hostname", setup_hostname);
 		if (setup_top != setup_oldtop || setup_bottom != setup_oldbottom)
 			Cbuf_AddText( va ("color %i %i\n", setup_top, setup_bottom) );
 		Cbuf_AddText ( va ("playerclass %d\n", setup_class) );
+#if defined(H2W_INTEGRATED)
+		/* Only on a change: a typed spectator password is kept otherwise. */
+		if (setup_hw && setup_spectator != setup_oldspectator)
+			Cvar_Set ("hw_spectator", setup_spectator ? "1" : "0");
+#endif
 		m_entersound = true;
-		M_Menu_MultiPlayer_f ();
+		M_Setup_Return ();
 		break;
 
 	case K_BACKSPACE:
-		if (setup_cursor == 0)
+		if (setup_cursor == 0 && !setup_hw)
 		{
 			if (strlen(setup_hostname))
 				setup_hostname[strlen(setup_hostname)-1] = 0;
@@ -1865,10 +1926,12 @@ static void M_Setup_Key (int k)
 		break;
 
 	case K_LEFTARROW:
-		if (setup_cursor < 2)
+		if (setup_cursor == 1 || (setup_cursor == 0 && !setup_hw))
 			return;
 		S_LocalSound ("raven/menu3.wav");
-		if (setup_cursor == 2)
+		if (setup_cursor == 0)
+			setup_spectator = !setup_spectator;
+		else if (setup_cursor == 2)
 		{
 #if ENABLE_OLD_DEMO
 			if (gameflags & GAME_OLD_DEMO)
@@ -1889,11 +1952,13 @@ static void M_Setup_Key (int k)
 			setup_bottom = setup_bottom - 1;
 		break;
 	case K_RIGHTARROW:
-		if (setup_cursor < 2)
+		if (setup_cursor == 1 || (setup_cursor == 0 && !setup_hw))
 			return;
 forward:
 		S_LocalSound ("raven/menu3.wav");
-		if (setup_cursor == 2)
+		if (setup_cursor == 0)
+			setup_spectator = !setup_spectator;
+		else if (setup_cursor == 2)
 		{
 #if ENABLE_OLD_DEMO
 			if (gameflags & GAME_OLD_DEMO)
@@ -1917,7 +1982,7 @@ forward:
 	default:
 		if (k < 32 || k > 127)
 			break;
-		if (setup_cursor == 0)
+		if (setup_cursor == 0 && !setup_hw)
 		{
 			l = strlen(setup_hostname);
 			if (l < 15)
@@ -1950,7 +2015,11 @@ forward:
 //=============================================================================
 /* NET MENU */
 
+#if defined(H2W_INTEGRATED)
+#define NET_ITEMS	2
+#else
 #define NET_ITEMS	1
+#endif
 
 static int	m_net_cursor = 0;
 
@@ -1960,7 +2029,13 @@ static const char *net_helpMessage[] =
   " Commonly used to play  ",
   " over the Internet, but ",
   " also used on a Local   ",
-  " Area Network.          "
+  " Area Network.          ",
+#if defined(H2W_INTEGRATED)
+  " Join a HexenWorld      ",
+  " server: Raven's        ",
+  " QuakeWorld-style       ",
+  " multiplayer.           "
+#endif
 };
 
 static void M_Menu_Net_f (void)
@@ -1983,6 +2058,10 @@ static void M_Net_Draw (void)
 	ScrollTitle("gfx/menu/title4.lmp");
 
 	M_DrawBigString (72, 72 + (_item_net_tcp * 20), "TCP/IP");
+#if defined(H2W_INTEGRATED)
+	if (!StartingGame)
+		M_DrawBigString (72, 72 + (_item_net_hw * 20), "HEXENWORLD");
+#endif
 
 	f = (320 - 26*8) / 2;
 	M_DrawTextBox (f, 142, 24, 4);
@@ -2025,6 +2104,12 @@ again:
 		case _item_net_tcp:
 			M_Menu_LanConfig_f ();
 			break;
+#if defined(H2W_INTEGRATED)
+		case _item_net_hw:
+			if (!StartingGame)
+				M_Menu_HWServers_f ();
+			break;
+#endif
 		default:
 		// multiprotocol
 			break;
@@ -2034,6 +2119,13 @@ again:
 
 	if (TCPIPConfig && !tcpipAvailable)
 		goto again;
+#if defined(H2W_INTEGRATED)
+	/* There is no HexenWorld listen server to start, so New Game steps
+	 * over the entry. */
+	if (m_net_cursor == _item_net_hw && StartingGame &&
+	    (k == K_DOWNARROW || k == K_UPARROW))
+		goto again;
+#endif
 
 	switch (k)
 	{
@@ -7176,17 +7268,12 @@ static void M_Quit_Draw (void)
 //=============================================================================
 
 static int	lanConfig_cursor = -1;
-static const int	lanConfig_cursor_table[] = {100, 120, 140, 172, 188};
-#define NUM_LANCONFIG_CMDS	5
+static const int	lanConfig_cursor_table[] = {100, 120, 140, 172};
+#define NUM_LANCONFIG_CMDS	4
 
 static int	lanConfig_port;
 static char	lanConfig_portname[6];
 static char	lanConfig_joinname[30];
-/* 0 = Hexen II protocol 19 (the legacy TCP/IP master-server join), 1 = the
- * HexenWorld QuakeWorld-style join.  When set, the join field issues
- * connect hw://<addr> instead of connect <addr>, so bare ip:port addresses
- * reach HexenWorld servers without the player typing the scheme. */
-static qboolean	lanConfig_hwjoin;
 
 static void M_Menu_LanConfig_f (void)
 {
@@ -7261,9 +7348,6 @@ static void M_LanConfig_Draw (void)
 		M_Print (basex, 156, "Join game at:");
 		M_DrawTextBox (basex, lanConfig_cursor_table[3]-8, 30, 1);
 		M_Print (basex+8, lanConfig_cursor_table[3], lanConfig_joinname);
-
-		M_Print (basex, lanConfig_cursor_table[4],
-			 lanConfig_hwjoin ? "Join as: HexenWorld" : "Join as: Hexen II (TCP/IP)");
 	}
 	else
 	{
@@ -7346,17 +7430,7 @@ static void M_LanConfig_Key (int key)
 			m_return_onerror = true;
 			Key_SetDest (key_game);
 			m_state = m_none;
-			if (lanConfig_hwjoin)
-				Cbuf_AddText ( va ("connect \"hw://%s\"\n", lanConfig_joinname) );
-			else
-				Cbuf_AddText ( va ("connect \"%s\"\n", lanConfig_joinname) );
-			break;
-		}
-
-		if (lanConfig_cursor == 4)
-		{
-			/* Protocol toggle: switching must not start a join. */
-			lanConfig_hwjoin = !lanConfig_hwjoin;
+			Cbuf_AddText ( va ("connect \"%s\"\n", lanConfig_joinname) );
 			break;
 		}
 
@@ -7378,15 +7452,10 @@ static void M_LanConfig_Key (int key)
 		break;
 
 	case K_LEFTARROW:
-		if (!JoiningGame || (lanConfig_cursor != 1 && lanConfig_cursor != 4))
+		if (lanConfig_cursor != 1 || !JoiningGame)
 			break;
 
 		S_LocalSound ("raven/menu3.wav");
-		if (lanConfig_cursor == 4)
-		{
-			lanConfig_hwjoin = !lanConfig_hwjoin;
-			break;
-		}
 #if ENABLE_OLD_DEMO
 		if (gameflags & GAME_OLD_DEMO)
 		{
@@ -7402,15 +7471,10 @@ static void M_LanConfig_Key (int key)
 		break;
 
 	case K_RIGHTARROW:
-		if (!JoiningGame || (lanConfig_cursor != 1 && lanConfig_cursor != 4))
+		if (lanConfig_cursor != 1 || !JoiningGame)
 			break;
 
 		S_LocalSound ("raven/menu3.wav");
-		if (lanConfig_cursor == 4)
-		{
-			lanConfig_hwjoin = !lanConfig_hwjoin;
-			break;
-		}
 #if ENABLE_OLD_DEMO
 		if (gameflags & GAME_OLD_DEMO)
 		{
@@ -7452,7 +7516,7 @@ static void M_LanConfig_Key (int key)
 		}
 	}
 
-	if (StartingGame && lanConfig_cursor >= 2)
+	if (StartingGame && lanConfig_cursor == 2)
 	{
 		if (key == K_UPARROW)
 			lanConfig_cursor = 1;
@@ -8718,6 +8782,330 @@ static void M_ServerList_Key (int k)
 	}
 }
 
+#if defined(H2W_INTEGRATED)
+//=============================================================================
+/* HEXENWORLD SERVERS MENU */
+
+/* HexenWorld is a transport on the Net menu like TCP/IP, but the client has
+ * no server discovery for it yet: the slist search above is Hexen II's
+ * qsocket broadcast, and hwmaster is only reachable from the hw_utils tools.
+ * So the browser lists the servers this client has reached, most recent
+ * first -- the original HexenWorld client kept the same kind of list in
+ * host1..host10.  An address goes on it when a server accepts the connection
+ * (cl_hw.c calls M_HW_RememberServer), never merely for being typed, so a
+ * typo or a dead server cannot push a working entry off the list. */
+
+#define HW_MAX_SERVERS		8
+
+static cvar_t	hw_servers[HW_MAX_SERVERS] =
+{
+	{"hw_server1", "", CVAR_ARCHIVE},
+	{"hw_server2", "", CVAR_ARCHIVE},
+	{"hw_server3", "", CVAR_ARCHIVE},
+	{"hw_server4", "", CVAR_ARCHIVE},
+	{"hw_server5", "", CVAR_ARCHIVE},
+	{"hw_server6", "", CVAR_ARCHIVE},
+	{"hw_server7", "", CVAR_ARCHIVE},
+	{"hw_server8", "", CVAR_ARCHIVE}
+};
+
+/* Selectable rows; M_HWServers_RowY places them and the hover test reads the
+ * same positions, so the label and gaps between them are never a row. */
+#define HWSERVERS_CONNECT	0
+#define HWSERVERS_FIRST		1
+#define HWSERVERS_SETUP		(HWSERVERS_FIRST + HW_MAX_SERVERS)
+#define HWSERVERS_ITEMS		(HWSERVERS_SETUP + 1)
+
+#define HWSERVERS_CONNECT_Y	72
+#define HWSERVERS_LIST_Y	96
+#define HWSERVERS_SETUP_Y	(HWSERVERS_LIST_Y + HW_MAX_SERVERS * 8 + 8)
+
+static int	hwservers_cursor;
+/* The pointer last stopped between rows -- on the "Recent servers:" label or
+ * a gap.  Nothing is selected until an arrow key reselects hwservers_cursor,
+ * so a click there cannot activate the row that happened to be selected. */
+static qboolean	hwservers_offrow;
+static char	hwconnect_address[HW_ADDRESS_MAX + 1];
+static qboolean	hwconnect_bad;
+
+static int M_HWServers_RowY (int row)
+{
+	if (row == HWSERVERS_CONNECT)
+		return HWSERVERS_CONNECT_Y;
+	if (row == HWSERVERS_SETUP)
+		return HWSERVERS_SETUP_Y;
+	return HWSERVERS_LIST_Y + (row - HWSERVERS_FIRST) * 8;
+}
+
+/* Trim the address and drop a typed hw:// -- the join adds the scheme.  False
+ * for an empty address, one too long for the connect command (which would cut
+ * it short and connect somewhere else), or one with a character that would
+ * break out of its quoted argument.  dst holds HW_ADDRESS_MAX + 1. */
+static qboolean M_HW_NormalizeAddress (char *dst, const char *src)
+{
+	const char	*p;
+	size_t	len;
+
+	while (*src == ' ')
+		src++;
+	if (!q_strncasecmp (src, "hw://", 5))
+		src += 5;
+	len = strlen (src);
+	while (len && src[len - 1] == ' ')
+		len--;
+	if (!len || len > HW_ADDRESS_MAX)
+		return false;
+	for (p = src; p < src + len; p++)
+	{
+		if (*p < 32 || *p > 126 || *p == '"' || *p == ';')
+			return false;
+	}
+	memcpy (dst, src, len);
+	dst[len] = 0;
+	return true;
+}
+
+void M_HW_RememberServer (const char *address)
+{
+	char	list[HW_MAX_SERVERS][HW_ADDRESS_MAX + 1];
+	int	i, n;
+
+	if (!M_HW_NormalizeAddress (list[0], address))
+		return;
+	/* Existing entries go through the same check, which also drops one
+	 * edited by hand into something the menu could not join. */
+	for (i = 0, n = 1; i < HW_MAX_SERVERS && n < HW_MAX_SERVERS; i++)
+	{
+		if (!M_HW_NormalizeAddress (list[n], hw_servers[i].string) ||
+		    !q_strcasecmp (list[n], list[0]))
+			continue;
+		n++;
+	}
+	for (i = 0; i < HW_MAX_SERVERS; i++)
+		Cvar_Set (hw_servers[i].name, (i < n) ? list[i] : "");
+}
+
+static void M_HW_ForgetServer (int slot)
+{
+	int	i;
+
+	for (i = slot; i < HW_MAX_SERVERS - 1; i++)
+		Cvar_Set (hw_servers[i].name, hw_servers[i + 1].string);
+	Cvar_Set (hw_servers[HW_MAX_SERVERS - 1].name, "");
+}
+
+/* HWCL reports a bad address or a silent server on the console, so this does
+ * not arm m_return_onerror -- only the qsocket connect consumes that.  The
+ * connect command itself stops a playing demo. */
+static qboolean M_HW_Join (const char *address)
+{
+	char	addr[HW_ADDRESS_MAX + 1];
+
+	if (!M_HW_NormalizeAddress (addr, address))
+		return false;
+	Key_SetDest (key_game);
+	m_state = m_none;
+	Cbuf_AddText (va ("connect \"hw://%s\"\n", addr));
+	return true;
+}
+
+static void M_Menu_HWServers_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_hwservers;
+	m_entersound = true;
+	hwservers_offrow = false;
+}
+
+/* M_Maps_MouseHover, except that pointing between rows inside the list
+ * deselects instead of leaving the previous row selected. */
+static void M_HWServers_MouseHover (void)
+{
+	int	vy, row, y;
+
+	if (!menu_mouse_moved)
+		return;
+
+	vy = M_ScreenYToCanvasY (menu_mouse_y);
+	for (row = 0; row < HWSERVERS_ITEMS; row++)
+	{
+		y = M_HWServers_RowY (row);
+		if (vy >= y && vy < y + 8)
+		{
+			hwservers_cursor = row;
+			hwservers_offrow = false;
+			M_HoverSound (row);
+			return;
+		}
+	}
+	if (vy >= HWSERVERS_CONNECT_Y && vy < HWSERVERS_SETUP_Y + 8)
+		hwservers_offrow = true;
+	M_HoverSound (-1);
+}
+
+static void M_HWServers_Draw (void)
+{
+	char	entry[31];
+	int	i;
+
+	ScrollTitle ("gfx/menu/title4.lmp");
+	M_Print (48, 60, "Join Game - HexenWorld");
+
+	M_HWServers_MouseHover ();
+
+	M_Print (56, HWSERVERS_CONNECT_Y, "Connect to address...");
+	M_PrintWhite (56, HWSERVERS_LIST_Y - 12, "Recent servers:");
+	for (i = 0; i < HW_MAX_SERVERS; i++)
+	{
+		if (!hw_servers[i].string[0])
+		{
+			M_PrintWhite (56, HWSERVERS_LIST_Y + i*8, "-");
+			continue;
+		}
+		q_strlcpy (entry, hw_servers[i].string, sizeof(entry));
+		M_Print (56, HWSERVERS_LIST_Y + i*8, entry);
+	}
+	M_Print (56, HWSERVERS_SETUP_Y, "Player setup...");
+
+	if (hwservers_offrow)
+		return;
+	M_DrawCharacter (48, M_HWServers_RowY (hwservers_cursor), 12+((int)(realtime*4)&1));
+
+	i = hwservers_cursor - HWSERVERS_FIRST;
+	if (i >= 0 && i < HW_MAX_SERVERS && hw_servers[i].string[0])
+		M_PrintWhite (56, 184, "ENTER join   DEL forget");
+}
+
+static void M_HWServers_Key (int key)
+{
+	int	slot;
+
+	switch (key)
+	{
+	case K_ESCAPE:
+		M_Menu_Net_f ();
+		break;
+
+	/* From off-row, the first arrow press brings back the selection it
+	 * hid rather than also stepping past it. */
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (hwservers_offrow)
+			hwservers_offrow = false;
+		else if (--hwservers_cursor < 0)
+			hwservers_cursor = HWSERVERS_ITEMS - 1;
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (hwservers_offrow)
+			hwservers_offrow = false;
+		else if (++hwservers_cursor >= HWSERVERS_ITEMS)
+			hwservers_cursor = 0;
+		break;
+
+	case K_ENTER:
+		if (hwservers_offrow)
+			break;
+		slot = hwservers_cursor - HWSERVERS_FIRST;
+		if (hwservers_cursor == HWSERVERS_CONNECT)
+			M_Menu_HWConnect_f ();
+		else if (hwservers_cursor == HWSERVERS_SETUP)
+			M_Menu_HWSetup_f ();
+		else if (!hw_servers[slot].string[0])
+			M_Menu_HWConnect_f ();
+		else if (!M_HW_Join (hw_servers[slot].string))
+			break;
+		m_entersound = true;
+		break;
+
+	case K_DEL:
+	case K_BACKSPACE:
+		if (hwservers_offrow)
+			break;
+		slot = hwservers_cursor - HWSERVERS_FIRST;
+		if (slot < 0 || slot >= HW_MAX_SERVERS || !hw_servers[slot].string[0])
+			break;
+		S_LocalSound ("raven/menu3.wav");
+		M_HW_ForgetServer (slot);
+		break;
+	}
+}
+
+//=============================================================================
+/* HEXENWORLD CONNECT DIALOG */
+
+static void M_Menu_HWConnect_f (void)
+{
+	Key_SetDest (key_menu);
+	m_state = m_hwconnect;
+	m_entersound = true;
+	hwconnect_bad = false;
+}
+
+static void M_HWConnect_Draw (void)
+{
+	int	len, ofs;
+
+	ScrollTitle ("gfx/menu/title4.lmp");
+	M_Print (48, 60, "Join Game - HexenWorld");
+
+	M_Print (56, 84, "Server address:");
+	M_DrawTextBox (56, 92, 30, 1);
+	len = (int) strlen (hwconnect_address);
+	ofs = (len > 29) ? len - 29 : 0;
+	M_Print (64, 100, hwconnect_address + ofs);
+	M_DrawCharacter (64 + 8*(len - ofs), 100, 10+((int)(realtime*4)&1));
+
+	M_PrintWhite (56, 124, "host or host:port");
+	M_PrintWhite (56, 132, "(port defaults to 26950)");
+	if (hwconnect_bad)
+		M_Print (56, 144, "Not a usable address");
+	M_PrintWhite (56, 156, "ENTER join   ESC back");
+}
+
+static void M_HWConnect_Key (int key)
+{
+	int	l;
+
+	switch (key)
+	{
+	case K_ESCAPE:
+		M_Menu_HWServers_f ();
+		break;
+
+	case K_ENTER:
+		if (!hwconnect_address[0])
+			break;
+		if (M_HW_Join (hwconnect_address))
+			m_entersound = true;
+		else
+			hwconnect_bad = true;
+		break;
+
+	case K_BACKSPACE:
+		hwconnect_bad = false;
+		l = (int) strlen (hwconnect_address);
+		if (l)
+			hwconnect_address[l - 1] = 0;
+		break;
+
+	default:
+		/* '"' and ';' would break out of the quoted connect command. */
+		if (key < 32 || key > 126 || key == '"' || key == ';')
+			break;
+		hwconnect_bad = false;
+		l = (int) strlen (hwconnect_address);
+		if (l < HW_ADDRESS_MAX)
+		{
+			hwconnect_address[l] = key;
+			hwconnect_address[l + 1] = 0;
+		}
+		break;
+	}
+}
+#endif	/* H2W_INTEGRATED */
+
 
 //=============================================================================
 /* Menu Subsystem */
@@ -8748,6 +9136,13 @@ void M_Init (void)
 	Cvar_RegisterVariable (&ui_mouse_sound);
 	Cvar_RegisterVariable (&ui_sound_throttle);
 	Cvar_RegisterVariable (&ui_search_timeout);
+#if defined(H2W_INTEGRATED)
+	{
+		int	i;
+		for (i = 0; i < HW_MAX_SERVERS; i++)
+			Cvar_RegisterVariable (&hw_servers[i]);
+	}
+#endif
 
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
@@ -8948,6 +9343,18 @@ void M_Draw (void)
 
 	case m_slist:
 		M_ServerList_Draw ();
+		break;
+
+	case m_hwservers:
+#if defined(H2W_INTEGRATED)
+		M_HWServers_Draw ();
+#endif
+		break;
+
+	case m_hwconnect:
+#if defined(H2W_INTEGRATED)
+		M_HWConnect_Draw ();
+#endif
 		break;
 	}
 
@@ -9230,6 +9637,18 @@ void M_Keydown (int key, qboolean repeat)
 
 	case m_slist:
 		M_ServerList_Key (key);
+		return;
+
+	case m_hwservers:
+#if defined(H2W_INTEGRATED)
+		M_HWServers_Key (key);
+#endif
+		return;
+
+	case m_hwconnect:
+#if defined(H2W_INTEGRATED)
+		M_HWConnect_Key (key);
+#endif
 		return;
 	}
 }
