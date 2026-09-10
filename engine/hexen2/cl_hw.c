@@ -8,6 +8,7 @@
 #include "cl_hw.h"
 #include "../hexenworld/shared/net.h"
 #include "../hexenworld/shared/huffman.h"
+#include "../hexenworld/shared/pmove.h"
 
 /* quakedef.h already includes Hexen II's effects.h.  HexenWorld uses the
  * same names for a different numeric table, so keep the values local to this
@@ -224,6 +225,16 @@ typedef struct
 
 static hwcl_usercmd_t hwcl_cmd_history[3];
 static qboolean hwcl_have_cmd_history;
+static qboolean hwcl_pmove_ready;
+static int hwcl_pmove_oldbuttons;
+static qboolean hwcl_predicted_valid;
+static vec3_t hwcl_predicted_origin;
+static vec3_t hwcl_predicted_velocity;
+static qboolean hwcl_predicted_onground;
+static int hwcl_local_movetype = MOVETYPE_WALK;
+static float hwcl_local_hasted = 1.0f;
+static qboolean hwcl_local_dead;
+static qboolean hwcl_local_crouched;
 static char hwcl_model_names[MAX_MODELS][MAX_QPATH];
 static char hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
 static int hwcl_model_count;
@@ -288,6 +299,22 @@ static void HWCL_WriteUsercmd (sizebuf_t *buf, const hwcl_usercmd_t *cmd,
 	if (bits & (1 << 5)) MSG_WriteByte (buf, cmd->buttons);
 	if (bits & (1 << 6)) MSG_WriteByte (buf, cmd->impulse);
 	if (bits & (1 << 7)) MSG_WriteByte (buf, cmd->msec);
+}
+
+/* Protocol 24 sends no movevars, and a zeroed movevars_t means no gravity and
+ * a maxspeed of zero.  These are hwsv's own cvar defaults (sv_phys.c). */
+static void HWCL_DefaultMoveVars (void)
+{
+	movevars.gravity = 800.0f;
+	movevars.stopspeed = 100.0f;
+	movevars.maxspeed = 360.0f;
+	movevars.spectatormaxspeed = 500.0f;
+	movevars.accelerate = 10.0f;
+	movevars.airaccelerate = 0.7f;
+	movevars.wateraccelerate = 10.0f;
+	movevars.friction = 4.0f;
+	movevars.waterfriction = 1.0f;
+	movevars.entgravity = 1.0f;
 }
 
 static qboolean HWCL_ValidProtocol (int protocol)
@@ -449,15 +476,23 @@ static void HWCL_ParseServerData (void)
 	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
 	playernum = MSG_ReadByte ();
 	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
+	HWCL_DefaultMoveVars ();
 	if (hwcl_protocol >= HW_PROTOCOL_VERSION)
-		for (i = 0; i < 10; i++)
-		{
-			float movevar = MSG_ReadFloat ();
-			if (i == 2)
-				hwcl_server_state.maxspeed = movevar;
-			if (i == 9)
-				hwcl_server_state.entgravity = movevar;
-		}
+	{
+		/* SV_New_f writes these in movevars_t field order. */
+		movevars.gravity = MSG_ReadFloat ();
+		movevars.stopspeed = MSG_ReadFloat ();
+		movevars.maxspeed = MSG_ReadFloat ();
+		movevars.spectatormaxspeed = MSG_ReadFloat ();
+		movevars.accelerate = MSG_ReadFloat ();
+		movevars.airaccelerate = MSG_ReadFloat ();
+		movevars.wateraccelerate = MSG_ReadFloat ();
+		movevars.friction = MSG_ReadFloat ();
+		movevars.waterfriction = MSG_ReadFloat ();
+		movevars.entgravity = MSG_ReadFloat ();
+		hwcl_server_state.maxspeed = movevars.maxspeed;
+		hwcl_server_state.entgravity = movevars.entgravity;
+	}
 	if (msg_badread)
 		return;
 
@@ -1146,6 +1181,21 @@ void HWCL_ApplyState (void)
 		state = &hwcl_server_state.players[viewentity - 1];
 		VectorCopy (state->velocity, cl.velocity);
 	}
+
+	/* _Host_Frame calls CL_SendCmd -- and so HWCL_PredictUsercmd -- before
+	 * CL_ReadFromServer, so the HWCL_CopyEntity pass above has just written
+	 * the server's origin over the predicted one.  Re-apply it here, last,
+	 * or prediction has no effect on what is drawn at all. */
+	if (hwcl_predicted_valid && viewentity >= 1 && viewentity < HWCL_MAX_ENTITIES)
+	{
+		entity_t *pent = &cl_entities[viewentity];
+
+		VectorCopy (hwcl_predicted_origin, pent->msg_origins[0]);
+		VectorCopy (hwcl_predicted_origin, pent->baseline.origin);
+		VectorCopy (hwcl_predicted_velocity, cl.velocity);
+		cl.onground = hwcl_predicted_onground;
+	}
+
 	cl.num_entities = highest + 1;
 	if (cl.num_entities < 1)
 		cl.num_entities = 1;
@@ -1195,9 +1245,9 @@ static void HWCL_ParseInventoryUpdate (void)
 	if (sc1 & (1u << 24)) MSG_ReadByte (); /* cnt_invincibility */
 	if (sc1 & (1u << 25)) MSG_ReadByte (); /* artifact_active */
 	if (sc1 & (1u << 26)) MSG_ReadByte (); /* artifact_low */
-	if (sc1 & (1u << 27)) MSG_ReadByte (); /* movetype */
+	if (sc1 & (1u << 27)) hwcl_local_movetype = MSG_ReadByte ();
 	if (sc1 & (1u << 28)) MSG_ReadByte (); /* cameramode */
-	if (sc1 & (1u << 29)) MSG_ReadFloat (); /* hasted */
+	if (sc1 & (1u << 29)) hwcl_local_hasted = MSG_ReadFloat ();
 	if (sc1 & (1u << 30)) MSG_ReadByte (); /* inventory */
 	if (sc1 & (1u << 31)) MSG_ReadByte (); /* rings_active */
 
@@ -1240,6 +1290,13 @@ static void HWCL_ParsePlayerInfo (void)
 	for (i = 0; i < 3; i++)
 		state->origin[i] = MSG_ReadCoord ();
 	state->frame = MSG_ReadByte ();
+	/* PF_DEAD and PF_CROUCH carry no payload, but PlayerMove needs both:
+	 * dead stops movement input and crouched selects the short hull. */
+	if (playernum == hwcl_playernum)
+	{
+		hwcl_local_dead = (flags & (1 << 9)) != 0;
+		hwcl_local_crouched = (flags & (1 << 10)) != 0;
+	}
 	if (flags & (1 << 0)) MSG_ReadByte (); /* msec */
 	if (flags & (1 << 1)) HWCL_SkipUsercmd ();
 	for (i = 0; i < 3; i++)
@@ -1464,9 +1521,11 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_MAXSPEED:
 			hwcl_server_state.maxspeed = MSG_ReadFloat ();
+			movevars.maxspeed = hwcl_server_state.maxspeed;
 			break;
 		case HW_SVC_ENTGRAVITY:
 			hwcl_server_state.entgravity = MSG_ReadFloat ();
+			movevars.entgravity = hwcl_server_state.entgravity;
 			break;
 		case HW_SVC_UPDATE_INV:
 			HWCL_ParseInventoryUpdate ();
@@ -1674,7 +1733,107 @@ qboolean HWCL_Active (void)
 	return hwcl_state != hwcl_disconnected;
 }
 
-void HWCL_SendCmd (const usercmd_t *cmd)
+static int HWCL_LocalPlayerSlot (void)
+{
+	int viewentity = hwcl_server_state.viewentity;
+	if (viewentity < 1 || viewentity > HWCL_MAX_CLIENTS)
+		return -1;
+	return viewentity - 1;
+}
+
+/*
+ * Local movement prediction.
+ *
+ * This runs hexenworld/shared/pmove.c -- the same PlayerMove() hwsv runs from
+ * SV_RunCmd -- rather than an approximation of it.  Anything hand-rolled here
+ * diverges from the server by construction: acceleration, friction, water,
+ * stairs, the class hulls and the crouch box are all decisions pmove already
+ * makes, and it makes them the way the authority does.
+ *
+ * The seed is the last server state for the local player, advanced by the
+ * command being sent this frame.  Re-simulating every unacknowledged command
+ * from the acknowledged snapshot is the next step and wants a command ring
+ * keyed on netchan sequence; the physics below is already the server's.
+ */
+void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse)
+{
+	const hwcl_entity_state_t *state;
+	entity_t *ent;
+	int slot;
+	int msec;
+
+	slot = HWCL_LocalPlayerSlot ();
+	if (slot < 0 || !cl.worldmodel || cls.signon != SIGNONS)
+		return;
+	state = &hwcl_server_state.players[slot];
+	if (!state->active)
+		return;
+	ent = &cl_entities[hwcl_server_state.viewentity];
+	if (!ent->model)
+		return;
+
+	if (!hwcl_pmove_ready)
+	{
+		Pmove_Init ();
+		hwcl_pmove_ready = true;
+	}
+
+	msec = (int)(host_frametime * 1000.0 + 0.5);
+	if (msec < 1)
+		msec = 1;
+	if (msec > 255)
+		msec = 255;
+
+	memset (&pmove, 0, sizeof(pmove));
+	VectorCopy (state->origin, pmove.origin);
+	VectorCopy (state->velocity, pmove.velocity);
+	VectorCopy (cl.viewangles, pmove.angles);
+	pmove.oldbuttons = hwcl_pmove_oldbuttons;
+	pmove.dead = hwcl_local_dead;
+	pmove.crouched = hwcl_local_crouched;
+	pmove.movetype = hwcl_local_movetype;
+	/* hasted multiplies maxspeed, so it is 1 and never 0 when unset. */
+	pmove.hasted = (hwcl_local_hasted > 0) ? hwcl_local_hasted : 1.0f;
+	pmove.spectator = 0;
+
+	/* physent 0 is the world.  Brush-model movers are not tracked yet, so
+	 * prediction sees the static world only and the server corrects the
+	 * rest -- it never sees a *wrong* world. */
+	pmove.numphysent = 1;
+	pmove.physents[0].model = cl.worldmodel;
+	VectorClear (pmove.physents[0].origin);
+	VectorClear (pmove.physents[0].angles);
+	pmove.physents[0].info = 0;
+
+	pmove.cmd.msec = msec;
+	VectorCopy (cl.viewangles, pmove.cmd.angles);
+	pmove.cmd.forwardmove = (short)cmd->forwardmove;
+	pmove.cmd.sidemove = (short)cmd->sidemove;
+	pmove.cmd.upmove = (short)cmd->upmove;
+	pmove.cmd.buttons = (byte)buttons;
+	pmove.cmd.impulse = (byte)impulse;
+	pmove.cmd.light_level = cmd->lightlevel;
+
+	PlayerMove ();
+
+	hwcl_pmove_oldbuttons = pmove.oldbuttons;
+
+	VectorCopy (pmove.origin, hwcl_predicted_origin);
+	VectorCopy (pmove.velocity, hwcl_predicted_velocity);
+	hwcl_predicted_onground = (onground != -1);
+	hwcl_predicted_valid = true;
+
+	cl.onground = hwcl_predicted_onground;
+	VectorCopy (hwcl_predicted_velocity, cl.velocity);
+	VectorCopy (hwcl_predicted_origin, ent->msg_origins[0]);
+	VectorCopy (hwcl_predicted_origin, ent->baseline.origin);
+	ent->msgtime = cl.mtime[0];
+}
+
+/* buttons and impulse are sampled by the caller and passed in: CL_GetButtonBits
+ * clears the edge-triggered bit of in_attack/in_jump and CL_GetImpulse zeroes
+ * in_impulse, so calling either twice in a frame loses the input. */
+void HWCL_SendCmd (const usercmd_t *cmd, int buttons, int impulse)
 {
 	hwcl_usercmd_t current;
 	hwcl_usercmd_t oldest;
@@ -1693,8 +1852,8 @@ void HWCL_SendCmd (const usercmd_t *cmd)
 	current.forwardmove = (int)cmd->forwardmove;
 	current.sidemove = (int)cmd->sidemove;
 	current.upmove = (int)cmd->upmove;
-	current.buttons = CL_GetButtonBits ();
-	current.impulse = CL_GetImpulse ();
+	current.buttons = buttons;
+	current.impulse = impulse;
 	current.lightlevel = cmd->lightlevel;
 	msec = (int)(host_frametime * 1000.0 + 0.5);
 	if (msec < 1)
@@ -1743,6 +1902,12 @@ void HWCL_Disconnect (void)
 	hwcl_servercount = 0;
 	hwcl_entity_sequence = -1;
 	hwcl_have_cmd_history = false;
+	hwcl_pmove_oldbuttons = 0;
+	hwcl_predicted_valid = false;
+	hwcl_local_movetype = MOVETYPE_WALK;
+	hwcl_local_hasted = 1.0f;
+	hwcl_local_dead = false;
+	hwcl_local_crouched = false;
 	memset (hwcl_cmd_history, 0, sizeof(hwcl_cmd_history));
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	cls.signon = 0;
