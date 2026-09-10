@@ -477,6 +477,15 @@ static void HWCL_ParseServerData (void)
 	hwcl_entity_sequence = -1;
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
+	/* The server's gamedir names where its content lives on disk.  Mount it
+	 * before anything references a model or sound, exactly as the original
+	 * HexenWorld client did here -- without it, hw/pak4.pak is invisible and
+	 * every map/model the signon names is reported unavailable. */
+	if (q_strcasecmp(fs_gamedir_nopath, gamedir))
+	{
+		Con_Printf ("HexenWorld server set the gamedir to %s\n", gamedir);
+		FS_Gamedir (gamedir);
+	}
 	playernum = MSG_ReadByte ();
 	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
 	HWCL_DefaultMoveVars ();
