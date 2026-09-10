@@ -23,6 +23,25 @@
 #ifndef __PLAYERMOVE_H
 #define __PLAYERMOVE_H
 
+/* Hexen II's usercmd_t (protocol.h) is a different structure from
+ * HexenWorld's -- it has no buttons, impulse or msec.  When this movement
+ * code is compiled into Hexenwail alongside the Hexen II client, spell the
+ * wire form out here so player movement keeps reading the fields it needs. */
+#ifdef H2W_INTEGRATED
+typedef struct hw_usercmd_s
+{
+	byte	msec;
+	vec3_t	angles;
+	short	forwardmove, sidemove, upmove;
+	byte	buttons;
+	byte	impulse;
+	byte	light_level;
+} hw_usercmd_t;
+#define	pm_usercmd_t	hw_usercmd_t
+#else
+#define	pm_usercmd_t	usercmd_t
+#endif
+
 typedef struct
 {
 	vec3_t	normal;
@@ -74,7 +93,7 @@ typedef struct
 	physent_t	physents[MAX_PHYSENTS];	// 0 should be the world
 
 	// input
-	usercmd_t	cmd;
+	pm_usercmd_t	cmd;
 
 	// results
 	int		numtouch;

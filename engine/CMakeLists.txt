@@ -866,6 +866,8 @@ if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
         ${ENGINE_TOP}/hexenworld/shared/huffman.c
         ${ENGINE_TOP}/hexenworld/shared/net_udp.c
         ${ENGINE_TOP}/hexenworld/shared/net_chan.c
+        ${ENGINE_TOP}/hexenworld/shared/pmove.c
+        ${ENGINE_TOP}/hexenworld/shared/pmovetst.c
     )
     list(APPEND CLIENT_DEFINITIONS H2W_INTEGRATED)
 endif()
