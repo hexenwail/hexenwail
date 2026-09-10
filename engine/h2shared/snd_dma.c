@@ -109,6 +109,11 @@ cvar_t		loadas8bit = {"loadas8bit", "0", CVAR_NONE};
  * user who prefers it keeps it; default off because it is a taste change,
  * not a bug fix, and this one has been reverted once already. */
 cvar_t		snd_resample = {"snd_resample", "0", CVAR_ARCHIVE | CVAR_CALLBACK};
+/* Ironwail-compatible resampler quality knob.  Here it selects the number of
+ * taps used by snd_resample's load-time sinc bank rather than upstream's
+ * per-frame sndspeed low-pass: the mixer architecture differs, but the visible
+ * contract is the same 1..5 archived quality ladder with 5 as best. */
+cvar_t		snd_filterquality = {"snd_filterquality", "5", CVAR_ARCHIVE | CVAR_CALLBACK};
 
 /* Output mix rate.  Deliberately NOT archived, as upstream: a value the device
  * cannot open would otherwise persist into a config and leave someone with no
@@ -286,9 +291,17 @@ static void S_ResampleChanged (cvar_t *var)
 	int	i;
 	sfx_t	*sfx;
 
-	(void) var;
+	if (var == &snd_filterquality && (var->integer < 1 || var->integer > 5))
+	{
+		Con_Printf ("snd_filterquality must be between 1 and 5\n");
+		Cvar_SetQuick (&snd_filterquality, snd_filterquality.default_string);
+		return;
+	}
 
 	if (!snd_initialized)
+		return;
+
+	if (var == &snd_filterquality && !snd_resample.integer)
 		return;
 
 	S_StopAllSounds (true);
@@ -332,8 +345,10 @@ void S_Init (void)
 	Cvar_RegisterVariable(&sfx_mutedvol);
 	Cvar_RegisterVariable(&loadas8bit);
 	Cvar_RegisterVariable(&snd_resample);
+	Cvar_RegisterVariable(&snd_filterquality);
 	Cvar_RegisterVariable(&snd_mixspeed);
 	Cvar_SetCallback(&snd_resample, S_ResampleChanged);
+	Cvar_SetCallback(&snd_filterquality, S_ResampleChanged);
 	Cvar_RegisterVariable(&bgmvolume);
 	Cvar_RegisterVariable(&bgm_mutedvol);
 	Cvar_RegisterVariable(&ambient_level);
