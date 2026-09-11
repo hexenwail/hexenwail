@@ -1,0 +1,25 @@
+[package]
+name = "hashindex-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Rust port of the Hexenwail/uhexen2 hashindex subsystem (engine/h2shared/hashindex.c)"
+publish = false
+
+[lib]
+name = "hashindex_rs"
+# staticlib, not cdylib: the engine is an ordinary executable and the
+# WASM/Emscripten path has no dynamic loader at all.
+crate-type = ["staticlib"]
+
+# There are deliberately NO dependencies.  The crate declares the handful of C
+# symbols it needs (malloc/free/memset/abort/Sys_Error) in an extern block
+# instead of pulling in the `libc` crate.  That keeps the build hermetic --
+# cargo never contacts crates.io, which a network-less nix sandbox would fail
+# on -- and means there is no Cargo.lock to vendor and audit.
+
+[profile.release]
+# Unwinding across an FFI boundary is undefined behaviour.  Every fatal path in
+# this API already goes through Sys_Error, so a panic here is only reachable via
+# a bug; abort rather than unwind.
+panic = "abort"

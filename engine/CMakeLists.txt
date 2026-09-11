@@ -35,6 +35,12 @@ option(USE_FLUIDSYNTH "Use FluidSynth as the MIDI driver when available" ON)
 # tier 1 (no FluidSynth, or WASM).  FluidSynth always wins where present.
 option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" ON)
 
+# Link the Rust port of hashindex in place of engine/h2shared/hashindex.c.
+# Deliberately OFF: this is a port in progress, not a shipping default.  See
+# the block above "Combine all sources" for what turning it on does, and for
+# why both halves (source removal and linking) have to happen together.
+option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" OFF)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -848,6 +854,72 @@ endif()
 #============================================================================
 # Create Executable
 #============================================================================
+#============================================================================
+# Rust hashindex shim (USE_RUST_HASHINDEX)
+#============================================================================
+# Replaces engine/h2shared/hashindex.c with engine/rust/hashindex.  Two halves,
+# and BOTH are required:
+#
+#   1. hashindex.c is removed from every source list carrying it --
+#      COMMON_SOURCES here (which feeds the client via ALL_SOURCES and h2ded via
+#      SERVER_SOURCES, itself a copy of COMMON_SOURCES made below), and
+#      HWSV_SOURCES in the HexenWorld block.  Skipping this is not a subtle
+#      failure: the C object and the Rust staticlib both define Hash_Allocate
+#      and friends, and the link dies with a multiple-definition error.
+#   2. the Rust staticlib is linked into each of those targets.
+#
+# hashindex.h is NOT touched.  It stays the layout source of truth, and its
+# four `static inline` helpers keep being compiled into every C caller -- they
+# have no symbol and cannot cross an FFI boundary anyway.
+#
+# Off by default, and nothing in the engine knows which implementation it got,
+# so -DUSE_RUST_HASHINDEX=OFF is a complete rollback rather than a revert.
+if(USE_RUST_HASHINDEX)
+    if(EMSCRIPTEN)
+        message(FATAL_ERROR
+            "USE_RUST_HASHINDEX is not wired up for the Emscripten build. The "
+            "wasm toolchain is the most fragile target in this tree and adding "
+            "a second one to it is out of scope for this phase.")
+    endif()
+
+    set(HASHINDEX_RS_DIR ${UHEXEN2_TOP}/engine/rust/hashindex)
+    set(HASHINDEX_RS_LIB ${CMAKE_BINARY_DIR}/rust/libhashindex_rs.a)
+    # Redirect cargo's output out of the source tree: it keeps the checkout
+    # clean, and it is required for a nix build, where the source directory is
+    # read-only.
+    set(HASHINDEX_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
+
+    # --offline is deliberate.  The crate has no dependencies, so nothing here
+    # should ever touch the network; a sandboxed nix build would fail on a
+    # fetch, and failing loudly here beats silently acquiring a dependency.
+    add_custom_command(
+        OUTPUT ${HASHINDEX_RS_LIB}
+        COMMAND ${CMAKE_COMMAND} -E env
+                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
+                CARGO_TARGET_DIR=${HASHINDEX_RS_TARGET_DIR}
+                cargo build --release --offline
+                --manifest-path ${HASHINDEX_RS_DIR}/Cargo.toml
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${HASHINDEX_RS_TARGET_DIR}/release/libhashindex_rs.a
+                ${HASHINDEX_RS_LIB}
+        DEPENDS ${HASHINDEX_RS_DIR}/src/lib.rs
+                ${HASHINDEX_RS_DIR}/src/ffi.rs
+                ${HASHINDEX_RS_DIR}/Cargo.toml
+        COMMENT "Building Rust hashindex shim"
+        VERBATIM)
+    add_custom_target(hashindex_rs DEPENDS ${HASHINDEX_RS_LIB})
+
+    function(hashindex_rs_attach tgt)
+        add_dependencies(${tgt} hashindex_rs)
+        target_link_libraries(${tgt} PRIVATE ${HASHINDEX_RS_LIB})
+    endfunction()
+
+    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/hashindex.c)
+    message(STATUS "hashindex: Rust shim (USE_RUST_HASHINDEX=ON)")
+else()
+    message(STATUS "hashindex: C original (USE_RUST_HASHINDEX=OFF)")
+endif()
+
 # Combine all sources
 if(EMSCRIPTEN AND WEB_RENDERER STREQUAL "software")
     set(RENDERER_SOURCES ${SOFT_RENDERER_SOURCES})
@@ -931,6 +1003,10 @@ endif()
 
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
 add_dependencies(${EXECUTABLE_NAME} shaders_gen)
+
+if(USE_RUST_HASHINDEX)
+    hashindex_rs_attach(${EXECUTABLE_NAME})
+endif()
 
 #============================================================================
 # Link Libraries
@@ -1075,6 +1151,12 @@ else()
     # and its output is the server console.
     add_executable(h2ded ${SERVER_SOURCES})
     target_compile_definitions(h2ded PRIVATE SERVERONLY)
+
+    # No source-list removal needed here: SERVER_SOURCES is a copy of
+    # COMMON_SOURCES, from which hashindex.c was already dropped above.
+    if(USE_RUST_HASHINDEX)
+        hashindex_rs_attach(h2ded)
+    endif()
     if(WIN32)
         target_link_libraries(h2ded PRIVATE ws2_32 winmm)
     else()
@@ -1155,8 +1237,18 @@ else()
         list(APPEND HWSV_SOURCES ${HW_TOP}/server/sys_unix.c)
     endif()
 
+    # Second and last source list carrying hashindex.c -- see the comment on
+    # the USE_RUST_HASHINDEX block near the top of this file.
+    if(USE_RUST_HASHINDEX)
+        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/hashindex.c)
+    endif()
+
     add_executable(hwsv ${HWSV_SOURCES})
     target_compile_definitions(hwsv PRIVATE H2W SERVERONLY)
+
+    if(USE_RUST_HASHINDEX)
+        hashindex_rs_attach(hwsv)
+    endif()
     # Order matters: hexenworld/shared shadows h2shared for quakedef.h et al.
     target_include_directories(hwsv BEFORE PRIVATE
         ${HW_TOP}/server
