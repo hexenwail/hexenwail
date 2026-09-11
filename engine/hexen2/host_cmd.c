@@ -24,6 +24,7 @@
 
 #include "quakedef.h"
 #include "q_ctype.h"
+#include "cl_hw.h"
 
 static	double	old_svtime;
 	/* sv.time of prev. level when changing levels, saved by changelevel2().
@@ -1398,6 +1399,13 @@ static void Host_Name_f (void)
 		if (strcmp(cl_name.string, newName) == 0)
 			return;
 		Cvar_Set ("_cl_name", newName);
+#if defined(H2W_INTEGRATED)
+		if (HWCL_Active ())
+		{
+			HWCL_SetInfo ("name", newName);
+			return;
+		}
+#endif
 		if (cls.state == ca_connected)
 			Cmd_ForwardToServer ();
 		return;
@@ -1471,6 +1479,16 @@ static void Host_Class_f (void)
 		if (sv.active && sv_globals.cl_playerclass)
 			*sv_globals.cl_playerclass = newClass;
 
+#if defined(H2W_INTEGRATED)
+		if (HWCL_Active ())
+		{
+			char	val[8];
+
+			q_snprintf (val, sizeof(val), "%d", (int)newClass);
+			HWCL_SetInfo ("playerclass", val);
+			return;
+		}
+#endif
 		if (cls.state == ca_connected)
 			Cmd_ForwardToServer ();
 		return;
@@ -1689,6 +1707,18 @@ static void Host_Color_f (void)
 	if (cmd_source == src_command)
 	{
 		Cvar_SetValue ("_cl_color", playercolor);
+#if defined(H2W_INTEGRATED)
+		if (HWCL_Active ())
+		{
+			char	val[8];
+
+			q_snprintf (val, sizeof(val), "%d", top);
+			HWCL_SetInfo ("topcolor", val);
+			q_snprintf (val, sizeof(val), "%d", bottom);
+			HWCL_SetInfo ("bottomcolor", val);
+			return;
+		}
+#endif
 		if (cls.state == ca_connected)
 			Cmd_ForwardToServer ();
 		return;
