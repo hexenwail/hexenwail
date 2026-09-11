@@ -6,9 +6,10 @@
 # the same ground the old client network tests did, without a display:
 #
 #   1. hwsv boots, mounts hw/ on top of data1, spawns a map.
-#   2. Two GL clients connect by plain address -- no hw:// scheme -- so the
-#      automatic H2-then-HW negotiation is what picks the protocol (issue #50).
-#      Each signs on, mounts the server's gamedir, and renders the world.
+#   2. A tiny UDP fixture sends client A a syntactically valid H2 acceptance
+#      and then stays silent. The bounded post-accept timeout must still select
+#      HW; client B uses the explicit hw:// override. Each signs on, mounts the
+#      server's gamedir, and renders the world (issue #50).
 #      Both must reach "signon complete" with zero unknown/malformed protocol
 #      messages and with the loading plaque dismissed.
 #   3. A server broadcast is delivered to both (say smoke-<token>).
@@ -27,6 +28,7 @@
 #     hwsv boot smoke.
 #   - Xvfb for the GL clients; pass the store path with --xvfb if Xvfb is not
 #     on PATH, and --client / --server for the binaries.
+#   - Python 3 for the false-H2-accept UDP fixture.
 #
 # Usage:
 #   hw-smoke.sh --basedir DIR [--client BIN] [--server BIN] [--xvfb BIN]
@@ -79,7 +81,7 @@ FIFO="$WORK/console"
 FAILURES=0
 # Initialised before the trap: cleanup runs under `set -u`, so an early exit
 # (Xvfb refused to start, an unusable basedir) must not trip over an unset PID.
-SRV_PID=""; CA_PID=""; CB_PID=""; CP_PID=""; SIEGE_PID=""; XV_PID=""
+SRV_PID=""; CA_PID=""; CB_PID=""; CP_PID=""; SIEGE_PID=""; XV_PID=""; FAKE_PID=""
 
 cleanup() {
 	[ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null
@@ -87,6 +89,7 @@ cleanup() {
 	[ -n "$CB_PID" ] && kill "$CB_PID" 2>/dev/null
 	[ -n "$CP_PID" ] && kill "$CP_PID" 2>/dev/null
 	[ -n "$SIEGE_PID" ] && kill "$SIEGE_PID" 2>/dev/null
+	[ -n "$FAKE_PID" ] && kill "$FAKE_PID" 2>/dev/null
 	[ -n "$XV_PID" ] && kill "$XV_PID" 2>/dev/null
 	exec 3>&- 4>&-
 	rm -rf "$WORK"
@@ -146,6 +149,25 @@ SRV_PID=$!
 
 wait_for "$SLOG" 'Building PHS' || { tail -40 "$SLOG"; fail "server did not reach map spawn"; }
 
+# A valid H2 control reply is only a provisional protocol match. Reproduce the
+# field failure by accepting on H2's default port without ever sending signon.
+cat > "$WORK/false-h2-accept.py" <<'PY'
+import socket
+import struct
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(("127.0.0.1", 26900))
+while True:
+    request, address = sock.recvfrom(8192)
+    if len(request) >= 5 and request[4] == 1:  # CCREQ_CONNECT
+        payload = bytes([0x81]) + struct.pack("<I", 26900)  # CCREP_ACCEPT
+        header = struct.pack(">I", 0x80000000 | (4 + len(payload)))
+        sock.sendto(header + payload, address)
+PY
+python3 "$WORK/false-h2-accept.py" > "$WORK/false-h2-accept.log" 2>&1 &
+FAKE_PID=$!
+sleep 1
+
 # --- client A ---
 DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$BASEDIR" -hwport 27001 +developer 1 \
 	+connect "127.0.0.1" > "$ALOG" 2>&1 &
@@ -154,8 +176,10 @@ CA_PID=$!
 wait_for "$ALOG" 'HexenWorld signon complete' || { fail "client A did not complete signon"; }
 wait_for "$ALOG" 'HexenWorld server set the gamedir to hw' || fail "client A did not mount the hw gamedir"
 wait_for "$ALOG" 'player 0 spawned' || fail "client A never saw its own spawn"
-# A plain address must reach HW by negotiation, never by the hw:// override.
-wait_for "$ALOG" 'No Hexen II response; trying HexenWorld' || fail "client A did not autodetect HexenWorld"
+# A control-packet acceptance without real H2 traffic must remain provisional.
+wait_for "$ALOG" 'Hexen II accepted but sent no signon data; trying HexenWorld' || \
+	fail "client A committed to a false Hexen II acceptance"
+kill "$FAKE_PID" 2>/dev/null; wait "$FAKE_PID" 2>/dev/null; FAKE_PID=""
 # Signon has to dismiss the loading plaque and actually draw, or the player sits
 # behind a frozen loading screen (the reported issue #50 failure).
 wait_for "$ALOG" 'First world draw completed' || fail "client A never rendered the world"

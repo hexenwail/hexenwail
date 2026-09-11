@@ -52,6 +52,32 @@ cvar_t	cl_showunbound = {"cl_showunbound", "0", CVAR_ARCHIVE};
 
 cvar_t	cfg_unbindall = {"cfg_unbindall", "1", CVAR_ARCHIVE};
 
+#if defined(H2W_INTEGRATED)
+/* A control-packet accept is not enough to identify H2: an HW endpoint (or a
+ * stale listener beside it) can produce bytes that satisfy that tiny reply.
+ * Keep plain joins provisional until the first real H2 server message. */
+#define CL_AUTO_H2_CONFIRM_TIMEOUT 5.0
+static qboolean cl_auto_h2_pending;
+static double cl_auto_h2_started;
+static char cl_auto_h2_host[MAX_QPATH];
+
+static qboolean CL_AutoProtocolFallback (qboolean force)
+{
+	char host[MAX_QPATH];
+
+	if (!cl_auto_h2_pending ||
+	    (!force && realtime - cl_auto_h2_started < CL_AUTO_H2_CONFIRM_TIMEOUT))
+		return false;
+	q_strlcpy (host, cl_auto_h2_host, sizeof(host));
+	cl_auto_h2_pending = false;
+	Con_Printf ("Hexen II accepted but sent no signon data; trying HexenWorld...\n");
+	CL_Disconnect ();
+	if (!HWCL_Connect (host))
+		Host_Error ("Invalid multiplayer server address");
+	return true;
+}
+#endif
+
 /* Always-on mouselook, the name every Quake-lineage engine uses.  A config or
  * mod written for one of them says `freelook 1` and, until now, got "Unknown
  * command" and no mouselook setting at all.
@@ -171,6 +197,7 @@ This is also called on Host_Error, so it shouldn't cause any errors
 void CL_Disconnect (void)
 {
 #if defined(H2W_INTEGRATED)
+	cl_auto_h2_pending = false;
 	HWCL_Disconnect ();
 #endif
 // don't get stuck in chat mode
@@ -287,6 +314,14 @@ void CL_EstablishConnection (const char *host)
 		Host_Error ("%s: connect failed", __thisfunc__);
 	Con_DPrintf ("%s: connected to %s\n", __thisfunc__, host);
 
+#if defined(H2W_INTEGRATED)
+	if (auto_protocol)
+	{
+		q_strlcpy (cl_auto_h2_host, host, sizeof(cl_auto_h2_host));
+		cl_auto_h2_started = realtime;
+		cl_auto_h2_pending = true;
+	}
+#endif
 	cls.demonum = -1;			// not in the demo loop now
 	cls.state = ca_connected;
 	cls.signon = 0;				// need all the signon messages before playing
@@ -1375,14 +1410,34 @@ int CL_ReadFromServer (void)
 	{
 		ret = CL_GetMessage ();
 		if (ret == -1)
+		{
+#if defined(H2W_INTEGRATED)
+			/* A provisional qsocket that dies before one H2 message is no
+			 * stronger evidence than one that stays silent. */
+			if (CL_AutoProtocolFallback (true))
+				return 0;
+#endif
 			Host_Error ("%s: lost server connection", __thisfunc__);
+		}
 		if (!ret)
 			break;
 
 		cl.last_received_message = realtime;
 		CL_ParseServerMessage ();
+#if defined(H2W_INTEGRATED)
+		/* Control traffic and svc_nop do not prove the server will speak H2.
+		 * Commit only once the ordinary parser advances H2 signon. */
+		if (cls.signon > 0)
+			cl_auto_h2_pending = false;
+#endif
 	} while (ret && cls.state == ca_connected);
 
+#if defined(H2W_INTEGRATED)
+	/* Drain a signon packet already waiting in the socket before applying the
+	 * deadline. This matters after a long render/filesystem stall. */
+	if (CL_AutoProtocolFallback (false))
+		return 0;
+#endif
 	if (cl_shownet.integer)
 		Con_Printf ("\n");
 

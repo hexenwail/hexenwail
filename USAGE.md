@@ -99,9 +99,10 @@ To launch a mod with portals data included: `glhexen2 -mod <modname>`
 ## Multiplayer
 
 The multiplayer menu and the ordinary `connect` command automatically try the
-Hexen II protocol first, then try HexenWorld when the Hexen II server does not
-answer. Use `h2://address` or `hw://address` to force a protocol when needed;
-this fallback is bounded and an H2 rejection is not silently retried as HW.
+Hexen II protocol first, then try HexenWorld when the Hexen II endpoint does not
+answer or accepts the control request but sends no H2 signon data. Use
+`h2://address` or `hw://address` to force a protocol when needed; this fallback
+is bounded and an H2 rejection is not silently retried as HW.
 
 A vanilla HexenWorld install needs the retail `data1/pak0.pak` and
 `pak1.pak`, plus `hw/pak4.pak` from the [Hammer of Thyrion HexenWorld game
