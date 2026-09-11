@@ -237,6 +237,10 @@ Host should be either "local" or a net address to be passed on
 */
 void CL_EstablishConnection (const char *host)
 {
+#if defined(H2W_INTEGRATED)
+	qboolean auto_protocol = true;
+	qboolean return_onerror;
+#endif
 	if (cls.state == ca_dedicated)
 		return;
 
@@ -246,16 +250,39 @@ void CL_EstablishConnection (const char *host)
 	CL_Disconnect ();
 
 #if defined(H2W_INTEGRATED)
-	/* The URI makes protocol selection explicit; ordinary host names retain
-	 * Hexen II's qsocket handshake. */
+	/* Explicit schemes bypass detection. Plain addresses try the bounded H2
+	 * handshake first, then HW only if H2 did not answer (not if rejected). */
 	if (!q_strncasecmp(host, "hw://", 5))
 	{
-		HWCL_Connect (host + 5);
+		if (!HWCL_Connect (host + 5))
+			Host_Error ("Invalid HexenWorld server address");
 		return;
 	}
+	if (!q_strncasecmp(host, "h2://", 5))
+	{
+		host += 5;
+		auto_protocol = false;
+	}
+	if (!*host || !q_strcasecmp(host, "local"))
+		auto_protocol = false;
+	/* A failed H2 probe must not return to the menu while HW is joining. */
+	return_onerror = m_return_onerror;
+	if (auto_protocol)
+		m_return_onerror = false;
 #endif
 
 	cls.netcon = NET_Connect (host);
+#if defined(H2W_INTEGRATED)
+	if (!cls.netcon && auto_protocol && net_connect_no_response)
+	{
+		Con_Printf ("No Hexen II response; trying HexenWorld...\n");
+		if (!HWCL_Connect (host))
+			Host_Error ("Invalid multiplayer server address");
+		return;
+	}
+	if (!cls.netcon)
+		m_return_onerror = return_onerror;
+#endif
 	if (!cls.netcon)
 		Host_Error ("%s: connect failed", __thisfunc__);
 	Con_DPrintf ("%s: connected to %s\n", __thisfunc__, host);

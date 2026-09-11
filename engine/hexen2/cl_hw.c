@@ -171,6 +171,9 @@ static netadr_t hwcl_server;
 static char hwcl_server_name[HW_ADDRESS_MAX + 1];
 static netchan_t hwcl_netchan;
 static double hwcl_connect_time;
+static double hwcl_connect_started;
+static double hwcl_last_received;
+#define HWCL_CONNECT_TIMEOUT 15.0
 static qboolean hwcl_received_packet;
 static int hwcl_protocol;
 static int hwcl_servercount;
@@ -353,11 +356,11 @@ static void HWCL_LoadModels (void)
 			continue;
 		model = Mod_ForName (hwcl_model_names[i], false);
 		if (!model)
-		{
-			Con_DPrintf ("HexenWorld model %d unavailable: %s\n", i,
-					hwcl_model_names[i]);
-			continue;
-		}
+			Host_Error ("HexenWorld missing %s: %s\n"
+				"Install hw/pak4.pak and the server's %s mod assets under %s (or %s).\n"
+				"Siege additionally needs siege/maps/siege.bsp and its mod assets.",
+				i == 1 ? "world map" : "model", hwcl_model_names[i],
+				fs_gamedir_nopath, FS_GetBasedir (), FS_GetUserbase ());
 		cl.model_precache[i] = model;
 	}
 
@@ -366,11 +369,7 @@ static void HWCL_LoadModels (void)
 			player_models[i] = Mod_ForName (player_names[i], false);
 
 	if (!cl.model_precache[1])
-	{
-		Con_Printf ("HexenWorld world model unavailable: %s\n",
-				hwcl_model_names[1]);
-		return;
-	}
+		Host_Error ("HexenWorld server supplied no world map");
 
 	cl.worldmodel = cl_entities[0].model = cl.model_precache[1];
 	COM_FileBase (hwcl_model_names[1], cl.mapname, sizeof(cl.mapname));
@@ -471,6 +470,7 @@ static void HWCL_ParseServerData (void)
 {
 	int playernum;
 	char gamedir[MAX_QPATH];
+	const char *server_gamedir;
 	char levelname[1024];
 
 	hwcl_protocol = MSG_ReadLong ();
@@ -484,16 +484,13 @@ static void HWCL_ParseServerData (void)
 	hwcl_servercount = MSG_ReadLong ();
 	hwcl_entity_sequence = -1;
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
-	q_strlcpy (gamedir, MSG_ReadString (), sizeof(gamedir));
-	/* The server's gamedir names where its content lives on disk.  Mount it
-	 * before anything references a model or sound, exactly as the original
-	 * HexenWorld client did here -- without it, hw/pak4.pak is invisible and
-	 * every map/model the signon names is reported unavailable. */
-	if (q_strcasecmp(fs_gamedir_nopath, gamedir))
-	{
-		Con_Printf ("HexenWorld server set the gamedir to %s\n", gamedir);
-		FS_Gamedir (gamedir);
-	}
+	server_gamedir = MSG_ReadString ();
+	if (msg_badread || strlen (server_gamedir) >= sizeof(gamedir))
+		Host_Error ("Invalid HexenWorld server game directory");
+	q_strlcpy (gamedir, server_gamedir, sizeof(gamedir));
+	if (!FS_HWGamedir (gamedir))
+		Host_Error ("Invalid HexenWorld server game directory: %s", gamedir);
+	Con_Printf ("HexenWorld server set the gamedir to %s\n", gamedir);
 	playernum = MSG_ReadByte ();
 	q_strlcpy (levelname, MSG_ReadString (), sizeof(levelname));
 	HWCL_DefaultMoveVars ();
@@ -536,6 +533,7 @@ static void HWCL_ParseServerData (void)
 			cl.maxclients * sizeof(*cl.scores), "hw_scores");
 	memset (cl.scores, 0, cl.maxclients * sizeof(*cl.scores));
 	cl.gametype = GAME_DEATHMATCH;
+	cl.viewheight = cl.crouch = 50;
 	cl.viewentity = hwcl_playernum + 1;
 	hwcl_server_state.viewentity = cl.viewentity;
 	if (hwcl_playernum >= 0 && hwcl_playernum < HWCL_MAX_CLIENTS)
@@ -693,6 +691,8 @@ static void HWCL_Changing (void)
 {
 	S_StopAllSounds (true);
 	cl.intermission = 0;
+	cls.signon = 0;
+	cl.worldmodel = NULL;
 	cls.state = ca_connected;	/* not active anymore, but not disconnected */
 	Con_Printf ("\nChanging map...\n");
 }
@@ -712,6 +712,8 @@ static void HWCL_Reconnect (void)
 	Con_Printf ("reconnecting...\n");
 	HWCL_Disconnect ();
 	hwcl_state = hwcl_connecting;
+	cls.state = ca_connected;
+	hwcl_connect_started = realtime;
 	HWCL_SendConnectPacket ();
 }
 
@@ -1352,6 +1354,11 @@ void HWCL_ApplyState (void)
 	{
 		state = &hwcl_server_state.players[viewentity - 1];
 		VectorCopy (state->velocity, cl.velocity);
+		cl.stats[STAT_WEAPONFRAME] = state->weaponframe;
+		/* HW origins are feet, and view height is implied by player flags,
+		 * not H2's SU_VIEWHEIGHT. Match the original HW client's camera. */
+		cl.viewheight = hwcl_spectator ? 50 :
+			(hwcl_local_crouched ? 24 : (hwcl_local_dead ? 8 : 50));
 	}
 
 	/* _Host_Frame calls CL_SendCmd -- and so HWCL_PredictUsercmd -- before
@@ -1389,49 +1396,51 @@ static void HWCL_ParseInventoryUpdate (void)
 	if (groups & 64) sc2 |= (unsigned int)MSG_ReadByte () << 16;
 	if (groups & 128) sc2 |= (unsigned int)MSG_ReadByte () << 24;
 
-	if (sc1 & (1u << 0)) MSG_ReadShort (); /* health */
-	if (sc1 & (1u << 1)) MSG_ReadByte (); /* level */
-	if (sc1 & (1u << 2)) MSG_ReadByte (); /* intelligence */
-	if (sc1 & (1u << 3)) MSG_ReadByte (); /* wisdom */
-	if (sc1 & (1u << 4)) MSG_ReadByte (); /* strength */
-	if (sc1 & (1u << 5)) MSG_ReadByte (); /* dexterity */
+	/* These fields drive both the HUD and view code. Discarding health leaves
+	 * the live player at zero HP and V_CalcViewRoll tilts the camera 80 degrees. */
+	if (sc1 & (1u << 0)) cl.v.health = MSG_ReadShort ();
+	if (sc1 & (1u << 1)) cl.v.level = MSG_ReadByte ();
+	if (sc1 & (1u << 2)) cl.v.intelligence = MSG_ReadByte ();
+	if (sc1 & (1u << 3)) cl.v.wisdom = MSG_ReadByte ();
+	if (sc1 & (1u << 4)) cl.v.strength = MSG_ReadByte ();
+	if (sc1 & (1u << 5)) cl.v.dexterity = MSG_ReadByte ();
 	/* Bit 6 is SC1_TELEPORT_TIME in the protocol header, but this server's
 	 * writer does not serialize a payload for it. */
-	if (sc1 & (1u << 7)) MSG_ReadByte (); /* bluemana */
-	if (sc1 & (1u << 8)) MSG_ReadByte (); /* greenmana */
-	if (sc1 & (1u << 9)) MSG_ReadLong (); /* experience */
-	if (sc1 & (1u << 10)) MSG_ReadByte (); /* cnt_torch */
-	if (sc1 & (1u << 11)) MSG_ReadByte (); /* cnt_h_boost */
-	if (sc1 & (1u << 12)) MSG_ReadByte (); /* cnt_sh_boost */
-	if (sc1 & (1u << 13)) MSG_ReadByte (); /* cnt_mana_boost */
-	if (sc1 & (1u << 14)) MSG_ReadByte (); /* cnt_teleport */
-	if (sc1 & (1u << 15)) MSG_ReadByte (); /* cnt_tome */
-	if (sc1 & (1u << 16)) MSG_ReadByte (); /* cnt_summon */
-	if (sc1 & (1u << 17)) MSG_ReadByte (); /* cnt_invisibility */
-	if (sc1 & (1u << 18)) MSG_ReadByte (); /* cnt_glyph */
-	if (sc1 & (1u << 19)) MSG_ReadByte (); /* cnt_haste */
-	if (sc1 & (1u << 20)) MSG_ReadByte (); /* cnt_blast */
-	if (sc1 & (1u << 21)) MSG_ReadByte (); /* cnt_polymorph */
-	if (sc1 & (1u << 22)) MSG_ReadByte (); /* cnt_flight */
-	if (sc1 & (1u << 23)) MSG_ReadByte (); /* cnt_cubeofforce */
-	if (sc1 & (1u << 24)) MSG_ReadByte (); /* cnt_invincibility */
-	if (sc1 & (1u << 25)) MSG_ReadByte (); /* artifact_active */
-	if (sc1 & (1u << 26)) MSG_ReadByte (); /* artifact_low */
-	if (sc1 & (1u << 27)) hwcl_local_movetype = MSG_ReadByte ();
-	if (sc1 & (1u << 28)) MSG_ReadByte (); /* cameramode */
-	if (sc1 & (1u << 29)) hwcl_local_hasted = MSG_ReadFloat ();
-	if (sc1 & (1u << 30)) MSG_ReadByte (); /* inventory */
-	if (sc1 & (1u << 31)) MSG_ReadByte (); /* rings_active */
+	if (sc1 & (1u << 7)) cl.v.bluemana = MSG_ReadByte ();
+	if (sc1 & (1u << 8)) cl.v.greenmana = MSG_ReadByte ();
+	if (sc1 & (1u << 9)) cl.v.experience = MSG_ReadLong ();
+	if (sc1 & (1u << 10)) cl.v.cnt_torch = MSG_ReadByte ();
+	if (sc1 & (1u << 11)) cl.v.cnt_h_boost = MSG_ReadByte ();
+	if (sc1 & (1u << 12)) cl.v.cnt_sh_boost = MSG_ReadByte ();
+	if (sc1 & (1u << 13)) cl.v.cnt_mana_boost = MSG_ReadByte ();
+	if (sc1 & (1u << 14)) cl.v.cnt_teleport = MSG_ReadByte ();
+	if (sc1 & (1u << 15)) cl.v.cnt_tome = MSG_ReadByte ();
+	if (sc1 & (1u << 16)) cl.v.cnt_summon = MSG_ReadByte ();
+	if (sc1 & (1u << 17)) cl.v.cnt_invisibility = MSG_ReadByte ();
+	if (sc1 & (1u << 18)) cl.v.cnt_glyph = MSG_ReadByte ();
+	if (sc1 & (1u << 19)) cl.v.cnt_haste = MSG_ReadByte ();
+	if (sc1 & (1u << 20)) cl.v.cnt_blast = MSG_ReadByte ();
+	if (sc1 & (1u << 21)) cl.v.cnt_polymorph = MSG_ReadByte ();
+	if (sc1 & (1u << 22)) cl.v.cnt_flight = MSG_ReadByte ();
+	if (sc1 & (1u << 23)) cl.v.cnt_cubeofforce = MSG_ReadByte ();
+	if (sc1 & (1u << 24)) cl.v.cnt_invincibility = MSG_ReadByte ();
+	if (sc1 & (1u << 25)) cl.v.artifact_active = MSG_ReadByte ();
+	if (sc1 & (1u << 26)) cl.v.artifact_low = MSG_ReadByte ();
+	if (sc1 & (1u << 27)) cl.v.movetype = hwcl_local_movetype = MSG_ReadByte ();
+	if (sc1 & (1u << 28)) cl.v.cameramode = MSG_ReadByte ();
+	if (sc1 & (1u << 29)) cl.v.hasted = hwcl_local_hasted = MSG_ReadFloat ();
+	if (sc1 & (1u << 30)) cl.v.inventory = MSG_ReadByte ();
+	if (sc1 & (1u << 31)) cl.v.rings_active = MSG_ReadByte ();
 
-	if (sc2 & (1u << 0)) MSG_ReadByte (); /* rings_low */
-	if (sc2 & (1u << 1)) MSG_ReadByte (); /* armor_amulet */
-	if (sc2 & (1u << 2)) MSG_ReadByte (); /* armor_bracer */
-	if (sc2 & (1u << 3)) MSG_ReadByte (); /* armor_breastplate */
-	if (sc2 & (1u << 4)) MSG_ReadByte (); /* armor_helmet */
-	if (sc2 & (1u << 5)) MSG_ReadByte (); /* ring_flight */
-	if (sc2 & (1u << 6)) MSG_ReadByte (); /* ring_water */
-	if (sc2 & (1u << 7)) MSG_ReadByte (); /* ring_turning */
-	if (sc2 & (1u << 8)) MSG_ReadByte (); /* ring_regeneration */
+	if (sc2 & (1u << 0)) cl.v.rings_low = MSG_ReadByte ();
+	if (sc2 & (1u << 1)) cl.v.armor_amulet = MSG_ReadByte ();
+	if (sc2 & (1u << 2)) cl.v.armor_bracer = MSG_ReadByte ();
+	if (sc2 & (1u << 3)) cl.v.armor_breastplate = MSG_ReadByte ();
+	if (sc2 & (1u << 4)) cl.v.armor_helmet = MSG_ReadByte ();
+	if (sc2 & (1u << 5)) cl.v.ring_flight = MSG_ReadByte ();
+	if (sc2 & (1u << 6)) cl.v.ring_water = MSG_ReadByte ();
+	if (sc2 & (1u << 7)) cl.v.ring_turning = MSG_ReadByte ();
+	if (sc2 & (1u << 8)) cl.v.ring_regeneration = MSG_ReadByte ();
 	/* Bits 9 and 10 are declared but not serialized by this server. */
 	if (sc2 & (1u << 11)) MSG_ReadString (); /* puzzle_inv1 */
 	if (sc2 & (1u << 12)) MSG_ReadString (); /* puzzle_inv2 */
@@ -1441,9 +1450,11 @@ static void HWCL_ParseInventoryUpdate (void)
 	if (sc2 & (1u << 16)) MSG_ReadString (); /* puzzle_inv6 */
 	if (sc2 & (1u << 17)) MSG_ReadString (); /* puzzle_inv7 */
 	if (sc2 & (1u << 18)) MSG_ReadString (); /* puzzle_inv8 */
-	if (sc2 & (1u << 19)) MSG_ReadShort (); /* max_health */
-	if (sc2 & (1u << 20)) MSG_ReadByte (); /* max_mana */
-	if (sc2 & (1u << 21)) MSG_ReadFloat (); /* flags */
+	if (sc2 & (1u << 19)) cl.v.max_health = MSG_ReadShort ();
+	if (sc2 & (1u << 20)) cl.v.max_mana = MSG_ReadByte ();
+	if (sc2 & (1u << 21)) cl.v.flags = MSG_ReadFloat ();
+	Sbar_Changed ();
+	SB_InvChanged ();
 }
 
 static void HWCL_ParsePlayerInfo (void)
@@ -1841,8 +1852,11 @@ static void HWCL_ParseServerMessage (void)
 					/* Skin download/translation is not wired up yet, but it must
 					 * not hold the transport handshake hostage. */
 					HWCL_StringCmd (va ("begin %d", hwcl_servercount));
+					if (!cl.worldmodel)
+						Host_Error ("HexenWorld signon without a world map");
 					cls.signon = SIGNONS;
-					Con_Printf ("HexenWorld signon complete; awaiting state adapter.\n");
+					SCR_EndLoadingPlaque ();
+					Con_Printf ("HexenWorld signon complete: %s.\n", cl.mapname);
 				}
 				else if (!q_strcasecmp (text, "changing\n"))
 				{
@@ -1956,6 +1970,8 @@ qboolean HWCL_Connect (const char *host)
 	CL_ClearState ();
 	cls.state = ca_connected;
 	hwcl_state = hwcl_connecting;
+	cls.demonum = -1;
+	hwcl_connect_started = realtime;
 	HWCL_SendConnectPacket ();
 	return true;
 }
@@ -2177,7 +2193,13 @@ void HWCL_Disconnect (void)
 	 * what sends clc_disconnect, closes the qsocket, shuts down a listen
 	 * server and removes the .gip files. */
 	if (hwcl_state != hwcl_disconnected)
+	{
 		cls.state = ca_disconnected;
+		S_StopAllSounds (true);
+		cl.worldmodel = NULL;
+		FS_HWRestore ();
+		SCR_EndLoadingPlaque ();
+	}
 	hwcl_state = hwcl_disconnected;
 	hwcl_received_packet = false;
 }
@@ -2186,6 +2208,9 @@ static void HWCL_ConnectionlessPacket (void)
 {
 	int command;
 
+	/* Do not accept an unsolicited handshake/print from another endpoint. */
+	if (!HWNET_CompareAdr (&hw_net_from, &hwcl_server))
+		return;
 	MSG_BeginReadingFrom (&hw_net_message);
 	MSG_ReadLong (); /* connectionless -1 marker */
 	command = MSG_ReadByte ();
@@ -2200,6 +2225,7 @@ static void HWCL_ConnectionlessPacket (void)
 		MSG_WriteString (&hwcl_netchan.message, "new");
 		HWNetchan_Transmit (&hwcl_netchan, 0, NULL);
 		hwcl_state = hwcl_connected;
+		hwcl_last_received = realtime;
 		Con_Printf ("HexenWorld connection accepted.\n");
 		/* Recorded only once a server has answered, so a mistyped or dead
 		 * address never reaches the menu's list. */
@@ -2223,6 +2249,12 @@ void HWCL_Frame (void)
 	if (!hwcl_net_initialized || hwcl_state == hwcl_disconnected)
 		return;
 
+	if (hwcl_state == hwcl_connecting &&
+	    realtime - hwcl_connect_started > HWCL_CONNECT_TIMEOUT)
+		Host_Error ("No HexenWorld response after 15 seconds; check server address, port and firewall");
+	if (hwcl_state == hwcl_connected &&
+	    realtime - hwcl_last_received > Cvar_VariableValue ("net_messagetimeout"))
+		Host_Error ("HexenWorld server connection timed out");
 	if (hwcl_state == hwcl_connecting && realtime - hwcl_connect_time > 5.0)
 		HWCL_SendConnectPacket ();
 
@@ -2242,6 +2274,7 @@ void HWCL_Frame (void)
 		if (!HWNetchan_Process (&hwcl_netchan))
 			continue;
 
+		hwcl_last_received = realtime;
 		if (!hwcl_received_packet)
 		{
 			Con_Printf ("HexenWorld netchan established (%d payload bytes).\n",

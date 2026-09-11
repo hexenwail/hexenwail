@@ -11,8 +11,9 @@ Editing either one rebuilds `.#gamecode`. If you add a third build-time tool,
 add it to that allowlist and to this paragraph — or put it in `scripts/`
 instead, which is where things that run during a build belong.
 
-Two more are CI gates rather than build inputs: `menu_soft_parity.py` and
-`ironwail_scorecard.py --check` both run in `.github/workflows/lint.yml`.
+Three more are CI gates rather than build inputs: `menu_soft_parity.py`,
+`test_multiplayer_join.py`, and `ironwail_scorecard.py --check` all run in
+`.github/workflows/lint.yml`.
 
 These are plain scripts, run directly. The Python ones need only stock
 `python3` (no third-party modules) except `pak_extract.py`, which needs Pillow.
@@ -27,6 +28,7 @@ These are plain scripts, run directly. The Python ones need only stock
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
+| `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 
 ---
 

@@ -1067,6 +1067,62 @@ add_pakfile:
 #endif
 }
 
+#ifdef H2W_INTEGRATED
+/* Keep the local game's paths alive, but out of the server's search order.
+ * Only temporary HW/mod entries above the base are freed on disconnect. */
+static searchpath_t *fs_hw_saved_paths;
+static char fs_hw_saved_game[MAX_QPATH];
+static char fs_hw_saved_gamedir[MAX_OSPATH], fs_hw_saved_userdir[MAX_OSPATH];
+static unsigned int fs_hw_saved_flags;
+
+qboolean FS_HWGamedir (const char *dir)
+{
+	const unsigned char *p = (const unsigned char *)dir;
+
+	/* A wire string must be one safe directory component, not a console
+	 * command, traversal, absolute path, or reserved local base directory. */
+	if (!*p || strlen(dir) >= MAX_QPATH || !strcmp(dir, ".") ||
+	    strstr(dir, "..") || !q_strcasecmp(dir, "data1") ||
+	    !q_strcasecmp(dir, "portals"))
+		return false;
+	for (; *p; p++)
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+		      (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' || *p == '.'))
+			return false;
+
+	if (!fs_hw_saved_paths)
+	{
+		fs_hw_saved_paths = fs_searchpaths;
+		q_strlcpy (fs_hw_saved_game, fs_gamedir_nopath, sizeof(fs_hw_saved_game));
+		q_strlcpy (fs_hw_saved_gamedir, fs_gamedir, sizeof(fs_hw_saved_gamedir));
+		q_strlcpy (fs_hw_saved_userdir, fs_userdir, sizeof(fs_hw_saved_userdir));
+		fs_hw_saved_flags = gameflags;
+		fs_searchpaths = fs_base_searchpaths;
+	}
+	else
+		FS_UnwindSearchpaths (fs_base_searchpaths, false);
+	Cache_Flush ();
+	FS_AddGameDirectory ("hw", false);
+	if (q_strcasecmp(dir, "hw"))
+		FS_AddGameDirectory (dir, false);
+	return true;
+}
+
+void FS_HWRestore (void)
+{
+	if (!fs_hw_saved_paths)
+		return;
+	Cache_Flush ();
+	FS_UnwindSearchpaths (fs_base_searchpaths, false);
+	fs_searchpaths = fs_hw_saved_paths;
+	fs_hw_saved_paths = NULL;
+	gameflags = fs_hw_saved_flags;
+	q_strlcpy (fs_gamedir_nopath, fs_hw_saved_game, sizeof(fs_gamedir_nopath));
+	q_strlcpy (fs_gamedir, fs_hw_saved_gamedir, sizeof(fs_gamedir));
+	q_strlcpy (fs_userdir, fs_hw_saved_userdir, sizeof(fs_userdir));
+}
+#endif
+
 /*
 ================
 FS_Gamedir

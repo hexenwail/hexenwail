@@ -66,6 +66,12 @@ void FS_Init (void);
 void FS_Gamedir (const char *dir);
 	/* Sets the gamedir and path to a different directory. */
 
+#ifdef H2W_INTEGRATED
+qboolean FS_HWGamedir (const char *dir);
+void FS_HWRestore (void);
+	/* Temporary server-selected HW/mod paths; restore the local game on exit. */
+#endif
+
 
 /* file i/o within qfs */
 extern	long	fs_filesize;	/* size of the last file opened through QFS api */
