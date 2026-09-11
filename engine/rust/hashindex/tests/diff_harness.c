@@ -188,34 +188,42 @@ static int cmp_state(hashindex_t *a, hashindex_t *b, const char *what)
 }
 
 /* ---- abort helper -------------------------------------------------------
- * Runs fn(hi) in a forked child and reports whether it died on SIGABRT.
- * fork() rather than a signal handler because the point is that the process
- * does not continue -- and both implementations share one Sys_Error, so the
- * comparison is of the call path, not of the abort itself.
+ * Runs fn(hi) in a forked child and reports whether it died on SIGABRT,
+ * capturing the Sys_Error text so the caller can assert WHICH guard fired.
+ *
+ * That distinction matters: a case that aborts for the wrong reason still
+ * "passes" a signal-only check.  fork() rather than a signal handler because
+ * the point is that the process does not continue -- and both implementations
+ * share one Sys_Error, so the comparison is of the call path, not of the
+ * abort itself.
  */
-static int aborts(void (*fn)(hashindex_t *), hashindex_t *hi)
+static int aborts_msg(void (*fn)(hashindex_t *), hashindex_t *hi,
+			char *msg, size_t msgsz)
 {
 	pid_t pid;
-	int status;
+	int status, pfd[2];
+	ssize_t n;
 
+	if (pipe(pfd) != 0) { perror("pipe"); exit(2); }
 	fflush(NULL);
 	pid = fork();
-	if (pid < 0) {
-		perror("fork");
-		exit(2);
-	}
+	if (pid < 0) { perror("fork"); exit(2); }
 	if (pid == 0) {
-		/* Silence the Sys_Error text; we only care about the signal. */
-		if (freopen("/dev/null", "w", stderr) == NULL)
-			; /* best effort: the abort is what matters, not the message */
+		close(pfd[0]);
+		if (dup2(pfd[1], STDERR_FILENO) < 0) _exit(3);
+		close(pfd[1]);
 		fn(hi);
 		/* Reaching here means it did NOT abort. */
 		_exit(0);
 	}
-	if (waitpid(pid, &status, 0) < 0) {
-		perror("waitpid");
-		exit(2);
-	}
+	close(pfd[1]);
+	n = read(pfd[0], msg, msgsz - 1);
+	if (n < 0) n = 0;
+	msg[n] = '\0';
+	close(pfd[0]);
+	while (n > 0 && (msg[n - 1] == '\n' || msg[n - 1] == '\r'))
+		msg[--n] = '\0';
+	if (waitpid(pid, &status, 0) < 0) { perror("waitpid"); exit(2); }
 	return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT;
 }
 
@@ -229,9 +237,22 @@ static void do_alloc_zero(hashindex_t *hi) { Hash_Allocate(hi, 0); }
 static void do_alloc_zero_c(hashindex_t *hi) { c_Hash_Allocate(hi, 0); }
 static void do_add_uninit(hashindex_t *hi) { memset(hi, 0, sizeof(*hi)); Hash_Add(hi, 1, 1); }
 static void do_add_uninit_c(hashindex_t *hi) { memset(hi, 0, sizeof(*hi)); c_Hash_Add(hi, 1, 1); }
-/* index must be within [0, hashSize); the second reason Hash_Add can abort */
-static void do_add_range(hashindex_t *hi) { Hash_Add(hi, 1, CAP); }
-static void do_add_range_c(hashindex_t *hi) { c_Hash_Add(hi, 1, CAP); }
+
+/* The index must be within [0, hashSize).  A valid table has to be set up
+ * FIRST, or the uninitialised-hash guard fires instead and this case silently
+ * tests the wrong branch.  Allocating inside the child keeps g_hi untouched. */
+static void do_add_range(hashindex_t *hi)
+{
+	memset(hi, 0, sizeof(*hi));
+	Hash_Allocate(hi, CAP);
+	Hash_Add(hi, 1, CAP);
+}
+static void do_add_range_c(hashindex_t *hi)
+{
+	memset(hi, 0, sizeof(*hi));
+	c_Hash_Allocate(hi, CAP);
+	c_Hash_Add(hi, 1, CAP);
+}
 
 static void targeted_tests(void)
 {
@@ -321,28 +342,49 @@ static void targeted_tests(void)
 	REQUIRE(r.hashMask == c.hashMask);
 	printf("free ok (pointers nulled, size/mask retained)\n");
 
-	/* 9. The fatal path must abort in both.  Same Sys_Error, so what is being
-	 *    compared is that each implementation reaches it for these inputs. */
+	/* 9. The fatal path must abort in both, AND for the same reason.  The
+	 *    expected substring is asserted against the captured Sys_Error text:
+	 *    a case that aborts via the wrong guard would otherwise still pass a
+	 *    signal-only check.  Note the C side prefixes with "c_Hash_Add" (its
+	 *    symbols are renamed for the differential link), so the comparison is
+	 *    on the distinguishing clause, not on the whole message. */
 	{
-		struct { const char *what; void (*r)(hashindex_t *); void (*c)(hashindex_t *); }
-		cases[] = {
-			{ "Hash_Allocate(5) not a power of two", do_alloc_bad,  do_alloc_bad_c  },
-			{ "Hash_Allocate(0)",                    do_alloc_zero, do_alloc_zero_c },
-			{ "Hash_Add uninitialised",              do_add_uninit, do_add_uninit_c },
-			{ "Hash_Add index out of range",         do_add_range,  do_add_range_c  },
+		struct { const char *what; void (*r)(hashindex_t *); void (*c)(hashindex_t *);
+			 const char *expect; } cases[] = {
+			{ "Hash_Allocate(5) not a power of two", do_alloc_bad,  do_alloc_bad_c,
+			  "is not power of two" },
+			{ "Hash_Allocate(0)",                    do_alloc_zero, do_alloc_zero_c,
+			  "is not power of two" },
+			{ "Hash_Add uninitialised",              do_add_uninit, do_add_uninit_c,
+			  "hash not initialized" },
+			{ "Hash_Add index out of range",         do_add_range,  do_add_range_c,
+			  "hash index out of range" },
 		};
 		size_t k;
 		for (k = 0; k < sizeof(cases)/sizeof(cases[0]); k++) {
-			int br = aborts(cases[k].r, &g_hi);
-			int bc = aborts(cases[k].c, &g_hi);
+			char mr[512], mc[512];
+			int br = aborts_msg(cases[k].r, &g_hi, mr, sizeof(mr));
+			int bc = aborts_msg(cases[k].c, &g_hi, mc, sizeof(mc));
+
 			checks++;
-			printf("abort parity: %-38s rust=%s c=%s\n",
+			printf("abort parity: %-38s rust=%-7s c=%-7s expected=/%s/\n",
 				cases[k].what, br ? "SIGABRT" : "returned",
-				bc ? "SIGABRT" : "returned");
+				bc ? "SIGABRT" : "returned", cases[k].expect);
+			printf("    rust said: %s\n", mr[0] ? mr : "(nothing)");
+			printf("    c    said: %s\n", mc[0] ? mc : "(nothing)");
+
 			if (br != bc)
 				FAIL("abort parity mismatch for %s", cases[k].what);
 			if (!br || !bc)
 				FAIL("expected both to abort for %s", cases[k].what);
+			/* Both must name the intended guard. */
+			checks += 2;
+			if (strstr(mr, cases[k].expect) == NULL)
+				FAIL("rust aborted for the WRONG reason in '%s': got \"%s\", "
+				     "expected substring \"%s\"", cases[k].what, mr, cases[k].expect);
+			if (strstr(mc, cases[k].expect) == NULL)
+				FAIL("c aborted for the WRONG reason in '%s': got \"%s\", "
+				     "expected substring \"%s\"", cases[k].what, mc, cases[k].expect);
 		}
 	}
 }
