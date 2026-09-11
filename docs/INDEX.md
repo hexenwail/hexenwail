@@ -56,7 +56,7 @@ whether you may edit it freely.
 ## Not here
 
 - **Contributor process** — `CONTRIBUTING.md` at the repo root
-- **Agent instructions** — `CLAUDE.md` and `AGENTS.md` at the repo root
+- **Agent instructions** — `AGENTS.md` at the repo root
 - **Player setup** — `USAGE.md` at the repo root
 - **HexenWorld** — `engine/hexenworld/README.md`
 - **The software renderer** — currently undocumented. `engine/hexen2/r_soft_web.c`
