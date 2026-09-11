@@ -24,6 +24,7 @@ root="$(cd "$engine/.." && pwd)"
 
 RUST_LIB="${RUST_LIB:-$crate/target/release/libhashindex_rs.a}"
 OUT="${OUT:-$(mktemp -d)}"
+mkdir -p "$OUT"
 
 if [ ! -f "$RUST_LIB" ]; then
 	echo "error: Rust staticlib not found: $RUST_LIB" >&2
