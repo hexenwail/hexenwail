@@ -165,7 +165,10 @@ typedef enum
 
 static hwcl_state_t hwcl_state;
 static qboolean hwcl_net_initialized;
+cvar_t hw_spectator = {"hw_spectator", "", CVAR_NONE};
 static netadr_t hwcl_server;
+/* The address as given to HWCL_Connect, for the menu's recent-server list. */
+static char hwcl_server_name[HW_ADDRESS_MAX + 1];
 static netchan_t hwcl_netchan;
 static double hwcl_connect_time;
 static qboolean hwcl_received_packet;
@@ -243,6 +246,9 @@ static char hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
 static int hwcl_model_count;
 static int hwcl_sound_count;
 static int hwcl_playernum;
+/* Bit 128 of the svc_serverdata player number.  hwsv decides spectator mode
+ * at connect and never changes it, and runs PlayerMove with it set. */
+static qboolean hwcl_spectator;
 /* Players whose spawn we have already announced this signon.  Cleared on every
  * svc_serverdata so a reconnect can be seen happening. */
 static qboolean hwcl_players_seen[HWCL_MAX_CLIENTS];
@@ -522,6 +528,7 @@ static void HWCL_ParseServerData (void)
 	hwcl_model_count = 1;
 	hwcl_sound_count = 1;
 	hwcl_playernum = playernum & 127;
+	hwcl_spectator = (playernum & 128) != 0;
 	q_strlcpy (cl.levelname, levelname, sizeof(cl.levelname));
 	q_strlcpy (cl.mod_name, gamedir, sizeof(cl.mod_name));
 	cl.maxclients = HWCL_MAX_CLIENTS;
@@ -1886,16 +1893,46 @@ static void HWCL_InitNet (void)
 	hwcl_net_initialized = true;
 }
 
+/* Userinfo values ride inside a backslash-delimited info string, and setinfo
+ * values inside a quoted string command, so neither may carry '\' or '"'. */
+static void HWCL_CleanInfoValue (char *dst, const char *src, size_t size)
+{
+	size_t i = 0;
+
+	for ( ; *src && i < size - 1; src++)
+	{
+		if (*src == '\\' || *src == '"')
+			continue;
+		dst[i++] = *src;
+	}
+	dst[i] = 0;
+}
+
 static void HWCL_SendConnectPacket (void)
 {
-	char data[256];
+	char data[512];
+	char name[32];
+	char value[48];
+	char spectator[64];
 	int portals;
 
 	portals = ((gameflags & GAME_PORTALS) == GAME_PORTALS);
+	HWCL_CleanInfoValue (name, cl_name.string, sizeof(name));
+	spectator[0] = 0;
+	if (hw_spectator.string[0] && strcmp (hw_spectator.string, "0"))
+	{
+		HWCL_CleanInfoValue (value, hw_spectator.string, sizeof(value));
+		q_snprintf (spectator, sizeof(spectator), "\\spectator\\%s", value);
+	}
+	/* topcolor/bottomcolor are what svc_updateuserinfo hands every other
+	 * client for this player's scoreboard colours. */
 	q_snprintf (data, sizeof(data),
-			"%c%c%c%cconnect %d \"\\name\\%s\\playerclass\\%d\\*cap\\A\"\n",
-			255, 255, 255, 255, portals, cl_name.string,
-			(int)cl_playerclass.value);
+			"%c%c%c%cconnect %d \"\\name\\%s\\playerclass\\%d"
+			"\\topcolor\\%d\\bottomcolor\\%d%s\\*cap\\A\"\n",
+			255, 255, 255, 255, portals, name,
+			(int)cl_playerclass.value,
+			(cl_color.integer >> 4) & 15, cl_color.integer & 15,
+			spectator);
 	HWNET_SendPacket (strlen(data), data, &hwcl_server);
 	hwcl_connect_time = realtime;
 	Con_Printf ("Connecting to HexenWorld server %s...\n",
@@ -1914,6 +1951,7 @@ qboolean HWCL_Connect (const char *host)
 	}
 	if (!hwcl_server.port)
 		hwcl_server.port = BigShort (HW_PORT_SERVER);
+	q_strlcpy (hwcl_server_name, host, sizeof(hwcl_server_name));
 
 	CL_ClearState ();
 	cls.state = ca_connected;
@@ -1925,6 +1963,27 @@ qboolean HWCL_Connect (const char *host)
 qboolean HWCL_Active (void)
 {
 	return hwcl_state != hwcl_disconnected;
+}
+
+/* Userinfo changed while connected -- name, playerclass, colours -- goes to
+ * hwsv as setinfo, which is how the original client relayed its
+ * CVAR_USERINFO cvars.  The Hexen II path would forward the name/color/
+ * playerclass command itself into cls.message, which nothing sends while
+ * HexenWorld owns the connection.  Before the netchan is up there is nothing
+ * to send to: the next connect packet reads the cvars afresh. */
+void HWCL_SetInfo (const char *key, const char *value)
+{
+	char clean[64];
+
+	if (hwcl_state != hwcl_connected)
+		return;
+	HWCL_CleanInfoValue (clean, value, sizeof(clean));
+	HWCL_StringCmd (va ("setinfo \"%s\" \"%s\"", key, clean));
+}
+
+void HWCL_Init (void)
+{
+	Cvar_RegisterVariable (&hw_spectator);
 }
 
 static int HWCL_LocalPlayerSlot (void)
@@ -1988,7 +2047,7 @@ void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse)
 	pmove.movetype = hwcl_local_movetype;
 	/* hasted multiplies maxspeed, so it is 1 and never 0 when unset. */
 	pmove.hasted = (hwcl_local_hasted > 0) ? hwcl_local_hasted : 1.0f;
-	pmove.spectator = 0;
+	pmove.spectator = hwcl_spectator;
 
 	/* physent 0 is the world.  Brush-model movers are not tracked yet, so
 	 * prediction sees the static world only and the server corrects the
@@ -2102,6 +2161,7 @@ void HWCL_Disconnect (void)
 	hwcl_local_hasted = 1.0f;
 	hwcl_local_dead = false;
 	hwcl_local_crouched = false;
+	hwcl_spectator = false;
 	memset (hwcl_cmd_history, 0, sizeof(hwcl_cmd_history));
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
 	cls.signon = 0;
@@ -2141,6 +2201,9 @@ static void HWCL_ConnectionlessPacket (void)
 		HWNetchan_Transmit (&hwcl_netchan, 0, NULL);
 		hwcl_state = hwcl_connected;
 		Con_Printf ("HexenWorld connection accepted.\n");
+		/* Recorded only once a server has answered, so a mistyped or dead
+		 * address never reaches the menu's list. */
+		M_HW_RememberServer (hwcl_server_name);
 		return;
 	}
 

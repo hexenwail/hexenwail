@@ -52,7 +52,9 @@ enum m_state_e
 	m_mload,
 	m_msave,
 	m_mods,
-	m_maps
+	m_maps,
+	m_hwservers,
+	m_hwconnect
 };
 
 extern	enum m_state_e	m_state;

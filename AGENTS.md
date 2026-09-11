@@ -1,8 +1,6 @@
 # Agent Instructions
 
-This project has no in-tree issue tracker.  The **bd (beads)** tracker it used to
-carry is retired; `(uhexen2-xxxx)` ids on older commits are historical breadcrumbs,
-not live issues.  Do not reintroduce `.beads/` to the tree.
+This file provides instructions and context for AI coding agents working on this project.
 
 ## Work in a worktree
 
@@ -33,13 +31,13 @@ Sharp edges in a shared checkout:
 So: **do the work in a worktree.**
 
 ```bash
-git worktree add .claude/worktrees/<slug> -b worktree-<slug>
-cd .claude/worktrees/<slug>
+git worktree add .worktrees/<slug> -b worktree-<slug>
+cd .worktrees/<slug>
 # ... edit, build, commit ...
-git worktree remove .claude/worktrees/<slug>   # once the branch has landed
+git worktree remove .worktrees/<slug>   # once the branch has landed
 ```
 
-`.claude/worktrees/<slug>` on a `worktree-<slug>` branch is the convention
+`.worktrees/<slug>` on a `worktree-<slug>` branch is the convention
 already in use here.
 
 ## Landing the Plane (Session Completion)
@@ -63,4 +61,104 @@ complete until `git push` succeeds.
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing — that leaves work stranded locally
+- NEVER say "ready to push when you are" — YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## Issue tracking
+
+This project uses **GitHub Issues** for tracking bugs, features, and work items.
+See [issues](https://github.com/hexenwail/hexenwail/issues) to report or browse.
+
+You will still see `(uhexen2-xxxx)` ids on older commits and in the docs under
+`history/`. Those are historical references from the retired **bd (beads)** tracker
+— read them as breadcrumbs into the reasoning behind a change, not as live issues.
+Do not reintroduce `.beads/` to the tree.
+
+## Citing commits
+
+**Write the commit SUBJECT, not just the hash.** The house workflow squashes, and
+a squash replaces the commit and its hash with a new one — so a hash recorded
+against work that has not landed yet is not occasionally stale, it is guaranteed
+stale.  Subjects survive a rebase, hashes do not. So write:
+
+> fixed in `feat(server): sv_netsort decides who survives a full datagram`
+> (4724daf2c at time of writing)
+
+and the reader can always find it with `git log --grep`, whatever the hash became.
+
+Note the squash keeps the subject of whichever commit came *first*, which is
+routinely unrelated work — the MD5 `.md5anim` parser lives inside a commit titled
+after BC7 texture compression.  When a subject looks wrong for the change it
+claims, search the diff, not the log.
+
+## Reading Ironwail
+
+The parity work reads upstream constantly.  **Read it by ref, never by path.**
+
+    git -C ../ironwail show origin/master:Quake/gl_screen.c
+    git -C ../ironwail grep <sym> origin/master -- Quake
+
+The checkout at `../ironwail` has two remotes.  `origin` is pristine Ironwail;
+its checked-out HEAD is `bobberb/ironwail`, a **Hexen II fork** ~190 commits
+and 18k lines ahead of upstream, with a dirty working tree on top.  So a read
+of the *worktree* can hand you the fork's Hexen II adaptation and look like
+upstream — and it will look *more* plausible than the real thing precisely
+because it already speaks Hexen II.
+
+Caught live: reading `SV_PrintMapChecklist` out of the worktree returns a
+`hexen2_mode ? "soundtype" : "sounds"` music-track check.  That is the fork's
+guess, and it is also wrong for this engine — Hexen II's music comes from the
+worldspawn `CD` / `MIDI` keys, which `ED_ParseEdict` intercepts by name, and
+`soundtype` is the field that picks a door's sound set.  Porting from that read
+would have shipped someone else's mistake under Ironwail's name.
+
+The fork is still worth reading as **prior art** — someone else's answer to the
+same adaptation question.  Cite it as "bobberb/ironwail fork", never as
+"Ironwail", and treat what you take as a design borrowed rather than parity
+achieved.  uhexen2-a5nn.39
+
+## Build & Test
+
+Always build through nix, never raw `cmake`/`make` — the flake pins the
+toolchain the CI targets are built with.
+
+```bash
+nix build .#default          # desktop GL client (glhexen2)
+nix build .#h2ded            # dedicated server
+nix build .#hwsv             # HexenWorld dedicated server
+nix build .#wasm             # WebAssembly/WebGL2 client
+nix develop                  # dev shell, incl. the shader toolchain
+```
+
+`CONTRIBUTING.md` has the full target list and what CI checks.
+
+## Architecture Overview
+
+`engine/h2shared/` is compiled by **both** Hexen II and HexenWorld. A change
+there has to be right for both, or fenced `#ifndef H2W` — see issue #42 for
+what has already drifted and how it was resolved.
+
+Rendering is **GL 4.3 core**: no immediate mode, no fixed-function matrix
+stack. There are **three renderer pathways**, and shared client code must clear
+all three:
+
+| Pathway | Guard | Notes |
+|---|---|---|
+| desktop GL 4.3 | `GLQUAKE` + `GL_DLSYM` | the reference path |
+| GLES3 / WebGL2 | `USE_GLES` | also what a desktop `-DUSE_GLES=ON` build takes |
+| 8bpp software | `WEBSOFT` | restored classic rasterizer; failure mode is a **link error** |
+
+Server and physics tick rate is the `sv_physfps` cvar, default **72 Hz**.
+`sys_ticrate` is dedicated-server only — anything describing a 20 Hz client
+tick is stale.
+
+## Conventions & Patterns
+
+- Default to **Ironwail's** approach for rendering features, and read it by ref
+  (see "Reading Ironwail" above), never from the local worktree.
+- Cite commits by **subject**, not hash (see "Citing commits" above).
+- Concurrent sessions share this checkout — read this file before any
+  `merge`, `rebase`, `stash`, `bisect` or `checkout`.
+- Lower-priority work carried over from the retired tracker lives in
+  [`docs/BACKLOG.md`](docs/BACKLOG.md); anything actively being worked on is a
+  GitHub issue.

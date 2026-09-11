@@ -1532,6 +1532,9 @@ void CL_Init (void)
 	CL_InitEffects();
 	CSQC_RegisterCvars ();
 	CSQC_InitBuiltins ();
+#if defined(H2W_INTEGRATED)
+	HWCL_Init ();
+#endif
 
 //
 // register our commands
