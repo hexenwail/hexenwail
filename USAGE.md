@@ -96,6 +96,34 @@ Options: `--scale 2|3|4` (default 4), `--upscaler realcugan|realesrgan` (default
 
 To launch a mod with portals data included: `glhexen2 -mod <modname>`
 
+## Multiplayer
+
+The multiplayer menu and the ordinary `connect` command automatically try the
+Hexen II protocol first, then try HexenWorld when the Hexen II server does not
+answer. Use `h2://address` or `hw://address` to force a protocol when needed;
+this fallback is bounded and an H2 rejection is not silently retried as HW.
+
+A vanilla HexenWorld install needs the retail `data1/pak0.pak` and
+`pak1.pak`, plus `hw/pak4.pak` from the [Hammer of Thyrion HexenWorld game
+data](https://uhexen2.sourceforge.net/download.html). HexenWorld servers
+advertise their game directory during signon. Hexenwail mounts `hw/` as the
+shared HW layer and puts the advertised mod above it, so Siege is still
+HexenWorld protocol rather than a third protocol.
+
+Siege is **not** contained entirely in `pak4.pak`. The upstream
+`hexenworld mods/siege.tgz` archive installs a `siege/` directory containing,
+at minimum, `hwprogs.dat`, the Siege maps (including `maps/siege.bsp`),
+models, sounds, menu graphics, and MIDI data. Keep that directory beside
+`hw/`; the server's advertised `siege` gamedir must be present on the client.
+The server can reference other maps or assets, so install the complete Siege
+archive rather than copying only `siege.bsp`. The client reports the missing
+path and leaves signon if a required world/model is unavailable instead of
+remaining behind the loading screen.
+
+When reporting a connection problem, include the console lines for `server set
+the gamedir`, `signon complete`, and any `HexenWorld missing` message. A
+successful join prints `signon complete`, followed by the first rendered world.
+
 ## Bundled gamecode
 
 Releases ship compiled gamecode (`progs.dat`, `progs2.dat`) beside the engine —

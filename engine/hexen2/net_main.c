@@ -430,12 +430,15 @@ NET_Connect
 int hostCacheCount = 0;
 hostcache_t hostcache[HOSTCACHESIZE];
 
+qboolean net_connect_no_response;
+
 qsocket_t *NET_Connect (const char *host)
 {
 	qsocket_t		*ret;
 	int				n;
 
 	SetNetTime();
+	net_connect_no_response = false;
 
 	if (host && *host == 0)
 		host = NULL;

@@ -6,14 +6,19 @@
 # the same ground the old client network tests did, without a display:
 #
 #   1. hwsv boots, mounts hw/ on top of data1, spawns a map.
-#   2. Two GL clients connect (each on its own -hwport), sign on, and mount
-#      the server's gamedir.  Both must reach "signon complete" with zero
-#      unknown/malformed protocol messages.
+#   2. Two GL clients connect by plain address -- no hw:// scheme -- so the
+#      automatic H2-then-HW negotiation is what picks the protocol (issue #50).
+#      Each signs on, mounts the server's gamedir, and renders the world.
+#      Both must reach "signon complete" with zero unknown/malformed protocol
+#      messages and with the loading plaque dismissed.
 #   3. A server broadcast is delivered to both (say smoke-<token>).
 #   4. A live map change is issued from the server console; both clients see
 #      "Changing map..." / "reconnecting..." and complete a SECOND signon
 #      without aborting the reader, and the static-entity list does not
 #      overflow ("Too many HexenWorld static entities").
+#   5. When Siege is installed, a Siege client renders successfully, while a
+#      client with data1+hw but no Siege map aborts before signon with an
+#      actionable maps/siege.bsp error.
 #
 # Requires:
 #   - Hexen II data1 (pak0/pak1) and a HexenWorld gamedir (hw/pak4.pak,
@@ -72,13 +77,18 @@ ALOG="$WORK/client-a.log"
 BLOG="$WORK/client-b.log"
 FIFO="$WORK/console"
 FAILURES=0
+# Initialised before the trap: cleanup runs under `set -u`, so an early exit
+# (Xvfb refused to start, an unusable basedir) must not trip over an unset PID.
+SRV_PID=""; CA_PID=""; CB_PID=""; CP_PID=""; SIEGE_PID=""; XV_PID=""
 
 cleanup() {
 	[ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null
 	[ -n "$CA_PID" ] && kill "$CA_PID" 2>/dev/null
 	[ -n "$CB_PID" ] && kill "$CB_PID" 2>/dev/null
+	[ -n "$CP_PID" ] && kill "$CP_PID" 2>/dev/null
+	[ -n "$SIEGE_PID" ] && kill "$SIEGE_PID" 2>/dev/null
 	[ -n "$XV_PID" ] && kill "$XV_PID" 2>/dev/null
-	exec 3>&-
+	exec 3>&- 4>&-
 	rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -137,24 +147,31 @@ SRV_PID=$!
 wait_for "$SLOG" 'Building PHS' || { tail -40 "$SLOG"; fail "server did not reach map spawn"; }
 
 # --- client A ---
-DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$BASEDIR" -nolan -hwport 27001 +developer 1 \
-	+connect "hw://127.0.0.1" > "$ALOG" 2>&1 &
+DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$BASEDIR" -hwport 27001 +developer 1 \
+	+connect "127.0.0.1" > "$ALOG" 2>&1 &
 CA_PID=$!
 
 wait_for "$ALOG" 'HexenWorld signon complete' || { fail "client A did not complete signon"; }
 wait_for "$ALOG" 'HexenWorld server set the gamedir to hw' || fail "client A did not mount the hw gamedir"
 wait_for "$ALOG" 'player 0 spawned' || fail "client A never saw its own spawn"
+# A plain address must reach HW by negotiation, never by the hw:// override.
+wait_for "$ALOG" 'No Hexen II response; trying HexenWorld' || fail "client A did not autodetect HexenWorld"
+# Signon has to dismiss the loading plaque and actually draw, or the player sits
+# behind a frozen loading screen (the reported issue #50 failure).
+wait_for "$ALOG" 'First world draw completed' || fail "client A never rendered the world"
+grep -q 'HexenWorld missing world map' "$ALOG" && fail "client A reported a missing world map"
 no_badness "$ALOG" || fail "client A hit a protocol abort"
 
 # --- client B ---
 sleep 2
-DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$BASEDIR" -nolan -hwport 27002 +developer 1 \
+DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$BASEDIR" -hwport 27002 +developer 1 \
 	+connect "hw://127.0.0.1" > "$BLOG" 2>&1 &
 CB_PID=$!
 
 wait_for "$BLOG" 'HexenWorld protocol 100.*player 1' || { fail "server did not give client B player slot 1"; }
 wait_for "$BLOG" 'HexenWorld signon complete' || fail "client B did not complete signon"
 wait_for "$BLOG" 'player 1 spawned' || fail "client B never saw its own spawn"
+wait_for "$BLOG" 'First world draw completed' || fail "client B never rendered the world"
 no_badness "$BLOG" || fail "client B hit a protocol abort"
 
 # --- broadcast to both ---
@@ -189,6 +206,58 @@ say "static records parsed: A=$((nsa + 0)) B=$((nsb + 0))"
 no_badness "$ALOG" || fail "client A aborted during/after the map change"
 no_badness "$BLOG" || fail "client B aborted during/after the map change"
 
+# --- optional Siege leg (issue #50) ---
+# Siege is an HW mod, not a third protocol: the server advertises gamedir
+# "siege" and the client must layer siege/ above the hw/ base.  Only runs when
+# the mod is actually installed, since the base hw install has no siege.bsp.
+if [ -d "$BASEDIR/siege" ] && [ -f "$BASEDIR/siege/maps/siege.bsp" ]; then
+	CLOG="$WORK/client-siege.log"
+	SFIFO="$WORK/console-siege"
+	mkfifo "$SFIFO"
+	exec 4<>"$SFIFO"
+	script -qefc "$SERVER -basedir $BASEDIR -userdir $WORK/usr-siege -game siege -port 27003 +map siege" \
+		"$WORK/server-siege.log" < "$SFIFO" >/dev/null 2>&1 &
+	SIEGE_PID=$!
+
+	wait_for "$WORK/server-siege.log" 'Building PHS' || fail "siege server did not spawn its map"
+
+	DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$BASEDIR" -hwport 27004 +developer 1 \
+		+connect "127.0.0.1:27003" > "$CLOG" 2>&1 &
+	CP_PID=$!
+
+	wait_for "$CLOG" 'HexenWorld server set the gamedir to siege' 120 || fail "siege client did not mount the siege gamedir"
+	wait_for "$CLOG" 'HexenWorld signon complete: siege' 180 || fail "siege client did not complete signon"
+	wait_for "$CLOG" 'First world draw completed' 120 || fail "siege client never rendered the world"
+	grep -q 'HexenWorld missing world map' "$CLOG" && fail "siege client reported a missing world map"
+	no_badness "$CLOG" || fail "siege client hit a protocol abort"
+
+	kill "$CP_PID" 2>/dev/null; wait "$CP_PID" 2>/dev/null; CP_PID=""
+
+	# The same server against a client install with data1+hw but no Siege map
+	# must abort before signon with the exact missing path. Symlinks avoid
+	# copying proprietary data into the test workdir.
+	MISSING_BASE="$WORK/missing-base"
+	MLOG="$WORK/client-missing-siege.log"
+	mkdir -p "$MISSING_BASE/siege"
+	ln -s "$BASEDIR/data1" "$MISSING_BASE/data1"
+	ln -s "$BASEDIR/hw" "$MISSING_BASE/hw"
+	DISPLAY="$DISPNUM" stdbuf -oL -eL "$CLIENT" -basedir "$MISSING_BASE" -hwport 27005 +developer 1 \
+		+connect "127.0.0.1:27003" > "$MLOG" 2>&1 &
+	CP_PID=$!
+	wait_for "$MLOG" 'Host_Error: HexenWorld missing world map: maps/siege\.bsp' 180 || \
+		fail "missing-Siege client did not report the required world map"
+	grep -q 'HexenWorld signon complete' "$MLOG" && fail "missing-Siege client completed signon"
+	wait_for "$MLOG" 'Install hw/pak4\.pak.*siege mod assets' 10 || \
+		fail "missing-Siege error was not actionable"
+	kill "$CP_PID" 2>/dev/null; wait "$CP_PID" 2>/dev/null; CP_PID=""
+
+	printf 'quit\n' >&4
+	sleep 2
+	wait "$SIEGE_PID" 2>/dev/null; SIEGE_PID=""
+else
+	say "siege: skipped ($BASEDIR/siege/maps/siege.bsp not installed)"
+fi
+
 # --- shut down ---
 printf 'quit\n' >&3
 sleep 2
@@ -198,7 +267,7 @@ CA_PID=""; CB_PID=""
 wait "$SRV_PID" 2>/dev/null; SRV_PID=""
 
 if [ "$FAILURES" -eq 0 ]; then
-	say "PASS: HexenWorld headless smoke (2 clients, broadcast, map change)."
+	say "PASS: HexenWorld smoke (autodetect, 2 clients, map change, optional Siege/content checks)."
 	exit 0
 fi
 say "FAILED: $FAILURES assertion(s).  Logs: $WORK (removed on exit)."

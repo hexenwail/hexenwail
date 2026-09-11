@@ -8837,7 +8837,7 @@ static int M_HWServers_RowY (int row)
 	return HWSERVERS_LIST_Y + (row - HWSERVERS_FIRST) * 8;
 }
 
-/* Trim the address and drop a typed hw:// -- the join adds the scheme.  False
+/* Trim the address and drop a typed hw:// -- plain joins autodetect.  False
  * for an empty address, one too long for the connect command (which would cut
  * it short and connect somewhere else), or one with a character that would
  * break out of its quoted argument.  dst holds HW_ADDRESS_MAX + 1. */
@@ -8905,7 +8905,7 @@ static qboolean M_HW_Join (const char *address)
 		return false;
 	Key_SetDest (key_game);
 	m_state = m_none;
-	Cbuf_AddText (va ("connect \"hw://%s\"\n", addr));
+	Cbuf_AddText (va ("connect \"%s\"\n", addr));
 	return true;
 }
 
