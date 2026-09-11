@@ -153,6 +153,30 @@ jobs:
             exit 1
           fi
 
+      # USE_RUST_HASHINDEX defaults OFF, and every step above builds with the
+      # default -- so without this one, engine/rust/hashindex is compiled by
+      # NOTHING.  A rustc bump, or a change to hashindex.h or any engine header
+      # the crate shares, could break the port outright while every other step
+      # stayed green; it would surface only for whoever next switched the flag
+      # on.  Same shape of hole as the HexenWorld step above, which existed
+      # because no target set BUILD_HEXENWORLD.
+      #
+      # The differential half matters more than the build half.  Compiling
+      # proves the crate links; it says nothing about whether the Rust
+      # implementation still computes what the C original computes.
+      # scripts/check-rust-hashindex.sh links BOTH implementations into one
+      # binary -- the C original recompiled with its symbols renamed -- and
+      # compares raw array contents and per-bucket chain ORDER over 1.2M
+      # operations, plus abort parity on the four fatal paths.  It then builds
+      # all three targets with the flag ON and asserts exactly one definition
+      # of each symbol, which is the duplicate-symbol hazard the CMake
+      # source-list removal exists to prevent, and finally that the flag OFF
+      # still links the C original.
+      #
+      # No game data is needed: nothing in it starts the engine.
+      - name: Rust hashindex (differential test + flag-ON build)
+        run: nix develop .#default -c ./scripts/check-rust-hashindex.sh
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 
