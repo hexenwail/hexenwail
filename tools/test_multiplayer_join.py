@@ -106,11 +106,19 @@ int main(void) {
 JOIN_STUBS = r'''
 enum { ca_disconnected, ca_connected, ca_dedicated, clc_nop };
 static struct { int state,demoplayback,demonum,signon,message; void *netcon; } cls;
+static struct { double last_received_message; } cl;
+static struct { int integer; } cl_shownet;
 static qboolean net_connect_no_response, m_return_onerror;
 static int net_calls, hw_calls, net_result, hw_result=1, disconnects;
 static char last_net[128], last_hw[128];
+static double realtime;
+static int reads[4], readpos, parse_signon;
+#define CL_AUTO_H2_CONFIRM_TIMEOUT 5.0
+static qboolean cl_auto_h2_pending;
+static double cl_auto_h2_started;
+static char cl_auto_h2_host[MAX_QPATH];
 static jmp_buf abort_join;
-static void CL_Disconnect(void) { disconnects++; }
+static void CL_Disconnect(void) { disconnects++; cl_auto_h2_pending=false; }
 static void *NET_Connect(const char *h) {
     net_calls++; q_strlcpy(last_net,h,sizeof(last_net));
     return net_result ? &cls : NULL;
@@ -118,13 +126,26 @@ static void *NET_Connect(const char *h) {
 static qboolean HWCL_Connect(const char *h) {
     hw_calls++; q_strlcpy(last_hw,h,sizeof(last_hw)); return hw_result;
 }
+static void HWCL_Frame(void) {}
+static qboolean HWCL_Active(void) { return false; }
+static void HWCL_ApplyState(void) {}
+static void CL_AdvanceTime(void) {}
+static int CL_GetMessage(void) { assert(readpos < 4); return reads[readpos++]; }
+static void CL_ParseServerMessage(void) { if (parse_signon) cls.signon=1; }
+static void CL_RelinkEntities(void) {}
+static void CL_UpdateEffects(void) {}
+static void CL_UpdateTEnts(void) {}
+static void CL_UpdateDevStats(void) {}
 static void Host_Error(const char *fmt,...) { (void)fmt; longjmp(abort_join,1); }
 static void Con_Printf(const char *fmt,...) { (void)fmt; }
 #define Con_DPrintf Con_Printf
 static void MSG_WriteByte(int *m,int b) { *m=b; }
 static void reset(void) {
-    memset(&cls,0,sizeof(cls)); net_calls=hw_calls=disconnects=0;
+    memset(&cls,0,sizeof(cls)); memset(&cl,0,sizeof(cl));
+    memset(reads,0,sizeof(reads)); readpos=parse_signon=0;
+    net_calls=hw_calls=disconnects=0; realtime=100; cl_shownet.integer=0;
     net_result=0; hw_result=1; net_connect_no_response=0; m_return_onerror=1;
+    cl_auto_h2_pending=false; cl_auto_h2_started=0; cl_auto_h2_host[0]=0;
 }
 '''
 
@@ -132,6 +153,15 @@ JOIN_TESTS = r'''
 int main(void) {
     reset(); net_result=1; CL_EstablishConnection("host:26900");
     assert(net_calls==1 && hw_calls==0 && cls.state==ca_connected);
+    assert(cl_auto_h2_pending && cl_auto_h2_started==realtime);
+    assert(!strcmp(cl_auto_h2_host,"host:26900"));
+    realtime += 4.9; assert(!CL_AutoProtocolFallback(false));
+    realtime += .2; assert(CL_AutoProtocolFallback(false));
+    assert(disconnects==2 && hw_calls==1 && !strcmp(last_hw,"host:26900"));
+    reset(); cl_auto_h2_pending=true; cl_auto_h2_started=realtime;
+    q_strlcpy(cl_auto_h2_host,"dropped",sizeof(cl_auto_h2_host));
+    assert(CL_AutoProtocolFallback(true)); /* provisional qsocket died early */
+    assert(hw_calls==1 && !strcmp(last_hw,"dropped"));
     reset(); net_connect_no_response=1; CL_EstablishConnection("host:26950");
     assert(net_calls==1 && hw_calls==1 && !strcmp(last_hw,"host:26950"));
     assert(!m_return_onerror);
@@ -139,6 +169,7 @@ int main(void) {
     assert(net_calls==0 && hw_calls==1 && !strcmp(last_hw,"host:26950"));
     reset(); net_result=1; CL_EstablishConnection("h2://host:26900");
     assert(net_calls==1 && hw_calls==0 && !strcmp(last_net,"host:26900"));
+    assert(!cl_auto_h2_pending); realtime += 10; assert(!CL_AutoProtocolFallback(false));
     reset(); /* an H2 rejection/error must not try another protocol */
     if (!setjmp(abort_join)) { CL_EstablishConnection("host"); assert(0); }
     assert(net_calls==1 && hw_calls==0 && m_return_onerror);
@@ -151,7 +182,19 @@ int main(void) {
     reset(); hw_result=0;
     if (!setjmp(abort_join)) { CL_EstablishConnection("hw://bad"); assert(0); }
     assert(net_calls==0);
-    puts("PASS: automatic H2/HW selection, explicit overrides, local connection and rejection handling");
+
+    reset(); cls.netcon=&cls; cls.state=ca_connected; cl_auto_h2_pending=true;
+    cl_auto_h2_started=90; q_strlcpy(cl_auto_h2_host,"queued",sizeof(cl_auto_h2_host));
+    reads[0]=1; reads[1]=0; parse_signon=1; CL_ReadFromServer();
+    assert(cls.signon==1 && !cl_auto_h2_pending && hw_calls==0 && readpos==2);
+    reset(); cls.netcon=&cls; cls.state=ca_connected; cl_auto_h2_pending=true;
+    cl_auto_h2_started=90; q_strlcpy(cl_auto_h2_host,"nop",sizeof(cl_auto_h2_host));
+    reads[0]=1; reads[1]=0; CL_ReadFromServer();
+    assert(hw_calls==1 && !strcmp(last_hw,"nop")); /* svc_nop cannot confirm H2 */
+    reset(); cls.netcon=&cls; cls.state=ca_connected; cl_auto_h2_pending=true;
+    cl_auto_h2_started=realtime; q_strlcpy(cl_auto_h2_host,"dropped",sizeof(cl_auto_h2_host));
+    reads[0]=-1; CL_ReadFromServer(); assert(hw_calls==1); /* early socket loss */
+    puts("PASS: automatic selection, overrides, rejection handling, and provisional H2 lifecycle");
 }
 '''
 
@@ -163,7 +206,11 @@ def main():
     cases = {
         "paths": PRELUDE + FS_STUBS + fs[start:end] + FS_TESTS,
         "join": PRELUDE + JOIN_STUBS + function(
+            "engine/hexen2/cl_main.c", "static qboolean CL_AutoProtocolFallback (qboolean force)"
+        ) + function(
             "engine/hexen2/cl_main.c", "void CL_EstablishConnection (const char *host)"
+        ) + function(
+            "engine/hexen2/cl_main.c", "int CL_ReadFromServer (void)"
         ) + JOIN_TESTS,
     }
     with tempfile.TemporaryDirectory(prefix="multiplayer-join-") as tmp:
