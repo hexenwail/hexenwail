@@ -29,11 +29,28 @@
 #      rollback is real and not merely documented
 #
 # Requires cc, cargo/rustc and cmake -- run it inside `nix develop`.
-# No game data needed: nothing here starts the engine.
+# No game data needed for the default checks: nothing here starts the engine.
+#
+#   ./scripts/check-rust-hashindex.sh            # fast: crate, harness, builds
+#   ./scripts/check-rust-hashindex.sh --engine   # also run the real engine and
+#                                                # diff ON vs OFF end to end
+#
+# --engine additionally resolves the demo data and Xvfb out of nix itself and
+# runs engine/rust/hashindex/tests/run_engine_smoke.sh, so it needs network (or
+# a warm store) on a first run.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 set -euo pipefail
+
+run_engine=0
+for arg in "$@"; do
+	case "$arg" in
+		--engine) run_engine=1 ;;
+		-h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
+	esac
+done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crate="$root/engine/rust/hashindex"
@@ -121,6 +138,28 @@ done
 echo "  all three OFF builds compile the C original"
 
 echo
-echo "PASS: Rust hashindex -- differential harness green, all three targets"
-echo "      build with the flag ON, none with a duplicate symbol, and the OFF"
-echo "      build still uses the C original."
+if [ "$run_engine" -eq 1 ]; then
+	echo "== 6. engine smoke: run the REAL engine both ways and diff =="
+	# Resolved out of nix rather than required from the caller: the store hash
+	# in the demo path changes on every bump, and a check that is tedious to
+	# run is a check that stops being run.
+	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
+	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
+	DEMO_DIR="$demo" \
+	ON_BIN="$work/build-on/bin/glhexen2" \
+	OFF_BIN="$work/build-off/bin/glhexen2" \
+	XVFB="$xvfb" \
+	WORK="$work/smoke" \
+		"$crate/tests/run_engine_smoke.sh"
+
+	echo
+	echo "PASS: Rust hashindex -- differential harness green; all three targets"
+	echo "      build with the flag ON and none with a duplicate symbol; the OFF"
+	echo "      build still uses the C original; and the real engine produces"
+	echo "      identical output on a pak load and a map load either way."
+else
+	echo "PASS: Rust hashindex -- differential harness green, all three targets"
+	echo "      build with the flag ON, none with a duplicate symbol, and the OFF"
+	echo "      build still uses the C original."
+	echo "      (re-run with --engine to also drive the real engine)"
+fi
