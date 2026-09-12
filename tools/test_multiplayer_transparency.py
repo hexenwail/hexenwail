@@ -103,6 +103,14 @@ int main(void) {
 
 
 def main():
+    shader = (ROOT / "engine/h2shared/gl_shader.c").read_text()
+    multiply = shader.index('"    vec4 color = tex * lm * v_color;\\n"')
+    discard = shader.index('"    if (color.a < u_alpha_threshold) discard;\\n"', multiply)
+    assert multiply < discard
+    brush = (ROOT / "engine/hexen2/gl_rsurf.c").read_text()
+    assert "GL_SetAlphaThreshold(R_BrushFenceThreshold(e));" in brush
+    assert "R_SetAlphaToCoverage (e->alpha == ENTALPHA_DEFAULT);" in brush
+
     source = PRELUDE + function(
         "engine/hexen2/cl_hw.c", "static void HWCL_ParseEntityDelta"
     ) + function(
