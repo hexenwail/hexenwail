@@ -111,6 +111,25 @@ def main():
     assert "GL_SetAlphaThreshold(R_BrushFenceThreshold(e));" in brush
     assert "R_SetAlphaToCoverage (e->alpha == ENTALPHA_DEFAULT);" in brush
 
+    # Pin the complete WEBSOFT brush route.  CL_RelinkEntities maps partial
+    # protocol alpha to DRF before publishing the entity; brush face emission
+    # propagates DRF to SURF_TRANSLUCENT; the first edge scan skips that flag
+    # and the saved second scan draws only that flag.
+    relink = function("engine/hexen2/cl_main.c", "static void CL_RelinkEntities")
+    adapt = relink.index("ent->drawflags |= DRF_TRANSLUCENT;")
+    publish = relink.index("cl_visedicts[cl_numvisedicts] = ent;")
+    assert adapt < publish
+    rdraw = (ROOT / "engine/h2shared/r_draw.c").read_text()
+    propagate = "surface_p->flags = psurf->flags | SURF_TRANSLUCENT;"
+    assert propagate in rdraw
+    edge_pass = function("engine/hexen2/r_main.c", "static void R_EdgeDrawing")
+    assert edge_pass.index("R_DrawBEntitiesOnList ();") < edge_pass.rindex(
+        "R_ScanEdges (Translucent);"
+    )
+    draw_surfaces = function("engine/h2shared/d_edge.c", "void D_DrawSurfaces")
+    assert "if (s->flags & SURF_TRANSLUCENT)\n\t\t\t\t\tcontinue;" in draw_surfaces
+    assert "if (!s->spans || !(s->flags & SURF_TRANSLUCENT))\n\t\t\t\t\tcontinue;" in draw_surfaces
+
     source = PRELUDE + function(
         "engine/hexen2/cl_hw.c", "static void HWCL_ParseEntityDelta"
     ) + function(
