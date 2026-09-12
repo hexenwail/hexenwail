@@ -990,6 +990,14 @@ static float R_BrushEntityAlpha (const entity_t *e, float fallback)
 		ENTALPHA_DECODE(e->alpha) : fallback;
 }
 
+static float R_BrushFenceThreshold (const entity_t *e)
+{
+	/* sworld_frag compares after tex.a has been multiplied by entity alpha.
+	 * Scale the cutoff by the same factor so it continues testing tex.a at
+	 * 0.666 instead of discarding an otherwise solid, translucent fence. */
+	return 0.666f * R_BrushEntityAlpha(e, 1.0f);
+}
+
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 {
 	texture_t	*t;
@@ -1198,9 +1206,11 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 			R_SetBlend (false);
 			R_SetDepthMask (true);
 		}
-		GL_SetAlphaThreshold(0.666f);
+		GL_SetAlphaThreshold(R_BrushFenceThreshold(e));
+		/* Alpha-to-coverage plus alpha blending attenuates explicit entity
+		 * alpha twice.  Keep A2C for the legacy opaque cutout only. */
 		if (r_alphatocoverage.integer)
-			R_SetAlphaToCoverage (true);
+			R_SetAlphaToCoverage (e->alpha == ENTALPHA_DEFAULT);
 	}
 
 	/* MLS_ABSLIGHT skip restored from pre-90265f406. Brush entities with

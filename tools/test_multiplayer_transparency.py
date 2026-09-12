@@ -85,6 +85,15 @@ int main(void) {
     assert(R_BrushEntityTranslucent(&brush));
     assert(R_BrushEntityAlpha(&brush, 0.4f) > 0.49f);
     assert(R_BrushEntityAlpha(&brush, 0.4f) < 0.51f);
+    /* sworld_frag thresholds tex.a * entity_alpha.  A solid texel must
+     * survive and a below-cutoff texel must still be discarded. */
+    float entity_alpha = R_BrushEntityAlpha(&brush, 1.0f);
+    float fence_threshold = R_BrushFenceThreshold(&brush);
+    assert(entity_alpha >= fence_threshold);
+    assert(0.5f * entity_alpha < fence_threshold);
+    brush.alpha = ENTALPHA_DEFAULT;
+    assert(R_BrushFenceThreshold(&brush) > 0.665f);
+    assert(R_BrushFenceThreshold(&brush) < 0.667f);
     brush.alpha = 255;
     assert(!R_BrushEntityTranslucent(&brush));
     puts("PASS: HW wire order and explicit brush alpha routing");
@@ -100,6 +109,8 @@ def main():
         "engine/hexen2/gl_rsurf.c", "static qboolean R_BrushEntityTranslucent"
     ) + function(
         "engine/hexen2/gl_rsurf.c", "static float R_BrushEntityAlpha"
+    ) + function(
+        "engine/hexen2/gl_rsurf.c", "static float R_BrushFenceThreshold"
     ) + TEST
     with tempfile.TemporaryDirectory(prefix="multiplayer-transparency-") as tmp:
         cfile = Path(tmp) / "wire.c"
