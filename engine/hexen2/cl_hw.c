@@ -602,8 +602,12 @@ static void HWCL_ParseEntityDelta (const hwcl_entity_state_t *from,
 	if (bits & (1 << 1)) to->angles[2] = MSG_ReadAngle ();
 	if (bits & (1 << 2)) to->scale = MSG_ReadByte ();
 	if (bits & (1 << 19)) to->abslight = MSG_ReadByte ();
-	if (bits & (1 << 17)) MSG_ReadShort (); /* sound index, routed later */
+	/* SV_WriteDelta writes the protocol-100 alpha extension before U_SOUND.
+	 * Keep this order even though U_SOUND has the lower bit number: consuming
+	 * sound first turns its high byte into alpha whenever both fields occur in
+	 * one delta, and leaves the packet stream one byte out of alignment. */
 	if (bits & (1 << 20)) to->alpha = MSG_ReadByte (); /* protocol 100 */
+	if (bits & (1 << 17)) MSG_ReadShort (); /* sound index, routed later */
 	to->active = true;
 }
 

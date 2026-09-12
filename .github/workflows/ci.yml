@@ -85,6 +85,9 @@ jobs:
           name: hexenwail
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
+      - name: Test multiplayer transparency state
+        run: nix develop -c python3 tools/test_multiplayer_transparency.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 

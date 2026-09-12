@@ -978,12 +978,25 @@ R_RenderBrushPoly
 static float R_LiquidAlpha (const texture_t *t); /* forward decl */
 void R_LightmapRebuildIfDirty (msurface_t *surf);	/* defined below */
 
+static qboolean R_BrushEntityTranslucent (const entity_t *e)
+{
+	return (e->drawflags & DRF_TRANSLUCENT) ||
+		(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha));
+}
+
+static float R_BrushEntityAlpha (const entity_t *e, float fallback)
+{
+	return (e->alpha != ENTALPHA_DEFAULT) ?
+		ENTALPHA_DECODE(e->alpha) : fallback;
+}
+
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 {
 	texture_t	*t;
 	byte		*base;
 	int		maps;
 	float		intensity, alpha_val;
+	qboolean	entity_translucent;
 
 	c_brush_polys++;
 
@@ -991,8 +1004,9 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	intensity = 1.0f;
 	alpha_val = 1.0f;
+	entity_translucent = R_BrushEntityTranslucent(e);
 
-	if (e->drawflags & DRF_TRANSLUCENT)
+	if (entity_translucent)
 	{
 		R_SetBlend (true);
 		/* Translucent surfaces must not write depth — otherwise the
@@ -1003,7 +1017,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		if (!OIT_InPass())
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		R_SetDepthMask (false);
-		alpha_val = r_wateralpha.value;
+		alpha_val = R_BrushEntityAlpha(e, r_wateralpha.value);
 	}
 	{
 		int mls = e->drawflags & MLS_MASKIN;
@@ -1030,11 +1044,11 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	if (fa->flags & SURF_DRAWSKY)
 	{	// warp texture, no lightmaps
 		EmitBothSkyLayers (fa);
-		/* Restore the DRF_TRANSLUCENT prelude state — the cleanup at
+		/* Restore the translucent prelude state — the cleanup at
 		 * the bottom of this function is bypassed by this early return
 		 * and a leaked DepthMask=0 / BLEND-on would corrupt the next
 		 * draw call.  uhexen2-j001.  Gated for OIT pass. */
-		if ((e->drawflags & DRF_TRANSLUCENT) && !OIT_InPass())
+		if (entity_translucent && !OIT_InPass())
 		{
 			R_SetDepthMask (true);
 			R_SetBlend (false);
@@ -1059,11 +1073,13 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWTURB)
 	{	// warp texture — apply per-liquid alpha + light tinting
-		float turb_alpha = R_LiquidAlpha(fa->texinfo->texture);
+		float turb_alpha = R_BrushEntityAlpha(e,
+			R_LiquidAlpha(fa->texinfo->texture));
 		qboolean turb_blend = (turb_alpha < 1.0f);
-		/* R_LiquidAlpha is authoritative for turb surfaces.  The
-		 * DRF_TRANSLUCENT block above set alpha_val = r_wateralpha and
-		 * enabled BLEND assuming a regular surface; for a turb surface
+		/* R_LiquidAlpha is authoritative for turb surfaces unless the entity
+		 * carries an explicit protocol alpha.  The translucent prelude otherwise
+		 * uses r_wateralpha and enables BLEND assuming a regular surface; for a
+		 * turb surface
 		 * (e.g. func_illusionary over a lava pit) we override with the
 		 * per-liquid alpha so default lava stays opaque even though
 		 * the brush ent is flagged translucent.  uhexen2-gbmv,
@@ -1173,11 +1189,11 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWFENCE)
 	{
-		/* Alpha-tested cutout — surviving pixels are fully opaque, so
-		 * write depth normally even when the entity is DRF_TRANSLUCENT
-		 * (which set DepthMask=0 above).  uhexen2-t4kt.  Gated for OIT
-		 * pass. */
-		if (!OIT_InPass())
+		/* Alpha-tested cutout texels are opaque under the legacy drawflag,
+		 * but an explicit entity alpha must still modulate the surviving
+		 * pixels.  Keep blending/no-depth-write in that case.  uhexen2-t4kt.
+		 * Gated for OIT pass. */
+		if (!OIT_InPass() && e->alpha == ENTALPHA_DEFAULT)
 		{
 			R_SetBlend (false);
 			R_SetDepthMask (true);
@@ -1200,7 +1216,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	 * surface actually renders — going through the MTex lightmap path
 	 * would multiply intensity by the baked lightmap and the effect
 	 * would be lost.  uhexen2-j7rp. */
-	if ((e->drawflags & DRF_TRANSLUCENT) ||
+	if (entity_translucent ||
 	    (e->drawflags & MLS_MASKIN) != MLS_NONE)
 	{
 		if (fa->flags & SURF_UNDERWATER)
@@ -1251,7 +1267,7 @@ dynamic:
 		R_BuildLightMap (fa, base, BLOCK_WIDTH*lightmap_bytes);
 	}
 
-	if (e->drawflags & DRF_TRANSLUCENT)
+	if (entity_translucent)
 	{
 		/* gated for OIT pass */
 		if (!OIT_InPass())
@@ -1276,9 +1292,9 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 	int		maps;
 	float		intensity, alpha_val;
 
-	/* DRF_TRANSLUCENT entities are routed through R_RenderBrushPoly
-	 * (the non-MTex sibling) by DrawTextureChains' branch on
-	 * (DRF_TRANSLUCENT || ABSLIGHT); this MTex path is the else.  Dead
+	/* Translucent entities are routed through R_RenderBrushPoly (the non-MTex
+	 * sibling) by their caller; DrawTextureChains also branches on
+	 * (DRF_TRANSLUCENT || ABSLIGHT).  This MTex path is the opaque else.  Dead
 	 * DRF_TRANSLUCENT prelude + cleanup blocks (which had the same
 	 * depth-state leak the j001 fix repaired in R_RenderBrushPoly) were
 	 * removed in uhexen2-a5es. */
