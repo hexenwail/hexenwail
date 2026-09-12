@@ -199,6 +199,12 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
+              # For engine/rust/hashindex, the optional Rust port of
+              # engine/h2shared/hashindex.c behind -DUSE_RUST_HASHINDEX.  That
+              # option defaults to OFF, so these go unused in a default build;
+              # they are listed here so turning it on needs no flake edit.
+              cargo
+              rustc
             ];
 
             buildInputs = with pkgs; [
@@ -1502,6 +1508,10 @@ EOF
             gcc
             gnumake
             cmake
+            # Rust toolchain for engine/rust/hashindex (optional; see
+            # -DUSE_RUST_HASHINDEX in engine/CMakeLists.txt).
+            cargo
+            rustc
 
             # Shader toolchain.  Present in the dev shell only, deliberately:
             # nothing in the build consumes it yet, because every shader in the
