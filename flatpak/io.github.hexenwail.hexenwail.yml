@@ -140,6 +140,9 @@ modules:
       - -DUSE_CODEC_XMP=ON
       - -DUSE_ALSA=OFF
       - -DSOUNDFONT_PATH=/app/share/soundfonts/default.sf2
+      # Rust hashindex requires cargo which is not present in
+      # the Flatpak build sandbox.  Disable for this target.
+      - -DUSE_RUST_HASHINDEX=OFF
     sources:
       - type: dir
         path: ..

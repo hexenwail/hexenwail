@@ -802,6 +802,9 @@
               "-DUSE_CODEC_OPUS=ON"
               "-DUSE_CODEC_XMP=ON"
               "-DUSE_DEBUGINFO=ON"
+              # Rust hashindex is not wired up for Emscripten or
+              # cross-compilation without cargo on the native host.
+              "-DUSE_RUST_HASHINDEX=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -947,7 +950,7 @@
               cd engine
             '';
 
-            cmakeFlags = [ "-DBUILD_DEDICATED=ON" ];
+            cmakeFlags = [ "-DBUILD_DEDICATED=ON" "-DUSE_RUST_HASHINDEX=OFF" ];
 
             # Only the server target; the client .exe is .#win64's job.
             buildFlags = [ "h2ded" ];
@@ -1026,6 +1029,7 @@
                 -DCMAKE_BUILD_TYPE=Release \
                 -DUSE_CODEC_VORBIS=OFF \
                 -DUSE_ALSA=OFF \
+                -DUSE_RUST_HASHINDEX=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine

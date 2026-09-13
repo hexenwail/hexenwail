@@ -153,8 +153,11 @@ jobs:
             exit 1
           fi
 
-      # USE_RUST_HASHINDEX now defaults ON: every CI build compiles the
-      # Rust hashindex.  This step still matters -- the differential harness
+      # USE_RUST_HASHINDEX now defaults ON for native Linux builds;
+      # unsupported targets (WASM, Windows cross-compile, Flatpak) are
+      # explicitly configured with -DUSE_RUST_HASHINDEX=OFF in their
+      # build scripts or manifests.  This step still matters -- the
+      # differential harness
       # proves the Rust implementation computes what the C original computed
       # (not just that it links), and the flag-OFF rollback keeps a working
       # C original in the build graph.  Same shape of hole as the HexenWorld

@@ -4,8 +4,10 @@
 #
 # WHY THIS EXISTS
 #
-#   USE_RUST_HASHINDEX defaults to OFF and every other target in this tree
-#   builds with the default.  Without this script the Rust crate is compiled by
+#   USE_RUST_HASHINDEX defaults to ON and the native Linux build compiles the
+#   Rust hashindex.  Unsupported targets (WASM, Windows cross-compile, Flatpak)
+#   are explicitly configured with -DUSE_RUST_HASHINDEX=OFF.  Without this script
+#   the Rust crate is compiled by
 #   *nothing*: a rustc bump, a change to hashindex.h, or a change to any engine
 #   header it shares could break the port outright while every other CI step
 #   stayed green.  It would rot silently and be discovered only by whoever next
