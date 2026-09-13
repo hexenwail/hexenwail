@@ -42,6 +42,13 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 # happen together.
 option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" ON)
 
+# Link the Rust port of mathlib in place of engine/h2shared/mathlib.c.
+# Deliberately ON: this is the default build configuration, not a shipping
+# default.  See the block above "Combine all sources" for what turning it
+# on does, and for why both halves (source removal and linking) have to
+# happen together.
+option(USE_MATHLIB_RS "Link the Rust mathlib implementation instead of mathlib.c" ON)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -921,6 +928,51 @@ else()
     message(STATUS "hashindex: C original (USE_RUST_HASHINDEX=OFF)")
 endif()
 
+#============================================================================
+# Rust mathlib shim (USE_MATHLIB_RS)
+#============================================================================
+# Replaces engine/h2shared/mathlib.c with engine/rust/mathlib.
+# Same pattern as hashindex above: two halves, both required.
+if(USE_MATHLIB_RS)
+    if(EMSCRIPTEN)
+        message(FATAL_ERROR
+            "USE_MATHLIB_RS is not wired up for the Emscripten build. The "
+            "wasm toolchain is the most fragile target in this tree and adding "
+            "a second one to it is out of scope for this phase.")
+    endif()
+
+    set(MATHLIB_RS_DIR ${UHEXEN2_TOP}/engine/rust/mathlib)
+    set(MATHLIB_RS_LIB ${CMAKE_BINARY_DIR}/rust/libmathlib_rs.a)
+    set(MATHLIB_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
+
+    add_custom_command(
+        OUTPUT ${MATHLIB_RS_LIB}
+        COMMAND ${CMAKE_COMMAND} -E env
+                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
+                CARGO_TARGET_DIR=${MATHLIB_RS_TARGET_DIR}
+                cargo build --release --offline
+                --manifest-path ${MATHLIB_RS_DIR}/Cargo.toml
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${MATHLIB_RS_TARGET_DIR}/release/libmathlib_rs.a
+                ${MATHLIB_RS_LIB}
+        DEPENDS ${MATHLIB_RS_DIR}/src/lib.rs
+                ${MATHLIB_RS_DIR}/src/ffi.rs
+                ${MATHLIB_RS_DIR}/Cargo.toml
+        COMMENT "Building Rust mathlib shim"
+        VERBATIM)
+    add_custom_target(mathlib_rs DEPENDS ${MATHLIB_RS_LIB})
+
+    function(mathlib_rs_attach tgt)
+        add_dependencies(${tgt} mathlib_rs)
+        target_link_libraries(${tgt} PRIVATE ${MATHLIB_RS_LIB})
+    endfunction()
+
+    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/mathlib.c)
+    message(STATUS "mathlib: Rust shim (USE_MATHLIB_RS=ON)")
+else()
+    message(STATUS "mathlib: C original (USE_MATHLIB_RS=OFF)")
+endif()
+
 # Combine all sources
 if(EMSCRIPTEN AND WEB_RENDERER STREQUAL "software")
     set(RENDERER_SOURCES ${SOFT_RENDERER_SOURCES})
@@ -1007,6 +1059,15 @@ add_dependencies(${EXECUTABLE_NAME} shaders_gen)
 
 if(USE_RUST_HASHINDEX)
     hashindex_rs_attach(${EXECUTABLE_NAME})
+endif()
+if(USE_MATHLIB_RS)
+    mathlib_rs_attach(${EXECUTABLE_NAME})
+endif()
+
+# Multiple Rust static libraries in one executable both define Rust runtime
+# symbols (__rustc::rust_begin_unwind, rust_eh_personality). Allow this.
+if(USE_RUST_HASHINDEX AND USE_MATHLIB_RS)
+    target_link_options(${EXECUTABLE_NAME} PRIVATE -Wl,-z,muldefs)
 endif()
 
 #============================================================================
@@ -1158,6 +1219,15 @@ else()
     if(USE_RUST_HASHINDEX)
         hashindex_rs_attach(h2ded)
     endif()
+    if(USE_MATHLIB_RS)
+        mathlib_rs_attach(h2ded)
+    endif()
+    # Multiple Rust static libraries in one executable both define Rust
+    # runtime symbols (__rustc::rust_begin_unwind, rust_eh_personality).
+    # Allow this.
+    if(USE_RUST_HASHINDEX AND USE_MATHLIB_RS)
+        target_link_options(h2ded PRIVATE -Wl,-z,muldefs)
+    endif()
     if(WIN32)
         target_link_libraries(h2ded PRIVATE ws2_32 winmm)
     else()
@@ -1244,11 +1314,24 @@ else()
         list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/hashindex.c)
     endif()
 
+    if(USE_MATHLIB_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/mathlib.c)
+    endif()
+
     add_executable(hwsv ${HWSV_SOURCES})
     target_compile_definitions(hwsv PRIVATE H2W SERVERONLY)
 
     if(USE_RUST_HASHINDEX)
         hashindex_rs_attach(hwsv)
+    endif()
+    if(USE_MATHLIB_RS)
+        mathlib_rs_attach(hwsv)
+    endif()
+    # Multiple Rust static libraries in one executable both define Rust
+    # runtime symbols (__rustc::rust_begin_unwind, rust_eh_personality).
+    # Allow this.
+    if(USE_RUST_HASHINDEX AND USE_MATHLIB_RS)
+        target_link_options(hwsv PRIVATE -Wl,-z,muldefs)
     endif()
     # Order matters: hexenworld/shared shadows h2shared for quakedef.h et al.
     target_include_directories(hwsv BEFORE PRIVATE
