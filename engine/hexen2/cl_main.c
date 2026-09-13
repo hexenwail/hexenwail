@@ -1316,6 +1316,17 @@ static void CL_RelinkEntities (void)
 		if (ent->effects & EF_NODRAW)
 			continue;
 
+#ifndef GLQUAKE
+		/* The 8bpp renderer has one palette translucency table rather than
+		 * arbitrary blend factors.  Preserve the protocol's important states:
+		 * ENTALPHA_ZERO is invisible, while every partial alpha uses the same
+		 * established path as DRF_TRANSLUCENT instead of rendering opaque. */
+		if (ent->alpha == ENTALPHA_ZERO)
+			continue;
+		if (ent->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(ent->alpha))
+			ent->drawflags |= DRF_TRANSLUCENT;
+#endif
+
 		if (cl_numvisedicts < MAX_VISEDICTS)
 		{
 			cl_visedicts[cl_numvisedicts] = ent;
