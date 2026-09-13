@@ -38,6 +38,7 @@ emcmake cmake \
 	-DWEB_RENDERER="$RENDERER" \
 	-DUSE_CODEC_VORBIS=OFF \
 	-DUSE_ALSA=OFF \
+	-DUSE_RUST_HASHINDEX=OFF \
 	"$SOURCE_DIR"
 
 emmake make -j"$(nproc)"

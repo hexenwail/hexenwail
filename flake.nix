@@ -199,6 +199,13 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
+              # For engine/rust/hashindex, the Rust port of
+              # engine/h2shared/hashindex.c behind -DUSE_RUST_HASHINDEX, which
+              # now defaults to ON -- so cargo/rustc are on the default build
+              # path, not an opt-in.  Listed here so the crate compiles without
+              # a separate toolchain fetch.
+              cargo
+              rustc
             ];
 
             buildInputs = with pkgs; [
@@ -795,6 +802,9 @@
               "-DUSE_CODEC_OPUS=ON"
               "-DUSE_CODEC_XMP=ON"
               "-DUSE_DEBUGINFO=ON"
+              # Rust hashindex is not wired up for Emscripten or
+              # cross-compilation without cargo on the native host.
+              "-DUSE_RUST_HASHINDEX=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -940,7 +950,7 @@
               cd engine
             '';
 
-            cmakeFlags = [ "-DBUILD_DEDICATED=ON" ];
+            cmakeFlags = [ "-DBUILD_DEDICATED=ON" "-DUSE_RUST_HASHINDEX=OFF" ];
 
             # Only the server target; the client .exe is .#win64's job.
             buildFlags = [ "h2ded" ];
@@ -1019,6 +1029,7 @@
                 -DCMAKE_BUILD_TYPE=Release \
                 -DUSE_CODEC_VORBIS=OFF \
                 -DUSE_ALSA=OFF \
+                -DUSE_RUST_HASHINDEX=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine
@@ -1502,6 +1513,11 @@ EOF
             gcc
             gnumake
             cmake
+            # Rust toolchain for engine/rust/hashindex, which is on
+            # the default build path (-DUSE_RUST_HASHINDEX defaults ON
+            # in engine/CMakeLists.txt).
+            cargo
+            rustc
 
             # Shader toolchain.  Present in the dev shell only, deliberately:
             # nothing in the build consumes it yet, because every shader in the
