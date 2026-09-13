@@ -39,7 +39,7 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 # Deliberately OFF: this is a port in progress, not a shipping default.  See
 # the block above "Combine all sources" for what turning it on does, and for
 # why both halves (source removal and linking) have to happen together.
-option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" OFF)
+option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" ON)
 
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately

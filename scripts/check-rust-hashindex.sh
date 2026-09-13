@@ -159,7 +159,7 @@ if [ "$run_engine" -eq 1 ]; then
 	echo "      identical output on a pak load and a map load either way."
 else
 	echo "PASS: Rust hashindex -- differential harness green, all three targets"
-	echo "      build with the flag ON, none with a duplicate symbol, and the OFF"
-	echo "      build still uses the C original."
+	echo "      build with the flag ON (the default), none with a duplicate symbol, and the OFF"
+	echo "      build still uses the C original (rollback is real)."
 	echo "      (re-run with --engine to also drive the real engine)"
 fi

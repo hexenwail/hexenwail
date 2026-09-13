@@ -199,10 +199,11 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
-              # For engine/rust/hashindex, the optional Rust port of
-              # engine/h2shared/hashindex.c behind -DUSE_RUST_HASHINDEX.  That
-              # option defaults to OFF, so these go unused in a default build;
-              # they are listed here so turning it on needs no flake edit.
+              # For engine/rust/hashindex, the Rust port of
+              # engine/h2shared/hashindex.c behind -DUSE_RUST_HASHINDEX, which
+              # now defaults to ON -- so cargo/rustc are on the default build
+              # path, not an opt-in.  Listed here so the crate compiles without
+              # a separate toolchain fetch.
               cargo
               rustc
             ];
@@ -1508,8 +1509,9 @@ EOF
             gcc
             gnumake
             cmake
-            # Rust toolchain for engine/rust/hashindex (optional; see
-            # -DUSE_RUST_HASHINDEX in engine/CMakeLists.txt).
+            # Rust toolchain for engine/rust/hashindex, which is on
+            # the default build path (-DUSE_RUST_HASHINDEX defaults ON
+            # in engine/CMakeLists.txt).
             cargo
             rustc
 

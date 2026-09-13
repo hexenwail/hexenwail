@@ -153,13 +153,12 @@ jobs:
             exit 1
           fi
 
-      # USE_RUST_HASHINDEX defaults OFF, and every step above builds with the
-      # default -- so without this one, engine/rust/hashindex is compiled by
-      # NOTHING.  A rustc bump, or a change to hashindex.h or any engine header
-      # the crate shares, could break the port outright while every other step
-      # stayed green; it would surface only for whoever next switched the flag
-      # on.  Same shape of hole as the HexenWorld step above, which existed
-      # because no target set BUILD_HEXENWORLD.
+      # USE_RUST_HASHINDEX now defaults ON: every CI build compiles the
+      # Rust hashindex.  This step still matters -- the differential harness
+      # proves the Rust implementation computes what the C original computed
+      # (not just that it links), and the flag-OFF rollback keeps a working
+      # C original in the build graph.  Same shape of hole as the HexenWorld
+      # step above, which existed because no target set BUILD_HEXENWORLD.
       #
       # The differential half matters more than the build half.  Compiling
       # proves the crate links; it says nothing about whether the Rust

@@ -164,7 +164,7 @@ executable and, for the WASM/Emscripten path, has no dynamic loader.
 Plan:
 
 ```cmake
-option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation" OFF)
+option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" ON)
 
 # Swap the C source out of both lists when the Rust lib is in use.
 if(USE_RUST_HASHINDEX)
@@ -311,7 +311,8 @@ change; no rendering or physics verification is required.
 
 ## 6. Rollback
 
-The switch is a single CMake option and is off by default.
+The switch is a single CMake option; the shipped default is ON, so
+rollback is a configure change, not a revert.
 
 1. `cmake -DUSE_RUST_HASHINDEX=OFF` (or simply omit it) — `hashindex.c` is
    back in `COMMON_SOURCES` and `HWSV_SOURCES`, the Rust staticlib is not
