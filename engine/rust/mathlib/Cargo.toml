@@ -1,0 +1,14 @@
+[package]
+name = "mathlib-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Rust port of the Hexenwail/uhexen2 mathlib subsystem (engine/h2shared/mathlib.c)"
+publish = false
+
+[lib]
+name = "mathlib_rs"
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "abort"
