@@ -20,9 +20,9 @@
 # WHAT IT CHECKS
 #
 #   1. the crate builds, offline, with no dependencies
-#   2. the differential harness passes -- Rust and C agree on the raw array
-#      contents AND on per-bucket chain ORDER, over 1.2M operations, plus
-#      abort parity on the four fatal paths
+#   2. the differential harness passes -- Rust and the renamed C original
+#      agree on scalar results, vectors, matrices, plane classification, and
+#      floor division over positive, negative, and boundary inputs
 #   3. all three targets build with -DUSE_MATHLIB_RS=ON
 #   4. exactly one definition of each of the 12 symbols in each binary; this
 #      is the duplicate-symbol hazard the CMake source-list removal exists to
@@ -80,7 +80,7 @@ set +e
 RUST_LIB="$rust_lib" OUT="$work/diff" "$crate/tests/run_diff_harness.sh" >"$diff_log" 2>&1
 harness_status=$?
 set -e
-grep -E 'RESULT:|checks run:' "$diff_log" || true
+grep -E 'RESULT:|differential harness:' "$diff_log" || true
 if [ "$harness_status" -ne 0 ]; then
 	echo "FAIL: differential harness exited $harness_status (a divergence)" >&2
 	sed -n '/FAIL /p' "$diff_log" | head -20 >&2

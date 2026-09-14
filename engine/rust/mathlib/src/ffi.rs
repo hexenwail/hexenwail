@@ -47,8 +47,10 @@ extern "C" {
 
     fn Sys_Error(fmt: *const c_char, ...) -> !;
 
-    fn sin(x: c_float) -> c_float;
-    fn cos(x: c_float) -> c_float;
+    // C's `sin` and `cos` take and return `double`; Rust must use f64 here
+    // even though all mathlib inputs and outputs are float.
+    fn sin(x: c_double) -> c_double;
+    fn cos(x: c_double) -> c_double;
     fn floor(x: c_double) -> c_double;
 }
 
@@ -125,33 +127,56 @@ const M_PI: f32 = 3.14159265358979323846_f32;
 
 #[no_mangle]
 pub unsafe extern "C" fn BoxOnPlaneSide(
-    emins: Vec3,
-    emaxs: Vec3,
+    emins: *const f32,
+    emaxs: *const f32,
     plane: *const MPlane,
 ) -> c_int {
     if plane.is_null() {
         return 0;
     }
     let p = &*plane;
+    let emins_slice = core::slice::from_raw_parts(emins, 3);
+    let emaxs_slice = core::slice::from_raw_parts(emaxs, 3);
 
-    if p.r#type < 3 {
-        if p.dist <= emins[p.r#type as usize] {
-            return 1;
-        }
-        if p.dist >= emaxs[p.r#type as usize] {
-            return 2;
-        }
-        return 3;
-    }
+    // Match mathlib.c exactly.  Its axial fast path is compiled out; callers
+    // use the BOX_ON_PLANE_SIDE macro for that case.
+    let (dist1, dist2) = match p.signbits {
+        0 => (
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emaxs_slice[2],
+            p.normal[0] * emins_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emins_slice[2],
+        ),
+        1 => (
+            p.normal[0] * emins_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emaxs_slice[2],
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emins_slice[2],
+        ),
+        2 => (
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emaxs_slice[2],
+            p.normal[0] * emins_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emins_slice[2],
+        ),
+        3 => (
+            p.normal[0] * emins_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emaxs_slice[2],
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emins_slice[2],
+        ),
+        4 => (
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emins_slice[2],
+            p.normal[0] * emins_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emaxs_slice[2],
+        ),
+        5 => (
+            p.normal[0] * emins_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emins_slice[2],
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emaxs_slice[2],
+        ),
+        6 => (
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emins_slice[2],
+            p.normal[0] * emins_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emaxs_slice[2],
+        ),
+        7 => (
+            p.normal[0] * emins_slice[0] + p.normal[1] * emins_slice[1] + p.normal[2] * emins_slice[2],
+            p.normal[0] * emaxs_slice[0] + p.normal[1] * emaxs_slice[1] + p.normal[2] * emaxs_slice[2],
+        ),
+        _ => BOPS_Error(),
+    };
 
     let mut sides = 0;
-    let dist1 = p.normal[0] * emaxs[0]
-        + p.normal[1] * emaxs[1]
-        + p.normal[2] * emaxs[2];
-    let dist2 = p.normal[0] * emins[0]
-        + p.normal[1] * emins[1]
-        + p.normal[2] * emins[2];
-
     if dist1 >= p.dist {
         sides = 1;
     }
@@ -170,35 +195,46 @@ pub unsafe extern "C" fn BoxOnPlaneSide(
 
 #[no_mangle]
 pub unsafe extern "C" fn AngleVectors(
-    angles: Vec3,
-    forward: *mut Vec3,
-    right: *mut Vec3,
-    up: *mut Vec3,
+    angles: *const f32,
+    forward: *mut f32,
+    right: *mut f32,
+    up: *mut f32,
 ) {
-    let angle = angles[1] * (M_PI * 2.0 / 360.0); // yaw
-    let sy = sin(angle);
-    let cy = cos(angle);
-    let angle = angles[0] * (M_PI * 2.0 / 360.0); // pitch
-    let sp = sin(angle);
-    let cp = cos(angle);
-    let angle = angles[2] * (M_PI * 2.0 / 360.0); // roll
-    let sr = sin(angle);
-    let cr = cos(angle);
+    // C checks: if (!angles || !forward) return;
+    if angles.is_null() || forward.is_null() {
+        return;
+    }
 
-    if !forward.is_null() {
-        (*forward)[0] = cp * cy;
-        (*forward)[1] = cp * sy;
-        (*forward)[2] = -sp;
-    }
+    // Create slices for safe indexing
+    let angles_slice = core::slice::from_raw_parts(angles, 3);
+    let yaw = angles_slice[1] * (M_PI * 2.0 / 360.0);
+    let pitch = angles_slice[0] * (M_PI * 2.0 / 360.0);
+    let roll = angles_slice[2] * (M_PI * 2.0 / 360.0);
+
+    let sy = sin(yaw as c_double) as c_float;
+    let cy = cos(yaw as c_double) as c_float;
+    let sp = sin(pitch as c_double) as c_float;
+    let cp = cos(pitch as c_double) as c_float;
+    let sr = sin(roll as c_double) as c_float;
+    let cr = cos(roll as c_double) as c_float;
+
+    let forward_slice = core::slice::from_raw_parts_mut(forward, 3);
+    forward_slice[0] = cp * cy;
+    forward_slice[1] = cp * sy;
+    forward_slice[2] = -sp;
+
     if !right.is_null() {
-        (*right)[0] = -1.0 * (sr * sp * cy + cr * -sy);
-        (*right)[1] = -1.0 * (sr * sp * sy + cr * cy);
-        (*right)[2] = -1.0 * (sr * cp);
+        let right_slice = core::slice::from_raw_parts_mut(right, 3);
+        right_slice[0] = -1.0 * (sr * sp * cy + cr * -sy);
+        right_slice[1] = -1.0 * (sr * sp * sy + cr * cy);
+        right_slice[2] = -1.0 * (sr * cp);
     }
+
     if !up.is_null() {
-        (*up)[0] = cr * sp * cy + -sr * -sy;
-        (*up)[1] = cr * sp * sy + -sr * cy;
-        (*up)[2] = cr * cp;
+        let up_slice = core::slice::from_raw_parts_mut(up, 3);
+        up_slice[0] = cr * sp * cy + -sr * -sy;
+        up_slice[1] = cr * sp * sy + -sr * cy;
+        up_slice[2] = cr * cp;
     }
 }
 
@@ -379,7 +415,7 @@ pub unsafe extern "C" fn FloorDivMod(
         (q, r)
     } else {
         let x = floor(-numer / denom);
-        let mut q = !(x as c_int);
+        let mut q = -(x as c_int);
         let mut r = floor(-numer - x * denom) as c_int;
         if r != 0 {
             q -= 1;
