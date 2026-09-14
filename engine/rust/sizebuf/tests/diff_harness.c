@@ -174,6 +174,18 @@ static int write_checks(void)
 
 	c_SZ_Clear(&c);
 	SZ_Clear(&r);
+	c.cursize = r.cursize = 30;
+	reset_printed();
+	c_ptr = c_SZ_GetSpace(&c, 2);
+	CHECK(printed[0] == '\0', "exact-capacity C write unexpectedly printed");
+	r_ptr = SZ_GetSpace(&r, 2);
+	CHECK(printed[0] == '\0', "exact-capacity Rust write unexpectedly printed");
+	CHECK((byte *)c_ptr - c.data == (byte *)r_ptr - r.data
+		&& c.cursize == 32 && r.cursize == 32,
+		"exact-capacity GetSpace differs");
+
+	c_SZ_Clear(&c);
+	SZ_Clear(&r);
 	c.allowoverflow = r.allowoverflow = 1;
 	c.name = r.name = "testbuf";
 	reset_printed();
@@ -189,6 +201,20 @@ static int write_checks(void)
 	CHECK((byte *)c_ptr - c.data == (byte *)r_ptr - r.data, "overflow pointer offset differs");
 	CHECK(same_state(&c, &r) && c.overflowed && c.cursize == 4,
 		"allowed overflow state differs");
+
+	/* A second overflow must remain observable and reset the buffer again. */
+	reset_printed();
+	c_ptr = c_SZ_GetSpace(&c, 29);
+	normalize_c_function_name(printed);
+	CHECK(strcmp(printed, "SZ_GetSpace: overflow\ntestbuf: currently 4 of 32, requested 29\n") == 0,
+		"repeated C overflow diagnostic differs: %s", printed);
+	reset_printed();
+	r_ptr = SZ_GetSpace(&r, 29);
+	CHECK(strcmp(printed, "SZ_GetSpace: overflow\ntestbuf: currently 4 of 32, requested 29\n") == 0,
+		"repeated Rust overflow diagnostic differs: %s", printed);
+	CHECK((byte *)c_ptr - c.data == (byte *)r_ptr - r.data
+		&& same_state(&c, &r) && c.overflowed && c.cursize == 29,
+		"repeated overflow state differs");
 
 	c_SZ_Clear(&c);
 	SZ_Clear(&r);
