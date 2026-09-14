@@ -579,6 +579,12 @@ static void Host_Connect_f (void)
 	}
 	q_strlcpy (name, Cmd_Argv(1), sizeof(name));
 	CL_EstablishConnection (name);
+#if defined(H2W_INTEGRATED)
+	/* A rejected hw:// address has already reported itself; raising the
+	 * plaque now would only freeze the screen until "load timeout". */
+	if (!q_strncasecmp (name, "hw://", 5) && !HWCL_Active ())
+		return;
+#endif
 	Host_Reconnect_f ();
 }
 

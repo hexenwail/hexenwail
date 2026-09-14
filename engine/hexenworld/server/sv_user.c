@@ -570,7 +570,8 @@ static void SV_BeginDownload_f(void)
 		// now sounds
 		|| (strncmp(name, "sound/", 6) == 0 && !allow_download_sounds.integer)
 		// now maps (note special case for maps, must not be in pak)
-		|| (strncmp(name, "maps/", 6) == 0 && !allow_download_maps.integer)
+		// (5, not 6: comparing the NUL made allow_download_maps 0 a no-op)
+		|| (strncmp(name, "maps/", 5) == 0 && !allow_download_maps.integer)
 		// MUST be in a subdirectory
 		|| !strstr (name, "/") )
 	{

@@ -340,7 +340,8 @@ static qboolean HWCL_ValidProtocol (int protocol)
 		protocol == HW_PROTOCOL_VERSION_HEXENWAIL_1;
 }
 
-static void HWCL_LoadModels (void)
+/* Returns false when the world model (index 1) did not load. */
+static qboolean HWCL_LoadModels (void)
 {
 	static const char *player_names[MAX_PLAYER_CLASS] = {
 		"models/paladin.mdl", "models/crusader.mdl", "models/necro.mdl",
@@ -355,11 +356,13 @@ static void HWCL_LoadModels (void)
 		if (!hwcl_model_names[i][0])
 			continue;
 		model = Mod_ForName (hwcl_model_names[i], false);
-		if (!model)
-			Host_Error ("HexenWorld missing %s: %s\n"
+		/* Index 1 is the world: the caller reports that one and disconnects,
+		 * because by here a download has already been attempted for it. */
+		if (!model && i != 1)
+			Host_Error ("HexenWorld missing model: %s\n"
 				"Install hw/pak4.pak and the server's %s mod assets under %s (or %s).\n"
 				"Siege additionally needs siege/maps/siege.bsp and its mod assets.",
-				i == 1 ? "world map" : "model", hwcl_model_names[i],
+				hwcl_model_names[i],
 				fs_gamedir_nopath, FS_GetBasedir (), FS_GetUserbase ());
 		cl.model_precache[i] = model;
 	}
@@ -369,11 +372,12 @@ static void HWCL_LoadModels (void)
 			player_models[i] = Mod_ForName (player_names[i], false);
 
 	if (!cl.model_precache[1])
-		Host_Error ("HexenWorld server supplied no world map");
+		return false;
 
 	cl.worldmodel = cl_entities[0].model = cl.model_precache[1];
 	COM_FileBase (hwcl_model_names[1], cl.mapname, sizeof(cl.mapname));
 	R_NewMap ();
+	return true;
 }
 
 static void HWCL_LoadSounds (void)
@@ -390,6 +394,236 @@ static void HWCL_LoadSounds (void)
 	}
 	S_EndPrecaching ();
 	CL_PrecacheTEntSounds ();
+}
+
+/*
+ * Signon file downloads, ported from the original HexenWorld client's
+ * CL_CheckOrDownloadFile / Sound_NextDownload / Model_NextDownload.
+ *
+ * Each precache list is walked before it is loaded; the first missing file
+ * is requested with "download", hwsv answers with svc_download blocks that we
+ * pull one at a time with "nextdl", and the walk resumes after the rename.
+ * Files land in the current gamedir's userdir, which FS_AddGameDirectory put
+ * on the searchpath as a loose directory, so the renamed file is found by the
+ * very next lookup.
+ */
+/* hwsv serves one 1024-byte block per request and never states a total, so
+ * without a ceiling a hostile server could fill the disk. */
+#define HWCL_DOWNLOAD_MAX_BYTES	(64L * 1024L * 1024L)
+
+typedef enum
+{
+	hwcl_dl_none,
+	hwcl_dl_sound,
+	hwcl_dl_model
+} hwcl_dltype_t;
+
+static hwcl_dltype_t hwcl_download_type;
+static int hwcl_download_number;
+static FILE *hwcl_download;
+static char hwcl_download_name[MAX_QPATH];
+static char hwcl_download_tempname[MAX_QPATH + 4];
+static long hwcl_download_bytes;
+
+static void HWCL_RequestNextDownload (void);
+
+/* The name comes off the wire and becomes a path under the userdir. */
+static qboolean HWCL_DownloadNameIsSafe (const char *name)
+{
+	static const char *const devices[] = { "con", "prn", "aux", "nul" };
+	const unsigned char *p;
+	const char *comp, *end;
+	size_t len, baselen;
+	int i;
+
+	if (!name[0] || strlen (name) >= MAX_QPATH)
+		return false;
+	if (strstr (name, "..") || name[0] == '/' || name[0] == '.')
+		return false;
+	/* '\\' is refused anywhere, not just leading: it is a separator on
+	 * Windows.  The rest are invalid in Windows file names. */
+	for (p = (const unsigned char *)name; *p; p++)
+	{
+		if (*p < 0x20 || *p == 0x7f || strchr ("\\:<>\"|?*", *p))
+			return false;
+	}
+	/* hwsv demands a subdirectory too; a bare name would land in the
+	 * gamedir root beside config.cfg and the paks. */
+	if (!strchr (name, '/'))
+		return false;
+
+	for (comp = name; ; comp = end + 1)
+	{
+		end = strchr (comp, '/');
+		len = end ? (size_t)(end - comp) : strlen (comp);
+		/* Windows silently strips a trailing '.' or ' ', so the name we
+		 * checked would not be the file that gets opened. */
+		if (len == 0 || comp[len - 1] == '.' || comp[len - 1] == ' ')
+			return false;
+		/* Device names open the device whatever the extension ("nul.bsp"),
+		 * and Windows ignores spaces before that extension. */
+		for (baselen = 0; baselen < len && comp[baselen] != '.'; baselen++)
+			;
+		while (baselen > 0 && comp[baselen - 1] == ' ')
+			baselen--;
+		if (baselen == 3)
+		{
+			for (i = 0; i < (int)(sizeof(devices) / sizeof(devices[0])); i++)
+			{
+				if (!q_strncasecmp (comp, devices[i], 3))
+					return false;
+			}
+		}
+		else if (baselen == 4 && comp[3] >= '1' && comp[3] <= '9' &&
+				(!q_strncasecmp (comp, "com", 3) ||
+				 !q_strncasecmp (comp, "lpt", 3)))
+			return false;
+		if (!end)
+			break;
+	}
+	return true;
+}
+
+static qboolean HWCL_DownloadPath (char *buf, size_t size, const char *name)
+{
+	int err = 0;
+
+	FS_MakePath_BUF (FS_USERDIR, &err, buf, size, name);
+	return !err;
+}
+
+/* Close and delete a partial download.  Safe to call with nothing active. */
+static void HWCL_CancelDownload (void)
+{
+	char path[MAX_OSPATH];
+
+	if (hwcl_download)
+	{
+		fclose (hwcl_download);
+		hwcl_download = NULL;
+		if (HWCL_DownloadPath (path, sizeof(path), hwcl_download_tempname))
+			Sys_unlink (path);
+	}
+	hwcl_download_type = hwcl_dl_none;
+	hwcl_download_number = 0;
+	hwcl_download_bytes = 0;
+	hwcl_download_name[0] = 0;
+	hwcl_download_tempname[0] = 0;
+}
+
+/* Drop the current file (partial or refused) and keep the list walk alive. */
+static void HWCL_AbandonCurrentDownload (void)
+{
+	char path[MAX_OSPATH];
+
+	if (hwcl_download)
+	{
+		fclose (hwcl_download);
+		hwcl_download = NULL;
+		if (HWCL_DownloadPath (path, sizeof(path), hwcl_download_tempname))
+			Sys_unlink (path);
+	}
+	hwcl_download_bytes = 0;
+	hwcl_download_name[0] = 0;
+	hwcl_download_tempname[0] = 0;
+}
+
+/* True when the file is present (or must not be fetched); false once a
+ * download has been requested, in which case the caller waits for it. */
+static qboolean HWCL_CheckOrDownloadFile (const char *filename)
+{
+	if (!HWCL_DownloadNameIsSafe (filename))
+	{
+		Con_Printf ("Refusing to download unsafe path %s\n", filename);
+		return true;
+	}
+	if (FS_FileExists (filename, NULL))
+		return true;
+
+	q_strlcpy (hwcl_download_name, filename, sizeof(hwcl_download_name));
+	q_snprintf (hwcl_download_tempname, sizeof(hwcl_download_tempname),
+			"%s.tmp", filename);
+	hwcl_download_bytes = 0;
+	Con_Printf ("Downloading %s...\n", hwcl_download_name);
+	/* A plaque held over a transfer of unknown length only runs into the
+	 * 25 second "load timeout"; show the console progress instead. */
+	SCR_EndLoadingPlaque ();
+	HWCL_StringCmd (va ("download %s", hwcl_download_name));
+	return false;
+}
+
+static void HWCL_SoundNextDownload (void)
+{
+	if (hwcl_download_number == 0)
+		hwcl_download_number = 1;
+	hwcl_download_type = hwcl_dl_sound;
+	for ( ; hwcl_download_number < hwcl_sound_count; hwcl_download_number++)
+	{
+		if (!hwcl_sound_names[hwcl_download_number][0])
+			continue;
+		if (!HWCL_CheckOrDownloadFile (va ("sound/%s",
+				hwcl_sound_names[hwcl_download_number])))
+		{
+			hwcl_download_number++;	/* resume after this one */
+			return;
+		}
+	}
+
+	HWCL_CancelDownload ();
+	HWCL_LoadSounds ();
+	HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
+}
+
+static void HWCL_ModelNextDownload (void)
+{
+	const char *name;
+
+	if (hwcl_download_number == 0)
+		hwcl_download_number = 1;
+	hwcl_download_type = hwcl_dl_model;
+	for ( ; hwcl_download_number < hwcl_model_count; hwcl_download_number++)
+	{
+		name = hwcl_model_names[hwcl_download_number];
+		if (!name[0] || name[0] == '*')
+			continue;	/* empty slot or inline brush model */
+		if (!HWCL_CheckOrDownloadFile (name))
+		{
+			hwcl_download_number++;
+			return;
+		}
+	}
+
+	HWCL_CancelDownload ();
+	if (!HWCL_LoadModels ())
+	{
+		/* Everything else is optional (a portals-less install is legal), but
+		 * signon with no world leaves nothing to draw or collide against. */
+		Con_Printf ("\nHexenWorld: the map %s could not be found or "
+				"downloaded (gamedir %s).  Disconnecting.\n"
+				"Install hw/pak4.pak and the server's mod assets under %s (or %s).\n\n",
+				hwcl_model_names[1][0] ? hwcl_model_names[1] : "(none)",
+				fs_gamedir_nopath, FS_GetBasedir (), FS_GetUserbase ());
+		HWCL_Disconnect ();
+		return;
+	}
+	Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
+	HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
+}
+
+static void HWCL_RequestNextDownload (void)
+{
+	switch (hwcl_download_type)
+	{
+	case hwcl_dl_sound:
+		HWCL_SoundNextDownload ();
+		break;
+	case hwcl_dl_model:
+		HWCL_ModelNextDownload ();
+		break;
+	case hwcl_dl_none:
+	default:
+		break;
+	}
 }
 
 /* Consume a chunked (protocol 26+) or classic precache list and retain its
@@ -449,20 +683,18 @@ static void HWCL_ParsePrecacheList (qboolean models)
 		}
 	}
 
+	HWCL_CancelDownload ();
 	if (models)
 	{
 		if (index > hwcl_model_count)
 			hwcl_model_count = index;
-		HWCL_LoadModels ();
-		Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
-		HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
+		HWCL_ModelNextDownload ();
 	}
 	else
 	{
 		if (index > hwcl_sound_count)
 			hwcl_sound_count = index;
-		HWCL_LoadSounds ();
-		HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
+		HWCL_SoundNextDownload ();
 	}
 }
 
@@ -473,6 +705,8 @@ static void HWCL_ParseServerData (void)
 	const char *server_gamedir;
 	char levelname[1024];
 
+	/* A new level invalidates whatever list a download was walking. */
+	HWCL_CancelDownload ();
 	hwcl_protocol = MSG_ReadLong ();
 	if (!HWCL_ValidProtocol (hwcl_protocol))
 	{
@@ -488,6 +722,10 @@ static void HWCL_ParseServerData (void)
 	if (msg_badread || strlen (server_gamedir) >= sizeof(gamedir))
 		Host_Error ("Invalid HexenWorld server game directory");
 	q_strlcpy (gamedir, server_gamedir, sizeof(gamedir));
+	/* Unconditional, and never FS_Gamedir: this name came off the wire, and
+	 * FS_HWGamedir is the one path that validates it before mounting.  It
+	 * also rebuilds from the base searchpath every time, so a "-game <mod>"
+	 * launch gets its mod unwound and remounted above hw. */
 	if (!FS_HWGamedir (gamedir))
 		Host_Error ("Invalid HexenWorld server game directory: %s", gamedir);
 	Con_Printf ("HexenWorld server set the gamedir to %s\n", gamedir);
@@ -693,6 +931,13 @@ static void HWCL_SendConnectPacket (void);	/* defined below, with HWCL_Connect *
 
 static void HWCL_Changing (void)
 {
+	/* The original CL_Changing_f ignored "changing" while downloading so a
+	 * long transfer survived the map change.  Here the download belongs to
+	 * the old level's precache list: the svc_serverdata that follows
+	 * "reconnect" restarts the walk against the new list, re-requesting the
+	 * file only if the new level still needs it.  Cancelling also keeps a
+	 * half-written .tmp from outliving the level. */
+	HWCL_CancelDownload ();
 	S_StopAllSounds (true);
 	cl.intermission = 0;
 	cls.signon = 0;
@@ -703,6 +948,7 @@ static void HWCL_Changing (void)
 
 static void HWCL_Reconnect (void)
 {
+	HWCL_CancelDownload ();
 	S_StopAllSounds (true);
 
 	if (hwcl_state == hwcl_connected)
@@ -864,15 +1110,127 @@ static void HWCL_ParseParticleExplosion (void)
 
 static void HWCL_ParseDownload (void)
 {
+	char path[MAX_OSPATH];
+	char final_path[MAX_OSPATH];
 	int size;
-	int i;
+	int percent;
 
 	size = MSG_ReadShort ();
-	MSG_ReadByte (); /* percent */
-	if (size <= 0 || msg_badread)
+	percent = MSG_ReadByte ();
+	if (msg_badread)
 		return;
-	for (i = 0; i < size; i++)
-		MSG_ReadByte ();
+
+	if (size < 0)
+	{
+		/* -1: hwsv refused or lacks the file (maps inside a pak always
+		 * are).  No payload follows. */
+		if (hwcl_download_type == hwcl_dl_none || !hwcl_download_name[0])
+			return;
+		Con_Printf ("Server cannot send %s.\n", hwcl_download_name);
+		HWCL_AbandonCurrentDownload ();
+		HWCL_RequestNextDownload ();
+		return;
+	}
+
+	if (size > hw_net_message.cursize - msg_readcount)
+	{
+		Con_Printf ("HexenWorld download block overruns its packet.\n");
+		HWCL_Disconnect ();
+		return;
+	}
+
+	/* Unsolicited block: consume it and write nothing. */
+	if (hwcl_download_type == hwcl_dl_none || !hwcl_download_name[0])
+	{
+		msg_readcount += size;
+		return;
+	}
+
+	/* hwsv only sends an empty block for an empty file, and an empty file
+	 * is no usable model, sound or map. */
+	if (size == 0)
+	{
+		Con_Printf ("Server sent an empty %s; skipping it.\n",
+				hwcl_download_name);
+		HWCL_AbandonCurrentDownload ();
+		HWCL_RequestNextDownload ();
+		return;
+	}
+
+	if (!hwcl_download)
+	{
+		if (!HWCL_DownloadPath (path, sizeof(path), hwcl_download_tempname) ||
+				FS_CreatePath (path) != 0 ||
+				!(hwcl_download = fopen (path, "wb")))
+		{
+			msg_readcount += size;
+			Con_Printf ("Unable to open %s for writing.\n",
+					hwcl_download_tempname);
+			HWCL_AbandonCurrentDownload ();
+			HWCL_RequestNextDownload ();
+			return;
+		}
+	}
+
+	if (hwcl_download_bytes + size > HWCL_DOWNLOAD_MAX_BYTES)
+	{
+		msg_readcount += size;
+		Con_Printf ("%s exceeds the %ld MB download limit; abandoned.\n",
+				hwcl_download_name, HWCL_DOWNLOAD_MAX_BYTES / (1024L * 1024L));
+		HWCL_AbandonCurrentDownload ();
+		HWCL_RequestNextDownload ();
+		return;
+	}
+
+	if (fwrite (hw_net_message.data + msg_readcount, 1, size, hwcl_download)
+			!= (size_t)size)
+	{
+		msg_readcount += size;
+		Con_Printf ("Write error while downloading %s.\n", hwcl_download_name);
+		HWCL_AbandonCurrentDownload ();
+		HWCL_RequestNextDownload ();
+		return;
+	}
+	msg_readcount += size;
+	hwcl_download_bytes += size;
+
+	/* Exactly 100, as the original client tested.  hwsv computes percent as
+	 * int downloadcount*100/size, which overflows past ~21.4 MB and sends
+	 * values like 185 mid-file; treating >= 100 as done renamed a truncated
+	 * file into place. */
+	if (percent != 100)
+	{
+		Con_DPrintf ("%s: %d%%\n", hwcl_download_name, percent);
+		HWCL_StringCmd ("nextdl");
+		return;
+	}
+
+	fclose (hwcl_download);
+	hwcl_download = NULL;
+	if (!HWCL_DownloadPath (path, sizeof(path), hwcl_download_tempname) ||
+			!HWCL_DownloadPath (final_path, sizeof(final_path),
+				hwcl_download_name))
+	{
+		Con_Printf ("Download path for %s is too long.\n", hwcl_download_name);
+	}
+	/* rename() replaces on POSIX and Sys_rename replaces on Windows too, so
+	 * test first: a file that appeared while we downloaded is never
+	 * clobbered. */
+	else if (Sys_FileType (final_path) != FS_ENT_NONE)
+	{
+		Con_Printf ("%s already exists; discarding the download.\n",
+				hwcl_download_name);
+		Sys_unlink (path);
+	}
+	else if (Sys_rename (path, final_path) != 0)
+	{
+		Con_Printf ("Failed to rename %s.\n", hwcl_download_tempname);
+		Sys_unlink (path);
+	}
+	hwcl_download_bytes = 0;
+	hwcl_download_name[0] = 0;
+	hwcl_download_tempname[0] = 0;
+	HWCL_RequestNextDownload ();
 }
 
 static void HWCL_SkipCoords (int count)
@@ -1859,6 +2217,8 @@ static void HWCL_ParseServerMessage (void)
 					if (!cl.worldmodel)
 						Host_Error ("HexenWorld signon without a world map");
 					cls.signon = SIGNONS;
+					/* Hexen II ends the plaque at signon 4 (CL_SignonReply);
+					 * this is HexenWorld's equivalent moment. */
 					SCR_EndLoadingPlaque ();
 					Con_Printf ("HexenWorld signon complete: %s.\n", cl.mapname);
 				}
@@ -1882,6 +2242,10 @@ static void HWCL_ParseServerMessage (void)
 					command);
 			return;
 		}
+		/* A handler may have dropped the connection (missing world, bad
+		 * download block); the rest of this packet belongs to it. */
+		if (hwcl_state == hwcl_disconnected)
+			return;
 		if (msg_badread)
 		{
 			Con_Printf ("Malformed HexenWorld server message.\n");
@@ -2171,6 +2535,7 @@ void HWCL_Disconnect (void)
 {
 	static const byte drop[] = {HW_CLC_STRINGCMD, 'd', 'r', 'o', 'p', 0};
 
+	HWCL_CancelDownload ();
 	hwcl_protocol = 0;
 	hwcl_servercount = 0;
 	hwcl_entity_sequence = -1;
@@ -2202,6 +2567,8 @@ void HWCL_Disconnect (void)
 		S_StopAllSounds (true);
 		cl.worldmodel = NULL;
 		FS_HWRestore ();
+		/* A connect or signon that fails leaves the plaque up, freezing the
+		 * screen until the 25 second "load timeout". */
 		SCR_EndLoadingPlaque ();
 	}
 	hwcl_state = hwcl_disconnected;
@@ -2260,7 +2627,12 @@ void HWCL_Frame (void)
 	    realtime - hwcl_last_received > Cvar_VariableValue ("net_messagetimeout"))
 		Host_Error ("HexenWorld server connection timed out");
 	if (hwcl_state == hwcl_connecting && realtime - hwcl_connect_time > 5.0)
+	{
+		/* No answer yet: show the console's retry lines rather than a
+		 * frozen plaque while the server stays silent. */
+		SCR_EndLoadingPlaque ();
 		HWCL_SendConnectPacket ();
+	}
 
 	while (HWNET_GetPacket ())
 	{
