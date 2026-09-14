@@ -1,0 +1,22 @@
+[package]
+name = "engine-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Consolidated Rust FFI ports for the Hexenwail engine"
+publish = false
+
+[lib]
+name = "engine_rs"
+crate-type = ["staticlib"]
+
+[features]
+default = []
+hashindex = []
+mathlib = []
+sizebuf = []
+
+[profile.release]
+# Unwinding across an FFI boundary is undefined behaviour. Fatal paths go
+# through the engine's noreturn C callbacks, so abort rather than unwind.
+panic = "abort"

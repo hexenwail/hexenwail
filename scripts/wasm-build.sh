@@ -39,6 +39,8 @@ emcmake cmake \
 	-DUSE_CODEC_VORBIS=OFF \
 	-DUSE_ALSA=OFF \
 	-DUSE_RUST_HASHINDEX=OFF \
+	-DUSE_MATHLIB_RS=OFF \
+	-DUSE_SIZEBUF_RS=OFF \
 	"$SOURCE_DIR"
 
 emmake make -j"$(nproc)"

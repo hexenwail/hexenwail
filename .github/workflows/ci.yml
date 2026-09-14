@@ -205,6 +205,13 @@ jobs:
       - name: Rust mathlib (differential test + flag-ON build)
         run: nix develop .#default -c ./scripts/check-rust-mathlib.sh
 
+      # sizebuf is the first port that crosses an ownership boundary: the C
+      # caller owns the struct and backing allocation while Rust returns
+      # interior pointers and invokes engine callbacks.  Keep its independent
+      # differential and ON/OFF construction gate beside the leaf-port gates.
+      - name: Rust sizebuf (differential test + flag-ON build)
+        run: nix develop .#default -c ./scripts/check-rust-sizebuf.sh
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 

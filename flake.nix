@@ -199,11 +199,9 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
-              # For engine/rust/hashindex, the Rust port of
-              # engine/h2shared/hashindex.c behind -DUSE_RUST_HASHINDEX, which
-              # now defaults to ON -- so cargo/rustc are on the default build
-              # path, not an opt-in.  Listed here so the crate compiles without
-              # a separate toolchain fetch.
+              # For engine/rust, the consolidated Rust FFI ports (hashindex,
+              # mathlib and sizebuf) are on the default native build path, so
+              # cargo/rustc are listed here rather than fetched separately.
               cargo
               rustc
             ];
@@ -802,9 +800,11 @@
               "-DUSE_CODEC_OPUS=ON"
               "-DUSE_CODEC_XMP=ON"
               "-DUSE_DEBUGINFO=ON"
-              # Rust hashindex is not wired up for Emscripten or
-              # cross-compilation without cargo on the native host.
+              # The consolidated Rust shim is not wired up for Emscripten or
+              # cross-compilation without the matching target toolchain.
               "-DUSE_RUST_HASHINDEX=OFF"
+              "-DUSE_MATHLIB_RS=OFF"
+              "-DUSE_SIZEBUF_RS=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -950,7 +950,12 @@
               cd engine
             '';
 
-            cmakeFlags = [ "-DBUILD_DEDICATED=ON" "-DUSE_RUST_HASHINDEX=OFF" ];
+            cmakeFlags = [
+              "-DBUILD_DEDICATED=ON"
+              "-DUSE_RUST_HASHINDEX=OFF"
+              "-DUSE_MATHLIB_RS=OFF"
+              "-DUSE_SIZEBUF_RS=OFF"
+            ];
 
             # Only the server target; the client .exe is .#win64's job.
             buildFlags = [ "h2ded" ];
@@ -1030,6 +1035,8 @@
                 -DUSE_CODEC_VORBIS=OFF \
                 -DUSE_ALSA=OFF \
                 -DUSE_RUST_HASHINDEX=OFF \
+                -DUSE_MATHLIB_RS=OFF \
+                -DUSE_SIZEBUF_RS=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine
@@ -1513,9 +1520,8 @@ EOF
             gcc
             gnumake
             cmake
-            # Rust toolchain for engine/rust/hashindex, which is on
-            # the default build path (-DUSE_RUST_HASHINDEX defaults ON
-            # in engine/CMakeLists.txt).
+            # Rust toolchain for the consolidated engine/rust staticlib, which
+            # is on the default native build path.
             cargo
             rustc
 

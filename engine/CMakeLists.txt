@@ -37,17 +37,23 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 
 # Link the Rust port of hashindex in place of engine/h2shared/hashindex.c.
 # Deliberately ON: this is the default build configuration, not a shipping
-# default.  See the block above "Combine all sources" for what turning it
-# on does, and for why both halves (source removal and linking) have to
-# happen together.
+# default.  See the consolidated Rust block below for what turning it on
+# does, and for why both halves (source removal and linking) have to happen
+# together.
 option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" ON)
 
 # Link the Rust port of mathlib in place of engine/h2shared/mathlib.c.
 # Deliberately ON: this is the default build configuration, not a shipping
-# default.  See the block above "Combine all sources" for what turning it
-# on does, and for why both halves (source removal and linking) have to
-# happen together.
+# default.  See the consolidated Rust block below for what turning it on
+# does, and for why both halves (source removal and linking) have to happen
+# together.
 option(USE_MATHLIB_RS "Link the Rust mathlib implementation instead of mathlib.c" ON)
+
+# Link the Rust port of sizebuf in place of engine/h2shared/sizebuf.c.  This
+# is the first port that mutates a caller-owned structured buffer and returns
+# pointers into its storage, so it stays independently switchable while the
+# ownership boundary is exercised.
+option(USE_SIZEBUF_RS "Link the Rust sizebuf implementation instead of sizebuf.c" ON)
 
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
@@ -863,114 +869,78 @@ endif()
 # Create Executable
 #============================================================================
 #============================================================================
-# Rust hashindex shim (USE_RUST_HASHINDEX)
+# Consolidated Rust engine shim
 #============================================================================
-# Replaces engine/h2shared/hashindex.c with engine/rust/hashindex.  Two halves,
-# and BOTH are required:
-#
-#   1. hashindex.c is removed from every source list carrying it --
-#      COMMON_SOURCES here (which feeds the client via ALL_SOURCES and h2ded via
-#      SERVER_SOURCES, itself a copy of COMMON_SOURCES made below), and
-#      HWSV_SOURCES in the HexenWorld block.  Skipping this is not a subtle
-#      failure: the C object and the Rust staticlib both define Hash_Allocate
-#      and friends, and the link dies with a multiple-definition error.
-#   2. the Rust staticlib is linked into each of those targets.
-#
-# hashindex.h is NOT touched.  It stays the layout source of truth, and its
-# four `static inline` helpers keep being compiled into every C caller -- they
-# have no symbol and cannot cross an FFI boundary anyway.
-#
-# Off by default, and nothing in the engine knows which implementation it got,
-# so -DUSE_RUST_HASHINDEX=OFF is a complete rollback rather than a revert.
+# All migrated subsystems live in one static library.  Separate staticlibs
+# each carried compiler-builtins and a panic/personality definition, which
+# forced the old build to use the linker-specific -z,muldefs workaround.  A
+# single crate owns those runtime symbols exactly once while Cargo features
+# preserve an independent C fallback for every subsystem.
+set(RUST_ENGINE_FEATURES)
+
 if(USE_RUST_HASHINDEX)
-    if(EMSCRIPTEN)
-        message(FATAL_ERROR
-            "USE_RUST_HASHINDEX is not wired up for the Emscripten build. The "
-            "wasm toolchain is the most fragile target in this tree and adding "
-            "a second one to it is out of scope for this phase.")
-    endif()
-
-    set(HASHINDEX_RS_DIR ${UHEXEN2_TOP}/engine/rust/hashindex)
-    set(HASHINDEX_RS_LIB ${CMAKE_BINARY_DIR}/rust/libhashindex_rs.a)
-    # Redirect cargo's output out of the source tree: it keeps the checkout
-    # clean, and it is required for a nix build, where the source directory is
-    # read-only.
-    set(HASHINDEX_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
-
-    # --offline is deliberate.  The crate has no dependencies, so nothing here
-    # should ever touch the network; a sandboxed nix build would fail on a
-    # fetch, and failing loudly here beats silently acquiring a dependency.
-    add_custom_command(
-        OUTPUT ${HASHINDEX_RS_LIB}
-        COMMAND ${CMAKE_COMMAND} -E env
-                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
-                CARGO_TARGET_DIR=${HASHINDEX_RS_TARGET_DIR}
-                cargo build --release --offline
-                --manifest-path ${HASHINDEX_RS_DIR}/Cargo.toml
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${HASHINDEX_RS_TARGET_DIR}/release/libhashindex_rs.a
-                ${HASHINDEX_RS_LIB}
-        DEPENDS ${HASHINDEX_RS_DIR}/src/lib.rs
-                ${HASHINDEX_RS_DIR}/src/ffi.rs
-                ${HASHINDEX_RS_DIR}/Cargo.toml
-        COMMENT "Building Rust hashindex shim"
-        VERBATIM)
-    add_custom_target(hashindex_rs DEPENDS ${HASHINDEX_RS_LIB})
-
-    function(hashindex_rs_attach tgt)
-        add_dependencies(${tgt} hashindex_rs)
-        target_link_libraries(${tgt} PRIVATE ${HASHINDEX_RS_LIB})
-    endfunction()
-
+    list(APPEND RUST_ENGINE_FEATURES hashindex)
     list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/hashindex.c)
     message(STATUS "hashindex: Rust shim (USE_RUST_HASHINDEX=ON)")
 else()
     message(STATUS "hashindex: C original (USE_RUST_HASHINDEX=OFF)")
 endif()
 
-#============================================================================
-# Rust mathlib shim (USE_MATHLIB_RS)
-#============================================================================
-# Replaces engine/h2shared/mathlib.c with engine/rust/mathlib.
-# Same pattern as hashindex above: two halves, both required.
 if(USE_MATHLIB_RS)
-    if(EMSCRIPTEN)
-        message(FATAL_ERROR
-            "USE_MATHLIB_RS is not wired up for the Emscripten build. The "
-            "wasm toolchain is the most fragile target in this tree and adding "
-            "a second one to it is out of scope for this phase.")
-    endif()
-
-    set(MATHLIB_RS_DIR ${UHEXEN2_TOP}/engine/rust/mathlib)
-    set(MATHLIB_RS_LIB ${CMAKE_BINARY_DIR}/rust/libmathlib_rs.a)
-    set(MATHLIB_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
-
-    add_custom_command(
-        OUTPUT ${MATHLIB_RS_LIB}
-        COMMAND ${CMAKE_COMMAND} -E env
-                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
-                CARGO_TARGET_DIR=${MATHLIB_RS_TARGET_DIR}
-                cargo build --release --offline
-                --manifest-path ${MATHLIB_RS_DIR}/Cargo.toml
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${MATHLIB_RS_TARGET_DIR}/release/libmathlib_rs.a
-                ${MATHLIB_RS_LIB}
-        DEPENDS ${MATHLIB_RS_DIR}/src/lib.rs
-                ${MATHLIB_RS_DIR}/src/ffi.rs
-                ${MATHLIB_RS_DIR}/Cargo.toml
-        COMMENT "Building Rust mathlib shim"
-        VERBATIM)
-    add_custom_target(mathlib_rs DEPENDS ${MATHLIB_RS_LIB})
-
-    function(mathlib_rs_attach tgt)
-        add_dependencies(${tgt} mathlib_rs)
-        target_link_libraries(${tgt} PRIVATE ${MATHLIB_RS_LIB})
-    endfunction()
-
+    list(APPEND RUST_ENGINE_FEATURES mathlib)
     list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/mathlib.c)
     message(STATUS "mathlib: Rust shim (USE_MATHLIB_RS=ON)")
 else()
     message(STATUS "mathlib: C original (USE_MATHLIB_RS=OFF)")
+endif()
+
+if(USE_SIZEBUF_RS)
+    list(APPEND RUST_ENGINE_FEATURES sizebuf)
+    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/sizebuf.c)
+    message(STATUS "sizebuf: Rust shim (USE_SIZEBUF_RS=ON)")
+else()
+    message(STATUS "sizebuf: C original (USE_SIZEBUF_RS=OFF)")
+endif()
+
+if(RUST_ENGINE_FEATURES)
+    if(EMSCRIPTEN)
+        message(FATAL_ERROR
+            "The Rust engine shim is not wired up for Emscripten. Disable "
+            "USE_RUST_HASHINDEX, USE_MATHLIB_RS, and USE_SIZEBUF_RS for the "
+            "WASM build.")
+    endif()
+
+    set(RUST_ENGINE_RS_DIR ${UHEXEN2_TOP}/engine/rust)
+    set(RUST_ENGINE_RS_LIB ${CMAKE_BINARY_DIR}/rust/libengine_rs.a)
+    set(RUST_ENGINE_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
+    string(JOIN "," RUST_ENGINE_FEATURE_LIST ${RUST_ENGINE_FEATURES})
+
+    # --offline is deliberate.  The consolidated crate has no dependencies;
+    # a sandboxed build must fail rather than silently fetch one.
+    add_custom_command(
+        OUTPUT ${RUST_ENGINE_RS_LIB}
+        COMMAND ${CMAKE_COMMAND} -E env
+                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
+                CARGO_TARGET_DIR=${RUST_ENGINE_RS_TARGET_DIR}
+                cargo build --release --offline
+                --manifest-path ${RUST_ENGINE_RS_DIR}/Cargo.toml
+                --features ${RUST_ENGINE_FEATURE_LIST}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${RUST_ENGINE_RS_TARGET_DIR}/release/libengine_rs.a
+                ${RUST_ENGINE_RS_LIB}
+        DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
+                ${RUST_ENGINE_RS_DIR}/src/lib.rs
+                ${RUST_ENGINE_RS_DIR}/src/sizebuf.rs
+                ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
+                ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
+        COMMENT "Building consolidated Rust engine shim"
+        VERBATIM)
+    add_custom_target(engine_rs DEPENDS ${RUST_ENGINE_RS_LIB})
+
+    function(engine_rs_attach tgt)
+        add_dependencies(${tgt} engine_rs)
+        target_link_libraries(${tgt} PRIVATE ${RUST_ENGINE_RS_LIB})
+    endfunction()
 endif()
 
 # Combine all sources
@@ -1057,17 +1027,8 @@ endif()
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
 add_dependencies(${EXECUTABLE_NAME} shaders_gen)
 
-if(USE_RUST_HASHINDEX)
-    hashindex_rs_attach(${EXECUTABLE_NAME})
-endif()
-if(USE_MATHLIB_RS)
-    mathlib_rs_attach(${EXECUTABLE_NAME})
-endif()
-
-# Multiple Rust static libraries in one executable both define Rust runtime
-# symbols (__rustc::rust_begin_unwind, rust_eh_personality). Allow this.
-if(USE_RUST_HASHINDEX AND USE_MATHLIB_RS)
-    target_link_options(${EXECUTABLE_NAME} PRIVATE -Wl,-z,muldefs)
+if(RUST_ENGINE_FEATURES)
+    engine_rs_attach(${EXECUTABLE_NAME})
 endif()
 
 #============================================================================
@@ -1214,19 +1175,10 @@ else()
     add_executable(h2ded ${SERVER_SOURCES})
     target_compile_definitions(h2ded PRIVATE SERVERONLY)
 
-    # No source-list removal needed here: SERVER_SOURCES is a copy of
-    # COMMON_SOURCES, from which hashindex.c was already dropped above.
-    if(USE_RUST_HASHINDEX)
-        hashindex_rs_attach(h2ded)
-    endif()
-    if(USE_MATHLIB_RS)
-        mathlib_rs_attach(h2ded)
-    endif()
-    # Multiple Rust static libraries in one executable both define Rust
-    # runtime symbols (__rustc::rust_begin_unwind, rust_eh_personality).
-    # Allow this.
-    if(USE_RUST_HASHINDEX AND USE_MATHLIB_RS)
-        target_link_options(h2ded PRIVATE -Wl,-z,muldefs)
+    # SERVER_SOURCES is a copy of COMMON_SOURCES, so the selected C/Rust
+    # implementation is already consistent with the client target.
+    if(RUST_ENGINE_FEATURES)
+        engine_rs_attach(h2ded)
     endif()
     if(WIN32)
         target_link_libraries(h2ded PRIVATE ws2_32 winmm)
@@ -1308,30 +1260,23 @@ else()
         list(APPEND HWSV_SOURCES ${HW_TOP}/server/sys_unix.c)
     endif()
 
-    # Second and last source list carrying hashindex.c -- see the comment on
-    # the USE_RUST_HASHINDEX block near the top of this file.
+    # This list is independent of COMMON_SOURCES, so repeat each selected
+    # source removal for the HexenWorld server.
     if(USE_RUST_HASHINDEX)
         list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/hashindex.c)
     endif()
-
     if(USE_MATHLIB_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/mathlib.c)
+    endif()
+    if(USE_SIZEBUF_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/sizebuf.c)
     endif()
 
     add_executable(hwsv ${HWSV_SOURCES})
     target_compile_definitions(hwsv PRIVATE H2W SERVERONLY)
 
-    if(USE_RUST_HASHINDEX)
-        hashindex_rs_attach(hwsv)
-    endif()
-    if(USE_MATHLIB_RS)
-        mathlib_rs_attach(hwsv)
-    endif()
-    # Multiple Rust static libraries in one executable both define Rust
-    # runtime symbols (__rustc::rust_begin_unwind, rust_eh_personality).
-    # Allow this.
-    if(USE_RUST_HASHINDEX AND USE_MATHLIB_RS)
-        target_link_options(hwsv PRIVATE -Wl,-z,muldefs)
+    if(RUST_ENGINE_FEATURES)
+        engine_rs_attach(hwsv)
     endif()
     # Order matters: hexenworld/shared shadows h2shared for quakedef.h et al.
     target_include_directories(hwsv BEFORE PRIVATE
