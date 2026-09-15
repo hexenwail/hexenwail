@@ -51,6 +51,8 @@ void R_ParseParticleEffect4 (void);
 
 void R_RunParticleEffect (vec3_t org, vec3_t dir, int color, int count);
 void R_RunParticleEffect2 (vec3_t org, vec3_t dmin, vec3_t dmax, int color, ptype_t effect, int count);
+void R_RunParticleEffect3 (vec3_t org, vec3_t box, int color, ptype_t effect, int count);
+void R_RunParticleEffect4 (vec3_t org, float radius, int color, ptype_t effect, int count);
 					/* for ptype_t, d_iface.h or glquake.h must be included before. */
 
 void R_ParticleExplosion (vec3_t org);
