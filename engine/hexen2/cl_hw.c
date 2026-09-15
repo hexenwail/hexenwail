@@ -1194,10 +1194,8 @@ static void HWCL_ParseDownload (void)
 	msg_readcount += size;
 	hwcl_download_bytes += size;
 
-	/* Exactly 100, as the original client tested.  hwsv computes percent as
-	 * int downloadcount*100/size, which overflows past ~21.4 MB and sends
-	 * values like 185 mid-file; treating >= 100 as done renamed a truncated
-	 * file into place. */
+	/* Exactly 100, as the original client tested.  Treating >= 100 as done
+	 * would let an invalid progress byte rename a truncated file into place. */
 	if (percent != 100)
 	{
 		Con_DPrintf ("%s: %d%%\n", hwcl_download_name, percent);
