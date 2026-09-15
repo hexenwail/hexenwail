@@ -78,6 +78,12 @@ jobs:
       - name: Software-renderer menu parity
         run: python3 tools/menu_soft_parity.py
 
+      # Data-free coverage for the unified multiplayer path. The harness
+      # extracts the production C functions rather than maintaining a Python
+      # reimplementation, then compiles them against narrow engine stubs.
+      - name: Multiplayer join and content-path regression
+        run: python3 tools/test_multiplayer_join.py
+
       # ARE_WE_IRONWAIL_YET.md carries a summary table over rows kept further
       # down the same file, and the two drift every time somebody flips a row
       # by hand.  The file records this happening in 2026-08-20 and twice on

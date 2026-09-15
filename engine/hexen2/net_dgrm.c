@@ -1299,6 +1299,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 
 	if (ret == 0)
 	{
+		net_connect_no_response = true;
 		reason = "No Response";
 		Con_Printf("%s\n", reason);
 		strcpy(m_return_reason, reason);
@@ -1313,6 +1314,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 		goto ErrorReturn;
 	}
 
+	net_connect_no_response = false;
 	ret = MSG_ReadByte();
 	if (ret == CCREP_REJECT)
 	{

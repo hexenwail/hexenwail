@@ -1228,6 +1228,11 @@ static void R_EdgeDrawing (qboolean Translucent)
 			db_time1 = rw_time2;
 		}
 
+		/* Despite its historical name, this emits brush-model edges/surfaces; it
+		 * does not shade them immediately.  R_RenderBmodelFace propagates an
+		 * entity's DRF_TRANSLUCENT to SURF_TRANSLUCENT.  R_ScanEdges(false)
+		 * below skips those surfaces, then R_EdgeDrawing(true) reuses this saved
+		 * edge list and draws only them. */
 		R_DrawBEntitiesOnList ();
 
 		SaveSurfacesCount = surface_p - surfaces;

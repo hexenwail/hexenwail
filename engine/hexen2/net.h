@@ -46,6 +46,7 @@ struct qsocket_s	*NET_CheckNewConnections (void);
 // returns a new connection number if there is one pending, else -1
 
 struct qsocket_s	*NET_Connect (const char *host);
+extern qboolean net_connect_no_response; /* allows HW fallback, never on H2 rejection */
 // called by client to connect to a host.  Returns -1 if not able to
 
 double NET_QSocketGetTime (const struct qsocket_s *sock);
