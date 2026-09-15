@@ -46,7 +46,12 @@
 #     phase 0 still runs and the script exits 77 (skip) if phase 0 passed.
 #   - Xvfb for the GL clients (pass --xvfb if it is not on PATH), or
 #     --offscreen to use SDL's offscreen video driver instead; --client /
-#     --server for the binaries.
+#     --server for the binaries.  Prefer Xvfb: phase 2 runs two clients at
+#     once, and SDL's offscreen driver gets one EGL surface per device on at
+#     least the NVIDIA driver -- the second client dies with "Couldn't create
+#     gl context: ... EGL_BAD_ALLOC" and phases 2-4 all fail.  --offscreen is
+#     fine for phase 0 and, with --skip-base, for phases 6-7, which never run
+#     two clients at the same time.
 #   - Python 3 for the false-H2-accept UDP fixture.
 #   - coreutils od/dd (the pak reader), util-linux script (the server pty).
 #
