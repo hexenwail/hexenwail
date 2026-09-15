@@ -914,49 +914,89 @@ static void HWCL_SkipFloats (int count)
 
 static void HWCL_ParseParticle (void)
 {
-	HWCL_SkipCoords (3);
-	MSG_ReadChar ();
-	MSG_ReadChar ();
-	MSG_ReadChar ();
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* color */
+	vec3_t origin, direction;
+	int count, color;
+	int i;
+
+	HWCL_ReadCoords (origin);
+	for (i = 0; i < 3; i++)
+		direction[i] = MSG_ReadChar () * (1.0f / 16.0f);
+	count = MSG_ReadByte ();
+	color = MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect (origin, direction, color,
+				count == 255 ? 1024 : count);
 }
 
 static void HWCL_ParseParticle2 (void)
 {
-	HWCL_SkipCoords (3);
-	HWCL_SkipFloats (6); /* dmin, dmax */
-	MSG_ReadShort (); /* color */
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* effect */
+	vec3_t origin, dmin, dmax;
+	int color, count;
+	ptype_t effect;
+	int i;
+
+	HWCL_ReadCoords (origin);
+	for (i = 0; i < 3; i++)
+		dmin[i] = MSG_ReadFloat ();
+	for (i = 0; i < 3; i++)
+		dmax[i] = MSG_ReadFloat ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadByte ();
+	effect = (ptype_t)MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect2 (origin, dmin, dmax, color, effect, count);
 }
 
 static void HWCL_ParseParticle3 (void)
 {
-	HWCL_SkipCoords (3);
-	MSG_ReadByte (); /* box x */
-	MSG_ReadByte (); /* box y */
-	MSG_ReadByte (); /* box z */
-	MSG_ReadShort (); /* color */
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* effect */
+	vec3_t origin, box;
+	int color, count;
+	ptype_t effect;
+	int i;
+
+	HWCL_ReadCoords (origin);
+	for (i = 0; i < 3; i++)
+		box[i] = MSG_ReadByte ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadByte ();
+	effect = (ptype_t)MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect3 (origin, box, color, effect, count);
 }
 
 static void HWCL_ParseParticle4 (void)
 {
-	HWCL_SkipCoords (3);
-	MSG_ReadByte (); /* radius */
-	MSG_ReadShort (); /* color */
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* effect */
+	vec3_t origin;
+	float radius;
+	int color, count;
+	ptype_t effect;
+
+	HWCL_ReadCoords (origin);
+	radius = MSG_ReadByte ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadByte ();
+	effect = (ptype_t)MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect4 (origin, radius, color, effect, count);
 }
 
 static void HWCL_ParseRainEffect (void)
 {
-	HWCL_SkipCoords (6); /* origin, size */
-	HWCL_SkipAngles (2); /* x/y direction */
-	MSG_ReadShort (); /* color */
-	MSG_ReadShort (); /* count */
+	vec3_t origin, size;
+	int x_dir, y_dir, color, count;
+
+	HWCL_ReadCoords (origin);
+	HWCL_ReadCoords (size);
+	x_dir = MSG_ReadAngle ();
+	y_dir = MSG_ReadAngle ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadShort ();
+	if (!msg_badread)
+	{
+		/* HexenWorld's svc_raineffect has no Z direction.  Zero retains the
+		 * maintained renderer's stock random 256-955 unit fall speed. */
+		R_RainEffect (origin, size, x_dir, y_dir, 0, color, count);
+	}
 }
 
 static void HWCL_ParsePackedMissiles (void)
@@ -972,11 +1012,20 @@ static void HWCL_ParsePackedMissiles (void)
 static void HWCL_ParseNails (void)
 {
 	int count;
-	int i;
+	int group, i;
 
-	count = MSG_ReadByte ();
-	for (i = 0; i < count * 6; i++)
-		MSG_ReadByte ();
+	/* The active HexenWorld server overloads svc_nails with two consecutive
+	 * packed raven groups.  Consume both even though rendering them needs a
+	 * separate frame-local entity adapter; stopping after the first group
+	 * leaves the second count to be misread as the next service opcode. */
+	for (group = 0; group < 2; group++)
+	{
+		count = MSG_ReadByte ();
+		if (count < 0)
+			return;
+		for (i = 0; i < count * 6; i++)
+			MSG_ReadByte ();
+	}
 }
 
 static const char *HWCL_InfoValue (const char *info, const char *key)
