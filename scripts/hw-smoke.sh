@@ -311,8 +311,11 @@ sleep 1
 
 # --- client A ---
 # Plain address, not hw://: client A is the autodetect path, and the false-H2
-# fixture above only proves anything if the client had to choose.
-launch_client "$ALOG" -basedir "$BASEDIR" -nolan -hwport 27001 +developer 1 \
+# fixture above only proves anything if the client had to choose.  No -nolan
+# either, for the same reason: it makes NET_Datagram_Init bail (net_dgrm.c),
+# so there is no Hexen II attempt left to reject and every phase-2 assertion
+# on client A fails.
+launch_client "$ALOG" -basedir "$BASEDIR" -hwport 27001 +developer 1 \
 	+connect "127.0.0.1"
 CA_PID=$LAST_PID
 

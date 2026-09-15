@@ -156,6 +156,18 @@ jobs:
             exit 1
           fi
 
+      # The one part of the HexenWorld client that CI can test properly: the
+      # signon download parser reads a file name, a block length and a percent
+      # byte straight off the wire, and hw-smoke.sh only ever points it at a
+      # cooperative hwsv.  A hostile one is what these cover, and they need no
+      # game data, no display and no network.
+      - name: Unit test HexenWorld download parsing
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_download_test scripts/hw_download_test.c
+          ./hw_download_test
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 

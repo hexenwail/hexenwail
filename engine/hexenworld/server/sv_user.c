@@ -22,7 +22,6 @@
 
 #include "quakedef.h"
 #include "q_ctype.h"
-#include "sv_download.h"
 
 edict_t	*sv_player;
 
@@ -535,7 +534,7 @@ static void SV_NextDownload_f (void)
 	size = host_client->downloadsize;
 	if (!size)
 		size = 1;
-	percent = SV_DownloadPercent (host_client->downloadcount, size);
+	percent = host_client->downloadcount*100/size;
 	MSG_WriteByte (&host_client->netchan.message, percent);
 	SZ_Write (&host_client->netchan.message, buffer, r);
 
