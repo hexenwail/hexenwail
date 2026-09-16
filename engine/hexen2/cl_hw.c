@@ -47,6 +47,8 @@
 #define CE_FLAMEWALL2 71
 #undef CE_ONFIRE
 #define CE_ONFIRE 73
+#undef CE_FLOOR_EXPLOSION3
+#define CE_FLOOR_EXPLOSION3 72
 #define CE_RIPPLE 56
 #define CE_SM_EXPLOSION2 50
 #define CE_HWMISSILESTAR 42
@@ -62,6 +64,29 @@
 #define CE_HWRAVENPOWER 53
 #define CE_HWDRILLA 54
 #define CE_DEATHBUBBLES 55
+
+/* Maintained Hexen II client IDs; never confuse these with HW wire values. */
+enum
+{
+	HWCL_H2_BLDRN_EXPL = 45,
+	HWCL_H2_ACID_MUZZFL,
+	HWCL_H2_ACID_HIT,
+	HWCL_H2_FIREWALL_SMALL,
+	HWCL_H2_FIREWALL_MEDIUM,
+	HWCL_H2_FIREWALL_LARGE,
+	HWCL_H2_LBALL_EXPL,
+	HWCL_H2_ACID_SPLAT,
+	HWCL_H2_ACID_EXPL,
+	HWCL_H2_FBOOM,
+	HWCL_H2_BOMB = 56,
+	HWCL_H2_BRN_BOUNCE,
+	HWCL_H2_LSHOCK,
+	HWCL_H2_FLAMEWALL,
+	HWCL_H2_FLAMEWALL2,
+	HWCL_H2_FLOOR_EXPLOSION3,
+	HWCL_H2_ONFIRE,
+	HWCL_H2_FLAMESTREAM = 42
+};
 
 #define HW_PORT_CLIENT 26901
 #define HW_PORT_SERVER 26950
@@ -1076,6 +1101,49 @@ static void HWCL_SkipXbowBolts (int turned)
 	}
 }
 
+static int HWCL_TranslateEffectType (int type)
+{
+	if (type >= 1 && type <= 41)
+		return type;
+	switch (type)
+	{
+	case CE_HWMISSILESTAR: return CE_HW_MISSILESTAR;
+	case CE_HWEIDOLONSTAR: return CE_HW_EIDOLONSTAR;
+	case CE_HWSHEEPINATOR: return CE_HW_SHEEPINATOR;
+	case CE_TRIPMINE: return CE_HW_TRIPMINE;
+	case CE_HWBONEBALL: return CE_HW_BONEBALL;
+	case CE_HWRAVENSTAFF: return CE_HW_RAVENSTAFF;
+	case CE_TRIPMINESTILL: return CE_HW_TRIPMINESTILL;
+	case CE_SCARABCHAIN: return CE_HW_SCARABCHAIN;
+	case CE_SM_EXPLOSION2: return CE_SM_EXPLOSION;
+	case CE_HWSPLITFLASH: return CE_SM_BLUE_FLASH;
+	case CE_HWXBOWSHOOT: return CE_HW_XBOWSHOOT;
+	case CE_HWRAVENPOWER: return CE_HW_RAVENPOWER;
+	case CE_HWDRILLA: return CE_HW_DRILLA;
+	case CE_DEATHBUBBLES: return CE_HW_DEATHBUBBLES;
+	case CE_RIPPLE: return CE_HW_RIPPLE;
+	case CE_BLDRN_EXPL: return HWCL_H2_BLDRN_EXPL;
+	case CE_ACID_MUZZFL: return HWCL_H2_ACID_MUZZFL;
+	case CE_ACID_HIT: return HWCL_H2_ACID_HIT;
+	case CE_FIREWALL_SMALL: return HWCL_H2_FIREWALL_SMALL;
+	case CE_FIREWALL_MEDIUM: return HWCL_H2_FIREWALL_MEDIUM;
+	case CE_FIREWALL_LARGE: return HWCL_H2_FIREWALL_LARGE;
+	case CE_LBALL_EXPL: return HWCL_H2_LBALL_EXPL;
+	case CE_ACID_SPLAT: return HWCL_H2_ACID_SPLAT;
+	case CE_ACID_EXPL: return HWCL_H2_ACID_EXPL;
+	case CE_FBOOM: return HWCL_H2_FBOOM;
+	case CE_BOMB: return HWCL_H2_BOMB;
+	case CE_BRN_BOUNCE: return HWCL_H2_BRN_BOUNCE;
+	case CE_LSHOCK: return HWCL_H2_LSHOCK;
+	case CE_FLAMEWALL: return HWCL_H2_FLAMEWALL;
+	case CE_FLAMEWALL2: return HWCL_H2_FLAMEWALL2;
+	case CE_FLOOR_EXPLOSION3: return HWCL_H2_FLOOR_EXPLOSION3;
+	case CE_ONFIRE: return HWCL_H2_ONFIRE;
+	case CE_FLAMESTREAM: return HWCL_H2_FLAMESTREAM;
+	default: return CE_NONE;
+	}
+}
+
 static qboolean HWCL_ParseEffectPayload (int type)
 {
 	switch (type)
@@ -1148,6 +1216,7 @@ static qboolean HWCL_ParseEffectPayload (int type)
 	case CE_BOMB:
 	case CE_BRN_BOUNCE:
 	case CE_LSHOCK:
+	case CE_FLOOR_EXPLOSION3:
 		HWCL_SkipCoords (3);
 		break;
 	case CE_WHITE_FLASH:
@@ -1226,69 +1295,103 @@ static qboolean HWCL_ParseEffectPayload (int type)
 
 static qboolean HWCL_ParseStartEffect (void)
 {
+	int start = msg_readcount;
 	int idx = MSG_ReadByte ();
-	int type = MSG_ReadByte ();
+	int wire_type = MSG_ReadByte ();
+	int type = HWCL_TranslateEffectType (wire_type);
+	int end;
 
-	(void)idx;
-	return HWCL_ParseEffectPayload (type);
+	(void) idx;
+	if (type == CE_NONE || !HWCL_ParseEffectPayload (wire_type))
+		return false;
+	end = msg_readcount;
+	/* Validation above is deliberately complete before replacing the slot. */
+	msg_readcount = start;
+	CL_ParseHWEffect (type);
+	msg_readcount = end;
+	return true;
 }
 
 static qboolean HWCL_ParseUpdateEffect (void)
 {
 	int idx = MSG_ReadByte ();
-	int type = MSG_ReadByte ();
-	int command;
+	int wire_type = MSG_ReadByte ();
+	int type = HWCL_TranslateEffectType (wire_type);
+	int command = 0, extra = 0;
+	float value = 0;
+	vec3_t angles = {0, 0, 0}, origin = {0, 0, 0};
 
-	(void)idx;
-	switch (type)
+	switch (wire_type)
 	{
 	case CE_SCARABCHAIN:
-		MSG_ReadShort ();
+		extra = MSG_ReadShort ();
 		break;
 	case CE_HWSHEEPINATOR:
 	case CE_HWXBOWSHOOT:
 		command = MSG_ReadByte ();
 		if (command & 1)
-			MSG_ReadCoord ();
+			value = MSG_ReadCoord ();
 		else
 		{
-			MSG_ReadAngle ();
-			MSG_ReadAngle ();
+			angles[0] = -MSG_ReadAngle ();
+			angles[1] = MSG_ReadAngle ();
 			if (command & 128)
-				HWCL_SkipCoords (3);
+				HWCL_ReadCoords (origin);
 		}
 		break;
 	case CE_HWDRILLA:
 		command = MSG_ReadByte ();
 		if (!command)
 		{
-			HWCL_SkipCoords (3);
-			MSG_ReadByte ();
+			HWCL_ReadCoords (origin);
+			extra = MSG_ReadByte ();
 		}
 		else
 		{
-			MSG_ReadAngle ();
-			MSG_ReadAngle ();
-			HWCL_SkipCoords (3);
+			angles[0] = -MSG_ReadAngle ();
+			angles[1] = MSG_ReadAngle ();
+			HWCL_ReadCoords (origin);
 		}
 		break;
 	default:
 		return false;
 	}
-	return !msg_badread;
+	if (msg_badread)
+		return false;
+	CL_UpdateHWEffect (idx, type, command, value, angles, origin, extra);
+	return true;
+}
+
+static qboolean HWCL_ParseTurnEffect (void)
+{
+	int idx = MSG_ReadByte ();
+	vec3_t origin, velocity;
+
+	(void) MSG_ReadFloat (); /* legacy interpolation timestamp */
+	HWCL_ReadCoords (origin);
+	HWCL_ReadCoords (velocity);
+	if (msg_badread)
+		return false;
+	CL_TurnHWEffect (idx, origin, velocity);
+	return true;
 }
 
 static qboolean HWCL_ParseMultiEffect (void)
 {
 	int type = MSG_ReadByte ();
-	int i;
+	int slots[3], i;
+	vec3_t origin, velocity;
 
 	if (type != CE_HWRAVENPOWER)
 		return false;
-	HWCL_SkipCoords (6);
+	HWCL_ReadCoords (origin);
+	HWCL_ReadCoords (velocity);
 	for (i = 0; i < 3; i++)
-		MSG_ReadByte ();
-	return !msg_badread;
+		slots[i] = MSG_ReadByte ();
+	if (msg_badread)
+		return false;
+	CL_MultiHWEffect (origin, velocity, slots);
+	return true;
 }
 
 static qmodel_t *HWCL_ModelForEntity (const hwcl_entity_state_t *state,
@@ -1664,7 +1767,10 @@ static void HWCL_ParseServerMessage (void)
 				return;
 			break;
 		case HW_SVC_END_EFFECT:
-			MSG_ReadByte ();
+			command = MSG_ReadByte ();
+			if (msg_badread)
+				return;
+			CL_EndHWEffect (command);
 			break;
 		case HW_SVC_CENTERPRINT:
 			SCR_CenterPrint (MSG_ReadString ());
@@ -1790,9 +1896,8 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParseParticle4 ();
 			break;
 		case HW_SVC_TURN_EFFECT:
-			MSG_ReadByte ();
-			MSG_ReadFloat ();
-			HWCL_SkipCoords (6);
+			if (!HWCL_ParseTurnEffect ())
+				return;
 			break;
 		case HW_SVC_UPDATE_EFFECT:
 			if (!HWCL_ParseUpdateEffect ())
