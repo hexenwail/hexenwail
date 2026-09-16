@@ -578,7 +578,16 @@ void CL_InitEffects (void);
 void CL_ClearEffects (void);
 void CL_EndEffect (void);
 void CL_ParseEffect (void);
+void CL_ParseHWEffect (int type);
+void CL_EndHWEffect (int idx);
+void CL_UpdateHWEffect (int idx, int type, int command,
+		float value, const vec3_t angles, const vec3_t origin, int extra);
+void CL_TurnHWEffect (int idx, const vec3_t origin, const vec3_t velocity);
+void CL_MultiHWEffect (const vec3_t origin, const vec3_t velocity,
+		const int slots[3]);
 void CL_UpdateEffects (void);
+void CL_CreateEffectStream (int effect, int tag,
+		const vec3_t source, const vec3_t dest);
 extern	cvar_t	v_gunkick;
 extern	vec3_t	v_punchangles[2];
 void CL_LatchFixAngle (void);
