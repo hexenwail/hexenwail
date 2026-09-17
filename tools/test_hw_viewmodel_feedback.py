@@ -30,8 +30,10 @@ def main():
     assert "case HW_SVC_BIGKICK:\n\t\t\tV_SetPunchAngle (-4);" in hw
     assert "case HW_SVC_MUZZLEFLASH:\n\t\t\tHWCL_ParseMuzzleFlash ();" in hw
     assert "cl.viewent.colorshade = MSG_ReadByte ();" in hw
-    assert "cl.viewent.drawflags |= MSG_ReadByte ();" in hw
-    assert "cl.viewent.drawflags &= ~MSG_ReadByte ();" in hw
+    assert "hwcl_view_drawflags |= MSG_ReadByte ();" in hw
+    assert "hwcl_view_drawflags &= ~MSG_ReadByte ();" in hw
+    assert "state->drawflags | hwcl_view_drawflags" in hw
+    assert hw.count("CL_ClearState ();\n\tHWCL_ResetPresentation ();") == 2
     assert "V_DecayPunchAngle ();" in hw
     assert "HWCL_ViewModelVisible" in view
 
@@ -54,6 +56,7 @@ typedef struct { qmodel_t *model; int frame, effects, scale, drawflags, abslight
 typedef struct { int weaponframe, effects, scale, drawflags, abslight; } hwcl_entity_state_t;
 static struct { int stats[32]; } hwcl_server_state;
 static struct { qmodel_t *model_precache[MAX_MODELS]; entity_t viewent; vec3_t punchangle; double punchtime, time; } cl;
+static int hwcl_view_drawflags;
 static float host_frametime;
 static vec3_t v_punchangles[2];
 #define VectorCopy(a,b) memcpy((b), (a), sizeof(vec3_t))
@@ -71,6 +74,18 @@ int main(void) {
     assert(cl.viewent.effects == 11 && cl.viewent.scale == 12);
     assert(cl.viewent.drawflags == 13 && cl.viewent.abslight == 14);
     assert(cl.viewent.lerpflags & LERP_RESETANIM);
+
+    /* A view-only invisibility flag precedes ordinary player updates. */
+    hwcl_view_drawflags = 64;
+    HWCL_ApplyViewModel(&state);
+    assert(cl.viewent.drawflags == (13 | 64));
+    state.drawflags = 8; /* later player update omits the view-only flag */
+    HWCL_ApplyViewModel(&state);
+    assert(cl.viewent.drawflags == (8 | 64));
+    hwcl_view_drawflags &= ~64;
+    HWCL_ApplyViewModel(&state);
+    assert(cl.viewent.drawflags == 8);
+
     hwcl_server_state.stats[STAT_WEAPON] = MAX_MODELS;
     HWCL_ApplyViewModel(&state);
     assert(cl.viewent.model == NULL);
@@ -84,14 +99,29 @@ int main(void) {
     host_frametime = 1.0f;
     V_DecayPunchAngle();
     assert(cl.punchangle[PITCH] == 0 && v_punchangles[0][PITCH] == 0);
-    puts("PASS: HW viewmodel state and one-shot kick routing");
+
+    /* A reconnect/map change clears cl but used to leave -2 in global history.
+       Resetting presentation state makes the first same-sized smallkick apply. */
+    cl.time = 20;
+    cl.punchangle[PITCH] = 0;
+    v_punchangles[0][PITCH] = v_punchangles[1][PITCH] = -2;
+    HWCL_ResetPresentation();
+    V_SetPunchAngle(-2);
+    assert(cl.punchangle[PITCH] == -2 &&
+           v_punchangles[0][PITCH] == -2 &&
+           v_punchangles[1][PITCH] == 0 && cl.punchtime == 20);
+    puts("PASS: HW viewmodel state, view flags, and one-shot kick resets");
     return 0;
 }
 '''
-    source = (prelude + function("engine/hexen2/cl_hw.c",
-                                 "static void HWCL_ApplyViewModel") + "\n" +
+    source = (prelude +
+              function("engine/hexen2/view.c", "void V_ResetPunchAngle") + "\n" +
               function("engine/hexen2/view.c", "void V_SetPunchAngle") + "\n" +
               function("engine/hexen2/view.c", "void V_DecayPunchAngle") + "\n" +
+              function("engine/hexen2/cl_hw.c",
+                       "static void HWCL_ResetPresentation") + "\n" +
+              function("engine/hexen2/cl_hw.c",
+                       "static void HWCL_ApplyViewModel") + "\n" +
               test)
     with tempfile.TemporaryDirectory(prefix="hw-viewmodel-feedback-") as tmp:
         cfile = Path(tmp) / "presentation.c"

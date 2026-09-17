@@ -277,11 +277,20 @@ static int hwcl_playernum;
 /* Bit 128 of the svc_serverdata player number.  hwsv decides spectator mode
  * at connect and never changes it, and runs PlayerMove with it set. */
 static qboolean hwcl_spectator;
+/* svc_set/clear_view_flags is local presentation state, not part of the
+ * authoritative player record that supplies the rest of the viewmodel. */
+static int hwcl_view_drawflags;
 /* Players whose spawn we have already announced this signon.  Cleared on every
  * svc_serverdata so a reconnect can be seen happening. */
 static qboolean hwcl_players_seen[HWCL_MAX_CLIENTS];
 
 extern qmodel_t *player_models[MAX_PLAYER_CLASS];
+
+static void HWCL_ResetPresentation (void)
+{
+	hwcl_view_drawflags = 0;
+	V_ResetPunchAngle ();
+}
 
 static void HWCL_StringCmd (const char *command)
 {
@@ -549,6 +558,7 @@ static void HWCL_ParseServerData (void)
 		return;
 
 	CL_ClearState ();
+	HWCL_ResetPresentation ();
 	cls.signon = 0;
 	memset (hwcl_model_names, 0, sizeof(hwcl_model_names));
 	memset (hwcl_sound_names, 0, sizeof(hwcl_sound_names));
@@ -1186,7 +1196,7 @@ static void HWCL_ApplyViewModel (const hwcl_entity_state_t *state)
 	cl.viewent.frame = state->weaponframe;
 	cl.viewent.effects = state->effects;
 	cl.viewent.scale = state->scale;
-	cl.viewent.drawflags = state->drawflags;
+	cl.viewent.drawflags = state->drawflags | hwcl_view_drawflags;
 	cl.viewent.abslight = state->abslight;
 }
 
@@ -1878,10 +1888,10 @@ static void HWCL_ParseServerMessage (void)
 			cl.viewent.colorshade = MSG_ReadByte ();
 			break;
 		case HW_SVC_SET_VIEW_FLAGS:
-			cl.viewent.drawflags |= MSG_ReadByte ();
+			hwcl_view_drawflags |= MSG_ReadByte ();
 			break;
 		case HW_SVC_CLEAR_VIEW_FLAGS:
-			cl.viewent.drawflags &= ~MSG_ReadByte ();
+			hwcl_view_drawflags &= ~MSG_ReadByte ();
 			break;
 		case HW_SVC_START_EFFECT:
 			if (!HWCL_ParseStartEffect ())
@@ -2262,6 +2272,7 @@ qboolean HWCL_Connect (const char *host)
 	q_strlcpy (hwcl_server_name, host, sizeof(hwcl_server_name));
 
 	CL_ClearState ();
+	HWCL_ResetPresentation ();
 	cls.state = ca_connected;
 	hwcl_state = hwcl_connecting;
 	cls.demonum = -1;

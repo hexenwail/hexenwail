@@ -78,6 +78,16 @@ vec3_t	v_punchangles[2];
 /* HexenWorld's svc_smallkick / svc_bigkick are one-shot events, unlike the
  * maintained Hexen II clientdata punchangle.  Update the same interpolation
  * history used by clientdata, so v_gunkick retains its documented behavior. */
+void V_ResetPunchAngle (void)
+{
+	/* cl is cleared at the HW connection/map boundary while this interpolation
+	 * history is global.  Rebase both samples to the new state before a kick
+	 * can compare against stale samples from the previous connection. */
+	VectorCopy (cl.punchangle, v_punchangles[0]);
+	VectorCopy (cl.punchangle, v_punchangles[1]);
+	cl.punchtime = cl.time;
+}
+
 void V_SetPunchAngle (float pitch)
 {
 	if (v_punchangles[0][PITCH] == pitch &&
