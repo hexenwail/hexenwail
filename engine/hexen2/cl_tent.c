@@ -420,6 +420,25 @@ static void ParseStream(int type)
 	}
 }
 
+void CL_CreateEffectStream (int effect, int tag,
+		const vec3_t source, const vec3_t dest)
+{
+	stream_t *stream;
+
+	/* Negative keys cannot collide with network entities and STREAM_ATTACHED
+	 * is deliberately clear: persistent effects supply both endpoints. */
+	if ((stream = NewStream (-effect - 1, tag)) == NULL)
+		return;
+	memset (stream, 0, sizeof(*stream));
+	stream->type = TE_STREAM_CHAIN;
+	stream->tag = tag;
+	stream->entity = -effect - 1;
+	stream->models[0] = Mod_ForName ("models/stchain.mdl", true);
+	stream->endTime = cl.time + 0.1;
+	VectorCopy (source, stream->source);
+	VectorCopy (dest, stream->dest);
+}
+
 //==========================================================================
 //
 // NewStream

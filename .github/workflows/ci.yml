@@ -85,6 +85,9 @@ jobs:
           name: hexenwail
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
+      - name: Test multiplayer transparency state
+        run: nix develop -c python3 tools/test_multiplayer_transparency.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
@@ -157,60 +160,37 @@ jobs:
       # unsupported targets (WASM, Windows cross-compile, Flatpak) are
       # explicitly configured with -DUSE_RUST_HASHINDEX=OFF in their
       # build scripts or manifests.  This step still matters -- the
-      # differential harness
-      # proves the Rust implementation computes what the C original computed
-      # (not just that it links), and the flag-OFF rollback keeps a working
-      # C original in the build graph.  Same shape of hole as the HexenWorld
-      # step above, which existed because no target set BUILD_HEXENWORLD.
-      #
-      # The differential half matters more than the build half.  Compiling
-      # proves the crate links; it says nothing about whether the Rust
-      # implementation still computes what the C original computes.
-      # scripts/check-rust-hashindex.sh links BOTH implementations into one
-      # binary -- the C original recompiled with its symbols renamed -- and
-      # compares raw array contents and per-bucket chain ORDER over 1.2M
-      # operations, plus abort parity on the four fatal paths.  It then builds
-      # all three targets with the flag ON and asserts exactly one definition
-      # of each symbol, which is the duplicate-symbol hazard the CMake
-      # source-list removal exists to prevent, and finally that the flag OFF
-      # still links the C original.
-      #
-      # No game data is needed: nothing in it starts the engine.
+      # differential harness proves the Rust implementation computes what the
+      # C original computed (not just that it links), and the flag-OFF rollback
+      # keeps a working C original in the build graph.
       - name: Rust hashindex (differential test + flag-ON build)
         run: nix develop .#default -c ./scripts/check-rust-hashindex.sh
 
-      # USE_MATHLIB_RS now defaults ON for native Linux builds;
-      # unsupported targets (WASM, Windows cross-compile, Flatpak) are
-      # explicitly configured with -DUSE_MATHLIB_RS=OFF in their
-      # build scripts or manifests.  This step still matters -- the
-      # differential harness
-      # proves the Rust implementation computes what the C original computed
-      # (not just that it links), and the flag-OFF rollback keeps a working
-      # C original in the build graph.  Same shape of hole as the Hashindex
-      # step above.
-      #
-      # The differential half matters more than the build half.  Compiling
-      # proves the crate links; it says nothing about whether the Rust
-      # implementation still computes what the C original computes.
-      # scripts/check-rust-mathlib.sh links BOTH implementations into one
-      # binary -- the C original recompiled with its symbols renamed -- and
-      # compares raw array contents and per-bucket chain ORDER over 1.2M
-      # operations, plus abort parity on the four fatal paths.  It then builds
-      # all three targets with the flag ON and asserts exactly one definition
-      # of each symbol, which is the duplicate-symbol hazard the CMake
-      # source-list removal exists to prevent, and finally that the flag OFF
-      # still links the C original.
-      #
-      # No game data is needed: nothing in it starts the engine.
+      # The differential harness proves the Rust implementation computes what
+      # the C original computed, while the flag-OFF rollback keeps the C
+      # implementation exercised.
       - name: Rust mathlib (differential test + flag-ON build)
         run: nix develop .#default -c ./scripts/check-rust-mathlib.sh
 
-      # sizebuf is the first port that crosses an ownership boundary: the C
-      # caller owns the struct and backing allocation while Rust returns
-      # interior pointers and invokes engine callbacks.  Keep its independent
-      # differential and ON/OFF construction gate beside the leaf-port gates.
       - name: Rust sizebuf (differential test + flag-ON build)
         run: nix develop .#default -c ./scripts/check-rust-sizebuf.sh
+
+      # The one part of the HexenWorld client that CI can test properly: the
+      # signon download parser and packed projectile handling need no game data,
+      # display or network.
+      - name: Unit test HexenWorld download parsing
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_download_test scripts/hw_download_test.c
+          ./hw_download_test
+
+      - name: Unit test HexenWorld packed projectiles
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_projectile_test scripts/hw_projectile_test.c
+          ./hw_projectile_test
 
       - name: Build Windows
         run: nix build .#win64 --print-build-logs

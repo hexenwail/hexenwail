@@ -47,6 +47,8 @@
 #define CE_FLAMEWALL2 71
 #undef CE_ONFIRE
 #define CE_ONFIRE 73
+#undef CE_FLOOR_EXPLOSION3
+#define CE_FLOOR_EXPLOSION3 72
 #define CE_RIPPLE 56
 #define CE_SM_EXPLOSION2 50
 #define CE_HWMISSILESTAR 42
@@ -62,6 +64,29 @@
 #define CE_HWRAVENPOWER 53
 #define CE_HWDRILLA 54
 #define CE_DEATHBUBBLES 55
+
+/* Maintained Hexen II client IDs; never confuse these with HW wire values. */
+enum
+{
+	HWCL_H2_BLDRN_EXPL = 45,
+	HWCL_H2_ACID_MUZZFL,
+	HWCL_H2_ACID_HIT,
+	HWCL_H2_FIREWALL_SMALL,
+	HWCL_H2_FIREWALL_MEDIUM,
+	HWCL_H2_FIREWALL_LARGE,
+	HWCL_H2_LBALL_EXPL,
+	HWCL_H2_ACID_SPLAT,
+	HWCL_H2_ACID_EXPL,
+	HWCL_H2_FBOOM,
+	HWCL_H2_BOMB = 56,
+	HWCL_H2_BRN_BOUNCE,
+	HWCL_H2_LSHOCK,
+	HWCL_H2_FLAMEWALL,
+	HWCL_H2_FLAMEWALL2,
+	HWCL_H2_FLOOR_EXPLOSION3,
+	HWCL_H2_ONFIRE,
+	HWCL_H2_FLAMESTREAM = 42
+};
 
 #define HW_PORT_CLIENT 26901
 #define HW_PORT_SERVER 26950
@@ -340,7 +365,8 @@ static qboolean HWCL_ValidProtocol (int protocol)
 		protocol == HW_PROTOCOL_VERSION_HEXENWAIL_1;
 }
 
-static void HWCL_LoadModels (void)
+/* Returns false when the world model (index 1) did not load. */
+static qboolean HWCL_LoadModels (void)
 {
 	static const char *player_names[MAX_PLAYER_CLASS] = {
 		"models/paladin.mdl", "models/crusader.mdl", "models/necro.mdl",
@@ -355,11 +381,13 @@ static void HWCL_LoadModels (void)
 		if (!hwcl_model_names[i][0])
 			continue;
 		model = Mod_ForName (hwcl_model_names[i], false);
-		if (!model)
-			Host_Error ("HexenWorld missing %s: %s\n"
+		/* Index 1 is the world: the caller reports that one and disconnects,
+		 * because by here a download has already been attempted for it. */
+		if (!model && i != 1)
+			Host_Error ("HexenWorld missing model: %s\n"
 				"Install hw/pak4.pak and the server's %s mod assets under %s (or %s).\n"
 				"Siege additionally needs siege/maps/siege.bsp and its mod assets.",
-				i == 1 ? "world map" : "model", hwcl_model_names[i],
+				hwcl_model_names[i],
 				fs_gamedir_nopath, FS_GetBasedir (), FS_GetUserbase ());
 		cl.model_precache[i] = model;
 	}
@@ -369,11 +397,12 @@ static void HWCL_LoadModels (void)
 			player_models[i] = Mod_ForName (player_names[i], false);
 
 	if (!cl.model_precache[1])
-		Host_Error ("HexenWorld server supplied no world map");
+		return false;
 
 	cl.worldmodel = cl_entities[0].model = cl.model_precache[1];
 	COM_FileBase (hwcl_model_names[1], cl.mapname, sizeof(cl.mapname));
 	R_NewMap ();
+	return true;
 }
 
 static void HWCL_LoadSounds (void)
@@ -391,6 +420,8 @@ static void HWCL_LoadSounds (void)
 	S_EndPrecaching ();
 	CL_PrecacheTEntSounds ();
 }
+
+#include "cl_hw_download.inc"
 
 /* Consume a chunked (protocol 26+) or classic precache list and retain its
  * indices.  The chunk command uses zero-based offsets, while wire indices
@@ -449,20 +480,18 @@ static void HWCL_ParsePrecacheList (qboolean models)
 		}
 	}
 
+	HWCL_CancelDownload ();
 	if (models)
 	{
 		if (index > hwcl_model_count)
 			hwcl_model_count = index;
-		HWCL_LoadModels ();
-		Con_Printf ("HexenWorld precache lists received; requesting signon.\n");
-		HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
+		HWCL_ModelNextDownload ();
 	}
 	else
 	{
 		if (index > hwcl_sound_count)
 			hwcl_sound_count = index;
-		HWCL_LoadSounds ();
-		HWCL_StringCmd (va ("modellist %d 0", hwcl_servercount));
+		HWCL_SoundNextDownload ();
 	}
 }
 
@@ -473,6 +502,8 @@ static void HWCL_ParseServerData (void)
 	const char *server_gamedir;
 	char levelname[1024];
 
+	/* A new level invalidates whatever list a download was walking. */
+	HWCL_CancelDownload ();
 	hwcl_protocol = MSG_ReadLong ();
 	if (!HWCL_ValidProtocol (hwcl_protocol))
 	{
@@ -488,6 +519,10 @@ static void HWCL_ParseServerData (void)
 	if (msg_badread || strlen (server_gamedir) >= sizeof(gamedir))
 		Host_Error ("Invalid HexenWorld server game directory");
 	q_strlcpy (gamedir, server_gamedir, sizeof(gamedir));
+	/* Unconditional, and never FS_Gamedir: this name came off the wire, and
+	 * FS_HWGamedir is the one path that validates it before mounting.  It
+	 * also rebuilds from the base searchpath every time, so a "-game <mod>"
+	 * launch gets its mod unwound and remounted above hw. */
 	if (!FS_HWGamedir (gamedir))
 		Host_Error ("Invalid HexenWorld server game directory: %s", gamedir);
 	Con_Printf ("HexenWorld server set the gamedir to %s\n", gamedir);
@@ -602,8 +637,12 @@ static void HWCL_ParseEntityDelta (const hwcl_entity_state_t *from,
 	if (bits & (1 << 1)) to->angles[2] = MSG_ReadAngle ();
 	if (bits & (1 << 2)) to->scale = MSG_ReadByte ();
 	if (bits & (1 << 19)) to->abslight = MSG_ReadByte ();
-	if (bits & (1 << 17)) MSG_ReadShort (); /* sound index, routed later */
+	/* SV_WriteDelta writes the protocol-100 alpha extension before U_SOUND.
+	 * Keep this order even though U_SOUND has the lower bit number: consuming
+	 * sound first turns its high byte into alpha whenever both fields occur in
+	 * one delta, and leaves the packet stream one byte out of alignment. */
 	if (bits & (1 << 20)) to->alpha = MSG_ReadByte (); /* protocol 100 */
+	if (bits & (1 << 17)) MSG_ReadShort (); /* sound index, routed later */
 	to->active = true;
 }
 
@@ -689,6 +728,13 @@ static void HWCL_SendConnectPacket (void);	/* defined below, with HWCL_Connect *
 
 static void HWCL_Changing (void)
 {
+	/* The original CL_Changing_f ignored "changing" while downloading so a
+	 * long transfer survived the map change.  Here the download belongs to
+	 * the old level's precache list: the svc_serverdata that follows
+	 * "reconnect" restarts the walk against the new list, re-requesting the
+	 * file only if the new level still needs it.  Cancelling also keeps a
+	 * half-written .tmp from outliving the level. */
+	HWCL_CancelDownload ();
 	S_StopAllSounds (true);
 	cl.intermission = 0;
 	cls.signon = 0;
@@ -699,6 +745,7 @@ static void HWCL_Changing (void)
 
 static void HWCL_Reconnect (void)
 {
+	HWCL_CancelDownload ();
 	S_StopAllSounds (true);
 
 	if (hwcl_state == hwcl_connected)
@@ -858,19 +905,6 @@ static void HWCL_ParseParticleExplosion (void)
 		R_ColoredParticleExplosion (origin, color, radius, counter);
 }
 
-static void HWCL_ParseDownload (void)
-{
-	int size;
-	int i;
-
-	size = MSG_ReadShort ();
-	MSG_ReadByte (); /* percent */
-	if (size <= 0 || msg_badread)
-		return;
-	for (i = 0; i < size; i++)
-		MSG_ReadByte ();
-}
-
 static void HWCL_SkipCoords (int count)
 {
 	int i;
@@ -905,69 +939,167 @@ static void HWCL_SkipFloats (int count)
 
 static void HWCL_ParseParticle (void)
 {
-	HWCL_SkipCoords (3);
-	MSG_ReadChar ();
-	MSG_ReadChar ();
-	MSG_ReadChar ();
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* color */
+	vec3_t origin, direction;
+	int count, color;
+	int i;
+
+	HWCL_ReadCoords (origin);
+	for (i = 0; i < 3; i++)
+		direction[i] = MSG_ReadChar () * (1.0f / 16.0f);
+	count = MSG_ReadByte ();
+	color = MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect (origin, direction, color,
+				count == 255 ? 1024 : count);
 }
 
 static void HWCL_ParseParticle2 (void)
 {
-	HWCL_SkipCoords (3);
-	HWCL_SkipFloats (6); /* dmin, dmax */
-	MSG_ReadShort (); /* color */
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* effect */
+	vec3_t origin, dmin, dmax;
+	int color, count;
+	ptype_t effect;
+	int i;
+
+	HWCL_ReadCoords (origin);
+	for (i = 0; i < 3; i++)
+		dmin[i] = MSG_ReadFloat ();
+	for (i = 0; i < 3; i++)
+		dmax[i] = MSG_ReadFloat ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadByte ();
+	effect = (ptype_t)MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect2 (origin, dmin, dmax, color, effect, count);
 }
 
 static void HWCL_ParseParticle3 (void)
 {
-	HWCL_SkipCoords (3);
-	MSG_ReadByte (); /* box x */
-	MSG_ReadByte (); /* box y */
-	MSG_ReadByte (); /* box z */
-	MSG_ReadShort (); /* color */
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* effect */
+	vec3_t origin, box;
+	int color, count;
+	ptype_t effect;
+	int i;
+
+	HWCL_ReadCoords (origin);
+	for (i = 0; i < 3; i++)
+		box[i] = MSG_ReadByte ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadByte ();
+	effect = (ptype_t)MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect3 (origin, box, color, effect, count);
 }
 
 static void HWCL_ParseParticle4 (void)
 {
-	HWCL_SkipCoords (3);
-	MSG_ReadByte (); /* radius */
-	MSG_ReadShort (); /* color */
-	MSG_ReadByte (); /* count */
-	MSG_ReadByte (); /* effect */
+	vec3_t origin;
+	float radius;
+	int color, count;
+	ptype_t effect;
+
+	HWCL_ReadCoords (origin);
+	radius = MSG_ReadByte ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadByte ();
+	effect = (ptype_t)MSG_ReadByte ();
+	if (!msg_badread)
+		R_RunParticleEffect4 (origin, radius, color, effect, count);
 }
 
 static void HWCL_ParseRainEffect (void)
 {
-	HWCL_SkipCoords (6); /* origin, size */
-	HWCL_SkipAngles (2); /* x/y direction */
-	MSG_ReadShort (); /* color */
-	MSG_ReadShort (); /* count */
+	vec3_t origin, size;
+	int x_dir, y_dir, color, count;
+
+	HWCL_ReadCoords (origin);
+	HWCL_ReadCoords (size);
+	x_dir = MSG_ReadAngle ();
+	y_dir = MSG_ReadAngle ();
+	color = MSG_ReadShort ();
+	count = MSG_ReadShort ();
+	if (!msg_badread)
+	{
+		/* HexenWorld's svc_raineffect has no Z direction.  Zero retains the
+		 * maintained renderer's stock random 256-955 unit fall speed. */
+		R_RainEffect (origin, size, x_dir, y_dir, 0, color, count);
+	}
 }
 
-static void HWCL_ParsePackedMissiles (void)
+#include "cl_hw_projectiles.inc"
+
+static qmodel_t *HWCL_PrecacheModelNamed (const char *name)
 {
-	int count;
 	int i;
 
-	count = MSG_ReadByte ();
-	for (i = 0; i < count * 5; i++)
-		MSG_ReadByte ();
+	for (i = 1; i < hwcl_model_count; i++)
+	{
+		if (!q_strcasecmp (hwcl_model_names[i], name))
+			return cl.model_precache[i];
+	}
+	return NULL;
 }
 
-static void HWCL_ParseNails (void)
+void HWCL_LinkPackedProjectiles (void)
 {
-	int count;
-	int i;
+	static entity_t entities[HWCL_MAX_PACKED_RAVENS + HWCL_MAX_PACKED_MISSILES];
+	static vec3_t missilestar_angles;
+	qmodel_t *raven_models[2];
+	qmodel_t *missile_models[2];
+	entity_t *ent;
+	int entity_count = 0;
+	int i, model;
 
-	count = MSG_ReadByte ();
-	for (i = 0; i < count * 6; i++)
-		MSG_ReadByte ();
+	raven_models[HWCL_RAVEN_MODEL] = HWCL_PrecacheModelNamed ("models/ravproj.mdl");
+	raven_models[HWCL_RAVEN2_MODEL] = HWCL_PrecacheModelNamed ("models/vindsht1.mdl");
+	missile_models[0] = HWCL_PrecacheModelNamed ("models/ball.mdl");
+	missile_models[1] = HWCL_PrecacheModelNamed ("models/newmmis.mdl");
+
+	missilestar_angles[1] += host_frametime * 300.0f;
+	missilestar_angles[2] += host_frametime * 400.0f;
+
+	for (i = 0; i < hwcl_num_packed_ravens; i++)
+	{
+		model = hwcl_packed_ravens[i].model;
+		if (!raven_models[model])
+			continue;
+		if (cl_numvisedicts == MAX_VISEDICTS)
+			break;
+		ent = &entities[entity_count++];
+		memset (ent, 0, sizeof(*ent));
+		ent->model = raven_models[model];
+		ent->colormap = vid.colormap;
+		ent->frame = hwcl_packed_ravens[i].frame;
+		VectorCopy (hwcl_packed_ravens[i].origin, ent->origin);
+		VectorCopy (hwcl_packed_ravens[i].angles, ent->angles);
+		cl_visedicts[cl_numvisedicts++] = ent;
+	}
+
+	for (i = 0; i < hwcl_num_packed_missiles; i++)
+	{
+		/* Type 1 is the ice-mace ball; every other server type historically
+		 * uses the spinning missile star. */
+		model = hwcl_packed_missiles[i].type == 1 ? 0 : 1;
+		if (!missile_models[model])
+			continue;
+		if (cl_numvisedicts == MAX_VISEDICTS)
+			break;
+		ent = &entities[entity_count++];
+		memset (ent, 0, sizeof(*ent));
+		ent->model = missile_models[model];
+		ent->colormap = vid.colormap;
+		ent->scale = model == 0 ? 10 : 50;
+		ent->drawflags = SCALE_TYPE_UNIFORM | SCALE_ORIGIN_CENTER;
+		VectorCopy (hwcl_packed_missiles[i].origin, ent->origin);
+		if (model == 1)
+			VectorCopy (missilestar_angles, ent->angles);
+		if (rand() % 10 < 3)
+		{
+			/* The legacy client passed the not-yet-filled temporary entity's
+			 * stale origin here.  Particles belong at the decoded projectile. */
+			R_RunParticleEffect4 (hwcl_packed_missiles[i].origin, 7,
+					148 + (rand() % 11), pt_grav, 10 + (rand() % 10));
+		}
+		cl_visedicts[cl_numvisedicts++] = ent;
+	}
 }
 
 static const char *HWCL_InfoValue (const char *info, const char *key)
@@ -1015,6 +1147,49 @@ static void HWCL_SkipXbowBolts (int turned)
 			HWCL_SkipCoords (3);
 			HWCL_SkipAngles (2);
 		}
+	}
+}
+
+static int HWCL_TranslateEffectType (int type)
+{
+	if (type >= 1 && type <= 41)
+		return type;
+	switch (type)
+	{
+	case CE_HWMISSILESTAR: return CE_HW_MISSILESTAR;
+	case CE_HWEIDOLONSTAR: return CE_HW_EIDOLONSTAR;
+	case CE_HWSHEEPINATOR: return CE_HW_SHEEPINATOR;
+	case CE_TRIPMINE: return CE_HW_TRIPMINE;
+	case CE_HWBONEBALL: return CE_HW_BONEBALL;
+	case CE_HWRAVENSTAFF: return CE_HW_RAVENSTAFF;
+	case CE_TRIPMINESTILL: return CE_HW_TRIPMINESTILL;
+	case CE_SCARABCHAIN: return CE_HW_SCARABCHAIN;
+	case CE_SM_EXPLOSION2: return CE_SM_EXPLOSION;
+	case CE_HWSPLITFLASH: return CE_SM_BLUE_FLASH;
+	case CE_HWXBOWSHOOT: return CE_HW_XBOWSHOOT;
+	case CE_HWRAVENPOWER: return CE_HW_RAVENPOWER;
+	case CE_HWDRILLA: return CE_HW_DRILLA;
+	case CE_DEATHBUBBLES: return CE_HW_DEATHBUBBLES;
+	case CE_RIPPLE: return CE_HW_RIPPLE;
+	case CE_BLDRN_EXPL: return HWCL_H2_BLDRN_EXPL;
+	case CE_ACID_MUZZFL: return HWCL_H2_ACID_MUZZFL;
+	case CE_ACID_HIT: return HWCL_H2_ACID_HIT;
+	case CE_FIREWALL_SMALL: return HWCL_H2_FIREWALL_SMALL;
+	case CE_FIREWALL_MEDIUM: return HWCL_H2_FIREWALL_MEDIUM;
+	case CE_FIREWALL_LARGE: return HWCL_H2_FIREWALL_LARGE;
+	case CE_LBALL_EXPL: return HWCL_H2_LBALL_EXPL;
+	case CE_ACID_SPLAT: return HWCL_H2_ACID_SPLAT;
+	case CE_ACID_EXPL: return HWCL_H2_ACID_EXPL;
+	case CE_FBOOM: return HWCL_H2_FBOOM;
+	case CE_BOMB: return HWCL_H2_BOMB;
+	case CE_BRN_BOUNCE: return HWCL_H2_BRN_BOUNCE;
+	case CE_LSHOCK: return HWCL_H2_LSHOCK;
+	case CE_FLAMEWALL: return HWCL_H2_FLAMEWALL;
+	case CE_FLAMEWALL2: return HWCL_H2_FLAMEWALL2;
+	case CE_FLOOR_EXPLOSION3: return HWCL_H2_FLOOR_EXPLOSION3;
+	case CE_ONFIRE: return HWCL_H2_ONFIRE;
+	case CE_FLAMESTREAM: return HWCL_H2_FLAMESTREAM;
+	default: return CE_NONE;
 	}
 }
 
@@ -1090,6 +1265,7 @@ static qboolean HWCL_ParseEffectPayload (int type)
 	case CE_BOMB:
 	case CE_BRN_BOUNCE:
 	case CE_LSHOCK:
+	case CE_FLOOR_EXPLOSION3:
 		HWCL_SkipCoords (3);
 		break;
 	case CE_WHITE_FLASH:
@@ -1168,69 +1344,103 @@ static qboolean HWCL_ParseEffectPayload (int type)
 
 static qboolean HWCL_ParseStartEffect (void)
 {
+	int start = msg_readcount;
 	int idx = MSG_ReadByte ();
-	int type = MSG_ReadByte ();
+	int wire_type = MSG_ReadByte ();
+	int type = HWCL_TranslateEffectType (wire_type);
+	int end;
 
-	(void)idx;
-	return HWCL_ParseEffectPayload (type);
+	(void) idx;
+	if (type == CE_NONE || !HWCL_ParseEffectPayload (wire_type))
+		return false;
+	end = msg_readcount;
+	/* Validation above is deliberately complete before replacing the slot. */
+	msg_readcount = start;
+	CL_ParseHWEffect (type);
+	msg_readcount = end;
+	return true;
 }
 
 static qboolean HWCL_ParseUpdateEffect (void)
 {
 	int idx = MSG_ReadByte ();
-	int type = MSG_ReadByte ();
-	int command;
+	int wire_type = MSG_ReadByte ();
+	int type = HWCL_TranslateEffectType (wire_type);
+	int command = 0, extra = 0;
+	float value = 0;
+	vec3_t angles = {0, 0, 0}, origin = {0, 0, 0};
 
-	(void)idx;
-	switch (type)
+	switch (wire_type)
 	{
 	case CE_SCARABCHAIN:
-		MSG_ReadShort ();
+		extra = MSG_ReadShort ();
 		break;
 	case CE_HWSHEEPINATOR:
 	case CE_HWXBOWSHOOT:
 		command = MSG_ReadByte ();
 		if (command & 1)
-			MSG_ReadCoord ();
+			value = MSG_ReadCoord ();
 		else
 		{
-			MSG_ReadAngle ();
-			MSG_ReadAngle ();
+			angles[0] = -MSG_ReadAngle ();
+			angles[1] = MSG_ReadAngle ();
 			if (command & 128)
-				HWCL_SkipCoords (3);
+				HWCL_ReadCoords (origin);
 		}
 		break;
 	case CE_HWDRILLA:
 		command = MSG_ReadByte ();
 		if (!command)
 		{
-			HWCL_SkipCoords (3);
-			MSG_ReadByte ();
+			HWCL_ReadCoords (origin);
+			extra = MSG_ReadByte ();
 		}
 		else
 		{
-			MSG_ReadAngle ();
-			MSG_ReadAngle ();
-			HWCL_SkipCoords (3);
+			angles[0] = -MSG_ReadAngle ();
+			angles[1] = MSG_ReadAngle ();
+			HWCL_ReadCoords (origin);
 		}
 		break;
 	default:
 		return false;
 	}
-	return !msg_badread;
+	if (msg_badread)
+		return false;
+	CL_UpdateHWEffect (idx, type, command, value, angles, origin, extra);
+	return true;
+}
+
+static qboolean HWCL_ParseTurnEffect (void)
+{
+	int idx = MSG_ReadByte ();
+	vec3_t origin, velocity;
+
+	(void) MSG_ReadFloat (); /* legacy interpolation timestamp */
+	HWCL_ReadCoords (origin);
+	HWCL_ReadCoords (velocity);
+	if (msg_badread)
+		return false;
+	CL_TurnHWEffect (idx, origin, velocity);
+	return true;
 }
 
 static qboolean HWCL_ParseMultiEffect (void)
 {
 	int type = MSG_ReadByte ();
-	int i;
+	int slots[3], i;
+	vec3_t origin, velocity;
 
 	if (type != CE_HWRAVENPOWER)
 		return false;
-	HWCL_SkipCoords (6);
+	HWCL_ReadCoords (origin);
+	HWCL_ReadCoords (velocity);
 	for (i = 0; i < 3; i++)
-		MSG_ReadByte ();
-	return !msg_badread;
+		slots[i] = MSG_ReadByte ();
+	if (msg_badread)
+		return false;
+	CL_MultiHWEffect (origin, velocity, slots);
+	return true;
 }
 
 static qmodel_t *HWCL_ModelForEntity (const hwcl_entity_state_t *state,
@@ -1510,6 +1720,12 @@ static void HWCL_ParseServerMessage (void)
 	int command;
 	const char *text;
 
+	/* These compact records describe only the current network update.  Keep
+	 * them out of cl_entities and replace the presentation set atomically per
+	 * server message, as the original HexenWorld client did. */
+	hwcl_num_packed_ravens = 0;
+	hwcl_num_packed_missiles = 0;
+
 	while (msg_readcount < hw_net_message.cursize)
 	{
 		command = MSG_ReadByte ();
@@ -1606,7 +1822,10 @@ static void HWCL_ParseServerMessage (void)
 				return;
 			break;
 		case HW_SVC_END_EFFECT:
-			MSG_ReadByte ();
+			command = MSG_ReadByte ();
+			if (msg_badread)
+				return;
+			CL_EndHWEffect (command);
 			break;
 		case HW_SVC_CENTERPRINT:
 			SCR_CenterPrint (MSG_ReadString ());
@@ -1732,9 +1951,8 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParseParticle4 ();
 			break;
 		case HW_SVC_TURN_EFFECT:
-			MSG_ReadByte ();
-			MSG_ReadFloat ();
-			HWCL_SkipCoords (6);
+			if (!HWCL_ParseTurnEffect ())
+				return;
 			break;
 		case HW_SVC_UPDATE_EFFECT:
 			if (!HWCL_ParseUpdateEffect ())
@@ -1855,6 +2073,8 @@ static void HWCL_ParseServerMessage (void)
 					if (!cl.worldmodel)
 						Host_Error ("HexenWorld signon without a world map");
 					cls.signon = SIGNONS;
+					/* Hexen II ends the plaque at signon 4 (CL_SignonReply);
+					 * this is HexenWorld's equivalent moment. */
 					SCR_EndLoadingPlaque ();
 					Con_Printf ("HexenWorld signon complete: %s.\n", cl.mapname);
 				}
@@ -1878,6 +2098,10 @@ static void HWCL_ParseServerMessage (void)
 					command);
 			return;
 		}
+		/* A handler may have dropped the connection (missing world, bad
+		 * download block); the rest of this packet belongs to it. */
+		if (hwcl_state == hwcl_disconnected)
+			return;
 		if (msg_badread)
 		{
 			Con_Printf ("Malformed HexenWorld server message.\n");
@@ -2167,6 +2391,7 @@ void HWCL_Disconnect (void)
 {
 	static const byte drop[] = {HW_CLC_STRINGCMD, 'd', 'r', 'o', 'p', 0};
 
+	HWCL_CancelDownload ();
 	hwcl_protocol = 0;
 	hwcl_servercount = 0;
 	hwcl_entity_sequence = -1;
@@ -2198,6 +2423,8 @@ void HWCL_Disconnect (void)
 		S_StopAllSounds (true);
 		cl.worldmodel = NULL;
 		FS_HWRestore ();
+		/* A connect or signon that fails leaves the plaque up, freezing the
+		 * screen until the 25 second "load timeout". */
 		SCR_EndLoadingPlaque ();
 	}
 	hwcl_state = hwcl_disconnected;
@@ -2256,7 +2483,12 @@ void HWCL_Frame (void)
 	    realtime - hwcl_last_received > Cvar_VariableValue ("net_messagetimeout"))
 		Host_Error ("HexenWorld server connection timed out");
 	if (hwcl_state == hwcl_connecting && realtime - hwcl_connect_time > 5.0)
+	{
+		/* No answer yet: show the console's retry lines rather than a
+		 * frozen plaque while the server stays silent. */
+		SCR_EndLoadingPlaque ();
 		HWCL_SendConnectPacket ();
+	}
 
 	while (HWNET_GetPacket ())
 	{

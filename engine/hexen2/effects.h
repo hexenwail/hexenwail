@@ -116,6 +116,21 @@
 #define CE_FLOOR_EXPLOSION3	61
 #define CE_ONFIRE		62
 
+/* Collision-free client-only types for HexenWorld's incompatible CE table. */
+#define CE_HW_MISSILESTAR	63
+#define CE_HW_EIDOLONSTAR	64
+#define CE_HW_SHEEPINATOR	65
+#define CE_HW_TRIPMINE		66
+#define CE_HW_BONEBALL		67
+#define CE_HW_RAVENSTAFF	68
+#define CE_HW_TRIPMINESTILL	69
+#define CE_HW_SCARABCHAIN	70
+#define CE_HW_XBOWSHOOT		71
+#define CE_HW_RAVENPOWER	72
+#define CE_HW_DRILLA		73
+#define CE_HW_DEATHBUBBLES	74
+#define CE_HW_RIPPLE		75
+
 struct EffectT
 {
 	int			type;
@@ -180,7 +195,37 @@ struct EffectT
 			vec3_t velocity;
 			int entity_index;
 			float time_amount;
+			float speed;
 		} Missile;
+		struct
+		{
+			vec3_t origin;
+			vec3_t velocity;
+			int ent1, owner;
+			int state, material, tag;
+			float time_amount, height;
+		} Chain;
+		struct
+		{
+			vec3_t angle, origin, avelocity, velocity;
+			int entity_index, ent1, ent2;
+			float time_amount, scale;
+			int scale_dir;
+		} Star;
+		struct
+		{
+			vec3_t origin[5];
+			vec3_t velocity, angle, vel[5];
+			int ent[5], state[5];
+			float gonetime[5], time_amount;
+			int activebolts, turnedbolts, bolts, randseed;
+		} Xbow;
+		struct
+		{
+			vec3_t offset;
+			int owner, count;
+			float time_amount;
+		} Bubble;
 		struct
 		{
 			int	entity_index[16];

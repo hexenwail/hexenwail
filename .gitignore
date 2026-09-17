@@ -4,6 +4,7 @@ all_output.txt
 result
 result-*
 .flatpak-builder/
+.pi/
 audit.md
 # engine/build/ is the default; the second renderer configuration needs its own
 # CMake cache, so the whole family is ignored (scripts/wasm-build.sh takes the
