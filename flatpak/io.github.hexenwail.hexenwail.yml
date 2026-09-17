@@ -140,6 +140,11 @@ modules:
       - -DUSE_CODEC_XMP=ON
       - -DUSE_ALSA=OFF
       - -DSOUNDFONT_PATH=/app/share/soundfonts/default.sf2
+      # The consolidated Rust shim requires cargo/rustc, which are not
+      # present in the Flatpak build sandbox.  Disable it for this target.
+      - -DUSE_RUST_HASHINDEX=OFF
+      - -DUSE_MATHLIB_RS=OFF
+      - -DUSE_SIZEBUF_RS=OFF
     sources:
       - type: dir
         path: ..

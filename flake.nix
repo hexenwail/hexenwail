@@ -199,6 +199,11 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
+              # For engine/rust, the consolidated Rust FFI ports (hashindex,
+              # mathlib and sizebuf) are on the default native build path, so
+              # cargo/rustc are listed here rather than fetched separately.
+              cargo
+              rustc
             ];
 
             buildInputs = with pkgs; [
@@ -795,6 +800,11 @@
               "-DUSE_CODEC_OPUS=ON"
               "-DUSE_CODEC_XMP=ON"
               "-DUSE_DEBUGINFO=ON"
+              # The consolidated Rust shim is not wired up for Emscripten or
+              # cross-compilation without the matching target toolchain.
+              "-DUSE_RUST_HASHINDEX=OFF"
+              "-DUSE_MATHLIB_RS=OFF"
+              "-DUSE_SIZEBUF_RS=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -940,7 +950,12 @@
               cd engine
             '';
 
-            cmakeFlags = [ "-DBUILD_DEDICATED=ON" ];
+            cmakeFlags = [
+              "-DBUILD_DEDICATED=ON"
+              "-DUSE_RUST_HASHINDEX=OFF"
+              "-DUSE_MATHLIB_RS=OFF"
+              "-DUSE_SIZEBUF_RS=OFF"
+            ];
 
             # Only the server target; the client .exe is .#win64's job.
             buildFlags = [ "h2ded" ];
@@ -1019,6 +1034,9 @@
                 -DCMAKE_BUILD_TYPE=Release \
                 -DUSE_CODEC_VORBIS=OFF \
                 -DUSE_ALSA=OFF \
+                -DUSE_RUST_HASHINDEX=OFF \
+                -DUSE_MATHLIB_RS=OFF \
+                -DUSE_SIZEBUF_RS=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine
@@ -1502,6 +1520,10 @@ EOF
             gcc
             gnumake
             cmake
+            # Rust toolchain for the consolidated engine/rust staticlib, which
+            # is on the default native build path.
+            cargo
+            rustc
 
             # Shader toolchain.  Present in the dev shell only, deliberately:
             # nothing in the build consumes it yet, because every shader in the

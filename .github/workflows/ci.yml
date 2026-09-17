@@ -156,11 +156,28 @@ jobs:
             exit 1
           fi
 
+      # USE_RUST_HASHINDEX now defaults ON for native Linux builds;
+      # unsupported targets (WASM, Windows cross-compile, Flatpak) are
+      # explicitly configured with -DUSE_RUST_HASHINDEX=OFF in their
+      # build scripts or manifests.  This step still matters -- the
+      # differential harness proves the Rust implementation computes what the
+      # C original computed (not just that it links), and the flag-OFF rollback
+      # keeps a working C original in the build graph.
+      - name: Rust hashindex (differential test + flag-ON build)
+        run: nix develop .#default -c ./scripts/check-rust-hashindex.sh
+
+      # The differential harness proves the Rust implementation computes what
+      # the C original computed, while the flag-OFF rollback keeps the C
+      # implementation exercised.
+      - name: Rust mathlib (differential test + flag-ON build)
+        run: nix develop .#default -c ./scripts/check-rust-mathlib.sh
+
+      - name: Rust sizebuf (differential test + flag-ON build)
+        run: nix develop .#default -c ./scripts/check-rust-sizebuf.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
-      # signon download parser reads a file name, a block length and a percent
-      # byte straight off the wire, and hw-smoke.sh only ever points it at a
-      # cooperative hwsv.  A hostile one is what these cover, and they need no
-      # game data, no display and no network.
+      # signon download parser and packed projectile handling need no game data,
+      # display or network.
       - name: Unit test HexenWorld download parsing
         run: |
           set -euo pipefail
