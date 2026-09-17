@@ -1404,6 +1404,7 @@ int CL_ReadFromServer (void)
 		CL_AdvanceTime ();
 		HWCL_ApplyState ();
 		CL_RelinkEntities ();
+		HWCL_LinkPackedProjectiles ();
 		CL_UpdateEffects ();
 		CL_UpdateTEnts ();
 		CL_UpdateDevStats ();

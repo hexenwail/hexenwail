@@ -129,6 +129,7 @@ static qboolean HWCL_Connect(const char *h) {
 static void HWCL_Frame(void) {}
 static qboolean HWCL_Active(void) { return false; }
 static void HWCL_ApplyState(void) {}
+static void HWCL_LinkPackedProjectiles(void) {}
 static void CL_AdvanceTime(void) {}
 static int CL_GetMessage(void) { assert(readpos < 4); return reads[readpos++]; }
 static void CL_ParseServerMessage(void) { if (parse_signon) cls.signon=1; }
