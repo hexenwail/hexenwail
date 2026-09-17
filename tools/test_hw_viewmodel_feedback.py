@@ -34,6 +34,10 @@ def main():
     assert "hwcl_view_drawflags &= ~MSG_ReadByte ();" in hw
     assert "state->drawflags | hwcl_view_drawflags" in hw
     assert hw.count("CL_ClearState ();\n\tHWCL_ResetPresentation ();") == 2
+    assert "V_ResetPunchAngle ();" not in function(
+        "engine/hexen2/cl_hw.c", "static void HWCL_ResetPresentation")
+    clear_state = function("engine/hexen2/cl_main.c", "void CL_ClearState (void)")
+    assert "memset (&cl, 0, sizeof(cl));\n\tV_ResetPunchAngle ();" in clear_state
     assert "V_DecayPunchAngle ();" in hw
     assert "HWCL_ViewModelVisible" in view
 
@@ -49,16 +53,43 @@ typedef int qboolean;
 #define ROLL 2
 #define STAT_WEAPON 2
 #define MAX_MODELS 8
+#define MAX_EFRAGS 4
 #define LERP_RESETANIM 4
 typedef struct qmodel_s { int id; } qmodel_t;
 typedef float vec3_t[3];
 typedef struct { qmodel_t *model; int frame, effects, scale, drawflags, abslight, lerpflags; } entity_t;
+typedef struct efrag_s { struct efrag_s *entnext; } efrag_t;
+typedef struct { int value; } dlight_t;
+typedef struct { int value; } lightstyle_t;
+typedef struct { int cleared; } sizebuf_t;
+typedef struct {
+    qmodel_t *model_precache[MAX_MODELS];
+    entity_t viewent;
+    vec3_t punchangle;
+    double punchtime, time;
+    efrag_t *free_efrags;
+    int current_frame, current_sequence, reference_frame, last_frame, last_sequence;
+    int need_build;
+} client_state_t;
 typedef struct { int weaponframe, effects, scale, drawflags, abslight; } hwcl_entity_state_t;
 static struct { int stats[32]; } hwcl_server_state;
-static struct { qmodel_t *model_precache[MAX_MODELS]; entity_t viewent; vec3_t punchangle; double punchtime, time; } cl;
+static client_state_t cl;
+static struct { sizebuf_t message; } cls;
+static struct { int active; } sv;
+static efrag_t cl_efrags[MAX_EFRAGS];
+static entity_t cl_entities[8];
+static dlight_t cl_dlights[8];
+static lightstyle_t cl_lightstyle[8];
 static int hwcl_view_drawflags;
 static float host_frametime;
 static vec3_t v_punchangles[2];
+static void CL_ShutdownCSProgs(void) {}
+static void Host_ClearMemory(void) {}
+static void SZ_Clear(sizebuf_t *message) { message->cleared++; }
+static void CL_ClearTEnts(void) {}
+static void CL_ClearEffects(void) {}
+static void SCR_SetPlaqueMessage(const char *message) { (void)message; }
+static void SB_InvReset(void) {}
 #define VectorCopy(a,b) memcpy((b), (a), sizeof(vec3_t))
 #define VectorClear(a) memset((a), 0, sizeof(vec3_t))
 '''
@@ -100,17 +131,16 @@ int main(void) {
     V_DecayPunchAngle();
     assert(cl.punchangle[PITCH] == 0 && v_punchangles[0][PITCH] == 0);
 
-    /* A reconnect/map change clears cl but used to leave -2 in global history.
-       Resetting presentation state makes the first same-sized smallkick apply. */
+    /* CL_ClearState is the shared level/connection boundary.  It must rebase
+       global punch history after clearing cl, without relying on HW wrappers. */
     cl.time = 20;
     cl.punchangle[PITCH] = 0;
     v_punchangles[0][PITCH] = v_punchangles[1][PITCH] = -2;
-    HWCL_ResetPresentation();
-    V_SetPunchAngle(-2);
-    assert(cl.punchangle[PITCH] == -2 &&
-           v_punchangles[0][PITCH] == -2 &&
-           v_punchangles[1][PITCH] == 0 && cl.punchtime == 20);
-    puts("PASS: HW viewmodel state, view flags, and one-shot kick resets");
+    CL_ClearState();
+    assert(cl.punchangle[PITCH] == 0 &&
+           v_punchangles[0][PITCH] == 0 &&
+           v_punchangles[1][PITCH] == 0 && cl.punchtime == 0);
+    puts("PASS: HW viewmodel state and shared punch reset boundary");
     return 0;
 }
 '''
@@ -118,8 +148,7 @@ int main(void) {
               function("engine/hexen2/view.c", "void V_ResetPunchAngle") + "\n" +
               function("engine/hexen2/view.c", "void V_SetPunchAngle") + "\n" +
               function("engine/hexen2/view.c", "void V_DecayPunchAngle") + "\n" +
-              function("engine/hexen2/cl_hw.c",
-                       "static void HWCL_ResetPresentation") + "\n" +
+              function("engine/hexen2/cl_main.c", "void CL_ClearState (void)") + "\n" +
               function("engine/hexen2/cl_hw.c",
                        "static void HWCL_ApplyViewModel") + "\n" +
               test)

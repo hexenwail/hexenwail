@@ -289,7 +289,6 @@ extern qmodel_t *player_models[MAX_PLAYER_CLASS];
 static void HWCL_ResetPresentation (void)
 {
 	hwcl_view_drawflags = 0;
-	V_ResetPunchAngle ();
 }
 
 static void HWCL_StringCmd (const char *command)
