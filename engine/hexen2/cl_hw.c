@@ -277,11 +277,19 @@ static int hwcl_playernum;
 /* Bit 128 of the svc_serverdata player number.  hwsv decides spectator mode
  * at connect and never changes it, and runs PlayerMove with it set. */
 static qboolean hwcl_spectator;
+/* svc_set/clear_view_flags is local presentation state, not part of the
+ * authoritative player record that supplies the rest of the viewmodel. */
+static int hwcl_view_drawflags;
 /* Players whose spawn we have already announced this signon.  Cleared on every
  * svc_serverdata so a reconnect can be seen happening. */
 static qboolean hwcl_players_seen[HWCL_MAX_CLIENTS];
 
 extern qmodel_t *player_models[MAX_PLAYER_CLASS];
+
+static void HWCL_ResetPresentation (void)
+{
+	hwcl_view_drawflags = 0;
+}
 
 static void HWCL_StringCmd (const char *command)
 {
@@ -549,6 +557,7 @@ static void HWCL_ParseServerData (void)
 		return;
 
 	CL_ClearState ();
+	HWCL_ResetPresentation ();
 	cls.signon = 0;
 	memset (hwcl_model_names, 0, sizeof(hwcl_model_names));
 	memset (hwcl_sound_names, 0, sizeof(hwcl_sound_names));
@@ -1133,7 +1142,61 @@ static const char *HWCL_InfoValue (const char *info, const char *key)
 
 static void HWCL_ParseDamage (void)
 {
+	/* HexenWorld's svc_damage payload is the maintained parser's armor,
+	 * blood, and inflictor-origin shape.  Keeping it on that path also
+	 * retains the HUD flash, view kick, and controller feedback. */
 	V_ParseDamage ();
+}
+
+static void HWCL_ParseMuzzleFlash (void)
+{
+	const hwcl_entity_state_t *state;
+	vec3_t forward, right, up;
+	dlight_t *dl;
+	int entitynum = MSG_ReadShort ();
+
+	if (msg_badread || entitynum < 1 || entitynum >= HWCL_MAX_ENTITIES)
+		return;
+	state = entitynum <= HWCL_MAX_CLIENTS ?
+		&hwcl_server_state.players[entitynum - 1] :
+		&hwcl_server_state.entities[entitynum];
+	if (!state->active)
+		return;
+
+	/* svc_muzzleflash is an event, not a persistent entity effect.  Do not
+	 * put EF_MUZZLEFLASH in the retained state: the next player update may
+	 * omit it, or a packet gap could leave the light on indefinitely. */
+	dl = CL_AllocDlight (entitynum);
+	VectorCopy (state->origin, dl->origin);
+	if (entitynum == cl.viewentity)
+		AngleVectors (cl.viewangles, forward, right, up);
+	else
+		AngleVectors (cl_entities[entitynum].angles, forward, right, up);
+	VectorMA (dl->origin, 18, forward, dl->origin);
+	dl->radius = 200 + (rand () & 31);
+	dl->minlight = 32;
+	dl->die = cl.time + 0.1;
+	dl->color[0] = 0.2;
+	dl->color[1] = 0.1;
+	dl->color[2] = 0.05;
+	dl->color[3] = 0.7;
+}
+
+static void HWCL_ApplyViewModel (const hwcl_entity_state_t *state)
+{
+	int modelindex = hwcl_server_state.stats[STAT_WEAPON];
+	qmodel_t *model = NULL;
+
+	if (modelindex > 0 && modelindex < MAX_MODELS)
+		model = cl.model_precache[modelindex];
+	if (cl.viewent.model != model)
+		cl.viewent.lerpflags |= LERP_RESETANIM;
+	cl.viewent.model = model;
+	cl.viewent.frame = state->weaponframe;
+	cl.viewent.effects = state->effects;
+	cl.viewent.scale = state->scale;
+	cl.viewent.drawflags = state->drawflags | hwcl_view_drawflags;
+	cl.viewent.abslight = state->abslight;
 }
 
 static void HWCL_SkipXbowBolts (int turned)
@@ -1525,6 +1588,11 @@ void HWCL_ApplyState (void)
 	int highest = 0;
 	int viewentity;
 
+	/* Legacy HW kicks are one-shot svc events, so reproduce the original
+	 * client's per-frame recovery rather than leaving a received kick in the
+	 * maintained clientdata punchangle forever. */
+	V_DecayPunchAngle ();
+
 	/* cl.mtime is shifted by HW_SVC_TIME and cl.time is advanced by
 	 * CL_AdvanceTime, exactly as on the Hexen II path.  Re-shifting mtime
 	 * here every rendered frame and pinning cl.time to mtime[0] would hold
@@ -1565,8 +1633,15 @@ void HWCL_ApplyState (void)
 		state = &hwcl_server_state.players[viewentity - 1];
 		VectorCopy (state->velocity, cl.velocity);
 		cl.stats[STAT_WEAPONFRAME] = state->weaponframe;
+		/* Keep all viewmodel state separate from player-origin prediction:
+		 * prediction owns only cl_entities[viewentity]'s position and velocity,
+		 * while these values always come from the last authoritative player
+		 * record.  This lets weapon animation continue while movement predicts. */
+		HWCL_ApplyViewModel (state);
 		/* HW origins are feet, and view height is implied by player flags,
-		 * not H2's SU_VIEWHEIGHT. Match the original HW client's camera. */
+		 * not H2's SU_VIEWHEIGHT. Match the original HW client's camera.
+		 * Spectators have no PF_DEAD/PF_CROUCH player payload, and always use
+		 * the normal eye height. */
 		cl.viewheight = hwcl_spectator ? 50 :
 			(hwcl_local_crouched ? 24 : (hwcl_local_dead ? 8 : 50));
 	}
@@ -1812,10 +1887,10 @@ static void HWCL_ParseServerMessage (void)
 			cl.viewent.colorshade = MSG_ReadByte ();
 			break;
 		case HW_SVC_SET_VIEW_FLAGS:
-			cl.viewent.drawflags |= MSG_ReadByte ();
+			hwcl_view_drawflags |= MSG_ReadByte ();
 			break;
 		case HW_SVC_CLEAR_VIEW_FLAGS:
-			cl.viewent.drawflags &= ~MSG_ReadByte ();
+			hwcl_view_drawflags &= ~MSG_ReadByte ();
 			break;
 		case HW_SVC_START_EFFECT:
 			if (!HWCL_ParseStartEffect ())
@@ -1833,8 +1908,12 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_KILLEDMONSTER:
 		case HW_SVC_FOUNDSECRET:
 		case HW_SVC_SELLSCREEN:
+			break;
 		case HW_SVC_SMALLKICK:
+			V_SetPunchAngle (-2);
+			break;
 		case HW_SVC_BIGKICK:
+			V_SetPunchAngle (-4);
 			break;
 		case HW_SVC_SPAWNSTATICSOUND:
 			HWCL_ParseStaticSound ();
@@ -1873,7 +1952,7 @@ static void HWCL_ParseServerMessage (void)
 				MSG_ReadLong ();
 			break;
 		case HW_SVC_MUZZLEFLASH:
-			MSG_ReadShort ();
+			HWCL_ParseMuzzleFlash ();
 			break;
 		case HW_SVC_UPDATEUSERINFO:
 			{
@@ -2192,6 +2271,7 @@ qboolean HWCL_Connect (const char *host)
 	q_strlcpy (hwcl_server_name, host, sizeof(hwcl_server_name));
 
 	CL_ClearState ();
+	HWCL_ResetPresentation ();
 	cls.state = ca_connected;
 	hwcl_state = hwcl_connecting;
 	cls.demonum = -1;
@@ -2203,6 +2283,13 @@ qboolean HWCL_Connect (const char *host)
 qboolean HWCL_Active (void)
 {
 	return hwcl_state != hwcl_disconnected;
+}
+
+qboolean HWCL_ViewModelVisible (void)
+{
+	/* The original HW view hides a dead player's weapon, but spectators keep
+	 * their normal first-person presentation and eye height. */
+	return !hwcl_local_dead;
 }
 
 /* Userinfo changed while connected -- name, playerclass, colours -- goes to

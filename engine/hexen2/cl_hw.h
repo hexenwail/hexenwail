@@ -23,6 +23,7 @@ void HWCL_ApplyState (void);
 void HWCL_LinkPackedProjectiles (void);
 void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse);
 qboolean HWCL_Active (void);
+qboolean HWCL_ViewModelVisible (void);
 void HWCL_Disconnect (void);
 void HWCL_Frame (void);
 void HWCL_Shutdown (void);

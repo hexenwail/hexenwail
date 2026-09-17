@@ -160,6 +160,7 @@ void CL_ClearState (void)
 
 // wipe the entire cl structure
 	memset (&cl, 0, sizeof(cl));
+	V_ResetPunchAngle ();
 
 	SZ_Clear (&cls.message);
 
