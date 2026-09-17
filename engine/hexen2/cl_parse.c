@@ -1240,7 +1240,7 @@ static void CL_ParseClientdata (int bits)
 CL_NewTranslation
 =====================
 */
-static void CL_NewTranslation (int slot)
+void CL_NewTranslation (int slot)
 {
 #ifndef GLQUAKE
 	int	i, j;

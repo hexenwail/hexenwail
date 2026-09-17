@@ -23,6 +23,10 @@
 #define __HX2_CLIENT_H
 
 #define	MAX_SCOREBOARDNAME	32
+/* Rebuild one player's software palette or GL translated skin after a
+ * protocol adapter changes its presentation metadata. */
+void CL_NewTranslation (int slot);
+
 typedef struct
 {
 	char		name[MAX_SCOREBOARDNAME];

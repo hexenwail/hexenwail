@@ -65,6 +65,7 @@ static int	rec_disconnects;
 static int	rec_plaque_ends;
 static int	rec_loadmodels_calls;
 static int	rec_loadsounds_calls;
+static int	rec_signon_finishes;
 static qboolean	stub_loadmodels_result = true;
 
 static char	testdir[MAX_OSPATH];
@@ -79,6 +80,7 @@ static void rec_reset (void)
 	rec_plaque_ends = 0;
 	rec_loadmodels_calls = 0;
 	rec_loadsounds_calls = 0;
+	rec_signon_finishes = 0;
 	stub_loadmodels_result = true;
 	stub_makepath_fail = 0;
 	stub_fs_fileexists = 0;
@@ -283,6 +285,21 @@ static char	hwcl_sound_names[MAX_SOUNDS][MAX_QPATH];
 static int	hwcl_model_count;
 static int	hwcl_sound_count;
 static int	hwcl_servercount = 7;
+
+/* Minimal HW player-presentation surface used by the skin download phase. */
+#define HWCL_MAX_CLIENTS 32
+typedef struct { char name[32]; } test_scoreboard_t;
+typedef struct { test_scoreboard_t *scores; } test_client_state_t;
+typedef struct { char skin[MAX_QPATH]; qboolean translation_dirty; }
+	test_presentation_t;
+static test_scoreboard_t test_scores[HWCL_MAX_CLIENTS];
+static test_client_state_t cl = { test_scores };
+static test_presentation_t hwcl_player_presentation[HWCL_MAX_CLIENTS];
+
+static void HWCL_FinishSignon (void)
+{
+	rec_signon_finishes++;
+}
 
 #include "../engine/hexen2/cl_hw_download.inc"
 
@@ -872,6 +889,32 @@ static void test_walk_requests (void)
 	CHECK (sent_cmd ("modellist 7 0"), "a complete sound list did not ask for models");
 }
 
+static void test_skin_walk (void)
+{
+	rec_reset ();
+	HWCL_CancelDownload ();
+	memset (test_scores, 0, sizeof(test_scores));
+	memset (hwcl_player_presentation, 0, sizeof(hwcl_player_presentation));
+	q_strlcpy (test_scores[2].name, "skin player", sizeof(test_scores[2].name));
+	q_strlcpy (hwcl_player_presentation[2].skin, "custom", MAX_QPATH);
+	stub_fs_fileexists = 0;
+	HWCL_SkinNextDownload ();
+	CHECK (sent_cmd ("download skins/custom.pcx"),
+		"the skin walk did not request the userinfo skin");
+
+	rec_reset ();
+	HWCL_CancelDownload ();
+	memset (test_scores, 0, sizeof(test_scores));
+	memset (hwcl_player_presentation, 0, sizeof(hwcl_player_presentation));
+	q_strlcpy (test_scores[0].name, "bad skin", sizeof(test_scores[0].name));
+	q_strlcpy (hwcl_player_presentation[0].skin, "../escape", MAX_QPATH);
+	HWCL_SkinNextDownload ();
+	CHECK (!sent_cmd ("download skins/"),
+		"the skin walk requested an unsafe userinfo path");
+	CHECK (rec_signon_finishes == 1,
+		"refused skin did not let the signon phase continue");
+}
+
 /* ================================================================== */
 
 int main (void)
@@ -896,6 +939,7 @@ int main (void)
 	test_rename_guard ();
 	test_missing_world ();
 	test_walk_requests ();
+	test_skin_walk ();
 
 	HWCL_CancelDownload ();
 	snprintf (cmd, sizeof(cmd), "rm -rf '%s'", testdir);
