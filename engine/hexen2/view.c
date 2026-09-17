@@ -28,6 +28,9 @@
 
 #include "quakedef.h"
 #include "input.h"
+#if defined(H2W_INTEGRATED)
+#include "cl_hw.h"
+#endif
 
 static	float	v_dmg_time, v_dmg_roll, v_dmg_pitch;
 
@@ -71,6 +74,34 @@ cvar_t	v_gunkick = {"v_gunkick", "2", CVAR_ARCHIVE};
 
 /* Copied from cl.punchangle by CL_ParseClientdata: [0] current, [1] previous. */
 vec3_t	v_punchangles[2];
+
+/* HexenWorld's svc_smallkick / svc_bigkick are one-shot events, unlike the
+ * maintained Hexen II clientdata punchangle.  Update the same interpolation
+ * history used by clientdata, so v_gunkick retains its documented behavior. */
+void V_SetPunchAngle (float pitch)
+{
+	if (v_punchangles[0][PITCH] == pitch &&
+		v_punchangles[0][YAW] == 0 && v_punchangles[0][ROLL] == 0)
+		return;
+	VectorCopy (v_punchangles[0], v_punchangles[1]);
+	VectorClear (cl.punchangle);
+	cl.punchangle[PITCH] = pitch;
+	VectorCopy (cl.punchangle, v_punchangles[0]);
+	cl.punchtime = cl.time;
+}
+
+void V_DecayPunchAngle (void)
+{
+	float pitch = cl.punchangle[PITCH];
+
+	if (pitch < 0)
+	{
+		pitch += 10 * host_frametime;
+		if (pitch > 0)
+			pitch = 0;
+		V_SetPunchAngle (pitch);
+	}
+}
 
 
 //=============================================================================
@@ -1088,6 +1119,13 @@ static void V_CalcRefdef (void)
 	 * one render frame of cross-model pose blending (uhexen2-43f8). */
 	{
 		struct qmodel_s *newmodel = cl.model_precache[cl.stats[STAT_WEAPON]];
+#if defined(H2W_INTEGRATED)
+		/* HexenWorld communicates death through PF_DEAD rather than a zero
+		 * weapon stat.  Keep its weapon hidden while dead without changing
+		 * the normal Hexen II clientdata path. */
+		if (HWCL_Active () && !HWCL_ViewModelVisible ())
+			newmodel = NULL;
+#endif
 		if (view->model != newmodel)
 			view->lerpflags |= LERP_RESETANIM;
 		view->model = newmodel;
