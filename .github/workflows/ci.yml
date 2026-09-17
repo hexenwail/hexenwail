@@ -168,6 +168,13 @@ jobs:
             -o hw_download_test scripts/hw_download_test.c
           ./hw_download_test
 
+      - name: Unit test HexenWorld packed projectiles
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_projectile_test scripts/hw_projectile_test.c
+          ./hw_projectile_test
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 

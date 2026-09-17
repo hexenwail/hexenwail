@@ -1024,32 +1024,81 @@ static void HWCL_ParseRainEffect (void)
 	}
 }
 
-static void HWCL_ParsePackedMissiles (void)
+#include "cl_hw_projectiles.inc"
+
+static qmodel_t *HWCL_PrecacheModelNamed (const char *name)
 {
-	int count;
 	int i;
 
-	count = MSG_ReadByte ();
-	for (i = 0; i < count * 5; i++)
-		MSG_ReadByte ();
+	for (i = 1; i < hwcl_model_count; i++)
+	{
+		if (!q_strcasecmp (hwcl_model_names[i], name))
+			return cl.model_precache[i];
+	}
+	return NULL;
 }
 
-static void HWCL_ParseNails (void)
+void HWCL_LinkPackedProjectiles (void)
 {
-	int count;
-	int group, i;
+	static entity_t entities[HWCL_MAX_PACKED_RAVENS + HWCL_MAX_PACKED_MISSILES];
+	static vec3_t missilestar_angles;
+	qmodel_t *raven_models[2];
+	qmodel_t *missile_models[2];
+	entity_t *ent;
+	int entity_count = 0;
+	int i, model;
 
-	/* The active HexenWorld server overloads svc_nails with two consecutive
-	 * packed raven groups.  Consume both even though rendering them needs a
-	 * separate frame-local entity adapter; stopping after the first group
-	 * leaves the second count to be misread as the next service opcode. */
-	for (group = 0; group < 2; group++)
+	raven_models[HWCL_RAVEN_MODEL] = HWCL_PrecacheModelNamed ("models/ravproj.mdl");
+	raven_models[HWCL_RAVEN2_MODEL] = HWCL_PrecacheModelNamed ("models/vindsht1.mdl");
+	missile_models[0] = HWCL_PrecacheModelNamed ("models/ball.mdl");
+	missile_models[1] = HWCL_PrecacheModelNamed ("models/newmmis.mdl");
+
+	missilestar_angles[1] += host_frametime * 300.0f;
+	missilestar_angles[2] += host_frametime * 400.0f;
+
+	for (i = 0; i < hwcl_num_packed_ravens; i++)
 	{
-		count = MSG_ReadByte ();
-		if (count < 0)
-			return;
-		for (i = 0; i < count * 6; i++)
-			MSG_ReadByte ();
+		model = hwcl_packed_ravens[i].model;
+		if (!raven_models[model])
+			continue;
+		if (cl_numvisedicts == MAX_VISEDICTS)
+			break;
+		ent = &entities[entity_count++];
+		memset (ent, 0, sizeof(*ent));
+		ent->model = raven_models[model];
+		ent->colormap = vid.colormap;
+		ent->frame = hwcl_packed_ravens[i].frame;
+		VectorCopy (hwcl_packed_ravens[i].origin, ent->origin);
+		VectorCopy (hwcl_packed_ravens[i].angles, ent->angles);
+		cl_visedicts[cl_numvisedicts++] = ent;
+	}
+
+	for (i = 0; i < hwcl_num_packed_missiles; i++)
+	{
+		/* Type 1 is the ice-mace ball; every other server type historically
+		 * uses the spinning missile star. */
+		model = hwcl_packed_missiles[i].type == 1 ? 0 : 1;
+		if (!missile_models[model])
+			continue;
+		if (cl_numvisedicts == MAX_VISEDICTS)
+			break;
+		ent = &entities[entity_count++];
+		memset (ent, 0, sizeof(*ent));
+		ent->model = missile_models[model];
+		ent->colormap = vid.colormap;
+		ent->scale = model == 0 ? 10 : 50;
+		ent->drawflags = SCALE_TYPE_UNIFORM | SCALE_ORIGIN_CENTER;
+		VectorCopy (hwcl_packed_missiles[i].origin, ent->origin);
+		if (model == 1)
+			VectorCopy (missilestar_angles, ent->angles);
+		if (rand() % 10 < 3)
+		{
+			/* The legacy client passed the not-yet-filled temporary entity's
+			 * stale origin here.  Particles belong at the decoded projectile. */
+			R_RunParticleEffect4 (hwcl_packed_missiles[i].origin, 7,
+					148 + (rand() % 11), pt_grav, 10 + (rand() % 10));
+		}
+		cl_visedicts[cl_numvisedicts++] = ent;
 	}
 }
 
@@ -1670,6 +1719,12 @@ static void HWCL_ParseServerMessage (void)
 {
 	int command;
 	const char *text;
+
+	/* These compact records describe only the current network update.  Keep
+	 * them out of cl_entities and replace the presentation set atomically per
+	 * server message, as the original HexenWorld client did. */
+	hwcl_num_packed_ravens = 0;
+	hwcl_num_packed_missiles = 0;
 
 	while (msg_readcount < hw_net_message.cursize)
 	{
