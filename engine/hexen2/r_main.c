@@ -1016,6 +1016,35 @@ static void RotatedBBox (vec3_t mins, vec3_t maxs, vec3_t angles, vec3_t tmins, 
 
 
 /*
+ * The 8bpp renderer has a single palette translucency table, but it still
+ * shares the brush-level decisions with GL: explicit zero skips the entity,
+ * partial alpha takes the translucent edge pass, and cutouts retain their
+ * palette hole semantics.  ENTALPHA_DECODE stays here rather than in the
+ * backend-neutral classifier because it is a protocol representation.
+ */
+brush_render_state_t R_SoftwareBrushRenderState (const entity_t *e,
+	const msurface_t *surface)
+{
+	brush_render_state_input_t input;
+
+	input.has_explicit_alpha = e->alpha != ENTALPHA_DEFAULT;
+	input.explicit_alpha = input.has_explicit_alpha ?
+		ENTALPHA_DECODE(e->alpha) : 1.0f;
+	/* Palette blending cannot represent r_wateralpha; its established default
+	 * is opaque unless the surface/entity already requests the trans pass. */
+	input.default_alpha = 1.0f;
+	input.drawflag_translucent = (e->drawflags & DRF_TRANSLUCENT) != 0;
+	if (surface && (surface->flags & SURF_DRAWTURB))
+		input.surface_kind = BRUSH_SURFACE_LIQUID;
+	else if (surface && surface->texinfo->texture->name[0] == '{')
+		input.surface_kind = BRUSH_SURFACE_CUTOUT;
+	else
+		input.surface_kind = BRUSH_SURFACE_REGULAR;
+
+	return R_ClassifyBrushRenderState(&input);
+}
+
+/*
 =============
 R_DrawBEntitiesOnList
 =============
@@ -1042,6 +1071,8 @@ static void R_DrawBEntitiesOnList (void)
 		switch (currententity->model->type)
 		{
 		case mod_brush:
+			if (!R_SoftwareBrushRenderState(currententity, NULL).visible)
+				break;
 			clmodel = currententity->model;
 
 			// see if the bounding box lets us trivially reject,

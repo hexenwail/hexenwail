@@ -22,6 +22,8 @@
 #ifndef GLQUAKE_H
 #define GLQUAKE_H
 
+#include "brush_render_state.h"
+
 /* Same implication glheader.h and gl_func.h make, restated because this
  * header does not include either and its texture format choice below depends
  * on the tier.  uhexen2-0py6. */
@@ -608,6 +610,8 @@ void TexMgr_Init (void);
 
 qboolean R_CullBox (vec3_t mins, vec3_t maxs);
 void R_DrawBrushModel (entity_t *e, qboolean Translucent);
+brush_render_state_t R_BrushEntityRenderState (const entity_t *e,
+	brush_surface_kind_t surface_kind, float default_alpha);
 void R_DrawWorld (void);
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override);
 void R_RotateForEntity (entity_t *e);
