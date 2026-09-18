@@ -593,6 +593,28 @@ static const char *GL_TextureFlagString (int flags)
 	return buf;
 }
 
+/* One row of imagelist.  tag marks which pool the texture came from. */
+static void GL_ImageListEntry (const gltexture_t *glt, int flags, const char *tag,
+			       const char *prefix, size_t preLen,
+			       int *live, int *shown, double *texels)
+{
+	(*live)++;
+	/* A full mip chain is 4/3 of the base level, the same estimate
+	 * upstream makes.  Compressed uploads occupy less than this;
+	 * the number is a texel count, not a VRAM measurement. */
+	*texels += (flags & TEX_MIPMAP)
+			? (double)glt->width * glt->height * 4.0 / 3.0
+			: (double)glt->width * glt->height;
+
+	if (preLen && q_strncasecmp (prefix, glt->identifier, preLen) != 0)
+		return;
+
+	(*shown)++;
+	Con_SafePrintf ("%6u %s %4i x%4i  %s%s\n", (unsigned int)glt->texnum,
+			GL_TextureFlagString (flags),
+			glt->width, glt->height, glt->identifier, tag);
+}
+
 /*
 ================
 GL_ImageList_f
@@ -619,9 +641,9 @@ static void GL_ImageList_f (void)
 {
 	const char	*prefix = NULL;
 	size_t		preLen = 0;
-	gltexture_t	*glt;
+	const gltexture_t	*glt;
 	double		texels = 0;
-	int		i, live = 0, shown = 0;
+	int		i, flags, live = 0, shown = 0;
 
 	if (Cmd_Argc() > 1)
 	{
@@ -633,22 +655,17 @@ static void GL_ImageList_f (void)
 	{
 		if (glt->texnum == GL_UNUSED_TEXTURE || !glt->identifier[0])
 			continue;	/* retired slot awaiting reuse */
+		GL_ImageListEntry (glt, glt->flags, "", prefix, preLen,
+				   &live, &shown, &texels);
+	}
 
-		live++;
-		/* A full mip chain is 4/3 of the base level, the same estimate
-		 * upstream makes.  Compressed uploads occupy less than this;
-		 * the number is a texel count, not a VRAM measurement. */
-		texels += (glt->flags & TEX_MIPMAP)
-				? (double)glt->width * glt->height * 4.0 / 3.0
-				: (double)glt->width * glt->height;
-
-		if (preLen && q_strncasecmp (prefix, glt->identifier, preLen) != 0)
-			continue;
-
-		shown++;
-		Con_SafePrintf ("%6u %s %4i x%4i  %s\n", (unsigned int)glt->texnum,
-				GL_TextureFlagString (glt->flags),
-				glt->width, glt->height, glt->identifier);
+	/* Skyboxes and the scrolling sky live in gl_texmgr.c's pool, not
+	 * gltextures[] -- see TexMgr_TextureAt for why.  Issue #127. */
+	for (i = 0; i < TexMgr_NumTextures (); i++)
+	{
+		if ((glt = TexMgr_TextureAt (i, &flags)) != NULL)
+			GL_ImageListEntry (glt, flags, "  [texmgr]", prefix, preLen,
+					   &live, &shown, &texels);
 	}
 
 	/* texels stays a double all the way to the printf: upstream truncates
@@ -684,60 +701,78 @@ static void GL_ImageDump_f (void)
 	Con_Printf ("imagedump needs glGetTexImage, which this GL ES build has no equivalent of\n");
 }
 #else
-static void GL_ImageDump_f (void)
+/* Writes one texture; false only when out of memory, which ends the dump. */
+static qboolean GL_ImageDumpEntry (const gltexture_t *glt, const char *dirpath,
+				   int *written, int *failed)
 {
-	char		dirpath[MAX_OSPATH], filepath[MAX_OSPATH];
+	char		filepath[MAX_OSPATH];
 	char		safename[MAX_QPATH];
-	gltexture_t	*glt;
 	byte		*buffer;
 	char		*c;
-	int		i, written = 0, failed = 0;
+
+	if (glt->width <= 0 || glt->height <= 0)
+		return true;
+
+	/* Identifiers are paths, and some are synthesised with ':' or
+	 * '*' in them (the warp textures, the per-face skybox names).
+	 * Flatten every separator to '_' so the result is one filename
+	 * in one directory on every platform.  Two identifiers that
+	 * differ only in a flattened character therefore land on the
+	 * same file and the second wins; that is upstream's behaviour
+	 * too, and the alternative -- a directory tree mirroring the
+	 * gamedir -- is worse to grep through, which is what the dump
+	 * is for. */
+	q_strlcpy (safename, glt->identifier, sizeof(safename));
+	for (c = safename; *c; c++)
+	{
+		if (strchr ("/\\:*?\"<>|", *c))
+			*c = '_';
+	}
+
+	q_snprintf (filepath, sizeof(filepath), "%s/%s.png", dirpath, safename);
+
+	buffer = (byte *) malloc ((size_t)glt->width * glt->height * 4);
+	if (!buffer)
+	{
+		Con_Printf ("imagedump: out of memory\n");
+		return false;
+	}
+
+	GL_Bind (glt->texnum);
+	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
+	glGetTexImage_fp (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+
+	if (Image_WritePNG (filepath, buffer, glt->width, glt->height, 32, true))
+		(*written)++;
+	else
+		(*failed)++;
+
+	free (buffer);
+	return true;
+}
+
+static void GL_ImageDump_f (void)
+{
+	char		dirpath[MAX_OSPATH];
+	const gltexture_t	*glt;
+	int		i, flags, written = 0, failed = 0;
+	qboolean	ok = true;
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, dirpath, sizeof(dirpath), "imagedump");
 	Sys_mkdir (dirpath, false);
 
-	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
+	for (i = 0, glt = gltextures; ok && i < numgltextures; i++, glt++)
 	{
 		if (glt->texnum == GL_UNUSED_TEXTURE || !glt->identifier[0])
 			continue;	/* retired slot awaiting reuse */
-		if (glt->width <= 0 || glt->height <= 0)
-			continue;
+		ok = GL_ImageDumpEntry (glt, dirpath, &written, &failed);
+	}
 
-		/* Identifiers are paths, and some are synthesised with ':' or
-		 * '*' in them (the warp textures, the per-face skybox names).
-		 * Flatten every separator to '_' so the result is one filename
-		 * in one directory on every platform.  Two identifiers that
-		 * differ only in a flattened character therefore land on the
-		 * same file and the second wins; that is upstream's behaviour
-		 * too, and the alternative -- a directory tree mirroring the
-		 * gamedir -- is worse to grep through, which is what the dump
-		 * is for. */
-		q_strlcpy (safename, glt->identifier, sizeof(safename));
-		for (c = safename; *c; c++)
-		{
-			if (strchr ("/\\:*?\"<>|", *c))
-				*c = '_';
-		}
-
-		q_snprintf (filepath, sizeof(filepath), "%s/%s.png", dirpath, safename);
-
-		buffer = (byte *) malloc ((size_t)glt->width * glt->height * 4);
-		if (!buffer)
-		{
-			Con_Printf ("imagedump: out of memory\n");
-			break;
-		}
-
-		GL_Bind (glt->texnum);
-		glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
-		glGetTexImage_fp (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
-
-		if (Image_WritePNG (filepath, buffer, glt->width, glt->height, 32, true))
-			written++;
-		else
-			failed++;
-
-		free (buffer);
+	/* gl_texmgr.c's pool: skyboxes and the scrolling sky.  Issue #127. */
+	for (i = 0; ok && i < TexMgr_NumTextures (); i++)
+	{
+		if ((glt = TexMgr_TextureAt (i, &flags)) != NULL)
+			ok = GL_ImageDumpEntry (glt, dirpath, &written, &failed);
 	}
 
 	Con_Printf ("imagedump: wrote %d texture%s to %s\n",
