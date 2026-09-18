@@ -662,11 +662,13 @@ void R_RenderBmodelFace (bedge_t *pedges, msurface_t *psurf)
 	if (!r_emitted)
 		return;
 
-	r_polycount++;
-
 	render_state = R_SoftwareBrushRenderState(currententity, psurf);
 	if (!render_state.visible)
 		return;
+
+	/* Counted after the visibility test: a zero-alpha surface is never
+	 * queued, so counting it first inflates r_speeds. */
+	r_polycount++;
 
 	surface_p->data = (void *)psurf;
 	surface_p->nearzi = r_nearzi;

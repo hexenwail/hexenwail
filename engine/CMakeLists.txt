@@ -1034,6 +1034,10 @@ add_dependencies(${EXECUTABLE_NAME} shaders_gen)
 # client and does not pull renderer or SDL linkage into the test binary.
 if(BUILD_TESTING)
     add_executable(brush_render_state_test tests/brush_render_state_test.c)
+    # The poly-count ordering case reads renderer sources as text, because the
+    # counters are globals in TUs that cannot link without SDL and the backend.
+    target_compile_definitions(brush_render_state_test PRIVATE
+        BRUSH_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME brush_render_state COMMAND brush_render_state_test)
 endif()
 
