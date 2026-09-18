@@ -1337,10 +1337,11 @@ void Mod_ReloadTextures (void)
 	// Reload alias models and sprites
 	for (j = 0; j < mod_numknown; j++)
 	{
-		/* MD5mesh models own no engine-loaded skins and live on the hunk,
-		 * so there is nothing to re-upload and the cache calls below would
-		 * corrupt the LRU chain.  uhexen2-zjux. */
-		if (mod_known[j].cache_is_hunk)
+		/* MD5mesh/MD3 models own no engine-loaded skins and live on the
+		 * hunk, so there is nothing to re-upload and the cache calls below
+		 * would corrupt the LRU chain.  uhexen2-zjux.  Alias only: sprites
+		 * are hunk too, and still need their frames re-uploaded.  GH #128. */
+		if (mod_known[j].type == mod_alias && mod_known[j].cache_is_hunk)
 			continue;
 
 		if ((mod_known[j].type == mod_alias) && (mod_known[j].needload != NL_UNREFERENCED))
@@ -3696,6 +3697,11 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 	daliasskingroup_t	*pinskingroup;
 	daliasskininterval_t	*pinskinintervals;
 
+	/* Deliberately the FIRST skin, never advanced: single skins 1..n have
+	 * never been flood-filled in any Quake-lineage GL loader (Ironwail too),
+	 * and filling them repaints UV-mapped texels on 30 retail models --
+	 * about 13k of snowleopard.mdl skin 1's 52k mapped texels.  Group
+	 * members below use their own pointer.  GH #154. */
 	skin = (byte *)(pskintype + 1);
 
 	/* Recomputed below from whatever skin actually wins; a reload must not
@@ -3893,7 +3899,9 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 		pskintype = (daliasskintype_t *)(pinskinintervals + groupskins);
 		for (j = 0; j < groupskins; j++)
 		{
-			Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
+			/* The member being loaded, not `skin`: that is skin 0, or the
+			 * group header itself when a group comes first.  GH #154. */
+			Mod_FloodFillSkin ((byte *)(pskintype), pheader->skinwidth, pheader->skinheight);
 			q_snprintf (name, sizeof(name), "%s_%i_%i", loadmodel->name, i, j);
 
 			// An external replacement (DDS/KTX, else PNG/TGA/PCX) wins
@@ -5293,6 +5301,10 @@ static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer)
 	{
 		psprite = (msprite_t *) Hunk_AllocName (size, loadname);
 		mod->cache.data = psprite;
+		/* Every reader asks cache_is_hunk, not the type, whether cache.data
+		 * may go to Cache_Check; a hunk address there dies in
+		 * Cache_UnlinkLRU.  GH #128. */
+		mod->cache_is_hunk = true;
 	}
 
 	psprite->type = LittleLong (pin->type);

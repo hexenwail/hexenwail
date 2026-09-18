@@ -91,6 +91,9 @@ jobs:
       - name: Test HexenWorld local presentation state
         run: nix develop -c python3 tools/test_hw_viewmodel_feedback.py
 
+      - name: Test GL model loader invariants
+        run: nix develop -c python3 tools/test_gl_model_loaders.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
