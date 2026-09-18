@@ -276,6 +276,7 @@ typedef struct
 	gl_renderer_profile_t	profile;
 	const char		*profile_name;
 	qboolean		anisotropy;
+	qboolean		texture_lod_bias;	/* GL_TEXTURE_LOD_BIAS: desktop only, not in ES 3.0/WebGL2 */
 	qboolean		float_color_buffer;	/* RGBA16F render targets, i.e. HDR */
 	qboolean		shader_storage;
 	qboolean		compute_shaders;

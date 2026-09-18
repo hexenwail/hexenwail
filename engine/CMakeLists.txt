@@ -1039,6 +1039,11 @@ if(BUILD_TESTING)
     target_compile_definitions(brush_render_state_test PRIVATE
         BRUSH_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME brush_render_state COMMAND brush_render_state_test)
+    add_executable(host_tick_test tests/host_tick_test.c)
+    add_test(NAME host_tick COMMAND host_tick_test)
+    # Menu pointer geometry (issue #137): header-only, same cheap shape.
+    add_executable(menu_pointer_test tests/menu_pointer_test.c)
+    add_test(NAME menu_pointer COMMAND menu_pointer_test)
 endif()
 
 if(RUST_ENGINE_FEATURES)

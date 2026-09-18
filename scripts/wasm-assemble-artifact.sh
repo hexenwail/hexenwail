@@ -36,6 +36,9 @@ rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
 cp -r web/. "$DIST_DIR/"
+# web/test/ holds the Node suites and the WebGL smoke page; they run in CI, not
+# in anyone's browser, so the deploy does not carry them.
+rm -rf "$DIST_DIR/test"
 sed -i.bak "s/__HEXENWAIL_BUILD_VERSION__/$BUILD_VERSION/g" "$DIST_DIR/sw.js"
 rm -f "$DIST_DIR/sw.js.bak"
 sed -i.bak "s/__HEXENWAIL_RENDERER__/$BUILD_RENDERER/g" "$DIST_DIR/app.js"
