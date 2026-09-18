@@ -243,6 +243,51 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int heigh
 	return tex;
 }
 
+/*
+================
+TexMgr_TextureAt
+
+Read-only view of what this shim owns, for imagelist and imagedump, which
+otherwise only see gltextures[].  Index 0 and 1 are the notexture/nulltexture
+placeholders, the rest are managed_textures[] slots.  Returns NULL for a slot
+TexMgr_FreeTexture has released or an index past TexMgr_NumTextures.
+*texflags gets the flags in TEX_* terms, since the stored ones are TEXPREF_*.
+
+The pool is deliberately NOT folded into gltextures[] (issue #127): the skybox
+cache in gl_sky.c holds these pointers across map changes, and every map change
+runs D_ClearOpenGLTextures(gl_texlevel), which deletes and zeroes gltextures[]
+slots by index range.  A merged pool would hand the cache dead GL names on the
+next map and let its eviction delete names since reissued to live textures.
+================
+*/
+int TexMgr_NumTextures (void)
+{
+	return 2 + num_managed_textures;
+}
+
+const gltexture_t *TexMgr_TextureAt (int i, int *texflags)
+{
+	const gltexture_t *tex;
+
+	if (i == 0)
+		tex = notexture;
+	else if (i == 1)
+		tex = nulltexture;
+	else if (i >= 2 && i < 2 + num_managed_textures)
+		tex = &managed_textures[i - 2];
+	else
+		return NULL;
+
+	if (tex->texnum == 0)
+		return NULL;
+
+	/* Every upload here is GL_RGBA with no mip chain. */
+	*texflags = TEX_RGBA;
+	if (tex->flags & TEXPREF_ALPHA)
+		*texflags |= TEX_ALPHA;
+	return tex;
+}
+
 void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants)
 {
 	/* Stub for compatibility */
