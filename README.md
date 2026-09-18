@@ -146,12 +146,11 @@ Two ways to attach music to a custom map:
    "CD"   "10"          // numeric fallback for engines without MIDI-key support
    ```
    Ship `<gamedir>/music/arena.ogg` (or `.opus`/`.mp3`/`.flac`/`.wav`/`.mid`/etc.).
-   Hexenwail also looks under `<gamedir>/music/<subdir>/arena.ogg` so multiple
-   authors can keep their tracks in separate folders without colliding.
+   `<gamedir>/music/<subdir>/arena.ogg` also works, so authors can keep their
+   tracks in separate folders.
 
-2. **Numeric track + remap** — keep the legacy `track%02d.ogg` layout but use
-   `bgm_remap` from the console (or autoexec.cfg) to point a numeric track at
-   any named file:
+2. **Numeric track + remap** — keep the `track%02d.ogg` layout and point a
+   track at any named file with `bgm_remap` (console or autoexec.cfg):
    ```
    bgm_remap 18 myambient
    bgm_remap list
@@ -159,8 +158,8 @@ Two ways to attach music to a custom map:
    ```
 
 ### Skybox and fog for mappers
-Engine-only worldspawn keys take the underscore prefix, so they never collide
-with the HexenC field namespace and your progs doesn't have to declare them:
+Use the underscore-prefixed worldspawn keys; your progs doesn't have to declare
+them:
 
 ```
 "_sky"    "grimmnight_"      // loads gfx/env/grimmnight_{rt,bk,lf,ft,up,dn}
@@ -169,51 +168,14 @@ with the HexenC field namespace and your progs doesn't have to declare them:
 ```
 
 The unprefixed `sky`, `skyname` (Half-Life), `qlsky` (Quake Lives), `skyfog`
-and `fog` spellings are still accepted for maps that already ship them, and
-neither spelling produces an `'sky' is not a field` warning any more. `sky
-<name>` also works from the console.
+and `fog` spellings are also accepted. `sky <name>` works from the console.
 
 ### MapSearch — entity search for mappers
-`mapsearch`, in the [`utils/`](utils/mapsearch) toolchain, searches `.map`
-sources for entities by classname, property name and value — for when you need
-to know what value someone else put in a property, which classnames actually
-use it, and whether the thing you are about to try has been done before. All
-three arguments are regexes, and each has to match a whole name or value:
-
-```
-mapsearch "*" spawnflags 64                  # anything with the 64 box checked
-mapsearch "*" "*" ".*\.wav"                  # every sound reference, anywhere
-mapsearch light_torch.* light "*"            # every torch and its light value
-mapsearch func_door.* classname              # one line per door, both variants
-```
-
-An integer value is also matched against the *bits* of spawnflags and its kin,
-so `2` finds everything with at least that box checked — whatever else is
-checked alongside it — and every hit prints its decomposition plus coordinates
-to paste into TrenchBroom's *Move Camera to...* box:
-
-```
-Line 15132: (trigger_teleport)   spawnflags          == 131 [1][2][128]  at -768 -1872 176
-Line 21642: (func_door_rotating) opendraw.spawnflags == 98 [2][32][64]   at -112 -264 -12
-```
-
-`+p` writes a `.pts` point file beside each matching map so you can step from
-one hit to the next in the editor. Search paths, exclusions and the list of
-flag properties live in `mapsearch-config.xml`.
-
-**MapSearch is [Inky](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)'s
-tool**, and thanks are due to him for it — the three-argument search, the
-bit-matching against spawnflags, the `.pts` point files and the config format
-are all his design, used here with his blessing and keeping his name at his
-request. **Please see [his site](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)
-for the full documentation and a Windows build for your mapping assistance** —
-his is the original, and the one that keeps getting his attention.
-
-This build shares none of his code. It exists so the toolchain has an entity
-search that compiles from source alongside qbsp and light on every platform we
-ship, including headless Linux. It reads `.map` text, so decompile your `.bsp`
-first (`utils/bsp2map` does it). Build it with `nix build .#utils`; full
-documentation is in [`utils/mapsearch/README`](utils/mapsearch/README).
+[`mapsearch`](utils/mapsearch/README) searches `.map` sources for entities by
+classname, property name and value. It is [Inky](http://earthday.free.fr/Inkys-Hexen-II-Mapping-Corner/)'s
+design, used with his permission and under his name; see his site for the
+original and a Windows build. Build ours with `nix build .#utils`. It reads
+`.map` text, so decompile a `.bsp` first with `utils/bsp2map`.
 
 ### Platform
 - SDL3 on Linux and Windows
