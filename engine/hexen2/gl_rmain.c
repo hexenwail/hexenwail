@@ -3338,7 +3338,7 @@ void R_CollectBrushInstances (void)
 	{
 		float fwd[3], rt[3], up[3];
 		entity_t *eview;
-		qboolean translucent;
+		brush_render_state_t render_state;
 
 		e = cl_visedicts[i];
 		if (!e->model || e->model->type != mod_brush)
@@ -3352,9 +3352,9 @@ void R_CollectBrushInstances (void)
 		 * routes the latter two to the full legacy R_DrawBrushModel
 		 * since they're opaque (the trans-edicts pass only sees
 		 * actually-translucent ents). */
-		translucent = ((e->drawflags & DRF_TRANSLUCENT) ||
-			(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
-		if (translucent)
+		render_state = R_BrushEntityRenderState(e,
+			BRUSH_SURFACE_REGULAR, 1.0f);
+		if (!render_state.visible || render_state.translucent)
 			continue;
 		if ((e->drawflags & MLS_MASKIN) != MLS_NONE)
 			continue;	/* MLS_ABSLIGHT/FULLBRIGHT/POWERMODE/TORCH/TOTALDARK
@@ -4878,6 +4878,7 @@ static void R_DrawEntitiesOnList (void)
 	qboolean	use_instancing;
 	mleaf_t		*pLeaf;
 	entity_t	*e;
+	brush_render_state_t brush_state;
 
 	if (r_aliasinfo_request)
 		R_DumpAliasInfo();
@@ -4975,8 +4976,11 @@ static void R_DrawEntitiesOnList (void)
 				if (!e->model || e->model->type != mod_brush)
 					continue;
 
-				item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
-					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
+				brush_state = R_BrushEntityRenderState(e,
+					BRUSH_SURFACE_REGULAR, 1.0f);
+				if (!brush_state.visible)
+					continue;
+				item_trans = brush_state.translucent;
 				if (item_trans)
 				{
 					pLeaf = Mod_PointInLeaf (e->origin, cl.worldmodel);
@@ -5030,8 +5034,11 @@ static void R_DrawEntitiesOnList (void)
 				e = cl_visedicts[i];
 				if (!e->model || e->model->type != mod_brush)
 					continue;
-				item_trans = ((e->drawflags & DRF_TRANSLUCENT) ||
-					(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha))) != 0;
+				brush_state = R_BrushEntityRenderState(e,
+					BRUSH_SURFACE_REGULAR, 1.0f);
+				if (!brush_state.visible)
+					continue;
+				item_trans = brush_state.translucent;
 				if (!item_trans)
 				{
 					if (r_speeds.integer >= 2) rprof_ents_n_brush_loop++;

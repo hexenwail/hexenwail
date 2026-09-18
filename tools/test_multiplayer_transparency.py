@@ -30,7 +30,7 @@ PRELUDE = r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-typedef int qboolean;
+#include "brush_render_state.h"
 #define true 1
 #define false 0
 #define DRF_TRANSLUCENT 128
@@ -77,25 +77,35 @@ int main(void) {
     assert(wire_pos == wire_len);
 
     entity_t brush = {0, ENTALPHA_DEFAULT};
-    assert(!R_BrushEntityTranslucent(&brush));
+    brush_render_state_t state =
+        R_BrushEntityRenderState(&brush, BRUSH_SURFACE_REGULAR, 1.0f);
+    assert(!state.translucent);
     brush.drawflags = DRF_TRANSLUCENT;
-    assert(R_BrushEntityTranslucent(&brush));
-    assert(R_BrushEntityAlpha(&brush, 0.4f) == 0.4f);
-    brush.drawflags = 0; brush.alpha = 128;
-    assert(R_BrushEntityTranslucent(&brush));
-    assert(R_BrushEntityAlpha(&brush, 0.4f) > 0.49f);
-    assert(R_BrushEntityAlpha(&brush, 0.4f) < 0.51f);
-    /* sworld_frag thresholds tex.a * entity_alpha.  A solid texel must
+    state = R_BrushEntityRenderState(&brush, BRUSH_SURFACE_REGULAR, 1.0f);
+    assert(state.translucent);
+    brush.drawflags = 0; brush.alpha = ENTALPHA_DEFAULT;
+    state = R_BrushEntityRenderState(&brush, BRUSH_SURFACE_REGULAR, 0.4f);
+    assert(state.translucent);
+    assert(state.alpha == 0.4f);
+    brush.alpha = 128;
+    state = R_BrushEntityRenderState(&brush, BRUSH_SURFACE_REGULAR, 0.4f);
+    assert(state.translucent);
+    assert(state.alpha > 0.49f);
+    assert(state.alpha < 0.51f);
+    /* sworld_frag thresholds tex.a * entity alpha.  A solid texel must
      * survive and a below-cutoff texel must still be discarded. */
-    float entity_alpha = R_BrushEntityAlpha(&brush, 1.0f);
-    float fence_threshold = R_BrushFenceThreshold(&brush);
-    assert(entity_alpha >= fence_threshold);
-    assert(0.5f * entity_alpha < fence_threshold);
+    state = R_BrushEntityRenderState(&brush, BRUSH_SURFACE_CUTOUT, 1.0f);
+    assert(state.cutout);
+    float fence_threshold = R_BrushFenceThreshold(&state);
+    assert(state.alpha >= fence_threshold);
+    assert(0.5f * state.alpha < fence_threshold);
     brush.alpha = ENTALPHA_DEFAULT;
-    assert(R_BrushFenceThreshold(&brush) > 0.665f);
-    assert(R_BrushFenceThreshold(&brush) < 0.667f);
+    state = R_BrushEntityRenderState(&brush, BRUSH_SURFACE_CUTOUT, 1.0f);
+    assert(R_BrushFenceThreshold(&state) > 0.665f);
+    assert(R_BrushFenceThreshold(&state) < 0.667f);
     brush.alpha = 255;
-    assert(!R_BrushEntityTranslucent(&brush));
+    state = R_BrushEntityRenderState(&brush, BRUSH_SURFACE_REGULAR, 1.0f);
+    assert(!state.translucent);
     puts("PASS: HW wire order and explicit brush alpha routing");
     return 0;
 }
@@ -107,21 +117,26 @@ def main():
     multiply = shader.index('"    vec4 color = tex * lm * v_color;\\n"')
     discard = shader.index('"    if (color.a < u_alpha_threshold) discard;\\n"', multiply)
     assert multiply < discard
-    brush = (ROOT / "engine/hexen2/gl_rsurf.c").read_text()
-    assert "GL_SetAlphaThreshold(R_BrushFenceThreshold(e));" in brush
-    assert "R_SetAlphaToCoverage (e->alpha == ENTALPHA_DEFAULT);" in brush
+    render_brush = function("engine/hexen2/gl_rsurf.c", "void R_RenderBrushPoly")
+    assert "render_state = R_BrushEntityRenderState(e, surface_kind, default_alpha);" in render_brush
+    cutout = render_brush.index("if (render_state.cutout)")
+    cutout_end = render_brush.index("\n\t/* MLS_ABSLIGHT", cutout)
+    cutout_route = render_brush[cutout:cutout_end]
+    assert "GL_SetAlphaThreshold(R_BrushFenceThreshold(&render_state));" in cutout_route
+    assert "R_SetAlphaToCoverage(!render_state.has_explicit_alpha);" in cutout_route
 
-    # Pin the complete WEBSOFT brush route.  CL_RelinkEntities maps partial
-    # protocol alpha to DRF before publishing the entity; brush face emission
-    # propagates DRF to SURF_TRANSLUCENT; the first edge scan skips that flag
-    # and the saved second scan draws only that flag.
+    # Pin the complete WEBSOFT brush route.  CL_RelinkEntities preserves
+    # canonical brush alpha; the software adapter feeds it through the shared
+    # classifier, then the saved edge scan draws only classified translucency.
     relink = function("engine/hexen2/cl_main.c", "static void CL_RelinkEntities")
     adapt = relink.index("ent->drawflags |= DRF_TRANSLUCENT;")
     publish = relink.index("cl_visedicts[cl_numvisedicts] = ent;")
     assert adapt < publish
     rdraw = (ROOT / "engine/h2shared/r_draw.c").read_text()
-    propagate = "surface_p->flags = psurf->flags | SURF_TRANSLUCENT;"
+    assert "render_state = R_SoftwareBrushRenderState(currententity, psurf);" in rdraw
+    propagate = "surface_p->flags = psurf->flags & ~SURF_TRANSLUCENT;"
     assert propagate in rdraw
+    assert "if (render_state.translucent)\n\t\tsurface_p->flags |= SURF_TRANSLUCENT;" in rdraw
     edge_pass = function("engine/hexen2/r_main.c", "static void R_EdgeDrawing")
     assert edge_pass.index("R_DrawBEntitiesOnList ();") < edge_pass.rindex(
         "R_ScanEdges (Translucent);"
@@ -133,9 +148,7 @@ def main():
     source = PRELUDE + function(
         "engine/hexen2/cl_hw.c", "static void HWCL_ParseEntityDelta"
     ) + function(
-        "engine/hexen2/gl_rsurf.c", "static qboolean R_BrushEntityTranslucent"
-    ) + function(
-        "engine/hexen2/gl_rsurf.c", "static float R_BrushEntityAlpha"
+        "engine/hexen2/gl_rsurf.c", "brush_render_state_t R_BrushEntityRenderState"
     ) + function(
         "engine/hexen2/gl_rsurf.c", "static float R_BrushFenceThreshold"
     ) + TEST
@@ -145,7 +158,8 @@ def main():
         cfile.write_text(source)
         subprocess.run([
             os.environ.get("CC", "cc"), "-std=c99", "-Wall", "-Wextra",
-            "-Werror", str(cfile), "-o", str(binary)
+            "-Werror", "-I" + str(ROOT / "engine/h2shared"),
+            "-I" + str(ROOT / "common"), str(cfile), "-o", str(binary)
         ], check=True)
         subprocess.run([str(binary)], check=True)
 

@@ -1318,14 +1318,17 @@ static void CL_RelinkEntities (void)
 			continue;
 
 #ifndef GLQUAKE
-		/* The 8bpp renderer has one palette translucency table rather than
-		 * arbitrary blend factors.  Preserve the protocol's important states:
-		 * ENTALPHA_ZERO is invisible, while every partial alpha uses the same
-		 * established path as DRF_TRANSLUCENT instead of rendering opaque. */
-		if (ent->alpha == ENTALPHA_ZERO)
-			continue;
-		if (ent->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(ent->alpha))
-			ent->drawflags |= DRF_TRANSLUCENT;
+		/* Brush entities keep canonical alpha until R_DrawBEntitiesOnList,
+		 * where the shared render-state classifier selects the opaque,
+		 * translucent, or skipped edge pass.  Other software model types still
+		 * use the palette renderer's established DRF_TRANSLUCENT bridge. */
+		if (!ent->model || ent->model->type != mod_brush)
+		{
+			if (ent->alpha == ENTALPHA_ZERO)
+				continue;
+			if (ent->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(ent->alpha))
+				ent->drawflags |= DRF_TRANSLUCENT;
+		}
 #endif
 
 		if (cl_numvisedicts < MAX_VISEDICTS)

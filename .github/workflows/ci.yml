@@ -195,6 +195,14 @@ jobs:
             -o hw_projectile_test scripts/hw_projectile_test.c
           ./hw_projectile_test
 
+      - name: Unit test brush render state
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -Iengine/h2shared -Icommon -o brush_render_state_test \
+            engine/tests/brush_render_state_test.c
+          ./brush_render_state_test
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 

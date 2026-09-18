@@ -26,6 +26,7 @@
 #ifndef GLQUAKE
 
 #include "r_shared.h"
+#include "brush_render_state.h"
 
 
 #define ALIAS_BASE_SIZE_RATIO	(1.0 / 11.0)
@@ -138,6 +139,10 @@ extern	int	r_visframecount;
 //
 extern	qboolean	insubmodel;
 
+/* The Web software renderer adapts this semantic state to its two palette
+ * passes; protocol alpha decoding remains in its renderer-owned adapter. */
+brush_render_state_t R_SoftwareBrushRenderState (const entity_t *e,
+	const msurface_t *surface);
 
 void R_DrawSprite (void);
 void R_RenderFace (msurface_t *fa, int clipflags);

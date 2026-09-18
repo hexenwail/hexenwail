@@ -978,24 +978,30 @@ R_RenderBrushPoly
 static float R_LiquidAlpha (const texture_t *t); /* forward decl */
 void R_LightmapRebuildIfDirty (msurface_t *surf);	/* defined below */
 
-static qboolean R_BrushEntityTranslucent (const entity_t *e)
+brush_render_state_t R_BrushEntityRenderState (const entity_t *e,
+	brush_surface_kind_t surface_kind, float default_alpha)
 {
-	return (e->drawflags & DRF_TRANSLUCENT) ||
-		(e->alpha != ENTALPHA_DEFAULT && !ENTALPHA_OPAQUE(e->alpha));
+	brush_render_state_input_t input;
+
+	input.has_explicit_alpha = e->alpha != ENTALPHA_DEFAULT;
+	/* Protocol decoding belongs to the renderer adapter, not the shared
+	 * classifier: Hexen II and HexenWorld may carry the same canonical value
+	 * through different parsers. */
+	input.explicit_alpha = input.has_explicit_alpha ?
+		ENTALPHA_DECODE(e->alpha) : 1.0f;
+	input.default_alpha = default_alpha;
+	input.drawflag_translucent = (e->drawflags & DRF_TRANSLUCENT) != 0;
+	input.surface_kind = surface_kind;
+
+	return R_ClassifyBrushRenderState(&input);
 }
 
-static float R_BrushEntityAlpha (const entity_t *e, float fallback)
-{
-	return (e->alpha != ENTALPHA_DEFAULT) ?
-		ENTALPHA_DECODE(e->alpha) : fallback;
-}
-
-static float R_BrushFenceThreshold (const entity_t *e)
+static float R_BrushFenceThreshold (const brush_render_state_t *state)
 {
 	/* sworld_frag compares after tex.a has been multiplied by entity alpha.
 	 * Scale the cutoff by the same factor so it continues testing tex.a at
 	 * 0.666 instead of discarding an otherwise solid, translucent fence. */
-	return 0.666f * R_BrushEntityAlpha(e, 1.0f);
+	return 0.666f * state->alpha;
 }
 
 void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
@@ -1005,14 +1011,37 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	int		maps;
 	float		intensity, alpha_val;
 	qboolean	entity_translucent;
+	brush_render_state_t render_state;
+	brush_surface_kind_t surface_kind;
+	float default_alpha;
 
 	c_brush_polys++;
 
 	glActiveTexture_fp(GL_TEXTURE0);
 
+	if (fa->flags & SURF_DRAWTURB)
+	{
+		surface_kind = BRUSH_SURFACE_LIQUID;
+		default_alpha = R_LiquidAlpha(fa->texinfo->texture);
+	}
+	else if (fa->flags & SURF_DRAWFENCE)
+	{
+		surface_kind = BRUSH_SURFACE_CUTOUT;
+		default_alpha = 1.0f;
+	}
+	else
+	{
+		surface_kind = BRUSH_SURFACE_REGULAR;
+		default_alpha = (e->drawflags & DRF_TRANSLUCENT) ?
+			r_wateralpha.value : 1.0f;
+	}
+	render_state = R_BrushEntityRenderState(e, surface_kind, default_alpha);
+	if (!render_state.visible)
+		return;
+
 	intensity = 1.0f;
-	alpha_val = 1.0f;
-	entity_translucent = R_BrushEntityTranslucent(e);
+	alpha_val = render_state.alpha;
+	entity_translucent = render_state.translucent;
 
 	if (entity_translucent)
 	{
@@ -1025,7 +1054,6 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		if (!OIT_InPass())
 			R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		R_SetDepthMask (false);
-		alpha_val = R_BrushEntityAlpha(e, r_wateralpha.value);
 	}
 	{
 		int mls = e->drawflags & MLS_MASKIN;
@@ -1081,9 +1109,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 
 	if (fa->flags & SURF_DRAWTURB)
 	{	// warp texture — apply per-liquid alpha + light tinting
-		float turb_alpha = R_BrushEntityAlpha(e,
-			R_LiquidAlpha(fa->texinfo->texture));
-		qboolean turb_blend = (turb_alpha < 1.0f);
+		float turb_alpha = render_state.alpha;
+		qboolean turb_blend = render_state.translucent;
 		/* R_LiquidAlpha is authoritative for turb surfaces unless the entity
 		 * carries an explicit protocol alpha.  The translucent prelude otherwise
 		 * uses r_wateralpha and enables BLEND assuming a regular surface; for a
@@ -1195,22 +1222,22 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		return;
 	}
 
-	if (fa->flags & SURF_DRAWFENCE)
+	if (render_state.cutout)
 	{
 		/* Alpha-tested cutout texels are opaque under the legacy drawflag,
 		 * but an explicit entity alpha must still modulate the surviving
 		 * pixels.  Keep blending/no-depth-write in that case.  uhexen2-t4kt.
 		 * Gated for OIT pass. */
-		if (!OIT_InPass() && e->alpha == ENTALPHA_DEFAULT)
+		if (!OIT_InPass() && !render_state.translucent)
 		{
 			R_SetBlend (false);
 			R_SetDepthMask (true);
 		}
-		GL_SetAlphaThreshold(R_BrushFenceThreshold(e));
+		GL_SetAlphaThreshold(R_BrushFenceThreshold(&render_state));
 		/* Alpha-to-coverage plus alpha blending attenuates explicit entity
-		 * alpha twice.  Keep A2C for the legacy opaque cutout only. */
+		 * alpha twice.  Keep A2C for opaque cutouts only. */
 		if (r_alphatocoverage.integer)
-			R_SetAlphaToCoverage (e->alpha == ENTALPHA_DEFAULT);
+			R_SetAlphaToCoverage(!render_state.has_explicit_alpha);
 	}
 
 	/* MLS_ABSLIGHT skip restored from pre-90265f406. Brush entities with
@@ -1802,6 +1829,8 @@ void R_DrawBrushModelSpecialOnly (entity_t *e)
 	qboolean rotated;
 
 	if (!clmodel)
+		return;
+	if (!R_BrushEntityRenderState(e, BRUSH_SURFACE_REGULAR, 1.0f).visible)
 		return;
 	/* uhexen2-view-dep: guarantee GL_BLEND is disabled on entry (same fix as
 	 * R_DrawBrushModel). Prevent stale blending state from world rendering. */
@@ -2587,8 +2616,8 @@ static void DrawTextureChains (entity_t *e)
 						 * r_wateralpha=1, r_lavaalpha=0) need
 						 * EmitWaterPolys for the warp UVs. */
 
-			if (((e->drawflags & DRF_TRANSLUCENT) ||
-				(e->drawflags & MLS_MASKIN) != MLS_NONE))
+			if (R_BrushEntityRenderState(e, BRUSH_SURFACE_REGULAR, 1.0f).translucent ||
+				(e->drawflags & MLS_MASKIN) != MLS_NONE)
 			{
 				if (world_state_set)
 				{
@@ -2872,6 +2901,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	qmodel_t	*clmodel;
 	qboolean	rotated;
 	qboolean	zfix;
+	brush_render_state_t render_state;
 
 	currenttexture = GL_UNUSED_TEXTURE;
 	GL_ImmResetState();
@@ -2883,6 +2913,9 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	R_SetBlend (false);
 
 	clmodel = e->model;
+	render_state = R_BrushEntityRenderState(e, BRUSH_SURFACE_REGULAR, 1.0f);
+	if (!render_state.visible)
+		return;
 
 	if (e->angles[0] || e->angles[1] || e->angles[2])
 	{
@@ -3008,7 +3041,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 	 * fence / underwater / translucent) fall through to the legacy
 	 * per-surface R_RenderBrushPoly path which handles them. */
 	if (world_vao && lm_atlas_enabled && lm_atlas_texture && world_ibo &&
-	    !Translucent && !(e->drawflags & DRF_TRANSLUCENT) &&
+	    !Translucent && !render_state.translucent &&
 	    (e->drawflags & MLS_MASKIN) == MLS_NONE &&
 	    !(e->model->flags & EF_TRANSPARENT))
 	{
