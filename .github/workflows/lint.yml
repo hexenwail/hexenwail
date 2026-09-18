@@ -90,6 +90,13 @@ jobs:
       - name: Multiplayer join and content-path regression
         run: python3 tools/test_multiplayer_join.py
 
+      # Skyboxes and the scrolling sky live in gl_texmgr.c's own pool, outside
+      # gltextures[], so imagelist/imagedump could not see them (issue #127).
+      # Compiles the real gl_texmgr.c against stubs and checks both commands
+      # still walk that pool.
+      - name: TexMgr pool visible to imagelist/imagedump
+        run: python3 tools/test_texmgr_image_enum.py
+
       # ARE_WE_IRONWAIL_YET.md carries a summary table over rows kept further
       # down the same file, and the two drift every time somebody flips a row
       # by hand.  The file records this happening in 2026-08-20 and twice on
