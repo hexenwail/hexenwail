@@ -39,6 +39,7 @@
 #include "bgmusic.h"
 #include "cdaudio.h"
 #include "sdl_inc.h"
+#include "menu_pointer.h"
 #include "gl_postprocess.h"
 #include "gl_shader.h"
 #include "gl_lightcluster.h"
@@ -777,6 +778,20 @@ void VID_SetWindowTitle (const char *title)
 SDL_Window *VID_GetWindow (void)
 {
 	return window;
+}
+
+void VID_PointerToFramebuffer (float wx, float wy, float *fx, float *fy)
+{
+	int	w = 0, h = 0, pw = 0, ph = 0;
+
+	if (window)
+	{
+		SDL_GetWindowSize (window, &w, &h);
+		SDL_GetWindowSizeInPixels (window, &pw, &ph);
+	}
+	/* GL_BeginRendering puts the framebuffer at 0,0 of the drawable */
+	*fx = MenuPointer_PointsToPixels (wx, w, pw);
+	*fy = MenuPointer_PointsToPixels (wy, h, ph);
 }
 
 qboolean VID_HasMouseOrInputFocus (void)
