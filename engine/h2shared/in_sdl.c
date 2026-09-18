@@ -25,6 +25,7 @@
 
 #include "sdl_inc.h"
 #include "quakedef.h"
+#include "menu_pointer.h"
 
 #include <math.h>
 #ifdef __EMSCRIPTEN__
@@ -75,6 +76,11 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_TouchLook (double dx, double dy)
 /* Menu cursor position (screen coordinates) */
 int		menu_mouse_x, menu_mouse_y;
 qboolean	menu_mouse_moved;
+/* Held SDL mouse buttons, MENU_MOUSE_BUTTON(b) per button, so a menu can tell
+ * a press-drag from a click (issue #137).  Set only by real SDL button events
+ * while the menu owns input: the web touch overlay injects K_MOUSE1 through
+ * Hexenwail_TouchKey and never touches this, so its taps stay plain Enter. */
+int		menu_mouse_buttons;
 
 static qboolean	mouseactive = false;
 static qboolean	mouseinitialized = false;
@@ -1409,6 +1415,11 @@ void IN_SendKeyEvents (void)
 	if (gamekey != prev_gamekey)
 		prev_gamekey = gamekey;
 
+	/* Leaving the menu drops every held button: a drag must start with a
+	 * press inside the menu, never inherit one from gameplay. */
+	if (!(Key_GetDest() & key_menu))
+		menu_mouse_buttons = 0;
+
 	while (SDL_PollEvent(&event))
 	{
 		switch (event.type)
@@ -1421,6 +1432,8 @@ void IN_SendKeyEvents (void)
 		case SDL_EVENT_WINDOW_FOCUS_LOST:
 			S_BlockSound();
 			IN_DeactivateMouse();
+			/* the release may land in another window and never reach us */
+			menu_mouse_buttons = 0;
 			break;
 		case SDL_EVENT_WINDOW_MINIMIZED:
 			scr_skipupdate = 1;
@@ -1482,11 +1495,21 @@ void IN_SendKeyEvents (void)
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
+			/* A release always clears, whoever it is routed to, so a press
+			 * that began in the menu can never stay held after it. */
+			if (!event.button.down && event.button.button >= 1 &&
+			    event.button.button <= 16)
+				menu_mouse_buttons &= ~MENU_MOUSE_BUTTON(event.button.button);
 			/* In menu mode, allow mouse clicks even when mouse is "inactive" */
 			if ((Key_GetDest() & key_menu) && ui_mouse.integer)
 			{
 				float mx, my;
 				SDL_GetMouseState(&mx, &my);
+				/* Before Key_Event: M_Keydown reads the bit to tell a
+				 * pointer press from Enter. */
+				if (event.button.down && event.button.button >= 1 &&
+				    event.button.button <= 16)
+					menu_mouse_buttons |= MENU_MOUSE_BUTTON(event.button.button);
 				menu_mouse_x = (int)mx;
 				menu_mouse_y = (int)my;
 				/* A click is a positioning event too: without this the

@@ -32,6 +32,7 @@
 #include "gl_pipeline.h"
 #endif
 #include "sbar.h"
+#include "menu_pointer.h"
 #include "sdl_inc.h"
 
 void (*vid_menudrawfn)(void);
@@ -222,10 +223,31 @@ static const char *DiffNames[MAX_PLAYER_CLASS][NUM_DIFFLEVELS] =
 
 extern int	menu_mouse_x, menu_mouse_y;
 extern qboolean	menu_mouse_moved;
+extern int	menu_mouse_buttons;	/* in_sdl.c; MENU_MOUSE_BUTTON bits */
 
 /* Convert a screen pixel Y to the menu canvas (0..200 logical) Y when
  * CANVAS_MENU is active, accounting for centering offset and scale. */
 static int M_ScreenYToCanvasY (int screen_y);
+
+/* The pointer in menu-canvas units, whether or not the canvas is set up yet:
+ * press handling runs from M_Keydown, outside M_Draw. */
+static int M_PointerCanvasX (void);
+static int M_PointerCanvasY (void);
+
+/* A press-drag in progress (issue #137).  While one is live the hover tests
+ * stand down, so the row being dragged keeps the cursor even when the pointer
+ * drifts off it vertically.  Released by M_Pointer_Think the first frame the
+ * button is up or the menu has changed underneath it. */
+typedef enum
+{
+	MGRAB_NONE,
+	MGRAB_SLIDER,
+	MGRAB_SCROLLBAR
+} menugrab_t;
+
+static menugrab_t	m_grab;
+static enum m_state_e	m_grab_state;
+static void M_Pointer_Think (void);
 
 /* ui_sound_throttle -- rate-limit a *repeated* menu sound.  Keyed on the
  * sample name, as upstream is (Ironwail Quake/menu.c:226): two different
@@ -298,7 +320,7 @@ static int M_MouseToMenuItem (int screen_y, int first_y, int item_height, int nu
 	 * every frame -- the arrow keys then appear to do nothing at all.
 	 * Gating here rather than at the fifteen call sites keeps the two
 	 * input devices from fighting in one place.  uhexen2-u4iz. */
-	if (!menu_mouse_moved)
+	if (!menu_mouse_moved || m_grab != MGRAB_NONE)
 		return -1;
 
 	vy = M_ScreenYToCanvasY (screen_y);
@@ -325,16 +347,47 @@ static int M_CenterOfs (void)
 /* Mouse comes in as raw screen pixels (top-left origin). Convert to the
  * 320x200 menu canvas Y. Canvas is top-anchored, horizontally centered,
  * so canvas Y = screen Y / scale. */
-static int M_ScreenYToCanvasY (int screen_y)
+static int M_CanvasYFromScreen (int screen_y)
 {
 	float s;
-	if (!m_canvas_active)
-		return screen_y;
 	s = SCR_CalcUIScale (&scr_menuscale);
 	if (s > (float)glwidth / 320.0f) s = (float)glwidth / 320.0f;
 	if (s > (float)glheight / 200.0f) s = (float)glheight / 200.0f;
 	if (s < 0.0001f) s = 1.0f;
 	return (int)(screen_y / s);
+}
+
+static int M_ScreenYToCanvasY (int screen_y)
+{
+	if (!m_canvas_active)
+		return screen_y;
+	return M_CanvasYFromScreen (screen_y);
+}
+
+static int M_PointerCanvasY (void)
+{
+	return M_CanvasYFromScreen (menu_mouse_y);
+}
+
+/* Inverse of CANVAS_MENU's horizontal placement in GL_SetCanvas: a 320-unit
+ * canvas, scaled by s and by the scr_pixelaspect stretch px, centred.  The
+ * software renderer reports s = 1 and a framebuffer-sized GUI, which makes
+ * this its (vid.width - 320) / 2 offset. */
+static int M_PointerCanvasX (void)
+{
+	float	s, px, w;
+	int	gw, gh;
+
+	SCR_GuiSize (&gw, &gh);
+	if (gw <= 0)
+		gw = glwidth;
+	s = SCR_CalcUIScale (&scr_menuscale);
+	if (s > (float)gw / 320.0f) s = (float)gw / 320.0f;
+	if (s < 0.0001f) s = 1.0f;
+	px = gw > 0 ? (float)glwidth / (float)gw : 1.0f;
+	if (px < 0.0001f) px = 1.0f;
+	w = 320.0f * s * px;
+	return (int)(((float)menu_mouse_x - ((float)glwidth - w) * 0.5f) / (s * px));
 }
 
 /*
@@ -2140,7 +2193,7 @@ again:
 //=============================================================================
 /* OPTIONS MENU */
 
-#define	SLIDER_RANGE	10
+#define	SLIDER_RANGE	MENU_SLIDER_CELLS	/* menu_pointer.h maps the pointer onto it */
 
 enum
 {
@@ -6122,15 +6175,15 @@ static int M_Mods_LayoutRows (int last_visible, int *ys)
  * or an uninstalled Portals row is drawn, but is not a place the cursor rests.
  *
  * Wheel and click need nothing here: M_Keydown already maps K_MWHEELUP/DOWN to
- * the arrows and K_MOUSE1 to Enter for every menu, so pointing at a row and
- * clicking activates that row.  Dragging the scrollbar thumb is NOT
- * implemented -- the menu is handed a position and a moved flag and no button
- * state at all (in_sdl.c:64), so a drag cannot be told from a hover. */
+ * the arrows and K_MOUSE1 to Enter, so pointing at a row and clicking
+ * activates that row.  The scrollbar is the exception: M_Mods_MousePress
+ * claims presses on it before they become Enter, and while its thumb is held
+ * this stands down so the drag, not the pointer's row, decides the scroll. */
 static void M_Mods_MouseHover (int n, const int *ys)
 {
 	int	vy, k;
 
-	if (!menu_mouse_moved)
+	if (!menu_mouse_moved || m_grab != MGRAB_NONE)
 		return;
 
 	vy = M_ScreenYToCanvasY (menu_mouse_y);
@@ -6149,6 +6202,82 @@ static void M_Mods_MouseHover (int n, const int *ys)
 		}
 	}
 	M_HoverSound (-1);
+}
+
+/* The scrollbar as it was last drawn.  Presses are hit-tested against this
+ * rather than a recomputed layout, because the track height depends on
+ * whether the separator is on screen (M_Mods_LayoutRows) -- what can be
+ * clicked has to be exactly what the player saw. */
+static menu_scrollbar_t	mods_sb;
+static int		mods_grab_offset;	/* pointer y - thumb y at the press */
+
+/* Scroll to `top' and pull the cursor into the new window.  Without the pull,
+ * M_Mods_EnsureVisible would drag the window straight back to the cursor on
+ * the next frame and the scrollbar could never move the list. */
+static void M_Mods_ScrollTo (int top)
+{
+	int	visible = M_Mods_VisibleRows ();
+
+	mods_top = MenuScrollbar_ClampTop (top, mods_view_count, visible);
+	if (mods_cursor < mods_top)
+	{
+		mods_cursor = mods_top;
+		M_Mods_SnapSelectable (1);
+	}
+	else if (mods_cursor >= mods_top + visible)
+	{
+		mods_cursor = mods_top + visible - 1;
+		M_Mods_SnapSelectable (-1);
+	}
+}
+
+/* Is canvas x over the scrollbar column?  One cell wide, with 4 units of slop
+ * each side; MODS_TAG_RIGHT keeps the tags out of that slop. */
+static qboolean M_Mods_OnScrollbarColumn (int vx)
+{
+	return vx >= MODS_SCROLLBAR_X - 4 && vx < MODS_SCROLLBAR_X + 8 + 4;
+}
+
+/* A pointer press, before M_Keydown turns it into Enter.  Returns true when
+ * the scrollbar took it: a press on the thumb starts a drag, a press on the
+ * track pages toward it.  Anywhere else is left to Enter, which activates the
+ * hovered row exactly as before. */
+static qboolean M_Mods_MousePress (void)
+{
+	int	vx = M_PointerCanvasX ();
+	int	vy = M_PointerCanvasY ();
+	int	hit;
+
+	if (!M_Mods_OnScrollbarColumn (vx))
+		return false;
+	hit = MenuScrollbar_HitTest (&mods_sb, vy);
+	if (hit == MENU_SCROLLBAR_MISS)
+		return false;
+
+	if (hit == MENU_SCROLLBAR_THUMB)
+	{
+		m_grab = MGRAB_SCROLLBAR;
+		m_grab_state = m_mods;
+		mods_grab_offset = vy - mods_sb.thumb_y;
+		return true;
+	}
+
+	S_LocalSound ("raven/menu1.wav");
+	M_Mods_ScrollTo (MenuScrollbar_PageTop (&mods_sb, mods_top, hit));
+	return true;
+}
+
+/* Per frame while the thumb is held (M_Pointer_Think). */
+static void M_Mods_DragScrollbar (void)
+{
+	int	top = MenuScrollbar_DragTop (&mods_sb, mods_top, M_PointerCanvasY (),
+					     mods_grab_offset);
+
+	if (top != mods_top)
+	{
+		M_Mods_ScrollTo (top);
+		M_MouseSound ("raven/menu1.wav");
+	}
 }
 
 static void M_Mods_Draw (void)
@@ -6224,19 +6353,17 @@ static void M_Mods_Draw (void)
 	if (last_visible < mods_view_count && nrows)
 		M_DrawCharacter (MODS_LIST_X - 16, row_y[nrows - 1], 129);
 
-	/* proportional scrollbar on right edge */
-	if (mods_view_count > visible)
+	/* proportional scrollbar on right edge; mods_sb is also what presses
+	 * are hit-tested against, so the two cannot drift apart */
+	if (MenuScrollbar_Layout (&mods_sb, MODS_LIST_TOP,
+				  list_bottom - MODS_LIST_TOP, mods_top,
+				  mods_view_count, visible))
 	{
-		int track_y = MODS_LIST_TOP;
-		int track_h = list_bottom - MODS_LIST_TOP;
-		int thumb_h = (visible * track_h) / mods_view_count;
-		int thumb_y = track_y + (mods_top * track_h) / mods_view_count;
 		int j;
-		if (thumb_h < 8) thumb_h = 8;
-		for (j = 0; j < track_h; j += 8)
+		for (j = 0; j < mods_sb.track_h; j += 8)
 		{
-			int cy = track_y + j;
-			if (cy >= thumb_y && cy < thumb_y + thumb_h)
+			int cy = mods_sb.track_y + j;
+			if (MenuScrollbar_CellIsThumb (&mods_sb, cy))
 				M_DrawCharacter (MODS_SCROLLBAR_X, cy, 11);
 			else
 				M_DrawCharacter (MODS_SCROLLBAR_X, cy, '-');
@@ -9172,6 +9299,7 @@ void M_Draw (void)
 		return;
 
 	M_Filter_Think ();
+	M_Pointer_Think ();
 
 	if (!m_recursiveDraw)
 	{
@@ -9382,6 +9510,208 @@ void M_Draw (void)
 }
 
 
+//=============================================================================
+/* POINTER PRESS AND DRAG (issue #137) */
+
+/*
+ * One description per slider row, in the terms the draw code already uses:
+ * v0/v1 are the cvar values at the left and right ends of the drawn bar (the
+ * inverse of each `r = ...' in the *_Draw functions), vmin/vmax the range the
+ * arrow keys clamp to, step the arrow-key increment.  A slider row that is
+ * not listed here still works with the keyboard; it just ignores the pointer.
+ */
+typedef struct
+{
+	int		item;
+	const char	*cvar;
+	float		v0, v1;
+	float		vmin, vmax;
+	float		step;
+	const cvar_t	*requires;	/* row shows text, not a bar, while this is 0 */
+} menuslider_t;
+
+typedef struct
+{
+	const menuslider_t	*sliders;
+	int			count;
+	int			*cursor;
+	int			first_y;	/* canvas y of row 0; rows are 8 apart */
+	int			slider_x;	/* x passed to M_DrawSlider */
+	qboolean		(*isskip) (int item);	/* NULL: every row drawn */
+} menusliderset_t;
+
+#define MENU_SLIDERSET(tab, cur, y0, skip) \
+	{ tab, (int)(sizeof(tab) / sizeof(tab[0])), &cur, y0, 220, skip }
+
+static const menuslider_t	disp_sliders[] =
+{
+	{ DISP_GAMMA,		"gamma",	1.0f, 0.3f,	0.3f, 1.0f,	0.05f, NULL },
+	{ DISP_CONTRAST,	"contrast",	0.5f, 2.0f,	0.5f, 2.0f,	0.05f, NULL },
+#ifdef GLQUAKE
+	/* DISP_CONSCALE steps through VID_ChangeConsize, not a cvar: keys only */
+	{ DISP_MENUFADEALPHA,	"scr_menubgalpha", 0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+#endif
+};
+
+static const menuslider_t	snd_sliders[] =
+{
+	{ SND_MUSICVOL,		"bgmvolume",	0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+	{ SND_SFXVOL,		"volume",	0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+	{ SND_WATERFX,		"snd_waterfx",	0.0f, 2.0f,	0.0f, 2.0f,	0.1f, NULL },
+};
+
+static const menuslider_t	rend_sliders[] =
+{
+	{ REND_DITHER,		"r_dither",	0.0f, 2.0f,	0.0f, 2.0f,	0.25f, NULL },
+	{ REND_WATERALPHA,	"r_wateralpha",	0.0f, 1.0f,	0.7f, 1.0f,	0.05f, NULL },
+	{ REND_LIQUIDWARP,	"gl_waterwarp_amount", 0.0f, 2.0f, 0.0f, 2.0f,	0.1f, NULL },
+	{ REND_FLASHINTENSITY,	"gl_flashintensity", 0.0f, 2.0f, 0.0f, 2.0f,	0.25f, NULL },
+	{ REND_MOTIONBLUR,	"r_motionblur",	0.0f, 1.0f,	0.0f, 1.0f,	0.25f, NULL },
+	{ REND_HDR_EXPOSURE,	"r_hdr_exposure", 0.1f, 4.0f,	0.1f, 4.0f,	0.1f, &r_hdr },
+};
+
+static const menuslider_t	gfx_sliders[] =
+{
+	{ GFX_CONALPHA,		"scr_conalpha",	0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+	{ GFX_CONBRIGHT,	"scr_conbrightness", 0.0f, 2.0f, 0.0f, 2.0f,	0.1f, NULL },
+	{ GFX_GLOW_INTENSITY,	"gl_glow_intensity", 0.0f, 1.0f, 0.0f, 1.0f,	0.1f, NULL },
+};
+
+static const menuslider_t	game_sliders[] =
+{
+	{ GAME_FOV,		"fov",		60.0f, 130.0f,	60.0f, 130.0f,	2.0f, NULL },
+	{ GAME_GUN_FOVSCALE,	"cl_gun_fovscale", 0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+	{ GAME_MOUSESPEED,	"sensitivity",	1.0f, 11.0f,	1.0f, 11.0f,	0.5f, NULL },
+	{ GAME_VIEWBOB,		"cl_bob",	0.0f, 0.05f,	0.0f, 0.05f,	0.005f, NULL },
+	{ GAME_VIEWROLL,	"cl_rollangle",	0.0f, 5.0f,	0.0f, 5.0f,	0.5f, NULL },
+};
+
+static const menuslider_t	gpad_sliders[] =
+{
+	{ GPAD_SENSX,		"joy_sensitivity_yaw",	 60.0f, 720.0f, 60.0f, 720.0f, 30.0f, NULL },
+	{ GPAD_SENSY,		"joy_sensitivity_pitch", 60.0f, 720.0f, 60.0f, 720.0f, 30.0f, NULL },
+	{ GPAD_ACCEL_LOOK,	"joy_exponent",		1.0f, 5.0f,	1.0f, 5.0f,	0.25f, NULL },
+	{ GPAD_ACCEL_MOVE,	"joy_exponent_move",	1.0f, 5.0f,	1.0f, 5.0f,	0.25f, NULL },
+	{ GPAD_DZ_LOOK,		"joy_deadzone_look",	0.0f, 0.5f,	0.0f, 0.5f,	0.025f, NULL },
+	{ GPAD_DZ_MOVE,		"joy_deadzone_move",	0.0f, 0.5f,	0.0f, 0.5f,	0.025f, NULL },
+	{ GPAD_DZ_TRIGGER,	"joy_deadzone_trigger",	0.0f, 0.75f,	0.0f, 0.75f,	0.05f, NULL },
+	{ GPAD_RUMBLE,		"joy_rumble",		0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+};
+
+static const menusliderset_t	disp_sliderset = MENU_SLIDERSET (disp_sliders, display_cursor, 92, M_Display_IsSkip);
+static const menusliderset_t	snd_sliderset = MENU_SLIDERSET (snd_sliders, sound_cursor, 92, NULL);
+static const menusliderset_t	rend_sliderset = MENU_SLIDERSET (rend_sliders, rendering_cursor, 92, M_Rendering_IsSkip);
+static const menusliderset_t	gfx_sliderset = MENU_SLIDERSET (gfx_sliders, graphics_cursor, 92, M_Graphics_IsSkip);
+static const menusliderset_t	game_sliderset = MENU_SLIDERSET (game_sliders, game_cursor, 92, M_Game_IsSkip);
+static const menusliderset_t	gpad_sliderset = MENU_SLIDERSET (gpad_sliders, gamepad_cursor, 90, NULL);
+
+static const menusliderset_t *M_SliderSetForState (enum m_state_e state)
+{
+	switch (state)
+	{
+	case m_display:		return &disp_sliderset;
+	case m_sound:		return &snd_sliderset;
+	case m_rendering:	return &rend_sliderset;
+	case m_graphics:	return &gfx_sliderset;
+	case m_game:		return &game_sliderset;
+	case m_gamepad:		return &gpad_sliderset;
+	default:		return NULL;
+	}
+}
+
+static const menuslider_t	*m_grab_slider;
+static int			m_grab_slider_x;
+
+/* Set the grabbed slider's cvar from pointer x.  Writes only on a change, so
+ * holding the thumb still does not re-run the cvar's callback every frame. */
+static void M_Slider_SetFromPointer (const menuslider_t *sl, int slider_x)
+{
+	float	v, cur, d;
+
+	v = MenuPointer_SliderValue (
+		MenuPointer_SliderFraction (M_PointerCanvasX (), slider_x),
+		sl->v0, sl->v1, sl->vmin, sl->vmax, sl->step);
+	cur = Cvar_VariableValue (sl->cvar);
+	d = v > cur ? v - cur : cur - v;
+	if (d < sl->step * 0.01f)
+		return;
+	Cvar_SetValue (sl->cvar, v);
+	M_ThrottledSound ("raven/menu3.wav");
+}
+
+/* A press on the bar of a slider row sets that slider from the pointer and
+ * holds it for dragging.  A press anywhere else on the row -- the label, the
+ * value text -- is left to Enter, which nudges it as it always has. */
+static qboolean M_Slider_MousePress (void)
+{
+	const menusliderset_t	*set = M_SliderSetForState (m_state);
+	const menuslider_t	*sl = NULL;
+	int			vy, row, i;
+
+	if (!set)
+		return false;
+	vy = M_PointerCanvasY ();
+	if (vy < set->first_y)
+		return false;
+	row = (vy - set->first_y) / 8;
+	for (i = 0; i < set->count; i++)
+	{
+		if (set->sliders[i].item == row)
+		{
+			sl = &set->sliders[i];
+			break;
+		}
+	}
+	if (!sl || (set->isskip && set->isskip (row)))
+		return false;
+	if (sl->requires && !sl->requires->integer)
+		return false;
+	if (!MenuPointer_OnSlider (M_PointerCanvasX (), set->slider_x))
+		return false;
+
+	*set->cursor = row;
+	m_grab = MGRAB_SLIDER;
+	m_grab_state = m_state;
+	m_grab_slider = sl;
+	m_grab_slider_x = set->slider_x;
+	S_LocalSound ("raven/menu3.wav");
+	M_Slider_SetFromPointer (sl, set->slider_x);
+	return true;
+}
+
+/* Offer a pointer press to the current menu before it becomes Enter. */
+static qboolean M_MousePress (void)
+{
+	m_grab = MGRAB_NONE;
+	if (m_state == m_mods)
+		return M_Mods_MousePress ();
+	return M_Slider_MousePress ();
+}
+
+/* Once per drawn frame, ahead of the hover tests.  Ends a grab the moment its
+ * button is up or its menu is gone (Escape mid-drag, a menu change, focus
+ * loss -- in_sdl.c zeroes the bits for the last two), else follows the
+ * pointer. */
+static void M_Pointer_Think (void)
+{
+	if (m_grab == MGRAB_NONE)
+		return;
+	if (!(menu_mouse_buttons & MENU_MOUSE_LEFT) || m_grab_state != m_state)
+	{
+		m_grab = MGRAB_NONE;
+		m_grab_slider = NULL;
+		return;
+	}
+	if (!menu_mouse_moved)
+		return;
+
+	if (m_grab == MGRAB_SLIDER && m_grab_slider)
+		M_Slider_SetFromPointer (m_grab_slider, m_grab_slider_x);
+	else if (m_grab == MGRAB_SCROLLBAR)
+		M_Mods_DragScrollbar ();
+}
+
+
 /*
 ================
 M_Keys_NoteConflict
@@ -9464,9 +9794,16 @@ void M_Keybind (int key)
 
 void M_Keydown (int key, qboolean repeat)
 {
-	/* Mouse support: click=Enter, wheel=Up/Down */
+	/* Mouse support: click=Enter, wheel=Up/Down.  A click the pointer layer
+	 * claims (slider bar, scrollbar) stops here.  The button bit is what makes
+	 * it a pointer click: the web touch overlay sends K_MOUSE1 without one,
+	 * and that must stay a plain Enter. */
 	if (key == K_MOUSE1)
+	{
+		if (!repeat && (menu_mouse_buttons & MENU_MOUSE_LEFT) && M_MousePress ())
+			return;
 		key = K_ENTER;
+	}
 	else if (key == K_MWHEELUP)
 		key = K_UPARROW;
 	else if (key == K_MWHEELDOWN)
