@@ -1015,8 +1015,6 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	brush_surface_kind_t surface_kind;
 	float default_alpha;
 
-	c_brush_polys++;
-
 	glActiveTexture_fp(GL_TEXTURE0);
 
 	if (fa->flags & SURF_DRAWTURB)
@@ -1038,6 +1036,10 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	render_state = R_BrushEntityRenderState(e, surface_kind, default_alpha);
 	if (!render_state.visible)
 		return;
+
+	/* Counted after the visibility test: a zero-alpha surface is never
+	 * drawn, so counting it first inflates r_speeds. */
+	c_brush_polys++;
 
 	intensity = 1.0f;
 	alpha_val = render_state.alpha;
