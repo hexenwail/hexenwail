@@ -1,21 +1,19 @@
 # HexenWorld (hwsv)
 
-Raven's QuakeWorld-derived multiplayer fork of Hexen II.  It is a *separate
-engine* that shares `h2shared` with Hexen II — its own protocol, its own
-gamecode (`hwprogs.dat`), its own client prediction and master server — not a
-mode of the Hexen II server.
+Raven's QuakeWorld-derived multiplayer fork of Hexen II: a separate engine with
+its own protocol, gamecode (`hwprogs.dat`), client prediction and master
+server, sharing `h2shared` with Hexen II.
 
 `engine/hexenworld/` holds the dedicated server (`hwsv`) and the shared
-HexenWorld protocol/transport.  There is deliberately no restored `hwcl` or
-`glhwcl` executable: HexenWorld client networking is being integrated as a
-protocol mode of Hexenwail itself.  The master server and its helper tools
-*are* built, but from `hw_utils/` rather than here — `hwmaster`,
-`hwmquery`, `hwrcon` and `hwterm` all come out of `nix build .#utils`, which
-CI already runs.
+HexenWorld protocol/transport. There is no standalone `hwcl` or `glhwcl`;
+HexenWorld client networking is a protocol mode of Hexenwail itself. The master
+server and helper tools (`hwmaster`, `hwmquery`, `hwrcon`, `hwterm`) are built
+from `hw_utils/` by `nix build .#utils`.
 
 ## Building
 
-`hwsv` is behind a CMake option, default OFF:
+`hwsv` is behind a CMake option, default OFF, which must be set at configure
+time:
 
     cmake -DBUILD_HEXENWORLD=ON ...
 
@@ -23,31 +21,22 @@ or via the flake:
 
     nix build .#hwsv
 
-Hexenwail includes the namespaced HexenWorld UDP, Huffman and netchan transport
-by default (`-DUSE_HEXENWORLD_CLIENT=OFF` disables it). Start that protocol path
-explicitly with:
+The HexenWorld client transport is built in by default
+(`-DUSE_HEXENWORLD_CLIENT=OFF` disables it). Connect with:
 
     connect hw://server.example:26950
 
-or from the menu: Multiplayer → Join a Game → HexenWorld.  That screen lists
-the servers this client has reached (the archived `hw_server1`..`hw_server8`
-cvars; an address is added when a server accepts the connection, not when it
-is typed), opens a connect dialog for a new address, and reaches the shared
-player setup, where the Hostname row becomes a Spectator toggle
-(`hw_spectator`, read by the server only at connect, and not archived because
-its value doubles as the spectator password).  It is not a live browser: the
-client has no master-server or status query yet.  While connected, `name`, `color` and `playerclass` reach
-the server as `setinfo`.
+or from the menu: Multiplayer → Join a Game → HexenWorld. That screen lists
+servers this client has connected to (archived in `hw_server1`..`hw_server8`),
+opens a connect dialog for a new address, and reaches player setup, where the
+Hostname row becomes a Spectator toggle (`hw_spectator`, read at connect, not
+archived because it doubles as the spectator password). There is no
+master-server browser yet. While connected, `name`, `color` and `playerclass`
+reach the server as `setinfo`.
 
-The integrated path completes connectionless acceptance, establishes the
-sequenced netchan, validates protocol 24/25/26/100 server data, and completes
-the sound/model-list, baseline, spawn, and begin transport handshake.
-Gameplay state, assets, and presentation messages still need to be routed into
-the shared Hexenwail client.
-
-The flag is required at *configure* time — it gates whether `add_executable(hwsv)`
-is reached at all, so `make hwsv` without it asks for a target the generated
-build system does not contain.
+The client completes the connection handshake through spawn and begin for
+protocols 24/25/26/100. Gameplay state, assets and presentation messages are
+not yet routed into the Hexenwail client.
 
 ## Runtime data
 
@@ -55,9 +44,7 @@ build system does not contain.
 
 ### 1. Hexen II retail data — `data1/pak0.pak`, `data1/pak1.pak`
 
-From your own Hexen II CD, patched to v1.11 (`h2patch`).  Licensed commercial
-data; not redistributable.  `FS_Init` refuses to start without it, before it
-ever looks at HexenWorld:
+From your own Hexen II copy, patched to v1.11 (`h2patch`). Not redistributable. Without it:
 
     FATAL ERROR: Unable to find a proper Hexen II installation.
 
@@ -68,10 +55,8 @@ Expected MD5s:
 
 ### 2. HexenWorld data — `hw/pak4.pak`
 
-**This one is freely redistributable** and is *not* on any CD.  HexenWorld was
-Raven's free beta add-on; the pak's own bundled readme reads "this is the
-hexenworld pak file from Raven's latest beta release".  Hammer of Thyrion
-distributes it directly:
+Freely redistributable (Raven's free beta add-on) and not on any CD. Hammer of
+Thyrion distributes it:
 
     https://sourceforge.net/projects/uhexen2/files/Hexen2%20GameData/hexenworld-pakfiles/
 
@@ -79,27 +64,23 @@ distributes it directly:
     tar xzf hexenworld-pakfiles-0.15.tgz    # yields hw/pak4.pak
     md5sum hw/pak4.pak                      # 88109ee385d9723ac5f1015e034a44dd
 
-Store it outside version control, in your game installation's `hw/` directory.
-Do not commit it.  `FS_Init`'s `GAME_HEXENWORLD` gate refuses to start without
-it (`engine/h2shared/quakefs.c`, "You must have the HexenWorld data installed").
-
-The engine recognises three vintages — 0.14/0.15 (10780245 bytes, the one
-above), and the older 0.11 and 0.09 betas.  Prefer 0.15.
+Put it in your game installation's `hw/` directory; do not commit it. Without
+it the server stops with "You must have the HexenWorld data installed". The
+engine also accepts the older 0.11 and 0.09 betas; prefer 0.15.
 
 ### 3. HexenWorld gamecode — `hw/hwprogs.dat`
 
-Built from source in this tree, so no acquisition problem. Install via the bundled package:
+Built from this tree. The bundled package installs `hwsv` together with
+`hw/hwprogs.dat`:
 
     nix build .#hwsv-bundled
 
-This creates a complete installation with both the `hwsv` binary and `hw/hwprogs.dat` in the correct location.
-
-Alternatively, you can install the gamecode manually from the gamecode package:
+Or install the gamecode by hand:
 
     nix build .#gamecode
     install -Dm644 result/share/hexenwail/hw/hwprogs.dat <gamedir>/hw/hwprogs.dat
 
-Without it `hwsv` gets all the way through `Host_Init` and then dies:
+Without it:
 
     SV_Error: PR_LoadProgs: couldn't load hwprogs.dat
 
@@ -109,34 +90,24 @@ With all three in place, from the game installation directory:
 
     $ hwsv +map demo1
     HexenWorld server 0.29 (Linux)
-    Added packfile .../data1/pak0.pak (696 files)
-    Added packfile .../data1/pak1.pak (523 files)
-    Playing the registered version.
-    Added packfile .../hw/pak4.pak (102 files)
+    ...
     IP address 0.0.0.0:26950
     UDP Initialized
     ======== HexenWorld Initialized ========
     Gamecode: hwprogs.dat from .../hw/hwprogs.dat (HW/v0.15, file crc 9155)
-    Building PHS...
-    Average leafs visible / hearable / total: 74 / 179 / 792
 
-The server then stays up serving on UDP 26950.
+The server then serves on UDP 26950.
 
-Note the log ordering when something fails: `Sys_Error` writes to unbuffered
-stderr while the banner is buffered stdout flushed at exit, so a fatal error
-appears *above* the startup banner.  It does not mean the failure happened
-before `Host_Init`.
+A fatal error goes to unbuffered stderr while the banner is buffered stdout, so
+the error can appear *above* the banner. That does not mean it happened first.
 
 ## Not yet done
 
 See GitHub issue #35.
 
-- Two `hwsv` instances discovering each other via `hwmaster`.  Not blocked on
-  building anything — `hwmaster` already ships in `.#utils`.  What is missing is
-  a harness that starts a master plus two servers and asserts the heartbeat.
-- Complete parsing of HexenWorld server messages in the integrated Hexenwail
-  client.  The connectionless handshake and sequenced netchan are in-tree; the
-  old standalone `hwcl` executable will not be restored.
-- Whether this engine's modern wire extensions ride over the HexenWorld protocol
-  at all, or are Hexen II only.  Undecided; `hwsv` must not silently drop
-  clients that advertise them.
+- A harness that starts `hwmaster` plus two `hwsv` instances and asserts the
+  heartbeat.
+- Full parsing of HexenWorld server messages in the Hexenwail client.
+- Whether this engine's modern wire extensions ride over the HexenWorld
+  protocol. Undecided; `hwsv` must not silently drop clients that advertise
+  them.

@@ -6,157 +6,77 @@ Changes
 
 Everything from 2022-06-12 (1.29c) down is Raven's and uHexen2's history.
 Above it are the Hexenwail fork's own divergences from 1.29c, newest first.
-The policy is that our .hc wins and every divergence gets recorded here, so
-that anyone auditing why our progs.dat differs from Raven's can read this file
-instead of diffing.  Bracketed ids are issues from the retired tracker; search
-the git log for one to find the commit that carries the full investigation.
+Our .hc wins, and every divergence gets an entry here.  Bracketed hashes are
+the commits that carry each change.
 
-Sibling forks are vendored under gamecode/vendor/ as submodules, so that "what
-have they found that we have not looked at?" is answerable with git log.  They
-are reference trees only: nothing there is compiled, the build reads
-gamecode/hc/ and the flake's gamecodeSrc filter cannot even see them, and the
-policy above is unchanged -- importing means writing our own hunk and recording
-it here with the upstream ref, never merging.  See gamecode/vendor/README.md.
+The build checks this file: the newest "YYYY-MM-DD [...]:" entry must match
+the date in HexenwailGamecode_YYYYMMDD in gamecode/hc/*/ident.hc.  Adding an
+entry without restamping ident.hc fails the build.
+
+Sibling forks are vendored under gamecode/vendor/ as reference trees only;
+nothing there is compiled.  Importing from them means writing our own hunk
+and recording it here with the upstream ref.  See gamecode/vendor/README.md.
 
 
 Hexenwail fork (diverges from 1.29c):
 =====================================
 
-2026-08-15 [uhexen2-8r3e]:
-- ident.hc (h2, hw, portals, siege): NEW.  Defines HexenwailGamecode(), a
-  marker function that exists only to be looked up, so the engine can say
-  whether the loaded progs is Raven's, ours, or a third party's.  It is never
-  called and it changes no behaviour.
+2026-08-15 [c562af1be, d0f4a5054]:
+- ident.hc (h2, hw, portals, siege): NEW.  Defines HexenwailGamecode_YYYYMMDD(),
+  a marker function that is never called, so the engine can tell whether the
+  loaded progs is Raven's, ours, or a third party's.  No behaviour change.
+  The progdefs CRC is unchanged; the whole-file CRC moves (data1 24008 ->
+  44321, portals 17171 -> 13325).
 
-  A function rather than a string global because hcc.c :: WriteData() replaces
-  a global's name with "LCL+" under -on unless the global carries
-  DEF_SAVEGLOBAL, and hcc only sets that for UNinitialised globals -- so a
-  version string would lose its name in portals, hw and siege, the three trees
-  built with -on.  The strip test is "def->type->type < ev_field" and
-  ev_function sorts above ev_field, so function names always survive it.  That
-  is also why qcdis.py --list BadBackpackDump works on the portals build.
+  The engine side is PR_ClassifyGamecode() in engine/h2shared/pr_edict.c.
+  The two spellings of the name are kept in sync BY HAND.  If they disagree
+  the build still succeeds, and our gamecode is reported as "Third-party".
+  Restamp the date in all four ident.hc files on every gamecode change.
 
-  Costs nothing structurally: it is not an entity field, so gamecode/fieldsets
-  stays byte-identical, and PR_WriteProgdefs() CRCs only the globals up to
-  end_sys_globals plus the field table, so the progdefs CRC the engine reports
-  as "H2/v1.11" is untouched.  The whole-file CRC does move -- data1 24008 ->
-  44321, portals 17171 -> 13325 -- which is expected and documented.
+2026-08-14 [732e74222]:
+- items.hc (portals only): RandomMonsterGoodies now rolls into the drop
+  entity instead of self (the corpse).  DropBackpack had already copied
+  self -> item, so every random monster drop in the mission pack went out
+  empty.  This is the "Bad backpack!" report, present since 1997 and in
+  HoT/uhexen2.  it_total is now also initialised.  h2, hw and siege roll
+  before the copy and are unaffected.
 
-  Engine side is PR_ClassifyGamecode() in engine/h2shared/pr_edict.c.  The two
-  spellings of the name are kept in sync BY HAND; nothing checks it, which is
-  this scheme's one weakness.  A build where they disagree does not fail, it
-  quietly reports our gamecode as "Third-party".
+  Credit: diagnosed in KoMiKoZa/jsHexen2-progs 22b5c8a.  Its handling of the
+  CLASS_HENCHMAN tail is deliberately NOT taken; see the next entry.
 
-  The date in the name is restamped BY HAND on every gamecode change, and two
-  flake.nix gates hold it: all five images must agree on one stamp, and it must
-  equal the newest dated entry in THIS FILE.  So adding an entry below without
-  restamping ident.hc fails the build, which is the point -- a confidently
-  wrong date is worse than no date.
-
-2026-08-14 [uhexen2-9gdx]:
-- items.hc (portals only): RandomMonsterGoodies now takes the drop entity and
-  rolls into it.  Raven wrote the assignments against self -- the corpse -- but
-  DropBackpack finishes copying self -> item before it calls this and never
-  copies again, so every random monster drop in the mission pack landed on a
-  body about to be discarded.  The item went out empty while 'total' claimed
-  one artifact, which sent the caller down the single-artifact branch, found
-  nothing, and binned the drop.  That is the whole of the "Bad backpack!"
-  report.  Present since 1997 and still present in HoT/uhexen2.
-
-  it_total is now also initialised.  HexenC locals live in the globals block
-  and keep whatever the previous caller left there; a stale nonzero value made
-  the function report an artifact it had never rolled, reaching the same dead
-  end from the other direction.  Raven never set it.
-
-  Only the portals tree has this.  In h2 (and hw, siege) the roll lives in
-  MonsterDropStuff and runs BEFORE DropBackpack copies self -> item, so writing
-  to self is correct there and those trees are untouched.
-
-  Credit: diagnosed in KoMiKoZa/jsHexen2-progs 22b5c8a, which is where the
-  self-vs-item mechanism was worked out.  Two of that commit's other hunks were
-  already fixed here independently (uhexen2-9r3n, uhexen2-hwky), and its
-  handling of the CLASS_HENCHMAN tail is deliberately NOT taken -- it keeps
-  Raven's dead zone and only stops miscounting it, where uhexen2-h77u below
-  closes the zone outright.  Per this file's policy our .hc wins; that entry
-  documents the reasoning and it still stands.
-
-2026-08-14 [uhexen2-h77u]:
+2026-08-14 [d95a5b23b]:
 - items.hc (h2, hw, portals, siege): MonsterDropStuff's CLASS_HENCHMAN chain
-  ended at "else if (chance < .90)" with nothing after it, so chance in
-  [0.90,1.0) set no field, DropBackpack found total==0 and took its "nothing
-  to put in the backpack" path, and the henchman dropped nothing.  15% * 10%
-  = 1.5% of henchman kills -- every mezzoman, the "leopard" of the field
-  reports -- earned a drop and got silently nothing.  Confirmed in retail
-  data1/PROGS.DAT with tools/qcdis.py, so it is Raven's and dates to 1997.
-  That branch is now a bare "else".
+  ended at "else if (chance < .90)", so 1.5% of henchman kills earned a drop
+  and got nothing.  Raven's since 1997.  That branch is now a bare "else",
+  like the grunt and leader chains, so cnt_blast covers [.80,1.0).
+  THIS IS A BALANCE CHANGE, made deliberately.
 
-  THIS IS A BALANCE CHANGE and was made deliberately, not because it was the
-  smallest diff.  The reasoning, which is the part worth keeping:
-
-    chain        branches  step  last band  unassigned tail
-    CLASS_GRUNT      4     .25      .25          0
-    CLASS_HENCHMAN  11     .08      .10        > .10 <
-    CLASS_LEADER    18     .05      .15          0
-
-  The two chains that terminate correctly do so with a bare else, and the
-  leader's else absorbs a remainder three times its own step width -- Raven
-  let the last item soak up the leftover rather than rescaling the chain.
-  Henchman is the only one of the three with an unassigned tail and the only
-  one without a terminal else, and its final bound is a round .90 where the
-  .08 cadence would have put .88.  It reads as an edit that stopped one
-  keyword early.  So the fix restores the convention the sibling chains
-  already follow; cnt_blast now covers [.80,1.0), 2.5x its neighbours, which
-  is the same shape as the leader's helmet at 3x.
-
-  The alternatives were considered and rejected.  Rescaling all 11 bands to
-  1/11 changes every outcome's odds, a strictly larger divergence than the
-  one it avoids.  Giving [0.90,1.0) its own artifact invents content: the
-  eight artifacts absent from this table are absent on purpose, per the
-  function's own "Henchmen drop instant items or lesser artifacts".  Leaving
-  it alone conflicts with the two fixes below (uhexen2-9r3n, uhexen2-hwky),
-  which are the same defect class -- a drop the player earned, lost with no
-  message -- in the same function.
-
-  Note for portals: its copy also does "it_total+=1" after the chain, which
-  counted the dead-zone case as a drop.  That count is now honest as a side
-  effect; no separate change was needed.
-
-2026-08-13 [uhexen2-qj8s] (ce8c9d1c4):
+2026-08-13 [ce8c9d1c4]:
 - invntory.hc (h2, portals): reverted the Crusader's Glyph of the Ancients
   (TimeBomb) to Raven's behaviour -- think=TimeBombBoom, spawned at
-  self.origin+self.proj_ofs, nextthink time+0.75.  Two earlier fork commits
-  (e9731510a, d39212a12, both below) had changed it on the premise that the
-  glyph landing at the caster's feet was a defect.  Disassembling retail
-  data1, retail portals and Storm Over Thyrion showed drop-and-detonate is
-  the intended vanilla design in all three, so the premise was wrong.  hw/
-  and siege/ never had the change and were not touched.
+  self.origin+self.proj_ofs, nextthink time+0.75.  Retail data1, retail
+  portals and Storm Over Thyrion all drop and detonate in place, so the two
+  2026-03-22 changes below were wrong.  hw/ and siege/ never had them.
 
-2026-08-13 [uhexen2-9r3n] (bb570666a):
+2026-08-13 [bb570666a]:
 - items.hc (h2, hw, portals): DropBackpack no longer deletes the bag it has
-  just finished building.  bluemana, greenmana and spawn_health are copied
-  onto the item after 'total' is accumulated, so a drop carrying two or more
-  of them and no artifacts or full armor matched none of the single-item
-  conditions, fell through to the multi-item bag branch, and was then removed
-  by that branch's trailing "if (!total) remove(item)".  The player got
-  nothing, with no dprint, so the loss was invisible even under developer 1.
+  just built.  A drop carrying two or more of bluemana, greenmana and
+  spawn_health, and nothing else, was silently removed.
 
-2026-08-11 [uhexen2-hwky] (fe1f2bdc1):
+2026-08-11 [fe1f2bdc1]:
 - items.hc (h2, hw, portals): the "Bad backpack!" fallthrough in DropBackpack
-  no longer remove()s the item.  It now drops a normal bag.mdl backpack
-  (matching the multi-item branch, including hw's scale calculation), so a
-  misclassified drop loses nothing.  Added BadBackpackDump(), which prints
-  'total' and every nonzero inventory field so the next report under
-  developer 1 identifies which field is lying.  The root cause is still open.
+  no longer remove()s the item; it drops a normal bag.mdl backpack.  Added
+  BadBackpackDump(), which prints 'total' and every nonzero inventory field
+  under developer 1.
 
-2026-03-22 (d39212a12):
+2026-03-22 [d39212a12]:
 - invntory.hc (h2, portals): centerprint messages beginning with '_' are drawn
   as a bottom-screen plaque instead of center-screen, with the underscore
   stripped.  Applies to any centerprint, not just intros.
 - invntory.hc (h2, portals): also changed the TimeBomb glyph to orbit a fixed
-  point on a 5 second fuse.  This was not mentioned in the commit message and
-  was reverted on 2026-08-13, above.
+  point on a 5 second fuse.  Reverted on 2026-08-13, above.
 
-2026-03-22 (e9731510a):
+2026-03-22 [e9731510a]:
 - MG_AI.hc (h2, hw, portals, siege): FindMonsterTarget() now tests
   FL_NOTARGET, so summoned monsters -- imp lords, cubes of force -- respect
   the notarget cheat like everything else does.
@@ -172,21 +92,12 @@ Hexenwail fork (diverges from 1.29c):
 - portals/invntory.hc: also threw the TimeBomb glyph forward on a 10 second
   MOVETYPE_BOUNCE fuse; reverted on 2026-08-13, above.
 
-2026-03-21 [uhexen2-o4tn] (a14b5eecd):
+2026-03-21 [a14b5eecd]:
 - items.hc (h2, hw, portals, siege): the "Bad backpack!" dprint now names the
-  entity's classname and origin instead of printing the bare string, so the
-  report is actionable.  (What it printed about was fixed later; see the two
-  2026-08 entries above.)
-
-  This one is deliberate instrumentation and is being kept, decided under
-  uhexen2-o4tn.  It reaches no ordinary player: dprint is PF_dprint, which is
-  Con_DPrintf, which is CON_Printf(_PRINT_DEVEL, ...) and is dropped unless
-  the developer cvar is set -- in the client and in h2ded alike.  What it buys
-  is the other half of the diagnostic that BadBackpackDump() prints: the dump
-  says what was in the bag, this says which entity dropped it, which is
-  exactly the question uhexen2-9gdx has to answer about the archer and
-  leopard field reports.  siege carries the same lines but they sit inside the
-  "Always throw BP in Siege" comment block, so there they are inert.
+  entity's classname and origin.  Kept deliberately: it prints only when
+  developer is set, and together with BadBackpackDump() it says which entity
+  dropped the bag.  In siege the lines sit inside a comment block and are
+  inert.
 
 
 uHexen2 / Raven history:

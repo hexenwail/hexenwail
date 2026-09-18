@@ -6,9 +6,8 @@ https://github.com/hexenwail/hexenwail
 
 Hexenwail is a modern source port of Raven Software's Hexen II,
 targeting Linux and Windows with SDL3 and OpenGL 4.3. It is based on
-Hammer of Thyrion (uHexen2) by O. Sezer (2004-2018; final release
-1.5.9 on 2018-06-06), which descends from the Anvil of Thyrion Linux
-port by Dan Olson and Clément Bourdarias.
+Hammer of Thyrion (uHexen2) by O. Sezer, which descends from the Anvil
+of Thyrion Linux port by Dan Olson and Clément Bourdarias.
 
 Hexen II was created by Raven Software Corp. in 1997, published by Id
 Software Inc and distributed by Activision, Inc; its engine source was
@@ -65,7 +64,7 @@ For the full changelog, see: git log
 
 Hexen II source and Hexenwail are free, but the game data is not:
 you need an original copy from Raven Software / Activision, or use
-the demo version (our demo packages include everything needed).
+the demo version.
 
 For the retail version, copy pak0.pak and pak1.pak from your cdrom
 into the "data1" directory. Run "h2patch" to update to v1.11.
@@ -148,19 +147,16 @@ connect to a Hexenwail server, start with "-protocol 18".
 
 1.6 Game Saves and Configuration
 
-On Linux a fresh install stores these under $XDG_DATA_HOME/hexen2 (that is
-~/.local/share/hexen2 unless XDG_DATA_HOME says otherwise).  An already
-existing ~/.hexen2 keeps winning, so an upgrade finds its savegames, configs
-and dropped-in mods exactly where it left them; nothing is ever migrated.
-Windows uses the game directory.
+On Linux a fresh install stores these under $XDG_DATA_HOME/hexen2
+(~/.local/share/hexen2 by default).  An existing ~/.hexen2 takes precedence;
+nothing is migrated.  Windows uses the game directory.
   Hexen II:       <userdir>/data1
   Mission Pack:   <userdir>/portals
   Demo:           ~/.hexen2demo or $XDG_DATA_HOME/hexen2demo
 
--userdir DIR overrides all of that and is used verbatim, which is the only way
-to redirect it: the home directory comes from the passwd database rather than
-$HOME, so setting HOME does nothing, and XDG_DATA_HOME has no effect once a
-~/.hexen2 exists.
+-userdir DIR overrides all of that and is used verbatim.  It is the only way
+to redirect it: setting HOME does nothing, and XDG_DATA_HOME has no effect
+once a ~/.hexen2 exists.
 
 
 1.7 Fullscreen/Windowed and Mouse

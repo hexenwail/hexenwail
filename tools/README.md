@@ -1,22 +1,19 @@
 # tools/
 
-Developer analysis tooling. `tools/` is deliberately absent from
-`filteredSrc`'s allowlist in `flake.nix`, so editing anything here leaves the
-**engine's** derivation hash untouched and invalidates nobody's cached build.
+Developer analysis tooling. `tools/` is not an input to the engine's derivation
+in `flake.nix`, so editing anything here does not rebuild the engine.
 
-**Two files are exceptions.** `gamecodeSrc` admits `tools/qcdis.py` and
-`tools/check_progs_fields.py` (`flake.nix:144-146`) and the `.#gamecode`
-derivation *runs* them in its check phase (`flake.nix:531`, `:535`, `:579`).
-Editing either one rebuilds `.#gamecode`. If you add a third build-time tool,
-add it to that allowlist and to this paragraph — or put it in `scripts/`
-instead, which is where things that run during a build belong.
+**Two exceptions:** `tools/qcdis.py` and `tools/check_progs_fields.py` are
+build inputs to `.#gamecode`, which runs them in its check phase. Editing
+either one rebuilds `.#gamecode`. A new build-time tool must be added to the
+`gamecodeSrc` filter in `flake.nix`, or belongs in `scripts/` instead.
 
-Three more are CI gates rather than build inputs: `menu_soft_parity.py`,
-`test_multiplayer_join.py`, and `ironwail_scorecard.py --check` all run in
-`.github/workflows/lint.yml`.
+Some scripts are CI gates, run from `.github/workflows/lint.yml`:
+`menu_soft_parity.py`, `test_software_model_flags.py`,
+`test_multiplayer_join.py` and `ironwail_scorecard.py --check`.
 
-These are plain scripts, run directly. The Python ones need only stock
-`python3` (no third-party modules) except `pak_extract.py`, which needs Pillow.
+Run the scripts directly. The Python ones need only stock `python3`, except
+`pak_extract.py`, which needs Pillow.
 
 | script | what it does |
 | --- | --- |
@@ -34,8 +31,10 @@ These are plain scripts, run directly. The Python ones need only stock
 
 ## qcdis.py — progs.dat disassembler
 
-Answers "does the HexenC in `gamecode/hc` actually match the bytecode players
-run?" without building or installing anything.
+Checks whether the HexenC in `gamecode/hc` matches the bytecode players run,
+without building anything. To read gamecode as source, use `utils/dcc`
+(`dhcc`) instead; `qcdis.py` is for proving two builds are semantically
+identical.
 
 ```
 qcdis.py <progs.dat> [function ...]     disassemble named functions
@@ -44,7 +43,7 @@ qcdis.py <progs.dat> --list [PATTERN]   list functions (regex, case-insensitive)
 qcdis.py --check-opcodes                verify the opcode table vs common/pr_comp.h
 ```
 
-The typical use is a cross-build diff:
+Cross-build diff:
 
 ```sh
 nix build .#gamecode
@@ -52,7 +51,7 @@ diff <(tools/qcdis.py ~/hexen2/data1/PROGS.DAT --pseudo Use_TimeBomb) \
      <(tools/qcdis.py result/share/hexenwail/data1/progs.dat --pseudo Use_TimeBomb)
 ```
 
-`--list` is the cheap first question — whether a symbol exists at all:
+Does a symbol exist at all:
 
 ```sh
 $ tools/qcdis.py ~/hexen2/sot/progs.dat --list '^TimeBomb'
@@ -60,91 +59,35 @@ TimeBombBoom                             invntory.hc:21159
 TimeBombTouch                            invntory.hc:21173
 ```
 
-### Why this and not `dhcc`
+Both progs versions (v6 and v7) are supported; struct layouts come from
+`common/pr_comp.h`. v6 operands are read unsigned except jump offsets, matching
+the engine (`engine/h2shared/pr_exec.c`) and `hcc`. Reading them all as signed
+corrupts about a third of the functions in retail `data1/PROGS.DAT`.
 
-`utils/dcc` (built as `dhcc`) is a full *decompiler* and will hand you back
-HexenC source, which is usually what you want when you are trying to read
-code. Use it for that. `qcdis.py` exists for a different job:
+Reading the output:
 
-- it needs no build step, so it works on any checkout and any `progs.dat`;
-- it shows the raw statement stream, which is what you need to prove two
-  builds are *semantically identical* rather than merely similar;
-- `--pseudo` normalises away temporary allocation, so output from different
-  compilers is directly diffable;
-- `dhcc`'s own README notes it cannot decompile `switch` statements, which
-  Hexen II gamecode uses heavily.
-
-### progs.dat format assumptions
-
-All struct layouts come from `common/pr_comp.h`; read it alongside this if you
-are debugging the tool. Both on-disk versions are supported:
-
-| | v6 | v7 |
-| --- | --- | --- |
-| statement | `ushort op; short a,b,c` (8 B) | `ushort pad; ushort op; int a,b,c` (16 B) |
-| def | `ushort type; ushort ofs; int s_name` (8 B) | `ushort pad; ushort type; int ofs; int s_name` (12 B) |
-
-The header is 15 little-endian ints (60 bytes); functions are 7 ints plus
-`byte parm_size[8]` (36 bytes). Every section offset is bounds-checked against
-the file size at load, so a truncated or non-progs file gets a clear error
-rather than nonsense output.
-
-**The v6 signedness trap.** v6 operands are declared `short`, but a progs with
-more than 32767 globals overflows that field, and the engine reads it back
-*unsigned* when it addresses a global — see the `(unsigned short)` casts on
-`OPA`/`OPB`/`OPC` and the `PR_ConvertOldStmts` comment in
-`engine/h2shared/pr_exec.c`, and the matching `(signed short)` narrowing in
-`utils/hcc/hcc.c:PR_GenV6Stmts`. Only *jump* offsets are re-signed
-(`IF`/`IFNOT` `b`, `GOTO` `a`, `SWITCH_*` `b`, `CASE` `b`, `CASERANGE` `c`).
-`qcdis.py` mirrors this exactly. Reading all operands as signed — the obvious
-thing to do from the header alone — silently corrupts roughly a third of all
-functions in retail `data1/PROGS.DAT`.
-
-### How far to trust the output
-
-Things the tool gets right, and which are checked (see "Verification" below):
-opcode names, operand decoding for both versions, jump targets, function
-bounds, and named-global/field resolution.
-
-Things to read carefully:
-
-- **Static values, not runtime values.** Constants shown in braces —
-  `time{0}`, `v_forward{0 0 0}` — are the values sitting in the globals block
-  in the *file*. For a genuine compile-time constant that is the real value;
-  for a runtime global it is just its initialiser, almost always zero. Do not
-  read `v_forward{0 0 0}` as "this multiplies by zero".
-- **Indirect calls.** `CALL*` prints the callee named by the operand's static
-  value. When the call goes through an entity field (`self.th_missile`), that
-  static value is whatever the linker left there — normally function 0, whose
-  name is empty, so the line renders as `()`. The preceding `LOAD_FNC` tells
-  you what is actually being called.
-- **`--pseudo` is lossy by design.** It prints observable effects only and
-  reuses the expression it last saw for a global, so a store through a pointer
-  can be attributed to the expression that produced the pointer (stores into a
-  freshly spawned entity show up as `spawn(...).field = ...`). It is built for
-  diffing, not for reading control flow. Use plain disassembly for that.
-- **Function extent is inferred.** Progs stores a start statement, not a
-  length. Disassembly stops at a `DONE`/`RETURN` that butts up against the next
-  function's start, and hard-stops at that start regardless. A function is also
-  capped at `--max-statements` (default 400) and says so explicitly when it
-  truncates — if you see that line, raise the limit rather than assuming the
-  function ended.
-- **`t<N>` is an unnamed global**, usually a compiler temporary. `I+` is
-  `IMMEDIATE_NAME` from `common/pr_comp.h` — a pooled constant.
+- **Braced constants are file values, not runtime values.** `v_forward{0 0 0}`
+  is the initialiser in the globals block, not what the code multiplies by.
+- **Indirect calls** through an entity field usually render as `()`. The
+  preceding `LOAD_FNC` shows what is actually called.
+- **`--pseudo` is lossy.** It is for diffing, not for reading control flow.
+- **Function extent is inferred.** A function is capped at `--max-statements`
+  (default 400) and prints a truncation line when it hits it; raise the limit
+  rather than assuming the function ended.
+- **`t<N>`** is an unnamed global, usually a compiler temporary. `I+` is an
+  `IMMEDIATE_NAME` pooled constant.
 
 ### Verification
 
-`--check-opcodes` re-derives the 105-entry opcode table from the `OP_*` enum in
-`common/pr_comp.h` and diffs it against the one compiled into the script. Run
-it after any upstream merge that touches `pr_comp.h`:
+Run `--check-opcodes` after any upstream merge that touches `pr_comp.h`:
 
 ```sh
 $ tools/qcdis.py --check-opcodes
 opcode table matches .../common/pr_comp.h (105 opcodes)
 ```
 
-The stronger end-to-end check exploits `hcc -v6` / `-v7` emitting both formats
-from one source: disassembling both builds must produce identical output.
+End-to-end check: build the same source as v7 and v6, and the disassembly of
+both must be identical.
 
 ```sh
 nix build .#utils -o /tmp/u
@@ -152,24 +95,14 @@ cp -r gamecode /tmp/gc && chmod -R u+w /tmp/gc
 (cd /tmp/gc && /tmp/u/bin/hcc -src hc/h2 -os -v7)      # v7 alongside the v6 from .#gamecode
 ```
 
-As landed, that comparison is clean over all 1631 functions. It is also what
-caught the signedness bug described above: reading v6 operands as signed made
-570 of those 1631 functions disagree between the two encodings of identical
-source.
-
 ---
 
 ## edict_pick.py + headless-cfg.sh — scripted runs and entity dumps
 
-A pair. `headless-cfg.sh` writes a config that starts a map, waits, throws an
-item and calls `edicts` at several points, bracketing each dump with a
-`ZZZ<TAG>` marker line. `edict_pick.py` splits the resulting log back on those
-markers and prints only the classnames and fields you asked for — an `edicts`
-dump is thousands of lines and unreadable raw.
-
-The delays are built from a `wait` alias ladder (`w5`/`w25`/`w125`) because the
-console has no `sleep`; one `wait` is one frame. No X server is involved, so
-this works on a dedicated server or any headless box.
+`headless-cfg.sh` writes a config that starts a map, waits, throws an item and
+calls `edicts` at several points, marking each dump with a `ZZZ<TAG>` line.
+`edict_pick.py` splits the log on those markers and prints only the classnames
+and fields you ask for. No X server is needed.
 
 ```sh
 tools/headless-cfg.sh 2 demo1 /tmp/run.cfg 108     # class 2 (crusader), throw impulse 108
@@ -177,26 +110,17 @@ glhexen2 -basedir ~/hexen2 -condebug +exec /tmp/run.cfg > /tmp/run.log
 tools/edict_pick.py /tmp/run.log player,timebomb
 ```
 
-```
-==================== PRE ====================
-  EDICT 1: classname=player origin='-918.0 -2034.0 0.0' movetype=3.0 ... health=74.0
-==================== DUMP1 ====================
-  ...
-```
-
-Pass `all` as the classname list to keep every entity, and `--fields` to change
+Pass `all` as the classname list to keep every entity, and `--fields` to choose
 which fields are printed and in what order.
 
 ---
 
 ## serve.sh — the dedicated server on stdin
 
-The fast lane, and the one to try first. `h2ded` is the `SERVERONLY` half of
-the engine: no renderer, video, sound or input, linking only libm and libc. It
-boots in about a second and takes console commands on stdin, so anything below
-the renderer — gamecode, physics, savegames, protocol, filesystem, cvars —
-gets answered in seconds instead of the minutes `headless-drive.sh` costs. It
-needs `bwrap` and nothing else; no X server is involved.
+Try this first for anything below the renderer: gamecode, physics, savegames,
+protocol, filesystem, cvars. `h2ded` boots in about a second and needs only
+`bwrap`. It cannot show you what anything looks like; use `headless-drive.sh`
+for that.
 
 ```sh
 nix build .#h2ded-bundled -o result-h2ded
@@ -205,70 +129,41 @@ printf 'map demo1\nwait 3\nstatus\nedicts\n' | \
   tools/serve.sh /tmp/out result-demodata/share/hexenwail
 ```
 
-One console command per line. `wait N` sleeps N seconds before the next line —
-the engine's own `wait` yields a single frame, which is never enough for a map
-load — and a final `quit` is appended, without which the server runs forever.
+One console command per line. `wait N` sleeps N seconds (the engine's own
+`wait` is one frame). A final `quit` is appended for you.
 
-Read `<outdir>/qconsole.log`. **h2ded prints nothing to stdout when stdout is
-not a tty**, so the `engine.stdout` beside it is normally empty; `-condebug` is
-passed for you. Like `headless-drive.sh`, the run is sandboxed with a throwaway
-`$HOME`, and both the basedir and the binary are `readlink -f`'d first: bwrap
-cannot create a `--ro-bind` mount point underneath an unresolved symlink, and
-`nix build -o` hands you exactly such a path. The failure is the misleading
-`Can't mkdir parents for <path>: No such file or directory`.
-
-What it cannot do is tell you what anything *looks* like. That is the other
-half of the pair, below.
+Read `<outdir>/qconsole.log`: **h2ded prints nothing to stdout when stdout is
+not a tty**, so `engine.stdout` is normally empty. `-condebug` is passed for
+you, and the run uses a throwaway `$HOME`.
 
 ---
 
-## headless-drive.sh — menu testing without a second machine
+## headless-drive.sh — menu testing under Xvfb
 
-Runs the engine under Xvfb and sends **real X key events** with `xdotool`, so
-input arrives through SDL and `Key_Event` exactly as it would from a keyboard.
-Menu code paths therefore actually execute — this is not a console script
-pretending to be a user, and it is why menu behaviour no longer needs a
-separate Windows box to verify. It screenshots each step with ImageMagick
-`import`.
+Runs the engine under Xvfb and sends real X key events with `xdotool`, so menu
+code runs exactly as it would from a keyboard. Each step is screenshotted with
+ImageMagick `import`.
 
 ```sh
 nix build .#default
 ENGINE=result/bin/glhexen2 tools/headless-drive.sh noportals /tmp/out ~/hexen2
 ```
 
-Requires `Xvfb`, `xdotool`, `bwrap` and `import`; it checks for all four and
-fails with a clear message rather than hanging. On a machine without them:
+Requires `Xvfb`, `xdotool`, `bwrap` and `import`. Without them:
 
 ```sh
 nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubblewrap --command \
   env ENGINE=result/bin/glhexen2 tools/headless-drive.sh noportals /tmp/out ~/hexen2
 ```
 
-There is no `nixpkgs#xvfb`: `Xvfb` ships inside `xorg-server`, and
-`nixpkgs#xorg.xorgserver` still resolves but warns that it has been renamed.
+(`Xvfb` ships in `xorg-server`; there is no `nixpkgs#xvfb`.)
 
-The run is wrapped in `bwrap` with a throwaway directory bound over `$HOME`, so
-it cannot touch your real config or savegames — wherever they live, `~/.hexen2`
-or `~/.local/share/hexen2` — and with the basedir
-re-bound **read-only on top** — the bind order matters, because the game data
-usually lives inside `$HOME` and would otherwise be hidden by the first bind.
-The sandboxed `~/.local/share/hexen2/qconsole.log` is copied into the output
-directory. A throwaway `$HOME` has no `~/.hexen2`, so the run always takes the
-XDG path (uhexen2-7b1s); `XDG_DATA_HOME` is pinned to the sandbox so a host
-value cannot redirect it.
+The run uses a throwaway `$HOME` with the basedir bound read-only, so it cannot
+touch your real config or savegames. Output in `<outdir>`: numbered PNGs,
+`engine.stdout`, `xvfb.log`, `qconsole.log`, and the sandbox HOME under `work/`.
 
-Output goes to `<outdir>`: numbered PNGs, `engine.stdout`, `xvfb.log`,
-`qconsole.log`, and the sandbox HOME under `work/`.
-
-The scenarios in the `case` block (`noportals`, `oldmission_paladin`,
-`oldmission_demoness`, `demoness_skin`, `newmission`) are the ones written for
-`uhexen2-uh5c`; `console_tab` was written for `uhexen2-q6ap`. Treat them as
-worked examples — the reusable parts are the harness itself and the `shot` /
-`key` / `keyn` / `typ` / `typn` / `wipe` helpers.
-
-Most runs need no new scenario at all. **`script` is the general-purpose arm**:
-it reads its steps from `$STEPS`, one verb per line, so a flat sequence of keys
-and screenshots costs a file rather than an edit here.
+**`script` is the general-purpose scenario.** It reads steps from `$STEPS`, one
+verb per line:
 
 ```sh
 printf 'shot 01-main\nkeyn Down 3\nkey Return\nshot 02-mods\n' > /tmp/steps.txt
@@ -277,16 +172,12 @@ STEPS=/tmp/steps.txt tools/headless-drive.sh script /tmp/out ~/hexen2
 
 Verbs: `shot` / `shotf` / `key` / `keyn` / `type` / `enter` / `console` / `cmd`
 / `hold` / `mouse` / `click` / `wipe` / `sleep`, plus `#` comments. `type`
-types without submitting and `enter` submits; `cmd` wraps one console command
-in the grave-key toggle either side. An unrecognised verb aborts the run — a
-typo that merely skipped its line would leave you reading screenshots of a menu
-that was never navigated, which is indistinguishable from a pass.
+types without submitting, `enter` submits, and `cmd` wraps one console command
+in the grave-key toggle. An unrecognised verb aborts the run.
 
-Add a `case` arm only when a run needs real logic (a burst loop, a control
-condition), and give it the comment explaining what it is proving.
-
-Timings are deliberately generous (the engine gets 25 s to load a map). It is
-slow, and that is the tradeoff for driving a real event loop.
+The other `case` arms are worked examples. Add one only when a run needs real
+logic (a loop, a control condition). Timings are generous: the engine gets
+25 s to load a map.
 
 ### console_tab — TAB completion
 
@@ -294,24 +185,11 @@ slow, and that is the tradeoff for driving a real event loop.
 tools/headless-drive.sh console_tab /tmp/out ~/hexen2 -condebug +"map demo1"
 ```
 
-Presses TAB in a live console, so `Key_Event` → `CompleteCommand`
-(`engine/hexen2/keys.c`) runs exactly as it does under a human. Eight cases:
-unique completion, ambiguous stem plus listing, no-match, mid-line splice,
-command-word (`argno` 0), second argument slot, `sky` with no `gfx/env`, and a
-repeat after all of the above to catch a leaked `FS_FreeNameList`.
-
-Two things it will not tolerate being dropped:
-
-- **`+map demo1`.** The console cannot be opened from the main menu — Escape
-  closes it, but with nothing connected and no demo loop the engine puts it
-  straight back, and a menu eats `grave`. The run then screenshots the
-  untouched menu eight times and looks like a pass.
-- **`-condebug`.** The ambiguous-match listing is console output; without the
-  log you only have the completed line.
-
-Read the results off the PNGs — the line under `]` is the assertion. `wipe`
-presses `End` before backspacing, because these cases deliberately leave the
-cursor mid-line and the tail would otherwise survive into the next shot.
+Presses TAB in a live console across eight cases. Keep both arguments:
+without `+map demo1` the console cannot be opened from the main menu and the
+run screenshots the untouched menu, which looks like a pass; without
+`-condebug` the ambiguous-match listing is lost. Read results off the PNGs: the
+line under `]` is the assertion.
 
 ---
 
@@ -322,37 +200,15 @@ progs_crc.py <progs.dat> [progs.dat ...]
 ```
 
 Prints the two numbers `PR_ClassifyGamecode()` (`engine/h2shared/pr_edict.c`)
-works from, and flags whether the first is one it recognises:
+works from, and flags whether the first is recognised:
 
-- **file crc** — CRC over the whole file, engine-side `pr_crc`. Identifies one
-  exact build. This is what the `retail_crcs[]` table holds.
-- **progdefs crc** — the `crc` field of the `dprograms_t` header, engine-side
-  `progs->crc`. Identifies the *interface generation* only, and is what
-  `progdefs.h`'s `PROGS_V103_CRC` / `PROGS_V111_CRC` / `PROGS_V112_CRC` name.
+- **file crc**: CRC over the whole file. Identifies one exact build; this is
+  what `retail_crcs[]` holds.
+- **progdefs crc**: the header's `crc` field. Identifies the interface
+  generation only (`PROGS_V103_CRC` / `PROGS_V111_CRC` / `PROGS_V112_CRC`).
+  Mods share these with retail, so only the file CRC tells a mod from Raven's
+  file.
 
-Keeping them apart is the point. Mods share progdefs CRCs with retail exactly —
-`GameOfTomes` has retail `data1`'s 38488, and `karma2`, `soc` and `sot` all have
-retail `portals`' 26905 — so only the whole-file CRC separates a mod from
-Raven's own file.
-
-The reason to have it: `retail_crcs[]` covers the three files a **1.11/1.12a**
-install has, because that is the only retail release anyone here has had in
-hand. Someone on 1.03 or 1.09 gets their retail gamecode reported as
-`Third-party` (`uhexen2-qvqk`). Fixing that needs only the missing numbers, and
-this reads them out of the file — so a report needs the `progs.dat`, not an
-installed and running copy of that release.
-
-## Provenance
-
-`qcdis.py`, `edict_pick.py`, `headless-cfg.sh` and `headless-drive.sh` were
-written to settle `uhexen2-9uzt` — a report that Glyph of the Ancients
-projectiles drop at the player's feet. Disassembling and diffing the four glyph
-launch functions showed them semantically identical between retail
-`data1/PROGS.DAT` and Storm Over Thyrion, so the behaviour was stock class
-design and not a defect.
-
-The same pass surfaced `uhexen2-qj8s`: our `gamecode/hc/h2/invntory.hc` defines
-`TimeBombThink` (the Crusader glyph orbits the player on a 5 s fuse) where
-retail, portals and SoT all lack that symbol and use `TimeBombBoom`, which
-detonates in place at +0.75 s. That divergence matters now that compiled
-gamecode ships in the release zip, and `qcdis.py` is how you re-check it.
+`retail_crcs[]` only covers 1.11/1.12a, so 1.03 or 1.09 retail gamecode is
+reported as `Third-party`. To fix that, run this on the `progs.dat` from that
+release and add the file CRCs.
