@@ -39,12 +39,24 @@ require "manifest.webmanifest"
 require "sw.js"
 require "app.js"
 
-# ES modules app.js imports; absent, the page loads and then does nothing.
-require "lib/paths.js"
-require "lib/zip.js"
-require "lib/save-bundle.js"
-require "lib/demo-fetch.js"
-require "lib/mods.js"
+# Everything sw.js precaches.  cache.addAll() is all-or-nothing, so one absent
+# entry means the service worker never installs and the shell never works
+# offline.  web/test/sw-precache.test.js keeps this list a superset of the
+# modules app.js imports, so checking it here also covers every lib/ module.
+precache="$(sed -n '/^const CORE_ASSETS = \[/,/^\];/p' "$DIST_DIR/sw.js" | grep -o "'\./[^']*'" | tr -d "'" | sed 's|^\./||' || true)"
+if [ -z "$precache" ]; then
+	echo "INVALID: could not read CORE_ASSETS from $DIST_DIR/sw.js" >&2
+	missing=1
+fi
+for asset in $precache; do
+	require "$asset"
+done
+
+# Test suites and fixtures are CI inputs, not part of the deployed PWA.
+if [ -e "$DIST_DIR/test" ]; then
+	echo "INVALID: $DIST_DIR/test is in the artifact; web/test/ must not be published" >&2
+	missing=1
+fi
 
 # Icons the manifest names.  An install prompt with no icon is a soft failure
 # browsers do not report.

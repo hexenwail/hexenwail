@@ -1,10 +1,19 @@
 const CACHE_PREFIX = 'hexenwail-pwa-';
 const CACHE_VERSION = `${CACHE_PREFIX}__HEXENWAIL_BUILD_VERSION__`;
+// Every module index.html reaches through static imports must be listed, or the
+// offline boot dies on the first uncached import.  web/test/sw-precache.test.js
+// walks the import graph and fails when this list falls behind it.
 const CORE_ASSETS = [
   './',
   './index.html',
   './app.js',
+  './lib/demo-fetch.js',
+  './lib/mods.js',
+  './lib/paths.js',
   './lib/phone-controls.js',
+  './lib/save-bundle.js',
+  './lib/webgl-diagnostics.js',
+  './lib/zip.js',
   './manifest.webmanifest',
   './sw.js',
   './icons/icon.svg',
