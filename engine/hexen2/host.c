@@ -30,6 +30,7 @@
 
 extern int VID_MenuGetVSync (void);
 #include "cdaudio.h"
+#include "host_tick.h"
 #include <setjmp.h>
 
 /*
@@ -1316,6 +1317,8 @@ static void _Host_Frame (float time)
 	double			phys_interval;
 	double			render_frametime;
 	double			fixangle_hold;
+	host_tick_plan_t	plan;
+	int			tick;
 
 	if (setjmp(host_abort))
 		return;			// something bad happened, or the server disconnected
@@ -1398,19 +1401,12 @@ static void _Host_Frame (float time)
 	}
 
 	render_frametime = host_frametime;
-	phys_accum += host_frametime;
+	plan = Host_PlanTicks (&phys_accum, host_frametime, phys_interval,
+			       host_framerate.value > 0);	/* issue #139 */
 
-	// Host_FilterTime already clamps one frame's contribution to 0.1s, so the
-	// accumulator can gain at most that per frame.  Cap just above it: cutting
-	// closer would silently dilate game time on every hitch, and this still
-	// bounds one render frame's catch-up (~9 ticks at 72 Hz), which drains
-	// more simulated time than a clamped frame can add.
-	if (phys_accum > 0.1 + phys_interval)
-		phys_accum = 0.1 + phys_interval;
-
-	while (phys_accum >= phys_interval)
+	for (tick = 0; tick < plan.ticks; tick++)
 	{
-		host_frametime = phys_interval;
+		host_frametime = plan.step;
 
 		if (sv.active)
 			CL_SendCmd ();
@@ -1420,8 +1416,6 @@ static void _Host_Frame (float time)
 
 		if (!sv.active)
 			CL_SendCmd ();
-
-		phys_accum -= phys_interval;
 	}
 
 	host_frametime = render_frametime;
