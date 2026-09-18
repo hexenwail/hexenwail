@@ -245,6 +245,102 @@ static struct
 	hwcl_entity_state_t players[HWCL_MAX_CLIENTS];
 } hwcl_server_state;
 
+/* Kept separate from scoreboard_t because that type is shared with the
+ * Hexen II client protocol, which has no skin name or invalidation state. */
+typedef struct
+{
+	char		skin[MAX_QPATH];
+	int		playerclass;
+	int		topcolor;
+	int		bottomcolor;
+	qboolean	translation_dirty;
+} hwcl_player_presentation_t;
+
+static hwcl_player_presentation_t hwcl_player_presentation[HWCL_MAX_CLIENTS];
+
+static int HWCL_ClampPlayerClass (int playerclass)
+{
+	if (playerclass < 1 || playerclass > MAX_PLAYER_CLASS)
+		return 1;
+	return playerclass;
+}
+
+static int HWCL_ClampPlayerColor (int color)
+{
+	/* gfx/player.lmp has ten colour ramps.  Zero deliberately means the
+	 * unmodified ramp; accepting a negative value would address before it. */
+	if (color < 0 || color > 10)
+		return 0;
+	return color;
+}
+
+static void HWCL_NormalizeSkinName (char *dst, const char *src)
+{
+	char *extension;
+	char *slash;
+	size_t i;
+
+	if (!src || !src[0] || src[0] == '.' || strstr (src, "..") ||
+			strchr (src, '\\'))
+	{
+		q_strlcpy (dst, "base", MAX_QPATH);
+		return;
+	}
+
+	for (i = 0; src[i] && i < MAX_QPATH - 1; i++)
+	{
+		unsigned char c = (unsigned char)src[i];
+
+		if (c < 0x20 || c == 0x7f || strchr (":<>\"|?*", c))
+		{
+			q_strlcpy (dst, "base", MAX_QPATH);
+			return;
+		}
+		dst[i] = c;
+	}
+	dst[i] = 0;
+	if (src[i] || dst[i - 1] == '/')
+	{
+		q_strlcpy (dst, "base", MAX_QPATH);
+		return;
+	}
+
+	/* Userinfo carries a skin basename, not a PCX pathname.  Retaining a
+	 * subdirectory is compatible with legacy servers, while the download path
+	 * validator remains the authority before anything reaches the filesystem. */
+	slash = strrchr (dst, '/');
+	extension = strrchr (dst, '.');
+	if (extension && (!slash || extension > slash))
+		*extension = 0;
+	if (!dst[0] || (slash && slash[1] == 0))
+		q_strlcpy (dst, "base", MAX_QPATH);
+}
+
+/* Returns true when a renderer translation must be rebuilt. */
+static qboolean HWCL_SetPlayerPresentation (int slot, const char *skin,
+		int playerclass, int topcolor, int bottomcolor)
+{
+	hwcl_player_presentation_t *presentation = &hwcl_player_presentation[slot];
+	char normalized_skin[MAX_QPATH];
+
+	HWCL_NormalizeSkinName (normalized_skin, skin);
+	playerclass = HWCL_ClampPlayerClass (playerclass);
+	topcolor = HWCL_ClampPlayerColor (topcolor);
+	bottomcolor = HWCL_ClampPlayerColor (bottomcolor);
+	if (!strcmp (presentation->skin, normalized_skin) &&
+			presentation->playerclass == playerclass &&
+			presentation->topcolor == topcolor &&
+			presentation->bottomcolor == bottomcolor)
+		return false;
+
+	q_strlcpy (presentation->skin, normalized_skin, sizeof(presentation->skin));
+	presentation->playerclass = playerclass;
+	presentation->topcolor = topcolor;
+	presentation->bottomcolor = bottomcolor;
+	presentation->translation_dirty = true;
+	return true;
+}
+
 typedef struct
 {
 	vec3_t angles;
@@ -285,6 +381,8 @@ static int hwcl_view_drawflags;
 static qboolean hwcl_players_seen[HWCL_MAX_CLIENTS];
 
 extern qmodel_t *player_models[MAX_PLAYER_CLASS];
+
+static void HWCL_SetPlayerClass (int slot, int playerclass);
 
 static void HWCL_ResetPresentation (void)
 {
@@ -429,6 +527,18 @@ static void HWCL_LoadSounds (void)
 	CL_PrecacheTEntSounds ();
 }
 
+static void HWCL_FinishSignon (void)
+{
+	HWCL_StringCmd (va ("begin %d", hwcl_servercount));
+	if (!cl.worldmodel)
+		Host_Error ("HexenWorld signon without a world map");
+	cls.signon = SIGNONS;
+	/* Hexen II ends the plaque at signon 4 (CL_SignonReply); this is
+	 * HexenWorld's equivalent moment. */
+	SCR_EndLoadingPlaque ();
+	Con_Printf ("HexenWorld signon complete: %s.\n", cl.mapname);
+}
+
 #include "cl_hw_download.inc"
 
 /* Consume a chunked (protocol 26+) or classic precache list and retain its
@@ -523,6 +633,7 @@ static void HWCL_ParseServerData (void)
 	hwcl_servercount = MSG_ReadLong ();
 	hwcl_entity_sequence = -1;
 	memset (&hwcl_server_state, 0, sizeof(hwcl_server_state));
+	memset (hwcl_player_presentation, 0, sizeof(hwcl_player_presentation));
 	server_gamedir = MSG_ReadString ();
 	if (msg_badread || strlen (server_gamedir) >= sizeof(gamedir))
 		Host_Error ("Invalid HexenWorld server game directory");
@@ -581,8 +692,7 @@ static void HWCL_ParseServerData (void)
 	cl.viewentity = hwcl_playernum + 1;
 	hwcl_server_state.viewentity = cl.viewentity;
 	if (hwcl_playernum >= 0 && hwcl_playernum < HWCL_MAX_CLIENTS)
-		hwcl_server_state.playerclass[hwcl_playernum] =
-			(int)cl_playerclass.value;
+		HWCL_SetPlayerClass (hwcl_playernum, (int)cl_playerclass.value);
 
 	Con_Printf ("HexenWorld protocol %d, game %s, level %s (player %d%s).\n",
 			hwcl_protocol, gamedir, levelname, playernum & 127,
@@ -1140,6 +1250,79 @@ static const char *HWCL_InfoValue (const char *info, const char *key)
 	return "";
 }
 
+static void HWCL_ApplyPlayerPresentation (int slot, entity_t *ent)
+{
+	hwcl_player_presentation_t *presentation;
+
+	if (slot < 0 || slot >= HWCL_MAX_CLIENTS || !cl.scores)
+		return;
+	presentation = &hwcl_player_presentation[slot];
+	/* A playerinfo may precede that slot's userinfo on a lossy signon.  Give
+	 * the renderer a translated paladin fallback instead of an uninitialised
+	 * player texture until the authoritative metadata arrives. */
+	if (!presentation->playerclass)
+	{
+		presentation->playerclass = 1;
+		presentation->translation_dirty = true;
+	}
+	cl.scores[slot].colors = (presentation->topcolor << 4) |
+		presentation->bottomcolor;
+	cl.scores[slot].playerclass = (float)presentation->playerclass;
+	/* The software renderer consumes this palette translation; GL uses the
+	 * distinct pointer as the cue to bind playertextures[slot]. */
+	ent->colormap = ent->sourcecolormap = cl.scores[slot].translations;
+	if (presentation->translation_dirty && ent->model)
+	{
+		CL_NewTranslation (slot);
+		presentation->translation_dirty = false;
+	}
+}
+
+static void HWCL_SetPlayerClass (int slot, int playerclass)
+{
+	hwcl_player_presentation_t *presentation;
+
+	if (slot < 0 || slot >= HWCL_MAX_CLIENTS)
+		return;
+	presentation = &hwcl_player_presentation[slot];
+	playerclass = HWCL_ClampPlayerClass (playerclass);
+	if (presentation->playerclass != playerclass)
+	{
+		presentation->playerclass = playerclass;
+		presentation->translation_dirty = true;
+	}
+	hwcl_server_state.playerclass[slot] = playerclass;
+	if (cl.scores)
+		cl.scores[slot].playerclass = (float)playerclass;
+}
+
+static void HWCL_UpdatePlayerPresentation (int slot, const char *userinfo)
+{
+	hwcl_player_presentation_t *presentation;
+	char skin[512];
+	int playerclass, topcolor, bottomcolor;
+
+	if (slot < 0 || slot >= HWCL_MAX_CLIENTS)
+		return;
+	/* HWCL_InfoValue owns one scratch buffer, so copy/convert each value before
+	 * asking for the next one. */
+	q_strlcpy (skin, HWCL_InfoValue (userinfo, "skin"), sizeof(skin));
+	playerclass = atoi (HWCL_InfoValue (userinfo, "playerclass"));
+	topcolor = atoi (HWCL_InfoValue (userinfo, "topcolor"));
+	bottomcolor = atoi (HWCL_InfoValue (userinfo, "bottomcolor"));
+	HWCL_SetPlayerPresentation (slot, skin, playerclass, topcolor, bottomcolor);
+	presentation = &hwcl_player_presentation[slot];
+	hwcl_server_state.playerclass[slot] = presentation->playerclass;
+	if (cl.scores)
+	{
+		cl.scores[slot].colors = (presentation->topcolor << 4) |
+			presentation->bottomcolor;
+		cl.scores[slot].playerclass = (float)presentation->playerclass;
+	}
+	/* A userinfo update can arrive after the player's first playerinfo. */
+	HWCL_ApplyPlayerPresentation (slot, &cl_entities[slot + 1]);
+}
+
 static void HWCL_ParseDamage (void)
 {
 	/* HexenWorld's svc_damage payload is the maintained parser's armor,
@@ -1516,9 +1699,8 @@ static qmodel_t *HWCL_ModelForEntity (const hwcl_entity_state_t *state,
 	if (!player)
 		return NULL;
 
-	playerclass = hwcl_server_state.playerclass[state - hwcl_server_state.players];
-	if (playerclass < 1 || playerclass > MAX_PLAYER_CLASS)
-		playerclass = 1;
+	playerclass = HWCL_ClampPlayerClass (
+		hwcl_player_presentation[state - hwcl_server_state.players].playerclass);
 	return player_models[playerclass - 1];
 }
 
@@ -1559,8 +1741,21 @@ static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
 	ent->msgtime = cl.mtime[0];
 	ent->model = model;
 	ent->frame = state->frame;
-	ent->colormap = vid.colormap;
-	ent->sourcecolormap = vid.colormap;
+	if (player)
+	{
+		int slot = entitynum - 1;
+
+		/* A different model changes the alias-skin dimensions used to build
+		 * the GL translation, even when userinfo did not change. */
+		if (model_changed)
+			hwcl_player_presentation[slot].translation_dirty = true;
+		HWCL_ApplyPlayerPresentation (slot, ent);
+	}
+	else
+	{
+		ent->colormap = vid.colormap;
+		ent->sourcecolormap = vid.colormap;
+	}
 	ent->skinnum = state->skinnum;
 	ent->effects = state->effects;
 	ent->scale = state->scale;
@@ -1966,10 +2161,7 @@ static void HWCL_ParseServerMessage (void)
 					name = HWCL_InfoValue (userinfo, "name");
 					q_strlcpy (cl.scores[slot].name, name,
 							sizeof(cl.scores[slot].name));
-					cl.scores[slot].colors = atoi (
-						HWCL_InfoValue (userinfo, "topcolor")) << 4;
-					cl.scores[slot].colors |= atoi (
-						HWCL_InfoValue (userinfo, "bottomcolor"));
+					HWCL_UpdatePlayerPresentation (slot, userinfo);
 				}
 			}
 			break;
@@ -2092,10 +2284,9 @@ static void HWCL_ParseServerMessage (void)
 				int packed = MSG_ReadByte ();
 				if (slot >= 0 && slot < HWCL_MAX_CLIENTS && cl.scores)
 				{
-					hwcl_server_state.playerclass[slot] = (packed >> 5) & 7;
+					HWCL_SetPlayerClass (slot, (packed >> 5) & 7);
 					hwcl_server_state.playerlevel[slot] = packed & 31;
-					cl.scores[slot].playerclass =
-						(float)hwcl_server_state.playerclass[slot];
+					HWCL_ApplyPlayerPresentation (slot, &cl_entities[slot + 1]);
 				}
 			}
 			break;
@@ -2146,16 +2337,9 @@ static void HWCL_ParseServerMessage (void)
 					HWCL_StringCmd (text + 4);
 				else if (!q_strcasecmp (text, "skins\n"))
 				{
-					/* Skin download/translation is not wired up yet, but it must
-					 * not hold the transport handshake hostage. */
-					HWCL_StringCmd (va ("begin %d", hwcl_servercount));
-					if (!cl.worldmodel)
-						Host_Error ("HexenWorld signon without a world map");
-					cls.signon = SIGNONS;
-					/* Hexen II ends the plaque at signon 4 (CL_SignonReply);
-					 * this is HexenWorld's equivalent moment. */
-					SCR_EndLoadingPlaque ();
-					Con_Printf ("HexenWorld signon complete: %s.\n", cl.mapname);
+					/* This is the legacy skin-download phase.  It uses the same
+					 * bounded, path-validated transfer as models and sounds. */
+					HWCL_SkinNextDownload ();
 				}
 				else if (!q_strcasecmp (text, "changing\n"))
 				{

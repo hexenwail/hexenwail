@@ -29,7 +29,8 @@ typedef enum
 {
 	hwcl_dl_none,
 	hwcl_dl_sound,
-	hwcl_dl_model
+	hwcl_dl_model,
+	hwcl_dl_skin
 } hwcl_dltype_t;
 
 static hwcl_dltype_t hwcl_download_type;
@@ -224,6 +225,34 @@ static void HWCL_ModelNextDownload (void)
 	HWCL_StringCmd (va ("prespawn %d 0", hwcl_servercount));
 }
 
+/* svc_stufftext "skins" follows the model list during signon.  Keep skin
+ * fetches in the existing download walker: HWCL_CheckOrDownloadFile remains
+ * the single path validator, size limiter, and atomic-rename implementation. */
+static void HWCL_SkinNextDownload (void)
+{
+	const char *skin;
+
+	if (hwcl_download_number == 0)
+		Con_Printf ("Checking HexenWorld player skins...\n");
+	hwcl_download_type = hwcl_dl_skin;
+	for ( ; hwcl_download_number < HWCL_MAX_CLIENTS; hwcl_download_number++)
+	{
+		if (!cl.scores || !cl.scores[hwcl_download_number].name[0])
+			continue;
+		skin = hwcl_player_presentation[hwcl_download_number].skin;
+		if (!skin[0])
+			skin = "base";
+		if (!HWCL_CheckOrDownloadFile (va ("skins/%s.pcx", skin)))
+		{
+			hwcl_download_number++; /* resume after this player */
+			return;
+		}
+	}
+
+	HWCL_CancelDownload ();
+	HWCL_FinishSignon ();
+}
+
 static void HWCL_RequestNextDownload (void)
 {
 	switch (hwcl_download_type)
@@ -233,6 +262,9 @@ static void HWCL_RequestNextDownload (void)
 		break;
 	case hwcl_dl_model:
 		HWCL_ModelNextDownload ();
+		break;
+	case hwcl_dl_skin:
+		HWCL_SkinNextDownload ();
 		break;
 	case hwcl_dl_none:
 	default:
@@ -359,6 +391,12 @@ static void HWCL_ParseDownload (void)
 		Con_Printf ("Failed to rename %s.\n", hwcl_download_tempname);
 		Sys_unlink (path);
 	}
+	/* Even the GL path currently translates the class base skin, not the
+	 * downloaded PCX, but make the presentation state retryable when a skin
+	 * becomes available so a later skin source can consume the same state. */
+	if (hwcl_download_type == hwcl_dl_skin && hwcl_download_number > 0 &&
+			hwcl_download_number <= HWCL_MAX_CLIENTS)
+		hwcl_player_presentation[hwcl_download_number - 1].translation_dirty = true;
 	hwcl_download_bytes = 0;
 	hwcl_download_name[0] = 0;
 	hwcl_download_tempname[0] = 0;
