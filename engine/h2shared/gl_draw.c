@@ -785,19 +785,39 @@ static float GL_ResolveLodBias (void)
 	return gl_lodbias.value;
 }
 
+/* The only place GL_TEXTURE_LOD_BIAS may be set (tools/test_lod_bias_gate.py
+ * enforces it): ES 3.0/WebGL2 reject the enum, so an unguarded call there
+ * raises GL_INVALID_ENUM on every mipmapped upload (GitHub #149). */
+static void GL_ApplyLodBias (void)
+{
+	if (!gl_renderer_caps.texture_lod_bias)
+		return;
+	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
+}
+
 static void Draw_LodBias_f (cvar_t *var)
 {
+	static qboolean	warned;
 	gltexture_t	*glt;
 	int		i;
-	float		bias = GL_ResolveLodBias();
 	(void)var;
+	if (!gl_renderer_caps.texture_lod_bias)
+	{
+		if (!warned)
+		{
+			Con_DPrintf("gl_lodbias: texture LOD bias is not supported on %s, ignored\n",
+				    gl_renderer_caps.profile_name);
+			warned = true;
+		}
+		return;
+	}
 	for (i = 0, glt = gltextures; i < numgltextures; i++, glt++)
 	{
 		if (glt->texnum == GL_UNUSED_TEXTURE) continue;	/* skip retired slots */
 		if (glt->flags & TEX_MIPMAP)
 		{
 			GL_Bind (glt->texnum);
-			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, bias);
+			GL_ApplyLodBias ();
 		}
 	}
 }
@@ -2778,7 +2798,7 @@ static void GL_SetTextureFilter (const gltexture_t *glt)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 		if (gl_max_anisotropy >= 2)
 			glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
-		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
+		GL_ApplyLodBias ();
 	}
 	else
 	{
@@ -2927,7 +2947,7 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, gl_texmodes[gl_filter_idx].maximize);
 	if (gl_max_anisotropy >= 2)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, gl_texture_anisotropy.value);
-	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, GL_ResolveLodBias());
+	GL_ApplyLodBias ();
 
 	/* uhexen2-khsa r11: see GL_Upload32 comment.  Embedded-mip BSP path
 	 * only uploads non-alpha indexed textures, so the swizzle is always
