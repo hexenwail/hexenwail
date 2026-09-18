@@ -30,6 +30,7 @@
 #include "d_local.h"
 #include "web_canvas.h"
 #include "sdl_inc.h"
+#include "menu_pointer.h"
 
 #include <emscripten/emscripten.h>
 
@@ -598,6 +599,32 @@ void VID_SetWindowTitle (const char *title)
 SDL_Window *VID_GetWindow (void)
 {
 	return sdl_window;
+}
+
+/* Window points -> device pixels of the canvas -> the framebuffer pixel the
+ * presenter drew there.  The image is upscaled at least AUTO_MIN_SCALE times
+ * and letterboxed (VID_DestRect), so the pointer and the 8bpp framebuffer
+ * are far apart in every mode. */
+void VID_PointerToFramebuffer (float wx, float wy, float *fx, float *fy)
+{
+	int	w = 0, h = 0, pw = 0, ph = 0;
+	int	dx, dy, dw, dh;
+
+	if (sdl_window)
+	{
+		SDL_GetWindowSize (sdl_window, &w, &h);
+		SDL_GetWindowSizeInPixels (sdl_window, &pw, &ph);
+	}
+	if (pw > 0 && ph > 0)
+	{
+		canvas_width = pw;
+		canvas_height = ph;
+	}
+	VID_DestRect (vid.width, vid.height, &dx, &dy, &dw, &dh);
+	*fx = MenuPointer_UnLetterbox (MenuPointer_PointsToPixels (wx, w, pw),
+				       dx, dw, vid.width);
+	*fy = MenuPointer_UnLetterbox (MenuPointer_PointsToPixels (wy, h, ph),
+				       dy, dh, vid.height);
 }
 
 qboolean VID_HasMouseOrInputFocus (void)

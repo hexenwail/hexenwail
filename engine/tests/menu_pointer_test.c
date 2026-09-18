@@ -238,8 +238,179 @@ static void TestScrollbarPage (void)
 	CHECK(MenuScrollbar_PageTop(&sb, 20, MENU_SCROLLBAR_THUMB) == 20, "thumb is not a page");
 }
 
+/* ---------------------------------------------------------------------------
+ * Canvas inverse.  The forward model below is GL_SetCanvas's CANVAS_MENU
+ * (gl_draw.c) and SCR_GuiSize / SCR_CalcUIScale's auto rule, restated: the
+ * test holds MenuPointer_CanvasX/Y to being its inverse, and to the specific
+ * rows the reviewer found the old conversion landing on.
+ * ------------------------------------------------------------------------- */
+typedef struct
+{
+	const char	*name;
+	int		glwidth, glheight;
+	float		aspect;		/* vid.guipixelaspect */
+	float		menuscale;	/* scr_menuscale, 0 = auto */
+} canvas_case_t;
+
+static menu_canvas_t CanvasFor (const canvas_case_t *k)
+{
+	menu_canvas_t	c;
+	float		a = k->aspect > 0.0f ? k->aspect : 1.0f;
+
+	c.glwidth = k->glwidth;
+	c.glheight = k->glheight;
+	/* SCR_GuiSize */
+	c.gw = (int)((float)k->glwidth / (a > 1.0f ? a : 1.0f));
+	c.gh = (int)((float)k->glheight * (a < 1.0f ? a : 1.0f));
+	/* SCR_CalcUIScale: auto is floor(gh / 480), at least 1 */
+	c.scale = k->menuscale;
+	if (c.scale <= 0.0f)
+	{
+		c.scale = (float)(int)((float)c.gh / 480.0f);
+		if (c.scale < 1.0f)
+			c.scale = 1.0f;
+	}
+	return c;
+}
+
+/* Where GL_SetCanvas puts the centre of canvas unit (cx, cy) on screen. */
+static void CanvasForward (const menu_canvas_t *c, int cx, int cy, float *fx, float *fy)
+{
+	float	s = c->scale, px;
+	int	w;
+
+	if (s > (float)c->gw / 320.0f)
+		s = (float)c->gw / 320.0f;
+	px = (float)c->glwidth / (float)c->gw;
+	w = (int)(320.0f * s * px);
+	*fx = (float)((c->glwidth - w) / 2) + ((float)cx + 0.5f) * (float)w / 320.0f;
+	*fy = ((float)cy + 0.5f) * (float)c->glheight / ((float)c->gh / s);
+}
+
+static const canvas_case_t canvas_cases[] =
+{
+	{ "800x600 auto",			 800,  600, 1.0f,	0 },
+	{ "1920x1080 auto",			1920, 1080, 1.0f,	0 },
+	{ "1920x1080 Stretched (5:6)",		1920, 1080, 5.0f / 6.0f, 0 },
+	{ "1920x1080 6:5",			1920, 1080, 6.0f / 5.0f, 0 },
+	{ "1280x720 Menu Scale 4",		1280,  720, 1.0f,	4 },
+	{ "1366x768 Menu Scale 4",		1366,  768, 1.0f,	4 },
+	{ "3840x2160 auto",			3840, 2160, 1.0f,	0 },
+	{ "software 640x480",			 640,  480, 1.0f,	1 },
+};
+
+#define NUM_CANVAS_CASES	((int)(sizeof(canvas_cases) / sizeof(canvas_cases[0])))
+
+/* Options rows start at canvas y 92, 8 apart: row 1 is Brightness in
+ * Display and Music Volume in Sound. */
+static int RowAt (int cy)
+{
+	return cy < 92 ? -1 : (cy - 92) / 8;
+}
+
+static void TestCanvasInverse (void)
+{
+	int	i, cx, cy;
+
+	for (i = 0; i < NUM_CANVAS_CASES; i++)
+	{
+		const canvas_case_t	*k = &canvas_cases[i];
+		menu_canvas_t		c = CanvasFor(k);
+		float			fx, fy;
+		int			bad = 0;
+
+		for (cy = 0; cy < 200 && !bad; cy++)
+		{
+			for (cx = 0; cx < 320; cx++)
+			{
+				CanvasForward(&c, cx, cy, &fx, &fy);
+				if (MenuPointer_CanvasX(&c, fx) != cx ||
+				    MenuPointer_CanvasY(&c, fy) != cy)
+				{
+					CHECK(0, "%s: canvas (%d,%d) -> screen (%.1f,%.1f) -> (%d,%d)",
+					      k->name, cx, cy, fx, fy,
+					      MenuPointer_CanvasX(&c, fx), MenuPointer_CanvasY(&c, fy));
+					bad = 1;
+					break;
+				}
+			}
+		}
+
+		/* the reviewer's cases, by row: a click on the Brightness /
+		 * Music Volume bar is row 1, never Contrast / Sound Volume or
+		 * the 2D Aspect row */
+		CanvasForward(&c, 260, 92 + 8 + 4, &fx, &fy);
+		CHECK(RowAt(MenuPointer_CanvasY(&c, fy)) == 1,
+		      "%s: row-1 slider click landed on row %d", k->name,
+		      RowAt(MenuPointer_CanvasY(&c, fy)));
+		CHECK(MenuPointer_OnSlider(MenuPointer_CanvasX(&c, fx), 220),
+		      "%s: slider click is off the bar at x=%d", k->name,
+		      MenuPointer_CanvasX(&c, fx));
+	}
+}
+
+/* HiDPI: SDL reports points, the canvas is laid out in pixels. */
+static void TestPixelDensity (void)
+{
+	canvas_case_t	k = { "density 2, 960x540 points", 1920, 1080, 1.0f, 0 };
+	menu_canvas_t	c = CanvasFor(&k);
+	float		fx, fy, px, py;
+	int		cy;
+
+	for (cy = 60; cy < 200; cy += 3)
+	{
+		CanvasForward(&c, 260, cy, &fx, &fy);
+		/* the point SDL would report for that pixel */
+		px = MenuPointer_PointsToPixels(fx / 2.0f, 960, 1920);
+		py = MenuPointer_PointsToPixels(fy / 2.0f, 540, 1080);
+		CHECK(MenuPointer_CanvasY(&c, py) == cy && MenuPointer_CanvasX(&c, px) == 260,
+		      "density 2: canvas (260,%d) came back as (%d,%d)", cy,
+		      MenuPointer_CanvasX(&c, px), MenuPointer_CanvasY(&c, py));
+	}
+	CHECK(Near(MenuPointer_PointsToPixels(10.0f, 0, 0), 10.0f), "unknown sizes pass through");
+}
+
+/* Software web: 640x480 framebuffer letterboxed into a 1920x1080 canvas,
+ * 1440x1080 at x=240 (VID_DestRect keeping 4:3). */
+static void TestLetterbox (void)
+{
+	canvas_case_t	k = { "software 640x480", 640, 480, 1.0f, 1 };
+	menu_canvas_t	c = CanvasFor(&k);
+	float		fx, fy, dev_x, dev_y;
+	int		cx, cy;
+
+	for (cy = 60; cy < 200; cy += 7)
+	{
+		for (cx = 0; cx < 320; cx += 13)
+		{
+			CanvasForward(&c, cx, cy, &fx, &fy);
+			dev_x = 240.0f + fx * 1440.0f / 640.0f;
+			dev_y = fy * 1080.0f / 480.0f;
+			fx = MenuPointer_UnLetterbox(dev_x, 240, 1440, 640);
+			fy = MenuPointer_UnLetterbox(dev_y, 0, 1080, 480);
+			CHECK(MenuPointer_CanvasX(&c, fx) == cx && MenuPointer_CanvasY(&c, fy) == cy,
+			      "letterbox: canvas (%d,%d) came back as (%d,%d)", cx, cy,
+			      MenuPointer_CanvasX(&c, fx), MenuPointer_CanvasY(&c, fy));
+		}
+	}
+	CHECK(Near(MenuPointer_UnLetterbox(0.0f, 240, 1440, 640), 0.0f), "left border clamps");
+	CHECK(Near(MenuPointer_UnLetterbox(1919.0f, 240, 1440, 640), 639.0f), "right border clamps");
+}
+
+/* Rows that print "Off" instead of a bar at their minimum. */
+static void TestBarDrawn (void)
+{
+	CHECK(!MenuPointer_SliderBarDrawn(0.0f, 0.0f, 1), "Off row at 0 draws no bar");
+	CHECK(MenuPointer_SliderBarDrawn(0.1f, 0.0f, 1), "Off row above 0 draws a bar");
+	CHECK(MenuPointer_SliderBarDrawn(0.0f, 0.0f, 0), "plain slider at 0 still draws a bar");
+}
+
 int main (void)
 {
+	TestCanvasInverse();
+	TestPixelDensity();
+	TestLetterbox();
+	TestBarDrawn();
 	TestSliderFraction();
 	TestSliderValue();
 	TestScrollbarLayout();

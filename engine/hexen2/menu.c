@@ -225,8 +225,7 @@ extern int	menu_mouse_x, menu_mouse_y;
 extern qboolean	menu_mouse_moved;
 extern int	menu_mouse_buttons;	/* in_sdl.c; MENU_MOUSE_BUTTON bits */
 
-/* Convert a screen pixel Y to the menu canvas (0..200 logical) Y when
- * CANVAS_MENU is active, accounting for centering offset and scale. */
+/* Framebuffer pixel Y -> CANVAS_MENU Y (MenuPointer_CanvasY). */
 static int M_ScreenYToCanvasY (int screen_y);
 
 /* The pointer in menu-canvas units, whether or not the canvas is set up yet:
@@ -344,50 +343,37 @@ static int M_CenterOfs (void)
 	return m_canvas_active ? 0 : ((vid.width - 320) >> 1);
 }
 
-/* Mouse comes in as raw screen pixels (top-left origin). Convert to the
- * 320x200 menu canvas Y. Canvas is top-anchored, horizontally centered,
- * so canvas Y = screen Y / scale. */
-static int M_CanvasYFromScreen (int screen_y)
+/* menu_mouse_x/y arrive in framebuffer pixels (in_sdl.c converts from SDL's
+ * window points).  The canvas inverse itself is MenuPointer_CanvasX/Y, which
+ * mirrors CANVAS_MENU in GL_SetCanvas line for line -- hover and press both go
+ * through it, so what the pointer highlights is what a click hits. */
+static void M_MenuCanvas (menu_canvas_t *c)
 {
-	float s;
-	s = SCR_CalcUIScale (&scr_menuscale);
-	if (s > (float)glwidth / 320.0f) s = (float)glwidth / 320.0f;
-	if (s > (float)glheight / 200.0f) s = (float)glheight / 200.0f;
-	if (s < 0.0001f) s = 1.0f;
-	return (int)(screen_y / s);
+	c->glwidth = glwidth;
+	c->glheight = glheight;
+	SCR_GuiSize (&c->gw, &c->gh);
+	c->scale = SCR_CalcUIScale (&scr_menuscale);
 }
 
 static int M_ScreenYToCanvasY (int screen_y)
 {
-	if (!m_canvas_active)
-		return screen_y;
-	return M_CanvasYFromScreen (screen_y);
+	menu_canvas_t	c;
+
+	M_MenuCanvas (&c);
+	return MenuPointer_CanvasY (&c, (float)screen_y);
 }
 
 static int M_PointerCanvasY (void)
 {
-	return M_CanvasYFromScreen (menu_mouse_y);
+	return M_ScreenYToCanvasY (menu_mouse_y);
 }
 
-/* Inverse of CANVAS_MENU's horizontal placement in GL_SetCanvas: a 320-unit
- * canvas, scaled by s and by the scr_pixelaspect stretch px, centred.  The
- * software renderer reports s = 1 and a framebuffer-sized GUI, which makes
- * this its (vid.width - 320) / 2 offset. */
 static int M_PointerCanvasX (void)
 {
-	float	s, px, w;
-	int	gw, gh;
+	menu_canvas_t	c;
 
-	SCR_GuiSize (&gw, &gh);
-	if (gw <= 0)
-		gw = glwidth;
-	s = SCR_CalcUIScale (&scr_menuscale);
-	if (s > (float)gw / 320.0f) s = (float)gw / 320.0f;
-	if (s < 0.0001f) s = 1.0f;
-	px = gw > 0 ? (float)glwidth / (float)gw : 1.0f;
-	if (px < 0.0001f) px = 1.0f;
-	w = 320.0f * s * px;
-	return (int)(((float)menu_mouse_x - ((float)glwidth - w) * 0.5f) / (s * px));
+	M_MenuCanvas (&c);
+	return MenuPointer_CanvasX (&c, (float)menu_mouse_x);
 }
 
 /*
@@ -6213,22 +6199,35 @@ static int		mods_grab_offset;	/* pointer y - thumb y at the press */
 
 /* Scroll to `top' and pull the cursor into the new window.  Without the pull,
  * M_Mods_EnsureVisible would drag the window straight back to the cursor on
- * the next frame and the scrollbar could never move the list. */
+ * the next frame and the scrollbar could never move the list.  The window
+ * wins over selectability: if the snap to a selectable row leaves the window
+ * (a screenful of [HW] mods), the cursor stays on the window's edge instead,
+ * where Enter is a no-op and the arrows walk on to the next real row. */
 static void M_Mods_ScrollTo (int top)
 {
 	int	visible = M_Mods_VisibleRows ();
+	int	edge;
 
 	mods_top = MenuScrollbar_ClampTop (top, mods_view_count, visible);
+	if (mods_cursor >= mods_top && mods_cursor < mods_top + visible)
+		return;
+
 	if (mods_cursor < mods_top)
 	{
-		mods_cursor = mods_top;
+		edge = mods_top;
+		mods_cursor = edge;
 		M_Mods_SnapSelectable (1);
 	}
-	else if (mods_cursor >= mods_top + visible)
+	else
 	{
-		mods_cursor = mods_top + visible - 1;
+		edge = mods_top + visible - 1;
+		if (edge >= mods_view_count)
+			edge = mods_view_count - 1;
+		mods_cursor = edge;
 		M_Mods_SnapSelectable (-1);
 	}
+	if (mods_cursor < mods_top || mods_cursor >= mods_top + visible)
+		mods_cursor = edge;
 }
 
 /* Is canvas x over the scrollbar column?  One cell wide, with 4 units of slop
@@ -9528,6 +9527,7 @@ typedef struct
 	float		vmin, vmax;
 	float		step;
 	const cvar_t	*requires;	/* row shows text, not a bar, while this is 0 */
+	qboolean	off_at_min;	/* row prints "Off" instead of a bar at vmin */
 } menuslider_t;
 
 typedef struct
@@ -9564,9 +9564,9 @@ static const menuslider_t	rend_sliders[] =
 {
 	{ REND_DITHER,		"r_dither",	0.0f, 2.0f,	0.0f, 2.0f,	0.25f, NULL },
 	{ REND_WATERALPHA,	"r_wateralpha",	0.0f, 1.0f,	0.7f, 1.0f,	0.05f, NULL },
-	{ REND_LIQUIDWARP,	"gl_waterwarp_amount", 0.0f, 2.0f, 0.0f, 2.0f,	0.1f, NULL },
-	{ REND_FLASHINTENSITY,	"gl_flashintensity", 0.0f, 2.0f, 0.0f, 2.0f,	0.25f, NULL },
-	{ REND_MOTIONBLUR,	"r_motionblur",	0.0f, 1.0f,	0.0f, 1.0f,	0.25f, NULL },
+	{ REND_LIQUIDWARP,	"gl_waterwarp_amount", 0.0f, 2.0f, 0.0f, 2.0f,	0.1f, NULL, true },
+	{ REND_FLASHINTENSITY,	"gl_flashintensity", 0.0f, 2.0f, 0.0f, 2.0f,	0.25f, NULL, true },
+	{ REND_MOTIONBLUR,	"r_motionblur",	0.0f, 1.0f,	0.0f, 1.0f,	0.25f, NULL, true },
 	{ REND_HDR_EXPOSURE,	"r_hdr_exposure", 0.1f, 4.0f,	0.1f, 4.0f,	0.1f, &r_hdr },
 };
 
@@ -9580,7 +9580,7 @@ static const menuslider_t	gfx_sliders[] =
 static const menuslider_t	game_sliders[] =
 {
 	{ GAME_FOV,		"fov",		60.0f, 130.0f,	60.0f, 130.0f,	2.0f, NULL },
-	{ GAME_GUN_FOVSCALE,	"cl_gun_fovscale", 0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
+	{ GAME_GUN_FOVSCALE,	"cl_gun_fovscale", 0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL, true },
 	{ GAME_MOUSESPEED,	"sensitivity",	1.0f, 11.0f,	1.0f, 11.0f,	0.5f, NULL },
 	{ GAME_VIEWBOB,		"cl_bob",	0.0f, 0.05f,	0.0f, 0.05f,	0.005f, NULL },
 	{ GAME_VIEWROLL,	"cl_rollangle",	0.0f, 5.0f,	0.0f, 5.0f,	0.5f, NULL },
@@ -9623,8 +9623,10 @@ static const menuslider_t	*m_grab_slider;
 static int			m_grab_slider_x;
 
 /* Set the grabbed slider's cvar from pointer x.  Writes only on a change, so
- * holding the thumb still does not re-run the cvar's callback every frame. */
-static void M_Slider_SetFromPointer (const menuslider_t *sl, int slider_x)
+ * holding the thumb still does not re-run the cvar's callback every frame.
+ * The one place the slider sound is played: a press sounds even when the
+ * value is already there (`press'), a drag only when it moves. */
+static void M_Slider_SetFromPointer (const menuslider_t *sl, int slider_x, qboolean press)
 {
 	float	v, cur, d;
 
@@ -9633,9 +9635,10 @@ static void M_Slider_SetFromPointer (const menuslider_t *sl, int slider_x)
 		sl->v0, sl->v1, sl->vmin, sl->vmax, sl->step);
 	cur = Cvar_VariableValue (sl->cvar);
 	d = v > cur ? v - cur : cur - v;
-	if (d < sl->step * 0.01f)
+	if (d >= sl->step * 0.01f)
+		Cvar_SetValue (sl->cvar, v);
+	else if (!press)
 		return;
-	Cvar_SetValue (sl->cvar, v);
 	M_ThrottledSound ("raven/menu3.wav");
 }
 
@@ -9666,6 +9669,9 @@ static qboolean M_Slider_MousePress (void)
 		return false;
 	if (sl->requires && !sl->requires->integer)
 		return false;
+	if (!MenuPointer_SliderBarDrawn (Cvar_VariableValue (sl->cvar), sl->vmin,
+					 sl->off_at_min))
+		return false;
 	if (!MenuPointer_OnSlider (M_PointerCanvasX (), set->slider_x))
 		return false;
 
@@ -9674,8 +9680,7 @@ static qboolean M_Slider_MousePress (void)
 	m_grab_state = m_state;
 	m_grab_slider = sl;
 	m_grab_slider_x = set->slider_x;
-	S_LocalSound ("raven/menu3.wav");
-	M_Slider_SetFromPointer (sl, set->slider_x);
+	M_Slider_SetFromPointer (sl, set->slider_x, true);
 	return true;
 }
 
@@ -9706,7 +9711,7 @@ static void M_Pointer_Think (void)
 		return;
 
 	if (m_grab == MGRAB_SLIDER && m_grab_slider)
-		M_Slider_SetFromPointer (m_grab_slider, m_grab_slider_x);
+		M_Slider_SetFromPointer (m_grab_slider, m_grab_slider_x, false);
 	else if (m_grab == MGRAB_SCROLLBAR)
 		M_Mods_DragScrollbar ();
 }

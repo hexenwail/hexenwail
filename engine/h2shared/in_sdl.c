@@ -82,6 +82,19 @@ qboolean	menu_mouse_moved;
  * Hexenwail_TouchKey and never touches this, so its taps stay plain Enter. */
 int		menu_mouse_buttons;
 
+/* The pointer in framebuffer pixels, which is what menu.c's canvas inverse
+ * expects: SDL reports window points, and at any pixel density but 1 (or on
+ * the software web renderer, always) those are a different space. */
+static void IN_MenuPointer (int *x, int *y)
+{
+	float	mx, my, fx, fy;
+
+	SDL_GetMouseState (&mx, &my);
+	VID_PointerToFramebuffer (mx, my, &fx, &fy);
+	*x = (int)fx;
+	*y = (int)fy;
+}
+
 static qboolean	mouseactive = false;
 static qboolean	mouseinitialized = false;
 static qboolean	mouseactivatetoggle = false;
@@ -1432,8 +1445,12 @@ void IN_SendKeyEvents (void)
 		case SDL_EVENT_WINDOW_FOCUS_LOST:
 			S_BlockSound();
 			IN_DeactivateMouse();
-			/* the release may land in another window and never reach us */
+			/* The release may land in another window and never reach us.
+			 * Key_ClearStates releases every key still down, which also
+			 * resets key_repeats: otherwise the next click in a menu would
+			 * arrive as an auto-repeat and M_Keydown would drop it. */
 			menu_mouse_buttons = 0;
+			Key_ClearStates ();
 			break;
 		case SDL_EVENT_WINDOW_MINIMIZED:
 			scr_skipupdate = 1;
@@ -1503,15 +1520,12 @@ void IN_SendKeyEvents (void)
 			/* In menu mode, allow mouse clicks even when mouse is "inactive" */
 			if ((Key_GetDest() & key_menu) && ui_mouse.integer)
 			{
-				float mx, my;
-				SDL_GetMouseState(&mx, &my);
 				/* Before Key_Event: M_Keydown reads the bit to tell a
 				 * pointer press from Enter. */
 				if (event.button.down && event.button.button >= 1 &&
 				    event.button.button <= 16)
 					menu_mouse_buttons |= MENU_MOUSE_BUTTON(event.button.button);
-				menu_mouse_x = (int)mx;
-				menu_mouse_y = (int)my;
+				IN_MenuPointer (&menu_mouse_x, &menu_mouse_y);
 				/* A click is a positioning event too: without this the
 				 * hover test would ignore it (it is gated on the moved
 				 * flag) and a click-without-motion could not select. */
@@ -1527,15 +1541,23 @@ void IN_SendKeyEvents (void)
 				SDL_GetMouseState(&mx, &my);
 				Con_MouseMove((int)mx, (int)my);
 				con_mouse_button_down = event.button.down;
+				/* a press delivered elsewhere still needs its release */
+				if (!event.button.down)
+					Key_Event(K_MOUSE1, false);
 				break;
 			}
-			if (!mouseactive || in_mode_set)
-				break;
 			if (event.button.button < 1 ||
 			    event.button.button > sizeof(buttonremap) / sizeof(buttonremap[0]))
 			{
 				break;
 			}
+			/* Releases are delivered even while the mouse is inactive: the
+			 * press may have gone through before it was deactivated (a
+			 * menu click, an in-game attack), and a key left down keeps
+			 * its binding held and its key_repeats count, which turns the
+			 * next menu click into a dropped auto-repeat. */
+			if (event.button.down && (!mouseactive || in_mode_set))
+				break;
 			Key_Event(buttonremap[event.button.button - 1], event.button.down);
 			break;
 
@@ -1606,12 +1628,12 @@ void IN_SendKeyEvents (void)
 			 * dispatched as Enter).  uhexen2-u4iz. */
 			else if ((Key_GetDest() & key_menu) && ui_mouse.integer)
 			{
-				float mx, my;
-				SDL_GetMouseState(&mx, &my);
-				if ((int)mx != menu_mouse_x || (int)my != menu_mouse_y)
+				int x, y;
+				IN_MenuPointer (&x, &y);
+				if (x != menu_mouse_x || y != menu_mouse_y)
 				{
-					menu_mouse_x = (int)mx;
-					menu_mouse_y = (int)my;
+					menu_mouse_x = x;
+					menu_mouse_y = y;
 					menu_mouse_moved = true;
 				}
 			}

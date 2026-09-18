@@ -16,6 +16,110 @@
 #define MENU_MOUSE_LEFT		MENU_MOUSE_BUTTON(1)
 
 /* ---------------------------------------------------------------------------
+ * Pointer -> framebuffer pixels.  SDL3 reports the mouse in window POINTS;
+ * every window is created SDL_WINDOW_HIGH_PIXEL_DENSITY (gl_vidsdl.c,
+ * vid_soft_web.c), so on a 2x display the framebuffer has twice as many
+ * pixels as the pointer has points.  Per axis, from the two sizes SDL gives
+ * (SDL_GetWindowSize / SDL_GetWindowSizeInPixels), rather than one density
+ * number, so a non-uniform ratio cannot skew one axis.
+ * ------------------------------------------------------------------------- */
+static inline float MenuPointer_PointsToPixels (float points, int size_points,
+						int size_pixels)
+{
+	if (size_points <= 0 || size_pixels <= 0)
+		return points;
+	return points * (float)size_pixels / (float)size_points;
+}
+
+/*
+ * Undo a letterboxed upscale: the software web renderer draws a small
+ * framebuffer (fb_size) and the presenter stretches it into dest_size device
+ * pixels at dest_off (VID_DestRect in vid_soft_web.c).  Device pixel -> the
+ * framebuffer pixel under it.  Outside the image clamps to the edge.
+ */
+static inline float MenuPointer_UnLetterbox (float device, int dest_off,
+					     int dest_size, int fb_size)
+{
+	float	f;
+
+	if (dest_size <= 0 || fb_size <= 0)
+		return device;
+	f = (device - (float)dest_off) * (float)fb_size / (float)dest_size;
+	if (f < 0.0f)
+		f = 0.0f;
+	if (f > (float)fb_size - 1.0f)
+		f = (float)fb_size - 1.0f;
+	return f;
+}
+
+/* ---------------------------------------------------------------------------
+ * Framebuffer pixel -> menu canvas unit.  The exact inverse of CANVAS_MENU in
+ * GL_SetCanvas (gl_draw.c):
+ *
+ *	s = SCR_CalcUIScale (&scr_menuscale);
+ *	s = q_min (s, (float)gw / 320.0f);	// width is the ONLY clamp
+ *	w = (int)(320.0f * s * px);		// px = glwidth / gw
+ *	h = glheight;
+ *	glViewport (glx + (glwidth - w) / 2, gly, w, h);
+ *	GL_Ortho (0, 320, (float)gh / s, 0, ...);
+ *
+ * gw/gh is SCR_GuiSize, the framebuffer squashed by scr_pixelaspect, so a
+ * "Stretched" 2D aspect makes canvas units taller than they are wide.  The
+ * software renderer fits the same formula with s = 1, gw = glwidth,
+ * gh = glheight: its canvas sits at (vid.width - 320) / 2, unscaled
+ * (draw_soft_web.c GL_SetCanvas).  glx/gly are 0 in both backends.
+ * ------------------------------------------------------------------------- */
+typedef struct
+{
+	int	glwidth, glheight;	/* framebuffer, pixels */
+	int	gw, gh;			/* SCR_GuiSize */
+	float	scale;			/* SCR_CalcUIScale (&scr_menuscale), unclamped */
+} menu_canvas_t;
+
+static inline int MenuPointer_Floor (float v)
+{
+	int	i = (int)v;
+	return ((float)i > v) ? i - 1 : i;
+}
+
+static inline void MenuPointer_CanvasFrame (const menu_canvas_t *c, float *s,
+					    int *left, int *w)
+{
+	float	px;
+
+	*s = c->scale;
+	if (c->gw > 0 && *s > (float)c->gw / 320.0f)
+		*s = (float)c->gw / 320.0f;
+	if (*s <= 0.0f)
+		*s = 1.0f;
+	px = c->gw > 0 ? (float)c->glwidth / (float)c->gw : 1.0f;
+	*w = (int)(320.0f * *s * px);
+	if (*w < 1)
+		*w = 1;
+	*left = (c->glwidth - *w) / 2;
+}
+
+static inline int MenuPointer_CanvasX (const menu_canvas_t *c, float fb_x)
+{
+	float	s;
+	int	left, w;
+
+	MenuPointer_CanvasFrame (c, &s, &left, &w);
+	return MenuPointer_Floor ((fb_x - (float)left) * 320.0f / (float)w);
+}
+
+static inline int MenuPointer_CanvasY (const menu_canvas_t *c, float fb_y)
+{
+	float	s;
+	int	left, w;
+
+	MenuPointer_CanvasFrame (c, &s, &left, &w);
+	if (c->glheight <= 0)
+		return MenuPointer_Floor (fb_y);
+	return MenuPointer_Floor (fb_y * ((float)c->gh / s) / (float)c->glheight);
+}
+
+/* ---------------------------------------------------------------------------
  * Sliders.  M_DrawSlider draws a left cap at x-8, MENU_SLIDER_CELLS bar cells
  * from x, a right cap after them, and the 8-wide thumb at
  * x + (MENU_SLIDER_CELLS-1)*8 * fraction.  The pointer maps to the fraction
@@ -29,6 +133,18 @@
 static inline int MenuPointer_OnSlider (int cx, int slider_x)
 {
 	return cx >= slider_x - 12 && cx <= slider_x + MENU_SLIDER_CELLS * 8 + 4;
+}
+
+/*
+ * Is the bar drawn at all?  Some rows print "Off" instead of a bar once their
+ * value reaches the bottom (liquid warp, flash, motion blur, gun FOV scale).
+ * A press there must stay Enter, which steps the value up: claimed as a
+ * slider press it would map to the bottom, change nothing, and swallow the
+ * one input that used to turn the effect back on.
+ */
+static inline int MenuPointer_SliderBarDrawn (float value, float vmin, int off_at_min)
+{
+	return !off_at_min || value > vmin;
 }
 
 static inline float MenuPointer_SliderFraction (int cx, int slider_x)
