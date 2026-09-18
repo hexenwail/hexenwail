@@ -94,6 +94,9 @@ jobs:
       - name: Test texture LOD bias capability gate
         run: nix develop -c python3 tools/test_lod_bias_gate.py
 
+      - name: Test GL model loader invariants
+        run: nix develop -c python3 tools/test_gl_model_loaders.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
