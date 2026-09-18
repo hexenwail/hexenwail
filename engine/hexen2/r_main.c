@@ -1030,16 +1030,32 @@ brush_render_state_t R_SoftwareBrushRenderState (const entity_t *e,
 	input.has_explicit_alpha = e->alpha != ENTALPHA_DEFAULT;
 	input.explicit_alpha = input.has_explicit_alpha ?
 		ENTALPHA_DECODE(e->alpha) : 1.0f;
-	/* Palette blending cannot represent r_wateralpha; its established default
-	 * is opaque unless the surface/entity already requests the trans pass. */
-	input.default_alpha = 1.0f;
 	input.drawflag_translucent = (e->drawflags & DRF_TRANSLUCENT) != 0;
 	if (surface && (surface->flags & SURF_DRAWTURB))
+	{
 		input.surface_kind = BRUSH_SURFACE_LIQUID;
+		/* The palette renderer has no continuous liquid alpha, so a liquid
+		 * already tagged for its translucent pass is represented by any
+		 * sub-opaque default.  The value is only used for classification;
+		 * Turbulent8 still performs the backend's palette quantization. */
+		input.default_alpha = (surface->flags & SURF_TRANSLUCENT) ?
+			0.5f : 1.0f;
+	}
 	else if (surface && surface->texinfo->texture->name[0] == '{')
+	{
 		input.surface_kind = BRUSH_SURFACE_CUTOUT;
+		input.default_alpha = 1.0f;
+	}
 	else
+	{
 		input.surface_kind = BRUSH_SURFACE_REGULAR;
+		input.default_alpha = 1.0f;
+		/* SURF_TRANSLUCENT is a legacy surface-level request for the
+		 * non-liquid palette path.  Feed it through the shared classifier
+		 * rather than restoring it after classification. */
+		if (surface && (surface->flags & SURF_TRANSLUCENT))
+			input.drawflag_translucent = true;
+	}
 
 	return R_ClassifyBrushRenderState(&input);
 }

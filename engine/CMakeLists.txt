@@ -4,6 +4,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(glhexen2 VERSION 1.5.10 LANGUAGES C)
 
+include(CTest)
+
 # Set output directories
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -1026,6 +1028,14 @@ endif()
 
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE ${CLIENT_DEFINITIONS})
 add_dependencies(${EXECUTABLE_NAME} shaders_gen)
+
+# Keep renderer-policy tests in the normal CMake graph.  The test only needs
+# the backend-neutral header, so it remains cheap to build alongside the
+# client and does not pull renderer or SDL linkage into the test binary.
+if(BUILD_TESTING)
+    add_executable(brush_render_state_test tests/brush_render_state_test.c)
+    add_test(NAME brush_render_state COMMAND brush_render_state_test)
+endif()
 
 if(RUST_ENGINE_FEATURES)
     engine_rs_attach(${EXECUTABLE_NAME})

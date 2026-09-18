@@ -670,10 +670,12 @@ void R_RenderBmodelFace (bedge_t *pedges, msurface_t *psurf)
 
 	surface_p->data = (void *)psurf;
 	surface_p->nearzi = r_nearzi;
+	/* Rebuild the dispatch bit from the classified state.  In particular,
+	 * an explicit opaque alpha overrides a liquid's legacy SURF_TRANSLUCENT
+	 * bit; default-alpha liquids were classified from that bit above. */
+	surface_p->flags = psurf->flags & ~SURF_TRANSLUCENT;
 	if (render_state.translucent)
-		surface_p->flags = psurf->flags | SURF_TRANSLUCENT;
-	else
-		surface_p->flags = psurf->flags;
+		surface_p->flags |= SURF_TRANSLUCENT;
 	surface_p->insubmodel = true;
 	surface_p->spanstate = 0;
 	surface_p->entity = currententity;
