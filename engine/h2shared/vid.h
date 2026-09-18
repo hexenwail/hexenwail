@@ -203,6 +203,11 @@ void VID_MenuAdjustAnisotropy (int dir);
 qboolean VID_HasMouseOrInputFocus (void);
 qboolean VID_IsMinimized (void);
 struct SDL_Window *VID_GetWindow (void);
+// Pointer position in window points (what SDL mouse events carry) -> the
+// framebuffer pixel under it, the space glwidth/glheight and the 2D canvases
+// are measured in.  Covers HiDPI and, on the software web renderer, the
+// letterboxed upscale.  Issue #137.
+void VID_PointerToFramebuffer (float wx, float wy, float *fx, float *fy);
 
 void VID_SetWindowTitle (const char *title);
 // Sets the window title bar.  The build's own name is appended, and NULL means

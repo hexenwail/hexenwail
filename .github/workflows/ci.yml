@@ -91,6 +91,12 @@ jobs:
       - name: Test HexenWorld local presentation state
         run: nix develop -c python3 tools/test_hw_viewmodel_feedback.py
 
+      - name: Test texture LOD bias capability gate
+        run: nix develop -c python3 tools/test_lod_bias_gate.py
+
+      - name: Test GL model loader invariants
+        run: nix develop -c python3 tools/test_gl_model_loaders.py
+
       - name: Build Linux
         run: nix build .#nixos --print-build-logs
 
@@ -202,6 +208,22 @@ jobs:
             -Iengine/h2shared -Icommon -o brush_render_state_test \
             engine/tests/brush_render_state_test.c
           ./brush_render_state_test
+
+      - name: Unit test host tick planning
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -Iengine/h2shared -o host_tick_test \
+            engine/tests/host_tick_test.c
+          ./host_tick_test
+
+      - name: Unit test menu pointer geometry
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -Iengine/h2shared -o menu_pointer_test \
+            engine/tests/menu_pointer_test.c
+          ./menu_pointer_test
 
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
