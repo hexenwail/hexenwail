@@ -136,14 +136,11 @@ model's skins, because those three decide the texture mode the skin was
 uploaded with. This is a no-op in the software renderer, which samples
 palettized texels directly.
 
-## Known gap: the software / WebAssembly renderer
+## Software / WebAssembly renderer limits
 
-`EF_SPIN` and `EF_FLOAT` are honoured by the GL renderer only. `r_alias.c`
-tests the raw `EF_ROTATE` MDL header bit and never consults `R_GetPimpFlags`,
-so a `misc_modelpimp` granting spin or float — shared or not — does nothing in
-the software build, including the `WEB_RENDERER=software` web build. Glow orbs
-are likewise GL-only; `EF_ILLUMINATE` does work, because the dlight is
-allocated in `cl_main.c`, which both renderers share.
+`EF_SPIN` and `EF_FLOAT` drive the software alias transform as well as the
+GL/GLES transform. Glow orbs remain GL-only; `EF_ILLUMINATE` does work,
+because the dlight is allocated in `cl_main.c`, which both renderers share.
 
 ## Adding your own light-casting models: `r_dlight_model_list`
 

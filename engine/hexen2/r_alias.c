@@ -396,6 +396,9 @@ static void R_AliasSetUpTransform (int trivial_accept)
 	float		xyfact = 1.0, zfact = 1.0; // avoid compiler warning
 	float		forward;
 	float		yaw, pitch;
+	int		pimp_flags;
+
+	pimp_flags = R_GetPimpFlags (currententity, NULL);
 
 // TODO: should really be stored with the entity instead of being reconstructed
 // TODO: should use a look-up table
@@ -436,7 +439,8 @@ static void R_AliasSetUpTransform (int trivial_accept)
 	{
 		angles[ROLL] = currententity->angles[ROLL];
 		angles[PITCH] = -currententity->angles[PITCH];
-		if (currententity->model->flags & EF_ROTATE)
+		if ((currententity->model->flags & EF_ROTATE) ||
+			(pimp_flags & EF_SPIN))
 		{
 			angles[YAW] = anglemod( (currententity->origin[0] + currententity->origin[1])*0.8
 						+ (108*cl.time) );
@@ -504,7 +508,8 @@ static void R_AliasSetUpTransform (int trivial_accept)
 		tmatrix[2][3] = pmdl->scale_origin[2];
 	}
 
-	if (currententity->model->flags & EF_ROTATE)
+	if ((currententity->model->flags & EF_ROTATE) ||
+		(pimp_flags & EF_FLOAT))
 	{
 		// Floating motion
 		tmatrix[2][3] += q_sinrad(currententity->origin[0]
@@ -930,6 +935,7 @@ R_AliasDrawModel
 void R_AliasDrawModel (alight_t *plighting)
 {
 	int		mls;
+	int		pimp_flags;
 	int		i, j;
 	byte		*dest, *source, *sourceA;
 	auxvert_t	auxverts[MAXALIASVERTS];
@@ -948,8 +954,10 @@ void R_AliasDrawModel (alight_t *plighting)
 	R_AliasSetupSkin ();
 	R_AliasSetUpTransform (currententity->trivial_accept);
 
+	pimp_flags = R_GetPimpFlags (currententity, NULL);
 	mls = currententity->drawflags & MLS_MASKIN;
-	if (currententity->model->flags & EF_ROTATE)
+	if ((currententity->model->flags & EF_ROTATE) ||
+		(pimp_flags & (EF_SPIN | EF_FLOAT)))
 	{
 		plighting->ambientlight =
 		plighting->shadelight =
