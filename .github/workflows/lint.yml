@@ -78,6 +78,12 @@ jobs:
       - name: Software-renderer menu parity
         run: python3 tools/menu_soft_parity.py
 
+      # EF_SPIN and EF_FLOAT are per-entity model flags.  The GL/GLES path
+      # already consumes them; keep the software alias transform and lighting
+      # path from silently falling back to the raw MDL EF_ROTATE bit.
+      - name: Software model-effect parity
+        run: python3 tools/test_software_model_flags.py
+
       # Data-free coverage for the unified multiplayer path. The harness
       # extracts the production C functions rather than maintaining a Python
       # reimplementation, then compiles them against narrow engine stubs.
