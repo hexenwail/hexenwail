@@ -1039,6 +1039,8 @@ if(BUILD_TESTING)
     target_compile_definitions(brush_render_state_test PRIVATE
         BRUSH_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME brush_render_state COMMAND brush_render_state_test)
+    add_executable(host_tick_test tests/host_tick_test.c)
+    add_test(NAME host_tick COMMAND host_tick_test)
 endif()
 
 if(RUST_ENGINE_FEATURES)

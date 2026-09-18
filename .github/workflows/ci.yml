@@ -206,6 +206,14 @@ jobs:
             engine/tests/brush_render_state_test.c
           ./brush_render_state_test
 
+      - name: Unit test host tick planning
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -Iengine/h2shared -o host_tick_test \
+            engine/tests/host_tick_test.c
+          ./host_tick_test
+
       - name: Build Windows
         run: nix build .#win64 --print-build-logs
 
