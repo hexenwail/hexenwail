@@ -659,8 +659,9 @@ static void GL_ImageList_f (void)
 				   &live, &shown, &texels);
 	}
 
-	/* Skyboxes and the scrolling sky live in gl_texmgr.c's pool, not
-	 * gltextures[] -- see TexMgr_TextureAt for why.  Issue #127. */
+	/* Skybox faces and the notexture/nulltexture placeholders live in
+	 * gl_texmgr.c's pool, not gltextures[] -- see TexMgr_TextureAt for
+	 * why.  Issue #127. */
 	for (i = 0; i < TexMgr_NumTextures (); i++)
 	{
 		if ((glt = TexMgr_TextureAt (i, &flags)) != NULL)
@@ -703,15 +704,47 @@ static void GL_ImageDump_f (void)
 #else
 /* Writes one texture; false only when out of memory, which ends the dump. */
 static qboolean GL_ImageDumpEntry (const gltexture_t *glt, const char *dirpath,
-				   int *written, int *failed)
+				   int *written, int *failed, int *stale)
 {
 	char		filepath[MAX_OSPATH];
 	char		safename[MAX_QPATH];
 	byte		*buffer;
 	char		*c;
+	GLint		w = 0, h = 0;
 
 	if (glt->width <= 0 || glt->height <= 0)
 		return true;
+
+	/* The recorded name and size are only claims.  After vid_restart the
+	 * TexMgr pool still holds names from the dead context, which the new
+	 * context reissues to unrelated textures, so ask GL what the name is
+	 * now rather than trusting the record. */
+	if (!glIsTexture_fp (glt->texnum))
+	{
+		Con_Printf ("imagedump: skipping %s: GL name %u is not a texture\n",
+			    glt->identifier, (unsigned int)glt->texnum);
+		(*stale)++;
+		return true;
+	}
+
+	/* Bound directly, not through GL_Bind: its currenttexture cache can
+	 * disagree with the real binding, and a skipped bind reads some other
+	 * texture into a buffer sized for this one. */
+	glBindTexture_fp (GL_TEXTURE_2D, glt->texnum);
+	glGetTexLevelParameteriv_fp (GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+	glGetTexLevelParameteriv_fp (GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+
+	/* GL_Upload32 and GL_UploadCompressed only ever shrink level 0
+	 * (gl_picmip, gl_max_size), so smaller than recorded is normal and
+	 * larger means the name now belongs to some other texture. */
+	if (w <= 0 || h <= 0 || w > glt->width || h > glt->height)
+	{
+		Con_Printf ("imagedump: skipping %s: GL name %u is %dx%d, recorded %dx%d (stale)\n",
+			    glt->identifier, (unsigned int)glt->texnum,
+			    (int)w, (int)h, glt->width, glt->height);
+		(*stale)++;
+		return true;
+	}
 
 	/* Identifiers are paths, and some are synthesised with ':' or
 	 * '*' in them (the warp textures, the per-face skybox names).
@@ -731,18 +764,16 @@ static qboolean GL_ImageDumpEntry (const gltexture_t *glt, const char *dirpath,
 
 	q_snprintf (filepath, sizeof(filepath), "%s/%s.png", dirpath, safename);
 
-	buffer = (byte *) malloc ((size_t)glt->width * glt->height * 4);
+	buffer = (byte *) malloc ((size_t)w * h * 4);
 	if (!buffer)
 	{
 		Con_Printf ("imagedump: out of memory\n");
 		return false;
 	}
 
-	GL_Bind (glt->texnum);
-	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
 	glGetTexImage_fp (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
 
-	if (Image_WritePNG (filepath, buffer, glt->width, glt->height, 32, true))
+	if (Image_WritePNG (filepath, buffer, w, h, 32, true))
 		(*written)++;
 	else
 		(*failed)++;
@@ -755,28 +786,44 @@ static void GL_ImageDump_f (void)
 {
 	char		dirpath[MAX_OSPATH];
 	const gltexture_t	*glt;
-	int		i, flags, written = 0, failed = 0;
+	int		i, flags, written = 0, failed = 0, stale = 0;
 	qboolean	ok = true;
+	GLint		prev_unit = GL_TEXTURE0, prev_tex = 0, prev_pack = 4;
 
 	FS_MakePath_BUF (FS_USERDIR, NULL, dirpath, sizeof(dirpath), "imagedump");
 	Sys_mkdir (dirpath, false);
+
+	glGetIntegerv_fp (GL_ACTIVE_TEXTURE, &prev_unit);
+	glActiveTexture_fp (GL_TEXTURE0);
+	glGetIntegerv_fp (GL_TEXTURE_BINDING_2D, &prev_tex);
+	glGetIntegerv_fp (GL_PACK_ALIGNMENT, &prev_pack);
+	glPixelStorei_fp (GL_PACK_ALIGNMENT, 1);
 
 	for (i = 0, glt = gltextures; ok && i < numgltextures; i++, glt++)
 	{
 		if (glt->texnum == GL_UNUSED_TEXTURE || !glt->identifier[0])
 			continue;	/* retired slot awaiting reuse */
-		ok = GL_ImageDumpEntry (glt, dirpath, &written, &failed);
+		ok = GL_ImageDumpEntry (glt, dirpath, &written, &failed, &stale);
 	}
 
-	/* gl_texmgr.c's pool: skyboxes and the scrolling sky.  Issue #127. */
+	/* gl_texmgr.c's pool: skybox faces and the placeholders.  Issue #127. */
 	for (i = 0; ok && i < TexMgr_NumTextures (); i++)
 	{
 		if ((glt = TexMgr_TextureAt (i, &flags)) != NULL)
-			ok = GL_ImageDumpEntry (glt, dirpath, &written, &failed);
+			ok = GL_ImageDumpEntry (glt, dirpath, &written, &failed, &stale);
 	}
+
+	glPixelStorei_fp (GL_PACK_ALIGNMENT, prev_pack);
+	glBindTexture_fp (GL_TEXTURE_2D, (GLuint)prev_tex);
+	glActiveTexture_fp ((GLenum)prev_unit);
+	/* Resync GL_Bind's cache to what the active unit really holds. */
+	glGetIntegerv_fp (GL_TEXTURE_BINDING_2D, &prev_tex);
+	currenttexture = (GLuint)prev_tex;
 
 	Con_Printf ("imagedump: wrote %d texture%s to %s\n",
 		    written, (written == 1) ? "" : "s", dirpath);
+	if (stale)
+		Con_Printf ("imagedump: %d skipped as stale\n", stale);
 	if (failed)
 		Con_Printf ("imagedump: %d could not be written\n", failed);
 }
