@@ -484,6 +484,10 @@ static void GL_InitRendererCaps (void)
 #ifdef USE_GLES
 	gl_renderer_caps.profile = GL_RENDERER_GLES3;
 	gl_renderer_caps.profile_name = "OpenGL ES 3.0 / WebGL2";
+	/* GL_TEXTURE_LOD_BIAS is not a texture parameter in ES 3.0 or WebGL2
+	 * (0x8501 raises GL_INVALID_ENUM there, GitHub #149).  memset already
+	 * cleared it; spelled out so the tier split reads in one place. */
+	gl_renderer_caps.texture_lod_bias = false;
 	/* Anisotropy and float color buffers are extensions on this tier.  In
 	 * the browser they must be *enabled* on the context before the enums
 	 * become legal, which SDL_GL_ExtensionSupported does not do -- a bare
@@ -515,6 +519,7 @@ static void GL_InitRendererCaps (void)
 	 * guarantee; the ES arm above is where the probe is load-bearing. */
 	gl_renderer_caps.anisotropy = true;
 	gl_renderer_caps.float_color_buffer = true;	/* core since GL 3.0 */
+	gl_renderer_caps.texture_lod_bias = true;	/* core since GL 1.4 */
 	gl_renderer_caps.shader_storage = (glBindBufferBase_fp != NULL);
 	gl_renderer_caps.compute_shaders =
 		(glDispatchCompute_fp != NULL) && (glMemoryBarrier_fp != NULL);
@@ -677,12 +682,13 @@ static void GL_RendererStatus_f (void)
 	Con_Printf("[RENDERER] drawable=%dx%d viewport=%d,%d %dx%d\n",
 		   WRWidth, WRHeight, glx, gly, glwidth, glheight);
 	Con_Printf("[RENDERER] postprocess=%s HDR-targets=%s OIT=%s SSBO=%s "
-		   "anisotropy=%s FBO-test=%s sample-shading=%s\n",
+		   "anisotropy=%s lod-bias=%s FBO-test=%s sample-shading=%s\n",
 		   gl_renderer_caps.postprocess ? "ready" : "unavailable",
 		   gl_renderer_caps.float_color_buffer ? "yes" : "no",
 		   gl_renderer_caps.oit ? "yes" : "sorted fallback",
 		   gl_renderer_caps.shader_storage ? "yes" : "CPU fallback",
 		   gl_renderer_caps.anisotropy ? "yes" : "no",
+		   gl_renderer_caps.texture_lod_bias ? "yes" : "no",
 		   gl_renderer_caps.fbo_selftest ? "pass" : "fail",
 		   gl_renderer_caps.sample_shading ? "yes" : "no");
 	GL_ReportShaderStatus();
