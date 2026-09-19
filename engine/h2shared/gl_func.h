@@ -118,6 +118,10 @@ GL_FUNCTION(void, glReadPixels, (GLint,GLint,GLsizei,GLsizei,GLenum,GLenum, GLvo
  * it is declared in this branch and the plain-desktop one below, and NOT in the
  * USE_GLES branch between them.  Every use must sit behind !defined(USE_GLES). */
 GL_FUNCTION(void, glGetTexImage, (GLenum,GLint,GLenum,GLenum,GLvoid *))
+/* imagedump's guards: is a recorded name still a texture, and what size is it
+ * really.  Desktop only for the same reason as glGetTexImage. */
+GL_FUNCTION(GLboolean, glIsTexture, (GLuint))
+GL_FUNCTION(void, glGetTexLevelParameteriv, (GLenum,GLint,GLenum,GLint *))
 GL_FUNCTION(void, glPixelStorei, (GLenum,GLint))
 GL_FUNCTION(void, glHint, (GLenum,GLenum))
 GL_FUNCTION(void, glCullFace, (GLenum))
@@ -292,6 +296,8 @@ GL_FUNCTION(void, glClearStencil, (GLint))
 #define glDrawBuffer_fp		glDrawBuffer
 #define glReadPixels_fp		glReadPixels
 #define glGetTexImage_fp	glGetTexImage	/* desktop only -- see the note above */
+#define glIsTexture_fp		glIsTexture
+#define glGetTexLevelParameteriv_fp	glGetTexLevelParameteriv
 #define glPixelStorei_fp	glPixelStorei
 #define glHint_fp		glHint
 #define glCullFace_fp		glCullFace
