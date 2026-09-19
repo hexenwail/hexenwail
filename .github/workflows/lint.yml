@@ -90,8 +90,8 @@ jobs:
       - name: Multiplayer join and content-path regression
         run: python3 tools/test_multiplayer_join.py
 
-      # Skyboxes and the scrolling sky live in gl_texmgr.c's own pool, outside
-      # gltextures[], so imagelist/imagedump could not see them (issue #127).
+      # Skybox faces live in gl_texmgr.c's own pool, outside gltextures[], so
+      # imagelist/imagedump could not see them (issue #127).
       # Compiles the real gl_texmgr.c against stubs and checks both commands
       # still walk that pool.
       - name: TexMgr pool visible to imagelist/imagedump

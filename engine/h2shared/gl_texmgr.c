@@ -160,6 +160,29 @@ void TexMgr_Init (void)
 	r_notexture_mip->gl_texturenum = notexture->texnum;
 }
 
+/* Skybox faces differ only in their last few characters ("_rt",
+ * "_rt.png_face0"), so a plain truncation of a long sky name gives all six the
+ * same identifier.  Keep the head, which imagelist's prefix filter matches, and
+ * the tail, which tells the faces apart; '~' marks the cut. */
+#define TEXMGR_ID_TAIL	16
+static void TexMgr_SetIdentifier (gltexture_t *tex, const char *name)
+{
+	size_t	len = strlen (name);
+	size_t	size = sizeof(tex->identifier);
+	size_t	head;
+
+	if (len < size)
+	{
+		q_strlcpy (tex->identifier, name, size);
+		return;
+	}
+	head = size - 1 - 1 - TEXMGR_ID_TAIL;
+	memcpy (tex->identifier, name, head);
+	tex->identifier[head] = '~';
+	memcpy (tex->identifier + head + 1, name + len - TEXMGR_ID_TAIL, TEXMGR_ID_TAIL);
+	tex->identifier[size - 1] = '\0';
+}
+
 /* TexMgr_LoadImage - simplified for uhexen2 compatibility */
 gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int height, enum srcformat format,
                                byte *data, char *source_file, src_offset_t source_offset, unsigned flags)
@@ -238,7 +261,7 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int heigh
 	tex->width = width;
 	tex->height = height;
 	tex->flags = flags;
-	q_strlcpy(tex->identifier, name, sizeof(tex->identifier));
+	TexMgr_SetIdentifier (tex, name);
 
 	return tex;
 }
@@ -249,9 +272,14 @@ TexMgr_TextureAt
 
 Read-only view of what this shim owns, for imagelist and imagedump, which
 otherwise only see gltextures[].  Index 0 and 1 are the notexture/nulltexture
-placeholders, the rest are managed_textures[] slots.  Returns NULL for a slot
-TexMgr_FreeTexture has released or an index past TexMgr_NumTextures.
+placeholders, the rest are managed_textures[] slots -- in practice the skybox
+faces from Sky_LoadSkyBox.  (The scrolling sky, upsky/lowsky, is NOT here:
+R_InitSky loads it through GL_LoadTexture into gltextures[].)  Returns NULL for
+a slot TexMgr_FreeTexture has released or an index past TexMgr_NumTextures.
 *texflags gets the flags in TEX_* terms, since the stored ones are TEXPREF_*.
+
+A returned texnum is only as good as the context it was made in: nothing here
+survives vid_restart, so a caller that talks to GL must check the name first.
 
 The pool is deliberately NOT folded into gltextures[] (issue #127): the skybox
 cache in gl_sky.c holds these pointers across map changes, and every map change
