@@ -86,33 +86,27 @@ Without it:
 
     SV_Error: PR_LoadProgs: couldn't load hwprogs.dat
 
-### 4. String table: `hw/strings.txt` (server and client)
+### 4. String table: nothing to install
 
 Obituaries, pickups and "joined the game" are indexed prints: line numbers
 into HexenWorld's `strings.txt`. That table is not Hexen II's. `STR_SUICIDES`
 is line 468, and the obituaries run to 592, while data1's table has 409
 lines and portals' 562. Siege has its own table. No pak ships one.
 
-**Server:** install it beside `hwprogs.dat`. `hwsv-bundled` ships it for
-exactly that:
+A legacy install (retail `data1` plus `hw/pak4.pak`) needs no extra file.
+Both `hwsv` and the client carry HW's and Siege's tables compiled in
+(`engine/h2shared/hw_strings_data.h`, generated from `gamecode/res/` by
+`scripts/gen_hw_strings.py`; CI fails if it goes stale). A copy on disk still
+wins, so a mod can edit its table. The lookup order:
 
-    nix build .#hwsv-bundled
-    install -Dm644 result/share/hexenwail/hw/strings.txt <gamedir>/hw/strings.txt
-
-hwsv loads an installed HW-family copy (the gamedir's own, or hw's under a
-mod), never data1's or portals'. Without one it warns, falls back to whatever
-`strings.txt` it finds (portals' on a mission-pack install), and the first
-obituary past that table's end stops the gamecode.
-
-**Client:** it tries these in order and needs no install step:
-1. The server gamedir's own installed copy.
-2. The copy shipped beside the engine for that gamedir
-   (`share/hexenwail/{hw,siege}/strings.txt`, from `gamecode/res/`).
+1. An installed copy in the server's gamedir (`siege/`, `hw/`, or a mod).
+2. The copy shipped beside the client for that gamedir
+   (`share/hexenwail/{hw,siege}/strings.txt`). hwsv has no bundle lookup.
 3. For a mod stacked on hw, an installed copy in hw.
-4. The shipped hw copy.
+4. The client's shipped hw copy.
+5. The compiled-in table.
 
-Without any of them it says so once per map, and those messages stay blank
-(#214).
+Neither ever uses data1's or portals' table (#214).
 
 ## Verified bringup
 

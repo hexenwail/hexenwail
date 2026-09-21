@@ -194,6 +194,19 @@ jobs:
             -o hw_download_test scripts/hw_download_test.c
           ./hw_download_test
 
+      # Deterministic, data-free gates for the HexenWorld client:
+      # temp-entity payload layouts (#213) against the gamecode writers and
+      # a byte-stream unit test, and the compiled-in string tables (#214)
+      # against gamecode/res.
+      - name: HexenWorld temp-entity layouts and string tables
+        run: |
+          set -euo pipefail
+          nix develop --command python3 scripts/hw_tent_layout_check.py
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_tent_test scripts/hw_tent_test.c
+          ./hw_tent_test
+          nix develop --command python3 scripts/gen_hw_strings.py --check
+
       - name: Unit test HexenWorld packed projectiles
         run: |
           set -euo pipefail

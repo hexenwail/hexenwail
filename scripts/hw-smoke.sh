@@ -357,7 +357,7 @@ grep -q "$TOKEN" "$BLOG" || fail "client B did not receive the server broadcast"
 wait_count "$ALOG" 'joined the game' 2 10 || \
 	fail "client A did not print the HexenWorld join messages (saw $(grep -c 'joined the game' "$ALOG" 2>/dev/null))"
 grep -q 'HexenWorld: no strings.txt' "$ALOG" "$BLOG" && \
-	fail "a client found no HexenWorld strings.txt (is the bundle beside the binary?)"
+	fail "a client found no HexenWorld strings.txt (the compiled-in table should make this impossible)"
 
 # --- live map change ---
 # Model/skin loading on a cold cache takes a while on llvmpipe boxen; the
