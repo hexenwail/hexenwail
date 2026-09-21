@@ -46,6 +46,20 @@ STREAMS = {"TE_STREAM_CHAIN", "TE_STREAM_SUNSTAFF1", "TE_STREAM_SUNSTAFF2",
            "TE_STREAM_COLORBEAM", "TE_STREAM_ICECHUNKS", "TE_STREAM_GAZE",
            "TE_STREAM_FAMINE"}
 
+# Writer sites whose size this parser cannot compute (an if/else inside the
+# write sequence), each verified by hand against the reader: every branch
+# writes the same bytes.  Keyed by file and TE name, not line, so edits
+# elsewhere in the file do not invalidate them.  A site NOT listed here
+# fails the check -- a new branchy writer needs a human to look at it.
+HAND_VERIFIED = {
+    ("boner.hc", "TE_HWBONEPOWER"),     # 1 ghost-count byte on both arms: 13
+    ("boner.hc", "TE_HWBONEPOWER2"),    # 1 hit byte on both arms: 7
+    ("boner.hc", "TE_HWBONERIC"),       # damage clamped, then 1 byte: 7
+    ("allplay.hc", "TE_PLAYER_DEATH"),  # force and style, 1 byte per arm: 10
+    ("weapons.hc", "TE_WIZSPIKE"),      # type byte picks wiz/knight/spike; pos: 6
+    ("lightning.hc", "te_type"),        # do_lightning: only TE_STREAM_LIGHTNING, 16
+}
+
 WRITE_RE = re.compile(r"\bWrite(Coord|Short|Entity|Byte|Char|Angle|Long|Float|String)\s*\(\s*MSG_\w+\s*,\s*([^;]*?)\)\s*;")
 END_RE = re.compile(r"\bmulticast\s*\(|^\s*\}|\breturn\b|\bfor\s*\(|\bwhile\s*\(|\bif\s*\(")
 
@@ -56,6 +70,21 @@ def strip_comments(text):
     text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"),
                   text, flags=re.S)
     return re.sub(r"//[^\n]*", "", text)
+
+
+def continues(lines, channel):
+    """True when another Write to the same message turns up before anything
+    that ends this temp entity: a multicast, the next SVC_* write, or the
+    end of the window.  Assignments and control flow in between (an if
+    that clamps the next value) do not end it; that is exactly the branchy
+    case a human has to check."""
+    for text in lines:
+        if re.search(r"\bmulticast\s*\(|\bSVC_\w+", text):
+            return False
+        m = WRITE_RE.search(text)
+        if m and ("(%s," % channel) in re.sub(r"\s", "", text):
+            return True
+    return False
 
 
 def writer_sizes():
@@ -72,6 +101,8 @@ def writer_sizes():
                 continue
             # the type byte is the next Write on this or following lines
             te, size, j, clean = None, 0, i, True
+            m = re.search(r"\(\s*(MSG_\w+)\s*,\s*SVC_TEMPENTITY", line)
+            channel = m.group(1) if m else "MSG_"
             rest = line[line.index("SVC_TEMPENTITY") + len("SVC_TEMPENTITY"):]
             chunk = [rest] + lines[i + 1:]
             for k, text in enumerate(chunk):
@@ -86,7 +117,12 @@ def writer_sizes():
                     size += SIZES[kind]
                 if te is not None and k > 0 and END_RE.search(text) and \
                         not WRITE_RE.search(text):
-                    if not re.search(r"\bmulticast\s*\(", text):
+                    # MSG_BROADCAST / MSG_ALL writers have no multicast()
+                    # to end on.  The sequence is only branchy if a write
+                    # to the same message continues it past this line,
+                    # before the next statement that is not a write.
+                    if not re.search(r"\bmulticast\s*\(", text) and \
+                            continues(chunk[k + 1:k + 9], channel):
                         clean = False
                     break
                 if k > 60:
@@ -95,6 +131,10 @@ def writer_sizes():
             if te is None:
                 continue
             site = "%s:%d" % (name, i + 1)
+            # A type byte from a variable (do_lightning's te_type) says
+            # nothing about the layout on its own: always a human's call.
+            if not te.startswith("TE_"):
+                clean = False
             if clean:
                 found.setdefault(te, set()).add(size)
                 found.setdefault(te + "@", []).append((site, size))
@@ -137,18 +177,28 @@ def main():
             bad += 1
             sites = ", ".join("%s=%d" % s for s in found[te + "@"])
             print("MISMATCH %-26s reader %s, writers %s" % (te, want, sites))
+    hand = 0
     for te, sites in sorted(unsure.items()):
-        if te in VARIABLE or te in found:
+        if te in VARIABLE:
             continue
-        print("note: %s written only under control flow (%s); not size-checked"
-              % (te, ", ".join(sites)))
+        for site in sites:
+            if (site.split(":")[0], te) in HAND_VERIFIED:
+                hand += 1
+                continue
+            bad += 1
+            print("UNCHECKED %-25s %s: the writer branches; verify it by hand "
+                  "and add it to HAND_VERIFIED" % (te, site))
     missing = [te for te in types if te not in VARIABLE and te not in STREAMS
                and te not in HEXEN2 and te not in table]
     for te in missing:
         bad += 1
         print("MISSING  %-26s written by gamecode, no reader size" % te)
-    print("%d temp entity types written by gamecode, %d checked, %d problem(s)"
-          % (len(types), len(types) - len(VARIABLE & set(types)), bad))
+    sized = sum(len(found[te + "@"]) for te in types if te not in VARIABLE)
+    written = {te for te in set(types) | set(unsure) if te.startswith("TE_")}
+    print("%d temp entity types written by gamecode: %d writer sites sized, "
+          "%d branchy sites hand-verified, %d variable types left to "
+          "hw_tent_test.c; %d problem(s)"
+          % (len(written), sized, hand, len(VARIABLE & written), bad))
     return 1 if bad else 0
 
 
