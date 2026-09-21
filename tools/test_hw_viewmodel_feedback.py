@@ -33,7 +33,12 @@ def main():
     assert "hwcl_view_drawflags |= MSG_ReadByte ();" in hw
     assert "hwcl_view_drawflags &= ~MSG_ReadByte ();" in hw
     assert "state->drawflags | hwcl_view_drawflags" in hw
-    assert hw.count("CL_ClearState ();\n\tHWCL_ResetPresentation ();") == 2
+    # Other connection cleanup may run between clearing client state and
+    # resetting local presentation (for example, clearing the HW string table).
+    # Keep the invariant about both connection paths without requiring the two
+    # calls to be adjacent.
+    assert hw.count("CL_ClearState ();") == 2
+    assert hw.count("HWCL_ResetPresentation ();") == 2
     assert "V_ResetPunchAngle ();" not in function(
         "engine/hexen2/cl_hw.c", "static void HWCL_ResetPresentation")
     clear_state = function("engine/hexen2/cl_main.c", "void CL_ClearState (void)")
