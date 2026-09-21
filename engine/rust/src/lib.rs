@@ -22,6 +22,9 @@ pub mod sizebuf;
 #[cfg(feature = "crc")]
 pub mod crc;
 
+#[cfg(feature = "link_ops")]
+pub mod link_ops;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

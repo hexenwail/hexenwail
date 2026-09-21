@@ -63,6 +63,15 @@ option(USE_SIZEBUF_RS "Link the Rust sizebuf implementation instead of sizebuf.c
 # targets are affected; utils/ still compiles crc.c directly.
 option(USE_CRC_RS "Link the Rust CRC implementation instead of crc.c" ON)
 
+# Link the Rust port of the intrusive doubly-linked list in place of
+# engine/h2shared/link_ops.c.  The smallest port in the set, but the widest
+# ownership boundary: the links live inside caller-owned edicts and area
+# nodes, world.c keeps raw pointers into the middle of the chain, and it
+# reads the stale prev/next back after RemoveLink.  So the C statement order
+# and the "do not touch l" rule are part of the contract, and this stays
+# independently switchable.
+option(USE_LINK_OPS_RS "Link the Rust link_ops implementation instead of link_ops.c" ON)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -918,12 +927,20 @@ else()
     message(STATUS "crc: C original (USE_CRC_RS=OFF)")
 endif()
 
+if(USE_LINK_OPS_RS)
+    list(APPEND RUST_ENGINE_FEATURES link_ops)
+    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/link_ops.c)
+    message(STATUS "link_ops: Rust shim (USE_LINK_OPS_RS=ON)")
+else()
+    message(STATUS "link_ops: C original (USE_LINK_OPS_RS=OFF)")
+endif()
+
 if(RUST_ENGINE_FEATURES)
     if(EMSCRIPTEN)
         message(FATAL_ERROR
             "The Rust engine shim is not wired up for Emscripten. Disable "
-            "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, and "
-            "USE_CRC_RS for the WASM build.")
+            "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, "
+            "USE_CRC_RS, and USE_LINK_OPS_RS for the WASM build.")
     endif()
 
     set(RUST_ENGINE_RS_DIR ${UHEXEN2_TOP}/engine/rust)
@@ -948,6 +965,7 @@ if(RUST_ENGINE_FEATURES)
                 ${RUST_ENGINE_RS_DIR}/src/lib.rs
                 ${RUST_ENGINE_RS_DIR}/src/sizebuf.rs
                 ${RUST_ENGINE_RS_DIR}/src/crc.rs
+                ${RUST_ENGINE_RS_DIR}/src/link_ops.rs
                 ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
                 ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
         COMMENT "Building consolidated Rust engine shim"
@@ -1307,6 +1325,9 @@ else()
     endif()
     if(USE_CRC_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/crc.c)
+    endif()
+    if(USE_LINK_OPS_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/link_ops.c)
     endif()
 
     add_executable(hwsv ${HWSV_SOURCES})
