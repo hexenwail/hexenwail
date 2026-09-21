@@ -488,8 +488,14 @@ static qboolean HWCL_LoadModels (void)
 			continue;
 		model = Mod_ForName (hwcl_model_names[i], false);
 		/* Index 1 is the world: the caller reports that one and disconnects,
-		 * because by here a download has already been attempted for it. */
-		if (!model && i != 1)
+		 * because by here a download has already been attempted for it.
+		 * Stop at once: the "*N" brush models right after it are submodels
+		 * of that BSP, so without it index 2 always fails, and failing it
+		 * here would Host_Error with a generic missing-model message before
+		 * the caller could say the map could not be downloaded. */
+		if (!model && i == 1)
+			return false;
+		if (!model)
 			Host_Error ("HexenWorld missing model: %s\n"
 				"Install hw/pak4.pak and the server's %s mod assets under %s (or %s).\n"
 				"Siege additionally needs siege/maps/siege.bsp and its mod assets.",
