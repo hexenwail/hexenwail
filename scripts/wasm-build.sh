@@ -41,6 +41,7 @@ emcmake cmake \
 	-DUSE_RUST_HASHINDEX=OFF \
 	-DUSE_MATHLIB_RS=OFF \
 	-DUSE_SIZEBUF_RS=OFF \
+	-DUSE_CRC_RS=OFF \
 	"$SOURCE_DIR"
 
 emmake make -j"$(nproc)"

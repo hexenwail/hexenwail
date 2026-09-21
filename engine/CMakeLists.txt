@@ -57,6 +57,12 @@ option(USE_MATHLIB_RS "Link the Rust mathlib implementation instead of mathlib.c
 # ownership boundary is exercised.
 option(USE_SIZEBUF_RS "Link the Rust sizebuf implementation instead of sizebuf.c" ON)
 
+# Link the Rust port of the CCITT CRC in place of common/crc.c.  Stateless
+# apart from a read-only table, but progs.dat and HexenWorld map checksums
+# depend on it bit for bit, so it keeps its own switch.  Only the engine
+# targets are affected; utils/ still compiles crc.c directly.
+option(USE_CRC_RS "Link the Rust CRC implementation instead of crc.c" ON)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -904,12 +910,20 @@ else()
     message(STATUS "sizebuf: C original (USE_SIZEBUF_RS=OFF)")
 endif()
 
+if(USE_CRC_RS)
+    list(APPEND RUST_ENGINE_FEATURES crc)
+    list(REMOVE_ITEM COMMON_SOURCES ${UHEXEN2_SHARED}/crc.c)
+    message(STATUS "crc: Rust shim (USE_CRC_RS=ON)")
+else()
+    message(STATUS "crc: C original (USE_CRC_RS=OFF)")
+endif()
+
 if(RUST_ENGINE_FEATURES)
     if(EMSCRIPTEN)
         message(FATAL_ERROR
             "The Rust engine shim is not wired up for Emscripten. Disable "
-            "USE_RUST_HASHINDEX, USE_MATHLIB_RS, and USE_SIZEBUF_RS for the "
-            "WASM build.")
+            "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, and "
+            "USE_CRC_RS for the WASM build.")
     endif()
 
     set(RUST_ENGINE_RS_DIR ${UHEXEN2_TOP}/engine/rust)
@@ -933,6 +947,7 @@ if(RUST_ENGINE_FEATURES)
         DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
                 ${RUST_ENGINE_RS_DIR}/src/lib.rs
                 ${RUST_ENGINE_RS_DIR}/src/sizebuf.rs
+                ${RUST_ENGINE_RS_DIR}/src/crc.rs
                 ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
                 ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
         COMMENT "Building consolidated Rust engine shim"
@@ -1289,6 +1304,9 @@ else()
     endif()
     if(USE_SIZEBUF_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/sizebuf.c)
+    endif()
+    if(USE_CRC_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/crc.c)
     endif()
 
     add_executable(hwsv ${HWSV_SOURCES})
