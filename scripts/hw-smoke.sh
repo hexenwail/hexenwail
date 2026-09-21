@@ -519,8 +519,16 @@ else
 
 		wait_for "$ELOG" 'HexenWorld signon complete' 300 \
 			|| fail "-game client did not complete signon"
-		absent "$ELOG" 'Downloading ' \
-			"-game client downloaded files, so hw is not beneath the mod"
+		# Player skins are the exception: HWCL_SkinNextDownload asks for
+		# skins/<name>.pcx during signon (8ce93dce8), and no pak ships a
+		# skins/ directory, so every client requests base.pcx whatever is
+		# mounted.  Any other download is an hw asset it failed to find.
+		# Captured, not "grep -qv": ugrep, grep on some boxes, gets -qv wrong.
+		# -o, not ^: a download line can follow console output that did
+		# not end in a newline, so "Downloading" need not start the line.
+		if [ -n "$(grep -oE 'Downloading [^[:space:].]+' "$ELOG" 2>/dev/null | grep -v '^Downloading skins/')" ]; then
+			fail "-game client downloaded files, so hw is not beneath the mod"
+		fi
 		absent "$ELOG" "can't find sound/misc/talk\.wav" \
 			"-game client: hw is not mounted beneath the mod (talk.wav missing)"
 		absent "$ELOG" 'world model unavailable|could not be found or downloaded' \
