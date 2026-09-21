@@ -101,6 +101,24 @@ The server then serves on UDP 26950.
 A fatal error goes to unbuffered stderr while the banner is buffered stdout, so
 the error can appear *above* the banner. That does not mean it happened first.
 
+## Headless checks
+
+Both need the retail data above and skip (exit 77) without it, so CI cannot
+run them. Run them locally after touching the HexenWorld client:
+
+- `scripts/hw-smoke.sh`: signon, broadcast, map change, Siege, mod download.
+- `scripts/hw-hud-check.sh`: the HUD status icons on screen (#211). The net
+  icon must be absent on a live session, drawn while the server is
+  SIGSTOPped, and clear again after SIGCONT. The spawn-protection rook must
+  appear at spawn and be gone 15 s later. Icons are matched against the pics
+  in your own paks (`scripts/wadpic2ppm.py`, `scripts/hudicon-score.py`).
+
+      nix build .#default .#hwsv-bundled -o result
+      nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
+        nixpkgs#bubblewrap nixpkgs#python3 nixpkgs#util-linux --command \
+        scripts/hw-hud-check.sh --basedir ~/hexen2 \
+          --client result/bin/glhexen2 --server result-1/bin/hwsv
+
 ## Not yet done
 
 See GitHub issue #35.

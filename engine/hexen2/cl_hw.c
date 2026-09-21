@@ -2778,6 +2778,10 @@ void HWCL_Frame (void)
 			continue;
 
 		hwcl_last_received = realtime;
+		/* SCR_DrawNet reads this, and only CL_ReadFromServer's qsocket loop
+		 * used to set it, so a live HexenWorld session showed the
+		 * disconnected-net icon the whole time.  GitHub #211. */
+		cl.last_received_message = realtime;
 		if (!hwcl_received_packet)
 		{
 			Con_Printf ("HexenWorld netchan established (%d payload bytes).\n",
