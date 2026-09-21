@@ -6,10 +6,22 @@
 // (often as a global) and Rust only mutates the fields and backing storage
 // supplied through the existing ABI.
 
-use core::ffi::{c_char, c_int, c_uint, c_void};
+use core::ffi::{c_char, c_int};
+#[cfg(feature = "sizebuf")]
+use core::ffi::{c_uint, c_void};
 
+// This module is compiled whenever either the sizebuf or the msg_io feature is
+// on, because msg_io needs SizeBufC.  Only the struct, its layout assertions
+// and the accessors below are unconditional: the SZ_* entry points stay behind
+// the sizebuf feature so that a build with USE_MSG_IO_RS=ON and
+// USE_SIZEBUF_RS=OFF keeps the C sizebuf.c as the single definition.  The
+// consolidated crate lands in one codegen unit, so an accidental second
+// definition would be a link error in every target, not a silently preferred
+// one.
+#[cfg(feature = "sizebuf")]
 const PRINT_TERMONLY: c_uint = 1;
 
+#[cfg(feature = "sizebuf")]
 extern "C" {
     fn CON_Printf(flags: c_uint, fmt: *const c_char, ...);
     fn Hunk_AllocName(size: c_int, name: *const c_char) -> *mut c_void;
@@ -17,6 +29,15 @@ extern "C" {
     fn memcpy(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
     fn memset(dst: *mut c_void, value: c_int, n: usize) -> *mut c_void;
     fn strlen(s: *const c_char) -> usize;
+}
+
+// These are the sizebuf entry points themselves, and only they are gated: see
+// the note above PRINT_TERMONLY.
+#[cfg(feature = "sizebuf")]
+#[inline]
+unsafe fn clear(buf: &mut SizeBufC) {
+    buf.cursize = 0;
+    buf.overflowed = 0;
 }
 
 /// `sizebuf_t` from engine/h2shared/sizebuf.h.
@@ -93,13 +114,8 @@ pub extern "C" fn SizeBufC_offsetof_name() -> usize {
     core::mem::offset_of!(SizeBufC, name)
 }
 
-#[inline]
-unsafe fn clear(buf: &mut SizeBufC) {
-    buf.cursize = 0;
-    buf.overflowed = 0;
-}
-
 /// `SZ_Init` -- preserve the caller-owned structure and allocation boundary.
+#[cfg(feature = "sizebuf")]
 #[no_mangle]
 pub unsafe extern "C" fn SZ_Init(
     buf: *mut SizeBufC,
@@ -127,12 +143,14 @@ pub unsafe extern "C" fn SZ_Init(
 }
 
 /// `SZ_Clear` -- clear logical contents, not the backing bytes.
+#[cfg(feature = "sizebuf")]
 #[no_mangle]
 pub unsafe extern "C" fn SZ_Clear(buf: *mut SizeBufC) {
     clear(&mut *buf);
 }
 
 /// `SZ_GetSpace` -- return an interior pointer into the caller's buffer.
+#[cfg(feature = "sizebuf")]
 #[no_mangle]
 pub unsafe extern "C" fn SZ_GetSpace(buf: *mut SizeBufC, length: c_int) -> *mut c_void {
     let buf = &mut *buf;
@@ -191,6 +209,7 @@ pub unsafe extern "C" fn SZ_GetSpace(buf: *mut SizeBufC, length: c_int) -> *mut 
 }
 
 /// `SZ_Write` -- copy bytes into the space returned by SZ_GetSpace.
+#[cfg(feature = "sizebuf")]
 #[no_mangle]
 pub unsafe extern "C" fn SZ_Write(
     buf: *mut SizeBufC,
@@ -202,6 +221,7 @@ pub unsafe extern "C" fn SZ_Write(
 }
 
 /// `SZ_Print` -- append a C string, replacing an existing trailing NUL.
+#[cfg(feature = "sizebuf")]
 #[no_mangle]
 pub unsafe extern "C" fn SZ_Print(buf: *mut SizeBufC, data: *const c_char) {
     let len = (strlen(data) as c_int).wrapping_add(1);
