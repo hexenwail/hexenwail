@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """How strongly a HUD icon appears in one region of a screenshot.
 
-    hudicon-score.py SHOT.png REF.ppm X Y W H
+    hudicon-score.py SHOT.png REF.ppm X Y W H [REF.ppm...]
+
+With several references (the frames of an animated icon) it prints the
+best match, cropping SHOT only once.
 
 Crops W x H at (X,Y) from SHOT (via ImageMagick's `magick`, the only
 dependency), scales REF -- a pic written by wadpic2ppm.py -- to the same size
@@ -46,14 +49,18 @@ def gray(rgb, i):
     return 0.299 * rgb[i] + 0.587 * rgb[i + 1] + 0.114 * rgb[i + 2]
 
 
-def score(shot, ref_path, x, y, w, h):
-    crop = subprocess.run(
+def crop(shot, x, y, w, h):
+    data = subprocess.run(
         ["magick", shot, "-crop", "%dx%d+%d+%d" % (w, h, x, y), "+repage",
          "-depth", "8", "ppm:-"],
         check=True, stdout=subprocess.PIPE).stdout
-    cw, ch, cpx = read_ppm(crop)
+    cw, ch, cpx = read_ppm(data)
     if (cw, ch) != (w, h):
         raise ValueError("crop is %dx%d, region runs off the image" % (cw, ch))
+    return cpx
+
+
+def score(cpx, ref_path, w, h):
     with open(ref_path, "rb") as f:
         rw, rh, rpx = read_ppm(f.read())
 
@@ -79,12 +86,14 @@ def score(shot, ref_path, x, y, w, h):
 
 
 def main():
-    if len(sys.argv) != 7:
-        sys.stderr.write("usage: hudicon-score.py SHOT.png REF.ppm X Y W H\n")
+    if len(sys.argv) < 7:
+        sys.stderr.write("usage: hudicon-score.py SHOT.png REF.ppm X Y W H [REF.ppm...]\n")
         return 2
-    shot, ref = sys.argv[1], sys.argv[2]
+    shot = sys.argv[1]
+    refs = [sys.argv[2]] + sys.argv[7:]
     x, y, w, h = (int(v) for v in sys.argv[3:7])
-    print("%.4f" % score(shot, ref, x, y, w, h))
+    cpx = crop(shot, x, y, w, h)
+    print("%.4f" % max(score(cpx, ref, w, h) for ref in refs))
     return 0
 
 

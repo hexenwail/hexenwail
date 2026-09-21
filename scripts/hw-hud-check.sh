@@ -15,10 +15,10 @@
 # Assertions, each with its positive control so none can pass by looking at
 # the wrong pixels:
 #
-#   1. During spawn the rook is drawn at least once (control), and 15 s after
-#      connecting it is gone -- spawn protection expired and the client saw
-#      artifact_active clear.
-#   2. 15 s after connecting, on a live session, the net icon is absent.
+#   1. During spawn the rook is drawn at least once (control), and after the
+#      spawn window (~15 s from connecting) it is gone -- spawn protection
+#      expired and the client saw artifact_active clear.
+#   2. At that same point, on a live session, the net icon is absent.
 #      Before the #211 fix it was drawn for the whole session: only the
 #      Hexen II qsocket loop set cl.last_received_message.
 #   3. With the server SIGSTOPped for ~3 s the net icon IS drawn (control:
@@ -125,19 +125,16 @@ done
 
 # score SHOT KIND -> prints the best similarity for that icon
 score() {
-	local shot="$1" kind="$2" best=-1 v k
+	local shot="$1" kind="$2"
 	if [ "$kind" = net ]; then
 		# shellcheck disable=SC2086
 		python3 "$HERE/hudicon-score.py" "$shot" "$REFS/net.ppm" $NET_BOX
 		return
 	fi
 	# The rook spins through 16 frames; whichever one was on screen wins.
-	for k in $(seq 1 16); do
-		# shellcheck disable=SC2086
-		v=$(python3 "$HERE/hudicon-score.py" "$shot" "$REFS/durshd$k.ppm" $ROOK_BOX)
-		best=$(awk -v a="$best" -v b="$v" 'BEGIN { print (b > a) ? b : a }')
-	done
-	echo "$best"
+	# shellcheck disable=SC2086
+	python3 "$HERE/hudicon-score.py" "$shot" "$REFS/durshd1.ppm" $ROOK_BOX \
+		"$REFS"/durshd[2-9].ppm "$REFS"/durshd1[0-6].ppm
 }
 above() { awk -v v="$1" -v t="$2" 'BEGIN { exit !(v >= t) }'; }
 
@@ -165,14 +162,9 @@ sleep 3
 {
 	echo "sleep 25"
 	echo "cmd connect hw://127.0.0.1:$PORT"
-	# The spawn window: sampled every 0.5 s from 2 s to 11 s after connect,
-	# which brackets load time plus the 3 s of spawn protection.
-	echo "sleep 2"
-	for i in $(seq -w 0 18); do
-		echo "shotf spawn$i"
-		echo "sleep 0.5"
-	done
-	echo "sleep 4"
+	# The spawn window is sampled by the rook grabber below, not by shots
+	# here: see there for why.
+	echo "sleep 16"
 	echo "shot 01-connected"
 	# The watcher below stops the server as soon as 01 exists.
 	echo "sleep 3"
@@ -195,6 +187,36 @@ wait_file() {
 		[ "$n" -lt 900 ] || return 1
 	done
 }
+
+# --- rook grabber: the spawn window ---------------------------------------------
+# The 3 s of spawn protection start at the server's "begin", and most of
+# them pass under the loading console, so the rook is on screen for well
+# under a second.  A full-window shot takes ~0.65 s once the world renders:
+# at that rate the rook landed in one frame per run and was missed one run
+# in two.  Grabbing only its 60x40 box is fast enough for several frames
+# inside the window, whatever the load time.
+LIVE="$SHOTS/work/home/.local/share/hexen2/qconsole.log"   # copied to $SHOTS only at exit
+ROOKDIR="$WORK/rook"
+mkdir -p "$ROOKDIR"
+DISP=""
+n=0
+until [ -n "$DISP" ] && grep -q "HexenWorld signon complete" "$LIVE" 2>/dev/null; do
+	[ -n "$DISP" ] || DISP=$(sed -n 's/^display=//p' "$SHOTS/pids" 2>/dev/null)
+	kill -0 "$DRIVE_PID" 2>/dev/null || break
+	sleep 0.1; n=$((n + 1)); [ "$n" -lt 1200 ] || break
+done
+if [ -n "$DISP" ]; then
+	# shellcheck disable=SC2086
+	set -- $ROOK_BOX
+	end=$(( $(date +%s) + 10 ))
+	i=0
+	while [ "$(date +%s)" -lt "$end" ]; do
+		import -display "$DISP" -window root -crop "${3}x${4}+${1}+${2}" +repage \
+			"$ROOKDIR/$(printf %04d "$i").png" 2>/dev/null
+		i=$((i + 1))
+	done
+	say "rook grabber: $i frames in 10 s"
+fi
 
 if wait_file "$SHOTS/01-connected.png"; then
 	kill -STOP "$HWSV_PID"
@@ -219,10 +241,11 @@ done
 # --- assertions ----------------------------------------------------------------
 : > "$WORK/scores.txt"
 rook_seen=""
-for f in "$SHOTS"/spawn*.png; do
-	s=$(score "$f" rook)
-	echo "$(basename "$f" .png) rook $s" >> "$WORK/scores.txt"
-	above "$s" "$PRESENT" && rook_seen="$(basename "$f" .png) ($s)"
+for f in "$ROOKDIR"/*.png; do
+	[ -f "$f" ] || continue
+	s=$(ROOK_BOX="0 0 60 40" score "$f" rook)
+	echo "grab$(basename "$f" .png) rook $s" >> "$WORK/scores.txt"
+	above "$s" "$PRESENT" && rook_seen="grab$(basename "$f" .png) ($s)"
 done
 for f in 01-connected 02-server-stalled 03-resumed; do
 	for kind in net rook; do
@@ -238,7 +261,7 @@ else
 fi
 s=$(get 01-connected rook)
 if above "$s" "$ABSENT"; then
-	fail "rook still drawn 15 s after connecting ($s): artifact_active never cleared"
+	fail "rook still drawn after the spawn window ($s): artifact_active never cleared"
 else
 	say "ok: rook cleared after spawn protection ($s)"
 fi
