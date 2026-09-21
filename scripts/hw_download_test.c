@@ -67,6 +67,7 @@ static int	rec_loadmodels_calls;
 static int	rec_loadsounds_calls;
 static int	rec_signon_finishes;
 static qboolean	rec_progress_active;
+static qboolean	rec_progress_needs_separator;
 static qboolean	stub_loadmodels_result = true;
 
 static char	testdir[MAX_OSPATH];
@@ -83,6 +84,7 @@ static void rec_reset (void)
 	rec_loadsounds_calls = 0;
 	rec_signon_finishes = 0;
 	rec_progress_active = false;
+	rec_progress_needs_separator = false;
 	stub_loadmodels_result = true;
 	stub_makepath_fail = 0;
 	stub_fs_fileexists = 0;
@@ -171,16 +173,28 @@ static void Con_Printf (const char *fmt, ...)
 {
 	char	line[1024];
 	va_list	ap;
+	qboolean interrupted = false;
+	size_t	len;
 
 	if (rec_progress_active)
 	{
 		rec_console_append ("\n");
 		rec_progress_active = false;
+		interrupted = true;
 	}
 	va_start (ap, fmt);
 	vsnprintf (line, sizeof(line), fmt, ap);
 	va_end (ap);
 	rec_console_append (line);
+	if (interrupted || rec_progress_needs_separator)
+	{
+		len = strlen (line);
+		if (len != 0)
+			rec_progress_needs_separator =
+				(line[len - 1] != '\n' && line[len - 1] != '\r');
+		else if (interrupted)
+			rec_progress_needs_separator = false;
+	}
 }
 
 static void CON_Progressf (const char *fmt, ...)
@@ -188,6 +202,11 @@ static void CON_Progressf (const char *fmt, ...)
 	char	line[1024];
 	va_list	ap;
 
+	if (!rec_progress_active && rec_progress_needs_separator)
+	{
+		rec_console_append ("\n");
+		rec_progress_needs_separator = false;
+	}
 	va_start (ap, fmt);
 	vsnprintf (line, sizeof(line), fmt, ap);
 	va_end (ap);
@@ -209,6 +228,7 @@ static qboolean CON_EndProgress (const char *fmt, ...)
 	rec_console_append (line);
 	rec_console_append ("\n");
 	rec_progress_active = false;
+	rec_progress_needs_separator = false;
 	return true;
 }
 
@@ -766,6 +786,18 @@ static void test_progress_display (void)
 		"cancel printed stale status after interleaved output: %s", rec_console);
 	CHECK (console_said ("server notice\n"),
 		"interleaved output was lost: %s", rec_console);
+
+	/* An empty print must not clear the separator owed after unterminated
+	 * interleaved output. */
+	rec_reset ();
+	begin_download ("maps/empty-print.bsp");
+	feed_block (sizeof(payload), 25, payload, sizeof(payload));
+	Con_Printf ("unterminated notice");
+	Con_Printf ("");
+	feed_block (sizeof(payload), 50, payload, sizeof(payload));
+	CHECK (console_said ("unterminated notice\n[=====     ]  50% 32 B\r"),
+		"empty print cleared the pending progress separator: %s", rec_console);
+	HWCL_CancelDownload ();
 }
 
 /* ================================================================== */

@@ -551,8 +551,11 @@ void CON_Printf (unsigned int flags, const char *fmt, ...)
 	if (interrupted || con_progress_needs_separator)
 	{
 		msglen = strlen (msg);
-		con_progress_needs_separator = (msglen != 0 &&
-				msg[msglen - 1] != '\n' && msg[msglen - 1] != '\r');
+		if (msglen != 0)
+			con_progress_needs_separator =
+				(msg[msglen - 1] != '\n' && msg[msglen - 1] != '\r');
+		else if (interrupted)
+			con_progress_needs_separator = false;
 	}
 	if (con_debuglog)
 		LOG_Print (msg);
