@@ -165,24 +165,45 @@ const CM_MSEC: c_int = 1 << 7;
 // writing
 //============================================================================
 
-/// The C `(int)` conversion the quantizing writers use.
+/// The C `(int)` conversion the quantizing writers use, reproducing what the
+/// reference platform's compiler emits.
 ///
 /// C leaves a float-to-int conversion whose value cannot be represented
-/// undefined (C11 6.3.1.4).  x86-64 answers an out-of-range conversion with
-/// INT_MIN (cvttss2si's "integer indefinite"); AArch64 saturates.  Rust's `as`
-/// saturates, so this matches the C exactly on AArch64 and matches it on
-/// x86-64 for every input whose scaled magnitude stays below 2^31.
+/// undefined (C11 6.3.1.4), and x86-64 answers one with INT_MIN --
+/// cvttss2si's "integer indefinite".  Rust's `as` saturates instead, which is
+/// what AArch64 does, so the two disagree on every positive overflow: +Inf, a
+/// coordinate at or past 2^31/8 = 268435456, an angle at or past about 3.0e9.
+/// This reproduces the x86-64 answer, which is what makes the differential
+/// harness a *total* oracle on the platform the gate runs on: every input it
+/// compares is compared for real rather than excluded from the comparison.
 ///
-/// The only inputs where the two disagree are positive ones: +Inf, a coord
-/// whose |f| * 8 reaches 2^31, or an angle past the 2^31 fixed-point range.
-/// No caller can produce one -- MSG_WriteCoord receives world coordinates and
-/// MSG_WriteAngle an `anglemod` result in [0, 360) -- so the port takes the
-/// defined behaviour rather than reproducing one platform's manifestation of
-/// undefined behaviour.  The differential harness states the same boundary and
-/// covers NaN and -Inf, which both implementations agree on.
+/// There is deliberately no target_arch cfg.  A branch CI never compiles or
+/// runs is untested code, and it would be the branch that matters least -- the
+/// harness runs on x86-64, so that is where the port has to agree.  On
+/// AArch64, where the C saturates instead, these inputs make the harness fail
+/// loudly rather than hide a difference behind a conditional.
+///
+/// These inputs are reachable, not theoretical.  MSG_WriteCoord and
+/// MSG_WriteAngle are QuakeC builtins exposed to every mod -- PF_WriteCoord and
+/// PF_WriteAngle in engine/h2shared/pr_cmds.c, registered as builtins #56 and
+/// #57 in the table both engines share -- and they take whatever float the mod
+/// evaluates, including an ent->v.origin[i] / ent->v.angles[i] a mod assigned
+/// directly and nothing anglemods.  QuakeC's division is unchecked (OP_DIV_F
+/// in pr_exec.c), so a mod dividing by zero is what supplies the Inf and NaN
+/// that arrive here.  MSG_WriteAngle16 is reachable the same way, through the
+/// command sv_ents.c echoes back to clients.
+///
+/// NaN and negative overflow need no special case: MSG_WriteShort truncates
+/// the saturated and the indefinite value to the same two bytes, and the angle
+/// paths mask the same way, so those already agreed byte for byte with Rust's
+/// `as` before this.  Only positive overflow changes anything.
 #[inline]
 fn quantize(f: c_float) -> c_int {
-    f as c_int
+    if f >= 2147483648.0 {
+        c_int::MIN
+    } else {
+        f as c_int
+    }
 }
 
 #[no_mangle]

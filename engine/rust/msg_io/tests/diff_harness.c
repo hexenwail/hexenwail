@@ -12,8 +12,18 @@
 // original twice, as c_* without H2W and as w_* with it, links both against
 // the single Rust union, and requires the implementations to agree byte for
 // byte.  The c_* object has no MSG_WriteAngle16 to point at, so the five
-// H2W-only cases below are compared between w_* and Rust only -- which is
-// exactly what "the Hexen II targets never call them" means in linkable form.
+// H2W-only cases below are compared between w_* and Rust only.
+//
+// What those NULLs prove, and what they do not.  They prove the C-H2 object
+// carries no such symbol -- a symbol-table fact.  They say nothing about
+// callers.  The property that actually makes the union safe lives elsewhere:
+// the `#if defined(H2W)` guard on the five declarations in msg_io.h, plus a
+// call-site check that no translation unit built without H2W reaches one.  It
+// is worth knowing why that has to be checked by hand now.  Before this port
+// an H2 caller of one of the five would have been a link error; today it links
+// silently against the HexenWorld-layout function, and because both usercmd_t
+// are 28 bytes with different offsets it would misread fields rather than
+// crash.  The union removed the old safety net, so the check is the safety net.
 //
 // Every case is a real three-way comparison driven through one msg_impl_t
 // table, not an assertion against a hand-written expectation alone: two
@@ -32,6 +42,9 @@
 //     2047-byte cap on MSG_ReadString;
 //   * bad-read state: the -1 return, the unchanged read cursor, the sticky
 //     flag, and the rewind cl_hw.c performs by assigning msg_readcount;
+//   * the reader's buffer selection: MSG_BeginReadingFrom reads the buffer it
+//     was handed rather than the module default, and MSG_BeginReading puts the
+//     default back -- the coexistence the HexenWorld client depends on;
 //   * strings without terminators, empty strings, and strings whose bytes are
 //     above 0x7f;
 //   * coordinate and angle quantization at the rounding and wraparound edges;
@@ -39,15 +52,21 @@
 //     with the short and long message variants written and read back;
 //   * deterministic round trips through the opposite implementation.
 //
-// ONE DELIBERATE DIVERGENCE, pinned below rather than hidden.  The quantizing
+// OUT-OF-RANGE QUANTIZER INPUTS ARE COMPARED, NOT EXCLUDED.  The quantizing
 // writers convert float to int, and C leaves that conversion undefined when
 // the value is out of range (C11 6.3.1.4): x86-64 answers with INT_MIN,
-// AArch64 saturates.  Rust's `as` saturates, so the port matches AArch64
-// exactly and matches x86-64 for every in-range input.  NaN and -Inf agree on
-// both (INT_MIN and 0 both truncate to the same bytes), so they are compared
-// normally; +Inf and large positive coordinates are the only inputs that
-// differ, and no engine caller can produce one.  quantizer_boundary() states
-// the boundary and pins the Rust answer for those two.
+// AArch64 saturates.  The port reproduces the x86-64 answer, so on the
+// platform this harness runs on there is no excluded input: +Inf, 2^31, a
+// coordinate past 2^31/8 and their MSG_WriteAngle16 counterparts go through
+// the same three-way write_case comparison as everything else.  NaN and
+// negative overflow were already byte-identical and stay that way.  On a
+// platform whose C saturates these cases fail loudly, which is the point --
+// see the quantize() comment in src/msg_io.rs.
+//
+// The inputs are reachable, not theoretical: MSG_WriteCoord and MSG_WriteAngle
+// are QuakeC builtins (#56/#57, PF_WriteCoord/PF_WriteAngle in pr_cmds.c) that
+// take whatever float a mod evaluates, and QuakeC division is unchecked, so a
+// mod dividing by zero supplies the Inf.
 
 #include "q_stdinc.h"
 #include "sizebuf.h"
@@ -164,10 +183,11 @@ typedef struct msg_impl_s {
 
 enum { IMPL_C_H2 = 0, IMPL_C_H2W = 1, IMPL_RUST = 2, IMPL_COUNT = 3 };
 
-// The C-H2 entry's five NULLs are the point of the whole harness: the object
-// compiled without H2W has no MSG_WriteAngle16 to point at, so a table that
-// referenced one would not link.  Every case that needs those functions asks
-// for has_h2w and is therefore compared between C-H2W and Rust only.
+// The C-H2 entry's five NULLs are not a claim about callers -- see the header
+// comment.  They are what the object compiled without H2W offers: a table that
+// referenced c_MSG_WriteAngle16 would not link.  Every case that needs one of
+// the five asks for has_h2w and is therefore compared between C-H2W and Rust
+// only.
 static const msg_impl_t impls[IMPL_COUNT] = {
 	{
 		"C-H2", 0,
@@ -982,6 +1002,50 @@ static void scenario_begin_reading(void)
 	expect_state("after rewind state", 1, 0);
 }
 
+// A second sizebuf_t holding different bytes, so that a MSG_BeginReadingFrom
+// which ignored its argument and selected the module default cannot pass.
+// This is the case the pointer exists for: net_chan.c:298-302 selects
+// hw_net_message for the HexenWorld transport while Hexen II reads
+// net_message, in one client process, and msg_io.c says as much above
+// msg_readbuf.  Without this scenario every call in the harness passes the
+// same object as the default, and the whole thing would pass with
+// `MSG_READBUF = &raw mut net_message` hard-coded.
+static unsigned char other_buf[SB_SIZE];
+static sizebuf_t other_message;
+
+static void scenario_begin_reading_from_argument(void)
+{
+	static const unsigned char data[] = { 0x11, 0x22, 0x33, 0x44 };
+	static const unsigned char other[] = { 0xaa, 0xbb, 0xcc, 0xdd };
+
+	// The module default holds one pattern...
+	net_reset(data, (int)sizeof data);
+	// ...and the explicitly selected buffer holds another, which is what every
+	// read below must see.
+	memset(other_buf, 0xcc, sizeof other_buf);
+	memcpy(other_buf, other, sizeof other);
+	other_message.allowoverflow = 0;
+	other_message.overflowed = 0;
+	other_message.data = other_buf;
+	other_message.maxsize = (int)sizeof other_buf;
+	other_message.cursize = (int)sizeof other;
+	other_message.name = NULL;
+
+	cur->BeginReadingFrom(&other_message);
+	expect_int("BeginReadingFrom argument byte 0", cur->ReadByte(), 0xaa);
+	expect_int("BeginReadingFrom argument byte 1", cur->ReadByte(), 0xbb);
+	expect_int("BeginReadingFrom argument byte 2", cur->ReadByte(), 0xcc);
+	expect_int("BeginReadingFrom argument byte 3", cur->ReadByte(), 0xdd);
+	expect_state("BeginReadingFrom argument exhausted", 4, 0);
+
+	// And MSG_BeginReading() with no argument puts the default back, so a
+	// BeginReadingFrom that latched the argument forever is caught too.
+	cur->BeginReading();
+	expect_int("BeginReading default byte 0", cur->ReadByte(), 0x11);
+	expect_int("BeginReading default byte 1", cur->ReadByte(), 0x22);
+	expect_state("BeginReading default state", 2, 0);
+}
+
 static void scenario_badread_sticky(void)
 {
 	static const unsigned char data[] = { 0x01 };
@@ -1073,6 +1137,7 @@ static void read_cases(void)
 	run_read_case("truncation", scenario_read_truncated, 0);
 	run_read_case("MSG_ReadFloat unchecked", scenario_read_float_unchecked, 0);
 	run_read_case("MSG_BeginReading/rewind", scenario_begin_reading, 0);
+	run_read_case("MSG_BeginReadingFrom argument", scenario_begin_reading_from_argument, 0);
 	run_read_case("badread stickiness", scenario_badread_sticky, 0);
 	run_read_case("MSG_ReadUsercmd", scenario_read_usercmd, 1);
 }
@@ -1173,36 +1238,63 @@ static void round_trip_cases(void)
 	}
 }
 
-// The one place the port does not reproduce the C bit for bit, stated out
-// loud.  See the header comment.
-static void quantizer_boundary(void)
+// The out-of-range quantizer inputs, compared for real.  x86-64 answers an
+// out-of-range float-to-int conversion with INT_MIN, which MSG_WriteShort then
+// truncates: INT_MIN's low byte and second byte are both zero, so the coord
+// packet is 0x00 0x00, and the masking angle paths give 0x00 and 0x00 0x00.
+// These are ordinary three-way cases, exactly like the in-range ones above.
+static void quantizer_overflow_cases(void)
 {
-	float pinf = fbits(0x7f800000);
+	static const unsigned char zero1[] = { 0x00 };
+	static const unsigned char zero2[] = { 0x00, 0x00 };
 
-	// NaN and -Inf are in range for the comparison: both implementations land
-	// on the same bytes (see the MSG_WriteCoord/MSG_WriteAngle NaN and -Inf
-	// cases above, which are compared three ways).
+	// +Inf, hand-derived: cvttss2si gives INT_MIN = 0x80000000, whose low two
+	// bytes are 00 00 (MSG_WriteShort writes c & 0xff and c >> 8, both zero),
+	// and whose low byte is 00 for the masking angle path.
+	g_float = fbits(0x7f800000);
+	write_case("MSG_WriteCoord(+Inf)", emit_coord, zero2, 2, 0);
+	g_float = fbits(0x7f800000);
+	write_case("MSG_WriteAngle(+Inf)", emit_angle, zero1, 1, 0);
+	g_float = fbits(0x7f800000);
+	write_case("MSG_WriteAngle16(+Inf)", emit_angle16, zero2, 2, 1);
 
-	// +Inf and a coordinate past 2^31/8 are the only inputs where the C's
-	// undefined conversion and Rust's saturating one differ on x86-64: the C
-	// produces INT_MIN (0x00 0x00 here), the port saturates to INT_MAX, and
-	// MSG_WriteShort truncates that to 0xff 0xff.  Pin the port's answer so a
-	// change to it is visible.
-	g_float = pinf;
-	sb_reset();
-	impls[IMPL_RUST].WriteCoord(&wsb, g_float);
-	check(wsb.cursize == 2 && wbuf[0] == 0xff && wbuf[1] == 0xff,
-		"quantizer boundary: Rust MSG_WriteCoord(+Inf) wrote %02x %02x,"
-		" expected the saturated 0x7fffffff truncated to 0xffff", wbuf[0], wbuf[1]);
-	sb_reset();
-	impls[IMPL_RUST].WriteAngle(&wsb, g_float);
-	check(wsb.cursize == 1 && wbuf[0] == 0xff,
-		"quantizer boundary: Rust MSG_WriteAngle(+Inf) wrote %02x,"
-		" expected the saturated 0xff", wbuf[0]);
+	// 2^31 exactly, the smallest positive integer the conversion cannot
+	// represent.  The rest carry no golden: out here the only oracle is the C
+	// itself, which is what the three-way comparison is for.
+	g_float = 2147483648.0f;
+	write_case("MSG_WriteCoord(2^31)", emit_coord, NULL, 0, 0);
 
-	printf("NOTE: +Inf and out-of-range coordinates hit C's undefined"
-		" float-to-int conversion (C11 6.3.1.4); the port saturates instead\n");
-	printf("      and matches the C everywhere the conversion is defined.\n");
+	// 2^31/8 = 268435456 is the first coordinate whose f * 8 overflows, and
+	// 2^31/4 is well past it.  Both are exactly representable in f32.
+	g_float = 268435456.0f;
+	write_case("MSG_WriteCoord(2^31/8)", emit_coord, NULL, 0, 0);
+	g_float = 536870912.0f;
+	write_case("MSG_WriteCoord(2^31/4)", emit_coord, NULL, 0, 0);
+	// The largest f32 below that threshold -- 2^28 - 32, the ulp at 2^28 being
+	// 32 -- so the boundary is shown to be where it is claimed to be.
+	g_float = 268435424.0f;
+	write_case("MSG_WriteCoord(just below 2^31/8)", emit_coord, NULL, 0, 0);
+
+	// The angle paths overflow later, because they scale by 256/360 and
+	// 65536/360: about 3.02e9 for MSG_WriteAngle and about 1.18e7 for
+	// MSG_WriteAngle16.  Each threshold is straddled.
+	g_float = 2.0e9f;
+	write_case("MSG_WriteAngle(2.0e9, below threshold)", emit_angle, NULL, 0, 0);
+	g_float = 3.0e9f;
+	write_case("MSG_WriteAngle(3.0e9, below threshold)", emit_angle, NULL, 0, 0);
+	g_float = 4.0e9f;
+	write_case("MSG_WriteAngle(4.0e9, past threshold)", emit_angle, NULL, 0, 0);
+	g_float = 1.0e7f;
+	write_case("MSG_WriteAngle16(1.0e7, below threshold)", emit_angle16, NULL, 0, 1);
+	g_float = 1.0e8f;
+	write_case("MSG_WriteAngle16(1.0e8, past threshold)", emit_angle16, NULL, 0, 1);
+	g_float = 1.0e9f;
+	write_case("MSG_WriteAngle16(1.0e9, past threshold)", emit_angle16, NULL, 0, 1);
+
+	printf("NOTE: out-of-range quantizer inputs hit C's undefined float-to-int"
+		" conversion (C11 6.3.1.4);\n");
+	printf("      the port reproduces x86-64's INT_MIN, so the cases above are"
+		" three-way comparisons, not pinned answers.\n");
 }
 
 /*----------------------------------------------------------------------------
@@ -1219,7 +1311,7 @@ int main(void)
 	usercmd_cases();
 	read_cases();
 	round_trip_cases();
-	quantizer_boundary();
+	quantizer_overflow_cases();
 
 	printf("checked %d expectations, %d failures\n", checks, failures);
 	if (failures != 0) {
