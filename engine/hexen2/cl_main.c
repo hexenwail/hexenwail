@@ -1414,7 +1414,13 @@ int CL_ReadFromServer (void)
 		CL_UpdateDevStats ();
 		return 0;
 	}
-	if (!cls.netcon)
+	/* Only a live network game needs a qsocket.  Demo playback has none --
+	 * CL_GetMessage reads cls.demofh -- so gating on cls.netcon alone froze
+	 * every demo at the loading plaque until "load timeout".  That is the
+	 * whole menu for mods that drive their front end from startdemos (Storm
+	 * of the Thyrion, Shadows of Chaos), so it read as "mod loading broken".
+	 * GitHub #209. */
+	if (!cls.netcon && !cls.demoplayback)
 		return 0;
 #endif
 
