@@ -16,7 +16,11 @@ pub mod hashindex;
 #[path = "../mathlib/src/ffi.rs"]
 pub mod mathlib;
 
-#[cfg(feature = "sizebuf")]
+// msg_io reads and writes through the sizebuf ABI, so it needs SizeBufC even
+// when the sizebuf functions themselves are left to the C original.  The
+// layout lives in one place; which half of sizebuf.rs is compiled is decided
+// there.
+#[cfg(any(feature = "sizebuf", feature = "msg_io"))]
 pub mod sizebuf;
 
 #[cfg(feature = "crc")]
@@ -24,6 +28,9 @@ pub mod crc;
 
 #[cfg(feature = "link_ops")]
 pub mod link_ops;
+
+#[cfg(feature = "msg_io")]
+pub mod msg_io;
 
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.

@@ -24,7 +24,7 @@ pkgs.mkShell {
     echo ""
     echo "Or by hand:"
     echo "  cd engine && mkdir -p build && cd build"
-    echo "  emcmake cmake -DCMAKE_BUILD_TYPE=Release -DWEB_RENDERER=webgl2 -DUSE_CODEC_VORBIS=OFF -DUSE_ALSA=OFF -DUSE_RUST_HASHINDEX=OFF -DUSE_MATHLIB_RS=OFF -DUSE_SIZEBUF_RS=OFF -DUSE_CRC_RS=OFF -DUSE_LINK_OPS_RS=OFF .."
+    echo "  emcmake cmake -DCMAKE_BUILD_TYPE=Release -DWEB_RENDERER=webgl2 -DUSE_CODEC_VORBIS=OFF -DUSE_ALSA=OFF -DUSE_RUST_HASHINDEX=OFF -DUSE_MATHLIB_RS=OFF -DUSE_SIZEBUF_RS=OFF -DUSE_CRC_RS=OFF -DUSE_LINK_OPS_RS=OFF -DUSE_MSG_IO_RS=OFF .."
     echo "  emmake make"
     echo ""
     echo "This shell has network access enabled for Emscripten port downloads."

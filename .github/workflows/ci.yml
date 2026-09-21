@@ -180,6 +180,14 @@ jobs:
       - name: Rust link_ops (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-link-ops.sh
 
+      # msg_io is the only port whose C original is compiled differently per
+      # target (-DH2W in hwsv only).  The harness therefore links three
+      # implementations into one binary -- the C as compiled without H2W, the C
+      # as compiled with it, and the Rust union -- and requires all three to
+      # agree byte for byte.
+      - name: Rust msg_io (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-msg-io.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.
