@@ -44,6 +44,7 @@ emcmake cmake \
 	-DUSE_CRC_RS=OFF \
 	-DUSE_LINK_OPS_RS=OFF \
 	-DUSE_MSG_IO_RS=OFF \
+	-DUSE_INFO_STR_RS=OFF \
 	"$SOURCE_DIR"
 
 emmake make -j"$(nproc)"

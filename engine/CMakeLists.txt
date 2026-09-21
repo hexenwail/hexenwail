@@ -82,6 +82,16 @@ option(USE_LINK_OPS_RS "Link the Rust link_ops implementation instead of link_op
 # switchable while the union-of-both-variants question is exercised.
 option(USE_MSG_IO_RS "Link the Rust msg_io implementation instead of msg_io.c" ON)
 
+# Link the Rust port of the HexenWorld info-string helpers in place of
+# engine/hexenworld/shared/info_str.c.  The first port of a file that is not in
+# h2shared, and the first whose C original is compiled by one target only:
+# info_str.c is in HWSV_SOURCES alone, and every Hexen II use of Info_* sits
+# inside `#if defined(H2W)`, so glhexen2 and h2ded never reference these
+# symbols.  Of the two variants in the C body, only the SERVERONLY one has ever
+# been compiled, so that is the one the Rust module implements.  It stays
+# independently switchable while the hwsv-only removal is exercised.
+option(USE_INFO_STR_RS "Link the Rust info_str implementation instead of info_str.c" ON)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -953,12 +963,22 @@ else()
     message(STATUS "msg_io: C original (USE_MSG_IO_RS=OFF)")
 endif()
 
+# info_str.c is not in COMMON_SOURCES -- it is only compiled into HWSV_SOURCES,
+# so its removal happens where that list is built, not here.
+if(USE_INFO_STR_RS)
+    list(APPEND RUST_ENGINE_FEATURES info_str)
+    message(STATUS "info_str: Rust shim (USE_INFO_STR_RS=ON)")
+else()
+    message(STATUS "info_str: C original (USE_INFO_STR_RS=OFF)")
+endif()
+
 if(RUST_ENGINE_FEATURES)
     if(EMSCRIPTEN)
         message(FATAL_ERROR
             "The Rust engine shim is not wired up for Emscripten. Disable "
             "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, "
-            "USE_CRC_RS, USE_LINK_OPS_RS, and USE_MSG_IO_RS for the WASM "
+            "USE_CRC_RS, USE_LINK_OPS_RS, USE_MSG_IO_RS, and "
+            "USE_INFO_STR_RS for the WASM "
             "build.")
     endif()
 
@@ -986,6 +1006,7 @@ if(RUST_ENGINE_FEATURES)
                 ${RUST_ENGINE_RS_DIR}/src/crc.rs
                 ${RUST_ENGINE_RS_DIR}/src/link_ops.rs
                 ${RUST_ENGINE_RS_DIR}/src/msg_io.rs
+                ${RUST_ENGINE_RS_DIR}/src/info_str.rs
                 ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
                 ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
         COMMENT "Building consolidated Rust engine shim"
@@ -1351,6 +1372,9 @@ else()
     endif()
     if(USE_MSG_IO_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/msg_io.c)
+    endif()
+    if(USE_INFO_STR_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${HW_TOP}/shared/info_str.c)
     endif()
 
     add_executable(hwsv ${HWSV_SOURCES})

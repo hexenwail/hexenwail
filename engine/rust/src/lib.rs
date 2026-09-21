@@ -32,6 +32,13 @@ pub mod link_ops;
 #[cfg(feature = "msg_io")]
 pub mod msg_io;
 
+// info_str is the one port whose C original lives in hexenworld/shared rather
+// than h2shared, and the one whose only compiled variant is hwsv's (H2W plus
+// SERVERONLY).  It reads the cvar table rather than a global; see the module
+// comment.
+#[cfg(feature = "info_str")]
+pub mod info_str;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]
