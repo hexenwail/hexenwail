@@ -148,16 +148,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/setup-nix
         with:
-          extra_nix_config: |
-            accept-flake-config = true
-      - uses: cachix/cachix-action@v17
-        # Cachix outages shouldn't fail the build — we just lose the cache.
-        continue-on-error: true
-        with:
-          name: hexenwail
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Build release binaries
         run: nix build .#release --print-build-logs

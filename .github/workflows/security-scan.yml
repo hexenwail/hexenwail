@@ -40,18 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/setup-nix
         with:
-          extra_nix_config: |
-            accept-flake-config = true
-
-      - uses: cachix/cachix-action@v17
-        # Same reasoning as ci.yml: a Cachix outage costs us the cache, not
-        # the run.
-        continue-on-error: true
-        with:
-          name: hexenwail
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       # vulnix downloads the NVD JSON feeds (hundreds of MB) on a cold cache.
       #

@@ -73,17 +73,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/setup-nix
         with:
-          extra_nix_config: |
-            accept-flake-config = true
-      - uses: cachix/cachix-action@v17
-        # Cachix outages (e.g. 502 from cachix.org) shouldn't fail the build —
-        # we just lose the cache for that run.
-        continue-on-error: true
-        with:
-          name: hexenwail
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Test multiplayer transparency state
         run: nix develop -c python3 tools/test_multiplayer_transparency.py
@@ -118,18 +110,16 @@ jobs:
             timeout -k 5 10 nix run .#nixos -- -help > smoke.log 2>&1
           head -20 smoke.log
 
-      - name: Build dedicated server
-        run: nix build .#h2ded --print-build-logs
-
-      # BUILD_HEXENWORLD defaults OFF and no other target sets it, so until
-      # this step the whole of engine/hexenworld/{server,shared} -- and the
-      # -DH2W compile of the shared sources underneath it -- was gated by
-      # nothing at all.  h2ded above does not cover it: HexenWorld is a
-      # separate engine sharing h2shared, not a mode of the Hexen II server,
-      # so a change to quakefs.c or pr_edict.c can pass every step above and
-      # still break the only build that compiles them with H2W defined.  #35.
-      - name: Build HexenWorld dedicated server
-        run: nix build .#hwsv --print-build-logs
+      # Build both server variants explicitly: h2ded does not compile the
+      # HexenWorld sources or the shared code with H2W defined.
+      - name: Build dedicated servers
+        run: |
+          set -euo pipefail
+          for target in h2ded hwsv; do
+            echo "::group::Build .$target"
+            nix build ".#$target" --print-build-logs
+            echo "::endgroup::"
+          done
 
       # Compiling hwsv does not prove it can reach main().  This runs it with
       # no game data and asserts it dies at the FS_Init gate with a diagnostic
@@ -225,38 +215,17 @@ jobs:
             engine/tests/menu_pointer_test.c
           ./menu_pointer_test
 
-      - name: Build Windows
-        run: nix build .#win64 --print-build-logs
-
-      # Cheap on the back of the step above — same mingw toolchain closure,
-      # and the server links no SDL, GL or codecs.  Without it the WIN32
-      # branch of the h2ded target and engine/hexen2/server/sys_win.c can
-      # break silently, exactly the rot uhexen2-hx78 described for Unix.
-      # uhexen2-befz.
-      - name: Build Windows dedicated server
-        run: nix build .#h2ded-win64 --print-build-logs
-
-      # BUILD_UTILS defaults OFF, so without these the three CMakeLists that
-      # build the map/model toolchain are gated by nothing.  Plain C, no SDL,
-      # GL or codecs — cheap on both hosts.  uhexen2-bjgb, uhexen2-4xd7.
-      - name: Build tools
-        run: nix build .#utils --print-build-logs
-
-      - name: Build Windows tools
-        run: nix build .#utils-win64 --print-build-logs
-
-      # Runs hcc over all four HexenC trees.  Until this existed nothing in
-      # the build read gamecode/ at all, so a .hc edit that did not even
-      # compile would land green — and did not have to be exotic to do it:
-      # a fix normally goes into h2, hw and portals together.  Nearly free
-      # on the back of .#utils above (same closure, hcc is the only input,
-      # a couple of seconds per tree).
-      #
-      # This gates compilation only.  It is deliberately NOT wired into
-      # .#release: whether Hexenwail ships a progs.dat is a separate and
-      # still-open question, see docs/GAMECODE.md.  uhexen2-zmb3.
-      - name: Build gamecode
-        run: nix build .#gamecode --print-build-logs
+      # Keep the cross-compiled, tools and gamecode targets in one grouped
+      # step.  The loop preserves the explicit target list while avoiding a
+      # separate workflow step for every small derivation.
+      - name: Build Windows, tools and gamecode
+        run: |
+          set -euo pipefail
+          for target in win64 h2ded-win64 utils utils-win64 gamecode; do
+            echo "::group::Build .$target"
+            nix build ".#$target" --print-build-logs
+            echo "::endgroup::"
+          done
 
   flatpak:
     runs-on: ubuntu-latest
