@@ -2806,6 +2806,20 @@ void HWCL_Frame (void)
 	 * advance to sequence one on the following frame. */
 	if (hwcl_state == hwcl_connected && HWNetchan_CanPacket (&hwcl_netchan))
 		HWNetchan_Transmit (&hwcl_netchan, 0, NULL);
+
+	/* More reliable data queued in one round trip than the netchan holds
+	 * (HWNET_MAX_MSGLEN): an exec or paste of many forwarded commands can do
+	 * it since #212.  HWNetchan_Transmit then refuses every packet, moves
+	 * included, and the session would sit dead until the server timed it
+	 * out.  Drop the overflowed buffer so HWCL_Disconnect's "drop" can
+	 * still go out, and say why. */
+	if (hwcl_state == hwcl_connected && hwcl_netchan.fatal_error)
+	{
+		SZ_Clear (&hwcl_netchan.message);
+		hwcl_netchan.fatal_error = false;
+		Host_Error ("HexenWorld: too many commands queued for the server "
+				"(outgoing message overflow)");
+	}
 }
 
 void HWCL_Shutdown (void)

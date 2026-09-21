@@ -10,6 +10,9 @@
 #   cmd say TOKEN2     Cmd_ForwardToServer_f (the "cmd" command)
 #   kill               Host_Kill_f -> Cmd_ForwardToServer, seen as the -2
 #                      frags ClientKill charges, read from the server's status
+#   hwflood x50        ~9500 bytes of say in one frame, past the netchan's
+#                      7500: the client must disconnect and say why, not go
+#                      silent until the server times it out
 #
 # Before the fix all three went into cls.message, which nothing sends while
 # HexenWorld owns the connection, so the server saw none of them.
@@ -103,6 +106,9 @@ TOK=$(tr -dc 'a-z' < /dev/urandom | head -c 8)
 T_SAY="saytok$TOK"
 T_CMD="cmdtok$TOK"
 T_SRV="srvtok$TOK"
+# 180 letters: 50 of these in one frame (the hwflood10 x5 below) queue
+# ~9500 bytes of reliable data, past the netchan's 7500 (HWNET_MAX_MSGLEN).
+FLOOD="flood$(printf 'x%.0s' $(seq 1 175))"
 
 # --- server ------------------------------------------------------------------
 rm -f "$FIFO"; mkfifo "$FIFO"
@@ -125,6 +131,11 @@ sleep 2
 cmd kill
 sleep 4
 shot 01-after-commands
+cmd alias hwflood "say $FLOOD"
+cmd alias hwflood10 "hwflood;hwflood;hwflood;hwflood;hwflood;hwflood;hwflood;hwflood;hwflood;hwflood"
+cmd hwflood10;hwflood10;hwflood10;hwflood10;hwflood10
+sleep 4
+shot 02-after-flood
 EOF
 
 ENGINE="$CLIENT" STEPS="$STEPS" "$ROOT/tools/headless-drive.sh" script \
@@ -202,6 +213,14 @@ elif [ "$FRAGS_AFTER" -lt "$FRAGS_BEFORE" ]; then
 	say "ok: client 'kill' made the player suicide (frags $FRAGS_BEFORE -> $FRAGS_AFTER)"
 else
 	fail "client 'kill' had no effect (frags $FRAGS_BEFORE -> $FRAGS_AFTER) -- GitHub #212"
+fi
+
+# Flooding the reliable stream must end the session with a reason, not
+# leave it silently dead until the server times it out.
+if grep -q "too many commands queued for the server" "$CLOG"; then
+	say "ok: an overflowed command queue disconnects with a message"
+else
+	fail "flooding forwarded commands did not report the netchan overflow"
 fi
 
 [ -n "$KEEP" ] && say "logs in $WORK"
