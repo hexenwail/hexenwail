@@ -17,8 +17,8 @@
 #
 # USAGE
 #
-#   ./check-rust-link-ops.sh            # differential harness + CMake gate
-#   ./check-rust-link-ops.sh --engine   # ... plus the engine smoke
+#   ./scripts/check-rust-link-ops.sh            # differential harness + CMake gate
+#   ./scripts/check-rust-link-ops.sh --engine   # ... plus the engine smoke
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
