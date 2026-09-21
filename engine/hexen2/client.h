@@ -607,6 +607,7 @@ void CL_InitTEnts (void);
 void CL_PrecacheTEntSounds (void);
 void CL_ClearTEnts (void);
 void CL_ParseTEnt (void);
+void CL_ParseTEntType (int type);	/* CL_ParseTEnt after its type byte */
 void CL_UpdateTEnts (void);
 
 //

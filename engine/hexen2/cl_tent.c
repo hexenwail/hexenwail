@@ -163,7 +163,14 @@ void CL_ClearTEnts(void)
 
 void CL_ParseTEnt(void)
 {
-	int type;
+	CL_ParseTEntType (MSG_ReadByte());
+}
+
+/* The body of CL_ParseTEnt for a type byte the caller has already read.
+ * The HexenWorld parser (cl_hw_tent.inc) hands its effects that share this
+ * numbering and payload straight to it rather than drawing them twice. */
+void CL_ParseTEntType(int type)
+{
 	vec3_t pos;
 #ifdef QUAKE2
 	vec3_t endpos;
@@ -172,7 +179,6 @@ void CL_ParseTEnt(void)
 	int rnd;
 //	int colorStart, colorLength;
 
-	type = MSG_ReadByte();
 	switch (type)
 	{
 	case TE_WIZSPIKE:	// spike hitting wall
@@ -297,7 +303,10 @@ void CL_ParseTEnt(void)
 	case TE_LIGHT_PULSE:	// colored light pulse from model glow settings
 	{
 		int entidx = MSG_ReadShort();
-		entity_t *tent = &cl_entities[entidx];
+		entity_t *tent;
+		if (entidx < 0 || entidx >= MAX_EDICTS)
+			break;		/* off the wire, signed: never index with it */
+		tent = &cl_entities[entidx];
 		dl = CL_AllocDlight(0);
 		VectorCopy(tent->origin, dl->origin);
 		dl->radius = 250;
@@ -351,6 +360,17 @@ static void ParseStream(int type)
 	dest[0] = MSG_ReadCoord();
 	dest[1] = MSG_ReadCoord();
 	dest[2] = MSG_ReadCoord();
+
+	/* The entity number came off the wire as a signed short and indexes
+	 * cl_entities here (STREAM_ATTACHED) and every frame in CL_UpdateTEnts.
+	 * The payload is fully consumed by now, so a bad number costs this one
+	 * stream and nothing else in the packet.  Reachable from any HexenWorld
+	 * server since #213 routed HW streams here. */
+	if (ent < 0 || ent >= MAX_EDICTS)
+	{
+		Con_DPrintf ("%s: entity %d out of range\n", __thisfunc__, ent);
+		return;
+	}
 
 	models[1] = models[2] = models[3] = NULL;
 	switch (type)
