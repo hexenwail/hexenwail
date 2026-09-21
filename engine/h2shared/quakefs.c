@@ -3697,6 +3697,14 @@ unsigned int FS_GetPortalsPathID (void)
 	return fs_portals_path_id;
 }
 
+/* path_id of the gamedir added last -- the one fs_gamedir names, and in
+ * HexenWorld mode the server's (siege above hw, a mod above hw).  0 before
+ * any gamedir exists. */
+unsigned int FS_GetGamedirPathID (void)
+{
+	return fs_searchpaths ? fs_searchpaths->path_id : 0;
+}
+
 /* The following FS_*() stdio replacements are necessary if one is
  * to perform non-sequential reads on files reopened on pak files
  * because we need the bookkeeping about file start/end positions.

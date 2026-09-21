@@ -350,6 +350,14 @@ printf 'say %s\n' "$TOKEN" >&3
 sleep 5
 grep -q "$TOKEN" "$ALOG" || fail "client A did not receive the server broadcast"
 grep -q "$TOKEN" "$BLOG" || fail "client B did not receive the server broadcast"
+# Indexed prints (#214): every ClientConnect broadcasts the name, then
+# strings.txt line 437 of HexenWorld's table, " joined the game".  Hexen
+# II's table stops at 409 lines, so this also proves which table loaded.
+# Client A sees its own join and client B's.
+wait_count "$ALOG" 'joined the game' 2 10 || \
+	fail "client A did not print the HexenWorld join messages (saw $(grep -c 'joined the game' "$ALOG" 2>/dev/null))"
+grep -q 'HexenWorld: no strings.txt' "$ALOG" "$BLOG" && \
+	fail "a client found no HexenWorld strings.txt (is the bundle beside the binary?)"
 
 # --- live map change ---
 # Model/skin loading on a cold cache takes a while on llvmpipe boxen; the

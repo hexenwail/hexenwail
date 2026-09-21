@@ -27,41 +27,48 @@ static int	*host_string_index = NULL;
 int		host_string_count = 0;
 
 
-void Host_LoadStrings (void)
+void Host_ClearStrings (void)
+{
+	host_strings = NULL;
+	host_string_index = NULL;
+	host_string_count = 0;
+}
+
+/* Index the lines of a strings.txt already in memory, in place.  `data` must
+ * live on the hunk for as long as the table is used (the index is allocated
+ * there too).  caret_newlines turns '^' into '\n', which is how HexenWorld's
+ * table marks the line break at the end of an indexed print.  Returns the
+ * number of lines; on 0 the table is left empty. */
+int Host_ParseStrings (char *data, qboolean caret_newlines)
 {
 	int		i, count, start;
 	signed char	newline_char;
 
-	host_strings = (char *)FS_LoadHunkFile ("strings.txt", NULL);
-	if (!host_strings)
-		Host_Error ("%s: couldn't load strings.txt", __thisfunc__);
-
+	Host_ClearStrings ();
 	newline_char = -1;
 
-	for (i = count = 0; host_strings[i] != 0; i++)
+	for (i = count = 0; data[i] != 0; i++)
 	{
-		if (host_strings[i] == '\r' || host_strings[i] == '\n')
+		if (data[i] == '\r' || data[i] == '\n')
 		{
-			if (newline_char == host_strings[i] || newline_char == -1)
+			if (newline_char == data[i] || newline_char == -1)
 			{
-				newline_char = host_strings[i];
+				newline_char = data[i];
 				count++;
 			}
 		}
 	}
 
 	if (!count)
-	{
-		Host_Error ("%s: no string lines found", __thisfunc__);
-	}
+		return 0;
 
 	host_string_index = (int *)Hunk_AllocName ((count + 1)*sizeof(int), "string_index");
 
-	for (i = count = start = 0; host_strings[i] != 0; i++)
+	for (i = count = start = 0; data[i] != 0; i++)
 	{
-		if (host_strings[i] == '\r' || host_strings[i] == '\n')
+		if (data[i] == '\r' || data[i] == '\n')
 		{
-			if (newline_char == host_strings[i])
+			if (newline_char == data[i])
 			{
 				host_string_index[count] = start;
 				start = i + 1;
@@ -72,20 +79,83 @@ void Host_LoadStrings (void)
 				start++;
 			}
 
-			host_strings[i] = 0;
+			data[i] = 0;
 		}
-#if defined(H2W)
-		/* Hexenworld: translate '^' to
-		 * '\n' for indexed prints */
-		else if (host_strings[i] == '^')
+		else if (caret_newlines && data[i] == '^')
 		{
-			host_strings[i] = '\n';
+			data[i] = '\n';
 		}
-#endif	/* H2W */
 	}
 
+	host_strings = data;
 	host_string_count = count;
 	Con_DPrintf("Read in %d string lines\n", count);
+	return count;
+}
+
+void Host_LoadStrings (void)
+{
+	char	*data;
+
+	data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
+	if (!data)
+		Host_Error ("%s: couldn't load strings.txt", __thisfunc__);
+#if defined(H2W)
+	if (!Host_ParseStrings (data, true))
+#else
+	if (!Host_ParseStrings (data, false))
+#endif
+		Host_Error ("%s: no string lines found", __thisfunc__);
+}
+
+/* HexenWorld's strings.txt, for the integrated client and hwsv alike.  Its
+ * indices are not Hexen II's -- STR_SUICIDES is 468 and the obituaries run
+ * to 592, while data1's table has 409 lines and portals' 562 -- and Siege's
+ * differs again (lines 402-404, 432, and five more).  No pak ships one and a
+ * retail install usually has none, so a plain FS lookup lands on data1's or
+ * portals' table: wrong text on the client, and on the server PF_print_indexed
+ * PR_RunErrors for every index past the end.  Tiers, most specific first:
+ *   1. installed in the current gamedir (siege, hw, or a mod over hw)
+ *   2. shipped beside the engine for that gamedir (PR_BundleDir; NULL in
+ *      hwsv, which reads only the game directory)
+ *   3. installed in a HexenWorld layer below it (hw under a mod)
+ *   4. hw's, shipped beside the engine
+ * Never data1's (path_id 1) or portals'.  Loaded on the hunk like
+ * Host_LoadStrings.  Returns false, with the table empty, if none was found.
+ * GitHub #214. */
+qboolean Host_LoadHWStrings (void)
+{
+	char		path[MAX_OSPATH];
+	const char	*bundle = PR_BundleDir ();
+	unsigned int	path_id = 0;
+	qboolean	hw_family;
+	char		*data = NULL;
+
+	hw_family = FS_FileExists ("strings.txt", &path_id) &&
+		    path_id != 1U && path_id != FS_GetPortalsPathID ();
+
+	if (hw_family && path_id == FS_GetGamedirPathID ())
+		data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
+	if (!data && bundle)
+	{
+		q_snprintf (path, sizeof(path), "%s/%s/strings.txt", bundle,
+				fs_gamedir_nopath);
+		data = (char *)FS_LoadHunkFileFromOSPath (path);
+	}
+	if (!data && hw_family)
+		data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
+	if (!data && bundle)
+	{
+		q_snprintf (path, sizeof(path), "%s/hw/strings.txt", bundle);
+		data = (char *)FS_LoadHunkFileFromOSPath (path);
+	}
+
+	if (!data || !Host_ParseStrings (data, true))
+	{
+		Host_ClearStrings ();
+		return false;
+	}
+	return true;
 }
 
 const char *Host_GetString (int idx)

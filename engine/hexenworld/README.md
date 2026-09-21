@@ -86,6 +86,34 @@ Without it:
 
     SV_Error: PR_LoadProgs: couldn't load hwprogs.dat
 
+### 4. String table: `hw/strings.txt` (server and client)
+
+Obituaries, pickups and "joined the game" are indexed prints: line numbers
+into HexenWorld's `strings.txt`. That table is not Hexen II's. `STR_SUICIDES`
+is line 468, and the obituaries run to 592, while data1's table has 409
+lines and portals' 562. Siege has its own table. No pak ships one.
+
+**Server:** install it beside `hwprogs.dat`. `hwsv-bundled` ships it for
+exactly that:
+
+    nix build .#hwsv-bundled
+    install -Dm644 result/share/hexenwail/hw/strings.txt <gamedir>/hw/strings.txt
+
+hwsv loads an installed HW-family copy (the gamedir's own, or hw's under a
+mod), never data1's or portals'. Without one it warns, falls back to whatever
+`strings.txt` it finds (portals' on a mission-pack install), and the first
+obituary past that table's end stops the gamecode.
+
+**Client:** it tries these in order and needs no install step:
+1. The server gamedir's own installed copy.
+2. The copy shipped beside the engine for that gamedir
+   (`share/hexenwail/{hw,siege}/strings.txt`, from `gamecode/res/`).
+3. For a mod stacked on hw, an installed copy in hw.
+4. The shipped hw copy.
+
+Without any of them it says so once per map, and those messages stay blank
+(#214).
+
 ## Verified bringup
 
 With all three in place, from the game installation directory:
@@ -112,7 +140,7 @@ run them. Run them locally after touching the HexenWorld client:
 - `scripts/hw-hud-check.sh`: the HUD status icons on screen (#211). The net
   icon must be absent on a live session, drawn while the server is
   SIGSTOPped, and clear again after SIGCONT. The spawn-protection rook must
-  appear at spawn and be gone 15 s later. Icons are matched against the pics
+  appear at spawn and be gone once spawn protection ends. Icons are matched against the pics
   in your own paks (`scripts/wadpic2ppm.py`, `scripts/hudicon-score.py`).
 
       nix build .#default .#hwsv-bundled -o result
