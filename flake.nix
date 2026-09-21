@@ -206,9 +206,9 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
-              # For engine/rust, the consolidated Rust FFI ports (hashindex,
-              # mathlib and sizebuf) are on the default native build path, so
-              # cargo/rustc are listed here rather than fetched separately.
+              # For engine/rust, the consolidated Rust FFI ports are on the
+              # default native build path, so cargo/rustc are listed here
+              # rather than fetched separately.
               cargo
               rustc
             ];

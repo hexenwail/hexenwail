@@ -9,15 +9,28 @@
 # CMake half proves the consolidated engine archive selects link_ops
 # independently and that the C fallback remains buildable.
 #
+# The --engine arm adds the end-to-end half: it runs the REAL ENGINE with the
+# Rust link_ops and with the C original, on a real map load, and diffs the
+# output.  SV_LinkEdict and SV_TouchLinks in engine/hexen2/world.c are the call
+# sites it reaches, and a map load drives both.  It is opt-in because it needs
+# the demo game data and Xvfb, which CI does not provide.
+#
+# USAGE
+#
+#   ./scripts/check-rust-link-ops.sh            # differential harness + CMake gate
+#   ./scripts/check-rust-link-ops.sh --engine   # ... plus the engine smoke
+#
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 set -euo pipefail
 
+run_engine=0
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+		--engine) run_engine=1 ;;
+		-h|--help) sed -n '2,25p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -126,6 +139,19 @@ for bin in glhexen2 h2ded hwsv; do
 		fi
 	done
 done
+
+if [ "$run_engine" -eq 1 ]; then
+	echo
+	echo "== 6. engine smoke: run the real engine both ways =="
+	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
+	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
+	DEMO_DIR="$demo" \
+	ON_BIN="$work/build-on/bin/glhexen2" \
+	OFF_BIN="$work/build-off/bin/glhexen2" \
+	XVFB="$xvfb" \
+	WORK="$work/smoke" \
+		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh"
+fi
 
 echo "PASS: Rust link_ops -- differential harness green, the consolidated"
 echo "      archive links exactly one symbol per target, and the C fallback"
