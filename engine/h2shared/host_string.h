@@ -25,6 +25,8 @@
 extern	int		host_string_count;
 
 void Host_LoadStrings (void);
+void Host_ClearStrings (void);
+int Host_ParseStrings (char *data, qboolean caret_newlines);
 const char *Host_GetString (int idx);
 
 #endif	/* HOST_STRING_H */

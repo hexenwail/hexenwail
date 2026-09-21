@@ -86,6 +86,17 @@ Without it:
 
     SV_Error: PR_LoadProgs: couldn't load hwprogs.dat
 
+### 4. Client string table: `hw/strings.txt` (client only)
+
+The client prints obituaries, pickups and "joined the game" from the
+server's indexed prints, which are line numbers into HexenWorld's
+`strings.txt`. That table is not Hexen II's (`STR_SUICIDES` is line 468; data1's
+table has 409 lines), and Siege has its own. No pak ships it. The client uses
+the server gamedir's copy if one is installed, and otherwise the copy shipped
+beside the engine (`share/hexenwail/hw/strings.txt`, from
+`gamecode/res/hw/strings.txt`). It never uses data1's or portals'. Without
+either, it says so once per map and those messages stay blank (#214).
+
 ## Verified bringup
 
 With all three in place, from the game installation directory:
@@ -112,7 +123,7 @@ run them. Run them locally after touching the HexenWorld client:
 - `scripts/hw-hud-check.sh`: the HUD status icons on screen (#211). The net
   icon must be absent on a live session, drawn while the server is
   SIGSTOPped, and clear again after SIGCONT. The spawn-protection rook must
-  appear at spawn and be gone 15 s later. Icons are matched against the pics
+  appear at spawn and be gone once spawn protection ends. Icons are matched against the pics
   in your own paks (`scripts/wadpic2ppm.py`, `scripts/hudicon-score.py`).
 
       nix build .#default .#hwsv-bundled -o result

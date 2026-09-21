@@ -472,6 +472,47 @@ static qboolean HWCL_ValidProtocol (int protocol)
 		protocol == HW_PROTOCOL_VERSION_HEXENWAIL_1;
 }
 
+/* HexenWorld's strings.txt: indexed prints (obituaries, pickups, "joined the
+ * game"), plaques.  Its indices are not Hexen II's -- STR_SUICIDES is 468,
+ * and data1's table has 409 lines -- and Siege's differs again, so the table
+ * must come from the server's gamedir, never from data1 or portals.  No pak
+ * ships one; a retail install usually has none either, so the copy shipped
+ * beside the engine (gamecode/res/<gamedir>) is the fallback.  Loaded per map
+ * on the hunk, as the Hexen II path does, because CL_ClearState frees it.
+ * GitHub #214. */
+static void HWCL_LoadStrings (void)
+{
+	char		path[MAX_OSPATH];
+	const char	*bundle;
+	unsigned int	path_id = 0;
+	char		*data = NULL;
+
+	if (FS_FileExists ("strings.txt", &path_id) &&
+	    path_id != 1U && path_id != FS_GetPortalsPathID ())
+		data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
+
+	if (!data && (bundle = PR_BundleDir ()) != NULL)
+	{
+		q_snprintf (path, sizeof(path), "%s/%s/strings.txt", bundle,
+				fs_gamedir_nopath);
+		data = (char *)FS_LoadHunkFileFromOSPath (path);
+		/* A mod mounted over hw speaks hw's table unless it brings its own. */
+		if (!data && q_strcasecmp (fs_gamedir_nopath, "hw") != 0)
+		{
+			q_snprintf (path, sizeof(path), "%s/hw/strings.txt", bundle);
+			data = (char *)FS_LoadHunkFileFromOSPath (path);
+		}
+	}
+
+	if (!data || !Host_ParseStrings (data, true))
+	{
+		Host_ClearStrings ();
+		Con_Printf ("HexenWorld: no strings.txt for %s; game messages "
+				"(obituaries, pickups) will not be shown\n",
+				fs_gamedir_nopath);
+	}
+}
+
 /* Returns false when the world model (index 1) did not load. */
 static qboolean HWCL_LoadModels (void)
 {
@@ -515,6 +556,7 @@ static qboolean HWCL_LoadModels (void)
 	cl.worldmodel = cl_entities[0].model = cl.model_precache[1];
 	COM_FileBase (hwcl_model_names[1], cl.mapname, sizeof(cl.mapname));
 	R_NewMap ();
+	HWCL_LoadStrings ();
 	return true;
 }
 
@@ -675,6 +717,10 @@ static void HWCL_ParseServerData (void)
 		return;
 
 	CL_ClearState ();
+	/* The table lived on the hunk CL_ClearState just freed; HWCL_LoadModels
+	 * loads the new map's.  Until then an indexed print shows nothing
+	 * rather than reading freed memory. */
+	Host_ClearStrings ();
 	HWCL_ResetPresentation ();
 	cls.signon = 0;
 	memset (hwcl_model_names, 0, sizeof(hwcl_model_names));
@@ -1993,9 +2039,25 @@ static void HWCL_ParsePlayerInfo (void)
 	if (flags & (1 << 15)) MSG_ReadShort (); /* weapon-channel sound */
 }
 
+/* The three HexenWorld print messages share the original client's handling:
+ * PRINT_CHAT plays the talk sound and highlights the text.  Text arrives
+ * raw, with no leading colour byte for Con_Printf to act on. */
+#define HWCL_PRINT_CHAT	3
+static void HWCL_Print (int level, const char *text)
+{
+	if (level == HWCL_PRINT_CHAT)
+	{
+		S_LocalSound ("misc/talk.wav");
+		con_ormask = 256;
+	}
+	Con_Printf ("%s", text);
+	con_ormask = 0;
+}
+
 static void HWCL_ParseServerMessage (void)
 {
 	int command;
+	int level;
 	const char *text;
 
 	/* These compact records describe only the current network update.  Keep
@@ -2012,10 +2074,10 @@ static void HWCL_ParseServerMessage (void)
 		case HW_SVC_NOP:
 			break;
 		case HW_SVC_PRINT:
-			MSG_ReadByte (); /* print level */
+			level = MSG_ReadByte ();
 			text = MSG_ReadString ();
 			if (!msg_badread)
-				Con_Printf ("%s", text);
+				HWCL_Print (level, text);
 			break;
 		case HW_SVC_DISCONNECT:
 			Con_Printf ("HexenWorld server disconnected.\n");
@@ -2257,12 +2319,17 @@ static void HWCL_ParseServerMessage (void)
 			MSG_ReadByte ();
 			break;
 		case HW_SVC_INDEXED_PRINT:
-			MSG_ReadByte (); /* print level */
-			MSG_ReadShort (); /* strings.txt index */
+			level = MSG_ReadByte ();
+			command = MSG_ReadShort (); /* strings.txt index, 1-based */
+			if (!msg_badread && command > 0 && command <= host_string_count)
+				HWCL_Print (level, Host_GetString (command - 1));
 			break;
 		case HW_SVC_NAME_PRINT:
-			MSG_ReadByte (); /* print level */
-			MSG_ReadByte (); /* player slot */
+			level = MSG_ReadByte ();
+			command = MSG_ReadByte (); /* player slot */
+			if (!msg_badread && cl.scores &&
+			    command >= 0 && command < cl.maxclients)
+				HWCL_Print (level, cl.scores[command].name);
 			break;
 		case HW_SVC_SOUND_UPDATE_POS:
 			{
@@ -2467,6 +2534,10 @@ qboolean HWCL_Connect (const char *host)
 	q_strlcpy (hwcl_server_name, host, sizeof(hwcl_server_name));
 
 	CL_ClearState ();
+	/* The table lived on the hunk CL_ClearState just freed; HWCL_LoadModels
+	 * loads the new map's.  Until then an indexed print shows nothing
+	 * rather than reading freed memory. */
+	Host_ClearStrings ();
 	HWCL_ResetPresentation ();
 	cls.state = ca_connected;
 	hwcl_state = hwcl_connecting;

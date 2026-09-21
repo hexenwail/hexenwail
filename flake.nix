@@ -135,6 +135,13 @@
                 # two filters apart.
                 || rel == "gamecode/fieldsets"
                 || pkgs.lib.hasPrefix "gamecode/fieldsets/" rel
+                # The two HexenWorld string tables the client needs (#214),
+                # named file by file: the rest of res/ is server configs
+                # nothing here installs.
+                || rel == "gamecode/res" || rel == "gamecode/res/hw"
+                || rel == "gamecode/res/siege"
+                || rel == "gamecode/res/hw/strings.txt"
+                || rel == "gamecode/res/siege/strings.txt"
                 # The changelog, because the ident-stamp gate below checks the
                 # marker date against its newest fork entry.  A prose edit to
                 # it now rebuilds the gamecode, which is the price of having
@@ -316,6 +323,13 @@
               install -Dm644 \
                 ${gamecodePkg}/share/hexenwail/portals/progs.dat \
                 -t $out/share/hexenwail/portals
+              # HexenWorld string tables for the client (#214): text data,
+              # not bytecode, so the hw/siege progs withholding elsewhere
+              # does not apply to them.
+              install -Dm644 ${gamecodePkg}/share/hexenwail/hw/strings.txt \
+                -t $out/share/hexenwail/hw
+              install -Dm644 ${gamecodePkg}/share/hexenwail/siege/strings.txt \
+                -t $out/share/hexenwail/siege
             '';
 
           # Same composition for the dedicated server.  h2ded runs
@@ -643,6 +657,13 @@
               install -Dm644 gamecode/hc/hw/hwprogs.dat \
                 -t $out/share/hexenwail/hw
               install -Dm644 gamecode/hc/siege/hwprogs.dat \
+                -t $out/share/hexenwail/siege
+              # The HexenWorld client's indexed-print tables (#214).  No pak
+              # ships them and their indices are not Hexen II's, so the
+              # client falls back to these copies (cl_hw.c HWCL_LoadStrings).
+              install -Dm644 gamecode/res/hw/strings.txt \
+                -t $out/share/hexenwail/hw
+              install -Dm644 gamecode/res/siege/strings.txt \
                 -t $out/share/hexenwail/siege
 
               runHook postInstall
@@ -1261,6 +1282,14 @@
             install -Dm644 \
               ${self.packages.${system}.gamecode}/share/hexenwail/portals/progs.dat \
               -t $out/release/gamecode/portals
+            # The HexenWorld client's string tables (#214) are text, not
+            # bytecode: the withholding above is about progs and not these.
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/hw/strings.txt \
+              -t $out/release/gamecode/hw
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/siege/strings.txt \
+              -t $out/release/gamecode/siege
 
             cat > $out/release/gamecode/README.txt <<'EOF'
 Hexenwail compiled gamecode (progs.dat)
@@ -1422,6 +1451,12 @@ EOF
             install -Dm644 \
               ${self.packages.${system}.gamecode}/share/hexenwail/portals/progs.dat \
               -t $out/release/linux-x86_64/share/hexenwail/portals
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/hw/strings.txt \
+              -t $out/release/linux-x86_64/share/hexenwail/hw
+            install -Dm644 \
+              ${self.packages.${system}.gamecode}/share/hexenwail/siege/strings.txt \
+              -t $out/release/linux-x86_64/share/hexenwail/siege
 
             # License files
             mkdir -p $out/release/licenses

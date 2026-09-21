@@ -2738,6 +2738,13 @@ static const char *PR_FindBundleDir (void)
 	return NULL;
 }
 
+/* Public face of PR_FindBundleDir for data other than progs: the HexenWorld
+ * client's strings.txt (cl_hw.c) has no retail source either. */
+const char *PR_BundleDir (void)
+{
+	return PR_FindBundleDir ();
+}
+
 /*
 ===============
 PR_BundledProgsPath
