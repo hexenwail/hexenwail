@@ -3886,12 +3886,13 @@ void R_DrawWorld (void)
 	 * drew something you cannot see" in a user's console log.  d2c46f078.
 	 * Developer-only: it is a diagnostic for a black-screen report, and it
 	 * was printing into every player's console on every map load, which is
-	 * noise for the 99% of loads that work.  Anyone chasing a blank screen
-	 * is already running developer 1.  Still one-shot per session either
+	 * noise for the 99% of loads that work.  Keep it behind developer 2 with
+	 * the other renderer bring-up details.  Still one-shot per session either
 	 * way -- the flag clears whether or not the line was printed. */
 	if (first_world_draw)
 	{
-		Con_SafeDPrintf ("[RENDERER] First world draw completed\n");
+		if (developer.integer >= 2)
+			Con_SafeDPrintf ("[RENDERER] First world draw completed\n");
 		first_world_draw = false;
 	}
 	gpu_cull_active = false;

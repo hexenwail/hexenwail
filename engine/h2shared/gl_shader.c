@@ -160,7 +160,7 @@ GLuint GL_LoadComputeProgram (const char *header, const char *body, const char *
 		return 0;
 	}
 
-	if (developer.integer)
+	if (developer.integer >= 2)
 		Con_SafePrintf("[SHADER] compute program '%s' linked OK (id=%u)\n", name, prog);
 	return prog;
 }

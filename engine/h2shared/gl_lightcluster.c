@@ -358,8 +358,9 @@ static qboolean R_LightCluster_Build (void)
 	}
 
 	lc_ready = true;
-	Con_SafePrintf ("LightCluster: %dx%dx%d froxels, %d lights max\n",
-			LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z, MAX_DLIGHTS);
+	if (developer.integer >= 2)
+		Con_SafePrintf ("LightCluster: %dx%dx%d froxels, %d lights max\n",
+				LIGHT_TILES_X, LIGHT_TILES_Y, LIGHT_TILES_Z, MAX_DLIGHTS);
 	return true;
 }
 
