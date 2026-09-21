@@ -37,7 +37,8 @@ jobs:
         run: |
           shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh \
             scripts/wasm-build.sh scripts/wasm-assemble-artifact.sh \
-            scripts/wasm-validate-artifact.sh scripts/webgl-smoke-test.sh
+            scripts/wasm-validate-artifact.sh scripts/webgl-smoke-test.sh \
+            scripts/demo-playback-smoke.sh
 
       # The metainfo is what GNOME Software and KDE Discover read, and Flathub
       # rejects a submission whose metainfo does not validate.  Nothing checked
@@ -89,6 +90,15 @@ jobs:
       # reimplementation, then compiles them against narrow engine stubs.
       - name: Multiplayer join and content-path regression
         run: python3 tools/test_multiplayer_join.py
+
+      # A demo has no qsocket, so a guard written for HexenWorld's socket
+      # ownership froze every demo on the loading plaque until "load timeout"
+      # (30ea43b17, GitHub #209).  Mods driving their front end from
+      # startdemos -- Storm of the Thyrion, Shadows of Chaos -- had no menu at
+      # all.  Nothing ran a demo: data1's hexen.rc plays none, and the
+      # headless lanes reach the world with +map.
+      - name: Demo playback reachable from the frame loop
+        run: python3 tools/test_demo_playback_gate.py
 
       # Skybox faces live in gl_texmgr.c's own pool, outside gltextures[], so
       # imagelist/imagedump could not see them (issue #127).

@@ -191,6 +191,26 @@ run screenshots the untouched menu, which looks like a pass; without
 `-condebug` the ambiguous-match listing is lost. Read results off the PNGs: the
 line under `]` is the assertion.
 
+### Demo playback — `scripts/demo-playback-smoke.sh`
+
+```
+nix build .#default -o result && nix build .#demodata -o result-demodata
+nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
+          nixpkgs#bubblewrap --command ./scripts/demo-playback-smoke.sh
+```
+
+Records a demo of `demo1`, then boots a **second, fresh** engine straight into
+`+playdemo`. The second boot is the whole point: a demo played in the session
+that recorded it still has the listen server's `cls.netcon`, so it survives a
+client that refuses to read without one. Only a cold boot has no qsocket — the
+state `startdemos` puts a mod's front end in. ~2 minutes; needs no retail data.
+
+The verdict is `couldn't exec <name>end.cfg` in `qconsole.log`, not a
+screenshot: a frozen client still prints `Playing demo from …` and the
+matching `start.cfg` line.
+
+`tools/test_demo_playback_gate.py` is the free CI half of the same invariant.
+
 ---
 
 ## progs_crc.py — which gamecode is this file?
