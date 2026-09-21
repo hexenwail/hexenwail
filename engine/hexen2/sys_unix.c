@@ -378,6 +378,12 @@ void Sys_PrintTerm (const char *msgtxt)
 		putc (*p, stdout);
 }
 
+void Sys_FlushTerm (void)
+{
+	if (!sys_nostdout.integer)
+		fflush (stdout);
+}
+
 void Sys_Quit (void)
 {
 	Host_Shutdown();

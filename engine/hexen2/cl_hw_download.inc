@@ -24,6 +24,7 @@
 /* hwsv serves one 1024-byte block per request and never states a total, so
  * without a ceiling a hostile server could fill the disk. */
 #define HWCL_DOWNLOAD_MAX_BYTES	(64L * 1024L * 1024L)
+#define HWCL_DOWNLOAD_BAR_WIDTH	10
 
 typedef enum
 {
@@ -39,8 +40,58 @@ static FILE *hwcl_download;
 static char hwcl_download_name[MAX_QPATH];
 static char hwcl_download_tempname[MAX_QPATH + 4];
 static long hwcl_download_bytes;
+static int hwcl_download_percent;
 
 static void HWCL_RequestNextDownload (void);
+
+/* The console's transient-progress API replaces each update in both a terminal
+ * and the graphical console without filling the log or scrollback.  Ten cells
+ * keep the full line below the console's 38-column minimum, even at the 64 MB
+ * limit. */
+static void HWCL_PrintDownloadProgress (int percent, const char *status)
+{
+	char bar[HWCL_DOWNLOAD_BAR_WIDTH + 1];
+	int fill, i;
+
+	if (percent == 100)
+		hwcl_download_percent = 100;
+	else if (percent >= 0 && percent < 100 &&
+			percent > hwcl_download_percent)
+		hwcl_download_percent = percent;
+	/* hwsv's percentage arithmetic overflows on files larger than ~21 MB.
+	 * Ignore its out-of-range intermediate values; the byte count still moves
+	 * on every block and percent 100 remains the protocol's completion marker. */
+	fill = hwcl_download_percent * HWCL_DOWNLOAD_BAR_WIDTH / 100;
+	for (i = 0; i < HWCL_DOWNLOAD_BAR_WIDTH; i++)
+		bar[i] = (i < fill) ? '=' : ' ';
+	bar[HWCL_DOWNLOAD_BAR_WIDTH] = 0;
+
+	if (status)
+	{
+		/* A one-block file has no intermediate line to replace, but its
+		 * successful completion is still useful confirmation. */
+		if (!CON_EndProgress ("[%s] %3d%% %ld B %s", bar,
+				hwcl_download_percent, hwcl_download_bytes, status) &&
+				percent == 100)
+			Con_Printf ("[%s] %3d%% %ld B %s\n", bar,
+					hwcl_download_percent, hwcl_download_bytes, status);
+	}
+	else
+	{
+		CON_Progressf ("[%s] %3d%% %ld B", bar,
+				hwcl_download_percent, hwcl_download_bytes);
+	}
+}
+
+static void HWCL_EndDownloadProgress (const char *status)
+{
+	HWCL_PrintDownloadProgress (hwcl_download_percent, status);
+}
+
+static void HWCL_ResetDownloadProgress (void)
+{
+	hwcl_download_percent = 0;
+}
 
 /* The name comes off the wire and becomes a path under the userdir. */
 static qboolean HWCL_DownloadNameIsSafe (const char *name)
@@ -112,6 +163,7 @@ static void HWCL_CancelDownload (void)
 {
 	char path[MAX_OSPATH];
 
+	HWCL_EndDownloadProgress ("canceled");
 	if (hwcl_download)
 	{
 		fclose (hwcl_download);
@@ -124,6 +176,7 @@ static void HWCL_CancelDownload (void)
 	hwcl_download_bytes = 0;
 	hwcl_download_name[0] = 0;
 	hwcl_download_tempname[0] = 0;
+	HWCL_ResetDownloadProgress ();
 }
 
 /* Drop the current file (partial or refused) and keep the list walk alive. */
@@ -141,6 +194,7 @@ static void HWCL_AbandonCurrentDownload (void)
 	hwcl_download_bytes = 0;
 	hwcl_download_name[0] = 0;
 	hwcl_download_tempname[0] = 0;
+	HWCL_ResetDownloadProgress ();
 }
 
 /* True when the file is present (or must not be fetched); false once a
@@ -159,6 +213,7 @@ static qboolean HWCL_CheckOrDownloadFile (const char *filename)
 	q_snprintf (hwcl_download_tempname, sizeof(hwcl_download_tempname),
 			"%s.tmp", filename);
 	hwcl_download_bytes = 0;
+	HWCL_ResetDownloadProgress ();
 	Con_Printf ("Downloading %s...\n", hwcl_download_name);
 	/* A plaque held over a transfer of unknown length only runs into the
 	 * 25 second "load timeout"; show the console progress instead. */
@@ -282,7 +337,10 @@ static void HWCL_ParseDownload (void)
 	size = MSG_ReadShort ();
 	percent = MSG_ReadByte ();
 	if (msg_badread)
+	{
+		HWCL_EndDownloadProgress ("failed");
 		return;
+	}
 
 	if (size < 0)
 	{
@@ -290,6 +348,7 @@ static void HWCL_ParseDownload (void)
 		 * are).  No payload follows. */
 		if (hwcl_download_type == hwcl_dl_none || !hwcl_download_name[0])
 			return;
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("Server cannot send %s.\n", hwcl_download_name);
 		HWCL_AbandonCurrentDownload ();
 		HWCL_RequestNextDownload ();
@@ -298,6 +357,7 @@ static void HWCL_ParseDownload (void)
 
 	if (size > hw_net_message.cursize - msg_readcount)
 	{
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("HexenWorld download block overruns its packet.\n");
 		HWCL_Disconnect ();
 		return;
@@ -314,6 +374,7 @@ static void HWCL_ParseDownload (void)
 	 * is no usable model, sound or map. */
 	if (size == 0)
 	{
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("Server sent an empty %s; skipping it.\n",
 				hwcl_download_name);
 		HWCL_AbandonCurrentDownload ();
@@ -328,6 +389,7 @@ static void HWCL_ParseDownload (void)
 				!(hwcl_download = fopen (path, "wb")))
 		{
 			msg_readcount += size;
+			HWCL_EndDownloadProgress ("failed");
 			Con_Printf ("Unable to open %s for writing.\n",
 					hwcl_download_tempname);
 			HWCL_AbandonCurrentDownload ();
@@ -339,6 +401,7 @@ static void HWCL_ParseDownload (void)
 	if (hwcl_download_bytes + size > HWCL_DOWNLOAD_MAX_BYTES)
 	{
 		msg_readcount += size;
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("%s exceeds the %ld MB download limit; abandoned.\n",
 				hwcl_download_name, HWCL_DOWNLOAD_MAX_BYTES / (1024L * 1024L));
 		HWCL_AbandonCurrentDownload ();
@@ -350,6 +413,7 @@ static void HWCL_ParseDownload (void)
 			!= (size_t)size)
 	{
 		msg_readcount += size;
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("Write error while downloading %s.\n", hwcl_download_name);
 		HWCL_AbandonCurrentDownload ();
 		HWCL_RequestNextDownload ();
@@ -364,7 +428,7 @@ static void HWCL_ParseDownload (void)
 	 * file into place. */
 	if (percent != 100)
 	{
-		Con_DPrintf ("%s: %d%%\n", hwcl_download_name, percent);
+		HWCL_PrintDownloadProgress (percent, NULL);
 		HWCL_StringCmd ("nextdl");
 		return;
 	}
@@ -375,6 +439,7 @@ static void HWCL_ParseDownload (void)
 			!HWCL_DownloadPath (final_path, sizeof(final_path),
 				hwcl_download_name))
 	{
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("Download path for %s is too long.\n", hwcl_download_name);
 	}
 	/* rename() replaces on POSIX and Sys_rename replaces on Windows too, so
@@ -382,14 +447,20 @@ static void HWCL_ParseDownload (void)
 	 * clobbered. */
 	else if (Sys_FileType (final_path) != FS_ENT_NONE)
 	{
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("%s already exists; discarding the download.\n",
 				hwcl_download_name);
 		Sys_unlink (path);
 	}
 	else if (Sys_rename (path, final_path) != 0)
 	{
+		HWCL_EndDownloadProgress ("failed");
 		Con_Printf ("Failed to rename %s.\n", hwcl_download_tempname);
 		Sys_unlink (path);
+	}
+	else
+	{
+		HWCL_PrintDownloadProgress (100, "complete");
 	}
 	/* Even the GL path currently translates the class base skin, not the
 	 * downloaded PCX, but make the presentation state retryable when a skin
@@ -400,5 +471,6 @@ static void HWCL_ParseDownload (void)
 	hwcl_download_bytes = 0;
 	hwcl_download_name[0] = 0;
 	hwcl_download_tempname[0] = 0;
+	HWCL_ResetDownloadProgress ();
 	HWCL_RequestNextDownload ();
 }

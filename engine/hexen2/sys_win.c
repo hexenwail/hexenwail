@@ -376,6 +376,11 @@ void Sys_PrintTerm (const char *msgtxt)
 	}
 }
 
+void Sys_FlushTerm (void)
+{
+	/* WriteFile is unbuffered. */
+}
+
 void Sys_Quit (void)
 {
 	Host_Shutdown();
