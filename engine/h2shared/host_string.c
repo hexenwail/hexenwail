@@ -21,6 +21,7 @@
  */
 
 #include "quakedef.h"
+#include "hw_strings_data.h"	/* generated: scripts/gen_hw_strings.py */
 
 static char	*host_strings = NULL;
 static int	*host_string_index = NULL;
@@ -120,8 +121,10 @@ void Host_LoadStrings (void)
  *      hwsv, which reads only the game directory)
  *   3. installed in a HexenWorld layer below it (hw under a mod)
  *   4. hw's, shipped beside the engine
+ *   5. compiled into the binary (hw_strings_data.h), so a bare retail
+ *      install needs nothing copied anywhere
  * Never data1's (path_id 1) or portals'.  Loaded on the hunk like
- * Host_LoadStrings.  Returns false, with the table empty, if none was found.
+ * Host_LoadStrings.  Only a table with no lines can fail it now.
  * GitHub #214. */
 qboolean Host_LoadHWStrings (void)
 {
@@ -149,8 +152,24 @@ qboolean Host_LoadHWStrings (void)
 		q_snprintf (path, sizeof(path), "%s/hw/strings.txt", bundle);
 		data = (char *)FS_LoadHunkFileFromOSPath (path);
 	}
+	if (data && Host_ParseStrings (data, true))
+		return true;
 
-	if (!data || !Host_ParseStrings (data, true))
+	/* 5. compiled in -- also when a file above was found but empty.  A
+	 *    legacy install (retail data1 and hw/pak4.pak, nothing else) must
+	 *    work with no manual install step, on the client and on hwsv, so
+	 *    the tables ship inside the binary.  Copied to the hunk because
+	 *    Host_ParseStrings rewrites in place. */
+	{
+		const char *src = q_strcasecmp (fs_gamedir_nopath, "siege") ?
+					hw_strings_hw : hw_strings_siege;
+		size_t len = strlen (src) + 1;
+
+		data = (char *)Hunk_AllocName ((int)len, "hwstrings");
+		memcpy (data, src, len);
+	}
+
+	if (!Host_ParseStrings (data, true))
 	{
 		Host_ClearStrings ();
 		return false;
