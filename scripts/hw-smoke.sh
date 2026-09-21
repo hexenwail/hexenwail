@@ -524,7 +524,9 @@ else
 		# skins/ directory, so every client requests base.pcx whatever is
 		# mounted.  Any other download is an hw asset it failed to find.
 		# Captured, not "grep -qv": ugrep, grep on some boxes, gets -qv wrong.
-		if [ -n "$(grep -E '^Downloading ' "$ELOG" 2>/dev/null | grep -v '^Downloading skins/')" ]; then
+		# -o, not ^: a download line can follow console output that did
+		# not end in a newline, so "Downloading" need not start the line.
+		if [ -n "$(grep -oE 'Downloading [^[:space:].]+' "$ELOG" 2>/dev/null | grep -v '^Downloading skins/')" ]; then
 			fail "-game client downloaded files, so hw is not beneath the mod"
 		fi
 		absent "$ELOG" "can't find sound/misc/talk\.wav" \
