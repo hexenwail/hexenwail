@@ -86,16 +86,33 @@ Without it:
 
     SV_Error: PR_LoadProgs: couldn't load hwprogs.dat
 
-### 4. Client string table: `hw/strings.txt` (client only)
+### 4. String table: `hw/strings.txt` (server and client)
 
-The client prints obituaries, pickups and "joined the game" from the
-server's indexed prints, which are line numbers into HexenWorld's
-`strings.txt`. That table is not Hexen II's (`STR_SUICIDES` is line 468; data1's
-table has 409 lines), and Siege has its own. No pak ships it. The client uses
-the server gamedir's copy if one is installed, and otherwise the copy shipped
-beside the engine (`share/hexenwail/hw/strings.txt`, from
-`gamecode/res/hw/strings.txt`). It never uses data1's or portals'. Without
-either, it says so once per map and those messages stay blank (#214).
+Obituaries, pickups and "joined the game" are indexed prints: line numbers
+into HexenWorld's `strings.txt`. That table is not Hexen II's. `STR_SUICIDES`
+is line 468, and the obituaries run to 592, while data1's table has 409
+lines and portals' 562. Siege has its own table. No pak ships one.
+
+**Server:** install it beside `hwprogs.dat`. `hwsv-bundled` ships it for
+exactly that:
+
+    nix build .#hwsv-bundled
+    install -Dm644 result/share/hexenwail/hw/strings.txt <gamedir>/hw/strings.txt
+
+hwsv loads an installed HW-family copy (the gamedir's own, or hw's under a
+mod), never data1's or portals'. Without one it warns, falls back to whatever
+`strings.txt` it finds (portals' on a mission-pack install), and the first
+obituary past that table's end stops the gamecode.
+
+**Client:** it tries these in order and needs no install step:
+1. The server gamedir's own installed copy.
+2. The copy shipped beside the engine for that gamedir
+   (`share/hexenwail/{hw,siege}/strings.txt`, from `gamecode/res/`).
+3. For a mod stacked on hw, an installed copy in hw.
+4. The shipped hw copy.
+
+Without any of them it says so once per map, and those messages stay blank
+(#214).
 
 ## Verified bringup
 

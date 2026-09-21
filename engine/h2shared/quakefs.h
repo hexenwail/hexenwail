@@ -56,6 +56,8 @@ unsigned int FS_GetPortalsPathID (void);
 	/* path_id the "portals" gamedir was assigned, or 0 if portals was never
 	 * added.  data1's id is the constant 1U, but portals' depends on what
 	 * else is on the path, so it has to be read rather than assumed.  */
+unsigned int FS_GetGamedirPathID (void);
+	/* path_id of the gamedir added last (the one fs_gamedir names). */
 
 extern	struct cvar_s	registered;
 extern	struct cvar_s	oem;

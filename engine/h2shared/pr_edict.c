@@ -2738,8 +2738,8 @@ static const char *PR_FindBundleDir (void)
 	return NULL;
 }
 
-/* Public face of PR_FindBundleDir for data other than progs: the HexenWorld
- * client's strings.txt (cl_hw.c) has no retail source either. */
+/* Public face of PR_FindBundleDir for data other than progs: HexenWorld's
+ * strings.txt (host_string.c) has no retail source either. */
 const char *PR_BundleDir (void)
 {
 	return PR_FindBundleDir ();
@@ -2852,6 +2852,16 @@ static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t out
 	return (Sys_FileType(out) == FS_ENT_FILE);
 }
 #endif	/* !H2W */
+
+#if defined(H2W)
+/* hwsv has no bundled-gamecode lookup: it reads hwprogs.dat and strings.txt
+ * from the game directory, where hwsv-bundled's files are installed by hand
+ * (engine/hexenworld/README.md). */
+const char *PR_BundleDir (void)
+{
+	return NULL;
+}
+#endif
 
 /*
 ===============

@@ -472,45 +472,16 @@ static qboolean HWCL_ValidProtocol (int protocol)
 		protocol == HW_PROTOCOL_VERSION_HEXENWAIL_1;
 }
 
-/* HexenWorld's strings.txt: indexed prints (obituaries, pickups, "joined the
- * game"), plaques.  Its indices are not Hexen II's -- STR_SUICIDES is 468,
- * and data1's table has 409 lines -- and Siege's differs again, so the table
- * must come from the server's gamedir, never from data1 or portals.  No pak
- * ships one; a retail install usually has none either, so the copy shipped
- * beside the engine (gamecode/res/<gamedir>) is the fallback.  Loaded per map
- * on the hunk, as the Hexen II path does, because CL_ClearState frees it.
- * GitHub #214. */
+/* HexenWorld's strings.txt for indexed prints (obituaries, pickups, "joined
+ * the game") and plaques.  Host_LoadHWStrings picks the table, never data1's
+ * or portals'.  Per map on the hunk, as the Hexen II path loads its own,
+ * because CL_ClearState frees it.  GitHub #214. */
 static void HWCL_LoadStrings (void)
 {
-	char		path[MAX_OSPATH];
-	const char	*bundle;
-	unsigned int	path_id = 0;
-	char		*data = NULL;
-
-	if (FS_FileExists ("strings.txt", &path_id) &&
-	    path_id != 1U && path_id != FS_GetPortalsPathID ())
-		data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
-
-	if (!data && (bundle = PR_BundleDir ()) != NULL)
-	{
-		q_snprintf (path, sizeof(path), "%s/%s/strings.txt", bundle,
-				fs_gamedir_nopath);
-		data = (char *)FS_LoadHunkFileFromOSPath (path);
-		/* A mod mounted over hw speaks hw's table unless it brings its own. */
-		if (!data && q_strcasecmp (fs_gamedir_nopath, "hw") != 0)
-		{
-			q_snprintf (path, sizeof(path), "%s/hw/strings.txt", bundle);
-			data = (char *)FS_LoadHunkFileFromOSPath (path);
-		}
-	}
-
-	if (!data || !Host_ParseStrings (data, true))
-	{
-		Host_ClearStrings ();
+	if (!Host_LoadHWStrings ())
 		Con_Printf ("HexenWorld: no strings.txt for %s; game messages "
 				"(obituaries, pickups) will not be shown\n",
 				fs_gamedir_nopath);
-	}
 }
 
 /* Returns false when the world model (index 1) did not load. */

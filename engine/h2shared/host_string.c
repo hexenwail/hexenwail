@@ -108,6 +108,56 @@ void Host_LoadStrings (void)
 		Host_Error ("%s: no string lines found", __thisfunc__);
 }
 
+/* HexenWorld's strings.txt, for the integrated client and hwsv alike.  Its
+ * indices are not Hexen II's -- STR_SUICIDES is 468 and the obituaries run
+ * to 592, while data1's table has 409 lines and portals' 562 -- and Siege's
+ * differs again (lines 402-404, 432, and five more).  No pak ships one and a
+ * retail install usually has none, so a plain FS lookup lands on data1's or
+ * portals' table: wrong text on the client, and on the server PF_print_indexed
+ * PR_RunErrors for every index past the end.  Tiers, most specific first:
+ *   1. installed in the current gamedir (siege, hw, or a mod over hw)
+ *   2. shipped beside the engine for that gamedir (PR_BundleDir; NULL in
+ *      hwsv, which reads only the game directory)
+ *   3. installed in a HexenWorld layer below it (hw under a mod)
+ *   4. hw's, shipped beside the engine
+ * Never data1's (path_id 1) or portals'.  Loaded on the hunk like
+ * Host_LoadStrings.  Returns false, with the table empty, if none was found.
+ * GitHub #214. */
+qboolean Host_LoadHWStrings (void)
+{
+	char		path[MAX_OSPATH];
+	const char	*bundle = PR_BundleDir ();
+	unsigned int	path_id = 0;
+	qboolean	hw_family;
+	char		*data = NULL;
+
+	hw_family = FS_FileExists ("strings.txt", &path_id) &&
+		    path_id != 1U && path_id != FS_GetPortalsPathID ();
+
+	if (hw_family && path_id == FS_GetGamedirPathID ())
+		data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
+	if (!data && bundle)
+	{
+		q_snprintf (path, sizeof(path), "%s/%s/strings.txt", bundle,
+				fs_gamedir_nopath);
+		data = (char *)FS_LoadHunkFileFromOSPath (path);
+	}
+	if (!data && hw_family)
+		data = (char *)FS_LoadHunkFile ("strings.txt", NULL);
+	if (!data && bundle)
+	{
+		q_snprintf (path, sizeof(path), "%s/hw/strings.txt", bundle);
+		data = (char *)FS_LoadHunkFileFromOSPath (path);
+	}
+
+	if (!data || !Host_ParseStrings (data, true))
+	{
+		Host_ClearStrings ();
+		return false;
+	}
+	return true;
+}
+
 const char *Host_GetString (int idx)
 {
 	return &host_strings[host_string_index[idx]];

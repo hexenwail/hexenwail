@@ -300,8 +300,9 @@
           #
           # Layout matches the release tree's: bin/glhexen2 with the gamecode
           # at ../share/hexenwail, which is PR_FindBundleDir()'s layer 2.
-          # hw/ and siege/ are withheld here for the same reason as in the
-          # release derivation -- see the note there.
+          # hw/ and siege/ progs are withheld here for the same reason as in
+          # the release derivation -- see the note there.  Their strings.txt
+          # tables ship: client text data, not bytecode (#214).
           nixos-bundled =
             let
               nixosPkg = self.packages.${system}.nixos;
@@ -383,6 +384,13 @@
               install -Dm644 \
                 ${gamecodePkg}/share/hexenwail/hw/hwprogs.dat \
                 -t $out/share/hexenwail/hw
+              # The server indexes strings.txt too (PF_print_indexed), and
+              # without HW's table it finds data1's or portals' and stops the
+              # gamecode on the first obituary past their end (#214).
+              install -Dm644 ${gamecodePkg}/share/hexenwail/hw/strings.txt \
+                -t $out/share/hexenwail/hw
+              install -Dm644 ${gamecodePkg}/share/hexenwail/siege/strings.txt \
+                -t $out/share/hexenwail/siege
             '';
 
           default = self.packages.${system}.nixos-bundled;
@@ -1270,7 +1278,8 @@
             # active a shipped data1/progs.dat is never read -- shipping only
             # h2 would miss every Portals player.
             #
-            # hw/ and siege/ are built (they gate compile errors) but withheld:
+            # hw/ and siege/ progs are built (they gate compile errors) but
+            # withheld -- only their strings.txt tables ship, below (#214):
             # no retail HexenWorld bytecode exists to compare them against and
             # this fork builds no HexenWorld engine.  Deferred to uhexen2-nr9l.
             # Named one by one rather than copying the tree so that stays true
@@ -1443,7 +1452,8 @@ EOF
             # different engine.  (It is NOT what -vanillaprogs falls back to --
             # that switch declines the bundle and takes the player's own
             # install's gamecode.)  ~2.9 MB for the one platform dir.
-            # hw/ and siege/ are withheld here for the same reason as above.
+            # hw/ and siege/ progs are withheld here for the same reason as
+            # above; their strings.txt tables ship (#214).
             install -Dm644 \
               ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs.dat \
               ${self.packages.${system}.gamecode}/share/hexenwail/data1/progs2.dat \

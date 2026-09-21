@@ -140,6 +140,12 @@ void PR_Init (void);
 void PR_ExecuteProgram (func_t fnum, const char *funcname);
 void PR_LoadProgs (void);
 
+/* Directory of the data shipped beside the engine (<exedir>/gamecode,
+ * <exedir>/../share/hexenwail, ...), or NULL.  Per-gamedir subdirectories.
+ * Every build, hwsv included: host_string.c reads HexenWorld's strings.txt
+ * from it. */
+const char *PR_BundleDir (void);
+
 #if !defined(H2W)
 /* Gamecode SOURCE selection -- which file, never whose code.  sv_gamecode
  * holds one of three states: the install's own gamedir (0), the copy bundled
@@ -153,9 +159,6 @@ void	 PR_LatchGamecode (void);
 qboolean PR_GamecodeIsUpdated (void);	/* state 1: substitute the bundle? */
 qboolean PR_GamecodeIsPakOnly (void);	/* state 2: skip the loose file? */
 qboolean PR_GamecodeAvailable (void);	/* is there a bundle to switch to? */
-/* Directory of the data shipped beside the engine (<exedir>/gamecode,
- * <exedir>/../share/hexenwail, ...), or NULL.  Per-gamedir subdirectories. */
-const char *PR_BundleDir (void);
 
 /* Menu-facing pair.  The first says whether state 2 is worth offering at all:
  * where no loose file shadows a pak copy of the base game's gamecode it
