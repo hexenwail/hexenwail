@@ -196,6 +196,9 @@ jobs:
       - name: Rust info_str (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-info-str.sh
 
+      - name: Rust strlcpy (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-strlcpy.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.

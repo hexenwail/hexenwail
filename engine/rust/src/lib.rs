@@ -39,6 +39,9 @@ pub mod msg_io;
 #[cfg(feature = "info_str")]
 pub mod info_str;
 
+#[cfg(feature = "strlcpy")]
+pub mod strlcpy;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]
