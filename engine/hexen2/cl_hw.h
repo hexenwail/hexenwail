@@ -17,6 +17,9 @@ extern cvar_t hw_spectator;
 
 void HWCL_Init (void);
 void HWCL_SetInfo (const char *key, const char *value);
+/* Send a console command line to the HexenWorld server.  False when not
+ * connected (still handshaking, or no HexenWorld session at all). */
+qboolean HWCL_ForwardCommand (const char *text);
 qboolean HWCL_Connect (const char *host);
 void HWCL_SendCmd (const usercmd_t *cmd, int buttons, int impulse);
 void HWCL_ApplyState (void);

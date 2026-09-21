@@ -20,6 +20,27 @@
  */
 
 #include "quakedef.h"
+#include "cl_hw.h"
+
+#if defined(H2W_INTEGRATED)
+/* A HexenWorld session carries commands on its own netchan; cls.message is
+ * never sent while it owns the connection.  Returns true when the command
+ * was handled here (sent, or refused because the handshake is not done). */
+static qboolean CL_ForwardToHexenWorld (const char *cmd, const char *args)
+{
+	char	line[1024];
+
+	if (!HWCL_Active ())
+		return false;
+	if (cmd && args && *args)
+		q_snprintf (line, sizeof(line), "%s %s", cmd, args);
+	else
+		q_strlcpy (line, cmd ? cmd : args, sizeof(line));
+	if (!HWCL_ForwardCommand (line))
+		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
+	return true;
+}
+#endif
 
 /*
 ===================
@@ -30,6 +51,10 @@ Sends the entire command line over to the server
 */
 void Cmd_ForwardToServer (void)
 {
+#if defined(H2W_INTEGRATED)
+	if (CL_ForwardToHexenWorld (Cmd_Argv(0), Cmd_Argc() > 1 ? Cmd_Args() : NULL))
+		return;
+#endif
 	if (cls.state != ca_connected)
 	{
 		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));
@@ -53,6 +78,13 @@ void Cmd_ForwardToServer (void)
 // is that it doesn't forward the first argument, which is "cmd"
 void Cmd_ForwardToServer_f (void)
 {
+#if defined(H2W_INTEGRATED)
+	/* "cmd" alone sends nothing, as on the Hexen II path below. */
+	if (HWCL_Active () && Cmd_Argc() < 2)
+		return;
+	if (CL_ForwardToHexenWorld (NULL, Cmd_Args()))
+		return;
+#endif
 	if (cls.state != ca_connected)
 	{
 		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv(0));

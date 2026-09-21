@@ -2492,6 +2492,19 @@ void HWCL_SetInfo (const char *key, const char *value)
 	HWCL_StringCmd (va ("setinfo \"%s\" \"%s\"", key, clean));
 }
 
+/* Cmd_ForwardToServer's HexenWorld arm: the command line goes out as a
+ * clc_stringcmd on the reliable netchan stream, which is what hwsv's
+ * SV_ExecuteClientMessage reads "say", "kill" and the rest from.  The
+ * Hexen II path writes cls.message instead, and nothing sends that while
+ * HexenWorld owns the connection.  GitHub #212. */
+qboolean HWCL_ForwardCommand (const char *text)
+{
+	if (hwcl_state != hwcl_connected)
+		return false;
+	HWCL_StringCmd (text);
+	return true;
+}
+
 void HWCL_Init (void)
 {
 	Cvar_RegisterVariable (&hw_spectator);
