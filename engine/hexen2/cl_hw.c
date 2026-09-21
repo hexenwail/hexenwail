@@ -118,6 +118,7 @@ enum
 #define HW_SVC_DAMAGE 19
 #define HW_SVC_SPAWNSTATIC 20
 #define HW_SVC_SPAWNBASELINE 22
+#define HW_SVC_TEMP_ENTITY 23
 #define HW_SVC_CENTERPRINT 26
 #define HW_SVC_KILLEDMONSTER 27
 #define HW_SVC_FOUNDSECRET 28
@@ -1144,6 +1145,7 @@ static void HWCL_ParseRainEffect (void)
 }
 
 #include "cl_hw_projectiles.inc"
+#include "cl_hw_tent.inc"
 
 static qmodel_t *HWCL_PrecacheModelNamed (const char *name)
 {
@@ -2235,6 +2237,10 @@ static void HWCL_ParseServerMessage (void)
 			break;
 		case HW_SVC_RAINEFFECT:
 			HWCL_ParseRainEffect ();
+			break;
+		case HW_SVC_TEMP_ENTITY:
+			if (!HWCL_ParseTempEntity ())
+				return;
 			break;
 		case HW_SVC_PACKMISSILE:
 			HWCL_ParsePackedMissiles ();

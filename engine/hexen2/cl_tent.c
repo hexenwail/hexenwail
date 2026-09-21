@@ -163,7 +163,14 @@ void CL_ClearTEnts(void)
 
 void CL_ParseTEnt(void)
 {
-	int type;
+	CL_ParseTEntType (MSG_ReadByte());
+}
+
+/* The body of CL_ParseTEnt for a type byte the caller has already read.
+ * The HexenWorld parser (cl_hw_tent.inc) hands its effects that share this
+ * numbering and payload straight to it rather than drawing them twice. */
+void CL_ParseTEntType(int type)
+{
 	vec3_t pos;
 #ifdef QUAKE2
 	vec3_t endpos;
@@ -172,7 +179,6 @@ void CL_ParseTEnt(void)
 	int rnd;
 //	int colorStart, colorLength;
 
-	type = MSG_ReadByte();
 	switch (type)
 	{
 	case TE_WIZSPIKE:	// spike hitting wall
