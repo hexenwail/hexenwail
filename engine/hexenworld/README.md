@@ -32,7 +32,9 @@ opens a connect dialog for a new address, and reaches player setup, where the
 Hostname row becomes a Spectator toggle (`hw_spectator`, read at connect, not
 archived because it doubles as the spectator password). There is no
 master-server browser yet. While connected, `name`, `color` and `playerclass`
-reach the server as `setinfo`.
+reach the server as `setinfo`. Other server commands (`say`, `say_team`,
+`kill`, `cmd <anything>`) go out as HexenWorld string commands.
+`scripts/hw-cmd-check.sh` checks that on a live server (#212).
 
 The client completes the connection handshake through spawn and begin for
 protocols 24/25/26/100. Gameplay state, assets and presentation messages are
