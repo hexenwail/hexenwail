@@ -16,6 +16,7 @@ hashindex = []
 mathlib = []
 sizebuf = []
 crc = []
+link_ops = []
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

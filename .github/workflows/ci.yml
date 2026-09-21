@@ -177,6 +177,9 @@ jobs:
       - name: Rust crc (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-crc.sh
 
+      - name: Rust link_ops (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-link-ops.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.
