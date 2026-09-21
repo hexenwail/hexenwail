@@ -19,6 +19,9 @@ pub mod mathlib;
 #[cfg(feature = "sizebuf")]
 pub mod sizebuf;
 
+#[cfg(feature = "crc")]
+pub mod crc;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

@@ -805,6 +805,7 @@
               "-DUSE_RUST_HASHINDEX=OFF"
               "-DUSE_MATHLIB_RS=OFF"
               "-DUSE_SIZEBUF_RS=OFF"
+              "-DUSE_CRC_RS=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -955,6 +956,7 @@
               "-DUSE_RUST_HASHINDEX=OFF"
               "-DUSE_MATHLIB_RS=OFF"
               "-DUSE_SIZEBUF_RS=OFF"
+              "-DUSE_CRC_RS=OFF"
             ];
 
             # Only the server target; the client .exe is .#win64's job.
@@ -1037,6 +1039,7 @@
                 -DUSE_RUST_HASHINDEX=OFF \
                 -DUSE_MATHLIB_RS=OFF \
                 -DUSE_SIZEBUF_RS=OFF \
+                -DUSE_CRC_RS=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine
