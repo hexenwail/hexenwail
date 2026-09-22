@@ -18,7 +18,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// Comparisons actually made.  The gate floors this rather than pinning it, so
+// that a regression which empties an enumeration cannot exit 0 and still read
+// as green.
+static unsigned long cases;
+
 #define CHECK(cond, ...) do { \
+	++cases; \
 	if (!(cond)) { \
 		fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
 		fprintf(stderr, __VA_ARGS__); \
@@ -341,6 +347,6 @@ int main(void)
 {
 	if (abi_checks() || init_checks() || write_checks() || print_checks() || fatal_checks())
 		return 1;
-	puts("sizebuf differential harness: PASS");
+	printf("sizebuf differential harness: PASS (%lu cases)\n", cases);
 	return 0;
 }

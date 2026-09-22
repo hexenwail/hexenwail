@@ -21,7 +21,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Comparisons actually made.  The gate floors this rather than pinning it, so
+// that a regression which empties an enumeration cannot exit 0 and still read
+// as green.
+static unsigned long cases;
+
 #define CHECK(cond, ...) do { \
+	++cases; \
 	if (!(cond)) { \
 		fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
 		fprintf(stderr, __VA_ARGS__); \
@@ -576,6 +582,6 @@ int main(void)
 	if (abi_checks() || clear_checks() || single_checks() || multi_checks()
 		|| unlink_relink_checks() || duplicate_absent_checks() || alias_checks())
 		return 1;
-	puts("link_ops differential harness: PASS");
+	printf("link_ops differential harness: PASS (%lu cases)\n", cases);
 	return 0;
 }
