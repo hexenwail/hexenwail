@@ -2,6 +2,10 @@
 //
 // The `extern "C"` boundary: exported functions that replace mathlib.c.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 2005-2012  O.Sezer <sezero@users.sourceforge.net>
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // # Why the exported names are not prefixed
 //
 // The engine calls these functions directly and `engine/h2shared/mathlib.h`

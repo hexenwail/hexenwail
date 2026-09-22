@@ -6,6 +6,11 @@
 // can link the one subsystem it compares against its C original.
 //
 // Copyright (C) 2026 Hexenwail contributors.
+//
+// Every module translated from a C file carries that file's copyright lines,
+// and for a non-GPL original (the ISC strlcpy/strlcat, which are distributed
+// here under the GPL) its full permission notice, in its own header.  scripts/check-rust-notices.sh enforces it and
+// holds the map from each module to its C original; a new port is added there.
 
 #![no_std]
 

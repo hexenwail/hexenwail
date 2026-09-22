@@ -2,6 +2,9 @@
 //
 // The `extern "C"` boundary: five functions that replace hashindex.c.
 //
+// Copyright (C) 1993-2012 id Software LLC, a ZeniMax Media company.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // # Why the exported names are not prefixed
 //
 // 61 call sites across seven files call these functions directly, and

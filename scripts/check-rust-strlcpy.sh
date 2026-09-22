@@ -11,7 +11,7 @@
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
-# SPDX-License-Identifier: ISC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 set -euo pipefail
 

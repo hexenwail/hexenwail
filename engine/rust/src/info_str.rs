@@ -2,6 +2,9 @@
 //
 // Rust replacement for engine/hexenworld/shared/info_str.c.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // Info strings are the backslash-separated key/value lists HexenWorld carries
 // as `svs.info` (serverinfo), `localinfo` and each client's `userinfo`.  Three
 // properties of the C original shape this port.

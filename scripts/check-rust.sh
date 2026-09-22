@@ -17,6 +17,8 @@
 #      original, symbol and stray-object checks on the shared build.
 #   5. the Rust/C struct layouts on the host (scripts/check-rust-abi.sh; the
 #      PWA job runs the same check for wasm32).
+#   6. every port carries its C original's copyright notices
+#      (scripts/check-rust-notices.sh), with that gate's own self-test.
 #
 # Every check runs even after one fails, so a red run lists all of them.  The
 # one exception is a failed shared build: the per-port gates all inspect it,
@@ -111,9 +113,19 @@ if ! WORKDIR="$work/abi" bash "$root/scripts/check-rust-abi.sh"; then
 fi
 
 echo
+echo "== 6. upstream copyright notices =="
+if ! bash "$root/scripts/check-rust-notices.sh"; then
+	failed+=(notices)
+fi
+if ! bash "$root/scripts/check-rust-notices.sh" --self-test; then
+	failed+=(notices-self-test)
+fi
+
+echo
 if [ "${#failed[@]}" -ne 0 ]; then
 	echo "FAIL: ${failed[*]}" >&2
 	exit 1
 fi
 echo "PASS: every Rust gate -- toolchain pinned, the old switches rejected, 11"
-echo "      ports agree with their C originals and link once, layouts match."
+echo "      ports agree with their C originals and link once, layouts match,"
+echo "      and each port carries its original's copyright notices."

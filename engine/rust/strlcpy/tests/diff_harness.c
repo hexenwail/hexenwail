@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Differential harness for common/strlcpy.c and the Rust strlcpy module.  The
 // C original is compiled as c_q_strlcpy, so both implementations receive the

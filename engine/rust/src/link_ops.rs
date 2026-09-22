@@ -2,6 +2,9 @@
 //
 // Rust replacement for engine/h2shared/link_ops.c.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // Four operations on an intrusive doubly-linked list.  The list is *entirely*
 // caller-owned: the link_t lives inside an edict or an area node, the head is
 // a sentinel whose own link_t is the list, and the C side keeps raw pointers
