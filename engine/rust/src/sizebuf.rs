@@ -2,6 +2,9 @@
 //
 // Rust replacement for engine/h2shared/sizebuf.c.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // The sizebuf is deliberately still caller-owned.  C allocates the structure
 // (often as a global) and Rust only mutates the fields and backing storage
 // supplied through the existing ABI.

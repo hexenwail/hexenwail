@@ -2,6 +2,9 @@
 //
 // Rust replacement for common/crc.c.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // 16-bit, non-reflected CCITT CRC (polynomial 0x1021, init 0xffff, final xor
 // 0x0000), the XMODEM variant.  The progs.dat CRC (pr_edict.c), pak directory
 // CRCs that identify retail paks (quakefs.c) and model checksums all come

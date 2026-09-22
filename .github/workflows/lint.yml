@@ -42,7 +42,7 @@ jobs:
             scripts/wasm-validate-artifact.sh scripts/webgl-smoke-test.sh \
             scripts/demo-playback-smoke.sh scripts/wasm-boot-smoke.sh \
             scripts/check-rust.sh scripts/check-rust-abi.sh \
-            scripts/lib/rust-gate.sh
+            scripts/check-rust-notices.sh scripts/lib/rust-gate.sh
 
       # The metainfo is what GNOME Software and KDE Discover read, and Flathub
       # rejects a submission whose metainfo does not validate.  Nothing checked

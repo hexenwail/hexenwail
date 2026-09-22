@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Differential harness for common/strlcat.c and the Rust strlcat module.  The
 // C original is compiled as c_q_strlcat, so both implementations receive the

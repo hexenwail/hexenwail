@@ -2,6 +2,9 @@
 //
 // Rust replacement for engine/hexenworld/shared/huffman.c.
 //
+// Copyright (C) 1997-1998  Raven Software Corp.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // HexenWorld compresses every packet it sends through this codec: HuffEncode
 // on the way out from NET_SendPacket, HuffDecode on the way in, ahead of
 // net_message being handed to the message reader.  Two properties of the C

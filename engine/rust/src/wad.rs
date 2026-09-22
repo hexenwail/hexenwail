@@ -2,6 +2,9 @@
 //
 // Rust replacement for engine/h2shared/wad.c.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // wad.c loads gfx.wad -- the tinyfont, conchars, backtile and menu pictures the
 // client and the menu draw -- and then edits the *mapped bytes* rather than
 // copying them.  Three properties of the C original shape this port.

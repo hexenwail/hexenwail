@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: ISC
+# SPDX-License-Identifier: GPL-2.0-or-later
 # Build strlcat.c with a renamed export and compare it with the consolidated
 # Rust engine staticlib's strlcat feature.
 set -euo pipefail

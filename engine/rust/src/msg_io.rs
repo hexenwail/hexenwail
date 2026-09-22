@@ -3,6 +3,10 @@
 // Rust replacement for engine/h2shared/msg_io.c -- the little-endian message
 // reader/writer that both Hexen II and HexenWorld speak through.
 //
+// Copyright (C) 1996-1997  Id Software, Inc.
+// Copyright (C) 1997-1998  Raven Software Corp.
+// Copyright (C) 2026 Hexenwail contributors.
+//
 // Three properties of the C original shape this port and are not obvious from
 // the file itself.
 //
