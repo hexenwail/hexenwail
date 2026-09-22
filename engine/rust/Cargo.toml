@@ -21,6 +21,7 @@ msg_io = []
 info_str = []
 strlcpy = []
 strlcat = []
+huffman = []
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

@@ -45,6 +45,14 @@ pub mod strlcpy;
 #[cfg(feature = "strlcat")]
 pub mod strlcat;
 
+// huffman is the second port of a file in hexenworld/shared, and the first
+// whose C original is compiled into two targets with a different allocation
+// strategy per target -- hwsv allocates the tree from the hunk, the
+// integrated client must not.  The archive is built once and linked into
+// both, so this module uses malloc for both; see the module comment.
+#[cfg(feature = "huffman")]
+pub mod huffman;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

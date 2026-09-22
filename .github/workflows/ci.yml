@@ -207,6 +207,15 @@ jobs:
       - name: Rust strlcat (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-strlcat.sh
 
+      # huffman is the first port whose C original is compiled for two targets
+      # with a different allocation strategy each (hwsv's hunk versus the
+      # integrated client's malloc), and the first whose decode path is fed
+      # attacker-controlled bytes.  The harness therefore compiles the C both
+      # ways and requires both to agree before either is compared with Rust,
+      # and pins the bounded bit read on malformed input with a guard page.
+      - name: Rust huffman (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-huffman.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.
