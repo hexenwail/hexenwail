@@ -196,6 +196,9 @@ jobs:
       - name: Rust info_str (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-info-str.sh
 
+      - name: Rust strlcpy (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-strlcpy.sh
+
       # huffman is the first port whose C original is compiled for two targets
       # with a different allocation strategy each (hwsv's hunk versus the
       # integrated client's malloc), and the first whose decode path is fed

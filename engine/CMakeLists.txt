@@ -92,6 +92,13 @@ option(USE_MSG_IO_RS "Link the Rust msg_io implementation instead of msg_io.c" O
 # independently switchable while the hwsv-only removal is exercised.
 option(USE_INFO_STR_RS "Link the Rust info_str implementation instead of info_str.c" ON)
 
+# Link the Rust port of the bounded BSD string copy helper in place of
+# common/strlcpy.c.  It has a tiny ABI (two pointers and size_t), no global
+# state, and a complete deterministic C-vs-Rust harness, so it is kept
+# independently switchable while callers in both Hexen II and HexenWorld use
+# it.
+option(USE_STRLCPY_RS "Link the Rust q_strlcpy implementation instead of strlcpy.c" ON)
+
 # Link the Rust port of the HexenWorld Huffman codec in place of
 # engine/hexenworld/shared/huffman.c.  The C original is compiled into two
 # targets with a *different allocation strategy per target*: hwsv builds its
@@ -986,6 +993,14 @@ else()
     message(STATUS "info_str: C original (USE_INFO_STR_RS=OFF)")
 endif()
 
+if(USE_STRLCPY_RS)
+    list(APPEND RUST_ENGINE_FEATURES strlcpy)
+    list(REMOVE_ITEM COMMON_SOURCES ${UHEXEN2_SHARED}/strlcpy.c)
+    message(STATUS "strlcpy: Rust shim (USE_STRLCPY_RS=ON)")
+else()
+    message(STATUS "strlcpy: C original (USE_STRLCPY_RS=OFF)")
+endif()
+
 # huffman.c is likewise not in COMMON_SOURCES.  It is compiled into the
 # integrated client through HW_CLIENT_NET_SOURCES (which is built below) and
 # into hwsv through HWSV_SOURCES; h2ded never compiles it at all.
@@ -1002,7 +1017,7 @@ if(RUST_ENGINE_FEATURES)
             "The Rust engine shim is not wired up for Emscripten. Disable "
             "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, "
             "USE_CRC_RS, USE_LINK_OPS_RS, USE_MSG_IO_RS, "
-            "USE_INFO_STR_RS, and USE_HUFFMAN_RS for the WASM "
+            "USE_INFO_STR_RS, USE_STRLCPY_RS, and USE_HUFFMAN_RS for the WASM "
             "build.")
     endif()
 
@@ -1032,6 +1047,7 @@ if(RUST_ENGINE_FEATURES)
                 ${RUST_ENGINE_RS_DIR}/src/link_ops.rs
                 ${RUST_ENGINE_RS_DIR}/src/msg_io.rs
                 ${RUST_ENGINE_RS_DIR}/src/info_str.rs
+                ${RUST_ENGINE_RS_DIR}/src/strlcpy.rs
                 ${RUST_ENGINE_RS_DIR}/src/huffman.rs
                 ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
                 ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
@@ -1407,6 +1423,9 @@ else()
     endif()
     if(USE_INFO_STR_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${HW_TOP}/shared/info_str.c)
+    endif()
+    if(USE_STRLCPY_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/strlcpy.c)
     endif()
     if(USE_HUFFMAN_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${HW_TOP}/shared/huffman.c)

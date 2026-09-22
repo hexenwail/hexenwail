@@ -39,6 +39,9 @@ pub mod msg_io;
 #[cfg(feature = "info_str")]
 pub mod info_str;
 
+#[cfg(feature = "strlcpy")]
+pub mod strlcpy;
+
 // huffman is the second port of a file in hexenworld/shared, and the first
 // whose C original is compiled into two targets with a different allocation
 // strategy per target -- hwsv allocates the tree from the hunk, the

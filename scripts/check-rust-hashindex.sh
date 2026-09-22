@@ -152,7 +152,7 @@ if [ "$run_engine" -eq 1 ]; then
 	OFF_BIN="$work/build-off/bin/glhexen2" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
-		"$crate/tests/run_engine_smoke.sh"
+		"$crate/tests/run_engine_smoke.sh" hashindex
 
 	echo
 	echo "PASS: Rust hashindex -- differential harness green; all three targets"

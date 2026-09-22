@@ -19,6 +19,7 @@ crc = []
 link_ops = []
 msg_io = []
 info_str = []
+strlcpy = []
 huffman = []
 
 [profile.release]
