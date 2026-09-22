@@ -26,10 +26,14 @@
 // loop is limited, by tbits = inlen*8 - *in, and the header byte is
 // attacker-controlled because net_udp.c decodes whatever arrived on the UDP
 // socket.  With `*in` smaller than the real padding count the decoder is left
-// mid-code at the end of the payload and reads on into whatever follows the
-// caller's buffer.  The Rust module stops at the end of the buffer instead.
-// The C's behaviour there is undefined, so there is no byte-for-byte answer to
-// compare against, and this harness does not pretend otherwise:
+// mid-code at the end of the payload and reads on past the `inlen` bytes the
+// caller declared.  The Rust module stops there instead.  Nothing portable can
+// be reproduced in those bytes: the one production caller receives into
+// huffbuff[65536] with recvfrom capped short of that, so what follows a short
+// packet is the stale tail of an earlier one -- the same buffer is the send
+// buffer too -- and the C's output there depends on prior traffic.  So this
+// harness makes the overread itself observable instead, and does not pretend
+// to have a byte-for-byte answer for it:
 //
 //   * every decode runs in a forked child with the packet placed so that its
 //     last byte abuts an unmapped page.  A read past the end is a SIGSEGV,
@@ -391,7 +395,7 @@ static void decode_case(const char *what, const unsigned char *pkt, int pktlen, 
 	checks++;
 
 	if (r[IMPL_RUST].sig != 0) {
-		fail("%s: the Rust read past the end of the caller's buffer "
+		fail("%s: the Rust read past the buffer it was given "
 			"(killed by signal %d) with pktlen %d, header 0x%02x, "
 			"maxlen %d", what, r[IMPL_RUST].sig, pktlen,
 			pktlen > 0 ? pkt[0] : 0, maxlen);
@@ -403,7 +407,7 @@ static void decode_case(const char *what, const unsigned char *pkt, int pktlen, 
 	}
 
 	if (r[IMPL_HWSV].sig != 0 && r[IMPL_CLIENT].sig != 0) {
-		// The bounded case: the C reads past the end of the buffer, which is
+		// The bounded case: the C read past its declared buffer, which is
 		// exactly what the Rust refuses to do.  No in-bounds C answer exists
 		// to compare with, so the check is the one described in the header --
 		// the Rust stopped, and what it produced is a strict prefix of the
@@ -422,7 +426,7 @@ static void decode_case(const char *what, const unsigned char *pkt, int pktlen, 
 			fail("%s: the bounded Rust decode is not a prefix of the C's "
 				"decode with a defined tail", what);
 		} else if (r[IMPL_RUST].outlen <= maxlen && r[IMPL_RUST].outlen >= tail.outlen) {
-			fail("%s: the C read on past the buffer but stopped at the "
+			fail("%s: the C read on past its declared buffer but stopped at the "
 				"same place as the bounded Rust decode (%d/%d bytes)",
 				what, r[IMPL_RUST].outlen, tail.outlen);
 		}
