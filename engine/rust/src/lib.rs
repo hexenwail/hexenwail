@@ -53,6 +53,14 @@ pub mod strlcat;
 #[cfg(feature = "huffman")]
 pub mod huffman;
 
+// wad is the only port whose C original is compiled into a single target:
+// wad.c is in COMMON_SOURCES and is removed again for h2ded, and HWSV_SOURCES
+// never lists it.  It also owns three exported globals (wad_numlumps,
+// wad_lumps, wad_base) and edits the mapped wad in place; see the module
+// comment.
+#[cfg(feature = "wad")]
+pub mod wad;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

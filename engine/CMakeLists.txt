@@ -121,6 +121,16 @@ option(USE_STRLCAT_RS "Link the Rust q_strlcat implementation instead of strlcat
 # bounded at the end of the caller's buffer -- see engine/rust/src/huffman.rs.
 option(USE_HUFFMAN_RS "Link the Rust huffman implementation instead of huffman.c" ON)
 
+# Link the Rust port of the wad loader in place of engine/h2shared/wad.c.  The
+# only port whose C original is compiled into a single target: wad.c is in
+# COMMON_SOURCES and is removed again for h2ded ("gfx.wad lumps are
+# renderer-only data"), and HWSV_SOURCES never lists it, so glhexen2 is the only
+# binary in the tree that contains it.  The port also owns three exported
+# globals (wad_numlumps, wad_lumps, wad_base) and edits the mapped wad in place
+# -- lump names and picture headers -- so it stays independently switchable
+# while the single-target removal is exercised.
+option(USE_WAD_RS "Link the Rust wad implementation instead of wad.c" ON)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -1027,14 +1037,26 @@ else()
     message(STATUS "huffman: C original (USE_HUFFMAN_RS=OFF)")
 endif()
 
+# wad.c *is* in COMMON_SOURCES, so the removal happens here -- unlike huffman's,
+# which is repeated in the two lists that name the file.  The h2ded removal
+# below still names wad.c because it is what makes the C fallback target-clean
+# when USE_WAD_RS=OFF; a REMOVE_ITEM for a path that is already gone is a no-op.
+if(USE_WAD_RS)
+    list(APPEND RUST_ENGINE_FEATURES wad)
+    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/wad.c)
+    message(STATUS "wad: Rust shim (USE_WAD_RS=ON)")
+else()
+    message(STATUS "wad: C original (USE_WAD_RS=OFF)")
+endif()
+
 if(RUST_ENGINE_FEATURES)
     if(EMSCRIPTEN)
         message(FATAL_ERROR
             "The Rust engine shim is not wired up for Emscripten. Disable "
             "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, "
             "USE_CRC_RS, USE_LINK_OPS_RS, USE_MSG_IO_RS, "
-            "USE_INFO_STR_RS, USE_STRLCPY_RS, USE_STRLCAT_RS, and "
-            "USE_HUFFMAN_RS for the WASM "
+            "USE_INFO_STR_RS, USE_STRLCPY_RS, USE_STRLCAT_RS, "
+            "USE_HUFFMAN_RS, and USE_WAD_RS for the WASM "
             "build.")
     endif()
 
@@ -1067,6 +1089,7 @@ if(RUST_ENGINE_FEATURES)
                 ${RUST_ENGINE_RS_DIR}/src/strlcpy.rs
                 ${RUST_ENGINE_RS_DIR}/src/strlcat.rs
                 ${RUST_ENGINE_RS_DIR}/src/huffman.rs
+                ${RUST_ENGINE_RS_DIR}/src/wad.rs
                 ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
                 ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
                 ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
