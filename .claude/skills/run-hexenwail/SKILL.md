@@ -119,15 +119,35 @@ WebGL2 engine shaders, RGBA8 framebuffer, post-process, and non-black-frame smok
 and still passes.** Judge it by that final line (or the exit code), never by
 the presence of stderr noise.
 
-To build the wasm client itself, use `shell-wasm.nix` — `nix build .#wasm` is
-deliberately not the supported path, because Emscripten fetches its SDL3 port
-over the network at configure time and the nix sandbox has none:
+To build the wasm client itself, use the `wasm` dev shell (`shell-wasm.nix`
+holds its recipe) — `nix build .#wasm` is deliberately not the supported path,
+because Emscripten fetches its SDL3 port over the network at configure time and
+the nix sandbox has none.  The shell also carries the Rust toolchain with the
+`wasm32-unknown-emscripten` target: the engine's Rust archive is linked into
+the web client like every other target.
 
 ```bash
-nix develop . -f shell-wasm.nix     # then:
+nix develop .#wasm                  # then:
 ./scripts/wasm-build.sh                            # webgl2, the shipping config
 ./scripts/wasm-build.sh software engine/build-soft # 8bpp software rasterizer
 ```
+
+Then run it.  This is the one lane that executes `hexenwail.wasm` rather than
+just its shaders: headless Chrome boots the real build, with no data to
+FS_Init's data gate (what CI runs), or with a basedir into demo1.
+
+```bash
+nix shell nixpkgs#chromium nixpkgs#python3 --command \
+  ./scripts/wasm-boot-smoke.sh engine/build/bin
+nix shell nixpkgs#chromium nixpkgs#python3 --command \
+  ./scripts/wasm-boot-smoke.sh engine/build/bin \
+  "$(nix build .#demodata --no-link --print-out-paths)/share/hexenwail"
+```
+
+Success is `PASS: hexenwail.wasm boot smoke (nodata)` / `(map)`.  The map run
+prints `GL error GL_INVALID_ENUM ... detected at end of frame` under
+SwiftShader; the C-only build printed the same lines, so they are not a
+failure.
 
 ## Run: the GUI lane (screenshots)
 

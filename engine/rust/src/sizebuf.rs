@@ -13,11 +13,11 @@ use core::ffi::{c_uint, c_void};
 // This module is compiled whenever either the sizebuf or the msg_io feature is
 // on, because msg_io needs SizeBufC.  Only the struct, its layout assertions
 // and the accessors below are unconditional: the SZ_* entry points stay behind
-// the sizebuf feature so that a build with USE_MSG_IO_RS=ON and
-// USE_SIZEBUF_RS=OFF keeps the C sizebuf.c as the single definition.  The
-// consolidated crate lands in one codegen unit, so an accidental second
-// definition would be a link error in every target, not a silently preferred
-// one.
+// the sizebuf feature, so a harness that links msg_io against the C
+// sizebuf.c keeps that as the single definition.  (The engine always builds
+// both features.)  The consolidated crate lands in one codegen unit, so an
+// accidental second definition would be a link error in every target, not a
+// silently preferred one.
 #[cfg(feature = "sizebuf")]
 const PRINT_TERMONLY: c_uint = 1;
 
@@ -61,15 +61,22 @@ const fn align_up(x: usize, align: usize) -> usize {
     (x + align - 1) & !(align - 1)
 }
 
+// The offsets are derived the way a C compiler lays the struct out, so they
+// hold on every target the engine builds for: LP64 Linux, LLP64 MinGW and
+// the ILP32 wasm32-unknown-emscripten client.  The two leading ints take 8
+// bytes whatever the pointer width, so `data` sits at align_up(8, PTR_ALIGN)
+// -- 8 on both, never "PTR_ALIGN", which is only the same number on 64-bit.
+const DATA_OFFSET: usize = align_up(8, PTR_ALIGN);
+const NAME_OFFSET: usize = align_up(DATA_OFFSET + PTR_SIZE + 8, PTR_ALIGN);
+
 const _: () = {
     assert!(core::mem::offset_of!(SizeBufC, allowoverflow) == 0);
     assert!(core::mem::offset_of!(SizeBufC, overflowed) == 4);
-    assert!(core::mem::offset_of!(SizeBufC, data) == PTR_ALIGN);
-    assert!(core::mem::offset_of!(SizeBufC, maxsize) == PTR_ALIGN + PTR_SIZE);
-    assert!(core::mem::offset_of!(SizeBufC, cursize) == PTR_ALIGN + PTR_SIZE + 4);
-    assert!(core::mem::offset_of!(SizeBufC, name) == PTR_ALIGN + PTR_SIZE + 8);
-    assert!(core::mem::size_of::<SizeBufC>()
-        == align_up(PTR_ALIGN + 2 * PTR_SIZE + 8, PTR_ALIGN));
+    assert!(core::mem::offset_of!(SizeBufC, data) == DATA_OFFSET);
+    assert!(core::mem::offset_of!(SizeBufC, maxsize) == DATA_OFFSET + PTR_SIZE);
+    assert!(core::mem::offset_of!(SizeBufC, cursize) == DATA_OFFSET + PTR_SIZE + 4);
+    assert!(core::mem::offset_of!(SizeBufC, name) == NAME_OFFSET);
+    assert!(core::mem::size_of::<SizeBufC>() == align_up(NAME_OFFSET + PTR_SIZE, PTR_ALIGN));
 };
 
 // These accessors let the C differential harness check the complete ABI

@@ -5,8 +5,9 @@
 # The differential half compares q_strlcpy's return value and every byte it
 # writes with the C original over all source lengths 0..256, destination sizes
 # 0..288, and unaligned source/destination offsets.  The CMake half proves
-# Hexen II and HexenWorld select it independently and that the C fallback
-# remains buildable.
+# Hexen II and HexenWorld both link it: the engine build every gate shares
+# (scripts/lib/rust-gate.sh) has it exactly once per binary with no C object
+# left in the build.
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
@@ -16,12 +17,14 @@ set -euo pipefail
 
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -74,15 +77,13 @@ if [ "${#count}" -lt 6 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_STRLCPY_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_STRLCPY_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. exactly one q_strlcpy definition per binary =="
-archive="$work/build-on/rust/libengine_rs.a"
+archive="$engine_build/rust/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 n=$(nm "$archive" 2>/dev/null | grep -cE " T $symbol\$" || true)
 if [ "$n" -ne 1 ]; then
@@ -90,7 +91,7 @@ if [ "$n" -ne 1 ]; then
 	exit 1
 fi
 for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	n=$(nm "$path" | grep -cE " [Tt] $symbol\$" || true)
 	if [ "$n" -ne 1 ]; then
@@ -99,31 +100,12 @@ for bin in glhexen2 h2ded hwsv; do
 	fi
 	echo "  $bin: $symbol exactly once"
 done
-stray=$(find "$work/build-on" -name 'strlcpy.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'strlcpy.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray strlcpy.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray strlcpy.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
-echo
-echo "== 5. flag OFF still compiles strlcpy.c (rollback is real) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_STRLCPY_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	found=$(find "$work/build-off" -name 'strlcpy.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin did not compile strlcpy.c ($found objects)" >&2
-		exit 1
-	fi
-	n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $symbol\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: OFF $bin: $symbol has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-
 echo "PASS: Rust strlcpy -- differential harness green, the consolidated"
-echo "      archive links exactly one definition per target, and the C fallback"
-echo "      still compiles when USE_STRLCPY_RS=OFF."
+echo "      archive links exactly one definition per target, and no strlcpy.c"
+echo "      object is left in the engine build."

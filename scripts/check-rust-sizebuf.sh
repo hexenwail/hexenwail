@@ -4,8 +4,8 @@
 #
 # The differential half proves caller-owned layout, interior pointer returns,
 # allocation, exact bytes, overflow state and fatal diagnostics.  The CMake
-# half proves the consolidated engine archive selects sizebuf independently and
-# that the C fallback remains buildable.
+# half proves the engine build every gate shares (scripts/lib/rust-gate.sh)
+# links it exactly once per binary with no C object left in the build.
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
@@ -17,12 +17,14 @@ run_engine=0
 for arg in "$@"; do
 	case "$arg" in
 		--engine) run_engine=1 ;;
-		-h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -77,16 +79,14 @@ if [ "${#count}" -lt 3 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_SIZEBUF_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_SIZEBUF_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. exactly one sizebuf definition per binary =="
 for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -97,39 +97,26 @@ for bin in glhexen2 h2ded hwsv; do
 	done
 	echo "  $bin: 5/5 symbols exactly once"
 done
-stray=$(find "$work/build-on" -name 'sizebuf.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'sizebuf.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray sizebuf.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray sizebuf.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
-echo
-echo "== 5. flag OFF still compiles sizebuf.c (rollback is real) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_SIZEBUF_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	found=$(find "$work/build-off" -name 'sizebuf.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin did not compile sizebuf.c ($found objects)" >&2
-		exit 1
-	fi
-done
-
 if [ "$run_engine" -eq 1 ]; then
 	echo
-	echo "== 6. engine smoke: run the real engine both ways =="
+	echo "== 5. engine smoke: this engine against a C-only reference =="
+	reference=$(rust_gate_reference_bin)
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$work/build-on/bin/glhexen2" \
-	OFF_BIN="$work/build-off/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/glhexen2" \
+	OFF_BIN="$reference" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
 		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" sizebuf
 fi
 
 echo "PASS: Rust sizebuf -- differential harness green, the consolidated"
-echo "      archive links exactly one symbol per target, and the C fallback"
-echo "      still compiles when USE_SIZEBUF_RS=OFF."
+echo "      archive links exactly one symbol per target, and no sizebuf.c"
+echo "      object is left in the engine build."

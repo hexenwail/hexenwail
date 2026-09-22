@@ -6,9 +6,9 @@
 # writes with the C original over destination sizes 0..288 in four initial
 # contents (empty, terminator at the last usable byte, no terminator within
 # `siz`, and a case-derived partial string), source lengths 0..256, and
-# unaligned source/destination offsets.  The CMake half proves the flag removes
-# strlcat.c from the Hexen II and HexenWorld source lists independently and that
-# the C fallback remains buildable.
+# unaligned source/destination offsets.  The CMake half proves the engine
+# build every gate shares (scripts/lib/rust-gate.sh) links it exactly once per
+# binary, Hexen II and HexenWorld alike, with no C object left in the build.
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
@@ -18,12 +18,14 @@ set -euo pipefail
 
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -75,15 +77,13 @@ if [ "${#count}" -lt 7 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_STRLCAT_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_STRLCAT_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. exactly one q_strlcat definition per binary =="
-archive="$work/build-on/rust/libengine_rs.a"
+archive="$engine_build/rust/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 n=$(nm "$archive" 2>/dev/null | grep -cE " T $symbol\$" || true)
 if [ "$n" -ne 1 ]; then
@@ -91,7 +91,7 @@ if [ "$n" -ne 1 ]; then
 	exit 1
 fi
 for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	n=$(nm "$path" | grep -cE " [Tt] $symbol\$" || true)
 	if [ "$n" -ne 1 ]; then
@@ -100,31 +100,12 @@ for bin in glhexen2 h2ded hwsv; do
 	fi
 	echo "  $bin: $symbol exactly once"
 done
-stray=$(find "$work/build-on" -name 'strlcat.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'strlcat.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray strlcat.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray strlcat.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
-echo
-echo "== 5. flag OFF still compiles strlcat.c (rollback is real) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_STRLCAT_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	found=$(find "$work/build-off" -name 'strlcat.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin did not compile strlcat.c ($found objects)" >&2
-		exit 1
-	fi
-	n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $symbol\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: OFF $bin: $symbol has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-
 echo "PASS: Rust strlcat -- differential harness green, the consolidated"
-echo "      archive links exactly one definition per target, and the C fallback"
-echo "      still compiles when USE_STRLCAT_RS=OFF."
+echo "      archive links exactly one definition per target, and no strlcat.c"
+echo "      object is left in the engine build."

@@ -9,9 +9,17 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # Official prebuilt Rust toolchains.  Only the WebAssembly builds use it:
+    # nixpkgs' rustc ships no wasm32-unknown-emscripten standard library, and
+    # the engine's Rust archive is linked into the web client like every
+    # other target.  Version pinned by engine/rust/rust-toolchain.toml.
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs {
@@ -30,6 +38,26 @@
             config = "x86_64-w64-mingw32";
           };
         };
+
+        # Rust for the MinGW cross builds.  The cross rustc carries the
+        # x86_64-pc-windows-gnu standard library next to the host one (build
+        # scripts still run on Linux), and it is in cache.nixos.org, so this
+        # costs a download, not a compiler build.  depsBuildBuild puts the
+        # native cc on PATH for rustc to link those build scripts with.
+        rustCrossWin64 = {
+          nativeBuildInputs = [
+            pkgsCross64.buildPackages.cargo
+            pkgsCross64.buildPackages.rustc
+          ];
+          depsBuildBuild = [ pkgs.stdenv.cc ];
+        };
+
+        # Rust for the WebAssembly client: the official toolchain named by
+        # engine/rust/rust-toolchain.toml, with its wasm32-unknown-emscripten
+        # target.  engine/CMakeLists.txt passes that triple to cargo whenever
+        # it is configured through emcmake.
+        rustWasm = (rust-overlay.lib.mkRustBin { } pkgs).fromRustupToolchainFile
+          ./engine/rust/rust-toolchain.toml;
 
         # Version: extracted from engine/hexen2/quakedef.h HW_BASE_VERSION
         version = let
@@ -206,9 +234,8 @@
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
-              # For engine/rust, the consolidated Rust FFI ports are on the
-              # default native build path, so cargo/rustc are listed here
-              # rather than fetched separately.
+              # engine/rust is linked into every engine target; there is no
+              # C fallback to build without it.
               cargo
               rustc
             ];
@@ -805,11 +832,12 @@
 
             src = filteredSrc;
 
-            nativeBuildInputs = with pkgs; [
+            nativeBuildInputs = (with pkgs; [
               cmake
               pkg-config
               removeReferencesTo
-            ];
+            ]) ++ rustCrossWin64.nativeBuildInputs;
+            inherit (rustCrossWin64) depsBuildBuild;
 
             buildInputs = with pkgsCross64; [
               windows.pthreads
@@ -829,19 +857,6 @@
               "-DUSE_CODEC_OPUS=ON"
               "-DUSE_CODEC_XMP=ON"
               "-DUSE_DEBUGINFO=ON"
-              # The consolidated Rust shim is not wired up for Emscripten or
-              # cross-compilation without the matching target toolchain.
-              "-DUSE_RUST_HASHINDEX=OFF"
-              "-DUSE_MATHLIB_RS=OFF"
-              "-DUSE_SIZEBUF_RS=OFF"
-              "-DUSE_CRC_RS=OFF"
-              "-DUSE_LINK_OPS_RS=OFF"
-              "-DUSE_MSG_IO_RS=OFF"
-              "-DUSE_INFO_STR_RS=OFF"
-              "-DUSE_STRLCPY_RS=OFF"
-              "-DUSE_STRLCAT_RS=OFF"
-              "-DUSE_HUFFMAN_RS=OFF"
-              "-DUSE_WAD_RS=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -974,14 +989,16 @@
 
             src = filteredSrc;
 
-            nativeBuildInputs = with pkgs; [
+            nativeBuildInputs = (with pkgs; [
               cmake
               pkg-config
-            ];
+            ]) ++ rustCrossWin64.nativeBuildInputs;
+            inherit (rustCrossWin64) depsBuildBuild;
 
             # No buildInputs at all: the Windows server links only ws2_32,
-            # winmm and the mingw runtime, and the Windows configure takes SDL3
-            # from oslibs rather than from a package.
+            # winmm, the mingw runtime and the Rust engine archive, and the
+            # Windows configure takes SDL3 from oslibs rather than from a
+            # package.
 
             preConfigure = ''
               cd engine
@@ -989,17 +1006,6 @@
 
             cmakeFlags = [
               "-DBUILD_DEDICATED=ON"
-              "-DUSE_RUST_HASHINDEX=OFF"
-              "-DUSE_MATHLIB_RS=OFF"
-              "-DUSE_SIZEBUF_RS=OFF"
-              "-DUSE_CRC_RS=OFF"
-              "-DUSE_LINK_OPS_RS=OFF"
-              "-DUSE_MSG_IO_RS=OFF"
-              "-DUSE_INFO_STR_RS=OFF"
-              "-DUSE_STRLCPY_RS=OFF"
-              "-DUSE_STRLCAT_RS=OFF"
-              "-DUSE_HUFFMAN_RS=OFF"
-              "-DUSE_WAD_RS=OFF"
             ];
 
             # Only the server target; the client .exe is .#win64's job.
@@ -1049,7 +1055,7 @@
 
           # WebAssembly / Emscripten build
           # NOTE: WASM builds require network access for Emscripten SDL3 port
-          # Quick fix (temporary): Use shell-wasm.nix for interactive dev builds
+          # Quick fix (temporary): use `nix develop .#wasm` for interactive dev builds
           # Long-term: See issue uhexen2-1z31 for reproducible solution
           wasm = pkgs.stdenv.mkDerivation {
             pname = "hexenwail-wasm";
@@ -1063,6 +1069,7 @@
               pkg-config
               nodejs
               sdl3
+              rustWasm
             ];
 
             # Emscripten-specific setup
@@ -1079,17 +1086,6 @@
                 -DCMAKE_BUILD_TYPE=Release \
                 -DUSE_CODEC_VORBIS=OFF \
                 -DUSE_ALSA=OFF \
-                -DUSE_RUST_HASHINDEX=OFF \
-                -DUSE_MATHLIB_RS=OFF \
-                -DUSE_SIZEBUF_RS=OFF \
-                -DUSE_CRC_RS=OFF \
-                -DUSE_LINK_OPS_RS=OFF \
-                -DUSE_MSG_IO_RS=OFF \
-                -DUSE_INFO_STR_RS=OFF \
-                -DUSE_STRLCPY_RS=OFF \
-                -DUSE_STRLCAT_RS=OFF \
-                -DUSE_HUFFMAN_RS=OFF \
-                -DUSE_WAD_RS=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine
@@ -1115,7 +1111,7 @@
 
                 Note: Pure Nix flake builds cannot fetch Emscripten ports due to
                 sandbox restrictions. For WASM development, use:
-                  nix develop -f shell-wasm.nix
+                  nix develop .#wasm
               '';
               homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
@@ -1637,6 +1633,15 @@ EOF
             echo "Release script:"
             echo "  ./build-release.sh [nix|cmake]"
           '';
+        };
+
+        # nix develop .#wasm -- Emscripten plus the Rust toolchain that can
+        # build the engine archive for wasm32-unknown-emscripten.  The recipe
+        # lives in shell-wasm.nix so `nix-shell shell-wasm.nix` stays a
+        # working spelling of the same shell.
+        devShells.wasm = import ./shell-wasm.nix {
+          inherit pkgs;
+          rustToolchain = rustWasm;
         };
 
         # App for easy running.  nixos-bundled, not nixos: `nix run` should

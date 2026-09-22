@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 #
-# check-rust-hashindex.sh -- gate for the optional Rust port of hashindex.c.
+# check-rust-hashindex.sh -- gate for the Rust port of hashindex.c.
 #
 # WHY THIS EXISTS
 #
-#   USE_RUST_HASHINDEX defaults to ON and the native Linux build compiles the
-#   Rust hashindex.  Unsupported targets (WASM, Windows cross-compile, Flatpak)
-#   are explicitly configured with -DUSE_RUST_HASHINDEX=OFF.  Without this script
-#   the Rust crate is compiled by
-#   *nothing*: a rustc bump, a change to hashindex.h, or a change to any engine
-#   header it shares could break the port outright while every other CI step
-#   stayed green.  It would rot silently and be discovered only by whoever next
-#   tried to switch the flag on.
+#   The Rust hashindex is the only one any engine target links; hashindex.c
+#   is compiled by the differential harness below and by nothing else.
 #
 #   The differential harness is the half that matters.  A build gate alone
 #   proves the crate compiles and links; it says nothing about whether the Rust
@@ -23,19 +17,18 @@
 #   2. the differential harness passes -- Rust and C agree on the raw array
 #      contents AND on per-bucket chain ORDER, over 1.2M operations, plus
 #      abort parity on the four fatal paths
-#   3. all three targets build with -DUSE_RUST_HASHINDEX=ON
+#   3. the engine build every gate shares (scripts/lib/rust-gate.sh)
 #   4. exactly one definition of each of the five symbols in each binary; this
 #      is the duplicate-symbol hazard the CMake source-list removal exists to
 #      prevent, and the failure mode if that removal is ever lost
-#   5. with the flag OFF, the C original is what gets linked -- i.e. the
-#      rollback is real and not merely documented
 #
 # Requires cc, cargo/rustc and cmake -- run it inside `nix develop`.
 # No game data needed for the default checks: nothing here starts the engine.
 #
 #   ./scripts/check-rust-hashindex.sh            # fast: crate, harness, builds
-#   ./scripts/check-rust-hashindex.sh --engine   # also run the real engine and
-#                                                # diff ON vs OFF end to end
+#   OFF_BIN=... ./scripts/check-rust-hashindex.sh --engine
+#       also run the real engine and diff it end to end against a C-only
+#       reference binary (how to build one: scripts/lib/rust-gate.sh)
 #
 # --engine additionally resolves the demo data and Xvfb out of nix itself and
 # runs engine/rust/hashindex/tests/run_engine_smoke.sh, so it needs network (or
@@ -49,12 +42,14 @@ run_engine=0
 for arg in "$@"; do
 	case "$arg" in
 		--engine) run_engine=1 ;;
-		-h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust/hashindex"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -104,76 +99,58 @@ if [ "${#count}" -lt 6 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with -DUSE_RUST_HASHINDEX=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_RUST_HASHINDEX=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. exactly one definition of each symbol, in each binary =="
 for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
 		if [ "$n" -ne 1 ]; then
 			echo "FAIL: $bin: $sym has $n definitions, expected exactly 1." >&2
-			echo "      If 0, the staticlib was not linked; if 2, the C original" >&2
-			echo "      is still in the source list (see the USE_RUST_HASHINDEX" >&2
-			echo "      block in engine/CMakeLists.txt)." >&2
+			echo "      If 0, the archive was not linked; if 2, hashindex.c is back in" >&2
+			echo "      an engine source list in engine/CMakeLists.txt." >&2
 			exit 1
 		fi
 	done
 	echo "  $bin: 5/5 symbols exactly once"
 done
 
-# The C object must not have been compiled into an ON build either, or the
+# The C object must not have been compiled into the build either, or the
 # single definitions above are luck rather than construction.
-stray=$(find "$work/build-on" -name 'hashindex.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'hashindex.c.o' | wc -l)
 if [ "$stray" -ne 0 ]; then
-	echo "FAIL: $stray hashindex.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray hashindex.c.o object(s) in the engine build" >&2
 	exit 1
 fi
 
 echo
-echo "== 5. flag OFF still links the C original (rollback is real) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_RUST_HASHINDEX=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	found=$(find "$work/build-off" -name 'hashindex.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin did not compile hashindex.c ($found objects)" >&2
-		exit 1
-	fi
-done
-echo "  all three OFF builds compile the C original"
-
-echo
 if [ "$run_engine" -eq 1 ]; then
-	echo "== 6. engine smoke: run the REAL engine both ways and diff =="
+	echo "== 5. engine smoke: run the REAL engine against a C-only reference and diff =="
+	reference=$(rust_gate_reference_bin)
 	# Resolved out of nix rather than required from the caller: the store hash
 	# in the demo path changes on every bump, and a check that is tedious to
 	# run is a check that stops being run.
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$work/build-on/bin/glhexen2" \
-	OFF_BIN="$work/build-off/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/glhexen2" \
+	OFF_BIN="$reference" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
 		"$crate/tests/run_engine_smoke.sh" hashindex
 
 	echo
 	echo "PASS: Rust hashindex -- differential harness green; all three targets"
-	echo "      build with the flag ON and none with a duplicate symbol; the OFF"
-	echo "      build still uses the C original; and the real engine produces"
-	echo "      identical output on a pak load and a map load either way."
+	echo "      link it with no duplicate symbol and no C object; and the real"
+	echo "      engine produces the C-only reference's output on a pak load and a"
+	echo "      map load."
 else
-	echo "PASS: Rust hashindex -- differential harness green, all three targets"
-	echo "      build with the flag ON (the default), none with a duplicate symbol, and the OFF"
-	echo "      build still uses the C original (rollback is real)."
-	echo "      (re-run with --engine to also drive the real engine)"
+	echo "PASS: Rust hashindex -- differential harness green, and all three targets"
+	echo "      link it with no duplicate symbol and no C object."
+	echo "      (re-run with --engine and OFF_BIN=... to also drive the real engine)"
 fi

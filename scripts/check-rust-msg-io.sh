@@ -13,10 +13,12 @@
 # and long message variants, and round trips through the opposite
 # implementation.
 #
-# The CMake half proves the consolidated engine archive selects msg_io
-# independently -- including the msg_io-on/sizebuf-off combination, where the
-# Rust sizebuf entry points must stay out of the way so the C sizebuf.c remains
-# the only definition -- and that the C fallback remains buildable.
+# The CMake half proves the engine build every gate shares
+# (scripts/lib/rust-gate.sh) links it exactly once per binary with no C object
+# left in the build, the two exported globals included.  (Cargo can still build
+# msg_io without the sizebuf feature, which used to be the USE_SIZEBUF_RS=OFF
+# engine build; no engine build selects that any more, so nothing here tests
+# it.)
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
@@ -28,12 +30,14 @@ run_engine=0
 for arg in "$@"; do
 	case "$arg" in
 		--engine) run_engine=1 ;;
-		-h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -97,11 +101,9 @@ if [ "${#count}" -lt 3 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_MSG_IO_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_MSG_IO_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. exactly one msg_io definition per binary =="
@@ -110,7 +112,7 @@ echo "== 4. exactly one msg_io definition per binary =="
 # once.  A second definition is what "the staticlib cannot hold two variants"
 # would look like if the union were done wrong.
 for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -129,85 +131,16 @@ for bin in glhexen2 h2ded hwsv; do
 	done
 	echo "  $bin: ${#symbols[@]}/${#symbols[@]} symbols and 2/2 globals exactly once"
 done
-stray=$(find "$work/build-on" -name 'msg_io.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'msg_io.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray msg_io.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray msg_io.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
-echo
-echo "== 5. msg_io stays switchable independently of sizebuf =="
-# The consolidated crate lands in a single codegen unit, so a build with
-# USE_MSG_IO_RS=ON and USE_SIZEBUF_RS=OFF is the combination where a sizebuf
-# symbol leaking out of the Rust archive would collide with the C sizebuf.c.
-cmake -B "$work/build-mixed" -S "$root/engine" \
-	-DUSE_MSG_IO_RS=ON -DUSE_SIZEBUF_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-mixed" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-mixed/bin/$bin"
-	[ -x "$path" ] || { echo "FAIL: mixed $path was not built" >&2; exit 1; }
-	for sym in SZ_GetSpace SZ_Write SZ_Init; do
-		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
-		if [ "$n" -ne 1 ]; then
-			echo "FAIL: mixed $bin: $sym has $n definitions, expected exactly 1" >&2
-			exit 1
-		fi
-	done
-	n=$(nm "$path" | grep -cE " [Tt] MSG_WriteByte\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: mixed $bin: MSG_WriteByte has $n definitions" >&2
-		exit 1
-	fi
-	found=$(find "$work/build-mixed" -name 'sizebuf.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: mixed $bin did not compile sizebuf.c ($found objects)" >&2
-		exit 1
-	fi
-done
-echo "  msg_io from Rust with sizebuf from C: all three targets link"
-
-echo
-echo "== 6. flag OFF still compiles msg_io.c (rollback is real) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_MSG_IO_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	found=$(find "$work/build-off" -name 'msg_io.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin did not compile msg_io.c ($found objects)" >&2
-		exit 1
-	fi
-	for sym in MSG_WriteByte MSG_ReadShort msg_readcount msg_badread; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [TtBbDd] $sym\$" || true)
-		if [ "$n" -ne 1 ]; then
-			echo "FAIL: OFF $bin: $sym has $n definitions, expected exactly 1" >&2
-			exit 1
-		fi
-	done
-done
-# The H2W-only five are only defined by the C original in the HexenWorld
-# target, which is the asymmetry the union exists to paper over.
-for sym in MSG_WriteAngle16 MSG_WriteUsercmd MSG_ReadStringLine MSG_ReadAngle16 MSG_ReadUsercmd; do
-	for bin in glhexen2 h2ded; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $sym\$" || true)
-		if [ "$n" -ne 0 ]; then
-			echo "FAIL: OFF $bin: $sym is defined $n times, but the H2 build has no such function" >&2
-			exit 1
-		fi
-	done
-	n=$(nm "$work/build-off/bin/hwsv" | grep -cE " [Tt] $sym\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: OFF hwsv: $sym has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-echo "  C msg_io.c is back in all three targets, H2W-only five only in hwsv"
-
 if [ "$run_engine" -eq 1 ]; then
 	echo
-	echo "== 7. engine smoke: run the real engine both ways =="
+	echo "== 5. engine smoke: this engine against a C-only reference =="
+	reference=$(rust_gate_reference_bin)
 	# Reuses the hashindex smoke arm verbatim -- it starts the client, the
 	# dedicated server and, where data allows, loads a map, and diffs the two
 	# logs.  msg_io sits under every packet that reaches a map load, so no
@@ -215,8 +148,8 @@ if [ "$run_engine" -eq 1 ]; then
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$work/build-on/bin/glhexen2" \
-	OFF_BIN="$work/build-off/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/glhexen2" \
+	OFF_BIN="$reference" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
 		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" msg_io
@@ -224,5 +157,5 @@ fi
 
 echo "PASS: Rust msg_io -- the C without H2W, the C with H2W and the Rust union"
 echo "      agree byte for byte, the consolidated archive links exactly one"
-echo "      definition per symbol in all three targets, and the C fallback"
-echo "      still compiles when USE_MSG_IO_RS=OFF."
+echo "      definition per symbol in all three targets, and no msg_io.c"
+echo "      object is left in the engine build."

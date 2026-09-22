@@ -19,6 +19,10 @@ Building with CMake:
 Prerequisites:
   - CMake 3.20+
   - A C compiler with C11 support (GCC 10+, Clang 12+)
+  - Rust 1.82 or newer (cargo and rustc; engine/rust/rust-toolchain.toml
+    names the version CI uses).  Not optional: part of the engine is
+    written in Rust and linked into every build as a static library.  CMake
+    finds cargo on PATH, or pass -DCARGO_EXECUTABLE=/path/to/cargo.
   - SDL3 development libraries
   - OpenGL 4.3 capable driver
 
@@ -64,8 +68,24 @@ Cross-compiling for Windows:
 Use MinGW-w64 with CMake:
 
     mkdir build-win && cd build-win
-    cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-w64.cmake ..
+    cmake -DCMAKE_TOOLCHAIN_FILE=../engine/cmake/toolchain-mingw64.cmake ../engine
     make
+
+The Rust half is built for x86_64-pc-windows-gnu, which CMake derives from the
+MinGW toolchain, so that target's standard library must be installed:
+
+    rustup target add x86_64-pc-windows-gnu
+
+`nix build .#win64` provides a cross rustc that already carries it.  Any other
+cross build has to name its triple: -DRUST_TARGET=<rust target triple>.
+
+
+Building the WebAssembly client:
+================================
+
+See docs/PWA.md.  Besides Emscripten it needs the wasm32-unknown-emscripten
+Rust target (`rustup target add wasm32-unknown-emscripten`); `nix develop
+.#wasm` provides both.
 
 
 Links:

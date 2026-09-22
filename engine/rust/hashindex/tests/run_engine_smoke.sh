@@ -36,8 +36,9 @@
 # USAGE
 #
 #   DEMO_DIR=<dir containing data1/> \
-#   ON_BIN=<glhexen2 built with -DUSE_<SUBSYSTEM>_RS=ON> \
-#   OFF_BIN=<glhexen2 built with -DUSE_<SUBSYSTEM>_RS=OFF> \
+#   ON_BIN=<glhexen2 from this tree, which always links the Rust archive> \
+#   OFF_BIN=<a C-only glhexen2; see rust_gate_reference_bin in
+#            scripts/lib/rust-gate.sh for how to build one> \
 #   XVFB=<path to Xvfb> \
 #   ./run_engine_smoke.sh [subsystem]
 #
@@ -64,8 +65,8 @@ case "$SUBSYSTEM" in
 esac
 
 : "${DEMO_DIR:?set DEMO_DIR to the basedir holding data1/}"
-: "${ON_BIN:?set ON_BIN to the flag-ON glhexen2}"
-: "${OFF_BIN:?set OFF_BIN to the flag-OFF glhexen2}"
+: "${ON_BIN:?set ON_BIN to this tree's glhexen2}"
+: "${OFF_BIN:?set OFF_BIN to a C-only reference glhexen2}"
 XVFB="${XVFB:-Xvfb}"
 WORK="${WORK:-$(mktemp -d)}"
 mkdir -p "$WORK"

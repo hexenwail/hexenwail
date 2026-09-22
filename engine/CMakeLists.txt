@@ -37,99 +37,15 @@ option(USE_FLUIDSYNTH "Use FluidSynth as the MIDI driver when available" ON)
 # tier 1 (no FluidSynth, or WASM).  FluidSynth always wins where present.
 option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" ON)
 
-# Link the Rust port of hashindex in place of engine/h2shared/hashindex.c.
-# Deliberately ON: this is the default build configuration, not a shipping
-# default.  See the consolidated Rust block below for what turning it on
-# does, and for why both halves (source removal and linking) have to happen
-# together.
-option(USE_RUST_HASHINDEX "Link the Rust hashindex implementation instead of hashindex.c" ON)
-
-# Link the Rust port of mathlib in place of engine/h2shared/mathlib.c.
-# Deliberately ON: this is the default build configuration, not a shipping
-# default.  See the consolidated Rust block below for what turning it on
-# does, and for why both halves (source removal and linking) have to happen
-# together.
-option(USE_MATHLIB_RS "Link the Rust mathlib implementation instead of mathlib.c" ON)
-
-# Link the Rust port of sizebuf in place of engine/h2shared/sizebuf.c.  This
-# is the first port that mutates a caller-owned structured buffer and returns
-# pointers into its storage, so it stays independently switchable while the
-# ownership boundary is exercised.
-option(USE_SIZEBUF_RS "Link the Rust sizebuf implementation instead of sizebuf.c" ON)
-
-# Link the Rust port of the CCITT CRC in place of common/crc.c.  Stateless
-# apart from a read-only table, but progs.dat and HexenWorld map checksums
-# depend on it bit for bit, so it keeps its own switch.  Only the engine
-# targets are affected; utils/ still compiles crc.c directly.
-option(USE_CRC_RS "Link the Rust CRC implementation instead of crc.c" ON)
-
-# Link the Rust port of the intrusive doubly-linked list in place of
-# engine/h2shared/link_ops.c.  The smallest port in the set, but the widest
-# ownership boundary: the links live inside caller-owned edicts and area
-# nodes, world.c keeps raw pointers into the middle of the chain, and it
-# reads the stale prev/next back after RemoveLink.  So the C statement order
-# and the "do not touch l" rule are part of the contract, and this stays
-# independently switchable.
-option(USE_LINK_OPS_RS "Link the Rust link_ops implementation instead of link_ops.c" ON)
-
-# Link the Rust port of the message reader/writer in place of
-# engine/h2shared/msg_io.c.  The widest surface of the set: it owns two
-# exported globals (msg_readcount, msg_badread) that C code both reads and
-# writes, reads a caller-selected sizebuf through a module-global pointer that
-# defaults to the C global net_message, and returns pointers into two static
-# string buffers.  It is also the first port whose C original is compiled with
-# different code per target (-DH2W in hwsv only), so it stays independently
-# switchable while the union-of-both-variants question is exercised.
-option(USE_MSG_IO_RS "Link the Rust msg_io implementation instead of msg_io.c" ON)
-
-# Link the Rust port of the HexenWorld info-string helpers in place of
-# engine/hexenworld/shared/info_str.c.  The first port of a file that is not in
-# h2shared, and the first whose C original is compiled by one target only:
-# info_str.c is in HWSV_SOURCES alone, and every Hexen II use of Info_* sits
-# inside `#if defined(H2W)`, so glhexen2 and h2ded never reference these
-# symbols.  Of the two variants in the C body, only the SERVERONLY one has ever
-# been compiled, so that is the one the Rust module implements.  It stays
-# independently switchable while the hwsv-only removal is exercised.
-option(USE_INFO_STR_RS "Link the Rust info_str implementation instead of info_str.c" ON)
-
-# Link the Rust port of the bounded BSD string copy helper in place of
-# common/strlcpy.c.  It has a tiny ABI (two pointers and size_t), no global
-# state, and a complete deterministic C-vs-Rust harness, so it is kept
-# independently switchable while callers in both Hexen II and HexenWorld use
-# it.
-option(USE_STRLCPY_RS "Link the Rust q_strlcpy implementation instead of strlcpy.c" ON)
-
-# Link the Rust port of the BSD bounded string append helper in place of
-# common/strlcat.c.  Same tiny ABI as strlcpy but the opposite contract: it
-# scans the destination before writing, so the "no write when there is no room"
-# and "return MIN(siz, strlen(dst)) + strlen(src) even when truncated" rules are
-# what the harness pins.  Only the engine targets are affected; utils/ still
-# compiles strlcat.c directly.
-option(USE_STRLCAT_RS "Link the Rust q_strlcat implementation instead of strlcat.c" ON)
-
-# Link the Rust port of the HexenWorld Huffman codec in place of
-# engine/hexenworld/shared/huffman.c.  The C original is compiled into two
-# targets with a *different allocation strategy per target*: hwsv builds its
-# tree with Hunk_AllocName, while the integrated client defines H2W_INTEGRATED
-# and must malloc, because CL_ClearState -> Host_ClearMemory does
-# Hunk_FreeToLowMark and takes a hunk-allocated tree with it, leaving HuffTree
-# dangling.  One archive is linked into both, so the Rust module picks malloc
-# for both; the differential harness compiles the C each way and proves the
-# two produce identical bytes before comparing either against the Rust.  It is
-# also the first port whose decode path is fed attacker-controlled bytes
-# (net_udp.c decodes whatever arrived on the socket), so the bit read is
-# bounded at the end of the caller's buffer -- see engine/rust/src/huffman.rs.
-option(USE_HUFFMAN_RS "Link the Rust huffman implementation instead of huffman.c" ON)
-
-# Link the Rust port of the wad loader in place of engine/h2shared/wad.c.  The
-# only port whose C original is compiled into a single target: wad.c is in
-# COMMON_SOURCES and is removed again for h2ded ("gfx.wad lumps are
-# renderer-only data"), and HWSV_SOURCES never lists it, so glhexen2 is the only
-# binary in the tree that contains it.  The port also owns three exported
-# globals (wad_numlumps, wad_lumps, wad_base) and edits the mapped wad in place
-# -- lump names and picture headers -- so it stays independently switchable
-# while the single-target removal is exercised.
-option(USE_WAD_RS "Link the Rust wad implementation instead of wad.c" ON)
+# Rust is not optional.  engine/rust is the only implementation of the
+# subsystems it has taken over from C -- hashindex, mathlib, sizebuf, crc,
+# link_ops, msg_io, info_str, strlcpy, strlcat, huffman and wad -- in every
+# target that compiled the C: the client, h2ded, hwsv, the MinGW cross builds
+# and the WebAssembly client.
+# Their C originals stay in the tree only as the reference the differential
+# harnesses under engine/rust/*/tests compare against; no engine target
+# compiles them.  See "Rust engine archive" below for how the archive is
+# built and which target triple it is built for.
 
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
@@ -712,10 +628,6 @@ set(COMMON_SOURCES
     ${COMMONDIR}/pr_cmds.c
     ${COMMONDIR}/pr_edict.c
     ${COMMONDIR}/pr_exec.c
-    ${COMMONDIR}/mathlib.c
-    ${COMMONDIR}/sizebuf.c
-    ${COMMONDIR}/link_ops.c
-    ${COMMONDIR}/hashindex.c
     ${COMMONDIR}/zone.c
     ${COMMONDIR}/quakefs.c
     ${COMMONDIR}/miniz.c
@@ -723,15 +635,12 @@ set(COMMON_SOURCES
     ${COMMONDIR}/host_string.c
     ${COMMONDIR}/cfgfile.c
     ${COMMONDIR}/common.c
-    ${COMMONDIR}/wad.c
-    ${COMMONDIR}/msg_io.c
     ${COMMONDIR}/sys_exedir.c
     # From common directory
     ${UHEXEN2_SHARED}/qsnprint.c
-    ${UHEXEN2_SHARED}/strlcat.c
-    ${UHEXEN2_SHARED}/strlcpy.c
     ${UHEXEN2_SHARED}/q_endian.c
-    ${UHEXEN2_SHARED}/crc.c
+    # hashindex, mathlib, sizebuf, link_ops, msg_io, wad, strlcpy, strlcat and
+    # crc come from the Rust engine archive; see "Rust engine archive" below.
 )
 
 #============================================================================
@@ -945,163 +854,148 @@ endif()
 # Create Executable
 #============================================================================
 #============================================================================
-# Consolidated Rust engine shim
+# Rust engine archive
 #============================================================================
-# All migrated subsystems live in one static library.  Separate staticlibs
-# each carried compiler-builtins and a panic/personality definition, which
-# forced the old build to use the linker-specific -z,muldefs workaround.  A
-# single crate owns those runtime symbols exactly once while Cargo features
-# preserve an independent C fallback for every subsystem.
-set(RUST_ENGINE_FEATURES)
+# Every migrated subsystem lives in one static library, engine/rust, and it
+# is linked into every engine target on every platform.  There is no C
+# fallback: the C originals are compiled only by the differential harnesses
+# under engine/rust/*/tests, which prove the Rust computes what they did.
+#
+# One archive rather than one per subsystem because separate staticlibs each
+# carried compiler-builtins and a panic/personality definition, which forced
+# the old build to use the linker-specific -z,muldefs workaround.  The Cargo
+# features survive only so each harness can link the subsystem it tests on
+# its own; the engine always builds all of them.
+set(RUST_ENGINE_FEATURES
+    hashindex mathlib sizebuf crc link_ops msg_io info_str strlcpy strlcat
+    huffman wad)
 
-if(USE_RUST_HASHINDEX)
-    list(APPEND RUST_ENGINE_FEATURES hashindex)
-    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/hashindex.c)
-    message(STATUS "hashindex: Rust shim (USE_RUST_HASHINDEX=ON)")
-else()
-    message(STATUS "hashindex: C original (USE_RUST_HASHINDEX=OFF)")
-endif()
-
-if(USE_MATHLIB_RS)
-    list(APPEND RUST_ENGINE_FEATURES mathlib)
-    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/mathlib.c)
-    message(STATUS "mathlib: Rust shim (USE_MATHLIB_RS=ON)")
-else()
-    message(STATUS "mathlib: C original (USE_MATHLIB_RS=OFF)")
-endif()
-
-if(USE_SIZEBUF_RS)
-    list(APPEND RUST_ENGINE_FEATURES sizebuf)
-    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/sizebuf.c)
-    message(STATUS "sizebuf: Rust shim (USE_SIZEBUF_RS=ON)")
-else()
-    message(STATUS "sizebuf: C original (USE_SIZEBUF_RS=OFF)")
-endif()
-
-if(USE_CRC_RS)
-    list(APPEND RUST_ENGINE_FEATURES crc)
-    list(REMOVE_ITEM COMMON_SOURCES ${UHEXEN2_SHARED}/crc.c)
-    message(STATUS "crc: Rust shim (USE_CRC_RS=ON)")
-else()
-    message(STATUS "crc: C original (USE_CRC_RS=OFF)")
-endif()
-
-if(USE_LINK_OPS_RS)
-    list(APPEND RUST_ENGINE_FEATURES link_ops)
-    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/link_ops.c)
-    message(STATUS "link_ops: Rust shim (USE_LINK_OPS_RS=ON)")
-else()
-    message(STATUS "link_ops: C original (USE_LINK_OPS_RS=OFF)")
-endif()
-
-if(USE_MSG_IO_RS)
-    list(APPEND RUST_ENGINE_FEATURES msg_io)
-    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/msg_io.c)
-    message(STATUS "msg_io: Rust shim (USE_MSG_IO_RS=ON)")
-else()
-    message(STATUS "msg_io: C original (USE_MSG_IO_RS=OFF)")
-endif()
-
-# info_str.c is not in COMMON_SOURCES -- it is only compiled into HWSV_SOURCES,
-# so its removal happens where that list is built, not here.
-if(USE_INFO_STR_RS)
-    list(APPEND RUST_ENGINE_FEATURES info_str)
-    message(STATUS "info_str: Rust shim (USE_INFO_STR_RS=ON)")
-else()
-    message(STATUS "info_str: C original (USE_INFO_STR_RS=OFF)")
-endif()
-
-if(USE_STRLCPY_RS)
-    list(APPEND RUST_ENGINE_FEATURES strlcpy)
-    list(REMOVE_ITEM COMMON_SOURCES ${UHEXEN2_SHARED}/strlcpy.c)
-    message(STATUS "strlcpy: Rust shim (USE_STRLCPY_RS=ON)")
-else()
-    message(STATUS "strlcpy: C original (USE_STRLCPY_RS=OFF)")
-endif()
-
-if(USE_STRLCAT_RS)
-    list(APPEND RUST_ENGINE_FEATURES strlcat)
-    list(REMOVE_ITEM COMMON_SOURCES ${UHEXEN2_SHARED}/strlcat.c)
-    message(STATUS "strlcat: Rust shim (USE_STRLCAT_RS=ON)")
-else()
-    message(STATUS "strlcat: C original (USE_STRLCAT_RS=OFF)")
-endif()
-
-# huffman.c is likewise not in COMMON_SOURCES.  It is compiled into the
-# integrated client through HW_CLIENT_NET_SOURCES (which is built below) and
-# into hwsv through HWSV_SOURCES; h2ded never compiles it at all.
-if(USE_HUFFMAN_RS)
-    list(APPEND RUST_ENGINE_FEATURES huffman)
-    message(STATUS "huffman: Rust shim (USE_HUFFMAN_RS=ON)")
-else()
-    message(STATUS "huffman: C original (USE_HUFFMAN_RS=OFF)")
-endif()
-
-# wad.c *is* in COMMON_SOURCES, so the removal happens here -- unlike huffman's,
-# which is repeated in the two lists that name the file.  The h2ded removal
-# below still names wad.c because it is what makes the C fallback target-clean
-# when USE_WAD_RS=OFF; a REMOVE_ITEM for a path that is already gone is a no-op.
-if(USE_WAD_RS)
-    list(APPEND RUST_ENGINE_FEATURES wad)
-    list(REMOVE_ITEM COMMON_SOURCES ${COMMONDIR}/wad.c)
-    message(STATUS "wad: Rust shim (USE_WAD_RS=ON)")
-else()
-    message(STATUS "wad: C original (USE_WAD_RS=OFF)")
-endif()
-
-if(RUST_ENGINE_FEATURES)
-    if(EMSCRIPTEN)
+# Each port used to have a switch that put its C original back.  A cache or a
+# packaging recipe that still says OFF is asking for that C code, and linking
+# Rust anyway would make the recipe lie about what it builds, so say so and
+# stop.  A leftover ON is what now happens regardless and is dropped quietly.
+foreach(_removed_rs_option
+        USE_RUST_HASHINDEX USE_MATHLIB_RS USE_SIZEBUF_RS USE_CRC_RS
+        USE_LINK_OPS_RS USE_MSG_IO_RS USE_INFO_STR_RS USE_STRLCPY_RS
+        USE_STRLCAT_RS USE_HUFFMAN_RS USE_WAD_RS)
+    if(DEFINED ${_removed_rs_option} AND NOT ${_removed_rs_option})
         message(FATAL_ERROR
-            "The Rust engine shim is not wired up for Emscripten. Disable "
-            "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, "
-            "USE_CRC_RS, USE_LINK_OPS_RS, USE_MSG_IO_RS, "
-            "USE_INFO_STR_RS, USE_STRLCPY_RS, USE_STRLCAT_RS, "
-            "USE_HUFFMAN_RS, and USE_WAD_RS for the WASM "
-            "build.")
+            "${_removed_rs_option}=OFF is no longer supported: the Rust engine "
+            "archive is mandatory and the C fallbacks are no longer built. "
+            "Drop the flag (and delete CMakeCache.txt if it came from there).")
+    endif()
+    unset(${_removed_rs_option} CACHE)
+endforeach()
+
+find_program(CARGO_EXECUTABLE cargo HINTS "$ENV{CARGO_HOME}/bin")
+if(NOT CARGO_EXECUTABLE)
+    message(FATAL_ERROR
+        "cargo was not found.  Rust is required to build Hexenwail: "
+        "use `nix develop`, install a toolchain with rustup, or pass "
+        "-DCARGO_EXECUTABLE=/path/to/cargo.")
+endif()
+
+# The archive must be built for the same target as the C it is linked into.
+# Native builds use cargo's host default.  The cross targets this tree builds
+# are derived from the C toolchain so no recipe has to spell them; anything
+# else has to name its triple.  The triple's Rust target must be installed:
+# `rustup target add <triple>`, or a toolchain that ships it (see flake.nix).
+set(RUST_TARGET "" CACHE STRING
+    "Rust target triple for the engine archive (empty: derived from the C toolchain)")
+set(RUST_ENGINE_TARGET "${RUST_TARGET}")
+if(NOT RUST_ENGINE_TARGET)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+        set(_rust_arch x86_64)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(i.86|x86)$")
+        set(_rust_arch i686)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+        set(_rust_arch aarch64)
+    else()
+        set(_rust_arch "${CMAKE_SYSTEM_PROCESSOR}")
     endif()
 
-    set(RUST_ENGINE_RS_DIR ${UHEXEN2_TOP}/engine/rust)
-    set(RUST_ENGINE_RS_LIB ${CMAKE_BINARY_DIR}/rust/libengine_rs.a)
-    set(RUST_ENGINE_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
-    string(JOIN "," RUST_ENGINE_FEATURE_LIST ${RUST_ENGINE_FEATURES})
+    if((MINGW OR MSVC) AND NOT EMSCRIPTEN AND NOT _rust_arch)
+        message(FATAL_ERROR
+            "CMAKE_SYSTEM_PROCESSOR is empty, so the Rust target triple for "
+            "this Windows build cannot be derived.  Set it in the toolchain "
+            "file, or pass -DRUST_TARGET=<arch>-pc-windows-gnu (or -msvc).")
+    endif()
 
-    # --offline is deliberate.  The consolidated crate has no dependencies;
-    # a sandboxed build must fail rather than silently fetch one.
-    add_custom_command(
-        OUTPUT ${RUST_ENGINE_RS_LIB}
-        COMMAND ${CMAKE_COMMAND} -E env
-                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
-                CARGO_TARGET_DIR=${RUST_ENGINE_RS_TARGET_DIR}
-                cargo build --release --offline
-                --manifest-path ${RUST_ENGINE_RS_DIR}/Cargo.toml
-                --features ${RUST_ENGINE_FEATURE_LIST}
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${RUST_ENGINE_RS_TARGET_DIR}/release/libengine_rs.a
-                ${RUST_ENGINE_RS_LIB}
-        DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
-                ${RUST_ENGINE_RS_DIR}/build.rs
-                ${RUST_ENGINE_RS_DIR}/src/lib.rs
-                ${RUST_ENGINE_RS_DIR}/src/sizebuf.rs
-                ${RUST_ENGINE_RS_DIR}/src/crc.rs
-                ${RUST_ENGINE_RS_DIR}/src/link_ops.rs
-                ${RUST_ENGINE_RS_DIR}/src/msg_io.rs
-                ${RUST_ENGINE_RS_DIR}/src/info_str.rs
-                ${RUST_ENGINE_RS_DIR}/src/strlcpy.rs
-                ${RUST_ENGINE_RS_DIR}/src/strlcat.rs
-                ${RUST_ENGINE_RS_DIR}/src/huffman.rs
-                ${RUST_ENGINE_RS_DIR}/src/wad.rs
-                ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
-                ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
-                ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
-        COMMENT "Building consolidated Rust engine shim"
-        VERBATIM)
-    add_custom_target(engine_rs DEPENDS ${RUST_ENGINE_RS_LIB})
-
-    function(engine_rs_attach tgt)
-        add_dependencies(${tgt} engine_rs)
-        target_link_libraries(${tgt} PRIVATE ${RUST_ENGINE_RS_LIB})
-    endfunction()
+    if(EMSCRIPTEN)
+        set(RUST_ENGINE_TARGET wasm32-unknown-emscripten)
+    elseif(MINGW)
+        # Native MSYS2 as much as the Linux cross build: rustup's Windows
+        # default is the MSVC ABI, which is not what MinGW links.
+        set(RUST_ENGINE_TARGET ${_rust_arch}-pc-windows-gnu)
+    elseif(MSVC)
+        set(RUST_ENGINE_TARGET ${_rust_arch}-pc-windows-msvc)
+    elseif(CMAKE_CROSSCOMPILING)
+        message(FATAL_ERROR
+            "Cross-compiling for ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}: "
+            "pass -DRUST_TARGET=<rust triple> so the Rust engine archive is "
+            "built for the same target as the C.")
+    endif()
 endif()
+
+set(RUST_ENGINE_RS_DIR ${UHEXEN2_TOP}/engine/rust)
+set(RUST_ENGINE_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
+if(RUST_ENGINE_TARGET)
+    set(_rust_target_args --target ${RUST_ENGINE_TARGET})
+    set(_rust_out_dir ${RUST_ENGINE_RS_TARGET_DIR}/${RUST_ENGINE_TARGET}/release)
+    message(STATUS "Rust engine archive: ${RUST_ENGINE_TARGET}")
+else()
+    set(_rust_target_args)
+    set(_rust_out_dir ${RUST_ENGINE_RS_TARGET_DIR}/release)
+    message(STATUS "Rust engine archive: host target")
+endif()
+if(RUST_ENGINE_TARGET MATCHES "msvc$")
+    set(_rust_lib_name engine_rs.lib)
+else()
+    set(_rust_lib_name libengine_rs.a)
+endif()
+set(RUST_ENGINE_RS_LIB ${CMAKE_BINARY_DIR}/rust/${_rust_lib_name})
+string(JOIN "," RUST_ENGINE_FEATURE_LIST ${RUST_ENGINE_FEATURES})
+
+# Globbed so a new port's module is a dependency without anyone remembering
+# to list it here; CONFIGURE_DEPENDS re-runs the glob when a file appears.
+# Not GLOB_RECURSE: that would also descend into the harness crates' target/
+# directories and depend on cargo's own generated files.
+file(GLOB RUST_ENGINE_RS_SOURCES CONFIGURE_DEPENDS
+    ${RUST_ENGINE_RS_DIR}/src/*.rs
+    ${RUST_ENGINE_RS_DIR}/*/src/*.rs)
+
+# --offline is deliberate.  The consolidated crate has no dependencies;
+# a sandboxed build must fail rather than silently fetch one.
+add_custom_command(
+    OUTPUT ${RUST_ENGINE_RS_LIB}
+    COMMAND ${CMAKE_COMMAND} -E env
+            CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
+            CARGO_TARGET_DIR=${RUST_ENGINE_RS_TARGET_DIR}
+            ${CARGO_EXECUTABLE} build --release --offline
+            --manifest-path ${RUST_ENGINE_RS_DIR}/Cargo.toml
+            ${_rust_target_args}
+            --features ${RUST_ENGINE_FEATURE_LIST}
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_rust_out_dir}/${_rust_lib_name}
+            ${RUST_ENGINE_RS_LIB}
+    DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
+            ${RUST_ENGINE_RS_DIR}/Cargo.lock
+            ${RUST_ENGINE_RS_DIR}/build.rs
+            ${RUST_ENGINE_RS_SOURCES}
+            ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
+    COMMENT "Building Rust engine archive"
+    VERBATIM)
+add_custom_target(engine_rs DEPENDS ${RUST_ENGINE_RS_LIB})
+
+function(engine_rs_attach tgt)
+    add_dependencies(${tgt} engine_rs)
+    target_link_libraries(${tgt} PRIVATE ${RUST_ENGINE_RS_LIB})
+    # rustc emits the archive's exported statics as local symbols on wasm32,
+    # so there the C owns their storage.  See the file's header.
+    if(EMSCRIPTEN)
+        target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/wasm_globals.c)
+    endif()
+endfunction()
 
 # Combine all sources
 if(EMSCRIPTEN AND WEB_RENDERER STREQUAL "software")
@@ -1123,12 +1017,9 @@ if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
         ${ENGINE_TOP}/hexenworld/shared/pmove.c
         ${ENGINE_TOP}/hexenworld/shared/pmovetst.c
     )
-    # The codec comes from the C original or from libengine_rs.a.  This is the
-    # H2W_INTEGRATED variant of huffman.c -- malloc, not the hunk -- which is
-    # the allocation the Rust module uses for both targets.
-    if(NOT USE_HUFFMAN_RS)
-        list(APPEND HW_CLIENT_NET_SOURCES ${ENGINE_TOP}/hexenworld/shared/huffman.c)
-    endif()
+    # The Huffman codec comes from libengine_rs.a, which allocates the tree
+    # with malloc -- the H2W_INTEGRATED variant of huffman.c -- for both this
+    # client and hwsv.
     list(APPEND CLIENT_DEFINITIONS H2W_INTEGRATED)
 endif()
 
@@ -1155,7 +1046,7 @@ if(EMSCRIPTEN)
         OUTPUT ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hexenwail-renderer.txt
         CONTENT "${WEB_RENDERER}")
     # Emscripten link flags: WebGL2, memory growth, shell template
-    # For pure Nix builds, use: nix develop -f shell-wasm.nix
+    # For Nix builds, use: nix develop .#wasm
     # callMain MUST stay in EXPORTED_RUNTIME_METHODS: the launcher defers main()
     # until the user's imported paks are in the FS, and INVOKE_RUN=0 otherwise
     # leaves no callMain wrapper for it to call at all.
@@ -1209,9 +1100,7 @@ if(BUILD_TESTING)
     add_test(NAME menu_pointer COMMAND menu_pointer_test)
 endif()
 
-if(RUST_ENGINE_FEATURES)
-    engine_rs_attach(${EXECUTABLE_NAME})
-endif()
+engine_rs_attach(${EXECUTABLE_NAME})
 
 #============================================================================
 # Link Libraries
@@ -1328,8 +1217,10 @@ else()
         ${ENGINE_TOP}/hexen2/host_cmd.c    # superseded by hexen2/server/host_cmd.c
         ${ENGINE_TOP}/hexen2/host_async.c  # background-save worker needs SDL threads
         ${ENGINE_TOP}/hexen2/net_loop.c    # loopback driver needs cls/ca_dedicated
-        ${COMMONDIR}/wad.c                 # gfx.wad lumps are renderer-only data
     )
+    # (wad.c used to be removed here too -- gfx.wad lumps are renderer-only
+    # data.  It is no longer an engine source at all: the wad port lives in the
+    # Rust archive, and h2ded simply never calls it.)
     list(APPEND SERVER_SOURCES
         ${ENGINE_TOP}/hexen2/server/host.c
         ${ENGINE_TOP}/hexen2/server/host_cmd.c
@@ -1357,11 +1248,7 @@ else()
     add_executable(h2ded ${SERVER_SOURCES})
     target_compile_definitions(h2ded PRIVATE SERVERONLY)
 
-    # SERVER_SOURCES is a copy of COMMON_SOURCES, so the selected C/Rust
-    # implementation is already consistent with the client target.
-    if(RUST_ENGINE_FEATURES)
-        engine_rs_attach(h2ded)
-    endif()
+    engine_rs_attach(h2ded)
     if(WIN32)
         target_link_libraries(h2ded PRIVATE ws2_32 winmm)
     else()
@@ -1396,30 +1283,21 @@ else()
     set(HWSV_SOURCES
         # portable bits shared with every other target
         ${UHEXEN2_SHARED}/q_endian.c
-        ${UHEXEN2_SHARED}/strlcat.c
-        ${UHEXEN2_SHARED}/strlcpy.c
         ${UHEXEN2_SHARED}/qsnprint.c
-        ${UHEXEN2_SHARED}/crc.c
         # h2shared, compiled here with -DH2W
-        ${COMMONDIR}/link_ops.c
-        ${COMMONDIR}/sizebuf.c
-        ${COMMONDIR}/msg_io.c
         ${COMMONDIR}/common.c
         ${COMMONDIR}/quakefs.c
         ${COMMONDIR}/miniz.c
         ${COMMONDIR}/cmd.c
         ${COMMONDIR}/cvar.c
         ${COMMONDIR}/host_string.c
-        ${COMMONDIR}/mathlib.c
         ${COMMONDIR}/zone.c
-        ${COMMONDIR}/hashindex.c
         ${COMMONDIR}/sv_model.c
         ${COMMONDIR}/pr_cmds.c
         ${COMMONDIR}/pr_edict.c
         ${COMMONDIR}/pr_exec.c
-        # HexenWorld's own shared layer
-        ${HW_TOP}/shared/info_str.c
-        ${HW_TOP}/shared/huffman.c
+        # HexenWorld's own shared layer.  info_str and huffman, like the
+        # h2shared ports above, come from the Rust engine archive.
         ${HW_TOP}/shared/net_udp.c
         ${HW_TOP}/shared/net_chan.c
         ${HW_TOP}/shared/pmove.c
@@ -1442,45 +1320,10 @@ else()
         list(APPEND HWSV_SOURCES ${HW_TOP}/server/sys_unix.c)
     endif()
 
-    # This list is independent of COMMON_SOURCES, so repeat each selected
-    # source removal for the HexenWorld server.
-    if(USE_RUST_HASHINDEX)
-        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/hashindex.c)
-    endif()
-    if(USE_MATHLIB_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/mathlib.c)
-    endif()
-    if(USE_SIZEBUF_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/sizebuf.c)
-    endif()
-    if(USE_CRC_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/crc.c)
-    endif()
-    if(USE_LINK_OPS_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/link_ops.c)
-    endif()
-    if(USE_MSG_IO_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${COMMONDIR}/msg_io.c)
-    endif()
-    if(USE_INFO_STR_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${HW_TOP}/shared/info_str.c)
-    endif()
-    if(USE_STRLCPY_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/strlcpy.c)
-    endif()
-    if(USE_STRLCAT_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/strlcat.c)
-    endif()
-    if(USE_HUFFMAN_RS)
-        list(REMOVE_ITEM HWSV_SOURCES ${HW_TOP}/shared/huffman.c)
-    endif()
-
     add_executable(hwsv ${HWSV_SOURCES})
     target_compile_definitions(hwsv PRIVATE H2W SERVERONLY)
 
-    if(RUST_ENGINE_FEATURES)
-        engine_rs_attach(hwsv)
-    endif()
+    engine_rs_attach(hwsv)
     # Order matters: hexenworld/shared shadows h2shared for quakedef.h et al.
     target_include_directories(hwsv BEFORE PRIVATE
         ${HW_TOP}/server

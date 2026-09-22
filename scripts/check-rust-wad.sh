@@ -12,12 +12,12 @@
 # The whole mapping is compared after every call, because the C edits it in
 # place -- names and picture headers -- rather than a copy.
 #
-# The CMake half proves the consolidated engine archive selects wad
-# independently, and covers the shape this port introduced: wad.c is compiled
-# into COMMON_SOURCES and removed again for h2ded ("gfx.wad lumps are
-# renderer-only data"), and HWSV_SOURCES never lists it.  glhexen2 is therefore
-# the only target that contains a definition, and the other two may only ever
-# have the unreferenced archive member pulled in for another port.
+# The CMake half checks the engine build every gate shares
+# (scripts/lib/rust-gate.sh), and covers the shape this port introduced: only
+# glhexen2 ever compiled wad.c (h2ded removed it -- gfx.wad lumps are
+# renderer-only data -- and HWSV_SOURCES never listed it), so glhexen2 is the
+# only target with a caller, and the other two may only ever have the
+# unreferenced archive member pulled in for another port.
 #
 # --engine is opt-in.  host.c and gl_vidsdl.c call W_LoadWadFile("gfx.wad") at
 # startup and the client and menu draw every character, icon and backtile from
@@ -35,13 +35,15 @@ set -euo pipefail
 run_engine=0
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		--engine) run_engine=1 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -101,15 +103,13 @@ if [ "${#count}" -lt 3 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_WAD_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_WAD_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. the archive exports the whole ABI exactly once =="
-archive="$work/build-on/rust/libengine_rs.a"
+archive="$engine_build/rust/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 for sym in "${symbols[@]}"; do
 	n=$(nm "$archive" 2>/dev/null | grep -cE " T $sym\$" || true)
@@ -144,14 +144,14 @@ echo "== 5. exactly one wad definition where it is reachable =="
 # glhexen2 is the only target with a caller -- the renderer, the menu and the
 # status bar -- so it must define every function, and all three globals.
 for sym in "${symbols[@]}"; do
-	n=$(nm "$work/build-on/bin/glhexen2" | grep -cE " [Tt] $sym\$" || true)
+	n=$(nm "$engine_build/bin/glhexen2" | grep -cE " [Tt] $sym\$" || true)
 	if [ "$n" -ne 1 ]; then
 		echo "FAIL: glhexen2: $sym has $n definitions, expected exactly 1" >&2
 		exit 1
 	fi
 done
 for sym in "${globals[@]}"; do
-	n=$(nm "$work/build-on/bin/glhexen2" | grep -cE " [BbDd] $sym\$" || true)
+	n=$(nm "$engine_build/bin/glhexen2" | grep -cE " [BbDd] $sym\$" || true)
 	if [ "$n" -ne 1 ]; then
 		echo "FAIL: glhexen2: $sym has $n definitions, expected exactly 1" >&2
 		exit 1
@@ -162,7 +162,7 @@ echo "  glhexen2: ${#symbols[@]}/${#symbols[@]} functions and ${#globals[@]}/${#
 # a caller: a definition there is the unreferenced archive member being pulled
 # in for another port, which is allowed but must never be more than one.
 for bin in h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -180,59 +180,15 @@ for bin in h2ded hwsv; do
 	done
 	echo "  $bin: every wad symbol at most once (no caller in this target)"
 done
-stray=$(find "$work/build-on" -name 'wad.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'wad.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray wad.c.o object(s) in a USE_WAD_RS=ON build" >&2
+	echo "FAIL: $stray wad.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
-echo
-echo "== 6. flag OFF still compiles the C original in its one target (rollback) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_WAD_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-found=$(find "$work/build-off" -name 'wad.c.o' -path "*glhexen2.dir*" | wc -l)
-if [ "$found" -ne 1 ]; then
-	echo "FAIL: OFF build of glhexen2 did not compile wad.c ($found objects)" >&2
-	exit 1
-fi
-for sym in "${symbols[@]}"; do
-	n=$(nm "$work/build-off/bin/glhexen2" | grep -cE " [Tt] $sym\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: OFF glhexen2: $sym has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-for sym in "${globals[@]}"; do
-	n=$(nm "$work/build-off/bin/glhexen2" | grep -cE " [BbDd] $sym\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: OFF glhexen2: $sym has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-# The two targets that remove wad.c from their source list must not grow one.
-for bin in h2ded hwsv; do
-	for sym in "${symbols[@]}"; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $sym\$" || true)
-		if [ "$n" -ne 0 ]; then
-			echo "FAIL: OFF $bin: $sym is defined $n times, expected 0" >&2
-			exit 1
-		fi
-	done
-	for sym in "${globals[@]}"; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [BbDd] $sym\$" || true)
-		if [ "$n" -ne 0 ]; then
-			echo "FAIL: OFF $bin: $sym is defined $n times, expected 0" >&2
-			exit 1
-		fi
-	done
-done
-echo "  the C wad.c is back in glhexen2, and never in h2ded or hwsv"
-
 if [ "$run_engine" -eq 1 ]; then
 	echo
-	echo "== 7. engine smoke: run the real engine both ways =="
+	echo "== 6. engine smoke: this engine against a C-only reference =="
 	# Reuses the hashindex smoke arm verbatim -- it starts the client, the
 	# dedicated server and, where data allows, loads a map, and diffs the two
 	# logs.  W_LoadWadFile runs during client startup (host.c:1555,
@@ -241,8 +197,8 @@ if [ "$run_engine" -eq 1 ]; then
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$work/build-on/bin/glhexen2" \
-	OFF_BIN="$work/build-off/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/glhexen2" \
+	OFF_BIN="$(rust_gate_reference_bin)" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
 		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" wad
@@ -252,5 +208,5 @@ echo
 echo "PASS: Rust wad -- the C as glhexen2 compiles it and the Rust module agree"
 echo "      byte for byte across the mapping they both edit in place, the"
 echo "      consolidated archive links exactly one definition in the one target"
-echo "      that has a caller, and the C fallback still compiles when"
-echo "      USE_WAD_RS=OFF."
+echo "      that has a caller, and no wad.c object is left in the engine"
+echo "      build."

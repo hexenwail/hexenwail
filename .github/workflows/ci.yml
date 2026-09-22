@@ -155,77 +155,29 @@ jobs:
             exit 1
           fi
 
-      # USE_RUST_HASHINDEX now defaults ON for native Linux builds;
-      # unsupported targets (WASM, Windows cross-compile, Flatpak) are
-      # explicitly configured with -DUSE_RUST_HASHINDEX=OFF in their
-      # build scripts or manifests.  This step still matters -- the
-      # differential harness proves the Rust implementation computes what the
-      # C original computed (not just that it links), and the flag-OFF rollback
-      # keeps a working C original in the build graph.
-      - name: Rust hashindex (differential test + flag-ON build)
-        run: nix develop .#default -c ./scripts/check-rust-hashindex.sh
+      # engine/rust is linked into every engine target on every platform; there
+      # is no C fallback to build.  What the nix builds above cannot show is
+      # that each port still computes what its C original computed, so this
+      # runs every differential harness against that C, the per-port symbol
+      # and stray-object checks, the Rust/C struct layouts, the toolchain pin
+      # and the rejection of the removed -DUSE_*_RS=OFF switches -- on one
+      # shared engine build.  (Before the archive was mandatory this was eleven
+      # steps that each built the engine twice, once per flag setting:
+      # twenty-two builds of one tree.)  Per-port notes -- msg_io's three-way
+      # H2/H2W/Rust comparison, info_str's hwsv-only shape, huffman's two
+      # allocation strategies and guard-page decode -- live in the header of
+      # each scripts/check-rust-<port>.sh.
+      - name: Rust ports (differential harnesses, symbols, ABI)
+        run: nix develop .#default -c bash ./scripts/check-rust.sh
 
-      # The differential harness proves the Rust implementation computes what
-      # the C original computed, while the flag-OFF rollback keeps the C
-      # implementation exercised.
-      - name: Rust mathlib (differential test + flag-ON build)
-        run: nix develop .#default -c ./scripts/check-rust-mathlib.sh
-
-      - name: Rust sizebuf (differential test + flag-ON build)
-        run: nix develop .#default -c ./scripts/check-rust-sizebuf.sh
-
-      - name: Rust crc (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-crc.sh
-
-      - name: Rust link_ops (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-link-ops.sh
-
-      # msg_io is the only port whose C original is compiled differently per
-      # target (-DH2W in hwsv only).  The harness therefore links three
-      # implementations into one binary -- the C as compiled without H2W, the C
-      # as compiled with it, and the Rust union -- and requires all three to
-      # agree byte for byte.
-      - name: Rust msg_io (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-msg-io.sh
-
-      # info_str is the first port whose C original is compiled by one target
-      # only: info_str.c is in HWSV_SOURCES alone, and every Hexen II use of
-      # Info_* is inside `#if defined(H2W)`, so glhexen2 and h2ded have no
-      # caller.  Of the two variants in its C body only the SERVERONLY one has
-      # ever been compiled, so that is the one the harness compares against.
-      - name: Rust info_str (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-info-str.sh
-
-      - name: Rust strlcpy (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-strlcpy.sh
-
-      # strlcat shares strlcpy's ABI but not its contract: it scans the
-      # destination first, so the harness drives a destination with no NUL
-      # inside `siz` (must not be written at all) and checks the return value
-      # against strlen(src) + MIN(siz, strlen(initial dst)) rather than against
-      # source_len alone.
-      - name: Rust strlcat (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-strlcat.sh
-
-      # huffman is the first port whose C original is compiled for two targets
-      # with a different allocation strategy each (hwsv's hunk versus the
-      # integrated client's malloc), and the first whose decode path is fed
-      # attacker-controlled bytes.  The harness therefore compiles the C both
-      # ways and requires both to agree before either is compared with Rust,
-      # and pins the bounded bit read on malformed input with a guard page.
-      - name: Rust huffman (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-huffman.sh
-
-      # wad is the only port whose C original is compiled into a single target:
-      # wad.c is in COMMON_SOURCES and is removed again for h2ded ("gfx.wad
-      # lumps are renderer-only data"), and HWSV_SOURCES never lists it.  So the
-      # harness has one C to compare against, the gate requires exactly one
-      # definition in glhexen2 and at most one in the other two, and the port's
-      # three exported globals keep the C's types.  The --engine arm is opt-in:
-      # W_LoadWadFile runs at client startup and every character and icon is
-      # drawn from those lumps, so an ON/OFF console diff is meaningful here.
-      - name: Rust wad (differential test + flag-ON build)
-        run: nix develop .#default -c bash ./scripts/check-rust-wad.sh
+      # The PWA job builds with emsdk + rustup, so nothing else touches the
+      # nix route to the web client: `nix develop .#wasm`, whose Rust comes
+      # from rust-overlay at the version engine/rust/rust-toolchain.toml pins.
+      # Evaluating it is cheap and fails if the pin names a release the locked
+      # rust-overlay does not know -- the drift check-rust.sh cannot see,
+      # because it only compares the pin against nixpkgs' rustc.
+      - name: Evaluate the wasm dev shell
+        run: nix eval --raw .#devShells.x86_64-linux.wasm.drvPath
 
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
@@ -324,11 +276,15 @@ jobs:
           # --no-related skips the extensions flatpak would otherwise drag in
           # with the runtime — .Locale (both Platform and Sdk), .GL.default,
           # .codecs-extra — none of which a build needs.  Worth ~16s.  The
-          # action's own --install-deps-from=flathub only installs the runtime
-          # and sdk the manifest names, so it does not pull them back.
+          # action's own --install-deps-from=flathub only installs the runtime,
+          # sdk and sdk-extensions the manifest names, so it does not pull them
+          # back.  rust-stable is one of those: the engine links engine/rust
+          # on every target, and it is where the Flatpak build gets cargo.  It
+          # is installed here, as root, for the same polkit reason as the SDK.
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive --no-related flathub \
-            org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+            org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
       # No cache-key: the action's default is
       # flatpak-builder-<arch>-<sha256(manifest)[:20]>, and its only restore
       # fallback is the prefix "flatpak-builder-<arch>".  A key containing

@@ -7,8 +7,8 @@
 // The engine calls these functions directly and `engine/h2shared/mathlib.h`
 // is not modified by this port.  The exported names must therefore be
 // byte-identical to the C originals.  What keeps the link free of duplicate
-// symbols is that `mathlib.c` is removed from the build when
-// `USE_MATHLIB_RS` is on (see engine/CMakeLists.txt) -- not a name prefix.
+// symbols is that no engine target compiles `mathlib.c` (see
+// engine/CMakeLists.txt) -- not a name prefix.
 //
 // # Why only the exported functions are here
 //

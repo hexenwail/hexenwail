@@ -1,0 +1,21 @@
+# The one Rust version pin for toolchains that are not nixpkgs'.
+#
+# Native and MinGW builds under nix use nixpkgs' rustc (flake.nix), which the
+# flake.lock pins.  The WebAssembly client needs the wasm32-unknown-emscripten
+# standard library, which nixpkgs does not ship, so those builds take an
+# official toolchain instead, and this file says which one:
+#
+#   - flake.nix reads it through rust-overlay for .#wasm and devShells.wasm;
+#   - .github/actions/wasm-build reads `channel` and installs it with rustup
+#     for the PR "PWA / WebAssembly" check and the Pages deploy.
+#
+# `channel` must equal the nixpkgs rustc version so the nix and web builds
+# compile the same Rust; scripts/check-rust.sh fails when a flake.lock bump
+# moves one and not the other.  The one build it does not reach is the
+# Flatpak, which takes whatever Flathub's rust-stable extension ships for the
+# 25.08 SDK (it must still satisfy Cargo.toml's rust-version).  rustup also
+# honours this file for anyone running cargo from inside engine/rust.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+targets = ["wasm32-unknown-emscripten"]

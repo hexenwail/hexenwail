@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// engine_rs -- the single Rust static library linked by the C engine while the
-// subsystem ports are being migrated.  Features are selected by CMake so each
-// subsystem retains an independent C fallback during the transition.
+// engine_rs -- the single Rust static library linked into every C engine
+// target.  CMake always builds it with every feature; there is no C fallback.
+// The features exist so each differential harness under engine/rust/*/tests
+// can link the one subsystem it compares against its C original.
 //
 // Copyright (C) 2026 Hexenwail contributors.
 
@@ -17,7 +18,7 @@ pub mod hashindex;
 pub mod mathlib;
 
 // msg_io reads and writes through the sizebuf ABI, so it needs SizeBufC even
-// when the sizebuf functions themselves are left to the C original.  The
+// in a harness build that leaves the sizebuf functions to the C original.  The
 // layout lives in one place; which half of sizebuf.rs is compiled is decided
 // there.
 #[cfg(any(feature = "sizebuf", feature = "msg_io"))]
@@ -74,8 +75,12 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() {}
 
-#[cfg(feature = "mathlib")]
 /// The engine's C callers link against this existing global symbol.
+///
+/// Not on wasm: rustc makes `#[no_mangle] static`s local in a wasm32
+/// staticlib, so the web client takes the storage from
+/// engine/rust/wasm_globals.c instead.  Nothing in Rust reads it.
+#[cfg(all(feature = "mathlib", not(target_family = "wasm")))]
 #[no_mangle]
 pub static mut vec3_origin: mathlib::Vec3 = [0.0, 0.0, 0.0];
 

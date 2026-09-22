@@ -11,8 +11,8 @@
 # and the pre-registration one, the four-buffer rotation by pointer identity, and
 # the in-place rewrites of Info_RemoveKey and Info_RemovePrefixedKeys.
 #
-# The CMake half proves the consolidated engine archive selects info_str
-# independently, and covers the shape this port introduced: info_str.c is
+# The CMake half checks the engine build every gate shares
+# (scripts/lib/rust-gate.sh), and covers the shape this port introduced: info_str.c is
 # compiled into HWSV_SOURCES alone, so the C symbols exist in hwsv and nowhere
 # else, while the Rust archive is linked into all three targets.  hwsv must
 # therefore define each of the six exactly once, and glhexen2 and h2ded at most
@@ -30,12 +30,14 @@ set -euo pipefail
 
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -93,15 +95,13 @@ if [ "${#count}" -lt 3 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_INFO_STR_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_INFO_STR_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. the archive exports the whole ABI exactly once =="
-archive="$work/build-on/rust/libengine_rs.a"
+archive="$engine_build/rust/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 for sym in "${symbols[@]}"; do
 	n=$(nm "$archive" 2>/dev/null | grep -cE " T $sym\$" || true)
@@ -141,7 +141,7 @@ echo "== 5. exactly one info_str definition where it is reachable =="
 # archive member being pulled in for another port, which is allowed but must
 # never be more than one.
 for sym in "${symbols[@]}"; do
-	n=$(nm "$work/build-on/bin/hwsv" | grep -cE " [Tt] $sym\$" || true)
+	n=$(nm "$engine_build/bin/hwsv" | grep -cE " [Tt] $sym\$" || true)
 	if [ "$n" -ne 1 ]; then
 		echo "FAIL: hwsv: $sym has $n definitions, expected exactly 1" >&2
 		exit 1
@@ -149,7 +149,7 @@ for sym in "${symbols[@]}"; do
 done
 echo "  hwsv: ${#symbols[@]}/${#symbols[@]} symbols exactly once"
 for bin in glhexen2 h2ded; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -160,49 +160,14 @@ for bin in glhexen2 h2ded; do
 	done
 	echo "  $bin: every info_str symbol at most once (no caller in this target)"
 done
-stray=$(find "$work/build-on" -name 'info_str.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'info_str.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray info_str.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray info_str.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
 echo
-echo "== 6. flag OFF still compiles info_str.c where it is used (rollback) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_INFO_STR_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded; do
-	found=$(find "$work/build-off" -name 'info_str.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 0 ]; then
-		echo "FAIL: OFF build of $bin compiled info_str.c ($found objects): the C" >&2
-		echo "      original is only in HWSV_SOURCES" >&2
-		exit 1
-	fi
-	for sym in "${symbols[@]}"; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $sym\$" || true)
-		if [ "$n" -ne 0 ]; then
-			echo "FAIL: OFF $bin: $sym is defined $n times, expected 0" >&2
-			exit 1
-		fi
-	done
-done
-found=$(find "$work/build-off" -name 'info_str.c.o' -path "*hwsv.dir*" | wc -l)
-if [ "$found" -ne 1 ]; then
-	echo "FAIL: OFF build of hwsv did not compile info_str.c ($found objects)" >&2
-	exit 1
-fi
-for sym in "${symbols[@]}"; do
-	n=$(nm "$work/build-off/bin/hwsv" | grep -cE " [Tt] $sym\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: OFF hwsv: $sym has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-echo "  the C info_str.c is back in hwsv, and was never in glhexen2 or h2ded"
-
-echo
 echo "PASS: Rust info_str -- the C as hwsv compiles it and the Rust module agree"
 echo "      across successive calls, the consolidated archive links exactly one"
-echo "      definition where the code is reachable, and the C fallback still"
-echo "      compiles when USE_INFO_STR_RS=OFF."
+echo "      definition where the code is reachable, and no info_str.c object"
+echo "      is left in the engine build."
