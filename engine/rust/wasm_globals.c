@@ -28,7 +28,7 @@
  * If C starts reading one, the web link fails on it -- loudly -- and it
  * belongs in this file with an extern in wad.rs, as for the three above.
  *
- * engine/CMakeLists.txt adds this file when EMSCRIPTEN is set, and
+ * engine/CMakeLists.txt adds this file to Emscripten builds only, and
  * scripts/check-rust-abi.sh --wasm links it into its layout check.
  */
 
