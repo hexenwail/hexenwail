@@ -63,6 +63,8 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 # enumeration were cut down to nothing -- so floor the count at eight digits (ten
 # million cases) rather than pinning it, which would mean editing the gate every
 # time the enumeration is deliberately widened.
+# Observed today: 16,884,495 cases, and the count is deterministic.  The floor
+# is one decimal place below it.
 count_line=$(grep -E '^crc differential harness: PASS \(' "$diff_log" || true)
 count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
 if [ "${#count}" -lt 8 ]; then

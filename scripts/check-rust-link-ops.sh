@@ -77,6 +77,7 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 # enumeration were cut down to nothing -- so floor the count at four digits (a
 # thousand cases) rather than pinning it, which would mean editing the gate every
 # time the enumeration is deliberately widened.
+# Observed today: 1,579 cases.  The floor is one decimal place below it.
 count_line=$(grep -E '^link_ops differential harness: PASS \(' "$diff_log" || true)
 count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
 if [ "${#count}" -lt 4 ]; then
