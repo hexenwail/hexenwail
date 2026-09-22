@@ -82,6 +82,7 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 # editing the gate every time the enumeration is deliberately widened.  The
 # first number on the line is the expectation count; the second is the failure
 # count, which the harness exits non-zero on.
+# Observed today: 231 expectations.  The floor is one decimal place below it.
 count_line=$(grep -E '^checked [0-9]+ expectations, [0-9]+ failures$' "$diff_log" || true)
 count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
 if [ "${#count}" -lt 3 ]; then
