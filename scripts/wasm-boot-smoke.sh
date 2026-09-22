@@ -57,8 +57,8 @@ site=$(mktemp -d)
 server_pid=""
 chrome_pid=""
 cleanup() {
-	[ -n "$chrome_pid" ] && kill "$chrome_pid" 2>/dev/null || true
-	[ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+	if [ -n "$chrome_pid" ]; then kill "$chrome_pid" 2>/dev/null || true; fi
+	if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
 	# Chrome's helper processes can still be writing the profile when the
 	# main pid is gone; a cleanup hiccup must not overturn the verdict.
 	rm -rf "$site" 2>/dev/null || true
