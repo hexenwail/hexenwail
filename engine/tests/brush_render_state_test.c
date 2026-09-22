@@ -181,7 +181,14 @@ int main (void)
 		{"opaque liquid", {true, 1.0f, 0.5f, true, BRUSH_SURFACE_LIQUID}, true, false, false, 1.0f},
 		{"opaque cutout with drawflag", {true, 1.0f, 0.5f, true, BRUSH_SURFACE_CUTOUT}, true, true, true, 1.0f},
 		{"opaque cutout", {true, 1.0f, 0.5f, false, BRUSH_SURFACE_CUTOUT}, true, false, true, 1.0f},
-		{"drawflag regular", {false, 1.0f, 1.0f, true, BRUSH_SURFACE_REGULAR}, true, true, false, 1.0f}
+		{"drawflag regular", {false, 1.0f, 1.0f, true, BRUSH_SURFACE_REGULAR}, true, true, false, 1.0f},
+		/* Vanilla coupling: a regular DRF_TRANSLUCENT brush takes the caller's
+		 * default, which gl_rsurf.c fills in from r_wateralpha (issue #250). */
+		{"drawflag regular uses caller default", {false, 1.0f, 0.33f, true, BRUSH_SURFACE_REGULAR}, true, true, false, 0.33f},
+		{"drawflag opaque liquid", {false, 1.0f, 1.0f, true, BRUSH_SURFACE_LIQUID}, true, false, false, 1.0f},
+		{"drawflag invisible regular", {true, 0.0f, 1.0f, true, BRUSH_SURFACE_REGULAR}, false, false, false, 0.0f},
+		{"drawflag explicit regular", {true, 0.25f, 1.0f, true, BRUSH_SURFACE_REGULAR}, true, true, false, 0.25f},
+		{"drawflag explicit opaque regular", {true, 1.0f, 0.5f, true, BRUSH_SURFACE_REGULAR}, true, true, false, 1.0f}
 	};
 	static const poly_count_order_case_t order_cases[] =
 	{
