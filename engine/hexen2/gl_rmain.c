@@ -187,7 +187,15 @@ cvar_t	r_oldskyleaf = {"r_oldskyleaf", "0", CVAR_NONE};
  * capability without touching the fixed one. */
 cvar_t	r_drawparticles = {"r_drawparticles", "1", CVAR_ARCHIVE};
 cvar_t	r_mirroralpha = {"r_mirroralpha", "1", CVAR_NONE};
-cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
+/* Vanilla's default, restored (issue #250).  Two unrelated things read this
+ * cvar and vanilla reads the SAME value for both: the translucent turb
+ * allowlist in Mod_SetDrawingFlags (*lowlight, *rtex078) and every
+ * DRF_TRANSLUCENT brush entity.  Hexen II's teleporter shells are
+ * func_illusionary with spawnflags 1 (gamecode/hc/h2/misc.hc), so defaulting
+ * to 1 rendered the portals opaque out of the box where vanilla shows them
+ * translucent.  1 still means opaque for both, exactly as in vanilla; the
+ * Water Alpha row reaches 0.33 again after the same restore (menu.c). */
+cvar_t	r_wateralpha = {"r_wateralpha", "0.33", CVAR_ARCHIVE};
 /* Lightmapped liquid surfaces.  Ironwail default and value set (CVAR_NONE, 1
  * = on).  A map only has lit water if it was compiled with it, so on a vanilla
  * Hexen II map this switch reaches nothing: Mod_SetDrawingFlags leaves every

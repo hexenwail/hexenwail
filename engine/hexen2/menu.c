@@ -3292,7 +3292,7 @@ static void M_Rendering_AdjustSliders (int dir)
 	case REND_WATERALPHA:
 	{
 		float f = r_wateralpha.value + dir * 0.05f;
-		if (f < 0.7f) f = 0.7f;
+		if (f < 0.1f) f = 0.1f;
 		if (f > 1.0f) f = 1.0f;
 		Cvar_SetValue ("r_wateralpha", f);
 		break;
@@ -9563,7 +9563,7 @@ static const menuslider_t	snd_sliders[] =
 static const menuslider_t	rend_sliders[] =
 {
 	{ REND_DITHER,		"r_dither",	0.0f, 2.0f,	0.0f, 2.0f,	0.25f, NULL },
-	{ REND_WATERALPHA,	"r_wateralpha",	0.0f, 1.0f,	0.7f, 1.0f,	0.05f, NULL },
+	{ REND_WATERALPHA,	"r_wateralpha",	0.0f, 1.0f,	0.1f, 1.0f,	0.05f, NULL },
 	{ REND_LIQUIDWARP,	"gl_waterwarp_amount", 0.0f, 2.0f, 0.0f, 2.0f,	0.1f, NULL, true },
 	{ REND_FLASHINTENSITY,	"gl_flashintensity", 0.0f, 2.0f, 0.0f, 2.0f,	0.25f, NULL, true },
 	{ REND_MOTIONBLUR,	"r_motionblur",	0.0f, 1.0f,	0.0f, 1.0f,	0.25f, NULL, true },
