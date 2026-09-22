@@ -28,12 +28,35 @@ cannot drift apart — see the header of `scripts/wasm-build.sh`. Hand-rolled
 reintroduce them here.
 
 ```bash
+nix develop .#wasm                      # or: emsdk_env.sh + rustup, below
 ./scripts/wasm-build.sh                 # engine -> engine/build/bin/
 ./scripts/wasm-assemble-artifact.sh dist
 ./scripts/wasm-validate-artifact.sh dist
 ```
 
 Build output lands in `engine/build/bin/`; the assembled site lands in `dist/`.
+
+The engine's Rust archive (`engine/rust`) is linked into the web client as
+into every other target, so the build needs cargo with the
+`wasm32-unknown-emscripten` target as well as Emscripten.  `nix develop .#wasm`
+provides both.  Without nix, activate emsdk and install the pinned toolchain:
+
+```bash
+export RUSTUP_TOOLCHAIN="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' engine/rust/rust-toolchain.toml)"
+rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --target wasm32-unknown-emscripten
+```
+
+The export is not optional: CMake runs cargo from the build tree, where rustup
+never sees `engine/rust/rust-toolchain.toml`, so without it cargo uses your
+default toolchain, which usually lacks the Emscripten target.
+
+Two checks run against the result in CI and work locally too:
+
+```bash
+./scripts/check-rust-abi.sh --wasm              # Rust/C struct layouts at 4-byte pointers
+./scripts/wasm-boot-smoke.sh engine/build/bin   # boots hexenwail.wasm to FS_Init's data gate
+./scripts/wasm-boot-smoke.sh engine/build/bin /path/to/basedir   # ... or into demo1
+```
 
 ### The two web renderers
 

@@ -51,9 +51,9 @@ use core::ffi::{c_char, c_float, c_int, c_void};
 use crate::sizebuf::SizeBufC;
 
 extern "C" {
-    // Provided by the sizebuf port when that feature is on, and by the C
-    // original when it is off.  Either way this is the same ABI, and this
-    // module has no opinion about which one is linked.
+    // Provided by the sizebuf port in the same archive.  Called through the
+    // C ABI, exactly as msg_io.c calls sizebuf.c, so this module depends on
+    // the interface and not on which implementation is linked.
     fn SZ_GetSpace(buf: *mut SizeBufC, length: c_int) -> *mut c_void;
     fn SZ_Write(buf: *mut SizeBufC, data: *const c_void, length: c_int);
     fn strlen(s: *const c_char) -> usize;
@@ -355,14 +355,27 @@ pub unsafe extern "C" fn MSG_WriteUsercmd(
 //============================================================================
 
 /// Read cursor into the selected message.  `cl_hw.c` writes this directly.
+#[cfg(not(target_family = "wasm"))]
 #[no_mangle]
 pub static mut msg_readcount: c_int = 0;
 
 /// Set by any read that runs off the end of the message, and sticky until the
 /// next MSG_BeginReading/MSG_BeginReadingFrom.  qboolean is a four-byte C int
 /// here, so this must not be a Rust bool.
+#[cfg(not(target_family = "wasm"))]
 #[no_mangle]
 pub static mut msg_badread: c_int = 0;
+
+// rustc does not export `#[no_mangle] static`s from a wasm32 staticlib: it
+// keeps the functions global and turns the data into local symbols, so the
+// web client's C would find neither.  There the storage is C's, in
+// engine/rust/wasm_globals.c, and this module uses it like any other extern.
+// Same names, types and zero initial values, so nothing below changes.
+#[cfg(target_family = "wasm")]
+extern "C" {
+    pub static mut msg_readcount: c_int;
+    pub static mut msg_badread: c_int;
+}
 
 /// The buffer the readers consume.  Defaults to `net_message`, so a read that
 /// arrives before any MSG_BeginReading behaves as it did when net_message was

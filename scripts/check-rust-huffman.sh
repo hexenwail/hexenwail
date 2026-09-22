@@ -29,12 +29,12 @@
 # every feature, which is what the CMake arms link and what the symbol checks
 # below are about.
 #
-# The CMake half proves the flag selects huffman independently: huffman.c is
-# compiled into glhexen2 through HW_CLIENT_NET_SOURCES and into hwsv through
-# HWSV_SOURCES, and h2ded never compiles it at all.  So the ON build must define
-# each symbol in the C original exactly once in glhexen2 and hwsv and at most
-# once in h2ded, with no huffman.c objects anywhere, and the OFF build must put
-# the C back in glhexen2 and hwsv and nowhere else.
+# The CMake half checks the engine build every gate shares
+# (scripts/lib/rust-gate.sh).  huffman.c used to be compiled into glhexen2
+# through HW_CLIENT_NET_SOURCES and into hwsv through HWSV_SOURCES, and h2ded
+# never compiled it at all.  So the build must define each symbol exactly once
+# in glhexen2 and hwsv and at most once in h2ded, with no huffman.c objects
+# anywhere.
 #
 # hw_utils is deliberately out of scope: hwterm and hwrcon compile
 # hexenworld/shared/huffman.c directly (hw_utils/CMakeLists.txt) and link no
@@ -48,12 +48,14 @@ set -euo pipefail
 
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -115,15 +117,13 @@ cargo build --release --offline \
 	--features hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,huffman
 
 echo
-echo "== 4. build all three targets with USE_HUFFMAN_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_HUFFMAN_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 4. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 5. the archive exports the whole ABI exactly once =="
-archive="$work/build-on/rust/libengine_rs.a"
+archive="$engine_build/rust/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 for sym in "${symbols[@]}" "${accessors[@]}"; do
 	n=$(nm "$archive" 2>/dev/null | grep -cE " T $sym\$" || true)
@@ -134,17 +134,17 @@ for sym in "${symbols[@]}" "${accessors[@]}"; do
 done
 echo "  libengine_rs.a: $(( ${#symbols[@]} + ${#accessors[@]} ))/$(( ${#symbols[@]} + ${#accessors[@]} )) symbols once"
 
-# The C original must not be in the ON build at all: with huffman.c compiled
+# The C original must not be in the build at all: with huffman.c compiled
 # and the archive linked, every target that compiles it would define each of
 # the three names twice, and a duplicate definition is only ever reported as a
 # link error in whichever target the linker happened to look at first.
-stray=$(find "$work/build-on" -name 'huffman.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'huffman.c.o' | wc -l)
 if [ "$stray" -ne 0 ]; then
-	echo "FAIL: $stray huffman.c.o object(s) in a USE_HUFFMAN_RS=ON build" >&2
-	find "$work/build-on" -name 'huffman.c.o' >&2
+	echo "FAIL: $stray huffman.c.o object(s) in the engine build" >&2
+	find "$engine_build" -name 'huffman.c.o' >&2
 	exit 1
 fi
-echo "  no huffman.c object in the ON build (the Rust archive is the only definition)"
+echo "  no huffman.c object in the build (the Rust archive is the only definition)"
 
 echo
 echo "== 6. exactly one definition where the C original is reachable =="
@@ -155,7 +155,7 @@ echo "== 6. exactly one definition where the C original is reachable =="
 # another port -- allowed, but never more than one.
 for sym in "${symbols[@]}"; do
 	for bin in glhexen2 hwsv; do
-		path="$work/build-on/bin/$bin"
+		path="$engine_build/bin/$bin"
 		[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
 		if [ "$n" -ne 1 ]; then
@@ -163,7 +163,7 @@ for sym in "${symbols[@]}"; do
 			exit 1
 		fi
 	done
-	n=$(nm "$work/build-on/bin/h2ded" | grep -cE " [Tt] $sym\$" || true)
+	n=$(nm "$engine_build/bin/h2ded" | grep -cE " [Tt] $sym\$" || true)
 	if [ "$n" -gt 1 ]; then
 		echo "FAIL: h2ded: $sym is defined $n times, expected at most 1" >&2
 		exit 1
@@ -173,46 +173,9 @@ echo "  glhexen2 and hwsv: ${#symbols[@]}/${#symbols[@]} symbols exactly once"
 echo "  h2ded: every symbol at most once (it never compiles huffman.c)"
 
 echo
-echo "== 7. flag OFF still compiles huffman.c where it is used (rollback) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_HUFFMAN_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 hwsv; do
-	found=$(find "$work/build-off" -name 'huffman.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin compiled huffman.c $found times, expected 1" >&2
-		exit 1
-	fi
-	for sym in "${symbols[@]}"; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $sym\$" || true)
-		if [ "$n" -ne 1 ]; then
-			echo "FAIL: OFF $bin: $sym has $n definitions, expected exactly 1" >&2
-			exit 1
-		fi
-	done
-	echo "  $bin: the C huffman.c is back, and defines every symbol exactly once"
-done
-for sym in "${symbols[@]}"; do
-	n=$(nm "$work/build-off/bin/h2ded" | grep -cE " [Tt] $sym\$" || true)
-	if [ "$n" -ne 0 ]; then
-		echo "FAIL: OFF h2ded: $sym is defined $n times, expected 0 -- h2ded" >&2
-		echo "      never compiles huffman.c and the Rust huffman feature is off" >&2
-		exit 1
-	fi
-done
-found=$(find "$work/build-off" -name 'huffman.c.o' -path "*h2ded.dir*" | wc -l)
-if [ "$found" -ne 0 ]; then
-	echo "FAIL: OFF build of h2ded compiled huffman.c ($found objects): it is not" >&2
-	echo "      in any list h2ded uses" >&2
-	exit 1
-fi
-echo "  h2ded: neither the C original nor a Rust definition, as before"
-
-echo
 echo "PASS: Rust huffman -- the C as hwsv and as the integrated client compile it"
 echo "      agree with each other byte for byte before either is compared with the"
 echo "      Rust module, the decode path stays inside the caller's buffer where the"
 echo "      C's does not, the consolidated archive defines the ABI exactly once"
-echo "      wherever huffman.c is reachable, and the C fallback still compiles when"
-echo "      USE_HUFFMAN_RS=OFF."
+echo "      wherever huffman.c was reachable, and no huffman.c object is left in"
+echo "      the engine build."

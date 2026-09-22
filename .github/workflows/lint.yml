@@ -35,10 +35,14 @@ jobs:
 
       - name: Shellcheck
         run: |
-          shellcheck scripts/mkrelease.sh flatpak/hexenwail.sh \
+          # -x so the Rust gates' `. scripts/lib/rust-gate.sh` is followed
+          # and checked with them rather than reported as unreadable.
+          shellcheck -x scripts/mkrelease.sh flatpak/hexenwail.sh \
             scripts/wasm-build.sh scripts/wasm-assemble-artifact.sh \
             scripts/wasm-validate-artifact.sh scripts/webgl-smoke-test.sh \
-            scripts/demo-playback-smoke.sh
+            scripts/demo-playback-smoke.sh scripts/wasm-boot-smoke.sh \
+            scripts/check-rust.sh scripts/check-rust-abi.sh \
+            scripts/lib/rust-gate.sh
 
       # The metainfo is what GNOME Software and KDE Discover read, and Flathub
       # rejects a submission whose metainfo does not validate.  Nothing checked

@@ -5,8 +5,9 @@
 # The differential half proves the CCITT CRC is bit-identical to the C
 # original: every (running value, byte) step exhaustively, CRC_Value over all
 # 2^16 inputs, a published check value, and seeded random blocks at unaligned
-# offsets.  The CMake half proves the consolidated engine archive selects crc
-# independently and that the C fallback remains buildable.
+# offsets.  The CMake half proves the consolidated engine archive exports it
+# and the engine build every gate shares (scripts/lib/rust-gate.sh) links it
+# exactly once per binary with no C object left in the build.
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
@@ -16,12 +17,14 @@ set -euo pipefail
 
 for arg in "$@"; do
 	case "$arg" in
-		-h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/rust-gate.sh
+. "$root/scripts/lib/rust-gate.sh"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -75,11 +78,9 @@ if [ "${#count}" -lt 8 ]; then
 fi
 
 echo
-echo "== 3. build all three targets with USE_CRC_RS=ON =="
-cmake -B "$work/build-on" -S "$root/engine" \
-	-DUSE_CRC_RS=ON \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-on" -j"$(nproc)" >/dev/null
+echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+engine_build=$(rust_gate_engine_build "$work")
+echo "  $engine_build"
 
 echo
 echo "== 4. exactly one crc definition per binary =="
@@ -87,7 +88,7 @@ echo "== 4. exactly one crc definition per binary =="
 # no engine caller, so whether it is present depends on how rustc partitioned
 # codegen units; require it at most once there, and every called symbol
 # exactly once.
-archive="$work/build-on/rust/libengine_rs.a"
+archive="$engine_build/rust/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 for sym in "${symbols[@]}"; do
 	n=$(nm "$archive" 2>/dev/null | grep -cE " T $sym\$" || true)
@@ -98,7 +99,7 @@ for sym in "${symbols[@]}"; do
 done
 echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} symbols exported exactly once"
 for bin in glhexen2 h2ded hwsv; do
-	path="$work/build-on/bin/$bin"
+	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -112,33 +113,12 @@ for bin in glhexen2 h2ded hwsv; do
 	done
 	echo "  $bin: called crc symbols exactly once, CRC_Value at most once"
 done
-stray=$(find "$work/build-on" -name 'crc.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'crc.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
-	echo "FAIL: $stray crc.c.o object(s) in an ON build" >&2
+	echo "FAIL: $stray crc.c.o object(s) in the engine build" >&2
 	exit 1
 }
 
-echo
-echo "== 5. flag OFF still compiles crc.c (rollback is real) =="
-cmake -B "$work/build-off" -S "$root/engine" \
-	-DUSE_CRC_RS=OFF \
-	-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >/dev/null
-cmake --build "$work/build-off" -j"$(nproc)" >/dev/null
-for bin in glhexen2 h2ded hwsv; do
-	found=$(find "$work/build-off" -name 'crc.c.o' -path "*$bin.dir*" | wc -l)
-	if [ "$found" -ne 1 ]; then
-		echo "FAIL: OFF build of $bin did not compile crc.c ($found objects)" >&2
-		exit 1
-	fi
-	for sym in "${symbols[@]}"; do
-		n=$(nm "$work/build-off/bin/$bin" | grep -cE " [Tt] $sym\$" || true)
-		if [ "$n" -ne 1 ]; then
-			echo "FAIL: OFF $bin: $sym has $n definitions, expected exactly 1" >&2
-			exit 1
-		fi
-	done
-done
-
 echo "PASS: Rust crc -- differential harness green, the consolidated archive"
-echo "      links exactly one symbol per target, and the C fallback still"
-echo "      compiles when USE_CRC_RS=OFF."
+echo "      links exactly one symbol per target, and no crc.c object is left"
+echo "      in the engine build."

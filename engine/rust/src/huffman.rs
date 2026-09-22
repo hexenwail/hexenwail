@@ -64,8 +64,8 @@ include!(concat!(env!("OUT_DIR"), "/hufffreq.rs"));
 const HUFF_NODES: usize = 512;
 
 /// `huffnode_t`.  The C spells the trailing 3 bytes out as `pad[3]`; this is
-/// the same 24-byte object with the same offsets, which the assertions below
-/// pin.
+/// the same object with the same offsets (24 bytes on 64-bit, 16 on wasm32),
+/// which the assertions below pin.
 #[repr(C)]
 struct HuffNode {
     zero: *mut HuffNode,
@@ -88,7 +88,13 @@ const _: () = {
     assert!(core::mem::offset_of!(HuffNode, one) == core::mem::size_of::<*mut HuffNode>());
     assert!(core::mem::offset_of!(HuffNode, freq) == 2 * core::mem::size_of::<*mut HuffNode>());
     assert!(core::mem::offset_of!(HuffNode, val) == 2 * core::mem::size_of::<*mut HuffNode>() + 4);
-    assert!(core::mem::size_of::<HuffNode>() == 24);
+    // Two pointers, a float, val and pad[3], rounded to pointer alignment:
+    // 24 bytes on 64-bit targets, 16 on the ILP32 WebAssembly client.
+    assert!(
+        core::mem::size_of::<HuffNode>()
+            == (2 * core::mem::size_of::<*mut HuffNode>() + 8)
+                .next_multiple_of(core::mem::align_of::<*mut HuffNode>())
+    );
     assert!(core::mem::offset_of!(HuffTab, bits) == 0);
     assert!(core::mem::offset_of!(HuffTab, len) == 4);
     assert!(core::mem::size_of::<HuffTab>() == 8);

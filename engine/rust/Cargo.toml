@@ -2,6 +2,9 @@
 name = "engine-rs"
 version = "0.1.0"
 edition = "2021"
+# &raw mut (msg_io.rs) needs 1.82.  Stated so an older distro rustc reports
+# the version instead of a syntax error.
+rust-version = "1.82"
 license = "GPL-3.0-or-later"
 description = "Consolidated Rust FFI ports for the Hexenwail engine"
 publish = false

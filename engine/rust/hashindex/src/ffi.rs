@@ -7,9 +7,8 @@
 // 61 call sites across seven files call these functions directly, and
 // `engine/h2shared/hashindex.h` is not modified by this port.  The exported
 // names must therefore be byte-identical to the C originals.  What keeps the
-// link free of duplicate symbols is that `hashindex.c` is removed from the
-// build when `USE_RUST_HASHINDEX` is on (see engine/CMakeLists.txt) -- not a
-// name prefix.
+// link free of duplicate symbols is that no engine target compiles
+// `hashindex.c` (see engine/CMakeLists.txt) -- not a name prefix.
 //
 // # Why only five functions are here
 //

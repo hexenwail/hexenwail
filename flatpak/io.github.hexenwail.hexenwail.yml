@@ -2,6 +2,12 @@ app-id: io.github.hexenwail.hexenwail
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
+# cargo and rustc for engine/rust, which is linked into the engine on every
+# target.  The base SDK ships no Rust; this is Flathub's own extension for it,
+# branch-matched to the 25.08 SDK.  Build-time only: the archive is static,
+# so nothing of it reaches the runtime.
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
 command: hexenwail.sh
 
 finish-args:
@@ -133,6 +139,11 @@ modules:
   - name: hexenwail
     buildsystem: cmake-ninja
     subdir: engine
+    build-options:
+      # The rust-stable extension mounts here (see sdk-extensions above).
+      # The crate has no dependencies and CMake runs cargo --offline, so the
+      # sandbox's lack of network is not a problem.
+      append-path: /usr/lib/sdk/rust-stable/bin
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DUSE_CODEC_VORBIS=ON
@@ -140,19 +151,6 @@ modules:
       - -DUSE_CODEC_XMP=ON
       - -DUSE_ALSA=OFF
       - -DSOUNDFONT_PATH=/app/share/soundfonts/default.sf2
-      # The consolidated Rust shim requires cargo/rustc, which are not
-      # present in the Flatpak build sandbox.  Disable it for this target.
-      - -DUSE_RUST_HASHINDEX=OFF
-      - -DUSE_MATHLIB_RS=OFF
-      - -DUSE_SIZEBUF_RS=OFF
-      - -DUSE_CRC_RS=OFF
-      - -DUSE_LINK_OPS_RS=OFF
-      - -DUSE_MSG_IO_RS=OFF
-      - -DUSE_INFO_STR_RS=OFF
-      - -DUSE_STRLCPY_RS=OFF
-      - -DUSE_STRLCAT_RS=OFF
-      - -DUSE_HUFFMAN_RS=OFF
-      - -DUSE_WAD_RS=OFF
     sources:
       - type: dir
         path: ..

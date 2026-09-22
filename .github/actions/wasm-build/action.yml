@@ -69,6 +69,33 @@ runs:
         ./emsdk install "${{ inputs.emsdk-version }}"
         ./emsdk activate "${{ inputs.emsdk-version }}"
 
+    # The engine's Rust archive is linked into the web client like every other
+    # target, so the build needs cargo and the wasm32-unknown-emscripten
+    # standard library.  The version comes from engine/rust/rust-toolchain.toml,
+    # the same pin flake.nix reads for .#wasm; the runner image's rustup is
+    # only the installer, never the version.  RUSTUP_TOOLCHAIN makes every
+    # later cargo use it whatever directory it runs from -- CMake runs cargo
+    # from the build tree, where rustup would not find the toolchain file.
+    - name: Install Rust (pinned, with the Emscripten target)
+      shell: bash
+      run: |
+        set -euo pipefail
+        channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' engine/rust/rust-toolchain.toml)
+        [ -n "$channel" ] || { echo "::error::no channel in engine/rust/rust-toolchain.toml"; exit 1; }
+        rustup toolchain install "$channel" --profile minimal --target wasm32-unknown-emscripten
+        echo "RUSTUP_TOOLCHAIN=$channel" >> "$GITHUB_ENV"
+
+    # Every Rust/C shared struct, laid out by emcc and by rustc for wasm32 and
+    # compared field by field.  The host differential harnesses only ever see
+    # 8-byte pointers; this is where a 64-bit-only layout assumption would
+    # show up, before the engine is even built.
+    - name: Rust/C ABI layouts on wasm32
+      shell: bash
+      run: |
+        set -euo pipefail
+        source "$PWD/emsdk/emsdk_env.sh"
+        ./scripts/check-rust-abi.sh --wasm
+
     - name: Build WebAssembly client (webgl2 renderer, shipping default)
       shell: bash
       run: |
@@ -86,6 +113,19 @@ runs:
         set -euo pipefail
         source "$PWD/emsdk/emsdk_env.sh"
         ./scripts/wasm-build.sh software engine/build-software
+
+    # The only step anywhere that executes hexenwail.wasm.  No game data may go
+    # on a runner, so both renderer builds must reach FS_Init's data gate and
+    # die there with its exact diagnostic -- through Host_Init's memory,
+    # command-buffer and filesystem setup on the Rust sizebuf and strlcpy --
+    # rather than trapping.  With the demo data locally, the same script also
+    # takes a build into demo1: scripts/wasm-boot-smoke.sh BIN DATA_DIR.
+    - name: Boot the WebAssembly client (both renderers)
+      shell: bash
+      run: |
+        set -euo pipefail
+        ./scripts/wasm-boot-smoke.sh engine/build/bin
+        ./scripts/wasm-boot-smoke.sh engine/build-software/bin
 
     - name: Assemble PWA artifact
       shell: bash

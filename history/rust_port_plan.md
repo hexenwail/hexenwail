@@ -1,5 +1,15 @@
 # Plan: Port `hashindex.c` to Rust Behind an FFI Shim
 
+> **Status (2026-09-21): superseded on the build side.**  The per-port
+> `USE_*` switches this plan introduces (`USE_RUST_HASHINDEX` and its
+> successors) were removed: `engine/rust` is now linked into every engine
+> target, including the MinGW and WebAssembly builds, and configuring with
+> any of the old switches set OFF stops with an error.  The rollback
+> described in section 6 no longer exists in-tree; the differential
+> harnesses remain the proof of equivalence.  See the "Rust engine archive"
+> block in `engine/CMakeLists.txt` and `scripts/check-rust.sh`.  The rest
+> of this document is kept as the record of how the first port was planned.
+
 **Goal**: port one self-contained engine subsystem to Rust callable from C, keeping the rest of the engine in C.
 
 **Chosen subsystem**: `engine/h2shared/hashindex.c` + `engine/h2shared/hashindex.h`.
