@@ -839,6 +839,7 @@
               "-DUSE_MSG_IO_RS=OFF"
               "-DUSE_INFO_STR_RS=OFF"
               "-DUSE_STRLCPY_RS=OFF"
+              "-DUSE_STRLCAT_RS=OFF"
             ];
 
             # Tidy the paths the DWARF we now ship records.  Mapping the
@@ -994,6 +995,7 @@
               "-DUSE_MSG_IO_RS=OFF"
               "-DUSE_INFO_STR_RS=OFF"
               "-DUSE_STRLCPY_RS=OFF"
+              "-DUSE_STRLCAT_RS=OFF"
             ];
 
             # Only the server target; the client .exe is .#win64's job.
@@ -1081,6 +1083,7 @@
                 -DUSE_MSG_IO_RS=OFF \
                 -DUSE_INFO_STR_RS=OFF \
                 -DUSE_STRLCPY_RS=OFF \
+                -DUSE_STRLCAT_RS=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
                 ../engine

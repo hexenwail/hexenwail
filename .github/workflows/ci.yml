@@ -199,6 +199,14 @@ jobs:
       - name: Rust strlcpy (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-strlcpy.sh
 
+      # strlcat shares strlcpy's ABI but not its contract: it scans the
+      # destination first, so the harness drives a destination with no NUL
+      # inside `siz` (must not be written at all) and checks the return value
+      # against strlen(src) + MIN(siz, strlen(initial dst)) rather than against
+      # source_len alone.
+      - name: Rust strlcat (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-strlcat.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.
