@@ -19,6 +19,7 @@ crc = []
 link_ops = []
 msg_io = []
 info_str = []
+huffman = []
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go
