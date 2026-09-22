@@ -150,7 +150,7 @@ if [ "$run_engine" -eq 1 ]; then
 	OFF_BIN="$work/build-off/bin/glhexen2" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
-		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh"
+		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" link_ops
 fi
 
 echo "PASS: Rust link_ops -- differential harness green, the consolidated"

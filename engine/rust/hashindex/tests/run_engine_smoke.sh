@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 #
-# run_engine_smoke.sh -- run the REAL ENGINE with the Rust hashindex and with
-# the C original, and diff the output.
+# run_engine_smoke.sh -- run the REAL ENGINE with a Rust port and with the C
+# original, and diff the output.
 #
 # WHY THIS EXISTS, given the differential harness already passes:
 #
-#   The harness verifies hashindex as a MODULE, in isolation.  It says nothing
-#   about the engine's actual use of it: the eight by-value embedding sites
-#   (model.c, gl_model.c, draw.c, gl_draw.c, snd_dma.c, gl_rmisc.c and the two
-#   members inside pack_t/zippack_t), the FS_LoadPackFile / FS_LoadZipFile
-#   paths, or initialization order.  This runs the engine and compares.
+#   A differential harness verifies a port as a MODULE, in isolation.  It says
+#   nothing about the engine's actual use of it: the by-value embedding sites,
+#   the FS_LoadPackFile / FS_LoadZipFile paths, initialization order, and the
+#   tables a real map load drives.  This runs the engine and compares.
 #
-#   It is the step to re-run before flipping USE_RUST_HASHINDEX to ON for
-#   real, which is why it is a script and not a shell-history footnote.
+#   It was written for hashindex, whose motivation was the eight by-value
+#   embedding sites (model.c, gl_model.c, draw.c, gl_draw.c, snd_dma.c,
+#   gl_rmisc.c and the two members inside pack_t/zippack_t).  sizebuf, link_ops
+#   and msg_io reuse it unchanged, because its guards -- engine started, pak
+#   loaded, map loaded -- are subsystem-neutral.  The subsystem argument below
+#   exists so the output names the port actually under test.
+#
+#   It is the step to re-run before flipping a USE_*_RS flag to ON for real,
+#   which is why it is a script and not a shell-history footnote.
 #
 # WHAT IT COVERS
 #
@@ -30,10 +36,14 @@
 # USAGE
 #
 #   DEMO_DIR=<dir containing data1/> \
-#   ON_BIN=<glhexen2 built with -DUSE_RUST_HASHINDEX=ON> \
-#   OFF_BIN=<glhexen2 built with -DUSE_RUST_HASHINDEX=OFF> \
+#   ON_BIN=<glhexen2 built with -DUSE_<SUBSYSTEM>_RS=ON> \
+#   OFF_BIN=<glhexen2 built with -DUSE_<SUBSYSTEM>_RS=OFF> \
 #   XVFB=<path to Xvfb> \
-#   ./run_engine_smoke.sh
+#   ./run_engine_smoke.sh [subsystem]
+#
+# The optional subsystem argument only labels the progress and result lines; it
+# defaults to hashindex, this script's original subject, and every caller in
+# scripts/check-rust-*.sh passes its own.
 #
 # The h2ded/hwsv binaries are taken from the same directories as ON_BIN/OFF_BIN.
 # Requires Xvfb and the engine's runtime libraries, i.e. run it inside
@@ -47,6 +57,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 set -euo pipefail
+
+SUBSYSTEM="${1:-hashindex}"
+case "$SUBSYSTEM" in
+	-*) echo "error: unknown option '$SUBSYSTEM' (usage: $0 [subsystem])" >&2; exit 2 ;;
+esac
 
 : "${DEMO_DIR:?set DEMO_DIR to the basedir holding data1/}"
 : "${ON_BIN:?set ON_BIN to the flag-ON glhexen2}"
@@ -96,9 +111,9 @@ run() {
 	wait "$xp" 2>/dev/null || true
 }
 
-echo "== running OFF (C hashindex) =="
+echo "== running OFF (C $SUBSYSTEM) =="
 run off "$OFF_DIR"
-echo "== running ON (Rust hashindex) =="
+echo "== running ON (Rust $SUBSYSTEM) =="
 run on "$ON_DIR"
 
 fail=0
@@ -134,10 +149,10 @@ else
 fi
 
 if [ "$fail" -ne 0 ]; then
-	echo "FAIL: engine output differs between the Rust and C hashindex" >&2
+	echo "FAIL: engine output differs between the Rust and C $SUBSYSTEM" >&2
 	exit 1
 fi
 
 echo
-echo "PASS: the engine behaves identically with the Rust hashindex and the C"
+echo "PASS: the engine behaves identically with the Rust $SUBSYSTEM and the C"
 echo "      original, on a real pak load and a real map load."
