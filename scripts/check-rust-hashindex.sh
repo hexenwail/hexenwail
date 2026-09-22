@@ -94,6 +94,7 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 # ran -- floor the check count at six digits (a hundred thousand checks) rather
 # than pinning it, which would mean editing the gate every time the enumeration
 # is deliberately widened.
+# Observed today: 342,295 checks.  The floor is one decimal place below it.
 count_line=$(grep -E '^checks run: [0-9]+' "$diff_log" || true)
 count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
 if [ "${#count}" -lt 6 ]; then

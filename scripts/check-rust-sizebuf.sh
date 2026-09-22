@@ -65,6 +65,8 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 # hundred cases; the count moves by a case or two with pipe chunking in the
 # child-process checks) rather than pinning it, which would mean editing the gate
 # every time the enumeration is deliberately widened.
+# Observed today: 359 to 361 cases, which is the pipe-chunking variation
+# described above.  The floor is one decimal place below that.
 count_line=$(grep -E '^sizebuf differential harness: PASS \(' "$diff_log" || true)
 count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
 if [ "${#count}" -lt 3 ]; then
