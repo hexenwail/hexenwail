@@ -12,12 +12,15 @@
 # two C variants are indistinguishable at the byte level.
 #
 # The decode half is guarded: every case runs in a forked child with the packet
-# placed against an unmapped page, so a decoder that reads past the end of the
-# caller's buffer is observed as a SIGSEGV rather than assumed.  The C dies
+# placed against an unmapped page, so a decoder that reads past the `inlen` bytes
+# the caller declared is observed as a SIGSEGV rather than assumed.  The C dies
 # that way on a crafted header byte -- net_udp.c decodes whatever arrived on the
-# socket, and the C's GetBit has no bound -- and the Rust must not.  Those cases
-# are the ones the port deliberately does not reproduce; see the harness header
-# for what is checked instead, and why.
+# socket, and the C's GetBit has no bound -- and the Rust must not.  That the
+# guard page is a tighter allocation than production is deliberate: net_udp.c
+# receives into huffbuff[65536], so the real overread reads the stale tail of a
+# live buffer and has no portable answer to compare against.  Those cases are
+# the ones the port deliberately does not reproduce; see the harness header for
+# what is checked instead, and why.
 #
 # The harness links a huffman-only archive: it is self-contained (hufffreq.h
 # and the two engine symbols the code under test reaches) and an all-features
