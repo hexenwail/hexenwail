@@ -16,6 +16,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -217,8 +218,31 @@ static int aborts_msg(void (*fn)(hashindex_t *), hashindex_t *hi,
 		_exit(0);
 	}
 	close(pfd[1]);
-	n = read(pfd[0], msg, msgsz - 1);
-	if (n < 0) n = 0;
+	/* Read to EOF, never just once.  Sys_Error writes to unbuffered stderr
+	 * in two write()s -- the message, then '\n' -- and a single read could
+	 * return between them.  Closing the pipe then made the child's second
+	 * write raise SIGPIPE, so it died of that instead of SIGABRT and the
+	 * case was reported as "did not abort": 4 failures in 30 runs, on a
+	 * different case each time.  Past a full buffer keep draining into a
+	 * scratch buffer, for the same reason. */
+	{
+		size_t total = 0;
+		char sink[256];
+
+		for (;;) {
+			if (total < msgsz - 1)
+				n = read(pfd[0], msg + total, msgsz - 1 - total);
+			else
+				n = read(pfd[0], sink, sizeof(sink));
+			if (n < 0 && errno == EINTR)
+				continue;
+			if (n <= 0)
+				break;
+			if (total < msgsz - 1)
+				total += (size_t)n;
+		}
+		n = (ssize_t)total;
+	}
 	msg[n] = '\0';
 	close(pfd[0]);
 	while (n > 0 && (msg[n - 1] == '\n' || msg[n - 1] == '\r'))
