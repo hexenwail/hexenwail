@@ -99,6 +99,20 @@ option(USE_INFO_STR_RS "Link the Rust info_str implementation instead of info_st
 # it.
 option(USE_STRLCPY_RS "Link the Rust q_strlcpy implementation instead of strlcpy.c" ON)
 
+# Link the Rust port of the HexenWorld Huffman codec in place of
+# engine/hexenworld/shared/huffman.c.  The C original is compiled into two
+# targets with a *different allocation strategy per target*: hwsv builds its
+# tree with Hunk_AllocName, while the integrated client defines H2W_INTEGRATED
+# and must malloc, because CL_ClearState -> Host_ClearMemory does
+# Hunk_FreeToLowMark and takes a hunk-allocated tree with it, leaving HuffTree
+# dangling.  One archive is linked into both, so the Rust module picks malloc
+# for both; the differential harness compiles the C each way and proves the
+# two produce identical bytes before comparing either against the Rust.  It is
+# also the first port whose decode path is fed attacker-controlled bytes
+# (net_udp.c decodes whatever arrived on the socket), so the bit read is
+# bounded at the end of the caller's buffer -- see engine/rust/src/huffman.rs.
+option(USE_HUFFMAN_RS "Link the Rust huffman implementation instead of huffman.c" ON)
+
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client
 # networking, by contrast, is part of Hexenwail itself; there is deliberately
 # no separate hwcl executable.  Emscripten is excluded below because this UDP
@@ -987,13 +1001,23 @@ else()
     message(STATUS "strlcpy: C original (USE_STRLCPY_RS=OFF)")
 endif()
 
+# huffman.c is likewise not in COMMON_SOURCES.  It is compiled into the
+# integrated client through HW_CLIENT_NET_SOURCES (which is built below) and
+# into hwsv through HWSV_SOURCES; h2ded never compiles it at all.
+if(USE_HUFFMAN_RS)
+    list(APPEND RUST_ENGINE_FEATURES huffman)
+    message(STATUS "huffman: Rust shim (USE_HUFFMAN_RS=ON)")
+else()
+    message(STATUS "huffman: C original (USE_HUFFMAN_RS=OFF)")
+endif()
+
 if(RUST_ENGINE_FEATURES)
     if(EMSCRIPTEN)
         message(FATAL_ERROR
             "The Rust engine shim is not wired up for Emscripten. Disable "
             "USE_RUST_HASHINDEX, USE_MATHLIB_RS, USE_SIZEBUF_RS, "
             "USE_CRC_RS, USE_LINK_OPS_RS, USE_MSG_IO_RS, "
-            "USE_INFO_STR_RS, and USE_STRLCPY_RS for the WASM "
+            "USE_INFO_STR_RS, USE_STRLCPY_RS, and USE_HUFFMAN_RS for the WASM "
             "build.")
     endif()
 
@@ -1016,6 +1040,7 @@ if(RUST_ENGINE_FEATURES)
                 ${RUST_ENGINE_RS_TARGET_DIR}/release/libengine_rs.a
                 ${RUST_ENGINE_RS_LIB}
         DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
+                ${RUST_ENGINE_RS_DIR}/build.rs
                 ${RUST_ENGINE_RS_DIR}/src/lib.rs
                 ${RUST_ENGINE_RS_DIR}/src/sizebuf.rs
                 ${RUST_ENGINE_RS_DIR}/src/crc.rs
@@ -1023,6 +1048,8 @@ if(RUST_ENGINE_FEATURES)
                 ${RUST_ENGINE_RS_DIR}/src/msg_io.rs
                 ${RUST_ENGINE_RS_DIR}/src/info_str.rs
                 ${RUST_ENGINE_RS_DIR}/src/strlcpy.rs
+                ${RUST_ENGINE_RS_DIR}/src/huffman.rs
+                ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
                 ${RUST_ENGINE_RS_DIR}/hashindex/src/ffi.rs
                 ${RUST_ENGINE_RS_DIR}/mathlib/src/ffi.rs
         COMMENT "Building consolidated Rust engine shim"
@@ -1050,12 +1077,17 @@ endif()
 if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
     set(HW_CLIENT_NET_SOURCES
         ${ENGINE_TOP}/hexen2/cl_hw.c
-        ${ENGINE_TOP}/hexenworld/shared/huffman.c
         ${ENGINE_TOP}/hexenworld/shared/net_udp.c
         ${ENGINE_TOP}/hexenworld/shared/net_chan.c
         ${ENGINE_TOP}/hexenworld/shared/pmove.c
         ${ENGINE_TOP}/hexenworld/shared/pmovetst.c
     )
+    # The codec comes from the C original or from libengine_rs.a.  This is the
+    # H2W_INTEGRATED variant of huffman.c -- malloc, not the hunk -- which is
+    # the allocation the Rust module uses for both targets.
+    if(NOT USE_HUFFMAN_RS)
+        list(APPEND HW_CLIENT_NET_SOURCES ${ENGINE_TOP}/hexenworld/shared/huffman.c)
+    endif()
     list(APPEND CLIENT_DEFINITIONS H2W_INTEGRATED)
 endif()
 
@@ -1394,6 +1426,9 @@ else()
     endif()
     if(USE_STRLCPY_RS)
         list(REMOVE_ITEM HWSV_SOURCES ${UHEXEN2_SHARED}/strlcpy.c)
+    endif()
+    if(USE_HUFFMAN_RS)
+        list(REMOVE_ITEM HWSV_SOURCES ${HW_TOP}/shared/huffman.c)
     endif()
 
     add_executable(hwsv ${HWSV_SOURCES})
