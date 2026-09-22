@@ -992,8 +992,8 @@ int main(void)
 	fuzz_malformed();
 
 	printf("  raw 0xff fallbacks: %d encodes\n", fallbacks);
-	printf("  bounded decodes (the C read past the caller's buffer, the Rust "
-		"did not): %d\n", bounded_cases);
+	printf("  bounded decodes (the C read past the payload it was given, the "
+		"Rust did not): %d\n", bounded_cases);
 	printf("  guard-page deaths: hwsv %d, client %d, Rust %d\n",
 		guard_deaths[IMPL_HWSV], guard_deaths[IMPL_CLIENT],
 		guard_deaths[IMPL_RUST]);

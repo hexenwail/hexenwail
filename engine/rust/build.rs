@@ -49,6 +49,11 @@ fn main() {
         } else if c == '/' && chars.peek() == Some(&'*') {
             chars.next();
             in_comment = true;
+            // A comment becomes one space, never nothing.  Splicing the two
+            // halves of a literal back together would turn
+            // `0.14473/*x*/691` into a different, valid-looking number, and
+            // the digit check below would not notice.
+            stripped.push(' ');
         } else {
             stripped.push(c);
         }

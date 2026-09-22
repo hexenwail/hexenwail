@@ -26,13 +26,19 @@
 //    `tbits = inlen*8 - *in`.  GetBit has no bound of its own, so a crafted
 //    `*in` -- and the header byte is attacker-controlled, because net_udp.c
 //    runs HuffDecode on whatever arrived on the UDP socket -- sends the
-//    decoder reading past the end of the caller's buffer; with `*in == 0` it
-//    reads one byte past and then keeps descending through whatever is there
-//    until it happens to land on a leaf.  The C's behaviour there is
-//    undefined, so there is no byte-for-byte answer to reproduce.  This
-//    module stops decoding when the buffer ends instead (see the bound in
-//    HuffDecode), and the harness pins that case separately: the C arm is run
-//    under a guard page to show the read is real, and the bounded result is
+//    decoder reading past the `inlen` bytes the caller declared; with
+//    `*in == 0` it reads one byte past and then keeps descending through
+//    whatever is there until it happens to land on a leaf.  For the one
+//    production caller those bits are not unmapped memory: net_udp.c receives
+//    into huffbuff[65536] with recvfrom capped at sizeof(net_message_buffer),
+//    so what follows the declared payload is the stale remainder of an earlier
+//    packet -- huffbuff is the send buffer too.  That makes the C defined but
+//    unspecified there rather than undefined, and there is still no
+//    byte-for-byte answer to reproduce, because the result depends on prior
+//    traffic.  This module stops decoding at the declared end instead (see the
+//    bound in HuffDecode), and the harness pins that case separately: the C arm
+//    is run under a guard page -- a tighter allocation than production, which
+//    is what makes the read observable at all -- and the bounded result is
 //    checked against an independent decoder built from the C's own code table.
 //
 // Everything else is deliberately literal: Masks, PutBit, GetBit, FindTab,
@@ -302,10 +308,12 @@ pub unsafe extern "C" fn HuffDecode(
             // whatever follows the buffer -- for as many bytes as it takes to
             // reach a leaf.  The header byte is attacker-controlled here:
             // net_udp.c hands HuffDecode whatever arrived on the socket.  So
-            // the read is bounded by the buffer the caller actually passed,
-            // and a code that does not complete inside it is abandoned
-            // rather than completed from adjacent memory.  The C's behaviour
-            // past that point is undefined, so there is nothing to match.
+            // the read is bounded by the `inlen` bytes the caller declared,
+            // and a code that does not complete inside them is abandoned
+            // rather than completed from whatever follows -- which in
+            // production is the stale tail of huffbuff, not unmapped memory,
+            // so the C is unspecified there rather than undefined and has no
+            // portable answer to match.
             if bits >= data_bits {
                 return;
             }
