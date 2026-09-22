@@ -43,9 +43,13 @@ extern size_t MathlibMPlane_offsetof_dist(void);
 extern size_t MathlibMPlane_offsetof_type(void);
 extern size_t MathlibMPlane_offsetof_signbits(void);
 
+// Comparisons actually made.  The gate floors this rather than pinning it, so
+// that a regression which empties an enumeration cannot exit 0 and still read
+// as green.
+static unsigned long cases;
 static int failures;
 static int feq(float a, float b) { return a == b || (isnan(a) && isnan(b)) || fabsf(a - b) <= 1e-6f; }
-static void check(int ok, const char *what) { if (!ok) { fprintf(stderr, "FAIL: %s\n", what); failures++; } }
+static void check(int ok, const char *what) { ++cases; if (!ok) { fprintf(stderr, "FAIL: %s\n", what); failures++; } }
 static int veq(const float *a, const float *b, size_t n) { while (n--) if (!feq(a[n], b[n])) return 0; return 1; }
 
 int main(void)
@@ -97,6 +101,6 @@ int main(void)
 		check(rq == cq && rr == cr, "FloorDivMod");
 	}
 	if (failures) { fprintf(stderr, "%d differential failures\n", failures); return 1; }
-	puts("mathlib-rs differential harness: PASS");
+	printf("mathlib-rs differential harness: PASS (%lu cases)\n", cases);
 	return 0;
 }

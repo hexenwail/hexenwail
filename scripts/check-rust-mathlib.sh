@@ -92,6 +92,17 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
 	exit 1
 }
+# The PASS line carries the case count, and RESULT alone would still pass if the
+# enumeration were cut down to nothing -- so floor the count at three digits (a
+# hundred cases) rather than pinning it, which would mean editing the gate every
+# time the enumeration is deliberately widened.
+count_line=$(grep -E '^mathlib-rs differential harness: PASS \(' "$diff_log" || true)
+count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
+if [ "${#count}" -lt 3 ]; then
+	echo "FAIL: harness case count is below the hundred-case floor" >&2
+	echo "      observed: ${count_line:-<no 'mathlib-rs differential harness: PASS (N cases)' line>}" >&2
+	exit 1
+fi
 
 echo
 echo "== 3. build all three targets with -DUSE_MATHLIB_RS=ON =="

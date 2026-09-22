@@ -80,6 +80,20 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 	cat "$diff_log" >&2
 	exit 1
 }
+# The summary line carries the expectation count, and RESULT alone would still
+# pass if the enumeration were cut down to nothing -- so floor the count at three
+# digits (a hundred expectations) rather than pinning it, which would mean
+# editing the gate every time the enumeration is deliberately widened.  The
+# first number on the line is the expectation count; the second is the failure
+# count, which the harness exits non-zero on.
+count_line=$(grep -E '^checked [0-9]+ expectations, [0-9]+ failures$' "$diff_log" || true)
+count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
+if [ "${#count}" -lt 3 ]; then
+	echo "FAIL: harness expectation count is below the hundred-expectation floor" >&2
+	echo "      observed: ${count_line:-<no 'checked N expectations, M failures' line>}" >&2
+	cat "$diff_log" >&2
+	exit 1
+fi
 
 echo
 echo "== 3. build all three targets with USE_MSG_IO_RS=ON =="

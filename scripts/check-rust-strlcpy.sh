@@ -59,6 +59,18 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 	cat "$diff_log" >&2
 	exit 1
 }
+# The PASS line carries the case count, and RESULT alone would still pass if the
+# enumeration were cut down to nothing -- so floor the count at six digits (a
+# hundred thousand cases) rather than pinning it, which would mean editing the
+# gate every time the enumeration is deliberately widened.
+count_line=$(grep -E '^strlcpy differential harness: PASS \(' "$diff_log" || true)
+count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
+if [ "${#count}" -lt 6 ]; then
+	echo "FAIL: harness case count is below the hundred-thousand floor" >&2
+	echo "      observed: ${count_line:-<no 'strlcpy differential harness: PASS (N cases)' line>}" >&2
+	cat "$diff_log" >&2
+	exit 1
+fi
 
 echo
 echo "== 3. build all three targets with USE_STRLCPY_RS=ON =="

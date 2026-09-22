@@ -15,7 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Comparisons actually made.  The gate floors this rather than pinning it, so
+// that a regression which empties an enumeration cannot exit 0 and still read
+// as green.
+static unsigned long cases;
+
 #define CHECK(cond, ...) do { \
+	++cases; \
 	if (!(cond)) { \
 		fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
 		fprintf(stderr, __VA_ARGS__); \
@@ -77,6 +83,7 @@ static int byte_checks(void)
 
 			c_CRC_ProcessByte(&c, (unsigned char)d);
 			CRC_ProcessByte(&r, (unsigned char)d);
+			++cases;	// this comparison is inline, not through CHECK
 			if (c != r) {
 				CHECK(0, "ProcessByte(%04x, %02x): C=%04x Rust=%04x", v, d, c, r);
 			}
@@ -175,6 +182,6 @@ int main(void)
 	if (abi_checks() || init_checks() || byte_checks() || value_checks()
 		|| known_answer_checks() || block_checks() || null_empty_checks())
 		return 1;
-	puts("crc differential harness: PASS");
+	printf("crc differential harness: PASS (%lu cases)\n", cases);
 	return 0;
 }

@@ -90,6 +90,17 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
 	exit 1
 }
+# RESULT: PASS reflects the failure count alone, so it stays green however little
+# ran -- floor the check count at six digits (a hundred thousand checks) rather
+# than pinning it, which would mean editing the gate every time the enumeration
+# is deliberately widened.
+count_line=$(grep -E '^checks run: [0-9]+' "$diff_log" || true)
+count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
+if [ "${#count}" -lt 6 ]; then
+	echo "FAIL: harness check count is below the hundred-thousand floor" >&2
+	echo "      observed: ${count_line:-<no 'checks run: N   failures: M' line>}" >&2
+	exit 1
+fi
 
 echo
 echo "== 3. build all three targets with -DUSE_RUST_HASHINDEX=ON =="
