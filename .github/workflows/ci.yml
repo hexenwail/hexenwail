@@ -199,6 +199,14 @@ jobs:
       - name: Rust strlcpy (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-strlcpy.sh
 
+      # strlcat shares strlcpy's ABI but not its contract: it scans the
+      # destination first, so the harness drives a destination with no NUL
+      # inside `siz` (must not be written at all) and checks the return value
+      # against strlen(src) + MIN(siz, strlen(initial dst)) rather than against
+      # source_len alone.
+      - name: Rust strlcat (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-strlcat.sh
+
       # huffman is the first port whose C original is compiled for two targets
       # with a different allocation strategy each (hwsv's hunk versus the
       # integrated client's malloc), and the first whose decode path is fed

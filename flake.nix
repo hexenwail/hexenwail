@@ -839,6 +839,7 @@
               "-DUSE_MSG_IO_RS=OFF"
               "-DUSE_INFO_STR_RS=OFF"
               "-DUSE_STRLCPY_RS=OFF"
+              "-DUSE_STRLCAT_RS=OFF"
               "-DUSE_HUFFMAN_RS=OFF"
             ];
 
@@ -995,6 +996,7 @@
               "-DUSE_MSG_IO_RS=OFF"
               "-DUSE_INFO_STR_RS=OFF"
               "-DUSE_STRLCPY_RS=OFF"
+              "-DUSE_STRLCAT_RS=OFF"
               "-DUSE_HUFFMAN_RS=OFF"
             ];
 
@@ -1083,6 +1085,7 @@
                 -DUSE_MSG_IO_RS=OFF \
                 -DUSE_INFO_STR_RS=OFF \
                 -DUSE_STRLCPY_RS=OFF \
+                -DUSE_STRLCAT_RS=OFF \
                 -DUSE_HUFFMAN_RS=OFF \
                 -DUSE_SDL3_STATIC=ON \
                 -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=TRUE \
