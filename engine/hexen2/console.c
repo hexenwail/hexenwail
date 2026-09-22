@@ -71,6 +71,8 @@ cvar_t	con_maxcols = {"con_maxcols", "0", CVAR_ARCHIVE};
 static float	con_times[NUM_CON_TIMES];	// realtime time the line was generated
 						// for transparent notify lines
 static qboolean	con_suppress_notify;		// when true, Con_Print skips notify timestamps
+static qboolean	con_progress_active;		// transient line awaiting replacement
+static qboolean	con_progress_needs_separator;	// interrupted text lacks a newline
 
 extern qboolean		menu_disabled_mouse;
 
@@ -432,6 +434,87 @@ static void Con_Print (const char *txt)
 }
 
 
+/* A progress update is transient: do not put every 1 KB block into the log
+ * or scrollback.  Both terminal backends and Con_Print leave a carriage-return
+ * update ready to be replaced by the next call. */
+void CON_Progressf (const char *fmt, ...)
+{
+	va_list	argptr;
+	char	msg[MAX_PRINTMSG];
+
+	va_start (argptr, fmt);
+	q_vsnprintf (msg, sizeof(msg), fmt, argptr);
+	va_end (argptr);
+
+	if (!con_progress_active && con_progress_needs_separator)
+	{
+		Sys_PrintTerm ("\n");
+		if (con_initialized && cls.state != ca_dedicated)
+			Con_Print ("\n");
+		con_progress_needs_separator = false;
+	}
+
+	Sys_PrintTerm (msg);
+	Sys_PrintTerm ("\r");
+	Sys_FlushTerm ();
+	if (con_initialized && cls.state != ca_dedicated)
+	{
+		Con_Print (msg);
+		Con_Print ("\r");
+	}
+	con_progress_active = true;
+}
+
+/* Replace the active transient line and terminate it.  False means ordinary
+ * output already interrupted the line, so a subsystem must not print a stale
+ * completion or cancellation status after that diagnostic. */
+qboolean CON_EndProgress (const char *fmt, ...)
+{
+	va_list	argptr;
+	char	msg[MAX_PRINTMSG];
+	char	logged[MAX_PRINTMSG + 2];
+
+	if (!con_progress_active)
+		return false;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (msg, sizeof(msg), fmt, argptr);
+	va_end (argptr);
+	con_progress_active = false;
+	con_progress_needs_separator = false;
+
+	Sys_PrintTerm (msg);
+	Sys_PrintTerm ("\n");
+	Sys_FlushTerm ();
+	if (con_debuglog)
+	{
+		q_snprintf (logged, sizeof(logged), "%s\n", msg);
+		LOG_Print (logged);
+	}
+	if (con_initialized && cls.state != ca_dedicated)
+	{
+		Con_Print (msg);
+		Con_Print ("\n");
+	}
+	return true;
+}
+
+/* Move unrelated output off a transient line.  The graphical console drops
+ * that provisional line from scrollback; a terminal keeps the last update as
+ * a single line. */
+static qboolean Con_AbandonProgress (void)
+{
+	if (!con_progress_active)
+		return false;
+
+	con_progress_active = false;
+	Sys_PrintTerm ("\n");
+	Sys_FlushTerm ();
+	if (con_initialized && cls.state != ca_dedicated)
+		Con_Print ("\n");
+	return true;
+}
+
 /*
 ================
 CON_Printf
@@ -444,6 +527,8 @@ void CON_Printf (unsigned int flags, const char *fmt, ...)
 	va_list		argptr;
 	char		msg[MAX_PRINTMSG];
 	static qboolean	inupdate;
+	qboolean	interrupted;
+	size_t		msglen;
 
 	if (flags & _PRINT_DEVEL && !developer.integer)
 	{
@@ -461,7 +546,17 @@ void CON_Printf (unsigned int flags, const char *fmt, ...)
 	q_vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 
+	interrupted = Con_AbandonProgress ();
 	Sys_PrintTerm (msg);	// echo to the terminal
+	if (interrupted || con_progress_needs_separator)
+	{
+		msglen = strlen (msg);
+		if (msglen != 0)
+			con_progress_needs_separator =
+				(msg[msglen - 1] != '\n' && msg[msglen - 1] != '\r');
+		else if (interrupted)
+			con_progress_needs_separator = false;
+	}
 	if (con_debuglog)
 		LOG_Print (msg);
 

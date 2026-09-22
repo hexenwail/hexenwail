@@ -14,7 +14,7 @@
  * unlink and already-exists paths exercise the real syscalls.
  *
  * Build and run:
- *     cc -Wall -Wextra -o /tmp/hwdltest scripts/hw_download_test.c && /tmp/hwdltest
+ *     nix develop -c sh -c 'cc -Wall -Wextra -o /tmp/hwdltest scripts/hw_download_test.c && /tmp/hwdltest'
  * Exit status 0 on pass, 1 on any failed assertion.
  */
 
@@ -66,6 +66,8 @@ static int	rec_plaque_ends;
 static int	rec_loadmodels_calls;
 static int	rec_loadsounds_calls;
 static int	rec_signon_finishes;
+static qboolean	rec_progress_active;
+static qboolean	rec_progress_needs_separator;
 static qboolean	stub_loadmodels_result = true;
 
 static char	testdir[MAX_OSPATH];
@@ -81,6 +83,8 @@ static void rec_reset (void)
 	rec_loadmodels_calls = 0;
 	rec_loadsounds_calls = 0;
 	rec_signon_finishes = 0;
+	rec_progress_active = false;
+	rec_progress_needs_separator = false;
 	stub_loadmodels_result = true;
 	stub_makepath_fail = 0;
 	stub_fs_fileexists = 0;
@@ -101,6 +105,16 @@ static qboolean sent_cmd (const char *needle)
 			return true;
 	}
 	return false;
+}
+
+static int count_char (const char *text, char needle)
+{
+	int count = 0;
+
+	for ( ; *text; text++)
+		if (*text == needle)
+			count++;
+	return count;
 }
 
 /* ------------------------------------------------------------------ */
@@ -149,16 +163,73 @@ static char *va (const char *fmt, ...)
 	return buf[idx];
 }
 
+static void rec_console_append (const char *text)
+{
+	if (strlen (rec_console) + strlen (text) < sizeof(rec_console))
+		strcat (rec_console, text);
+}
+
 static void Con_Printf (const char *fmt, ...)
 {
 	char	line[1024];
 	va_list	ap;
+	qboolean interrupted = false;
+	size_t	len;
 
+	if (rec_progress_active)
+	{
+		rec_console_append ("\n");
+		rec_progress_active = false;
+		interrupted = true;
+	}
 	va_start (ap, fmt);
 	vsnprintf (line, sizeof(line), fmt, ap);
 	va_end (ap);
-	if (strlen (rec_console) + strlen (line) < sizeof(rec_console))
-		strcat (rec_console, line);
+	rec_console_append (line);
+	if (interrupted || rec_progress_needs_separator)
+	{
+		len = strlen (line);
+		if (len != 0)
+			rec_progress_needs_separator =
+				(line[len - 1] != '\n' && line[len - 1] != '\r');
+		else if (interrupted)
+			rec_progress_needs_separator = false;
+	}
+}
+
+static void CON_Progressf (const char *fmt, ...)
+{
+	char	line[1024];
+	va_list	ap;
+
+	if (!rec_progress_active && rec_progress_needs_separator)
+	{
+		rec_console_append ("\n");
+		rec_progress_needs_separator = false;
+	}
+	va_start (ap, fmt);
+	vsnprintf (line, sizeof(line), fmt, ap);
+	va_end (ap);
+	rec_console_append (line);
+	rec_console_append ("\r");
+	rec_progress_active = true;
+}
+
+static qboolean CON_EndProgress (const char *fmt, ...)
+{
+	char	line[1024];
+	va_list	ap;
+
+	if (!rec_progress_active)
+		return false;
+	va_start (ap, fmt);
+	vsnprintf (line, sizeof(line), fmt, ap);
+	va_end (ap);
+	rec_console_append (line);
+	rec_console_append ("\n");
+	rec_progress_active = false;
+	rec_progress_needs_separator = false;
+	return true;
 }
 
 #define Con_DPrintf Con_Printf
@@ -646,7 +717,91 @@ static void test_size_cap (void)
 }
 
 /* ================================================================== */
-/* 5. the percent guard (hwsv's int overflow past ~21.4 MB)            */
+/* 5. inline progress display                                          */
+/* ================================================================== */
+
+static void test_progress_display (void)
+{
+	byte payload[16];
+
+	memset (payload, 'D', sizeof(payload));
+
+	/* Intermediate blocks rewrite one line.  The exact byte count changes
+	 * even when integer percentage rounding leaves percent unchanged. */
+	rec_reset ();
+	begin_download ("maps/progress.bsp");
+	feed_block (sizeof(payload), 25, payload, sizeof(payload));
+	CHECK (console_said ("[==        ]  25% 16 B\r"),
+		"first block did not print the expected progress line: %s", rec_console);
+	CHECK (rec_progress_active, "progress line was not marked active");
+	feed_block (sizeof(payload), 25, payload, sizeof(payload));
+	CHECK (console_said ("[==        ]  25% 32 B\r"),
+		"unchanged percent did not update the byte count: %s", rec_console);
+	CHECK (count_char (rec_console, '\n') == 0,
+		"intermediate progress added %d console-history lines",
+		count_char (rec_console, '\n'));
+
+	/* Values produced by hwsv's signed overflow must neither complete the
+	 * file nor appear as nonsensical percentages. */
+	feed_block (sizeof(payload), 185, payload, sizeof(payload));
+	CHECK (!console_said ("185%"), "overflowed percent was shown to the user");
+	CHECK (console_said ("25% 48 B\r"),
+		"overflowed percent hid the trustworthy byte progress: %s", rec_console);
+
+	feed_block (sizeof(payload), 100, payload, sizeof(payload));
+	CHECK (console_said ("[==========] 100% 64 B complete\n"),
+		"completion did not finish the inline line: %s", rec_console);
+	CHECK (!rec_progress_active, "completion left progress active");
+	unlink (tmppath ("maps/progress.bsp"));
+
+	/* Cancellation and failures replace the active line with a terminated
+	 * status, rather than leaving a carriage-return line pending. */
+	rec_reset ();
+	begin_download ("maps/cancel.bsp");
+	feed_block (sizeof(payload), 50, payload, sizeof(payload));
+	HWCL_CancelDownload ();
+	CHECK (console_said ("50% 16 B canceled\n"),
+		"cancel did not terminate the progress line: %s", rec_console);
+	CHECK (!rec_progress_active, "cancel left progress active");
+	CHECK (!exists ("maps/cancel.bsp.tmp"), "cancel left the partial file");
+
+	rec_reset ();
+	begin_download ("maps/fail.bsp");
+	feed_block (sizeof(payload), 50, payload, sizeof(payload));
+	feed_block (-1, 0, NULL, 0);
+	CHECK (console_said ("50% 16 B failed\n"),
+		"server refusal did not terminate the progress line: %s", rec_console);
+	CHECK (console_said ("Server cannot send maps/fail.bsp"),
+		"server refusal lost its diagnostic");
+	CHECK (!rec_progress_active, "failure left progress active");
+
+	/* Unrelated output owns the line and makes a later cancellation stale. */
+	rec_reset ();
+	begin_download ("maps/interrupted.bsp");
+	feed_block (sizeof(payload), 50, payload, sizeof(payload));
+	Con_Printf ("server notice\n");
+	CHECK (!rec_progress_active, "ordinary output did not abandon progress");
+	HWCL_CancelDownload ();
+	CHECK (!console_said ("canceled"),
+		"cancel printed stale status after interleaved output: %s", rec_console);
+	CHECK (console_said ("server notice\n"),
+		"interleaved output was lost: %s", rec_console);
+
+	/* An empty print must not clear the separator owed after unterminated
+	 * interleaved output. */
+	rec_reset ();
+	begin_download ("maps/empty-print.bsp");
+	feed_block (sizeof(payload), 25, payload, sizeof(payload));
+	Con_Printf ("unterminated notice");
+	Con_Printf ("");
+	feed_block (sizeof(payload), 50, payload, sizeof(payload));
+	CHECK (console_said ("unterminated notice\n[=====     ]  50% 32 B\r"),
+		"empty print cleared the pending progress separator: %s", rec_console);
+	HWCL_CancelDownload ();
+}
+
+/* ================================================================== */
+/* 6. the percent guard (hwsv's int overflow past ~21.4 MB)            */
 /* ================================================================== */
 
 static void test_percent_guard (void)
@@ -711,7 +866,7 @@ static void test_percent_guard (void)
 }
 
 /* ================================================================== */
-/* 6. the rename guard                                                 */
+/* 7. the rename guard                                                 */
 /* ================================================================== */
 
 static void test_rename_guard (void)
@@ -773,7 +928,7 @@ static void test_rename_guard (void)
 }
 
 /* ================================================================== */
-/* 7. the missing-world disconnect                                     */
+/* 8. the missing-world disconnect                                     */
 /* ================================================================== */
 
 static void test_missing_world (void)
@@ -808,7 +963,7 @@ static void test_missing_world (void)
 }
 
 /* ================================================================== */
-/* 8. the precache walk requests what is missing                       */
+/* 9. the precache walk requests what is missing                       */
 /* ================================================================== */
 
 static void test_walk_requests (void)
@@ -935,6 +1090,7 @@ int main (void)
 	test_packet_overrun ();
 	test_unsolicited ();
 	test_size_cap ();
+	test_progress_display ();
 	test_percent_guard ();
 	test_rename_guard ();
 	test_missing_world ();

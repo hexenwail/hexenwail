@@ -34,6 +34,13 @@
  */
 void CON_Printf (unsigned int flags, const char *fmt, ...) FUNC_PRINTF(2,3);
 
+/* A transient line is rewritten in place until CON_EndProgress replaces it.
+ * Ordinary CON_Printf output abandons it first so unrelated text starts on a
+ * clean terminal line and owns the graphical console line.  Intermediate
+ * updates are deliberately excluded from the debug log. */
+void CON_Progressf (const char *fmt, ...) FUNC_PRINTF(1,2);
+qboolean CON_EndProgress (const char *fmt, ...) FUNC_PRINTF(1,2);
+
 /* common print flags */
 #define	_PRINT_NORMAL			0	/* print to both terminal and to the in-game console */
 #define	_PRINT_TERMONLY			1	/* print to the terminal only: formerly Sys_Printf */

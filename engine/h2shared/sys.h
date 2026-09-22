@@ -104,6 +104,8 @@ FUNC_NORETURN void Sys_Error (const char *error, ...) FUNC_PRINTF(1,2);
 
 void Sys_PrintTerm (const char *msgtxt);
 	/* print the given string to the terminal */
+void Sys_FlushTerm (void);
+	/* make an unterminated terminal update visible immediately */
 
 double Sys_DoubleTime (void);
 
