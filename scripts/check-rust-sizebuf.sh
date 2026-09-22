@@ -17,7 +17,7 @@ run_engine=0
 for arg in "$@"; do
 	case "$arg" in
 		--engine) run_engine=1 ;;
-		-h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,12p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -112,7 +112,7 @@ if [ "$run_engine" -eq 1 ]; then
 	OFF_BIN="$work/build-off/bin/glhexen2" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
-		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh"
+		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" sizebuf
 fi
 
 echo "PASS: Rust sizebuf -- differential harness green, the consolidated"

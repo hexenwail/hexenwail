@@ -204,7 +204,7 @@ if [ "$run_engine" -eq 1 ]; then
 	OFF_BIN="$work/build-off/bin/glhexen2" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
-		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh"
+		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" msg_io
 fi
 
 echo "PASS: Rust msg_io -- the C without H2W, the C with H2W and the Rust union"

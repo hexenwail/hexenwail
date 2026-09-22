@@ -38,7 +38,7 @@
 #                                                # diff ON vs OFF end to end
 #
 # --engine additionally resolves the demo data and Xvfb out of nix itself and
-# runs engine/rust/mathlib/tests/run_engine_smoke.sh, so it needs network (or
+# runs the shared engine smoke, so it needs network (or
 # a warm store) on a first run.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -154,7 +154,7 @@ if [ "$run_engine" -eq 1 ]; then
 	OFF_BIN="$work/build-off/bin/glhexen2" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
-		"$crate/tests/run_engine_smoke.sh"
+		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" mathlib
 
 	echo
 	echo "PASS: Rust mathlib -- differential harness green; all three targets"
