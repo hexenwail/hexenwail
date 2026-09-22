@@ -188,6 +188,14 @@ jobs:
       - name: Rust msg_io (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-msg-io.sh
 
+      # info_str is the first port whose C original is compiled by one target
+      # only: info_str.c is in HWSV_SOURCES alone, and every Hexen II use of
+      # Info_* is inside `#if defined(H2W)`, so glhexen2 and h2ded have no
+      # caller.  Of the two variants in its C body only the SERVERONLY one has
+      # ever been compiled, so that is the one the harness compares against.
+      - name: Rust info_str (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-info-str.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.
