@@ -48,6 +48,7 @@ emcmake cmake \
 	-DUSE_STRLCPY_RS=OFF \
 	-DUSE_STRLCAT_RS=OFF \
 	-DUSE_HUFFMAN_RS=OFF \
+	-DUSE_WAD_RS=OFF \
 	"$SOURCE_DIR"
 
 emmake make -j"$(nproc)"

@@ -216,6 +216,17 @@ jobs:
       - name: Rust huffman (differential test + flag-ON build)
         run: nix develop .#default -c bash ./scripts/check-rust-huffman.sh
 
+      # wad is the only port whose C original is compiled into a single target:
+      # wad.c is in COMMON_SOURCES and is removed again for h2ded ("gfx.wad
+      # lumps are renderer-only data"), and HWSV_SOURCES never lists it.  So the
+      # harness has one C to compare against, the gate requires exactly one
+      # definition in glhexen2 and at most one in the other two, and the port's
+      # three exported globals keep the C's types.  The --engine arm is opt-in:
+      # W_LoadWadFile runs at client startup and every character and icon is
+      # drawn from those lumps, so an ON/OFF console diff is meaningful here.
+      - name: Rust wad (differential test + flag-ON build)
+        run: nix develop .#default -c bash ./scripts/check-rust-wad.sh
+
       # The one part of the HexenWorld client that CI can test properly: the
       # signon download parser and packed projectile handling need no game data,
       # display or network.

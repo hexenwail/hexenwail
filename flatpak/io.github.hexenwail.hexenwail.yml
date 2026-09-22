@@ -152,6 +152,7 @@ modules:
       - -DUSE_STRLCPY_RS=OFF
       - -DUSE_STRLCAT_RS=OFF
       - -DUSE_HUFFMAN_RS=OFF
+      - -DUSE_WAD_RS=OFF
     sources:
       - type: dir
         path: ..
