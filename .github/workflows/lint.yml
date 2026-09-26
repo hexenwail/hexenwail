@@ -41,6 +41,7 @@ jobs:
             scripts/wasm-build.sh scripts/wasm-assemble-artifact.sh \
             scripts/wasm-validate-artifact.sh scripts/webgl-smoke-test.sh \
             scripts/demo-playback-smoke.sh scripts/wasm-boot-smoke.sh \
+            scripts/quit-smoke.sh \
             scripts/check-rust.sh scripts/check-rust-abi.sh \
             scripts/check-rust-notices.sh scripts/lib/rust-gate.sh
 

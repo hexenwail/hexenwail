@@ -43,24 +43,30 @@ Host_Quit_f
 */
 
 /* Ironwail's cl_confirmquit (uhexen2-a5nn.16).  1 keeps the confirmation
- * prompt; 0 quits immediately from anywhere.
+ * prompt on the menu's Quit entry, 0 takes that entry straight out.  Read in
+ * M_Menu_Quit_f, which is now the only thing that asks.
  *
- * Worth having beyond parity: the prompt only appears when connected AND not
- * at the console, so a `quit` issued from a script, a bind or the command line
- * silently opens a menu and leaves the engine running instead of exiting.
- * That is exactly the case where nobody is watching to answer it. */
+ * THE PROMPT BELONGS TO THE MENU, NOT TO THE `quit` COMMAND (GitHub #204).
+ * Upstream raises it from here whenever the client is connected and the console
+ * is closed, and that catches every scripted quit as well: `quit` in a cfg, in
+ * a bind or on the command line opened a modal menu and left the engine
+ * running.  A headless run cannot answer that prompt -- no key events arrive,
+ * and the console cannot even be opened to retry, because with a connection
+ * live the menu takes the grave key.  So every harness run sat in the prompt
+ * until its own timeout killed it.  The two lines the hang was always reported
+ * with, "Sending clc_disconnect" and "Client player removed", come from the
+ * SIGTERM that timeout sends (SDL_EVENT_QUIT -> CL_Disconnect in in_sdl.c):
+ * they are printed AFTER the hang, which is what made it look like a blocked
+ * shutdown rather than a shutdown that never started.
+ *
+ * The accident worth guarding -- Escape, Quit, oops -- is reached through the
+ * menu, and the menu still asks.  A `quit` command is an instruction, and the
+ * dedicated server's own Host_Quit_f (engine/hexen2/server/host_cmd.c) has
+ * always treated it as one. */
 cvar_t	cl_confirmquit = {"cl_confirmquit", "1", CVAR_ARCHIVE};
 
 void Host_Quit_f (void)
 {
-	if (cl_confirmquit.integer &&
-	    Key_GetDest() != key_console && 
-	    /* quit without asking if we aren't connected  -- Steve */
-	    /* cls.state != ca_dedicated */ cls.state == ca_connected)
-	{
-		M_Menu_Quit_f ();
-		return;
-	}
 	CL_Disconnect ();
 	Host_ShutdownServer(false);
 
