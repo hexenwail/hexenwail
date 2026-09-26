@@ -1105,6 +1105,14 @@ if(BUILD_TESTING)
     target_compile_definitions(vid_restart_context_test PRIVATE
         VID_RESTART_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME vid_restart_context COMMAND vid_restart_context_test)
+    # SV_CheckBottom's corner box (issue #278).  Source-text shape again:
+    # SV_CheckBottom reaches sv.models[], SV_Move and Con_Printf, so it cannot
+    # link here, and the bug was an extra assignment rather than wrong
+    # arithmetic -- see the test's header comment.
+    add_executable(sv_checkbottom_test tests/sv_checkbottom_test.c)
+    target_compile_definitions(sv_checkbottom_test PRIVATE
+        SV_CHECKBOTTOM_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME sv_checkbottom COMMAND sv_checkbottom_test)
 endif()
 
 engine_rs_attach(${EXECUTABLE_NAME})
