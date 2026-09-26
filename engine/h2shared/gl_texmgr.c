@@ -160,6 +160,38 @@ void TexMgr_Init (void)
 	r_notexture_mip->gl_texturenum = notexture->texnum;
 }
 
+/*
+================
+TexMgr_ContextLost
+
+vid_restart really destroys the GL context, so every name this shim handed out
+is dead.  Zero them WITHOUT glDeleteTextures: the new context reissues the same
+low numbers, so a delete here would destroy whatever live texture inherited the
+name, and a recorded width/height would describe an object that no longer has
+it (issue #205).
+
+Emptying the pool reissues slots from index 0, so every holder of a
+gltexture_t * into it must drop its pointers first.  gl_sky.c's skybox cache is
+the only one; Sky_ContextLost does that, and gl_vidsdl.c calls it immediately
+before this.  TexMgr_Init re-uploads the placeholders once the new context is
+current -- it early-returns on a nonzero texnum, which is why they are zeroed
+here rather than left alone.
+================
+*/
+void TexMgr_ContextLost (void)
+{
+	memset (managed_textures, 0, sizeof(managed_textures));
+	num_managed_textures = 0;
+
+	memset (&notexture_val, 0, sizeof(notexture_val));
+	memset (&nulltexture_val, 0, sizeof(nulltexture_val));
+
+	if (r_notexture_mip)
+		r_notexture_mip->gl_texturenum = 0;
+
+	currenttexture = GL_UNUSED_TEXTURE;
+}
+
 /* Skybox faces differ only in their last few characters ("_rt",
  * "_rt.png_face0"), so a plain truncation of a long sky name gives all six the
  * same identifier.  Keep the head, which imagelist's prefix filter matches, and

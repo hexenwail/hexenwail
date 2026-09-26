@@ -236,6 +236,14 @@ jobs:
             engine/tests/menu_pointer_test.c
           ./menu_pointer_test
 
+      - name: Unit test vid_restart context lifetime
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -Iengine/h2shared -o vid_restart_context_test \
+            engine/tests/vid_restart_context_test.c
+          ./vid_restart_context_test
+
       # Keep the cross-compiled, tools and gamecode targets in one grouped
       # step.  The loop preserves the explicit target list while avoiding a
       # separate workflow step for every small derivation.

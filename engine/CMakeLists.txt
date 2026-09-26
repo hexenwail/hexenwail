@@ -1098,6 +1098,13 @@ if(BUILD_TESTING)
     # Menu pointer geometry (issue #137): header-only, same cheap shape.
     add_executable(menu_pointer_test tests/menu_pointer_test.c)
     add_test(NAME menu_pointer COMMAND menu_pointer_test)
+    # vid_restart GL-context lifetime (issue #205).  Same source-text shape as
+    # brush_render_state_test: the caches are file-static in TUs that need SDL
+    # and the GL backend to link.
+    add_executable(vid_restart_context_test tests/vid_restart_context_test.c)
+    target_compile_definitions(vid_restart_context_test PRIVATE
+        VID_RESTART_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME vid_restart_context COMMAND vid_restart_context_test)
 endif()
 
 engine_rs_attach(${EXECUTABLE_NAME})

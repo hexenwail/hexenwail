@@ -608,6 +608,7 @@ void D_ClearOpenGLTextures (int last_tex);
 /* gl_texmgr.c: uploads the notexture/nulltexture placeholders and binds
  * notexture to r_notexture_mip.  Must run after R_InitTextures. */
 void TexMgr_Init (void);
+void TexMgr_ContextLost (void);	/* vid_restart: zero names, never delete them (issue #205) */
 /* gl_texmgr.c keeps its own pool (skybox faces, notexture/nulltexture)
  * outside gltextures[]; these let imagelist/imagedump enumerate it. */
 int TexMgr_NumTextures (void);

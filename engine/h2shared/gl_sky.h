@@ -41,5 +41,9 @@ void Sky_LoadWindCfg (const char *name);
 void Sky_UpdateWind (void);
 void Sky_ProcessPoly (glpoly_t *p);
 void Sky_CacheFlush (void);
+/* vid_restart context teardown/rebuild.  Not Sky_CacheFlush: that deletes GL
+ * names the new context has already reissued (issue #205). */
+void Sky_ContextLost (void);
+void Sky_ContextRestored (void);
 
 #endif /* GL_SKY_H */
