@@ -60,7 +60,7 @@ typedef int qboolean;
 #define MAX_MODELS 8
 #define MAX_EFRAGS 4
 #define LERP_RESETANIM 4
-typedef struct qmodel_s { int id; } qmodel_t;
+typedef struct qmodel_s { int id, numframes; } qmodel_t;
 typedef float vec3_t[3];
 typedef struct { qmodel_t *model; int frame, effects, scale, drawflags, abslight, lerpflags; } entity_t;
 typedef struct efrag_s { struct efrag_s *entnext; } efrag_t;
@@ -100,7 +100,7 @@ static void SB_InvReset(void) {}
 '''
     test = r'''
 int main(void) {
-    qmodel_t old = {1}, weapon = {2};
+    qmodel_t old = {1, 0}, weapon = {2, 0};
     hwcl_entity_state_t state = {7, 11, 12, 13, 14};
     cl.viewent.model = &old;
     cl.model_precache[3] = &weapon;
@@ -110,6 +110,12 @@ int main(void) {
     assert(cl.viewent.effects == 11 && cl.viewent.scale == 12);
     assert(cl.viewent.drawflags == 13 && cl.viewent.abslight == 14);
     assert(cl.viewent.lerpflags & LERP_RESETANIM);
+
+    /* Mods can transiently pair a new model with an old weapon frame. */
+    weapon.numframes = 4;
+    HWCL_ApplyViewModel(&state);
+    assert(cl.viewent.frame == 0);
+    weapon.numframes = 0;
 
     /* A view-only invisibility flag precedes ordinary player updates. */
     hwcl_view_drawflags = 64;
@@ -154,6 +160,8 @@ int main(void) {
               function("engine/hexen2/view.c", "void V_SetPunchAngle") + "\n" +
               function("engine/hexen2/view.c", "void V_DecayPunchAngle") + "\n" +
               function("engine/hexen2/cl_main.c", "void CL_ClearState (void)") + "\n" +
+              function("engine/hexen2/cl_hw.c",
+                       "static int HWCL_ClampModelFrame") + "\n" +
               function("engine/hexen2/cl_hw.c",
                        "static void HWCL_ApplyViewModel") + "\n" +
               test)
