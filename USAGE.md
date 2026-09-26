@@ -128,7 +128,7 @@ successful join prints `signon complete`, followed by the first rendered world.
 ## Bundled gamecode
 
 Releases ship compiled gamecode (`progs.dat`, `progs2.dat`) beside the engine —
-in `gamecode/` next to `glh2.exe` on Windows, in `share/hexenwail/` next to
+in `gamecode/` next to `hexenwail.exe` on Windows, in `share/hexenwail/` next to
 `bin/` on Linux — so the gamecode fixes apply without copying anything into your
 game directory.
 

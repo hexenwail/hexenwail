@@ -19,7 +19,7 @@ every "we recommend X" as "X is what shipped".
 The player-facing consequence, which the two texts below are written against:
 **a normal install copies nothing on either platform.** On Linux the engine
 finds `<exedir>/../share/hexenwail/`; on Windows the release zip is flat, so
-`gamecode/` already sits beside `glh2.exe` and satisfies lookup layer 1.
+`gamecode/` already sits beside `hexenwail.exe` and satisfies lookup layer 1.
 
 **Citation convention: `file.c :: Symbol()`, never `file.c:LINE`.** This
 document cited bare line numbers until `uhexen2-2z1z`, and they went stale four
@@ -221,7 +221,7 @@ byte-identical to before.
 ### F6 — the Windows package already has the right shape
 
 The Windows release zip is flat, and `gamecode/` is already a root-level
-subdirectory sitting beside `glh2.exe` (`.github/workflows/release.yml`, the `Package` step):
+subdirectory sitting beside `hexenwail.exe` (`.github/workflows/release.yml`, the `Package` step):
 
 ```sh
 winpkg=hexenwail-windows
@@ -559,7 +559,7 @@ the player's own config tree, making an engine-packaging decision persist into
 an install the engine may not own.
 
 **Why not presence-of-file alone.** "Delete the bundle" is destructive to the
-download, and on Windows — where the bundle sits beside `glh2.exe` among the
+download, and on Windows — where the bundle sits beside `hexenwail.exe` among the
 DLLs — it is undiscoverable. It should nonetheless keep working as the ultimate
 escape hatch, because a mechanism that survives a corrupted config is worth
 having.
@@ -664,7 +664,7 @@ All three resolve through `Sys_GetExeDir()` (F5), never through `basedir`.
 ## Packaging consequences
 
 **Windows: no change.** `gamecode/` is already a root-level directory beside
-`glh2.exe` (F6).
+`hexenwail.exe` (F6).
 
 **Linux: add `share/hexenwail/{data1,portals}` under `linux-x86_64/`** —
 roughly 2.9 MB (867K + 819K + 1120K) added to the Linux zip. The root-level
@@ -832,7 +832,7 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    which every retail tree populates, and the feature would be inert. A Windows
    player's `<install>/data1/progs.dat` loses to the bundle, so their recourse
    is `-vanillaprogs`, or **replacing the file inside `gamecode/` beside
-   `glh2.exe`** — the bundle is our file, not Raven's, so overwriting it risks
+   `hexenwail.exe`** — the bundle is our file, not Raven's, so overwriting it risks
    nothing and re-extracting the zip undoes it. Prefer that to "delete the
    bundle": it is reversible and it keeps the other two gamedirs intact.
 

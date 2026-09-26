@@ -888,12 +888,12 @@
               mkdir -p $out/bin
 
               # Install the Windows executable
-              install -Dm755 bin/glh2.exe $out/bin/glh2.exe
+              install -Dm755 bin/hexenwail.exe $out/bin/hexenwail.exe
 
               # Dr. MinGW's post-mortem handler.  engine/hexen2/sys_win.c
               # LoadLibraryA()s exchndl.dll as the first thing WinMain does,
               # so shipping these four DLLs is the entire crash-reporting
-              # setup -- a crash drops a symbolized glh2.RPT next to the
+              # setup -- a crash drops a symbolized hexenwail.RPT next to the
               # binary without the player installing a debugger.  uhexen2-hger.
               install -Dm755 ${drmingw}/bin/*.dll -t $out/bin/
 
@@ -963,11 +963,11 @@
               # own source paths are not store paths and so are untouched --
               # they are what makes the reports readable.  uhexen2-hger.
               for h in $(grep -oaE '/nixpkgs/[0-9a-df-np-sv-z]{32}-' \
-                           $out/bin/glh2.exe | cut -d/ -f3 | cut -d- -f1 | sort -u); do
-                remove-references-to -t "$NIX_STORE/$h-x" $out/bin/glh2.exe
+                           $out/bin/hexenwail.exe | cut -d/ -f3 | cut -d- -f1 | sort -u); do
+                remove-references-to -t "$NIX_STORE/$h-x" $out/bin/hexenwail.exe
               done
             '';
-            # Note glh2.exe is deliberately absent from the strip loop above:
+            # Note hexenwail.exe is deliberately absent from the strip loop above:
             # its DWARF is the payload, not waste.  Stripping it would turn
             # every future crash report back into raw hex addresses.
 
@@ -1276,7 +1276,7 @@
             # Since uhexen2-xsmc the player copies nothing on either platform:
             # the engine loads this gamecode from beside its own executable.
             # On Windows this very directory is what it finds (release.yml
-            # flattens that zip, leaving gamecode/ next to glh2.exe, i.e. the
+            # flattens that zip, leaving gamecode/ next to hexenwail.exe, i.e. the
             # first lookup layer); on Linux it finds the per-platform copy
             # installed below.  What survives here is the hand-install case --
             # feeding these files to a DIFFERENT engine -- which is the only
@@ -1338,7 +1338,7 @@ straight out of the zip: nothing is copied, nothing of yours is overwritten,
 and there is no step you have missed.
 
 So this gamecode/ folder is not a job waiting for you.  On Windows it IS the
-copy the engine loads -- it sits beside glh2.exe, which is where the engine
+copy the engine loads -- it sits beside hexenwail.exe, which is where the engine
 looks first.  On Linux the engine loads its own from the platform directory
 and this folder is a spare.  Either way, read on only if you want to check
 what you are running, turn it off, or use these files somewhere else.
@@ -1396,7 +1396,7 @@ Two more reasons it is the right place, both about being able to undo it:
     own.  The game folder is never touched, so there is nothing to restore.
 
 Windows -- there is no user directory, so replace the files inside the
-gamecode\ folder beside glh2.exe instead:
+gamecode\ folder beside hexenwail.exe instead:
 
   gamecode\data1\progs.dat
   gamecode\data1\progs2.dat
@@ -1464,7 +1464,7 @@ EOF
             #
             # Windows gets no equivalent because it needs none: release.yml
             # flattens that zip to a Hexen II-style root, which leaves
-            # gamecode/ beside glh2.exe and satisfies the engine's first
+            # gamecode/ beside hexenwail.exe and satisfies the engine's first
             # lookup layer, <exedir>/gamecode/, as shipped.
             #
             # An addition, not a move: the staging tree above stays, as the
@@ -1532,7 +1532,7 @@ use your own install's gamecode instead; the "Gamecode:" line the engine
 prints on load always names the file it actually used.
 
 gamecode/ is the same three files kept separately.  On Windows it is the copy
-the engine loads, since it sits beside glh2.exe; on Linux the engine loads its
+the engine loads, since it sits beside hexenwail.exe; on Linux the engine loads its
 own from the platform directory and this is a spare.  Copying it into a Hexen
 II folder is needed only to feed a DIFFERENT engine, and that overwrites files
 retail keeps loose with no .pak copy to fall back on -- back up first.  Read
@@ -1540,8 +1540,8 @@ gamecode/README.txt; it covers all of this, and lists one deliberate behaviour
 change to the Crusader's Glyph of the Ancients.
 
 Crash reporting (Windows):
-The Windows build carries Dr. MinGW, so a crash writes "glh2.RPT" beside
-glh2.exe by itself -- nothing to install, nothing to turn on.  Send that file
+The Windows build carries Dr. MinGW, so a crash writes "hexenwail.RPT" beside
+hexenwail.exe by itself -- nothing to install, nothing to turn on.  Send that file
 and qconsole.log with any crash report; between them they name the source file
 and line the game died on.
 

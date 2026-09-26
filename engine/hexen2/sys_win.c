@@ -521,7 +521,8 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	/* Dr. MinGW's exception handler, loaded first so it covers everything
 	   below.  It installs an unhandled-exception filter from its own
 	   DllMain, so merely loading it is the whole setup: a hard crash then
-	   writes a symbolized backtrace to glh2.RPT beside the binary,
+	   writes a symbolized backtrace named after the executable (hexenwail.RPT)
+	   beside the binary,
 	   with nothing for the player to install or run.  That matters because
 	   we cross-compile with mingw and therefore emit DWARF -- WinDbg,
 	   procdump and Windows Error Reporting all want PDB and cannot

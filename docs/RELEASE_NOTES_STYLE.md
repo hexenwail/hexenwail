@@ -100,7 +100,7 @@ README — a single static badge above the top-level heading, pointing at
 Adopting the voice does not mean dropping content Ironwail has no equivalent
 for. Carry these forward into every restyled body:
 
-- **Crash-reporting instructions** — how to attach `glh2.RPT` and `qconsole.log`
+- **Crash-reporting instructions** — how to attach `hexenwail.RPT` and `qconsole.log`
   to a bug report.
 - **SHA256SUMS verification** — the checksums, and how to verify a download
   against them.

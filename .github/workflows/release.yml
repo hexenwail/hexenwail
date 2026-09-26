@@ -169,12 +169,14 @@ jobs:
           (cd staging && zip -r ../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
             linux-x86_64/ gamecode/ licenses/ BUILD_INFO.txt)
 
-          # Windows: Hexen II-style flat layout — glh2.exe + DLLs at the zip
+          # Windows: Hexen II-style flat layout — hexenwail.exe + DLLs at the zip
           # root next to an empty data1/, so users extract straight into their
           # Hexen II directory and drop pak0.pak/pak1.pak into data1/.
           winpkg=hexenwail-windows
           mkdir -p "$winpkg/data1"
           cp staging/windows-x86_64/bin/* "$winpkg/"
+          test -f "$winpkg/hexenwail.exe"
+          test ! -e "$winpkg/glh2.exe"
           # get_demo.* live beside bin/, not in it, so copying bin/* alone
           # shipped a bundle whose own BUILD_INFO.txt told users to run a
           # file that was not there.
@@ -185,6 +187,7 @@ jobs:
           # player's retail gamecode on unzip, with no copy in any .pak to
           # restore from.  Keep the copy deliberate.
           cp -r staging/gamecode "$winpkg/"
+          test -f "$winpkg/gamecode/data1/progs.dat"
           cp -r staging/licenses "$winpkg/"
           cp staging/BUILD_INFO.txt "$winpkg/"
           echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
@@ -273,7 +276,7 @@ jobs:
             echo ""
             echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
             echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/\`"
-            echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`glh2.exe\`"
+            echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`hexenwail.exe\`"
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
             echo ""
@@ -296,11 +299,11 @@ jobs:
             echo "- **To run different gamecode** — a translation, a balance patch, your own build —"
             echo "  put it in \`~/.hexen2/<gamedir>/\` on Linux, which outranks the bundled copy."
             echo "  Windows has no user directory, so replace the files in \`gamecode/\` beside"
-            echo "  \`glh2.exe\` instead."
+            echo "  \`hexenwail.exe\` instead."
             echo ""
             echo "The \`gamecode/\` folder in the zip is those same three files, plus the"
             echo "HexenWorld and Siege \`strings.txt\` tables the client prints game messages from. On Windows it *is*"
-            echo "the copy the engine loads, since it sits next to \`glh2.exe\`; on Linux the engine"
+            echo "the copy the engine loads, since it sits next to \`hexenwail.exe\`; on Linux the engine"
             echo "loads its own from the platform directory and this one is a spare you can install"
             echo "by hand into a different engine. See \`gamecode/README.txt\`."
             echo ""
@@ -316,7 +319,7 @@ jobs:
             echo "### Reporting a crash"
             echo ""
             echo "Windows builds report crashes by themselves — there is nothing to install or enable."
-            echo "If the game dies, a file called \`glh2.RPT\` appears next to \`glh2.exe\`."
+            echo "If the game dies, a file called \`hexenwail.RPT\` appears next to \`hexenwail.exe\`."
             echo "Attach that file and \`qconsole.log\` from the same folder to your report."
             echo ""
             echo "The Windows build ships with debug symbols, so that report names the source file"

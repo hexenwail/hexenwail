@@ -39,7 +39,7 @@ Build steps:
     cmake ..
     make
 
-The binary will be named glhexen2 (Linux) or glh2.exe (Windows).
+The binary will be named glhexen2 (Linux) or hexenwail.exe (Windows).
 
 
 Building against OpenGL ES 3.0 instead of desktop GL:
