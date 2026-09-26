@@ -771,13 +771,13 @@ void R_BuildWorldCull (void)
 
 void R_FreeWorldCull (void)
 {
-	if (cull_surf_ssbo) { glDeleteBuffers_fp(1, &cull_surf_ssbo); cull_surf_ssbo = 0; }
-	if (cull_marksurf_ssbo) { glDeleteBuffers_fp(1, &cull_marksurf_ssbo); cull_marksurf_ssbo = 0; }
-	if (cull_indirect_buf) { glDeleteBuffers_fp(1, &cull_indirect_buf); cull_indirect_buf = 0; }
-	if (cull_src_ibo) { glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
-	if (cull_dst_ibo) { glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
-	if (cull_dedup_ssbo) { glDeleteBuffers_fp(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
-	if (cull_stats_ssbo) { glDeleteBuffers_fp(1, &cull_stats_ssbo); cull_stats_ssbo = 0; }
+	if (cull_surf_ssbo) { GL_ForgetBuffer(cull_surf_ssbo); glDeleteBuffers_fp(1, &cull_surf_ssbo); cull_surf_ssbo = 0; }
+	if (cull_marksurf_ssbo) { GL_ForgetBuffer(cull_marksurf_ssbo); glDeleteBuffers_fp(1, &cull_marksurf_ssbo); cull_marksurf_ssbo = 0; }
+	if (cull_indirect_buf) { GL_ForgetBuffer(cull_indirect_buf); glDeleteBuffers_fp(1, &cull_indirect_buf); cull_indirect_buf = 0; }
+	if (cull_src_ibo) { GL_ForgetBuffer(cull_src_ibo); glDeleteBuffers_fp(1, &cull_src_ibo); cull_src_ibo = 0; }
+	if (cull_dst_ibo) { GL_ForgetBuffer(cull_dst_ibo); glDeleteBuffers_fp(1, &cull_dst_ibo); cull_dst_ibo = 0; }
+	if (cull_dedup_ssbo) { GL_ForgetBuffer(cull_dedup_ssbo); glDeleteBuffers_fp(1, &cull_dedup_ssbo); cull_dedup_ssbo = 0; }
+	if (cull_stats_ssbo) { GL_ForgetBuffer(cull_stats_ssbo); glDeleteBuffers_fp(1, &cull_stats_ssbo); cull_stats_ssbo = 0; }
 	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (cull_clear_prog) { glDeleteProgram_fp(cull_clear_prog); cull_clear_prog = 0; }
 	if (cull_mark_prog) { glDeleteProgram_fp(cull_mark_prog); cull_mark_prog = 0; }

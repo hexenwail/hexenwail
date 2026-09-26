@@ -893,7 +893,7 @@ void R_LightCluster_Shutdown (void)
 {
 	R_PipelineForgetProgram ();	/* GL reuses program names */
 	if (lc_prog) { glDeleteProgram_fp (lc_prog); lc_prog = 0; }
-	if (lc_ssbo) { glDeleteBuffers_fp (1, &lc_ssbo); lc_ssbo = 0; }
+	if (lc_ssbo) { GL_ForgetBuffer (lc_ssbo); glDeleteBuffers_fp (1, &lc_ssbo); lc_ssbo = 0; }
 	if (lc_grid) { glDeleteTextures_fp (1, &lc_grid); lc_grid = 0; }
 	lc_ready = false;
 	lc_failed = false;

@@ -38,13 +38,6 @@ qboolean	gl_sync_able = false;
 GLint		gl_ssbo_align = 256;	/* conservative default */
 GLint		gl_ubo_align = 256;
 
-/* Last-seen single buffer bindings — drop redundant glBindBuffer calls. */
-static GLuint	current_array_buffer;
-static GLuint	current_element_array_buffer;
-static GLuint	current_shader_storage_buffer;
-static GLuint	current_uniform_buffer;
-static GLuint	current_draw_indirect_buffer;
-
 typedef struct {
 	GLuint		buffer;
 	GLintptr	offset;
@@ -61,50 +54,37 @@ static bufferrange_t ubo_ranges[CACHED_BUFFER_RANGES];
  *  Buffer binding wrappers — drop redundant binds.
  * ---------------------------------------------------------------------- */
 
+/* The generic (non-indexed) binding point is deliberately NOT cached.
+ *
+ * It used to be, and skipping the "redundant" bind is what produced the
+ * glBufferSubData errors in issue #203 and its GL_INVALID_OPERATION twin
+ * ("no buffer bound").  The cache can only be trusted if every binder in the
+ * engine goes through it, and roughly forty raw glBindBuffer_fp calls do not
+ * — gl_mesh.c, gl_shader.c, r_part.c and gl_worldcull.c all bind
+ * GL_SHADER_STORAGE_BUFFER directly and then unbind to 0.  Sequence that bit:
+ *
+ *   frame N   LC_SetupFrame        GL_BindBufferBase(SSBO, 6, lc_ssbo)
+ *                                    -> cache says lc_ssbo, real binding lc_ssbo
+ *   map load  GL_MakeAliasGPUMesh  glBindBuffer_fp(SSBO, 0)
+ *                                    -> cache still says lc_ssbo, real binding 0
+ *   frame N+1 LC_UploadAndDispatch GL_BindBuffer(SSBO, lc_ssbo)  [skipped!]
+ *                                  glBufferSubData(SSBO, 0, 1024, styles)
+ *                                    -> GL_INVALID_OPERATION, no buffer bound,
+ *                                       or GL_INVALID_VALUE into whatever a
+ *                                       sibling path left bound instead.
+ *
+ * glBindBuffer is a cheap state set and this wrapper has under a dozen call
+ * sites, a handful of which run per frame, so binding unconditionally costs
+ * nothing measurable and removes the entire failure class.  The indexed
+ * binding points below ARE still cached, which is safe because no raw
+ * glBindBufferBase_fp / glBindBufferRange_fp call exists outside this file;
+ * the one remaining way to stale that cache is deleting a buffer and having
+ * GL hand the name back out, which GL_ForgetBuffer covers. */
 void GL_BindBuffer (GLenum target, GLuint buffer)
 {
-	GLuint *cache;
-
-	switch (target)
-	{
-	case GL_ARRAY_BUFFER:		cache = &current_array_buffer;		break;
-	case GL_ELEMENT_ARRAY_BUFFER:	cache = &current_element_array_buffer;	break;
-	case GL_SHADER_STORAGE_BUFFER:	cache = &current_shader_storage_buffer;	break;
-	case GL_UNIFORM_BUFFER:		cache = &current_uniform_buffer;	break;
-	case GL_DRAW_INDIRECT_BUFFER:	cache = &current_draw_indirect_buffer;	break;
-	default:
-		glBindBuffer_fp (target, buffer);
-		return;
-	}
-
-	if (*cache == buffer)
-		return;
-	*cache = buffer;
 	glBindBuffer_fp (target, buffer);
 }
-#define GL_BindBufferCached GL_BindBuffer
-
-/* Force a glBindBuffer even when the cache thinks it's already bound, and
- * sync the cache afterward.  Use in correctness-critical paths (unmap,
- * delete) where a desynced cache caused by a sibling code path's raw
- * glBindBuffer_fp would otherwise route the next op to the wrong buffer.
- *
- * Many setup paths in worldcull/mesh/shader/particles still do raw binds
- * outside this wrapper.  Until those are migrated, defensively re-bind
- * here so we never glUnmapBuffer the wrong buffer.  uhexen2-of7g. */
-static void GL_BindBufferForce (GLenum target, GLuint buffer)
-{
-	switch (target)
-	{
-	case GL_ARRAY_BUFFER:		current_array_buffer		= buffer; break;
-	case GL_ELEMENT_ARRAY_BUFFER:	current_element_array_buffer	= buffer; break;
-	case GL_SHADER_STORAGE_BUFFER:	current_shader_storage_buffer	= buffer; break;
-	case GL_UNIFORM_BUFFER:		current_uniform_buffer		= buffer; break;
-	case GL_DRAW_INDIRECT_BUFFER:	current_draw_indirect_buffer	= buffer; break;
-	default: break;
-	}
-	glBindBuffer_fp (target, buffer);
-}
+#define GL_BindBufferForce GL_BindBuffer
 
 void GL_BindBufferRange (GLenum target, GLuint index,
 			 GLuint buffer, GLintptr offset, GLsizeiptr size)
@@ -128,13 +108,6 @@ void GL_BindBufferRange (GLenum target, GLuint index,
 		cache->offset = offset;
 		cache->size   = size;
 	}
-
-	/* BindBufferRange also implicitly binds to the target binding,
-	 * so update the single-binding cache for that target too. */
-	if (target == GL_SHADER_STORAGE_BUFFER)
-		current_shader_storage_buffer = buffer;
-	else if (target == GL_UNIFORM_BUFFER)
-		current_uniform_buffer = buffer;
 
 	glBindBufferRange_fp (target, index, buffer, offset, size);
 }
@@ -161,12 +134,6 @@ void GL_BindBufferBase (GLenum target, GLuint index, GLuint buffer)
 		cache->offset = 0;
 		cache->size   = 0;
 	}
-
-	/* BindBufferBase moves the generic target binding too. */
-	if (target == GL_SHADER_STORAGE_BUFFER)
-		current_shader_storage_buffer = buffer;
-	else if (target == GL_UNIFORM_BUFFER)
-		current_uniform_buffer = buffer;
 
 	glBindBufferBase_fp (target, index, buffer);
 }
@@ -205,15 +172,42 @@ void GL_BindBuffersRange (GLenum target, GLuint first, GLsizei count,
 		GL_BindBufferRange (target, first + i, buffers[i], offsets[i], sizes[i]);
 }
 
-void GL_ClearBufferBindings (void)
+/* Drop any cached indexed binding that names `handle`.
+ *
+ * glDeleteBuffers resets every binding point the deleted buffer occupied back
+ * to 0, and GL then hands the freed name straight back out of the next
+ * glGenBuffers (names are allocated lowest-free-first).  So a cache entry left
+ * holding a dead name is not merely stale, it actively matches the buffer that
+ * inherits the name: GL_BindBufferRange sees buffer/offset/size all equal,
+ * short-circuits, and the shader reads binding 0 instead of the new buffer.
+ * Every SSBO/UBO delete site in the engine calls this first. */
+void GL_ForgetBuffer (GLuint handle)
 {
 	int i;
 
-	current_array_buffer = 0;
-	current_element_array_buffer = 0;
-	current_shader_storage_buffer = 0;
-	current_uniform_buffer = 0;
-	current_draw_indirect_buffer = 0;
+	if (!handle)
+		return;
+
+	for (i = 0; i < CACHED_BUFFER_RANGES; i++)
+	{
+		if (ssbo_ranges[i].buffer == handle)
+		{
+			ssbo_ranges[i].buffer = 0;
+			ssbo_ranges[i].offset = 0;
+			ssbo_ranges[i].size   = 0;
+		}
+		if (ubo_ranges[i].buffer == handle)
+		{
+			ubo_ranges[i].buffer = 0;
+			ubo_ranges[i].offset = 0;
+			ubo_ranges[i].size   = 0;
+		}
+	}
+}
+
+void GL_ClearBufferBindings (void)
+{
+	int i;
 
 	for (i = 0; i < CACHED_BUFFER_RANGES; i++)
 	{
@@ -270,7 +264,10 @@ static void GL_DrainGarbage (frameres_t *frame)
 {
 	int i;
 	for (i = 0; i < frame->num_garbage; i++)
+	{
+		GL_ForgetBuffer (frame->garbage[i]);
 		glDeleteBuffers_fp (1, &frame->garbage[i]);
+	}
 	frame->num_garbage = 0;
 }
 
@@ -488,6 +485,7 @@ void GL_DeleteFrameResources (void) {}
 void GL_AcquireFrameResources (void) {}
 void GL_ReleaseFrameResources (void) {}
 void GL_ClearBufferBindings (void) {}
+void GL_ForgetBuffer (GLuint handle) { (void)handle; }
 void GL_AddGarbageBuffer (GLuint handle) { (void)handle; }
 
 void GL_Upload (GLenum target, const void *data, size_t numbytes,

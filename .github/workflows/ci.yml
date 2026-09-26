@@ -218,6 +218,16 @@ jobs:
             -o hw_ce_test scripts/hw_ce_test.c
           ./hw_ce_test
 
+      # Structural gate on the GL buffer binding cache (#203).  Caching the
+      # generic (non-indexed) binding point is what produced both
+      # "glBufferSubData(offset 0 + size 1024 > buffer size 288)" and
+      # "glBufferSubData(no buffer bound)": ~40 raw glBindBuffer_fp calls
+      # elsewhere in the engine bypass any such cache and make it lie.
+      - name: GL buffer binding cache gate
+        run: |
+          set -euo pipefail
+          nix develop --command python3 scripts/gl_binding_cache_check.py
+
       - name: Unit test HexenWorld packed projectiles
         run: |
           set -euo pipefail
