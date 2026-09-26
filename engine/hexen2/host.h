@@ -54,6 +54,7 @@ extern	cvar_t		host_maxfps;
 extern	cvar_t		sys_nostdout;
 extern	cvar_t		developer;
 extern	cvar_t		map_checks;	/* mapper mode; see host.c.  uhexen2-a5nn.34 */
+extern	cvar_t		cl_confirmquit;		/* read by the menu's Quit entry; see Host_Quit_f */
 extern	cvar_t		sv_autosave;		/* see Host_CheckAutosave.  uhexen2-a5nn.31 */
 extern	cvar_t		sv_autosave_interval;
 

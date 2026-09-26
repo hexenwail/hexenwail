@@ -211,6 +211,25 @@ matching `start.cfg` line.
 
 `tools/test_demo_playback_gate.py` is the free CI half of the same invariant.
 
+### Quitting — `scripts/quit-smoke.sh`
+
+```
+nix build .#default -o result && nix build .#demodata -o result-demodata
+./scripts/quit-smoke.sh
+```
+
+Loads `demo1`, issues `quit` from a cfg the way every headless harness does,
+and asserts the process exits 0 inside `LIMIT` seconds. Needs no X and no
+retail data — SDL's offscreen video driver is enough — so it is the cheapest
+check here at ~60 s.
+
+The assertion is the **exit status**, never a log line: the bug it guards
+(GitHub #204) let the engine print everything up to and including the `quit`
+and then keep rendering, because `quit` raised the confirmation prompt and a
+headless run has no key to answer it with. The two lines that hang was always
+reported with, `Sending clc_disconnect` and `Client player removed`, are
+printed by the harness timeout's SIGTERM on the way out, *after* the hang.
+
 ---
 
 ## progs_crc.py — which gamecode is this file?

@@ -7238,6 +7238,14 @@ void M_Menu_Quit_f (void)
 {
 	if (m_state == m_quit)
 		return;
+	/* The prompt lives here and nowhere else now (GitHub #204), so this is
+	 * where cl_confirmquit has to be honoured -- Host_Quit_f no longer looks
+	 * at it. */
+	if (!cl_confirmquit.integer)
+	{
+		Host_Quit_f ();
+		return;
+	}
 	wasInMenus = !!(Key_GetDest () & key_menu);
 	Key_SetDest (key_menu);
 	m_quit_prevstate = m_state;
@@ -7291,7 +7299,9 @@ static void M_Quit_Key (int key)
 	 * keyboard.  The cancel side already worked: B arrives as K_ESCAPE.
 	 * uhexen2-4364. */
 	case K_ENTER:
-		Key_SetDest (key_console);
+		/* No Key_SetDest (key_console) first: that only existed to dodge the
+		 * confirmation check Host_Quit_f used to make, and the answer to the
+		 * prompt is now the last word (GitHub #204). */
 		Host_Quit_f ();
 		break;
 
