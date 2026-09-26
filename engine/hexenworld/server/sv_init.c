@@ -358,16 +358,11 @@ void SV_SpawnServer (const char *server, const char *startspot)
 	/* HexenWorld's own table, never data1's or portals': a plain lookup on
 	 * a retail install with the mission pack found portals' 562 lines, and
 	 * PF_print_indexed PR_RunErrored on every obituary from 563 to 592
-	 * (incinerated, electrocuted, lava, slime, drowning ...).  #214. */
+	 * (incinerated, electrocuted, lava, slime, drowning ...).  The
+	 * compiled-in fallback means a bare retail install needs nothing
+	 * installed; only a corrupt build could leave it empty.  #214. */
 	if (!Host_LoadHWStrings ())
-	{
-		Con_Printf ("WARNING: no HexenWorld strings.txt for %s -- install "
-			"hw/strings.txt beside hw/hwprogs.dat (nix build "
-			".#hwsv-bundled ships it).  Falling back to whatever "
-			"strings.txt the searchpath has; indexed prints past its end "
-			"will stop the gamecode\n", fs_gamedir_nopath);
-		Host_LoadStrings ();
-	}
+		Host_Error ("%s: no HexenWorld string table", __thisfunc__);
 
 	// allocate edicts
 	sv.edicts = (edict_t *) Hunk_AllocName (MAX_EDICTS*pr_edict_size, "edicts");
