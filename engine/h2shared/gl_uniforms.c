@@ -420,11 +420,13 @@ void R_Uniforms_Shutdown (void)
 {
 	if (ubo_vert)
 	{
+		GL_ForgetBuffer (ubo_vert);
 		glDeleteBuffers_fp (1, &ubo_vert);
 		ubo_vert = 0;
 	}
 	if (ubo_frag)
 	{
+		GL_ForgetBuffer (ubo_frag);
 		glDeleteBuffers_fp (1, &ubo_frag);
 		ubo_frag = 0;
 	}

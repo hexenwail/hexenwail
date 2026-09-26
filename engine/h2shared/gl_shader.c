@@ -2531,11 +2531,13 @@ void GL_AliasInst_Shutdown (void)
 	if (gl_shader_alias_inst.program)
 		glDeleteProgram_fp(gl_shader_alias_inst.program);
 	if (gl_shader_alias_inst.ubo_shadedots)
+		GL_ForgetBuffer(gl_shader_alias_inst.ubo_shadedots);
 		glDeleteBuffers_fp(1, &gl_shader_alias_inst.ubo_shadedots);
 	memset(&gl_shader_alias_inst, 0, sizeof(gl_shader_alias_inst));
 	if (gl_shader_alias_inst_np.program)
 		glDeleteProgram_fp(gl_shader_alias_inst_np.program);
 	if (gl_shader_alias_inst_np.ubo_shadedots)
+		GL_ForgetBuffer(gl_shader_alias_inst_np.ubo_shadedots);
 		glDeleteBuffers_fp(1, &gl_shader_alias_inst_np.ubo_shadedots);
 	memset(&gl_shader_alias_inst_np, 0, sizeof(gl_shader_alias_inst_np));
 }

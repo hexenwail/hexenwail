@@ -77,6 +77,7 @@ static void R_GPU_Particles_Init (void)
 void R_GPU_Particles_Shutdown (void)
 {
     if (gpu_particle_ssbo) {
+        GL_ForgetBuffer(gpu_particle_ssbo);
         glDeleteBuffers_fp(1, &gpu_particle_ssbo);
         gpu_particle_ssbo = 0;
     }

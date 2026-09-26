@@ -320,10 +320,15 @@ void GL_ReleaseFrameResources (void);
 void GL_ClearBufferBindings (void);
 void GL_AddGarbageBuffer (GLuint handle);
 
-/* Generic-target buffer binder that keeps the binding cache in sync.
- * Prefer over raw glBindBuffer_fp for ARRAY/ELEMENT_ARRAY/SHADER_STORAGE/
- * UNIFORM/DRAW_INDIRECT targets — raw binds desync the cache and cause
- * subsequent cached binds to short-circuit to the wrong buffer. */
+/* Call immediately BEFORE glDeleteBuffers on any buffer that has ever been
+ * handed to GL_BindBufferRange/GL_BindBufferBase (i.e. every SSBO and UBO).
+ * GL recycles the freed name, so a cached indexed binding still naming it
+ * would match the buffer that inherits the name and skip a required bind. */
+void GL_ForgetBuffer (GLuint handle);
+
+/* Generic-target buffer binder.  Always issues the bind: the generic binding
+ * point is not cached, because ~40 raw glBindBuffer_fp calls elsewhere in the
+ * engine bypass any such cache and made it lie.  See gl_buffer.c. */
 void GL_BindBuffer (GLenum target, GLuint buffer);
 
 void GL_Upload (GLenum target, const void *data, size_t numbytes,

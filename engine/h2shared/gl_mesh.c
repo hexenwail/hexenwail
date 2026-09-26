@@ -395,9 +395,11 @@ void GL_FreeAliasGPUMeshes (void)
 		if (gm->vbo_verts)     { glDeleteBuffers_fp(1, &gm->vbo_verts); }
 		if (gm->vbo_tc)        { glDeleteBuffers_fp(1, &gm->vbo_tc); }
 		if (gm->ibo)           { glDeleteBuffers_fp(1, &gm->ibo); }
-		if (gm->ssbo_pose)     { glDeleteBuffers_fp(1, &gm->ssbo_pose); }
-		if (gm->ssbo_pose_md3) { glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
-		if (gm->ssbo_bones)    { glDeleteBuffers_fp(1, &gm->ssbo_bones); }
+		/* SSBOs sit in the indexed-binding cache; forget the name before
+		 * GL recycles it into a different buffer.  uhexen2 #203. */
+		if (gm->ssbo_pose)     { GL_ForgetBuffer(gm->ssbo_pose);     glDeleteBuffers_fp(1, &gm->ssbo_pose); }
+		if (gm->ssbo_pose_md3) { GL_ForgetBuffer(gm->ssbo_pose_md3); glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
+		if (gm->ssbo_bones)    { GL_ForgetBuffer(gm->ssbo_bones);    glDeleteBuffers_fp(1, &gm->ssbo_bones); }
 		if (gm->tex_pose)      { glDeleteTextures_fp(1, &gm->tex_pose); }
 	}
 	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
