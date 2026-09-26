@@ -205,6 +205,19 @@ jobs:
           ./hw_tent_test
           nix develop --command python3 scripts/gen_hw_strings.py --check
 
+      # Same duty for the CE_* effect messages (#213): svc_start_effect,
+      # svc_update_effect, svc_turn_effect and svc_multieffect.  These are
+      # written by engine code rather than gamecode, so the layout check
+      # derives its sizes from SV_SendEffect, PF_updateeffect, PF_turneffect
+      # and SV_ParseMultiEffect.
+      - name: HexenWorld effect payload layouts
+        run: |
+          set -euo pipefail
+          nix develop --command python3 scripts/hw_ce_layout_check.py
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_ce_test scripts/hw_ce_test.c
+          ./hw_ce_test
+
       - name: Unit test HexenWorld packed projectiles
         run: |
           set -euo pipefail
