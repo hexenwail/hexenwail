@@ -79,7 +79,7 @@ For Portal of Praevus, copy pak3.pak into the "portals" directory.
 Game binaries:
 
    glhexen2  -  Linux
-   glh2.exe  -  Windows
+   hexenwail.exe  -  Windows
 
 
 1.2 Windows Installation
@@ -90,9 +90,9 @@ from http://www.gamers.org/pub/idgames2/hexen2/official/patch/).
 NOTE: Delete any opengl32.dll the installer puts in the game folder —
 it's a 3dfx minidriver that causes "glide2x.dll not found" errors.
 
-Extract the Hexenwail package into the installation folder. The old
-h2mp.exe and glh2mp.exe are obsolete and can be deleted. To play the
-mission pack: glh2 -portals
+Extract the Hexenwail package into the installation folder. It does not
+replace the original glh2.exe or other game binaries. To play the mission
+pack with Hexenwail: hexenwail.exe -portals
 
 
 1.3 Running the Game

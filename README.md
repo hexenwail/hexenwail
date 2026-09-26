@@ -52,6 +52,8 @@ There are three living branches of the Hexen II engine, depending on what you wa
 | 64-bit Windows / SDL3 | OpenGL 4.3 | ZIP (cross-compiled from Nix) | Supported |
 | Web / WASM (Emscripten) | WebGL2, or the classic 8bpp software rasterizer | PWA, deployed to GitHub Pages | Supported — [play it in a browser](https://hexenwail.github.io/hexenwail/) |
 
+On Windows, run `hexenwail.exe`. You can extract the ZIP into an existing Hexen II directory without replacing vanilla `glh2.exe`; keep the bundled DLLs and `gamecode/` beside `hexenwail.exe`.
+
 Planned:
 
 | Platform | Renderer | Status |

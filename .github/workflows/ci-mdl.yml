@@ -135,20 +135,23 @@ jobs:
           # Windows: flat layout matching release.yml, so a tester extracts it
           # straight into a Hexen II directory.  bin/* is what makes it
           # runnable without a toolchain -- the win64 derivation installs
-          # SDL3.dll and the codec DLLs into bin/ beside glh2.exe.
+          # SDL3.dll and the codec DLLs into bin/ beside hexenwail.exe.
           winpkg=win-pkg
           mkdir -p "$winpkg/data1"
           cp staging/windows-x86_64/bin/* "$winpkg/"
+          test -f "$winpkg/hexenwail.exe"
+          test ! -e "$winpkg/glh2.exe"
           # get_demo.* live beside bin/, not in it; BUILD_INFO.txt tells the
           # user to run them, so they have to travel too.
           cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
-          # Windows has no share/hexenwail layer: gamecode/ beside glh2.exe is
+          # Windows has no share/hexenwail layer: gamecode/ beside hexenwail.exe is
           # the copy PR_FindBundleDir() loads, so without this the tester runs
           # their own install's retail progs.dat while the release runs ours --
           # exactly the gamecode mismatch this workflow's comment about
           # confusing bug reports is about.  Same placement as release.yml.
           # uhexen2-biyi.
           cp -r staging/gamecode "$winpkg/"
+          test -f "$winpkg/gamecode/data1/progs.dat"
           cp -r staging/licenses "$winpkg/"
           cp staging/BUILD_INFO.txt "$winpkg/"
           echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
@@ -181,7 +184,7 @@ jobs:
             - your GPU model and driver version
             - qconsole.log from this folder
 
-          On Windows a crash also writes glh2.RPT next to glh2.exe; send that too.
+          On Windows a crash also writes hexenwail.RPT next to hexenwail.exe; send that too.
           EOF
           done
 
