@@ -564,6 +564,72 @@ static void Sky_ResetCubemapBuild (void)
 	sky_cube_mismatch = false;
 }
 
+/*
+==================
+Sky_ContextLost / Sky_ContextRestored
+
+vid_restart destroys the GL context.  Every name in the skybox cache, in
+skybox_texnums[], in skybox_cubemap and in the two scrolling-sky textures was
+minted against it and is now dead -- and the new context reissues the same low
+numbers, so those names alias live textures (issue #205).
+
+This is why Sky_CacheFlush is the WRONG call here: it glDeleteTextures the
+cached faces and cubemaps, which on a recreated context deletes whatever now
+owns those names.  Drop the bookkeeping, delete nothing.
+
+The pixels are gone with the context and this cache keeps no copy of them, so
+restoring means reloading the active skybox off disk.  Sky_LoadSkyBox
+early-returns on a name match, hence the name is stashed and skybox_name
+cleared.  TexMgr_ContextLost must run after this one: it empties the pool these
+entries point into.
+==================
+*/
+static char	sky_restore_name[32] = "";
+
+void Sky_ContextLost (void)
+{
+	skybox_t	*entry, *next;
+	int		i;
+
+	q_strlcpy (sky_restore_name, skybox_name, sizeof(sky_restore_name));
+
+	for (entry = skybox_cache; entry; entry = next)
+	{
+		next = entry->next;
+		free (entry);	/* the struct only; its GL names died with the context */
+	}
+	skybox_cache = NULL;
+
+	skybox_name[0] = 0;
+	for (i = 0; i < 6; i++)
+	{
+		skybox_textures[i] = NULL;
+		skybox_texnums[i] = 0;
+	}
+
+	/* Pool slots that TexMgr_ContextLost is about to recycle; keeping the
+	 * pointers would have Sky_LoadTexture TexMgr_FreeTexture a slot that
+	 * by then belongs to somebody else. */
+	solidskytexture = NULL;
+	alphaskytexture = NULL;
+
+	Sky_ResetCubemapBuild ();	/* zeroes skybox_cubemap, drops staging pixels */
+}
+
+void Sky_ContextRestored (void)
+{
+	char	name[sizeof(sky_restore_name)];
+
+	if (!sky_restore_name[0])
+		return;
+	/* Copy first: Sky_LoadSkyBox can re-enter Sky_ContextLost's siblings
+	 * and will overwrite skybox_name, not this, but keep the input stable
+	 * against a future reload path that clears it. */
+	q_strlcpy (name, sky_restore_name, sizeof(name));
+	sky_restore_name[0] = 0;
+	Sky_LoadSkyBox (name);
+}
+
 /* Keep a copy of one face's RGBA while the loader still has it.  The loader
  * frees or hunk-drops `data` immediately after uploading the 2D texture, and
  * reading it back off the GPU is not an option on the ES tier. */

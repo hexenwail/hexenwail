@@ -46,6 +46,7 @@
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_uniforms.h"
+#include "gl_sky.h"		/* Sky_ContextLost/Restored across the context teardown */
 #include "filenames.h"
 
 #ifdef __EMSCRIPTEN__
@@ -2425,6 +2426,14 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_DeleteFrameResources ();
 #endif
 
+	/* Caches that outlive the context and own GL names of their own.  Order
+	 * matters: the skybox cache holds gltexture_t * into TexMgr's pool, and
+	 * TexMgr_ContextLost empties that pool.  Neither deletes a name -- the
+	 * context is about to take them all, and the new one reissues the same
+	 * low numbers (issue #205). */
+	Sky_ContextLost();
+	TexMgr_ContextLost();
+
 	// Unload all textures and reset texture counts
 	D_ClearOpenGLTextures(0);
 	memset (lightmap_textures, 0, sizeof(lightmap_textures));
@@ -2463,6 +2472,10 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_Init();
 	VID_InitGamma();
 
+	/* Re-upload the notexture/nulltexture placeholders and re-point
+	 * r_notexture_mip at the new name (issue #205). */
+	TexMgr_Init();
+
 	// Reload pre-map pics, fonts, console, etc
 	Draw_Init();
 	SCR_Init();
@@ -2482,6 +2495,11 @@ static void VID_ChangeVideoMode (int newmode)
 
 	// Reload model textures and player skins
 	Mod_ReloadTextures();
+	/* Reload the active skybox off disk: its pixels lived only in the dead
+	 * context, so unlike the model textures there is nothing in memory to
+	 * re-upload.  After Mod_ReloadTextures, which re-runs R_InitSky and so
+	 * re-makes the scrolling sky this may replace. */
+	Sky_ContextRestored();
 	// rebuild the lightmaps
 	GL_BuildLightmaps();
 	/* If a level is loaded, rebuild world VBO and GPU cull state — the
