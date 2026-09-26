@@ -1313,6 +1313,14 @@ static void HWCL_ParseMuzzleFlash (void)
 	dl->color[3] = 0.7;
 }
 
+static int HWCL_ClampModelFrame (qmodel_t *model, int frame)
+{
+	if (model && model->numframes > 0 &&
+			(frame < 0 || frame >= model->numframes))
+		return 0;
+	return frame;
+}
+
 static void HWCL_ApplyViewModel (const hwcl_entity_state_t *state)
 {
 	int modelindex = hwcl_server_state.stats[STAT_WEAPON];
@@ -1323,7 +1331,11 @@ static void HWCL_ApplyViewModel (const hwcl_entity_state_t *state)
 	if (cl.viewent.model != model)
 		cl.viewent.lerpflags |= LERP_RESETANIM;
 	cl.viewent.model = model;
-	cl.viewent.frame = state->weaponframe;
+	/* HexenWorld mods can change the weapon model and weaponframe on separate
+	 * reliable/unreliable paths.  Siege in particular can momentarily pair
+	 * models/crossbow.mdl with paladin weapon frames in the 40s/50s; clamp here
+	 * so the renderer does not emit a "no such frame" line every draw. */
+	cl.viewent.frame = HWCL_ClampModelFrame (model, state->weaponframe);
 	cl.viewent.effects = state->effects;
 	cl.viewent.scale = state->scale;
 	cl.viewent.drawflags = state->drawflags | hwcl_view_drawflags;
@@ -1385,7 +1397,7 @@ static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
 	VectorCopy (state->angles, ent->msg_angles[0]);
 	ent->msgtime = cl.mtime[0];
 	ent->model = model;
-	ent->frame = state->frame;
+	ent->frame = HWCL_ClampModelFrame (model, state->frame);
 	if (player)
 	{
 		int slot = entitynum - 1;
