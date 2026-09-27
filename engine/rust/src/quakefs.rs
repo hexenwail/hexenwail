@@ -609,8 +609,10 @@ pub type MzFileReadFunc =
 const MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE: usize = 512;
 const MZ_ZIP_MAX_ARCHIVE_FILE_COMMENT_SIZE: usize = 512;
 
-/// `mz_zip_archive` from miniz.h:618-645.
+/// `mz_zip_archive` from miniz.h:618-645.  Field names are miniz's, kept
+/// verbatim so a reader can diff this against the header.
 #[repr(C)]
+#[allow(non_snake_case)]
 pub struct MzZipArchive {
     pub m_archive_size: u64,
     pub m_central_directory_file_ofs: u64,
@@ -1053,7 +1055,7 @@ unsafe fn fs_open_file_internal(
                 fs_filesize = (*entry).filelen as c_long;
                 file_from_pak = 1;
                 q_strlcpy(
-                    FS_LASTFILE_SOURCE.as_mut_ptr(),
+                    (&raw mut FS_LASTFILE_SOURCE).cast::<c_char>(),
                     (*pak).filename.as_ptr(),
                     MAX_OSPATH,
                 );
@@ -1088,7 +1090,7 @@ unsafe fn fs_open_file_internal(
                 // An archive member is "from a pak" for every purpose that asks.
                 file_from_pak = 1;
                 q_strlcpy(
-                    FS_LASTFILE_SOURCE.as_mut_ptr(),
+                    (&raw mut FS_LASTFILE_SOURCE).cast::<c_char>(),
                     (*zip).filename.as_ptr(),
                     MAX_OSPATH,
                 );
@@ -1158,7 +1160,7 @@ unsafe fn fs_open_file_internal(
                 continue;
             }
             q_strlcpy(
-                FS_LASTFILE_SOURCE.as_mut_ptr(),
+                (&raw mut FS_LASTFILE_SOURCE).cast::<c_char>(),
                 ospath.as_ptr(),
                 MAX_OSPATH,
             );
@@ -1203,7 +1205,7 @@ unsafe fn fs_open_file_internal(
 /// recent lookup, empty after a failed one.
 #[no_mangle]
 pub unsafe extern "C" fn FS_LastFileSource() -> *const c_char {
-    FS_LASTFILE_SOURCE.as_ptr()
+    (&raw const FS_LASTFILE_SOURCE).cast::<c_char>()
 }
 
 /// `FS_OpenFile`
@@ -1428,6 +1430,271 @@ pub unsafe extern "C" fn FS_UserdirHasFile(
 }
 
 //============================================================================
+// the searchpath and gamedir machinery
+//============================================================================
+
+/// `fsfind_t` from engine/h2shared/sys.h:49-52 -- the platform's directory
+/// enumeration state plus the current name.  Passed by address to Sys_Find*,
+/// which is why its layout matters.
+#[repr(C)]
+pub struct FSFindC {
+    pub priv_: *mut c_void,
+    pub name: [c_char; MAX_OSPATH],
+}
+
+const _: () = {
+    assert!(core::mem::offset_of!(FSFindC, priv_) == 0);
+    assert!(core::mem::offset_of!(FSFindC, name) == PTR_SIZE);
+    assert!(core::mem::size_of::<FSFindC>() == align_up(PTR_SIZE + MAX_OSPATH, PTR_ALIGN));
+};
+
+extern "C" {
+    fn Sys_FindFirstFile(
+        ctx: *mut FSFindC,
+        path: *const c_char,
+        pattern: *const c_char,
+    ) -> *const c_char;
+    fn Sys_FindNextFile(ctx: *mut FSFindC) -> *const c_char;
+    fn Sys_FindClose(ctx: *mut FSFindC);
+    fn Sys_mkdir(path: *const c_char, crash: c_int) -> c_int;
+    fn qsort(
+        base: *mut c_void,
+        nmemb: usize,
+        size: usize,
+        compar: unsafe extern "C" fn(*const c_void, *const c_void) -> c_int,
+    );
+}
+
+/// The `FSERR_MakePath_VABUF (…, "…%s…", …)` sites, without varargs: the tail
+/// is formatted first and handed to the non-variadic builder the module owns.
+/// The C's caller name and line number are passed through so an overflow reads
+/// identically.
+unsafe fn fserr_make_path_vabuf_pak(
+    caller: *const c_char,
+    linenum: c_int,
+    base: c_int,
+    buf: *mut c_char,
+    siz: usize,
+    index: c_int,
+) -> *mut c_char {
+    let mut tail = [0 as c_char; MAX_OSPATH];
+
+    q_snprintf(tail.as_mut_ptr(), MAX_OSPATH, c"pak%i.pak".as_ptr(), index);
+    fserr_make_path_buf(caller, linenum, base, buf, siz, tail.as_ptr())
+}
+
+unsafe fn fserr_make_path_vabuf_name(
+    caller: *const c_char,
+    linenum: c_int,
+    base: c_int,
+    buf: *mut c_char,
+    siz: usize,
+    name: *const c_char,
+) -> *mut c_char {
+    let mut tail = [0 as c_char; MAX_OSPATH];
+
+    q_snprintf(tail.as_mut_ptr(), MAX_OSPATH, c"%s".as_ptr(), name);
+    fserr_make_path_buf(caller, linenum, base, buf, siz, tail.as_ptr())
+}
+
+/// `FS_AddGameDirectory` -- set fs_gamedir/fs_userdir/fs_gamedir_nopath, add
+/// the directory, then load every pak and every pk3 in it.  The C reaches the
+/// userdir half with a `goto add_pakfile`; the loop here is the same control
+/// flow (gamedir first, then the userdir when it is a different place).
+unsafe fn fs_add_game_directory(dir: *const c_char, base_fs: c_int) {
+    let mut pakfile = [0 as c_char; MAX_OSPATH];
+    let path_id: c_uint;
+    let mut do_userdir = 0;
+
+    qerr_strlcpy(
+        c"FS_AddGameDirectory".as_ptr(),
+        947,
+        (&raw mut fs_gamedir_nopath).cast::<c_char>(),
+        dir,
+        MAX_QPATH,
+    );
+    fserr_make_path_buf(
+        c"FS_AddGameDirectory".as_ptr(),
+        949,
+        MAKEPATH_BASEDIR,
+        (&raw mut FS_GAMEDIR).cast::<c_char>(),
+        MAX_OSPATH,
+        dir,
+    );
+    fserr_make_path_buf(
+        c"FS_AddGameDirectory".as_ptr(),
+        951,
+        MAKEPATH_USERBASE,
+        (&raw mut FS_USERDIR).cast::<c_char>(),
+        MAX_OSPATH,
+        dir,
+    );
+
+    // assign a path_id to this game directory
+    if !FS_SEARCHPATHS.is_null() {
+        path_id = (*FS_SEARCHPATHS).path_id << 1;
+    } else {
+        path_id = 1;
+    }
+
+    // Recorded where it is assigned rather than recomputed by walking the
+    // searchpath later.
+    if q_strcasecmp(dir, c"portals".as_ptr()) == 0 {
+        FS_PORTALS_PATH_ID = path_id;
+    }
+
+    loop {
+        // add any pak files in the format pak0.pak pak1.pak, ...; Hexen II
+        // cannot stop at the first unavailable pak, since the mission pack has
+        // only pak3 and hw only pak4.
+        let mut i: c_int = 0;
+        while i < 10 {
+            let base = if do_userdir != 0 {
+                MAKEPATH_USERDIR
+            } else {
+                MAKEPATH_GAMEDIR
+            };
+            fserr_make_path_vabuf_pak(
+                c"FS_AddGameDirectory".as_ptr(),
+                974,
+                base,
+                pakfile.as_mut_ptr(),
+                MAX_OSPATH,
+                i,
+            );
+            let pak = fs_load_pack_file(pakfile.as_ptr(), i, base_fs);
+            if !pak.is_null() {
+                let search = Z_Malloc(
+                    core::mem::size_of::<SearchPathC>() as c_int,
+                    Z_MAINZONE,
+                )
+                .cast::<SearchPathC>();
+                (*search).path_id = path_id;
+                (*search).pack = pak;
+                (*search).next = FS_SEARCHPATHS;
+                FS_SEARCHPATHS = search;
+            }
+            i += 1;
+        }
+
+        // add any .pk3 archives in this directory, alphabetically.  Pushed
+        // after the numbered paks and before the loose directory, so the
+        // search order is loose files, then pk3s, then paks; within the pk3s
+        // the alphabetically last wins, because each is pushed onto the head.
+        {
+            let mut find: FSFindC = core::mem::zeroed();
+            let mut zipnames = [[0 as c_char; MAX_QPATH]; MAX_PK3_PER_DIR];
+            let mut numzips: usize = 0;
+            let scandir = if do_userdir != 0 {
+                (&raw const FS_USERDIR).cast::<c_char>()
+            } else {
+                (&raw const FS_GAMEDIR).cast::<c_char>()
+            };
+
+            let mut findname = Sys_FindFirstFile(&mut find, scandir, c"*.pk3".as_ptr());
+            while !findname.is_null() {
+                if numzips == MAX_PK3_PER_DIR {
+                    CON_Printf(
+                        PRINT_TERMONLY,
+                        c"WARNING: more than %i pk3 files in %s, ignoring the rest\n"
+                            .as_ptr(),
+                        MAX_PK3_PER_DIR as c_int,
+                        scandir,
+                    );
+                    break;
+                }
+                q_strlcpy(
+                    zipnames[numzips].as_mut_ptr(),
+                    findname,
+                    MAX_QPATH,
+                );
+                numzips += 1;
+                findname = Sys_FindNextFile(&mut find);
+            }
+            Sys_FindClose(&mut find);
+
+            // Sys_FindFirstFile makes no ordering promise -- readdir order is
+            // filesystem order -- so sort rather than assume.
+            if numzips > 1 {
+                qsort(
+                    zipnames.as_mut_ptr().cast::<c_void>(),
+                    numzips,
+                    MAX_QPATH,
+                    fs_compare_zip_names,
+                );
+            }
+
+            let mut j: usize = 0;
+            while j < numzips {
+                let base = if do_userdir != 0 {
+                    MAKEPATH_USERDIR
+                } else {
+                    MAKEPATH_GAMEDIR
+                };
+                fserr_make_path_vabuf_name(
+                    c"FS_AddGameDirectory".as_ptr(),
+                    1028,
+                    base,
+                    pakfile.as_mut_ptr(),
+                    MAX_OSPATH,
+                    zipnames[j].as_ptr(),
+                );
+                let zip = fs_load_zip_file(pakfile.as_ptr(), base_fs);
+                if !zip.is_null() {
+                    let search = Z_Malloc(
+                        core::mem::size_of::<SearchPathC>() as c_int,
+                        Z_MAINZONE,
+                    )
+                    .cast::<SearchPathC>();
+                    (*search).path_id = path_id;
+                    (*search).zip = zip;
+                    (*search).next = FS_SEARCHPATHS;
+                    FS_SEARCHPATHS = search;
+                }
+                j += 1;
+            }
+        }
+
+        // add the directory itself, ~after~ the paks in it, so a loose file
+        // overrides the packaged copy.
+        let search =
+            Z_Malloc(core::mem::size_of::<SearchPathC>() as c_int, Z_MAINZONE).cast::<SearchPathC>();
+        if do_userdir != 0 {
+            qerr_strlcpy(
+                c"FS_AddGameDirectory".as_ptr(),
+                1048,
+                (*search).filename.as_mut_ptr(),
+                (&raw const FS_USERDIR).cast::<c_char>(),
+                MAX_OSPATH,
+            );
+        } else {
+            qerr_strlcpy(
+                c"FS_AddGameDirectory".as_ptr(),
+                1049,
+                (*search).filename.as_mut_ptr(),
+                (&raw const FS_GAMEDIR).cast::<c_char>(),
+                MAX_OSPATH,
+            );
+        }
+        (*search).path_id = path_id;
+        (*search).next = FS_SEARCHPATHS;
+        FS_SEARCHPATHS = search;
+
+        if do_userdir != 0 {
+            return;
+        }
+        do_userdir = 1;
+
+        // add the user's directory to the search path and its paks too, but
+        // only where that is a different place from the install directory.
+        if !do_userdirs() || strcmp((&raw const FS_GAMEDIR).cast::<c_char>(), (&raw const FS_USERDIR).cast::<c_char>()) == 0 {
+            return;
+        }
+        Sys_mkdir((&raw const FS_USERDIR).cast::<c_char>(), 1);
+    }
+}
+
+//============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
 // `FS_MakePath_VA` (quakefs.h:239) and `FS_MakePath_VABUF` (:242) are the
@@ -1538,7 +1805,7 @@ unsafe fn check_known_paks(paknum: c_int, numfiles: c_int, crc: u16) -> c_uint {
     }
 
     let i = paknum as usize;
-    if strcmp(fs_gamedir_nopath.as_ptr(), PAKDATA[i].dirname.as_ptr()) != 0 {
+    if strcmp((&raw const fs_gamedir_nopath).cast::<c_char>(), PAKDATA[i].dirname.as_ptr()) != 0 {
         return GAME_MODIFIED; // Raven didn't ship like that
     }
 
@@ -1635,7 +1902,7 @@ unsafe fn check_known_zip(zip: *mut ZipPackC) -> c_uint {
     let mut flags: c_uint = 0;
 
     for cd in CONTENTDATA.iter() {
-        if strcmp(fs_gamedir_nopath.as_ptr(), cd.dirname.as_ptr()) != 0 {
+        if strcmp((&raw const fs_gamedir_nopath).cast::<c_char>(), cd.dirname.as_ptr()) != 0 {
             continue; // Raven didn't ship it there
         }
         if zip_has_marks(zip, cd.marks) != 0 {
