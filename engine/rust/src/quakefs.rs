@@ -126,6 +126,7 @@ const MAX_PAK_SIZE: c_long = 0x7FFFFFFF;
 /// `dpackfile_t` from common/pakfile.h -- a pak directory entry, on disk and
 /// in memory.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct PackFileC {
     pub name: [c_char; PAK_PATH_LENGTH],
     pub filepos: c_int,
@@ -173,7 +174,7 @@ pub struct ZipFilesC {
 pub struct ZipPackC {
     pub filename: [c_char; MAX_OSPATH],
     pub handle: *mut CFile,
-    pub archive: *mut c_void,
+    pub archive: MzZipArchive,
     pub numfiles: c_int,
     pub files: *mut ZipFilesC,
     pub hash: HashIndexC,
@@ -582,5 +583,852 @@ unsafe fn hash_generate_key_string(
 unsafe fn hash_generate_key_int(hi: *mut HashIndexC, n: c_int) -> c_int {
     n & (*hi).hash_mask
 }
+
+//============================================================================
+// miniz, which stays C
+//============================================================================
+// `zippack_t` embeds `mz_zip_archive` *by value*, so this struct is
+// reproduced in full rather than standing in as an opaque pointer: C fills and
+// reads it through the pointer, and a shorter type would move `numfiles`,
+// `files` and `hash` in `ZipPackC`.  Only three of its fields are ever touched
+// here -- m_pRead, m_pIO_opaque and m_total_files -- but the ones between them
+// are what put those at the right offsets, and
+// engine/rust/tests/abi_layout.c checks the lot against the real header on the
+// host and again under emcc for ILP32.
+
+/// `mz_file_read_func` from miniz.h.
+pub type MzFileReadFunc =
+    Option<unsafe extern "C" fn(opaque: *mut c_void, ofs: u64, buf: *mut c_void, n: usize) -> usize>;
+
+/// `MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE` and
+/// `MZ_ZIP_MAX_ARCHIVE_FILE_COMMENT_SIZE` from miniz.h:488.
+const MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE: usize = 512;
+const MZ_ZIP_MAX_ARCHIVE_FILE_COMMENT_SIZE: usize = 512;
+
+/// `mz_zip_archive` from miniz.h:618-645.
+#[repr(C)]
+pub struct MzZipArchive {
+    pub m_archive_size: u64,
+    pub m_central_directory_file_ofs: u64,
+    pub m_total_files: u32,
+    pub m_zip_mode: c_int,
+    pub m_zip_type: c_int,
+    pub m_last_error: c_int,
+    pub m_file_offset_alignment: u64,
+    pub m_pAlloc: *mut c_void,
+    pub m_pFree: *mut c_void,
+    pub m_pRealloc: *mut c_void,
+    pub m_pAlloc_opaque: *mut c_void,
+    pub m_pRead: MzFileReadFunc,
+    pub m_pWrite: *mut c_void,
+    pub m_pNeeds_keepalive: *mut c_void,
+    pub m_pIO_opaque: *mut c_void,
+    pub m_pState: *mut c_void,
+}
+
+/// `mz_zip_archive_file_stat` from miniz.h:505-543.  Filled wholesale by
+/// `mz_zip_reader_file_stat`, so every field has to be here, not only the five
+/// the loader reads.
+#[repr(C)]
+pub struct MzZipArchiveFileStat {
+    pub m_file_index: u32,
+    pub m_central_dir_ofs: u64,
+    pub m_version_made_by: u16,
+    pub m_version_needed: u16,
+    pub m_bit_flag: u16,
+    pub m_method: u16,
+    pub m_crc32: u32,
+    pub m_comp_size: u64,
+    pub m_uncomp_size: u64,
+    pub m_internal_attr: u16,
+    pub m_external_attr: u32,
+    pub m_local_header_ofs: u64,
+    pub m_comment_size: u32,
+    pub m_is_directory: c_int,
+    pub m_is_encrypted: c_int,
+    pub m_is_supported: c_int,
+    pub m_filename: [c_char; MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE],
+    pub m_comment: [c_char; MZ_ZIP_MAX_ARCHIVE_FILE_COMMENT_SIZE],
+}
+
+// The offsets below are the ones the C compiler reported for the host; the
+// wasm32 build re-derives them from the widths, exactly as the other ports do,
+// and abi_layout.c compares both.
+const _: () = {
+    assert!(core::mem::offset_of!(MzZipArchive, m_total_files) == 16);
+    // 16 (two u64s) + three enums + padding to 8 gives the alignment field at
+    // 32, and the ten pointers follow it; the whole struct rounds up to 8.
+    assert!(core::mem::offset_of!(MzZipArchive, m_pRead) == 40 + 4 * PTR_SIZE);
+    assert!(core::mem::offset_of!(MzZipArchive, m_pIO_opaque) == 40 + 7 * PTR_SIZE);
+    assert!(core::mem::size_of::<MzZipArchive>() == align_up(40 + 9 * PTR_SIZE, 8));
+
+    assert!(core::mem::offset_of!(MzZipArchiveFileStat, m_method) == 16 + 6);
+    assert!(core::mem::offset_of!(MzZipArchiveFileStat, m_uncomp_size) == 40);
+    assert!(core::mem::offset_of!(MzZipArchiveFileStat, m_is_directory) == 64 + 4);
+    assert!(core::mem::offset_of!(MzZipArchiveFileStat, m_is_supported) == 64 + 4 + 8);
+    assert!(core::mem::offset_of!(MzZipArchiveFileStat, m_filename) == 80);
+    assert!(core::mem::size_of::<MzZipArchiveFileStat>()
+        == 80 + MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE + MZ_ZIP_MAX_ARCHIVE_FILE_COMMENT_SIZE);
+};
+
+extern "C" {
+    fn mz_zip_reader_init(zip: *mut MzZipArchive, size: u64, flags: c_uint) -> c_int;
+    fn mz_zip_reader_end(zip: *mut MzZipArchive) -> c_int;
+    fn mz_zip_reader_file_stat(
+        zip: *mut MzZipArchive,
+        index: c_uint,
+        stat: *mut MzZipArchiveFileStat,
+    ) -> c_int;
+    fn mz_zip_reader_extract_to_mem(
+        zip: *mut MzZipArchive,
+        index: c_uint,
+        buf: *mut c_void,
+        size: usize,
+        flags: c_uint,
+    ) -> c_int;
+}
+
+//============================================================================
+// libc and the engine surface the loader group calls
+//============================================================================
+
+/// `FILE` is opaque to the port; it is only ever passed to libc.
+pub type LibcFile = c_void;
+
+/// `SEEK_SET` from stdio.h.
+const SEEK_SET: c_int = 0;
+/// `SEEK_END` from stdio.h.
+const SEEK_END: c_int = 2;
+
+#[cfg(windows)]
+const MAX_PATH: usize = 260;
+#[cfg(windows)]
+const CP_UTF8: c_uint = 65001;
+
+#[cfg(windows)]
+extern "system" {
+    fn MultiByteToWideChar(
+        code_page: c_uint,
+        flags: c_uint,
+        mbstr: *const c_char,
+        cbmb: c_int,
+        wcstr: *mut u16,
+        cchwide: c_int,
+    ) -> c_int;
+    fn _wfopen(filename: *const u16, mode: *const u16) -> *mut LibcFile;
+}
+
+extern "C" {
+    fn fopen(path: *const c_char, mode: *const c_char) -> *mut LibcFile;
+    fn fclose(f: *mut LibcFile) -> c_int;
+    fn fread(ptr: *mut c_void, size: usize, n: usize, f: *mut LibcFile) -> usize;
+    fn fseek(f: *mut LibcFile, off: c_long, whence: c_int) -> c_int;
+    fn ftell(f: *mut LibcFile) -> c_long;
+    fn malloc(size: usize) -> *mut c_void;
+    fn free(ptr: *mut c_void);
+    fn memset(dst: *mut c_void, c: c_int, n: usize) -> *mut c_void;
+    fn memcpy(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
+    fn strlen(s: *const c_char) -> usize;
+    fn strcmp(a: *const c_char, b: *const c_char) -> c_int;
+
+    /// printsys.h: `Sys_Printf(fmt, ...)` is `CON_Printf(_PRINT_TERMONLY, ...)`.
+    fn CON_Printf(flags: c_uint, fmt: *const c_char, ...);
+    /// common.h, FUNC_NORETURN: the fatal paths never return.
+    fn Sys_Error(fmt: *const c_char, ...) -> !;
+
+    fn q_strlcpy(dst: *mut c_char, src: *const c_char, size: usize) -> usize;
+    fn q_strcasecmp(a: *const c_char, b: *const c_char) -> c_int;
+    /// common.h:61 -- `q_strlcpy` plus a `Sys_Error` naming the caller and its
+    /// line when the source does not fit.  The port passes the C file's own
+    /// line numbers so the diagnostic text matches byte for byte.
+    fn qerr_strlcpy(
+        caller: *const c_char,
+        linenum: c_int,
+        dst: *mut c_char,
+        src: *const c_char,
+        size: usize,
+    ) -> usize;
+}
+
+/// `_PRINT_TERMONLY` from engine/h2shared/printsys.h.
+const PRINT_TERMONLY: c_uint = 1;
+
+/// `LittleLong` from common/q_endian.h -- the identity on a little-endian
+/// host, `LongSwap` on a big-endian one, so it is a property of the bytes read
+/// rather than of the field holding them, exactly as wad.rs records.
+#[inline]
+fn little_long(v: c_int) -> c_int {
+    #[cfg(target_endian = "little")]
+    {
+        v
+    }
+    #[cfg(target_endian = "big")]
+    {
+        v.swap_bytes()
+    }
+}
+
+//============================================================================
+// the loader group
+//============================================================================
+
+/// `FS_FOpen` -- `fopen`, except on Windows where the path is UTF-8 and the CRT
+/// wants UTF-16 (quakefs.c:38-56).
+unsafe fn fs_fopen(path: *const c_char, mode: *const c_char) -> *mut LibcFile {
+    #[cfg(windows)]
+    {
+        let mut widepath = [0u16; MAX_PATH];
+        let mut widemode = [0u16; 16];
+
+        let pathlen = MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            path,
+            -1,
+            widepath.as_mut_ptr(),
+            MAX_PATH as c_int,
+        );
+        let modelen = MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            mode,
+            -1,
+            widemode.as_mut_ptr(),
+            16 as c_int,
+        );
+
+        if pathlen == 0 || modelen == 0 {
+            return core::ptr::null_mut();
+        }
+
+        _wfopen(widepath.as_ptr(), widemode.as_ptr())
+    }
+    #[cfg(not(windows))]
+    {
+        fopen(path, mode)
+    }
+}
+
+/// `FS_CompareZipNames` -- the `qsort` comparator the pk3 scan sorts names
+/// with.  Reproduced here with the hashinlines because it belongs to the
+/// loader half of the file.
+#[allow(dead_code)] // used once the directory scan lands
+unsafe extern "C" fn fs_compare_zip_names(a: *const c_void, b: *const c_void) -> c_int {
+    q_strcasecmp(a.cast::<c_char>(), b.cast::<c_char>())
+}
+
+/// The `sys_printf!` sites, written out: `CON_Printf` with `_PRINT_TERMONLY`.
+#[inline]
+unsafe fn sys_print1(fmt: *const c_char, a1: *const c_char) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1);
+}
+
+#[inline]
+unsafe fn sys_print2i(fmt: *const c_char, a1: *const c_char, a2: c_int) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1, a2);
+}
+
+#[inline]
+unsafe fn sys_print2u(fmt: *const c_char, a1: *const c_char, a2: c_uint) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1, a2);
+}
+
+#[inline]
+unsafe fn sys_print2s(fmt: *const c_char, a1: *const c_char, a2: *const c_char) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1, a2);
+}
+
+#[inline]
+unsafe fn sys_print3(fmt: *const c_char, a1: *const c_char, a2: *const c_char, a3: c_int) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1, a2, a3);
+}
+
+#[inline]
+unsafe fn sys_print_pakfiles(fmt: *const c_char, a1: *const c_char, a2: c_int, a3: c_int) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1, a2, a3);
+}
+
+#[inline]
+unsafe fn sys_print_zipfiles(fmt: *const c_char, a1: *const c_char, a2: c_uint, a3: c_int) {
+    CON_Printf(PRINT_TERMONLY, fmt, a1, a2, a3);
+}
+
+/// `check_known_paks` -- fingerprint the container: a CRC over the pak
+/// directory plus its file count, and the gamedir it was shipped in.
+unsafe fn check_known_paks(paknum: c_int, numfiles: c_int, crc: u16) -> c_uint {
+    if paknum >= MAX_PAKDATA as c_int {
+        return GAME_MODIFIED;
+    }
+
+    let i = paknum as usize;
+    if strcmp(fs_gamedir_nopath.as_ptr(), PAKDATA[i].dirname.as_ptr()) != 0 {
+        return GAME_MODIFIED; // Raven didn't ship like that
+    }
+
+    if numfiles != PAKDATA[i].numfiles {
+        match paknum {
+            0 => {
+                if numfiles == DEMO_PAKDATA[0].numfiles && crc == DEMO_PAKDATA[0].crc as u16 {
+                    return GAME_DEMO;
+                }
+                if numfiles == OEM0_PAKDATA[0].numfiles && crc == OEM0_PAKDATA[0].crc as u16 {
+                    return GAME_OEM0;
+                }
+                if numfiles == OLD_PAKDATA[2].numfiles && crc == OLD_PAKDATA[2].crc as u16 {
+                    return GAME_OLD_DEMO;
+                }
+                if numfiles == OLD_PAKDATA[0].numfiles && crc == OLD_PAKDATA[0].crc as u16 {
+                    return GAME_OLD_CDROM0;
+                }
+                if numfiles == OLD_PAKDATA[3].numfiles && crc == OLD_PAKDATA[3].crc as u16 {
+                    return GAME_OLD_OEM0;
+                }
+                return GAME_MODIFIED;
+            }
+            1 => {
+                if numfiles == OLD_PAKDATA[1].numfiles && crc == OLD_PAKDATA[1].crc as u16 {
+                    return GAME_OLD_CDROM1;
+                }
+                return GAME_MODIFIED;
+            }
+            2 => {
+                if numfiles == OLD_PAKDATA[4].numfiles && crc == OLD_PAKDATA[4].crc as u16 {
+                    return GAME_OLD_OEM2;
+                }
+                return GAME_MODIFIED;
+            }
+            4 => {
+                if numfiles == OLD_PAKDATA[5].numfiles && crc == OLD_PAKDATA[5].crc as u16 {
+                    return GAME_HEXENWORLD;
+                }
+                return GAME_MODIFIED;
+            }
+            _ => return GAME_MODIFIED,
+        }
+    }
+
+    if crc != PAKDATA[i].crc as u16 {
+        return GAME_MODIFIED;
+    }
+
+    match paknum {
+        0 => GAME_REGISTERED0,
+        1 => GAME_REGISTERED1,
+        2 => GAME_OEM2,
+        3 => GAME_PORTALS,
+        4 => GAME_HEXENWORLD,
+        _ => GAME_MODIFIED,
+    }
+}
+
+/// `zip_has_marks` -- does this one archive hold every listed member, each at
+/// its exact size?
+unsafe fn zip_has_marks(
+    zip: *mut ZipPackC,
+    marks: &[ContentMarkC],
+) -> c_int {
+    for mark in marks {
+        let mut found = 0;
+        let key = hash_generate_key_string(&mut (*zip).hash, mark.name.as_ptr(), 0);
+        let mut j = hash_first(&mut (*zip).hash, key);
+        while j != -1 {
+            let file = (*zip).files.add(j as usize);
+            if q_strcasecmp((*file).name.as_ptr(), mark.name.as_ptr()) != 0 {
+                j = hash_next(&mut (*zip).hash, j);
+                continue;
+            }
+            // Right name, wrong size is a NO rather than a keep-looking.
+            if (*file).filelen != mark.filelen {
+                return 0;
+            }
+            found = 1;
+            break;
+        }
+        if found == 0 {
+            return 0;
+        }
+    }
+
+    1
+}
+
+/// `check_known_zip` -- the container-agnostic half of `check_known_paks`:
+/// ask what is inside instead of fingerprinting the archive format.
+unsafe fn check_known_zip(zip: *mut ZipPackC) -> c_uint {
+    let mut flags: c_uint = 0;
+
+    for cd in CONTENTDATA.iter() {
+        if strcmp(fs_gamedir_nopath.as_ptr(), cd.dirname.as_ptr()) != 0 {
+            continue; // Raven didn't ship it there
+        }
+        if zip_has_marks(zip, cd.marks) != 0 {
+            flags |= cd.gameflag;
+        }
+    }
+
+    flags
+}
+
+/// `FS_ZipRead` -- miniz's I/O callback, over the same FILE the rest of the
+/// file layer uses so that UTF-8 archive paths keep working on Windows.
+unsafe extern "C" fn fs_zip_read(
+    opaque: *mut c_void,
+    ofs: u64,
+    buf: *mut c_void,
+    n: usize,
+) -> usize {
+    let f = opaque as *mut LibcFile;
+
+    if fseek(f, ofs as c_long, SEEK_SET) != 0 {
+        return 0;
+    }
+    fread(buf, 1, n, f)
+}
+
+/// `FS_ZipDataOffset` -- resolve where a STORED entry's bytes start, from the
+/// local header rather than the central directory.
+unsafe fn fs_zip_data_offset(zip: *mut ZipPackC, mut localhdr: u64) -> c_int {
+    /// `ZIP_LOCALHDR_SIZE` from quakefs.c.
+    const ZIP_LOCALHDR_SIZE: usize = 30;
+    /// `ZIP_LOCALHDR_SIG` from quakefs.c.
+    const ZIP_LOCALHDR_SIG: c_uint = 0x0403_4b50;
+
+    let mut hdr = [0u8; ZIP_LOCALHDR_SIZE];
+
+    if fseek((*zip).handle, localhdr as c_long, SEEK_SET) != 0 {
+        return -1;
+    }
+    if fread(
+        hdr.as_mut_ptr().cast::<c_void>(),
+        1,
+        ZIP_LOCALHDR_SIZE,
+        (*zip).handle,
+    ) != ZIP_LOCALHDR_SIZE
+    {
+        return -1;
+    }
+
+    // little-endian on the wire regardless of host byte order
+    let sig = hdr[0] as c_uint
+        | (hdr[1] as c_uint) << 8
+        | (hdr[2] as c_uint) << 16
+        | (hdr[3] as c_uint) << 24;
+    if sig != ZIP_LOCALHDR_SIG {
+        return -1;
+    }
+
+    let namelen = hdr[26] as c_uint | (hdr[27] as c_uint) << 8;
+    let extralen = hdr[28] as c_uint | (hdr[29] as c_uint) << 8;
+
+    localhdr += ZIP_LOCALHDR_SIZE as u64 + namelen as u64 + extralen as u64;
+    if localhdr > 0x7fff_ffffu64 {
+        return -1; // past what fseek()/filepos can address; inflate instead
+    }
+
+    localhdr as c_int
+}
+
+/// `FS_LoadPackFile` -- load a pak's header and directory into a new
+/// `pack_t`.
+unsafe fn fs_load_pack_file(
+    packfile: *const c_char,
+    paknum: c_int,
+    base_fs: c_int,
+) -> *mut PackC {
+    let mut header: PackHeaderC = core::mem::zeroed();
+    let mut info = [PackFileC {
+        name: [0; PAK_PATH_LENGTH],
+        filepos: 0,
+        filelen: 0,
+    }; MAX_FILES_IN_PACK as usize];
+
+    let packhandle = fs_fopen(packfile, c"rb".as_ptr());
+    if packhandle.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    fread(
+        (&mut header as *mut PackHeaderC).cast::<c_void>(),
+        1,
+        core::mem::size_of::<PackHeaderC>(),
+        packhandle,
+    );
+    if header.id[0] != b'P' as c_char
+        || header.id[1] != b'A' as c_char
+        || header.id[2] != b'C' as c_char
+        || header.id[3] != b'K' as c_char
+    {
+        sys_print1(c"WARNING: %s is not a packfile, ignored\n".as_ptr(), packfile);
+        fclose(packhandle);
+        return core::ptr::null_mut();
+    }
+
+    header.dirofs = little_long(header.dirofs);
+    header.dirlen = little_long(header.dirlen);
+
+    let numpackfiles = header.dirlen / core::mem::size_of::<PackFileC>() as c_int;
+
+    if header.dirlen < 0 || header.dirofs < 0 {
+        Sys_Error(
+            c"Invalid packfile %s (dirlen: %i, dirofs: %i)".as_ptr(),
+            packfile,
+            header.dirlen,
+            header.dirofs,
+        );
+    }
+    if numpackfiles == 0 {
+        sys_print1(c"WARNING: %s has no files, ignored\n".as_ptr(), packfile);
+        fclose(packhandle);
+        return core::ptr::null_mut();
+    }
+    if numpackfiles > MAX_FILES_IN_PACK {
+        sys_print_pakfiles(
+            c"WARNING: %s has %i files (max. allowed is %i), ignored\n".as_ptr(),
+            packfile,
+            numpackfiles,
+            MAX_FILES_IN_PACK,
+        );
+        fclose(packhandle);
+        return core::ptr::null_mut();
+    }
+
+    // malloc, NOT Z_Malloc: one full pak's directory is 7% of the client's
+    // 2 MB zone and a mod shipping a dozen would exhaust it (uhexen2-mm4l).
+    let newfiles = malloc(numpackfiles as usize * core::mem::size_of::<PakFilesC>()).cast::<PakFilesC>();
+    if newfiles.is_null() {
+        Sys_Error(
+            c"%s: out of memory for %i pak entries".as_ptr(),
+            c"FS_LoadPackFile".as_ptr(),
+            numpackfiles,
+        );
+    }
+
+    fseek(packhandle, header.dirofs as c_long, SEEK_SET);
+    fread(
+        info.as_mut_ptr().cast::<c_void>(),
+        1,
+        header.dirlen as usize,
+        packhandle,
+    );
+
+    // crc the directory
+    let mut crc: u16 = 0;
+    CRC_Init(&mut crc);
+    for i in 0..header.dirlen as usize {
+        CRC_ProcessByte(&mut crc, info.as_ptr().cast::<u8>().add(i).read());
+    }
+
+    // check for modifications
+    if base_fs != 0 {
+        gameflags |= check_known_paks(paknum, numpackfiles, crc);
+    } else {
+        gameflags |= GAME_MODIFIED;
+    }
+
+    let pack = Z_Malloc(core::mem::size_of::<PackC>() as c_int, Z_MAINZONE).cast::<PackC>();
+    // get the hash table size from the number of files in the pak
+    let mut i: c_int = 1;
+    while i < MAX_FILES_IN_PACK {
+        if i > numpackfiles {
+            break;
+        }
+        i <<= 1;
+    }
+    Hash_Allocate(&mut (*pack).hash, i);
+
+    // parse the directory
+    for n in 0..numpackfiles as usize {
+        qerr_strlcpy(
+            c"FS_LoadPackFile".as_ptr(),
+            604,
+            (*newfiles.add(n)).name.as_mut_ptr(),
+            info[n].name.as_ptr(),
+            MAX_QPATH,
+        );
+        (*newfiles.add(n)).filepos = little_long(info[n].filepos);
+        (*newfiles.add(n)).filelen = little_long(info[n].filelen);
+        let key = hash_generate_key_string(
+            &mut (*pack).hash,
+            (*newfiles.add(n)).name.as_ptr(),
+            0,
+        );
+        Hash_Add(&mut (*pack).hash, key, n as c_int);
+    }
+
+    qerr_strlcpy(
+        c"FS_LoadPackFile".as_ptr(),
+        611,
+        (*pack).filename.as_mut_ptr(),
+        packfile,
+        MAX_OSPATH,
+    );
+    (*pack).handle = packhandle;
+    (*pack).numfiles = numpackfiles;
+    (*pack).files = newfiles;
+
+    sys_print2i(
+        c"Added packfile %s (%i files)\n".as_ptr(),
+        packfile,
+        numpackfiles,
+    );
+    pack
+}
+
+/// `FS_LoadZipFile` -- mount a .pk3/.zip as a searchpath entry.  Returns NULL
+/// on anything malformed: these are optional content, so a bad archive costs a
+/// warning rather than a Sys_Error.
+unsafe fn fs_load_zip_file(zipfile: *const c_char, base_fs: c_int) -> *mut ZipPackC {
+    let handle = fs_fopen(zipfile, c"rb".as_ptr());
+    if handle.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    if fseek(handle, 0, SEEK_END) != 0 {
+        fclose(handle);
+        return core::ptr::null_mut();
+    }
+    let filesize = ftell(handle);
+    if filesize <= 0 {
+        fclose(handle);
+        return core::ptr::null_mut();
+    }
+
+    let zip = Z_Malloc(core::mem::size_of::<ZipPackC>() as c_int, Z_MAINZONE).cast::<ZipPackC>();
+    memset(zip.cast::<c_void>(), 0, core::mem::size_of::<ZipPackC>());
+    (*zip).handle = handle;
+    (*zip).archive.m_pRead = Some(fs_zip_read);
+    (*zip).archive.m_pIO_opaque = handle;
+
+    if mz_zip_reader_init(&mut (*zip).archive, filesize as u64, 0) == 0 {
+        sys_print1(
+            c"WARNING: %s is not a valid zip archive, ignored\n".as_ptr(),
+            zipfile,
+        );
+        Z_Free(zip.cast::<c_void>());
+        fclose(handle);
+        return core::ptr::null_mut();
+    }
+
+    // mz_zip_reader_get_num_files() sits inside a block Ironwail disabled;
+    // m_total_files is the public field it would have returned.
+    let numentries = (*zip).archive.m_total_files;
+    if numentries == 0 {
+        sys_print1(c"WARNING: %s has no files, ignored\n".as_ptr(), zipfile);
+        mz_zip_reader_end(&mut (*zip).archive);
+        Z_Free(zip.cast::<c_void>());
+        fclose(handle);
+        return core::ptr::null_mut();
+    }
+    if numentries > MAX_FILES_IN_ZIP as u32 {
+        sys_print_zipfiles(
+            c"WARNING: %s has %u files (max. allowed is %i), ignored\n".as_ptr(),
+            zipfile,
+            numentries,
+            MAX_FILES_IN_ZIP,
+        );
+        mz_zip_reader_end(&mut (*zip).archive);
+        Z_Free(zip.cast::<c_void>());
+        fclose(handle);
+        return core::ptr::null_mut();
+    }
+
+    // malloc, NOT Z_Malloc: MAX_FILES_IN_ZIP entries is 4.75 MB against a
+    // fixed 2 MB zone, and the searchpath holds every mounted archive at once.
+    let newfiles = malloc(numentries as usize * core::mem::size_of::<ZipFilesC>()).cast::<ZipFilesC>();
+    if newfiles.is_null() {
+        Sys_Error(
+            c"%s: out of memory for %u zip entries".as_ptr(),
+            c"FS_LoadZipFile".as_ptr(),
+            numentries,
+        );
+    }
+
+    // smallest power of two that covers the entry count, floor of 16
+    let mut hashsize: c_int = 16;
+    while (hashsize as u32) < numentries {
+        hashsize <<= 1;
+    }
+    Hash_Allocate(&mut (*zip).hash, hashsize);
+
+    let mut numfiles: c_int = 0;
+    let mut i: u32 = 0;
+    while i < numentries {
+        let mut stat: MzZipArchiveFileStat = core::mem::zeroed();
+
+        if mz_zip_reader_file_stat(&mut (*zip).archive, i, &mut stat) == 0 {
+            i += 1;
+            continue;
+        }
+        if stat.m_is_directory != 0 {
+            i += 1;
+            continue;
+        }
+        if stat.m_is_supported == 0 {
+            // encrypted, or a compression method miniz cannot decode
+            sys_print2s(
+                c"WARNING: %s: unsupported entry %s, skipped\n".as_ptr(),
+                zipfile,
+                stat.m_filename.as_ptr(),
+            );
+            i += 1;
+            continue;
+        }
+        if stat.m_uncomp_size > 0x7fff_ffffu64 {
+            sys_print2s(
+                c"WARNING: %s: entry %s too large, skipped\n".as_ptr(),
+                zipfile,
+                stat.m_filename.as_ptr(),
+            );
+            i += 1;
+            continue;
+        }
+        if stat.m_method != 0 && stat.m_uncomp_size > MAX_ZIP_INFLATE as u64 {
+            let mb = ((stat.m_uncomp_size + (1 << 20) - 1) >> 20) as c_uint;
+            let limit = (MAX_ZIP_INFLATE >> 20) as c_uint;
+            CON_Printf(
+                PRINT_TERMONLY,
+                c"WARNING: %s: deflated entry %s inflates to %u MB, over the %u MB limit -- skipped\n"
+                    .as_ptr(),
+                zipfile,
+                stat.m_filename.as_ptr(),
+                mb,
+                limit,
+            );
+            i += 1;
+            continue;
+        }
+        if strlen(stat.m_filename.as_ptr()) >= MAX_QPATH {
+            sys_print2s(
+                c"WARNING: %s: entry name too long, skipped: %s\n".as_ptr(),
+                zipfile,
+                stat.m_filename.as_ptr(),
+            );
+            i += 1;
+            continue;
+        }
+
+        let entry = newfiles.add(numfiles as usize);
+        q_strlcpy((*entry).name.as_mut_ptr(), stat.m_filename.as_ptr(), MAX_QPATH);
+        (*entry).index = i;
+        (*entry).filelen = stat.m_uncomp_size as c_int;
+        // STORED entries get a real offset resolved on first open; anything
+        // else is flagged as needing inflation.  -1 means "not yet resolved".
+        (*entry).filepos = if stat.m_method == 0 { -1 } else { -2 };
+
+        let key = hash_generate_key_string(&mut (*zip).hash, (*entry).name.as_ptr(), 0);
+        Hash_Add(&mut (*zip).hash, key, numfiles);
+        numfiles += 1;
+        i += 1;
+    }
+
+    if numfiles == 0 {
+        sys_print1(
+            c"WARNING: %s has no usable files, ignored\n".as_ptr(),
+            zipfile,
+        );
+        Hash_Free(&mut (*zip).hash);
+        free(newfiles.cast::<c_void>());
+        mz_zip_reader_end(&mut (*zip).archive);
+        Z_Free(zip.cast::<c_void>());
+        fclose(handle);
+        return core::ptr::null_mut();
+    }
+
+    q_strlcpy((*zip).filename.as_mut_ptr(), zipfile, MAX_OSPATH);
+    (*zip).numfiles = numfiles;
+    (*zip).files = newfiles;
+
+    // An archive still counts as content the original game never shipped; what
+    // is new is that it can now ALSO be identified as Raven's own content.
+    gameflags |= GAME_MODIFIED;
+    if base_fs != 0 {
+        gameflags |= check_known_zip(zip);
+    }
+
+    sys_print2i(c"Added archive %s (%i files)\n".as_ptr(), zipfile, numfiles);
+    zip
+}
+
+/// `FS_ZipReadEntry` -- inflate a DEFLATED entry into a caller buffer, which
+/// must hold `entry->filelen` bytes.
+unsafe fn fs_zip_read_entry(zip: *mut ZipPackC, entry: *const ZipFilesC, buf: *mut c_void) -> c_int {
+    if (*entry).filelen == 0 {
+        return 1; // nothing to do; an empty entry is not an error
+    }
+    if mz_zip_reader_extract_to_mem(
+        &mut (*zip).archive,
+        (*entry).index,
+        buf,
+        (*entry).filelen as usize,
+        0,
+    ) != 0
+    {
+        1
+    } else {
+        0
+    }
+}
+
+/// `FS_UnwindSearchpaths` -- pop and free every searchpath entry above
+/// `mark`, leaving `fs_searchpaths` at `mark`.  Centralised because of
+/// `fs_portals_path_id`: an id that outlives the entries it names would hand
+/// PR_ShouldSubstituteProgs a stale answer (uhexen2-5vb6).
+unsafe fn fs_unwind_searchpaths(mark: *mut SearchPathC, verbose: c_int) {
+    while FS_SEARCHPATHS != mark {
+        if !(*FS_SEARCHPATHS).pack.is_null() {
+            if verbose != 0 {
+                sys_print1(
+                    c"Removed packfile %s\n".as_ptr(),
+                    (*(*FS_SEARCHPATHS).pack).filename.as_ptr(),
+                );
+            }
+            fclose((*(*FS_SEARCHPATHS).pack).handle);
+            free((*(*FS_SEARCHPATHS).pack).files.cast::<c_void>());
+            Hash_Free(&mut (*(*FS_SEARCHPATHS).pack).hash);
+            Z_Free((*FS_SEARCHPATHS).pack.cast::<c_void>());
+        } else if !(*FS_SEARCHPATHS).zip.is_null() {
+            if verbose != 0 {
+                sys_print1(
+                    c"Removed archive %s\n".as_ptr(),
+                    (*(*FS_SEARCHPATHS).zip).filename.as_ptr(),
+                );
+            }
+            mz_zip_reader_end(&mut (*(*FS_SEARCHPATHS).zip).archive);
+            fclose((*(*FS_SEARCHPATHS).zip).handle);
+            free((*(*FS_SEARCHPATHS).zip).files.cast::<c_void>());
+            Hash_Free(&mut (*(*FS_SEARCHPATHS).zip).hash);
+            Z_Free((*FS_SEARCHPATHS).zip.cast::<c_void>());
+        } else if verbose != 0 {
+            sys_print1(
+                c"Removed path %s\n".as_ptr(),
+                (*FS_SEARCHPATHS).filename.as_ptr(),
+            );
+        }
+        if FS_PORTALS_PATH_ID != 0 && (*FS_SEARCHPATHS).path_id == FS_PORTALS_PATH_ID {
+            FS_PORTALS_PATH_ID = 0;
+        }
+        let next = (*FS_SEARCHPATHS).next;
+        Z_Free(FS_SEARCHPATHS.cast::<c_void>());
+        FS_SEARCHPATHS = next;
+    }
+}
+
+extern "C" {
+    /// The zone port's allocator, defined in every target.
+    fn Z_Malloc(size: c_int, zone_id: c_int) -> *mut c_void;
+    fn Z_Free(ptr: *mut c_void);
+    /// `Z_MAINZONE` from engine/h2shared/zone.h.
+    /// (Spelled as a value at each call site below.)
+    /// The hashindex port's five exported functions.
+    fn Hash_Allocate(hi: *mut HashIndexC, hash_size: c_int);
+    fn Hash_Free(hi: *mut HashIndexC);
+    fn Hash_Add(hi: *mut HashIndexC, key: c_int, index: c_int);
+    /// The crc port's byte-at-a-time API, used to fingerprint a pak directory.
+    fn CRC_Init(crc: *mut u16);
+    fn CRC_ProcessByte(crc: *mut u16, b: u8);
+}
+
+/// `Z_MAINZONE` from engine/h2shared/zone.h.
+const Z_MAINZONE: c_int = 1 << 0;
 
 // ==== PORT CONTINUES ====
