@@ -990,6 +990,15 @@ add_custom_target(engine_rs DEPENDS ${RUST_ENGINE_RS_LIB})
 function(engine_rs_attach tgt)
     add_dependencies(${tgt} engine_rs)
     target_link_libraries(${tgt} PRIVATE ${RUST_ENGINE_RS_LIB})
+
+    # The zone port's per-target configuration.  One archive serves all three
+    # binaries but zone.c's ZONE_DEFSIZE, secondary-zone size, cache API and
+    # dedicated flag differ between them, so each target compiles the shim
+    # with its own defines and the Rust module asks it.  Decided on #233;
+    # the file's header explains why, and engine/h2shared/zone_target.h is
+    # the single source of the values, shared with zone.c.
+    target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/zone_target.c)
+
     # rustc emits the archive's exported statics as local symbols on wasm32,
     # so there the C owns their storage.  See the file's header.
     if(EMSCRIPTEN)
