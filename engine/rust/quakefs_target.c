@@ -83,6 +83,46 @@ int QuakeFS_TargetHasClientCommands (void)
 
 #endif	/* SERVERONLY */
 
+/* Whether this target is the H2W-integrated *client* -- H2W_INTEGRATED and
+ * neither H2W nor SERVERONLY, which in this tree means native glhexen2 alone.
+ * The wasm client does not define it either: CLIENT_DEFINITIONS only gains
+ * H2W_INTEGRATED under `USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN`, so the web
+ * client takes quakefs.c's plain-Hexen II branch in FS_Gamedir and in the
+ * FS_Init rollback.  Distinct from QuakeFS_TargetHasClientCommands, which is
+ * every non-SERVERONLY target including the web client. */
+#if defined(H2W_INTEGRATED)
+
+int QuakeFS_TargetIsH2WIntegrated (void)
+{
+	return 1;
+}
+
+#else
+
+int QuakeFS_TargetIsH2WIntegrated (void)
+{
+	return 0;
+}
+
+#endif	/* H2W_INTEGRATED */
+
+/* The hwsv-only serverinfo write: `Info_SetValueForStarKey (svs.info,
+ * "*gamedir", dir, ...)`, which names the `svs` global that exists in no other
+ * binary.  Info_SetValueForStarKey itself is the info_str port and so is in
+ * the archive everywhere; only the global needs this. */
+#if defined(H2W) && defined(SERVERONLY)
+
+void QuakeFS_TargetSetHwServerinfo (const char *dir)
+{
+	Info_SetValueForStarKey (svs.info, "*gamedir", dir, MAX_SERVERINFO_STRING);
+}
+
+#else
+
+void QuakeFS_TargetSetHwServerinfo (const char *dir) { (void)dir; }
+
+#endif	/* H2W && SERVERONLY */
+
 /*============================================================================
  * behaviour hooks.  Each wraps one contiguous client-only statement group;
  * the dedicated builds, where the C has no such code at all, get a no-op.

@@ -1694,6 +1694,224 @@ unsafe fn fs_add_game_directory(dir: *const c_char, base_fs: c_int) {
     }
 }
 
+extern "C" {
+    /// quakefs_target.c -- the per-target predicates and hooks this module uses
+    /// instead of naming a symbol some binary does not have.
+    fn QuakeFS_TargetIsH2W() -> c_int;
+    fn QuakeFS_TargetIsH2WIntegrated() -> c_int;
+    fn QuakeFS_TargetSetHwServerinfo(dir: *const c_char);
+
+    /// engine/hexen2/host.h -- `qboolean host_initialized`.
+    static host_initialized: c_int;
+    /// The zone port's Cache_Flush.  Not hooked, deliberately: it is a Rust
+    /// symbol in every binary now, and flushing an empty cache is a no-op, so
+    /// the dedicated targets' compiled-out arms stay inert.
+    fn Cache_Flush();
+    fn strstr(haystack: *const c_char, needle: *const c_char) -> *mut c_char;
+}
+
+/// `_PRINT_NORMAL` -- what the C's `Con_Printf (fmt, ...)` macro passes.
+const PRINT_NORMAL: c_uint = 0;
+
+/// `set_hw_dir` (`quakefs.c:1142-1153`, H2W only) -- the H2W server's way of
+/// pointing the gamedir variables at "hw".  The `#ifdef SERVERONLY`
+/// serverinfo write inside it is the hwsv-only hook.
+unsafe fn set_hw_dir() {
+    qerr_strlcpy(
+        c"set_hw_dir".as_ptr(),
+        1143,
+        (&raw mut fs_gamedir_nopath).cast::<c_char>(),
+        c"hw".as_ptr(),
+        MAX_QPATH,
+    );
+    fserr_make_path_buf(
+        c"set_hw_dir".as_ptr(),
+        1145,
+        MAKEPATH_BASEDIR,
+        (&raw mut FS_GAMEDIR).cast::<c_char>(),
+        MAX_OSPATH,
+        c"hw".as_ptr(),
+    );
+    fserr_make_path_buf(
+        c"set_hw_dir".as_ptr(),
+        1147,
+        MAKEPATH_USERBASE,
+        (&raw mut FS_USERDIR).cast::<c_char>(),
+        MAX_OSPATH,
+        c"hw".as_ptr(),
+    );
+    QuakeFS_TargetSetHwServerinfo(c"hw".as_ptr());
+}
+
+/// `FS_HWGamedir` (H2W_INTEGRATED only in the C).  A wire string must be one
+/// safe directory component: not empty, not a path, not traversal, not a
+/// reserved local base directory, and only [A-Za-z0-9_.-].
+#[no_mangle]
+pub unsafe extern "C" fn FS_HWGamedir(dir: *const c_char) -> c_int {
+    let mut p = dir.cast::<u8>();
+
+    if *p == 0
+        || strlen(dir) >= MAX_QPATH
+        || strcmp(dir, c".".as_ptr()) == 0
+        || !strstr(dir, c"..".as_ptr()).is_null()
+        || q_strcasecmp(dir, c"data1".as_ptr()) == 0
+        || q_strcasecmp(dir, c"portals".as_ptr()) == 0
+    {
+        return 0;
+    }
+    while *p != 0 {
+        let c = *p;
+        let ok = (c >= b'a' && c <= b'z')
+            || (c >= b'A' && c <= b'Z')
+            || (c >= b'0' && c <= b'9')
+            || c == b'_'
+            || c == b'-'
+            || c == b'.';
+        if !ok {
+            return 0;
+        }
+        p = p.add(1);
+    }
+
+    if FS_HW_SAVED_PATHS.is_null() {
+        // Keep the local game's paths alive, but out of the server's search
+        // order; only temporary HW/mod entries above the base are freed.
+        FS_HW_SAVED_PATHS = FS_SEARCHPATHS;
+        q_strlcpy(
+            (&raw mut FS_HW_SAVED_GAME).cast::<c_char>(),
+            (&raw const fs_gamedir_nopath).cast::<c_char>(),
+            MAX_QPATH,
+        );
+        q_strlcpy(
+            (&raw mut FS_HW_SAVED_GAMEDIR).cast::<c_char>(),
+            (&raw const FS_GAMEDIR).cast::<c_char>(),
+            MAX_OSPATH,
+        );
+        q_strlcpy(
+            (&raw mut FS_HW_SAVED_USERDIR).cast::<c_char>(),
+            (&raw const FS_USERDIR).cast::<c_char>(),
+            MAX_OSPATH,
+        );
+        FS_HW_SAVED_FLAGS = gameflags;
+        FS_SEARCHPATHS = FS_BASE_SEARCHPATHS;
+    } else {
+        fs_unwind_searchpaths(FS_BASE_SEARCHPATHS, 0);
+    }
+    Cache_Flush();
+    fs_add_game_directory(c"hw".as_ptr(), 0);
+    if q_strcasecmp(dir, c"hw".as_ptr()) != 0 {
+        fs_add_game_directory(dir, 0);
+    }
+    1
+}
+
+/// `FS_HWRestore` -- put the local game's searchpath back, as it was before
+/// the H2W server took the gamedir over.
+#[no_mangle]
+pub unsafe extern "C" fn FS_HWRestore() {
+    if FS_HW_SAVED_PATHS.is_null() {
+        return;
+    }
+    Cache_Flush();
+    fs_unwind_searchpaths(FS_BASE_SEARCHPATHS, 0);
+    FS_SEARCHPATHS = FS_HW_SAVED_PATHS;
+    FS_HW_SAVED_PATHS = core::ptr::null_mut();
+    gameflags = FS_HW_SAVED_FLAGS;
+    q_strlcpy(
+        (&raw mut fs_gamedir_nopath).cast::<c_char>(),
+        (&raw const FS_HW_SAVED_GAME).cast::<c_char>(),
+        MAX_QPATH,
+    );
+    q_strlcpy(
+        (&raw mut FS_GAMEDIR).cast::<c_char>(),
+        (&raw const FS_HW_SAVED_GAMEDIR).cast::<c_char>(),
+        MAX_OSPATH,
+    );
+    q_strlcpy(
+        (&raw mut FS_USERDIR).cast::<c_char>(),
+        (&raw const FS_HW_SAVED_USERDIR).cast::<c_char>(),
+        MAX_OSPATH,
+    );
+}
+
+/// `FS_Gamedir` -- set the gamedir and path to a different directory.  Hexen II
+/// uses it for `-game`; HexenWorld calls it on every map change from
+/// CL_ParseServerData and from SV_Gamedir_f, which is why the three reserved
+/// names below exist at all.
+#[no_mangle]
+pub unsafe extern "C" fn FS_Gamedir(dir: *const c_char) {
+    if *dir == 0
+        || strcmp(dir, c".".as_ptr()) == 0
+        || !strstr(dir, c"..".as_ptr()).is_null()
+        || !strstr(dir, c"/".as_ptr()).is_null()
+        || !strstr(dir, c"\\".as_ptr()).is_null()
+        || !strstr(dir, c":".as_ptr()).is_null()
+    {
+        if *(&raw const host_initialized) == 0 {
+            Sys_Error(c"gamedir should be a single directory name, not a path\n".as_ptr());
+        } else {
+            CON_Printf(
+                PRINT_NORMAL,
+                c"gamedir should be a single directory name, not a path\n".as_ptr(),
+            );
+            return;
+        }
+    }
+
+    if q_strcasecmp((&raw const fs_gamedir_nopath).cast::<c_char>(), dir) == 0 {
+        return; // still the same
+    }
+
+    // free up any current game dir info: the top searchpath dir will be hw and
+    // any gamedirs set by this very procedure are removed.
+    fs_unwind_searchpaths(FS_BASE_SEARCHPATHS, 0);
+
+    // flush all data, so it will be forced to reload
+    Cache_Flush();
+
+    // check for reserved gamedirs
+    if q_strcasecmp(dir, c"hw".as_ptr()) == 0 {
+        if QuakeFS_TargetIsH2W() != 0 {
+            // the hw server went back to pure hw: adjust our variables
+            set_hw_dir();
+        } else if QuakeFS_TargetIsH2WIntegrated() != 0 {
+            // The HexenWorld client lives inside a plain Hexenwail launch whose
+            // base searchpaths were built for data1; the server-directed
+            // gamedir has to be mounted now or every model, sound and map it
+            // references -- hw/pak4.pak especially -- is unresolvable.
+            fs_add_game_directory(dir, 0);
+        } else {
+            // hw is reserved for hexenworld only; hexen2 should not use it
+            CON_Printf(
+                PRINT_NORMAL,
+                c"WARNING: Gamedir not set to hw :\nIt is reserved for HexenWorld.\n".as_ptr(),
+            );
+        }
+        return;
+    }
+
+    if q_strcasecmp(dir, c"portals".as_ptr()) == 0 {
+        // hw must stay above portals in the hierarchy; hypothetical for h2
+        if QuakeFS_TargetIsH2W() != 0 {
+            set_hw_dir();
+        }
+        return;
+    }
+
+    if q_strcasecmp(dir, c"data1".as_ptr()) == 0 {
+        // hypothetical: no hw mod is supposed to do this
+        if QuakeFS_TargetIsH2W() != 0 {
+            set_hw_dir();
+        }
+        return;
+    }
+
+    // a new gamedir: let's set it here
+    fs_add_game_directory(dir, 0);
+    // change the *gamedir serverinfo properly (hwsv only; a no-op elsewhere)
+    QuakeFS_TargetSetHwServerinfo(dir);
+}
+
 //============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
