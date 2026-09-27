@@ -34,10 +34,21 @@
  * the per-target shim compiled the same way, so the predicates and the
  * behaviour hooks are exercised rather than assumed.
  *
- * What is NOT covered, recorded rather than implied: the private searchpath
- * and pack structures are never walked (they are static), so a port that built
- * the same answers through a different list shape would pass; and miniz is the
- * same C in both binaries, so its behaviour is not under test.
+ * HOW THE SEARCHPATH ORDER IS PINNED WITHOUT READING IT.  fs_searchpaths and
+ * the pack structures are static in quakefs.c, so neither implementation can be
+ * asked for its list directly, and inventing an accessor for one side would
+ * compare the accessor rather than the port.  Instead the order is tested
+ * through what it MEANS: the same file name is placed in the base directory,
+ * the gamedir, a pak and a second pak with different contents each time, and
+ * the harness records which one each implementation resolves and what bytes it
+ * returns.  Resolution order, plus the public getters (FS_GetBasedir,
+ * GetUserbase, GetGamedir, GetUserdir, GetPortalsPathID, GetGamedirPathID), the
+ * package lookups and the listers, pins the order behaviourally -- which is
+ * what parity means here.
+ *
+ * What is NOT covered, recorded rather than implied: an internal list shape
+ * that produced the same answers would pass, and miniz is the same C in both
+ * binaries, so its behaviour is not under test.
  */
 
 #include "quakedef.h"
@@ -47,64 +58,74 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <dirent.h>
 #include <setjmp.h>
 #include "sys.h"
+#include "miniz.h"
 #include <unistd.h>
 
 #ifndef IMPL
 #define IMPL
 #endif
 
+/* Token-pasting needs two levels: `#define FS_Init CAT(IMPL, FS_Init)` pastes the
+ * NAME IMPL rather than its expansion, which leaves the bare (Rust) arm with
+ * IMPLfs_filesize and friends undeclared.  CAT(a,b) is the standard fix --
+ * the arguments are expanded before CAT_ pastes them. */
+#define CAT_(a, b) a##b
+#define CAT(a, b) CAT_(a, b)
+
 /* Every entry point the cases drive, through whichever implementation this
  * translation unit was compiled for. */
-#define FS_Init			IMPL##FS_Init
-#define FS_Gamedir		IMPL##FS_Gamedir
-#define FS_GetGamedir		IMPL##FS_GetGamedir
-#define FS_GetUserdir		IMPL##FS_GetUserdir
-#define FS_GetBasedir		IMPL##FS_GetBasedir
-#define FS_GetUserbase		IMPL##FS_GetUserbase
-#define FS_GetPortalsPathID	IMPL##FS_GetPortalsPathID
-#define FS_GetGamedirPathID	IMPL##FS_GetGamedirPathID
-#define FS_OpenFile		IMPL##FS_OpenFile
-#define FS_OpenFile_Silent	IMPL##FS_OpenFile_Silent
-#define FS_FileExists		IMPL##FS_FileExists
-#define FS_FileExistsInPak	IMPL##FS_FileExistsInPak
-#define FS_FileInGamedir	IMPL##FS_FileInGamedir
-#define FS_LastFileSource	IMPL##FS_LastFileSource
-#define FS_LoadMallocFile	IMPL##FS_LoadMallocFile
-#define FS_LoadStackFile	IMPL##FS_LoadStackFile
-#define FS_LoadHunkFile		IMPL##FS_LoadHunkFile
-#define FS_LoadTempFile		IMPL##FS_LoadTempFile
-#define FS_LoadZoneFile		IMPL##FS_LoadZoneFile
-#define FS_LoadHunkFileFromOSPath IMPL##FS_LoadHunkFileFromOSPath
-#define FS_fread		IMPL##FS_fread
-#define FS_fseek		IMPL##FS_fseek
-#define FS_ftell		IMPL##FS_ftell
-#define FS_feof			IMPL##FS_feof
-#define FS_ferror		IMPL##FS_ferror
-#define FS_fclose		IMPL##FS_fclose
-#define FS_WriteFile		IMPL##FS_WriteFile
-#define FS_CopyFile		IMPL##FS_CopyFile
-#define FS_CreatePath		IMPL##FS_CreatePath
-#define FS_IsGamedir		IMPL##FS_IsGamedir
-#define FS_ListSearchSubdirs	IMPL##FS_ListSearchSubdirs
-#define FS_BuildMapList		IMPL##FS_BuildMapList
-#define FS_MapListName		IMPL##FS_MapListName
-#define FS_GetMapTitle		IMPL##FS_GetMapTitle
-#define FS_MakePath		IMPL##FS_MakePath
-#define FS_MakePath_BUF		IMPL##FS_MakePath_BUF
+#define FS_Init			CAT(IMPL, FS_Init)
+#define FS_Gamedir		CAT(IMPL, FS_Gamedir)
+#define FS_GetGamedir		CAT(IMPL, FS_GetGamedir)
+#define FS_GetUserdir		CAT(IMPL, FS_GetUserdir)
+#define FS_GetBasedir		CAT(IMPL, FS_GetBasedir)
+#define FS_GetUserbase		CAT(IMPL, FS_GetUserbase)
+#define FS_GetPortalsPathID	CAT(IMPL, FS_GetPortalsPathID)
+#define FS_GetGamedirPathID	CAT(IMPL, FS_GetGamedirPathID)
+#define FS_OpenFile		CAT(IMPL, FS_OpenFile)
+#define FS_OpenFile_Silent	CAT(IMPL, FS_OpenFile_Silent)
+#define FS_FileExists		CAT(IMPL, FS_FileExists)
+#define FS_FileExistsInPak	CAT(IMPL, FS_FileExistsInPak)
+#define FS_FileInGamedir	CAT(IMPL, FS_FileInGamedir)
+#define FS_LastFileSource	CAT(IMPL, FS_LastFileSource)
+#define FS_LoadMallocFile	CAT(IMPL, FS_LoadMallocFile)
+#define FS_LoadStackFile	CAT(IMPL, FS_LoadStackFile)
+#define FS_LoadHunkFile		CAT(IMPL, FS_LoadHunkFile)
+#define FS_LoadTempFile		CAT(IMPL, FS_LoadTempFile)
+#define FS_LoadZoneFile		CAT(IMPL, FS_LoadZoneFile)
+#define FS_LoadHunkFileFromOSPath CAT(IMPL, FS_LoadHunkFileFromOSPath)
+#define FS_fread		CAT(IMPL, FS_fread)
+#define FS_fseek		CAT(IMPL, FS_fseek)
+#define FS_ftell		CAT(IMPL, FS_ftell)
+#define FS_feof			CAT(IMPL, FS_feof)
+#define FS_ferror		CAT(IMPL, FS_ferror)
+#define FS_fclose		CAT(IMPL, FS_fclose)
+#define FS_OpenFileHandle	CAT(IMPL, FS_OpenFileHandle)
+#define FS_WriteFile		CAT(IMPL, FS_WriteFile)
+#define FS_CopyFile		CAT(IMPL, FS_CopyFile)
+#define FS_CreatePath		CAT(IMPL, FS_CreatePath)
+#define FS_IsGamedir		CAT(IMPL, FS_IsGamedir)
+#define FS_ListSearchSubdirs	CAT(IMPL, FS_ListSearchSubdirs)
+#define FS_BuildMapList		CAT(IMPL, FS_BuildMapList)
+#define FS_MapListName		CAT(IMPL, FS_MapListName)
+#define FS_GetMapTitle		CAT(IMPL, FS_GetMapTitle)
+#define FS_MakePath		CAT(IMPL, FS_MakePath)
+#define FS_MakePath_BUF		CAT(IMPL, FS_MakePath_BUF)
 
 /* The exported globals, spelled the same way. */
-#define fs_gamedir_nopath	IMPL##fs_gamedir_nopath
-#define gameflags		IMPL##gameflags
-#define fs_filesize		IMPL##fs_filesize
-#define file_from_pak		IMPL##file_from_pak
+#define fs_gamedir_nopath	CAT(IMPL, fs_gamedir_nopath)
+#define gameflags		CAT(IMPL, gameflags)
+#define fs_filesize		CAT(IMPL, fs_filesize)
+#define file_from_pak		CAT(IMPL, file_from_pak)
 
-extern int Cmd_Exists(const char *name);
+extern qboolean Cmd_Exists(const char *name);
 
 /* The per-target predicates: from the shim for the C arm, from the shim for
  * the Rust arm too -- both link engine/rust/quakefs_target.c, which is the
@@ -202,6 +223,7 @@ FUNC_NORETURN void Sys_Error(const char *fmt, ...)
 	rec_int(0xE44);
 	rec_str(err_buf);
 
+	fprintf(stderr, "Sys_Error: %s\n", err_buf);
 	if (!err_armed) {
 		/* A fatal path reached outside a case that expects one: die loudly
 		 * so the run script sees a signal in the trace, as the C does. */
@@ -232,13 +254,17 @@ int Sys_FileType(const char *path)
 	return 0;
 }
 
-int Sys_mkdir(const char *path, int crash)
+int Sys_mkdir(const char *path, qboolean crash)
 {
 	(void)crash;
 	return mkdir(path, 0755);
 }
 
-/* Directory walk: a tiny sorted implementation, the same for both sides. */
+/* Directory walk: a tiny, deterministic implementation -- collect, sort, hand
+ * back one at a time.  Both implementations get this same code, so what the
+ * filesystem layer sees is identical and a difference in the trace is a
+ * difference in the port.  The pattern forms quakefs.c uses are "*.ext",
+ * "prefix*" and "*", so the matcher only needs '*' and '?'. */
 static char find_names[64][256];
 static int find_count;
 static int find_pos;
@@ -248,33 +274,46 @@ static int name_cmp(const void *a, const void *b)
 	return strcmp((const char *)a, (const char *)b);
 }
 
-const char *Sys_FindFirstFile(fsfind_t *ctx, const char *path, const char *pattern)
+static int glob_match(const char *pat, const char *name)
 {
-	char dirname[512];
+	if (!pat || !*pat)
+		return 1;
+	if (*pat == '*')
+		return glob_match(pat + 1, name) ||
+			(*name && glob_match(pat, name + 1));
+	if (*pat == '?')
+		return *name && glob_match(pat + 1, name + 1);
+	if (*pat != *name)
+		return 0;
+	return glob_match(pat + 1, name + 1);
+}
+
+const char *Sys_FindFirstFile(fsfind_t *ctx, const char *path,
+		const char *pattern)
+{
 	DIR *d;
 	struct dirent *de;
 
-	(void)pattern;
-	(void)base;
+	(void)ctx;
 	find_count = 0;
 	find_pos = 0;
-	snprintf(dirname, sizeof dirname, "%s", path);
-	d = opendir(dirname);
-	if (!d) {
-		*ctxp = NULL;
-		return;
+	d = opendir(path);
+	if (d) {
+		while ((de = readdir(d)) != NULL && find_count < 64) {
+			if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+				continue;
+			if (!glob_match(pattern, de->d_name))
+				continue;
+			snprintf(find_names[find_count],
+				sizeof find_names[0], "%s", de->d_name);
+			find_count++;
+		}
+		closedir(d);
 	}
-	while ((de = readdir(d)) != NULL && find_count < 64) {
-		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
-			continue;
-		snprintf(find_names[find_count], sizeof find_names[0], "%s",
-			de->d_name);
-		find_count++;
-	}
-	closedir(d);
-	qsort(find_names, find_count, sizeof find_names[0], name_cmp);
-	(void)ctx;
-	return find_count ? find_names[find_pos++] : NULL;
+	qsort(find_names, (size_t)find_count, sizeof find_names[0], name_cmp);
+	if (find_pos >= find_count)
+		return NULL;
+	return find_names[find_pos++];
 }
 
 const char *Sys_FindNextFile(fsfind_t *ctx)
@@ -290,10 +329,67 @@ void Sys_FindClose(fsfind_t *ctx)
 	(void)ctx;
 }
 
-/* host_parms: com_argc/com_argv are macros over these (common.h:92-93), so the
- * harness owns the storage and the init path. */
+/* host_parms: com_argc/com_argv are macros over these (common.h:92-93), and
+ * the substrate's cmd/cmd.rs reads the symbol by name, so the harness defines
+ * it rather than a differently-named copy. */
 static char *h_argv[16];
 static quakeparms_t h_parms;
+quakeparms_t *host_parms;
+/* Cmd_AddCommand refuses once the host is initialized; the harness registers
+ * commands the way startup does, so this stays false. */
+qboolean host_initialized;
+/* Globals the substrate reads: the developer cvar, the protocol the engine
+ * negotiated, the dedicated flag the shims ask about, and the client state--
+ * all of them the same for both arms, so none of them can make the traces
+ * differ.  developer and cls are only ever read. */
+cvar_t developer;
+int sv_protocol;
+qboolean isDedicated;
+/* The client state the client-arm hooks reset (cls.demofile, cls.demos). */
+client_static_t cls;
+/* The rest of the system surface quakefs.c reaches. */
+int Sys_CopyFile(const char *from, const char *to)
+{
+	FILE *in = fopen(from, "rb"), *out;
+	char buf[4096];
+	size_t n;
+
+	if (!in) return -1;
+	out = fopen(to, "wb");
+	if (!out) { fclose(in); return -1; }
+	while ((n = fread(buf, 1, sizeof buf, in)) > 0)
+		fwrite(buf, 1, n, out);
+	fclose(in); fclose(out);
+	return 0;
+}
+double Sys_DoubleTime(void)
+{
+	/* Fixed: a clock in the trace would make the two arms differ for reasons
+	 * that have nothing to do with the port. */
+	return 1.0;
+}
+int Sys_ListDirectories(const char *path, char dirs[][64], int maxdirs)
+{
+	DIR *d;
+	struct dirent *de;
+	struct stat st;
+	int n = 0;
+	char full[512];
+
+	d = opendir(path);
+	if (!d) return 0;
+	while ((de = readdir(d)) != NULL && n < maxdirs) {
+		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+			continue;
+		snprintf(full, sizeof full, "%s/%s", path, de->d_name);
+		if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
+			continue;
+		snprintf(dirs[n], 64, "%s", de->d_name);
+		n++;
+	}
+	closedir(d);
+	return n;
+}
 
 /* The client-arm hook targets.  Only the client arm's shim bodies call these,
  * which is exactly what the arms exist to check. */
@@ -301,7 +397,7 @@ void Draw_ReInit(void) { rec_int(0xD201); }
 void TexMgr_NewGame(void) { rec_int(0x7C01); }
 void VID_Lock(void) { rec_int(0x7A01); }
 void Host_ClearMemory(void) { rec_int(0xAC01); }
-void Host_ShutdownServer(int total) { (void)total; rec_int(0x4501); }
+void Host_ShutdownServer(qboolean crash) { (void)crash; rec_int(0x4501); }
 void Host_WriteConfiguration(const char *name) { (void)name; rec_int(0x4A01); }
 void BGM_Stop(void) { rec_int(0xBA01); }
 void CL_Disconnect(void) { rec_int(0xC201); }
@@ -326,15 +422,6 @@ void Host_Error(const char *fmt, ...)
 	rec_str(err_buf);
 	abort();
 }
-/* hwsv's arm writes serverinfo; the shim calls this in that arm only. */
-void Info_SetValueForStarKey(char *s, const char *k, const char *v, int max)
-{
-	(void)s; (void)k; (void)v; (void)max;
-	rec_int(0x1F01);
-	rec_str(k ? k : "");
-	rec_str(v ? v : "");
-}
-
 /*----------------------------------------------------------------------------
  * the on-disk fixture
  *--------------------------------------------------------------------------*/
@@ -383,26 +470,137 @@ static void write_pak(const char *path)
 	write_bytes(path, buf, 44 + sizeof lump_text);
 }
 
-/* A zip with one stored and one deflated member, written with the same miniz
- * the port calls, so the archive is valid by construction. */
-static void write_zip(const char *path)
-{
-	void *zip = mz_zip_writer_create();
-	const char *stored = "stored member payload";
-	const char *deflated = "deflated member payload, long enough to compress";
+/* A zip, built byte by byte here rather than with a writer API: the vendored
+ * miniz is compiled with MINIZ_NO_DEFLATE_APIS, so it can read a deflated
+ * member but cannot write one.  Building the bytes directly is also what lets
+ * the malformed and truncated variants come from the same buffer.  The
+ * deflated member's stream is real deflate output, embedded below, so the
+ * reader's inflate path is exercised rather than assumed. */
 
-	if (!zip)
-		exit(2);
-	if (!mz_zip_writer_add_mem(zip, "stored.txt", stored,
-			strlen(stored), MZ_NO_COMPRESSION) ||
-	    !mz_zip_writer_add_mem(zip, "deflated.txt", deflated,
-			strlen(deflated), MZ_DEFAULT_COMPRESSION) ||
-	    !mz_zip_writer_finalize_archive(zip) ||
-	    !mz_zip_writer_write_archive(path, zip)) {
-		fprintf(stderr, "harness: miniz could not write %s\n", path);
-		exit(2);
+/* raw deflate of "deflated member payload, long enough to compress" */
+static const unsigned char deflated_stream[] = {
+	0x4b, 0x49, 0x4d, 0xcb, 0x49, 0x2c, 0x49, 0x4d, 0x51, 0xc8, 0x4d, 0xcd,
+	0x4d, 0x4a, 0x2d, 0x52, 0x28, 0x48, 0xac, 0xcc, 0xc9, 0x4f, 0x4c, 0xd1,
+	0x51, 0xc8, 0xc9, 0xcf, 0x4b, 0x57, 0x48, 0xcd, 0xcb, 0x2f, 0x4d, 0xcf,
+	0x50, 0x28, 0xc9, 0x57, 0x48, 0xce, 0xcf, 0x2d, 0x28, 0x4a, 0x2d, 0x2e,
+	0x06, 0x00,
+};
+#define DEFLATED_RAW_LEN 48
+#define DEFLATED_CRC 0xd6318ff9u
+#define STORED_CRC 0xccba1d93u
+
+static void put16(unsigned char *p, unsigned int v)
+{
+	p[0] = (unsigned char)(v & 0xff);
+	p[1] = (unsigned char)((v >> 8) & 0xff);
+}
+
+static void put32(unsigned char *p, unsigned long v)
+{
+	p[0] = (unsigned char)(v & 0xff);
+	p[1] = (unsigned char)((v >> 8) & 0xff);
+	p[2] = (unsigned char)((v >> 16) & 0xff);
+	p[3] = (unsigned char)((v >> 24) & 0xff);
+}
+
+/* One local file header + name + data.  method 0 = stored, 8 = deflated. */
+static size_t zip_local(unsigned char *out, const char *name,
+		const unsigned char *data, size_t len, size_t uncomp,
+		unsigned long crc, int method)
+{
+	size_t n = strlen(name), o = 0;
+
+	put32(out + o, 0x04034b50UL); o += 4;
+	put16(out + o, 20); o += 2;		/* version needed */
+	put16(out + o, 0); o += 2;		/* flags */
+	put16(out + o, (unsigned int)method); o += 2;
+	put16(out + o, 0); o += 2;		/* time */
+	put16(out + o, 0); o += 2;		/* date */
+	put32(out + o, crc); o += 4;
+	put32(out + o, (unsigned long)len); o += 4;
+	put32(out + o, (unsigned long)uncomp); o += 4;
+	put16(out + o, (unsigned int)n); o += 2;
+	put16(out + o, 0); o += 2;		/* extra len */
+	memcpy(out + o, name, n); o += n;
+	memcpy(out + o, data, len); o += len;
+	return o;
+}
+
+static size_t zip_central(unsigned char *out, const char *name,
+		size_t local_off, size_t len, size_t uncomp,
+		unsigned long crc, int method)
+{
+	size_t n = strlen(name), o = 0;
+
+	put32(out + o, 0x02014b50UL); o += 4;
+	put16(out + o, 20); o += 2;		/* version made by */
+	put16(out + o, 20); o += 2;		/* version needed */
+	put16(out + o, 0); o += 2;
+	put16(out + o, (unsigned int)method); o += 2;
+	put16(out + o, 0); o += 2;
+	put16(out + o, 0); o += 2;
+	put32(out + o, crc); o += 4;
+	put32(out + o, (unsigned long)len); o += 4;
+	put32(out + o, (unsigned long)uncomp); o += 4;
+	put16(out + o, (unsigned int)n); o += 2;
+	put16(out + o, 0); o += 2;		/* extra */
+	put16(out + o, 0); o += 2;		/* comment */
+	put16(out + o, 0); o += 2;		/* disk */
+	put16(out + o, 0); o += 2;		/* internal attrs */
+	put32(out + o, 0UL); o += 4;		/* external attrs */
+	put32(out + o, (unsigned long)local_off); o += 4;
+	memcpy(out + o, name, n); o += n;
+	return o;
+}
+
+#define ZIP_MAX 4096
+
+/* variant: 0 good, 1 central directory signature corrupted, 2 truncated */
+static size_t build_zip(unsigned char *out, int variant)
+{
+	const unsigned char *stored = (const unsigned char *)"stored member payload";
+	size_t o = 0, cd = 0, nstored = 21;
+	unsigned char central[ZIP_MAX];
+
+	o += zip_local(out + o, "stored.txt", stored, nstored, nstored,
+			STORED_CRC, 0);
+	{
+		size_t off = o;
+		o += zip_local(out + o, "deflated.txt", deflated_stream,
+				sizeof deflated_stream, DEFLATED_RAW_LEN,
+				DEFLATED_CRC, 8);
+		cd += zip_central(central + cd, "stored.txt", 0, nstored,
+				nstored, STORED_CRC, 0);
+		cd += zip_central(central + cd, "deflated.txt", off,
+				sizeof deflated_stream, DEFLATED_RAW_LEN,
+				DEFLATED_CRC, 8);
 	}
-	mz_zip_writer_end(zip);
+	if (variant == 1)
+		put32(central, 0xdeadbeefUL);	/* bad central signature */
+	{
+		size_t cd_off = o;
+		memcpy(out + o, central, cd);
+		o += cd;
+		put32(out + o, 0x06054b50UL); o += 4;
+		put16(out + o, 0); o += 2;	/* disk */
+		put16(out + o, 0); o += 2;	/* cd disk */
+		put16(out + o, 2); o += 2;	/* entries here */
+		put16(out + o, 2); o += 2;	/* entries total */
+		put32(out + o, (unsigned long)cd); o += 4;
+		put32(out + o, (unsigned long)cd_off); o += 4;
+		put16(out + o, 0); o += 2;	/* comment len */
+	}
+	if (variant == 2)
+		o = o > 40 ? 40 : o;		/* cut mid central directory */
+	return o;
+}
+
+static void write_zip_variant(const char *path, int variant)
+{
+	unsigned char buf[ZIP_MAX];
+	size_t n = build_zip(buf, variant);
+
+	write_bytes(path, buf, n);
 }
 
 static void fixture_setup(void)
@@ -421,16 +619,36 @@ static void fixture_setup(void)
 	path_join(p, sizeof p, base, "data1/pak0.pak");
 	write_pak(p);
 	path_join(p, sizeof p, base, "data1/gfx.zip");
-	write_zip(p);
+	write_zip_variant(p, 0);
+	path_join(p, sizeof p, base, "data1/bad.zip");
+	write_zip_variant(p, 1);
+	path_join(p, sizeof p, base, "data1/trunc.zip");
+	write_zip_variant(p, 2);
 }
 
 /*----------------------------------------------------------------------------
  * cases
  *--------------------------------------------------------------------------*/
 
+#define HARNESS_MEMSIZE (16 * 1024 * 1024)
+
+static void *membase_keep;
+
 static void parms_init(void)
 {
 	int n = 0;
+
+	/* The engine calls Memory_Init (zone.c, now the Rust zone port) before
+	 * anything touches FS_Init, and every Z_Malloc in quakefs.c needs it --
+	 * without this the port dies on "Bad zone id 1" before a case starts. */
+	if (!membase_keep) {
+		membase_keep = malloc(HARNESS_MEMSIZE);
+		if (!membase_keep) {
+			fprintf(stderr, "harness: out of memory\n");
+			exit(2);
+		}
+		Memory_Init(membase_keep, HARNESS_MEMSIZE);
+	}
 
 	memset(&h_parms, 0, sizeof h_parms);
 	h_parms.basedir = base;
@@ -442,6 +660,8 @@ static void parms_init(void)
 	h_argv[n++] = user;
 	h_parms.argc = n;
 	h_parms.argv = h_argv;
+	h_parms.membase = membase_keep;
+	h_parms.memsize = HARNESS_MEMSIZE;
 	host_parms = &h_parms;
 }
 
@@ -495,16 +715,40 @@ static void scenario_pak(void)
 	rec_str(FS_LastFileSource());
 	if (f) {
 		memset(buf, 0, sizeof buf);
-		rec_int((int)FS_fread(buf, 1, sizeof buf - 1, f));
+		rec_int((int)fread(buf, 1, sizeof buf - 1, f));
 		rec_str(buf);
-		rec_long(FS_ftell(f));
-		rec_int(FS_fseek(f, 0, SEEK_SET));
-		rec_long(FS_ftell(f));
-		rec_int(FS_feof(f));
-		rec_int(FS_ferror(f));
-		FS_fclose(f);
+		rec_long(ftell(f));
+		rec_int(fseek(f, 0, SEEK_SET));
+		rec_long(ftell(f));
+		rec_int(feof(f));
+		rec_int(ferror(f));
+		fclose(f);
+	} else {
+		rec_int(-1);
 	}
 	rec_long(fs_filesize);
+
+	/* The same member through the port's own handle API: FS_OpenFileHandle
+	 * plus FS_fread/FS_fseek/FS_ftell/FS_feof/FS_ferror/FS_fclose. */
+	call("open a pak member through a fshandle");
+	{
+		fshandle_t fh;
+		long hlen = FS_OpenFileHandle("harness.lum", &fh, &path_id);
+		rec_long(hlen);
+		if (hlen >= 0) {
+			memset(buf, 0, sizeof buf);
+			rec_int((int)FS_fread(buf, 1, sizeof buf - 1, &fh));
+			rec_str(buf);
+			rec_long(FS_ftell(&fh));
+			rec_int(FS_fseek(&fh, 0, SEEK_SET));
+			rec_long(FS_ftell(&fh));
+			rec_int(FS_feof(&fh));
+			rec_int(FS_ferror(&fh));
+			FS_fclose(&fh);
+		} else {
+			rec_int(-1);
+		}
+	}
 
 	call("file existence");
 	rec_int(FS_FileExists("harness.lum", &path_id));
@@ -554,9 +798,9 @@ static void scenario_zip(void)
 	rec_long(len);
 	if (f) {
 		memset(buf, 0, sizeof buf);
-		rec_int((int)FS_fread(buf, 1, sizeof buf - 1, f));
+		rec_int((int)fread(buf, 1, sizeof buf - 1, f));
 		rec_str(buf);
-		FS_fclose(f);
+		fclose(f);
 	} else {
 		rec_int(-1);
 	}
@@ -566,9 +810,9 @@ static void scenario_zip(void)
 	rec_long(len);
 	if (f) {
 		memset(buf, 0, sizeof buf);
-		rec_int((int)FS_fread(buf, 1, sizeof buf - 1, f));
+		rec_int((int)fread(buf, 1, sizeof buf - 1, f));
 		rec_str(buf);
-		FS_fclose(f);
+		fclose(f);
 	} else {
 		rec_int(-1);
 	}
@@ -716,9 +960,14 @@ static int run_case(const char *name, void (*fn)(void))
 	    read(fd, &hdr, sizeof hdr) != (ssize_t)sizeof hdr) {
 		close(fd);
 		unlink(path);
-		printf("case %-24s SIGNAL %d\n", name,
+		/* A case that died must never read as agreement: two arms that
+		 * both segfault would otherwise produce identical traces and a
+		 * passing comparison, which is a gate that proves nothing. */
+		printf("case %-24s CHILD DIED (signal %d) -- FAILURE\n", name,
 			WIFSIGNALED(status) ? WTERMSIG(status) : -1);
-		rec_int(WIFSIGNALED(status) ? WTERMSIG(status) : -1);
+		rec_int(0xDEAD);
+		rec_str(name);
+		failures++;
 		return -1;
 	}
 	got = (size_t)read(fd, trace + trace_len, hdr.len);
@@ -734,6 +983,11 @@ static int run_case(const char *name, void (*fn)(void))
 	printf("case %-24s %6zu bytes, %d checks, %d failures, exit %d\n",
 		name, hdr.len, hdr.checks, hdr.failures,
 		WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		printf("case %-24s child exited %d -- FAILURE\n", name,
+			WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		failures++;
+	}
 	return 0;
 }
 
@@ -784,7 +1038,7 @@ int main(int argc, char **argv)
  * -Iengine/hexen2 -Iengine/h2shared -Icommon` reports 69 errors, in these
  * classes:
  *
- *  1. The IMPL prefix does not work yet.  `#define FS_Init IMPL##FS_Init`
+ *  1. The IMPL prefix does not work yet.  `#define FS_Init CAT(IMPL, FS_Init)`
  *     pastes the *name* IMPL instead of its expansion, so the no-`-DIMPL`
  *     (Rust) arm ends up with IMPLfs_filesize and friends undeclared.  Fix is
  *     the two-level paste: `#define CAT_(a,b) a##b` / `#define CAT(a,b) CAT_(a,b)`
