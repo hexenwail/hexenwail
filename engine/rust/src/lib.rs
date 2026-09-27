@@ -37,6 +37,12 @@ pub mod sizebuf;
 #[cfg(any(feature = "cvar", feature = "info_str"))]
 pub mod cvar;
 
+// zone is the Phase 6 allocator/ownership port.  It has no ABI half of its own
+// that another port needs -- its structs are private to zone.c -- so it is
+// compiled only for its own feature.
+#[cfg(feature = "zone")]
+pub mod zone;
+
 #[cfg(feature = "crc")]
 pub mod crc;
 

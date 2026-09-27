@@ -74,6 +74,7 @@ derived_map() {
 	engine/rust/src/strlcat.rs            common/strlcat.c
 	engine/rust/src/strlcpy.rs            common/strlcpy.c
 	engine/rust/src/wad.rs                engine/h2shared/wad.c
+	engine/rust/src/zone.rs               engine/h2shared/zone.c
 	engine/rust/hashindex/src/lib.rs      engine/h2shared/hashindex.c
 	engine/rust/hashindex/src/ffi.rs      engine/h2shared/hashindex.c
 	engine/rust/mathlib/src/lib.rs        engine/h2shared/mathlib.c

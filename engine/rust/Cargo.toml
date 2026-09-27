@@ -27,6 +27,7 @@ strlcat = []
 huffman = []
 wad = []
 cvar = []
+zone = []
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

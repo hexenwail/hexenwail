@@ -45,6 +45,65 @@ typedef struct abi_mplane_s {
 	byte	pad[2];
 } abi_mplane_t;
 
+/* The zone structures are private to zone.c and never appear in zone.h, and
+ * cache_user_t's block in zone.h is behind `#if !defined(SERVERONLY)` -- which
+ * this program is compiled with.  So they are copied here, as mplane_t is
+ * above, and the zone port's own differential harness is what proves the copy
+ * did not drift: it compares the bytes either implementation leaves in the
+ * hunk, which follow from these sizes and offsets. */
+typedef struct abi_memblock_s {
+	int	size;
+	int	tag;
+	int	magic;
+	int	pad;
+	struct abi_memblock_s	*next, *prev;
+} abi_memblock_t;
+
+typedef struct abi_memzone_s {
+	int		size;
+	abi_memblock_t	blocklist;
+	abi_memblock_t	*rover;
+} abi_memzone_t;
+
+typedef struct abi_zonelist_s {
+	int		id, magic;
+	const char	*name;
+	abi_memzone_t	*zone;
+	struct abi_zonelist_s	*next;
+} abi_zonelist_t;
+
+typedef struct abi_hunk_s {
+	int	sentinal;
+	int	size;
+	char	name[24];
+} abi_hunk_t;
+
+typedef struct abi_cache_user_s {
+	void	*data;
+} abi_cache_user_t;
+
+typedef struct abi_cache_system_s {
+	int			size;
+	abi_cache_user_t		*user;
+	char			name[32];
+	struct abi_cache_system_s	*prev, *next;
+	struct abi_cache_system_s	*lru_prev, *lru_next;
+} abi_cache_system_t;
+
+/* quakeparms_t from engine/hexen2/host.h -- hexen2/server/host.h and
+ * hexenworld/server/host.h carry the same definition.  zone.c reaches the
+ * command line through the com_argc/com_argv macros, which are
+ * `host_parms->argc` and `host_parms->argv` (common.h:92-93). */
+typedef struct abi_quakeparms_s {
+	const char	*basedir;
+	const char	*userdir;
+	int		argc;
+	char		**argv;
+	void		*membase;
+	int		memsize;
+	int		errstate;
+} abi_quakeparms_t;
+
 #define RUST_ACCESSOR(name) extern size_t name(void);
 #define STRUCT_ACCESSORS(S) RUST_ACCESSOR(S##_sizeof)
 
@@ -84,6 +143,54 @@ RUST_ACCESSOR(CvarC_offsetof_integer)
 RUST_ACCESSOR(CvarC_offsetof_callback)
 RUST_ACCESSOR(CvarC_offsetof_next)
 RUST_ACCESSOR(CvarC_offsetof_default_string)
+
+STRUCT_ACCESSORS(ZonelistC)
+RUST_ACCESSOR(ZonelistC_offsetof_id)
+RUST_ACCESSOR(ZonelistC_offsetof_magic)
+RUST_ACCESSOR(ZonelistC_offsetof_name)
+RUST_ACCESSOR(ZonelistC_offsetof_zone)
+RUST_ACCESSOR(ZonelistC_offsetof_next)
+
+STRUCT_ACCESSORS(MemBlockC)
+RUST_ACCESSOR(MemBlockC_alignof)
+RUST_ACCESSOR(MemBlockC_offsetof_size)
+RUST_ACCESSOR(MemBlockC_offsetof_tag)
+RUST_ACCESSOR(MemBlockC_offsetof_magic)
+RUST_ACCESSOR(MemBlockC_offsetof_pad)
+RUST_ACCESSOR(MemBlockC_offsetof_next)
+RUST_ACCESSOR(MemBlockC_offsetof_prev)
+
+STRUCT_ACCESSORS(MemZoneC)
+RUST_ACCESSOR(MemZoneC_offsetof_size)
+RUST_ACCESSOR(MemZoneC_offsetof_blocklist)
+RUST_ACCESSOR(MemZoneC_offsetof_rover)
+
+STRUCT_ACCESSORS(HunkC)
+RUST_ACCESSOR(HunkC_offsetof_sentinal)
+RUST_ACCESSOR(HunkC_offsetof_size)
+RUST_ACCESSOR(HunkC_offsetof_name)
+
+STRUCT_ACCESSORS(CacheUserC)
+RUST_ACCESSOR(CacheUserC_offsetof_data)
+
+STRUCT_ACCESSORS(CacheSystemC)
+RUST_ACCESSOR(CacheSystemC_alignof)
+RUST_ACCESSOR(CacheSystemC_offsetof_size)
+RUST_ACCESSOR(CacheSystemC_offsetof_user)
+RUST_ACCESSOR(CacheSystemC_offsetof_name)
+RUST_ACCESSOR(CacheSystemC_offsetof_prev)
+RUST_ACCESSOR(CacheSystemC_offsetof_next)
+RUST_ACCESSOR(CacheSystemC_offsetof_lru_prev)
+RUST_ACCESSOR(CacheSystemC_offsetof_lru_next)
+
+STRUCT_ACCESSORS(QuakeParmsC)
+RUST_ACCESSOR(QuakeParmsC_offsetof_basedir)
+RUST_ACCESSOR(QuakeParmsC_offsetof_userdir)
+RUST_ACCESSOR(QuakeParmsC_offsetof_argc)
+RUST_ACCESSOR(QuakeParmsC_offsetof_argv)
+RUST_ACCESSOR(QuakeParmsC_offsetof_membase)
+RUST_ACCESSOR(QuakeParmsC_offsetof_memsize)
+RUST_ACCESSOR(QuakeParmsC_offsetof_errstate)
 
 STRUCT_ACCESSORS(UsercmdC)
 RUST_ACCESSOR(UsercmdC_alignof)
@@ -126,8 +233,6 @@ RUST_ACCESSOR(QPicC_offsetof_data)
  * undefined; a new reference fails this link loudly, which is the point. */
 void Sys_Error (const char *error, ...) { (void)error; abort(); }
 void CON_Printf (unsigned int flags, const char *fmt, ...) { (void)flags; (void)fmt; abort(); }
-void *Hunk_AllocName (int size, const char *name) { (void)size; (void)name; abort(); }
-void Z_Free (void *ptr) { (void)ptr; abort(); }
 byte *FS_LoadZoneFile (const char *path, int zone_id, unsigned int *path_id)
 {
 	(void)path; (void)zone_id; (void)path_id; abort();
@@ -144,13 +249,26 @@ void Cmd_AddCommand (const char *cmd_name, void (*function)(void))
 	(void)cmd_name; (void)function; abort();
 }
 int Cmd_Exists (const char *cmd_name) { (void)cmd_name; abort(); }
-void *Z_Malloc (int size, int zone_id) { (void)size; (void)zone_id; abort(); }
-char *Z_Strdup (const char *s) { (void)s; abort(); }
 int q_strcasecmp (const char *s1, const char *s2) { (void)s1; (void)s2; abort(); }
 int q_snprintf (char *str, size_t size, const char *format, ...)
 {
 	(void)str; (void)size; (void)format; abort();
 }
+
+/* zone.rs's own calls.  Same rule again; Z_Malloc, Z_Strdup, Z_Free and
+ * Hunk_AllocName are no longer here because the zone port now defines them --
+ * the archive exporting them is what removed those four stubs. */
+int COM_CheckParm (const char *parm) { (void)parm; abort(); }
+abi_quakeparms_t *host_parms;
+
+/* The zone port's four per-target values come from engine/rust/zone_target.c,
+ * which each engine target compiles with its own defines; the layout program
+ * links the archive without it and never calls Memory_Init, so it stubs them.
+ * The zone gate is the place that proves what each target's shim answers. */
+int Zone_TargetDefSize (void) { abort(); }
+int Zone_TargetSecSize (void) { abort(); }
+int Zone_TargetHasCache (void) { abort(); }
+int Zone_TargetDedicated (void) { abort(); }
 
 static int checked, failures;
 
@@ -239,6 +357,54 @@ int main (void)
 	OFF(qpic_t, width, QPicC, width);
 	OFF(qpic_t, height, QPicC, height);
 	OFF(qpic_t, data, QPicC, data);
+
+	SIZE(abi_zonelist_t, ZonelistC);
+	OFF(abi_zonelist_t, id, ZonelistC, id);
+	OFF(abi_zonelist_t, magic, ZonelistC, magic);
+	OFF(abi_zonelist_t, name, ZonelistC, name);
+	OFF(abi_zonelist_t, zone, ZonelistC, zone);
+	OFF(abi_zonelist_t, next, ZonelistC, next);
+
+	SIZE(abi_memblock_t, MemBlockC);
+	ALIGN(abi_memblock_t, MemBlockC);
+	OFF(abi_memblock_t, size, MemBlockC, size);
+	OFF(abi_memblock_t, tag, MemBlockC, tag);
+	OFF(abi_memblock_t, magic, MemBlockC, magic);
+	OFF(abi_memblock_t, pad, MemBlockC, pad);
+	OFF(abi_memblock_t, next, MemBlockC, next);
+	OFF(abi_memblock_t, prev, MemBlockC, prev);
+
+	SIZE(abi_memzone_t, MemZoneC);
+	OFF(abi_memzone_t, size, MemZoneC, size);
+	OFF(abi_memzone_t, blocklist, MemZoneC, blocklist);
+	OFF(abi_memzone_t, rover, MemZoneC, rover);
+
+	SIZE(abi_hunk_t, HunkC);
+	OFF(abi_hunk_t, sentinal, HunkC, sentinal);
+	OFF(abi_hunk_t, size, HunkC, size);
+	OFF(abi_hunk_t, name, HunkC, name);
+
+	SIZE(abi_cache_user_t, CacheUserC);
+	OFF(abi_cache_user_t, data, CacheUserC, data);
+
+	SIZE(abi_cache_system_t, CacheSystemC);
+	ALIGN(abi_cache_system_t, CacheSystemC);
+	OFF(abi_cache_system_t, size, CacheSystemC, size);
+	OFF(abi_cache_system_t, user, CacheSystemC, user);
+	OFF(abi_cache_system_t, name, CacheSystemC, name);
+	OFF(abi_cache_system_t, prev, CacheSystemC, prev);
+	OFF(abi_cache_system_t, next, CacheSystemC, next);
+	OFF(abi_cache_system_t, lru_prev, CacheSystemC, lru_prev);
+	OFF(abi_cache_system_t, lru_next, CacheSystemC, lru_next);
+
+	SIZE(abi_quakeparms_t, QuakeParmsC);
+	OFF(abi_quakeparms_t, basedir, QuakeParmsC, basedir);
+	OFF(abi_quakeparms_t, userdir, QuakeParmsC, userdir);
+	OFF(abi_quakeparms_t, argc, QuakeParmsC, argc);
+	OFF(abi_quakeparms_t, argv, QuakeParmsC, argv);
+	OFF(abi_quakeparms_t, membase, QuakeParmsC, membase);
+	OFF(abi_quakeparms_t, memsize, QuakeParmsC, memsize);
+	OFF(abi_quakeparms_t, errstate, QuakeParmsC, errstate);
 
 	printf("abi_layout: %d fields checked, %d mismatches (sizeof(void *) = %zu)\n",
 		checked, failures, sizeof(void *));

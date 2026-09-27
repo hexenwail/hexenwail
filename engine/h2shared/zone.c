@@ -30,48 +30,12 @@
  * commands. see in Memory_Init()	*/
 #define	Z_DEBUG_COMMANDS	0
 
-#define	ZONE_MINSIZE	0x100000	/* 1 mb */
-#define	ZONE_MAXSIZE	0x800000	/* 8 mb */
-#if defined(SERVERONLY)
-#define	ZONE_DEFSIZE	0x100000	/* 1 mb */
-#else
-#define	ZONE_DEFSIZE	0x200000	/* 2 mb */
-#endif	/* SERVERONLY */
+#include "zone_target.h"	/* ZONE_DEFSIZE, MEM_STATIC_TEX, SECZONE_SIZE: per target */
 #define	ZMAGIC		0x1d4a11
 #define	ZMAGIC2		0xf382da
 #define	HUNK_SENTINAL	0x1df001ed
 #define	MINFRAGMENT	64
 
-/* setup size for secondary zone: */
-#define	MEM_STATIC_TEX	0x40000
-
-#define	MEM_CODEC_MEM	0
-#if defined(CODECS_USE_ZONE)
-/* this setup assumes only one codec
- * would be active at a time. */
-#if defined(USE_CODEC_MP3)
-#if (MEM_CODEC_MEM < LIBMAD_NEEDMEM)
-#undef	MEM_CODEC_MEM
-#define	MEM_CODEC_MEM	LIBMAD_NEEDMEM
-#endif
-#endif	/* LIBMAD */
-#if defined(USE_CODEC_VORBIS)
-#if (MEM_CODEC_MEM < VORBIS_NEEDMEM)
-#undef	MEM_CODEC_MEM
-#define	MEM_CODEC_MEM	VORBIS_NEEDMEM
-#endif
-#endif	/* VORBIS */
-#endif	/* CODECS_USE_ZONE */
-
-#if defined(SERVERONLY)
-#undef	MEM_STATIC_TEX
-#define	MEM_STATIC_TEX	0
-#undef	MEM_CODEC_MEM
-#define	MEM_CODEC_MEM	0
-#endif
-
-#define	SECZONE_SIZE			\
-	(MEM_STATIC_TEX + MEM_CODEC_MEM)
 
 typedef struct memblock_s
 {
