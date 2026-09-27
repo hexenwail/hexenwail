@@ -151,6 +151,14 @@ static size_t trace_len;
 static int failures;
 static int checks;
 
+/* Progress markers, off unless QF_TRACE is set: there is no debugger in the
+ * dev shell, so a SIGSEGV is located by the last step that printed. */
+static void step(const char *what)
+{
+	if (getenv("QF_TRACE"))
+		fprintf(stderr, "step: %s\n", what);
+}
+
 static void rec(const void *p, size_t n)
 {
 	if (trace_len + n > sizeof trace) {
@@ -195,6 +203,16 @@ static void call(const char *what)
 /* Diagnostics are recorded, so a refusal or a fatal message is part of the
  * comparison rather than noise. */
 static jmp_buf err_env;
+/* The C original is linked under renamed symbols, so its diagnostics name
+ * themselves "c_FS_Init" where the shipping build says "FS_Init".  That is a
+ * harness artifact, not a port difference, so it is removed before the message
+ * is recorded -- the same normalisation the cmd and wad harnesses do. */
+static void normalize_diag(char *buf)
+{
+	if (strncmp(buf, "c_", 2) == 0)
+		memmove(buf, buf + 2, strlen(buf + 2) + 1);
+}
+
 static int err_armed;
 static int err_calls;
 static char err_buf[1024];
@@ -207,6 +225,7 @@ void CON_Printf(unsigned int flags, const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(err_buf, sizeof err_buf, fmt, ap);
 	va_end(ap);
+	normalize_diag(err_buf);
 	rec_int(0x9911);
 	rec_str(err_buf);
 }
@@ -218,6 +237,7 @@ FUNC_NORETURN void Sys_Error(const char *fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(err_buf, sizeof err_buf, fmt, ap);
 	va_end(ap);
+	normalize_diag(err_buf);
 
 	err_calls++;
 	rec_int(0xE44);
@@ -344,9 +364,18 @@ qboolean host_initialized;
  * differ.  developer and cls are only ever read. */
 cvar_t developer;
 int sv_protocol;
+/* hwsv does not have this symbol at all: hexenworld/server/host.h defines
+ * isDedicated as the macro 1, which is exactly why the zone and cmd shims
+ * answer that question in C instead of letting Rust read a global. */
+#ifndef isDedicated
 qboolean isDedicated;
-/* The client state the client-arm hooks reset (cls.demofile, cls.demos). */
+#endif
+/* The client state the client-arm hooks reset (cls.demofile, cls.demos).
+ * client_static_t does not exist in a SERVERONLY build, and neither does the
+ * client-only half of the API -- quakefs.h guards it, so the harness does too. */
+#ifndef SERVERONLY
 client_static_t cls;
+#endif
 /* The rest of the system surface quakefs.c reaches. */
 int Sys_CopyFile(const char *from, const char *to)
 {
@@ -411,17 +440,49 @@ void Con_ShowList(int num, const char **list)
 	for (i = 0; i < num; i++)
 		rec_str(list[i]);
 }
+/* In an H2W build the C's Host_Error is a MACRO for SV_Error
+ * (hexenworld/server/host.h:62), so C callers reach SV_Error while the Rust
+ * archive calls the name Host_Error directly.  Both have to exist here, and
+ * the undef is what lets this file define the name rather than the macro
+ * rewriting it into a duplicate of SV_Error. */
+#ifdef Host_Error
+#undef Host_Error
+#endif
+
+static void harness_fatal(const char *fmt, va_list ap)
+{
+	vsnprintf(err_buf, sizeof err_buf, fmt, ap);
+	normalize_diag(err_buf);
+	rec_int(0x4E01);
+	rec_str(err_buf);
+	abort();
+}
+
 void Host_Error(const char *fmt, ...)
 {
 	va_list ap;
 
 	va_start(ap, fmt);
-	vsnprintf(err_buf, sizeof err_buf, fmt, ap);
+	harness_fatal(fmt, ap);
 	va_end(ap);
-	rec_int(0x4E01);
-	rec_str(err_buf);
-	abort();
 }
+
+#ifdef H2W
+void SV_Error(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	harness_fatal(fmt, ap);
+	va_end(ap);
+}
+
+/* hwsv's server state, which the port's hwsv arm writes through the shim
+ * (svs.info).  The C original and the shim both reach it in this arm. */
+#include "server.h"
+server_static_t svs;
+#endif
+
 /*----------------------------------------------------------------------------
  * the on-disk fixture
  *--------------------------------------------------------------------------*/
@@ -605,24 +666,53 @@ static void write_zip_variant(const char *path, int variant)
 
 static void fixture_setup(void)
 {
+	const char *demo = getenv("QF_BASEDIR");
 	char p[512];
 
-	snprintf(root, sizeof root, "/tmp/quakefs-harness-%d", (int)getpid());
-	snprintf(base, sizeof base, "%s/base", root);
+	step("fixture: mkdir root/user");
+	/* The root must be the SAME path in both arms or every path in the trace
+	 * differs by the pid -- and the run script wipes it between the two runs,
+	 * so the second arm does not inherit the first's userdir. */
+	if (demo && *demo && getenv("QF_ROOT"))
+		snprintf(root, sizeof root, "%s", getenv("QF_ROOT"));
+	else if (demo && *demo)
+		snprintf(root, sizeof root, "/tmp/quakefs-harness-%d", (int)getpid());
+	else
+		snprintf(root, sizeof root, "/tmp/quakefs-harness-%d", (int)getpid());
 	snprintf(user, sizeof user, "%s/user", root);
-
 	mkdir(root, 0755);
-	mkdir(base, 0755);
 	mkdir(user, 0755);
-	path_join(p, sizeof p, base, "data1");
+
+	if (demo && *demo) {
+		/* FS_Init identifies the installation from known paks by size and
+		 * CRC (check_known_paks), so a hand-built pak0.pak cannot pass it --
+		 * "Unable to find a proper Hexen II installation" is what the first
+		 * attempt got.  The demo data the engine smoke tests use is a real
+		 * install, so the base comes from there and this harness only owns
+		 * the userdir, which is where its own archives go. */
+		step("fixture: using QF_BASEDIR");
+		snprintf(base, sizeof base, "%s", demo);
+	} else {
+		step("fixture: synthetic base (no QF_BASEDIR)");
+		snprintf(base, sizeof base, "%s/base", root);
+		mkdir(base, 0755);
+		path_join(p, sizeof p, base, "data1");
+		mkdir(p, 0755);
+		step("fixture: write pak0.pak");
+		path_join(p, sizeof p, base, "data1/pak0.pak");
+		write_pak(p);
+	}
+
+	/* The archives this harness compares live in the userdir's gamedir, so
+	 * they are in the search path without writing into a read-only store. */
+	step("fixture: write the three zips");
+	path_join(p, sizeof p, user, "data1");
 	mkdir(p, 0755);
-	path_join(p, sizeof p, base, "data1/pak0.pak");
-	write_pak(p);
-	path_join(p, sizeof p, base, "data1/gfx.zip");
+	path_join(p, sizeof p, user, "data1/gfx.zip");
 	write_zip_variant(p, 0);
-	path_join(p, sizeof p, base, "data1/bad.zip");
+	path_join(p, sizeof p, user, "data1/bad.zip");
 	write_zip_variant(p, 1);
-	path_join(p, sizeof p, base, "data1/trunc.zip");
+	path_join(p, sizeof p, user, "data1/trunc.zip");
 	write_zip_variant(p, 2);
 }
 
@@ -638,31 +728,36 @@ static void parms_init(void)
 {
 	int n = 0;
 
-	/* The engine calls Memory_Init (zone.c, now the Rust zone port) before
-	 * anything touches FS_Init, and every Z_Malloc in quakefs.c needs it --
-	 * without this the port dies on "Bad zone id 1" before a case starts. */
-	if (!membase_keep) {
-		membase_keep = malloc(HARNESS_MEMSIZE);
-		if (!membase_keep) {
-			fprintf(stderr, "harness: out of memory\n");
-			exit(2);
-		}
-		Memory_Init(membase_keep, HARNESS_MEMSIZE);
-	}
-
+	/* host_parms must be live BEFORE Memory_Init: com_argc/com_argv are macros
+	 * over host_parms->argc/argv (common.h:92-93), Memory_Init parses -zone
+	 * through them, and calling it first dereferences a NULL host_parms --
+	 * which is what the first marker run caught. */
 	memset(&h_parms, 0, sizeof h_parms);
-	h_parms.basedir = base;
-	h_parms.userdir = user;
 	h_argv[n++] = (char *)"hexenwail";
 	h_argv[n++] = (char *)"-basedir";
 	h_argv[n++] = base;
 	h_argv[n++] = (char *)"-userdir";
 	h_argv[n++] = user;
+	h_parms.basedir = base;
+	h_parms.userdir = user;
 	h_parms.argc = n;
 	h_parms.argv = h_argv;
+	host_parms = &h_parms;
+
+	/* The engine calls Memory_Init (zone.c, now the Rust zone port) before
+	 * anything touches FS_Init, and every Z_Malloc in quakefs.c needs it --
+	 * without this the port dies on "Bad zone id 1" before a case starts. */
+	step("parms: allocate membase");
+	membase_keep = malloc(HARNESS_MEMSIZE);
+	if (!membase_keep) {
+		fprintf(stderr, "harness: out of memory\n");
+		exit(2);
+	}
 	h_parms.membase = membase_keep;
 	h_parms.memsize = HARNESS_MEMSIZE;
-	host_parms = &h_parms;
+	step("parms: Memory_Init");
+	Memory_Init(membase_keep, HARNESS_MEMSIZE);
+	step("parms: Memory_Init returned");
 }
 
 static void rec_getters(void)
@@ -684,10 +779,14 @@ static void rec_getters(void)
 
 static void scenario_init(void)
 {
+	step("init: parms_init");
 	parms_init();
+	step("init: FS_Init");
 	call("FS_Init");
 	FS_Init();
+	step("init: FS_Init returned");
 	rec_getters();
+	step("init: getters done");
 	/* The client arm registers maplist/randmap through Cmd_AddCommand; the
 	 * dedicated ones must not.  The registrations are recorded by the
 	 * substrate, so this is compared rather than assumed. */
@@ -833,9 +932,12 @@ static void scenario_lists(void)
 	for (i = 0; i < n && i < 8; i++)
 		rec_str(dirs[i]);
 
+#ifndef SERVERONLY
+	/* quakefs.h declares the map list only for non-SERVERONLY targets. */
 	call("build the map list");
 	rec_int(FS_BuildMapList("maps"));
 	rec_int(FS_BuildMapList(""));
+#endif
 	rec_getters();
 }
 
@@ -886,9 +988,11 @@ static void scenario_write(void)
 		rec_int(err);
 	}
 
+#ifndef SERVERONLY
 	call("FS_IsGamedir");
 	rec_int(FS_IsGamedir(base, "data1"));
 	rec_int(FS_IsGamedir(base, "nosuchdir"));
+#endif
 
 	(void)path_id;
 	rec_getters();
@@ -906,9 +1010,14 @@ static void scenario_fatal_missing(void)
 
 static void scenario_fatal_gamedir(void)
 {
+	step("fatal-gamedir: parms_init");
 	parms_init();
+	step("fatal-gamedir: FS_Init");
+	FS_Init();
+	step("fatal-gamedir: FS_Gamedir(nosuchdir)");
 	call("FS_Gamedir to a directory that is not there");
 	FS_Gamedir("nosuchdir");
+	step("fatal-gamedir: returned");
 }
 
 /*----------------------------------------------------------------------------
@@ -994,6 +1103,7 @@ static int run_case(const char *name, void (*fn)(void))
 int main(int argc, char **argv)
 {
 	const char *out = argc > 1 ? argv[1] : "/tmp/quakefs-harness.trace";
+	const char *only = argc > 2 ? argv[2] : NULL;
 	FILE *f;
 
 	fixture_setup();
@@ -1006,13 +1116,20 @@ int main(int argc, char **argv)
 #endif
 	);
 
-	run_case("init", scenario_init);
-	run_case("pak", scenario_pak);
-	run_case("zip", scenario_zip);
-	run_case("lists", scenario_lists);
-	run_case("write", scenario_write);
-	run_case("fatal-missing", scenario_fatal_missing);
-	run_case("fatal-gamedir", scenario_fatal_gamedir);
+	if (!only || !strcmp(only, "init"))
+		run_case("init", scenario_init);
+	if (!only || !strcmp(only, "pak"))
+		run_case("pak", scenario_pak);
+	if (!only || !strcmp(only, "zip"))
+		run_case("zip", scenario_zip);
+	if (!only || !strcmp(only, "lists"))
+		run_case("lists", scenario_lists);
+	if (!only || !strcmp(only, "write"))
+		run_case("write", scenario_write);
+	if (!only || !strcmp(only, "fatal-missing"))
+		run_case("fatal-missing", scenario_fatal_missing);
+	if (!only || !strcmp(only, "fatal-gamedir"))
+		run_case("fatal-gamedir", scenario_fatal_gamedir);
 
 	rec_int(0xF1A1);
 	rec_int(checks);

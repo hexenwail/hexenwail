@@ -23,6 +23,22 @@
 # The Rust module is the same code in all three; what changes is the shim it
 # asks, which is the point of the per-target mechanism.
 #
+# ARMS THAT RUN, AND THE ONE THAT CANNOT.  `client` and `serveronly` run
+# green against the demo data.  `h2w` cannot: hwsv's FS_Init refuses that data
+# with "You must have the HexenWorld data installed", because HexenWorld needs
+# hw/pak4.pak and no HexenWorld data ships in this tree -- the same gap the
+# engine smoke tests record ("pak loading on the dedicated HexenWorld server,
+# which needs hw/pak4.pak").  The arm is kept because it compiles and links,
+# which is what proves the shim's H2W arm and the port's H2W references
+# resolve; running its cases needs HexenWorld data that does not exist here.
+#
+# A FINDING FOR THE WIRING STEP, from building that arm: in H2W the C's
+# Host_Error is a macro for SV_Error (hexenworld/server/host.h:62), and the C
+# only ever defines SV_Error.  The Rust archive references Host_Error by name,
+# so wiring quakefs into hwsv will need that answered -- the shim forwarding
+# one to the other, most likely -- or hwsv will not link.  This harness has to
+# define both names for the same reason.
+#
 # Requires cc, cargo and nm -- run inside `nix develop`.
 set -euo pipefail
 
@@ -112,10 +128,22 @@ cc -o "$OUT/h_rust" "$OUT/harness_rust.o" "$OUT/shim_rust.o" \
 	"$OUT/variadic.o" "$OUT/miniz.o" "$OUT/compat.o" "$OUT/qsnprint.o" "$OUT/q_endian.o" "$OUT/cmd_target.o" "$OUT/zone_target.o" \
 	"$RUST_LIB" -lm
 
+# FS_Init identifies the installation from known paks by size and CRC, so the
+# harness needs a real Hexen II install.  This is the same demo data the engine
+# smoke tests use; the harness puts its own archives in the userdir.
+QF_DEMO="${QF_DEMO:-$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail}"
+echo "-- base: $QF_DEMO"
+export QF_BASEDIR="$QF_DEMO"
+
 echo "-- running both"
+# The fixture root is fixed and wiped before each arm, so the second arm does
+# not inherit the first's userdir and no path in the trace carries a pid.
+export QF_ROOT="$OUT/fixture-root"
 set +e
+rm -rf "$QF_ROOT"
 timeout 120 "$OUT/h_rust" "$OUT/rust.trace"
 rust_status=$?
+rm -rf "$QF_ROOT"
 timeout 120 "$OUT/h_c" "$OUT/c.trace"
 c_status=$?
 set -e
