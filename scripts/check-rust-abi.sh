@@ -36,7 +36,7 @@ mkdir -p "$work"
 
 # Every feature: this is the archive the engine links, so these are the
 # layouts the engine depends on.
-features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,zone
+features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,cmd,zone
 
 extra_c=()
 if [ "$mode" = wasm ]; then

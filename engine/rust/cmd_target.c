@@ -46,6 +46,29 @@ int Cmd_TargetHasClientLists (void)
 
 #endif	/* SERVERONLY */
 
+/* Whether this target compiles the __EMSCRIPTEN__ fallback startup script.
+ * Cmd_StartupScript returns `cmd_builtin_hexenrc` instead of "exec hexen.rc"
+ * only there (cmd.c:357-390), because a browser build normally has no loose
+ * hexen.rc: without it nothing execs default.cfg or config.cfg and the game is
+ * unplayable.  The predicate is what lets one Rust implementation serve both
+ * without changing behaviour on the desktop, where the C never makes that
+ * check. */
+#if defined(__EMSCRIPTEN__)
+
+int Cmd_TargetHasBuiltinStartupScript (void)
+{
+	return 1;
+}
+
+#else
+
+int Cmd_TargetHasBuiltinStartupScript (void)
+{
+	return 0;
+}
+
+#endif	/* __EMSCRIPTEN__ */
+
 /* Whether this target is the HexenWorld build -- hwsv, and only hwsv, in this
  * tree: glhexen2 is GLQUAKE + H2W_INTEGRATED and never H2W. */
 #if defined(H2W)

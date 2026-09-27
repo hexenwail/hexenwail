@@ -622,11 +622,10 @@ set(COMMON_SOURCES
     ${ENGINE_TOP}/hexen2/net_main.c
     ${ENGINE_TOP}/hexen2/net_loop.c
     ${ENGINE_TOP}/hexen2/net_dgrm.c
-    # From h2shared.  cvar.c is not compiled here: cvar is ported, and the C
-    # original is now only a differential harness fixture.  zone.c likewise:
-    # the zone port lives in the Rust archive, and its per-target constants
-    # come from engine/rust/zone_target.c, which each target compiles itself.
-    ${COMMONDIR}/cmd.c
+    # From h2shared.  cvar.c, zone.c and cmd.c are not compiled here: all three
+    # are ported, and the C originals are now only differential harness
+    # fixtures.  The per-target constants and predicates the ports need come
+    # from engine/rust/{zone,cmd}_target.c, which each target compiles itself.
     ${COMMONDIR}/pr_cmds.c
     ${COMMONDIR}/pr_edict.c
     ${COMMONDIR}/pr_exec.c
@@ -869,7 +868,7 @@ endif()
 # its own; the engine always builds all of them.
 set(RUST_ENGINE_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io info_str strlcpy strlcat
-    huffman wad cvar zone)
+    huffman wad cvar zone cmd)
 
 # Each port used to have a switch that put its C original back.  A cache or a
 # packaging recipe that still says OFF is asking for that C code, and linking
@@ -1313,16 +1312,15 @@ else()
         # portable bits shared with every other target
         ${UHEXEN2_SHARED}/q_endian.c
         ${UHEXEN2_SHARED}/qsnprint.c
-        # h2shared, compiled here with -DH2W.  cvar.c is not compiled: the
-        # cvar port lives in the Rust archive, and cvar.c has no H2W arm, so
-        # one translation serves this target too.  zone.c is not compiled
-        # either; the zone port takes its per-target constants from
-        # engine/rust/zone_target.c, which this target compiles with
-        # -DSERVERONLY.
+        # h2shared, compiled here with -DH2W.  cvar.c, zone.c and cmd.c are not
+        # compiled: all three are ported and live in the Rust archive, and none
+        # of them has an H2W arm that changes what is compiled into this target
+        # (cmd.c's H2W arm only selects a diagnostic).  The per-target values and
+        # predicates the ports need come from engine/rust/{zone,cmd}_target.c,
+        # which this target compiles with -DSERVERONLY.
         ${COMMONDIR}/common.c
         ${COMMONDIR}/quakefs.c
         ${COMMONDIR}/miniz.c
-        ${COMMONDIR}/cmd.c
         ${COMMONDIR}/host_string.c
         ${COMMONDIR}/sv_model.c
         ${COMMONDIR}/pr_cmds.c
