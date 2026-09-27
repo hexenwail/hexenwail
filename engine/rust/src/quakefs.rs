@@ -3160,6 +3160,8 @@ extern "C" {
     fn Cvar_SetROM(var_name: *const c_char, value: *const c_char);
     /// The other hooks this group needs.
     fn QuakeFS_TargetIsServerOnly() -> c_int;
+    fn QuakeFS_TargetHasClientCommands() -> c_int;
+    fn QuakeFS_TargetOldProtocolRequest() -> c_int;
     fn QuakeFS_TargetClientReset();
     fn QuakeFS_TargetClientClearState();
     fn QuakeFS_TargetClientReinit();
@@ -3887,6 +3889,284 @@ unsafe extern "C" fn Host_Game_f() {
     Cbuf_AddText(QuakeFS_TargetStartupScript());
     Cbuf_AddText(c"vid_unlock\n".as_ptr());
     CON_Printf(PRINT_NORMAL, c"\ngame changed to \"%s\"\n".as_ptr(), dir);
+}
+
+//============================================================================
+// FS_Init
+//============================================================================
+
+/// `ENABLE_OLD_RETAIL` and `ENABLE_OLD_DEMO` from engine/h2shared/h2config.h
+/// :101 and :119 -- both 0 in this tree, so both refusals are live.
+const ENABLE_OLD_RETAIL: c_int = 0;
+const ENABLE_OLD_DEMO: c_int = 0;
+/// `PROTOCOL_RAVEN_111` from engine/hexen2/protocol.h:29.
+const PROTOCOL_RAVEN_111: c_int = 18;
+
+/// `FS_Init` -- the whole search path, in the C's order, because that order is
+/// what gives the paths their meaning: data1 and its paks, then the checks
+/// that decide whether this is a real installation at all, then the mission
+/// pack, then hw for HexenWorld, and only then any -game/-mod override.
+///
+/// The H2MP branch of the mission-pack selection is dead in this tree
+/// (h2config.h undefines it), so only the H2W and plain forms are ported; the
+/// C's `#if !defined(H2W)` guards on `sv_protocol` and on the modified-games
+/// refusal are the shim's QuakeFS_TargetOldProtocolRequest and
+/// QuakeFS_TargetIsServerOnly, since `sv_protocol` does not exist in hwsv.
+#[no_mangle]
+pub unsafe extern "C" fn FS_Init() {
+    let mut check_portals: c_int = 0;
+
+    Cvar_RegisterVariable(&raw mut oem);
+    Cvar_RegisterVariable(&raw mut registered);
+
+    Cmd_AddCommand(c"path".as_ptr(), Some(fs_path_f));
+    // The five client-only ones, behind the predicate: a command that exists
+    // in one target and not another is observable through Cmd_Exists.
+    if QuakeFS_TargetHasClientCommands() != 0 {
+        Cmd_AddCommand(c"maplist".as_ptr(), Some(FS_Maplist_f));
+        Cmd_AddCommand(c"randmap".as_ptr(), Some(FS_RandMap_f));
+        Cmd_AddCommand(c"skies".as_ptr(), Some(FS_Skies_f));
+        Cmd_AddCommand(c"games".as_ptr(), Some(FS_Games_f));
+        Cmd_AddCommand(c"game".as_ptr(), Some(Host_Game_f));
+    }
+
+    // -basedir <path> overrides the system supplied base directory
+    let i = COM_CheckParm(c"-basedir".as_ptr());
+    if i != 0 && i < (*host_parms).argc - 1 {
+        FS_BASEDIR = *(*host_parms).argv.add((i + 1) as usize);
+        if *FS_BASEDIR == 0 {
+            Sys_Error(c"Bad argument to -basedir".as_ptr());
+        }
+        if !do_userdirs() {
+            (*host_parms).userdir = *(*host_parms).argv.add((i + 1) as usize);
+        }
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"%s: basedir changed to: %s\n".as_ptr(),
+            c"FS_Init".as_ptr(),
+            FS_BASEDIR,
+        );
+    } else {
+        FS_BASEDIR = (*host_parms).basedir;
+    }
+
+    // step 1: start up with data1 by default
+    fs_add_game_directory(c"data1".as_ptr(), 1);
+
+    if (gameflags & GAME_REGISTERED0) != 0 && (gameflags & GAME_REGISTERED1) != 0 {
+        gameflags |= GAME_REGISTERED;
+    }
+    if (gameflags & GAME_OEM0) != 0 && (gameflags & GAME_OEM2) != 0 {
+        gameflags |= GAME_OEM;
+    }
+    if (gameflags & GAME_OLD_CDROM0) != 0 && (gameflags & GAME_OLD_CDROM1) != 0 {
+        gameflags |= GAME_REGISTERED_OLD;
+    }
+    if (gameflags & GAME_OLD_OEM0) != 0 && (gameflags & GAME_OLD_OEM2) != 0 {
+        gameflags |= GAME_OLD_OEM;
+    }
+
+    // check for bad installations (mix'n'match data)
+    let registered_bits = GAME_REGISTERED | GAME_REGISTERED_OLD;
+    let demos = GAME_DEMO | GAME_OLD_DEMO;
+    let oems = GAME_OEM0 | GAME_OLD_OEM0 | GAME_OEM2 | GAME_OLD_OEM2;
+    if (gameflags & GAME_REGISTERED0 != 0 && gameflags & GAME_OLD_CDROM1 != 0)
+        || (gameflags & GAME_REGISTERED1 != 0 && gameflags & GAME_OLD_CDROM0 != 0)
+        || (gameflags & (GAME_OEM2 | GAME_OLD_OEM2) != 0 && gameflags & (registered_bits | demos) != 0)
+        || (gameflags & (GAME_REGISTERED1 | GAME_OLD_CDROM1) != 0
+            && gameflags & (demos | oems) != 0)
+    {
+        Sys_Error(c"Bad Hexen II installation: mixed data from incompatible versions".as_ptr());
+    }
+
+    if ENABLE_OLD_DEMO == 0 && (gameflags & GAME_OLD_DEMO) != 0 {
+        Sys_Error(c"Old version of Hexen II demo isn't supported".as_ptr());
+    }
+    if ENABLE_OLD_RETAIL == 0
+        && (gameflags & (GAME_OLD_CDROM0 | GAME_OLD_CDROM1 | GAME_OLD_OEM0 | GAME_OLD_OEM2)) != 0
+    {
+        Sys_Error(c"You must patch your installation with Raven's 1.11 update".as_ptr());
+    }
+
+    // finish the base filesystem setup
+    if (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) != 0 {
+        Cvar_SetROM(c"registered".as_ptr(), c"1".as_ptr());
+        CON_Printf(PRINT_TERMONLY, c"Playing the registered version.\n".as_ptr());
+    } else if (gameflags & GAME_OEM) != 0 {
+        Cvar_SetROM(c"oem".as_ptr(), c"1".as_ptr());
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"Playing the oem (Matrox m3D bundle) version \"Continent of Blackmarsh\"\n"
+                .as_ptr(),
+        );
+    } else if (gameflags & (GAME_DEMO | GAME_OLD_DEMO)) != 0 {
+        CON_Printf(PRINT_TERMONLY, c"Playing the demo version.\n".as_ptr());
+    } else {
+        // No proper Raven data.  The two forms differ only in how they name
+        // the fetch helper, and the text is the C's verbatim (uhexen2-49ep).
+        #[cfg(windows)]
+        Sys_Error(
+            c"Unable to find a proper Hexen II installation.\n\nWanted a \"data1\" directory containing pak0.pak, under:\n    %s\n\nIf you own Hexen II (Steam, GOG or the CD), copy that\ninstallation's data1 directory to the path above.\n\nIf you don't, the free three-level 1997 demo works. A\nhelper that downloads and verifies it ships next to this\nexecutable:\n    get_demo.cmd\n\n(double-click it, or run it from cmd). In a source\ncheckout it is scripts\\get_demo.cmd instead."
+                .as_ptr(),
+            FS_BASEDIR,
+        );
+        #[cfg(not(windows))]
+        Sys_Error(
+            c"Unable to find a proper Hexen II installation.\n\nWanted a \"data1\" directory containing pak0.pak, under:\n    %s\n\nIf you own Hexen II (Steam, GOG or the CD), copy that\ninstallation's data1 directory to the path above.\n\nIf you don't, the free three-level 1997 demo works. A\nhelper that downloads and verifies it ships next to this\nexecutable:\n    ./get_demo.sh\n\nIn a source checkout it is scripts/get_demo.sh instead, or\nrun: nix run .#get-demo -- \"%s\""
+                .as_ptr(),
+            FS_BASEDIR,
+            FS_BASEDIR,
+        );
+    }
+
+    if (gameflags & (GAME_OLD_DEMO | GAME_REGISTERED_OLD | GAME_OLD_OEM)) != 0 {
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"Using old/unsupported, pre-1.11 version pak files.\n".as_ptr(),
+        );
+    }
+    if (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) != 0 {
+        if CheckRegistered() != 0 {
+            Sys_Error(c"Unable to verify retail version data.".as_ptr());
+        }
+    }
+    if QuakeFS_TargetIsServerOnly() == 0
+        && (gameflags & GAME_MODIFIED) != 0
+        && (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) == 0
+    {
+        Sys_Error(
+            c"You must have the full version of Hexen II to play modified games".as_ptr(),
+        );
+    }
+
+    // Mark the end of step 1.  Everything at or below this point is the base
+    // game and nothing else; Host_Game_f unwinds here to return to data1.
+    // uhexen2-5vb6.
+    FS_BASE_NOMP_SEARCHPATHS = FS_SEARCHPATHS;
+
+    // step 2: portals directory (mission pack)
+    if QuakeFS_TargetIsH2W() != 0 {
+        // hwsv: portals only for a registered install, and -noportals wins
+        if COM_CheckParm(c"-noportals".as_ptr()) == 0
+            && (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) != 0
+        {
+            check_portals = 1;
+        }
+    } else {
+        if COM_CheckParm(c"-noportals".as_ptr()) != 0 {
+            check_portals = 0;
+        } else {
+            check_portals = if COM_CheckParm(c"-portals".as_ptr()) != 0
+                || COM_CheckParm(c"-missionpack".as_ptr()) != 0
+                || COM_CheckParm(c"-h2mp".as_ptr()) != 0
+            {
+                1
+            } else {
+                0
+            };
+            let mut i = COM_CheckParm(c"-game".as_ptr());
+            if i != 0 && i < (*host_parms).argc - 1 {
+                check_portals = 1;
+            }
+            i = COM_CheckParm(c"-mod".as_ptr());
+            if i != 0 && i < (*host_parms).argc - 1 {
+                check_portals = 1;
+            }
+        }
+        if check_portals != 0 && (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) == 0 {
+            Sys_Error(
+                c"Portal of Praevus requires registered version of Hexen II".as_ptr(),
+            );
+        }
+    }
+    // The old-protocol refusal is a non-H2W guard in the C, and the shim
+    // answers it: hwsv has no sv_protocol to ask about.
+    if QuakeFS_TargetOldProtocolRequest() != 0 && check_portals != 0 {
+        Sys_Error(c"Old protocol request not compatible with the Mission Pack".as_ptr());
+    }
+
+    if check_portals != 0 {
+        let mark = FS_SEARCHPATHS;
+        fs_add_game_directory(c"portals".as_ptr(), 1);
+        if (gameflags & GAME_PORTALS) == 0 {
+            // back out searchpaths from invalid mission pack installations,
+            // because the portals directory is reserved for the mission pack
+            CON_Printf(
+                PRINT_TERMONLY,
+                c"Missing or invalid mission pack installation\n".as_ptr(),
+            );
+            CON_Printf(
+                PRINT_NORMAL,
+                c"Missing or invalid mission pack installation\n".as_ptr(),
+            );
+
+            fs_unwind_searchpaths(mark, 1);
+            // back to data1 -- all three, the way Host_Game_f's own
+            // reset-to-data1 does it, since leaving fs_gamedir_nopath on
+            // "portals" while the path holds only data1 makes the engine
+            // misreport which game it is running (uhexen2-1bmj).
+            qerr_strlcpy(
+                c"FS_Init".as_ptr(),
+                3471,
+                (&raw mut fs_gamedir_nopath).cast::<c_char>(),
+                c"data1".as_ptr(),
+                MAX_QPATH,
+            );
+            FS_MakePath_BUF(
+                MAKEPATH_BASEDIR,
+                core::ptr::null_mut(),
+                (&raw mut FS_GAMEDIR).cast::<c_char>(),
+                MAX_OSPATH,
+                c"data1".as_ptr(),
+            );
+            FS_MakePath_BUF(
+                MAKEPATH_USERBASE,
+                core::ptr::null_mut(),
+                (&raw mut FS_USERDIR).cast::<c_char>(),
+                MAX_OSPATH,
+                c"data1".as_ptr(),
+            );
+        }
+        // nothing to do on success: the portals entry stays where
+        // FS_AddGameDirectory put it, below fs_base_searchpaths.
+    }
+
+    // step 3: hw directory (hexenworld)
+    if QuakeFS_TargetIsH2W() != 0 {
+        fs_add_game_directory(c"hw".as_ptr(), 1);
+        if (gameflags & GAME_HEXENWORLD) == 0 {
+            Sys_Error(c"You must have the HexenWorld data installed".as_ptr());
+        }
+        // hw is added ABOVE portals, so one pointer cannot mark a base that
+        // keeps hw and drops the mission pack; HexenWorld never rolls back to
+        // data1 at runtime, so the two marks collapse.
+        FS_BASE_NOMP_SEARCHPATHS = FS_SEARCHPATHS;
+    }
+
+    // this is the end of our base searchpath: any gamedirs set later, from
+    // -game, exec'd configs or the server, are freed up to here.
+    FS_BASE_SEARCHPATHS = FS_SEARCHPATHS;
+
+    let mut i = COM_CheckParm(c"-game".as_ptr());
+    if i == 0 {
+        i = COM_CheckParm(c"-mod".as_ptr());
+    }
+    if i != 0 {
+        // only registered versions can do -game/-mod
+        if (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) == 0 {
+            Sys_Error(
+                c"You must have the full version of Hexen II to play modified games".as_ptr(),
+            );
+        }
+        // add basedir/gamedir as an override game.  Portals sits below it
+        // already (step 2 put it there), and it is deliberately not re-added
+        // when step 2 rolled it back: that rollback means the mission pack
+        // failed validation, and putting the directory back would serve a
+        // broken install's files to the mod anyway (uhexen2-6h8x/ofgb).
+        if i < (*host_parms).argc - 1 {
+            FS_Gamedir(*(*host_parms).argv.add((i + 1) as usize));
+        }
+    }
 }
 
 //============================================================================

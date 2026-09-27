@@ -126,6 +126,29 @@ int QuakeFS_TargetIsServerOnly (void)
 
 #endif	/* SERVERONLY && !H2W */
 
+/* Whether the operator asked for the pre-1.11 wire protocol, which the
+ * mission pack cannot speak.  The C guards this on `!defined(H2W)` because
+ * `sv_protocol` is defined in engine/hexen2/sv_main.c, which no HexenWorld
+ * target compiles -- so the same guard belongs here: on hwsv the question
+ * cannot be asked, and the answer is 0.  Referencing the global directly from
+ * Rust would be an undefined symbol in hwsv, which is exactly the trap this
+ * shim exists to avoid. */
+#if defined(H2W)
+
+int QuakeFS_TargetOldProtocolRequest (void)
+{
+	return 0;
+}
+
+#else
+
+int QuakeFS_TargetOldProtocolRequest (void)
+{
+	return (sv_protocol == PROTOCOL_RAVEN_111);
+}
+
+#endif	/* H2W */
+
 /* The hwsv-only serverinfo write: `Info_SetValueForStarKey (svs.info,
  * "*gamedir", dir, ...)`, which names the `svs` global that exists in no other
  * binary.  Info_SetValueForStarKey itself is the info_str port and so is in
