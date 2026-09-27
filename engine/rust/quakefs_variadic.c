@@ -34,6 +34,34 @@
 
 #include "quakedef.h"
 
+/* 3. A fatal diagnostic whose NAME differs per build.  In an H2W build the
+ *    C's Host_Error is a macro for SV_Error (engine/hexenworld/server/host.h:62)
+ *    and only SV_Error is ever defined; in every other target it is
+ *    Host_Error.  The archive is one object linked into all of them, so a Rust
+ *    extern of either name alone would be an undefined reference somewhere --
+ *    "Host_Error" in hwsv, "SV_Error" everywhere else.  The name is therefore
+ *    chosen here, where the target's own headers are in scope, and the Rust
+ *    call site reaches it through this shim.  Forwarded as "%s" so the format
+ *    is consumed once, here, rather than re-interpreted by the callee.
+ *
+ *    Found by building the harness's h2w arm: the port's first link in that
+ *    target failed on `undefined reference to Host_Error'. */
+FUNC_NORETURN void QuakeFS_TargetHostError (const char *fmt, ...)
+{
+	va_list	ap;
+	char	buf[1024];
+
+	va_start (ap, fmt);
+	q_vsnprintf (buf, sizeof (buf), fmt, ap);
+	va_end (ap);
+
+#if defined(H2W)
+	SV_Error ("%s", buf);
+#else
+	Host_Error ("%s", buf);
+#endif
+}
+
 #ifndef PLATFORM_WINDOWS
 /* quakefs.c includes this itself for FS_ResolveCasePath; quakedef.h does not,
  * and struct dirent is what that function reads. */

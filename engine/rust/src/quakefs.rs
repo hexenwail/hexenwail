@@ -1938,8 +1938,11 @@ pub unsafe extern "C" fn FS_Gamedir(dir: *const c_char) {
 extern "C" {
     /// engine/h2shared/sys.h:39.
     fn Sys_CopyFile(frompath: *const c_char, topath: *const c_char) -> c_int;
-    /// engine/hexen2/host.h:84, FUNC_NORETURN.
-    fn Host_Error(fmt: *const c_char, ...) -> !;
+    /// The fatal diagnostic, whose C name differs per build: H2W has no
+    /// Host_Error symbol at all (hexenworld/server/host.h:62 makes it a macro
+    /// for SV_Error).  quakefs_variadic.c picks the name, so this module never
+    /// references either one directly.
+    fn QuakeFS_TargetHostError(fmt: *const c_char, ...) -> !;
     fn fwrite(ptr: *const c_void, size: usize, n: usize, f: *mut LibcFile) -> usize;
 }
 
@@ -2069,7 +2072,7 @@ pub unsafe extern "C" fn FS_WriteFile(
         filename,
     );
     if err != 0 {
-        Host_Error(
+        QuakeFS_TargetHostError(
             c"%s: %d: string buffer overflow!".as_ptr(),
             c"FS_WriteFile".as_ptr(),
             1359,

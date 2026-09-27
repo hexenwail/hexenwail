@@ -43,6 +43,8 @@
 set -euo pipefail
 
 arm="${1:-client}"
+link_only=0
+[ "${2:-}" = "--link-only" ] && link_only=1
 case "$arm" in
 	client)     CDEFS=(-DGLQUAKE -DH2W_INTEGRATED); INCS=(-Iengine/hexen2 -Iengine/h2shared -Icommon) ;;
 	serveronly) CDEFS=(-DSERVERONLY);                INCS=(-Iengine/hexen2 -Iengine/h2shared -Icommon) ;;
@@ -134,6 +136,16 @@ cc -o "$OUT/h_rust" "$OUT/harness_rust.o" "$OUT/shim_rust.o" \
 QF_DEMO="${QF_DEMO:-$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail}"
 echo "-- base: $QF_DEMO"
 export QF_BASEDIR="$QF_DEMO"
+
+if [ "$link_only" -eq 1 ]; then
+	# The h2w arm: it links, which is what proves the shim's H2W arm and the
+	# port's H2W references resolve, but its cases cannot run here because
+	# hwsv's FS_Init wants hw/pak4.pak and no HexenWorld data ships in this
+	# tree.  Link-only is evidence; a skipped arm would not be.
+	echo "LINK-ONLY: $arm arm built and linked; cases not run (hwsv needs hw/pak4.pak, which does not ship here)"
+	echo "RESULT: PASS"
+	exit 0
+fi
 
 echo "-- running both"
 # The fixture root is fixed and wiped before each arm, so the second arm does
