@@ -14,7 +14,7 @@
 
 #![no_std]
 
-#[cfg(feature = "hashindex")]
+#[cfg(any(feature = "hashindex", feature = "quakefs"))]
 #[path = "../hashindex/src/ffi.rs"]
 pub mod hashindex;
 
@@ -34,13 +34,13 @@ pub mod sizebuf;
 // harness build that links only that port.  Same split as sizebuf/msg_io: the
 // layout is unconditional in cvar.rs and the functions are behind
 // `feature = "cvar"`.
-#[cfg(any(feature = "cvar", feature = "info_str", feature = "cmd"))]
+#[cfg(any(feature = "cvar", feature = "info_str", feature = "cmd", feature = "quakefs"))]
 pub mod cvar;
 
 // zone is the Phase 6 allocator/ownership port.  It has no ABI half of its own
 // that another port needs -- its structs are private to zone.c -- so it is
 // compiled only for its own feature.
-#[cfg(any(feature = "zone", feature = "cmd"))]
+#[cfg(any(feature = "zone", feature = "cmd", feature = "quakefs"))]
 pub mod zone;
 
 // cmd is the Phase 6 command/registry port.  It needs cvar_t (Cmd_CheckCommand
@@ -112,3 +112,6 @@ pub static mut vec3_origin: mathlib::Vec3 = [0.0, 0.0, 0.0];
 extern "C" {
     fn abort() -> !;
 }
+
+#[cfg(feature = "quakefs")]
+pub mod quakefs;
