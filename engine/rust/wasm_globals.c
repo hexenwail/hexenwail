@@ -4,8 +4,9 @@
  * WebAssembly client.  Compiled into the Emscripten build only.
  *
  * 1. Exported statics.  msg_io.rs owns msg_readcount and msg_badread, lib.rs
- *    owns vec3_origin, and cmd.rs owns cmd_source, as `#[no_mangle] static
- *    mut`.  On every native target that makes them ordinary global data in
+ *    owns vec3_origin, cmd.rs owns cmd_source, and quakefs.rs owns the six the
+ *    file system exports (fs_gamedir_nopath, gameflags, fs_filesize,
+ *    file_from_pak, oem and registered), as `#[no_mangle] static mut`.  On every native target that makes them ordinary global data in
  *    libengine_rs.a.  For
  *    wasm32-unknown-emscripten rustc keeps the archive's functions global but
  *    emits those statics as local symbols (`d msg_readcount.0`), with or
@@ -43,6 +44,17 @@ int		msg_readcount;
 qboolean	msg_badread;
 vec3_t		vec3_origin;
 cmd_source_t	cmd_source;   /* written by Cmd_ExecuteString, read by the C that dispatches */
+
+/* quakefs.rs's six.  quakefs.h declares all of them, so the types here are the
+ * header's rather than restated, and the values are the zero initialisers the
+ * Rust statics carry (the two cvars are registered by FS_Init, which is what
+ * gives them their "0"). */
+char		fs_gamedir_nopath[MAX_QPATH];
+unsigned int	gameflags;
+long		fs_filesize;
+int		file_from_pak;
+cvar_t		oem;
+cvar_t		registered;
 
 #ifdef USE_SINCOS_TABLE
 const float sincos_tab[SINCOS_SIZE] = {
