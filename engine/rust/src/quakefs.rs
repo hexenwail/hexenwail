@@ -64,6 +64,9 @@ const MAX_FILES_IN_ZIP: c_int = 65536;
 const MAX_ZIP_INFLATE: c_long = 64 * 1024 * 1024;
 /// `MAX_LISTNAMES` from quakefs.c -- the tab-completion name buffer.
 const MAX_LISTNAMES: usize = 256;
+/// `MAX_MATCHES` from engine/h2shared/cmd.h:141 -- the cap the List* callers
+/// pass into their completion buffer, so fillMatches stops at the same place.
+const MAX_MATCHES: c_int = 128;
 /// `MAX_PAKDATA` and `MAX_CONTENTDATA` from quakefs.c.
 const MAX_PAKDATA: usize = 5;
 const MAX_CONTENTDATA: usize = 3;
@@ -2405,6 +2408,399 @@ pub unsafe extern "C" fn FS_LoadMallocFile(
     path_id: *mut c_uint,
 ) -> *mut u8 {
     fs_load_file(path, LOADFILE_MALLOC, path_id)
+}
+
+//============================================================================
+// listing: the search path, and the tab-completion name list
+//============================================================================
+extern "C" {
+    fn Sys_ListDirectories(
+        path: *const c_char,
+        dirs: *mut [c_char; 64],
+        maxdirs: c_int,
+    ) -> c_int;
+    /// common.h:107 -- the rotating-buffer formatter.  A C variadic; calling
+    /// one is stable, only defining one is not.
+    fn va(format: *const c_char, ...) -> *mut c_char;
+    fn q_strncasecmp(a: *const c_char, b: *const c_char, n: usize) -> c_int;
+    fn strncmp(a: *const c_char, b: *const c_char, n: usize) -> c_int;
+    fn strchr(s: *const c_char, c: c_int) -> *mut c_char;
+    fn Z_Strdup(s: *const c_char) -> *mut c_char;
+}
+
+/// `MAX_GAMEDIRS` from quakefs.c:2240 -- how many subdirectories "game" probes.
+const MAX_GAMEDIRS: usize = 128;
+
+/// `FS_ListSearchSubdirs` -- enumerate subdirectories of `relpath` across the
+/// loose (non-pak) searchpath entries, highest priority first, skipping
+/// case-insensitive duplicates.
+#[no_mangle]
+pub unsafe extern "C" fn FS_ListSearchSubdirs(
+    relpath: *const c_char,
+    dirs: *mut [c_char; 64],
+    maxdirs: c_int,
+) -> c_int {
+    let mut path = [0 as c_char; MAX_OSPATH];
+    let mut buf = [[0 as c_char; 64]; 64];
+    let mut count: c_int = 0;
+
+    if relpath.is_null() || dirs.is_null() || maxdirs <= 0 {
+        return 0;
+    }
+
+    let mut search = FS_SEARCHPATHS;
+    while !search.is_null() && count < maxdirs {
+        if !(*search).pack.is_null() {
+            search = (*search).next;
+            continue;
+        }
+        q_snprintf(
+            path.as_mut_ptr(),
+            MAX_OSPATH,
+            c"%s/%s".as_ptr(),
+            (*search).filename.as_ptr(),
+            relpath,
+        );
+        let n = Sys_ListDirectories(path.as_ptr(), buf.as_mut_ptr(), 64);
+        let mut i: c_int = 0;
+        while i < n && count < maxdirs {
+            let mut dup = 0;
+            let mut j: c_int = 0;
+            while j < count {
+                if q_strcasecmp((*dirs.add(j as usize)).as_ptr(), buf[i as usize].as_ptr()) == 0 {
+                    dup = 1;
+                    break;
+                }
+                j += 1;
+            }
+            if dup == 0 {
+                q_strlcpy(
+                    (*dirs.add(count as usize)).as_mut_ptr(),
+                    buf[i as usize].as_ptr(),
+                    64,
+                );
+                count += 1;
+            }
+            i += 1;
+        }
+        search = (*search).next;
+    }
+
+    count
+}
+
+/// `FS_Path_f` -- print the search path.
+#[allow(dead_code)] // registered by FS_Init, which is the next group
+unsafe extern "C" fn fs_path_f() {
+    CON_Printf(PRINT_NORMAL, c"Current search path:\n".as_ptr());
+
+    let mut s = FS_SEARCHPATHS;
+    while !s.is_null() {
+        if s == FS_BASE_SEARCHPATHS {
+            CON_Printf(PRINT_NORMAL, c"----------\n".as_ptr());
+        }
+        if !(*s).pack.is_null() {
+            CON_Printf(
+                PRINT_NORMAL,
+                c"%s (%i files)\n".as_ptr(),
+                (*(*s).pack).filename.as_ptr(),
+                (*(*s).pack).numfiles,
+            );
+        } else {
+            CON_Printf(PRINT_NORMAL, c"%s\n".as_ptr(), (*s).filename.as_ptr());
+        }
+        s = (*s).next;
+    }
+}
+
+/// `FS_FreeNameList` -- release the names the last scan handed out.
+#[no_mangle]
+pub unsafe extern "C" fn FS_FreeNameList() {
+    while LISTNAME_COUNT != 0 {
+        LISTNAME_COUNT -= 1;
+        Z_Free(LISTNAMES[LISTNAME_COUNT as usize].cast::<c_void>());
+    }
+}
+
+/// `addListName` -- add one already-trimmed name, skipping case-insensitive
+/// duplicates.  Returns 0 when skipped, the new count when added, or -1 when
+/// the list is full.
+unsafe fn add_list_name(name: *const c_char) -> c_int {
+    if LISTNAME_COUNT >= MAX_LISTNAMES as c_int {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"WARNING: reached maximum number of names to list\n".as_ptr(),
+        );
+        return -1;
+    }
+
+    let mut j: c_int = 0;
+    while j < LISTNAME_COUNT {
+        if q_strcasecmp(LISTNAMES[j as usize], name) == 0 {
+            return 0; // duplicated name.  skip.
+        }
+        j += 1;
+    }
+
+    LISTNAMES[LISTNAME_COUNT as usize] = Z_Strdup(name);
+    LISTNAME_COUNT += 1;
+    LISTNAME_COUNT
+}
+
+/// `addFileName` -- prefix-filter a filename, strip its extension and add it.
+/// The prefix is matched with the extension still on, which is what the
+/// maplist command has always done.
+unsafe fn add_file_name(
+    filename: *const c_char,
+    partial: *const c_char,
+    len_partial: usize,
+    ext: *const c_char,
+) -> c_int {
+    let mut cur_name = [0 as c_char; MAX_QPATH];
+    let extlen = strlen(ext);
+
+    if len_partial != 0 && q_strncasecmp(partial, filename, len_partial) != 0 {
+        return 0; // doesn't match the prefix.  skip.
+    }
+
+    let len = q_strlcpy(cur_name.as_mut_ptr(), filename, MAX_QPATH);
+    if len >= MAX_QPATH {
+        return 0; // truncated: not a name we could hand back
+    }
+    if len <= extlen {
+        return 0;
+    }
+
+    let len = len - extlen;
+    if q_strcasecmp((&raw const cur_name).cast::<c_char>().add(len), ext) != 0 {
+        return 0;
+    }
+
+    cur_name[len] = 0;
+
+    add_list_name(cur_name.as_ptr())
+}
+
+/// `FS_ScanFilesEx` -- walk every searchpath collecting files with the given
+/// extension.  `subdir` names a directory below the gamedir, or is NULL to
+/// scan the root, in which case pak entries in subdirectories are ignored.
+unsafe fn fs_scan_files_ex(
+    subdir: *const c_char,
+    ext: *const c_char,
+    prefix: *const c_char,
+    pre_len: usize,
+    reset: c_int,
+) {
+    let mut pakdir = [0 as c_char; MAX_QPATH];
+    let mut pattern = [0 as c_char; MAX_QPATH];
+
+    if reset != 0 {
+        FS_FreeNameList();
+    }
+
+    pakdir[0] = 0;
+    if !subdir.is_null() {
+        q_snprintf(
+            pakdir.as_mut_ptr(),
+            MAX_QPATH,
+            c"%s/".as_ptr(),
+            subdir,
+        );
+    }
+    let dirlen = strlen(pakdir.as_ptr());
+    q_snprintf(
+        pattern.as_mut_ptr(),
+        MAX_QPATH,
+        c"*%s".as_ptr(),
+        ext,
+    );
+
+    let mut search = FS_SEARCHPATHS;
+    while !search.is_null() {
+        if !(*search).pack.is_null() {
+            let mut i: c_int = 0;
+            while i < (*(*search).pack).numfiles {
+                let mut name = (*(*(*search).pack).files.add(i as usize)).name.as_ptr();
+
+                if dirlen != 0 {
+                    if strncmp(pakdir.as_ptr(), name, dirlen) != 0 {
+                        i += 1;
+                        continue;
+                    }
+                    name = name.add(dirlen);
+                } else if !strchr(name, b'/' as c_int).is_null() {
+                    // gamedir root only
+                    i += 1;
+                    continue;
+                }
+
+                if add_file_name(name, prefix, pre_len, ext) < 0 {
+                    return;
+                }
+                i += 1;
+            }
+        } else {
+            let mut find: FSFindC = core::mem::zeroed();
+            let mut findname = Sys_FindFirstFile(
+                &mut find,
+                if !subdir.is_null() {
+                    va(
+                        c"%s/%s".as_ptr(),
+                        (*search).filename.as_ptr(),
+                        subdir,
+                    )
+                } else {
+                    (*search).filename.as_ptr()
+                },
+                pattern.as_ptr(),
+            );
+            while !findname.is_null() {
+                if add_file_name(findname, prefix, pre_len, ext) < 0 {
+                    Sys_FindClose(&mut find);
+                    return;
+                }
+                findname = Sys_FindNextFile(&mut find);
+            }
+            Sys_FindClose(&mut find);
+        }
+        search = (*search).next;
+    }
+}
+
+/// `FS_ScanFiles` -- the common case: one extension, starting a fresh list.
+unsafe fn fs_scan_files(
+    subdir: *const c_char,
+    ext: *const c_char,
+    prefix: *const c_char,
+    pre_len: usize,
+) {
+    fs_scan_files_ex(subdir, ext, prefix, pre_len, 1);
+}
+
+/// `fillMatches` -- hand the scanned names to a tab-completion caller in the
+/// ListCommands() shape: fill `buf[pos+i]`, return the count added.
+unsafe fn fill_matches(buf: *mut *const c_char, pos: c_int) -> c_int {
+    if buf.is_null() {
+        return 0;
+    }
+
+    let mut i: c_int = 0;
+    while i < LISTNAME_COUNT {
+        if pos + i >= MAX_MATCHES {
+            break;
+        }
+        *buf.add((pos + i) as usize) = LISTNAMES[i as usize];
+        i += 1;
+    }
+
+    i
+}
+
+/// The `strlen(prefix)` the listers hand to the scanner.
+#[inline]
+unsafe fn prefix_len(prefix: *const c_char) -> usize {
+    if prefix.is_null() {
+        0
+    } else {
+        strlen(prefix)
+    }
+}
+
+/// `ListMaps`
+#[no_mangle]
+pub unsafe extern "C" fn ListMaps(
+    prefix: *const c_char,
+    buf: *mut *const c_char,
+    pos: c_int,
+) -> c_int {
+    fs_scan_files(c"maps".as_ptr(), c".bsp".as_ptr(), prefix, prefix_len(prefix));
+    fill_matches(buf, pos)
+}
+
+/// `ListDemos`
+#[no_mangle]
+pub unsafe extern "C" fn ListDemos(
+    prefix: *const c_char,
+    buf: *mut *const c_char,
+    pos: c_int,
+) -> c_int {
+    fs_scan_files(core::ptr::null(), c".dem".as_ptr(), prefix, prefix_len(prefix));
+    fill_matches(buf, pos)
+}
+
+/// `ListCfgs`
+#[no_mangle]
+pub unsafe extern "C" fn ListCfgs(
+    prefix: *const c_char,
+    buf: *mut *const c_char,
+    pos: c_int,
+) -> c_int {
+    fs_scan_files(core::ptr::null(), c".cfg".as_ptr(), prefix, prefix_len(prefix));
+    fill_matches(buf, pos)
+}
+
+/// `ListSkies` -- the union of png, tga and pcx `_rt` faces with the suffix
+/// trimmed; the right face is enough to offer a name.
+#[no_mangle]
+pub unsafe extern "C" fn ListSkies(
+    prefix: *const c_char,
+    buf: *mut *const c_char,
+    pos: c_int,
+) -> c_int {
+    let pre_len = prefix_len(prefix);
+
+    fs_scan_files_ex(c"gfx/env".as_ptr(), c"_rt.png".as_ptr(), prefix, pre_len, 1);
+    fs_scan_files_ex(c"gfx/env".as_ptr(), c"_rt.tga".as_ptr(), prefix, pre_len, 0);
+    fs_scan_files_ex(c"gfx/env".as_ptr(), c"_rt.pcx".as_ptr(), prefix, pre_len, 0);
+    fill_matches(buf, pos)
+}
+
+/// `ListSaves` -- directories directly under the userdir holding an info.dat,
+/// which is the same test Host_Loadgame_f applies before it reads one.
+#[no_mangle]
+pub unsafe extern "C" fn ListSaves(
+    prefix: *const c_char,
+    buf: *mut *const c_char,
+    pos: c_int,
+) -> c_int {
+    let mut alldirs = [[0 as c_char; MAX_QPATH]; MAX_GAMEDIRS];
+    let mut path = [0 as c_char; MAX_OSPATH];
+    let pre_len = prefix_len(prefix);
+
+    FS_FreeNameList();
+
+    let numdirs = Sys_ListDirectories(
+        (&raw const FS_USERDIR).cast::<c_char>(),
+        alldirs.as_mut_ptr(),
+        MAX_GAMEDIRS as c_int,
+    );
+
+    let mut i: c_int = 0;
+    while i < numdirs {
+        if pre_len != 0
+            && q_strncasecmp(prefix, alldirs[i as usize].as_ptr(), pre_len) != 0
+        {
+            i += 1;
+            continue;
+        }
+        q_snprintf(
+            path.as_mut_ptr(),
+            MAX_OSPATH,
+            c"%s/%s/info.dat".as_ptr(),
+            (&raw const FS_USERDIR).cast::<c_char>(),
+            alldirs[i as usize].as_ptr(),
+        );
+        if Sys_FileType(path.as_ptr()) != FS_ENT_FILE {
+            i += 1;
+            continue;
+        }
+        if add_list_name(alldirs[i as usize].as_ptr()) < 0 {
+            break;
+        }
+        i += 1;
+    }
+
+    fill_matches(buf, pos)
 }
 
 //============================================================================
