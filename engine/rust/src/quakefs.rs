@@ -2804,6 +2804,329 @@ pub unsafe extern "C" fn ListSaves(
 }
 
 //============================================================================
+// the getters
+//============================================================================
+
+/// `FS_GetBasedir`
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetBasedir() -> *const c_char {
+    fs_basedir_ptr()
+}
+
+/// `FS_GetUserbase`
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetUserbase() -> *const c_char {
+    (*host_parms).userdir
+}
+
+/// `FS_GetGamedir`
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetGamedir() -> *const c_char {
+    (&raw const FS_GAMEDIR).cast::<c_char>()
+}
+
+/// `FS_GetUserdir`
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetUserdir() -> *const c_char {
+    (&raw const FS_USERDIR).cast::<c_char>()
+}
+
+/// `FS_GetPortalsPathID`
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetPortalsPathID() -> c_uint {
+    FS_PORTALS_PATH_ID
+}
+
+/// `FS_GetGamedirPathID` -- the path_id of the gamedir added last, which is
+/// the one fs_gamedir names; 0 before any gamedir exists.
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetGamedirPathID() -> c_uint {
+    if FS_SEARCHPATHS.is_null() {
+        0
+    } else {
+        (*FS_SEARCHPATHS).path_id
+    }
+}
+
+//============================================================================
+// the FS_* stdio replacements
+//============================================================================
+// These exist so a caller can read non-sequentially from a file reopened on a
+// pak member, where the stream's own position says nothing about where the
+// member starts.  A DEFLATED archive entry has no stream at all, so the same
+// handle also covers memory-backed reads -- which is why every one of these
+// checks `fh->data` before touching `fh->file`.
+
+/// `SEEK_CUR` from stdio.h (SEEK_SET and SEEK_END are above).
+const SEEK_CUR: c_int = 1;
+/// `EOF` from stdio.h.
+const EOF: c_int = -1;
+/// `EBADF`, `EFAULT` and `EINVAL` from errno.h -- 9, 14 and 22 on Linux, the
+/// same in mingw's and Emscripten's errno.h, which is what the C passes to
+/// `errno` here.
+const EBADF: c_int = 9;
+const EFAULT: c_int = 14;
+const EINVAL: c_int = 22;
+
+#[cfg(unix)]
+extern "C" {
+    fn __errno_location() -> *mut c_int;
+}
+#[cfg(windows)]
+extern "C" {
+    fn _errno() -> *mut c_int;
+}
+
+/// Set `errno`, the way the C's `errno = EBADF` does.
+#[inline]
+unsafe fn set_errno(value: c_int) {
+    #[cfg(unix)]
+    {
+        *__errno_location() = value;
+    }
+    #[cfg(windows)]
+    {
+        *_errno() = value;
+    }
+}
+
+extern "C" {
+    fn clearerr(f: *mut LibcFile);
+    fn ferror(f: *mut LibcFile) -> c_int;
+    fn fgetc(f: *mut LibcFile) -> c_int;
+    fn fgets(s: *mut c_char, size: c_int, f: *mut LibcFile) -> *mut c_char;
+}
+
+/// `FS_fread`
+#[no_mangle]
+pub unsafe extern "C" fn FS_fread(
+    ptr: *mut c_void,
+    size: usize,
+    nmemb: usize,
+    fh: *mut FSHandleC,
+) -> usize {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return 0;
+    }
+    if ptr.is_null() {
+        set_errno(EFAULT);
+        return 0;
+    }
+    if size == 0 || nmemb == 0 {
+        // no error, just zero bytes wanted
+        set_errno(0);
+        return 0;
+    }
+
+    let mut byte_size: c_long = (nmemb * size) as c_long;
+    if byte_size > (*fh).length - (*fh).pos {
+        // just read to end
+        byte_size = (*fh).length - (*fh).pos;
+    }
+    let bytes_read: c_long;
+    if !(*fh).data.is_null() {
+        // inflated archive entry, already in memory
+        memcpy(
+            ptr,
+            (*fh).data.add((*fh).pos as usize).cast::<c_void>(),
+            byte_size as usize,
+        );
+        bytes_read = byte_size;
+    } else {
+        bytes_read = fread(ptr, 1, byte_size as usize, (*fh).file) as c_long;
+    }
+    (*fh).pos += bytes_read;
+
+    // fread() must return the number of elements read, not the total number
+    // of bytes.  A partially read last element still counts as whole.
+    let mut nmemb_read = (bytes_read as usize) / size;
+    if (bytes_read as usize) % size != 0 {
+        nmemb_read += 1;
+    }
+
+    nmemb_read
+}
+
+/// `FS_fseek`
+#[no_mangle]
+pub unsafe extern "C" fn FS_fseek(fh: *mut FSHandleC, offset: c_long, whence: c_int) -> c_int {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return -1;
+    }
+
+    // the relative file position shouldn't be smaller than zero or bigger
+    // than the filesize
+    let mut offset = offset;
+    match whence {
+        SEEK_SET => {}
+        SEEK_CUR => offset += (*fh).pos,
+        SEEK_END => offset = (*fh).length + offset,
+        _ => {
+            set_errno(EINVAL);
+            return -1;
+        }
+    }
+
+    if offset < 0 {
+        set_errno(EINVAL);
+        return -1;
+    }
+
+    if offset > (*fh).length {
+        // just seek to end
+        offset = (*fh).length;
+    }
+
+    if (*fh).data.is_null() {
+        let ret = fseek((*fh).file, (*fh).start + offset, SEEK_SET);
+        if ret < 0 {
+            return ret;
+        }
+    }
+
+    (*fh).pos = offset;
+    0
+}
+
+/// `FS_fclose`
+#[no_mangle]
+pub unsafe extern "C" fn FS_fclose(fh: *mut FSHandleC) -> c_int {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return -1;
+    }
+    if !(*fh).data.is_null() {
+        free((*fh).data.cast::<c_void>());
+        (*fh).data = core::ptr::null_mut();
+        return 0;
+    }
+    fclose((*fh).file)
+}
+
+/// `FS_ftell`
+#[no_mangle]
+pub unsafe extern "C" fn FS_ftell(fh: *mut FSHandleC) -> c_long {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return -1;
+    }
+    (*fh).pos
+}
+
+/// `FS_rewind`
+#[no_mangle]
+pub unsafe extern "C" fn FS_rewind(fh: *mut FSHandleC) {
+    if fh.is_null() {
+        return;
+    }
+    if (*fh).data.is_null() {
+        clearerr((*fh).file);
+        fseek((*fh).file, (*fh).start, SEEK_SET);
+    }
+    (*fh).pos = 0;
+}
+
+/// `FS_feof`
+#[no_mangle]
+pub unsafe extern "C" fn FS_feof(fh: *mut FSHandleC) -> c_int {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return -1;
+    }
+    if (*fh).pos >= (*fh).length {
+        return -1;
+    }
+    0
+}
+
+/// `FS_ferror`
+#[no_mangle]
+pub unsafe extern "C" fn FS_ferror(fh: *mut FSHandleC) -> c_int {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return -1;
+    }
+    if !(*fh).data.is_null() {
+        // a memory-backed handle has no stream to fault
+        return 0;
+    }
+    ferror((*fh).file)
+}
+
+/// `FS_fgetc`
+#[no_mangle]
+pub unsafe extern "C" fn FS_fgetc(fh: *mut FSHandleC) -> c_int {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return EOF;
+    }
+    if (*fh).pos >= (*fh).length {
+        return EOF;
+    }
+    if !(*fh).data.is_null() {
+        let c = *(*fh).data.add((*fh).pos as usize);
+        (*fh).pos += 1;
+        return c as c_int;
+    }
+    (*fh).pos += 1;
+    fgetc((*fh).file)
+}
+
+/// `FS_fgets`
+#[no_mangle]
+pub unsafe extern "C" fn FS_fgets(
+    s: *mut c_char,
+    size: c_int,
+    fh: *mut FSHandleC,
+) -> *mut c_char {
+    if FS_feof(fh) != 0 {
+        return core::ptr::null_mut();
+    }
+
+    let mut size = size;
+    if size as c_long > ((*fh).length - (*fh).pos) + 1 {
+        size = ((*fh).length - (*fh).pos + 1) as c_int;
+    }
+
+    if !(*fh).data.is_null() {
+        // same contract as fgets(): copy up to and including the first
+        // newline, stop at size-1 bytes, always NUL-terminate.
+        if size < 2 {
+            return core::ptr::null_mut();
+        }
+        let mut i: c_int = 0;
+        while i < size - 1 && (*fh).pos < (*fh).length {
+            let c = *(*fh).data.add((*fh).pos as usize) as c_char;
+            (*fh).pos += 1;
+            *s.add(i as usize) = c;
+            i += 1;
+            if c as u8 == b'\n' {
+                break;
+            }
+        }
+        *s.add(i as usize) = 0;
+        return if i != 0 { s } else { core::ptr::null_mut() };
+    }
+
+    let ret = fgets(s, size, (*fh).file);
+    (*fh).pos = ftell((*fh).file) - (*fh).start;
+
+    ret
+}
+
+/// `FS_filelength`
+#[no_mangle]
+pub unsafe extern "C" fn FS_filelength(fh: *mut FSHandleC) -> c_long {
+    if fh.is_null() {
+        set_errno(EBADF);
+        return -1;
+    }
+    (*fh).length
+}
+
+//============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
 // `FS_MakePath_VA` (quakefs.h:239) and `FS_MakePath_VABUF` (:242) are the
