@@ -14,7 +14,7 @@
 
 #![no_std]
 
-#[cfg(feature = "hashindex")]
+#[cfg(any(feature = "hashindex", feature = "quakefs"))]
 #[path = "../hashindex/src/ffi.rs"]
 pub mod hashindex;
 
@@ -112,3 +112,6 @@ pub static mut vec3_origin: mathlib::Vec3 = [0.0, 0.0, 0.0];
 extern "C" {
     fn abort() -> !;
 }
+
+#[cfg(feature = "quakefs")]
+pub mod quakefs;

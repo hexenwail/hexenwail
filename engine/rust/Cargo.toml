@@ -28,6 +28,7 @@ huffman = []
 wad = []
 cvar = []
 cmd = []
+quakefs = []
 zone = []
 
 [profile.release]
