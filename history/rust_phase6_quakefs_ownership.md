@@ -58,6 +58,23 @@ Findings that matter:
 - h2ded and hwsv differ from each other by `Host_Error`/`sv_protocol` (h2ded
   only) and `Info_SetValueForStarKey`/`SV_Error`/`svs` (hwsv only).
 
+## 2b. The exported globals, and the wasm-storage trap they set
+
+Four globals are declared `extern` in `quakefs.h` and defined in `quakefs.c`,
+and C outside the file reads all four: `fs_gamedir_nopath[MAX_QPATH]` (`:181`),
+`gameflags` (`:189`), `fs_filesize` (`:1248`) and `file_from_pak` (`:1249`).
+Readers include `gl_draw.c`, `gl_model.c`, `model.c`, `menu.c`, `sbar.c`,
+`pr_edict.c`, `sv_main.c`, `host_cmd.c` and `cl_hw.c`, so none of them can be
+made Rust-private the way `wad.c`'s three globals were.
+
+They are therefore the same trap `cmd_source` hit: rustc emits `#[no_mangle]`
+**statics as local symbols** in a wasm32 staticlib while keeping functions
+global, so on that target the C's reads would fail to link. The port defines
+each on every target except wasm32 and declares it `extern` there, with the
+storage added to `engine/rust/wasm_globals.c` using the engine's own types from
+`quakefs.h` — the fourth to seventh entries in that file, after
+`msg_readcount`, `msg_badread`, `vec3_origin` and `cmd_source`.
+
 ## 3. The #233 verdict
 
 **The per-target shim still suffices — but it has to grow from values and
