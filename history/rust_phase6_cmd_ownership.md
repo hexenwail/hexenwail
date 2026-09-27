@@ -67,13 +67,28 @@ shim landed with the zone port), so nothing here reopens it.
 | registrations of `commands`/`cmdlist`/`cvarlist`/`aliaslist` (`:1173-1179`) | present | absent | absent |
 | `#if defined(H2W)` dispatch arm (`:835`) | absent | absent | present, takes the `Sys_Printf ("FIXME: command %s has NULL handler function")` branch |
 | `Cmd_ForwardToServer()` arm | **not built anywhere** | | |
+| `Cmd_StartupScript` built-in `hexen.rc` fallback (`:374-383`) | absent | absent | absent |
 
-Two predicates come from the per-target shim, in the same shape as
-`Zone_Target*`: whether this target has the client-only list commands
-(`!SERVERONLY`) and whether it is the H2W build. The first is not cosmetic:
+The startup-script row was missed in the first pass of this note, which swept for
+`H2W`/`SERVERONLY`/`H2W_INTEGRATED` and not for `__EMSCRIPTEN__`: under the
+browser build `Cmd_StartupScript` returns the compiled-in
+`cmd_builtin_hexenrc` instead of `"exec hexen.rc\n"`, because a wasm client
+normally has no loose `hexen.rc` and would otherwise never exec `default.cfg`
+or `config.cfg`. That target is the **wasm client**, not one of the three
+native binaries: glhexen2, h2ded and hwsv all report the fallback as absent,
+and the WebAssembly build is the only one that compiles it in.
+
+Three predicates therefore come from the per-target shim, in the same shape as
+`Zone_Target*`: `Cmd_TargetHasClientLists` (not `SERVERONLY`),
+`Cmd_TargetIsH2W`, and `Cmd_TargetHasBuiltinStartupScript`
+(`__EMSCRIPTEN__`). The first is not cosmetic:
 registering the four list commands in `h2ded`/`hwsv` would give those targets
 commands the C does not have, and `Cmd_Exists` is what decides whether a cvar
 name is refused, so it is observable from the cvar port.
+
+**Verified per binary** after the port landed (disassembly of a clean build):
+glhexen2 `1/0/0`, h2ded `0/0/0`, hwsv `0/0/1`, and all three report the startup
+fallback as `0`; only the wasm client will see it set, which the PWA job builds.
 
 `Cmd_ForwardToServer()` needs `H2W && !SERVERONLY`, a configuration **no target
 in this tree builds** (glhexen2 is `GLQUAKE` + `H2W_INTEGRATED`, never `H2W`;
