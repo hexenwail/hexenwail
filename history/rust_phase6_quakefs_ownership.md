@@ -172,3 +172,61 @@ path formatting; the cost of the file layer is the syscalls underneath it, which
 the port does not change and which a two-implementation micro-benchmark would
 measure rather than the port. This is recorded in the gate's header rather than
 left implicit, as #292 requires.
+
+## 7. Port notes from reading the loaders (for whoever resumes)
+
+Recorded while porting, so the next run does not have to rediscover them.  Line
+references are to `quakefs.c` at `9f336799e`.
+
+**Why the entry arrays are `malloc`, not `Z_Malloc` (uhexen2-mm4l).** Both
+loaders allocate their `pakfiles_t`/`zipfiles_t` array with `malloc` and say so
+in a comment: `MAX_FILES_IN_PACK * sizeof(pakfiles_t)` is 2048 * 72 = 144 KB,
+7% of the client's 2 MB zone, and `MAX_FILES_IN_ZIP * sizeof(zipfiles_t)` is
+65536 * 76 = 4.75 MB — 2.5x the whole pool — so the entry-count check alone was
+admitting archives the zone could not serve.  The searchpath holds every
+mounted archive at once (`MAX_PK3_PER_DIR` = 64 per gamedir).  The port must
+keep `malloc`/`free` here and must not "improve" it to `Z_Malloc`, and it must
+not need the zeroing: both parse loops write every field of the entries they
+keep.  `pack_t` and `zippack_t` themselves *are* `Z_Malloc`'d, and the zip one
+is `memset` before use.
+
+**The STORED / DEFLATED split is per entry, not per archive.** `zipfiles_t.filepos`
+carries the state: `-1` means "STORED, offset not resolved yet", `-2` means
+"must be inflated", anything else is a real data offset.  STORED entries are
+served exactly like pak members (reopen, seek, hand back the `FILE *`) and
+`FS_ZipDataOffset` resolves their offset lazily on first open by reading the
+30-byte local header, because the central directory's offset points at the
+local header whose name/extra lengths may differ.  DEFLATED entries are
+inflated into memory by `FS_ZipReadEntry`.  `FS_OpenFile_Internal` sets
+`fs_lastzip`/`fs_lastzipentry` only for the DEFLATED case and returns the
+uncompressed length with `*file == NULL`, which is what makes `FS_OpenFile`
+and the `fshandle_t` path diverge.
+
+**Two ceilings, enforced at different times.** `MAX_ZIP_INFLATE` (64 MB) is
+checked at *mount* for any entry with `method != 0`, so a zip bomb costs one
+warning naming the archive rather than a mysterious failure at open
+(uhexen2-k4lc); `0x7fffffff` is the length ceiling that keeps sizes in a
+`long`/`fseek`.  Both skip the entry; neither aborts.
+
+**Hash sizing is not `Hash_Allocate`'s business.** The pak loader picks the
+smallest power of two greater than the file count by a loop from 1, the zip
+loader from a floor of 16; `Hash_Allocate` aborts if it is not a power of two.
+`Hash_GenerateKeyString(..., false)` (case-insensitive) is used on both paths
+so a pk3 authored on a case-sensitive filesystem resolves like a pak.
+
+**`gameflags` is accumulate-only, with one exception.** Every loader ORs into
+it; only `GAME_PORTALS` is ever cleared, by `Host_Game_f`, because it doubles as
+"portals content is reachable now" (uhexen2-lx4m).  An archive adds
+`GAME_MODIFIED` unconditionally and additionally `check_known_zip`'s flags when
+it is a base mount.
+
+**`FS_UnwindSearchpaths` is centralised for `fs_portals_path_id`** (uhexen2-5vb6):
+the three old open-coded loops differed only in narration, and an id that
+outlives the entries it names would hand `PR_ShouldSubstituteProgs` a stale
+answer.
+
+**`check_known_paks` returns a flag chosen by (paknum, numfiles, crc)**, with a
+per-paknum cascade of demo/OEM/old-edition fallbacks, and `check_known_zip` is
+the container-agnostic half: it asks whether one archive holds every marked
+member at its exact size (`zip_has_marks`), with a wrong size an immediate NO
+rather than a keep-looking.
