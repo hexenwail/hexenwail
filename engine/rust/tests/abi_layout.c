@@ -27,6 +27,8 @@ struct cvar_s;		/* cvar.h names it in a prototype before defining it */
 #include "cvar.h"
 #include "protocol.h"		/* hexenworld/shared: the H2W usercmd_t */
 #include "wad.h"
+#include "compiler.h"	/* FUNC_* macros, which sys.h uses */
+#include "sys.h"	/* fsfind_t, for the Sys_Find* stubs quakefs.rs needs */
 
 #include <stddef.h>
 #include <stdio.h>
@@ -263,15 +265,76 @@ RUST_ACCESSOR(QPicC_offsetof_data)
  * undefined; a new reference fails this link loudly, which is the point. */
 void Sys_Error (const char *error, ...) { (void)error; abort(); }
 void CON_Printf (unsigned int flags, const char *fmt, ...) { (void)flags; (void)fmt; abort(); }
-byte *FS_LoadZoneFile (const char *path, int zone_id, unsigned int *path_id)
-{
-	(void)path; (void)zone_id; (void)path_id; abort();
-}
 sizebuf_t net_message;
 
 /* cvar.rs's own calls.  Same rule as the block above: the engine provides all
  * of these, the archive leaves them undefined, and the layout program never
  * reaches them. */
+/* quakefs.rs's own calls, same rule again.  The per-target QuakeFS_Target
+ * shims are stubbed here as Cmd_Target and Zone_Target already are, so the
+ * layout program does not need quakefs_target.c or the client state it resets;
+ * the two symbols that are not stubs -- FS_ResolveCasePath and
+ * QuakeFS_TargetHostError -- come from quakefs_variadic.c, which the gate
+ * links.  SV_Error is what the H2W arm of that forwarder calls, because
+ * hexenworld/server/host.h:62 makes Host_Error a macro for it and the gate
+ * compiles with -DH2W. */
+void COM_FileBase (const char *in, char *out, size_t outsize)
+{
+	(void)in; (void)out; (void)outsize; abort();
+}
+int COM_StrCompare (const void *a1, const void *a2) { (void)a1; (void)a2; abort(); }
+size_t qerr_strlcpy (const char *caller, int linenum, char *dst,
+		const char *src, size_t siz)
+{
+	(void)caller; (void)linenum; (void)dst; (void)src; (void)siz; abort();
+}
+int Sys_FileType (const char *path) { (void)path; abort(); }
+void SV_Error (const char *error, ...) { (void)error; abort(); }
+cvar_t developer;
+int QuakeFS_TargetIsH2W (void) { abort(); }
+int QuakeFS_TargetIsH2WIntegrated (void) { abort(); }
+int QuakeFS_TargetHasClientCommands (void) { abort(); }
+void QuakeFS_TargetClientReset (void) { abort(); }
+void QuakeFS_TargetClientClearState (void) { abort(); }
+void QuakeFS_TargetClientReinit (void) { abort(); }
+void QuakeFS_TargetVidLock (void) { abort(); }
+void QuakeFS_TargetShowList (int num, const char **list)
+{
+	(void)num; (void)list; abort();
+}
+void QuakeFS_TargetSetHwServerinfo (const char *dir) { (void)dir; abort(); }
+
+int q_vsnprintf (char *str, size_t size, const char *format, va_list args)
+{
+	(void)str; (void)size; (void)format; (void)args; abort();
+}
+int Sys_CopyFile (const char *frompath, const char *topath)
+{
+	(void)frompath; (void)topath; abort();
+}
+double Sys_DoubleTime (void) { abort(); }
+int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
+{
+	(void)path; (void)dirs; (void)maxdirs; abort();
+}
+void QuakeFS_TargetBeginDisc (const char *name) { (void)name; abort(); }
+void QuakeFS_TargetEndDisc (void) { abort(); }
+int QuakeFS_TargetIsServerOnly (void) { abort(); }
+int QuakeFS_TargetOldProtocolRequest (void) { abort(); }
+const char *QuakeFS_TargetStartupScript (void) { abort(); }
+
+/* The filesystem surface quakefs.rs reaches, with the signatures sys.h
+ * declares (fsfind_t is the caller's enumeration state). */
+long Sys_filesize (const char *path) { (void)path; abort(); }
+int Sys_mkdir (const char *path, qboolean crash) { (void)path; (void)crash; abort(); }
+const char *Sys_FindFirstFile (fsfind_t *ctx, const char *path, const char *pattern)
+{
+	(void)ctx; (void)path; (void)pattern; abort();
+}
+const char *Sys_FindNextFile (fsfind_t *ctx) { (void)ctx; abort(); }
+void Sys_FindClose (fsfind_t *ctx) { (void)ctx; abort(); }
+char *va (const char *format, ...) { (void)format; abort(); }
+
 int q_strcasecmp (const char *s1, const char *s2) { (void)s1; (void)s2; abort(); }
 int q_strncasecmp (const char *s1, const char *s2, size_t n)
 {
@@ -279,18 +342,6 @@ int q_strncasecmp (const char *s1, const char *s2, size_t n)
 }
 const char *COM_Parse (const char *data) { (void)data; abort(); }
 char com_token[1024];
-byte *FS_LoadHunkFile (const char *path, unsigned int *path_id)
-{
-	(void)path; (void)path_id; abort();
-}
-char *FS_MakePath (int base, int *error, const char *path)
-{
-	(void)base; (void)error; (void)path; abort();
-}
-int FS_FileExists (const char *filename, unsigned int *path_id)
-{
-	(void)filename; (void)path_id; abort();
-}
 int host_initialized;
 /* The cmd port's per-target predicates live in engine/rust/cmd_target.c, which
  * this program does not link; it checks layouts, not behaviour. */

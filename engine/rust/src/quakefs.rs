@@ -279,7 +279,12 @@ const _: () = {
     assert!(core::mem::offset_of!(PackC, filename) == 0);
     assert!(core::mem::offset_of!(PackC, handle) == MAX_OSPATH);
     assert!(core::mem::offset_of!(PackC, numfiles) == MAX_OSPATH + PTR_SIZE);
-    assert!(core::mem::offset_of!(PackC, files) == MAX_OSPATH + PTR_SIZE + 8 + 0);
+    // numfiles is an int and files is a pointer, so the padding between them
+    // is the pointer's alignment, not a constant: 4 bytes of padding on LP64,
+    // none on ILP32.  The wasm arm of check-rust-abi.sh is what caught the
+    // hardcoded 8 here -- the layout has to be derived for any pointer width.
+    assert!(core::mem::offset_of!(PackC, files)
+        == align_up(MAX_OSPATH + PTR_SIZE + 4, PTR_ALIGN));
 
     assert!(core::mem::offset_of!(ZipFilesC, index) == MAX_QPATH);
     assert!(core::mem::offset_of!(ZipFilesC, filelen) == MAX_QPATH + 4);
