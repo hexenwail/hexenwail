@@ -126,6 +126,6 @@ if [ "${#failed[@]}" -ne 0 ]; then
 	echo "FAIL: ${failed[*]}" >&2
 	exit 1
 fi
-echo "PASS: every Rust gate -- toolchain pinned, the old switches rejected, 11"
+echo "PASS: every Rust gate -- toolchain pinned, the old switches rejected, 12"
 echo "      ports agree with their C originals and link once, layouts match,"
 echo "      and each port carries its original's copyright notices."
