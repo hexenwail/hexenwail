@@ -353,6 +353,14 @@ int q_snprintf (char *str, size_t size, const char *format, ...)
 	(void)str; (void)size; (void)format; abort();
 }
 
+/* net_udp_hw's four shim accessors.  They are C functions in the engine, not in
+ * the archive, so the layout program has to satisfy the link the same way it
+ * does for the other ports' externs.  None is called here. */
+void *NetUDP_TargetMessageBuf (void) { abort(); }
+void *NetUDP_TargetFrom (void) { abort(); }
+void *NetUDP_TargetLocalAdr (void) { abort(); }
+void *NetUDP_TargetLoopbackAdr (void) { abort(); }
+
 /* zone.rs's own calls.  Same rule again; Z_Malloc, Z_Strdup, Z_Free and
  * Hunk_AllocName are no longer here because the zone port now defines them --
  * the archive exporting them is what removed those four stubs. */

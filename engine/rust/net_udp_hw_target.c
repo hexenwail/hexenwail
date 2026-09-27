@@ -37,7 +37,7 @@
 #include "arch_def.h"
 #include "net_sys.h"
 #ifdef H2W_INTEGRATED
-#include "../../hexen2/quakedef.h"
+#include "../hexen2/quakedef.h"
 #else
 #include "quakedef.h"
 #endif

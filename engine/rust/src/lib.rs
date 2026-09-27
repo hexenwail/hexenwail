@@ -40,7 +40,7 @@ pub mod cvar;
 // zone is the Phase 6 allocator/ownership port.  It has no ABI half of its own
 // that another port needs -- its structs are private to zone.c -- so it is
 // compiled only for its own feature.
-#[cfg(any(feature = "zone", feature = "cmd", feature = "quakefs", feature = "net_udp_hw"))]
+#[cfg(any(feature = "zone", feature = "cmd", feature = "quakefs"))]
 pub mod zone;
 
 // cmd is the Phase 6 command/registry port.  It needs cvar_t (Cmd_CheckCommand

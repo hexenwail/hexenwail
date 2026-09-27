@@ -51,7 +51,33 @@ mod imp {
     use core::ffi::{c_char, c_int, c_long, c_uint, c_void};
 
     use crate::sizebuf::SizeBufC;
-    use crate::zone::QuakeParmsC;
+
+    /// `quakeparms_t` from engine/hexen2/host.h, only as far as `argc` and
+    /// `argv`: `com_argc`/`com_argv` are macros over `host_parms->argc/argv`
+    /// (common.h:92-93), so `-ip`/`-bindip` are read through this.  The zone
+    /// port has the same struct for `-zone`; the fields are asserted here so
+    /// a copy cannot drift silently, which is the same trade the other ports
+    /// make when sharing the type would drag a whole module into a harness.
+    #[repr(C)]
+    pub struct QuakeParmsC {
+        pub basedir: *mut c_char,
+        pub userdir: *mut c_char,
+        pub argc: c_int,
+        pub argv: *mut *mut c_char,
+    }
+
+    const _: () = {
+        assert!(core::mem::offset_of!(QuakeParmsC, basedir) == 0);
+        assert!(core::mem::offset_of!(QuakeParmsC, argc) == 2 * core::mem::size_of::<*mut c_char>());
+        assert!(
+            core::mem::offset_of!(QuakeParmsC, argv)
+                == 2 * core::mem::size_of::<*mut c_char>() + 4
+                    + (core::mem::align_of::<*mut c_char>()
+                        - (2 * core::mem::size_of::<*mut c_char>() + 4)
+                            % core::mem::align_of::<*mut c_char>())
+                        % core::mem::align_of::<*mut c_char>()
+        );
+    };
 
     //========================================================================
     // the C ABI this module speaks
