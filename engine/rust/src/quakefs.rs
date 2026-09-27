@@ -3140,6 +3140,756 @@ pub unsafe extern "C" fn FS_filelength(fh: *mut FSHandleC) -> c_long {
 }
 
 //============================================================================
+// the mod commands
+//============================================================================
+extern "C" {
+    /// engine/h2shared/common.h:89, 112.
+    fn COM_CheckParm(parm: *const c_char) -> c_int;
+    fn COM_StrCompare(arg1: *const c_void, arg2: *const c_void) -> c_int;
+    fn atoi(s: *const c_char) -> c_int;
+    fn rand() -> c_int;
+    fn Sys_DoubleTime() -> f64;
+    /// The cmd port's own functions.
+    fn Cmd_AddCommand(cmd_name: *const c_char, function: Option<unsafe extern "C" fn()>);
+    fn Cmd_Argc() -> c_int;
+    fn Cmd_Argv(arg: c_int) -> *const c_char;
+    fn Cbuf_AddText(text: *const c_char);
+    fn Cbuf_Clear();
+    /// The cvar port's.
+    fn Cvar_RegisterVariable(variable: *mut CvarC);
+    fn Cvar_SetROM(var_name: *const c_char, value: *const c_char);
+    /// The other hooks this group needs.
+    fn QuakeFS_TargetIsServerOnly() -> c_int;
+    fn QuakeFS_TargetClientReset();
+    fn QuakeFS_TargetClientClearState();
+    fn QuakeFS_TargetClientReinit();
+    fn QuakeFS_TargetVidLock();
+    fn QuakeFS_TargetStartupScript() -> *const c_char;
+    fn QuakeFS_TargetShowList(num: c_int, list: *const *const c_char);
+}
+
+/// `BSPVERSION`, `BSP2VERSION`, `HEADER_LUMPS` and `LUMP_ENTITIES` from
+/// common/bspfile.h:57-65.  BSP2's version is the four characters "BSP2"
+/// read as a little-endian int, spelled the way the header spells it.
+const BSPVERSION: c_int = 29;
+const BSP2VERSION: c_int =
+    (b'B' as c_int) << 0 | (b'S' as c_int) << 8 | (b'P' as c_int) << 16 | (b'2' as c_int) << 24;
+const HEADER_LUMPS: usize = 15;
+const LUMP_ENTITIES: usize = 0;
+
+/// `lump_t` from common/bspfile.h:59-63.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct LumpC {
+    pub fileofs: c_int,
+    pub filelen: c_int,
+}
+
+/// `dheader_t` from common/bspfile.h:91-96.  Both BSP formats this engine
+/// loads share it: version 29 and BSP2 differ in the width of node, leaf and
+/// edge records, never in the header.
+#[repr(C)]
+pub struct DHeaderC {
+    pub version: c_int,
+    pub lumps: [LumpC; HEADER_LUMPS],
+}
+
+const _: () = {
+    assert!(core::mem::size_of::<LumpC>() == 8);
+    assert!(core::mem::offset_of!(DHeaderC, version) == 0);
+    assert!(core::mem::offset_of!(DHeaderC, lumps) == 4);
+    assert!(core::mem::size_of::<DHeaderC>() == 4 + HEADER_LUMPS * 8);
+};
+
+/// `BigShort` from common/q_endian.h -- a byte swap on a little-endian host.
+#[inline]
+fn big_short(v: u16) -> u16 {
+    #[cfg(target_endian = "little")]
+    {
+        v.swap_bytes()
+    }
+    #[cfg(target_endian = "big")]
+    {
+        v
+    }
+}
+
+/// `FS_IsGamedir` -- does `dir` under `basedir` look like game data?  Gamecode
+/// (progs.dat or hwprogs.dat), any pak0..pak9, any .pk3, or a maps/ directory
+/// holding at least one .bsp.
+#[no_mangle]
+pub unsafe extern "C" fn FS_IsGamedir(basedir: *const c_char, dir: *const c_char) -> c_int {
+    let mut path = [0 as c_char; MAX_OSPATH];
+
+    q_snprintf(
+        path.as_mut_ptr(),
+        MAX_OSPATH,
+        c"%s/%s/progs.dat".as_ptr(),
+        basedir,
+        dir,
+    );
+    if Sys_FileType(path.as_ptr()) == FS_ENT_FILE {
+        return 1;
+    }
+
+    // ...or hwprogs.dat: a HexenWorld mod carries gamecode just as much as a
+    // Hexen II one does (uhexen2-3m0h).
+    q_snprintf(
+        path.as_mut_ptr(),
+        MAX_OSPATH,
+        c"%s/%s/hwprogs.dat".as_ptr(),
+        basedir,
+        dir,
+    );
+    if Sys_FileType(path.as_ptr()) == FS_ENT_FILE {
+        return 1;
+    }
+
+    let mut i: c_int = 0;
+    while i < 10 {
+        q_snprintf(
+            path.as_mut_ptr(),
+            MAX_OSPATH,
+            c"%s/%s/pak%d.pak".as_ptr(),
+            basedir,
+            dir,
+            i,
+        );
+        if Sys_FileType(path.as_ptr()) == FS_ENT_FILE {
+            return 1;
+        }
+        i += 1;
+    }
+
+    // ...or any .pk3: a mod shipped as a single archive is still a mod
+    // (uhexen2-pzha).  Unlike the pak probe this cannot be a fixed set of
+    // names.
+    q_snprintf(
+        path.as_mut_ptr(),
+        MAX_OSPATH,
+        c"%s/%s".as_ptr(),
+        basedir,
+        dir,
+    );
+    let mut find: FSFindC = core::mem::zeroed();
+    let findname = Sys_FindFirstFile(&mut find, path.as_ptr(), c"*.pk3".as_ptr());
+    let found = !findname.is_null();
+    Sys_FindClose(&mut find);
+    if found {
+        return 1;
+    }
+
+    // ...or a maps/ directory holding at least one .bsp: a pure map pack
+    // ships no gamecode and no archive, but it is still a mod the player
+    // dropped in (uhexen2-3m0h).  The .bsp probe matters -- a bare maps/
+    // directory, or one holding only .lit or .ent sidecars, is not a map pack.
+    q_snprintf(
+        path.as_mut_ptr(),
+        MAX_OSPATH,
+        c"%s/%s/maps".as_ptr(),
+        basedir,
+        dir,
+    );
+    if Sys_FileType(path.as_ptr()) != FS_ENT_DIRECTORY {
+        return 0;
+    }
+
+    let mut find: FSFindC = core::mem::zeroed();
+    let findname = Sys_FindFirstFile(&mut find, path.as_ptr(), c"*.bsp".as_ptr());
+    let found = !findname.is_null();
+    Sys_FindClose(&mut find);
+
+    if found {
+        1
+    } else {
+        0
+    }
+}
+
+/// `ListGames` -- everything Host_Game_f accepts: data1 unconditionally,
+/// portals when installed, and every other game data directory under both
+/// roots.
+#[no_mangle]
+pub unsafe extern "C" fn ListGames(
+    prefix: *const c_char,
+    buf: *mut *const c_char,
+    pos: c_int,
+) -> c_int {
+    let mut alldirs = [[0 as c_char; MAX_QPATH]; MAX_GAMEDIRS];
+    let mut path = [0 as c_char; MAX_OSPATH];
+    let pre_len = prefix_len(prefix);
+
+    FS_FreeNameList();
+
+    // fs_basedir, not host_parms->basedir: Host_Game_f resolves its argument
+    // against the former, which -basedir moves (uhexen2-5mhd).
+    if pre_len == 0 || q_strncasecmp(prefix, c"data1".as_ptr(), pre_len) == 0 {
+        add_list_name(c"data1".as_ptr());
+    }
+
+    q_snprintf(
+        path.as_mut_ptr(),
+        MAX_OSPATH,
+        c"%s/portals".as_ptr(),
+        fs_basedir_ptr(),
+    );
+    if Sys_FileType(path.as_ptr()) == FS_ENT_DIRECTORY {
+        if pre_len == 0 || q_strncasecmp(prefix, c"portals".as_ptr(), pre_len) == 0 {
+            add_list_name(c"portals".as_ptr());
+        }
+    }
+
+    // Both roots: a gamedir under the userdir mounts exactly as one under the
+    // basedir does, and addListName de-duplicates case-insensitively.  The
+    // second pass is skipped where the two are the same directory
+    // (uhexen2-3m0h).
+    let mut numdirs = Sys_ListDirectories(
+        fs_basedir_ptr(),
+        alldirs.as_mut_ptr(),
+        MAX_GAMEDIRS as c_int,
+    );
+    if strcmp(fs_basedir_ptr(), (*host_parms).userdir) != 0 {
+        numdirs += Sys_ListDirectories(
+            (*host_parms).userdir,
+            alldirs.as_mut_ptr().add(numdirs as usize),
+            MAX_GAMEDIRS as c_int - numdirs,
+        );
+    }
+
+    let mut i: c_int = 0;
+    while i < numdirs {
+        let dir = alldirs[i as usize].as_ptr();
+
+        // hw holds HexenWorld's data, which only the hwcl/hwsv binaries can
+        // use; the single player client has nothing to do with it
+        if q_strcasecmp(dir, c"hw".as_ptr()) == 0 {
+            i += 1;
+            continue;
+        }
+        if pre_len != 0 && q_strncasecmp(prefix, dir, pre_len) != 0 {
+            i += 1;
+            continue;
+        }
+        if FS_IsGamedir(fs_basedir_ptr(), dir) == 0
+            && FS_IsGamedir((*host_parms).userdir, dir) == 0
+        {
+            i += 1;
+            continue;
+        }
+        if add_list_name(dir) < 0 {
+            break;
+        }
+        i += 1;
+    }
+
+    fill_matches(buf, pos)
+}
+
+/// The `Cmd_Argc() > 1 ? Cmd_Argv(1) : NULL` preamble every lister command
+/// shares.
+#[inline]
+unsafe fn cmd_prefix_arg() -> (*const c_char, usize) {
+    if Cmd_Argc() > 1 {
+        let prefix = Cmd_Argv(1);
+        (prefix, strlen(prefix))
+    } else {
+        (core::ptr::null(), 0)
+    }
+}
+
+/// The shared tail of maplist/skies/games: nothing found, else sort and show.
+unsafe fn show_name_list(empty_msg: *const c_char, found_fmt: *const c_char) {
+    if LISTNAME_COUNT == 0 {
+        CON_Printf(PRINT_NORMAL, empty_msg);
+        return;
+    }
+
+    CON_Printf(PRINT_NORMAL, found_fmt, LISTNAME_COUNT);
+    if LISTNAME_COUNT > 1 {
+        qsort(
+            (&raw mut LISTNAMES).cast::<c_void>(),
+            LISTNAME_COUNT as usize,
+            PTR_SIZE,
+            com_str_compare_thunk,
+        );
+    }
+    QuakeFS_TargetShowList(LISTNAME_COUNT, (&raw const LISTNAMES).cast::<*const c_char>());
+    CON_Printf(PRINT_NORMAL, c"\n".as_ptr());
+
+    FS_FreeNameList();
+}
+
+/// `COM_StrCompare` is a C function, so it cannot be passed to `qsort`
+/// directly through a Rust `unsafe extern "C" fn` item without naming it; this
+/// thunk is the one place that does.
+unsafe extern "C" fn com_str_compare_thunk(a: *const c_void, b: *const c_void) -> c_int {
+    COM_StrCompare(a, b)
+}
+
+/// `FS_Maplist_f`
+#[no_mangle]
+#[allow(non_snake_case)]
+unsafe extern "C" fn FS_Maplist_f() {
+    let (prefix, pre_len) = cmd_prefix_arg();
+
+    fs_scan_files(c"maps".as_ptr(), c".bsp".as_ptr(), prefix, pre_len);
+    show_name_list(
+        c"No maps found.\n\n".as_ptr(),
+        c"Found %d maps:\n\n".as_ptr(),
+    );
+}
+
+/// `FS_BuildMapList` -- the scan maplist and randmap already do, exposed so
+/// the maps browser menu can drive it too (uhexen2-a5nn.13).  The names live
+/// in the shared scan storage until FS_FreeNameList or the next scan.
+#[no_mangle]
+pub unsafe extern "C" fn FS_BuildMapList(prefix: *const c_char) -> c_int {
+    fs_scan_files(c"maps".as_ptr(), c".bsp".as_ptr(), prefix, prefix_len(prefix));
+
+    if LISTNAME_COUNT > 1 {
+        qsort(
+            (&raw mut LISTNAMES).cast::<c_void>(),
+            LISTNAME_COUNT as usize,
+            PTR_SIZE,
+            com_str_compare_thunk,
+        );
+    }
+
+    LISTNAME_COUNT
+}
+
+/// `FS_MapListName`
+#[no_mangle]
+pub unsafe extern "C" fn FS_MapListName(i: c_int) -> *const c_char {
+    if i < 0 || i >= LISTNAME_COUNT {
+        return core::ptr::null();
+    }
+    LISTNAMES[i as usize]
+}
+
+/// `FS_MapTitle_Quoted` -- walk to a quoted value, stopping at '}' so the
+/// scan cannot leave worldspawn for the next entity.
+unsafe fn fs_map_title_quoted(
+    mut p: *const c_char,
+    out: *mut c_char,
+    outsize: usize,
+) -> *const c_char {
+    let mut n: usize = 0;
+
+    while *p != 0 && *p != b'"' as c_char && *p != b'}' as c_char {
+        p = p.add(1);
+    }
+    if *p != b'"' as c_char {
+        return core::ptr::null();
+    }
+    p = p.add(1);
+    while *p != 0 && *p != b'"' as c_char {
+        if n + 1 < outsize {
+            *out.add(n) = *p;
+            n += 1;
+        }
+        p = p.add(1);
+    }
+    if *p != b'"' as c_char {
+        return core::ptr::null();
+    }
+    *out.add(n) = 0;
+    p.add(1)
+}
+
+/// `FS_GetMapTitle` -- the worldspawn "message" key of maps/<name>.bsp, which
+/// is what the maps browser lists instead of a filename.
+#[no_mangle]
+pub unsafe extern "C" fn FS_GetMapTitle(
+    mapname: *const c_char,
+    out: *mut c_char,
+    outsize: usize,
+) -> c_int {
+    let mut path = [0 as c_char; MAX_QPATH];
+    let mut buf = [0 as c_char; 8192];
+    let mut key = [0 as c_char; 64];
+    let mut val = [0 as c_char; 256];
+
+    if out.is_null() || outsize == 0 {
+        return 0;
+    }
+    *out = 0;
+    if mapname.is_null() || *mapname == 0 {
+        return 0;
+    }
+
+    q_snprintf(
+        path.as_mut_ptr(),
+        MAX_QPATH,
+        c"maps/%s.bsp".as_ptr(),
+        mapname,
+    );
+    let mut fh: FSHandleC = core::mem::zeroed();
+    if FS_OpenFileHandle_Silent(path.as_ptr(), &mut fh, core::ptr::null_mut()) < 0 {
+        return 0;
+    }
+
+    let mut header: DHeaderC = core::mem::zeroed();
+    if FS_fread(
+        (&mut header as *mut DHeaderC).cast::<c_void>(),
+        1,
+        core::mem::size_of::<DHeaderC>(),
+        &mut fh,
+    ) != core::mem::size_of::<DHeaderC>()
+    {
+        FS_fclose(&mut fh);
+        return 0;
+    }
+
+    let version = little_long(header.version);
+    if version != BSPVERSION && version != BSP2VERSION {
+        FS_fclose(&mut fh);
+        return 0;
+    }
+
+    let ofs = little_long(header.lumps[LUMP_ENTITIES].fileofs);
+    let mut len = little_long(header.lumps[LUMP_ENTITIES].filelen);
+    if ofs < 0 || len <= 0 {
+        FS_fclose(&mut fh);
+        return 0;
+    }
+    if len > 8192 - 1 {
+        len = 8192 - 1;
+    }
+
+    if FS_fseek(&mut fh, ofs as c_long, SEEK_SET) != 0 {
+        FS_fclose(&mut fh);
+        return 0;
+    }
+    let got = FS_fread(buf.as_mut_ptr().cast::<c_void>(), 1, len as usize, &mut fh);
+    FS_fclose(&mut fh);
+    if got == 0 {
+        return 0;
+    }
+    buf[got] = 0;
+
+    let mut p = buf.as_ptr();
+    while *p != 0 && *p != b'{' as c_char {
+        p = p.add(1);
+    }
+    if *p == 0 {
+        return 0;
+    }
+    p = p.add(1);
+
+    loop {
+        p = fs_map_title_quoted(p, key.as_mut_ptr(), 64);
+        if p.is_null() {
+            break;
+        }
+        p = fs_map_title_quoted(p, val.as_mut_ptr(), 256);
+        if p.is_null() {
+            break;
+        }
+        if q_strcasecmp(key.as_ptr(), c"message".as_ptr()) == 0 {
+            q_strlcpy(out, val.as_ptr(), outsize);
+            return if *out != 0 { 1 } else { 0 };
+        }
+    }
+
+    0
+}
+
+/// `FS_RandMap_f` -- pick one of the installed maps and start it.
+#[no_mangle]
+#[allow(non_snake_case)]
+unsafe extern "C" fn FS_RandMap_f() {
+    let (prefix, pre_len) = cmd_prefix_arg();
+
+    fs_scan_files(c"maps".as_ptr(), c".bsp".as_ptr(), prefix, pre_len);
+
+    if LISTNAME_COUNT == 0 {
+        CON_Printf(PRINT_NORMAL, c"No maps found.\n".as_ptr());
+        return;
+    }
+
+    // rand() is never seeded anywhere in this engine, and the callers that
+    // matter -- cl_tent.c's debris angles and everything downstream of the
+    // gamecode's RNG -- are written against that determinism.  Seeding it from
+    // a console command would change all of them; mix the clock in locally
+    // instead, so two randmaps in one session differ and nothing else is
+    // touched.
+    let which = ((rand() as c_uint) + ((Sys_DoubleTime() * 1000.0) as c_uint))
+        % (LISTNAME_COUNT as c_uint);
+
+    CON_Printf(
+        PRINT_NORMAL,
+        c"Starting map %s...\n".as_ptr(),
+        LISTNAMES[which as usize],
+    );
+    Cbuf_AddText(va(c"map %s\n".as_ptr(), LISTNAMES[which as usize]));
+
+    FS_FreeNameList();
+}
+
+/// `FS_Skies_f` -- the skyboxes `sky` will accept.  gl_sky.c's suf[] and its
+/// two search directories are restated because quakefs.c is renderer-
+/// independent and is also compiled into the software client, which has no
+/// gl_sky.c to extern them from.
+#[no_mangle]
+#[allow(non_snake_case)]
+unsafe extern "C" fn FS_Skies_f() {
+    static SKYFACES: [&[u8]; 6] = [b"rt\0", b"bk\0", b"lf\0", b"ft\0", b"up\0", b"dn\0"];
+    static SKYEXTS: [&[u8]; 3] = [b".png\0", b".tga\0", b".pcx\0"];
+    static SKYDIRS: [&[u8]; 2] = [b"gfx/env\0", b"skies\0"];
+
+    let (prefix, pre_len) = cmd_prefix_arg();
+    let mut suffix = [0 as c_char; 16];
+    let mut reset: c_int = 1;
+
+    for d in 0..2 {
+        for f in 0..6 {
+            for e in 0..3 {
+                q_snprintf(
+                    suffix.as_mut_ptr(),
+                    16,
+                    c"_%s%s".as_ptr(),
+                    SKYFACES[f].as_ptr().cast::<c_char>(),
+                    SKYEXTS[e].as_ptr().cast::<c_char>(),
+                );
+                fs_scan_files_ex(
+                    SKYDIRS[d].as_ptr().cast::<c_char>(),
+                    suffix.as_ptr(),
+                    prefix,
+                    pre_len,
+                    reset,
+                );
+                reset = 0;
+            }
+        }
+    }
+
+    show_name_list(
+        c"No skyboxes found.\n\n".as_ptr(),
+        c"Found %d skyboxes:\n\n".as_ptr(),
+    );
+}
+
+/// `FS_Games_f` -- the same scan ListGames does, rendered to the console
+/// instead of into a completion buffer; fillMatches returns early on a NULL
+/// buffer, which is what makes passing NULL here safe.
+#[no_mangle]
+#[allow(non_snake_case)]
+unsafe extern "C" fn FS_Games_f() {
+    let (prefix, _pre_len) = cmd_prefix_arg();
+
+    ListGames(prefix, core::ptr::null_mut(), 0);
+    show_name_list(
+        c"No game directories found.\n\n".as_ptr(),
+        c"Found %d game directories:\n\n".as_ptr(),
+    );
+}
+
+/// `CheckRegistered` -- the pop.txt graphic has to be in the pak for the
+/// registered features, and this verifies it byte for byte.
+#[no_mangle]
+pub unsafe extern "C" fn CheckRegistered() -> c_int {
+    let mut check = [0u16; 128];
+    let mut fh: FSHandleC = core::mem::zeroed();
+
+    // Through the handle, not a raw FILE *: an install repacked as a .pk3
+    // keeps pop.lmp in a deflated entry, and FS_OpenFile hands back a NULL
+    // FILE * for those.  Reading it the old way silently demoted a registered
+    // install to shareware.
+    if FS_OpenFileHandle(c"gfx/pop.lmp".as_ptr(), &mut fh, core::ptr::null_mut()) < 0 {
+        return -1;
+    }
+
+    if FS_fread(
+        check.as_mut_ptr().cast::<c_void>(),
+        1,
+        core::mem::size_of_val(&check),
+        &mut fh,
+    ) != core::mem::size_of_val(&check)
+    {
+        FS_fclose(&mut fh);
+        return -1;
+    }
+    FS_fclose(&mut fh);
+
+    for i in 0..128 {
+        if POP[i] != big_short(check[i]) {
+            CON_Printf(PRINT_TERMONLY, c"Corrupted data file\n".as_ptr());
+            return -1;
+        }
+    }
+
+    0
+}
+
+/// `Host_Game_f` -- runtime mod switching: "game <dirname>" to switch, "game"
+/// to print the current one.
+#[no_mangle]
+#[allow(non_snake_case)]
+unsafe extern "C" fn Host_Game_f() {
+    let mut path = [0 as c_char; MAX_OSPATH];
+
+    if Cmd_Argc() < 2 {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"Current game directory: %s\n".as_ptr(),
+            (&raw const fs_gamedir_nopath).cast::<c_char>(),
+        );
+        return;
+    }
+
+    let mut dir = Cmd_Argv(1);
+
+    // optional second arg: 1 = include portals data
+    let use_portals = Cmd_Argc() >= 3 && atoi(Cmd_Argv(2)) != 0;
+
+    // validate
+    if *dir == 0
+        || strcmp(dir, c".".as_ptr()) == 0
+        || !strstr(dir, c"..".as_ptr()).is_null()
+        || !strstr(dir, c"/".as_ptr()).is_null()
+        || !strstr(dir, c"\\".as_ptr()).is_null()
+    {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"gamedir should be a single directory name, not a path\n".as_ptr(),
+        );
+        return;
+    }
+
+    // switching back to base game
+    if q_strcasecmp(dir, c"data1".as_ptr()) == 0 {
+        dir = c"data1".as_ptr();
+    }
+
+    // already the current game?
+    if q_strcasecmp((&raw const fs_gamedir_nopath).cast::<c_char>(), dir) == 0 {
+        CON_Printf(PRINT_NORMAL, c"Already running: %s\n".as_ptr(), dir);
+        return;
+    }
+
+    // validate that the directory exists (skip for data1)
+    if q_strcasecmp(dir, c"data1".as_ptr()) != 0 {
+        // fs_basedir, not host_parms->basedir: -basedir moves the former and
+        // never touches the latter (uhexen2-5mhd).
+        q_snprintf(
+            path.as_mut_ptr(),
+            MAX_OSPATH,
+            c"%s/%s".as_ptr(),
+            fs_basedir_ptr(),
+            dir,
+        );
+        if Sys_FileType(path.as_ptr()) != FS_ENT_DIRECTORY {
+            // ...or under the userdir: FS_AddGameDirectory mounts both and
+            // requires neither to exist, so a mod installed only under
+            // ~/.hexen2/<dir> loads perfectly well (uhexen2-3m0h).
+            q_snprintf(
+                path.as_mut_ptr(),
+                MAX_OSPATH,
+                c"%s/%s".as_ptr(),
+                (*host_parms).userdir,
+                dir,
+            );
+            if Sys_FileType(path.as_ptr()) != FS_ENT_DIRECTORY {
+                CON_Printf(
+                    PRINT_NORMAL,
+                    c"Game directory \"%s\" not found\n".as_ptr(),
+                    dir,
+                );
+                return;
+            }
+        }
+    }
+
+    // === FULL ENGINE RESET ===
+
+    // save config to the old mod's directory, stop everything, flush the
+    // memory, and drop the stale client state
+    QuakeFS_TargetClientReset();
+    QuakeFS_TargetClientClearState();
+
+    // discard any pending commands from the old mod
+    Cbuf_Clear();
+
+    // Reset the filesystem back to the base game before adding new game
+    // paths.  Unwind to fs_base_nomp_searchpaths, NOT fs_base_searchpaths:
+    // the latter includes portals whenever the session was launched with
+    // -game, and stopping there left pak3 on the path across every later
+    // switch (uhexen2-5vb6).
+    fs_unwind_searchpaths(FS_BASE_NOMP_SEARCHPATHS, 0);
+    FS_BASE_SEARCHPATHS = FS_BASE_NOMP_SEARCHPATHS;
+
+    // The unwind above just took pak3/pak4 off the searchpath, so drop the
+    // flag that says they are on it.  gameflags is accumulate-only except for
+    // this one bit, and left stale it is fatal rather than cosmetic:
+    // CL_ParseServerInfo calls CL_LoadInfoStrings whenever it is set, and that
+    // Host_Errors on a missing infolist.txt in the middle of a map load
+    // (uhexen2-lx4m).  It is re-set below when portals is genuinely re-added.
+    gameflags &= !GAME_PORTALS;
+
+    Cache_Flush();
+
+    // optionally add portals as base for custom mods
+    if use_portals
+        && q_strcasecmp(dir, c"data1".as_ptr()) != 0
+        && q_strcasecmp(dir, c"portals".as_ptr()) != 0
+    {
+        q_snprintf(
+            path.as_mut_ptr(),
+            MAX_OSPATH,
+            c"%s/portals".as_ptr(),
+            fs_basedir_ptr(),
+        );
+        if Sys_FileType(path.as_ptr()) == FS_ENT_DIRECTORY {
+            fs_add_game_directory(c"portals".as_ptr(), 1);
+            FS_BASE_SEARCHPATHS = FS_SEARCHPATHS;
+        }
+    }
+
+    // add the new game directory (skip for data1 -- already in base)
+    if q_strcasecmp(dir, c"data1".as_ptr()) != 0 {
+        let base_fs = if q_strcasecmp(dir, c"portals".as_ptr()) == 0 {
+            1
+        } else {
+            0
+        };
+        fs_add_game_directory(dir, base_fs);
+    } else {
+        // reset gamedir tracking to data1
+        qerr_strlcpy(
+            c"Host_Game_f".as_ptr(),
+            3471,
+            (&raw mut fs_gamedir_nopath).cast::<c_char>(),
+            c"data1".as_ptr(),
+            MAX_QPATH,
+        );
+        FS_MakePath_BUF(
+            MAKEPATH_BASEDIR,
+            core::ptr::null_mut(),
+            (&raw mut FS_GAMEDIR).cast::<c_char>(),
+            MAX_OSPATH,
+            c"data1".as_ptr(),
+        );
+        FS_MakePath_BUF(
+            MAKEPATH_USERBASE,
+            core::ptr::null_mut(),
+            (&raw mut FS_USERDIR).cast::<c_char>(),
+            MAX_OSPATH,
+            c"data1".as_ptr(),
+        );
+    }
+
+    // Reload the client's view of the new mod and hold the video mode across
+    // the config exec that follows
+    QuakeFS_TargetClientReinit();
+    QuakeFS_TargetVidLock();
+    Cbuf_AddText(c"unbindall\nunaliasall\n".as_ptr());
+    Cbuf_AddText(QuakeFS_TargetStartupScript());
+    Cbuf_AddText(c"vid_unlock\n".as_ptr());
+    CON_Printf(PRINT_NORMAL, c"\ngame changed to \"%s\"\n".as_ptr(), dir);
+}
+
+//============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
 // `FS_MakePath_VA` (quakefs.h:239) and `FS_MakePath_VABUF` (:242) are the

@@ -106,6 +106,26 @@ int QuakeFS_TargetIsH2WIntegrated (void)
 
 #endif	/* H2W_INTEGRATED */
 
+/* Whether this target is a dedicated-only build -- SERVERONLY without H2W.
+ * The FS_Init rollback and the modified-games refusal are both guarded on
+ * `!(defined(H2W) && defined(SERVERONLY))`, which is the same test: h2ded and
+ * the wasm client take the guard, hwsv does not. */
+#if defined(SERVERONLY) && !defined(H2W)
+
+int QuakeFS_TargetIsServerOnly (void)
+{
+	return 1;
+}
+
+#else
+
+int QuakeFS_TargetIsServerOnly (void)
+{
+	return 0;
+}
+
+#endif	/* SERVERONLY && !H2W */
+
 /* The hwsv-only serverinfo write: `Info_SetValueForStarKey (svs.info,
  * "*gamedir", dir, ...)`, which names the `svs` global that exists in no other
  * binary.  Info_SetValueForStarKey itself is the info_str port and so is in
