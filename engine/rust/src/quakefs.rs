@@ -39,6 +39,19 @@
 // fs_base_nomp_searchpaths rather than fs_base_searchpaths (uhexen2-5vb6), and
 // the DEVELOPER-only diagnostics keep their text.
 
+//
+// 4. One asymmetry decides what crosses the boundary and what does not.
+//    Rust can *call* a C-variadic function on stable but cannot *define* one.
+//    So FS_MakePath_VA and FS_MakePath_VABUF -- variadic exports used by
+//    thirteen C call sites -- stay C in engine/rust/quakefs_variadic.c, which
+//    owns nothing but the va_list plumbing and asks this module for the buffer
+//    and the base half; while va(), the rotating-buffer formatter, is called
+//    from here directly, because calling it is an ordinary FFI call.  The same
+//    file also keeps FS_ResolveCasePath, for a different reason: it reads
+//    `struct dirent`, whose layout is the platform's and not the C standard's.
+//    That file is per *build*, not per target, which is why it is not
+//    quakefs_target.c.
+
 use core::ffi::{c_char, c_int, c_long, c_uint, c_void};
 use core::ffi::CStr;
 
