@@ -58,7 +58,9 @@ HARNESS_FEATURES=quakefs,zone,hashindex,cvar,cmd,info_str,sizebuf,crc,strlcpy,st
 # Floors, recorded beside the numbers the arms actually produce.  The floor is
 # one decimal place below the observation, so widening the enumeration does not
 # mean editing the gate.
-# Observed: client 7 cases / 7579 trace bytes; serveronly 7 cases / 5826.
+# Observed: client 7 cases / 7893 trace bytes; serveronly 7 cases / 9167.
+# (The numbers are re-recorded whenever the harness changes shape; the floors
+# below are what the gate enforces, and they are one step under these.)
 FLOOR_CASES=6
 FLOOR_BYTES=5000
 
@@ -89,7 +91,7 @@ for arm in client serveronly; do
 		cat "$log" >&2
 		exit 1
 	fi
-	cases=$(grep -c '^case ' "$log" || true)
+	cases=$(grep -oE '^case [a-z-]+' "$log" | sort -u | wc -l)
 	trace_bytes=$(stat -c%s "$work/arm-$arm/rust.trace" 2>/dev/null || echo 0)
 	if [ "$cases" -lt "$FLOOR_CASES" ]; then
 		echo "FAIL: $arm ran $cases cases, below the floor of $FLOOR_CASES" >&2
@@ -126,7 +128,7 @@ root = sys.argv[1]
 c = open(f"{root}/engine/h2shared/quakefs.c").read()
 r = open(f"{root}/engine/rust/src/quakefs.rs").read()
 
-def block(text, start_pat, end_pat=r'\n\};|\n\];'):
+def block(text, start_pat, end_pat=r'\n[ \t]*\};|\n[ \t]*\];'):
     m = re.search(start_pat, text)
     if not m:
         return None
@@ -138,13 +140,20 @@ def c_strings(seg):
     return re.findall(r'"([^"]*)"', seg) if seg else []
 
 def r_strings(seg):
-    return re.findall(r'(?:c|b)?"([^"]*)"', seg) if seg else []
+    # The Rust spellings are CStr/byte-string literals: b"rt\0" IS the C string
+    # "rt", so the trailing NUL is stripped before comparing.
+    out = []
+    for lit in re.findall(r'(?:c|b)?"([^"]*)"', seg) if seg else []:
+        out.append(lit[:-2] if lit.endswith('\\0') else lit)
+    return out
 
 def c_numbers(seg):
-    return re.findall(r'\b(\d+)\b', seg) if seg else []
+    # The C's pop[] is written in hex (0x6600), so decimal-only matching sees
+    # nothing -- normalise both sides through int(x, 0).
+    return [int(x, 0) for x in re.findall(r'0x[0-9a-fA-F]+|\b\d+\b', seg)] if seg else []
 
 def r_numbers(seg):
-    return re.findall(r'\b(\d+)\b', seg) if seg else []
+    return [int(x, 0) for x in re.findall(r'0x[0-9a-fA-F]+|\b\d+\b', seg)] if seg else []
 
 checks = [
     ("pakdata[]",          r'static pakdata_t pakdata\[',        r'static PAKDATA:'),
@@ -172,21 +181,30 @@ for name, cpat, rpat in checks:
         print(f"  {name}: {len(cs)} entries match")
 
 # pop[] is numbers, not strings.
-cp = c_numbers(block(c, r'static const unsigned short pop\[\]'))
-rp = r_numbers(block(r, r'static POP:'))
+cp = c_numbers(block(c, r'static const unsigned short\s+pop\[\]'))
+# From the '= [' onward: the declaration's own `[u16; 128]` would otherwise
+# contribute a 129th number.
+_pop = block(r, r'static POP:')
+rp = r_numbers(_pop[_pop.index('= [') + 3:] if '= [' in _pop else _pop)
 if cp != rp:
     bad += 1
     print(f"FAIL: pop[] differs (C {len(cp)} values, Rust {len(rp)})", file=sys.stderr)
 else:
     print(f"  pop[]: {len(cp)} values match")
 
-# The sky lists live inside a function in the C and as statics in the Rust.
-c_sky = c_strings(block(c, r'static const char \*const skyfaces\[6\]')) + \
-        c_strings(block(c, r'static const char \*const skyexts\[3\]')) + \
-        c_strings(block(c, r'static const char \*const skydirs\[2\]'))
-r_sky = r_strings(block(r, r'static SKYFACES:')) + \
-        r_strings(block(r, r'static SKYEXTS:')) + \
-        r_strings(block(r, r'static SKYDIRS:'))
+# The sky lists: single-line arrays on both sides, so they are read from their
+# own line rather than through block(), whose close pattern assumes the brace
+# starts a line.
+def one_line(text, pat):
+    m = re.search(pat + r'[^\n]*', text)
+    return m.group(0) if m else ''
+
+c_sky = (c_strings(one_line(c, r'static const char \*const skyfaces\[6\]')) +
+         c_strings(one_line(c, r'static const char \*const skyexts\[3\]')) +
+         c_strings(one_line(c, r'static const char \*const skydirs\[2\]')))
+r_sky = (r_strings(one_line(r, r'static SKYFACES:')) +
+         r_strings(one_line(r, r'static SKYEXTS:')) +
+         r_strings(one_line(r, r'static SKYDIRS:')))
 if c_sky != r_sky:
     bad += 1
     print(f"FAIL: the sky lists differ\n      C: {c_sky}\n      Rust: {r_sky}", file=sys.stderr)
@@ -218,18 +236,14 @@ symbols=()
 while read -r sym; do
 	[ -n "$sym" ] && symbols+=("$sym")
 done < <(grep -oE '^(const char|char|void|int|long|qboolean|size_t|byte|unsigned int|fshandle_t|FILE) +\**([A-Za-z_][A-Za-z0-9_]*) *\(' \
-	"$root/engine/h2shared/quakefs.h" | grep -oE '[A-Za-z_][A-Za-z0-9_]* *\($' | tr -d ' (' | sort -u)
-# The variadic and dirent entry points come from the C shim, not the archive.
-shim_symbols=(FS_MakePath_VA FS_MakePath_VABUF FS_ResolveCasePath QuakeFS_TargetHostError)
+	"$root/engine/h2shared/quakefs.h" | grep -oE '[A-Za-z_][A-Za-z0-9_]* *\($' | tr -d ' (' | sort -u \
+	| grep -vE '^(FS_MakePath_VA|FS_MakePath_VABUF|FS_ResolveCasePath)$')
+# The variadic and dirent entry points come from the C shim
+# (engine/rust/quakefs_variadic.c), which is compiled per target, so they are
+# checked in the binaries below and not in the archive.
+shim_binary_symbols=(FS_MakePath_VA FS_MakePath_VABUF FS_ResolveCasePath QuakeFS_TargetHostError)
 globals=(fs_gamedir_nopath gameflags fs_filesize file_from_pak oem registered)
 for sym in "${symbols[@]}"; do
-	n=$(nm "$archive" 2>/dev/null | grep -cE " T ${sym}\$" || true)
-	if [ "$n" -ne 1 ]; then
-		echo "FAIL: libengine_rs.a: $sym has $n definitions, expected exactly 1" >&2
-		exit 1
-	fi
-done
-for sym in "${shim_symbols[@]}"; do
 	n=$(nm "$archive" 2>/dev/null | grep -cE " T ${sym}\$" || true)
 	if [ "$n" -ne 1 ]; then
 		echo "FAIL: libengine_rs.a: $sym has $n definitions, expected exactly 1" >&2
@@ -243,12 +257,12 @@ for sym in "${globals[@]}"; do
 		exit 1
 	fi
 done
-echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} FS functions, ${#shim_symbols[@]}/${#shim_symbols[@]} shim entries and ${#globals[@]}/${#globals[@]} globals once"
+echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} FS functions and ${#globals[@]}/${#globals[@]} globals once"
 
 echo
 echo "== 7. exactly one quakefs definition, and the shim symbols, in every target =="
 targets=(glhexen2 h2ded hwsv)
-predicates=(QuakeFS_TargetIsH2W QuakeFS_TargetIsH2WIntegrated QuakeFS_TargetHasClientCommands QuakeFS_TargetClientReset QuakeFS_TargetClientClearState QuakeFS_TargetClientReinit QuakeFS_TargetVidLock QuakeFS_TargetShowList QuakeFS_TargetSetHwServerinfo QuakeFS_TargetHostError QuakeFS_TargetDefSize QuakeFS_TargetSecSize QuakeFS_TargetHasCache QuakeFS_TargetDedicated Cmd_TargetHasClientLists Cmd_TargetIsH2W Cmd_TargetHasBuiltinStartupScript)
+predicates=(QuakeFS_TargetIsH2W QuakeFS_TargetIsH2WIntegrated QuakeFS_TargetHasClientCommands QuakeFS_TargetClientReset QuakeFS_TargetClientClearState QuakeFS_TargetClientReinit QuakeFS_TargetVidLock QuakeFS_TargetShowList QuakeFS_TargetSetHwServerinfo QuakeFS_TargetHostError Zone_TargetDefSize Zone_TargetSecSize Zone_TargetHasCache Zone_TargetDedicated Cmd_TargetHasClientLists Cmd_TargetIsH2W Cmd_TargetHasBuiltinStartupScript)
 for bin in "${targets[@]}"; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
@@ -266,14 +280,14 @@ for bin in "${targets[@]}"; do
 			exit 1
 		fi
 	done
-	for sym in "${predicates[@]}"; do
+	for sym in "${predicates[@]}" "${shim_binary_symbols[@]}"; do
 		n=$(nm "$path" | grep -cE " [Tt] ${sym}\$" || true)
 		if [ "$n" -ne 1 ]; then
 			echo "FAIL: $bin: $sym has $n definitions, expected exactly 1" >&2
 			exit 1
 		fi
 	done
-	echo "  $bin: ${#symbols[@]}/${#symbols[@]} FS functions, ${#globals[@]}/${#globals[@]} globals and ${#predicates[@]}/${#predicates[@]} shim symbols exactly once"
+	echo "  $bin: ${#symbols[@]}/${#symbols[@]} FS functions, ${#globals[@]}/${#globals[@]} globals, ${#predicates[@]}/${#predicates[@]} shim predicates and ${#shim_binary_symbols[@]}/${#shim_binary_symbols[@]} variadic/dirent entries exactly once"
 done
 stray=$(find "$engine_build" -name 'quakefs.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
