@@ -769,6 +769,24 @@ fn little_long(v: c_int) -> c_int {
 }
 
 //============================================================================
+// what cannot come across, and where it goes instead
+//============================================================================
+// `FS_MakePath_VA` (quakefs.h:239) and `FS_MakePath_VABUF` (:242) are the
+// file's only two C-variadic exports, with thirteen call sites in host.c,
+// host_cmd.c, menu.c, server/host_cmd.c and sv_ccmds.c.  Rust cannot *define* a
+// C-variadic function on stable -- `c_variadic` is unstable, and defining one
+// contradicts the crate's no-nightly, no-dependency rule -- so those two entry
+// points stay in C, in a small shim beside engine/rust/quakefs_target.c that
+// formats with `q_vsnprintf` and calls the non-variadic core this module owns
+// (`FS_MakePath` / `FS_MakePath_BUF`).  The same applies to the internal
+// `FSERR_MakePath_VABUF`, whose two callers can format through `q_snprintf`
+// themselves instead, so only the exported pair needs the shim.
+//
+// Nothing else in the file is variadic, so this is a bounded exception rather
+// than a second implementation: the path *logic* -- which base directory, the
+// separator, the truncation diagnostic -- is still this module's.
+
+//============================================================================
 // the loader group
 //============================================================================
 
