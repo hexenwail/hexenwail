@@ -944,9 +944,30 @@ static void scenario_dispatch(void)
 	cur->AddCommand("cfg_enginedefaults", echo_cmd);
 	rec_state();
 
-	call("a removed legacy command");
-	cur->ExecuteString("gl_ztrick 1", src_command);
-	rec_state();
+	/* Every name in the C's legacy_cmds[] (cmd.c:865-871), not just the first:
+	 * a name the port drops shows up here as "Unknown command" where the C
+	 * stays silent, and a name it invents is caught by the gate's comparison
+	 * of the two lists.  Probing one name only is what let an invented entry
+	 * through once. */
+	{
+		static const char *const legacy[] = {
+			"gl_ztrick", "gl_max_size", "sys_delay", "r_transwater",
+			"_windowed_mouse", "vid_stretch_by_2", "vid_config_y",
+			"vid_config_x", "_vid_default_mode_win",
+			"_vid_default_mode", "_vid_wait_override",
+			"vid_nopageflip", "sys_quake2",
+		};
+		unsigned int li;
+
+		for (li = 0; li < sizeof legacy / sizeof legacy[0]; li++) {
+			char legacy_line[64];
+
+			snprintf(legacy_line, sizeof legacy_line, "%s 1", legacy[li]);
+			call(legacy_line);
+			cur->ExecuteString(legacy_line, src_command);
+			rec_state();
+		}
+	}
 
 	call("an unknown command");
 	cur->ExecuteString("nosuchcommand x", src_command);

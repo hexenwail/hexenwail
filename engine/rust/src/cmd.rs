@@ -359,7 +359,7 @@ static mut STUFFCMDS_DONE: c_int = 0;
 
 /// `static const char *legacy_cmds[]` in Cmd_ExecuteString -- removed legacy
 /// commands that an old config may still name, silently ignored.
-static LEGACY_CMDS: [&[u8]; 15] = [
+static LEGACY_CMDS: [&[u8]; 14] = [
     b"gl_ztrick\0",
     b"gl_max_size\0",
     b"sys_delay\0",
@@ -373,7 +373,6 @@ static LEGACY_CMDS: [&[u8]; 15] = [
     b"_vid_wait_override\0",
     b"vid_nopageflip\0",
     b"sys_quake2\0",
-    b"term_escapes\0",
     b"\0",
 ];
 

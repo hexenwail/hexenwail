@@ -192,8 +192,28 @@ stray=$(find "$engine_build" -name 'cmd.c.o' | wc -l)
 }
 
 echo
+echo "== 6. the legacy command list matches the C's, entry for entry =="
+# Cmd_ExecuteString silently ignores a list of removed legacy commands.  A name
+# the port drops turns a silent return into "Unknown command"; a name it
+# invents turns a diagnostic into a silent return.  Neither is visible to a
+# harness probe of one name, so the two lists are compared here directly and in
+# order -- this is the check that catches an entry that exists in the port and
+# nowhere in the C.
+c_legacy=$(sed -n '/static const char \*legacy_cmds\[\]/,/NULL/p' \
+	"$root/engine/h2shared/cmd.c" | grep -oE '"[^"]+"' | tr -d '"')
+r_legacy=$(sed -n '/static LEGACY_CMDS/,/^\];/p' \
+	"$root/engine/rust/src/cmd.rs" | grep -oE 'b"[^"]*"' \
+	| sed 's/^b"//; s/"$//; s/\\0$//' | grep -v '^$')
+if [ -z "$c_legacy" ] || [ "$c_legacy" != "$r_legacy" ]; then
+	echo "FAIL: the legacy command lists differ (C on the left, Rust on the right)" >&2
+	diff <(printf '%s\n' "$c_legacy") <(printf '%s\n' "$r_legacy") >&2 || true
+	exit 1
+fi
+echo "  $(printf '%s\n' "$c_legacy" | wc -l) legacy names match the C's, in order"
+
+echo
 echo "PASS: Rust cmd -- the C original and the Rust module agree byte for byte"
-echo "      across the registry, the tokenizer, the command buffer, the aliases"
-echo "      and the diagnostics, in all three target arms; the per-target"
-echo "      predicates are compiled into every binary; no cmd.c object is left"
-echo "      in the engine build."
+echo "      across the registry, the tokenizer, the command buffer, the aliases,"
+echo "      every removed legacy name and the diagnostics, in all three target"
+echo "      arms; the per-target predicates are compiled into every binary; no"
+echo "      cmd.c object is left in the engine build."
