@@ -41,7 +41,12 @@
 // keeps the functions out of the info_str-only build, as sizebuf.rs does for
 // msg_io.
 
-use core::ffi::{c_char, c_float, c_int, c_uint, c_void};
+use core::ffi::{c_char, c_float, c_int, c_uint};
+
+// Only the cvar functions cast through c_void; the ABI half above does not, so
+// the import is gated or an info_str-only build warns it is unused.
+#[cfg(feature = "cvar")]
+use core::ffi::c_void;
 
 //============================================================================
 // cvar_t
