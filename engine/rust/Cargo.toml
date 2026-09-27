@@ -27,6 +27,7 @@ strlcat = []
 huffman = []
 wad = []
 cvar = []
+cmd = []
 zone = []
 
 [profile.release]

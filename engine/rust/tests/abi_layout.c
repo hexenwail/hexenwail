@@ -203,6 +203,36 @@ RUST_ACCESSOR(UsercmdC_offsetof_buttons)
 RUST_ACCESSOR(UsercmdC_offsetof_impulse)
 RUST_ACCESSOR(UsercmdC_offsetof_light_level)
 
+/* cmd_function_t and cmdalias_t are private to cmd.c, so this program spells
+ * out copies of them (as it does for mplane_t) and compares Rust's view with
+ * the C compiler's. */
+typedef struct abi_cmd_function_s {
+	struct abi_cmd_function_s *next;
+	const char *name;
+	void (*function)(void);
+} abi_cmd_function_t;
+
+typedef struct abi_cmd_alias_s {
+	struct abi_cmd_alias_s *next;
+	char name[32];
+	char *value;
+} abi_cmd_alias_t;
+
+STRUCT_ACCESSORS(CmdFunctionC)
+RUST_ACCESSOR(CmdFunctionC_alignof)
+RUST_ACCESSOR(CmdFunctionC_offsetof_next)
+RUST_ACCESSOR(CmdFunctionC_offsetof_name)
+RUST_ACCESSOR(CmdFunctionC_offsetof_function)
+
+STRUCT_ACCESSORS(CmdAliasC)
+RUST_ACCESSOR(CmdAliasC_alignof)
+RUST_ACCESSOR(CmdAliasC_offsetof_next)
+RUST_ACCESSOR(CmdAliasC_offsetof_name)
+RUST_ACCESSOR(CmdAliasC_offsetof_value)
+
+RUST_ACCESSOR(Cmd_MAX_ARGS)
+RUST_ACCESSOR(Cmd_MAX_ALIAS_NAME)
+
 STRUCT_ACCESSORS(WadInfoC)
 RUST_ACCESSOR(WadInfoC_offsetof_identification)
 RUST_ACCESSOR(WadInfoC_offsetof_numlumps)
@@ -242,14 +272,31 @@ sizebuf_t net_message;
 /* cvar.rs's own calls.  Same rule as the block above: the engine provides all
  * of these, the archive leaves them undefined, and the layout program never
  * reaches them. */
-const char *Cmd_Argv (int arg) { (void)arg; abort(); }
-int Cmd_Argc (void) { abort(); }
-void Cmd_AddCommand (const char *cmd_name, void (*function)(void))
-{
-	(void)cmd_name; (void)function; abort();
-}
-int Cmd_Exists (const char *cmd_name) { (void)cmd_name; abort(); }
 int q_strcasecmp (const char *s1, const char *s2) { (void)s1; (void)s2; abort(); }
+int q_strncasecmp (const char *s1, const char *s2, size_t n)
+{
+	(void)s1; (void)s2; (void)n; abort();
+}
+const char *COM_Parse (const char *data) { (void)data; abort(); }
+char com_token[1024];
+byte *FS_LoadHunkFile (const char *path, unsigned int *path_id)
+{
+	(void)path; (void)path_id; abort();
+}
+char *FS_MakePath (int base, int *error, const char *path)
+{
+	(void)base; (void)error; (void)path; abort();
+}
+int FS_FileExists (const char *filename, unsigned int *path_id)
+{
+	(void)filename; (void)path_id; abort();
+}
+int host_initialized;
+/* The cmd port's per-target predicates live in engine/rust/cmd_target.c, which
+ * this program does not link; it checks layouts, not behaviour. */
+int Cmd_TargetHasClientLists (void) { abort(); }
+int Cmd_TargetIsH2W (void) { abort(); }
+int Cmd_TargetHasBuiltinStartupScript (void) { abort(); }
 int q_snprintf (char *str, size_t size, const char *format, ...)
 {
 	(void)str; (void)size; (void)format; abort();
@@ -335,6 +382,21 @@ int main (void)
 	OFF(usercmd_t, buttons, UsercmdC, buttons);
 	OFF(usercmd_t, impulse, UsercmdC, impulse);
 	OFF(usercmd_t, light_level, UsercmdC, light_level);
+
+	SIZE(abi_cmd_function_t, CmdFunctionC);
+	ALIGN(abi_cmd_function_t, CmdFunctionC);
+	OFF(abi_cmd_function_t, next, CmdFunctionC, next);
+	OFF(abi_cmd_function_t, name, CmdFunctionC, name);
+	OFF(abi_cmd_function_t, function, CmdFunctionC, function);
+
+	SIZE(abi_cmd_alias_t, CmdAliasC);
+	ALIGN(abi_cmd_alias_t, CmdAliasC);
+	OFF(abi_cmd_alias_t, next, CmdAliasC, next);
+	OFF(abi_cmd_alias_t, name, CmdAliasC, name);
+	OFF(abi_cmd_alias_t, value, CmdAliasC, value);
+
+	check("Cmd_MAX_ARGS", (size_t)80, (size_t)Cmd_MAX_ARGS());
+	check("Cmd_MAX_ALIAS_NAME", (size_t)32, (size_t)Cmd_MAX_ALIAS_NAME());
 
 	SIZE(wadinfo_t, WadInfoC);
 	OFF(wadinfo_t, identification, WadInfoC, identification);

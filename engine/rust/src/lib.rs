@@ -26,7 +26,7 @@ pub mod mathlib;
 // in a harness build that leaves the sizebuf functions to the C original.  The
 // layout lives in one place; which half of sizebuf.rs is compiled is decided
 // there.
-#[cfg(any(feature = "sizebuf", feature = "msg_io"))]
+#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd"))]
 pub mod sizebuf;
 
 // cvar is the Phase 6 engine-state port, and info_str reads
@@ -34,14 +34,20 @@ pub mod sizebuf;
 // harness build that links only that port.  Same split as sizebuf/msg_io: the
 // layout is unconditional in cvar.rs and the functions are behind
 // `feature = "cvar"`.
-#[cfg(any(feature = "cvar", feature = "info_str"))]
+#[cfg(any(feature = "cvar", feature = "info_str", feature = "cmd"))]
 pub mod cvar;
 
 // zone is the Phase 6 allocator/ownership port.  It has no ABI half of its own
 // that another port needs -- its structs are private to zone.c -- so it is
 // compiled only for its own feature.
-#[cfg(feature = "zone")]
+#[cfg(any(feature = "zone", feature = "cmd"))]
 pub mod zone;
+
+// cmd is the Phase 6 command/registry port.  It needs cvar_t (Cmd_CheckCommand
+// walks the list directly), SizeBufC (cmd_text), QuakeParmsC (com_argc/com_argv
+// are macros over host_parms) and the per-target predicates in cmd_target.c.
+#[cfg(feature = "cmd")]
+pub mod cmd;
 
 #[cfg(feature = "crc")]
 pub mod crc;

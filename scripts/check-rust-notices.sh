@@ -64,6 +64,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Rust file (relative to the repo root) -> the C file it was translated from.
 derived_map() {
 	cat <<-'EOF'
+	engine/rust/src/cmd.rs                engine/h2shared/cmd.c
 	engine/rust/src/crc.rs                common/crc.c
 	engine/rust/src/cvar.rs               engine/h2shared/cvar.c
 	engine/rust/src/huffman.rs            engine/hexenworld/shared/huffman.c
