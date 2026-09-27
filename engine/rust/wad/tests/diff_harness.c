@@ -169,10 +169,19 @@ static void rec_str(const char *s) { rec(s, strlen(s) + 1); }
 #define ZONE_SIZE 4096
 #define WAD_MAX 1024
 
-static byte zone[ZONE_SIZE];
+// The zone the wad is mapped into.  Aligned deliberately: the unaligned-table
+// case below needs an offset that is not a multiple of `lumpinfo_t`'s
+// alignment, and a bare byte array's own alignment is only 1 -- which would
+// make the case depend on where the compiler happened to put the array.
+static union {
+	byte bytes[ZONE_SIZE];
+	int align;
+	void *align_ptr;
+} zone_storage;
+#define zone (zone_storage.bytes)
+
 static byte wad_tmpl[WAD_MAX];
 static int wad_len;
-
 // FS_LoadZoneFile is the only way the wad reaches W_LoadWadFile, so this is
 // where the harness controls the input.  Every load gets a fresh copy of the
 // current template, so the two implementations always start from the same
@@ -321,8 +330,22 @@ static const tmpl_lump_t lumps_endian[] = {
 	{ "BIGVALS", TYP_NONE, palette, 8, 0x01020304 },
 };
 
+// The unaligned-table case.  A picture lump first, so SwapPic is reached
+// through a misaligned filepos as well as read out of a misaligned table.
+static const tmpl_lump_t lumps_odd[] = {
+	{ "TINYFONT", TYP_QPIC, pic_font, 12, 12 },
+	{ "PALETTE", TYP_PALETTE, palette, 8, 8 },
+};
+
 #define LUMPINFO_SIZE 32
 #define WAD_TABLE_OFS 12
+
+// Neither the table nor the lump data starts on a `lumpinfo_t`/`qpic_t`
+// boundary here.  The wad format requires neither alignment; the C reads
+// through both offsets, and the port must agree byte for byte without
+// turning the C's caller precondition into a Rust-level alignment assumption.
+#define WAD_TABLE_OFS_ODD 13
+#define WAD_DATA_OFS_ODD (WAD_TABLE_OFS_ODD + 2 * LUMPINFO_SIZE + 1)
 
 enum {
 	T_GFX = 0,
@@ -336,6 +359,7 @@ enum {
 	T_ID_WXD2,
 	T_ID_WAX2,
 	T_ID_WADX,
+	T_ODD_TABLE,
 };
 
 static void put_le32(byte *p, int v)
@@ -346,18 +370,19 @@ static void put_le32(byte *p, int v)
 	p[3] = (byte)(v >> 24);
 }
 
-static void build_wad(const char *id, const tmpl_lump_t *lumps, int n)
+static void build_wad_at(const char *id, const tmpl_lump_t *lumps, int n,
+		int tableofs, int datastart)
 {
-	int dataofs = WAD_TABLE_OFS + LUMPINFO_SIZE * n;
+	int dataofs = datastart;
 	int i;
 
 	memset(wad_tmpl, 0, sizeof wad_tmpl);
 	memcpy(wad_tmpl, id, 4);
 	put_le32(wad_tmpl + 4, n);
-	put_le32(wad_tmpl + 8, WAD_TABLE_OFS);
+	put_le32(wad_tmpl + 8, tableofs);
 
 	for (i = 0; i < n; ++i) {
-		byte *e = wad_tmpl + WAD_TABLE_OFS + LUMPINFO_SIZE * i;
+		byte *e = wad_tmpl + tableofs + LUMPINFO_SIZE * i;
 
 		put_le32(e + 0, dataofs);		// filepos
 		put_le32(e + 4, lumps[i].datalen);	// disksize
@@ -379,6 +404,12 @@ static void build_wad(const char *id, const tmpl_lump_t *lumps, int n)
 		fprintf(stderr, "harness bug: template is %d bytes\n", wad_len);
 		abort();
 	}
+}
+
+static void build_wad(const char *id, const tmpl_lump_t *lumps, int n)
+{
+	build_wad_at(id, lumps, n, WAD_TABLE_OFS,
+		WAD_TABLE_OFS + LUMPINFO_SIZE * n);
 }
 
 static void select_wad(int which)
@@ -417,6 +448,11 @@ static void select_wad(int which)
 		break;
 	case T_ID_WADX:
 		build_wad("WADX", lumps_one, 1);
+		break;
+	case T_ODD_TABLE:
+		build_wad_at("WAD2", lumps_odd,
+			(int)(sizeof lumps_odd / sizeof lumps_odd[0]),
+			WAD_TABLE_OFS_ODD, WAD_DATA_OFS_ODD);
 		break;
 	default:
 		fprintf(stderr, "harness bug: unknown template %d\n", which);
@@ -850,6 +886,58 @@ static void scenario_pictures(void)
 	rec_state();
 }
 
+// The lump table and the lump data are both deliberately misaligned.  This is
+// the case issue #249 asks for: the port forms a `lumpinfo_t` pointer from the
+// header's infotableofs and a `qpic_t` pointer from a lump's filepos, and the
+// C accepts both without checking alignment.  A Rust dereference through a
+// misaligned pointer is undefined behaviour, so the port reads and writes those
+// fields unaligned; the bytes it leaves are the same bytes the C leaves, which
+// is what this case compares.
+static void scenario_odd_table(void)
+{
+	check(WAD_TABLE_OFS_ODD % 4 != 0,
+		"harness bug: the odd table offset is aligned");
+	check(WAD_DATA_OFS_ODD % 4 != 0,
+		"harness bug: the odd lump data offset is aligned");
+	check(((uintptr_t)zone + WAD_TABLE_OFS_ODD) % 4 != 0,
+		"harness bug: the table address itself is aligned");
+	check(((uintptr_t)zone + WAD_DATA_OFS_ODD) % 4 != 0,
+		"harness bug: the lump data address itself is aligned");
+
+	load_wad("a wad with an unaligned lump table", T_ODD_TABLE, "gfx.wad",
+		0, NULL, 0, 0);
+	numlumps_is("two lumps", 2);
+	lumps_at("the table is at the offset the header named",
+		WAD_TABLE_OFS_ODD);
+
+	// The endian conversion and the in-place name cleanup both ran on the
+	// misaligned table.
+	lump_field("filepos is little-endian", 0, "filepos",
+		cur->lumps[0][0].filepos, WAD_DATA_OFS_ODD);
+	lump_field("size is little-endian", 0, "size",
+		cur->lumps[0][0].size, 12);
+
+	// The picture lump's width and height were swapped in place at a
+	// misaligned filepos, and the palette lump was left alone.
+	check(le32_at(zone + WAD_DATA_OFS_ODD) == (int)LittleLong(16),
+		"[%s]: tinyfont width is 0x%08x, want 16", cur->name,
+		(unsigned)le32_at(zone + WAD_DATA_OFS_ODD));
+	check(le32_at(zone + WAD_DATA_OFS_ODD + 4) == (int)LittleLong(8),
+		"[%s]: tinyfont height is 0x%08x, want 8", cur->name,
+		(unsigned)le32_at(zone + WAD_DATA_OFS_ODD + 4));
+	check(memcmp(zone + WAD_DATA_OFS_ODD + 12, palette,
+		sizeof palette) == 0,
+		"[%s]: the palette lump was modified", cur->name);
+
+	lookup("a lump in the unaligned table", "tinyfont", NULL,
+		WAD_TABLE_OFS_ODD);
+	lookup("the second lump", "palette", NULL,
+		WAD_TABLE_OFS_ODD + LUMPINFO_SIZE);
+	lumpname("a lump's data in the unaligned table", "tinyfont", NULL,
+		WAD_DATA_OFS_ODD);
+	rec_state();
+}
+
 // The identification check and its fatal path.  The mapping is already in place
 // when the check runs, and nothing in it has been edited yet -- but wad_base
 // has been repointed, so the previous wad is only reachable through the next
@@ -1076,6 +1164,7 @@ int main(void)
 	run_case("load: the lump names", scenario_names);
 	run_case("load: the endian fields", scenario_endian);
 	run_case("load: the picture lumps", scenario_pictures);
+	run_case("load: an unaligned lump table", scenario_odd_table);
 	run_case("load: the WAD2 identification check", scenario_bad_id);
 	run_case("load: the couldn't-load path", scenario_load_failure);
 	run_case("load: reloading", scenario_reload);
