@@ -142,8 +142,13 @@ and `QuakeParmsC` (zone/cmd).
 
 Still C: `mz_*` from vendored **miniz** (the zip reader: `mz_zip_reader_init`,
 `…_file_stat`, `…_get_num_files`, `…_extract_to_mem`, `…_end`), which stays a C
-dependency until Phase 11 replaces or externalises it, and the `FS_*` syscall
-helpers themselves.
+dependency until Phase 11 replaces or externalises it, plus the three entry
+points that cannot move in this port — `FS_MakePath_VA`/`FS_MakePath_VABUF`
+(C-variadic, which stable Rust cannot define, so they stay in
+`engine/rust/quakefs_variadic.c`) and `FS_ResolveCasePath` (walks
+`struct dirent`, a glibc layout, not a standard one).  The `FS_*` syscall
+helpers themselves *are* ported — this note originally listed them as staying
+C, which the port disproved.
 
 ## 5. Tables the gate must compare against the C, entry for entry
 

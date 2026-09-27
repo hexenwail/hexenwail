@@ -1149,30 +1149,6 @@ int main(int argc, char **argv)
 	return failures ? 1 : 0;
 }
 
-/*============================================================================
- * WIP -- THIS FILE DOES NOT COMPILE YET.  It is committed so a later run
- * starts from the design rather than from a blank page.  `cc -c -O1 -DGLQUAKE
- * -Iengine/hexen2 -Iengine/h2shared -Icommon` reports 69 errors, in these
- * classes:
- *
- *  1. The IMPL prefix does not work yet.  `#define FS_Init CAT(IMPL, FS_Init)`
- *     pastes the *name* IMPL instead of its expansion, so the no-`-DIMPL`
- *     (Rust) arm ends up with IMPLfs_filesize and friends undeclared.  Fix is
- *     the two-level paste: `#define CAT_(a,b) a##b` / `#define CAT(a,b) CAT_(a,b)`
- *     and `#define FS_Init CAT(IMPL, FS_Init)`.
- *  2. Missing includes: <fcntl.h> for open()/O_RDWR/O_CREAT/O_TRUNC,
- *     "miniz.h" for MZ_NO_COMPRESSION/MZ_DEFAULT_COMPRESSION and the writer.
- *  3. mz_zip_writer_create()/mz_zip_writer_write_archive() are invented; the
- *     vendored miniz has no such names.  Either use its real writer API
- *     (grep miniz.h for mz_zip_writer_*) or build the STORED member by hand.
- *  4. Sys_FindFirstFile/Sys_FindNextFile/Sys_FindClose are now the real
- *     fsfind_t signatures but the body still returns before filling names on
- *     the first call -- rework against sys.h:54-56.
- *  5. Several int-to-pointer diagnostics are downstream of 1.
- *
- * After it compiles: the run script (two binaries, `-DIMPL=c_` and bare, same
- * substrate, traces compared byte for byte), then scripts/check-rust-quakefs.sh
- * with per-arm floors and the structural table comparison, then the single
- * wiring commit.  See the file header for the design and what it deliberately
- * does not cover.
- *============================================================================*/
+/* The file ends at run_case(): every case runs in a child per implementation and
+ * the traces are compared with memcmp, so a difference is reported as a byte
+ * offset rather than as a failing assertion. */
