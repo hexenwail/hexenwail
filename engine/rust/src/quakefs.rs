@@ -111,10 +111,14 @@ const LOADFILE_MALLOC: c_int = 5;
 /// The numbers are positional in that enum and must match it.  Prefixed here
 /// because the plain names are this file's own state (`fs_gamedir` and
 /// friends) rather than the bases a path can be made against.
+/// The values are quakefs.h:232-235, which orders them FS_BASEDIR,
+/// FS_USERBASE, FS_GAMEDIR, FS_USERDIR -- not the "basedir, gamedir,
+/// userdir, userbase" order the names suggest.  init_MakePath's switch is the
+/// authority and this follows it, not the mnemonic.
 const MAKEPATH_BASEDIR: c_int = 0;
-const MAKEPATH_GAMEDIR: c_int = 1;
-const MAKEPATH_USERDIR: c_int = 2;
-const MAKEPATH_USERBASE: c_int = 3;
+const MAKEPATH_USERBASE: c_int = 1;
+const MAKEPATH_GAMEDIR: c_int = 2;
+const MAKEPATH_USERDIR: c_int = 3;
 
 /// `MAX_FILES_IN_PACK` and `MAX_OSPATH` bounds the pack loader enforces.
 const MAX_PAK_SIZE: c_long = 0x7FFFFFFF;
@@ -766,6 +770,186 @@ fn little_long(v: c_int) -> c_int {
     {
         v.swap_bytes()
     }
+}
+
+//============================================================================
+// the path builders
+//============================================================================
+
+/// `FS_NUM_BUFFS` and `FS_BUFFERLEN` from quakefs.c:3533-3534.
+const FS_NUM_BUFFS: usize = 4;
+const FS_BUFFERLEN: usize = 1024;
+
+/// `_PRINT_DEVEL` from engine/h2shared/printsys.h -- what the C's
+/// `Con_DPrintf` macro passes as CON_Printf's first argument.
+const PRINT_DEVEL: c_uint = 2;
+
+/// `get_fs_buffer` -- four rotating 1024-byte buffers, so a caller may hold
+/// two paths at once (the C comment on FS_MakePath's callers relies on it).
+static mut FS_BUFFERS: [[c_char; FS_BUFFERLEN]; FS_NUM_BUFFS] = [[0; FS_BUFFERLEN]; FS_NUM_BUFFS];
+static mut FS_BUFFER_IDX: c_int = 0;
+
+unsafe fn get_fs_buffer() -> *mut c_char {
+    FS_BUFFER_IDX = (FS_BUFFER_IDX + 1) & (FS_NUM_BUFFS as c_int - 1);
+    // Raw arithmetic rather than indexing: indexing a `static mut` array forms
+    // a reference, which the crate avoids everywhere else for the same reason.
+    (&raw mut FS_BUFFERS)
+        .cast::<c_char>()
+        .add(FS_BUFFER_IDX as usize * FS_BUFFERLEN)
+}
+
+/// `IS_DIR_SEPARATOR` from common/filenames.h -- '\\' counts only on Windows.
+#[inline]
+fn is_dir_separator(c: c_char) -> bool {
+    #[cfg(windows)]
+    {
+        c == b'/' as c_char || c == b'\\' as c_char
+    }
+    #[cfg(not(windows))]
+    {
+        c == b'/' as c_char
+    }
+}
+
+/// `DIR_SEPARATOR_CHAR` from common/filenames.h.
+#[inline]
+const fn dir_separator_char() -> c_char {
+    #[cfg(windows)]
+    {
+        b'\\' as c_char
+    }
+    #[cfg(not(windows))]
+    {
+        b'/' as c_char
+    }
+}
+
+/// `init_MakePath` -- write the base directory into `buf`, append a separator
+/// if it does not end in one, and report how many bytes that took.  Returns -1
+/// when the base does not fit, which is what turns into `*error = 1`.
+unsafe fn init_MakePath(base: c_int, buf: *mut c_char, siz: usize) -> c_int {
+    let mut len: c_int = match base {
+        MAKEPATH_USERDIR => q_strlcpy(buf, (&raw const FS_USERDIR).cast::<c_char>(), siz) as c_int,
+        MAKEPATH_GAMEDIR => q_strlcpy(buf, (&raw const FS_GAMEDIR).cast::<c_char>(), siz) as c_int,
+        MAKEPATH_USERBASE => q_strlcpy(
+            buf,
+            (*host_parms).userdir,
+            siz,
+        ) as c_int,
+        MAKEPATH_BASEDIR => q_strlcpy(buf, fs_basedir_ptr(), siz) as c_int,
+        _ => {
+            Sys_Error(c"%s: Bad FS_BASE".as_ptr(), c"init_MakePath".as_ptr());
+        }
+    };
+
+    if len >= siz as c_int - 1 {
+        return -1;
+    }
+    if len != 0 && !is_dir_separator(*buf.add(len as usize)) {
+        *buf.add(len as usize) = dir_separator_char();
+        len += 1;
+    }
+    *buf.add(len as usize) = 0;
+    len
+}
+
+/// `do_MakePath` -- the base, then the path, then the truncation flag.
+unsafe fn do_MakePath(
+    base: c_int,
+    error: *mut c_int,
+    buf: *mut c_char,
+    siz: usize,
+    path: *const c_char,
+) -> *mut c_char {
+    let mut len = init_MakePath(base, buf, siz);
+
+    if len < 0 {
+        if !error.is_null() {
+            *error = 1;
+        }
+        CON_Printf(
+            PRINT_DEVEL,
+            c"%s: overflow (string truncated)\n".as_ptr(),
+            c"do_MakePath".as_ptr(),
+        );
+        return buf;
+    }
+
+    len = q_strlcat(buf, path, siz) as c_int;
+    if len < siz as c_int {
+        if !error.is_null() {
+            *error = 0;
+        }
+    } else {
+        if !error.is_null() {
+            *error = 1;
+        }
+        CON_Printf(
+            PRINT_DEVEL,
+            c"%s: overflow (string truncated)\n".as_ptr(),
+            c"do_MakePath".as_ptr(),
+        );
+    }
+
+    buf
+}
+
+/// `FS_MakePath` -- into the next of the four rotating buffers.
+#[no_mangle]
+pub unsafe extern "C" fn FS_MakePath(
+    base: c_int,
+    error: *mut c_int,
+    path: *const c_char,
+) -> *mut c_char {
+    do_MakePath(base, error, get_fs_buffer(), FS_BUFFERLEN, path)
+}
+
+/// `FS_MakePath_BUF` -- into the caller's buffer.
+#[no_mangle]
+pub unsafe extern "C" fn FS_MakePath_BUF(
+    base: c_int,
+    error: *mut c_int,
+    buf: *mut c_char,
+    siz: usize,
+    path: *const c_char,
+) -> *mut c_char {
+    do_MakePath(base, error, buf, siz, path)
+}
+
+/// `FSERR_MakePath_BUF` -- `do_MakePath` but fatal on overflow, with the C's
+/// caller/line in the message.
+unsafe fn fserr_make_path_buf(
+    caller: *const c_char,
+    linenum: c_int,
+    base: c_int,
+    buf: *mut c_char,
+    siz: usize,
+    path: *const c_char,
+) -> *mut c_char {
+    let mut err: c_int = 0;
+    let p = do_MakePath(base, &mut err, buf, siz, path);
+
+    if err != 0 {
+        Sys_Error(
+            c"%s: %d: string buffer overflow!".as_ptr(),
+            caller,
+            linenum,
+        );
+    }
+    p
+}
+
+extern "C" {
+    /// engine/hexen2/host.h -- set by Sys_Init before anything builds a path.
+    static host_parms: *mut crate::zone::QuakeParmsC;
+    fn q_strlcat(dst: *mut c_char, src: *const c_char, size: usize) -> usize;
+}
+
+/// The path builders read the C's own `static const char *fs_basedir` through
+/// this, so there is one place that knows how it is spelled.
+#[inline]
+unsafe fn fs_basedir_ptr() -> *const c_char {
+    FS_BASEDIR
 }
 
 //============================================================================
