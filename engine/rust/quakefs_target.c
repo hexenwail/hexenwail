@@ -86,10 +86,11 @@ int QuakeFS_TargetHasClientCommands (void)
 /* Whether this target is the H2W-integrated *client* -- H2W_INTEGRATED and
  * neither H2W nor SERVERONLY, which in this tree means native glhexen2 alone.
  * The wasm client does not define it either: CLIENT_DEFINITIONS only gains
- * H2W_INTEGRATED under `USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN`, so the web
- * client takes quakefs.c's plain-Hexen II branch in FS_Gamedir and in the
- * FS_Init rollback.  Distinct from QuakeFS_TargetHasClientCommands, which is
- * every non-SERVERONLY target including the web client. */
+ * H2W_INTEGRATED under USE_HEXENWORLD_CLIENT with the Emscripten build
+ * excluded, so the web client takes quakefs.c's plain-Hexen II branch in
+ * FS_Gamedir and in the FS_Init rollback.  Distinct from
+ * QuakeFS_TargetHasClientCommands, which is every non-SERVERONLY target
+ * including the web client. */
 #if defined(H2W_INTEGRATED)
 
 int QuakeFS_TargetIsH2WIntegrated (void)
