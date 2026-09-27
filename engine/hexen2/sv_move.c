@@ -120,10 +120,77 @@ qboolean SV_CheckBottom (edict_t *ent)
 {
 	// By this point, ent has been moved to its new position after the
 	// move, and adjusted for steps
-	qmodel_t	*model;
+	/* THE DEAD BLOCK BELOW MUST STAY DEAD -- issue #278.
+	 *
+	 * Raven left it commented out, uHexen2 (sezero) still does, and our own
+	 * HexenWorld server has never carried it at all
+	 * (engine/hexenworld/server/sv_move.c).  It was uncommented here in
+	 * "Hexenwail: SDL3/GL4.3 modernization (2025-2026)" with no rationale
+	 * recorded, and live it silently overwrites the two VectorAdds above: the
+	 * four corner samples stop coming from the entity's own bounding box and
+	 * come from a WORLD CLIP HULL's fixed box instead.  This function is
+	 * documented as testing whether THE ENTITY's bottom is off an edge, and only
+	 * ent->v.mins/maxs describe the entity, so the substitution is wrong however
+	 * it happens to land.
+	 *
+	 * The hull indexing is fine -- .hull is 1-based (HULL_POINT 1 .. HULL_GOLEM
+	 * 6, gamecode/hc/h2/constant.hc) against the 0-based hulls[] Mod_MakeHulls
+	 * fills, and the size fallback indexes the same array the same way.  What is
+	 * wrong is that the clip boxes are FIXED (+/-16 player, +/-24 scorpion,
+	 * +/-16 crouch, +/-8 pentacle, +/-48 golem) while monster bboxes are not.
+	 *
+	 * WHICH WAY IT LANDS, because the intuitive answer is backwards.  Every
+	 * shipped walkmonster has a bbox equal to or LARGER than the hull box it
+	 * resolves to, so on retail content the live block is systematically
+	 * PERMISSIVE, not strict:
+	 *
+	 *   sheep and humanoids  .hull 2  clip +/-16 z-24   bbox +/-16 z 0
+	 *   familiar horse       .hull 1  clip 0,0,0        bbox +/-40
+	 *   death horse          .hull 1  clip 0,0,0        bbox +/-55
+	 *   eidolon              .hull 1  clip 0,0,0        bbox +/-54
+	 *
+	 * Measured with a temporary probe on village1 and village3, the only two
+	 * retail maps of 42 where a no-player dedicated server reaches this function
+	 * at all: player_sheep, bbox [-16 -16 0]..[16 16 32], clip box
+	 * [-16 -16 -24]..[16 16 32].  Same x/y; mins[2] 24 lower, so
+	 * `start[2] = mins[2] - 1' samples 25 units BELOW the monster's feet, inside
+	 * the floor, the fast path finds CONTENTS_SOLID under all four corners, and
+	 * the function returns true without doing the real check.  A HULL_POINT
+	 * walker is worse still: its corners collapse onto the origin, so the check
+	 * stops being an edge test at all.
+	 *
+	 * The opposite direction -- corners pushed OUTSIDE the footprint, refusing
+	 * steps that should be allowed -- is real in the arithmetic but has no
+	 * instance in shipped gamecode: the narrow bboxes that would produce it
+	 * ('-6 -6 -8','6 6 8' and '-8 -8 -28','8 8 8') belong to torches and items
+	 * (torch.hc:85,118,190, items.hc:30,80,105), which never call walkmove.  So
+	 * do NOT cite this block as the explanation for a monster refusing a step;
+	 * Mathuzzz's 2026-09-26 report of one is still unexplained, and village1's
+	 * own 532 refusals are all `step-down trace allsolid', which returns above
+	 * before CheckBottom is reached.
+	 *
+	 * Restoring the bbox therefore makes this check STRICTER for big monsters,
+	 * which is the regression risk in the revert rather than the payoff.  It is
+	 * survivable for the same reason upstream survives it: SV_NewChaseDir ends
+	 * with SV_FixCheckBottom on failure, which sets FL_PARTIALGROUND, and the
+	 * FL_PARTIALGROUND branch below then allows the move anyway.  Fail once,
+	 * carry the flag, keep walking; the flag is cleared again once a move passes
+	 * cleanly.  eidolon.hc:458, the only gamecode caller of the checkbottom()
+	 * builtin, was written against this behaviour.
+	 *
+	 * `if (!wclip_hull)' is dead on its own terms too: it tests the address of
+	 * an array element, which is never null, so an out-of-range .hull reads
+	 * past hulls[] instead of being caught.
+	 *
+	 * Kept commented rather than deleted, byte-identical to upstream, so a
+	 * future sezero/master merge does not conflict here.  The gate test
+	 * tests/sv_checkbottom_test.c fails if it is revived, and
+	 * tools/monster-walk-eval.sh is the differential run.
+	 */
+/*	qmodel_t	*model;
 	hull_t	*wclip_hull;
 	int	index;
-	vec3_t	size;
+	vec3_t	check, size; */
 	vec3_t	mins, maxs, start, stop;
 	trace_t	trace;
 	int	x, y;
@@ -133,7 +200,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 	VectorAdd (ent->v.origin, ent->v.mins, mins);
 	VectorAdd (ent->v.origin, ent->v.maxs, maxs);
 
-	// Make it use the clipping hull's size, not their bounding box...
+/*	// Make it use the clipping hull's size, not their bounding box...
 	model = sv.models[ (int)sv.edicts->v.modelindex ];
 	VectorSubtract (ent->v.maxs, ent->v.mins, size);
 	if (ent->v.hull)
@@ -142,7 +209,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 		wclip_hull = &model->hulls[index];
 		if (!wclip_hull) // Invalid hull
 		{
-			Con_Printf ("ERROR: hull %d is null.\n",index);
+			Con_Printf ("ERROR: hull %d is null.\n",wclip_hull);
 			wclip_hull = &model->hulls[0];
 		}
 	}
@@ -161,7 +228,7 @@ qboolean SV_CheckBottom (edict_t *ent)
 	}
 	VectorAdd (ent->v.origin, wclip_hull->clip_mins, mins);
 	VectorAdd (ent->v.origin, wclip_hull->clip_maxs, maxs);
-
+*/
 	// if all of the points under the corners are solid world, don't bother
 	// with the tougher checks
 	// the corners must be within 16 of the midpoint

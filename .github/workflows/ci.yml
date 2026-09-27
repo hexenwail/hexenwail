@@ -267,6 +267,14 @@ jobs:
             engine/tests/vid_restart_context_test.c
           ./vid_restart_context_test
 
+      - name: Unit test SV_CheckBottom corner box
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o sv_checkbottom_test \
+            engine/tests/sv_checkbottom_test.c
+          ./sv_checkbottom_test
+
       # Keep the cross-compiled, tools and gamecode targets in one grouped
       # step.  The loop preserves the explicit target list while avoiding a
       # separate workflow step for every small derivation.
