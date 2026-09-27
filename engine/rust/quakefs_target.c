@@ -136,6 +136,8 @@ void QuakeFS_TargetClientReinit (void) { }
 void QuakeFS_TargetVidLock (void) { }
 const char *QuakeFS_TargetStartupScript (void) { return ""; }
 void QuakeFS_TargetShowList (int num, const char **list) { (void)num; (void)list; }
+void QuakeFS_TargetBeginDisc (void) { }
+void QuakeFS_TargetEndDisc (void) { }
 
 #else	/* !SERVERONLY */
 
@@ -208,6 +210,19 @@ const char *QuakeFS_TargetStartupScript (void)
 void QuakeFS_TargetShowList (int num, const char **list)
 {
 	Con_ShowList (num, list);
+}
+
+/* quakefs.c:1982,:1985,:2028,:2038 -- the loading-disc busy indicator around
+ * the read and the inflate.  The C compiles them to nothing under SERVERONLY
+ * (:1919-1920), so a dedicated target does the same here. */
+void QuakeFS_TargetBeginDisc (void)
+{
+	Draw_BeginDisc ();
+}
+
+void QuakeFS_TargetEndDisc (void)
+{
+	Draw_EndDisc ();
 }
 
 #endif	/* !SERVERONLY */

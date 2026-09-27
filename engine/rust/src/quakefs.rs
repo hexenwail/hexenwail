@@ -100,7 +100,11 @@ const FS_ENT_NONE: c_int = 0;
 const FS_ENT_FILE: c_int = 1 << 0;
 const FS_ENT_DIRECTORY: c_int = 1 << 1;
 
-/// `LOADFILE_*` from quakefs.c: how a loaded file's buffer is allocated.
+/// `LOADFILE_*` from quakefs.c:1912-1917: how a loaded file's buffer is
+/// allocated.  Each variant names its own lifetime, and the port keeps them
+/// distinct rather than unifying them -- the callers free or re-read them
+/// differently, and the harness compares the bytes each returns.
+const LOADFILE_ZONE: c_int = 0;
 const LOADFILE_HUNK: c_int = 1;
 const LOADFILE_TEMPHUNK: c_int = 2;
 const LOADFILE_CACHE: c_int = 3;
@@ -2142,6 +2146,265 @@ pub unsafe extern "C" fn FS_CreatePath(path: *mut c_char) -> c_int {
     }
 
     err
+}
+
+//============================================================================
+// the load layer
+//============================================================================
+extern "C" {
+    fn QuakeFS_TargetBeginDisc();
+    fn QuakeFS_TargetEndDisc();
+    /// engine/h2shared/common.h:101 -- the basename used as a hunk tag.
+    fn COM_FileBase(input: *const c_char, out: *mut c_char, outsize: usize);
+    fn Hunk_AllocName(size: c_int, name: *const c_char) -> *mut c_void;
+    fn Hunk_TempAlloc(size: c_int) -> *mut c_void;
+    /// The zone port's cache allocator.  Direct, not hooked: it is a Rust
+    /// symbol in every binary, and its only use here is the LOADFILE_CACHE arm
+    /// that no dedicated target can reach.
+    fn Cache_Alloc(c: *mut CacheUserC, size: c_int, name: *const c_char) -> *mut c_void;
+}
+
+/// `FS_AllocLoadBuffer` -- the allocation half of a load, split out so the
+/// archive path can obtain a buffer by exactly the same rules before inflating
+/// into it (uhexen2-pzha).
+unsafe fn fs_alloc_load_buffer(path: *const c_char, usehunk: c_int, len: c_long) -> *mut u8 {
+    let mut base = [0 as c_char; 32];
+
+    // extract the file's base name for the hunk tag
+    COM_FileBase(path, base.as_mut_ptr(), 32);
+
+    let buf: *mut c_void = match usehunk {
+        LOADFILE_HUNK => Hunk_AllocName(len as c_int + 1, base.as_ptr()),
+        LOADFILE_TEMPHUNK => Hunk_TempAlloc(len as c_int + 1),
+        LOADFILE_ZONE => Z_Malloc(len as c_int + 1, ZONE_NUM),
+        LOADFILE_CACHE => Cache_Alloc(LOADCACHE, len as c_int + 1, base.as_ptr()),
+        LOADFILE_STACK => {
+            if len < LOADSIZE {
+                LOADBUF.cast::<c_void>()
+            } else {
+                Hunk_TempAlloc(len as c_int + 1)
+            }
+        }
+        LOADFILE_MALLOC => malloc(len as usize + 1),
+        _ => {
+            Sys_Error(
+                c"%s: bad usehunk".as_ptr(),
+                c"FS_AllocLoadBuffer".as_ptr(),
+            );
+        }
+    };
+
+    if buf.is_null() {
+        Sys_Error(
+            c"%s: not enough space for %s".as_ptr(),
+            c"FS_AllocLoadBuffer".as_ptr(),
+            path,
+        );
+    }
+
+    let bytes = buf.cast::<u8>();
+    *bytes.add(len as usize) = 0;
+    bytes
+}
+
+/// `FS_ReadIntoBuffer` -- allocate, read the whole thing, and define every
+/// byte even when the read comes up short.
+unsafe fn fs_read_into_buffer(
+    h: *mut LibcFile,
+    path: *const c_char,
+    usehunk: c_int,
+    len: c_long,
+) -> *mut u8 {
+    let buf = fs_alloc_load_buffer(path, usehunk, len);
+
+    QuakeFS_TargetBeginDisc();
+    let nread = fread(buf.cast::<c_void>(), 1, len as usize, h);
+    fclose(h);
+    QuakeFS_TargetEndDisc();
+
+    // A short read means the promised length and the bytes that arrived
+    // disagree.  Every caller sizes its parsing from fs_filesize rather than
+    // from what was read, so the gap has to be filled: Hunk_AllocName hands
+    // back zeroed memory but malloc, Cache_Alloc and the STACK buffer do not,
+    // and on those paths the tail would be whatever the allocator held.
+    // Deliberately not an error -- the loaders' contract is unchanged.
+    // uhexen2-huys.
+    if nread < len as usize {
+        memset(
+            buf.add(nread).cast::<c_void>(),
+            0,
+            len as usize - nread,
+        );
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"WARNING: %s: short read on %s (%lu of %ld bytes)\n".as_ptr(),
+            c"FS_ReadIntoBuffer".as_ptr(),
+            path,
+            nread as core::ffi::c_ulong,
+            len,
+        );
+    }
+
+    buf
+}
+
+/// `FS_ReadZipIntoBuffer` -- inflate the DEFLATED entry the preceding
+/// FS_OpenFile left in fs_lastzip.  Allocates by the same rules, so from the
+/// caller's side only the bytes' origin differs.
+unsafe fn fs_read_zip_into_buffer(
+    path: *const c_char,
+    usehunk: c_int,
+    len: c_long,
+) -> *mut u8 {
+    let buf = fs_alloc_load_buffer(path, usehunk, len);
+
+    QuakeFS_TargetBeginDisc();
+    if fs_zip_read_entry(FS_LASTZIP, FS_LASTZIPENTRY, buf.cast::<c_void>()) == 0 {
+        // Matches FS_ReadIntoBuffer's short-read contract rather than
+        // erroring: callers size their parsing from fs_filesize, so the buffer
+        // has to be fully defined either way.
+        memset(buf.cast::<c_void>(), 0, len as usize);
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"WARNING: %s: corrupt deflate stream for %s in %s\n".as_ptr(),
+            c"FS_ReadZipIntoBuffer".as_ptr(),
+            path,
+            (*FS_LASTZIP).filename.as_ptr(),
+        );
+    }
+    QuakeFS_TargetEndDisc();
+
+    buf
+}
+
+/// `FS_LoadFile`
+unsafe fn fs_load_file(
+    path: *const c_char,
+    usehunk: c_int,
+    path_id: *mut c_uint,
+) -> *mut u8 {
+    let mut h: *mut LibcFile = core::ptr::null_mut();
+
+    // look for it in the filesystem or pack files
+    let len = fs_open_file_internal(path, &mut h, path_id, 0, 0);
+    if len < 0 {
+        return core::ptr::null_mut();
+    }
+
+    if h.is_null() {
+        // deflated archive entry -- inflate rather than read
+        return fs_read_zip_into_buffer(path, usehunk, len);
+    }
+
+    fs_read_into_buffer(h, path, usehunk, len)
+}
+
+/// `FS_LoadHunkFileFromOSPath` -- load a loose file by its OS path, with the
+/// same state left behind that the searchpath path leaves.
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadHunkFileFromOSPath(ospath: *const c_char) -> *mut u8 {
+    let len = Sys_filesize(ospath);
+    if len < 0 {
+        return core::ptr::null_mut();
+    }
+    let h = fs_fopen(ospath, c"rb".as_ptr());
+    if h.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    // Callers read fs_filesize, file_from_pak and FS_LastFileSource() as state
+    // left behind by the load: PR_LoadProgs uses fs_filesize three times, so a
+    // stale one there corrupts the CRC and the bounds check silently.
+    fs_filesize = len;
+    file_from_pak = 0;
+    q_strlcpy(
+        (&raw mut FS_LASTFILE_SOURCE).cast::<c_char>(),
+        ospath,
+        MAX_OSPATH,
+    );
+
+    fs_read_into_buffer(h, ospath, LOADFILE_HUNK, len)
+}
+
+/// `FS_LoadHunkFile`
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadHunkFile(path: *const c_char, path_id: *mut c_uint) -> *mut u8 {
+    fs_load_file(path, LOADFILE_HUNK, path_id)
+}
+
+/// `FS_LoadHunkFileFromPak` -- pak members only, with the provenance state
+/// left naming the pak rather than the loose file it stepped over.
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadHunkFileFromPak(
+    path: *const c_char,
+    path_id: *mut c_uint,
+) -> *mut u8 {
+    let mut h: *mut LibcFile = core::ptr::null_mut();
+
+    let len = fs_open_file_in_pak(path, &mut h, path_id);
+    if len < 0 {
+        return core::ptr::null_mut();
+    }
+
+    if h.is_null() {
+        // deflated archive entry -- inflate rather than read
+        return fs_read_zip_into_buffer(path, LOADFILE_HUNK, len);
+    }
+
+    fs_read_into_buffer(h, path, LOADFILE_HUNK, len)
+}
+
+/// `FS_LoadZoneFile`
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadZoneFile(
+    path: *const c_char,
+    zone_id: c_int,
+    path_id: *mut c_uint,
+) -> *mut u8 {
+    ZONE_NUM = zone_id;
+    fs_load_file(path, LOADFILE_ZONE, path_id)
+}
+
+/// `FS_LoadTempFile`
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadTempFile(path: *const c_char, path_id: *mut c_uint) -> *mut u8 {
+    fs_load_file(path, LOADFILE_TEMPHUNK, path_id)
+}
+
+/// `FS_LoadCacheFile` -- the client-only cache variant.  The C compiles it
+/// out of the dedicated builds entirely; here it exists but is unreachable
+/// there, and its only target-only symbol (Cache_Alloc) is the zone port's.
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadCacheFile(
+    path: *const c_char,
+    cu: *mut CacheUserC,
+    path_id: *mut c_uint,
+) {
+    LOADCACHE = cu;
+    fs_load_file(path, LOADFILE_CACHE, path_id);
+}
+
+/// `FS_LoadStackFile` -- uses the temp hunk when the file is larger than the
+/// caller's buffer.
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadStackFile(
+    path: *const c_char,
+    buffer: *mut c_void,
+    bufsize: c_long,
+    path_id: *mut c_uint,
+) -> *mut u8 {
+    LOADBUF = buffer.cast::<u8>();
+    LOADSIZE = bufsize;
+    fs_load_file(path, LOADFILE_STACK, path_id)
+}
+
+/// `FS_LoadMallocFile` -- returns malloc'd memory.
+#[no_mangle]
+pub unsafe extern "C" fn FS_LoadMallocFile(
+    path: *const c_char,
+    path_id: *mut c_uint,
+) -> *mut u8 {
+    fs_load_file(path, LOADFILE_MALLOC, path_id)
 }
 
 //============================================================================
