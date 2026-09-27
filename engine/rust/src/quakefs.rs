@@ -500,4 +500,87 @@ extern "C" {
     pub static mut registered: CvarC;
 }
 
+//============================================================================
+// the four hashindex inlines, reproduced
+//============================================================================
+// `Hash_First`, `Hash_Next`, `Hash_GenerateKeyString` and `Hash_GenerateKeyInt`
+// are `static inline` in engine/h2shared/hashindex.h (:47, :59, :70, :90): they
+// have no symbol, so no FFI can reach them and every C caller compiles its own
+// copy.  quakefs.c calls the first three nine times (445-449, 604-607, 820-823,
+// 1550-1580), so the faithful translation is another copy here rather than an
+// export from the hashindex port -- which is what that port's own header note
+// says, and why it does not export them either.
+//
+// The bodies are the header's, including the one detail that matters for
+// parity: `*string` is a C `char`, so a byte at or above 0x80 arrives
+// sign-extended, `q_tolower` leaves it negative, and the hash accumulator goes
+// negative with it.  Reading the byte as `c_char` and widening reproduces that.
+
+/// `q_isupper` from common/q_ctype.h:32 -- ASCII A-Z only.
+#[inline]
+fn q_isupper(c: c_int) -> bool {
+    c >= b'A' as c_int && c <= b'Z' as c_int
+}
+
+/// `q_tolower` from common/q_ctype.h:89 -- `c | ('a' - 'A')` when upper, and
+/// the byte unchanged (including negative) otherwise.
+#[inline]
+fn q_tolower(c: c_int) -> c_int {
+    if q_isupper(c) {
+        c | (b'a' as c_int - b'A' as c_int)
+    } else {
+        c
+    }
+}
+
+/// `Hash_First` -- the first index in a hash entry's chain, or -1 if empty.
+#[inline]
+unsafe fn hash_first(hi: *mut HashIndexC, key: c_int) -> c_int {
+    *(*hi).hash.add((key & (*hi).hash_mask) as usize)
+}
+
+/// `Hash_Next` -- the next index in the chain, or -1 at the end of it.
+#[inline]
+unsafe fn hash_next(hi: *mut HashIndexC, index: c_int) -> c_int {
+    *(*hi).index_chain.add(index as usize)
+}
+
+/// `Hash_GenerateKeyString` -- the string hash, case-folded when the caller
+/// says so.  Every quakefs.c call passes `false`.
+#[inline]
+unsafe fn hash_generate_key_string(
+    hi: *mut HashIndexC,
+    string: *const c_char,
+    case_sensitive: c_int,
+) -> c_int {
+    let mut hash: c_int = 0;
+    let mut p = string;
+    let mut i: c_int = 0;
+
+    if case_sensitive != 0 {
+        while *p != 0 {
+            hash += (*p as c_int) * (i + 119);
+            p = p.add(1);
+            i += 1;
+        }
+    } else {
+        while *p != 0 {
+            hash += q_tolower(*p as c_int) * (i + 119);
+            p = p.add(1);
+            i += 1;
+        }
+    }
+
+    hash & (*hi).hash_mask
+}
+
+/// `Hash_GenerateKeyInt`.  quakefs.c has no call site for this one -- the C
+/// callers that do are elsewhere -- but the header's inline is reproduced with
+/// the other three so the set stays together.
+#[inline]
+#[allow(dead_code)]
+unsafe fn hash_generate_key_int(hi: *mut HashIndexC, n: c_int) -> c_int {
+    n & (*hi).hash_mask
+}
+
 // ==== PORT CONTINUES ====
