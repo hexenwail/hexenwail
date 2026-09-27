@@ -1913,6 +1913,238 @@ pub unsafe extern "C" fn FS_Gamedir(dir: *const c_char) {
 }
 
 //============================================================================
+// writing: save files, screenshots, config
+//============================================================================
+extern "C" {
+    /// engine/h2shared/sys.h:39.
+    fn Sys_CopyFile(frompath: *const c_char, topath: *const c_char) -> c_int;
+    /// engine/hexen2/host.h:84, FUNC_NORETURN.
+    fn Host_Error(fmt: *const c_char, ...) -> !;
+    fn fwrite(ptr: *const c_void, size: usize, n: usize, f: *mut LibcFile) -> usize;
+}
+
+/// `COPY_READ_BUFSIZE` from quakefs.c:1297.
+const COPY_READ_BUFSIZE: usize = 8192;
+
+/// `FS_CopyFile` -- copy a file, creating the destination's directories.  
+/// Reachable from the background save worker, so it must stay free of zone
+/// allocation and console output: FS_CreatePath only needs a mutable copy,
+/// which the stack provides, and the caller reports failures with both paths.
+#[no_mangle]
+pub unsafe extern "C" fn FS_CopyFile(
+    frompath: *const c_char,
+    topath: *const c_char,
+) -> c_int {
+    let mut tmp = [0 as c_char; MAX_OSPATH];
+
+    if frompath.is_null() || topath.is_null() {
+        return 1;
+    }
+    if q_strlcpy(tmp.as_mut_ptr(), topath, MAX_OSPATH) >= MAX_OSPATH {
+        return 1;
+    }
+    // create directories up to the dest file
+    let err = FS_CreatePath(tmp.as_mut_ptr());
+    if err != 0 {
+        return err;
+    }
+
+    Sys_CopyFile(frompath, topath)
+}
+
+/// `FS_WriteFileFromHandle` -- copy an already-open file's first `size` bytes
+/// to a path, creating directories as needed.
+#[no_mangle]
+pub unsafe extern "C" fn FS_WriteFileFromHandle(
+    fromfile: *mut LibcFile,
+    topath: *const c_char,
+    size: usize,
+) -> c_int {
+    let mut buf = [0 as c_char; COPY_READ_BUFSIZE];
+    let mut tmp = [0 as c_char; MAX_OSPATH];
+
+    if fromfile.is_null() || topath.is_null() {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"%s: null input\n".as_ptr(),
+            c"FS_WriteFileFromHandle".as_ptr(),
+        );
+        return 1;
+    }
+    if q_strlcpy(tmp.as_mut_ptr(), topath, MAX_OSPATH) >= MAX_OSPATH {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"%s: path too long\n".as_ptr(),
+            c"FS_WriteFileFromHandle".as_ptr(),
+        );
+        return 1;
+    }
+
+    // create directories up to the dest file
+    let err = FS_CreatePath(tmp.as_mut_ptr());
+    if err != 0 {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"%s: unable to create directory\n".as_ptr(),
+            c"FS_WriteFileFromHandle".as_ptr(),
+        );
+        return err;
+    }
+
+    let out = fs_fopen(topath, c"wb".as_ptr());
+    if out.is_null() {
+        // The C names the path first and the function second here, which is
+        // the wrong way round; kept as written.
+        CON_Printf(
+            PRINT_NORMAL,
+            c"%s: unable to create %s\n".as_ptr(),
+            topath,
+            c"FS_WriteFileFromHandle".as_ptr(),
+        );
+        return 1;
+    }
+
+    let mut remaining = size;
+    while remaining != 0 {
+        let count = if remaining < COPY_READ_BUFSIZE {
+            remaining
+        } else {
+            COPY_READ_BUFSIZE
+        };
+
+        if fread(buf.as_mut_ptr().cast::<c_void>(), 1, count, fromfile) != count {
+            break;
+        }
+        if fwrite(buf.as_ptr().cast::<c_void>(), 1, count, out) != count {
+            break;
+        }
+
+        remaining -= count;
+    }
+
+    fclose(out);
+
+    if remaining == 0 {
+        0
+    } else {
+        1
+    }
+}
+
+/// `FS_WriteFile` -- write a buffer under the user's gamedir.
+#[no_mangle]
+pub unsafe extern "C" fn FS_WriteFile(
+    filename: *const c_char,
+    data: *const c_void,
+    len: usize,
+) -> c_int {
+    let mut name = [0 as c_char; MAX_OSPATH];
+    let mut err: c_int = 0;
+
+    FS_MakePath_BUF(
+        MAKEPATH_USERDIR,
+        &mut err,
+        name.as_mut_ptr(),
+        MAX_OSPATH,
+        filename,
+    );
+    if err != 0 {
+        Host_Error(
+            c"%s: %d: string buffer overflow!".as_ptr(),
+            c"FS_WriteFile".as_ptr(),
+            1359,
+        );
+    }
+
+    let f = fs_fopen(name.as_ptr(), c"wb".as_ptr());
+    if f.is_null() {
+        CON_Printf(PRINT_NORMAL, c"Error opening %s\n".as_ptr(), filename);
+        return 1;
+    }
+
+    CON_Printf(
+        PRINT_TERMONLY,
+        c"%s: %s\n".as_ptr(),
+        c"FS_WriteFile".as_ptr(),
+        name.as_ptr(),
+    );
+    let size = fwrite(data, 1, len, f);
+    fclose(f);
+    if size != len {
+        CON_Printf(PRINT_NORMAL, c"Error in writing %s\n".as_ptr(), filename);
+        return 1;
+    }
+    0
+}
+
+/// `FS_CreatePath` -- make every directory component under the user's path.
+/// The path must either name a file or end in a separator when the full path
+/// is meant to exist.
+#[no_mangle]
+pub unsafe extern "C" fn FS_CreatePath(path: *mut c_char) -> c_int {
+    let mut err: c_int = 0;
+
+    if path.is_null() || *path == 0 {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"%s: no path!\n".as_ptr(),
+            c"FS_CreatePath".as_ptr(),
+        );
+        return 1;
+    }
+
+    if !strstr(path, c"..".as_ptr()).is_null() {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"Relative pathnames are not allowed.\n".as_ptr(),
+        );
+        return 1;
+    }
+
+    let userdir = (*host_parms).userdir;
+    let offset = strlen(userdir);
+    if offset != 0 && strstr(path, userdir) != path {
+        Sys_Error(c"Attempted to create a directory out of user's path".as_ptr());
+    }
+
+    let mut ofs = path.add(offset);
+    if *ofs == 0 {
+        return 0; // not necessarily an error
+    }
+    // check for the path separator after the userdir
+    if is_dir_separator(*ofs) {
+        ofs = ofs.add(1);
+    } else if offset != 0 {
+        // if the userdir itself has no trailing separator either, then it is a
+        // bad path
+        if !is_dir_separator(*userdir.add(offset - 1)) {
+            CON_Printf(
+                PRINT_NORMAL,
+                c"%s: bad path\n".as_ptr(),
+                c"FS_CreatePath".as_ptr(),
+            );
+            return 1;
+        }
+    }
+
+    while *ofs != 0 {
+        let c = *ofs;
+        if is_dir_separator(c) {
+            // create the directory
+            *ofs = 0;
+            err = Sys_mkdir(path, 0);
+            *ofs = c;
+            if err != 0 {
+                break;
+            }
+        }
+        ofs = ofs.add(1);
+    }
+
+    err
+}
+
+//============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
 // `FS_MakePath_VA` (quakefs.h:239) and `FS_MakePath_VABUF` (:242) are the
