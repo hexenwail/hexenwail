@@ -996,6 +996,438 @@ extern "C" {
 }
 
 //============================================================================
+// the file syscall layer
+//============================================================================
+// `DO_USERDIRS` from engine/h2shared/h2config.h:57, disabled by sys.h:91 for
+// Windows, OS/2 and Emscripten -- the web client gets one persistence root, so
+// a separate userdir would put config.cfg and the savegames nowhere.  The
+// cfg below is that same platform test, not merely a Windows one.
+#[inline]
+const fn do_userdirs() -> bool {
+    !(cfg!(windows) || cfg!(target_family = "wasm"))
+}
+
+extern "C" {
+    /// engine/h2shared/sys.h:37 -- the size of a file, or -1.
+    fn Sys_filesize(path: *const c_char) -> c_long;
+    /// engine/h2shared/sys.h:33 -- `FS_ENT_FILE`/`FS_ENT_DIRECTORY` bits.
+    fn Sys_FileType(path: *const c_char) -> c_int;
+    fn q_snprintf(str: *mut c_char, size: usize, format: *const c_char, ...) -> c_int;
+
+    /// engine/hexen2/host.h:55 -- the `developer` cvar, read as an address so
+    /// nothing here assumes Rust exclusivity over a C-owned global.
+    static mut developer: CvarC;
+}
+
+/// `FS_OpenFile_Internal` -- the one search loop every open, existence check
+/// and handle open goes through.  `paks_only` skips the directory entries, so
+/// a loose file that permanently hides the pak copy can be stepped over.
+unsafe fn fs_open_file_internal(
+    filename: *const c_char,
+    file: *mut *mut LibcFile,
+    path_id: *mut c_uint,
+    silent: c_int,
+    paks_only: c_int,
+) -> c_long {
+    let mut ospath = [0 as c_char; MAX_OSPATH];
+
+    file_from_pak = 0;
+    FS_LASTZIP = core::ptr::null_mut();
+    FS_LASTZIPENTRY = core::ptr::null();
+
+    // search through the path, one element at a time
+    let mut search = FS_SEARCHPATHS;
+    while !search.is_null() {
+        if !(*search).pack.is_null() {
+            // look through all the pak file elements
+            let pak = (*search).pack;
+            let key = hash_generate_key_string(&mut (*pak).hash, filename, 0);
+            let mut i = hash_first(&mut (*pak).hash, key);
+            while i != -1 {
+                let entry = (*pak).files.add(i as usize);
+                if q_strcasecmp((*entry).name.as_ptr(), filename) != 0 {
+                    i = hash_next(&mut (*pak).hash, i);
+                    continue;
+                }
+                // found it!
+                fs_filesize = (*entry).filelen as c_long;
+                file_from_pak = 1;
+                q_strlcpy(
+                    FS_LASTFILE_SOURCE.as_mut_ptr(),
+                    (*pak).filename.as_ptr(),
+                    MAX_OSPATH,
+                );
+                if !path_id.is_null() {
+                    *path_id = (*search).path_id;
+                }
+                if file.is_null() {
+                    // for FS_FileExists()
+                    return fs_filesize;
+                }
+                // open a new file on the pakfile
+                *file = fs_fopen((*pak).filename.as_ptr(), c"rb".as_ptr());
+                if (*file).is_null() {
+                    Sys_Error(c"Couldn't reopen %s".as_ptr(), (*pak).filename.as_ptr());
+                }
+                fseek(*file, (*entry).filepos as c_long, SEEK_SET);
+                return fs_filesize;
+            }
+        } else if !(*search).zip.is_null() {
+            // look through a mounted .pk3
+            let zip = (*search).zip;
+            let key = hash_generate_key_string(&mut (*zip).hash, filename, 0);
+            let mut i = hash_first(&mut (*zip).hash, key);
+            while i != -1 {
+                let entry = (*zip).files.add(i as usize);
+                if q_strcasecmp((*entry).name.as_ptr(), filename) != 0 {
+                    i = hash_next(&mut (*zip).hash, i);
+                    continue;
+                }
+                // found it!
+                fs_filesize = (*entry).filelen as c_long;
+                // An archive member is "from a pak" for every purpose that asks.
+                file_from_pak = 1;
+                q_strlcpy(
+                    FS_LASTFILE_SOURCE.as_mut_ptr(),
+                    (*zip).filename.as_ptr(),
+                    MAX_OSPATH,
+                );
+                if !path_id.is_null() {
+                    *path_id = (*search).path_id;
+                }
+                if file.is_null() {
+                    // for FS_FileExists()
+                    return fs_filesize;
+                }
+
+                if (*entry).filepos == -1 {
+                    // STORED, offset not resolved yet
+                    let mut st: MzZipArchiveFileStat = core::mem::zeroed();
+                    let mut ofs: c_int = -2;
+
+                    if mz_zip_reader_file_stat(&mut (*zip).archive, (*entry).index, &mut st) != 0 {
+                        ofs = fs_zip_data_offset(zip, st.m_local_header_ofs);
+                    }
+                    // A local header we cannot parse demotes the entry to the
+                    // inflate path rather than failing the lookup.
+                    (*entry).filepos = if ofs < 0 { -2 } else { ofs };
+                }
+
+                if (*entry).filepos >= 0 {
+                    // STORED: contiguous plain bytes, served like a pak member
+                    *file = fs_fopen((*zip).filename.as_ptr(), c"rb".as_ptr());
+                    if (*file).is_null() {
+                        Sys_Error(c"Couldn't reopen %s".as_ptr(), (*zip).filename.as_ptr());
+                    }
+                    fseek(*file, (*entry).filepos as c_long, SEEK_SET);
+                    return fs_filesize;
+                }
+
+                // DEFLATED: no FILE * can represent this.
+                *file = core::ptr::null_mut();
+                FS_LASTZIP = zip;
+                FS_LASTZIPENTRY = entry;
+                return fs_filesize;
+            }
+        } else if paks_only == 0 {
+            // check a file in the directory tree
+            q_snprintf(
+                ospath.as_mut_ptr(),
+                MAX_OSPATH,
+                c"%s/%s".as_ptr(),
+                (*search).filename.as_ptr(),
+                filename,
+            );
+            fs_filesize = Sys_filesize(ospath.as_ptr());
+            #[cfg(not(windows))]
+            {
+                if fs_filesize < 0 {
+                    // case-insensitive fallback for loose files
+                    if FS_ResolveCasePath(
+                        (*search).filename.as_ptr(),
+                        filename,
+                        ospath.as_mut_ptr(),
+                    ) != 0
+                    {
+                        fs_filesize = Sys_filesize(ospath.as_ptr());
+                    }
+                }
+            }
+            if fs_filesize < 0 {
+                search = (*search).next;
+                continue;
+            }
+            q_strlcpy(
+                FS_LASTFILE_SOURCE.as_mut_ptr(),
+                ospath.as_ptr(),
+                MAX_OSPATH,
+            );
+            if !path_id.is_null() {
+                *path_id = (*search).path_id;
+            }
+            if file.is_null() {
+                // for FS_FileExists()
+                return fs_filesize;
+            }
+            *file = fs_fopen(ospath.as_ptr(), c"rb".as_ptr());
+            if (*file).is_null() {
+                Sys_Error(c"Couldn't reopen %s".as_ptr(), ospath.as_ptr());
+            }
+            return fs_filesize;
+        }
+
+        search = (*search).next;
+    }
+
+    // Only print "can't find" messages when developer >= 1 and not in silent
+    // mode (suppresses noise from optional external textures and missing
+    // assets).
+    if silent == 0 && (*(&raw const developer)).integer >= 1 {
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"%s: can't find %s\n".as_ptr(),
+            c"FS_OpenFile_Internal".as_ptr(),
+            filename,
+        );
+    }
+
+    if !file.is_null() {
+        *file = core::ptr::null_mut();
+    }
+    fs_filesize = -1;
+    FS_LASTFILE_SOURCE[0] = 0;
+    fs_filesize
+}
+
+/// `FS_LastFileSource` -- the OS path of the entry that satisfied the most
+/// recent lookup, empty after a failed one.
+#[no_mangle]
+pub unsafe extern "C" fn FS_LastFileSource() -> *const c_char {
+    FS_LASTFILE_SOURCE.as_ptr()
+}
+
+/// `FS_OpenFile`
+#[no_mangle]
+pub unsafe extern "C" fn FS_OpenFile(
+    filename: *const c_char,
+    file: *mut *mut LibcFile,
+    path_id: *mut c_uint,
+) -> c_long {
+    fs_open_file_internal(filename, file, path_id, 0, 0)
+}
+
+/// `FS_OpenFileInPak` -- pak members only, and silent because both callers
+/// report the miss themselves.
+unsafe fn fs_open_file_in_pak(
+    filename: *const c_char,
+    file: *mut *mut LibcFile,
+    path_id: *mut c_uint,
+) -> c_long {
+    fs_open_file_internal(filename, file, path_id, 1, 1)
+}
+
+/// `FS_OpenFile_Silent`
+#[no_mangle]
+pub unsafe extern "C" fn FS_OpenFile_Silent(
+    filename: *const c_char,
+    file: *mut *mut LibcFile,
+    path_id: *mut c_uint,
+) -> c_long {
+    fs_open_file_internal(filename, file, path_id, 1, 0)
+}
+
+/// `FS_OpenFileHandle_Internal` -- `FS_OpenFile` for callers that read
+/// incrementally, and the only way to read a DEFLATED archive entry, which no
+/// `FILE *` can represent.
+unsafe fn fs_open_file_handle_internal(
+    filename: *const c_char,
+    fh: *mut FSHandleC,
+    path_id: *mut c_uint,
+    silent: c_int,
+) -> c_long {
+    if fh.is_null() {
+        return -1;
+    }
+
+    memset(fh.cast::<c_void>(), 0, core::mem::size_of::<FSHandleC>());
+
+    let mut f: *mut LibcFile = core::ptr::null_mut();
+    let len = if silent != 0 {
+        fs_open_file_internal(filename, &mut f, path_id, 1, 0)
+    } else {
+        fs_open_file_internal(filename, &mut f, path_id, 0, 0)
+    };
+    if len < 0 {
+        return -1;
+    }
+
+    if !f.is_null() {
+        (*fh).file = f;
+        (*fh).pak = if file_from_pak != 0 { 1 } else { 0 };
+        (*fh).start = ftell(f);
+        (*fh).length = len;
+        (*fh).pos = 0;
+        return len;
+    }
+
+    // deflated archive entry
+    (*fh).data = malloc(len as usize + 1).cast::<u8>();
+    if (*fh).data.is_null() {
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"%s: out of memory for %s\n".as_ptr(),
+            c"FS_OpenFileHandle_Internal".as_ptr(),
+            filename,
+        );
+        return -1;
+    }
+    *(*fh).data.add(len as usize) = 0;
+
+    if fs_zip_read_entry(FS_LASTZIP, FS_LASTZIPENTRY, (*fh).data.cast::<c_void>()) == 0 {
+        CON_Printf(
+            PRINT_TERMONLY,
+            c"%s: corrupt deflate stream for %s in %s\n".as_ptr(),
+            c"FS_OpenFileHandle_Internal".as_ptr(),
+            filename,
+            (*FS_LASTZIP).filename.as_ptr(),
+        );
+        free((*fh).data.cast::<c_void>());
+        (*fh).data = core::ptr::null_mut();
+        return -1;
+    }
+
+    (*fh).pak = 1; // it came out of packaged content
+    (*fh).start = 0;
+    (*fh).length = len;
+    (*fh).pos = 0;
+    len
+}
+
+/// `FS_OpenFileHandle`
+#[no_mangle]
+pub unsafe extern "C" fn FS_OpenFileHandle(
+    filename: *const c_char,
+    fh: *mut FSHandleC,
+    path_id: *mut c_uint,
+) -> c_long {
+    fs_open_file_handle_internal(filename, fh, path_id, 0)
+}
+
+/// `FS_OpenFileHandle_Silent` -- for optional content whose absence is normal.
+#[no_mangle]
+pub unsafe extern "C" fn FS_OpenFileHandle_Silent(
+    filename: *const c_char,
+    fh: *mut FSHandleC,
+    path_id: *mut c_uint,
+) -> c_long {
+    fs_open_file_handle_internal(filename, fh, path_id, 1)
+}
+
+/// `FS_FileExists`
+#[no_mangle]
+pub unsafe extern "C" fn FS_FileExists(
+    filename: *const c_char,
+    path_id: *mut c_uint,
+) -> c_int {
+    let ret = fs_open_file_internal(filename, core::ptr::null_mut(), path_id, 1, 0);
+    if ret < 0 {
+        0
+    } else {
+        1
+    }
+}
+
+/// `FS_FileExistsInPak` -- is there a copy inside some pak, whether or not a
+/// loose file is hiding it?  No syscalls, so ask it first.
+#[no_mangle]
+pub unsafe extern "C" fn FS_FileExistsInPak(
+    filename: *const c_char,
+    path_id: *mut c_uint,
+) -> c_int {
+    let ret = fs_open_file_in_pak(filename, core::ptr::null_mut(), path_id);
+    if ret < 0 {
+        0
+    } else {
+        1
+    }
+}
+
+/// `FS_FileInGamedir` -- a readable loose file in fs_gamedir or fs_userdir,
+/// never a pak member.
+#[no_mangle]
+pub unsafe extern "C" fn FS_FileInGamedir(filename: *const c_char) -> c_int {
+    let mut ret = Sys_FileType(FS_MakePath(MAKEPATH_USERDIR, core::ptr::null_mut(), filename));
+    if ret & FS_ENT_FILE != 0 {
+        return 1;
+    }
+
+    ret = Sys_FileType(FS_MakePath(MAKEPATH_GAMEDIR, core::ptr::null_mut(), filename));
+    if ret & FS_ENT_FILE != 0 {
+        return 1;
+    }
+
+    0
+}
+
+/// `FS_UserdirHasFile` -- did the player put their own loose copy in the
+/// userdir's `gamedir`?  False where there is no user directory, and false
+/// where the userdir and the install directory are the same place.
+#[no_mangle]
+pub unsafe extern "C" fn FS_UserdirHasFile(
+    gamedir: *const c_char,
+    filename: *const c_char,
+) -> c_int {
+    if !do_userdirs() {
+        return 0;
+    }
+
+    let mut userpath = [0 as c_char; MAX_OSPATH];
+    let mut basepath = [0 as c_char; MAX_OSPATH];
+    let mut ospath = [0 as c_char; MAX_OSPATH];
+
+    FS_MakePath_BUF(
+        MAKEPATH_USERBASE,
+        core::ptr::null_mut(),
+        userpath.as_mut_ptr(),
+        MAX_OSPATH,
+        gamedir,
+    );
+    FS_MakePath_BUF(
+        MAKEPATH_BASEDIR,
+        core::ptr::null_mut(),
+        basepath.as_mut_ptr(),
+        MAX_OSPATH,
+        gamedir,
+    );
+    if strcmp(userpath.as_ptr(), basepath.as_ptr()) == 0 {
+        return 0;
+    }
+
+    q_snprintf(
+        ospath.as_mut_ptr(),
+        MAX_OSPATH,
+        c"%s/%s".as_ptr(),
+        userpath.as_ptr(),
+        filename,
+    );
+    if Sys_FileType(ospath.as_ptr()) & FS_ENT_FILE != 0 {
+        return 1;
+    }
+    #[cfg(not(windows))]
+    {
+        if FS_ResolveCasePath(userpath.as_ptr(), filename, ospath.as_mut_ptr()) != 0 {
+            return if Sys_FileType(ospath.as_ptr()) & FS_ENT_FILE != 0 {
+                1
+            } else {
+                0
+            };
+        }
+    }
+
+    0
+}
+
+//============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
 // `FS_MakePath_VA` (quakefs.h:239) and `FS_MakePath_VABUF` (:242) are the
