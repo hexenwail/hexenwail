@@ -952,6 +952,49 @@ unsafe fn fs_basedir_ptr() -> *const c_char {
     FS_BASEDIR
 }
 
+/*----------------------------------------------------------------------------
+ * the three helpers engine/rust/quakefs_variadic.c calls
+ *
+ * That file is C because a C-variadic signature cannot be *defined* in stable
+ * Rust; it is not a second implementation of anything, and these are the only
+ * names it needs -- the buffer it formats into, its length, and the base half
+ * of do_MakePath.  The logic stays here.
+ *--------------------------------------------------------------------------*/
+
+/// The next of the four rotating buffers, for `FS_MakePath_VA`'s caller.
+#[no_mangle]
+pub unsafe extern "C" fn QuakeFS_GetBuffer() -> *mut c_char {
+    get_fs_buffer()
+}
+
+/// `FS_BUFFERLEN` -- what that buffer can hold.
+#[no_mangle]
+pub extern "C" fn QuakeFS_BufferLen() -> usize {
+    FS_BUFFERLEN
+}
+
+/// `init_MakePath` -- the base directory and its separator, which the shim
+/// needs before it can format the rest of the path onto the end.
+#[no_mangle]
+pub unsafe extern "C" fn QuakeFS_MakePathPrefix(
+    base: c_int,
+    buf: *mut c_char,
+    siz: usize,
+) -> c_int {
+    init_MakePath(base, buf, siz)
+}
+
+#[cfg(not(windows))]
+extern "C" {
+    /// engine/rust/quakefs_variadic.c, which owns it because reading
+    /// `struct dirent` is an ABI concern rather than a porting one.
+    pub fn FS_ResolveCasePath(
+        basedir: *const c_char,
+        relpath: *const c_char,
+        resolved: *mut c_char,
+    ) -> c_int;
+}
+
 //============================================================================
 // what cannot come across, and where it goes instead
 //============================================================================
