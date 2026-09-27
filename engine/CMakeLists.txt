@@ -622,9 +622,9 @@ set(COMMON_SOURCES
     ${ENGINE_TOP}/hexen2/net_main.c
     ${ENGINE_TOP}/hexen2/net_loop.c
     ${ENGINE_TOP}/hexen2/net_dgrm.c
-    # From h2shared
+    # From h2shared.  cvar.c is not compiled here: cvar is ported, and the C
+    # original is now only a differential harness fixture.
     ${COMMONDIR}/cmd.c
-    ${COMMONDIR}/cvar.c
     ${COMMONDIR}/pr_cmds.c
     ${COMMONDIR}/pr_edict.c
     ${COMMONDIR}/pr_exec.c
@@ -868,7 +868,7 @@ endif()
 # its own; the engine always builds all of them.
 set(RUST_ENGINE_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io info_str strlcpy strlcat
-    huffman wad)
+    huffman wad cvar)
 
 # Each port used to have a switch that put its C original back.  A cache or a
 # packaging recipe that still says OFF is asking for that C code, and linking
@@ -1299,12 +1299,13 @@ else()
         # portable bits shared with every other target
         ${UHEXEN2_SHARED}/q_endian.c
         ${UHEXEN2_SHARED}/qsnprint.c
-        # h2shared, compiled here with -DH2W
+        # h2shared, compiled here with -DH2W.  cvar.c is not compiled: the
+        # cvar port lives in the Rust archive, and cvar.c has no H2W arm, so
+        # one translation serves this target too.
         ${COMMONDIR}/common.c
         ${COMMONDIR}/quakefs.c
         ${COMMONDIR}/miniz.c
         ${COMMONDIR}/cmd.c
-        ${COMMONDIR}/cvar.c
         ${COMMONDIR}/host_string.c
         ${COMMONDIR}/zone.c
         ${COMMONDIR}/sv_model.c

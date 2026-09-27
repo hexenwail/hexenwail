@@ -29,6 +29,14 @@ pub mod mathlib;
 #[cfg(any(feature = "sizebuf", feature = "msg_io"))]
 pub mod sizebuf;
 
+// cvar is the Phase 6 engine-state port, and info_str reads
+// `sv_highchars.integer` through Cvar_FindVar, so it needs cvar_t even in a
+// harness build that links only that port.  Same split as sizebuf/msg_io: the
+// layout is unconditional in cvar.rs and the functions are behind
+// `feature = "cvar"`.
+#[cfg(any(feature = "cvar", feature = "info_str"))]
+pub mod cvar;
+
 #[cfg(feature = "crc")]
 pub mod crc;
 

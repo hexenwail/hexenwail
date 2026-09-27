@@ -65,6 +65,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 derived_map() {
 	cat <<-'EOF'
 	engine/rust/src/crc.rs                common/crc.c
+	engine/rust/src/cvar.rs               engine/h2shared/cvar.c
 	engine/rust/src/huffman.rs            engine/hexenworld/shared/huffman.c
 	engine/rust/src/info_str.rs           engine/hexenworld/shared/info_str.c
 	engine/rust/src/link_ops.rs           engine/h2shared/link_ops.c
