@@ -79,6 +79,10 @@ const MAX_MATCHES: c_int = 128;
 const LINE_LEN: usize = 1024;
 
 /// `cmd_source_t` from cmd.h: a two-value enum, so an int across the ABI.
+/// `SRC_CLIENT` is the initial value of the exported `cmd_source`; on wasm32
+/// that storage is C's and zero-initialised there, so the constant has no use
+/// on that target.
+#[cfg(not(target_family = "wasm"))]
 const SRC_CLIENT: c_int = 0;
 const SRC_COMMAND: c_int = 1;
 
@@ -289,9 +293,23 @@ static mut CMD_TEXT: SizeBufC = SizeBufC {
     name: core::ptr::null(),
 };
 
-/// `cmd_source_t cmd_source` -- exported, written by Cmd_ExecuteString.
+/// `cmd_source_t cmd_source` -- exported, written by Cmd_ExecuteString and
+/// read by the C that dispatches commands.
+#[cfg(not(target_family = "wasm"))]
 #[no_mangle]
 pub static mut cmd_source: c_int = SRC_CLIENT;
+
+// rustc does not export `#[no_mangle] static`s from a wasm32 staticlib: it
+// keeps the functions global and turns the data into local symbols, so the web
+// client's C would not find cmd_source and the link fails on it.  There the
+// storage is C's, in engine/rust/wasm_globals.c, and this module uses it like
+// any other extern -- the same treatment msg_readcount, msg_badread and
+// vec3_origin already get.  Same name, type and zero initial value, so nothing
+// below changes.
+#[cfg(target_family = "wasm")]
+extern "C" {
+    pub static mut cmd_source: c_int;
+}
 
 /// `static cmdalias_t *cmd_alias`.
 static mut CMD_ALIAS: *mut CmdAliasC = core::ptr::null_mut();

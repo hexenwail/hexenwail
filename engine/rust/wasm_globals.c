@@ -3,9 +3,10 @@
  * wasm_globals.c -- the data the Rust engine archive does not provide on the
  * WebAssembly client.  Compiled into the Emscripten build only.
  *
- * 1. Exported statics.  msg_io.rs owns msg_readcount and msg_badread, and
- *    lib.rs owns vec3_origin, as `#[no_mangle] static mut`.  On every native
- *    target that makes them ordinary global data in libengine_rs.a.  For
+ * 1. Exported statics.  msg_io.rs owns msg_readcount and msg_badread, lib.rs
+ *    owns vec3_origin, and cmd.rs owns cmd_source, as `#[no_mangle] static
+ *    mut`.  On every native target that makes them ordinary global data in
+ *    libengine_rs.a.  For
  *    wasm32-unknown-emscripten rustc keeps the archive's functions global but
  *    emits those statics as local symbols (`d msg_readcount.0`), with or
  *    without #[used], so the C that reads them -- cl_parse.c, cl_tent.c,
@@ -41,6 +42,7 @@
 int		msg_readcount;
 qboolean	msg_badread;
 vec3_t		vec3_origin;
+cmd_source_t	cmd_source;   /* written by Cmd_ExecuteString, read by the C that dispatches */
 
 #ifdef USE_SINCOS_TABLE
 const float sincos_tab[SINCOS_SIZE] = {
