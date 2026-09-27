@@ -1001,7 +1001,8 @@ function(engine_rs_attach tgt)
     # shared with zone.c.
     target_sources(${tgt} PRIVATE
         ${RUST_ENGINE_RS_DIR}/zone_target.c
-        ${RUST_ENGINE_RS_DIR}/cmd_target.c)
+        ${RUST_ENGINE_RS_DIR}/cmd_target.c
+        ${RUST_ENGINE_RS_DIR}/quakefs_target.c)
 
     # rustc emits the archive's exported statics as local symbols on wasm32,
     # so there the C owns their storage.  See the file's header.
