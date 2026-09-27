@@ -230,3 +230,17 @@ per-paknum cascade of demo/OEM/old-edition fallbacks, and `check_known_zip` is
 the container-agnostic half: it asks whether one archive holds every marked
 member at its exact size (`zip_has_marks`), with a wrong size an immediate NO
 rather than a keep-looking.
+
+**A work item the model did not have: four `static inline` hashindex helpers.**
+`quakefs.c` calls `Hash_First`, `Hash_Next`, `Hash_GenerateKeyString` and
+`Hash_GenerateKeyInt` nine times, and all four are `static inline` in
+`engine/h2shared/hashindex.h` (`:47`, `:59`, `:70`, `:90`) — compiled into each
+C caller, not exported as symbols.  A Rust port cannot call them, so it must
+either reproduce those four bodies in Rust against the `HashIndexC` layout (the
+same way the header's other inlines are handled, and what migration rule 3
+anticipates when it says to audit `static inline` functions) or the hashindex
+port must start exporting them, which would change a landed port.  Reproducing
+them in `quakefs.rs` is the smaller change and keeps the hashindex port as it
+is; either way the differential harness has to compare the two, because a hash
+key that differs by one bit turns a lookup into a miss rather than into a
+visible error.
