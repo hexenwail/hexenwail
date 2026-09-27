@@ -29,6 +29,7 @@ wad = []
 cvar = []
 cmd = []
 quakefs = []
+net_udp_hw = []
 zone = []
 
 [profile.release]

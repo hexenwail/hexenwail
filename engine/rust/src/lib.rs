@@ -26,7 +26,7 @@ pub mod mathlib;
 // in a harness build that leaves the sizebuf functions to the C original.  The
 // layout lives in one place; which half of sizebuf.rs is compiled is decided
 // there.
-#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd"))]
+#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd", feature = "net_udp_hw"))]
 pub mod sizebuf;
 
 // cvar is the Phase 6 engine-state port, and info_str reads
@@ -40,7 +40,7 @@ pub mod cvar;
 // zone is the Phase 6 allocator/ownership port.  It has no ABI half of its own
 // that another port needs -- its structs are private to zone.c -- so it is
 // compiled only for its own feature.
-#[cfg(any(feature = "zone", feature = "cmd", feature = "quakefs"))]
+#[cfg(any(feature = "zone", feature = "cmd", feature = "quakefs", feature = "net_udp_hw"))]
 pub mod zone;
 
 // cmd is the Phase 6 command/registry port.  It needs cvar_t (Cmd_CheckCommand
@@ -115,3 +115,11 @@ extern "C" {
 
 #[cfg(feature = "quakefs")]
 pub mod quakefs;
+
+// net_udp_hw is HexenWorld's transport.  Its C original is compiled into
+// glhexen2 and hwsv only, and net.h renames every symbol of it in the client,
+// so the module exports the unambiguous HWNET_* spelling and the per-target C
+// shim owns the C-visible storage and the plain NET_* names hwsv uses; see the
+// module header.
+#[cfg(feature = "net_udp_hw")]
+pub mod net_udp_hw;
