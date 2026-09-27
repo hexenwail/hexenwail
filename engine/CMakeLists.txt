@@ -629,7 +629,6 @@ set(COMMON_SOURCES
     ${COMMONDIR}/pr_cmds.c
     ${COMMONDIR}/pr_edict.c
     ${COMMONDIR}/pr_exec.c
-    ${COMMONDIR}/quakefs.c
     ${COMMONDIR}/miniz.c
     ${COMMONDIR}/debuglog.c
     ${COMMONDIR}/host_string.c
@@ -868,7 +867,7 @@ endif()
 # its own; the engine always builds all of them.
 set(RUST_ENGINE_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io info_str strlcpy strlcat
-    huffman wad cvar zone cmd)
+    huffman wad cvar zone cmd quakefs)
 
 # Each port used to have a switch that put its C original back.  A cache or a
 # packaging recipe that still says OFF is asking for that C code, and linking
@@ -1002,7 +1001,11 @@ function(engine_rs_attach tgt)
     target_sources(${tgt} PRIVATE
         ${RUST_ENGINE_RS_DIR}/zone_target.c
         ${RUST_ENGINE_RS_DIR}/cmd_target.c
-        ${RUST_ENGINE_RS_DIR}/quakefs_target.c)
+        ${RUST_ENGINE_RS_DIR}/quakefs_target.c
+        # The two C-variadic entry points, FS_ResolveCasePath (struct dirent),
+        # and QuakeFS_TargetHostError, whose C name differs per build: H2W has
+        # no Host_Error symbol at all.  See the file's header.
+        ${RUST_ENGINE_RS_DIR}/quakefs_variadic.c)
 
     # rustc emits the archive's exported statics as local symbols on wasm32,
     # so there the C owns their storage.  See the file's header.
@@ -1320,7 +1323,6 @@ else()
         # predicates the ports need come from engine/rust/{zone,cmd}_target.c,
         # which this target compiles with -DSERVERONLY.
         ${COMMONDIR}/common.c
-        ${COMMONDIR}/quakefs.c
         ${COMMONDIR}/miniz.c
         ${COMMONDIR}/host_string.c
         ${COMMONDIR}/sv_model.c
