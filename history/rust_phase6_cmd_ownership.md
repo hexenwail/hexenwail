@@ -86,8 +86,9 @@ registering the four list commands in `h2ded`/`hwsv` would give those targets
 commands the C does not have, and `Cmd_Exists` is what decides whether a cvar
 name is refused, so it is observable from the cvar port.
 
-**Verified per binary** after the port landed (disassembly of a clean build):
-glhexen2 `1/0/0`, h2ded `0/0/0`, hwsv `0/0/1`, and all three report the startup
+**Verified per binary** after the port landed (disassembly of a clean build), in
+the order **client-lists / is-H2W / builtin-startup**: glhexen2 `1/0/0`, h2ded
+`0/0/0`, hwsv `0/1/0`.  All three native binaries therefore report the startup
 fallback as `0`; only the wasm client will see it set, which the PWA job builds.
 
 `Cmd_ForwardToServer()` needs `H2W && !SERVERONLY`, a configuration **no target
