@@ -126,7 +126,6 @@ RUST_ACCESSOR(QPicC_offsetof_data)
  * undefined; a new reference fails this link loudly, which is the point. */
 void Sys_Error (const char *error, ...) { (void)error; abort(); }
 void CON_Printf (unsigned int flags, const char *fmt, ...) { (void)flags; (void)fmt; abort(); }
-cvar_t *Cvar_FindVar (const char *var_name) { (void)var_name; abort(); }
 void *Hunk_AllocName (int size, const char *name) { (void)size; (void)name; abort(); }
 void Z_Free (void *ptr) { (void)ptr; abort(); }
 byte *FS_LoadZoneFile (const char *path, int zone_id, unsigned int *path_id)
@@ -134,6 +133,24 @@ byte *FS_LoadZoneFile (const char *path, int zone_id, unsigned int *path_id)
 	(void)path; (void)zone_id; (void)path_id; abort();
 }
 sizebuf_t net_message;
+
+/* cvar.rs's own calls.  Same rule as the block above: the engine provides all
+ * of these, the archive leaves them undefined, and the layout program never
+ * reaches them. */
+const char *Cmd_Argv (int arg) { (void)arg; abort(); }
+int Cmd_Argc (void) { abort(); }
+void Cmd_AddCommand (const char *cmd_name, void (*function)(void))
+{
+	(void)cmd_name; (void)function; abort();
+}
+int Cmd_Exists (const char *cmd_name) { (void)cmd_name; abort(); }
+void *Z_Malloc (int size, int zone_id) { (void)size; (void)zone_id; abort(); }
+char *Z_Strdup (const char *s) { (void)s; abort(); }
+int q_strcasecmp (const char *s1, const char *s2) { (void)s1; (void)s2; abort(); }
+int q_snprintf (char *str, size_t size, const char *format, ...)
+{
+	(void)str; (void)size; (void)format; abort();
+}
 
 static int checked, failures;
 

@@ -52,7 +52,7 @@
 // harness compares them across successive calls and against the caller's own
 // buffer, not just against a return value.
 
-use core::ffi::{c_char, c_float, c_int, c_uint, c_void};
+use core::ffi::{c_char, c_int, c_uint, c_void};
 
 /// C's `pkey[512]` and `value[512]` in the parse loops, and the width of one
 /// Info_ValueForKey rotation slot (`static char value[4][512]`).
@@ -89,97 +89,14 @@ extern "C" {
 // cvar_t
 //============================================================================
 
-/// `cvar_t` from engine/h2shared/cvar.h -- the HexenWorld server compiles the
-/// same header.  Only `integer` is ever read here; the whole struct is spelled
-/// out so the offsets can be asserted here and checked against the real C
-/// struct by the differential harness.
-#[repr(C)]
-pub struct CvarC {
-    pub name: *const c_char,
-    pub string: *const c_char,
-    pub flags: c_uint,
-    pub value: c_float,
-    pub integer: c_int,
-    pub callback: *mut c_void,
-    pub next: *mut CvarC,
-    pub default_string: *const c_char,
-}
-
-const PTR_SIZE: usize = core::mem::size_of::<*mut CvarC>();
-const PTR_ALIGN: usize = core::mem::align_of::<*mut CvarC>();
-
-const fn align_up(x: usize, align: usize) -> usize {
-    (x + align - 1) & !(align - 1)
-}
-
-const _: () = {
-    assert!(core::mem::offset_of!(CvarC, name) == 0);
-    assert!(core::mem::offset_of!(CvarC, string) == PTR_SIZE);
-    assert!(core::mem::offset_of!(CvarC, flags) == 2 * PTR_SIZE);
-    assert!(core::mem::offset_of!(CvarC, value) == 2 * PTR_SIZE + 4);
-    assert!(core::mem::offset_of!(CvarC, integer) == 2 * PTR_SIZE + 8);
-    assert!(core::mem::offset_of!(CvarC, callback)
-        == align_up(2 * PTR_SIZE + 12, PTR_ALIGN));
-    assert!(core::mem::offset_of!(CvarC, next)
-        == align_up(2 * PTR_SIZE + 12, PTR_ALIGN) + PTR_SIZE);
-    assert!(core::mem::offset_of!(CvarC, default_string)
-        == align_up(2 * PTR_SIZE + 12, PTR_ALIGN) + 2 * PTR_SIZE);
-    assert!(core::mem::size_of::<CvarC>()
-        == align_up(align_up(2 * PTR_SIZE + 12, PTR_ALIGN) + 3 * PTR_SIZE, PTR_ALIGN));
-};
-
-// These accessors let the C differential harness check the layout against the
-// real cvar_t without restating Rust's assumptions in C, as the sizebuf,
-// link_ops and msg_io ports do.
-#[no_mangle]
-pub extern "C" fn CvarC_sizeof() -> usize {
-    core::mem::size_of::<CvarC>()
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_alignof() -> usize {
-    core::mem::align_of::<CvarC>()
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_name() -> usize {
-    core::mem::offset_of!(CvarC, name)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_string() -> usize {
-    core::mem::offset_of!(CvarC, string)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_flags() -> usize {
-    core::mem::offset_of!(CvarC, flags)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_value() -> usize {
-    core::mem::offset_of!(CvarC, value)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_integer() -> usize {
-    core::mem::offset_of!(CvarC, integer)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_callback() -> usize {
-    core::mem::offset_of!(CvarC, callback)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_next() -> usize {
-    core::mem::offset_of!(CvarC, next)
-}
-
-#[no_mangle]
-pub extern "C" fn CvarC_offsetof_default_string() -> usize {
-    core::mem::offset_of!(CvarC, default_string)
-}
+// `cvar_t` from engine/h2shared/cvar.h -- the HexenWorld server compiles the
+// same header.  Only `integer` is ever read here, so the layout lives with the
+// port that owns the type (cvar.rs); declaring it a second time would be a
+// second thing to keep in step, and the CvarC_* layout accessors the
+// differential harness calls are exported from there too.  cvar.rs is compiled
+// whenever this module is (see lib.rs), which is what makes the import legal in
+// an info_str-only harness build.
+use crate::cvar::CvarC;
 
 /// `sv_highchars.integer` from engine/hexenworld/server/sv_main.c, read through
 /// the cvar table instead of the global.
