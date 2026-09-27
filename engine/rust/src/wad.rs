@@ -35,6 +35,16 @@
 //    half-updated state is reachable only through a fatal diagnostic, and it is
 //    reproduced rather than tidied up.
 //
+// 4. Every offset that comes out of the file is treated as a byte offset, not
+//    as the address of a `LumpInfoC`/`QPicC` that is known to be aligned.  The
+//    C casts to the struct pointer and dereferences, which makes alignment a
+//    caller precondition; in Rust that same dereference would be undefined
+//    behaviour rather than a fault the caller could be blamed for.  `field_ptr`
+//    below computes field addresses arithmetically and every field access goes
+//    through `read_unaligned`/`write_unaligned`, so the precondition is gone and
+//    no byte in the mapping changes -- see issue #249 and the harness's
+//    unaligned-table case.
+//
 // LittleLong is a compile-time macro in the C (common/q_endian.h: on a
 // little-endian host it is the identity, on a big-endian host it is LongSwap).
 // The port keeps that shape: `little_long` swaps under cfg(target_endian) and
@@ -236,6 +246,19 @@ fn little_long(v: c_int) -> c_int {
     }
 }
 
+/// Address of the field at `offset` bytes into the mapping at `base`.
+///
+/// Deliberately arithmetic, never `(*base).field`: the offsets in a wad are read
+/// out of the file, so the address they produce is not known to be aligned for
+/// `T`, and forming a reference there would be undefined behaviour even before
+/// the field is touched.  The read/write helpers below take the pointer this
+/// returns.  `offset_of!` supplies the offsets, so the field layout stays stated
+/// in one place.
+#[inline]
+fn field_ptr<T>(base: *mut u8, offset: usize) -> *mut T {
+    base.wrapping_add(offset).cast::<T>()
+}
+
 //============================================================================
 // the exported state
 //============================================================================
@@ -340,50 +363,83 @@ pub unsafe extern "C" fn W_LoadWadFile(filename: *const c_char) {
         );
     }
 
-    let header = wad_base.cast::<WadInfoC>();
-
-    if (*header).identification[0] != b'W' as c_char
-        || (*header).identification[1] != b'A' as c_char
-        || (*header).identification[2] != b'D' as c_char
-        || (*header).identification[3] != b'2' as c_char
+    // Identification is read as four plain chars, not through LittleLong:
+    // the check is byte-order independent on purpose, and "2DAW" -- the same
+    // four bytes reversed -- is rejected here too.  Read unaligned: `wad_base`
+    // is a byte mapping, so nothing guarantees `wadinfo_t`'s alignment.
+    let identification = core::ptr::read_unaligned(field_ptr::<[c_char; 4]>(
+        wad_base,
+        core::mem::offset_of!(WadInfoC, identification),
+    ));
+    if identification[0] != b'W' as c_char
+        || identification[1] != b'A' as c_char
+        || identification[2] != b'D' as c_char
+        || identification[3] != b'2' as c_char
     {
-        // Identification is read as four plain chars, not through LittleLong:
-        // the check is byte-order independent on purpose, and "2DAW" -- the
-        // same four bytes reversed -- is rejected here too.
         Sys_Error(
             c"Wad file %s doesn't have WAD2 id\n".as_ptr(),
             filename,
         );
     }
 
-    wad_numlumps = little_long((*header).numlumps);
-    let infotableofs = little_long((*header).infotableofs);
+    wad_numlumps = little_long(core::ptr::read_unaligned(field_ptr::<c_int>(
+        wad_base,
+        core::mem::offset_of!(WadInfoC, numlumps),
+    )));
+    let infotableofs = little_long(core::ptr::read_unaligned(field_ptr::<c_int>(
+        wad_base,
+        core::mem::offset_of!(WadInfoC, infotableofs),
+    )));
 
     // The C computes `(lumpinfo_t *)(wad_base + infotableofs)`; wrapping keeps
     // that a byte offset into the mapping instead of an inbounds assumption, so
     // a malformed table offset cannot turn into a Rust-level precondition
-    // failure that the C original does not have.
+    // failure that the C original does not have.  For the same reason the
+    // fields are reached through `field_ptr` and read unaligned -- the C has a
+    // caller precondition where Rust would have undefined behaviour.
     wad_lumps = wad_base
         .wrapping_offset(infotableofs as isize)
         .cast::<LumpInfoC>();
 
     let mut i = 0;
     while i < wad_numlumps {
-        let lump_p = wad_lumps.wrapping_offset(i as isize);
+        let entry = wad_lumps.wrapping_add(i as usize).cast::<u8>();
 
         // filepos and size are the two fields read back out of the table as
         // integers; disksize, type, compression and the pads are left as they
         // are -- type in particular is compared against TYP_QPIC below without
         // any conversion.
-        (*lump_p).filepos = little_long((*lump_p).filepos);
-        (*lump_p).size = little_long((*lump_p).size);
+        let filepos = little_long(core::ptr::read_unaligned(field_ptr::<c_int>(
+            entry,
+            core::mem::offset_of!(LumpInfoC, filepos),
+        )));
+        core::ptr::write_unaligned(
+            field_ptr::<c_int>(entry, core::mem::offset_of!(LumpInfoC, filepos)),
+            filepos,
+        );
+        core::ptr::write_unaligned(
+            field_ptr::<c_int>(entry, core::mem::offset_of!(LumpInfoC, size)),
+            little_long(core::ptr::read_unaligned(field_ptr::<c_int>(
+                entry,
+                core::mem::offset_of!(LumpInfoC, size),
+            ))),
+        );
 
-        W_CleanupName((*lump_p).name.as_ptr(), (*lump_p).name.as_mut_ptr());
+        // The byte pointer is handed to W_CleanupName for the same reason: it
+        // walks the field as bytes, which is defined at any alignment, whereas
+        // `(*lump_p).name` would form a reference to a possibly-misaligned
+        // array first.
+        let name = field_ptr::<c_char>(entry, core::mem::offset_of!(LumpInfoC, name));
+        W_CleanupName(name, name);
 
-        if (*lump_p).type_ == TYP_QPIC {
+        if core::ptr::read_unaligned(field_ptr::<c_char>(
+            entry,
+            core::mem::offset_of!(LumpInfoC, type_),
+        )) == TYP_QPIC
+        {
             SwapPic(
                 wad_base
-                    .wrapping_offset((*lump_p).filepos as isize)
+                    .wrapping_offset(filepos as isize)
                     .cast::<QPicC>(),
             );
         }
@@ -405,10 +461,11 @@ pub unsafe extern "C" fn W_GetLumpinfo(name: *const c_char) -> *mut LumpInfoC {
 
     let mut i = 0;
     while i < wad_numlumps {
-        let lump_p = wad_lumps.wrapping_offset(i as isize);
+        let entry = wad_lumps.wrapping_add(i as usize).cast::<u8>();
+        let name_p = field_ptr::<c_char>(entry, core::mem::offset_of!(LumpInfoC, name));
 
-        if strcmp(clean.as_ptr(), (*lump_p).name.as_ptr()) == 0 {
-            return lump_p;
+        if strcmp(clean.as_ptr(), name_p) == 0 {
+            return wad_lumps.wrapping_add(i as usize);
         }
 
         i += 1;
@@ -426,9 +483,13 @@ pub unsafe extern "C" fn W_GetLumpinfo(name: *const c_char) -> *mut LumpInfoC {
 #[no_mangle]
 pub unsafe extern "C" fn W_GetLumpName(name: *const c_char) -> *mut c_void {
     let lump = W_GetLumpinfo(name);
+    let filepos = core::ptr::read_unaligned(field_ptr::<c_int>(
+        lump.cast::<u8>(),
+        core::mem::offset_of!(LumpInfoC, filepos),
+    ));
 
     wad_base
-        .wrapping_offset((*lump).filepos as isize)
+        .wrapping_offset(filepos as isize)
         .cast::<c_void>()
 }
 
@@ -444,6 +505,13 @@ pub unsafe extern "C" fn W_GetLumpName(name: *const c_char) -> *mut c_void {
 /// port.  It swaps the two header words in place and leaves `data` alone.
 #[no_mangle]
 pub unsafe extern "C" fn SwapPic(pic: *mut QPicC) {
-    (*pic).width = little_long((*pic).width);
-    (*pic).height = little_long((*pic).height);
+    let base = pic.cast::<u8>();
+    let width = field_ptr::<c_int>(base, core::mem::offset_of!(QPicC, width));
+    let height = field_ptr::<c_int>(base, core::mem::offset_of!(QPicC, height));
+
+    core::ptr::write_unaligned(width, little_long(core::ptr::read_unaligned(width)));
+    core::ptr::write_unaligned(
+        height,
+        little_long(core::ptr::read_unaligned(height)),
+    );
 }
