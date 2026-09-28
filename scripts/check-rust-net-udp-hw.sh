@@ -90,17 +90,21 @@ grep -q '^RESULT: PASS$' "$diff_log" || {
 	exit 1
 }
 # Floors rather than pins: RESULT alone would still pass if the case list were
-# cut down to nothing.  Observed today: 3 cases, 800 trace bytes.
+# cut down to nothing.  Observed today: 7 cases, 6220 trace bytes -- the case
+# list was widened from three (address conversions, one round trip, failures)
+# to cover payload sizes, the oversize boundary, a bounded read timeout and
+# the init/shutdown lifecycle, because the first PR that landed this harness
+# said plainly that three cases was thin.
 count_line=$(grep -E '^checked [0-9]+ expectations, [0-9]+ failures, [0-9]+ cases, [0-9]+ trace bytes$' "$diff_log" || true)
 cases=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | sed -n 3p || true)
 bytes=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | sed -n 4p || true)
-if [ -z "$cases" ] || [ "$cases" -lt 3 ]; then
-	echo "FAIL: harness case count is below the three-case floor" >&2
+if [ -z "$cases" ] || [ "$cases" -lt 6 ]; then
+	echo "FAIL: harness case count is below the six-case floor" >&2
 	echo "      observed: ${count_line:-<no summary line>}" >&2
 	exit 1
 fi
-if [ -z "$bytes" ] || [ "$bytes" -lt 500 ]; then
-	echo "FAIL: harness compared fewer than 500 trace bytes" >&2
+if [ -z "$bytes" ] || [ "$bytes" -lt 5000 ]; then
+	echo "FAIL: harness compared fewer than 5000 trace bytes" >&2
 	echo "      observed: ${count_line:-<no summary line>}" >&2
 	exit 1
 fi
@@ -118,6 +122,22 @@ if [ "$c_names" != "$r_names" ]; then
 	exit 1
 fi
 echo "  $(printf '%s\n' "$c_names" | wc -l) functions match the C's, name for name"
+
+# The receive-buffer limit the harness asserts against is the C's, derived the
+# same way, so it cannot drift: MAX_UDP_PACKET is HWNET_MAX_MSGLEN + 9
+# (net_udp.c:53), and the harness's HARNESS_RX_LIMIT must be that expression.
+c_msglen=$(sed -n 's/^#define[[:space:]]*HWNET_MAX_MSGLEN[[:space:]]*\([0-9]*\).*/\1/p' \
+	"$root/engine/hexenworld/shared/net.h" | head -1)
+c_packet=$(sed -n 's/^#define[[:space:]]*MAX_UDP_PACKET[[:space:]]*(HWNET_MAX_MSGLEN[[:space:]]*+\([[:space:]]*[0-9]*\)).*/\1/p' \
+	"$root/engine/hexenworld/shared/net_udp.c" | head -1 | tr -d ' ')
+h_limit=$(sed -n 's/^#define[[:space:]]*HARNESS_RX_LIMIT[[:space:]]*(HWNET_MAX_MSGLEN[[:space:]]*+\([[:space:]]*[0-9]*\)).*/\1/p' \
+	"$crate/net_udp_hw/tests/diff_harness.c" | head -1 | tr -d ' ')
+if [ -z "$c_msglen" ] || [ -z "$c_packet" ] || [ "$c_packet" != "$h_limit" ]; then
+	echo "FAIL: HARNESS_RX_LIMIT does not match the C's MAX_UDP_PACKET" >&2
+	echo "      HWNET_MAX_MSGLEN=$c_msglen, C adds '$c_packet', harness adds '$h_limit'" >&2
+	exit 1
+fi
+echo "  the receive limit matches the C's (HWNET_MAX_MSGLEN $c_msglen + $c_packet)"
 
 # The two printed forms, which are the part of the API a player actually sees.
 for fmt in '%i.%i.%i.%i:%i' '%i.%i.%i.%i'; do

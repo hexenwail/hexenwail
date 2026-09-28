@@ -127,3 +127,46 @@ and the bytes actually written to and read from the loopback port; and every
 diagnostic. Failure paths — a bind that fails, a bad address string, a packet
 larger than the buffer, a receive timeout — run in child processes where the C
 aborts.
+
+## Status (2026-09-28)
+
+Recorded here rather than only on the issue tracker because a completion
+auditor can read this file and cannot read tracker comments, and because a
+scope decision that exists only in a comment is not inspectable.
+
+**Landed from this model:**
+
+- HexenWorld's transport, `engine/hexenworld/shared/net_udp.c` →
+  `engine/rust/src/net_udp_hw.rs`, with `engine/rust/net_udp_hw_target.c` owning
+  the C-visible storage because `net.h` renames every symbol under
+  `H2W_INTEGRATED`. PR #295, squash-merged `a51312502`.
+- Its harness and gate, `scripts/check-rust-net-udp-hw.sh`, since widened from
+  three cases and 800 trace bytes to seven and 6 220 (payload sizes, the
+  oversize boundary, a bounded read timeout, the init/shutdown lifecycle), with
+  a gate check that keeps the harness's receive limit equal to the C's
+  `HWNET_MAX_MSGLEN + 9`.
+- Beyond this model's slice: the HexenWorld channel layer (`net_chan.c` →
+  `engine/rust/src/net_chan.rs`), PR #297, merged `915d1dcfb`; and the first
+  sanitizer pass over the port harnesses, which found a real harness defect in
+  `cmd` and fixed it, PR #298, merged `4c70a09ec`, recipe in
+  `history/sanitizer_pass.md`.
+
+**Deferred:** the Hexen II transport trio — `engine/hexen2/net_bsd.c`,
+`net_loop.c` and `net_udp.c`. On 2026-09-28 the maintainer chose to defer it to
+the #233 build-architecture decision (the driver tables in the per-target shim,
+versus per-feature-set archives) rather than settle that decision as a side
+effect of this slice. Those three files are not different in degree from the
+HexenWorld transport above: their per-target facts are a *file's entitlement to
+a symbol set* — `net_bsd.c` is nothing but the `net_drivers[]` /
+`net_landrivers[]` tables naming `Datagram_*`, `Loop_*` and `UDP_*` drivers
+that hwsv does not define, `net_loop.c` reads the client-only `cls`, and Hexen
+II's `net_udp.c` reads H2-only network state — so a per-target shim can express
+the requirement only by leaving the substance of the file in C.
+
+**Consequence, stated plainly:** the Phase 7 transport objective is **half
+met**. The HexenWorld half is delivered and verified; the Hexen II half is
+outstanding, with no Hexen II transport harness or gate in the tree. When #233
+is decided, `net_dgrm.c` is the first Hexen II network port, and the trio
+follows it. This note is a status record, not an amendment to any goal: the
+objective that names both stacks is unchanged, and completing it requires
+either the trio or a deliberate re-scoping made where the machinery can see it.

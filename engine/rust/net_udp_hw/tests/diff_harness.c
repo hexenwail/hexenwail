@@ -566,6 +566,141 @@ static void scenario_failures(void)
 	cur->Shutdown();
 }
 
+/// The receive buffer's limit, taken from the C rather than guessed:
+/// `MAX_UDP_PACKET` is `HWNET_MAX_MSGLEN + 9` (`net_udp.c:53`), and a datagram
+/// that exactly fills the buffer is reported as oversize and dropped rather
+/// than truncated (`:202-207`).  The gate checks this constant against both
+/// sources so it cannot drift.
+#define HARNESS_RX_LIMIT (HWNET_MAX_MSGLEN + 9)
+
+/// Payload sizes, not just the couple of bytes the round trip uses: the decode
+/// path's buffer arithmetic is where an off-by-one hides, and one byte is the
+/// case that exercises a codec's smallest input.
+static void scenario_sizes(void)
+{
+	static const int sizes[] = { 1, 2, 512, 4000 };
+	netadr_t peer;
+	size_t i;
+
+	cur->Init(PORT_ANY);
+	mkadr(&peer, 127, 0, 0, 1, ntohs(peer_port));
+
+	for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+		byte plain[8192], encoded[8192];
+		int clen = 0;
+
+		memset(plain, (int)(0xa0 + i), (size_t)sizes[i]);
+		op_reset();
+		rec_int(sizes[i]);
+		HuffEncode(plain, encoded, sizes[i], &clen);
+		rec_int(clen);
+		peer_send(cur->local_adr, encoded, clen);
+		{
+			int n = cur->GetPacket();
+
+			rec_int(n);
+			check(n == sizes[i], "[%s]: GetPacket returned %d for a %d-byte payload",
+				cur->name, n, sizes[i]);
+			if (n > 0)
+				rec(cur->message->data, (size_t)n);
+			rec_adr_assigned(cur->from);
+		}
+		rec_state();
+	}
+	cur->Shutdown();
+}
+
+/// The boundary at the receive buffer: a datagram of exactly the limit is
+/// reported oversize and dropped, and one byte under it reaches the decoder.
+/// The second half is the more interesting: it is attacker-shaped input, and
+/// whatever the C does with it is what the port has to do.
+static void scenario_oversize(void)
+{
+	byte big[HARNESS_RX_LIMIT];
+
+	cur->Init(PORT_ANY);
+	memset(big, 0x5a, sizeof big);
+
+	op_reset();
+	rec_int((int)sizeof big);
+	peer_send(cur->local_adr, big, (int)sizeof big);
+	{
+		int n = cur->GetPacket();
+
+		rec_int(n);
+		check(n == 0, "[%s]: an oversize datagram returned %d, want 0",
+			cur->name, n);
+		rec_adr_assigned(cur->from);
+	}
+	rec_state();
+
+	op_reset();
+	peer_send(cur->local_adr, big, (int)sizeof big - 1);
+	err_armed = 1;
+	if (setjmp(err_env) == 0) {
+		int n = cur->GetPacket();
+
+		rec_int(n);
+	}
+	err_armed = 0;
+	rec_int(err_calls);
+	rec_state();
+	cur->Shutdown();
+}
+
+/// `NET_CheckReadTimeout` is a `select` with a deadline (`net_udp.c:254-265`),
+/// and the landed harness only ever called it with `(0, 0)`.  A bounded wait
+/// that expires and one that finds data ready are different paths.
+static void scenario_timeout(void)
+{
+	byte encoded[64];
+	int clen = 0;
+
+	cur->Init(PORT_ANY);
+
+	/* Nothing is waiting, so a bounded wait expires and reports 0. */
+	rec_int(cur->CheckReadTimeout(0, 50000));
+
+	/* Now something is: the same wait reports readable rather than timing out. */
+	HuffEncode((const unsigned char *)"t", encoded, 1, &clen);
+	peer_send(cur->local_adr, encoded, clen);
+	rec_int(cur->CheckReadTimeout(0, 200000));
+
+	/* Drain it; the wait expires again. */
+	rec_int(cur->GetPacket());
+	rec_int(cur->CheckReadTimeout(0, 50000));
+	rec_state();
+	cur->Shutdown();
+}
+
+/// Init, Shutdown, then Init again.  A second `NET_Init` has to give a working
+/// socket rather than a stale descriptor, and the state it leaves after each
+/// step is part of the contract.
+static void scenario_lifecycle(void)
+{
+	byte encoded[64];
+	int clen = 0;
+
+	cur->Init(PORT_ANY);
+	rec_int(cur->local_adr->port != 0);
+	rec_adr(cur->loopback_adr);
+	cur->Shutdown();
+	rec_state();
+
+	cur->Init(PORT_ANY);
+	rec_int(cur->local_adr->port != 0);
+	rec_adr(cur->loopback_adr);
+
+	/* Traffic after the re-init proves the second socket is real. */
+	HuffEncode((const unsigned char *)"after re-init", encoded, 13, &clen);
+	peer_send(cur->local_adr, encoded, clen);
+	rec_int(cur->GetPacket());
+	rec_state();
+
+	cur->Shutdown();
+	rec_state();
+}
+
 /*----------------------------------------------------------------------------
  * case runner
  *--------------------------------------------------------------------------*/
@@ -742,6 +877,10 @@ int main(void)
 	run_case("address conversions", scenario_addresses);
 	run_case("round trip", scenario_roundtrip);
 	run_case("failure paths", scenario_failures);
+	run_case("payload sizes", scenario_sizes);
+	run_case("oversize datagrams", scenario_oversize);
+	run_case("read timeouts", scenario_timeout);
+	run_case("init and shutdown lifecycle", scenario_lifecycle);
 
 	printf("checked %d expectations, %d failures, %d cases, %zu trace bytes\n",
 		checks, failures, cases_run, trace_bytes);
