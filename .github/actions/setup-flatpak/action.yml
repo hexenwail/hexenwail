@@ -1,0 +1,289 @@
+name: Set up flatpak-builder
+
+description: >-
+  Install flatpak-builder on the bare runner and the Flathub runtime, SDK and
+  SDK extensions a build needs into the system installation, restoring that
+  installation from the Actions cache when one exists.
+
+# flatpak + flatpak-builder are installed directly on the runner.  The
+# bilelmoussaoui/flatpak-github-actions container image worked until Docker
+# Hub flaked (release run 27069188929, 2026-06-06) and tanked the whole
+# release because the container couldn't be pulled.  Ubuntu 24.04 ships
+# flatpak-builder in main, so no PPA is needed.  The runtime and SDK come
+# from Flathub either way; they are what this action caches.
+
+inputs:
+  refs:
+    description: >-
+      Space-separated Flathub refs to install: the runtime, the SDK and every
+      sdk-extension the manifest names.
+    required: false
+    default: >-
+      org.freedesktop.Platform//25.08
+      org.freedesktop.Sdk//25.08
+      org.freedesktop.Sdk.Extension.rust-stable//25.08
+  extra-packages:
+    description: Extra apt packages to install alongside flatpak-builder.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # The cache holds a copy of /var/lib/flatpak, the system installation.
+    # It has to be the system one: flatpak/flatpak-github-actions runs
+    # flatpak-builder --install-deps-from=flathub without --user, so
+    # flatpak-builder checks and updates the deps with `flatpak --system`.
+    # /var/lib/flatpak is root-owned and actions/cache runs tar as the runner
+    # user, so the cache goes through a runner-owned staging directory that
+    # is moved into place with sudo.  Both installation types use
+    # bare-user-only ostree repos, where file ownership and xattrs carry no
+    # meaning, so a plain tar round-trip loses nothing flatpak reads.  It
+    # keeps modes and the hardlinks between the repo and the deployed
+    # runtimes.
+    #
+    # The key prefix is the ref list.  The full key adds the installed
+    # commits, so an entry is saved again only when Flathub has actually
+    # moved one of these refs.  A restore takes the newest entry under the
+    # prefix.  A stale entry is safe: the install step below brings it up to
+    # date, and at worst downloads the difference.
+    #
+    # Scope: only a push to the default branch saves.  Every other run --
+    # pull requests, and release.yml's tag builds -- restores only.  A
+    # default-branch entry is readable from every branch, PR and tag, which
+    # is how tag builds skip the download.  An entry saved anywhere else is
+    # readable only in its own scope: the PR that saved it, or a tag nobody
+    # builds twice.  Since each entry is ~850 MB, every PR run between
+    # Flathub moving a ref and master re-saving would store its own copy.
+    # rust-stable moves often, and a handful of those copies would evict the
+    # vulnix NVD and flatpak-builder caches from the shared budget.  A run
+    # that does not save also skips the 3.4 GB staging copy.
+    #
+    # Size, measured 2026-09-28 with the three 25.08 refs: 3.4 GB on disk
+    # and ~850 MB as the zstd archive actions/cache stores.  rust-stable is
+    # 2.0 GB of that.  The repo's 10 GB budget also holds the flatpak-builder
+    # module cache (~69 MiB) and the rolling vulnix NVD entries.  With only
+    # master saving, and a superseded entry evicted after seven days unused,
+    # steady state is one of these, two just after Flathub moves a ref.
+    #
+    # Nothing here verifies the restored tree beyond flatpak opening it: a
+    # full `ostree fsck` would cost ~14s of the time this saves.  tar and
+    # zstd do check integrity; a failed extract is a cache miss in
+    # actions/cache, and the partial staging directory is never moved into
+    # place.  A tree flatpak cannot open fails the install below, which
+    # then starts over from scratch.
+    - name: Compute runtime cache key prefix
+      id: key
+      shell: bash
+      env:
+        REFS: ${{ inputs.refs }}
+      run: |
+        set -euo pipefail
+        read -ra ref_list <<<"$REFS"
+        refs_hash=$(printf '%s\n' "${ref_list[@]}" | sort | sha256sum | cut -c1-16)
+        # ImageOS (ubuntu24, ...) so a runner-image move, which can bring a
+        # different flatpak, starts a fresh line of entries.
+        echo "prefix=flatpak-system-v1-${ImageOS:-unknown}-${RUNNER_ARCH}-${refs_hash}" >> "$GITHUB_OUTPUT"
+        echo "stage=${RUNNER_TEMP}/flatpak-system" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Flathub runtime cache
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.key.outputs.stage }}
+        # Never an exact hit: the real keys end in a commit hash that is
+        # not known until after install.  restore-keys picks the newest.
+        key: ${{ steps.key.outputs.prefix }}-restore
+        restore-keys: |
+          ${{ steps.key.outputs.prefix }}-
+
+    - name: Install flatpak-builder and the Flathub runtime
+      id: install
+      shell: bash
+      env:
+        REFS: ${{ inputs.refs }}
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+        STAGE: ${{ steps.key.outputs.stage }}
+        RESTORED: ${{ steps.restore.outputs.cache-matched-key }}
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        # --no-install-recommends, with the tools flatpak-builder actually
+        # shells out to named explicitly.  Plain `apt-get install
+        # flatpak-builder` pulls 123 packages and 99 MB: appstream-compose
+        # Recommends ffmpeg, which drags in the entire multimedia stack --
+        # libavcodec, mesa-va-drivers, intel-media-va-driver, pocketsphinx,
+        # openal, SDL2 -- none of which builds a Flatpak.  That apt step was
+        # ~47s of a ~60-125s job, far more than flatpak-builder's own ~42s.
+        #
+        # The named set is what upstream flatpak-builder actually links or
+        # invokes (appstream-compose for metainfo, desktop-file-utils to
+        # validate the .desktop, elfutils for debuginfo, ostree for the repo,
+        # bubblewrap for the build sandbox).  Fewer packages is also fewer
+        # downloads to fail: on 2026-08-17 a GitHub incident took releases
+        # down by failing a single tarball fetch, and 123 packages is 123
+        # chances at that.  uhexen2-bvei.  Never cached: apt runs every time.
+        # shellcheck disable=SC2086  # a word list by design
+        sudo apt-get install -y --no-install-recommends \
+          flatpak flatpak-builder bubblewrap ostree \
+          appstream-compose desktop-file-utils elfutils $EXTRA_PACKAGES
+
+        # bad_entry=true tells the stage step to replace the restored entry.
+        # Keys are immutable, and a fresh install of the same commits
+        # computes the same key, so without this a broken entry would be
+        # restored, thrown away and cold-installed over on every run until
+        # Flathub moved a ref.
+        bad_entry=false
+        if [ -n "$RESTORED" ]; then
+          if [ -d "$STAGE/repo" ]; then
+            echo "Restoring the system installation from cache entry $RESTORED"
+            sudo rm -rf /var/lib/flatpak
+            sudo mv "$STAGE" /var/lib/flatpak
+            sudo chown -R root:root /var/lib/flatpak
+          else
+            echo "::warning::cache entry $RESTORED restored without a repo/ directory; ignoring it and installing from scratch"
+            rm -rf "$STAGE"
+            bad_entry=true
+          fi
+        fi
+
+        # The container image came with Flathub pre-configured and ran as
+        # root; a bare apt install on the runner has neither.  Add the system
+        # remote, then install the runtime + SDK as root.  Root bypasses
+        # polkit, which the unprivileged runner user lacks for system flatpak
+        # operations.  Without this the action's own `flatpak --system
+        # install` fails with "operation Deploy not allowed for user".
+        #
+        # --or-update, and it runs on a cache hit too, so correctness never
+        # depends on the cache: a restored runtime that Flathub has since
+        # moved is updated here, as root.  That matters beyond freshness.
+        # With the deps present, flatpak-builder runs `flatpak --system
+        # update` on them as the runner user.  That is a no-op when current,
+        # but on a stale runtime it would need to deploy, and fail on the same
+        # polkit error.
+        #
+        # --no-related skips the extensions flatpak would otherwise drag in
+        # with the runtime -- .Locale (both Platform and Sdk), .GL.default,
+        # .codecs-extra -- none of which a build needs.  Worth ~16s.  The
+        # action's own --install-deps-from=flathub only installs the runtime,
+        # sdk and sdk-extensions the manifest names, so it does not pull them
+        # back.  rust-stable is one of those: the engine links engine/rust on
+        # every target, and it is where the Flatpak build gets cargo.
+        #
+        # A small race remains.  If Flathub publishes a ref between this
+        # install and flatpak-builder's own unprivileged `flatpak --system
+        # update`, that update needs to deploy and fails on polkit.  Saving
+        # runs widen the window by the staging copy.  A re-run fixes it.
+        install_refs() {
+          # shellcheck disable=SC2086
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo &&
+            sudo flatpak install -y --noninteractive --or-update --no-related flathub $REFS
+        }
+        if ! install_refs; then
+          # A fresh install failing is Flathub's problem, not the cache's.
+          if [ -z "$RESTORED" ] || [ "$bad_entry" = true ]; then exit 1; fi
+          # Once more on the same tree first: a transient Flathub failure
+          # while fetching an update is not corruption, and wiping would
+          # turn it into a full 3.4 GB download from the same flaky server.
+          echo "flatpak install/update failed on the tree restored from $RESTORED; retrying once"
+          if ! install_refs; then
+            # A cache entry flatpak cannot use costs one cold install, never
+            # the build.
+            echo "::warning::flatpak install/update failed twice on the tree restored from cache entry $RESTORED; wiping it and installing from scratch"
+            sudo rm -rf /var/lib/flatpak
+            bad_entry=true
+            install_refs
+          fi
+        fi
+        echo "bad_entry=$bad_entry" >> "$GITHUB_OUTPUT"
+        sudo du -sh /var/lib/flatpak
+
+    # Best effort, like the save: every failure path here exits 0 with a
+    # warning and leaves save unset, so a disk or I/O error while staging
+    # costs the next run a download, never this run its result, and a
+    # partial copy is never saved.  continue-on-error covers anything the
+    # script does not.
+    - name: Stage the runtime for the cache
+      id: stage
+      continue-on-error: true
+      shell: bash
+      env:
+        REFS: ${{ inputs.refs }}
+        PREFIX: ${{ steps.key.outputs.prefix }}
+        STAGE: ${{ steps.key.outputs.stage }}
+        RESTORED: ${{ steps.restore.outputs.cache-matched-key }}
+        BAD_ENTRY: ${{ steps.install.outputs.bad_entry }}
+        # Read here rather than passed in by each caller, so no caller can
+        # forget it.  See "Scope" above.
+        MAY_SAVE: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      run: |
+        set -euo pipefail
+        # Each commit captured on its own: a failing `flatpak info` inside a
+        # printf argument would not trip set -e, and would silently hash an
+        # empty commit into the key.
+        commits=''
+        for r in $REFS; do
+          c=$(flatpak --system info --show-commit "$r" 2>/dev/null) || c=''
+          if [ -z "$c" ]; then
+            echo "::warning::could not read the installed commit of $r; not saving the runtime cache"
+            exit 0
+          fi
+          commits+="$r $c"$'\n'
+        done
+        commits=$(printf '%s' "$commits" | sort)
+        printf '%s\n' "$commits"
+        key="${PREFIX}-$(printf '%s\n' "$commits" | sha256sum | cut -c1-16)"
+
+        if [ "$BAD_ENTRY" = true ]; then
+          # Replaces a bad entry with the same commits under a key that
+          # sorts newest under the prefix.  For a prefix match, actions/cache
+          # restores the most recently created entry.
+          key="${key}-r${GITHUB_RUN_ID}"
+          if [ "$MAY_SAVE" != true ]; then
+            echo "::warning::cache entry $RESTORED is bad and was not used.  Only a push to the default branch saves; its next run will hit the same fallback and replace the entry."
+            exit 0
+          fi
+          echo "Replacing bad cache entry $RESTORED with $key"
+        else
+          # A replacement entry carries a -r<run> suffix; it is still current.
+          case "$RESTORED" in
+            "$key" | "$key"-r*)
+              echo "Cache entry $RESTORED is current; nothing to save."
+              exit 0 ;;
+          esac
+          if [ "$MAY_SAVE" != true ]; then
+            echo "Would save $key, but only a push to the default branch saves; restore-only here."
+            exit 0
+          fi
+        fi
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+
+        # A copy, not a move: the build still needs /var/lib/flatpak.
+        if ! { rm -rf "$STAGE" &&
+               sudo cp -a /var/lib/flatpak "$STAGE" &&
+               sudo chown -R "$(id -u):$(id -g)" "$STAGE"; }; then
+          echo "::warning::could not stage /var/lib/flatpak for the cache; not saving"
+          sudo rm -rf "$STAGE" || true
+          exit 0
+        fi
+        echo "save=true" >> "$GITHUB_OUTPUT"
+
+    # Saved now rather than in a post step, so a failed build still keeps
+    # the runtime it downloaded.  Best effort: a save race with a parallel
+    # job, or the cache service being down, costs the next run a download,
+    # never this one its result.
+    - name: Save Flathub runtime cache
+      if: steps.stage.outputs.save == 'true'
+      continue-on-error: true
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.key.outputs.stage }}
+        key: ${{ steps.stage.outputs.key }}
+
+    - name: Drop the staging copy
+      if: steps.stage.outputs.save == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        STAGE: ${{ steps.key.outputs.stage }}
+      run: rm -rf "$STAGE" || echo "::warning::could not remove the staging copy at $STAGE"
