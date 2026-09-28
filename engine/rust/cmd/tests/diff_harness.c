@@ -554,6 +554,14 @@ static quakeparms_t parms;
 static char *argv_no_plus[3];
 static char *argv_plus[6];
 
+/* The plain command line, file scope for the same reason argv_plus is: the
+ * engine keeps the pointer in host_parms, and Cmd_StuffCmds_f reads it after
+ * the arm that set it up has returned.  A block-local array is a
+ * stack-use-after-scope the two implementations share, which is exactly the
+ * kind of agreement a differential harness cannot see -- found by running the
+ * gate under AddressSanitizer. */
+static char *argv_plain[3];
+
 // The engine's host_parms lives in host.c; the harness owns it here, and the
 // ports read com_argc/com_argv through it.
 quakeparms_t *host_parms = &parms;
@@ -1007,15 +1015,11 @@ static void scenario_startup(void)
 	rec_state();
 
 	call("stuffcmds with no +commands");
-	{
-		char *argv[3];
-
-		argv[0] = (char *)"hexenwail";
-		argv[1] = (char *)"-width";
-		argv[2] = (char *)"320";
-		host_parms->argc = 3;
-		host_parms->argv = argv;
-	}
+	argv_plain[0] = (char *)"hexenwail";
+	argv_plain[1] = (char *)"-width";
+	argv_plain[2] = (char *)"320";
+	host_parms->argc = 3;
+	host_parms->argv = argv_plain;
 
 	guarded("stuffcmds", cur->StuffCmds_f);
 	rec_state();
