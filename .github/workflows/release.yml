@@ -159,52 +159,30 @@ jobs:
       - name: Build release binaries
         run: nix build .#release --print-build-logs
 
+      # Layout, asserts and the bugs behind each live in the script, which
+      # tester-build.yml calls too, so the two cannot drift apart again.  The
+      # tag goes in through env rather than pasted into the command text.
       - name: Package
-        run: |
-          cp -rL result/release staging
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: bash scripts/package-release.sh --zip "$VERSION" result/release pkg
 
-          # Linux: keep the linux-x86_64/ tree as-is.  gamecode/ is a shared
-          # staging tree, not part of any platform dir, so it has to be named
-          # here or it ships nowhere (uhexen2-8qp3).
-          (cd staging && zip -r ../hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
-            linux-x86_64/ gamecode/ licenses/ BUILD_INFO.txt)
-
-          # Windows: Hexen II-style flat layout — hexenwail.exe + DLLs at the zip
-          # root next to an empty data1/, so users extract straight into their
-          # Hexen II directory and drop pak0.pak/pak1.pak into data1/.
-          winpkg=hexenwail-windows
-          mkdir -p "$winpkg/data1"
-          cp staging/windows-x86_64/bin/* "$winpkg/"
-          test -f "$winpkg/hexenwail.exe"
-          test ! -e "$winpkg/glh2.exe"
-          # get_demo.* live beside bin/, not in it, so copying bin/* alone
-          # shipped a bundle whose own BUILD_INFO.txt told users to run a
-          # file that was not there.
-          cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
-          # gamecode/ stays a subdirectory even in the flat Windows layout:
-          # this zip is meant to be extracted straight into a Hexen II folder,
-          # so putting progs.dat at data1/progs.dat here would overwrite the
-          # player's retail gamecode on unzip, with no copy in any .pak to
-          # restore from.  Keep the copy deliberate.
-          cp -r staging/gamecode "$winpkg/"
-          test -f "$winpkg/gamecode/data1/progs.dat"
-          cp -r staging/licenses "$winpkg/"
-          cp staging/BUILD_INFO.txt "$winpkg/"
-          echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
-            > "$winpkg/data1/README - put pak files here.txt"
-          (cd "$winpkg" && zip -r ../hexenwail-${{ github.ref_name }}-windows-x86_64.zip .)
-
+      # A single-file path uploads the bare file name, so the pkg/ prefix
+      # never reaches the artifact or publish's cp paths.
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-bundle
-          path: hexenwail-${{ github.ref_name }}-linux-x86_64.zip
+          path: pkg/hexenwail-${{ github.ref_name }}-linux-x86_64.zip
+          # A missing zip fails here, not three jobs later in publish.
+          if-no-files-found: error
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-bundle
-          path: hexenwail-${{ github.ref_name }}-windows-x86_64.zip
+          path: pkg/hexenwail-${{ github.ref_name }}-windows-x86_64.zip
+          if-no-files-found: error
 
       - name: Generate changelog
         run: |
