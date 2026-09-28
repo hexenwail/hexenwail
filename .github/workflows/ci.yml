@@ -44,8 +44,15 @@ jobs:
   #
   # Same composite action pages.yml uses, so this is the deploy's build minus
   # the upload.
+  #
+  # Pull requests only.  On push to master pages.yml runs this identical build
+  # and validation, wasm boot smoke included, so running it here too spent
+  # ~95s per merge on a duplicate.  pages.yml is the master-push gate: master
+  # has no branch protection, and a break that reaches it turns that
+  # workflow red instead of this one.
   pwa:
     name: PWA / WebAssembly
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # Cold, this is an emsdk install plus a full engine compile; warm it is
     # the compile alone.  A "something is stuck" bound, not a target.
@@ -158,21 +165,6 @@ jobs:
             exit 1
           fi
 
-      # engine/rust is linked into every engine target on every platform; there
-      # is no C fallback to build.  What the nix builds above cannot show is
-      # that each port still computes what its C original computed, so this
-      # runs every differential harness against that C, the per-port symbol
-      # and stray-object checks, the Rust/C struct layouts, the toolchain pin
-      # and the rejection of the removed -DUSE_*_RS=OFF switches -- on one
-      # shared engine build.  (Before the archive was mandatory this was eleven
-      # steps that each built the engine twice, once per flag setting:
-      # twenty-two builds of one tree.)  Per-port notes -- msg_io's three-way
-      # H2/H2W/Rust comparison, info_str's hwsv-only shape, huffman's two
-      # allocation strategies and guard-page decode -- live in the header of
-      # each scripts/check-rust-<port>.sh.
-      - name: Rust ports (differential harnesses, symbols, ABI)
-        run: nix develop .#default -c bash ./scripts/check-rust.sh
-
       # The PWA job builds with emsdk + rustup, so nothing else touches the
       # nix route to the web client: `nix develop .#wasm`, whose Rust comes
       # from rust-overlay at the version engine/rust/rust-toolchain.toml pins.
@@ -274,6 +266,50 @@ jobs:
             -o sv_checkbottom_test \
             engine/tests/sv_checkbottom_test.c
           ./sv_checkbottom_test
+
+  # The Rust gate and the Windows/tools/gamecode loop share nothing with the
+  # steps in `build` -- check-rust.sh builds its own tree under mktemp and
+  # every target in the loop is its own derivation; neither reads ./result --
+  # so each is a job of its own.  Serial, `build` was the critical path at
+  # 295-344s, ~130s of it this gate and ~75-90s that loop.
+  rust:
+    name: Rust ports
+    runs-on: ubuntu-latest
+    # One shared cmake build of three engine targets plus every harness.  A
+    # "something is stuck" bound, not a target.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      # engine/rust is linked into every engine target on every platform; there
+      # is no C fallback to build.  What the nix builds in `build` cannot show
+      # is that each port still computes what its C original computed, so this
+      # runs every differential harness against that C, the per-port symbol
+      # and stray-object checks, the Rust/C struct layouts, the toolchain pin
+      # and the rejection of the removed -DUSE_*_RS=OFF switches -- on one
+      # shared engine build.  (Before the archive was mandatory this was eleven
+      # steps that each built the engine twice, once per flag setting:
+      # twenty-two builds of one tree.)  Per-port notes -- msg_io's three-way
+      # H2/H2W/Rust comparison, info_str's hwsv-only shape, huffman's two
+      # allocation strategies and guard-page decode -- live in the header of
+      # each scripts/check-rust-<port>.sh.
+      - name: Rust ports (differential harnesses, symbols, ABI)
+        run: nix develop .#default -c bash ./scripts/check-rust.sh
+
+  cross:
+    name: Windows, tools and gamecode
+    runs-on: ubuntu-latest
+    # Five nix builds, mostly Cachix hits.  A "something is stuck" bound, not
+    # a target.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       # Keep the cross-compiled, tools and gamecode targets in one grouped
       # step.  The loop preserves the explicit target list while avoiding a

@@ -44,7 +44,9 @@
 #                copy in each way the checks exist to catch and require every
 #                breakage to fail.
 #
-# Requires only bash and awk; no build.
+# Requires bash and GNU awk (gawk); no build.  mawk 1.3.4 fails to match the
+# `\*\/.*$` that c_comments uses to strip a closing */, so under it the ISC
+# notice check fails on a correct tree.  `nix develop` provides gawk.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -58,6 +60,15 @@ for arg in "$@"; do
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
+
+# Captured, not piped into grep -q: under pipefail an early grep exit can
+# SIGPIPE awk and fail the pipeline even on a match.
+awk_ver=$(awk --version 2>/dev/null | head -n1 || true)
+if [[ "$awk_ver" != "GNU Awk"* ]]; then
+	awk_ver=$(awk -W version 2>/dev/null | head -n1 || true)
+	echo "error: GNU awk required (awk is ${awk_ver:-unknown}); run inside 'nix develop' or install gawk" >&2
+	exit 2
+fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
