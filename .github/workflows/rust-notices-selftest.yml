@@ -1,0 +1,71 @@
+name: Rust notices self-test
+
+# scripts/check-rust-notices.sh --self-test breaks a scratch copy of the tree
+# in each way the notices gate exists to catch and requires every breakage to
+# fail.  It tests the checker, not the tree -- check-rust.sh runs the gate
+# itself on every CI run -- so it used to spend 27s of the Rust gate's time on
+# every push (run 36362642855) proving a script nobody had touched.
+#
+# The paths are everything the self-test reads, not just the script: it
+# copies each mapped Rust port and its C original, then seds their exact
+# header text (a holder name, an ISC disclaimer line, a licence phrase).
+# Reword one of those headers and a breakage can silently stop applying, which
+# only this run notices.  The C globs are the directories the map in
+# check-rust-notices.sh draws from; a new directory means editing that map,
+# which triggers this anyway -- add the directory here in the same commit.
+on:
+  pull_request:
+    paths:
+      - 'scripts/check-rust-notices.sh'
+      - 'engine/rust/**/*.rs'
+      - 'common/*.c'
+      - 'engine/h2shared/*.c'
+      - 'engine/hexenworld/shared/*.c'
+      - '.github/workflows/rust-notices-selftest.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'scripts/check-rust-notices.sh'
+      - 'engine/rust/**/*.rs'
+      - 'common/*.c'
+      - 'engine/h2shared/*.c'
+      - 'engine/hexenworld/shared/*.c'
+      - '.github/workflows/rust-notices-selftest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  self-test:
+    name: check-rust-notices.sh --self-test
+    runs-on: ubuntu-latest
+    # ~30s of bash and awk.  A "something is stuck" bound, not a target.
+    timeout-minutes: 10
+    steps:
+      # Shallow is enough: the script reads the working tree, never history.
+      - uses: actions/checkout@v6
+
+      # Bare on the runner, no nix: the script needs only bash, awk, sed,
+      # grep, find and coreutils, and entering the dev shell would cost more
+      # than the test.  The awk must be GNU awk, though.  Ubuntu's default
+      # awk is mawk, and under mawk 1.3.4 the gate itself fails check 3 on
+      # the unmodified tree (strlcpy.rs and strlcat.rs "do not reproduce the
+      # permission notice"); check-rust.sh never saw it because nix develop
+      # puts gawk on PATH.  gawk's alternatives priority outranks mawk's, so
+      # installing it is enough to make `awk` resolve to it.
+      - name: Ensure awk is GNU awk
+        run: |
+          set -euo pipefail
+          if ! awk --version 2>/dev/null | grep -q '^GNU Awk'; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends gawk
+          fi
+          awk --version | head -1
+
+      - name: Notices gate self-test
+        run: bash scripts/check-rust-notices.sh --self-test

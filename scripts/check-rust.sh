@@ -18,7 +18,10 @@
 #   5. the Rust/C struct layouts on the host (scripts/check-rust-abi.sh; the
 #      PWA job runs the same check for wasm32).
 #   6. every port carries its C original's copyright notices
-#      (scripts/check-rust-notices.sh), with that gate's own self-test.
+#      (scripts/check-rust-notices.sh).  That gate's own --self-test runs in
+#      .github/workflows/rust-notices-selftest.yml, only when the checker or
+#      a file it reads changes: it tests the checker, not the tree, and took
+#      27s of every run here.
 #
 # Every check runs even after one fails, so a red run lists all of them.  The
 # one exception is a failed shared build: the per-port gates all inspect it,
@@ -116,9 +119,6 @@ echo
 echo "== 6. upstream copyright notices =="
 if ! bash "$root/scripts/check-rust-notices.sh"; then
 	failed+=(notices)
-fi
-if ! bash "$root/scripts/check-rust-notices.sh" --self-test; then
-	failed+=(notices-self-test)
 fi
 
 echo
