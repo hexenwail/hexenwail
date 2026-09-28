@@ -20,6 +20,8 @@ on:
       - 'flake.lock'
       - '.github/workflows/security-scan.yml'
       - '.github/vulnix-whitelist.toml'
+      - 'scripts/vulnix-report.py'
+      - 'tools/test_vulnix_report.py'
 
 permissions:
   contents: read
@@ -39,6 +41,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+
+      # First and bare: a renderer bug is a code bug, not an advisory finding,
+      # and it should fail in a second rather than after the closure build.
+      - name: Test the report renderer
+        run: python3 tools/test_vulnix_report.py
 
       - uses: ./.github/actions/setup-nix
         with:
@@ -68,7 +75,6 @@ jobs:
       - name: Scan closure against NVD
         id: scan
         run: |
-          set -o pipefail
           # -w filters the closure-only noise.  vulnix scans every store path
           # the build refers to, which is far more than the engine loads; the
           # whitelist records, with a written reason each, the packages that
@@ -76,44 +82,42 @@ jobs:
           # anything the engine can be made to parse is deliberately absent
           # from it.  (uhexen2-c58o)
           #
-          # vulnix exits non-zero when it finds anything; that is the normal
-          # reporting path here, so swallow it and read the report instead.
-          nix run nixpkgs#vulnix -- --closure ./result --show-description \
-            -w .github/vulnix-whitelist.toml \
-            | tee vulnix-report.txt || true
-          # The JSON artifact keeps the whitelisted entries (-s) so the full
-          # picture is still recoverable from a run without editing the file.
+          # One run, JSON, with -s so the whitelisted entries stay in: the
+          # uploaded JSON keeps the full picture and the filtered text report
+          # is rendered from it in the next step.  This used to be a second
+          # full vulnix run in text mode, about half of a ~49s step.
+          #
+          # vulnix exits non-zero when it finds anything, in JSON mode too:
+          # 2 for findings, 1 for whitelisted-only entries under -s, and 2
+          # again for a RuntimeError such as unreachable NVD feeds.  So the
+          # exit code cannot tell findings from failure.  Swallow it, and
+          # hand it to the renderer, which decides from the JSON and uses
+          # the code only as a cross-check.  If VULNIX_RC is never set, the
+          # renderer knows this step did not run.  No pipefail: nothing
+          # here is piped any more.
+          #
+          # nixpkgs#vulnix resolves the registry's nixpkgs, not flake.lock,
+          # so it can move past the 1.12.4 the renderer was written against.
+          # The renderer treats per-entry keys other than affected_by as
+          # optional for that reason.
+          rc=0
           nix run nixpkgs#vulnix -- --closure ./result --json \
             -w .github/vulnix-whitelist.toml -s \
-            > vulnix-report.json || true
+            > vulnix-report.json || rc=$?
+          echo "vulnix exited $rc (0 nothing, 1 whitelisted only, 2 findings or error)"
+          echo "VULNIX_RC=$rc" >> "$GITHUB_ENV"
 
+      # Writes the filtered text report and the summary, and names the
+      # outcome: not run, failed, suspicious, clean or findings.  The
+      # definitions are in the script.  The old test was
+      # [ -s vulnix-report.txt ], but vulnix's text output is never empty
+      # ("Found no advisories.  Excellent!"), so its "no findings" branch
+      # only ever fired when vulnix had crashed.  An empty `[]` is not an
+      # all-clear either: vulnix silently skips closure paths whose deriver
+      # it cannot find.  Advisory like the rest of the job: always exits 0.
       - name: Summarise
-        run: |
-          {
-            echo '## vulnix CVE scan'
-            echo
-            if [ -s vulnix-report.txt ]; then
-              echo 'Findings in the runtime closure of the `.#nixos` build,'
-              echo 'after filtering through `.github/vulnix-whitelist.toml`:'
-              echo
-              echo '```'
-              head -c 60000 vulnix-report.txt
-              echo '```'
-              echo
-              echo 'Everything here is either new or on a path the engine can'
-              echo 'actually be made to parse — attacker-supplied map, model,'
-              echo 'texture, music and soundfont files.  Closure-only packages'
-              echo 'are filtered out by the whitelist, each with a written'
-              echo 'reason; the uploaded JSON artifact still lists them.'
-              echo
-              echo 'If a finding here is unreachable, add it to the whitelist'
-              echo 'with the reason rather than ignoring the report.'
-            else
-              echo 'No findings past the whitelist, or the scanner could not'
-              echo 'reach the NVD feeds.  Check the scan step log to tell'
-              echo 'those two apart.'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+        run: python3 scripts/vulnix-report.py vulnix-report.json vulnix-report.txt >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report
         if: always()
