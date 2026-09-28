@@ -64,17 +64,32 @@ jobs:
           # engine/hexen2/quakedef.h (HW_BASE_VERSION), not from git describe.
           ref: ${{ inputs.ref }}
 
-      - uses: cachix/install-nix-action@v31
+      # The tooling this workflow runs -- setup-nix and package-release.sh --
+      # comes from the workflow's own commit, not from the ref under test.
+      # Dispatching from master with `ref` set to an older commit is the main
+      # use, and those commits predate both, so loading them from the root
+      # checkout would fail on "No such file or directory".  When the inline
+      # packaging lived here it travelled with the workflow file; this keeps
+      # that property.  Second, so the root checkout's clean cannot delete it.
+      # Untracked in the root tree, so the git flake never sees it, and
+      # nothing below packages or uploads it.
+      #
+      # This does not make every old commit packageable.  The script asserts
+      # the current layout -- hexenwail.exe, not glh2.exe -- exactly as the
+      # inline copy did, so a ref older than 7cfa258b8 (#274) still fails at
+      # that check.  What it guarantees is that a ref new enough to have that
+      # layout never fails merely for predating the script.
+      #
+      # No credentials: nothing is ever pushed from .ci.
+      - uses: actions/checkout@v6
         with:
-          extra_nix_config: |
-            accept-flake-config = true
+          ref: ${{ github.sha }}
+          path: .ci
+          persist-credentials: false
 
-      - uses: cachix/cachix-action@v17
-        # Cachix outages shouldn't fail the build -- see ci.yml.
-        continue-on-error: true
+      - uses: ./.ci/.github/actions/setup-nix
         with:
-          name: hexenwail
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       # Named packages, individually -- never a sweep over `packages`.
       # packages.demodata is lib.licenses.unfree with hydraPlatforms = [], and
@@ -115,53 +130,24 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
 
-          cp -rL result/release staging
-
-          # Linux: the whole linux-x86_64/ tree.  The original workflow copied
-          # bin/glhexen2 alone, which cannot start -- linux-fhs patchelfs the
-          # binary to rpath $ORIGIN/../lib and bundles 36 shared objects there
-          # (uhexen2-3aet), and bin/ also carries soundfont.sf2.
-          mkdir linux-pkg
-          cp -r staging/linux-x86_64/. linux-pkg/
-          cp -r staging/licenses linux-pkg/
-          cp staging/BUILD_INFO.txt linux-pkg/
-          # The gamecode the engine actually loads on Linux travelled with the
-          # line above -- it lives at linux-x86_64/share/hexenwail/.  This is
-          # release.yml's root-level spare copy, which BUILD_INFO.txt and
-          # gamecode/README.txt both describe, so the tester's tree matches the
-          # zip they would have got.  uhexen2-biyi.
-          cp -r staging/gamecode linux-pkg/
-
-          # Windows: flat layout matching release.yml, so a tester extracts it
-          # straight into a Hexen II directory.  bin/* is what makes it
-          # runnable without a toolchain -- the win64 derivation installs
-          # SDL3.dll and the codec DLLs into bin/ beside hexenwail.exe.
-          winpkg=win-pkg
-          mkdir -p "$winpkg/data1"
-          cp staging/windows-x86_64/bin/* "$winpkg/"
-          test -f "$winpkg/hexenwail.exe"
-          test ! -e "$winpkg/glh2.exe"
-          # get_demo.* live beside bin/, not in it; BUILD_INFO.txt tells the
-          # user to run them, so they have to travel too.
-          cp staging/windows-x86_64/get_demo.ps1 staging/windows-x86_64/get_demo.cmd "$winpkg/"
-          # Windows has no share/hexenwail layer: gamecode/ beside hexenwail.exe is
-          # the copy PR_FindBundleDir() loads, so without this the tester runs
-          # their own install's retail progs.dat while the release runs ours --
-          # exactly the gamecode mismatch this workflow's comment about
-          # confusing bug reports is about.  Same placement as release.yml.
-          # uhexen2-biyi.
-          cp -r staging/gamecode "$winpkg/"
-          test -f "$winpkg/gamecode/data1/progs.dat"
-          cp -r staging/licenses "$winpkg/"
-          cp staging/BUILD_INFO.txt "$winpkg/"
-          echo "Place your Hexen II pak files (pak0.pak, pak1.pak) in this folder." \
-            > "$winpkg/data1/README - put pak files here.txt"
+          # Same script release.yml packages with, so the Windows tree is the
+          # release zip's layout exactly, and a layout fix lands in both at
+          # once -- uhexen2-biyi and the glh2 rename each had to be made twice.
+          #
+          # The Linux tree is NOT the release zip's layout.  The release zip
+          # keeps linux-x86_64/ as a directory beside gamecode/, licenses/ and
+          # BUILD_INFO.txt; --flat-linux puts linux-x86_64/'s contents (bin/,
+          # lib/, share/) at the root instead, beside those three.  Same files,
+          # one directory level shallower.  That is how this workflow has
+          # always laid it out, kept as-is until the maintainer decides whether
+          # to unify the two.
+          bash .ci/scripts/package-release.sh --flat-linux result/release pkg
 
           # Nothing else in the bundle records which commit this is, and a
           # tester reporting against "the build you sent me" is how uhexen2-khsa
           # burned ~29 builds without a reproducible data point.
           COMMIT=$(git rev-parse HEAD)
-          for d in linux-pkg "$winpkg"; do
+          for d in pkg/linux pkg/windows; do
             cat > "$d/TESTING.txt" <<EOF
           Hexenwail test build
           Commit:  ${COMMIT}
@@ -192,7 +178,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hexenwail-test-linux-${{ env.SHORT_SHA }}
-          path: linux-pkg/
+          path: pkg/linux/
           # GitHub's maximum. uhexen2-zroc sat undelivered for two months;
           # a tester build expiring before anyone sends the link is the
           # failure mode this workflow exists to prevent, so don't leave it
@@ -203,5 +189,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hexenwail-test-windows-${{ env.SHORT_SHA }}
-          path: win-pkg/
+          path: pkg/windows/
           retention-days: 90
