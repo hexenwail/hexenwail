@@ -47,9 +47,10 @@ jobs:
   #
   # Pull requests only.  On push to master pages.yml runs this identical build
   # and validation, wasm boot smoke included, so running it here too spent
-  # ~95s per merge on a duplicate.  pages.yml is the master-push gate: master
-  # has no branch protection, and a break that reaches it turns that
-  # workflow red instead of this one.
+  # ~95s per merge on a duplicate.  pages.yml is the master-push gate: a
+  # break that reaches master turns that workflow red instead of this one.
+  # As a required status check this job is unaffected -- required checks are
+  # evaluated on pull requests, where it always runs.
   pwa:
     name: PWA / WebAssembly
     if: github.event_name == 'pull_request'

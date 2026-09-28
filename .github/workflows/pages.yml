@@ -24,6 +24,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Since #299 this is the only WASM build on push to master: ci.yml's `pwa`
+    # copy, which carried this same 45-minute bound, now runs on pull requests
+    # only.  Without it a wedged boot smoke here would run to GitHub's 6-hour
+    # default.  A "something is stuck" bound, not a target.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 

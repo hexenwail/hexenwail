@@ -61,11 +61,19 @@ jobs:
       - name: Ensure awk is GNU awk
         run: |
           set -euo pipefail
-          if ! awk --version 2>/dev/null | grep -q '^GNU Awk'; then
+          # Captured, not piped into grep -q: under pipefail an early grep
+          # exit can SIGPIPE awk, fail the pipeline, and reinstall gawk that
+          # is already there.  Same pattern as check-rust-notices.sh.
+          ver=$(awk --version 2>/dev/null | head -n1 || true)
+          if [[ "$ver" != "GNU Awk"* ]]; then
             sudo apt-get update -qq
             sudo apt-get install -y --no-install-recommends gawk
+            ver=$(awk --version 2>/dev/null | head -n1 || true)
           fi
-          awk --version | head -1
+          echo "$ver"
+          # Fail here, by name, if the alternative did not switch -- rather
+          # than as a misleading notices FAIL in the next step.
+          [[ "$ver" == "GNU Awk"* ]] || { echo "::error::awk is still not GNU awk"; exit 1; }
 
       - name: Notices gate self-test
         run: bash scripts/check-rust-notices.sh --self-test
