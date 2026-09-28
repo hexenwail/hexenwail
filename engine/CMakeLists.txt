@@ -867,7 +867,8 @@ endif()
 # its own; the engine always builds all of them.
 set(RUST_ENGINE_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io info_str strlcpy strlcat
-    huffman wad cvar zone cmd quakefs)
+    huffman wad cvar zone cmd quakefs
+    net_udp_hw)
 
 # Each port used to have a switch that put its C original back.  A cache or a
 # packaging recipe that still says OFF is asking for that C code, and linking
@@ -1005,7 +1006,11 @@ function(engine_rs_attach tgt)
         # The two C-variadic entry points, FS_ResolveCasePath (struct dirent),
         # and QuakeFS_TargetHostError, whose C name differs per build: H2W has
         # no Host_Error symbol at all.  See the file's header.
-        ${RUST_ENGINE_RS_DIR}/quakefs_variadic.c)
+        ${RUST_ENGINE_RS_DIR}/quakefs_variadic.c
+        # HexenWorld's transport storage and hwsv's plain NET_* names.  net.h
+        # renames the whole transport in the client, so these cannot live in
+        # the one archive.  See the file's header.
+        ${RUST_ENGINE_RS_DIR}/net_udp_hw_target.c)
 
     # rustc emits the archive's exported statics as local symbols on wasm32,
     # so there the C owns their storage.  See the file's header.
@@ -1029,11 +1034,13 @@ endif()
 if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
     set(HW_CLIENT_NET_SOURCES
         ${ENGINE_TOP}/hexen2/cl_hw.c
-        ${ENGINE_TOP}/hexenworld/shared/net_udp.c
         ${ENGINE_TOP}/hexenworld/shared/net_chan.c
         ${ENGINE_TOP}/hexenworld/shared/pmove.c
         ${ENGINE_TOP}/hexenworld/shared/pmovetst.c
     )
+    # net_udp.c is not compiled here: HexenWorld's transport is ported, and its
+    # C-visible storage and hwsv's plain NET_* names come from
+    # engine/rust/net_udp_hw_target.c, which this target compiles itself.
     # The Huffman codec comes from libengine_rs.a, which allocates the tree
     # with malloc -- the H2W_INTEGRATED variant of huffman.c -- for both this
     # client and hwsv.
@@ -1330,8 +1337,10 @@ else()
         ${COMMONDIR}/pr_edict.c
         ${COMMONDIR}/pr_exec.c
         # HexenWorld's own shared layer.  info_str and huffman, like the
-        # h2shared ports above, come from the Rust engine archive.
-        ${HW_TOP}/shared/net_udp.c
+        # h2shared ports above, come from the Rust engine archive, and the
+        # transport does too -- net_udp.c is not compiled here, and the plain
+        # NET_* names its C calls are forwarded from the Rust module by
+        # engine/rust/net_udp_hw_target.c.
         ${HW_TOP}/shared/net_chan.c
         ${HW_TOP}/shared/pmove.c
         ${HW_TOP}/shared/pmovetst.c
