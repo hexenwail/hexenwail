@@ -28,6 +28,10 @@ struct cvar_s;		/* cvar.h names it in a prototype before defining it */
 #include "protocol.h"		/* hexenworld/shared: the H2W usercmd_t */
 #include "wad.h"
 #include "compiler.h"	/* FUNC_* macros, which sys.h uses */
+/* net.h uses FUNC_PRINTF, so it comes after compiler.h.  No H2W_INTEGRATED is
+ * defined for this program, so its renaming macros stay off and netchan_t is
+ * the plain struct. */
+#include "net.h"
 #include "sys.h"	/* fsfind_t, for the Sys_Find* stubs quakefs.rs needs */
 
 #include <stddef.h>
@@ -235,6 +239,32 @@ RUST_ACCESSOR(CmdAliasC_offsetof_value)
 RUST_ACCESSOR(Cmd_MAX_ARGS)
 RUST_ACCESSOR(Cmd_MAX_ALIAS_NAME)
 
+/* net_chan's channel-layer struct: caller-owned, embedded by cl_hw.c and by
+ * the server's client struct, with 7500-byte buffers inline. */
+STRUCT_ACCESSORS(NetChanC)
+RUST_ACCESSOR(NetChanC_alignof)
+RUST_ACCESSOR(NetChanC_offsetof_fatal_error)
+RUST_ACCESSOR(NetChanC_offsetof_last_received)
+RUST_ACCESSOR(NetChanC_offsetof_frame_latency)
+RUST_ACCESSOR(NetChanC_offsetof_frame_rate)
+RUST_ACCESSOR(NetChanC_offsetof_drop_count)
+RUST_ACCESSOR(NetChanC_offsetof_good_count)
+RUST_ACCESSOR(NetChanC_offsetof_remote_address)
+RUST_ACCESSOR(NetChanC_offsetof_cleartime)
+RUST_ACCESSOR(NetChanC_offsetof_rate)
+RUST_ACCESSOR(NetChanC_offsetof_incoming_sequence)
+RUST_ACCESSOR(NetChanC_offsetof_incoming_acknowledged)
+RUST_ACCESSOR(NetChanC_offsetof_incoming_reliable_acknowledged)
+RUST_ACCESSOR(NetChanC_offsetof_incoming_reliable_sequence)
+RUST_ACCESSOR(NetChanC_offsetof_outgoing_sequence)
+RUST_ACCESSOR(NetChanC_offsetof_reliable_sequence)
+RUST_ACCESSOR(NetChanC_offsetof_last_reliable_sequence)
+RUST_ACCESSOR(NetChanC_offsetof_message)
+RUST_ACCESSOR(NetChanC_offsetof_message_buf)
+RUST_ACCESSOR(NetChanC_offsetof_reliable_length)
+RUST_ACCESSOR(NetChanC_offsetof_reliable_buf)
+RUST_ACCESSOR(NetChanC_offsetof_outgoing_size)
+RUST_ACCESSOR(NetChanC_offsetof_outgoing_time)
 STRUCT_ACCESSORS(WadInfoC)
 RUST_ACCESSOR(WadInfoC_offsetof_identification)
 RUST_ACCESSOR(WadInfoC_offsetof_numlumps)
@@ -360,6 +390,16 @@ void *NetUDP_TargetMessageBuf (void) { abort(); }
 void *NetUDP_TargetFrom (void) { abort(); }
 void *NetUDP_TargetLocalAdr (void) { abort(); }
 void *NetUDP_TargetLoopbackAdr (void) { abort(); }
+
+
+/* net_chan's per-target facts and the engine's clock.  Same rule again: the
+ * channel port reaches net_drop and the NOT_DEMOPLAYBACK predicate through
+ * engine/rust/net_chan_target.c, which the layout program does not link, and
+ * reads realtime, which the engine defines.  None is called here.
+ * NetUDP_TargetMessageBuf/From above are the transport's and are shared. */
+int *NetChan_TargetDrop (void) { abort(); }
+int NetChan_TargetNotDemoPlayback (void) { abort(); }
+double realtime;
 
 /* zone.rs's own calls.  Same rule again; Z_Malloc, Z_Strdup, Z_Free and
  * Hunk_AllocName are no longer here because the zone port now defines them --
@@ -527,6 +567,30 @@ int main (void)
 	OFF(abi_quakeparms_t, memsize, QuakeParmsC, memsize);
 	OFF(abi_quakeparms_t, errstate, QuakeParmsC, errstate);
 
+	SIZE(netchan_t, NetChanC);
+	ALIGN(netchan_t, NetChanC);
+	OFF(netchan_t, fatal_error, NetChanC, fatal_error);
+	OFF(netchan_t, last_received, NetChanC, last_received);
+	OFF(netchan_t, frame_latency, NetChanC, frame_latency);
+	OFF(netchan_t, frame_rate, NetChanC, frame_rate);
+	OFF(netchan_t, drop_count, NetChanC, drop_count);
+	OFF(netchan_t, good_count, NetChanC, good_count);
+	OFF(netchan_t, remote_address, NetChanC, remote_address);
+	OFF(netchan_t, cleartime, NetChanC, cleartime);
+	OFF(netchan_t, rate, NetChanC, rate);
+	OFF(netchan_t, incoming_sequence, NetChanC, incoming_sequence);
+	OFF(netchan_t, incoming_acknowledged, NetChanC, incoming_acknowledged);
+	OFF(netchan_t, incoming_reliable_acknowledged, NetChanC, incoming_reliable_acknowledged);
+	OFF(netchan_t, incoming_reliable_sequence, NetChanC, incoming_reliable_sequence);
+	OFF(netchan_t, outgoing_sequence, NetChanC, outgoing_sequence);
+	OFF(netchan_t, reliable_sequence, NetChanC, reliable_sequence);
+	OFF(netchan_t, last_reliable_sequence, NetChanC, last_reliable_sequence);
+	OFF(netchan_t, message, NetChanC, message);
+	OFF(netchan_t, message_buf, NetChanC, message_buf);
+	OFF(netchan_t, reliable_length, NetChanC, reliable_length);
+	OFF(netchan_t, reliable_buf, NetChanC, reliable_buf);
+	OFF(netchan_t, outgoing_size, NetChanC, outgoing_size);
+	OFF(netchan_t, outgoing_time, NetChanC, outgoing_time);
 	printf("abi_layout: %d fields checked, %d mismatches (sizeof(void *) = %zu)\n",
 		checked, failures, sizeof(void *));
 	if (failures)

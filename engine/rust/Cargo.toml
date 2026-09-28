@@ -30,6 +30,7 @@ cvar = []
 cmd = []
 quakefs = []
 net_udp_hw = []
+net_chan = []
 zone = []
 
 [profile.release]

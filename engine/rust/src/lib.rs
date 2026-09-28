@@ -26,7 +26,7 @@ pub mod mathlib;
 // in a harness build that leaves the sizebuf functions to the C original.  The
 // layout lives in one place; which half of sizebuf.rs is compiled is decided
 // there.
-#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd", feature = "net_udp_hw"))]
+#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd", feature = "net_udp_hw", feature = "net_chan"))]
 pub mod sizebuf;
 
 // cvar is the Phase 6 engine-state port, and info_str reads
@@ -34,7 +34,7 @@ pub mod sizebuf;
 // harness build that links only that port.  Same split as sizebuf/msg_io: the
 // layout is unconditional in cvar.rs and the functions are behind
 // `feature = "cvar"`.
-#[cfg(any(feature = "cvar", feature = "info_str", feature = "cmd", feature = "quakefs"))]
+#[cfg(any(feature = "cvar", feature = "info_str", feature = "cmd", feature = "quakefs", feature = "net_chan"))]
 pub mod cvar;
 
 // zone is the Phase 6 allocator/ownership port.  It has no ABI half of its own
@@ -123,3 +123,10 @@ pub mod quakefs;
 // module header.
 #[cfg(feature = "net_udp_hw")]
 pub mod net_udp_hw;
+
+// HexenWorld's channel layer: the packet header, the reliable queue and the
+// bandwidth choke above the transport.  It shares the sizebuf ABI (net_message
+// and the channel's own buffers) and the cvar ABI (its two cvars), and like the
+// transport it is built into glhexen2 and hwsv only.
+#[cfg(feature = "net_chan")]
+pub mod net_chan;
