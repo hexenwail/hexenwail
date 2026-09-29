@@ -102,7 +102,7 @@ echo "== 4. exactly one link_ops definition per binary =="
 # InsertLinkBefore), so whether it survives depends on how the linker
 # partitions the archive; require it at most once there, and every called
 # symbol exactly once.
-archive="$engine_build/rust/libengine_rs.a"
+archive="$engine_build/rust/client/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 for sym in "${symbols[@]}"; do
 	n=$(nm "$archive" 2>/dev/null | grep -cE " T $sym\$" || true)

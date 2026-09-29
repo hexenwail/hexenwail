@@ -855,20 +855,22 @@ endif()
 #============================================================================
 # Rust engine archive
 #============================================================================
-# Every migrated subsystem lives in one static library, engine/rust, and it
-# is linked into every engine target on every platform.  There is no C
-# fallback: the C originals are compiled only by the differential harnesses
-# under engine/rust/*/tests, which prove the Rust computes what they did.
-#
-# One archive rather than one per subsystem because separate staticlibs each
-# carried compiler-builtins and a panic/personality definition, which forced
-# the old build to use the linker-specific -z,muldefs workaround.  The Cargo
-# features survive only so each harness can link the subsystem it tests on
-# its own; the engine always builds all of them.
-set(RUST_ENGINE_FEATURES
-    hashindex mathlib sizebuf crc link_ops msg_io info_str strlcpy strlcat
-    huffman wad cvar zone cmd quakefs
-    net_udp_hw net_chan)
+# Each binary links exactly one engine/rust staticlib, built with its own
+# feature set.  Do not link per-subsystem archives: each includes compiler
+# builtins and the panic/personality runtime, which caused duplicate symbols
+# before the consolidated crate.  The C originals remain harness-only.
+# #233 selects per-target archives so a port may use symbols that exist only
+# in its target, without forcing C shims to own an entire source file.
+set(RUST_ENGINE_COMMON_FEATURES
+    hashindex mathlib sizebuf crc link_ops msg_io strlcpy strlcat
+    cvar zone cmd quakefs)
+set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad)
+if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
+    list(APPEND RUST_ENGINE_CLIENT_FEATURES huffman net_udp_hw net_chan)
+endif()
+set(RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_COMMON_FEATURES})
+set(RUST_ENGINE_HWSV_FEATURES ${RUST_ENGINE_COMMON_FEATURES}
+    info_str huffman net_udp_hw net_chan)
 
 # Each port used to have a switch that put its C original back.  A cache or a
 # packaging recipe that still says OFF is asking for that C code, and linking
@@ -938,23 +940,18 @@ if(NOT RUST_ENGINE_TARGET)
 endif()
 
 set(RUST_ENGINE_RS_DIR ${UHEXEN2_TOP}/engine/rust)
-set(RUST_ENGINE_RS_TARGET_DIR ${CMAKE_BINARY_DIR}/rust/target)
 if(RUST_ENGINE_TARGET)
     set(_rust_target_args --target ${RUST_ENGINE_TARGET})
-    set(_rust_out_dir ${RUST_ENGINE_RS_TARGET_DIR}/${RUST_ENGINE_TARGET}/release)
-    message(STATUS "Rust engine archive: ${RUST_ENGINE_TARGET}")
+    message(STATUS "Rust engine archives: ${RUST_ENGINE_TARGET}")
 else()
     set(_rust_target_args)
-    set(_rust_out_dir ${RUST_ENGINE_RS_TARGET_DIR}/release)
-    message(STATUS "Rust engine archive: host target")
+    message(STATUS "Rust engine archives: host target")
 endif()
 if(RUST_ENGINE_TARGET MATCHES "msvc$")
     set(_rust_lib_name engine_rs.lib)
 else()
     set(_rust_lib_name libengine_rs.a)
 endif()
-set(RUST_ENGINE_RS_LIB ${CMAKE_BINARY_DIR}/rust/${_rust_lib_name})
-string(JOIN "," RUST_ENGINE_FEATURE_LIST ${RUST_ENGINE_FEATURES})
 
 # Globbed so a new port's module is a dependency without anyone remembering
 # to list it here; CONFIGURE_DEPENDS re-runs the glob when a file appears.
@@ -964,41 +961,52 @@ file(GLOB RUST_ENGINE_RS_SOURCES CONFIGURE_DEPENDS
     ${RUST_ENGINE_RS_DIR}/src/*.rs
     ${RUST_ENGINE_RS_DIR}/*/src/*.rs)
 
-# --offline is deliberate.  The consolidated crate has no dependencies;
-# a sandboxed build must fail rather than silently fetch one.
-add_custom_command(
-    OUTPUT ${RUST_ENGINE_RS_LIB}
-    COMMAND ${CMAKE_COMMAND} -E env
-            CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
-            CARGO_TARGET_DIR=${RUST_ENGINE_RS_TARGET_DIR}
-            ${CARGO_EXECUTABLE} build --release --offline
-            --manifest-path ${RUST_ENGINE_RS_DIR}/Cargo.toml
-            ${_rust_target_args}
-            --features ${RUST_ENGINE_FEATURE_LIST}
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${_rust_out_dir}/${_rust_lib_name}
-            ${RUST_ENGINE_RS_LIB}
-    DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
-            ${RUST_ENGINE_RS_DIR}/Cargo.lock
-            ${RUST_ENGINE_RS_DIR}/build.rs
-            ${RUST_ENGINE_RS_SOURCES}
-            ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
-    COMMENT "Building Rust engine archive"
-    VERBATIM)
-add_custom_target(engine_rs DEPENDS ${RUST_ENGINE_RS_LIB})
+# --offline is deliberate. Each variant has an isolated Cargo target dir: a
+# parallel build cannot overwrite another variant's libengine_rs.a (nor race
+# Cargo's fingerprint/lock). Native and cross builds still use the C target's
+# triple. No --all-features: target-only symbols must stay out of other bins.
+function(engine_rs_attach tgt variant)
+    set(_rust_target_dir ${CMAKE_BINARY_DIR}/rust/target-${variant})
+    set(_rust_lib ${CMAKE_BINARY_DIR}/rust/${variant}/${_rust_lib_name})
+    if(RUST_ENGINE_TARGET)
+        set(_rust_out_dir ${_rust_target_dir}/${RUST_ENGINE_TARGET}/release)
+    else()
+        set(_rust_out_dir ${_rust_target_dir}/release)
+    endif()
+    string(JOIN "," _rust_features ${ARGN})
+    add_custom_command(
+        OUTPUT ${_rust_lib}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/rust/${variant}
+        COMMAND ${CMAKE_COMMAND} -E env
+                CARGO_HOME=${CMAKE_BINARY_DIR}/rust/cargo-home
+                CARGO_TARGET_DIR=${_rust_target_dir}
+                ${CARGO_EXECUTABLE} build --release --offline
+                --manifest-path ${RUST_ENGINE_RS_DIR}/Cargo.toml
+                ${_rust_target_args}
+                --no-default-features --features ${_rust_features}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${_rust_out_dir}/${_rust_lib_name} ${_rust_lib}
+        DEPENDS ${RUST_ENGINE_RS_DIR}/Cargo.toml
+                ${RUST_ENGINE_RS_DIR}/Cargo.lock
+                ${RUST_ENGINE_RS_DIR}/build.rs
+                ${RUST_ENGINE_RS_SOURCES}
+                ${UHEXEN2_TOP}/engine/hexenworld/shared/hufffreq.h
+        COMMENT "Building Rust engine archive (${variant}: ${_rust_features})"
+        VERBATIM)
+    add_custom_target(engine_rs_${variant} DEPENDS ${_rust_lib})
+    add_dependencies(${tgt} engine_rs_${variant})
+    target_link_libraries(${tgt} PRIVATE ${_rust_lib})
+    file(WRITE ${CMAKE_BINARY_DIR}/rust/archive-${tgt}.txt
+        "${tgt}|${_rust_lib}|${_rust_features}\n")
+    # Evaluated at generate time, after all target_link_libraries calls: the
+    # gate can inspect the complete link set even with Ninja (no link.txt).
+    file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/rust/link-libraries-${tgt}.txt
+        CONTENT "$<TARGET_PROPERTY:${tgt},LINK_LIBRARIES>\n")
 
-function(engine_rs_attach tgt)
-    add_dependencies(${tgt} engine_rs)
-    target_link_libraries(${tgt} PRIVATE ${RUST_ENGINE_RS_LIB})
-
-    # The per-target shims the Rust ports need.  One archive serves all three
-    # binaries, but zone.c's ZONE_DEFSIZE, secondary-zone size, cache API and
-    # dedicated flag differ between them, and so do cmd.c's client-only list
-    # surface and its H2W dispatch arm.  Each target therefore compiles the
-    # shims with its own defines and the Rust modules ask them.  Decided on
-    # #233; each file's header explains its facts, and
-    # engine/h2shared/zone_target.h stays the single source of the zone values,
-    # shared with zone.c.
+    # The per-target shims still provide C-variadic entry points and target
+    # facts (including H2W_INTEGRATED's names); archives cannot replace those
+    # ABI or compile-time decisions.  zone_target.h stays the source of zone
+    # constants shared with zone.c.
     target_sources(${tgt} PRIVATE
         ${RUST_ENGINE_RS_DIR}/zone_target.c
         ${RUST_ENGINE_RS_DIR}/cmd_target.c
@@ -1047,9 +1055,8 @@ if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
     # the channel's net_drop, its NOT_DEMOPLAYBACK predicate and its variadic
     # Netchan_OutOfBandPrint from engine/rust/net_chan_target.c, both of which
     # this target compiles itself.
-    # The Huffman codec comes from libengine_rs.a, which allocates the tree
-    # with malloc -- the H2W_INTEGRATED variant of huffman.c -- for both this
-    # client and hwsv.
+    # Each target's archive contains the Huffman codec, which allocates its
+    # tree with malloc in both the client and hwsv (the H2W_INTEGRATED C arm).
     list(APPEND CLIENT_DEFINITIONS H2W_INTEGRATED)
 endif()
 
@@ -1145,7 +1152,7 @@ if(BUILD_TESTING)
     add_test(NAME sv_checkbottom COMMAND sv_checkbottom_test)
 endif()
 
-engine_rs_attach(${EXECUTABLE_NAME})
+engine_rs_attach(${EXECUTABLE_NAME} client ${RUST_ENGINE_CLIENT_FEATURES})
 
 #============================================================================
 # Link Libraries
@@ -1293,7 +1300,7 @@ else()
     add_executable(h2ded ${SERVER_SOURCES})
     target_compile_definitions(h2ded PRIVATE SERVERONLY)
 
-    engine_rs_attach(h2ded)
+    engine_rs_attach(h2ded h2ded ${RUST_ENGINE_H2DED_FEATURES})
     if(WIN32)
         target_link_libraries(h2ded PRIVATE ws2_32 winmm)
     else()
@@ -1371,7 +1378,7 @@ else()
     add_executable(hwsv ${HWSV_SOURCES})
     target_compile_definitions(hwsv PRIVATE H2W SERVERONLY)
 
-    engine_rs_attach(hwsv)
+    engine_rs_attach(hwsv hwsv ${RUST_ENGINE_HWSV_FEATURES})
     # Order matters: hexenworld/shared shadows h2shared for quakedef.h et al.
     target_include_directories(hwsv BEFORE PRIVATE
         ${HW_TOP}/server

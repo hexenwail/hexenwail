@@ -159,7 +159,7 @@ echo "  $engine_build"
 
 echo
 echo "== 5. the archive exports the whole ABI exactly once =="
-archive="$engine_build/rust/libengine_rs.a"
+archive="$engine_build/rust/client/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 # The accessors are not here: they live in the per-target shim, which is
 # compiled into each binary rather than into the archive.  Step 6 checks them

@@ -83,7 +83,7 @@ echo "  $engine_build"
 
 echo
 echo "== 4. exactly one q_strlcpy definition per binary =="
-archive="$engine_build/rust/libengine_rs.a"
+archive="$engine_build/rust/client/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 n=$(nm "$archive" 2>/dev/null | grep -cE " T $symbol\$" || true)
 if [ "$n" -ne 1 ]; then

@@ -6,7 +6,7 @@ edition = "2021"
 # the version instead of a syntax error.
 rust-version = "1.82"
 license = "GPL-3.0-or-later"
-description = "Consolidated Rust FFI ports for the Hexenwail engine"
+description = "Target-specific Rust FFI ports for the Hexenwail engine"
 publish = false
 
 [lib]

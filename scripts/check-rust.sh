@@ -13,8 +13,9 @@
 #      -DUSE_*_RS=OFF must stop with the explanation, not silently link Rust.
 #   3. one engine build of glhexen2, h2ded and hwsv, shared by every gate
 #      below (it used to be two per gate: twenty-two builds of one tree).
-#   4. each port's gate -- crate, differential harness against the C
-#      original, symbol and stray-object checks on the shared build.
+#   4. #233 archive mapping/ownership gate, then each port's gate -- crate,
+#      differential harness against the C original, symbol and stray-object
+#      checks on the shared build.
 #   5. the Rust/C struct layouts on the host (scripts/check-rust-abi.sh; the
 #      PWA job runs the same check for wasm32).
 #   6. every port carries its C original's copyright notices
@@ -90,6 +91,13 @@ ports=(hashindex mathlib sizebuf crc link-ops msg-io info-str strlcpy strlcat hu
 if ENGINE_BUILD=$(rust_gate_engine_build "$work"); then
 	export ENGINE_BUILD
 	echo "  $ENGINE_BUILD"
+	echo
+	echo "== 4. per-target Rust archives =="
+	if WORKDIR="$work/archives" bash "$root/scripts/check-rust-archives.sh"; then
+		:
+	else
+		failed+=(archives)
+	fi
 else
 	# Every per-port gate checks symbols in this build, so none can run; the
 	# layout check below does not need it and still does.
