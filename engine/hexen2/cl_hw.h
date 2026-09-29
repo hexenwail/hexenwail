@@ -24,6 +24,9 @@ qboolean HWCL_Connect (const char *host);
 void HWCL_SendCmd (const usercmd_t *cmd, int buttons, int impulse);
 void HWCL_ApplyState (void);
 void HWCL_LinkPackedProjectiles (void);
+/* HexenWorld temp-entity explosions: advance them and link their entities.
+ * After CL_RelinkEntities, while HWCL_Active. */
+void HWCL_UpdateTempEntities (void);
 void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse);
 qboolean HWCL_Active (void);
 qboolean HWCL_ViewModelVisible (void);

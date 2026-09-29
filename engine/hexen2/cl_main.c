@@ -1411,6 +1411,7 @@ int CL_ReadFromServer (void)
 		HWCL_LinkPackedProjectiles ();
 		CL_UpdateEffects ();
 		CL_UpdateTEnts ();
+		HWCL_UpdateTempEntities ();
 		CL_UpdateDevStats ();
 		return 0;
 	}

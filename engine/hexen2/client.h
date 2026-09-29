@@ -608,6 +608,9 @@ void CL_PrecacheTEntSounds (void);
 void CL_ClearTEnts (void);
 void CL_ParseTEnt (void);
 void CL_ParseTEntType (int type);	/* CL_ParseTEnt after its type byte */
+qboolean CL_CreateStream (int type, int ent, int flags, int tag, float duration,
+		int skin, struct qmodel_s *const models[4],
+		const vec3_t source, const vec3_t dest);
 void CL_UpdateTEnts (void);
 
 //

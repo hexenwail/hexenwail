@@ -73,6 +73,7 @@ typedef struct
 	vec3_t	offset;
 	float	endTime;
 	float	lastTrailTime;
+	qboolean fixed_dest;	/* CL_CreateStream: never re-aimed by cl_truelightning */
 } stream_t;
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
@@ -432,12 +433,61 @@ static void ParseStream(int type)
 	stream->models[3] = models[3];
 	stream->endTime = cl.time+duration;
 	stream->lastTrailTime = 0;
+	stream->fixed_dest = false;
 	VectorCopy(source, stream->source);
 	VectorCopy(dest, stream->dest);
 	if (flags & STREAM_ATTACHED)
 	{
 		VectorSubtract(source, cl_entities[ent].origin, stream->offset);
 	}
+}
+
+/* A stream built by the caller rather than read off the wire: HexenWorld's
+ * temp entities (cl_hw_tent_fx.inc) make ice storms, hammer and chain
+ * lightning, sunstaff beams and cube beams this way, as the original HW
+ * client's CreateStream did.  The caller supplies the models, so a missing
+ * one costs this stream and never reaches Sys_Error; a model slot the
+ * renderer below will draw must be filled, or the stream is refused.
+ * fixed_dest is set because these endpoints are the effect's own geometry:
+ * cl_truelightning re-aiming a lightning-hammer bolt at the crosshair would
+ * be wrong.  Returns false when nothing was created. */
+qboolean CL_CreateStream (int type, int ent, int flags, int tag, float duration,
+		int skin, qmodel_t *const models[4],
+		const vec3_t source, const vec3_t dest)
+{
+	stream_t	*stream;
+
+	if (ent < 0 || ent >= MAX_EDICTS)
+		return false;
+	if (!models[0])
+		return false;
+	if (type == TE_STREAM_SUNSTAFF1 && (!models[1] || !models[2] || !models[3]))
+		return false;
+	if (type == TE_STREAM_SUNSTAFF2 && (!models[2] || !models[3]))
+		return false;
+
+	if ((stream = NewStream(ent, tag)) == NULL)
+	{
+		Con_Printf("stream list overflow\n");
+		return false;
+	}
+	memset (stream, 0, sizeof(*stream));
+	stream->type = type;
+	stream->tag = tag;
+	stream->flags = flags;
+	stream->entity = ent;
+	stream->skin = skin;
+	stream->models[0] = models[0];
+	stream->models[1] = models[1];
+	stream->models[2] = models[2];
+	stream->models[3] = models[3];
+	stream->endTime = cl.time + duration;
+	stream->fixed_dest = true;
+	VectorCopy (source, stream->source);
+	VectorCopy (dest, stream->dest);
+	if (flags & STREAM_ATTACHED)
+		VectorSubtract (source, cl_entities[ent].origin, stream->offset);
+	return true;
 }
 
 void CL_CreateEffectStream (int effect, int tag,
@@ -533,7 +583,8 @@ void CL_UpdateTEnts(void)
 		/* TrueLightning: override beam endpoint with current aim direction
 		 * for the player's own lightning beams. Eliminates the visual lag
 		 * between where you're aiming and where the beam renders. */
-		if (cl_truelightning.value && stream->entity == cl.viewentity &&
+		if (cl_truelightning.value && !stream->fixed_dest &&
+		    stream->entity == cl.viewentity &&
 		    stream->endTime >= cl.time &&
 		    (stream->type == TE_STREAM_LIGHTNING || stream->type == TE_STREAM_LIGHTNING_SMALL))
 		{

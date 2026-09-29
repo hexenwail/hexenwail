@@ -19,9 +19,11 @@
  *
  * Effects the maintained Hexen II code already draws, with the same number
  * and payload, go to CL_ParseTEntType.  A few cheap particle effects are
- * drawn here.  The rest -- HW's own explosions, chunks, streams tied to
- * entity state -- are consumed without visuals for now; porting their
- * visuals is the remaining half of #213.
+ * drawn here.  The rest -- HW's own explosions, chunks, gibs, flying
+ * weapon effects and the streams tied to entity state -- are drawn by
+ * cl_hw_tent_fx.inc, included below.  hwte_fixed_size[] stays the
+ * authority on how many bytes each of those consumes: the effect reads
+ * its fields, and HWCL_ParseTempEntity then holds it to the table.
  */
 
 /* HexenWorld TE_* numbers (engine/hexenworld/shared/protocol.h), kept local
@@ -35,7 +37,10 @@ enum
 	HWTE_WIZSPIKE = 7, HWTE_KNIGHTSPIKE = 8, HWTE_LIGHTNING3 = 9,
 	HWTE_LAVASPLASH = 10, HWTE_TELEPORT = 11, HWTE_BLOOD = 12,
 	HWTE_LIGHTNINGBLOOD = 13,
-	HWTE_STREAM_CHAIN = 25, HWTE_STREAM_FAMINE = 32,
+	HWTE_STREAM_CHAIN = 25, HWTE_STREAM_SUNSTAFF1 = 26,
+	HWTE_STREAM_SUNSTAFF2 = 27, HWTE_STREAM_LIGHTNING = 28,
+	HWTE_STREAM_COLORBEAM = 29, HWTE_STREAM_ICECHUNKS = 30,
+	HWTE_STREAM_FAMINE = 32,
 	HWTE_BIGGRENADE = 33, HWTE_CHUNK = 34, HWTE_HWBONEPOWER = 35,
 	HWTE_HWBONEPOWER2 = 36, HWTE_METEORHIT = 37, HWTE_HWRAVENDIE = 38,
 	HWTE_HWRAVENEXPLODE = 39, HWTE_XBOWHIT = 40, HWTE_CHUNK2 = 41,
@@ -144,13 +149,19 @@ static void HWCL_SkipBytes (int count)
 		MSG_ReadByte ();
 }
 
+/* An effect that read more or fewer bytes than hwte_fixed_size[] says.  A
+ * bug in this file if it is ever non-zero; hw_tent_test.c asserts it. */
+static int hwte_size_mismatches;
+
+#include "cl_hw_tent_fx.inc"
+
 /* Returns false only for a type byte no HexenWorld server sends, where the
  * payload size is unknowable and the caller must drop the rest of the
  * packet rather than misread it. */
 static qboolean HWCL_ParseTempEntity (void)
 {
 	vec3_t	pos;
-	int	type, h2type, count, i;
+	int	type, h2type, count, i, ent, start, allocs, streams;
 
 	type = MSG_ReadByte ();
 	if (msg_badread)
@@ -183,34 +194,83 @@ static qboolean HWCL_ParseTempEntity (void)
 	case HWTE_TAREXPLOSION:
 		HWCL_ReadCoords (pos);
 		if (!msg_badread)
+		{
 			R_BlobExplosion (pos);
+			HWCL_TEntSound (HWS_R_EXP3, pos);
+		}
 		return true;
 
 	case HWTE_SUNSTAFF_CHEAP:
+	{
 		/* entity, reflect count, then 2 + reflect_count points.  The
 		 * original client read these as coords when it found the entity
-		 * and as shorts when it did not -- the same 2 bytes either way. */
-		MSG_ReadShort ();
+		 * and as shorts when it did not -- the same 2 bytes either way.
+		 * It kept them as whole units (a short), and had room for four:
+		 * a reflect count over 2 overran its array.  Every point is
+		 * still consumed here; only the first four are kept, which is
+		 * as many beams as the original could draw without the overrun. */
+		vec3_t	points[4];
+
+		ent = MSG_ReadShort ();
 		count = MSG_ReadByte ();
-		HWCL_SkipBytes ((2 + count) * 3 * 2);
+		for (i = 0; i < 2 + count && !msg_badread; i++)
+		{
+			HWCL_ReadCoords (pos);
+			if (i < 4)
+			{
+				points[i][0] = (short)pos[0];
+				points[i][1] = (short)pos[1];
+				points[i][2] = (short)pos[2];
+			}
+		}
+		if (!msg_badread)
+			HWCL_TEntSunstaffCheap (ent, points, (count < 2 ? count : 2) + 1);
 		return true;
+	}
 
 	case HWTE_CHAINLIGHTNING:
+	{
 		/* entity, then points until an all-zero one, which ends the list
-		 * and is itself on the wire (lightwp.hc writes 0 0 0 last). */
-		MSG_ReadShort ();
+		 * and is itself on the wire (lightwp.hc writes 0 0 0 last).  The
+		 * original kept at most 9 targets, the rest read and dropped. */
+		vec3_t	points[10];
+		int	numTargs = 0;
+
+		ent = MSG_ReadShort ();
 		for (i = 0; !msg_badread; i++)
 		{
 			HWCL_ReadCoords (pos);
 			if (!pos[0] && !pos[1] && !pos[2])
 				break;
+			VectorCopy (pos, points[numTargs]);
+			if (numTargs < 9)
+				numTargs++;
 		}
+		if (!msg_badread)
+			HWCL_TEntChainLightning (ent, points, numTargs);
 		return true;
+	}
 
 	default:
 		if (type >= 0 && type < HWTE_COUNT && hwte_fixed_size[type])
 		{
-			HWCL_SkipBytes (hwte_fixed_size[type]);
+			start = msg_readcount;
+			allocs = hwcl_tent_allocs;
+			streams = hwcl_tent_streams;
+			HWCL_TEntEffect (type);
+			count = msg_readcount - start;
+			if (count != hwte_fixed_size[type] && !msg_badread)
+			{
+				hwte_size_mismatches++;
+				Con_DPrintf ("HexenWorld temp entity %d read %d bytes, "
+						"expected %d\n", type, count,
+						hwte_fixed_size[type]);
+			}
+			if (count < hwte_fixed_size[type])
+				HWCL_SkipBytes (hwte_fixed_size[type] - count);
+			Con_DPrintf ("HW tent %d: alloc'd %d, streams %d\n", type,
+					hwcl_tent_allocs - allocs,
+					hwcl_tent_streams - streams);
 			return true;
 		}
 		Con_DPrintf ("HexenWorld temp entity %d is not a HexenWorld type\n", type);
