@@ -56,7 +56,8 @@ typedef enum
 	pt_darken,
 	pt_snow,
 	pt_gravwell,
-	pt_redfire
+	pt_redfire,
+	pt_grensmoke		/* HexenWorld grenade smoke; appended, see rt_grensmoke */
 } ptype_t;
 
 typedef enum
@@ -78,7 +79,12 @@ typedef enum
 	rt_boneshard,
 	rt_scarab,
 	rt_acidball,
-	rt_bloodshot
+	rt_bloodshot,
+	/* HexenWorld trails, for its temp entities (cl_hw_tent_fx.inc).  HW
+	 * numbered these 16 and 17, ahead of acidball; appended here so no
+	 * Hexen II number moves.  Never pass a HW rt_ number through raw. */
+	rt_grensmoke,
+	rt_purify
 } rt_type_t;
 
 typedef struct particle_s

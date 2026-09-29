@@ -1221,6 +1221,17 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 			lifetime = .8;
 			break;
 
+		case rt_grensmoke:
+			size = 5;
+			VectorScale (dist, 5, dist);
+			break;
+
+		case rt_purify:
+			size = 5;
+			lifetime = .5;
+			VectorScale (dist, 5, dist);
+			break;
+
 		default:
 			size = 3;
 			dist[0] *= 3;
@@ -1447,6 +1458,23 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 					p->org[j] = start[j] + (rand() & 7);
 
 				p->vel[2] = -(rand() & 7);
+				break;
+
+			case rt_grensmoke:
+			// HexenWorld: smoke trail for grenade
+				p->color = 283 + (rand() & 3);
+				p->type = pt_grensmoke;
+				for (j = 0; j < 3; j++)
+					p->org[j] = start[j] + ((rand() % 6) - 3);
+				break;
+
+			case rt_purify:
+			// HexenWorld: purifier
+				p->type = pt_setstaff;
+				p->color = ramp9[0];
+				p->ramp = rand() & 3;
+				for (j = 0; j < 3; j++)
+					p->org[j] = start[j] + ((rand() % 3) - 1);
 				break;
 		}
 
@@ -2365,6 +2393,12 @@ void R_UpdateParticles (void)
 
 		case pt_fastgrav:
 			p->vel[2] -= grav * 4;
+			break;
+
+		case pt_grensmoke:
+			p->vel[0] += time3 * ((rand() % 3) - 1);
+			p->vel[1] += time3 * ((rand() % 3) - 1);
+			p->vel[2] += time3 * ((rand() % 3) - 1);
 			break;
 
 		case pt_rain:
