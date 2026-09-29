@@ -36,15 +36,12 @@
 //    rotation, so it is part of the contract, and the harness compares
 //    successive calls rather than a single one.
 //
-// 3. The C reads the hwsv-only global `sv_highchars` directly.  This module
-//    cannot: the consolidated Rust archive is a single object member
-//    (libengine_rs.a holds one engine_rs object), so any target that pulls it
-//    for any other port -- glhexen2 and h2ded do, for crc/sizebuf/msg_io --
-//    inherits every undefined symbol in it, and neither of those two targets
-//    defines sv_highchars.  A direct extern static is therefore an immediate
-//    link error outside hwsv.  The read goes through Cvar_FindVar instead; see
-//    sv_highchars_integer for why that is the same value in every state the
-//    engine can reach.
+// 3. The C reads the hwsv-only global `sv_highchars` directly. This port
+//    predates the per-feature-set archives: it reads through Cvar_FindVar
+//    because the former all-target archive could not reference that global.
+//    Keep the proved-equivalent lookup (see sv_highchars_integer); the hwsv
+//    archive now contains this module, while the client and h2ded archives do
+//    not. A future hwsv-only port need not inherit this indirection.
 //
 // The rest is deliberately literal: statement order, the parse loops, the
 // in-place rewrite boundaries (Info_RemoveKey's memmove, Info_RemovePrefixedKeys

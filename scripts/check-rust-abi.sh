@@ -34,8 +34,8 @@ engine="$root/engine"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
 
-# Every feature: this is the archive the engine links, so these are the
-# layouts the engine depends on.
+# ABI probe of every feature: this is a test-only union, not an archive linked
+# into an engine binary. It covers the fields across all three feature sets.
 features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,cmd,zone,quakefs,net_udp_hw,net_chan
 
 extra_c=()

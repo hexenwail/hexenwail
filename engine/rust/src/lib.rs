@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// engine_rs -- the single Rust static library linked into every C engine
-// target.  CMake always builds it with every feature; there is no C fallback.
-// The features exist so each differential harness under engine/rust/*/tests
-// can link the one subsystem it compares against its C original.
+// engine_rs -- one Rust static library per C engine target. CMake builds a
+// target-specific feature set and links exactly one archive into each binary;
+// there is no C fallback. Differential harnesses enable their own subsets.
 //
 // Copyright (C) 2026 Hexenwail contributors.
 //
@@ -95,8 +94,8 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 /// `compiler_builtins` emits a relocation for this symbol even with
-/// `panic = "abort"`.  Keep the compatibility definition in the consolidated
-/// library rather than duplicating it in every subsystem archive.
+/// `panic = "abort"`. Each target links one staticlib with this definition,
+/// rather than multiple per-subsystem archives with duplicate runtimes.
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() {}
 
