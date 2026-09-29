@@ -1150,6 +1150,13 @@ if(BUILD_TESTING)
     target_compile_definitions(sv_checkbottom_test PRIVATE
         SV_CHECKBOTTOM_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME sv_checkbottom COMMAND sv_checkbottom_test)
+    # HW_VERSION_* vs HW_BASE_VERSION (issue #279).  Text again, but for a
+    # different reason than the others: there is no runtime to link, both
+    # sides are preprocessor tokens in one header.
+    add_executable(version_cvar_test tests/version_cvar_test.c)
+    target_compile_definitions(version_cvar_test PRIVATE
+        VERSION_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME version_cvar COMMAND version_cvar_test)
 endif()
 
 engine_rs_attach(${EXECUTABLE_NAME} client ${RUST_ENGINE_CLIENT_FEATURES})

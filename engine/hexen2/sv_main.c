@@ -41,6 +41,27 @@ static	cvar_t	sv_update_misc		= {"sv_update_misc", "1", CVAR_ARCHIVE};
  * truncation, for comparison.  Not archived, as upstream. */
 static	cvar_t	sv_netsort		= {"sv_netsort", "1", CVAR_NONE};
 
+/* Engine identity for HexenC mods -- issue #279, asked for by Mathuzzz.
+ *
+ * A mod that wants to light up engine-specific content has no portable way to
+ * ask which engine it is on.  checkextension() cannot do it: that builtin is
+ * #130 here and #99 in DP/FTE, so the number a mod writes against means two
+ * different things.  cvar() is #45 everywhere, including FTE's Hexen II
+ * support, so a numerically-valued cvar is the one probe that compiles and
+ * behaves identically on every engine -- and reads 0 on all of them but this
+ * one, because an unknown cvar reads as 0.
+ *
+ * CVAR_ROM so a player cannot set it and fake the answer, and deliberately NOT
+ * CVAR_ARCHIVE: a value written into config.cfg by one build would be read
+ * back by another and would then be lying about the engine it is in.  The
+ * value is stamped from HW_VERSION_NUM at registration rather than typed here,
+ * so it cannot drift from HW_BASE_VERSION; engine/tests/version_cvar_test.c
+ * fails the build if the two ever disagree.
+ *
+ * Registered in SV_Init, which both the client and h2ded run, because the mod
+ * asking is server-side QuakeC. */
+cvar_t	hexenwail_version	= {"hexenwail", "0", CVAR_ROM};
+
 /* Deliberately not CVAR_ARCHIVE, as upstream: a ceiling silently persisted
  * into a config is how you get a mod that only fails on one machine.  Takes
  * effect at the next map load, since sv.edicts is sized once there.
@@ -228,6 +249,10 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_cheats);
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
 	Cvar_RegisterVariable (&pr_checkextension);
+	Cvar_RegisterVariable (&hexenwail_version);
+	/* Stamp the real value now that it is registered.  Cvar_SetValueROM is
+	 * the only way in -- CVAR_ROM rejects Cvar_Set from console or config. */
+	Cvar_SetValueROM ("hexenwail", (float)HW_VERSION_NUM);
 	Cvar_RegisterVariable (&sv_flypitch);
 	Cvar_RegisterVariable (&sv_debugmovestep);
 	Cvar_SetCallback (&sv_debugmovestep, SV_DebugMoveStep_Changed);
