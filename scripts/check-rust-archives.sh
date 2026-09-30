@@ -26,9 +26,9 @@ check_count() { # file symbol expected-count
 
 for target in glhexen2 h2ded hwsv; do
     case "$target" in
-        glhexen2) variant=client; features=$common,wad,huffman,net_udp_hw,net_chan;
+        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan;
             wad=1; info=0; hw=1 ;;
-        h2ded) variant=h2ded; features=$common;
+        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target;
             wad=0; info=0; hw=0 ;;
         hwsv) variant=hwsv; features=$common,info_str,huffman,net_udp_hw,net_chan;
             wad=0; info=1; hw=1 ;;
@@ -68,6 +68,11 @@ for target in glhexen2 h2ded hwsv; do
         check_count "$file" W_LoadWadFile "$wad"
         check_count "$file" Info_ValueForKey "$info"
         check_count "$file" HWNET_Init "$hw"
+        if [ "$target" = hwsv ]; then h2=0; else h2=1; fi
+        check_count "$file" net_landrivers "$h2"
+        check_count "$file" UDP_Init "$h2"
+        if [ "$target" = glhexen2 ]; then loop=1; else loop=0; fi
+        check_count "$file" Loop_Init "$loop"
     done
     echo "  $target: exactly one $variant archive; correct features and symbol ownership"
 done

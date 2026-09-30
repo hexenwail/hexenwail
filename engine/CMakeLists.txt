@@ -620,7 +620,6 @@ set(COMMON_SOURCES
     ${ENGINE_TOP}/hexen2/sv_move.c
     ${ENGINE_TOP}/hexen2/world.c
     ${ENGINE_TOP}/hexen2/net_main.c
-    ${ENGINE_TOP}/hexen2/net_loop.c
     ${ENGINE_TOP}/hexen2/net_dgrm.c
     # From h2shared.  cvar.c, zone.c and cmd.c are not compiled here: all three
     # are ported, and the C originals are now only differential harness
@@ -723,11 +722,8 @@ if(EMSCRIPTEN)
         ${COMMONDIR}/sys_sdl.c
     )
 
-    # Network — loopback only (no raw sockets in WASM)
-    list(APPEND PLATFORM_SOURCES
-        ${ENGINE_TOP}/hexen2/net_bsd.c
-        ${ENGINE_TOP}/hexen2/net_udp.c
-    )
+    # Network — browser socket API remains inert; Rust owns the Hexen II
+    # tables and UDP exports as well as the working loopback driver.
 
     # No MIDI driver (tier 1); MIDI plays through the libTiMidity codec instead
     list(APPEND PLATFORM_SOURCES ${COMMONDIR}/midi_nul.c)
@@ -770,11 +766,14 @@ elseif(UNIX)
     # Input
     list(APPEND PLATFORM_SOURCES ${COMMONDIR}/in_sdl.c)
 
-    # Network
-    list(APPEND PLATFORM_SOURCES
-        ${ENGINE_TOP}/hexen2/net_bsd.c
-        ${ENGINE_TOP}/hexen2/net_udp.c
-    )
+    # Linux's Hexen II driver tables and UDP live in Rust. Other Unix
+    # platforms retain their C socket backend until platform-specific FFI
+    # and differential fixtures exist (Phase 7 remains incomplete there).
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        list(APPEND PLATFORM_SOURCES
+            ${ENGINE_TOP}/hexen2/net_bsd.c
+            ${ENGINE_TOP}/hexen2/net_udp.c)
+    endif()
 
     # System
     list(APPEND PLATFORM_SOURCES
@@ -864,11 +863,17 @@ endif()
 set(RUST_ENGINE_COMMON_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io strlcpy strlcat
     cvar zone cmd quakefs)
-set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad)
+set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad net_loop_h2)
+if(EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND RUST_ENGINE_CLIENT_FEATURES net_bsd_h2 net_udp_h2)
+endif()
 if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
     list(APPEND RUST_ENGINE_CLIENT_FEATURES huffman net_udp_hw net_chan)
 endif()
 set(RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_COMMON_FEATURES})
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND RUST_ENGINE_H2DED_FEATURES net_bsd_h2 net_udp_h2 h2ded_target)
+endif()
 set(RUST_ENGINE_HWSV_FEATURES ${RUST_ENGINE_COMMON_FEATURES}
     info_str huffman net_udp_hw net_chan)
 
@@ -1160,6 +1165,7 @@ if(BUILD_TESTING)
 endif()
 
 engine_rs_attach(${EXECUTABLE_NAME} client ${RUST_ENGINE_CLIENT_FEATURES})
+target_sources(${EXECUTABLE_NAME} PRIVATE ${RUST_ENGINE_RS_DIR}/net_loop_h2_target.c)
 
 #============================================================================
 # Link Libraries
@@ -1275,7 +1281,6 @@ else()
         ${ENGINE_TOP}/hexen2/host.c        # superseded by hexen2/server/host.c
         ${ENGINE_TOP}/hexen2/host_cmd.c    # superseded by hexen2/server/host_cmd.c
         ${ENGINE_TOP}/hexen2/host_async.c  # background-save worker needs SDL threads
-        ${ENGINE_TOP}/hexen2/net_loop.c    # loopback driver needs cls/ca_dedicated
     )
     # (wad.c used to be removed here too -- gfx.wad lumps are renderer-only
     # data.  It is no longer an engine source at all: the wad port lives in the
@@ -1295,11 +1300,12 @@ else()
             ${ENGINE_TOP}/hexen2/server/sys_win.c
         )
     else()
-        list(APPEND SERVER_SOURCES
-            ${ENGINE_TOP}/hexen2/net_bsd.c
-            ${ENGINE_TOP}/hexen2/net_udp.c
-            ${ENGINE_TOP}/hexen2/server/sys_unix.c
-        )
+        if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            list(APPEND SERVER_SOURCES
+                ${ENGINE_TOP}/hexen2/net_bsd.c
+                ${ENGINE_TOP}/hexen2/net_udp.c)
+        endif()
+        list(APPEND SERVER_SOURCES ${ENGINE_TOP}/hexen2/server/sys_unix.c)
     endif()
 
     # No WIN32 flag on Windows: h2ded is a console program with a plain main(),

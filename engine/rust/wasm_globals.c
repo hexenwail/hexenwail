@@ -38,7 +38,22 @@
  * compile error here rather than a silent size mismatch at link time.
  * quakedef.h brings mathlib.h, sizebuf.h and msg_io.h in the order they
  * need, as mathlib.c includes it. */
+#include "q_stdinc.h"
+#include "arch_def.h"
+#include "net_sys.h"
 #include "quakedef.h"
+#if !defined(H2W)
+#include "../hexen2/net_defs.h"
+
+/* Rust constructs every entry; this is storage only because wasm32 staticlib
+ * makes Rust's exported data local. NET_Init calls NetH2_InitDriverTables
+ * before traversing the tables. These are Hexen II names, distinct from the
+ * integrated HexenWorld transport's hw_net_* names. */
+net_driver_t net_drivers[2];
+const int net_numdrivers = 2;
+net_landriver_t net_landrivers[1];
+const int net_numlandrivers = 1;
+#endif /* Hexen II client; not the HexenWorld ABI probe */
 
 int		msg_readcount;
 qboolean	msg_badread;

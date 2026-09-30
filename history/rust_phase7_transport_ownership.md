@@ -163,10 +163,42 @@ that hwsv does not define, `net_loop.c` reads the client-only `cls`, and Hexen
 II's `net_udp.c` reads H2-only network state — so a per-target shim can express
 the requirement only by leaving the substance of the file in C.
 
-**Consequence, stated plainly:** the Phase 7 transport objective is **half
-met**. The HexenWorld half is delivered and verified; the Hexen II half is
-outstanding, with no Hexen II transport harness or gate in the tree. When #233
-is decided, `net_dgrm.c` is the first Hexen II network port, and the trio
-follows it. This note is a status record, not an amendment to any goal: the
-objective that names both stacks is unchanged, and completing it requires
-either the trio or a deliberate re-scoping made where the machinery can see it.
+**Consequence at the time of that deferral:** the Phase 7 transport objective
+was **half met**. The HexenWorld half was delivered; the Hexen II half had no
+port, harness or gate. This was a status record, not an amendment to the goal.
+
+## Follow-up after #233 (2026-09-29; not a goal-completion claim)
+
+The maintainer selected per-feature-set archives in #233, implemented in
+`build(rust): select one feature-set archive per engine target (#233)` (#305).
+That unblocked a **Linux and browser** implementation of the Hexen II trio:
+`net_bsd.c`'s full function-pointer tables, `net_loop.c`'s client loopback,
+and `net_udp.c`'s socket/address driver now live in `net_bsd_h2.rs`,
+`net_loop_h2.rs` and `net_udp_h2.rs`. A small `net_loop_h2_target.c` exposes
+client/server facts without copying the client state structs into Rust. Each
+binary still links one archive: Linux glhexen2 has all three ports; Linux
+h2ded has tables and UDP with the SERVERONLY driver layout, no loopback;
+hwsv has none. The Windows binaries still build their *different* C network
+files, `net_win.c` and `net_wins.c`, while the client loopback is Rust.
+
+The separate Hexen II gate `scripts/check-rust-net-h2.sh` builds the C
+originals under renamed symbols. Its client fixture checks driver table entry
+order, fields and every function pointer; qsocket and table layouts; reliable
+and unreliable loopback packets and state; UDP address conversion, actual
+bidirectional socket traffic with an ordinary C peer, init/shutdown, invalid
+socket and bind failure diagnostics. A SERVERONLY fixture checks the dedicated
+table's different ABI and all 40 entry/layout/function-pointer facts. This is
+not HexenWorld's Huffman-framed transport or its gate.
+
+**Platform boundary, still unresolved for the goal:** CMake deliberately keeps
+`net_bsd.c` and `net_udp.c` as C on macOS and non-Linux Unix because their
+socket-address family layouts, ioctl request sizes and errno values differ
+from the currently Linux-specific Rust FFI. No cross-target parity fixture
+or macOS build evidence exists. Emscripten *does* link the Rust code and no
+Hexen II C transport originals; wasm32 staticlib cannot export data globals,
+so `wasm_globals.c` owns only the two table arrays and two counts and
+`NetH2_InitDriverTables` fills their entries in Rust before `NET_Init` uses
+them. WebGL2 build and the existing wasm ABI gate pass, but there is no wasm
+runtime packet fixture. The original objective names both stacks without a
+Linux-only exception; do not mark it complete until this residual platform
+support is ported and verified, or the user explicitly changes that scope.
