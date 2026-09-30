@@ -223,7 +223,7 @@ static qboolean HWCL_ParseTempEntity (void)
 				points[i][2] = (short)pos[2];
 			}
 		}
-		if (!msg_badread)
+		if (!msg_badread && cl.worldmodel)
 			HWCL_TEntSunstaffCheap (ent, points, (count < 2 ? count : 2) + 1);
 		return true;
 	}
@@ -246,7 +246,7 @@ static qboolean HWCL_ParseTempEntity (void)
 			if (numTargs < 9)
 				numTargs++;
 		}
-		if (!msg_badread)
+		if (!msg_badread && cl.worldmodel)
 			HWCL_TEntChainLightning (ent, points, numTargs);
 		return true;
 	}
@@ -254,6 +254,17 @@ static qboolean HWCL_ParseTempEntity (void)
 	default:
 		if (type >= 0 && type < HWTE_COUNT && hwte_fixed_size[type])
 		{
+			/* No world yet: svc_serverdata cleared it and the model
+			 * list has not loaded.  Effects trace against the world
+			 * (TE_FIREWALL finds the floor), and Mod_PointInLeaf
+			 * Sys_Errors on a NULL model; anything spawned now would
+			 * also appear in a map it was never sent for.  Consume
+			 * and drop. */
+			if (!cl.worldmodel)
+			{
+				HWCL_SkipBytes (hwte_fixed_size[type]);
+				return true;
+			}
 			start = msg_readcount;
 			allocs = hwcl_tent_allocs;
 			streams = hwcl_tent_streams;
@@ -268,9 +279,12 @@ static qboolean HWCL_ParseTempEntity (void)
 			}
 			if (count < hwte_fixed_size[type])
 				HWCL_SkipBytes (hwte_fixed_size[type] - count);
-			Con_DPrintf ("HW tent %d: alloc'd %d, streams %d\n", type,
-					hwcl_tent_allocs - allocs,
-					hwcl_tent_streams - streams);
+			/* developer 2: this is one line per temp entity, which
+			 * is dozens a second under weapon fire */
+			if (developer.integer >= 2)
+				Con_DPrintf ("HW tent %d: alloc'd %d, streams %d\n",
+						type, hwcl_tent_allocs - allocs,
+						hwcl_tent_streams - streams);
 			return true;
 		}
 		Con_DPrintf ("HexenWorld temp entity %d is not a HexenWorld type\n", type);

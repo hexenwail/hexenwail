@@ -7,9 +7,13 @@
  * reader.  Transcribed from the original HexenWorld client's cl_tent.c
  * (engine/hexenworld/client/cl_tent.c, deleted in 036a0b531): CL_ParseTEnt,
  * CL_AllocExplosion, CL_UpdateExplosions and the think functions after it.
- * Models, sounds, timings, counts, colours and the order of rand() draws
- * inside each effect are the original's; where this file departs from it,
- * the comment at that spot says why.
+ * Models, sounds, timings, counts and colours are the original's, and so
+ * is the order of the rand() draws that feed each effect -- including the
+ * ones that pick a model last (HWCL_PlaceExplosion, HWCL_TEntBurstPiece).
+ * The exception: a few draws whose result the original computed and never
+ * used (an ftemp in the grenade thinks, a teleport flash's avel with no
+ * rotate flag) are dropped.  Where this file departs from the original in
+ * anything else, the comment at that spot says why.
  *
  * Three things the original leaned on that the integrated client does not
  * have, and what stands in for them:
@@ -59,6 +63,13 @@
 
 #define HWCL_FRANDOM()	(rand() * (1.0 / RAND_MAX))
 
+/* Called with each entity as it goes into cl_visedicts.  Nothing in the
+ * engine; hw_tent_test.c defines it to snapshot the entity and prove that
+ * nothing writes it again that frame. */
+#ifndef HWCL_TENT_LINKED
+#define HWCL_TENT_LINKED(ent)	((void)0)
+#endif
+
 typedef struct hwcl_explosion_s hwcl_explosion_t;
 
 struct hwcl_explosion_s
@@ -83,9 +94,19 @@ struct hwcl_explosion_s
 };
 
 static hwcl_explosion_t	hwcl_explosions[HWCL_MAX_EXPLOSIONS];
-/* One per slot, handed to the renderer by pointer.  Reset when the slot is
- * reallocated, so alias lerp state never carries over from another effect. */
+/* One per slot, handed to the renderer by pointer.  The invariant that
+ * keeps this safe: an entity is written ONLY by HWCL_UpdateTempEntities,
+ * at the moment it is linked, and each slot is visited once per frame.
+ * Allocation never touches it -- with the pool full, HWCL_AllocExplosion
+ * reuses a live slot, and a think function allocating mid-update would
+ * otherwise zero an entity already sitting in cl_visedicts, which the sky
+ * pass then dereferences (e->model->type).  A slot reused after it was
+ * linked keeps drawing its old contents for the rest of that frame; the
+ * new explosion first draws on the next. */
 static entity_t		hwcl_explosion_ents[HWCL_MAX_EXPLOSIONS];
+/* Bumped by every allocation of the slot, so the update can tell that a
+ * think function reused the very slot it is running in. */
+static unsigned int	hwcl_explosion_gen[HWCL_MAX_EXPLOSIONS];
 
 /* Running totals, read by the developer trace and by hw_tent_test.c. */
 static int	hwcl_tent_allocs;
@@ -313,7 +334,7 @@ static hwcl_explosion_t *HWCL_AllocExplosion (void)
 	}
 
 	memset (&hwcl_explosions[idx], 0, sizeof(hwcl_explosion_t));
-	memset (&hwcl_explosion_ents[idx], 0, sizeof(entity_t));
+	hwcl_explosion_gen[idx]++;
 	hwcl_tent_allocs++;
 	return &hwcl_explosions[idx];
 }
@@ -334,6 +355,25 @@ static hwcl_explosion_t *HWCL_NewExplosion (int model)
 	return ex;
 }
 
+/* For effects the original filled in first and gave a model last, with a
+ * rand() draw: build the explosion in `t', draw the model, and only then
+ * take a pool slot -- so the draws keep the original's order and a
+ * missing model still costs no slot. */
+static hwcl_explosion_t *HWCL_PlaceExplosion (const hwcl_explosion_t *t,
+		int model)
+{
+	qmodel_t		*mod;
+	hwcl_explosion_t	*ex;
+
+	mod = HWCL_TEntModel (model);
+	if (!mod)
+		return NULL;
+	ex = HWCL_AllocExplosion ();
+	*ex = *t;
+	ex->model = mod;
+	return ex;
+}
+
 /* FindState, range-checked.  Entity 0 is the world, which is never in a
  * packet, so the original never found it either. */
 static qboolean HWCL_TEntEntityOrigin (int ent, vec3_t origin)
@@ -344,9 +384,11 @@ static qboolean HWCL_TEntEntityOrigin (int ent, vec3_t origin)
 }
 
 /* NewStream + fill, as the original did inline.  Model ids, -1 for none. */
+/* attach_origin is where ent is now, from HWCL_TEntEntityOrigin; needed
+ * only with HWCL_STREAM_ATTACHED, NULL otherwise. */
 static qboolean HWCL_TEntStream (int type, int ent, int flags, int tag,
 		float duration, int skin, int m0, int m1, int m2, int m3,
-		const vec3_t source, const vec3_t dest)
+		const vec3_t source, const vec3_t dest, const vec3_t attach_origin)
 {
 	qmodel_t	*models[4];
 
@@ -357,7 +399,7 @@ static qboolean HWCL_TEntStream (int type, int ent, int flags, int tag,
 	models[2] = HWCL_TEntModel (m2);
 	models[3] = HWCL_TEntModel (m3);
 	if (!CL_CreateStream (type, ent, flags, tag, duration, skin, models,
-			source, dest))
+			source, dest, attach_origin))
 		return false;
 	hwcl_tent_streams++;
 	return true;
@@ -407,8 +449,13 @@ static void HWCL_TEntDirection (float angle, float pitch, float speed,
 	VectorScale (out, speed, out);
 }
 
+/* Mod_PointInLeaf Sys_Errors on a NULL model, and cl.worldmodel is NULL
+ * from svc_serverdata until the model list loads -- a window a temp entity
+ * can arrive in.  No world reads as solid: nothing moves into it. */
 static qboolean HWCL_TEntEmpty (vec3_t p)
 {
+	if (!cl.worldmodel)
+		return false;
 	return Mod_PointInLeaf (p, cl.worldmodel)->contents == CONTENTS_EMPTY;
 }
 
@@ -1167,13 +1214,10 @@ static void HWCL_TEntChunks (int type, vec3_t pos, vec3_t vel, int chType,
 
 	for (i = 0; i < cnt; i++)
 	{
-		hwcl_explosion_t	*ex;
+		hwcl_explosion_t	t, *ex = &t;
 		int	skin = 0, flags = 0, model;
 
-		model = HWCL_ChunkModel (chType, (rand() % 100) * .01, &skin, &flags);
-		ex = HWCL_NewExplosion (model);
-		if (!ex)
-			continue;
+		memset (&t, 0, sizeof(t));
 		ex->frameFunc = HWCL_ChunkThink;
 
 		if (type == HWTE_CHUNK)
@@ -1214,6 +1258,11 @@ static void HWCL_TEntChunks (int type, vec3_t pos, vec3_t vel, int chType,
 			ex->avel[2] = rand() % 1200;
 		}
 		ex->data = chType;
+
+		model = HWCL_ChunkModel (chType, (rand() % 100) * .01, &skin, &flags);
+		ex = HWCL_PlaceExplosion (&t, model);
+		if (!ex)
+			continue;
 		ex->skin = skin;
 		ex->flags |= flags;
 		if (chType == THINGTYPE_METEOR)
@@ -1224,21 +1273,25 @@ static void HWCL_TEntChunks (int type, vec3_t pos, vec3_t vel, int chType,
 	}
 }
 
-/* The four "spray of sprites around pos" explosions (METEORHIT's blast,
+/* The "spray of sprites around pos" explosions (METEORHIT's blast,
  * AXE_EXPLODE, TIME_BOMB, PURIFY2_EXPLODE, ACIDBALL, ACIDBLOB) share this
  * placement: jitter the origin by +-jitter, fly outward at spread times
- * the jitter. */
-static hwcl_explosion_t *HWCL_TEntBurstPiece (int model, vec3_t pos,
-		int jitter, float spread)
+ * the jitter.  The model is then drawn from models[] -- after the jitter,
+ * as the original drew it -- unless there is only one; *pick says which. */
+static hwcl_explosion_t *HWCL_TEntBurstPiece (const int *models, int count,
+		vec3_t pos, int jitter, float spread, int *pick)
 {
 	hwcl_explosion_t	*ex;
 	vec3_t	org;
-	int	j;
+	int	j, n;
 
 	VectorCopy (pos, org);
 	for (j = 0; j < 3; j++)
 		org[j] += (rand() % (jitter * 2)) - jitter;
-	ex = HWCL_NewExplosion (model);
+	n = (count > 1) ? rand() % count : 0;
+	if (pick)
+		*pick = n;
+	ex = HWCL_NewExplosion (models[n]);
 	if (!ex)
 		return NULL;
 	VectorCopy (org, ex->origin);
@@ -1373,7 +1426,7 @@ static void HWCL_TEntEffect (int type)
 			static const int	models[4] = {
 				HWM_SM_EXPLD, HWM_SM_EXPLD, HWM_BG_EXPLD, HWM_GEN_EXPL
 			};
-			ex = HWCL_TEntBurstPiece (models[rand() % 4], pos, 5, 12);
+			ex = HWCL_TEntBurstPiece (models, 4, pos, 5, 12, NULL);
 			if (!ex)
 				continue;
 			if (host_frametime < .07)
@@ -1599,7 +1652,7 @@ static void HWCL_TEntEffect (int type)
 			dest[2] += 128;
 			if (!HWCL_TEntStream (HWTE_STREAM_ICECHUNKS, ent,
 					i + HWCL_STREAM_ATTACHED, i, 0.3, 0,
-					HWM_STICE, -1, -1, -1, source, dest))
+					HWM_STICE, -1, -1, -1, source, dest, org))
 				break;
 		}
 		return;
@@ -1646,7 +1699,7 @@ static void HWCL_TEntEffect (int type)
 			dest[1] += (rand() % 80) - 40;
 			dest[2] += 64 + (rand() % 48);
 			if (!HWCL_TEntStream (HWTE_STREAM_LIGHTNING, ent, i, i, 0.5, 0,
-					HWM_STLGHTNG, -1, -1, -1, source, dest))
+					HWM_STLGHTNG, -1, -1, -1, source, dest, NULL))
 				break;
 		}
 		return;
@@ -1721,7 +1774,7 @@ static void HWCL_TEntEffect (int type)
 				dest[2] += 64 + (rand() % 48);
 				if (!HWCL_TEntStream (HWTE_STREAM_LIGHTNING, ent, i, i,
 						0.5, 0, HWM_STLGHTNG, -1, -1, -1,
-						source, dest))
+						source, dest, NULL))
 					break;
 			}
 		}
@@ -1765,16 +1818,19 @@ static void HWCL_TEntEffect (int type)
 		i = (host_frametime < .07) ? 0 : 3;	/* based on framerate */
 		for ( ; i < 5; i++)
 		{
-			int	flags = 0;
+			/* 0,1 xpspblue; 2,3 xpspblue see-through; 4,5 spark0
+			 * see-through */
+			static const int	models[6] = {
+				HWM_XPSPBLUE, HWM_XPSPBLUE, HWM_XPSPBLUE,
+				HWM_XPSPBLUE, HWM_SPARK0, HWM_SPARK0
+			};
 
-			rnd = rand() % 6;
-			if (rnd >= 2)
-				flags = MLS_ABSLIGHT|DRF_TRANSLUCENT;
-			ex = HWCL_TEntBurstPiece (rnd >= 4 ? HWM_SPARK0 : HWM_XPSPBLUE,
-					pos, 3, 15);
+			ex = HWCL_TEntBurstPiece (models, 6, pos, 3, 15, &rnd);
 			if (!ex)
 				continue;
-			ex->flags |= flags | MLS_ABSLIGHT;
+			if (rnd >= 2)
+				ex->flags |= MLS_ABSLIGHT|DRF_TRANSLUCENT;
+			ex->flags |= MLS_ABSLIGHT;
 			ex->abslight = 160 + (rand() % 24);
 			ex->skin = 0;
 			ex->scale = 80 + (rand() % 40);
@@ -1794,7 +1850,7 @@ static void HWCL_TEntEffect (int type)
 			static const int	models[4] = {
 				HWM_SM_EXPLD, HWM_GEN_EXPL, HWM_BG_EXPLD, HWM_GEN_EXPL
 			};
-			ex = HWCL_TEntBurstPiece (models[rand() % 4], pos, 3, 40);
+			ex = HWCL_TEntBurstPiece (models, 4, pos, 3, 40, NULL);
 			if (!ex)
 				continue;
 			ex->flags |= MLS_ABSLIGHT|DRF_TRANSLUCENT;
@@ -1864,12 +1920,15 @@ static void HWCL_TEntEffect (int type)
 		if (HWCL_TEntEntityOrigin (ent, org))
 		{
 			HWCL_TEntSound (HWS_SUNSTAFF, org);
-			/* Hexen II's renderer draws SUNSTAFF2 from models[0] with
-			 * [2] and [3] at the end; the original's own spiral used
-			 * [1] as well.  See CL_UpdateTEnts. */
+			/* Drawn by Hexen II's SUNSTAFF2 stream renderer
+			 * (cl_tent.c CL_UpdateTEnts): a straight run of models[0]
+			 * with [2] and [3] at the end.  That LOOKS DIFFERENT from
+			 * HexenWorld, whose renderer twisted two strands of [0]
+			 * and [1] around the beam in a spiral that shrank over its
+			 * 0.8 s life.  Streams stay Hexen II's to draw (#213). */
 			HWCL_TEntStream (HWTE_STREAM_SUNSTAFF2, ent, 0, 0, 0.8, 0,
 					HWM_STSUNSF2, HWM_STSUNSF1, HWM_STSUNSF3,
-					HWM_STSUNSF4, vel, pos);
+					HWM_STSUNSF4, vel, pos, NULL);
 		}
 		return;
 
@@ -1895,7 +1954,7 @@ static void HWCL_TEntEffect (int type)
 			static const int	models[4] = {
 				HWM_SM_EXPLD, HWM_SM_EXPLD, HWM_BG_EXPLD, HWM_GEN_EXPL
 			};
-			ex = HWCL_TEntBurstPiece (models[rand() % 4], pos, 10, 12);
+			ex = HWCL_TEntBurstPiece (models, 4, pos, 10, 12, NULL);
 			if (!ex)
 				continue;
 			if (host_frametime < 0.07)
@@ -1928,9 +1987,11 @@ static void HWCL_TEntEffect (int type)
 			static const int	models[3] = {
 				HWM_FLESH1, HWM_FLESH2, HWM_FLESH3
 			};
-			ex = HWCL_NewExplosion (models[rand() % 3]);
-			if (!ex)
-				continue;
+			hwcl_explosion_t	t;
+
+			/* filled first, model drawn last, as the original */
+			memset (&t, 0, sizeof(t));
+			ex = &t;
 			VectorCopy (pos, ex->origin);
 			ex->origin[0] += (rand() % 40) - 20;
 			ex->origin[1] += (rand() % 40) - 20;
@@ -1952,9 +2013,9 @@ static void HWCL_TEntEffect (int type)
 			ex->avel[2] = (rand() % 850) - 425;
 			ex->scale = 80 + (rand() % 40);
 			ex->data = THINGTYPE_FLESH;
-			ex->skin = 0;
 			ex->startTime = cl.time;
 			ex->endTime = ex->startTime + 4.0;
+			HWCL_PlaceExplosion (&t, models[rand() % 3]);
 		}
 
 		switch (style)
@@ -2099,7 +2160,9 @@ static void HWCL_TEntEffect (int type)
 		i = (host_frametime < 0.07) ? 0 : 2;
 		for ( ; i < 5; i++)
 		{
-			ex = HWCL_TEntBurstPiece (HWM_AXPLSN_2, pos, 3, 6);
+			static const int	model = HWM_AXPLSN_2;
+
+			ex = HWCL_TEntBurstPiece (&model, 1, pos, 3, 6, NULL);
 			if (!ex)
 				continue;
 			if (host_frametime < 0.07)
@@ -2123,7 +2186,7 @@ static void HWCL_TEntEffect (int type)
 			static const int	models[4] = {
 				HWM_AXPLSN_2, HWM_AXPLSN_1, HWM_AXPLSN_5, HWM_AXPLSN_5
 			};
-			ex = HWCL_TEntBurstPiece (models[rand() % 4], pos, 3, 25);
+			ex = HWCL_TEntBurstPiece (models, 4, pos, 3, 25, NULL);
 			if (!ex)
 				continue;
 			if (host_frametime < 0.07)
@@ -2587,7 +2650,7 @@ static void HWCL_TEntEffect (int type)
 		HWCL_TEntSound (HWS_SUNHIT, dest);
 		R_SunStaffTrail (dest, source);
 		HWCL_TEntStream (HWTE_STREAM_COLORBEAM, ent, 0, 0, 0.1, rand() % 5,
-				HWM_STCLRBM, -1, -1, -1, source, dest);
+				HWM_STCLRBM, -1, -1, -1, source, dest, NULL);
 		return;
 	}
 
@@ -2607,7 +2670,7 @@ static void HWCL_TEntEffect (int type)
 			HWCL_TEntDirection (tempAng, tempPitch, 75, dest);
 			VectorAdd (dest, pos, dest);
 			if (!HWCL_TEntStream (HWTE_STREAM_LIGHTNING, ent, i, i, 0.5, 0,
-					HWM_STLGHTNG, -1, -1, -1, pos, dest))
+					HWM_STLGHTNG, -1, -1, -1, pos, dest, NULL))
 				break;
 		}
 		return;
@@ -2628,7 +2691,7 @@ static void HWCL_TEntSunstaffCheap (int ent, vec3_t points[4], int beams)
 		if (!HWCL_TEntStream (HWTE_STREAM_SUNSTAFF1, ent,
 				i ? i : HWCL_STREAM_ATTACHED, i, 0.5, 0,
 				HWM_STSUNSF1, HWM_STSUNSF2, HWM_STSUNSF3,
-				HWM_STSUNSF4, points[i], points[i + 1]))
+				HWM_STSUNSF4, points[i], points[i + 1], org))
 			return;
 	}
 }
@@ -2643,7 +2706,8 @@ static void HWCL_TEntChainLightning (int ent, vec3_t *points, int numTargs)
 	for (i = 0; i < numTargs - 1; i++)
 	{
 		if (!HWCL_TEntStream (HWTE_STREAM_LIGHTNING, ent, i, i, 0.3, 0,
-				HWM_STLGHTNG, -1, -1, -1, points[i], points[i + 1]))
+				HWM_STLGHTNG, -1, -1, -1, points[i], points[i + 1],
+				NULL))
 			return;
 		ex = HWCL_NewExplosion (HWM_VORPSHOK);
 		if (!ex)
@@ -2668,6 +2732,7 @@ static void HWCL_TEntChainLightning (int ent, vec3_t *points, int numTargs)
 void HWCL_UpdateTempEntities (void)
 {
 	int	i, f, numframes, fresh = 0, linked = 0;
+	unsigned int	gen;
 	hwcl_explosion_t	*ex;
 	entity_t	*ent;
 
@@ -2713,11 +2778,15 @@ void HWCL_UpdateTempEntities (void)
 		if (ex->startTime > cl.time)
 			continue;
 
+		gen = hwcl_explosion_gen[i];
 		if (ex->frameFunc)
 			ex->frameFunc (ex);
 
-		/* the frame func may have delayed or removed it */
-		if (ex->startTime > cl.time || !ex->model)
+		/* The frame func may have delayed or removed it -- or, with the
+		 * pool full, allocated this very slot for something new, which
+		 * starts drawing next frame from its own first frame. */
+		if (hwcl_explosion_gen[i] != gen || ex->startTime > cl.time ||
+				!ex->model)
 			continue;
 
 		if (cl_numvisedicts >= MAX_VISEDICTS)
@@ -2732,7 +2801,13 @@ void HWCL_UpdateTempEntities (void)
 		if (f < 0)
 			f = 0;
 
+		/* The one place an explosion entity is written.  Cleared on
+		 * this explosion's first draw, so nothing (alias lerp state
+		 * included) carries over from the slot's previous tenant;
+		 * after that every field is refilled each frame. */
 		ent = &hwcl_explosion_ents[i];
+		if (!ex->drawn)
+			memset (ent, 0, sizeof(*ent));
 		VectorCopy (ex->origin, ent->origin);
 		VectorCopy (ex->angles, ent->angles);
 		ent->model = ex->model;
@@ -2743,6 +2818,7 @@ void HWCL_UpdateTempEntities (void)
 		ent->scale = ex->scale;
 		ent->colormap = vid.colormap;
 		cl_visedicts[cl_numvisedicts++] = ent;
+		HWCL_TENT_LINKED (ent);
 
 		linked++;
 		if (!ex->drawn)
@@ -2753,7 +2829,7 @@ void HWCL_UpdateTempEntities (void)
 	}
 
 	hwcl_tent_linked += fresh;
-	if (fresh)
+	if (fresh && developer.integer >= 2)
 		Con_DPrintf ("HW tents: drew %d new, %d linked this frame\n",
 				fresh, linked);
 }

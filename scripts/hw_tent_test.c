@@ -150,7 +150,10 @@ static void Con_DPrintf (const char *fmt, ...)
 #define HX_FRAME_TIME		0.05
 #define CONTENTS_EMPTY		-1
 #define CONTENTS_SOLID		-2
-#define MAX_VISEDICTS		64
+/* Above the pool size on purpose: with every slot linkable, a think
+ * function allocating mid-update reuses slots that are already linked,
+ * which is the path test 18 has to reach. */
+#define MAX_VISEDICTS		512
 #define MAX_DYNAMIC_CHANNELS	128
 #define MAX_EDICTS		8192
 #define HWCL_MAX_ENTITIES	768	/* cl_hw.c */
@@ -223,6 +226,7 @@ typedef struct
 } entity_t;
 
 static struct { double time; qmodel_t *worldmodel; } cl;
+static struct { int integer; } developer;
 static struct { byte *colormap; } vid;
 static struct { float gravity; } movevars = { 800 };
 static double host_frametime = 0.01;
@@ -248,10 +252,15 @@ static qmodel_t *Mod_ForName (const char *name, qboolean crash)
 	return &mod_pool[mod_pool_used++];
 }
 
+/* The engine's Mod_PointInLeaf Sys_Errors on a NULL model, so any call
+ * with one is a crash in the client; counted, and asserted zero. */
 static mleaf_t test_leaf = { CONTENTS_EMPTY };
+static int null_leaf_calls;
 static mleaf_t *Mod_PointInLeaf (vec3_t p, qmodel_t *m)
 {
-	(void)p; (void)m;
+	(void)p;
+	if (!m)
+		null_leaf_calls++;
 	return &test_leaf;
 }
 
@@ -280,18 +289,27 @@ static void R_SunStaffTrail (vec3_t a, vec3_t b) { (void)a; (void)b; }
 
 /* cl_tent.c's CL_CreateStream: records every call, and flags any entity
  * number that would have indexed cl_entities out of range. */
-static int stream_calls, stream_bad_ent;
+static int stream_calls, stream_bad_ent, stream_attached, stream_attach_ok;
 static qboolean CL_CreateStream (int type, int ent, int flags, int tag,
 		float duration, int skin, qmodel_t *const models[4],
-		const vec3_t source, const vec3_t dest)
+		const vec3_t source, const vec3_t dest, const vec3_t attach_origin)
 {
-	(void)type; (void)flags; (void)tag; (void)duration; (void)skin;
+	(void)type; (void)tag; (void)duration; (void)skin;
 	(void)source; (void)dest;
 	if (ent < 0 || ent >= MAX_EDICTS)
 		stream_bad_ent++;
 	if (!models[0])
 		return false;
 	stream_calls++;
+	/* an attached stream must be offset from where the lookup put the
+	 * entity (10 20 30 below), not from cl_entities */
+	if (flags & 16)
+	{
+		stream_attached++;
+		if (attach_origin && attach_origin[0] == 10 &&
+				attach_origin[1] == 20 && attach_origin[2] == 30)
+			stream_attach_ok++;
+	}
 	return true;
 }
 
@@ -313,6 +331,11 @@ static qboolean HWCL_EntityStateOrigin (int ent, vec3_t origin)
 	VectorSet (origin, 10, 20, 30);
 	return true;
 }
+
+/* Snapshot every entity as it is linked; test 18 proves none of them is
+ * written again before the frame is drawn. */
+static entity_t link_snap[MAX_VISEDICTS];
+#define HWCL_TENT_LINKED(ent)	(link_snap[cl_numvisedicts - 1] = *(ent))
 
 #include "../engine/hexen2/cl_hw_tent.inc"
 
@@ -396,6 +419,38 @@ static void reset_world (void)
 	cl.worldmodel = &worldmodel;
 	cl_numvisedicts = 0;
 	host_frametime = 0.01;
+}
+
+/* Every linked entity has a model and is exactly what it was linked as. */
+static int visedicts_intact (void)
+{
+	int i, j;
+
+	for (i = 0; i < cl_numvisedicts; i++)
+	{
+		if (!cl_visedicts[i] || !cl_visedicts[i]->model)
+			return 0;
+		if (memcmp (cl_visedicts[i], &link_snap[i], sizeof(entity_t)))
+			return 0;
+		for (j = 0; j < i; j++)
+			if (cl_visedicts[j] == cl_visedicts[i])
+				return 0;	/* linked twice */
+	}
+	return 1;
+}
+
+/* Fill the pool: every slot live and drawable, slot 0 the oldest. */
+static void fill_pool (void)
+{
+	int n;
+	hwcl_explosion_t *ex;
+
+	for (n = 0; n < HWCL_MAX_EXPLOSIONS; n++)
+	{
+		ex = HWCL_NewExplosion (HWM_GEN_EXPL);
+		ex->startTime = cl.time - 60 + n * 0.1;
+		ex->endTime = cl.time + 60;
+	}
 }
 
 static int live_explosions (void)
@@ -658,13 +713,66 @@ static void test_effects (void)
 
 	/* the visedict list is never overrun */
 	reset_world ();
-	for (n = 0; n < HWCL_MAX_EXPLOSIONS; n++)
+	fill_pool ();
+	cl.time += 0.01;
+	cl_numvisedicts = MAX_VISEDICTS - 10;
+	HWCL_UpdateTempEntities ();
+	expect (cl_numvisedicts == MAX_VISEDICTS, "visedicts capped, not overrun", -1);
+
+	/* 18. pool_full_think_reuses_linked_slot: with every slot live, a
+	 * spawning think in a high slot reuses the oldest -- low -- slots,
+	 * which this frame has already linked.  Their entities must be left
+	 * exactly as linked: the sky pass reads e->model->type from every
+	 * visedict, and a zeroed one is a NULL deref. */
+	reset_world ();
+	fill_pool ();
+	ex = &hwcl_explosions[120];
+	ex->frameFunc = HWCL_MultiGrenadeThink;
+	ex->data = 250;
 	{
-		ex = HWCL_NewExplosion (HWM_GEN_EXPL);
-		ex->startTime = cl.time;
-		ex->endTime = cl.time + 10;
+		unsigned int gen_before[HWCL_MAX_EXPLOSIONS];
+		int reused_linked = 0;
+
+		memcpy (gen_before, hwcl_explosion_gen, sizeof(gen_before));
+		allocs = hwcl_tent_allocs;
+		run_frame (0.01);
+		for (n = 0; n < 120; n++)
+			reused_linked += hwcl_explosion_gen[n] != gen_before[n];
+		expect (hwcl_tent_allocs - allocs >= 6 && reused_linked >= 6,
+				"pool_full_think_reuses_linked_slot: the think reused "
+				"slots linked earlier this frame", -1);
+		expect (cl_numvisedicts == HWCL_MAX_EXPLOSIONS,
+				"pool_full_think_reuses_linked_slot: each slot linked once", -1);
+		expect (visedicts_intact (),
+				"pool_full_think_reuses_linked_slot: every linked entity "
+				"has a model and is unchanged since it was linked", -1);
+		/* next frame the reused slots draw their new explosions */
+		run_frame (0.01);
+		expect (visedicts_intact (),
+				"pool_full_think_reuses_linked_slot: next frame intact", -1);
 	}
-	expect (run_frame (0.01) == MAX_VISEDICTS, "visedicts capped, not overrun", -1);
+
+	/* 19. think_reuses_own_slot: the running think's first allocation is
+	 * its own slot (the oldest).  That slot now holds a new explosion; it
+	 * must not be linked this frame under the old one's frame number. */
+	reset_world ();
+	fill_pool ();
+	hwcl_explosions[120].startTime = cl.time - 500;	/* now the oldest */
+	hwcl_explosions[120].frameFunc = HWCL_MultiGrenadeThink;
+	hwcl_explosions[120].data = 250;
+	{
+		unsigned int gen120 = hwcl_explosion_gen[120];
+		int linked120 = 0;
+
+		run_frame (0.01);
+		for (n = 0; n < cl_numvisedicts; n++)
+			linked120 += cl_visedicts[n] == &hwcl_explosion_ents[120];
+		expect (hwcl_explosion_gen[120] != gen120,
+				"think_reuses_own_slot: the think took its own slot", -1);
+		expect (linked120 == 0,
+				"think_reuses_own_slot: the reused slot waits a frame", -1);
+		expect (visedicts_intact (), "think_reuses_own_slot: visedicts intact", -1);
+	}
 
 	/* 14. a still frame past the model's end is pinned for the renderer */
 	reset_world ();
@@ -699,6 +807,49 @@ static void test_effects (void)
 	put_byte (8);
 	run_exact (HWTE_FIREWALL, "fire wall over a void");
 	expect (live_explosions () == 16, "fire wall: 8 flames, 8 streaks", -1);
+
+	/* 20. firewall_without_world: a fire wall between svc_serverdata and
+	 * the model list must not trace a NULL world (Mod_PointInLeaf
+	 * Sys_Errors on one); the bytes are consumed and nothing is made */
+	reset_world ();
+	cl.worldmodel = NULL;
+	allocs = hwcl_tent_allocs;
+	begin (HWTE_FIREWALL);
+	put_coord3 (1, 2, 3);
+	put_byte (0);
+	put_byte (0);
+	put_byte (8);
+	run_exact (HWTE_FIREWALL, "firewall_without_world");
+	expect (null_leaf_calls == 0,
+			"firewall_without_world: no Mod_PointInLeaf on a NULL world", -1);
+	expect (hwcl_tent_allocs == allocs,
+			"firewall_without_world: nothing spawned without a world", -1);
+	/* and every other type, sunstaff and chain included */
+	for (i = 0; i < sizeof(spec) / sizeof(spec[0]); i++)
+	{
+		if (spec[i].type >= HWTE_COUNT || !hwte_fixed_size[spec[i].type])
+			continue;
+		put_fixed (spec[i].type, spec[i].size, 5);
+		run_exact (spec[i].type, "no world: payload consumed");
+	}
+	expect (null_leaf_calls == 0 && hwcl_tent_allocs == allocs,
+			"no_world_any_type: nothing traced or spawned", -1);
+
+	/* 21. attached_stream_uses_resolved_origin: an ice storm's attached
+	 * streams take their offset from the origin just looked up, not from
+	 * cl_entities, which is not relinked until after the parse */
+	reset_world ();
+	stream_attached = stream_attach_ok = 0;
+	put_fixed (HWTE_ICESTORM, 2, 5);
+	run_exact (HWTE_ICESTORM, "ice storm");
+	begin (HWTE_SUNSTAFF_CHEAP);
+	put_short (5);
+	put_byte (0);
+	put_coord3 (1, 2, 3);
+	put_coord3 (4, 5, 6);
+	run_exact (HWTE_SUNSTAFF_CHEAP, "sunstaff");
+	expect (stream_attached == 6 && stream_attach_ok == 6,
+			"attached_stream_uses_resolved_origin", -1);
 
 	/* 16. level change / disconnect: nothing survives the clear */
 	reset_world ();
@@ -745,6 +896,7 @@ static void test_effects (void)
 			buf[buf_len++] = (unsigned char)rand ();
 		entities_present = rand () & 1;
 		models_missing = !(rand () % 8);
+		cl.worldmodel = (rand () % 10) ? &worldmodel : NULL;
 		(void)HWCL_ParseTempEntity ();
 		checks++;
 		if (msg_readcount > buf_len)
@@ -757,6 +909,8 @@ static void test_effects (void)
 	}
 	expect (state_bad_ent == 0 && stream_bad_ent == 0,
 			"fuzz: no out-of-range entity reached a lookup", -1);
+	/* cumulative, never reset: covers every test above as well */
+	expect (null_leaf_calls == 0, "no Mod_PointInLeaf on a NULL world, anywhere", -1);
 	expect (hwte_size_mismatches == 0, "fuzz: no effect read off its table size", -1);
 }
 

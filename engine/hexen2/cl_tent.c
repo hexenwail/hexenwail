@@ -450,10 +450,15 @@ static void ParseStream(int type)
  * renderer below will draw must be filled, or the stream is refused.
  * fixed_dest is set because these endpoints are the effect's own geometry:
  * cl_truelightning re-aiming a lightning-hammer bolt at the crosshair would
- * be wrong.  Returns false when nothing was created. */
+ * be wrong.  attach_origin, for STREAM_ATTACHED, is where the caller has
+ * just resolved ent to be: cl_entities[ent] is not updated until
+ * CL_RelinkEntities, so for an entity new in this very packet it still
+ * holds zero or a stale position, and the offset taken from it would throw
+ * the beam's start across the map.  NULL falls back to cl_entities, as
+ * ParseStream does.  Returns false when nothing was created. */
 qboolean CL_CreateStream (int type, int ent, int flags, int tag, float duration,
 		int skin, qmodel_t *const models[4],
-		const vec3_t source, const vec3_t dest)
+		const vec3_t source, const vec3_t dest, const vec3_t attach_origin)
 {
 	stream_t	*stream;
 
@@ -486,7 +491,11 @@ qboolean CL_CreateStream (int type, int ent, int flags, int tag, float duration,
 	VectorCopy (source, stream->source);
 	VectorCopy (dest, stream->dest);
 	if (flags & STREAM_ATTACHED)
-		VectorSubtract (source, cl_entities[ent].origin, stream->offset);
+	{
+		const float	*org = attach_origin ? attach_origin : cl_entities[ent].origin;
+
+		VectorSubtract (source, org, stream->offset);
+	}
 	return true;
 }
 
