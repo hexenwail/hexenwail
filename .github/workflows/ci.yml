@@ -228,6 +228,16 @@ jobs:
             -o hw_projectile_test scripts/hw_projectile_test.c
           ./hw_projectile_test
 
+      # The HexenWorld client clock (#308): cl.time must advance without
+      # svc_time, mtime must follow entity updates, and entities must be
+      # drawn interpolated in [0, 1] rather than frozen or extrapolated.
+      - name: Unit test HexenWorld client clock
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o hw_clock_test scripts/hw_clock_test.c -lm
+          ./hw_clock_test
+
       - name: Unit test brush render state
         run: |
           set -euo pipefail

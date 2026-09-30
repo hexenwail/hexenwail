@@ -150,9 +150,11 @@ typedef struct
 	vec3_t velocity;
 } hwcl_entity_state_t;
 
+#include "cl_hw_clock.inc"
+
 static struct
 {
-	double server_time;
+	hwcl_clock_t clock;
 	vec3_t viewangles;
 	int viewentity;
 	int stats[MAX_CL_STATS];
@@ -767,6 +769,9 @@ static void HWCL_ParsePacketEntities (qboolean delta)
 	}
 	if (apply)
 		hwcl_entity_sequence = hwcl_netchan.incoming_sequence;
+	/* Stamped whether or not the delta applied: the svc_playerinfo records
+	 * that precede it in this message are new either way. */
+	HWCL_ClockEntityUpdate (&hwcl_server_state.clock, cl.time);
 }
 
 static void HWCL_SkipUsercmd (void)
@@ -1395,7 +1400,7 @@ static qmodel_t *HWCL_ModelForEntity (const hwcl_entity_state_t *state,
 }
 
 static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
-		qboolean player)
+		qboolean player, qboolean new_update)
 {
 	entity_t *ent = &cl_entities[entitynum];
 	qmodel_t *model;
@@ -1421,13 +1426,8 @@ static void HWCL_CopyEntity (int entitynum, const hwcl_entity_state_t *state,
 	ent->baseline.abslight = state->abslight;
 	ent->baseline.alpha = (byte)state->alpha;
 
-	if (was_on)
-	{
-		VectorCopy (ent->msg_origins[0], ent->msg_origins[1]);
-		VectorCopy (ent->msg_angles[0], ent->msg_angles[1]);
-	}
-	VectorCopy (state->origin, ent->msg_origins[0]);
-	VectorCopy (state->angles, ent->msg_angles[0]);
+	HWCL_ClockPushSample (ent->msg_origins, state->origin, was_on && new_update);
+	HWCL_ClockPushSample (ent->msg_angles, state->angles, was_on && new_update);
 	ent->msgtime = cl.mtime[0];
 	ent->model = model;
 	ent->frame = HWCL_ClampModelFrame (model, state->frame);
@@ -1472,16 +1472,18 @@ void HWCL_ApplyState (void)
 	int i;
 	int highest = 0;
 	int viewentity;
+	qboolean new_update;
 
 	/* Legacy HW kicks are one-shot svc events, so reproduce the original
 	 * client's per-frame recovery rather than leaving a received kick in the
 	 * maintained clientdata punchangle forever. */
 	V_DecayPunchAngle ();
 
-	/* cl.mtime is shifted by HW_SVC_TIME and cl.time is advanced by
-	 * CL_AdvanceTime, exactly as on the Hexen II path.  Re-shifting mtime
-	 * here every rendered frame and pinning cl.time to mtime[0] would hold
-	 * the lerp fraction at 1 and make every entity snap between updates. */
+	/* cl.time is advanced by CL_AdvanceTime only; cl.mtime moves here, once
+	 * per received entity update, and HWCL_LerpPoint reads both without
+	 * writing either back.  See cl_hw_clock.inc.  #308. */
+	new_update = HWCL_ClockLatch (&hwcl_server_state.clock, cl.mtime);
+
 	for (i = 0; i < MAX_CL_STATS; i++)
 		cl.stats[i] = hwcl_server_state.stats[i];
 
@@ -1502,7 +1504,7 @@ void HWCL_ApplyState (void)
 
 		if (state->active)
 		{
-			HWCL_CopyEntity (i, state, i <= HWCL_MAX_CLIENTS);
+			HWCL_CopyEntity (i, state, i <= HWCL_MAX_CLIENTS, new_update);
 			highest = i;
 		}
 		else if (cl_entities[i].baseline.flags & BE_ON)
@@ -1539,7 +1541,11 @@ void HWCL_ApplyState (void)
 	{
 		entity_t *pent = &cl_entities[viewentity];
 
+		/* Both ends: the predicted origin is already this frame's answer,
+		 * and lerping it against the last server update would drag the
+		 * camera back by up to one update interval. */
 		VectorCopy (hwcl_predicted_origin, pent->msg_origins[0]);
+		VectorCopy (hwcl_predicted_origin, pent->msg_origins[1]);
 		VectorCopy (hwcl_predicted_origin, pent->baseline.origin);
 		VectorCopy (hwcl_predicted_velocity, cl.velocity);
 		cl.onground = hwcl_predicted_onground;
@@ -1548,6 +1554,11 @@ void HWCL_ApplyState (void)
 	cl.num_entities = highest + 1;
 	if (cl.num_entities < 1)
 		cl.num_entities = 1;
+}
+
+float HWCL_LerpPoint (void)
+{
+	return HWCL_ClockLerpFrac (cl.time, cl.mtime, cl_nolerp.integer != 0);
 }
 
 static void HWCL_ParseInventoryUpdate (void)
@@ -1733,9 +1744,10 @@ static void HWCL_ParseServerMessage (void)
 			HWCL_ParseServerData ();
 			break;
 		case HW_SVC_TIME:
-			hwcl_server_state.server_time = MSG_ReadFloat ();
-			cl.mtime[1] = cl.mtime[0];
-			cl.mtime[0] = hwcl_server_state.server_time;
+			/* A resync of the Siege timer, not of the clock: moving
+			 * cl.mtime here is what froze cl.time at T+0.1.  #308. */
+			HWCL_ClockServerTime (&hwcl_server_state.clock,
+					MSG_ReadFloat (), cl.time);
 			break;
 		case HW_SVC_SETANGLE:
 			hwcl_server_state.viewangles[0] = MSG_ReadAngle ();
