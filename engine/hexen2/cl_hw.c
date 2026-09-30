@@ -307,6 +307,9 @@ static qboolean hwcl_players_seen[HWCL_MAX_CLIENTS];
 extern qmodel_t *player_models[MAX_PLAYER_CLASS];
 
 static void HWCL_SetPlayerClass (int slot, int playerclass);
+/* cl_hw_tent_fx.inc, included further down */
+static void HWCL_ClearTempEntities (void);
+static void HWCL_PrecacheTEntSounds (void);
 
 static void HWCL_ResetPresentation (void)
 {
@@ -468,6 +471,7 @@ static void HWCL_LoadSounds (void)
 	}
 	S_EndPrecaching ();
 	CL_PrecacheTEntSounds ();
+	HWCL_PrecacheTEntSounds ();
 }
 
 static void HWCL_FinishSignon (void)
@@ -616,6 +620,7 @@ static void HWCL_ParseServerData (void)
 	 * rather than reading freed memory. */
 	Host_ClearStrings ();
 	HWCL_ResetPresentation ();
+	HWCL_ClearTempEntities ();
 	cls.signon = 0;
 	memset (hwcl_model_names, 0, sizeof(hwcl_model_names));
 	memset (hwcl_sound_names, 0, sizeof(hwcl_sound_names));
@@ -1091,6 +1096,34 @@ static void HWCL_ParseRainEffect (void)
 }
 
 #include "cl_hw_projectiles.inc"
+
+/* The original HexenWorld client's FindState, for the temp entities that
+ * name an entity: where is entity n in the latest packet?  Players are
+ * 1..HWCL_MAX_CLIENTS, and the local one is wherever prediction put it, as
+ * FindState returned cl.simorg.  One difference: FindState answered for any
+ * player slot, active or not; an empty slot has no position worth
+ * answering with, so it is "not found" here.  The caller range-checks n. */
+static qboolean HWCL_EntityStateOrigin (int ent, vec3_t origin)
+{
+	const hwcl_entity_state_t *state;
+
+	if (ent <= HWCL_MAX_CLIENTS)
+	{
+		if (ent == hwcl_playernum + 1 && hwcl_predicted_valid)
+		{
+			VectorCopy (hwcl_predicted_origin, origin);
+			return true;
+		}
+		state = &hwcl_server_state.players[ent - 1];
+	}
+	else
+		state = &hwcl_server_state.entities[ent];
+	if (!state->active)
+		return false;
+	VectorCopy (state->origin, origin);
+	return true;
+}
+
 #include "cl_hw_tent.inc"
 
 static qmodel_t *HWCL_PrecacheModelNamed (const char *name)
@@ -2362,6 +2395,7 @@ void HWCL_Disconnect (void)
 	static const byte drop[] = {HW_CLC_STRINGCMD, 'd', 'r', 'o', 'p', 0};
 
 	HWCL_CancelDownload ();
+	HWCL_ClearTempEntities ();
 	hwcl_protocol = 0;
 	hwcl_servercount = 0;
 	hwcl_entity_sequence = -1;
