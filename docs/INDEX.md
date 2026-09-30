@@ -27,6 +27,7 @@ whether you may edit it freely.
 |---|---|
 | [`MODDING_TICKRATE.md`](MODDING_TICKRATE.md) | `sv_physfps`, `frametime`, and how to write think chains that survive a tick-rate change. What a mod author is handed when their entity lags. |
 | [`MODELPIMP.md`](MODELPIMP.md) | The `misc_modelpimp` reach contract — additive only, snapshot/restore per map |
+| [`ENGINE_DETECTION.md`](ENGINE_DETECTION.md) | The read-only `hexenwail` cvar a HexenC mod uses to detect this engine and its version. Name, encoding and monotonicity are promised. |
 | [`MODS_CORPUS.md`](MODS_CORPUS.md) | The mod corpus behind the Mods menu. **Cited by path from `engine/h2shared/quakefs.c`** — if you change the probe order here, change it there too. |
 | [`GAMECODE.md`](GAMECODE.md) | Reference: what `.#gamecode` produces, search-path precedence, what ships |
 | [`WEBGL_RENDERER.md`](WEBGL_RENDERER.md) | What the GLES3 / WebGL2 tier does and does not compile, and how to diagnose it |

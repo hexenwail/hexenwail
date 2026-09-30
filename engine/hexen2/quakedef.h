@@ -27,6 +27,40 @@
 
 /* Hexenwail fork — based on Hammer of Thyrion 1.5.10, Hexen II engine 1.29 */
 #define	HW_BASE_VERSION		"0.8.0-beta.r31"
+
+/* Numeric form of HW_BASE_VERSION, for the read-only `hexenwail' cvar that
+ * lets a HexenC mod ask which engine it is running under (issue #279).
+ *
+ * A mod cannot read a string cvar usefully -- builtin #45 cvar() returns a
+ * float -- and it cannot use checkextension() portably either, because that
+ * builtin is #130 here and #99 in DP/FTE (see PF_checkextension).  cvar() is
+ * #45 in every Hexen II engine including FTE's Hexen II support, so a number
+ * is the only probe that compiles and runs the same everywhere:
+ *
+ *	float(string s) cvar = #45;
+ *	if (cvar("hexenwail") >= 80031) { ... }
+ *
+ * It returns 0 on every engine that is not this one, because an unknown cvar
+ * reads as 0 -- that is the whole detection mechanism, so the name must never
+ * be reused for anything else.
+ *
+ * MAJOR*1000000 + MINOR*10000 + PATCH*100 + REV, so it increases across every
+ * component and a plain >= works: 0.8.0-beta.r31 is 80031, 0.9.0-beta.r1 is
+ * 90001, 1.0.0 is 1000000.  Beta/alpha phase is deliberately not encoded --
+ * it would have to sort somewhere, and no mod should branch on it.
+ *
+ * These four MUST track HW_BASE_VERSION.  The version-bump skill edits the
+ * string, and a bump that forgets these numbers is the obvious failure mode,
+ * so engine/tests/version_cvar_test.c parses the string out of this header and
+ * fails the build if they disagree.  Update both, or the gate stops you. */
+#define	HW_VERSION_MAJOR	0
+#define	HW_VERSION_MINOR	8
+#define	HW_VERSION_PATCH	0
+#define	HW_VERSION_REV		31
+#define	HW_VERSION_NUM		(HW_VERSION_MAJOR * 1000000 +	\
+				 HW_VERSION_MINOR * 10000 +	\
+				 HW_VERSION_PATCH * 100 +	\
+				 HW_VERSION_REV)
 #ifdef HW_GIT_VERSION
 #define	HW_VERSION		HW_GIT_VERSION
 #else

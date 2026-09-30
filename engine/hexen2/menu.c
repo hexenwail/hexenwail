@@ -4329,6 +4329,7 @@ enum
 	GAME_CHASE,
 	GAME_VIEWBOB,
 	GAME_VIEWROLL,
+	GAME_GUNKICK,
 	GAME_ANIMSMOOTH,
 	GAME_LERPVIEWMDL,
 	GAME_UIPREVIEW,
@@ -4354,6 +4355,7 @@ static const char *game_labels[GAME_ITEMS] = {
 	"Chase Mode    :",	/* GAME_CHASE */
 	"View Bob      :",	/* GAME_VIEWBOB */
 	"View Roll     :",	/* GAME_VIEWROLL */
+	"Weapon Kick   :",	/* GAME_GUNKICK */
 	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
 	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
 	"Live Preview  :",	/* GAME_UIPREVIEW */
@@ -4475,6 +4477,17 @@ static void M_Game_AdjustSliders (int dir)
 		if (f < 0)	f = 0;
 		else if (f > 5)	f = 5;
 		Cvar_SetValue ("cl_rollangle", f);
+		break;
+	case GAME_GUNKICK:
+		/* 0 off, 1 vanilla, 2 blended.  Rotates rather than clamping so
+		 * one key reaches every state; Off is the accessibility setting
+		 * this row exists for (issue #280) and must be reachable in one
+		 * press from the default, which rotation gives in either
+		 * direction. */
+		f = Cvar_VariableValue("v_gunkick") + dir;
+		if (f < 0)	f = 2;
+		else if (f > 2)	f = 0;
+		Cvar_SetValue ("v_gunkick", f);
 		break;
 	case GAME_ANIMSMOOTH:
 		Cvar_SetValue ("r_lerpmodels", !Cvar_VariableValue("r_lerpmodels"));
@@ -4649,6 +4662,19 @@ static void M_Game_Draw (void)
 		M_Print (76, 92 + 8*GAME_VIEWROLL, game_labels[GAME_VIEWROLL]);
 		r = Cvar_VariableValue("cl_rollangle") / 5.0;
 		M_DrawSliderValue (220, 92 + 8*GAME_VIEWROLL, r, "%.0f%%", Cvar_VariableValue("cl_rollangle") * 20);
+	}
+
+	if (!M_Game_IsSkip(GAME_GUNKICK))
+	{
+		int		kick = (int)Cvar_VariableValue("v_gunkick");
+		const char	*name;
+
+		if (kick <= 0)		name = "off";
+		else if (kick == 1)	name = "vanilla";
+		else			name = "smooth";
+
+		M_Print (76, 92 + 8*GAME_GUNKICK, game_labels[GAME_GUNKICK]);
+		M_Print (220, 92 + 8*GAME_GUNKICK, name);
 	}
 
 	if (!M_Game_IsSkip(GAME_ANIMSMOOTH))

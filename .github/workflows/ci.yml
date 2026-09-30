@@ -268,6 +268,14 @@ jobs:
             engine/tests/sv_checkbottom_test.c
           ./sv_checkbottom_test
 
+      - name: Unit test hexenwail version cvar
+        run: |
+          set -euo pipefail
+          nix develop --command cc -Wall -Wextra -Werror \
+            -o version_cvar_test \
+            engine/tests/version_cvar_test.c
+          ./version_cvar_test
+
   # The Rust gate and the Windows/tools/gamecode loop share nothing with the
   # steps in `build` -- check-rust.sh builds its own tree under mktemp and
   # every target in the loop is its own derivation; neither reads ./result --
