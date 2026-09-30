@@ -824,7 +824,7 @@ static void test_effects (void)
 			"firewall_without_world: no Mod_PointInLeaf on a NULL world", -1);
 	expect (hwcl_tent_allocs == allocs,
 			"firewall_without_world: nothing spawned without a world", -1);
-	/* and every other type, sunstaff and chain included */
+	/* and every other fixed-size type */
 	for (i = 0; i < sizeof(spec) / sizeof(spec[0]); i++)
 	{
 		if (spec[i].type >= HWTE_COUNT || !hwte_fixed_size[spec[i].type])
@@ -834,6 +834,25 @@ static void test_effects (void)
 	}
 	expect (null_leaf_calls == 0 && hwcl_tent_allocs == allocs,
 			"no_world_any_type: nothing traced or spawned", -1);
+
+	/* no_world_variable_types: the two variable-size types have their own
+	 * world guard in the parser, which the loop above never reaches */
+	stream_calls = 0;
+	begin (HWTE_SUNSTAFF_CHEAP);
+	put_short (5);
+	put_byte (2);
+	for (n = 0; n < 4; n++)
+		put_coord3 (10 + n, 20, 30);
+	run_exact (HWTE_SUNSTAFF_CHEAP, "no_world_variable_types: sunstaff consumed");
+	begin (HWTE_CHAINLIGHTNING);
+	put_short (5);
+	put_coord3 (1, 2, 3);
+	put_coord3 (4, 5, 6);
+	put_coord3 (7, 8, 9);
+	put_coord3 (0, 0, 0);
+	run_exact (HWTE_CHAINLIGHTNING, "no_world_variable_types: chain consumed");
+	expect (stream_calls == 0 && hwcl_tent_allocs == allocs,
+			"no_world_variable_types: no stream or explosion without a world", -1);
 
 	/* 21. attached_stream_uses_resolved_origin: an ice storm's attached
 	 * streams take their offset from the origin just looked up, not from

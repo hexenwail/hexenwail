@@ -90,7 +90,11 @@ struct hwcl_explosion_s
 	qmodel_t	*model;		/* NULL: slot is free */
 	void		(*frameFunc) (hwcl_explosion_t *ex);
 	float		data;
-	qboolean	drawn;		/* for the developer trace only */
+	/* Set on first link.  Until then the update clears the slot's entity
+	 * before filling it, which is what stops alias lerp state carrying
+	 * over from the slot's previous tenant; it also feeds the "drew N
+	 * new" developer trace. */
+	qboolean	drawn;
 };
 
 static hwcl_explosion_t	hwcl_explosions[HWCL_MAX_EXPLOSIONS];
@@ -451,7 +455,10 @@ static void HWCL_TEntDirection (float angle, float pitch, float speed,
 
 /* Mod_PointInLeaf Sys_Errors on a NULL model, and cl.worldmodel is NULL
  * from svc_serverdata until the model list loads -- a window a temp entity
- * can arrive in.  No world reads as solid: nothing moves into it. */
+ * can arrive in.  Defence in depth, not the fix: today neither caller can
+ * get here without a world (HWCL_ParseTempEntity drops every effect when
+ * there is none, and HWCL_UpdateTempEntities returns first).  This keeps a
+ * future caller from reaching the Sys_Error.  No world reads as solid. */
 static qboolean HWCL_TEntEmpty (vec3_t p)
 {
 	if (!cl.worldmodel)
