@@ -861,6 +861,11 @@ static void CL_RelinkEntities (void)
 	qboolean	nodlight;
 
 // determine partial update time
+#if defined(H2W_INTEGRATED)
+	if (HWCL_Active ())
+		frac = HWCL_LerpPoint ();
+	else
+#endif
 	frac = CL_LerpPoint ();
 
 	cl_numvisedicts = 0;

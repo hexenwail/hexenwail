@@ -27,6 +27,9 @@ void HWCL_LinkPackedProjectiles (void);
 /* HexenWorld temp-entity explosions: advance them and link their entities.
  * After CL_RelinkEntities, while HWCL_Active. */
 void HWCL_UpdateTempEntities (void);
+/* CL_LerpPoint for a HexenWorld session: reads cl.time and cl.mtime, and
+ * never writes the clock back.  GitHub #308. */
+float HWCL_LerpPoint (void);
 void HWCL_PredictUsercmd (const usercmd_t *cmd, int buttons, int impulse);
 qboolean HWCL_Active (void);
 qboolean HWCL_ViewModelVisible (void);

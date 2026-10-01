@@ -23,6 +23,11 @@
 #      Hexen II qsocket loop set cl.last_received_message.
 #   3. With the server SIGSTOPped for ~3 s the net icon IS drawn (control:
 #      the icon still means what it says), and after SIGCONT it clears.
+#   4. The client clock runs at wall-clock rate: between two r_dlightinfo
+#      reports on the live session, cl.time moves on by the wall time that
+#      passed between them (stamped as each reaches the console log), within
+#      1 s.  Before the #308 fix both read cl.time=0.00, so nothing timed off
+#      cl.time ever expired.
 #
 # Requires what tools/headless-drive.sh needs (Xvfb, xdotool, ImageMagick 7,
 # bubblewrap), plus util-linux script and python3, and a retail install:
@@ -98,12 +103,12 @@ SHOTS="$WORK/shots"         # headless-drive owns (and wipes) this one
 FIFO="$WORK/console"
 SLOG="$WORK/server.log"
 STEPS="$WORK/steps.txt"
-SRV_PID=""; HWSV_PID=""; DRIVE_PID=""
+SRV_PID=""; HWSV_PID=""; DRIVE_PID=""; STAMP_PID=""
 FAILURES=0
 
 cleanup() {
 	[ -n "$HWSV_PID" ] && kill -CONT "$HWSV_PID" 2>/dev/null
-	for pid in "$DRIVE_PID" "$SRV_PID" "$HWSV_PID"; do
+	for pid in "$STAMP_PID" "$DRIVE_PID" "$SRV_PID" "$HWSV_PID"; do
 		[ -n "$pid" ] && kill "$pid" 2>/dev/null
 	done
 	exec 3>&-
@@ -164,7 +169,11 @@ sleep 3
 	echo "cmd connect hw://127.0.0.1:$PORT"
 	# The spawn window is sampled by the rook grabber below, not by shots
 	# here: see there for why.
-	echo "sleep 16"
+	echo "sleep 10"
+	echo "cmd r_dlightinfo"
+	echo "sleep 5"
+	echo "cmd r_dlightinfo"
+	echo "sleep 1"
 	echo "shot 01-connected"
 	# The watcher below stops the server as soon as 01 exists.
 	echo "sleep 3"
@@ -177,6 +186,27 @@ sleep 3
 ENGINE="$CLIENT" STEPS="$STEPS" "$ROOT/tools/headless-drive.sh" script \
 	"$SHOTS" "$BASEDIR" > "$WORK/drive.log" 2>&1 &
 DRIVE_PID=$!
+LIVE="$SHOTS/work/home/.local/share/hexen2/qconsole.log"   # copied to $SHOTS only at exit
+
+# --- clock stamper (#308) --------------------------------------------------------
+# The wall time each r_dlightinfo report reaches the live log.  The step
+# file's sleeps are no reference: a console "cmd" spends several seconds
+# typing, so the real gap between the two reports is ~11 s, not 5.
+STAMPS="$WORK/clock-stamps.txt"
+: > "$STAMPS"
+(
+	seen=0
+	while [ "$seen" -lt 2 ]; do
+		n=$(grep -c 'r_dlightinfo: cl\.time=' "$LIVE" 2>/dev/null) || n=0
+		if [ "$n" -gt "$seen" ]; then
+			t=$(sed -n 's/^--- r_dlightinfo: cl\.time=\([0-9.]*\) ---.*/\1/p' "$LIVE" | tail -n1)
+			echo "$(date +%s.%N) $t" >> "$STAMPS"
+			seen=$n
+		fi
+		sleep 0.1
+	done
+) &
+STAMP_PID=$!
 
 wait_file() {
 	local f="$1" n=0
@@ -195,7 +225,6 @@ wait_file() {
 # at that rate the rook landed in one frame per run and was missed one run
 # in two.  Grabbing only its 60x40 box is fast enough for several frames
 # inside the window, whatever the load time.
-LIVE="$SHOTS/work/home/.local/share/hexen2/qconsole.log"   # copied to $SHOTS only at exit
 ROOKDIR="$WORK/rook"
 mkdir -p "$ROOKDIR"
 DISP=""
@@ -282,6 +311,20 @@ if above "$s" "$ABSENT"; then
 	fail "net icon still drawn after the server resumed ($s)"
 else
 	say "ok: net icon cleared once the server resumed ($s)"
+fi
+
+# clock-stamps.txt: "<wall seconds> <cl.time>", one line per report.
+kill "$STAMP_PID" 2>/dev/null; STAMP_PID=""
+# shellcheck disable=SC2046
+set -- $(head -n2 "$STAMPS")
+if [ $# -lt 4 ]; then
+	fail "expected two stamped r_dlightinfo reports, got: $(tr '\n' ' ' < "$STAMPS")"
+elif awk -v w1="$1" -v c1="$2" -v w2="$3" -v c2="$4" \
+		'BEGIN { dw = w2 - w1; dc = c2 - c1; d = dc - dw
+			exit !(dc >= 4 && d <= 1 && d >= -1) }'; then
+	say "ok: client clock ran $2 -> $4 while the wall clock ran $(awk -v a="$1" -v b="$3" 'BEGIN { printf "%.2f", b - a }') s"
+else
+	fail "client clock read $2 then $4 over $(awk -v a="$1" -v b="$3" 'BEGIN { printf "%.2f", b - a }') s of wall time: cl.time is not running at wall rate -- GitHub #308"
 fi
 
 [ -n "$KEEP" ] && say "frames and scores in $WORK"
