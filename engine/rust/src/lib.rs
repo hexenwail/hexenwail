@@ -25,7 +25,7 @@ pub mod mathlib;
 // in a harness build that leaves the sizebuf functions to the C original.  The
 // layout lives in one place; which half of sizebuf.rs is compiled is decided
 // there.
-#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd", feature = "net_udp_hw", feature = "net_chan"))]
+#[cfg(any(feature = "sizebuf", feature = "msg_io", feature = "cmd", feature = "net_udp_hw", feature = "net_chan", feature = "net_loop_h2", feature = "net_bsd_h2"))]
 pub mod sizebuf;
 
 // cvar is the Phase 6 engine-state port, and info_str reads
@@ -129,3 +129,10 @@ pub mod net_udp_hw;
 // transport it is built into glhexen2 and hwsv only.
 #[cfg(feature = "net_chan")]
 pub mod net_chan;
+
+#[cfg(any(feature = "net_loop_h2", feature = "net_bsd_h2", feature = "net_udp_h2"))]
+pub mod net_loop_h2;
+#[cfg(feature = "net_bsd_h2")]
+pub mod net_bsd_h2;
+#[cfg(feature = "net_udp_h2")]
+pub mod net_udp_h2;

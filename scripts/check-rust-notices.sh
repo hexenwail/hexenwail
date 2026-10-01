@@ -83,6 +83,9 @@ derived_map() {
 	engine/rust/src/link_ops.rs           engine/h2shared/link_ops.c
 	engine/rust/src/msg_io.rs             engine/h2shared/msg_io.c
 	engine/rust/src/net_chan.rs              engine/hexenworld/shared/net_chan.c
+	engine/rust/src/net_bsd_h2.rs            engine/hexen2/net_bsd.c
+	engine/rust/src/net_loop_h2.rs           engine/hexen2/net_loop.c
+	engine/rust/src/net_udp_h2.rs            engine/hexen2/net_udp.c
 	engine/rust/src/net_udp_hw.rs        engine/hexenworld/shared/net_udp.c
 	engine/rust/src/quakefs.rs             engine/h2shared/quakefs.c
 	engine/rust/src/sizebuf.rs            engine/h2shared/sizebuf.c

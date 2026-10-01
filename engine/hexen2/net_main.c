@@ -806,6 +806,13 @@ void NET_Init (void)
 	int			i;
 	qsocket_t	*s;
 
+#if defined(__EMSCRIPTEN__)
+	/* Rust's wasm32 staticlib cannot export data globals. C owns only the
+	 * table storage; Rust fills every entry before the first driver walk. */
+	extern void NetH2_InitDriverTables (void);
+	NetH2_InitDriverTables ();
+#endif
+
 	i = COM_CheckParm ("-port");
 	if (!i)
 		i = COM_CheckParm ("-udpport");
