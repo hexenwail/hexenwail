@@ -133,7 +133,7 @@ jobs:
       # A single-file path uploads the bare file name, so the pkg/ prefix
       # never reaches the artifact or publish's cp paths.
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-bundle
           path: pkg/hexenwail-${{ github.ref_name }}-linux-x86_64.zip
@@ -141,7 +141,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-bundle
           path: pkg/hexenwail-${{ github.ref_name }}-windows-x86_64.zip
@@ -276,7 +276,7 @@ jobs:
           } > release_notes.md
 
       - name: Upload release notes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: release_notes.md
@@ -290,7 +290,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
 
       # scripts/get_demo.sh verifies Raven's demo download against a known
       # SHA-256, but our own binaries shipped with nothing to check them

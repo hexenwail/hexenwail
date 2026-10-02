@@ -62,7 +62,7 @@ jobs:
       # new cache entry per run, and this workflow runs weekly plus the odd PR
       # touching flake.lock, so it is nowhere near the 10 GB budget.
       - name: Restore NVD feed cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/vulnix
           key: vulnix-nvd-${{ github.run_id }}
@@ -121,7 +121,7 @@ jobs:
 
       - name: Upload report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vulnix-report
           path: |

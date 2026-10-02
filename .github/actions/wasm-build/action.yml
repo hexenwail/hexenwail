@@ -52,7 +52,7 @@ runs:
     # SDL3 port lands -- that is the expensive half.
     - name: Cache emsdk
       id: cache-emsdk
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: emsdk
         key: emsdk-${{ runner.os }}-${{ inputs.emsdk-version }}

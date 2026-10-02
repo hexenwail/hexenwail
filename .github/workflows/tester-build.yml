@@ -175,7 +175,7 @@ jobs:
           done
 
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hexenwail-test-linux-${{ env.SHORT_SHA }}
           path: pkg/linux/
@@ -186,7 +186,7 @@ jobs:
           retention-days: 90
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hexenwail-test-windows-${{ env.SHORT_SHA }}
           path: pkg/windows/
