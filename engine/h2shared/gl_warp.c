@@ -301,6 +301,43 @@ float R_WaterWarpAmount (void)
 
 /*
 =============
+R_WaterRipple
+
+Z offset of the liquid surface at (x, y): always in [-depth, 0], never above
+the rest plane.  A depth of zero or less is a flat surface.  GitHub #312.
+
+A two-sided ripple lifted the rim wherever the liquid meets a sloped floor:
+a rim vertex pushed up leaves the slope and the edge floats, where against a
+vertical wall it only slides along the wall.  Pushed down, the rim sinks into
+the slope and the floor hides it, and a wall still hides it too because the
+wall carries on below the surface.
+
+The trough sits exactly where the old two-sided wave's trough did, so the
+surface never dips lower than it already did and no shallow puddle shows its
+floor through it.  The price is half the old peak-to-peak height.
+
+The mirror case gets more common instead: a liquid edge with solid ABOVE it,
+such as the lip of a waterfall face or a sloped ceiling, now pulls away from
+that solid by depth/2 on average, where before it did only in the troughs.
+At the defaults that is half a unit; it only shows at extreme gl_waterripple.
+Brush entities pass model-space verts, so on a pitched or rolled model "down"
+is model -Z, not world down.
+
+Both sines key on the in-plane axes: on a horizontal liquid surface z is
+constant, so keying either on it collapses the ripple to 1-D stripes that
+flatten whenever that constant term crosses zero.  The offset depends only
+on (x, y), so two faces sharing an edge move it together and stay sealed.
+=============
+*/
+static float R_WaterRipple (float x, float y, float wtime, float depth)
+{
+	if (!(depth > 0))
+		return 0;
+	return -depth * 0.5f * (1.0f + sin(x*0.05 + wtime) * sin(y*0.05 + wtime));
+}
+
+/*
+=============
 EmitWaterPolys
 
 Does a water warp on the pre-fragmented glpoly_t chain
@@ -374,11 +411,7 @@ void EmitWaterPolys (msurface_t *fa)
 
 				nz = v[2];
 				if (ripple > 0)
-					/* Both factors must key on the in-plane axes: on a
-					 * horizontal liquid surface v[2] is constant, so keying
-					 * one of them on it collapses the ripple to 1-D stripes
-					 * that flatten whenever that constant term crosses zero. */
-					nz += ripple * warpamt * sin(v[0]*0.05 + wtime) * sin(v[1]*0.05 + wtime);
+					nz += R_WaterRipple (v[0], v[1], wtime, ripple * warpamt);
 
 				if (pixelwarp)
 				{	/* raw coords; the shader warps them */
