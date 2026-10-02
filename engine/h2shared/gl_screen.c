@@ -1920,6 +1920,23 @@ int SCR_ModalMessage (const char *text, float timeout)
 	if (cls.state == ca_dedicated)
 		return true;
 #endif	/* H2W */
+
+	/* The loop below waits for a Y/N keypress by blocking, so it only works
+	 * where the target can deliver one while the engine is inside a frame.  A
+	 * browser cannot: the loop spins inside a single wasm frame, control never
+	 * returns to the JavaScript event loop, and the keypress is therefore never
+	 * delivered.  No Asyncify is enabled, so it cannot yield even in principle,
+	 * and every menu caller passes timeout == 0.0, which leaves deadline at
+	 * 0.0, so there is no deadline to break out either.
+	 *
+	 * Decline rather than hang, and say so, because a silent no is
+	 * indistinguishable from a real answer.  The menus do not come through
+	 * here at all: they draw their confirmations as a menu state and handle the
+	 * answer themselves, which works on every target. */
+#ifdef __EMSCRIPTEN__
+	Con_Printf ("SCR_ModalMessage: cannot wait for a keypress on this target; answering no\n");
+	return false;
+#else
 	scr_notifystring = text;
 
 // draw a fresh screen
@@ -1952,6 +1969,7 @@ int SCR_ModalMessage (const char *text, float timeout)
 	SCR_UpdateScreen ();
 
 	return key_lastpress == 'y';
+#endif	/* __EMSCRIPTEN__ */
 }
 
 //=============================================================================
