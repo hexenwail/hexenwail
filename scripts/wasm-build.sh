@@ -54,4 +54,9 @@ emcmake cmake \
 	-DUSE_ALSA=OFF \
 	"$SOURCE_DIR"
 
-emmake make -j"$(nproc)"
+# getconf, not nproc: nproc is coreutils and absent on macOS and BSD.  There it
+# expands to nothing and leaves make a bare -j, which GNU make reads as *no job
+# limit* rather than as one job -- so the build forks a compiler per source file
+# instead of failing.  getconf is POSIX and answers on both; the fallback exists
+# so that a getconf failure cannot empty the argument the same way nproc does.
+emmake make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"

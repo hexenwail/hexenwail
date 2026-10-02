@@ -30,7 +30,7 @@ rust_gate_engine_build() {
 	root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 	if ! cmake -B "$work/build" -S "$root/engine" \
 			-DBUILD_DEDICATED=ON -DBUILD_HEXENWORLD=ON >"$work/build.log" 2>&1 ||
-		! cmake --build "$work/build" -j"$(nproc)" >>"$work/build.log" 2>&1; then
+		! cmake --build "$work/build" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >>"$work/build.log" 2>&1; then
 		echo "error: engine build failed; see $work/build.log" >&2
 		tail -30 "$work/build.log" >&2
 		return 1
@@ -50,7 +50,7 @@ rust_gate_engine_build() {
 #     -DUSE_CRC_RS=OFF -DUSE_LINK_OPS_RS=OFF -DUSE_MSG_IO_RS=OFF \
 #     -DUSE_INFO_STR_RS=OFF -DUSE_STRLCPY_RS=OFF -DUSE_STRLCAT_RS=OFF \
 #     -DUSE_HUFFMAN_RS=OFF -DUSE_WAD_RS=OFF
-#   cmake --build /tmp/c-ref/build -j"$(nproc)" --target glhexen2 h2ded
+#   cmake --build /tmp/c-ref/build -j"$(getconf _NPROCESSORS_ONLN)" --target glhexen2 h2ded
 #   OFF_BIN=/tmp/c-ref/build/bin/glhexen2 ./scripts/check-rust-hashindex.sh --engine
 rust_gate_reference_bin() {
 	if [ -z "${OFF_BIN:-}" ] || [ ! -x "$OFF_BIN" ]; then

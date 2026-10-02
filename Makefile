@@ -37,6 +37,9 @@ nix-win64:
 	nix build .#win64 --print-build-logs
 
 # CMake build (Linux)
+#
+# getconf, not nproc: nproc is coreutils and absent on macOS and BSD, where it
+# expands to nothing and leaves make a bare -j (= no job limit at all).
 build:
 	mkdir -p engine/build
 	cd engine/build && cmake .. \
@@ -45,7 +48,7 @@ build:
 		-DUSE_CODEC_VORBIS=ON \
 		-DUSE_CODEC_FLAC=ON \
 		-DUSE_ALSA=ON
-	cd engine/build && make -j$$(nproc)
+	cd engine/build && make -j$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 	@echo ""
 	@echo "Build complete: engine/build/bin/glhexen2"
 
