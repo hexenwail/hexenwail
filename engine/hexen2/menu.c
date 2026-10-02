@@ -1562,6 +1562,13 @@ static void M_Load_Draw (void)
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 8, MAX_SAVEGAMES); if (h >= 0) load_cursor = h; }
 // line cursor
 	M_DrawCharacter (8, 60 + load_cursor*8, 12+((int)(realtime*4)&1));
+
+	/* The delete binding is otherwise undiscoverable: nothing else on this
+	 * screen mentions it, so a save could not be removed by anyone who had not
+	 * been told.  Backspace is named because a keyboard with no forward-delete
+	 * key -- Apple's -- has no other way to reach it.  One blank row below the
+	 * list, which ends at 60 + 8*MAX_SAVEGAMES. */
+	M_Print (16, 60 + 8*MAX_SAVEGAMES + 8, "Del or Backspace erases this save");
 }
 
 
@@ -1577,6 +1584,13 @@ static void M_Save_Draw (void)
 	{ int h = M_MouseToMenuItem(menu_mouse_y, 60, 8, MAX_SAVEGAMES); if (h >= 0) load_cursor = h; }
 // line cursor
 	M_DrawCharacter (8, 60 + load_cursor*8, 12+((int)(realtime*4)&1));
+
+	/* The delete binding is otherwise undiscoverable: nothing else on this
+	 * screen mentions it, so a save could not be removed by anyone who had not
+	 * been told.  Backspace is named because a keyboard with no forward-delete
+	 * key -- Apple's -- has no other way to reach it.  One blank row below the
+	 * list, which ends at 60 + 8*MAX_SAVEGAMES. */
+	M_Print (16, 60 + 8*MAX_SAVEGAMES + 8, "Del or Backspace erases this save");
 }
 
 
@@ -1589,6 +1603,7 @@ static void M_Load_Key (int k)
 		break;
 
 	case K_DEL:
+	case K_BACKSPACE:	/* Apple keyboards have no forward-delete key */
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
@@ -1640,6 +1655,7 @@ static void M_Save_Key (int k)
 		break;
 
 	case K_DEL:
+	case K_BACKSPACE:	/* Apple keyboards have no forward-delete key */
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
@@ -1788,6 +1804,7 @@ static void M_MLoad_Key (int k)
 		break;
 
 	case K_DEL:
+	case K_BACKSPACE:	/* Apple keyboards have no forward-delete key */
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
@@ -1843,6 +1860,7 @@ static void M_MSave_Key (int k)
 		break;
 
 	case K_DEL:
+	case K_BACKSPACE:	/* Apple keyboards have no forward-delete key */
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
