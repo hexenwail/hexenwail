@@ -26,7 +26,7 @@
 #define STRINGIFY(x) __STRINGIFY(x)
 
 /* Hexenwail fork — based on Hammer of Thyrion 1.5.10, Hexen II engine 1.29 */
-#define	HW_BASE_VERSION		"0.8.0-beta.r31"
+#define	HW_BASE_VERSION		"0.8.0-beta.r32"
 
 /* Numeric form of HW_BASE_VERSION, for the read-only `hexenwail' cvar that
  * lets a HexenC mod ask which engine it is running under (issue #279).
@@ -56,7 +56,7 @@
 #define	HW_VERSION_MAJOR	0
 #define	HW_VERSION_MINOR	8
 #define	HW_VERSION_PATCH	0
-#define	HW_VERSION_REV		31
+#define	HW_VERSION_REV		32
 #define	HW_VERSION_NUM		(HW_VERSION_MAJOR * 1000000 +	\
 				 HW_VERSION_MINOR * 10000 +	\
 				 HW_VERSION_PATCH * 100 +	\
