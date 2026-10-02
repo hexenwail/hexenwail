@@ -1389,6 +1389,15 @@ void Con_NotifyBox (const char *text)
 	key_count = -2;		// wait for a key down and up
 	Key_SetDest (key_console);
 
+	/* A browser cannot deliver a keypress while the engine is inside a frame,
+	 * so this loop would spin forever -- there is no timeout to break out of
+	 * it either.  See SCR_ModalMessage in screen.h.  Nothing calls this today,
+	 * but it is declared in console.h, and the next caller should not have to
+	 * discover that the hard way. */
+#ifdef __EMSCRIPTEN__
+	(void)t1; (void)t2;
+	Con_Printf ("Con_NotifyBox: cannot wait for a keypress on this target\n");
+#else
 	do
 	{
 		t1 = Sys_DoubleTime ();
@@ -1397,6 +1406,7 @@ void Con_NotifyBox (const char *text)
 		t2 = Sys_DoubleTime ();
 		realtime += t2-t1;	// make the cursor blink
 	} while (key_count < 0);
+#endif
 
 	Con_Printf ("\n");
 	Key_SetDest (key_game);

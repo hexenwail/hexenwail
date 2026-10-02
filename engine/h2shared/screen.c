@@ -1109,6 +1109,16 @@ int SCR_ModalMessage (const char *text, float timeout)
 	if (cls.state == ca_dedicated)
 		return true;
 #endif	/* H2W */
+
+	/* See the note on this function in screen.h.  Waiting for a keypress by
+	 * blocking cannot work on a target that delivers one only between frames,
+	 * so decline rather than hang, and say so: a silent no is indistinguishable
+	 * from a real answer.  The menus do not come through here: they draw their
+	 * confirmations as a menu state instead. */
+#ifdef __EMSCRIPTEN__
+	Con_Printf ("SCR_ModalMessage: cannot wait for a keypress on this target; answering no\n");
+	return false;
+#else
 	scr_notifystring = text;
 
 // draw a fresh screen
@@ -1141,6 +1151,7 @@ int SCR_ModalMessage (const char *text, float timeout)
 	SCR_UpdateScreen ();
 
 	return key_lastpress == 'y';
+#endif	/* __EMSCRIPTEN__ */
 }
 
 //=============================================================================

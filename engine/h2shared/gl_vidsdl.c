@@ -2626,6 +2626,11 @@ static void VID_Test_f (void)
 	    modelist[vid_modenum].height == old_height)
 		return;
 
+	/* The only caller of SCR_ModalMessage outside the menus.  Where the target
+	 * cannot deliver a keypress mid-frame this answers no at once rather than
+	 * waiting out the five seconds, so the mode is reverted and the prompt is
+	 * never drawn -- the safe outcome, and the only one reachable there, since
+	 * VID_Restart_f cannot change a mode in the first place. */
 	if (SCR_ModalMessage ("Keep this video mode?\n(y/n -- reverting in 5 seconds)\n", 5.0f))
 		return;
 

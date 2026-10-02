@@ -160,6 +160,38 @@ static void M_ConfigureNetSubsystem(void);
 
 static void M_Menu_Class_f (void);
 
+/* ---- confirmation -------------------------------------------------------
+ *
+ * A yes/no prompt drawn as a menu state, the way M_Menu_Quit_f draws its own,
+ * rather than through SCR_ModalMessage.  The blocking prompt cannot work where
+ * a keypress is delivered only between frames: the wait spins inside a single
+ * wasm frame, control never returns to the JavaScript event loop, the keypress
+ * is therefore never delivered, and with no timeout it hangs the tab with no
+ * way out.  A menu state has no such problem on any target, so this is not a
+ * platform special case -- the same path runs everywhere.
+ *
+ * The pending work is named by an enum because a menu key handler's
+ * continuation is a few lines of menu code that cannot be resumed
+ * mid-switch.  The setting that continuation needs -- which save slot -- is
+ * captured when the question is asked. */
+typedef enum
+{
+	CONFIRM_NONE = 0,
+	CONFIRM_NEWGAME,	/* Single Player -> New Game */
+	CONFIRM_DELETE_S,	/* Load/Save -> delete s<i> */
+	CONFIRM_DELETE_MS	/* Multiplayer Load/Save -> delete ms<i> */
+} confirm_action_t;
+
+static confirm_action_t	m_confirm_action = CONFIRM_NONE;
+static int		m_confirm_cursor;	/* load_cursor at the time of the ask */
+static const char	*m_confirm_text;	/* the question, borrowed */
+static enum m_state_e	m_confirm_prevstate;	/* where to go on cancel */
+
+static void M_Confirm (confirm_action_t action, const char *question);
+static void M_ConfirmKey (int key);
+static void M_ConfirmDraw (void);
+static void M_ConfirmAction (confirm_action_t action);
+
 const char *ClassNames[MAX_PLAYER_CLASS] =
 {
 	"Paladin",
@@ -1281,16 +1313,12 @@ static void M_SinglePlayer_Key (int key)
 				m_enter_portals = 1;
 		case 3:
 			if (sv.active)
-				if (!SCR_ModalMessage("Are you sure you want to\nstart a new game?\n", 0.0f))
-					break;
-			Key_SetDest (key_game);
-			if (sv.active)
-				Cbuf_AddText ("disconnect\n");
-			Host_RemoveGIPFiles(NULL);
-			Cbuf_AddText ("maxplayers 1\n");
-			Cbuf_AddText ("coop 0\n");
-			Cbuf_AddText ("deathmatch 0\n");
-			M_Menu_Class_f ();
+			{
+				M_Confirm (CONFIRM_NEWGAME,
+					   "Are you sure you want to\nstart a new game?\n");
+				break;
+			}
+			M_ConfirmAction (CONFIRM_NEWGAME);
 			break;
 
 		case 1:
@@ -1319,6 +1347,150 @@ static int		load_cursor;		// 0 < load_cursor < MAX_SAVEGAMES
 static char	m_filenames[MAX_SAVEGAMES][SAVEGAME_COMMENT_LENGTH+1];
 static char	savefile[MAX_OSPATH];
 static int		loadable[MAX_SAVEGAMES];
+
+/*
+==================
+M_Confirm
+
+Ask the player to confirm.  Returns true when the caller should run its action
+now, which on a target that can wait for a keypress means the player said yes.
+Where it cannot, the question goes on screen and this returns false: the caller
+must return, and M_ConfirmAction runs its action if the answer turns out to be
+yes.
+==================
+*/
+static void M_Confirm (confirm_action_t action, const char *question)
+{
+	m_confirm_action = action;
+	m_confirm_cursor = load_cursor;
+	m_confirm_text = question;
+	m_confirm_prevstate = m_state;
+	m_state = m_confirm;
+	m_entersound = true;
+}
+
+/*
+==================
+M_ConfirmKey
+
+The answer keys are the ones the quit prompt takes, K_ENTER included: M_Keydown
+maps a gamepad A press to K_ENTER and B to K_ESCAPE, so a controller-only player
+must be able to answer both ways.  Without K_ENTER they could cancel but never
+confirm -- see uhexen2-4364 on M_Quit_Key, which had exactly that bug.
+==================
+*/
+static void M_ConfirmKey (int key)
+{
+	switch (key)
+	{
+	case 'y':
+	case 'Y':
+	case K_ENTER:
+	{
+		confirm_action_t	action = m_confirm_action;
+
+		m_confirm_action = CONFIRM_NONE;
+		m_state = m_confirm_prevstate;	/* the action may set its own */
+		M_ConfirmAction (action);
+		break;
+	}
+
+	case 'n':
+	case 'N':
+	case K_ESCAPE:
+		m_confirm_action = CONFIRM_NONE;
+		m_state = m_confirm_prevstate;
+		m_entersound = true;
+		break;
+
+	default:
+		break;
+	}
+}
+
+/* Both are wider than any question, so the box starts wide enough for these and
+ * only grows if a question line is longer. */
+#define	CONFIRM_HINT1	"Press y to confirm"
+#define	CONFIRM_HINT2	"Press n to cancel"
+
+/*
+==================
+M_ConfirmDraw
+
+The question and the keys that answer it, in the same box the quit prompt uses.
+Sized from the text, so a longer question gets a taller box rather than a
+clipped one.  M_DrawTextBox counts its width in units of 8 pixels and its
+height in 8-pixel rows, and adds the borders itself.
+==================
+*/
+static void M_ConfirmDraw (void)
+{
+	const char	*p, *start;
+	char		line[80];
+	int		len, maxlen, rows;
+	int		bx, by, bw, bh;
+
+	maxlen = (int)strlen (CONFIRM_HINT1);
+	if ((int)strlen (CONFIRM_HINT2) > maxlen)
+		maxlen = (int)strlen (CONFIRM_HINT2);
+
+	rows = 0;
+	len = 0;
+	for (p = m_confirm_text; ; p++)
+	{
+		if (*p != '\n' && *p != '\0')
+		{
+			len++;
+			continue;
+		}
+		if (len > maxlen)
+			maxlen = len;
+		if (len > 0)
+			rows++;
+		len = 0;
+		if (*p == '\0')
+			break;
+	}
+	rows += 3;			/* a blank row, then the two hint rows */
+
+	/* M_DrawTextBox puts an 8-pixel border either side of `width` units of 8
+	 * pixels, so the box is 16 + width*8 across and 8*lines + 16 tall, not
+	 * width*8 by lines*8.  M_Quit_Draw is the proof: its (0, 0, 38, 23) gives
+	 * 16 + 304 = 320 across, exactly the menu screen.  Sizing the box without
+	 * those borders leaves it 16 pixels off centre while the text stays centred
+	 * on the screen, which reads as text that is not centred in its own box. */
+	bw = 16 + (maxlen + 2) * 8;
+	bh = (rows + 3) * 8;
+	bx = (320 - bw) / 2;
+	by = (200 - bh) / 2;
+	M_DrawTextBox (bx, by, maxlen + 2, rows + 1);
+
+	/* Centred in the box rather than on the screen: the two agree while the box
+	 * is centred, and this stays right if it ever is not. */
+	by += 8;
+	start = m_confirm_text;
+	for (p = m_confirm_text; ; p++)
+	{
+		if (*p != '\n' && *p != '\0')
+			continue;
+		len = (int)(p - start);
+		if (len > 0 && len < (int)sizeof(line))
+		{
+			memcpy (line, start, len);
+			line[len] = 0;
+			M_Print (bx + (bw - len * 8) / 2, by, line);
+			by += 8;
+		}
+		start = p + 1;
+		if (*p == '\0')
+			break;
+	}
+
+	by += 8;
+	M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT1) * 8) / 2, by, CONFIRM_HINT1);
+	by += 8;
+	M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT2) * 8) / 2, by, CONFIRM_HINT2);
+}
 
 static void M_ScanSaves (void)
 {
@@ -1420,11 +1592,8 @@ static void M_Load_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
-			return;
-		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "s%i", load_cursor);
-		Host_DeleteSave (savefile);
-		M_ScanSaves ();
+		M_Confirm (CONFIRM_DELETE_S,
+			   "Are you sure you want to\ndelete this saved game?\n");
 		break;
 
 	case K_ENTER:
@@ -1474,11 +1643,8 @@ static void M_Save_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
-			return;
-		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "s%i", load_cursor);
-		Host_DeleteSave (savefile);
-		M_ScanSaves ();
+		M_Confirm (CONFIRM_DELETE_S,
+			   "Are you sure you want to\ndelete this saved game?\n");
 		break;
 
 	case K_ENTER:
@@ -1571,6 +1737,48 @@ static void M_Menu_MSave_f (void)
 }
 
 
+/*
+==================
+M_ConfirmAction
+
+Run the work a confirmation was asked about.  Called inline by the caller when
+the answer was known immediately, or from M_ConfirmKey when it arrived on a
+later frame.
+==================
+*/
+static void M_ConfirmAction (confirm_action_t action)
+{
+	switch (action)
+	{
+	case CONFIRM_NEWGAME:
+		Key_SetDest (key_game);
+		if (sv.active)
+			Cbuf_AddText ("disconnect\n");
+		Host_RemoveGIPFiles(NULL);
+		Cbuf_AddText ("maxplayers 1\n");
+		Cbuf_AddText ("coop 0\n");
+		Cbuf_AddText ("deathmatch 0\n");
+		M_Menu_Class_f ();
+		break;
+
+	case CONFIRM_DELETE_S:
+		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "s%i", m_confirm_cursor);
+		Host_DeleteSave (savefile);
+		M_ScanSaves ();
+		break;
+
+	case CONFIRM_DELETE_MS:
+		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "ms%i", m_confirm_cursor);
+		Host_DeleteSave (savefile);
+		M_ScanMSaves ();
+		break;
+
+	case CONFIRM_NONE:
+		break;
+	}
+}
+
+
 static void M_MLoad_Key (int k)
 {
 	switch (k)
@@ -1583,11 +1791,8 @@ static void M_MLoad_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
-			return;
-		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "ms%i", load_cursor);
-		Host_DeleteSave (savefile);
-		M_ScanMSaves ();
+		M_Confirm (CONFIRM_DELETE_MS,
+			   "Are you sure you want to\ndelete this saved game?\n");
 		break;
 
 	case K_ENTER:
@@ -1641,11 +1846,8 @@ static void M_MSave_Key (int k)
 		S_LocalSound ("raven/menu2.wav");
 		if (!loadable[load_cursor])
 			return;
-		if (!SCR_ModalMessage("Are you sure you want to\ndelete this saved game?\n", 0.0f))
-			return;
-		FS_MakePath_VABUF (FS_USERDIR, NULL, savefile, sizeof(savefile), "ms%i", load_cursor);
-		Host_DeleteSave (savefile);
-		M_ScanMSaves ();
+		M_Confirm (CONFIRM_DELETE_MS,
+			   "Are you sure you want to\ndelete this saved game?\n");
 		break;
 
 	case K_ENTER:
@@ -9492,6 +9694,10 @@ void M_Draw (void)
 		M_Quit_Draw ();
 		break;
 
+	case m_confirm:
+		M_ConfirmDraw ();
+		break;
+
 	case m_lanconfig:
 		M_LanConfig_Draw ();
 		break;
@@ -9999,6 +10205,10 @@ void M_Keydown (int key, qboolean repeat)
 
 	case m_quit:
 		M_Quit_Key (key);
+		return;
+
+	case m_confirm:
+		M_ConfirmKey (key);
 		return;
 
 	case m_lanconfig:
