@@ -23,7 +23,7 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    # ubuntu-latest ships all three, but the runner image's contents are not a
+    # ubuntu-24.04 ships all three, but the runner image's contents are not a
     # contract; naming them is what keeps a future image change from being our
     # outage.  --no-install-recommends for the reason ci.yml's flatpak job
     # spells out at length.

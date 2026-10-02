@@ -43,7 +43,7 @@ concurrency:
 jobs:
   self-test:
     name: check-rust-notices.sh --self-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # ~30s of bash and awk.  A "something is stuck" bound, not a target.
     timeout-minutes: 10
     steps:

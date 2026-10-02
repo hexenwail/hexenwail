@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Observed runtime is well under a minute to a few minutes; this is a
     # "something is stuck" threshold, not a target, and is sized to leave
     # room for a cold cache.  Without it the job inherits GitHub's 6-hour

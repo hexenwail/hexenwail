@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Since #299 this is the only WASM build on push to master: ci.yml's `pwa`
     # copy, which carried this same 45-minute bound, now runs on pull requests
     # only.  Without it a wedged boot smoke here would run to GitHub's 6-hour
@@ -60,7 +60,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

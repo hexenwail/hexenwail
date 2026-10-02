@@ -31,7 +31,7 @@ jobs:
     uses: ./.github/workflows/lint.yml
 
   flatpak:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Gated on lint so a red gate costs seconds, not a full flatpak-builder
     # run -- and, through publish's needs, cannot reach a published release.
     needs: [lint]
@@ -107,7 +107,7 @@ jobs:
           upload-artifact: true
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [lint]
     timeout-minutes: 45
     steps:
@@ -282,7 +282,7 @@ jobs:
           path: release_notes.md
 
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [flatpak, build]
     # The only job that writes: `gh release create` below.

@@ -54,7 +54,7 @@ jobs:
   pwa:
     name: PWA / WebAssembly
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Cold, this is an emsdk install plus a full engine compile; warm it is
     # the compile alone.  A "something is stuck" bound, not a target.
     timeout-minutes: 45
@@ -77,7 +77,7 @@ jobs:
         run: ./scripts/wasm-validate-artifact.sh dist
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -293,7 +293,7 @@ jobs:
   # 295-344s, ~130s of it this gate and ~75-90s that loop.
   rust:
     name: Rust ports
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # One shared cmake build of three engine targets plus every harness.  A
     # "something is stuck" bound, not a target.
     timeout-minutes: 45
@@ -320,7 +320,7 @@ jobs:
 
   cross:
     name: Windows, tools and gamecode
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Five nix builds, mostly Cachix hits.  A "something is stuck" bound, not
     # a target.
     timeout-minutes: 45
@@ -343,7 +343,7 @@ jobs:
           done
 
   flatpak:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
