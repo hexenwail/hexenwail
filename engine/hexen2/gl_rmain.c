@@ -565,6 +565,10 @@ cvar_t	gl_playermip = {"gl_playermip", "0", CVAR_NONE};
 cvar_t	gl_nocolors = {"gl_nocolors", "0", CVAR_NONE};
 cvar_t	gl_keeptjunctions = {"gl_keeptjunctions", "1", CVAR_ARCHIVE};
 cvar_t	gl_reporttjunctions = {"gl_reporttjunctions", "0", CVAR_NONE};
+/* Z ripple on liquid surfaces, in units of gl_waterwarp_amount.  Downward
+ * only: the surface dips up to gl_waterripple * gl_waterwarp_amount below its
+ * plane and never rises above it, so a rim against a sloped floor sinks into
+ * the floor instead of lifting off it.  R_WaterRipple, GitHub #312. */
 cvar_t	gl_waterripple = {"gl_waterripple", "2", CVAR_ARCHIVE};
 /* Surface warp on liquids -- the texcoord turb in EmitWaterPolys, the Z
  * ripple beside it, and the underwater wall wobble in DrawGLWaterPoly.
