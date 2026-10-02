@@ -40,6 +40,15 @@ void SCR_SetPlaqueMessage (const char *msg);	// set pointer to current plaque me
 int SCR_ModalMessage (const char *text, float timeout);
 // y/n prompt.  timeout is in seconds; 0 waits forever, which is what every
 // caller but vid_test wants.  A timed-out prompt answers no.  uhexen2-x5e6
+//
+// This waits for the keypress by blocking, so it only works where the target
+// can deliver one while the engine is inside a frame.  Where it cannot -- a
+// browser delivers key events only between frames, and the wait spins inside a
+// single wasm frame -- this answers no at once rather than hanging.
+//
+// Menu code should not use this at all.  The menus draw their confirmations as
+// a menu state (see M_Confirm in menu.c), which works on every target instead
+// of being a platform special case.
 
 #ifndef H2W
 extern	int			total_loading_size;	// global vars for
