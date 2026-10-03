@@ -9,6 +9,15 @@ mkdir -p "$work"
 lib="${RUST_LIB:-$engine/rust/target/release/libengine_rs.a}"
 inc=(-I"$engine/hexen2" -I"$engine/h2shared" -I"$root/common")
 flags=(-std=gnu11 -O1 -g -Wall -Wno-unused-function -DGLQUAKE -D_GNU_SOURCE=1)
+# An extra -I for a platform that keeps headers outside the compiler's default
+# search path.  FreeBSD is the case in hand: quakeinc.h reaches glheader.h from
+# quakedef.h, libglvnd installs GL/gl.h under /usr/local/include, and base
+# clang does not search that directory.  CPPFLAGS is the conventional carrier,
+# so a caller sets it rather than every script growing a platform path.
+if [ -n "${CPPFLAGS:-}" ]; then
+  # shellcheck disable=SC2206  # deliberate: CPPFLAGS is a whitespace-separated flag list
+  flags+=(${CPPFLAGS})
+fi
 renames=()
 for fn in Init Shutdown Listen SearchForHosts Connect CheckNewConnections GetMessage SendMessage SendUnreliableMessage CanSendMessage CanSendUnreliableMessage Close; do
   renames+=("-DLoop_${fn}=c_Loop_${fn}")

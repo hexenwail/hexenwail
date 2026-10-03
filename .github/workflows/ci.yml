@@ -377,10 +377,15 @@ jobs:
             # libglvnd is not for the driver -- it is for the harness.  net_defs.h
             # reaches glheader.h through quakedef.h, so GL/gl.h has to exist to
             # compile the C originals the fixture compares against, even though
-            # nothing here touches the renderer.
+            # nothing here touches the renderer.  Assert it landed: the package
+            # owning it has changed before, and a silent miss costs a VM boot.
             pkg install -y bash rust libglvnd
+            ls -l /usr/local/include/GL/gl.h
           run: |
-            bash scripts/check-rust-net-h2-fixture.sh
+            # FreeBSD's base clang does not search /usr/local/include, where
+            # ports put their headers, so the path above is invisible without
+            # this.  The harness reads CPPFLAGS for exactly this.
+            CPPFLAGS=-I/usr/local/include bash scripts/check-rust-net-h2-fixture.sh
 
   cross:
     name: Windows, tools and gamecode
