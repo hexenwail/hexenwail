@@ -190,15 +190,85 @@ socket and bind failure diagnostics. A SERVERONLY fixture checks the dedicated
 table's different ABI and all 40 entry/layout/function-pointer facts. This is
 not HexenWorld's Huffman-framed transport or its gate.
 
-**Platform boundary, still unresolved for the goal:** CMake deliberately keeps
-`net_bsd.c` and `net_udp.c` as C on macOS and non-Linux Unix because their
-socket-address family layouts, ioctl request sizes and errno values differ
-from the currently Linux-specific Rust FFI. No cross-target parity fixture
-or macOS build evidence exists. Emscripten *does* link the Rust code and no
-Hexen II C transport originals; wasm32 staticlib cannot export data globals,
-so `wasm_globals.c` owns only the two table arrays and two counts and
-`NetH2_InitDriverTables` fills their entries in Rust before `NET_Init` uses
-them. WebGL2 build and the existing wasm ABI gate pass, but there is no wasm
-runtime packet fixture. The original objective names both stacks without a
-Linux-only exception; do not mark it complete until this residual platform
-support is ported and verified, or the user explicitly changes that scope.
+**Platform boundary, resolved 2026-10-02 — see below.** The paragraph that
+stood here said CMake deliberately kept `net_bsd.c` and `net_udp.c` as C on
+macOS and non-Linux Unix, because their socket-address family layouts, ioctl
+request sizes and errno values differ from the then Linux-specific Rust FFI,
+and that no cross-target parity fixture existed. That is no longer the case.
+
+Emscripten *does* link the Rust code and no Hexen II C transport originals;
+wasm32 staticlib cannot export data globals, so `wasm_globals.c` owns only the
+two table arrays and two counts and `NetH2_InitDriverTables` fills their
+entries in Rust before `NET_Init` uses them. WebGL2 build and the existing wasm
+ABI gate pass, but there is still no wasm runtime packet fixture.
+
+## The platform boundary, and what closed it (2026-10-02)
+
+The port had no platform dependence left in it beyond a handful of values that
+are not logic: the socket constants, the two ioctl request numbers, the errno
+values compared against `EWOULDBLOCK` and `ECONNREFUSED`, how `errno` and
+`h_errno` are reached, and the byte layout of `sockaddr_in`. Those are exactly
+what `net_udp.c` reads out of the system headers, and `common/net_sys.h`
+already names the one that moves — `HAVE_SA_LEN`/`SA_FAM_OFFSET`, because a
+BSD-family `sockaddr` carries an `sa_len` byte, so the family sits at offset 1
+and is one byte wide instead of two. `struct qsockaddr` in
+`engine/hexen2/net_defs.h` mirrors the same split, which is why the two cast
+between each other on both families.
+
+So the values now come from C, once: `engine/rust/net_udp_h2_target.c` returns
+each one by reading the real macro or `offsetof`, and the shim is attached to
+every target that links the feature. Returning them rather than writing per-OS
+constant tables in Rust is the point — there is no second copy to drift, and a
+platform nobody enumerated still gets the right numbers. Nothing in that file
+is transport logic; the driver is still entirely in `net_udp_h2.rs`, and
+`QSockAddr` became a fixed 16-byte region whose family is read and written at
+the shim's offset, which is what removed the last `target_os` assumption from
+the port.
+
+`engine/CMakeLists.txt` then dropped the
+`if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")` fallback in both the client and
+h2ded source lists, and the feature sets became `UNIX` rather than
+`CMAKE_SYSTEM_NAME STREQUAL "Linux"`. Windows is unchanged: it builds
+`net_win.c`/`net_wins.c`, a different transport this port does not replace.
+
+**Evidence.** `scripts/check-rust-net-h2-fixture.sh` is the differential
+fixture on its own — the half that decides whether the port computes the C's
+bytes, and the half that does not need the engine to build.
+`scripts/check-rust-net-h2.sh` now calls it, and two CI jobs run it on the
+platforms whose layout is the point: `macos-transport` on `macos-latest`
+(darwin/arm64) and `freebsd-transport` in a FreeBSD VM (x86_64). Both link the
+Rust archive against the C originals compiled by that host's own compiler, so a
+wrong family offset, ioctl request or errno value fails there rather than
+passing on Linux.
+
+All three passed, at PR #320:
+
+| host | expectations | cases | trace bytes |
+|---|---|---|---|
+| Linux (x86_64) | 128 | 4 | 972 |
+| macOS (arm64) | 130 | 4 | 1082 |
+| FreeBSD (x86_64) | 130 | 4 | 1044 |
+
+The trace is a byte-for-byte comparison of what the C original and the Rust
+port produce; the three byte counts differ only because the trace records the
+C's diagnostics as well as its packets (`CON_Printf` is stubbed but recorded),
+and whether `gethostbyname()` resolves the host's own name, and which
+`strerror()` text the platform returns, both vary. That the counts differ while
+the comparison still succeeds is the point: the port is not agreeing with
+Linux's answers, it is computing the host's own.
+
+Two things this does **not** establish, stated plainly so a reader does not
+infer them:
+
+- **No engine-level build on macOS or the BSDs.** The engine does not build on
+  macOS at all yet — glhexen2 there is behind ANGLE (uhexen2-6wj4), and
+  docs/COMPILE still lists Linux and Windows — so there is no macOS
+  `glhexen2`/`h2ded` binary to show carrying no `net_bsd.c` object. The
+  object- and symbol-ownership half of the gate runs on Linux only. That is a
+  gap in platform support, not in the transport: it is the same CMake code
+  path Linux exercises, and it is covered the moment macOS builds, which is
+  what the C fallback was waiting on and is no longer waiting for.
+- **Still no wasm runtime packet fixture.** The browser links the Rust
+  transport and the wasm ABI gate passes; nothing drives a packet through it
+  under Emscripten. The interface scan is compiled out there
+  (`H2UDP_has_ifscan()` is 0, as `#if defined(SIOCGIFCONF)` was in the C).

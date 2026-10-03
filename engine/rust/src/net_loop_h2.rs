@@ -3,8 +3,32 @@
 // Copyright (C) 1996-1997  Id Software, Inc.
 // Copyright (C) 2026 Hexenwail contributors.
 
+/// `struct qsockaddr` from engine/hexen2/net_defs.h, and the `sockaddr_in`
+/// every land driver casts it to.
+///
+/// Its shape is not fixed.  Under `HAVE_SA_LEN` -- the BSDs, macOS, OS/2,
+/// Hurd, Haiku -- the first two members are `unsigned char qsa_len` and
+/// `unsigned char qsa_family`; everywhere else `qsa_family` is a short at
+/// offset 0.  The same split applies to `sockaddr_in` (sa_len, then
+/// sa_family, then port and address), which is why net_udp.c can cast one to
+/// the other and read both through struct member accesses.
+///
+/// Both are 16 bytes and the port and address bytes land in the same place
+/// either way, so only the family moves -- two bytes at offset 0, or one byte
+/// at offset 1.  Storage is therefore a fixed 16 bytes and the family's
+/// offset and width come from the C headers through net_udp_h2_target.c.
+/// Keeping that out of here is the point: a `#[cfg(target_os = ...)]` list
+/// would have to name every BSD to stay right, and the one that got left off
+/// would silently read the wrong byte.
+pub const QSOCKADDR_SIZE: usize = 16;
+
 #[repr(C)]
-pub struct QSockAddr { pub family: i16, pub data: [u8; 14] }
+#[derive(Clone, Copy)]
+pub struct QSockAddr { pub storage: [u8; QSOCKADDR_SIZE] }
+
+impl QSockAddr {
+    pub const fn zeroed() -> Self { QSockAddr { storage: [0; QSOCKADDR_SIZE] } }
+}
 #[no_mangle]
 pub extern "C" fn H2QSockAddr_sizeof() -> usize { core::mem::size_of::<QSockAddr>() }
 #[no_mangle]
