@@ -22,6 +22,8 @@ cc "${inc[@]}" "${flags[@]}" "${renames[@]}" \
   -Dnet_drivers=c_net_drivers -Dnet_landrivers=c_net_landrivers \
   -Dnet_numdrivers=c_net_numdrivers -Dnet_numlandrivers=c_net_numlandrivers \
   -c "$engine/hexen2/net_bsd.c" -o "$work/bsd.o"
+cc "${inc[@]}" "${flags[@]}" -c "$engine/rust/net_udp_h2_target.c" -o "$work/udp_target.o"
 cc "${inc[@]}" "${flags[@]}" -c "$here/diff_harness.c" -o "$work/harness.o"
-cc -o "$work/diff_harness" "$work/harness.o" "$work/loop.o" "$work/udp.o" "$work/bsd.o" "$lib" -lm
+cc -o "$work/diff_harness" "$work/harness.o" "$work/loop.o" "$work/udp.o" "$work/bsd.o" \
+  "$work/udp_target.o" "$lib" -lm
 timeout -k 5 60 "$work/diff_harness"

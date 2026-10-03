@@ -766,14 +766,13 @@ elseif(UNIX)
     # Input
     list(APPEND PLATFORM_SOURCES ${COMMONDIR}/in_sdl.c)
 
-    # Linux's Hexen II driver tables and UDP live in Rust. Other Unix
-    # platforms retain their C socket backend until platform-specific FFI
-    # and differential fixtures exist (Phase 7 remains incomplete there).
-    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        list(APPEND PLATFORM_SOURCES
-            ${ENGINE_TOP}/hexen2/net_bsd.c
-            ${ENGINE_TOP}/hexen2/net_udp.c)
-    endif()
+    # Hexen II's driver tables, loopback and UDP land driver are Rust on every
+    # Unix now, not just Linux; net_bsd.c and net_udp.c are harness-only
+    # originals.  The platform facts the port used to leave in C -- the socket
+    # constants, the ioctl requests, the errno values and the sockaddr_in
+    # family offset -- come from engine/rust/net_udp_h2_target.c, which is
+    # attached with the feature.  Windows is a different transport
+    # (net_win.c/net_wins.c) and still C.
 
     # System
     list(APPEND PLATFORM_SOURCES
@@ -864,14 +863,14 @@ set(RUST_ENGINE_COMMON_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io strlcpy strlcat
     cvar zone cmd quakefs)
 set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad net_loop_h2)
-if(EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(EMSCRIPTEN OR UNIX)
     list(APPEND RUST_ENGINE_CLIENT_FEATURES net_bsd_h2 net_udp_h2)
 endif()
 if(USE_HEXENWORLD_CLIENT AND NOT EMSCRIPTEN)
     list(APPEND RUST_ENGINE_CLIENT_FEATURES huffman net_udp_hw net_chan)
 endif()
 set(RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_COMMON_FEATURES})
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(UNIX)
     list(APPEND RUST_ENGINE_H2DED_FEATURES net_bsd_h2 net_udp_h2 h2ded_target)
 endif()
 set(RUST_ENGINE_HWSV_FEATURES ${RUST_ENGINE_COMMON_FEATURES}
@@ -1028,6 +1027,16 @@ function(engine_rs_attach tgt variant)
         # the NOT_DEMOPLAYBACK predicate (cls exists in no dedicated binary),
         # and the C-variadic Netchan_OutOfBandPrint.  See the file's header.
         ${RUST_ENGINE_RS_DIR}/net_chan_target.c)
+
+    # Hexen II's UDP land driver reads its platform facts -- socket constants,
+    # ioctl requests, errno values, the sockaddr_in family offset and the
+    # ifreq scan's shape -- from the C headers through this shim, so the port
+    # carries no target_os list of its own.  Only targets that link the
+    # feature get it; Windows' transport is net_win.c/net_wins.c.
+    list(FIND ARGN net_udp_h2 _h2_udp_feature)
+    if(NOT WIN32 AND _h2_udp_feature GREATER -1)
+        target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/net_udp_h2_target.c)
+    endif()
 
     # rustc emits the archive's exported statics as local symbols on wasm32,
     # so there the C owns their storage.  See the file's header.
@@ -1300,11 +1309,6 @@ else()
             ${ENGINE_TOP}/hexen2/server/sys_win.c
         )
     else()
-        if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-            list(APPEND SERVER_SOURCES
-                ${ENGINE_TOP}/hexen2/net_bsd.c
-                ${ENGINE_TOP}/hexen2/net_udp.c)
-        endif()
         list(APPEND SERVER_SOURCES ${ENGINE_TOP}/hexen2/server/sys_unix.c)
     endif()
 

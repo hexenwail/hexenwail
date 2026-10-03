@@ -318,6 +318,60 @@ jobs:
       - name: Rust ports (differential harnesses, symbols, ABI)
         run: nix develop .#default -c bash ./scripts/check-rust.sh
 
+  # The Hexen II transport is Rust on every Unix now, not only Linux.  What
+  # the Linux gate above cannot show is that the port still computes the C's
+  # bytes where the address layout differs: under HAVE_SA_LEN -- macOS and the
+  # BSDs -- sockaddr_in carries an sa_len byte, so the family sits at offset 1
+  # and is one byte wide, and the ioctl request numbers and the errno values
+  # compared against are different numbers again.
+  #
+  # Only the differential fixture runs here, not scripts/check-rust.sh.  The
+  # engine does not build on macOS yet -- glhexen2 is behind ANGLE
+  # (uhexen2-6wj4, and docs/COMPILE still lists Linux and Windows) -- and the
+  # fixture does not need it: it links the Rust archive against the C originals
+  # compiled by the same host compiler, which is the comparison that decides
+  # whether the port is portable.
+  macos-transport:
+    name: macOS transport fixture
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      # rustup ships on the runner, but not the version engine/rust/
+      # rust-toolchain.toml pins.  Installing it is not ceremony: the fixture
+      # compares this compiler's Rust against this host's C, and the pin is
+      # what every other target in this workflow uses.
+      - name: Install the pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' engine/rust/rust-toolchain.toml)
+          test -n "$version"
+          rustup toolchain install "$version" --profile minimal --no-self-update
+          rustup default "$version"
+          rustc --version
+      - name: Hexen II transport differential fixture
+        run: bash scripts/check-rust-net-h2-fixture.sh
+
+  # The same fixture on a real BSD, which is the half of "non-Linux Unix"
+  # darwin only stands in for.  FreeBSD reaches errno through __error() and
+  # h_errno by yet another route, and gives FIONBIO/FIONREAD their own
+  # encodings, so it exercises net_udp_h2_target.c rather than agreeing with
+  # macOS about the numbers.
+  freebsd-transport:
+    name: FreeBSD transport fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Hexen II transport differential fixture
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y bash rust
+          run: |
+            bash scripts/check-rust-net-h2-fixture.sh
+
   cross:
     name: Windows, tools and gamecode
     runs-on: ubuntu-latest

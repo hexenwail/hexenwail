@@ -9,24 +9,15 @@ work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
 crate="$root/engine/rust"
 echo '== Hexen II client differential (C originals vs Rust, C UDP peer) =='
-cargo build --release --offline --manifest-path "$crate/Cargo.toml" \
-  --features net_loop_h2,net_bsd_h2,net_udp_h2 >"$work/cargo.log" 2>&1 || {
-  tail -25 "$work/cargo.log" >&2; exit 1;
-}
-RUST_LIB="$crate/target/release/libengine_rs.a" WORKDIR="$work/fixture" \
-  bash "$crate/net_h2/tests/run_diff_harness.sh" >"$work/harness.log" 2>&1 || {
+# The fixture decides whether the port computes the C's bytes, so it is the one
+# half of this gate a platform can run without the engine building there; see
+# scripts/check-rust-net-h2-fixture.sh.  It is shared rather than copied so the
+# floors stay in one place.
+WORKDIR="$work/fixture" RUST_LIB="$crate/target/release/libengine_rs.a" \
+  bash "$root/scripts/check-rust-net-h2-fixture.sh" >"$work/harness.log" 2>&1 || {
   tail -65 "$work/harness.log" >&2; exit 1;
 }
 grep '^PASS:\|^checked\|^RESULT:' "$work/harness.log"
-line=$(grep -E '^checked [0-9]+ expectations, [0-9]+ cases, [0-9]+ trace bytes$' "$work/harness.log" || true)
-checks=$(printf '%s\n' "$line" | grep -oE '[0-9]+' | sed -n 1p || true)
-cases=$(printf '%s\n' "$line" | grep -oE '[0-9]+' | sed -n 2p || true)
-bytes=$(printf '%s\n' "$line" | grep -oE '[0-9]+' | sed -n 3p || true)
-# Observed: 128 expectations, 4 cases, 972 compared trace bytes.
-if [ "${checks:-0}" -lt 120 ] || [ "${cases:-0}" -lt 4 ] || [ "${bytes:-0}" -lt 900 ]; then
-  echo "FAIL: Hexen II fixture below 120 expectations / 4 cases / 900 bytes" >&2
-  exit 1
-fi
 
 echo '== Hexen II dedicated driver table variant =='
 cargo build --release --offline --manifest-path "$crate/Cargo.toml" \
@@ -41,7 +32,10 @@ cc "${includes[@]}" -DSERVERONLY -D_GNU_SOURCE=1 -std=gnu11 \
   -Dnet_landrivers=c_net_landrivers -Dnet_numlandrivers=c_net_numlandrivers \
   -c "$root/engine/hexen2/net_bsd.c" -o "$work/bsd-dedicated.o"
 cc "${includes[@]}" -DSERVERONLY -D_GNU_SOURCE=1 -std=gnu11 \
+  -c "$crate/net_udp_h2_target.c" -o "$work/udp-target-dedicated.o"
+cc "${includes[@]}" -DSERVERONLY -D_GNU_SOURCE=1 -std=gnu11 \
   "$crate/net_h2/tests/dedicated_tables.c" "$work/bsd-dedicated.o" \
+  "$work/udp-target-dedicated.o" \
   "$work/dedicated-target/release/libengine_rs.a" -lm -o "$work/dedicated-tables"
 "$work/dedicated-tables" | tee "$work/dedicated.log"
 grep -q '^dedicated driver tables: 40 entries/layout/function-pointer checks passed$' "$work/dedicated.log" || {
