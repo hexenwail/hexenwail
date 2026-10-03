@@ -349,6 +349,12 @@ jobs:
           rustup toolchain install "$version" --profile minimal --no-self-update
           rustup default "$version"
           rustc --version
+      # macOS has no /usr/bin/timeout; the harness prefers one when it is there
+      # and runs unbounded when it is not.  Worth having, since a fixture that
+      # deadlocks on a socket read would otherwise sit until the job's own
+      # limit.  Homebrew calls it gtimeout, and skips the install when present.
+      - name: Ensure a watchdog for the harness
+        run: command -v timeout >/dev/null || command -v gtimeout >/dev/null || brew install coreutils
       - name: Hexen II transport differential fixture
         run: bash scripts/check-rust-net-h2-fixture.sh
 

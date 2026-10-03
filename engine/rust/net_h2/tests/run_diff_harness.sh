@@ -26,4 +26,16 @@ cc "${inc[@]}" "${flags[@]}" -c "$engine/rust/net_udp_h2_target.c" -o "$work/udp
 cc "${inc[@]}" "${flags[@]}" -c "$here/diff_harness.c" -o "$work/harness.o"
 cc -o "$work/diff_harness" "$work/harness.o" "$work/loop.o" "$work/udp.o" "$work/bsd.o" \
   "$work/udp_target.o" "$lib" -lm
-timeout -k 5 60 "$work/diff_harness"
+# A watchdog, in case a fixture deadlocks on a socket read.  timeout(1) is GNU
+# coreutils and macOS ships no /usr/bin/timeout, which is how the first macOS
+# run of this harness died with 127 after compiling everything -- Homebrew's
+# coreutils installs the same program as gtimeout.  Neither present is not
+# fatal; it just means the caller's own time limit is the only one.
+if command -v timeout >/dev/null 2>&1; then
+  timeout -k 5 60 "$work/diff_harness"
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout -k 5 60 "$work/diff_harness"
+else
+  echo 'warning: neither timeout(1) nor gtimeout(1) on PATH; running the fixture unbounded' >&2
+  "$work/diff_harness"
+fi
