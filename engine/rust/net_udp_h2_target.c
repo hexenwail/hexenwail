@@ -41,8 +41,15 @@
  * net_sys.h has already pulled in <sys/ioctl.h>, <sys/socket.h>,
  * <netinet/in.h> and <netdb.h>.  The browser build has no network interface
  * to enumerate and no net/if.h, which is why it is excluded here rather than
- * left to fail. */
+ * left to fail.
+ *
+ * The macro below, not SIOCGIFCONF alone, is what gates the scan further
+ * down.  Emscripten defines SIOCGIFCONF but leaves struct ifreq incomplete,
+ * so gating on the macro compiled sizeof(struct ifreq) against an incomplete
+ * type and broke the web build.  The header being present is the condition
+ * that actually makes the scan expressible. */
 #include <net/if.h>
+#define H2UDP_HAVE_IFSCAN_HEADER 1
 #endif
 
 /* --- socket constants ----------------------------------------------------- */
@@ -119,7 +126,7 @@ int H2UDP_sockaddr_in_addr_offset(void)
 
 /* --- interface scan ------------------------------------------------------- */
 
-#if defined(SIOCGIFCONF) && defined(SIOCGIFADDR)
+#if defined(H2UDP_HAVE_IFSCAN_HEADER) && defined(SIOCGIFCONF) && defined(SIOCGIFADDR)
 int H2UDP_has_ifscan(void) { return 1; }
 unsigned long H2UDP_SIOCGIFCONF(void) { return (unsigned long) SIOCGIFCONF; }
 unsigned long H2UDP_SIOCGIFADDR(void) { return (unsigned long) SIOCGIFADDR; }

@@ -374,7 +374,11 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y bash rust
+            # libglvnd is not for the driver -- it is for the harness.  net_defs.h
+            # reaches glheader.h through quakedef.h, so GL/gl.h has to exist to
+            # compile the C originals the fixture compares against, even though
+            # nothing here touches the renderer.
+            pkg install -y bash rust libglvnd
           run: |
             bash scripts/check-rust-net-h2-fixture.sh
 

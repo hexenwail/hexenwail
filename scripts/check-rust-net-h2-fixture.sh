@@ -57,16 +57,15 @@ line=$(grep -E '^checked [0-9]+ expectations, [0-9]+ cases, [0-9]+ trace bytes$'
 checks=$(printf '%s\n' "$line" | grep -oE '[0-9]+' | sed -n 1p || true)
 cases=$(printf '%s\n' "$line" | grep -oE '[0-9]+' | sed -n 2p || true)
 bytes=$(printf '%s\n' "$line" | grep -oE '[0-9]+' | sed -n 3p || true)
-# Observed on Linux: 128 expectations, 4 cases, 972 compared trace bytes.  The
-# trace carries the C's diagnostics as well as its packets -- CON_Printf is
-# stubbed but recorded -- so its exact length is host-dependent: whether
-# gethostbyname() succeeds for this host's own name, and which strerror() text
-# the platform returns for EBADF, both change it, and on macOS a hostname
-# ending in ".local" makes the C skip the lookup entirely.  The byte floor is
-# therefore "a substantial trace, not an empty one" rather than a target, and
-# sits well under the smallest figure any of the three hosts is expected to
-# produce.  The expectations and case floors are the tight ones: nothing about
-# the host changes how many checks the fixture makes.
+# Observed: 128 expectations, 4 cases, 972 trace bytes on Linux; 130 and 1082
+# on macOS.  The trace carries the C's diagnostics as well as its packets --
+# CON_Printf is stubbed but recorded -- so its exact length is host-dependent:
+# whether gethostbyname() succeeds for the host's own name, and which
+# strerror() text the platform returns for EBADF, both move it, and macOS
+# happens to print more of both rather than less.  The byte floor is therefore
+# "a substantial trace, not an empty one" rather than a target.  The
+# expectations and case floors are the tight ones: nothing about the host
+# changes how many checks the fixture makes beyond those diagnostics.
 if [ "${checks:-0}" -lt 120 ] || [ "${cases:-0}" -lt 4 ] || [ "${bytes:-0}" -lt 600 ]; then
 	echo "FAIL: Hexen II fixture below 120 expectations / 4 cases / 600 trace bytes" >&2
 	exit 1
