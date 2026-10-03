@@ -231,14 +231,31 @@ h2ded source lists, and the feature sets became `UNIX` rather than
 `CMAKE_SYSTEM_NAME STREQUAL "Linux"`. Windows is unchanged: it builds
 `net_win.c`/`net_wins.c`, a different transport this port does not replace.
 
-**Evidence, and its limits.** `scripts/check-rust-net-h2-fixture.sh` is the
-differential fixture on its own — the half that decides whether the port
-computes the C's bytes, and the half that does not need the engine to build.
+**Evidence.** `scripts/check-rust-net-h2-fixture.sh` is the differential
+fixture on its own — the half that decides whether the port computes the C's
+bytes, and the half that does not need the engine to build.
 `scripts/check-rust-net-h2.sh` now calls it, and two CI jobs run it on the
-platforms whose layout is the point: `macos-transport` on `macos-latest` and
-`freebsd-transport` in a FreeBSD VM. Both link the Rust archive against the C
-originals compiled by that host's own compiler, so a wrong family offset, ioctl
-request or errno value fails there rather than passing on Linux.
+platforms whose layout is the point: `macos-transport` on `macos-latest`
+(darwin/arm64) and `freebsd-transport` in a FreeBSD VM (x86_64). Both link the
+Rust archive against the C originals compiled by that host's own compiler, so a
+wrong family offset, ioctl request or errno value fails there rather than
+passing on Linux.
+
+All three passed, at PR #320:
+
+| host | expectations | cases | trace bytes |
+|---|---|---|---|
+| Linux (x86_64) | 128 | 4 | 972 |
+| macOS (arm64) | 130 | 4 | 1082 |
+| FreeBSD (x86_64) | 130 | 4 | 1044 |
+
+The trace is a byte-for-byte comparison of what the C original and the Rust
+port produce; the three byte counts differ only because the trace records the
+C's diagnostics as well as its packets (`CON_Printf` is stubbed but recorded),
+and whether `gethostbyname()` resolves the host's own name, and which
+`strerror()` text the platform returns, both vary. That the counts differ while
+the comparison still succeeds is the point: the port is not agreeing with
+Linux's answers, it is computing the host's own.
 
 Two things this does **not** establish, stated plainly so a reader does not
 infer them:
