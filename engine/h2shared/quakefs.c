@@ -3359,7 +3359,28 @@ void FS_Init (void)
 	 * file was wanted, not where it was looked for, not how to obtain any.
 	 * Hexenwail ships no game content and cannot -- see assets/demo/README.md
 	 * and uhexen2-3vmk -- so pointing at the fetch helper is the whole of the
-	 * answer we can give.  uhexen2-49ep. */
+	 * answer we can give.  uhexen2-49ep.
+	 *
+	 * In the browser there is no shell to run a fetch helper from and no
+	 * basedir the user can copy files to -- the launcher owns the virtual
+	 * filesystem -- so that arm names the launcher's own import controls
+	 * and demo button instead of get_demo.sh.  uhexen2-bmj9. */
+#ifdef __EMSCRIPTEN__
+		Sys_Error ("Unable to find a proper Hexen II installation.\n"
+			   "\n"
+			   "Wanted a \"data1\" directory containing pak0.pak, but no\n"
+			   "game data has been imported into the launcher yet.\n"
+			   "\n"
+			   "If you own Hexen II (Steam, GOG or the CD), import that\n"
+			   "installation's data1 directory with the launcher's import\n"
+			   "controls -- loose files or a .zip both work.\n"
+			   "\n"
+			   "If you don't, the free three-level 1997 demo works. Press\n"
+			   "\"Get the free demo (13 MB)\" in the launcher: it downloads\n"
+			   "Raven's November 1997 demo, verifies it against known hashes,\n"
+			   "and installs it for you."
+			   );
+#else
 		Sys_Error ("Unable to find a proper Hexen II installation.\n"
 			   "\n"
 			   "Wanted a \"data1\" directory containing pak0.pak, under:\n"
@@ -3387,6 +3408,7 @@ void FS_Init (void)
 			   , fs_basedir
 #endif
 			   );
+#endif	/* __EMSCRIPTEN__ */
 	}
 	if (gameflags & (GAME_OLD_DEMO|GAME_REGISTERED_OLD|GAME_OLD_OEM))
 		Sys_Printf ("Using old/unsupported, pre-1.11 version pak files.\n");

@@ -4010,15 +4010,23 @@ pub unsafe extern "C" fn FS_Init() {
     } else if (gameflags & (GAME_DEMO | GAME_OLD_DEMO)) != 0 {
         CON_Printf(PRINT_TERMONLY, c"Playing the demo version.\n".as_ptr());
     } else {
-        // No proper Raven data.  The two forms differ only in how they name
-        // the fetch helper, and the text is the C's verbatim (uhexen2-49ep).
-        #[cfg(windows)]
+        // No proper Raven data.  The Windows and Unix forms differ only in how
+        // they name the fetch helper; the browser form names the launcher's
+        // import controls and demo button instead, matching the C's
+        // __EMSCRIPTEN__ arm, and the text is the C's verbatim
+        // (uhexen2-49ep, uhexen2-bmj9).
+        #[cfg(target_os = "emscripten")]
+        Sys_Error(
+            c"Unable to find a proper Hexen II installation.\n\nWanted a \"data1\" directory containing pak0.pak, but no\ngame data has been imported into the launcher yet.\n\nIf you own Hexen II (Steam, GOG or the CD), import that\ninstallation's data1 directory with the launcher's import\ncontrols -- loose files or a .zip both work.\n\nIf you don't, the free three-level 1997 demo works. Press\n\"Get the free demo (13 MB)\" in the launcher: it downloads\nRaven's November 1997 demo, verifies it against known hashes,\nand installs it for you."
+                .as_ptr(),
+        );
+        #[cfg(all(not(target_os = "emscripten"), windows))]
         Sys_Error(
             c"Unable to find a proper Hexen II installation.\n\nWanted a \"data1\" directory containing pak0.pak, under:\n    %s\n\nIf you own Hexen II (Steam, GOG or the CD), copy that\ninstallation's data1 directory to the path above.\n\nIf you don't, the free three-level 1997 demo works. A\nhelper that downloads and verifies it ships next to this\nexecutable:\n    get_demo.cmd\n\n(double-click it, or run it from cmd). In a source\ncheckout it is scripts\\get_demo.cmd instead."
                 .as_ptr(),
             FS_BASEDIR,
         );
-        #[cfg(not(windows))]
+        #[cfg(all(not(target_os = "emscripten"), not(windows)))]
         Sys_Error(
             c"Unable to find a proper Hexen II installation.\n\nWanted a \"data1\" directory containing pak0.pak, under:\n    %s\n\nIf you own Hexen II (Steam, GOG or the CD), copy that\ninstallation's data1 directory to the path above.\n\nIf you don't, the free three-level 1997 demo works. A\nhelper that downloads and verifies it ships next to this\nexecutable:\n    ./get_demo.sh\n\nIn a source checkout it is scripts/get_demo.sh instead, or\nrun: nix run .#get-demo -- \"%s\""
                 .as_ptr(),
