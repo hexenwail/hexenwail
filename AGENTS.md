@@ -117,6 +117,39 @@ same adaptation question.  Cite it as "bobberb/ironwail fork", never as
 "Ironwail", and treat what you take as a design borrowed rather than parity
 achieved.  uhexen2-a5nn.39
 
+## Prior art: quake-srp, Quake in Rust
+
+`engine/rust` ports one subsystem at a time behind an FFI shim, each port with a
+differential harness against the C original.  A whole Quake-family engine has
+already been taken the other way — rewritten in Rust outright — and is worth
+reading as both existence proof and method:
+
+**quake-srp** — <https://github.com/terrapapagalli1516/quake-srp> — id's
+WinQuake ported to Rust whole, ~112k lines, GPL-2.0-or-later, written by Claude
+Code agent fleets (a chair agent merged a branch only once the full check
+passed).  Read it by ref from the sibling clone — and note `main`, not `master`:
+
+    git -C ../quake-srp show main:quake-rs/src/render/world.rs
+    git -C ../quake-srp grep <sym> main -- quake-rs
+
+**What it proves:** fidelity in a rewrite is a comparison anyone can re-run, not
+a careful reading of the C.  It builds id's C headless (`oracle/`) and diffs the
+port against it — every pixel of the 3-D view, the mixer sample for sample, demo
+playback frame by frame.  That is this repo's own argument
+(`scripts/check-rust.sh`), applied to a whole engine.  Its rules are worth
+holding too: `std` only, `#![forbid(unsafe_code)]` everywhere, and every
+departure from id's game a setting that the Classic profile turns off.
+
+**What does not read across:** it is **Quake, not Hexen II** — single-player
+only, **no multiplayer**, **software renderer only**.  HexenWorld, the Hexen II
+protocols and two of our three render pathways have no counterpart there, so
+what you take from it is prior art, not parity.
+
+**Licensing:** GPL-2.0-or-later is compatible with our GPL-3.0-or-later
+`engine/rust`, but borrowed code carries its notices like any other port —
+`scripts/check-rust-notices.sh` is the gate that fails otherwise.  The fidelity
+numbers above are quake-srp's own claim; we have not re-run them.
+
 ## Build & Test
 
 Always build through nix, never raw `cmake`/`make` — the flake pins the
@@ -156,6 +189,8 @@ tick is stale.
 
 - Default to **Ironwail's** approach for rendering features, and read it by ref
   (see "Reading Ironwail" above), never from the local worktree.
+- Rust work may read **quake-srp** as prior art (see "Prior art" above); it is
+  Quake, not Hexen II — never cite it as parity.
 - Cite commits by **subject**, not hash (see "Citing commits" above).
 - Concurrent sessions share this checkout — read this file before any
   `merge`, `rebase`, `stash`, `bisect` or `checkout`.
