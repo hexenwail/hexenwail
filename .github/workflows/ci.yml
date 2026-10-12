@@ -91,6 +91,9 @@ jobs:
       - name: Test brush and liquid alpha policy
         run: nix develop -c python3 tools/test_brush_alpha.py
 
+      - name: Test menu confirmation prompts
+        run: nix develop -c python3 tools/test_menu_confirm.py
+
       - name: Test HexenWorld local presentation state
         run: nix develop -c python3 tools/test_hw_viewmodel_feedback.py
 

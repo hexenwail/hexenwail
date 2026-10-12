@@ -55,6 +55,13 @@ static qboolean	rawinput_active;
 static float	mwheel_accum;
 
 static int	mouse_x, mouse_y, old_mouse_x, old_mouse_y;
+/* True only while Hexenwail_TouchKey is delivering a key.  K_MOUSE1 reaches
+ * the menu from three places -- a pointer click (menu_mouse_buttons bit set),
+ * a click with ui_mouse off (no bit) and the web touch overlay's attack
+ * button (no bit either) -- and only the last is a deliberate "accept", so it
+ * has to be marked positively rather than inferred from the missing bit. */
+qboolean	menu_touch_key;
+
 #ifdef __EMSCRIPTEN__
 static float	touch_look_x, touch_look_y;
 
@@ -62,7 +69,9 @@ EMSCRIPTEN_KEEPALIVE int Hexenwail_TouchKey (int key, int down)
 {
 	if (key <= 0 || key > K_GP_DPAD_RIGHT)
 		return 0;
+	menu_touch_key = true;
 	Key_Event(key, down ? true : false);
+	menu_touch_key = false;
 	return 1;
 }
 
@@ -78,8 +87,9 @@ int		menu_mouse_x, menu_mouse_y;
 qboolean	menu_mouse_moved;
 /* Held SDL mouse buttons, MENU_MOUSE_BUTTON(b) per button, so a menu can tell
  * a press-drag from a click (issue #137).  Set only by real SDL button events
- * while the menu owns input: the web touch overlay injects K_MOUSE1 through
- * Hexenwail_TouchKey and never touches this, so its taps stay plain Enter. */
+ * while the menu owns input and ui_mouse is on.  A clear bit does not mean
+ * "not a mouse": with ui_mouse off a real click arrives without it, as the
+ * web touch overlay's K_MOUSE1 does (see menu_touch_key). */
 int		menu_mouse_buttons;
 
 /* The pointer in framebuffer pixels, which is what menu.c's canvas inverse
