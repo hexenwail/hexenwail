@@ -1044,8 +1044,6 @@ static void HWCL_ParseParticle2 (void)
 		dmax[i] = MSG_ReadFloat ();
 	color = MSG_ReadShort ();
 	count = MSG_ReadByte ();
-	if (msg_badread)
-		return; /* drop the record and keep aligned */
 	effect = HW_H2ParticleMap (MSG_ReadByte ());
 	if (!msg_badread)
 		R_RunParticleEffect2 (origin, dmin, dmax, color, effect, count);
@@ -1063,8 +1061,6 @@ static void HWCL_ParseParticle3 (void)
 		box[i] = MSG_ReadByte ();
 	color = MSG_ReadShort ();
 	count = MSG_ReadByte ();
-	if (msg_badread)
-		return; /* drop the record and keep aligned */
 	effect = HW_H2ParticleMap (MSG_ReadByte ());
 	if (!msg_badread)
 		R_RunParticleEffect3 (origin, box, color, effect, count);
@@ -1081,8 +1077,6 @@ static void HWCL_ParseParticle4 (void)
 	radius = MSG_ReadByte ();
 	color = MSG_ReadShort ();
 	count = MSG_ReadByte ();
-	if (msg_badread)
-		return; /* drop the record and keep aligned */
 	effect = HW_H2ParticleMap (MSG_ReadByte ());
 	if (!msg_badread)
 		R_RunParticleEffect4 (origin, radius, color, effect, count);

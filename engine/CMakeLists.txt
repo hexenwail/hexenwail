@@ -1171,6 +1171,13 @@ if(BUILD_TESTING)
     target_compile_definitions(version_cvar_test PRIVATE
         VERSION_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME version_cvar COMMAND version_cvar_test)
+    # HexenWorld wire particle types (issue #309): the map is header-only;
+    # that cl_hw.c uses it is checked as source text.
+    add_executable(hw_particle_map_test tests/hw_particle_map_test.c)
+    target_include_directories(hw_particle_map_test PRIVATE hexen2)
+    target_compile_definitions(hw_particle_map_test PRIVATE
+        HW_PARTICLE_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME hw_particle_map COMMAND hw_particle_map_test)
 endif()
 
 engine_rs_attach(${EXECUTABLE_NAME} client ${RUST_ENGINE_CLIENT_FEATURES})

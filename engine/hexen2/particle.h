@@ -57,7 +57,10 @@ typedef enum
 	pt_snow,
 	pt_gravwell,
 	pt_redfire,
-	pt_grensmoke		/* HexenWorld grenade smoke; appended, see rt_grensmoke */
+	pt_grensmoke,		/* HexenWorld grenade smoke; appended, see rt_grensmoke */
+	pt_bluestep		/* HexenWorld footstep puff; appended.  HW numbers its
+				 * types differently from 24 up: a wire type goes
+				 * through HW_H2ParticleMap, never a cast. */
 } ptype_t;
 
 typedef enum
