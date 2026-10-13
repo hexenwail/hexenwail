@@ -51,6 +51,9 @@ from test_multiplayer_transparency import ROOT, function
 
 MENU = "engine/hexen2/menu.c"
 INPUT = "engine/h2shared/in_sdl.c"
+POINTER = "engine/h2shared/menu_pointer.h"
+# Any C assignment operator, and not a comparison.
+ASSIGN = r"(?:[-+*/%&|^]|<<|>>)?=(?!=)"
 
 PRELUDE = r'''
 #include <assert.h>
@@ -300,7 +303,7 @@ def check_wiring():
         "M_Keydown mentions m_confirm outside the click block and the dispatch"
     # Ten rewrites of the key in all: the click block's two, wheel up and
     # down, pad A and B, and the four d-pad arrows.  Two of them are Enter.
-    assert len(re.findall(r"\bkey = ", keydown)) == 10, \
+    assert len(re.findall(r"\bkey\s*(?:%s|\+\+|--)|(?:\+\+|--)\s*key\b" % ASSIGN, keydown)) == 10, \
         "M_Keydown rewrites the key somewhere new"
     assert keydown.count("key = K_ENTER;") == 2, \
         "M_Keydown turns something other than a non-confirm click and pad A into Enter"
@@ -317,12 +320,17 @@ def check_wiring():
     # answers or leaves the prompt.
     for name, uses in (("M_ConfirmKey", 3), ("M_Confirm_ClickKey", 2),
                        ("M_Confirm_HitKey", 3), ("menu_touch_key", 2),
+                       ("M_ConfirmAction", 4), ("M_ConfirmDraw", 3),
                        ("m_confirm", 4), ("m_confirm_action", 5),
                        ("m_confirm_prevstate", 4),
                        ("m_confirm_hint_x0", 3), ("m_confirm_hint_x1", 3),
                        ("m_confirm_hint_y", 8)):
         found = len(re.findall(r"\b%s\b" % name, menu))
         assert found == uses, f"menu.c uses {name!r} {found} times, expected {uses}"
+    assert "case m_confirm: M_ConfirmDraw (); break;" in menu, \
+        "M_Draw's m_confirm case must draw the prompt and do nothing else"
+    assert not re.search(r"\bmenu_mouse_buttons\s*%s" % ASSIGN, menu), \
+        "menu.c writes menu_mouse_buttons; only in_sdl.c may"
     for path in (MENU, INPUT):
         for line in live((ROOT / path).read_text()).splitlines():
             assert not re.match(r"\s*#\s*(define|undef)\b.*(M_Confirm|m_confirm|menu_touch_key)", line), \
@@ -359,8 +367,20 @@ def check_wiring():
     assert block in inp, \
         "in_sdl.c's menu click block changed; the button bit must be set only " \
         "with ui_mouse on, and a click must arrive as K_MOUSE1"
-    assert len(re.findall(r"\bmenu_mouse_buttons\s*(\|=|=(?!=)\s*[^0\s])", inp)) == 1, \
-        "in_sdl.c sets a menu_mouse_buttons bit outside the menu click block"
+    # Every write to the bits, by any operator: two clears, the release, and
+    # the one set pinned above.
+    writes = re.findall(r"\bmenu_mouse_buttons\s*(%s\s*\S+)" % ASSIGN, inp)
+    assert sorted(writes) == sorted(["= 0;", "= 0;", "&= ~MENU_MOUSE_BUTTON(event.button.button);",
+                                     "|= MENU_MOUSE_BUTTON(event.button.button);"]), \
+        f"in_sdl.c writes menu_mouse_buttons somewhere new: {writes}"
+    assert not re.search(r"(\+\+|--)\s*menu_mouse_buttons|menu_mouse_buttons\s*(\+\+|--)", inp), \
+        "in_sdl.c writes menu_mouse_buttons somewhere new"
+
+    # The bit the click block tests is the bit a left press sets.
+    pointer_h = squash(live((ROOT / POINTER).read_text()))
+    for define in ("#define MENU_MOUSE_BUTTON(b) (1 << ((b) - 1)) ",
+                   "#define MENU_MOUSE_LEFT MENU_MOUSE_BUTTON(1) "):
+        assert define in pointer_h, f"menu_pointer.h no longer has: {define.strip()}"
 
 
 def main():
