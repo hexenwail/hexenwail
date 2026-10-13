@@ -191,10 +191,8 @@ static enum m_state_e	m_confirm_prevstate;	/* where to go on cancel */
  * them.  y < 0 until the prompt has been drawn: a click cannot land on a row
  * nobody has seen. */
 static int		m_confirm_hint_x0, m_confirm_hint_x1, m_confirm_hint_y = -1;
-/* Where the pointer was when the prompt went up, and whether it has moved
- * since.  See M_Prompt_Aimed. */
-static int		m_prompt_rest_x, m_prompt_rest_y;
-static qboolean		m_prompt_aimed;
+/* menu_mouse_motions as the prompt went up.  See M_Prompt_Aimed. */
+static unsigned int	m_prompt_motions;
 /* Pointer clicks are dropped until realtime passes this.  See M_Keydown. */
 static double		m_click_lockout;
 #define	CLICK_LOCKOUT	0.35	/* seconds; longer than a double click */
@@ -269,6 +267,7 @@ static const char *DiffNames[MAX_PLAYER_CLASS][NUM_DIFFLEVELS] =
 
 extern int	menu_mouse_x, menu_mouse_y;
 extern qboolean	menu_mouse_moved;
+extern unsigned int	menu_mouse_motions;	/* in_sdl.c; pointer moves seen by the menu */
 extern int	menu_mouse_buttons;	/* in_sdl.c; MENU_MOUSE_BUTTON bits */
 extern qboolean	menu_touch_key;		/* in_sdl.c; key came from the touch overlay */
 
@@ -1374,9 +1373,7 @@ drawn yet, and the pointer is wherever the last menu left it.
 static void M_Prompt_Open (void)
 {
 	m_confirm_hint_y = -1;
-	m_prompt_rest_x = menu_mouse_x;
-	m_prompt_rest_y = menu_mouse_y;
-	m_prompt_aimed = false;
+	m_prompt_motions = menu_mouse_motions;
 }
 
 /*
@@ -1388,13 +1385,16 @@ under a resting pointer: the sixth save slot is drawn exactly where "Press y to
 confirm" lands, so Delete on a hovered save puts yes under the pointer.  A
 click that was never aimed at an answer must not give one, so until the
 pointer moves the rows neither highlight nor answer.
+
+Moves are counted, not inferred from menu_mouse_x/y: that position is only as
+fresh as the last event the menu saw, and a click refreshes it.  After the
+pointer moved while the game owned input, the click itself would look like a
+move and answer.
 ==================
 */
 static qboolean M_Prompt_Aimed (void)
 {
-	if (menu_mouse_x != m_prompt_rest_x || menu_mouse_y != m_prompt_rest_y)
-		m_prompt_aimed = true;
-	return m_prompt_aimed;
+	return menu_mouse_motions != m_prompt_motions;
 }
 
 /*

@@ -85,6 +85,13 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_TouchLook (double dx, double dy)
 /* Menu cursor position (screen coordinates) */
 int		menu_mouse_x, menu_mouse_y;
 qboolean	menu_mouse_moved;
+/* Counts the times the pointer has been seen to move while the menu owned
+ * input.  Unlike menu_mouse_moved it is never cleared, and unlike a change in
+ * menu_mouse_x/y it is not raised by a click: the button handler refreshes the
+ * position, and after the pointer moved unseen (the game owned input) that
+ * refresh alone changes it.  A prompt compares counts to tell whether the
+ * pointer was moved onto an answer or merely found there. */
+unsigned int	menu_mouse_motions;
 /* Held SDL mouse buttons, MENU_MOUSE_BUTTON(b) per button, so a menu can tell
  * a press-drag from a click (issue #137).  Set only by real SDL button events
  * while the menu owns input and ui_mouse is on.  A clear bit does not mean
@@ -1645,6 +1652,7 @@ void IN_SendKeyEvents (void)
 					menu_mouse_x = x;
 					menu_mouse_y = y;
 					menu_mouse_moved = true;
+					menu_mouse_motions++;
 				}
 			}
 			break;

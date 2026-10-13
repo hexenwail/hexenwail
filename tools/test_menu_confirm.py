@@ -90,8 +90,7 @@ static int load_cursor, m_confirm_cursor;
 static int menu_mouse_buttons, menu_mouse_x, menu_mouse_y;
 static const char *m_confirm_text;
 static int m_confirm_hint_x0, m_confirm_hint_x1, m_confirm_hint_y = -1;
-static int m_prompt_rest_x, m_prompt_rest_y;
-static qboolean m_prompt_aimed;
+static unsigned int menu_mouse_motions, m_prompt_motions;
 static double realtime, m_click_lockout, host_frametime;
 static float LinePos;
 static int LineTimes, MaxLines;
@@ -176,6 +175,21 @@ static int mouse1 (qboolean touch, qboolean pointer)
 enum { DELETE, QUIT };
 static int kind;
 
+/* The pointer as in_sdl.c feeds it (check_wiring pins both halves).  A motion
+ * event while the menu owns input moves it and is counted, if it went
+ * anywhere.  A click refreshes the position and is not counted: the pointer
+ * is merely found where it was left, which after the game owned input is not
+ * where the menu last saw it. */
+static void move (int x, int y)
+{
+    if (x != menu_mouse_x || y != menu_mouse_y)
+    {
+        menu_mouse_x = x; menu_mouse_y = y;
+        menu_mouse_motions++;
+    }
+}
+static void found (int x, int y) { menu_mouse_x = x; menu_mouse_y = y; }
+
 static void redraw (void)
 {
     box_n = nprinted = 0;
@@ -189,7 +203,7 @@ static void redraw (void)
 
 static void draw (int px, int py)
 {
-    menu_mouse_x = px; menu_mouse_y = py;
+    move (px, py);
     redraw ();
 }
 
@@ -226,20 +240,33 @@ static int answer (int key)
     return -1;
 }
 
-/* One K_MOUSE1 at (vx, vy) against the prompt, long after any earlier click. */
+/* The pointer moved to (vx, vy), then one K_MOUSE1 against the prompt, long
+ * after any earlier click. */
 static int click (qboolean touch, qboolean pointer, int vx, int vy)
 {
     int key;
     m_state = (kind == DELETE) ? m_confirm : m_quit;
-    menu_mouse_x = vx; menu_mouse_y = vy;
+    move (vx, vy);
     realtime += 1.0;
     key = mouse1 (touch, pointer);
     return answer (key);
 }
 
+/* One pointer K_MOUSE1 that finds the pointer at (vx, vy) without the menu
+ * having seen it get there. */
+static int click_found (int vx, int vy)
+{
+    int key;
+    m_state = (kind == DELETE) ? m_confirm : m_quit;
+    found (vx, vy);
+    realtime += 1.0;
+    key = mouse1 (false, true);
+    return answer (key);
+}
+
 static void open (int px, int py, const char *question)
 {
-    menu_mouse_x = px; menu_mouse_y = py;
+    found (px, py);
     m_state = m_load;
     if (kind == DELETE)
     {
@@ -396,6 +423,33 @@ static void prompt (int k, const char *question)
         assert (printed[find (hint2)].white == (want != -1));
         assert (click (false, true, x, y) == want);
         assert (click (false, true, x, y) == want);
+
+        /* The pointer was put on the row while the game owned input, so the
+         * menu never saw it move.  The click that finds it there refreshes
+         * the position; that is not a move, and it is not an answer. */
+        open (FAR, FAR, question);
+        redraw ();
+        assert (click_found (x, y) == 0);
+        assert (click_found (x, y) == 0);
+        redraw ();
+        PLACED ();
+        assert (printed[find (hint1)].white && printed[find (hint2)].white);
+        move (x, y);                                 /* already there: no move */
+        assert (click_found (x, y) == 0);
+        move (x + 1, y);
+        move (x, y);
+        redraw ();
+        assert (printed[find (hint1)].white == (want != 1));
+        assert (click_found (x, y) == want);
+
+        /* One move is enough: straight onto the row from somewhere else. */
+        open (FAR, FAR, question);
+        redraw ();
+        move (x, y);
+        redraw ();
+        assert (printed[find (hint1)].white == (want != 1));
+        assert (printed[find (hint2)].white == (want != -1));
+        assert (click_found (x, y) == want);
     }
 #undef PLACED
 }
@@ -513,7 +567,7 @@ USES = (
     ("m_confirm", 4), ("m_confirm_action", 5), ("m_confirm_prevstate", 4),
     ("m_quit", 6), ("m_quit_prevstate", 4),
     ("m_confirm_hint_x0", 3), ("m_confirm_hint_x1", 3), ("m_confirm_hint_y", 9),
-    ("m_prompt_rest_x", 3), ("m_prompt_rest_y", 3), ("m_prompt_aimed", 4),
+    ("m_prompt_motions", 3), ("menu_mouse_motions", 3),
     ("m_click_lockout", 3), ("CLICK_LOCKOUT", 2),
 )
 
@@ -653,14 +707,14 @@ def check_wiring():
     assert ("wasInMenus = !!(Key_GetDest () & key_menu); Key_SetDest (key_menu); "
             "m_quit_prevstate = m_state; M_Prompt_Open (); m_state = m_quit; ") in quit_f, \
         "M_Menu_Quit_f must open the prompt through M_Prompt_Open"
-    for name in ("menu_mouse_buttons", "menu_mouse_x", "menu_mouse_y", "realtime"):
+    for name in ("menu_mouse_buttons", "menu_mouse_x", "menu_mouse_y", "menu_mouse_motions", "realtime"):
         assert not re.search(r"\b%s\s*(?:%s|\+\+|--)|(?:\+\+|--)\s*%s\b" % (name, ASSIGN, name), menu), \
             f"menu.c writes {name}; the prompts' click test reads it as input"
     assert "#define CLICK_LOCKOUT 0.35 " in menu, "CLICK_LOCKOUT changed"
     for path in (MENU, INPUT):
         for line in live((ROOT / path).read_text()).splitlines():
             assert not re.match(r"\s*#\s*(define|undef)\b.*(M_Confirm|m_confirm|M_Prompt|m_prompt|"
-                                r"M_Quit|m_quit|m_click_lockout|menu_touch_key|\brealtime\b)", line), \
+                                r"M_Quit|m_quit|m_click_lockout|menu_touch_key|menu_mouse_motions|\brealtime\b)", line), \
                 f"{path} has a macro over the prompt code: {line.strip()}"
 
     # menu_touch_key is zero-initialised, raised by Hexenwail_TouchKey around
@@ -702,6 +756,20 @@ def check_wiring():
         f"in_sdl.c writes menu_mouse_buttons somewhere new: {writes}"
     assert not re.search(r"(\+\+|--)\s*menu_mouse_buttons|menu_mouse_buttons\s*(\+\+|--)", inp), \
         "in_sdl.c writes menu_mouse_buttons somewhere new"
+
+    # What M_Prompt_Aimed rests on, and what the harness's move() copies: the
+    # count goes up when a motion event moves the menu pointer, and nowhere
+    # else -- not in the button handler above, which only refreshes x/y.
+    motion = ("else if ((Key_GetDest() & key_menu) && ui_mouse.integer) { int x, y; "
+              "IN_MenuPointer (&x, &y); "
+              "if (x != menu_mouse_x || y != menu_mouse_y) { "
+              "menu_mouse_x = x; menu_mouse_y = y; menu_mouse_moved = true; "
+              "menu_mouse_motions++; } } break;")
+    assert motion in inp, \
+        "in_sdl.c's menu motion block changed; menu_mouse_motions must count real moves only"
+    assert " unsigned int menu_mouse_motions; " in inp, "menu_mouse_motions must be defined once"
+    assert len(re.findall(r"\bmenu_mouse_motions\b", inp)) == 2, \
+        "in_sdl.c touches menu_mouse_motions outside its definition and the motion block"
 
     # The bit the click block tests is the bit a left press sets.
     pointer_h = squash(live((ROOT / POINTER).read_text()))
