@@ -186,12 +186,20 @@ static confirm_action_t	m_confirm_action = CONFIRM_NONE;
 static int		m_confirm_cursor;	/* load_cursor at the time of the ask */
 static const char	*m_confirm_text;	/* the question, borrowed */
 static enum m_state_e	m_confirm_prevstate;	/* where to go on cancel */
-/* Where M_ConfirmDraw last put the two answer rows, in menu canvas units, so
- * a click can be tested against them.  y < 0 until the prompt has been drawn:
- * a click cannot land on a row nobody has seen. */
+/* Where the prompt on screen (a confirmation, or the quit prompt) last drew
+ * its two answer rows, in menu canvas units, so a click can be tested against
+ * them.  y < 0 until the prompt has been drawn: a click cannot land on a row
+ * nobody has seen. */
 static int		m_confirm_hint_x0, m_confirm_hint_x1, m_confirm_hint_y = -1;
+/* menu_mouse_motions as the prompt went up.  See M_Prompt_Aimed. */
+static unsigned int	m_prompt_motions;
+/* Pointer clicks are dropped until realtime passes this.  See M_Keydown. */
+static double		m_click_lockout;
+#define	CLICK_LOCKOUT	0.5	/* seconds; the usual limit for a double click */
 
 static void M_Confirm (confirm_action_t action, const char *question);
+static void M_Prompt_Open (void);
+static void M_Prompt_DrawAnswers (int x0, int x1, int y, const char *yes, const char *no);
 static void M_ConfirmKey (int key);
 static void M_ConfirmDraw (void);
 static void M_ConfirmAction (confirm_action_t action);
@@ -259,6 +267,7 @@ static const char *DiffNames[MAX_PLAYER_CLASS][NUM_DIFFLEVELS] =
 
 extern int	menu_mouse_x, menu_mouse_y;
 extern qboolean	menu_mouse_moved;
+extern unsigned int	menu_mouse_motions;	/* in_sdl.c; pointer moves seen by the menu */
 extern int	menu_mouse_buttons;	/* in_sdl.c; MENU_MOUSE_BUTTON bits */
 extern qboolean	menu_touch_key;		/* in_sdl.c; key came from the touch overlay */
 
@@ -1355,6 +1364,41 @@ static int		loadable[MAX_SAVEGAMES];
 
 /*
 ==================
+M_Prompt_Open
+
+Every prompt with answer rows calls this as it goes up.  The rows are not
+drawn yet, and the pointer is wherever the last menu left it.
+==================
+*/
+static void M_Prompt_Open (void)
+{
+	m_confirm_hint_y = -1;
+	m_prompt_motions = menu_mouse_motions;
+}
+
+/*
+==================
+M_Prompt_Aimed
+
+True once the pointer has moved since the prompt went up.  A prompt can appear
+under a resting pointer: the sixth save slot is drawn exactly where "Press y to
+confirm" lands, so Delete on a hovered save puts yes under the pointer.  A
+click that was never aimed at an answer must not give one, so until the
+pointer moves the rows neither highlight nor answer.
+
+Moves are counted, not inferred from menu_mouse_x/y: that position is only as
+fresh as the last event the menu saw, and a click refreshes it.  After the
+pointer moved while the game owned input, the click itself would look like a
+move and answer.
+==================
+*/
+static qboolean M_Prompt_Aimed (void)
+{
+	return menu_mouse_motions != m_prompt_motions;
+}
+
+/*
+==================
 M_Confirm
 
 Put a yes/no question on screen as the m_confirm menu state.  The caller
@@ -1368,7 +1412,7 @@ static void M_Confirm (confirm_action_t action, const char *question)
 	m_confirm_cursor = load_cursor;
 	m_confirm_text = question;
 	m_confirm_prevstate = m_state;
-	m_confirm_hint_y = -1;		/* not drawn yet */
+	M_Prompt_Open ();
 	m_state = m_confirm;
 	m_entersound = true;
 }
@@ -1396,13 +1440,13 @@ static int M_Confirm_HitKey (int vx, int vy)
 ==================
 M_Confirm_ClickKey
 
-What a K_MOUSE1 means while a confirmation is up, as the key to hand
-M_ConfirmKey, or 0 to drop it.  Everywhere else in the menus a click is Enter;
-here Enter is yes, so a stray click would delete a save or end the game.
+What a K_MOUSE1 means while a prompt is up, as the key to hand M_ConfirmKey
+or M_Quit_Key, or 0 to drop it.  Everywhere else in the menus a click is Enter;
+here Enter is yes, so a stray click would delete a save, end the game or quit.
 
   touch    the web overlay's attack button: a deliberate accept, like gamepad A
   pointer  a real click with a known position: it answers only if it is on an
-	   answer row
+	   answer row, and only once the pointer has been moved there
   neither  a click with ui_mouse off: there is no pointer to aim, so it is not
 	   an answer
 ==================
@@ -1411,9 +1455,38 @@ static int M_Confirm_ClickKey (qboolean touch, qboolean pointer, int vx, int vy)
 {
 	if (touch)
 		return K_ENTER;
-	if (!pointer)
+	if (!pointer || !M_Prompt_Aimed ())
 		return 0;
 	return M_Confirm_HitKey (vx, vy);
+}
+
+/*
+==================
+M_Prompt_DrawAnswers
+
+Draw a prompt's two answer rows at y and y + 8, centred between x0 and x1, and
+record that rectangle as the click target.  The row under an aimed pointer is
+drawn in the question's face instead of white so it reads as a target.
+ui_mouse off means no pointer, so neither row changes.
+==================
+*/
+static void M_Prompt_DrawAnswers (int x0, int x1, int y, const char *yes, const char *no)
+{
+	int	hover;
+
+	m_confirm_hint_x0 = x0;
+	m_confirm_hint_x1 = x1;
+	m_confirm_hint_y = y;
+	hover = (ui_mouse.integer && M_Prompt_Aimed ()) ?
+			M_Confirm_HitKey (M_PointerCanvasX (), M_PointerCanvasY ()) : 0;
+	if (hover == 'y')
+		M_Print (x0 + (x1 - x0 - (int)strlen(yes) * 8) / 2, y, yes);
+	else
+		M_PrintWhite (x0 + (x1 - x0 - (int)strlen(yes) * 8) / 2, y, yes);
+	if (hover == 'n')
+		M_Print (x0 + (x1 - x0 - (int)strlen(no) * 8) / 2, y + 8, no);
+	else
+		M_PrintWhite (x0 + (x1 - x0 - (int)strlen(no) * 8) / 2, y + 8, no);
 }
 
 /*
@@ -1475,7 +1548,7 @@ static void M_ConfirmDraw (void)
 	const char	*p, *start;
 	char		line[80];
 	int		len, maxlen, rows;
-	int		bx, by, bw, bh, hover;
+	int		bx, by, bw, bh;
 
 	maxlen = (int)strlen (CONFIRM_HINT1);
 	if ((int)strlen (CONFIRM_HINT2) > maxlen)
@@ -1533,24 +1606,8 @@ static void M_ConfirmDraw (void)
 			break;
 	}
 
-	/* The two answer rows are click targets across the inside of the box, and
-	 * the one under the pointer is drawn in the question's face instead of
-	 * white so it reads as one.  ui_mouse off means no pointer, so neither
-	 * changes. */
-	by += 8;
-	m_confirm_hint_x0 = bx + 8;
-	m_confirm_hint_x1 = bx + bw - 8;
-	m_confirm_hint_y = by;
-	hover = ui_mouse.integer ? M_Confirm_HitKey (M_PointerCanvasX (), M_PointerCanvasY ()) : 0;
-	if (hover == 'y')
-		M_Print (bx + (bw - (int)strlen(CONFIRM_HINT1) * 8) / 2, by, CONFIRM_HINT1);
-	else
-		M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT1) * 8) / 2, by, CONFIRM_HINT1);
-	by += 8;
-	if (hover == 'n')
-		M_Print (bx + (bw - (int)strlen(CONFIRM_HINT2) * 8) / 2, by, CONFIRM_HINT2);
-	else
-		M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT2) * 8) / 2, by, CONFIRM_HINT2);
+	/* The two answer rows are click targets across the inside of the box. */
+	M_Prompt_DrawAnswers (bx + 8, bx + bw - 8, by + 8, CONFIRM_HINT1, CONFIRM_HINT2);
 }
 
 static void M_ScanSaves (void)
@@ -7540,6 +7597,8 @@ static const char *Credit2TextMP[MAX_LINES2_MP] =
 };
 
 #define QUIT_SIZE 12	/* visible credit-scroll lines */
+#define	QUIT_HINT1	"Press y to exit"
+#define	QUIT_HINT2	"Press n to cancel"
 
 void M_Menu_Quit_f (void)
 {
@@ -7556,6 +7615,7 @@ void M_Menu_Quit_f (void)
 	wasInMenus = !!(Key_GetDest () & key_menu);
 	Key_SetDest (key_menu);
 	m_quit_prevstate = m_state;
+	M_Prompt_Open ();
 	m_state = m_quit;
 	m_entersound = true;
 //	msgNumber = rand()&7;
@@ -7584,6 +7644,9 @@ static void M_Quit_Key (int key)
 	case K_ESCAPE:
 	case 'n':
 	case 'N':
+		/* The rows belong to this prompt; whatever is under it has not
+		 * drawn its own yet. */
+		m_confirm_hint_y = -1;
 		if (wasInMenus)
 		{
 			m_state = m_quit_prevstate;
@@ -7628,6 +7691,11 @@ static void M_Quit_Draw (void)
 		m_recursiveDraw = true;
 		M_Draw ();
 		m_state = m_quit;
+		/* M_Draw leaves in CANVAS_DEFAULT.  Back to the menu canvas: the
+		 * answer rows are click targets, and a click is tested in menu
+		 * canvas units, so they have to be drawn in them. */
+		GL_SetCanvas (CANVAS_MENU);
+		m_canvas_active = true;
 	}
 
 	LinePos += host_frametime*1.75;
@@ -7704,8 +7772,13 @@ static void M_Quit_Draw (void)
 		M_DrawPic(x, y + (QUIT_SIZE*8) + 8, p);	// draw at bottom for smooth scroll in
 	}
 
+	/* The answer rows are click targets as wide as the longer hint and a
+	 * column either side, like a confirmation's.  The second sits on the last
+	 * row inside the box. */
 	y += (QUIT_SIZE * 8) + 8;
-	M_PrintWhite ((320 - 15 * 8) / 2, y,  "Press y to exit");
+	M_Prompt_DrawAnswers ((320 - (int)strlen(QUIT_HINT2) * 8) / 2 - 8,
+			      (320 + (int)strlen(QUIT_HINT2) * 8) / 2 + 8,
+			      y, QUIT_HINT1, QUIT_HINT2);
 }
 
 //=============================================================================
@@ -10126,16 +10199,25 @@ void M_Keydown (int key, qboolean repeat)
 	 * and that must stay a plain Enter. */
 	if (key == K_MOUSE1)
 	{
-		if (!repeat && (menu_mouse_buttons & MENU_MOUSE_LEFT) && M_MousePress ())
+		qboolean	pointer = (menu_mouse_buttons & MENU_MOUSE_LEFT) != 0;
+
+		/* A click on an answer row takes the prompt away, and the second
+		 * click of a double click would land as Enter on whatever menu is
+		 * under the pointer now: a double click on "cancel" over the Save
+		 * menu saved over a slot. */
+		if (pointer && realtime < m_click_lockout)
 			return;
-		if (m_state == m_confirm)
+		if (!repeat && pointer && M_MousePress ())
+			return;
+		if (m_state == m_confirm || m_state == m_quit)
 		{
 			/* Not Enter here: see M_Confirm_ClickKey. */
-			key = M_Confirm_ClickKey (menu_touch_key,
-					(menu_mouse_buttons & MENU_MOUSE_LEFT) != 0,
+			key = M_Confirm_ClickKey (menu_touch_key, pointer,
 					M_PointerCanvasX (), M_PointerCanvasY ());
 			if (!key)
 				return;
+			if (key != K_ENTER)
+				m_click_lockout = realtime + CLICK_LOCKOUT;
 		}
 		else
 			key = K_ENTER;
