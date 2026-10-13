@@ -283,24 +283,54 @@ def check_wiring():
             "(menu_mouse_buttons & MENU_MOUSE_LEFT) != 0, "
             "M_PointerCanvasX (), M_PointerCanvasY ()); "
             "if (!key) return; } else key = K_ENTER; } "
-            "else if (key == K_MWHEELUP)")
+            # The rest of the remap chain: no wheel notch, other button or
+            # pad key may become an answer the click could not be.
+            "else if (key == K_MWHEELUP) key = K_UPARROW; "
+            "else if (key == K_MWHEELDOWN) key = K_DOWNARROW; "
+            "else if (key == K_GP_A) key = K_ENTER; "
+            "else if (key == K_GP_B) key = K_ESCAPE; "
+            "else if (key == K_GP_DPAD_UP || key == K_GP_DPAD_DOWN || "
+            "key == K_GP_DPAD_LEFT || key == K_GP_DPAD_RIGHT) {")
     assert keydown.startswith(want), \
-        "M_Keydown's click block changed; a click on m_confirm must go through " \
-        "M_Confirm_ClickKey and nothing else. Found: " + keydown[:len(want) + 80]
+        "M_Keydown's click block or remap chain changed; a click on m_confirm must go " \
+        "through M_Confirm_ClickKey and nothing else. Found: " + keydown[:len(want) + 80]
     assert "case m_confirm: M_ConfirmKey (key); return;" in keydown, \
         "M_Keydown must hand m_confirm's key straight to M_ConfirmKey"
     assert keydown.count("m_confirm") == 2, \
         "M_Keydown mentions m_confirm outside the click block and the dispatch"
+    # Ten rewrites of the key in all: the click block's two, wheel up and
+    # down, pad A and B, and the four d-pad arrows.  Two of them are Enter.
+    assert len(re.findall(r"\bkey = ", keydown)) == 10, \
+        "M_Keydown rewrites the key somewhere new"
+    assert keydown.count("key = K_ENTER;") == 2, \
+        "M_Keydown turns something other than a non-confirm click and pad A into Enter"
 
-    # One caller each, so there is no second way in.
-    for name, uses in (("M_ConfirmKey (", 3), ("M_Confirm_ClickKey (", 2),
-                       ("M_Confirm_HitKey (", 3), ("menu_touch_key", 2),
-                       ("m_confirm_hint_", 14)):
-        assert menu.count(name) == uses, \
-            f"menu.c uses {name!r} {menu.count(name)} times, expected {uses}"
+    # The pointer layer runs ahead of the click block; it must not know the
+    # prompt exists.
+    press = squash(live(function(MENU, "static qboolean M_MousePress (void)\n{")))
+    assert press == ("static qboolean M_MousePress (void) { m_grab = MGRAB_NONE; "
+                     "if (m_state == m_mods) return M_Mods_MousePress (); "
+                     "return M_Slider_MousePress (); }"), \
+        "M_MousePress changed; it runs before the confirmation's click test"
 
-    # menu_touch_key is raised by Hexenwail_TouchKey around its Key_Event and
-    # touched by nothing else, so a real click can never pass for a touch.
+    # One caller each, so there is no second way in, and nothing else that
+    # answers or leaves the prompt.
+    for name, uses in (("M_ConfirmKey", 3), ("M_Confirm_ClickKey", 2),
+                       ("M_Confirm_HitKey", 3), ("menu_touch_key", 2),
+                       ("m_confirm", 4), ("m_confirm_action", 5),
+                       ("m_confirm_prevstate", 4),
+                       ("m_confirm_hint_x0", 3), ("m_confirm_hint_x1", 3),
+                       ("m_confirm_hint_y", 8)):
+        found = len(re.findall(r"\b%s\b" % name, menu))
+        assert found == uses, f"menu.c uses {name!r} {found} times, expected {uses}"
+    for path in (MENU, INPUT):
+        for line in live((ROOT / path).read_text()).splitlines():
+            assert not re.match(r"\s*#\s*(define|undef)\b.*(M_Confirm|m_confirm|menu_touch_key)", line), \
+                f"{path} has a macro over the confirmation code: {line.strip()}"
+
+    # menu_touch_key is zero-initialised, raised by Hexenwail_TouchKey around
+    # its Key_Event and touched by nothing else, so a real click can never
+    # pass for a touch.
     inp = squash(live((ROOT / INPUT).read_text()))
     touch = squash(live(function(INPUT, "EMSCRIPTEN_KEEPALIVE int Hexenwail_TouchKey (int key, int down)\n{")))
     assert touch.endswith("{ if (key <= 0 || key > K_GP_DPAD_RIGHT) return 0; "
@@ -309,6 +339,28 @@ def check_wiring():
         "Hexenwail_TouchKey must raise menu_touch_key around its Key_Event only"
     assert inp.count("menu_touch_key") == 3, \
         "in_sdl.c touches menu_touch_key outside its definition and Hexenwail_TouchKey"
+    assert " qboolean menu_touch_key; " in inp, \
+        "menu_touch_key must be defined without an initialiser"
+
+    # What M_Keydown's `pointer` argument rests on: the button bit is set in
+    # one place, behind ui_mouse, and that place sends the click as K_MOUSE1.
+    block = ("case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: "
+             "if (!event.button.down && event.button.button >= 1 && "
+             "event.button.button <= 16) "
+             "menu_mouse_buttons &= ~MENU_MOUSE_BUTTON(event.button.button); "
+             "if ((Key_GetDest() & key_menu) && ui_mouse.integer) { "
+             "if (event.button.down && event.button.button >= 1 && "
+             "event.button.button <= 16) "
+             "menu_mouse_buttons |= MENU_MOUSE_BUTTON(event.button.button); "
+             "IN_MenuPointer (&menu_mouse_x, &menu_mouse_y); "
+             "menu_mouse_moved = true; "
+             "if (event.button.button == 1) Key_Event(K_MOUSE1, event.button.down); "
+             "break; }")
+    assert block in inp, \
+        "in_sdl.c's menu click block changed; the button bit must be set only " \
+        "with ui_mouse on, and a click must arrive as K_MOUSE1"
+    assert len(re.findall(r"\bmenu_mouse_buttons\s*(\|=|=(?!=)\s*[^0\s])", inp)) == 1, \
+        "in_sdl.c sets a menu_mouse_buttons bit outside the menu click block"
 
 
 def main():
