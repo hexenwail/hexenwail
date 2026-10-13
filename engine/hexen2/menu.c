@@ -186,6 +186,10 @@ static confirm_action_t	m_confirm_action = CONFIRM_NONE;
 static int		m_confirm_cursor;	/* load_cursor at the time of the ask */
 static const char	*m_confirm_text;	/* the question, borrowed */
 static enum m_state_e	m_confirm_prevstate;	/* where to go on cancel */
+/* Where M_ConfirmDraw last put the two answer rows, in menu canvas units, so
+ * a click can be tested against them.  y < 0 until the prompt has been drawn:
+ * a click cannot land on a row nobody has seen. */
+static int		m_confirm_hint_x0, m_confirm_hint_x1, m_confirm_hint_y = -1;
 
 static void M_Confirm (confirm_action_t action, const char *question);
 static void M_ConfirmKey (int key);
@@ -256,6 +260,7 @@ static const char *DiffNames[MAX_PLAYER_CLASS][NUM_DIFFLEVELS] =
 extern int	menu_mouse_x, menu_mouse_y;
 extern qboolean	menu_mouse_moved;
 extern int	menu_mouse_buttons;	/* in_sdl.c; MENU_MOUSE_BUTTON bits */
+extern qboolean	menu_touch_key;		/* in_sdl.c; key came from the touch overlay */
 
 /* Framebuffer pixel Y -> CANVAS_MENU Y (MenuPointer_CanvasY). */
 static int M_ScreenYToCanvasY (int screen_y);
@@ -1352,11 +1357,9 @@ static int		loadable[MAX_SAVEGAMES];
 ==================
 M_Confirm
 
-Ask the player to confirm.  Returns true when the caller should run its action
-now, which on a target that can wait for a keypress means the player said yes.
-Where it cannot, the question goes on screen and this returns false: the caller
-must return, and M_ConfirmAction runs its action if the answer turns out to be
-yes.
+Put a yes/no question on screen as the m_confirm menu state.  The caller
+returns at once; M_ConfirmKey runs the action through M_ConfirmAction if the
+answer is yes, on whatever later frame it arrives.
 ==================
 */
 static void M_Confirm (confirm_action_t action, const char *question)
@@ -1365,8 +1368,52 @@ static void M_Confirm (confirm_action_t action, const char *question)
 	m_confirm_cursor = load_cursor;
 	m_confirm_text = question;
 	m_confirm_prevstate = m_state;
+	m_confirm_hint_y = -1;		/* not drawn yet */
 	m_state = m_confirm;
 	m_entersound = true;
+}
+
+/*
+==================
+M_Confirm_HitKey
+
+The answer a pointer at (vx, vy) in menu canvas units is resting on: 'y' on the
+confirm row, 'n' on the cancel row, 0 anywhere else.
+==================
+*/
+static int M_Confirm_HitKey (int vx, int vy)
+{
+	if (m_confirm_hint_y < 0 || vx < m_confirm_hint_x0 || vx >= m_confirm_hint_x1)
+		return 0;
+	if (vy >= m_confirm_hint_y && vy < m_confirm_hint_y + 8)
+		return 'y';
+	if (vy >= m_confirm_hint_y + 8 && vy < m_confirm_hint_y + 16)
+		return 'n';
+	return 0;
+}
+
+/*
+==================
+M_Confirm_ClickKey
+
+What a K_MOUSE1 means while a confirmation is up, as the key to hand
+M_ConfirmKey, or 0 to drop it.  Everywhere else in the menus a click is Enter;
+here Enter is yes, so a stray click would delete a save or end the game.
+
+  touch    the web overlay's attack button: a deliberate accept, like gamepad A
+  pointer  a real click with a known position: it answers only if it is on an
+	   answer row
+  neither  a click with ui_mouse off: there is no pointer to aim, so it is not
+	   an answer
+==================
+*/
+static int M_Confirm_ClickKey (qboolean touch, qboolean pointer, int vx, int vy)
+{
+	if (touch)
+		return K_ENTER;
+	if (!pointer)
+		return 0;
+	return M_Confirm_HitKey (vx, vy);
 }
 
 /*
@@ -1428,7 +1475,7 @@ static void M_ConfirmDraw (void)
 	const char	*p, *start;
 	char		line[80];
 	int		len, maxlen, rows;
-	int		bx, by, bw, bh;
+	int		bx, by, bw, bh, hover;
 
 	maxlen = (int)strlen (CONFIRM_HINT1);
 	if ((int)strlen (CONFIRM_HINT2) > maxlen)
@@ -1486,10 +1533,24 @@ static void M_ConfirmDraw (void)
 			break;
 	}
 
+	/* The two answer rows are click targets across the inside of the box, and
+	 * the one under the pointer is drawn in the question's face instead of
+	 * white so it reads as one.  ui_mouse off means no pointer, so neither
+	 * changes. */
 	by += 8;
-	M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT1) * 8) / 2, by, CONFIRM_HINT1);
+	m_confirm_hint_x0 = bx + 8;
+	m_confirm_hint_x1 = bx + bw - 8;
+	m_confirm_hint_y = by;
+	hover = ui_mouse.integer ? M_Confirm_HitKey (M_PointerCanvasX (), M_PointerCanvasY ()) : 0;
+	if (hover == 'y')
+		M_Print (bx + (bw - (int)strlen(CONFIRM_HINT1) * 8) / 2, by, CONFIRM_HINT1);
+	else
+		M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT1) * 8) / 2, by, CONFIRM_HINT1);
 	by += 8;
-	M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT2) * 8) / 2, by, CONFIRM_HINT2);
+	if (hover == 'n')
+		M_Print (bx + (bw - (int)strlen(CONFIRM_HINT2) * 8) / 2, by, CONFIRM_HINT2);
+	else
+		M_PrintWhite (bx + (bw - (int)strlen(CONFIRM_HINT2) * 8) / 2, by, CONFIRM_HINT2);
 }
 
 static void M_ScanSaves (void)
@@ -10067,7 +10128,17 @@ void M_Keydown (int key, qboolean repeat)
 	{
 		if (!repeat && (menu_mouse_buttons & MENU_MOUSE_LEFT) && M_MousePress ())
 			return;
-		key = K_ENTER;
+		if (m_state == m_confirm)
+		{
+			/* Not Enter here: see M_Confirm_ClickKey. */
+			key = M_Confirm_ClickKey (menu_touch_key,
+					(menu_mouse_buttons & MENU_MOUSE_LEFT) != 0,
+					M_PointerCanvasX (), M_PointerCanvasY ());
+			if (!key)
+				return;
+		}
+		else
+			key = K_ENTER;
 	}
 	else if (key == K_MWHEELUP)
 		key = K_UPARROW;
