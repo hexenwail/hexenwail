@@ -9,6 +9,7 @@
 #include "../hexenworld/shared/net.h"
 #include "../hexenworld/shared/huffman.h"
 #include "../hexenworld/shared/pmove.h"
+#include "hw_particle_mapping.h"
 
 
 #define HW_PORT_CLIENT 26901
@@ -1043,7 +1044,7 @@ static void HWCL_ParseParticle2 (void)
 		dmax[i] = MSG_ReadFloat ();
 	color = MSG_ReadShort ();
 	count = MSG_ReadByte ();
-	effect = (ptype_t)MSG_ReadByte ();
+	effect = HW_H2ParticleMap (MSG_ReadByte ());
 	if (!msg_badread)
 		R_RunParticleEffect2 (origin, dmin, dmax, color, effect, count);
 }
@@ -1060,7 +1061,7 @@ static void HWCL_ParseParticle3 (void)
 		box[i] = MSG_ReadByte ();
 	color = MSG_ReadShort ();
 	count = MSG_ReadByte ();
-	effect = (ptype_t)MSG_ReadByte ();
+	effect = HW_H2ParticleMap (MSG_ReadByte ());
 	if (!msg_badread)
 		R_RunParticleEffect3 (origin, box, color, effect, count);
 }
@@ -1076,7 +1077,7 @@ static void HWCL_ParseParticle4 (void)
 	radius = MSG_ReadByte ();
 	color = MSG_ReadShort ();
 	count = MSG_ReadByte ();
-	effect = (ptype_t)MSG_ReadByte ();
+	effect = HW_H2ParticleMap (MSG_ReadByte ());
 	if (!msg_badread)
 		R_RunParticleEffect4 (origin, radius, color, effect, count);
 }

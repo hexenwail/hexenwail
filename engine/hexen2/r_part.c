@@ -135,6 +135,8 @@ static int ramp9[16] = { 416, 416+1, 416+2, 416+3, 416+4, 416+5, 416+6, 416+7, 4
 static int ramp10[16] ={ 432, 432+1, 432+2, 432+3, 432+4, 432+5, 432+6, 432+7, 432+8, 432+9, 432+10, 432+11, 432+12, 432+13, 432+14, 432+15 };
 static int ramp11[8] = { 424, 424+1, 424+2, 424+3, 424+4, 424+5, 424+6, 424+7 };
 static int ramp12[8] = { 136, 137, 138, 139, 140, 141, 142, 143 };
+/* HexenWorld */
+static int ramp13[16] ={ 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159 };
 
 //=============================================================================
 
@@ -2547,6 +2549,19 @@ void R_UpdateParticles (void)
 			p->vel[0] *= .9;
 			p->vel[1] *= .9;
 			p->vel[2] += grav/2;
+			break;
+
+		case pt_bluestep:
+		// HexenWorld: footstep puff, as its client ran it
+			p->ramp += frametime * 8;
+			if ((int)p->ramp >= 16)
+				p->die = -1;
+			else
+				p->color = ramp13[(int)p->ramp] + 256;
+
+			p->vel[0] *= .9;
+			p->vel[1] *= .9;
+			p->vel[2] += grav;
 			break;
 
 		case pt_magicmissile:
