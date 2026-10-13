@@ -7691,6 +7691,11 @@ static void M_Quit_Draw (void)
 		m_recursiveDraw = true;
 		M_Draw ();
 		m_state = m_quit;
+		/* M_Draw leaves in CANVAS_DEFAULT.  Back to the menu canvas: the
+		 * answer rows are click targets, and a click is tested in menu
+		 * canvas units, so they have to be drawn in them. */
+		GL_SetCanvas (CANVAS_MENU);
+		m_canvas_active = true;
 	}
 
 	LinePos += host_frametime*1.75;

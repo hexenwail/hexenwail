@@ -107,7 +107,15 @@ static void M_ConfirmAction (confirm_action_t action) { if (action == CONFIRM_DE
 static void Host_Quit_f (void) { quits++; }
 static void Key_SetDest (int dest) { assert (dest == key_game); to_game++; }
 static void Sbar_Changed (void) {}
-static void M_Draw (void) {}
+/* The canvas the draw calls land in.  A click is tested in menu canvas units,
+ * so every prompt draw must be in the menu canvas.  M_Draw here is the menu
+ * under the quit prompt being drawn, and it leaves the way the real one does:
+ * check_wiring pins that tail. */
+enum { CANVAS_DEFAULT, CANVAS_MENU };
+static int canvas;
+static qboolean m_canvas_active;
+static void GL_SetCanvas (int c) { canvas = c; }
+static void M_Draw (void) { m_canvas_active = false; GL_SetCanvas (CANVAS_DEFAULT); }
 static void BGM_PlayCDtrack (int track, qboolean looping) { (void)track; (void)looping; }
 static void S_LocalSound (const char *name) { (void)name; }
 static qpic_t a_pic;
@@ -122,11 +130,15 @@ static int M_PointerCanvasY (void) { return menu_mouse_y; }
 /* What the prompt put on screen, recorded instead of drawn. */
 static int box_n, box_x, box_y, box_w, box_lines;
 static void M_DrawTextBox (int x, int y, int width, int lines)
-{ box_n++; box_x = x; box_y = y; box_w = width; box_lines = lines; }
+{
+    assert (canvas == CANVAS_MENU && m_canvas_active);
+    box_n++; box_x = x; box_y = y; box_w = width; box_lines = lines;
+}
 static struct { int white, x, y; char text[80]; } printed[16];
 static int nprinted;
 static void record (int white, int cx, int cy, const char *str)
 {
+    assert (canvas == CANVAS_MENU && m_canvas_active);
     assert (nprinted < 16 && strlen (str) < 80);
     printed[nprinted].white = white; printed[nprinted].x = cx; printed[nprinted].y = cy;
     strcpy (printed[nprinted].text, str);
@@ -167,8 +179,12 @@ static int kind;
 static void redraw (void)
 {
     box_n = nprinted = 0;
+    /* as M_Draw does before it dispatches on m_state */
+    GL_SetCanvas (CANVAS_MENU);
+    m_canvas_active = true;
     if (kind == DELETE) M_ConfirmDraw (); else M_Quit_Draw ();
     assert (box_n == 1);
+    assert (canvas == CANVAS_MENU && m_canvas_active);
 }
 
 static void draw (int px, int py)
@@ -255,7 +271,7 @@ static void prompt (int k, const char *question)
 {
     const char *hint1 = (k == DELETE) ? CONFIRM_HINT1 : QUIT_HINT1;
     const char *hint2 = (k == DELETE) ? CONFIRM_HINT2 : QUIT_HINT2;
-    int x, y, x0, x1, top, bottom, yes, no, yy, ny, i, want, c;
+    int x, y, x0, x1, top, bottom, yes, no, yx, nx, yy, ny, i, want, c;
     int corner[4][2];
 
     kind = k;
@@ -282,8 +298,13 @@ static void prompt (int k, const char *question)
     bottom = box_y + 8 + box_lines * 8;
     yes = find (hint1);
     no = find (hint2);
+    yx = printed[yes].x;
+    nx = printed[no].x;
     yy = printed[yes].y;
     ny = printed[no].y;
+/* hovered or not, each hint is drawn in the one place */
+#define PLACED() assert (printed[find (hint1)].x == yx && printed[find (hint1)].y == yy \
+                      && printed[find (hint2)].x == nx && printed[find (hint2)].y == ny)
     if (kind == DELETE)
     {
         x0 = box_x + 8;
@@ -329,13 +350,17 @@ static void prompt (int k, const char *question)
     /* The row under the pointer is drawn in the question's face, and only
      * with a pointer to aim. */
     draw (x0, yy);
+    PLACED ();
     assert (!printed[find (hint1)].white && printed[find (hint2)].white);
     draw (x1 - 1, ny + 7);
+    PLACED ();
     assert (printed[find (hint1)].white && !printed[find (hint2)].white);
     draw (x0 - 1, yy);
+    PLACED ();
     assert (printed[find (hint1)].white && printed[find (hint2)].white);
     ui_mouse.integer = 0;
     draw (x0, yy);
+    PLACED ();
     assert (printed[find (hint1)].white && printed[find (hint2)].white);
     ui_mouse.integer = 1;
 
@@ -366,11 +391,13 @@ static void prompt (int k, const char *question)
         else
             draw (x, y + 1);
         draw (x, y);
+        PLACED ();
         assert (printed[find (hint1)].white == (want != 1));
         assert (printed[find (hint2)].white == (want != -1));
         assert (click (false, true, x, y) == want);
         assert (click (false, true, x, y) == want);
     }
+#undef PLACED
 }
 
 /* After a pointer click answers a prompt, the menu under it must not take the
@@ -436,9 +463,11 @@ int main (void)
      * the box, and the rows with it, land somewhere else each time; the quit
      * prompt between them leaves its own rows behind for the next. */
     prompt (DELETE, "Are you sure you want to\nstart a new game?\n");
+    wasInMenus = true;      /* over a menu, which M_Quit_Draw draws first */
     prompt (QUIT, NULL);
     prompt (DELETE, "Are you sure you want to\ndelete this saved game?\n");
     prompt (DELETE, "A question wider than both hints\n");
+    wasInMenus = false;     /* straight from the game */
     prompt (QUIT, NULL);
     prompt (DELETE, "One\ntwo\nthree\nfour\nfive\nsix\n");
     prompt (DELETE, "Are you sure you want to\nstart a new game?\n");
@@ -447,6 +476,7 @@ int main (void)
      * y 176 and 184; lockout() fails on its first answer if they move. */
     lockout (DELETE, 100, 100, 1);
     lockout (DELETE, 100, 108, -1);
+    wasInMenus = true;
     lockout (QUIT, 160, 176, 1);
     lockout (QUIT, 160, 184, -1);
 
@@ -610,6 +640,14 @@ def check_wiring():
         "M_Draw's m_confirm case must draw the prompt and do nothing else"
     assert "case m_quit: M_Quit_Draw (); break;" in menu, \
         "M_Draw's m_quit case must draw the prompt and do nothing else"
+    # The harness's M_Draw stub and redraw() copy the canvas M_Draw dispatches
+    # in and the canvas it leaves in.
+    draw_fn = squash(live(function(MENU, "void M_Draw (void)\n{")))
+    assert "GL_SetCanvas (CANVAS_MENU); m_canvas_active = true; switch (m_state) {" in draw_fn, \
+        "M_Draw must dispatch inside the menu canvas"
+    assert ("menu_mouse_moved = false; m_canvas_active = false; "
+            "GL_SetCanvas (CANVAS_DEFAULT);") in draw_fn, \
+        "M_Draw's tail changed; the harness's M_Draw stub models it"
     # The harness raises the quit prompt by hand; this is what it copies.
     quit_f = squash(live(function(MENU, "void M_Menu_Quit_f (void)\n{")))
     assert ("wasInMenus = !!(Key_GetDest () & key_menu); Key_SetDest (key_menu); "
