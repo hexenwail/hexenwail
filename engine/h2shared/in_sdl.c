@@ -86,11 +86,10 @@ EMSCRIPTEN_KEEPALIVE void Hexenwail_TouchLook (double dx, double dy)
 int		menu_mouse_x, menu_mouse_y;
 qboolean	menu_mouse_moved;
 /* Counts the times the pointer has been seen to move while the menu owned
- * input.  Unlike menu_mouse_moved it is never cleared, and unlike a change in
- * menu_mouse_x/y it is not raised by a click: the button handler refreshes the
- * position, and after the pointer moved unseen (the game owned input) that
- * refresh alone changes it.  A prompt compares counts to tell whether the
- * pointer was moved onto an answer or merely found there. */
+ * input.  Unlike menu_mouse_moved it is never cleared, and it is raised
+ * neither by a click nor by a motion event that leaves the pointer where it
+ * was last seen.  A prompt compares counts to tell whether the pointer was
+ * moved onto an answer or merely found there. */
 unsigned int	menu_mouse_motions;
 /* Held SDL mouse buttons, MENU_MOUSE_BUTTON(b) per button, so a menu can tell
  * a press-drag from a click (issue #137).  Set only by real SDL button events
@@ -1630,6 +1629,20 @@ void IN_SendKeyEvents (void)
 			break;
 
 		case SDL_EVENT_MOUSE_MOTION:
+		{
+			int		x, y;
+			qboolean	moved;
+
+			/* The position is tracked whoever owns input, so it is never
+			 * stale when the menu takes over.  SDL sends a motion event
+			 * of its own on leaving relative mouse mode; against a stale
+			 * position that looked like a move and armed a prompt nobody
+			 * had aimed at. */
+			IN_MenuPointer (&x, &y);
+			moved = (x != menu_mouse_x || y != menu_mouse_y);
+			menu_mouse_x = x;
+			menu_mouse_y = y;
+
 			if (Key_GetDest() == key_console)
 			{
 				float mx, my;
@@ -1643,19 +1656,13 @@ void IN_SendKeyEvents (void)
 			 * activated whatever was selected BEFORE it (the cursor moves
 			 * in M_Draw, which runs after K_MOUSE1 has already been
 			 * dispatched as Enter).  uhexen2-u4iz. */
-			else if ((Key_GetDest() & key_menu) && ui_mouse.integer)
+			else if ((Key_GetDest() & key_menu) && ui_mouse.integer && moved)
 			{
-				int x, y;
-				IN_MenuPointer (&x, &y);
-				if (x != menu_mouse_x || y != menu_mouse_y)
-				{
-					menu_mouse_x = x;
-					menu_mouse_y = y;
-					menu_mouse_moved = true;
-					menu_mouse_motions++;
-				}
+				menu_mouse_moved = true;
+				menu_mouse_motions++;
 			}
 			break;
+		}
 
 		case SDL_EVENT_GAMEPAD_AXIS_MOTION:
 			break;

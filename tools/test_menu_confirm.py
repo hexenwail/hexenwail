@@ -177,9 +177,8 @@ static int kind;
 
 /* The pointer as in_sdl.c feeds it (check_wiring pins both halves).  A motion
  * event while the menu owns input moves it and is counted, if it went
- * anywhere.  A click refreshes the position and is not counted: the pointer
- * is merely found where it was left, which after the game owned input is not
- * where the menu last saw it. */
+ * anywhere.  A motion event while the game owns input, or a click, sets the
+ * position and is not counted: the pointer is merely found there. */
 static void move (int x, int y)
 {
     if (x != menu_mouse_x || y != menu_mouse_y)
@@ -441,6 +440,18 @@ static void prompt (int k, const char *question)
         redraw ();
         assert (printed[find (hint1)].white == (want != 1));
         assert (click_found (x, y) == want);
+
+        /* in_sdl.c follows the pointer while the game owns input too, so the
+         * motion event SDL sends by itself on leaving relative mouse mode
+         * finds the pointer where it was last seen.  That is no move. */
+        open (x, y, question);
+        redraw ();
+        move (x, y);
+        redraw ();
+        PLACED ();
+        assert (printed[find (hint1)].white && printed[find (hint2)].white);
+        assert (click_found (x, y) == 0);
+        assert (click_found (x, y) == 0);
 
         /* One move is enough: straight onto the row from somewhere else. */
         open (FAR, FAR, question);
@@ -710,7 +721,7 @@ def check_wiring():
     for name in ("menu_mouse_buttons", "menu_mouse_x", "menu_mouse_y", "menu_mouse_motions", "realtime"):
         assert not re.search(r"\b%s\s*(?:%s|\+\+|--)|(?:\+\+|--)\s*%s\b" % (name, ASSIGN, name), menu), \
             f"menu.c writes {name}; the prompts' click test reads it as input"
-    assert "#define CLICK_LOCKOUT 0.35 " in menu, "CLICK_LOCKOUT changed"
+    assert "#define CLICK_LOCKOUT 0.5 " in menu, "CLICK_LOCKOUT changed"
     for path in (MENU, INPUT):
         for line in live((ROOT / path).read_text()).splitlines():
             assert not re.match(r"\s*#\s*(define|undef)\b.*(M_Confirm|m_confirm|M_Prompt|m_prompt|"
@@ -760,13 +771,20 @@ def check_wiring():
     # What M_Prompt_Aimed rests on, and what the harness's move() copies: the
     # count goes up when a motion event moves the menu pointer, and nowhere
     # else -- not in the button handler above, which only refreshes x/y.
-    motion = ("else if ((Key_GetDest() & key_menu) && ui_mouse.integer) { int x, y; "
+    # The position is taken on every motion event, whoever owns input, before
+    # anything is counted: a position left stale while the game owned input
+    # lets the motion event SDL sends on leaving relative mode pass for a move.
+    motion = ("case SDL_EVENT_MOUSE_MOTION: { int x, y; qboolean moved; "
               "IN_MenuPointer (&x, &y); "
-              "if (x != menu_mouse_x || y != menu_mouse_y) { "
-              "menu_mouse_x = x; menu_mouse_y = y; menu_mouse_moved = true; "
-              "menu_mouse_motions++; } } break;")
+              "moved = (x != menu_mouse_x || y != menu_mouse_y); "
+              "menu_mouse_x = x; menu_mouse_y = y; "
+              "if (Key_GetDest() == key_console) { float mx, my; "
+              "SDL_GetMouseState(&mx, &my); Con_MouseMove((int)mx, (int)my); } "
+              "else if ((Key_GetDest() & key_menu) && ui_mouse.integer && moved) { "
+              "menu_mouse_moved = true; menu_mouse_motions++; } break; }")
     assert motion in inp, \
-        "in_sdl.c's menu motion block changed; menu_mouse_motions must count real moves only"
+        "in_sdl.c's motion block changed; menu_mouse_motions must count real moves only, " \
+        "against a position tracked on every motion event"
     assert " unsigned int menu_mouse_motions; " in inp, "menu_mouse_motions must be defined once"
     assert len(re.findall(r"\bmenu_mouse_motions\b", inp)) == 2, \
         "in_sdl.c touches menu_mouse_motions outside its definition and the motion block"

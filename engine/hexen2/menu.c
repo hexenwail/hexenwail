@@ -195,7 +195,7 @@ static int		m_confirm_hint_x0, m_confirm_hint_x1, m_confirm_hint_y = -1;
 static unsigned int	m_prompt_motions;
 /* Pointer clicks are dropped until realtime passes this.  See M_Keydown. */
 static double		m_click_lockout;
-#define	CLICK_LOCKOUT	0.35	/* seconds; longer than a double click */
+#define	CLICK_LOCKOUT	0.5	/* seconds; the usual limit for a double click */
 
 static void M_Confirm (confirm_action_t action, const char *question);
 static void M_Prompt_Open (void);
