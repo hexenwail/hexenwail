@@ -22,6 +22,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `headless-cfg.sh` | generate a scripted-run config that emits those dumps |
 | `headless-drive.sh` | drive the engine's menus under Xvfb with real key events |
 | `serve.sh` | drive the dedicated server (`h2ded`) on stdin, with no X at all |
+| `hw-drive.sh` | run `hwsv` and a client connected to it, and screenshot the HexenWorld session |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
@@ -178,6 +179,41 @@ in the grave-key toggle. An unrecognised verb aborts the run.
 The other `case` arms are worked examples. Add one only when a run needs real
 logic (a loop, a control condition). Timings are generous: the engine gets
 25 s to load a map.
+
+---
+
+## hw-drive.sh — a live HexenWorld session
+
+The client's HexenWorld reader (`engine/hexen2/cl_hw.c`) runs only after
+`connect hw://`, so no other driver here reaches it. `hw-drive.sh` starts
+`hwsv` on loopback, boots the client through `headless-drive.sh`, connects it,
+and then runs your step file with the client already in the game.
+
+```sh
+nix build .#default      -o result
+nix build .#hwsv-bundled -o result-hwsv
+nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubblewrap --command \
+  env STEPS=tools/hw-bluestep.steps ./tools/hw-drive.sh /tmp/out-hw
+```
+
+About 90 s. It ends with `client_rc=0  server saw joins: 1  client signons: 1`
+and exits non-zero if the client never signed on. Output: `server.log` (the
+server console), `client/` (PNGs and `qconsole.log`), `steps.txt` (your steps
+with the connect preamble in front).
+
+**It needs retail data.** `hwsv` refuses the demo: `BASEDIR` (default
+`~/hexen2`) must hold `data1/pak0.pak`, `data1/pak1.pak`, `hw/pak4.pak` and
+`hw/hwprogs.dat`.
+
+The server starts with `+deathmatch 0 +coop 0 +skill 0` because the gamecode's
+cheat impulses return early otherwise; set `SVARGS=` to change that. `MAP=`,
+`PORT=`, `SERVER=`, `ENGINE=`, `LOAD=`, `JOIN=` and `TIMEOUT=` are described at
+the top of the script.
+
+`hw-bluestep.steps` is the worked example and the live check for issue #309:
+an invisible player walks, and the first `walk-*.png` frames must show pale
+blue specks around a translucent footprint. Red specks mean wire particle type
+28 is being drawn as red fire again.
 
 ### console_tab — TAB completion
 

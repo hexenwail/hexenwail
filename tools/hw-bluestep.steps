@@ -1,0 +1,30 @@
+# hw-bluestep.steps -- the blue footstep puff of an invisible player, for
+# tools/hw-drive.sh.  This is the live check for issue #309: the HexenWorld
+# gamecode sends svc_particle4 with wire type 28 (newplay.hc, dropStep), and
+# the client must draw it as pale blue specks around a translucent footprint.
+# Before the fix they came out as red fire.
+#
+# dropStep only runs for a player who is invisible and moving on the ground,
+# so: take every artifact, use invisibility, look at the floor, walk.
+#
+# impulse 43 is the everything cheat (needs deathmatch 0, coop 0, skill < 3).
+# impulse 107 uses inventory slot 8, INV_INVISIBILITY (100 + slot - 1).
+cmd impulse 43
+sleep 1
+cmd impulse 107
+sleep 1
+shot 01-invisible
+cmd +lookdown
+sleep 1
+cmd -lookdown
+cmd +forward
+shotf walk-1
+shotf walk-2
+shotf walk-3
+shotf walk-4
+shotf walk-5
+shotf walk-6
+shotf walk-7
+shotf walk-8
+cmd -forward
+shot 02-stopped
