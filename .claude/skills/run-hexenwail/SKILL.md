@@ -1,11 +1,11 @@
 ---
 name: run-hexenwail
-description: Build, launch, drive and screenshot the Hexenwail (uHexen2) Hexen II engine headlessly. Use when asked to run, start, launch, play, test, smoke-test or screenshot the engine, to see a renderer/menu/HUD change on screen, or to exercise gamecode, maps, savegames, protocol, shaders or cvars without a display. Covers glhexen2 (GL client, under Xvfb), h2ded (dedicated server, no X at all) and the WebAssembly/PWA web client.
+description: Build, launch, drive and screenshot the Hexenwail (uHexen2) Hexen II engine headlessly. Use when asked to run, start, launch, play, test, smoke-test or screenshot the engine, to see a renderer/menu/HUD change on screen, or to exercise gamecode, maps, savegames, protocol, shaders or cvars without a display. Covers glhexen2 (GL client, under Xvfb), h2ded (dedicated server, no X at all), hwsv with a connected HexenWorld client, and the WebAssembly/PWA web client.
 ---
 
 # Running Hexenwail
 
-Hexen II engine, C + CMake, built with Nix. Three lanes, and **which one you
+Hexen II engine, C + CMake, built with Nix. Four lanes, and **which one you
 want is the first decision**:
 
 | You are changing | Drive it with | Cost |
@@ -13,6 +13,7 @@ want is the first decision**:
 | Gamecode, physics, savegames, protocol, filesystem, cvars | `tools/serve.sh` — `h2ded` on stdin, no X | ~5 s |
 | Web client, PWA shell, GLSL shaders | `node --test` + `scripts/webgl-smoke-test.sh` | 0.4 s / ~20 s |
 | Renderer, menus, HUD, input, anything visual | `tools/headless-drive.sh` — engine under Xvfb, real X key events, PNG screenshots | 25 s menu / ~75 s in-game |
+| The HexenWorld client path (`cl_hw.c`, anything behind `connect hw://`) | `tools/hw-drive.sh` — `hwsv` plus a connected client, PNG screenshots | ~90 s, needs retail data |
 
 Do not reach for the GUI lane to check something a cheaper lane can answer.
 Under llvmpipe a map load alone costs 25 seconds.
@@ -218,6 +219,39 @@ The named scenarios still in the script (`oldmission_demoness`, `console_tab`,
 `ayrn_pulse`, `noportals`, …) are past bug investigations. Their comments
 record what each was proving and are worth reading before writing a similar
 check; their `ingame()` helper is the model for cheats-plus-movement sequences.
+
+## Run: the HexenWorld lane (hwsv + a connected client)
+
+The client's HexenWorld reader runs only after `connect hw://`, so the three
+lanes above never execute it. `tools/hw-drive.sh` starts `hwsv` on loopback,
+boots the client through `headless-drive.sh`, connects it, and runs your step
+file with the client already in the game.
+
+```bash
+nix build .#hwsv-bundled -o result-hwsv
+
+nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubblewrap --command \
+  env STEPS=tools/hw-bluestep.steps ./tools/hw-drive.sh /tmp/out-hw
+```
+
+~90 s. Success ends `client_rc=0  server saw joins: 1  client signons: 1`; the
+script exits non-zero if the client never signed on. PNGs and the client log
+are under `/tmp/out-hw/client/`, the server console is `/tmp/out-hw/server.log`.
+
+- **`.#demodata` does not work here.** `hwsv` refuses it with `You must have
+  the HexenWorld data installed`. `BASEDIR` (default `~/hexen2`) needs retail
+  `data1/pak0.pak` + `pak1.pak`, `hw/pak4.pak` and `hw/hwprogs.dat`.
+- **Step files start already connected.** The driver puts the map load, the
+  `connect` and the join wait in front of yours; do not repeat them.
+- **Cheat impulses need `deathmatch 0` and `coop 0`**, and `hwsv` defaults to
+  `deathmatch 1`. The driver's default `SVARGS` turns both off.
+- `tools/hw-bluestep.steps` is the worked example (issue #309): `impulse 43`
+  for every artifact, `impulse 107` to use invisibility, then walk. The first
+  `walk-*.png` frames must show pale blue specks around a footprint; red specks
+  mean wire particle type 28 is drawn as red fire again. The player reaches a
+  wall after about four frames, so judge the early ones.
+- To compare against an older client, build it with `-o result-old` and pass
+  `ENGINE=./result-old/bin/glhexen2`.
 
 ## Run: human path
 

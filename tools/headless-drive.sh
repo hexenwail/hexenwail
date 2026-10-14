@@ -210,12 +210,17 @@ echo "display $DISP, engine $ENGINE, basedir $BASEDIR"
 # --die-with-parent, as on Xvfb above: if this script is killed too hard to run
 # its traps, bwrap still tears the sandbox down (PDEATHSIG down the chain)
 # instead of leaving an engine holding the display.
+#
+# LD_LIBRARY_PATH is dropped for the engine: a nix-built binary carries its own
+# rpath, and a host value pointing at a library built against a newer glibc
+# kills it before main() with "version `GLIBC_2.43' not found".
 bwrap --dev-bind / / \
       --die-with-parent \
       --bind "$WORK/home" "$HOME" \
       --ro-bind "$BASEDIR" "$BASEDIR" \
       --ro-bind "$ENGINE_DIR" "$ENGINE_DIR" \
-  env DISPLAY="$DISP" HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" \
+  env -u LD_LIBRARY_PATH \
+      DISPLAY="$DISP" HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" \
       SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
   "$ENGINE" -basedir "$BASEDIR" -width "$W" -height "$H" -window -nosound "$@" \
   >"$OUT/engine.stdout" 2>&1 &
@@ -253,7 +258,9 @@ key()   { xdotool key --clearmodifiers "$1"; sleep 0.7; }
 keyn()  { for _ in $(seq 1 "$2"); do xdotool key --clearmodifiers "$1"; sleep 0.5; done; }
 # type without submitting -- needed to test TAB, where pressing Return would
 # run whatever just got completed
-typn()  { xdotool type --clearmodifiers --delay 40 "$1"; sleep 0.5; }
+# `--` so text that starts with a dash (`cmd -forward`) is typed, not parsed as
+# an xdotool option.
+typn()  { xdotool type --clearmodifiers --delay 40 -- "$1"; sleep 0.5; }
 typ()   { typn "$1"; xdotool key Return; sleep 0.8; }
 # End first: the cursor can be mid-line (that is the point of the TAB splice
 # tests) and BackSpace only eats backwards, so without it the tail survives
