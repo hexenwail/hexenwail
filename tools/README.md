@@ -119,9 +119,11 @@ which fields are printed and in what order.
 ## serve.sh — the dedicated server on stdin
 
 Try this first for anything below the renderer: gamecode, physics, savegames,
-protocol, filesystem, cvars. `h2ded` boots in about a second and needs only
-`bwrap`. It cannot show you what anything looks like; use `headless-drive.sh`
-for that.
+protocol, filesystem, cvars. `h2ded` boots in about a second and needs nothing
+but the engine: every run gets `-userdir <outdir>/userdir`, and `bwrap` adds a
+throwaway `$HOME` and read-only data when it is installed (`NO_BWRAP=1` skips
+it). It cannot show you what anything looks like; use `headless-drive.sh` for
+that.
 
 ```sh
 nix build .#h2ded-bundled -o result-h2ded

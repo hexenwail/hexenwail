@@ -13,7 +13,8 @@
 #
 # Environment:
 #   ENGINE    path to the engine binary  (default: ./result/bin/glhexen2)
-#   WORK      scratch dir for the sandboxed HOME (default: <outdir>/work)
+#   WORK      scratch dir: WORK/home is the sandboxed HOME, WORK/userdir the
+#             engine's -userdir (default: <outdir>/work)
 #   DISPLAY_N X display number           (default: let Xvfb pick a free one)
 #   W, H      window size                (default: 800x600)
 #   STEPS     step file, for the `script` scenario only (see below)
@@ -89,7 +90,7 @@ ENGINE_DIR=$(dirname "$ENGINE")
 rm -rf "$OUT"; mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 WORK=${WORK:-$OUT/work}
-rm -rf "$WORK"; mkdir -p "$WORK/home"
+rm -rf "$WORK"; mkdir -p "$WORK/home" "$WORK/userdir"
 
 # Set before the trap, and checked inside it: cleanup can fire between Xvfb
 # starting and the engine starting, and under `set -u` an unset $GPID there
@@ -194,14 +195,16 @@ STRAY=$(xdotool search --name "." 2>/dev/null | tr '\n' ' ')
 
 echo "display $DISP, engine $ENGINE, basedir $BASEDIR"
 
-# The engine writes config/savegames/qconsole.log under the userdir, which for
-# a fresh throwaway $HOME is now $HOME/.local/share/hexen2 -- uhexen2-7b1s moved
-# it there and the legacy $HOME/.hexen2 only wins when it already exists, which
-# it never does here.  XDG_DATA_HOME is pinned below so a host value cannot
-# redirect the run out of the sandbox.  Bind a
-# throwaway dir over $HOME so a run cannot touch the real one, then re-bind the
-# game data read-only *on top* -- the basedir usually lives inside $HOME, so
-# the order matters: the ro-bind must come after the HOME bind or it is hidden.
+# The engine writes config/savegames/qconsole.log under the userdir, and
+# -userdir "$WORK/userdir" is what pins that: the engine reads the home
+# directory from getpwuid(), not $HOME, and an existing ~/.hexen2 beats
+# XDG_DATA_HOME, so nothing else can redirect it (uhexen2-stbe, GitHub #131).
+# bwrap stays required here, unlike tools/serve.sh, because --die-with-parent
+# is what reaps Xvfb and the engine after a hard kill.  It also binds a
+# throwaway dir over $HOME so nothing else the engine touches lands in the real
+# one, then re-binds the game data read-only *on top* -- the basedir usually
+# lives inside $HOME, so the order matters: the ro-bind must come after the
+# HOME bind or it is hidden.
 #
 # The engine binary needs the same treatment for the same reason: a source
 # checkout under $HOME puts ./result there too, and without this the sandbox
@@ -222,7 +225,8 @@ bwrap --dev-bind / / \
   env -u LD_LIBRARY_PATH \
       DISPLAY="$DISP" HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" \
       SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
-  "$ENGINE" -basedir "$BASEDIR" -width "$W" -height "$H" -window -nosound "$@" \
+  "$ENGINE" -basedir "$BASEDIR" -userdir "$WORK/userdir" \
+      -width "$W" -height "$H" -window -nosound "$@" \
   >"$OUT/engine.stdout" 2>&1 &
 GPID=$!
 
@@ -591,5 +595,5 @@ case "$SCEN" in
 esac
 
 sleep 2
-cp "$WORK/home/.local/share/hexen2/qconsole.log" "$OUT/qconsole.log" 2>/dev/null
+cp "$WORK/userdir/qconsole.log" "$OUT/qconsole.log" 2>/dev/null
 echo "done -> $OUT"
