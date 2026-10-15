@@ -118,6 +118,13 @@ jobs:
       - name: Liquid ripple stays at or below the surface
         run: python3 tools/test_water_ripple.py
 
+      # r_fastsky only reached the skybox path; the classic scrolling sky
+      # ignored it, and its fill colour was computed in a dead function
+      # (GitHub #323).  Checks both classic draw paths branch on the cvar
+      # and that R_InitSky, the live loader, sets skyflatcolor.
+      - name: r_fastsky reaches the classic sky
+        run: python3 tools/test_fastsky_classic.py
+
       # ARE_WE_IRONWAIL_YET.md carries a summary table over rows kept further
       # down the same file, and the two drift every time somebody flips a row
       # by hand.  The file records this happening in 2026-08-20 and twice on

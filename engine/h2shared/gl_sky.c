@@ -114,7 +114,7 @@ gltexture_t	*solidskytexture, *alphaskytexture;
  * the frustum.  uhexen2-li13. */
 cvar_t gl_farclip = {"gl_farclip", "16384", CVAR_ARCHIVE};
 extern cvar_t r_skyalpha; /* defined in gl_rmain.c */
-cvar_t r_fastsky = {"r_fastsky", "0", CVAR_NONE};
+cvar_t r_fastsky = {"r_fastsky", "0", CVAR_ARCHIVE};	/* archived, as in Ironwail */
 cvar_t r_sky_quality = {"r_sky_quality", "12", CVAR_NONE};
 cvar_t r_skyfog = {"r_skyfog", "0.5", CVAR_NONE};
 cvar_t r_skyspeed_back = {"r_skyspeed_back", "8", CVAR_ARCHIVE};	/* back/solid sky scroll speed (0 = frozen) */

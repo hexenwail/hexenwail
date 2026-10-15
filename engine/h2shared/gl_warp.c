@@ -827,6 +827,55 @@ cleanup:
 
 /*
 =============
+Sky_FastColor
+
+r_fastsky colour for the classic scrolling sky: the fog colour when fog is on,
+otherwise the average of the front layer's opaque texels (skyflatcolor, worked
+out in R_InitSky).  The same choice Sky_DrawSky makes for the skybox path
+and Ironwail makes for both.  GitHub #323.
+=============
+*/
+extern cvar_t	r_fastsky;
+extern GLfloat	skyflatcolor[3];
+float Fog_GetDensity (void);
+float *Fog_GetColor (void);
+
+static void Sky_FastColor (void)
+{
+	if (Fog_GetDensity() > 0)
+	{
+		float *c = Fog_GetColor();
+		GL_ImmColor4f (c[0], c[1], c[2], 1.0f);
+	}
+	else
+		GL_ImmColor4f (skyflatcolor[0], skyflatcolor[1], skyflatcolor[2], 1.0f);
+}
+
+/*
+=============
+EmitSkyPolysFast
+
+r_fastsky fill for one surface's poly chain (brush-model sky).
+=============
+*/
+static void EmitSkyPolysFast (msurface_t *fa)
+{
+	glpoly_t	*p;
+	float		*v;
+	int		i;
+
+	for (p = fa->polys ; p ; p = p->next)
+	{
+		GL_ImmBegin ();
+		Sky_FastColor ();
+		for (i = 0, v = p->verts[0]; i < p->numverts; i++, v += VERTEXSIZE)
+			GL_ImmVertex3f (v[0], v[1], v[2]);
+		GL_ImmEnd (GL_POLYGON, &gl_shader_flat);
+	}
+}
+
+/*
+=============
 EmitSkyPolys
 =============
 */
@@ -963,7 +1012,10 @@ will have them chained together.
 */
 void EmitBothSkyLayers (msurface_t *fa)
 {
-	EmitSkyPolysMulti (fa);
+	if (r_fastsky.value)
+		EmitSkyPolysFast (fa);
+	else
+		EmitSkyPolysMulti (fa);
 }
 
 #ifndef QUAKE2
@@ -1021,6 +1073,11 @@ not a clean refactor and r_skyalpha defaults to 1.
 		SKYWARP_DIR(_vp, _dir); \
 		GL_ImmTexCoord2f((realtime*bspeed + _dir[0]) * (1.0f/128.0f), \
 				 (realtime*bspeed + _dir[1]) * (1.0f/128.0f)); \
+		GL_ImmVertex3f  (_vp[0], _vp[1], _vp[2]); \
+	} while (0)
+
+#define SKYWARP_VERT_FAST(_v) do { \
+		float *_vp = (_v); \
 		GL_ImmVertex3f  (_vp[0], _vp[1], _vp[2]); \
 	} while (0)
 
@@ -1107,7 +1164,13 @@ void R_DrawSkyChain (msurface_t *s)
 		GL_ImmEnd (GL_TRIANGLES, (PROG)); \
 	} while (0)
 
-	if (alpha >= 1.0f)
+	if (r_fastsky.value)
+	{
+		/* r_fastsky: one flat-colour pass, no textures, no warp UVs.
+		 * Before #323 only the skybox path honoured the cvar. */
+		EMIT_LOOP (&gl_shader_flat, SKYWARP_VERT_FAST, Sky_FastColor ());
+	}
+	else if (alpha >= 1.0f)
 	{
 		/* single-pass: shader blends both layers using TU0/TU1 */
 		GL_Bind (solidskytexture);
@@ -1141,6 +1204,7 @@ void R_DrawSkyChain (msurface_t *s)
 #undef SKYWARP_VERT_MULTI
 #undef SKYWARP_VERT_BACK
 #undef SKYWARP_VERT_FRONT
+#undef SKYWARP_VERT_FAST
 #undef SKYWARP_DIR
 
 #endif
@@ -1889,7 +1953,7 @@ void R_InitSky (texture_t *mt)
 	byte		*src;
 	unsigned int	trans[128*128];
 	unsigned int	transpix;
-	int		r, g, b;
+	int		r, g, b, count;
 	unsigned int	*rgba;
 
 	src = (byte *)mt + mt->offsets[0];
@@ -1917,6 +1981,11 @@ void R_InitSky (texture_t *mt)
 
 	solidskytexture = GL_LoadTexture("upsky", (byte *)trans, 128, 128, TEX_RGBA|TEX_LINEAR);
 
+	/* The front layer, plus the r_fastsky colour: the average of its opaque
+	 * texels, as Ironwail's Sky_LoadTexture computes it.  The copy of that
+	 * function in gl_sky.c is never called, so skyflatcolor stayed zero and
+	 * r_fastsky filled the classic sky with black.  GitHub #323. */
+	r = g = b = count = 0;
 	for (i = 0; i < 128; i++)
 	{
 		for (j = 0; j < 128; j++)
@@ -1925,9 +1994,22 @@ void R_InitSky (texture_t *mt)
 			if (p == 0)
 				trans[(i*128) + j] = transpix;
 			else
-				trans[(i*128) + j] = d_8to24table[p];
+			{
+				rgba = &d_8to24table[p];
+				trans[(i*128) + j] = *rgba;
+				r += ((byte *)rgba)[0];
+				g += ((byte *)rgba)[1];
+				b += ((byte *)rgba)[2];
+				count++;
+			}
 		}
 	}
+
+	if (count == 0)		/* fully transparent front layer: 0/0 is NaN */
+		count = 1;
+	skyflatcolor[0] = (float)r / (count * 255);
+	skyflatcolor[1] = (float)g / (count * 255);
+	skyflatcolor[2] = (float)b / (count * 255);
 
 	alphaskytexture = GL_LoadTexture("lowsky", (byte *)trans, 128, 128, TEX_ALPHA|TEX_RGBA|TEX_LINEAR);
 }

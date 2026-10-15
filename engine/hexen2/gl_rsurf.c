@@ -2572,7 +2572,12 @@ static void DrawTextureChains (entity_t *e)
 		{
 			{
 			double _t0sp = (r_speeds.integer >= 2 && e == &r_worldentity) ? Sys_DoubleTime() : 0;
-			if (skybox_name[0])
+			/* r_fastsky takes the flat fill in R_DrawSkyChain on a
+			 * skybox map too: Sky_DrawSky skips the box and
+			 * Sky_ProcessPoly returns early, so nothing else would
+			 * cover the sky pixels (GitHub #323). */
+			extern cvar_t r_fastsky;
+			if (skybox_name[0] && !r_fastsky.value)
 			{
 				/* Sky_ProcessPoly is data-only; world state stays valid. */
 				msurface_t *sky;
