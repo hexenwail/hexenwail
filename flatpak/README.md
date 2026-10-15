@@ -21,11 +21,18 @@ flatpak run io.github.hexenwail.hexenwail
 
 ## Game Data
 
-Place your Hexen II game data in `~/.hexen2/data1/`:
+Place your Hexen II game data in
+`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/`:
 - `pak0.pak` (required)
 - `pak1.pak` (required)
 
-For Portal of Praevus, add `~/.hexen2/portals/pak3.pak`.
+For Portal of Praevus, add
+`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/portals/pak3.pak`.
+
+That is the host side of the sandbox's `--persist=.hexen2`: inside the
+sandbox it is `~/.hexen2`, but the app cannot see your real `~/.hexen2`.
+With no game data present, the launcher offers to download Raven's free
+1997 demo into the same directory.
 
 ## Notes
 

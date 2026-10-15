@@ -11,7 +11,7 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (69)
+## P2 — worth doing (55)
 
 - **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
@@ -69,7 +69,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (61)
+## P3 — someday (55)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
@@ -124,7 +124,6 @@ here.
 - **Audit hw/siege gamecode against reference HexenWorld bytecode, then decide on bundling** `uhexen2-nr9l` — uhexen2-8zia audited gamecode/hc/h2 and gamecode/hc/portals against retail progs.dat using a disassembler (qcdis.py, tools/qcdis.py, landed e6dd815f1 with v6 unsigned-operand fix).
 - **Content marks for the demo, OEM, pre-1.11 and hw sets, so those repack too** `uhexen2-p9mh` — ca0e292db made archive identification container-agnostic (check_known_zip in engine/h2shared/quakefs.c) but only listed the v1.11 content sets: data1 pak0, data1 pak1 and portals/pak3.
 - **Track libsndfile parser CVEs; re-audit on nixpkgs bump** `uhexen2-ql7h` — libsndfile 1.2.2 in runtime closure, 5 active CVEs: - CVE-2025-52194 (CVSS 7.5) - CVE-2026-37555 (7.5) - CVE-2024-50613 (6.5) - CVE-2024-50612 (5.5) - CVE-2025-56226 (5.3)
-- **Update the docs that still send users to ~/.hexen2 after the XDG move** `uhexen2-rw6r` — uhexen2-7b1s moved the native unix userdir to $XDG_DATA_HOME/hexen2 (default ~/.local/share/hexen2) in commit a73355399. Several docs still name the old ~/.hexen2 location.
 - **Release notes: 0.8.0-beta.r14 shipped without a notes file** `uhexen2-s5qj` — docs/release-notes/ has a file for every tagged release from 0.8.0-beta.r1 through r13, and now r15 — but not r14.
 - **Decide whether a mod-supplied gfx.wad should be able to abort the engine (FS_LoadZoneFile into the 256 KB secondary zone)** `uhexen2-zyns` — Split out of the uhexen2-mm4l zone audit rather than bundled into it, because it is a decision, not a mechanical move.
 

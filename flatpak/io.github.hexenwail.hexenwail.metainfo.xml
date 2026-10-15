@@ -14,7 +14,8 @@
     </p>
     <p>
       Requires original Hexen II game data files (data1/pak0.pak, data1/pak1.pak).
-      Place game data in ~/.hexen2/data1/ or alongside the executable.
+      Place game data in ~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/,
+      or let the launcher download Raven's free 1997 demo there.
     </p>
   </description>
 

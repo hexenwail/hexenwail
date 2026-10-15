@@ -316,7 +316,8 @@ a window and blocks.
   a derivation that has no `bin/glhexen2`. Always pass `-o <name>` or
   `--no-link`.
 - Both drivers `rm -rf` their outdir on start and bind a throwaway `$HOME` over
-  the real one, so a run cannot touch `~/.hexen2`.
+  the real one, so a run cannot touch your real user directory
+  (`~/.hexen2` if it exists, else `~/.local/share/hexen2`).
 
 ## Troubleshooting
 
