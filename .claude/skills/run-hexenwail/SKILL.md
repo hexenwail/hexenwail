@@ -120,12 +120,13 @@ WebGL2 engine shaders, RGBA8 framebuffer, post-process, and non-black-frame smok
 and still passes.** Judge it by that final line (or the exit code), never by
 the presence of stderr noise.
 
-To build the wasm client itself, use the `wasm` dev shell (`shell-wasm.nix`
-holds its recipe) — `nix build .#wasm` is deliberately not the supported path,
-because Emscripten fetches its SDL3 port over the network at configure time and
-the nix sandbox has none.  The shell also carries the Rust toolchain with the
-`wasm32-unknown-emscripten` target: the engine's Rust archive is linked into
-the web client like every other target.
+To build the wasm client itself there are two routes.  `nix build .#wasm -o
+result-wasm` builds the webgl2 client in the sandbox: the SDL3 port Emscripten would download is pre-fetched and handed over through
+`EMCC_LOCAL_PORTS` (GitHub #333).  It uses nixpkgs' Emscripten, not CI's pinned
+emsdk, so for anything version-sensitive, or the software renderer config, use
+the `wasm` dev shell (`shell-wasm.nix` holds its recipe).  The shell also
+carries the Rust toolchain with the `wasm32-unknown-emscripten` target: the
+engine's Rust archive is linked into the web client like every other target.
 
 ```bash
 nix develop .#wasm                  # then:
@@ -135,7 +136,10 @@ nix develop .#wasm                  # then:
 
 Then run it.  This is the one lane that executes `hexenwail.wasm` rather than
 just its shaders: headless Chrome boots the real build, with no data to
-FS_Init's data gate (what CI runs), or with a basedir into demo1.
+FS_Init's data gate (what CI runs), or with a basedir into demo1.  The nix
+build's output directory (`result-wasm`) works as BIN_DIR too.  Run it with
+`LD_LIBRARY_PATH` unset: this box's value makes chromium die on a glibc
+version mismatch, which then shows up as "no verdict within 180s".
 
 ```bash
 nix shell nixpkgs#chromium nixpkgs#python3 --command \
