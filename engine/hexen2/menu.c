@@ -4693,7 +4693,12 @@ static const char *game_labels[GAME_ITEMS] = {
 	"Chase Mode    :",	/* GAME_CHASE */
 	"View Bob      :",	/* GAME_VIEWBOB */
 	"View Roll     :",	/* GAME_VIEWROLL */
-	"Weapon Kick   :",	/* GAME_GUNKICK */
+	/* v_gunkick gates cl.punchangle, which is every server-driven view
+	 * shake, not just the weapon's: attack kicks, earthquakes (SoT's
+	 * ShakeRattleAndRoll) and HexenWorld's smallkick/bigkick.  Named for
+	 * what it does, since this is the motion-sickness master switch.
+	 * Issue #280. */
+	"Screen Shake  :",	/* GAME_GUNKICK */
 	"Anim Smoothing:",	/* GAME_ANIMSMOOTH */
 	"Smooth Weapon :",	/* GAME_LERPVIEWMDL */
 	"Live Preview  :",	/* GAME_UIPREVIEW */
