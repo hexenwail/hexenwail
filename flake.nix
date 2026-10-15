@@ -1053,11 +1053,24 @@
             };
           };
 
-          # WebAssembly / Emscripten build
-          # NOTE: WASM builds require network access for Emscripten SDL3 port
-          # Quick fix (temporary): use `nix develop .#wasm` for interactive dev builds
-          # Long-term: See issue uhexen2-1z31 for reproducible solution
-          wasm = pkgs.stdenv.mkDerivation {
+          # WebAssembly / Emscripten build.
+          #
+          # -sUSE_SDL=3 makes emcc download SDL as a "port" at compile time,
+          # which the nix sandbox has no network for (GitHub #333).  The fix
+          # is to fetch the exact archive the port pins as a fixed-output
+          # derivation and hand it to emcc through EMCC_LOCAL_PORTS, which
+          # copies a local tree into the port cache instead of downloading.
+          # SDL is the only port the build uses (engine/CMakeLists.txt).
+          wasm = let
+            # Must match tools/ports/sdl3.py in the emscripten below (TAG and
+            # HASH).  The sha512 here IS that file's HASH, so a mismatch fails
+            # the fetch; preConfigure also checks TAG and names the fix.
+            sdl3PortTag = "release-3.4.2";
+            sdl3Port = pkgs.fetchurl {
+              url = "https://github.com/libsdl-org/SDL/archive/${sdl3PortTag}.zip";
+              sha512 = "a17fe538993a3956e0b85fda21e7b431244e803a5facb35bb7a2bfd9ee23f1aac65838ed3225f526b81410cae7c23da7c40693c2e791385281f0764239116bce";
+            };
+          in pkgs.stdenv.mkDerivation {
             pname = "hexenwail-wasm";
             inherit version;
 
@@ -1070,16 +1083,40 @@
               nodejs
               sdl3
               rustWasm
+              unzip
             ];
 
-            # Emscripten-specific setup
+            # Emscripten-specific setup.  EM_CACHE must be writable (ports and
+            # any missing system libraries are built into it) and absolute
+            # (configurePhase cds into build/).  Seed it from the cache nixpkgs
+            # prebuilt, so libc and friends are not rebuilt from source.
+            # EM_CONFIG is left alone: nixpkgs' own .emscripten is what
+            # points emcc at its clang.
             preConfigure = ''
-              export EM_CACHE="''${EM_CACHE:-.emcache}"
-              export EM_CONFIG="''${EM_CONFIG:-.emscripten}"
+              export EM_CACHE="$TMPDIR/emcache"
+              cp -r ${pkgs.emscripten}/share/emscripten/cache "$EM_CACHE"
+              chmod -R u+rwX "$EM_CACHE"
+
+              portpy=${pkgs.emscripten}/share/emscripten/tools/ports/sdl3.py
+              if ! grep -q "VERSION = '${pkgs.lib.removePrefix "release-" sdl3PortTag}'" "$portpy"; then
+                echo "flake.nix: sdl3PortTag (${sdl3PortTag}) no longer matches $portpy." >&2
+                echo "Update sdl3PortTag and its sha512 to that file's TAG and HASH." >&2
+                exit 1
+              fi
+
+              # Writable copy: the port's create() writes SDL_build_config.h
+              # into the tree, and copytree keeps the store's read-only mode.
+              mkdir -p "$TMPDIR/sdl3-port"
+              unzip -q ${sdl3Port} -d "$TMPDIR/sdl3-port"
+              chmod -R u+w "$TMPDIR/sdl3-port"
+              export EMCC_LOCAL_PORTS="sdl3=$TMPDIR/sdl3-port/SDL-${sdl3PortTag}"
             '';
 
-            # Use Emscripten's CMake toolchain
+            # Use Emscripten's CMake toolchain.  A custom configurePhase does
+            # not run preConfigure on its own; without this runHook the
+            # EM_CACHE / EMCC_LOCAL_PORTS setup above never happens.
             configurePhase = ''
+              runHook preConfigure
               mkdir -p build
               cd build
               emcmake cmake \
@@ -1108,10 +1145,7 @@
               longDescription = ''
                 Hexenwail WebAssembly / Emscripten build for browser gameplay.
                 Requires users to provide game data files (pak0.pak, pak1.pak).
-
-                Note: Pure Nix flake builds cannot fetch Emscripten ports due to
-                sandbox restrictions. For WASM development, use:
-                  nix develop .#wasm
+                Builds in the sandbox: the SDL3 port is pre-fetched.
               '';
               homepage = "https://github.com/hexenwail/hexenwail";
               license = licenses.gpl2Plus;
