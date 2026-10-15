@@ -35,7 +35,8 @@ nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubble
 nix shell nixpkgs#chromium nixpkgs#nodejs --command <cmd>
 ```
 
-`serve.sh` needs `bwrap` and nothing else — no shell wrapper.
+`serve.sh` needs nothing beyond the engine — no shell wrapper. It uses `bwrap`
+when present and runs on `-userdir` alone without it (`NO_BWRAP=1` forces that).
 
 ## Build
 
@@ -279,7 +280,8 @@ a window and blocks.
   need `+map <something>`. A run that ignores this screenshots an untouched
   menu N times and looks exactly like a pass.
 - **h2ded is silent on a non-tty stdout.** Everything is in `qconsole.log`
-  under the sandboxed `$HOME` (both drivers copy it out for you). `-condebug`
+  under the run's `-userdir`, `<outdir>/userdir` or `<outdir>/work/userdir`
+  (both drivers copy it out for you). `-condebug`
   is already passed by `serve.sh`.
 - **Piping several commands into h2ded used to concatenate them** —
   `map demo1\nstatus\nquit\n` ran as the single command `map demo1statusquit`,
