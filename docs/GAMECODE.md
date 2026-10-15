@@ -98,19 +98,25 @@ of a build tree, where nothing sits beside the binary to be found.
 its own gamecode from beside the executable on both platforms, so a normal
 install copies nothing; see [Shipping](#shipping-in-the-release-bundle) and
 [BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md). What follows is also the recipe for
-overriding that bundle with some other `progs.dat`, since `~/.hexen2` outranks
-it. To use it from a checkout:
+overriding that bundle with some other `progs.dat`, since the per-user data
+directory outranks it. To use it from a checkout:
 
 ```sh
 nix build .#gamecode
-mkdir -p ~/.hexen2/data1
-cp result/share/hexenwail/data1/progs.dat  ~/.hexen2/data1/
-cp result/share/hexenwail/data1/progs2.dat ~/.hexen2/data1/
+# An existing ~/.hexen2 wins; otherwise the XDG location is used.
+USERDIR=$([ -d ~/.hexen2 ] && echo ~/.hexen2 || echo "${XDG_DATA_HOME:-$HOME/.local/share}/hexen2")
+mkdir -p "$USERDIR/data1"
+cp result/share/hexenwail/data1/progs.dat  "$USERDIR/data1/"
+cp result/share/hexenwail/data1/progs2.dat "$USERDIR/data1/"
 ```
 
-`~/.hexen2` is the per-user data directory on Unix
-(`engine/h2shared/userdir.h :: SYS_USERDIR_UNIX`); demo builds use
-`~/.hexen2demo` (same macro, demo `#ifdef`). Windows and OS/2 have no user
+The per-user data directory on Unix is `~/.hexen2` when that directory already
+exists, and otherwise `$XDG_DATA_HOME/hexen2` (`~/.local/share/hexen2` when the
+variable is unset), so an upgrade never moves anyone's files
+(`engine/h2shared/userdir.h :: SYS_USERDIR_UNIX` / `SYS_USERDIR_XDG`,
+`engine/hexen2/sys_unix.c`). `-userdir <path>` overrides both. Demo builds use
+`hexen2demo` in place of `hexen2` (same macros, demo `#ifdef`). The flatpak
+always uses `~/.hexen2`, which its manifest persists. Windows and OS/2 have no user
 directory — `engine/h2shared/sys.h :: DO_USERDIRS` is forced to 0 there — so on
 those a build-tree run needs the files beside the executable, in
 `<exedir>/gamecode/<gamedir>/`, which is the bundle's own first lookup layer.
