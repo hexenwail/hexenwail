@@ -41,7 +41,19 @@
    configured for userdirs, or under the currentdir otherwise.
    =================================================================== */
 #define DO_USERDIRS	1
-#define HWM_USERDIR	".hwmaster"	/* user directory for unix	*/
+#define HWM_USERDIR	".hwmaster"	/* legacy user directory for unix	*/
+
+/* Plain unix follows the XDG Base Directory spec, as the engine does since
+ * a73355399: a fresh install keeps filters.ini in $XDG_CONFIG_HOME/hwmaster
+ * (default ~/.config/hwmaster), and an existing $HOME/.hwmaster still wins.
+ * CONFIG, not the engine's DATA dir, on purpose: filters.ini is the operator's
+ * IP filter list, i.e. settings, where the engine's userdir holds savegames and
+ * mods.  OS X and Haiku keep their own conventions, as in userdir.h.
+ * GitHub #133. */
+#if !defined(PLATFORM_OSX) && !defined(PLATFORM_HAIKU)
+#define USE_XDG_USERDIR		1
+#define HWM_USERDIR_XDG		"hwmaster"
+#endif
 
 #define FILTERS_FILE	"filters.ini"
 

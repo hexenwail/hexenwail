@@ -151,11 +151,33 @@ int Sys_mkdir (const char *path, qboolean crash)
 	return rc;
 }
 
+#if defined(USE_XDG_USERDIR)
+/* mkdir -p for the parents of path, not the leaf (main() makes that).
+ * Sys_mkdir is single-level, and ~/.config need not exist on a fresh box. */
+static void Sys_MakeParentDirs (char *path)
+{
+	char	*p;
+
+	for (p = path + 1; *p; p++)
+	{
+		if (*p != '/')
+			continue;
+		*p = '\0';
+		Sys_mkdir (path, true);
+		*p = '/';
+	}
+}
+#endif
+
 static int Sys_GetUserdir (char *dst, size_t dstsize)
 {
 	size_t		n;
 	const char	*home_dir = NULL;
 	struct passwd	*pwent;
+#if defined(USE_XDG_USERDIR)
+	const char	*xdg;
+	struct stat	st;
+#endif
 
 	pwent = getpwuid(getuid());
 	if (pwent == NULL)
@@ -173,6 +195,32 @@ static int Sys_GetUserdir (char *dst, size_t dstsize)
 					__thisfunc__, (int)dstsize, (int)n);
 	}
 	q_snprintf (dst, dstsize, "%s/%s", home_dir, HWM_USERDIR);
+
+#if defined(USE_XDG_USERDIR)
+/* An existing ~/.hwmaster wins, so an upgrading operator keeps their filters
+ * where they are; nothing is migrated.  Otherwise $XDG_CONFIG_HOME, which the
+ * spec says to ignore unless it is absolute. */
+	if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode))
+		return 0;
+
+	xdg = getenv("XDG_CONFIG_HOME");
+	if (xdg != NULL && xdg[0] == '/')
+	{
+		n = strlen(xdg) + strlen(HWM_USERDIR_XDG) + strlen(FILTERS_FILE) + 3;
+		if (n >= dstsize)
+			Sys_Error ("%s: XDG_CONFIG_HOME is too long", __thisfunc__);
+		q_snprintf (dst, dstsize, "%s/%s", xdg, HWM_USERDIR_XDG);
+	}
+	else
+	{
+		n = strlen(home_dir) + strlen("/.config/") + strlen(HWM_USERDIR_XDG) + strlen(FILTERS_FILE) + 2;
+		if (n >= dstsize)
+			Sys_Error ("%s: Insufficient bufsize %d. Need at least %d.",
+						__thisfunc__, (int)dstsize, (int)n);
+		q_snprintf (dst, dstsize, "%s/.config/%s", home_dir, HWM_USERDIR_XDG);
+	}
+	Sys_MakeParentDirs (dst);
+#endif
 	return 0;
 }
 #endif	/* DO_USERDIRS */
