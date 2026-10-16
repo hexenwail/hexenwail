@@ -66,7 +66,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (48)
+## P3 — someday (47)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
