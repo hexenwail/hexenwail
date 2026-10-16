@@ -24,6 +24,11 @@ const CORE_ASSETS = [
   './icons/icon-512.png',
   './hexenwail.js',
   './hexenwail.wasm',
+  // The bundled General MIDI SoundFont (TimGM6mb, ~6 MB), so MIDI music plays
+  // without an import and offline.  scripts/fetch-soundfont.sh puts it in the
+  // artifact; soundfont-NOTICE.txt carries its licence.  GitHub #114.
+  './soundfont.sf2',
+  './soundfont-NOTICE.txt',
 ];
 const CORE_ASSET_URLS = CORE_ASSETS.map((asset) => new URL(asset, self.location).href);
 const INDEX_URL = new URL('./index.html', self.location).href;

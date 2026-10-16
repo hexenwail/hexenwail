@@ -19,7 +19,11 @@ test('manifest uses relative project-pages-safe paths', () => {
 
 test('service worker precaches repo-managed launcher assets', () => {
   const matches = [...swText.matchAll(/'\.\/([^']+)'/g)].map((match) => match[1]);
-  const repoManaged = matches.filter((asset) => !asset.startsWith('hexenwail.'));
+  // Build outputs: the engine, and the SoundFont scripts/wasm-assemble-artifact.sh
+  // fetches (scripts/fetch-soundfont.sh, #114).  wasm-validate-artifact.sh
+  // checks those in the assembled site.
+  const assembled = (asset) => asset.startsWith('hexenwail.') || asset === 'soundfont.sf2';
+  const repoManaged = matches.filter((asset) => !assembled(asset));
   for (const asset of repoManaged) {
     const relativePath = asset === '' ? 'index.html' : asset;
     assert.equal(existsSync(join(repoRoot, 'web', relativePath)), true, `missing precache asset ${asset}`);

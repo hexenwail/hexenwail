@@ -81,3 +81,26 @@ test('settleSoundFonts keeps the last usable SoundFont and says why the others w
 
   assert.deepEqual(settleSoundFonts([pak]), { items: [pak], notes: [], soundFontKept: false });
 });
+
+// GitHub #114: the site ships TimGM6mb and mounts it where the engine looks.
+test('the bundled SoundFont is precached and mounted on a path the engine searches', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), 'utf8');
+  const sw = read('web/sw.js');
+  const app = read('web/app.js');
+  const engine = read('engine/h2shared/soundfont.c');
+  assert.match(sw, /'\.\/soundfont\.sf2'/);
+  assert.match(sw, /'\.\/soundfont-NOTICE\.txt'/);
+  const mount = app.match(/const BUNDLED_SOUNDFONT_PATH = '([^']+)';/)[1];
+  // SF_FindSoundFont's system list carries the exact path...
+  assert.ok(engine.includes(`"${mount}"`), `${mount} is not in SF_FindSoundFont's search list`);
+  // ...and SF_FindSoundFont walks that list after data1/soundfont.sf2, so an
+  // import still wins.
+  const find = engine.slice(engine.indexOf('const char *SF_FindSoundFont ('));
+  assert.ok(find.indexOf('"%s/data1/soundfont.sf2"') >= 0);
+  assert.ok(find.indexOf('"%s/data1/soundfont.sf2"') < find.indexOf('sf_paths[i]'));
+  // Outside /persistent, so the storage sync never copies it.
+  assert.ok(!mount.startsWith('/persistent'));
+  assert.match(app, /if \(state\.storedPaths\.has\('data1\/soundfont\.sf2'\)\) \{\s*return;/);
+  assert.match(app, /await mountBundledSoundFont\(\);/);
+});

@@ -233,10 +233,12 @@ Recognized inputs include:
 - files already inside `data1/`, `portals/`, `hw/`, or `music/`
 - `.ogg` music files (loose files default to `data1/music/`)
 - a General MIDI SoundFont, `.sf2` (stored as `data1/soundfont.sf2`, whatever it was
-  called), for the game's MIDI music. The web build ships none: without one the runtime
-  log says `Could not initialize Timidity` and MIDI tracks are silent; with one it says
-  `libTiMidity ... initialized`. A small GM font such as TimGM6mb (~6 MB) is enough.
-  One SoundFont is kept: importing another replaces the first, and in a batch holding
+  called), for the game's MIDI music. The site ships one, TimGM6mb (~6 MB, GPL-2,
+  `soundfont-NOTICE.txt`): `scripts/fetch-soundfont.sh` fetches it at assembly against
+  the same pin the Flatpak and the Linux release use, the service worker precaches it,
+  and the launcher mounts it at `/usr/share/sounds/sf2/TimGM6mb.sf2`, in memory, where
+  the engine looks after `data1/soundfont.sf2`. So MIDI plays out of the box, and an
+  imported SoundFont replaces the bundled one. One SoundFont is kept: importing another replaces the first, and in a batch holding
   several the last one listed wins, which the import message names. SF3 is refused, even
   renamed to `.sf2` (the file is read, not just its name), because the web build's
   synth, libTiMidity, cannot decode it; the message says so. The synth starts once, with

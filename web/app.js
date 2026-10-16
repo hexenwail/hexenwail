@@ -549,9 +549,49 @@ async function loadStoredFilesIntoRuntime() {
     }
   }
 
+  await mountBundledSoundFont();
+
   updateLaunchState();
   if (!files.length && ui.progressText) {
     ui.progressText.textContent = 'No imported assets yet.';
+  }
+}
+
+/*
+ * The SoundFont the site ships (soundfont.sf2, TimGM6mb), mounted at a path
+ * SF_FindSoundFont already searches -- /usr/share/sounds/sf2/TimGM6mb.sf2,
+ * after <basedir>/data1/soundfont.sf2 -- so a SoundFont the player imported
+ * still wins, and it lives in memory, outside /persistent: the sync never
+ * copies 6 MB of shipped data into the player's storage.  Skipped when the
+ * player has their own.  Without it MIDI music was silent until an import.
+ * GitHub #114.
+ */
+const BUNDLED_SOUNDFONT_PATH = '/usr/share/sounds/sf2/TimGM6mb.sf2';
+
+async function mountBundledSoundFont() {
+  if (state.storedPaths.has('data1/soundfont.sf2')) {
+    return;
+  }
+  const FS = getFS();
+  try {
+    FS.lookupPath(BUNDLED_SOUNDFONT_PATH);
+    return;	// already mounted this session
+  } catch {
+    // not there yet
+  }
+  try {
+    const response = await fetch('./soundfont.sf2');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    await ensureRuntimeDirectory(BUNDLED_SOUNDFONT_PATH.split('/').slice(0, -1).join('/'));
+    FS.writeFile(BUNDLED_SOUNDFONT_PATH, bytes);
+    logToConsole('[music]', `bundled SoundFont mounted (${formatBytes(bytes.byteLength)})`);
+  } catch (error) {
+    // A development build served straight from web/ has none; MIDI is then
+    // silent until an import, as it always was.
+    logToConsole('[music]', `no bundled SoundFont (${error.message}); MIDI needs an imported .sf2`);
   }
 }
 
