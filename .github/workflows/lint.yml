@@ -162,6 +162,11 @@ jobs:
       - name: r_fastsky reaches the classic sky
         run: python3 tools/test_fastsky_classic.py
 
+      # The Options submenus' row notes fit the canvas and name the cvar the
+      # row sets, so a rewired row cannot keep a stale note (GitHub #98).
+      - name: Menu row notes fit and stay true
+        run: python3 tools/test_menu_row_notes.py
+
       # EF_TRANSPARENT alias skins have r_wateralpha baked into their alpha,
       # so a change reached world water and never the models (GitHub #124).
       # Compiles the real cache test, clamp and callback.

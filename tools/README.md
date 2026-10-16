@@ -35,6 +35,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `test_wateralpha_reupload.py` | compile the real `GL_WaterAlphaByte`, the `GL_LoadTextureEx` cache test and `Mod_WaterAlphaChanged`, and check a change to `r_wateralpha` re-uploads exactly the loaded EF_TRANSPARENT alias skins (#124) |
 | `test_menu_mouse_grab.py` | compile `IN_ReactivateMouse` and check that focus, unpause and `_enable_mouse` take the mouse back through it, and that no menu draw function grabs it, so menu hover keeps working (#91) |
 | `test_demo_mods_gate.py` | check that the `game` command (C and Rust) refuses mods without the full game, that the main menu dims MODS and says why, and that the GL glyph fade can fade (#171) |
+| `test_menu_row_notes.py` | check that the Options submenus' row notes fit `M_ROWNOTE_MAX` columns and name the cvar their row actually sets (#98) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
 

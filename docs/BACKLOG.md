@@ -11,7 +11,7 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (51)
+## P2 — worth doing (50)
 
 - **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
@@ -26,7 +26,6 @@ here.
 - **Renderer toggle menu: software / opengl-sdl / vulkan-sdl / (metal-sdl) / (d3d12-sdl), gated per platform** `uhexen2-73mv` — GOAL: Implement runtime renderer backend selection in the Rendering submenu, showing only backends available on the current platform.
 - **Hexen II community hub — static site** `uhexen2-96ii` — The Hexen II community has no durable home. The two hubs it has relied on are gone or going:
 - **WebAssembly/Emscripten port** `uhexen2-a7l4` — WASM/WebGL2 build is PROVEN (shell-wasm.nix, 1.4 MB .wasm, since 2026-03-26). Remaining scope is productionization for distribution and CI coverage.
-- **Menu: per-item description/tooltip text** `uhexen2-8y3o` — Last substantial gap from uhexen2-yae's Ironwail menu list. Hexenwail menus have no description text: an item's name is all the player gets, and names like 'Render Scale', 'Dither', 'Overbri…
 - **WASM port: productionize the working WebGL2 build** `uhexen2-91t4` — The engine builds and runs under Emscripten/WebGL2 via shell-wasm.nix (proven 2026-03-26), but it's a dev-shell artifact, not a shippable port.
 - **Autosave trio (sv_autosave, sv_autosave_interval, sv_autoload) — the port is the Hexen II adaptation, not the cvars** `uhexen2-a5nn.31` *(in_progress)* — Item 4 of the uhexen2-a5nn.23 inventory queue, scoped 2026-09-02 against both trees rather than ported, because the interesting half is what does NOT transfer.
 - **No-dynamic-light control is keyed to the model, which does not scale past a few custom light models** `uhexen2-aywo` — Raised by Mathuzzz: 'regarding the lights, it shouldn't be model dependent as I use like 2 dozens of additional models for light sources.
