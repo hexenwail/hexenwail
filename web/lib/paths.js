@@ -126,6 +126,18 @@ export function mapImportedPath(inputPath) {
 
   const segments = safe.split('/');
   const lowered = segments.map((segment) => segment.toLowerCase());
+
+  // A General MIDI SoundFont for the MIDI music (GitHub #114).  The web build
+  // has no executable directory, so of SF_FindSoundFont's search
+  // (engine/h2shared/soundfont.c) the reachable spot is
+  // <basedir>/data1/soundfont.sf2 -- whatever the file was called and wherever
+  // it sat in the picked folder.  The launcher writes stored files before the
+  // engine starts, so the codec finds it at init.  SF3 is not taken: the web
+  // synth is libTiMidity, which cannot decode it (the engine skips one).
+  if (lowered.at(-1).endsWith('.sf2')) {
+    return 'data1/soundfont.sf2';
+  }
+
   const knownRootIndex = lowered.findIndex((segment) =>
     KNOWN_GAME_ROOTS.includes(segment) || segment === 'music'
   );
