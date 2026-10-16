@@ -3426,6 +3426,11 @@ void SV_SpawnServer (const char *server, const char *startspot)
 #endif
 
 	Con_DPrintf ("%s: %s\n", __func__, server);
+
+	/* A Host_Error out of SV_Physics skips its reset; a map loaded after it
+	 * would stamp every entity with that walk's value instead of 0 (#138). */
+	sv_physics_walk = 0;
+
 	if (svs.changelevel_issued)
 	{
 		SaveGamestate(true);

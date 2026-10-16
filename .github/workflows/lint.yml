@@ -162,6 +162,12 @@ jobs:
       - name: r_fastsky reaches the classic sky
         run: python3 tools/test_fastsky_classic.py
 
+      # An edict created during the physics walk waits for the next frame,
+      # whatever slot it took, so a projectile is first seen where it was
+      # spawned at any tick rate (GitHub #138).
+      - name: New edicts wait for the next physics frame
+        run: python3 tools/test_spawn_walk.py
+
       # The Options submenus' row notes fit the canvas and name the cvar the
       # row sets, so a rewired row cannot keep a stale note (GitHub #98).
       - name: Menu row notes fit and stay true

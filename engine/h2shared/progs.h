@@ -62,6 +62,7 @@ typedef struct edict_s
 
 	float		freetime;		/* sv.time when the object was freed */
 	float		alloctime;		/* sv.time when the object was allocated */
+	int		spawnwalk;		/* sv_physics_walk when allocated; 0 = outside one */
 	entvars_t	v;			/* C exported fields from progs */
 
 	/* other fields from progs come immediately after */
@@ -72,6 +73,12 @@ typedef struct edict_s
 //============================================================================
 
 typedef void (*builtin_t) (void);
+
+/* Nonzero while SV_Physics walks the edicts, a new value each frame.  ED_Alloc
+ * stamps it on what it allocates, so the walk can leave an edict created
+ * during the same walk for the next frame (GitHub #138).  Only the Hexen II
+ * server sets it; HexenWorld's leaves it 0. */
+extern	int		sv_physics_walk;
 
 extern	dprograms_t	*progs;
 extern	dfunction_t	*pr_functions;

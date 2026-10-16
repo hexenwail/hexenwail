@@ -2252,10 +2252,31 @@ void SV_Physics (void)
 	entity_cap = sv_freezenonclients.integer ? svs.maxclients + 1 : sv.num_edicts;
 	if (entity_cap > sv.num_edicts)
 		entity_cap = sv.num_edicts;	/* never walk past what is allocated */
+
+	/* An edict created during this walk -- a missile from a player's think,
+	 * say -- waits for the next frame, so it is first seen where it was
+	 * spawned.  It used to depend on the slot: one appended past entity_cap
+	 * waited, one reusing a freed slot after its spawner's was moved a whole
+	 * tick at once, and after the first few shots nearly every missile took
+	 * a freed slot -- the Paladin's purifier first showed 14 units out at 72
+	 * Hz and 50 at 20 (measured on #138).  Decided there: every new edict
+	 * waits, at any tick rate.  Vanilla moved both kinds in their first
+	 * frame, so a projectile now starts one tick later than it did there.
+	 * Edicts spawned outside the walk (map load, StartFrame) are unaffected. */
+	{
+		static unsigned int	walks;	/* unsigned: wrapping is defined */
+
+		if (++walks > 0x7fffffffu)
+			walks = 1;	/* stays a positive int; 0 means "not in a walk" */
+		sv_physics_walk = (int) walks;
+	}
+
 	for (i = 0; i < entity_cap; i++, ent = NEXT_EDICT(ent))
 	{
 		if (ent->free)
 			continue;
+		if (ent->spawnwalk == sv_physics_walk && i > svs.maxclients)
+			continue;	/* created during this walk: next frame */
 
 		ent2 = PROG_TO_EDICT(ent->v.movechain);
 		if (ent2 != sv.edicts)
@@ -2329,6 +2350,8 @@ void SV_Physics (void)
 			}
 		}
 	}
+
+	sv_physics_walk = 0;
 
 	if (*sv_globals.force_retouch)
 		(*sv_globals.force_retouch)--;
