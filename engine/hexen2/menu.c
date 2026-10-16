@@ -6437,16 +6437,28 @@ static void M_Mods_FilterChanged (void)
 
 /* Fit a label into the label column, ellipsising what does not go.  The corpus
  * carries a 27-character directory name (thebarongastonehousebyrino), so this
- * is a real case and not defensive padding. */
+ * is a real case and not defensive padding.
+ *
+ * The ellipsis goes in the MIDDLE and the tail is kept.  Cutting the end made
+ * "Mission Pack by Rino" and "Mission Pack by Rino 2" (mpbyrino, mpbyrino2)
+ * both "Mission Pack By ...": two rows nobody could tell apart, and numbered
+ * sequels are most of the long titles that collide.  Keeping the last
+ * MODS_LABEL_TAIL characters gives "Mission Pa...y Rino" and
+ * "Mission Pa...Rino 2".  GitHub #136. */
+#define	MODS_LABEL_TAIL		6
 static const char *M_Mods_FitLabel (const char *label)
 {
 	static char	buf[MODS_LABEL_MAX + 1];
+	size_t		len = strlen(label);
+	size_t		head = MODS_LABEL_MAX - 3 - MODS_LABEL_TAIL;
 
-	if (strlen(label) <= MODS_LABEL_MAX)
+	if (len <= MODS_LABEL_MAX)
 		return label;
 
-	q_strlcpy (buf, label, MODS_LABEL_MAX - 3 + 1);
-	q_strlcat (buf, "...", sizeof(buf));
+	memcpy (buf, label, head);
+	memcpy (buf + head, "...", 3);
+	memcpy (buf + head + 3, label + len - MODS_LABEL_TAIL, MODS_LABEL_TAIL);
+	buf[MODS_LABEL_MAX] = '\0';
 	return buf;
 }
 
