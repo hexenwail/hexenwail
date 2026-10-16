@@ -808,7 +808,14 @@ static void DrawGLWaterPoly (glpoly_t *p)
 			GL_ImmVertex3f (v[0], v[1], v[2]);
 		}
 	}
-	GL_ImmEnd (GL_TRIANGLE_FAN, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+	{
+		const glprogram_t *prog = OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias;
+		/* An underwater wall, not a liquid (those go to EmitWaterPolys):
+		 * D_DrawSpans8's cell, as DrawGLPoly (#176). */
+		R_SetSpanCell (prog, R_SpanCell (false));
+		GL_ImmEnd (GL_TRIANGLE_FAN, prog);
+		R_SetSpanCell (prog, 0.0f);
+	}
 }
 
 static void DrawGLWaterPolyMTexLM (glpoly_t *p)
@@ -840,6 +847,8 @@ static void DrawGLWaterPolyMTexLM (glpoly_t *p)
 			GL_ImmVertex3f (v[0], v[1], v[2]);
 		}
 	}
+	/* An underwater wall on the world program, which already holds the
+	 * world's span cell for the frame (#176). */
 	GL_ImmEnd (GL_TRIANGLE_FAN, OIT_InPass() ? &gl_shader_world_oit : &gl_shader_world);
 }
 
@@ -861,7 +870,13 @@ static void DrawGLPoly (glpoly_t *p)
 		GL_ImmTexCoord2f (v[3], v[4]);
 		GL_ImmVertex3f (v[0], v[1], v[2]);
 	}
-	GL_ImmEnd (GL_POLYGON, OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias);
+	/* A translucent or ABSLIGHT brush face: D_DrawSpans8 in 1997 (#176). */
+	{
+		const glprogram_t *prog = OIT_InPass() ? &gl_shader_alias_oit : &gl_shader_alias;
+		R_SetSpanCell (prog, R_SpanCell (false));
+		GL_ImmEnd (GL_POLYGON, prog);
+		R_SetSpanCell (prog, 0.0f);
+	}
 }
 
 static void DrawGLPolyMTex (glpoly_t *p)

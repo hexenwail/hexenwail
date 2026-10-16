@@ -6065,6 +6065,22 @@ static void R_SetupFrame (void)
 				glUniform4f_fp(gl_shader_world_oit.u_softemu, se[0], se[1], se[2], se[3]);
 			}
 		}
+		/* The 1997 span cells on the world programs (#176).  Always pushed,
+		 * so turning the cvar off reaches them on the next frame. */
+		{
+			const float	spans = R_SpanCell (false);
+			const glprogram_t	*wp[3] = { &gl_shader_world, &gl_shader_world_opaque, &gl_shader_world_oit };
+			int		k;
+
+			for (k = 0; k < 3; k++)
+			{
+				if (wp[k]->program && wp[k]->u_spans >= 0)
+				{
+					R_UseProgram (wp[k]->program);
+					glUniform1f_fp(wp[k]->u_spans, spans);
+				}
+			}
+		}
 		R_UseProgram (0);
 	}
 
@@ -7490,6 +7506,52 @@ static void R_ProfileReport (void)
 		   rprof_wpoly, rprof_epoly, rprof_texbinds);
 
 	rprof_pending = false;
+}
+
+/*
+=============
+R_SpanCell / R_SetSpanCell
+
+The span cell width in render-target pixels under r_softemu_spans, or 0.
+
+D_DrawSpans8 stepped every 8 pixels of a 320-wide frame; Turbulent8 every 16.
+A fixed 8 framebuffer pixels would be 1/100 of an 800-wide frame and 1/240 of
+1080p, and the effect, which is the point, would vanish (measured: a mean
+1/255 difference at 800x600).  So the cell keeps 1997's proportion: 8/320 of
+the width the scene is rendered at -- glwidth under r_scale, as the post chain
+sizes its target -- and twice that for liquids.  At r_scale 0.4 on 800x600
+that is exactly 320 wide and 8 pixels.  GitHub #176.
+=============
+*/
+float R_SpanCell (qboolean liquid)
+{
+	float	scale, cell;
+
+	if (!r_softemu_spans.integer)
+		return 0.0f;
+	scale = r_scale.value;
+	if (scale < 0.25f) scale = 0.25f;
+	if (scale > 1.0f) scale = 1.0f;
+	/* The width the post chain actually allocates: (int)(glwidth * scale). */
+	cell = 8.0f * (float)(int)(glwidth * scale) / 320.0f;
+	/* A whole, even number of pixels: boundaries then fall on pixel centres,
+	 * where SpanUV is exact, and never inside a 2x2 shading quad, whose
+	 * shared derivatives pick the mip (a quad starts on an even column). */
+	cell = 2.0f * floorf (cell * 0.5f + 0.5f);
+	if (cell < 4.0f)
+		cell = 4.0f;
+	return liquid ? 2.0f * cell : cell;
+}
+
+/* For the immediate-mode draws that override it around one batch: brush polys
+ * and liquids through gl_shader_alias, lit liquids through the world program.
+ * Nothing when the mode is off, so the default path does no uniform traffic. */
+void R_SetSpanCell (const glprogram_t *p, float cell)
+{
+	if (!r_softemu_spans.integer || !p->program || p->u_spans < 0)
+		return;
+	R_UseProgram (p->program);
+	glUniform1f_fp (p->u_spans, cell);
 }
 
 void R_RenderView (void)

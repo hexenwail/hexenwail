@@ -213,6 +213,12 @@ cvar_t	r_softemu_lightmap_banding = {"r_softemu_lightmap_banding", "-1", CVAR_AR
 /* -1 = follow the mode (on at r_softemu 3), 0 = never, > 0 = always.  The one
  * softemu sub-cvar Ironwail puts in its menu. */
 cvar_t	r_softemu_mdl_warp = {"r_softemu_mdl_warp", "-1", CVAR_ARCHIVE};
+/* The 1997 span rasteriser's texture interpolation on world surfaces:
+ * perspective-correct every 8 pixels, linear between (sworld_frag's SpanUV,
+ * after D_DrawSpans8).  Its own switch, not a stage of r_softemu: the palette
+ * look and this are independent, and either is wanted without the other.
+ * Alias models already have theirs, r_softemu_mdl_warp.  GitHub #176. */
+cvar_t	r_softemu_spans = {"r_softemu_spans", "0", CVAR_ARCHIVE};
 /* Which colour-distance function the nearest-colour LUT minimises: -1 auto,
  * 0 naive RGB, 1 Riemersma, 2 OKLab.  Upstream's name, default and archive
  * flag (Ironwail gl_texmgr.c:41).  uhexen2-h8yy.
@@ -2248,6 +2254,7 @@ void GL_PostProcess_Init (void)
 	Cvar_RegisterVariable(&r_softemu_dither_texture);
 	Cvar_RegisterVariable(&r_softemu_lightmap_banding);
 	Cvar_RegisterVariable(&r_softemu_mdl_warp);
+	Cvar_RegisterVariable(&r_softemu_spans);
 	Cvar_RegisterVariable(&r_softemu_metric);
 	Cvar_RegisterVariable(&r_hdr);
 	Cvar_RegisterVariable(&r_hdr_exposure);
