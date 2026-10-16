@@ -187,6 +187,14 @@ float Draw_GetCharacterAlpha (void)
 	return draw_charalpha;
 }
 
+static int Stipple_Threshold (float alpha);
+static inline qboolean Stipple_Passes (int x, int y, int threshold);
+
+qboolean Draw_CharacterPixelPasses (int x, int y)
+{
+	return Stipple_Passes (x, y, Stipple_Threshold (draw_charalpha));
+}
+
 /*
 =============================================================================
 

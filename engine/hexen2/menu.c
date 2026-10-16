@@ -887,6 +887,12 @@ static const char *M_RendererName (void)
 }
 
 
+/* Mods run only on the full game (FS_Init's -game gate, Host_Game_f's). */
+static qboolean M_ModsAvailable (void)
+{
+	return (gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)) != 0;
+}
+
 static void M_Main_Draw (void)
 {
 	int		f;
@@ -895,7 +901,19 @@ static void M_Main_Draw (void)
 	M_DrawBigString (72, 60 + (0 * 20), "SINGLE PLAYER");
 	M_DrawBigString (72, 60 + (1 * 20), "MULTIPLAYER");
 	M_DrawBigString (72, 60 + (2 * 20), "OPTIONS");
+	/* The demo cannot run mods: FS_Init refuses -game and Host_Game_f the
+	 * game command without the full game.  Show the row dimmed and say why
+	 * beside it, rather than offer a menu whose every choice fails.
+	 * GitHub #171. */
+	if (!M_ModsAvailable ())
+		Draw_SetCharacterAlpha (0.35f);
 	M_DrawBigString (72, 60 + (3 * 20), "MODS");
+	if (!M_ModsAvailable ())
+	{
+		Draw_SetCharacterAlpha (1.0f);
+		/* Beside the row: the menu fills the 200-unit canvas below it. */
+		M_Print (164, 60 + (3 * 20) + 6, "needs full game");
+	}
 	M_DrawBigString (72, 60 + (4 * 20), "HELP");
 	M_DrawBigString (72, 60 + (5 * 20), "INTRO");
 	M_DrawBigString (72, 60 + (6 * 20), "QUIT");
@@ -986,6 +1004,13 @@ static void M_Main_Key (int key)
 			break;
 
 		case 3:
+			if (!M_ModsAvailable ())
+			{
+				/* Dimmed, with the reason drawn under it; Enter does
+				 * nothing rather than open a menu that cannot work. */
+				m_entersound = false;
+				break;
+			}
 			M_Menu_Mods_f ();
 			break;
 

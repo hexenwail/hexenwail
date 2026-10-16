@@ -174,6 +174,11 @@ jobs:
       - name: A menu keeps the pointer free
         run: python3 tools/test_menu_mouse_grab.py
 
+      # The demo refused -game at startup and accepted "game mymod" at
+      # runtime, and the main menu offered MODS regardless (GitHub #171).
+      - name: Mods need the full game
+        run: python3 tools/test_demo_mods_gate.py
+
       # ARE_WE_IRONWAIL_YET.md carries a summary table over rows kept further
       # down the same file, and the two drift every time somebody flips a row
       # by hand.  The file records this happening in 2026-08-20 and twice on

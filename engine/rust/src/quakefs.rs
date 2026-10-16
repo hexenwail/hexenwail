@@ -3871,6 +3871,19 @@ unsafe extern "C" fn Host_Game_f() {
         return;
     }
 
+    // FS_Init's -game gate, at runtime too: only the full game runs modified
+    // content.  hwsv is exempt, as it is from the startup check.  #171.
+    if QuakeFS_TargetIsH2W() == 0
+        && q_strcasecmp(dir, c"data1".as_ptr()) != 0
+        && (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) == 0
+    {
+        CON_Printf(
+            PRINT_NORMAL,
+            c"You must have the full version of Hexen II to play modified games\n".as_ptr(),
+        );
+        return;
+    }
+
     // validate that the directory exists (skip for data1)
     if q_strcasecmp(dir, c"data1".as_ptr()) != 0 {
         // fs_basedir, not host_parms->basedir: -basedir moves the former and

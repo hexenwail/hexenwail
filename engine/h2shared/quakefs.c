@@ -3195,6 +3195,18 @@ static void Host_Game_f (void)
 		return;
 	}
 
+#if !(defined(H2W) && defined(SERVERONLY))
+	/* The gate FS_Init applies to -game, at runtime too: only the full game
+	 * runs modified content.  The demo used to refuse -game mymod at
+	 * startup and accept "game mymod" from the console or the MODS menu.
+	 * hwsv is exempt, as it is from the startup check.  GitHub #171. */
+	if (q_strcasecmp(dir, "data1") && !(gameflags & (GAME_REGISTERED|GAME_REGISTERED_OLD)))
+	{
+		Con_Printf ("You must have the full version of Hexen II to play modified games\n");
+		return;
+	}
+#endif
+
 	/* validate that the directory exists (skip for data1) */
 	if (q_strcasecmp(dir, "data1"))
 	{
