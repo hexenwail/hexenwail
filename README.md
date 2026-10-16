@@ -11,7 +11,7 @@ Just as [Ironwail](https://github.com/andrei-drexler/ironwail) took sezero's [Qu
 
 Raven Software released the Hexen II source code in 2000. [Hammer of Thyrion](http://uhexen2.sourceforge.net/) (2004–2018) by O. Sezer became the definitive cross-platform engine. [uHexen2](https://github.com/sezero/uhexen2) continued the work with graphical enhancements and mod support — notably Shanjaq and Inky's contributions. Hexenwail (2025) began when [Storm over Thyrion](https://www.moddb.com/mods/storm-over-thyrion) shipped without a buildable Linux client, and grew into a full GL 4.3 modernization.
 
-Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii) or [Steam](https://store.steampowered.com/app/9060/HeXen_II/). You need `data1/pak0.pak` and `data1/pak1.pak`. For Portal of Praevus, add `portals/pak3.pak`; it is auto-included when you launch with `-game modname` / `-mod modname` (use `-noportals` to opt out), and is toggleable from the Mods menu.
+Hexenwail does *not* include any original game assets; a valid copy of Hexen II is *required* and can be purchased from [GOG](https://www.gog.com/en/game/hexen_ii) or [Steam](https://store.steampowered.com/app/9060/HeXen_II/). You need `data1/pak0.pak` and `data1/pak1.pak`. Raven's free three-level 1997 demo also runs: `scripts/get_demo.sh` (or `nix run .#get-demo`) downloads and verifies it for a native build, and the web launcher offers it on first run. For Portal of Praevus, add `portals/pak3.pak`; it is auto-included when you launch with `-game modname` / `-mod modname` (use `-noportals` to opt out), and is toggleable from the Mods menu.
 
 ### Just want to try it?
 

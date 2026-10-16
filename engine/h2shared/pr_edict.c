@@ -1035,6 +1035,14 @@ static const char *PR_ClassifyGamecode (void)
 	static const unsigned int	retail_crcs[] = { 17499U, 20799U, 33075U };
 	size_t	i;
 
+	/* Raven's free three-level demo (November 1997), whose progs.dat ships
+	 * loose beside pak0.pak.  Its progdefs CRC is the 1.11 interface (38488),
+	 * so the release switch below would call it "Raven 1.11"; name it for
+	 * what it is instead.  Measured with tools/progs_crc.py off the
+	 * hash-verified .#demodata.  GitHub #171. */
+	if ((unsigned int)pr_crc == 16640U)
+		return "Raven demo";
+
 	for (i = 0; i < sizeof(retail_crcs) / sizeof(retail_crcs[0]); i++)
 	{
 		if ((unsigned int)pr_crc != retail_crcs[i])
