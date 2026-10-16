@@ -390,12 +390,18 @@ void Sys_Quit (void)
 
 #ifdef __EMSCRIPTEN__
 	emscripten_cancel_main_loop();
+	/* The gamedir the session ended in: the in-game MODS menu (and the
+	 * `game` command) can switch it after launch, and the launcher adopts
+	 * it so its dropdown and the next start match where the saves went
+	 * (GitHub #171).  fs_gamedir_nopath is a static array, still valid
+	 * after Host_Shutdown. */
 	EM_ASM({
-		dispatchEvent(new CustomEvent('hexenwailquit', { detail: { kind: 'quit' } }));
+		const gamedir = UTF8ToString($0);
+		dispatchEvent(new CustomEvent('hexenwailquit', { detail: { kind: 'quit', gamedir } }));
 		if (globalThis.HexenwailBoot && typeof globalThis.HexenwailBoot.onQuit === 'function') {
-			globalThis.HexenwailBoot.onQuit({ kind: 'quit' });
+			globalThis.HexenwailBoot.onQuit({ kind: 'quit', gamedir });
 		}
-	});
+	}, fs_gamedir_nopath);
 #endif
 
 	exit (0);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildEngineArguments, detectModGamedirs, hasMissionPack, isModAssetPath, mapModImportPath, MISSION_PACK,
+  buildEngineArguments, detectModGamedirs, hasMissionPack, isModAssetPath, launchChoiceForGamedir, mapModImportPath, MISSION_PACK,
   modImportRoot, modOwnedPath, modPanelNote, parseLaunchChoice, planModZipImport,
 } from '../lib/mods.js';
 import { readFileSync } from 'node:fs';
@@ -241,4 +241,32 @@ test('the launcher offers a mod .zip import beside the folder import', () => {
   assert.match(html, /<input id="mod-zip-input" type="file" accept="\.zip,application\/zip">/);
   assert.match(app, /ui\.modZipInput\?\.addEventListener\('change'[\s\S]*?handleModZipImport\(/);
   assert.match(app, /planModZipImport\(extracted\.map\(\(entry\) => entry\.name\), file\.name\)/);
+});
+
+test('launchChoiceForGamedir adopts the gamedir an in-game switch left (#171)', () => {
+  const held = { mods: ['karma', 'sot'], missionPack: true };
+  assert.equal(launchChoiceForGamedir('data1', held), '');
+  assert.equal(launchChoiceForGamedir('DATA1', held), '');
+  assert.equal(launchChoiceForGamedir('portals', held), MISSION_PACK);
+  assert.equal(launchChoiceForGamedir('sot', held), 'sot');
+  // The engine matches gamedirs without case; the stored spelling wins.
+  assert.equal(launchChoiceForGamedir('SoT', held), 'sot');
+  // Nothing the launcher could start: keep the stored choice.
+  assert.equal(launchChoiceForGamedir('portals', { mods: [], missionPack: false }), null);
+  assert.equal(launchChoiceForGamedir('elsewhere', held), null);
+  assert.equal(launchChoiceForGamedir('', held), null);
+  assert.equal(launchChoiceForGamedir(undefined, held), null);
+  // Every adopted choice round-trips to the arguments that reopen it.
+  assert.deepEqual(buildEngineArguments(BASE, launchChoiceForGamedir('sot', held)), [...BASE, '-game', 'sot']);
+  assert.deepEqual(buildEngineArguments(BASE, launchChoiceForGamedir('portals', held)), [...BASE, '-portals']);
+});
+
+test('the engine reports its gamedir on quit, and both quit paths pass it on (#171)', () => {
+  const sys = readFileSync(join(import.meta.dirname, '../../engine/hexen2/sys_unix.c'), 'utf8');
+  const quit = sys.slice(sys.indexOf('void Sys_Quit (void)'));
+  assert.match(quit.slice(0, quit.indexOf('exit (0);')), /detail: \{ kind: 'quit', gamedir \}[\s\S]*\}, fs_gamedir_nopath\);/);
+  const app = readFileSync(join(import.meta.dirname, '../app.js'), 'utf8');
+  assert.match(app, /boot\.onQuit = \(detail\) => handleEngineQuit\([^)]*detail\?\.gamedir/);
+  assert.match(app, /handleEngineQuit\([^)]*event\.detail\?\.gamedir/);
+  assert.match(app, /if \(intentional\) \{\s*adoptQuitGamedir\(gamedir\);/);
 });

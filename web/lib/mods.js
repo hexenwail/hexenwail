@@ -262,6 +262,34 @@ export function parseLaunchChoice(value) {
 }
 
 /*
+ * The launch choice for the gamedir a session ended in (GitHub #171).  The
+ * in-game MODS menu and the `game` command switch gamedirs mid-session, and
+ * saves follow; adopting the engine's gamedir on quit keeps the dropdown, and
+ * the next start, where those saves are.
+ *
+ *   data1     -> '' (the base game)
+ *   portals   -> MISSION_PACK, while the mission pack is installed
+ *   a gamedir -> that gamedir as the launcher stores it, matched without case
+ *                (the engine compares gamedirs case-insensitively)
+ *
+ * null means "nothing to adopt": no name, or a gamedir the launcher does not
+ * hold, which leaves the stored choice alone.
+ */
+export function launchChoiceForGamedir(gamedir, { mods = [], missionPack = false } = {}) {
+  if (typeof gamedir !== 'string' || !gamedir) {
+    return null;
+  }
+  const name = gamedir.toLowerCase();
+  if (name === 'data1') {
+    return '';
+  }
+  if (name === MISSION_PACK) {
+    return missionPack ? MISSION_PACK : null;
+  }
+  return mods.find((mod) => mod.toLowerCase() === name) ?? null;
+}
+
+/*
  * -game is what FS_Init looks for first (-mod is its alias, checked only when
  * -game is absent), and passing it also folds portals/ into the search path
  * below the mod, which is what mods that share mission pack assets expect.
