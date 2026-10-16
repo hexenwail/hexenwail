@@ -107,26 +107,6 @@ int QuakeFS_TargetIsH2WIntegrated (void)
 
 #endif	/* H2W_INTEGRATED */
 
-/* Whether this target is a dedicated-only build -- SERVERONLY without H2W.
- * The FS_Init rollback and the modified-games refusal are both guarded on
- * `!(defined(H2W) && defined(SERVERONLY))`, which is the same test: h2ded and
- * the wasm client take the guard, hwsv does not. */
-#if defined(SERVERONLY) && !defined(H2W)
-
-int QuakeFS_TargetIsServerOnly (void)
-{
-	return 1;
-}
-
-#else
-
-int QuakeFS_TargetIsServerOnly (void)
-{
-	return 0;
-}
-
-#endif	/* SERVERONLY && !H2W */
-
 /* Whether the operator asked for the pre-1.11 wire protocol, which the
  * mission pack cannot speak.  The C guards this on `!defined(H2W)` because
  * `sv_protocol` is defined in engine/hexen2/sv_main.c, which no HexenWorld

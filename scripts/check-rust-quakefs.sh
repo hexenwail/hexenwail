@@ -58,7 +58,7 @@ HARNESS_FEATURES=quakefs,zone,hashindex,cvar,cmd,info_str,sizebuf,crc,strlcpy,st
 # Floors, recorded beside the numbers the arms actually produce.  The floor is
 # one decimal place below the observation, so widening the enumeration does not
 # mean editing the gate.
-# Observed: client 7 cases / 7893 trace bytes; serveronly 7 cases / 9167.
+# Observed: client 8 cases / 12234 trace bytes; serveronly 8 cases / 12314.
 # (The numbers are re-recorded whenever the harness changes shape; the floors
 # below are what the gate enforces, and they are one step under these.)
 FLOOR_CASES=6
@@ -160,9 +160,6 @@ checks = [
     ("demo_pakdata[]",     r'static pakdata_t demo_pakdata\[\]',  r'static DEMO_PAKDATA:'),
     ("oem0_pakdata[]",     r'static pakdata_t oem0_pakdata\[\]',  r'static OEM0_PAKDATA:'),
     ("old_pakdata[]",      r'static pakdata_t old_pakdata\[\]',   r'static OLD_PAKDATA:'),
-    ("mark_data1_pak0[]",  r'static const contentmark_t mark_data1_pak0\[\]', r'static MARK_DATA1_PAK0:'),
-    ("mark_data1_pak1[]",  r'static const contentmark_t mark_data1_pak1\[\]', r'static MARK_DATA1_PAK1:'),
-    ("mark_portals[]",     r'static const contentmark_t mark_portals\[\]',    r'static MARK_PORTALS:'),
 ]
 bad = 0
 for name, cpat, rpat in checks:
@@ -179,6 +176,53 @@ for name, cpat, rpat in checks:
             print(f"      C: {cs}\n      Rust: {rs}", file=sys.stderr)
     else:
         print(f"  {name}: {len(cs)} entries match")
+
+# The content marks are (name, size) pairs, and the size is what decides a
+# match, so names alone would pass a mistyped byte count.  Every mark table the
+# C declares is compared, so a new one cannot be added to one side only (#130).
+def c_marks(seg):
+    return [(n, int(v)) for n, v in re.findall(r'\{\s*"([^"]+)",\s*(\d+)\s*\}', seg)] if seg else []
+
+def r_marks(seg):
+    return [(n, int(v)) for n, v in re.findall(r'name: c"([^"]+)", filelen: (\d+)', seg)] if seg else []
+
+for cname in re.findall(r'static const contentmark_t (mark_\w+)\[\]', c):
+    cm = c_marks(block(c, r'static const contentmark_t %s\[\]' % cname))
+    rm = r_marks(block(r, r'static %s:' % cname.upper()))
+    if not cm or cm != rm:
+        bad += 1
+        print(f"FAIL: {cname}[] differs: C {cm} vs Rust {rm}", file=sys.stderr)
+    else:
+        print(f"  {cname}[]: {len(cm)} name/size pairs match")
+
+# contentdata[]: which marks set which flag in which gamedir, and what a match
+# takes back.  Order matters to nobody, but both sides are written in the same
+# order, so a reorder is still a difference worth seeing.
+crows = [(m.upper(), d, f, x, n) for m, d, f, x, n in re.findall(
+    r'\{\s*(mark_\w+),[^"]*"(\w+)",\s*(\w+),\s*(\w+),\s*(\d+)\s*\}',
+    block(c, r'\} contentdata\[\] =') or '')]
+rrows = re.findall(
+    r'marks: &(MARK_\w+),\s*dirname: c"(\w+)",\s*gameflag: (\w+),\s*supersedes: (\w+),\s*numfiles: (\d+)',
+    block(r, r'static CONTENTDATA:') or '')
+if not crows or crows != rrows:
+    bad += 1
+    print(f"FAIL: contentdata[] differs:\n      C: {crows}\n      Rust: {rrows}", file=sys.stderr)
+else:
+    print(f"  contentdata[]: {len(crows)} rows match")
+# Each row's member count is a Raven pak's, so it must be one the pak tables
+# already record for that gamedir; a typo there would make a faithful repack
+# count as modified.
+known = set()
+for tname in ("pakdata", "demo_pakdata"):
+    for nf, d in re.findall(r'\{\s*(-?\d+),\s*\d+\s*,\s*\d+,\s*"(\w+)"',
+                            block(c, r'static pakdata_t %s\[' % tname) or ''):
+        known.add((int(nf), d))
+stray = [row for row in crows if (int(row[4]), row[1]) not in known]
+if not crows or stray:
+    bad += 1
+    print(f"FAIL: contentdata[] member counts no pak table records: {stray}", file=sys.stderr)
+else:
+    print("  contentdata[]: every member count is a recorded Raven pak's")
 
 # pop[] is numbers, not strings.
 cp = c_numbers(block(c, r'static const unsigned short\s+pop\[\]'))

@@ -6,9 +6,10 @@ Usage:
   pak2pk3.py <gamedir> <outdir>            pak0.pak..pak9.pak -> 000-pakN.pk3
   pak2pk3.py <gamedir> <outdir> --loose    also pack the loose game files
 
-Made for Raven's v1.11 data1 (pak0, pak1) and Portal of Praevus
-(portals/pak3), the archives the engine still recognises as a pk3; a mod's
-own paks convert only with --force.
+Made for Raven's v1.11 data1 (pak0, pak1), the Nov. 1997 demo (data1/pak0),
+Portal of Praevus (portals/pak3) and HexenWorld 0.14 - 0.15 (hw/pak4), the
+archives the engine still recognises as a pk3; a mod's own paks convert only
+with --force.
 On a retail data1 the paks go from 98 MB to 46 MB.  GitHub #129.
 
 WHAT IS PRESERVED, because the engine depends on it
@@ -40,15 +41,17 @@ WHAT IS PRESERVED, because the engine depends on it
 
 WHAT IS REFUSED, and why
 
-- A data1 without BOTH a v1.11 pak0 and pak1, which is every data1 but a
-  patched retail one: the demo, the OEM release, pre-1.11 installs.  As
-  .pk3s the engine identifies data1 only from those two; the 1997 demo's
-  pak0 carries the pak0 content but has no pak1, and a converted demo fails
-  with "Unable to find a proper Hexen II installation" (measured).  A
-  portals without the v1.11 pak3 likewise.  Not overridable.
-- HexenWorld's hw directory.  HexenWorld recognises its data only from a
-  real pak4.pak, and a converted one stops hwsv and hwcl with "You must have
-  the HexenWorld data installed" (measured).  Not overridable.
+- A data1 with neither a v1.11 pak0 and pak1 pair nor the Nov. 1997 demo's
+  pak0: the OEM release, pre-1.11 installs, the older 0.42 demo.  As .pk3s
+  the engine identifies data1 only from those, and a converted one fails
+  with "Unable to find a proper Hexen II installation".  A portals without
+  the v1.11 pak3 likewise.  Not overridable.
+- On the demo's data1, --loose and any pak beside its pak0.  The demo runs
+  no modified content, and every pk3 that is not a whole Raven pak counts
+  as modified.  Not overridable.
+- An hw without the HexenWorld 0.14 - 0.15 pak4.pak (0.09 and 0.11 have no
+  content marks).  As a .pk3 hwsv would not recognise it and stops with "You
+  must have the HexenWorld data installed".  Not overridable.
 - Any other pak beside the base content (a mod's pak5.pak), and a mod's own
   gamedir, unless --force.  Those mount as unrecognised archives, which marks
   the game "modified" (fine on a registered install), and since every pk3
@@ -130,6 +133,12 @@ CASE_INSENSITIVE_FS = sys.platform in ("win32", "darwin")
 # recognise Raven's content inside an archive, and the gamedir each belongs
 # in.  tools/test_pak2pk3.py checks this copy against quakefs.c.
 CONTENT_MARKS = {
+    # First: the demo's pak0 carries every "data1 pak0" mark too, and
+    # identify() takes the first key that matches.
+    "data1 demo": ("data1", {
+        "strings.txt": 16539, "models/h_cru.mdl": 16896,
+        "models/h_nec.mdl": 8052, "models/castrch.mdl": 16996,
+        "gfx/menu/netp2.lmp": 7760}),
     "data1 pak0": ("data1", {
         "maplist.txt": 193, "puzzles.txt": 1131, "default.cfg": 2793,
         "gfx.wad": 10732, "gfx/palette.lmp": 768, "maps/demo1.bsp": 1896452}),
@@ -139,6 +148,10 @@ CONTENT_MARKS = {
     "portals": ("portals", {
         "default.cfg": 3164, "maps/keep1.bsp": 2500124,
         "maps/tibet1.bsp": 2463304, "maps/tibet7.bsp": 2749412}),
+    "hw pak4": ("hw", {
+        "maps/hwdm1.bsp": 1066196, "maps/hwdm3.bsp": 620284,
+        "maps/hwdm5.bsp": 1521668, "sound/taunt/taunt001.wav": 9996,
+        "models/h_suc.mdl": 6268}),
 }
 
 
@@ -318,7 +331,7 @@ def main(argv=None):
         description="Convert a retail Hexen II gamedir's .pak archives to .pk3.",
         epilog="See the module docstring or tools/README.md for what is "
                "preserved and what is refused.")
-    ap.add_argument("gamedir", help="data1 or portals of a retail install")
+    ap.add_argument("gamedir", help="data1, portals or hw of a retail install")
     ap.add_argument("outdir", help="where to write the .pk3 files (created if missing)")
     ap.add_argument("--loose", action="store_true",
                     help="also pack the loose game files into %s" % LOOSE_ARCHIVE)
@@ -350,11 +363,6 @@ def main(argv=None):
             print("skipped %s: the engine opens only pak0.pak..pak9.pak"
                   % printable(n))
 
-        # HexenWorld recognises its data only from a real hw/pak4.pak
-        # (GAME_HEXENWORLD, set by the pak path alone; contentdata[] has no hw
-        # entry), so a converted hw directory stops hwsv and hwcl with "You
-        # must have the HexenWorld data installed".  glhexen2 never loads hw,
-        # so nothing would show the breakage until then.  Not overridable.
         if gamedir_name not in ("data1", "portals", "hw") and not args.force:
             hint = ""
             if any(os.path.isdir(os.path.join(args.gamedir, d)) and d.lower() == "data1"
@@ -363,7 +371,7 @@ def main(argv=None):
                         "root, so pass %s instead."
                         % printable(os.path.join(args.gamedir, "data1")))
             raise PakError(
-                "%s is not data1 or portals, so this is a mod's directory (or "
+                "%s is not data1, portals or hw, so this is a mod's directory (or "
                 "the wrong one).  Rerun with --force to convert it: its pk3s "
                 "mount as unrecognised archives, which only a registered "
                 "install may run.%s" % (printable(args.gamedir), hint))
@@ -371,13 +379,6 @@ def main(argv=None):
         if not paks and not args.loose:
             print("error: no pak0.pak..pak9.pak in %s" % args.gamedir, file=sys.stderr)
             return 1
-
-        if gamedir_name == "hw":
-            raise PakError(
-                "%s is HexenWorld's directory.  HexenWorld recognises its data "
-                "only from a real pak4.pak; as a .pk3 the server and client "
-                "refuse to start (\"You must have the HexenWorld data "
-                "installed\").  Leave hw as it is." % args.gamedir)
 
         # Read and identify everything before writing anything.
         plan = []
@@ -392,26 +393,62 @@ def main(argv=None):
         # can be converted at all, and neither rule can be overridden: a
         # gamedir converted without it never starts.
         #
-        # FS_Init counts a data1 as an installation only with BOTH the pak0
-        # and the pak1 content (GAME_REGISTERED0 | GAME_REGISTERED1).  The 1997
-        # demo's pak0 carries the pak0 marks too, but no pak1, and as a .pk3
-        # nothing else identifies it: "Unable to find a proper Hexen II
-        # installation" (measured).  OEM and pre-1.11 data1 paks carry neither.
+        # FS_Init counts a data1 as an installation with BOTH the pak0 and
+        # the pak1 content (GAME_REGISTERED0 | GAME_REGISTERED1), or with the
+        # Nov. 1997 demo's pak0 (GAME_DEMO, whose row in contentdata[] takes
+        # back the GAME_REGISTERED0 its pak0 also matches).  Anything else, as
+        # a .pk3, fails: "Unable to find a proper Hexen II installation".
+        # OEM, pre-1.11 and 0.42-demo data1 paks carry no marks.
         # An empty plan is --loose on a gamedir already converted: fine.
         found = {key for _, _, key in plan if base_ok(key)}
         if plan and gamedir_name == "data1" and \
-                not {"data1 pak0", "data1 pak1"} <= found:
+                not {"data1 pak0", "data1 pak1"} <= found and \
+                "data1 demo" not in found:
             raise PakError(
-                "%s has no v1.11 pak0.pak and pak1.pak pair (the demo, the OEM "
-                "release and pre-1.11 installs do not).  As .pk3s the engine "
-                "identifies data1 only from those two, and would refuse to "
-                "start: \"Unable to find a proper Hexen II installation\".  "
-                "Leave this data1 as paks." % args.gamedir)
+                "%s has no v1.11 pak0.pak and pak1.pak pair, and no Nov. 1997 "
+                "demo pak0.pak (the OEM release, pre-1.11 installs and the "
+                "older demo have neither).  As .pk3s the engine identifies "
+                "data1 only from those, and would refuse to start: \"Unable "
+                "to find a proper Hexen II installation\".  Leave this data1 "
+                "as paks." % args.gamedir)
         if plan and gamedir_name == "portals" and "portals" not in found:
             raise PakError(
                 "%s has no v1.11 Portal of Praevus pak3.pak.  As a .pk3 the "
                 "engine would not recognise the mission pack.  Leave it as "
                 "paks." % args.gamedir)
+        # hwsv requires GAME_HEXENWORLD, and as a .pk3 only the 0.14 - 0.15
+        # pak4 carries marks for it.  glhexen2 mounts hw only to join a
+        # HexenWorld server, and identifies nothing there.
+        if plan and gamedir_name == "hw" and "hw pak4" not in found:
+            raise PakError(
+                "%s has no HexenWorld 0.14 - 0.15 pak4.pak (0.09 and 0.11 "
+                "have no content marks).  As a .pk3 hwsv would not recognise "
+                "it: \"You must have the HexenWorld data installed\".  Leave "
+                "it as paks." % args.gamedir)
+        # The demo cannot run modified content (FS_Init: "You must have the
+        # full version of Hexen II to play modified games"), and every pk3
+        # but a whole Raven pak repacked counts as modified: a zz-loose.pk3,
+        # or a converted mod pak, would stop it starting.  Not overridable.
+        if "data1 demo" in found:
+            if args.loose:
+                raise PakError(
+                    "%s is the demo, which runs no modified content, and %s "
+                    "would be an archive Raven never shipped: the demo would "
+                    "refuse to start (\"You must have the full version of "
+                    "Hexen II to play modified games\").  Rerun without "
+                    "--loose; the loose files work as they are."
+                    % (printable(args.gamedir), LOOSE_ARCHIVE))
+            other = [name for name, _, key in plan if not base_ok(key)]
+            if other:
+                raise PakError(
+                    "%s is the demo, which runs no modified content, and %s "
+                    "%s not Raven's.  Converted or not, the demo would refuse "
+                    "to start with %s installed.  Move %s out of %s."
+                    % (printable(args.gamedir), ", ".join(other),
+                       "is" if len(other) == 1 else "are",
+                       "it" if len(other) == 1 else "them",
+                       "it" if len(other) == 1 else "them",
+                       printable(args.gamedir)))
 
         # Whatever else is here: a mod's pak5 beside the base content, or a
         # mod's own gamedir.  Converting is fine -- it mounts as an

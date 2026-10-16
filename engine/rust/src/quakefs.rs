@@ -82,7 +82,7 @@ const MAX_LISTNAMES: usize = 256;
 const MAX_MATCHES: c_int = 128;
 /// `MAX_PAKDATA` and `MAX_CONTENTDATA` from quakefs.c.
 const MAX_PAKDATA: usize = 5;
-const MAX_CONTENTDATA: usize = 3;
+const MAX_CONTENTDATA: usize = 5;
 
 /// `IDPAKHEADER` from common/pakfile.h.
 const IDPAKHEADER: u32 = (b'K' as u32) << 24 | (b'C' as u32) << 16 | (b'A' as u32) << 8 | (b'P' as u32);
@@ -238,6 +238,10 @@ struct ContentDataC {
     marks: &'static [ContentMarkC],
     dirname: &'static CStr,
     gameflag: c_uint,
+    /// Flags this match takes back from the same archive.
+    supersedes: c_uint,
+    /// Members in Raven's pak, which a faithful repack keeps.
+    numfiles: c_int,
 }
 
 /// `fshandle_t` from quakefs.h.
@@ -375,12 +379,63 @@ static MARK_PORTALS: [ContentMarkC; 4] = [
     ContentMarkC { name: c"maps/tibet7.bsp", filelen: 2749412 },
 ];
 
+/// `mark_data1_demo[]` -- the Nov. 1997 demo pak0's fingerprint (#130).  A
+/// superset of the v1.11 pak0, so its row supersedes GAME_REGISTERED0.
+static MARK_DATA1_DEMO: [ContentMarkC; 5] = [
+    ContentMarkC { name: c"strings.txt", filelen: 16539 },
+    ContentMarkC { name: c"models/h_cru.mdl", filelen: 16896 },
+    ContentMarkC { name: c"models/h_nec.mdl", filelen: 8052 },
+    ContentMarkC { name: c"models/castrch.mdl", filelen: 16996 },
+    ContentMarkC { name: c"gfx/menu/netp2.lmp", filelen: 7760 },
+];
+
+/// `mark_hw_pak4[]` -- HexenWorld 0.14 - 0.15's hw/pak4 fingerprint (#130).
+static MARK_HW_PAK4: [ContentMarkC; 5] = [
+    ContentMarkC { name: c"maps/hwdm1.bsp", filelen: 1066196 },
+    ContentMarkC { name: c"maps/hwdm3.bsp", filelen: 620284 },
+    ContentMarkC { name: c"maps/hwdm5.bsp", filelen: 1521668 },
+    ContentMarkC { name: c"sound/taunt/taunt001.wav", filelen: 9996 },
+    ContentMarkC { name: c"models/h_suc.mdl", filelen: 6268 },
+];
+
 /// `contentdata[]` -- which marks identify which edition, and where Raven
 /// shipped it.
 static CONTENTDATA: [ContentDataC; MAX_CONTENTDATA] = [
-    ContentDataC { marks: &MARK_DATA1_PAK0, dirname: c"data1", gameflag: GAME_REGISTERED0 },
-    ContentDataC { marks: &MARK_DATA1_PAK1, dirname: c"data1", gameflag: GAME_REGISTERED1 },
-    ContentDataC { marks: &MARK_PORTALS, dirname: c"portals", gameflag: GAME_PORTALS },
+    ContentDataC {
+        marks: &MARK_DATA1_PAK0,
+        dirname: c"data1",
+        gameflag: GAME_REGISTERED0,
+        supersedes: 0,
+        numfiles: 696,
+    },
+    ContentDataC {
+        marks: &MARK_DATA1_PAK1,
+        dirname: c"data1",
+        gameflag: GAME_REGISTERED1,
+        supersedes: 0,
+        numfiles: 523,
+    },
+    ContentDataC {
+        marks: &MARK_DATA1_DEMO,
+        dirname: c"data1",
+        gameflag: GAME_DEMO,
+        supersedes: GAME_REGISTERED0,
+        numfiles: 797,
+    },
+    ContentDataC {
+        marks: &MARK_PORTALS,
+        dirname: c"portals",
+        gameflag: GAME_PORTALS,
+        supersedes: 0,
+        numfiles: 245,
+    },
+    ContentDataC {
+        marks: &MARK_HW_PAK4,
+        dirname: c"hw",
+        gameflag: GAME_HEXENWORLD,
+        supersedes: 0,
+        numfiles: 102,
+    },
 ];
 
 /// `pop[]` -- the graphic that has to be in the pak for registered features.
@@ -3206,7 +3261,6 @@ extern "C" {
     fn Cvar_RegisterVariable(variable: *mut CvarC);
     fn Cvar_SetROM(var_name: *const c_char, value: *const c_char);
     /// The other hooks this group needs.
-    fn QuakeFS_TargetIsServerOnly() -> c_int;
     fn QuakeFS_TargetHasClientCommands() -> c_int;
     fn QuakeFS_TargetOldProtocolRequest() -> c_int;
     fn QuakeFS_TargetClientReset();
@@ -3958,7 +4012,7 @@ const PROTOCOL_RAVEN_111: c_int = 18;
 /// (h2config.h undefines it), so only the H2W and plain forms are ported; the
 /// C's `#if !defined(H2W)` guards on `sv_protocol` and on the modified-games
 /// refusal are the shim's QuakeFS_TargetOldProtocolRequest and
-/// QuakeFS_TargetIsServerOnly, since `sv_protocol` does not exist in hwsv.
+/// QuakeFS_TargetIsH2W, since `sv_protocol` does not exist in hwsv.
 #[no_mangle]
 pub unsafe extern "C" fn FS_Init() {
     let mut check_portals: c_int = 0;
@@ -4085,7 +4139,11 @@ pub unsafe extern "C" fn FS_Init() {
             Sys_Error(c"Unable to verify retail version data.".as_ptr());
         }
     }
-    if QuakeFS_TargetIsServerOnly() == 0
+    // C: `#if !(defined(H2W) && defined(SERVERONLY))`, i.e. everywhere but
+    // hwsv.  This used to read a QuakeFS_TargetIsServerOnly() that was h2ded:
+    // the inverse, so h2ded ran modified content on demo data and hwsv
+    // refused what C hwsv accepted.  QuakeFS_TargetIsH2W is hwsv alone.
+    if QuakeFS_TargetIsH2W() == 0
         && (gameflags & GAME_MODIFIED) != 0
         && (gameflags & (GAME_REGISTERED | GAME_REGISTERED_OLD)) == 0
     {
@@ -4428,8 +4486,11 @@ unsafe fn zip_has_marks(
 
 /// `check_known_zip` -- the container-agnostic half of `check_known_paks`:
 /// ask what is inside instead of fingerprinting the archive format.
-unsafe fn check_known_zip(zip: *mut ZipPackC) -> c_uint {
+unsafe fn check_known_zip(zip: *mut ZipPackC, whole: &mut bool) -> c_uint {
     let mut flags: c_uint = 0;
+    let mut taken: c_uint = 0;
+
+    *whole = false;
 
     for cd in CONTENTDATA.iter() {
         if strcmp((&raw const fs_gamedir_nopath).cast::<c_char>(), cd.dirname.as_ptr()) != 0 {
@@ -4437,10 +4498,14 @@ unsafe fn check_known_zip(zip: *mut ZipPackC) -> c_uint {
         }
         if zip_has_marks(zip, cd.marks) != 0 {
             flags |= cd.gameflag;
+            taken |= cd.supersedes;
+            if (*zip).numfiles == cd.numfiles {
+                *whole = true;
+            }
         }
     }
 
-    flags
+    flags & !taken
 }
 
 /// `FS_ZipRead` -- miniz's I/O callback, over the same FILE the rest of the
@@ -4812,11 +4877,15 @@ unsafe fn fs_load_zip_file(zipfile: *const c_char, base_fs: c_int) -> *mut ZipPa
     (*zip).numfiles = numfiles;
     (*zip).files = newfiles;
 
-    // An archive still counts as content the original game never shipped; what
-    // is new is that it can now ALSO be identified as Raven's own content.
-    gameflags |= GAME_MODIFIED;
+    // Modified unless it is a whole Raven pak repacked: marks matched AND the
+    // pak's member count, as check_known_paks reads numfiles and the CRC.  The
+    // demo needs that to run as a pk3 at all (#130).
+    let mut whole = false;
     if base_fs != 0 {
-        gameflags |= check_known_zip(zip);
+        gameflags |= check_known_zip(zip, &mut whole);
+    }
+    if !whole {
+        gameflags |= GAME_MODIFIED;
     }
 
     sys_print2i(c"Added archive %s (%i files)\n".as_ptr(), zipfile, numfiles);

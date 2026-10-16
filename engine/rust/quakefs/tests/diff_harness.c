@@ -664,6 +664,78 @@ static void write_zip_variant(const char *path, int variant)
 	write_bytes(path, buf, n);
 }
 
+/* A pk3 shaped like the Nov. 1997 demo's pak0 repacked (#130): the members
+ * mark_data1_pak0[] and mark_data1_demo[] look for, at their sizes, padded
+ * with one-byte fillers to `members` entries.  Identification reads only the
+ * central directory, so the payloads are zeros; the CRCs are still right. */
+static unsigned long crc32_zeros(size_t n)
+{
+	unsigned long c = 0xFFFFFFFFUL;
+	int k;
+
+	while (n--) {
+		for (k = 0; k < 8; k++)
+			c = (c >> 1) ^ (0xEDB88320UL & (0UL - (c & 1)));
+	}
+	return c ^ 0xFFFFFFFFUL;
+}
+
+static void write_demo_pk3(const char *path, int members)
+{
+	static const struct { const char *name; size_t size; } marks[] = {
+		{ "maplist.txt", 193 }, { "puzzles.txt", 1131 },
+		{ "default.cfg", 2793 }, { "gfx.wad", 10732 },
+		{ "gfx/palette.lmp", 768 }, { "maps/demo1.bsp", 1896452 },
+		{ "strings.txt", 16539 }, { "models/h_cru.mdl", 16896 },
+		{ "models/h_nec.mdl", 8052 }, { "models/castrch.mdl", 16996 },
+		{ "gfx/menu/netp2.lmp", 7760 }
+	};
+	const int nmarks = (int)(sizeof marks / sizeof marks[0]);
+	unsigned char hdr[512], *central;
+	static unsigned char zeros[65536];
+	size_t cd = 0, off = 0, left;
+	unsigned long crc;
+	char name[64];
+	int i;
+	FILE *f = fopen(path, "wb");
+
+	if (!f) {
+		fprintf(stderr, "harness: cannot write %s\n", path);
+		exit(2);
+	}
+	central = malloc((size_t)members * 128);
+	for (i = 0; i < members; i++) {
+		size_t size, n;
+
+		if (i < nmarks) {
+			snprintf(name, sizeof name, "%s", marks[i].name);
+			size = marks[i].size;
+		} else {
+			snprintf(name, sizeof name, "filler/%04d.txt", i);
+			size = 1;
+		}
+		crc = crc32_zeros(size);
+		/* zip_local copies the payload too; write the header alone and
+		 * stream the zeros after it. */
+		n = zip_local(hdr, name, zeros, 0, size, crc, 0);
+		put32(hdr + 18, (unsigned long)size);	/* compressed size */
+		fwrite(hdr, 1, n, f);
+		for (left = size; left; left -= (left < sizeof zeros ? left : sizeof zeros))
+			fwrite(zeros, 1, left < sizeof zeros ? left : sizeof zeros, f);
+		cd += zip_central(central + cd, name, off, size, size, crc, 0);
+		off += n + size;
+	}
+	fwrite(central, 1, cd, f);
+	put32(hdr, 0x06054b50UL);
+	put16(hdr + 4, 0); put16(hdr + 6, 0);
+	put16(hdr + 8, (unsigned int)members); put16(hdr + 10, (unsigned int)members);
+	put32(hdr + 12, (unsigned long)cd); put32(hdr + 16, (unsigned long)off);
+	put16(hdr + 20, 0);
+	fwrite(hdr, 1, 22, f);
+	fclose(f);
+	free(central);
+}
+
 static void fixture_setup(void)
 {
 	const char *demo = getenv("QF_BASEDIR");
@@ -1020,6 +1092,50 @@ static void scenario_fatal_gamedir(void)
 	step("fatal-gamedir: returned");
 }
 
+/* The demo as a pk3 (#130), on a base of its own.  797 members is the demo
+ * pak's count, so the archive is a whole Raven pak and FS_Init must say demo
+ * and not modified; 796 is not, and anything beside it is a mod: the demo
+ * refuses both ("You must have the full version of Hexen II to play modified
+ * games").  That refusal is C's everywhere but hwsv, which is what the Rust
+ * port once had backwards, so this case is the one that would see it. */
+static void demo_pk3_case(const char *tag, int members, int with_mod)
+{
+	char p[512];
+
+	snprintf(base, sizeof base, "%s/base-%s", root, tag);
+	mkdir(base, 0755);
+	path_join(p, sizeof p, base, "data1");
+	mkdir(p, 0755);
+	path_join(p, sizeof p, base, "data1/000-pak0.pk3");
+	write_demo_pk3(p, members);
+	if (with_mod) {
+		path_join(p, sizeof p, base, "data1/mod.pk3");
+		write_zip_variant(p, 0);
+	}
+
+	err_armed = 1;
+	if (setjmp(err_env)) {
+		call("FS_Init refused");
+		check(members != 797 || with_mod,
+		      "%s: the whole demo pk3 was refused: %s", tag, err_buf);
+		check(strstr(err_buf, "modified games") != NULL,
+		      "%s: refused for the wrong reason: %s", tag, err_buf);
+		return;
+	}
+	parms_init();
+	FS_Init();
+	call("FS_Init returned");
+	rec_getters();
+	check(members == 797 && !with_mod,
+	      "%s: FS_Init accepted a modified demo", tag);
+	check((gameflags & GAME_DEMO) && !(gameflags & (GAME_MODIFIED | GAME_REGISTERED0)),
+	      "%s: gameflags 0x%x, wanted GAME_DEMO alone", tag, (unsigned)gameflags);
+}
+
+static void scenario_demo_pk3(void) { demo_pk3_case("demo", 797, 0); }
+static void scenario_demo_pk3_mod(void) { demo_pk3_case("demo-mod", 797, 1); }
+static void scenario_demo_pk3_short(void) { demo_pk3_case("demo-short", 796, 0); }
+
 /*----------------------------------------------------------------------------
  * case runner
  *--------------------------------------------------------------------------*/
@@ -1130,6 +1246,12 @@ int main(int argc, char **argv)
 		run_case("fatal-missing", scenario_fatal_missing);
 	if (!only || !strcmp(only, "fatal-gamedir"))
 		run_case("fatal-gamedir", scenario_fatal_gamedir);
+	if (!only || !strcmp(only, "demo-pk3"))
+		run_case("demo-pk3", scenario_demo_pk3);
+	if (!only || !strcmp(only, "demo-pk3-mod"))
+		run_case("demo-pk3-mod", scenario_demo_pk3_mod);
+	if (!only || !strcmp(only, "demo-pk3-short"))
+		run_case("demo-pk3-short", scenario_demo_pk3_short);
 
 	rec_int(0xF1A1);
 	rec_int(checks);

@@ -27,7 +27,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `hw-drive.sh` | run `hwsv` and a client connected to it, and screenshot the HexenWorld session |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `test_demobar_copies.py` | fail if the software renderer's `SCR_DrawDemoBar` (`screen.c`) drifts from the GL one (`gl_screen.c`) beyond the two allowed lines (#123) |
-| `pak2pk3.py` | convert a retail v1.11 `data1` or `portals` from `pakN.pak` to `000-pakN.pk3` (DEFLATE, same members, order, duplicates and bytes; verified before it is renamed into place). Refuses content the engine would not identify as a pk3, such as the demo. `--loose` packs the loose game files into `zz-loose.pk3`. Retail data1: paks 98 MB to 46 MB (#129) |
+| `pak2pk3.py` | convert a retail v1.11 `data1` or `portals`, the Nov. 1997 demo's `data1`, or HexenWorld 0.14 - 0.15's `hw` from `pakN.pak` to `000-pakN.pk3` (DEFLATE, same members, order, duplicates and bytes; verified before it is renamed into place). Refuses content the engine would not identify as a pk3, such as the OEM release and pre-1.11 installs (#130). `--loose` packs the loose game files into `zz-loose.pk3`. Retail data1: paks 98 MB to 46 MB (#129) |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
 | `artifact-save-check.sh` | check on a live engine that the selected artifact survives save, relaunch and load, including old-format saves and a pre-r11 engine (#159); needs retail data and a GPU (offscreen) |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by, and the Raven release when it is one |
