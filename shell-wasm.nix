@@ -30,7 +30,7 @@ pkgs.mkShell {
     echo ""
     echo "Quick commands:"
     echo "  ./scripts/wasm-build.sh                       # webgl2 (shipping)"
-    echo "  ./scripts/wasm-build.sh software engine/build-soft"
+    echo "  ./scripts/wasm-build.sh software engine/build-software"
     echo ""
     echo "Or by hand:"
     echo "  cd engine && mkdir -p build && cd build"

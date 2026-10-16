@@ -145,7 +145,7 @@ cvar_t	r_draworder = {"r_draworder", "0", CVAR_NONE};
 cvar_t	r_speeds = {"r_speeds", "0", CVAR_NONE};
 cvar_t	r_timegraph = {"r_timegraph", "0", CVAR_NONE};
 cvar_t	r_graphheight = {"r_graphheight", "10", CVAR_NONE};
-cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_NONE};
+cvar_t	r_clearcolor = {"r_clearcolor", "0", CVAR_ARCHIVE};	/* archived as in gl_rmain.c: #104 */
 cvar_t	r_waterwarp = {"r_waterwarp", "1", CVAR_ARCHIVE};
 cvar_t	r_fullbright = {"r_fullbright", "0", CVAR_NONE};
 cvar_t	r_drawentities = {"r_drawentities", "1", CVAR_NONE};
@@ -190,7 +190,7 @@ static void R_TextureExternal_Deprecated (cvar_t *var)
 		Con_Printf ("  Your old value of 0 was IGNORED; replacement textures stay on.\n");
 }
 
-cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_NONE};
+cvar_t	r_dynamic = {"r_dynamic", "1", CVAR_ARCHIVE};	/* archived as in gl_rmain.c: #104 */
 
 //void CreatePassages (void);
 //void SetVisibilityByPassages (void);
@@ -371,7 +371,7 @@ void R_NewMap (void)
 
 	r_viewleaf = NULL;
 	/* Roll back any misc_modelpimp mutations from the previous map before
-	 * clearing the per-entity overrides (matches r_webgl2.c:R_NewMap). */
+	 * clearing the per-entity overrides (matches gl_rmisc.c:R_NewMap). */
 	Mod_RestoreAliasModelDefaults ();
 	R_ClearPimpOverrides ();
 	R_ClearParticles ();

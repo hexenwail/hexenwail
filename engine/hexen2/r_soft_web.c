@@ -3,12 +3,12 @@
  *
  * hexenwail's shared client code (cl_main.c, cl_effect.c, cl_parse.c,
  * menu.c, pr_csqc.c) is written against a handful of renderer-policy
- * symbols that the WebGL2 renderer publishes from r_webgl2.c. Some of
- * those knobs -- dynamic-light policy in particular -- are meaningful in
- * the software rasteriser too; others describe GPU features that have no
- * software counterpart.
+ * symbols that the GL renderer publishes, mostly from gl_rmain.c and
+ * gl_postprocess.c. Some of those knobs -- dynamic-light policy in
+ * particular -- are meaningful in the software rasteriser too; others
+ * describe GPU features that have no software counterpart.
  *
- * This file is the software counterpart of the r_webgl2.c cvar block:
+ * This file is the software counterpart of those GL cvar blocks:
  *   - light-policy cvars are real and honoured by the client;
  *   - GPU-only cvars exist so shared code links, and the menu rows that
  *     drive them are hidden under the software renderer (menu.c).
@@ -38,12 +38,22 @@
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_torch_dlight = {"gl_torch_dlight", "1", CVAR_ARCHIVE};
 cvar_t	gl_flashintensity = {"gl_flashintensity", "1", CVAR_ARCHIVE};
-cvar_t	gl_extra_dynamic_lights = {"gl_extra_dynamic_lights", "1", CVAR_ARCHIVE};
+cvar_t	gl_extra_dynamic_lights = {"gl_extra_dynamic_lights", "1", CVAR_NONE};
 
-/* --- GPU-only knobs: present for linkage, hidden in the menu ------- */
+/* --- GPU-only knobs: present for linkage, hidden in the menu -------
+ *
+ * Every default here must equal the GL build's, whether or not this build
+ * reads the cvar (beyond menu.c, which reads most of them to draw rows that
+ * are hidden here, only gl_particles and r_drawparticles are read: by
+ * r_part.c).  They are CVAR_ARCHIVE, so config.cfg carries them to whichever
+ * build reads it next: r_wateralpha "1" and r_dither "0" here used to turn the
+ * GL build's water opaque and its dithering off whenever the software build
+ * wrote the config first.
+ * tools/test_soft_cvar_defaults.py holds every software-only file to the GL
+ * definitions, archive flag included. */
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
 cvar_t	r_softemu = {"r_softemu", "0", CVAR_ARCHIVE};
-cvar_t	r_dither = {"r_dither", "0", CVAR_ARCHIVE};
+cvar_t	r_dither = {"r_dither", "0.5", CVAR_ARCHIVE};
 /* The r_softemu sub-cvars (uhexen2-a5nn.3).  Only the one with a menu row
  * has to be here for linkage -- menu.c reads it to draw that row -- but all
  * five are registered so a config written by the GL build round-trips through
@@ -59,7 +69,7 @@ cvar_t	gl_particles = {"gl_particles", "1", CVAR_ARCHIVE};
  * linkage: the software R_DrawParticles honours it too. */
 cvar_t	r_drawparticles = {"r_drawparticles", "1", CVAR_ARCHIVE};
 cvar_t	gl_fullbrights = {"gl_fullbrights", "1", CVAR_ARCHIVE};
-cvar_t	r_wateralpha = {"r_wateralpha", "1", CVAR_ARCHIVE};
+cvar_t	r_wateralpha = {"r_wateralpha", "0.33", CVAR_ARCHIVE};
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_glow_intensity = {"gl_glow_intensity", "1", CVAR_ARCHIVE};
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};
@@ -132,8 +142,8 @@ void R_SoftWebInitCvars (void)
 
 	per-entity PimpModel overrides
 
-	model.h declares this table as renderer-owned; r_webgl2.c carries the
-	WebGL2 copy. Behaviour must match exactly, because pr_cmds.c /
+	model.h declares this table as renderer-owned; gl_rmain.c carries the
+	GL copy. Behaviour must match exactly, because pr_cmds.c /
 	pr_edict.c drive it from QuakeC.
 
 =============================================================================
@@ -186,8 +196,8 @@ int R_GetPimpFlags (entity_t *e, float **gsettings_out)
 Fog_ParseServerMessage
 
 svc_fog is a renderer-owned message: cl_parse.c dispatches it
-unconditionally and each renderer supplies the handler (the WebGL2 build
-does so from r_webgl2.c). The software rasteriser has no fog, but the
+unconditionally and each renderer supplies the handler (the GL build
+does so from gl_fog.c). The software rasteriser has no fog, but the
 payload -- [byte] density, [byte] red, [byte] green, [byte] blue,
 [short] fade time -- still has to be drained or the rest of the server
 message is parsed at the wrong offset.

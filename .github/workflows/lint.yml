@@ -90,6 +90,12 @@ jobs:
       - name: Software model-effect parity
         run: python3 tools/test_software_model_flags.py
 
+      # Both web builds can share one config.cfg, so every cvar they both
+      # register must default and archive alike; one listed exception
+      # (r_waterwarp).  Also reports cvars only one registers (#104, #362).
+      - name: Software renderer cvar defaults match GL
+        run: python3 tools/test_soft_cvar_defaults.py
+
       # Data-free coverage for the unified multiplayer path. The harness
       # extracts the production C functions rather than maintaining a Python
       # reimplementation, then compiles them against narrow engine stubs.

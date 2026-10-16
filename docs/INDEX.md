@@ -32,6 +32,8 @@ whether you may edit it freely.
 | [`GAMECODE.md`](GAMECODE.md) | Reference: what `.#gamecode` produces, search-path precedence, what ships |
 | [`WEBGL_RENDERER.md`](WEBGL_RENDERER.md) | What the GLES3 / WebGL2 tier does and does not compile, and how to diagnose it |
 | [`PWA.md`](PWA.md) | The web build: launcher, import, mods, saves, offline, iOS |
+| [`web/ARCHITECTURE.md`](web/ARCHITECTURE.md) | How the web build's two configurations (WebGL2, software) fit together, from configure to browser |
+| [`web/SOFTWARE_RENDERER.md`](web/SOFTWARE_RENDERER.md) | The restored 8bpp rasterizer: what is restored, the four adapters, the presenter, its gates |
 
 ### Design records — history, not instructions
 
@@ -60,6 +62,3 @@ whether you may edit it freely.
 - **Agent instructions** — `AGENTS.md` at the repo root
 - **Player setup** — `USAGE.md` at the repo root
 - **HexenWorld** — `engine/hexenworld/README.md`
-- **The software renderer** — currently undocumented. `engine/hexen2/r_soft_web.c`
-  points at a `docs/web/SOFTWARE_RENDERER.md` that has never existed; it is
-  `uhexen2-ibnq.3` in `BACKLOG.md`.
