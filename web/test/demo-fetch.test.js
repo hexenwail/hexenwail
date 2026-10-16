@@ -345,3 +345,33 @@ test('downloadHexen2Demo warns but proceeds when an equivalent repack is served'
   assert.equal(result.files.length, 3);
   assert.match(result.warnings[0], /not the pinned/);
 });
+
+// GitHub #101: the demo's loose files stop overriding the full game.
+test('demoLeftoverCandidates lists the demo loose files only once pak1 is stored', async () => {
+  const { demoLeftoverCandidates, HEXEN2_DEMO_SOURCE } = await import('../lib/demo-fetch.js');
+  const demo = Object.keys(HEXEN2_DEMO_SOURCE.files);
+  // The demo alone: nothing to retire, it is still the demo.
+  assert.deepEqual(demoLeftoverCandidates(demo), []);
+  // The full game imported over it: every loose demo file, never pak0 or pak1,
+  // each with the digest the caller must still see before deleting it.
+  const full = demoLeftoverCandidates([...demo, 'data1/pak1.pak']);
+  assert.deepEqual(full.map(([path]) => path).sort(),
+    demo.filter((path) => path !== 'data1/pak0.pak').sort());
+  assert.ok(full.some(([path]) => path === 'data1/progs.dat'));
+  for (const [path, digest] of full) {
+    assert.equal(digest, HEXEN2_DEMO_SOURCE.files[path].sha256);
+  }
+  // Only what is stored.
+  assert.deepEqual(demoLeftoverCandidates(['data1/pak0.pak', 'data1/pak1.pak', 'data1/progs.dat']).map(([p]) => p),
+    ['data1/progs.dat']);
+});
+
+test('the launcher retires demo leftovers after an import and at startup', async () => {
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const retire = app.slice(app.indexOf('async function retireDemoLeftovers()'));
+  // Deletes only a file still byte-for-byte the demo's.
+  assert.match(retire.slice(0, 1200), /sha256Hex\(await state\.storage\.readFile\(path\)\) !== digest/);
+  assert.match(app, /await migrateStoredNames\(\);[\s\S]{0,200}await retireDemoLeftovers\(\);/);
+  assert.match(app, /const retired = await retireDemoLeftovers\(\);/);
+});

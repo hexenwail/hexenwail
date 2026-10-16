@@ -1,6 +1,6 @@
 import { extractZipEntries } from './lib/zip.js';
 import { settleSoundFonts } from './lib/soundfont.js';
-import { downloadHexen2Demo, isDemoDecompressionSupported } from './lib/demo-fetch.js';
+import { demoLeftoverCandidates, downloadHexen2Demo, isDemoDecompressionSupported, sha256Hex } from './lib/demo-fetch.js';
 import {
   getBaseAssetStatus, mapImportedPath, normalizeGamedirName, planCanonicalRenames, sanitizeGamedirName,
 } from './lib/paths.js';
@@ -497,12 +497,41 @@ async function migrateStoredNames() {
   }
 }
 
+/*
+ * Delete the demo's loose files once the full game is stored, each only while
+ * it is byte-for-byte the demo's (see demoLeftoverCandidates).  Run after an
+ * import and at startup, so an install that was already in this state is
+ * repaired too.  Returns the paths removed.  GitHub #101.
+ */
+async function retireDemoLeftovers() {
+  const removed = [];
+  for (const [path, digest] of demoLeftoverCandidates([...state.storedPaths])) {
+    try {
+      if (await sha256Hex(await state.storage.readFile(path)) !== digest) {
+        continue;	// edited by the player: theirs, not the demo's
+      }
+      await state.storage.deleteFile(path);
+      state.storedPaths.delete(path);
+      await deleteRuntimeFile(path);
+      removed.push(path);
+    } catch (error) {
+      console.warn(`Could not remove the demo's ${path}`, error);
+    }
+  }
+  if (removed.length) {
+    logToConsole('[storage]', `removed the demo's ${removed.join(', ')}: the full game is installed`);
+  }
+  return removed;
+}
+
 async function loadStoredFilesIntoRuntime() {
   if (!state.runtimeReady || !state.storageReady) {
     return;
   }
 
   await migrateStoredNames();
+  state.storedPaths = new Set((await state.storage.listFiles()).map((file) => file.path));
+  await retireDemoLeftovers();
   const files = await state.storage.listFiles();
   state.storedPaths = new Set(files.map((file) => file.path));
   setStatus(files.length ? 'Restoring imported game data…' : 'Waiting for Hexen II assets…');
@@ -651,6 +680,11 @@ async function handleImportedFiles(fileList) {
     rejected.push(...result.rejected);
     notes.push(...result.notes);
     soundFontKept ||= result.soundFontKept;
+  }
+
+  const retired = await retireDemoLeftovers();
+  if (retired.length) {
+    notes.push(`Removed the demo's ${retired.map((path) => path.replace(/^data1\//, '')).join(', ')}, which would have overridden the full game${state.engineStarted && !state.runtimeExited ? ' (restart the game to load the full game\'s gamecode)' : ''}.`);
   }
 
   await updateStorageIndicator();
