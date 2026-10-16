@@ -5,28 +5,23 @@ Print the two CRCs PR_ClassifyGamecode() identifies a progs.dat by.
 WHY THIS EXISTS (uhexen2-qvqk)
 
 PR_ClassifyGamecode() (engine/h2shared/pr_edict.c) names Raven's gamecode from
-a table of whole-file CRCs measured off a retail install:
+pr_raven_images[], a table of (whole-file CRC, progdefs CRC, release) rows.  It
+first held only the three images measured off one retail install (1.11 and
+the CD's portals), so a player on 1.03, 1.08, 1.09, 1.10 or the 1.12a update
+saw their retail gamecode called "Third-party" (GitHub #160).  The rest of the
+table came from running this script over sezero's uhexen2-hcode_archive (see
+KNOWN_RAVEN and ARCHIVE_ROWS below).
 
-    static const unsigned int retail_crcs[] = { 17499U, 20799U, 33075U };
-
-Those three are the only retail images anyone here has had in hand, and they
-are 1.11/1.12a.  A player on an older Raven release -- 1.03, or the 1.09 whose
-progdefs CRC is aliased to 1.11's -- has a whole-file CRC that is not in that
-table and no Hexenwail marker, so the startup line and the Game Options footer
-call their retail gamecode "Third-party".  Closing that hole needs nothing but
-the missing numbers, and the numbers need nothing but the file.
-
-Reading them off the engine's own "Gamecode:" line means owning that release
-and running it.  This reads them straight out of the file instead, so anyone
-who can put a 1.03 or 1.09 progs.dat in front of a shell can report the value
-without installing anything.
+Reading a CRC off the engine's own "Gamecode:" line means owning that release
+and running it.  This reads both straight out of the file instead, so anyone
+who can put a progs.dat in front of a shell can report the values without
+installing anything.
 
 WHAT THE TWO NUMBERS ARE
 
   file crc      CRC over the entire file, engine-side `pr_crc`, set in
                 PR_LoadProgs as CRC_Block((byte *)progs, fs_filesize).
-                This is the identity of one exact build.  It is what
-                retail_crcs[] holds, and it is the number uhexen2-qvqk wants.
+                This is the identity of one exact build.
 
   progdefs crc  The `crc` field of the dprograms_t header (offset 4), engine-
                 side `progs->crc`.  This is the interface generation -- which
@@ -34,8 +29,9 @@ WHAT THE TWO NUMBERS ARE
                 PROGS_V103_CRC / PROGS_V111_CRC / PROGS_V112_CRC name.  Many
                 different builds share one of these.
 
-The distinction is the whole reason qvqk cannot be fixed by the progdefs CRC
-alone: mods share progdefs CRCs with retail exactly.  Measured 2026-08-15,
+The progdefs CRC cannot do the job alone, for two reasons.  Releases share it:
+1.08 through 1.11 all declare 38488, and portals 1.12 and 1.12a both declare
+26905.  And mods share it with retail exactly.  Measured 2026-08-15,
 
     data1/PROGS.DAT      file 17499   progdefs 38488  (V111)
     GameOfTomes          file 41534   progdefs 38488  (V111)   <-- same
@@ -78,14 +74,45 @@ KNOWN_PROGDEFS = {
     26905: "v1.12",
 }
 
-# PR_ClassifyGamecode()'s retail_crcs[], with the file each was measured from.
-KNOWN_RETAIL = {
-    17499: "retail data1/PROGS.DAT",
-    20799: "retail portals/progs.dat",
-    33075: "retail data1/PROGS2.DAT",
-    # Not in retail_crcs[]: PR_ClassifyGamecode() tests it on its own, as
-    # "Raven demo", because its progdefs CRC would otherwise read as 1.11.
-    16640: "Raven demo data1/progs.dat (Nov 1997)",
+# pr_edict.c's pr_raven_images[]: (file crc, progdefs crc) -> (release the
+# engine prints, which file it is).  tools/test_progs_release_ident.py fails
+# if the two tables drift apart.
+KNOWN_RAVEN = {
+    (20607, 14046): ("Raven 1.03", "data1/progs.dat"),
+    (60119, 14046): ("Raven 1.03", "data1/progs2.dat"),
+    (1534, 38488): ("Raven 1.08", "data1/progs.dat"),
+    (17570, 38488): ("Raven 1.08", "data1/progs2.dat"),
+    (30965, 38488): ("Raven 1.09", "data1/progs.dat"),
+    (50972, 38488): ("Raven 1.09", "data1/progs2.dat"),
+    (1209, 38488): ("Raven 1.10", "data1/progs.dat"),
+    (32649, 38488): ("Raven 1.10", "data1/progs2.dat"),
+    (17499, 38488): ("Raven 1.11", "data1/PROGS.DAT"),
+    (33075, 38488): ("Raven 1.11", "data1/PROGS2.DAT"),
+    (20799, 26905): ("Raven 1.12", "portals/progs.dat, CD release"),
+    (3174, 26905): ("Raven 1.12a", "portals/progs.dat, official update"),
+    (16640, 38488): ("Raven demo", "data1/progs.dat, Nov 1997 demo"),
+}
+
+# Where each row came from.  "measured" means read off a real install or the
+# hash-verified .#demodata; "archive" means sezero's uhexen2-hcode_archive
+# bin/ images, whose 1.11 and 1.12 files are byte-identical to the measured
+# retail ones.  Not every bin/ image there is a shipped binary: its
+# h2-1.11-demo (crc 47044) is not the real demo (16640) and looks rebuilt, so
+# an archive row is good evidence, not proof.  tools/test_progs_release_ident.py
+# re-reads the archive rows when HCODE_ARCHIVE points at a checkout.
+ARCHIVE_ROWS = {
+    (20607, 14046): "h2-1.03/bin/progs.dat",
+    (60119, 14046): "h2-1.03/bin/progs2.dat",
+    (1534, 38488): "h2-1.08/bin/progs.dat",
+    (17570, 38488): "h2-1.08/bin/progs2.dat",
+    (30965, 38488): "h2-1.09/bin/progs.dat",
+    (50972, 38488): "h2-1.09/bin/progs2.dat",
+    (1209, 38488): "h2-1.10/bin/progs.dat",
+    (32649, 38488): "h2-1.10/bin/progs2.dat",
+    (17499, 38488): "h2-1.11/bin/progs.dat",
+    (33075, 38488): "h2-1.11/bin/progs2.dat",
+    (20799, 26905): "portals-1.12/bin/progs.dat",
+    (3174, 26905): "portals-1.12a/bin/progs.dat",
 }
 
 
@@ -123,7 +150,7 @@ def describe(path):
 def main():
     ap = argparse.ArgumentParser(
         description="Print the file CRC and progdefs CRC of one or more progs.dat images.",
-        epilog="The file CRC is what PR_ClassifyGamecode()'s retail_crcs[] table holds.",
+        epilog="PR_ClassifyGamecode()'s pr_raven_images[] matches on both CRCs.",
     )
     ap.add_argument("progs", nargs="+", help="progs.dat / PROGS.DAT files")
     args = ap.parse_args()
@@ -144,10 +171,11 @@ def main():
             continue
 
         notes = []
-        if file_crc in KNOWN_RETAIL:
-            notes.append(KNOWN_RETAIL[file_crc])
+        known = KNOWN_RAVEN.get((file_crc, progdefs_crc))
+        if known:
+            notes.append("%s (%s)" % known)
         else:
-            notes.append("file crc not in retail_crcs[]")
+            notes.append("not a known Raven image")
         notes.append("progdefs " + KNOWN_PROGDEFS.get(progdefs_crc, "unrecognised"))
 
         print("%-52s %8d %9d  %s" % (path, file_crc, progdefs_crc, "; ".join(notes)))

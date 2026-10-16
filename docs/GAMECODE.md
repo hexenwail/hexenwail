@@ -508,7 +508,7 @@ version and whole-file CRC. That line is now what the release notes and
 
 ```
 Gamecode: progs.dat from …/data1/PROGS.DAT   (H2/v1.11,  file crc 17499) -- Raven 1.11
-Gamecode: progs.dat from …/portals/progs.dat (H2MP/v1.12, file crc 20799) -- Raven 1.12a
+Gamecode: progs.dat from …/portals/progs.dat (H2MP/v1.12, file crc 20799) -- Raven 1.12
 Gamecode: progs.dat from …/share/hexenwail/data1/progs.dat (H2/v1.11, file crc 49692) -- hexenwail-2026-08-15
 Gamecode: progs.dat from …/data1/progs.dat   (H2/v1.11,  file crc 24008) -- hexenwail (undated)
 Gamecode: progs.dat from …/karma2/progs.dat  (H2MP/v1.12, file crc 22850) -- Third-party
@@ -522,7 +522,12 @@ install instructions, loading from a path indistinguishable from Raven's.
 whose code that is. Both are written up in
 [BUNDLED_GAMECODE.md](BUNDLED_GAMECODE.md#three-states-named-for-a-place).
 
-Raven is matched on the three retail whole-file CRCs, which are fixed forever.
+Raven is matched on its shipped images' whole-file CRCs, which are fixed
+forever, together with the progdefs CRC each declares: `pr_raven_images[]` in
+`pr_edict.c` names 1.03, 1.08, 1.09, 1.10, 1.11, portals 1.12 (the CD) and
+1.12a, and the November 1997 demo. The progdefs CRC alone cannot name a release (1.08
+through 1.11 share one, as do 1.12 and 1.12a), and the first cut, which read
+the release off it, called the CD's portals "1.12a". GitHub #160.
 Ours is matched on `HexenwailGamecode_YYYYMMDD`, a marker function every tree
 carries via `gamecode/hc/<tree>/ident.hc` — a *function* because `hcc` strips
 global names under `-on` (`hcc.c :: WriteData()`) in exactly the trees that need
