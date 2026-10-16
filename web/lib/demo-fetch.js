@@ -348,3 +348,26 @@ export async function downloadHexen2Demo(options = {}) {
   const { files, ignored } = await verifyDemoPayload(members, config);
   return { source, files, ignored, warnings };
 }
+
+/*
+ * The demo's own loose files, once the full game is installed (GitHub #101).
+ *
+ * The demo ships its gamecode and configs loose beside pak0 -- progs.dat,
+ * default.cfg, hexen.rc, autoexec.cfg, maps/demo2.* -- and the engine searches
+ * loose files above paks.  So a player who installed the demo and then
+ * imported the full game kept the demo's progs.dat in front of the full
+ * game's gamecode, and the demo's default.cfg in front of its bindings.
+ *
+ * Returns [path, sha256] for each such file in storedPaths when the full game
+ * (data1/pak1.pak) is stored; the caller deletes one only if its bytes still
+ * hash to the demo's pinned digest, so a file the player edited stays.
+ */
+export function demoLeftoverCandidates(storedPaths, config = HEXEN2_DEMO_SOURCE) {
+  const stored = new Set(storedPaths);
+  if (!stored.has('data1/pak1.pak')) {
+    return [];
+  }
+  return Object.entries(config.files)
+    .filter(([path]) => path !== 'data1/pak0.pak' && stored.has(path))
+    .map(([path, file]) => [path, file.sha256]);
+}

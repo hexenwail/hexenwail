@@ -307,7 +307,14 @@ Every file the button installs is pinned by size and SHA-256:
 | `data1/maps/demo2.ent` | 55,132 | `7823ecb49d00fde6101412975f8df2a91f4c37232696c3c0c8a3d78340aad35b` |
 
 `pak0.pak` and `progs.dat` are required — the demo `pak0.pak` contains no gamecode, so the
-loose `progs.dat` is not optional. `pak0.pak`'s MD5 (`8e598d82bf53436ed7a0e133aa4b9f09`) is
+loose `progs.dat` is not optional.
+
+**Upgrading to the full game.** The engine searches loose files above paks, so the demo's
+loose `progs.dat` would override the full game's gamecode, and its `default.cfg` and
+`hexen.rc` the full game's. Once `data1/pak1.pak` is stored, the launcher deletes each of
+the demo's loose files listed above (never `pak0.pak`) whose bytes still match the pinned
+SHA-256, after an import and at every startup; a file you edited is kept. The import message
+and the runtime log say what was removed (#101). `pak0.pak`'s MD5 (`8e598d82bf53436ed7a0e133aa4b9f09`) is
 also the engine's own genuine-demo fingerprint in `engine/h2shared/quakefs.c`.
 
 Nothing else in the archive is installed: the 1997 engine binaries and the bundled docs
