@@ -269,6 +269,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_shadows);
 	Cvar_RegisterVariable (&r_mirroralpha);
 	Cvar_RegisterVariable (&r_wateralpha);
+	Cvar_SetCallback (&r_wateralpha, Mod_WaterAlphaChanged);
 	Cvar_RegisterVariable (&r_litwater);
 	Cvar_RegisterVariable (&r_skyalpha);
 	Cvar_RegisterVariable (&r_dynamic);

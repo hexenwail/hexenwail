@@ -32,6 +32,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `artifact-save-check.sh` | check on a live engine that the selected artifact survives save, relaunch and load, including old-format saves and a pre-r11 engine (#159); needs retail data and a GPU (offscreen) |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by, and the Raven release when it is one |
 | `test_progs_release_ident.py` | compile `pr_raven_images[]` and its lookup out of `pr_edict.c` and check every Raven release is named, only on both CRCs, in step with `progs_crc.py` (#160) |
+| `test_wateralpha_reupload.py` | compile the real `GL_WaterAlphaByte`, the `GL_LoadTextureEx` cache test and `Mod_WaterAlphaChanged`, and check a change to `r_wateralpha` re-uploads exactly the loaded EF_TRANSPARENT alias skins (#124) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
 
