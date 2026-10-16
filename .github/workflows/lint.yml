@@ -122,6 +122,11 @@ jobs:
       - name: Raven gamecode releases are named
         run: python3 tools/test_progs_release_ident.py
 
+      # The software renderer draws its own copy of the demo playback bar;
+      # it must stay the GL copy's code (#123).
+      - name: Demo bar copies agree
+        run: python3 tools/test_demobar_copies.py
+
       # A demo has no qsocket, so a guard written for HexenWorld's socket
       # ownership froze every demo on the loading plaque until "load timeout"
       # (30ea43b17, GitHub #209).  Mods driving their front end from

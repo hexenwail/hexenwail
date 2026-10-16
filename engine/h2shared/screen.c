@@ -1411,6 +1411,155 @@ static void SB_IntermissionOverlay (void)
 
 //=============================================================================
 
+/*
+==============
+SCR_DrawDemoBar
+
+The demo playback bar for the 8bpp software renderer (GitHub #123): seek rail
+and cursor, demo name, playback state, base speed and elapsed map time.  The
+body below is gl_screen.c's SCR_DrawDemoBar (Ironwail's SCR_DrawDemoControls)
+line for line -- read that copy's header for the layout and the timeout rules,
+and change the two together.  It runs unmodified because draw_soft_web.c
+republishes the 2D API it uses: GL_SetCanvas places the 320-wide canvases,
+Draw_FillAlpha and Draw_SetCharacterAlpha fade with the ordered stipple, and
+SCR_CalcUIScale is 1, so the intermission placement reduces to 7/8 down the
+framebuffer.
+
+One difference from the GL copy: it ends by restoring CANVAS_DEFAULT.  A
+software canvas is a translation of the drawing origin, and everything this
+file draws after the bar's two call sites expects the default one.
+==============
+*/
+#define DEMOBAR_CHARS	38	/* Ironwail's TIMEBAR_CHARS */
+#define DEMOBAR_FADE	0.5f	/* seconds of fade-out at the end of the timeout */
+
+static void SCR_DrawDemoBar (void)
+{
+	static float	showtime = 0.0f;
+	static double	lastframe = 0.0;
+	static double	lastactivity = 0.0;
+	static qboolean	wasplaying = false;
+	static qboolean	waspaused = false;
+	static float	prevspeed = -1.0f;
+	static float	prevbasespeed = -1.0f;
+	int		i, x, y, cursor, mins, secs;
+	float		frac, alpha, s;
+	const char	*str, *colon;
+	double		dt;
+
+	if (!cls.demoplayback || scr_demobar_timeout.value < 0.0f)
+	{
+		showtime = 0.0f;
+		wasplaying = false;
+		lastframe = realtime;
+		lastactivity = cls.demoactivity;
+		return;
+	}
+
+	dt = realtime - lastframe;
+	lastframe = realtime;
+	if (dt < 0.0 || dt > 1.0)
+		dt = 0.0;	/* loading hitch or clock reset: don't eat the timeout */
+
+	if (!wasplaying || cl.paused != waspaused ||
+	    cls.demospeed != prevspeed || cls.basedemospeed != prevbasespeed ||
+	    cls.demospeed > cls.basedemospeed ||
+	    cls.demoactivity != lastactivity || scr_demobar_timeout.value == 0.0f)
+	{
+		wasplaying = true;
+		waspaused = cl.paused;
+		prevspeed = cls.demospeed;
+		prevbasespeed = cls.basedemospeed;
+		lastactivity = cls.demoactivity;
+		showtime = (scr_demobar_timeout.value > 0.0f) ? scr_demobar_timeout.value : 1.0f;
+	}
+	else
+	{
+		showtime -= (float) dt;
+		if (showtime <= 0.0f)
+		{
+			showtime = 0.0f;
+			return;
+		}
+	}
+
+	alpha = (showtime < DEMOBAR_FADE) ? showtime / DEMOBAR_FADE : 1.0f;
+
+	frac = (cls.demofh.length > 0)
+		? (float)(cls.demofh.pos / (double) cls.demofh.length) : 0.0f;
+	if (frac < 0.0f) frac = 0.0f;
+	else if (frac > 1.0f) frac = 1.0f;
+
+	if (cl.intermission)
+	{
+		int	gw, gh;
+
+		GL_SetCanvas (CANVAS_MENU);
+		SCR_GuiSize (&gw, &gh);
+		s = SCR_CalcUIScale (&scr_menuscale);
+		if (s > (float)gw / (float)UI_CANVAS_WIDTH)
+			s = (float)gw / (float)UI_CANVAS_WIDTH;
+		if (s < 0.0001f)
+			s = 1.0f;
+		y = (int)((float)gh / s) * 7 / 8;
+	}
+	else
+	{
+		GL_SetCanvas (CANVAS_SBAR);
+		y = UI_SBAR_CANVAS_HEIGHT - 89;
+	}
+	x = (UI_CANVAS_WIDTH - DEMOBAR_CHARS * 8) / 2;
+
+	Draw_FillAlpha (x - 8, y - 23, DEMOBAR_CHARS * 8 + 16, 35,
+			0.0f, 0.0f, 0.0f, 0.5f * alpha);
+
+	Draw_SetCharacterAlpha (alpha);
+
+	if (cls.demospeed == 0.0f)
+		str = "II";
+	else if (cls.demospeed > 1.0f)
+		str = ">>";
+	else
+		str = ">";
+	Draw_String (x, y, str);
+
+	if (cls.basedemospeed >= 1.0f)
+		str = va ("%gx", cls.basedemospeed);
+	else if (cls.basedemospeed > 0.0f)
+		str = va ("1/%gx", 1.0f / cls.basedemospeed);
+	else
+		str = "";
+	Draw_String (x + (DEMOBAR_CHARS - (int)strlen(str)) * 8, y, str);
+
+	if (cls.demofilename[0])
+		Draw_String ((UI_CANVAS_WIDTH - (int)strlen(cls.demofilename) * 8) / 2,
+			     y, cls.demofilename);
+
+	cursor = x + (int)((DEMOBAR_CHARS - 1) * 8 * frac);
+	y -= 8;
+	Draw_Character (x - 8, y, 256);
+	for (i = 0; i < DEMOBAR_CHARS; i++)
+		Draw_Character (x + i * 8, y, 257);
+	Draw_Character (x + i * 8, y, 258);
+	Draw_Character (cursor, y, 259);
+
+	y -= 11;
+	secs = (int) cl.time;
+	mins = secs / 60;
+	secs %= 60;
+	str = va ("%i:%02i", mins, secs);
+	colon = strchr (str, ':');
+	x = cursor - (int)(colon - str) * 8;
+	if (x < 0)
+		x = 0;
+	else if (x + (int)strlen(str) * 8 > UI_CANVAS_WIDTH)
+		x = UI_CANVAS_WIDTH - (int)strlen(str) * 8;
+	Draw_String (x, y, str);
+
+	Draw_SetCharacterAlpha (1.0f);
+	GL_SetCanvas (CANVAS_DEFAULT);
+}
+
 
 /*
 ==================
@@ -1528,6 +1677,7 @@ void SCR_UpdateScreen (void)
 	{
 #if !defined(H2W)
 		SB_IntermissionOverlay();
+		SCR_DrawDemoBar ();
 		if (!(cl.intermission_flags & INTERMISSION_NO_MENUS))
 		{
 			SCR_DrawConsole();
@@ -1558,6 +1708,7 @@ void SCR_UpdateScreen (void)
 			SCR_DrawPause();
 			Sbar_Draw();
 		}
+		SCR_DrawDemoBar ();
 		GL_SetCanvas (CANVAS_DEFAULT);
 		SCR_CheckDrawCenterString();
 		SCR_DrawFPS();

@@ -4068,8 +4068,8 @@ static qboolean M_Graphics_IsSkip (int i)
 #if defined(WEBSOFT)
 	/* Rows whose cvar is only ever read by a gl_*.c file.  This build swaps
 	 * gl_draw.c/gl_screen.c/gl_rmain.c out for draw_soft_web.c/screen.c and
-	 * the 8bpp rasterizer, so nothing on this side consumes them: the demo
-	 * bar has no bar, the three UI scales cannot apply (draw_soft_web.c's
+	 * the 8bpp rasterizer, so nothing on this side consumes them: the three
+	 * UI scales cannot apply (draw_soft_web.c's
 	 * SCR_CalcUIScale returns 1 unconditionally and says why), and the rest
 	 * reach no code at all.  Their cvars stay registered in r_soft_web.c so
 	 * a config written by the GL build round-trips unharmed; what does not
@@ -4091,12 +4091,13 @@ static qboolean M_Graphics_IsSkip (int i)
 	case GFX_GLOW_INTENSITY:
 	case GFX_SHOWSPEED:
 	case GFX_SHOWCLOCK:
-	case GFX_DEMOBAR:
 		return true;
 	default:
 		break;
 	}
-	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT */
+	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT, GFX_DEMOBAR
+	 *
+	 * GFX_DEMOBAR: screen.c draws the bar in this build too (GitHub #123). */
 #endif
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
 }

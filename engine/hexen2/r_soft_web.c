@@ -70,11 +70,11 @@ cvar_t	gl_coloredlight = {"gl_coloredlight", "1", CVAR_ARCHIVE};
 cvar_t	r_softparticles = {"r_softparticles", "0", CVAR_ARCHIVE};
 cvar_t	gl_waterwarp_speed = {"gl_waterwarp_speed", "0.5", CVAR_ARCHIVE};
 cvar_t	gl_waterwarp_amount = {"gl_waterwarp_amount", "0.5", CVAR_ARCHIVE};
-/* The demo playback bar (uhexen2-itie).  Drawn by gl_screen.c, which the
- * software build swaps out for screen.c, so the overlay does not exist here --
- * but menu.c reads the cvar unconditionally and the link fails without it.
- * Default matches gl_screen.c exactly, or a config round-tripped through the
- * software build would come back to the GL one with the bar turned off. */
+/* The demo playback bar (uhexen2-itie).  gl_screen.c owns the cvar in the GL
+ * build; the software build swaps that file for screen.c, which draws its own
+ * copy of the bar (GitHub #123), so the cvar lives here.  Default matches
+ * gl_screen.c exactly, or a config round-tripped through the software build
+ * would come back to the GL one with the bar turned off. */
 cvar_t	scr_demobar_timeout = {"scr_demobar_timeout", "1", CVAR_ARCHIVE};
 
 int	gl_filter_idx = 0;
