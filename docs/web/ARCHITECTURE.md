@@ -65,8 +65,8 @@ documents were not brought over and these were written instead.
    target; CI instead installs a pinned emsdk (`.github/actions/wasm-build`), so
    a local build is close to, not identical with, CI's. `nix build .#wasm` also
    builds the default configuration, in the sandbox, but it is a different path:
-   it installs the engine's own launcher page (`engine/web/shell.html`, linked
-   in as `hexenwail.html`) as `index.html` with the `.js` and `.wasm`, but not
+   `web/` is outside its source filter, so it links with emcc's default shell
+   and installs that as `index.html` with the `.js` and `.wasm`, but not
    `app.js` or the rest of `web/`, and no `hexenwail-renderer.txt`. That is
    neither a working launcher nor the `bin/` directory the steps below read.
 2. **Stamp.** CMake writes the configuration into `hexenwail-renderer.txt` next to

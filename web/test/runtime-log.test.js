@@ -6,12 +6,12 @@ import { join } from 'node:path';
 const repoRoot = process.cwd();
 const app = readFileSync(join(repoRoot, 'web/app.js'), 'utf8');
 
-test('launcher chrome exposes bounded runtime diagnostics in both shells', () => {
-  for (const path of ['web/index.html', 'engine/web/shell.html']) {
-    const html = readFileSync(join(repoRoot, path), 'utf8');
-    assert.match(html, /id="runtime-log"/, `${path} is missing the runtime log`);
-    assert.match(html, /earlyLog/, `${path} does not buffer output emitted before app.js binds`);
-  }
+test('launcher chrome exposes bounded runtime diagnostics', () => {
+  // web/index.html is also the emcc shell (engine/CMakeLists.txt, #155), so
+  // this covers engine-shell-debug.html too.
+  const html = readFileSync(join(repoRoot, 'web/index.html'), 'utf8');
+  assert.match(html, /id="runtime-log"/, 'web/index.html is missing the runtime log');
+  assert.match(html, /earlyLog/, 'web/index.html does not buffer output emitted before app.js binds');
 
   assert.match(app, /MAX_RUNTIME_LOG_ENTRIES/);
   assert.match(app, /appendRuntimeLog\(prefix, text\)/);

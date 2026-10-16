@@ -15,8 +15,9 @@
 # `nix build .#wasm` is deliberately NOT what CI runs.  It does build in the
 # sandbox now (the flake hands Emscripten a pinned SDL3 port through
 # EMCC_LOCAL_PORTS, #333), but with nixpkgs' Emscripten rather than CI's pinned
-# emsdk, and it installs the linked launcher page (engine/web/shell.html) as
-# index.html with the .js and .wasm but without app.js or the rest of web/, and
+# emsdk, and web/ is outside its source filter, so it links with emcc's default
+# shell and installs that as index.html with the .js and .wasm, without app.js
+# or the rest of web/, and
 # no hexenwail-renderer.txt -- not the bin/ directory
 # scripts/wasm-assemble-artifact.sh reads.
 #
