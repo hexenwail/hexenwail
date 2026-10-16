@@ -6,7 +6,7 @@ import {
 } from './lib/paths.js';
 import {
   buildEngineArguments, detectModGamedirs, hasMissionPack, mapModImportPath, MISSION_PACK, modImportRoot,
-  modOwnedPath, modPanelNote, parseLaunchChoice,
+  modOwnedPath, modPanelNote, parseLaunchChoice, planModZipImport,
 } from './lib/mods.js';
 import {
   createSaveBundle, getPakCompatibilityWarnings, isPakCompatibilityPath, isSavePath, planSaveImport, sha256,
@@ -224,6 +224,9 @@ function renderMods() {
   }
   if (ui.modImportButton) {
     ui.modImportButton.disabled = !state.storageReady || busy;
+  }
+  if (ui.modZipButton) {
+    ui.modZipButton.disabled = !state.storageReady || busy;
   }
   if (ui.modRequirements) {
     ui.modRequirements.textContent = modPanelNote({
@@ -697,21 +700,99 @@ async function handleModDirectoryImport(fileList) {
     return;
   }
 
+  await installMod(gamedir, root, entries.map((entry) => ({
+    sourcePath: entry.sourcePath,
+    modPath: entry.sourcePath,
+    size: entry.file.size,
+    read: async () => new Uint8Array(await entry.file.arrayBuffer()),
+  })), 'folder');
+}
+
+/*
+ * A mod shipped as a .zip (GitHub #143).  planModZipImport finds the mod inside
+ * the archive by its anchors (progs.dat, paks, content folders), whatever
+ * wraps it, and the files go through the same mapModImportPath filter and
+ * installer as a folder import.
+ */
+async function handleModZipImport(file) {
+  if (!file) {
+    return;
+  }
+  // An early refusal must not leave the previous import's lists on screen.
+  const refuse = (message) => {
+    setModMessage(message, 'error');
+    if (ui.modRejectedList) ui.modRejectedList.textContent = '';
+    if (ui.progressText) ui.progressText.textContent = '';
+  };
+  if (file.size > MAX_IMPORT_BYTES) {
+    refuse(`Mod import failed: the ZIP is too large for browser storage (${formatBytes(file.size)}).`);
+    return;
+  }
+  setModMessage(`Reading “${file.name}”…`);
+  let extracted;
+  try {
+    extracted = await extractZipEntries(new Uint8Array(await file.arrayBuffer()), {
+      onProgress: ({ processedBytes, totalBytes, entry }) => {
+        if (ui.progressText) {
+          ui.progressText.textContent = `Extracting ${entry.rawName} (${formatBytes(processedBytes)} / ${formatBytes(totalBytes)})`;
+        }
+      },
+    });
+  } catch (error) {
+    refuse(`Mod import failed: ${error.message}`);
+    return;
+  }
+
+  const plan = planModZipImport(extracted.map((entry) => entry.name), file.name);
+  if (plan.error) {
+    const messages = {
+      empty: `“${file.name}” has no files in it.`,
+      'no-anchor': `“${file.name}” has no progs.dat, pak, pk3 or content folder (maps/, sound/, models/, …), so where the mod starts cannot be told. Extract it and use “Import mod folder”.`,
+      'base-game': `“${file.name}” holds a ${plan.base}/ folder, so it is base-game content rather than a mod. Import it with “Choose files” instead.`,
+      several: `“${file.name}” holds more than one mod (${plan.names?.join(', ')}). Extract it and import each folder with “Import mod folder”.`,
+      reserved: `“${plan.name}” is reserved for the base game and the mission pack, so it cannot be imported as a mod.`,
+      unnamed: `“${plan.name}” has no usable gamedir name. Rename the ZIP (or the folder inside it) using letters, digits, “-” or “_”.`,
+    };
+    refuse(messages[plan.error]);
+    return;
+  }
+
+  // Files beside the mod -- a README next to its folder -- are reported as
+  // ignored along with anything the type filter drops.
+  const outside = new Set(plan.outside);
+
+  await installMod(plan.gamedir, file.name, extracted
+    .filter((entry) => plan.paths.has(entry.name) || outside.has(entry.name))
+    .map((entry) => ({
+      sourcePath: entry.rawName,
+      // null: outside the mod, so mapModImportPath refuses it into the list
+      modPath: plan.paths.get(entry.name) ?? null,
+      size: entry.data.byteLength,
+      read: async () => entry.data,
+    })), 'ZIP');
+}
+
+/*
+ * Stores a mod's files under its gamedir and selects it.  entries carry the
+ * gamedir-rooted modPath (what mapModImportPath filters), the sourcePath to
+ * name in the ignored list, and a read() for the bytes.
+ */
+async function installMod(gamedir, source, entries, kind) {
   setModMessage(`Importing the “${gamedir}” mod…`);
   const accepted = [];
   const rejected = [];
   let processedBytes = 0;
   try {
     for (const entry of entries) {
-      const mappedPath = mapModImportPath(gamedir, entry.sourcePath);
+      const mappedPath = mapModImportPath(gamedir, entry.modPath);
       if (!mappedPath) {
         rejected.push(entry.sourcePath);
         continue;
       }
-      if (processedBytes + entry.file.size > MAX_IMPORT_BYTES) {
-        throw new Error(`Mod folder is too large for browser storage (over ${formatBytes(MAX_IMPORT_BYTES)}).`);
+      if (processedBytes + entry.size > MAX_IMPORT_BYTES) {
+        throw new Error(`Mod ${kind} is too large for browser storage (over ${formatBytes(MAX_IMPORT_BYTES)}).`);
       }
-      const bytes = new Uint8Array(await entry.file.arrayBuffer());
+      const bytes = await entry.read();
       processedBytes += bytes.byteLength;
       accepted.push({ path: mappedPath, bytes });
       if (ui.progressText) {
@@ -720,7 +801,7 @@ async function handleModDirectoryImport(fileList) {
     }
 
     if (!accepted.length) {
-      setModMessage(`No mod files were recognized in “${root}”. Mods are imported by file type; see the PWA notes for the accepted list.`, 'error');
+      setModMessage(`No mod files were recognized in “${source}”. Mods are imported by file type; see the PWA notes for the accepted list.`, 'error');
       return;
     }
 
@@ -745,7 +826,7 @@ async function handleModDirectoryImport(fileList) {
     updateLaunchState();
     if (ui.modRejectedList) {
       ui.modRejectedList.textContent = rejected.length
-        ? `Ignored ${rejected.length} unsupported file(s): ${rejected.slice(0, 8).join(', ')}${rejected.length > 8 ? '…' : ''}`
+        ? `Ignored ${rejected.length} file(s), outside the mod or of a type the engine does not read: ${rejected.slice(0, 8).join(', ')}${rejected.length > 8 ? '…' : ''}`
         : '';
     }
   }
@@ -1560,6 +1641,8 @@ function bindUi() {
     modImportButton: document.getElementById('mod-import-button'),
     modRemoveButton: document.getElementById('mod-remove-button'),
     modInput: document.getElementById('mod-input'),
+    modZipButton: document.getElementById('mod-zip-button'),
+    modZipInput: document.getElementById('mod-zip-input'),
     modMessage: document.getElementById('mod-message'),
     modRejectedList: document.getElementById('mod-rejected-list'),
     modRequirements: document.getElementById('mod-requirements'),
@@ -1604,6 +1687,11 @@ function bindUi() {
   ui.modImportButton?.addEventListener('click', () => ui.modInput?.click());
   ui.modInput?.addEventListener('change', async (event) => {
     await handleModDirectoryImport(event.target.files);
+    event.target.value = '';
+  });
+  ui.modZipButton?.addEventListener('click', () => ui.modZipInput?.click());
+  ui.modZipInput?.addEventListener('change', async (event) => {
+    await handleModZipImport(event.target.files?.[0]);
     event.target.value = '';
   });
   ui.modSelect?.addEventListener('change', () => {

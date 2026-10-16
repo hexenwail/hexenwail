@@ -66,7 +66,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (47)
+## P3 — someday (46)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
@@ -87,7 +87,6 @@ here.
 - **Realtime lighting path (prerequisite for normal-mapped materials)** `uhexen2-abwd` — Deferred out of uhexen2-0vgo by the decision recorded in uhexen2-0vgo.3.
 - **vid_saveresize: needs a resizable window first** `uhexen2-a5nn.28` — Split out of uhexen2-a5nn.26 (the vid_* family port).
 - **Menu mouse input carries no button state, so scrollbar thumbs cannot be dragged** `uhexen2-i2ga` — Split out of uhexen2-3m0h stage 4, which implemented hover selection for the mods menu and stopped at drag.
-- **Import mod as .zip (and unwrap single-folder archives)** `uhexen2-sy5j` — Mods distributed as zips; today importZipFile routes through mapImportedPath (data1-oriented) so mod zips must be hand-extracted and folder-imported.
 - **Android port (SDL3 + GLES3)** `uhexen2-vigl` — Port Hexenwail to Android using SDL3 (which has Android support) and GLES3 renderer. Hardening the WASM port's GLES path is the natural precursor, so complete the WASM productionization work…
 - **Vendor jsHexen2-progs under gamecode/hc/vendor/ with a vendored-tree provenance policy** `uhexen2-42cm` — Gated on the vendored-variant decision bead. Do not start until that is decided YES.
 - **Reach the maps browser from the menu, not just the menu_maps command** `uhexen2-4hpt` — uhexen2-a5nn.13 landed menu_maps as a command only ('feat(menu): maps browser (menu_maps), Ironwail's ExtraMaps', bd07a27c4 at time of writing).

@@ -1,4 +1,4 @@
-import { canonicalPakName, isGamedirName, sanitizeGamedirName, sanitizeRelativePath } from './paths.js';
+import { KNOWN_GAME_ROOTS, canonicalPakName, isGamedirName, normalizeGamedirName, sanitizeGamedirName, sanitizeRelativePath } from './paths.js';
 
 /*
  * The browser equivalent of `hexen2 -game mymod`.
@@ -80,6 +80,122 @@ export function mapModImportPath(gamedir, sourcePath) {
     rest[0] = canonicalPakName(rest[0]);
   }
   return [dir, ...rest].join('/');
+}
+
+/*
+ * Where a mod .zip's mod lives inside it, and what to call it (GitHub #143).
+ *
+ * The mod is found by its anchors, not by the archive's folder shape: a
+ * progs.dat, a pak or pk3, or a folder the engine reads content from (maps/,
+ * sound/, models/, ...).  The mod root is the shallowest directory an anchor
+ * sits in, compared without case, and the gamedir is that directory's name --
+ * or the archive's, when the anchors are at the top:
+ *
+ *   mymod/progs.dat, mymod/maps/a.bsp          -> mymod
+ *   README.txt, mymod/progs.dat, mymod/pak0.pak -> mymod (README left out)
+ *   Download/MyMod/progs.dat                   -> mymod (wrappers fall away)
+ *   progs.dat, maps/a.bsp                      -> named after the archive
+ *   maps/a.bsp                                 -> named after the archive
+ *
+ * A shape rule ("one top folder is the mod, unless...") got these wrong: a
+ * README beside the mod folder made the archive the mod and stored
+ * mymod-v1/mymod/pak0.pak, which the engine never mounts.
+ *
+ * Refused: a root that is, or sits inside, data1/portals/hw (a base-game
+ * overlay, which "Choose files" imports); anchors in two different roots (two
+ * mods, or a mod plus an overlay); and an archive with no anchor at all, whose
+ * layout says nothing about where the mod starts.
+ *
+ * Archive junk -- __MACOSX/ resource forks, .DS_Store, Thumbs.db,
+ * desktop.ini -- is dropped before anything is read.
+ *
+ * names are the zip's file entry names (directories already dropped).
+ * Returns { gamedir, root, paths, outside } -- root the anchor directory's
+ * segments, paths mapping each entry under it to its gamedir-rooted path,
+ * outside the entries left out -- or { error, ... }.
+ */
+const MOD_CONTENT_DIRS = new Set([
+  'maps', 'models', 'progs', 'sound', 'sounds', 'music', 'midi', 'gfx', 'sprites',
+  'textures', 'skins', 'particles', 'demos', 'locs', 'env', 'puzzles',
+]);
+
+const ARCHIVE_JUNK_RE = /(^|\/)(__MACOSX\/|\.DS_Store$|Thumbs\.db$|desktop\.ini$)/i;
+
+function anchorRoot(segments) {
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    if (MOD_CONTENT_DIRS.has(segments[i].toLowerCase())) {
+      return segments.slice(0, i);
+    }
+  }
+  const base = segments.at(-1).toLowerCase();
+  if (/^progs2?\.dat$/.test(base) || base.endsWith('.pak') || base.endsWith('.pk3')) {
+    return segments.slice(0, -1);
+  }
+  return null;
+}
+
+export function planModZipImport(names, archiveName) {
+  const kept = [];
+  for (const value of names) {
+    const safe = sanitizeRelativePath(value);
+    if (safe && !ARCHIVE_JUNK_RE.test(safe)) {
+      kept.push({ name: value, segments: safe.split('/') });
+    }
+  }
+  if (!kept.length) {
+    return { error: 'empty' };
+  }
+
+  // Every anchor's root, keyed without case: MyMod/ and mymod/ are one folder
+  // to the engine's lookups, so they are one root here.
+  const roots = new Map();
+  for (const { segments } of kept) {
+    const root = anchorRoot(segments);
+    if (root) {
+      const key = root.join('/').toLowerCase();
+      if (!roots.has(key)) {
+        roots.set(key, root);
+      }
+    }
+  }
+  if (!roots.size) {
+    return { error: 'no-anchor' };
+  }
+  const depth = Math.min(...[...roots.values()].map((root) => root.length));
+  const shallowest = [...roots.values()].filter((root) => root.length === depth);
+
+  for (const root of roots.values()) {
+    const base = root.find((segment) => KNOWN_GAME_ROOTS.includes(segment.toLowerCase()));
+    if (base) {
+      return { error: 'base-game', base: base.toLowerCase() };
+    }
+  }
+  if (shallowest.length > 1) {
+    return { error: 'several', names: shallowest.map((root) => root.at(-1) || archiveName) };
+  }
+
+  const root = shallowest[0];
+  const rawName = root.length ? root.at(-1) : String(archiveName ?? '').replace(/\.zip$/i, '');
+  const gamedir = sanitizeGamedirName(rawName);
+  if (!gamedir) {
+    return normalizeGamedirName(rawName)
+      ? { error: 'reserved', name: rawName }
+      : { error: 'unnamed', name: rawName || archiveName };
+  }
+
+  const prefix = root.map((segment) => segment.toLowerCase());
+  const paths = new Map();
+  const outside = [];
+  for (const { name, segments } of kept) {
+    const inside = segments.length > prefix.length
+      && prefix.every((segment, i) => segments[i].toLowerCase() === segment);
+    if (inside) {
+      paths.set(name, [gamedir, ...segments.slice(prefix.length)].join('/'));
+    } else {
+      outside.push(name);
+    }
+  }
+  return { gamedir, root, paths, outside };
 }
 
 // Detection is by storage layout, not by a registry: a gamedir is any stored
@@ -183,7 +299,7 @@ export function modPanelNote({ mods, missionPack, selected, launchable }) {
   }
   const parts = [mods.length
     ? `Imported mods: ${mods.join(', ')}.`
-    : 'No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game <folder>.'];
+    : 'No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game <folder>; “Import mod .zip” does the same for a mod as it was downloaded.'];
   if (selected === MISSION_PACK) {
     parts.push('Portal of Praevus is selected: the engine starts the mission pack (-portals).');
   } else if (selected) {
