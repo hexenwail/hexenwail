@@ -3206,7 +3206,7 @@ the check has to extend them the same way to compute the same target.
 */
 const char *PR_ValidateBytecode (const dstatement_t *statements, int numstatements,
 				 const dfunction_t *functions, int numfunctions,
-				 int numglobals, qboolean v6)
+				 int numglobals, qboolean v6, int tail_slack)
 {
 	static char	reason[128];
 	int		i, k;
@@ -3259,7 +3259,15 @@ const char *PR_ValidateBytecode (const dstatement_t *statements, int numstatemen
 		/* EnterFunction() saves locals[] off the globals lump starting at
 		 * parm_start and LeaveFunction() writes them back, so both ends of
 		 * that range have to exist.  Subtraction rather than addition:
-		 * parm_start + locals is two attacker-chosen ints. */
+		 * parm_start + locals is two attacker-chosen ints.
+		 *
+		 * Not for a builtin: EnterFunction never runs for one -- OP_CALL
+		 * dispatches it first, and PR_ExecuteProgram refuses it -- so its
+		 * parm_start is never read.  Older hcc builds put a builtin's at
+		 * the end of the globals, which this used to refuse ("function 2
+		 * has 0 locals at global 32 of 32").  GitHub #120. */
+		if (f->first_statement < 0)
+			continue;
 		if (f->parm_start < 0 || f->locals < 0 ||
 		    f->locals > numglobals - f->parm_start ||
 		    parmwords > numglobals - f->parm_start)
@@ -3333,7 +3341,11 @@ const char *PR_ValidateBytecode (const dstatement_t *statements, int numstatemen
 				break;
 			}
 
-			if (ofs < 0 || ofs > numglobals - width)
+			/* A wide operand may run into the caller's zeroed tail
+			 * (tail_slack), never start in it: the first word must be a
+			 * real global.  (#120) */
+			if (ofs < 0 || ofs > numglobals - width
+					     + (tail_slack < width - 1 ? tail_slack : width - 1))
 			{
 				q_snprintf (reason, sizeof(reason),
 					    "statement %d reaches global %d of %d",
@@ -3740,7 +3752,7 @@ void PR_LoadProgs (void)
 	{
 		const char	*bad = PR_ValidateBytecode (pr_statements, progs->numstatements,
 							    pr_functions, progs->numfunctions,
-							    progs->numglobals, is_progs_v6);
+							    progs->numglobals, is_progs_v6, 0);
 		if (bad)
 			Host_Error ("%s: %s", progname, bad);
 	}

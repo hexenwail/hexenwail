@@ -166,7 +166,15 @@ void CL_LoadCSProgs (void)
 	csqc_state.functions = (dfunction_t *)((byte *)p + p->ofs_functions);
 	csqc_state.strings = (char *)p + p->ofs_strings;
 	csqc_state.stringssize = p->numstrings;
-	csqc_state.globals = (float *)((byte *)p + p->ofs_globals);
+	/* The globals get their own buffer with PR_GLOBALS_TAIL_SLACK zeroed
+	 * words after them, rather than living in the file image: a csprogs.dat
+	 * from an hcc that left a vector operand on its last global reads (and
+	 * may write) two words past the lump, and in the image those words are
+	 * whatever lump comes next, or past the end of the file.  With the slack
+	 * allocated here, PR_ValidateBytecode can accept those images instead of
+	 * refusing them.  Hunk_AllocName zeroes.  GitHub #120. */
+	csqc_state.globals = (float *)Hunk_AllocName ((p->numglobals + PR_GLOBALS_TAIL_SLACK) * 4, "csqcglob");
+	memcpy (csqc_state.globals, (byte *)p + p->ofs_globals, p->numglobals * 4);
 
 	csqc_state.edict_size = p->entityfields * 4 + sizeof(edict_t) - sizeof(entvars_t);
 	csqc_state.edict_size += sizeof(void *) - 1;
@@ -227,7 +235,7 @@ void CL_LoadCSProgs (void)
 	 * a bad file deny the player their client. */
 	bad = PR_ValidateBytecode (csqc_state.statements, p->numstatements,
 				   csqc_state.functions, p->numfunctions,
-				   p->numglobals, false);
+				   p->numglobals, false, PR_GLOBALS_TAIL_SLACK);
 	if (bad)
 	{
 		Con_Printf ("CSQC: ignoring csprogs.dat: %s\n", bad);
@@ -255,6 +263,12 @@ void CL_LoadCSProgs (void)
 		 * whose function table does not describe its own strings.
 		 * uhexen2-uglw. */
 		if (fn->s_name < 0 || fn->s_name >= csqc_state.stringssize)
+			continue;
+		/* An entry point has to be QuakeC.  PR_ExecuteProgram now refuses a
+		 * builtin with Host_Error, which a hostile file must not be able to
+		 * provoke every frame, so a builtin under one of these names is not
+		 * an entry point at all.  GitHub #120. */
+		if (fn->first_statement < 0)
 			continue;
 		const char *name = csqc_state.strings + fn->s_name;
 		if (!strcmp(name, "CSQC_Init"))

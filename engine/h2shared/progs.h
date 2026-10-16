@@ -201,10 +201,20 @@ const char *PR_CheckProgsExtents (const dprograms_t *raw, long filelen);
  * raw int32 indices into pr_globals and PR_ExecuteProgram() dereferences them --
  * including as write targets -- without a check of its own.  Call after the
  * byteswap loops, with the same is_v6 flag the interpreter will run under.
- * uhexen2-1p3o, uhexen2-im9e. */
+ * uhexen2-1p3o, uhexen2-im9e.
+ *
+ * tail_slack: words of zeroed, writable memory the caller guarantees after the
+ * globals lump.  A vector operand whose first word is a real global may run
+ * that far past the end; nothing else may.  0 keeps the strict rule.  The CSQC
+ * loader passes PR_GLOBALS_TAIL_SLACK, having allocated it (GitHub #120). */
 const char *PR_ValidateBytecode (const dstatement_t *statements, int numstatements,
 				 const dfunction_t *functions, int numfunctions,
-				 int numglobals, qboolean v6);
+				 int numglobals, qboolean v6, int tail_slack);
+
+/* A vector is three words, so a vector operand on the last global reaches two
+ * past it.  Older hcc builds could leave one there (`fix(hcc): pad the globals
+ * block past every read the engine checks (#120)' stopped that). */
+#define	PR_GLOBALS_TAIL_SLACK	2
 
 const char *PR_GetString (int num);
 int PR_SetEngineString (const char *s);
