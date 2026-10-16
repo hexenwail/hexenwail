@@ -66,7 +66,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (48)
+## P3 — someday (47)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
@@ -109,7 +109,6 @@ here.
 - **Grep gate: no raw GL calls outside h2shared/gl_*.c (second-backend readiness)** `uhexen2-ibnq.8` — engine/h2shared/gl_pipeline.h:20 states the invariant that a second backend depends on: 'There is one place that knows the whole draw state, which is what a second backend needs -- Vulkan/D3…
 - **Runtime round-trip test for the savegame artifact field** `uhexen2-jja8` — uhexen2-1knr (08a65a99e) persists the selected artifact id as a trailing line in info.dat. It was verified by build and by inspection -- ordering of the writers, the single producer of saved…
 - **Save-bundle 'merge' mode won't import new save slots — clarify UX or change semantics** `uhexen2-jwkw` — As ported from fork (commit 61107b747, test-asserted), merge mode only overwrites bundle paths that already exist on the device.
-- **Dedupe web launcher markup between web/index.html and engine/web/shell.html** `uhexen2-m1dn` — The ported PWA code duplicates substantial HTML/CSS markup between web/index.html (GitHub Pages launcher) and engine/web/shell.html (becomes dist/engine-shell-debug.html).
 - **Step-8 loose ends: uninspected fork hunks + artifact validation gaps** `uhexen2-ncu0` — Four items flagged during software renderer port (step 8, commit 8e5f562f6), deferred out of scope: (a) Two fork hunks from 0b1906add never inspected — web/app.js (6 lines) and web/test/phon…
 - **Audit hw/siege gamecode against reference HexenWorld bytecode, then decide on bundling** `uhexen2-nr9l` — uhexen2-8zia audited gamecode/hc/h2 and gamecode/hc/portals against retail progs.dat using a disassembler (qcdis.py, tools/qcdis.py, landed e6dd815f1 with v6 unsigned-operand fix).
 - **Content marks for the OEM, pre-1.11, 0.42-demo and pre-0.14 hw sets, so those repack too** `uhexen2-p9mh` — The Nov. 1997 demo and HexenWorld 0.14 - 0.15 got theirs in GitHub #130. ca0e292db made archive identification container-agnostic (check_known_zip in engine/h2shared/quakefs.c) but only listed the v1.11 content sets: data1 pak0, data1 pak1 and portals/pak3.

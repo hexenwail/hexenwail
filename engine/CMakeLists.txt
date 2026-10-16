@@ -1100,7 +1100,46 @@ if(EMSCRIPTEN)
     file(GENERATE
         OUTPUT ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/hexenwail-renderer.txt
         CONTENT "${WEB_RENDERER}")
-    # Emscripten link flags: WebGL2, memory growth, shell template
+    # The shell emcc links the page from is web/index.html itself, the
+    # launcher users get, with the engine script embedded: emcc's
+    # {{{ SCRIPT }}} goes in ahead of app.js and the page says so, so app.js
+    # does not load hexenwail.js a second time.  It used to be a hand copy,
+    # engine/web/shell.html, which had drifted from the launcher it copied
+    # (GitHub #155).  Generated at configure time, and configure re-runs when
+    # index.html changes.
+    #
+    # web/ is outside the flake's filteredSrc on purpose -- a launcher edit
+    # must not rebuild every native package -- so `nix build .#wasm` has no
+    # index.html and links with emcc's default shell.  That output was never
+    # a working launcher (no app.js), so nothing is lost there.
+    set(HEXENWAIL_WEB_INDEX ${CMAKE_CURRENT_SOURCE_DIR}/../web/index.html)
+    if(EXISTS ${HEXENWAIL_WEB_INDEX})
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HEXENWAIL_WEB_INDEX})
+        file(READ ${HEXENWAIL_WEB_INDEX} HEXENWAIL_SHELL)
+        set(_embed_off "window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = false;")
+        set(_app_tag "<script type=\"module\" src=\"./app.js\"></script>")
+        foreach(_anchor _embed_off _app_tag)
+            string(FIND "${HEXENWAIL_SHELL}" "${${_anchor}}" _at)
+            if(_at EQUAL -1)
+                message(FATAL_ERROR "web/index.html has no `${${_anchor}}`: "
+                    "the emcc shell is generated from it (#155)")
+            endif()
+        endforeach()
+        string(REPLACE "${_embed_off}"
+            "window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = true;"
+            HEXENWAIL_SHELL "${HEXENWAIL_SHELL}")
+        string(REPLACE "${_app_tag}" "{{{ SCRIPT }}}\n  ${_app_tag}"
+            HEXENWAIL_SHELL "${HEXENWAIL_SHELL}")
+        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/shell.html "${HEXENWAIL_SHELL}")
+        target_link_options(${EXECUTABLE_NAME} PRIVATE
+            --shell-file=${CMAKE_CURRENT_BINARY_DIR}/shell.html)
+        set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+            LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/shell.html)
+    else()
+        message(STATUS "web/index.html is not in this source tree: "
+            "linking with emcc's default shell")
+    endif()
+    # Emscripten link flags: WebGL2, memory growth
     # For Nix builds, use: nix develop .#wasm
     # callMain MUST stay in EXPORTED_RUNTIME_METHODS: the launcher defers main()
     # until the user's imported paks are in the FS, and INVOKE_RUN=0 otherwise
@@ -1118,7 +1157,6 @@ if(EMSCRIPTEN)
         -sEXPORTED_FUNCTIONS=['_main','_Hexenwail_TouchKey','_Hexenwail_TouchLook','_Hexenwail_ResizeCanvas']
         -sEXPORTED_RUNTIME_METHODS=['FS','callMain','ccall']
         -sUSE_SDL=3
-        --shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html
     )
     # Preload game data if specified
     if(GAME_DATA_DIR)

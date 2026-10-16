@@ -55,10 +55,10 @@ fi
 if [ -f "$BUILD_BIN/hexenwail.worker.js" ]; then
 	cp "$BUILD_BIN/hexenwail.worker.js" "$DIST_DIR/"
 fi
-# emcc's own shell template (engine/web/shell.html) is a bare canvas useful
-# for bisecting "is it the engine or the PWA?".  The real entry point users
-# get is web/index.html, so the generated shell is kept under a name that
-# cannot win the index.html slot.
+# The page emcc linked: web/index.html with the engine script embedded rather
+# than loaded by app.js (engine/CMakeLists.txt generates the shell from it,
+# #155).  Kept as a debug entry point for "does the engine load when emcc
+# places it?", under a name that cannot win the index.html slot.
 cp "$BUILD_BIN/hexenwail.html" "$DIST_DIR/engine-shell-debug.html"
 
 echo "Assembled PWA artifact in $DIST_DIR (renderer: $BUILD_RENDERER):"
