@@ -55,6 +55,12 @@ extern cvar_t r_softemu_dither_screen;
 extern cvar_t r_softemu_dither_texture;
 extern cvar_t r_softemu_lightmap_banding;
 extern cvar_t r_softemu_mdl_warp;
+extern cvar_t r_softemu_spans;
+/* r_softemu_spans' cell width in render pixels (0 = off), and an override for
+ * one immediate-mode batch; gl_rmain.c.  GitHub #176. */
+struct glprogram_s;
+float R_SpanCell (qboolean liquid);
+void R_SetSpanCell (const struct glprogram_s *p, float cell);
 /* -1 auto, 0 naive RGB, 1 Riemersma, 2 OKLab.  Selects the colour-distance
  * function the r_softemu 1/2 nearest-colour LUT minimises; inert at
  * r_softemu 3 unless the game ships no gfx/colormap.lmp.  uhexen2-h8yy. */

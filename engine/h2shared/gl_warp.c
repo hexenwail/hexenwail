@@ -383,6 +383,7 @@ void EmitWaterPolys (msurface_t *fa)
 	else if (ripple > 10) ripple = 10;
 
 	GL_SetTurb (pixelwarp ? warpamt * 8.0f : 0.0f, wtime);
+	R_SetSpanCell (prog, R_SpanCell (true));	/* Turbulent8's 16 (#176) */
 
 	/* Batch all polygons as triangles in one draw call */
 	GL_ImmBegin ();
@@ -452,6 +453,9 @@ void EmitWaterPolys (msurface_t *fa)
 		GL_ClearTurb (prog);
 	else
 		GL_SetTurb (0.0f, 0.0f);
+	/* Same reason for the span cell (#176): the world program goes back to
+	 * the world's, the shared alias program to none. */
+	R_SetSpanCell (prog, lit ? R_SpanCell (false) : 0.0f);
 
 	if (lit)
 		R_LitWaterReleaseTextures ();

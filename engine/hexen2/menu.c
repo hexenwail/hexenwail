@@ -3491,6 +3491,7 @@ enum
 	REND_RENDERSCALE = 0,
 	REND_SOFTEMU,
 	REND_MDLWARP,
+	REND_SPANS,
 	REND_DITHER,
 	REND_TEXFILTER,
 	REND_ANISOTROPY,
@@ -3522,6 +3523,7 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Render Scale  :",	/* REND_RENDERSCALE */
 	"Retro Mode    :",	/* REND_SOFTEMU */
 	"Model Warp    :",	/* REND_MDLWARP */
+	"Retro Spans   :",	/* REND_SPANS */
 	"Dither Amount :",	/* REND_DITHER */
 	"Textures      :",	/* REND_TEXFILTER */
 	"Anisotropy    :",	/* REND_ANISOTROPY */
@@ -3559,6 +3561,7 @@ static qboolean M_Rendering_IsSkip (int i)
 	case REND_RENDERSCALE:
 	case REND_SOFTEMU:
 	case REND_MDLWARP:
+	case REND_SPANS:	/* the rasteriser already steps by 8 */
 	case REND_DITHER:
 	case REND_TEXFILTER:
 	case REND_ANISOTROPY:
@@ -3653,6 +3656,13 @@ static void M_Rendering_AdjustSliders (int dir)
 			  state == 0 ? "-1" : state == 1 ? "0" : "1");
 		break;
 	}
+	/* The world's half of the same look: texture coordinates exact every 8
+	 * pixels and linear between, as D_DrawSpans8 stepped them.  #176. */
+	case REND_SPANS:
+#ifndef WEBSOFT	/* the software build has no such cvar: its rasteriser IS the spans */
+		Cvar_SetValue ("r_softemu_spans", !r_softemu_spans.integer);
+#endif
+		break;
 	case REND_DITHER:
 	{
 		float f = r_dither.value + dir * 0.25;
@@ -3785,6 +3795,7 @@ static const char *M_Rendering_Note (int row)
 	case REND_RENDERSCALE:	return "3D drawn at a fraction of the window";	/* r_scale */
 	case REND_SOFTEMU:	return "Software-era 8-bit palette look";	/* r_softemu */
 	case REND_MDLWARP:	return "Software-style model warping";		/* r_softemu_mdl_warp */
+	case REND_SPANS:	return "1997 spans: perspective every 8/320";	/* r_softemu_spans */
 	case REND_DITHER:	return "Dither strength in Retro Mode";		/* r_dither */
 	/* Both replacement-skin rows are read by Mod_LoadAllSkins, so toggling
 	 * one changes nothing until models are reloaded; without this the row
@@ -3840,6 +3851,14 @@ static void M_Rendering_Draw (void)
 		M_PrintWhite (220, 92 + 8*REND_MDLWARP,
 			(v < 0.0f) ? "Auto" : (v == 0.0f) ? "Off" : "On");
 	}
+
+#ifndef WEBSOFT
+	if (!M_Rendering_IsSkip(REND_SPANS))
+	{
+		M_Print (76, 92 + 8*REND_SPANS, rend_labels[REND_SPANS]);
+		M_DrawCheckbox (220, 92 + 8*REND_SPANS, r_softemu_spans.integer);
+	}
+#endif
 
 	if (!M_Rendering_IsSkip(REND_DITHER))
 	{

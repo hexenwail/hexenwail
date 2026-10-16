@@ -162,6 +162,11 @@ jobs:
       - name: r_fastsky reaches the classic sky
         run: python3 tools/test_fastsky_classic.py
 
+      # r_softemu_spans: the 1997 span rasteriser's texture coordinates on the
+      # world, brush polys and liquids, at 1997's proportion (GitHub #176).
+      - name: Retro spans reach every span-drawn surface
+        run: python3 tools/test_softemu_spans.py
+
       # The web build, the Linux release and the Flatpak bundle one TimGM6mb
       # from one Debian tarball; the pin must agree everywhere (GitHub #114).
       - name: One SoundFont pin

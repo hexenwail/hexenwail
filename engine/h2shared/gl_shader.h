@@ -47,6 +47,7 @@ typedef struct glprogram_s {
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
 	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
+	GLint	u_spans;	/* world shader: 0 = perspective-correct, else the 1997 span cell width in pixels (r_softemu_spans, #176) */
 	GLint	u_softemu;	/* world shader: vec4(texture dither, lightmap banding, screen dither, any stage live).  All zero unless r_softemu is on.  uhexen2-a5nn.3. */
 	/* Clustered GPU dynamic lighting, world programs only; -1 everywhere
 	 * else and on the ES tier, which has neither compute nor SSBOs and so

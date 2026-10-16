@@ -461,6 +461,7 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
 	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
 	p->u_softemu         = glGetUniformLocation_fp(p->program, "u_softemu");
+	p->u_spans           = glGetUniformLocation_fp(p->program, "u_spans");
 	/* Clustered dynamic lighting (uhexen2-26bm); -1 on every non-world
 	 * program and on the whole ES tier. */
 	p->u_dlight_scale    = glGetUniformLocation_fp(p->program, "u_dlight_scale");
@@ -560,7 +561,7 @@ static const char sworld_vert[] =
 	"uniform mat4 u_mvp;\n"
 	"uniform mat4 u_modelview;\n"
 	"out highp vec2 v_texcoord;\n"	/* highp: the material tangent frame differentiates this; see v_eyepos (uhexen2-mfql) */
-	"out vec2 v_lmcoord;\n"
+	"out highp vec2 v_lmcoord;\n"	/* highp: SpanUV extrapolates it across a cell (#176) */
 	"out vec4 v_color;\n"
 	"out float v_fogdist;\n"
 	/* World-space XY for caustics sampling.  For world surfaces a_position
@@ -693,6 +694,46 @@ static const char sworld_vert[] =
 	"    float at = mod(K * raw.x + turb.y, TAU);\n" \
 	"    raw += turb.x * vec2(att.x * sin(as), att.y * sin(at));\n" \
 	"    return raw * (1.0 / 64.0);\n" \
+	"}\n"
+
+
+/* The 1997 span rasteriser's texture coordinates (GitHub #176).
+ * D_DrawSpans8 (d_scan.c) divided by z to get exact s/t once every 8 pixels
+ * along a span and stepped linearly between, so a surface's texture swims a
+ * little between those columns and not at all on them -- not the full affine
+ * wobble of a rasteriser that never divides.
+ *
+ * uv * gl_FragCoord.w and gl_FragCoord.w are linear in screen space across a
+ * triangle (they are the barycentric sums perspective interpolation divides),
+ * so their dFdx is exact, and both can be evaluated at the cell's first pixel
+ * and at the first pixel of the next cell.  Divide there, interpolate between:
+ * exact at every 8th column, linear in between, as in d_scan.c.  No
+ * noperspective qualifier, so the ES tier (WebGL2) runs it too.
+ *
+ * The cells sit on a screen grid; d_scan.c's started where each span did.  The
+ * difference is where the exact columns fall, not how far apart.
+ *
+ * D_DrawSpans8 also clamped its endpoints to the face's extents, which a
+ * shader cannot see.  The bound here instead: a cell whose depth changes by
+ * more than 8x across it -- an edge-on sliver, or a cell at a plane's
+ * vanishing line, where the far end's 1/w heads for zero and its coordinate
+ * for infinity -- keeps the perspective coordinate.  Elsewhere a cell end
+ * past the face is at most one cell's extrapolation of the same plane, so a
+ * lightmap sample there strays by under a luxel, into the atlas gutter
+ * (LM_FillGutter).  highp throughout: the ES tier's default is mediump, and
+ * a mediump return would undo the world's highp texcoords (uhexen2-mfql). */
+#define GLSL_SPAN_UV_FN \
+	"highp vec2 SpanUV(highp vec2 uv, highp float span) {\n" \
+	"    highp float w  = gl_FragCoord.w;\n" \
+	"    highp vec2  a  = uv * w;\n" \
+	"    highp vec2  da = dFdx(a);\n" \
+	"    highp float dw = dFdx(w);\n" \
+	"    highp float d0 = floor(gl_FragCoord.x / span) * span + 0.5 - gl_FragCoord.x;\n" \
+	"    highp float d1 = d0 + span;\n" \
+	"    highp float w0 = w + dw * d0;\n" \
+	"    highp float w1 = w + dw * d1;\n" \
+	"    if (min(w0, w1) < 0.125 * max(w0, w1)) return uv;\n" \
+	"    return mix((a + da * d0) / w0, (a + da * d1) / w1, -d0 / span);\n" \
 	"}\n"
 
 
@@ -1234,9 +1275,10 @@ static const char sworld_frag[] =
 	 *       DITHER axis on the world program; a uniform-static branch costs
 	 *       one compare and saves three more programs. */
 	"uniform vec4 u_softemu;\n"
+	"uniform float u_spans;\n"		/* 0 = off, else the span cell width in pixels (r_softemu_spans, #176) */
 	GLSL_DLIGHT_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
-	"in vec2 v_lmcoord;\n"
+	"in highp vec2 v_lmcoord;\n"	/* highp: SpanUV extrapolates it across a cell (#176) */
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
@@ -1245,10 +1287,29 @@ static const char sworld_frag[] =
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
 	GLSL_TURB_UV_FN
+	GLSL_SPAN_UV_FN
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	GLSL_DLIGHT_FN
 	"void main() {\n"
+	/* The 1997 spans (#176) replace both coordinates, as the surface cache
+	 * baked light into the texture before the span loop ever sampled it. */
+	"    highp vec2 tc = v_texcoord;\n"
+	"    highp vec2 lmc = v_lmcoord;\n"
+	"    if (u_spans > 0.0) {\n"
+	"        tc = SpanUV(v_texcoord, u_spans);\n"
+	"        lmc = SpanUV(v_lmcoord, u_spans);\n"
+	/* D_DrawSpans8 clamped s/t to the surface's extents; a shader cannot
+	 * see the face's lightmap rect.  Inside a cell the linear coordinate
+	 * overshoots the perspective one by up to half the cell's span, which
+	 * at a face edge would read past LM_GUTTER (gl_rsurf.c) into the next
+	 * face's light.  So the lightmap may depart from its perspective
+	 * coordinate by at most LM_GUTTER - 0.5 luxels (bilinear reads half a
+	 * luxel further, bicubic a whole one: 1.0 then); the texture, which
+	 * tiles, keeps the full span. */
+	"        highp vec2 lmlim = ((u_lightmap_bicubic > 0.5) ? 1.0 : 1.5) / vec2(textureSize(u_texture1, 0));\n"
+	"        lmc = v_lmcoord + clamp(lmc - v_lmcoord, -lmlim, lmlim);\n"
+	"    }\n"
 	/* Lit water rides this program (uhexen2-a5nn.2), so the liquid warp has
 	 * to live here too.  u_turb.x is 0 for every other draw -- only
 	 * EmitWaterPolys raises it, and only under r_water_pixel_warp 1 -- so uv
@@ -1256,8 +1317,8 @@ static const char sworld_frag[] =
 	 * diffuse texture space follows uv; the lightmap deliberately does not,
 	 * because warping the light along with the texture would drag the
 	 * shoreline shading around with the ripple. */
-	"    vec2 uv = v_texcoord;\n"
-	"    if (u_turb.x > 0.0) uv = TurbUV(v_texcoord, u_turb);\n"
+	"    highp vec2 uv = tc;\n"
+	"    if (u_turb.x > 0.0) uv = TurbUV(tc, u_turb);\n"
 	/* Negative LOD bias under softemu, as upstream: the 1997 rasteriser had
 	 * no trilinear blend, so biasing toward the sharper mip is closer to it
 	 * than letting the hardware pick.  -1 where the lightmap is banded too,
@@ -1269,7 +1330,7 @@ static const char sworld_frag[] =
 	 * it the banded lightmap below still fades smoothly between luxels and
 	 * the effect reads as a posterised gradient rather than as bands. */
 	"    vec2 lmsize = vec2(textureSize(u_texture1, 0)) * 16.0;\n"
-	"    vec2 lmuv = v_lmcoord;\n"
+	"    highp vec2 lmuv = lmc;\n"
 	"    if (u_softemu.w > 0.0)\n"
 	"        lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
@@ -1406,10 +1467,11 @@ static const char sworld_frag_opaque[] =
 	 * would have meant the modes reached only fences and brush ents.
 	 * uhexen2-a5nn.3. */
 	"uniform vec4 u_softemu;\n"
+	"uniform float u_spans;\n"		/* 0 = off, else the span cell width in pixels (r_softemu_spans, #176) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	GLSL_DLIGHT_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
-	"in vec2 v_lmcoord;\n"
+	"in highp vec2 v_lmcoord;\n"	/* see sworld_frag */
 	"in vec4 v_color;\n"
 	"in float v_fogdist;\n"
 	"in vec2 v_worldxy;\n"
@@ -1417,14 +1479,31 @@ static const char sworld_frag_opaque[] =
 	"out vec4 fragColor;\n"
 	GLSL_BICUBIC_LM_FN
 	GLSL_CAUSTICS_FN
+	GLSL_SPAN_UV_FN
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	GLSL_DLIGHT_FN
 	"void main() {\n"
+	"    highp vec2 tc = v_texcoord;\n"	/* see sworld_frag (#176) */
+	"    highp vec2 lmc = v_lmcoord;\n"
+	"    if (u_spans > 0.0) {\n"
+	"        tc = SpanUV(v_texcoord, u_spans);\n"
+	"        lmc = SpanUV(v_lmcoord, u_spans);\n"
+	/* D_DrawSpans8 clamped s/t to the surface's extents; a shader cannot
+	 * see the face's lightmap rect.  Inside a cell the linear coordinate
+	 * overshoots the perspective one by up to half the cell's span, which
+	 * at a face edge would read past LM_GUTTER (gl_rsurf.c) into the next
+	 * face's light.  So the lightmap may depart from its perspective
+	 * coordinate by at most LM_GUTTER - 0.5 luxels (bilinear reads half a
+	 * luxel further, bicubic a whole one: 1.0 then); the texture, which
+	 * tiles, keeps the full span. */
+	"        highp vec2 lmlim = ((u_lightmap_bicubic > 0.5) ? 1.0 : 1.5) / vec2(textureSize(u_texture1, 0));\n"
+	"        lmc = v_lmcoord + clamp(lmc - v_lmcoord, -lmlim, lmlim);\n"
+	"    }\n"
 	"    float lodbias = (u_softemu.w > 0.0) ? ((u_softemu.y > 0.0) ? -1.0 : -0.5) : 0.0;\n"
-	"    vec4 tex = texture(u_texture0, v_texcoord, lodbias);\n"
+	"    vec4 tex = texture(u_texture0, tc, lodbias);\n"
 	"    vec2 lmsize = vec2(textureSize(u_texture1, 0)) * 16.0;\n"
-	"    vec2 lmuv = v_lmcoord;\n"
+	"    highp vec2 lmuv = lmc;\n"
 	"    if (u_softemu.w > 0.0)\n"
 	"        lmuv = (floor(lmuv * lmsize) + 0.5) / lmsize;\n"
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
@@ -1442,7 +1521,7 @@ static const char sworld_frag_opaque[] =
 	 * uhexen2-mfql. */
 	"    vec3 matspec = vec3(0.0);\n"
 	"    if (u_material.x > 0.0 || u_material.y > 0.0) {\n"
-	"        vec4 m = MaterialShade(u_texture3, u_texture4, v_texcoord,\n"
+	"        vec4 m = MaterialShade(u_texture3, u_texture4, tc,\n"
 	"                               v_eyepos, u_material.xy, u_material.z);\n"
 	/* Weight the highlight by the lightmap BEFORE the relief term is folded
 	 * into it.  Relief redistributes the light that is already arriving;
@@ -1455,7 +1534,7 @@ static const char sworld_frag_opaque[] =
 	"    }\n"
 	"    vec4 color = tex * lm * v_color;\n"
 	"    color.rgb *= u_overbright;\n"		/* Ironwail-style overbright (uhexen2-f29y) */
-	"    vec3 fb = texture(u_texture2, v_texcoord).rgb * (1.0 - u_lightdebug.y);\n"
+	"    vec3 fb = texture(u_texture2, tc).rgb * (1.0 - u_lightdebug.y);\n"
 	"    color.rgb += fb;\n"
 	"    color.rgb += matspec;\n"
 	"    if (u_caustics.x > 0.0) {\n"
@@ -1553,6 +1632,7 @@ static const char salias_frag[] =
 	"uniform float u_force_opaque_alpha;\n"	/* uhexen2-khsa r13 */
 	"uniform vec2 u_alias_caustics;\n"	/* x=intensity (0=off), y=time (uhexen2-0gn3) */
 	"uniform vec2 u_turb;\n"		/* x=warp amplitude in texture units (0=off), y=time (uhexen2-9o7u) */
+	"uniform float u_spans;\n"		/* 0 except for brush polys and liquids under r_softemu_spans (#176) */
 	/* Soft particles (uhexen2-mf9u).  Explicitly highp: GLSL_FRAG_HEADER
 	 * defaults the ES tier to mediump, whose 10-bit mantissa cannot tell
 	 * two window-space depths apart, and the whole fade is a difference of
@@ -1589,6 +1669,7 @@ static const char salias_frag[] =
 	GLSL_ALIAS_DLIGHT_DECL
 	GLSL_CAUSTICS_FN
 	GLSL_TURB_UV_FN
+	GLSL_SPAN_UV_FN
 	GLSL_MATERIAL_FN
 	GLSL_ALIAS_DLIGHT_FN
 	"void main() {\n"
@@ -1598,8 +1679,12 @@ static const char salias_frag[] =
 	 * The maths, and why it is not just sin(), live on GLSL_TURB_UV_FN; a lit
 	 * liquid face takes the world program instead of this one and has to
 	 * ripple identically, so the two share one copy.  uhexen2-a5nn.2. */
-	"    vec2 uv = v_texcoord;\n"
-	"    if (u_turb.x > 0.0) uv = TurbUV(v_texcoord, u_turb);\n"
+	"    highp vec2 uv = v_texcoord;\n"
+	/* The brush polys and unlit liquids this program draws were spans in
+	 * 1997 too (D_DrawSpans8, Turbulent8); models were not, and leave it 0.
+	 * Never set on the NOPERSP twins, whose texcoord is already affine. */
+	"    if (u_spans > 0.0) uv = SpanUV(v_texcoord, u_spans);\n"
+	"    if (u_turb.x > 0.0) uv = TurbUV(uv, u_turb);\n"
 	/* Point-sample one mip, offset half a texel.  The qualifier alone is not
 	 * the look: the rasteriser had no mip chain and no bilinear blend, and
 	 * upstream's variant takes both away too (Ironwail gl_shaders.h, the
