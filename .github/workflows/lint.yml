@@ -101,6 +101,12 @@ jobs:
       - name: Mods menu labels stay distinct when shortened
         run: python3 tools/test_mods_label_fit.py
 
+      # misc_modelpimp spawnflag 64 suppresses every standing dlight an
+      # entity casts, and deliberately not the muzzle flash (#140).  Lifts
+      # the dlight block out of CL_RelinkEntities and counts allocations.
+      - name: misc_modelpimp flag 64 gates dynamic lights
+        run: python3 tools/test_modelpimp_nodlight.py
+
       # A demo has no qsocket, so a guard written for HexenWorld's socket
       # ownership froze every demo on the loading plaque until "load timeout"
       # (30ea43b17, GitHub #209).  Mods driving their front end from
