@@ -56,6 +56,68 @@ export function isGamedirName(value) {
   return typeof value === 'string' && sanitizeGamedirName(value) === value;
 }
 
+// FS_AddGameDirectory opens a gamedir's paks as "pak%i.pak", lowercase, with
+// no case fallback, so PAK0.PAK from a CD copy has to be stored as pak0.pak or
+// the engine never sees it.  Its pk3 scan matches "*.pk3" case-sensitively
+// (Sys_FindFirstFile's fnmatch), so a .PK3 extension is folded too; the rest
+// of a pk3's name keeps its case, since the engine mounts pk3s in name order.
+// Any other name keeps its case: loose files are found case-insensitively.
+export function canonicalPakName(name) {
+  if (/^pak\d+\.pak$/i.test(name)) {
+    return name.toLowerCase();
+  }
+  if (/\.pk3$/i.test(name)) {
+    return name.slice(0, -4) + '.pk3';
+  }
+  return name;
+}
+
+/*
+ * The name a stored file should have so the engine opens it: a game root
+ * (data1, portals, hw) by its canonical lowercase name -- FS_AddGameDirectory
+ * adds the directory by exactly that name -- and a pak or pk3 directly inside
+ * any gamedir by canonicalPakName.  Interior paths keep their case.
+ *
+ * Imports before GitHub #100 stored the root and paks as the source folder
+ * spelled them, so a CD-style DATA1/PAK0.PAK copy sat in storage under a name
+ * the engine never opens.  planCanonicalRenames moves those.
+ */
+export function canonicalStoredPath(inputPath) {
+  const safe = sanitizeRelativePath(inputPath);
+  if (!safe) {
+    return null;
+  }
+  const segments = safe.split('/');
+  if (KNOWN_GAME_ROOTS.includes(segments[0].toLowerCase())) {
+    segments[0] = segments[0].toLowerCase();
+  }
+  if (segments.length === 2) {
+    segments[1] = canonicalPakName(segments[1]);
+  }
+  return segments.join('/');
+}
+
+/*
+ * [from, to] moves that bring stored paths to their canonical names.  A move
+ * whose target is already stored, or is claimed by an earlier move, is skipped:
+ * the canonical copy is the one the engine loads, and a launcher must not
+ * pick between two different files on its own, or delete one.
+ */
+export function planCanonicalRenames(paths) {
+  const stored = new Set(paths);
+  const claimed = new Set();
+  const moves = [];
+  for (const from of paths) {
+    const to = canonicalStoredPath(from);
+    if (!to || to === from || stored.has(to) || claimed.has(to)) {
+      continue;
+    }
+    claimed.add(to);
+    moves.push([from, to]);
+  }
+  return moves;
+}
+
 export function mapImportedPath(inputPath) {
   const safe = sanitizeRelativePath(inputPath);
   if (!safe) {
@@ -77,22 +139,31 @@ export function mapImportedPath(inputPath) {
       }
       return ['data1', 'music', ...suffix].join('/');
     }
-    return segments.slice(knownRootIndex).join('/');
+    // The root is stored by its canonical name ("PORTALS/" from a CD copy
+    // becomes "portals/"), because the engine adds the gamedir by exactly that
+    // name and the browser filesystem is case-sensitive.  Interior names keep
+    // their case -- loose files are found through the engine's case-insensitive
+    // fallback -- except a top-level pakN.pak, see canonicalPakName.
+    const rest = segments.slice(knownRootIndex + 1);
+    if (rest.length === 1) {
+      rest[0] = canonicalPakName(rest[0]);
+    }
+    return [root, ...rest].join('/');
   }
 
   const basename = segments.at(-1);
   const lowerBase = basename.toLowerCase();
   if (/^pak[0-2]\.pak$/.test(lowerBase)) {
-    return `data1/${basename}`;
+    return `data1/${lowerBase}`;
   }
   if (lowerBase === 'pak3.pak') {
-    return `portals/${basename}`;
+    return `portals/${lowerBase}`;
   }
   if (lowerBase.endsWith('.ogg')) {
     return `data1/music/${basename}`;
   }
   if (lowerBase.endsWith('.pak')) {
-    return `data1/${basename}`;
+    return `data1/${canonicalPakName(basename)}`;
   }
   // The demo ships its gamecode loose next to pak0 instead of inside a pak, so
   // a file-by-file import of a demo install has to be able to take it.
@@ -111,8 +182,12 @@ export function isRecognizedImportPath(inputPath) {
 // and the engine does its own version detection (and fatals with a clear
 // message when a registered pak0 has no pak1), so the launcher reports what it
 // can see rather than guessing which edition the file is.
+//
+// Exact names, not case-folded: the engine opens data1/pak0.pak by exactly that
+// name, so a DATA1/PAK0.PAK it cannot open must not read as installed.  Stored
+// legacy spellings are renamed by planCanonicalRenames before this is asked.
 export function getBaseAssetStatus(paths) {
-  const set = new Set(paths.map((value) => sanitizeRelativePath(value)?.toLowerCase()).filter(Boolean));
+  const set = new Set(paths.map((value) => sanitizeRelativePath(value)).filter(Boolean));
   if (!set.has('data1/pak0.pak')) {
     return 'none';
   }

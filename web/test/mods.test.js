@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildEngineArguments, detectModGamedirs, isModAssetPath, mapModImportPath, modImportRoot, modOwnedPath,
+  buildEngineArguments, detectModGamedirs, hasMissionPack, isModAssetPath, mapModImportPath, MISSION_PACK,
+  modImportRoot, modOwnedPath, modPanelNote, parseLaunchChoice,
 } from '../lib/mods.js';
 
 const BASE = ['-basedir', '/persistent'];
@@ -67,9 +68,10 @@ test('buildEngineArguments appends -game only for a real mod', () => {
   assert.deepEqual(buildEngineArguments(BASE, undefined), BASE);
   assert.deepEqual(buildEngineArguments(BASE, 'testmod'), ['-basedir', '/persistent', '-game', 'testmod']);
   // FS_Gamedir ignores these, so an argument pair for them would be a lie.
+  // ("portals" is the mission pack choice, never -game portals; see below.)
   assert.deepEqual(buildEngineArguments(BASE, 'data1'), BASE);
-  assert.deepEqual(buildEngineArguments(BASE, 'portals'), BASE);
   assert.deepEqual(buildEngineArguments(BASE, 'hw'), BASE);
+  assert.ok(!buildEngineArguments(BASE, 'portals').includes('-game'));
   // Never let a stored preference smuggle a path or a second flag through.
   assert.deepEqual(buildEngineArguments(BASE, '../data1'), BASE);
   assert.deepEqual(buildEngineArguments(BASE, '-nosound'), ['-basedir', '/persistent', '-game', 'nosound']);
@@ -79,5 +81,71 @@ test('buildEngineArguments appends -game only for a real mod', () => {
 test('buildEngineArguments does not mutate the base arguments', () => {
   const base = [...BASE];
   buildEngineArguments(base, 'testmod');
+  buildEngineArguments(base, MISSION_PACK);
   assert.deepEqual(base, BASE);
+});
+
+// GitHub #100: the mission pack launches from its own flag, because FS_Gamedir
+// ignores -game portals.
+test('the mission pack choice launches with -portals and nothing else', () => {
+  assert.equal(MISSION_PACK, 'portals');
+  assert.deepEqual(buildEngineArguments(BASE, MISSION_PACK), ['-basedir', '/persistent', '-portals']);
+  // Only the exact sentinel: a near miss is not a quiet way to get -portals.
+  assert.deepEqual(buildEngineArguments(BASE, 'Portals'), BASE);
+  assert.deepEqual(buildEngineArguments(BASE, ' portals'), BASE);
+});
+
+test('hasMissionPack wants portals/pak3.pak exactly where the engine opens it', () => {
+  assert.equal(hasMissionPack(['data1/pak0.pak', 'data1/pak1.pak', 'portals/pak3.pak']), true);
+  assert.equal(hasMissionPack(['portals/pak3.pak']), true);
+  assert.equal(hasMissionPack([]), false);
+  assert.equal(hasMissionPack(['data1/pak0.pak', 'data1/pak1.pak']), false);
+  // Loose portals files alone are not an installation: no pak3, no GAME_PORTALS.
+  assert.equal(hasMissionPack(['portals/progs.dat', 'portals/strings.txt']), false);
+  // FS_AddGameDirectory opens "portals/pak3.pak" by that exact name on a
+  // case-sensitive filesystem; an older import stored differently is not
+  // offered, since the engine would not load it.
+  assert.equal(hasMissionPack(['PORTALS/pak3.pak']), false);
+  assert.equal(hasMissionPack(['portals/PAK3.PAK']), false);
+  assert.equal(hasMissionPack(['mymod/portals/pak3.pak']), false);
+  assert.equal(hasMissionPack(['data1/pak3.pak']), false);
+  // A mission pack converted by tools/pak2pk3.py (#129) is a portals pk3.
+  assert.equal(hasMissionPack(['portals/000-pak3.pk3']), true);
+  assert.equal(hasMissionPack(['portals/sub/000-pak3.pk3']), false);
+  assert.equal(hasMissionPack(['portals/000-pak3.PK3']), false);
+});
+
+test('a mod\'s top-level paks are stored by the name the engine mounts', () => {
+  assert.equal(mapModImportPath('testmod', 'testmod/PAK0.PAK'), 'testmod/pak0.pak');
+  assert.equal(mapModImportPath('testmod', 'testmod/Extra.PK3'), 'testmod/Extra.pk3');
+  assert.equal(mapModImportPath('testmod', 'testmod/maps/PAK0.PAK'), 'testmod/maps/PAK0.PAK');
+});
+
+test('modPanelNote says what the selection actually does', () => {
+  const note = (o) => modPanelNote({ mods: [], missionPack: false, selected: '', launchable: true, ...o });
+  assert.match(note({}), /^No mods imported yet\./);
+  assert.doesNotMatch(note({}), /Portal of Praevus/);
+  assert.match(note({ missionPack: true }), /Portal of Praevus is installed: pick it above/);
+  const mp = note({ mods: ['mymod'], missionPack: true, selected: MISSION_PACK });
+  assert.match(mp, /Portal of Praevus is selected: the engine starts the mission pack \(-portals\)/);
+  // The first cut said the selection went out as -game here.  It does not.
+  assert.doesNotMatch(mp, /-game/);
+  const mod = note({ mods: ['mymod'], missionPack: true, selected: 'mymod' });
+  assert.match(mod, /“mymod” is selected and is passed to the engine as -game/);
+  assert.doesNotMatch(mod, /-portals/);
+  assert.match(note({ mods: ['mymod'] }), /Pick one above to pass it to the engine as -game/);
+  assert.match(note({ selected: MISSION_PACK, launchable: false }), /^Portal of Praevus is selected but will not load/);
+  assert.match(note({ mods: ['mymod'], selected: 'mymod', launchable: false }), /^“mymod” is selected but will not load/);
+});
+
+test('parseLaunchChoice keeps the mission pack and sanitizes everything else', () => {
+  assert.equal(parseLaunchChoice('portals'), MISSION_PACK);
+  assert.equal(parseLaunchChoice('testmod'), 'testmod');
+  assert.equal(parseLaunchChoice(''), '');
+  assert.equal(parseLaunchChoice(undefined), '');
+  assert.equal(parseLaunchChoice(null), '');
+  assert.equal(parseLaunchChoice(42), '');
+  assert.equal(parseLaunchChoice('data1'), '');
+  assert.equal(parseLaunchChoice('hw'), '');
+  assert.equal(parseLaunchChoice('../portals'), '');
 });
