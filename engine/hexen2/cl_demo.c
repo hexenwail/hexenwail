@@ -73,6 +73,12 @@ void CL_StopPlayback (void)
 	memset (&cls.demofh, 0, sizeof(cls.demofh));
 	cls.demoplayback = false;
 	cls.state = ca_disconnected;
+	/* Disconnected means not signed on, as CL_Disconnect has it.  A demo
+	 * that hits EOF with no svc_disconnect (truncated, or recorded by a
+	 * process that died) ends here and nowhere else, and a signon left at
+	 * SIGNONS kept the console up and the HUD drawing over a 3D view that
+	 * V_RenderView no longer draws for a disconnected client.  GitHub #204. */
+	cls.signon = 0;
 	/* Leave basedemospeed alone -- see CL_PlayDemo_f.  These two are the
 	 * per-playback state, and a stale 0 demospeed would freeze the next
 	 * demo's signon reads.  uhexen2-ofl9. */

@@ -1216,6 +1216,18 @@ void V_RenderView (void)
 	if (con_forcedup)
 		return;
 
+	/* Not connected: there is no world to render, only the one the client
+	 * just left.  con_forcedup does not cover this.  Host_Map_f disconnects
+	 * (shutting the local server down) and then puts the loading plaque up,
+	 * and SCR_SetUpToDrawConsole decides nothing while the plaque is up, so
+	 * con_forcedup keeps its in-game false and this used to draw the old
+	 * map one more time, after the disconnect.  The frame never shows it --
+	 * with signon reset the plaque draws the opaque menu backdrop over the
+	 * whole screen -- but on NVIDIA (offscreen EGL, Tesla P4) that draw left
+	 * the driver faulting inside the very next draw call.  GitHub #204. */
+	if (cls.state != ca_connected)
+		return;
+
 	// don't allow cheats in multiplayer
 	if (cl.maxclients > 1)
 	{

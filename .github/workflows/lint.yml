@@ -167,6 +167,11 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # A disconnected client renders no world: the loading plaque used to
+      # redraw the map just left, after the disconnect (GitHub #204).
+      - name: No world render while disconnected
+        run: python3 tools/test_render_disconnected.py
+
       # The web build, the Linux release and the Flatpak bundle one TimGM6mb
       # from one Debian tarball; the pin must agree everywhere (GitHub #114).
       - name: One SoundFont pin
