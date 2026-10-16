@@ -339,6 +339,46 @@ _v6not:
 	return NULL;
 }
 
+/*
+============
+ReserveGlobalTail
+
+The engine's PR_ValidateBytecode refuses an image that reads past its last
+global, and two reads here run past the last one allocated:
+
+  - OP_RETURN, OP_DONE, the OP_CALLn argument copies and the vector opcodes
+    read three globals from an operand whatever its type, so the last global
+    may be read as the first of three.
+  - a builtin's parm_start is wherever the globals stood when it was
+    declared, and it allocates nothing, yet its parameter words and locals
+    are checked from there.
+
+Big gamecode never ends on either; a HUD-only csprogs.dat ends right on them
+(GitHub #120).  Pad with zeros until both fit.
+============
+*/
+static void ReserveGlobalTail (void)
+{
+	int		i, j, need, parmwords;
+
+	need = numpr_globals + 2;
+	for (i = 1; i < numfunctions; i++)
+	{
+		parmwords = 0;
+		for (j = 0; j < functions[i].numparms && j < MAX_PARMS; j++)
+			parmwords += functions[i].parm_size[j];
+		if (functions[i].locals > parmwords)
+			parmwords = functions[i].locals;
+		if (functions[i].parm_start + parmwords > need)
+			need = functions[i].parm_start + parmwords;
+	}
+
+	if (need > MAX_REGS)
+		COM_Error("Too many registers: no room for the global tail");
+	while (numpr_globals < need)
+		pr_globals[numpr_globals++] = 0;
+}
+
 static void WriteData (int crc)
 {
 	def_t		*def;
@@ -397,6 +437,8 @@ static void WriteData (int crc)
 //	PrintGlobals ();
 
 	strofs = (strofs + 3) & ~3;
+
+	ReserveGlobalTail ();
 
 	printf("object file %s\n", destfile);
 	printf("      registers: %10d / %10d (%10d bytes)\n", numpr_globals, MAX_REGS, numpr_globals*(int)sizeof(float));
