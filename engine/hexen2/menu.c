@@ -3178,6 +3178,43 @@ static void M_Display_AdjustSliders (int dir)
 	}
 }
 
+/* The notes.  Each says what the cvar behind the row does, read off the
+ * code that consumes it, not off the label. */
+static const char *M_Display_Note (int row)
+{
+	switch (row)
+	{
+#ifdef GLQUAKE
+	case DISP_PIXELASPECT:	return "5:6 is 320x200 pixels on a 4:3 screen";	/* scr_pixelaspect */
+#endif
+	default:		return NULL;
+	}
+}
+
+
+
+/*
+================
+M_DrawRowNote
+
+One line under a submenu, for the highlighted row when its name does not say
+what it does.  GitHub #98, decided as Ironwail-shaped: Ironwail itself has no
+per-row descriptions (only submenu subtitles, which these menus already
+print), so a note is written only where a row's effect is not obvious, and
+each one says what the cvar behind it actually does.  Drawn centred in the
+row each menu leaves free at y = 92 + 8*ITEMS; the search prompt has the row
+below.  At most M_ROWNOTE_MAX characters, which tools/test_menu_row_notes.py
+holds them to, so a note fits the 320-unit canvas.
+================
+*/
+#define	M_ROWNOTE_MAX	38
+
+static void M_DrawRowNote (int y, const char *note)
+{
+	if (note && note[0])
+		M_Print ((320 - 8 * (int)strlen (note)) / 2, y, note);
+}
+
 static void M_Display_Draw (void)
 {
 	float	r;
@@ -3330,6 +3367,7 @@ static void M_Display_Draw (void)
 	if (!M_Display_IsSkip(display_cursor))
 		M_DrawCharacter (64, 92 + display_cursor*8, 12+((int)(realtime*4)&1));
 
+	M_DrawRowNote (92 + 8*DISP_ITEMS, M_Display_Note (display_cursor));
 	M_Filter_Draw (76, 92 + 8*(DISP_ITEMS + 1));
 }
 
@@ -3740,6 +3778,30 @@ static void M_Rendering_AdjustSliders (int dir)
 	}
 }
 
+static const char *M_Rendering_Note (int row)
+{
+	switch (row)
+	{
+	case REND_RENDERSCALE:	return "3D drawn at a fraction of the window";	/* r_scale */
+	case REND_SOFTEMU:	return "Software-era 8-bit palette look";	/* r_softemu */
+	case REND_MDLWARP:	return "Software-style model warping";		/* r_softemu_mdl_warp */
+	case REND_DITHER:	return "Dither strength in Retro Mode";		/* r_dither */
+	/* Both replacement-skin rows are read by Mod_LoadAllSkins, so toggling
+	 * one changes nothing until models are reloaded; without this the row
+	 * reads as broken.  uhexen2-b0kv */
+	case REND_EXTTEXTURES:
+	case REND_LEGACYALPHA:	return "applies on next map load";
+	case REND_LMBICUBIC:	return "Smoother lightmaps, at a small cost";	/* r_lightmap_bicubic */
+	case REND_SOFTPARTICLES: return "Fade sprites where they cut into walls";	/* r_softparticles */
+	case REND_WATERCOLOR:	return "Screen tint while underwater";		/* r_watercolor */
+	case REND_WATERWARP:	return "Wobble the view while underwater";	/* r_waterwarp */
+	case REND_LIQUIDWARP:	return "Ripple strength on liquid surfaces";	/* gl_waterwarp_amount */
+	case REND_FLASHINTENSITY: return "Reach of muzzle and effect lights";	/* gl_flashintensity */
+	case REND_HDR:		return "ACES tonemapping for bright scenes";	/* r_hdr */
+	default:		return NULL;
+	}
+}
+
 static void M_Rendering_Draw (void)
 {
 	float	r;
@@ -3953,19 +4015,7 @@ static void M_Rendering_Draw (void)
 	if (!M_Rendering_IsSkip(rendering_cursor))
 		M_DrawCharacter (64, 92 + 8*rendering_cursor, 12+((int)(realtime*4)&1));
 
-	/* Both replacement-skin rows are read by Mod_LoadAllSkins, so toggling
-	 * one changes nothing until models are reloaded.  Without this the row
-	 * reads as broken -- the checkbox moves and the world does not.  Drawn
-	 * only while the cursor is on one of them; row REND_ITEMS is free,
-	 * REND_ITEMS+1 belongs to the search prompt.  uhexen2-b0kv */
-	if (rendering_cursor == REND_EXTTEXTURES || rendering_cursor == REND_LEGACYALPHA)
-		M_Print (76, 92 + 8*REND_ITEMS, "applies on next map load");
-
-	/* No hint for r_wateralpha.  It used to read "water now; models on map
-	 * load", because EF_TRANSPARENT alias skins have the cvar baked into their
-	 * alpha at upload and kept the old value.  Mod_WaterAlphaChanged now
-	 * re-uploads them when it moves, so the slider is immediate for both.
-	 * GitHub #124. */
+	M_DrawRowNote (92 + 8*REND_ITEMS, M_Rendering_Note (rendering_cursor));
 
 	/* search prompt below the menu (no row uses Y == REND_ITEMS+1) */
 	M_Filter_Draw (76, 92 + 8*(REND_ITEMS + 1));
@@ -4276,6 +4326,17 @@ static void M_Graphics_AdjustSliders (int dir)
 	}
 }
 
+static const char *M_Graphics_Note (int row)
+{
+	switch (row)
+	{
+	case GFX_CONMAXCOLS:	return "Wrap console text at this width";	/* con_maxcols */
+	case GFX_OVERBRIGHT:	return "Full lets models light up like walls";	/* gl_overbright_models */
+	case GFX_TORCH_DLIGHT:	return "Wall torches cast dynamic light";	/* gl_torch_dlight */
+	default:		return NULL;
+	}
+}
+
 static void M_Graphics_Draw (void)
 {
 	ScrollTitle("gfx/menu/title3.lmp");
@@ -4436,6 +4497,7 @@ static void M_Graphics_Draw (void)
 	if (!M_Graphics_IsSkip(graphics_cursor))
 		M_DrawCharacter (64, 92 + 8*graphics_cursor, 12+((int)(realtime*4)&1));
 
+	M_DrawRowNote (92 + 8*GFX_ITEMS, M_Graphics_Note (graphics_cursor));
 	M_Filter_Draw (76, 92 + 8*(GFX_ITEMS + 1));
 }
 
