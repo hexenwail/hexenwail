@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildEngineArguments, detectModGamedirs, hasMissionPack, isModAssetPath, mapModImportPath, MISSION_PACK,
-  modImportRoot, modOwnedPath, modPanelNote, parseLaunchChoice,
+  modImportRoot, modOwnedPath, modPanelNote, parseLaunchChoice, planModZipImport,
 } from '../lib/mods.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const BASE = ['-basedir', '/persistent'];
 
@@ -148,4 +150,95 @@ test('parseLaunchChoice keeps the mission pack and sanitizes everything else', (
   assert.equal(parseLaunchChoice('data1'), '');
   assert.equal(parseLaunchChoice('hw'), '');
   assert.equal(parseLaunchChoice('../portals'), '');
+});
+
+// A mod .zip (GitHub #143): where the mod is inside the archive, and its name.
+const planPaths = (plan) => Object.fromEntries(plan.paths);
+
+test('planModZipImport takes the folder a zip holds its mod in', () => {
+  const plan = planModZipImport(['MyMod/progs.dat', 'MyMod/maps/x.bsp', 'MyMod/pak0.pak'], 'anything.zip');
+  assert.equal(plan.gamedir, 'mymod');
+  assert.deepEqual([...plan.paths.values()], ['mymod/progs.dat', 'mymod/maps/x.bsp', 'mymod/pak0.pak']);
+  // And what it maps to is what a folder import of MyMod/ stores.
+  assert.deepEqual([...plan.paths.values()].map((p) => mapModImportPath(plan.gamedir, p)),
+    ['MyMod/progs.dat', 'MyMod/maps/x.bsp', 'MyMod/pak0.pak'].map((p) => mapModImportPath('mymod', p)));
+});
+
+test('planModZipImport names a zip with its mod at the top after the archive', () => {
+  const plan = planModZipImport(['progs.dat', 'maps/x.bsp'], 'Cool Mod v2.zip');
+  assert.equal(plan.gamedir, 'cool-mod-v2');
+  assert.deepEqual(plan.root, []);
+  assert.equal(plan.paths.get('maps/x.bsp'), 'cool-mod-v2/maps/x.bsp');
+  // A content folder at the top is the mod's, not the mod.
+  const maps = planModZipImport(['maps/a.bsp', 'maps/b.bsp'], 'Arena Pack.zip');
+  assert.equal(maps.gamedir, 'arena-pack');
+  assert.equal(maps.paths.get('maps/a.bsp'), 'arena-pack/maps/a.bsp');
+  // A pk3-only mod.
+  assert.deepEqual(planPaths(planModZipImport(['pak0.pak'], 'Cool.zip')), { 'pak0.pak': 'cool/pak0.pak' });
+});
+
+test('planModZipImport sees through wrapper folders', () => {
+  const plan = planModZipImport(['Download/stuff/mymod/progs.dat', 'Download/stuff/mymod/maps/a.bsp'], 'dl.zip');
+  assert.equal(plan.gamedir, 'mymod');
+  assert.equal(plan.paths.get('Download/stuff/mymod/maps/a.bsp'), 'mymod/maps/a.bsp');
+  // A map pack keeps its folder's name: maps/ is content, not the mod.
+  assert.equal(planModZipImport(['mymod/maps/a.bsp', 'mymod/maps/b.bsp'], 'x.zip').gamedir, 'mymod');
+  assert.equal(planModZipImport(['Download/mymod/maps/a.bsp'], 'x.zip').gamedir, 'mymod');
+  assert.equal(planModZipImport(['MyMod/Sound/a.wav'], 'x.zip').gamedir, 'mymod');
+});
+
+test('planModZipImport leaves out files beside the mod instead of nesting it', () => {
+  // The common real layout: a README next to the mod folder.  This once made
+  // the archive the mod and stored mymod-v1/mymod/pak0.pak.
+  const plan = planModZipImport(['README.txt', 'mymod/progs.dat', 'mymod/pak0.pak'], 'mymod-v1.zip');
+  assert.equal(plan.gamedir, 'mymod');
+  assert.deepEqual(planPaths(plan), { 'mymod/progs.dat': 'mymod/progs.dat', 'mymod/pak0.pak': 'mymod/pak0.pak' });
+  assert.deepEqual(plan.outside, ['README.txt']);
+  const wrapped = planModZipImport(['Download/mymod/progs.dat', 'Download/readme.txt'], 'x.zip');
+  assert.equal(wrapped.gamedir, 'mymod');
+  assert.deepEqual(wrapped.outside, ['Download/readme.txt']);
+  // A folder a mod does not use, under the mod root, stays with it.
+  const glow = planModZipImport(['mymod/progs.dat', 'mymod/glow/a.tga'], 'x.zip');
+  assert.equal(glow.paths.get('mymod/glow/a.tga'), 'mymod/glow/a.tga');
+});
+
+test('planModZipImport folds case the way the engine does', () => {
+  const plan = planModZipImport(['MyMod/progs.dat', 'mymod/maps/a.bsp'], 'x.zip');
+  assert.equal(plan.gamedir, 'mymod');
+  assert.deepEqual(planPaths(plan), { 'MyMod/progs.dat': 'mymod/progs.dat', 'mymod/maps/a.bsp': 'mymod/maps/a.bsp' });
+});
+
+test('planModZipImport ignores archive junk when reading the layout', () => {
+  const plan = planModZipImport(
+    ['mymod/progs.dat', '__MACOSX/mymod/._progs.dat', 'mymod/.DS_Store', 'Thumbs.db'], 'm.zip');
+  assert.equal(plan.gamedir, 'mymod');
+  assert.deepEqual([...plan.paths.keys()], ['mymod/progs.dat']);
+  assert.deepEqual(plan.outside, []);
+});
+
+test('planModZipImport refuses what it cannot install as one mod', () => {
+  // Base-game content, at the top or wrapped.
+  assert.deepEqual(planModZipImport(['data1/pak5.pak', 'mymod/progs.dat'], 'o.zip'),
+    { error: 'base-game', base: 'data1' });
+  assert.equal(planModZipImport(['data1/pak5.pak'], 'o.zip').error, 'base-game');
+  assert.equal(planModZipImport(['Hexen2/data1/maps/a.bsp', 'Hexen2/portals/maps/b.bsp'], 'o.zip').error, 'base-game');
+  // Two mods.
+  assert.deepEqual(planModZipImport(['moda/progs.dat', 'modb/progs.dat'], 'o.zip'),
+    { error: 'several', names: ['moda', 'modb'] });
+  // Nothing that says where a mod starts.
+  assert.equal(planModZipImport(['mymod/glow/a.tga', 'readme.txt'], 'o.zip').error, 'no-anchor');
+  // Names.
+  assert.equal(planModZipImport(['progs.dat'], 'hw.zip').error, 'reserved');
+  assert.equal(planModZipImport(['progs.dat'], '!!!.zip').error, 'unnamed');
+  assert.equal(planModZipImport(['__MACOSX/._x'], 'o.zip').error, 'empty');
+  assert.equal(planModZipImport([], 'o.zip').error, 'empty');
+});
+
+test('the launcher offers a mod .zip import beside the folder import', () => {
+  const html = readFileSync(join(process.cwd(), 'web/index.html'), 'utf8');
+  const app = readFileSync(join(process.cwd(), 'web/app.js'), 'utf8');
+  assert.match(html, /<button id="mod-zip-button">Import mod \.zip<\/button>/);
+  assert.match(html, /<input id="mod-zip-input" type="file" accept="\.zip,application\/zip">/);
+  assert.match(app, /ui\.modZipInput\?\.addEventListener\('change'[\s\S]*?handleModZipImport\(/);
+  assert.match(app, /planModZipImport\(extracted\.map\(\(entry\) => entry\.name\), file\.name\)/);
 });

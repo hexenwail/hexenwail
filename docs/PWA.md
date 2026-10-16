@@ -337,7 +337,29 @@ Import mod folder -> pick "mymod" -> Active mod: mymod -> Start   # launcher
 name becomes the directory the engine is launched with, and its contents are stored under
 that name with their internal structure intact (`mymod/progs.dat`, `mymod/maps/e1m1.bsp`,
 `mymod/pak0.pak`, …). Pick the mod's own folder — if a download wraps the mod in an extra
-directory, descend into it first, or the wrapper becomes the gamedir instead.
+directory, descend into it first, or the wrapper becomes the gamedir instead. (The .zip
+import below unwraps for you.)
+
+**Import mod .zip** takes the mod as it was downloaded (GitHub #143). The launcher finds
+the mod inside the archive by its anchors -- a `progs.dat`, a pak or pk3, or a content
+folder (`maps/`, `sound/`, `models/`, `gfx/`, ...) -- whatever folders wrap it. The mod root
+is the shallowest folder an anchor sits in, and its name is the gamedir; when the anchors
+are at the top of the archive, the archive's own name is.
+
+| Inside `mymod-v1.zip` | Installed as |
+|---|---|
+| `MyMod/progs.dat`, `MyMod/maps/...` | `mymod/` |
+| `README.txt`, `mymod/pak0.pak` | `mymod/`, with `README.txt` listed as ignored |
+| `Download/MyMod/progs.dat` ... | `mymod/` -- wrapper folders fall away |
+| `MyMod/maps/*.bsp` only (a map pack) | `mymod/` -- `maps/` is the mod's content, not the mod |
+| `progs.dat`, `maps/...` at the top | `mymod-v1/` -- named after the archive |
+| `data1/...`, anywhere | refused: base-game content, which **Choose files** imports |
+| two mod folders | refused: extract it and import each folder |
+| no anchor at all | refused: nothing says where the mod starts |
+
+Folder names are compared without case, as the engine's lookups are. `__MACOSX/`,
+`.DS_Store`, `Thumbs.db` and `desktop.ini` are dropped first. From there the files go
+through the same type filter and installer as a folder import.
 
 Unlike the base-game importer, nothing here is flattened into `data1/`: that mapper exists
 to turn a retail install into the layout the engine expects, and a mod's whole meaning is

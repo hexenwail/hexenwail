@@ -465,7 +465,7 @@
         </section>
         <section class="card">
           <h2>Mods</h2>
-          <p id="mod-requirements">No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game &lt;folder&gt;.</p>
+          <p id="mod-requirements">No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game &lt;folder&gt;; “Import mod .zip” does the same for a mod as it was downloaded.</p>
           <label class="setting">Active mod
             <select id="mod-select" aria-label="Active mod" disabled>
               <option value="">None (Hexen II)</option>
@@ -473,9 +473,11 @@
           </label>
           <div class="buttons">
             <button id="mod-import-button">Import mod folder</button>
+            <button id="mod-zip-button">Import mod .zip</button>
             <button id="mod-remove-button" disabled>Remove mod</button>
           </div>
           <input id="mod-input" type="file" webkitdirectory directory multiple>
+          <input id="mod-zip-input" type="file" accept=".zip,application/zip">
           <small id="mod-message" class="muted"></small>
           <small id="mod-rejected-list" class="muted"></small>
         </section>
