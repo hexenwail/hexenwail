@@ -490,7 +490,6 @@ GL_FUNCTION_OPT(void, glDrawElementsIndirect, (GLenum, GLenum, const void *))
 GL_FUNCTION_OPT(void, glTexImage3D, (GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *))
 
 /* Additional uniform functions */
-GL_FUNCTION_OPT(void, glUniform3fv, (GLint, GLsizei, const GLfloat *))
 GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 
 #undef GL_FUNCTION_OPT
@@ -581,7 +580,6 @@ GL_FUNCTION_OPT(void, glUniform4fv, (GLint, GLsizei, const GLfloat *))
 #define glGetActiveUniformBlockiv_fp	glGetActiveUniformBlockiv
 #define glBindBufferRange_fp		glBindBufferRange
 #define glTexImage3D_fp			glTexImage3D
-#define glUniform3fv_fp			glUniform3fv
 #define glUniform4fv_fp			glUniform4fv
 /* GL 4.3+ buffer streaming: not in WebGL2.  The streaming ring
  * (gl_buffer.c) is compiled out under USE_GLES — these stubs

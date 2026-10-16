@@ -1386,7 +1386,17 @@ function tryCaptureInput() {
   if (ui.canvas) {
     ui.canvas.focus();
     if (typeof ui.canvas.requestPointerLock === 'function') {
-      ui.canvas.requestPointerLock();
+      // Chrome returns a promise and rejects it when the pointer is already
+      // locked, or the request comes too soon after an Escape released it;
+      // Safari returns nothing.  Unhandled, the rejection reached the global
+      // handler and replaced the status line with "Unhandled promise
+      // rejection: Pointer is already locked." on every canvas click.  A
+      // refused lock is not an error: the next click asks again.  (#150)
+      if (document.pointerLockElement === ui.canvas) {
+        return;
+      }
+      const pending = ui.canvas.requestPointerLock();
+      pending?.catch?.((error) => console.debug('Pointer lock not granted:', error?.message ?? error));
     } else if (ui.pointerLockHint) {
       ui.pointerLockHint.textContent = 'Pointer Lock is unavailable here (expected on iPadOS Safari). External keyboard/mouse still work without it.';
     }

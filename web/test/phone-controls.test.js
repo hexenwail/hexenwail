@@ -138,3 +138,18 @@ test('phone mode DOM includes playing layout, touch visibility rules, and quit h
   assert.equal([...app.matchAll(/startEngineFromUserAction\(/g)].length, 2,
     'engine startup should only be defined and invoked by the launch-button handler');
 });
+
+test('every phone button action is a button on the page, and every button maps', async () => {
+  // #152: "run" sat in BUTTON_ACTIONS with no data-phone-action="run" button,
+  // and "menu" with none either (the Menu button goes through web/app.js).
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../lib/phone-controls.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const listed = JSON.parse(source.match(/const BUTTON_ACTIONS = new Set\((\[[^\]]*\])\)/)[1].replace(/'/g, '"'));
+  const onPage = [...html.matchAll(/data-phone-action="([a-zA-Z]+)"/g)].map((m) => m[1])
+    .filter((action) => action !== 'stick' && action !== 'look');
+  assert.deepEqual([...listed].sort(), [...new Set(onPage)].sort());
+  for (const action of listed) {
+    assert.equal(typeof PHONE_CONTROL_KEYCODES[action], 'number', `${action} has no keycode`);
+  }
+});
