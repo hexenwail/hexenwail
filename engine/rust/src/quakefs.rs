@@ -2453,7 +2453,7 @@ extern "C" {
 const MAX_GAMEDIRS: usize = 128;
 
 /// `FS_ListSearchSubdirs` -- enumerate subdirectories of `relpath` across the
-/// loose (non-pak) searchpath entries, highest priority first, skipping
+/// loose (non-archive) searchpath entries, highest priority first, skipping
 /// case-insensitive duplicates.
 #[no_mangle]
 pub unsafe extern "C" fn FS_ListSearchSubdirs(
@@ -2471,7 +2471,10 @@ pub unsafe extern "C" fn FS_ListSearchSubdirs(
 
     let mut search = FS_SEARCHPATHS;
     while !search.is_null() && count < maxdirs {
-        if !(*search).pack.is_null() {
+        // Archives are skipped, pk3s as well as paks: a zip searchpath has
+        // no filename, and listing "/<relpath>" from the filesystem root
+        // would offer whatever directories happen to live there.
+        if !(*search).pack.is_null() || !(*search).zip.is_null() {
             search = (*search).next;
             continue;
         }
@@ -2526,6 +2529,14 @@ unsafe extern "C" fn fs_path_f() {
                 c"%s (%i files)\n".as_ptr(),
                 (*(*s).pack).filename.as_ptr(),
                 (*(*s).pack).numfiles,
+            );
+        } else if !(*s).zip.is_null() {
+            // A pk3 has no filename of its own: name the archive.
+            CON_Printf(
+                PRINT_NORMAL,
+                c"%s (%i files)\n".as_ptr(),
+                (*(*s).zip).filename.as_ptr(),
+                (*(*s).zip).numfiles,
             );
         } else {
             CON_Printf(PRINT_NORMAL, c"%s\n".as_ptr(), (*s).filename.as_ptr());
@@ -2642,6 +2653,34 @@ unsafe fn fs_scan_files_ex(
             let mut i: c_int = 0;
             while i < (*(*search).pack).numfiles {
                 let mut name = (*(*(*search).pack).files.add(i as usize)).name.as_ptr();
+
+                if dirlen != 0 {
+                    if strncmp(pakdir.as_ptr(), name, dirlen) != 0 {
+                        i += 1;
+                        continue;
+                    }
+                    name = name.add(dirlen);
+                } else if !strchr(name, b'/' as c_int).is_null() {
+                    // gamedir root only
+                    i += 1;
+                    continue;
+                }
+
+                if add_file_name(name, prefix, pre_len, ext) < 0 {
+                    return;
+                }
+                i += 1;
+            }
+        } else if !(*search).zip.is_null() {
+            // A mounted .pk3 lists its members the way a pak does.  Without
+            // this branch a zip searchpath fell through to the loose-file
+            // scan below with an empty filename, so maplist, the map menu,
+            // randmap and the demo/cfg/sky listings saw nothing inside any
+            // pk3 and globbed "/maps" at the filesystem root instead.
+            let zip = (*search).zip;
+            let mut i: c_int = 0;
+            while i < (*zip).numfiles {
+                let mut name = (*(*zip).files.add(i as usize)).name.as_ptr();
 
                 if dirlen != 0 {
                     if strncmp(pakdir.as_ptr(), name, dirlen) != 0 {
