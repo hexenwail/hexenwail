@@ -96,6 +96,11 @@ jobs:
       - name: Multiplayer join and content-path regression
         run: python3 tools/test_multiplayer_join.py
 
+      # Long mod titles shorten in the middle, so numbered sequels stay
+      # distinct rows (#136).  Compiles the real M_Mods_FitLabel.
+      - name: Mods menu labels stay distinct when shortened
+        run: python3 tools/test_mods_label_fit.py
+
       # A demo has no qsocket, so a guard written for HexenWorld's socket
       # ownership froze every demo on the loading plaque until "load timeout"
       # (30ea43b17, GitHub #209).  Mods driving their front end from
