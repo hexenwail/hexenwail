@@ -29,7 +29,8 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `pak2pk3.py` | convert a retail v1.11 `data1` or `portals` from `pakN.pak` to `000-pakN.pk3` (DEFLATE, same members, order, duplicates and bytes; verified before it is renamed into place). Refuses content the engine would not identify as a pk3, such as the demo. `--loose` packs the loose game files into `zz-loose.pk3`. Retail data1: paks 98 MB to 46 MB (#129) |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
 | `artifact-save-check.sh` | check on a live engine that the selected artifact survives save, relaunch and load, including old-format saves and a pre-r11 engine (#159); needs retail data and a GPU (offscreen) |
-| `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
+| `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by, and the Raven release when it is one |
+| `test_progs_release_ident.py` | compile `pr_raven_images[]` and its lookup out of `pr_edict.c` and check every Raven release is named, only on both CRCs, in step with `progs_crc.py` (#160) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
 
@@ -282,15 +283,18 @@ progs_crc.py <progs.dat> [progs.dat ...]
 ```
 
 Prints the two numbers `PR_ClassifyGamecode()` (`engine/h2shared/pr_edict.c`)
-works from, and flags whether the first is recognised:
+works from, and names the Raven release when the pair is one it knows:
 
-- **file crc**: CRC over the whole file. Identifies one exact build; this is
-  what `retail_crcs[]` holds.
+- **file crc**: CRC over the whole file. Identifies one exact build.
 - **progdefs crc**: the header's `crc` field. Identifies the interface
   generation only (`PROGS_V103_CRC` / `PROGS_V111_CRC` / `PROGS_V112_CRC`).
-  Mods share these with retail, so only the file CRC tells a mod from Raven's
-  file.
+  Releases share these (1.08 to 1.11 all declare 38488) and so do mods, so
+  only the file CRC tells them apart.
 
-`retail_crcs[]` only covers 1.11/1.12a, so 1.03 or 1.09 retail gamecode is
-reported as `Third-party`. To fix that, run this on the `progs.dat` from that
-release and add the file CRCs.
+`pr_raven_images[]` matches on both and covers 1.03, 1.08, 1.09, 1.10, 1.11,
+portals 1.12 and 1.12a, and the November 1997 demo. A Raven image it does not know
+(a localised release, say) is reported as `Third-party`: run this on it and
+add the pair to `pr_raven_images[]` and `KNOWN_RAVEN` together.
+`test_progs_release_ident.py` fails if the two tables drift, and with
+`HCODE_ARCHIVE=<uhexen2-hcode_archive checkout>` it re-reads the archive rows
+from the binaries.

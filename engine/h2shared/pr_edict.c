@@ -969,15 +969,14 @@ they are the only numbers here that can be hardcoded safely: they were fixed in
 it, which is why docs/BUNDLED_GAMECODE.md stamps its own table "dated, and
 expected to move" -- so our side is identified by a symbol instead.
 
-Raven is asked first only because pr_crc is already computed and the test is
-six compares; retail can never carry the sentinel, so the order is not
+Raven is asked first only because pr_crc is already computed and the test is a
+walk of a short table; retail can never carry the sentinel, so the order is not
 load-bearing.
 
-The Raven answer carries a release number, taken from progs->crc -- the same
-field the progvstr switch reads, and the file's own statement of its interface
-version.  "1.12a" rather than progvstr's "H2MP/v1.12" because 1.12a is what
-Raven actually shipped the mission pack as; the bare "1.12" is the progdefs
-generation, not a release.
+The Raven answer carries the release, from pr_raven_images[] below.  It used to
+be read off progs->crc, which names the interface generation and not the
+release: it filed the CD's portals 1.12 as "1.12a", and could not have told
+1.08, 1.09, 1.10 and 1.11 apart at all.
 
 Our answer carries the date the gamecode last changed, read out of the marker's
 own name, giving "hexenwail-2026-08-15".  The whole-file CRC on the same line is
@@ -992,11 +991,11 @@ reads as the same string at a glance.  A reporter on a build with no stamp
 flipped the source row back and forth, saw the row below apparently not move,
 and concluded the control was broken.  uhexen2-nt96.
 
-Anything unrecognised reads as third-party rather than as Raven: the retail
-list covers the three files a retail install has, and the mods measured in the
-verification matrix (sot 28154, soc 58269, karma2 22850, GameOfTomes 41534) all
-land here correctly.  An older Raven release we have no CRC for would be
-misfiled, which is the known cost of not being able to enumerate them.
+Anything unrecognised reads as third-party rather than as Raven: the mods
+measured in the verification matrix (sot 28154, soc 58269, karma2 22850,
+GameOfTomes 41534) all land here correctly.  A Raven build missing from the
+table (a localised release, say) would be misfiled the same way, which is the
+known cost of not being able to enumerate them.
 ===============
 */
 /* Defined further down this file and not in any header; host_cmd.c reaches it
@@ -1028,31 +1027,61 @@ static const char *PR_GamecodeStamp (void)
 	return NULL;
 }
 
+/* Raven's shipped images: whole-file pr_crc, the progdefs CRC the same file
+ * declares, and the release it is.  A row matches only when both CRCs do, so a
+ * mod has to collide on the 16-bit file CRC *and* share the interface
+ * generation to be misfiled.  A mistyped row cannot misname another listed
+ * image (no two rows share a pair), but it can name an unlisted file that
+ * happens to carry the mistyped pair.
+ *
+ * The progdefs CRC cannot name the release on its own: 1.08, 1.09, 1.10 and
+ * 1.11 all declare 38488, and the CD's portals 1.12 and the 1.12a update both
+ * declare 26905.  Only the file CRC separates them.
+ *
+ * Sources, kept in step with tools/progs_crc.py by
+ * tools/test_progs_release_ident.py:
+ *   - 1.11 data1 pair and portals 1.12: measured off a real retail install
+ *     (docs/BUNDLED_GAMECODE.md's P8/B6 rows).  That install's portals is the
+ *     CD release, which this table used to call "1.12a".
+ *   - demo: the hash-verified .#demodata (Raven's November 1997 demo, whose
+ *     progs.dat ships loose beside pak0.pak).  GitHub #171.
+ *   - 1.03, 1.08, 1.09, 1.10 and 1.12a: the bin/ images of sezero's
+ *     uhexen2-hcode_archive, read with tools/progs_crc.py.  Its 1.11 and 1.12
+ *     images are byte-identical to the retail files above.  Not every bin/
+ *     image is a shipped binary, though: its h2-1.11-demo progs.dat (crc
+ *     47044) is not the demo's real 16640 file and differs from its own 1.11
+ *     image in 132 bytes, so it looks rebuilt.  None of these five has been
+ *     read off a player's install yet; a field reading that disagrees wins.
+ *     GitHub #160. */
+static const struct {
+	unsigned short	file_crc;
+	unsigned short	progdefs_crc;
+	const char	*release;
+} pr_raven_images[] = {
+	{ 20607U, PROGS_V103_CRC, "Raven 1.03" },	/* data1/progs.dat  */
+	{ 60119U, PROGS_V103_CRC, "Raven 1.03" },	/* data1/progs2.dat */
+	{  1534U, PROGS_V111_CRC, "Raven 1.08" },
+	{ 17570U, PROGS_V111_CRC, "Raven 1.08" },
+	{ 30965U, PROGS_V111_CRC, "Raven 1.09" },
+	{ 50972U, PROGS_V111_CRC, "Raven 1.09" },
+	{  1209U, PROGS_V111_CRC, "Raven 1.10" },
+	{ 32649U, PROGS_V111_CRC, "Raven 1.10" },
+	{ 17499U, PROGS_V111_CRC, "Raven 1.11" },
+	{ 33075U, PROGS_V111_CRC, "Raven 1.11" },
+	{ 20799U, PROGS_V112_CRC, "Raven 1.12" },	/* portals, CD release */
+	{  3174U, PROGS_V112_CRC, "Raven 1.12a" },	/* portals, official update */
+	{ 16640U, PROGS_V111_CRC, "Raven demo" },
+};
+
 static const char *PR_ClassifyGamecode (void)
 {
-	/* data1/PROGS.DAT, portals/progs.dat, data1/PROGS2.DAT -- read off a real
-	 * retail install in docs/BUNDLED_GAMECODE.md's P8/B6 rows. */
-	static const unsigned int	retail_crcs[] = { 17499U, 20799U, 33075U };
 	size_t	i;
 
-	/* Raven's free three-level demo (November 1997), whose progs.dat ships
-	 * loose beside pak0.pak.  Its progdefs CRC is the 1.11 interface (38488),
-	 * so the release switch below would call it "Raven 1.11"; name it for
-	 * what it is instead.  Measured with tools/progs_crc.py off the
-	 * hash-verified .#demodata.  GitHub #171. */
-	if ((unsigned int)pr_crc == 16640U)
-		return "Raven demo";
-
-	for (i = 0; i < sizeof(retail_crcs) / sizeof(retail_crcs[0]); i++)
+	for (i = 0; i < sizeof(pr_raven_images) / sizeof(pr_raven_images[0]); i++)
 	{
-		if ((unsigned int)pr_crc != retail_crcs[i])
-			continue;
-		switch (progs->crc) {
-		case PROGS_V103_CRC:	return "Raven 1.03";
-		case PROGS_V111_CRC:	return "Raven 1.11";
-		case PROGS_V112_CRC:	return "Raven 1.12a";
-		default:		return "Raven";
-		}
+		if ((unsigned int)pr_crc == pr_raven_images[i].file_crc &&
+		    progs->crc == pr_raven_images[i].progdefs_crc)
+			return pr_raven_images[i].release;
 	}
 
 	{

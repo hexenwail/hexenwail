@@ -117,6 +117,11 @@ jobs:
       - name: pak2pk3 converter
         run: python3 tools/test_pak2pk3.py
 
+      # Every Raven release in pr_raven_images[] is named, a row needs both
+      # CRCs, and the table agrees with tools/progs_crc.py (#160).
+      - name: Raven gamecode releases are named
+        run: python3 tools/test_progs_release_ident.py
+
       # A demo has no qsocket, so a guard written for HexenWorld's socket
       # ownership froze every demo on the loading plaque until "load timeout"
       # (30ea43b17, GitHub #209).  Mods driving their front end from

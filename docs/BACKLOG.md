@@ -69,7 +69,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (51)
+## P3 — someday (50)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
@@ -80,7 +80,6 @@ here.
 - **host_framerate no longer produces slow motion — the physics accumulator speeds it up instead** `uhexen2-i1hz` — host_framerate is the classic Quake slow-motion / fixed-step demo knob: Host_FilterTime overrides host_frametime with its value instead of the real elapsed time.
 - **Replacement-skin cutout is 4x-quantised: 41k texels solid-per-index, black-per-art** `uhexen2-lddd` — Split out of uhexen2-4y6w, where it was measured but deliberately not fixed.
 - **Web canvas not window-bounded outside phone mode** `uhexen2-mpca` — web/index.html:37 — 1280x720 browser window yields a 832x2371 drawable. Layout/CSS issue in the launcher page preventing proper canvas sizing.
-- **Gamecode ident: retail 1.03/1.09 progs misreport as Third-party** `uhexen2-qvqk` — PR_ClassifyGamecode() (engine/h2shared/pr_edict.c) identifies Raven's gamecode from a table of three whole-file CRCs read off a retail 1.11/1.12a install: 17499 (data1/PROGS.DAT), 20799 (por…
 - **Paladin purifier projectiles spawn too far forward at 0.05s ticks, correct at the fastest tick** `uhexen2-rdi4` — BloodShot, Discord 2026-08-23: 'You can also see it on the paladin purifier, at ticrate 0 the projectiles spawn correctly, but at 0.05 they spawn too far forward.'
 - **Master's committed 0.8.0-beta.r12 release notes file is corrupt (sections duplicated)** `uhexen2-t6xa` — docs/release-notes/0.8.0-beta.r12.md as committed on master (cfe2f92d0 lineage, now aa13afab0's tree) appends verbatim copy of Downloads/gamecode/crash-reporting sections.
 - **Item spawns on a func_door (Mathuzzz) — needs map/item to reproduce** `uhexen2-v41m` — Reported on Discord by Mathuzzz (2026-08-15): 'It spawns on func_door. The very same situation as my green key.'
@@ -169,6 +168,6 @@ here.
 - **macOS packaging — .app bundle, code signing, notarization** `uhexen2-q7df` *(blocked)* — Produce a proper .app bundle with an Info.plist, then code-sign and notarize it. Without notarization Gatekeeper blocks the app for every user who did not build it themselves, so this is a h…
 - **Add darwin to the flake and an APPLE branch to CMake** `uhexen2-q88b` *(blocked)* — flake.nix must gain aarch64-darwin and x86_64-darwin systems with a working package. engine/CMakeLists.txt must gain an explicit APPLE branch before the UNIX branch so macOS does not inherit…
 - **HiDPI/Retina validation on macOS** `uhexen2-u8a8` *(blocked)* — SDL_WINDOW_HIGH_PIXEL_DENSITY is already set at gl_vidsdl.c, but the Retina backing scale interacts with the render-scale and vid_scale features and has never been exercised.
-- **Demo-mode polish: genuine demo progs.dat labelled 'Third-party'; mods menu not gated** `uhexen2-ulh5` — Four demo/mod polish items: (1) pr_edict.c:1079 prints 'Gamecode: progs.dat (...) -- Third-party' for legitimate demo progs (CRC 16640). Cosmetically wrong; add demo CRC to known-list.
+- **Demo-mode polish: mods menu not gated** `uhexen2-ulh5` — Four demo/mod polish items. Item (1), the genuine demo progs.dat (CRC 16640) printing 'Third-party', is fixed: it reads 'Raven demo' since `fix(progs): name Raven's 1997 demo gamecode instead of "Third-party" (part of #171)`. The rest are tracked on GitHub #171.
 - **Exclude web/test/ from the published Pages artifact** `uhexen2-wq4h` — The pages.yml workflow's cp -r web/. dist/ ships the test files in the deployed PWA. Pre-existing in the ported fork code, harmless but dead weight in the deploy.
 - **Audit tail: remaining latent divergences and perf-trade gates** `uhexen2-xzkn` — Umbrella issue listing items deliberately deferred from the 2026-08-18 rendering audit, with file:line each:
