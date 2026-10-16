@@ -225,6 +225,84 @@ static int CountIn (const char *begin, const char *end, const char *needle)
 	return n;
 }
 
+static int IsIdentChar (char c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+	       (c >= '0' && c <= '9') || c == '_';
+}
+
+/*
+ * Every `return' token in [begin, end) -- whatever follows it: a space, a tab,
+ * a newline or a parenthesis -- and how many of them are exactly
+ *
+ *	return SV_DebugMoveStep_Call (ent, mins, maxs, true|false, ...);
+ *
+ * with nothing between the call's closing parenthesis and the semicolon, so
+ * "Call (...) && false" or a flag that is not a literal does not count.  The
+ * text has had its comments blanked; string literals are skipped when matching
+ * the call's parentheses, because the reason strings hold their own.
+ */
+static void CountReturns (const char *begin, const char *end, int *returns,
+			  int *logged, char *flags, size_t flagsize)
+{
+	static const char	call[] = "SV_DebugMoveStep_Call (ent, mins, maxs, ";
+	const char		*p;
+
+	*returns = *logged = 0;
+	flags[0] = '\0';
+	for (p = begin; p + 6 <= end; p++)
+	{
+		const char	*q;
+		int		depth;
+		char		flag;
+
+		if (strncmp(p, "return", 6) != 0 ||
+		    (p > begin && IsIdentChar(p[-1])) ||
+		    (p + 6 < end && IsIdentChar(p[6])))
+			continue;
+		(*returns)++;
+
+		for (q = p + 6; q < end && (*q == ' ' || *q == '\t' || *q == '\n'); q++)
+			;
+		if (q == p + 6 || strncmp(q, call, sizeof(call) - 1) != 0)
+			continue;
+		q += sizeof(call) - 1;
+		if (strncmp(q, "true,", 5) != 0 && strncmp(q, "false,", 6) != 0)
+			continue;
+		flag = (*q == 't') ? 'T' : 'F';
+
+		/* the call's own '(' is the one just before "ent" */
+		depth = 1;
+		while (q < end && depth > 0)
+		{
+			if (*q == '"')
+			{
+				for (q++; q < end && *q != '"'; q++)
+					if (*q == '\\')
+						q++;
+			}
+			else if (*q == '(')
+				depth++;
+			else if (*q == ')')
+				depth--;
+			q++;
+		}
+		while (q < end && (*q == ' ' || *q == '\t' || *q == '\n'))
+			q++;
+		if (depth == 0 && q < end && *q == ';')
+		{
+			size_t n = strlen(flags);
+
+			(*logged)++;
+			if (n + 1 < flagsize)
+			{
+				flags[n] = flag;
+				flags[n + 1] = '\0';
+			}
+		}
+	}
+}
+
 /*
  * The region under test: from SV_CheckBottom's signature to the comment that
  * opens the corner sampling.  Everything that can redefine the corner box lives
@@ -341,6 +419,60 @@ static int CheckOneCopy (const char *path)
 			"component directly before the corner loop -- see issue #278.\n",
 			path);
 		failed = 1;
+	}
+
+	/*
+	 * 4. Every exit reports itself to a negative sv_debugmovestep (#282).  A
+	 *    return that skips SV_DebugMoveStep_Call makes call-level logs lie by
+	 *    omission -- the exact "zero lines, so it was never called" misreading
+	 *    the per-call lines exist to prevent.  Whole function body this time,
+	 *    up to its closing brace in column 0.
+	 */
+	{
+		const char	*body_end = strstr(head, "\n}\n");
+		int		returns, logged;
+		char		flags[16];
+
+		if (!body_end)
+		{
+			fprintf(stderr, "checkbottom: %s: cannot find the end of "
+				"SV_CheckBottom\n", path);
+			failed = 1;
+		}
+		else
+		{
+			CountReturns(head, body_end, &returns, &logged, flags, sizeof(flags));
+			/* ...and no call outside a return, which would log a
+			 * decision the function did not make. */
+			if (CountIn(head, body_end, "SV_DebugMoveStep_Call") != logged)
+			{
+				fprintf(stderr, "checkbottom: %s: SV_CheckBottom calls "
+					"SV_DebugMoveStep_Call %d times, but only %d are "
+					"its own returns (#282).\n", path,
+					CountIn(head, body_end, "SV_DebugMoveStep_Call"),
+					logged);
+				failed = 1;
+			}
+			else if (returns < 4 || returns != logged)
+			{
+				fprintf(stderr, "checkbottom: %s: SV_CheckBottom has %d "
+					"returns, %d of them through SV_DebugMoveStep_Call; "
+					"every exit must report the call (#282).\n",
+					path, returns, logged);
+				failed = 1;
+			}
+			/* The four exits, in source order: fast path passes,
+			 * midpoint fails, corner fails, traced passes.  A flag
+			 * that disagrees makes the log say pass for a refusal. */
+			else if (strcmp(flags, "TFFT") != 0)
+			{
+				fprintf(stderr, "checkbottom: %s: SV_CheckBottom's "
+					"logged exits report %s, expected TFFT (fast pass, "
+					"midpoint fail, corner fail, traced pass) (#282).\n",
+					path, flags);
+				failed = 1;
+			}
+		}
 	}
 
 	free(text);
