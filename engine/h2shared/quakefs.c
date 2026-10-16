@@ -2156,7 +2156,8 @@ FS_ListSearchSubdirs
 
 Enumerates subdirectories of <relpath> across all loose (non-pak)
 searchpath gamedirs.  Higher-priority gamedirs are scanned first;
-duplicate names (case-insensitive) are skipped.  Pak entries are ignored.
+duplicate names (case-insensitive) are skipped.  Archive (pak and pk3) entries
+are ignored.
 ============
 */
 int FS_ListSearchSubdirs (const char *relpath, char dirs[][64], int maxdirs)
@@ -2172,7 +2173,10 @@ int FS_ListSearchSubdirs (const char *relpath, char dirs[][64], int maxdirs)
 
 	for (search = fs_searchpaths; search && count < maxdirs; search = search->next)
 	{
-		if (search->pack)
+		/* Archives are skipped, pk3s as well as paks: a zip searchpath has
+		 * no filename, and listing "/<relpath>" from the filesystem root
+		 * would offer whatever directories happen to live there. */
+		if (search->pack || search->zip)
 			continue;
 		q_snprintf (path, sizeof(path), "%s/%s", search->filename, relpath);
 		n = Sys_ListDirectories (path, buf, 64);
@@ -2216,6 +2220,8 @@ static void FS_Path_f (void)
 			Con_Printf ("----------\n");
 		if (s->pack)
 			Con_Printf ("%s (%i files)\n", s->pack->filename, s->pack->numfiles);
+		else if (s->zip)	/* a pk3 has no filename of its own: name the archive */
+			Con_Printf ("%s (%i files)\n", s->zip->filename, s->zip->numfiles);
 		else
 			Con_Printf ("%s\n", s->filename);
 	}
@@ -2352,6 +2358,31 @@ static void FS_ScanFilesEx (const char *subdir, const char *ext, const char *pre
 			for (; i < search->pack->numfiles; ++i)
 			{
 				const char *name = search->pack->files[i].name;
+
+				if (dirlen)
+				{
+					if (strncmp(pakdir, name, dirlen) != 0)
+						continue;
+					name += dirlen;
+				}
+				else if (strchr(name, '/'))
+					continue;	/* gamedir root only */
+
+				if (addFileName(name, prefix, preLen, ext) < 0)
+					return;
+			}
+		}
+		else if (search->zip)
+		{
+			/* A mounted .pk3 lists its members the way a pak does.  Without
+			 * this branch a zip searchpath fell through to the loose-file
+			 * scan below with an empty filename, so maplist, the map menu,
+			 * randmap and the demo/cfg/sky listings saw nothing inside any
+			 * pk3 and globbed "/maps" at the filesystem root instead. */
+			int i = 0;
+			for (; i < search->zip->numfiles; ++i)
+			{
+				const char *name = search->zip->files[i].name;
 
 				if (dirlen)
 				{

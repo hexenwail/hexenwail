@@ -107,6 +107,11 @@ jobs:
       - name: misc_modelpimp flag 64 gates dynamic lights
         run: python3 tools/test_modelpimp_nodlight.py
 
+      # maplist, the map menu and the other name listings must see inside
+      # mounted .pk3s, in the shipped Rust quakefs and the C reference (#129).
+      - name: Name listings see inside pk3 archives
+        run: python3 tools/test_pk3_listing.py
+
       # A demo has no qsocket, so a guard written for HexenWorld's socket
       # ownership froze every demo on the loading plaque until "load timeout"
       # (30ea43b17, GitHub #209).  Mods driving their front end from
