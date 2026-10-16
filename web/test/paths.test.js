@@ -35,6 +35,16 @@ test('mapImportedPath recognizes common Hexen II asset layouts', () => {
   assert.equal(mapImportedPath('data1/sub/PAK0.PAK'), 'data1/sub/PAK0.PAK');
   // Not a pakN name: kept as shipped.
   assert.equal(mapImportedPath('Extra.PAK'), 'data1/Extra.PAK');
+
+  // A SoundFont lands where SF_FindSoundFont looks on the web, whatever it was
+  // called and wherever it sat (GitHub #114); SF3 is not taken.
+  assert.equal(mapImportedPath('TimGM6mb.sf2'), 'data1/soundfont.sf2');
+  assert.equal(mapImportedPath('Sounds/GeneralMIDI.SF2'), 'data1/soundfont.sf2');
+  assert.equal(mapImportedPath('data1/GeneralUser.sf2'), 'data1/soundfont.sf2');
+  assert.equal(mapImportedPath('portals/x.sf2'), 'data1/soundfont.sf2');
+  assert.equal(mapImportedPath('data1/soundfont.sf2'), 'data1/soundfont.sf2');
+  assert.equal(mapImportedPath('FluidR3.sf3'), null);
+  assert.equal(mapImportedPath('../evil.sf2'), null);
   assert.equal(mapImportedPath('README.txt'), null);
 });
 

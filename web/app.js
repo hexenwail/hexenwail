@@ -1,4 +1,5 @@
 import { extractZipEntries } from './lib/zip.js';
+import { settleSoundFonts } from './lib/soundfont.js';
 import { downloadHexen2Demo, isDemoDecompressionSupported } from './lib/demo-fetch.js';
 import {
   getBaseAssetStatus, mapImportedPath, normalizeGamedirName, planCanonicalRenames, sanitizeGamedirName,
@@ -563,15 +564,16 @@ async function importFileBatch(entries) {
     }
     const bytes = new Uint8Array(await entry.file.arrayBuffer());
     processedBytes += bytes.byteLength;
-    accepted.push({ path: mappedPath, bytes });
+    accepted.push({ path: mappedPath, bytes, source: entry.sourcePath });
     if (ui.progressText) {
       ui.progressText.textContent = `Imported ${accepted.length} files (${formatBytes(processedBytes)})`;
     }
   }
 
-  await storeImportedFiles(accepted);
+  const settled = settleSoundFonts(accepted);
+  await storeImportedFiles(settled.items);
 
-  return { accepted, rejected };
+  return { accepted: settled.items, rejected, notes: settled.notes, soundFontKept: settled.soundFontKept };
 }
 
 async function importZipFile(file) {
@@ -596,16 +598,17 @@ async function importZipFile(file) {
       rejected.push(entry.rawName);
       continue;
     }
-    accepted.push({ path: mappedPath, bytes: entry.data });
+    accepted.push({ path: mappedPath, bytes: entry.data, source: entry.rawName });
   }
 
-  await storeImportedFiles(accepted, ({ storedBytes }) => {
+  const settled = settleSoundFonts(accepted);
+  await storeImportedFiles(settled.items, ({ storedBytes }) => {
     if (ui.progressText) {
-      ui.progressText.textContent = `Stored ${accepted.length} extracted files (${formatBytes(storedBytes)})`;
+      ui.progressText.textContent = `Stored ${settled.items.length} extracted files (${formatBytes(storedBytes)})`;
     }
   });
 
-  return { accepted, rejected };
+  return { accepted: settled.items, rejected, notes: settled.notes, soundFontKept: settled.soundFontKept };
 }
 
 async function handleImportedFiles(fileList) {
@@ -626,24 +629,36 @@ async function handleImportedFiles(fileList) {
 
   const accepted = [];
   const rejected = [];
+  const notes = [];
+  let soundFontKept = false;
   for (const file of zipFiles) {
     const result = await importZipFile(file);
     accepted.push(...result.accepted.map((item) => item.path));
     rejected.push(...result.rejected);
+    notes.push(...result.notes);
+    soundFontKept ||= result.soundFontKept;
   }
   if (looseFiles.length) {
     const result = await importFileBatch(looseFiles);
     accepted.push(...result.accepted.map((item) => item.path));
     rejected.push(...result.rejected);
+    notes.push(...result.notes);
+    soundFontKept ||= result.soundFontKept;
   }
 
   await updateStorageIndicator();
   updateLaunchState();
 
+  // The MIDI codec initialises once, at engine start, and is not retried, so
+  // a SoundFont imported into a running game is heard only after a restart.
+  if (soundFontKept && state.engineStarted && !state.runtimeExited) {
+    notes.push('MIDI music uses the new SoundFont after the game is restarted.');
+  }
+  const noteText = notes.length ? ` ${notes.join(' ')}` : '';
   if (accepted.length) {
-    setImportMessage(`Imported ${accepted.length} file(s). Existing files were replaced when names matched. Start the game when ready.`, 'success');
+    setImportMessage(`Imported ${accepted.length} file(s). Existing files were replaced when names matched. Start the game when ready.${noteText}`, 'success');
   } else {
-    setImportMessage('No recognized Hexen II assets were imported.', 'error');
+    setImportMessage(`No recognized Hexen II assets were imported.${noteText}`, 'error');
   }
   if (rejected.length && ui.rejectedList) {
     ui.rejectedList.textContent = `Ignored ${rejected.length} item(s): ${rejected.slice(0, 8).join(', ')}${rejected.length > 8 ? '…' : ''}`;

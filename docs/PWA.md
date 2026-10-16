@@ -230,6 +230,17 @@ Recognized inputs include:
   gamecode outside the pak)
 - files already inside `data1/`, `portals/`, `hw/`, or `music/`
 - `.ogg` music files (loose files default to `data1/music/`)
+- a General MIDI SoundFont, `.sf2` (stored as `data1/soundfont.sf2`, whatever it was
+  called), for the game's MIDI music. The web build ships none: without one the runtime
+  log says `Could not initialize Timidity` and MIDI tracks are silent; with one it says
+  `libTiMidity ... initialized`. A small GM font such as TimGM6mb (~6 MB) is enough.
+  One SoundFont is kept: importing another replaces the first, and in a batch holding
+  several the last one listed wins, which the import message names. SF3 is refused, even
+  renamed to `.sf2` (the file is read, not just its name), because the web build's
+  synth, libTiMidity, cannot decode it; the message says so. The synth starts once, with
+  the engine, so a SoundFont imported while the game runs is used after a restart. A
+  `.sf2` inside a mod folder is not used: the engine looks for the SoundFont only here.
+  GitHub #114.
 
 ZIP imports are extracted entirely client-side in the browser. The importer rejects:
 

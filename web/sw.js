@@ -13,6 +13,7 @@ const CORE_ASSETS = [
   './lib/paths.js',
   './lib/phone-controls.js',
   './lib/save-bundle.js',
+  './lib/soundfont.js',
   './lib/webgl-diagnostics.js',
   './lib/zip.js',
   './manifest.webmanifest',
