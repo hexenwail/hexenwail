@@ -7,6 +7,7 @@ const CORE_ASSETS = [
   './',
   './index.html',
   './app.js',
+  './lib/canvas-viewport.js',
   './lib/demo-fetch.js',
   './lib/mods.js',
   './lib/paths.js',

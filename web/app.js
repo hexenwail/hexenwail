@@ -10,6 +10,7 @@ import {
 } from './lib/save-bundle.js';
 import { PhoneControls, PHONE_CONTROL_KEYCODES } from './lib/phone-controls.js';
 import { runPresenterDiagnostics, runWebGLDiagnostics } from './lib/webgl-diagnostics.js';
+import { canvasViewportVerdict, readViewport } from './lib/canvas-viewport.js';
 
 // Stamped by scripts/wasm-assemble-artifact.sh from the CMake build (see
 // WEB_RENDERER in engine/CMakeLists.txt).  Served straight from web/ during
@@ -1066,6 +1067,45 @@ function scheduleCanvasResize() {
   });
 }
 
+// Launch-time layout assertion (GitHub #145).  The WebGL2 self-test renders
+// offscreen and cannot see a healthy canvas laid out off the page, which is
+// how the o6js bug (721c218b2) went unnoticed.  Runs on the third frame, after
+// scheduleCanvasResize's two passes have settled the size, and says what it
+// found in the runtime log either way.
+//
+// In phone mode the runtime log is hidden while the game runs, and the only
+// way back is returnToLauncher's reload, which empties the log -- on exactly
+// the devices most likely to have the bug.  So the verdict is also kept in
+// sessionStorage, which survives that reload, and init() replays it.
+const LAYOUT_VERDICT_KEY = 'hexenwail.lastLayoutVerdict';
+
+function scheduleCanvasViewportCheck() {
+  requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!ui.canvas) return;
+    const verdict = canvasViewportVerdict(ui.canvas.getBoundingClientRect(), readViewport());
+    logToConsole('[layout]', verdict.message, !verdict.ok);
+    try {
+      sessionStorage.setItem(LAYOUT_VERDICT_KEY, JSON.stringify({ ok: verdict.ok, message: verdict.message }));
+    } catch {
+      // Private mode or blocked storage: the live log line above still stands.
+    }
+  })));
+}
+
+function replayLastLayoutVerdict() {
+  try {
+    const raw = sessionStorage.getItem(LAYOUT_VERDICT_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(LAYOUT_VERDICT_KEY);
+    const last = JSON.parse(raw);
+    if (typeof last?.message === 'string') {
+      logToConsole('[layout]', `previous launch: ${last.message}`, last.ok !== true);
+    }
+  } catch {
+    // Unreadable or blocked storage: nothing to replay.
+  }
+}
+
 async function handleEngineQuit(kind = 'quit', message = '') {
   if (state.quitInProgress) return;
   state.quitInProgress = true;
@@ -1103,6 +1143,7 @@ async function startEngineFromUserAction() {
   savePreferences();
   applyPreferences();
   scheduleCanvasResize();
+  scheduleCanvasViewportCheck();
   setStatus('Starting Hexenwail…');
   try {
     const Module = getModule();
@@ -1644,6 +1685,7 @@ function bindBootCallbacks() {
 async function init() {
   loadPreferences();
   bindUi();
+  replayLastLayoutVerdict();
   // Before anything expensive: a browser that cannot compile the renderer's
   // shader families or read back an RGBA8 FBO will start the engine and then
   // render a black canvas with no diagnosable symptom.  Refusing to launch and
