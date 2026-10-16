@@ -27,6 +27,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `hw-drive.sh` | run `hwsv` and a client connected to it, and screenshot the HexenWorld session |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
+| `artifact-save-check.sh` | check on a live engine that the selected artifact survives save, relaunch and load, including old-format saves and a pre-r11 engine (#159); needs retail data and a GPU (offscreen) |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
