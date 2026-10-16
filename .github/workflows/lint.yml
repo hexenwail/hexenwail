@@ -112,6 +112,11 @@ jobs:
       - name: Name listings see inside pk3 archives
         run: python3 tools/test_pk3_listing.py
 
+      # pak -> pk3 keeps duplicate members, exact sizes and pak order (#129).
+      # Synthetic paks, no game data.
+      - name: pak2pk3 converter
+        run: python3 tools/test_pak2pk3.py
+
       # A demo has no qsocket, so a guard written for HexenWorld's socket
       # ownership froze every demo on the loading plaque until "load timeout"
       # (30ea43b17, GitHub #209).  Mods driving their front end from
