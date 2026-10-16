@@ -2328,7 +2328,6 @@ void GL_PostProcess_Init (void)
 
 	/* GL functions loaded at runtime */
 	glTexImage3D_fp = (glTexImage3D_f) SDL_GL_GetProcAddress("glTexImage3D");
-	glUniform3fv_fp = (glUniform3fv_f) SDL_GL_GetProcAddress("glUniform3fv");
 	if (!glUniform2f_fp)
 		glUniform2f_fp = (glUniform2f_f) SDL_GL_GetProcAddress("glUniform2f");
 #endif /* !USE_GLES */

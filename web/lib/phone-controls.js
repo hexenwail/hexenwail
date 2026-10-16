@@ -9,7 +9,6 @@ export const PHONE_CONTROL_KEYCODES = Object.freeze({
   menu: 27, // K_ESCAPE
   nextWeapon: 248, // K_GP_RSHOULDER, default binding "impulse 10"
   prevWeapon: 247, // K_GP_LSHOULDER, default binding "impulse 12"
-  run: 134, // K_SHIFT
 });
 
 export const DEFAULT_PHONE_CONTROL_OPTIONS = Object.freeze({
@@ -20,7 +19,11 @@ export const DEFAULT_PHONE_CONTROL_OPTIONS = Object.freeze({
   keys: PHONE_CONTROL_KEYCODES,
 });
 
-const BUTTON_ACTIONS = new Set(['attack', 'jump', 'use', 'menu', 'nextWeapon', 'prevWeapon', 'run']);
+// One per data-phone-action button in web/index.html (the stick and the look
+// pad are handled separately); a test holds the two lists equal, so a mapping
+// with no button cannot linger, as "run" and "menu" did (#152).  The Menu
+// button is #phone-menu-button, which web/app.js sends through keys.menu.
+const BUTTON_ACTIONS = new Set(['attack', 'jump', 'use', 'nextWeapon', 'prevWeapon']);
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
