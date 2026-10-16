@@ -568,7 +568,7 @@ void VID_HandlePause (qboolean paused)
 		if (paused)
 			IN_DeactivateMouse ();
 		else
-			IN_ActivateMouse ();
+			IN_ReactivateMouse ();
 	}
 }
 

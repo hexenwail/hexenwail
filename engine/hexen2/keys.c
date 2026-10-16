@@ -1783,7 +1783,13 @@ keydest_t Key_GetDest (void)
 
 void Key_SetDest (keydest_t dest)
 {
+	keydest_t	old = key_dest;
+
 	key_dest = dest;
+
+	/* A menu opening or closing decides who holds the pointer (#91). */
+	if ((old ^ dest) & key_menu)
+		IN_MenuPointerFollowDest ();
 
 	/* enable SDL text input for console and chat, disable otherwise */
 	Key_UpdateTextInputMode ();

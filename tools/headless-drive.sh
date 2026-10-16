@@ -47,6 +47,9 @@
 #   mouse X Y          warp the pointer
 #   click [BUTTON]     click (default button 1)
 #   wipe               clear the console line
+#   blur               move X input focus to the root window (the engine gets
+#                      FOCUS_LOST; Xvfb has no window manager to alt-tab with)
+#   focus              give X input focus back to the engine (FOCUS_GAINED)
 #   sleep SECS         wait
 #   # ...              comment; blank lines ignored
 #
@@ -337,6 +340,8 @@ case "$SCEN" in
         mouse)   xdotool mousemove ${rest}; sleep 0.5 ;;
         click)   xdotool click "${rest:-1}"; sleep 0.7 ;;
         wipe)    wipe ;;
+        blur)    xdotool windowfocus "$(xdotool search --maxdepth 0 "" 2>/dev/null | head -1)"; sleep 1 ;;
+        focus)   xdotool windowfocus "$WID"; sleep 1 ;;
         sleep)   sleep "$rest" ;;
         *) echo "headless-drive: $STEPS:$lineno: unknown verb '$verb'" >&2; exit 2 ;;
       esac

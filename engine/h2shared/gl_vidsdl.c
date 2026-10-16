@@ -750,7 +750,7 @@ void VID_HandlePause (qboolean paused)
 		}
 		else
 		{
-			IN_ActivateMouse ();
+			IN_ReactivateMouse ();
 			// IN_HideMouse ();
 		}
 	}
@@ -2191,7 +2191,7 @@ void GL_EndRendering (void)
 	if (_enable_mouse.integer != enable_mouse /*&& modestate == MS_WINDOWED*/)
 	{
 		if (_enable_mouse.integer)
-			IN_ActivateMouse ();
+			IN_ReactivateMouse ();
 		else	IN_DeactivateMouse ();
 
 		enable_mouse = _enable_mouse.integer;
@@ -3262,7 +3262,6 @@ Handles switching between fullscreen/windowed modes
 and brings the mouse to a proper state afterwards
 ================
 */
-extern qboolean menu_disabled_mouse;
 void VID_ToggleFullscreen (void)
 {
 	/* This is now only used for instant borderless toggle from the menu.
@@ -3309,16 +3308,12 @@ void VID_ToggleFullscreen (void)
 		vid.recalc_refdef = 1;
 		glViewport_fp(0, 0, WRWidth, WRHeight);
 
-		if (vid_menu_fs > 0)
-		{
-			if (menu_disabled_mouse)
-				IN_ActivateMouse();
-		}
-		else
-		{
-			if (menu_disabled_mouse)
-				IN_DeactivateMouse();
-		}
+		/* Toggled from the Display menu: the pointer stays with whoever
+		 * holds it there, captured or free, in either window mode.  This
+		 * used to capture on the way to fullscreen whenever the menu flag
+		 * was set, which killed the menu's hover (#91). */
+		if (Key_GetDest () & key_menu)
+			IN_MenuPointerFollowDest ();
 	}
 	else
 	{
