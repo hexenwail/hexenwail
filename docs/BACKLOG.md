@@ -69,7 +69,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (50)
+## P3 — someday (49)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
@@ -97,7 +97,6 @@ here.
 - **Reach the maps browser from the menu, not just the menu_maps command** `uhexen2-4hpt` — uhexen2-a5nn.13 landed menu_maps as a command only ('feat(menu): maps browser (menu_maps), Ironwail's ExtraMaps', bd07a27c4 at time of writing).
 - **Placeholdered entity gets a ±26 unit physics box; dormant risk from missing-model fallback** `uhexen2-5iyy` — A model replaced by the placeholder now yields a ±26 unit bounding box (cube ±16, padded 10 by the alias loader) where the entity previously killed the game outright.
 - **Resolve the variant coverage hole: fall back to Updated for gamedirs a variant does not ship** `uhexen2-6xtv` — Gated on the vendored-variant decision bead, and on the enum bead. This is the hard call in the whole feature; it is filed separately so the reasoning gets recorded rather than being made si…
-- **Demo playback bar is GL-only -- WEB_RENDERER=software has none** `uhexen2-70xx` — SCR_DrawDemoBar lives in engine/h2shared/gl_screen.c, which engine/CMakeLists.txt:370 builds only into GL_RENDERER_SOURCES.
 - **WASM: quad/polygon draw path is newly reachable and has never been run in a browser** `uhexen2-7z2l` *(blocked)* — Fixing uhexen2-menr.1 (commit e13ab194c) uncovered that the WASM build had GL_QUADS and GL_POLYGON #defined to 0 in eight separate files.
 - **Phone-mode touch controls: polish + hardware QA** `uhexen2-8du6` — Flagged during port review (commit c9f98d0ce) — three items for refinement before shipping to testers. (a) Dead code: PHONE_CONTROL_KEYCODES.run (K_SHIFT) is mapped in BUTTON_ACTIONS but no…
 - **Site: build-time static search index** `uhexen2-96ii.13` — Add site-wide search, built at compile time and served as static files.
