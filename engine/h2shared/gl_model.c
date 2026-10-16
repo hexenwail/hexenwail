@@ -4117,20 +4117,42 @@ current then.
 
 EF_TRANSPARENT is the whole set.  It wins the tex_mode chain in
 Mod_LoadAllSkins and in Mod_RestoreIndexAlpha, and nothing else bakes the cvar.
+
+The callback only notes the time; Mod_WaterAlphaFrame does the work once the
+value has held still for WATERALPHA_SETTLE.  The Rendering menu's slider moves
+the cvar 0.05 a key press, so a drag is a burst of a dozen sets, and each pass
+re-reads every affected .mdl and re-decodes its replacement, glow, normal and
+gloss images: nothing for retail skins, a visible hitch per step for a pack of
+2K PNGs.  A burst now costs one pass, a quarter second after it ends.
 =================
 */
+#define WATERALPHA_SETTLE	0.25	/* seconds */
+
+static double	wateralpha_changed = -1;	/* realtime of a change not yet applied */
+
 void Mod_WaterAlphaChanged (cvar_t *var)
+{
+	(void) var;
+
+	/* Fires for config.cfg before anything is loaded. */
+	if (!host_initialized)
+		return;
+	wateralpha_changed = realtime;
+}
+
+/* Called once a frame from R_RenderView. */
+void Mod_WaterAlphaFrame (void)
 {
 	static int	applied = -1;	/* byte the loaded skins were baked with */
 	int		i, now, count = 0;
 	qmodel_t	*mod;
 
-	(void) var;
-
-	/* Fires for config.cfg before anything is loaded, and for every set
-	 * that leaves the clamped byte where it was. */
-	if (!host_initialized)
+	if (wateralpha_changed < 0 || realtime - wateralpha_changed < WATERALPHA_SETTLE)
 		return;
+	wateralpha_changed = -1;
+
+	/* A burst that ended where it started, or a set that leaves the clamped
+	 * byte where it was, has nothing to re-upload. */
 	now = GL_WaterAlphaByte ();
 	if (now == applied)
 		return;

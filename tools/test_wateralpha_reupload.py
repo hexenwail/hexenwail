@@ -13,8 +13,9 @@ Four parts, all compiled from the real source with stubs around it:
   2. GL_LoadTextureEx keys an indexed TEX_TRANSPARENT texture on the baked
      byte: same byte is a cache hit, a new byte is a fresh upload, and nothing
      else (opaque, RGBA, other flags) re-uploads because the cvar moved.
-  3. Mod_WaterAlphaChanged re-uploads exactly the loaded EF_TRANSPARENT alias
-     models, once per distinct byte, and nothing before host init.
+  3. Mod_WaterAlphaChanged / Mod_WaterAlphaFrame re-upload exactly the loaded
+     EF_TRANSPARENT alias models, once per distinct byte, nothing before host
+     init, and once per slider drag rather than once per step.
   4. Source: the callback is registered, and both writers read the helper
      rather than the cvar, so they cannot drift from the cache test.
 """
@@ -202,7 +203,11 @@ int main (void)
 
 # --------------------------------------------------------------------------
 # Part 3: the callback.
-CALLBACK = function(model, "void Mod_WaterAlphaChanged (cvar_t *var)")
+# The settle constant, the pending timestamp, the callback and the frame hook,
+# as one span of the source.
+_start = model.index("#define WATERALPHA_SETTLE")
+CALLBACK = model[_start:model.index(function(model, "void Mod_WaterAlphaFrame (void)"))] + \
+    function(model, "void Mod_WaterAlphaFrame (void)")
 
 PART3 = PRELUDE + r'''
 typedef enum { mod_brush, mod_sprite, mod_alias } modtype_t;
@@ -214,6 +219,7 @@ typedef struct qmodel_s { char name[MAX_QPATH]; modtype_t type; int flags;
 static qmodel_t mod_known[MAX_MOD_KNOWN];
 static int mod_numknown;
 qboolean host_initialized;
+double realtime = 100.0;
 static void *Cache_Check (cache_user_t *c) { return c->data; }
 static void Mod_ReuploadAliasSkins (qmodel_t *m) { m->reuploads++; }
 #define Con_DPrintf(...) ((void)0)
@@ -232,7 +238,15 @@ static qmodel_t *add (const char *n, modtype_t t, int flags, int needload,
 	return m;
 }
 
-static void set (float v) { r_wateralpha.value = v; Mod_WaterAlphaChanged (&r_wateralpha); }
+/* A set, then frames until well past the settle time. */
+static void set (float v)
+{
+	r_wateralpha.value = v;
+	Mod_WaterAlphaChanged (&r_wateralpha);
+	Mod_WaterAlphaFrame ();
+	realtime += 1.0;
+	Mod_WaterAlphaFrame ();
+}
 
 int main (void)
 {
@@ -263,6 +277,31 @@ int main (void)
 	assert (hit->reuploads == 2 && hunk->reuploads == 0);
 	set (3.0f);	/* clamps to 255, already applied */
 	assert (hit->reuploads == 2);
+
+	/* A slider drag: a set every 50 ms with a frame between.  Nothing goes
+	 * up while the value is moving; one pass goes up once it holds still. */
+	for (int step = 0; step < 12; step++)
+	{
+		r_wateralpha.value = 0.95f - 0.05f * step;
+		Mod_WaterAlphaChanged (&r_wateralpha);
+		realtime += 0.05;
+		Mod_WaterAlphaFrame ();
+	}
+	assert (hit->reuploads == 2);
+	realtime += 0.1;
+	Mod_WaterAlphaFrame ();
+	assert (hit->reuploads == 2);		/* 0.15 s after the last step */
+	realtime += 0.2;
+	Mod_WaterAlphaFrame ();
+	assert (hit->reuploads == 3);		/* settled */
+	Mod_WaterAlphaFrame ();
+	assert (hit->reuploads == 3);		/* and only once */
+
+	/* A drag that ends where it began uploads nothing. */
+	r_wateralpha.value = 0.5f; Mod_WaterAlphaChanged (&r_wateralpha);
+	r_wateralpha.value = 0.95f - 0.05f * 11; Mod_WaterAlphaChanged (&r_wateralpha);
+	realtime += 1.0; Mod_WaterAlphaFrame ();
+	assert (hit->reuploads == 3);
 
 	puts ("ok   Mod_WaterAlphaChanged picks the loaded EF_TRANSPARENT alias models");
 	return 0;
@@ -298,6 +337,9 @@ def source_checks():
     restore = function(m, "static qboolean Mod_RestoreIndexAlpha (")
     if "GL_WaterAlphaByte ()" not in restore or "r_wateralpha" in restore:
         errors.append("Mod_RestoreIndexAlpha must take the byte from GL_WaterAlphaByte")
+    rmain = strip_comments((ROOT / "engine/hexen2/gl_rmain.c").read_text())
+    if "Mod_WaterAlphaFrame ();" not in function(rmain, "void R_RenderView (void)"):
+        errors.append("R_RenderView no longer calls Mod_WaterAlphaFrame, so a change never applies")
     rmisc = strip_comments(GLRMISC.read_text())
     if not re.search(r"Cvar_SetCallback\s*\(\s*&r_wateralpha\s*,\s*Mod_WaterAlphaChanged\s*\)", rmisc):
         errors.append("gl_rmisc.c no longer registers Mod_WaterAlphaChanged on r_wateralpha")
