@@ -82,9 +82,11 @@ def main():
 
     # The tool's marks must be the engine's.
     qfs = (ROOT / "engine/h2shared/quakefs.c").read_text()
-    for key, cname in (("data1 pak0", "mark_data1_pak0"),
+    for key, cname in (("data1 demo", "mark_data1_demo"),
+                       ("data1 pak0", "mark_data1_pak0"),
                        ("data1 pak1", "mark_data1_pak1"),
-                       ("portals", "mark_portals")):
+                       ("portals", "mark_portals"),
+                       ("hw pak4", "mark_hw_pak4")):
         block = re.search(r"%s\[\]\s*=\s*\{(.*?)\};" % cname, qfs, re.S)
         engine = dict((n, int(s)) for n, s in
                       re.findall(r'\{\s*"([^"]+)",\s*(\d+)\s*\}', block.group(1))) if block else {}
@@ -183,26 +185,56 @@ def main():
         check(r3f.returncode != 0 and not (work / "out3f").exists(),
               "--force does not override data1's pak0+pak1 requirement")
 
-        # The real demo's shape: a pak0 WITH the v1.11 pak0 marks and no pak1.
-        # The engine cannot identify that as pk3s (measured on the real demo:
-        # "Unable to find a proper Hexen II installation"), so it is refused.
+        # A pak0 with the v1.11 pak0 marks and no pak1, and not the demo:
+        # nothing identifies that data1 as pk3s, so it is refused.
         demo2 = work / "demo2" / "data1"
         demo2.mkdir(parents=True)
         make_pak(demo2 / "pak0.pak", marks("data1 pak0"))
         r3b = run(demo2, work / "out3b")
         check(r3b.returncode != 0 and "pak0.pak and pak1.pak pair" in r3b.stderr
               and not (work / "out3b").exists(),
-              "a data1 with pak0 content but no pak1 (the demo) is refused")
+              "a data1 with pak0 content but no pak1, and not the demo, is refused")
 
-        # HexenWorld's hw: refused outright, --force included (a converted
-        # pak4 stops hwsv and hwcl).
+        # The Nov. 1997 demo's shape: one pak0 carrying both mark sets (#130).
+        # It converts, and is named as the demo, not as a v1.11 pak0.
+        demo3 = work / "demo3" / "data1"
+        demo3.mkdir(parents=True)
+        make_pak(demo3 / "pak0.pak", marks("data1 pak0") + marks("data1 demo"))
+        check(pak2pk3.identify(marks("data1 pak0") + marks("data1 demo")) == "data1 demo",
+              "the demo pak0 is identified as the demo, not as a v1.11 pak0")
+        r3d = run(demo3, work / "out3d")
+        check(r3d.returncode == 0 and (work / "out3d" / "000-pak0.pk3").exists(),
+              "the Nov. 1997 demo's data1 converts")
+        # ...but nothing that would count as modified content, which the demo
+        # refuses to run: not the loose files, not a mod's pak, --force or no.
+        (demo3 / "progs.dat").write_bytes(b"p" * 10)
+        r3l = run(demo3, work / "out3l", "--loose")
+        check(r3l.returncode != 0 and "--loose" in r3l.stderr
+              and not (work / "out3l").exists(),
+              "--loose is refused on the demo")
+        make_pak(demo3 / "pak5.pak", [("maps/mod.bsp", b"m" * 10)])
+        r3m = run(demo3, work / "out3m", "--force")
+        check(r3m.returncode != 0 and "pak5.pak" in r3m.stderr
+              and not (work / "out3m").exists(),
+              "a mod pak beside the demo is refused, --force included")
+
+        # HexenWorld's hw: an unknown pak4 (0.09, 0.11, a mod's) is refused,
+        # --force included, since hwsv would not start on it.
         hw = work / "hw"
         hw.mkdir()
         make_pak(hw / "pak4.pak", [("maps/hwmap.bsp", b"h" * 10)])
         r4 = run(hw, work / "out4", "--force")
         check(r4.returncode != 0 and "HexenWorld" in r4.stderr and "--force" not in r4.stderr
               and not (work / "out4").exists(),
-              "hw is refused even with --force, and the message offers no override")
+              "an hw without the 0.14 - 0.15 pak4 is refused even with --force")
+
+        # The 0.14 - 0.15 pak4 converts (#130).
+        hwok = work / "hwok" / "hw"
+        hwok.mkdir(parents=True)
+        make_pak(hwok / "pak4.pak", marks("hw pak4") + [("maps/hwdm2.bsp", b"d" * 99)])
+        r4h = run(hwok, work / "out4h")
+        check(r4h.returncode == 0 and (work / "out4h" / "000-pak4.pk3").exists(),
+              "hw with the 0.14 - 0.15 pak4 converts")
 
         # A pre-1.11/OEM-shaped data1 (pak0 and pak1, neither with the v1.11
         # marks): the data1 rule answers first, without suggesting --force or

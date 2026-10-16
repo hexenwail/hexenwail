@@ -349,7 +349,6 @@ int Sys_ListDirectories (const char *path, char dirs[][64], int maxdirs)
 }
 void QuakeFS_TargetBeginDisc (const char *name) { (void)name; abort(); }
 void QuakeFS_TargetEndDisc (void) { abort(); }
-int QuakeFS_TargetIsServerOnly (void) { abort(); }
 int QuakeFS_TargetOldProtocolRequest (void) { abort(); }
 const char *QuakeFS_TargetStartupScript (void) { abort(); }
 

@@ -288,17 +288,51 @@ static const contentmark_t mark_portals[] =
 	{ "maps/tibet7.bsp",	2749412	}
 };
 
+/* The free demo's data1/pak0.pak (Nov. 1997, demo_pakdata[0]).  It is a
+ * superset of the v1.11 pak0: every member of that one at the same size, plus
+ * 100 files the retail game ships in pak1, plus strings.txt, which no retail
+ * pak carries.  So it matches mark_data1_pak0 as well, and its row cancels
+ * GAME_REGISTERED0 for the archive it matches (contentdata[].supersedes): a
+ * demo pk3 then identifies as GAME_DEMO alone, as the demo pak does.  The
+ * four pak1-era files are there for weight.  GitHub #130. */
+static const contentmark_t mark_data1_demo[] =
+{
+	{ "strings.txt",		16539	},
+	{ "models/h_cru.mdl",		16896	},
+	{ "models/h_nec.mdl",		8052	},
+	{ "models/castrch.mdl",		16996	},
+	{ "gfx/menu/netp2.lmp",		7760	}
+};
+
+/* HexenWorld 0.14 - 0.15 hw/pak4.pak, the release check_known_paks knows by
+ * CRC 41062.  Every map in it is a hwdm*, which no other set carries, and the
+ * taunt and the demoness head are HexenWorld's own.  Read off a pak4 whose
+ * MD5 is the one pakdata[4] records (88109ee385d9723ac5f1015e034a44dd).  The
+ * 0.09 and 0.11 paks have no row: none is at hand to read.  GitHub #130. */
+static const contentmark_t mark_hw_pak4[] =
+{
+	{ "maps/hwdm1.bsp",		1066196	},
+	{ "maps/hwdm3.bsp",		620284	},
+	{ "maps/hwdm5.bsp",		1521668	},
+	{ "sound/taunt/taunt001.wav",	9996	},
+	{ "models/h_suc.mdl",		6268	}
+};
+
 static const struct
 {
 	const contentmark_t	*marks;
 	int			nummarks;
 	const char		*dirname;
 	unsigned int		gameflag;
+	unsigned int		supersedes;	/* flags this match takes back from the same archive */
+	int			numfiles;	/* members in Raven's pak, which a faithful repack keeps */
 } contentdata[] =
 {
-	{ mark_data1_pak0, (int)(sizeof(mark_data1_pak0)/sizeof(mark_data1_pak0[0])), "data1",   GAME_REGISTERED0 },
-	{ mark_data1_pak1, (int)(sizeof(mark_data1_pak1)/sizeof(mark_data1_pak1[0])), "data1",   GAME_REGISTERED1 },
-	{ mark_portals,    (int)(sizeof(mark_portals)   /sizeof(mark_portals[0])),    "portals", GAME_PORTALS     }
+	{ mark_data1_pak0, (int)(sizeof(mark_data1_pak0)/sizeof(mark_data1_pak0[0])), "data1",   GAME_REGISTERED0, 0,                696 },
+	{ mark_data1_pak1, (int)(sizeof(mark_data1_pak1)/sizeof(mark_data1_pak1[0])), "data1",   GAME_REGISTERED1, 0,                523 },
+	{ mark_data1_demo, (int)(sizeof(mark_data1_demo)/sizeof(mark_data1_demo[0])), "data1",   GAME_DEMO,        GAME_REGISTERED0, 797 },
+	{ mark_portals,    (int)(sizeof(mark_portals)   /sizeof(mark_portals[0])),    "portals", GAME_PORTALS,     0,                245 },
+	{ mark_hw_pak4,    (int)(sizeof(mark_hw_pak4)   /sizeof(mark_hw_pak4[0])),    "hw",      GAME_HEXENWORLD,  0,                102 }
 };
 
 #define	MAX_CONTENTDATA	(int)(sizeof(contentdata)/sizeof(contentdata[0]))
@@ -493,27 +527,35 @@ per-container attribution the pak path has -- pak0's content and pak1's content
 stay separate flags, so mixing editions is still detectable -- and it means a
 mod that happens to override a marker file cannot demote a real install.
 
-Only the v1.11 content sets are listed.  The pre-1.11 editions, the demo and
-the OEM bundle keep their pak-only identification: nobody is repacking a 1997
-demo, and a table that cannot be tested against real data is worse than no
-table.  An unrecognised archive falls through to GAME_MODIFIED, exactly as
+Listed: the v1.11 content sets, the Nov. 1997 demo's pak0, and HexenWorld 0.14
+- 0.15's hw/pak4 (#130).  The pre-1.11 editions, the OEM bundle, the older demo
+and the older HexenWorld paks keep their pak-only identification: none is at
+hand to read, and a table that cannot be tested against real data is worse
+than no table.  An unrecognised archive falls through to GAME_MODIFIED, exactly as
 every archive did before.
 =================
 */
-static unsigned int check_known_zip (zippack_t *zip)
+static unsigned int check_known_zip (zippack_t *zip, qboolean *whole)
 {
-	unsigned int	flags = 0;
+	unsigned int	flags = 0, taken = 0;
 	int		i;
+
+	*whole = false;
 
 	for (i = 0; i < MAX_CONTENTDATA; i++)
 	{
 		if (strcmp(fs_gamedir_nopath, contentdata[i].dirname) != 0)
 			continue;	/* Raven didn't ship it there */
 		if (zip_has_marks (zip, contentdata[i].marks, contentdata[i].nummarks))
+		{
 			flags |= contentdata[i].gameflag;
+			taken |= contentdata[i].supersedes;
+			if (zip->numfiles == contentdata[i].numfiles)
+				*whole = true;
+		}
 	}
 
-	return flags;
+	return flags & ~taken;
 }
 
 /*
@@ -839,14 +881,22 @@ static zippack_t *FS_LoadZipFile (const char *zipfile, qboolean base_fs)
 	zip->numfiles = numfiles;
 	zip->files = newfiles;
 
-	/* An archive still counts as content the original game never shipped --
-	 * that has one reader, the "modified games need the full version" check at
-	 * the end of FS_Init, and a registered install satisfies it either way, so
-	 * leaving it set keeps every existing install bit-identical.  What is new
-	 * is that an archive can now ALSO be identified as Raven's own content. */
-	gameflags |= GAME_MODIFIED;
-	if (base_fs)
-		gameflags |= check_known_zip (zip);
+	/* An archive counts as content the original game never shipped unless it
+	 * is a whole Raven pak repacked: its marks match an edition AND it holds
+	 * exactly as many members as that pak, the pair of facts check_known_paks
+	 * reads off a pak (numfiles and the directory CRC).  The one reader is the
+	 * "modified games need the full version" check at the end of FS_Init.  A
+	 * registered install satisfies it whatever this says, but the demo does
+	 * not, so a faithful demo pk3 must not count as modified, and a demo pk3
+	 * with anything added still does.  GitHub #130. */
+	{
+		qboolean	whole = false;
+		unsigned int	known = base_fs ? check_known_zip (zip, &whole) : 0;
+
+		gameflags |= known;
+		if (!whole)
+			gameflags |= GAME_MODIFIED;
+	}
 
 	Sys_Printf ("Added archive %s (%i files)\n", zipfile, numfiles);
 	return zip;
