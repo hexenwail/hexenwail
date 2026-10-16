@@ -155,19 +155,37 @@ build never writes it, so whenever a session there saves `config.cfg` -- in
 practice every session, since loading the config marks it changed and
 `Host_WriteConfiguration` then flushes it -- the cvar is dropped. The
 gate counts these without failing (`python3 tools/test_soft_cvar_defaults.py -v`
-lists them), and they are open as #362:
+lists them), and they are a known, accepted cost (#362, below):
 - 92 that only the webgl2 build archives: `zoom_fov`, `r_viewmodel_fov`,
   `gl_texturemode`, `scr_conscale`, `showclock`, `scr_pixelaspect`, the `vid_*`
   window settings, most of the GL renderer's options;
 - 4 that only this build archives: `vid_soft_mode`, `vid_soft_filter`,
   `vid_soft_stretch`, `r_transwater`.
 
-Registering inert stand-ins would fix it. `r_soft_web.c` already does that for
-four cvars: the `r_softemu_*` sub-cvars other than `r_softemu_mdl_warp` (which
-`menu.c` needs for linkage) are registered only so a GL config round-trips. The uhexen2-a5nn.38 rule recorded in
-`VID_SetSoftMode` says the opposite: an inert archived cvar is a bug, which is why
-`scr_pixelaspect` is not registered here. #362 is where that gets decided. Until
-then, do not serve both builds to players from one origin.
+**Decided (#362, 2026-10-16): accepted and documented, not fixed.** The two
+builds are not meant to share one origin with players: the shipped site serves
+webgl2 alone, and the software build is for development and for comparing
+against the original renderer. So running both against one `/persistent` tree
+costs settings, in both directions, and that is acceptable:
+
+- a software session drops the 92 webgl2-only settings above from
+  `config.cfg`, and the next webgl2 session starts them at their defaults;
+- a webgl2 session drops the software build's 4.
+
+Shared settings -- binds, volume, `gamma`, the cvars both builds register --
+survive, and the defaults gate keeps them agreeing.
+
+The alternatives were considered and set aside. Registering inert stand-ins for
+every one-build cvar (about a hundred, under a coverage gate) would round-trip
+everything, but it retires the uhexen2-a5nn.38 rule recorded in
+`VID_SetSoftMode` -- an inert archived cvar is a bug, which is why
+`scr_pixelaspect` is not registered here -- for a case no player hits.
+`r_soft_web.c` does it for four `r_softemu_*` sub-cvars only. A config file per
+build would end the cross-talk but make every shared setting twice the work.
+
+**Revisit if the software build is ever offered to players beside webgl2 on
+one origin**: then this stops being a development cost and becomes silent data
+loss, and the stand-in route is the fix.
 
 ### draw_soft_web.c
 
