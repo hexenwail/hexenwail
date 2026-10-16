@@ -1069,7 +1069,7 @@ async function importSaveBundle(file) {
     }
     const size = bundle.files.reduce((total, entry) => total + entry.bytes.byteLength, 0);
     const mode = ui.saveImportMode?.value === 'replace' ? 'replace' : 'merge';
-    const summary = `Import ${bundle.files.length} save file(s) (${formatBytes(size)}) from ${new Date(bundle.manifest.createdAt).toLocaleString()} for ${bundle.manifest.gameDirectories.join(', ')}?\n\nMode: ${mode === 'replace' ? 'Replace saves (all existing save slots are removed)' : 'Merge (only matching save paths are replaced)'}${warnings.length ? `\n\nCompatibility warnings:\n${warnings.join('\n')}` : ''}`;
+    const summary = `Import ${bundle.files.length} save file(s) (${formatBytes(size)}) from ${new Date(bundle.manifest.createdAt).toLocaleString()} for ${bundle.manifest.gameDirectories.join(', ')}?\n\nMode: ${mode === 'replace' ? 'Replace saves (all existing save slots are removed)' : 'Merge (the bundle\'s save slots are added or replace the same slots here; other slots are kept)'}${warnings.length ? `\n\nCompatibility warnings:\n${warnings.join('\n')}` : ''}`;
     setSaveMessage(`Ready to import ${bundle.files.length} save file(s) from ${new Date(bundle.manifest.createdAt).toLocaleString()}.${warnings.length ? ` ${warnings.join(' ')}` : ''}`);
     if (!confirm(summary)) return;
     const result = await applySaveImport(bundle, mode);

@@ -205,11 +205,33 @@ export function getPakCompatibilityWarnings(requiredPaks, installedPaks) {
   });
 }
 
+// A save slot is a directory -- data1/s0/, mymod/ms2/ -- of several files that
+// only make sense together.  Keyed without case, as the engine finds them.
+function saveSlotKey(path) {
+  const parts = sanitizeRelativePath(path).split('/');
+  return `${parts[0]}/${parts[1]}`.toLowerCase();
+}
+
+/*
+ * What an import writes and deletes.  Both modes write every save in the bundle.
+ *
+ *   replace -- the device's saves become the bundle's: every other save file
+ *              goes.
+ *   merge   -- the bundle's slots replace the same slots on the device, and
+ *              slots the bundle does not carry are kept.  A slot is replaced
+ *              whole, so a file the device's copy had and the bundle's does
+ *              not is deleted rather than left mixed into another save.
+ *
+ * Merge used to write only paths the device already had, so a slot new to the
+ * device was skipped without a word -- moving saves to a fresh device took
+ * Replace.  GitHub #153.
+ */
 export function planSaveImport(existingPaths, bundleFiles, mode) {
   assertBundle(mode === 'merge' || mode === 'replace', 'Invalid save import mode');
-  const writes = mode === 'merge'
-    ? bundleFiles.map((file) => file.path).filter((path) => existingPaths.includes(path))
-    : bundleFiles.map((file) => file.path);
-  const deletes = mode === 'replace' ? existingPaths.filter((path) => isSavePath(path) && !writes.includes(path)) : [];
+  const writes = bundleFiles.map((file) => file.path);
+  const written = new Set(writes);
+  const slots = new Set(writes.map(saveSlotKey));
+  const deletes = existingPaths.filter((path) => isSavePath(path) && !written.has(path)
+    && (mode === 'replace' || slots.has(saveSlotKey(path))));
   return { writes, deletes };
 }

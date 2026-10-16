@@ -480,8 +480,12 @@ runtime binaries, caches, or other imported commercial game data. The manifest r
 file SHA-256 hashes and sizes and records local PAK paths, sizes, and hashes for comparison
 only; it does not embed PAKs.
 
-Choose **Merge saves** to replace only bundle paths that already exist, or **Replace saves**
-to delete existing recognized save files before adding the bundle. Neither mode deletes PAKs,
+Choose **Merge saves** to add the bundle's save slots: a slot the device does not have is
+added, a slot it has (`data1/s0/`, `mymod/ms2/`, ...) is replaced whole, and slots the
+bundle does not carry are kept. This is the mode for moving saves to a new device. (It used
+to replace only paths the device already had, so a new slot was skipped; #153.) Choose
+**Replace saves** to make the device's saves exactly the bundle's, deleting every other
+recognized save file. Neither mode deletes PAKs,
 music, or other assets. The importer verifies the manifest, ZIP safety limits, paths,
 duplicates, file sizes, and SHA-256 hashes before writing anything. It rejects unsupported
 future formats and unsafe, unexpected, or undeclared ZIP entries. If persistent storage

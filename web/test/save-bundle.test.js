@@ -125,11 +125,29 @@ test('rejects mismatched, duplicate, unlisted, and unsafe bundle files', async (
 
 test('plans merge and replace without deleting assets', () => {
   const existing = ['data1/pak0.pak', 'data1/s0/info.dat', 'data1/s1/clients.gip'];
-  assert.deepEqual(planSaveImport(existing, [save], 'merge'), { writes: [], deletes: [] });
+  // Merge replaces the bundle's slot whole (s0's stale info.dat goes) and
+  // keeps the slot it does not carry (s1).
+  assert.deepEqual(planSaveImport(existing, [save], 'merge'), { writes: ['data1/s0/clients.gip'], deletes: ['data1/s0/info.dat'] });
   assert.deepEqual(planSaveImport(existing, [save], 'replace'), { writes: ['data1/s0/clients.gip'], deletes: ['data1/s0/info.dat', 'data1/s1/clients.gip'] });
 
   const existingWithSave = ['data1/pak0.pak', 'data1/s0/clients.gip', 'data1/s1/clients.gip'];
   assert.deepEqual(planSaveImport(existingWithSave, [save], 'merge'), { writes: ['data1/s0/clients.gip'], deletes: [] });
+});
+
+test('merge imports slots the device does not have yet (#153)', () => {
+  // A fresh device: only game data, no saves.  Merge used to write nothing.
+  const fresh = ['data1/pak0.pak', 'data1/pak1.pak'];
+  const bundle = [
+    { path: 'data1/s0/clients.gip' }, { path: 'data1/s0/info.dat' },
+    { path: 'mymod/ms3/clients.gip' },
+  ];
+  assert.deepEqual(planSaveImport(fresh, bundle, 'merge'), {
+    writes: ['data1/s0/clients.gip', 'data1/s0/info.dat', 'mymod/ms3/clients.gip'], deletes: [],
+  });
+  // Slots are matched without case, as the engine finds them, and only save
+  // files are ever deleted.
+  const existing = ['data1/S0/old.gip', 'data1/s2/clients.gip', 'data1/pak0.pak', 'data1/config.cfg'];
+  assert.deepEqual(planSaveImport(existing, bundle, 'merge').deletes, ['data1/S0/old.gip']);
 });
 
 test('reports missing and incompatible PAKs', () => {
