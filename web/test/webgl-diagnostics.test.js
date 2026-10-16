@@ -32,6 +32,19 @@ test('launcher blocks startup on a failed renderer self-test', async () => {
   assert.match(app, /\[renderer:error\]/);
 });
 
+// Both builds' self-tests need WebGL2, but the software build's checks only the
+// palette blit, so its failure must not blame the GL renderer it does not use.
+// GitHub #104.
+test('a failed self-test names the test the build actually ran', async () => {
+  const app = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+  assert.match(app, /const RENDERER_TEST_NAME = ENGINE_RENDERER === 'software' \? 'WebGL2 palette presenter' : 'WebGL2 renderer';/);
+  assert.match(app, /ENGINE_RENDERER === 'software'\s*\?\s*runPresenterDiagnostics\(\)\s*:\s*runWebGLDiagnostics\(\)/);
+  // Both failure messages go through it; neither hard-codes one build's name.
+  assert.equal((app.match(/\$\{RENDERER_TEST_NAME\} self-test failed/g) || []).length, 2);
+  assert.doesNotMatch(app, /'WebGL2 renderer self-test failed/);
+  assert.doesNotMatch(app, /`WebGL2 renderer self-test failed/);
+});
+
 test('pixel-quality failures warn, structural failures throw', async () => {
   const diagnostics = await readFile(new URL('../lib/webgl-diagnostics.js', import.meta.url), 'utf8');
 

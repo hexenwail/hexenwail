@@ -132,7 +132,7 @@ engine's Rust archive is linked into the web client like every other target.
 ```bash
 nix develop .#wasm                  # then:
 ./scripts/wasm-build.sh                            # webgl2, the shipping config
-./scripts/wasm-build.sh software engine/build-soft # 8bpp software rasterizer
+./scripts/wasm-build.sh software engine/build-software # 8bpp software rasterizer
 ```
 
 Then run it.  This is the one lane that executes `hexenwail.wasm` rather than

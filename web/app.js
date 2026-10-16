@@ -22,6 +22,10 @@ import { canvasViewportVerdict, readViewport } from './lib/canvas-viewport.js';
 // software renderer only ever reaches a browser through an assembled artifact.
 const BUILD_RENDERER_STAMP = '__HEXENWAIL_RENDERER__';
 const ENGINE_RENDERER = BUILD_RENDERER_STAMP === 'software' ? 'software' : 'webgl2';
+// What the self-test checks, by build.  Both need WebGL2, but the software build
+// asks it only for the palette blit, so its failure names that, not the GL
+// renderer it does not use.
+const RENDERER_TEST_NAME = ENGINE_RENDERER === 'software' ? 'WebGL2 palette presenter' : 'WebGL2 renderer';
 
 const BASE_DIR = '/persistent';
 const ENGINE_ARGUMENTS = ['-basedir', BASE_DIR];
@@ -263,7 +267,7 @@ function updateLaunchState() {
   }
   if (ui.requirementsText) {
     ui.requirementsText.textContent = !state.rendererReady
-      ? 'WebGL2 renderer self-test failed. See the runtime log.'
+      ? `${RENDERER_TEST_NAME} self-test failed. See the runtime log.`
       : assets === 'full'
         ? 'Required base game assets detected.'
         : assets === 'pak0-only'
@@ -1786,7 +1790,7 @@ async function init() {
     state.rendererReady = false;
     setEngineState('fatal');
     logToConsole('[renderer:error]', error.message, true);
-    setStatus(`WebGL2 renderer self-test failed: ${error.message}`, 'error');
+    setStatus(`${RENDERER_TEST_NAME} self-test failed: ${error.message}`, 'error');
   }
   updateTouchOnlyEnvironment();
   bindBootCallbacks();

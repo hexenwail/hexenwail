@@ -3479,10 +3479,11 @@ static qboolean M_Rendering_IsSkip (int i)
 	if (i < 0 || i >= REND_ITEMS)
 		return true;
 #if defined(WEBSOFT)
-	/* GPU-only rows have no counterpart in the software rasterizer.  Their
-	 * cvars still exist (r_soft_web.c registers them) so configs written by
-	 * the GL build round-trip, but a slider that cannot move anything does
-	 * not belong in the menu. */
+	/* GPU-only rows have no counterpart in the software rasterizer, and a
+	 * slider that cannot move anything does not belong in the menu.  Most of
+	 * their cvars are still registered here (r_soft_web.c, r_main.c), with the
+	 * GL defaults; some are not (r_motionblur, r_legacy_special_trans_alpha),
+	 * so a software session drops those from config.cfg: GitHub #362. */
 	switch (i)
 	{
 	case REND_RENDERSCALE:
@@ -4071,9 +4072,14 @@ static qboolean M_Graphics_IsSkip (int i)
 	 * the 8bpp rasterizer, so nothing on this side consumes them: the three
 	 * UI scales cannot apply (draw_soft_web.c's
 	 * SCR_CalcUIScale returns 1 unconditionally and says why), and the rest
-	 * reach no code at all.  Their cvars stay registered in r_soft_web.c so
-	 * a config written by the GL build round-trips unharmed; what does not
-	 * belong here is the row offering to move something it cannot.
+	 * reach no code at all.  What does not belong here is the row offering
+	 * to move something it cannot.
+	 *
+	 * The cvars behind these rows are a separate matter.  Those this build
+	 * defines (r_soft_web.c, draw_soft_web.c) default as the GL build does,
+	 * which tools/test_soft_cvar_defaults.py enforces.  The GL-only ones
+	 * (showclock, scr_showspeed, ...) are not registered here at all, so a
+	 * software session drops them from config.cfg: GitHub #362.
 	 *
 	 * Found by tools/menu_soft_parity.py, which now holds this list to that
 	 * standard on every push.  uhexen2-ibnq.2.

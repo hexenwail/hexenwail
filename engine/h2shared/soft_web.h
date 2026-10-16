@@ -1,12 +1,14 @@
 /*
  * soft_web.h -- shared declarations for the web software-renderer build.
  *
- * The web port can be built with either the classic 8bpp software
- * rasterizer (default) or the experimental WebGL2 renderer. Shared client
- * code (menu.c, sbar.c, console.c, ...) is written against a handful of
- * symbols that the WebGL2 build publishes through r_webgl2.h. This header
- * is the software-renderer counterpart: it is pulled in from quakeinc.h
- * when WEBQUAKE is defined without WEBGL2QUAKE.
+ * The web port is built with either Hexenwail's GL renderer on the ES 3.0
+ * tier (WEB_RENDERER=webgl2, the default and shipping configuration) or the
+ * restored classic 8bpp software rasterizer (WEB_RENDERER=software). Shared
+ * client code (menu.c, sbar.c, console.c, ...) is written against a handful
+ * of symbols the GL renderer publishes through glquake.h and
+ * gl_postprocess.h. This header is the
+ * software-renderer counterpart: quakeinc.h pulls it in when WEBSOFT is
+ * defined, in place of the glquake.h/gl_model.h set.
  *
  * See docs/web/SOFTWARE_RENDERER.md for the design.
  *
@@ -87,7 +89,7 @@ void GL_PostProcess_ResetWaterwarpPreview (void);
 void GL_PostProcess_RequestWaterwarpPreview (float duration);
 
 /* svc_fog handler. The software renderer has no fog, so this only drains
- * the message payload; r_webgl2.h declares the WebGL2 counterpart. */
+ * the message payload; gl_fog.c is the GL counterpart. */
 void Fog_ParseServerMessage (void);
 
 /* Skin re-upload after a pimpmodel() flag change (pr_cmds.c) and skybox

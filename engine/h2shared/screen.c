@@ -116,7 +116,7 @@ static	cvar_t	scr_centertime = {"scr_centertime", "4", CVAR_NONE};
 static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
-static	cvar_t	scr_showfps = {"showfps", "0", CVAR_NONE};
+static	cvar_t	scr_showfps = {"showfps", "0", CVAR_ARCHIVE};	/* as in gl_screen.c: #104 */
 #if defined(WEBSOFT)
 /* Owned by gl_screen.c in every GL build; the software renderer draws its 2D
  * through this screen module, so it owns them here.

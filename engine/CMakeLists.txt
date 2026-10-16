@@ -178,10 +178,11 @@ endif()
 if(EMSCRIPTEN)
     add_definitions(-D__EMSCRIPTEN__)
     if(WEB_RENDERER STREQUAL "software")
-        # WEBQUAKE marks the browser *platform*; WEBSOFT marks the software
-        # *renderer*.  They are separate because the shared 2D API guards in
-        # draw.h/vid.h are platform questions while the rasterizer guards are
-        # renderer questions.  SDLQUAKE stays: only the renderer is swapped,
+        # WEBQUAKE stands in for GLQUAKE where shared code asks whether the
+        # extended 2D API exists (draw.h, vid.h, one site each in screen.c and
+        # menu.c); only this build sets it, since the webgl2 build has GLQUAKE.
+        # WEBSOFT marks the rasterizer itself.  They are separate because the
+        # 2D API is not a rasterizer question.  SDLQUAKE stays: only the renderer is swapped,
         # the SDL3 input/sound/system layer is the same one the desktop uses.
         set(CLIENT_DEFINITIONS WEBQUAKE WEBSOFT SDLQUAKE NO_SPLASHES)
     else()
@@ -538,13 +539,16 @@ set(GL_RENDERER_SOURCES
     ${COMMONDIR}/img_dds.c
 )
 
-# Classic 8bpp software renderer (WEB_RENDERER=software).  Restored verbatim
-# from the pre-GL tree; the only new files are the four adapters that bridge it
-# to the browser: r_soft_web.c (renderer-owned cvars and hooks the shared client
+# Classic 8bpp software renderer (WEB_RENDERER=software).  Restored from the
+# pre-GL tree (several files carry deliberate changes since; see the doc below).
+# New files are the shared mod_placeholder.c and the four adapters that bridge
+# it to the browser: r_soft_web.c (renderer-owned cvars and hooks the shared client
 # expects), draw_soft_web.c (extended 2D API on top of the 8bpp framebuffer),
 # vid_soft_web.c (framebuffer + resolution ladder) and web_canvas_gl2.c (the
-# palette-LUT presenter).  Do not reformat the restored files: their value is
-# being byte-identical to the renderer that shipped.
+# palette-LUT presenter).  Do not reformat the restored files: a diff against
+# the tree before "Hexenwail: SDL3/GL4.3 modernization (2025-2026)"
+# (036a0b531~1) must keep showing deliberate changes and nothing else.  See
+# docs/web/SOFTWARE_RENDERER.md.
 set(SOFT_RENDERER_SOURCES
     # From hexen2 (client-specific software renderer)
     ${ENGINE_TOP}/hexen2/r_main.c

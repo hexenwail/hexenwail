@@ -65,11 +65,13 @@ Two checks run against the result in CI and work locally too:
 | Value | Define | What it is |
 |---|---|---|
 | `webgl2` (default) | `USE_GLES` | the GLES3 / WebGL2 tier — see [`WEBGL_RENDERER.md`](WEBGL_RENDERER.md) |
-| `software` | `WEBSOFT` | the restored classic 8bpp rasterizer |
+| `software` | `WEBSOFT` | the restored classic 8bpp rasterizer — see [`web/SOFTWARE_RENDERER.md`](web/SOFTWARE_RENDERER.md) |
 
+How the two fit together is [`web/ARCHITECTURE.md`](web/ARCHITECTURE.md).
 CI builds **both** on every PR (`.github/actions/wasm-build/action.yml`).
 `wasm-assemble-artifact.sh` reads the `hexenwail-renderer.txt` build stamp and
-refuses anything that is not one of those two.
+refuses anything that is not one of those two; a build directory with no stamp is
+taken as `webgl2`.
 
 ### Without the scripts
 

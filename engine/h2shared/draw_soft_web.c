@@ -42,10 +42,17 @@ int	glwidth, glheight;
  * GL_SetCanvas, applied by every drawing primitive in draw.c. */
 int	draw_canvas_x, draw_canvas_y;
 
-cvar_t	scr_sbarscale = {"scr_sbarscale", "1", CVAR_ARCHIVE};
-cvar_t	scr_menuscale = {"scr_menuscale", "1", CVAR_ARCHIVE};
-cvar_t	scr_crosshairscale = {"scr_crosshairscale", "1", CVAR_ARCHIVE};
-cvar_t	scr_conalpha = {"scr_conalpha", "0.8", CVAR_ARCHIVE};
+/* Read by nothing in this build -- SCR_CalcUIScale below is always 1, and
+ * the console is drawn opaque -- and their menu rows are hidden.  They are
+ * here for linkage and must default exactly as gl_draw.c does: they are
+ * archived, and a config this build writes first carries its default into
+ * the GL build ("1" here used to pin its auto-scaled HUD, menu and crosshair
+ * at 1x).
+ * tools/test_soft_cvar_defaults.py.  GitHub #104. */
+cvar_t	scr_sbarscale = {"scr_sbarscale", "0", CVAR_ARCHIVE};
+cvar_t	scr_menuscale = {"scr_menuscale", "0", CVAR_ARCHIVE};
+cvar_t	scr_crosshairscale = {"scr_crosshairscale", "0", CVAR_ARCHIVE};
+cvar_t	scr_conalpha = {"scr_conalpha", "1", CVAR_ARCHIVE};
 cvar_t	scr_conbrightness = {"scr_conbrightness", "1", CVAR_ARCHIVE};
 
 static float	draw_charalpha = 1.0f;
