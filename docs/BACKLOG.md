@@ -11,7 +11,7 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (55)
+## P2 — worth doing (54)
 
 - **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
@@ -31,7 +31,6 @@ here.
 - **WASM port: productionize the working WebGL2 build** `uhexen2-91t4` — The engine builds and runs under Emscripten/WebGL2 via shell-wasm.nix (proven 2026-03-26), but it's a dev-shell artifact, not a shippable port.
 - **Autosave trio (sv_autosave, sv_autosave_interval, sv_autoload) — the port is the Hexen II adaptation, not the cvars** `uhexen2-a5nn.31` *(in_progress)* — Item 4 of the uhexen2-a5nn.23 inventory queue, scoped 2026-09-02 against both trees rather than ported, because the interesting half is what does NOT transfer.
 - **No-dynamic-light control is keyed to the model, which does not scale past a few custom light models** `uhexen2-aywo` — Raised by Mathuzzz: 'regarding the lights, it shouldn't be model dependent as I use like 2 dozens of additional models for light sources.
-- **Mission Pack (Portals of Praevus) launch support in web launcher** `uhexen2-cxfn` — -game portals is deliberate no-op in engine (FS_Gamedir ignores it); Mission Pack launches via separate -portals/-missionpack/-h2mp flag.
 - **Real shadow-casting for dynamic lights (uhexen2-q3gh was closed without it landing)** `uhexen2-i0tr` — Split out of uhexen2-kd3g. Mathuzzz asked for dynamic lights that cast shadows; uhexen2-kd3g delivered only the fallback he offered (a per-light opt-out from the dlight set, misc_modelpimp s…
 - **Make stub-vs-real a declaration in r_soft_web.c, not a convention** `uhexen2-ibnq.4` — r_soft_web.c splits its cvars into two blocks by comment: 'light policy: honoured by cl_main.c / cl_effect.c' and 'GPU-only knobs: present for linkage, hidden in the menu'.
 - **r_showtris: outline alias models, sprites and particles too (world and brush entities done)** `uhexen2-jxte` — r_showtris landed under uhexen2-a5nn.10 covering world surfaces and brush entities. Ironwail also outlines alias models, sprites and particles; we do not.

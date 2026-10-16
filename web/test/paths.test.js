@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getBaseAssetStatus, isGamedirName, mapImportedPath, normalizeGamedirName, sanitizeGamedirName,
-  sanitizeRelativePath,
+  canonicalPakName, canonicalStoredPath, getBaseAssetStatus, isGamedirName, mapImportedPath, normalizeGamedirName,
+  planCanonicalRenames, sanitizeGamedirName, sanitizeRelativePath,
 } from '../lib/paths.js';
 
 test('sanitizeRelativePath rejects traversal and absolute paths', () => {
@@ -19,6 +19,22 @@ test('mapImportedPath recognizes common Hexen II asset layouts', () => {
   assert.equal(mapImportedPath('Hexen II/data1/pak1.pak'), 'data1/pak1.pak');
   assert.equal(mapImportedPath('music/track02.ogg'), 'data1/music/track02.ogg');
   assert.equal(mapImportedPath('Mods/portals/progs.dat'), 'portals/progs.dat');
+  // Game roots and top-level paks are stored by the names the engine opens:
+  // the gamedir by its canonical name, pakN.pak lowercase (FS_AddGameDirectory
+  // has no case fallback for either).  GitHub #100.
+  assert.equal(mapImportedPath('HEXEN2/PORTALS/PAK3.PAK'), 'portals/pak3.pak');
+  assert.equal(mapImportedPath('Data1/PAK0.PAK'), 'data1/pak0.pak');
+  assert.equal(mapImportedPath('PAK1.PAK'), 'data1/pak1.pak');
+  assert.equal(mapImportedPath('PAK3.PAK'), 'portals/pak3.pak');
+  assert.equal(mapImportedPath('Pak5.Pak'), 'data1/pak5.pak');
+  // Loose files keep their case: the engine finds those case-insensitively,
+  // and a name like PROGS.DAT is how a retail install ships it.
+  assert.equal(mapImportedPath('DATA1/PROGS.DAT'), 'data1/PROGS.DAT');
+  assert.equal(mapImportedPath('portals/Maps/Keep1.bsp'), 'portals/Maps/Keep1.bsp');
+  // Only a pak at the top of the gamedir is a pak the engine mounts.
+  assert.equal(mapImportedPath('data1/sub/PAK0.PAK'), 'data1/sub/PAK0.PAK');
+  // Not a pakN name: kept as shipped.
+  assert.equal(mapImportedPath('Extra.PAK'), 'data1/Extra.PAK');
   assert.equal(mapImportedPath('README.txt'), null);
 });
 
@@ -69,6 +85,55 @@ test('getBaseAssetStatus treats pak0.pak alone as launchable demo data', () => {
   assert.equal(getBaseAssetStatus(['data1/pak1.pak']), 'none');
   assert.equal(getBaseAssetStatus(['data1/pak0.pak']), 'pak0-only');
   assert.equal(getBaseAssetStatus(['data1/pak0.pak', 'data1/progs.dat']), 'pak0-only');
-  assert.equal(getBaseAssetStatus(['DATA1/PAK0.PAK']), 'pak0-only');
+  // Exact names: the engine cannot open DATA1/PAK0.PAK, so it is not
+  // installed.  The launcher renames such legacy files (planCanonicalRenames)
+  // before it asks.  GitHub #100.
+  assert.equal(getBaseAssetStatus(['DATA1/PAK0.PAK']), 'none');
+  assert.equal(getBaseAssetStatus(['data1/pak0.pak', 'DATA1/PAK1.PAK']), 'pak0-only');
   assert.equal(getBaseAssetStatus(['data1/pak0.pak', 'data1/pak1.pak']), 'full');
+});
+
+// GitHub #100: the names a stored file must have for the engine to open it.
+test('canonicalPakName folds what the engine matches exactly and nothing else', () => {
+  assert.equal(canonicalPakName('PAK0.PAK'), 'pak0.pak');
+  assert.equal(canonicalPakName('Pak12.Pak'), 'pak12.pak');
+  assert.equal(canonicalPakName('pak0.pak'), 'pak0.pak');
+  // pk3: only the extension, which the mount scan matches case-sensitively;
+  // the name orders the mounts and keeps its case.
+  assert.equal(canonicalPakName('000-Pak3.PK3'), '000-Pak3.pk3');
+  assert.equal(canonicalPakName('zz-loose.pk3'), 'zz-loose.pk3');
+  assert.equal(canonicalPakName('PROGS.DAT'), 'PROGS.DAT');
+  assert.equal(canonicalPakName('Extra.PAK'), 'Extra.PAK');
+  assert.equal(canonicalPakName('pak.pak'), 'pak.pak');
+});
+
+test('canonicalStoredPath fixes the root and top-level paks, keeps the rest', () => {
+  assert.equal(canonicalStoredPath('DATA1/PAK0.PAK'), 'data1/pak0.pak');
+  assert.equal(canonicalStoredPath('Portals/PAK3.PAK'), 'portals/pak3.pak');
+  assert.equal(canonicalStoredPath('HW/Pak4.pak'), 'hw/pak4.pak');
+  assert.equal(canonicalStoredPath('DATA1/PROGS.DAT'), 'data1/PROGS.DAT');
+  assert.equal(canonicalStoredPath('DATA1/s0/INFO.DAT'), 'data1/s0/INFO.DAT');
+  assert.equal(canonicalStoredPath('data1/sub/PAK0.PAK'), 'data1/sub/PAK0.PAK');
+  // A mod's root is already its sanitized gamedir; its top-level paks are not.
+  assert.equal(canonicalStoredPath('mymod/PAK0.PAK'), 'mymod/pak0.pak');
+  assert.equal(canonicalStoredPath('mymod/Maps/E1.bsp'), 'mymod/Maps/E1.bsp');
+  assert.equal(canonicalStoredPath('data1/pak0.pak'), 'data1/pak0.pak');
+  assert.equal(canonicalStoredPath('../data1/pak0.pak'), null);
+});
+
+test('planCanonicalRenames moves legacy names and never picks between two files', () => {
+  assert.deepEqual(planCanonicalRenames(['data1/pak0.pak', 'data1/pak1.pak', 'portals/pak3.pak']), []);
+  assert.deepEqual(planCanonicalRenames(['DATA1/PAK0.PAK', 'DATA1/PAK1.PAK', 'DATA1/PROGS.DAT']), [
+    ['DATA1/PAK0.PAK', 'data1/pak0.pak'],
+    ['DATA1/PAK1.PAK', 'data1/pak1.pak'],
+    ['DATA1/PROGS.DAT', 'data1/PROGS.DAT'],
+  ]);
+  // The canonical copy already exists: it is what the engine loads, so the
+  // legacy one is left alone, not moved over it and not deleted.
+  assert.deepEqual(planCanonicalRenames(['portals/pak3.pak', 'PORTALS/PAK3.PAK']), []);
+  // Two legacy spellings of one target: only the first moves.
+  assert.deepEqual(planCanonicalRenames(['DATA1/PAK0.PAK', 'Data1/pak0.PAK']), [
+    ['DATA1/PAK0.PAK', 'data1/pak0.pak'],
+  ]);
+  assert.deepEqual(planCanonicalRenames([]), []);
 });

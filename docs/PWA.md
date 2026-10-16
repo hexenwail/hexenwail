@@ -239,6 +239,14 @@ ZIP imports are extracted entirely client-side in the browser. The importer reje
 
 Re-importing a file with the same logical path overwrites the previous local copy.
 
+Names are stored the way the engine opens them, because the browser filesystem is
+case-sensitive and the engine looks some names up exactly: a game root folder by its
+lowercase name (`DATA1/` from a CD copy becomes `data1/`), and a pak directly inside any
+gamedir as lowercase `pakN.pak` (a `.PK3` extension becomes `.pk3`). Every other file keeps
+its case; the engine finds loose files case-insensitively. Data imported before this rule
+(GitHub #100) is renamed once, the next time the launcher loads it, unless a file under
+the corrected name already exists, in which case both are left alone.
+
 Mods are imported separately and are *not* mapped into `data1/` — see [Playing
 mods](#playing-mods).
 
@@ -335,7 +343,7 @@ for all three, so importing one as a mod would create a control that cannot do a
 Mod content is accepted by file type, since a mod's payload is whatever its `progs.dat`
 asks for:
 
-`.pak` · `.dat` `.cfg` `.rc` `.lst` `.txt` · `.bsp` `.lit` `.ent` · `.mdl` `.spr` ·
+`.pak` `.pk3` · `.dat` `.cfg` `.rc` `.lst` `.txt` · `.bsp` `.lit` `.ent` · `.mdl` `.spr` ·
 `.lmp` `.wad` `.pcx` `.tga` `.png` `.jpg` `.jpeg` `.dds` `.ktx` ·
 `.wav` `.ogg` `.mp3` `.flac` `.opus` `.mid` `.it` `.s3m` `.umx` · `.dem`
 
@@ -354,8 +362,20 @@ refuse a gamedir for any other reason, its own message is what the runtime log s
 Passing `-game` also folds `portals/` into the search path below the mod, because mods
 commonly depend on mission pack models. With no mission pack installed the engine prints
 `Missing or invalid mission pack installation` once and continues — that line is expected,
-not a failed launch. Launching the mission pack *itself* is a different flag (`-portals`)
-and is not offered by this panel yet.
+not a failed launch.
+
+### The mission pack
+
+Launching Portal of Praevus *itself* is a different flag, `-portals`; `-game portals` does
+nothing. Once `portals/pak3.pak` is imported, or a `portals/*.pk3` such as the
+`000-pak3.pk3` that `tools/pak2pk3.py` writes, the panel's dropdown offers **Portal of
+Praevus (mission pack)** above the imported mods, and choosing it launches with
+`-portals`. The choice is remembered like a mod. It is gated the same way: the engine
+fatals with *"Portal of Praevus requires registered version of Hexen II"* on a demo
+install, so without `data1/pak1.pak` the panel says so and the base game launches instead.
+It is not a mod, so **Remove** never offers to delete it; "Clear imported data" does.
+Whether the file really is the mission pack is the engine's call: a wrong `pak3.pak`
+prints `Missing or invalid mission pack installation` and the base game runs.
 
 ### Removing a mod
 

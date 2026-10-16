@@ -1,8 +1,11 @@
 import { extractZipEntries } from './lib/zip.js';
 import { downloadHexen2Demo, isDemoDecompressionSupported } from './lib/demo-fetch.js';
-import { getBaseAssetStatus, mapImportedPath, normalizeGamedirName, sanitizeGamedirName } from './lib/paths.js';
 import {
-  buildEngineArguments, detectModGamedirs, mapModImportPath, modImportRoot, modOwnedPath,
+  getBaseAssetStatus, mapImportedPath, normalizeGamedirName, planCanonicalRenames, sanitizeGamedirName,
+} from './lib/paths.js';
+import {
+  buildEngineArguments, detectModGamedirs, hasMissionPack, mapModImportPath, MISSION_PACK, modImportRoot,
+  modOwnedPath, modPanelNote, parseLaunchChoice,
 } from './lib/mods.js';
 import {
   createSaveBundle, getPakCompatibilityWarnings, isPakCompatibilityPath, isSavePath, planSaveImport, sha256,
@@ -158,12 +161,28 @@ function modsAreLaunchable() {
   return getBaseAssetStatus([...state.storedPaths]) === 'full';
 }
 
+function missionPackInstalled() {
+  return hasMissionPack([...state.storedPaths]);
+}
+
+const MISSION_PACK_LABEL = 'Portal of Praevus (mission pack)';
+
 // What the dropdown shows: an imported mod stays selected even on an install
 // that cannot launch it, so it can still be managed and comes back the moment
-// the missing pak1 does.
+// the missing pak1 does.  The mission pack is the same kind of choice
+// (GitHub #100): kept while portals/pak3.pak is stored, launched as -portals.
 function getSelectedMod() {
   const mod = state.preferences.mod;
+  if (mod === MISSION_PACK) {
+    return missionPackInstalled() ? MISSION_PACK : '';
+  }
   return mod && getDetectedMods().includes(mod) ? mod : '';
+}
+
+// A selected mod that is an imported gamedir, i.e. one that can be removed.
+function getSelectedImportedMod() {
+  const mod = getSelectedMod();
+  return mod === MISSION_PACK ? '' : mod;
 }
 
 // What the engine is actually launched with.
@@ -173,33 +192,38 @@ function getActiveMod() {
 
 function renderMods() {
   const mods = getDetectedMods();
+  const missionPack = missionPackInstalled();
   const selected = getSelectedMod();
+  const removable = getSelectedImportedMod();
   const busy = state.engineStarted && !state.runtimeExited;
   if (ui.modSelect) {
     // Rebuilt only when the set changes: this runs from every launch-state
     // refresh, including the ten-second save sync, and replacing the options
     // under an open dropdown would close it mid-selection.
-    const signature = mods.join(' ');
+    // '/' cannot occur in a gamedir name, so the two parts cannot run together.
+    const signature = `${missionPack ? 'portals' : ''}/${mods.join(' ')}`;
     if (signature !== state.modOptionSignature) {
       state.modOptionSignature = signature;
-      ui.modSelect.replaceChildren(new Option('None (Hexen II)', ''), ...mods.map((mod) => new Option(mod, mod)));
+      ui.modSelect.replaceChildren(
+        new Option('None (Hexen II)', ''),
+        ...(missionPack ? [new Option(MISSION_PACK_LABEL, MISSION_PACK)] : []),
+        ...mods.map((mod) => new Option(mod, mod)),
+      );
     }
     ui.modSelect.value = selected;
-    ui.modSelect.disabled = !mods.length || busy;
+    ui.modSelect.disabled = !(mods.length || missionPack) || busy;
   }
   if (ui.modRemoveButton) {
-    ui.modRemoveButton.disabled = !selected || busy;
-    ui.modRemoveButton.textContent = selected ? `Remove “${selected}”` : 'Remove mod';
+    ui.modRemoveButton.disabled = !removable || busy;
+    ui.modRemoveButton.textContent = removable ? `Remove “${removable}”` : 'Remove mod';
   }
   if (ui.modImportButton) {
     ui.modImportButton.disabled = !state.storageReady || busy;
   }
   if (ui.modRequirements) {
-    ui.modRequirements.textContent = !mods.length
-      ? 'No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game <folder>.'
-      : selected && !modsAreLaunchable()
-        ? `“${selected}” is selected but will not load: the engine refuses -game without the full game's data1/pak1.pak, so this install starts unmodded.`
-        : `Imported mods: ${mods.join(', ')}. The selected mod is passed to the engine as -game.`;
+    ui.modRequirements.textContent = modPanelNote({
+      mods, missionPack, selected, launchable: modsAreLaunchable(),
+    });
   }
 }
 
@@ -218,7 +242,7 @@ function updateLaunchState() {
         : state.engineStarted
           ? 'Running'
           : assets === 'full'
-            ? activeMod ? `Start game — ${activeMod}` : 'Start game'
+            ? activeMod ? `Start game — ${activeMod === MISSION_PACK ? 'Portal of Praevus' : activeMod}` : 'Start game'
             : assets === 'pak0-only' ? 'Start game (demo)' : 'Import pak0.pak first';
   }
   if (ui.exitButton) {
@@ -442,11 +466,35 @@ async function syncRuntimeToStorage() {
   return state.syncPromise;
 }
 
+/*
+ * Imports before GitHub #100 kept a game root and its paks as the source folder
+ * spelled them, so a CD-style DATA1/PAK0.PAK copy was stored under a name the
+ * engine never opens -- and re-importing it now would store a second, canonical
+ * copy beside the dead one.  Move each such file to its canonical name once,
+ * before anything reads the stored list.  A move whose target already exists
+ * is skipped (planCanonicalRenames), and a failed one leaves the original in
+ * place: nothing here deletes a file it has not first copied.
+ */
+async function migrateStoredNames() {
+  const moves = planCanonicalRenames((await state.storage.listFiles()).map((file) => file.path));
+  for (const [from, to] of moves) {
+    try {
+      const bytes = await state.storage.readFile(from);
+      await state.storage.writeFile(to, bytes, { size: bytes.byteLength, mtimeMs: Date.now() });
+      await state.storage.deleteFile(from);
+      logToConsole('[storage]', `renamed ${from} to ${to}, the name the engine opens`);
+    } catch (error) {
+      console.warn(`Could not rename ${from} to ${to}`, error);
+    }
+  }
+}
+
 async function loadStoredFilesIntoRuntime() {
   if (!state.runtimeReady || !state.storageReady) {
     return;
   }
 
+  await migrateStoredNames();
   const files = await state.storage.listFiles();
   state.storedPaths = new Set(files.map((file) => file.path));
   setStatus(files.length ? 'Restoring imported game data…' : 'Waiting for Hexen II assets…');
@@ -939,7 +987,7 @@ function loadPreferences() {
     const sensitivity = Number(saved.lookSensitivity);
     if (Number.isFinite(sensitivity) && sensitivity >= 0.5 && sensitivity <= 2) state.preferences.lookSensitivity = sensitivity;
     state.preferences.phoneHintSeen = Boolean(saved.phoneHintSeen);
-    state.preferences.mod = sanitizeGamedirName(saved.mod) ?? '';
+    state.preferences.mod = parseLaunchChoice(saved.mod);
   } catch (error) {
     console.warn('Could not load launcher preferences', error);
   }
@@ -1540,12 +1588,12 @@ function bindUi() {
     event.target.value = '';
   });
   ui.modSelect?.addEventListener('change', () => {
-    state.preferences.mod = sanitizeGamedirName(ui.modSelect.value) ?? '';
+    state.preferences.mod = parseLaunchChoice(ui.modSelect.value);
     savePreferences();
     updateLaunchState();
   });
   ui.modRemoveButton?.addEventListener('click', () => {
-    const target = getSelectedMod();
+    const target = getSelectedImportedMod();
     if (target) removeMod(target);
   });
   ui.launchButton?.addEventListener('click', () => {
