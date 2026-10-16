@@ -11,6 +11,8 @@ either one rebuilds `.#gamecode`. A new build-time tool must be added to the
 Some scripts are CI gates, run from `.github/workflows/lint.yml`:
 `menu_soft_parity.py`, `test_software_model_flags.py`,
 `test_multiplayer_join.py` and `ironwail_scorecard.py --check`.
+`test_hcc_tail_slack.py` is a gate in `ci.yml`'s `cross` job instead,
+because it needs the `hcc` that job builds.
 
 Run the scripts directly. The Python ones need only stock `python3`, except
 `pak_extract.py`, which needs Pillow.
@@ -27,6 +29,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `upscale-pak.sh` | extract and AI-upscale PAK textures to TGA overrides |
 | `progs_crc.py` | print the two CRCs `PR_ClassifyGamecode()` identifies a `progs.dat` by |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
+| `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
 
 ---
 

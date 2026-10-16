@@ -422,6 +422,23 @@ jobs:
             echo "::endgroup::"
           done
 
+      # hcc and dhcc must not end the globals block before the engine stops
+      # reading it, or a small csprogs.dat that ends on a returned value or a
+      # builtin is refused by PR_ValidateBytecode (#120).  Here rather than in
+      # the gamecode checkPhase: the test reads the engine's operand table from
+      # pr_edict.c, which is deliberately not an input to that derivation.
+      # Both builds above are store hits by now.
+      - name: hcc leaves the globals tail the engine reads
+        run: |
+          set -euo pipefail
+          utils=$(nix build .#utils --no-link --print-out-paths)
+          gamecode=$(nix build .#gamecode --no-link --print-out-paths)
+          mapfile -t dats < <(find "$gamecode/share/hexenwail" -name '*.dat' | sort)
+          # Five images today; zero would check only the fixtures.
+          [ "${#dats[@]}" -ge 5 ] || { echo "found ${#dats[@]} gamecode images, expected 5"; exit 1; }
+          python3 tools/test_hcc_tail_slack.py "$utils/bin/hcc" "${dats[@]}"
+          python3 tools/test_hcc_tail_slack.py "$utils/bin/dhcc"
+
   flatpak:
     runs-on: ubuntu-latest
     timeout-minutes: 30
