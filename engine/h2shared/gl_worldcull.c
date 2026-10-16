@@ -449,54 +449,6 @@ static const char hiz_reduce_src[] =
 	"}\n";
 
 /* ------------------------------------------------------------------ */
-/* Compile helper                                                      */
-/* ------------------------------------------------------------------ */
-
-/* header may be NULL for a body that still carries its own #version; the
- * file-backed shaders pass one so the .glsl stays free of a tier decision. */
-static GLuint R_CompileComputeProgram (const char *header, const char *source,
-				       const char *name)
-{
-	GLuint shader, prog;
-	GLint status;
-	char log[1024];
-	const char *chunks[2];
-	GLsizei nchunks = 0;
-
-	if (header)
-		chunks[nchunks++] = header;
-	chunks[nchunks++] = source;
-
-	shader = glCreateShader_fp(GL_COMPUTE_SHADER);
-	glShaderSource_fp(shader, nchunks, chunks, NULL);
-	glCompileShader_fp(shader);
-	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
-	if (!status)
-	{
-		glGetShaderInfoLog_fp(shader, sizeof(log), NULL, log);
-		Con_Printf("Compute shader '%s' compile error: %s\n", name, log);
-		glDeleteShader_fp(shader);
-		return 0;
-	}
-
-	prog = glCreateProgram_fp();
-	glAttachShader_fp(prog, shader);
-	glLinkProgram_fp(prog);
-	glDeleteShader_fp(shader);
-
-	glGetProgramiv_fp(prog, GL_LINK_STATUS, &status);
-	if (!status)
-	{
-		glGetProgramInfoLog_fp(prog, sizeof(log), NULL, log);
-		Con_Printf("Compute shader '%s' link error: %s\n", name, log);
-		glDeleteProgram_fp(prog);
-		return 0;
-	}
-
-	return prog;
-}
-
-/* ------------------------------------------------------------------ */
 /* Build GPU data at map load                                          */
 /* ------------------------------------------------------------------ */
 
@@ -515,8 +467,8 @@ void R_BuildWorldCull (void)
 	R_FreeWorldCull();
 
 	/* Compile compute shaders */
-	cull_clear_prog = R_CompileComputeProgram(NULL, clear_indirect_src, "clear_indirect");
-	cull_mark_prog = R_CompileComputeProgram(NULL, cull_mark_src, "cull_mark");
+	cull_clear_prog = GL_LoadComputeProgram(NULL, clear_indirect_src, "clear_indirect");
+	cull_mark_prog = GL_LoadComputeProgram(NULL, cull_mark_src, "cull_mark");
 	if (!cull_clear_prog || !cull_mark_prog)
 	{
 		Con_Printf("GPU world culling: compute shaders failed, using CPU path\n");
@@ -839,7 +791,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 
 	if (!hiz_copy_prog)
 	{
-		hiz_copy_prog = R_CompileComputeProgram(HIZ_COMPUTE_VERSION,
+		hiz_copy_prog = GL_LoadComputeProgram(HIZ_COMPUTE_VERSION,
 							hiz_copy_comp, "hiz_copy");
 		/* Safe to skip: an unassigned block already defaults to binding
 		 * point 0, which is the point we ask for. */
@@ -854,7 +806,7 @@ static qboolean R_HiZ_EnsureResources (int scene_w, int scene_h)
 		}
 	}
 	if (!hiz_reduce_prog)
-		hiz_reduce_prog = R_CompileComputeProgram(NULL, hiz_reduce_src, "hiz_reduce");
+		hiz_reduce_prog = GL_LoadComputeProgram(NULL, hiz_reduce_src, "hiz_reduce");
 
 	if (!hiz_copy_prog || !hiz_reduce_prog)
 	{

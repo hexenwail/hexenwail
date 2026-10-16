@@ -69,7 +69,7 @@ here.
 - **Reply to Inky with the MapSearch suggestions he asked for** `uhexen2-wknf` — Inky closed the MapSearch naming question on Discord 2026-09-01 with an open invitation: "if Claude or you have ideas/suggestions to make the tool better or widely known, don't hesitate to t…
 - **Port MBOIT (moment-based OIT) from vkQuake as an upgrade over our WBOIT** `uhexen2-y2se` — Source: vkQuake Shaders/mboit.inc (141 lines) + Shaders/mboit_resolve.frag (27 lines).
 
-## P3 — someday (55)
+## P3 — someday (54)
 
 - **SoT docks/winter: monsters and props embedded in world brushes at spawn** `uhexen2-1jbs` *(blocked)* — Map-side, for relay to Mathuzzz — not an engine defect, but now measurable.
 - **Sprites store a hunk pointer in cache.data but leave cache_is_hunk false** `uhexen2-4ehj` — Mod_LoadSpriteModel (engine/h2shared/gl_model.c, ~line 4629) allocates the msprite_t with Hunk_AllocName and assigns the result to mod->cache.data, but never sets mod->cache_is_hunk.
@@ -89,7 +89,6 @@ here.
 - **imagelist and imagedump cannot see skybox textures — TexMgr keeps a separate pool from gltextures[]** `uhexen2-xa91` — Found while verifying uhexen2-qqis by trying to dump a freshly loaded skybox.
 - **r_wateralpha is baked into alias skins at load and never re-read** `uhexen2-xaon` — Found while testing uhexen2-4y6w. Mod_RestoreIndexAlpha reads r_wateralpha.value ONCE, at model load, and writes the result into the texture's alpha channel:
 - **Mod_LoadAllSkins flood-fills the first skin for every member of a skin group** `uhexen2-z8pt` — Spotted while fixing uhexen2-93a8, not fixed there because it is a separate defect with its own blast radius.
-- **Migrate gl_worldcull.c's private R_CompileComputeProgram to the shared GL_LoadComputeProgram** `uhexen2-w5xz` — uhexen2-h8yy added GL_LoadComputeProgram to engine/h2shared/gl_shader.c as the shared way to build a compute program.
 - **Decide whether to vendor a third gamecode variant (jsHexen2) as sv_gamecode 2** `uhexen2-2kcw` — `ebd68cc11` (uhexen2-vbnx) shipped the Classic/Updated selector and closed with a note that there is "room for a third value if a vendored variant is added later".
 - **Realtime lighting path (prerequisite for normal-mapped materials)** `uhexen2-abwd` — Deferred out of uhexen2-0vgo by the decision recorded in uhexen2-0vgo.3.
 - **vid_saveresize: needs a resizable window first** `uhexen2-a5nn.28` — Split out of uhexen2-a5nn.26 (the vid_* family port).

@@ -127,15 +127,19 @@ GLuint GL_CompileShader (GLenum type, const char *source)
 GLuint GL_LoadComputeProgram (const char *header, const char *body, const char *name)
 {
 	const char	*sources[2];
+	GLsizei		nsources = 0;
 	GLuint		shader, prog;
 	GLint		status;
 	char		log[2048];
 
-	sources[0] = header;
-	sources[1] = body;
+	/* header may be NULL for a body that still carries its own #version
+	 * (gl_worldcull.c's inline cull shaders). */
+	if (header)
+		sources[nsources++] = header;
+	sources[nsources++] = body;
 
 	shader = glCreateShader_fp(GL_COMPUTE_SHADER);
-	glShaderSource_fp(shader, 2, sources, NULL);
+	glShaderSource_fp(shader, nsources, sources, NULL);
 	glCompileShader_fp(shader);
 	glGetShaderiv_fp(shader, GL_COMPILE_STATUS, &status);
 	if (!status)
