@@ -167,6 +167,12 @@ jobs:
       - name: One SoundFont pin
         run: python3 tools/test_soundfont_pin.py
 
+      # csprogs.dat images the old hcc built (a vector operand on the last
+      # globals, a builtin record at the end) load, and nothing they run can
+      # reach past the globals or enter a builtin (GitHub #120).
+      - name: Old-hcc CSQC images load safely
+        run: python3 tools/test_csqc_tail_slack.py
+
       # An edict created during the physics walk waits for the next frame,
       # whatever slot it took, so a projectile is first seen where it was
       # spawned at any tick rate (GitHub #138).

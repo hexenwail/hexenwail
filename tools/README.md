@@ -38,6 +38,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `test_menu_row_notes.py` | check that the Options submenus' row notes fit `M_ROWNOTE_MAX` columns and name the cvar their row actually sets (#98) |
 | `test_spawn_walk.py` | check that `SV_Physics` leaves an edict created during its walk for the next frame and that every `ED_Alloc` path stamps it (#138) |
 | `test_soundfont_pin.py` | check that the TimGM6mb tarball hash agrees in `scripts/fetch-soundfont.sh`, `flake.nix`, the Flatpak manifest and `web/soundfont-NOTICE.txt` (#114) |
+| `test_csqc_tail_slack.py` | compile `PR_ValidateBytecode` and check that a wide operand may run into the CSQC loader's zeroed globals tail but never start there, that builtin function records are not bounds-checked, and that the loader and `PR_ExecuteProgram` keep builtins from being entered (#120) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
 

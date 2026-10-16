@@ -174,6 +174,21 @@ void PR_ExecuteProgram (func_t fnum, const char *funcname)
 
 	f = &pr_functions[fnum];
 
+	/* A builtin is not entered: OP_CALL dispatches builtins before it gets
+	 * here, so this is a host entry point (a think, CSQC_DrawHud, ...) that
+	 * names one.  EnterFunction would copy parameters to its parm_start and
+	 * run from statement first_statement - 1, which for a builtin is a
+	 * negative index before the statements lump.  Refuse it instead.  The
+	 * CSQC loader never offers one (cl_csqc.c), and PR_ValidateBytecode can
+	 * leave a builtin's parm_start unchecked because nothing reaches it.
+	 * GitHub #120. */
+	if (f->first_statement < 0)
+	{
+		q_snprintf(error_msg, sizeof(error_msg), "%s: %s is builtin #%d, not a QuakeC function",
+			   __thisfunc__, funcname ? funcname : "(unknown)", -f->first_statement);
+		Host_Error("%s", error_msg);
+	}
+
 	pr_trace = false;
 
 	exitdepth = pr_depth;
