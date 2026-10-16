@@ -3042,6 +3042,26 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 
 /*
 ===============
+GL_WaterAlphaByte
+===============
+*/
+byte GL_WaterAlphaByte (void)
+{
+	float	a = r_wateralpha.value;
+
+	/* The same [0.1, 1] that R_RenderView and the world liquid path clamp
+	 * the cvar to before they read it.  Unclamped, a value above 1 wrapped
+	 * through the old `& 0xff` (1.5 baked 126, more translucent than 0.5),
+	 * and one below 0.1 baked a skin the world path would never draw. */
+	if (a < 0.1f)
+		a = 0.1f;
+	if (a > 1.0f)
+		a = 1.0f;
+	return (byte)(int)(255.0f * a);
+}
+
+/*
+===============
 GL_Upload8
 
 modes:
@@ -3106,7 +3126,7 @@ static void GL_Upload8 (byte *data, gltexture_t *glt)
 				}
 				else if (p & 1)
 				{
-					p = (int)(255 * r_wateralpha.value) & 0xff;
+					p = glt->wateralpha;
 					trans[i] &= MASK_rgb;
 					trans[i] |= p << SHIFT_a;
 				}
@@ -3248,6 +3268,7 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 {
 	int		i, slot, size, key;
 	unsigned short	crc;
+	byte		wateralpha;
 	gltexture_t	*glt;
 
 #if !defined (H2W)
@@ -3272,6 +3293,13 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 		crc = CRC_Block (data, size);
 	}
 
+	/* An indexed EF_TRANSPARENT skin has r_wateralpha baked into it, and the
+	 * indices it is baked from do not change when the cvar does.  Without
+	 * this a re-upload after the cvar moved found its own stale entry and
+	 * kept the old translucency.  #124 */
+	wateralpha = (!cimg && !(flags & TEX_RGBA) && (flags & TEX_TRANSPARENT))
+		   ? GL_WaterAlphaByte () : 0;
+
 	key = Hash_GenerateKeyString (&hash_gltextures, identifier, true);
 	if (identifier[0])
 	{
@@ -3281,7 +3309,7 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 			glt = &gltextures[i];
 			if (!strcmp (identifier, glt->identifier))
 			{
-				if (crc != glt->crc ||
+				if (crc != glt->crc || wateralpha != glt->wateralpha ||
 				    (glt->flags & TEX_MIPMAP) != (flags & TEX_MIPMAP) ||
 				    (glt->flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) != (flags & (TEX_ALPHA|TEX_HOLEY|TEX_FENCE)) ||
 				    width  != glt->width || height != glt->height)
@@ -3337,6 +3365,7 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 	glt->height = height;
 	glt->flags = flags;
 	glt->crc = crc;
+	glt->wateralpha = wateralpha;
 
 	GL_Bind (glt->texnum);
 	if (cimg)

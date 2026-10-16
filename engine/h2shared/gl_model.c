@@ -3585,7 +3585,7 @@ static qboolean Mod_RestoreIndexAlpha (imgreplace_t *rep, const byte *skin,
 		return false;
 	}
 
-	wateralpha = (int)(255.0f * r_wateralpha.value) & 0xff;
+	wateralpha = GL_WaterAlphaByte ();
 
 	for (y = 0; y < rep->height; y++)
 	{
@@ -4001,18 +4001,26 @@ skin_too_large:
 
 /* Re-read the model file and re-upload alias skins with current mod->flags.
  * Called from PF_pimpmodel when EF_HOLEY is newly added to a model that was
- * originally uploaded without it.  TexMgr detects the TEX_HOLEY flag
+ * originally uploaded without it, and from Mod_WaterAlphaChanged when the
+ * alpha baked into an EF_TRANSPARENT skin moves (#124).  TexMgr detects the TEX_HOLEY flag
  * mismatch on the existing gltexture_t and re-uploads with correct alpha. */
 void Mod_ReuploadAliasSkins (qmodel_t *mod)
 {
-	byte		stackbuf[65536];
-	byte		*buf;
+	static aliashdr_t	work;
+	aliashdr_t	*live;
+	byte		*buf = NULL;
 	int		mod_type;
 	int		want_flags;
 	aliashdr_t	*saved_pheader;
 	qmodel_t	*saved_loadmodel;
 
 	if (!mod || mod->type != mod_alias)
+		return;
+	/* An MD5/MD3 substitute lives on the hunk with an aliashdr_t of its own
+	 * (one skin, no skinwidth): running the .mdl's skins over it replaces
+	 * the material it picked with a 0x0 upload.  It owns no engine skins
+	 * and bakes nothing, which is why Mod_ReloadTextures skips it too. */
+	if (mod->cache_is_hunk)
 		return;
 
 	saved_pheader = pheader;
@@ -4024,12 +4032,27 @@ void Mod_ReuploadAliasSkins (qmodel_t *mod)
 	 * granted and make the re-upload below a no-op.  Carry the caller's
 	 * flags across and put them back. */
 	want_flags = mod->flags;
-	pheader = (aliashdr_t *)Mod_Extradata(mod);
+	live = (aliashdr_t *)Mod_Extradata(mod);
 	mod->flags = want_flags;
-	if (!pheader)
+	if (!live)
 		goto restore;
 
-	buf = FS_LoadStackFile(mod->name, stackbuf, sizeof(stackbuf), NULL);
+	/* Mod_LoadAllSkins writes through pheader, and the header lives in the
+	 * cache -- typically the cache's lowest entry, right where GL_Upload8's
+	 * Hunk_AllocName scratch buffer grows the low hunk into, and
+	 * Cache_FreeLow moves or frees whatever is in the way.  Writing through
+	 * a pointer taken before the uploads would then land in the hunk's
+	 * scratch space while the moved header kept texnums the cache-mismatch
+	 * path had just deleted.  So the skins load into a copy, and the texnums
+	 * go back into wherever the header is once the uploads are done. */
+	memcpy (&work, live, sizeof(work));
+	pheader = &work;
+
+	/* malloc, not FS_LoadStackFile: a file over the stack buffer goes to
+	 * Hunk_TempAlloc, which can move or free the cache entry pheader points
+	 * into, and Mod_LoadAllSkins then writes texnums through it.  Read after
+	 * Mod_Extradata, which may itself allocate when it reloads. */
+	buf = FS_LoadMallocFile(mod->name, NULL);
 	if (!buf)
 	{
 		Con_Printf("Mod_ReuploadAliasSkins: couldn't reload %s\n", mod->name);
@@ -4055,12 +4078,105 @@ void Mod_ReuploadAliasSkins (qmodel_t *mod)
 		goto restore;
 	}
 
+	/* Evicted meanwhile: its next load uploads from scratch. */
+	live = (aliashdr_t *)Cache_Check(&mod->cache);
+	if (live)
+	{
+		memcpy (live->gl_texturenum, work.gl_texturenum, sizeof(work.gl_texturenum));
+		memcpy (live->gl_fb_texturenum, work.gl_fb_texturenum, sizeof(work.gl_fb_texturenum));
+		memcpy (live->gl_norm_texturenum, work.gl_norm_texturenum, sizeof(work.gl_norm_texturenum));
+		memcpy (live->gl_gloss_texturenum, work.gl_gloss_texturenum, sizeof(work.gl_gloss_texturenum));
+	}
+
 	Con_DPrintf("Mod_ReuploadAliasSkins: %s, %d skin(s), flags 0x%x\n",
-		    mod->name, pheader->numskins, mod->flags);
+		    mod->name, work.numskins, mod->flags);
 
 restore:
+	free (buf);
 	pheader = saved_pheader;
 	loadmodel = saved_loadmodel;
+}
+
+/*
+=================
+Mod_WaterAlphaChanged -- r_wateralpha callback
+
+An EF_TRANSPARENT alias skin carries r_wateralpha baked into its alpha: an
+odd palette index becomes that alpha in GL_Upload8, and Mod_RestoreIndexAlpha
+does the same for a replacement skin rebuilt from the indices.  World water
+reads the cvar per frame, so before this a change reached the water at once
+and those models never, until something reloaded them.  #124
+
+Re-upload the skins of every EF_TRANSPARENT alias model that is loaded now.
+The texture cache keys an indexed TEX_TRANSPARENT skin on the baked byte too
+(gltexture_t.wateralpha), and a rebuilt replacement's rgba changes with it, so
+both kinds miss the cache and go up again; everything else hits it and stays.
+A model whose cache has been evicted is left alone rather than reloaded for
+this: its next load goes through the same cache test and picks up the value
+current then.
+
+EF_TRANSPARENT is the whole set.  It wins the tex_mode chain in
+Mod_LoadAllSkins and in Mod_RestoreIndexAlpha, and nothing else bakes the cvar.
+
+The callback only notes the time; Mod_WaterAlphaFrame does the work once the
+value has held still for WATERALPHA_SETTLE.  The Rendering menu's slider moves
+the cvar 0.05 a key press, so a drag is a burst of a dozen sets, and each pass
+re-reads every affected .mdl and re-decodes its replacement, glow, normal and
+gloss images: nothing for retail skins, a visible hitch per step for a pack of
+2K PNGs.  A burst now costs one pass, a quarter second after it ends.
+=================
+*/
+#define WATERALPHA_SETTLE	0.25	/* seconds */
+
+static double	wateralpha_changed = -1;	/* realtime of a change not yet applied */
+
+void Mod_WaterAlphaChanged (cvar_t *var)
+{
+	(void) var;
+
+	/* Fires for config.cfg before anything is loaded. */
+	if (!host_initialized)
+		return;
+	wateralpha_changed = realtime;
+}
+
+/* Called once a frame from R_RenderView. */
+void Mod_WaterAlphaFrame (void)
+{
+	static int	applied = -1;	/* byte the loaded skins were baked with */
+	int		i, now, count = 0;
+	qmodel_t	*mod;
+
+	if (wateralpha_changed < 0 || realtime - wateralpha_changed < WATERALPHA_SETTLE)
+		return;
+	wateralpha_changed = -1;
+
+	/* A burst that ended where it started, or a set that leaves the clamped
+	 * byte where it was, has nothing to re-upload. */
+	now = GL_WaterAlphaByte ();
+	if (now == applied)
+		return;
+	applied = now;
+
+	for (i = 0, mod = mod_known; i < mod_numknown; i++, mod++)
+	{
+		if (mod->type != mod_alias || !mod->name[0])
+			continue;
+		if (!(mod->flags & EF_TRANSPARENT))
+			continue;
+		if (mod->needload != NL_PRESENT)
+			continue;
+		/* An MD5/MD3 substitute owns no engine skins (see
+		 * Mod_ReuploadAliasSkins), and an evicted model bakes the
+		 * current value when it next loads. */
+		if (mod->cache_is_hunk || !Cache_Check (&mod->cache))
+			continue;
+		Mod_ReuploadAliasSkins (mod);
+		count++;
+	}
+
+	Con_DPrintf ("r_wateralpha: re-uploaded %d EF_TRANSPARENT model(s) at alpha %d\n",
+		     count, now);
 }
 
 //=========================================================================

@@ -190,6 +190,10 @@ typedef struct
 	int		width, height;
 	int		flags;
 	unsigned short	crc;
+	/* TEX_TRANSPARENT only: the r_wateralpha byte GL_Upload8 baked into the
+	 * odd-index texels.  Part of the cache identity, because the index data
+	 * (and so the crc) is the same whatever value it was baked with.  #124 */
+	byte		wateralpha;
 } gltexture_t;
 
 /* texture filters */
@@ -608,6 +612,12 @@ struct imgreplace_s;
 GLuint GL_LoadReplacement (const char *identifier, const struct imgreplace_s *r, int extraflags);
 
 GLuint GL_LoadPicTexture (qpic_t *pic);
+
+/* The alpha byte an odd palette index of an EF_TRANSPARENT alias skin gets:
+ * r_wateralpha as GL_Upload8 and Mod_RestoreIndexAlpha both bake it.  One
+ * definition, so the texture cache's change test and the two writers cannot
+ * disagree about what "the current value" is.  #124 */
+byte GL_WaterAlphaByte (void);
 void D_ClearOpenGLTextures (int last_tex);
 
 /* gl_texmgr.c: uploads the notexture/nulltexture placeholders and binds
