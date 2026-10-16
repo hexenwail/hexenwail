@@ -1167,6 +1167,8 @@ void ED_ClearEdict (edict_t *e)
 	e->free = false;
 }
 
+int		sv_physics_walk;	/* see progs.h; set by SV_Physics */
+
 /*
 =================
 ED_Alloc
@@ -1191,6 +1193,7 @@ edict_t *ED_Alloc (void)
 		if (e->free && (e->freetime < 2 || sv.time - e->freetime > 0.5))
 		{
 			ED_ClearEdict (e);
+			e->spawnwalk = sv_physics_walk;
 			return e;
 		}
 	}
@@ -1214,6 +1217,7 @@ edict_t *ED_Alloc (void)
 	sv.num_edicts++;
 	e = EDICT_NUM(i);
 	ED_ClearEdict (e);
+	e->spawnwalk = sv_physics_walk;
 
 	return e;
 }
@@ -1233,6 +1237,7 @@ edict_t *ED_Alloc_Temp (void)
 		{
 			ED_ClearEdict (e);
 			e->alloctime = sv.time;
+			e->spawnwalk = sv_physics_walk;
 
 			return e;
 		}
@@ -1245,6 +1250,7 @@ edict_t *ED_Alloc_Temp (void)
 	ED_Free(Least);
 	ED_ClearEdict (Least);
 	Least->alloctime = sv.time;
+	Least->spawnwalk = sv_physics_walk;
 
 	return Least;
 }
