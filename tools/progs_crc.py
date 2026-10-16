@@ -83,6 +83,9 @@ KNOWN_RETAIL = {
     17499: "retail data1/PROGS.DAT",
     20799: "retail portals/progs.dat",
     33075: "retail data1/PROGS2.DAT",
+    # Not in retail_crcs[]: PR_ClassifyGamecode() tests it on its own, as
+    # "Raven demo", because its progdefs CRC would otherwise read as 1.11.
+    16640: "Raven demo data1/progs.dat (Nov 1997)",
 }
 
 
