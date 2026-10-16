@@ -1,0 +1,19 @@
+soundfont.sf2 -- the General MIDI SoundFont the Hexenwail web build plays
+MIDI music with when you have not imported your own.
+
+  TimGM6mb.sf2
+  Copyright 2004 Tim Brechbill <https://www.timbrechbill.com>
+  Copyright 2010 David Bolton
+  License: GNU General Public License, version 2
+           <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>
+
+The file is distributed unmodified, as Debian packages it:
+  https://deb.debian.org/debian/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz
+  SHA-256 af8f3a00e416dfb262bcaa904a1c84df04a51b72bbc1313aed012bc754bdf99b
+Upstream: https://github.com/musescore/musescore-old/commit/90c33ef9d87b3f5ff92efd3b07d89eb455fb1fef
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+Importing a .sf2 of your own in the launcher replaces it.

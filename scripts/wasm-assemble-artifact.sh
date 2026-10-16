@@ -39,6 +39,9 @@ cp -r web/. "$DIST_DIR/"
 # web/test/ holds the Node suites and the WebGL smoke page; they run in CI, not
 # in anyone's browser, so the deploy does not carry them.
 rm -rf "$DIST_DIR/test"
+# The bundled MIDI SoundFont (sw.js precaches it; app.js mounts it where the
+# engine looks).  Fetched and hash-checked here, never committed.  #114.
+./scripts/fetch-soundfont.sh "$DIST_DIR/soundfont.sf2"
 sed -i.bak "s/__HEXENWAIL_BUILD_VERSION__/$BUILD_VERSION/g" "$DIST_DIR/sw.js"
 rm -f "$DIST_DIR/sw.js.bak"
 sed -i.bak "s/__HEXENWAIL_RENDERER__/$BUILD_RENDERER/g" "$DIST_DIR/app.js"
