@@ -58,7 +58,7 @@ HARNESS_FEATURES=quakefs,zone,hashindex,cvar,cmd,info_str,sizebuf,crc,strlcpy,st
 # Floors, recorded beside the numbers the arms actually produce.  The floor is
 # one decimal place below the observation, so widening the enumeration does not
 # mean editing the gate.
-# Observed: client 7 cases / 7893 trace bytes; serveronly 7 cases / 9167.
+# Observed: client 8 cases / 12234 trace bytes; serveronly 8 cases / 12314.
 # (The numbers are re-recorded whenever the harness changes shape; the floors
 # below are what the gate enforces, and they are one step under these.)
 FLOOR_CASES=6
