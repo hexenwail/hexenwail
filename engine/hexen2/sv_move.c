@@ -24,12 +24,43 @@
 
 #define	STEPSIZE	18
 
+/* sv_debugmovestep N: log the next N refused monster steps, with the reason.
+ * sv_debugmovestep -N: the same N-line budget, and also one line for EVERY
+ * SV_CheckBottom call -- pass or fail, which path decided it, the corner box it
+ * sampled, the entity's bbox and .hull.  Refusals alone cannot tell "never
+ * called" from "always passed" (village3 calls SV_CheckBottom 331 times and
+ * refuses nothing), and the corner box is what #278 needed a throwaway build
+ * to read.  GitHub #282.
+ *
+ * Set a negative value from the console or a cfg, not as +sv_debugmovestep
+ * -N on the command line: there the "-N" token ends the + command, so the
+ * cvar never receives it.
+ *
+ * Setting the value it already holds does not refill a spent budget (the cvar
+ * code skips the callback when the string is unchanged): set 0 first.  Call
+ * lines include every SV_CheckBottom caller, not just SV_movestep -- the
+ * SV_FixCheckBottom path, sliding corpses in SV_Physics_Step and the QC
+ * checkbottom builtin draw on the same budget. */
 cvar_t	sv_debugmovestep = {"sv_debugmovestep", "0", CVAR_NONE};
 static int sv_debugmovestep_remaining;
+static qboolean sv_debugmovestep_calls;
 
 void SV_DebugMoveStep_Changed (cvar_t *var)
 {
-	sv_debugmovestep_remaining = (int)var->value;
+	/* Parsed from the string, in the integer domain, not from var->value:
+	 * the engine builds with -ffast-math, which deletes a float NaN test,
+	 * and "nan" then clamped to -1e9 and turned call logging ON.  strtol
+	 * reads "nan" (and any junk) as 0, stops at a fraction or exponent, and
+	 * the clamp keeps -v defined. */
+	long	v = strtol (var->string, NULL, 10);
+
+	if (v > 1000000000L)
+		v = 1000000000L;
+	else if (v < -1000000000L)
+		v = -1000000000L;
+
+	sv_debugmovestep_calls = (v < 0);
+	sv_debugmovestep_remaining = (int)((v < 0) ? -v : v);
 }
 
 static void SV_DebugMoveStep_Log (const edict_t *ent, const trace_t *trace, const char *fmt, ...)
@@ -106,6 +137,35 @@ static void SV_DebugMoveStep_DumpMovers (const vec3_t foot)
 			check->v.absmax[0], check->v.absmax[1], check->v.absmax[2],
 			foot[0], foot[1], foot[2]);
 	}
+}
+
+/*
+=============
+SV_DebugMoveStep_Call
+
+One line per SV_CheckBottom call under a negative sv_debugmovestep: the
+answer, which test decided it, the absolute corner box the function sampled
+(mins/maxs as it computed them), the entity's own bbox and its .hull.  Every
+return in SV_CheckBottom goes through here; engine/tests/sv_checkbottom_test.c
+fails if one does not.
+=============
+*/
+static qboolean SV_DebugMoveStep_Call (const edict_t *ent, const vec3_t mins,
+				       const vec3_t maxs, qboolean ok,
+				       const char *why)
+{
+	if (sv_debugmovestep_calls)
+	{
+		SV_DebugMoveStep_Log (ent, NULL,
+			"CheckBottom call: %s, %s box=[%.1f %.1f %.1f]..[%.1f %.1f %.1f]"
+			" bbox=[%.0f %.0f %.0f]..[%.0f %.0f %.0f] hull=%.0f",
+			ok ? "pass" : "FAIL", why,
+			mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2],
+			ent->v.mins[0], ent->v.mins[1], ent->v.mins[2],
+			ent->v.maxs[0], ent->v.maxs[1], ent->v.maxs[2],
+			ent->v.hull);
+	}
+	return ok;
 }
 
 /*
@@ -253,7 +313,8 @@ qboolean SV_CheckBottom (edict_t *ent)
 		}
 	}
 
-	return true;	// we got out easy
+	// we got out easy
+	return SV_DebugMoveStep_Call (ent, mins, maxs, true, "all corners over solid");
 
 realcheck:	// check it for real...
 
@@ -290,7 +351,7 @@ realcheck:	// check it for real...
 	{
 		SV_DebugMoveStep_Log (ent, NULL, "CheckBottom: midpoint trace had no ground within 2*STEPSIZE down");
 		SV_DebugMoveStep_DumpMovers (start);
-		return false;
+		return SV_DebugMoveStep_Call (ent, mins, maxs, false, "midpoint has no ground");
 	}
 
 	// trace did not reach full 36 below, so set mid and bottom
@@ -353,12 +414,14 @@ realcheck:	// check it for real...
 					(trace.fraction == 1.0) ? "off edge" : "drop > STEPSIZE",
 					mid, trace.endpos[2]);
 				SV_DebugMoveStep_DumpMovers (start);
-				return false;
+				return SV_DebugMoveStep_Call (ent, mins, maxs, false,
+					(trace.fraction == 1.0) ? "a corner is off an edge"
+								: "a corner drops > STEPSIZE");
 			}
 		}
 	}
 
-	return true;
+	return SV_DebugMoveStep_Call (ent, mins, maxs, true, "traced, corners within STEPSIZE");
 }
 
 

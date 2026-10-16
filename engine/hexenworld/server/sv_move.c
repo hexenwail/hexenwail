@@ -24,6 +24,150 @@
 
 #define	STEPSIZE	18
 
+/* sv_debugmovestep N: log the next N refused monster steps, with the reason.
+ * sv_debugmovestep -N: the same N-line budget, and also one line for EVERY
+ * SV_CheckBottom call -- pass or fail, which path decided it, the corner box it
+ * sampled, the entity's bbox and .hull.  Refusals alone cannot tell "never
+ * called" from "always passed" (village3 calls SV_CheckBottom 331 times and
+ * refuses nothing), and the corner box is what #278 needed a throwaway build
+ * to read.  GitHub #282.
+ *
+ * Set a negative value from the console or a cfg, not as +sv_debugmovestep
+ * -N on the command line: there the "-N" token ends the + command, so the
+ * cvar never receives it.
+ *
+ * Setting the value it already holds does not refill a spent budget (the cvar
+ * code skips the callback when the string is unchanged): set 0 first.  Call
+ * lines include every SV_CheckBottom caller, not just SV_movestep -- the
+ * SV_FixCheckBottom path and the QC checkbottom builtin draw on the same
+ * budget (Hexen II's server also checks sliding corpses; this one does not). */
+cvar_t	sv_debugmovestep = {"sv_debugmovestep", "0", CVAR_NONE};
+static int sv_debugmovestep_remaining;
+static qboolean sv_debugmovestep_calls;
+
+void SV_DebugMoveStep_Changed (cvar_t *var)
+{
+	/* Parsed from the string, in the integer domain, not from var->value:
+	 * the engine builds with -ffast-math, which deletes a float NaN test,
+	 * and "nan" then clamped to -1e9 and turned call logging ON.  strtol
+	 * reads "nan" (and any junk) as 0, stops at a fraction or exponent, and
+	 * the clamp keeps -v defined. */
+	long	v = strtol (var->string, NULL, 10);
+
+	if (v > 1000000000L)
+		v = 1000000000L;
+	else if (v < -1000000000L)
+		v = -1000000000L;
+
+	sv_debugmovestep_calls = (v < 0);
+	sv_debugmovestep_remaining = (int)((v < 0) ? -v : v);
+}
+
+static void SV_DebugMoveStep_Log (const edict_t *ent, const trace_t *trace, const char *fmt, ...)
+{
+	char	buf[256];
+	const char *touched = "";
+	va_list	argptr;
+
+	if (sv_debugmovestep_remaining <= 0)
+		return;
+	sv_debugmovestep_remaining--;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (buf, sizeof(buf), fmt, argptr);
+	va_end (argptr);
+
+	if (trace && trace->ent && trace->ent != sv.edicts)
+		touched = PR_GetString (trace->ent->v.classname);
+
+	Con_Printf ("sv_debugmovestep: %s [%s @ %.0f %.0f %.0f]%s%s\n",
+		buf,
+		PR_GetString (ent->v.classname),
+		ent->v.origin[0], ent->v.origin[1], ent->v.origin[2],
+		touched[0] ? " touched=" : "",
+		touched[0] ? touched : "");
+}
+
+#define	DEBUGMOVESTEP_MOVER_RADIUS	256
+
+/*
+=============
+SV_DebugMoveStep_DumpMovers
+
+Dumps every non-world SOLID_BSP brush entity whose bounding box comes within
+DEBUGMOVESTEP_MOVER_RADIUS of the failing foot position. The real absmin/absmax
+is the only reliable way to tell a walkable platform from a shaft-filling
+elevator car, so a monster refusing to step "onto a train" can be judged
+without reading the BSP submodel lump (uhexen2-nnwb).
+=============
+*/
+static void SV_DebugMoveStep_DumpMovers (const vec3_t foot)
+{
+	edict_t	*check;
+	int	i, j;
+
+	if (sv_debugmovestep_remaining <= 0)
+		return;
+
+	check = NEXT_EDICT(sv.edicts);
+	for (i = 1; i < sv.num_edicts; i++, check = NEXT_EDICT(check))
+	{
+		if (check->free)
+			continue;
+		if (check->v.solid != SOLID_BSP)
+			continue;
+
+		for (j = 0; j < 3; j++)
+		{
+			if (foot[j] < check->v.absmin[j] - DEBUGMOVESTEP_MOVER_RADIUS ||
+			    foot[j] > check->v.absmax[j] + DEBUGMOVESTEP_MOVER_RADIUS)
+				break;
+		}
+		if (j != 3)
+			continue;
+
+		if (sv_debugmovestep_remaining <= 0)
+			return;
+		sv_debugmovestep_remaining--;
+
+		Con_Printf ("sv_debugmovestep:   mover %s org=%.0f %.0f %.0f abs=[%.0f %.0f %.0f]..[%.0f %.0f %.0f] | foot=%.0f %.0f %.0f\n",
+			PR_GetString (check->v.classname),
+			check->v.origin[0], check->v.origin[1], check->v.origin[2],
+			check->v.absmin[0], check->v.absmin[1], check->v.absmin[2],
+			check->v.absmax[0], check->v.absmax[1], check->v.absmax[2],
+			foot[0], foot[1], foot[2]);
+	}
+}
+
+/*
+=============
+SV_DebugMoveStep_Call
+
+One line per SV_CheckBottom call under a negative sv_debugmovestep: the
+answer, which test decided it, the absolute corner box the function sampled
+(mins/maxs as it computed them), the entity's own bbox and its .hull.  Every
+return in SV_CheckBottom goes through here; engine/tests/sv_checkbottom_test.c
+fails if one does not.
+=============
+*/
+static qboolean SV_DebugMoveStep_Call (const edict_t *ent, const vec3_t mins,
+				       const vec3_t maxs, qboolean ok,
+				       const char *why)
+{
+	if (sv_debugmovestep_calls)
+	{
+		SV_DebugMoveStep_Log (ent, NULL,
+			"CheckBottom call: %s, %s box=[%.1f %.1f %.1f]..[%.1f %.1f %.1f]"
+			" bbox=[%.0f %.0f %.0f]..[%.0f %.0f %.0f] hull=%.0f",
+			ok ? "pass" : "FAIL", why,
+			mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2],
+			ent->v.mins[0], ent->v.mins[1], ent->v.mins[2],
+			ent->v.maxs[0], ent->v.maxs[1], ent->v.maxs[2],
+			ent->v.hull);
+	}
+	return ok;
+}
+
 /*
 =============
 SV_CheckBottom
@@ -59,7 +203,8 @@ qboolean SV_CheckBottom (edict_t *ent)
 		}
 	}
 
-	return true;	// we got out easy
+	// we got out easy
+	return SV_DebugMoveStep_Call (ent, mins, maxs, true, "all corners over solid");
 
 realcheck:	// check it for real...
 
@@ -76,7 +221,11 @@ realcheck:	// check it for real...
 	ent->v.hull = save_hull;
 
 	if (trace.fraction == 1.0)
-		return false;
+	{
+		SV_DebugMoveStep_Log (ent, NULL, "CheckBottom: midpoint trace had no ground within 2*STEPSIZE down");
+		SV_DebugMoveStep_DumpMovers (start);
+		return SV_DebugMoveStep_Call (ent, mins, maxs, false, "midpoint has no ground");
+	}
 
 	mid = bottom = trace.endpos[2];
 
@@ -96,11 +245,21 @@ realcheck:	// check it for real...
 			if (trace.fraction != 1.0 && trace.endpos[2] > bottom)
 				bottom = trace.endpos[2];
 			if (trace.fraction == 1.0 || mid - trace.endpos[2] > STEPSIZE)
-				return false;
+			{
+				SV_DebugMoveStep_Log (ent, &trace,
+					"CheckBottom: corner (x=%d,y=%d) %s (mid=%.1f corner_z=%.1f)",
+					x, y,
+					(trace.fraction == 1.0) ? "off edge" : "drop > STEPSIZE",
+					mid, trace.endpos[2]);
+				SV_DebugMoveStep_DumpMovers (start);
+				return SV_DebugMoveStep_Call (ent, mins, maxs, false,
+					(trace.fraction == 1.0) ? "a corner is off an edge"
+								: "a corner drops > STEPSIZE");
+			}
 		}
 	}
 
-	return true;
+	return SV_DebugMoveStep_Call (ent, mins, maxs, true, "traced, corners within STEPSIZE");
 }
 
 
@@ -173,7 +332,10 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 			if (trace.fraction == 1)
 			{
 				if ( ((int)ent->v.flags & FL_SWIM) && SV_PointContents(trace.endpos) == CONTENTS_EMPTY )
+				{
+					SV_DebugMoveStep_Log (ent, &trace, "swim monster left water (frac=%.2f)", trace.fraction);
 					return false;	// swim monster left water
+				}
 				VectorCopy (trace.endpos, ent->v.origin);
 				if (relink)
 					SV_LinkEdict (ent, true);
@@ -185,6 +347,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 				break;
 		}
 
+		SV_DebugMoveStep_Log (ent, &trace, "flier blocked (frac=%.2f)", trace.fraction);
 		return false;
 	}
 
@@ -202,6 +365,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 
 	if (trace.allsolid)
 	{
+		SV_DebugMoveStep_Log (ent, &trace, "step-down trace allsolid (move=%.0f %.0f %.0f)", move[0], move[1], move[2]);
 		return false;
 	}
 
@@ -215,6 +379,9 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 		}
 		if (trace.allsolid || trace.startsolid)
 		{
+			SV_DebugMoveStep_Log (ent, &trace, "step-down still %s after retry (move=%.0f %.0f %.0f)",
+				trace.allsolid ? "allsolid" : "startsolid",
+				move[0], move[1], move[2]);
 			return false;
 		}
 	}
@@ -231,6 +398,8 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 			return true;
 		}
 
+		SV_DebugMoveStep_Log (ent, &trace, "walked off edge: no ground within 2*STEPSIZE down (move=%.0f %.0f %.0f)",
+			move[0], move[1], move[2]);
 		return false;	// walked off an edge
 	}
 
@@ -247,6 +416,7 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 			return true;
 		}
 
+		SV_DebugMoveStep_Log (ent, &trace, "CheckBottom failed at landing pos (groundent above)");
 		VectorCopy (oldorg, ent->v.origin);
 		return false;
 	}

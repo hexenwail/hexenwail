@@ -125,6 +125,8 @@ extern	cvar_t	sv_airaccelerate;
 extern	cvar_t	sv_wateraccelerate;
 extern	cvar_t	sv_friction;
 extern	cvar_t	sv_waterfriction;
+extern	cvar_t	sv_debugmovestep;
+extern void SV_DebugMoveStep_Changed (cvar_t *var);
 
 
 //============================================================================
@@ -1381,6 +1383,8 @@ static void SV_InitLocal (void)
 	Cvar_RegisterVariable (&sv_waterfriction);
 
 	Cvar_RegisterVariable (&sv_aim);
+	Cvar_RegisterVariable (&sv_debugmovestep);
+	Cvar_SetCallback (&sv_debugmovestep, SV_DebugMoveStep_Changed);
 
 	Cvar_RegisterVariable (&filterban);
 

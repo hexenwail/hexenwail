@@ -30,9 +30,15 @@
 # refusals and calls SV_CheckBottom 271 times, while village3 logs zero
 # refusals and still calls it 331 times.  A map reporting "no refused steps"
 # under both builds is therefore weak evidence, not strong: it says the two
-# builds refused the same nothing.  To see call-level behaviour you have to
-# instrument SV_CheckBottom itself -- issue #282 proposes doing that behind the
-# existing cvar so the next investigation does not need a throwaway build.
+# builds refused the same nothing.
+#
+# CALLS=1 closes that gap.  It passes a NEGATIVE budget, which makes
+# sv_debugmovestep also log every SV_CheckBottom call -- pass or fail, the test
+# that decided it, the corner box, the bbox and .hull (#282) -- so two builds
+# are diffed on decisions, not just failures.  The village3 above reads
+# "331 calls, all passed" instead of nothing.  Both engines must carry #282:
+# an older build reads a negative value as "log nothing", which the report
+# flags rather than calling it agreement.
 #
 # It also needs an idle machine.  Map load has to finish inside SETTLE, and
 # under a parallel nix build it does not: the same sweep that reports 532
@@ -64,7 +70,8 @@
 # serve.sh and headless-drive.sh, not something a build runs.
 #
 # Environment: SETTLE (seconds after map load, default 5), OBSERVE (seconds of
-# logging, default 15), BUDGET (sv_debugmovestep line budget, default 8000).
+# logging, default 15), BUDGET (sv_debugmovestep line budget, default 8000),
+# CALLS (1 = also log every SV_CheckBottom call, see above; default 0).
 #
 # Do not shorten OBSERVE below about 12 seconds.  The wanderers this eval rides
 # on take several seconds to get going, and village1 -- which reports 532 steps
@@ -73,7 +80,9 @@
 #
 set -uo pipefail
 
-usage() { sed -n '2,42p' "$0"; exit 2; }
+# The whole header comment, up to the line above `set -uo pipefail', so it
+# cannot drift out of step with a fixed line range again.
+usage() { sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 2; }
 [ $# -ge 4 ] || usage
 
 OUT="$1"; BASEDIR="$2"; ENGINE_A="$3"; ENGINE_B="$4"; shift 4
@@ -81,6 +90,15 @@ OUT="$1"; BASEDIR="$2"; ENGINE_A="$3"; ENGINE_B="$4"; shift 4
 SETTLE=${SETTLE:-5}
 OBSERVE=${OBSERVE:-15}
 BUDGET=${BUDGET:-8000}
+CALLS=${CALLS:-0}
+case "$BUDGET" in
+	''|*[!0-9]*|0) echo "eval: BUDGET must be a positive integer, not '$BUDGET'" >&2; exit 1 ;;
+esac
+case "$CALLS" in
+	0) CVAR_VALUE=$BUDGET ;;
+	1) CVAR_VALUE=-$BUDGET ;;
+	*) echo "eval: CALLS must be 0 or 1, not '$CALLS'" >&2; exit 1 ;;
+esac
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SERVE="$HERE/tools/serve.sh"
@@ -132,7 +150,7 @@ fi
 
 [ ${#MAPS[@]} -gt 0 ] || { echo "eval: no maps found in $BASEDIR" >&2; exit 1; }
 
-say "monster-walk eval: ${#MAPS[@]} maps, settle=${SETTLE}s observe=${OBSERVE}s"
+say "monster-walk eval: ${#MAPS[@]} maps, settle=${SETTLE}s observe=${OBSERVE}s calls=${CALLS}"
 say "  A = $ENGINE_A"
 say "  B = $ENGINE_B"
 say "follow with: tail -f $PROGRESS"
@@ -142,7 +160,7 @@ run_one() {
 	local engine="$1" map="$2" dest="$3" work
 	work="$OUT/.work"
 	printf 'map %s\nwait %s\nsv_debugmovestep %s\nwait %s\n' \
-		"$map" "$SETTLE" "$BUDGET" "$OBSERVE" |
+		"$map" "$SETTLE" "$CVAR_VALUE" "$OBSERVE" |
 		ENGINE="$engine" TIMEOUT=$((SETTLE + OBSERVE + 60)) \
 		"$SERVE" "$work" "$BASEDIR" >/dev/null 2>&1
 	grep '^sv_debugmovestep' "$work/qconsole.log" 2>/dev/null > "$dest"
@@ -152,8 +170,8 @@ run_one() {
 	! grep -qi "couldn't spawn server\|couldn't load" "$work/qconsole.log" 2>/dev/null
 }
 
-printf '%-12s %8s %8s %8s %8s  %s\n' \
-	map A_steps B_steps A_cbot B_cbot verdict > "$REPORT"
+printf '%-12s %8s %8s %8s %8s %8s %8s  %s\n' \
+	map A_lines B_lines A_cbot B_cbot A_calls B_calls verdict > "$REPORT"
 
 differ=0; missing=0; agreed=0; done_n=0
 for map in "${MAPS[@]}"; do
@@ -164,21 +182,31 @@ for map in "${MAPS[@]}"; do
 	run_one "$ENGINE_B" "$map" "$b" || ok=1
 
 	na=$(wc -l < "$a"); nb=$(wc -l < "$b")
-	ca=$(grep -c 'CheckBottom' "$a"); cb=$(grep -c 'CheckBottom' "$b")
+	# cbot: CheckBottom refusals; calls: per-call lines, CALLS=1 only
+	ca=$(grep 'CheckBottom' "$a" | grep -vc 'CheckBottom call')
+	cb=$(grep 'CheckBottom' "$b" | grep -vc 'CheckBottom call')
+	ka=$(grep -c 'CheckBottom call' "$a"); kb=$(grep -c 'CheckBottom call' "$b")
 
 	if [ "$ok" != 0 ]; then
 		verdict="MAP NOT LOADED"
 		missing=$((missing + 1))
 	elif [ "$na" = 0 ] && [ "$nb" = 0 ]; then
-		# Not "nothing moved" -- nothing was REFUSED.  See the header.
-		verdict="no refused steps (weak)"
+		# Not "nothing moved" -- nothing was REFUSED (or, under CALLS=1,
+		# SV_CheckBottom was never reached either).  See the header.
+		verdict="no lines from either build (weak)"
 		agreed=$((agreed + 1))
+	elif [ "$na" = 0 ] || [ "$nb" = 0 ]; then
+		# The common prefix is empty, so a diff would call this agreement.
+		# Under CALLS=1 it is usually a build without #282 reading the
+		# negative budget as "log nothing".
+		verdict="DIFFERS -- one build logged nothing"
+		differ=$((differ + 1))
 	else
 		# Common prefix only; see the header for why the totals may differ.
 		n=$(( na < nb ? na : nb ))
 		if diff -u <(head -n "$n" "$a") <(head -n "$n" "$b") > "$OUT/$map.diff"; then
 			rm -f "$OUT/$map.diff"
-			verdict="identical (${n} steps compared)"
+			verdict="identical (${n} lines compared)"
 			agreed=$((agreed + 1))
 		else
 			verdict="DIFFERS -- see $map.diff"
@@ -186,9 +214,9 @@ for map in "${MAPS[@]}"; do
 		fi
 	fi
 
-	printf '%-12s %8s %8s %8s %8s  %s\n' \
-		"$map" "$na" "$nb" "$ca" "$cb" "$verdict" >> "$REPORT"
-	say "[$done_n/${#MAPS[@]}] $map: A=$na B=$nb cbot=$ca/$cb -- $verdict"
+	printf '%-12s %8s %8s %8s %8s %8s %8s  %s\n' \
+		"$map" "$na" "$nb" "$ca" "$cb" "$ka" "$kb" "$verdict" >> "$REPORT"
+	say "[$done_n/${#MAPS[@]}] $map: A=$na B=$nb cbot=$ca/$cb calls=$ka/$kb -- $verdict"
 done
 
 rm -rf "$OUT/.work"
