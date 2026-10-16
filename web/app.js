@@ -5,7 +5,7 @@ import {
   getBaseAssetStatus, mapImportedPath, normalizeGamedirName, planCanonicalRenames, sanitizeGamedirName,
 } from './lib/paths.js';
 import {
-  buildEngineArguments, detectModGamedirs, hasMissionPack, mapModImportPath, MISSION_PACK, modImportRoot,
+  buildEngineArguments, detectModGamedirs, hasMissionPack, launchChoiceForGamedir, mapModImportPath, MISSION_PACK, modImportRoot,
   modOwnedPath, modPanelNote, parseLaunchChoice, planModZipImport,
 } from './lib/mods.js';
 import {
@@ -1328,11 +1328,29 @@ function replayLastLayoutVerdict() {
   }
 }
 
-async function handleEngineQuit(kind = 'quit', message = '') {
+// The engine reports the gamedir it quit in; the in-game MODS menu may have
+// moved it since launch (GitHub #171).  Only a clean quit is adopted: a fatal
+// may be the switch itself failing, and the choice that launched is the
+// safer one to keep.
+function adoptQuitGamedir(gamedir) {
+  if (!modsAreLaunchable()) return;
+  const choice = launchChoiceForGamedir(gamedir, {
+    mods: getDetectedMods(), missionPack: missionPackInstalled(),
+  });
+  if (choice === null || choice === getSelectedMod()) return;
+  state.preferences.mod = choice;
+  savePreferences();
+  logToConsole('[mod]', `the game was switched in-session; the launcher now starts ${choice || 'the base game'}`);
+}
+
+async function handleEngineQuit(kind = 'quit', message = '', gamedir = '') {
   if (state.quitInProgress) return;
   state.quitInProgress = true;
   releasePhoneInputs();
   const intentional = kind === 'quit';
+  if (intentional) {
+    adoptQuitGamedir(gamedir);
+  }
   try {
     setStatus(intentional ? 'Hexenwail quit. Syncing saves…' : `Engine stopped unexpectedly. Syncing saves…`, intentional ? 'info' : 'error');
     await syncRuntimeToStorage();
@@ -1909,7 +1927,7 @@ function bindBootCallbacks() {
     announceEngineReady();
     updateLaunchState();
   };
-  boot.onQuit = (detail) => handleEngineQuit(detail?.kind ?? 'quit', detail?.message ?? '');
+  boot.onQuit = (detail) => handleEngineQuit(detail?.kind ?? 'quit', detail?.message ?? '', detail?.gamedir ?? '');
 
   if (boot.runtimeInitialized) {
     queueMicrotask(async () => {
@@ -2007,7 +2025,7 @@ async function init() {
   globalThis.visualViewport?.addEventListener('resize', scheduleCanvasResize);
   globalThis.visualViewport?.addEventListener('scroll', scheduleCanvasResize);
   addEventListener('hexenwailquit', (event) => {
-    handleEngineQuit(event.detail?.kind ?? 'quit', event.detail?.message ?? '').catch((error) => console.warn(error));
+    handleEngineQuit(event.detail?.kind ?? 'quit', event.detail?.message ?? '', event.detail?.gamedir ?? '').catch((error) => console.warn(error));
   });
   // 'pagehide' fires on tab close, app switch (iPadOS Safari/PWA backgrounding),
   // and bfcache eviction; 'beforeunload' and 'freeze' are extra safety nets so
