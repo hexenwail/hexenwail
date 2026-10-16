@@ -11,12 +11,11 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (52)
+## P2 — worth doing (51)
 
 - **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
-- **Entities behind sky-windowed openings are z-rejected again (uhexen2-4h32 regressed by the ixdb fix)** `uhexen2-7pyq` — Reinstates uhexen2-4h32, which 95896e59c intentionally reverted.
 - **Regaining window focus re-grabs the mouse while a menu is open, killing menu hover** `uhexen2-cbbx` — Hit head-on while driving the mods menu under Xvfb: menu hover did nothing until the engine was launched with '+_enable_mouse 0'.
 - **Faint scanline on tile floors during forward motion — SoT Arena, Clean preset** `uhexen2-ebpk` — Bob Bobber (Intel Iris Xe / Mesa, laptop) observed a very subtle horizontal line visible on tile floors during forward motion in SoT Arena with the Clean display preset.
 - **Mathuzzz: console will not close (typing half fixed at the root; close-to-nowhere half remains)** `uhexen2-lx4m` — Two console/input-focus items from Mathuzzz, Discord 2026-08-23, both re-confirmed against the latest build: * 'console won't close' * 'you cannot write into the console in the menu after it…
@@ -161,6 +160,6 @@ here.
 - **macOS packaging — .app bundle, code signing, notarization** `uhexen2-q7df` *(blocked)* — Produce a proper .app bundle with an Info.plist, then code-sign and notarize it. Without notarization Gatekeeper blocks the app for every user who did not build it themselves, so this is a h…
 - **Add darwin to the flake and an APPLE branch to CMake** `uhexen2-q88b` *(blocked)* — flake.nix must gain aarch64-darwin and x86_64-darwin systems with a working package. engine/CMakeLists.txt must gain an explicit APPLE branch before the UNIX branch so macOS does not inherit…
 - **HiDPI/Retina validation on macOS** `uhexen2-u8a8` *(blocked)* — SDL_WINDOW_HIGH_PIXEL_DENSITY is already set at gl_vidsdl.c, but the Retina backing scale interacts with the render-scale and vid_scale features and has never been exercised.
-- **Demo-mode polish: mods menu not gated** `uhexen2-ulh5` — Four demo/mod polish items. Item (1), the genuine demo progs.dat (CRC 16640) printing 'Third-party', is fixed: it reads 'Raven demo' since `fix(progs): name Raven's 1997 demo gamecode instead of "Third-party" (part of #171)`. The rest are tracked on GitHub #171.
+- **Demo-mode polish: README wording and launcher/engine gamedir sync** `uhexen2-ulh5` — Four demo/mod polish items. Item (1), the genuine demo progs.dat (CRC 16640) printing 'Third-party', is fixed: it reads 'Raven demo' since `fix(progs): name Raven's 1997 demo gamecode instead of "Third-party" (part of #171)`. Item (2), the ungated MODS menu, is fixed by `fix(menu): mods need the full game, and the menu says so (#171)`. The rest are tracked on GitHub #171.
 - **Exclude web/test/ from the published Pages artifact** `uhexen2-wq4h` — The pages.yml workflow's cp -r web/. dist/ ships the test files in the deployed PWA. Pre-existing in the ported fork code, harmless but dead weight in the deploy.
 - **Audit tail: remaining latent divergences and perf-trade gates** `uhexen2-xzkn` — Umbrella issue listing items deliberately deferred from the 2026-08-18 rendering audit, with file:line each:

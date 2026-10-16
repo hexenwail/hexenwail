@@ -758,7 +758,9 @@ void Draw_BigCharacter (int x, int y, int num)
 		dest = vid.buffer + (y + ypos) * vid.rowbytes + x;
 		for (xpos = 0; xpos < 19; xpos++, dest++, source++)
 		{
-			if (*source)
+			/* Draw_SetCharacterAlpha fades it by ordered stipple, as the
+			 * other glyph paths do (the dimmed MODS row, #171). */
+			if (*source && Draw_CharacterPixelPasses (x + xpos, y + ypos))
 			{
 				*dest = *source;
 			}

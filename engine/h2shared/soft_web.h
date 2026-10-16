@@ -100,4 +100,9 @@ void Sky_LoadSkyBox (const char *name);
 /* Implemented by draw_soft_web.c; called once from Draw_Init(). */
 void Draw_SoftWebInit (void);
 
+/* Does pixel (x, y) survive the current Draw_SetCharacterAlpha?  The same
+ * ordered stipple Draw_AlphaPic uses, for glyph paths that write the
+ * framebuffer directly (draw.c's Draw_BigCharacter).  GitHub #171. */
+qboolean Draw_CharacterPixelPasses (int x, int y);
+
 #endif	/* __HX2_SOFT_WEB_H */

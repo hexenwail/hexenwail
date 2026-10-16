@@ -1282,7 +1282,27 @@ void Draw_SetCharacterAlpha (float a)
 {
 	if (a < 0.0f) a = 0.0f;
 	else if (a > 1.0f) a = 1.0f;
+	if (a == char_batch_alpha)
+		return;
+
+	/* 2D draws alpha-test at 0.666 with blending off (GL_Set2D), so a glyph
+	 * faded below two thirds was discarded outright and one above it drew
+	 * opaque: the dimmed MODS row vanished (#171), and the demo bar's fade
+	 * was a cut.  A faded batch blends, and its cut-off scales with it, so
+	 * the font's transparent texels still drop and the rest fades.  Queued
+	 * quads go out first, under the state they were queued for. */
+	Draw_FlushCharBatch ();
 	char_batch_alpha = a;
+	if (a < 1.0f)
+	{
+		R_SetBlend (true);
+		GL_SetAlphaThreshold (0.666f * a);
+	}
+	else
+	{
+		R_SetBlend (false);
+		GL_SetAlphaThreshold (0.666f);
+	}
 }
 
 /*
