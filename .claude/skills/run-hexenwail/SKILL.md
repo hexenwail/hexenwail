@@ -186,7 +186,8 @@ lands on MODS and shows `Hexen II` / `Portal of Praevus (none)`.)
 Step verbs: `shot NAME`, `shotf NAME` (no settle, for time series),
 `key KEYSYM`, `keyn KEYSYM N`, `type TEXT`, `enter TEXT`, `console`,
 `cmd TEXT` (console + command + console), `hold KEYSYM SECS`, `mouse X Y`,
-`click [BUTTON]`, `wipe`, `sleep SECS`, `# comment`. An unknown verb aborts
+`click [BUTTON]`, `wipe`, `blur` / `focus` (move X input focus off the engine and back,
+which is how a window-manager-less Xvfb does alt-tab), `sleep SECS`, `# comment`. An unknown verb aborts
 the run rather than being skipped.
 
 To reach the world instead of a menu, pass `+map demo1` as a trailing engine

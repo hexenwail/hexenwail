@@ -878,6 +878,9 @@ void IN_ActivateMouse (void)
 			SDL_SetWindowRelativeMouseMode(VID_GetWindow(), true);
 			/* discard any stale relative motion */
 			SDL_GetRelativeMouseState (NULL, NULL);
+			/* Who holds the pointer is invisible in a screenshot and
+			 * decides whether menu hover works at all (#91). */
+			Con_DPrintf ("mouse: captured\n");
 		}
 	    }
 	}
@@ -890,8 +893,60 @@ void IN_DeactivateMouse (void)
 		mouseactivatetoggle = false;
 		mouseactive = false;
 		SDL_SetWindowRelativeMouseMode(VID_GetWindow(), false);
+		Con_DPrintf ("mouse: released\n");
 	    }
 	}
+}
+
+/*
+===========
+IN_MenuOwnsPointer / IN_ReactivateMouse / IN_MenuPointerFollowDest
+
+Who holds the pointer: an open menu, or the game.  GitHub #91.
+
+Relative mode stops SDL tracking the pointer, and the menus read the pointer
+for hover (menu_mouse_x/y, from SDL_EVENT_MOUSE_MOTION).  So a menu has to
+hold it free, and the game has to take it back when the menu closes.  That
+used to be done call site by call site: the main menu released it, a dozen
+menu exits captured it, and every path that captured on its own -- the
+window regaining focus, unpausing, _enable_mouse changing, a video restart,
+the borderless toggle -- did so with the menu still up, so the window's
+first focus or an alt-tab back left the menu with dead hover.  Menus opened
+from the game by key (save, load, options, quit, class) never released it at
+all, and exits that forgot to capture left the game with no mouselook.
+
+Now the transition decides: Key_SetDest calls IN_MenuPointerFollowDest when
+the destination enters or leaves key_menu, and the capture-on-their-own paths
+go through IN_ReactivateMouse.
+
+A menu holds the pointer only with ui_mouse on.  With it off the menus take
+no pointer input, and a captured mouse is what lets Key Setup bind a mouse
+button: with the mouse released, the button handler drops presses unless
+ui_mouse forwards them, and it forwards only button 1.
+
+Keyed on the key destination rather than menu_disabled_mouse: that flag is
+written in five places and read in one, while key_menu is what the menu
+input path itself tests.  key_menubind carries the key_menu bit.
+===========
+*/
+qboolean IN_MenuOwnsPointer (void)
+{
+	return (Key_GetDest () & key_menu) && ui_mouse.integer;
+}
+
+void IN_ReactivateMouse (void)
+{
+	if (IN_MenuOwnsPointer ())
+		return;
+	IN_ActivateMouse ();
+}
+
+void IN_MenuPointerFollowDest (void)
+{
+	if (IN_MenuOwnsPointer ())
+		IN_DeactivateMouse ();
+	else
+		IN_ActivateMouse ();
 }
 
 static void IN_StartupMouse (void)
@@ -905,10 +960,12 @@ static void IN_StartupMouse (void)
 	old_mouse_x = old_mouse_y = 0;
 	mouseinitialized = true;
 	IN_ApplyRawInput();
-	if (_enable_mouse.integer)
+	/* A video restart from the Display menu lands here with the menu up. */
+	if (_enable_mouse.integer && !IN_MenuOwnsPointer ())
 	{
 		mouseactivatetoggle = true;
 		mouseactive = true;
+		Con_DPrintf ("mouse: captured\n");
 		SDL_SetWindowRelativeMouseMode(VID_GetWindow(), true);
 		SDL_GetRelativeMouseState (NULL, NULL);
 	}
@@ -1455,7 +1512,7 @@ void IN_SendKeyEvents (void)
 		{
 		case SDL_EVENT_WINDOW_FOCUS_GAINED:
 			S_UnblockSound();
-			IN_ActivateMouse();
+			IN_ReactivateMouse();
 			scr_skipupdate = 0;
 			break;
 		case SDL_EVENT_WINDOW_FOCUS_LOST:

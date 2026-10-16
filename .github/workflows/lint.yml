@@ -168,6 +168,12 @@ jobs:
       - name: r_wateralpha re-uploads EF_TRANSPARENT skins
         run: python3 tools/test_wateralpha_reupload.py
 
+      # Relative mouse mode kills menu hover.  Focus regained, unpause and
+      # _enable_mouse took the mouse back behind an open menu, and the
+      # Options menu grabbed it every frame (GitHub #91).
+      - name: A menu keeps the pointer free
+        run: python3 tools/test_menu_mouse_grab.py
+
       # ARE_WE_IRONWAIL_YET.md carries a summary table over rows kept further
       # down the same file, and the two drift every time somebody flips a row
       # by hand.  The file records this happening in 2026-08-20 and twice on

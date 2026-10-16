@@ -43,6 +43,12 @@ void IN_ClearStates (void);
 
 void IN_ActivateMouse (void);
 void IN_DeactivateMouse (void);
+/* Whether an open menu holds the pointer for hover (it does only with
+ * ui_mouse on).  IN_ReactivateMouse captures unless it does; Key_SetDest
+ * calls IN_MenuPointerFollowDest when a menu opens or closes.  GitHub #91. */
+qboolean IN_MenuOwnsPointer (void);
+void IN_ReactivateMouse (void);
+void IN_MenuPointerFollowDest (void);
 void IN_ShowMouse (void);
 void IN_HideMouse (void);
 

@@ -849,7 +849,10 @@ void M_Menu_Main_f (void)
 {
 	// Deactivate the mouse when the menus are drawn
 	menu_disabled_mouse = true;
-	IN_DeactivateMouse ();
+	/* Reached from a submenu too, where no Key_SetDest transition fires;
+	 * with ui_mouse off the menus leave the mouse captured (#91). */
+	if (IN_MenuOwnsPointer ())
+		IN_DeactivateMouse ();
 
 	if (!(Key_GetDest() & key_menu))
 	{
@@ -2693,9 +2696,13 @@ void M_DrawCheckbox (int x, int y, int on)
 
 static void M_Options_Draw (void)
 {
-	menu_disabled_mouse = false;
-	IN_ActivateMouse ();
-
+	/* This used to take the mouse back every frame (menu_disabled_mouse =
+	 * false; IN_ActivateMouse), from uHexen2's single Options page, where
+	 * the mouse speed slider sat beside the mouse you were tuning.  Options
+	 * is a hub of submenus now, and relative mode stops the pointer hover
+	 * the menus read, so it left Options and every submenu reached from it
+	 * with dead hover.  The main menu released the mouse; leaving the menus
+	 * takes it back.  GitHub #91. */
 	ScrollTitle("gfx/menu/title3.lmp");
 
 	M_Print (76, 92 + 8*OPT_CUSTOMIZE,	"Key Setup");
