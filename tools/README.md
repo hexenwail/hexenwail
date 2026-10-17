@@ -25,6 +25,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `headless-drive.sh` | drive the engine's menus under Xvfb with real key events |
 | `serve.sh` | drive the dedicated server (`h2ded`) on stdin, with no X at all |
 | `hw-drive.sh` | run `hwsv` and a client connected to it, and screenshot the HexenWorld session |
+| `pimp-nodlight-check.sh` | **local, needs Storm over Thyrion in `sot/`**: live end-to-end check that `misc_modelpimp` spawnflag 64 turns a model's dynamic lights off -- loads a SoT map twice through an external `.ent` (control, then with a flag-64 pimp added) and compares `r_dlightinfo` / `mcache` (#140) |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |
 | `test_demobar_copies.py` | fail if the software renderer's `SCR_DrawDemoBar` (`screen.c`) drifts from the GL one (`gl_screen.c`) beyond the two allowed lines (#123) |
 | `pak2pk3.py` | convert a retail v1.11 `data1` or `portals`, the Nov. 1997 demo's `data1`, or HexenWorld 0.14 - 0.15's `hw` from `pakN.pak` to `000-pakN.pk3` (DEFLATE, same members, order, duplicates and bytes; verified before it is renamed into place). Refuses content the engine would not identify as a pk3, such as the OEM release and pre-1.11 installs (#130). `--loose` packs the loose game files into `zz-loose.pk3`. Retail data1: paks 98 MB to 46 MB (#129) |
