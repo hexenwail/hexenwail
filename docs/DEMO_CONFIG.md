@@ -73,10 +73,36 @@ bgmvolume 1.0
   Negative hides the bar entirely, 0 pins it up for the whole demo.
 - Standard cvars: `fov`, `host_maxfps`, `gamma`, `contrast`, `bgmvolume`, `volume`, etc.
 
+## Playback Controls
+
+While a demo plays (and no menu or console is open):
+
+| Key | Does |
+|---|---|
+| Space | pause / resume |
+| Up / Down | double / halve the base speed (1/4x to 8x) |
+| Right arrow (held) | fast-forward at 5x the base speed |
+| Left arrow (held) | rewind at 5x the base speed |
+| Shift or Ctrl (held) | quarter whatever the above chose |
+
+Rewind goes back as far as the start of the current level (or a static object
+spawned mid-demo, which it cannot undo); holding it there freezes on the first
+frame. Fog and skybox changes are not rewound. Sounds do not replay while rewinding, and particles
+are cleared and respawn from their emitters.
+
+`demoseek <seconds>` jumps to that point on the demo clock (forward or back);
+`demoseek` alone prints the current time.
+
+How rewind works: about once a second of demo time the client state is saved
+as a keyframe (~20 KB). A rewind step restores the nearest earlier keyframe and
+silently re-reads the demo forward to the exact time. Hexen II's entity updates
+are deltas against a rolling reference frame, so Ironwail's approach of
+re-reading one message back cannot work here (GitHub #76).
+
 ## The Playback Bar
 
 During playback the engine draws a bar above the status bar showing the demo
-name, the play/pause state, how far through the file playback has reached, and
+name, the play/pause/rewind state (`>`, `II`, `>>`, `<<`), how far through the file playback has reached, and
 the elapsed map time. It appears when the demo starts and whenever input
 reaches the demo -- a mouse click, say -- then fades out after
 `scr_demobar_timeout` seconds of no interaction.

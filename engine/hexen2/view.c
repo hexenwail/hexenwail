@@ -1257,6 +1257,26 @@ void V_RenderView (void)
 V_Init
 =============
 */
+/* Demo rewind (cl_demo.c, GitHub #76): the damage kick and punch a message
+ * sets, and the empty-contents shift a stuffed v_cshift sets. */
+void V_SaveState (demostate_t *s)
+{
+	DemoState_Put (s, &v_dmg_time, sizeof(v_dmg_time));
+	DemoState_Put (s, &v_dmg_roll, sizeof(v_dmg_roll));
+	DemoState_Put (s, &v_dmg_pitch, sizeof(v_dmg_pitch));
+	DemoState_Put (s, v_punchangles, sizeof(v_punchangles));
+	DemoState_Put (s, &cshift_empty, sizeof(cshift_empty));
+}
+
+void V_RestoreState (const byte **cur)
+{
+	DemoState_Get (cur, &v_dmg_time, sizeof(v_dmg_time));
+	DemoState_Get (cur, &v_dmg_roll, sizeof(v_dmg_roll));
+	DemoState_Get (cur, &v_dmg_pitch, sizeof(v_dmg_pitch));
+	DemoState_Get (cur, v_punchangles, sizeof(v_punchangles));
+	DemoState_Get (cur, &cshift_empty, sizeof(cshift_empty));
+}
+
 void V_Init (void)
 {
 	unsigned int	i;

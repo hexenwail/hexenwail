@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # Demo rewind: keyframes and silent replay (#76).
+      - name: Demo rewind
+        run: python3 tools/test_demo_rewind.py
+
       # joy_always_active gates rumble and gyro (#409).
       - name: joy_always_active
         run: python3 tools/test_joy_always_active.py
