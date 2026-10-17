@@ -422,6 +422,21 @@
 
           default = self.packages.${system}.nixos-bundled;
 
+          # The desktop client on the GL ES 3.0 tier (-DUSE_GLES=ON): the
+          # render path the WebGL2 build takes, compiled natively so CI can
+          # gate it on every push.  Without an output it could only be built
+          # by hand, so ES-tier breakage surfaced in the browser first
+          # (GitHub #150 d).  Engine only, like .#nixos.
+          gles = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
+            pname = "hexenwail-gles";
+            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DUSE_GLES=ON" ];
+            installPhase = ''
+              runHook preInstall
+              install -Dm755 bin/glhexen2 $out/bin/glhexen2
+              runHook postInstall
+            '';
+          });
+
           # Dedicated server (h2ded) — headless, links only libm/libc.
           # A separate output rather than a flag on `nixos` so CI can build it
           # on every push: nothing else compiles the SERVERONLY half of the
