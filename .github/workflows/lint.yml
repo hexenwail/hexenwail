@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # Maps browser skill step resumes an autosave (#410).
+      - name: Maps browser resume
+        run: python3 tools/test_maps_resume.py
+
       # sv_autoload: death loads the last save on this map (#410).
       - name: sv_autoload
         run: python3 tools/test_sv_autoload.py

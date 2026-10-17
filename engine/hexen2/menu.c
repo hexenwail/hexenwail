@@ -34,6 +34,8 @@
 #include "sbar.h"
 #include "menu_pointer.h"
 #include "sdl_inc.h"
+#include <sys/stat.h>
+#include <time.h>
 
 void (*vid_menudrawfn)(void);
 
@@ -8759,6 +8761,8 @@ typedef struct
 	qboolean	is_start;
 } mapentry_t;
 
+static void M_Maps_OpenSkill (const mapentry_t *e);
+
 static mapentry_t	maps_list[MAPS_MAX];
 static int	maps_count;
 static int	maps_view[MAPS_MAX];
@@ -9246,11 +9250,143 @@ static void M_Maps_Key (int key)
 	case K_GP_A:
 		if (maps_view_count <= 0)
 			break;
+		M_Maps_OpenSkill (&maps_list[maps_view[maps_cursor]]);
+		break;
+	}
+}
+
+//=============================================================================
+/* MAP SKILL STEP -- Ironwail's M_Menu_Skill_f, after a map is picked.
+ *
+ * Pick a skill to start the map fresh, or, when the map has an autosave,
+ * "Resume last game" -- which is how an autosave is reached from the menus at
+ * all: M_ScanSaves only enumerates the numbered slots.  The skill names are
+ * the current class's, as on the New Game difficulty menu.  Resume is
+ * preselected when present, else the current skill, as upstream.  GitHub #410.
+ */
+
+static char	mapskill_name[MAX_QPATH];
+static char	mapskill_title[64];
+static int	mapskill_cursor;
+static qboolean	mapskill_canresume;
+static time_t	mapskill_lastplayed;	/* 0: unknown */
+#define	MAPSKILL_RESUME		NUM_DIFFLEVELS
+#define	MAPSKILL_RESUME_Y	(60 + NUM_DIFFLEVELS * 20 + 4)
+
+static void M_Maps_OpenSkill (const mapentry_t *e)
+{
+	char		info[MAX_OSPATH];
+	struct stat	st;
+	int		error_state;
+
+	q_strlcpy (mapskill_name, e->name, sizeof(mapskill_name));
+	q_strlcpy (mapskill_title, e->title[0] ? e->title : e->name, sizeof(mapskill_title));
+
+	mapskill_canresume = false;
+	mapskill_lastplayed = 0;
+	FS_MakePath_BUF (FS_USERDIR, &error_state, info, sizeof(info),
+			 va("autosave/%s/info.dat", e->name));
+	if (!error_state && stat (info, &st) == 0)
+	{
+		mapskill_canresume = true;
+		if (st.st_mtime <= time (NULL))
+			mapskill_lastplayed = st.st_mtime;
+	}
+
+	if (mapskill_canresume)
+		mapskill_cursor = MAPSKILL_RESUME;
+	else
+		mapskill_cursor = CLAMP (0, skill.integer, NUM_DIFFLEVELS - 1);
+	m_state = m_mapskill;
+	m_entersound = true;
+}
+
+/* "3 minutes", "2 hours", "5 days": Ironwail's COM_DescribeDuration, coarse. */
+static const char *M_DescribeAge (time_t then)
+{
+	long	s = (long) difftime (time (NULL), then);
+
+	if (s < 60)		return va("%ld second%s", s, s == 1 ? "" : "s");
+	if (s < 3600)		return va("%ld minute%s", s / 60, s / 60 == 1 ? "" : "s");
+	if (s < 86400)		return va("%ld hour%s", s / 3600, s / 3600 == 1 ? "" : "s");
+	return va("%ld day%s", s / 86400, s / 86400 == 1 ? "" : "s");
+}
+
+static int M_MapSkill_Items (void)
+{
+	return NUM_DIFFLEVELS + (mapskill_canresume ? 1 : 0);
+}
+
+static void M_MapSkill_Draw (void)
+{
+	int	i, cls, f, h;
+
+	ScrollTitle("gfx/menu/title5.lmp");
+	M_PrintWhite ((320 - (int)strlen(mapskill_title) * 8) / 2, 44, mapskill_title);
+
+	cls = cl_playerclass.integer;
+	if (cls < 1 || cls > MAX_PLAYER_CLASS)
+		cls = MAX_PLAYER_CLASS;
+	if (cls > MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES && !(gameflags & GAME_PORTALS))
+		cls = MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES;
+	for (i = 0; i < NUM_DIFFLEVELS; ++i)
+		M_DrawBigString (72, 60 + (i * 20), DiffNames[cls - 1][i]);
+
+	if (mapskill_canresume)
+	{
+		M_Print (72, MAPSKILL_RESUME_Y, "Resume last game");
+		if (mapskill_lastplayed)
+			M_Print (72, MAPSKILL_RESUME_Y + 8, va("from %s ago", M_DescribeAge (mapskill_lastplayed)));
+	}
+
+	h = M_MouseToMenuItem (menu_mouse_y, 60, 20, NUM_DIFFLEVELS);
+	if (h >= 0)
+		mapskill_cursor = h;
+	else if (mapskill_canresume && M_MouseToMenuItem (menu_mouse_y, MAPSKILL_RESUME_Y - 4, 20, 1) >= 0)
+		mapskill_cursor = MAPSKILL_RESUME;
+
+	f = (int)(realtime * 10) % 8;
+	M_DrawTransPic (43, (mapskill_cursor == MAPSKILL_RESUME) ? MAPSKILL_RESUME_Y - 6 : 54 + mapskill_cursor * 20,
+			Draw_CachePic(va("gfx/menu/menudot%i.lmp", f + 1)));
+}
+
+static void M_MapSkill_Key (int key)
+{
+	switch (key)
+	{
+	case K_ESCAPE:
+	case K_GP_B:
+		m_state = m_maps;
+		m_entersound = true;
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (++mapskill_cursor >= M_MapSkill_Items ())
+			mapskill_cursor = 0;
+		break;
+
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (--mapskill_cursor < 0)
+			mapskill_cursor = M_MapSkill_Items () - 1;
+		break;
+
+	case K_ENTER:
+	case K_GP_A:
 		m_entersound = true;
 		Key_SetDest (key_game);
 		m_state = m_none;
 		M_Filter_Clear ();
-		Cbuf_AddText (va("map %s\n", maps_list[maps_view[maps_cursor]].name));
+		if (sv.active)
+			Cbuf_AddText ("disconnect\n");
+		if (mapskill_cursor == MAPSKILL_RESUME)
+			Cbuf_AddText (va("load \"autosave/%s\"\n", mapskill_name));
+		else
+		{
+			Cbuf_AddText (va("skill %d\n", mapskill_cursor));
+			Cbuf_AddText (va("map %s\n", mapskill_name));
+		}
 		break;
 	}
 }
@@ -9987,6 +10123,10 @@ void M_Draw (void)
 		M_Maps_Draw ();
 		break;
 
+	case m_mapskill:
+		M_MapSkill_Draw ();
+		break;
+
 	case m_help:
 		/* Help pics are full-screen sized — render in CANVAS_DEFAULT,
 		 * then put the menu canvas back so the post-switch teardown
@@ -10527,6 +10667,10 @@ void M_Keydown (int key, qboolean repeat)
 
 	case m_maps:
 		M_Maps_Key (key);
+		return;
+
+	case m_mapskill:
+		M_MapSkill_Key (key);
 		return;
 
 	case m_help:
