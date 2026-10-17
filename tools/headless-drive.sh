@@ -217,12 +217,20 @@ echo "display $DISP, engine $ENGINE, basedir $BASEDIR"
 # its traps, bwrap still tears the sandbox down (PDEATHSIG down the chain)
 # instead of leaving an engine holding the display.
 #
+# The userdir gets the same treatment.  An outdir under $HOME (a job's scratch
+# dir, say) puts $WORK/userdir behind the HOME bind, so the engine wrote its
+# qconsole.log, config and saves into $WORK/home/<that path>/userdir instead,
+# and this script's copy-out -- and hw-drive.sh's signon check, which reads
+# that copy -- found nothing: "the client never signed on" for a session that
+# had.  Binding it over itself, after HOME, keeps it where it is read.
+#
 # LD_LIBRARY_PATH is dropped for the engine: a nix-built binary carries its own
 # rpath, and a host value pointing at a library built against a newer glibc
 # kills it before main() with "version `GLIBC_2.43' not found".
 bwrap --dev-bind / / \
       --die-with-parent \
       --bind "$WORK/home" "$HOME" \
+      --bind "$WORK/userdir" "$WORK/userdir" \
       --ro-bind "$BASEDIR" "$BASEDIR" \
       --ro-bind "$ENGINE_DIR" "$ENGINE_DIR" \
   env -u LD_LIBRARY_PATH \
