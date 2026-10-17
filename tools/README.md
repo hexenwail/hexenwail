@@ -25,6 +25,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `headless-drive.sh` | drive the engine's menus under Xvfb with real key events |
 | `serve.sh` | drive the dedicated server (`h2ded`) on stdin, with no X at all |
 | `hw-drive.sh` | run `hwsv` and a client connected to it, and screenshot the HexenWorld session |
+| `web-drive.mjs` | drive the web player page in headless Chromium (boot, start prompt, running, drawer, files menu; desktop or emulated phone) and screenshot each phase |
 | `hw-master-check.sh` | `hwmaster` plus two `hwsv`: both must appear in `hwmquery`'s list, and one that quits over `hwrcon` must leave it (heartbeat and shutdown, #38); retail data, local only |
 | `pimp-nodlight-check.sh` | **local, needs Storm over Thyrion in `sot/`**: live end-to-end check that `misc_modelpimp` spawnflag 64 turns a model's dynamic lights off -- loads a SoT map twice through an external `.ent` (control, then with a flag-64 pimp added) and compares `r_dlightinfo` / `mcache` (#140) |
 | `pak_extract.py` | extract textures/skins/GFX from a PAK to PNG |

@@ -19,6 +19,32 @@ This repository now includes a GitHub-Pages-deployable, installable PWA shell fo
 
 User-imported assets are mirrored into the runtime filesystem before `main()` is called.
 
+## The page
+
+The page is the game, laid out after quake-srp's player
+(<https://quake-srp.pages.dev>): a 4:3 view sized to the window, one line under
+it, and a drawer with everything else.
+
+- **First visit, no game data:** the page fetches Raven's free 1997 demo by
+  itself (13 MB from archive.org, verified against known hashes before anything
+  is written), with the progress in the view. Files the player has stored are
+  never touched; a browser that cannot unpack the archive is told to add files.
+- **Start:** "click (or press Enter) to play". The whole view is the button,
+  because audio and pointer lock need a user gesture. With Portal of Praevus or
+  a mod in storage (and the full game), the choices show under the prompt.
+- **The bar:** wordmark, a one-line status, then fullscreen, keys (opens the
+  drawer), files (add files or a folder, the free demo, stop & sync, remove
+  everything) and source.
+- **The drawer:** Raven's default controls, the console cheats, the game and
+  mod choice and mod import, save bundles, touch settings, storage, the runtime
+  log, credits.
+- **Drop** files anywhere on the page to import them.
+- **Fullscreen** is the stage element, so the chips and touch controls come
+  along. The engine never takes the window fullscreen in the browser: SDL3
+  implements that as "fill document", which hid the whole page while playing.
+  Its own toggle (Alt+Enter, the video menu) asks the page instead
+  (`Module.hexenwailToggleFullscreen`, `gl_vidsdl.c`).
+
 ## Local build
 
 **Use the scripts.** `scripts/wasm-build.sh` and `scripts/wasm-assemble-artifact.sh`
@@ -157,21 +183,21 @@ All launcher URLs are relative (`./...`) so the site works under project Pages p
 2. Wait for the first online load to finish.
 3. Use **Share → Add to Home Screen**.
 4. Launch the installed app.
-5. Import your legally acquired Hexen II assets:
+5. With nothing imported it fetches the free demo. For the full game, add your
+   legally acquired Hexen II assets with **files** (or drop them on the page):
    - loose `.pak` / `.ogg` files
    - a directory selected with the folder picker (where supported)
    - or a `.zip` archive
-6. Press **Start game** (**Start game (demo)** when only `pak0.pak` is present).
-   Importing assets never starts the engine on its own, so the launcher stays
-   reachable and a pending shell update can install first.
+6. Tap the view to start. Importing assets never starts the engine on its own,
+   so a pending shell update can install first.
 
 Use assets from your own copy of Hexen II / Portal of Praevus, for example from GOG or Steam. This project does **not** include game data.
 
 ## Phone mode
 
 On phone-sized coarse-pointer devices, starting the engine switches the page from
-the launcher into a game-focused viewport: the header and import panels disappear,
-the canvas fills the visual viewport, safe-area insets are honored, page scrolling
+the page into a game-focused viewport: the bar and the drawer disappear,
+the view fills the visual viewport, safe-area insets are honored, page scrolling
 is disabled only while playing, and resize/rotation events are forwarded to the
 SDL/WebAssembly renderer. Landscape is strongly recommended on iPhone because it
 leaves room for the game view plus touch controls.
@@ -179,16 +205,16 @@ leaves room for the game view plus touch controls.
 The in-game **☰** button opens a small phone overlay. It can resume play, send
 Escape to the engine menu, or **Sync & exit to launcher**. The latter first
 syncs the runtime filesystem to browser storage and then reloads the page to get
-a fresh WebAssembly runtime. The launcher's own **Exit to launcher** button does
-the same thing from a desktop or tablet layout, and is enabled only while the
-engine is running.
+a fresh WebAssembly runtime. **stop & sync** in the files menu does the same
+thing from a desktop or tablet layout, and is enabled only while the engine is
+running.
 
 Selecting **Quit** inside Hexen II uses a browser-specific Emscripten path: the
 engine performs its normal shutdown, cancels the browser main loop, notifies the
 launcher, and the launcher syncs saves before returning to a stopped launcher
 state. The current WASM runtime is treated as not safely restartable after this
-shutdown, so the launcher shows **Restart game**, which performs the same
-sync-then-reload flow. Fatal engine errors are reported separately and also ask
+shutdown, so the view shows "stopped — click (or press Enter) to restart",
+which performs the same sync-then-reload flow. Fatal engine errors are reported separately and also ask
 for a clean restart.
 
 ### Touch mappings
