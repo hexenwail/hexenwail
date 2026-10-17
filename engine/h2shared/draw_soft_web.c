@@ -148,6 +148,13 @@ float SCR_CalcUIScale (cvar_t *user)
 	return 1.0f;
 }
 
+/* The menu canvas is 200 lines from the top here (no scaling): see gl_draw.c's
+ * Draw_MenuReachesLine.  GitHub #135. */
+qboolean Draw_MenuReachesLine (int y)
+{
+	return 200 > y;
+}
+
 /* No scr_pixelaspect on this target (see vid_soft_web.c), so the gui extent is
  * the framebuffer.  uhexen2-a5nn.37 */
 void SCR_GuiSize (int *w, int *h)

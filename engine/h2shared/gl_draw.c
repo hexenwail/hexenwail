@@ -2018,6 +2018,28 @@ void Draw_MenuBackdrop (void)
 	Draw_ConsoleVersionInfo (vid.height);
 }
 
+/*
+================
+Draw_MenuReachesLine
+
+Whether the menu's 320x200 canvas, as GL_SetCanvas places it, reaches down to
+line y of CANVAS_DEFAULT.  Both canvases span the screen height, the menu one
+at gh/s logical units, so its 200-unit bottom lands at 200*s/gh of the height.
+At 320x200 that is the whole screen, and the bottom-line labels (renderer name,
+version watermark) would print over the menu's last row.  GitHub #135.
+================
+*/
+qboolean Draw_MenuReachesLine (int y)
+{
+	int	gw, gh;
+	float	s;
+
+	SCR_GuiSize (&gw, &gh);
+	s = SCR_CalcUIScale (&scr_menuscale);
+	s = q_min (s, (float)gw / 320.0f);
+	return 200.0f * s / (float)gh * (float)vid.height > (float)y;
+}
+
 static void Draw_ConsoleVersionInfo (int lines)
 {
 	static const char ver[] = ENGINE_WATERMARK;
@@ -2027,6 +2049,10 @@ static void Draw_ConsoleVersionInfo (int lines)
 	 * unsquashed geometry and are not a canvas extent.  uhexen2-a5nn.37 */
 	int x = vid.width - (strlen(ver) * 8 + 11);
 	int y = lines - 14;
+
+	/* Behind an open menu that reaches this line, the menu wins. */
+	if (Key_GetDest () == key_menu && Draw_MenuReachesLine (y))
+		return;
 	for (; *ptr; ++ptr)
 		Draw_Character (x + (int)(ptr - ver) * 8, y, *ptr | 0x100);
 }
