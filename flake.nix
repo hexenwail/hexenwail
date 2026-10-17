@@ -893,10 +893,14 @@
             fi
             # libsndfile left the bundle on purpose (GitHub #168); a dependency
             # that brings it back should fail here, not ship.
-            if ls $out/lib/libsndfile.so* >/dev/null 2>&1; then
-              echo "linux-fhs: libsndfile is bundled again (see fluidsynthPortable)" >&2
-              exit 1
-            fi
+            # A loop, not `ls glob`: the builder runs with nullglob, so an
+            # unmatched glob expands to nothing and `ls` lists the cwd instead.
+            for f in $out/lib/libsndfile.so*; do
+              if [ -e "$f" ]; then
+                echo "linux-fhs: libsndfile is bundled again (see fluidsynthPortable)" >&2
+                exit 1
+              fi
+            done
           '';
 
 
