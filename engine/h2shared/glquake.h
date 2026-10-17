@@ -672,7 +672,6 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
 void R_BuildFrustum (const vec3_t origin, const vec3_t pn, const vec3_t right,
 		     const vec3_t up, float fov_x, float fov_y, mplane_t out[4]);
 void R_AnimateLight(void);
-int R_LightPoint (vec3_t p);
 float R_LightPointColor (vec3_t p, lightcache_t *cache);
 void GL_BuildLightmaps (void);
 void R_BuildWorldVBO (void);

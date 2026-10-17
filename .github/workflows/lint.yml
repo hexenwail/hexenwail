@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # The rendering audit's deferred tail (#174).
+      - name: Rendering audit tail
+        run: python3 tools/test_audit_tail_174.py
+
       # sv_maxdatagram caps the per-frame datagram (#82).
       - name: sv_maxdatagram
         run: python3 tools/test_sv_maxdatagram.py
