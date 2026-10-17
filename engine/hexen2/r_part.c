@@ -2133,7 +2133,12 @@ void R_UpdateParticles (void)
 	if (!cl.worldmodel)
 		return;
 
-	frametime = host_frametime;
+	/* Render rate, for smooth motion -- but not while the game is paused.
+	 * Upstream stepped particles by cl.time - cl.oldtime, which a pause
+	 * holds at 0; host_frametime keeps running, so snow, rain and smoke
+	 * kept moving under the PAUSED plaque (and, their die times being in
+	 * cl.time, fell forever).  Seen while signing off #84. */
+	frametime = cl.paused ? 0.0f : host_frametime;
 //	Con_Printf("%10.5f\n", frametime);
 	time4 = frametime * 20;
 	time3 = frametime * 15;
