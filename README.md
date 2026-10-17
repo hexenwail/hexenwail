@@ -73,6 +73,7 @@ Planned:
 - Lightmap atlas, batched world draws, hardware-instanced alias models
 - Unified-shader brush entity batched dispatch (`r_brush_inst`, default on) — same compiled program as world surfaces so within-shader `invariant gl_Position` covers coplanar joins
 - MSAA, FXAA, anisotropic filtering
+- Entity contact occlusion (`r_ssao` 1-3, off by default): vkQuake's XeGTAO port, darkening the world only where a monster, item or door stands on it, since the world's own corners are already in its lightmaps
 - Render scale (25–100%), retro dithering mode
 - Display presets: Faithful / Crunchy / Retro / Clean / Modern / Ultra
 - Brightness/contrast via post-process shader

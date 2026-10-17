@@ -213,6 +213,37 @@ typedef int64_t  GLint64;
 #ifndef GL_RGBA32F	/* MBOIT moment target (gl_postprocess.c, #87); absent from the mingw headers */
 #define GL_RGBA32F				0x8814
 #endif
+/* r_ssao's targets and barriers (gl_ssao.c, #188); the mingw headers lack them. */
+#ifndef GL_R8
+#define GL_R8					0x8229
+#endif
+#ifndef GL_RG16F
+#define GL_RG16F				0x822F
+#endif
+#ifndef GL_R16UI
+#define GL_R16UI				0x8234
+#endif
+#ifndef GL_DEPTH_STENCIL_ATTACHMENT
+#define GL_DEPTH_STENCIL_ATTACHMENT		0x821A
+#endif
+#ifndef GL_DEPTH24_STENCIL8
+#define GL_DEPTH24_STENCIL8			0x88F0
+#endif
+#ifndef GL_READ_ONLY
+#define GL_READ_ONLY				0x88B8
+#endif
+#ifndef GL_READ_WRITE
+#define GL_READ_WRITE				0x88BA
+#endif
+#ifndef GL_WRITE_ONLY
+#define GL_WRITE_ONLY				0x88B9
+#endif
+#ifndef GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
+#define GL_SHADER_IMAGE_ACCESS_BARRIER_BIT	0x00000020
+#endif
+#ifndef GL_TEXTURE_UPDATE_BARRIER_BIT
+#define GL_TEXTURE_UPDATE_BARRIER_BIT		0x00000100
+#endif
 #ifndef GL_RGB10_A2
 #define GL_RGB10_A2				0x8059
 #endif
