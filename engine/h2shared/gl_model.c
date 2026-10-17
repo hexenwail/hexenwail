@@ -34,6 +34,7 @@ static qmodel_t*	loadmodel;
 static char	loadname[MAX_QPATH];	/* for hunk tags */
 
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
+static void Mod_ClearLerpPairs (qmodel_t *mod);
 static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
@@ -790,6 +791,11 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	COM_FileBase (mod->name, loadname, sizeof(loadname));
 
 	loadmodel = mod;
+	/* Whatever loads into this slot measures its own pose pairs, or has
+	 * none: an r_enhancedmodels MD3/MD5 substitute never runs
+	 * Mod_ComputeFlipbookRatio, and must not inherit the .mdl's table
+	 * (GitHub #94). */
+	Mod_ClearLerpPairs (mod);
 
 //
 // fill it in
@@ -4254,9 +4260,11 @@ A flipbook (flames, torches, waterfalls, explosions whose 'frames' are
 unrelated geometry sheets) has pose deltas comparable to the model's
 own size, so the ratio approaches 1.0.  Real deforming animations
 (walk, swing, breathe) have small per-tick deltas, so the ratio is
-small.  Stored on mod->flipbook_max_ratio and consulted by
-Mod_SetExtraFlags so the threshold cvar can be tuned at runtime
-without re-reading pose data.
+small.  The worst is stored on mod->flipbook_max_ratio (for `modellist`), and
+every measured pair on mod->lerp_next / lerp_ratio, which R_AliasResolveLerp
+reads against the threshold cvar -- so the cvar still tunes at runtime without
+re-reading pose data, and a model loses blending only on the pairs that are
+too far apart rather than everywhere (GitHub #94).
 
 Callers must invoke this BEFORE Hunk_FreeToLowMark in the load path,
 while the poseverts[] global still points into the working buffer.
@@ -4300,18 +4308,35 @@ static qboolean Mod_FramesAreSequential (const char *a, const char *b)
 	return (atoi(b + nb) == atoi(a + na) + 1);
 }
 
+/* No measured pairs: nothing snaps by the heuristic.  GitHub #94. */
+static void Mod_ClearLerpPairs (qmodel_t *mod)
+{
+	int	i;
+
+	mod->flipbook_max_ratio = 0.0f;
+	mod->lerp_states_only = false;
+	for (i = 0; i < MAXALIASFRAMES; i++)
+	{
+		mod->lerp_next[i] = -1;
+		mod->lerp_ratio[i] = 0;
+	}
+}
+
 static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 {
 	extern trivertx_t *poseverts[];
 	int   f, i, v, numverts;
 	int   pass, measured = 0;
+	qboolean states_only = false;
 	float max_ratio = 0.0f;
 	float bbox_diag, dx, dy, dz;
 	float sx, sy, sz;
 
-	mod->flipbook_max_ratio = 0.0f;
+	if (!mod)
+		return;
+	Mod_ClearLerpPairs (mod);
 
-	if (!mod || mod->type != mod_alias || !hdr)
+	if (mod->type != mod_alias || !hdr)
 		return;
 	if (hdr->numposes < 2 || hdr->numverts < 1)
 		return;
@@ -4348,6 +4373,8 @@ static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 	{
 		if (pass == 1 && measured > 0)
 			break;
+		if (pass == 1)
+			states_only = true;	/* pass 0 found no animation runs */
 
 		for (f = 0; f < hdr->numframes; f++)
 		{
@@ -4425,11 +4452,19 @@ static void Mod_ComputeFlipbookRatio (qmodel_t *mod, aliashdr_t *hdr)
 				measured++;
 				if (ratio > max_ratio)
 					max_ratio = ratio;
+				if (a >= 0 && a < MAXALIASFRAMES)
+				{
+					float q = ratio * 10000.0f + 0.5f;
+					mod->lerp_next[a] = (short) b;
+					mod->lerp_ratio[a] = (q >= 65535.0f) ? 65535 : (unsigned short) q;
+				}
 			}
 		}
 	}
 
 	mod->flipbook_max_ratio = max_ratio;
+	/* Everything measured came from pass 1: standalone states only. */
+	mod->lerp_states_only = states_only && measured > 0;
 }
 
 /*
@@ -4439,18 +4474,18 @@ Mod_SetExtraFlags -- Ironwail (johnfitz)
 Apply engine-side flags to an alias model from cvar-driven lists
 (currently r_nolerp_list).  Called at model load and on cvar change.
 
-uhexen2-f807: also union in MOD_NOLERP for models whose load-time
-flipbook ratio exceeds r_lerp_autodetect_threshold.  The static list
-remains an explicit override (curated entries always win); the
-heuristic catches new flipbook models — typically mods — without
-maintenance.
+The geometry heuristic (r_lerp_autodetect) no longer sets MOD_NOLERP here: it
+used to, for the whole model, whenever its worst pose pair crossed the
+threshold, so one violent death frame took blending away from the idle, walk
+and run too (models/golem_i.mdl lost it all over Rpound11 -> Rpound12, while
+golem_s, at 0.345 on the same animation, kept it).  It is decided per pose
+pair in R_AliasResolveLerp now (GitHub #94).  r_nolerp_list still turns a
+whole model off by name.
 =================
 */
 void Mod_SetExtraFlags (qmodel_t *mod)
 {
 	extern cvar_t r_nolerp_list;
-	extern cvar_t r_lerp_autodetect;
-	extern cvar_t r_lerp_autodetect_threshold;
 	extern cvar_t r_noshadow_list;
 
 	if (!mod || mod->type != mod_alias)
@@ -4468,10 +4503,6 @@ void Mod_SetExtraFlags (qmodel_t *mod)
 	 * load or cvar change. */
 	if (nameInList (r_noshadow_list.string, mod->name))
 		mod->flags |= MOD_NOSHADOW;
-
-	if (r_lerp_autodetect.integer &&
-	    mod->flipbook_max_ratio > r_lerp_autodetect_threshold.value)
-		mod->flags |= MOD_NOLERP;
 }
 
 /*
@@ -5518,6 +5549,18 @@ static void Mod_Print (void)
 			MOD_Printf (FH, " flipratio=%.3f", mod->flipbook_max_ratio);
 		if (mod->type == mod_alias && (mod->flags & MOD_NOLERP))
 			MOD_Printf (FH, " NOLERP");
+		/* Pairs r_lerp_autodetect snaps instead of blending (GitHub #94). */
+		if (mod->type == mod_alias)
+		{
+			extern cvar_t r_lerp_autodetect, r_lerp_autodetect_threshold;
+			int	p, snapped = 0;
+			for (p = 0; p < MAXALIASFRAMES; p++)
+				if (mod->lerp_next[p] >= 0 &&
+				    mod->lerp_ratio[p] > r_lerp_autodetect_threshold.value * 10000.0f)
+					snapped++;
+			if (snapped && r_lerp_autodetect.integer)
+				MOD_Printf (FH, " snaps=%d", snapped);
+		}
 		/* Engine-assigned light/glow group, so a modder can confirm an
 		 * r_dlight_model_list entry actually took -- without this there is
 		 * no way to tell a mistyped model name from a light that is being

@@ -167,6 +167,11 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # r_lerp_autodetect snaps the violent pose pairs, not the whole model
+      # (GitHub #94).
+      - name: Lerp autodetect per pose pair
+        run: python3 tools/test_lerp_pair_snaps.py
+
       # The headless driver's sandbox keeps the engine userdir where the
       # script reads it, even for an outdir under $HOME.
       - name: Headless driver binds

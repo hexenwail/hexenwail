@@ -11,9 +11,8 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (50)
+## P2 — worth doing (49)
 
-- **r_lerp_autodetect is all-or-nothing per model — one violent animation costs a model interpolation everywhere** `uhexen2-1ies` — Split out of uhexen2-aqm0. That bead fixed the heuristic measuring animation SEAMS (pairs the QC never blends).
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
 - **Regaining window focus re-grabs the mouse while a menu is open, killing menu hover** `uhexen2-cbbx` — Hit head-on while driving the mods menu under Xvfb: menu hover did nothing until the engine was launched with '+_enable_mouse 0'.

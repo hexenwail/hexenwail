@@ -481,9 +481,10 @@ cvar_t	r_noshadow_list = {"r_noshadow_list",
 	"models/xhair.mdl",
 	CVAR_NONE};
 /* uhexen2-f807: replace the maintenance treadmill of r_nolerp_list with
- * a geometry heuristic — at load each alias model's max pose-pair
- * displacement (world units) is divided by its bbox diagonal, and any
- * ratio above the threshold flags MOD_NOLERP automatically.  The static
+ * a geometry heuristic — at load each alias model's pose-pair
+ * displacements (world units) are divided by its bbox diagonal, and a
+ * pair above the threshold is drawn snapped instead of blended (per
+ * pair since GitHub #94; it used to turn the whole model off).  The static
  * list above remains an explicit override (curated entries always win).
  * Threshold tuning happens at runtime: load a map, toggle, observe.
  * Disable with r_lerp_autodetect 0 to fall back to list-only.  Threshold
@@ -1998,6 +1999,31 @@ Outputs:
   *out_blend -- 0.0 = full pose1, 1.0 = full pose2
 =================
 */
+/* True when r_lerp_autodetect measured the pose pair (either direction: some
+ * animations are played backwards) and found it too far apart to blend.  A
+ * pair it never measured -- a jump between animations -- blends, as it
+ * always did.  So does a skip: a client that never draws pose B blends A -> C
+ * straight across a violent B, which the old whole-model flag snapped.  The
+ * cost of keeping walk cycles smooth; rare, since a skipped pose is under a
+ * frame long.  GitHub #94. */
+static qboolean R_AliasPairSnaps (const qmodel_t *m, int a, int b)
+{
+	float	limit;
+
+	if (!r_lerp_autodetect.integer || a == b)
+		return false;
+	/* Standalone states only (no animation runs): the QC jumps between them
+	 * freely, so pairs go unmeasured -- keep the whole-model verdict. */
+	if (m->lerp_states_only)
+		return m->flipbook_max_ratio > r_lerp_autodetect_threshold.value;
+	limit = r_lerp_autodetect_threshold.value * 10000.0f;
+	if (a >= 0 && a < MAXALIASFRAMES && m->lerp_next[a] == b && m->lerp_ratio[a] > limit)
+		return true;
+	if (b >= 0 && b < MAXALIASFRAMES && m->lerp_next[b] == a && m->lerp_ratio[b] > limit)
+		return true;
+	return false;
+}
+
 static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 				int *out_pose1, int *out_pose2, float *out_blend)
 {
@@ -2101,6 +2127,7 @@ static void R_AliasResolveLerp (entity_t *e, aliashdr_t *paliashdr,
 
 	if (r_lerpmodels.integer && !model_fullbright_pass &&
 	    !(e->model->flags & MOD_NOLERP) && e->lerptime > 0.0f &&
+	    !R_AliasPairSnaps (e->model, e->previouspose, e->currentpose) &&
 	    (e != &cl.viewent || r_lerp_viewmodel.integer))
 	{
 		/* Halve the effective lerp duration so the blend completes in
