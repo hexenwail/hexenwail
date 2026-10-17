@@ -576,6 +576,14 @@ static GLuint GL_LoadProgramSplit (const char *vert_header, const char *vert_src
 	return prog;
 }
 
+/* A program whose stages carry no #version of their own (engine/shaders):
+ * each gets its header as a separate source chunk.  gl_ssao.c. */
+GLuint GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
+			      const char *frag_header, const char *frag_src)
+{
+	return GL_LoadProgramSplit (vert_header, vert_src, frag_header, frag_src);
+}
+
 GLuint GL_LoadProgram (const char *vert_src, const char *frag_src)
 {
 	return GL_LoadProgramSplit (NULL, vert_src, NULL, frag_src);

@@ -23,6 +23,7 @@
 #include "gl_shader.h"
 #include "gl_uniforms.h"
 #include "gl_lightcluster.h"
+#include "gl_ssao.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_matrix.h"
@@ -6389,6 +6390,10 @@ static void R_RenderScene (void)
 	R_DrawWorld ();		// adds static entities to the list
 	RPROF_CPU_END(rprof_cpu_drawworld);
 
+	/* r_ssao: the world's depth, before the sky or any entity writes some
+	 * (GitHub #188). */
+	R_SSAO_CaptureWorld ();
+
 	RPROF_CPU_BEGIN();
 	Sky_DrawSky ();		// render skybox
 	RPROF_CPU_END(rprof_cpu_sky);
@@ -6398,6 +6403,10 @@ static void R_RenderScene (void)
 	RPROF_CPU_BEGIN();
 	R_DrawEntitiesOnList ();
 	RPROF_CPU_END(rprof_cpu_ents);
+
+	/* r_ssao: the occlusion the entities add, onto the world, while the
+	 * world's fog is still the one in force (GitHub #188). */
+	R_SSAO_Apply ();
 
 	/* R_DrawAllGlows moved to R_RenderView, after OIT_EndTranslucency. */
 

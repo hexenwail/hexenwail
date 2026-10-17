@@ -21,6 +21,8 @@ GLuint	GL_LoadProgram (const char *vert_src, const char *frag_src);
  * Desktop GL 4.3 only -- the ES tier has no compute stage; callers gate on
  * gl_renderer_caps.compute_shaders.  uhexen2-h8yy. */
 GLuint	GL_LoadComputeProgram (const char *header, const char *body, const char *name);
+GLuint	GL_LoadProgramHeaders (const char *vert_header, const char *vert_src,
+			       const char *frag_header, const char *frag_src);
 
 /* Shader programs */
 typedef struct glprogram_s {

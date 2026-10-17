@@ -43,6 +43,7 @@
 #include "gl_postprocess.h"
 #include "gl_shader.h"
 #include "gl_lightcluster.h"
+#include "gl_ssao.h"
 #include "gl_pipeline.h"
 #include "gl_vbo.h"
 #include "gl_uniforms.h"
@@ -2452,6 +2453,7 @@ static void VID_ChangeVideoMode (int newmode)
 	GL_VBO_Shutdown();
 	R_GPU_Particles_Shutdown();
 	R_LightCluster_Shutdown();	/* before the shader manager: GL reuses program names */
+	R_SSAO_Shutdown ();	/* GitHub #188; GL reuses program names */
 	GL_Shaders_Shutdown();
 	R_Uniforms_Shutdown();
 #ifndef USE_GLES

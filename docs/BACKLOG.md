@@ -119,7 +119,6 @@ here.
 - **Decals system (blood, scorch marks)** `uhexen2-1ab` — Projected decals on world surfaces for impacts, blood, explosions.
 - **Screen-space reflections** `uhexen2-1b9` — Water and floor reflections via screen-space raymarching.
 - **Add AppImage build target to the release pipeline** `uhexen2-1k0s` — Ship a Hexenwail-<tag>-x86_64.AppImage release asset alongside the existing linux zip, windows zip, and flatpak bundle.
-- **Screen-space ambient occlusion (SSAO)** `uhexen2-2ob` — Post-process depth-based corner/cavity darkening.
 - **Per-brush-entity liquid properties** `uhexen2-3xjw` *(blocked)* — Mappers want control over liquid properties per brush entity: transparency, shadows, lighting, warp speed, color, movement speed. Requested by Mathuzzz for SoT-style mapping flexibility.
 - **FFmpeg audio plugin/backend** `uhexen2-4v6` — Consider an optional FFmpeg backend for broad audio format support (AC3, AAC, WMA, etc.) without adding individual codec libraries.
 - **PBR material support** `uhexen2-5z6` — Metallic/roughness workflow for hi-res texture packs.
