@@ -512,6 +512,8 @@ extern	cvar_t	gl_overbright;
 extern	cvar_t	r_lightmap_bicubic;
 extern	cvar_t	gl_fxaa;
 extern	cvar_t	gl_lmatlas;
+extern	cvar_t	r_gpulightstyles;	/* GitHub #439 */
+void R_LightStyles_FrameSetup (void);	/* gl_rsurf.c: once per frame, before the world */
 extern	cvar_t	gl_glows;
 extern	cvar_t	gl_other_glows;
 extern	cvar_t	gl_missile_glows;

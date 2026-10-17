@@ -360,6 +360,7 @@ export async function extractEngineWebGLPrograms() {
   for (const name of ['GLSL_VERT_HEADER', 'GLSL_FRAG_HEADER', 'GLSL_EARLY_Z', 'GLSL_EARLY_Z_OPAQUE',
                       'GLSL_BITFIELD_REVERSE',
                       'GLSL_DLIGHT_DECL', 'GLSL_DLIGHT_FN', 'GLSL_DLIGHT_APPLY',
+                      'GLSL_LMSTYLES_DECL', 'GLSL_LMSTYLES_FN', 'GLSL_LMSTYLES_APPLY',
                       'GLSL_ALIAS_DLIGHT_DECL', 'GLSL_ALIAS_DLIGHT_FN', 'GLSL_ALIAS_DLIGHT_APPLY',
                       'GLSL_ALIAS_DLIGHT_VS_OUT', 'GLSL_ALIAS_DLIGHT_FS_IN',
                       'GLSL_ALIAS_DLIGHT_VS_CALC']) {
