@@ -1340,6 +1340,7 @@ static void SV_PrepareClientEntities (client_t *client, edict_t	*clent, sizebuf_
 	int			NumSorted;
 	int			ShedNearest;
 	qboolean		measuring;
+	int			trailer_reserve = DATAGRAM_TRAILER_RESERVE;
 	int			netsort_cutoff, bcount, cursize, prio, bytes;
 	int			binbytes[NETSORT_BINS];
 	entity_state2_t		scratch_ref, scratch_set;
@@ -1806,10 +1807,11 @@ skipA:
 		 *                  a subsequent zero-delta frame would then skip it and
 		 *                  leave it invisible until it next changed.
 		 *
-		 * DATAGRAM_TRAILER_RESERVE keeps room for the svc_clear_edicts trailer
-		 * written after the loop. */
+		 * trailer_reserve keeps room for the svc_clear_edicts trailer written
+		 * after the loop: the worst case, or the exact size once a measuring
+		 * pass has counted it. */
 		if (prio >= netsort_cutoff ||
-			cursize + bytes + DATAGRAM_TRAILER_RESERVE > msg->maxsize)
+			cursize + bytes + trailer_reserve > msg->maxsize)
 		{
 			*ref_ent = saved_ref;
 			NumShed++;
@@ -1905,7 +1907,14 @@ skipA:
 		/* Nothing was written, so msg->cursize is still just the
 		 * svc_reference header: everything after it, less the trailer, is
 		 * what the entity updates have to fit into. */
-		budget = msg->maxsize - DATAGRAM_TRAILER_RESERVE - msg->cursize;
+		/* The measuring pass ran the same removal decisions the write
+		 * pass will -- they read only entity state, the PVS and the
+		 * client's reference frame, none of which measuring touches -- so
+		 * the trailer's size is now known exactly rather than reserved for
+		 * the worst case.  512 bytes was 12.5% of a 4096 datagram and 37%
+		 * of an sv_maxdatagram 1400 one.  GitHub #82. */
+		trailer_reserve = 2 + 2 * NumToRemove;
+		budget = msg->maxsize - trailer_reserve - msg->cursize;
 
 		/* netsort_cutoff ends as the number of whole bins that fit, so the
 		 * write pass sheds everything from that bin outwards.  Reaching
@@ -1938,6 +1947,21 @@ skipA:
 	 * than as anything diagnosable (uhexen2-6ugh). */
 	if (NumToRemove > MAX_CLEAR_EDICTS_PER_MSG)
 		NumToRemove = MAX_CLEAR_EDICTS_PER_MSG;
+
+	/* The measured reserve is exact only if both passes made the same
+	 * removals, which they do (see the measuring block).  Should that ever
+	 * stop being true, an svc_clear_edicts that does not fit would overflow
+	 * the message and drop the client; say so loudly instead and send the
+	 * removals that fit.  The ones cut would linger on the client as
+	 * ghosts, which is the lesser failure and one this message points at. */
+	if (msg->cursize + 2 + 2 * NumToRemove > msg->maxsize)
+	{
+		Con_Printf ("%s: removal trailer (%d) exceeds measured reserve (%d)\n",
+				__thisfunc__, 2 + 2 * NumToRemove, trailer_reserve);
+		NumToRemove = (msg->maxsize - msg->cursize - 2) / 2;
+		if (NumToRemove < 0)
+			NumToRemove = 0;
+	}
 
 	if (NumDeferred)
 		Con_DPrintf ("%s: remove list full, %d edict(s) deferred\n",
