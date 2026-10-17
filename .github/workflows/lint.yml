@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # cl_startmenu, Ironwail's start-at-the-menu toggle (#273).
+      - name: cl_startmenu
+        run: python3 tools/test_cl_startmenu.py
+
       # Demo rewind: keyframes and silent replay (#76).
       - name: Demo rewind
         run: python3 tools/test_demo_rewind.py

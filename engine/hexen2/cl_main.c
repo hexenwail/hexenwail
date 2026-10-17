@@ -107,6 +107,13 @@ cvar_t	freelook = {"freelook", "0", CVAR_ARCHIVE};
  * Costs nothing when the loop is off, and an imported config that says
  * `cl_startdemos 0` stops being an "Unknown command".  uhexen2-a5nn.34 */
 cvar_t	cl_startdemos = {"cl_startdemos", "1", CVAR_ARCHIVE};
+/* Ironwail's cl_startmenu (08d57813, after our parity baseline): 0 starts at
+ * the console (or straight into the demo loop) instead of the main menu.
+ * Hexen II's hexen.rc opens the menu itself -- `menu_main` after
+ * autoexec.cfg, which Quake's quake.rc does not have -- so this gates that
+ * call too (M_Menu_Main_Cmd_f), as well as upstream's in Host_Startdemos_f.
+ * The default, 1, is how this engine already started.  GitHub #273. */
+cvar_t	cl_startmenu = {"cl_startmenu", "1", CVAR_ARCHIVE};
 cvar_t	lookspring = {"lookspring", "0", CVAR_ARCHIVE};
 cvar_t	lookstrafe = {"lookstrafe", "0", CVAR_ARCHIVE};
 cvar_t	sensitivity = {"sensitivity", "3", CVAR_ARCHIVE};
@@ -1672,6 +1679,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&cl_startdemos);
+	Cvar_RegisterVariable (&cl_startmenu);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);

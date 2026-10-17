@@ -49,6 +49,7 @@ void Host_WriteConfiguration (const char *fname);
 quakeparms_t	*host_parms;
 
 qboolean	host_initialized;		// true if into command execution
+qboolean	host_startup_script;	/* see host.h */
 
 static jmp_buf	host_abort;
 
@@ -1618,8 +1619,10 @@ void Host_Init (void)
 	if (cls.state != ca_dedicated)
 	{
 		Cbuf_InsertText (Cmd_StartupScript ());
+		host_startup_script = true;
 		if (!setjmp(host_abort))		/* in case exec fails with a longjmp(), e.g. Host_Error() */
 			Cbuf_Execute ();
+		host_startup_script = false;
 	}
 
 	Cvar_UnlockAll ();				/* unlock the early-set cvars after init */

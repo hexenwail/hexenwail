@@ -847,6 +847,16 @@ static char	old_bgmtype[20];	// S.A
 static int	old_extmusic = -1;
 
 
+/* The `menu_main' command.  Ironwail's cl_startmenu 0 means "do not start at
+ * the menu", and in Hexen II it is hexen.rc that starts there, so the command
+ * stands down while the startup script runs.  GitHub #273. */
+static void M_Menu_Main_Cmd_f (void)
+{
+	if (host_startup_script && !cl_startmenu.integer)
+		return;
+	M_Menu_Main_f ();
+}
+
 void M_Menu_Main_f (void)
 {
 	// Deactivate the mouse when the menus are drawn
@@ -9954,7 +9964,7 @@ void M_Init (void)
 
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
-	Cmd_AddCommand ("menu_main", M_Menu_Main_f);
+	Cmd_AddCommand ("menu_main", M_Menu_Main_Cmd_f);
 	Cmd_AddCommand ("menu_singleplayer", M_Menu_SinglePlayer_f);
 	Cmd_AddCommand ("menu_load", M_Menu_Load_f);
 	Cmd_AddCommand ("menu_save", M_Menu_Save_f);
