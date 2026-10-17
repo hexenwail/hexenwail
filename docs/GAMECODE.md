@@ -329,10 +329,12 @@ gamecode/
 
 ### Three files, not five
 
-`hw/hwprogs.dat` and `siege/hwprogs.dat` are built but **not shipped**. No
-retail HexenWorld bytecode exists to compare them against, and this fork builds
-no HexenWorld engine, so they would be untested bytes. Deferred to
-`uhexen2-nr9l`. `flake.nix` names the three shipped files individually rather
+`hw/hwprogs.dat` and `siege/hwprogs.dat` are built but **not shipped** in the
+release zips. No retail HexenWorld bytecode exists to compare them against.
+The one place `hw/hwprogs.dat` does ship is `.#hwsv-bundled`, the HexenWorld
+server package: there it is the only gamecode `hwsv` can have, and `hwsv` loads
+it from beside the engine only when the gamedir holds none, so a copy the
+player installed always wins (#37). `siege/hwprogs.dat` ships nowhere yet. `flake.nix` names the three shipped files individually rather
 than copying the tree, so adding a sixth is a deliberate edit and a vanished
 path fails the build.
 

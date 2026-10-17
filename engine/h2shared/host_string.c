@@ -117,8 +117,7 @@ void Host_LoadStrings (void)
  * portals' table: wrong text on the client, and on the server PF_print_indexed
  * PR_RunErrors for every index past the end.  Tiers, most specific first:
  *   1. installed in the current gamedir (siege, hw, or a mod over hw)
- *   2. shipped beside the engine for that gamedir (PR_BundleDir; NULL in
- *      hwsv, which reads only the game directory)
+ *   2. shipped beside the engine for that gamedir (PR_BundleDir)
  *   3. installed in a HexenWorld layer below it (hw under a mod)
  *   4. hw's, shipped beside the engine
  *   5. compiled into the binary (hw_strings_data.h), so a bare retail

@@ -150,7 +150,7 @@ void PR_LoadProgs (void);
 /* Directory of the data shipped beside the engine (<exedir>/gamecode,
  * <exedir>/../share/hexenwail, ...), or NULL.  Per-gamedir subdirectories.
  * Every build, hwsv included: host_string.c reads HexenWorld's strings.txt
- * from it. */
+ * from it, and hwsv falls back to its hwprogs.dat (#37). */
 const char *PR_BundleDir (void);
 
 #if !defined(H2W)
