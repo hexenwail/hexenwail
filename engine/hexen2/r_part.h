@@ -37,6 +37,7 @@ extern int	r_numpointfile;
 extern qboolean	r_pointfile_isleak;
 
 void R_DrawParticles (void);
+void R_DrawParticles_ShowTris (void);	/* GL: r_showtris's pass, GitHub #81 */
 void R_InitParticles (void);
 void R_ClearParticles (void);
 #ifdef GLQUAKE
