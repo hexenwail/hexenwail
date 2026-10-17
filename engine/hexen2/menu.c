@@ -3095,8 +3095,10 @@ static void M_Display_AdjustSliders (int dir)
 		Cvar_SetValue ("gamma", f);
 		break;
 	case DISP_CONTRAST:
+		/* 1..2, Ironwail's range: contrast multiplies, and below 1 the
+		 * shader treats it as 1.  GitHub #112 follow-up. */
 		f = v_contrast.value + dir * 0.05;
-		if (f < 0.5)	f = 0.5;
+		if (f < 1)	f = 1;
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrast", f);
 		break;
@@ -3246,7 +3248,7 @@ static void M_Display_Draw (void)
 	if (!M_Display_IsSkip(DISP_CONTRAST))
 	{
 		M_Print (76, 92 + 8*DISP_CONTRAST, disp_labels[DISP_CONTRAST]);
-		r = (v_contrast.value - 0.5) / 1.5;
+		r = (v_contrast.value - 1.0) / 1.0;
 		M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
 	}
 
@@ -10094,7 +10096,7 @@ typedef struct
 static const menuslider_t	disp_sliders[] =
 {
 	{ DISP_GAMMA,		"gamma",	1.0f, 0.3f,	0.3f, 1.0f,	0.05f, NULL },
-	{ DISP_CONTRAST,	"contrast",	0.5f, 2.0f,	0.5f, 2.0f,	0.05f, NULL },
+	{ DISP_CONTRAST,	"contrast",	1.0f, 2.0f,	1.0f, 2.0f,	0.05f, NULL },
 #ifdef GLQUAKE
 	/* DISP_CONSCALE steps through VID_ChangeConsize, not a cvar: keys only */
 	{ DISP_MENUFADEALPHA,	"scr_menubgalpha", 0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },

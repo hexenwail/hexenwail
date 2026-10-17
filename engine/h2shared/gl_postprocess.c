@@ -147,6 +147,17 @@ static GLuint	pp_program;
 static GLint	pp_loc_scene;
 static GLint	pp_loc_gamma;
 static GLint	pp_loc_contrast;
+
+/* The contrast the shader applies: v_contrast clamped to Ironwail's 1..2
+ * (gl_rmain.c: q_min(2.0f, q_max(1.0f, vid_contrast.value))).  Below 1 it
+ * is identity, as upstream, not a darkening. */
+static float PP_Contrast (void)
+{
+	float c = v_contrast.value;
+	if (c < 1.0f) c = 1.0f;
+	if (c > 2.0f) c = 2.0f;
+	return c;
+}
 static GLint	pp_loc_mvp;
 static GLint	pp_loc_softemu;
 static GLint	pp_loc_dither;
@@ -493,7 +504,7 @@ static qboolean PP_NeedsPostProcess (void)
 {
 	if (!pp_initialized)
 		return false;
-	if (v_gamma.value != 1.0f || v_contrast.value != 1.0f)
+	if (v_gamma.value != 1.0f || PP_Contrast () != 1.0f)
 		return true;
 	if (r_scale.value < 1.0f)
 		return true;
@@ -925,8 +936,12 @@ static const char pp_frag_src[] =
 	"        vec3 x = color.rgb;\n"
 	"        color.rgb = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);\n"
 	"    }\n"
-	"    if (contrast != 1.0)\n"
-	"        color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
+	/* Ironwail's (and QuakeSpasm's, MarkV's) contrast: a multiplier, 1..2,
+	 * that brightens.  This was a stretch about mid-grey, which a dark
+	 * scene -- most of Hexen II -- read as darkening: contrast 1.5 took
+	 * demo1's mean from 0.107 to 0.018.  PP_Contrast clamps.  GitHub #112
+	 * follow-up. */
+	"    color.rgb *= contrast;\n"
 	"    if (gamma != 1.0)\n"
 	"        color.rgb = pow(max(color.rgb, vec3(0.0)), vec3(gamma));\n"
 	"    color.rgb = clamp(color.rgb, 0.0, 1.0);\n"
@@ -2934,7 +2949,7 @@ apply_shader:
 	if (pp_loc_gamma >= 0)
 		glUniform1f_fp(pp_loc_gamma, v_gamma.value);
 	if (pp_loc_contrast >= 0)
-		glUniform1f_fp(pp_loc_contrast, v_contrast.value);
+		glUniform1f_fp(pp_loc_contrast, PP_Contrast ());
 	if (pp_loc_hdr_exposure >= 0)
 		glUniform1f_fp(pp_loc_hdr_exposure, PP_HDRActive() ? r_hdr_exposure.value : 0.0f);
 
