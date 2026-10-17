@@ -130,7 +130,6 @@ here.
 - **Rain should use its own texture, not the shared particle sprite** `uhexen2-km0d` — Mathuzzz: rain particles are visually near-identical to snow because both draw from the same 2x2 particle atlas, so a downpour reads as drifting flakes rather than falling water.
 - **Depth of field post-process** `uhexen2-ljz` — Focal blur for cinematic feel. Toggle.
 - **Cascaded shadow maps** `uhexen2-oa9` — High-quality outdoor shadows with distance-based cascade levels.
-- **Load and walk a Quake BSP29 map as proof of concept** `uhexen2-q184` — Proof of concept only: load a Quake (id1) BSP29 map and walk around it in Hexenwail under Hexen II gamecode.
 - **Classic Software look: affine (perspective-incorrect) texture interpolation** `uhexen2-rwh6` — Item 3 of uhexen2-lpza's ranked list, the one part deliberately left out of that bead's first pass. lpza closed with palette quantization through Raven's colormap verified exact (100% of sce…
 - **Texture streaming (on-demand hi-res loading)** `uhexen2-xmz` — Load high-resolution textures on demand instead of all at startup.
 - **WASM: User game data upload (data1 PAK files)** `uhexen2-4zzm` — Allow users to upload their Hexen II data1 folder for web gameplay. Implement: (1) HTML5 file input for selecting data1 folder/pak files, (2) JavaScript file reader to load into Emscripten V…

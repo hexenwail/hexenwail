@@ -1186,6 +1186,9 @@ if(BUILD_TESTING)
     target_compile_definitions(brush_render_state_test PRIVATE
         BRUSH_TEST_ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME brush_render_state COMMAND brush_render_state_test)
+    # LUMP_MODELS in Hexen II's or Quake's layout (#169): header-only too.
+    add_executable(bsp_submodels_test tests/bsp_submodels_test.c)
+    add_test(NAME bsp_submodels COMMAND bsp_submodels_test)
     add_executable(host_tick_test tests/host_tick_test.c)
     add_test(NAME host_tick COMMAND host_tick_test)
     # Menu pointer geometry (issue #137): header-only, same cheap shape.

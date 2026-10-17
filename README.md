@@ -121,6 +121,7 @@ Planned:
 - TrueLightning (`cl_truelightning`)
 - Ships its own rebuilt `progs.dat`/`progs2.dat`/`portals/progs.dat` beside the executable and prefers it to your Hexen II install's copy — nothing is copied or overwritten on either platform, and a mod's own `progs.dat` (or anything you place in your user directory: `~/.local/share/hexen2`, or `~/.hexen2` if you already have one) always wins over ours. **Options → Game → Gamecode from** picks the source by *place*: `Bundled`, `Loose` (your install's own gamedir) or `Pak` (the pak copy specifically, offered when a loose file is shadowing it). `-vanillaprogs` outranks all three and opts back out to Raven's 1997 gamecode. The console names both the file and whose code it turned out to be at every map load. See `gamecode/README.txt`.
 - Mods can add their own rows to the Key Setup menu via `bindlist.lst`, merged alongside the engine's own key bindings
+- Loads Quake (id1) BSP29 / BSP2 maps as a proof of concept: the map draws and the player collides with it, under Hexen II gamecode. Quake textures go through Hexen II's palette, Quake entities with no Hexen II spawn function are dropped, and every clip hull but the point one is the player's. A Quake player start sits 24 units higher for Hexen II's player (Quake's origin is the box centre, Hexen II's the feet), so a start under a low ceiling is unstuck to the map origin. Quake gameplay is out of scope ([#169](https://github.com/hexenwail/hexenwail/issues/169))
 
 ### Mod showcase
 

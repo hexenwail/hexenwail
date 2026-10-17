@@ -23,6 +23,7 @@
  */
 
 #include "quakedef.h"
+#include "bsp_submodels.h"
 #include "hashindex.h"
 #include "hwal.h"
 #include "r_local.h"	/* MAXALIASVERTS, ALIAS_BASE_SIZE_RATIO */
@@ -836,34 +837,46 @@ static void Mod_LoadVertexes (lump_t *l)
 Mod_LoadSubmodels
 =================
 */
+/* Hexen II's 80-byte records or Quake's 64-byte ones: see bsp_submodels.h
+ * for how the layout is told apart, and GitHub #169 for why. */
 static void Mod_LoadSubmodels (lump_t *l)
 {
-	dmodel_t	*in;
+	const unsigned char	*in;
 	dmodel_t	*out;
-	int			i, j, count;
+	bsp_submodel_limits_t	lim;
+	int			i, j, count, stride;
 
-	in = (dmodel_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
+	in = (const unsigned char *)(mod_base + l->fileofs);
+	lim.numfaces = loadmodel->numsurfaces;
+	lim.numleafs = loadmodel->numleafs;
+	lim.numnodes = loadmodel->numnodes;
+	lim.numclipnodes = loadmodel->numclipnodes;
+	stride = BSP_SubmodelStride (in, l->filelen, &lim);
+	if (!stride)
 		Sys_Error ("%s: funny lump size in %s", __thisfunc__, loadmodel->name);
-	count = l->filelen / sizeof(*in);
+	count = l->filelen / stride;
 	out = (dmodel_t *) Hunk_AllocName (count * sizeof(*out), "submodels");
 
 	loadmodel->submodels = out;
 	loadmodel->numsubmodels = count;
 
-	for (i = 0; i < count; i++, in++, out++)
+	for (i = 0; i < count; i++, in += stride, out++)
+		BSP_ReadSubmodel (in, stride, out);
+
+	if (stride == BSP_SUBMODEL_STRIDE_Q1)
 	{
-		for (j = 0; j < 3; j++)
-		{	// spread the mins / maxs by a pixel
-			out->mins[j] = LittleFloat (in->mins[j]) - 1;
-			out->maxs[j] = LittleFloat (in->maxs[j]) + 1;
-			out->origin[j] = LittleFloat (in->origin[j]);
+		/* A Quake map builds no trees for Hexen II's hulls 2-5, so
+		 * BSP_ReadSubmodel pointed them at the player hull's.  Give them
+		 * its box too: SV_HullForEntity offsets by the hull's clip_mins,
+		 * and a box the tree was not built for would sink or float
+		 * whatever selects that hull. */
+		for (j = 2; j <= 5; j++)
+		{
+			VectorCopy (loadmodel->hulls[1].clip_mins, loadmodel->hulls[j].clip_mins);
+			VectorCopy (loadmodel->hulls[1].clip_maxs, loadmodel->hulls[j].clip_maxs);
 		}
-		for (j = 0; j < MAX_MAP_HULLS; j++)
-			out->headnode[j] = LittleLong (in->headnode[j]);
-		out->visleafs = LittleLong (in->visleafs);
-		out->firstface = LittleLong (in->firstface);
-		out->numfaces = LittleLong (in->numfaces);
+		Con_Printf ("%s: Quake BSP; every clip hull but the point one is the player's\n",
+			    loadmodel->name);
 	}
 }
 
