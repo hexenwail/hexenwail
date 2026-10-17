@@ -790,15 +790,32 @@
             # The engine uses fluidsynth only as an offline synth
             # (fluid_synth_write_s into its own mixer, midi_fluid.c), so none
             # of its audio drivers are needed -- and nixpkgs' hard-links
-            # PulseAudio, JACK and libgomp.  libsndfile stays: it is what
-            # loads SF3 (compressed) soundfonts, and its codecs are bundled.
+            # PulseAudio, JACK and libgomp.
+            #
+            # Nor libsndfile (GitHub #168).  fluidsynth needs it only to
+            # decode SF3 samples, and does so through sf_open_virtual with an
+            # autodetected format, so a crafted soundfont reaches every
+            # libsndfile parser -- 1.2.2, five open CVEs, no release since
+            # 2023.  patches/fluidsynth-sf3-vorbisfile.patch decodes SF3
+            # samples with libvorbisfile instead (already shipped for music),
+            # opening Ogg Vorbis and nothing else, with libsndfile's peak
+            # normalisation reproduced sample for sample.  SF3 keeps working;
+            # libsndfile and its FLAC/mpg123/LAME codecs leave the bundle.
             fluidsynthPortable = pkgs.fluidsynth.overrideAttrs (old: {
+              patches = (old.patches or []) ++ [ ./patches/fluidsynth-sf3-vorbisfile.patch ];
+              buildInputs = (pkgs.lib.filter (p: (p.pname or "") != "libsndfile") old.buildInputs)
+                ++ [ pkgs.libvorbis pkgs.libogg ];
               cmakeFlags = (old.cmakeFlags or []) ++ [
                 "-Denable-pulseaudio=off" "-Denable-jack=off" "-Denable-pipewire=off"
                 "-Denable-openmp=off" "-Denable-dbus=off" "-Denable-systemd=off"
                 "-Denable-sdl2=off" "-Denable-sdl3=off" "-Denable-portaudio=off"
                 "-Denable-readline=off" "-Denable-ladspa=off" "-Denable-oss=off"
+                "-Denable-libsndfile=off"
               ];
+              env = (old.env or {}) // {
+                NIX_CFLAGS_COMPILE = "-DHEXENWAIL_VORBISFILE";
+                NIX_LDFLAGS = "-lvorbisfile -lvorbis -logg";
+              };
             });
             # Taken from each package's library output (lib.getLib): the
             # default output of libsndfile and flac is "bin", so "${pkg}/lib"
@@ -808,10 +825,6 @@
               libvorbis
               libogg
               fluidsynthPortable
-              libsndfile
-              flac
-              mpg123
-              lame
               libxmp
               opusfile
               libopus
@@ -876,6 +889,12 @@
             done
             if [ -n "$missing" ]; then
               echo "linux-fhs: NEEDED neither bundled nor a host library:$missing" >&2
+              exit 1
+            fi
+            # libsndfile left the bundle on purpose (GitHub #168); a dependency
+            # that brings it back should fail here, not ship.
+            if ls $out/lib/libsndfile.so* >/dev/null 2>&1; then
+              echo "linux-fhs: libsndfile is bundled again (see fluidsynthPortable)" >&2
               exit 1
             fi
           '';
