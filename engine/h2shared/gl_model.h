@@ -489,6 +489,18 @@ typedef struct {
 	 * way.  Same reasoning Mod_LoadTextures uses on the world half. */
 	GLuint		gl_norm_texturenum[MAX_SKINS][4];	// _norm / _bump normal map
 	GLuint		gl_gloss_texturenum[MAX_SKINS][4];	// _gloss specular map
+	/* Which alias_gpu_meshes[] slot is this model's, and for which
+	 * generation of that table (GL_FreeAliasGPUMeshes starts a new one).
+	 * Carried in the header rather than looked up by its address: the
+	 * loader builds the header in the hunk, GL_MakeAliasGPUMesh runs there,
+	 * and the header is then copied into the cache and the hunk freed, so
+	 * the address the mesh was made for is dead before the first draw --
+	 * and the cache can evict a model and hand its address to another.
+	 * The memcpy into the cache carries these with it.  gpu_mesh -1 with a
+	 * current generation means "tried, refused": do not rebuild per frame.
+	 * GitHub #134. */
+	int		gpu_mesh;
+	int		gpu_mesh_gen;
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
 

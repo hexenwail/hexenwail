@@ -172,6 +172,11 @@ jobs:
       - name: No world render while disconnected
         run: python3 tools/test_render_disconnected.py
 
+      # Alias GPU meshes are found through the header, not its address,
+      # which the loader frees before the first draw (GitHub #134).
+      - name: Alias meshes keyed by header
+        run: python3 tools/test_alias_mesh_key.py
+
       # The web build, the Linux release and the Flatpak bundle one TimGM6mb
       # from one Debian tarball; the pin must agree everywhere (GitHub #114).
       - name: One SoundFont pin
