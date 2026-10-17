@@ -93,6 +93,7 @@ static void Host_ClearMemory(void) {}
 static void SZ_Clear(sizebuf_t *message) { message->cleared++; }
 static void CL_ClearTEnts(void) {}
 static void CL_ClearEffects(void) {}
+static void CL_DemoKeys_Clear(void) {}	/* demo rewind keyframes, #76 */
 static void SCR_SetPlaqueMessage(const char *message) { (void)message; }
 static void SB_InvReset(void) {}
 #define VectorCopy(a,b) memcpy((b), (a), sizeof(vec3_t))

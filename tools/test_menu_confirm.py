@@ -744,7 +744,10 @@ def check_wiring():
 
     # What M_Keydown's `pointer` argument rests on: the button bit is set in
     # one place, behind ui_mouse, and that place sends the click as K_MOUSE1.
+    # (in_lastactive is joy_always_active's last-used device, GitHub #409:
+    # a click is mouse input whoever it is routed to.)
     block = ("case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: "
+             "in_lastactive = IN_LAST_MOUSE; "
              "if (!event.button.down && event.button.button >= 1 && "
              "event.button.button <= 16) "
              "menu_mouse_buttons &= ~MENU_MOUSE_BUTTON(event.button.button); "
