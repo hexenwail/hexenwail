@@ -260,18 +260,21 @@ void Draw_Init (void)
 	for (i = MAX_DISC - 1; i >= 0; i--)
 	{
 		if (draw_disc[i])
-			Z_Free (draw_disc[i]);
+			free (draw_disc[i]);
 		q_snprintf(temp, sizeof(temp), "gfx/menu/skull%d.lmp", i);
-		draw_disc[i] = (qpic_t *)FS_LoadZoneFile (temp, Z_SECZONE, NULL);
+		draw_disc[i] = (qpic_t *)FS_LoadMallocFile (temp, NULL);
 	//	Draw_PicCheckError (draw_disc[i], temp);
 		if (draw_disc[i])
 			SwapPic (draw_disc[i]);
 	}
 #endif	/* DRAW_LOADINGSKULL */
 
+	/* conchars, backtile and the loading disc come from the C heap, not the
+	 * 256 KB secondary zone, whose size a mod's bigger files must not be
+	 * able to exceed into a Sys_Error at startup.  GitHub #126. */
 	if (draw_chars)
-		Z_Free (draw_chars);
-	draw_chars = FS_LoadZoneFile ("gfx/menu/conchars.lmp", Z_SECZONE, NULL);
+		free (draw_chars);
+	draw_chars = FS_LoadMallocFile ("gfx/menu/conchars.lmp", NULL);
 	Draw_PicCheckError (draw_chars, "gfx/menu/conchars.lmp");
 
 	// SoT/karma2 mods have larger charset but it's raw data, NOT a qpic with header
@@ -285,8 +288,8 @@ void Draw_Init (void)
 	draw_smallchars = (byte *) W_GetLumpName("tinyfont");
 
 	if (draw_backtile)
-		Z_Free (draw_backtile);
-	draw_backtile = (qpic_t	*)FS_LoadZoneFile ("gfx/menu/backtile.lmp", Z_SECZONE, NULL);
+		free (draw_backtile);
+	draw_backtile = (qpic_t	*)FS_LoadMallocFile ("gfx/menu/backtile.lmp", NULL);
 	Draw_PicCheckError (draw_backtile, "gfx/menu/backtile.lmp");
 	SwapPic (draw_backtile);
 

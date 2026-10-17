@@ -25,7 +25,7 @@
 //     Sys_Error, and the state left behind (wad_base already repointed, the
 //     previous wad_numlumps and wad_lumps still in place, the mapping unedited)
 //     is recorded;
-//   * the "couldn't load" path, where FS_LoadZoneFile returns NULL and wad_base
+//   * the "couldn't load" path, where FS_LoadMallocFile returns NULL and wad_base
 //     is left NULL rather than stale;
 //   * the endian fields: the header's numlumps and infotableofs, the table's
 //     filepos and size (read through LittleLong), disksize/type/compression,
@@ -182,22 +182,22 @@ static union {
 
 static byte wad_tmpl[WAD_MAX];
 static int wad_len;
-// FS_LoadZoneFile is the only way the wad reaches W_LoadWadFile, so this is
-// where the harness controls the input.  Every load gets a fresh copy of the
+// FS_LoadMallocFile is the only way the wad reaches W_LoadWadFile, so this is
+// where the harness controls the input.  It hands out the harness's own static
+// buffer, not malloc'd memory; the link wraps free (--wrap=free) so the release
+// of that buffer is recorded instead of reaching libc (GitHub #126 moved the
+// wad off the secondary zone).  Every load gets a fresh copy of the
 // current template, so the two implementations always start from the same
 // bytes even though both edit the mapping in place.
 static int fs_fail;		// return NULL, as a missing gfx.wad would
 static int fs_calls;
 static char fs_name[64];
-static int fs_bad_zone;
 static int fs_bad_pathid;
 
-byte *FS_LoadZoneFile(const char *path, int zone_id, unsigned int *path_id)
+byte *FS_LoadMallocFile(const char *path, unsigned int *path_id)
 {
 	fs_calls++;
 	snprintf(fs_name, sizeof fs_name, "%s", path);
-	if (zone_id != Z_SECZONE)
-		fs_bad_zone++;
 	if (path_id != NULL)
 		fs_bad_pathid++;
 
@@ -209,24 +209,28 @@ byte *FS_LoadZoneFile(const char *path, int zone_id, unsigned int *path_id)
 	return zone;
 }
 
-// The wad is allocated in the zone, so the only legitimate Z_Free is the one
-// W_LoadWadFile performs on the previously mapped wad.  Recording the offset
-// catches a port that frees the wrong pointer or forgets to free at all.
+// The only legitimate free of the wad buffer is the one W_LoadWadFile performs
+// on the previously mapped wad.  Recording the offset catches a port that frees
+// the wrong pointer or forgets to free at all.  Every other free in the process
+// (the harness's own, libc's, the Rust runtime's) passes straight through.
 static int zf_calls;
 static int zf_off;
 static int zf_bad;
 
-void Z_Free(void *ptr)
+void __real_free(void *ptr);
+void __wrap_free(void *ptr)
 {
 	uintptr_t p = (uintptr_t)ptr;
 	uintptr_t lo = (uintptr_t)zone;
 	uintptr_t hi = lo + sizeof zone;
 
-	zf_calls++;
 	if (p >= lo && p < hi)
+	{
+		zf_calls++;
 		zf_off = (int)(p - lo);
-	else
-		zf_bad++;
+		return;
+	}
+	__real_free(ptr);
 }
 
 // Sys_Error is FUNC_NORETURN in the engine; here it records the formatted
@@ -511,7 +515,6 @@ static void rec_state(void)
 	rec_str(err_buf);
 	rec_int(fs_calls);
 	rec_str(fs_name);
-	rec_int(fs_bad_zone);
 	rec_int(fs_bad_pathid);
 	rec_int(zf_calls);
 	rec_int(zf_off);
@@ -524,7 +527,6 @@ static void op_reset(void)
 	err_buf[0] = 0;
 	fs_calls = 0;
 	fs_name[0] = 0;
-	fs_bad_zone = 0;
 	fs_bad_pathid = 0;
 	fs_fail = 0;
 	zf_calls = 0;
@@ -536,7 +538,7 @@ static void op_reset(void)
  * operations
  *--------------------------------------------------------------------------*/
 
-// W_LoadWadFile, with the template that FS_LoadZoneFile will hand it.  The
+// W_LoadWadFile, with the template that FS_LoadMallocFile will hand it.  The
 // guarded call is what makes the fatal paths testable: Sys_Error unwinds here
 // instead of ending the run.
 static void load_wad(const char *what, int which, const char *filename,
@@ -561,22 +563,19 @@ static void load_wad(const char *what, int which, const char *filename,
 			err_buf);
 	}
 
-	check(fs_calls == 1, "%s [%s]: FS_LoadZoneFile called %d time(s), want 1",
+	check(fs_calls == 1, "%s [%s]: FS_LoadMallocFile called %d time(s), want 1",
 		what, cur->name, fs_calls);
 	check(strcmp(fs_name, filename) == 0,
-		"%s [%s]: FS_LoadZoneFile got \"%s\", want \"%s\"", what, cur->name,
+		"%s [%s]: FS_LoadMallocFile got \"%s\", want \"%s\"", what, cur->name,
 		fs_name, filename);
-	check(fs_bad_zone == 0,
-		"%s [%s]: FS_LoadZoneFile was not asked for Z_SECZONE", what,
-		cur->name);
 	check(fs_bad_pathid == 0,
-		"%s [%s]: FS_LoadZoneFile path_id was not NULL", what, cur->name);
+		"%s [%s]: FS_LoadMallocFile path_id was not NULL", what, cur->name);
 	check(zf_calls == want_frees,
-		"%s [%s]: Z_Free called %d time(s), want %d", what, cur->name,
+		"%s [%s]: free called %d time(s), want %d", what, cur->name,
 		zf_calls, want_frees);
 	if (want_frees)
 		check(zf_off == want_free_off,
-			"%s [%s]: Z_Free got offset %d, want %d", what, cur->name,
+			"%s [%s]: free got offset %d, want %d", what, cur->name,
 			zf_off, want_free_off);
 
 	rec_state();
@@ -941,7 +940,7 @@ static void scenario_odd_table(void)
 // The identification check and its fatal path.  The mapping is already in place
 // when the check runs, and nothing in it has been edited yet -- but wad_base
 // has been repointed, so the previous wad is only reachable through the next
-// load's Z_Free.
+// load's free.
 static void scenario_bad_id(void)
 {
 	load_wad("a wad that is not a wad", T_ID_WAD3, "gfx.wad", 0,

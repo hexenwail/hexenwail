@@ -58,10 +58,6 @@ use core::ffi::{c_char, c_int, c_uint, c_void};
 /// byte-swaps in place; every other type is left as it was mapped.
 const TYP_QPIC: c_char = 66;
 
-/// `Z_SECZONE` from engine/h2shared/zone.h -- the zone W_LoadWadFile maps the
-/// wad into, and the zone the caller's Z_Free therefore has to release.
-const Z_SECZONE: c_int = 1 << 1;
-
 /// `lumpinfo_t->name`: W_CleanupName walks all 16 bytes, not up to the NUL.
 const NAME_LEN: usize = 16;
 
@@ -278,13 +274,14 @@ pub static mut wad_lumps: *mut LumpInfoC = core::ptr::null_mut();
 pub static mut wad_base: *mut u8 = core::ptr::null_mut();
 
 extern "C" {
-    /// engine/h2shared/quakefs.h.  Returns the wad mapped into the zone named
-    /// by zone_id, or NULL.
-    fn FS_LoadZoneFile(path: *const c_char, zone_id: c_int, path_id: *mut c_uint)
-        -> *mut u8;
+    /// engine/h2shared/quakefs.h.  Returns the wad in malloc'd memory, or NULL.
+    /// The C heap rather than the secondary zone, as wad.c: a mod's bigger
+    /// gfx.wad must not be able to outgrow a fixed 256 KB zone and abort the
+    /// engine (GitHub #126).
+    fn FS_LoadMallocFile(path: *const c_char, path_id: *mut c_uint) -> *mut u8;
 
-    /// engine/h2shared/zone.h.
-    fn Z_Free(ptr: *mut c_void);
+    /// libc: the release for FS_LoadMallocFile's buffer.
+    fn free(ptr: *mut c_void);
 
     /// engine/h2shared/common.h, FUNC_NORETURN: the fatal paths below never
     /// return, which is why the state they leave behind is the state the
@@ -348,14 +345,14 @@ unsafe fn W_CleanupName(input: *const c_char, out: *mut c_char) {
 #[no_mangle]
 pub unsafe extern "C" fn W_LoadWadFile(filename: *const c_char) {
     if !wad_base.is_null() {
-        Z_Free(wad_base.cast::<c_void>());
+        free(wad_base.cast::<c_void>());
     }
 
     // path_id is NULL: the C passes it and never looks at it.
-    wad_base = FS_LoadZoneFile(filename, Z_SECZONE, core::ptr::null_mut());
+    wad_base = FS_LoadMallocFile(filename, core::ptr::null_mut());
     if wad_base.is_null() {
-        // The zone is already released by the failed load, but wad_base now
-        // holds the NULL the call returned -- the C writes it before testing.
+        // The old buffer is already released, but wad_base now holds the NULL
+        // the call returned -- the C writes it before testing.
         Sys_Error(
             c"%s: couldn't load %s".as_ptr(),
             c"W_LoadWadFile".as_ptr(),

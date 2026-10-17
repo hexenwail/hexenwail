@@ -9,8 +9,8 @@
 # is removed again for h2ded, and HWSV_SOURCES never lists it, so glhexen2 is
 # the only target that compiles it.  The file has no #ifdefs of its own.
 #
-# The Rust staticlib must have been built with the wad feature.  FS_LoadZoneFile,
-# Z_Free and Sys_Error -- the engine symbols the module calls -- are defined by
+# The Rust staticlib must have been built with the wad feature.  FS_LoadMallocFile,
+# free (wrapped) and Sys_Error -- the engine symbols the module calls -- are defined by
 # diff_harness.c.
 set -euo pipefail
 
@@ -54,8 +54,10 @@ cc "${INCS[@]}" "${CFLAGS[@]}" -DGLQUAKE \
 	-c "$here/diff_harness.c" -o "$OUT/diff_harness.o"
 
 echo "== linking both implementations into one binary =="
+# --wrap=free: the harness records the release of the wad buffer it hands out
+# (a static array, never malloc'd) and forwards every other free to libc.
 cc -o "$OUT/diff_harness" "$OUT/diff_harness.o" "$OUT/wad_c.o" \
-	"$RUST_LIB" -lm
+	"$RUST_LIB" -lm -Wl,--wrap=free
 
 echo "== running =="
 # The timeout is load-bearing, not defensive habit.
