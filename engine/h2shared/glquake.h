@@ -281,6 +281,7 @@ typedef struct
 	const char		*profile_name;
 	qboolean		anisotropy;
 	qboolean		texture_lod_bias;	/* GL_TEXTURE_LOD_BIAS: desktop only, not in ES 3.0/WebGL2 */
+	qboolean		texture_swizzle;	/* GL_TEXTURE_SWIZZLE_*: desktop and ES 3.0, but WebGL2 dropped it (#112) */
 	qboolean		float_color_buffer;	/* RGBA16F render targets, i.e. HDR */
 	qboolean		shader_storage;
 	qboolean		compute_shaders;

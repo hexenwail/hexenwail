@@ -487,6 +487,16 @@ static void GL_InitRendererCaps (void)
 	 * (0x8501 raises GL_INVALID_ENUM there, GitHub #149).  memset already
 	 * cleared it; spelled out so the tier split reads in one place. */
 	gl_renderer_caps.texture_lod_bias = false;
+	/* Texture swizzle is core ES 3.0 but WebGL2 removed it: every
+	 * GL_TEXTURE_SWIZZLE_A call raised GL_INVALID_ENUM in the browser
+	 * (254 on demo1), and the opaque alpha it was there to force never
+	 * happened.  GL_Upload32 writes that alpha into the texels instead
+	 * where this is false.  GitHub #112. */
+#ifdef __EMSCRIPTEN__
+	gl_renderer_caps.texture_swizzle = false;
+#else
+	gl_renderer_caps.texture_swizzle = true;
+#endif
 	/* Anisotropy and float color buffers are extensions on this tier.  In
 	 * the browser they must be *enabled* on the context before the enums
 	 * become legal, which SDL_GL_ExtensionSupported does not do -- a bare
@@ -519,6 +529,7 @@ static void GL_InitRendererCaps (void)
 	gl_renderer_caps.anisotropy = true;
 	gl_renderer_caps.float_color_buffer = true;	/* core since GL 3.0 */
 	gl_renderer_caps.texture_lod_bias = true;	/* core since GL 1.4 */
+	gl_renderer_caps.texture_swizzle = true;	/* core since GL 3.3 */
 	gl_renderer_caps.shader_storage = (glBindBufferBase_fp != NULL);
 	gl_renderer_caps.compute_shaders =
 		(glDispatchCompute_fp != NULL) && (glMemoryBarrier_fp != NULL);

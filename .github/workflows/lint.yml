@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # The WebGL2 fixes from verifying the ES tier in a browser (GitHub #112).
+      - name: WebGL2 ES-tier fixes
+        run: python3 tools/test_webgl2_es_fixes.py
+
       # Particles stand still while the game is paused.
       - name: Particles pause
         run: python3 tools/test_particles_pause.py

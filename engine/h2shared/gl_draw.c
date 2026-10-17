@@ -2743,6 +2743,18 @@ static void GL_Upload32 (unsigned int *data, gltexture_t *glt)
 
 	samples = (glt->flags & TEX_ALPHA) ? gl_alpha_format : gl_solid_format;
 
+	/* An opaque texture's alpha must read 1.  The sampler swizzle below
+	 * forces it, but WebGL2 has no swizzle, and on the ES tier opaque
+	 * textures are stored RGBA8 -- so index-255 texels (alpha 0 in
+	 * d_8to24table) reached the alias shader's discard as alpha 0.  Write
+	 * the 1 into the texels there instead.  GitHub #112. */
+	if (!(glt->flags & TEX_ALPHA) && !gl_renderer_caps.texture_swizzle)
+	{
+		int	i, n = glt->width * glt->height;
+		for (i = 0; i < n; i++)
+			data[i] |= MASK_a;
+	}
+
 	// Alpha-bleed RGBA textures with transparency to prevent black fringes:
 	// bilinear filter blends RGB across alpha=0 pixels, so if their RGB is
 	// black (common in PNG cutouts) the fringe darkens. Flood RGB from
@@ -2991,8 +3003,9 @@ static void GL_SetTextureFilter (const gltexture_t *glt)
 	 * internal storage.  TEX_ALPHA paths (FENCE, HOLEY, TRANSPARENT,
 	 * SPECIAL_TRANS, translucent PNG skins) explicitly reset to
 	 * GL_ALPHA so re-uploads of the same texture name stay correct. */
-	glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
-			   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
+	if (gl_renderer_caps.texture_swizzle)
+		glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+				   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
 }
 
 /*
@@ -3092,7 +3105,8 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	{
 		ms = cur_w * cur_h;
 		for (i = 0; i < ms; i++)
-			conv[i] = d_8to24table[mip_ptr[i]];
+			conv[i] = d_8to24table[mip_ptr[i]] |
+				  ((!(glt->flags & TEX_ALPHA) && !gl_renderer_caps.texture_swizzle) ? MASK_a : 0);	/* #112 */
 
 		glTexImage2D_fp(GL_TEXTURE_2D, gl_level, samples, cur_w, cur_h, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, conv);
@@ -3125,8 +3139,9 @@ static void GL_Upload8_EmbeddedMips (byte *data, gltexture_t *glt)
 	/* uhexen2-khsa r11: see GL_Upload32 comment.  Embedded-mip BSP path
 	 * only uploads non-alpha indexed textures, so the swizzle is always
 	 * GL_ONE here — guarded on the flag anyway for safety. */
-	glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
-			   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
+	if (gl_renderer_caps.texture_swizzle)
+		glTexParameteri_fp(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+				   (glt->flags & TEX_ALPHA) ? GL_ALPHA : GL_ONE);
 
 	Hunk_FreeToLowMark(mark);
 }

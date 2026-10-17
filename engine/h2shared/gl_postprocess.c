@@ -1857,6 +1857,21 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	GLenum textarget = (samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 
 	OIT_DeleteFBO();
+#ifdef USE_GLES
+	/* ES 3.0 and WebGL2 have no multisample textures, so the two OIT
+	 * targets cannot match a multisampled scene's depth.  Creating them as
+	 * GL_TEXTURE_2D_MULTISAMPLE anyway failed both binds and both
+	 * attachments, and the depth-only FBO left behind still checked
+	 * complete: "OIT: FBO ready", drawing translucency into nothing.
+	 * Under MSAA on this tier there is no OIT; sorted translucency it is.
+	 * GitHub #112. */
+	if (samples > 1)
+	{
+		Con_SafePrintf("OIT: unavailable with MSAA on the GLES tier (no multisample textures)\n");
+		oit_samples = 0;
+		return false;
+	}
+#endif
 	oit_samples = (samples > 1) ? samples : 0;
 
 	/* Accumulation texture (RGBA16F). When MSAA is active these must be
