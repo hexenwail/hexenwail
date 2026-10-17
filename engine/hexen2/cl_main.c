@@ -160,8 +160,8 @@ void CL_ClearState (void)
 
 // wipe the entire cl structure
 	memset (&cl, 0, sizeof(cl));
-	CL_DemoKeys_Clear ();	/* keyframes belong to the level they were taken on (#76) */
 	V_ResetPunchAngle ();
+	CL_DemoKeys_Clear ();	/* keyframes belong to the level they were taken on (#76) */
 
 	SZ_Clear (&cls.message);
 
