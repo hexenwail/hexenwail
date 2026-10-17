@@ -281,6 +281,7 @@ typedef struct
 	const char		*profile_name;
 	qboolean		anisotropy;
 	qboolean		texture_lod_bias;	/* GL_TEXTURE_LOD_BIAS: desktop only, not in ES 3.0/WebGL2 */
+	qboolean		texture_swizzle;	/* GL_TEXTURE_SWIZZLE_*: desktop and ES 3.0, but WebGL2 dropped it (#112) */
 	qboolean		float_color_buffer;	/* RGBA16F render targets, i.e. HDR */
 	qboolean		shader_storage;
 	qboolean		compute_shaders;
@@ -511,6 +512,8 @@ extern	cvar_t	gl_overbright;
 extern	cvar_t	r_lightmap_bicubic;
 extern	cvar_t	gl_fxaa;
 extern	cvar_t	gl_lmatlas;
+extern	cvar_t	r_gpulightstyles;	/* GitHub #439 */
+void R_LightStyles_FrameSetup (void);	/* gl_rsurf.c: once per frame, before the world */
 extern	cvar_t	gl_glows;
 extern	cvar_t	gl_other_glows;
 extern	cvar_t	gl_missile_glows;
@@ -671,7 +674,6 @@ void R_MarkLights (dlight_t *light, int lnum, mnode_t *node);
 void R_BuildFrustum (const vec3_t origin, const vec3_t pn, const vec3_t right,
 		     const vec3_t up, float fov_x, float fov_y, mplane_t out[4]);
 void R_AnimateLight(void);
-int R_LightPoint (vec3_t p);
 float R_LightPointColor (vec3_t p, lightcache_t *cache);
 void GL_BuildLightmaps (void);
 void R_BuildWorldVBO (void);

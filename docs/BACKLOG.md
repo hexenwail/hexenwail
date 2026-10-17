@@ -11,7 +11,7 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (49)
+## P2 — worth doing (47)
 
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
@@ -35,7 +35,6 @@ here.
 - **vid_test: mode change with a confirmation prompt (last item of a5nn.20)** `uhexen2-x5e6` *(in_progress)* — The only Ironwail console command left from uhexen2-a5nn.20. Split out because it is the one item there that cannot be verified headlessly: it needs a real mode change plus a modal keypress.
 - **WASM: Implement proper offline build or pre-cached ports** `uhexen2-1z31` — Long-term solution for WASM builds to avoid --impure requirement.
 - **MD5: verify skeletal render with a real asset (winding, lighting, skin)** `uhexen2-2t38` — uhexen2-7ok0 phases 2 and 3 landed in 5670c942b and are verified against the synthetic models in engine/tests/md5 (parser math, inverse-bind composition, hierarchy propagation, bounds).
-- **Consider raising the softemu palette LUT past 32^3 now that the GPU builds it** `uhexen2-3bes` — Our nearest-colour LUT is a 32^3 grid (PP_LUT_DIM in engine/h2shared/gl_postprocess.c); Ironwail's is 128^3, which is affordable upstream precisely because a compute pass builds it.
 - **Field-confirm with BloodShot that tristram's CTD is gone (uhexen2-z5wt)** `uhexen2-6fko` — Follow-up to uhexen2-z5wt, which is CLOSED: the signon overflow is fixed (a47d006fb + 9091ddffc) and the multi-buffer path is validated end to end (see that bead's notes for the measurements…
 - **Site: community directory (Discord, projects, people, servers)** `uhexen2-96ii.10` — Build the community directory — the static replacement for a forum, a webring and a hosted-sites program.
 - **Site: /archive/ — preserve interviews, .plan updates, and community history** `uhexen2-96ii.11` — Build the `/archive/` section — deliberate preservation of Hexen II history, done with permission and attribution.
@@ -49,7 +48,6 @@ here.
 - **Keep README platform plans in sync as ports land** `uhexen2-d1uc` — The README Platforms table is being updated today (2026-08-18) to show WASM build status and planned Android/Flathub/AppImage rows.
 - **Settle whether Garrett's 'bright lines' are surface seams or diagonal shadow stepping** `uhexen2-f3wm` — Split out of uhexen2-5nle, whose other half (large-map lightmap page ceiling) is answered and closed. This half never was about the gutter -- it is about whether uhexen2-jwzf was ever Garret…
 - **WASM: deliver a soundfont into the emscripten virtual FS** `uhexen2-g3j9` — 59343680d wired the libTiMidity codec into BGM tier 2 and it builds and links for WASM, but nothing puts an SF2 where SF_FindSoundFont() can see it, so browser MIDI is still silent.
-- **Raise the hard MAX_EDICTS ceiling above 8192 (memory budget decision)** `uhexen2-gyul` — uhexen2-a5nn.9 made max_edicts a runtime cvar, but it clamps into a hard MAX_EDICTS of 8192, so it can only lower the ceiling.
 - **Build desktop -DUSE_GLES=ON in CI -- the claim that it matches the web path is unverified** `uhexen2-ibnq.5` — engine/CMakeLists.txt:195 drops GL_DLSYM when USE_GLES is set, with the comment: 'Dropping it here is what makes a desktop -DUSE_GLES=ON build take the same code path Emscripten already take…
 - **Check in the GL-vs-GLES headless render comparison as a gate** `uhexen2-ibnq.6` — The burst-and-cross-match harness from the 'cross-build-headless-render-comparison-2026-08-15' memory exists only as a memory and a set of ad-hoc invocations.
 - **Audit the Display submenu for software parity -- it has no WEBSOFT arm** `uhexen2-ibnq.7` — M_Display_IsSkip is the third submenu with per-row skip logic, and it is the only one with no '#if defined(WEBSOFT)' arm -- so tools/menu_soft_parity.py deliberately skips it (checks 3 and 4…
@@ -132,7 +130,6 @@ here.
 - **Rain should use its own texture, not the shared particle sprite** `uhexen2-km0d` — Mathuzzz: rain particles are visually near-identical to snow because both draw from the same 2x2 particle atlas, so a downpour reads as drifting flakes rather than falling water.
 - **Depth of field post-process** `uhexen2-ljz` — Focal blur for cinematic feel. Toggle.
 - **Cascaded shadow maps** `uhexen2-oa9` — High-quality outdoor shadows with distance-based cascade levels.
-- **Load and walk a Quake BSP29 map as proof of concept** `uhexen2-q184` — Proof of concept only: load a Quake (id1) BSP29 map and walk around it in Hexenwail under Hexen II gamecode.
 - **Classic Software look: affine (perspective-incorrect) texture interpolation** `uhexen2-rwh6` — Item 3 of uhexen2-lpza's ranked list, the one part deliberately left out of that bead's first pass. lpza closed with palette quantization through Raven's colormap verified exact (100% of sce…
 - **Texture streaming (on-demand hi-res loading)** `uhexen2-xmz` — Load high-resolution textures on demand instead of all at startup.
 - **WASM: User game data upload (data1 PAK files)** `uhexen2-4zzm` — Allow users to upload their Hexen II data1 folder for web gameplay. Implement: (1) HTML5 file input for selecting data1 folder/pak files, (2) JavaScript file reader to load into Emscripten V…

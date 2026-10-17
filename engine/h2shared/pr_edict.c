@@ -2714,7 +2714,6 @@ static dstatement_v7_t *PR_ConvertV6Stmts (dstatement_v6_t *v6stmts, int numstmt
 	return v7stmts;
 }
 
-#if !defined(H2W)
 /* Bundled gamecode: a drop-in engine brings its own progs.dat, so a player who
  * unzips a release gets our fixes without hand-copying anything into data1/.
  *
@@ -2726,9 +2725,11 @@ static dstatement_v7_t *PR_ConvertV6Stmts (dstatement_v6_t *v6stmts, int numstmt
  * `developer 1'.  Design, findings and the verification matrix are in
  * docs/BUNDLED_GAMECODE.md.
  *
- * H2W is excluded because def_progname there is "hwprogs.dat": this fork
- * builds no HexenWorld engine and ships no HexenWorld gamecode to compare
- * against, so the substitution has nothing correct to do.
+ * H2W shares the bundle directory but not the substitution: HexenWorld's
+ * gamecode never shipped retail, so there is no Raven copy for ours to
+ * supersede, and the player's gamedir copy simply wins.  hwsv reaches the
+ * bundle only when the gamedir has no hwprogs.dat at all -- see
+ * PR_LoadBundledHWProgs (#37).
  */
 
 /*
@@ -2781,12 +2782,13 @@ static const char *PR_FindBundleDir (void)
 	return NULL;
 }
 
-/* Public face of PR_FindBundleDir for data other than progs: HexenWorld's
- * strings.txt (host_string.c) has no retail source either. */
+/* Public face of PR_FindBundleDir, for callers outside this file. */
 const char *PR_BundleDir (void)
 {
 	return PR_FindBundleDir ();
 }
+
+#if !defined(H2W)
 
 /*
 ===============
@@ -2897,12 +2899,48 @@ static qboolean PR_BundledProgsPath (const char *progname, char *out, size_t out
 #endif	/* !H2W */
 
 #if defined(H2W)
-/* hwsv has no bundled-gamecode lookup: it reads hwprogs.dat and strings.txt
- * from the game directory, where hwsv-bundled's files are installed by hand
- * (engine/hexenworld/README.md). */
-const char *PR_BundleDir (void)
+/*
+===============
+PR_LoadBundledHWProgs
+
+hwsv's last resort when the gamedir holds no hwprogs.dat: the copy shipped
+beside the engine (hwsv-bundled, the release zips), for the gamedir the
+server is actually in -- never hw's bytecode under siege.  Before this, the
+bundle's hwprogs.dat was unreachable and a correct pak4 install stopped at
+"couldn't load hwprogs.dat", which reads as the wrong pak (#37).
+
+Fallback only, never a substitution: HexenWorld's gamecode has no retail
+copy to supersede, so any file the player put in the gamedir is the
+statement of intent and wins.  -vanillaprogs takes the bundle out of the
+picture here too.  Anything doubtful about the bundled file surrenders to
+the unchanged "couldn't load" error, said out loud.
+===============
+*/
+static dprograms_t *PR_LoadBundledHWProgs (const char *progname)
 {
-	return NULL;
+	char		path[MAX_OSPATH];
+	const char	*bundle, *bad;
+	int		hunkmark;
+	dprograms_t	*p;
+
+	if (COM_CheckParm("-vanillaprogs"))
+		return NULL;
+	if (!(bundle = PR_FindBundleDir()))
+		return NULL;
+	q_snprintf (path, sizeof(path), "%s/%s/%s", bundle, fs_gamedir_nopath, progname);
+	if (Sys_FileType(path) != FS_ENT_FILE)
+		return NULL;
+
+	hunkmark = Hunk_LowMark ();
+	p = (dprograms_t *) FS_LoadHunkFileFromOSPath (path);
+	bad = p ? PR_CheckProgsExtents (p, fs_filesize) : "cannot be opened for reading";
+	if (bad)
+	{
+		Con_Printf ("Ignoring bundled %s: %s\n", path, bad);
+		Hunk_FreeToLowMark (hunkmark);
+		return NULL;
+	}
+	return p;
 }
 #endif
 
@@ -3477,6 +3515,10 @@ void PR_LoadProgs (void)
 	 * special sources above was asked for and could not deliver. */
 	if (!progs)
 		progs = (dprograms_t *)FS_LoadHunkFile (progname, NULL);
+#if defined(H2W)
+	if (!progs)
+		progs = PR_LoadBundledHWProgs (progname);
+#endif
 	if (!progs)
 		Host_Error ("%s: couldn't load %s", __thisfunc__, progname);
 	/* FS_LastFileSource() describes the last lookup only, so grab it before
@@ -3878,7 +3920,10 @@ void PR_RestoreVMState (const pr_vmstate_t *state)
 
 edict_t *EDICT_NUM(int n)
 {
-	if (n < 0 || n >= MAX_EDICTS)
+	/* sv.edicts holds sv_max_edicts, not MAX_EDICTS: bounding by the macro
+	 * let any max_edicts below the ceiling read past the allocation
+	 * (GitHub #411).  HexenWorld keeps sv_max_edicts too. */
+	if (n < 0 || n >= sv_max_edicts)
 		Host_Error ("%s: bad number %i", __thisfunc__, n);
 	return (edict_t *)((byte *)sv.edicts + (n)*pr_edict_size);
 }

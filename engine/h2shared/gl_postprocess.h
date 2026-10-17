@@ -86,6 +86,8 @@ extern cvar_t r_bloom_intensity;
 extern cvar_t r_bloom_threshold;
 void OIT_BeginTranslucency (void);
 void OIT_EndTranslucency (GLuint scene_fbo);
+qboolean OIT_NextPass (void);	/* r_oit 2: draw the translucents again while true (#87) */
+qboolean OIT_KeepChains (void);	/* this pass's lists are drawn again; do not consume them */
 qboolean OIT_Active (void);	/* OIT is built and r_oit is on */
 qboolean OIT_InPass (void);	/* currently between Begin/EndTranslucency */
 GLuint GL_GetSceneFBO (void);

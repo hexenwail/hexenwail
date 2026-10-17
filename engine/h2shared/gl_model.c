@@ -24,6 +24,7 @@
  */
 
 #include "quakedef.h"
+#include "bsp_submodels.h"
 #include "hashindex.h"
 #include "hwal.h"
 #include "img_load.h"
@@ -944,6 +945,159 @@ static byte	*mod_base;
 
 /*
 =================
+Mod_UploadBrushTexture
+
+Upload one brush texture to GL: the sky, the diffuse (an external
+replacement if one is installed, else the BSP's own miptex), its glow,
+and the material-map sidecars.  Shared by Mod_LoadTextures and
+Mod_ReloadTextures so that a vid_restart re-uploads exactly what the
+first load did, replacements and material maps included (#430).
+=================
+*/
+static void Mod_UploadBrushTexture (texture_t *tx, const char *modelname)
+{
+	/* A reload finds the names of the dead context here; every branch
+	 * below that uploads nothing must leave 0, as the first load did. */
+	tx->gl_fb_texturenum = 0;
+	tx->gl_norm_texturenum = 0;
+	tx->gl_gloss_texturenum = 0;
+
+	if (!strncmp(tx->name,"sky",3))
+		R_InitSky (tx);
+	else
+	{
+		/* An external replacement wins over the miptex data embedded
+		 * in the BSP.  IMG_LoadReplacement searches the per-map
+		 * directory before the shared pool and prefers a compressed
+		 * container over a decoded one; see img_load.c. */
+		imgreplace_t	rep;
+		int		rep_flags;
+
+		/* true: a '{' fence is recognized inside the loader, which
+		 * declines the compressed container for it (uhexen2-r7zu).
+		 * Nothing else about a world miptex is alpha-tested. */
+		if (IMG_LoadReplacement (tx->name, modelname, true, &rep))
+		{
+			/* IMG_LoadReplacement already named the winning file.
+			 * Add what only this caller knows: the BSP shipped its
+			 * own texture under that name and lost.  Printing the
+			 * miptex dimensions next to it makes a botched export
+			 * legible -- the #lowlight6.tga behind uhexen2-nqwl was
+			 * a 64x64 outlier among 256x256 siblings.  uhexen2-0q4f. */
+			Con_DPrintf ("IMG: BSP miptex \"%s\" (%dx%d) displaced\n",
+				     tx->name, tx->width, tx->height);
+
+			rep_flags = TEX_MIPMAP;
+			// Check for fence texture (name starts with '{')
+			if (tx->name[0] == '{')
+				rep_flags |= (TEX_ALPHA | TEX_FENCE);  // Need TEX_ALPHA for alpha channel!
+			tx->gl_texturenum = GL_LoadReplacement (tx->name, &rep, rep_flags);
+			IMG_FreeReplacement (&rep);
+
+			/* The fullbright mask is normally extracted from palette
+			 * indices >= vid.fullbright, which an RGBA or block
+			 * replacement no longer carries -- so once a texture is
+			 * replaced its glow can only come from a sidecar file.
+			 * Without this, installing a HD pack puts out every torch,
+			 * rune and lava highlight in the map (uhexen2-0vgo.1).
+			 * Same exclusions as the embedded path below: sky, turb
+			 * and fence surfaces never get the additive pass. */
+			if (tx->name[0] != '*' && tx->name[0] != '{' &&
+			    strncmp(tx->name, "sky", 3) != 0 &&
+			    gl_fullbrights.integer)
+			{
+				imgreplace_t	glow;
+
+				if (IMG_LoadReplacementGlow (tx->name, modelname, &glow))
+				{
+					char	fbname[MAX_QPATH];
+
+					q_snprintf (fbname, sizeof(fbname), "%s_glow", tx->name);
+					tx->gl_fb_texturenum = GL_LoadReplacement (fbname, &glow,
+									TEX_MIPMAP | TEX_ALPHA);
+					IMG_FreeReplacement (&glow);
+				}
+			}
+		}
+		else
+		{
+			// Fall back to internal BSP texture
+			int tex_flags = TEX_MIPMAP | TEX_EMBEDDED_MIPS;
+			// Check for fence texture (name starts with '{')
+			// Per Spoike: index 255 is alpha=0, glhexen2 also uses index 0
+			if (tx->name[0] == '{')
+				tex_flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);  // Enable alpha testing and binary transparency
+			tx->gl_texturenum = GL_LoadTexture(tx->name, (byte *)(tx+1), tx->width, tx->height, tex_flags);
+
+			/* Extract fullbright pixel mask (palette index >= vid.fullbright,
+			 * typically 224).  Used for the additive fullbright pass that
+			 * makes torches / lava / glow details look bright regardless of
+			 * lightmap.  Skip for sky/turb/fence — they don't get the
+			 * additive pass anyway.  uhexen2-sjvf. */
+			if (tx->name[0] != '*' && tx->name[0] != '{' &&
+			    strncmp(tx->name, "sky", 3) != 0)
+			{
+				char fbname[32];
+				q_snprintf(fbname, sizeof(fbname), "%s_glow", tx->name);
+				tx->gl_fb_texturenum = Mod_LoadFullbrightTexture(
+					fbname, (byte *)(tx+1), tx->width, tx->height);
+			}
+		}
+
+		/* Material-map sidecars.  Outside the replaced/embedded
+		 * branch above on purpose: unlike the glow, which the
+		 * embedded path can recover from palette indices, there
+		 * is no in-BSP source for relief or specular, so the
+		 * sidecar is the ONLY source either way.  A pack that
+		 * adds rtex001_norm.tga to sharpen a stock wall, without
+		 * repainting the wall itself, is a normal thing to ship
+		 * and DarkPlaces honours it; requiring a diffuse
+		 * replacement first would silently ignore that pack.
+		 *
+		 * Excluded exactly where the world shader does not
+		 * run: sky has its own program, and '*' turb goes
+		 * through EmitWaterPolys on gl_shader_alias.  A '{'
+		 * fence is NOT excluded -- it renders through
+		 * gl_shader_world like any other wall and a grate
+		 * with relief is a normal thing for a pack to ship.
+		 *
+		 * r_materialmaps gates the load so a machine that
+		 * cannot afford the VRAM does not pay for it; the
+		 * cvar also gates the shader, so toggling it off
+		 * mid-game stops the effect immediately, while the
+		 * memory comes back at the next map load.
+		 * uhexen2-mfql. */
+		if (tx->name[0] != '*' &&
+		    strncmp(tx->name, "sky", 3) != 0 &&
+		    r_materialmaps.integer)
+		{
+			imgreplace_t	mat;
+			char		matname[MAX_QPATH];
+
+			if (IMG_LoadReplacementNormal (tx->name, modelname, &mat))
+			{
+				q_snprintf (matname, sizeof(matname), "%s_norm", tx->name);
+				/* TEX_ALPHA because the _bump path parks
+				 * the height field in alpha and a future
+				 * offset-mapping pass wants it kept. */
+				tx->gl_norm_texturenum = GL_LoadReplacement (matname, &mat,
+								TEX_MIPMAP | TEX_ALPHA);
+				IMG_FreeReplacement (&mat);
+			}
+
+			if (IMG_LoadReplacementGloss (tx->name, modelname, &mat))
+			{
+				q_snprintf (matname, sizeof(matname), "%s_gloss", tx->name);
+				tx->gl_gloss_texturenum = GL_LoadReplacement (matname, &mat,
+								TEX_MIPMAP);
+				IMG_FreeReplacement (&mat);
+			}
+		}
+	}
+}
+
+/*
+=================
 Mod_LoadTextures
 =================
 */
@@ -1060,138 +1214,7 @@ bsp_tex_internal:
 			continue;
 #endif
 
-		if (!strncmp(mt->name,"sky",3))
-			R_InitSky (tx);
-		else
-		{
-			/* An external replacement wins over the miptex data embedded
-			 * in the BSP.  IMG_LoadReplacement searches the per-map
-			 * directory before the shared pool and prefers a compressed
-			 * container over a decoded one; see img_load.c. */
-			imgreplace_t	rep;
-			int		rep_flags;
-
-			/* true: a '{' fence is recognized inside the loader, which
-			 * declines the compressed container for it (uhexen2-r7zu).
-			 * Nothing else about a world miptex is alpha-tested. */
-			if (IMG_LoadReplacement (mt->name, loadmodel->name, true, &rep))
-			{
-				/* IMG_LoadReplacement already named the winning file.
-				 * Add what only this caller knows: the BSP shipped its
-				 * own texture under that name and lost.  Printing the
-				 * miptex dimensions next to it makes a botched export
-				 * legible -- the #lowlight6.tga behind uhexen2-nqwl was
-				 * a 64x64 outlier among 256x256 siblings.  uhexen2-0q4f. */
-				Con_DPrintf ("IMG: BSP miptex \"%s\" (%dx%d) displaced\n",
-					     mt->name, tx->width, tx->height);
-
-				rep_flags = TEX_MIPMAP;
-				// Check for fence texture (name starts with '{')
-				if (mt->name[0] == '{')
-					rep_flags |= (TEX_ALPHA | TEX_FENCE);  // Need TEX_ALPHA for alpha channel!
-				tx->gl_texturenum = GL_LoadReplacement (mt->name, &rep, rep_flags);
-				IMG_FreeReplacement (&rep);
-
-				/* The fullbright mask is normally extracted from palette
-				 * indices >= vid.fullbright, which an RGBA or block
-				 * replacement no longer carries -- so once a texture is
-				 * replaced its glow can only come from a sidecar file.
-				 * Without this, installing a HD pack puts out every torch,
-				 * rune and lava highlight in the map (uhexen2-0vgo.1).
-				 * Same exclusions as the embedded path below: sky, turb
-				 * and fence surfaces never get the additive pass. */
-				if (mt->name[0] != '*' && mt->name[0] != '{' &&
-				    strncmp(mt->name, "sky", 3) != 0 &&
-				    gl_fullbrights.integer)
-				{
-					imgreplace_t	glow;
-
-					if (IMG_LoadReplacementGlow (mt->name, loadmodel->name, &glow))
-					{
-						char	fbname[MAX_QPATH];
-
-						q_snprintf (fbname, sizeof(fbname), "%s_glow", mt->name);
-						tx->gl_fb_texturenum = GL_LoadReplacement (fbname, &glow,
-										TEX_MIPMAP | TEX_ALPHA);
-						IMG_FreeReplacement (&glow);
-					}
-				}
-			}
-			else
-			{
-				// Fall back to internal BSP texture
-				int tex_flags = TEX_MIPMAP | TEX_EMBEDDED_MIPS;
-				// Check for fence texture (name starts with '{')
-				// Per Spoike: index 255 is alpha=0, glhexen2 also uses index 0
-				if (mt->name[0] == '{')
-					tex_flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);  // Enable alpha testing and binary transparency
-				tx->gl_texturenum = GL_LoadTexture(mt->name, (byte *)(tx+1), tx->width, tx->height, tex_flags);
-
-				/* Extract fullbright pixel mask (palette index >= vid.fullbright,
-				 * typically 224).  Used for the additive fullbright pass that
-				 * makes torches / lava / glow details look bright regardless of
-				 * lightmap.  Skip for sky/turb/fence — they don't get the
-				 * additive pass anyway.  uhexen2-sjvf. */
-				if (mt->name[0] != '*' && mt->name[0] != '{' &&
-				    strncmp(mt->name, "sky", 3) != 0)
-				{
-					char fbname[32];
-					q_snprintf(fbname, sizeof(fbname), "%s_glow", mt->name);
-					tx->gl_fb_texturenum = Mod_LoadFullbrightTexture(
-						fbname, (byte *)(tx+1), tx->width, tx->height);
-				}
-			}
-
-			/* Material-map sidecars.  Outside the replaced/embedded
-			 * branch above on purpose: unlike the glow, which the
-			 * embedded path can recover from palette indices, there
-			 * is no in-BSP source for relief or specular, so the
-			 * sidecar is the ONLY source either way.  A pack that
-			 * adds rtex001_norm.tga to sharpen a stock wall, without
-			 * repainting the wall itself, is a normal thing to ship
-			 * and DarkPlaces honours it; requiring a diffuse
-			 * replacement first would silently ignore that pack.
-			 *
-			 * Excluded exactly where the world shader does not
-			 * run: sky has its own program, and '*' turb goes
-			 * through EmitWaterPolys on gl_shader_alias.  A '{'
-			 * fence is NOT excluded -- it renders through
-			 * gl_shader_world like any other wall and a grate
-			 * with relief is a normal thing for a pack to ship.
-			 *
-			 * r_materialmaps gates the load so a machine that
-			 * cannot afford the VRAM does not pay for it; the
-			 * cvar also gates the shader, so toggling it off
-			 * mid-game stops the effect immediately, while the
-			 * memory comes back at the next map load.
-			 * uhexen2-mfql. */
-			if (mt->name[0] != '*' &&
-			    strncmp(mt->name, "sky", 3) != 0 &&
-			    r_materialmaps.integer)
-			{
-				imgreplace_t	mat;
-				char		matname[MAX_QPATH];
-
-				if (IMG_LoadReplacementNormal (mt->name, loadmodel->name, &mat))
-				{
-					q_snprintf (matname, sizeof(matname), "%s_norm", mt->name);
-					/* TEX_ALPHA because the _bump path parks
-					 * the height field in alpha and a future
-					 * offset-mapping pass wants it kept. */
-					tx->gl_norm_texturenum = GL_LoadReplacement (matname, &mat,
-									TEX_MIPMAP | TEX_ALPHA);
-					IMG_FreeReplacement (&mat);
-				}
-
-				if (IMG_LoadReplacementGloss (mt->name, loadmodel->name, &mat))
-				{
-					q_snprintf (matname, sizeof(matname), "%s_gloss", mt->name);
-					tx->gl_gloss_texturenum = GL_LoadReplacement (matname, &mat,
-									TEX_MIPMAP);
-					IMG_FreeReplacement (&mat);
-				}
-			}
-		}
+		Mod_UploadBrushTexture (tx, loadmodel->name);
 	}
 
 //
@@ -1298,46 +1321,35 @@ upload them to OpenGL pipeline. Called when video mode is changed upon
 which all OpenGL textures are gone.
 =================
 */
+static void Mod_ReloadBrushTextures (qmodel_t *mod)
+{
+	int			j;
+
+	for (j = 0; j < mod->numtextures; j++)
+	{
+		if (mod->textures[j])
+			Mod_UploadBrushTexture (mod->textures[j], mod->name);
+	}
+}
+
 void Mod_ReloadTextures (void)
 {
 	int			j;
-	qmodel_t	*mod;
-	texture_t	*tx;
 
-	// Reload world (brush models are submodels of world),
-	// don't touch if not yet loaded
-	mod = cl.worldmodel;
-	if (mod && !mod->needload)
+	/* Every loaded brush model, not just cl.worldmodel.  The server loads
+	 * the map -- and uploads its textures -- before the client has parsed
+	 * serverdata, so a vid_restart in that window found cl.worldmodel NULL,
+	 * skipped the world, and left the cached model holding names from the
+	 * dead context; Mod_ForName then handed it to the client as loaded and
+	 * the level drew with whatever the new context had recycled those names
+	 * to (#430).  The "*N" inline submodels share the world's texture_t
+	 * array, so they are skipped rather than uploaded twice.  This also
+	 * covers standalone .bsp entity models, which nothing reloaded before. */
+	for (j = 0; j < mod_numknown; j++)
 	{
-		for (j = 0; j < mod->numtextures; j++)
-		{
-			tx = mod->textures[j];
-			if (tx)
-			{
-				if (!strncmp(tx->name, "sky", 3))
-				{
-					R_InitSky(tx);
-				}
-				else
-				{
-					int flags = TEX_MIPMAP | TEX_EMBEDDED_MIPS;
-					if (tx->name[0] == '{')
-						flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);
-					tx->gl_texturenum = GL_LoadTexture (tx->name, (byte *)(tx+1), tx->width, tx->height, flags);
-					if (tx->name[0] != '*' && tx->name[0] != '{')
-					{
-						char fbname[32];
-						q_snprintf(fbname, sizeof(fbname), "%s_glow", tx->name);
-						tx->gl_fb_texturenum = Mod_LoadFullbrightTexture(
-							fbname, (byte *)(tx+1), tx->width, tx->height);
-					}
-					else
-					{
-						tx->gl_fb_texturenum = 0;
-					}
-				}
-			}
-		}
+		if (mod_known[j].type == mod_brush && mod_known[j].needload == NL_PRESENT &&
+		    mod_known[j].name[0] && mod_known[j].name[0] != '*')
+			Mod_ReloadBrushTextures (&mod_known[j]);
 	}
 
 	// Reload alias models and sprites
@@ -1697,34 +1709,46 @@ static void Mod_LoadVertexes (lump_t *l)
 Mod_LoadSubmodels
 =================
 */
+/* Hexen II's 80-byte records or Quake's 64-byte ones: see bsp_submodels.h
+ * for how the layout is told apart, and GitHub #169 for why. */
 static void Mod_LoadSubmodels (lump_t *l)
 {
-	dmodel_t	*in;
+	const unsigned char	*in;
 	dmodel_t	*out;
-	int			i, j, count;
+	bsp_submodel_limits_t	lim;
+	int			i, j, count, stride;
 
-	in = (dmodel_t *)(mod_base + l->fileofs);
-	if (l->filelen % sizeof(*in))
+	in = (const unsigned char *)(mod_base + l->fileofs);
+	lim.numfaces = loadmodel->numsurfaces;
+	lim.numleafs = loadmodel->numleafs;
+	lim.numnodes = loadmodel->numnodes;
+	lim.numclipnodes = loadmodel->numclipnodes;
+	stride = BSP_SubmodelStride (in, l->filelen, &lim);
+	if (!stride)
 		Sys_Error ("%s: funny lump size in %s", __thisfunc__, loadmodel->name);
-	count = l->filelen / sizeof(*in);
+	count = l->filelen / stride;
 	out = (dmodel_t *) Hunk_AllocName (count * sizeof(*out), "submodels");
 
 	loadmodel->submodels = out;
 	loadmodel->numsubmodels = count;
 
-	for (i = 0; i < count; i++, in++, out++)
+	for (i = 0; i < count; i++, in += stride, out++)
+		BSP_ReadSubmodel (in, stride, out);
+
+	if (stride == BSP_SUBMODEL_STRIDE_Q1)
 	{
-		for (j = 0; j < 3; j++)
-		{	// spread the mins / maxs by a pixel
-			out->mins[j] = LittleFloat (in->mins[j]) - 1;
-			out->maxs[j] = LittleFloat (in->maxs[j]) + 1;
-			out->origin[j] = LittleFloat (in->origin[j]);
+		/* A Quake map builds no trees for Hexen II's hulls 2-5, so
+		 * BSP_ReadSubmodel pointed them at the player hull's.  Give them
+		 * its box too: SV_HullForEntity offsets by the hull's clip_mins,
+		 * and a box the tree was not built for would sink or float
+		 * whatever selects that hull. */
+		for (j = 2; j <= 5; j++)
+		{
+			VectorCopy (loadmodel->hulls[1].clip_mins, loadmodel->hulls[j].clip_mins);
+			VectorCopy (loadmodel->hulls[1].clip_maxs, loadmodel->hulls[j].clip_maxs);
 		}
-		for (j = 0; j < MAX_MAP_HULLS; j++)
-			out->headnode[j] = LittleLong (in->headnode[j]);
-		out->visleafs = LittleLong (in->visleafs);
-		out->firstface = LittleLong (in->firstface);
-		out->numfaces = LittleLong (in->numfaces);
+		Con_Printf ("%s: Quake BSP; every clip hull but the point one is the player's\n",
+			    loadmodel->name);
 	}
 }
 
@@ -2623,6 +2647,12 @@ static void Mod_MakeHulls (int count)
 	hull->clip_maxs[2] = 16;
 
 //hydra -changing in MP to '-8 -8 -8', '8 8 8' for pentacles
+/* "MP" is Raven's mission pack, not multiplayer: Portals of Praevus's
+ * pentacles take HULL_HYDRA, so the 1.11 Hexen II engine shrank this hull
+ * from the original +-40 to +-8.  HexenWorld forked from the engine before
+ * that and still builds +-40, hence the H2W arm keeping the old box.  Both
+ * are each engine's shipped behaviour; gamecode's constant.hc says the same.
+ * GitHub #284. */
 	hull = &loadmodel->hulls[4];
 	hull->clipnodes = loadmodel->clipnodes;
 	hull->firstclipnode = 0;
@@ -4934,6 +4964,11 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 
 	Mod_SetAliasModelExtraFlags (mod);
 
+	/* A reload after the cache evicted this model: its previous GPU mesh is
+	 * unreachable now, so give the slot back.  GitHub #387. */
+	GL_ReleaseAliasGPUMesh (mod->gpu_mesh_slot, mod->gpu_mesh_slot_gen);
+	mod->gpu_mesh_slot_gen = 0;
+
 	start = Hunk_LowMark ();
 
 	pinmodel = (newmdl_t *)buffer;
@@ -5089,6 +5124,8 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 // build the draw lists
 //
 	GL_MakeAliasModelDisplayLists (mod, pheader);
+	mod->gpu_mesh_slot = pheader->gpu_mesh;
+	mod->gpu_mesh_slot_gen = pheader->gpu_mesh_gen;
 
 //
 // move the complete, relocatable alias model to the cache
@@ -5132,6 +5169,11 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	int			start, end, total;
 
 	Mod_SetAliasModelExtraFlags (mod);
+
+	/* A reload after the cache evicted this model: its previous GPU mesh is
+	 * unreachable now, so give the slot back.  GitHub #387. */
+	GL_ReleaseAliasGPUMesh (mod->gpu_mesh_slot, mod->gpu_mesh_slot_gen);
+	mod->gpu_mesh_slot_gen = 0;
 
 	start = Hunk_LowMark ();
 
@@ -5282,6 +5324,8 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 // build the draw lists
 //
 	GL_MakeAliasModelDisplayLists (mod, pheader);
+	mod->gpu_mesh_slot = pheader->gpu_mesh;
+	mod->gpu_mesh_slot_gen = pheader->gpu_mesh_gen;
 
 //
 // move the complete, relocatable alias model to the cache

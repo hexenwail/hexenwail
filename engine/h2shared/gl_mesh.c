@@ -32,21 +32,27 @@ ALIAS MODEL DISPLAY LIST GENERATION
 =================================================================
 */
 
-static int		used[8192];
+/* Sized from MAXALIASTRIS, which the loaders enforce, so no model can overrun
+ * them.  They were 8192 / 128 / 1024 with no bounds checks: a 2048-triangle
+ * model that strips badly emits 7 command ints per triangle (14337 > 8192),
+ * and any strip or fan past 126 triangles overran stripverts[128].  GitHub
+ * #174 (e). */
+static int		used[MAXALIASTRIS];
 
 // the command list holds counts and s/t values that are valid for
-// every frame
-static int		commands[8192];
+// every frame: per strip a count and two s/t ints per vertex, worst case a
+// strip per triangle (1 + 2*3), plus the terminator
+static int		commands[MAXALIASTRIS * 7 + 1];
 static int		numcommands;
 
 // all frames will have their vertexes rearranged and expanded
 // so they are in the order expected by the command list
-static int		vertexorder[8192];
+static int		vertexorder[MAXALIASTRIS * 3];
 static int		numorder;
 
-static int		stripverts[128];
-static int		striptris[128];
-static int		stripstverts[128];
+static int		stripverts[MAX_ALIAS_STRIP_VERTS];
+static int		striptris[MAXALIASTRIS];
+static int		stripstverts[MAX_ALIAS_STRIP_VERTS];
 static int		stripcount;
 
 /*
@@ -236,9 +242,9 @@ static void BuildTris (void)
 	int		startv;
 	float	s, t;
 	int		len, bestlen, besttype;
-	int		bestverts[1024];
-	int		besttris[1024];
-	int		beststverts[1024];
+	static int	bestverts[MAX_ALIAS_STRIP_VERTS];	/* GitHub #174 (e) */
+	static int	besttris[MAXALIASTRIS];
+	static int	beststverts[MAX_ALIAS_STRIP_VERTS];
 	int		type;
 
 	//
@@ -426,6 +432,29 @@ void GL_AliasGPUMeshes_ContextLost (void)
 	alias_gpu_generation++;
 }
 
+/* A model's previous mesh, released when the model reloads after the cache
+ * evicted it: the evicted header is gone, so nothing can reach that slot any
+ * more, and without this every eviction leaked one until the next
+ * generation.  A slot from an older generation is already gone.  GitHub #387. */
+void GL_ReleaseAliasGPUMesh (int slot, int gen)
+{
+	if (gen != alias_gpu_generation || slot < 0 || slot >= num_alias_gpu_meshes)
+		return;
+	GL_FreeAliasGPUMesh (&alias_gpu_meshes[slot]);	/* memsets: now empty */
+}
+
+/* The slot a new mesh goes into: an emptied one if there is one, else the
+ * next past the end.  -1 when the table is full.  GitHub #387. */
+static int GL_AllocAliasGPUSlot (void)
+{
+	int	i;
+
+	for (i = 0; i < num_alias_gpu_meshes; i++)
+		if (!alias_gpu_meshes[i].valid && !alias_gpu_meshes[i].vao)
+			return i;
+	return (num_alias_gpu_meshes < MAX_ALIAS_MODELS) ? num_alias_gpu_meshes : -1;
+}
+
 /* A refused mesh: free what was made for it, and mark the header so the draw
  * path does not rebuild (and leak) it every frame. */
 static void GL_RefuseAliasGPUMesh (aliashdr_t *hdr, alias_gpu_mesh_t *gm)
@@ -482,9 +511,10 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	trivertx_t	*pv;
 	iqmvert_t	*iqmv;
 	alias_gpu_mesh_t *gm;
-	int		i, j;
+	int		i, j, slot;
 
-	if (num_alias_gpu_meshes >= MAX_ALIAS_MODELS)
+	slot = GL_AllocAliasGPUSlot ();
+	if (slot < 0)
 	{
 		hdr->gpu_mesh = -1;		/* full: refused for this generation */
 		hdr->gpu_mesh_gen = alias_gpu_generation;
@@ -625,7 +655,7 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	}
 
 	/* Create GPU objects */
-	gm = &alias_gpu_meshes[num_alias_gpu_meshes];
+	gm = &alias_gpu_meshes[slot];
 	memset(gm, 0, sizeof(*gm));
 	gm->poseverttype = hdr->poseverttype;
 
@@ -653,7 +683,7 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	{
 iqm_gpu_setup:
 		/* Skeletal setup: upload iqmvert_t data + bone pose matrices */
-		gm = &alias_gpu_meshes[num_alias_gpu_meshes];
+		gm = &alias_gpu_meshes[slot];
 		memset(gm, 0, sizeof(*gm));
 		gm->poseverttype = PV_IQM;
 		gm->numbones = hdr->numbones;
@@ -732,9 +762,10 @@ iqm_gpu_setup:
 		gm->numposes = hdr->numposes;
 		gm->valid = true;
 
-		hdr->gpu_mesh = num_alias_gpu_meshes;
+		hdr->gpu_mesh = slot;
 		hdr->gpu_mesh_gen = alias_gpu_generation;
-		num_alias_gpu_meshes++;
+		if (slot == num_alias_gpu_meshes)
+			num_alias_gpu_meshes++;
 
 		if (hdr->poseverttype == PV_IQM)
 		{
@@ -812,9 +843,10 @@ iqm_gpu_setup:
 	gm->numposes = hdr->numposes;
 	gm->valid = true;
 
-	hdr->gpu_mesh = num_alias_gpu_meshes;
+	hdr->gpu_mesh = slot;
 	hdr->gpu_mesh_gen = alias_gpu_generation;
-	num_alias_gpu_meshes++;
+	if (slot == num_alias_gpu_meshes)
+		num_alias_gpu_meshes++;
 
 	GL_MeshScratchFree();
 }

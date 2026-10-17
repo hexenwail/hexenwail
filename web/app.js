@@ -27,6 +27,9 @@ const ENGINE_RENDERER = BUILD_RENDERER_STAMP === 'software' ? 'software' : 'webg
 // renderer it does not use.
 const RENDERER_TEST_NAME = ENGINE_RENDERER === 'software' ? 'WebGL2 palette presenter' : 'WebGL2 renderer';
 
+// How long the keyboard/wheel/mouse must be quiet before a touch brings the
+// touch controls back (GitHub #152 b).
+const TOUCH_REGATE_QUIET_MS = 2000;
 const BASE_DIR = '/persistent';
 const ENGINE_ARGUMENTS = ['-basedir', BASE_DIR];
 const STORAGE_ROOT = 'hexenwail';
@@ -47,6 +50,7 @@ const state = {
   syncPromise: null,
   applyingSaveImport: false,
   demoInstalling: false,
+  autoDemoTried: false,
   demoSupported: true,
   storedPaths: new Set(),
   runtimeSnapshot: new Map(),
@@ -66,6 +70,7 @@ const state = {
   },
   modOptionSignature: '',
   touchOnlyEnvironment: false,
+  lastHardwareInputAt: 0,
   phoneMode: false,
 };
 
@@ -113,6 +118,24 @@ function setEngineState(engineState) {
   }
 }
 
+// The boot overlay's bar: a fraction 0..1, 'indet' for an unknown total, or
+// 'fail'.  The line above it is ui.progressText, which every loading stage
+// already writes.
+function setBootProgress(value) {
+  if (!ui.bootFill) return;
+  ui.bootFill.classList.toggle('indet', value === 'indet');
+  ui.bootFill.classList.toggle('fail', value === 'fail');
+  ui.bootFill.style.width = typeof value === 'number'
+    ? `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%` : '';
+}
+
+function setOverlayNote(message, kind = 'info') {
+  if (!ui.overlayNote) return;
+  ui.overlayNote.hidden = !message;
+  ui.overlayNote.textContent = message || '';
+  ui.overlayNote.dataset.kind = kind;
+}
+
 function renderRuntimeLog() {
   if (!ui.runtimeLog) return;
   const followTail = ui.runtimeLog.scrollHeight - ui.runtimeLog.scrollTop - ui.runtimeLog.clientHeight <= 8;
@@ -151,7 +174,11 @@ function announceEngineReady() {
   if (!state.rendererReady) {
     return;
   }
-  setStatus('Engine ready. Start the game when ready.');
+  if (getBaseAssetStatus([...state.storedPaths]) === 'none') {
+    setStatus(state.demoInstalling ? 'fetching the free demo…' : 'no game data yet: “files” to add yours');
+    return;
+  }
+  setStatus('ready — click the view to start');
 }
 
 function getDetectedMods() {
@@ -235,24 +262,58 @@ function renderMods() {
   }
 }
 
+// Hexen II, Portal of Praevus and any imported mod, as buttons on the start
+// screen -- only when there is a choice to make and the full game to make it
+// with (modsAreLaunchable), and gone once the engine runs.
+function renderGamePicker() {
+  if (!ui.gamePicker) return;
+  const choices = [['', 'Hexen II']];
+  if (missionPackInstalled()) choices.push([MISSION_PACK, 'Portal of Praevus']);
+  for (const mod of getDetectedMods()) choices.push([mod, mod]);
+  const show = choices.length > 1 && modsAreLaunchable() && !state.engineStarted && !state.runtimeExited;
+  ui.gamePicker.hidden = !show;
+  if (!show) return;
+  const selected = getSelectedMod();
+  const signature = choices.map(([value]) => value).join('/') + `|${selected}`;
+  if (ui.gamePicker.dataset.signature === signature) return;
+  ui.gamePicker.dataset.signature = signature;
+  ui.gamePicker.replaceChildren(...choices.map(([value, label]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = value === selected ? 'game cur' : 'game';
+    button.textContent = label;
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.preferences.mod = parseLaunchChoice(value);
+      savePreferences();
+      updateLaunchState();
+    });
+    return button;
+  }));
+}
+
 function updateLaunchState() {
   const assets = getBaseAssetStatus([...state.storedPaths]);
   const ready = assets !== 'none';
   renderMods();
   const activeMod = getActiveMod();
   if (ui.launchButton) {
-    ui.launchButton.disabled = !state.rendererReady || !ready
+    // The overlay's start prompt.  Disabled hides it (the boot bar and its
+    // line say what is still happening instead).
+    ui.launchButton.disabled = !state.rendererReady || !ready || !state.runtimeReady
       || (state.engineStarted && !state.runtimeExited);
-    ui.launchButton.textContent = !state.rendererReady
-      ? 'WebGL2 unavailable'
-      : state.runtimeExited
-        ? 'Restart game'
-        : state.engineStarted
-          ? 'Running'
-          : assets === 'full'
-            ? activeMod ? `Start game — ${activeMod === MISSION_PACK ? 'Portal of Praevus' : activeMod}` : 'Start game'
-            : assets === 'pak0-only' ? 'Start game (demo)' : 'Import pak0.pak first';
+    const what = activeMod ? ` ${activeMod === MISSION_PACK ? 'Portal of Praevus' : activeMod}` : '';
+    ui.launchButton.textContent = state.runtimeExited
+      ? 'stopped — click (or press Enter) to restart'
+      : assets === 'pak0-only'
+        ? 'click (or press Enter) to play the demo'
+        : `click (or press Enter) to play${what}`;
   }
+  if (ui.overlay) {
+    ui.overlay.dataset.phase = state.runtimeExited ? 'stopped'
+      : (!state.rendererReady || ui.launchButton?.disabled) ? 'boot' : 'ready';
+  }
+  renderGamePicker();
   if (ui.exitButton) {
     ui.exitButton.disabled = !state.engineStarted || state.runtimeExited;
   }
@@ -972,6 +1033,7 @@ async function installDemo() {
   state.demoInstalling = true;
   updateLaunchState();
   setImportMessage('Fetching the Hexen II demo…');
+  setStatus('fetching the free demo…');
 
   try {
     const result = await downloadHexen2Demo({
@@ -979,6 +1041,8 @@ async function installDemo() {
         if (ui.progressText) {
           ui.progressText.textContent = describeDemoStage(event);
         }
+        setBootProgress(event.stage === 'downloading' && event.totalBytes
+          ? (event.receivedBytes ?? 0) / event.totalBytes : 'indet');
       },
     });
     for (const warning of result.warnings) {
@@ -996,7 +1060,8 @@ async function installDemo() {
     if (ui.progressText) {
       ui.progressText.textContent = `Installed ${result.files.length} demo files (${formatBytes(storedBytes)})`;
     }
-    setImportMessage(`Installed the Hexen II demo from ${result.source.label}. Start the game when ready.`, 'success');
+    setImportMessage(`Installed the Hexen II demo from ${result.source.label}.`, 'success');
+    setBootProgress(1);
     await updateStorageIndicator();
   } catch (error) {
     // Verification failures leave nothing behind: files are only written after
@@ -1007,10 +1072,32 @@ async function installDemo() {
       ui.progressText.textContent = 'Demo install failed; nothing was written.';
     }
     setImportMessage(`Demo download failed: ${error.message}`, 'error');
+    setBootProgress('fail');
+    setOverlayNote(`Could not fetch the free demo (${error.message}). Add your own Hexen II files with “files” below, or drop them on this page.`, 'error');
   } finally {
     state.demoInstalling = false;
     updateLaunchState();
   }
+}
+
+// First visit with no game data: fetch Raven's free demo straight away, so
+// the page opens on something playable instead of an import form.  Once per
+// page load, and never over files the player has stored.
+async function maybeAutoInstallDemo() {
+  if (state.autoDemoTried || !state.storageReady || !state.runtimeReady) return;
+  if (getBaseAssetStatus([...state.storedPaths]) !== 'none') return;
+  state.autoDemoTried = true;
+  if (!state.demoSupported) {
+    setBootProgress('fail');
+    if (ui.progressText) ui.progressText.textContent = 'no game data yet';
+    setOverlayNote('This browser cannot unpack the free demo. Add your own Hexen II files with “files” below, or drop them on this page.', 'error');
+    return;
+  }
+  await installDemo();
+  if (getBaseAssetStatus([...state.storedPaths]) !== 'none') {
+    announceEngineReady();
+  }
+  updateLaunchState();
 }
 
 async function getInstalledPaks(gameDirectories) {
@@ -1239,10 +1326,24 @@ function isPhoneModeEnvironment() {
   return matchMedia(PHONE_VIEWPORT_QUERY).matches;
 }
 
+// Are the touch controls on screen?  The CSS decides the same thing from the
+// same three inputs (index.html, .phone-controls display rules).
+function touchControlsShown() {
+  const pref = state.preferences.touchControls;
+  return pref === 'on' || (pref === 'auto' && state.touchOnlyEnvironment);
+}
+
 function updateTouchOnlyEnvironment(forceOff = false) {
+  const wasShown = touchControlsShown();
   state.phoneMode = isPhoneModeEnvironment();
   state.touchOnlyEnvironment = !forceOff && isLikelyTouchOnlyEnvironment();
-  if (!state.touchOnlyEnvironment) {
+  // Release held touch input only when the controls actually go away.  This
+  // runs on every touch pointerdown (the two-way gate below), which is
+  // dispatched AFTER the pad registered that very touch -- so releasing
+  // whenever the environment read "not touch-only" ended every look drag and
+  // stick push the moment it began, with "Always show" on, on a tablet with
+  // a trackpad, or on any phone whose browser reports a fine pointer.
+  if (wasShown && !touchControlsShown()) {
     releasePhoneInputs();
   }
   applyPreferences();
@@ -1398,7 +1499,7 @@ async function startEngineFromUserAction() {
       throw new Error(`Engine exited during startup with status ${exitStatus}.`);
     }
     scheduleCanvasResize();
-    setStatus('Hexenwail running. Tap the canvas to focus input.');
+    setStatus(state.touchOnlyEnvironment || state.phoneMode ? 'playing — ☰ for the menu' : 'playing — click the view to capture the mouse · Esc for the menu');
   } catch (error) {
     if (state.quitInProgress) return;
     state.engineStarted = false;
@@ -1447,7 +1548,9 @@ async function clearImportedData() {
 }
 
 async function requestFullscreenForCanvas() {
-  const canvas = ui.canvas;
+  // The stage, not the bare canvas: the chips and the touch controls live in
+  // it, and the engine's canvas follows its size (resizeCanvasToViewport).
+  const canvas = ui.viewport ?? ui.canvas;
   if (!canvas) return;
 
   let target = null;
@@ -1471,6 +1574,18 @@ async function requestFullscreenForCanvas() {
     await method.call(target);
   } catch (error) {
     setImportMessage(`Fullscreen request failed: ${error.message}`, 'error');
+  }
+}
+
+// The engine's own fullscreen toggle (Alt+Enter, the video menu) lands here:
+// in the browser the page owns fullscreen, on the stage (gl_vidsdl.c,
+// VID_ToggleFullscreen).
+function toggleFullscreenFromEngine() {
+  const current = document.fullscreenElement ?? document.webkitFullscreenElement;
+  if (current) {
+    (document.exitFullscreen ?? document.webkitExitFullscreen)?.call(document)?.catch?.(() => {});
+  } else {
+    requestFullscreenForCanvas();
   }
 }
 
@@ -1748,8 +1863,16 @@ function bindUi() {
     modMessage: document.getElementById('mod-message'),
     modRejectedList: document.getElementById('mod-rejected-list'),
     modRequirements: document.getElementById('mod-requirements'),
-    dropZone: document.getElementById('drop-zone'),
     viewport: document.querySelector('.viewport'),
+    overlay: document.getElementById('overlay'),
+    bootFill: document.getElementById('bootFill'),
+    overlayNote: document.getElementById('overlay-note'),
+    gamePicker: document.getElementById('game-picker'),
+    keysButton: document.getElementById('keys-button'),
+    drawer: document.getElementById('drawer'),
+    filesButton: document.getElementById('files-button'),
+    filesMenu: document.getElementById('files-menu'),
+    dropHint: document.getElementById('dropHint'),
     storageText: document.getElementById('storage-text'),
     storageBackendText: document.getElementById('storage-backend-text'),
     offlineText: document.getElementById('offline-text'),
@@ -1860,33 +1983,94 @@ function bindUi() {
   }
   addEventListener('gamepadconnected', () => updateTouchOnlyEnvironment(true));
   addEventListener('gamepaddisconnected', () => updateTouchOnlyEnvironment());
+  // A keyboard, wheel or mouse hides the touch controls -- and a touch brings
+  // them back.  The gate used to be one-way for the session, so detaching a
+  // Bluetooth keyboard left them hidden until a reload (GitHub #152 b).  The
+  // touch only counts once the hardware has been quiet a moment, so a
+  // keyboard player tapping the canvas to focus it does not flicker them.
+  const hardwareInput = () => {
+    state.lastHardwareInputAt = performance.now();
+    updateTouchOnlyEnvironment(true);
+  };
   addEventListener('keydown', (event) => {
-    if (event.isTrusted !== false) updateTouchOnlyEnvironment(true);
+    if (event.isTrusted !== false) hardwareInput();
   });
-  addEventListener('wheel', () => updateTouchOnlyEnvironment(true), { passive: true });
+  addEventListener('wheel', hardwareInput, { passive: true });
   addEventListener('pointerdown', (event) => {
     if (event.pointerType === 'mouse' || event.pointerType === 'pen') {
-      updateTouchOnlyEnvironment(true);
+      hardwareInput();
+    } else if (event.pointerType === 'touch' && !state.touchOnlyEnvironment &&
+               performance.now() - state.lastHardwareInputAt > TOUCH_REGATE_QUIET_MS) {
+      updateTouchOnlyEnvironment();
     }
   }, { passive: true });
 
-  if (ui.dropZone) {
-    for (const eventName of ['dragenter', 'dragover']) {
-      ui.dropZone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        ui.dropZone.dataset.drag = 'true';
-      });
+  // The drawer (keys, settings, the log) and the files menu, from the bar.
+  const setDrawer = (open) => {
+    if (!ui.drawer) return;
+    ui.drawer.hidden = !open;
+    ui.keysButton?.setAttribute('aria-expanded', String(open));
+    if (open) ui.drawer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  ui.keysButton?.addEventListener('click', () => setDrawer(ui.drawer?.hidden ?? false));
+  const setFilesMenu = (open) => {
+    if (!ui.filesMenu) return;
+    ui.filesMenu.hidden = !open;
+    ui.filesButton?.setAttribute('aria-expanded', String(open));
+  };
+  ui.filesButton?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setFilesMenu(ui.filesMenu?.hidden ?? false);
+  });
+  ui.filesMenu?.addEventListener('click', (event) => event.stopPropagation());
+  addEventListener('click', () => setFilesMenu(false));
+
+  // The whole overlay is the start button, and so is Enter while it shows:
+  // both go through the launch button's own handler, the one place the
+  // engine is started from.
+  ui.overlay?.addEventListener('click', (event) => {
+    if (event.target === ui.launchButton) return;
+    if (ui.launchButton && !ui.launchButton.disabled) ui.launchButton.click();
+  });
+  addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || state.engineStarted && !state.runtimeExited) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest('input, select, textarea, button, a, #drawer, #files-menu')) return;
+    if (ui.launchButton && !ui.launchButton.disabled) {
+      event.preventDefault();
+      ui.launchButton.click();
     }
-    for (const eventName of ['dragleave', 'drop']) {
-      ui.dropZone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        ui.dropZone.dataset.drag = 'false';
-      });
-    }
-    ui.dropZone.addEventListener('drop', async (event) => {
-      await handleImportedFiles(event.dataTransfer?.files ?? []);
-    });
-  }
+  });
+  document.addEventListener('pointerlockchange', () => {
+    document.body.dataset.pointerLocked = document.pointerLockElement ? 'true' : 'false';
+  });
+
+  // Files dropped anywhere on the page are imported, as the files menu's
+  // "add files" would.
+  let dragDepth = 0;
+  const showDropHint = (show) => { if (ui.dropHint) ui.dropHint.hidden = !show; };
+  const carriesFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
+  addEventListener('dragenter', (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    showDropHint(true);
+  });
+  addEventListener('dragover', (event) => {
+    if (carriesFiles(event)) event.preventDefault();
+  });
+  addEventListener('dragleave', (event) => {
+    if (!carriesFiles(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) showDropHint(false);
+  });
+  addEventListener('drop', async (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    showDropHint(false);
+    await handleImportedFiles(event.dataTransfer?.files ?? []);
+  });
 }
 
 function bindBootCallbacks() {
@@ -1894,6 +2078,7 @@ function bindBootCallbacks() {
   const Module = getModule();
   const previousOnRuntimeInitialized = Module.onRuntimeInitialized;
   Module.canvas = ui.canvas;
+  Module.hexenwailToggleFullscreen = toggleFullscreenFromEngine;
   Module.arguments = [...ENGINE_ARGUMENTS];
   Module.noInitialRun = true;
   Module.locateFile = (path) => new URL(path, document.baseURI).toString();
@@ -1926,6 +2111,7 @@ function bindBootCallbacks() {
     await loadStoredFilesIntoRuntime();
     announceEngineReady();
     updateLaunchState();
+    await maybeAutoInstallDemo();
   };
   boot.onQuit = (detail) => handleEngineQuit(detail?.kind ?? 'quit', detail?.message ?? '', detail?.gamedir ?? '');
 
@@ -1935,6 +2121,7 @@ function bindBootCallbacks() {
       await loadStoredFilesIntoRuntime();
       announceEngineReady();
       updateLaunchState();
+      await maybeAutoInstallDemo();
     });
   }
 }
@@ -1994,6 +2181,8 @@ async function init() {
   updateLaunchState();
   await updateStorageIndicator();
   await registerServiceWorker();
+  if (ui.progressText) ui.progressText.textContent = 'fetching engine…';
+  setBootProgress('indet');
   await ensureEngineScriptLoaded();
   // Still restore stored files when the renderer self-test failed: the save
   // panel is driven by that state, and somebody whose browser cannot render
@@ -2003,6 +2192,7 @@ async function init() {
     await loadStoredFilesIntoRuntime();
     announceEngineReady();
     updateLaunchState();
+    await maybeAutoInstallDemo();
   }
 
   setInterval(() => {

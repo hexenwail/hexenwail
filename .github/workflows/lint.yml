@@ -167,6 +167,80 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # Lightstyles animated on the GPU, no lightmap rebuild (#439).
+      - name: GPU lightstyles
+        run: python3 tools/test_gpu_lightstyles.py
+
+      # hwsv falls back to the hwprogs.dat shipped beside it (#37).
+      - name: hwsv bundled gamecode fallback
+        run: python3 tools/test_hwsv_bundled_progs.py
+
+      # r_oit 2: moment-based OIT (#87).
+      - name: Moment-based OIT
+        run: python3 tools/test_mboit.py
+
+      # The 128^3 softemu LUT's CPU builder equals a full scan (#80).
+      - name: Softemu LUT builder is exact
+        run: python3 tools/test_softemu_lut.py
+
+      # The AppImage's AppRun picks the basedir like the zip (#173).
+      - name: AppImage AppRun
+        run: python3 tools/test_appimage_apprun.py
+
+      # The rendering audit's deferred tail (#174).
+      - name: Rendering audit tail
+        run: python3 tools/test_audit_tail_174.py
+
+      # sv_maxdatagram caps the per-frame datagram (#82).
+      - name: sv_maxdatagram
+        run: python3 tools/test_sv_maxdatagram.py
+
+      # cl_startmenu, Ironwail's start-at-the-menu toggle (#273).
+      - name: cl_startmenu
+        run: python3 tools/test_cl_startmenu.py
+
+      # Demo rewind: keyframes and silent replay (#76).
+      - name: Demo rewind
+        run: python3 tools/test_demo_rewind.py
+
+      # joy_always_active gates rumble and gyro (#409).
+      - name: joy_always_active
+        run: python3 tools/test_joy_always_active.py
+
+      # Maps browser skill step resumes an autosave (#410).
+      - name: Maps browser resume
+        run: python3 tools/test_maps_resume.py
+
+      # sv_autoload: death loads the last save on this map (#410).
+      - name: sv_autoload
+        run: python3 tools/test_sv_autoload.py
+
+      # max_edicts 16384 of 32000; sounds past entity 8192 (#411).
+      - name: Edict ceiling and large-entity sounds
+        run: python3 tools/test_max_edicts.py
+
+      # contrast is Ironwail's multiplier, clamped 1..2.
+      - name: Contrast parity
+        run: python3 tools/test_contrast_parity.py
+
+      # The WebGL2 fixes from verifying the ES tier in a browser (GitHub #112).
+      - name: WebGL2 ES-tier fixes
+        run: python3 tools/test_webgl2_es_fixes.py
+
+      # Particles stand still while the game is paused.
+      - name: Particles pause
+        run: python3 tools/test_particles_pause.py
+
+      # Headless (offscreen) runs stay windowed, so screenshots are the
+      # frame and nothing else (GitHub #401).
+      - name: Offscreen driver windowed
+        run: python3 tools/test_offscreen_windowed.py
+
+      # A brush entity's abslight is lit like a lightmap sample of it, as
+      # the software renderer does (GitHub #326, the dark pillars).
+      - name: Brush abslight scale
+        run: python3 tools/test_brush_abslight.py
+
       # scr_sbaralpha fades the bottom bar on GL and nothing else (GitHub #83).
       - name: Status bar alpha
         run: python3 tools/test_sbar_alpha.py

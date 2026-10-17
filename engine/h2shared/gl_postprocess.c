@@ -147,10 +147,22 @@ static GLuint	pp_program;
 static GLint	pp_loc_scene;
 static GLint	pp_loc_gamma;
 static GLint	pp_loc_contrast;
+
+/* The contrast the shader applies: v_contrast clamped to Ironwail's 1..2
+ * (gl_rmain.c: q_min(2.0f, q_max(1.0f, vid_contrast.value))).  Below 1 it
+ * is identity, as upstream, not a darkening. */
+static float PP_Contrast (void)
+{
+	float c = v_contrast.value;
+	if (c < 1.0f) c = 1.0f;
+	if (c > 2.0f) c = 2.0f;
+	return c;
+}
 static GLint	pp_loc_mvp;
 static GLint	pp_loc_softemu;
 static GLint	pp_loc_dither;
 static GLint	pp_loc_paletteLUT;
+static GLint	pp_loc_lutmax;
 static GLint	pp_loc_scale;
 static GLint	pp_loc_waterwarp;
 static GLint	pp_loc_time;
@@ -166,8 +178,19 @@ static GLint	pp_loc_bloom_strength;
  * colour is baked rather than looked up from a palette uniform, and why RGBA
  * and not RGB (rgba8 is an image-storable format; rgb8 is not, and the compute
  * builder writes into this same texture). */
-#define PP_LUT_DIM	32
+/* The nearest-colour LUT is Ironwail's 128^3 (GitHub #80): at 32^3 the grid
+ * quantised colour before the palette match even ran, a floor under every
+ * metric.  The CPU builder that the ES / WebGL2 tier depends on searches a
+ * sorted palette with an exact lower bound instead of all 255 entries, which
+ * is what makes 128^3 affordable there (PP_BuildPaletteLUT_CPU).
+ *
+ * The colormap LUT (r_softemu 3) stays 32^3: its candidates depend on the
+ * target's luma, so it has no such bound, and 128^3 would be 537M
+ * evaluations.  The shader is told which grid it is reading (lutmax). */
+#define PP_LUT_DIM	128
 #define PP_LUT_TEXELS	(PP_LUT_DIM * PP_LUT_DIM * PP_LUT_DIM)
+#define PP_CMAP_DIM	32
+#define PP_CMAP_TEXELS	(PP_CMAP_DIM * PP_CMAP_DIM * PP_CMAP_DIM)
 
 /* Colour-distance functions the nearest-colour search can minimise, in
  * upstream's order -- r_softemu_metric indexes this directly, and the compute
@@ -319,6 +342,8 @@ qboolean R_SoftEmuMdlWarp (void)
 }
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
+/* 0 off, 1 weighted blended OIT, 2 moment-based OIT (GitHub #87; falls
+ * back to 1 where the moment targets cannot be built). */
 cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 cvar_t	r_bloom = {"r_bloom", "0", CVAR_ARCHIVE};		/* bloom post-process */
 cvar_t	r_bloom_intensity = {"r_bloom_intensity", "1.0", CVAR_ARCHIVE};	/* bloom glow strength */
@@ -367,10 +392,22 @@ static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static GLint	oit_resolve_msaa_loc_accum;
 static GLint	oit_resolve_msaa_loc_reveal;
+static GLint	oit_resolve_loc_mboit;
+static GLint	oit_resolve_msaa_loc_mboit;
 static int	oit_samples;		/* >1 when accum/revealage are multisampled */
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
 static qboolean	oit_in_pass;		/* true between Begin/EndTranslucency */
+/* Moment-based OIT (r_oit 2, GitHub #87).  The moment pass accumulates b0 and
+ * four power moments of depth into these; the composite pass then re-draws
+ * the translucents into oit_accum_tex, weighted by the transmittance
+ * reconstructed from them, and the ordinary resolve composites the result.
+ * 32-bit float: the moments of a deep stack lose everything in fp16. */
+static GLuint	mboit_b0_tex;		/* R32F  absorbance sum */
+static GLuint	mboit_mom_tex;		/* RGBA32F  depth moments */
+static GLuint	mboit_fbo;
+static qboolean	mboit_available;
+static int	mboit_pass;		/* 0 none, 1 moments, 2 composite */
 
 /* OIT resolve shaders */
 static const char oit_resolve_vert[] =
@@ -386,11 +423,14 @@ static const char oit_resolve_frag[] =
 	PP_FRAG_HEADER
 	"uniform sampler2D TexAccum;\n"
 	"uniform sampler2D TexReveal;\n"
+	"uniform int u_mboit;\n"	/* TexReveal holds MBOIT's b0 (#87) */
 	"layout(location=0) out vec4 out_fragcolor;\n"
 	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
 	"void main() {\n"
 	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
 	"    float revealage = texelFetch(TexReveal, coords, 0).r;\n"
+	/* MBOIT: the scene shows through what the absorbance b0 leaves */
+	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
 	"    vec4 accumulation = texelFetch(TexAccum, coords, 0);\n"
 	"    if (isinf(max3(abs(accumulation.rgb))))\n"
 	"        accumulation.rgb = vec3(accumulation.a);\n"
@@ -411,11 +451,13 @@ static const char oit_resolve_frag_msaa[] =
 	PP_FRAG_HEADER
 	"uniform sampler2DMS TexAccum;\n"
 	"uniform sampler2DMS TexReveal;\n"
+	"uniform int u_mboit;\n"
 	"layout(location=0) out vec4 out_fragcolor;\n"
 	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
 	"void main() {\n"
 	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
 	"    float revealage = texelFetch(TexReveal, coords, gl_SampleID).r;\n"
+	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
 	"    vec4 accumulation = texelFetch(TexAccum, coords, gl_SampleID);\n"
 	"    if (isinf(max3(abs(accumulation.rgb))))\n"
 	"        accumulation.rgb = vec3(accumulation.a);\n"
@@ -493,7 +535,7 @@ static qboolean PP_NeedsPostProcess (void)
 {
 	if (!pp_initialized)
 		return false;
-	if (v_gamma.value != 1.0f || v_contrast.value != 1.0f)
+	if (v_gamma.value != 1.0f || PP_Contrast () != 1.0f)
 		return true;
 	if (r_scale.value < 1.0f)
 		return true;
@@ -849,6 +891,7 @@ static const char pp_frag_src[] =
 	"uniform int softemu;\n"
 	"uniform float dither;\n"
 	"uniform sampler3D paletteLUT;\n"
+	"uniform float lutmax;\n"	/* grid size - 1 of the bound LUT (#80) */
 	"uniform float scale;\n"
 	"uniform float waterwarp;\n"
 	"uniform float time;\n"
@@ -925,8 +968,12 @@ static const char pp_frag_src[] =
 	"        vec3 x = color.rgb;\n"
 	"        color.rgb = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);\n"
 	"    }\n"
-	"    if (contrast != 1.0)\n"
-	"        color.rgb = (color.rgb - 0.5) * contrast + 0.5;\n"
+	/* Ironwail's (and QuakeSpasm's, MarkV's) contrast: a multiplier, 1..2,
+	 * that brightens.  This was a stretch about mid-grey, which a dark
+	 * scene -- most of Hexen II -- read as darkening: contrast 1.5 took
+	 * demo1's mean from 0.107 to 0.018.  PP_Contrast clamps.  GitHub #112
+	 * follow-up. */
+	"    color.rgb *= contrast;\n"
 	"    if (gamma != 1.0)\n"
 	"        color.rgb = pow(max(color.rgb, vec3(0.0)), vec3(gamma));\n"
 	"    color.rgb = clamp(color.rgb, 0.0, 1.0);\n"
@@ -937,7 +984,7 @@ static const char pp_frag_src[] =
 	"            float d = bayer16(ivec2(gl_FragCoord.xy * scale));\n"
 	"            c += d * dither / 16.0;\n"
 	"        }\n"
-	"        ivec3 idx = ivec3(clamp(c, 0.0, 1.0) * 31.0 + 0.5);\n"
+	"        ivec3 idx = ivec3(clamp(c, 0.0, 1.0) * lutmax + 0.5);\n"
 	"        color.rgb = texelFetch(paletteLUT, idx, 0).rgb;\n"
 	"    }\n"
 	"\n"
@@ -1009,6 +1056,7 @@ static qboolean PP_InitShader (void)
 	pp_loc_softemu = glGetUniformLocation_fp(pp_program, "softemu");
 	pp_loc_dither = glGetUniformLocation_fp(pp_program, "dither");
 	pp_loc_paletteLUT = glGetUniformLocation_fp(pp_program, "paletteLUT");
+	pp_loc_lutmax = glGetUniformLocation_fp(pp_program, "lutmax");
 	pp_loc_scale = glGetUniformLocation_fp(pp_program, "scale");
 	pp_loc_waterwarp = glGetUniformLocation_fp(pp_program, "waterwarp");
 	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
@@ -1095,7 +1143,7 @@ extern unsigned int d_8to24table[256];
  * PP_UploadLUT, the compute builder by imageStore.  Binds on unit 1, where the
  * post-process shader expects the LUT, and leaves GL_TEXTURE0 active with
  * nothing newly bound. */
-static GLuint PP_CreateLUTTexture (void)
+static GLuint PP_CreateLUTTexture (int dim)
 {
 	GLuint tex = 0;
 
@@ -1103,7 +1151,7 @@ static GLuint PP_CreateLUTTexture (void)
 	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, tex);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
-			PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,
+			dim, dim, dim, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1135,20 +1183,20 @@ static GLuint PP_CreateLUTTexture (void)
  * Safe to bake because d_8to24table is built once in VID_InitPalette and never
  * mutated afterwards; palette flashes go through v_blend, not this table.
  * Ported from alextnewman/hexenwail d2c46f078. */
-static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
+static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut, int dim)
 {
-	/* static: 128 KB, too much for the stack on Windows */
+	/* static: 8 MB at 128^3, far too much for the stack */
 	static unsigned char rgba[PP_LUT_TEXELS * 4];
-	int i;
+	int i, texels = dim * dim * dim;
 
 	if (!*tex)
 	{
-		*tex = PP_CreateLUTTexture();
+		*tex = PP_CreateLUTTexture(dim);
 		if (!*tex)
 			return false;
 	}
 
-	for (i = 0; i < PP_LUT_TEXELS; i++)
+	for (i = 0; i < texels; i++)
 	{
 		unsigned int c = d_8to24table[lut[i]];
 		rgba[i * 4 + 0] = (c >>  0) & 0xff;
@@ -1160,7 +1208,7 @@ static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
 	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, *tex);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
-			PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,
+			dim, dim, dim, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 	glBindTexture_fp(GL_TEXTURE_3D, 0);
 	glActiveTexture_fp(GL_TEXTURE0);
@@ -1182,7 +1230,8 @@ static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
 /*                                                                     */
 /* Checked against the retail palette rather than assumed.  Under the  */
 /* naive metric this reproduces the exact integer nearest-colour table */
-/* over all 32768 grid points -- zero worse choices.                   */
+/* over all 32768 grid points of the then 32^3 grid -- zero worse      */
+/* choices.  (Now 128^3: GitHub #80.)                                  */
 /*                                                                     */
 /* The two implementations were then diffed against each other on a    */
 /* real driver (GL 4.3, NVIDIA 580): Riemersma byte-identical over the */
@@ -1205,22 +1254,25 @@ static float PP_SRGBToLinear (float v)
 	return (v > 0.04045f) ? powf((v + 0.055f) / 1.055f, 2.4f) : (v / 12.92f);
 }
 
-/* 8-bit sRGB triple -> the space `metric` measures distance in. */
-static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, float out[3])
+/* One 8-bit channel through the per-channel part of PP_NormalizeColor:
+ * scale, and to linear for every metric but naive.  Split out so the LUT
+ * builder can do it once per grid coordinate (GitHub #80); the whole-colour
+ * function below calls exactly this, so the two cannot drift. */
+static float PP_NormalizeChannel (softemu_metric_t metric, int v8)
 {
-	float c[3];
-
-	c[0] = (float)r8 * (1.0f / 255.0f);
-	c[1] = (float)g8 * (1.0f / 255.0f);
-	c[2] = (float)b8 * (1.0f / 255.0f);
+	float c = (float)v8 * (1.0f / 255.0f);
 
 	if (metric >= SOFTEMU_METRIC_RIEMERSMA)
-	{
-		c[0] = PP_SRGBToLinear(c[0]);
-		c[1] = PP_SRGBToLinear(c[1]);
-		c[2] = PP_SRGBToLinear(c[2]);
+		c = PP_SRGBToLinear(c);
+	return c;
+}
 
-		if (metric >= SOFTEMU_METRIC_OKLAB)
+/* The channel-mixing part of PP_NormalizeColor: OKLab from linear RGB, in
+ * place.  Only OKLab mixes channels. */
+static void PP_MixChannels (softemu_metric_t metric, float c[3])
+{
+	if (metric >= SOFTEMU_METRIC_OKLAB)
+	{
 		{
 			/* A perceptual color space for image processing -- Bjorn
 			 * Ottosson.  https://bottosson.github.io/posts/oklab/ */
@@ -1240,10 +1292,15 @@ static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, 
 			c[2] = 0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_;
 		}
 	}
+}
 
-	out[0] = c[0];
-	out[1] = c[1];
-	out[2] = c[2];
+/* 8-bit sRGB triple -> the space `metric` measures distance in. */
+static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, float out[3])
+{
+	out[0] = PP_NormalizeChannel(metric, r8);
+	out[1] = PP_NormalizeChannel(metric, g8);
+	out[2] = PP_NormalizeChannel(metric, b8);
+	PP_MixChannels(metric, out);
 }
 
 static float PP_ColorDistanceSquared (softemu_metric_t metric, const float c0[3], const float c1[3])
@@ -1362,7 +1419,7 @@ static void PP_MetricChanged (cvar_t *var)
 static qboolean PP_BuildColormapLUT (void)
 {
 	/* static: ~114 KB of tables, too much for the stack on Windows */
-	static unsigned char lut[PP_LUT_TEXELS];
+	static unsigned char lut[PP_CMAP_TEXELS];
 	static unsigned char rampluma[VID_GRADES][256];	/* [light][texel] -> luma */
 	static unsigned char bestlevel[256][256];	/* [texel][target luma] -> light */
 	const byte *cmap = host_colormap;
@@ -1405,15 +1462,15 @@ static qboolean PP_BuildColormapLUT (void)
 		}
 	}
 
-	for (b = 0; b < 32; b++)
+	for (b = 0; b < PP_CMAP_DIM; b++)
 	{
-		for (g = 0; g < 32; g++)
+		for (g = 0; g < PP_CMAP_DIM; g++)
 		{
-			for (r = 0; r < 32; r++)
+			for (r = 0; r < PP_CMAP_DIM; r++)
 			{
-				int tr = (r * 255) / 31;
-				int tg = (g * 255) / 31;
-				int tb = (b * 255) / 31;
+				int tr = (r * 255) / (PP_CMAP_DIM - 1);
+				int tg = (g * 255) / (PP_CMAP_DIM - 1);
+				int tb = (b * 255) / (PP_CMAP_DIM - 1);
 				int ty = PP_LUMA(tr, tg, tb);
 				int best = 0;
 				int bestdist = 0x7fffffff;
@@ -1436,12 +1493,154 @@ static qboolean PP_BuildColormapLUT (void)
 						best = entry;
 					}
 				}
-				lut[b * 32 * 32 + g * 32 + r] = (unsigned char)best;
+				lut[(b * PP_CMAP_DIM + g) * PP_CMAP_DIM + r] = (unsigned char)best;
 			}
 		}
 	}
 
-	return PP_UploadLUT(&pp_colormap_lut, lut);
+	return PP_UploadLUT(&pp_colormap_lut, lut, PP_CMAP_DIM);
+}
+
+/* Per-axis bounds on PP_ColorDistanceSquared, as weights on the squared
+ * per-channel differences: the distance always lies between
+ * sum(lo[k] * d[k]^2) and sum(hi[k] * d[k]^2).  Exact (lo == hi) for the two
+ * Euclidean metrics -- naive, and OKLab with its 1.25 / 1.5 axis scales --
+ * and for Riemersma from rmean in [0,1] (linear RGB): its red and blue
+ * weights move between 2 and 3, green is 4.  GitHub #80. */
+static void PP_MetricWeights (softemu_metric_t metric, float lo[3], float hi[3])
+{
+	switch (metric)
+	{
+	case SOFTEMU_METRIC_RIEMERSMA:
+		lo[0] = 2.0f; lo[1] = 4.0f; lo[2] = 2.0f;
+		hi[0] = 3.0f; hi[1] = 4.0f; hi[2] = 3.0f;
+		break;
+	case SOFTEMU_METRIC_OKLAB:
+		lo[0] = hi[0] = 1.5625f; lo[1] = hi[1] = 1.0f; lo[2] = hi[2] = 2.25f;
+		break;
+	default:
+		lo[0] = hi[0] = lo[1] = hi[1] = lo[2] = hi[2] = 1.0f;
+		break;
+	}
+}
+
+#define PP_LUT_BLOCK	8	/* grid cells per block edge; divides PP_LUT_DIM */
+
+/*
+===============
+PP_FillPaletteGrid
+
+The nearest-colour grid: for every PP_LUT_DIM^3 cell, the palette index a
+scan of all `count' entries keeping the first strict minimum would pick --
+ties included -- but without scanning them all.  The grid is cut into
+PP_LUT_BLOCK^3 blocks; for each, the box its targets span in metric space
+gives every entry a lower and an upper bound on its distance to any target
+inside.  The least upper bound caps every target's nearest distance, so only
+entries whose lower bound does not exceed it can be nearest -- or tie for
+nearest -- anywhere in the block.  Those are then scanned per cell in index
+order with the same strict comparison as the full scan, so the result is the
+same table.  The cap is widened by a relative margin far above float
+rounding, which can only admit extra candidates, never drop one.
+
+Shared verbatim with tools/test_softemu_lut.py, which checks it cell for cell
+against the full scan.  GitHub #80.
+===============
+*/
+static void PP_FillPaletteGrid (softemu_metric_t metric, float palcolors[][3], int count,
+				unsigned char *lut)
+{
+	static float	targets[PP_LUT_BLOCK][PP_LUT_BLOCK][PP_LUT_BLOCK][3];
+	static float	axis[PP_LUT_DIM];
+	static int	cand[256];
+	float		wlo[3], whi[3];
+	int		br, bg, bb, r, g, b, i, k, ncand;
+
+	PP_MetricWeights(metric, wlo, whi);
+
+	/* The per-channel part of the transform, once per grid coordinate: the
+	 * same calls PP_NormalizeColor makes, so the targets are bit-identical
+	 * to whole-colour calls.  Only OKLab's channel mixing is left per cell. */
+	for (i = 0; i < PP_LUT_DIM; i++)
+		axis[i] = PP_NormalizeChannel(metric, PP_GRID_TO_8BIT(i));
+
+	for (bb = 0; bb < PP_LUT_DIM; bb += PP_LUT_BLOCK)
+	for (bg = 0; bg < PP_LUT_DIM; bg += PP_LUT_BLOCK)
+	for (br = 0; br < PP_LUT_DIM; br += PP_LUT_BLOCK)
+	{
+		float	boxlo[3] = { 1e30f, 1e30f, 1e30f };
+		float	boxhi[3] = { -1e30f, -1e30f, -1e30f };
+		float	cap = 1e30f;
+
+		for (b = 0; b < PP_LUT_BLOCK; b++)
+		for (g = 0; g < PP_LUT_BLOCK; g++)
+		for (r = 0; r < PP_LUT_BLOCK; r++)
+		{
+			float	*t = targets[b][g][r];
+			t[0] = axis[br + r];
+			t[1] = axis[bg + g];
+			t[2] = axis[bb + b];
+			PP_MixChannels(metric, t);
+			for (k = 0; k < 3; k++)
+			{
+				if (t[k] < boxlo[k]) boxlo[k] = t[k];
+				if (t[k] > boxhi[k]) boxhi[k] = t[k];
+			}
+		}
+
+		/* least upper bound over entries: no target in the box is farther
+		 * than this from its nearest entry */
+		for (i = 0; i < count; i++)
+		{
+			float	upper = 0.0f;
+			for (k = 0; k < 3; k++)
+			{
+				float	d0 = palcolors[i][k] - boxlo[k];
+				float	d1 = boxhi[k] - palcolors[i][k];
+				float	d = (d0 > d1) ? d0 : d1;
+				upper += whi[k] * d * d;
+			}
+			if (upper < cap)
+				cap = upper;
+		}
+		cap = cap * 1.001f + 1e-9f;
+
+		ncand = 0;
+		for (i = 0; i < count; i++)
+		{
+			float	lower = 0.0f;
+			for (k = 0; k < 3; k++)
+			{
+				float	d = 0.0f;
+				if (palcolors[i][k] < boxlo[k])
+					d = boxlo[k] - palcolors[i][k];
+				else if (palcolors[i][k] > boxhi[k])
+					d = palcolors[i][k] - boxhi[k];
+				lower += wlo[k] * d * d;
+			}
+			if (lower <= cap)
+				cand[ncand++] = i;
+		}
+
+		for (b = 0; b < PP_LUT_BLOCK; b++)
+		for (g = 0; g < PP_LUT_BLOCK; g++)
+		for (r = 0; r < PP_LUT_BLOCK; r++)
+		{
+			int	best = 0;
+			float	bestdist = 1e+30f;
+			for (k = 0; k < ncand; k++)
+			{
+				float	dist = PP_ColorDistanceSquared(metric, targets[b][g][r],
+								       palcolors[cand[k]]);
+				if (dist < bestdist)
+				{
+					bestdist = dist;
+					best = cand[k];
+				}
+			}
+			lut[((bb + b) * PP_LUT_DIM + (bg + g)) * PP_LUT_DIM + (br + r)] =
+				(unsigned char)best;
+		}
+	}
 }
 
 /*
@@ -1450,20 +1649,18 @@ PP_BuildPaletteLUT_CPU
 
 The nearest-colour table, built under `metric`.  Runs on every tier; on the ES
 / WebGL2 one it is the only route, since that tier has no compute shaders.
-
-~8.4M distance evaluations (32^3 grid x 255 candidates), which is tens of
-milliseconds -- fine at load and at a settings change, and the reason the GPU
-path below is a nicety here rather than the necessity it is upstream, where
-the grid is 128^3 and the same loop is 537M evaluations.
+128^3 (Ironwail's grid) by a full scan is 537M distance evaluations, too slow
+at load; PP_FillPaletteGrid returns the same table from a few candidates per
+cell.  GitHub #80.
 ===============
 */
 static qboolean PP_BuildPaletteLUT_CPU (softemu_metric_t metric)
 {
-	/* static: 32 KB of indices + 3 KB of transformed palette, and this is
-	 * called from the frame path when the metric changes */
+	/* static: 2 MB of indices, and this is called from the frame path when
+	 * the metric changes */
 	static unsigned char	lut[PP_LUT_TEXELS];
 	static float		palcolors[256][3];
-	int	r, g, b, i;
+	int	i;
 
 	if (!glTexImage3D_fp)
 		return false;
@@ -1479,41 +1676,13 @@ static qboolean PP_BuildPaletteLUT_CPU (softemu_metric_t metric)
 				  palcolors[i]);
 	}
 
-	for (b = 0; b < PP_LUT_DIM; b++)
-	{
-		for (g = 0; g < PP_LUT_DIM; g++)
-		{
-			for (r = 0; r < PP_LUT_DIM; r++)
-			{
-				float	target[3];
-				int	best = 0;
-				float	bestdist = 1e+30f;
+	/* 255, not 256: index 255 is skipped (transparent / fullbright).
+	 * Upstream searches all 256 -- Quake's last entry is an ordinary
+	 * colour, ours is the transparency key, and emitting it would paint
+	 * holes. */
+	PP_FillPaletteGrid(metric, palcolors, 255, lut);
 
-				PP_NormalizeColor(metric,
-						  PP_GRID_TO_8BIT(r),
-						  PP_GRID_TO_8BIT(g),
-						  PP_GRID_TO_8BIT(b),
-						  target);
-
-				/* skip index 255 (transparent / fullbright).
-				 * Upstream searches all 256 -- Quake's last entry
-				 * is an ordinary colour, ours is the transparency
-				 * key, and emitting it would paint holes. */
-				for (i = 0; i < 255; i++)
-				{
-					float dist = PP_ColorDistanceSquared(metric, target, palcolors[i]);
-					if (dist < bestdist)
-					{
-						bestdist = dist;
-						best = i;
-					}
-				}
-				lut[(b * PP_LUT_DIM + g) * PP_LUT_DIM + r] = (unsigned char)best;
-			}
-		}
-	}
-
-	return PP_UploadLUT(&pp_palette_lut, lut);
+	return PP_UploadLUT(&pp_palette_lut, lut, PP_LUT_DIM);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1713,7 +1882,7 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 
 	if (!pp_palette_lut)
 	{
-		pp_palette_lut = PP_CreateLUTTexture();
+		pp_palette_lut = PP_CreateLUTTexture(PP_LUT_DIM);
 		if (!pp_palette_lut)
 			return false;
 	}
@@ -1846,6 +2015,10 @@ static void OIT_DeleteFBO (void)
 	if (oit_accum_tex) { glDeleteTextures_fp(1, &oit_accum_tex); oit_accum_tex = 0; }
 	if (oit_revealage_tex) { glDeleteTextures_fp(1, &oit_revealage_tex); oit_revealage_tex = 0; }
 	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
+	if (mboit_b0_tex) { glDeleteTextures_fp(1, &mboit_b0_tex); mboit_b0_tex = 0; }
+	if (mboit_mom_tex) { glDeleteTextures_fp(1, &mboit_mom_tex); mboit_mom_tex = 0; }
+	if (mboit_fbo) { glDeleteFramebuffers_fp(1, &mboit_fbo); mboit_fbo = 0; }
+	mboit_available = false;
 	oit_samples = 0;
 	oit_available = false;
 }
@@ -1857,6 +2030,21 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	GLenum textarget = (samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 
 	OIT_DeleteFBO();
+#ifdef USE_GLES
+	/* ES 3.0 and WebGL2 have no multisample textures, so the two OIT
+	 * targets cannot match a multisampled scene's depth.  Creating them as
+	 * GL_TEXTURE_2D_MULTISAMPLE anyway failed both binds and both
+	 * attachments, and the depth-only FBO left behind still checked
+	 * complete: "OIT: FBO ready", drawing translucency into nothing.
+	 * Under MSAA on this tier there is no OIT; sorted translucency it is.
+	 * GitHub #112. */
+	if (samples > 1)
+	{
+		Con_SafePrintf("OIT: unavailable with MSAA on the GLES tier (no multisample textures)\n");
+		oit_samples = 0;
+		return false;
+	}
+#endif
 	oit_samples = (samples > 1) ? samples : 0;
 
 	/* Accumulation texture (RGBA16F). When MSAA is active these must be
@@ -1919,6 +2107,50 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	oit_height = height;
 	oit_available = true;
 	Con_SafePrintf("OIT: %dx%d FBO ready\n", width, height);
+
+#ifndef USE_GLES
+	/* The MBOIT moment targets (#87), sharing the scene depth like the WBOIT
+	 * pair.  Optional: without them r_oit 2 falls back to weighted blended. */
+	{
+		GLenum	fmts[2] = { GL_R32F, GL_RGBA32F };
+		GLenum	cfmts[2] = { GL_RED, GL_RGBA };
+		GLuint	*texs[2] = { &mboit_b0_tex, &mboit_mom_tex };
+		int	k;
+
+		for (k = 0; k < 2; k++)
+		{
+			glGenTextures_fp(1, texs[k]);
+			glBindTexture_fp(textarget, *texs[k]);
+			if (oit_samples > 1)
+				glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
+							   fmts[k], width, height, GL_TRUE);
+			else
+			{
+				glTexImage2D_fp(GL_TEXTURE_2D, 0, fmts[k], width, height, 0,
+						cfmts[k], GL_FLOAT, NULL);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			}
+		}
+		glGenFramebuffers_fp(1, &mboit_fbo);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, mboit_fbo);
+		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textarget, mboit_b0_tex, 0);
+		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, textarget, mboit_mom_tex, 0);
+		if (depth_stencil_tex)
+			glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+						  GL_TEXTURE_2D, depth_stencil_tex, 0);
+		else
+			glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+						     GL_RENDERBUFFER, depth_stencil_rb);
+		glDrawBuffers_fp(2, drawbufs);
+		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+		glBindTexture_fp(textarget, 0);
+		mboit_available = (status == GL_FRAMEBUFFER_COMPLETE);
+		if (!mboit_available)
+			Con_SafePrintf("OIT: MBOIT moment targets incomplete (status 0x%x); r_oit 2 falls back to 1\n", status);
+	}
+#endif
 	return true;
 }
 
@@ -1952,6 +2184,7 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_prog = prog;
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+	oit_resolve_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
 
 #ifndef USE_GLES
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
@@ -1971,6 +2204,7 @@ static qboolean OIT_InitShader (void)
 			oit_resolve_prog_msaa = prog;
 			oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 			oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+			oit_resolve_msaa_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
 		}
 		else
 			glDeleteProgram_fp(prog);
@@ -1995,6 +2229,25 @@ void OIT_BeginTranslucency (void)
 		return;
 
 	oit_in_pass = true;
+
+	/* r_oit 2: the moment pass first; OIT_NextPass moves on to the
+	 * composite.  Both targets sum additively. */
+	if (r_oit.integer >= 2 && mboit_available)
+	{
+		mboit_pass = 1;
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, mboit_fbo);
+		glClearBufferfv_fp(GL_COLOR, 0, zeroes);
+		glClearBufferfv_fp(GL_COLOR, 1, zeroes);
+		R_SetBlend (true);
+		R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
+		R_SetBlendFuncIndexed (1, GL_ONE, GL_ONE);
+		R_SetDepthMask (false);
+		GL_SetOITMode (1, oit_samples > 1);
+		return;
+	}
+
+	mboit_pass = 0;
+	GL_SetOITMode (0, false);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
 	glClearBufferfv_fp(GL_COLOR, 1, ones);
@@ -2008,12 +2261,53 @@ void OIT_BeginTranslucency (void)
 	R_SetDepthMask (false);
 }
 
+/* Moves an r_oit 2 translucency pass from moments to composite; the caller
+ * draws its translucents again while this returns true (gl_rmain.c).  The
+ * composite writes oit_accum_tex only -- one draw buffer, so the second
+ * output of the OIT programs goes nowhere -- reading the moment targets
+ * through MBOIT_TMU_*.  GitHub #87. */
+qboolean OIT_NextPass (void)
+{
+	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
+	GLenum	one = GL_COLOR_ATTACHMENT0;
+	GLenum	textarget = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+
+	if (!oit_in_pass || mboit_pass != 1)
+		return false;
+
+	mboit_pass = 2;
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
+	glDrawBuffers_fp(1, &one);
+	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
+	R_SetBlend (true);
+	R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
+	R_SetDepthMask (false);
+
+	glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0));
+	glBindTexture_fp(textarget, mboit_b0_tex);
+	glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
+	glBindTexture_fp(textarget, mboit_mom_tex);
+	glActiveTexture_fp(GL_TEXTURE0);
+
+	GL_SetOITMode (2, oit_samples > 1);
+	return true;
+}
+
+/* True while translucents are being drawn for a pass that will be drawn
+ * again: the r_oit 2 moment pass.  Draw code that consumes a list as it
+ * draws it (R_DrawWaterSurfaces nulls its texture chains) keeps it for the
+ * composite.  GitHub #87. */
+qboolean OIT_KeepChains (void)
+{
+	return oit_in_pass && mboit_pass == 1;
+}
+
 void OIT_EndTranslucency (GLuint scene_fbo)
 {
 	GLenum textarget;
 	GLuint prog;
 	GLint loc_accum, loc_reveal;
-	qboolean cull_was_on;
+	qboolean cull_was_on, mboit;
 	GLint saved_viewport[4];
 
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
@@ -2025,6 +2319,25 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	loc_reveal = (oit_samples > 1) ? oit_resolve_msaa_loc_reveal : oit_resolve_loc_reveal;
 
 	oit_in_pass = false;
+
+	/* r_oit 2: the composite left oit_accum_tex holding transmittance-
+	 * weighted colour; resolve it with b0 standing in for revealage. */
+	mboit = (mboit_pass == 2);
+	if (mboit_pass)
+	{
+		GLenum	two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+		GLenum	mt = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
+		glDrawBuffers_fp(2, two);
+		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0));
+		glBindTexture_fp(mt, 0);
+		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
+		glBindTexture_fp(mt, 0);
+		glActiveTexture_fp(GL_TEXTURE0);
+		GL_SetOITMode (0, false);
+		mboit_pass = 0;
+	}
 
 	cull_was_on = R_GetCull();
 	glGetIntegerv_fp(GL_VIEWPORT, saved_viewport);
@@ -2041,10 +2354,14 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(textarget, oit_accum_tex);
 	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(textarget, oit_revealage_tex);
+	glBindTexture_fp(textarget, mboit ? mboit_b0_tex : oit_revealage_tex);
 
 	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
 	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
+	{
+		GLint	loc = (oit_samples > 1) ? oit_resolve_msaa_loc_mboit : oit_resolve_loc_mboit;
+		if (loc >= 0) glUniform1i_fp(loc, mboit ? 1 : 0);
+	}
 
 	/* Full-buffer for the resolve triangle, but SAVED and put back below.
 	 * The scene's viewport is not the whole buffer: R_SetupGL() derives it
@@ -2734,6 +3051,7 @@ void GL_PostProcess_EndFrame (void)
 {
 	GLuint blit_tex;
 	int blit_w, blit_h;
+	float lutmax;	/* grid size - 1 of the LUT bound for softemu (#80) */
 
 	/* Drain any pending HUD glyph quads before we touch FBOs and shaders. */
 	Draw_FlushCharBatch ();
@@ -2897,12 +3215,14 @@ apply_shader:
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	/* bind palette LUT on texture unit 1 if softemu is active */
+	lutmax = (float)(PP_LUT_DIM - 1);
 	if ((int)r_softemu.value > 0 && pp_lut_built)
 	{
 		/* mode 3 swaps in the colormap-derived LUT; the shader is identical
 		 * either way, only the table it reads changes */
-		GLuint lut = ((int)r_softemu.value == 3 && pp_colormap_lut) ?
-				pp_colormap_lut : pp_palette_lut;
+		qboolean cmap = ((int)r_softemu.value == 3 && pp_colormap_lut);
+		GLuint lut = cmap ? pp_colormap_lut : pp_palette_lut;
+		lutmax = (float)((cmap ? PP_CMAP_DIM : PP_LUT_DIM) - 1);
 		glActiveTexture_fp(GL_TEXTURE0 + 1);
 		glBindTexture_fp(GL_TEXTURE_3D, lut);
 		glActiveTexture_fp(GL_TEXTURE0);
@@ -2919,13 +3239,15 @@ apply_shader:
 	if (pp_loc_gamma >= 0)
 		glUniform1f_fp(pp_loc_gamma, v_gamma.value);
 	if (pp_loc_contrast >= 0)
-		glUniform1f_fp(pp_loc_contrast, v_contrast.value);
+		glUniform1f_fp(pp_loc_contrast, PP_Contrast ());
 	if (pp_loc_hdr_exposure >= 0)
 		glUniform1f_fp(pp_loc_hdr_exposure, PP_HDRActive() ? r_hdr_exposure.value : 0.0f);
 
 	/* softemu uniforms */
 	if (pp_loc_softemu >= 0)
 		glUniform1i_fp(pp_loc_softemu, (int)r_softemu.value);
+	if (pp_loc_lutmax >= 0)
+		glUniform1f_fp(pp_loc_lutmax, lutmax);
 	if (pp_loc_dither >= 0)
 	{
 		/* r_softemu_dither_screen scales the master strength, which is what

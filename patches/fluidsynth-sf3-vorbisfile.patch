@@ -1,0 +1,231 @@
+--- a/src/sfloader/fluid_sffile.c	2026-10-17 15:17:53.390060872 -0400
++++ b/src/sfloader/fluid_sffile.c	2026-10-17 15:21:08.510158375 -0400
+@@ -27,6 +27,9 @@
+ 
+ #if LIBSNDFILE_SUPPORT
+ #include <sndfile.h>
++#elif defined(HEXENWAIL_VORBISFILE)
++#include <math.h>
++#include <vorbis/vorbisfile.h>
+ #endif
+ 
+ #if LIBINSTPATCH_SUPPORT
+@@ -719,7 +722,7 @@
+ 
+             if(sf->version.major == 3)
+             {
+-#if !LIBSNDFILE_SUPPORT
++#if !LIBSNDFILE_SUPPORT && !defined(HEXENWAIL_VORBISFILE)
+                 FLUID_LOG(FLUID_WARN,
+                           "Sound font version is %d.%d but fluidsynth was compiled without"
+                           " support for (v3.x)",
+@@ -2747,6 +2750,209 @@
+     sf_close(sndfile);
+     return -1;
+ }
++#elif defined(HEXENWAIL_VORBISFILE)
++/* Hexenwail: SF3 samples decoded with libvorbisfile instead of libsndfile.
++ *
++ * sf_open_virtual() above autodetects the format, so a crafted sample can
++ * reach every libsndfile parser; this opens Ogg Vorbis and nothing else.
++ * The output matches the libsndfile path sample for sample:
++ * SFC_SET_SCALE_FLOAT_INT_READ makes libsndfile peak-normalise, writing
++ * lrintf(x / ((32768/32767) * peak) * 32767) for every sample x.  */
++typedef struct
++{
++    SFData *sffile;
++    long start;   /* first byte of the compressed sample in the file */
++    long length;  /* bytes */
++    long offset;  /* current position, relative to start */
++} hw_ovio_t;
++
++static size_t hw_ov_read(void *ptr, size_t size, size_t nmemb, void *user)
++{
++    hw_ovio_t *d = user;
++    SFData *sf = d->sffile;
++    long count = (long)(size * nmemb);
++
++    if(count > d->length - d->offset)
++    {
++        count = d->length - d->offset;
++    }
++    if(count <= 0 || size == 0)
++    {
++        return 0;
++    }
++    fluid_rec_mutex_lock(sf->mtx);
++    if(sf->fcbs->fseek(sf->sffd, d->start + d->offset, SEEK_SET) == FLUID_FAILED
++            || sf->fcbs->fread(ptr, count, sf->sffd) == FLUID_FAILED)
++    {
++        fluid_rec_mutex_unlock(sf->mtx);
++        return 0;
++    }
++    fluid_rec_mutex_unlock(sf->mtx);
++    d->offset += count;
++    return (size_t)count / size;
++}
++
++static int hw_ov_seek(void *user, ogg_int64_t offset, int whence)
++{
++    hw_ovio_t *d = user;
++    ogg_int64_t to;
++
++    switch(whence)
++    {
++    case SEEK_SET: to = offset; break;
++    case SEEK_CUR: to = d->offset + offset; break;
++    case SEEK_END: to = d->length + offset; break;
++    default: return -1;
++    }
++    if(to < 0 || to > d->length)
++    {
++        return -1;
++    }
++    d->offset = (long)to;
++    return 0;
++}
++
++static long hw_ov_tell(void *user)
++{
++    return ((hw_ovio_t *)user)->offset;
++}
++
++static int fluid_sffile_read_vorbis(SFData *sf, unsigned int start_byte, unsigned int end_byte, short **data)
++{
++    ov_callbacks cb = { hw_ov_read, hw_ov_seek, NULL, hw_ov_tell };
++    hw_ovio_t io;
++    OggVorbis_File vf;
++    vorbis_info *vi;
++    float *pcmbuf = NULL;
++    short *wav_data = NULL;
++    long frames = 0, cap, i;
++    float peak = 0.0f;
++    int section;
++
++    if((start_byte > sf->samplesize) || (end_byte > sf->samplesize) || end_byte < start_byte)
++    {
++        FLUID_LOG(FLUID_ERR, "Ogg Vorbis data offsets exceed sample data chunk");
++        return -1;
++    }
++
++    io.sffile = sf;
++    io.start = (long)(sf->samplepos + start_byte);
++    io.length = (long)(end_byte - start_byte) + 1;  /* end is inclusive, as above */
++    io.offset = 0;
++
++    if(ov_open_callbacks(&io, &vf, NULL, 0, cb) != 0)
++    {
++        FLUID_LOG(FLUID_ERR, "ov_open_callbacks(): not an Ogg Vorbis sample");
++        return -1;
++    }
++
++    vi = ov_info(&vf, -1);
++    if(!vi || vi->channels != 1)
++    {
++        FLUID_LOG(FLUID_DBG, "Unsupported channel count %d in ogg sample", vi ? vi->channels : 0);
++        ov_clear(&vf);
++        return -1;
++    }
++
++    cap = 4096;
++    pcmbuf = FLUID_ARRAY(float, cap);
++    if(!pcmbuf)
++    {
++        FLUID_LOG(FLUID_PANIC, "Out of memory");
++        ov_clear(&vf);
++        return -1;
++    }
++
++    for(;;)
++    {
++        float **pcm;
++        long n = ov_read_float(&vf, &pcm, 4096, &section);
++
++        if(n == OV_HOLE)
++        {
++            continue;
++        }
++        if(n < 0)
++        {
++            FLUID_LOG(FLUID_ERR, "ov_read_float(): decode error %ld", n);
++            goto error_exit;
++        }
++        if(n == 0)
++        {
++            break;
++        }
++        if(frames + n > cap)
++        {
++            float *grown;
++            while(frames + n > cap)
++            {
++                cap *= 2;
++            }
++            grown = FLUID_REALLOC(pcmbuf, cap * sizeof(float));
++            if(!grown)
++            {
++                FLUID_LOG(FLUID_PANIC, "Out of memory");
++                goto error_exit;
++            }
++            pcmbuf = grown;
++        }
++        for(i = 0; i < n; i++)
++        {
++            float x = pcm[0][i];
++            float ax = x < 0.0f ? -x : x;
++            if(ax > peak)
++            {
++                peak = ax;
++            }
++            pcmbuf[frames + i] = x;
++        }
++        frames += n;
++    }
++    ov_clear(&vf);
++
++    if(frames <= 0)
++    {
++        FLUID_LOG(FLUID_DBG, "Empty decompressed sample");
++        FLUID_FREE(pcmbuf);
++        *data = NULL;
++        return 0;
++    }
++
++    wav_data = FLUID_ARRAY(short, frames);
++    if(!wav_data)
++    {
++        FLUID_LOG(FLUID_PANIC, "Out of memory");
++        FLUID_FREE(pcmbuf);
++        return -1;
++    }
++
++    if(peak > 0.0f)
++    {
++        /* exactly as libsndfile: its float_max is a float, computed in
++         * double from the double signal maximum; the reciprocal is taken in
++         * double and narrowed.  A double float_max is off by one LSB on
++         * about 1 sample in 5000. */
++        float float_max = (float)((32768.0 / 32767.0) * (double)peak);
++        float inverse = (float)(1.0 / float_max);
++        for(i = 0; i < frames; i++)
++        {
++            wav_data[i] = (short)lrintf((pcmbuf[i] * inverse) * 32767.0f);
++        }
++    }
++    else
++    {
++        FLUID_MEMSET(wav_data, 0, frames * sizeof(short));
++    }
++
++    FLUID_FREE(pcmbuf);
++    *data = wav_data;
++    return (int)frames;
++
++error_exit:
++    FLUID_FREE(pcmbuf);
++    ov_clear(&vf);
++    return -1;
++}
+ #else
+ static int fluid_sffile_read_vorbis(SFData *sf, unsigned int start_byte, unsigned int end_byte, short **data)
+ {

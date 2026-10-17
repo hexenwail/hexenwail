@@ -34,6 +34,8 @@
 #include "sbar.h"
 #include "menu_pointer.h"
 #include "sdl_inc.h"
+#include <sys/stat.h>
+#include <time.h>
 
 void (*vid_menudrawfn)(void);
 
@@ -845,6 +847,16 @@ static char	old_bgmtype[20];	// S.A
 static int	old_extmusic = -1;
 
 
+/* The `menu_main' command.  Ironwail's cl_startmenu 0 means "do not start at
+ * the menu", and in Hexen II it is hexen.rc that starts there, so the command
+ * stands down while the startup script runs.  GitHub #273. */
+static void M_Menu_Main_Cmd_f (void)
+{
+	if (host_startup_script && !cl_startmenu.integer)
+		return;
+	M_Menu_Main_f ();
+}
+
 void M_Menu_Main_f (void)
 {
 	// Deactivate the mouse when the menus are drawn
@@ -943,9 +955,19 @@ static void M_Main_Draw (void)
 		const char *r = M_RendererName();
 		int i, y = vid.height - 14;	/* CANVAS_DEFAULT extent (a5nn.37) */
 
+		/* The watermark at the other end of this line starts here (its
+		 * own x, clamped like Draw_ConsoleVersionInfo clamps it).  On a
+		 * narrow framebuffer -- the software renderer's 320 -- the two
+		 * met in the middle and printed over each other; the watermark
+		 * names the build, so the renderer tag is the one that yields.
+		 * GitHub #441. */
+		int wm_x = vid.width - ((int)strlen (ENGINE_WATERMARK) * 8 + 11);
+		if (wm_x < 11)
+			wm_x = 11;
+
 		/* At 320x200 the menu canvas is the whole screen and this would
 		 * print over QUIT: the menu wins.  GitHub #135. */
-		if (!Draw_MenuReachesLine (y))
+		if (!Draw_MenuReachesLine (y) && 11 + (int)strlen (r) * 8 + 8 <= wm_x)
 		{
 			GL_SetCanvas (CANVAS_DEFAULT);
 			for (i = 0; r[i]; i++)
@@ -3095,8 +3117,10 @@ static void M_Display_AdjustSliders (int dir)
 		Cvar_SetValue ("gamma", f);
 		break;
 	case DISP_CONTRAST:
+		/* 1..2, Ironwail's range: contrast multiplies, and below 1 the
+		 * shader treats it as 1.  GitHub #112 follow-up. */
 		f = v_contrast.value + dir * 0.05;
-		if (f < 0.5)	f = 0.5;
+		if (f < 1)	f = 1;
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrast", f);
 		break;
@@ -3246,7 +3270,7 @@ static void M_Display_Draw (void)
 	if (!M_Display_IsSkip(DISP_CONTRAST))
 	{
 		M_Print (76, 92 + 8*DISP_CONTRAST, disp_labels[DISP_CONTRAST]);
-		r = (v_contrast.value - 0.5) / 1.5;
+		r = (v_contrast.value - 1.0) / 1.0;
 		M_DrawSliderValue (220, 92 + 8*DISP_CONTRAST, r, "%.2f", v_contrast.value);
 	}
 
@@ -4180,15 +4204,14 @@ static qboolean M_Graphics_IsSkip (int i)
 	 * The cvars behind these rows are a separate matter.  Those this build
 	 * defines (r_soft_web.c, draw_soft_web.c) default as the GL build does,
 	 * which tools/test_soft_cvar_defaults.py enforces.  The GL-only ones
-	 * (showclock, scr_showspeed, ...) are not registered here at all, so a
-	 * software session drops them from config.cfg: GitHub #362.
+	 * are not registered here at all, so a software session drops them from
+	 * config.cfg: GitHub #362.
 	 *
 	 * Found by tools/menu_soft_parity.py, which now holds this list to that
 	 * standard on every push.  uhexen2-ibnq.2.
 	 */
 	switch (i)
 	{
-	case GFX_CENTERPRINTBG:
 	case GFX_HUDSCALE:
 	case GFX_MENUSCALE:
 	case GFX_CROSSHAIRSCALE:
@@ -4197,15 +4220,16 @@ static qboolean M_Graphics_IsSkip (int i)
 	case GFX_OVERBRIGHT:
 	case GFX_COLORED_LM:
 	case GFX_GLOW_INTENSITY:
-	case GFX_SHOWSPEED:
-	case GFX_SHOWCLOCK:
 		return true;
 	default:
 		break;
 	}
-	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT, GFX_DEMOBAR
+	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT, GFX_DEMOBAR,
+	 *          GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK
 	 *
-	 * GFX_DEMOBAR: screen.c draws the bar in this build too (GitHub #123). */
+	 * GFX_DEMOBAR: screen.c draws the bar in this build too (GitHub #123).
+	 * GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK: ported to screen.c,
+	 * the background stippled by Draw_FillAlpha (GitHub #329). */
 #endif
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
 }
@@ -8757,6 +8781,8 @@ typedef struct
 	qboolean	is_start;
 } mapentry_t;
 
+static void M_Maps_OpenSkill (const mapentry_t *e);
+
 static mapentry_t	maps_list[MAPS_MAX];
 static int	maps_count;
 static int	maps_view[MAPS_MAX];
@@ -9244,11 +9270,143 @@ static void M_Maps_Key (int key)
 	case K_GP_A:
 		if (maps_view_count <= 0)
 			break;
+		M_Maps_OpenSkill (&maps_list[maps_view[maps_cursor]]);
+		break;
+	}
+}
+
+//=============================================================================
+/* MAP SKILL STEP -- Ironwail's M_Menu_Skill_f, after a map is picked.
+ *
+ * Pick a skill to start the map fresh, or, when the map has an autosave,
+ * "Resume last game" -- which is how an autosave is reached from the menus at
+ * all: M_ScanSaves only enumerates the numbered slots.  The skill names are
+ * the current class's, as on the New Game difficulty menu.  Resume is
+ * preselected when present, else the current skill, as upstream.  GitHub #410.
+ */
+
+static char	mapskill_name[MAX_QPATH];
+static char	mapskill_title[64];
+static int	mapskill_cursor;
+static qboolean	mapskill_canresume;
+static time_t	mapskill_lastplayed;	/* 0: unknown */
+#define	MAPSKILL_RESUME		NUM_DIFFLEVELS
+#define	MAPSKILL_RESUME_Y	(60 + NUM_DIFFLEVELS * 20 + 4)
+
+static void M_Maps_OpenSkill (const mapentry_t *e)
+{
+	char		info[MAX_OSPATH];
+	struct stat	st;
+	int		error_state;
+
+	q_strlcpy (mapskill_name, e->name, sizeof(mapskill_name));
+	q_strlcpy (mapskill_title, e->title[0] ? e->title : e->name, sizeof(mapskill_title));
+
+	mapskill_canresume = false;
+	mapskill_lastplayed = 0;
+	FS_MakePath_BUF (FS_USERDIR, &error_state, info, sizeof(info),
+			 va("autosave/%s/info.dat", e->name));
+	if (!error_state && stat (info, &st) == 0)
+	{
+		mapskill_canresume = true;
+		if (st.st_mtime <= time (NULL))
+			mapskill_lastplayed = st.st_mtime;
+	}
+
+	if (mapskill_canresume)
+		mapskill_cursor = MAPSKILL_RESUME;
+	else
+		mapskill_cursor = CLAMP (0, skill.integer, NUM_DIFFLEVELS - 1);
+	m_state = m_mapskill;
+	m_entersound = true;
+}
+
+/* "3 minutes", "2 hours", "5 days": Ironwail's COM_DescribeDuration, coarse. */
+static const char *M_DescribeAge (time_t then)
+{
+	long	s = (long) difftime (time (NULL), then);
+
+	if (s < 60)		return va("%ld second%s", s, s == 1 ? "" : "s");
+	if (s < 3600)		return va("%ld minute%s", s / 60, s / 60 == 1 ? "" : "s");
+	if (s < 86400)		return va("%ld hour%s", s / 3600, s / 3600 == 1 ? "" : "s");
+	return va("%ld day%s", s / 86400, s / 86400 == 1 ? "" : "s");
+}
+
+static int M_MapSkill_Items (void)
+{
+	return NUM_DIFFLEVELS + (mapskill_canresume ? 1 : 0);
+}
+
+static void M_MapSkill_Draw (void)
+{
+	int	i, cls, f, h;
+
+	ScrollTitle("gfx/menu/title5.lmp");
+	M_PrintWhite ((320 - (int)strlen(mapskill_title) * 8) / 2, 44, mapskill_title);
+
+	cls = cl_playerclass.integer;
+	if (cls < 1 || cls > MAX_PLAYER_CLASS)
+		cls = MAX_PLAYER_CLASS;
+	if (cls > MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES && !(gameflags & GAME_PORTALS))
+		cls = MAX_PLAYER_CLASS - PORTALS_EXTRA_CLASSES;
+	for (i = 0; i < NUM_DIFFLEVELS; ++i)
+		M_DrawBigString (72, 60 + (i * 20), DiffNames[cls - 1][i]);
+
+	if (mapskill_canresume)
+	{
+		M_Print (72, MAPSKILL_RESUME_Y, "Resume last game");
+		if (mapskill_lastplayed)
+			M_Print (72, MAPSKILL_RESUME_Y + 8, va("from %s ago", M_DescribeAge (mapskill_lastplayed)));
+	}
+
+	h = M_MouseToMenuItem (menu_mouse_y, 60, 20, NUM_DIFFLEVELS);
+	if (h >= 0)
+		mapskill_cursor = h;
+	else if (mapskill_canresume && M_MouseToMenuItem (menu_mouse_y, MAPSKILL_RESUME_Y - 4, 20, 1) >= 0)
+		mapskill_cursor = MAPSKILL_RESUME;
+
+	f = (int)(realtime * 10) % 8;
+	M_DrawTransPic (43, (mapskill_cursor == MAPSKILL_RESUME) ? MAPSKILL_RESUME_Y - 6 : 54 + mapskill_cursor * 20,
+			Draw_CachePic(va("gfx/menu/menudot%i.lmp", f + 1)));
+}
+
+static void M_MapSkill_Key (int key)
+{
+	switch (key)
+	{
+	case K_ESCAPE:
+	case K_GP_B:
+		m_state = m_maps;
+		m_entersound = true;
+		break;
+
+	case K_DOWNARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (++mapskill_cursor >= M_MapSkill_Items ())
+			mapskill_cursor = 0;
+		break;
+
+	case K_UPARROW:
+		S_LocalSound ("raven/menu1.wav");
+		if (--mapskill_cursor < 0)
+			mapskill_cursor = M_MapSkill_Items () - 1;
+		break;
+
+	case K_ENTER:
+	case K_GP_A:
 		m_entersound = true;
 		Key_SetDest (key_game);
 		m_state = m_none;
 		M_Filter_Clear ();
-		Cbuf_AddText (va("map %s\n", maps_list[maps_view[maps_cursor]].name));
+		if (sv.active)
+			Cbuf_AddText ("disconnect\n");
+		if (mapskill_cursor == MAPSKILL_RESUME)
+			Cbuf_AddText (va("load \"autosave/%s\"\n", mapskill_name));
+		else
+		{
+			Cbuf_AddText (va("skill %d\n", mapskill_cursor));
+			Cbuf_AddText (va("map %s\n", mapskill_name));
+		}
 		break;
 	}
 }
@@ -9816,7 +9974,7 @@ void M_Init (void)
 
 	Cmd_AddCommand ("togglemenu", M_ToggleMenu_f);
 
-	Cmd_AddCommand ("menu_main", M_Menu_Main_f);
+	Cmd_AddCommand ("menu_main", M_Menu_Main_Cmd_f);
 	Cmd_AddCommand ("menu_singleplayer", M_Menu_SinglePlayer_f);
 	Cmd_AddCommand ("menu_load", M_Menu_Load_f);
 	Cmd_AddCommand ("menu_save", M_Menu_Save_f);
@@ -9985,6 +10143,10 @@ void M_Draw (void)
 		M_Maps_Draw ();
 		break;
 
+	case m_mapskill:
+		M_MapSkill_Draw ();
+		break;
+
 	case m_help:
 		/* Help pics are full-screen sized — render in CANVAS_DEFAULT,
 		 * then put the menu canvas back so the post-switch teardown
@@ -10094,7 +10256,7 @@ typedef struct
 static const menuslider_t	disp_sliders[] =
 {
 	{ DISP_GAMMA,		"gamma",	1.0f, 0.3f,	0.3f, 1.0f,	0.05f, NULL },
-	{ DISP_CONTRAST,	"contrast",	0.5f, 2.0f,	0.5f, 2.0f,	0.05f, NULL },
+	{ DISP_CONTRAST,	"contrast",	1.0f, 2.0f,	1.0f, 2.0f,	0.05f, NULL },
 #ifdef GLQUAKE
 	/* DISP_CONSCALE steps through VID_ChangeConsize, not a cvar: keys only */
 	{ DISP_MENUFADEALPHA,	"scr_menubgalpha", 0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
@@ -10525,6 +10687,10 @@ void M_Keydown (int key, qboolean repeat)
 
 	case m_maps:
 		M_Maps_Key (key);
+		return;
+
+	case m_mapskill:
+		M_MapSkill_Key (key);
 		return;
 
 	case m_help:

@@ -65,6 +65,7 @@ qboolean Host_SaveGameToName (const char *name, qboolean quiet);
 extern	cvar_t		pausable;
 
 extern	qboolean	host_initialized;	// true if into command execution
+extern	qboolean	host_startup_script;	// running hexen.rc (cl_startmenu, #273)
 extern	double		host_frametime;
 extern	byte		*host_basepal;
 extern	byte		*host_colormap;

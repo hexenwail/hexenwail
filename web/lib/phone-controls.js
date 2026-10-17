@@ -101,7 +101,15 @@ export class PhoneControls {
 
     event.preventDefault?.();
     event.stopPropagation?.();
-    event.target?.setPointerCapture?.(event.pointerId);
+    // Best effort: the browser refuses capture for a pointer it no longer
+    // counts as active (InvalidStateError), and an uncaught throw here ended
+    // the gesture before it was registered -- the look pad then ignored the
+    // drag entirely, and the error landed in the status line.
+    try {
+      event.target?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // The drag still works through the pad's own pointermove events.
+    }
 
     if (action === 'stick') {
       this.pointerOwners.set(event.pointerId, { type: 'stick', action });
@@ -150,7 +158,11 @@ export class PhoneControls {
     if (!owner) return;
     event.preventDefault?.();
     event.stopPropagation?.();
-    event.target?.releasePointerCapture?.(event.pointerId);
+    try {
+      event.target?.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Already released, or never captured.
+    }
     this.pointerOwners.delete(event.pointerId);
 
     if (owner.type === 'stick') {

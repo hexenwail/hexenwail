@@ -404,6 +404,60 @@ static void Host_Map_f (void)
 
 /*
 ==================
+Host_AutoLoad
+
+Ironwail's: on death, load the last save made or loaded on this map instead
+of restarting it.  Hexen II dies two ways -- `restart restore`, and with parm7
+set a changelevel / changelevel2 back to the same map (client.hc respawn) --
+and all three call this first.  sv_autoload 0 is off, 1 asks, 2 loads while
+the player is dead, 3 loads on any restart.  Single player only, never during
+an intermission.
+
+Two departures, both forced.  Upstream runs the load with a nested
+Cbuf_Execute and falls back if it fails; our load Host_Errors on a missing
+save rather than returning, so instead the save is checked for here -- a
+deleted one falls back to the plain restart -- and the load is queued
+in front of whatever the buffer holds next.  And saves are directories, so
+"exists" means its info.dat.  GitHub #410.
+==================
+*/
+extern	cvar_t	sv_autoload;
+
+static qboolean Host_AutoLoad (void)
+{
+	char	info[MAX_OSPATH];
+	int	error_state;
+
+	if (!sv_autoload.value || !sv.lastsave[0] || svs.maxclients != 1 || cl.intermission)
+		return false;
+
+	Host_WaitForSaveThread ();	/* a save made a moment ago is still being written */
+	FS_MakePath_BUF (FS_USERDIR, &error_state, info, sizeof(info),
+			 va("%s/info.dat", sv.lastsave));
+	if (error_state || Sys_FileType (info) != FS_ENT_FILE)
+	{
+		sv.lastsave[0] = '\0';
+		return false;
+	}
+
+	if (sv_autoload.value < 2.f)
+	{
+		if (!SCR_ModalMessage ("Load last save? (y/n)", 0.f))
+		{
+			sv.lastsave[0] = '\0';
+			return false;
+		}
+	}
+	else if (sv_autoload.value < 3.f && svs.clients[0].edict->v.health > 0.f)
+		return false;
+
+	Con_Printf ("Autoloading %s...\n", sv.lastsave);
+	Cbuf_InsertText (va("load \"%s\"\n", sv.lastsave));
+	return true;
+}
+
+/*
+==================
 Host_Changelevel_f
 
 Goes to a new map, taking all clients along
@@ -431,6 +485,9 @@ static void Host_Changelevel_f (void)
 		Host_Error ("%s: cannot find map %s", __thisfunc__, level);
 
 	q_strlcpy (level, Cmd_Argv(1), sizeof(level));
+	/* Back to the same map is how a parm7 death restarts (client.hc). */
+	if (!q_strcasecmp (sv.name, level) && Host_AutoLoad ())
+		return;
 	if (Cmd_Argc() == 2)
 		startspot = NULL;
 	else
@@ -475,6 +532,9 @@ static void Host_Changelevel2_f (void)
 		Host_Error ("%s: cannot find map %s", __thisfunc__, level);
 
 	q_strlcpy (level, Cmd_Argv(1), sizeof(level));
+	/* Back to the same map is how a parm7 death restarts (client.hc). */
+	if (!q_strcasecmp (sv.name, level) && Host_AutoLoad ())
+		return;
 	if (Cmd_Argc() == 2)
 		startspot = NULL;
 	else
@@ -517,6 +577,9 @@ static void Host_Restart_f (void)
 		return;
 
 	if (cmd_source != src_command)
+		return;
+
+	if (Host_AutoLoad ())
 		return;
 
 	q_strlcpy (mapname, sv.name, sizeof(mapname));	// mapname gets cleared in spawnserver
@@ -739,6 +802,7 @@ qboolean Host_SaveGameToName (const char *p, qboolean quiet)
 		Host_SubmitSave(&sd);
 	}
 
+	q_strlcpy (sv.lastsave, p, sizeof(sv.lastsave));	/* sv_autoload, #410 */
 	return true;
 }
 
@@ -985,6 +1049,7 @@ static void Host_Loadgame_f (void)
 
 	sv.paused = true;		// pause until all clients connect
 	sv.loadgame = true;
+	q_strlcpy (sv.lastsave, Cmd_Argv(1), sizeof(sv.lastsave));	/* sv_autoload, #410 */
 
 	if (cls.state != ca_dedicated)
 	{
@@ -2409,14 +2474,15 @@ static void Host_Startdemos_f (void)
 	if (!sv.active && cls.demonum != -1 && !cls.demoplayback)
 	{
 		cls.demonum = 0;
+		/* Ironwail's order: the menu (unless cl_startmenu 0, GitHub #273),
+		 * then the demos (unless cl_startdemos 0).  Inserted rather than
+		 * appended so it runs ahead of whatever else the startup script
+		 * queued behind this command.  uhexen2-a5nn.34 */
+		if (cl_startmenu.integer)
+			Cbuf_InsertText ("menu_main\n");
 		if (!cl_startdemos.integer)
 		{
-			/* Straight to the menu.  Inserted rather than appended so it
-			 * runs ahead of whatever else the startup script queued behind
-			 * this command, which is where the demo would otherwise have
-			 * started from.  uhexen2-a5nn.34 */
 			cls.demonum = -1;
-			Cbuf_InsertText ("menu_main\n");
 			return;
 		}
 		CL_NextDemo ();

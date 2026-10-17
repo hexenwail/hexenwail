@@ -295,19 +295,130 @@ static GLuint GL_CompileOITFragShader (const char *frag_src)
 	 * that.  An early `return;` added to one of them later would yield
 	 * undefined colour in OIT mode only.  Seeding it makes that case
 	 * transparent black instead of garbage.  uhexen2-nkvm. */
+	/* u_oit_mode picks what the wrapped shader writes (GitHub #87):
+	 *   0  weighted blended OIT -- accum, revealage (r_oit 1)
+	 *   1  moment-based OIT, moment pass -- absorbance b0 and its four
+	 *      depth-weighted power moments (r_oit 2)
+	 *   2  moment-based OIT, composite pass -- colour weighted by the
+	 *      transmittance reconstructed from those moments at this depth
+	 * One program per shader, branched on a uniform, rather than a program
+	 * per mode: every per-frame uniform the engine pushes to an OIT
+	 * program (caustics, overbright, light clusters, ...) then reaches all
+	 * three modes with no extra plumbing.
+	 *
+	 * The moment maths is vkQuake's Shaders/mboit.inc (Muenstermann et al.,
+	 * "Moment-Based Order-Independent Transparency", I3D 2018), with two
+	 * departures: the moments come from texelFetch on the moment targets
+	 * rather than Vulkan subpass inputs, and depth is warped from view
+	 * distance (1/gl_FragCoord.w, valid whatever gl_reversed_z says) where
+	 * vkQuake reads its reversed-Z gl_FragCoord.z. */
 	static const char oit_preamble[] =
 		"#define OIT 1\n"
 		"vec4 fragColor = vec4(0.0);\n"
 		"layout(location=0) out vec4 out_accum;\n"
 		"layout(location=1) out vec4 out_reveal;\n"
+		"uniform int u_oit_mode;\n"
+		"uniform int u_mboit_ms;\n"
+		"uniform sampler2D u_mboit_b0;\n"
+		"uniform sampler2D u_mboit_mom;\n"
+		"uniform sampler2DMS u_mboit_b0_ms;\n"
+		"uniform sampler2DMS u_mboit_mom_ms;\n"
+		"#define MBOIT_OVERESTIMATION 0.25\n"
+		/* log-warp view distance to [-1,1]: 14 octaves from the 4-unit
+		 * near plane, i.e. up to 65536 units */
+		"float MBOIT_Depth() {\n"
+		"    float d = max(1.0 / gl_FragCoord.w, 4.0) * 0.25;\n"
+		"    return clamp(log2(d) * (1.0 / 14.0), 0.0, 1.0) * 2.0 - 1.0;\n"
+		"}\n"
+		"float MBOIT_Transmittance4(float b_0, vec2 b_even, vec2 b_odd, float depth, float bias, vec4 bias_vector) {\n"
+		"    vec4 b = vec4(b_odd.x, b_even.x, b_odd.y, b_even.y);\n"
+		"    b = mix(b, bias_vector, bias);\n"
+		"    vec3 z;\n"
+		"    z[0] = depth;\n"
+		"    float L21D11 = fma(-b[0], b[1], b[2]);\n"
+		"    float D11 = fma(-b[0], b[0], b[1]);\n"
+		"    float InvD11 = 1.0 / D11;\n"
+		"    float L21 = L21D11 * InvD11;\n"
+		"    float SquaredDepthVariance = fma(-b[1], b[1], b[3]);\n"
+		"    float D22 = fma(-L21D11, L21, SquaredDepthVariance);\n"
+		"    vec3 c = vec3(1.0, z[0], z[0] * z[0]);\n"
+		"    c[1] -= b.x;\n"
+		"    c[2] -= b.y + L21 * c[1];\n"
+		"    c[1] *= InvD11;\n"
+		"    c[2] /= D22;\n"
+		"    c[1] -= L21 * c[2];\n"
+		"    c[0] -= dot(c.yz, b.xy);\n"
+		"    float InvC2 = 1.0 / c[2];\n"
+		"    float p = c[1] * InvC2;\n"
+		"    float q = c[0] * InvC2;\n"
+		"    float D = (p * p * 0.25) - q;\n"
+		"    float r = sqrt(D);\n"
+		"    z[1] = -p * 0.5 - r;\n"
+		"    z[2] = -p * 0.5 + r;\n"
+		"    vec3 polynomial;\n"
+		"    vec3 weight_factor = vec3(MBOIT_OVERESTIMATION, (z[1] < z[0]) ? 1.0 : 0.0, (z[2] < z[0]) ? 1.0 : 0.0);\n"
+		"    float f0 = weight_factor[0];\n"
+		"    float f1 = weight_factor[1];\n"
+		"    float f2 = weight_factor[2];\n"
+		"    float f01 = (f1 - f0) / (z[1] - z[0]);\n"
+		"    float f12 = (f2 - f1) / (z[2] - z[1]);\n"
+		"    float f012 = (f12 - f01) / (z[2] - z[0]);\n"
+		"    polynomial[0] = f012;\n"
+		"    polynomial[1] = polynomial[0];\n"
+		"    polynomial[0] = f01 - polynomial[0] * z[1];\n"
+		"    polynomial[2] = polynomial[1];\n"
+		"    polynomial[1] = polynomial[0] - polynomial[1] * z[0];\n"
+		"    polynomial[0] = f0 - polynomial[0] * z[0];\n"
+		"    float absorbance = polynomial[0] + dot(b.xy, polynomial.yz);\n"
+		"    if (isnan(absorbance))\n"
+		"        absorbance = MBOIT_OVERESTIMATION;\n"
+		"    return clamp(exp(-b_0 * absorbance), 0.0, 1.0);\n"
+		"}\n"
+		"float MBOIT_TransmittanceAtDepth(float z, float b0, vec4 moments0) {\n"
+		"    if (b0 <= 1e-3)\n"
+		"        return 1.0;\n"
+		"    moments0 /= b0;\n"
+		/* vkQuake's bias, well above the paper's: a lone fragment's Hankel
+		 * matrix is rank one and its pivots drown in fp32 noise otherwise */
+		"    return MBOIT_Transmittance4(b0, moments0.yw, moments0.xz, z, 6e-5, vec4(0.0, 0.375, 0.0, 0.375));\n"
+		"}\n"
 		"void main_body();\n"
 		"void main() {\n"
 		"    main_body();\n"
 		"    fragColor = clamp(fragColor, 0.0, 1.0);\n"
-		"    float z = 1.0 / gl_FragCoord.w;\n"
-		"    float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n"
-		"    out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n"
-		"    out_reveal = vec4(fragColor.a, 0.0, 0.0, 0.0);\n"
+		"    if (u_oit_mode == 0) {\n"
+		"        float z = 1.0 / gl_FragCoord.w;\n"
+		"        float w = clamp(fragColor.a * fragColor.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);\n"
+		"        out_accum = vec4(fragColor.rgb * fragColor.a * w, fragColor.a * w);\n"
+		"        out_reveal = vec4(fragColor.a, 0.0, 0.0, 0.0);\n"
+		"        return;\n"
+		"    }\n"
+		/* both MBOIT passes must drop the same fragments */
+		"    if (fragColor.a < (1.0 / 255.0))\n"
+		"        discard;\n"
+		"    float mz = MBOIT_Depth();\n"
+		"    if (u_oit_mode == 1) {\n"
+		"        float absorbance = -log(max(1.0 - clamp(fragColor.a, 0.0, 0.999), 1e-4));\n"
+		"        float z2 = mz * mz;\n"
+		"        out_accum = vec4(absorbance, 0.0, 0.0, 0.0);\n"
+		"        out_reveal = vec4(mz, z2, z2 * mz, z2 * z2) * absorbance;\n"
+		"        return;\n"
+		"    }\n"
+		"    ivec2 pix = ivec2(gl_FragCoord.xy);\n"
+		"    float b0;\n"
+		"    vec4 mom;\n"
+		/* sample 0 under MSAA, as vkQuake: moments only differ between
+		 * samples at the edges of translucent geometry */
+		"    if (u_mboit_ms != 0) {\n"
+		"        b0 = texelFetch(u_mboit_b0_ms, pix, 0).r;\n"
+		"        mom = texelFetch(u_mboit_mom_ms, pix, 0);\n"
+		"    } else {\n"
+		"        b0 = texelFetch(u_mboit_b0, pix, 0).r;\n"
+		"        mom = texelFetch(u_mboit_mom, pix, 0);\n"
+		"    }\n"
+		"    float t = MBOIT_TransmittanceAtDepth(mz, b0, mom);\n"
+		"    out_accum = vec4(fragColor.rgb * fragColor.a * t, fragColor.a * t);\n"
+		"    out_reveal = vec4(0.0);\n"
 		"}\n"
 		"#define main main_body\n";
 
@@ -391,6 +502,9 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
 		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
 		if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
+		if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
+		if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
+		if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
 		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
 		{
@@ -398,6 +512,15 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 			Mat4_Identity(ident);
 			glUniformMatrix4fv_fp(p->u_alias_model, 1, GL_FALSE, ident);
 		}
+		/* MBOIT moment targets (#87): their own units, the 2D and the
+		 * multisample pair apart, so the two sampler types never share a
+		 * unit -- that is an error at draw time even when one is unused */
+		if (p->u_oit_mode >= 0)     glUniform1i_fp(p->u_oit_mode, 0);
+		if (p->u_mboit_ms >= 0)     glUniform1i_fp(p->u_mboit_ms, 0);
+		if (p->u_mboit_b0 >= 0)     glUniform1i_fp(p->u_mboit_b0, MBOIT_TMU_B0);
+		if (p->u_mboit_mom >= 0)    glUniform1i_fp(p->u_mboit_mom, MBOIT_TMU_MOM);
+		if (p->u_mboit_b0_ms >= 0)  glUniform1i_fp(p->u_mboit_b0_ms, MBOIT_TMU_B0_MS);
+		if (p->u_mboit_mom_ms >= 0) glUniform1i_fp(p->u_mboit_mom_ms, MBOIT_TMU_MOM_MS);
 		R_UseProgram (0);
 		Con_SafePrintf("  %s_oit: OK (prog=%u)\n", name, p->program);
 	}
@@ -407,6 +530,32 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 	}
 }
 #endif	/* !USE_GLES */
+
+/* Switch every OIT program to one of the u_oit_mode outputs above (#87).
+ * `ms' says the moment targets are multisampled.  A no-op on the ES tier,
+ * which builds no OIT programs. */
+void GL_SetOITMode (int mode, qboolean ms)
+{
+#ifdef USE_GLES
+	(void)mode; (void)ms;
+#else
+	glprogram_t	*progs[] = { &gl_shader_world_oit, &gl_shader_alias_oit,
+				     &gl_shader_alias_np_oit, &gl_shader_skeletal_oit,
+				     &gl_shader_skeletal_np_oit, &gl_shader_particle_oit };
+	int		i;
+
+	for (i = 0; i < (int)(sizeof(progs) / sizeof(progs[0])); i++)
+	{
+		if (!progs[i]->program || progs[i]->u_oit_mode < 0)
+			continue;
+		R_UseProgram (progs[i]->program);
+		glUniform1i_fp(progs[i]->u_oit_mode, mode);
+		if (progs[i]->u_mboit_ms >= 0)
+			glUniform1i_fp(progs[i]->u_mboit_ms, ms ? 1 : 0);
+	}
+	R_UseProgram (0);
+#endif
+}
 
 
 /* GL_LoadProgram where each stage is a (header, body) pair; see
@@ -459,9 +608,19 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
+	p->u_lmstyles        = glGetUniformLocation_fp(p->program, "u_lmstyles");
+	p->u_lmlayer1        = glGetUniformLocation_fp(p->program, "u_lmlayer1");
+	p->u_lmlayer2        = glGetUniformLocation_fp(p->program, "u_lmlayer2");
+	p->u_lmlayer3        = glGetUniformLocation_fp(p->program, "u_lmlayer3");
 	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
 	p->u_softemu         = glGetUniformLocation_fp(p->program, "u_softemu");
 	p->u_spans           = glGetUniformLocation_fp(p->program, "u_spans");
+	p->u_oit_mode        = glGetUniformLocation_fp(p->program, "u_oit_mode");	/* #87 */
+	p->u_mboit_ms        = glGetUniformLocation_fp(p->program, "u_mboit_ms");
+	p->u_mboit_b0        = glGetUniformLocation_fp(p->program, "u_mboit_b0");
+	p->u_mboit_mom       = glGetUniformLocation_fp(p->program, "u_mboit_mom");
+	p->u_mboit_b0_ms     = glGetUniformLocation_fp(p->program, "u_mboit_b0_ms");
+	p->u_mboit_mom_ms    = glGetUniformLocation_fp(p->program, "u_mboit_mom_ms");
 	/* Clustered dynamic lighting (uhexen2-26bm); -1 on every non-world
 	 * program and on the whole ES tier. */
 	p->u_dlight_scale    = glGetUniformLocation_fp(p->program, "u_dlight_scale");
@@ -1162,6 +1321,48 @@ static const char sworld_vert[] =
  * dlights.  A uniform cannot distinguish them; a flat varying the vertex shader
  * fills from the instance record can.  The other two paths set it from the
  * uniform unchanged. */
+/* GPU lightstyles (GitHub #439).  The atlas then holds each surface's first
+ * style raw, the three layer atlases at the same UVs styles 2-4, and every
+ * layer's alpha that layer's style index (255: none).  Summed here weighted
+ * by LightStyles[] -- the light-cluster SSBO, declared above -- and the CPU
+ * path's shift and clamp applied after, so the result matches the combined
+ * lightmap it replaces to within rounding.  The layer-1 alpha is read with a
+ * plain bilinear fetch first: a surface with one style (most of them) pays
+ * that and nothing more.  Indices are constant over a surface's rect and its
+ * gutter, so every filter tap agrees on them. */
+#define GLSL_LMSTYLES_DECL \
+	"uniform vec2 u_lmstyles;\n"	/* x 1 = on; y the CPU shift as a factor */ \
+	"uniform sampler2D u_lmlayer1;\n" \
+	"uniform sampler2D u_lmlayer2;\n" \
+	"uniform sampler2D u_lmlayer3;\n"
+
+#define GLSL_LMSTYLES_FN \
+	"float LMStyle(float a) {\n" \
+	"    int i = int(a * 255.0 + 0.5);\n" \
+	"    return (i < " GLSL_STR(MAX_LIGHTSTYLES) ") ? LightStyles[i] : 1.0;\n" \
+	"}\n" \
+	"vec4 LMLayer(sampler2D t, highp vec2 uv) {\n" \
+	"    return (u_lightmap_bicubic > 0.5) ? BicubicLightmap(t, uv) : texture(t, uv);\n" \
+	"}\n" \
+	"vec4 LMStyles(vec4 lm0, highp vec2 uv) {\n" \
+	"    const float NONE = 254.5 / 255.0;\n" \
+	"    vec3 l = lm0.rgb * LMStyle(lm0.a);\n" \
+	"    float a = texture(u_lmlayer1, uv).a;\n" \
+	"    if (a < NONE) {\n" \
+	"        l += LMLayer(u_lmlayer1, uv).rgb * LMStyle(a);\n" \
+	"        a = texture(u_lmlayer2, uv).a;\n" \
+	"        if (a < NONE) {\n" \
+	"            l += LMLayer(u_lmlayer2, uv).rgb * LMStyle(a);\n" \
+	"            a = texture(u_lmlayer3, uv).a;\n" \
+	"            if (a < NONE) l += LMLayer(u_lmlayer3, uv).rgb * LMStyle(a);\n" \
+	"        }\n" \
+	"    }\n" \
+	"    return vec4(min(l * u_lmstyles.y, vec3(1.0)), 1.0);\n" \
+	"}\n"
+
+#define GLSL_LMSTYLES_APPLY \
+	"    if (u_lmstyles.x > 0.5) lm = LMStyles(lm, lmuv);\n"
+
 #define GLSL_ALIAS_DLIGHT_DECL \
 	GLSL_LIGHTGRID_DECL
 
@@ -1239,6 +1440,9 @@ static const char sworld_vert[] =
 #define GLSL_DLIGHT_DECL	""
 #define GLSL_DLIGHT_FN		""
 #define GLSL_DLIGHT_APPLY	""
+#define GLSL_LMSTYLES_DECL	""	/* #439: needs the SSBO, desktop only */
+#define GLSL_LMSTYLES_FN	""
+#define GLSL_LMSTYLES_APPLY	""
 #define GLSL_ALIAS_DLIGHT_DECL	""
 #define GLSL_ALIAS_DLIGHT_FN	""
 #define GLSL_ALIAS_DLIGHT_APPLY	"    vec4 color = tex * v_color;\n"
@@ -1277,6 +1481,7 @@ static const char sworld_frag[] =
 	"uniform vec4 u_softemu;\n"
 	"uniform float u_spans;\n"		/* 0 = off, else the span cell width in pixels (r_softemu_spans, #176) */
 	GLSL_DLIGHT_DECL
+	GLSL_LMSTYLES_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in highp vec2 v_lmcoord;\n"	/* highp: SpanUV extrapolates it across a cell (#176) */
 	"in vec4 v_color;\n"
@@ -1291,6 +1496,7 @@ static const char sworld_frag[] =
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	GLSL_DLIGHT_FN
+	GLSL_LMSTYLES_FN
 	"void main() {\n"
 	/* The 1997 spans (#176) replace both coordinates, as the surface cache
 	 * baked light into the texture before the span loop ever sampled it. */
@@ -1345,6 +1551,7 @@ static const char sworld_frag[] =
 	 * anything downstream sees it -- the CPU path they replace baked into
 	 * exactly this value, so banding, the debug views, overbright and the
 	 * material weighting all have to keep acting on the sum.  uhexen2-26bm. */
+	GLSL_LMSTYLES_APPLY
 	GLSL_DLIGHT_APPLY
 	/* 64 light levels, which is what colormap.lmp had.  Upstream folds its
 	 * overbright doubling into the same expression; ours stays separate in
@@ -1470,6 +1677,7 @@ static const char sworld_frag_opaque[] =
 	"uniform float u_spans;\n"		/* 0 = off, else the span cell width in pixels (r_softemu_spans, #176) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	GLSL_DLIGHT_DECL
+	GLSL_LMSTYLES_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in highp vec2 v_lmcoord;\n"	/* see sworld_frag */
 	"in vec4 v_color;\n"
@@ -1483,6 +1691,7 @@ static const char sworld_frag_opaque[] =
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	GLSL_DLIGHT_FN
+	GLSL_LMSTYLES_FN
 	"void main() {\n"
 	"    highp vec2 tc = v_texcoord;\n"	/* see sworld_frag (#176) */
 	"    highp vec2 lmc = v_lmcoord;\n"
@@ -1509,6 +1718,7 @@ static const char sworld_frag_opaque[] =
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, lmuv)\n"
 	"        : texture(u_texture1, lmuv);\n"
+	GLSL_LMSTYLES_APPLY
 	GLSL_DLIGHT_APPLY	/* before banding and the debug views; see sworld_frag */
 	"    if (u_softemu.y > 0.0)\n"
 	"        lm.rgb = floor(lm.rgb * 63.0 + 0.5) * (1.0/63.0);\n"
@@ -2384,6 +2594,9 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
 		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
 	if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
+	if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
+	if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
+	if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
 	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —

@@ -72,19 +72,28 @@ engine also accepts the older 0.11 and 0.09 betas; prefer 0.15.
 
 ### 3. HexenWorld gamecode — `hw/hwprogs.dat`
 
-Built from this tree. The bundled package installs `hwsv` together with
-`hw/hwprogs.dat`:
+Built from this tree, and nothing to install if you run the bundled server:
 
     nix build .#hwsv-bundled
 
-Or install the gamecode by hand:
+It carries `share/hexenwail/hw/hwprogs.dat`, and `hwsv` loads that copy by
+itself when the gamedir holds none. The log names where the bytes came from:
+
+    Gamecode: hwprogs.dat from .../bin/../share/hexenwail/hw/hwprogs.dat (HW/v0.15, file crc 37917)
+
+A `hw/hwprogs.dat` in the gamedir always wins over the bundled one, so a
+server that wants different gamecode just installs it there:
 
     nix build .#gamecode
     install -Dm644 result/share/hexenwail/hw/hwprogs.dat <gamedir>/hw/hwprogs.dat
 
-Without it:
+`-vanillaprogs` turns the bundled fallback off. A bare `.#hwsv`, with neither
+copy, still stops with:
 
     SV_Error: PR_LoadProgs: couldn't load hwprogs.dat
+
+The bundle holds no `siege/hwprogs.dat`: under `-game siege` the gamedir must
+supply one. `hwsv` never falls back to `hw`'s bytecode for another gamedir.
 
 ### 4. String table: nothing to install
 
@@ -100,10 +109,10 @@ Both `hwsv` and the client carry HW's and Siege's tables compiled in
 wins, so a mod can edit its table. The lookup order:
 
 1. An installed copy in the server's gamedir (`siege/`, `hw/`, or a mod).
-2. The copy shipped beside the client for that gamedir
-   (`share/hexenwail/{hw,siege}/strings.txt`). hwsv has no bundle lookup.
+2. The copy shipped beside the engine for that gamedir
+   (`share/hexenwail/{hw,siege}/strings.txt`), client and hwsv-bundled alike.
 3. For a mod stacked on hw, an installed copy in hw.
-4. The client's shipped hw copy.
+4. The shipped hw copy.
 5. The compiled-in table.
 
 Neither ever uses data1's or portals' table (#214).

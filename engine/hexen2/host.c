@@ -49,6 +49,7 @@ void Host_WriteConfiguration (const char *fname);
 quakeparms_t	*host_parms;
 
 qboolean	host_initialized;		// true if into command execution
+qboolean	host_startup_script;	/* see host.h */
 
 static jmp_buf	host_abort;
 
@@ -179,12 +180,12 @@ cvar_t	map_checks = {"map_checks", "0", CVAR_NONE};
  * timer -- see Host_CheckAutosave for what the interval actually scales.
  * uhexen2-a5nn.31
  *
- * sv_autoload is deliberately NOT here.  Upstream's third cvar reloads the
- * last save on death, and that half has not been written; registering it now
- * would archive a value that reads back correctly and does nothing, which is
- * the exact thing uhexen2-a5nn.38 had to go back and fix. */
+ * sv_autoload is upstream's third: what dying does with the last save made or
+ * loaded on this map -- 0 ignores it, 1 asks, 2 (default) loads it, 3 loads
+ * it even on a restart while alive.  Host_AutoLoad, host_cmd.c.  GitHub #410. */
 cvar_t	sv_autosave = {"sv_autosave", "1", CVAR_ARCHIVE};
 cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
+cvar_t	sv_autoload = {"sv_autoload", "2", CVAR_ARCHIVE};
 
 cvar_t	skill = {"skill", "1", CVAR_NONE};		// 0 - 3
 cvar_t	startmap = {"startmap", "", CVAR_NONE};	// mods can override in autoexec.cfg
@@ -528,6 +529,7 @@ static void Host_InitLocal (void)
 	Cvar_SetCallback (&map_checks, Map_Checks_f);
 	Cvar_RegisterVariable (&sv_autosave);
 	Cvar_RegisterVariable (&sv_autosave_interval);
+	Cvar_RegisterVariable (&sv_autoload);
 	if (COM_CheckParm("-developer"))
 	{
 		Cvar_Set ("developer", "1");
@@ -1220,7 +1222,7 @@ Host_UpdateDevEdicts
 
 The one devstats counter that belongs to the server: how many edicts are alive
 rather than merely allocated.  Walked once a frame and only while the overlay
-is on, because sv.num_edicts is a ceiling that max_edicts raised to 8192 and
+is on, because sv.num_edicts is a ceiling that max_edicts raised to 16384 and
 this is a linear scan of it.
 
 Left at its last value when no local server is running, which is the honest
@@ -1617,8 +1619,10 @@ void Host_Init (void)
 	if (cls.state != ca_dedicated)
 	{
 		Cbuf_InsertText (Cmd_StartupScript ());
+		host_startup_script = true;
 		if (!setjmp(host_abort))		/* in case exec fails with a longjmp(), e.g. Host_Error() */
 			Cbuf_Execute ();
+		host_startup_script = false;
 	}
 
 	Cvar_UnlockAll ();				/* unlock the early-set cvars after init */

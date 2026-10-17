@@ -64,6 +64,8 @@ qboolean	menu_touch_key;
 
 #ifdef __EMSCRIPTEN__
 static float	touch_look_x, touch_look_y;
+/* Degrees of turn per CSS pixel of drag on the web look pad (IN_TouchLook). */
+static cvar_t	touch_lookspeed = {"touch_lookspeed", "0.25", CVAR_ARCHIVE};
 
 EMSCRIPTEN_KEEPALIVE int Hexenwail_TouchKey (int key, int down)
 {
@@ -131,6 +133,8 @@ static int buttonremap[] =
    ================================================================ */
 
 static SDL_Gamepad	*gp_active = NULL;
+
+static qboolean IN_JoyActive (void);
 static SDL_JoystickID	gp_active_id = 0;
 static gamepad_type_t	gp_type = GAMEPAD_TYPE_UNKNOWN;
 
@@ -146,6 +150,17 @@ cvar_t	joy_exponent_move = {"joy_exponent_move", "2", CVAR_ARCHIVE};
 cvar_t	joy_invert = {"joy_invert", "0", CVAR_ARCHIVE};
 cvar_t	joy_swapmovelook = {"joy_swapmovelook", "0", CVAR_ARCHIVE};
 cvar_t	joy_rumble = {"joy_rumble", "0", CVAR_ARCHIVE};
+/* Ironwail's: rumble and gyro act only while the pad is the input last used,
+ * unless this is set.  It does NOT gate the sticks or buttons -- upstream's
+ * IN_JoyMove reads the pad regardless, and so does ours.  GitHub #409. */
+cvar_t	joy_always_active = {"joy_always_active", "0", CVAR_ARCHIVE};
+
+/* The input device last used: what joy_always_active 0 compares against.
+ * Keyboard and text input, mouse buttons and the wheel (not motion, as
+ * upstream: a nudged mouse is not a switch of device), gamepad buttons and
+ * sticks or triggers past their deadzones. */
+typedef enum { IN_LAST_NONE, IN_LAST_KEYBOARD, IN_LAST_MOUSE, IN_LAST_GAMEPAD } in_lastactive_t;
+static in_lastactive_t	in_lastactive = IN_LAST_NONE;
 /* Outer-edge saturation thresholds: any magnitude within `outer` of 1.0
  * snaps to full deflection.  Compensates for sticks that can't reliably
  * reach 32767/-32768 in the corners.  Per-stick because cheap pads often
@@ -305,7 +320,10 @@ static float IN_GetAxis (SDL_GamepadAxis axis)
 static void IN_GPKeyEvent (qboolean old_down, qboolean new_down, int key)
 {
 	if (new_down != old_down)
+	{
+		in_lastactive = IN_LAST_GAMEPAD;
 		Key_Event(key, new_down);
+	}
 }
 
 /* stick-as-arrows for menu navigation */
@@ -488,6 +506,9 @@ static void IN_GPMove (void)
 	rtrig = IN_GetAxis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
 	lt_down = (ltrig > joy_deadzone_trigger.value);
 	rt_down = (rtrig > joy_deadzone_trigger.value);
+
+	if (move.x || move.y || look.x || look.y || lt_down || rt_down)
+		in_lastactive = IN_LAST_GAMEPAD;	/* joy_always_active, #409 */
 
 	/* in menus: sticks act as arrow keys, triggers as enter */
 	if (!Key_IsGameKey())
@@ -699,6 +720,10 @@ static void IN_GyroMove (void)
 		return;
 	}
 
+	/* Calibration above runs regardless; turning the view does not. */
+	if (!IN_JoyActive ())
+		return;
+
 	ratex -= gyro_calibration_x.value;
 	ratey -= gyro_calibration_y.value;
 	ratez -= gyro_calibration_z.value;
@@ -801,6 +826,13 @@ static void IN_JoyLEDChanged (cvar_t *var)
 	IN_ApplyGamepadLED();
 }
 
+/* Ironwail's IN_JoyActive: a pad is open, and either joy_always_active or it
+ * was the input last used.  Gates rumble and gyro only.  GitHub #409. */
+static qboolean IN_JoyActive (void)
+{
+	return gp_active != NULL && (joy_always_active.integer || in_lastactive == IN_LAST_GAMEPAD);
+}
+
 /*
 ===========
 IN_GPRumble -- trigger haptic feedback
@@ -808,7 +840,7 @@ IN_GPRumble -- trigger haptic feedback
 */
 void IN_GPRumble (float low_freq, float high_freq, Uint32 duration_ms)
 {
-	if (!gp_active || joy_rumble.value <= 0)
+	if (!IN_JoyActive () || gyro_calibrating || joy_rumble.value <= 0)
 		return;
 	SDL_RumbleGamepad(gp_active,
 			  (Uint16)(low_freq * joy_rumble.value * 65535),
@@ -993,6 +1025,9 @@ void IN_Init (void)
 {
 	/* mouse */
 	Cvar_RegisterVariable (&m_filter);
+#ifdef __EMSCRIPTEN__
+	Cvar_RegisterVariable (&touch_lookspeed);
+#endif
 	Cvar_RegisterVariable (&m_rawinput);
 	Cvar_RegisterVariable (&in_debugkeys);
 
@@ -1008,6 +1043,7 @@ void IN_Init (void)
 	Cvar_RegisterVariable (&joy_invert);
 	Cvar_RegisterVariable (&joy_swapmovelook);
 	Cvar_RegisterVariable (&joy_rumble);
+	Cvar_RegisterVariable (&joy_always_active);
 	Cvar_RegisterVariable (&joy_outer_threshold_look);
 	Cvar_RegisterVariable (&joy_outer_threshold_move);
 	Cvar_RegisterVariable (&joy_led);
@@ -1118,6 +1154,35 @@ static void IN_MouseMove (usercmd_t *cmd, int mx, int my)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/* The web page's look pad (web/lib/phone-controls.js, Hexenwail_TouchLook).
+ * Always free look: a phone has no other way to look up or down, and routing
+ * the drag through IN_MouseMove sent its vertical half to forwardmove whenever
+ * freelook was off -- the default -- so dragging up walked the player forward
+ * instead of tilting the camera.  Nor does it share m_filter's history with a
+ * real mouse.  Its own rate, touch_lookspeed in degrees per CSS pixel of drag:
+ * the mouse scale (sensitivity 3 x m_yaw 0.022) gave 0.066, so a full swipe
+ * across the pad turned about 30 degrees.  The page's look-sensitivity slider
+ * multiplies the pixels before they arrive.  A negative m_pitch (invert
+ * mouse) still inverts the pitch, and the pitch limits are the mouse's. */
+static void IN_TouchLook (void)
+{
+	float	dx = touch_look_x, dy = touch_look_y;
+
+	touch_look_x = touch_look_y = 0;
+	if (dx == 0.0f && dy == 0.0f)
+		return;
+
+	cl.viewangles[YAW] -= touch_lookspeed.value * dx;
+	cl.viewangles[PITCH] += (m_pitch.value < 0 ? -1.0f : 1.0f) * touch_lookspeed.value * dy;
+	if (cl.viewangles[PITCH] > 80)
+		cl.viewangles[PITCH] = 80;
+	if (cl.viewangles[PITCH] < -70)
+		cl.viewangles[PITCH] = -70;
+	V_StopPitchDrift ();
+}
+#endif
+
 static void IN_DiscardMove (void)
 {
 	if (mouseinitialized)
@@ -1166,20 +1231,11 @@ void IN_Move (usercmd_t *cmd)
 		x = (int)fx;
 		y = (int)fy;
 	}
-#ifdef __EMSCRIPTEN__
-	if (touch_look_x <= -1.0f || touch_look_x >= 1.0f ||
-	    touch_look_y <= -1.0f || touch_look_y >= 1.0f)
-	{
-		int tx = (int)touch_look_x;
-		int ty = (int)touch_look_y;
-		touch_look_x -= tx;
-		touch_look_y -= ty;
-		x += tx;
-		y += ty;
-	}
-#endif
 	if (x != 0 || y != 0)
 		IN_MouseMove (cmd, x, y);
+#ifdef __EMSCRIPTEN__
+	IN_TouchLook ();
+#endif
 
 	if (app_active)
 		IN_GPMove ();
@@ -1534,6 +1590,7 @@ void IN_SendKeyEvents (void)
 			break;
 
 		case SDL_EVENT_TEXT_INPUT:
+			in_lastactive = IN_LAST_KEYBOARD;
 			if (in_debugkeys.integer)
 				Con_Printf ("in_debugkeys: text \"%s\"\n", event.text.text);
 			/* feed printable characters to console/chat input */
@@ -1562,6 +1619,7 @@ void IN_SendKeyEvents (void)
 			}
 		/* fallthrough */
 		case SDL_EVENT_KEY_UP:
+			in_lastactive = IN_LAST_KEYBOARD;
 			modstate = SDL_GetModState();
 			state = event.key.down;
 			if (gamekey)
@@ -1585,6 +1643,7 @@ void IN_SendKeyEvents (void)
 
 		case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		case SDL_EVENT_MOUSE_BUTTON_UP:
+			in_lastactive = IN_LAST_MOUSE;
 			/* A release always clears, whoever it is routed to, so a press
 			 * that began in the menu can never stay held after it. */
 			if (!event.button.down && event.button.button >= 1 &&
@@ -1635,6 +1694,7 @@ void IN_SendKeyEvents (void)
 			break;
 
 		case SDL_EVENT_MOUSE_WHEEL:
+			in_lastactive = IN_LAST_MOUSE;
 			if (in_mode_set)
 				break;
 			/* Allow wheel in menus even when mouse is deactivated */
@@ -1644,6 +1704,7 @@ void IN_SendKeyEvents (void)
 		/* SDL3 Gamepad button events */
 		case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
 		case SDL_EVENT_GAMEPAD_BUTTON_UP:
+			in_lastactive = IN_LAST_GAMEPAD;
 			if (in_mode_set)
 				break;
 			/* Only from the pad we actually opened.  Stick and trigger input

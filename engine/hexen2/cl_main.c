@@ -107,6 +107,13 @@ cvar_t	freelook = {"freelook", "0", CVAR_ARCHIVE};
  * Costs nothing when the loop is off, and an imported config that says
  * `cl_startdemos 0` stops being an "Unknown command".  uhexen2-a5nn.34 */
 cvar_t	cl_startdemos = {"cl_startdemos", "1", CVAR_ARCHIVE};
+/* Ironwail's cl_startmenu (08d57813, after our parity baseline): 0 starts at
+ * the console (or straight into the demo loop) instead of the main menu.
+ * Hexen II's hexen.rc opens the menu itself -- `menu_main` after
+ * autoexec.cfg, which Quake's quake.rc does not have -- so this gates that
+ * call too (M_Menu_Main_Cmd_f), as well as upstream's in Host_Startdemos_f.
+ * The default, 1, is how this engine already started.  GitHub #273. */
+cvar_t	cl_startmenu = {"cl_startmenu", "1", CVAR_ARCHIVE};
 cvar_t	lookspring = {"lookspring", "0", CVAR_ARCHIVE};
 cvar_t	lookstrafe = {"lookstrafe", "0", CVAR_ARCHIVE};
 cvar_t	sensitivity = {"sensitivity", "3", CVAR_ARCHIVE};
@@ -161,6 +168,7 @@ void CL_ClearState (void)
 // wipe the entire cl structure
 	memset (&cl, 0, sizeof(cl));
 	V_ResetPunchAngle ();
+	CL_DemoKeys_Clear ();	/* keyframes belong to the level they were taken on (#76) */
 
 	SZ_Clear (&cls.message);
 
@@ -1452,6 +1460,7 @@ int CL_ReadFromServer (void)
 
 		cl.last_received_message = realtime;
 		CL_ParseServerMessage ();
+		CL_DemoKeyframe ();	/* demo rewind, GitHub #76 */
 #if defined(H2W_INTEGRATED)
 		/* Control traffic and svc_nop do not prove the server will speak H2.
 		 * Commit only once the ordinary parser advances H2 signon. */
@@ -1670,6 +1679,7 @@ void CL_Init (void)
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&freelook);
 	Cvar_RegisterVariable (&cl_startdemos);
+	Cvar_RegisterVariable (&cl_startmenu);
 	Cvar_RegisterVariable (&lookspring);
 	Cvar_RegisterVariable (&lookstrafe);
 	Cvar_RegisterVariable (&sensitivity);
@@ -1689,6 +1699,7 @@ void CL_Init (void)
 	Cmd_AddCommand ("record", CL_Record_f);
 	Cmd_AddCommand ("stop", CL_Stop_f);
 	Cmd_AddCommand ("playdemo", CL_PlayDemo_f);
+	CL_InitDemo ();	/* demoseek, GitHub #76 */
 	Cmd_AddCommand ("timedemo", CL_TimeDemo_f);
 	Cmd_AddCommand ("sensitivity_save", CL_Sensitivity_save_f);
 

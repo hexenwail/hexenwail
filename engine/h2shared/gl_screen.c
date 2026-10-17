@@ -1326,6 +1326,8 @@ static void SCR_DrawDemoBar (void)
 	 * speed the right-hand readout reports.  uhexen2-ofl9. */
 	if (cls.demospeed == 0.0f)
 		str = "II";
+	else if (cls.demospeed < 0.0f)
+		str = "<<";	/* rewind, GitHub #76 */
 	else if (cls.demospeed > 1.0f)
 		str = ">>";
 	else
@@ -1707,15 +1709,24 @@ static void SCR_ExpandShotName (const char *tmpl, char *out, size_t outsize)
 		q_strlcpy (out, scr_shotprefix, outsize);
 }
 
+static void SCR_TakeScreenShot (const char *ext, int quality);
+
+/* A browser clears the drawing buffer once a frame is presented
+ * (preserveDrawingBuffer is off), and `screenshot` runs from the command
+ * buffer, between frames: every web screenshot read back pure black.  There
+ * the capture waits for the end of the next frame, before it is presented
+ * (SCR_UpdateScreen).  The desktop keeps reading the back buffer at once, so
+ * "screenshot; quit" in one script still writes its file.  GitHub #112. */
+#ifdef __EMSCRIPTEN__
+static qboolean	scr_shot_pending;
+static char	scr_shot_ext[8];
+static int	scr_shot_quality;
+#endif
+
 static void SCR_ScreenShot_f (void)
 {
 	char	ext[8];
-	char	shotname[MAX_QPATH];
-	char	filename[MAX_QPATH + 16];
-	char	fullpath[MAX_OSPATH];
-	byte	*rgba;
-	int	i, npix, quality;
-	qboolean	ok;
+	int	quality;
 
 	/* Ironwail's contract: "screenshot [png|tga|jpg] [quality]".  The format
 	 * is per-invocation rather than a cvar, and png is the default. */
@@ -1737,6 +1748,24 @@ static void SCR_ScreenShot_f (void)
 		if (quality < 1 || quality > 100)
 			quality = 90;
 	}
+
+#ifdef __EMSCRIPTEN__
+	q_strlcpy (scr_shot_ext, ext, sizeof(scr_shot_ext));
+	scr_shot_quality = quality;
+	scr_shot_pending = true;
+#else
+	SCR_TakeScreenShot (ext, quality);
+#endif
+}
+
+static void SCR_TakeScreenShot (const char *ext, int quality)
+{
+	char	shotname[MAX_QPATH];
+	char	filename[MAX_QPATH + 16];
+	char	fullpath[MAX_OSPATH];
+	byte	*rgba;
+	int	i, npix;
+	qboolean	ok;
 
 	/* Expand the template, then find a free name.  The unsuffixed name is
 	 * tried FIRST: with the default template a %time% at one-second
@@ -2450,6 +2479,15 @@ void SCR_UpdateScreen (void)
 	V_UpdatePalette ();
 
 	GL_PostProcess_EndFrame ();
+
+#ifdef __EMSCRIPTEN__
+	/* The finished frame, before presenting clears it.  GitHub #112. */
+	if (scr_shot_pending)
+	{
+		scr_shot_pending = false;
+		SCR_TakeScreenShot (scr_shot_ext, scr_shot_quality);
+	}
+#endif
 
 	GL_EndRendering ();
 }

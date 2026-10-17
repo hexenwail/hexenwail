@@ -156,9 +156,11 @@ practice every session, since loading the config marks it changed and
 `Host_WriteConfiguration` then flushes it -- the cvar is dropped. The
 gate counts these without failing (`python3 tools/test_soft_cvar_defaults.py -v`
 lists them), and they are a known, accepted cost (#362, below):
-- 92 that only the webgl2 build archives: `zoom_fov`, `r_viewmodel_fov`,
-  `gl_texturemode`, `scr_conscale`, `showclock`, `scr_pixelaspect`, the `vid_*`
-  window settings, most of the GL renderer's options;
+- 91 that only the webgl2 build archives: `zoom_fov`, `r_viewmodel_fov`,
+  `gl_texturemode`, `scr_conscale`, `scr_pixelaspect`, the `vid_*` window
+  settings, most of the GL renderer's options (`showclock` and
+  `scr_showspeed` left this list when the software build gained the readouts,
+  #329);
 - 4 that only this build archives: `vid_soft_mode`, `vid_soft_filter`,
   `vid_soft_stretch`, `r_transwater`.
 
@@ -336,6 +338,11 @@ These follow from the design rather than being bugs:
 - no multithreading: the rasterizer runs on the main wasm thread, which is why
   auto mode stops at 1024x768.
 
-Open work on this configuration: the Software Graphics menu's remaining rows
-(#329), the Display Preset row (`uhexen2-ibnq.7`), and the demo playback bar
+The Graphics menu's Center Print BG, Show Speed and Show Clock rows work here:
+`screen.c` draws the clock and speed readouts stacked above `showfps` as
+`gl_screen.c` does, and the centerprint background through `Draw_FillAlpha`'s
+stipple (#329).
+
+Open work on this configuration: the Software Graphics menu's remaining hidden
+rows (#329), the Display Preset row (`uhexen2-ibnq.7`), and the demo playback bar
 (#123).

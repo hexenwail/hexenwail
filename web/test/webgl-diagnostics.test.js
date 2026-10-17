@@ -175,8 +175,10 @@ test('post-process palette stays inside the WebGL2 fragment uniform budget', asy
   // through glBindImageTexture, and rgb8 is not an image-storable format.
   // `feat(renderer): r_softemu_metric and a GPU palette LUT with three colour
   // metrics` (bc3d77b7e at time of writing).
+  // The size is a parameter since the palette and colormap LUTs got
+  // separate grids (GitHub #80).
   assert.match(postprocess,
-    /GL_RGBA8,\s+PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,\s+GL_RGBA,/);
+    /GL_RGBA8,\s+dim, dim, dim, 0,\s+GL_RGBA,/);
 });
 
 test('brush-entity instancing stays off on the ES tier', async () => {

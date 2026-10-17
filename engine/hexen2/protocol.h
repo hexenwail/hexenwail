@@ -49,6 +49,8 @@
  *     recvfrom on the way in, which reaches the player as "Illegible server
  *     message" with nothing to point at.
  *   - reliable messages above 16384 bytes (SV_MaxReliableMessage).
+ *   - sounds on entities >= 8192: SND_LARGEENTITY, svc_stopsound_large and
+ *     svc_sound_update_pos_large (SV_SoundEntityFits, GitHub #411).
  *
  * The number is 100 rather than 22 on purpose: 22 is the next value a Raven,
  * UQE or Shanjaq descendant would reach for, and a silent collision between
@@ -134,6 +136,11 @@
 #define	svc_mod_name		54	// [string] name (UQE v1.13 by Korax, music file name)
 #define	svc_skybox		55	// [string] name (UQE v1.13 by Korax, skybox name)
 #define svc_fog					56	// [byte] density [byte] red [byte] green [byte] blue [float] time
+/* Protocol 100 only, and only for entities >= SND_MAX_PACKED_ENTITY, whose
+ * number does not fit the packed short of svc_stopsound / svc_sound_update_pos
+ * (GitHub #411).  Never sent on 18..21. */
+#define	svc_stopsound_large		57	// [short] ent [byte] channel
+#define	svc_sound_update_pos_large	58	// [short] ent [byte] channel [coord3] pos
 
 //==============================================
 
@@ -273,6 +280,12 @@
 #define	SND_ATTENUATION	(1<<1)	/* a byte	*/
 #define	SND_OVERFLOW	(1<<2)	/* add 256 to snd num			*/
 #define	SND_OVERFLOW2	(1<<3)	/* add 512 to snd num: a UQE/1.13 thing	*/
+#define	SND_LARGEENTITY	(1<<4)	/* [short] ent [byte] channel, not ent<<3|channel:
+				 * protocol 100 only, for ent >= 8192 (GitHub #411).
+				 * Ironwail's bit 3 is our SND_OVERFLOW2, hence 4. */
+
+/* Entities a packed (ent<<3)|channel short can name. */
+#define	SND_MAX_PACKED_ENTITY	8192
 
 // gonna use the rest of the bits to pack the ent+channel
 #define DEFAULT_SOUND_PACKET_VOLUME		255
@@ -365,9 +378,12 @@ typedef struct
 } entity_state3_t;
 
 /* Per-client per-frame entity state cap for the Hexen II reference-frame
- * delta protocol.  Each delta entry indexes an edict (0..MAX_EDICTS-1), so
- * the true upper bound is MAX_EDICTS (quakedef.h, currently 8192) — anything
- * smaller risks SV_PrepareClientEntities hitting build->count >= cap and
+ * delta protocol.  It counts the entities ONE client is sent -- the list is
+ * PVS-culled in SV_PrepareClientEntities -- not edict numbers, so it did not
+ * follow MAX_EDICTS to 32000 (GitHub #411): at 32000 this would be ~9 MB of
+ * hunk per client, ~143 MB for a 16-player server, to cover a visible set no
+ * datagram could carry anyway.  When it equalled MAX_EDICTS (8192), the
+ * reasoning was that anything smaller risks SV_PrepareClientEntities hitting build->count >= cap and
  * breaking out of the loop silently, dropping the tail of the entity list.
  * As entities enter/leave the "changed since baseline" set across ticks the
  * dropped tail shifts, producing pop-in/out for alias models AND brush ents

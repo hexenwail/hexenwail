@@ -140,6 +140,7 @@ typedef struct
 // entering a map (and clearing client_state_t)
 	qboolean	demorecording;
 	qboolean	demoplayback;
+	qboolean	demoseeking;	/* rewind re-parsing to its target, silently (cl_demo.c, GitHub #76) */
 	qboolean	timedemo;
 	int		forcetrack;		// -1 = use normal cd track
 	FILE		*demofile;	/* recording only -- writes need a stream */
@@ -493,6 +494,7 @@ typedef struct
 extern	kbutton_t	in_mlook, in_klook;
 extern	cvar_t		freelook;
 extern	cvar_t		cl_startdemos;
+extern	cvar_t		cl_startmenu;
 qboolean CL_MouseLookActive (void);
 // "is the mouse looking right now" -- the +mlook button held, or freelook set.
 // One predicate so the input, lookspring and menu paths cannot drift apart.
@@ -606,6 +608,25 @@ qboolean CL_FixAngleHeld (double hold);
 void CL_InitTEnts (void);
 void CL_PrecacheTEntSounds (void);
 void CL_ClearTEnts (void);
+
+/* Demo rewind keyframes (cl_demo.c, GitHub #76): a growing byte buffer, and
+ * the savers for client state that lives in other files' statics. */
+typedef struct
+{
+	byte	*data;
+	size_t	size, cap;
+} demostate_t;
+void DemoState_Put (demostate_t *s, const void *p, size_t n);
+void DemoState_Get (const byte **cur, void *p, size_t n);
+void CL_TEnts_SaveState (demostate_t *s);
+void CL_TEnts_RestoreState (const byte **cur);
+void CL_Effects_SaveState (demostate_t *s);
+void CL_Effects_RestoreState (const byte **cur);
+void V_SaveState (demostate_t *s);
+void V_RestoreState (const byte **cur);
+void CL_DemoKeyframe (void);
+void CL_DemoKeys_Clear (void);
+void CL_InitDemo (void);
 void CL_ParseTEnt (void);
 void CL_ParseTEntType (int type);	/* CL_ParseTEnt after its type byte */
 qboolean CL_CreateStream (int type, int ent, int flags, int tag, float duration,

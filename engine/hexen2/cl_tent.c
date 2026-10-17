@@ -151,6 +151,22 @@ void CL_InitTEnts(void)
 //
 //==========================================================================
 
+/* Demo rewind (cl_demo.c, GitHub #76): streams are client state a message
+ * creates and later frames advance, so a keyframe carries them. */
+void CL_TEnts_SaveState (demostate_t *s)
+{
+	DemoState_Put (s, cl_Streams, sizeof(cl_Streams));
+	DemoState_Put (s, StreamEntities, sizeof(StreamEntities));
+	DemoState_Put (s, &StreamEntityCount, sizeof(StreamEntityCount));
+}
+
+void CL_TEnts_RestoreState (const byte **cur)
+{
+	DemoState_Get (cur, cl_Streams, sizeof(cl_Streams));
+	DemoState_Get (cur, StreamEntities, sizeof(StreamEntities));
+	DemoState_Get (cur, &StreamEntityCount, sizeof(StreamEntityCount));
+}
+
 void CL_ClearTEnts(void)
 {
 	memset(cl_Streams, 0, sizeof(cl_Streams));

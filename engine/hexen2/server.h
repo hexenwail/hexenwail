@@ -84,9 +84,13 @@ typedef struct ex_inventory_page_s
  * buffer gets copied into client->message, which is MAX_MSGLEN and may
  * already be carrying unrelated reliable data, so exactly filling it would
  * trade this crash for an overflowed-client drop.
+ *
+ * 48 buffers (768 KB) since MAX_EDICTS went to 32000 (GitHub #411): a
+ * baseline for every edict is 640 KB of it, so a map that fills the ceiling
+ * still has room for statics.  24 covered ~19.6k baselines.
  */
 #define	MAX_SIGNON_SIZE		(NET_MAXMESSAGE / 2)
-#define	MAX_SIGNON_BUFFERS	24
+#define	MAX_SIGNON_BUFFERS	48
 
 typedef struct
 {
@@ -112,6 +116,11 @@ typedef struct
 	byte		cd_track;	// cd track number
 
 	char		startspot[64];
+	/* The save the player last made or loaded on THIS map, which sv_autoload
+	 * reloads on death.  Cleared with the rest of sv by every map spawn, so
+	 * like Ironwail's it only reaches back to a save on the current map.
+	 * GitHub #410. */
+	char		lastsave[MAX_OSPATH];
 	char		modelname[MAX_QPATH];	// maps/<name>.bsp, for model_precache[0]
 	struct qmodel_s	*worldmodel;
 	const char	*model_precache[MAX_MODELS];	// NULL terminated

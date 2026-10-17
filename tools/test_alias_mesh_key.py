@@ -58,7 +58,7 @@ if not free or "alias_gpu_generation++" not in free.group(1):
     errors.append("GL_FreeAliasGPUMeshes must start a new generation")
 
 make = mesh[mesh.index("void GL_MakeAliasGPUMesh (aliashdr_t *hdr)\n"):]
-registrations = len(re.findall(r"hdr->gpu_mesh = num_alias_gpu_meshes;\s*hdr->gpu_mesh_gen = alias_gpu_generation;\s*num_alias_gpu_meshes\+\+;", make))
+registrations = len(re.findall(r"hdr->gpu_mesh = slot;\s*hdr->gpu_mesh_gen = alias_gpu_generation;\s*if \(slot == num_alias_gpu_meshes\)\s*num_alias_gpu_meshes\+\+;", make))
 if registrations != 2 or make.count("num_alias_gpu_meshes++") != 2:
     errors.append(f"every registration must stamp the header (found {registrations} of 2)")
 # Every early return in the builder marks the header refused.
@@ -94,6 +94,25 @@ vid = strip((ROOT / "engine/h2shared/gl_vidsdl.c").read_text())
 change = vid[vid.index("static void VID_ChangeVideoMode (int newmode)"):]
 if not re.search(r"GL_AliasGPUMeshes_ContextLost\(\);[\s\S]*SDL_GL_DestroyContext", change):
     errors.append("VID_ChangeVideoMode must drop the alias mesh table before the context dies")
+
+# The table holds every alias model a session can load: one per model slot.
+# 256 starved SoT courtyard (351 alias models; 94 got no mesh).  Slots an
+# evicted model leaves behind are reused, so churn does not fill it.  #387.
+read = lambda p: (ROOT / p).read_text()
+hdrtext = read("engine/h2shared/gl_model.h")
+mm = re.search(r"#define MAX_ALIAS_MODELS (\d+)", hdrtext)
+mk = re.search(r"#define\s+MAX_MOD_KNOWN\s+(\d+)", read("engine/h2shared/gl_model.c"))
+if not mm or not mk or int(mm.group(1)) < int(mk.group(1)):
+    errors.append("MAX_ALIAS_MODELS must hold one mesh per model slot (>= MAX_MOD_KNOWN)")
+if "slot = GL_AllocAliasGPUSlot ();" not in make or make.count("hdr->gpu_mesh = slot;") != 2:
+    errors.append("GL_MakeAliasGPUMesh must register into GL_AllocAliasGPUSlot's slot")
+alloc = re.search(r"static int GL_AllocAliasGPUSlot \(void\)\s*\{(.*?)\n\}", mesh, re.S)
+if not alloc or "!alias_gpu_meshes[i].valid && !alias_gpu_meshes[i].vao" not in alloc.group(1):
+    errors.append("GL_AllocAliasGPUSlot must reuse emptied slots before appending")
+model = strip(read("engine/h2shared/gl_model.c"))
+if model.count("GL_ReleaseAliasGPUMesh (mod->gpu_mesh_slot, mod->gpu_mesh_slot_gen);") != 2 or \
+   model.count("mod->gpu_mesh_slot = pheader->gpu_mesh;") != 2:
+    errors.append("both alias loaders must release the model's previous slot and record the new one")
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))

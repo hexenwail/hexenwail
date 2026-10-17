@@ -615,6 +615,11 @@ cvar_t	gl_overbright = {"gl_overbright", "1", CVAR_ARCHIVE};	// world/brush ligh
 cvar_t	r_lightmap_bicubic = {"r_lightmap_bicubic", "0", CVAR_ARCHIVE};
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};		// FXAA post-process anti-aliasing
 cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to disable)
+/* Animate lightstyles on the GPU instead of rebuilding and re-uploading the
+ * lightmaps (GitHub #439, Ironwail parity).  Takes effect where clustered
+ * lighting shades the world and the atlas is on; elsewhere the CPU path
+ * stays.  0 forces the CPU path everywhere. */
+cvar_t	r_gpulightstyles = {"r_gpulightstyles", "1", CVAR_ARCHIVE};
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
@@ -1574,9 +1579,9 @@ static void GL_DrawAliasFrameMD3 (entity_t *e, aliashdr_t *paliashdr,
 	float			r, g, b;
 	byte			ColorShade;
 	qboolean		do_lerp;
-	static float		tmp_tc[128][2];
-	static float		tmp_color[128][4];
-	static float		tmp_pos[128][3];
+	static float		tmp_tc[MAX_ALIAS_STRIP_VERTS][2];	/* GitHub #174 (e) */
+	static float		tmp_color[MAX_ALIAS_STRIP_VERTS][4];
+	static float		tmp_pos[MAX_ALIAS_STRIP_VERTS][3];
 	int			vi;
 
 	lastposenum = posenum;
@@ -1619,7 +1624,13 @@ static void GL_DrawAliasFrameMD3 (entity_t *e, aliashdr_t *paliashdr,
 		else
 			is_fan = false;
 
-		if (count > 128) count = 128;
+		/* Clamping here used to desynchronise the command walk -- the
+		 * skipped s/t pairs were then read as counts.  No strip can exceed
+		 * the scratch now (MAX_ALIAS_STRIP_VERTS), so this only guards a
+		 * corrupt command list: stop drawing the model rather than walk
+		 * it out of step.  GitHub #174 (e). */
+		if (count > MAX_ALIAS_STRIP_VERTS)
+			break;
 
 		for (vi = 0; vi < count; vi++)
 		{
@@ -1800,9 +1811,9 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 	 * per-primitive GL_ImmBegin/End overhead (5-15x fewer draws). */
 	{
 	/* Temp arrays for current strip/fan vertices */
-	static float tmp_tc[128][2];
-	static float tmp_color[128][4];
-	static float tmp_pos[128][3];
+	static float tmp_tc[MAX_ALIAS_STRIP_VERTS][2];	/* GitHub #174 (e) */
+	static float tmp_color[MAX_ALIAS_STRIP_VERTS][4];
+	static float tmp_pos[MAX_ALIAS_STRIP_VERTS][3];
 	int vi;
 
 	GL_ImmBegin ();
@@ -1822,7 +1833,13 @@ static void GL_DrawAliasFrame (entity_t *e, aliashdr_t *paliashdr, int posenum, 
 		else
 			is_fan = false;
 
-		if (count > 128) count = 128;
+		/* Clamping here used to desynchronise the command walk -- the
+		 * skipped s/t pairs were then read as counts.  No strip can exceed
+		 * the scratch now (MAX_ALIAS_STRIP_VERTS), so this only guards a
+		 * corrupt command list: stop drawing the model rather than walk
+		 * it out of step.  GitHub #174 (e). */
+		if (count > MAX_ALIAS_STRIP_VERTS)
+			break;
 
 		/* Collect strip/fan vertices into temp arrays */
 		for (vi = 0; vi < count; vi++)
@@ -2408,6 +2425,7 @@ static void R_AliasModelTransform (entity_t *e, aliashdr_t *paliashdr,
 		entScale = (float)e->scale / 100.0f;
 		switch (e->drawflags & SCALE_TYPE_MASKIN)
 		{
+		default:	/* 24, both type bits: undefined; read as 0 (#174 f) */
 		case SCALE_TYPE_UNIFORM:
 			tmatrix[0][0] = paliashdr->scale[0]*entScale;
 			tmatrix[1][1] = paliashdr->scale[1]*entScale;
@@ -2432,6 +2450,7 @@ static void R_AliasModelTransform (entity_t *e, aliashdr_t *paliashdr,
 
 		switch (e->drawflags & SCALE_ORIGIN_MASKIN)
 		{
+		default:	/* 96, both origin bits: undefined; read as 0 (#174 f) */
 		case SCALE_ORIGIN_CENTER:
 			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
 			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
@@ -3866,6 +3885,18 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 	if (!clmodel)
 		return false;
 
+	/* r_entdist: beyond it, leave the entity to the legacy loop, which
+	 * applies the same cull (R_DrawEntitiesOnList).  The instanced path
+	 * used to draw it regardless.  GitHub #174 (a). */
+	if (r_entdist.value > 0 && e != &cl_entities[cl.viewentity])
+	{
+		float dx = e->origin[0] - r_origin[0];
+		float dy = e->origin[1] - r_origin[1];
+		float dz = e->origin[2] - r_origin[2];
+		if (dx*dx + dy*dy + dz*dz > r_entdist.value * r_entdist.value)
+			return false;
+	}
+
 	/* Skip translucent / special blend entities — drawn separately.
 	 * Must match the item_trans check in R_DrawEntitiesOnList. */
 	if ((e->drawflags & DRF_TRANSLUCENT) ||
@@ -4021,6 +4052,7 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		entScale = (float)e->scale / 100.0f;
 		switch (e->drawflags & SCALE_TYPE_MASKIN)
 		{
+		default:	/* 24, both type bits: undefined; read as 0 (#174 f) */
 		case SCALE_TYPE_UNIFORM:
 			tscale[0] = paliashdr->scale[0]*entScale;
 			tscale[1] = paliashdr->scale[1]*entScale;
@@ -4044,6 +4076,7 @@ static qboolean R_CollectAliasInstance (entity_t *e)
 		}
 		switch (e->drawflags & SCALE_ORIGIN_MASKIN)
 		{
+		default:	/* 96, both origin bits: undefined; read as 0 (#174 f) */
 		case SCALE_ORIGIN_CENTER:
 			torigin[0] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
 			torigin[1] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
@@ -6289,6 +6322,10 @@ static void R_SetupGL (void)
 	R_LightCluster_Update ();
 	R_LightCluster_BindForWorld ();
 	R_LightCluster_BindForAlias ();	/* uhexen2-waum, phase C */
+	/* After the cluster update, whose SSBO carries LightStyles[]: the GPU
+	 * lightstyle mode reads them, and may rebuild the lightmaps here if the
+	 * mode it wants has changed (#439). */
+	R_LightStyles_FrameSetup ();
 }
 
 /*
@@ -7892,14 +7929,21 @@ void R_RenderView (void)
 
 	OIT_BeginTranslucency();
 
-	R_DrawParticles ();
+	/* Once, or twice under r_oit 2: moment-based OIT draws every translucent
+	 * into its moment targets and then again into the composite
+	 * (OIT_NextPass).  Nothing here may consume what it draws on the first
+	 * of two passes; see OIT_KeepChains.  GitHub #87. */
+	do
+	{
+		R_DrawParticles ();
 
-	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
+		R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
-	R_DrawWaterSurfaces (WATER_PHASE_TRANSLUCENT);
-	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
+		R_DrawWaterSurfaces (WATER_PHASE_TRANSLUCENT);
+		if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
 
-	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
+		R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
+	} while (OIT_NextPass ());
 
 	OIT_EndTranslucency(GL_GetSceneFBO());
 

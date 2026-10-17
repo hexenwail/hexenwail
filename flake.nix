@@ -393,7 +393,9 @@
           # A bare .#hwsv has the same gap as .#h2ded vs Raven's progs.dat,
           # and hwprogs.dat has no retail equivalent a user could supply
           # instead -- it only ever came from Raven's free release, compiled
-          # from source in this tree.  uhexen2-9die.
+          # from source in this tree.  uhexen2-9die.  hwsv finds the copy
+          # under $out/share/hexenwail by itself when the gamedir has none
+          # (PR_LoadBundledHWProgs, #37); one in the gamedir still wins.
           hwsv-bundled =
             let
               hwsvPkg = self.packages.${system}.hwsv;
@@ -421,6 +423,21 @@
             '';
 
           default = self.packages.${system}.nixos-bundled;
+
+          # The desktop client on the GL ES 3.0 tier (-DUSE_GLES=ON): the
+          # render path the WebGL2 build takes, compiled natively so CI can
+          # gate it on every push.  Without an output it could only be built
+          # by hand, so ES-tier breakage surfaced in the browser first
+          # (GitHub #150 d).  Engine only, like .#nixos.
+          gles = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
+            pname = "hexenwail-gles";
+            cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DUSE_GLES=ON" ];
+            installPhase = ''
+              runHook preInstall
+              install -Dm755 bin/glhexen2 $out/bin/glhexen2
+              runHook postInstall
+            '';
+          });
 
           # Dedicated server (h2ded) — headless, links only libm/libc.
           # A separate output rather than a flag on `nixos` so CI can build it
@@ -757,20 +774,77 @@
               ];
               sha256 = "af8f3a00e416dfb262bcaa904a1c84df04a51b72bbc1313aed012bc754bdf99b";
             };
-            runtimeLibs = with pkgs; [
-              sdl3
+            # nixpkgs builds SDL3 with SDL_DEPS_SHARED off, which turns every
+            # optional backend -- X11 and its extensions, Wayland, libdecor,
+            # JACK, PipeWire, PulseAudio, libusb -- into a hard DT_NEEDED.
+            # Right on NixOS, where dlopen cannot find a library by soname;
+            # wrong for a download, where a host missing any one of them then
+            # cannot start the game at all.  Upstream's default dlopens them,
+            # so a missing backend only disables that backend.  GitHub #424.
+            sdl3Portable = pkgs.sdl3.overrideAttrs (old: {
+              cmakeFlags = map (f: if f == "-DSDL_DEPS_SHARED:BOOL=FALSE"
+                                   then "-DSDL_DEPS_SHARED:BOOL=TRUE" else f)
+                               old.cmakeFlags;
+              # SDL's own tests init subsystems, which with dlopened backends
+              # find nothing to open inside the build sandbox.
+              doCheck = false;
+            });
+            # The engine uses fluidsynth only as an offline synth
+            # (fluid_synth_write_s into its own mixer, midi_fluid.c), so none
+            # of its audio drivers are needed -- and nixpkgs' hard-links
+            # PulseAudio, JACK and libgomp.
+            #
+            # Nor libsndfile (GitHub #168).  fluidsynth needs it only to
+            # decode SF3 samples, and does so through sf_open_virtual with an
+            # autodetected format, so a crafted soundfont reaches every
+            # libsndfile parser -- 1.2.2, five open CVEs, no release since
+            # 2023.  patches/fluidsynth-sf3-vorbisfile.patch decodes SF3
+            # samples with libvorbisfile instead (already shipped for music),
+            # opening Ogg Vorbis and nothing else, with libsndfile's peak
+            # normalisation reproduced sample for sample.  SF3 keeps working;
+            # libsndfile and its FLAC/mpg123/LAME codecs leave the bundle.
+            fluidsynthPortable = pkgs.fluidsynth.overrideAttrs (old: {
+              patches = (old.patches or []) ++ [ ./patches/fluidsynth-sf3-vorbisfile.patch ];
+              buildInputs = (pkgs.lib.filter (p: (p.pname or "") != "libsndfile") old.buildInputs)
+                ++ [ pkgs.libvorbis pkgs.libogg ];
+              cmakeFlags = (old.cmakeFlags or []) ++ [
+                "-Denable-pulseaudio=off" "-Denable-jack=off" "-Denable-pipewire=off"
+                "-Denable-openmp=off" "-Denable-dbus=off" "-Denable-systemd=off"
+                "-Denable-sdl2=off" "-Denable-sdl3=off" "-Denable-portaudio=off"
+                "-Denable-readline=off" "-Denable-ladspa=off" "-Denable-oss=off"
+                "-Denable-libsndfile=off"
+              ];
+              env = (old.env or {}) // {
+                NIX_CFLAGS_COMPILE = "-DHEXENWAIL_VORBISFILE";
+                NIX_LDFLAGS = "-lvorbisfile -lvorbis -logg";
+              };
+            });
+            # Taken from each package's library output (lib.getLib): the
+            # default output of libsndfile and flac is "bin", so "${pkg}/lib"
+            # silently bundled neither.
+            runtimeLibs = map pkgs.lib.getLib (with pkgs; [
+              sdl3Portable
               libvorbis
               libogg
-              fluidsynth
-              libsndfile
-              flac
+              fluidsynthPortable
               libxmp
               opusfile
               libopus
               alsa-lib
+            ]);
+            # What a download may assume the host provides: glibc, the C++
+            # runtime every desktop distro carries, and the GL driver, which
+            # must come from the host (bundling it would bind the game to the
+            # builder's GPU stack).  Anything else NEEDed must be in lib/;
+            # the check at the end of the build fails otherwise.  GitHub #424.
+            hostLibs = [
+              "ld-linux-x86-64.so.2" "libc.so.6" "libm.so.6" "libdl.so.2"
+              "libpthread.so.0" "librt.so.1" "libmvec.so.1"
+              "libstdc++.so.6" "libgcc_s.so.1"
+              "libGL.so.1" "libGLX.so.0" "libOpenGL.so.0" "libEGL.so.1"
             ];
           in pkgs.runCommand "hexenwail-linux-fhs-${nixosPkg.version}" {
-            nativeBuildInputs = [ pkgs.patchelf ];
+            nativeBuildInputs = [ pkgs.patchelf pkgs.binutils ];
           } ''
             mkdir -p $out/bin $out/lib
 
@@ -791,6 +865,9 @@
               done
             done
             chmod +w $out/lib/*
+            # opusfile's URL-streaming companion: nothing links it (the engine
+            # needs libopusfile only), and it would drag OpenSSL in.
+            rm -f $out/lib/libopusurl.so*
 
             # Set FHS interpreter and relative rpaths
             patchelf \
@@ -799,6 +876,32 @@
               $out/bin/glhexen2
             for so in $out/lib/*.so $out/lib/*.so.*; do
               [ -f "$so" ] && patchelf --set-rpath "\$ORIGIN" "$so" 2>/dev/null || true
+            done
+
+            # Every DT_NEEDED in the bundle must be bundled or a host library
+            # (hostLibs above).  GitHub #424.
+            missing=""
+            for f in $out/bin/glhexen2 $out/lib/*.so*; do
+              [ -f "$f" ] || continue
+              for n in $(readelf -d "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+                case " ${pkgs.lib.concatStringsSep " " hostLibs} " in *" $n "*) continue ;; esac
+                [ -e "$out/lib/$n" ] && continue
+                missing="$missing $(basename "$f")->$n"
+              done
+            done
+            if [ -n "$missing" ]; then
+              echo "linux-fhs: NEEDED neither bundled nor a host library:$missing" >&2
+              exit 1
+            fi
+            # libsndfile left the bundle on purpose (GitHub #168); a dependency
+            # that brings it back should fail here, not ship.
+            # A loop, not `ls glob`: the builder runs with nullglob, so an
+            # unmatched glob expands to nothing and `ls` lists the cwd instead.
+            for f in $out/lib/libsndfile.so*; do
+              if [ -e "$f" ]; then
+                echo "linux-fhs: libsndfile is bundled again (see fluidsynthPortable)" >&2
+                exit 1
+              fi
             done
           '';
 
@@ -1596,6 +1699,46 @@ Built with Nix flakes
 EOF
 
             echo "Release bundle created in $out/release"
+          '';
+
+          # AppImage: the release's linux-x86_64 tree in one runnable file
+          # (GitHub #173).  Built by hand rather than with appimagetool, which
+          # nixpkgs no longer carries: a type-2 AppImage is the AppImage
+          # runtime ELF followed by a squashfs of the AppDir, which is all
+          # appimagetool does.  The runtime is pinned to a tagged type2-runtime
+          # release ("continuous" moves, and would break the hash).
+          #
+          # The AppDir keeps the FHS layout the binary already relies on:
+          # usr/lib through its $ORIGIN rpath, and usr/share/hexenwail for the
+          # bundled gamecode (pr_edict.c looks in <exedir>/../share/hexenwail).
+          # appimage/AppRun decides the basedir; see the comment there.
+          appimage = let
+            rel = self.packages.${system}.release;
+            runtime = pkgs.fetchurl {
+              url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
+              sha256 = "0396xi3km1yd0z4329lbjxmv82ddc40gd0x8hca0ylcj7i28pjig";
+            };
+          in pkgs.runCommand "hexenwail-appimage-${version}" {
+            nativeBuildInputs = [ pkgs.squashfsTools ];
+            meta.platforms = [ "x86_64-linux" ];
+          } ''
+            app=$TMPDIR/AppDir
+            mkdir -p $app/usr
+            cp -rL ${rel}/release/linux-x86_64/bin $app/usr/
+            cp -rL ${rel}/release/linux-x86_64/lib $app/usr/
+            cp -rL ${rel}/release/linux-x86_64/share $app/usr/
+            chmod -R u+w $app
+            install -m755 ${rel}/release/linux-x86_64/get_demo.sh $app/usr/bin/get_demo.sh
+            install -m755 ${./appimage/AppRun} $app/AppRun
+            sed 's/^Exec=.*/Exec=AppRun/' ${./flatpak/io.github.hexenwail.hexenwail.desktop} \
+              > $app/io.github.hexenwail.hexenwail.desktop
+            install -m644 ${./engine/resource/hexen2.png} $app/io.github.hexenwail.hexenwail.png
+            ln -s io.github.hexenwail.hexenwail.png $app/.DirIcon
+
+            mksquashfs $app $TMPDIR/app.squashfs -root-owned -noappend -comp zstd -quiet
+            mkdir -p $out
+            cat ${runtime} $TMPDIR/app.squashfs > $out/hexenwail-${version}-x86_64.AppImage
+            chmod 755 $out/hexenwail-${version}-x86_64.AppImage
           '';
         };
 

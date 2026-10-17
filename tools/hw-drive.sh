@@ -34,7 +34,8 @@
 # Traps worth knowing:
 #   - hwsv refuses the demo data ("You must have the HexenWorld data
 #     installed").  BASEDIR needs retail data1/pak0.pak + pak1.pak and
-#     hw/pak4.pak, plus hw/hwprogs.dat (nix build .#hwsv-bundled builds one).
+#     hw/pak4.pak.  hw/hwprogs.dat comes from the gamedir if it has one,
+#     else from beside the engine: an ENGINE from .#hwsv-bundled carries it.
 #   - hwsv prints nothing on a non-tty stdout, so it runs under `script` for a
 #     pty.  server.log is that pty's transcript.
 #   - The gamecode's cheat impulses return early when deathmatch or coop is

@@ -487,6 +487,16 @@ static void GL_InitRendererCaps (void)
 	 * (0x8501 raises GL_INVALID_ENUM there, GitHub #149).  memset already
 	 * cleared it; spelled out so the tier split reads in one place. */
 	gl_renderer_caps.texture_lod_bias = false;
+	/* Texture swizzle is core ES 3.0 but WebGL2 removed it: every
+	 * GL_TEXTURE_SWIZZLE_A call raised GL_INVALID_ENUM in the browser
+	 * (254 on demo1), and the opaque alpha it was there to force never
+	 * happened.  GL_Upload32 writes that alpha into the texels instead
+	 * where this is false.  GitHub #112. */
+#ifdef __EMSCRIPTEN__
+	gl_renderer_caps.texture_swizzle = false;
+#else
+	gl_renderer_caps.texture_swizzle = true;
+#endif
 	/* Anisotropy and float color buffers are extensions on this tier.  In
 	 * the browser they must be *enabled* on the context before the enums
 	 * become legal, which SDL_GL_ExtensionSupported does not do -- a bare
@@ -519,6 +529,7 @@ static void GL_InitRendererCaps (void)
 	gl_renderer_caps.anisotropy = true;
 	gl_renderer_caps.float_color_buffer = true;	/* core since GL 3.0 */
 	gl_renderer_caps.texture_lod_bias = true;	/* core since GL 1.4 */
+	gl_renderer_caps.texture_swizzle = true;	/* core since GL 3.3 */
 	gl_renderer_caps.shader_storage = (glBindBufferBase_fp != NULL);
 	gl_renderer_caps.compute_shaders =
 		(glDispatchCompute_fp != NULL) && (glMemoryBarrier_fp != NULL);
@@ -1591,8 +1602,32 @@ static qboolean VID_SetMode (int modenum)
 	if (scaling_factor != 100)
 		Con_Printf ("High DPI scaling in effect! (%d%%)\n", scaling_factor);
 
+	/* SDL's offscreen driver has no display to fill, and its EGL surface
+	 * keeps the size it was created at while a fullscreen switch still
+	 * reports the "desktop" size (1024x768): the frame then drew into a
+	 * 640x480 corner of what the engine believed was 1024x768, and
+	 * `screenshot` read back the whole of it, garbage included.  Headless
+	 * runs stay windowed.  GitHub #401. */
+#ifdef __EMSCRIPTEN__
+	/* In the browser the page owns the canvas: its size, through
+	 * Hexenwail_ResizeCanvas, and fullscreen, on the stage element that also
+	 * carries the touch controls.  SDL3's Emscripten backend implements a
+	 * fullscreen window as "fill document" -- it moves the canvas to <body>,
+	 * fixes it over the whole window and hides every other element -- which
+	 * took the page's bar and drawer away for as long as the game ran. */
+	if (vid_config_fscr.integer != 0)
+	{
+		Con_SafePrintf ("browser: the page owns fullscreen; running windowed\n");
+	}
+	else
+#endif
+	if (vid_config_fscr.integer != 0 && SDL_GetCurrentVideoDriver () &&
+	    !strcmp (SDL_GetCurrentVideoDriver (), "offscreen"))
+	{
+		Con_SafePrintf ("offscreen video driver: running windowed\n");
+	}
 	// Handle fullscreen modes after window creation
-	if (vid_config_fscr.integer == 2)
+	else if (vid_config_fscr.integer == 2)
 	{
 		// Exclusive fullscreen: find matching SDL display mode
 		display_id = SDL_GetDisplayForWindow(window);
@@ -3266,6 +3301,18 @@ void VID_ToggleFullscreen (void)
 	 * Full mode changes (windowed/borderless/exclusive) go through VID_Restart_f. */
 
 	if (!window) return;
+#ifdef __EMSCRIPTEN__
+	/* The page owns fullscreen (see VID_SetMode); ask it, rather than have
+	 * SDL fill the document.  A toggle of the page's real state, not a set
+	 * from vid_menu_fs: Alt+Enter arrives here without touching it, and the
+	 * browser's own Esc leaves fullscreen without telling the engine.
+	 * web/app.js defines the hook. */
+	EM_ASM({
+		if (Module.hexenwailToggleFullscreen)
+			Module.hexenwailToggleFullscreen();
+	});
+	return;
+#endif
 	if (!fs_toggle_works)
 		return;
 

@@ -64,6 +64,7 @@
 =============================================================================*/
 
 #include "quakedef.h"
+#include <time.h>	/* SCR_DrawClock's wall-clock modes */
 //#include "r_local.h"
 #ifdef PLATFORM_WINDOWS
 #include "winquake.h"
@@ -117,6 +118,13 @@ static	cvar_t	scr_showram = {"showram", "1", CVAR_NONE};
 static	cvar_t	scr_showturtle = {"showturtle", "0", CVAR_NONE};
 static	cvar_t	scr_showpause = {"showpause", "1", CVAR_NONE};
 static	cvar_t	scr_showfps = {"showfps", "0", CVAR_ARCHIVE};	/* as in gl_screen.c: #104 */
+/* The other two bottom-right readouts, with gl_screen.c's names, defaults and
+ * Quake-lineage aliases, so a config means the same thing in either renderer
+ * and the Graphics menu's rows work here too (#329). */
+static	cvar_t	scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
+static	cvar_t	scr_showclock = {"showclock", "0", CVAR_ARCHIVE};
+static	cvar_t	alias_scr_showfps = {"scr_showfps", "0", CVAR_NONE};
+static	cvar_t	alias_scr_clock = {"scr_clock", "0", CVAR_NONE};
 #if defined(WEBSOFT)
 /* Owned by gl_screen.c in every GL build; the software renderer draws its 2D
  * through this screen module, so it owns them here.
@@ -312,6 +320,21 @@ static void SCR_DrawCenterString (void)
 	FindTextBreaks(scr_centerstring, 38);
 
 	by = (25-lines) * 8 / 2 + ((vid.height - 200)>>1);
+
+#if defined(WEBSOFT)
+	/* gl_screen.c's background, same rectangles and alphas; the 8bpp
+	 * framebuffer has no blend, so Draw_FillAlpha stipples it as every
+	 * other translucent fill here does (#329). */
+	if (scr_centerprintbg.integer && lines > 0)
+	{
+		const int pad = 8;
+		int bg_w = (scr_centerprintbg.integer == 1) ? (int)vid.width : 38 * 8 + pad * 2;
+
+		Draw_FillAlpha ((vid.width - bg_w) / 2, by - pad, bg_w, lines * 8 + pad * 2,
+				0.0f, 0.0f, 0.0f,
+				(scr_centerprintbg.integer == 1) ? 0.30f : 0.50f);
+	}
+#endif
 
 	for (i = 0; i < lines; i++, by += 8)
 	{
@@ -540,6 +563,10 @@ void SCR_Init (void)
 	Cvar_RegisterVariable (&scr_showturtle);
 	Cvar_RegisterVariable (&scr_showpause);
 	Cvar_RegisterVariable (&scr_showfps);
+	Cvar_RegisterVariable (&scr_showspeed);
+	Cvar_RegisterVariable (&scr_showclock);
+	Cvar_RegisterAlias (&alias_scr_showfps, &scr_showfps);
+	Cvar_RegisterAlias (&alias_scr_clock, &scr_showclock);
 #if defined(WEBSOFT)
 	Cvar_RegisterVariable (&scr_centerprintbg);
 	Cvar_RegisterVariable (&scr_menubgstyle);
@@ -699,6 +726,108 @@ static void SCR_DrawFPS (void)
 	y = vid.height - sb_lines - 8;
 //	Draw_TileClear(x, y, strlen(st) * 8, 8);
 	Draw_String(x, y, st);
+}
+
+/* SCR_DrawClock / SCR_DrawSpeed: gl_screen.c's, stacked the same way above
+ * the FPS line, in this module's bottom-right corner (vid size less the
+ * status bar) since there is no SCR_InfoCorner canvas here.  #329 */
+static void SCR_DrawClock (void)
+{
+	char	st[16];
+	int	x, y, right;
+	int	minutes, seconds;
+
+	if (!scr_showclock.integer)
+		return;
+
+	if (scr_showclock.integer >= 2)
+	{
+		/* Wall clock (real time) */
+		time_t	rawtime;
+		struct tm *ti;
+		time(&rawtime);
+		ti = localtime(&rawtime);
+		if (!ti) return;
+		if (scr_showclock.integer == 3)
+			sprintf(st, "%02d:%02d:%02d", ti->tm_hour, ti->tm_min, ti->tm_sec);
+		else
+			sprintf(st, "%02d:%02d", ti->tm_hour, ti->tm_min);
+	}
+	else
+	{
+		/* Game time (level elapsed) */
+		seconds = (int)cl.time;
+		minutes = seconds / 60;
+		seconds %= 60;
+		if (minutes >= 60)
+			sprintf(st, "%d:%02d:%02d", minutes / 60, minutes % 60, seconds);
+		else
+			sprintf(st, "%d:%02d", minutes, seconds);
+	}
+
+	right = vid.width;
+	y = vid.height - sb_lines;
+	x = right - strlen(st) * 8 - 8;
+	y -= 16 + (scr_showfps.integer ? 8 : 0);
+	Draw_String(x, y, st);
+
+	/* Also show host uptime below the clock */
+	if (scr_showclock.integer >= 2)
+	{
+		seconds = (int)realtime;
+		minutes = seconds / 60;
+		seconds %= 60;
+		if (minutes >= 60)
+			sprintf(st, "%d:%02d:%02d", minutes / 60, minutes % 60, seconds);
+		else
+			sprintf(st, "%d:%02d", minutes, seconds);
+		x = right - strlen(st) * 8 - 8;
+		y -= 8;
+		Draw_String(x, y, st);
+	}
+}
+
+static void SCR_DrawSpeed (void)
+{
+	static float	display_speed = -1;
+	static float	maxspeed = 0;
+	static double	lasttime = 0;
+	vec3_t		vel;
+	float		speed;
+	char		st[12];
+	int		x, y;
+
+	if (!scr_showspeed.integer)
+		return;
+	if (cls.state != ca_active)
+		return;
+
+	/* horizontal speed only (no vertical component) */
+	vel[0] = cl.velocity[0];
+	vel[1] = cl.velocity[1];
+	vel[2] = 0;
+	speed = VectorLength (vel);
+	if (speed > maxspeed)
+		maxspeed = speed;
+
+	/* update display value every 0.1 seconds */
+	if (realtime - lasttime >= 0.1)
+	{
+		display_speed = maxspeed;
+		maxspeed = 0;
+		lasttime = realtime;
+	}
+	if (display_speed < 0)
+		return;
+
+	sprintf (st, "%d", (int)display_speed);
+	x = vid.width - strlen(st) * 8 - 8;
+	y = vid.height - sb_lines - 8;
+	if (scr_showfps.integer)
+		y -= 8;
+	if (scr_showclock.integer)
+		y -= 8;
+	Draw_String (x, y, st);
 }
 
 /*
@@ -1517,6 +1646,8 @@ static void SCR_DrawDemoBar (void)
 
 	if (cls.demospeed == 0.0f)
 		str = "II";
+	else if (cls.demospeed < 0.0f)
+		str = "<<";	/* rewind, GitHub #76 */
 	else if (cls.demospeed > 1.0f)
 		str = ">>";
 	else
@@ -1712,6 +1843,8 @@ void SCR_UpdateScreen (void)
 		GL_SetCanvas (CANVAS_DEFAULT);
 		SCR_CheckDrawCenterString();
 		SCR_DrawFPS();
+		SCR_DrawClock();
+		SCR_DrawSpeed();
 		SCR_DrawDevStats();
 
 		Plaque_Draw(plaquemessage, false);

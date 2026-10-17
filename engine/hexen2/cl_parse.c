@@ -98,7 +98,9 @@ static const char *svc_strings[] =
 	"svc_sound_update_pos",
 	"svc_mod_name",	// UQE v1.13 by Korax, music file name
 	"svc_skybox",	// UQE v1.13 by Korax, skybox name
-	"svc_fog"
+	"svc_fog",
+	"svc_stopsound_large",		// 57, protocol 100 (GitHub #411)
+	"svc_sound_update_pos_large"	// 58
 };
 #define	NUM_SVC_STRINGS	(sizeof(svc_strings) / sizeof(svc_strings[0]))
 
@@ -208,7 +210,20 @@ static void CL_ParseStartSoundPacket(void)
 		attenuation = MSG_ReadByte () / 64.0;
 	else	attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
 
-	channel = MSG_ReadShort ();
+	/* Packed (ent<<3)|channel, read UNSIGNED: as a signed short every
+	 * entity from 4096 up came out negative (QuakeSpasm's fix).  Protocol
+	 * 100 sends entities past the packed range whole (GitHub #411). */
+	if (field_mask & SND_LARGEENTITY)
+	{
+		ent = (unsigned short) MSG_ReadShort ();
+		channel = MSG_ReadByte ();
+	}
+	else
+	{
+		channel = (unsigned short) MSG_ReadShort ();
+		ent = channel >> 3;
+		channel &= 7;
+	}
 	sound_num = MSG_ReadByte ();
 	/* The index is split across the byte and the two overflow mask bits;
 	 * on protocol 21 both bits may be set at once (=> +768).  This used to
@@ -219,10 +234,7 @@ static void CL_ParseStartSoundPacket(void)
 	if (field_mask & SND_OVERFLOW2)
 		sound_num += MAX_SOUNDS_H2MP;	/* +512 */
 
-	ent = channel >> 3;
-	channel &= 7;
-
-	if (ent > MAX_EDICTS)
+	if (ent >= MAX_EDICTS)
 		Host_Error ("%s: ent = %i", __thisfunc__, ent);
 
 	for (i = 0; i < 3; i++)
@@ -1674,7 +1686,10 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_print:
-			if (intro_playing) {
+			/* A rewind re-parses up to a second of demo in one frame; its
+			 * prints, centerprints and stuffed commands already happened
+			 * once and would all land at once.  GitHub #76. */
+			if (intro_playing || cls.demoseeking) {
 				MSG_ReadString ();
 				break;
 			}
@@ -1682,11 +1697,15 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_centerprint:
-			SCR_CenterPrint (MSG_ReadString ());
+			str = MSG_ReadString ();
+			if (!cls.demoseeking)
+				SCR_CenterPrint (str);
 			break;
 
 		case svc_stufftext:
-			Cbuf_AddText (MSG_ReadString ());
+			str = MSG_ReadString ();
+			if (!cls.demoseeking)
+				Cbuf_AddText (str);
 			break;
 
 		case svc_damage:
@@ -1766,6 +1785,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_sound_update_pos:
+		case svc_sound_update_pos_large:
 		  {	// FIXME: put a field on the entity that lists the channels
 			// it should update when it moves- if a certain flag
 			// is on the ent, this update_channels field could
@@ -1774,11 +1794,19 @@ void CL_ParseServerMessage (void)
 			vec3_t	pos;
 			int	channel, ent_num;
 
-			channel = MSG_ReadShort ();
-			ent_num = channel >> 3;
-			channel &= 7;
+			if (cmd == svc_sound_update_pos_large)
+			{
+				ent_num = (unsigned short) MSG_ReadShort ();
+				channel = MSG_ReadByte ();
+			}
+			else
+			{
+				channel = (unsigned short) MSG_ReadShort ();
+				ent_num = channel >> 3;
+				channel &= 7;
+			}
 
-			if (ent_num > MAX_EDICTS)
+			if (ent_num >= MAX_EDICTS)
 				Host_Error ("svc_sound_update_pos: ent = %i", ent_num);
 
 			for (i = 0; i < 3; i++)
@@ -1788,8 +1816,13 @@ void CL_ParseServerMessage (void)
 		  }	break;
 
 		case svc_stopsound:
-			i = MSG_ReadShort();
+			i = (unsigned short) MSG_ReadShort();	/* see CL_ParseStartSoundPacket */
 			S_StopSound(i>>3, i&7);
+			break;
+
+		case svc_stopsound_large:
+			i = (unsigned short) MSG_ReadShort();
+			S_StopSound(i, MSG_ReadByte() & 7);
 			break;
 
 		case svc_updatename:
@@ -1851,6 +1884,12 @@ void CL_ParseServerMessage (void)
 			break;
 		case svc_spawnstatic:
 			CL_ParseStatic ();
+			/* A static spawned mid-demo links efrags and statics no
+			 * keyframe can unlink, and replaying it would link them twice;
+			 * rewind may not cross it, as it may not cross a level change.
+			 * GitHub #76. */
+			if (cls.demoplayback && cls.signon == SIGNONS)
+				CL_DemoKeys_Clear ();
 			break;
 
 		case svc_raineffect:
@@ -1902,11 +1941,15 @@ void CL_ParseServerMessage (void)
 
 		case svc_spawnstaticsound:
 			CL_ParseStaticSound ();
+			if (cls.demoplayback && cls.signon == SIGNONS)
+				CL_DemoKeys_Clear ();	/* as svc_spawnstatic, #76 */
 			break;
 
 		case svc_cdtrack:
 			cl.cdtrack = MSG_ReadByte ();
 			cl.looptrack = MSG_ReadByte ();
+			if (cls.demoseeking)
+				break;	/* the track is state; restarting it is not (#76) */
 			if (q_strcasecmp(bgmtype.string,"cd") != 0)
 				CDAudio_Stop ();
 			else if ((cls.demoplayback || cls.demorecording) &&
@@ -1917,6 +1960,8 @@ void CL_ParseServerMessage (void)
 
 		case svc_midi_name:
 			q_strlcpy (cl.midi_name, MSG_ReadString(), sizeof(cl.midi_name));
+			if (cls.demoseeking)
+				break;
 			if (q_strcasecmp(bgmtype.string,"midi") != 0)
 				BGM_Stop();
 			else	BGM_PlayMIDIorMusic(cl.midi_name);

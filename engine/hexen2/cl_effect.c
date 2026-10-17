@@ -66,6 +66,24 @@ static int	EffectEntityCount;
 //
 //==========================================================================
 
+/* Demo rewind (cl_demo.c, GitHub #76).  cl.Effects rides in the cl snapshot;
+ * the entities its effects index, and the HexenWorld effect RNG, are here. */
+void CL_Effects_SaveState (demostate_t *s)
+{
+	DemoState_Put (s, EffectEntities, sizeof(EffectEntities));
+	DemoState_Put (s, EntityUsed, sizeof(EntityUsed));
+	DemoState_Put (s, &EffectEntityCount, sizeof(EffectEntityCount));
+	DemoState_Put (s, &hw_effect_seed, sizeof(hw_effect_seed));
+}
+
+void CL_Effects_RestoreState (const byte **cur)
+{
+	DemoState_Get (cur, EffectEntities, sizeof(EffectEntities));
+	DemoState_Get (cur, EntityUsed, sizeof(EntityUsed));
+	DemoState_Get (cur, &EffectEntityCount, sizeof(EffectEntityCount));
+	DemoState_Get (cur, &hw_effect_seed, sizeof(hw_effect_seed));
+}
+
 void CL_InitEffects (void)
 {
 }
