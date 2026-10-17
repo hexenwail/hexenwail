@@ -570,6 +570,7 @@ extern int num_alias_gpu_meshes;
 alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr);
 void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 void GL_FreeAliasGPUMeshes (void);
+void GL_AliasGPUMeshes_ContextLost (void);
 extern	aliashdr_t	*pheader;
 
 /* MD5mesh skeletal model loader.  out_mins/out_maxs receive the union of the

@@ -413,6 +413,19 @@ void GL_FreeAliasGPUMeshes (void)
 	alias_gpu_generation++;
 }
 
+/* The GL context is going away (vid_restart).  Its names die with it, and the
+ * new context hands the same low numbers out again, so nothing is deleted:
+ * deleting later would hit whatever the new context gave those names to.
+ * The table is emptied and the generation bumped, so every header -- cached
+ * ones reloaded by Mod_ReloadTextures, and hunk-resident MD3/MD5/IQM ones it
+ * skips -- builds a fresh mesh in the new context.  GitHub #387. */
+void GL_AliasGPUMeshes_ContextLost (void)
+{
+	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
+	num_alias_gpu_meshes = 0;
+	alias_gpu_generation++;
+}
+
 /* A refused mesh: free what was made for it, and mark the header so the draw
  * path does not rebuild (and leak) it every frame. */
 static void GL_RefuseAliasGPUMesh (aliashdr_t *hdr, alias_gpu_mesh_t *gm)
@@ -420,6 +433,35 @@ static void GL_RefuseAliasGPUMesh (aliashdr_t *hdr, alias_gpu_mesh_t *gm)
 	GL_FreeAliasGPUMesh(gm);
 	hdr->gpu_mesh = -1;
 	hdr->gpu_mesh_gen = alias_gpu_generation;
+}
+
+/* Scratch for GL_MakeAliasGPUMesh, from the C heap rather than the hunk.
+ * The builder also runs from the draw path (GL_GetAliasGPUMesh, after
+ * Mod_ClearAll or vid_restart retired the table while models stayed cached),
+ * and a hunk allocation there can call Cache_FreeLow -- evicting, and so
+ * freeing, the cache block that holds the very header being read.  GitHub
+ * #387.  Zero-filled, as Hunk_AllocName was. */
+#define MESH_SCRATCH_MAX	4
+static void	*mesh_scratch[MESH_SCRATCH_MAX];
+static int	mesh_scratch_count;
+
+static void *GL_MeshScratch (size_t size)
+{
+	void *p;
+
+	if (mesh_scratch_count >= MESH_SCRATCH_MAX)
+		Sys_Error ("GL_MeshScratch: more than %d scratch blocks", MESH_SCRATCH_MAX);
+	p = calloc (1, size ? size : 1);
+	if (!p)
+		Sys_Error ("GL_MeshScratch: failed on %lu bytes", (unsigned long) size);
+	mesh_scratch[mesh_scratch_count++] = p;
+	return p;
+}
+
+static void GL_MeshScratchFree (void)
+{
+	while (mesh_scratch_count > 0)
+		free (mesh_scratch[--mesh_scratch_count]);
 }
 
 /*
@@ -440,7 +482,7 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	trivertx_t	*pv;
 	iqmvert_t	*iqmv;
 	alias_gpu_mesh_t *gm;
-	int		mark, i, j;
+	int		i, j;
 
 	if (num_alias_gpu_meshes >= MAX_ALIAS_MODELS)
 	{
@@ -452,10 +494,9 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	/* For skeletal (PV_IQM) models, create simple vertex order */
 	if (hdr->poseverttype == PV_IQM)
 	{
-		mark = Hunk_LowMark();
 		num_tris = hdr->numtris;
-		indices = (unsigned short *) Hunk_AllocName(num_tris * 3 * sizeof(unsigned short), "gpuidx");
-		texcoords = (float *) Hunk_AllocName(hdr->poseverts * 2 * sizeof(float), "gputc");
+		indices = (unsigned short *) GL_MeshScratch(num_tris * 3 * sizeof(unsigned short));
+		texcoords = (float *) GL_MeshScratch(hdr->poseverts * 2 * sizeof(float));
 		iqmv = (iqmvert_t *)((byte *)hdr + hdr->posedata);
 
 		/* Extract texture coordinates */
@@ -494,12 +535,12 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	{
 		hdr->gpu_mesh = -1;		/* nothing to draw: refused, see above */
 		hdr->gpu_mesh_gen = alias_gpu_generation;
+		GL_MeshScratchFree();	/* none held on this path; kept for any reorder */
 		return;
 	}
 
-	mark = Hunk_LowMark();
-	indices = (unsigned short *) Hunk_AllocName(num_tris * 3 * sizeof(unsigned short), "gpuidx");
-	texcoords = (float *) Hunk_AllocName(hdr->poseverts * 2 * sizeof(float), "gputc");
+	indices = (unsigned short *) GL_MeshScratch(num_tris * 3 * sizeof(unsigned short));
+	texcoords = (float *) GL_MeshScratch(hdr->poseverts * 2 * sizeof(float));
 
 	/* Second pass: triangulate and extract texcoords */
 	order = (int *)((byte *)hdr + hdr->commands);
@@ -572,8 +613,7 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	else
 	{
 		/* PV_QUAKE1: trivertx_t → uint (v[0] | v[1]<<8 | v[2]<<16 | ni<<24) */
-		pose_packed = (unsigned int *) Hunk_AllocName(
-			hdr->numposes * hdr->poseverts * sizeof(unsigned int), "gpupose");
+		pose_packed = (unsigned int *) GL_MeshScratch(hdr->numposes * hdr->poseverts * sizeof(unsigned int));
 		pv = (trivertx_t *)((byte *)hdr + hdr->posedata);
 		for (i = 0; i < hdr->numposes * hdr->poseverts; i++)
 		{
@@ -683,7 +723,7 @@ iqm_gpu_setup:
 			Con_DPrintf ("GL_MakeAliasGPUMesh: no pose data (numposes=%d poseverts=%d), model will not be drawn\n",
 						hdr->numposes, hdr->poseverts);
 			GL_RefuseAliasGPUMesh(hdr, gm);
-			Hunk_FreeToLowMark(mark);
+			GL_MeshScratchFree();
 			return;
 		}
 
@@ -698,7 +738,7 @@ iqm_gpu_setup:
 
 		if (hdr->poseverttype == PV_IQM)
 		{
-			Hunk_FreeToLowMark(mark);
+			GL_MeshScratchFree();
 			return;
 		}
 	}
@@ -763,7 +803,7 @@ iqm_gpu_setup:
 		Con_DPrintf ("GL_MakeAliasGPUMesh: no pose data (numposes=%d poseverts=%d), model will not be drawn\n",
 					hdr->numposes, hdr->poseverts);
 		GL_RefuseAliasGPUMesh(hdr, gm);
-		Hunk_FreeToLowMark(mark);
+		GL_MeshScratchFree();
 		return;
 	}
 
@@ -776,6 +816,6 @@ iqm_gpu_setup:
 	hdr->gpu_mesh_gen = alias_gpu_generation;
 	num_alias_gpu_meshes++;
 
-	Hunk_FreeToLowMark(mark);
+	GL_MeshScratchFree();
 }
 
