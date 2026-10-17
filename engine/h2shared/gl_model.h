@@ -507,6 +507,11 @@ typedef struct {
 #define	MAXALIASVERTS	2000
 #define	MAXALIASFRAMES	256
 #define	MAXALIASTRIS	2048
+/* Longest strip or fan BuildTris (gl_mesh.c) can emit: every triangle of a
+ * MAXALIASTRIS model in one run, plus its two leading vertices.  The mesh
+ * builder's buffers and the legacy draw's per-strip scratch are sized by it,
+ * so neither can overrun.  GitHub #174 (e). */
+#define	MAX_ALIAS_STRIP_VERTS	(MAXALIASTRIS + 2)
 
 /* GPU-resident alias model data for AZDO rendering */
 typedef struct {
@@ -547,7 +552,12 @@ typedef struct {
  * alias model.  Smaller caps silently truncate the instanced draw on
  * dense maps. */
 #define MAX_ALIAS_INSTANCES	16384
-#define MAX_ALIAS_BATCHES	256
+/* One batch per distinct (model, skin) among the instances, so never more
+ * batches than instances: sized to match, overflow is impossible.  At 256 a
+ * view with more distinct pairs stopped batching and the rest -- already
+ * marked collected, so the legacy loop skipped them too -- were not drawn.
+ * ~640 KB.  GitHub #174 (b). */
+#define MAX_ALIAS_BATCHES	MAX_ALIAS_INSTANCES
 
 typedef struct {
 	aliashdr_t	*hdr;		/* model -- determines VAO + pose texture */
