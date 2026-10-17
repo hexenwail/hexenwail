@@ -112,7 +112,7 @@ here.
 - **Release notes: 0.8.0-beta.r14 shipped without a notes file** `uhexen2-s5qj` — docs/release-notes/ has a file for every tagged release from 0.8.0-beta.r1 through r13, and now r15 — but not r14.
 - **Decide whether a mod-supplied gfx.wad should be able to abort the engine (FS_LoadZoneFile into the 256 KB secondary zone)** `uhexen2-zyns` — Split out of the uhexen2-mm4l zone audit rather than bundled into it, because it is a decision, not a mechanical move.
 
-## P4 — parked (47)
+## P4 — parked (46)
 
 - **Decide HexenWorld target topology and the fate of the 234 H2W guards in h2shared** `uhexen2-6g8q.1` — Nothing else in uhexen2-6g8q can be sized until this is settled, so it is the epic's first move.
 - **Port HexenWorld to unified Hexenwail modern engine** `uhexen2-6g8q` — HexenWorld is Raven's QuakeWorld-derived multiplayer fork of Hexen II: client-side prediction, a delta-compressed protocol, a master server, and its own gamecode (hwprogs.dat).
@@ -135,7 +135,6 @@ here.
 - **Load and walk a Quake BSP29 map as proof of concept** `uhexen2-q184` — Proof of concept only: load a Quake (id1) BSP29 map and walk around it in Hexenwail under Hexen II gamecode.
 - **Classic Software look: affine (perspective-incorrect) texture interpolation** `uhexen2-rwh6` — Item 3 of uhexen2-lpza's ranked list, the one part deliberately left out of that bead's first pass. lpza closed with palette quantization through Raven's colormap verified exact (100% of sce…
 - **Texture streaming (on-demand hi-res loading)** `uhexen2-xmz` — Load high-resolution textures on demand instead of all at startup.
-- **docs/release-notes still say 'Shadows of Turmoil' for the sot gamedir** `uhexen2-1o8i` — The pack in sot/ is Storm over Thyrion (README.md:12, moddb.com/mods/storm-over-thyrion, and the install ships StormOverThyrion.bat).
 - **WASM: User game data upload (data1 PAK files)** `uhexen2-4zzm` — Allow users to upload their Hexen II data1 folder for web gameplay. Implement: (1) HTML5 file input for selecting data1 folder/pak files, (2) JavaScript file reader to load into Emscripten V…
 - **Settle HW protocol 24/25/26 against the shared msg_io layer** `uhexen2-6g8q.10` — Settle how the HexenWorld protocol coexists with the Hexen II protocol in the shared message layer.
 - **Fold HexenWorld into the unified menu: server browser, connect dialog, player setup** `uhexen2-6g8q.11` — Give HexenWorld its menu screens inside the modern menu system, rather than restoring HW's parallel one.
