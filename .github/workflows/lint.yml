@@ -167,6 +167,11 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # A brush entity's abslight is lit like a lightmap sample of it, as
+      # the software renderer does (GitHub #326, the dark pillars).
+      - name: Brush abslight scale
+        run: python3 tools/test_brush_abslight.py
+
       # scr_sbaralpha fades the bottom bar on GL and nothing else (GitHub #83).
       - name: Status bar alpha
         run: python3 tools/test_sbar_alpha.py

@@ -987,6 +987,38 @@ void R_UpdateLightmaps (qboolean Translucent)
 
 /*
 ================
+R_BrushAbsLight
+
+The intensity of a brush entity drawn at a fixed light level (MLS_ABSLIGHT --
+a mapper's "abslight", e.g. romeric6's breakable pillars at 0.3).
+
+The 1997 software renderer treats abslight A exactly as a lightmap sample of
+value A: r_surf.c fills blocklights with (255 - A) << VID_CBITS, the very
+expression a lightmap sample goes through, so A lands on the same colormap row
+-- about 2A/255 of the texture, since row 32 of 64 is 1x.  The GL path drew
+A/255, half that, because it bypasses the lightmap and with it the overbright
+factor every lightmapped surface gets: "dark pillars" on romeric6 and
+wherever a mapper used abslight on a brush.  GitHub #326.
+
+So: the scale a lightmap sample of value A gets here.  2A/255 with
+gl_overbright (the shader output saturates above 1, as the world's does);
+without it, the same capped at 1, as the lightmap upload caps it; and 1 under
+r_fullbright, like every lightmapped surface.
+================
+*/
+static float R_BrushAbsLight (const entity_t *e)
+{
+	float	v = 2.0f * (float)e->abslight / 255.0f;
+
+	if (r_fullbright.integer)
+		return 1.0f;
+	if (!gl_overbright.integer && v > 1.0f)
+		v = 1.0f;
+	return v;
+}
+
+/*
+================
 R_RenderBrushPoly
 ================
 */
@@ -1076,8 +1108,8 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 		int mls = e->drawflags & MLS_MASKIN;
 		if (mls == MLS_ABSLIGHT)
 		{
-			// ent->abslight   0 - 255
-			intensity = (float)e->abslight / 255.0f;
+			// ent->abslight   0 - 255, lit as a lightmap sample of it
+			intensity = R_BrushAbsLight (e);
 		}
 		else if (mls != MLS_NONE)
 		{
@@ -1208,7 +1240,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 				/* A self-emissive liquid is its own light source, so the
 				 * entity's light level must not scale it either -- the
 				 * lightmap exemption above is pointless if MLS_ABSLIGHT
-				 * (intensity = abslight/255) or an MLS_* lightstyle slot
+				 * (intensity = R_BrushAbsLight) or an MLS_* lightstyle slot
 				 * dims the very same texel a line later.  uhexen2-nqwl:
 				 * SoT docks.bsp carries its sewer slime on a brush ent
 				 * with abslight 25, and the RenderDoc capture shows every
@@ -1365,7 +1397,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 
 	if ((e->drawflags & MLS_ABSLIGHT) == MLS_ABSLIGHT)
 	{
-		intensity = (float)e->abslight / 255.0f;
+		intensity = R_BrushAbsLight (e);	/* GitHub #326 */
 	}
 
 	if (fa->flags & SURF_DRAWTURB)
