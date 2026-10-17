@@ -27,6 +27,9 @@ const ENGINE_RENDERER = BUILD_RENDERER_STAMP === 'software' ? 'software' : 'webg
 // renderer it does not use.
 const RENDERER_TEST_NAME = ENGINE_RENDERER === 'software' ? 'WebGL2 palette presenter' : 'WebGL2 renderer';
 
+// How long the keyboard/wheel/mouse must be quiet before a touch brings the
+// touch controls back (GitHub #152 b).
+const TOUCH_REGATE_QUIET_MS = 2000;
 const BASE_DIR = '/persistent';
 const ENGINE_ARGUMENTS = ['-basedir', BASE_DIR];
 const STORAGE_ROOT = 'hexenwail';
@@ -66,6 +69,7 @@ const state = {
   },
   modOptionSignature: '',
   touchOnlyEnvironment: false,
+  lastHardwareInputAt: 0,
   phoneMode: false,
 };
 
@@ -1860,13 +1864,25 @@ function bindUi() {
   }
   addEventListener('gamepadconnected', () => updateTouchOnlyEnvironment(true));
   addEventListener('gamepaddisconnected', () => updateTouchOnlyEnvironment());
+  // A keyboard, wheel or mouse hides the touch controls -- and a touch brings
+  // them back.  The gate used to be one-way for the session, so detaching a
+  // Bluetooth keyboard left them hidden until a reload (GitHub #152 b).  The
+  // touch only counts once the hardware has been quiet a moment, so a
+  // keyboard player tapping the canvas to focus it does not flicker them.
+  const hardwareInput = () => {
+    state.lastHardwareInputAt = performance.now();
+    updateTouchOnlyEnvironment(true);
+  };
   addEventListener('keydown', (event) => {
-    if (event.isTrusted !== false) updateTouchOnlyEnvironment(true);
+    if (event.isTrusted !== false) hardwareInput();
   });
-  addEventListener('wheel', () => updateTouchOnlyEnvironment(true), { passive: true });
+  addEventListener('wheel', hardwareInput, { passive: true });
   addEventListener('pointerdown', (event) => {
     if (event.pointerType === 'mouse' || event.pointerType === 'pen') {
-      updateTouchOnlyEnvironment(true);
+      hardwareInput();
+    } else if (event.pointerType === 'touch' && !state.touchOnlyEnvironment &&
+               performance.now() - state.lastHardwareInputAt > TOUCH_REGATE_QUIET_MS) {
+      updateTouchOnlyEnvironment();
     }
   }, { passive: true });
 
