@@ -426,6 +426,29 @@ void GL_AliasGPUMeshes_ContextLost (void)
 	alias_gpu_generation++;
 }
 
+/* A model's previous mesh, released when the model reloads after the cache
+ * evicted it: the evicted header is gone, so nothing can reach that slot any
+ * more, and without this every eviction leaked one until the next
+ * generation.  A slot from an older generation is already gone.  GitHub #387. */
+void GL_ReleaseAliasGPUMesh (int slot, int gen)
+{
+	if (gen != alias_gpu_generation || slot < 0 || slot >= num_alias_gpu_meshes)
+		return;
+	GL_FreeAliasGPUMesh (&alias_gpu_meshes[slot]);	/* memsets: now empty */
+}
+
+/* The slot a new mesh goes into: an emptied one if there is one, else the
+ * next past the end.  -1 when the table is full.  GitHub #387. */
+static int GL_AllocAliasGPUSlot (void)
+{
+	int	i;
+
+	for (i = 0; i < num_alias_gpu_meshes; i++)
+		if (!alias_gpu_meshes[i].valid && !alias_gpu_meshes[i].vao)
+			return i;
+	return (num_alias_gpu_meshes < MAX_ALIAS_MODELS) ? num_alias_gpu_meshes : -1;
+}
+
 /* A refused mesh: free what was made for it, and mark the header so the draw
  * path does not rebuild (and leak) it every frame. */
 static void GL_RefuseAliasGPUMesh (aliashdr_t *hdr, alias_gpu_mesh_t *gm)
@@ -482,9 +505,10 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	trivertx_t	*pv;
 	iqmvert_t	*iqmv;
 	alias_gpu_mesh_t *gm;
-	int		i, j;
+	int		i, j, slot;
 
-	if (num_alias_gpu_meshes >= MAX_ALIAS_MODELS)
+	slot = GL_AllocAliasGPUSlot ();
+	if (slot < 0)
 	{
 		hdr->gpu_mesh = -1;		/* full: refused for this generation */
 		hdr->gpu_mesh_gen = alias_gpu_generation;
@@ -625,7 +649,7 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	}
 
 	/* Create GPU objects */
-	gm = &alias_gpu_meshes[num_alias_gpu_meshes];
+	gm = &alias_gpu_meshes[slot];
 	memset(gm, 0, sizeof(*gm));
 	gm->poseverttype = hdr->poseverttype;
 
@@ -653,7 +677,7 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	{
 iqm_gpu_setup:
 		/* Skeletal setup: upload iqmvert_t data + bone pose matrices */
-		gm = &alias_gpu_meshes[num_alias_gpu_meshes];
+		gm = &alias_gpu_meshes[slot];
 		memset(gm, 0, sizeof(*gm));
 		gm->poseverttype = PV_IQM;
 		gm->numbones = hdr->numbones;
@@ -732,9 +756,10 @@ iqm_gpu_setup:
 		gm->numposes = hdr->numposes;
 		gm->valid = true;
 
-		hdr->gpu_mesh = num_alias_gpu_meshes;
+		hdr->gpu_mesh = slot;
 		hdr->gpu_mesh_gen = alias_gpu_generation;
-		num_alias_gpu_meshes++;
+		if (slot == num_alias_gpu_meshes)
+			num_alias_gpu_meshes++;
 
 		if (hdr->poseverttype == PV_IQM)
 		{
@@ -812,9 +837,10 @@ iqm_gpu_setup:
 	gm->numposes = hdr->numposes;
 	gm->valid = true;
 
-	hdr->gpu_mesh = num_alias_gpu_meshes;
+	hdr->gpu_mesh = slot;
 	hdr->gpu_mesh_gen = alias_gpu_generation;
-	num_alias_gpu_meshes++;
+	if (slot == num_alias_gpu_meshes)
+		num_alias_gpu_meshes++;
 
 	GL_MeshScratchFree();
 }

@@ -563,7 +563,12 @@ typedef struct {
 	int		count;		/* number of instances */
 } alias_batch_t;
 
-#define MAX_ALIAS_MODELS 256
+/* One per alias model a session can hold: every alias model is a model slot,
+ * so MAX_MOD_KNOWN (gl_model.c) bounds them.  256 was not enough for real
+ * content: Storm over Thyrion's courtyard loads 351 alias models, and every
+ * one past the 256th got no GPU mesh and drew as nothing.  Slots freed by an
+ * evicted model's reload are reused (GL_ReleaseAliasGPUMesh).  GitHub #387. */
+#define MAX_ALIAS_MODELS 2048
 extern alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];
 extern int num_alias_gpu_meshes;
 
@@ -571,6 +576,7 @@ alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr);
 void GL_MakeAliasGPUMesh (aliashdr_t *hdr);
 void GL_FreeAliasGPUMeshes (void);
 void GL_AliasGPUMeshes_ContextLost (void);
+void GL_ReleaseAliasGPUMesh (int slot, int gen);	/* GitHub #387 */
 extern	aliashdr_t	*pheader;
 
 /* MD5mesh skeletal model loader.  out_mins/out_maxs receive the union of the
@@ -829,6 +835,12 @@ typedef struct qmodel_s
 	 * keeps the whole-model verdict: over the threshold anywhere, it snaps
 	 * everywhere. */
 	qboolean	lerp_states_only;
+
+	/* The alias GPU mesh slot this model's last load registered, and its
+	 * generation, so a reload after the cache evicted the model can free it
+	 * (GL_ReleaseAliasGPUMesh).  Generation 0 is "none".  GitHub #387. */
+	int		gpu_mesh_slot;
+	int		gpu_mesh_slot_gen;
 
 	/* True when this model is EF_HOLEY but its replacement skin carries
 	 * authored, graduated alpha rather than a binary cutout mask.

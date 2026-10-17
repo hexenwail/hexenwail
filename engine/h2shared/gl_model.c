@@ -4931,6 +4931,11 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 
 	Mod_SetAliasModelExtraFlags (mod);
 
+	/* A reload after the cache evicted this model: its previous GPU mesh is
+	 * unreachable now, so give the slot back.  GitHub #387. */
+	GL_ReleaseAliasGPUMesh (mod->gpu_mesh_slot, mod->gpu_mesh_slot_gen);
+	mod->gpu_mesh_slot_gen = 0;
+
 	start = Hunk_LowMark ();
 
 	pinmodel = (newmdl_t *)buffer;
@@ -5086,6 +5091,8 @@ static void Mod_LoadAliasModelNew (qmodel_t *mod, void *buffer)
 // build the draw lists
 //
 	GL_MakeAliasModelDisplayLists (mod, pheader);
+	mod->gpu_mesh_slot = pheader->gpu_mesh;
+	mod->gpu_mesh_slot_gen = pheader->gpu_mesh_gen;
 
 //
 // move the complete, relocatable alias model to the cache
@@ -5129,6 +5136,11 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 	int			start, end, total;
 
 	Mod_SetAliasModelExtraFlags (mod);
+
+	/* A reload after the cache evicted this model: its previous GPU mesh is
+	 * unreachable now, so give the slot back.  GitHub #387. */
+	GL_ReleaseAliasGPUMesh (mod->gpu_mesh_slot, mod->gpu_mesh_slot_gen);
+	mod->gpu_mesh_slot_gen = 0;
 
 	start = Hunk_LowMark ();
 
@@ -5279,6 +5291,8 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 // build the draw lists
 //
 	GL_MakeAliasModelDisplayLists (mod, pheader);
+	mod->gpu_mesh_slot = pheader->gpu_mesh;
+	mod->gpu_mesh_slot_gen = pheader->gpu_mesh_gen;
 
 //
 // move the complete, relocatable alias model to the cache
