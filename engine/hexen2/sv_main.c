@@ -72,6 +72,19 @@ cvar_t	hexenwail_version	= {"hexenwail", "0", CVAR_ROM};
  * entities past 8192 make sounds only on protocol 100 (SV_SoundEntityFits). */
 cvar_t	max_edicts		= {"max_edicts", "16384", CVAR_NONE};
 
+/* Cap on the per-frame unreliable datagram, in bytes; 0 (the default) is no
+ * cap beyond what the connection and protocol allow (SV_SendClientDatagram).
+ * MAX_DATAGRAM is 4096, well over a 1500-byte path MTU, so on a real link
+ * every full datagram is IP-fragmented in three and losing any one fragment
+ * loses the frame; a frame is re-sent next tick anyway, so a smaller one that
+ * arrives beats a larger one that does not.  ~1400 suits such links; sv_netsort
+ * decides what to shed when the budget tightens.  Applies to local
+ * connections too, which makes it the test lever for the shedding path that
+ * stock maps never reach.  Floored at SV_MAXDATAGRAM_FLOOR so the
+ * svc_clear_edicts reserve still leaves room for entities.  GitHub #82. */
+cvar_t	sv_maxdatagram		= {"sv_maxdatagram", "0", CVAR_NONE};
+#define	SV_MAXDATAGRAM_FLOOR	MAX_DATAGRAM_OLD	/* 1024: what protocols 18-20 always had */
+
 /* Registered but never read by the engine, exactly as upstream, where it exists
  * so the 2021 rerelease's progs find a cvar to query rather than nothing.  No
  * Hexen II gamecode reads it either; it is here for parity and for a mod that
@@ -246,6 +259,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_gameplayfix_elevators);
 	Cvar_RegisterVariable (&sv_freezenonclients);
 	Cvar_RegisterVariable (&max_edicts);
+	Cvar_RegisterVariable (&sv_maxdatagram);
 	Cvar_SetCallback (&max_edicts, Max_Edicts_f);
 	Cvar_RegisterVariable (&sv_cheats);
 	Cvar_RegisterVariable (&sv_gameplayfix_random);
@@ -2517,6 +2531,16 @@ static qboolean SV_SendClientDatagram (client_t *client)
 		int max = SV_MaxDatagram ();
 		if (wire > max)
 			wire = max;
+	}
+
+	/* ...and no larger than sv_maxdatagram, when set (GitHub #82). */
+	if (sv_maxdatagram.integer > 0)
+	{
+		int cap = sv_maxdatagram.integer;
+		if (cap < SV_MAXDATAGRAM_FLOOR)
+			cap = SV_MAXDATAGRAM_FLOOR;
+		if (wire > cap)
+			wire = cap;
 	}
 
 	SZ_Init (&msg, buf, wire);

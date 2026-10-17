@@ -60,6 +60,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `test_joy_always_active.py` | check `joy_always_active` (default 0) gates rumble and gyro steering, and only those, on the gamepad being the input last used, tracked as upstream |
 | `test_demo_rewind.py` | check demo rewind: the left arrow gives a negative speed that restores a keyframe and silently replays to the target (sounds muted, prints/stufftext/music held back), keyframe save and restore cover the same state in the same order, keyframes are dropped per level and bounded, and the demo bar shows `<<` |
 | `test_cl_startmenu.py` | check `cl_startmenu` (default 1) gates both the `menu_main` that `startdemos` queues and the one Hexen II's `hexen.rc` runs during startup |
+| `test_sv_maxdatagram.py` | check `sv_maxdatagram` (default 0 = off) caps the per-frame unreliable datagram for every connection after the protocol clamp, floored at 1024 |
 | `test_softemu_spans.py` | check that `r_softemu_spans` routes the world, brush-poly and liquid texture coordinates through `SpanUV` (highp, guarded), at 8/320 of the render width (16 for liquids), and resets around each override (#176) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
