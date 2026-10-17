@@ -1811,11 +1811,14 @@ static const float ptex_coord[4][3][2] =
 #define RAIN_STREAK 3.0f
 #define RAIN_WIDTH  0.5f
 
-void R_DrawParticles (void)
+/* showtris: r_showtris's pass (GitHub #81).  The same triangles, white, on
+ * the flat shader, with the blend and texture state left to the caller --
+ * and always as triangles, since a wireframe of points is nothing. */
+static void R_DrawParticles_Real (qboolean showtris)
 {
     particle_t      *p;
     int             color;
-    qboolean        square = !gl_particles.integer;
+    qboolean        square = !gl_particles.integer && !showtris;
 #define SCALE_BASE  ((p->type == pt_snow) ? p->count/10 : 1)
 
     if (!active_particles)
@@ -1840,6 +1843,8 @@ void R_DrawParticles (void)
      * snow, no blood, no sparks.  Binding solid white makes the multiply a
      * no-op and gives square mode the flat particle it is asking for.
      * Reported against SoT by Garrett; uhexen2-2rxl. */
+    if (!showtris)
+    {
     GL_Bind(square ? gl_solid_white_texture : particletexture);
     R_SetBlend (true);
     /* Inside an OIT pass, OIT_BeginTranslucency already configured the
@@ -1848,13 +1853,15 @@ void R_DrawParticles (void)
     if (!OIT_InPass())
         R_SetBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL_SetAlphaThreshold(0.0f);
+    }
 
     VectorScale(vup, 1.5, r_pup);
     VectorScale(vright, 1.5, r_pright);
 
     {
-        glprogram_t *prog = OIT_InPass() ? &gl_shader_particle_oit
-                                         : &gl_shader_particle;
+        glprogram_t *prog = showtris ? &gl_shader_flat
+                                     : OIT_InPass() ? &gl_shader_particle_oit
+                                                    : &gl_shader_particle;
 
     if (square)
     {
@@ -1900,7 +1907,9 @@ void R_DrawParticles (void)
             }
 
             color = ((int)p->color) & 0x01ff;
-            if (color < 256)
+            if (showtris)
+                GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+            else if (color < 256)
                 GL_ImmColor3ubv((byte *)&d_8to24table[color]);
             else
                 GL_ImmColor4ubv((byte *)&d_8to24TranslucentTable[color-256]);
@@ -1965,11 +1974,23 @@ void R_DrawParticles (void)
     }
     }
 
+    if (showtris)
+        return;
     GL_SetAlphaThreshold(0.01f);
     /* OIT_EndTranslucency will restore blend state; don't yank GL_BLEND
      * mid-pass or subsequent OIT draws lose their MRT contribution. */
     if (!OIT_InPass())
         R_SetBlend (false);
+}
+
+void R_DrawParticles (void)
+{
+    R_DrawParticles_Real (false);
+}
+
+void R_DrawParticles_ShowTris (void)
+{
+    R_DrawParticles_Real (true);
 }
 
 #else	/* !GLQUAKE */

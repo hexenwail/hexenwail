@@ -167,6 +167,11 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # r_showtris outlines alias models, sprites, particles and the
+      # viewmodel, from the geometry their draws use (GitHub #81).
+      - name: r_showtris covers models, sprites and particles
+        run: python3 tools/test_showtris_models.py
+
       # r_lerp_autodetect snaps the violent pose pairs, not the whole model
       # (GitHub #94).
       - name: Lerp autodetect per pose pair

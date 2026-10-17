@@ -1040,55 +1040,63 @@ static qboolean R_SoftParticleParams (float *inv_dist, float *za, float *zb)
 	return true;
 }
 
-static void R_DrawSpriteModel (entity_t *e)
+/*
+=================
+R_SpriteAxes
+
+The frame R_DrawSpriteModel draws and the billboard axes it draws it on, or
+NULL where it draws nothing (no frames, or a view too close to the sprite's
+own up axis).  Factored out so r_showtris outlines the same quad (GitHub #81).
+=================
+*/
+static mspriteframe_t *R_SpriteAxes (entity_t *e, spritedesc_t *desc)
 {
-	vec3_t		point;
 	mspriteframe_t	*frame;
 	msprite_t	*psprite;
 	vec3_t		tvec;
 	float		dot, angle, sr, cr;
-	spritedesc_t	r_spritedesc;
-	int			i;
-	float		soft_inv = 0.0f, soft_za = 0.0f, soft_zb = 0.0f;
-	qboolean	soft_active;
+	int		i;
 
 	frame = R_GetSpriteFrame (e);
 	if (!frame)
-		return;		/* sprite carries no frames; uhexen2-hv68 */
+		return NULL;	/* sprite carries no frames; uhexen2-hv68 */
 	psprite = (msprite_t *) e->model->cache.data;
 
 	if (psprite->type == SPR_FACING_UPRIGHT)
 	{
 	// generate the sprite's axes, with vup straight up in worldspace, and
-	// r_spritedesc.vright perpendicular to modelorg.
+	// desc->vright perpendicular to modelorg.
 	// This will not work if the view direction is very close to straight up or
 	// down, because the cross product will be between two nearly parallel
 	// vectors and starts to approach an undefined state, so we don't draw if
 	// the two vectors are less than 1 degree apart
-		tvec[0] = -modelorg[0];
-		tvec[1] = -modelorg[1];
-		tvec[2] = -modelorg[2];
+		/* From the sprite to the eye, computed here.  This read the global
+		 * modelorg, which only R_DrawAliasModel and the brush path set: a
+		 * facing-upright sprite turned to face wherever the last model drawn
+		 * before it stood.  No retail sprite is SPR_FACING_UPRIGHT, so only
+		 * mod sprites ever showed it.  GitHub #81 review. */
+		VectorSubtract (e->origin, r_origin, tvec);
 		VectorNormalize (tvec);
-		dot = tvec[2];	// same as DotProduct (tvec, r_spritedesc.vup)
-				// because r_spritedesc.vup is 0, 0, 1
+		dot = tvec[2];	// same as DotProduct (tvec, desc->vup)
+				// because desc->vup is 0, 0, 1
 
 		if ((dot > 0.999848) || (dot < -0.999848))	// cos(1 degree) = 0.999848
-			return;
+			return NULL;
 
-		r_spritedesc.vup[0] = 0;
-		r_spritedesc.vup[1] = 0;
-		r_spritedesc.vup[2] = 1;
-		r_spritedesc.vright[0] = tvec[1];
-								// CrossProduct (r_spritedesc.vup, -modelorg,
-		r_spritedesc.vright[1] = -tvec[0];
-								//		 r_spritedesc.vright)
-		r_spritedesc.vright[2] = 0;
-		VectorNormalize (r_spritedesc.vright);
-		r_spritedesc.vpn[0] = -r_spritedesc.vright[1];
-		r_spritedesc.vpn[1] = r_spritedesc.vright[0];
-		r_spritedesc.vpn[2] = 0;
-					// CrossProduct (r_spritedesc.vright, r_spritedesc.vup,
-					//		 r_spritedesc.vpn)
+		desc->vup[0] = 0;
+		desc->vup[1] = 0;
+		desc->vup[2] = 1;
+		desc->vright[0] = tvec[1];
+								// CrossProduct (desc->vup, -modelorg,
+		desc->vright[1] = -tvec[0];
+								//		 desc->vright)
+		desc->vright[2] = 0;
+		VectorNormalize (desc->vright);
+		desc->vpn[0] = -desc->vright[1];
+		desc->vpn[1] = desc->vright[0];
+		desc->vpn[2] = 0;
+					// CrossProduct (desc->vright, desc->vup,
+					//		 desc->vpn)
 	}
 	else if (psprite->type == SPR_VP_PARALLEL)
 	{
@@ -1097,43 +1105,43 @@ static void R_DrawSpriteModel (entity_t *e)
 	// position relative to the viewer
 		for (i = 0; i < 3; i++)
 		{
-			r_spritedesc.vup[i] = vup[i];
-			r_spritedesc.vright[i] = vright[i];
-			r_spritedesc.vpn[i] = vpn[i];
+			desc->vup[i] = vup[i];
+			desc->vright[i] = vright[i];
+			desc->vpn[i] = vpn[i];
 		}
 	}
 	else if (psprite->type == SPR_VP_PARALLEL_UPRIGHT)
 	{
 	// generate the sprite's axes, with vup straight up in worldspace, and
-	// r_spritedesc.vright parallel to the viewplane.
+	// desc->vright parallel to the viewplane.
 	// This will not work if the view direction is very close to straight up or
 	// down, because the cross product will be between two nearly parallel
 	// vectors and starts to approach an undefined state, so we don't draw if
 	// the two vectors are less than 1 degree apart
-		dot = vpn[2];	// same as DotProduct (vpn, r_spritedesc.vup)
-				// because r_spritedesc.vup is 0, 0, 1
+		dot = vpn[2];	// same as DotProduct (vpn, desc->vup)
+				// because desc->vup is 0, 0, 1
 
 		if ((dot > 0.999848) || (dot < -0.999848))	// cos(1 degree) = 0.999848
-			return;
+			return NULL;
 
-		r_spritedesc.vup[0] = 0;
-		r_spritedesc.vup[1] = 0;
-		r_spritedesc.vup[2] = 1;
-		r_spritedesc.vright[0] = vpn[1];
-							// CrossProduct (r_spritedesc.vup, vpn,
-		r_spritedesc.vright[1] = -vpn[0];	//		 r_spritedesc.vright)
-		r_spritedesc.vright[2] = 0;
-		VectorNormalize (r_spritedesc.vright);
-		r_spritedesc.vpn[0] = -r_spritedesc.vright[1];
-		r_spritedesc.vpn[1] = r_spritedesc.vright[0];
-		r_spritedesc.vpn[2] = 0;
-					// CrossProduct (r_spritedesc.vright, r_spritedesc.vup,
-					//		 r_spritedesc.vpn)
+		desc->vup[0] = 0;
+		desc->vup[1] = 0;
+		desc->vup[2] = 1;
+		desc->vright[0] = vpn[1];
+							// CrossProduct (desc->vup, vpn,
+		desc->vright[1] = -vpn[0];	//		 desc->vright)
+		desc->vright[2] = 0;
+		VectorNormalize (desc->vright);
+		desc->vpn[0] = -desc->vright[1];
+		desc->vpn[1] = desc->vright[0];
+		desc->vpn[2] = 0;
+					// CrossProduct (desc->vright, desc->vup,
+					//		 desc->vpn)
 	}
 	else if (psprite->type == SPR_ORIENTED)
 	{
 	// generate the sprite's axes, according to the sprite's world orientation
-		AngleVectors (e->angles, r_spritedesc.vpn, r_spritedesc.vright, r_spritedesc.vup);
+		AngleVectors (e->angles, desc->vpn, desc->vright, desc->vup);
 	}
 	else if (psprite->type == SPR_VP_PARALLEL_ORIENTED)
 	{
@@ -1146,15 +1154,30 @@ static void R_DrawSpriteModel (entity_t *e)
 
 		for (i = 0; i < 3; i++)
 		{
-			r_spritedesc.vpn[i] = vpn[i];
-			r_spritedesc.vright[i] = vright[i] * cr + vup[i] * sr;
-			r_spritedesc.vup[i] = vright[i] * -sr + vup[i] * cr;
+			desc->vpn[i] = vpn[i];
+			desc->vright[i] = vright[i] * cr + vup[i] * sr;
+			desc->vup[i] = vright[i] * -sr + vup[i] * cr;
 		}
 	}
 	else
 	{
-		Sys_Error ("%s: Bad sprite type %d", __thisfunc__, psprite->type);
+		Sys_Error ("%s: Bad sprite type %d", "R_DrawSpriteModel", psprite->type);
 	}
+
+	return frame;
+}
+
+static void R_DrawSpriteModel (entity_t *e)
+{
+	vec3_t		point;
+	mspriteframe_t	*frame;
+	spritedesc_t	r_spritedesc;
+	float		soft_inv = 0.0f, soft_za = 0.0f, soft_zb = 0.0f;
+	qboolean	soft_active;
+
+	frame = R_SpriteAxes (e, &r_spritedesc);
+	if (!frame)
+		return;
 
 	soft_active = R_SoftParticleParams (&soft_inv, &soft_za, &soft_zb);
 
@@ -2360,6 +2383,129 @@ static void R_ClearAliasMaterial (void)
 	GL_SetAliasMaterial (0.0f, 0.0f, 1.0f);
 }
 
+/*
+=================
+R_AliasModelTransform
+
+The translate and scale R_DrawAliasModel applies after R_RotateForEntity2:
+the header's scale and origin, the entity's own scale (SCALE_TYPE_* about
+SCALE_ORIGIN_*), the floating bob, and for the viewmodel the FOV correction
+and cl_gun_x/y/z.  Factored out so r_showtris outlines a model exactly where
+it draws (GitHub #81); R_DrawAliasModel still issues the same two
+GL_Translatef / GL_Scalef calls with the same numbers, so its matrix -- and
+the rounding uhexen2-iir3 depends on -- is unchanged.
+=================
+*/
+static void R_AliasModelTransform (entity_t *e, aliashdr_t *paliashdr,
+				   float tmatrix[3][4], float mdl_t[3], float mdl_s[3])
+{
+	float		entScale;
+	float		xyfact = 1.0, zfact = 1.0; // avoid compiler warning
+	qmodel_t	*clmodel = e->model;
+
+	if (e->scale != 0 && e->scale != 100)
+	{
+		entScale = (float)e->scale / 100.0f;
+		switch (e->drawflags & SCALE_TYPE_MASKIN)
+		{
+		case SCALE_TYPE_UNIFORM:
+			tmatrix[0][0] = paliashdr->scale[0]*entScale;
+			tmatrix[1][1] = paliashdr->scale[1]*entScale;
+			tmatrix[2][2] = paliashdr->scale[2]*entScale;
+			xyfact = zfact = (entScale-1.0)*127.95;
+			break;
+		case SCALE_TYPE_XYONLY:
+			tmatrix[0][0] = paliashdr->scale[0]*entScale;
+			tmatrix[1][1] = paliashdr->scale[1]*entScale;
+			tmatrix[2][2] = paliashdr->scale[2];
+			xyfact = (entScale-1.0)*127.95;
+			zfact = 1.0;
+			break;
+		case SCALE_TYPE_ZONLY:
+			tmatrix[0][0] = paliashdr->scale[0];
+			tmatrix[1][1] = paliashdr->scale[1];
+			tmatrix[2][2] = paliashdr->scale[2]*entScale;
+			xyfact = 1.0;
+			zfact = (entScale-1.0)*127.95;
+			break;
+		}
+
+		switch (e->drawflags & SCALE_ORIGIN_MASKIN)
+		{
+		case SCALE_ORIGIN_CENTER:
+			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
+			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
+			tmatrix[2][3] = paliashdr->scale_origin[2]-paliashdr->scale[2]*zfact;
+			break;
+		case SCALE_ORIGIN_BOTTOM:
+			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
+			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
+			tmatrix[2][3] = paliashdr->scale_origin[2];
+			break;
+		case SCALE_ORIGIN_TOP:
+			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
+			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
+			tmatrix[2][3] = paliashdr->scale_origin[2]-paliashdr->scale[2]*zfact*2.0;
+			break;
+		}
+	}
+	else
+	{
+		tmatrix[0][0] = paliashdr->scale[0];
+		tmatrix[1][1] = paliashdr->scale[1];
+		tmatrix[2][2] = paliashdr->scale[2];
+		tmatrix[0][3] = paliashdr->scale_origin[0];
+		tmatrix[1][3] = paliashdr->scale_origin[1];
+		tmatrix[2][3] = paliashdr->scale_origin[2];
+	}
+
+	if ((clmodel->flags & EF_ROTATE) ||
+	    (R_GetPimpFlags(e, NULL) & EF_FLOAT))
+	{
+		// Floating motion
+		tmatrix[2][3] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
+	}
+
+	{
+		/* Ironwail-style viewmodel distortion correction: blend factor
+		 * 0 = no correction (gun stretches with FOV), 1 = full correction
+		 * (gun stays same apparent size as at 90 FOV).  Hoisted out of the
+		 * old if/else so cl_gun_x/y below can reuse the same number: their
+		 * FOV correction has to be the same one the gun itself got, or the
+		 * offset and the model disagree about where "the same place" is. */
+		float fovscale = 1.f;
+
+		if (e == &cl.viewent && scr_fov.value > 90.f && cl_gun_fovscale.value)
+		{
+			fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
+			fovscale = 1.f + (fovscale - 1.f) * cl_gun_fovscale.value;
+		}
+
+		mdl_t[0] = tmatrix[0][3];
+		mdl_t[1] = tmatrix[1][3] * fovscale;
+		mdl_t[2] = tmatrix[2][3] * fovscale;
+		mdl_s[0] = tmatrix[0][0];
+		mdl_s[1] = tmatrix[1][1] * fovscale;
+		mdl_s[2] = tmatrix[2][2] * fovscale;
+
+		/* cl_gun_x/y/z (uhexen2-a5nn.16).  See the cvars' comment for why
+		 * screen right is local -Y, screen up is local +Z and forward is
+		 * local +X, and for why the scale[] indices are upstream's pairing
+		 * rather than the axis each one moves along.
+		 *
+		 * Added to the translation column AFTER the fovscale multiply
+		 * above, because upstream applies fovscale to the offsets and not
+		 * to the offsets-plus-everything-else. */
+		if (e == &cl.viewent)
+		{
+			mdl_t[1] -= cl_gun_x.value * paliashdr->scale[0] * fovscale;
+			mdl_t[2] += cl_gun_y.value * paliashdr->scale[1] * fovscale;
+			mdl_t[0] += cl_gun_z.value * paliashdr->scale[2];
+		}
+	}
+}
+
+
 static void R_DrawAliasModel (entity_t *e)
 {
 	int		i;
@@ -2369,9 +2515,7 @@ static void R_DrawAliasModel (entity_t *e)
 	qmodel_t	*clmodel;
 	vec3_t		mins, maxs;
 	aliashdr_t	*paliashdr;
-	static float	tmatrix[3][4];
-	float		an, entScale;
-	float		xyfact = 1.0, zfact = 1.0; // avoid compiler warning
+	float		an;
 	int		skinnum;
 	int		mls;
 	float		mdl_t[3], mdl_s[3];	/* model translate/scale, replayed for the caustics matrix (uhexen2-0gn3) */
@@ -2558,105 +2702,13 @@ static void R_DrawAliasModel (entity_t *e)
 	GL_PushMatrix();
 	R_RotateForEntity2(e);
 
-	if (e->scale != 0 && e->scale != 100)
+	/* static, as it always was: a drawflags value that matches no
+	 * SCALE_TYPE_* / SCALE_ORIGIN_* case leaves those entries at the last
+	 * draw's.  The r_showtris pass keeps its own, so turning it on cannot
+	 * change what this inherits. */
 	{
-		entScale = (float)e->scale / 100.0f;
-		switch (e->drawflags & SCALE_TYPE_MASKIN)
-		{
-		case SCALE_TYPE_UNIFORM:
-			tmatrix[0][0] = paliashdr->scale[0]*entScale;
-			tmatrix[1][1] = paliashdr->scale[1]*entScale;
-			tmatrix[2][2] = paliashdr->scale[2]*entScale;
-			xyfact = zfact = (entScale-1.0)*127.95;
-			break;
-		case SCALE_TYPE_XYONLY:
-			tmatrix[0][0] = paliashdr->scale[0]*entScale;
-			tmatrix[1][1] = paliashdr->scale[1]*entScale;
-			tmatrix[2][2] = paliashdr->scale[2];
-			xyfact = (entScale-1.0)*127.95;
-			zfact = 1.0;
-			break;
-		case SCALE_TYPE_ZONLY:
-			tmatrix[0][0] = paliashdr->scale[0];
-			tmatrix[1][1] = paliashdr->scale[1];
-			tmatrix[2][2] = paliashdr->scale[2]*entScale;
-			xyfact = 1.0;
-			zfact = (entScale-1.0)*127.95;
-			break;
-		}
-
-		switch (e->drawflags & SCALE_ORIGIN_MASKIN)
-		{
-		case SCALE_ORIGIN_CENTER:
-			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
-			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
-			tmatrix[2][3] = paliashdr->scale_origin[2]-paliashdr->scale[2]*zfact;
-			break;
-		case SCALE_ORIGIN_BOTTOM:
-			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
-			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
-			tmatrix[2][3] = paliashdr->scale_origin[2];
-			break;
-		case SCALE_ORIGIN_TOP:
-			tmatrix[0][3] = paliashdr->scale_origin[0]-paliashdr->scale[0]*xyfact;
-			tmatrix[1][3] = paliashdr->scale_origin[1]-paliashdr->scale[1]*xyfact;
-			tmatrix[2][3] = paliashdr->scale_origin[2]-paliashdr->scale[2]*zfact*2.0;
-			break;
-		}
-	}
-	else
-	{
-		tmatrix[0][0] = paliashdr->scale[0];
-		tmatrix[1][1] = paliashdr->scale[1];
-		tmatrix[2][2] = paliashdr->scale[2];
-		tmatrix[0][3] = paliashdr->scale_origin[0];
-		tmatrix[1][3] = paliashdr->scale_origin[1];
-		tmatrix[2][3] = paliashdr->scale_origin[2];
-	}
-
-	if ((clmodel->flags & EF_ROTATE) ||
-	    (R_GetPimpFlags(e, NULL) & EF_FLOAT))
-	{
-		// Floating motion
-		tmatrix[2][3] += sin(e->origin[0] + e->origin[1] + (cl.time*3)) * 5.5;
-	}
-
-	{
-		/* Ironwail-style viewmodel distortion correction: blend factor
-		 * 0 = no correction (gun stretches with FOV), 1 = full correction
-		 * (gun stays same apparent size as at 90 FOV).  Hoisted out of the
-		 * old if/else so cl_gun_x/y below can reuse the same number: their
-		 * FOV correction has to be the same one the gun itself got, or the
-		 * offset and the model disagree about where "the same place" is. */
-		float fovscale = 1.f;
-
-		if (e == &cl.viewent && scr_fov.value > 90.f && cl_gun_fovscale.value)
-		{
-			fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
-			fovscale = 1.f + (fovscale - 1.f) * cl_gun_fovscale.value;
-		}
-
-		mdl_t[0] = tmatrix[0][3];
-		mdl_t[1] = tmatrix[1][3] * fovscale;
-		mdl_t[2] = tmatrix[2][3] * fovscale;
-		mdl_s[0] = tmatrix[0][0];
-		mdl_s[1] = tmatrix[1][1] * fovscale;
-		mdl_s[2] = tmatrix[2][2] * fovscale;
-
-		/* cl_gun_x/y/z (uhexen2-a5nn.16).  See the cvars' comment for why
-		 * screen right is local -Y, screen up is local +Z and forward is
-		 * local +X, and for why the scale[] indices are upstream's pairing
-		 * rather than the axis each one moves along.
-		 *
-		 * Added to the translation column AFTER the fovscale multiply
-		 * above, because upstream applies fovscale to the offsets and not
-		 * to the offsets-plus-everything-else. */
-		if (e == &cl.viewent)
-		{
-			mdl_t[1] -= cl_gun_x.value * paliashdr->scale[0] * fovscale;
-			mdl_t[2] += cl_gun_y.value * paliashdr->scale[1] * fovscale;
-			mdl_t[0] += cl_gun_z.value * paliashdr->scale[2];
-		}
+		static float	tmatrix[3][4];
+		R_AliasModelTransform (e, paliashdr, tmatrix, mdl_t, mdl_s);
 	}
 
 	GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);
@@ -5594,6 +5646,65 @@ static void R_DrawAllGlows (void)
 //=============================================================================
 
 
+/* Whether the weapon in hand is drawn at all.  Shared by R_DrawViewModel and
+ * the r_showtris pass (GitHub #81), so the wireframe outlines exactly the
+ * weapon that is on screen. */
+static qboolean R_ViewModelVisible (void)
+{
+	return cl.viewent.model &&
+	       cl.v.health > 0 &&
+	       !chase_active.integer &&
+//rjr	       !(cl.items & IT_INVISIBILITY) &&
+	       r_drawviewmodel.integer &&
+	       r_drawentities.integer &&
+	       scr_viewsize.integer < 140;
+}
+
+/* The viewmodel's own depth slice and weapon FOV, around its draw.  depthrange
+ * false keeps the caller's range: r_showtris 1 draws through everything. */
+static void R_ViewModelBegin (qboolean depthrange)
+{
+	// hack the depth range to prevent view model from poking into walls.
+	// Reversed-Z: near is gldepthmax (1.0), so the viewmodel slice sits
+	// at the upper 30% of the range instead of the lower 30%.
+	if (depthrange)
+	{
+		if (gl_clipcontrol_able)
+			R_SetDepthRange (gldepthmax - 0.3*(gldepthmax-gldepthmin), gldepthmax);
+		else
+			R_SetDepthRange (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
+	}
+
+	/* override projection for weapon FOV if set */
+	if (r_viewmodel_fov.value > 0)
+	{
+		float fov = r_viewmodel_fov.value;
+		float aspect = (float)r_refdef.vrect.width / (float)r_refdef.vrect.height;
+		GLdouble xmax, ymax;
+		if (fov < 30) fov = 30;
+		if (fov > 170) fov = 170;
+		ymax = 4.0 * tan(fov * M_PI / 360.0);
+		xmax = ymax * aspect;
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_PushMatrix();
+		GL_LoadIdentity();
+		GL_Frustum(-xmax, xmax, -ymax, ymax, 4.0, 16384);
+		GL_MatrixMode(GL_MAT_MODELVIEW);
+	}
+}
+
+static void R_ViewModelEnd (void)
+{
+	if (r_viewmodel_fov.value > 0)
+	{
+		GL_MatrixMode(GL_MAT_PROJECTION);
+		GL_PopMatrix();
+		GL_MatrixMode(GL_MAT_MODELVIEW);
+	}
+
+	R_SetDepthRange (gldepthmin, gldepthmax);
+}
+
 /*
 =============
 R_DrawViewModel
@@ -5648,53 +5759,14 @@ skip_dlights:
 
 	cl.light_level = ambientlight;
 
-	if ((cl.v.health <= 0) ||
-	    (chase_active.integer) ||
-//rjr	    (cl.items & IT_INVISIBILITY) ||
-	    (!r_drawviewmodel.integer) ||
-	    (!r_drawentities.integer) ||
-	    (scr_viewsize.integer >= 140))
-	{
+	if (!R_ViewModelVisible ())
 		return;
-	}
 
-	// hack the depth range to prevent view model from poking into walls.
-	// Reversed-Z: near is gldepthmax (1.0), so the viewmodel slice sits
-	// at the upper 30% of the range instead of the lower 30%.
-	if (gl_clipcontrol_able)
-		R_SetDepthRange (gldepthmax - 0.3*(gldepthmax-gldepthmin), gldepthmax);
-	else
-		R_SetDepthRange (gldepthmin, gldepthmin + 0.3*(gldepthmax-gldepthmin));
-
-	/* override projection for weapon FOV if set */
-	if (r_viewmodel_fov.value > 0)
-	{
-		float fov = r_viewmodel_fov.value;
-		float aspect = (float)r_refdef.vrect.width / (float)r_refdef.vrect.height;
-		GLdouble xmax, ymax;
-		if (fov < 30) fov = 30;
-		if (fov > 170) fov = 170;
-		ymax = 4.0 * tan(fov * M_PI / 360.0);
-		xmax = ymax * aspect;
-		GL_MatrixMode(GL_MAT_PROJECTION);
-		GL_PushMatrix();
-		GL_LoadIdentity();
-		GL_Frustum(-xmax, xmax, -ymax, ymax, 4.0, 16384);
-		GL_MatrixMode(GL_MAT_MODELVIEW);
-	}
-
+	R_ViewModelBegin (true);
 	AlwaysDrawModel = true;
 	R_DrawAliasModel (e);
 	AlwaysDrawModel = false;
-
-	if (r_viewmodel_fov.value > 0)
-	{
-		GL_MatrixMode(GL_MAT_PROJECTION);
-		GL_PopMatrix();
-		GL_MatrixMode(GL_MAT_MODELVIEW);
-	}
-
-	R_SetDepthRange (gldepthmin, gldepthmax);
+	R_ViewModelEnd ();
 }
 
 //=============================================================================
@@ -6944,10 +7016,14 @@ DrawTextureChains a keep-chains mode -- which would preserve and re-walk
 per-texture linked lists purely so a second pass could throw the texture
 information away.
 
-Two known gaps, both deliberate, tracked as uhexen2-jxte:
-  * Alias models, sprites and particles are not outlined.  Everything drawn
-    here lives in the world VBO and shares one mechanism; those three do not,
-    and each needs its own re-issue with its own batching to think about.
+Alias models, sprites and particles are outlined too (GitHub #81), each by
+re-issuing its geometry rather than its draw: R_ShowTris_Alias poses the model
+on the CPU with the draw's own pose pair, blend and matrix; R_ShowTris_Sprite
+takes the draw's axes from R_SpriteAxes; R_DrawParticles_ShowTris is the
+particle draw with the flat shader and no blend.  All white, all unlit, as
+upstream forces.  The viewmodel gets its own depth slice in mode 2.
+
+One known gap, deliberate:
   * glPolygonMode does not exist on GLES/WebGL (gl_func.h:212 compiles it to
     a no-op), so this is desktop GL only.  Making it work there means emitting
     real line geometry, which is a different feature.
@@ -6996,6 +7072,143 @@ static void R_ShowTris_DrawSurfaceRuns (const msurface_t *surfaces, int first,
 				   (void *)(intptr_t)(run_first * sizeof(unsigned int)));
 }
 
+/* An alias model's triangles, posed on the CPU from its pose data (the draw
+ * path poses them in the vertex shader, which a wireframe has no use for):
+ * the same pose pair and blend R_AliasResolveLerp hands the draw, the same
+ * matrix R_AliasModelTransform builds for it, white.  Quake MDL and MD3
+ * poses; an IQM's skeleton has r_showskel.  GitHub #81. */
+static void R_ShowTris_Alias (entity_t *e)
+{
+	aliashdr_t	*hdr;
+	vec3_t		mins, maxs;
+	float		mdl_t[3], mdl_s[3], blend, pos[3];
+	int		pose1, pose2, count, vert, first, i, k, idx[3];
+	int		*order;
+
+	if (!e->model || e->model->type != mod_alias)
+		return;
+	if (e != &cl.viewent)
+	{
+		/* r_entdist, as the draw applies it: nothing to outline past it. */
+		if (r_entdist.value > 0 && e != &cl_entities[cl.viewentity])
+		{
+			float dx = e->origin[0] - r_origin[0];
+			float dy = e->origin[1] - r_origin[1];
+			float dz = e->origin[2] - r_origin[2];
+			if (dx*dx + dy*dy + dz*dz > r_entdist.value * r_entdist.value)
+				return;
+		}
+		VectorAdd (e->origin, e->model->mins, mins);
+		VectorAdd (e->origin, e->model->maxs, maxs);
+		if (R_CullBox (mins, maxs))
+			return;
+	}
+	hdr = (aliashdr_t *) Mod_Extradata (e->model);
+	if (!hdr || hdr->numposes < 1 || hdr->poseverts < 1 ||
+	    (hdr->poseverttype != PV_QUAKE1 && hdr->poseverttype != PV_MD3))
+		return;
+
+	R_AliasResolveLerp (e, hdr, &pose1, &pose2, &blend);
+	if (pose1 < 0 || pose1 >= hdr->numposes) pose1 = 0;
+	if (pose2 < 0 || pose2 >= hdr->numposes) pose2 = 0;
+
+	GL_PushMatrix ();
+	R_RotateForEntity2 (e);
+	{
+		static float	tmatrix[3][4];	/* its own; see R_DrawAliasModel */
+		R_AliasModelTransform (e, hdr, tmatrix, mdl_t, mdl_s);
+	}
+	GL_Translatef (mdl_t[0], mdl_t[1], mdl_t[2]);
+	GL_Scalef (mdl_s[0], mdl_s[1], mdl_s[2]);
+
+	GL_ImmBegin ();
+	GL_ImmColor4f (1.0f, 1.0f, 1.0f, 1.0f);
+	order = (int *)((byte *)hdr + hdr->commands);
+	vert = 0;
+	while ((count = *order++) != 0)
+	{
+		qboolean fan = count < 0;
+
+		if (fan)
+			count = -count;
+		order += count * 2;	/* the s/t pairs: positions come from the pose */
+		first = vert;
+		for (i = 2; i < count; i++)
+		{
+			/* The strip winding GL_MakeAliasGPUMesh uses; a wireframe
+			 * would not show the difference, a later reader might. */
+			if (fan)
+			{ idx[0] = first; idx[1] = first + i - 1; idx[2] = first + i; }
+			else if (i & 1)
+			{ idx[0] = first + i; idx[1] = first + i - 1; idx[2] = first + i - 2; }
+			else
+			{ idx[0] = first + i - 2; idx[1] = first + i - 1; idx[2] = first + i; }
+
+			if (GL_ImmCount () > GL_IMM_MAX_VERTS - 3)
+			{
+				GL_ImmEnd (GL_TRIANGLES, &gl_shader_flat);
+				GL_ImmBegin ();
+			}
+			for (k = 0; k < 3; k++)
+			{
+				int	v = idx[k];
+
+				if (v >= hdr->poseverts)
+					v = hdr->poseverts - 1;
+				if (hdr->poseverttype == PV_MD3)
+				{
+					const md3Vertex_t *base = (const md3Vertex_t *)((byte *)hdr + hdr->posedata);
+					const md3Vertex_t *a = base + pose1 * hdr->poseverts + v;
+					const md3Vertex_t *b = base + pose2 * hdr->poseverts + v;
+					pos[0] = (a->xyz[0] + (b->xyz[0] - a->xyz[0]) * blend) * (1.0f / 64.0f);
+					pos[1] = (a->xyz[1] + (b->xyz[1] - a->xyz[1]) * blend) * (1.0f / 64.0f);
+					pos[2] = (a->xyz[2] + (b->xyz[2] - a->xyz[2]) * blend) * (1.0f / 64.0f);
+				}
+				else
+				{
+					const trivertx_t *base = (const trivertx_t *)((byte *)hdr + hdr->posedata);
+					const trivertx_t *a = base + pose1 * hdr->poseverts + v;
+					const trivertx_t *b = base + pose2 * hdr->poseverts + v;
+					pos[0] = a->v[0] + (b->v[0] - a->v[0]) * blend;
+					pos[1] = a->v[1] + (b->v[1] - a->v[1]) * blend;
+					pos[2] = a->v[2] + (b->v[2] - a->v[2]) * blend;
+				}
+				GL_ImmVertex3f (pos[0], pos[1], pos[2]);
+			}
+		}
+		vert += count;
+	}
+	GL_ImmEnd (GL_TRIANGLES, &gl_shader_flat);
+	GL_PopMatrix ();
+}
+
+/* A sprite's quad, on the axes and frame R_DrawSpriteModel uses.  GitHub #81. */
+static void R_ShowTris_Sprite (entity_t *e)
+{
+	spritedesc_t	desc;
+	mspriteframe_t	*frame;
+	vec3_t		p;
+
+	frame = R_SpriteAxes (e, &desc);
+	if (!frame)
+		return;
+	GL_ImmBegin ();
+	GL_ImmColor4f (1.0f, 1.0f, 1.0f, 1.0f);
+	VectorMA (e->origin, frame->down, desc.vup, p);
+	VectorMA (p, frame->left, desc.vright, p);
+	GL_ImmVertex3f (p[0], p[1], p[2]);
+	VectorMA (e->origin, frame->up, desc.vup, p);
+	VectorMA (p, frame->left, desc.vright, p);
+	GL_ImmVertex3f (p[0], p[1], p[2]);
+	VectorMA (e->origin, frame->up, desc.vup, p);
+	VectorMA (p, frame->right, desc.vright, p);
+	GL_ImmVertex3f (p[0], p[1], p[2]);
+	VectorMA (e->origin, frame->down, desc.vup, p);
+	VectorMA (p, frame->right, desc.vright, p);
+	GL_ImmVertex3f (p[0], p[1], p[2]);
+	GL_ImmEnd (GL_QUADS, &gl_shader_flat);
+}
+
 static void R_ShowTris (void)
 {
 	extern GLuint	world_vao, world_ibo;
@@ -7006,6 +7219,12 @@ static void R_ShowTris (void)
 		return;
 	if (cl.maxclients > 1)
 		return;
+#ifdef USE_GLES
+	/* No glPolygonMode on GLES/WebGL2 (gl_func.h compiles it away), so every
+	 * draw below would come out FILLED: the world, then every model, painted
+	 * solid white.  Off there until it emits real line geometry. */
+	return;
+#endif
 	if (!cl.worldmodel || !world_vao || !world_ibo)
 		return;
 
@@ -7066,6 +7285,35 @@ static void R_ShowTris (void)
 		R_ShowTris_DrawSurfaceRuns (clmodel->surfaces, clmodel->firstmodelsurface,
 					    clmodel->nummodelsurfaces, -1);
 	}
+	glBindVertexArray_fp (0);
+
+	/* Alias models and sprites, through the immediate path on the flat
+	 * shader: GL_ImmEnd pushes the matrix stack's MVP itself.  GitHub #81. */
+	if (r_drawentities.integer)
+	{
+		for (i = 0; i < cl_numvisedicts; i++)
+		{
+			entity_t	*e = cl_visedicts[i];
+
+			if (!e || !e->model)
+				continue;
+			if (e->model->type == mod_alias)
+				R_ShowTris_Alias (e);
+			else if (e->model->type == mod_sprite)
+				R_ShowTris_Sprite (e);
+		}
+
+		/* The weapon in its own depth slice, as upstream does it in mode 2;
+		 * mode 1 already draws through everything. */
+		if (R_ViewModelVisible ())
+		{
+			R_ViewModelBegin (r_showtris.value != 1);
+			R_ShowTris_Alias (&cl.viewent);
+			R_ViewModelEnd ();
+		}
+	}
+
+	R_DrawParticles_ShowTris ();
 
 	glPolygonMode_fp (GL_FRONT_AND_BACK, GL_FILL);
 	if (r_showtris.value != 1)
