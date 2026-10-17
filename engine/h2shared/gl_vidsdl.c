@@ -1591,8 +1591,19 @@ static qboolean VID_SetMode (int modenum)
 	if (scaling_factor != 100)
 		Con_Printf ("High DPI scaling in effect! (%d%%)\n", scaling_factor);
 
+	/* SDL's offscreen driver has no display to fill, and its EGL surface
+	 * keeps the size it was created at while a fullscreen switch still
+	 * reports the "desktop" size (1024x768): the frame then drew into a
+	 * 640x480 corner of what the engine believed was 1024x768, and
+	 * `screenshot` read back the whole of it, garbage included.  Headless
+	 * runs stay windowed.  GitHub #401. */
+	if (vid_config_fscr.integer != 0 && SDL_GetCurrentVideoDriver () &&
+	    !strcmp (SDL_GetCurrentVideoDriver (), "offscreen"))
+	{
+		Con_SafePrintf ("offscreen video driver: running windowed\n");
+	}
 	// Handle fullscreen modes after window creation
-	if (vid_config_fscr.integer == 2)
+	else if (vid_config_fscr.integer == 2)
 	{
 		// Exclusive fullscreen: find matching SDL display mode
 		display_id = SDL_GetDisplayForWindow(window);
