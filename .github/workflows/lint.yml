@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # scr_sbaralpha fades the bottom bar on GL and nothing else (GitHub #83).
+      - name: Status bar alpha
+        run: python3 tools/test_sbar_alpha.py
+
       # gfx.wad and the 2D lumps load from the C heap, so a mod's bigger
       # gfx.wad cannot abort startup (GitHub #126).
       - name: gfx.wad off the secondary zone

@@ -4146,7 +4146,11 @@ static int	graphics_cursor;
 static const char *gfx_labels[GFX_ITEMS] = {
 	"Message Backdrop:",	/* GFX_CENTERPRINTBG */
 	"HUD Scale       :",	/* GFX_HUDSCALE */
-	"HUD Transparency:",	/* GFX_HUDTRANS */
+#if defined(WEBSOFT)
+	"HUD Transparency:",	/* GFX_HUDTRANS: sbtrans, the rasteriser's levels */
+#else
+	"Status Bar Alpha:",	/* GFX_HUDTRANS: scr_sbaralpha (GitHub #83) */
+#endif
 	"Menu Scale      :",	/* GFX_MENUSCALE */
 	"Crosshair Scale :",	/* GFX_CROSSHAIRSCALE */
 	"Console Alpha   :",	/* GFX_CONALPHA */
@@ -4284,10 +4288,18 @@ static void M_Graphics_AdjustSliders (int dir)
 	}
 	case GFX_HUDTRANS:
 	{
+#if defined(WEBSOFT)
 		int v = sbtrans.integer + dir;
 		if (v < 0) v = 2;
 		if (v > 2) v = 0;
 		Cvar_SetValue ("sbtrans", v);
+#else
+		/* GL never read sbtrans: the row drives scr_sbaralpha there. */
+		float v = scr_sbaralpha.value + dir * 0.05f;
+		if (v < 0.0f) v = 0.0f;
+		if (v > 1.0f) v = 1.0f;
+		Cvar_SetValue ("scr_sbaralpha", v);
+#endif
 		break;
 	}
 	case GFX_OVERBRIGHT:
@@ -4357,6 +4369,9 @@ static const char *M_Graphics_Note (int row)
 	case GFX_CONMAXCOLS:	return "Wrap console text at this width";	/* con_maxcols */
 	case GFX_OVERBRIGHT:	return "Full lets models light up like walls";	/* gl_overbright_models */
 	case GFX_TORCH_DLIGHT:	return "Wall torches cast dynamic light";	/* gl_torch_dlight */
+#if !defined(WEBSOFT)
+	case GFX_HUDTRANS:	return "Bottom bar opacity; 1 is solid";	/* scr_sbaralpha */
+#endif
 	default:		return NULL;
 	}
 }
@@ -4443,9 +4458,14 @@ static void M_Graphics_Draw (void)
 	if (!M_Graphics_IsSkip(GFX_HUDTRANS))
 	{
 		M_Print (76, 92 + 8*GFX_HUDTRANS, gfx_labels[GFX_HUDTRANS]);
+#if defined(WEBSOFT)
 		M_PrintWhite (220, 92 + 8*GFX_HUDTRANS,
 			sbtrans.integer == 2 ? "Heavy" :
 			sbtrans.integer == 1 ? "Light" : "Off");
+#else
+		M_DrawSliderValue (220, 92 + 8*GFX_HUDTRANS,
+			scr_sbaralpha.value, "%.2f", scr_sbaralpha.value);
+#endif
 	}
 
 	if (!M_Graphics_IsSkip(GFX_OVERBRIGHT))
@@ -10100,6 +10120,9 @@ static const menuslider_t	rend_sliders[] =
 
 static const menuslider_t	gfx_sliders[] =
 {
+#if !defined(WEBSOFT)
+	{ GFX_HUDTRANS,		"scr_sbaralpha", 0.0f, 1.0f,	0.0f, 1.0f,	0.05f, NULL },
+#endif
 	{ GFX_CONALPHA,		"scr_conalpha",	0.0f, 1.0f,	0.0f, 1.0f,	0.1f, NULL },
 	{ GFX_CONBRIGHT,	"scr_conbrightness", 0.0f, 2.0f, 0.0f, 2.0f,	0.1f, NULL },
 	{ GFX_GLOW_INTENSITY,	"gl_glow_intensity", 0.0f, 1.0f, 0.0f, 1.0f,	0.1f, NULL },

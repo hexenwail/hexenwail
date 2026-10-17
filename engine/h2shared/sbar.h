@@ -45,7 +45,8 @@ void Sbar_DeathmatchOverlay(void);
 
 extern int sb_lines; // scan lines to draw
 
-extern cvar_t sbtrans;	// statusbar transparency: 0 opaque, 1 light, 2 heavy
+extern cvar_t sbtrans;	// statusbar transparency: 0 opaque, 1 light, 2 heavy (software renderer)
+extern cvar_t scr_sbaralpha;	// bottom bar opacity, GL renderer (GitHub #83)
 
 
 #endif	/* __HX2_SBAR_H */

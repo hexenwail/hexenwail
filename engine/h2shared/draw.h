@@ -94,6 +94,7 @@ void Draw_MenuBackdrop (void);	/* full-screen conback for main-menu backdrop */
 #endif
 
 void Draw_Character (int x, int y, unsigned int num);
+void Draw_SetPicAlpha (float a);	/* GL: pic alpha for scr_sbaralpha (GitHub #83); caller restores to 1 */
 void Draw_SetCharacterAlpha (float a);	/* per-quad alpha for Draw_Character/String; caller restores to 1 */
 void Draw_String (int x, int y, const char *str);
 void Draw_SmallCharacter (int x, int y, int num);
