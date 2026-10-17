@@ -955,9 +955,19 @@ static void M_Main_Draw (void)
 		const char *r = M_RendererName();
 		int i, y = vid.height - 14;	/* CANVAS_DEFAULT extent (a5nn.37) */
 
+		/* The watermark at the other end of this line starts here (its
+		 * own x, clamped like Draw_ConsoleVersionInfo clamps it).  On a
+		 * narrow framebuffer -- the software renderer's 320 -- the two
+		 * met in the middle and printed over each other; the watermark
+		 * names the build, so the renderer tag is the one that yields.
+		 * GitHub #441. */
+		int wm_x = vid.width - ((int)strlen (ENGINE_WATERMARK) * 8 + 11);
+		if (wm_x < 11)
+			wm_x = 11;
+
 		/* At 320x200 the menu canvas is the whole screen and this would
 		 * print over QUIT: the menu wins.  GitHub #135. */
-		if (!Draw_MenuReachesLine (y))
+		if (!Draw_MenuReachesLine (y) && 11 + (int)strlen (r) * 8 + 8 <= wm_x)
 		{
 			GL_SetCanvas (CANVAS_DEFAULT);
 			for (i = 0; r[i]; i++)

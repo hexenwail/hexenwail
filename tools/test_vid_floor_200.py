@@ -29,7 +29,7 @@ if "MIN_CONHEIGHT" in vid:
 menu = read("engine/hexen2/menu.c")
 main = menu[menu.index("static void M_Main_Draw (void)\n{"):]
 main = main[:main.index("\n}\n")]
-if "if (!Draw_MenuReachesLine (y))" not in main:
+if "if (!Draw_MenuReachesLine (y)" not in main:
     errors.append("M_Main_Draw: the renderer label must yield where the menu reaches its line")
 gl = read("engine/h2shared/gl_draw.c")
 ver = gl[gl.index("static void Draw_ConsoleVersionInfo (int lines)\n{"):]

@@ -2093,6 +2093,11 @@ static void Draw_ConsoleVersionInfo (int lines)
 	 * scr_pixelaspect squash; conwidth/conheight are the console's own
 	 * unsquashed geometry and are not a canvas extent.  uhexen2-a5nn.37 */
 	int x = vid.width - (strlen(ver) * 8 + 11);
+	/* Wider than the screen (the software renderer's 320): keep its start
+	 * on screen and let the end clip, rather than run it off the left edge
+	 * and over the renderer tag (GitHub #441). */
+	if (x < 11)
+		x = 11;
 	int y = lines - 14;
 
 	/* Behind an open menu that reaches this line, the menu wins. */

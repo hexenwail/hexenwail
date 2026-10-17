@@ -1466,6 +1466,11 @@ static void Draw_ConsoleVersionInfo (int lines)
 	static const char ver[] = ENGINE_WATERMARK;
 	const char *ptr = ver;
 	int x = vid.conwidth - (strlen(ver) * 8 + 11);
+	/* Wider than the screen (the software renderer's 320): keep its start
+	 * on screen and let the end clip, rather than run it off the left edge
+	 * and over the renderer tag (GitHub #441). */
+	if (x < 11)
+		x = 11;
 	int y = lines - 14;
 	for (; *ptr; ++ptr)
 		Draw_Character (x + (int)(ptr - ver) * 8, y, *ptr | 0x100);
