@@ -162,3 +162,44 @@ test('the touch-only gate is two-way: a touch after quiet hardware brings the co
   // A touch re-evaluates (not forced off) once the hardware has been quiet.
   assert.match(app, /event\.pointerType === 'touch' && !state\.touchOnlyEnvironment &&\s*performance\.now\(\) - state\.lastHardwareInputAt > TOUCH_REGATE_QUIET_MS\) \{\s*updateTouchOnlyEnvironment\(\);/);
 });
+
+test('a refused pointer capture does not end the look drag', () => {
+  // Browsers throw InvalidStateError from setPointerCapture for a pointer they
+  // no longer count as active; uncaught, it ended the gesture before the pad
+  // registered it, and the drag never turned the camera.
+  const root = makeElement(null);
+  const look = makeElement('look');
+  look.setPointerCapture = () => { throw new Error('InvalidStateError'); };
+  look.releasePointerCapture = () => { throw new Error('InvalidStateError'); };
+  const deltas = [];
+  const controls = new PhoneControls(root, { key() {}, look: (dx, dy) => deltas.push([dx, dy]) });
+  controls.attach();
+
+  root.dispatch('pointerdown', pointer(look, 4, 100, 100));
+  root.dispatch('pointermove', pointer(look, 4, 100, 80));
+  root.dispatch('pointermove', pointer(look, 4, 130, 80));
+  assert.doesNotThrow(() => root.dispatch('pointerup', pointer(look, 4, 130, 80)));
+  assert.deepEqual(deltas, [[0, -20], [30, 0]]);
+});
+
+test('held touch input is released only when the controls go away', () => {
+  // The re-gate runs on every touch pointerdown, after the pad registered that
+  // touch; releasing whenever the environment read "not touch-only" ended
+  // every drag at birth with "Always show" on or a fine pointer present.
+  const app = readFileSync(join(process.cwd(), 'web/app.js'), 'utf8');
+  const fn = app.slice(app.indexOf('function updateTouchOnlyEnvironment('), app.indexOf('function openPhoneOverlay('));
+  assert.match(fn, /const wasShown = touchControlsShown\(\);/);
+  assert.match(fn, /if \(wasShown && !touchControlsShown\(\)\) \{\s*releasePhoneInputs\(\);/);
+  assert.doesNotMatch(fn, /if \(!state\.touchOnlyEnvironment\) \{\s*releasePhoneInputs\(\);/);
+});
+
+test('the engine turns touch look into free look at its own rate', () => {
+  const c = readFileSync(join(process.cwd(), 'engine/h2shared/in_sdl.c'), 'utf8');
+  const fn = c.slice(c.indexOf('static void IN_TouchLook (void)'), c.indexOf('static void IN_DiscardMove (void)'));
+  assert.match(fn, /cl\.viewangles\[YAW\] -= touch_lookspeed\.value \* dx;/);
+  assert.match(fn, /cl\.viewangles\[PITCH\] \+= \(m_pitch\.value < 0 \? -1\.0f : 1\.0f\) \* touch_lookspeed\.value \* dy;/);
+  assert.doesNotMatch(fn, /forwardmove/, 'a vertical drag must never walk the player');
+  const move = c.slice(c.indexOf('void IN_Move (usercmd_t *cmd)'), c.indexOf('void IN_Commands (void)'));
+  assert.doesNotMatch(move, /x \+= tx;/, 'touch deltas no longer ride the mouse path');
+  assert.match(move, /IN_TouchLook \(\);/);
+});
