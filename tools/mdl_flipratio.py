@@ -6,9 +6,11 @@ r_lerp_autodetect (engine/h2shared/gl_model.c, uhexen2-f807) decides per model
 whether frame interpolation is worth doing, by measuring the worst per-vertex
 displacement between poses that get blended, over the model's bbox diagonal.
 Flipbooks -- flames, torches, explosions whose "frames" are unrelated geometry
-sheets -- score near 1.0; real deforming animation scores low.  Above
-r_lerp_autodetect_threshold (default 0.35) the model gets MOD_NOLERP and its
-animation snaps instead of blending.
+sheets -- score near 1.0; real deforming animation scores low.  A pose pair
+above r_lerp_autodetect_threshold (default 0.35) snaps instead of blending; the
+rest of the model still blends (GitHub #94 -- it used to be the whole model,
+and still is for a model of standalone states with no animation runs).  The
+ratio printed here is the model's worst pair.
 
 Deciding whether a given model trips that needs no GPU and no person, only the
 pose data, so this computes the same number Mod_ComputeFlipbookRatio does and
@@ -191,7 +193,7 @@ def main(argv):
         rows.append((seq, allp, seam, name, len(m['frames']), m['numverts']))
     rows.sort(reverse=True)
 
-    print('r_lerp_autodetect_threshold = %.2f  (above it: MOD_NOLERP, animation snaps)\n' % THRESHOLD)
+    print('r_lerp_autodetect_threshold = %.2f  (above it: that pose pair snaps)\n' % THRESHOLD)
     hdr = '%-30s %7s' % ('model', 'ratio')
     if show_seams: hdr += ' %7s  %s' % ('w/seams', 'worst seam pair')
     print(hdr)

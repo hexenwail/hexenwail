@@ -804,13 +804,31 @@ typedef struct qmodel_s
 	/* Max (per-vertex peak displacement in world units, divided by the
 	 * model's bbox diagonal) across every pose pair that R_AliasResolveLerp
 	 * actually blends — intra-multi-pose-group adjacencies plus adjacent
-	 * single-pose-frame pairs.  Computed at load (Mod_ComputeFlipbookRatio)
-	 * and read by Mod_SetExtraFlags: ratios above r_lerp_autodetect_threshold
-	 * mean adjacent poses are unrelated geometry sheets (flipbook flames,
-	 * torches, waterfalls), not deformations of one mesh, so morph
-	 * interpolation smears them — MOD_NOLERP suppresses the blend.  Zero
-	 * for non-alias models or models with one pose.  uhexen2-f807. */
+	 * single-pose-frame pairs.  Computed at load (Mod_ComputeFlipbookRatio).
+	 * Ratios above r_lerp_autodetect_threshold mean the poses are unrelated
+	 * geometry sheets (flipbook flames, torches, waterfalls), not
+	 * deformations of one mesh, so morph interpolation smears them.  Shown
+	 * by `mcache`; the per-pair verdict below is what the draw uses
+	 * (GitHub #94).  Zero for non-alias models or models with one pose.
+	 * uhexen2-f807. */
 	float		flipbook_max_ratio;
+
+	/* The same measurement, kept per pair so one violent transition does
+	 * not cost the model its smoothness everywhere (GitHub #94).  For pose
+	 * P, lerp_next[P] is the pose Mod_ComputeFlipbookRatio measured it
+	 * blending into (-1 when none was) and lerp_ratio[P] that pair's ratio
+	 * in units of 1/10000, saturating.  R_AliasResolveLerp snaps exactly
+	 * the pairs over r_lerp_autodetect_threshold, read live, so the cvar
+	 * still tunes at runtime.  Poses index poseverts[], so MAXALIASFRAMES
+	 * bounds them. */
+	short		lerp_next[MAXALIASFRAMES];
+	unsigned short	lerp_ratio[MAXALIASFRAMES];
+	/* Measured in Mod_ComputeFlipbookRatio's second pass: the model has no
+	 * animation runs, only standalone states (a flipbook), and the QC may
+	 * jump between any two of them -- pairs nobody measured.  Such a model
+	 * keeps the whole-model verdict: over the threshold anywhere, it snaps
+	 * everywhere. */
+	qboolean	lerp_states_only;
 
 	/* True when this model is EF_HOLEY but its replacement skin carries
 	 * authored, graduated alpha rather than a binary cutout mask.
