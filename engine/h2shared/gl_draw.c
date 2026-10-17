@@ -131,6 +131,7 @@ static GLuint		char_menufonttexture;
 static int		char_batch_count;
 static GLuint		char_batch_tex;
 static float		char_batch_alpha = 1.0f;	/* per-quad alpha for the glyph batcher; see Draw_SetCharacterAlpha */
+static float		pic_alpha = 1.0f;	/* Draw_Pic / Draw_PicCropped / Draw_SubPicCropped; see Draw_SetPicAlpha */
 
 // Crosshair texture is a 32x32 alpha map with 8 levels of alpha.
 // The format is similar to an X11 pixmap, but not the same.
@@ -1526,6 +1527,44 @@ void Draw_BigCharacter (int x, int y, int num)
 
 
 /*
+================
+Draw_SetPicAlpha
+
+The alpha Draw_Pic, Draw_PicCropped and Draw_SubPicCropped (and so the
+TransPic forms) draw at; 1 is opaque.  Callers restore it to 1.  The status
+bar's scr_sbaralpha is what sets it (GitHub #83).  Unlike the glyph alpha it
+holds no blend state: each faded pic blends and scales the 2D alpha test for
+its own quad and puts both back, so the two cannot disagree about it.
+================
+*/
+void Draw_SetPicAlpha (float a)
+{
+	if (a < 0.0f) a = 0.0f;
+	else if (a > 1.0f) a = 1.0f;
+	pic_alpha = a;
+}
+
+/* Around one pic quad: blend it, and let its transparent texels still drop at
+ * the alpha test scaled to the fade (2D alpha-tests at 0.666, blend off). */
+static void Draw_PicAlphaBegin (void)
+{
+	if (pic_alpha < 1.0f)
+	{
+		R_SetBlend (true);
+		GL_SetAlphaThreshold (0.666f * pic_alpha);
+	}
+}
+
+static void Draw_PicAlphaEnd (void)
+{
+	if (pic_alpha < 1.0f)
+	{
+		R_SetBlend (false);
+		GL_SetAlphaThreshold (0.666f);
+	}
+}
+
+/*
 =============
 Draw_Pic
 =============
@@ -1542,7 +1581,7 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmColor4f (1, 1, 1, pic_alpha);
 	GL_ImmTexCoord2f (gl->sl, gl->tl);
 	GL_ImmVertex2f (x, y);
 	GL_ImmTexCoord2f (gl->sh, gl->tl);
@@ -1551,7 +1590,9 @@ void Draw_Pic (int x, int y, qpic_t *pic)
 	GL_ImmVertex2f (x+pic->width, y+pic->height);
 	GL_ImmTexCoord2f (gl->sl, gl->th);
 	GL_ImmVertex2f (x, y+pic->height);
+	Draw_PicAlphaBegin ();
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	Draw_PicAlphaEnd ();
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -1771,7 +1812,7 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmColor4f (1, 1, 1, pic_alpha);
 	GL_ImmTexCoord2f (gl->sl, tl);
 	GL_ImmVertex2f (x, y);
 	GL_ImmTexCoord2f (gl->sh, tl);
@@ -1780,7 +1821,9 @@ void Draw_PicCropped (int x, int y, qpic_t *pic)
 	GL_ImmVertex2f (x+pic->width, y+height);
 	GL_ImmTexCoord2f (gl->sl, th);
 	GL_ImmVertex2f (x, y+height);
+	Draw_PicAlphaBegin ();
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	Draw_PicAlphaEnd ();
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -1837,7 +1880,7 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	GL_ImmBegin();
-	GL_ImmColor4f (1, 1, 1, 1);
+	GL_ImmColor4f (1, 1, 1, pic_alpha);
 	GL_ImmTexCoord2f (gl->sl, tl);
 	GL_ImmVertex2f (x, y);
 	GL_ImmTexCoord2f (gl->sh, tl);
@@ -1846,7 +1889,9 @@ void Draw_SubPicCropped (int x, int y, int h, qpic_t *pic)
 	GL_ImmVertex2f (x+pic->width, y+height);
 	GL_ImmTexCoord2f (gl->sl, th);
 	GL_ImmVertex2f (x, y+height);
+	Draw_PicAlphaBegin ();
 	GL_ImmEnd (GL_QUADS, &gl_shader_2d);
+	Draw_PicAlphaEnd ();
 
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);

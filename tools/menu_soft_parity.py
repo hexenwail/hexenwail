@@ -168,6 +168,10 @@ def check_labels(text, prefix, members):
         return          # not every group keeps a label table
     brace = array.end() - 1
     body = text[brace:match_braces(text, brace)]
+    # An #if / #else pair fills ONE slot per build (gfx_labels' GFX_HUDTRANS
+    # names sbtrans on WEBSOFT and scr_sbaralpha elsewhere, GitHub #83), so
+    # only the first branch is counted.
+    body = re.sub(r'#else\b.*?#endif', '#endif', body, flags=re.S)
     entries = re.findall(
         r'(?:"(?:[^"\\]|\\.)*"|\bNULL\b)\s*,?\s*(?:/\*\s*(\w+)\s*\*/)?',
         body)

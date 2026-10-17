@@ -102,7 +102,14 @@ static float BarHeight;
 static float BarTargetHeight;
 static cvar_t BarSpeed = {"barspeed", "5", CVAR_NONE};
 static cvar_t DMMode = {"dm_mode", "1", CVAR_ARCHIVE};
-cvar_t sbtrans = {"sbtrans", "0", CVAR_ARCHIVE};
+cvar_t sbtrans = {"sbtrans", "0", CVAR_ARCHIVE};	/* the software renderer's levels */
+/* Ironwail's scr_sbaralpha, for the GL renderer, which never read sbtrans
+ * (only draw.c does).  The bottom bar only -- the bar, its top bumps, its
+ * numbers and the lower bar -- by the decision on GitHub #83: the edge ring and
+ * artifact indicators, the inventory strip, the deathmatch overlays and the
+ * minimal full-screen HUD stay opaque.  Default 1, not upstream's 0.75: Hexen
+ * II's bar is ornate art and has always been solid. */
+cvar_t scr_sbaralpha = {"scr_sbaralpha", "1", CVAR_ARCHIVE};
 static cvar_t dmtrans = {"dmtrans", "0", CVAR_ARCHIVE};
 static cvar_t hide_hud = {"hide_hud", "0", CVAR_NONE};
 
@@ -204,6 +211,7 @@ void Sbar_Init(void)
 
 	Cvar_RegisterVariable(&DMMode);
 	Cvar_RegisterVariable(&sbtrans);
+	Cvar_RegisterVariable(&scr_sbaralpha);
 	Cvar_RegisterVariable(&dmtrans);
 	Cvar_RegisterVariable(&BarSpeed);
 	Cvar_RegisterVariable(&hide_hud);
@@ -216,6 +224,27 @@ void Sbar_Init(void)
 // Sbar_Draw
 //
 //==========================================================================
+
+/* The bar's pics and glyphs at scr_sbaralpha, or back to opaque.  GL only:
+ * the software renderer has sbtrans, and its Draw_SetCharacterAlpha stipples,
+ * which would fade the bar's numbers but not its art.  GitHub #83. */
+static void Sbar_BarAlpha (qboolean on)
+{
+#if defined(GLQUAKE)
+	float	a = 1.0f;
+
+	if (on)
+	{
+		a = scr_sbaralpha.value;
+		if (a < 0.0f) a = 0.0f;
+		if (a > 1.0f) a = 1.0f;
+	}
+	Draw_SetPicAlpha (a);
+	Draw_SetCharacterAlpha (a);
+#else
+	(void) on;
+#endif
+}
 
 void Sbar_Draw(void)
 {
@@ -282,6 +311,7 @@ void Sbar_Draw(void)
 			BarHeight = BarTargetHeight;
 	}
 
+	Sbar_BarAlpha (true);
 	Sbar_DrawTransPic(0, -23, Draw_CachePic("gfx/topbumpl.lmp"));
 	Sbar_DrawTransPic(138, -8, Draw_CachePic("gfx/topbumpm.lmp"));
 	Sbar_DrawTransPic(269, -23, Draw_CachePic("gfx/topbumpr.lmp"));
@@ -291,7 +321,10 @@ void Sbar_Draw(void)
 
 #ifndef GLQUAKE
 	if (sb_updates >= vid.numpages)
+	{
+		Sbar_BarAlpha (false);
 		return;
+	}
 #endif
 
 //	if (BarHeight == BarTargetHeight)
@@ -302,6 +335,7 @@ void Sbar_Draw(void)
 
 	if (BarHeight < 0 && scr_viewsize.integer <= 120)
 	{
+		Sbar_BarAlpha (false);	/* the minimal HUD is not the bar */
 		SetChainPosition(cl.v.health, cl.v.max_health, true);
 		DrawFullScreenInfo();
 		return;
@@ -367,6 +401,7 @@ void Sbar_Draw(void)
 	{
 		DrawBarArtifactIcon(144, 3, cl.inv_selected);
 	}
+	Sbar_BarAlpha (false);
 }
 
 //==========================================================================
