@@ -3324,8 +3324,8 @@ static void Host_Game_f (void)
 	 * music, key-bind list.  Skipped entirely when running dedicated, which
 	 * initialised none of it -- Host_Init guards the matching VID_Init /
 	 * Draw_Init / S_Init / CL_Init block with the same test.  Draw_ReInit is
-	 * the one that used to be fatal: it pulls conchars, the loading disc and
-	 * backtile through FS_LoadZoneFile(..., Z_SECZONE), and Memory_Init only
+	 * the one that used to be fatal: it pulled conchars, the loading disc and
+	 * backtile through FS_LoadZoneFile(..., Z_SECZONE) (malloc since #126), and Memory_Init only
 	 * creates the secondary zone for a non-dedicated process, so every runtime
 	 * "game <dir>" on a dedicated server died on "Z_Malloc: Bad zone id 2".
 	 * uhexen2-jjmb. */

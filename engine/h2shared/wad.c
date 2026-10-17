@@ -71,9 +71,13 @@ void W_LoadWadFile (const char *filename)
 	int			i;
 	int			infotableofs;
 
+	/* From the C heap, not the 256 KB secondary zone: the file's own size
+	 * decides the allocation, and a mod free to ship a bigger gfx.wad must not
+	 * be able to Sys_Error the engine at startup by outgrowing the zone.
+	 * GitHub #126. */
 	if (wad_base)
-		Z_Free (wad_base);
-	wad_base = FS_LoadZoneFile (filename, Z_SECZONE, NULL);
+		free (wad_base);
+	wad_base = FS_LoadMallocFile (filename, NULL);
 	if (!wad_base)
 		Sys_Error ("%s: couldn't load %s", __thisfunc__, filename);
 

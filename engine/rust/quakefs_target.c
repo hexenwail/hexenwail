@@ -195,8 +195,8 @@ void QuakeFS_TargetClientClearState (void)
 
 /* quakefs.c:3239-3255 -- reload the client's view of the new mod.  Skipped
  * entirely when running dedicated, which initialised none of it; Draw_ReInit
- * is the one that used to be fatal, because it pulls the loading disc and
- * backtile through FS_LoadZoneFile (..., Z_SECZONE) and Memory_Init only
+ * is the one that used to be fatal, because it pulled the loading disc and
+ * backtile through FS_LoadZoneFile (..., Z_SECZONE) (malloc since #126) and Memory_Init only
  * creates the secondary zone for a non-dedicated process.  uhexen2-jjmb. */
 void QuakeFS_TargetClientReinit (void)
 {
