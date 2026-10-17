@@ -1,0 +1,64 @@
+#!/bin/sh
+# AppRun -- the Hexenwail AppImage's entry point (GitHub #173).
+#
+# The engine takes its basedir from the directory its executable is in, which
+# inside an AppImage is a read-only mount that holds no game data.  So:
+#
+#   1. game data beside the .AppImage file (data1/pak0.pak there) -> that
+#      directory is the basedir, exactly as the Linux zip is used: drop the
+#      file into your Hexen II folder and run it;
+#   2. otherwise the engine's user directory, ~/.hexen2, which it searches for
+#      paks on its own -- where the Flatpak keeps them too;
+#   3. neither -> offer the free 1997 demo through get_demo.sh (with zenity if
+#      the host has it), into ~/.hexen2.
+#
+# An explicit -basedir on the command line always wins.  `--get-demo [DIR]`
+# runs the demo fetch directly.
+
+HERE=$(dirname "$(readlink -f "$0")")
+BIN="$HERE/usr/bin/glhexen2"
+GETDEMO="$HERE/usr/bin/get_demo.sh"
+USERDATA="${HOME}/.hexen2"
+
+if [ "$1" = "--get-demo" ]; then
+	shift
+	exec "$GETDEMO" "${1:-$USERDATA}"
+fi
+
+for a in "$@"; do
+	case "$a" in
+	-basedir|-h|-help|--help|-v|-version|--version)
+		exec "$BIN" "$@" ;;
+	esac
+done
+
+BESIDE=""
+[ -n "$APPIMAGE" ] && BESIDE=$(dirname "$APPIMAGE")
+if [ -n "$BESIDE" ] && [ -f "$BESIDE/data1/pak0.pak" ]; then
+	exec "$BIN" -basedir "$BESIDE" "$@"
+fi
+
+if [ ! -f "$USERDATA/data1/pak0.pak" ]; then
+	msg="Hexen II game data was not found.
+
+If you own Hexen II, put this AppImage in your Hexen II folder (the one
+holding data1/), or copy pak0.pak and pak1.pak to:
+  $USERDATA/data1/
+
+Otherwise Hexenwail can download the free three-level demo Raven released
+in 1997 (13 MB) into $USERDATA."
+	if command -v zenity >/dev/null 2>&1; then
+		if zenity --question --title="Hexenwail — Game Data Missing" --text="$msg
+
+Download the demo now?" --ok-label="Download demo" --cancel-label="Quit" 2>/dev/null; then
+			mkdir -p "$USERDATA" && "$GETDEMO" "$USERDATA" 2>&1 |
+				zenity --progress --pulsate --auto-close --no-cancel \
+					--title="Hexenwail" --text="Downloading the Hexen II demo…" 2>/dev/null
+		fi
+	else
+		printf '%s\n\nRun this AppImage with --get-demo to fetch it.\n' "$msg" >&2
+	fi
+	[ -f "$USERDATA/data1/pak0.pak" ] || exit 1
+fi
+
+exec "$BIN" "$@"

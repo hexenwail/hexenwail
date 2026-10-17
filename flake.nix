@@ -1612,6 +1612,46 @@ EOF
 
             echo "Release bundle created in $out/release"
           '';
+
+          # AppImage: the release's linux-x86_64 tree in one runnable file
+          # (GitHub #173).  Built by hand rather than with appimagetool, which
+          # nixpkgs no longer carries: a type-2 AppImage is the AppImage
+          # runtime ELF followed by a squashfs of the AppDir, which is all
+          # appimagetool does.  The runtime is pinned to a tagged type2-runtime
+          # release ("continuous" moves, and would break the hash).
+          #
+          # The AppDir keeps the FHS layout the binary already relies on:
+          # usr/lib through its $ORIGIN rpath, and usr/share/hexenwail for the
+          # bundled gamecode (pr_edict.c looks in <exedir>/../share/hexenwail).
+          # appimage/AppRun decides the basedir; see the comment there.
+          appimage = let
+            rel = self.packages.${system}.release;
+            runtime = pkgs.fetchurl {
+              url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
+              sha256 = "0396xi3km1yd0z4329lbjxmv82ddc40gd0x8hca0ylcj7i28pjig";
+            };
+          in pkgs.runCommand "hexenwail-appimage-${version}" {
+            nativeBuildInputs = [ pkgs.squashfsTools ];
+            meta.platforms = [ "x86_64-linux" ];
+          } ''
+            app=$TMPDIR/AppDir
+            mkdir -p $app/usr
+            cp -rL ${rel}/release/linux-x86_64/bin $app/usr/
+            cp -rL ${rel}/release/linux-x86_64/lib $app/usr/
+            cp -rL ${rel}/release/linux-x86_64/share $app/usr/
+            chmod -R u+w $app
+            install -m755 ${rel}/release/linux-x86_64/get_demo.sh $app/usr/bin/get_demo.sh
+            install -m755 ${./appimage/AppRun} $app/AppRun
+            sed 's/^Exec=.*/Exec=AppRun/' ${./flatpak/io.github.hexenwail.hexenwail.desktop} \
+              > $app/io.github.hexenwail.hexenwail.desktop
+            install -m644 ${./engine/resource/hexen2.png} $app/io.github.hexenwail.hexenwail.png
+            ln -s io.github.hexenwail.hexenwail.png $app/.DirIcon
+
+            mksquashfs $app $TMPDIR/app.squashfs -root-owned -noappend -comp zstd -quiet
+            mkdir -p $out
+            cat ${runtime} $TMPDIR/app.squashfs > $out/hexenwail-${version}-x86_64.AppImage
+            chmod 755 $out/hexenwail-${version}-x86_64.AppImage
+          '';
         };
 
         # Development shell for building and testing
