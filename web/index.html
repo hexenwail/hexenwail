@@ -5,206 +5,276 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#2b2242">
-  <meta name="description" content="Installable offline-capable Hexenwail WebAssembly launcher for iPadOS and desktop browsers.">
-  <title>Hexenwail PWA</title>
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0809">
+  <meta name="description" content="Hexen II in your browser: Hexenwail, a modernized Hexen II engine, compiled to WebAssembly. Plays Raven's free 1997 demo, or your own copy of the game.">
+  <title>Hexenwail</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/icon-180.png">
   <style>
+    /* The page is the game: the view, one quiet line under it, and a drawer
+       with the reference and the settings.  Layout borrowed from quake-srp's
+       player page (github.com/terrapapagalli1516/quake-srp, web/index.html),
+       re-implemented here for Hexen II. */
     :root {
       color-scheme: dark;
       --safe-top: env(safe-area-inset-top, 0px);
       --safe-right: env(safe-area-inset-right, 0px);
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-left: env(safe-area-inset-left, 0px);
-      --chrome-bg: rgba(12, 10, 18, 0.94);
-      --panel-bg: rgba(24, 19, 37, 0.92);
-      --panel-border: rgba(255, 255, 255, 0.1);
-      --accent: #ccad63;
-      --text-dim: #c3bed5;
-      --ok: #8dd890;
-      --warn: #e8c26d;
-      --err: #ff7e7e;
-      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #0a0809;
+      --ink: #d4cdbd;
+      --dim: #908570;
+      --faint: #8c826f;
+      --gold: #b8954a;
+      --gold-hi: #dcb767;
+      --line: #2a2119;
+      --edge: #3b2e20;
+      --ok: #a6b77a;
+      --warn: #e0bd6a;
+      --err: #d98a72;
+      font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
     }
     * { box-sizing: border-box; }
     html, body {
       margin: 0;
-      min-height: 100%;
-      background: radial-gradient(circle at top, #2a2142 0%, #15111f 45%, #06070c 100%);
-      color: #f7f5fb;
+      background: var(--bg);
+      color: var(--ink);
       overscroll-behavior: none;
     }
+    ::selection { background: #7a5f24; color: var(--bg); }
+    [hidden] { display: none !important; }
+    code, kbd { font-family: inherit; }
+    code { color: var(--gold-hi); }
+    kbd { display: inline-block; min-width: 1.1em; padding: 1px 5px; margin: 0 1px;
+      border: 1px solid var(--edge); border-bottom-width: 2px; border-radius: 3px;
+      background: #1a1410; color: #ddd0b3; font-size: 11px; text-align: center; }
+
+    /* A column centred in the window: the two flexible spacers take whatever
+       height is left, none once the drawer makes the page taller than the
+       window.  A definite height (100dvh) under the minimum, so the stage is
+       sized by the window and never by the drawer's content: an auto-height
+       page once let a 2400px panel stretch the canvas below the fold
+       (uhexen2-o6js). */
     body {
-      /* A definite height, not merely a minimum.  The shell lives in a `1fr`
-         row, and an `auto` height body lets the launcher column's content --
-         about 2400px of cards -- size that row instead of the window.  The
-         canvas then grows with it, and the software renderer's centred 4:3
-         image lands hundreds of pixels below the fold (uhexen2-o6js).
-         100vh first for browsers without dvh. */
-      min-height: 100vh;
       height: 100dvh;
       min-height: 100dvh;
       padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
-      touch-action: pan-y;
-      -webkit-user-select: none;
-      user-select: none;
-      display: grid;
-      grid-template-rows: auto 1fr;
-    }
-    body[data-engine-state="running"][data-phone-mode="true"] {
-      width: 100vw;
-      height: 100dvh;
-      min-height: 100dvh;
-      overflow: hidden;
-      padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
-      grid-template-rows: 1fr;
-      touch-action: none;
-    }
-    body[data-engine-state="running"][data-phone-mode="true"] .topbar,
-    body[data-engine-state="running"][data-phone-mode="true"] #control-panel {
-      display: none;
-    }
-    body[data-engine-state="running"][data-phone-mode="true"] .shell {
-      display: block;
-      width: 100%;
-      height: 100%;
-      min-height: 0;
-    }
-    body[data-engine-state="running"][data-phone-mode="true"] .viewport {
-      width: 100%;
-      height: 100%;
-      min-height: 0;
-      overflow: hidden;
-      border-radius: 0;
-      touch-action: none;
-    }
-    .topbar {
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
       align-items: center;
-      justify-content: space-between;
-      gap: 0.75rem;
-      padding: 0.75rem 1rem;
-      background: var(--chrome-bg);
-      border-bottom: 1px solid var(--panel-border);
-      backdrop-filter: blur(14px);
-    }
-    .topbar h1 {
-      margin: 0;
-      font-size: 1rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    .topbar small { color: var(--text-dim); }
-    .shell {
-      display: grid;
-      grid-template-columns: minmax(18rem, 28rem) 1fr;
-      /* Pin the row to the shell's own height so #control-panel's overflow
-         has something to scroll against; an auto row would size to the
-         panel's content and take the canvas up with it. */
-      grid-template-rows: minmax(0, 1fr);
-      min-height: 0;
-    }
-    #control-panel {
-      background: var(--panel-bg);
-      border-right: 1px solid var(--panel-border);
-      padding: 1rem;
-      overflow: auto;
-      backdrop-filter: blur(10px);
-    }
-    .stack { display: grid; gap: 0.9rem; }
-    .card {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
-      padding: 1rem;
-    }
-    .card h2 {
-      margin: 0 0 0.55rem;
-      font-size: 0.95rem;
-    }
-    .card p, .card li, .card code, .card small {
-      color: var(--text-dim);
-      line-height: 1.45;
-    }
-    .buttons {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.6rem;
-    }
-    button {
-      appearance: none;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 999px;
-      padding: 0.75rem 1rem;
-      font: inherit;
-      color: white;
-      background: rgba(255, 255, 255, 0.08);
-      cursor: pointer;
-    }
-    button:hover { background: rgba(255, 255, 255, 0.14); }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-    button.primary { background: linear-gradient(135deg, #6e569b, #49376e); }
-    button.primary:hover { background: linear-gradient(135deg, #7b62ad, #53407e); }
-    #drop-zone {
-      min-height: 9rem;
-      display: grid;
-      place-items: center;
       text-align: center;
-      border: 2px dashed rgba(204, 173, 99, 0.45);
-      border-radius: 18px;
-      padding: 1rem;
-      background: rgba(204, 173, 99, 0.06);
+      touch-action: pan-y;
     }
-    #drop-zone[data-drag="true"] { background: rgba(204, 173, 99, 0.13); }
-    #status-panel[data-kind="error"] #status-text, #import-message[data-kind="error"] { color: var(--err); }
-    #import-message[data-kind="success"], #save-message[data-kind="success"] { color: var(--ok); }
-    #save-message[data-kind="error"] { color: var(--err); }
-    #status-panel[data-kind="warn"] #status-text { color: var(--warn); }
-    .muted { color: var(--text-dim); }
-    .runtime-log {
-      min-height: 6rem;
-      max-height: 14rem;
-      margin: 0;
-      overflow: auto;
-      padding: 0.7rem;
-      border-radius: 10px;
-      background: rgba(0, 0, 0, 0.42);
-      color: var(--text-dim);
-      font: 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      -webkit-user-select: text;
-      user-select: text;
-    }
-    .viewport {
+    body:has(#drawer:not([hidden])) { height: auto; }
+    body::before, body::after { content: ''; flex: 1 1 0; }
+    #stage { display: inline-block; margin-top: 16px; text-align: left; }
+
+    /* The view: the largest 4:3 box the window fits with the bar under it
+       still in view (--chrome-v: the top margin and the bar; --chrome-h: a
+       16px gutter each side), and never smaller than 640x480 on a desktop
+       window (the page scrolls instead).  The canvas fills it, and
+       resizeCanvasToViewport hands the engine that box at device pixels. */
+    #wrap.viewport {
+      --chrome-v: 84px;
+      --chrome-h: 34px;
       position: relative;
-      min-width: 0;
-      min-height: 0;
-      background: black;
+      display: block;
+      width: max(640px, min(100vw - var(--chrome-h), (100dvh - var(--chrome-v)) * 4 / 3));
+      aspect-ratio: 4 / 3;
+      background: #000;
+      border: 1px solid #2e2e2e;
+      overflow: hidden;
     }
     #canvas {
       display: block;
       width: 100%;
       height: 100%;
-      background: black;
+      background: #000;
       touch-action: none;
       outline: none;
+      cursor: crosshair;
     }
-    .canvas-hint {
+    /* Fullscreen takes the whole stage, so the chips and the touch controls
+       ride along; the engine fills the screen at its own aspect. */
+    #wrap.viewport:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; }
+    #wrap.viewport:-webkit-full-screen { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; }
+
+    /* The boot overlay: download progress, then the start prompt.  Gone while
+       the engine runs; back, saying so, if it stops. */
+    #overlay {
       position: absolute;
-      inset: auto 1rem 1rem 1rem;
-      z-index: 2;
-      padding: 0.7rem 0.85rem;
-      border-radius: 12px;
-      background: rgba(0, 0, 0, 0.62);
-      color: #f0eef6;
-      max-width: 34rem;
-      font-size: 0.92rem;
-      pointer-events: none;
+      inset: 0;
+      z-index: 4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      background: rgba(0, 0, 0, 0.55);
+      color: #eee;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
     }
-    body[data-engine-state="running"] .canvas-hint { display: none; }
+    body[data-engine-state="running"] #overlay { display: none; }
+    #boot { width: min(420px, 82%); }
+    #bootTitle { font-size: 14px; letter-spacing: 0.45em; text-indent: 0.45em; color: var(--gold-hi);
+      margin-bottom: 14px; text-align: center; }
+    #progress-text { color: #c4b89f; font-size: 13px; margin-bottom: 10px; min-height: 1.2em;
+      text-align: center; }
+    #bootBar { height: 10px; border: 1px solid var(--edge); background: #0a0806;
+      border-radius: 2px; overflow: hidden; }
+    #bootFill { height: 100%; width: 0%; background: linear-gradient(90deg, #7a5f24, #c9a14e);
+      transition: width 0.12s linear; }
+    #bootFill.indet { width: 40%; animation: sweep 1.1s linear infinite; }
+    @keyframes sweep { from { margin-left: -40%; } to { margin-left: 100%; } }
+    #bootFill.fail { background: #6e2a14; width: 100%; animation: none; }
+    #overlay[data-phase="ready"] #bootBar, #overlay[data-phase="stopped"] #bootBar { display: none; }
+    /* The start prompt is the launch button itself, dressed as a line of text,
+       so a click anywhere on the overlay and Enter both go through the one
+       handler that starts the engine. */
+    #launch-button {
+      margin-top: 18px;
+      font: inherit;
+      font-size: 17px;
+      color: #ece2cb;
+      text-shadow: 0 1px 6px #000;
+      background: none;
+      border: 0;
+      padding: 0 16px;
+      max-width: 100%;
+      cursor: pointer;
+    }
+    #launch-button:disabled { display: none; }
+    #launch-button:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+    #overlay-note { margin-top: 14px; max-width: min(560px, 92%); font-size: 12.5px; line-height: 1.5;
+      color: #a8935e; text-align: center; }
+    #overlay-note[data-kind="error"] { color: var(--err); }
+    /* The game choices: Hexen II, Portal of Praevus and any imported mod, as
+       buttons -- here before the start, and in the drawer's Game section. */
+    .games { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 18px;
+      padding: 0 16px; }
+    .games .game { display: inline-flex; align-items: center; justify-content: center;
+      min-height: 34px; padding: 0 14px; border: 1px solid rgba(184, 149, 74, 0.55); border-radius: 4px;
+      background: rgba(10, 8, 9, 0.82); color: var(--ink); font: inherit; font-size: 13px;
+      white-space: nowrap; cursor: pointer; }
+    .games .game:hover { border-color: var(--gold-hi); color: var(--gold-hi); }
+    .games .game.cur { background: rgba(184, 149, 74, 0.34); border-color: var(--gold-hi);
+      color: #fff2c0; font-weight: 600; cursor: default; }
+
+    /* Small chips inside the stage (so they ride along into fullscreen).
+       pointer-events: none -- the capture chip invites the very click that
+       locks the mouse, so it must not catch it. */
+    .chip { position: absolute; z-index: 3; padding: 4px 12px; border: 1px solid var(--edge);
+      border-radius: 3px; background: rgba(10, 8, 9, 0.85); color: #ddd0b3; font-size: 12px;
+      pointer-events: none; white-space: nowrap; opacity: 0; transition: opacity 0.25s; }
+    #pointer-lock-hint { top: 10px; right: 10px; }
+    body[data-engine-state="running"][data-pointer-locked="false"][data-touch-only="false"][data-phone-mode="false"] #pointer-lock-hint { opacity: 1; }
+
+    /* The bar under the view: wordmark, status, the text buttons.  width: 0
+       plus min-width: 100% keeps it exactly as wide as the view. */
+    #bar { position: relative; width: 0; min-width: 100%; display: flex; flex-wrap: wrap;
+      align-items: baseline; gap: 4px 18px; margin-top: 9px; font-size: 12.5px; }
+    #mark { font-size: 12.5px; font-weight: 600; letter-spacing: 0.35em; color: var(--gold-hi); }
+    #mark .sep { color: #7a5f24; }
+    #status-panel { flex: 1 1 12rem; min-width: 0; color: #a8935e; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; }
+    #status-panel[data-kind="error"] { color: var(--err); }
+    #status-panel[data-kind="warn"] { color: var(--warn); }
+    #barBtns { display: flex; gap: 16px; }
+    button.link, a.link { font: inherit; font-size: 12.5px; background: none; border: 0; padding: 0;
+      color: var(--dim); cursor: pointer; text-decoration: underline; text-decoration-color: transparent;
+      text-underline-offset: 3px; transition: color 0.15s, text-decoration-color 0.15s; }
+    button.link:hover, a.link:hover { color: var(--gold-hi); text-decoration-color: currentColor; }
+    button.link:focus-visible, a.link:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 2px; }
+    button.link:disabled { opacity: 0.45; cursor: not-allowed; text-decoration: none; }
+    button.link[aria-expanded="true"] { color: var(--gold-hi); }
+    .sico { height: 1.2em; width: auto; fill: none; stroke: currentColor; stroke-width: 1.4;
+      stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.28em; }
+    a.link .ico { height: 0.85em; width: auto; fill: currentColor; vertical-align: -0.05em; margin-right: 0.4em; }
+    #files-button .sico { margin-right: 0.4em; }
+    .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+    /* The files menu: what is loaded, adding and removing files.  Opens
+       upward over the view's right corner, anchored to the bar. */
+    #files-menu { position: absolute; right: 0; bottom: calc(100% + 12px); z-index: 9; width: max-content;
+      max-width: min(380px, 100%); padding: 12px; border: 1px solid var(--edge); border-radius: 4px;
+      background: rgba(10, 8, 9, 0.97); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7); text-align: left;
+      white-space: normal; }
+    #files-menu p { margin: 10px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--faint); }
+    #files-menu #requirements-text { margin-top: 0; font-size: 12.5px; color: var(--ink); }
+    .acts { margin: 10px 2px 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+    [data-kind="error"] { color: var(--err) !important; }
+    [data-kind="success"] { color: var(--ok) !important; }
+
+    /* The drawer: controls, console commands, the game and its files, saves,
+       touch controls, storage, the runtime log, and the credits. */
+    #drawer { width: 100%; max-width: 940px; margin: 22px auto 36px; padding: 0 16px; text-align: left; }
+    .cols { display: flex; gap: 30px; justify-content: center; flex-wrap: wrap; }
+    .col { flex: 1 1 0; min-width: 240px; max-width: 340px; }
+    #drawer h2 { font-size: 11px; font-weight: 600; letter-spacing: 0.25em; text-transform: uppercase;
+      color: var(--gold); margin: 0 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+    #drawer section { margin-top: 26px; }
+    #drawer p, #drawer li, #drawer small { font-size: 12.5px; line-height: 1.55; color: var(--dim); }
+    .keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 12.5px;
+      color: var(--dim); align-items: baseline; }
+    .keys .k { text-align: right; color: var(--ink); white-space: nowrap; }
+    details summary { cursor: pointer; color: var(--ink); font-size: 12.5px; }
+    details summary:hover { color: var(--gold-hi); }
+    .congrid { display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; margin: 10px 0 4px 8px;
+      font-size: 12.5px; color: var(--dim); }
+    label.setting { display: grid; gap: 0.35rem; margin: 0.55rem 0; font-size: 12.5px; color: var(--dim); }
+    select, input[type="range"] { font: inherit; font-size: 12.5px; color: var(--ink); background: #15100c;
+      border: 1px solid var(--edge); border-radius: 3px; padding: 0.3rem 0.45rem; }
+    .runtime-log { min-height: 6rem; max-height: 16rem; margin: 8px 0 0; overflow: auto; padding: 0.7rem;
+      border: 1px solid var(--line); border-radius: 3px; background: #050404; color: var(--dim);
+      font: 0.74rem/1.4 inherit; white-space: pre-wrap; overflow-wrap: anywhere;
+      -webkit-user-select: text; user-select: text; }
+    .aside { max-width: 680px; margin: 14px auto 0; font-size: 12px !important; color: var(--faint) !important; }
+    #dropHint { position: fixed; inset: 10px; z-index: 20; pointer-events: none; display: flex;
+      align-items: center; justify-content: center; border: 2px dashed var(--gold); border-radius: 6px;
+      background: rgba(10, 8, 9, 0.75); color: var(--gold-hi); font-size: 15px; }
+    input[type="file"] { display: none; }
+
+    /* Buttons inside the touch layer and its overlay keep a solid look. */
+    .phone-top-button, .phone-button, .phone-overlay-card button {
+      appearance: none; font: inherit; color: #fff; cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 999px;
+      padding: 0.6rem 0.9rem; background: rgba(255, 255, 255, 0.08); }
+    .phone-overlay-card .buttons { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .phone-overlay-card p, .phone-overlay-card li { color: var(--dim); font-size: 13px; }
+
+    /* A phone playing: the stage is the whole screen, nothing else shows. */
+    body[data-engine-state="running"][data-phone-mode="true"] {
+      width: 100vw;
+      height: 100dvh;
+      min-height: 100dvh;
+      overflow: hidden;
+      padding: 0;
+      touch-action: none;
+    }
+    body[data-engine-state="running"][data-phone-mode="true"]::before,
+    body[data-engine-state="running"][data-phone-mode="true"]::after,
+    body[data-engine-state="running"][data-phone-mode="true"] #bar,
+    body[data-engine-state="running"][data-phone-mode="true"] #drawer { display: none !important; }
+    body[data-engine-state="running"][data-phone-mode="true"] #stage { margin: 0; width: 100%; height: 100%; }
+    body[data-engine-state="running"][data-phone-mode="true"] #wrap.viewport {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      aspect-ratio: auto;
+      border: 0;
+      touch-action: none;
+    }
+
+    /* A narrow window: shrink the 4:3 box so the page never breaks. */
+    @media (max-width: 699px) {
+      #wrap.viewport { width: calc(100vw - 32px); }
+      #launch-button { font-size: 14px; }
+      .keys .k { text-align: left; }
+    }
     .phone-top-button {
       position: absolute;
       top: max(0.75rem, var(--safe-top));
@@ -359,26 +429,6 @@
     }
     .phone-overlay-card h2 { margin-top: 0; }
     .phone-overlay-card ul { margin-bottom: 1rem; }
-    input[type="file"] { display: none; }
-    select, input[type="range"] {
-      color: #fff;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 999px;
-      padding: 0.5rem 0.7rem;
-    }
-    label.setting {
-      display: grid;
-      gap: 0.35rem;
-      margin: 0.55rem 0;
-      color: var(--text-dim);
-    }
-    ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    @media (max-width: 1024px) {
-      .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(18rem, 1fr); }
-      #control-panel { border-right: 0; border-bottom: 1px solid var(--panel-border); }
-    }
   </style>
   <script>
     window.__HEXENWAIL_EMSCRIPTEN_SCRIPT_EMBEDDED = false;
@@ -409,128 +459,21 @@
     };
   </script>
 </head>
-<body data-engine-state="ready">
-  <header class="topbar">
-    <div>
-      <h1>Hexenwail PWA</h1>
-      <small>Install once, import your legal game data locally, then play offline.</small>
-    </div>
-    <small id="offline-text">Offline shell not installed yet.</small>
-  </header>
-  <main class="shell">
-    <aside id="control-panel">
-      <div class="stack">
-        <section class="card">
-          <h2>Status</h2>
-          <div id="status-panel" data-kind="info">
-            <div id="status-text">Preparing launcher…</div>
-            <small id="progress-text" class="muted">No imported assets yet.</small>
-          </div>
-        </section>
-        <section class="card">
-          <h2>Runtime log</h2>
-          <pre id="runtime-log" class="runtime-log" role="log" aria-live="polite">Waiting for launcher output…</pre>
-        </section>
-        <section class="card">
-          <h2>Import Hexen II assets</h2>
-          <p id="requirements-text">Required: data1/pak0.pak from a legal Hexen II installation. The demo runs on pak0.pak alone; the full game also needs data1/pak1.pak.</p>
-          <!-- One grid item: #drop-zone is a centering grid, so unwrapped inline
-               children would each become a row of their own. -->
-          <div id="drop-zone"><span>Drop <code>.pak</code>, <code>.dat</code>, <code>.ogg</code>, <code>.sf2</code> (MIDI SoundFont), or <code>.zip</code> files here.</span></div>
-          <div class="buttons">
-            <button id="import-button" class="primary">Choose files</button>
-            <button id="directory-button">Choose folder</button>
-            <button id="demo-button" hidden>Get the free demo (13 MB)</button>
-            <button id="clear-button">Clear imported data &amp; saves</button>
-          </div>
-          <p id="demo-note">No copy of the game? “Get the free demo” downloads Raven's November 1997 three-level demo from archive.org, checks it against known file hashes, and installs it here. Hexenwail hosts no game data of its own.</p>
-          <input id="file-input" type="file" multiple accept=".pak,.dat,.ogg,.sf2,.zip,application/zip">
-          <input id="directory-input" type="file" webkitdirectory directory multiple>
-          <small id="import-message" class="muted"></small>
-          <small id="rejected-list" class="muted"></small>
-        </section>
-        <section class="card">
-          <h2>Saves &amp; Backup</h2>
-          <p>Save bundles contain only game saves, never PAKs, music, or other commercial game data.</p>
-          <div class="buttons">
-            <button id="export-saves-button">Export saves</button>
-            <button id="import-saves-button">Import saves</button>
-            <select id="save-import-mode" aria-label="Save import mode">
-              <option value="merge">Merge saves</option>
-              <option value="replace">Replace saves</option>
-            </select>
-          </div>
-          <input id="save-file-input" type="file" accept=".hexenwail-save.zip,.zip,application/zip">
-          <small id="save-message" class="muted">Export a compact local backup to Files or iCloud Drive.</small>
-        </section>
-        <section class="card">
-          <h2>Mods</h2>
-          <p id="mod-requirements">No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game &lt;folder&gt;; “Import mod .zip” does the same for a mod as it was downloaded.</p>
-          <label class="setting">Active mod
-            <select id="mod-select" aria-label="Active mod" disabled>
-              <option value="">None (Hexen II)</option>
-            </select>
-          </label>
-          <div class="buttons">
-            <button id="mod-import-button">Import mod folder</button>
-            <button id="mod-zip-button">Import mod .zip</button>
-            <button id="mod-remove-button" disabled>Remove mod</button>
-          </div>
-          <input id="mod-input" type="file" webkitdirectory directory multiple>
-          <input id="mod-zip-input" type="file" accept=".zip,application/zip">
-          <small id="mod-message" class="muted"></small>
-          <small id="mod-rejected-list" class="muted"></small>
-        </section>
-        <section class="card">
-          <h2>Launch</h2>
-          <div class="buttons">
-            <button id="launch-button" class="primary" disabled>Import pak0.pak first</button>
-            <button id="exit-button" disabled>Exit to launcher</button>
-            <button id="fullscreen-button">Request fullscreen</button>
-          </div>
-          <small id="pointer-lock-hint" class="muted">Tap/click the canvas after launch to focus keyboard input and request mouse capture where supported.</small>
-        </section>
-        <section class="card">
-          <h2>Phone controls</h2>
-          <p id="phone-hint">On iPhone, start the game then rotate to landscape. The left pad moves, the right side looks, and buttons attack, jump, use, switch weapons, and open the menu.</p>
-          <label class="setting">Touch controls
-            <select id="touch-controls-setting">
-              <option value="auto">Auto on phones</option>
-              <option value="on">Always show</option>
-              <option value="off">Off</option>
-            </select>
-          </label>
-          <label class="setting">Handedness
-            <select id="handedness-setting">
-              <option value="right">Move left / buttons right</option>
-              <option value="left">Move right / buttons left</option>
-            </select>
-          </label>
-          <label class="setting">Look sensitivity
-            <input id="look-sensitivity-setting" type="range" min="0.5" max="2" step="0.1" value="1">
-          </label>
-        </section>
-        <section class="card">
-          <h2>Storage</h2>
-          <small id="storage-backend-text" class="muted">Storage backend: probing…</small><br>
-          <small id="storage-text" class="muted">Browser storage estimate unavailable.</small><br>
-          <small class="muted">Save games are written by the engine under your imported <code>data1/</code> folder and are synced to persistent browser storage automatically (periodically during play, and when you switch away or close the tab). "Clear imported data &amp; saves" deletes both.</small>
-        </section>
-        <section class="card">
-          <h2>Notes for iPadOS</h2>
-          <ul>
-            <li>Install via Safari → Share → <strong>Add to Home Screen</strong>.</li>
-            <li>Pointer Lock is currently unavailable on iPadOS Safari; external keyboards and mice still help.</li>
-            <li>Standalone mode is the practical target on iPadOS; it is close to fullscreen but still obeys system safe areas.</li>
-            <li>Updates install when the launcher opens or returns to the foreground. Imported game data and saves are preserved.</li>
-            <li>Storage persistence is best-effort; avoid clearing Safari website data for this app, and periodically confirm persistence in the Storage panel above.</li>
-          </ul>
-        </section>
-      </div>
-    </aside>
-    <section class="viewport">
+<body data-engine-state="ready" data-pointer-locked="false">
+  <main id="stage">
+    <div id="wrap" class="viewport">
       <canvas id="canvas" tabindex="0" aria-label="Hexenwail game canvas"></canvas>
-      <div class="canvas-hint">Tap/click the canvas to focus input. On platforms without Pointer Lock (notably iPadOS Safari), mouselook remains limited.</div>
+      <div id="overlay" data-phase="boot">
+        <div id="boot">
+          <div id="bootTitle">HEXENWAIL</div>
+          <div id="progress-text">loading…</div>
+          <div id="bootBar"><div id="bootFill" class="indet"></div></div>
+        </div>
+        <button id="launch-button" type="button" disabled>loading…</button>
+        <div id="overlay-note" hidden></div>
+        <div id="game-picker" class="games" hidden></div>
+      </div>
+      <div id="pointer-lock-hint" class="chip">click to capture the mouse</div>
       <button id="phone-menu-button" class="phone-top-button" type="button" aria-label="Open phone controls menu">☰</button>
       <div id="phone-controls" class="phone-controls" aria-label="Touch game controls">
         <div class="phone-look" data-phone-action="look" aria-label="Drag to look"></div>
@@ -558,8 +501,161 @@
           </div>
         </div>
       </div>
-    </section>
+    </div>
+    <div id="bar">
+      <span id="mark">HEXEN<span class="sep">·</span>WAIL</span>
+      <span id="status-panel" data-kind="info"><span id="status-text">loading…</span></span>
+      <span id="barBtns">
+        <button id="fullscreen-button" class="link" type="button" title="fullscreen"><svg class="sico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg><span class="vh">fullscreen</span></button>
+        <button id="keys-button" class="link" type="button" aria-expanded="false" aria-controls="drawer" title="keys, console commands, your files and settings"><svg class="sico" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.25" y="3.75" width="13.5" height="8.5" rx="1.5"/><path d="M4 6.75h.01M6.67 6.75h.01M9.33 6.75h.01M12 6.75h.01M5 9.5h6"/></svg><span class="vh">keys and settings</span></button>
+        <span id="files-ctl"><button id="files-button" class="link" type="button" aria-expanded="false" aria-controls="files-menu" title="your own Hexen II files: pak1.pak for the full game, portals/pak3.pak for the mission pack. They stay in this browser"><svg class="sico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 3.25h4.25l1.5 1.75h6.75v7.75H1.75z"/></svg>files</button>
+          <div id="files-menu" hidden>
+            <p id="requirements-text">Checking for game data…</p>
+            <div class="acts">
+              <button id="import-button" class="link" type="button">add files</button>
+              <button id="directory-button" class="link" type="button">add a folder</button>
+              <button id="demo-button" class="link" type="button" hidden>get the free demo (13 MB)</button>
+            </div>
+            <p id="demo-note" hidden>The demo is Raven's November 1997 three-level Hexen II demo, fetched from archive.org and checked against known file hashes before it is installed. Hexenwail hosts no game data of its own.</p>
+            <p>Own Hexen II? Add your copy's <code>data1/pak0.pak</code> and <code>pak1.pak</code> for the full game, <code>portals/pak3.pak</code> for Portal of Praevus, music <code>.ogg</code> files, a <code>.sf2</code> SoundFont, or a <code>.zip</code> of any of these. Or drop them anywhere on this page. Everything stays in this browser.</p>
+            <p id="import-message"></p>
+            <p id="rejected-list"></p>
+            <div class="acts">
+              <button id="exit-button" class="link" type="button" disabled>stop &amp; sync</button>
+              <button id="clear-button" class="link" type="button">remove all files &amp; saves</button>
+            </div>
+            <input id="file-input" type="file" multiple accept=".pak,.dat,.ogg,.sf2,.zip,application/zip">
+            <input id="directory-input" type="file" webkitdirectory directory multiple>
+          </div>
+        </span>
+        <a class="link" href="https://github.com/hexenwail/hexenwail" target="_blank" rel="noopener" title="the source code, on GitHub"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>source</a>
+      </span>
+    </div>
   </main>
+
+  <div id="drawer" hidden>
+    <div class="cols">
+      <div class="col">
+        <h2>Move</h2>
+        <div class="keys">
+          <span class="k"><kbd>↑</kbd><kbd>↓</kbd></span><span>forward / back</span>
+          <span class="k"><kbd>←</kbd><kbd>→</kbd></span><span>turn (<kbd>Alt</kbd> to strafe)</span>
+          <span class="k"><kbd>,</kbd><kbd>.</kbd></span><span>strafe left / right</span>
+          <span class="k">mouse</span><span>look (click the view to capture it); right button walks forward</span>
+          <span class="k"><kbd>/</kbd></span><span>jump</span>
+          <span class="k"><kbd>Space</kbd></span><span>crouch</span>
+          <span class="k"><kbd>D</kbd> <kbd>C</kbd></span><span>swim / fly up, down</span>
+          <span class="k"><kbd>Shift</kbd></span><span>run</span>
+          <span class="k">rebind</span><span>Options, Customize Controls. These are Raven's 1997 defaults</span>
+        </div>
+      </div>
+      <div class="col">
+        <h2>Fight</h2>
+        <div class="keys">
+          <span class="k">click, <kbd>Ctrl</kbd></span><span>attack</span>
+          <span class="k"><kbd>1</kbd>–<kbd>4</kbd></span><span>select weapon</span>
+          <span class="k"><kbd>[</kbd><kbd>]</kbd></span><span>inventory left / right</span>
+          <span class="k"><kbd>Enter</kbd></span><span>use the selected item</span>
+          <span class="k"><kbd>\</kbd></span><span>drop the selected item</span>
+          <span class="k"><kbd>Tab</kbd></span><span>hold for your stats and inventory</span>
+        </div>
+      </div>
+      <div class="col">
+        <h2>Interface</h2>
+        <div class="keys">
+          <span class="k"><kbd>Esc</kbd></span><span>menu / back. With the mouse captured, the first <kbd>Esc</kbd> releases it</span>
+          <span class="k"><kbd>F6</kbd> <kbd>F9</kbd></span><span>quicksave / quickload (<kbd>F2</kbd>/<kbd>F3</kbd> the Save/Load screens, <kbd>F4</kbd> Options)</span>
+          <span class="k"><kbd>-</kbd><kbd>=</kbd></span><span>screen size down / up</span>
+          <span class="k"><kbd>~</kbd></span><span>console (below)</span>
+          <span class="k">game</span><span>with Portal of Praevus or a mod in your files: pick it on the start screen, or under Game below</span>
+        </div>
+      </div>
+    </div>
+
+    <section>
+      <details>
+        <summary>console commands: cheats and level select (press <kbd>~</kbd>)</summary>
+        <div class="congrid">
+          <code>god</code><span>invulnerability</span>
+          <code>noclip</code><span>walk through walls</span>
+          <code>impulse 9</code><span>all weapons and full mana (below Nightmare skill)</span>
+          <code>impulse 43</code><span>everything: weapons, mana and every inventory item (below Nightmare)</span>
+          <code>map demo1</code><span>jump to a level: the demo has <code>demo1</code>, <code>demo2</code>, <code>demo3</code></span>
+          <code>kill</code><span>respawn</span>
+          <code>r_softemu 1</code><span>the look of the 1997 software renderer</span>
+        </div>
+      </details>
+    </section>
+
+    <div class="cols">
+      <section class="col">
+        <h2>Game</h2>
+        <p id="mod-requirements">No mods imported yet. “Import mod folder” stores a folder under its own name and launches the engine with -game &lt;folder&gt;; “Import mod .zip” does the same for a mod as it was downloaded.</p>
+        <label class="setting">Play
+          <select id="mod-select" aria-label="Active mod" disabled>
+            <option value="">None (Hexen II)</option>
+          </select>
+        </label>
+        <div class="acts">
+          <button id="mod-import-button" class="link">Import mod folder</button>
+          <button id="mod-zip-button" class="link">Import mod .zip</button>
+          <button id="mod-remove-button" class="link" disabled>Remove mod</button>
+        </div>
+        <input id="mod-input" type="file" webkitdirectory directory multiple>
+        <input id="mod-zip-input" type="file" accept=".zip,application/zip">
+        <p id="mod-message"></p>
+        <p id="mod-rejected-list"></p>
+      </section>
+      <section class="col">
+        <h2>Saves</h2>
+        <p>A save bundle holds your saved games only, never the game's own files.</p>
+        <div class="acts">
+          <button id="export-saves-button" class="link">export saves</button>
+          <button id="import-saves-button" class="link">import saves</button>
+          <select id="save-import-mode" aria-label="Save import mode">
+            <option value="merge">merge</option>
+            <option value="replace">replace</option>
+          </select>
+        </div>
+        <input id="save-file-input" type="file" accept=".hexenwail-save.zip,.zip,application/zip">
+        <p id="save-message">Saves sync to this browser's storage as you play.</p>
+      </section>
+      <section class="col">
+        <h2>Touch</h2>
+        <p id="phone-hint">On a phone, start the game and turn it sideways. The left pad moves, the right side looks, and the buttons attack, jump, use and change weapons.</p>
+        <label class="setting">Touch controls
+          <select id="touch-controls-setting">
+            <option value="auto">Auto on phones</option>
+            <option value="on">Always show</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label class="setting">Handedness
+          <select id="handedness-setting">
+            <option value="right">Move left / buttons right</option>
+            <option value="left">Move right / buttons left</option>
+          </select>
+        </label>
+        <label class="setting">Look sensitivity
+          <input id="look-sensitivity-setting" type="range" min="0.5" max="2" step="0.1" value="1">
+        </label>
+      </section>
+    </div>
+
+    <section>
+      <h2>Storage and diagnostics</h2>
+      <p><small id="storage-backend-text">Storage backend: probing…</small><br>
+        <small id="storage-text">Browser storage estimate unavailable.</small><br>
+        <small id="offline-text">Offline shell not installed yet.</small></p>
+      <details>
+        <summary>runtime log</summary>
+        <pre id="runtime-log" class="runtime-log" role="log" aria-live="polite">Waiting for launcher output…</pre>
+      </details>
+    </section>
+
+    <p class="aside">Hexenwail is a modernized Hexen II engine, built from Raven Software's GPL source, compiled to WebAssembly and rendered with WebGL2 in your browser. With no files of your own it plays Raven's free three-level demo of 1997. Install it from the browser's menu (on iPad, Share, Add to Home Screen) and it runs offline. Hexen II is a trademark of its owners; Hexenwail is not affiliated with or endorsed by them. <a class="link" href="https://github.com/hexenwail/hexenwail" target="_blank" rel="noopener">Source on GitHub</a>.</p>
+  </div>
+  <div id="dropHint" hidden>drop your Hexen II files: pak0.pak, pak1.pak, the mission pack's pak3.pak, music, a SoundFont, or a .zip</div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

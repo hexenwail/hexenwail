@@ -1608,6 +1608,19 @@ static qboolean VID_SetMode (int modenum)
 	 * 640x480 corner of what the engine believed was 1024x768, and
 	 * `screenshot` read back the whole of it, garbage included.  Headless
 	 * runs stay windowed.  GitHub #401. */
+#ifdef __EMSCRIPTEN__
+	/* In the browser the page owns the canvas: its size, through
+	 * Hexenwail_ResizeCanvas, and fullscreen, on the stage element that also
+	 * carries the touch controls.  SDL3's Emscripten backend implements a
+	 * fullscreen window as "fill document" -- it moves the canvas to <body>,
+	 * fixes it over the whole window and hides every other element -- which
+	 * took the page's bar and drawer away for as long as the game ran. */
+	if (vid_config_fscr.integer != 0)
+	{
+		Con_SafePrintf ("browser: the page owns fullscreen; running windowed\n");
+	}
+	else
+#endif
 	if (vid_config_fscr.integer != 0 && SDL_GetCurrentVideoDriver () &&
 	    !strcmp (SDL_GetCurrentVideoDriver (), "offscreen"))
 	{
@@ -3288,6 +3301,18 @@ void VID_ToggleFullscreen (void)
 	 * Full mode changes (windowed/borderless/exclusive) go through VID_Restart_f. */
 
 	if (!window) return;
+#ifdef __EMSCRIPTEN__
+	/* The page owns fullscreen (see VID_SetMode); ask it, rather than have
+	 * SDL fill the document.  A toggle of the page's real state, not a set
+	 * from vid_menu_fs: Alt+Enter arrives here without touching it, and the
+	 * browser's own Esc leaves fullscreen without telling the engine.
+	 * web/app.js defines the hook. */
+	EM_ASM({
+		if (Module.hexenwailToggleFullscreen)
+			Module.hexenwailToggleFullscreen();
+	});
+	return;
+#endif
 	if (!fs_toggle_works)
 		return;
 

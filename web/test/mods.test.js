@@ -237,7 +237,7 @@ test('planModZipImport refuses what it cannot install as one mod', () => {
 test('the launcher offers a mod .zip import beside the folder import', () => {
   const html = readFileSync(join(process.cwd(), 'web/index.html'), 'utf8');
   const app = readFileSync(join(process.cwd(), 'web/app.js'), 'utf8');
-  assert.match(html, /<button id="mod-zip-button">Import mod \.zip<\/button>/);
+  assert.match(html, /<button id="mod-zip-button"[^>]*>Import mod \.zip<\/button>/);
   assert.match(html, /<input id="mod-zip-input" type="file" accept="\.zip,application\/zip">/);
   assert.match(app, /ui\.modZipInput\?\.addEventListener\('change'[\s\S]*?handleModZipImport\(/);
   assert.match(app, /planModZipImport\(extracted\.map\(\(entry\) => entry\.name\), file\.name\)/);

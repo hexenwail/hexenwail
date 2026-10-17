@@ -15,7 +15,7 @@ Hexenwail does *not* include any original game assets; a valid copy of Hexen II 
 
 ### Just want to try it?
 
-**[Play it in your browser](https://hexenwail.github.io/hexenwail/)** — nothing to install. The launcher fetches Raven's free November 1997 three-level demo (13 MB, from archive.org) on one click, or you can import your own `data1` for the full game. It keeps working offline after the first load and installs to the home screen on iOS and Android.
+**[Play it in your browser](https://hexenwail.github.io/hexenwail/)** — nothing to install. The page fetches Raven's free November 1997 three-level demo (13 MB, from archive.org) on your first visit and drops you at the start prompt; add your own `data1` (the **files** button, or drop it on the page) for the full game. It keeps working offline after the first load and installs to the home screen on iOS and Android.
 
 The free three-level demo Raven released in November 1997 runs on Hexenwail, and a fetch helper ships beside the executable in every release. Unpack the release, then from that directory:
 
