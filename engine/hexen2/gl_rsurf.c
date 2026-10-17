@@ -1730,8 +1730,10 @@ void R_DrawWaterSurfaces (int phase)
 
 		/* Only NULL the chain for textures we actually drained — the
 		 * phase-gated skips above leave their chains intact for the
-		 * companion phase to process. */
-		t->texturechain = NULL;
+		 * companion phase to process -- and not on the r_oit 2 moment
+		 * pass, which is drawn again (GitHub #87). */
+		if (!OIT_KeepChains ())
+			t->texturechain = NULL;
 	}
 
 	GL_ImmColor4f (1,1,1,1);

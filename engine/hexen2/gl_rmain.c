@@ -7920,14 +7920,21 @@ void R_RenderView (void)
 
 	OIT_BeginTranslucency();
 
-	R_DrawParticles ();
+	/* Once, or twice under r_oit 2: moment-based OIT draws every translucent
+	 * into its moment targets and then again into the composite
+	 * (OIT_NextPass).  Nothing here may consume what it draws on the first
+	 * of two passes; see OIT_KeepChains.  GitHub #87. */
+	do
+	{
+		R_DrawParticles ();
 
-	R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
+		R_DrawTransEntitiesOnList (r_viewleaf->contents == CONTENTS_EMPTY); // This restores the depth mask
 
-	R_DrawWaterSurfaces (WATER_PHASE_TRANSLUCENT);
-	if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
+		R_DrawWaterSurfaces (WATER_PHASE_TRANSLUCENT);
+		if (r_speeds.integer >= 2) R_ProfileTimestamp(RPROF_TRANS);
 
-	R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
+		R_DrawTransEntitiesOnList (r_viewleaf->contents != CONTENTS_EMPTY);
+	} while (OIT_NextPass ());
 
 	OIT_EndTranslucency(GL_GetSceneFBO());
 
