@@ -162,6 +162,7 @@ static GLint	pp_loc_mvp;
 static GLint	pp_loc_softemu;
 static GLint	pp_loc_dither;
 static GLint	pp_loc_paletteLUT;
+static GLint	pp_loc_lutmax;
 static GLint	pp_loc_scale;
 static GLint	pp_loc_waterwarp;
 static GLint	pp_loc_time;
@@ -177,8 +178,19 @@ static GLint	pp_loc_bloom_strength;
  * colour is baked rather than looked up from a palette uniform, and why RGBA
  * and not RGB (rgba8 is an image-storable format; rgb8 is not, and the compute
  * builder writes into this same texture). */
-#define PP_LUT_DIM	32
+/* The nearest-colour LUT is Ironwail's 128^3 (GitHub #80): at 32^3 the grid
+ * quantised colour before the palette match even ran, a floor under every
+ * metric.  The CPU builder that the ES / WebGL2 tier depends on searches a
+ * sorted palette with an exact lower bound instead of all 255 entries, which
+ * is what makes 128^3 affordable there (PP_BuildPaletteLUT_CPU).
+ *
+ * The colormap LUT (r_softemu 3) stays 32^3: its candidates depend on the
+ * target's luma, so it has no such bound, and 128^3 would be 537M
+ * evaluations.  The shader is told which grid it is reading (lutmax). */
+#define PP_LUT_DIM	128
 #define PP_LUT_TEXELS	(PP_LUT_DIM * PP_LUT_DIM * PP_LUT_DIM)
+#define PP_CMAP_DIM	32
+#define PP_CMAP_TEXELS	(PP_CMAP_DIM * PP_CMAP_DIM * PP_CMAP_DIM)
 
 /* Colour-distance functions the nearest-colour search can minimise, in
  * upstream's order -- r_softemu_metric indexes this directly, and the compute
@@ -860,6 +872,7 @@ static const char pp_frag_src[] =
 	"uniform int softemu;\n"
 	"uniform float dither;\n"
 	"uniform sampler3D paletteLUT;\n"
+	"uniform float lutmax;\n"	/* grid size - 1 of the bound LUT (#80) */
 	"uniform float scale;\n"
 	"uniform float waterwarp;\n"
 	"uniform float time;\n"
@@ -952,7 +965,7 @@ static const char pp_frag_src[] =
 	"            float d = bayer16(ivec2(gl_FragCoord.xy * scale));\n"
 	"            c += d * dither / 16.0;\n"
 	"        }\n"
-	"        ivec3 idx = ivec3(clamp(c, 0.0, 1.0) * 31.0 + 0.5);\n"
+	"        ivec3 idx = ivec3(clamp(c, 0.0, 1.0) * lutmax + 0.5);\n"
 	"        color.rgb = texelFetch(paletteLUT, idx, 0).rgb;\n"
 	"    }\n"
 	"\n"
@@ -1024,6 +1037,7 @@ static qboolean PP_InitShader (void)
 	pp_loc_softemu = glGetUniformLocation_fp(pp_program, "softemu");
 	pp_loc_dither = glGetUniformLocation_fp(pp_program, "dither");
 	pp_loc_paletteLUT = glGetUniformLocation_fp(pp_program, "paletteLUT");
+	pp_loc_lutmax = glGetUniformLocation_fp(pp_program, "lutmax");
 	pp_loc_scale = glGetUniformLocation_fp(pp_program, "scale");
 	pp_loc_waterwarp = glGetUniformLocation_fp(pp_program, "waterwarp");
 	pp_loc_time = glGetUniformLocation_fp(pp_program, "time");
@@ -1110,7 +1124,7 @@ extern unsigned int d_8to24table[256];
  * PP_UploadLUT, the compute builder by imageStore.  Binds on unit 1, where the
  * post-process shader expects the LUT, and leaves GL_TEXTURE0 active with
  * nothing newly bound. */
-static GLuint PP_CreateLUTTexture (void)
+static GLuint PP_CreateLUTTexture (int dim)
 {
 	GLuint tex = 0;
 
@@ -1118,7 +1132,7 @@ static GLuint PP_CreateLUTTexture (void)
 	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, tex);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
-			PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,
+			dim, dim, dim, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameterf_fp(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1150,20 +1164,20 @@ static GLuint PP_CreateLUTTexture (void)
  * Safe to bake because d_8to24table is built once in VID_InitPalette and never
  * mutated afterwards; palette flashes go through v_blend, not this table.
  * Ported from alextnewman/hexenwail d2c46f078. */
-static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
+static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut, int dim)
 {
-	/* static: 128 KB, too much for the stack on Windows */
+	/* static: 8 MB at 128^3, far too much for the stack */
 	static unsigned char rgba[PP_LUT_TEXELS * 4];
-	int i;
+	int i, texels = dim * dim * dim;
 
 	if (!*tex)
 	{
-		*tex = PP_CreateLUTTexture();
+		*tex = PP_CreateLUTTexture(dim);
 		if (!*tex)
 			return false;
 	}
 
-	for (i = 0; i < PP_LUT_TEXELS; i++)
+	for (i = 0; i < texels; i++)
 	{
 		unsigned int c = d_8to24table[lut[i]];
 		rgba[i * 4 + 0] = (c >>  0) & 0xff;
@@ -1175,7 +1189,7 @@ static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
 	glActiveTexture_fp(GL_TEXTURE0 + 1);
 	glBindTexture_fp(GL_TEXTURE_3D, *tex);
 	glTexImage3D_fp(GL_TEXTURE_3D, 0, GL_RGBA8,
-			PP_LUT_DIM, PP_LUT_DIM, PP_LUT_DIM, 0,
+			dim, dim, dim, 0,
 			GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 	glBindTexture_fp(GL_TEXTURE_3D, 0);
 	glActiveTexture_fp(GL_TEXTURE0);
@@ -1197,7 +1211,8 @@ static qboolean PP_UploadLUT (GLuint *tex, const unsigned char *lut)
 /*                                                                     */
 /* Checked against the retail palette rather than assumed.  Under the  */
 /* naive metric this reproduces the exact integer nearest-colour table */
-/* over all 32768 grid points -- zero worse choices.                   */
+/* over all 32768 grid points of the then 32^3 grid -- zero worse      */
+/* choices.  (Now 128^3: GitHub #80.)                                  */
 /*                                                                     */
 /* The two implementations were then diffed against each other on a    */
 /* real driver (GL 4.3, NVIDIA 580): Riemersma byte-identical over the */
@@ -1220,22 +1235,25 @@ static float PP_SRGBToLinear (float v)
 	return (v > 0.04045f) ? powf((v + 0.055f) / 1.055f, 2.4f) : (v / 12.92f);
 }
 
-/* 8-bit sRGB triple -> the space `metric` measures distance in. */
-static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, float out[3])
+/* One 8-bit channel through the per-channel part of PP_NormalizeColor:
+ * scale, and to linear for every metric but naive.  Split out so the LUT
+ * builder can do it once per grid coordinate (GitHub #80); the whole-colour
+ * function below calls exactly this, so the two cannot drift. */
+static float PP_NormalizeChannel (softemu_metric_t metric, int v8)
 {
-	float c[3];
-
-	c[0] = (float)r8 * (1.0f / 255.0f);
-	c[1] = (float)g8 * (1.0f / 255.0f);
-	c[2] = (float)b8 * (1.0f / 255.0f);
+	float c = (float)v8 * (1.0f / 255.0f);
 
 	if (metric >= SOFTEMU_METRIC_RIEMERSMA)
-	{
-		c[0] = PP_SRGBToLinear(c[0]);
-		c[1] = PP_SRGBToLinear(c[1]);
-		c[2] = PP_SRGBToLinear(c[2]);
+		c = PP_SRGBToLinear(c);
+	return c;
+}
 
-		if (metric >= SOFTEMU_METRIC_OKLAB)
+/* The channel-mixing part of PP_NormalizeColor: OKLab from linear RGB, in
+ * place.  Only OKLab mixes channels. */
+static void PP_MixChannels (softemu_metric_t metric, float c[3])
+{
+	if (metric >= SOFTEMU_METRIC_OKLAB)
+	{
 		{
 			/* A perceptual color space for image processing -- Bjorn
 			 * Ottosson.  https://bottosson.github.io/posts/oklab/ */
@@ -1255,10 +1273,15 @@ static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, 
 			c[2] = 0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_;
 		}
 	}
+}
 
-	out[0] = c[0];
-	out[1] = c[1];
-	out[2] = c[2];
+/* 8-bit sRGB triple -> the space `metric` measures distance in. */
+static void PP_NormalizeColor (softemu_metric_t metric, int r8, int g8, int b8, float out[3])
+{
+	out[0] = PP_NormalizeChannel(metric, r8);
+	out[1] = PP_NormalizeChannel(metric, g8);
+	out[2] = PP_NormalizeChannel(metric, b8);
+	PP_MixChannels(metric, out);
 }
 
 static float PP_ColorDistanceSquared (softemu_metric_t metric, const float c0[3], const float c1[3])
@@ -1377,7 +1400,7 @@ static void PP_MetricChanged (cvar_t *var)
 static qboolean PP_BuildColormapLUT (void)
 {
 	/* static: ~114 KB of tables, too much for the stack on Windows */
-	static unsigned char lut[PP_LUT_TEXELS];
+	static unsigned char lut[PP_CMAP_TEXELS];
 	static unsigned char rampluma[VID_GRADES][256];	/* [light][texel] -> luma */
 	static unsigned char bestlevel[256][256];	/* [texel][target luma] -> light */
 	const byte *cmap = host_colormap;
@@ -1420,15 +1443,15 @@ static qboolean PP_BuildColormapLUT (void)
 		}
 	}
 
-	for (b = 0; b < 32; b++)
+	for (b = 0; b < PP_CMAP_DIM; b++)
 	{
-		for (g = 0; g < 32; g++)
+		for (g = 0; g < PP_CMAP_DIM; g++)
 		{
-			for (r = 0; r < 32; r++)
+			for (r = 0; r < PP_CMAP_DIM; r++)
 			{
-				int tr = (r * 255) / 31;
-				int tg = (g * 255) / 31;
-				int tb = (b * 255) / 31;
+				int tr = (r * 255) / (PP_CMAP_DIM - 1);
+				int tg = (g * 255) / (PP_CMAP_DIM - 1);
+				int tb = (b * 255) / (PP_CMAP_DIM - 1);
 				int ty = PP_LUMA(tr, tg, tb);
 				int best = 0;
 				int bestdist = 0x7fffffff;
@@ -1451,12 +1474,154 @@ static qboolean PP_BuildColormapLUT (void)
 						best = entry;
 					}
 				}
-				lut[b * 32 * 32 + g * 32 + r] = (unsigned char)best;
+				lut[(b * PP_CMAP_DIM + g) * PP_CMAP_DIM + r] = (unsigned char)best;
 			}
 		}
 	}
 
-	return PP_UploadLUT(&pp_colormap_lut, lut);
+	return PP_UploadLUT(&pp_colormap_lut, lut, PP_CMAP_DIM);
+}
+
+/* Per-axis bounds on PP_ColorDistanceSquared, as weights on the squared
+ * per-channel differences: the distance always lies between
+ * sum(lo[k] * d[k]^2) and sum(hi[k] * d[k]^2).  Exact (lo == hi) for the two
+ * Euclidean metrics -- naive, and OKLab with its 1.25 / 1.5 axis scales --
+ * and for Riemersma from rmean in [0,1] (linear RGB): its red and blue
+ * weights move between 2 and 3, green is 4.  GitHub #80. */
+static void PP_MetricWeights (softemu_metric_t metric, float lo[3], float hi[3])
+{
+	switch (metric)
+	{
+	case SOFTEMU_METRIC_RIEMERSMA:
+		lo[0] = 2.0f; lo[1] = 4.0f; lo[2] = 2.0f;
+		hi[0] = 3.0f; hi[1] = 4.0f; hi[2] = 3.0f;
+		break;
+	case SOFTEMU_METRIC_OKLAB:
+		lo[0] = hi[0] = 1.5625f; lo[1] = hi[1] = 1.0f; lo[2] = hi[2] = 2.25f;
+		break;
+	default:
+		lo[0] = hi[0] = lo[1] = hi[1] = lo[2] = hi[2] = 1.0f;
+		break;
+	}
+}
+
+#define PP_LUT_BLOCK	8	/* grid cells per block edge; divides PP_LUT_DIM */
+
+/*
+===============
+PP_FillPaletteGrid
+
+The nearest-colour grid: for every PP_LUT_DIM^3 cell, the palette index a
+scan of all `count' entries keeping the first strict minimum would pick --
+ties included -- but without scanning them all.  The grid is cut into
+PP_LUT_BLOCK^3 blocks; for each, the box its targets span in metric space
+gives every entry a lower and an upper bound on its distance to any target
+inside.  The least upper bound caps every target's nearest distance, so only
+entries whose lower bound does not exceed it can be nearest -- or tie for
+nearest -- anywhere in the block.  Those are then scanned per cell in index
+order with the same strict comparison as the full scan, so the result is the
+same table.  The cap is widened by a relative margin far above float
+rounding, which can only admit extra candidates, never drop one.
+
+Shared verbatim with tools/test_softemu_lut.py, which checks it cell for cell
+against the full scan.  GitHub #80.
+===============
+*/
+static void PP_FillPaletteGrid (softemu_metric_t metric, float palcolors[][3], int count,
+				unsigned char *lut)
+{
+	static float	targets[PP_LUT_BLOCK][PP_LUT_BLOCK][PP_LUT_BLOCK][3];
+	static float	axis[PP_LUT_DIM];
+	static int	cand[256];
+	float		wlo[3], whi[3];
+	int		br, bg, bb, r, g, b, i, k, ncand;
+
+	PP_MetricWeights(metric, wlo, whi);
+
+	/* The per-channel part of the transform, once per grid coordinate: the
+	 * same calls PP_NormalizeColor makes, so the targets are bit-identical
+	 * to whole-colour calls.  Only OKLab's channel mixing is left per cell. */
+	for (i = 0; i < PP_LUT_DIM; i++)
+		axis[i] = PP_NormalizeChannel(metric, PP_GRID_TO_8BIT(i));
+
+	for (bb = 0; bb < PP_LUT_DIM; bb += PP_LUT_BLOCK)
+	for (bg = 0; bg < PP_LUT_DIM; bg += PP_LUT_BLOCK)
+	for (br = 0; br < PP_LUT_DIM; br += PP_LUT_BLOCK)
+	{
+		float	boxlo[3] = { 1e30f, 1e30f, 1e30f };
+		float	boxhi[3] = { -1e30f, -1e30f, -1e30f };
+		float	cap = 1e30f;
+
+		for (b = 0; b < PP_LUT_BLOCK; b++)
+		for (g = 0; g < PP_LUT_BLOCK; g++)
+		for (r = 0; r < PP_LUT_BLOCK; r++)
+		{
+			float	*t = targets[b][g][r];
+			t[0] = axis[br + r];
+			t[1] = axis[bg + g];
+			t[2] = axis[bb + b];
+			PP_MixChannels(metric, t);
+			for (k = 0; k < 3; k++)
+			{
+				if (t[k] < boxlo[k]) boxlo[k] = t[k];
+				if (t[k] > boxhi[k]) boxhi[k] = t[k];
+			}
+		}
+
+		/* least upper bound over entries: no target in the box is farther
+		 * than this from its nearest entry */
+		for (i = 0; i < count; i++)
+		{
+			float	upper = 0.0f;
+			for (k = 0; k < 3; k++)
+			{
+				float	d0 = palcolors[i][k] - boxlo[k];
+				float	d1 = boxhi[k] - palcolors[i][k];
+				float	d = (d0 > d1) ? d0 : d1;
+				upper += whi[k] * d * d;
+			}
+			if (upper < cap)
+				cap = upper;
+		}
+		cap = cap * 1.001f + 1e-9f;
+
+		ncand = 0;
+		for (i = 0; i < count; i++)
+		{
+			float	lower = 0.0f;
+			for (k = 0; k < 3; k++)
+			{
+				float	d = 0.0f;
+				if (palcolors[i][k] < boxlo[k])
+					d = boxlo[k] - palcolors[i][k];
+				else if (palcolors[i][k] > boxhi[k])
+					d = palcolors[i][k] - boxhi[k];
+				lower += wlo[k] * d * d;
+			}
+			if (lower <= cap)
+				cand[ncand++] = i;
+		}
+
+		for (b = 0; b < PP_LUT_BLOCK; b++)
+		for (g = 0; g < PP_LUT_BLOCK; g++)
+		for (r = 0; r < PP_LUT_BLOCK; r++)
+		{
+			int	best = 0;
+			float	bestdist = 1e+30f;
+			for (k = 0; k < ncand; k++)
+			{
+				float	dist = PP_ColorDistanceSquared(metric, targets[b][g][r],
+								       palcolors[cand[k]]);
+				if (dist < bestdist)
+				{
+					bestdist = dist;
+					best = cand[k];
+				}
+			}
+			lut[((bb + b) * PP_LUT_DIM + (bg + g)) * PP_LUT_DIM + (br + r)] =
+				(unsigned char)best;
+		}
+	}
 }
 
 /*
@@ -1465,20 +1630,18 @@ PP_BuildPaletteLUT_CPU
 
 The nearest-colour table, built under `metric`.  Runs on every tier; on the ES
 / WebGL2 one it is the only route, since that tier has no compute shaders.
-
-~8.4M distance evaluations (32^3 grid x 255 candidates), which is tens of
-milliseconds -- fine at load and at a settings change, and the reason the GPU
-path below is a nicety here rather than the necessity it is upstream, where
-the grid is 128^3 and the same loop is 537M evaluations.
+128^3 (Ironwail's grid) by a full scan is 537M distance evaluations, too slow
+at load; PP_FillPaletteGrid returns the same table from a few candidates per
+cell.  GitHub #80.
 ===============
 */
 static qboolean PP_BuildPaletteLUT_CPU (softemu_metric_t metric)
 {
-	/* static: 32 KB of indices + 3 KB of transformed palette, and this is
-	 * called from the frame path when the metric changes */
+	/* static: 2 MB of indices, and this is called from the frame path when
+	 * the metric changes */
 	static unsigned char	lut[PP_LUT_TEXELS];
 	static float		palcolors[256][3];
-	int	r, g, b, i;
+	int	i;
 
 	if (!glTexImage3D_fp)
 		return false;
@@ -1494,41 +1657,13 @@ static qboolean PP_BuildPaletteLUT_CPU (softemu_metric_t metric)
 				  palcolors[i]);
 	}
 
-	for (b = 0; b < PP_LUT_DIM; b++)
-	{
-		for (g = 0; g < PP_LUT_DIM; g++)
-		{
-			for (r = 0; r < PP_LUT_DIM; r++)
-			{
-				float	target[3];
-				int	best = 0;
-				float	bestdist = 1e+30f;
+	/* 255, not 256: index 255 is skipped (transparent / fullbright).
+	 * Upstream searches all 256 -- Quake's last entry is an ordinary
+	 * colour, ours is the transparency key, and emitting it would paint
+	 * holes. */
+	PP_FillPaletteGrid(metric, palcolors, 255, lut);
 
-				PP_NormalizeColor(metric,
-						  PP_GRID_TO_8BIT(r),
-						  PP_GRID_TO_8BIT(g),
-						  PP_GRID_TO_8BIT(b),
-						  target);
-
-				/* skip index 255 (transparent / fullbright).
-				 * Upstream searches all 256 -- Quake's last entry
-				 * is an ordinary colour, ours is the transparency
-				 * key, and emitting it would paint holes. */
-				for (i = 0; i < 255; i++)
-				{
-					float dist = PP_ColorDistanceSquared(metric, target, palcolors[i]);
-					if (dist < bestdist)
-					{
-						bestdist = dist;
-						best = i;
-					}
-				}
-				lut[(b * PP_LUT_DIM + g) * PP_LUT_DIM + r] = (unsigned char)best;
-			}
-		}
-	}
-
-	return PP_UploadLUT(&pp_palette_lut, lut);
+	return PP_UploadLUT(&pp_palette_lut, lut, PP_LUT_DIM);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1728,7 +1863,7 @@ static qboolean PP_BuildPaletteLUT_GPU (softemu_metric_t metric)
 
 	if (!pp_palette_lut)
 	{
-		pp_palette_lut = PP_CreateLUTTexture();
+		pp_palette_lut = PP_CreateLUTTexture(PP_LUT_DIM);
 		if (!pp_palette_lut)
 			return false;
 	}
@@ -2764,6 +2899,7 @@ void GL_PostProcess_EndFrame (void)
 {
 	GLuint blit_tex;
 	int blit_w, blit_h;
+	float lutmax;	/* grid size - 1 of the LUT bound for softemu (#80) */
 
 	/* Drain any pending HUD glyph quads before we touch FBOs and shaders. */
 	Draw_FlushCharBatch ();
@@ -2927,12 +3063,14 @@ apply_shader:
 	glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	/* bind palette LUT on texture unit 1 if softemu is active */
+	lutmax = (float)(PP_LUT_DIM - 1);
 	if ((int)r_softemu.value > 0 && pp_lut_built)
 	{
 		/* mode 3 swaps in the colormap-derived LUT; the shader is identical
 		 * either way, only the table it reads changes */
-		GLuint lut = ((int)r_softemu.value == 3 && pp_colormap_lut) ?
-				pp_colormap_lut : pp_palette_lut;
+		qboolean cmap = ((int)r_softemu.value == 3 && pp_colormap_lut);
+		GLuint lut = cmap ? pp_colormap_lut : pp_palette_lut;
+		lutmax = (float)((cmap ? PP_CMAP_DIM : PP_LUT_DIM) - 1);
 		glActiveTexture_fp(GL_TEXTURE0 + 1);
 		glBindTexture_fp(GL_TEXTURE_3D, lut);
 		glActiveTexture_fp(GL_TEXTURE0);
@@ -2956,6 +3094,8 @@ apply_shader:
 	/* softemu uniforms */
 	if (pp_loc_softemu >= 0)
 		glUniform1i_fp(pp_loc_softemu, (int)r_softemu.value);
+	if (pp_loc_lutmax >= 0)
+		glUniform1f_fp(pp_loc_lutmax, lutmax);
 	if (pp_loc_dither >= 0)
 	{
 		/* r_softemu_dither_screen scales the master strength, which is what
