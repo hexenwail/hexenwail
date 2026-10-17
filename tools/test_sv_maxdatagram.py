@@ -32,6 +32,23 @@ else:
         errors.append("the cap must apply to local connections too (test lever)")
     if "if (cap < SV_MAXDATAGRAM_FLOOR)" not in body[cap:]:
         errors.append("the cap must honour SV_MAXDATAGRAM_FLOOR")
+# The svc_clear_edicts reserve: worst case (512 B) until a measuring pass has
+# counted the removals, then exact.  At 1400 the first full update went from
+# 660 B / 108 entities to 1133-1396 B / 188-239.  Removals verified by
+# teleporting away from 621 visible entities: 255 + deferred 365 + 110, no
+# warning, same under cap and without.
+pe = re.search(r"static void SV_PrepareClientEntities \(.*?\n\}", src, re.S)
+pe = pe.group(0) if pe else ""
+if "int			trailer_reserve = DATAGRAM_TRAILER_RESERVE;" not in pe:
+    errors.append("the trailer reserve must start at the worst case")
+if "trailer_reserve = 2 + 2 * NumToRemove;" not in pe or \
+   pe.find("trailer_reserve = 2 + 2 * NumToRemove;") > pe.find("budget = msg->maxsize - trailer_reserve - msg->cursize;"):
+    errors.append("the measuring pass must size the reserve from the removals it counted, before the budget")
+if "cursize + bytes + trailer_reserve > msg->maxsize" not in pe or "cursize + bytes + DATAGRAM_TRAILER_RESERVE" in pe:
+    errors.append("the write-pass guard must use trailer_reserve")
+if "if (msg->cursize + 2 + 2 * NumToRemove > msg->maxsize)" not in pe:
+    errors.append("the trailer must be checked against the room left before it is written")
+
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
 print("PASS sv_maxdatagram caps the per-frame datagram, default off (#82)")
