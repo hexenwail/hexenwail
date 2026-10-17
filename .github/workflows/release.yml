@@ -147,6 +147,23 @@ jobs:
           path: pkg/hexenwail-${{ github.ref_name }}-windows-x86_64.zip
           if-no-files-found: error
 
+      # The release's linux-x86_64 tree as one runnable file (GitHub #173).
+      # Named from the tag here, like the zips, rather than from the flake's
+      # own version string.
+      - name: Build AppImage
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          nix build .#appimage -o result-appimage --print-build-logs
+          cp result-appimage/*.AppImage "pkg/hexenwail-$VERSION-x86_64.AppImage"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: pkg/hexenwail-${{ github.ref_name }}-x86_64.AppImage
+          if-no-files-found: error
+
       - name: Generate changelog
         run: |
           # A release may ship hand-written notes: put them at
@@ -205,6 +222,7 @@ jobs:
               echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-windows-x86_64.zip\">![Download Windows build](https://img.shields.io/badge/%E2%AC%87_Windows_x86__64-blue?style=for-the-badge&logo=windows&logoColor=white)</a>"
               echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-linux-x86_64.zip\">![Download Linux build](https://img.shields.io/badge/%E2%AC%87_Linux_x86__64-8A9A5B?style=for-the-badge)</a>"
               echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG.flatpak\">![Download Flatpak](https://img.shields.io/badge/%E2%AC%87_Flatpak-4A90D9?style=for-the-badge&logo=flatpak&logoColor=white)</a>"
+              echo "<a href=\"https://github.com/hexenwail/hexenwail/releases/download/$TAG/hexenwail-$TAG-x86_64.AppImage\">![Download AppImage](https://img.shields.io/badge/%E2%AC%87_AppImage-6E7F80?style=for-the-badge)</a>"
               echo ""
               echo "$HEADER"
               echo ""
@@ -217,6 +235,7 @@ jobs:
             echo ""
             echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
             echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/\`"
+            echo "- **Linux AppImage** — one file: \`chmod +x\` it and put it in your Hexen II folder (beside \`data1/\`), or keep game data in \`~/.hexen2/data1/\`; run it with \`--get-demo\` to fetch the free demo"
             echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`hexenwail.exe\`"
             echo ""
             echo "Requires game data files (\`data1/pak0.pak\`, \`data1/pak1.pak\`)."
@@ -302,11 +321,12 @@ jobs:
           cp linux-bundle/hexenwail-${{ github.ref_name }}-linux-x86_64.zip dist/
           cp windows-bundle/hexenwail-${{ github.ref_name }}-windows-x86_64.zip dist/
           cp hexenwail-${{ github.ref_name }}-x86_64.flatpak/hexenwail-${{ github.ref_name }}.flatpak dist/
+          cp appimage/hexenwail-${{ github.ref_name }}-x86_64.AppImage dist/
           # Run in dist/ so the file records bare names, not paths — that is
           # what `sha256sum -c` expects next to the downloaded files.  The
           # patterns are explicit rather than `*` so the digest file can never
           # end up listing itself.
-          (cd dist && sha256sum hexenwail-*.zip hexenwail-*.flatpak > SHA256SUMS)
+          (cd dist && sha256sum hexenwail-*.zip hexenwail-*.flatpak hexenwail-*.AppImage > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: Create release
@@ -321,4 +341,5 @@ jobs:
             dist/hexenwail-${{ github.ref_name }}-linux-x86_64.zip \
             dist/hexenwail-${{ github.ref_name }}-windows-x86_64.zip \
             dist/hexenwail-${{ github.ref_name }}.flatpak \
+            dist/hexenwail-${{ github.ref_name }}-x86_64.AppImage \
             dist/SHA256SUMS

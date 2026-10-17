@@ -48,11 +48,13 @@ There are three living branches of the Hexen II engine, depending on what you wa
 
 | Platform | Renderer | Packaging | Status |
 |----------|----------|-----------|--------|
-| 64-bit Linux / SDL3 | OpenGL 4.3 | Nix, Flatpak, tarball | Supported |
+| 64-bit Linux / SDL3 | OpenGL 4.3 | Nix, Flatpak, AppImage, tarball | Supported |
 | 64-bit Windows / SDL3 | OpenGL 4.3 | ZIP (cross-compiled from Nix) | Supported |
 | Web / WASM (Emscripten) | WebGL2, or the classic 8bpp software rasterizer | PWA, deployed to GitHub Pages | Supported — [play it in a browser](https://hexenwail.github.io/hexenwail/) |
 | 64-bit Linux / SDL3, GLES tier | OpenGL ES 3.0 (the WebGL2 path, natively) | Nix (`.#gles`), built in CI | Build from source |
 | Dedicated servers | — | Nix: `.#h2ded` (Hexen II), `.#hwsv` (HexenWorld), `.#h2ded-win64` | Supported |
+
+On Linux, the AppImage is one file: `chmod +x` it and put it in your Hexen II folder (beside `data1/`), or keep the game data in `~/.hexen2/data1/`; `--get-demo` fetches the free demo. It needs the same desktop libraries as the tarball (X11 or Wayland, OpenGL, audio). `nix build .#appimage` builds it.
 
 On Windows, run `hexenwail.exe`. You can extract the ZIP into an existing Hexen II directory without replacing vanilla `glh2.exe`; keep the bundled DLLs and `gamecode/` beside `hexenwail.exe`.
 
@@ -61,7 +63,6 @@ Planned:
 | Platform | Renderer | Status |
 |----------|----------|--------|
 | Flathub listing | OpenGL 4.3 | Not started |
-| AppImage | OpenGL 4.3 | Not started |
 | Android / SDL3 | GLES3 | Not started — builds on the WASM/GLES render path |
 
 ## Features

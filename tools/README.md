@@ -62,6 +62,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `test_cl_startmenu.py` | check `cl_startmenu` (default 1) gates both the `menu_main` that `startdemos` queues and the one Hexen II's `hexen.rc` runs during startup |
 | `test_sv_maxdatagram.py` | check `sv_maxdatagram` (default 0 = off) caps the per-frame unreliable datagram for every connection after the protocol clamp, floored at 1024 |
 | `test_audit_tail_174.py` | check the 2026-08-18 audit tail stays fixed: `r_entdist` culls instanced models, alias batches cannot run out, mesh buffers are sized from `MAXALIASTRIS`, both-bits scale flags read as 0, dead GL `R_LightPoint` stays gone |
+| `test_appimage_apprun.py` | run `appimage/AppRun` against a stub engine: data beside the AppImage becomes `-basedir`, `~/.hexen2` data runs as-is, no data explains and exits, `-basedir`/`-help` pass through, `--get-demo` fetches; and the runtime is pinned to a tagged release |
 | `test_softemu_spans.py` | check that `r_softemu_spans` routes the world, brush-poly and liquid texture coordinates through `SpanUV` (highp, guarded), at 8/320 of the render width (16 for liquids), and resets around each override (#176) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
