@@ -132,14 +132,20 @@ float PARTICLETYPE_DARKEN		= 25;	//Particle will darken to darkest color of that
 float PARTICLETYPE_REDFIRE		= 28;	//Particle will darken to darkest color of that shade, valid only for colors <= 232
 
 // Hexen hull constants
+/* What each .hull clips as.  Two frames, both right: the first box is the
+ * setsize() the hull is meant for, feet at z 0; the second is the clip box
+ * Mod_MakeHulls builds, centred on the hull's own origin.  SV_HullForEntity
+ * moves between them by (clip_mins - mins), so only the size has to agree.
+ * Corrected to the engine's boxes, which are what the game has always run
+ * with: GitHub #284. */
 float HULL_IMPLICIT			= 0;	//Choose the hull based on bounding box- like in Quake
 float HULL_POINT			= 1;	//0 0 0, 0 0 0
-float HULL_PLAYER			= 2;	//'-16 -16 0', '16 16 56'
+float HULL_PLAYER			= 2;	//'-16 -16 0', '16 16 56'; clips as '-16 -16 -24', '16 16 32'
 float HULL_SCORPION			= 3;	//'-24 -24 -20', '24 24 20'
-float HULL_CROUCH			= 4;	//'-16 -16 0', '16 16 28'
-//Next 2 clip though world?
-float HULL_HYDRA			= 5;	//'-40 -40 -42', '40 40 42' - replace me in MP with a '-8 -8 -8' '8 8 8' hull for pentacles
-float HULL_GOLEM			= 6;	//'-48 -48 -50', '48 48 50' - maybe change to '-23 -23 -40', '23 23 40' for yakman
+float HULL_CROUCH			= 4;	//'-16 -16 0', '16 16 28'; clips as '-16 -16 -12', '16 16 16'
+float HULL_HYDRA			= 5;	//'-8 -8 -8', '8 8 8' in this engine (Hexen II 1.11); Raven shrank it for
+//					the mission pack's pentacles.  HexenWorld keeps '-40 -40 -42', '40 40 42'.
+float HULL_GOLEM			= 6;	//'-48 -48 -50', '48 48 50'
 
 // edict.solid values
 float	SOLID_NOT					= 0;		// no interaction with other objects

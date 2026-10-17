@@ -1097,6 +1097,12 @@ static void Mod_MakeHulls (int count)
 	hull->clip_maxs[2] = 16;
 
 //hydra -changing in MP to '-8 -8 -8', '8 8 8' for pentacles
+/* "MP" is Raven's mission pack, not multiplayer: Portals of Praevus's
+ * pentacles take HULL_HYDRA, so the 1.11 Hexen II engine shrank this hull
+ * from the original +-40 to +-8.  HexenWorld forked from the engine before
+ * that and still builds +-40, hence the H2W arm keeping the old box.  Both
+ * are each engine's shipped behaviour; gamecode's constant.hc says the same.
+ * GitHub #284. */
 	hull = &loadmodel->hulls[4];
 	hull->clipnodes = loadmodel->clipnodes;
 	hull->firstclipnode = 0;
