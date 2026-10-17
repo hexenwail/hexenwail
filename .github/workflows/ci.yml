@@ -97,6 +97,9 @@ jobs:
       - name: Test HexenWorld local presentation state
         run: nix develop -c python3 tools/test_hw_viewmodel_feedback.py
 
+      - name: Test vid_restart re-uploads every brush model's textures
+        run: nix develop -c python3 tools/test_vid_restart_brush_textures.py
+
       - name: Test texture LOD bias capability gate
         run: nix develop -c python3 tools/test_lod_bias_gate.py
 
