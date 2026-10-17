@@ -4194,15 +4194,14 @@ static qboolean M_Graphics_IsSkip (int i)
 	 * The cvars behind these rows are a separate matter.  Those this build
 	 * defines (r_soft_web.c, draw_soft_web.c) default as the GL build does,
 	 * which tools/test_soft_cvar_defaults.py enforces.  The GL-only ones
-	 * (showclock, scr_showspeed, ...) are not registered here at all, so a
-	 * software session drops them from config.cfg: GitHub #362.
+	 * are not registered here at all, so a software session drops them from
+	 * config.cfg: GitHub #362.
 	 *
 	 * Found by tools/menu_soft_parity.py, which now holds this list to that
 	 * standard on every push.  uhexen2-ibnq.2.
 	 */
 	switch (i)
 	{
-	case GFX_CENTERPRINTBG:
 	case GFX_HUDSCALE:
 	case GFX_MENUSCALE:
 	case GFX_CROSSHAIRSCALE:
@@ -4211,15 +4210,16 @@ static qboolean M_Graphics_IsSkip (int i)
 	case GFX_OVERBRIGHT:
 	case GFX_COLORED_LM:
 	case GFX_GLOW_INTENSITY:
-	case GFX_SHOWSPEED:
-	case GFX_SHOWCLOCK:
 		return true;
 	default:
 		break;
 	}
-	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT, GFX_DEMOBAR
+	/* soft-ok: GFX_HUDTRANS, GFX_CONMAXCOLS, GFX_TORCH_DLIGHT, GFX_DEMOBAR,
+	 *          GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK
 	 *
-	 * GFX_DEMOBAR: screen.c draws the bar in this build too (GitHub #123). */
+	 * GFX_DEMOBAR: screen.c draws the bar in this build too (GitHub #123).
+	 * GFX_CENTERPRINTBG, GFX_SHOWSPEED, GFX_SHOWCLOCK: ported to screen.c,
+	 * the background stippled by Draw_FillAlpha (GitHub #329). */
 #endif
 	return M_Filter_Active() && !M_Filter_Matches(gfx_labels[i]);
 }

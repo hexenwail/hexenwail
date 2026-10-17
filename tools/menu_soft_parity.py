@@ -223,16 +223,26 @@ def cvar_has_software_reader(cvar, sources):
     registers the whole GPU-only block precisely so that shared code links,
     and counting that would make every row pass.
     """
-    field = re.compile(r'\b%s\.(?:integer|value|string)\b' % re.escape(cvar))
-    byref = re.compile(r'&\s*%s\b' % re.escape(cvar))
+    texts = []
     for path in sources:
         with open(path, encoding='utf-8', errors='replace') as fh:
-            src = fh.read()
-        for line in src.split('\n'):
-            if line.lstrip().startswith('cvar_t ') or 'Cvar_Register' in line:
-                continue
-            if field.search(line) or byref.search(line):
-                return True
+            texts.append(fh.read())
+    # A row names the cvar by its console name, which need not be its C
+    # identifier: "showclock" is declared as scr_showclock.  Resolve through
+    # every `cvar_t ident = {"name", ...}` in the software build.
+    idents = {cvar}
+    decl = re.compile(r'cvar_t\s+(\w+)\s*=\s*\{\s*"%s"' % re.escape(cvar))
+    for src in texts:
+        idents.update(decl.findall(src))
+    for ident in idents:
+        field = re.compile(r'\b%s\.(?:integer|value|string)\b' % re.escape(ident))
+        byref = re.compile(r'&\s*%s\b' % re.escape(ident))
+        for src in texts:
+            for line in src.split('\n'):
+                if 'cvar_t ' in line or 'Cvar_Register' in line:
+                    continue
+                if field.search(line) or byref.search(line):
+                    return True
     return False
 
 
