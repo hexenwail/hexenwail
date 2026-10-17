@@ -53,6 +53,7 @@ Run the scripts directly. The Python ones need only stock `python3`, except
 | `test_offscreen_windowed.py` | check that `VID_SetMode` keeps SDL's offscreen driver windowed, so a headless `screenshot` reads back the frame that was drawn and not a fullscreen size the EGL surface never had (#401) |
 | `test_particles_pause.py` | check that `R_UpdateParticles` advances particles by the render frame time but not while `cl.paused` (snow kept falling under the PAUSED plaque) |
 | `test_webgl2_es_fixes.py` | check the WebGL2 fixes: texture swizzle gated on a cap that is false in the browser (opaque alpha written instead), no multisample OIT targets on the ES tier, web screenshots taken before the frame is presented, and the boot smoke failing on WebGL/GL errors (#112) |
+| `test_contrast_parity.py` | check that `contrast` multiplies the frame, clamped to Ironwail's 1..2, in the shader, the uniform, the post-process trigger and the Display menu |
 | `test_softemu_spans.py` | check that `r_softemu_spans` routes the world, brush-poly and liquid texture coordinates through `SpanUV` (highp, guarded), at 8/320 of the render width (16 for liquids), and resets around each override (#176) |
 | `test_multiplayer_join.py` | compile extracted production join/filesystem functions and test protocol fallback, gamedir validation, HW/Siege precedence, and restoration |
 | `test_hcc_tail_slack.py` | compile the `hcc_tail_slack/` fixtures with a given `hcc` and apply the engine's operand and function-record bounds to them and to any `progs.dat` named |
