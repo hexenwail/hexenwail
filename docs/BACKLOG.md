@@ -11,7 +11,7 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (48)
+## P2 — worth doing (47)
 
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
@@ -35,7 +35,6 @@ here.
 - **vid_test: mode change with a confirmation prompt (last item of a5nn.20)** `uhexen2-x5e6` *(in_progress)* — The only Ironwail console command left from uhexen2-a5nn.20. Split out because it is the one item there that cannot be verified headlessly: it needs a real mode change plus a modal keypress.
 - **WASM: Implement proper offline build or pre-cached ports** `uhexen2-1z31` — Long-term solution for WASM builds to avoid --impure requirement.
 - **MD5: verify skeletal render with a real asset (winding, lighting, skin)** `uhexen2-2t38` — uhexen2-7ok0 phases 2 and 3 landed in 5670c942b and are verified against the synthetic models in engine/tests/md5 (parser math, inverse-bind composition, hierarchy propagation, bounds).
-- **Consider raising the softemu palette LUT past 32^3 now that the GPU builds it** `uhexen2-3bes` — Our nearest-colour LUT is a 32^3 grid (PP_LUT_DIM in engine/h2shared/gl_postprocess.c); Ironwail's is 128^3, which is affordable upstream precisely because a compute pass builds it.
 - **Field-confirm with BloodShot that tristram's CTD is gone (uhexen2-z5wt)** `uhexen2-6fko` — Follow-up to uhexen2-z5wt, which is CLOSED: the signon overflow is fixed (a47d006fb + 9091ddffc) and the multi-buffer path is validated end to end (see that bead's notes for the measurements…
 - **Site: community directory (Discord, projects, people, servers)** `uhexen2-96ii.10` — Build the community directory — the static replacement for a forum, a webring and a hosted-sites program.
 - **Site: /archive/ — preserve interviews, .plan updates, and community history** `uhexen2-96ii.11` — Build the `/archive/` section — deliberate preservation of Hexen II history, done with permission and attribution.
