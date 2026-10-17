@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # Particles stand still while the game is paused.
+      - name: Particles pause
+        run: python3 tools/test_particles_pause.py
+
       # Headless (offscreen) runs stay windowed, so screenshots are the
       # frame and nothing else (GitHub #401).
       - name: Offscreen driver windowed
