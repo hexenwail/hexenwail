@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # hwsv falls back to the hwprogs.dat shipped beside it (#37).
+      - name: hwsv bundled gamecode fallback
+        run: python3 tools/test_hwsv_bundled_progs.py
+
       # r_oit 2: moment-based OIT (#87).
       - name: Moment-based OIT
         run: python3 tools/test_mboit.py

@@ -393,7 +393,9 @@
           # A bare .#hwsv has the same gap as .#h2ded vs Raven's progs.dat,
           # and hwprogs.dat has no retail equivalent a user could supply
           # instead -- it only ever came from Raven's free release, compiled
-          # from source in this tree.  uhexen2-9die.
+          # from source in this tree.  uhexen2-9die.  hwsv finds the copy
+          # under $out/share/hexenwail by itself when the gamedir has none
+          # (PR_LoadBundledHWProgs, #37); one in the gamedir still wins.
           hwsv-bundled =
             let
               hwsvPkg = self.packages.${system}.hwsv;

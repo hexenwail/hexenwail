@@ -1415,6 +1415,9 @@ else()
         ${COMMONDIR}/pr_cmds.c
         ${COMMONDIR}/pr_edict.c
         ${COMMONDIR}/pr_exec.c
+        # PR_FindBundleDir: hwsv falls back to the hwprogs.dat shipped
+        # beside it when the gamedir has none (#37).
+        ${COMMONDIR}/sys_exedir.c
         # HexenWorld's own shared layer.  info_str and huffman, like the
         # h2shared ports above, come from the Rust engine archive, and so do
         # the transport and the channel: net_udp.c and net_chan.c are not
