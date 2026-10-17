@@ -943,10 +943,15 @@ static void M_Main_Draw (void)
 		const char *r = M_RendererName();
 		int i, y = vid.height - 14;	/* CANVAS_DEFAULT extent (a5nn.37) */
 
-		GL_SetCanvas (CANVAS_DEFAULT);
-		for (i = 0; r[i]; i++)
-			Draw_Character (11 + i*8, y, r[i] | 0x100);
-		GL_SetCanvas (CANVAS_MENU);
+		/* At 320x200 the menu canvas is the whole screen and this would
+		 * print over QUIT: the menu wins.  GitHub #135. */
+		if (!Draw_MenuReachesLine (y))
+		{
+			GL_SetCanvas (CANVAS_DEFAULT);
+			for (i = 0; r[i]; i++)
+				Draw_Character (11 + i*8, y, r[i] | 0x100);
+			GL_SetCanvas (CANVAS_MENU);
+		}
 	}
 }
 

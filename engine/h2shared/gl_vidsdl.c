@@ -171,19 +171,16 @@ static void GL_PollErrors (const char *tag)
 #define MAXWIDTH		10000
 #define MAXHEIGHT		10000
 #define MIN_WIDTH		320
-/* Two different floors, deliberately.  MIN_HEIGHT gates which video modes are
- * offered at all and someone raised it from 200 to 240 (the commented-out line
- * that used to be here).  MIN_CONHEIGHT gates how far the console/HUD canvas
- * may be scaled down, and has always been 200 -- it was spelled as a bare
- * literal with a comment beside it naming MIN_HEIGHT, a macro that no longer
- * held that value.
- *
- * Whether the mode floor should come back down to 200 is a separate question:
- * Spoike's point is that 320x200 is the minimum Quake and WinHexen2 define, so
- * a 240 floor is arguably already wrong.  That needs someone to confirm the
- * menus still render at 200 before it changes.  uhexen2-c01c */
-#define MIN_HEIGHT		240
-#define MIN_CONHEIGHT		200
+/* 320x200: the minimum Quake and WinHexen2 define, and a smaller virtual
+ * canvas would be an engine bug (Spoike).  The mode floor had been raised to
+ * 240 without a recorded reason, so `-width 320 -height 200` was rejected as
+ * "invalid" and silently ran at 640x480.  Checked at a real 320x200 before
+ * lowering it: the HUD, console, in-game view and menus all render; the one
+ * collision -- the main menu's renderer label printing over QUIT -- yields to
+ * the menu now (M_Main_Draw).  One floor serves both the modes and the
+ * console/HUD canvas again; MIN_HEIGHT was the second spelling of it.
+ * uhexen2-c01c, GitHub #135. */
+#define MIN_HEIGHT		200
 #define MAX_DESC		33
 
 typedef struct {
@@ -1044,7 +1041,7 @@ static void VID_ConWidth (int modenum)
 		w = modewidth;
 
 	h = w * modelist[modenum].height / modewidth;
-	if (h < MIN_CONHEIGHT || h > modelist[modenum].height)
+	if (h < MIN_HEIGHT || h > modelist[modenum].height)
 	{
 		vid_conscale = false;
 		VID_StoreConWidth (modewidth);
@@ -1162,7 +1159,7 @@ void VID_ChangeConsize (int dir)
 	}
 
 	h = w * modelist[vid_modenum].height / modelist[vid_modenum].width;
-	if (h < MIN_CONHEIGHT)
+	if (h < MIN_HEIGHT)
 		return;
 	vid.width = vid.conwidth = w;
 	vid.height = vid.conheight = h;

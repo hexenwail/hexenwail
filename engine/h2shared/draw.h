@@ -150,6 +150,7 @@ extern cvar_t scr_conbrightness;
  * canvases size themselves against, and what SCR_CalcUIScale's auto reads.
  * Both are exactly glwidth/glheight at the default aspect.  uhexen2-a5nn.37 */
 void SCR_GuiSize (int *w, int *h);
+qboolean Draw_MenuReachesLine (int y);	/* GitHub #135 */
 
 float SCR_CalcUIScale (cvar_t *user);
 

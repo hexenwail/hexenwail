@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # 320x200 is a valid mode again, and the main menu fits (GitHub #135).
+      - name: Video mode floor 320x200
+        run: python3 tools/test_vid_floor_200.py
+
       # r_showtris outlines alias models, sprites, particles and the
       # viewmodel, from the geometry their draws use (GitHub #81).
       - name: r_showtris covers models, sprites and particles
