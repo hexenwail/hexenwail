@@ -150,10 +150,12 @@ nix shell nixpkgs#chromium nixpkgs#python3 --command \
   "$(nix build .#demodata --no-link --print-out-paths)/share/hexenwail"
 ```
 
-Success is `PASS: hexenwail.wasm boot smoke (nodata)` / `(map)`.  The map run
-prints `GL error GL_INVALID_ENUM ... detected at end of frame` under
-SwiftShader; the C-only build printed the same lines, so they are not a
-failure.
+Success is `PASS: hexenwail.wasm boot smoke (nodata)` / `(map)`.  Any
+`WebGL: INVALID_...` line in Chrome's log, or the engine's own `GL error ...
+detected at end of frame`, now FAILS the run.  Those lines used to be waved
+off as SwiftShader noise; they were real WebGL2 bugs (GitHub #112: texture
+swizzle WebGL2 dropped, multisample OIT targets).  If one appears, it is the
+engine.
 
 ## Run: the GUI lane (screenshots)
 

@@ -204,6 +204,17 @@ echo "---- engine output ----"
 # Chrome escapes the message as a JS string literal: \" and \\ at most.
 sed -n 's/.*"HWLOG \(.*\)", source: .*/\1/p' "$console" | sed 's/\\"/"/g; s/\\\\/\\/g'
 echo "-----------------------"
+# A WebGL error is a failure, not noise.  These lines were once read as
+# SwiftShader chatter; they were the engine: texture swizzle WebGL2 dropped
+# (254 per demo1 load), and multisample OIT targets the ES tier cannot create
+# (GitHub #112).  Chrome reports each as "WebGL: INVALID_..."; the engine's ES
+# error poll as "GL error ... detected at end of frame".
+gl_errors=$(grep -acE 'WebGL: (INVALID|OUT_OF_MEMORY|CONTEXT_LOST)|GL error GL_' "$console" || true)
+if [ "$gl_errors" -gt 0 ] && [ "${verdict%% *}" = pass ]; then
+	echo "GL errors in the browser's log:"
+	grep -aoE 'WebGL: [A-Z_]+: [^"]*|GL error GL_[^"]*' "$console" | sort | uniq -c | head -20
+	verdict="fail $gl_errors WebGL/GL error line(s)"
+fi
 case "$verdict" in
 	pass\ *) echo "result: $verdict"; echo "PASS: hexenwail.wasm boot smoke ($mode)" ;;
 	fail\ *) echo "result: $verdict"; echo "FAIL: hexenwail.wasm boot smoke ($mode)"; exit 1 ;;
