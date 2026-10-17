@@ -51,6 +51,8 @@ There are three living branches of the Hexen II engine, depending on what you wa
 | 64-bit Linux / SDL3 | OpenGL 4.3 | Nix, Flatpak, tarball | Supported |
 | 64-bit Windows / SDL3 | OpenGL 4.3 | ZIP (cross-compiled from Nix) | Supported |
 | Web / WASM (Emscripten) | WebGL2, or the classic 8bpp software rasterizer | PWA, deployed to GitHub Pages | Supported — [play it in a browser](https://hexenwail.github.io/hexenwail/) |
+| 64-bit Linux / SDL3, GLES tier | OpenGL ES 3.0 (the WebGL2 path, natively) | Nix (`.#gles`), built in CI | Build from source |
+| Dedicated servers | — | Nix: `.#h2ded` (Hexen II), `.#hwsv` (HexenWorld), `.#h2ded-win64` | Supported |
 
 On Windows, run `hexenwail.exe`. You can extract the ZIP into an existing Hexen II directory without replacing vanilla `glh2.exe`; keep the bundled DLLs and `gamecode/` beside `hexenwail.exe`.
 
@@ -190,10 +192,6 @@ original and a Windows build. Build ours with `nix build .#utils`. It reads
 
 See [docs/COMPILE](docs/COMPILE) for full instructions.
 
-### Web / iPadOS PWA
-
-A GitHub-Pages-deployable WebAssembly/PWA shell now lives under [`web/`](web/) with setup notes in [docs/PWA.md](docs/PWA.md). It targets installable, offline-capable play after the user imports their own legal Hexen II assets.
-
 **Quick start (any Linux):**
 ```bash
 cd engine && mkdir build && cd build
@@ -207,8 +205,15 @@ cmake .. && make -j$(nproc)
 nix build              # NixOS
 nix build .#linux-fhs  # Portable Linux binary
 nix build .#win64      # Windows 64-bit (cross-compiled)
+nix build .#gles       # Desktop client on the GLES 3 tier (the WebGL2 render path)
+nix build .#h2ded      # Hexen II dedicated server (.#h2ded-win64 for Windows)
+nix build .#hwsv       # HexenWorld dedicated server
 nix build .#release    # All platforms
 ```
+
+### Web / iPadOS PWA
+
+A GitHub-Pages-deployable WebAssembly/PWA shell lives under [`web/`](web/) with setup notes in [docs/PWA.md](docs/PWA.md). It targets installable, offline-capable play after the user imports their own legal Hexen II assets. Build it in the `nix develop .#wasm` shell with `./scripts/wasm-build.sh`; `nix build .#wasm` is not the supported path (Emscripten fetches its SDL3 port at configure time, and the Nix sandbox has no network).
 
 ## Contributing
 
