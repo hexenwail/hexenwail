@@ -371,7 +371,10 @@ void *Hunk_AllocName (int size, const char *name)
 	size = sizeof(hunk_t) + ((size + 15) & ~15);
 
 	if (hunk_size - hunk_low_used - hunk_high_used < size)
-		Sys_Error ("%s: failed on %i bytes for %s", __thisfunc__, size, name);
+		Sys_Error ("%s: failed on %i bytes for %s\n"
+			   "The heap is %i KB; start with -heapsize <KB> for more (e.g. -heapsize %i)",
+			   __thisfunc__, size, name,
+			   hunk_size / 1024, (hunk_size / 1024) * 2);
 
 	h = (hunk_t *)(hunk_base + hunk_low_used);
 	hunk_low_used += size;

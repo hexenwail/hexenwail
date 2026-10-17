@@ -28,7 +28,14 @@
 
 
 #define MIN_MEM_ALLOC	0x2000000	/* 32 mb */
-#define STD_MEM_ALLOC	0x4000000	/* 64 mb */
+/* 512 MB, as the GL client.  64 MB could not hold a large BSP2 map
+ * ("Hunk_AllocName: failed on 1656928 bytes for vertexes" on a 28 MB one,
+ * GitHub #79) that the client loads with its 512.  The hunk is malloc'd and
+ * never touched as a whole -- each allocation zeroes only itself -- so on a
+ * Linux host the unused part costs address space, not memory: h2ded on demo1
+ * measured VmRSS 44000 kB at -heapsize 65536 and 44008 kB at 524288.
+ * -heapsize (in KB) still overrides it either way. */
+#define STD_MEM_ALLOC	0x20000000	/* 512 mb */
 
 #define q_swprintf _snwprintf
 
@@ -512,7 +519,7 @@ static const char *help_strings[] = {
 	"     [-portals | -h2mp ]     Run the Portal of Praevus mission pack",
 #   endif
 #endif
-	"     [-heapsize Bytes]       Heapsize (memory to allocate)",
+	"     [-heapsize KB]          Heapsize (memory to allocate, in KB)",
 	"     [-vanillaprogs]         Ignore the bundled gamecode, use the game's own",
 	NULL
 };

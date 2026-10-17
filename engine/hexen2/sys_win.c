@@ -24,7 +24,6 @@
 #include "debuglog.h"
 #include <wchar.h>
 
-#define MIN_MEM_ALLOC	0x4000000	/* 64 mb */
 #define STD_MEM_ALLOC	0x20000000	/* 512 mb */
 
 #define q_swprintf _snwprintf
@@ -600,7 +599,9 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 	Sys_CheckSDL ();
 
-	parms.memsize = (isDedicated)? MIN_MEM_ALLOC : STD_MEM_ALLOC;
+	/* -dedicated takes the client's size: the same maps, the same hunk
+	 * (GitHub #79; see STD_MEM_ALLOC in server/sys_unix.c). */
+	parms.memsize = STD_MEM_ALLOC;
 	i = COM_CheckParm ("-heapsize");
 	if (i && i < com_argc-1)
 		parms.memsize = atoi (com_argv[i+1]) * 1024;

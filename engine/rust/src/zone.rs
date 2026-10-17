@@ -735,11 +735,15 @@ pub unsafe extern "C" fn Hunk_AllocName(size: c_int, name: *const c_char) -> *mu
     let size = core::mem::size_of::<HunkC>() as c_int + ((size + 15) & !15);
 
     if HUNK_SIZE - HUNK_LOW_USED - HUNK_HIGH_USED < size {
+        // Names the way out, as zone.c does (GitHub #79): -heapsize is in KB.
         Sys_Error(
-            c"%s: failed on %i bytes for %s".as_ptr(),
+            c"%s: failed on %i bytes for %s\nThe heap is %i KB; start with -heapsize <KB> for more (e.g. -heapsize %i)"
+                .as_ptr(),
             c"Hunk_AllocName".as_ptr(),
             size,
             name,
+            HUNK_SIZE / 1024,
+            (HUNK_SIZE / 1024) * 2,
         );
     }
 

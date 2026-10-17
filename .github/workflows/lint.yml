@@ -167,6 +167,11 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # Dedicated servers default to the client's 512 MB heap, and running
+      # out names -heapsize (in KB) (GitHub #79).
+      - name: Dedicated server heap
+        run: python3 tools/test_dedicated_heap.py
+
       # A disconnected client renders no world: the loading plaque used to
       # redraw the map just left, after the disconnect (GitHub #204).
       - name: No world render while disconnected
