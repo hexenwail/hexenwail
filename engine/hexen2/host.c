@@ -179,12 +179,12 @@ cvar_t	map_checks = {"map_checks", "0", CVAR_NONE};
  * timer -- see Host_CheckAutosave for what the interval actually scales.
  * uhexen2-a5nn.31
  *
- * sv_autoload is deliberately NOT here.  Upstream's third cvar reloads the
- * last save on death, and that half has not been written; registering it now
- * would archive a value that reads back correctly and does nothing, which is
- * the exact thing uhexen2-a5nn.38 had to go back and fix. */
+ * sv_autoload is upstream's third: what dying does with the last save made or
+ * loaded on this map -- 0 ignores it, 1 asks, 2 (default) loads it, 3 loads
+ * it even on a restart while alive.  Host_AutoLoad, host_cmd.c.  GitHub #410. */
 cvar_t	sv_autosave = {"sv_autosave", "1", CVAR_ARCHIVE};
 cvar_t	sv_autosave_interval = {"sv_autosave_interval", "30", CVAR_ARCHIVE};
+cvar_t	sv_autoload = {"sv_autoload", "2", CVAR_ARCHIVE};
 
 cvar_t	skill = {"skill", "1", CVAR_NONE};		// 0 - 3
 cvar_t	startmap = {"startmap", "", CVAR_NONE};	// mods can override in autoexec.cfg
@@ -528,6 +528,7 @@ static void Host_InitLocal (void)
 	Cvar_SetCallback (&map_checks, Map_Checks_f);
 	Cvar_RegisterVariable (&sv_autosave);
 	Cvar_RegisterVariable (&sv_autosave_interval);
+	Cvar_RegisterVariable (&sv_autoload);
 	if (COM_CheckParm("-developer"))
 	{
 		Cvar_Set ("developer", "1");

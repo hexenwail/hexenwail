@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # sv_autoload: death loads the last save on this map (#410).
+      - name: sv_autoload
+        run: python3 tools/test_sv_autoload.py
+
       # max_edicts 16384 of 32000; sounds past entity 8192 (#411).
       - name: Edict ceiling and large-entity sounds
         run: python3 tools/test_max_edicts.py
