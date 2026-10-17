@@ -53,6 +53,7 @@ enum m_state_e
 	m_msave,
 	m_mods,
 	m_maps,
+	m_mapskill,	/* skill / resume step after picking a map (GitHub #410) */
 	m_hwservers,
 	m_hwconnect,
 	m_confirm
