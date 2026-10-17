@@ -153,3 +153,12 @@ test('every phone button action is a button on the page, and every button maps',
     assert.equal(typeof PHONE_CONTROL_KEYCODES[action], 'number', `${action} has no keycode`);
   }
 });
+
+test('the touch-only gate is two-way: a touch after quiet hardware brings the controls back (#152 b)', () => {
+  const app = readFileSync(join(import.meta.dirname, '../app.js'), 'utf8');
+  assert.match(app, /const TOUCH_REGATE_QUIET_MS = \d+;/);
+  // Hardware input still hides them, and records when.
+  assert.match(app, /const hardwareInput = \(\) => \{\s*state\.lastHardwareInputAt = performance\.now\(\);\s*updateTouchOnlyEnvironment\(true\);/);
+  // A touch re-evaluates (not forced off) once the hardware has been quiet.
+  assert.match(app, /event\.pointerType === 'touch' && !state\.touchOnlyEnvironment &&\s*performance\.now\(\) - state\.lastHardwareInputAt > TOUCH_REGATE_QUIET_MS\) \{\s*updateTouchOnlyEnvironment\(\);/);
+});
