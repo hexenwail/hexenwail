@@ -160,6 +160,7 @@ void CL_ClearState (void)
 
 // wipe the entire cl structure
 	memset (&cl, 0, sizeof(cl));
+	CL_DemoKeys_Clear ();	/* keyframes belong to the level they were taken on (#76) */
 	V_ResetPunchAngle ();
 
 	SZ_Clear (&cls.message);
@@ -1452,6 +1453,7 @@ int CL_ReadFromServer (void)
 
 		cl.last_received_message = realtime;
 		CL_ParseServerMessage ();
+		CL_DemoKeyframe ();	/* demo rewind, GitHub #76 */
 #if defined(H2W_INTEGRATED)
 		/* Control traffic and svc_nop do not prove the server will speak H2.
 		 * Commit only once the ordinary parser advances H2 signon. */
@@ -1689,6 +1691,7 @@ void CL_Init (void)
 	Cmd_AddCommand ("record", CL_Record_f);
 	Cmd_AddCommand ("stop", CL_Stop_f);
 	Cmd_AddCommand ("playdemo", CL_PlayDemo_f);
+	CL_InitDemo ();	/* demoseek, GitHub #76 */
 	Cmd_AddCommand ("timedemo", CL_TimeDemo_f);
 	Cmd_AddCommand ("sensitivity_save", CL_Sensitivity_save_f);
 

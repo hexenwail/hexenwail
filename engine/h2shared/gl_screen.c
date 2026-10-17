@@ -1326,6 +1326,8 @@ static void SCR_DrawDemoBar (void)
 	 * speed the right-hand readout reports.  uhexen2-ofl9. */
 	if (cls.demospeed == 0.0f)
 		str = "II";
+	else if (cls.demospeed < 0.0f)
+		str = "<<";	/* rewind, GitHub #76 */
 	else if (cls.demospeed > 1.0f)
 		str = ">>";
 	else

@@ -1517,6 +1517,8 @@ static void SCR_DrawDemoBar (void)
 
 	if (cls.demospeed == 0.0f)
 		str = "II";
+	else if (cls.demospeed < 0.0f)
+		str = "<<";	/* rewind, GitHub #76 */
 	else if (cls.demospeed > 1.0f)
 		str = ">>";
 	else

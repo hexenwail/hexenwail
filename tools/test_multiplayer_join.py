@@ -138,6 +138,7 @@ static void CL_RelinkEntities(void) {}
 static void CL_UpdateEffects(void) {}
 static void CL_UpdateTEnts(void) {}
 static void CL_UpdateDevStats(void) {}
+static void CL_DemoKeyframe(void) {}	/* demo rewind keyframes, #76 */
 static void Host_Error(const char *fmt,...) { (void)fmt; longjmp(abort_join,1); }
 static void Con_Printf(const char *fmt,...) { (void)fmt; }
 #define Con_DPrintf Con_Printf

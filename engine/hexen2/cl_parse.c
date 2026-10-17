@@ -1686,7 +1686,10 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_print:
-			if (intro_playing) {
+			/* A rewind re-parses up to a second of demo in one frame; its
+			 * prints, centerprints and stuffed commands already happened
+			 * once and would all land at once.  GitHub #76. */
+			if (intro_playing || cls.demoseeking) {
 				MSG_ReadString ();
 				break;
 			}
@@ -1694,11 +1697,15 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_centerprint:
-			SCR_CenterPrint (MSG_ReadString ());
+			str = MSG_ReadString ();
+			if (!cls.demoseeking)
+				SCR_CenterPrint (str);
 			break;
 
 		case svc_stufftext:
-			Cbuf_AddText (MSG_ReadString ());
+			str = MSG_ReadString ();
+			if (!cls.demoseeking)
+				Cbuf_AddText (str);
 			break;
 
 		case svc_damage:
@@ -1877,6 +1884,12 @@ void CL_ParseServerMessage (void)
 			break;
 		case svc_spawnstatic:
 			CL_ParseStatic ();
+			/* A static spawned mid-demo links efrags and statics no
+			 * keyframe can unlink, and replaying it would link them twice;
+			 * rewind may not cross it, as it may not cross a level change.
+			 * GitHub #76. */
+			if (cls.demoplayback && cls.signon == SIGNONS)
+				CL_DemoKeys_Clear ();
 			break;
 
 		case svc_raineffect:
@@ -1928,11 +1941,15 @@ void CL_ParseServerMessage (void)
 
 		case svc_spawnstaticsound:
 			CL_ParseStaticSound ();
+			if (cls.demoplayback && cls.signon == SIGNONS)
+				CL_DemoKeys_Clear ();	/* as svc_spawnstatic, #76 */
 			break;
 
 		case svc_cdtrack:
 			cl.cdtrack = MSG_ReadByte ();
 			cl.looptrack = MSG_ReadByte ();
+			if (cls.demoseeking)
+				break;	/* the track is state; restarting it is not (#76) */
 			if (q_strcasecmp(bgmtype.string,"cd") != 0)
 				CDAudio_Stop ();
 			else if ((cls.demoplayback || cls.demorecording) &&
@@ -1943,6 +1960,8 @@ void CL_ParseServerMessage (void)
 
 		case svc_midi_name:
 			q_strlcpy (cl.midi_name, MSG_ReadString(), sizeof(cl.midi_name));
+			if (cls.demoseeking)
+				break;
 			if (q_strcasecmp(bgmtype.string,"midi") != 0)
 				BGM_Stop();
 			else	BGM_PlayMIDIorMusic(cl.midi_name);

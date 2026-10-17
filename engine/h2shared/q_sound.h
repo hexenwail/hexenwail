@@ -90,6 +90,9 @@ void S_Init (void);
 void S_Startup (void);
 void S_Shutdown (void);
 void S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol, float attenuation);
+/* Nonzero while a demo rewind silently re-parses up to its target (cl_demo.c):
+ * the sounds of a second of demo must not all start in one frame.  GitHub #76. */
+extern int	snd_mute_starts;
 void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation);
 void S_StopSound (int entnum, int entchannel);
 void S_UpdateSoundPos (int entnum, int entchannel, vec3_t origin);

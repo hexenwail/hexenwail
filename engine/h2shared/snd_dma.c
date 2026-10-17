@@ -652,6 +652,8 @@ void SND_Spatialize (channel_t *ch)
 // Start a sound effect
 // =======================================================================
 
+int		snd_mute_starts;	/* see q_sound.h; GitHub #76 */
+
 void S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float fvol, float attenuation)
 {
 	channel_t	*target_chan, *check;
@@ -666,7 +668,7 @@ void S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float 
 	if (!sfx)
 		return;
 
-	if (nosound.integer)
+	if (nosound.integer || snd_mute_starts)
 		return;
 
 // pick a channel to play on
