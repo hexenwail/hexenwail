@@ -361,50 +361,65 @@ void GL_MakeAliasModelDisplayLists (qmodel_t *m, aliashdr_t *hdr)
 alias_gpu_mesh_t alias_gpu_meshes[MAX_ALIAS_MODELS];
 int num_alias_gpu_meshes;
 
-/* Map an aliashdr_t to its GPU mesh.  Direct pointer comparison (uhexen2-njba). */
-static aliashdr_t *alias_gpu_owners[MAX_ALIAS_MODELS];
+/* The table's generation.  A header's gpu_mesh is only trusted when its
+ * gpu_mesh_gen matches; GL_FreeAliasGPUMeshes bumps this, which retires every
+ * cached header's slot at once.  Starts at 1 so a zero-filled header (the
+ * hunk zeroes what it hands out) is never mistaken for a current one. */
+static int alias_gpu_generation = 1;
 
+/* Map an aliashdr_t to its GPU mesh, through the slot its header carries.
+ * The mesh used to be found by comparing header ADDRESSES against the one
+ * GL_MakeAliasGPUMesh saw -- which is the loader's hunk copy, freed before
+ * the first draw.  Every model then missed, built a second mesh from the draw
+ * path, and a later header landing on a dead address was handed another
+ * model's mesh: its index count and pose size, read against this model's
+ * draw -- the "orphaned header" GitHub #134 caught in gdb. */
 alias_gpu_mesh_t *GL_GetAliasGPUMesh (aliashdr_t *hdr)
 {
-	int i;
-	for (i = 0; i < num_alias_gpu_meshes; i++)
+	if (hdr->gpu_mesh_gen != alias_gpu_generation)
 	{
-		if (alias_gpu_owners[i] == hdr && alias_gpu_meshes[i].valid)
-			return &alias_gpu_meshes[i];
+		/* No mesh in this generation: build one (after Mod_ClearAll or a
+		 * mesh-affecting cvar freed the table, the model stays cached). */
+		GL_MakeAliasGPUMesh(hdr);
 	}
-	/* Lazily create GPU mesh if missing (e.g., after Mod_ClearAll
-	 * freed GPU resources but models stayed in cache). */
-	GL_MakeAliasGPUMesh(hdr);
-	/* Retry lookup — MakeAliasGPUMesh appends at num_alias_gpu_meshes-1 */
-	if (num_alias_gpu_meshes > 0)
-	{
-		i = num_alias_gpu_meshes - 1;
-		if (alias_gpu_owners[i] == hdr && alias_gpu_meshes[i].valid)
-			return &alias_gpu_meshes[i];
-	}
+	if (hdr->gpu_mesh_gen == alias_gpu_generation &&
+	    hdr->gpu_mesh >= 0 && hdr->gpu_mesh < num_alias_gpu_meshes &&
+	    alias_gpu_meshes[hdr->gpu_mesh].valid)
+		return &alias_gpu_meshes[hdr->gpu_mesh];
 	return NULL;
+}
+
+static void GL_FreeAliasGPUMesh (alias_gpu_mesh_t *gm)
+{
+	if (gm->vao)           { glDeleteVertexArrays_fp(1, &gm->vao); }
+	if (gm->vbo_verts)     { glDeleteBuffers_fp(1, &gm->vbo_verts); }
+	if (gm->vbo_tc)        { glDeleteBuffers_fp(1, &gm->vbo_tc); }
+	if (gm->ibo)           { glDeleteBuffers_fp(1, &gm->ibo); }
+	/* SSBOs sit in the indexed-binding cache; forget the name before
+	 * GL recycles it into a different buffer.  uhexen2 #203. */
+	if (gm->ssbo_pose)     { GL_ForgetBuffer(gm->ssbo_pose);     glDeleteBuffers_fp(1, &gm->ssbo_pose); }
+	if (gm->ssbo_pose_md3) { GL_ForgetBuffer(gm->ssbo_pose_md3); glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
+	if (gm->ssbo_bones)    { GL_ForgetBuffer(gm->ssbo_bones);    glDeleteBuffers_fp(1, &gm->ssbo_bones); }
+	if (gm->tex_pose)      { glDeleteTextures_fp(1, &gm->tex_pose); }
+	memset(gm, 0, sizeof(*gm));
 }
 
 void GL_FreeAliasGPUMeshes (void)
 {
 	int i;
 	for (i = 0; i < num_alias_gpu_meshes; i++)
-	{
-		alias_gpu_mesh_t *gm = &alias_gpu_meshes[i];
-		if (gm->vao)           { glDeleteVertexArrays_fp(1, &gm->vao); }
-		if (gm->vbo_verts)     { glDeleteBuffers_fp(1, &gm->vbo_verts); }
-		if (gm->vbo_tc)        { glDeleteBuffers_fp(1, &gm->vbo_tc); }
-		if (gm->ibo)           { glDeleteBuffers_fp(1, &gm->ibo); }
-		/* SSBOs sit in the indexed-binding cache; forget the name before
-		 * GL recycles it into a different buffer.  uhexen2 #203. */
-		if (gm->ssbo_pose)     { GL_ForgetBuffer(gm->ssbo_pose);     glDeleteBuffers_fp(1, &gm->ssbo_pose); }
-		if (gm->ssbo_pose_md3) { GL_ForgetBuffer(gm->ssbo_pose_md3); glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
-		if (gm->ssbo_bones)    { GL_ForgetBuffer(gm->ssbo_bones);    glDeleteBuffers_fp(1, &gm->ssbo_bones); }
-		if (gm->tex_pose)      { glDeleteTextures_fp(1, &gm->tex_pose); }
-	}
-	memset(alias_gpu_meshes, 0, sizeof(alias_gpu_meshes));
-	memset(alias_gpu_owners, 0, sizeof(alias_gpu_owners));
+		GL_FreeAliasGPUMesh(&alias_gpu_meshes[i]);
 	num_alias_gpu_meshes = 0;
+	alias_gpu_generation++;
+}
+
+/* A refused mesh: free what was made for it, and mark the header so the draw
+ * path does not rebuild (and leak) it every frame. */
+static void GL_RefuseAliasGPUMesh (aliashdr_t *hdr, alias_gpu_mesh_t *gm)
+{
+	GL_FreeAliasGPUMesh(gm);
+	hdr->gpu_mesh = -1;
+	hdr->gpu_mesh_gen = alias_gpu_generation;
 }
 
 /*
@@ -428,7 +443,11 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	int		mark, i, j;
 
 	if (num_alias_gpu_meshes >= MAX_ALIAS_MODELS)
+	{
+		hdr->gpu_mesh = -1;		/* full: refused for this generation */
+		hdr->gpu_mesh_gen = alias_gpu_generation;
 		return;
+	}
 
 	/* For skeletal (PV_IQM) models, create simple vertex order */
 	if (hdr->poseverttype == PV_IQM)
@@ -472,7 +491,11 @@ void GL_MakeAliasGPUMesh (aliashdr_t *hdr)
 	}
 
 	if (num_tris <= 0)
+	{
+		hdr->gpu_mesh = -1;		/* nothing to draw: refused, see above */
+		hdr->gpu_mesh_gen = alias_gpu_generation;
 		return;
+	}
 
 	mark = Hunk_LowMark();
 	indices = (unsigned short *) Hunk_AllocName(num_tris * 3 * sizeof(unsigned short), "gpuidx");
@@ -659,6 +682,7 @@ iqm_gpu_setup:
 		{
 			Con_DPrintf ("GL_MakeAliasGPUMesh: no pose data (numposes=%d poseverts=%d), model will not be drawn\n",
 						hdr->numposes, hdr->poseverts);
+			GL_RefuseAliasGPUMesh(hdr, gm);
 			Hunk_FreeToLowMark(mark);
 			return;
 		}
@@ -668,7 +692,8 @@ iqm_gpu_setup:
 		gm->numposes = hdr->numposes;
 		gm->valid = true;
 
-		alias_gpu_owners[num_alias_gpu_meshes] = hdr;
+		hdr->gpu_mesh = num_alias_gpu_meshes;
+		hdr->gpu_mesh_gen = alias_gpu_generation;
 		num_alias_gpu_meshes++;
 
 		if (hdr->poseverttype == PV_IQM)
@@ -737,6 +762,7 @@ iqm_gpu_setup:
 	{
 		Con_DPrintf ("GL_MakeAliasGPUMesh: no pose data (numposes=%d poseverts=%d), model will not be drawn\n",
 					hdr->numposes, hdr->poseverts);
+		GL_RefuseAliasGPUMesh(hdr, gm);
 		Hunk_FreeToLowMark(mark);
 		return;
 	}
@@ -746,7 +772,8 @@ iqm_gpu_setup:
 	gm->numposes = hdr->numposes;
 	gm->valid = true;
 
-	alias_gpu_owners[num_alias_gpu_meshes] = hdr;
+	hdr->gpu_mesh = num_alias_gpu_meshes;
+	hdr->gpu_mesh_gen = alias_gpu_generation;
 	num_alias_gpu_meshes++;
 
 	Hunk_FreeToLowMark(mark);
