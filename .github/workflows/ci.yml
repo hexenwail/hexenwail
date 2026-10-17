@@ -423,7 +423,11 @@ jobs:
       - name: Build Windows, tools and gamecode
         run: |
           set -euo pipefail
-          for target in win64 h2ded-win64 utils utils-win64 gamecode; do
+          # linux-fhs and appimage are what the Linux zip and the AppImage
+          # ship; linux-fhs fails its own build if the bundle NEEDs a library
+          # it neither carries nor may assume from the host (GitHub #424), so
+          # building them here is that gate, ahead of a release tag.
+          for target in win64 h2ded-win64 utils utils-win64 gamecode linux-fhs appimage; do
             echo "::group::Build .$target"
             nix build ".#$target" --print-build-logs
             echo "::endgroup::"

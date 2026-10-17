@@ -772,20 +772,64 @@
               ];
               sha256 = "af8f3a00e416dfb262bcaa904a1c84df04a51b72bbc1313aed012bc754bdf99b";
             };
-            runtimeLibs = with pkgs; [
-              sdl3
+            # nixpkgs builds SDL3 with SDL_DEPS_SHARED off, which turns every
+            # optional backend -- X11 and its extensions, Wayland, libdecor,
+            # JACK, PipeWire, PulseAudio, libusb -- into a hard DT_NEEDED.
+            # Right on NixOS, where dlopen cannot find a library by soname;
+            # wrong for a download, where a host missing any one of them then
+            # cannot start the game at all.  Upstream's default dlopens them,
+            # so a missing backend only disables that backend.  GitHub #424.
+            sdl3Portable = pkgs.sdl3.overrideAttrs (old: {
+              cmakeFlags = map (f: if f == "-DSDL_DEPS_SHARED:BOOL=FALSE"
+                                   then "-DSDL_DEPS_SHARED:BOOL=TRUE" else f)
+                               old.cmakeFlags;
+              # SDL's own tests init subsystems, which with dlopened backends
+              # find nothing to open inside the build sandbox.
+              doCheck = false;
+            });
+            # The engine uses fluidsynth only as an offline synth
+            # (fluid_synth_write_s into its own mixer, midi_fluid.c), so none
+            # of its audio drivers are needed -- and nixpkgs' hard-links
+            # PulseAudio, JACK and libgomp.  libsndfile stays: it is what
+            # loads SF3 (compressed) soundfonts, and its codecs are bundled.
+            fluidsynthPortable = pkgs.fluidsynth.overrideAttrs (old: {
+              cmakeFlags = (old.cmakeFlags or []) ++ [
+                "-Denable-pulseaudio=off" "-Denable-jack=off" "-Denable-pipewire=off"
+                "-Denable-openmp=off" "-Denable-dbus=off" "-Denable-systemd=off"
+                "-Denable-sdl2=off" "-Denable-sdl3=off" "-Denable-portaudio=off"
+                "-Denable-readline=off" "-Denable-ladspa=off" "-Denable-oss=off"
+              ];
+            });
+            # Taken from each package's library output (lib.getLib): the
+            # default output of libsndfile and flac is "bin", so "${pkg}/lib"
+            # silently bundled neither.
+            runtimeLibs = map pkgs.lib.getLib (with pkgs; [
+              sdl3Portable
               libvorbis
               libogg
-              fluidsynth
+              fluidsynthPortable
               libsndfile
               flac
+              mpg123
+              lame
               libxmp
               opusfile
               libopus
               alsa-lib
+            ]);
+            # What a download may assume the host provides: glibc, the C++
+            # runtime every desktop distro carries, and the GL driver, which
+            # must come from the host (bundling it would bind the game to the
+            # builder's GPU stack).  Anything else NEEDed must be in lib/;
+            # the check at the end of the build fails otherwise.  GitHub #424.
+            hostLibs = [
+              "ld-linux-x86-64.so.2" "libc.so.6" "libm.so.6" "libdl.so.2"
+              "libpthread.so.0" "librt.so.1" "libmvec.so.1"
+              "libstdc++.so.6" "libgcc_s.so.1"
+              "libGL.so.1" "libGLX.so.0" "libOpenGL.so.0" "libEGL.so.1"
             ];
           in pkgs.runCommand "hexenwail-linux-fhs-${nixosPkg.version}" {
-            nativeBuildInputs = [ pkgs.patchelf ];
+            nativeBuildInputs = [ pkgs.patchelf pkgs.binutils ];
           } ''
             mkdir -p $out/bin $out/lib
 
@@ -806,6 +850,9 @@
               done
             done
             chmod +w $out/lib/*
+            # opusfile's URL-streaming companion: nothing links it (the engine
+            # needs libopusfile only), and it would drag OpenSSL in.
+            rm -f $out/lib/libopusurl.so*
 
             # Set FHS interpreter and relative rpaths
             patchelf \
@@ -815,6 +862,22 @@
             for so in $out/lib/*.so $out/lib/*.so.*; do
               [ -f "$so" ] && patchelf --set-rpath "\$ORIGIN" "$so" 2>/dev/null || true
             done
+
+            # Every DT_NEEDED in the bundle must be bundled or a host library
+            # (hostLibs above).  GitHub #424.
+            missing=""
+            for f in $out/bin/glhexen2 $out/lib/*.so*; do
+              [ -f "$f" ] || continue
+              for n in $(readelf -d "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+                case " ${pkgs.lib.concatStringsSep " " hostLibs} " in *" $n "*) continue ;; esac
+                [ -e "$out/lib/$n" ] && continue
+                missing="$missing $(basename "$f")->$n"
+              done
+            done
+            if [ -n "$missing" ]; then
+              echo "linux-fhs: NEEDED neither bundled nor a host library:$missing" >&2
+              exit 1
+            fi
           '';
 
 
