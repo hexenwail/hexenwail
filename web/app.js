@@ -1326,10 +1326,24 @@ function isPhoneModeEnvironment() {
   return matchMedia(PHONE_VIEWPORT_QUERY).matches;
 }
 
+// Are the touch controls on screen?  The CSS decides the same thing from the
+// same three inputs (index.html, .phone-controls display rules).
+function touchControlsShown() {
+  const pref = state.preferences.touchControls;
+  return pref === 'on' || (pref === 'auto' && state.touchOnlyEnvironment);
+}
+
 function updateTouchOnlyEnvironment(forceOff = false) {
+  const wasShown = touchControlsShown();
   state.phoneMode = isPhoneModeEnvironment();
   state.touchOnlyEnvironment = !forceOff && isLikelyTouchOnlyEnvironment();
-  if (!state.touchOnlyEnvironment) {
+  // Release held touch input only when the controls actually go away.  This
+  // runs on every touch pointerdown (the two-way gate below), which is
+  // dispatched AFTER the pad registered that very touch -- so releasing
+  // whenever the environment read "not touch-only" ended every look drag and
+  // stick push the moment it began, with "Always show" on, on a tablet with
+  // a trackpad, or on any phone whose browser reports a fine pointer.
+  if (wasShown && !touchControlsShown()) {
     releasePhoneInputs();
   }
   applyPreferences();

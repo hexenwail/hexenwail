@@ -64,6 +64,8 @@ qboolean	menu_touch_key;
 
 #ifdef __EMSCRIPTEN__
 static float	touch_look_x, touch_look_y;
+/* Degrees of turn per CSS pixel of drag on the web look pad (IN_TouchLook). */
+static cvar_t	touch_lookspeed = {"touch_lookspeed", "0.25", CVAR_ARCHIVE};
 
 EMSCRIPTEN_KEEPALIVE int Hexenwail_TouchKey (int key, int down)
 {
@@ -1023,6 +1025,9 @@ void IN_Init (void)
 {
 	/* mouse */
 	Cvar_RegisterVariable (&m_filter);
+#ifdef __EMSCRIPTEN__
+	Cvar_RegisterVariable (&touch_lookspeed);
+#endif
 	Cvar_RegisterVariable (&m_rawinput);
 	Cvar_RegisterVariable (&in_debugkeys);
 
@@ -1149,6 +1154,35 @@ static void IN_MouseMove (usercmd_t *cmd, int mx, int my)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+/* The web page's look pad (web/lib/phone-controls.js, Hexenwail_TouchLook).
+ * Always free look: a phone has no other way to look up or down, and routing
+ * the drag through IN_MouseMove sent its vertical half to forwardmove whenever
+ * freelook was off -- the default -- so dragging up walked the player forward
+ * instead of tilting the camera.  Nor does it share m_filter's history with a
+ * real mouse.  Its own rate, touch_lookspeed in degrees per CSS pixel of drag:
+ * the mouse scale (sensitivity 3 x m_yaw 0.022) gave 0.066, so a full swipe
+ * across the pad turned about 30 degrees.  The page's look-sensitivity slider
+ * multiplies the pixels before they arrive.  A negative m_pitch (invert
+ * mouse) still inverts the pitch, and the pitch limits are the mouse's. */
+static void IN_TouchLook (void)
+{
+	float	dx = touch_look_x, dy = touch_look_y;
+
+	touch_look_x = touch_look_y = 0;
+	if (dx == 0.0f && dy == 0.0f)
+		return;
+
+	cl.viewangles[YAW] -= touch_lookspeed.value * dx;
+	cl.viewangles[PITCH] += (m_pitch.value < 0 ? -1.0f : 1.0f) * touch_lookspeed.value * dy;
+	if (cl.viewangles[PITCH] > 80)
+		cl.viewangles[PITCH] = 80;
+	if (cl.viewangles[PITCH] < -70)
+		cl.viewangles[PITCH] = -70;
+	V_StopPitchDrift ();
+}
+#endif
+
 static void IN_DiscardMove (void)
 {
 	if (mouseinitialized)
@@ -1197,20 +1231,11 @@ void IN_Move (usercmd_t *cmd)
 		x = (int)fx;
 		y = (int)fy;
 	}
-#ifdef __EMSCRIPTEN__
-	if (touch_look_x <= -1.0f || touch_look_x >= 1.0f ||
-	    touch_look_y <= -1.0f || touch_look_y >= 1.0f)
-	{
-		int tx = (int)touch_look_x;
-		int ty = (int)touch_look_y;
-		touch_look_x -= tx;
-		touch_look_y -= ty;
-		x += tx;
-		y += ty;
-	}
-#endif
 	if (x != 0 || y != 0)
 		IN_MouseMove (cmd, x, y);
+#ifdef __EMSCRIPTEN__
+	IN_TouchLook ();
+#endif
 
 	if (app_active)
 		IN_GPMove ();

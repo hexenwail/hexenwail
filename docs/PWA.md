@@ -226,7 +226,14 @@ If a touchpad/mouse, physical keyboard activity, pen, wheel, or controller is
 detected, auto mode hides the overlay and releases all held touch inputs. The
 launcher setting can choose auto/on/off behavior, left- or right-handed layout,
 and look sensitivity; **Always show** displays the controls on any running
-device.
+device. Held touch input is released only when the controls actually go away,
+never on a touch that merely re-evaluates the environment.
+
+The right-hand look pad is always free look, whatever `freelook` says: drag up
+to look up, right to turn right. Its rate is `touch_lookspeed`, in degrees per
+CSS pixel of drag (default 0.25, so a swipe across the pad turns about 120
+degrees), multiplied by the look-sensitivity slider; a negative `m_pitch`
+(invert mouse) inverts it too.
 Preferences are stored in local browser storage, separate from imported game
 assets and saves.
 
