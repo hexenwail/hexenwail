@@ -66,10 +66,11 @@ cvar_t	hexenwail_version	= {"hexenwail", "0", CVAR_ROM};
  * into a config is how you get a mod that only fails on one machine.  Takes
  * effect at the next map load, since sv.edicts is sized once there.
  *
- * MAX_EDICTS is still the hard ceiling this clamps into, so today this can only
- * lower the limit, not raise it past 8192.  Raising the hard cap is a separate
- * decision with real costs -- see the note on MIN_EDICTS in quakedef.h. */
-cvar_t	max_edicts		= {"max_edicts", "8192", CVAR_NONE};
+ * Ironwail's default and ceiling: 16384, clamped into MAX_EDICTS 32000.  The
+ * ceiling was 8192 until GitHub #411, so this could only LOWER the limit;
+ * the costs of raising it are in the note on MIN_EDICTS in quakedef.h, and
+ * entities past 8192 make sounds only on protocol 100 (SV_SoundEntityFits). */
+cvar_t	max_edicts		= {"max_edicts", "16384", CVAR_NONE};
 
 /* Registered but never read by the engine, exactly as upstream, where it exists
  * so the 2021 rerelease's progs find a cvar to query rather than nothing.  No
@@ -462,17 +463,47 @@ void SV_StartParticle4 (vec3_t org, float radius, int color, int effect, int cou
 
 /*
 ==================
+SV_SoundEntityFits
+
+Every Raven-lineage sound message packs the entity into (ent<<3)|channel in
+one short, so it can name entities 0..8191 and nothing above.  Above that
+the entity goes out whole -- an SND_LARGEENTITY svc_sound, or
+svc_stopsound_large / svc_sound_update_pos_large -- which only protocol 100
+defines; on 18..21 the message is dropped, as Ironwail drops it on
+PROTOCOL_NETQUAKE, rather than sent with a number that wraps onto some
+other entity.  Only reachable at all since max_edicts can exceed 8192
+(GitHub #411).
+==================
+*/
+static qboolean SV_SoundEntityFits (int ent, qboolean *large)
+{
+	*large = (ent >= SND_MAX_PACKED_ENTITY);
+	return !*large || sv_protocol >= PROTOCOL_HEXENWAIL_1;
+}
+
+/*
+==================
 SV_StopSound
 ==================
 */
 void SV_StopSound (edict_t *entity, int channel)
 {
 	int			ent;
+	qboolean		large;
 
 	if (sv.datagram.cursize > MAX_DATAGRAM-4)
 		return;
 
 	ent = NUM_FOR_EDICT(entity);
+	if (!SV_SoundEntityFits (ent, &large))
+		return;
+	if (large)
+	{
+		MSG_WriteByte (&sv.datagram, svc_stopsound_large);
+		MSG_WriteShort (&sv.datagram, ent);
+		MSG_WriteByte (&sv.datagram, channel);
+		return;
+	}
 	channel = (ent<<3) | channel;
 
 	MSG_WriteByte (&sv.datagram, svc_stopsound);
@@ -488,15 +519,25 @@ void SV_UpdateSoundPos (edict_t *entity, int channel)
 {
 	int			ent;
 	int			i;
+	qboolean		large;
 
 	if (sv.datagram.cursize > MAX_DATAGRAM-4)
 		return;
 
 	ent = NUM_FOR_EDICT(entity);
-	channel = (ent<<3) | channel;
-
-	MSG_WriteByte (&sv.datagram, svc_sound_update_pos);
-	MSG_WriteShort (&sv.datagram, channel);
+	if (!SV_SoundEntityFits (ent, &large))
+		return;
+	if (large)
+	{
+		MSG_WriteByte (&sv.datagram, svc_sound_update_pos_large);
+		MSG_WriteShort (&sv.datagram, ent);
+		MSG_WriteByte (&sv.datagram, channel);
+	}
+	else
+	{
+		MSG_WriteByte (&sv.datagram, svc_sound_update_pos);
+		MSG_WriteShort (&sv.datagram, (ent<<3) | channel);
+	}
 	for (i = 0; i < 3; i++)
 		MSG_WriteCoord (&sv.datagram, entity->v.origin[i] + 0.5*(entity->v.mins[i]+entity->v.maxs[i]));
 }
@@ -630,6 +671,7 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 {
 	int			sound_num, ent;
 	int			i, field_mask;
+	qboolean		large;
 
 	if (q_strcasecmp(sample,"misc/null.wav") == 0)
 	{
@@ -663,10 +705,10 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 	}
 
 	ent = NUM_FOR_EDICT(entity);
+	if (!SV_SoundEntityFits (ent, &large))
+		return;
 
-	channel = (ent<<3) | channel;
-
-	field_mask = 0;
+	field_mask = large ? SND_LARGEENTITY : 0;
 	if (volume != DEFAULT_SOUND_PACKET_VOLUME)
 		field_mask |= SND_VOLUME;
 	if (attenuation != DEFAULT_SOUND_PACKET_ATTENUATION)
@@ -700,7 +742,13 @@ void SV_StartSound (edict_t *entity, int channel, const char *sample, int volume
 		MSG_WriteByte (&sv.datagram, volume);
 	if (field_mask & SND_ATTENUATION)
 		MSG_WriteByte (&sv.datagram, attenuation*64);
-	MSG_WriteShort (&sv.datagram, channel);
+	if (field_mask & SND_LARGEENTITY)
+	{
+		MSG_WriteShort (&sv.datagram, ent);
+		MSG_WriteByte (&sv.datagram, channel);
+	}
+	else
+		MSG_WriteShort (&sv.datagram, (ent<<3) | channel);
 	MSG_WriteByte (&sv.datagram, sound_num);
 	for (i = 0; i < 3; i++)
 		MSG_WriteCoord (&sv.datagram, entity->v.origin[i] + 0.5*(entity->v.mins[i]+entity->v.maxs[i]));

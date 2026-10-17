@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # max_edicts 16384 of 32000; sounds past entity 8192 (#411).
+      - name: Edict ceiling and large-entity sounds
+        run: python3 tools/test_max_edicts.py
+
       # contrast is Ironwail's multiplier, clamped 1..2.
       - name: Contrast parity
         run: python3 tools/test_contrast_parity.py

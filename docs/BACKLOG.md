@@ -11,7 +11,7 @@ a change, not live tickets -- there is no tracker to look them up in.
 If one of these becomes real work, open a GitHub issue for it and delete the line
 here.
 
-## P2 — worth doing (49)
+## P2 — worth doing (48)
 
 - **SoT rain/snow reported missing in the field (Garrett)** `uhexen2-2rxl` — Garrett reports Storm over Thyrion's rain/snow weather effects are missing on 0.8.0-beta.r3. Triage checklist sent to him: (link omitted)
 - **Dedicated server default heap too small for large BSP2 maps** `uhexen2-3uan` — A 28 MB BSP2 map (tristwail_test.bsp, community WIP by BloodShot) fails to load on dedicated server with: `FATAL ERROR: Hunk_AllocName: failed on 1656928 bytes for vertexes`
@@ -49,7 +49,6 @@ here.
 - **Keep README platform plans in sync as ports land** `uhexen2-d1uc` — The README Platforms table is being updated today (2026-08-18) to show WASM build status and planned Android/Flathub/AppImage rows.
 - **Settle whether Garrett's 'bright lines' are surface seams or diagonal shadow stepping** `uhexen2-f3wm` — Split out of uhexen2-5nle, whose other half (large-map lightmap page ceiling) is answered and closed. This half never was about the gutter -- it is about whether uhexen2-jwzf was ever Garret…
 - **WASM: deliver a soundfont into the emscripten virtual FS** `uhexen2-g3j9` — 59343680d wired the libTiMidity codec into BGM tier 2 and it builds and links for WASM, but nothing puts an SF2 where SF_FindSoundFont() can see it, so browser MIDI is still silent.
-- **Raise the hard MAX_EDICTS ceiling above 8192 (memory budget decision)** `uhexen2-gyul` — uhexen2-a5nn.9 made max_edicts a runtime cvar, but it clamps into a hard MAX_EDICTS of 8192, so it can only lower the ceiling.
 - **Build desktop -DUSE_GLES=ON in CI -- the claim that it matches the web path is unverified** `uhexen2-ibnq.5` — engine/CMakeLists.txt:195 drops GL_DLSYM when USE_GLES is set, with the comment: 'Dropping it here is what makes a desktop -DUSE_GLES=ON build take the same code path Emscripten already take…
 - **Check in the GL-vs-GLES headless render comparison as a gate** `uhexen2-ibnq.6` — The burst-and-cross-match harness from the 'cross-build-headless-render-comparison-2026-08-15' memory exists only as a memory and a set of ad-hoc invocations.
 - **Audit the Display submenu for software parity -- it has no WEBSOFT arm** `uhexen2-ibnq.7` — M_Display_IsSkip is the third submenu with per-row skip logic, and it is the only one with no '#if defined(WEBSOFT)' arm -- so tools/menu_soft_parity.py deliberately skips it (checks 3 and 4…
