@@ -46,6 +46,8 @@ typedef struct glprogram_s {
 	GLint	u_caustics;	/* world shader: vec2(intensity, time) for underwater caustics (uhexen2-6bfm) */
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
+	GLint	u_lmstyles;	/* world shader: x 1 = GPU lightstyles, y the CPU shift as a factor (#439) */
+	GLint	u_lmlayer1, u_lmlayer2, u_lmlayer3;	/* lightstyle layer atlases, units LMSTYLE_TMU.. */
 	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
 	GLint	u_oit_mode;		/* OIT programs: 0 WBOIT, 1 MBOIT moments, 2 MBOIT composite (#87) */
 	GLint	u_mboit_ms;		/* moment targets multisampled */
@@ -111,6 +113,8 @@ typedef struct glprogram_s {
 
 /* Texture units of the MBOIT moment targets during the composite pass (#87);
  * above everything a translucent draw binds (0-5, LIGHT_GRID_TMU 5). */
+/* GPU lightstyle layer atlases (gl_rsurf.c, #439): units 6, 7, 8. */
+#define LMSTYLE_TMU		6
 #define MBOIT_TMU_B0		12
 #define MBOIT_TMU_MOM		13
 #define MBOIT_TMU_B0_MS		14

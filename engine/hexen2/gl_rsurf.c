@@ -104,6 +104,23 @@ static qboolean	lightmap_modified[MAX_LIGHTMAPS];
  * comes first in the file.  Read by gl_rmain.c via extern. */
 int	rprof_lm_pages_uploaded;
 
+/* GPU lightstyles (GitHub #439).  When on, the atlas holds each surface's
+ * FIRST style's raw samples, not the CPU's combined light, and three layer
+ * atlases at the same UVs hold styles 2-4.  The world shader sums the layers
+ * weighted by LightStyles[] from the light-cluster SSBO, so an animated light
+ * costs neither a rebuild nor an upload.  Every layer's alpha carries its
+ * own style index, 255 meaning "no style here" (the layers are cleared to
+ * it): an index is constant over a surface's rect and its gutter, so no
+ * filter tap ever blends two.  lm_gpu_styles is the mode the lightmaps were
+ * BUILT in; R_LightStyles_FrameSetup rebuilds them when the wanted mode
+ * changes.  Ironwail's design, with same-UV layer textures instead of its
+ * side-by-side atlas packing. */
+static qboolean	lm_gpu_styles;
+static GLuint	lm_style_layers[3];
+static void LM_DeleteStyleLayers (void);
+static void LM_RebuildSurfaces (void);
+void R_RebuildAllLightmaps (void);
+
 /* Dirty rect per lightmap page for sub-image uploads */
 static int	lightmap_rectmin[MAX_LIGHTMAPS][2]; /* x, y */
 static int	lightmap_rectmax[MAX_LIGHTMAPS][2]; /* x, y */
@@ -599,6 +616,10 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 	unsigned int	scale;
 	int		maps;
 	unsigned int	*blcr, *blcg, *blcb;
+	/* GPU lightstyles: layer 0 is the first style's raw samples, at 1x
+	 * (scale 256, shift 8), with that style's index in alpha. */
+	const qboolean	layered = lm_gpu_styles;
+	const byte	lm_alpha = layered ? (surf->styles[0] == 255 ? 0 : surf->styles[0]) : 255;
 
 	/* Sky/turb/tiled surfaces carry placeholder extents (16384, set in
 	 * Mod_SetDrawingFlags) and no lightmap samples.  A dynamic light marking
@@ -638,6 +659,8 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 		{
 			scale = d_lightstylevalue[surf->styles[maps]];
 			surf->cached_light[maps] = scale;	// 8.8 fraction
+			if (layered)
+				scale = 256;
 
 			for (i = 0, j = 0; i < size; i++)
 			{
@@ -648,11 +671,13 @@ static void R_BuildLightMap (msurface_t *surf, byte *dest, int stride)
 			}
 
 			lightmap += size * 3;
+			if (layered)
+				break;		/* styles 2-4 live in the layer atlases */
 		}
 	}
 
 // add all the dynamic lights (only when r_dynamic is enabled)
-	if (r_dynamic.integer && surf->dlightframe == r_framecount)
+	if (!layered && r_dynamic.integer && surf->dlightframe == r_framecount)
 		R_AddDynamicLights (surf);
 
 // bound, invert, and shift
@@ -668,7 +693,7 @@ store:
 		 * framebuffer.  When off, fall back to the legacy "2x pre-baked"
 		 * shift 7 (which clamps at the atlas).  uhexen2-f29y. */
 		{
-		const int lmshift = 7 + (gl_overbright.integer ? 1 : 0);
+		const int lmshift = layered ? 8 : 7 + (gl_overbright.integer ? 1 : 0);
 		/* What the writers below add to dest at the end of a row, which is
 		 * the row stride less the smax pixels they just walked it over.  A
 		 * separate name because `stride` stays the caller's row stride all
@@ -689,7 +714,7 @@ store:
 					dest[0] = q;
 					dest[1] = r;
 					dest[2] = s;
-					dest[3] = 255;
+					dest[3] = lm_alpha;
 					dest += 4;
 					blcr += 3;
 				}
@@ -709,7 +734,7 @@ store:
 					dest[0] = t;
 					dest[1] = t;
 					dest[2] = t;
-					dest[3] = 255;
+					dest[3] = lm_alpha;
 					dest += 4;
 					blcr += 3;
 				}
@@ -1332,7 +1357,7 @@ void R_RenderBrushPoly (entity_t *e, msurface_t *fa, qboolean override)
 	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
 
 	// check for lightmap modification
-	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
+	for (maps = 0; !lm_gpu_styles && maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
 	{
 		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
 			goto dynamic;
@@ -1497,7 +1522,7 @@ void R_RenderBrushPolyMTex (entity_t *e, msurface_t *fa, qboolean override)
 		lightmap_polys[fa->lightmaptexturenum] = fa->polys;
 
 		// check for lightmap modification
-		for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
+		for (maps = 0; !lm_gpu_styles && maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
 		{
 			if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
 				goto dynamic1;
@@ -1812,7 +1837,7 @@ static void R_BatchEmitSurface (msurface_t *fa)
 	fa->polys->chain = lightmap_polys[fa->lightmaptexturenum];
 	lightmap_polys[fa->lightmaptexturenum] = fa->polys;
 
-	for (maps = 0; maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
+	for (maps = 0; !lm_gpu_styles && maps < MAXLIGHTMAPS && fa->styles[maps] != 255; maps++)
 	{
 		if (d_lightstylevalue[fa->styles[maps]] != fa->cached_light[maps])
 			goto dynamic_batch;
@@ -1944,7 +1969,7 @@ void R_LightmapRebuildIfDirty (msurface_t *surf)
 	 * extents — skip the rebuild + dirty-rect entirely.  See R_BuildLightMap. */
 	if (surf->flags & SURF_DRAWTILED)
 		return;
-	for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+	for (maps = 0; !lm_gpu_styles && maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
 	{
 		if (d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps])
 		{
@@ -2784,7 +2809,7 @@ static void DrawTextureChains (entity_t *e)
 						qboolean style_changed = false;
 						s->polys->chain = lightmap_polys[s->lightmaptexturenum];
 						lightmap_polys[s->lightmaptexturenum] = s->polys;
-						for (maps = 0; maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
+						for (maps = 0; !lm_gpu_styles && maps < MAXLIGHTMAPS && s->styles[maps] != 255; maps++)
 						{
 							if (d_lightstylevalue[s->styles[maps]] != s->cached_light[maps])
 							{
@@ -3231,7 +3256,7 @@ void R_DrawBrushModel (entity_t *e, qboolean Translucent)
 				qboolean style_changed = false;
 				surf->polys->chain = lightmap_polys[surf->lightmaptexturenum];
 				lightmap_polys[surf->lightmaptexturenum] = surf->polys;
-				for (maps = 0; maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
+				for (maps = 0; !lm_gpu_styles && maps < MAXLIGHTMAPS && surf->styles[maps] != 255; maps++)
 				{
 					if (d_lightstylevalue[surf->styles[maps]] != surf->cached_light[maps])
 					{
@@ -3699,6 +3724,7 @@ void R_FreeWorldVBO (void)
 	if (world_vao) { glDeleteVertexArrays_fp(1, &world_vao); world_vao = 0; }
 	if (world_index_data) { free(world_index_data); world_index_data = NULL; }
 	if (lm_atlas_texture) { glDeleteTextures_fp(1, &lm_atlas_texture); lm_atlas_texture = 0; }
+	LM_DeleteStyleLayers ();
 	lm_atlas_enabled = false;
 	world_num_verts = 0;
 	world_num_indices = 0;
@@ -4396,6 +4422,216 @@ static qboolean LM_StitchAtlas (void)
 
 /*
 ==================
+GPU lightstyles: the layer atlases  (GitHub #439)
+==================
+*/
+static void LM_DeleteStyleLayers (void)
+{
+	int	k;
+
+	for (k = 0; k < 3; k++)
+	{
+		if (lm_style_layers[k])
+		{
+			glDeleteTextures_fp (1, &lm_style_layers[k]);
+			lm_style_layers[k] = 0;
+		}
+	}
+	currenttexture = GL_UNUSED_TEXTURE;
+}
+
+/* Is the GPU path wanted?  Desktop clustered lighting only: its SSBO is what
+ * carries LightStyles[] to the world shader, and its per-pixel dlights are
+ * what lets layer 0 stay free of baked dynamic light.  The atlas has to be
+ * on, because the layers share its UVs.  Every input is stable within a
+ * frame, the same contract R_LightCluster_ShadesWorld keeps. */
+static qboolean LM_GpuStylesWanted (void)
+{
+#ifdef USE_GLES
+	return false;
+#else
+	return r_gpulightstyles.integer != 0 && lm_atlas_enabled &&
+	       R_LightCluster_ShadesWorld ();
+#endif
+}
+
+/* One style's raw samples for a surface, at 1x, into a block that has the
+ * LM_GUTTER border around it, then the gutter itself.  The shape of
+ * R_BuildLightMap's layer 0, for map index `map`. */
+static void LM_BuildRawLayer (const msurface_t *surf, int map, byte *block, int stride)
+{
+	const int	smax = (surf->extents[0] >> 4) + 1;
+	const int	tmax = (surf->extents[1] >> 4) + 1;
+	const byte	*src = surf->samples ? surf->samples + (size_t)map * smax * tmax * 3 : NULL;
+	byte		*dest;
+	int		i, j, r, g, b;
+
+	for (i = 0; i < tmax; i++)
+	{
+		dest = block + (size_t)i * stride;
+		for (j = 0; j < smax; j++, dest += 4)
+		{
+			r = src ? src[0] : 0;
+			g = src ? src[1] : 0;
+			b = src ? src[2] : 0;
+			if (src)
+				src += 3;
+			if (!gl_coloredlight.integer)
+				r = g = b = (r + g + b) / 3;
+			dest[0] = r;
+			dest[1] = g;
+			dest[2] = b;
+			dest[3] = surf->styles[map];
+		}
+	}
+	LM_FillGutter (block, stride, smax, tmax);
+}
+
+/* Create the three layer atlases, cleared to "no style" (alpha 255), and
+ * upload styles 2-4 of every surface that has them at that surface's own
+ * atlas rect.  False on any GL error, and the caller falls back. */
+static qboolean LM_BuildStyleLayers (void)
+{
+	static byte	blockbuf[BLOCK_WIDTH * BLOCK_HEIGHT * 4];
+	size_t		atlas_size, n;
+	byte		*clear;
+	int		i, j, k, map;
+	qmodel_t	*m;
+
+	if (!lm_atlas_texture || lm_atlas_height <= 0)
+		return false;
+
+	atlas_size = (size_t)LM_ATLAS_WIDTH * lm_atlas_height * 4;
+	clear = (byte *) malloc (atlas_size);
+	if (!clear)
+		return false;
+	for (n = 0; n < atlas_size; n += 4)
+	{
+		clear[n] = clear[n + 1] = clear[n + 2] = 0;
+		clear[n + 3] = 255;
+	}
+
+	while (glGetError_fp () != GL_NO_ERROR)
+		;
+	for (k = 0; k < 3; k++)
+	{
+		if (!lm_style_layers[k])
+			glGenTextures_fp (1, &lm_style_layers[k]);
+		glBindTexture_fp (GL_TEXTURE_2D, lm_style_layers[k]);
+		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf_fp (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexImage2D_fp (GL_TEXTURE_2D, 0, lightmap_internalformat,
+				 LM_ATLAS_WIDTH, lm_atlas_height, 0,
+				 GL_RGBA, GL_UNSIGNED_BYTE, clear);
+	}
+	free (clear);
+
+	for (j = 1; j < MAX_MODELS; j++)
+	{
+		m = cl.model_precache[j];
+		if (!m)
+			break;
+		if (m->name[0] == '*' || m->type != mod_brush)
+			continue;
+		for (i = 0; i < m->numsurfaces; i++)
+		{
+			const msurface_t *surf = m->surfaces + i;
+			const int	smax = (surf->extents[0] >> 4) + 1;
+			const int	tmax = (surf->extents[1] >> 4) + 1;
+			const int	w = smax + LM_GUTTER * 2, h = tmax + LM_GUTTER * 2;
+			const int	page = surf->lightmaptexturenum;
+
+			if (surf->flags & SURF_DRAWTILED)
+				continue;
+			for (map = 1; map < MAXLIGHTMAPS && surf->styles[map] != 255; map++)
+			{
+				LM_BuildRawLayer (surf, map, blockbuf + ((size_t)LM_GUTTER * w + LM_GUTTER) * 4, w * 4);
+				glBindTexture_fp (GL_TEXTURE_2D, lm_style_layers[map - 1]);
+				glTexSubImage2D_fp (GL_TEXTURE_2D, 0,
+						    (page % LM_ATLAS_COLS) * BLOCK_WIDTH + surf->light_s - LM_GUTTER,
+						    (page / LM_ATLAS_COLS) * BLOCK_HEIGHT + surf->light_t - LM_GUTTER,
+						    w, h, GL_RGBA, GL_UNSIGNED_BYTE, blockbuf);
+			}
+		}
+	}
+	currenttexture = GL_UNUSED_TEXTURE;
+	if (glGetError_fp () != GL_NO_ERROR)
+	{
+		Con_Printf ("GPU lightstyles: the driver rejected the layer atlases\n");
+		return false;
+	}
+	return true;
+}
+
+/* After lightmaps[] and the atlas are built in the current mode: make the
+ * layers match it.  If the GPU path cannot get its layers, fall back to the
+ * CPU mode for good (until the next map), rebuilding what was just built. */
+static void LM_SettleStyleLayers (void)
+{
+	int	i;
+
+	if (!lm_gpu_styles)
+	{
+		LM_DeleteStyleLayers ();
+		return;
+	}
+	if (LM_BuildStyleLayers ())
+		return;
+
+	LM_DeleteStyleLayers ();
+	lm_gpu_styles = false;
+	LM_RebuildSurfaces ();
+	for (i = 0; i < lm_pages_used; i++)
+	{
+		lightmap_modified[i] = true;
+		lightmap_rectmin[i][0] = lightmap_rectmin[i][1] = 0;
+		lightmap_rectmax[i][0] = BLOCK_WIDTH;
+		lightmap_rectmax[i][1] = BLOCK_HEIGHT;
+	}
+	(void) LM_StitchAtlas ();
+}
+
+/* Once per frame, before the world draws: rebuild when the wanted mode moved
+ * (a cvar, r_lightclusters), then bind the layers and tell the three world
+ * programs which mode their lightmap is in.  u_lmstyles.y is the CPU path's
+ * shift turned into a factor: x2 at gl_overbright 0, where it shifted by 7. */
+void R_LightStyles_FrameSetup (void)
+{
+	const glprogram_t	*progs[3] = { &gl_shader_world, &gl_shader_world_opaque, &gl_shader_world_oit };
+	qboolean	want;
+	int		i;
+
+	want = LM_GpuStylesWanted () && lm_atlas_texture != 0;
+	if (cl.worldmodel && lm_pages_used > 0 && want != lm_gpu_styles)
+	{
+		lm_gpu_styles = want;
+		Con_DPrintf ("GPU lightstyles %s: rebuilding lightmaps\n", want ? "on" : "off");
+		R_RebuildAllLightmaps ();
+	}
+
+	if (lm_gpu_styles)
+	{
+		for (i = 0; i < 3; i++)
+		{
+			glActiveTexture_fp (GL_TEXTURE0 + LMSTYLE_TMU + i);
+			glBindTexture_fp (GL_TEXTURE_2D, lm_style_layers[i]);
+		}
+		glActiveTexture_fp (GL_TEXTURE0);
+	}
+	for (i = 0; i < 3; i++)
+	{
+		if (!progs[i]->program || progs[i]->u_lmstyles < 0)
+			continue;
+		R_UseProgram (progs[i]->program);
+		glUniform2f_fp (progs[i]->u_lmstyles, lm_gpu_styles ? 1.0f : 0.0f,
+				gl_overbright.integer ? 1.0f : 2.0f);
+	}
+}
+
+/*
+==================
 GL_BuildLightmaps
 
 Builds the lightmap texture
@@ -4422,6 +4658,8 @@ void GL_BuildLightmaps (void)
 
 	/* Decide atlas mode BEFORE building surfaces (UVs depend on it) */
 	lm_atlas_enabled = (Cvar_VariableValue("gl_lmatlas") != 0);
+	/* And the lightstyle mode, which R_BuildLightMap reads (#439). */
+	lm_gpu_styles = LM_GpuStylesWanted ();
 
 	/* Keep page 0 backed even if this map turns out to have no lit surfaces
 	 * at all (everything sky or liquid).  Several draw paths compute
@@ -4496,7 +4734,25 @@ void GL_BuildLightmaps (void)
 	 * costs nothing — it reads only lightmaps[], which pass 1 has already
 	 * filled — and lets the failure turn the atlas off while that still
 	 * means something.  uhexen2-6yzs. */
+	/* The atlas can still be refused above (driver size limit); the GPU
+	 * lightstyle mode needs it, so rebuild in the CPU mode before stitching
+	 * the per-page or failed case.  #439. */
+	if (lm_gpu_styles && !lm_atlas_enabled)
+	{
+		lm_gpu_styles = false;
+		LM_RebuildSurfaces ();
+	}
 	atlas_ok = LM_StitchAtlas ();
+	if (!atlas_ok && lm_gpu_styles)
+	{
+		lm_gpu_styles = false;
+		LM_RebuildSurfaces ();
+		atlas_ok = LM_StitchAtlas ();
+	}
+	if (atlas_ok)
+		LM_SettleStyleLayers ();
+	else
+		LM_DeleteStyleLayers ();
 	if (!atlas_ok)
 	{
 		/* Drop the texture as well as the flag: a name left non-zero is
@@ -4595,9 +4851,8 @@ void GL_BuildLightmaps (void)
 	Con_SafePrintf ("Lightmaps: %d/%d pages (%dx%d)",
 			lm_pages_used, MAX_LIGHTMAPS, BLOCK_WIDTH, BLOCK_HEIGHT);
 	if (lm_atlas_enabled && lm_atlas_texture)
-		Con_SafePrintf (", atlas %dx%d\n", LM_ATLAS_WIDTH, lm_atlas_height);
-	else
-		Con_SafePrintf ("\n");
+		Con_SafePrintf (", atlas %dx%d", LM_ATLAS_WIDTH, lm_atlas_height);
+	Con_SafePrintf (lm_gpu_styles ? ", GPU lightstyles\n" : "\n");	/* #439 */
 
 	if (lm_atlas_enabled && lm_pages_used > 0 && !lm_atlas_lit_texels)
 		Con_Printf ("[RENDERER] WARNING: lightmap atlas contains no lit texels\n");
@@ -4625,6 +4880,19 @@ void GL_ReportLightmapStatus (void)
 		    lm_atlas_enabled ? "enabled" : "per-page fallback",
 		    (unsigned int)lm_atlas_texture, lm_pages_used,
 		    (unsigned long)lm_atlas_lit_texels);
+	/* Which lightstyle path, and when it is the CPU one, why (#439). */
+	Con_Printf ("[RENDERER] lightstyles: %s%s\n",
+		    lm_gpu_styles ? "gpu" : "cpu",
+		    lm_gpu_styles ? "" :
+#ifdef USE_GLES
+		    " (ES tier: no SSBO)"
+#else
+		    !r_gpulightstyles.integer ? " (r_gpulightstyles 0)" :
+		    !lm_atlas_enabled ? " (no atlas)" :
+		    !R_LightCluster_ShadesWorld () ? " (clustered lighting off or unavailable)" :
+		    " (the layer atlases could not be built)"
+#endif
+		    );
 }
 
 
@@ -4639,13 +4907,15 @@ if gl_lmatlas is on, re-stitches the atlas immediately via
 LM_StitchAtlas so it stays in sync with the new shift.  uhexen2-f29y.
 ===============
 */
-void R_RebuildAllLightmaps (void)
+/* Rebuild every lightmapped surface into lightmaps[], in the current mode
+ * (lm_gpu_styles).  SURF_DRAWTILED is the skip, as in
+ * GL_CreateSurfaceLightmap: it used to skip DRAWSKY|DRAWTURB, which since
+ * lit water (uhexen2-a5nn.2) also skipped every LIT liquid face, so a
+ * gl_overbright toggle left the water lit at the old scale (#439). */
+static void LM_RebuildSurfaces (void)
 {
 	int		i, j;
 	qmodel_t	*m;
-
-	if (!cl.worldmodel)
-		return;
 
 	for (j = 1; j < MAX_MODELS; j++)
 	{
@@ -4661,13 +4931,23 @@ void R_RebuildAllLightmaps (void)
 		{
 			msurface_t *surf = m->surfaces + i;
 			byte *base;
-			if (surf->flags & (SURF_DRAWSKY|SURF_DRAWTURB))
+			if (surf->flags & SURF_DRAWTILED)
 				continue;
 			base = lightmaps + surf->lightmaptexturenum*lightmap_bytes*BLOCK_WIDTH*BLOCK_HEIGHT;
 			base += (surf->light_t * BLOCK_WIDTH + surf->light_s) * lightmap_bytes;
 			R_BuildLightMap (surf, base, BLOCK_WIDTH*lightmap_bytes);
 		}
 	}
+}
+
+void R_RebuildAllLightmaps (void)
+{
+	int		i;
+
+	if (!cl.worldmodel)
+		return;
+
+	LM_RebuildSurfaces ();
 
 	/* Only the pages in use — see the matching note in R_UpdateLightmaps.
 	 * Dirtying a page beyond lm_pages_used would upload from past the end
@@ -4698,6 +4978,7 @@ void R_RebuildAllLightmaps (void)
 	 * a corner of its own page.  A stale atlas is the better failure.
 	 * uhexen2-6yzs. */
 	(void) LM_StitchAtlas ();
+	LM_SettleStyleLayers ();
 }
 
 

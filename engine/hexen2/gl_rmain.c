@@ -615,6 +615,11 @@ cvar_t	gl_overbright = {"gl_overbright", "1", CVAR_ARCHIVE};	// world/brush ligh
 cvar_t	r_lightmap_bicubic = {"r_lightmap_bicubic", "0", CVAR_ARCHIVE};
 cvar_t	gl_fxaa = {"gl_fxaa", "0", CVAR_ARCHIVE};		// FXAA post-process anti-aliasing
 cvar_t	gl_lmatlas = {"gl_lmatlas", "1", CVAR_ARCHIVE};	// lightmap atlas (0 to disable)
+/* Animate lightstyles on the GPU instead of rebuilding and re-uploading the
+ * lightmaps (GitHub #439, Ironwail parity).  Takes effect where clustered
+ * lighting shades the world and the atlas is on; elsewhere the CPU path
+ * stays.  0 forces the CPU path everywhere. */
+cvar_t	r_gpulightstyles = {"r_gpulightstyles", "1", CVAR_ARCHIVE};
 cvar_t	gl_glows = {"gl_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_other_glows = {"gl_other_glows", "1", CVAR_ARCHIVE};
 cvar_t	gl_missile_glows = {"gl_missile_glows", "1", CVAR_ARCHIVE};
@@ -6317,6 +6322,10 @@ static void R_SetupGL (void)
 	R_LightCluster_Update ();
 	R_LightCluster_BindForWorld ();
 	R_LightCluster_BindForAlias ();	/* uhexen2-waum, phase C */
+	/* After the cluster update, whose SSBO carries LightStyles[]: the GPU
+	 * lightstyle mode reads them, and may rebuild the lightmaps here if the
+	 * mode it wants has changed (#439). */
+	R_LightStyles_FrameSetup ();
 }
 
 /*

@@ -502,6 +502,9 @@ static void GL_InitOITProgram (glprogram_t *p, const char *name,
 		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
 		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
 		if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
+		if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
+		if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
+		if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
 		if (p->u_soft_depth >= 0) glUniform1i_fp(p->u_soft_depth, 1);	/* uhexen2-mf9u */
 		if (p->u_alias_model >= 0)	/* uhexen2-0gn3, see GL_InitProgram */
 		{
@@ -605,6 +608,10 @@ static void GL_InitProgramUniforms (glprogram_t *p)
 	p->u_caustics        = glGetUniformLocation_fp(p->program, "u_caustics");
 	p->u_overbright      = glGetUniformLocation_fp(p->program, "u_overbright");
 	p->u_lightmap_bicubic = glGetUniformLocation_fp(p->program, "u_lightmap_bicubic");
+	p->u_lmstyles        = glGetUniformLocation_fp(p->program, "u_lmstyles");
+	p->u_lmlayer1        = glGetUniformLocation_fp(p->program, "u_lmlayer1");
+	p->u_lmlayer2        = glGetUniformLocation_fp(p->program, "u_lmlayer2");
+	p->u_lmlayer3        = glGetUniformLocation_fp(p->program, "u_lmlayer3");
 	p->u_lightdebug      = glGetUniformLocation_fp(p->program, "u_lightdebug");
 	p->u_softemu         = glGetUniformLocation_fp(p->program, "u_softemu");
 	p->u_spans           = glGetUniformLocation_fp(p->program, "u_spans");
@@ -1314,6 +1321,48 @@ static const char sworld_vert[] =
  * dlights.  A uniform cannot distinguish them; a flat varying the vertex shader
  * fills from the instance record can.  The other two paths set it from the
  * uniform unchanged. */
+/* GPU lightstyles (GitHub #439).  The atlas then holds each surface's first
+ * style raw, the three layer atlases at the same UVs styles 2-4, and every
+ * layer's alpha that layer's style index (255: none).  Summed here weighted
+ * by LightStyles[] -- the light-cluster SSBO, declared above -- and the CPU
+ * path's shift and clamp applied after, so the result matches the combined
+ * lightmap it replaces to within rounding.  The layer-1 alpha is read with a
+ * plain bilinear fetch first: a surface with one style (most of them) pays
+ * that and nothing more.  Indices are constant over a surface's rect and its
+ * gutter, so every filter tap agrees on them. */
+#define GLSL_LMSTYLES_DECL \
+	"uniform vec2 u_lmstyles;\n"	/* x 1 = on; y the CPU shift as a factor */ \
+	"uniform sampler2D u_lmlayer1;\n" \
+	"uniform sampler2D u_lmlayer2;\n" \
+	"uniform sampler2D u_lmlayer3;\n"
+
+#define GLSL_LMSTYLES_FN \
+	"float LMStyle(float a) {\n" \
+	"    int i = int(a * 255.0 + 0.5);\n" \
+	"    return (i < " GLSL_STR(MAX_LIGHTSTYLES) ") ? LightStyles[i] : 1.0;\n" \
+	"}\n" \
+	"vec4 LMLayer(sampler2D t, highp vec2 uv) {\n" \
+	"    return (u_lightmap_bicubic > 0.5) ? BicubicLightmap(t, uv) : texture(t, uv);\n" \
+	"}\n" \
+	"vec4 LMStyles(vec4 lm0, highp vec2 uv) {\n" \
+	"    const float NONE = 254.5 / 255.0;\n" \
+	"    vec3 l = lm0.rgb * LMStyle(lm0.a);\n" \
+	"    float a = texture(u_lmlayer1, uv).a;\n" \
+	"    if (a < NONE) {\n" \
+	"        l += LMLayer(u_lmlayer1, uv).rgb * LMStyle(a);\n" \
+	"        a = texture(u_lmlayer2, uv).a;\n" \
+	"        if (a < NONE) {\n" \
+	"            l += LMLayer(u_lmlayer2, uv).rgb * LMStyle(a);\n" \
+	"            a = texture(u_lmlayer3, uv).a;\n" \
+	"            if (a < NONE) l += LMLayer(u_lmlayer3, uv).rgb * LMStyle(a);\n" \
+	"        }\n" \
+	"    }\n" \
+	"    return vec4(min(l * u_lmstyles.y, vec3(1.0)), 1.0);\n" \
+	"}\n"
+
+#define GLSL_LMSTYLES_APPLY \
+	"    if (u_lmstyles.x > 0.5) lm = LMStyles(lm, lmuv);\n"
+
 #define GLSL_ALIAS_DLIGHT_DECL \
 	GLSL_LIGHTGRID_DECL
 
@@ -1391,6 +1440,9 @@ static const char sworld_vert[] =
 #define GLSL_DLIGHT_DECL	""
 #define GLSL_DLIGHT_FN		""
 #define GLSL_DLIGHT_APPLY	""
+#define GLSL_LMSTYLES_DECL	""	/* #439: needs the SSBO, desktop only */
+#define GLSL_LMSTYLES_FN	""
+#define GLSL_LMSTYLES_APPLY	""
 #define GLSL_ALIAS_DLIGHT_DECL	""
 #define GLSL_ALIAS_DLIGHT_FN	""
 #define GLSL_ALIAS_DLIGHT_APPLY	"    vec4 color = tex * v_color;\n"
@@ -1429,6 +1481,7 @@ static const char sworld_frag[] =
 	"uniform vec4 u_softemu;\n"
 	"uniform float u_spans;\n"		/* 0 = off, else the span cell width in pixels (r_softemu_spans, #176) */
 	GLSL_DLIGHT_DECL
+	GLSL_LMSTYLES_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in highp vec2 v_lmcoord;\n"	/* highp: SpanUV extrapolates it across a cell (#176) */
 	"in vec4 v_color;\n"
@@ -1443,6 +1496,7 @@ static const char sworld_frag[] =
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	GLSL_DLIGHT_FN
+	GLSL_LMSTYLES_FN
 	"void main() {\n"
 	/* The 1997 spans (#176) replace both coordinates, as the surface cache
 	 * baked light into the texture before the span loop ever sampled it. */
@@ -1497,6 +1551,7 @@ static const char sworld_frag[] =
 	 * anything downstream sees it -- the CPU path they replace baked into
 	 * exactly this value, so banding, the debug views, overbright and the
 	 * material weighting all have to keep acting on the sum.  uhexen2-26bm. */
+	GLSL_LMSTYLES_APPLY
 	GLSL_DLIGHT_APPLY
 	/* 64 light levels, which is what colormap.lmp had.  Upstream folds its
 	 * overbright doubling into the same expression; ours stays separate in
@@ -1622,6 +1677,7 @@ static const char sworld_frag_opaque[] =
 	"uniform float u_spans;\n"		/* 0 = off, else the span cell width in pixels (r_softemu_spans, #176) */
 	"uniform vec2 u_lightdebug;\n"		/* x=r_fullbright, y=r_lightmap (uhexen2-isq7) */
 	GLSL_DLIGHT_DECL
+	GLSL_LMSTYLES_DECL
 	"in highp vec2 v_texcoord;\n"	/* highp: see sworld_vert (uhexen2-mfql) */
 	"in highp vec2 v_lmcoord;\n"	/* see sworld_frag */
 	"in vec4 v_color;\n"
@@ -1635,6 +1691,7 @@ static const char sworld_frag_opaque[] =
 	GLSL_SOFTEMU_NOISE_FN
 	GLSL_MATERIAL_FN
 	GLSL_DLIGHT_FN
+	GLSL_LMSTYLES_FN
 	"void main() {\n"
 	"    highp vec2 tc = v_texcoord;\n"	/* see sworld_frag (#176) */
 	"    highp vec2 lmc = v_lmcoord;\n"
@@ -1661,6 +1718,7 @@ static const char sworld_frag_opaque[] =
 	"    vec4 lm = (u_lightmap_bicubic > 0.5)\n"
 	"        ? BicubicLightmap(u_texture1, lmuv)\n"
 	"        : texture(u_texture1, lmuv);\n"
+	GLSL_LMSTYLES_APPLY
 	GLSL_DLIGHT_APPLY	/* before banding and the debug views; see sworld_frag */
 	"    if (u_softemu.y > 0.0)\n"
 	"        lm.rgb = floor(lm.rgb * 63.0 + 0.5) * (1.0/63.0);\n"
@@ -2536,6 +2594,9 @@ static qboolean GL_InitProgramSplit (glprogram_t *p, const char *name,
 		if (p->u_texture3 >= 0) glUniform1i_fp(p->u_texture3, 3);	/* uhexen2-mfql */
 		if (p->u_texture4 >= 0) glUniform1i_fp(p->u_texture4, 4);
 	if (p->u_lightgrid >= 0) glUniform1i_fp(p->u_lightgrid, LIGHT_GRID_TMU);	/* uhexen2-26bm */
+	if (p->u_lmlayer1 >= 0) glUniform1i_fp(p->u_lmlayer1, LMSTYLE_TMU);	/* #439 */
+	if (p->u_lmlayer2 >= 0) glUniform1i_fp(p->u_lmlayer2, LMSTYLE_TMU + 1);
+	if (p->u_lmlayer3 >= 0) glUniform1i_fp(p->u_lmlayer3, LMSTYLE_TMU + 2);
 	if (p->u_alpha_threshold >= 0) glUniform1f_fp(p->u_alpha_threshold, 0.0f);
 	if (p->u_fog_density >= 0) glUniform1f_fp(p->u_fog_density, 0.0f);
 	/* uhexen2-mf9u.  Unit 1 is free on every program that declares this —
