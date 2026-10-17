@@ -26,7 +26,12 @@
 
 
 #define MIN_MEM_ALLOC	0x0800000
-#define STD_MEM_ALLOC	0x1000000
+/* 512 MB, as the Hexen II dedicated server and the client (GitHub #79):
+ * 16 MB is too small for a large BSP2 map.  The hunk is malloc'd and never
+ * touched as a whole, so on a Linux host the unused part costs address space,
+ * not memory: hwsv on demo1 measured VmRSS 11152 kB at -heapsize 16384 and
+ * 11156 kB at 524288.  -heapsize (in KB) still overrides it. */
+#define STD_MEM_ALLOC	0x20000000	/* 512 mb */
 
 cvar_t		sys_nostdout = {"sys_nostdout", "0", CVAR_NONE};
 int		devlog;	/* log the Con_DPrintf and Sys_DPrintf content when !developer.integer */

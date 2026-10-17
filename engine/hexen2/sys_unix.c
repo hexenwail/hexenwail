@@ -45,7 +45,6 @@
 #endif
 
 
-#define MIN_MEM_ALLOC	0x4000000	/* 64 mb */
 #define STD_MEM_ALLOC	0x20000000	/* 512 mb */
 
 cvar_t		sys_nostdout = {"sys_nostdout", "0", CVAR_NONE};
@@ -706,7 +705,7 @@ static const char *help_strings[] = {
 #endif	/* _NO_SOUND */
 	"     [-nomouse]              Disable mouse usage",
 	"     [-listen N]             Enable multiplayer with max N players",
-	"     [-heapsize Bytes]       Heapsize (memory to allocate)",
+	"     [-heapsize KB]          Heapsize (memory to allocate, in KB)",
 	"     [-vanillaprogs]         Ignore the bundled gamecode, use the game's own",
 #if DO_USERDIRS
 	"     [-userdir DIR]          Write configs and savegames to DIR",
@@ -797,7 +796,9 @@ int main (int argc, char **argv)
 
 	Sys_CheckSDL ();
 
-	parms.memsize = (isDedicated)? MIN_MEM_ALLOC : STD_MEM_ALLOC;
+	/* -dedicated takes the client's size: the same maps, the same hunk
+	 * (GitHub #79; see STD_MEM_ALLOC in server/sys_unix.c). */
+	parms.memsize = STD_MEM_ALLOC;
 	i = COM_CheckParm ("-heapsize");
 	if (i && i < com_argc-1)
 		parms.memsize = atoi (com_argv[i+1]) * 1024;

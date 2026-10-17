@@ -760,7 +760,9 @@ static void scenario_hunk_low(void)
 	EXPECT_ERROR("a negative mark", "Hunk_FreeToHighMark: bad mark -1",
 		cur->Hunk_FreeToHighMark(-1));
 	EXPECT_ERROR("an allocation larger than the hunk",
-		"Hunk_AllocName: failed on 4194336 bytes for huge",
+		/* The hint names -heapsize, in KB (GitHub #79). */
+		"Hunk_AllocName: failed on 4194336 bytes for huge\n"
+		"The heap is 4096 KB; start with -heapsize <KB> for more (e.g. -heapsize 8192)",
 		(void)cur->Hunk_AllocName(4194304, "huge"));
 }
 
