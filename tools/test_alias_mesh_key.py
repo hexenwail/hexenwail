@@ -70,6 +70,31 @@ for m in re.finditer(r"\breturn;", make):
         errors.append(f"GL_MakeAliasGPUMesh: a return (~{line} lines in) leaves the header unmarked; "
                       "the draw path would rebuild it every frame")
 
+# The builder runs from the draw path too, where a hunk allocation can call
+# Cache_FreeLow and free the cache block holding the header being read
+# (#387): its scratch comes from the C heap, and every return after the
+# first allocation releases it.
+if "Hunk_" in make[:make.index("\n}\n")]:
+    errors.append("GL_MakeAliasGPUMesh must not allocate from the hunk (it runs from the draw path)")
+body_end = make.index("\n}\n")
+first = make.find("GL_MeshScratch(")
+for m in re.finditer(r"\breturn;", make[:body_end]):
+    if first < 0 or m.start() < first:
+        continue
+    if "GL_MeshScratchFree();" not in make[max(0, m.start() - 120):m.start()]:
+        line = make[:m.start()].count("\n")
+        errors.append(f"GL_MakeAliasGPUMesh: a return (~{line} lines in) leaks its scratch")
+
+# vid_restart: the table is dropped without deleting dead-context names, and
+# the generation moves so every header rebuilds in the new context (#387).
+lost = re.search(r"void GL_AliasGPUMeshes_ContextLost \(void\)\s*\{(.*?)\n\}", mesh, re.S)
+if not lost or "alias_gpu_generation++" not in lost.group(1) or "glDelete" in lost.group(1):
+    errors.append("GL_AliasGPUMeshes_ContextLost must bump the generation and delete nothing")
+vid = strip((ROOT / "engine/h2shared/gl_vidsdl.c").read_text())
+change = vid[vid.index("static void VID_ChangeVideoMode (int newmode)"):]
+if not re.search(r"GL_AliasGPUMeshes_ContextLost\(\);[\s\S]*SDL_GL_DestroyContext", change):
+    errors.append("VID_ChangeVideoMode must drop the alias mesh table before the context dies")
+
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
 print("PASS alias models find their GPU mesh through the header, per generation (#134)")

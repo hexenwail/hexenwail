@@ -2433,6 +2433,7 @@ static void VID_ChangeVideoMode (int newmode)
 	 * low numbers (issue #205). */
 	Sky_ContextLost();
 	TexMgr_ContextLost();
+	GL_AliasGPUMeshes_ContextLost();
 
 	// Unload all textures and reset texture counts
 	D_ClearOpenGLTextures(0);
