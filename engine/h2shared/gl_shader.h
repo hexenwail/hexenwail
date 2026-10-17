@@ -47,6 +47,9 @@ typedef struct glprogram_s {
 	GLint	u_overbright;	/* world shader: lightmap multiplier (1.0 = off, 2.0 = on); Ironwail parity (uhexen2-f29y) */
 	GLint	u_lightmap_bicubic; /* world shader: 0.0 = hardware bilinear, 1.0 = 4-tap B-spline bicubic lightmap fetch (uhexen2-b2f0) */
 	GLint	u_lightdebug;	/* world shader: vec2(r_fullbright, r_lightmap).  x > 0.5 replaces the lightmap sample with white, y > 0.5 replaces the diffuse sample with white.  Both zero in normal rendering.  uhexen2-isq7. */
+	GLint	u_oit_mode;		/* OIT programs: 0 WBOIT, 1 MBOIT moments, 2 MBOIT composite (#87) */
+	GLint	u_mboit_ms;		/* moment targets multisampled */
+	GLint	u_mboit_b0, u_mboit_mom, u_mboit_b0_ms, u_mboit_mom_ms;
 	GLint	u_spans;	/* world shader: 0 = perspective-correct, else the 1997 span cell width in pixels (r_softemu_spans, #176) */
 	GLint	u_softemu;	/* world shader: vec4(texture dither, lightmap banding, screen dither, any stage live).  All zero unless r_softemu is on.  uhexen2-a5nn.3. */
 	/* Clustered GPU dynamic lighting, world programs only; -1 everywhere
@@ -105,6 +108,14 @@ typedef struct glprogram_s {
 	GLint	ub_vert;	    /* VertParams, at UBO_BINDING_VERT */
 	GLint	ub_frag;	    /* FragParams, at UBO_BINDING_FRAG */
 } glprogram_t;
+
+/* Texture units of the MBOIT moment targets during the composite pass (#87);
+ * above everything a translucent draw binds (0-5, LIGHT_GRID_TMU 5). */
+#define MBOIT_TMU_B0		12
+#define MBOIT_TMU_MOM		13
+#define MBOIT_TMU_B0_MS		14
+#define MBOIT_TMU_MOM_MS	15
+void GL_SetOITMode (int mode, qboolean ms);
 
 /* Extended program for GPU particle SSBO rendering */
 typedef struct {

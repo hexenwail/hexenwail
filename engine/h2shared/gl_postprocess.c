@@ -342,6 +342,8 @@ qboolean R_SoftEmuMdlWarp (void)
 }
 cvar_t	r_hdr = {"r_hdr", "0", CVAR_ARCHIVE};		/* 0=off, 1=ACES tonemap */
 cvar_t	r_hdr_exposure = {"r_hdr_exposure", "1.0", CVAR_ARCHIVE};
+/* 0 off, 1 weighted blended OIT, 2 moment-based OIT (GitHub #87; falls
+ * back to 1 where the moment targets cannot be built). */
 cvar_t	r_oit = {"r_oit", "0", CVAR_ARCHIVE};
 cvar_t	r_bloom = {"r_bloom", "0", CVAR_ARCHIVE};		/* bloom post-process */
 cvar_t	r_bloom_intensity = {"r_bloom_intensity", "1.0", CVAR_ARCHIVE};	/* bloom glow strength */
@@ -390,10 +392,22 @@ static GLint	oit_resolve_loc_accum;
 static GLint	oit_resolve_loc_reveal;
 static GLint	oit_resolve_msaa_loc_accum;
 static GLint	oit_resolve_msaa_loc_reveal;
+static GLint	oit_resolve_loc_mboit;
+static GLint	oit_resolve_msaa_loc_mboit;
 static int	oit_samples;		/* >1 when accum/revealage are multisampled */
 static int	oit_width, oit_height;
 static qboolean	oit_available;		/* true if FBO + shader created OK */
 static qboolean	oit_in_pass;		/* true between Begin/EndTranslucency */
+/* Moment-based OIT (r_oit 2, GitHub #87).  The moment pass accumulates b0 and
+ * four power moments of depth into these; the composite pass then re-draws
+ * the translucents into oit_accum_tex, weighted by the transmittance
+ * reconstructed from them, and the ordinary resolve composites the result.
+ * 32-bit float: the moments of a deep stack lose everything in fp16. */
+static GLuint	mboit_b0_tex;		/* R32F  absorbance sum */
+static GLuint	mboit_mom_tex;		/* RGBA32F  depth moments */
+static GLuint	mboit_fbo;
+static qboolean	mboit_available;
+static int	mboit_pass;		/* 0 none, 1 moments, 2 composite */
 
 /* OIT resolve shaders */
 static const char oit_resolve_vert[] =
@@ -409,11 +423,14 @@ static const char oit_resolve_frag[] =
 	PP_FRAG_HEADER
 	"uniform sampler2D TexAccum;\n"
 	"uniform sampler2D TexReveal;\n"
+	"uniform int u_mboit;\n"	/* TexReveal holds MBOIT's b0 (#87) */
 	"layout(location=0) out vec4 out_fragcolor;\n"
 	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
 	"void main() {\n"
 	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
 	"    float revealage = texelFetch(TexReveal, coords, 0).r;\n"
+	/* MBOIT: the scene shows through what the absorbance b0 leaves */
+	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
 	"    vec4 accumulation = texelFetch(TexAccum, coords, 0);\n"
 	"    if (isinf(max3(abs(accumulation.rgb))))\n"
 	"        accumulation.rgb = vec3(accumulation.a);\n"
@@ -434,11 +451,13 @@ static const char oit_resolve_frag_msaa[] =
 	PP_FRAG_HEADER
 	"uniform sampler2DMS TexAccum;\n"
 	"uniform sampler2DMS TexReveal;\n"
+	"uniform int u_mboit;\n"
 	"layout(location=0) out vec4 out_fragcolor;\n"
 	"float max3(vec3 v) { return max(max(v.x, v.y), v.z); }\n"
 	"void main() {\n"
 	"    ivec2 coords = ivec2(gl_FragCoord.xy);\n"
 	"    float revealage = texelFetch(TexReveal, coords, gl_SampleID).r;\n"
+	"    if (u_mboit != 0) revealage = exp(-max(revealage, 0.0));\n"
 	"    vec4 accumulation = texelFetch(TexAccum, coords, gl_SampleID);\n"
 	"    if (isinf(max3(abs(accumulation.rgb))))\n"
 	"        accumulation.rgb = vec3(accumulation.a);\n"
@@ -1996,6 +2015,10 @@ static void OIT_DeleteFBO (void)
 	if (oit_accum_tex) { glDeleteTextures_fp(1, &oit_accum_tex); oit_accum_tex = 0; }
 	if (oit_revealage_tex) { glDeleteTextures_fp(1, &oit_revealage_tex); oit_revealage_tex = 0; }
 	if (oit_fbo) { glDeleteFramebuffers_fp(1, &oit_fbo); oit_fbo = 0; }
+	if (mboit_b0_tex) { glDeleteTextures_fp(1, &mboit_b0_tex); mboit_b0_tex = 0; }
+	if (mboit_mom_tex) { glDeleteTextures_fp(1, &mboit_mom_tex); mboit_mom_tex = 0; }
+	if (mboit_fbo) { glDeleteFramebuffers_fp(1, &mboit_fbo); mboit_fbo = 0; }
+	mboit_available = false;
 	oit_samples = 0;
 	oit_available = false;
 }
@@ -2084,6 +2107,50 @@ static qboolean OIT_CreateFBO (int width, int height, GLuint depth_stencil_rb, G
 	oit_height = height;
 	oit_available = true;
 	Con_SafePrintf("OIT: %dx%d FBO ready\n", width, height);
+
+#ifndef USE_GLES
+	/* The MBOIT moment targets (#87), sharing the scene depth like the WBOIT
+	 * pair.  Optional: without them r_oit 2 falls back to weighted blended. */
+	{
+		GLenum	fmts[2] = { GL_R32F, GL_RGBA32F };
+		GLenum	cfmts[2] = { GL_RED, GL_RGBA };
+		GLuint	*texs[2] = { &mboit_b0_tex, &mboit_mom_tex };
+		int	k;
+
+		for (k = 0; k < 2; k++)
+		{
+			glGenTextures_fp(1, texs[k]);
+			glBindTexture_fp(textarget, *texs[k]);
+			if (oit_samples > 1)
+				glTexImage2DMultisample_fp(GL_TEXTURE_2D_MULTISAMPLE, oit_samples,
+							   fmts[k], width, height, GL_TRUE);
+			else
+			{
+				glTexImage2D_fp(GL_TEXTURE_2D, 0, fmts[k], width, height, 0,
+						cfmts[k], GL_FLOAT, NULL);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+				glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			}
+		}
+		glGenFramebuffers_fp(1, &mboit_fbo);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, mboit_fbo);
+		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textarget, mboit_b0_tex, 0);
+		glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, textarget, mboit_mom_tex, 0);
+		if (depth_stencil_tex)
+			glFramebufferTexture2D_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+						  GL_TEXTURE_2D, depth_stencil_tex, 0);
+		else
+			glFramebufferRenderbuffer_fp(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+						     GL_RENDERBUFFER, depth_stencil_rb);
+		glDrawBuffers_fp(2, drawbufs);
+		status = glCheckFramebufferStatus_fp(GL_FRAMEBUFFER);
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, 0);
+		glBindTexture_fp(textarget, 0);
+		mboit_available = (status == GL_FRAMEBUFFER_COMPLETE);
+		if (!mboit_available)
+			Con_SafePrintf("OIT: MBOIT moment targets incomplete (status 0x%x); r_oit 2 falls back to 1\n", status);
+	}
+#endif
 	return true;
 }
 
@@ -2117,6 +2184,7 @@ static qboolean OIT_InitShader (void)
 	oit_resolve_prog = prog;
 	oit_resolve_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 	oit_resolve_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+	oit_resolve_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
 
 #ifndef USE_GLES
 	/* MSAA per-sample resolve variant — best-effort. If it fails to build
@@ -2136,6 +2204,7 @@ static qboolean OIT_InitShader (void)
 			oit_resolve_prog_msaa = prog;
 			oit_resolve_msaa_loc_accum = glGetUniformLocation_fp(prog, "TexAccum");
 			oit_resolve_msaa_loc_reveal = glGetUniformLocation_fp(prog, "TexReveal");
+			oit_resolve_msaa_loc_mboit = glGetUniformLocation_fp(prog, "u_mboit");
 		}
 		else
 			glDeleteProgram_fp(prog);
@@ -2160,6 +2229,25 @@ void OIT_BeginTranslucency (void)
 		return;
 
 	oit_in_pass = true;
+
+	/* r_oit 2: the moment pass first; OIT_NextPass moves on to the
+	 * composite.  Both targets sum additively. */
+	if (r_oit.integer >= 2 && mboit_available)
+	{
+		mboit_pass = 1;
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, mboit_fbo);
+		glClearBufferfv_fp(GL_COLOR, 0, zeroes);
+		glClearBufferfv_fp(GL_COLOR, 1, zeroes);
+		R_SetBlend (true);
+		R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
+		R_SetBlendFuncIndexed (1, GL_ONE, GL_ONE);
+		R_SetDepthMask (false);
+		GL_SetOITMode (1, oit_samples > 1);
+		return;
+	}
+
+	mboit_pass = 0;
+	GL_SetOITMode (0, false);
 	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
 	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
 	glClearBufferfv_fp(GL_COLOR, 1, ones);
@@ -2173,12 +2261,53 @@ void OIT_BeginTranslucency (void)
 	R_SetDepthMask (false);
 }
 
+/* Moves an r_oit 2 translucency pass from moments to composite; the caller
+ * draws its translucents again while this returns true (gl_rmain.c).  The
+ * composite writes oit_accum_tex only -- one draw buffer, so the second
+ * output of the OIT programs goes nowhere -- reading the moment targets
+ * through MBOIT_TMU_*.  GitHub #87. */
+qboolean OIT_NextPass (void)
+{
+	static const float zeroes[4] = {0.f, 0.f, 0.f, 0.f};
+	GLenum	one = GL_COLOR_ATTACHMENT0;
+	GLenum	textarget = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+
+	if (!oit_in_pass || mboit_pass != 1)
+		return false;
+
+	mboit_pass = 2;
+	glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
+	glDrawBuffers_fp(1, &one);
+	glClearBufferfv_fp(GL_COLOR, 0, zeroes);
+	R_SetBlend (true);
+	R_SetBlendFuncIndexed (0, GL_ONE, GL_ONE);
+	R_SetDepthMask (false);
+
+	glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0));
+	glBindTexture_fp(textarget, mboit_b0_tex);
+	glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
+	glBindTexture_fp(textarget, mboit_mom_tex);
+	glActiveTexture_fp(GL_TEXTURE0);
+
+	GL_SetOITMode (2, oit_samples > 1);
+	return true;
+}
+
+/* True while translucents are being drawn for a pass that will be drawn
+ * again: the r_oit 2 moment pass.  Draw code that consumes a list as it
+ * draws it (R_DrawWaterSurfaces nulls its texture chains) keeps it for the
+ * composite.  GitHub #87. */
+qboolean OIT_KeepChains (void)
+{
+	return oit_in_pass && mboit_pass == 1;
+}
+
 void OIT_EndTranslucency (GLuint scene_fbo)
 {
 	GLenum textarget;
 	GLuint prog;
 	GLint loc_accum, loc_reveal;
-	qboolean cull_was_on;
+	qboolean cull_was_on, mboit;
 	GLint saved_viewport[4];
 
 	if (!oit_available || !r_oit.integer || !HW_OIT_HAS_BLEND_FUNCI)
@@ -2190,6 +2319,25 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	loc_reveal = (oit_samples > 1) ? oit_resolve_msaa_loc_reveal : oit_resolve_loc_reveal;
 
 	oit_in_pass = false;
+
+	/* r_oit 2: the composite left oit_accum_tex holding transmittance-
+	 * weighted colour; resolve it with b0 standing in for revealage. */
+	mboit = (mboit_pass == 2);
+	if (mboit_pass)
+	{
+		GLenum	two[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+		GLenum	mt = (oit_samples > 1) ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+
+		glBindFramebuffer_fp(GL_FRAMEBUFFER, oit_fbo);
+		glDrawBuffers_fp(2, two);
+		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_B0_MS : MBOIT_TMU_B0));
+		glBindTexture_fp(mt, 0);
+		glActiveTexture_fp(GL_TEXTURE0 + ((oit_samples > 1) ? MBOIT_TMU_MOM_MS : MBOIT_TMU_MOM));
+		glBindTexture_fp(mt, 0);
+		glActiveTexture_fp(GL_TEXTURE0);
+		GL_SetOITMode (0, false);
+		mboit_pass = 0;
+	}
 
 	cull_was_on = R_GetCull();
 	glGetIntegerv_fp(GL_VIEWPORT, saved_viewport);
@@ -2206,10 +2354,14 @@ void OIT_EndTranslucency (GLuint scene_fbo)
 	glActiveTexture_fp(GL_TEXTURE0);
 	glBindTexture_fp(textarget, oit_accum_tex);
 	glActiveTexture_fp(GL_TEXTURE1);
-	glBindTexture_fp(textarget, oit_revealage_tex);
+	glBindTexture_fp(textarget, mboit ? mboit_b0_tex : oit_revealage_tex);
 
 	if (loc_accum >= 0) glUniform1i_fp(loc_accum, 0);
 	if (loc_reveal >= 0) glUniform1i_fp(loc_reveal, 1);
+	{
+		GLint	loc = (oit_samples > 1) ? oit_resolve_msaa_loc_mboit : oit_resolve_loc_mboit;
+		if (loc >= 0) glUniform1i_fp(loc, mboit ? 1 : 0);
+	}
 
 	/* Full-buffer for the resolve triangle, but SAVED and put back below.
 	 * The scene's viewport is not the whole buffer: R_SetupGL() derives it

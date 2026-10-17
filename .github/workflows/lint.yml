@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # r_oit 2: moment-based OIT (#87).
+      - name: Moment-based OIT
+        run: python3 tools/test_mboit.py
+
       # The 128^3 softemu LUT's CPU builder equals a full scan (#80).
       - name: Softemu LUT builder is exact
         run: python3 tools/test_softemu_lut.py
