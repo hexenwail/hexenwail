@@ -210,6 +210,9 @@ typedef int64_t  GLint64;
 #ifndef GL_RGBA16F
 #define GL_RGBA16F				0x881A
 #endif
+#ifndef GL_RGBA32F	/* MBOIT moment target (gl_postprocess.c, #87); absent from the mingw headers */
+#define GL_RGBA32F				0x8814
+#endif
 #ifndef GL_RGB10_A2
 #define GL_RGB10_A2				0x8059
 #endif
