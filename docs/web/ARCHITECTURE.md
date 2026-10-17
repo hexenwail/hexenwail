@@ -102,3 +102,11 @@ documents were not brought over and these were written instead.
 
 The software configuration has further source-level gates in `lint.yml`; they
 are listed in [`SOFTWARE_RENDERER.md`](SOFTWARE_RENDERER.md#gates).
+
+## Known limits
+
+- `qconsole.log` is written to the MEMFS working directory, not the persisted
+  basedir: `LOG_Init` runs before `FS_Init` applies `-basedir`. That keeps an
+  ever-growing log out of the 10-second IndexedDB sync, at the cost that it is
+  lost on reload and cannot be pulled for a bug report. Deliberate; revisit if
+  testers need logs from the web build (GitHub #150 g).

@@ -124,6 +124,13 @@ jobs:
             timeout -k 5 10 nix run .#nixos -- -help > smoke.log 2>&1
           head -20 smoke.log
 
+      # The desktop client on the GL ES 3.0 tier: the render path the WebGL2
+      # build takes, natively.  Nothing else compiles the shared sources with
+      # USE_GLES on a desktop toolchain, so ES-only breakage reached the
+      # browser before anything caught it (GitHub #150 d).
+      - name: Build the GLES tier
+        run: nix build .#gles --print-build-logs
+
       # Build both server variants explicitly: h2ded does not compile the
       # HexenWorld sources or the shared code with H2W defined.
       - name: Build dedicated servers

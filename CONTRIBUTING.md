@@ -106,7 +106,7 @@ Three hard rules:
   The same sources must build under GCC, Clang and mingw-w64.
 - **Shared client code must clear all three renderer pathways.** They are
   desktop GL 4.3 (`GLQUAKE` + `GL_DLSYM`), GLES3 / WebGL2 (`USE_GLES`, which a
-  desktop `-DUSE_GLES=ON` build also takes) and the restored 8bpp software
+  desktop `-DUSE_GLES=ON` build also takes -- `nix build .#gles`, gated in CI) and the restored 8bpp software
   rasterizer (`WEBSOFT`). Shared code references renderer cvars by symbol, so
   the software pathway's failure mode is a **link error** rather than a visual
   one — it will not show up in a desktop build. Likewise `engine/h2shared/` is

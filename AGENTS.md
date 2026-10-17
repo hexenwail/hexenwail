@@ -159,6 +159,7 @@ toolchain the CI targets are built with.
 nix build .#default          # desktop GL client (glhexen2)
 nix build .#h2ded            # dedicated server
 nix build .#hwsv             # HexenWorld dedicated server
+nix build .#gles             # desktop client on the GLES 3.0 tier (the WebGL2 render path)
 nix build .#wasm             # WebAssembly/WebGL2 client
 nix develop                  # dev shell, incl. the shader toolchain
 ```
