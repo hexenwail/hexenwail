@@ -116,6 +116,11 @@ typedef struct
 	byte		cd_track;	// cd track number
 
 	char		startspot[64];
+	/* The save the player last made or loaded on THIS map, which sv_autoload
+	 * reloads on death.  Cleared with the rest of sv by every map spawn, so
+	 * like Ironwail's it only reaches back to a save on the current map.
+	 * GitHub #410. */
+	char		lastsave[MAX_OSPATH];
 	char		modelname[MAX_QPATH];	// maps/<name>.bsp, for model_precache[0]
 	struct qmodel_s	*worldmodel;
 	const char	*model_precache[MAX_MODELS];	// NULL terminated
