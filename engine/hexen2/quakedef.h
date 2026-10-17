@@ -136,14 +136,15 @@
 //
 // per-level limits
 //
-/* MIN_EDICTS/MAX_EDICTS bound the runtime `max_edicts` cvar; MAX_EDICTS is
- * still a hard compile-time ceiling because several arrays are sized by it --
- * cl_entities (2.75 MB) and pimp_overrides (448 KB) in BSS, and, more sharply,
- * moved_edict[]/moved_from[] in SV_PushMove, which are 160 KB of *stack* at
- * 8192.  Raising the ceiling is therefore not a one-line change; see
- * uhexen2-a5nn.9's notes. */
+/* MIN_EDICTS/MAX_EDICTS bound the runtime `max_edicts` cvar (default 16384,
+ * sv_main.c).  MAX_EDICTS is a compile-time ceiling because arrays are sized
+ * by it: cl_entities and pimp_overrides in BSS (~11 MB and ~1.7 MB at 32000)
+ * and SV_PushMove's moved_edict[]/moved_from[], static rather than stack for
+ * exactly this reason (~0.6 MB per routine).  The edicts themselves are hunk
+ * memory sized by the latched cvar, ~1.5 KB each.  Raised 8192 -> 32000 in
+ * GitHub #411; what the wire can carry past 8192 is in SV_SoundEntityFits. */
 #define	MIN_EDICTS	256
-#define	MAX_EDICTS	8192
+#define	MAX_EDICTS	32000	/* Ironwail's ceiling; max_edicts defaults to 16384 (GitHub #411) */
 #define	MAX_LIGHTSTYLES	256
 
 #define	MAX_MODELS	2048		/* Sent over the net as a word */

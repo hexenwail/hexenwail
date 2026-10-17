@@ -98,7 +98,9 @@ static const char *svc_strings[] =
 	"svc_sound_update_pos",
 	"svc_mod_name",	// UQE v1.13 by Korax, music file name
 	"svc_skybox",	// UQE v1.13 by Korax, skybox name
-	"svc_fog"
+	"svc_fog",
+	"svc_stopsound_large",		// 57, protocol 100 (GitHub #411)
+	"svc_sound_update_pos_large"	// 58
 };
 #define	NUM_SVC_STRINGS	(sizeof(svc_strings) / sizeof(svc_strings[0]))
 
@@ -208,7 +210,20 @@ static void CL_ParseStartSoundPacket(void)
 		attenuation = MSG_ReadByte () / 64.0;
 	else	attenuation = DEFAULT_SOUND_PACKET_ATTENUATION;
 
-	channel = MSG_ReadShort ();
+	/* Packed (ent<<3)|channel, read UNSIGNED: as a signed short every
+	 * entity from 4096 up came out negative (QuakeSpasm's fix).  Protocol
+	 * 100 sends entities past the packed range whole (GitHub #411). */
+	if (field_mask & SND_LARGEENTITY)
+	{
+		ent = (unsigned short) MSG_ReadShort ();
+		channel = MSG_ReadByte ();
+	}
+	else
+	{
+		channel = (unsigned short) MSG_ReadShort ();
+		ent = channel >> 3;
+		channel &= 7;
+	}
 	sound_num = MSG_ReadByte ();
 	/* The index is split across the byte and the two overflow mask bits;
 	 * on protocol 21 both bits may be set at once (=> +768).  This used to
@@ -219,10 +234,7 @@ static void CL_ParseStartSoundPacket(void)
 	if (field_mask & SND_OVERFLOW2)
 		sound_num += MAX_SOUNDS_H2MP;	/* +512 */
 
-	ent = channel >> 3;
-	channel &= 7;
-
-	if (ent > MAX_EDICTS)
+	if (ent >= MAX_EDICTS)
 		Host_Error ("%s: ent = %i", __thisfunc__, ent);
 
 	for (i = 0; i < 3; i++)
@@ -1766,6 +1778,7 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_sound_update_pos:
+		case svc_sound_update_pos_large:
 		  {	// FIXME: put a field on the entity that lists the channels
 			// it should update when it moves- if a certain flag
 			// is on the ent, this update_channels field could
@@ -1774,11 +1787,19 @@ void CL_ParseServerMessage (void)
 			vec3_t	pos;
 			int	channel, ent_num;
 
-			channel = MSG_ReadShort ();
-			ent_num = channel >> 3;
-			channel &= 7;
+			if (cmd == svc_sound_update_pos_large)
+			{
+				ent_num = (unsigned short) MSG_ReadShort ();
+				channel = MSG_ReadByte ();
+			}
+			else
+			{
+				channel = (unsigned short) MSG_ReadShort ();
+				ent_num = channel >> 3;
+				channel &= 7;
+			}
 
-			if (ent_num > MAX_EDICTS)
+			if (ent_num >= MAX_EDICTS)
 				Host_Error ("svc_sound_update_pos: ent = %i", ent_num);
 
 			for (i = 0; i < 3; i++)
@@ -1788,8 +1809,13 @@ void CL_ParseServerMessage (void)
 		  }	break;
 
 		case svc_stopsound:
-			i = MSG_ReadShort();
+			i = (unsigned short) MSG_ReadShort();	/* see CL_ParseStartSoundPacket */
 			S_StopSound(i>>3, i&7);
+			break;
+
+		case svc_stopsound_large:
+			i = (unsigned short) MSG_ReadShort();
+			S_StopSound(i, MSG_ReadByte() & 7);
 			break;
 
 		case svc_updatename:

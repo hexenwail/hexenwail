@@ -3878,7 +3878,10 @@ void PR_RestoreVMState (const pr_vmstate_t *state)
 
 edict_t *EDICT_NUM(int n)
 {
-	if (n < 0 || n >= MAX_EDICTS)
+	/* sv.edicts holds sv_max_edicts, not MAX_EDICTS: bounding by the macro
+	 * let any max_edicts below the ceiling read past the allocation
+	 * (GitHub #411).  HexenWorld keeps sv_max_edicts too. */
+	if (n < 0 || n >= sv_max_edicts)
 		Host_Error ("%s: bad number %i", __thisfunc__, n);
 	return (edict_t *)((byte *)sv.edicts + (n)*pr_edict_size);
 }

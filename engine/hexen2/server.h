@@ -84,9 +84,13 @@ typedef struct ex_inventory_page_s
  * buffer gets copied into client->message, which is MAX_MSGLEN and may
  * already be carrying unrelated reliable data, so exactly filling it would
  * trade this crash for an overflowed-client drop.
+ *
+ * 48 buffers (768 KB) since MAX_EDICTS went to 32000 (GitHub #411): a
+ * baseline for every edict is 640 KB of it, so a map that fills the ceiling
+ * still has room for statics.  24 covered ~19.6k baselines.
  */
 #define	MAX_SIGNON_SIZE		(NET_MAXMESSAGE / 2)
-#define	MAX_SIGNON_BUFFERS	24
+#define	MAX_SIGNON_BUFFERS	48
 
 typedef struct
 {

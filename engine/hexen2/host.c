@@ -1220,7 +1220,7 @@ Host_UpdateDevEdicts
 
 The one devstats counter that belongs to the server: how many edicts are alive
 rather than merely allocated.  Walked once a frame and only while the overlay
-is on, because sv.num_edicts is a ceiling that max_edicts raised to 8192 and
+is on, because sv.num_edicts is a ceiling that max_edicts raised to 16384 and
 this is a linear scan of it.
 
 Left at its last value when no local server is running, which is the honest
