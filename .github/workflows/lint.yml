@@ -167,6 +167,10 @@ jobs:
       - name: Retro spans reach every span-drawn surface
         run: python3 tools/test_softemu_spans.py
 
+      # joy_always_active gates rumble and gyro (#409).
+      - name: joy_always_active
+        run: python3 tools/test_joy_always_active.py
+
       # Maps browser skill step resumes an autosave (#410).
       - name: Maps browser resume
         run: python3 tools/test_maps_resume.py
