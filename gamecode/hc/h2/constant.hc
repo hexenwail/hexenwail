@@ -111,14 +111,20 @@ float PARTICLETYPE_ICE			= 14;
 float PARTICLETYPE_SPELL		= 15;
 
 // Hexen hull constants
+/* What each .hull clips as.  Two frames, both right: the first box is the
+ * setsize() the hull is meant for, feet at z 0; the second is the clip box
+ * Mod_MakeHulls builds, centred on the hull's own origin.  SV_HullForEntity
+ * moves between them by (clip_mins - mins), so only the size has to agree.
+ * Corrected to the engine's boxes, which are what the game has always run
+ * with: GitHub #284. */
 float HULL_IMPLICIT			= 0;	//Choose the hull based on bounding box- like in Quake
 float HULL_POINT			= 1;	//0 0 0, 0 0 0
-float HULL_PLAYER			= 2;	//'-16 -16 0', '16 16 56'
+float HULL_PLAYER			= 2;	//'-16 -16 0', '16 16 56'; clips as '-16 -16 -24', '16 16 32'
 float HULL_SCORPION			= 3;	//'-24 -24 -20', '24 24 20'
-float HULL_CROUCH			= 4;	//'-16 -16 0', '16 16 28'
-//Next 2 clip though world?
-float HULL_HYDRA			= 5;	//'-28 -28 -24', '28 28 24'
-float HULL_GOLEM			= 6;	//???,???
+float HULL_CROUCH			= 4;	//'-16 -16 0', '16 16 28'; clips as '-16 -16 -12', '16 16 16'
+float HULL_HYDRA			= 5;	//'-8 -8 -8', '8 8 8' in this engine (Hexen II 1.11); Raven shrank it for
+//					the mission pack's pentacles.  HexenWorld keeps '-40 -40 -42', '40 40 42'.
+float HULL_GOLEM			= 6;	//'-48 -48 -50', '48 48 50'
 
 // Keep around old constants until all references are removed
 float HULL_OLD				= 0;
