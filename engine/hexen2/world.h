@@ -59,6 +59,9 @@ typedef struct areanode_s
 #define	AREA_DEPTH	4
 #define	AREA_NODES	32
 
+/* world.c's storage; engine/rust/src/world_link.rs links to it (#455). */
+extern	areanode_t	sv_areanodes[AREA_NODES];
+
 
 
 void SV_ClearWorld (void);

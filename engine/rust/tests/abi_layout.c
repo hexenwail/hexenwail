@@ -87,6 +87,23 @@ typedef struct {
 const world_target_facts_t World_TargetFacts;
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }
+struct qmodel_s *World_SvWorldModel (void) { return NULL; }
+double World_SvTime (void) { return 0; }
+int *World_GlobalSelf (void) { return NULL; }
+int *World_GlobalOther (void) { return NULL; }
+float *World_GlobalTime (void) { return NULL; }
+void PR_ExecuteProgram (int fnum, const char *funcname) { (void) fnum; (void) funcname; }
+
+/* areanode_t from world.h, copied as the hull structs are; world_link.rs
+ * links to world.c's sv_areanodes, stood in for here. */
+typedef struct abi_areanode_s {
+	int			axis;
+	float			dist;
+	struct abi_areanode_s	*children[2];
+	link_t			trigger_edicts;
+	link_t			solid_edicts;
+} abi_areanode_t;
+abi_areanode_t sv_areanodes[32];
 
 /* The zone structures are private to zone.c and never appear in zone.h, and
  * cache_user_t's block in zone.h is behind `#if !defined(SERVERONLY)` -- which
@@ -201,6 +218,13 @@ STRUCT_ACCESSORS(WorldTargetFacts)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_hull_size)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_solid_bsp)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_fl_monster)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_model_leafs)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_area_nodes)
+STRUCT_ACCESSORS(WorldAreaNode)
+RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
+RUST_ACCESSOR(WorldAreaNode_offsetof_children)
+RUST_ACCESSOR(WorldAreaNode_offsetof_trigger_edicts)
+RUST_ACCESSOR(WorldAreaNode_offsetof_solid_edicts)
 
 STRUCT_ACCESSORS(CvarC)
 RUST_ACCESSOR(CvarC_alignof)
@@ -549,6 +573,14 @@ int main (void)
 	OFF(world_target_facts_t, hull_size, WorldTargetFacts, hull_size);
 	OFF(world_target_facts_t, solid_bsp, WorldTargetFacts, solid_bsp);
 	OFF(world_target_facts_t, fl_monster, WorldTargetFacts, fl_monster);
+	OFF(world_target_facts_t, model_leafs, WorldTargetFacts, model_leafs);
+	OFF(world_target_facts_t, area_nodes, WorldTargetFacts, area_nodes);
+
+	SIZE(abi_areanode_t, WorldAreaNode);
+	OFF(abi_areanode_t, dist, WorldAreaNode, dist);
+	OFF(abi_areanode_t, children, WorldAreaNode, children);
+	OFF(abi_areanode_t, trigger_edicts, WorldAreaNode, trigger_edicts);
+	OFF(abi_areanode_t, solid_edicts, WorldAreaNode, solid_edicts);
 
 	SIZE(cvar_t, CvarC);
 	ALIGN(cvar_t, CvarC);

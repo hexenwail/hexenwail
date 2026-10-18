@@ -1,4 +1,5 @@
-/* world_target.h -- the per-target facts engine/rust/src/world_hull.rs reads.
+/* world_target.h -- the per-target facts engine/rust/src/world_hull.rs and
+ * world_link.rs read.
  *
  * Hull selection (SV_HullForEntity) reads an edict's progs fields, the
  * server's model table and a model's hulls.  Every one of those lives in a
@@ -37,8 +38,17 @@ typedef struct world_target_facts_s
 	size_t	model_type, model_hulls;
 	/* sizeof (hull_t), so a hull index steps the way &model->hulls[i] does */
 	size_t	hull_size;
+	/* edict_t members outside v (area linking) */
+	size_t	edict_free, edict_area, edict_num_leafs, edict_leafnums;
+	/* entvars_t members, relative to v (area linking) */
+	size_t	v_touch, v_absmin, v_absmax, v_angles;
+	/* mnode_t members, sizeof (mleaf_t) (the leaf walk) */
+	size_t	node_contents, node_plane, node_children, leaf_size;
+	/* qmodel_t members (the world model) */
+	size_t	model_mins, model_maxs, model_nodes, model_leafs;
 	/* header constants */
 	int	solid_bsp, movetype_push, mod_brush, fl_monster;
+	int	solid_trigger, solid_not, fl_item, max_ent_leafs, area_depth, area_nodes;
 } world_target_facts_t;
 
 extern const world_target_facts_t	World_TargetFacts;
@@ -47,5 +57,13 @@ extern const world_target_facts_t	World_TargetFacts;
  * every map change.  sv itself is per protocol, so these are C. */
 struct qmodel_s	**World_SvModels (void);
 struct edict_s	*World_SvEdicts (void);
+struct qmodel_s	*World_SvWorldModel (void);
+double		World_SvTime (void);
+
+/* sv_globals.self / .other / .time: sv_globals_t is generated per protocol
+ * (progdefs.h), so where the pointers sit in it is the target's. */
+int	*World_GlobalSelf (void);
+int	*World_GlobalOther (void);
+float	*World_GlobalTime (void);
 
 #endif	/* WORLD_TARGET_H */

@@ -22,7 +22,15 @@ const world_target_facts_t World_TargetFacts =
 	V(origin), V(mins), V(maxs),
 	offsetof (qmodel_t, type), offsetof (qmodel_t, hulls),
 	sizeof (hull_t),
-	SOLID_BSP, MOVETYPE_PUSH, mod_brush, FL_MONSTER
+	offsetof (edict_t, free), offsetof (edict_t, area),
+	offsetof (edict_t, num_leafs), offsetof (edict_t, leafnums),
+	V(touch), V(absmin), V(absmax), V(angles),
+	offsetof (mnode_t, contents), offsetof (mnode_t, plane),
+	offsetof (mnode_t, children), sizeof (mleaf_t),
+	offsetof (qmodel_t, mins), offsetof (qmodel_t, maxs),
+	offsetof (qmodel_t, nodes), offsetof (qmodel_t, leafs),
+	SOLID_BSP, MOVETYPE_PUSH, mod_brush, FL_MONSTER,
+	SOLID_TRIGGER, SOLID_NOT, FL_ITEM, MAX_ENT_LEAFS, AREA_DEPTH, AREA_NODES
 };
 
 struct qmodel_s **World_SvModels (void)
@@ -33,4 +41,29 @@ struct qmodel_s **World_SvModels (void)
 struct edict_s *World_SvEdicts (void)
 {
 	return sv.edicts;
+}
+
+struct qmodel_s *World_SvWorldModel (void)
+{
+	return sv.worldmodel;
+}
+
+double World_SvTime (void)
+{
+	return sv.time;
+}
+
+int *World_GlobalSelf (void)
+{
+	return sv_globals.self;
+}
+
+int *World_GlobalOther (void)
+{
+	return sv_globals.other;
+}
+
+float *World_GlobalTime (void)
+{
+	return sv_globals.time;
 }

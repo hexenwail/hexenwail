@@ -98,6 +98,11 @@ pub mod world_trace;
 #[cfg(feature = "world_hull")]
 pub mod world_hull;
 
+// world.c's area linking: the area nodes, link/unlink, the touch and leaf
+// walks (#455).
+#[cfg(feature = "world_link")]
+pub mod world_link;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]
