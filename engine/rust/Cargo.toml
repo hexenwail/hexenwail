@@ -59,6 +59,9 @@ sv_move = ["world_move"]
 # SV_AddGravity, SV_PushEntity.  Reads engine/rust/phys_target.c besides
 # world_target.c.
 sv_phys = ["world_move"]
+# sv_phys.c's pushers (#455's second sv_phys.c slice): SV_PushMove, HexenWorld's
+# SV_Push, SV_PushRotate, SV_Physics_Pusher.
+sv_phys_push = ["sv_phys"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

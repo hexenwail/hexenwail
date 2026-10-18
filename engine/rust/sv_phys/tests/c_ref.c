@@ -18,6 +18,7 @@
 extern	cvar_t	sv_maxvelocity;
 #ifndef H2W
 extern	cvar_t	sv_gravity;
+extern	cvar_t	sv_gameplayfix_elevators;
 #endif
 
 #define static

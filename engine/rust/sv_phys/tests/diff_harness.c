@@ -85,7 +85,12 @@ cvar_t		sv_maxvelocity = { "sv_maxvelocity", "2000", CVAR_NONE };
 movevars_t	movevars;
 #else
 cvar_t		sv_gravity = { "sv_gravity", "800", CVAR_NONE };
+/* phys_target.c's pusher accessors read these; nothing here calls them */
+cvar_t		sv_gameplayfix_elevators = { "sv_gameplayfix_elevators", "1", CVAR_NONE };
+cvar_t		map_checks = { "map_checks", "0", CVAR_NONE };
 #endif
+server_static_t	svs;
+int		pr_edict_size = sizeof (edict_t);
 
 static struct
 {

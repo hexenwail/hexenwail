@@ -70,6 +70,14 @@ pub struct PhysTargetFacts {
     pub movetype_bounce: c_int,
     pub movetype_bouncemissile: c_int,
     pub movetype_swim: c_int,
+    pub v_ltime: usize,
+    pub v_avelocity: usize,
+    pub v_watertype: usize,
+    pub v_blocked: usize,
+    pub movetype_none: c_int,
+    pub movetype_noclip: c_int,
+    pub movetype_follow: c_int,
+    pub max_edicts: c_int,
 }
 
 #[no_mangle]
@@ -83,6 +91,14 @@ pub extern "C" fn PhysTargetFacts_offsetof_v_hoverz() -> usize {
 #[no_mangle]
 pub extern "C" fn PhysTargetFacts_offsetof_movetype_swim() -> usize {
     core::mem::offset_of!(PhysTargetFacts, movetype_swim)
+}
+#[no_mangle]
+pub extern "C" fn PhysTargetFacts_offsetof_v_blocked() -> usize {
+    core::mem::offset_of!(PhysTargetFacts, v_blocked)
+}
+#[no_mangle]
+pub extern "C" fn PhysTargetFacts_offsetof_max_edicts() -> usize {
+    core::mem::offset_of!(PhysTargetFacts, max_edicts)
 }
 
 /// printsys.h: Hexen II's NaN reports are Con_DPrintf (_PRINT_DEVEL),
@@ -135,28 +151,28 @@ extern "C" {
 }
 
 #[inline(always)]
-unsafe fn pf() -> &'static PhysTargetFacts {
+pub(crate) unsafe fn pf() -> &'static PhysTargetFacts {
     &*(&raw const Phys_TargetFacts)
 }
 
 #[inline(always)]
-unsafe fn v(ent: *mut u8, member: usize) -> *mut f32 {
+pub(crate) unsafe fn v(ent: *mut u8, member: usize) -> *mut f32 {
     ent.add(facts().edict_v + member).cast::<f32>()
 }
 
 #[inline(always)]
-unsafe fn vi(ent: *mut u8, member: usize) -> *mut c_int {
+pub(crate) unsafe fn vi(ent: *mut u8, member: usize) -> *mut c_int {
     v(ent, member).cast::<c_int>()
 }
 
 #[inline(always)]
-unsafe fn free(ent: *mut u8) -> bool {
+pub(crate) unsafe fn free(ent: *mut u8) -> bool {
     *ent.add(facts().edict_free).cast::<c_int>() != 0
 }
 
 /// `EDICT_TO_PROG(e)`.
 #[inline(always)]
-unsafe fn edict_to_prog(e: *mut u8) -> c_int {
+pub(crate) unsafe fn edict_to_prog(e: *mut u8) -> c_int {
     (e as isize).wrapping_sub(World_SvEdicts() as isize) as c_int
 }
 
@@ -168,7 +184,7 @@ fn is_nan(x: f32) -> bool {
 
 /// `DotProduct`, in float, left to right as the macro expands.
 #[inline(always)]
-unsafe fn dot(a: *const f32, b: *const f32) -> f32 {
+pub(crate) unsafe fn dot(a: *const f32, b: *const f32) -> f32 {
     *a * *b + *a.add(1) * *b.add(1) + *a.add(2) * *b.add(2)
 }
 
