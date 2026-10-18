@@ -93,6 +93,8 @@ int *World_GlobalSelf (void) { return NULL; }
 int *World_GlobalOther (void) { return NULL; }
 float *World_GlobalTime (void) { return NULL; }
 void PR_ExecuteProgram (int fnum, const char *funcname) { (void) fnum; (void) funcname; }
+const char *PR_GetString (int num) { (void) num; return ""; }
+void *GetEdictFieldValue (void *ed, const char *field) { (void) ed; (void) field; return NULL; }
 
 /* areanode_t from world.h, copied as the hull structs are; world_link.rs
  * links to world.c's sv_areanodes, stood in for here. */
@@ -220,6 +222,8 @@ RUST_ACCESSOR(WorldTargetFacts_offsetof_solid_bsp)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_fl_monster)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_model_leafs)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_area_nodes)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_v_classname)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_solid_ghost)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -575,6 +579,8 @@ int main (void)
 	OFF(world_target_facts_t, fl_monster, WorldTargetFacts, fl_monster);
 	OFF(world_target_facts_t, model_leafs, WorldTargetFacts, model_leafs);
 	OFF(world_target_facts_t, area_nodes, WorldTargetFacts, area_nodes);
+	OFF(world_target_facts_t, v_classname, WorldTargetFacts, v_classname);
+	OFF(world_target_facts_t, solid_ghost, WorldTargetFacts, solid_ghost);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

@@ -107,6 +107,9 @@ pub struct WorldTargetFacts {
     pub model_maxs: usize,
     pub model_nodes: usize,
     pub model_leafs: usize,
+    pub v_size: usize,
+    pub v_owner: usize,
+    pub v_classname: usize,
     pub solid_bsp: c_int,
     pub movetype_push: c_int,
     pub mod_brush: c_int,
@@ -117,6 +120,11 @@ pub struct WorldTargetFacts {
     pub max_ent_leafs: c_int,
     pub area_depth: c_int,
     pub area_nodes: c_int,
+    pub move_nomonsters: c_int,
+    pub move_missile: c_int,
+    pub move_water: c_int,
+    pub move_phase: c_int,
+    pub solid_ghost: c_int,
 }
 
 extern "C" {
@@ -245,9 +253,10 @@ unsafe fn v(ent: *mut u8, member: usize) -> *mut f32 {
 /// `hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs,
 /// vec3_t offset, edict_t *move_ent)`.
 ///
-/// Static in both C files and called from SV_ClipMoveToEntity and, in
-/// hexenworld, SV_TestPlayerPosition -- both still C -- so it is exported now,
-/// declared in both world.h files.  Statement order, and the order of the
+/// Static in both C files.  Its one live caller, SV_ClipMoveToEntity, was C
+/// when this was ported and is now world_move.rs; it stays exported and
+/// declared in both world.h files.  (HexenWorld's SV_TestPlayerPosition calls
+/// it too, but sits under `#if 0 /* no callers */` in every build.)  Statement order, and the order of the
 /// Vector macros' element writes, are the C's: `offset` is written before
 /// `mins`'s later elements are read, which matters only to a caller that
 /// aliases them, and that caller then sees what the C gave it.
@@ -392,4 +401,12 @@ pub extern "C" fn WorldTargetFacts_offsetof_model_leafs() -> usize {
 #[no_mangle]
 pub extern "C" fn WorldTargetFacts_offsetof_area_nodes() -> usize {
     core::mem::offset_of!(WorldTargetFacts, area_nodes)
+}
+#[no_mangle]
+pub extern "C" fn WorldTargetFacts_offsetof_v_classname() -> usize {
+    core::mem::offset_of!(WorldTargetFacts, v_classname)
+}
+#[no_mangle]
+pub extern "C" fn WorldTargetFacts_offsetof_solid_ghost() -> usize {
+    core::mem::offset_of!(WorldTargetFacts, solid_ghost)
 }
