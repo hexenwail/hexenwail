@@ -91,6 +91,12 @@ double Phys_HostFrametime (void) { return 0; }
 struct edict_s *Phys_SvPlayer (void) { return NULL; }
 float Phys_MaxVelocity (void) { return 0; }
 float Phys_Gravity (void) { return 0; }
+int Phys_EdictSize (void) { return 0; }
+int Phys_NumEdicts (void) { return 0; }
+int Phys_MaxClients (void) { return 0; }
+int Phys_MapChecks (void) { return 0; }
+float Phys_Elevators (void) { return 0; }
+int NUM_FOR_EDICT (void *e) { (void) e; return 0; }
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }
 struct qmodel_s *World_SvWorldModel (void) { return NULL; }
@@ -235,6 +241,8 @@ RUST_ACCESSOR(WorldTargetFacts_offsetof_fl_set_trace)
 RUST_ACCESSOR(PhysTargetFacts_sizeof)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_v_hoverz)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_movetype_swim)
+RUST_ACCESSOR(PhysTargetFacts_offsetof_v_blocked)
+RUST_ACCESSOR(PhysTargetFacts_offsetof_max_edicts)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -598,6 +606,8 @@ int main (void)
 	SIZE(phys_target_facts_t, PhysTargetFacts);
 	OFF(phys_target_facts_t, v_hoverz, PhysTargetFacts, v_hoverz);
 	OFF(phys_target_facts_t, movetype_swim, PhysTargetFacts, movetype_swim);
+	OFF(phys_target_facts_t, v_blocked, PhysTargetFacts, v_blocked);
+	OFF(phys_target_facts_t, max_edicts, PhysTargetFacts, max_edicts);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

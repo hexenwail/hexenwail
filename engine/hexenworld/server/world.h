@@ -125,4 +125,10 @@ int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace);
 void SV_AddGravity (edict_t *ent, float scale);
 trace_t SV_PushEntity (edict_t *ent, vec3_t push);
 
+/* sv_phys.c's pushers, now engine/rust/src/sv_phys_push.rs (#455) */
+qboolean SV_Push (edict_t *pusher, vec3_t move);
+void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time);
+void SV_PushRotate (edict_t *pusher, float movetime);
+void SV_Physics_Pusher (edict_t *ent);
+
 #endif	/* __HX2_WORLD_H */

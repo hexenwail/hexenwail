@@ -117,6 +117,11 @@ pub mod sv_move;
 #[cfg(feature = "sv_phys")]
 pub mod sv_phys;
 
+// sv_phys.c's pushers: SV_PushMove, SV_Push, SV_PushRotate, SV_Physics_Pusher
+// (#455).
+#[cfg(feature = "sv_phys_push")]
+pub mod sv_phys_push;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

@@ -22,6 +22,10 @@ typedef struct phys_target_facts_s
 	/* header constants */
 	int	solid_phase, movetype_walk, movetype_flymissile, movetype_bounce;
 	int	movetype_bouncemissile, movetype_swim;
+	/* the pushers (sv_phys_push.rs): entvars_t members, relative to v */
+	size_t	v_ltime, v_avelocity, v_watertype, v_blocked;
+	/* header constants; max_edicts sizes the pushers' moved lists */
+	int	movetype_none, movetype_noclip, movetype_follow, max_edicts;
 } phys_target_facts_t;
 
 extern const phys_target_facts_t	Phys_TargetFacts;
@@ -33,5 +37,13 @@ float		Phys_MaxVelocity (void);
 /* Hexen II: sv_gravity.value.  HexenWorld: movevars.gravity, which
  * SV_AddGravity reads there in place of the cvar. */
 float		Phys_Gravity (void);
+/* pr_edict_size and sv.num_edicts, for the entity walk */
+int		Phys_EdictSize (void);
+int		Phys_NumEdicts (void);
+/* Hexen II's SV_PushMove only: svs.maxclients, map_checks.integer and
+ * sv_gameplayfix_elevators.value.  0 in HexenWorld, which has none of them. */
+int		Phys_MaxClients (void);
+int		Phys_MapChecks (void);
+float		Phys_Elevators (void);
 
 #endif	/* PHYS_TARGET_H */
