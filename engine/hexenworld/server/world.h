@@ -101,5 +101,10 @@ edict_t	*SV_TestPlayerPosition (edict_t *ent, vec3_t origin);
  * world.c's own, SV_HullPointContents a static. */
 int SV_HullPointContents (hull_t *hull, int num, vec3_t p);
 qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace);
+/* Both defined in engine/rust/src/world_hull.rs (#455); world.c's statics
+ * until then.  SV_ClearWorld, SV_ClipMoveToEntity and (hexenworld)
+ * SV_TestPlayerPosition call them. */
+void SV_InitBoxHull (void);
+hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset, edict_t *move_ent);
 
 #endif	/* __HX2_WORLD_H */

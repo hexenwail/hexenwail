@@ -79,6 +79,15 @@ typedef struct {
 	void		*ent;
 } abi_trace_t;
 
+/* world_hull.rs reads its target layouts through this table, which every
+ * target's own engine/rust/world_target.c fills.  The header is plain, so it
+ * is included rather than copied; the definition below is a stand-in that
+ * lets this program link the archive's world_hull objects without a server. */
+#include "world_target.h"
+const world_target_facts_t World_TargetFacts;
+struct qmodel_s **World_SvModels (void) { return NULL; }
+struct edict_s *World_SvEdicts (void) { return NULL; }
+
 /* The zone structures are private to zone.c and never appear in zone.h, and
  * cache_user_t's block in zone.h is behind `#if !defined(SERVERONLY)` -- which
  * this program is compiled with.  So they are copied here, as mplane_t is
@@ -188,6 +197,10 @@ RUST_ACCESSOR(WorldTrace_offsetof_endpos)
 RUST_ACCESSOR(WorldTrace_offsetof_plane_normal)
 RUST_ACCESSOR(WorldTrace_offsetof_plane_dist)
 RUST_ACCESSOR(WorldTrace_offsetof_ent)
+STRUCT_ACCESSORS(WorldTargetFacts)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_hull_size)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_solid_bsp)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_fl_monster)
 
 STRUCT_ACCESSORS(CvarC)
 RUST_ACCESSOR(CvarC_alignof)
@@ -531,6 +544,11 @@ int main (void)
 	OFF(abi_trace_t, plane.normal, WorldTrace, plane_normal);
 	OFF(abi_trace_t, plane.dist, WorldTrace, plane_dist);
 	OFF(abi_trace_t, ent, WorldTrace, ent);
+
+	SIZE(world_target_facts_t, WorldTargetFacts);
+	OFF(world_target_facts_t, hull_size, WorldTargetFacts, hull_size);
+	OFF(world_target_facts_t, solid_bsp, WorldTargetFacts, solid_bsp);
+	OFF(world_target_facts_t, fl_monster, WorldTargetFacts, fl_monster);
 
 	SIZE(cvar_t, CvarC);
 	ALIGN(cvar_t, CvarC);
