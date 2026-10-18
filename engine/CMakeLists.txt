@@ -866,7 +866,7 @@ endif()
 # in its target, without forcing C shims to own an entire source file.
 set(RUST_ENGINE_COMMON_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io strlcpy strlcat
-    cvar zone cmd quakefs world_trace world_hull world_link world_move sv_move)
+    cvar zone cmd quakefs world_trace world_hull world_link world_move sv_move sv_phys)
 set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad net_loop_h2)
 if(EMSCRIPTEN OR UNIX)
     list(APPEND RUST_ENGINE_CLIENT_FEATURES net_bsd_h2 net_udp_h2)
@@ -1037,7 +1037,10 @@ function(engine_rs_attach tgt variant)
         # The layouts hull selection reads -- edict_t, entvars_t, qmodel_t,
         # server_t -- are each target's own; this fills world_hull.rs's
         # table of offsets from them.  See world_target.h.
-        ${RUST_ENGINE_RS_DIR}/world_target.c)
+        ${RUST_ENGINE_RS_DIR}/world_target.c
+        # The same for the physics: velocity, think, hoverz, host_frametime,
+        # sv_player and the physics cvars.  See phys_target.h.
+        ${RUST_ENGINE_RS_DIR}/phys_target.c)
 
     # Hexen II's UDP land driver reads its platform facts -- socket constants,
     # ioctl requests, errno values, the sockaddr_in family offset and the

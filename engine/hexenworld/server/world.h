@@ -116,4 +116,13 @@ void SV_DebugMoveStep_DumpMovers (const vec3_t foot);
 qboolean SV_DebugMoveStep_Call (const edict_t *ent, const vec3_t mins,
 				const vec3_t maxs, qboolean ok, const char *why);
 
+/* sv_phys.c's base helpers, now engine/rust/src/sv_phys.rs (#455) */
+void SV_CheckVelocity (edict_t *ent);
+qboolean SV_RunThink (edict_t *ent);
+void SV_Impact (edict_t *e1, edict_t *e2);
+int ClipVelocity (vec3_t in, vec3_t normal, vec3_t out, float overbounce);
+int SV_FlyMove (edict_t *ent, float time, trace_t *steptrace);
+void SV_AddGravity (edict_t *ent, float scale);
+trace_t SV_PushEntity (edict_t *ent, vec3_t push);
+
 #endif	/* __HX2_WORLD_H */

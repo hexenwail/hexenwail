@@ -13,7 +13,7 @@ for tool in cmake nm; do
     command -v "$tool" >/dev/null || { echo "FAIL: $tool missing" >&2; exit 2; }
 done
 build=$(rust_gate_engine_build "$work")
-common=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,strlcpy,strlcat,cvar,zone,cmd,quakefs,world_trace,world_hull,world_link,world_move,sv_move
+common=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,strlcpy,strlcat,cvar,zone,cmd,quakefs,world_trace,world_hull,world_link,world_move,sv_move,sv_phys
 
 check_count() { # file symbol expected-count
     local count
