@@ -62,6 +62,10 @@ sv_phys = ["world_move"]
 # sv_phys.c's pushers (#455's second sv_phys.c slice): SV_PushMove, HexenWorld's
 # SV_Push, SV_PushRotate, SV_Physics_Pusher.
 sv_phys_push = ["sv_phys"]
+# sv_phys.c's client movement (#455's third sv_phys.c slice): Hexen II's
+# SV_CheckStuck, SV_CheckWater, SV_WallFriction, SV_TryUnstick, SV_WalkMove
+# and SV_Physics_Client; HexenWorld's SV_Physics_Client.
+sv_phys_walk = ["sv_phys"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

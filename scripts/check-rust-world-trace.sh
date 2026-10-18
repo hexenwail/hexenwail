@@ -11,7 +11,9 @@
 # SV_movestep, SV_MoveToGoal; sv_move.rs), which leaves sv_move.c only the
 # sv_debugmovestep diagnostics, and sv_phys.c's base helpers (SV_FlyMove,
 # SV_PushEntity and the rest; sv_phys.rs) and pushers (SV_PushMove,
-# SV_PushRotate, SV_Physics_Pusher, HexenWorld's SV_Push; sv_phys_push.rs).
+# SV_PushRotate, SV_Physics_Pusher, HexenWorld's SV_Push; sv_phys_push.rs)
+# and client movement (SV_WalkMove, SV_Physics_Client and their helpers;
+# sv_phys_walk.rs).
 #
 # The differential half runs each port's harness twice: against the Hexen II
 # original, and against the HexenWorld original with world_trace_hw, the
@@ -58,7 +60,7 @@ symbols=(SV_HullPointContents SV_RecursiveHullCheck SV_InitBoxHull SV_HullForEnt
 sv_move_symbols=(SV_CheckBottom SV_movestep SV_MoveToGoal)
 # SV_FlyExtras is Hexen II's alone (HexenWorld's is #if 0), so it is checked
 # per binary below
-sv_phys_symbols=(SV_CheckVelocity SV_RunThink SV_Impact ClipVelocity SV_FlyMove SV_AddGravity SV_PushEntity SV_PushMove SV_PushRotate SV_Physics_Pusher)
+sv_phys_symbols=(SV_CheckVelocity SV_RunThink SV_Impact ClipVelocity SV_FlyMove SV_AddGravity SV_PushEntity SV_PushMove SV_PushRotate SV_Physics_Pusher SV_Physics_Client)
 
 for tool in cc gcov cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
@@ -69,7 +71,7 @@ done
 
 step=1
 for variant in h2 hw; do
-for port in trace hull link move svmove svphys svpush; do
+for port in trace hull link move svmove svphys svpush svwalk; do
 	# Each harness links its own archive: the hull harness supplies
 	# world_target.c, the trace harness does not, so world_hull stays out of
 	# the trace archive.  world_trace_hw selects HexenWorld's arms in both.
@@ -88,11 +90,14 @@ for port in trace hull link move svmove svphys svpush; do
 		hw/svphys) feature=sv_phys,world_trace_hw ;;
 		h2/svpush) feature=sv_phys_push ;;
 		hw/svpush) feature=sv_phys_push,world_trace_hw ;;
+		h2/svwalk) feature=sv_phys_walk ;;
+		hw/svwalk) feature=sv_phys_walk,world_trace_hw ;;
 	esac
 	case "$port" in
 		svmove) dir=sv_move; name=sv_move ;;
 		svphys) dir=sv_phys; name=sv_phys ;;
 		svpush) dir=sv_phys; name=sv_phys_push ;;
+		svwalk) dir=sv_phys; name=sv_phys_walk ;;
 		*) dir=world_$port; name=world_$port ;;
 	esac
 	echo "== $step. $variant: build the crate with $feature =="
@@ -109,10 +114,10 @@ for port in trace hull link move svmove svphys svpush; do
 	log="$work/diff-$variant-$port.log"
 	set +e
 	VARIANT=$variant RUST_LIB="$lib" OUT="$work/diff-$variant-$port" \
-		bash "$crate/$dir/tests/$( [ "$port" = svpush ] && echo run_push_harness.sh || echo run_diff_harness.sh )" >"$log" 2>&1
+		bash "$crate/$dir/tests/$(case "$port" in svpush) echo run_push_harness.sh ;; svwalk) echo run_walk_harness.sh ;; *) echo run_diff_harness.sh ;; esac)" >"$log" 2>&1
 	status=$?
 	set -e
-	grep -E '^(undefined in the C|outcomes:|          [0-9A-Za-z-]|generated:|            [-0-9a-z%]|timed phase:|directed:)|^(world_(trace|hull|link|move)|sv_move|sv_phys|sv_phys_push) differential harness|^coverage:|^RESULT:' "$log" || true
+	grep -E '^(undefined in the C|outcomes:|          [0-9A-Za-z-]|generated:|            [-0-9a-z%]|timed phase:|directed:)|^(world_(trace|hull|link|move)|sv_move|sv_phys|sv_phys_push|sv_phys_walk) differential harness|^coverage:|^RESULT:' "$log" || true
 	if [ "$status" -ne 0 ] || ! grep -q '^RESULT: PASS$' "$log"; then
 		echo "FAIL: $variant $name differential harness (exit $status)" >&2
 		grep -E 'MISMATCH|COVERAGE|FAIL|#####|error|harness bug' "$log" >&2 || tail -40 "$log" >&2
@@ -124,8 +129,8 @@ for port in trace hull link move svmove svphys svpush; do
 	# cases are whole scenarios -- a cleared world and up to 48 links and
 	# unlinks, compared as one end state -- plus the QuakeC calls in them
 	# (five digits); 201,204 for SV_Move and the rest (six); 180,000 for the
-	# monster movement and 180,000 for the physics helpers, 120,000 for the
-	# pushers (six).
+	# monster movement and 180,000 for the physics helpers, 120,000 each for
+	# the pushers and the client movement (six).
 	if [ "$port" = link ]; then floor_digits=5; else floor_digits=6; fi
 	count_line=$(grep -E "^$name differential harness( \([A-Za-z0-9_]+\))?: PASS \(" "$log" || true)
 	count=$(printf '%s\n' "$count_line" | sed -n 's/.*PASS (\([0-9]*\) cases.*/\1/p')
@@ -156,7 +161,7 @@ for bin in glhexen2 h2ded hwsv; do
 		fi
 	done
 	# SV_FlyExtras is Hexen II's alone, SV_Push HexenWorld's
-	for pair in SV_FlyExtras:1:0 SV_Push:0:1; do
+	for pair in SV_FlyExtras:1:0 SV_Push:0:1 SV_CheckStuck:1:0 SV_CheckWater:1:0 SV_WallFriction:1:0 SV_TryUnstick:1:0 SV_WalkMove:1:0; do
 		sym=${pair%%:*}; want=${pair#*:}; want=${want%%:*}
 		[ "$bin" = hwsv ] && want=${pair##*:}
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -214,7 +219,7 @@ if [ "$nobj" -lt 3 ]; then
 	exit 1
 fi
 while IFS= read -r obj; do
-	for sym in "${sv_phys_symbols[@]}" SV_FlyExtras SV_Push; do
+	for sym in "${sv_phys_symbols[@]}" SV_FlyExtras SV_Push SV_CheckStuck SV_CheckWater SV_WallFriction SV_TryUnstick SV_WalkMove; do
 		if nm "$obj" | grep -qE " [Tt] $sym\$"; then
 			echo "FAIL: ${obj#"$engine_build"/} still defines $sym" >&2
 			exit 1
@@ -229,6 +234,6 @@ stray=$(find "$engine_build" -name 'world_trace_*.c.o' -o -name 'world_hull_*.c.
 }
 
 echo "PASS: Rust world.c ports (traces, hull selection, area linking, moves), sv_move.c's"
-echo "      monster movement and sv_phys.c's base helpers -- each harness agrees with"
+echo "      monster movement and sv_phys.c's helpers, pushers and client movement -- each harness agrees with"
 echo "      both C originals, every reachable line of them ran, each binary links"
 echo "      each symbol once, and neither world.c defines any of them."

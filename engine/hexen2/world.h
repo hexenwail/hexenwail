@@ -134,4 +134,14 @@ void SV_PushMove (edict_t *pusher, float movetime, qboolean update_time);
 void SV_PushRotate (edict_t *pusher, float movetime);
 void SV_Physics_Pusher (edict_t *ent);
 
+/* sv_phys.c's client movement, now engine/rust/src/sv_phys_walk.rs (#455),
+ * and SV_Physics_Toss, still sv_phys.c's, which it calls */
+void SV_CheckStuck (edict_t *ent);
+qboolean SV_CheckWater (edict_t *ent);
+void SV_WallFriction (edict_t *ent, trace_t *trace);
+int SV_TryUnstick (edict_t *ent, vec3_t oldvel);
+void SV_WalkMove (edict_t *ent);
+void SV_Physics_Client (edict_t *ent, int num);
+void SV_Physics_Toss (edict_t *ent);
+
 #endif	/* __HX2_WORLD_H */
