@@ -13,6 +13,8 @@ name: Rust notices self-test
 # only this run notices.  The C globs are the directories the map in
 # check-rust-notices.sh draws from; a new directory means editing that map,
 # which triggers this anyway -- add the directory here in the same commit.
+# (engine/hexen2 was missing while the net_*_h2 ports already drew from it;
+# engine/hexenworld/server is where #455's world/sv_move/sv_phys slices land.)
 on:
   pull_request:
     paths:
@@ -20,7 +22,9 @@ on:
       - 'engine/rust/**/*.rs'
       - 'common/*.c'
       - 'engine/h2shared/*.c'
+      - 'engine/hexen2/*.c'
       - 'engine/hexenworld/shared/*.c'
+      - 'engine/hexenworld/server/*.c'
       - '.github/workflows/rust-notices-selftest.yml'
   push:
     branches: [master]
@@ -29,7 +33,9 @@ on:
       - 'engine/rust/**/*.rs'
       - 'common/*.c'
       - 'engine/h2shared/*.c'
+      - 'engine/hexen2/*.c'
       - 'engine/hexenworld/shared/*.c'
+      - 'engine/hexenworld/server/*.c'
       - '.github/workflows/rust-notices-selftest.yml'
   workflow_dispatch:
 
