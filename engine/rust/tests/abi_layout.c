@@ -101,7 +101,18 @@ int Phys_NoStep (void) { return 0; }
 int Phys_ClientActive (int num) { (void) num; return 0; }
 int Phys_PlayerPreThink (void) { return 0; }
 int Phys_PlayerPostThink (void) { return 0; }
-void SV_Physics_Toss (void *ent) { (void) ent; }
+float *Phys_ForceRetouch (void) { return NULL; }
+int Phys_StartFrame (void) { return 0; }
+int *Phys_PhysicsWalk (void) { return NULL; }
+double Phys_Realtime (void) { return 0; }
+double *Phys_HostFrametimePtr (void) { return NULL; }
+double *Phys_SvTimePtr (void) { return NULL; }
+int Phys_FreezeNonClients (void) { return 0; }
+float *Phys_FrameTimeGlobal (void) { return NULL; }
+int *Phys_Newmis (void) { return NULL; }
+float Phys_MinTic (void) { return 0; }
+float Phys_MaxTic (void) { return 0; }
+void SV_StartSound (void *e, int ch, const char *s, int vol, float att) { (void) e; (void) ch; (void) s; (void) vol; (void) att; }
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }
 struct qmodel_s *World_SvWorldModel (void) { return NULL; }
@@ -250,6 +261,8 @@ RUST_ACCESSOR(PhysTargetFacts_offsetof_v_blocked)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_max_edicts)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_v_v_angle)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_movetype_fly)
+RUST_ACCESSOR(PhysTargetFacts_offsetof_edict_spawnwalk)
+RUST_ACCESSOR(PhysTargetFacts_offsetof_max_clients)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -617,6 +630,8 @@ int main (void)
 	OFF(phys_target_facts_t, max_edicts, PhysTargetFacts, max_edicts);
 	OFF(phys_target_facts_t, v_v_angle, PhysTargetFacts, v_v_angle);
 	OFF(phys_target_facts_t, movetype_fly, PhysTargetFacts, movetype_fly);
+	OFF(phys_target_facts_t, edict_spawnwalk, PhysTargetFacts, edict_spawnwalk);
+	OFF(phys_target_facts_t, max_clients, PhysTargetFacts, max_clients);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

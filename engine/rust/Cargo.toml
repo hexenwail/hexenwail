@@ -66,6 +66,10 @@ sv_phys_push = ["sv_phys"]
 # SV_CheckStuck, SV_CheckWater, SV_WallFriction, SV_TryUnstick, SV_WalkMove
 # and SV_Physics_Client; HexenWorld's SV_Physics_Client.
 sv_phys_walk = ["sv_phys"]
+# sv_phys.c's movetype dispatch (#455's fourth and last sv_phys.c slice):
+# SV_Physics_None, _Noclip, _Toss, _Step, SV_CheckWaterTransition and
+# SV_Physics; HexenWorld's SV_ProgStartFrame, SV_RunEntity, SV_RunNewmis.
+sv_phys_move = ["sv_phys_push", "sv_phys_walk"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

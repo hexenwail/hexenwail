@@ -83,6 +83,15 @@ cvar_t		sv_nostep = { "sv_nostep", "0", CVAR_NONE };
 #endif
 server_static_t	svs;
 int		pr_edict_size = sizeof (edict_t);
+/* phys_target.c's movetype-dispatch accessors read these; nothing here calls them */
+double		realtime;
+int		sv_physics_walk;
+#ifdef SV_HW
+cvar_t		sv_mintic = { "sv_mintic", "0.03", CVAR_NONE };
+cvar_t		sv_maxtic = { "sv_maxtic", "0.1", CVAR_NONE };
+#else
+cvar_t		sv_freezenonclients = { "sv_freezenonclients", "0", CVAR_NONE };
+#endif
 #ifndef SV_HW
 static client_t	clients[NCLIENTS_HARNESS];
 #endif

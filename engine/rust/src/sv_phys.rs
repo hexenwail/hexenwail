@@ -85,6 +85,13 @@ pub struct PhysTargetFacts {
     pub movetype_step: c_int,
     pub movetype_toss: c_int,
     pub movetype_fly: c_int,
+    pub v_movechain: usize,
+    pub v_chainmoved: usize,
+    pub v_lastruntime: usize,
+    pub edict_spawnwalk: usize,
+    pub fl_movechain_angle: c_int,
+    pub movetype_pushpull: c_int,
+    pub max_clients: c_int,
 }
 
 #[no_mangle]
@@ -114,6 +121,14 @@ pub extern "C" fn PhysTargetFacts_offsetof_v_v_angle() -> usize {
 #[no_mangle]
 pub extern "C" fn PhysTargetFacts_offsetof_movetype_fly() -> usize {
     core::mem::offset_of!(PhysTargetFacts, movetype_fly)
+}
+#[no_mangle]
+pub extern "C" fn PhysTargetFacts_offsetof_edict_spawnwalk() -> usize {
+    core::mem::offset_of!(PhysTargetFacts, edict_spawnwalk)
+}
+#[no_mangle]
+pub extern "C" fn PhysTargetFacts_offsetof_max_clients() -> usize {
+    core::mem::offset_of!(PhysTargetFacts, max_clients)
 }
 
 /// printsys.h: Hexen II's NaN reports are Con_DPrintf (_PRINT_DEVEL),
