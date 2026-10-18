@@ -104,6 +104,7 @@ derived_map() {
 	engine/rust/src/net_udp_hw.rs        engine/hexenworld/shared/net_udp.c
 	engine/rust/src/quakefs.rs             engine/h2shared/quakefs.c
 	engine/rust/src/sizebuf.rs            engine/h2shared/sizebuf.c
+	engine/rust/src/sv_move.rs            engine/hexen2/sv_move.c
 	engine/rust/src/strlcat.rs            common/strlcat.c
 	engine/rust/src/strlcpy.rs            common/strlcpy.c
 	engine/rust/src/wad.rs                engine/h2shared/wad.c

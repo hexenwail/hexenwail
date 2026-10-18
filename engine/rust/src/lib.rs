@@ -107,6 +107,11 @@ pub mod world_link;
 #[cfg(feature = "world_move")]
 pub mod world_move;
 
+// sv_move.c's monster movement: SV_CheckBottom, SV_movestep, movetogoal
+// (#455).
+#[cfg(feature = "sv_move")]
+pub mod sv_move;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

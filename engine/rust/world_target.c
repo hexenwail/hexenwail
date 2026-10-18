@@ -30,13 +30,20 @@ const world_target_facts_t World_TargetFacts =
 	offsetof (qmodel_t, mins), offsetof (qmodel_t, maxs),
 	offsetof (qmodel_t, nodes), offsetof (qmodel_t, leafs),
 	V(size), V(owner), V(classname),
+	V(enemy), V(view_ofs), V(groundentity), V(ideal_yaw), V(goalentity),
 	SOLID_BSP, MOVETYPE_PUSH, mod_brush, FL_MONSTER,
 	SOLID_TRIGGER, SOLID_NOT, FL_ITEM, MAX_ENT_LEAFS, AREA_DEPTH, AREA_NODES,
 	MOVE_NOMONSTERS, MOVE_MISSILE, MOVE_WATER, MOVE_PHASE,
 #ifdef SOLID_GHOST
-	SOLID_GHOST
+	SOLID_GHOST,
 #else
-	-1
+	-1,
+#endif
+	FL_SWIM, FL_FLY, FL_ONGROUND, FL_PARTIALGROUND,
+#ifdef FL_HUNTFACE
+	FL_HUNTFACE, FL_NOZ, FL_SET_TRACE
+#else
+	0, 0, 0
 #endif
 };
 
@@ -74,4 +81,17 @@ int *World_GlobalOther (void)
 float *World_GlobalTime (void)
 {
 	return sv_globals.time;
+}
+
+void World_TraceGlobals (world_trace_globals_t *out)
+{
+	out->allsolid = sv_globals.trace_allsolid;
+	out->startsolid = sv_globals.trace_startsolid;
+	out->fraction = sv_globals.trace_fraction;
+	out->inwater = sv_globals.trace_inwater;
+	out->inopen = sv_globals.trace_inopen;
+	out->endpos = *sv_globals.trace_endpos;
+	out->plane_normal = *sv_globals.trace_plane_normal;
+	out->plane_dist = sv_globals.trace_plane_dist;
+	out->ent = sv_globals.trace_ent;
 }

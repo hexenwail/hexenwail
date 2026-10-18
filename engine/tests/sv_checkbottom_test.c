@@ -36,7 +36,8 @@
  * and shipped for six months, pushing the corner samples up to 32 units outside
  * the monster's real footprint, so monsters refused steps uHexen2 allows.
  * Reverted in #278; the long comment on the dead block in
- * engine/hexen2/sv_move.c has the full account.
+ * engine/rust/sv_move/tests/sv_move_h2.c (moved there verbatim from
+ * engine/hexen2/sv_move.c, #455) has the full account.
  *
  * WHY SOURCE TEXT AND NOT A UNIT CALL
  *
@@ -50,9 +51,18 @@
  * before the corner loop, mins and maxs are each written exactly once, and from
  * the entity's own bbox.
  *
- * Both server copies are checked.  engine/hexenworld/server/sv_move.c has never
+ * Both server copies are checked.  HexenWorld's (now sv_move_hw.c) has never
  * carried the block; pinning it too stops a future port from copying the wrong
  * one back across.
+ *
+ * WHERE THE CODE IS NOW
+ *
+ * SV_CheckBottom is engine/rust/src/sv_move.rs (#455).  The C originals moved
+ * verbatim to engine/rust/sv_move/tests/sv_move_{h2,hw}.c, where the
+ * differential harness holds the Rust to them, log lines included.  So the
+ * two C checks below pin the reference, and CheckRust pins the port the same
+ * way: one write each of mins and maxs before the corner loop, from the
+ * entity's own bbox, and every exit through SV_DebugMoveStep_Call.
  */
 
 #include <stdio.h>
@@ -505,12 +515,161 @@ static int CheckStripper (void)
 	return 0;
 }
 
+/*
+ * The port.  The stripper reads Rust's comments and strings the way it reads
+ * C's; sv_move.rs keeps loop labels and lifetimes out of SV_CheckBottom, whose
+ * leading quote would read as a char literal here.
+ */
+#define	RUST_PATH		"rust/src/sv_move.rs"
+#define	RUST_HEAD		"pub unsafe extern \"C\" fn SV_CheckBottom(ent: *mut u8) -> c_int {"
+#define	RUST_CORNER_ANCHOR	"start[2] = mins[2] - 1.0;"
+
+/*
+ * Writes to the variable `name' in [begin, end): the identifier on its own,
+ * optionally indexed (any index), then an assignment operator -- `=' that is
+ * not `==', or a compound `+=' `-=' `*=' `/=' `|=' `&=' `^='.  Comparisons
+ * and reads do not count.
+ */
+static int CountWrites (const char *begin, const char *end, const char *name)
+{
+	size_t		len = strlen(name);
+	const char	*p = begin;
+	int		n = 0;
+
+	while (p < end)
+	{
+		const char *hit = strstr(p, name);
+		const char *q;
+
+		if (!hit || hit + len > end)
+			break;
+		p = hit + len;
+		if ((hit > begin && IsIdentChar(hit[-1])) || IsIdentChar(hit[len]))
+			continue;
+		q = hit + len;
+		while (q < end && (*q == ' ' || *q == '\t' || *q == '\n'))
+			q++;
+		if (*q == '[')
+		{
+			int depth = 0;
+			for (; q < end; q++)
+			{
+				if (*q == '[')
+					depth++;
+				else if (*q == ']' && --depth == 0)
+				{
+					q++;
+					break;
+				}
+			}
+		}
+		while (q < end && (*q == ' ' || *q == '\t' || *q == '\n'))
+			q++;
+		if (q < end && strchr("+-*/|&^", *q) && q + 1 < end && q[1] == '=')
+			n++;
+		else if (q < end && *q == '=' && (q + 1 >= end || q[1] != '='))
+			n++;
+	}
+	return n;
+}
+
+static int CheckRust (void)
+{
+	char		*text = ReadSourceFile(RUST_PATH);
+	const char	*head, *end, *body_end;
+	int		failed = 0;
+	unsigned int	i;
+	static const char *const banned[] =
+	{
+		"clip_mins", "clip_maxs", "hulls"
+	};
+	/* the corner box escapes CountWrites through a pointer or a borrow;
+	 * the function never needs either, only as_ptr for the diagnostics */
+	static const char *const banned_anywhere[] =
+	{
+		"mins.as_mut_ptr", "maxs.as_mut_ptr", "&mut mins", "&mut maxs",
+		"copy_from", "copy_nonoverlapping", "ptr::write", "write_bytes",
+		"mins.iter_mut", "maxs.iter_mut", "mins.fill", "maxs.fill",
+		"mins.swap", "maxs.swap", "clip_mins", "clip_maxs", "hulls"
+	};
+
+	if (!text)
+		return 1;
+	StripComments(text);
+
+	head = strstr(text, RUST_HEAD);
+	end = head ? strstr(head, RUST_CORNER_ANCHOR) : NULL;
+	body_end = head ? strstr(head, "\n}\n") : NULL;
+	if (!head || !end || !body_end || end > body_end)
+	{
+		fprintf(stderr, "checkbottom: %s: cannot find SV_CheckBottom, its "
+			"corner loop `%s' or its end\n", RUST_PATH, RUST_CORNER_ANCHOR);
+		free(text);
+		return 1;
+	}
+
+	for (i = 0; i < sizeof(banned) / sizeof(banned[0]); i++)
+	{
+		if (CountIn(head, end, banned[i]) != 0)
+		{
+			fprintf(stderr, "checkbottom: %s: SV_CheckBottom has `%s' "
+				"before the corner loop.  The corner box must be the "
+				"entity's own bbox, written once -- see issue #278.\n",
+				RUST_PATH, banned[i]);
+			failed = 1;
+		}
+	}
+	for (i = 0; i < sizeof(banned_anywhere) / sizeof(banned_anywhere[0]); i++)
+	{
+		if (CountIn(head, body_end, banned_anywhere[i]) != 0)
+		{
+			fprintf(stderr, "checkbottom: %s: SV_CheckBottom has `%s', "
+				"which can rewrite the corner box -- see issue #278.\n",
+				RUST_PATH, banned_anywhere[i]);
+			failed = 1;
+		}
+	}
+	/* In the WHOLE function, not just before the corner loop: mins and maxs
+	 * are each written twice -- the zeroed declaration and the one write
+	 * from the entity's bbox, which must come before the corner loop. */
+	if (CountIn(head, end, "mins[i] = *origin.add(i) + *v(ent, f.v_mins).add(i);") != 1 ||
+	    CountIn(head, end, "maxs[i] = *origin.add(i) + *v(ent, f.v_maxs).add(i);") != 1 ||
+	    CountIn(head, end, "let mut mins = [0.0f32; 3];") != 1 ||
+	    CountIn(head, end, "let mut maxs = [0.0f32; 3];") != 1 ||
+	    CountWrites(head, body_end, "mins") != 2 ||
+	    CountWrites(head, body_end, "maxs") != 2)
+	{
+		fprintf(stderr, "checkbottom: %s: SV_CheckBottom must write mins and "
+			"maxs exactly once, before the corner loop, from origin + "
+			"v.mins / v.maxs (#278); found %d/%d writes in all.\n", RUST_PATH,
+			CountWrites(head, body_end, "mins"), CountWrites(head, body_end, "maxs"));
+		failed = 1;
+	}
+
+	/* every exit through SV_DebugMoveStep_Call (#282): three returns and the
+	 * tail expression, and no call that is not an exit */
+	if (CountIn(head, body_end, "return ") != 3 ||
+	    CountIn(head, body_end, "return SV_DebugMoveStep_Call(") != 3 ||
+	    CountIn(head, body_end, "SV_DebugMoveStep_Call(") != 4 ||
+	    !strstr(head, "\n    SV_DebugMoveStep_Call(") ||
+	    strstr(head, "\n    SV_DebugMoveStep_Call(") > body_end)
+	{
+		fprintf(stderr, "checkbottom: %s: every SV_CheckBottom exit must go "
+			"through SV_DebugMoveStep_Call, and nothing else may call it "
+			"(#282).\n", RUST_PATH);
+		failed = 1;
+	}
+
+	free(text);
+	return failed;
+}
+
 int main (void)
 {
 	static const char *const copies[] =
 	{
-		"hexen2/sv_move.c",
-		"hexenworld/server/sv_move.c"
+		"rust/sv_move/tests/sv_move_h2.c",
+		"rust/sv_move/tests/sv_move_hw.c"
 	};
 	unsigned int i;
 	int failed = CheckStripper();
@@ -520,6 +679,8 @@ int main (void)
 		if (CheckOneCopy(copies[i]) != 0)
 			failed = 1;
 	}
+	if (CheckRust() != 0)
+		failed = 1;
 
 	return failed;
 }
