@@ -1,5 +1,5 @@
 /* world_target.h -- the per-target facts engine/rust/src/world_hull.rs,
- * world_link.rs and world_move.rs read.
+ * world_link.rs, world_move.rs and sv_move.rs read.
  *
  * Hull selection (SV_HullForEntity) reads an edict's progs fields, the
  * server's model table and a model's hulls.  Every one of those lives in a
@@ -48,13 +48,28 @@ typedef struct world_target_facts_s
 	size_t	model_mins, model_maxs, model_nodes, model_leafs;
 	/* entvars_t members, relative to v (moves) */
 	size_t	v_size, v_owner, v_classname;
+	/* entvars_t members, relative to v (monster movement) */
+	size_t	v_enemy, v_view_ofs, v_groundentity, v_ideal_yaw, v_goalentity;
 	/* header constants */
 	int	solid_bsp, movetype_push, mod_brush, fl_monster;
 	int	solid_trigger, solid_not, fl_item, max_ent_leafs, area_depth, area_nodes;
 	int	move_nomonsters, move_missile, move_water, move_phase;
 	/* SOLID_GHOST is Hexen II's alone; -1 where the protocol has none */
 	int	solid_ghost;
+	/* entity flags; HUNTFACE, NOZ and SET_TRACE are Hexen II's alone, 0
+	 * where the protocol has none */
+	int	fl_swim, fl_fly, fl_onground, fl_partialground;
+	int	fl_huntface, fl_noz, fl_set_trace;
 } world_target_facts_t;
+
+/* sv_globals' trace_* pointers -- where SV_movestep's set_move_trace writes
+ * a trace for QuakeC.  sv_globals_t is generated per protocol. */
+typedef struct world_trace_globals_s
+{
+	float	*allsolid, *startsolid, *fraction, *inwater, *inopen;
+	float	*endpos, *plane_normal, *plane_dist;
+	int	*ent;
+} world_trace_globals_t;
 
 extern const world_target_facts_t	World_TargetFacts;
 
@@ -70,5 +85,6 @@ double		World_SvTime (void);
 int	*World_GlobalSelf (void);
 int	*World_GlobalOther (void);
 float	*World_GlobalTime (void);
+void	World_TraceGlobals (world_trace_globals_t *out);
 
 #endif	/* WORLD_TARGET_H */

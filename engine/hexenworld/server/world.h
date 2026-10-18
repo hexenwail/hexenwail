@@ -109,4 +109,11 @@ qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec
 void SV_InitBoxHull (void);
 hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset, edict_t *move_ent);
 
+/* sv_move.c's sv_debugmovestep diagnostics, called by the monster movement in
+ * engine/rust/src/sv_move.rs (#455) */
+void SV_DebugMoveStep_Log (const edict_t *ent, const trace_t *trace, const char *fmt, ...) FUNC_PRINTF(3,4);
+void SV_DebugMoveStep_DumpMovers (const vec3_t foot);
+qboolean SV_DebugMoveStep_Call (const edict_t *ent, const vec3_t mins,
+				const vec3_t maxs, qboolean ok, const char *why);
+
 #endif	/* __HX2_WORLD_H */

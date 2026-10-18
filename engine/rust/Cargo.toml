@@ -51,6 +51,9 @@ world_hull = ["world_trace"]
 world_link = ["world_hull", "link_ops", "mathlib"]
 # SV_Move and the rest of world.c (#455's fourth and last world.c slice).
 world_move = ["world_link"]
+# sv_move.c's monster movement (#455's sv_move.c slice).  The diagnostics
+# (sv_debugmovestep) stay C in sv_move.c and are called from here.
+sv_move = ["world_move"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

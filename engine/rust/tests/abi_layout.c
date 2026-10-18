@@ -224,6 +224,8 @@ RUST_ACCESSOR(WorldTargetFacts_offsetof_model_leafs)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_area_nodes)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_v_classname)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_solid_ghost)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_v_goalentity)
+RUST_ACCESSOR(WorldTargetFacts_offsetof_fl_set_trace)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -581,6 +583,8 @@ int main (void)
 	OFF(world_target_facts_t, area_nodes, WorldTargetFacts, area_nodes);
 	OFF(world_target_facts_t, v_classname, WorldTargetFacts, v_classname);
 	OFF(world_target_facts_t, solid_ghost, WorldTargetFacts, solid_ghost);
+	OFF(world_target_facts_t, v_goalentity, WorldTargetFacts, v_goalentity);
+	OFF(world_target_facts_t, fl_set_trace, WorldTargetFacts, fl_set_trace);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

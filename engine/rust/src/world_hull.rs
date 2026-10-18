@@ -110,6 +110,11 @@ pub struct WorldTargetFacts {
     pub v_size: usize,
     pub v_owner: usize,
     pub v_classname: usize,
+    pub v_enemy: usize,
+    pub v_view_ofs: usize,
+    pub v_groundentity: usize,
+    pub v_ideal_yaw: usize,
+    pub v_goalentity: usize,
     pub solid_bsp: c_int,
     pub movetype_push: c_int,
     pub mod_brush: c_int,
@@ -125,6 +130,13 @@ pub struct WorldTargetFacts {
     pub move_water: c_int,
     pub move_phase: c_int,
     pub solid_ghost: c_int,
+    pub fl_swim: c_int,
+    pub fl_fly: c_int,
+    pub fl_onground: c_int,
+    pub fl_partialground: c_int,
+    pub fl_huntface: c_int,
+    pub fl_noz: c_int,
+    pub fl_set_trace: c_int,
 }
 
 extern "C" {
@@ -409,4 +421,12 @@ pub extern "C" fn WorldTargetFacts_offsetof_v_classname() -> usize {
 #[no_mangle]
 pub extern "C" fn WorldTargetFacts_offsetof_solid_ghost() -> usize {
     core::mem::offset_of!(WorldTargetFacts, solid_ghost)
+}
+#[no_mangle]
+pub extern "C" fn WorldTargetFacts_offsetof_v_goalentity() -> usize {
+    core::mem::offset_of!(WorldTargetFacts, v_goalentity)
+}
+#[no_mangle]
+pub extern "C" fn WorldTargetFacts_offsetof_fl_set_trace() -> usize {
+    core::mem::offset_of!(WorldTargetFacts, fl_set_trace)
 }
