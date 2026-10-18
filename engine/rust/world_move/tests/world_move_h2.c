@@ -4,6 +4,10 @@
  * beside this file includes it; no engine target compiles it.  The
  * engine's implementation is engine/rust/src/world_move.rs.
  *
+ * One change since the move, made here and in world_move.rs together:
+ * SV_TestEntityPosition returns the entity it found the mover stuck in, the
+ * sv_gameplayfix_elevators fix (see the comment there).
+ *
  * (from world.c -- world query functions)
  *
  * entities never clip against themselves, or their owner
@@ -86,7 +90,13 @@ edict_t	*SV_TestEntityPosition (edict_t *ent)
 	if (trace.startsolid)
 	{
 	//	Con_DPrintf("%s inside check\n", PR_GetString(trace.ent->v.classname));
-		return sv.edicts;
+		/* Changed after the move, in this reference and in world_move.rs
+		 * together: return what the entity is stuck in, as Ironwail does,
+		 * not always the world.  SV_PushMove's sv_gameplayfix_elevators
+		 * nudge tests `block == pusher', which this makes true for the
+		 * plat carrying the rider; before it, only the world could be.
+		 * Every other caller tests the result for NULL. */
+		return trace.ent ? trace.ent : sv.edicts;
 	}
 
 	return NULL;
