@@ -15,6 +15,7 @@ import {
 import { PhoneControls, PHONE_CONTROL_KEYCODES } from './lib/phone-controls.js';
 import { runPresenterDiagnostics, runWebGLDiagnostics } from './lib/webgl-diagnostics.js';
 import { canvasViewportVerdict, readViewport } from './lib/canvas-viewport.js';
+import { guardPointerLock } from './lib/pointer-lock.js';
 
 // Stamped by scripts/wasm-assemble-artifact.sh from the CMake build (see
 // WEB_RENDERER in engine/CMakeLists.txt).  Served straight from web/ during
@@ -2129,6 +2130,8 @@ function bindBootCallbacks() {
 async function init() {
   loadPreferences();
   bindUi();
+  // Before hexenwail.js loads: SDL asks for the lock too, and drops the promise.
+  guardPointerLock(ui.canvas);
   replayLastLayoutVerdict();
   // Before anything expensive: a browser that cannot compile the renderer's
   // shader families or read back an RGBA8 FBO will start the engine and then
