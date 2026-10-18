@@ -23,9 +23,9 @@
 //
 // STORAGE THAT STAYS IN C
 //
-// sv_areanodes, the tree's 32 nodes, is read by SV_ClipToLinks (still C) and,
-// in HexenWorld, by sv_user.c's pmove setup, so its storage stays in world.c
-// and the port links to it.  sv_numareanodes and the touch walk's
+// sv_areanodes, the tree's 32 nodes, is read by SV_ClipToLinks (C when this
+// was ported, world_move.rs now) and, in HexenWorld, by sv_user.c's pmove
+// setup, so its storage stays in world.c and the port links to it.  sv_numareanodes and the touch walk's
 // sv_link_next / sv_link_prev cursors are private to these functions and move
 // here.
 //
@@ -104,7 +104,7 @@ unsafe fn area(ent: *mut u8) -> *mut LinkC {
 }
 
 #[inline(always)]
-unsafe fn areanodes() -> *mut AreaNode {
+pub(crate) unsafe fn areanodes() -> *mut AreaNode {
     (&raw mut sv_areanodes).cast::<AreaNode>()
 }
 

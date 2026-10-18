@@ -103,6 +103,10 @@ pub mod world_hull;
 #[cfg(feature = "world_link")]
 pub mod world_link;
 
+// SV_Move and the rest of world.c (#455).
+#[cfg(feature = "world_move")]
+pub mod world_move;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

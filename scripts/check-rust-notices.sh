@@ -109,6 +109,7 @@ derived_map() {
 	engine/rust/src/wad.rs                engine/h2shared/wad.c
 	engine/rust/src/world_hull.rs         engine/hexen2/world.c
 	engine/rust/src/world_link.rs         engine/hexen2/world.c
+	engine/rust/src/world_move.rs         engine/hexen2/world.c
 	engine/rust/src/world_trace.rs        engine/hexen2/world.c
 	engine/rust/src/zone.rs               engine/h2shared/zone.c
 	engine/rust/hashindex/src/lib.rs      engine/h2shared/hashindex.c

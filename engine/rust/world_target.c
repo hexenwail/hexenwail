@@ -29,8 +29,15 @@ const world_target_facts_t World_TargetFacts =
 	offsetof (mnode_t, children), sizeof (mleaf_t),
 	offsetof (qmodel_t, mins), offsetof (qmodel_t, maxs),
 	offsetof (qmodel_t, nodes), offsetof (qmodel_t, leafs),
+	V(size), V(owner), V(classname),
 	SOLID_BSP, MOVETYPE_PUSH, mod_brush, FL_MONSTER,
-	SOLID_TRIGGER, SOLID_NOT, FL_ITEM, MAX_ENT_LEAFS, AREA_DEPTH, AREA_NODES
+	SOLID_TRIGGER, SOLID_NOT, FL_ITEM, MAX_ENT_LEAFS, AREA_DEPTH, AREA_NODES,
+	MOVE_NOMONSTERS, MOVE_MISSILE, MOVE_WATER, MOVE_PHASE,
+#ifdef SOLID_GHOST
+	SOLID_GHOST
+#else
+	-1
+#endif
 };
 
 struct qmodel_s **World_SvModels (void)
@@ -52,6 +59,7 @@ double World_SvTime (void)
 {
 	return sv.time;
 }
+
 
 int *World_GlobalSelf (void)
 {

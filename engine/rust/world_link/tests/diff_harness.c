@@ -41,6 +41,11 @@
  * a ceiling on how many keeps the comparison meaningful.  Wherever the C
  * returns, the Rust must return the same end state.
  *
+ * The C original's callees -- ClearLink, RemoveLink, InsertLinkBefore,
+ * BoxOnPlaneSide, SV_InitBoxHull -- are the already-ported Rust functions,
+ * each held to its own C by its own harness (link_ops, mathlib, world_hull),
+ * so this compares the area-linking logic itself over shared callees.
+ *
  * The C original is built once, as plain IEEE C: these functions only add,
  * subtract and compare floats, which -ffast-math reads the same way for
  * finite values, and the inputs here are finite.  The coverage build

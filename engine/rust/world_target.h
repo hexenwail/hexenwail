@@ -1,5 +1,5 @@
-/* world_target.h -- the per-target facts engine/rust/src/world_hull.rs and
- * world_link.rs read.
+/* world_target.h -- the per-target facts engine/rust/src/world_hull.rs,
+ * world_link.rs and world_move.rs read.
  *
  * Hull selection (SV_HullForEntity) reads an edict's progs fields, the
  * server's model table and a model's hulls.  Every one of those lives in a
@@ -46,9 +46,14 @@ typedef struct world_target_facts_s
 	size_t	node_contents, node_plane, node_children, leaf_size;
 	/* qmodel_t members (the world model) */
 	size_t	model_mins, model_maxs, model_nodes, model_leafs;
+	/* entvars_t members, relative to v (moves) */
+	size_t	v_size, v_owner, v_classname;
 	/* header constants */
 	int	solid_bsp, movetype_push, mod_brush, fl_monster;
 	int	solid_trigger, solid_not, fl_item, max_ent_leafs, area_depth, area_nodes;
+	int	move_nomonsters, move_missile, move_water, move_phase;
+	/* SOLID_GHOST is Hexen II's alone; -1 where the protocol has none */
+	int	solid_ghost;
 } world_target_facts_t;
 
 extern const world_target_facts_t	World_TargetFacts;

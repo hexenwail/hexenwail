@@ -49,6 +49,8 @@ world_hull = ["world_trace"]
 # SV_ClearWorld, SV_LinkEdict, SV_UnlinkEdict and the touch and leaf walks
 # (#455's third world.c slice), through the same target shim.
 world_link = ["world_hull", "link_ops", "mathlib"]
+# SV_Move and the rest of world.c (#455's fourth and last world.c slice).
+world_move = ["world_link"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

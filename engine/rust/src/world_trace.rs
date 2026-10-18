@@ -232,12 +232,12 @@ unsafe fn plane_dist(plane: *const MPlane, p: *const f32) -> f32 {
 
 /// `int SV_HullPointContents (hull_t *hull, int num, vec3_t p)`.
 ///
-/// Static in both C files, and so never exported before; it is now, because
-/// world.c's remaining callers live on the C side: SV_PointContents (and
-/// SV_TruePointContents, compiled only under QUAKE2) in both, and in
-/// hexenworld the two checks in SV_TestPlayerPosition.  hexen2/world.h
-/// declared it only behind the dead id386 arm and hexenworld/server/world.h
-/// not at all; both now declare it unconditionally.
+/// Static in both C files, and so never exported before.  It was exported for
+/// world.c's other callers, then C: SV_PointContents, now world_move.rs.
+/// SV_TruePointContents (only under QUAKE2) and HexenWorld's
+/// SV_TestPlayerPosition (under `#if 0`) call it too, in no build.
+/// hexen2/world.h declared it only behind the dead id386 arm and
+/// hexenworld/server/world.h not at all; both now declare it unconditionally.
 #[no_mangle]
 pub unsafe extern "C" fn SV_HullPointContents(hull: *mut Hull, mut num: c_int, p: *mut f32) -> c_int {
     while num >= 0 {
