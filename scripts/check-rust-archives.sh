@@ -26,9 +26,9 @@ check_count() { # file symbol expected-count
 
 for target in glhexen2 h2ded hwsv; do
     case "$target" in
-        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan;
+        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound;
             wad=1; info=0; hw=1 ;;
-        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target;
+        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target,sv_main_sound;
             wad=0; info=0; hw=0 ;;
         hwsv) variant=hwsv; features=$common,info_str,huffman,net_udp_hw,net_chan,world_trace_hw;
             wad=0; info=1; hw=1 ;;
@@ -83,7 +83,14 @@ for target in glhexen2 h2ded hwsv; do
         check_count "$file" SV_Move 1
         check_count "$file" SV_PointContents 1
         check_count "$file" SV_TestEntityPosition 1
+        # Hexen II's sv_main.c ports (#469): the client's listen server and
+        # h2ded only.  hwsv has no SV_MaxSounds at all
+        check_count "$file" SV_MaxSounds "$h2"
     done
+    # hwsv has SV_StartParticle4 and the other message functions too, but as
+    # HexenWorld's own C (sv_send.c): its archive must not carry the Rust
+    check_count "$archive" SV_StartParticle4 "$h2"
+    check_count "$binary" SV_StartParticle4 1
     # The hull traces' fatal path names the target's own error function: the
     # hwsv archive must reach SV_Error (world_trace_hw) and the other two must
     # not, since only hwsv defines it -- an archive that did would fail to

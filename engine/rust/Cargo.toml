@@ -70,6 +70,12 @@ sv_phys_walk = ["sv_phys"]
 # SV_Physics_None, _Noclip, _Toss, _Step, SV_CheckWaterTransition and
 # SV_Physics; HexenWorld's SV_ProgStartFrame, SV_RunEntity, SV_RunNewmis.
 sv_phys_move = ["sv_phys_push", "sv_phys_walk"]
+# Hexen II's sv_main.c sound and particle messages and per-protocol limits
+# (#469 slice A, of #455): SV_StartParticle..4, SV_StopSound,
+# SV_UpdateSoundPos, SV_StartSound, SV_MaxSounds, SV_MaxDatagram,
+# SV_MaxReliableMessage.  Hexen II's targets only (glhexen2, h2ded); reads
+# engine/rust/sv_main_target.c besides world_target.c.
+sv_main_sound = ["world_hull", "msg_io", "sizebuf"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

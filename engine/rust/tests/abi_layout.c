@@ -85,6 +85,7 @@ typedef struct {
  * lets this program link the archive's world_hull objects without a server. */
 #include "world_target.h"
 #include "phys_target.h"
+#include "sv_main_target.h"
 const world_target_facts_t World_TargetFacts;
 const phys_target_facts_t Phys_TargetFacts;
 double Phys_HostFrametime (void) { return 0; }
@@ -112,7 +113,13 @@ float *Phys_FrameTimeGlobal (void) { return NULL; }
 int *Phys_Newmis (void) { return NULL; }
 float Phys_MinTic (void) { return 0; }
 float Phys_MaxTic (void) { return 0; }
-void SV_StartSound (void *e, int ch, const char *s, int vol, float att) { (void) e; (void) ch; (void) s; (void) vol; (void) att; }
+/* Hexen II's sv_main.c ports (#469); the parenthesised name keeps a
+ * Host_Error macro, if a header ever brings one, from rewriting the stub */
+const sv_main_target_facts_t SvMain_TargetFacts;
+struct sizebuf_s *SvMain_Datagram (void) { return NULL; }
+const char **SvMain_SoundPrecache (void) { return NULL; }
+int sv_protocol;
+void (Host_Error) (const char *error, ...) { (void) error; abort (); }
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }
 struct qmodel_s *World_SvWorldModel (void) { return NULL; }
@@ -263,6 +270,12 @@ RUST_ACCESSOR(PhysTargetFacts_offsetof_v_v_angle)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_movetype_fly)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_edict_spawnwalk)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_max_clients)
+RUST_ACCESSOR(SvMainTargetFacts_sizeof)
+RUST_ACCESSOR(SvMainTargetFacts_offsetof_msg_sound_update_pos_large)
+RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_volume)
+RUST_ACCESSOR(SvMainTargetFacts_offsetof_max_sounds_uh2)
+RUST_ACCESSOR(SvMainTargetFacts_offsetof_protocol_hexenwail_1)
+RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_attenuation)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -632,6 +645,13 @@ int main (void)
 	OFF(phys_target_facts_t, movetype_fly, PhysTargetFacts, movetype_fly);
 	OFF(phys_target_facts_t, edict_spawnwalk, PhysTargetFacts, edict_spawnwalk);
 	OFF(phys_target_facts_t, max_clients, PhysTargetFacts, max_clients);
+
+	SIZE(sv_main_target_facts_t, SvMainTargetFacts);
+	OFF(sv_main_target_facts_t, msg_sound_update_pos_large, SvMainTargetFacts, msg_sound_update_pos_large);
+	OFF(sv_main_target_facts_t, default_sound_packet_volume, SvMainTargetFacts, default_sound_packet_volume);
+	OFF(sv_main_target_facts_t, max_sounds_uh2, SvMainTargetFacts, max_sounds_uh2);
+	OFF(sv_main_target_facts_t, protocol_hexenwail_1, SvMainTargetFacts, protocol_hexenwail_1);
+	OFF(sv_main_target_facts_t, default_sound_packet_attenuation, SvMainTargetFacts, default_sound_packet_attenuation);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

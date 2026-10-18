@@ -132,6 +132,11 @@ pub mod sv_phys_walk;
 #[cfg(feature = "sv_phys_move")]
 pub mod sv_phys_move;
 
+// Hexen II's sv_main.c sound and particle messages and protocol limits
+// (#469 slice A).
+#[cfg(feature = "sv_main_sound")]
+pub mod sv_main_sound;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

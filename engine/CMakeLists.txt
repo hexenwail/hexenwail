@@ -878,6 +878,11 @@ set(RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_COMMON_FEATURES})
 if(UNIX)
     list(APPEND RUST_ENGINE_H2DED_FEATURES net_bsd_h2 net_udp_h2 h2ded_target)
 endif()
+# Hexen II's server, engine/hexen2/sv_main.c (#469): the client's listen
+# server and h2ded.  hwsv's server is HexenWorld's own sv_main.c.
+set(RUST_ENGINE_H2_SERVER_FEATURES sv_main_sound)
+list(APPEND RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
+list(APPEND RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 # world_trace_hw: hexenworld/server/world.c's hull traces report a bad node
 # through SV_Error, which hwsv alone defines (#455).
 set(RUST_ENGINE_HWSV_FEATURES ${RUST_ENGINE_COMMON_FEATURES}
@@ -1047,6 +1052,13 @@ function(engine_rs_attach tgt variant)
     # ifreq scan's shape -- from the C headers through this shim, so the port
     # carries no target_os list of its own.  Only targets that link the
     # feature get it; Windows' transport is net_win.c/net_wins.c.
+    # Hexen II's server state and protocol constants, for the sv_main.c
+    # ports (#469).  Only Hexen II's targets link those features.
+    list(FIND ARGN sv_main_sound _h2_sv_main_feature)
+    if(_h2_sv_main_feature GREATER -1)
+        target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/sv_main_target.c)
+    endif()
+
     list(FIND ARGN net_udp_h2 _h2_udp_feature)
     if(NOT WIN32 AND _h2_udp_feature GREATER -1)
         target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/net_udp_h2_target.c)
