@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 #
-# check-rust-world-trace.sh -- gate for the Rust port of the hull traces,
-# SV_HullPointContents and SV_RecursiveHullCheck, out of engine/hexen2/world.c
-# and engine/hexenworld/server/world.c (#455).
+# check-rust-world-trace.sh -- gate for the Rust ports out of
+# engine/hexen2/world.c and engine/hexenworld/server/world.c (#455): the hull
+# traces (SV_HullPointContents, SV_RecursiveHullCheck; world_trace.rs) and
+# hull selection (the box hull, SV_HullForEntity; world_hull.rs).
 #
-# The differential half runs engine/rust/world_trace/tests twice: against the
-# Hexen II original with the archive's world_trace feature, and against the
-# HexenWorld original with world_trace_hw, the feature hwsv's archive carries.
-# Each run compares every return value, trace_t, console line and fatal call
-# byte for byte (NaN payloads canonicalised), requires its outcome floors (startsolid, impacts, the
-# "backup past 0" exit, hangs on NaN, fatal calls from both functions), and
-# requires every line of its C original to have run under gcov, but for one
-# clamp proven unreachable in run_diff_harness.sh.
+# The differential half runs each port's harness twice: against the Hexen II
+# original, and against the HexenWorld original with world_trace_hw, the
+# feature hwsv's archive carries.  Each run compares what both sides return
+# and write byte for byte (NaN payloads canonicalised), and every console
+# line and fatal call; requires its outcome floors; and requires every line
+# of its C original to have run under gcov, but for lines run_diff_harness.sh
+# proves unreachable (one clamp in the traces, the two-line null-hull branch
+# in hull selection).  The hull harness also compiles the real
+# engine/rust/world_target.c, through which the port reads each target's
+# layouts.
 #
-# The CMake half proves the shared engine build links the port exactly once
-# per binary, and that neither world.c object still defines either function.
-# check-rust-archives.sh holds the error-name split: only hwsv's archive may
-# reach SV_Error.
+# The CMake half proves the shared engine build links each exported symbol
+# exactly once per binary, and that neither world.c object still defines any
+# of them.  check-rust-archives.sh holds the error-name split: only hwsv's
+# archive may reach SV_Error.
 #
 # USAGE
 #
@@ -41,7 +44,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
-symbols=(SV_HullPointContents SV_RecursiveHullCheck)
+symbols=(SV_HullPointContents SV_RecursiveHullCheck SV_InitBoxHull SV_HullForEntity)
 
 for tool in cc gcov cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
@@ -52,40 +55,51 @@ done
 
 step=1
 for variant in h2 hw; do
-	if [ "$variant" = h2 ]; then feature=world_trace; else feature=world_trace_hw; fi
+for port in trace hull; do
+	# Each harness links its own archive: the hull harness supplies
+	# world_target.c, the trace harness does not, so world_hull stays out of
+	# the trace archive.  world_trace_hw selects HexenWorld's arms in both.
+	case "$variant/$port" in
+		h2/trace) feature=world_trace ;;
+		hw/trace) feature=world_trace_hw ;;
+		h2/hull)  feature=world_hull ;;
+		hw/hull)  feature=world_hull,world_trace_hw ;;
+	esac
 	echo "== $step. $variant: build the crate with $feature =="
 	step=$((step + 1))
 	cargo build --release --offline \
 		--manifest-path "$crate/Cargo.toml" \
-		--target-dir "$work/target-$variant" \
+		--target-dir "$work/target-$variant-$port" \
 		--features "$feature"
-	lib="$work/target-$variant/release/libengine_rs.a"
+	lib="$work/target-$variant-$port/release/libengine_rs.a"
 
 	echo
-	echo "== $step. $variant: differential harness, Rust vs the C original =="
+	echo "== $step. $variant: world_$port differential harness, Rust vs the C original =="
 	step=$((step + 1))
-	log="$work/diff-$variant.log"
+	log="$work/diff-$variant-$port.log"
 	set +e
-	VARIANT=$variant RUST_LIB="$lib" OUT="$work/diff-$variant" \
-		bash "$crate/world_trace/tests/run_diff_harness.sh" >"$log" 2>&1
+	VARIANT=$variant RUST_LIB="$lib" OUT="$work/diff-$variant-$port" \
+		bash "$crate/world_$port/tests/run_diff_harness.sh" >"$log" 2>&1
 	status=$?
 	set -e
-	grep -E '^(outcomes:|          [a-z]|generated:|            [-0-9a-z%]|timed phase:|directed:)|^world_trace differential harness|^coverage:|^RESULT:' "$log" || true
+	grep -E '^(outcomes:|          [A-Za-z-]|generated:|            [-0-9a-z%]|timed phase:|directed:)|^world_(trace|hull) differential harness|^coverage:|^RESULT:' "$log" || true
 	if [ "$status" -ne 0 ] || ! grep -q '^RESULT: PASS$' "$log"; then
-		echo "FAIL: $variant differential harness (exit $status)" >&2
-		grep -E 'MISMATCH|COVERAGE|FAIL|#####|error' "$log" >&2 || tail -40 "$log" >&2
+		echo "FAIL: $variant world_$port differential harness (exit $status)" >&2
+		grep -E 'MISMATCH|COVERAGE|FAIL|#####|error|harness bug' "$log" >&2 || tail -40 "$log" >&2
 		exit 1
 	fi
 	# RESULT alone would still pass with the enumeration cut to nothing, so
-	# floor the case count at six digits.  Observed: 416,400 per variant.
-	count_line=$(grep -E '^world_trace differential harness \([A-Za-z_]+\): PASS \(' "$log" || true)
+	# floor the case count at six digits.  Observed per variant: 416,400 for
+	# the traces, 155,588 for hull selection.
+	count_line=$(grep -E "^world_$port differential harness \([A-Za-z_]+\): PASS \(" "$log" || true)
 	count=$(printf '%s\n' "$count_line" | sed -n 's/.*PASS (\([0-9]*\) cases.*/\1/p')
 	if [ "${#count}" -lt 6 ]; then
-		echo "FAIL: $variant harness case count is below the 100,000-case floor" >&2
+		echo "FAIL: $variant world_$port harness case count is below the 100,000-case floor" >&2
 		echo "      observed: ${count_line:-<no PASS line>}" >&2
 		exit 1
 	fi
 	echo
+done
 done
 
 echo "== $step. the engine build: glhexen2, h2ded and hwsv =="
@@ -116,7 +130,7 @@ if [ "$nobj" -lt 3 ]; then
 	exit 1
 fi
 while IFS= read -r obj; do
-	for sym in "${symbols[@]}" WackyBugFixer; do
+	for sym in "${symbols[@]}" WackyBugFixer SV_HullForBox; do
 		if nm "$obj" | grep -qE " [Tt] $sym\$"; then
 			echo "FAIL: ${obj#"$engine_build"/} still defines $sym" >&2
 			exit 1
@@ -124,12 +138,12 @@ while IFS= read -r obj; do
 	done
 done <<<"$objects"
 echo "  $nobj world.c object(s): none defines the traces"
-stray=$(find "$engine_build" -name 'world_trace_*.c.o' -o -name 'c_ref.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'world_trace_*.c.o' -o -name 'world_hull_*.c.o' -o -name 'c_ref.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
 	echo "FAIL: $stray harness fixture object(s) in the engine build" >&2
 	exit 1
 }
 
-echo "PASS: Rust hull traces -- the harness agrees with both C originals, every"
-echo "      line of them ran, each binary links the port once, and neither"
-echo "      world.c defines it."
+echo "PASS: Rust world.c ports (traces, hull selection) -- each harness agrees with"
+echo "      both C originals, every reachable line of them ran, each binary links"
+echo "      each symbol once, and neither world.c defines any of them."

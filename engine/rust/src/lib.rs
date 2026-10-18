@@ -93,6 +93,11 @@ pub mod wad;
 #[cfg(feature = "world_trace")]
 pub mod world_trace;
 
+// world.c's hull selection, reading the target's layouts through
+// engine/rust/world_target.c (#455).
+#[cfg(feature = "world_hull")]
+pub mod world_hull;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

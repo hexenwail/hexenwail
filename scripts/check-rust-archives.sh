@@ -13,7 +13,7 @@ for tool in cmake nm; do
     command -v "$tool" >/dev/null || { echo "FAIL: $tool missing" >&2; exit 2; }
 done
 build=$(rust_gate_engine_build "$work")
-common=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,strlcpy,strlcat,cvar,zone,cmd,quakefs,world_trace
+common=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,strlcpy,strlcat,cvar,zone,cmd,quakefs,world_trace,world_hull
 
 check_count() { # file symbol expected-count
     local count
@@ -75,6 +75,8 @@ for target in glhexen2 h2ded hwsv; do
         check_count "$file" Loop_Init "$loop"
         check_count "$file" SV_RecursiveHullCheck 1
         check_count "$file" SV_HullPointContents 1
+        check_count "$file" SV_HullForEntity 1
+        check_count "$file" SV_InitBoxHull 1
     done
     # The hull traces' fatal path names the target's own error function: the
     # hwsv archive must reach SV_Error (world_trace_hw) and the other two must

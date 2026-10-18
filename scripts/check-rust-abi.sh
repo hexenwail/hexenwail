@@ -36,7 +36,7 @@ mkdir -p "$work"
 
 # ABI probe of every feature: this is a test-only union, not an archive linked
 # into an engine binary. It covers the fields across all three feature sets.
-features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,cmd,zone,quakefs,net_udp_hw,net_chan,world_trace
+features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,cmd,zone,quakefs,net_udp_hw,net_chan,world_trace,world_hull
 
 extra_c=()
 if [ "$mode" = wasm ]; then
@@ -87,7 +87,7 @@ echo "== 2. compile abi_layout.c with the target's C compiler and link it =="
 # -Werror, so it is suppressed here rather than fixed there.
 "$CC" -std=gnu99 -O1 -Wall -Werror -Wno-comment \
 	-I"$engine/hexenworld/server" -I"$engine/hexenworld/shared" \
-	-I"$engine/h2shared" -I"$root/common" \
+	-I"$engine/h2shared" -I"$root/common" -I"$crate" \
 	-DGLQUAKE -DH2W -DSERVERONLY \
 	-o "$exe" "$crate/tests/abi_layout.c" "${extra_c[@]}" \
 		"$crate/quakefs_variadic.c" "$engine/h2shared/miniz.c" "$lib" -lm
