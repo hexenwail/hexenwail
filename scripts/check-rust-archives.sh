@@ -13,7 +13,7 @@ for tool in cmake nm; do
     command -v "$tool" >/dev/null || { echo "FAIL: $tool missing" >&2; exit 2; }
 done
 build=$(rust_gate_engine_build "$work")
-common=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,strlcpy,strlcat,cvar,zone,cmd,quakefs
+common=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,strlcpy,strlcat,cvar,zone,cmd,quakefs,world_trace
 
 check_count() { # file symbol expected-count
     local count
@@ -30,7 +30,7 @@ for target in glhexen2 h2ded hwsv; do
             wad=1; info=0; hw=1 ;;
         h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target;
             wad=0; info=0; hw=0 ;;
-        hwsv) variant=hwsv; features=$common,info_str,huffman,net_udp_hw,net_chan;
+        hwsv) variant=hwsv; features=$common,info_str,huffman,net_udp_hw,net_chan,world_trace_hw;
             wad=0; info=1; hw=1 ;;
     esac
     archive="$build/rust/$variant/libengine_rs.a"
@@ -73,7 +73,19 @@ for target in glhexen2 h2ded hwsv; do
         check_count "$file" UDP_Init "$h2"
         if [ "$target" = glhexen2 ]; then loop=1; else loop=0; fi
         check_count "$file" Loop_Init "$loop"
+        check_count "$file" SV_RecursiveHullCheck 1
+        check_count "$file" SV_HullPointContents 1
     done
+    # The hull traces' fatal path names the target's own error function: the
+    # hwsv archive must reach SV_Error (world_trace_hw) and the other two must
+    # not, since only hwsv defines it -- an archive that did would fail to
+    # link there, or silently report through the wrong path (#455).
+    sv_error_refs=$(nm -u "$archive" 2>/dev/null | grep -cE ' U SV_Error$' || true)
+    if [ "$target" = hwsv ]; then want_sv_error=1; else want_sv_error=0; fi
+    if [ "$(( sv_error_refs > 0 ))" -ne "$want_sv_error" ]; then
+        echo "FAIL: $variant archive references SV_Error $sv_error_refs time(s); expected $([ "$want_sv_error" = 1 ] && echo 'at least once' || echo none)" >&2
+        exit 1
+    fi
     echo "  $target: exactly one $variant archive; correct features and symbol ownership"
 done
 

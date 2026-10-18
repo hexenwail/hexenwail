@@ -866,7 +866,7 @@ endif()
 # in its target, without forcing C shims to own an entire source file.
 set(RUST_ENGINE_COMMON_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io strlcpy strlcat
-    cvar zone cmd quakefs)
+    cvar zone cmd quakefs world_trace)
 set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad net_loop_h2)
 if(EMSCRIPTEN OR UNIX)
     list(APPEND RUST_ENGINE_CLIENT_FEATURES net_bsd_h2 net_udp_h2)
@@ -878,8 +878,10 @@ set(RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_COMMON_FEATURES})
 if(UNIX)
     list(APPEND RUST_ENGINE_H2DED_FEATURES net_bsd_h2 net_udp_h2 h2ded_target)
 endif()
+# world_trace_hw: hexenworld/server/world.c's hull traces report a bad node
+# through SV_Error, which hwsv alone defines (#455).
 set(RUST_ENGINE_HWSV_FEATURES ${RUST_ENGINE_COMMON_FEATURES}
-    info_str huffman net_udp_hw net_chan)
+    info_str huffman net_udp_hw net_chan world_trace_hw)
 
 # Each port used to have a switch that put its C original back.  A cache or a
 # packaging recipe that still says OFF is asking for that C code, and linking

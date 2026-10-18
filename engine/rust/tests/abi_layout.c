@@ -51,6 +51,34 @@ typedef struct abi_mplane_s {
 	byte	pad[2];
 } abi_mplane_t;
 
+/* The hull traces' structs (engine/rust/src/world_trace.rs, #455), copied
+ * for the same reason: hull_t and mclipnode_t live in the three model
+ * headers, trace_t in two world.h files that each need edict_t.  The copies
+ * are tied to the real headers by the world_trace harness, which compares
+ * the engine's own offsetof against these accessors on the host; this file
+ * carries the comparison to wasm32, where every pointer field moves. */
+typedef struct {
+	int	planenum;
+	int	children[2];	/* dclipnode2_t: ENABLE_BSP2 is always defined */
+} abi_mclipnode_t;
+
+typedef struct {
+	abi_mclipnode_t	*clipnodes;
+	abi_mplane_t	*planes;
+	int		firstclipnode;
+	int		lastclipnode;
+	vec3_t		clip_mins;
+	vec3_t		clip_maxs;
+} abi_hull_t;
+
+typedef struct {
+	qboolean	allsolid, startsolid, inopen, inwater;
+	float		fraction;
+	vec3_t		endpos;
+	struct { vec3_t normal; float dist; } plane;
+	void		*ent;
+} abi_trace_t;
+
 /* The zone structures are private to zone.c and never appear in zone.h, and
  * cache_user_t's block in zone.h is behind `#if !defined(SERVERONLY)` -- which
  * this program is compiled with.  So they are copied here, as mplane_t is
@@ -138,6 +166,28 @@ RUST_ACCESSOR(MathlibMPlane_offsetof_normal)
 RUST_ACCESSOR(MathlibMPlane_offsetof_dist)
 RUST_ACCESSOR(MathlibMPlane_offsetof_type)
 RUST_ACCESSOR(MathlibMPlane_offsetof_signbits)
+STRUCT_ACCESSORS(WorldMClipNode)
+RUST_ACCESSOR(WorldMClipNode_offsetof_planenum)
+RUST_ACCESSOR(WorldMClipNode_offsetof_children)
+STRUCT_ACCESSORS(WorldHull)
+RUST_ACCESSOR(WorldHull_alignof)
+RUST_ACCESSOR(WorldHull_offsetof_clipnodes)
+RUST_ACCESSOR(WorldHull_offsetof_planes)
+RUST_ACCESSOR(WorldHull_offsetof_firstclipnode)
+RUST_ACCESSOR(WorldHull_offsetof_lastclipnode)
+RUST_ACCESSOR(WorldHull_offsetof_clip_mins)
+RUST_ACCESSOR(WorldHull_offsetof_clip_maxs)
+STRUCT_ACCESSORS(WorldTrace)
+RUST_ACCESSOR(WorldTrace_alignof)
+RUST_ACCESSOR(WorldTrace_offsetof_allsolid)
+RUST_ACCESSOR(WorldTrace_offsetof_startsolid)
+RUST_ACCESSOR(WorldTrace_offsetof_inopen)
+RUST_ACCESSOR(WorldTrace_offsetof_inwater)
+RUST_ACCESSOR(WorldTrace_offsetof_fraction)
+RUST_ACCESSOR(WorldTrace_offsetof_endpos)
+RUST_ACCESSOR(WorldTrace_offsetof_plane_normal)
+RUST_ACCESSOR(WorldTrace_offsetof_plane_dist)
+RUST_ACCESSOR(WorldTrace_offsetof_ent)
 
 STRUCT_ACCESSORS(CvarC)
 RUST_ACCESSOR(CvarC_alignof)
@@ -458,6 +508,29 @@ int main (void)
 	OFF(abi_mplane_t, dist, MathlibMPlane, dist);
 	OFF(abi_mplane_t, type, MathlibMPlane, type);
 	OFF(abi_mplane_t, signbits, MathlibMPlane, signbits);
+
+	SIZE(abi_mclipnode_t, WorldMClipNode);
+	OFF(abi_mclipnode_t, planenum, WorldMClipNode, planenum);
+	OFF(abi_mclipnode_t, children, WorldMClipNode, children);
+	SIZE(abi_hull_t, WorldHull);
+	ALIGN(abi_hull_t, WorldHull);
+	OFF(abi_hull_t, clipnodes, WorldHull, clipnodes);
+	OFF(abi_hull_t, planes, WorldHull, planes);
+	OFF(abi_hull_t, firstclipnode, WorldHull, firstclipnode);
+	OFF(abi_hull_t, lastclipnode, WorldHull, lastclipnode);
+	OFF(abi_hull_t, clip_mins, WorldHull, clip_mins);
+	OFF(abi_hull_t, clip_maxs, WorldHull, clip_maxs);
+	SIZE(abi_trace_t, WorldTrace);
+	ALIGN(abi_trace_t, WorldTrace);
+	OFF(abi_trace_t, allsolid, WorldTrace, allsolid);
+	OFF(abi_trace_t, startsolid, WorldTrace, startsolid);
+	OFF(abi_trace_t, inopen, WorldTrace, inopen);
+	OFF(abi_trace_t, inwater, WorldTrace, inwater);
+	OFF(abi_trace_t, fraction, WorldTrace, fraction);
+	OFF(abi_trace_t, endpos, WorldTrace, endpos);
+	OFF(abi_trace_t, plane.normal, WorldTrace, plane_normal);
+	OFF(abi_trace_t, plane.dist, WorldTrace, plane_dist);
+	OFF(abi_trace_t, ent, WorldTrace, ent);
 
 	SIZE(cvar_t, CvarC);
 	ALIGN(cvar_t, CvarC);

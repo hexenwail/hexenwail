@@ -36,7 +36,7 @@ mkdir -p "$work"
 
 # ABI probe of every feature: this is a test-only union, not an archive linked
 # into an engine binary. It covers the fields across all three feature sets.
-features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,cmd,zone,quakefs,net_udp_hw,net_chan
+features=hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,strlcpy,strlcat,huffman,wad,cvar,cmd,zone,quakefs,net_udp_hw,net_chan,world_trace
 
 extra_c=()
 if [ "$mode" = wasm ]; then

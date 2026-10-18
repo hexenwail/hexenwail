@@ -17,7 +17,9 @@
 #[path = "../hashindex/src/ffi.rs"]
 pub mod hashindex;
 
-#[cfg(feature = "mathlib")]
+// world_trace shares mathlib's mplane_t, so a harness that links only the
+// trace still gets the type (and mathlib's exports, which it does not define).
+#[cfg(any(feature = "mathlib", feature = "world_trace"))]
 #[path = "../mathlib/src/ffi.rs"]
 pub mod mathlib;
 
@@ -85,6 +87,11 @@ pub mod huffman;
 // comment.
 #[cfg(feature = "wad")]
 pub mod wad;
+
+// The hull-trace core of both world.c files (#455).  The module header says
+// where its code came from.
+#[cfg(feature = "world_trace")]
+pub mod world_trace;
 
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
