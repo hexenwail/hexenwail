@@ -388,7 +388,9 @@ check_tree() {
 		# way a citation can look right and point at nothing: a tree id for the
 		# commit, a commit from some other repository, a local commit no URL
 		# reaches, a directory for the file, and a licence change.
-		[ -n "${QUAKE_SRP_DIR:-}" ] && [ "$srp_ok" -eq 1 ] || continue
+		if [ -z "${QUAKE_SRP_DIR:-}" ] || [ "$srp_ok" -ne 1 ]; then
+			continue
+		fi
 		if [ "$(srp_git cat-file -t "$sha" 2>/dev/null)" != commit ]; then
 			echo "FAIL: $rs cites $sha, which is not a commit in QUAKE_SRP_DIR"
 			bad=1
