@@ -97,4 +97,9 @@ trace_t SV_Move (vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int type, e
 
 edict_t	*SV_TestPlayerPosition (edict_t *ent, vec3_t origin);
 
+/* Both defined in engine/rust/src/world_trace.rs (#455); until then they were
+ * world.c's own, SV_HullPointContents a static. */
+int SV_HullPointContents (hull_t *hull, int num, vec3_t p);
+qboolean SV_RecursiveHullCheck (hull_t *hull, int num, float p1f, float p2f, vec3_t p1, vec3_t p2, trace_t *trace);
+
 #endif	/* __HX2_WORLD_H */

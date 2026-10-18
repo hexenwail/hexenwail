@@ -107,6 +107,7 @@ derived_map() {
 	engine/rust/src/strlcat.rs            common/strlcat.c
 	engine/rust/src/strlcpy.rs            common/strlcpy.c
 	engine/rust/src/wad.rs                engine/h2shared/wad.c
+	engine/rust/src/world_trace.rs        engine/hexen2/world.c
 	engine/rust/src/zone.rs               engine/h2shared/zone.c
 	engine/rust/hashindex/src/lib.rs      engine/h2shared/hashindex.c
 	engine/rust/hashindex/src/ffi.rs      engine/h2shared/hashindex.c
@@ -132,6 +133,7 @@ original_files() {
 # holder that C original already names.
 borrowed_map() {
 	cat <<-'EOF'
+	engine/rust/src/world_trace.rs quake-rs/src/world.rs f3f372bc0779199f2bffc7b77b0dd081edd6624a
 	EOF
 	# The self-test registers its scratch borrowings here; a real run ignores it.
 	if [ "$self_test" -eq 1 ] && [ -f "${NOTICES_EXTRA_BORROWED:-}" ]; then

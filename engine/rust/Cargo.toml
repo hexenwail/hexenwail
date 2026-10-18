@@ -36,6 +36,11 @@ net_bsd_h2 = []
 net_udp_h2 = []
 h2ded_target = []
 zone = []
+# SV_HullPointContents and SV_RecursiveHullCheck (#455).  world_trace_hw is
+# hwsv's: the same port, reporting a bad node through SV_Error, which only
+# hwsv defines, instead of Sys_Error.
+world_trace = []
+world_trace_hw = ["world_trace"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go
