@@ -150,6 +150,32 @@ what you take from it is prior art, not parity.
 `scripts/check-rust-notices.sh` is the gate that fails otherwise.  The fidelity
 numbers above are quake-srp's own claim; we have not re-run them.
 
+**Copying from it (#455):** the Phase 7 world, `sv_move`, `sv_phys` and
+server-frame slices may start from quake-srp's code instead of a blank
+translation.  The copy is a starting point, not evidence: the port still
+translates a Hexen II C original, and still lands only with the #61
+differential harness against *that* C.  quake-srp's oracle compares against
+WinQuake, so its numbers say nothing about Hexen II.  Copying means adapting:
+`no_std` with no allocator, C-owned state behind the FFI edge, Hexen II's
+movetypes 11–14 and 8 clip hulls, separate Hexen II and HexenWorld fixtures.
+#455 has the file map.  To register a borrowing:
+
+1. Add a line to `borrowed_map` in `scripts/check-rust-notices.sh`:
+   `<rust file> <quake-rs/... path> <full 40-hex quake-srp commit>`, one per
+   quake-srp source file.  The Rust file must also be in `derived_map`.
+2. Put the matching line in the Rust file's leading `//` header:
+   `// Adapted from quake-srp: https://github.com/terrapapagalli1516/quake-srp/blob/<commit>/<path>`
+3. Tag it `GPL-2.0-or-later` or `GPL-3.0-or-later`, never ISC.
+4. Run the gate with `QUAKE_SRP_DIR=<your clone>`.  That checks the commit is
+   quake-srp's (descends from its root) and on an upstream branch (a local
+   commit has no URL), the path is a file there, and the licence at that commit
+   is GPL-2.0-or-later.  CI has no clone and checks only the form, so this run
+   is the author's job, and the PR says it was done.
+
+A Rust file anywhere in `engine/rust` that names quake-srp (any spelling, the
+owner's handle, or a `quake-rs/` path) and is not in `borrowed_map` fails the
+gate, and so does an `Adapted from` header line no entry asked for.
+
 ## Build & Test
 
 Always build through nix, never raw `cmake`/`make` — the flake pins the
@@ -190,7 +216,8 @@ tick is stale.
 
 - Default to **Ironwail's** approach for rendering features, and read it by ref
   (see "Reading Ironwail" above), never from the local worktree.
-- Rust work may read **quake-srp** as prior art (see "Prior art" above); it is
+- Rust work may read **quake-srp** as prior art, and copy from it under #455
+  (see "Prior art" above); it is
   Quake, not Hexen II — never cite it as parity.
 - Cite commits by **subject**, not hash (see "Citing commits" above).
 - Concurrent sessions share this checkout — read this file before any

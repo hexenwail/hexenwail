@@ -33,12 +33,27 @@
 #      else unrecognised fail rather than being guessed at;
 #   5. every .rs under a src/ directory of engine/rust, at any depth, is either
 #      in the map or listed as original Hexenwail code, so a new port cannot
-#      land without being registered here.
+#      land without being registered here;
+#   6. every file in borrowed_map -- code adapted from quake-srp, the Rust port
+#      of id's WinQuake (#455) -- is also in derived_map, pins quake-srp at a
+#      full 40-hex commit, names a path under quake-rs/, carries the header line
+#      `Adapted from quake-srp: <repo>/blob/<commit>/<path>` for each source, and
+#      is tagged GPL-2.0-or-later or GPL-3.0-or-later (quake-srp is GPLv2+, so
+#      ISC is out even where the C original allows it).  With QUAKE_SRP_DIR set
+#      to a clone (bare or not), the cited object must be a commit descending
+#      from quake-srp's root commit and contained in an upstream branch, the
+#      path must be a file at that commit, and quake-rs/Cargo.toml there must
+#      say GPL-2.0-or-later;
+#   7. any .rs under engine/rust (not only src/; cargo's target/ aside) that
+#      names quake-srp in any spelling, its owner or a quake-rs/ path is in
+#      borrowed_map, and every "Adapted from" header line of a borrowed file
+#      is one borrowed_map asked for -- so code cannot arrive with a credit
+#      comment and no pinned source, or a second source ride on the first's.
 #
 # A holder statement that wraps onto a second line in the C is compared line by
 # line; none does today, and one that did would fail check 1 loudly, not pass.
 #
-# Usage: check-rust-notices.sh [--self-test]
+# Usage: [QUAKE_SRP_DIR=<clone>] check-rust-notices.sh [--self-test]
 #
 #   --self-test  run the checks on a scratch copy of the tree, then break the
 #                copy in each way the checks exist to catch and require every
@@ -107,6 +122,69 @@ original_files() {
 	cat <<-'EOF'
 	engine/rust/src/lib.rs
 	EOF
+}
+
+# Rust file -> a quake-srp file it adapts code from -> the full commit it was
+# taken at (#455).  One line per quake-srp source, so a port seeded from two
+# files is listed twice.  Every file here is also in derived_map: borrowed
+# code is Quake's, and the port still translates a Hexen II C original whose
+# notices it carries -- quake-srp's own headers credit id Software alone, the
+# holder that C original already names.
+borrowed_map() {
+	cat <<-'EOF'
+	EOF
+	# The self-test registers its scratch borrowings here; a real run ignores it.
+	if [ "$self_test" -eq 1 ] && [ -f "${NOTICES_EXTRA_BORROWED:-}" ]; then
+		cat "$NOTICES_EXTRA_BORROWED"
+	fi
+}
+
+srp_url='https://github.com/terrapapagalli1516/quake-srp'
+# quake-srp's root commit: a citation must descend from it, so a clone of some
+# other repository with a quake-rs/ directory cannot stand in for upstream.
+# Read at check time, not load time: the self-test's stand-in repository sets
+# its own root after the script has loaded, and only a self-test may.
+srp_root() {
+	if [ "$self_test" -eq 1 ] && [ -n "${NOTICES_SRP_ROOT:-}" ]; then
+		echo "$NOTICES_SRP_ROOT"
+	else
+		echo 29997476d18779a0aa3609d0a6c43a09f1ae9299
+	fi
+}
+# Check 7's net: quake-srp in any spelling (quake_srp, QuakeSRP, a non-ASCII
+# hyphen -- up to three bytes between), its owner, or a path into its crate.
+srp_re='quake[^a-z0-9]{0,3}srp|terrapapagalli|quake-rs/'
+
+# git against QUAKE_SRP_DIR, deaf to any GIT_DIR or GIT_WORK_TREE in the
+# environment, which would otherwise redirect it to another repository.
+srp_git() {
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY \
+		-u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_COMMON_DIR \
+		git -C "$QUAKE_SRP_DIR" "$@"
+}
+
+# The refs that mirror upstream: a clone's remote-tracking branches, or a bare
+# clone's own branches (it has no others).
+srp_upstream_refs() {
+	if [ "$(srp_git rev-parse --is-bare-repository 2>/dev/null)" = true ]; then
+		echo refs/heads
+	else
+		echo refs/remotes
+	fi
+}
+
+# Every .rs under engine/rust, symlinks included, minus cargo's build output.
+# Only a crate's target/ -- beside its Cargo.toml -- is pruned: a directory
+# merely named target inside a source tree (src/target/) is source.  Extra
+# find tests follow.
+rust_files() {
+	local t=$1/engine/rust d
+	shift
+	local -a prune=(-path "$t/target")
+	for d in "$t"/*/Cargo.toml; do
+		[ -f "$d" ] && prune+=(-o -path "${d%/Cargo.toml}/target")
+	done
+	find "$t" \( "${prune[@]}" \) -prune -o \( -type f -o -type l \) -name '*.rs' "$@" -print | sort
 }
 
 # Every comment line of a C file -- all /* ... */ blocks and whole-line //
@@ -261,7 +339,98 @@ check_tree() {
 			echo "      the C file it translates, or to original_files if it translates none"
 			bad=1
 		fi
-	done < <(find "$tree/engine/rust" -name target -prune -o -type f -name '*.rs' -path '*/src/*' -print | sort)
+	done < <(rust_files "$tree" -path '*/src/*')
+
+	# 6. code adapted from quake-srp: pinned, attributed, GPL-tagged (#455)
+	local -A derived=() borrowed=() wanted=()
+	local srp sha extra want srp_lic srp_ok=1
+	while read -r rs c; do derived[$rs]=1; done < <(derived_map)
+	if [ -n "${QUAKE_SRP_DIR:-}" ] && ! srp_git rev-parse -q --git-dir >/dev/null 2>&1; then
+		echo "FAIL: QUAKE_SRP_DIR=$QUAKE_SRP_DIR is not a git repository"
+		bad=1; srp_ok=0
+	fi
+	while read -r rs srp sha extra; do
+		[ -n "$rs" ] || continue
+		borrowed[$rs]=1
+		if [ -z "${sha:-}" ] || [ -n "${extra:-}" ]; then
+			echo "FAIL: borrowed_map line for $rs is not \"<rust file> <quake-srp path> <commit>\""
+			bad=1; continue
+		fi
+		want="Adapted from quake-srp: $srp_url/blob/$sha/$srp"
+		wanted["$rs|$want"]=1
+		if [ -z "${derived[$rs]:-}" ]; then
+			echo "FAIL: $rs adapts quake-srp code but is not in derived_map -- a borrowed"
+			echo "      file still translates a Hexen II C original, whose notices it carries"
+			bad=1; continue
+		fi
+		if ! [[ $sha =~ ^[0-9a-f]{40}$ ]]; then
+			echo "FAIL: $rs pins quake-srp at \"$sha\"; use the full 40-hex commit, a branch moves"
+			bad=1; continue
+		fi
+		if [[ $srp != quake-rs/?* || $srp == *..* || $srp == */ ]]; then
+			echo "FAIL: $rs names quake-srp path \"$srp\", which is not a file under quake-rs/"
+			bad=1; continue
+		fi
+		[ -f "$tree/$rs" ] || continue   # the derived_map loop has reported it
+		# A whole-line match on the captured header, no pipe into grep -q: an
+		# early grep exit can SIGPIPE the writer and fail the test under pipefail.
+		hlines=$'\n'$(rs_header "$tree/$rs" | flat_lines)$'\n'
+		if [[ $hlines != *$'\n'"$want"$'\n'* ]]; then
+			echo "FAIL: $rs header lacks the quake-srp provenance line \"$want\""
+			bad=1
+		fi
+		spdx=$(sed -n '1s|^// SPDX-License-Identifier: ||p' "$tree/$rs")
+		if [[ " GPL-2.0-or-later GPL-3.0-or-later " != *" $spdx "* ]]; then
+			echo "FAIL: $rs adapts quake-srp code (GPL-2.0-or-later) and may not be tagged \"${spdx:-<none>}\""
+			bad=1
+		fi
+		# Against upstream itself, when a clone is at hand.  Each step closes a
+		# way a citation can look right and point at nothing: a tree id for the
+		# commit, a commit from some other repository, a local commit no URL
+		# reaches, a directory for the file, and a licence change.
+		[ -n "${QUAKE_SRP_DIR:-}" ] && [ "$srp_ok" -eq 1 ] || continue
+		if [ "$(srp_git cat-file -t "$sha" 2>/dev/null)" != commit ]; then
+			echo "FAIL: $rs cites $sha, which is not a commit in QUAKE_SRP_DIR"
+			bad=1
+		elif ! srp_git merge-base --is-ancestor "$(srp_root)" "$sha" 2>/dev/null; then
+			echo "FAIL: $rs cites $sha, which does not descend from quake-srp's root commit $(srp_root)"
+			bad=1
+		elif [ -z "$(srp_git for-each-ref --contains "$sha" --format='%(refname)' "$(srp_upstream_refs)")" ]; then
+			echo "FAIL: $rs cites $sha, which no upstream branch contains -- a local"
+			echo "      commit has no URL; push it to quake-srp or cite one that is there"
+			bad=1
+		elif [ "$(srp_git cat-file -t "$sha:$srp" 2>/dev/null)" != blob ]; then
+			echo "FAIL: $rs cites $srp at $sha, which is not a file in quake-srp there"
+			bad=1
+		else
+			srp_lic=$(srp_git show "$sha:quake-rs/Cargo.toml" 2>/dev/null |
+				sed -n 's/^license[[:space:]]*=[[:space:]]*"\([^"]*\)".*$/\1/p')
+			if [ "$srp_lic" != GPL-2.0-or-later ]; then
+				echo "FAIL: $rs cites quake-srp at $sha, licensed \"${srp_lic:-<none>}\" there, not GPL-2.0-or-later"
+				bad=1
+			fi
+		fi
+	done < <(borrowed_map)
+
+	# 7. no quake-srp code arrives unregistered.  Every .rs in the crate, not
+	# only src/ (tests, build.rs, a vendored module), is scanned for any
+	# spelling of the name, the owner's handle, or a quake-rs/ path; and every
+	# "Adapted from" line in a header is one borrowed_map asked for, so a second
+	# source cannot ride in on the first one's registration.
+	while IFS= read -r rs; do
+		rs=${rs#"$tree/"}
+		if grep -Eiq -- "$srp_re" "$tree/$rs" && [ -z "${borrowed[$rs]:-}" ]; then
+			echo "FAIL: $rs mentions quake-srp but is not in borrowed_map -- register the"
+			echo "      quake-srp file and commit it adapts, or drop the mention"
+			bad=1
+		fi
+		while IFS= read -r line; do
+			if [ -n "${borrowed[$rs]:-}" ] && [ -z "${wanted["$rs|$line"]:-}" ]; then
+				echo "FAIL: $rs header line \"$line\" matches no borrowed_map entry"
+				bad=1
+			fi
+		done < <(rs_header "$tree/$rs" | flat_lines | grep -Ei '^adapted from' || true)
+	done < <(rust_files "$tree")
 
 	return "$bad"
 }
@@ -274,6 +443,11 @@ if [ "$self_test" -eq 0 ]; then
 	fi
 	echo "PASS: $(derived_map | wc -l) derived files carry their C originals' notices;"
 	echo "      $(original_files | wc -l) original file(s); nothing unregistered."
+	n_borrowed=$(borrowed_map | grep -c . || true)
+	echo "      $n_borrowed quake-srp source(s) pinned and attributed."
+	if [ "$n_borrowed" -gt 0 ] && [ -z "${QUAKE_SRP_DIR:-}" ]; then
+		echo "note: quake-srp citations not checked against upstream; set QUAKE_SRP_DIR to a clone"
+	fi
 	exit 0
 fi
 
@@ -281,8 +455,12 @@ fi
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 
+# The real environment must not reach the cases: each sets what it tests.
+unset QUAKE_SRP_DIR
+export NOTICES_EXTRA_BORROWED=$scratch/borrowed
+
 fresh_copy() {
-	rm -rf "$scratch/tree"
+	rm -rf "$scratch/tree" "$NOTICES_EXTRA_BORROWED"
 	mkdir -p "$scratch/tree"
 	local f
 	while read -r f; do
@@ -445,6 +623,241 @@ mkdir -p "$scratch/tree/engine/rust/src/net"
 printf '// SPDX-License-Identifier: GPL-2.0-or-later\n' >"$scratch/tree/engine/rust/src/net/mod.rs"
 expect fail "unregistered nested module" \
 	'engine/rust/src/net/mod\.rs is not in check-rust-notices\.sh'
+
+# Checks 6 and 7: code adapted from quake-srp (#455).  The real map borrows
+# nothing yet, so each case registers a scratch borrowing of its own.
+
+# borrow RS SRP_PATH SHA: register the borrowing and give RS its provenance line.
+borrow() {
+	printf '%s %s %s\n' "$1" "$2" "$3" >>"$NOTICES_EXTRA_BORROWED"
+	sed -i "1a // Adapted from quake-srp: $srp_url/blob/$3/$2" "$scratch/tree/$1"
+}
+
+# Stand-in quake-srps, outside the tree so fresh_copy keeps them.  The main
+# one has four commits on its upstream branch -- GPL, MIT, GPL again with a
+# trailing comment on the licence line -- and one local commit past it, which
+# no upstream branch contains.  A second repository, laid out the same but
+# with its own root, plays a clone of something else.
+srp_commit() { git -C "$1" -c user.name=t -c user.email=t@t commit -qam "$2"; git -C "$1" rev-parse HEAD; }
+srp_repo=$scratch/quake-srp
+mkdir -p "$srp_repo/quake-rs/src/server"
+printf '[package]\nname = "quake-rs"\nlicense = "GPL-2.0-or-later"\n' >"$srp_repo/quake-rs/Cargo.toml"
+printf '//! SV_Move.\n' >"$srp_repo/quake-rs/src/server/sv_world.rs"
+git -C "$srp_repo" init -q
+git -C "$srp_repo" add -A
+srp_gpl=$(srp_commit "$srp_repo" gpl)
+sed -i 's/GPL-2.0-or-later/MIT/' "$srp_repo/quake-rs/Cargo.toml"
+srp_mit=$(srp_commit "$srp_repo" mit)
+sed -i 's/"MIT"/"GPL-2.0-or-later"  # relicensed back/' "$srp_repo/quake-rs/Cargo.toml"
+srp_regpl=$(srp_commit "$srp_repo" regpl)
+git -C "$srp_repo" update-ref refs/remotes/origin/main HEAD
+printf '//! Not upstream.\n' >>"$srp_repo/quake-rs/src/server/sv_world.rs"
+srp_local=$(srp_commit "$srp_repo" local)
+srp_tree=$(git -C "$srp_repo" rev-parse "$srp_gpl^{tree}")
+export NOTICES_SRP_ROOT=$srp_gpl
+git clone -q --bare "$srp_repo" "$scratch/quake-srp.git"
+git -C "$scratch/quake-srp.git" update-ref -d refs/heads/"$(git -C "$srp_repo" branch --show-current)"
+git -C "$scratch/quake-srp.git" update-ref refs/heads/main "$srp_regpl"
+other_repo=$scratch/other
+mkdir -p "$other_repo/quake-rs/src/server"
+printf '[package]\nlicense = "GPL-2.0-or-later"\n' >"$other_repo/quake-rs/Cargo.toml"
+printf '//! Something else.\n' >"$other_repo/quake-rs/src/server/sv_world.rs"
+git -C "$other_repo" init -q
+git -C "$other_repo" add -A
+srp_other=$(srp_commit "$other_repo" other)
+git -C "$other_repo" update-ref refs/remotes/origin/main HEAD
+srp_fake=0123456789abcdef0123456789abcdef01234567
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+expect pass "registered, pinned, attributed borrowing (no clone to check against)"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+borrow engine/rust/src/crc.rs quake-rs/src/world.rs "$srp_fake"
+expect pass "one port seeded from two quake-srp files"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+sed -i '/^\/\/ Adapted from quake-srp: /d' "$scratch/tree/engine/rust/src/crc.rs"
+expect fail "provenance line dropped from a registered borrowing" \
+	'crc\.rs header lacks the quake-srp provenance line'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+borrow engine/rust/src/crc.rs quake-rs/src/world.rs "$srp_fake"
+sed -i '\|quake-rs/src/world\.rs$|d' "$scratch/tree/engine/rust/src/crc.rs"
+expect fail "second of two provenance lines dropped" \
+	'crc\.rs header lacks the quake-srp provenance line ".*/quake-rs/src/world\.rs"'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+printf '\nfn later() {}\n// Adapted from quake-srp: %s/blob/%s/quake-rs/src/server/sv_world.rs\n' \
+	"$srp_url" "$srp_fake" >>"$scratch/tree/engine/rust/src/crc.rs"
+sed -i '2d' "$scratch/tree/engine/rust/src/crc.rs"
+expect fail "provenance line below the header, not in it" \
+	'crc\.rs header lacks the quake-srp provenance line'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs main
+expect fail "borrowing pinned to a branch name" \
+	'crc\.rs pins quake-srp at "main"'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs f3f372b
+expect fail "borrowing pinned to an abbreviated commit" \
+	'crc\.rs pins quake-srp at "f3f372b"'
+
+fresh_copy
+borrow engine/rust/src/crc.rs oracle/c/world.c "$srp_fake"
+expect fail "borrowing from outside quake-rs/ (id's C, not the port)" \
+	'crc\.rs names quake-srp path "oracle/c/world\.c", which is not a file under quake-rs/'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/../oracle/c/world.c "$srp_fake"
+expect fail "borrowing path that climbs out of quake-rs/" \
+	'crc\.rs names quake-srp path "quake-rs/\.\./oracle/c/world\.c"'
+
+fresh_copy
+borrow engine/rust/src/lib.rs quake-rs/src/lib.rs "$srp_fake"
+expect fail "borrowing into a file that translates no Hexen II C" \
+	'engine/rust/src/lib\.rs adapts quake-srp code but is not in derived_map'
+
+fresh_copy
+printf 'engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs\n' >"$NOTICES_EXTRA_BORROWED"
+expect fail "borrowed_map line missing its commit" \
+	'borrowed_map line for engine/rust/src/crc\.rs is not'
+
+fresh_copy
+sed -i '1s/GPL-2.0-or-later/ISC/' "$scratch/tree/engine/rust/src/strlcat.rs"
+borrow engine/rust/src/strlcat.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+expect fail "ISC tag on a port that adapts quake-srp (its C would allow ISC)" \
+	'strlcat\.rs adapts quake-srp code \(GPL-2\.0-or-later\) and may not be tagged "ISC"'
+
+fresh_copy
+printf '\n// SV_Move, adapted from Quake-SRP.\n' >>"$scratch/tree/engine/rust/src/zone.rs"
+expect fail "quake-srp credited in a comment, no pinned source" \
+	'zone\.rs mentions quake-srp but is not in borrowed_map'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/ "$srp_fake"
+expect fail "borrowing path that is quake-rs/ itself" \
+	'crc\.rs names quake-srp path "quake-rs/", which is not a file'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+sed -i "1a // Adapted from quake-srp: $srp_url/blob/main/quake-rs/src/server/sv_phys.rs" \
+	"$scratch/tree/engine/rust/src/crc.rs"
+expect fail "second, unregistered provenance line rides on the first's entry" \
+	'crc\.rs header line "Adapted from quake-srp: .*/blob/main/quake-rs/src/server/sv_phys\.rs" matches no borrowed_map entry'
+
+for spelling in 'quake_srp' 'QuakeSRP' 'quake srp' $'quake\xe2\x80\x91srp' \
+		'github.com/terrapapagalli1516' 'quake-rs/src/world.rs'; do
+	fresh_copy
+	printf '\n// SV_Move, adapted from %s.\n' "$spelling" >>"$scratch/tree/engine/rust/src/zone.rs"
+	expect fail "quake-srp credited as \"$spelling\", no pinned source" \
+		'zone\.rs mentions quake-srp but is not in borrowed_map'
+done
+
+fresh_copy
+mkdir -p "$scratch/tree/engine/rust/cvar/tests"
+printf '// adapted from quake-srp\n' >"$scratch/tree/engine/rust/cvar/tests/vendored.rs"
+expect fail "quake-srp credited outside src/, in a test" \
+	'cvar/tests/vendored\.rs mentions quake-srp'
+
+fresh_copy
+printf '// SPDX-License-Identifier: MIT\n' >"$scratch/tree/engine/rust/vendored.rs"
+ln -s ../vendored.rs "$scratch/tree/engine/rust/src/vendored.rs"
+expect fail "port symlinked into src/ from outside it" \
+	'engine/rust/src/vendored\.rs is not in check-rust-notices\.sh'
+
+# The copy carries no Cargo.toml, so these cases give hashindex one: with a
+# crate present, its target/ is pruned and a src/target/ still is not.
+fresh_copy
+touch "$scratch/tree/engine/rust/hashindex/Cargo.toml"
+mkdir -p "$scratch/tree/engine/rust/src/target"
+printf '// SPDX-License-Identifier: MIT\n' >"$scratch/tree/engine/rust/src/target/world.rs"
+expect fail "port in a source directory that happens to be named target" \
+	'engine/rust/src/target/world\.rs is not in check-rust-notices\.sh'
+
+fresh_copy
+touch "$scratch/tree/engine/rust/hashindex/Cargo.toml"
+mkdir -p "$scratch/tree/engine/rust/target/debug" "$scratch/tree/engine/rust/hashindex/target/src"
+printf '// quake-srp, unregistered\n' >"$scratch/tree/engine/rust/target/debug/out.rs"
+printf '// quake-srp, unregistered\n' >"$scratch/tree/engine/rust/hashindex/target/src/out.rs"
+expect pass "cargo's build output is not scanned, top-level or a crate's"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/ "$srp_fake"
+expect fail "borrowing path that names a directory" \
+	'crc\.rs names quake-srp path "quake-rs/src/", which is not a file'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_gpl"
+QUAKE_SRP_DIR=$srp_repo expect pass "citation checked against a quake-srp clone"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_regpl"
+QUAKE_SRP_DIR=$srp_repo expect pass "licence line with a trailing comment"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_gpl"
+QUAKE_SRP_DIR=$scratch/quake-srp.git expect pass "citation checked against a bare clone"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_gpl"
+# In a subshell for the cd; t_fail does not come back out of one, the status does.
+(
+	cd "$scratch"
+	CDPATH=/ QUAKE_SRP_DIR=quake-srp GIT_DIR=$root/.git \
+		expect pass "relative QUAKE_SRP_DIR, with CDPATH and GIT_DIR set"
+	exit "$t_fail"
+) || t_fail=1
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_phys.rs "$srp_gpl"
+QUAKE_SRP_DIR=$srp_repo expect fail "cited path absent at the cited commit" \
+	'crc\.rs cites quake-rs/src/server/sv_phys\.rs at [0-9a-f]{40}, which is not a file in quake-srp there'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server "$srp_gpl"
+QUAKE_SRP_DIR=$srp_repo expect fail "cited path is a directory" \
+	'crc\.rs cites quake-rs/src/server at [0-9a-f]{40}, which is not a file in quake-srp there'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_fake"
+QUAKE_SRP_DIR=$srp_repo expect fail "cited commit absent from the clone" \
+	'crc\.rs cites 0123456789abcdef0123456789abcdef01234567, which is not a commit in QUAKE_SRP_DIR'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_tree"
+QUAKE_SRP_DIR=$srp_repo expect fail "a tree id cited as the commit" \
+	'crc\.rs cites [0-9a-f]{40}, which is not a commit in QUAKE_SRP_DIR'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_other"
+QUAKE_SRP_DIR=$other_repo expect fail "a clone of some other repository laid out like quake-srp" \
+	"crc\\.rs cites [0-9a-f]{40}, which does not descend from quake-srp's root commit"
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_local"
+QUAKE_SRP_DIR=$srp_repo expect fail "a local commit no upstream branch contains" \
+	'crc\.rs cites [0-9a-f]{40}, which no upstream branch contains'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_mit"
+QUAKE_SRP_DIR=$srp_repo expect fail "quake-srp not GPL-2.0-or-later at the cited commit" \
+	'crc\.rs cites quake-srp at [0-9a-f]{40}, licensed "MIT" there'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_gpl"
+QUAKE_SRP_DIR=$root/engine expect fail "QUAKE_SRP_DIR inside Hexenwail answers with Hexenwail's history" \
+	'crc\.rs cites [0-9a-f]{40}, which is not a commit in QUAKE_SRP_DIR'
+
+fresh_copy
+borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_gpl"
+QUAKE_SRP_DIR=$scratch/nowhere expect fail "QUAKE_SRP_DIR that does not exist" \
+	'QUAKE_SRP_DIR=.* is not a git repository'
 
 echo
 if [ "$t_fail" -ne 0 ]; then
