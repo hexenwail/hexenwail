@@ -141,6 +141,30 @@ borrowed_map() {
 	fi
 }
 
+# The entries above, each line led by where it came from: "real" for the
+# heredoc, "scratch" for the self-test's.  The self-test's stand-in quake-srp
+# cannot hold a real citation's commit, so its upstream cases verify only the
+# scratch entries; the real ones stay registered and are checked offline in
+# full, and against upstream in a real run with QUAKE_SRP_DIR.
+borrowed_entries() {
+	local n_real line
+	n_real=$(borrowed_map_real | grep -c . || true)
+	borrowed_map | while IFS= read -r line; do
+		if [ "$n_real" -gt 0 ]; then
+			n_real=$((n_real - 1))
+			printf 'real %s\n' "$line"
+		else
+			printf 'scratch %s\n' "$line"
+		fi
+	done
+}
+
+# The heredoc alone, without the self-test's additions.
+borrowed_map_real() {
+	local self_test=0
+	borrowed_map
+}
+
 srp_url='https://github.com/terrapapagalli1516/quake-srp'
 # quake-srp's root commit: a citation must descend from it, so a clone of some
 # other repository with a quake-rs/ directory cannot stand in for upstream.
@@ -351,7 +375,8 @@ check_tree() {
 		echo "FAIL: QUAKE_SRP_DIR=$QUAKE_SRP_DIR is not a git repository"
 		bad=1; srp_ok=0
 	fi
-	while read -r rs srp sha extra; do
+	local origin
+	while read -r origin rs srp sha extra; do
 		[ -n "$rs" ] || continue
 		borrowed[$rs]=1
 		if [ -z "${sha:-}" ] || [ -n "${extra:-}" ]; then
@@ -393,6 +418,10 @@ check_tree() {
 		if [ -z "${QUAKE_SRP_DIR:-}" ] || [ "$srp_ok" -ne 1 ]; then
 			continue
 		fi
+		# A real citation cannot be in the self-test's stand-in quake-srp.
+		if [ "$self_test" -eq 1 ] && [ "$origin" = real ]; then
+			continue
+		fi
 		if [ "$(srp_git cat-file -t "$sha" 2>/dev/null)" != commit ]; then
 			echo "FAIL: $rs cites $sha, which is not a commit in QUAKE_SRP_DIR"
 			bad=1
@@ -414,7 +443,7 @@ check_tree() {
 				bad=1
 			fi
 		fi
-	done < <(borrowed_map)
+	done < <(borrowed_entries)
 
 	# 7. no quake-srp code arrives unregistered.  Every .rs in the crate, not
 	# only src/ (tests, build.rs, a vendored module), is scanned for any
@@ -795,6 +824,16 @@ fresh_copy
 borrow engine/rust/src/crc.rs quake-rs/src/ "$srp_fake"
 expect fail "borrowing path that names a directory" \
 	'crc\.rs names quake-srp path "quake-rs/src/", which is not a file'
+
+# The real map's own entries: skipped by the stand-in clone below, which
+# cannot hold their commits, but held offline like any other.
+if [ -n "$(borrowed_map_real)" ]; then
+	fresh_copy
+	read -r real_rs _ <<<"$(borrowed_map_real | head -n1)"
+	sed -i '/^\/\/ Adapted from quake-srp: /d' "$scratch/tree/$real_rs"
+	expect fail "a real borrowing's provenance line dropped (offline check)" \
+		"$(printf '%s' "$real_rs" | sed 's/[.]/\\./g') header lacks the quake-srp provenance line"
+fi
 
 fresh_copy
 borrow engine/rust/src/crc.rs quake-rs/src/server/sv_world.rs "$srp_gpl"
