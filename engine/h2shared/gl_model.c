@@ -3762,7 +3762,10 @@ static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype, int md
 	{
 	    k = LittleLong (pskintype->type);		/* aliasskintype_t */
 	    if (k == ALIAS_SKIN_SINGLE) {
-		Mod_FloodFillSkin (skin, pheader->skinwidth, pheader->skinheight);
+		/* This skin, not the first one: `skin` is set once at entry, so
+		 * passing it flood-filled skin 0 once per skin and skins 1..n-1
+		 * never (Ironwail has the same stale pointer).  GitHub #202. */
+		Mod_FloodFillSkin ((byte *)(pskintype + 1), pheader->skinwidth, pheader->skinheight);
 
 		// save 8 bit texels for the player model to remap
 		if (!strcmp(loadmodel->name,"models/paladin.mdl"))

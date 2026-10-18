@@ -72,9 +72,11 @@ def check_skin_groups(text):
     require(r"GL_LoadTexture\s*\([^;]*\(byte\s*\*\)\s*\(?pskintype\)?\s*,", loop,
             "flood fill and GL_LoadTexture read the same member buffer")
 
-    require(r"Mod_FloodFillSkin\s*\(\s*skin\s*,", single,
-            "single-skin branch keeps the entry-time skin pointer (retail parity, GH #154)")
-    print("PASS: skin-group members flood-filled through their own pointer (GH #154)")
+    # GH #202: the single-skin branch flood-filled the entry-time pointer, so
+    # skin 0 once per skin and skins 1..n-1 never.  Each skin now fills itself.
+    require(r"Mod_FloodFillSkin\s*\(\s*\(byte\s*\*\)\s*\(pskintype\s*\+\s*1\)\s*,", single,
+            "single-skin branch flood-fills the skin it is on, not the entry-time pointer (GH #202)")
+    print("PASS: every skin, single or grouped, is flood-filled through its own pointer (GH #154, #202)")
 
 
 def check_sprite_hunk_flag(text):
