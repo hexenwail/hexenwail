@@ -84,7 +84,13 @@ typedef struct {
  * is included rather than copied; the definition below is a stand-in that
  * lets this program link the archive's world_hull objects without a server. */
 #include "world_target.h"
+#include "phys_target.h"
 const world_target_facts_t World_TargetFacts;
+const phys_target_facts_t Phys_TargetFacts;
+double Phys_HostFrametime (void) { return 0; }
+struct edict_s *Phys_SvPlayer (void) { return NULL; }
+float Phys_MaxVelocity (void) { return 0; }
+float Phys_Gravity (void) { return 0; }
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }
 struct qmodel_s *World_SvWorldModel (void) { return NULL; }
@@ -226,6 +232,9 @@ RUST_ACCESSOR(WorldTargetFacts_offsetof_v_classname)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_solid_ghost)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_v_goalentity)
 RUST_ACCESSOR(WorldTargetFacts_offsetof_fl_set_trace)
+RUST_ACCESSOR(PhysTargetFacts_sizeof)
+RUST_ACCESSOR(PhysTargetFacts_offsetof_v_hoverz)
+RUST_ACCESSOR(PhysTargetFacts_offsetof_movetype_swim)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -585,6 +594,10 @@ int main (void)
 	OFF(world_target_facts_t, solid_ghost, WorldTargetFacts, solid_ghost);
 	OFF(world_target_facts_t, v_goalentity, WorldTargetFacts, v_goalentity);
 	OFF(world_target_facts_t, fl_set_trace, WorldTargetFacts, fl_set_trace);
+
+	SIZE(phys_target_facts_t, PhysTargetFacts);
+	OFF(phys_target_facts_t, v_hoverz, PhysTargetFacts, v_hoverz);
+	OFF(phys_target_facts_t, movetype_swim, PhysTargetFacts, movetype_swim);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

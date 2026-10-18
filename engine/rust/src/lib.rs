@@ -112,6 +112,11 @@ pub mod world_move;
 #[cfg(feature = "sv_move")]
 pub mod sv_move;
 
+// sv_phys.c's base helpers: velocity bounds, think, impact, the fly-move
+// slide, gravity and SV_PushEntity (#455).
+#[cfg(feature = "sv_phys")]
+pub mod sv_phys;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]
