@@ -107,6 +107,7 @@ derived_map() {
 	engine/rust/src/sv_move.rs            engine/hexen2/sv_move.c
 	engine/rust/src/sv_phys.rs            engine/hexen2/sv_phys.c
 	engine/rust/src/sv_phys_push.rs       engine/hexen2/sv_phys.c
+	engine/rust/src/sv_phys_walk.rs       engine/hexen2/sv_phys.c
 	engine/rust/src/strlcat.rs            common/strlcat.c
 	engine/rust/src/strlcpy.rs            common/strlcpy.c
 	engine/rust/src/wad.rs                engine/h2shared/wad.c

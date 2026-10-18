@@ -26,6 +26,10 @@ typedef struct phys_target_facts_s
 	size_t	v_ltime, v_avelocity, v_watertype, v_blocked;
 	/* header constants; max_edicts sizes the pushers' moved lists */
 	int	movetype_none, movetype_noclip, movetype_follow, max_edicts;
+	/* walking (sv_phys_walk.rs): entvars_t members, relative to v */
+	size_t	v_oldorigin, v_waterlevel, v_v_angle;
+	/* header constants */
+	int	fl_waterjump, movetype_step, movetype_toss, movetype_fly;
 } phys_target_facts_t;
 
 extern const phys_target_facts_t	Phys_TargetFacts;
@@ -45,5 +49,11 @@ int		Phys_NumEdicts (void);
 int		Phys_MaxClients (void);
 int		Phys_MapChecks (void);
 float		Phys_Elevators (void);
+/* Hexen II's walking only: sv_nostep.integer; svs.clients[num - 1].active;
+ * *sv_globals.PlayerPreThink and PlayerPostThink.  0 in HexenWorld. */
+int		Phys_NoStep (void);
+int		Phys_ClientActive (int num);
+int		Phys_PlayerPreThink (void);
+int		Phys_PlayerPostThink (void);
 
 #endif	/* PHYS_TARGET_H */

@@ -15,6 +15,7 @@ extern	cvar_t	sv_maxvelocity;
 #ifndef H2W
 extern	cvar_t	sv_gravity;
 extern	cvar_t	sv_gameplayfix_elevators;
+extern	cvar_t	sv_nostep;
 #endif
 
 #define V(member)	offsetof (entvars_t, member)
@@ -25,7 +26,9 @@ const phys_target_facts_t Phys_TargetFacts =
 	SOLID_PHASE, MOVETYPE_WALK, MOVETYPE_FLYMISSILE, MOVETYPE_BOUNCE,
 	MOVETYPE_BOUNCEMISSILE, MOVETYPE_SWIM,
 	V(ltime), V(avelocity), V(watertype), V(blocked),
-	MOVETYPE_NONE, MOVETYPE_NOCLIP, MOVETYPE_FOLLOW, MAX_EDICTS
+	MOVETYPE_NONE, MOVETYPE_NOCLIP, MOVETYPE_FOLLOW, MAX_EDICTS,
+	V(oldorigin), V(waterlevel), V(v_angle),
+	FL_WATERJUMP, MOVETYPE_STEP, MOVETYPE_TOSS, MOVETYPE_FLY
 };
 
 double Phys_HostFrametime (void)
@@ -86,5 +89,42 @@ float Phys_Elevators (void)
 	return 0;
 #else
 	return sv_gameplayfix_elevators.value;
+#endif
+}
+
+int Phys_NoStep (void)
+{
+#ifdef H2W
+	return 0;
+#else
+	return sv_nostep.integer;
+#endif
+}
+
+int Phys_ClientActive (int num)
+{
+#ifdef H2W
+	(void) num;
+	return 0;
+#else
+	return svs.clients[num - 1].active;
+#endif
+}
+
+int Phys_PlayerPreThink (void)
+{
+#ifdef H2W
+	return 0;
+#else
+	return *sv_globals.PlayerPreThink;
+#endif
+}
+
+int Phys_PlayerPostThink (void)
+{
+#ifdef H2W
+	return 0;
+#else
+	return *sv_globals.PlayerPostThink;
 #endif
 }
