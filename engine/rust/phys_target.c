@@ -16,6 +16,7 @@ extern	cvar_t	sv_maxvelocity;
 extern	cvar_t	sv_gravity;
 extern	cvar_t	sv_gameplayfix_elevators;
 extern	cvar_t	sv_nostep;
+extern	cvar_t	sv_freezenonclients;
 #endif
 
 #define V(member)	offsetof (entvars_t, member)
@@ -28,7 +29,20 @@ const phys_target_facts_t Phys_TargetFacts =
 	V(ltime), V(avelocity), V(watertype), V(blocked),
 	MOVETYPE_NONE, MOVETYPE_NOCLIP, MOVETYPE_FOLLOW, MAX_EDICTS,
 	V(oldorigin), V(waterlevel), V(v_angle),
-	FL_WATERJUMP, MOVETYPE_STEP, MOVETYPE_TOSS, MOVETYPE_FLY
+	FL_WATERJUMP, MOVETYPE_STEP, MOVETYPE_TOSS, MOVETYPE_FLY,
+	V(movechain), V(chainmoved),
+#ifdef H2W
+	V(lastruntime),
+#else
+	0,
+#endif
+	offsetof (edict_t, spawnwalk),
+	FL_MOVECHAIN_ANGLE, MOVETYPE_PUSHPULL,
+#ifdef H2W
+	MAX_CLIENTS
+#else
+	0
+#endif
 };
 
 double Phys_HostFrametime (void)
@@ -126,5 +140,80 @@ int Phys_PlayerPostThink (void)
 	return 0;
 #else
 	return *sv_globals.PlayerPostThink;
+#endif
+}
+
+float *Phys_ForceRetouch (void)
+{
+	return sv_globals.force_retouch;
+}
+
+int Phys_StartFrame (void)
+{
+	return *sv_globals.StartFrame;
+}
+
+int *Phys_PhysicsWalk (void)
+{
+	return &sv_physics_walk;
+}
+
+double Phys_Realtime (void)
+{
+	return realtime;
+}
+
+double *Phys_HostFrametimePtr (void)
+{
+	return &host_frametime;
+}
+
+double *Phys_SvTimePtr (void)
+{
+	return &sv.time;
+}
+
+int Phys_FreezeNonClients (void)
+{
+#ifdef H2W
+	return 0;
+#else
+	return sv_freezenonclients.integer;
+#endif
+}
+
+float *Phys_FrameTimeGlobal (void)
+{
+#ifdef H2W
+	return sv_globals.frametime;
+#else
+	return NULL;
+#endif
+}
+
+int *Phys_Newmis (void)
+{
+#ifdef H2W
+	return sv_globals.newmis;
+#else
+	return NULL;
+#endif
+}
+
+float Phys_MinTic (void)
+{
+#ifdef H2W
+	return sv_mintic.value;
+#else
+	return 0;
+#endif
+}
+
+float Phys_MaxTic (void)
+{
+#ifdef H2W
+	return sv_maxtic.value;
+#else
+	return 0;
 #endif
 }

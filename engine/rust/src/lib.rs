@@ -127,6 +127,11 @@ pub mod sv_phys_push;
 #[cfg(feature = "sv_phys_walk")]
 pub mod sv_phys_walk;
 
+// sv_phys.c's movetype dispatch and the frame's entity walk, SV_Physics
+// (#455).
+#[cfg(feature = "sv_phys_move")]
+pub mod sv_phys_move;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

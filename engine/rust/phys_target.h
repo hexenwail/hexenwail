@@ -30,6 +30,14 @@ typedef struct phys_target_facts_s
 	size_t	v_oldorigin, v_waterlevel, v_v_angle;
 	/* header constants */
 	int	fl_waterjump, movetype_step, movetype_toss, movetype_fly;
+	/* the movetype dispatch (sv_phys_move.rs): entvars_t members, relative
+	 * to v; lastruntime is HexenWorld's alone (0 in Hexen II) */
+	size_t	v_movechain, v_chainmoved, v_lastruntime;
+	/* edict_t's spawnwalk, outside v (#138) */
+	size_t	edict_spawnwalk;
+	/* header constants; max_clients is HexenWorld's MAX_CLIENTS (0 in
+	 * Hexen II, which walks svs.maxclients) */
+	int	fl_movechain_angle, movetype_pushpull, max_clients;
 } phys_target_facts_t;
 
 extern const phys_target_facts_t	Phys_TargetFacts;
@@ -55,5 +63,22 @@ int		Phys_NoStep (void);
 int		Phys_ClientActive (int num);
 int		Phys_PlayerPreThink (void);
 int		Phys_PlayerPostThink (void);
+/* the frame: *sv_globals.force_retouch and StartFrame; sv_physics_walk
+ * (pr_edict.c's, #138); realtime; host_frametime and sv.time, which the
+ * walk writes */
+float		*Phys_ForceRetouch (void);
+int		Phys_StartFrame (void);
+int		*Phys_PhysicsWalk (void);
+double		Phys_Realtime (void);
+double		*Phys_HostFrametimePtr (void);
+double		*Phys_SvTimePtr (void);
+/* Hexen II only (0 in HexenWorld): sv_freezenonclients.integer */
+int		Phys_FreezeNonClients (void);
+/* HexenWorld only (NULL / 0 in Hexen II): *sv_globals.frametime and newmis,
+ * sv_mintic and sv_maxtic */
+float		*Phys_FrameTimeGlobal (void);
+int		*Phys_Newmis (void);
+float		Phys_MinTic (void);
+float		Phys_MaxTic (void);
 
 #endif	/* PHYS_TARGET_H */

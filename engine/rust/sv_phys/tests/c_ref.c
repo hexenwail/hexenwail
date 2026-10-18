@@ -20,6 +20,7 @@ extern	cvar_t	sv_maxvelocity;
 extern	cvar_t	sv_gravity;
 extern	cvar_t	sv_gameplayfix_elevators;
 extern	cvar_t	sv_nostep;
+extern	cvar_t	sv_freezenonclients;
 #endif
 
 #define static
