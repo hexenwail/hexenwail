@@ -64,8 +64,11 @@ extern hull_t		f_box_hull;
 #define WANT_ERROR_FN	"Sys_Error"
 #endif
 
-/* the server the shim reads: defined in sv_main.c / sv_init.c in the engine */
+/* the server the shim reads: defined in sv_main.c / sv_init.c in the engine;
+ * sv_globals in pr_edict.c (world_target.c's accessors for area linking
+ * read it, so it is linked even though hull selection never does) */
 server_t	sv;
+sv_globals_t	sv_globals;
 
 /* ------------------------------------------------------------------------ */
 

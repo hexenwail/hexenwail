@@ -91,10 +91,32 @@ pub struct WorldTargetFacts {
     pub model_type: usize,
     pub model_hulls: usize,
     pub hull_size: usize,
+    pub edict_free: usize,
+    pub edict_area: usize,
+    pub edict_num_leafs: usize,
+    pub edict_leafnums: usize,
+    pub v_touch: usize,
+    pub v_absmin: usize,
+    pub v_absmax: usize,
+    pub v_angles: usize,
+    pub node_contents: usize,
+    pub node_plane: usize,
+    pub node_children: usize,
+    pub leaf_size: usize,
+    pub model_mins: usize,
+    pub model_maxs: usize,
+    pub model_nodes: usize,
+    pub model_leafs: usize,
     pub solid_bsp: c_int,
     pub movetype_push: c_int,
     pub mod_brush: c_int,
     pub fl_monster: c_int,
+    pub solid_trigger: c_int,
+    pub solid_not: c_int,
+    pub fl_item: c_int,
+    pub max_ent_leafs: c_int,
+    pub area_depth: c_int,
+    pub area_nodes: c_int,
 }
 
 extern "C" {
@@ -122,7 +144,7 @@ extern "C" {
 /// aarch64's fcvtzs, which is Rust's `as`.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[inline(always)]
-fn cvt_c(f: f32) -> c_int {
+pub(crate) fn cvt_c(f: f32) -> c_int {
     if f.is_nan() || f >= 2147483648.0 || f < -2147483648.0 {
         c_int::MIN
     } else {
@@ -132,7 +154,7 @@ fn cvt_c(f: f32) -> c_int {
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 #[inline(always)]
-fn cvt_c(f: f32) -> c_int {
+pub(crate) fn cvt_c(f: f32) -> c_int {
     f as c_int
 }
 
@@ -210,7 +232,7 @@ unsafe fn sv_hull_for_box(mins: *const f32, maxs: *const f32) -> *mut Hull {
 // --- field access through the target's facts ----------------------------------
 
 #[inline(always)]
-unsafe fn facts() -> &'static WorldTargetFacts {
+pub(crate) unsafe fn facts() -> &'static WorldTargetFacts {
     &*(&raw const World_TargetFacts)
 }
 
@@ -362,4 +384,12 @@ pub extern "C" fn WorldTargetFacts_offsetof_solid_bsp() -> usize {
 #[no_mangle]
 pub extern "C" fn WorldTargetFacts_offsetof_fl_monster() -> usize {
     core::mem::offset_of!(WorldTargetFacts, fl_monster)
+}
+#[no_mangle]
+pub extern "C" fn WorldTargetFacts_offsetof_model_leafs() -> usize {
+    core::mem::offset_of!(WorldTargetFacts, model_leafs)
+}
+#[no_mangle]
+pub extern "C" fn WorldTargetFacts_offsetof_area_nodes() -> usize {
+    core::mem::offset_of!(WorldTargetFacts, area_nodes)
 }

@@ -46,6 +46,9 @@ world_trace_hw = ["world_trace"]
 # engine/rust/world_target.c, which a harness for the traces alone does not
 # link; world_trace_hw selects its HexenWorld arms too.
 world_hull = ["world_trace"]
+# SV_ClearWorld, SV_LinkEdict, SV_UnlinkEdict and the touch and leaf walks
+# (#455's third world.c slice), through the same target shim.
+world_link = ["world_hull", "link_ops", "mathlib"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

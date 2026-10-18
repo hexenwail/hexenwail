@@ -866,7 +866,7 @@ endif()
 # in its target, without forcing C shims to own an entire source file.
 set(RUST_ENGINE_COMMON_FEATURES
     hashindex mathlib sizebuf crc link_ops msg_io strlcpy strlcat
-    cvar zone cmd quakefs world_trace world_hull)
+    cvar zone cmd quakefs world_trace world_hull world_link)
 set(RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_COMMON_FEATURES} wad net_loop_h2)
 if(EMSCRIPTEN OR UNIX)
     list(APPEND RUST_ENGINE_CLIENT_FEATURES net_bsd_h2 net_udp_h2)
