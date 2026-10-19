@@ -306,7 +306,7 @@ fn fmt_4_2f(buf: &mut [u8], v: f64) -> usize {
     // 53-bit integer mantissa, then scale by 100 in integers.
     let bits = a.to_bits();
     let exp = ((bits >> 52) & 0x7ff) as i32;
-    let (mut m, mut e): (u64, i32) = if exp == 0 {
+    let (m, e): (u64, i32) = if exp == 0 {
         // Subnormal: no implicit leading 1.
         ((bits & 0xfffffffffffff) as u64, -1074)
     } else {
