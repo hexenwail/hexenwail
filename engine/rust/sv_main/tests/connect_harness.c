@@ -494,6 +494,8 @@ static client_state2_t states[MAXHARNESSCLIENTS];
 static qmodel_t	qmodels[16];
 static char	model_names[16][64];
 static char	sound_names[16][64];
+/* a completely full precache, for SV_ModelIndex's MAX_MODELS guard */
+static char	full_names[MAX_MODELS][24];
 static ex_item_t ex_items[8];
 static ex_inventory_page_t inv_page;
 
@@ -703,6 +705,15 @@ static void setup_case (uint64_t seed)
 		memset (&inv_page, 0, sizeof inv_page);
 		stub_inv_page = rng_next () % 2 ? &inv_page : NULL;
 	} else if (case_kind == 2) {
+		if (rng_int (0, 7) == 0) {
+			/* Completely full precache: the i < MAX_MODELS guard,
+			 * not the NULL terminator, must stop the scan. */
+			for (i = 0; i < MAX_MODELS; i++) {
+				snprintf (full_names[i], sizeof full_names[i],
+					  "models/full%04d.mdl", i);
+				sv.model_precache[i] = full_names[i];
+			}
+		}
 		switch (rng_int (0, 4)) {
 		case 0: case_name = NULL; break;
 		case 1: case_name = ""; break;
@@ -791,8 +802,21 @@ static void setup_case (uint64_t seed)
 			e->v.angles[1] = rng_float ();
 			e->v.angles[2] = rng_float ();
 		}
+		if (sv.num_edicts > svs.maxclients && rng_int (0, 3) == 0) {
+			/* Boundary player edict with no model: the
+			 * entnum > maxclients skip must not fire for
+			 * entnum == maxclients. */
+			edicts[svs.maxclients].free = false;
+			edicts[svs.maxclients].v.modelindex = 0.0f;
+		}
 		stub_alpha_present = rng_int (0, 1);
 		stub_alpha_value = rng_float ();
+		if (rng_int (0, 3) == 0) {
+			/* Exact zero alpha: entalpha_encode's 0 -> default
+			 * early return, which the fuzzer never generates. */
+			stub_alpha_present = 1;
+			stub_alpha_value = 0.0f;
+		}
 		SZ_Init (&sv.signon, sv.signon_bufs[0], MAX_SIGNON_SIZE);
 	}
 }
