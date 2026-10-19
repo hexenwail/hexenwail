@@ -61,7 +61,14 @@ build() { # name ieee-cflags...
 		-c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$here/datagram_harness.c" -o "$OUT/$name/datagram_harness.o"
-	cc "$@" -o "$OUT/$name/datagram_harness" "$OUT/$name/datagram_harness.o" \
+	# The harness calls __gcov_dump through a weak declaration (libgcov on
+	# some toolchains hides the older __gcov_flush name).  A weak reference
+	# does not make the linker extract _gcov_dump.o from libgcov.a, so the
+	# null check would always fail and no coverage would be written; force
+	# the symbol for coverage builds.
+	link_extra=()
+	case " $* " in *" --coverage "*) link_extra=(-Wl,-u,__gcov_dump) ;; esac
+	cc "$@" "${link_extra[@]}" -o "$OUT/$name/datagram_harness" "$OUT/$name/datagram_harness.o" \
 		"$OUT/$name/${fixture%.c}.o" "$OUT/$name/world_target.o" \
 		"$OUT/$name/sv_main_target.o" "$RUST_LIB" -lm
 }
