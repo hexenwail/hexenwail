@@ -96,8 +96,8 @@ gcov_file="$OUT/cov/$fixture.gcov"
 #
 # 1. INV_UpdateExItem's `if (inc)' true arms (two sites): the slice calls it
 #    only as INV_UpdateExItem(page, id, (int)cnt, false) -- fifteen call
-#    sites in SV_WriteClientdataToMessage, all with a literal false.  The
-#    proof is about exact text, so the call sites are pinned by hash below.
+#    sites in SV_WriteClientdataToMessage, all with a literal false
+#    (verified by inspection; if the fixture gains a call site, re-check).
 # 2. SV_ClientInventoryPage's out-of-pages `return NULL': the backing is 32
 #    pages and the slice's ids are 1..15, so one page holds every id the
 #    slice ever creates; allocation from the backing cannot exhaust it.
@@ -107,8 +107,9 @@ gcov_file="$OUT/cov/$fixture.gcov"
 #    `if' guarding the `return 0' above it, so the trailing return is
 #    unreachable.
 #
-# The pins are line numbers in $fixture; the text around each is hashed so
-# an edit fails here until someone re-reads the proof and re-pins.
+# The pins are line numbers in $fixture; the anchor patterns are chosen to be
+# unique (indentation-sensitive), so an edit that moves them fails the count
+# check below until someone re-reads the proof and re-pins.
 exempt_lines=""
 for anchor in 'page->item_cnt[i] += inv_cnt;'; do
 	mapfile -t at < <(grep -nF -- "$anchor" "$here/$fixture" | cut -d: -f1)
@@ -149,5 +150,5 @@ if [ -n "$unrun" ]; then
 	exit 1
 fi
 lines=$(grep -cE '^ *[0-9]+\*?:' "$gcov_file" || true)
-echo "coverage: every executable line of $fixture ran ($lines), except the 3 pinned exemptions"
+echo "coverage: every executable line of $fixture ran ($lines), except the 4 pinned exemptions"
 echo "RESULT: PASS"
