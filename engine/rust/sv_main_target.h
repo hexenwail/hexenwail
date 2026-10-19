@@ -229,5 +229,6 @@ const char		*SvMain_ModName (void);		/* sv.mod_name */
 const char		*SvMain_Skybox (void);		/* sv.skybox */
 int			*SvMain_NetActiveConnections (void); /* &net_activeconnections */
 struct qmodel_s		**SvMain_Models (void);		/* sv.models */
+int			SvMain_IsDedicated (void);	/* isDedicated */
 
 #endif	/* SV_MAIN_TARGET_H */

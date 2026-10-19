@@ -92,6 +92,13 @@ int		sv_kingofhill;
 unsigned short	pr_crc;
 int		net_activeconnections;
 int		pr_edict_size = sizeof (edict_t);
+/* SvMain_IsDedicated's global: the harness is always the dedicated
+ * server, so SV_SendReconnect's listen-server arm stays dead -- exactly
+ * what the -DSERVERONLY fixture does. */
+qboolean	isDedicated = true;
+/* the C's src_command, now owned by the Rust cmd port; read by
+ * SV_SendReconnect's listen-server arm (dead in this harness). */
+cmd_source_t	cmd_source;
 sv_globals_t	sv_globals;
 areanode_t	sv_areanodes[AREA_NODES];
 sizebuf_t	net_message;
@@ -163,6 +170,15 @@ static void log_con (int flags, const char *fmt, va_list ap)
 	n = snprintf (conlog + conlog_len, LOGSIZE - conlog_len, "%s", tmp);
 	if (n > 0)
 		conlog_len += (size_t)n < LOGSIZE - conlog_len ? (size_t)n : 0;
+}
+
+/* SV_SendReconnect's listen-server arm calls this; the harness is always
+ * dedicated, so the arm stays dead and this only satisfies the link.
+ * It logs like every other stub, so a future non-dedicated harness case
+ * would show the call the -DSERVERONLY fixture cannot make. */
+void	Cmd_ExecuteString (const char *text, cmd_source_t src)
+{
+	log_call ("Cmd_ExecuteString(%s,%d)", text, (int)src);
 }
 
 /* ---- output serialization: one malloc'd buffer per child ---- */

@@ -217,3 +217,7 @@ const char *SvMain_ModName (void)		{ return sv.mod_name; }
 const char *SvMain_Skybox (void)		{ return sv.skybox; }
 int *SvMain_NetActiveConnections (void)		{ return &net_activeconnections; }
 struct qmodel_s **SvMain_Models (void)		{ return sv.models; }
+/* host.h's isDedicated; the dedicated server's own sys_unix.c defines it
+ * true, the client's sets it from -dedicated. */
+extern qboolean	isDedicated;
+int SvMain_IsDedicated (void)			{ return isDedicated; }

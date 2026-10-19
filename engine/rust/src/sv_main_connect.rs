@@ -50,13 +50,16 @@
 //   * The model-effects loop honors the target's build: the
 //     `!SERVERONLY && GLQUAKE` block runs only when the facts say the
 //     target compiled it (sv_main_target.c sets model_effects).
+//   * SV_SendReconnect's `#if !defined(SERVERONLY)` listen-server arm is
+//     a runtime `SvMain_IsDedicated()` check instead: h2ded defines
+//     isDedicated true, so it is dead there exactly where the C's #if
+//     removed it, and the SERVERONLY differential fixture never takes
+//     it.  The command goes through the Rust cmd port's
+//     Cmd_ExecuteString with the live cmd_source, as the C's
+//     `src_command` global.
 //
 // DEPARTURES FROM THE C
 //
-//   * SV_SendReconnect's `#if !defined(SERVERONLY)` listen-server branch
-//     is not ported: `isDedicated`/`src_command` live in the client
-//     overlay h2ded never compiles.  This is the SERVERONLY variant, as
-//     slice C's dev_stats.packetsize precedent.
 //   * SV_ProtocolName returns a nullable `*const c_char`; a NULL passed
 //     to `%s` prints `(null)` under glibc, exactly as the C's does.
 
@@ -221,6 +224,13 @@ extern "C" {
     fn NET_CheckNewConnections() -> *mut u8;
     fn NET_QSocketGetAddressString(sock: *const u8) -> *const c_char;
     fn NET_SendToAll(data: *mut SizeBufC, blocktime: c_double);
+    fn SvMain_IsDedicated() -> c_int;
+    // The command system: the C's Cmd_ExecuteString/src_command, now
+    // owned by the Rust cmd port (cmd.rs) -- extern here like every
+    // other engine service, so this slice does not drag in cmd's own
+    // dependencies (notably the zone allocator).
+    fn Cmd_ExecuteString(text: *const c_char, src: c_int);
+    static cmd_source: c_int;
     fn SV_ClientInventoryPage(clientnum: c_int) -> *mut u8;
     fn SV_GetLevelname() -> *const c_char;
     fn GetEdictFieldValue(ed: *mut u8, field: *const c_char) -> *mut u8;
@@ -1075,4 +1085,14 @@ pub unsafe extern "C" fn SV_SendReconnect() {
     MSG_WriteChar(&mut msg as *mut SizeBufC, f.msg_stufftext);
     MSG_WriteString(&mut msg as *mut SizeBufC, c"reconnect\n".as_ptr());
     NET_SendToAll(&mut msg as *mut SizeBufC, 5.0);
+    // The C's `#if !defined(SERVERONLY)` listen-server arm: the local
+    // client runs Host_Reconnect_f synchronously here, instead of only
+    // through the loopback stufftext on its next frame (loading plaque
+    // and cls.signon reset before the spawn, not after).  h2ded's
+    // isDedicated is always true, so this is dead there -- exactly where
+    // the C's #if removed it -- and the SERVERONLY harness never takes
+    // it either.
+    if SvMain_IsDedicated() == 0 {
+        Cmd_ExecuteString(c"reconnect\n".as_ptr(), cmd_source);
+    }
 }
