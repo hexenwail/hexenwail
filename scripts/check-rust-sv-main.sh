@@ -6,7 +6,10 @@
 # SV_StopSound, SV_UpdateSoundPos, SV_StartSound, SV_MaxSounds,
 # SV_MaxDatagram, SV_MaxReliableMessage; sv_main_sound.rs).  Slice B: the
 # entity updates (the fat PVS, SV_EntityUpdateSize, SV_EntityPriority,
-# SV_PrepareClientEntities, SV_CleanupEnts; sv_main_ents.rs).  Hexen II only:
+# SV_PrepareClientEntities, SV_CleanupEnts; sv_main_ents.rs).  Slice C: the
+# client data and datagrams (SV_ClearDatagram, SV_WriteClientdataToMessage,
+# SV_SendClientDatagram, SV_UpdateToReliableMessages, SV_SendNop,
+# SV_SendClientMessages; sv_main_datagram.rs).  Hexen II only:
 # HexenWorld's server has its own sv_main.c, and its own C message functions
 # of the same names in sv_send.c, which multicast; it has no SV_Max*.
 #
@@ -61,10 +64,11 @@ for tool in cc gcov cargo cmake nm; do
 done
 
 step=1
-for port in sound ents; do
+for port in sound ents datagram; do
 	case "$port" in
 		sound) feature=sv_main_sound; name=sv_main_sound; runner=run_diff_harness.sh; floor_digits=6 ;;
 		ents) feature=sv_main_ents; name=sv_main_ents; runner=run_ents_harness.sh; floor_digits=5 ;;
+		datagram) feature=sv_main_datagram; name=sv_main_datagram; runner=run_datagram_harness.sh; floor_digits=5 ;;
 	esac
 	echo "== $step. build the crate with $feature =="
 	step=$((step + 1))
@@ -160,7 +164,7 @@ while IFS= read -r obj; do
 	done
 done <<<"$objects"
 echo "  $nobj Hexen II sv_main.c object(s): none defines the ported functions"
-stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'c_ref_ents.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'sv_main_datagram_*.c.o' -o -name 'c_ref_ents.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
 	echo "FAIL: $stray harness fixture object(s) in the engine build" >&2
 	exit 1

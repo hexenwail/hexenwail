@@ -50,6 +50,10 @@
 #include <errno.h>
 #include <string.h>
 
+#ifdef __GNUC__
+void __gcov_flush (void);
+#endif
+
 static void crash_handler (int sig)
 {
 	void *bt[32];
@@ -778,6 +782,9 @@ static void run_child (void)
 		_exit (3);
 	fwrite (outbuf, 1, outlen, f);
 	fclose (f);
+#ifdef __GNUC__
+	__gcov_flush ();
+#endif
 	_exit (0);
 }
 
