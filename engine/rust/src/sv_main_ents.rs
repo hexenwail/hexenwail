@@ -965,11 +965,14 @@ pub unsafe extern "C" fn SV_PrepareClientEntities(client: *mut u8, clent: *mut u
             };
 
             if measuring {
-                // Total the demand; do not truncate it.  A NaN box makes
-                // prio INT_MIN (cvt_c), which the C writes through, far
-                // outside binbytes[], and dies; this bounds check aborts
-                // instead.  Faithful in that both stop the server; the fix
-                // is its own change (see the PR).
+                // Total the demand; do not truncate it.  A NaN box used to
+                // make prio INT_MIN (cvt_c), which the C writes through, far
+                // outside binbytes[], and dies there.  entity_priority's
+                // `!(dist < (NETSORT_BINS - 1) as f32)` guard takes a
+                // non-finite key as the least important bin instead, so
+                // prio is always in [0, NETSORT_BINS) and this indexes
+                // safely.  The C's crash is its own fix (#473); this is the
+                // ported side of it.
                 binbytes[prio as usize] += bytes;
                 if bcount >= MAX_CLIENT_STATES as c_int {
                     break;
