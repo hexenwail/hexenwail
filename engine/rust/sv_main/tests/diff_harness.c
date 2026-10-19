@@ -73,6 +73,17 @@ sv_globals_t	sv_globals;
 areanode_t	sv_areanodes[AREA_NODES];
 sizebuf_t	net_message;	/* msg_io.rs's readers; nothing here reads */
 
+/* sv_main_target.c is one translation unit for every sv_main.rs slice, so
+ * #469 slice B's entity-update accessors are compiled in beside slice A's
+ * sound ones and their globals must exist to link.  Nothing here reads
+ * them; ents_harness.c sets them up for the slice that does. */
+server_static_t	svs;
+cvar_t	sv_update_player = { "sv_update_player", "1", CVAR_NONE };
+cvar_t	sv_update_monsters = { "sv_update_monsters", "1", CVAR_NONE };
+cvar_t	sv_update_missiles = { "sv_update_missiles", "1", CVAR_NONE };
+cvar_t	sv_update_misc = { "sv_update_misc", "1", CVAR_NONE };
+cvar_t	sv_netsort = { "sv_netsort", "1", CVAR_NONE };
+
 /* MAX_EDICTS + 1: every entity the engine can have, so the large forms are
  * held to the whole short range they write, not just its start */
 #define NE	(MAX_EDICTS + 1)

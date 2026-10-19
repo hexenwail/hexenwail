@@ -137,6 +137,10 @@ pub mod sv_phys_move;
 #[cfg(feature = "sv_main_sound")]
 pub mod sv_main_sound;
 
+// Hexen II's sv_main.c entity updates (#469 slice B).
+#[cfg(feature = "sv_main_ents")]
+pub mod sv_main_ents;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

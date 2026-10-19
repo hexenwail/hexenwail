@@ -120,6 +120,23 @@ struct sizebuf_s *SvMain_Datagram (void) { return NULL; }
 const char **SvMain_SoundPrecache (void) { return NULL; }
 int sv_protocol;
 void (Host_Error) (const char *error, ...) { (void) error; abort (); }
+const sv_main_ents_facts_t SvMainEnts_TargetFacts;
+struct edict_s *SvMain_Edicts (void) { return NULL; }
+int SvMain_NumEdicts (void) { return 0; }
+int SvMain_EdictSize (void) { return 0; }
+struct qmodel_s *SvMain_WorldModel (void) { return NULL; }
+void *SvMain_States (void) { return NULL; }
+struct client_s *SvMain_Clients (void) { return NULL; }
+int SvMain_Protocol (void) { return 0; }
+int SvMain_UpdatePlayer (void) { return 0; }
+int SvMain_UpdateMonsters (void) { return 0; }
+int SvMain_UpdateMissiles (void) { return 0; }
+int SvMain_UpdateMisc (void) { return 0; }
+int SvMain_NetSort (void) { return 0; }
+unsigned char *SvMain_FatPvs (void) { return NULL; }
+void *EDICT_NUM (int n) { (void) n; abort (); }
+int SV_ModelIndex (const char *name) { (void) name; abort (); }
+unsigned char *Mod_LeafPVS (void *leaf, void *model) { (void) leaf; (void) model; abort (); }
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }
 struct qmodel_s *World_SvWorldModel (void) { return NULL; }
@@ -270,6 +287,12 @@ RUST_ACCESSOR(PhysTargetFacts_offsetof_v_v_angle)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_movetype_fly)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_edict_spawnwalk)
 RUST_ACCESSOR(PhysTargetFacts_offsetof_max_clients)
+RUST_ACCESSOR(SvMainEntsFacts_sizeof)
+RUST_ACCESSOR(SvMainEntsFacts_offsetof_v_cameramode)
+RUST_ACCESSOR(SvMainEntsFacts_offsetof_client_frames_count)
+RUST_ACCESSOR(SvMainEntsFacts_offsetof_max_client_states)
+RUST_ACCESSOR(SvMainEntsFacts_offsetof_max_qpath)
+RUST_ACCESSOR(SvMainEntsFacts_offsetof_u_alpha)
 RUST_ACCESSOR(SvMainTargetFacts_sizeof)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_msg_sound_update_pos_large)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_volume)
@@ -645,6 +668,13 @@ int main (void)
 	OFF(phys_target_facts_t, movetype_fly, PhysTargetFacts, movetype_fly);
 	OFF(phys_target_facts_t, edict_spawnwalk, PhysTargetFacts, edict_spawnwalk);
 	OFF(phys_target_facts_t, max_clients, PhysTargetFacts, max_clients);
+
+	SIZE(sv_main_ents_facts_t, SvMainEntsFacts);
+	OFF(sv_main_ents_facts_t, v_cameramode, SvMainEntsFacts, v_cameramode);
+	OFF(sv_main_ents_facts_t, client_frames_count, SvMainEntsFacts, client_frames_count);
+	OFF(sv_main_ents_facts_t, max_client_states, SvMainEntsFacts, max_client_states);
+	OFF(sv_main_ents_facts_t, max_qpath, SvMainEntsFacts, max_qpath);
+	OFF(sv_main_ents_facts_t, u_alpha, SvMainEntsFacts, u_alpha);
 
 	SIZE(sv_main_target_facts_t, SvMainTargetFacts);
 	OFF(sv_main_target_facts_t, msg_sound_update_pos_large, SvMainTargetFacts, msg_sound_update_pos_large);

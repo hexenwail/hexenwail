@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 #
 # check-rust-sv-main.sh -- gate for the Rust ports out of the server frame,
-# engine/hexen2/sv_main.c (#469, step 6 of #455).  So far slice A: the sound
-# and particle messages and the per-protocol limits (SV_StartParticle..4,
+# engine/hexen2/sv_main.c (#469, step 6 of #455).  Slice A: the sound and
+# particle messages and the per-protocol limits (SV_StartParticle..4,
 # SV_StopSound, SV_UpdateSoundPos, SV_StartSound, SV_MaxSounds,
-# SV_MaxDatagram, SV_MaxReliableMessage; sv_main_sound.rs).  Hexen II only:
+# SV_MaxDatagram, SV_MaxReliableMessage; sv_main_sound.rs).  Slice B: the
+# entity updates (the fat PVS, SV_EntityUpdateSize, SV_EntityPriority,
+# SV_PrepareClientEntities, SV_CleanupEnts; sv_main_ents.rs).  Hexen II only:
 # HexenWorld's server has its own sv_main.c, and its own C message functions
 # of the same names in sv_send.c, which multicast; it has no SV_Max*.
 #
-# The differential half runs the harness against the C original: it
-# compares the datagram each call writes, byte for byte, its cursize and
-# overflow flag, the return value and every console line and fatal call;
-# requires its outcome floors; and requires every line of the C original to
-# have run under gcov.
+# The differential half runs each slice's harness against its C original:
+# each compares the datagram the call writes, byte for byte, with its
+# cursize and overflow flag, every console line and fatal call, and what
+# else the call writes (return values; the client's reference frames, frame
+# bytes, ClearCounts, effects and fat PVS); requires its outcome floors; and
+# requires every line of the C original to have run under gcov.
 #
 # The CMake half proves the shared engine build links each exported symbol
 # exactly once in glhexen2 and h2ded; that hwsv defines the message functions
@@ -46,6 +49,9 @@ mkdir -p "$work"
 sound_symbols=(SV_StartParticle SV_StartParticle2 SV_StartParticle3 SV_StartParticle4
 	SV_StopSound SV_UpdateSoundPos SV_StartSound SV_MaxSounds SV_MaxDatagram
 	SV_MaxReliableMessage)
+# exported for sv_main.c's SV_SendClientDatagram and SV_SendClientMessages;
+# Hexen II's alone, hwsv's entity updates being its sv_ents.c
+ents_symbols=(SV_PrepareClientEntities SV_CleanupEnts)
 
 for tool in cc gcov cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
@@ -55,9 +61,10 @@ for tool in cc gcov cargo cmake nm; do
 done
 
 step=1
-for port in sound; do
+for port in sound ents; do
 	case "$port" in
-		sound) feature=sv_main_sound; name=sv_main_sound; floor_digits=6 ;;
+		sound) feature=sv_main_sound; name=sv_main_sound; runner=run_diff_harness.sh; floor_digits=6 ;;
+		ents) feature=sv_main_ents; name=sv_main_ents; runner=run_ents_harness.sh; floor_digits=5 ;;
 	esac
 	echo "== $step. build the crate with $feature =="
 	step=$((step + 1))
@@ -73,17 +80,19 @@ for port in sound; do
 	log="$work/diff-$port.log"
 	set +e
 	VARIANT=h2 RUST_LIB="$lib" OUT="$work/diff-$port" \
-		bash "$crate/sv_main/tests/run_diff_harness.sh" >"$log" 2>&1
+		bash "$crate/sv_main/tests/$runner" >"$log" 2>&1
 	status=$?
 	set -e
-	grep -E '^(outcomes:|          [0-9A-Za-z-])|^sv_main_[a-z]+ differential harness|^coverage:|^RESULT:' "$log" || true
+	grep -E '^(layouts:|outcomes:|          [0-9A-Za-z-])|^sv_main_[a-z]+ differential harness|^coverage:|^RESULT:' "$log" || true
 	if [ "$status" -ne 0 ] || ! grep -q '^RESULT: PASS$' "$log"; then
 		echo "FAIL: $name differential harness (exit $status)" >&2
 		grep -E 'MISMATCH|COVERAGE|FAIL|#####|error|harness bug' "$log" >&2 || tail -40 "$log" >&2
 		exit 1
 	fi
 	# RESULT alone would still pass with the enumeration cut to nothing, so
-	# floor the case count.  Observed: 120,000 for the sound messages.
+	# floor the case count.  Observed: 120,000 for the sound messages
+	# (six digits); 12,000 for the entity updates, whose cases are whole
+	# frames of up to 8300 edicts (five).
 	count_line=$(grep -E "^$name differential harness \([a-z0-9]+\): PASS \(" "$log" || true)
 	count=$(printf '%s\n' "$count_line" | sed -n 's/.*PASS (\([0-9]*\) cases.*/\1/p')
 	if [ "${#count}" -lt "$floor_digits" ]; then
@@ -114,7 +123,15 @@ for bin in glhexen2 h2ded hwsv; do
 			exit 1
 		fi
 	done
-	echo "  $bin: each defined once$([ "$bin" = hwsv ] && echo ' (HexenWorld'"'"'s sv_send.c), SV_Max* absent')"
+	for sym in "${ents_symbols[@]}"; do
+		if [ "$bin" = hwsv ]; then want=0; else want=1; fi
+		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
+		if [ "$n" -ne "$want" ]; then
+			echo "FAIL: $bin: $sym has $n definitions, expected $want" >&2
+			exit 1
+		fi
+	done
+	echo "  $bin: each defined once$([ "$bin" = hwsv ] && echo ' (HexenWorld'"'"'s sv_send.c), SV_Max* and the entity updates absent')"
 done
 # hwsv's message functions must be its sv_send.c's, not the Rust
 objects=$(find "$engine_build" -path '*hexenworld*' \( -name 'sv_send.c.o' -o -name 'sv_send.c.obj' \) | sort)
@@ -134,7 +151,8 @@ if [ "$nobj" -lt 2 ]; then
 	exit 1
 fi
 while IFS= read -r obj; do
-	for sym in "${sound_symbols[@]}" SV_SoundEntityFits; do
+	for sym in "${sound_symbols[@]}" SV_SoundEntityFits "${ents_symbols[@]}" \
+		SV_AddToFatPVS SV_FatPVS SV_EntityUpdateSize SV_EntityPriority; do
 		if nm "$obj" | grep -qE " [Tt] $sym\$"; then
 			echo "FAIL: ${obj#"$engine_build"/} still defines $sym" >&2
 			exit 1
@@ -142,13 +160,13 @@ while IFS= read -r obj; do
 	done
 done <<<"$objects"
 echo "  $nobj Hexen II sv_main.c object(s): none defines the ported functions"
-stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'c_ref_ents.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
 	echo "FAIL: $stray harness fixture object(s) in the engine build" >&2
 	exit 1
 }
 
 echo "PASS: Rust sv_main.c ports (the sound and particle messages and protocol"
-echo "      limits) -- the harness agrees with the C original, every line of it ran,"
-echo "      each Hexen II binary links each symbol once, hwsv none, and sv_main.c"
-echo "      defines none of them."
+echo "      limits, the entity updates) -- each harness agrees with its C original,"
+echo "      every line of it ran, each Hexen II binary links each symbol once, hwsv"
+echo "      only its own, and sv_main.c defines none of them."

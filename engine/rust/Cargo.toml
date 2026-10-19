@@ -76,6 +76,10 @@ sv_phys_move = ["sv_phys_push", "sv_phys_walk"]
 # SV_MaxReliableMessage.  Hexen II's targets only (glhexen2, h2ded); reads
 # engine/rust/sv_main_target.c besides world_target.c.
 sv_main_sound = ["world_hull", "msg_io", "sizebuf"]
+# Hexen II's sv_main.c entity updates (#469 slice B): the fat PVS,
+# SV_EntityUpdateSize, SV_EntityPriority, SV_PrepareClientEntities and
+# SV_CleanupEnts.  Reads the protocol numbers through sv_main_sound's facts.
+sv_main_ents = ["sv_main_sound"]
 
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go

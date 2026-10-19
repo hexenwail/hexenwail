@@ -37,7 +37,11 @@ else:
 # 660 B / 108 entities to 1133-1396 B / 188-239.  Removals verified by
 # teleporting away from 621 visible entities: 255 + deferred 365 + 110, no
 # warning, same under cap and without.
-pe = re.search(r"static void SV_PrepareClientEntities \(.*?\n\}", src, re.S)
+# SV_PrepareClientEntities is Rust now (#469 slice B): its C original was
+# moved verbatim into the harness fixture, which still holds the shape
+# below, and the port must hold the same four things.
+ents = (Path(__file__).resolve().parents[1] / "engine/rust/sv_main/tests/sv_main_ents_h2.c").read_text()
+pe = re.search(r"static void SV_PrepareClientEntities \(.*?\n\}", ents, re.S)
 pe = pe.group(0) if pe else ""
 if "int			trailer_reserve = DATAGRAM_TRAILER_RESERVE;" not in pe:
     errors.append("the trailer reserve must start at the worst case")
@@ -48,6 +52,19 @@ if "cursize + bytes + trailer_reserve > msg->maxsize" not in pe or "cursize + by
     errors.append("the write-pass guard must use trailer_reserve")
 if "if (msg->cursize + 2 + 2 * NumToRemove > msg->maxsize)" not in pe:
     errors.append("the trailer must be checked against the room left before it is written")
+
+rs = (Path(__file__).resolve().parents[1] / "engine/rust/src/sv_main_ents.rs").read_text()
+pr = re.search(r'pub unsafe extern "C" fn SV_PrepareClientEntities\(.*?\n\}', rs, re.S)
+pr = pr.group(0) if pr else ""
+if "let mut trailer_reserve: c_int = 2 + 2 * f.max_clear_edicts_per_msg;" not in pr:
+    errors.append("sv_main_ents.rs: the trailer reserve must start at the worst case")
+measured = pr.find("trailer_reserve = 2 + 2 * num_to_remove as c_int;")
+if measured < 0 or measured > pr.find("let budget = (*msg).maxsize - trailer_reserve - (*msg).cursize;"):
+    errors.append("sv_main_ents.rs: the measuring pass must size the reserve from the removals it counted, before the budget")
+if "cursize + bytes + trailer_reserve > (*msg).maxsize" not in pr:
+    errors.append("sv_main_ents.rs: the write-pass guard must use trailer_reserve")
+if "if (*msg).cursize + 2 + 2 * num_to_remove as c_int > (*msg).maxsize {" not in pr:
+    errors.append("sv_main_ents.rs: the trailer must be checked against the room left before it is written")
 
 if errors:
     sys.exit("FAIL:\n  " + "\n  ".join(errors))
