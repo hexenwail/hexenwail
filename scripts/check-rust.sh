@@ -87,7 +87,7 @@ fi
 
 echo
 echo "== 3. the shared engine build =="
-ports=(hashindex mathlib sizebuf crc link-ops msg-io info-str strlcpy strlcat huffman wad cvar zone cmd net-udp-hw quakefs net-chan net-h2 world-trace)
+ports=(hashindex mathlib sizebuf crc link-ops msg-io info-str strlcpy strlcat huffman wad cvar zone cmd net-udp-hw quakefs net-chan net-h2 world-trace sv-main)
 if ENGINE_BUILD=$(rust_gate_engine_build "$work"); then
 	export ENGINE_BUILD
 	echo "  $ENGINE_BUILD"

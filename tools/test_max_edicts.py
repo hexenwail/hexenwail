@@ -32,7 +32,10 @@ if not m or int(m.group(1)) < 16384:
 if not re.search(r'cvar_t\s+max_edicts\s*=\s*\{"max_edicts", "16384", CVAR_NONE\};', read("engine/hexen2/sv_main.c")):
     errors.append("max_edicts must default to 16384, unarchived, as Ironwail")
 
-srv = read("engine/hexen2/sv_main.c")
+# The sound messages are Rust now (#469 slice A): the C original was moved
+# verbatim into the harness fixture, which still holds the shape below, and
+# the port must hold the same three things.
+srv = read("engine/rust/sv_main/tests/sv_main_sound_h2.c")
 fits = re.search(r"static qboolean SV_SoundEntityFits \(int ent, qboolean \*large\)\s*\{(.*?)\n\}", srv, re.S)
 if not fits or "ent >= SND_MAX_PACKED_ENTITY" not in fits.group(1) or "sv_protocol >= PROTOCOL_HEXENWAIL_1" not in fits.group(1):
     errors.append("SV_SoundEntityFits must allow large entities on protocol 100 only")
@@ -42,6 +45,23 @@ for fn in ("SV_StartSound", "SV_StopSound", "SV_UpdateSoundPos"):
         errors.append(f"{fn} must check SV_SoundEntityFits before writing")
     elif "channel = (ent<<3) | channel;" in body.group(1).split("SV_SoundEntityFits")[0]:
         errors.append(f"{fn} packs the entity before checking it fits")
+
+rs = read("engine/rust/src/sv_main_sound.rs")
+fits = re.search(r"unsafe fn sound_entity_fits\(ent: c_int, large: &mut bool\) -> bool \{(.*?)\n\}", rs, re.S)
+if not fits or "*large = ent >= sf().snd_max_packed_entity;" not in fits.group(1) \
+        or "!*large || protocol() >= sf().protocol_hexenwail_1" not in fits.group(1):
+    errors.append("sv_main_sound.rs: sound_entity_fits must allow large entities on protocol 100 only")
+for fn in ("SV_StartSound", "SV_StopSound", "SV_UpdateSoundPos"):
+    body = re.search(r'pub unsafe extern "C" fn %s\(.*?\n\}' % fn, rs, re.S)
+    body = body.group(0) if body else ""
+    check = body.find("if !sound_entity_fits(ent, &mut large) {\n        return;")
+    if check < 0:
+        errors.append(f"sv_main_sound.rs: {fn} must return when the entity does not fit")
+        continue
+    for write in ("MSG_Write", "(ent << 3)"):
+        at = body.find(write)
+        if 0 <= at < check:
+            errors.append(f"sv_main_sound.rs: {fn} writes ({write}) before checking the entity fits")
 
 p = read("engine/hexen2/protocol.h")
 for need in ("#define	SND_LARGEENTITY	(1<<4)", "#define	SND_MAX_PACKED_ENTITY	8192",
