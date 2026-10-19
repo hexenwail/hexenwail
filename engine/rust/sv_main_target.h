@@ -192,6 +192,7 @@ typedef struct sv_main_connect_facts_s
 	size_t	client_netconnection, client_spawn_parms, client_name, client_name_size;
 	size_t	client_active, client_spawned, client_send_all_v, client_signon_buffer;
 	size_t	client_edict, client_ex_inventory, client_sendsignon;
+	size_t	client_state2_size;
 	/* edict_t's v and baseline, and entvars_t members relative to v */
 	size_t	edict_v, edict_baseline;
 	size_t	v_origin, v_angles, v_frame, v_skin, v_scale, v_drawflags;

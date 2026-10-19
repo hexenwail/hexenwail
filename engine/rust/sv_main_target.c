@@ -186,6 +186,7 @@ const sv_main_connect_facts_t SvMainConnect_TargetFacts =
 	CL(netconnection), CL(spawn_parms), CL(name), sizeof (((client_t *)0)->name),
 	CL(active), CL(spawned), CL(send_all_v), CL(signon_buffer),
 	CL(edict), CL(ex_inventory), CL(sendsignon),
+	sizeof (client_state2_t),
 	offsetof (edict_t, v), offsetof (edict_t, baseline),
 	V(origin), V(angles), V(frame), V(skin), V(scale), V(drawflags),
 	V(abslight), V(model), V(modelindex), V(free),
