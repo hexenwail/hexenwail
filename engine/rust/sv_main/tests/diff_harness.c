@@ -78,6 +78,9 @@ sizebuf_t	net_message;	/* msg_io.rs's readers; nothing here reads */
  * sound ones and their globals must exist to link.  Nothing here reads
  * them; ents_harness.c sets them up for the slice that does. */
 server_static_t	svs;
+/* SvMain_IsDedicated's global, new in slice D's half of sv_main_target.c:
+ * these harnesses are always the dedicated server. */
+qboolean	isDedicated = true;
 cvar_t	sv_update_player = { "sv_update_player", "1", CVAR_NONE };
 cvar_t	sv_update_monsters = { "sv_update_monsters", "1", CVAR_NONE };
 cvar_t	sv_update_missiles = { "sv_update_missiles", "1", CVAR_NONE };

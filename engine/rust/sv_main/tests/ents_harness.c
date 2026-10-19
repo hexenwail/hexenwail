@@ -90,6 +90,9 @@ extern byte	c_fatpvs[MAX_MAP_LEAFS/8];
 /* the engine's storage */
 server_t	sv;
 server_static_t	svs;
+/* SvMain_IsDedicated's global, new in slice D's half of sv_main_target.c:
+ * this harness is always the dedicated server. */
+qboolean	isDedicated = true;
 int		sv_protocol;
 int		sv_max_edicts;
 int		pr_edict_size = sizeof (edict_t);
