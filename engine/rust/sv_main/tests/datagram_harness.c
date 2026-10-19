@@ -51,7 +51,11 @@
 #include <string.h>
 
 #ifdef __GNUC__
-void __gcov_flush (void);
+/* Weak: __gcov_dump exists only when this TU is built with --coverage (the
+   cov build in run_datagram_harness.sh; GCC 13's libgcov no longer exports
+   the old __gcov_flush name).  A single weak declaration -- a second,
+   non-weak one makes GCC drop the null check and emit a direct call. */
+__attribute__((weak)) void __gcov_dump (void);
 #endif
 
 static void crash_handler (int sig)
@@ -783,7 +787,8 @@ static void run_child (void)
 	fwrite (outbuf, 1, outlen, f);
 	fclose (f);
 #ifdef __GNUC__
-	__gcov_flush ();
+	if (__gcov_dump)
+		__gcov_dump ();
 #endif
 	_exit (0);
 }
