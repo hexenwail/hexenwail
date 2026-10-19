@@ -152,6 +152,15 @@ pub unsafe extern "C" fn SV_TestEntityPosition(ent: *mut u8) -> *mut u8 {
     let trace = SV_Move(origin, v(ent, f.v_mins), v(ent, f.v_maxs), origin, 0, ent);
 
     if trace.startsolid != 0 {
+        // Hexen II returns what the entity is stuck in, as Ironwail does, not
+        // always the world: SV_PushMove's sv_gameplayfix_elevators nudge
+        // tests `block == pusher', which before this held only for the
+        // world.  Changed in world_move_h2.c too.  HexenWorld has no nudge,
+        // and its callers only test for NULL, so it keeps the original.
+        #[cfg(not(feature = "world_trace_hw"))]
+        if !trace.ent.is_null() {
+            return trace.ent.cast::<u8>();
+        }
         return World_SvEdicts();
     }
 

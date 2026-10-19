@@ -602,6 +602,7 @@ static void gen_corner (void)
 /* ------------------------------------------------------------------------ */
 
 static long	st_liquid, st_push_false, st_qc_in_push, st_plat, st_crush, st_spawned, st_pusher_not_bsp;
+static long	st_nudged_brush;
 
 /* The last NSPARE slots are past sv.num_edicts, free and unlinked, for the
  * QuakeC stub's spawn () to fill. */
@@ -758,13 +759,12 @@ static void box_tree (int m, int h, int first_plane, const vec3_t lo, const vec3
 	models[m].hulls[h].lastclipnode = 5;
 }
 
-/* WHY THE WORLD.  Hexen II's SV_TestEntityPosition returns sv.edicts for
- * any stuck entity, never the entity it is stuck in (Ironwail's returns
- * trace.ent; that half of its elevator fix was not taken).  So SV_PushMove's
- * `block == pusher' holds only when the pusher is the world itself, and that
- * is the one way sv_gameplayfix_elevators' nudge runs at all -- the world
- * made a moving plat.  The case does that half the time; the other half the
- * plat is a brush entity, where the nudge cannot run. */
+/* BRUSH AND WORLD.  SV_PushMove's nudge tests `block == pusher'.  Hexen
+ * II's SV_TestEntityPosition used to return sv.edicts for any stuck entity,
+ * so that held only for the world as the pusher; it now returns the entity
+ * stuck in, as Ironwail's does (world_move.rs), so a brush plat carrying
+ * the rider is the pusher it names.  The case makes the plat a brush entity
+ * half the time and the world the other half: both must nudge. */
 static void gen_plat (edict_t *p, edict_t *rider)
 {
 	static const vec3_t	box_lo = { -32, -32, 0 }, box_hi = { 32, 32, 16 };
@@ -1124,7 +1124,11 @@ static void compare_case (void)
 	if (strstr (after_c.dbg, " think in "))
 		st_think++;
 	if (strstr (after_c.dbg, "nudged"))
+	{
 		st_nudged++;
+		if (pi != 0)
+			st_nudged_brush++;
+	}
 	if (strstr (after_c.dbg, " touch "))
 		st_qc_in_push++;
 	if (kind == K_PUSH && rc == 0)
@@ -1193,10 +1197,10 @@ int main (void)
 	printf ("outcomes: calls: SV_Physics_Pusher %ld, SV_PushMove %ld, SV_PushRotate %ld, SV_Push %ld\n"
 		"          blocked functions %ld, thinks %ld, touches inside a push %ld; entities moved %ld,\n"
 		"          riders lifted off %ld, corpses flattened %ld, elevator nudges %ld; rotators %ld;\n"
-		"          liquid pushers %ld; SV_Push false %ld\n",
+		"          liquid pushers %ld; SV_Push false %ld; brush-plat nudges %ld\n",
 		st_kind[K_PHYSICS], st_kind[K_PUSHMOVE], st_kind[K_PUSHROTATE], st_kind[K_PUSH],
 		st_blocked, st_think, st_qc_in_push, st_pushed, st_rider, st_corpse, st_nudged, st_rotated,
-		st_liquid, st_push_false);
+		st_liquid, st_push_false, st_nudged_brush);
 
 	floor_check ("an SV_Physics_Pusher call", st_kind[K_PHYSICS], 30000);
 	floor_check ("an SV_PushMove call", st_kind[K_PUSHMOVE], 10000);
@@ -1216,6 +1220,8 @@ int main (void)
 	floor_check ("an SV_Push that fails", st_push_false, 500);
 #else
 	floor_check ("an elevator nudge", st_nudged, 50);
+	/* the fix: a brush plat nudges its own rider */
+	floor_check ("an elevator nudge on a brush plat", st_nudged_brush, 50);
 	floor_check ("a plat case", st_plat, 1000);
 	floor_check ("a liquid pusher", st_liquid, 500);
 #endif
