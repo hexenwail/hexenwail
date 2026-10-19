@@ -195,8 +195,10 @@ typedef struct sv_main_connect_facts_s
 	size_t	client_state2_size;
 	/* edict_t's v and baseline, and entvars_t members relative to v */
 	size_t	edict_v, edict_baseline;
+	/* edict_t's free (NOT in entvars_t), then entvars_t members relative to v */
+	size_t	edict_free;
 	size_t	v_origin, v_angles, v_frame, v_skin, v_scale, v_drawflags;
-	size_t	v_abslight, v_model, v_modelindex, v_free;
+	size_t	v_abslight, v_model, v_modelindex;
 	/* entity_state_t members, relative to baseline */
 	size_t	es_origin, es_angles, es_modelindex, es_frame, es_colormap;
 	size_t	es_skin, es_scale, es_drawflags, es_abslight, es_alpha;

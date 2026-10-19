@@ -122,6 +122,7 @@ pub struct SvMainConnectFacts {
     pub client_state2_size: usize,
     pub edict_v: usize,
     pub edict_baseline: usize,
+    pub edict_free: usize,
     pub v_origin: usize,
     pub v_angles: usize,
     pub v_frame: usize,
@@ -131,7 +132,6 @@ pub struct SvMainConnectFacts {
     pub v_abslight: usize,
     pub v_model: usize,
     pub v_modelindex: usize,
-    pub v_free: usize,
     pub es_origin: usize,
     pub es_angles: usize,
     pub es_modelindex: usize,
@@ -269,10 +269,11 @@ unsafe fn vi(ent: *mut u8, member: usize) -> c_int {
     *ent.add(facts().edict_v + member).cast::<c_int>()
 }
 
-/// A qboolean entvars_t member (free).
+/// edict_t's `free` qboolean at an absolute offset from the edict start
+/// (it is NOT in entvars_t).
 #[inline(always)]
-unsafe fn vb(ent: *mut u8, member: usize) -> c_int {
-    *ent.add(facts().edict_v + member).cast::<c_int>()
+unsafe fn vb(ent: *mut u8, off: usize) -> c_int {
+    *(ent.add(off) as *mut c_int)
 }
 
 /// Copy a byte string into `buf`; returns bytes written.
@@ -282,9 +283,12 @@ fn write_str(buf: &mut [u8], s: &[u8]) -> usize {
 }
 
 /// `%4.2f`: fixed-point, 2 decimals, minimum field width 4, space-padded
-/// left.  Byte-exact with glibc's sprintf on the harness's fuzz corpus;
-/// the only production input is ENGINE_VERSION (1.29).  `buf` must hold at
-/// least 32 bytes.  Returns bytes written.
+/// left.  Byte-exact with glibc's sprintf: the rounding is done on the
+/// exact binary value via integer arithmetic on the mantissa and
+/// exponent (a floating-point `v * 100.0` would not be exact, and
+/// round-half-to-even needs the true halfway cases).  `buf` must hold at
+/// least 32 bytes.  Returns bytes written.  Values whose integer part
+/// exceeds u64::MAX saturate; production input is ENGINE_VERSION (1.29).
 fn fmt_4_2f(buf: &mut [u8], v: f64) -> usize {
     // glibc's shapes for the non-finite values, width-padded like the rest.
     if v.is_nan() {
@@ -298,31 +302,40 @@ fn fmt_4_2f(buf: &mut [u8], v: f64) -> usize {
     }
     let neg = v.is_sign_negative();
     let a = v.abs();
-    // Round half to even on the exact binary value, as glibc's printf
-    // does: `frac == 0.5` is exact only when the scaled value is exactly
-    // representable, which is precisely when half-to-even applies.
-    let scaled = a * 100.0;
-    // floor for the non-negative scaled value (core has no f64::floor
-    // here); saturates at u64::MAX, which the digit loop below handles.
-    let fl = if scaled >= 18446744073709551615.0 {
-        u64::MAX
-    } else if scaled < 9223372036854775808.0 {
-        // `as` truncates toward zero == floor for non-negative values.
-        scaled as u64
+    // Exact round(a * 100), half to even: decompose a = m * 2^e with a
+    // 53-bit integer mantissa, then scale by 100 in integers.
+    let bits = a.to_bits();
+    let exp = ((bits >> 52) & 0x7ff) as i32;
+    let (mut m, mut e): (u64, i32) = if exp == 0 {
+        // Subnormal: no implicit leading 1.
+        ((bits & 0xfffffffffffff) as u64, -1074)
     } else {
-        // 2^63 <= scaled < 2^64: split off the high 32 bits; the
-        // remainder is exactly representable, so both parts floor cleanly.
-        let hi = (scaled / 4294967296.0) as u64;
-        let lo = (scaled - hi as f64 * 4294967296.0) as u64;
-        (hi << 32) | lo
+        (((bits & 0xfffffffffffff) | 0x10000000000000) as u64, exp - 1075)
     };
-    let n: u64 = {
-        let frac = scaled - fl as f64;
-        let mut n = fl;
-        if frac > 0.5 || (frac == 0.5 && n & 1 == 1) {
-            n = n.wrapping_add(1);
+    // m * 100 < 2^60: fits in u64.
+    let scaled_m = m * 100;
+    let n: u64 = if e >= 0 {
+        let e = e as u32;
+        if e >= 64 || scaled_m > u64::MAX >> e {
+            u64::MAX
+        } else {
+            scaled_m << e
         }
-        n
+    } else {
+        let k = (-e) as u32;
+        if k >= 61 {
+            // scaled_m < 2^60 <= 2^(k-1): below half, rounds to 0.
+            0
+        } else {
+            let q = scaled_m >> k;
+            let r = scaled_m & ((1u64 << k) - 1);
+            let half = 1u64 << (k - 1);
+            if r > half || (r == half && q & 1 == 1) {
+                q + 1
+            } else {
+                q
+            }
+        }
     };
     let ip = n / 100;
     let fp = (n % 100) as u8;
@@ -465,10 +478,11 @@ pub unsafe extern "C" fn SvMainConnect_TestFmt02d(buf: *mut u8, v: c_int) -> usi
 }
 
 /// SV_ProtocolName: the four protocols this engine speaks, or NULL for
-/// anything else.  Private: only SV_SendServerinfo's Con_DPrintf uses it.
-/// A NULL return passed to `%s` prints `(null)` under glibc, as the C's
-/// does -- the harness's CON_Printf stub formats the same way.
-unsafe fn protocol_name(protocol: c_int) -> *const c_char {
+/// anything else.  #[no_mangle]: the still-C SV_Protocol_f console
+/// command and the -protocol startup check call it.  A NULL return
+/// passed to `%s` prints `(null)` under glibc, as the C's does.
+#[no_mangle]
+pub unsafe extern "C" fn SV_ProtocolName(protocol: c_int) -> *const c_char {
     let f = facts();
     if protocol == f.protocol_raven_111 {
         c"Raven/H2/1.11".as_ptr()
@@ -525,26 +539,27 @@ pub unsafe extern "C" fn SV_SendServerinfo(client: *mut u8) {
     MSG_WriteString(msg, message.as_ptr().cast::<c_char>());
 
     // Con_DPrintf ("%s: %s, protocol %i (%s), datagram %i, reliable %i\n", ...)
+    // The C evaluates NET_IsLocalConnection three times; the harness's
+    // call log records every stub call, so this does too.
     let netconnection = clp(client, f.client_netconnection);
-    let is_local = NET_IsLocalConnection(netconnection) != 0;
     let proto = SvMain_Protocol();
     CON_Printf(
         PRINT_DEVEL,
         c"%s: %s, protocol %i (%s), datagram %i, reliable %i\n".as_ptr(),
         c"SV_SendServerinfo".as_ptr(),
-        if is_local {
+        if NET_IsLocalConnection(netconnection) != 0 {
             c"local".as_ptr()
         } else {
             c"remote".as_ptr()
         },
         proto,
-        protocol_name(proto),
-        if is_local {
+        SV_ProtocolName(proto),
+        if NET_IsLocalConnection(netconnection) != 0 {
             NET_MaxUnreliableMessage(netconnection)
         } else {
             SV_MaxDatagram()
         },
-        if is_local {
+        if NET_IsLocalConnection(netconnection) != 0 {
             f.client_msgbuf_size as c_int
         } else {
             SV_MaxReliableMessage()
@@ -958,7 +973,7 @@ pub unsafe extern "C" fn SV_CreateBaseline() {
     let mut entnum = 0;
     while entnum < num_edicts {
         let svent = edicts.add(entnum as usize * edict_size);
-        if vb(svent, f.v_free) != 0 {
+        if vb(svent, f.edict_free) != 0 {
             entnum += 1;
             continue;
         }
