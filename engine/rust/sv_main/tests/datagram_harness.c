@@ -622,10 +622,17 @@ static void setup_case (uint64_t seed)
 			setup_pages (i, np);
 		}
 		/* sometimes old_v == v exactly and no page flags, so the
-		 * inventory block's `goto end' path runs */
+		 * inventory block's `goto end' path runs.  Scrub NaNs: the
+		 * generator emits them, and NaN != NaN would set sc bits
+		 * despite the memcpy, keeping the path unreachable. */
 		if (rng_next () % 8 == 0) {
 			int p;
+			size_t k, n = sizeof c->old_v / sizeof (float);
+			float *a = (float *)&c->old_v, *b = (float *)&c->edict->v;
 			memcpy (&c->old_v, &c->edict->v, sizeof c->old_v);
+			for (k = 0; k < n; k++)
+				if (a[k] != a[k])
+					a[k] = b[k] = 0.0f;
 			for (p = 0; p < 3; p++) {
 				pages[i][p].changed_items = 0;
 				pages[i][p].new_items = 0;
@@ -669,7 +676,7 @@ static void setup_case (uint64_t seed)
 	stub_send_unreliable_ret = rng_int (0, 5) == 0 ? -1 : 0;
 	stub_send_ret = rng_int (0, 5) == 0 ? -1 : 0;
 
-	if (case_kind == 1) {
+	if (case_kind == 1 || case_kind == 3) {
 		case_client = rng_int (0, svs.maxclients - 1);
 		host_client = &clients[case_client];
 		SZ_Init (&case_msg, case_msg_buf, sizeof case_msg_buf);
@@ -693,7 +700,7 @@ static void serialize_side (void)
 	if (case_kind == 0) {
 		out_sizebuf (&sv.datagram);
 		out_int (sv_datagram_dropped);
-	} else if (case_kind == 1) {
+	} else if (case_kind == 1 || case_kind == 3) {
 		client_t *c = &clients[case_client];
 		out_sizebuf (&case_msg);
 		out_sizebuf (&c->message);
@@ -740,6 +747,10 @@ static void serialize_side (void)
 		}
 		out_int (sv.reliable_datagram.cursize);
 		out_int ((int)(host_client - svs.clients));
+		/* SV_CleanupEnts clears EF_MUZZLEFLASH on every edict at the end
+		 * of SV_SendClientMessages; capture it */
+		for (i = 0; i < MAXEDICTS; i++)
+			out_bytes (&edicts[i].v.effects, sizeof (float));
 	}
 	out_bytes (calllog, calllog_len);
 	out_bytes (conlog, conlog_len);
@@ -774,6 +785,18 @@ static void run_child (void)
 			c_SV_WriteClientdataToMessage (c, c->edict, &case_msg);
 		else
 			SV_WriteClientdataToMessage (c, c->edict, &case_msg);
+	} else if (case_kind == 3) {
+		/* forty back-to-back calls in one child: the only way to
+		 * advance next_update/next_count through the whole 0..11
+		 * forced-refresh cycle (a single frame never gets past 1) */
+		client_t *c = &clients[case_client];
+		int k;
+		for (k = 0; k < 40; k++) {
+			if (harness_side == 0)
+				c_SV_WriteClientdataToMessage (c, c->edict, &case_msg);
+			else
+				SV_WriteClientdataToMessage (c, c->edict, &case_msg);
+		}
 	} else {
 		if (harness_side == 0)
 			c_SV_SendClientMessages ();
@@ -813,7 +836,7 @@ static int run_one_case (uint64_t seed, int kind, const char *tmpdir)
 	setup_case (seed);
 	{
 		uint32_t sum = 0, sum2 = 0;
-		int i, cc = case_kind == 1 ? case_client : 0;
+		int i, cc = (case_kind == 1 || case_kind == 3) ? case_client : 0;
 		for (i = 0; i < (int)sizeof(clients[cc].old_v); i++)
 			sum += ((unsigned char *)&clients[cc].old_v)[i];
 		for (i = 0; i < (int)sizeof(edicts[cc].v); i++)
@@ -846,7 +869,7 @@ static int run_one_case (uint64_t seed, int kind, const char *tmpdir)
 	setup_case (seed);
 	{
 		uint32_t sum = 0, sum2 = 0;
-		int i, cc = case_kind == 1 ? case_client : 0;
+		int i, cc = (case_kind == 1 || case_kind == 3) ? case_client : 0;
 		for (i = 0; i < (int)sizeof(clients[cc].old_v); i++)
 			sum += ((unsigned char *)&clients[cc].old_v)[i];
 		for (i = 0; i < (int)sizeof(edicts[cc].v); i++)
@@ -929,6 +952,10 @@ static int directed (const char *tmpdir)
 	/* send paths: unreliable refused, reliable refused, local vs not */
 	for (seed = 0; seed < 40; seed++)
 		bad |= run_one_case (0x5EED0000ULL + seed, 2, tmpdir);
+	/* the next_update/next_count forced-refresh cycle, forty calls per
+	 * child so all twelve phases (and the wrap) actually run */
+	for (seed = 0; seed < 4; seed++)
+		bad |= run_one_case (0xC7C10000ULL + seed, 3, tmpdir);
 	/* clear-datagram with every flag state */
 	for (seed = 0; seed < 8; seed++)
 		bad |= run_one_case (0xC1EA0000ULL + seed, 0, tmpdir);
