@@ -49,6 +49,11 @@
  * is a difference between the two sides, not a harness bug, and a mutated
  * datagram size is exactly how one side reaches it.
  *
+ * A NaN box is the one input where the two sides are meant to disagree: the
+ * C dies on it (see SV_EntityPriority) and the port sheds the entity as the
+ * least important bin.  Those cases run forked as well, and the runner
+ * checks for exactly that instead of for agreement.
+ *
  * After the random cases come the directed ones (below): values the
  * generator does not reach, each the kill of a mutant that survived every
  * random case.
@@ -708,6 +713,8 @@ enum {
 				 * them with a changed frame byte */
 	DIR_IGNORE_TAIL,	/* an ignored edict on the build frame's last
 				 * entry, the one count the loop breaks at */
+	DIR_NAN_PRIO,		/* a NaN box, where the C dies and the port
+				 * sheds the entity as the last bin */
 	NDIRECTED
 };
 
@@ -921,6 +928,21 @@ static void directed_scenario (scenario_t *sc, int d)
 			x->baseline.frame = 3;
 		}
 		break;
+	case DIR_NAN_PRIO:
+		/* A box of three NaNs -- QuakeC's setorigin on 0/0, or an absmax -
+		 * absmin of two infinities -- leaves the priority NaN.  The C's
+		 * clamp is false for a NaN, so it returns (int) of one, INT_MIN, and
+		 * the measuring pass writes binbytes[INT_MIN], far below the array,
+		 * and the server dies.  The port takes it as the least important bin
+		 * and sheds the entity, which the shed message names.  This case is
+		 * forked, and the runner expects the two sides to disagree here: the
+		 * one place in this file where they are meant to. */
+		msg.maxsize = DIR_MSGMAX;
+		VectorSet (ent->v.absmin, NAN, NAN, NAN);
+		VectorSet (ent->v.absmax, NAN, NAN, NAN);
+		directed_zero_delta (ent);
+		sc->nonfinite = 1;	/* the C dies: run both sides forked */
+		return;
 	}
 
 	if (delta != 0.0f)
@@ -1102,10 +1124,13 @@ static void gen_case (scenario_t *sc, int directed)
 	if (directed >= 0)
 		directed_scenario (sc, directed);
 
-	/* A NaN box makes SV_EntityPriority's (int) INT_MIN, and the measuring
-	 * pass then indexes binbytes[] with it: the C writes far outside the
-	 * array and dies, the Rust's bounds check aborts it (GitHub issue in
-	 * the PR).  Such a case runs forked, where both dying is agreement. */
+	/* A NaN box makes SV_EntityPriority's key NaN.  The C's clamp is false
+	 * for it, so (int) of it is INT_MIN and the measuring pass writes
+	 * binbytes[INT_MIN], far outside the array, and the reference dies.  The
+	 * port takes a non-finite key as the least important bin instead and
+	 * sheds the entity: the case is forked, and the runner expects exactly
+	 * that disagreement.  Where the frame cannot overflow the key is never
+	 * computed and both sides still agree. */
 	if (sc->nonfinite && sv_netsort.integer)
 		sc->fatal = 1;
 
@@ -1332,7 +1357,7 @@ static int forked_side (int rust, const scenario_t *sc, char *out, size_t outsiz
 static long	n_cases, n_forked, n_problems;
 static long	o_huge[5], o_measured, o_shed, o_shed_sort, o_deferred, o_trailer, o_fatal;
 static long	o_long, o_morebits2, o_alpha, o_classdep, o_clear, o_removals, o_cleanup;
-static long	o_branch[4], o_both_died;
+static long	o_branch[4], o_nan_shed;
 
 static void problem (long i, const scenario_t *sc, const char *what)
 {
@@ -1470,10 +1495,32 @@ int main (void)
 			n_forked++;
 			okc = forked_side (0, &sc, fork_c, sizeof (fork_c));
 			okr = forked_side (1, &sc, fork_r, sizeof (fork_r));
-			if (!okc && !okr && sc.nonfinite)
+			if (sc.nonfinite)
 			{
-				/* both died on a NaN priority; see gen_case */
-				o_both_died++;
+				/* A NaN box: the key is NaN, the C's (int) of it is INT_MIN,
+				 * and the measuring pass writes binbytes[] with it, so the
+				 * reference dies.  The port takes a non-finite key as the
+				 * least important bin and sheds that entity instead, which is
+				 * the one place the two are meant to disagree; a case whose
+				 * frame cannot overflow never computes the key, and there they
+				 * must still agree. */
+				if (okc)
+				{
+					if (!okr || strcmp (fork_c, fork_r) != 0)
+						problem (i, &sc, "forked, with no NaN key computed");
+					continue;
+				}
+				if (!okr)
+					problem (i, &sc, "a NaN priority: the C died and the Rust must not");
+				else if (i == NCASES - NDIRECTED + DIR_NAN_PRIO
+					 && !strstr (fork_r, "nearest shed bin 255"))
+					/* the directed case's scene leaves that entity the only
+					 * one that can be shed, so its message has to name the bin
+					 * the port gave it.  A generated case sheds others too,
+					 * and `nearest shed bin' is the least of them. */
+					problem (i, &sc, "the NaN priority case must shed bin 255");
+				else
+					o_nan_shed++;
 				continue;
 			}
 			if (!okc || !okr || strcmp (fork_c, fork_r) != 0)
@@ -1578,11 +1625,11 @@ int main (void)
 		"          huge write %ld, zero %ld, measure %ld, shed %ld; measured %ld,\n"
 		"          shed %ld (by netsort %ld), deferred removals %ld, trailer clamp %ld,\n"
 		"          removals %ld, U_LONGENTITY %ld, U_MOREBITS2 %ld, U_ALPHA %ld, U_CLEAR_ENT %ld,\n"
-		"          class-dependent models %ld, cleanups %ld, fatal %ld, both died on a NaN priority %ld\n",
+		"          class-dependent models %ld, cleanups %ld, fatal %ld, NaN priorities shed %ld\n",
 		o_branch[0], o_branch[1], o_branch[2], o_branch[3],
 		o_huge[1], o_huge[2], o_huge[3], o_huge[4], o_measured,
 		o_shed, o_shed_sort, o_deferred, o_trailer, o_removals,
-		o_long, o_morebits2, o_alpha, o_clear, o_classdep, o_cleanup, o_fatal, o_both_died);
+		o_long, o_morebits2, o_alpha, o_clear, o_classdep, o_cleanup, o_fatal, o_nan_shed);
 
 	floor_check ("the old-sequence branch", o_branch[0], 1000);
 	floor_check ("the expired branch", o_branch[1], 1000);
@@ -1605,6 +1652,7 @@ int main (void)
 	floor_check ("a class-dependent model", o_classdep, 1000);
 	floor_check ("SV_CleanupEnts", o_cleanup, 2000);
 	floor_check ("a fatal call", o_fatal, 100);
+	floor_check ("a NaN priority shed as bin 255", o_nan_shed, 100);
 
 	if (n_problems)
 	{

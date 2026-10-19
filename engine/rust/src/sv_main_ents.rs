@@ -53,14 +53,23 @@
 //   * EDICT_NUM, SV_ModelIndex, Mod_LeafPVS, GetEdictFieldValue and
 //     PR_GetString are the engine's C, called as the C calls them.
 //
-// ONE DEPARTURE, IN UNDEFINED BEHAVIOUR ONLY
+// DEPARTURES FROM THE C
 //
-// FL_CLASS_DEPENDENT rewrites the model name's fifth character from the
-// end.  The C strcpy's the name into a MAX_QPATH buffer and indexes
-// strlen-5, so a name of MAX_QPATH or more overflows the stack and one under
-// five characters writes before the buffer.  The port copies at most
-// MAX_QPATH-1 characters and skips the rewrite for a name under five; it
-// does what the C does for every name the C handles defined.
+//   * FL_CLASS_DEPENDENT, in undefined behaviour only.  It rewrites the
+//     model name's fifth character from the end.  The C strcpy's the name
+//     into a MAX_QPATH buffer and indexes strlen-5, so a name of MAX_QPATH
+//     or more overflows the stack and one under five characters writes
+//     before the buffer.  The port copies at most MAX_QPATH-1 characters
+//     and skips the rewrite for a name under five; it does what the C does
+//     for every name the C handles defined.
+//   * SV_EntityPriority's clamp, on a key that is not a number -- see it
+//     below.  The C's `dist >= NETSORT_BINS - 1' is false for a NaN, so it
+//     returns (int) of one, INT_MIN, and the measuring pass indexes
+//     binbytes[] with it, some 8 GB below the array, and the server dies.
+//     The port takes a non-finite key as the least important bin, which is
+//     what Ironwail's own `(int) q_min (dist, 255.f)' does, and what a box
+//     its priority cannot be computed for deserves.  A crash becomes a shed
+//     entity, and the harness holds both sides of it.
 
 use core::ffi::{c_char, c_int, c_long, c_uint};
 
@@ -482,7 +491,14 @@ unsafe fn entity_priority(ent: *mut u8, org: &[f32; 3], is_clent: bool) -> c_int
     }
 
     dist = (8.0f64 * sqrt(sqrt((dist / size) as f64))) as f32;
-    if dist >= (NETSORT_BINS - 1) as f32 {
+    // `!(dist < NETSORT_BINS - 1`, and not `dist >= NETSORT_BINS - 1`: the
+    // two are equal for every number, and differ for a NaN, which is what
+    // this test is for.  A NaN box (QuakeC's setorigin on 0/0, or
+    // absmax - absmin of two infinities) leaves the key NaN, and (int) of
+    // one is INT_MIN, which the measuring pass writes binbytes[INT_MIN]
+    // with, far below the array: the C dies there.  The entity becomes the
+    // least important in the frame instead.  See the header.
+    if !(dist < (NETSORT_BINS - 1) as f32) {
         return NETSORT_BINS - 1;
     }
     cvt_c(dist)
