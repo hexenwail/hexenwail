@@ -79,3 +79,77 @@ int SvMain_NetSort (void)			{ return sv_netsort.integer; }
 static byte	fatpvs[MAX_MAP_LEAFS/8];
 unsigned char *SvMain_FatPvs (void)		{ return fatpvs; }
 size_t SvMain_FatPvsSize (void)			{ return sizeof (fatpvs); }
+
+/* sv_main_datagram.rs (#469 slice C): the clientdata/inventory message
+ * numbers and bit masks, the entvars_t/client_t/ex_inventory_page_t member
+ * offsets, and the globals the six functions read and write. */
+
+#define EX(member)	offsetof (ex_inventory_page_t, member)
+
+const sv_main_datagram_facts_t SvMainDatagram_TargetFacts =
+{
+	svc_damage, svc_setangle, svc_clientdata, svc_update_inv,
+	svc_time, svc_nop, svc_updatefrags, svc_signonnum,
+	SU_VIEWHEIGHT, SU_IDEALPITCH, SU_IDEALROLL,
+	SU_PUNCH1, SU_VELOCITY1,
+	SU_ONGROUND, SU_WEAPONFRAME, SU_ARMOR, SU_WEAPON,
+	SC1_HEALTH, SC1_LEVEL, SC1_INTELLIGENCE, SC1_WISDOM, SC1_STRENGTH,
+	SC1_DEXTERITY, SC1_WEAPON, SC1_BLUEMANA, SC1_GREENMANA,
+	SC1_EXPERIENCE, SC1_CNT_TORCH, SC1_CNT_H_BOOST, SC1_CNT_SH_BOOST,
+	SC1_CNT_MANA_BOOST, SC1_CNT_TELEPORT, SC1_CNT_TOME, SC1_CNT_SUMMON,
+	SC1_CNT_INVISIBILITY, SC1_CNT_GLYPH, SC1_CNT_HASTE, SC1_CNT_BLAST,
+	SC1_CNT_POLYMORPH, SC1_CNT_FLIGHT, SC1_CNT_CUBEOFFORCE,
+	SC1_CNT_INVINCIBILITY, SC1_ARTIFACT_ACTIVE, SC1_ARTIFACT_LOW,
+	SC1_MOVETYPE, SC1_CAMERAMODE, SC1_HASTED, SC1_INVENTORY,
+	SC1_RINGS_ACTIVE,
+	SC2_RINGS_LOW, SC2_AMULET, SC2_BRACER, SC2_BREASTPLATE, SC2_HELMET,
+	SC2_FLIGHT_T, SC2_WATER_T, SC2_TURNING_T, SC2_REGEN_T,
+	SC2_HASTE_T, SC2_TOME_T,
+	SC2_PUZZLE1, SC2_PUZZLE2, SC2_PUZZLE3, SC2_PUZZLE4,
+	SC2_PUZZLE5, SC2_PUZZLE6, SC2_PUZZLE7, SC2_PUZZLE8,
+	SC2_MAXHEALTH, SC2_MAXMANA, SC2_FLAGS, SC2_OBJ, SC2_OBJ2,
+	MAX_INVENTORY_EX, FL_ONGROUND,
+	offsetof (edict_t, v), sizeof (entvars_t),
+	V(dmg_take), V(dmg_save), V(dmg_inflictor),
+	V(origin), V(mins), V(maxs),
+	V(fixangle), V(angles), V(view_ofs), V(idealpitch), V(idealroll),
+	V(punchangle), V(velocity),
+	V(weaponframe), V(armorvalue), V(weaponmodel), V(flags),
+	V(health), V(level), V(intelligence), V(wisdom), V(strength),
+	V(dexterity), V(weapon), V(bluemana), V(greenmana), V(experience),
+	V(cnt_torch), V(cnt_h_boost), V(cnt_sh_boost), V(cnt_mana_boost),
+	V(cnt_teleport), V(cnt_tome), V(cnt_summon), V(cnt_invisibility),
+	V(cnt_glyph), V(cnt_haste), V(cnt_blast), V(cnt_polymorph),
+	V(cnt_flight), V(cnt_cubeofforce), V(cnt_invincibility),
+	V(artifact_active), V(artifact_low), V(movetype), V(cameramode),
+	V(hasted), V(inventory), V(rings_active), V(rings_low),
+	V(armor_amulet), V(armor_bracer), V(armor_breastplate), V(armor_helmet),
+	V(ring_flight), V(ring_water), V(ring_turning), V(ring_regeneration),
+	V(haste_time), V(tome_time),
+	V(puzzle_inv1), V(puzzle_inv2), V(puzzle_inv3), V(puzzle_inv4),
+	V(puzzle_inv5), V(puzzle_inv6), V(puzzle_inv7), V(puzzle_inv8),
+	V(max_health), V(max_mana), V(frags),
+	sizeof (client_t), CL(old_v), CL(send_all_v), CL(edict),
+	CL(message), CL(datagram), CL(netconnection),
+	CL(active), CL(spawned), CL(signon_buffer),
+	CL(sendsignon), CL(last_message), CL(dropasap),
+	CL(old_frags), CL(info_mask), CL(info_mask2),
+	CL(name), CL(ex_inventory),
+	EX(changed_items), EX(new_items), EX(item_cnt), EX(item_id), EX(next)
+};
+
+/* sv_main.c's file-scope globals this slice reads and writes */
+extern	unsigned int	info_mask, info_mask2;
+extern	cvar_t		sv_maxdatagram;
+extern	double		realtime;
+
+struct client_s **SvMain_HostClient (void)	{ return &host_client; }
+int SvMain_MaxClients (void)			{ return svs.maxclients; }
+struct sizebuf_s *SvMain_ReliableDatagram (void) { return &sv.reliable_datagram; }
+double SvMain_Time (void)			{ return sv.time; }
+int SvMain_DatagramDropped (void)		{ return sv_datagram_dropped; }
+void SvMain_SetDatagramDropped (int v)		{ sv_datagram_dropped = v; }
+unsigned int SvMain_InfoMask (void)		{ return info_mask; }
+unsigned int SvMain_InfoMask2 (void)		{ return info_mask2; }
+int SvMain_MaxDatagramCvar (void)		{ return sv_maxdatagram.integer; }
+double SvMain_Realtime (void)			{ return realtime; }

@@ -880,7 +880,7 @@ if(UNIX)
 endif()
 # Hexen II's server, engine/hexen2/sv_main.c (#469): the client's listen
 # server and h2ded.  hwsv's server is HexenWorld's own sv_main.c.
-set(RUST_ENGINE_H2_SERVER_FEATURES sv_main_sound sv_main_ents)
+set(RUST_ENGINE_H2_SERVER_FEATURES sv_main_sound sv_main_ents sv_main_datagram)
 list(APPEND RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 list(APPEND RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 # world_trace_hw: hexenworld/server/world.c's hull traces report a bad node

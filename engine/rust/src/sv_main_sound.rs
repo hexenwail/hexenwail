@@ -132,6 +132,27 @@ pub(crate) unsafe fn protocol_hexenwail_1() -> c_int {
     sf().protocol_hexenwail_1
 }
 
+/// PROTOCOL_RAVEN_111, for sv_main_datagram.rs's mission-pack objective test.
+#[cfg(feature = "sv_main_datagram")]
+#[inline(always)]
+pub(crate) unsafe fn protocol_raven_111() -> c_int {
+    sf().protocol_raven_111
+}
+
+/// PROTOCOL_UH2_114, for sv_main_datagram.rs's extended-inventory test.
+#[cfg(feature = "sv_main_datagram")]
+#[inline(always)]
+pub(crate) unsafe fn protocol_uh2_114() -> c_int {
+    sf().protocol_uh2_114
+}
+
+/// MAX_DATAGRAM_OLD, SV_MAXDATAGRAM_FLOOR's value, for sv_main_datagram.rs.
+#[cfg(feature = "sv_main_datagram")]
+#[inline(always)]
+pub(crate) unsafe fn max_datagram_old() -> c_int {
+    sf().max_datagram_old
+}
+
 #[inline(always)]
 unsafe fn protocol() -> c_int {
     *(&raw const sv_protocol)
