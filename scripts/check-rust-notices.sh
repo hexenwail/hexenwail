@@ -112,6 +112,7 @@ derived_map() {
 	engine/rust/src/sv_main_sound.rs      engine/hexen2/sv_main.c
 	engine/rust/src/sv_main_ents.rs       engine/hexen2/sv_main.c
 	engine/rust/src/sv_main_datagram.rs   engine/hexen2/sv_main.c
+	engine/rust/src/sv_main_connect.rs    engine/hexen2/sv_main.c
 	engine/rust/src/strlcat.rs            common/strlcat.c
 	engine/rust/src/strlcpy.rs            common/strlcpy.c
 	engine/rust/src/wad.rs                engine/h2shared/wad.c

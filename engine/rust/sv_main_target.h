@@ -163,4 +163,68 @@ unsigned int	SvMain_InfoMask2 (void);	/* info_mask2, sv_main.c */
 int		SvMain_MaxDatagramCvar (void);	/* sv_maxdatagram.integer */
 double		SvMain_Realtime (void);		/* realtime */
 
+/* sv_main_connect.rs (#469 slice D) */
+typedef struct sv_main_connect_facts_s
+{
+	/* protocol.h's versions */
+	int	protocol_raven_111, protocol_raven_112, protocol_uqe_113;
+	int	protocol_uh2_114, protocol_hexenwail_1;
+	/* svc_* message numbers, named msg_* here because the
+	 * svc_* names are those macros */
+	int	msg_print, msg_serverinfo, msg_cdtrack, msg_midi_name, msg_mod_name;
+	int	msg_skybox, msg_setview, msg_signonnum, msg_spawnbaseline, msg_stufftext;
+	/* protocol.h's game types */
+	int	game_coop, game_deathmatch;
+	/* quakedef.h / server.h constants */
+	int	max_models, max_sounds, max_qpath;
+	int	max_signon_size, max_signon_buffers, num_spawn_parms;
+	int	entalpha_default;
+	/* ENGINE_VERSION, a double literal in the C */
+	double	engine_version;
+	/* qmodel_t model effects: 1 when the target compiles the
+	 * !SERVERONLY && GLQUAKE block of SV_SendServerinfo, else 0.
+	 * The two offsets are only read when model_effects is 1. */
+	int	model_effects;
+	size_t	qmodel_ex_flags, qmodel_glow_settings;
+	/* client_t's layout */
+	size_t	client_size, client_message, client_msgbuf, client_msgbuf_size;
+	size_t	client_datagram, client_datagram_buf, client_datagram_buf_size;
+	size_t	client_netconnection, client_spawn_parms, client_name, client_name_size;
+	size_t	client_active, client_spawned, client_send_all_v, client_signon_buffer;
+	size_t	client_edict, client_ex_inventory, client_sendsignon;
+	/* edict_t's v and baseline, and entvars_t members relative to v */
+	size_t	edict_v, edict_baseline;
+	size_t	v_origin, v_angles, v_frame, v_skin, v_scale, v_drawflags;
+	size_t	v_abslight, v_model, v_modelindex, v_free;
+	/* entity_state_t members, relative to baseline */
+	size_t	es_origin, es_angles, es_modelindex, es_frame, es_colormap;
+	size_t	es_skin, es_scale, es_drawflags, es_abslight, es_alpha;
+	size_t	es_clearcount;
+	/* ex_item_t's layout */
+	size_t	ex_item_id, ex_item_icon;
+} sv_main_connect_facts_t;
+
+extern const sv_main_connect_facts_t	SvMainConnect_TargetFacts;
+
+int			SvMain_Coop (void);		/* coop.integer */
+int			SvMain_Deathmatch (void);	/* deathmatch.integer */
+int			SvMain_KingOfHill (void);	/* sv_kingofhill */
+int			SvMain_LoadGame (void);		/* sv.loadgame */
+unsigned short		SvMain_PrecacheCRC (void);	/* pr_crc */
+struct sizebuf_s	*SvMain_Signon (void);		/* &sv.signon */
+unsigned char		*SvMain_SignonBufs (void);	/* sv.signon_bufs */
+int			SvMain_NumSignonBuffers (void);	/* sv.num_signon_buffers */
+void			SvMain_SetNumSignonBuffers (int v);
+int			SvMain_SignonSize (int i);	/* sv.signon_size[i] */
+void			SvMain_SetSignonSize (int i, int v);
+const char		**SvMain_ModelPrecache (void);	/* sv.model_precache */
+int			SvMain_NumExItems (void);	/* sv.num_ex_items */
+void			*SvMain_ExItems (void);		/* sv.ex_items */
+unsigned char		SvMain_CdTrack (void);		/* sv.cd_track */
+const char		*SvMain_MidiName (void);	/* sv.midi_name */
+const char		*SvMain_ModName (void);		/* sv.mod_name */
+const char		*SvMain_Skybox (void);		/* sv.skybox */
+int			*SvMain_NetActiveConnections (void); /* &net_activeconnections */
+struct qmodel_s		**SvMain_Models (void);		/* sv.models */
+
 #endif	/* SV_MAIN_TARGET_H */

@@ -153,3 +153,65 @@ unsigned int SvMain_InfoMask (void)		{ return info_mask; }
 unsigned int SvMain_InfoMask2 (void)		{ return info_mask2; }
 int SvMain_MaxDatagramCvar (void)		{ return sv_maxdatagram.integer; }
 double SvMain_Realtime (void)			{ return realtime; }
+
+/* sv_main_connect.rs (#469 slice D) */
+#if !defined(SERVERONLY) && defined(GLQUAKE)
+#define SV_MAIN_CONNECT_MODEL_EFFECTS	1
+#else
+#define SV_MAIN_CONNECT_MODEL_EFFECTS	0
+#endif
+
+#define ES(member)	offsetof (entity_state_t, member)
+#define EXI(member)	offsetof (ex_item_t, member)
+
+const sv_main_connect_facts_t SvMainConnect_TargetFacts =
+{
+	PROTOCOL_RAVEN_111, PROTOCOL_RAVEN_112, PROTOCOL_UQE_113,
+	PROTOCOL_UH2_114, PROTOCOL_HEXENWAIL_1,
+	svc_print, svc_serverinfo, svc_cdtrack, svc_midi_name, svc_mod_name,
+	svc_skybox, svc_setview, svc_signonnum, svc_spawnbaseline, svc_stufftext,
+	GAME_COOP, GAME_DEATHMATCH,
+	MAX_MODELS, MAX_SOUNDS, MAX_QPATH,
+	MAX_SIGNON_SIZE, MAX_SIGNON_BUFFERS, NUM_SPAWN_PARMS,
+	ENTALPHA_DEFAULT,
+	ENGINE_VERSION,
+	SV_MAIN_CONNECT_MODEL_EFFECTS,
+#if SV_MAIN_CONNECT_MODEL_EFFECTS
+	offsetof (qmodel_t, ex_flags), offsetof (qmodel_t, glow_settings),
+#else
+	0, 0,
+#endif
+	sizeof (client_t), CL(message), CL(msgbuf), sizeof (((client_t *)0)->msgbuf),
+	CL(datagram), CL(datagram_buf), sizeof (((client_t *)0)->datagram_buf),
+	CL(netconnection), CL(spawn_parms), CL(name), sizeof (((client_t *)0)->name),
+	CL(active), CL(spawned), CL(send_all_v), CL(signon_buffer),
+	CL(edict), CL(ex_inventory), CL(sendsignon),
+	offsetof (edict_t, v), offsetof (edict_t, baseline),
+	V(origin), V(angles), V(frame), V(skin), V(scale), V(drawflags),
+	V(abslight), V(model), V(modelindex), V(free),
+	ES(origin), ES(angles), ES(modelindex), ES(frame), ES(colormap),
+	ES(skin), ES(scale), ES(drawflags), ES(abslight), ES(alpha),
+	ES(ClearCount),
+	EXI(id), EXI(icon)
+};
+
+int SvMain_Coop (void)				{ return coop.integer; }
+int SvMain_Deathmatch (void)			{ return deathmatch.integer; }
+int SvMain_KingOfHill (void)			{ return sv_kingofhill; }
+int SvMain_LoadGame (void)			{ return sv.loadgame; }
+unsigned short SvMain_PrecacheCRC (void)	{ return pr_crc; }
+struct sizebuf_s *SvMain_Signon (void)		{ return &sv.signon; }
+unsigned char *SvMain_SignonBufs (void)		{ return (unsigned char *)sv.signon_bufs; }
+int SvMain_NumSignonBuffers (void)		{ return sv.num_signon_buffers; }
+void SvMain_SetNumSignonBuffers (int v)		{ sv.num_signon_buffers = v; }
+int SvMain_SignonSize (int i)			{ return sv.signon_size[i]; }
+void SvMain_SetSignonSize (int i, int v)	{ sv.signon_size[i] = v; }
+const char **SvMain_ModelPrecache (void)	{ return sv.model_precache; }
+int SvMain_NumExItems (void)			{ return sv.num_ex_items; }
+void *SvMain_ExItems (void)			{ return sv.ex_items; }
+unsigned char SvMain_CdTrack (void)		{ return sv.cd_track; }
+const char *SvMain_MidiName (void)		{ return sv.midi_name; }
+const char *SvMain_ModName (void)		{ return sv.mod_name; }
+const char *SvMain_Skybox (void)		{ return sv.skybox; }
+int *SvMain_NetActiveConnections (void)		{ return &net_activeconnections; }
+struct qmodel_s **SvMain_Models (void)		{ return sv.models; }

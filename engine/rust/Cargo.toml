@@ -87,6 +87,12 @@ sv_main_ents = ["sv_main_sound"]
 # engine/rust/sv_main_target.c besides world_target.c.
 sv_main_datagram = ["sv_main_ents"]
 
+# Hexen II's sv_main.c connect and signon (#469 slice D): SV_SendServerinfo,
+# SV_ConnectClient, SV_CheckForNewClients, SV_ModelIndex, the signon-buffer
+# machinery, SV_CreateBaseline and SV_SendReconnect.  Reads the protocol
+# numbers and per-protocol limits through sv_main_sound's facts.
+sv_main_connect = ["sv_main_sound"]
+
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go
 # through the engine's noreturn C callbacks, so abort rather than unwind.

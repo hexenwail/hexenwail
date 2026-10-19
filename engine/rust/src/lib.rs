@@ -147,6 +147,10 @@ pub mod sv_main_ents;
 #[cfg(feature = "sv_main_datagram")]
 pub mod sv_main_datagram;
 
+// Hexen II's sv_main.c connect and signon (#469 slice D).
+#[cfg(feature = "sv_main_connect")]
+pub mod sv_main_connect;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]
