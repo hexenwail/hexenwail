@@ -106,4 +106,18 @@ if [ -n "$unrun" ]; then
 fi
 lines=$(grep -cE '^ *[0-9]+\*?:' "$gcov_file" || true)
 echo "coverage: every executable line of $fixture ran ($lines)"
+
+echo "== $VARIANT: the listen-server arm of SV_SendReconnect =="
+# The differential fixture is -DSERVERONLY, so SV_SendReconnect's
+# `#if !defined(SERVERONLY)` listen arm is dead there by construction.
+# test_listen_branch.c checks both sides of the runtime
+# SvMain_IsDedicated() gate directly: dedicated sends only the
+# stufftext; a listen server also runs Cmd_ExecuteString("reconnect\n").
+mkdir -p "$OUT/listen"
+cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
+	-c "$here/test_listen_branch.c" -o "$OUT/listen/test_listen_branch.o"
+cc "$OUT/listen/test_listen_branch.o" "$OUT/opt/sv_main_target.o" \
+	"$RUST_LIB" -lm -o "$OUT/listen/test_listen_branch"
+(cd "$OUT/listen" && ./test_listen_branch)
+
 echo "RESULT: PASS"
