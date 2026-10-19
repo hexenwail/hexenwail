@@ -938,7 +938,7 @@ static int directed (const char *tmpdir)
 int main (int argc, char **argv)
 {
 	char tmpdir[] = "/tmp/datagram_harness_XXXXXX";
-	long i, target;
+	long i, target, case_offset = 0;
 	int bad = 0;
 
 	if (!mkdtemp (tmpdir)) { perror ("mkdtemp"); return 2; }
@@ -946,22 +946,42 @@ int main (int argc, char **argv)
 		return 2;
 
 	target = argc > 1 ? atol (argv[1]) : 12000;
+	/* Chunked runs: HARNESS_CASE_OFFSET shifts the enumerated seeds, so a
+	 * full enumeration too fork-heavy for one process (fork() fails with
+	 * ENOMEM after ~900 forks on small machines) can be covered in
+	 * several processes with disjoint seeds.  HARNESS_SKIP_DIRECTED
+	 * skips the directed edges, which are identical in every chunk. */
+	{
+		const char *off = getenv ("HARNESS_CASE_OFFSET");
+		if (off)
+			case_offset = atol (off);
+	}
 	printf ("sv_main_datagram differential harness\n");
 
-	/* two thirds messages-frames, the rest split over the small ones */
+	/* two thirds messages-frames, the rest split over the small ones.
+	 * HARNESS_KIND=0/1/2 runs only one loop, for chunked full
+	 * enumerations with per-kind offsets. */
+	{
+		const char *kf = getenv ("HARNESS_KIND");
+		int only = kf ? atoi (kf) : -1;
+		if (only < 0 || only == 2)
 	for (i = 0; i < target * 2 / 3; i++) {
-		if (run_one_case (0x10000000ULL + (uint64_t)i, 2, tmpdir))
+		if (run_one_case (0x10000000ULL + (uint64_t)(i + case_offset), 2, tmpdir))
 			bad = 1;
 	}
+		if (only < 0 || only == 1)
 	for (i = 0; i < target / 6; i++) {
-		if (run_one_case (0x20000000ULL + (uint64_t)i, 1, tmpdir))
+		if (run_one_case (0x20000000ULL + (uint64_t)(i + case_offset), 1, tmpdir))
 			bad = 1;
 	}
+		if (only < 0 || only == 0)
 	for (i = 0; i < target / 6; i++) {
-		if (run_one_case (0x30000000ULL + (uint64_t)i, 0, tmpdir))
+		if (run_one_case (0x30000000ULL + (uint64_t)(i + case_offset), 0, tmpdir))
 			bad = 1;
 	}
-	bad |= directed (tmpdir);
+	}
+	if (!getenv ("HARNESS_SKIP_DIRECTED"))
+		bad |= directed (tmpdir);
 
 	printf ("sv_main_datagram differential harness (%s): %s (%ld cases, %ld pass)\n",
 		"h2", bad ? "FAIL" : "PASS", cases_run, cases_pass);
