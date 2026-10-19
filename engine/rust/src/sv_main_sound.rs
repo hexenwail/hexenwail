@@ -125,6 +125,13 @@ unsafe fn sf() -> &'static SvMainTargetFacts {
     &*(&raw const SvMain_TargetFacts)
 }
 
+/// PROTOCOL_HEXENWAIL_1, for sv_main_ents.rs's U_ALPHA test.
+#[cfg(feature = "sv_main_ents")]
+#[inline(always)]
+pub(crate) unsafe fn protocol_hexenwail_1() -> c_int {
+    sf().protocol_hexenwail_1
+}
+
 #[inline(always)]
 unsafe fn protocol() -> c_int {
     *(&raw const sv_protocol)
