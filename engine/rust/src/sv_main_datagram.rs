@@ -344,10 +344,22 @@ unsafe fn vf(ent: *mut u8, member: usize) -> f32 {
     *ent.add(facts().edict_v + member).cast::<f32>()
 }
 
+/// A float member of an entvars_t* directly (client_t.old_v): no edict_v.
+#[inline(always)]
+unsafe fn vf_ev(ev: *mut u8, member: usize) -> f32 {
+    *ev.add(member).cast::<f32>()
+}
+
 /// A float entvars_t member's address, for writes and vector reads.
 #[inline(always)]
 unsafe fn vp(ent: *mut u8, member: usize) -> *mut f32 {
     ent.add(facts().edict_v + member).cast::<f32>()
+}
+
+/// A float member's address in an entvars_t* directly.
+#[inline(always)]
+unsafe fn vp_ev(ev: *mut u8, member: usize) -> *mut f32 {
+    ev.add(member).cast::<f32>()
 }
 
 /// An int entvars_t member (dmg_inflictor, weaponmodel, cameramode,
@@ -355,6 +367,12 @@ unsafe fn vp(ent: *mut u8, member: usize) -> *mut f32 {
 #[inline(always)]
 unsafe fn vi(ent: *mut u8, member: usize) -> c_int {
     *ent.add(facts().edict_v + member).cast::<c_int>()
+}
+
+/// An int member of an entvars_t* directly.
+#[inline(always)]
+unsafe fn vi_ev(ev: *mut u8, member: usize) -> c_int {
+    *ev.add(member).cast::<c_int>()
 }
 
 /// A client_t int member.
@@ -497,32 +515,32 @@ pub unsafe extern "C" fn SV_WriteClientdataToMessage(
             | f.su_armor
             | f.su_weapon;
     } else {
-        if *vp(ent, f.v_view_ofs).add(2) != *vp(old_v, f.v_view_ofs).add(2) {
+        if *vp(ent, f.v_view_ofs).add(2) != *vp_ev(old_v, f.v_view_ofs).add(2) {
             bits |= f.su_viewheight;
         }
-        if vf(ent, f.v_idealpitch) != vf(old_v, f.v_idealpitch) {
+        if vf(ent, f.v_idealpitch) != vf_ev(old_v, f.v_idealpitch) {
             bits |= f.su_idealpitch;
         }
-        if vf(ent, f.v_idealroll) != vf(old_v, f.v_idealroll) {
+        if vf(ent, f.v_idealroll) != vf_ev(old_v, f.v_idealroll) {
             bits |= f.su_idealroll;
         }
         for i in 0..3 {
             let i = i as usize;
-            if *vp(ent, f.v_punchangle).add(i) != *vp(old_v, f.v_punchangle).add(i) {
+            if *vp(ent, f.v_punchangle).add(i) != *vp_ev(old_v, f.v_punchangle).add(i) {
                 bits |= f.su_punch1 << i as c_int;
             }
-            if *vp(ent, f.v_velocity).add(i) != *vp(old_v, f.v_velocity).add(i) {
+            if *vp(ent, f.v_velocity).add(i) != *vp_ev(old_v, f.v_velocity).add(i) {
                 bits |= f.su_velocity1 << i as c_int;
             }
         }
-        if vf(ent, f.v_weaponframe) != vf(old_v, f.v_weaponframe) {
+        if vf(ent, f.v_weaponframe) != vf_ev(old_v, f.v_weaponframe) {
             bits |= f.su_weaponframe;
         }
-        if vf(ent, f.v_armorvalue) != vf(old_v, f.v_armorvalue) {
+        if vf(ent, f.v_armorvalue) != vf_ev(old_v, f.v_armorvalue) {
             bits |= f.su_armor;
         }
         // weaponmodel is an int field: compared as ints, not floats.
-        if vi(ent, f.v_weaponmodel) != vi(old_v, f.v_weaponmodel) {
+        if vi(ent, f.v_weaponmodel) != vi_ev(old_v, f.v_weaponmodel) {
             bits |= f.su_weapon;
         }
     }
@@ -612,7 +630,7 @@ pub unsafe extern "C" fn SV_WriteClientdataToMessage(
         // the int field among them.
         macro_rules! sc {
             ($acc:ident, $field:ident, $bit:ident) => {
-                if vf(ent, f.$field) != vf(hc_old_v, f.$field) {
+                if vf(ent, f.$field) != vf_ev(hc_old_v, f.$field) {
                     $acc |= f.$bit;
                 }
             };
@@ -645,7 +663,7 @@ pub unsafe extern "C" fn SV_WriteClientdataToMessage(
         sc!(sc1, v_artifact_active, sc1_artifact_active);
         sc!(sc1, v_artifact_low, sc1_artifact_low);
         sc!(sc1, v_movetype, sc1_movetype);
-        if vi(ent, f.v_cameramode) != vi(hc_old_v, f.v_cameramode) {
+        if vi(ent, f.v_cameramode) != vi_ev(hc_old_v, f.v_cameramode) {
             sc1 |= f.sc1_cameramode;
         }
         sc!(sc1, v_hasted, sc1_hasted);
@@ -665,7 +683,7 @@ pub unsafe extern "C" fn SV_WriteClientdataToMessage(
         // puzzle_inv* are string_t (int): compared as ints, not floats.
         macro_rules! sc_i {
             ($acc:ident, $field:ident, $bit:ident) => {
-                if vi(ent, f.$field) != vi(hc_old_v, f.$field) {
+                if vi(ent, f.$field) != vi_ev(hc_old_v, f.$field) {
                     $acc |= f.$bit;
                 }
             };
@@ -1209,6 +1227,9 @@ pub unsafe extern "C" fn SV_SendClientMessages() {
         }
         i += 1;
     }
+    // The C's for loop increments host_client past the last client before
+    // the condition fails; match it.
+    *SvMain_HostClient() = clients.add(maxclients as usize * f.client_size);
 
     // clear muzzle flashes
     SV_CleanupEnts();

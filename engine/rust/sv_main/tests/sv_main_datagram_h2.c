@@ -7,8 +7,20 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
+#include "quakedef.h"
+#include "server.h"
+#include "sv_main_target.h"
 
-==================
+/* sv_maxdatagram lives in sv_main.c; the harness provides the definition. */
+extern cvar_t sv_maxdatagram;
+#define SV_MAXDATAGRAM_FLOOR MAX_DATAGRAM_OLD
+
+/* already ported (slices A/B): both sides call the same Rust */
+extern void SV_PrepareClientEntities (client_t *client, edict_t *clent, sizebuf_t *msg);
+extern void SV_CleanupEnts (void);
+
+
+/*
 SV_ClientInventoryPage
 
 Find, or claim, the extended-inventory page belonging to a client.
@@ -25,9 +37,7 @@ retrying made go away, because the reused bytes differ every time.
 
 Returns NULL when no page is available.  Callers must assign the result
 unconditionally; INV_UpdateExItem treats NULL as an empty chain.
-==================
-*/
-ex_inventory_page_t *SV_ClientInventoryPage (int clientnum)
+*/ex_inventory_page_t *SV_ClientInventoryPage (int clientnum)
 {
 	int	npages, i;
 
@@ -139,23 +149,17 @@ int INV_UpdateExItem(ex_inventory_page_t *startPage, int inv_id, int inv_cnt, qb
 	return result;
 }
 
-==================
+/*
 SV_ClearDatagram
-
-==================
-*/
-void SV_ClearDatagram (void)
+*/void SV_ClearDatagram (void)
 {
 	SZ_Clear (&sv.datagram);
 	sv_datagram_dropped = false;
 }
 
-==================
+/*
 SV_WriteClientdataToMessage
-
-==================
-*/
-void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg)
+*/void SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg)
 {
 	int	bits,sc1,sc2,sc3,sc4;
 	byte	test;
@@ -678,11 +682,9 @@ end:
 	memcpy (&client->old_v, &ent->v, sizeof(client->old_v));
 }
 
-=======================
+/*
 SV_SendClientDatagram
-=======================
-*/
-static qboolean SV_SendClientDatagram (client_t *client)
+*/static qboolean SV_SendClientDatagram (client_t *client)
 {
 	byte		buf[NET_MAXMESSAGE];
 	sizebuf_t	msg;
@@ -785,11 +787,9 @@ static qboolean SV_SendClientDatagram (client_t *client)
 	return true;
 }
 
-=======================
+/*
 SV_UpdateToReliableMessages
-=======================
-*/
-static void SV_UpdateToReliableMessages (void)
+*/static void SV_UpdateToReliableMessages (void)
 {
 	int		i, j;
 	client_t	*client;
@@ -825,14 +825,12 @@ static void SV_UpdateToReliableMessages (void)
 	SZ_Clear (&sv.reliable_datagram);
 }
 
-=======================
+/*
 SV_SendNop
 
 Send a nop message without trashing or sending the accumulated client
 message buffer
-=======================
-*/
-static void SV_SendNop (client_t *client)
+*/static void SV_SendNop (client_t *client)
 {
 	sizebuf_t	msg;
 	byte		buf[4];
@@ -846,11 +844,9 @@ static void SV_SendNop (client_t *client)
 	client->last_message = realtime;
 }
 
-=======================
+/*
 SV_SendClientMessages
-=======================
-*/
-void SV_SendClientMessages (void)
+*/void SV_SendClientMessages (void)
 {
 	int			i;
 
@@ -946,12 +942,9 @@ void SV_SendClientMessages (void)
 	SV_CleanupEnts ();
 }
 
-================
+/*
 SV_ModelIndex
-
-================
-*/
-int SV_ModelIndex (const char *name)
+*/int SV_ModelIndex (const char *name)
 {
 	int		i;
 
@@ -973,7 +966,7 @@ int SV_ModelIndex (const char *name)
 	return i;
 }
 
-================
+/*
 SV_SignonBufferCount
 SV_SignonBufferSize
 
@@ -981,9 +974,7 @@ How many signon buffers there are and how long each one is.  The buffer being
 filled is the last, and its length is sv.signon.cursize rather than an entry in
 signon_size[] -- QC can still write to MSG_INIT after the map has spawned, so
 sealing the length at spawn time would short a client that connected later.
-================
-*/
-static int SV_SignonBufferCount (void)
+*/static int SV_SignonBufferCount (void)
 {
 	return sv.num_signon_buffers + 1;
 }
@@ -993,7 +984,7 @@ static int SV_SignonBufferSize (int i)
 	return (i < sv.num_signon_buffers) ? sv.signon_size[i] : sv.signon.cursize;
 }
 
-================
+/*
 SV_SendSignonBuffer
 
 Hand a client the next signon buffer it is owed, and the signon-stage marker
@@ -1003,9 +994,7 @@ statics spread over several messages -- only svc_signonnum advances its state.
 
 Called from Host_PreSpawn_f for the first buffer and from SV_SendClientMessages
 for the rest.
-================
-*/
-void SV_SendSignonBuffer (client_t *client)
+*/void SV_SendSignonBuffer (client_t *client)
 {
 	int	i = client->signon_buffer;
 
