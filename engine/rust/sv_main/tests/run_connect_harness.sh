@@ -84,6 +84,21 @@ build cov -O0 -g --coverage
 gcov_file="$OUT/cov/$fixture.gcov"
 [ -f "$gcov_file" ] || { echo "FAIL: gcov produced no $fixture.gcov" >&2; ls "$OUT/cov" >&2; exit 1; }
 unrun=$(grep -E '^ *(#####|=====):' "$gcov_file" || true)
+# Exemption, proven and pinned: SV_ModelIndex's trailing `return i;` is
+# unreachable dead code. The `for (i = 0; i < MAX_MODELS &&
+# sv.model_precache[i]; i++)` loop exits only with i == MAX_MODELS or
+# sv.model_precache[i] == NULL, and the `if (i == MAX_MODELS ||
+# !sv.model_precache[i])` immediately after catches both arms (Con_Printf,
+# return 0).
+#
+# The pin is the line number of the second `return i;` in $fixture; the
+# anchor count is checked so an edit fails here until the proof is re-read.
+mapfile -t _ri < <(grep -nF 'return i;' "$here/$fixture" | cut -d: -f1)
+[ "${#_ri[@]}" -eq 2 ] && [ "${_ri[1]}" = "310" ] || {
+	echo "FAIL: exemption anchor moved in $fixture (found:${_ri[*]}); re-check the proof" >&2
+	exit 1
+}
+unrun=$(printf '%s\n' "$unrun" | grep -vE '^ *#####: *310:' || true)
 if [ -n "$unrun" ]; then
 	echo "FAIL: lines of $fixture the harness never ran:" >&2
 	printf '%s\n' "$unrun" >&2
