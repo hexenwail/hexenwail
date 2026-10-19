@@ -11,7 +11,7 @@
  *   - a world: a random BSP tree of up to 31 nodes over up to 300 leafs,
  *     planes axial or oblique and often within 8 units of the viewer, and a
  *     random PVS per leaf (Mod_LeafPVS below);
- *   - up to 700 edicts: every mix of NODRAW and muzzle flash, models present
+ *   - up to 900 edicts: every mix of NODRAW and muzzle flash, models present
  *     and not, FL_CLIENT, FL_MONSTER and FL_CLASS_DEPENDENT, the missile
  *     movetypes and MOVETYPE_STEP, leaf lists empty, in the PVS, out of it
  *     and full (MAX_ENT_LEAFS, always sent), byte fields at and past 255,
@@ -34,15 +34,29 @@
  * compare byte for byte: the datagram (cursize, overflowed, every byte up to
  * maxsize); every frame of the client's client_state2_t, field by field
  * with the padding left out (C leaves it unspecified), over every entry the
- * generator filled and two past each frame's count, which is as far as a
- * shed entry can have been written; the four frame/sequence bytes; each
- * edict's ClearCount for the client and its effects; the fat PVS; and the
+ * call can have written -- the build frame takes one per edict, whatever the
+ * reference held, so the region is the whole of that, not the reference's
+ * own fill; the four frame/sequence bytes; each edict's ClearCount for the
+ * client and its effects, including the two edicts past num_edicts, so a
+ * SV_CleanupEnts that runs one edict too many shows; the fat PVS; and the
  * log: every console line with its level, every SV_ModelIndex call with the
  * class-dependent name it was given.
  *
  * Host_Error (QuakeC flags past bit 23) and Sys_Error (SZ_GetSpace without
  * allowoverflow) do not return: a case that can reach either runs forked,
- * once per side, and the children report a digest of the same outputs.
+ * once per side, and the children report a digest of the same outputs.  A
+ * fatal the generator did not foresee is caught rather than aborted on: it
+ * is a difference between the two sides, not a harness bug, and a mutated
+ * datagram size is exactly how one side reaches it.
+ *
+ * After the random cases come the directed ones (below): values the
+ * generator does not reach, each the kill of a mutant that survived every
+ * random case.
+ *
+ * The comparison covers every entered frame entry, the client's four
+ * frame/sequence bytes, each edict's ClearCount and effects, the fat PVS
+ * and the log -- and the two edicts past num_edicts, so SV_CleanupEnts
+ * stopping one edict late shows.
  *
  * Before the cases, the reference-frame structs sv_main_ents.rs mirrors are
  * checked against this compile of the Hexen II headers.
@@ -52,6 +66,7 @@
 #include "sv_main_target.h"
 
 #include <math.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -188,11 +203,28 @@ void CON_Printf (unsigned int flags, const char *fmt, ...)
 
 static void report_and_exit (void);
 
+/* An unplanned fatal is a result, not a harness bug: a mutant whose size
+ * bookkeeping is wrong drives the datagram over maxsize with allowoverflow
+ * off, and only the side it is in dies.  The runner arms the jump around
+ * each side's call, so the case is compared like any other, and only a
+ * fatal in a side the generator did not predict reaching the process's exit
+ * would still abort.  The jump leaves the port's frames without running
+ * destructors, which cannot matter here: the port holds raw pointers and
+ * arrays, and its crate is panic = abort. */
+static jmp_buf	fatal_jmp;
+static int	fatal_armed;
+static int	fatal_hit;
+
 static FUNC_NORETURN void fatal (const char *tag, const char *fmt, va_list ap)
 {
 	logv (tag, fmt, ap);
 	if (in_child >= 0)
 		report_and_exit ();
+	if (fatal_armed)
+	{
+		fatal_hit = 1;
+		longjmp (fatal_jmp, 1);
+	}
 	fprintf (stderr, "harness bug: %.*s", (int) loglen, logbuf);
 	abort ();
 }
@@ -649,7 +681,261 @@ static void gen_frame (scenario_t *sc, client_frames_t *fr, int fi)
 	sc->fill[fi] = n;
 }
 
-static void gen_case (scenario_t *sc)
+/* ------------------------------------------------------------------------
+ * Directed cases
+ *
+ * The random generator does not reach every input the port distinguishes.
+ * Each case here is one that a mutant of sv_main_ents.rs survived every
+ * random case without, so it needs the exact value where the C and the
+ * mutation part company; what each side does with it is at the case.  The
+ * scene is a small, fully determined one -- the client's edict at the
+ * viewer, a handful of edicts, an empty reference so every update is built
+ * from its own baseline -- laid over the case the generator built, so the
+ * world and the fat PVS stay varied.
+ */
+
+enum {
+	DIR_ORIGIN_POS,		/* a delta of exactly +0.1f */
+	DIR_ORIGIN_NEG,		/* ... and -0.1f */
+	DIR_ORIGIN_ULP,		/* the float either side of 0.1f, which both send */
+	DIR_CLASS_ROUND,	/* the class-dependent model name's digit */
+	DIR_ALPHA_ROUND,	/* ENTALPHA_ENCODE's Q_rint */
+	DIR_PRIO_SQRT,		/* a distance whose float and double chains bin
+				 * one apart */
+	DIR_PRIO_254,		/* a distance in bin 254, where `>= 255' and
+				 * `>= 254' part company */
+	DIR_FRAME_TAIL,		/* a build frame past 700 entries, every one of
+				 * them with a changed frame byte */
+	DIR_IGNORE_TAIL,	/* an ignored edict on the build frame's last
+				 * entry, the one count the loop breaks at */
+	NDIRECTED
+};
+
+#define DIR_NE		7	/* 0 is the world, 1 the client's, 6 the case's */
+#define DIR_TAIL_NE	900	/* the frame-tail case: past the 700 the write
+				 * path's tail is at, and inside one datagram */
+#define DIR_HUGE_NE	8300	/* the ignore case: past MAX_CLIENT_STATES */
+#define DIR_CLIENT	1
+#define DIR_TEST	6	/* last, so the small updates are written first */
+#define DIR_MSGMAX	16	/* room for 1..5, not for 6: 3 + 5*2 + its own
+				 * 2 + the 2-byte trailer overflows it */
+#define DIR_ROOM	65000	/* the cases that only need the datagram */
+
+/* the baseline an update is a zero delta against: the edict as it stands,
+ * as edict_state () does it for a frame entry */
+static void directed_zero_delta (edict_t *ent)
+{
+	int	k;
+
+	for (k = 0; k < 3; k++)
+	{
+		ent->baseline.origin[k] = ent->v.origin[k];
+		ent->baseline.angles[k] = ent->v.angles[k];
+	}
+	ent->baseline.modelindex = (short) (int) ent->v.modelindex;
+	ent->baseline.frame = (byte) (int) ent->v.frame;
+	ent->baseline.colormap = (byte) (int) ent->v.colormap;
+	ent->baseline.skin = (byte) (int) ent->v.skin;
+	ent->baseline.drawflags = (byte) (int) ent->v.drawflags;
+	ent->baseline.effects = (byte) (int) ent->v.effects;
+	ent->baseline.scale = (int) (ent->v.scale * 100.0) & 255;
+	ent->baseline.abslight = (int) (ent->v.abslight * 255.0) & 255;
+	ent->baseline.alpha = 0;
+}
+
+/* before the world, the edicts and the frames are built from sc */
+static void directed_pre (scenario_t *sc, int d)
+{
+	sc->k = 0;
+	sc->cleanup = 0;
+	sc->want_oddbox = sc->want_oddflags = sc->want_badflags = 0;
+	if (d == DIR_IGNORE_TAIL)
+	{
+		/* the build frame full, and an ignored edict on its last entry:
+		 * the huge zero-delta scene, which fills a full reference and
+		 * writes nothing, is the one that reaches bcount 8192 */
+		sc->huge = HUGE_ZERO;
+		sc->ne = DIR_HUGE_NE;
+		sc->clent = DIR_CLIENT;
+		return;
+	}
+	sc->huge = 0;
+	sc->ne = (d == DIR_FRAME_TAIL) ? DIR_TAIL_NE : DIR_NE;
+	sc->clent = DIR_CLIENT;
+}
+
+/* over the case the generator built, once its frames and datagram exist */
+static void directed_scenario (scenario_t *sc, int d)
+{
+	client_t	*cl = &svs.clients[sc->k];
+	client_state2_t	*st = &sv.states[sc->k];
+	edict_t		*ce = edict (DIR_CLIENT);
+	edict_t		*ent;
+	float		delta = 0.0f;
+	int		e, fi, k;
+
+	if (d == DIR_IGNORE_TAIL)
+	{
+		/* Every edict is in the reference and ignored for its update
+		 * type, so the call reaches the ignore path at bcount exactly
+		 * MAX_CLIENT_STATES -- the 8192nd edict.  The C goes on to the
+		 * edicts past the reference, which are monsters and so are
+		 * written; a break at the ignored one stops an edict early, and
+		 * the build frame's count and the datagram both show it. */
+		sv_update_player.integer = 1;
+		sv_update_monsters.integer = 1;
+		sv_update_missiles.integer = 1;
+		sv_update_misc.integer = 0;	/* no misc: every edict is ignored */
+		sv_netsort.integer = 0;
+		for (e = 1; e < sc->ne; e++)
+			edict (e)->v.flags = (float) ((e == MAX_CLIENT_STATES) ? 0 : FL_MONSTER);
+		msg.maxsize = DIR_ROOM;
+		msg.cursize = 0;
+		msg.allowoverflow = 1;
+		return;
+	}
+
+	/* the client's edict sits at the viewer with no view offset, so the
+	 * org the priority cases measure from is view_org exactly.  clent is
+	 * the generator's by now, so pin it here: an entity that is the
+	 * client's own has priority 0 by definition, and the case's edict
+	 * must not be it. */
+	sc->clent = DIR_CLIENT;
+	cl->edict = ce;
+	/* The viewer sits at the origin, and the client's edict with it, with no
+	 * view offset.  SV_EntityPriority measures from `the box - org', and
+	 * only a viewer at 0 makes that subtraction exact, so the distance a
+	 * case chooses is the distance the port computes; placed at a random
+	 * view_org the sum rounds at that magnitude and moves the bin. */
+	VectorClear (view_org);
+	ce->v.cameramode = 0;
+	VectorSet (ce->v.view_ofs, 0, 0, 0);
+	VectorCopy (view_org, ce->v.origin);
+
+	/* An empty reference, so every update is built from its own baseline.
+	 * The region stays the case's own: gen_case sized it for what the call
+	 * can write, the build frame taking one entry per edict. */
+	for (fi = 0; fi < MAX_FRAMES + 2; fi++)
+	{
+		memset (st->frames[fi].states, 0, (size_t) sc->hreg[fi] * sizeof (entity_state2_t));
+		st->frames[fi].count = 0;
+		sc->fill[fi] = 0;
+	}
+	prev_h[sc->k] = sc->hreg[0];
+
+	/* every edict: visible, always sent, a unit box on the viewer and a
+	 * zero delta against it.  A unit box the org is inside of makes its
+	 * priority 0, so only the case's own edict can be shed. */
+	for (e = 0; e < sc->ne; e++)
+	{
+		ent = edict (e);
+		memset (ent, 0, pr_edict_size);
+		ent->num_leafs = MAX_ENT_LEAFS;	/* always sent */
+		for (k = 0; k < MAX_ENT_LEAFS; k++)
+			ent->leafnums[k] = 0;
+		ent->v.model = 1;		/* "models/paladin1.mdl" */
+		ent->v.modelindex = 5.0f;
+		ent->v.movetype = MOVETYPE_WALK;
+		VectorCopy (view_org, ent->v.origin);
+		VectorSet (ent->v.absmin, view_org[0] - 1.0f, view_org[1] - 1.0f, view_org[2] - 1.0f);
+		VectorSet (ent->v.absmax, view_org[0] + 1.0f, view_org[1] + 1.0f, view_org[2] + 1.0f);
+		directed_zero_delta (ent);
+		for (k = 0; k < 32; k++)
+			ent->baseline.ClearCount[k] = 3;	/* never a removal */
+	}
+
+	/* every update type on, sv_netsort on, and a datagram with room for
+	 * the small updates and not for the case's own */
+	sv_update_player.integer = sv_update_monsters.integer = 1;
+	sv_update_missiles.integer = sv_update_misc.integer = 1;
+	sv_netsort.integer = 1;
+	sv_protocol = 21;
+	msg.data = msgbuf;
+	msg.maxsize = DIR_ROOM;
+	msg.cursize = 0;
+	msg.allowoverflow = 1;	/* what overflows is not what is under test */
+	msg.overflowed = 0;
+	msg.name = "datagram";
+
+	ent = edict (DIR_TEST);
+	switch (d)
+	{
+	case DIR_ORIGIN_POS:
+	case DIR_ORIGIN_NEG:
+		/* The origin is sent when the delta is outside +/-0.1 as a
+		 * double.  0.1f is 0.100000001490116 as a double, so it is
+		 * sent; compared as a float against 0.1f it is not (0.1f >
+		 * 0.1f is false), and the update loses the origin. */
+		ent->v.origin[0] = (d == DIR_ORIGIN_POS) ? 0.1f : -0.1f;
+		ent->baseline.origin[0] = 0.0f;
+		break;
+	case DIR_ORIGIN_ULP:
+		/* the float either side of 0.1f: neither crosses, in either
+		 * compare, so these pin the boundary the cases above sit on */
+		ent->v.origin[0] = -nextafterf (0.1f, 0.0f);
+		ent->baseline.origin[0] = 0.0f;
+		{
+			edict_t	*o = edict (2);
+			o->v.origin[0] = nextafterf (0.1f, 1.0f);
+			o->baseline.origin[0] = 0.0f;
+		}
+		break;
+	case DIR_CLASS_ROUND:
+		/* FL_CLASS_DEPENDENT rewrites the name's fifth character from
+		 * the end with `(int)(playerclass + 48.0)'.  At 0.99999994f
+		 * that is 49, while truncating the class and then adding 48
+		 * gives 48: the name, its SV_ModelIndex and the update's model
+		 * index all differ. */
+		ent->v.flags = FL_CLASS_DEPENDENT;
+		cl->playerclass = 0.99999994f;
+		break;
+	case DIR_ALPHA_ROUND:
+		/* ENTALPHA_ENCODE: Q_rint of a*254+1, computed in float.  At
+		 * 0.00196850393f that is 2; computed in double it is 1. */
+		sv_protocol = 100;	/* PROTOCOL_HEXENWAIL_1: U_ALPHA exists */
+		has_alpha[DIR_TEST] = 1;
+		alpha_val[DIR_TEST] = 0.00196850393f;
+		ent->baseline.alpha = 0;
+		break;
+	case DIR_PRIO_SQRT:
+		/* 8*sqrt(sqrt(dist/size)) is 19.999999 in double at this
+		 * distance, and 20 in float: the bin, which the shed message
+		 * names, is 19 and 20. */
+		delta = 6.24999952f;
+		break;
+	case DIR_PRIO_254:
+		/* ... and 254.243977 here: bin 254, where the clamp
+		 * `dist >= NETSORT_BINS - 1' (255) parts company with the
+		 * same test against 254, 254 against 255. */
+		delta = 1010.0f;
+		break;
+	case DIR_FRAME_TAIL:
+		/* A build frame past 700 entries -- the write path's tail -- with
+		 * every entity's frame byte different from its baseline, so the
+		 * frame write happens at every one of them and the whole tail is
+		 * compared. */
+		for (e = 1; e < sc->ne; e++)
+		{
+			edict_t	*x = edict (e);
+			x->v.frame = 7.0f;
+			x->baseline.frame = 3;
+		}
+		break;
+	}
+
+	if (delta != 0.0f)
+	{
+		/* a zero-size box the viewer is outside of: the distance is
+		 * the whole delta, and the box's size is 0, clamped to 1 */
+		msg.maxsize = DIR_MSGMAX;
+		VectorSet (ent->v.absmin, view_org[0] + delta, view_org[1], view_org[2]);
+		VectorSet (ent->v.absmax, view_org[0] + delta, view_org[1], view_org[2]);
+		VectorSet (ent->v.origin, view_org[0] + delta, view_org[1], view_org[2]);
+		directed_zero_delta (ent);
+	}
+}
+
+static void gen_case (scenario_t *sc, int directed)
 {
 	int		i, e, fi;
 	client_t	*cl;
@@ -658,12 +944,18 @@ static void gen_case (scenario_t *sc)
 	memset (sc, 0, sizeof (*sc));
 	if (chance (1))
 		sc->huge = 1 + irand (4);
-	sc->ne = sc->huge ? 8300 : (chance (40) ? 2 + irand (80) : (chance (50) ? 200 + irand (200) : 400 + irand (NE_NORMAL - 400)));
+	/* 400..899: past 700 entries the write path's tail is a different one
+	 * (the frame write at bcount > 700 is the mutation's own window), and
+	 * the huge scenarios alone do not reach it with a frame in play */
+	sc->ne = sc->huge ? 8300 : (chance (40) ? 2 + irand (80) : (chance (50) ? 200 + irand (200) : 400 + irand (NE_NORMAL + 200 - 400)));
 	sc->k = irand (MAXC);
 	sc->cleanup = chance (33);
 	sc->want_oddbox = !sc->huge && chance (6);
 	sc->want_oddflags = !sc->huge && chance (3);
 	sc->want_badflags = !sc->huge && chance (3);
+	/* a directed case pins its own scene before anything is built from it */
+	if (directed >= 0)
+		directed_pre (sc, directed);
 	sv.num_edicts = sv_max_edicts = sc->ne;
 
 	/* the viewer first: the planes are placed around it */
@@ -673,6 +965,16 @@ static void gen_case (scenario_t *sc)
 
 	for (e = 0; e < sc->ne; e++)
 		gen_edict (sc, e);
+	/* The two edicts past num_edicts.  SV_CleanupEnts clears the effects of
+	 * edicts 1..num_edicts-1, so a call that runs one edict too many -- from
+	 * 0 instead of 1 -- touches the first of these; main compares effects
+	 * this far.  The first gets the muzzle flash the call clears. */
+	for (e = sc->ne; e < sc->ne + 2; e++)
+	{
+		edict_t	*x = edict (e);
+		memset (x, 0, pr_edict_size);
+		x->v.effects = (e == sc->ne) ? EF_MUZZLEFLASH : 0.0f;
+	}
 	/* the client's edict, and perhaps a camera */
 	sc->clent = (sc->ne > sc->k + 1 && chance (85)) ? sc->k + 1 : irand (sc->ne);
 	{
@@ -732,6 +1034,16 @@ static void gen_case (scenario_t *sc)
 	{
 		gen_frame (sc, &st->frames[fi], fi);
 		sc->hreg[fi] = sc->fill[fi] + 2;
+		/* The build frame takes one entry per edict -- whatever the
+		 * reference held, and whether or not the reference had the
+		 * edict at all -- so its region is the whole of what the call
+		 * can write, not the reference's own fill.  A mutation in that
+		 * tail (the frame byte past 700 entries) is otherwise outside
+		 * every region compared, and invisible. */
+		if (sc->hreg[fi] < sc->ne + 2)
+			sc->hreg[fi] = sc->ne + 2;
+		/* and no further: the guards stop the call at MAX_CLIENT_STATES
+		 * entries, and the frames hold exactly that many */
 		if (sc->hreg[fi] > MAX_CLIENT_STATES)
 			sc->hreg[fi] = MAX_CLIENT_STATES;
 	}
@@ -786,6 +1098,10 @@ static void gen_case (scenario_t *sc)
 	}
 	for (i = 0; i < MSGMAX; i++)
 		msgbuf[i] = (byte) (i * 7 + 3);
+	/* the directed case's own scene, over what the generator built */
+	if (directed >= 0)
+		directed_scenario (sc, directed);
+
 	/* A NaN box makes SV_EntityPriority's (int) INT_MIN, and the measuring
 	 * pass then indexes binbytes[] with it: the C writes far outside the
 	 * array and dies, the Rust's bounds check aborts it (GitHub issue in
@@ -804,7 +1120,7 @@ static void gen_case (scenario_t *sc)
 	pristine_client[1] = cl->last_frame;
 	pristine_client[2] = cl->current_sequence;
 	pristine_client[3] = cl->last_sequence;
-	for (e = 0; e < sc->ne; e++)
+	for (e = 0; e < sc->ne + 2; e++)
 	{
 		pristine_cc[e] = edict (e)->baseline.ClearCount[sc->k];
 		pristine_effects[e] = edict (e)->v.effects;
@@ -831,7 +1147,7 @@ static void restore (const scenario_t *sc)
 	cl->last_frame = pristine_client[1];
 	cl->current_sequence = pristine_client[2];
 	cl->last_sequence = pristine_client[3];
-	for (e = 0; e < sc->ne; e++)
+	for (e = 0; e < sc->ne + 2; e++)
 	{
 		edict (e)->baseline.ClearCount[sc->k] = pristine_cc[e];
 		edict (e)->v.effects = pristine_effects[e];
@@ -947,7 +1263,7 @@ static uint64_t digest (const scenario_t *sc, int rust)
 	h = fnv (h, msgbuf, (size_t) msg.maxsize);
 	n = frames_bytes (sc, tmp);
 	h = fnv (h, tmp, n);
-	for (e = 0; e < sc->ne; e++)
+	for (e = 0; e < sc->ne + 2; e++)
 	{
 		h = fnv (h, &edict (e)->baseline.ClearCount[sc->k], 1);
 		h = fnv (h, &edict (e)->v.effects, 4);
@@ -1143,8 +1459,9 @@ int main (void)
 		outcome_t	oc, orr;
 		size_t		nfc, nfr;
 		int		before, fb;
+		int		c_hit, r_hit;
 
-		gen_case (&sc);
+		gen_case (&sc, (int) i < NCASES - NDIRECTED ? -1 : (int) (i - (NCASES - NDIRECTED)));
 		n_cases++;
 
 		if (sc.fatal)
@@ -1173,7 +1490,12 @@ int main (void)
 		/* the C */
 		restore (&sc);
 		before = msg.cursize;
-		run_side (0, &sc);
+		fatal_hit = 0;
+		fatal_armed = 1;
+		if (setjmp (fatal_jmp) == 0)
+			run_side (0, &sc);
+		fatal_armed = 0;
+		c_hit = fatal_hit;
 		memset (&oc, 0, sizeof (oc));
 		capture (&sc, &oc, 0);
 		oc.fatbytes = c_fatbytes;
@@ -1181,7 +1503,7 @@ int main (void)
 		memcpy (log_c, logbuf, loglen);
 		log_c[loglen] = 0;
 		nfc = frames_bytes (&sc, frames_c);
-		for (k = 0; k < sc.ne; k++)
+		for (k = 0; k < sc.ne + 2; k++)
 		{
 			cc_c[k] = edict (k)->baseline.ClearCount[sc.k];
 			fx_c[k] = edict (k)->v.effects;
@@ -1192,13 +1514,20 @@ int main (void)
 
 		/* the Rust */
 		restore (&sc);
-		run_side (1, &sc);
+		fatal_hit = 0;
+		fatal_armed = 1;
+		if (setjmp (fatal_jmp) == 0)
+			run_side (1, &sc);
+		fatal_armed = 0;
+		r_hit = fatal_hit;
 		memset (&orr, 0, sizeof (orr));
 		capture (&sc, &orr, 1);
 		orr.fatbytes = oc.fatbytes;
 		nfr = frames_bytes (&sc, frames_r);
 
-		if (oc.cursize != orr.cursize || oc.overflowed != orr.overflowed)
+		if (c_hit != r_hit)
+			problem (i, &sc, "a fatal call: one side died and the other did not");
+		else if (oc.cursize != orr.cursize || oc.overflowed != orr.overflowed)
 			problem (i, &sc, "datagram cursize/overflowed");
 		else if (memcmp (msg_c, msgbuf, (size_t) msg.maxsize) != 0)
 		{
@@ -1233,7 +1562,7 @@ int main (void)
 		}
 		else
 		{
-			for (k = 0; k < sc.ne; k++)
+			for (k = 0; k < sc.ne + 2; k++)
 				if (cc_c[k] != edict (k)->baseline.ClearCount[sc.k]
 				    || memcmp (&fx_c[k], &edict (k)->v.effects, 4) != 0)
 				{

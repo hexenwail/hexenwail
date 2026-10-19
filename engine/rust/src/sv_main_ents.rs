@@ -516,7 +516,9 @@ fn entalpha_encode(f: &SvMainEntsFacts, a: f32) -> u8 {
 
 // Raw indexing, as the C indexes: frames[] and states[] by values the frame
 // state carries, which a Rust bounds check would turn into an abort where
-// the C reads or writes past the array.
+// the C reads or writes past the array.  Both writers stay under
+// MAX_CLIENT_STATES -- they break when bcount reaches it -- so a mutated
+// `states[i]` (the checked form) is the same address and equivalent.
 #[inline(always)]
 unsafe fn frame(state: *mut ClientState2, i: usize) -> *mut ClientFrames {
     (&raw mut (*state).frames).cast::<ClientFrames>().add(i)
@@ -770,6 +772,12 @@ pub unsafe extern "C" fn SV_PrepareClientEntities(client: *mut u8, clent: *mut u
                 build_ent.drawflags = b.drawflags;
                 build_ent.abslight = b.abslight;
                 build_ent.alpha = b.alpha;
+                // Zero, as the C's is: there build_ent is uninitialised stack,
+                // and this is the line that makes the entry the C records
+                // zero.  Here the value is ZERO_STATE2 at the top and
+                // nothing writes its flags, so dropping the line changes
+                // nothing -- a mutant that drops it is equivalent, and was
+                // left alive on purpose (see the PR's mutant run).
                 build_ent.flags = 0;
                 ref_ent = &raw mut build_ent;
 
@@ -920,6 +928,13 @@ pub unsafe extern "C" fn SV_PrepareClientEntities(client: *mut u8, clent: *mut u
             if bits >= 256 {
                 bits |= f.u_morebits;
             }
+            // 65535 is unreachable, so this test and `bits >= 65535' agree
+            // on every value the code can build: the lowest bit that can
+            // push `bits` past 65536 is U_SKIN (1 << 16), and with it clear
+            // the most the rest can make is U_MOREBITS | U_ORIGIN1..3 |
+            // U_ANGLE1..3 | U_NOLERP | U_FRAME | U_MODEL | U_CLEAR_ENT |
+            // U_LONGENTITY = 20351.  U_ENT_OFF (1 << 13) is HexenWorld's and
+            // this code never sets it.  Its mutant survives for that reason.
             if bits >= 65536 {
                 bits |= f.u_morebits2;
             }
@@ -1048,7 +1063,10 @@ pub unsafe extern "C" fn SV_PrepareClientEntities(client: *mut u8, clent: *mut u
             trailer_reserve = 2 + 2 * num_to_remove as c_int;
             let budget = (*msg).maxsize - trailer_reserve - (*msg).cursize;
 
-            // the number of whole bins that fit
+            // the number of whole bins that fit.  `total` is read nowhere
+            // past this loop: adding the bin a pass too early moves nothing
+            // but `total` itself, which is why the mutant that does it is
+            // equivalent and was left alive (the PR's mutant run).
             let mut total: c_int = 0;
             netsort_cutoff = 0;
             while netsort_cutoff < NETSORT_BINS {
