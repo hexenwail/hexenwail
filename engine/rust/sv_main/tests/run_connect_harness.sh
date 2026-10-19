@@ -77,7 +77,9 @@ run "$OUT/opt"
 
 echo "== $VARIANT: the same run with C line coverage =="
 build cov -O0 -g --coverage
-run "$OUT/cov" >/dev/null
+# The children use exit(), not _exit(), so libgcov's exit handler dumps
+# and merges the per-process coverage automatically.
+(cd "$OUT/cov" && ./connect_harness >/dev/null 2>&1) || true
 (cd "$OUT/cov" && gcov -o . c_ref.o >/dev/null 2>&1) || true
 gcov_file="$OUT/cov/$fixture.gcov"
 [ -f "$gcov_file" ] || { echo "FAIL: gcov produced no $fixture.gcov" >&2; ls "$OUT/cov" >&2; exit 1; }

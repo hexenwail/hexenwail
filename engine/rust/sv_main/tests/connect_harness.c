@@ -45,14 +45,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-#ifdef __GNUC__
-/* Weak: __gcov_dump exists only when this TU is built with --coverage (the
-   cov build in run_connect_harness.sh; GCC 13's libgcov no longer exports
-   the old __gcov_flush name).  A single weak declaration -- a second,
-   non-weak one makes GCC drop the null check and emit a direct call. */
-__attribute__((weak)) void __gcov_dump (void);
-#endif
-
 static void crash_handler (int sig)
 {
 	void *bt[32];
@@ -201,7 +193,8 @@ static void out_sizebuf (const sizebuf_t *sb)
 	out_bytes (sb->data, (size_t)(sb->cursize < 0 ? 0 : sb->cursize));
 }
 /* write whatever we have so far (the logs) and abort: the error-path
- * stubs call this so both sides' abort cases can be compared. */
+ * stubs call this so both sides' abort cases can be compared.  Uses
+ * exit(42), not abort(), so the gcov exit handler dumps coverage. */
 static void out_write_and_abort (void)
 {
 	FILE *f = fopen (out_path, "wb");
@@ -209,7 +202,7 @@ static void out_write_and_abort (void)
 		fwrite (outbuf, 1, outlen, f);
 		fclose (f);
 	}
-	abort ();
+	exit (42);
 }
 
 /* qsocket_s tokens: the stubs only need distinct pointers, never the
@@ -522,14 +515,17 @@ static void setup_client (int i)
 	SZ_Init (&c->datagram, dgrambufs[i], sizeof dgrambufs[i]);
 }
 
-/* fill sv.model_precache[1..n] and sv.sound_precache[1..m]; index 0 stays
- * NULL as the engine leaves it. */
+/* fill sv.model_precache[1..n] and sv.sound_precache[1..m]; index 0 gets
+ * a dummy like the engine's SV_SpawnServer does. */
 static void setup_precache (int nmodels, int nsounds)
 {
 	int i;
+	static char dummy[] = "dummy";
 	memset (sv.model_precache, 0, sizeof sv.model_precache);
 	memset (sv.sound_precache, 0, sizeof sv.sound_precache);
 	memset (sv.models, 0, sizeof sv.models);
+	sv.model_precache[0] = dummy;
+	sv.sound_precache[0] = dummy;
 	for (i = 0; i < nmodels && i < 16; i++) {
 		snprintf (model_names[i], sizeof model_names[i],
 			  "models/v_w%d.mdl", i);
@@ -891,11 +887,10 @@ static void run_child (void)
 		_exit (3);
 	fwrite (outbuf, 1, outlen, f);
 	fclose (f);
-#ifdef __GNUC__
-	if (__gcov_dump)
-		__gcov_dump ();
-#endif
-	_exit (0);
+	/* exit(), not _exit(): the gcov exit handler dumps coverage, and
+	 * libgcov merges the per-process files.  An explicit __gcov_dump
+	 * does not exist in GCC 13's libgcov. */
+	exit (0);
 }
 
 /* ---- main: generate cases, fork both sides, compare ---- */
@@ -973,7 +968,7 @@ static int run_one_case (uint64_t seed, int kind, const char *tmpdir)
 			return 0;
 		}
 		printf ("case %lu kind %d: one side wrote no output\n",
-			cases_run - 1);
+			cases_run - 1, kind);
 		return 1;
 	}
 	fseek (fc, 0, SEEK_END); szc = ftell (fc); fseek (fc, 0, SEEK_SET);
@@ -1143,6 +1138,8 @@ int main (int argc, char **argv)
 	int bad = 0;
 
 	if (!mkdtemp (tmpdir)) { perror ("mkdtemp"); return 2; }
+	if (getenv ("HARNESS_PRINT_TMPDIR"))
+		printf ("tmpdir=%s\n", tmpdir);
 	if (check_facts ())
 		return 2;
 
