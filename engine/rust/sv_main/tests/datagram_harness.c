@@ -433,6 +433,8 @@ static void setup_client (int i, int active)
 	SZ_Init (&c->datagram, dgrambufs[i], sizeof dgrambufs[i]);
 }
 
+static int pr_w3_off = -1;	/* heap offset of "models/v_w3.mdl", for SV_ModelIndex's found path */
+
 static void randomize_edict_v (edict_t *e)
 {
 	float *v = &e->v.origin[0] - offsetof (entvars_t, origin) / sizeof (float);
@@ -444,6 +446,10 @@ static void randomize_edict_v (edict_t *e)
 	 * kept inside the harness's edict array */
 	e->v.dmg_inflictor = rng_int (0, MAXEDICTS - 1) * (int)sizeof (edict_t);
 	e->v.weaponmodel = rng_int (0, 64);
+	/* sometimes a precached model name, so SV_ModelIndex's found path
+	 * (return i) runs; the precache holds models/v_w0..7.mdl */
+	if (pr_w3_off >= 0 && rng_next () % 4 == 0)
+		e->v.weaponmodel = pr_w3_off;
 	e->v.cameramode = rng_int (0, 1);
 	e->v.puzzle_inv1 = rng_int (0, 200); e->v.puzzle_inv2 = rng_int (0, 200);
 	e->v.puzzle_inv3 = rng_int (0, 200); e->v.puzzle_inv4 = rng_int (0, 200);
@@ -491,6 +497,7 @@ static void setup_strings (void)
 	static const char *words[] = {
 		"puzzle1", "puzzle2", "key", "models/v_crowbar.mdl",
 		"models/v_shot.mdl", "", "a_very_long_puzzle_name_for_overflow",
+		"models/v_w3.mdl",
 	};
 	size_t off = 0, w;
 	pr_strings = heap;
@@ -498,6 +505,8 @@ static void setup_strings (void)
 		size_t l = strlen (words[w]) + 1;
 		if (off + l >= sizeof heap)
 			break;
+		if (!strcmp (words[w], "models/v_w3.mdl"))
+			pr_w3_off = (int)off;
 		memcpy (heap + off, words[w], l);
 		off += l;
 	}

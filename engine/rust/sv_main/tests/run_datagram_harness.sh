@@ -102,6 +102,10 @@ gcov_file="$OUT/cov/$fixture.gcov"
 #    pages and the slice's ids are 1..15, so one page holds every id the
 #    slice ever creates; allocation from the backing cannot exhaust it.
 #    (The harness's own randomized pages are not the backing.)
+# 3. SV_ModelIndex's trailing `return i;': dead code.  The for loop exits
+#    iff i == MAX_MODELS or !sv.model_precache[i], which is exactly the
+#    `if' guarding the `return 0' above it, so the trailing return is
+#    unreachable.
 #
 # The pins are line numbers in $fixture; the text around each is hashed so
 # an edit fails here until someone re-reads the proof and re-pins.
@@ -119,8 +123,14 @@ mapfile -t at < <(grep -n $'^\treturn NULL;$' "$here/$fixture" | cut -d: -f1)
 for ln in "${at[@]}"; do
 	exempt_lines="$exempt_lines $ln"
 done
-# The += line occurs twice (found-slot and new-slot arms); return NULL once.
-[ "$(echo "$exempt_lines" | wc -w)" -eq 3 ] || {
+# SV_ModelIndex's dead trailing `return i;': function scope, a single tab;
+# the found-match `return i' inside the loop is indented one more and runs.
+mapfile -t at < <(grep -n $'^\treturn i;$' "$here/$fixture" | cut -d: -f1)
+for ln in "${at[@]}"; do
+	exempt_lines="$exempt_lines $ln"
+done
+# The += line occurs twice (found-slot and new-slot arms); each return once.
+[ "$(echo "$exempt_lines" | wc -w)" -eq 4 ] || {
 	echo "FAIL: exemption anchors moved in $fixture (found:$exempt_lines); re-check the proofs" >&2
 	exit 1
 }
