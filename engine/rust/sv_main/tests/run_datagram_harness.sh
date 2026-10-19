@@ -99,11 +99,18 @@ gcov_file="$OUT/cov/$fixture.gcov"
 # The pins are line numbers in $fixture; the text around each is hashed so
 # an edit fails here until someone re-reads the proof and re-pins.
 exempt_lines=""
-for anchor in 'page->item_cnt[i] += inv_cnt;' 'return NULL;'; do
-	mapfile -t at < <(grep -nxF -- "$anchor" "$here/$fixture" | cut -d: -f1)
+for anchor in 'page->item_cnt[i] += inv_cnt;'; do
+	mapfile -t at < <(grep -nF -- "$anchor" "$here/$fixture" | cut -d: -f1)
 	for ln in "${at[@]}"; do
 		exempt_lines="$exempt_lines $ln"
 	done
+done
+# SV_ClientInventoryPage's out-of-pages `return NULL': the one at function
+# scope (a single tab); the `!sv.ex_inventory_pages' early return is
+# indented one more and does run, so it is not exempt.
+mapfile -t at < <(grep -n $'^\treturn NULL;$' "$here/$fixture" | cut -d: -f1)
+for ln in "${at[@]}"; do
+	exempt_lines="$exempt_lines $ln"
 done
 # The += line occurs twice (found-slot and new-slot arms); return NULL once.
 [ "$(echo "$exempt_lines" | wc -w)" -eq 3 ] || {
