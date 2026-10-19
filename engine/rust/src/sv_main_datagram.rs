@@ -66,7 +66,7 @@
 //     SERVERONLY variant, as info_str.rs does for its own split; h2ded's C
 //     never writes it either.
 
-use core::ffi::{c_char, c_int, c_uchar, c_uint, c_void};
+use core::ffi::{c_char, c_int, c_uint, c_void};
 
 use crate::msg_io::{
     MSG_WriteAngle, MSG_WriteByte, MSG_WriteChar, MSG_WriteCoord, MSG_WriteFloat,
@@ -411,17 +411,19 @@ unsafe fn cldp(client: *mut u8, member: usize) -> *mut f64 {
     client.add(member) as *mut f64
 }
 
-/// A client_t byte member (active, spawned, sendsignon, dropasap,
-/// send_all_v).
+/// A client_t qboolean member (active, spawned, sendsignon, dropasap,
+/// send_all_v): read and written as the full int, as the C does.  (An
+/// earlier revision read only the low byte; qboolean is int, so a value
+/// with nonzero high bytes would have misread.)
 #[inline(always)]
 unsafe fn clb(client: *mut u8, member: usize) -> c_int {
-    *client.add(member) as c_int
+    *(client.add(member) as *mut c_int)
 }
 
-/// A client_t byte member's address, for writes.
+/// A client_t qboolean member's address, for writes.
 #[inline(always)]
-unsafe fn clbp(client: *mut u8, member: usize) -> *mut c_uchar {
-    client.add(member)
+unsafe fn clbp(client: *mut u8, member: usize) -> *mut c_int {
+    client.add(member) as *mut c_int
 }
 
 /// sv_main.c's function-local `static int next_update` / `static int
