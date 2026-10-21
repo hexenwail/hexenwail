@@ -89,6 +89,16 @@ client_t	*host_client;
 unsigned int	info_mask, info_mask2;
 qboolean	sv_datagram_dropped;
 double		realtime;
+/* SvMain_IsDedicated's global (slice D's half of sv_main_target.c): always
+ * the dedicated server here. */
+qboolean	isDedicated = true;
+/* sv_main_target.c's slice D accessors name these.  Unused here, but the
+ * object is linked whole, so each must resolve. */
+cvar_t		coop = { "coop", "0", CVAR_NONE };
+cvar_t		deathmatch = { "deathmatch", "0", CVAR_NONE };
+int		sv_kingofhill;
+unsigned short	pr_crc;
+int		net_activeconnections;
 char		*pr_strings;
 int		pr_stringssize;
 

@@ -104,6 +104,11 @@ areanode_t	sv_areanodes[AREA_NODES];
 sizebuf_t	net_message;
 client_t	*host_client;
 double		realtime;
+/* sv_main_target.c's slice C accessors name these.  Unused here, but the
+ * object is linked whole, so each must resolve. */
+unsigned int	info_mask, info_mask2;
+qboolean	sv_datagram_dropped;
+cvar_t		sv_maxdatagram = {"sv_maxdatagram", "0", CVAR_NONE};
 char		*pr_strings;
 int		pr_stringssize;
 int		host_string_count;

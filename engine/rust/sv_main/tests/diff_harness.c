@@ -94,6 +94,13 @@ unsigned int	info_mask, info_mask2;
 qboolean	sv_datagram_dropped;
 cvar_t		sv_maxdatagram = { "sv_maxdatagram", "0", CVAR_NONE };
 double		realtime;
+/* sv_main_target.c's slice D accessors name these.  Unused here, but the
+ * object is linked whole, so each must resolve. */
+cvar_t		coop = { "coop", "0", CVAR_NONE };
+cvar_t		deathmatch = { "deathmatch", "0", CVAR_NONE };
+int		sv_kingofhill;
+unsigned short	pr_crc;
+int		net_activeconnections;
 
 /* MAX_EDICTS + 1: every entity the engine can have, so the large forms are
  * held to the whole short range they write, not just its start */

@@ -36,6 +36,12 @@ int			net_activeconnections;
 int			pr_edict_size;
 qboolean		isDedicated;
 cmd_source_t		cmd_source;
+/* slice C's accessors in sv_main_target.c, linked whole; never read here */
+client_t		*host_client;
+unsigned int		info_mask, info_mask2;
+qboolean		sv_datagram_dropped;
+cvar_t			sv_maxdatagram;
+double			realtime;
 
 /* ---- recorders ---- */
 static int	ces_calls;
