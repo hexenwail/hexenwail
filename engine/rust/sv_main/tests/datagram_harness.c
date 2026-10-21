@@ -212,7 +212,6 @@ FUNC_NORETURN void Sys_Error (const char *error, ...)
 
 edict_t *EDICT_NUM (int n)
 {
-	fprintf (stderr, "EDICT_NUM(%d) max=%d\n", n, sv_max_edicts);
 	if (n < 0 || n >= sv_max_edicts) {
 		fprintf (stderr, "EDICT_NUM: bad number %i (max %i)\n", n, sv_max_edicts);
 		Host_Error ("EDICT_NUM: bad number %i", n);
@@ -647,14 +646,6 @@ static void setup_case (uint64_t seed)
 				pages[i][p].new_items = 0;
 			}
 		}
-		/* DEBUG: force inventory flags to zero to isolate sc2 */
-		if (getenv ("HARNESS_NOINV")) {
-			int p;
-			for (p = 0; p < 3; p++) {
-				pages[i][p].changed_items = 0;
-				pages[i][p].new_items = 0;
-			}
-		}
 		if (rng_next () % 3 == 0) {
 			/* up to and past the reliable limits, so the
 			 * too-big-for-the-protocol drop runs; capped so the
@@ -848,14 +839,6 @@ static int run_one_case (uint64_t seed, int kind, const char *tmpdir)
 
 	case_kind = kind;
 	setup_case (seed);
-	{
-		uint32_t sum = 0, sum2 = 0;
-		int i, cc = (case_kind == 1 || case_kind == 3) ? case_client : 0;
-		for (i = 0; i < (int)sizeof(clients[cc].old_v); i++)
-			sum += ((unsigned char *)&clients[cc].old_v)[i];
-		for (i = 0; i < (int)sizeof(edicts[cc].v); i++)
-			sum2 += ((unsigned char *)&edicts[cc].v)[i];
-	}
 
 	harness_side = 0;
 	snprintf (out_path, sizeof out_path, "%s", path_c);
@@ -881,14 +864,6 @@ static int run_one_case (uint64_t seed, int kind, const char *tmpdir)
 	 * untouched by fork; re-running setup is belt and braces. */
 	case_kind = kind;
 	setup_case (seed);
-	{
-		uint32_t sum = 0, sum2 = 0;
-		int i, cc = (case_kind == 1 || case_kind == 3) ? case_client : 0;
-		for (i = 0; i < (int)sizeof(clients[cc].old_v); i++)
-			sum += ((unsigned char *)&clients[cc].old_v)[i];
-		for (i = 0; i < (int)sizeof(edicts[cc].v); i++)
-			sum2 += ((unsigned char *)&edicts[cc].v)[i];
-	}
 
 	harness_side = 1;
 	snprintf (out_path, sizeof out_path, "%s", path_r);
