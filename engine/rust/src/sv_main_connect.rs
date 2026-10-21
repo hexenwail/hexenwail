@@ -223,7 +223,7 @@ extern "C" {
     fn NET_MaxUnreliableMessage(sock: *mut u8) -> c_int;
     fn NET_CheckNewConnections() -> *mut u8;
     fn NET_QSocketGetAddressString(sock: *const u8) -> *const c_char;
-    fn NET_SendToAll(data: *mut SizeBufC, blocktime: c_double);
+    fn NET_SendToAll(data: *mut SizeBufC, blocktime: c_double) -> c_int;
     fn SvMain_IsDedicated() -> c_int;
     // The command system: the C's Cmd_ExecuteString/src_command, now
     // owned by the Rust cmd port (cmd.rs) -- extern here like every
@@ -1084,7 +1084,8 @@ pub unsafe extern "C" fn SV_SendReconnect() {
     };
     MSG_WriteChar(&mut msg as *mut SizeBufC, f.msg_stufftext);
     MSG_WriteString(&mut msg as *mut SizeBufC, c"reconnect\n".as_ptr());
-    NET_SendToAll(&mut msg as *mut SizeBufC, 5.0);
+    // The C original ignores the count of clients reached.
+    let _ = NET_SendToAll(&mut msg as *mut SizeBufC, 5.0);
     // The C's `#if !defined(SERVERONLY)` listen-server arm: the local
     // client runs Host_Reconnect_f synchronously here, instead of only
     // through the loopback stufftext on its next frame (loading plaque

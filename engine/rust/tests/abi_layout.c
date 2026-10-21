@@ -163,7 +163,7 @@ void *NET_CheckNewConnections (void) { return NULL; }
 int NET_IsLocalConnection (void *sock) { (void) sock; return 0; }
 int NET_MaxUnreliableMessage (void *sock) { (void) sock; return 0; }
 const char *NET_QSocketGetAddressString (const void *sock) { (void) sock; return NULL; }
-void NET_SendToAll (void *data, double blocktime) { (void) data; (void) blocktime; }
+int NET_SendToAll (void *data, double blocktime) { (void) data; (void) blocktime; return 0; }
 void *SV_ClientInventoryPage (int clientnum) { (void) clientnum; return NULL; }
 const char *SV_GetLevelname (void) { return NULL; }
 unsigned char *SvMain_FatPvs (void) { return NULL; }
