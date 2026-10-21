@@ -96,12 +96,13 @@ for target in glhexen2 h2ded hwsv; do
     # SV_SendClientMessages, the other two get it from the archive
     check_count "$archive" SV_SendClientMessages "$h2"
     check_count "$binary" SV_SendClientMessages 1
-    # the connect/signon port (#469 slice D): HexenWorld's server has none of
-    # these, so hwsv has zero in the archive and in the binary; the other two
-    # get exactly one each from the archive
+    # the connect/signon port (#469 slice D): the archive carries these in the
+    # Hexen II targets only.  hwsv's binary has none of them except
+    # SV_ModelIndex, which is HexenWorld's own C in sv_init.c; the Hexen II
+    # binaries get exactly one of each from the archive.
     for sym in SV_CheckForNewClients SV_ModelIndex SV_ReserveSignonSpace SV_SendSignonBuffer SV_SendServerinfo; do
         check_count "$archive" "$sym" "$h2"
-        check_count "$binary" "$sym" "$h2"
+        case "$sym" in SV_ModelIndex) check_count "$binary" "$sym" 1 ;; *) check_count "$binary" "$sym" "$h2" ;; esac
     done
     # The hull traces' fatal path names the target's own error function: the
     # hwsv archive must reach SV_Error (world_trace_hw) and the other two must

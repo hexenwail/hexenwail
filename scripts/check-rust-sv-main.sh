@@ -146,6 +146,9 @@ for bin in glhexen2 h2ded hwsv; do
 	done
 	for sym in "${connect_symbols[@]}"; do
 		if [ "$bin" = hwsv ]; then want=0; else want=1; fi
+		# hwsv's own sv_init.c defines SV_ModelIndex (its SV_CreateBaseline
+		# is static and inlined away)
+		[ "$bin" = hwsv ] && [ "$sym" = SV_ModelIndex ] && want=1
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
 		if [ "$n" -ne "$want" ]; then
 			echo "FAIL: $bin: $sym has $n definitions, expected $want" >&2
