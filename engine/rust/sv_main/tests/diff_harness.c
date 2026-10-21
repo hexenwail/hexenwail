@@ -84,6 +84,14 @@ cvar_t	sv_update_missiles = { "sv_update_missiles", "1", CVAR_NONE };
 cvar_t	sv_update_misc = { "sv_update_misc", "1", CVAR_NONE };
 cvar_t	sv_netsort = { "sv_netsort", "1", CVAR_NONE };
 
+/* sv_main_target.c's slice C accessors name these.  Neither is used by this
+ * harness, but the object is linked whole, so each must resolve. */
+client_t	*host_client;
+unsigned int	info_mask, info_mask2;
+qboolean	sv_datagram_dropped;
+cvar_t		sv_maxdatagram = { "sv_maxdatagram", "0", CVAR_NONE };
+double		realtime;
+
 /* MAX_EDICTS + 1: every entity the engine can have, so the large forms are
  * held to the whole short range they write, not just its start */
 #define NE	(MAX_EDICTS + 1)

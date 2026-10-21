@@ -73,13 +73,66 @@ build() { # name ieee-cflags...
 		"$OUT/$name/sv_main_target.o" "$RUST_LIB" -lm
 }
 
-run() { # dir
-	local status=0
-	(cd "$1" && timeout -k 10 "$LIMIT" ./datagram_harness) || status=$?
+# The harness forks twice per case, and fork() gets slower the longer one
+# process keeps forking: measured here, 500 cases take 3s, 2000 take 42s and
+# the 12000-case enumeration in one process runs past the 900s bound (on
+# smaller machines fork() fails with ENOMEM outright).  So the enumeration is
+# tiled over processes of CHUNK cases each, with disjoint seeds (the harness's
+# HARNESS_CASE_OFFSET / HARNESS_KIND), plus one process for the directed
+# edges.  The union is exactly the single-process enumeration; counts are
+# summed into one PASS line, and the coverage run's .gcda files merge.
+TOTAL=12000
+CHUNK=500
+# loop kind (the harness's own numbering), its share of TOTAL
+KINDS=("2 $((TOTAL * 2 / 3))" "1 $((TOTAL / 6))" "0 $((TOTAL / 6))")
+
+run_chunk() { # dir, then env assignments and the harness's target argument
+	local dir=$1 status=0; shift
+	(cd "$dir" && env "$@" timeout -k 10 "$LIMIT" ./datagram_harness "$ARG") || status=$?
 	if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
 		echo "FAIL: the harness hung (timeout ${LIMIT}s)" >&2
 	fi
 	return "$status"
+}
+
+run() { # dir
+	local dir=$1 cases=0 pass=0 kind share off line n m
+	local log="$dir/chunk.log" layouts=""
+	# the loops derive their counts from the argument: kind 2 runs 2/3 of it,
+	# kinds 1 and 0 one sixth, so each chunk asks for the argument that
+	# yields exactly CHUNK (or the remainder) cases of its kind
+	local -a todo=()
+	for kk in "${KINDS[@]}"; do
+		read -r kind share <<<"$kk"
+		for ((off = 0; off < share; off += CHUNK)); do
+			n=$((share - off < CHUNK ? share - off : CHUNK))
+			case $kind in 2) ARG=$((n * 3 / 2 + 1)) ;; *) ARG=$((n * 6)) ;; esac
+			todo+=("$kind $off $ARG")
+		done
+	done
+	todo+=("9 0 0")	# no loop runs: the directed edges alone
+	for t in "${todo[@]}"; do
+		read -r kind off ARG <<<"$t"
+		local -a env_=(HARNESS_CASE_OFFSET="$off" HARNESS_KIND="$kind")
+		[ "$kind" = 9 ] || env_+=(HARNESS_SKIP_DIRECTED=1)
+		if ! run_chunk "$dir" "${env_[@]}" >"$log" 2>&1; then
+			cat "$log"
+			echo "FAIL: chunk kind=$kind offset=$off" >&2
+			return 1
+		fi
+		line=$(grep -E '^sv_main_datagram differential harness \(h2\): PASS \(' "$log" || true)
+		n=$(printf '%s\n' "$line" | sed -n 's/.*PASS (\([0-9]*\) cases, \([0-9]*\) pass).*/\1/p')
+		m=$(printf '%s\n' "$line" | sed -n 's/.*PASS (\([0-9]*\) cases, \([0-9]*\) pass).*/\2/p')
+		if [ -z "$n" ] || [ "$n" != "$m" ]; then
+			cat "$log"
+			echo "FAIL: chunk kind=$kind offset=$off did not report PASS" >&2
+			return 1
+		fi
+		cases=$((cases + n)); pass=$((pass + m))
+		[ -n "$layouts" ] || layouts=$(grep -E '^layouts:' "$log" || true)
+	done
+	[ -z "$layouts" ] || echo "$layouts"
+	echo "sv_main_datagram differential harness (h2): PASS ($cases cases, $pass pass)"
 }
 
 echo "== $VARIANT: the C original against the Rust archive =="

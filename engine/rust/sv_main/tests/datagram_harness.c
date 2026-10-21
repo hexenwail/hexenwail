@@ -46,6 +46,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <execinfo.h>
 #include <errno.h>
 #include <string.h>
@@ -66,7 +67,6 @@ static void crash_handler (int sig)
 	backtrace_symbols_fd (bt, n, 2);
 	_exit (100 + sig);
 }
-#include <unistd.h>
 
 void	c_SV_ClearDatagram (void);
 void	c_SV_WriteClientdataToMessage (client_t *client, edict_t *ent, sizebuf_t *msg);
@@ -695,6 +695,11 @@ static void setup_case (uint64_t seed)
 			 * aborts a zero-size buffer on the first byte */
 			int n = rng_int (100, 30000);
 			case_msg.maxsize = n;
+			/* the C writes unchecked and SZ_GetSpace kills the process
+			 * on a buffer without allowoverflow; with it set the call
+			 * clears the buffer and flags overflowed, which is what the
+			 * two sides are compared on */
+			case_msg.allowoverflow = true;
 			case_msg.cursize = rng_int (0, n);
 			memset (case_msg.data, 0x3C, (size_t)case_msg.cursize);
 		}
