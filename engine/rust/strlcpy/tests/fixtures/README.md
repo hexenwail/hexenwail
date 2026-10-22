@@ -12,7 +12,7 @@ One record per line; `#` lines are comments; hex is lowercase, `-` is empty.
 the NUL (which must never be copied). `dst-bytes` is the `siz`-byte destination
 after the call, which started as all `a5`. `ret` is the return value.
 
-Contents (686 records): every source length 0..20 against every size 0..24
+Contents (680 records): every source length 0..20 against every size 0..24
 (size 0, size 1, truncation, exact fit `siz == len + 1`, slack); junk after the
 NUL; sources of 63, 64, 127, 255 and 256 bytes against sizes 0, 1, 2, len-1,
 len, len+1, len+2, len+32 and len/2; and 32 seeded random (len, siz, junk) mixes

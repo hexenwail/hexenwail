@@ -75,7 +75,7 @@ the original stays in the tree. Do not delete it.
 - The port needs no C symbols, so no stubs; the old harness's `Sys_Error`,
   `CON_Printf`, `Hunk_AllocName` stubs only existed because it linked the whole
   `libengine_rs.a`. The test-only crate drops them.
-- Fixture size is driven by long sources: 75 KB for 686 records. Keep random
+- Fixture size is driven by long sources: 75 KB for 680 records. Keep random
   mixes small; the grid carries the boundary coverage.
 - Mutants killed by a panic or SIGABRT (size-0 NULL write) are real kills but
   are not "could not compile"; `mutants.sh` counts them correctly.
