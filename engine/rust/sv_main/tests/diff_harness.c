@@ -78,11 +78,29 @@ sizebuf_t	net_message;	/* msg_io.rs's readers; nothing here reads */
  * sound ones and their globals must exist to link.  Nothing here reads
  * them; ents_harness.c sets them up for the slice that does. */
 server_static_t	svs;
+/* SvMain_IsDedicated's global, new in slice D's half of sv_main_target.c:
+ * these harnesses are always the dedicated server. */
+qboolean	isDedicated = true;
 cvar_t	sv_update_player = { "sv_update_player", "1", CVAR_NONE };
 cvar_t	sv_update_monsters = { "sv_update_monsters", "1", CVAR_NONE };
 cvar_t	sv_update_missiles = { "sv_update_missiles", "1", CVAR_NONE };
 cvar_t	sv_update_misc = { "sv_update_misc", "1", CVAR_NONE };
 cvar_t	sv_netsort = { "sv_netsort", "1", CVAR_NONE };
+
+/* sv_main_target.c's slice C accessors name these.  Neither is used by this
+ * harness, but the object is linked whole, so each must resolve. */
+client_t	*host_client;
+unsigned int	info_mask, info_mask2;
+qboolean	sv_datagram_dropped;
+cvar_t		sv_maxdatagram = { "sv_maxdatagram", "0", CVAR_NONE };
+double		realtime;
+/* sv_main_target.c's slice D accessors name these.  Unused here, but the
+ * object is linked whole, so each must resolve. */
+cvar_t		coop = { "coop", "0", CVAR_NONE };
+cvar_t		deathmatch = { "deathmatch", "0", CVAR_NONE };
+int		sv_kingofhill;
+unsigned short	pr_crc;
+int		net_activeconnections;
 
 /* MAX_EDICTS + 1: every entity the engine can have, so the large forms are
  * held to the whole short range they write, not just its start */

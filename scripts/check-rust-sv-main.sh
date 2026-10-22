@@ -6,7 +6,14 @@
 # SV_StopSound, SV_UpdateSoundPos, SV_StartSound, SV_MaxSounds,
 # SV_MaxDatagram, SV_MaxReliableMessage; sv_main_sound.rs).  Slice B: the
 # entity updates (the fat PVS, SV_EntityUpdateSize, SV_EntityPriority,
-# SV_PrepareClientEntities, SV_CleanupEnts; sv_main_ents.rs).  Hexen II only:
+# SV_PrepareClientEntities, SV_CleanupEnts; sv_main_ents.rs).  Slice C: the
+# client data and datagrams (SV_ClearDatagram, SV_WriteClientdataToMessage,
+# SV_SendClientDatagram, SV_UpdateToReliableMessages, SV_SendNop,
+# SV_SendClientMessages; sv_main_datagram.rs).  Slice D: the connect and
+# signon functions (SV_ProtocolName, SV_SendServerinfo, SV_ConnectClient,
+# SV_CheckForNewClients, SV_ModelIndex, SV_SignonBufferCount/Size,
+# SV_ReserveSignonSpace, SV_SendSignonBuffer, SV_CreateBaseline,
+# SV_SendReconnect; sv_main_connect.rs).  Hexen II only:
 # HexenWorld's server has its own sv_main.c, and its own C message functions
 # of the same names in sv_send.c, which multicast; it has no SV_Max*.
 #
@@ -52,6 +59,10 @@ sound_symbols=(SV_StartParticle SV_StartParticle2 SV_StartParticle3 SV_StartPart
 # exported for sv_main.c's SV_SendClientDatagram and SV_SendClientMessages;
 # Hexen II's alone, hwsv's entity updates being its sv_ents.c
 ents_symbols=(SV_PrepareClientEntities SV_CleanupEnts)
+# slice D: the connect and signon functions; SV_ProtocolName, SV_SendServerinfo,
+# SV_CreateBaseline and SV_SendReconnect stay C-visible for the still-C callers
+connect_symbols=(SV_ProtocolName SV_SendServerinfo SV_CheckForNewClients SV_ModelIndex
+	SV_ReserveSignonSpace SV_SendSignonBuffer SV_CreateBaseline SV_SendReconnect)
 
 for tool in cc gcov cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
@@ -61,10 +72,12 @@ for tool in cc gcov cargo cmake nm; do
 done
 
 step=1
-for port in sound ents; do
+for port in sound ents datagram connect; do
 	case "$port" in
 		sound) feature=sv_main_sound; name=sv_main_sound; runner=run_diff_harness.sh; floor_digits=6 ;;
 		ents) feature=sv_main_ents; name=sv_main_ents; runner=run_ents_harness.sh; floor_digits=5 ;;
+		datagram) feature=sv_main_datagram; name=sv_main_datagram; runner=run_datagram_harness.sh; floor_digits=5 ;;
+		connect) feature=sv_main_connect; name=sv_main_connect; runner=run_connect_harness.sh; floor_digits=6 ;;
 	esac
 	echo "== $step. build the crate with $feature =="
 	step=$((step + 1))
@@ -131,6 +144,17 @@ for bin in glhexen2 h2ded hwsv; do
 			exit 1
 		fi
 	done
+	for sym in "${connect_symbols[@]}"; do
+		if [ "$bin" = hwsv ]; then want=0; else want=1; fi
+		# hwsv's own sv_init.c defines SV_ModelIndex (its SV_CreateBaseline
+		# is static and inlined away)
+		[ "$bin" = hwsv ] && [ "$sym" = SV_ModelIndex ] && want=1
+		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
+		if [ "$n" -ne "$want" ]; then
+			echo "FAIL: $bin: $sym has $n definitions, expected $want" >&2
+			exit 1
+		fi
+	done
 	echo "  $bin: each defined once$([ "$bin" = hwsv ] && echo ' (HexenWorld'"'"'s sv_send.c), SV_Max* and the entity updates absent')"
 done
 # hwsv's message functions must be its sv_send.c's, not the Rust
@@ -152,7 +176,8 @@ if [ "$nobj" -lt 2 ]; then
 fi
 while IFS= read -r obj; do
 	for sym in "${sound_symbols[@]}" SV_SoundEntityFits "${ents_symbols[@]}" \
-		SV_AddToFatPVS SV_FatPVS SV_EntityUpdateSize SV_EntityPriority; do
+		SV_AddToFatPVS SV_FatPVS SV_EntityUpdateSize SV_EntityPriority \
+		"${connect_symbols[@]}"; do
 		if nm "$obj" | grep -qE " [Tt] $sym\$"; then
 			echo "FAIL: ${obj#"$engine_build"/} still defines $sym" >&2
 			exit 1
@@ -160,7 +185,7 @@ while IFS= read -r obj; do
 	done
 done <<<"$objects"
 echo "  $nobj Hexen II sv_main.c object(s): none defines the ported functions"
-stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'c_ref_ents.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'sv_main_datagram_*.c.o' -o -name 'sv_main_connect_*.c.o' -o -name 'c_ref_ents.c.o' -o -name 'c_ref_connect.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
 	echo "FAIL: $stray harness fixture object(s) in the engine build" >&2
 	exit 1

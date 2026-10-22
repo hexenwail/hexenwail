@@ -20,7 +20,11 @@ if 'cvar_t	sv_maxdatagram		= {"sv_maxdatagram", "0", CVAR_NONE};' not in src or 
     errors.append("sv_maxdatagram must be registered, default 0 (no cap)")
 if "#define	SV_MAXDATAGRAM_FLOOR	MAX_DATAGRAM_OLD" not in src:
     errors.append("the cap must be floored at MAX_DATAGRAM_OLD (1024)")
-fn = re.search(r"static qboolean SV_SendClientDatagram \(client_t \*client\)\s*\{(.*?)\n\}", src, re.S)
+# SV_SendClientDatagram is Rust now (#469 slice C): its C original was moved
+# verbatim into the harness fixture, which still holds the shape below, and
+# the port (checked after the C body) must hold the same ordering.
+dg_c = (Path(__file__).resolve().parents[1] / "engine/rust/sv_main/tests/sv_main_datagram_h2.c").read_text()
+fn = re.search(r"static qboolean SV_SendClientDatagram \(client_t \*client\)\s*\{(.*?)\n\}", dg_c, re.S)
 body = fn.group(1) if fn else ""
 cap = body.find("if (sv_maxdatagram.integer > 0)")
 if cap < 0:
@@ -32,6 +36,21 @@ else:
         errors.append("the cap must apply to local connections too (test lever)")
     if "if (cap < SV_MAXDATAGRAM_FLOOR)" not in body[cap:]:
         errors.append("the cap must honour SV_MAXDATAGRAM_FLOOR")
+dg_rs = (Path(__file__).resolve().parents[1] / "engine/rust/src/sv_main_datagram.rs").read_text()
+rfn = re.search(r"unsafe fn send_client_datagram\(client: \*mut u8\) -> c_int \{(.*?)\n\}", dg_rs, re.S)
+rbody = rfn.group(1) if rfn else ""
+rcap = rbody.find("let cap0 = SvMain_MaxDatagramCvar();")
+rinit = rbody.find("SZ_Init(&mut msg, buf.as_mut_ptr(), wire);")
+if rcap < 0 or "if cap0 > 0 {" not in rbody:
+    errors.append("sv_main_datagram.rs: send_client_datagram must apply sv_maxdatagram")
+else:
+    if rcap < rbody.find("SV_MaxDatagram()") or rcap > rinit:
+        errors.append("sv_main_datagram.rs: the cap must come after the protocol clamp and before the buffer is sized")
+    if "NET_IsLocalConnection" in rbody[rcap:rinit]:
+        errors.append("sv_main_datagram.rs: the cap must apply to local connections too (test lever)")
+    if "if cap < sv_maxdatagram_floor() {" not in rbody[rcap:rinit]:
+        errors.append("sv_main_datagram.rs: the cap must honour the MAX_DATAGRAM_OLD floor")
+
 # The svc_clear_edicts reserve: worst case (512 B) until a measuring pass has
 # counted the removals, then exact.  At 1400 the first full update went from
 # 660 B / 108 entities to 1133-1396 B / 188-239.  Removals verified by

@@ -133,9 +133,41 @@ int SvMain_UpdateMonsters (void) { return 0; }
 int SvMain_UpdateMissiles (void) { return 0; }
 int SvMain_UpdateMisc (void) { return 0; }
 int SvMain_NetSort (void) { return 0; }
+/* Slice D's connect/signon accessors (#469).  Slice C's SV_SendClientMessages
+ * calls SV_SendSignonBuffer, so the archive object holding it is pulled in
+ * and every accessor it names must resolve; none is ever called. */
+const sv_main_connect_facts_t SvMainConnect_TargetFacts;
+int SvMain_MaxClients (void) { return 0; }
+int SvMain_Coop (void) { return 0; }
+int SvMain_Deathmatch (void) { return 0; }
+int SvMain_KingOfHill (void) { return 0; }
+int SvMain_LoadGame (void) { return 0; }
+unsigned short SvMain_PrecacheCRC (void) { return 0; }
+struct sizebuf_s *SvMain_Signon (void) { return NULL; }
+unsigned char *SvMain_SignonBufs (void) { return NULL; }
+int SvMain_NumSignonBuffers (void) { return 0; }
+void SvMain_SetNumSignonBuffers (int v) { (void) v; }
+int SvMain_SignonSize (int i) { (void) i; return 0; }
+void SvMain_SetSignonSize (int i, int v) { (void) i; (void) v; }
+const char **SvMain_ModelPrecache (void) { return NULL; }
+int SvMain_NumExItems (void) { return 0; }
+void *SvMain_ExItems (void) { return NULL; }
+unsigned char SvMain_CdTrack (void) { return 0; }
+const char *SvMain_MidiName (void) { return NULL; }
+const char *SvMain_ModName (void) { return NULL; }
+const char *SvMain_Skybox (void) { return NULL; }
+int *SvMain_NetActiveConnections (void) { return NULL; }
+struct qmodel_s **SvMain_Models (void) { return NULL; }
+int SvMain_IsDedicated (void) { return 0; }
+void *NET_CheckNewConnections (void) { return NULL; }
+int NET_IsLocalConnection (void *sock) { (void) sock; return 0; }
+int NET_MaxUnreliableMessage (void *sock) { (void) sock; return 0; }
+const char *NET_QSocketGetAddressString (const void *sock) { (void) sock; return NULL; }
+int NET_SendToAll (void *data, double blocktime) { (void) data; (void) blocktime; return 0; }
+void *SV_ClientInventoryPage (int clientnum) { (void) clientnum; return NULL; }
+const char *SV_GetLevelname (void) { return NULL; }
 unsigned char *SvMain_FatPvs (void) { return NULL; }
 void *EDICT_NUM (int n) { (void) n; abort (); }
-int SV_ModelIndex (const char *name) { (void) name; abort (); }
 unsigned char *Mod_LeafPVS (void *leaf, void *model) { (void) leaf; (void) model; abort (); }
 struct qmodel_s **World_SvModels (void) { return NULL; }
 struct edict_s *World_SvEdicts (void) { return NULL; }

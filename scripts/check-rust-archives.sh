@@ -26,9 +26,9 @@ check_count() { # file symbol expected-count
 
 for target in glhexen2 h2ded hwsv; do
     case "$target" in
-        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound,sv_main_ents;
+        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect;
             wad=1; info=0; hw=1 ;;
-        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target,sv_main_sound,sv_main_ents;
+        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect;
             wad=0; info=0; hw=0 ;;
         hwsv) variant=hwsv; features=$common,info_str,huffman,net_udp_hw,net_chan,world_trace_hw;
             wad=0; info=1; hw=1 ;;
@@ -92,6 +92,18 @@ for target in glhexen2 h2ded hwsv; do
     # HexenWorld's own C (sv_send.c): its archive must not carry the Rust
     check_count "$archive" SV_StartParticle4 "$h2"
     check_count "$binary" SV_StartParticle4 1
+    # the datagram port (#469 slice C) is the same shape: hwsv defines its own
+    # SV_SendClientMessages, the other two get it from the archive
+    check_count "$archive" SV_SendClientMessages "$h2"
+    check_count "$binary" SV_SendClientMessages 1
+    # the connect/signon port (#469 slice D): the archive carries these in the
+    # Hexen II targets only.  hwsv's binary has none of them except
+    # SV_ModelIndex, which is HexenWorld's own C in sv_init.c; the Hexen II
+    # binaries get exactly one of each from the archive.
+    for sym in SV_CheckForNewClients SV_ModelIndex SV_ReserveSignonSpace SV_SendSignonBuffer SV_SendServerinfo; do
+        check_count "$archive" "$sym" "$h2"
+        case "$sym" in SV_ModelIndex) check_count "$binary" "$sym" 1 ;; *) check_count "$binary" "$sym" "$h2" ;; esac
+    done
     # The hull traces' fatal path names the target's own error function: the
     # hwsv archive must reach SV_Error (world_trace_hw) and the other two must
     # not, since only hwsv defines it -- an archive that did would fail to

@@ -141,6 +141,16 @@ pub mod sv_main_sound;
 #[cfg(feature = "sv_main_ents")]
 pub mod sv_main_ents;
 
+// Hexen II's sv_main.c client data and datagrams (#469 slice C):
+// SV_ClearDatagram, SV_WriteClientdataToMessage, SV_SendClientDatagram,
+// SV_UpdateToReliableMessages, SV_SendNop and SV_SendClientMessages.
+#[cfg(feature = "sv_main_datagram")]
+pub mod sv_main_datagram;
+
+// Hexen II's sv_main.c connect and signon (#469 slice D).
+#[cfg(feature = "sv_main_connect")]
+pub mod sv_main_connect;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]
