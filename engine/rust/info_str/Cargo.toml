@@ -1,0 +1,17 @@
+[package]
+name = "info-str-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Test-only host crate that replays frozen hexenworld/shared/info_str.c fixtures against engine/rust/src/info_str.rs"
+publish = false
+
+# Not linked into the engine.  The engine archive (engine/rust, no_std
+# staticlib) cannot host a `cargo test` target, so this crate compiles the
+# very same source file and runs the fixture replay in tests/replay.rs.
+# info_str.rs calls three C symbols (CON_Printf, Cvar_FindVar, and through
+# cvar.rs only the layout), which src/lib.rs stubs.
+
+[lib]
+name = "info_str_rs"
+path = "src/lib.rs"

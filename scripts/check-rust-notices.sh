@@ -139,6 +139,7 @@ original_files() {
 	engine/rust/crc/src/lib.rs
 	engine/rust/strlcpy/src/lib.rs
 	engine/rust/huffman/src/lib.rs
+	engine/rust/info_str/src/lib.rs
 	engine/rust/mathlib/replay/src/lib.rs
 	EOF
 }
