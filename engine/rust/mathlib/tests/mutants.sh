@@ -24,11 +24,13 @@ trap 'cp "$orig" "$src"; rm -f "$orig"' EXIT
 # fails to compile proves nothing, so that is an error, not a kill.
 replay() {
 	local out
-	# A mutant that loops forever (GCD with the wrong step) is a kill: 124.
-	if out=$(timeout 120 cargo test --release --offline --manifest-path "$crate/Cargo.toml" 2>&1); then return 0; fi
-	if grep -q 'could not compile' <<<"$out"; then
+	# Compile first, with no timeout: a slow build must never read as a kill.
+	if ! out=$(cargo test --release --offline --no-run --manifest-path "$crate/Cargo.toml" 2>&1); then
 		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; return 2
 	fi
+	# The binary is already built, so only a run that hangs (GCD with the wrong
+	# step) hits the timeout: rc 124 is a kill.
+	if timeout 120 cargo test --release --offline --manifest-path "$crate/Cargo.toml" >/dev/null 2>&1; then return 0; fi
 	return 1
 }
 errf="$(mktemp)"

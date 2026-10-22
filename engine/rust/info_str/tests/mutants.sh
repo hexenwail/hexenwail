@@ -29,13 +29,16 @@ trap 'cp "$orig" "$src"; rm -f "$orig" "$errf"' EXIT
 # run and fail.  A mutant that merely fails to compile proves nothing, so that
 # is an error (return 2, printed by the loop below), not a kill.  A mutant that
 # loops forever (an Info_RemoveKey that removes nothing under
-# Info_RemovePrefixedKeys' restart) is a kill: timeout exits 124.
+# Info_RemovePrefixedKeys' restart) is a kill: timeout exits 124.  Compilation
+# runs first and outside the timeout, so a slow build is never read as a kill.
 replay() {
 	local out
-	if out=$(timeout 60 cargo test --release --offline --manifest-path "$crate/Cargo.toml" 2>&1); then return 0; fi
-	if grep -q 'could not compile' <<<"$out"; then
+	# Compile first, with no timeout: a slow build must never read as a kill.
+	if ! out=$(cargo test --release --offline --no-run --manifest-path "$crate/Cargo.toml" 2>&1); then
 		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; return 2
 	fi
+	# Built above, so only a hang of a test binary that ran is a kill (rc 124).
+	if timeout 60 cargo test --release --offline --manifest-path "$crate/Cargo.toml" >/dev/null 2>&1; then return 0; fi
 	return 1
 }
 if [ "${1:-}" = "--" ]; then shift; kill_cmd=("$@"); else kill_cmd=(replay); fi
