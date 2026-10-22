@@ -20,8 +20,8 @@ const CRC_INIT_VALUE: u16 = 0xffff;
 const CRC_XOR_VALUE: u16 = 0x0000;
 
 /// Built at compile time from the polynomial rather than copied, so a typo in
-/// a hand-transcribed table cannot exist.  The differential harness still
-/// compares every entry's effect against crc.c's literal table.
+/// a hand-transcribed table cannot exist.  The frozen fixture (engine/rust/crc/tests/
+/// fixtures) pins every entry's effect against crc.c's literal table.
 const TABLE: [u16; 256] = build_table();
 static CRCTABLE: [u16; 256] = TABLE;
 
