@@ -2,14 +2,15 @@
 #
 # check-rust-strlcpy.sh -- gate for the Rust port of common/strlcpy.c.
 #
-# The differential half compares q_strlcpy's return value and every byte it
-# writes with the C original over all source lengths 0..256, destination sizes
-# 0..288, and unaligned source/destination offsets.  The CMake half proves
-# Hexen II and HexenWorld both link it: the engine build every gate shares
-# (scripts/lib/rust-gate.sh) has it exactly once per binary with no C object
-# left in the build.
+# The fixture half replays expected values frozen from the C original (every
+# source length 0..20 against every size 0..24, junk after the NUL, long
+# sources around the size boundary, seeded random mixes) against the Rust port
+# with guard bytes and unaligned offsets, with no C compiler.  The CMake half
+# proves Hexen II and HexenWorld both link it: the engine build every gate
+# shares (scripts/lib/rust-gate.sh) has it exactly once per binary with no C
+# object left in the build.
 #
-# Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
+# Requires cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -30,59 +31,49 @@ work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
 symbol=q_strlcpy
 
-for tool in cc cargo cmake nm; do
+for tool in cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
 	}
 done
 
-echo "== 1. build the consolidated crate with all migrated subsystems =="
-cargo build --release --offline \
-	--manifest-path "$crate/Cargo.toml" \
-	--features hashindex,mathlib,sizebuf,crc,link_ops,strlcpy
-
-echo
-echo "== 2. differential harness: Rust vs the C original, one binary =="
-diff_log="$work/diff.log"
-set +e
-RUST_LIB="$crate/target/release/libengine_rs.a" \
-	OUT="$work/diff" \
-	bash "$crate/strlcpy/tests/run_diff_harness.sh" >"$diff_log" 2>&1
-harness_status=$?
-set -e
-grep -E 'RESULT:|differential harness:' "$diff_log" || true
-if [ "$harness_status" -ne 0 ]; then
-	echo "FAIL: differential harness exited $harness_status" >&2
-	cat "$diff_log" >&2
+echo "== 1. fixture replay: the frozen common/strlcpy.c oracle, plain cargo test =="
+# The differential harness against the C original was retired (#475).  Its
+# expected values are frozen in engine/rust/strlcpy/tests/fixtures/strlcpy.txt
+# and replayed against src/strlcpy.rs with no C compiler.  The fixture is
+# audited against C by tests/gen_fixtures.sh --check, and shown able to fail by
+# tests/mutants.sh; neither runs here (docs/rust-harness-retirement.md).
+replay_log="$work/replay.log"
+if ! cargo test --offline --manifest-path "$crate/strlcpy/Cargo.toml" >"$replay_log" 2>&1; then
+	echo "FAIL: strlcpy fixture replay failed" >&2
+	cat "$replay_log" >&2
 	exit 1
 fi
-grep -q '^RESULT: PASS$' "$diff_log" || {
-	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
-	cat "$diff_log" >&2
-	exit 1
-}
-# The PASS line carries the case count, and RESULT alone would still pass if the
-# enumeration were cut down to nothing -- so floor the count at six digits (a
-# hundred thousand cases) rather than pinning it, which would mean editing the
-# gate every time the enumeration is deliberately widened.
-# Observed today: 594,184 cases.  The floor is one decimal place below it.
-count_line=$(grep -E '^strlcpy differential harness: PASS \(' "$diff_log" || true)
-count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
-if [ "${#count}" -lt 6 ]; then
-	echo "FAIL: harness case count is below the hundred-thousand floor" >&2
-	echo "      observed: ${count_line:-<no 'strlcpy differential harness: PASS (N cases)' line>}" >&2
-	cat "$diff_log" >&2
+# A green exit is not enough: require that the replay tests themselves ran, so
+# a renamed or filtered-out test cannot read as green.
+for t in replay_c_fixtures size_zero_leaves_a_real_destination_alone; do
+	grep -q "^test $t \\.\\.\\. ok\$" "$replay_log" || {
+		echo "FAIL: $t did not run and pass" >&2
+		cat "$replay_log" >&2
+		exit 1
+	}
+done
+fixture="$crate/strlcpy/tests/fixtures/strlcpy.txt"
+records=$(grep -cvE '^(#|$)' "$fixture")
+if [ "$records" -lt 600 ]; then
+	echo "FAIL: strlcpy fixture has $records records, below the 600 floor" >&2
 	exit 1
 fi
+echo "  replay_c_fixtures ok ($records records)"
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 2. the engine build: glhexen2, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
 echo
-echo "== 4. exactly one q_strlcpy definition per binary =="
+echo "== 3. exactly one q_strlcpy definition per binary =="
 archive="$engine_build/rust/client/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 n=$(nm "$archive" 2>/dev/null | grep -cE " T $symbol\$" || true)
@@ -106,6 +97,6 @@ stray=$(find "$engine_build" -name 'strlcpy.c.o' | wc -l)
 	exit 1
 }
 
-echo "PASS: Rust strlcpy -- differential harness green, the consolidated"
+echo "PASS: Rust strlcpy -- fixture replay green, the consolidated"
 echo "      archive links exactly one definition per target, and no strlcpy.c"
 echo "      object is left in the engine build."

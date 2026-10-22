@@ -61,3 +61,25 @@ the original stays in the tree. Do not delete it.
   16 min `check-rust.sh`. The gain is decoupling from vanilla, not wall time.
 - `saturating_sub` on a signed zero goes negative; write mutants that actually
   compile and behave as intended, and read the kill reason once.
+
+## Findings: strlcpy
+
+- `strlcpy` and `strlcat` are separate files, crates-to-be and gates
+  (`src/strlcpy.rs`, `src/strlcat.rs`, `check-rust-strlcpy.sh`,
+  `check-rust-strlcat.sh`, own harness dirs). Not entangled: retiring one leaves
+  the other untouched. `check-rust-strlcat.sh` builds with `--features ...,strlcpy,strlcat`
+  and keeps its live harness.
+- Pointer-writing ports: record the destination as the full `siz`-byte buffer
+  (started all `a5`) so the fixture captures the untouched tail, and replay in
+  guard zones. `siz == 0` is called with NULL, as the C original permits.
+- The port needs no C symbols, so no stubs; the old harness's `Sys_Error`,
+  `CON_Printf`, `Hunk_AllocName` stubs only existed because it linked the whole
+  `libengine_rs.a`. The test-only crate drops them.
+- Fixture size is driven by long sources: 75 KB for 686 records. Keep random
+  mixes small; the grid carries the boundary coverage.
+- Mutants killed by a panic or SIGABRT (size-0 NULL write) are real kills but
+  are not "could not compile"; `mutants.sh` counts them correctly.
+- To run mutants against the live harness, the kill command must rebuild the
+  engine archive (`cargo build --release ... --features ...`) then run
+  `run_diff_harness.sh`; check the unmutated baseline exits 0 first so a build
+  failure is not read as a kill.
