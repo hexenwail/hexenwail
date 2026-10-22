@@ -1,0 +1,18 @@
+[package]
+name = "huffman-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Test-only host crate that replays frozen hexenworld/shared/huffman.c fixtures against engine/rust/src/huffman.rs"
+publish = false
+# Reuses the engine crate's build script: huffman.rs include!s the frequency
+# table that script generates from hexenworld/shared/hufffreq.h.
+build = "../build.rs"
+
+# Not linked into the engine.  The engine archive (engine/rust, no_std
+# staticlib) cannot host a `cargo test` target, so this crate compiles the
+# very same source file and runs the fixture replay in tests/replay.rs.
+
+[lib]
+name = "huffman_rs"
+path = "src/lib.rs"

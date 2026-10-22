@@ -138,6 +138,7 @@ original_files() {
 	engine/rust/src/lib.rs
 	engine/rust/crc/src/lib.rs
 	engine/rust/strlcpy/src/lib.rs
+	engine/rust/huffman/src/lib.rs
 	EOF
 }
 

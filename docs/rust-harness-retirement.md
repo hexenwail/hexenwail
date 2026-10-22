@@ -83,3 +83,42 @@ the original stays in the tree. Do not delete it.
   engine archive (`cargo build --release ... --features ...`) then run
   `run_diff_harness.sh`; check the unmutated baseline exits 0 first so a build
   failure is not read as a kill.
+
+## Findings from `huffman` (#475)
+
+Worked example: `engine/rust/huffman/` and `scripts/check-rust-huffman.sh`. A
+stateful port with a build step, two C variants and a deliberate divergence from
+the C.
+
+- **Statics.** The generator `#include`s `huffman.c` instead of linking it, so
+  it can dump `HuffLookup` and `HuffFreq` (file-scope statics) as fixture
+  records. The second C variant is linked separately under renamed symbols.
+- **Both C variants stay audited.** The hwsv build (Hunk_AllocName) and the
+  integrated client build (malloc) are both run by `gen_fixtures.sh`, which
+  aborts if they differ. The fixture records one answer; the cross-check of the
+  two lives in the generator, not in the gate.
+- **Divergence from C becomes a record kind.** The C overreads on a crafted
+  header byte, the Rust does not. The generator forks each decode against a
+  guard page: survivors are `dec` (exact match required), deaths are `ovr` (the
+  C's answer with a defined zero tail; the Rust must be a strict prefix). The
+  replay forks too, so a Rust overread is a reported SIGSEGV, not UB.
+- **Build script.** `huffman.rs` `include!`s a table `engine/rust/build.rs`
+  generates from `hufffreq.h`. The test crate sets `build = "../build.rs"`, and
+  `build.rs` now looks for the header from both manifest depths. Any port
+  with generated input can reuse this.
+- **C symbols.** Only `Sys_Error` is needed; the test crate stubs it as an
+  aborting function with the fixed prefix of the variadic signature (ABI
+  compatible on x86-64 and aarch64). `malloc`, `memset`, `memcpy` come from libc.
+  The `Hunk_*` stub is needed only by the generator.
+- **Encode tail.** After the raw fallback the encode buffer past `outlen` holds
+  scratch bits from the failed compressed attempt. Not frozen; no caller reads it.
+- **Compressible inputs.** Random uniform bytes almost always take the raw 0xff
+  fallback with this table. Compressed packets need payloads drawn from the
+  frequency table (`weighted_symbol` in the generator); without them half the
+  encoder is untested. Floor the compressed-encode count separately.
+- **Perl anchors.** An unanchored `s/HUFF_FREQ\[index\]/.../` rewrote the doc
+  comment, not the code, and the mutant "survived". Anchor mutants on code-only
+  context and read at least one mutated file.
+- **Equivalent mutant.** Swapping which work slot BuildTree's merged node takes
+  only matters for frequency ties; the shipped table has none among merged
+  weights. Not a fixture gap; left out of `mutants.sh` with a note in the README.
