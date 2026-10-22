@@ -15,3 +15,9 @@ publish = false
 [lib]
 name = "info_str_rs"
 path = "src/lib.rs"
+
+# src/cvar.rs gates the cvar functions on `feature = "cvar"` (the engine crate's
+# feature).  This crate reads only the cvar_t layout, so the feature stays off;
+# declaring the name keeps rustc from flagging every gate as an unknown cfg.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cvar"))'] }
