@@ -31,12 +31,15 @@ class (size 0, size 1, no NUL in `siz`, room for the terminator only, truncation
 exact fit, slack, empty dst, empty src, junk after either NUL, long sources).
 
 Beyond the fixture, `full_dstlen_srclen_size_offset_grid_matches_the_contract`
-runs a generated grid of destination string length 0..=40 x source length
-0..=40 x size 0..=48 x source offsets {0, 3} x destination offsets {0, 5}
-(329,476 calls) in guard zones. The destination region holds the string, its NUL
-and junk, so strings longer than `siz` (`siz < strlen(dst)`, where `siz` bounds
-the return and nothing may be written) are covered. It compares the whole
-destination image, return value, and source against the contract.
+runs a generated grid in guard zones: every source length 0..=256 x every size
+0..=288 x source offsets {0, 3} x destination offsets {0, 5}. Destination string
+lengths are every value 0..=40 for sizes up to 48, and above that the shapes the
+old harness built (empty, 10 bytes, NUL at `siz - 2`, `siz - 1`, `siz`,
+`siz + 1`). 4.4 million calls, about 1.4 s in release. The destination region
+holds the string, its NUL and junk, so strings longer than `siz`
+(`siz < strlen(dst)`, where `siz` bounds the return and nothing may be written)
+are covered. It compares the whole destination image, return value, and source
+against the contract.
 
 Regenerate or audit against C (needs cc):
 
@@ -57,6 +60,14 @@ mutated engine archive as the kill command).
 Equivalent mutant, left out: `n <= 1` for `n == 0` on the no-room return. With
 `n == 1` the write pointer already sits on the NUL that ends `dst`, so the final
 `*d = 0` rewrites a zero and the return value is unchanged.
+
+Narrowed against the retired harness, accepted: it ran every source length
+0..256 against every size 0..288 over 4 destination kinds and 8 offset pairs. The
+replay grid has the same source and size range but 4 offset pairs (source {0, 3},
+destination {0, 5}), and every destination string length 0..=40 only for sizes up
+to 48 (above that, the 6 shapes listed above rather than every length). The
+fixture adds mixes up to 129 / 89 / 99 and the long-source fixed cases. Offsets
+other than those listed are not replayed.
 
 Not covered, by design: overlapping source and destination, and a source with no
 NUL. Both are outside the C contract (undefined behavior) and not matched.

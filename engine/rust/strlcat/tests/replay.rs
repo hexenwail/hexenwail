@@ -184,21 +184,24 @@ fn size_zero_leaves_a_real_destination_alone() {
 }
 
 /// The grid the retired differential harness covered, written from the
-/// contract rather than from a fixture: every destination string length
-/// 0..=40 (including ones longer than `siz`) against every source length
-/// 0..=40, every size 0..=48, at source offsets {0, 3} and destination offsets
-/// {0, 5}, inside guard zones.  The destination region is the string, its NUL
-/// and junk, laid out contiguously; only the first `siz` bytes are the
-/// function's to touch, so a destination string running past `siz` checks that
-/// the scan stops at `siz` (the return is bounded by `siz`, not by
+/// contract rather than from a fixture.  Every source length 0..=256 meets
+/// every size 0..=288 at source offsets {0, 3} and destination offsets {0, 5},
+/// inside guard zones.  Destination strings: every length 0..=40 for sizes up to
+/// 48 (including ones longer than `siz`); above that, the four shapes the old
+/// harness built (empty, 10 bytes, and a NUL at `siz - 2`, `siz - 1`, `siz` and
+/// `siz + 1`, the last two being a full destination).  The destination region is
+/// the string, its NUL and junk, laid out contiguously; only the first `siz`
+/// bytes are the function's to touch, so a destination string running past `siz`
+/// checks that the scan stops at `siz` (the return is bounded by `siz`, not by
 /// strlen(dst)) and that nothing beyond it, nor any guard byte, is written.
 /// The whole image is compared with the contract, which also covers the
 /// terminator, the append span and the untouched tail.
 #[test]
 fn full_dstlen_srclen_size_offset_grid_matches_the_contract() {
     const MAXD: usize = 40;
-    const MAXS: usize = 40;
-    const MAXSIZ: usize = 48;
+    const MAXS: usize = 256;
+    const MAXSIZ: usize = 288;
+    const DENSE_SIZ: usize = 48;
     let mut checked = 0u64;
     let mut n_size_bounds_return = 0u64;
     for slen in 0..=MAXS {
@@ -211,11 +214,11 @@ fn full_dstlen_srclen_size_offset_grid_matches_the_contract() {
             .collect();
         s.push(0);
         s.extend_from_slice(&[0x77; 5]); // junk after the NUL, never to be copied
-        for dc in 0..=MAXD {
+        let mut one = |dc: usize, siz: usize| {
             // The string already in the destination: dc non-zero bytes, a NUL,
             // then junk.  `region` is long enough for every size to see a
             // prefix of it, and bytes past `siz` are not the function's.
-            let mut region = vec![0u8; MAXD.max(MAXSIZ) + 2];
+            let mut region = vec![0u8; MAXSIZ + 3];
             for (i, b) in region.iter_mut().enumerate() {
                 *b = if i < dc {
                     0x3c + (i % 5) as u8
@@ -225,29 +228,39 @@ fn full_dstlen_srclen_size_offset_grid_matches_the_contract() {
                     0x41
                 };
             }
-            for siz in 0..=MAXSIZ {
-                let dst = &region[..siz.max(dc + 1)];
-                let (eret, eimg) = {
-                    let (r, img) = expected(&dst[..siz], &s, slen);
-                    let mut full = dst.to_vec();
-                    full[..siz].copy_from_slice(&img);
-                    (r, full)
-                };
-                if siz < dc {
-                    // dsize < strlen(dst): the size bounds the return value.
-                    assert_eq!(eret, slen + siz);
-                    n_size_bounds_return += 1;
-                }
-                for (so, dof) in [(0usize, 0usize), (3, 0), (0, 5), (3, 5)] {
-                    let ctx = format!("dst string {dc} src {slen} siz {siz} src off {so} dst off {dof}");
-                    let (ret, img) = run(&s, dst, siz, so, dof, &ctx);
-                    assert_eq!(ret, eret, "{ctx}: return");
-                    assert_eq!(img, eimg, "{ctx}: destination image");
-                    checked += 1;
-                }
+            let dst = &region[..siz.max(dc + 1)];
+            let (eret, eimg) = {
+                let (r, img) = expected(&dst[..siz], &s, slen);
+                let mut full = dst.to_vec();
+                full[..siz].copy_from_slice(&img);
+                (r, full)
+            };
+            if siz < dc {
+                // dsize < strlen(dst): the size bounds the return value.
+                assert_eq!(eret, slen + siz);
+                n_size_bounds_return += 1;
+            }
+            for (so, dof) in [(0usize, 0usize), (3, 0), (0, 5), (3, 5)] {
+                let ctx = format!("dst string {dc} src {slen} siz {siz} src off {so} dst off {dof}");
+                let (ret, img) = run(&s, dst, siz, so, dof, &ctx);
+                assert_eq!(ret, eret, "{ctx}: return");
+                assert_eq!(img, eimg, "{ctx}: destination image");
+                checked += 1;
+            }
+        };
+        for dc in 0..=MAXD {
+            for siz in 0..=DENSE_SIZ {
+                one(dc, siz);
+            }
+        }
+        for siz in DENSE_SIZ + 1..=MAXSIZ {
+            for dc in [0, 10, siz - 2, siz - 1, siz, siz + 1] {
+                one(dc, siz);
             }
         }
     }
-    assert_eq!(checked, 41 * 41 * 49 * 4);
-    assert!(n_size_bounds_return >= 41 * 400, "dsize < strlen(dst) cases: {n_size_bounds_return}");
+    let dense = 257 * 41 * 49 * 4;
+    let sparse = 257 * (MAXSIZ - DENSE_SIZ) as u64 * 6 * 4;
+    assert_eq!(checked, dense + sparse);
+    assert!(n_size_bounds_return >= 257 * 400, "dsize < strlen(dst) cases: {n_size_bounds_return}");
 }
