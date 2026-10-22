@@ -122,6 +122,7 @@ if ! check_log=$(bash "$crate/huffman/tests/gen_fixtures.sh" --check 2>&1); then
 fi
 echo "  $check_log"
 
+echo
 echo "== 2. build the consolidated crate with every migrated subsystem =="
 cargo build --release --offline \
 	--manifest-path "$crate/Cargo.toml" \

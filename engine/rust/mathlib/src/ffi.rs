@@ -90,8 +90,8 @@ pub struct MPlane {
 
 // --- ABI cross-check surface ------------------------------------------------
 //
-// Exported so the C-side differential harness can assert that its own
-// `offsetof(mplane_t, ...)` agrees with what Rust computed.
+// Exported so the C-side layout check (scripts/check-rust-abi.sh) can assert
+// that its own `offsetof(mplane_t, ...)` agrees with what Rust computed.
 
 #[no_mangle]
 pub extern "C" fn MathlibMPlane_sizeof() -> usize {

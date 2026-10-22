@@ -42,6 +42,11 @@ Deliberately not in the fixture:
 - `Invert24To16` for 256..512: `2^40/val` does not fit an `int` there and C's
   double-to-int conversion is undefined (x86 gives INT_MIN, Rust saturates to
   INT_MAX). 513 is the first value whose result fits.
+- `anglemod` for |a| of about 1.18e7 or more (and inf): the `(int)` cast of the
+  scaled value is undefined in C. On x86 it gives INT_MIN, so C returns 0 for
+  1.2e7, 1e9, +inf and 3e38; Rust's `as c_int` saturates to INT_MAX, so those
+  return 359.9945. Negative large values, -inf and NaN return 0 on both sides.
+  The fixture stops at 1e5; no caller passes angles anywhere near this range.
 - `BOPS_Error` and the `FloorDivMod` bad-denominator path call `Sys_Error`, which
   never returns. The replay covers them separately: it re-runs itself as a child,
   requires SIGABRT and the message (`bops_bad_signbits_calls_sys_error`,
