@@ -1,0 +1,20 @@
+[package]
+name = "mathlib-replay"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Test-only host crate that replays frozen engine/h2shared/mathlib.c fixtures against mathlib/src/ffi.rs"
+publish = false
+
+# Not linked into the engine.  The mathlib crate one directory up is a no_std
+# staticlib with its own panic handler, so it cannot host a `cargo test` target.
+# This crate compiles the very same src/ffi.rs and runs the replay in
+# ../tests/replay.rs.
+
+[lib]
+name = "mathlib_replay"
+path = "src/lib.rs"
+
+[[test]]
+name = "replay"
+path = "../tests/replay.rs"

@@ -5,27 +5,31 @@
 # WHY THIS EXISTS
 #
 #   The Rust mathlib is the only one any engine target links; mathlib.c is
-#   compiled by the differential harness below and by nothing else.
+#   compiled by nothing in the engine build.
 #
-#   The differential harness is the half that matters.  A build gate alone
-#   proves the crate compiles and links; it says nothing about whether the Rust
-#   implementation still computes what the C original computes.
+#   A build gate alone proves the crate compiles and links; it says nothing
+#   about whether the Rust implementation still computes what the C original
+#   computed.  The fixture replay is the half that does.
 #
 # WHAT IT CHECKS
 #
 #   1. the crate builds, offline, with no dependencies
-#   2. the differential harness passes -- Rust and the renamed C original
-#      agree on scalar results, vectors, matrices, plane classification, and
-#      floor division over positive, negative, and boundary inputs
+#   2. the fixture replay passes -- the values frozen from the C original
+#      (scalar results, vectors, matrices, plane classification, floor
+#      division, struct layout) are reproduced by the Rust port, with a record
+#      floor so a truncated fixture cannot read green.  No C compiler: the
+#      differential harness against mathlib.c was retired (#475);
+#      tests/gen_fixtures.sh --check audits the fixture against C and
+#      tests/mutants.sh shows it can fail, neither run here
 #   3. the engine build every gate shares (scripts/lib/rust-gate.sh)
 #   4. exactly one definition of each of the 12 symbols in each binary; this
 #      is the duplicate-symbol hazard the CMake source-list removal exists to
 #      prevent, and the failure mode if that removal is ever lost
 #
-# Requires cc, cargo/rustc and cmake -- run it inside `nix develop`.
+# Requires cargo/rustc, cmake and nm -- run it inside `nix develop`.
 # No game data needed for the default checks: nothing here starts the engine.
 #
-#   ./scripts/check-rust-mathlib.sh            # fast: crate, harness, builds
+#   ./scripts/check-rust-mathlib.sh            # fast: crate, replay, builds
 #   OFF_BIN=... ./scripts/check-rust-mathlib.sh --engine
 #       also run the real engine and diff it end to end against a C-only
 #       reference binary (how to build one: scripts/lib/rust-gate.sh)
@@ -53,12 +57,11 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crate="$root/engine/rust/mathlib"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
-rust_lib="$crate/target/release/libmathlib_rs.a"
 symbols=(Q_isnan anglemod GreatestCommonDivisor NearestMultiple Q_log2 \
          Invert24To16 BOPS_Error FloorDivMod AngleVectors \
          R_ConcatRotations R_ConcatTransforms BoxOnPlaneSide)
 
-for tool in cc cargo cmake nm; do
+for tool in cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
@@ -69,36 +72,30 @@ echo "== 1. build the crate (offline, no dependencies) =="
 cargo build --release --offline --manifest-path "$crate/Cargo.toml"
 
 echo
-echo "== 2. differential harness: Rust vs the C original, one binary =="
-diff_log="$work/diff.log"
-set +e
-RUST_LIB="$rust_lib" OUT="$work/diff" "$crate/tests/run_diff_harness.sh" >"$diff_log" 2>&1
-harness_status=$?
-set -e
-grep -E 'RESULT:|differential harness:' "$diff_log" || true
-if [ "$harness_status" -ne 0 ]; then
-	echo "FAIL: differential harness exited $harness_status (a divergence)" >&2
-	sed -n '/FAIL /p' "$diff_log" | head -20 >&2
+echo "== 2. fixture replay: the frozen engine/h2shared/mathlib.c oracle, plain cargo test =="
+replay_log="$work/replay.log"
+if ! cargo test --offline --manifest-path "$crate/replay/Cargo.toml" >"$replay_log" 2>&1; then
+	echo "FAIL: mathlib fixture replay failed" >&2
+	cat "$replay_log" >&2
 	exit 1
 fi
-# Re-assert the summary line too: a harness that somehow exited 0 without
-# having run anything must not pass as green.
-grep -q '^RESULT: PASS$' "$diff_log" || {
-	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
-	exit 1
-}
-# The PASS line carries the case count, and RESULT alone would still pass if the
-# enumeration were cut down to nothing -- so floor the count at three digits (a
-# hundred cases) rather than pinning it, which would mean editing the gate every
-# time the enumeration is deliberately widened.
-# Observed today: 192 cases.  The floor is one decimal place below it.
-count_line=$(grep -E '^mathlib-rs differential harness: PASS \(' "$diff_log" || true)
-count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
-if [ "${#count}" -lt 3 ]; then
-	echo "FAIL: harness case count is below the hundred-case floor" >&2
-	echo "      observed: ${count_line:-<no 'mathlib-rs differential harness: PASS (N cases)' line>}" >&2
+# A green exit is not enough: require that the replay tests themselves ran, so
+# a renamed or filtered-out test cannot read as green.
+for t in replay_c_fixtures angle_vectors_null_guards bops_bad_signbits_calls_sys_error \
+         floordivmod_zero_denominator_calls_sys_error floordivmod_negative_denominator_calls_sys_error; do
+	grep -q "^test $t \.\.\. ok\$" "$replay_log" || {
+		echo "FAIL: $t did not run and pass" >&2
+		cat "$replay_log" >&2
+		exit 1
+	}
+done
+fixture="$crate/tests/fixtures/mathlib.txt"
+records=$(grep -cvE '^(#|$)' "$fixture")
+if [ "$records" -lt 1000 ]; then
+	echo "FAIL: mathlib fixture has $records records, below the 1000 floor" >&2
 	exit 1
 fi
+echo "  replay ok ($records records)"
 
 echo
 echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
@@ -147,12 +144,12 @@ if [ "$run_engine" -eq 1 ]; then
 		"$root/engine/rust/hashindex/tests/run_engine_smoke.sh" mathlib
 
 	echo
-	echo "PASS: Rust mathlib -- differential harness green; all three targets"
+	echo "PASS: Rust mathlib -- fixture replay green; all three targets"
 	echo "      link it with no duplicate symbol and no C object; and the real"
 	echo "      engine produces the C-only reference's output on a pak load and a"
 	echo "      map load."
 else
-	echo "PASS: Rust mathlib -- differential harness green, and all three targets"
+	echo "PASS: Rust mathlib -- fixture replay green, and all three targets"
 	echo "      link it with no duplicate symbol and no C object."
 	echo "      (re-run with --engine and OFF_BIN=... to also drive the real engine)"
 fi

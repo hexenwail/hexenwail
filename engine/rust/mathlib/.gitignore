@@ -7,3 +7,6 @@ Cargo.lock
 
 # Ignore any test binaries
 mathlib-tests
+
+# Test-only replay host crate
+/replay/target/

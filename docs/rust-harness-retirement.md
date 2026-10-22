@@ -122,3 +122,35 @@ the C.
 - **Equivalent mutant.** Swapping which work slot BuildTree's merged node takes
   only matters for frequency ties; the shipped table has none among merged
   weights. Not a fixture gap; left out of `mutants.sh` with a note in the README.
+
+## Findings from `mathlib` (#475)
+
+- **The port already has a crate.** `mathlib/` is a `no_std` staticlib with a
+  `#[panic_handler]`, so it cannot host `cargo test`. The test-only crate lives in
+  a subdirectory (`mathlib/replay/`, `[[test]] path = "../tests/replay.rs"`), and
+  its `src/lib.rs` is registered in `check-rust-notices.sh` like crc's.
+- **C symbols: stub them, fixed arguments only.** `ffi.rs` calls the variadic
+  `Sys_Error`. Stable Rust cannot define a variadic function; a stub taking just
+  `fmt` links and works on the System V / AArch64 Linux ABIs. Error paths that
+  never return are covered by re-running the test binary as a child
+  (`current_exe()` plus an env trigger) and requiring SIGABRT and the message.
+  `sin`/`cos`/`floor` resolve from the host libm; no stub.
+- **Freezing the oracle found two things the live harness hid.** Its 1e-6
+  tolerance and 12 angles let `anglemod` run in `f32` where C runs in `double`
+  (fixed in its own commit), and `Invert24To16(256..512)` overflows an `int`, which
+  is undefined in C (excluded from the fixture, noted in its README). Compare bit
+  for bit by default; keep a tolerance only where libm is involved.
+- **Pick mutants against the C-visible behaviour, then check for equivalents.**
+  Two early mutants were equivalent (`+ 0.5` inside a `floor` of an integer;
+  `num > 0` vs `num >= 0` in `NearestMultiple`) and survived honestly. Regexes
+  that start with a bare token can match the doc comment first; anchor them on
+  code.
+- **A mutant can hang.** `GreatestCommonDivisor` with `/` for `%` loops forever.
+  `mutants.sh` runs the replay under `timeout 60` and counts that as a kill.
+- **Pilot bug: `mutants.sh` swallowed the broken-mutant message.** `crc`'s loop
+  ran the kill command with `2>&1` sent to `/dev/null`, so `exit 2` from a mutant
+  that did not compile printed nothing. `mathlib/tests/mutants.sh` captures stderr
+  and prints it on exit code 2; port that fix to `crc` if you touch it.
+- **Two-sided table.** Run the same list against the live harness first: it
+  killed 28 of 38 here, and the replay killed all 38. Keep the mutants that only
+  the replay kills; they are what the harness was missing.
