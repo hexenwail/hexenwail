@@ -78,8 +78,8 @@ the original stays in the tree. Do not delete it.
 - `strlcpy` and `strlcat` are separate files and gates
   (`src/strlcpy.rs`, `src/strlcat.rs`, `check-rust-strlcpy.sh`,
   `check-rust-strlcat.sh`, own harness dirs). Not entangled: retiring one leaves
-  the other untouched. `check-rust-strlcat.sh` builds with `--features ...,strlcpy,strlcat`
-  and keeps its live harness.
+  the other untouched. (strlcat has since been retired the same way; see
+  "Findings: strlcat".)
 - Pointer-writing ports: record the destination as the full `siz`-byte buffer
   (started all `a5`) so the fixture captures the untouched tail, and replay in
   guard zones. `siz == 0` is called with NULL, as the C original permits.
@@ -165,3 +165,35 @@ the C.
 - **Two-sided table.** Run the same list against the live harness first: it
   killed 28 of 38 here, and the replay killed all 38. Keep the mutants that only
   the replay kills; they are what the harness was missing.
+
+## Findings: strlcat
+
+Worked example: `engine/rust/strlcat/` and `scripts/check-rust-strlcat.sh`. The
+strlcpy crate shape, reused: a std test-only crate compiling `src/strlcat.rs`
+unchanged, no C symbols to stub, no `autotests` tricks needed.
+
+- **No divergence from C found.** The Rust and the C agree on every fixture
+  record and every grid point. Nothing needed a `fix(rust):` commit.
+- **The live harness only knew about a few destination shapes.** It built four
+  initial destinations (empty, NUL in the last usable byte, no NUL within `siz`,
+  one case-derived partial). The fixture grid instead walks every destination
+  string length 0..siz, and the replay grid goes to strings longer than `siz`
+  (the `dsize < strlen(dst)` case), where `siz` bounds the return value and
+  nothing may be written.
+- **Record shape.** The destination is recorded before and after as the
+  `siz`-byte window C may look at, with junk after the destination NUL so an
+  append that clobbers the tail shows. Bytes past `siz` are not recorded (C
+  never reads them); the generated grid in the replay lays a longer string out
+  past `siz` and requires it untouched.
+- **A mutant that is equivalent.** `n <= 1` for `n == 0` on the no-room return:
+  with `n == 1` the write pointer already sits on the NUL that ends `dst`, so the
+  final `*d = 0` rewrites a zero. Dropped from `mutants.sh` with a note. It
+  survives the live harness for the same reason.
+- **Mutant kills by crash count.** The scan-unbounded mutant dereferences the
+  NULL destination when `siz == 0` and dies of SIGSEGV; that is a kill, not a
+  compile failure, and `mutants.sh` counts it correctly.
+- **Both tables agree.** 18 mutants: the replay kills all 18 and the live
+  differential harness (kill command: rebuild the engine archive, run
+  `run_diff_harness.sh`, baseline checked to exit 0 first) killed the same 18.
+- **Undefined in C, not matched.** Overlapping `src`/`dst` and a source with no
+  NUL. Neither is in the contract and neither is in the fixture.
