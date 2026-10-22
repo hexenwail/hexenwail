@@ -5,10 +5,15 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Rust port of the Hexenwail/uhexen2 mathlib subsystem (engine/h2shared/mathlib.c)"
 publish = false
+autotests = false
 
 [lib]
 name = "mathlib_rs"
 crate-type = ["staticlib"]
+# no_std staticlib with its own panic handler: it cannot host a test harness.
+# The replay lives in replay/ (see that crate).
+test = false
+doctest = false
 
 [profile.release]
 panic = "abort"
