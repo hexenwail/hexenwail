@@ -22,6 +22,12 @@ written outside the destination, passes NULL when `siz == 0` (as C permits), and
 re-derives the semantic (prefix, NUL, a5 tail, return == strlen) from each
 record, so a bad fixture cannot bless a bad port.
 
+Beyond the fixture, `../replay.rs` runs a generated grid of every source length
+0..=256 against every size 0..=288 at source and destination offsets 0..=7
+(4.75 million calls) inside guard zones and checks the semantic directly:
+prefix copied, NUL after it, return == strlen, the rest of the destination
+untouched, nothing written outside it, source unchanged.
+
 Regenerate or audit against C (needs cc):
 
     bash engine/rust/strlcpy/tests/gen_fixtures.sh           # rewrite

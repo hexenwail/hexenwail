@@ -118,3 +118,106 @@ fn null_pointer_with_zero_count() {
     assert_eq!(c, 0xbeef);
     assert_eq!(unsafe { CRC_Block(core::ptr::null(), 0) }, 0xffff);
 }
+
+// ---------------------------------------------------------------------------
+// Exhaustive cross-check against an INDEPENDENT reference.
+//
+// The fixture is a sample.  The retired differential harness was exhaustive
+// (every (crc, byte) step, every CRC_Value input, 20000 blocks up to 8192
+// bytes at offsets 0..15), and the fixture alone does not match that.  This
+// restores it without a C compiler or a big fixture: `ref_step` is a plain
+// bit-by-bit CRC-CCITT (poly 0x1021, MSB first, no table) written here and
+// sharing nothing with src/crc.rs, whose step is table driven.  The fixture
+// records above are what tie the port to the actual bytes of common/crc.c;
+// this section shows the port is the CCITT function everywhere else.
+//
+// Sized for `cargo test --release`, which is how the gate and mutants.sh run
+// it (the engine ships release); a debug build takes noticeably longer.
+// ---------------------------------------------------------------------------
+
+const POLY: u16 = 0x1021;
+
+fn ref_step(mut crc: u16, byte: u8) -> u16 {
+    crc ^= (byte as u16) << 8;
+    for _ in 0..8 {
+        crc = if crc & 0x8000 != 0 { (crc << 1) ^ POLY } else { crc << 1 };
+    }
+    crc
+}
+
+fn ref_block(seed: u16, d: &[u8]) -> u16 {
+    d.iter().fold(seed, |c, &b| ref_step(c, b))
+}
+
+/// xorshift64*, seeded: deterministic and unrelated to the code under test.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+}
+
+#[test]
+fn reference_pins_the_published_check_value() {
+    // CRC-16/CCITT-FALSE of "123456789", the published check value.  Asserted
+    // against the literal so a wrong reference cannot validate a wrong port.
+    assert_eq!(ref_block(0xffff, b"123456789"), 0x29b1);
+    assert_eq!(unsafe { CRC_Block(b"123456789".as_ptr(), 9) }, 0x29b1);
+}
+
+#[test]
+fn every_crc_byte_step_matches_the_reference() {
+    // All 2^24 (crc, byte) pairs.
+    for crc in 0..=0xffffu32 {
+        for byte in 0..=0xffu32 {
+            let mut c = crc as u16;
+            unsafe { CRC_ProcessByte(&mut c, byte as u8) };
+            assert_eq!(c, ref_step(crc as u16, byte as u8), "crc {crc:04x} byte {byte:02x}");
+        }
+    }
+}
+
+#[test]
+fn crc_value_matches_the_reference_for_every_input() {
+    // common/crc.c: CRC_Value(x) is `x ^ CRC_XOR_VALUE`, and CRC_XOR_VALUE is
+    // 0x0000 for this CRC-CCITT variant, so it is the identity.  Every one of
+    // the 2^16 inputs, against the literal.
+    for x in 0..=0xffffu32 {
+        assert_eq!(CRC_Value(x as u16), x as u16 ^ 0x0000, "CRC_Value({x:04x})");
+    }
+}
+
+#[test]
+fn seeded_blocks_up_to_8192_bytes_at_every_offset_match_the_reference() {
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    for i in 0..5000usize {
+        // Edge lengths first, then random ones up to 8192.
+        let len = match i {
+            0 => 0,
+            1 => 1,
+            2 => 8192,
+            3 => 8191,
+            _ => (rng.next() % 8193) as usize,
+        };
+        let mut d = vec![0u8; len];
+        for b in d.iter_mut() {
+            *b = rng.next() as u8;
+        }
+        let seed = if i % 2 == 0 { 0xffff } else { rng.next() as u16 };
+        let want = ref_block(seed, &d);
+        let off = i % 16; // every offset 0..15, cycling
+        let got = at_offset(&d, off, |p| unsafe {
+            let mut c = seed;
+            CRC_ProcessBlock(p, &mut c, len as i32);
+            c
+        });
+        assert_eq!(got, want, "block {i}: len {len} offset {off} seed {seed:04x}");
+        if seed == 0xffff {
+            let got = at_offset(&d, off, |p| unsafe { CRC_Block(p, len as i32) });
+            assert_eq!(got, want, "CRC_Block {i}: len {len} offset {off}");
+        }
+    }
+}

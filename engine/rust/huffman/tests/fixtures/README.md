@@ -50,10 +50,22 @@ the integrated client does (malloc), and aborts if the two ever differ in bytes
 or in whether they overran. That is the one-allocation-path finding of the old
 harness, re-proved on every `--check`.
 
-Not frozen: bytes past `outlen` in the encode buffer (the raw fallback leaves
-scratch bits of the failed compressed attempt there; no caller reads them), and
+Not frozen, an ACCEPTED LOSS against the retired live harness: bytes past
+`outlen` in the encode buffer (the raw fallback leaves scratch bits of the
+failed compressed attempt there; no caller reads them, so a change that alters
+only those bytes passes), and
 the Sys_Error paths (they need a frequency table or allocator the ABI does not
 expose, and the fixed table never reaches them).
+
+## Beyond the fixture
+
+`../replay.rs` also encodes 1500 seeded payloads of 1..255 bytes, drawn
+proportionally to the frequency table (every fifth uniform, so the raw fallback
+is exercised too), and checks, from `huffman.c` HuffEncode and not from the
+fixture: `outlen <= inlen + 1`, `outlen = 1 + (bits + 7) / 8` with `bits` the
+sum of the code lengths unless that reaches `inlen + 1` (then `0xff` + the
+payload verbatim and `outlen = inlen + 1`), a header of `8 * (outlen - 1) - bits`
+in 0..=7 for compressed packets, and `decode(encode(x)) == x` at maxlen == len.
 
 ## Regenerate or audit against C (needs cc)
 

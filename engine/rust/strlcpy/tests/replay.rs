@@ -139,3 +139,70 @@ fn size_zero_leaves_a_real_destination_alone() {
     assert_eq!(r, 5);
     assert_eq!(dst, [CANARY; 4]);
 }
+
+/// The full grid the retired differential harness covered, written straight
+/// from the semantic rather than from a fixture: every source length 0..=256
+/// against every size 0..=288 at source and destination offsets 0..=7, inside
+/// guard zones.  Checks, directly: the first min(len, siz-1) bytes are copied,
+/// a NUL follows them (siz > 0), the return is strlen(src), the rest of the
+/// destination is untouched, nothing outside it is written, and the source is
+/// unchanged.  A NUL-free source byte pattern with junk after the terminator
+/// proves nothing past the NUL is copied.
+#[test]
+fn full_length_size_offset_grid_matches_the_semantic() {
+    const MAXLEN: usize = 256;
+    const MAXSIZ: usize = 288;
+    let mut checked = 0u64;
+    for len in 0..=MAXLEN {
+        // Non-zero, never the canary, so a stray copy or a missed write shows.
+        let mut s: Vec<u8> = (0..len)
+            .map(|i| match ((i * 7) % 250 + 1) as u8 {
+                CANARY => 0x5a,
+                b => b,
+            })
+            .collect();
+        s.push(0);
+        s.extend_from_slice(&[0x77; 5]); // junk after the NUL, never to be copied
+        for so in 0..8usize {
+            let mut sbuf = vec![CANARY; GUARD + so + s.len() + GUARD];
+            sbuf[GUARD + so..GUARD + so + s.len()].copy_from_slice(&s);
+            let sbefore = sbuf.clone();
+            for dof in 0..8usize {
+                let mut dbuf = vec![CANARY; GUARD + dof + MAXSIZ + GUARD];
+                for siz in 0..=MAXSIZ {
+                    dbuf.fill(CANARY);
+                    let lo = GUARD + dof;
+                    let ret = unsafe {
+                        let d = if siz == 0 {
+                            core::ptr::null_mut()
+                        } else {
+                            dbuf.as_mut_ptr().add(lo) as *mut core::ffi::c_char
+                        };
+                        q_strlcpy(d, sbuf.as_ptr().add(GUARD + so) as *const core::ffi::c_char, siz)
+                    };
+                    let ctx = || format!("len {len} siz {siz} src off {so} dst off {dof}");
+                    assert_eq!(ret, len, "{}: return != strlen", ctx());
+                    assert_eq!(sbuf, sbefore, "{}: source modified", ctx());
+                    assert!(dbuf[..lo].iter().all(|&b| b == CANARY), "{}: wrote below dst", ctx());
+                    assert!(
+                        dbuf[lo + siz..].iter().all(|&b| b == CANARY),
+                        "{}: wrote past dst",
+                        ctx()
+                    );
+                    if siz > 0 {
+                        let keep = len.min(siz - 1);
+                        assert_eq!(&dbuf[lo..lo + keep], &s[..keep], "{}: prefix", ctx());
+                        assert_eq!(dbuf[lo + keep], 0, "{}: no NUL after the copy", ctx());
+                        assert!(
+                            dbuf[lo + keep + 1..lo + siz].iter().all(|&b| b == CANARY),
+                            "{}: tail inside dst touched",
+                            ctx()
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 257 * 8 * 8 * 289);
+}

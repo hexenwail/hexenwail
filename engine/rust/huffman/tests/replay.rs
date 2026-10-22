@@ -307,3 +307,80 @@ fn code_table_is_a_complete_prefix_code() {
         }
     }
 }
+
+/// Round trips over many more payloads than the fixture freezes, with the
+/// checks stated from huffman.c's HuffEncode (lines 333-340) and not from the
+/// fixture:
+///
+///   bits    = the sum of the code lengths of the payload bytes
+///   outlen  = 1 + (bits + 7) / 8, header byte = 8 * (outlen - 1) - bits
+///   if outlen >= inlen + 1 the encoder sends 0xff + the payload, outlen = inlen + 1
+///
+/// so outlen <= inlen + 1 always, a compressed packet is strictly shorter than
+/// that bound and has a header in 0..=7, and decode(encode(x)) == x at
+/// maxlen == len.  The code lengths are read from the Rust table, which
+/// `code_table_is_a_complete_prefix_code` and the frozen `code` records tie to
+/// the C.  Payloads are 1..=255 bytes, drawn with probability proportional to
+/// the C's frequency table (the same weights gen_fixtures.c uses), so most take
+/// the compressed path.
+#[test]
+fn seeded_weighted_payloads_round_trip_and_obey_the_encoder_invariants() {
+    init();
+    let mut cum = [0u64; 256];
+    let mut sum = 0u64;
+    for (i, c) in cum.iter_mut().enumerate() {
+        sum += (Huffman_freq(i) * 1_000_000.0) as u64 + 1;
+        *c = sum;
+    }
+    let mut state = 0x243f_6a88_85a3_08d3u64; // xorshift64*, seeded
+    let mut next = move || {
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        state.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    };
+
+    let (mut compressed, mut raw) = (0, 0);
+    for case in 0..1500usize {
+        let len = 1 + (next() % 255) as usize;
+        let payload: Vec<u8> = (0..len)
+            .map(|_| {
+                if case % 5 == 4 {
+                    (next() >> 24) as u8 // uniform: mostly the raw fallback
+                } else {
+                    let r = next() % sum;
+                    cum.iter().position(|&c| r < c).unwrap() as u8
+                }
+            })
+            .collect();
+
+        let mut out = vec![POISON; 300];
+        let mut outlen = -1i32;
+        unsafe { HuffEncode(payload.as_ptr(), out.as_mut_ptr(), len as i32, &mut outlen) };
+        let at = format!("case {case} (len {len})");
+        assert!(outlen >= 1 && outlen as usize <= len + 1, "{at}: outlen {outlen} > inlen + 1");
+
+        let bits: i32 = payload.iter().map(|&b| Huffman_lookup_len(b as usize)).sum();
+        let packed = 1 + (bits + 7) / 8;
+        if packed >= len as i32 + 1 {
+            assert_eq!(out[0], 0xff, "{at}: expected the raw fallback");
+            assert_eq!(outlen, len as i32 + 1, "{at}: raw outlen");
+            assert_eq!(&out[1..=len], &payload[..], "{at}: raw payload");
+            raw += 1;
+        } else {
+            assert_eq!(outlen, packed, "{at}: compressed outlen");
+            assert!(outlen < len as i32 + 1, "{at}: compressed packet not shorter");
+            assert_eq!(out[0] as i32, 8 * (outlen - 1) - bits, "{at}: padding header");
+            assert!(out[0] <= 7, "{at}: padding count {}", out[0]);
+            compressed += 1;
+        }
+
+        let pkt = out[..outlen as usize].to_vec();
+        let (dlen, dout) = survived(&at, guard_decode(&pkt, len as i32));
+        check_stored(&at, dlen, &dout, len as i32, &payload);
+        assert_eq!(dlen, len as i32, "{at}: decoded length");
+    }
+    // Both paths must actually have been exercised.
+    assert!(compressed >= 800, "compressed packets: {compressed}");
+    assert!(raw >= 100, "raw fallbacks: {raw}");
+}
