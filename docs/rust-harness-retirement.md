@@ -165,3 +165,69 @@ the C.
 - **Two-sided table.** Run the same list against the live harness first: it
   killed 28 of 38 here, and the replay killed all 38. Keep the mutants that only
   the replay kills; they are what the harness was missing.
+
+## Findings: info_str (#475)
+
+Worked example: `engine/rust/info_str/` and `scripts/check-rust-info-str.sh`. A
+port with process-global state, two stubbed C symbols and a C original that
+only one target compiles.
+
+- **No porting bug.** The port, the fixture (frozen from the C) and an
+  independent reference model agreed on the first run: all 918 fixture records,
+  every string over `{ \ a b * }` up to length 8, 3000 seeded random sequences
+  of 60 operations compared byte for byte over the whole 1024-byte buffer after
+  every call, and a 34560-case key/value length x `maxsize` x filter grid. No
+  `fix(rust):` commit.
+- **One C variant.** `info_str.c` is in `HWSV_SOURCES` alone, so the generator
+  compiles it as hwsv does (`-DH2W -DSERVERONLY`) and only that variant is
+  frozen. The `#ifndef SERVERONLY` client branch is compiled into no binary.
+- **A model written from the data shape, not the control flow.** The model
+  treats an info string as an optional leading backslash then fields split on
+  backslashes, read as key/value pairs; removal, prefixed removal, set and print
+  are defined on that. It also has to reproduce every fixture record, which is
+  what stops it drifting from the C. The model is the cheap way to get an
+  exhaustive malformed-input sweep without a big fixture.
+- **Small-alphabet sweep as a digest.** Strings over `{ \ a b * }` to length 7
+  are run through ten operations in the C, and every output (return text, whole
+  64-byte buffer, log) is folded into one FNV-1a digest, one fixture line. The
+  replay folds the Rust the same way. The serialisation lives in both
+  `gen_fixtures.c` and `replay.rs` and must change together. Use this when an
+  exhaustive enumeration is cheap to run and expensive to store.
+- **Pointer identity is not a contract.** `Info_ValueForKey` returns one of four
+  static slots on a hit and a `""` literal on a miss, from two different return
+  sites. Whether a compiler merges the two literals is not defined. The
+  generator and the replay probe both sites once and record a miss as class `E`;
+  hits are classed by first appearance in the run, and every slot seen so far has
+  its text recorded after each call, so a slot a later (even missed) lookup
+  overwrote is checked.
+- **Variadic C stub.** `CON_Printf(flags, fmt, ...)` cannot be defined in stable
+  Rust, so `info_str/src/lib.rs` stubs it with one fixed extra pointer argument,
+  sound on the System V and AArch64 Linux ABIs (the same argument as the
+  `Sys_Error` stub in mathlib). It records `[flags]text`, as the generator's C
+  stub does, so every message, and the flags word, is compared. `Cvar_FindVar`
+  is stubbed too, with a registered and a not-registered state and a counter for
+  lookups of any name but `sv_highchars`.
+- **Process-global state.** The rotation slots, the log and the cvar stub are
+  global, so the replay tests share one lock; `cargo test` runs them on threads.
+- **Generator pitfall.** `cvar_t sv_highchars = { "sv_highchars", "1", ... }`
+  leaves `.integer` at 0 (the brace initialiser sets only name, string and
+  flags). The generator sets it to 1 explicitly before anything that depends on
+  it, the way the engine's registration path does.
+- **Buffer windows.** For writing operations the fixture records the window
+  `0 .. max(old, new) + 1` of a poison-filled buffer, so the NUL and the stale
+  bytes `memmove` leaves past it are part of the record, and the generator
+  asserts the C wrote nothing beyond it.
+- **Mutants: 41, same set killed by both.** The replay kills all 41; the same
+  list run against the live differential harness (kill command rebuilding the
+  engine archive and running `run_diff_harness.sh`, baseline exit 0 checked
+  first) also killed all 41, so unlike mathlib this harness had no gap the replay
+  closes. Two equivalent mutants are left out and noted in `mutants.sh`
+  (`l < 20` -> `l <= 20` in `Info_Print`, and the `!= 0` rewrite of the cvar
+  test). A mutant can hang the replay (observed: one ran for minutes before a
+  timeout was added), so the kill command runs under `timeout 60`, which counts
+  as a kill.
+- **Accepted losses.** A key or value segment of 512 bytes or more overruns the
+  C's `pkey`/`value` stack buffers and the rotation slots, and a `maxsize` above
+  the caller's buffer lets the C write past it; both are undefined in C and are
+  not generated. Miss-pointer identity and the absolute rotation slot are not
+  frozen.
