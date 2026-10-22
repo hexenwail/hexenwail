@@ -1,0 +1,922 @@
+# info_str fixture: frozen output of engine/hexenworld/shared/info_str.c
+# compiled as hwsv does (-DH2W -DSERVERONLY).  Do not edit by hand:
+# bash engine/rust/info_str/tests/gen_fixtures.sh   (--check to audit)
+# Format: tests/fixtures/README.md
+rot
+look \hostname\hexenwail\maxclients\8\_password\secret hostname 0 hexenwail
+look \hostname\hexenwail\maxclients\8\_password\secret maxclients 1 hexenwail 8
+look \hostname\hexenwail\maxclients\8\_password\secret _password 2 hexenwail 8 secret
+look \hostname\hexenwail\maxclients\8\_password\secret nope E hexenwail 8 secret
+look \hostname\hexenwail\maxclients\8\_password\secret nope E secret 8 secret
+look ~ a E secret 8 secret
+look \ a E secret 8 secret
+look abc abc E secret 8 secret
+look a\b a 0 b 8 secret
+look \\a\\b ~ 1 b a secret
+look \\a\\b b E b a b
+rot
+look k\v k 0 v
+look \a\ a 1 v ~
+look \a a E v ~
+look \\ ~ 2 v ~ ~
+look \\ ~ 0 ~ ~ ~
+look \a\\b a 1 ~ ~ ~
+look \a\b\c b E ~ ~ ~
+look \a\b\c c E ~ ~ b
+look \k\first\k\second k 0 first ~ b
+look \k\second\k\first k 1 first second b
+look \Key\v key E first second b
+look \a\two%20words\b\1 a 2 first second two%20words
+rot
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\1\2 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\1\2 1 1 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 2
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\1\2 kkk E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 2
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\1\2 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 2 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 2 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+rot
+look \a\A\b\B\c\C\d\D\e\E a 0 A
+look \a\A\b\B\c\C\d\D\e\E b 1 A B
+look \a\A\b\B\c\C\d\D\e\E c 2 A B C
+look \a\A\b\B\c\C\d\D\e\E d 3 A B C D
+look \a\A\b\B\c\C\d\D\e\E zz E E B C D
+look \a\A\b\B\c\C\d\D\e\E e 1 E E C D
+look \a\A\b\B\c\C\d\D\e\E zz E E E E D
+look \a\A\b\B\c\C\d\D\e\E zz E E E E E
+look \a\A\b\B\c\C\d\D\e\E a 0 A E E E
+look \a\A\b\B\c\C\d\D\e\E b 1 A B E E
+look \a\A\b\B\c\C\d\D\e\E c 2 A B C E
+look \a\A\b\B\c\C\d\D\e\E d 3 A B C D
+look \a\A\b\B\c\C\d\D\e\E e 0 E B C D
+rot
+look \p\one\q\two p 0 one
+look \r\three\s\four zz E one
+look \r\three\s\four r 1 one three
+look \x\5 x 2 one three 5
+look \x\5 y E 5 three 5
+look \x\5 x 3 5 three 5 5
+look \x\5 x 1 5 5 5 5
+rot
+look \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ccb\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfeef\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\two%20words\ dfeef 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\0\\\e%0dd\ team 1 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 0
+look \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ccb\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfeef\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\two%20words\ ccb 2 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ccb\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfeef\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\two%20words\ dfeef 3 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ccb\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfeef\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\two%20words\ *gamedir E two%20words 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ccb\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfeef\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\two%20words\ _x E two%20words two%20words vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\0\\\e%0dd\ topcolor 2 two%20words two%20words vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+rot
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\0 _pw E
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\0 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\*gamedir\B kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\*gamedir\B kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 -
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\*gamedir\B ~ E -
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\0 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 - ~
+rot
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 ~
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\c\12345678\\ABE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv name E ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 ~ ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 2 ~ ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\c\12345678\\ABE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv cbd E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\c\12345678\\ABE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv c 3 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ _ E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 2 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ topcolor E ~ ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\c\12345678\\ABE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv k E ~ ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\c\12345678\\ABE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _x E ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+rot
+look \edff\0\team\%ff\ team 0 %ff
+look \edff\0\team\%ff\ topcolor E %ff
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG ~ 1 %ff Z
+look \edff\0\team\%ff\ edff 2 %ff Z 0
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG ~ 0 Z Z 0
+look \edff\0\team\%ff\ *spectator E Z Z 0
+look \edff\0\team\%ff\ *gamedir E Z %ff 0
+look \edff\0\team\%ff\ * E Z %ff %ff
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG *gamedir E BGG %ff %ff
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG _ E BGG %ff %ff
+look \edff\0\team\%ff\ team 1 BGG %ff %ff
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG ~ 2 BGG %ff Z
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 0 %ff Z
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG b 3 0 %ff Z 0
+look \\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\BGG b 1 0 0 Z 0
+rot
+look \_x\%0dc%1fe\_\Z\team\x\*spectator\%0d team 0 x
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail _pw 1 x hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail _pw 2 x hexenwail hexenwail
+look \_x\%0dc%1fe\_\Z\team\x\*spectator\%0d kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E x hexenwail hexenwail
+look \_x\%0dc%1fe\_\Z\team\x\*spectator\%0d _x 0 %0dc%1fe hexenwail hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 %0dc%1fe - hexenwail
+look \_x\%0dc%1fe\_\Z\team\x\*spectator\%0d a E %0dc%1fe - %0d
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail b E %0dc%1fe - %0d
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail _pw 0 hexenwail - %0d
+look \_x\%0dc%1fe\_\Z\team\x\*spectator\%0d _ 1 hexenwail Z %0d
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 2 hexenwail Z -
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail _pw 3 hexenwail Z - hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail _pw 0 hexenwail Z - hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\_pw\hexenwail _pw 1 hexenwail hexenwail - hexenwail
+rot
+look \*gamedir\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\c ~ E
+look \*gamedir\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\c b E
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _x E
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv k E
+look \*gamedir\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\c kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 c
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv team 1 c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv topcolor E c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \*gamedir\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\c kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 2 c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv c
+look \*gamedir\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\c kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv c
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv team 1 c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv c
+look \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv team 3 c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv c vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+rot
+look \topcolor\d%7f%ff%0d\*gamedir\- k E
+look \topcolor\d%7f%ff%0d\*gamedir\- *gamedir 0 -
+look \\12345678\fdcb\HE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\team\hexenwail fdcb 1 - HE
+look \topcolor\d%7f%ff%0d\*gamedir\- d E - HE
+look \topcolor\d%7f%ff%0d\*gamedir\- *gamedir 2 - HE -
+look \topcolor\d%7f%ff%0d\*gamedir\- topcolor 0 d%7f%ff%0d HE -
+look \topcolor\d%7f%ff%0d\*gamedir\- *gamedir 1 d%7f%ff%0d - -
+look \\12345678\fdcb\HE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\team\hexenwail ~ 3 d%7f%ff%0d - - 12345678
+look \topcolor\d%7f%ff%0d\*gamedir\- *gamedir 2 d%7f%ff%0d - - 12345678
+look \\12345678\fdcb\HE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\team\hexenwail a E hexenwail - - 12345678
+look \\12345678\fdcb\HE\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\team\hexenwail kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 hexenwail two%20words - 12345678
+rot
+look \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\\df\ a 0 ~
+look \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\\df\ df 1 ~ ~
+look \k\%0e k 2 ~ ~ %0e
+look \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\\df\ a 3 ~ ~ %0e ~
+look \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\\df\ df 0 ~ ~ %0e ~
+look \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\\df\ _pw E ~ ~ %0e ~
+rot
+look *spectator\cba%0e\topcolor\hexenwail\*spectator\-\k\- fbdea E
+look \k\d%7ff%0e\*spectator\Z\name\BBD *spectator 0 Z
+look *spectator\cba%0e\topcolor\hexenwail\*spectator\-\k\- topcolor 1 Z hexenwail
+look \k\d%7ff%0e\*spectator\Z\name\BBD *spectator 2 Z hexenwail Z
+look \k\d%7ff%0e\*spectator\Z\name\BBD *spectator 3 Z hexenwail Z Z
+look \k\d%7ff%0e\*spectator\Z\name\BBD k 0 d%7ff%0e hexenwail Z Z
+rot
+look \_x\two%20words _x 0 two%20words
+look a\DG fcff E two%20words
+look \_x\two%20words * E two%20words
+look a\DG _x E two%20words
+look a\DG _pw E DG
+look a\DG a 1 DG DG
+look a\DG b E DG DG
+look \_x\two%20words _x 2 DG DG two%20words
+look a\DG a 0 DG DG two%20words
+look a\DG _x E DG DG two%20words
+look \_x\two%20words name E DG DG two%20words
+look \_x\two%20words _x 2 DG DG two%20words
+look a\DG a 0 DG DG two%20words
+look \_x\two%20words _ E DG two%20words two%20words
+look \_x\two%20words name E DG two%20words two%20words
+rot
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x *spectator 0 Z
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x team 1 Z CBBCGC
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x b 2 Z CBBCGC vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x b 3 Z CBBCGC vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x *spectator 0 Z CBBCGC vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \k\Z k 1 Z Z vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x b 2 Z Z vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \k\Z k 3 Z Z vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv Z
+look \k\Z *gamedir E Z Z vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv Z
+look \*spectator\Z\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\CBBCGC\name\x *spectator 1 Z Z vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv Z
+rot
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 topcolor 0 hexenwail
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 a E hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z name E hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z *spectator E hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 Z
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 topcolor 1 Z hexenwail
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 *gamedir 2 Z hexenwail -
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z _ E Z hexenwail -
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 team E 1 hexenwail -
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 *gamedir 1 1 - -
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z a E 1 - Z
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z b E 1 - Z
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z * E Z - Z
+look \*gamedir\-\topcolor\hexenwail\name\%0dcfb\feea\1 k E Z 1 Z
+rot
+look ~ d E
+look \_\ name E
+look ~ k E
+look ~ _x E
+look ~ team E
+look ~ b E
+look \_\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E
+look ~ team E
+rot
+look \*\%1fb\a\hexenwail\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _ E
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\topcolor\12345678\b\two%20words\topcolor\Z a E
+look \*\%1fb\a\hexenwail\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv team 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \*\%1fb\a\hexenwail\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv a 1 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv hexenwail
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\topcolor\12345678\b\two%20words\topcolor\Z kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv hexenwail
+look \*\%1fb\a\hexenwail\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv * 2 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv hexenwail %1fb
+look \*\%1fb\a\hexenwail\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _pw E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv hexenwail %1fb
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\topcolor\12345678\b\two%20words\topcolor\Z b 1 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv two%20words %1fb
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\two%20words\topcolor\12345678\b\two%20words\topcolor\Z b 3 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv two%20words %1fb two%20words
+rot
+look \k\a\aabca\x aabca 0 x
+look \k\a\aabca\x k 1 x a
+look \k\a\aabca\x k 2 x a a
+look \a\\1\ k E x a a
+look \a\\1\ a 0 ~ a a
+look \a\\1\ 1 1 ~ ~ a
+look \a\\1\ 1 2 ~ ~ ~
+look \k\a\aabca\x aabca 3 ~ ~ ~ x
+look \k\a\aabca\x a E x ~ ~ x
+look \a\\1\ b E x ~ ~ x
+look \k\a\aabca\x aabca 2 x ~ x x
+look \a\\1\ 1 3 x ~ x ~
+look \k\a\aabca\x k 0 a ~ x ~
+rot
+look \topcolor\CDF\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%1f%7f\cc\-\ k E
+look \topcolor\CDF\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%1f%7f\cc\-\ topcolor 0 CDF
+look \topcolor\CDF\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%1f%7f\cc\-\ cc 1 CDF -
+look \*\\DBGGA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\*gamedir\x\dcd\hexenwail DBGGA 2 CDF - kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
+look \*\\DBGGA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\*gamedir\x\dcd\hexenwail * 3 CDF - kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~
+look \topcolor\CDF\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%1f%7f\cc\-\ cc 0 - - kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~
+rot
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ name E
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ a E
+look \*gamedir\a%7fc\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ ffabf E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+look \*gamedir\a%7fc\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\ a 1 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~
+look \*gamedir\a%7fc\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\ bacee E vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ _pw E ~ ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ a E ~ ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 ~ %01%ff%ffd
+look \*gamedir\a%7fc\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\ a 2 ~ %01%ff%ffd ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%ff%ffd\*\%7f\*\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 %01%ff%ffd %01%ff%ffd ~
+look \*gamedir\a%7fc\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\ *gamedir 3 %01%ff%ffd %01%ff%ffd ~ a%7fc
+rot
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B *gamedir 0 12345678
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B a 1 12345678 GDEH
+look \_pw\%0d\topcolor\HACDDA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\bd%80%01 _pw 2 12345678 GDEH %0d
+look \_pw\%0d\topcolor\HACDDA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\bd%80%01 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 3 12345678 GDEH %0d bd%80%01
+look \_pw\%0d\topcolor\HACDDA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\bd%80%01 _ E bd%80%01 GDEH %0d bd%80%01
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B _x 1 bd%80%01 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv %0d bd%80%01
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B *gamedir 2 bd%80%01 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678 bd%80%01
+look \_pw\%0d\topcolor\HACDDA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\bd%80%01 * E bd%80%01 vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678 bd%80%01
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B _pw E B vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 12345678 bd%80%01
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B name E B B 12345678 bd%80%01
+look _x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\GDEH\*gamedir\12345678\f\B *gamedir 2 B B 12345678 bd%80%01
+rot
+look *spectator\-\a\\ _ E
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e team 0 GCGFAH
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e team 1 GCGFAH GCGFAH
+look *spectator\-\a\\ *spectator 2 GCGFAH GCGFAH -
+look *spectator\-\a\\ *spectator 3 GCGFAH GCGFAH - -
+look *spectator\-\a\\ a 0 ~ GCGFAH - -
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e k E ~ e - -
+look *spectator\-\a\\ *gamedir E ~ e ~ -
+look *spectator\-\a\\ topcolor E ~ e ~ ~
+look *spectator\-\a\\ caae E ~ e ~ ~
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e name 1 ~ %c8%0d ~ ~
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e f E ~ %c8%0d e ~
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e *spectator E ~ %c8%0d e e
+look *spectator\-\a\\ *spectator 0 - %c8%0d e e
+look \_pw\Z\name\%c8%0d\team\GCGFAH\_\e name 1 - %c8%0d e e
+rot
+look \name\0\\ name 0 0
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE team 1 0 12345678
+look \name\0\\ name 2 0 12345678 0
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE name E 0 12345678 0
+look \name\0\\ *spectator E ~ 12345678 0
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 ~ CEFGG 0
+look \name\0\\ ~ 2 ~ CEFGG ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE _pw E ~ CEFGG ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 0 CEFGG CEFGG ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE *gamedir E CEFGG EE ~
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEFGG\team\12345678\k\\\EE topcolor E CEFGG EE EE
+look \name\0\\ name 3 CEFGG EE EE 0
+rot
+look \\AHCC\ * E
+look \\AHCC\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\efb\team\- _pw E
+look \\AHCC\ ff E
+look \\AHCC\ ~ 0 AHCC
+look \\AHCC\ team E AHCC
+look \\AHCC\ ~ 1 AHCC AHCC
+look \\AHCC\ ~ 2 AHCC AHCC AHCC
+look \\AHCC\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E AHCC AHCC AHCC
+look \\AHCC\ ~ 3 AHCC AHCC AHCC AHCC
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\efb\team\- team 1 AHCC - AHCC AHCC
+look \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\efb\team\- kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E AHCC - - AHCC
+look \\AHCC\ bade E AHCC - - AHCC
+look \\AHCC\ a E AHCC - - AHCC
+rot
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail topcolor E
+look \*spectator\12345678\*gamedir\hexenwail *gamedir 0 hexenwail
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail _x 1 hexenwail FE
+look \*spectator\12345678\*gamedir\hexenwail b E hexenwail FE
+look \*spectator\12345678\*gamedir\hexenwail *gamedir 2 hexenwail FE hexenwail
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail _ E hexenwail FE hexenwail
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail team 1 hexenwail two%20words hexenwail
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail team 3 hexenwail two%20words hexenwail two%20words
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail team 2 hexenwail two%20words two%20words two%20words
+look \_x\FE\team\two%20words\team\two%20words\_pw\hexenwail b E hexenwail two%20words two%20words two%20words
+rot
+look \ffcfc\F\ccac\hexenwail\b\GBBBFA ffcfc 0 F
+look \ffcfc\F\ccac\hexenwail\b\GBBBFA b 1 F GBBBFA
+look ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E F GBBBFA
+look ~ name E F GBBBFA
+look ~ _pw E F GBBBFA
+look ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk E F GBBBFA
+look \ffcfc\F\ccac\hexenwail\b\GBBBFA ffcfc 2 F GBBBFA F
+look \ffcfc\F\ccac\hexenwail\b\GBBBFA ccac 3 F GBBBFA F hexenwail
+look \ffcfc\F\ccac\hexenwail\b\GBBBFA _ E GBBBFA GBBBFA F hexenwail
+look ~ *gamedir E GBBBFA GBBBFA F hexenwail
+look ~ ~ E GBBBFA GBBBFA F hexenwail
+rot
+look \efc\x\team\1 team 0 1
+look \_x\Z _x 1 1 Z
+look \efc\x\team\1 _pw E 1 Z
+look \_x\Z _pw E 1 Z
+look \_x\Z _x 0 Z Z
+look \efc\x\team\1 team 1 Z 1
+look \efc\x\team\1 topcolor E Z 1
+look \efc\x\team\1 team 2 Z 1 1
+look \_x\Z _x 0 Z 1 1
+look \_x\Z _x 1 Z Z 1
+look \efc\x\team\1 efc 3 Z Z 1 x
+look \_x\Z _x 2 Z Z Z x
+look \_x\Z _x 0 Z Z Z x
+look \_x\Z b E Z Z Z x
+rm \a\1\b\2\c\3 b ~ \a\1\c\3%00c\3%00
+rm \a\1\b\2 a ~ \b\2%00b\2%00
+rm \a\1\b\2 b ~ \a\1%00b\2%00
+rm \a\1 a ~ %00a\1%00
+rm \a\1\b\2 zz ~ \a\1\b\2%00
+rm ~ a ~ %00
+rm abc abc ~ abc%00
+rm a\1\b\2 a ~ \b\2%00\2%00
+rm a\1\b\2 b ~ a\1%00b\2%00
+rm \a\\b\2 a ~ \b\2%00\2%00
+rm \\a\1 ~ ~ \1%00\1%00
+rm \a\1\b\ b ~ \a\1%00b\%00
+rm \a\1\b b ~ \a\1\b%00
+rm \a\1\ a ~ \%00\1\%00
+rm \a\1\ ~ ~ \a\1\%00
+rm \A\1\a\2 a ~ \A\1%00a\2%00
+rm \k\first\k\second k ~ \k\second%00\second%00
+rm \a\1 b\c [0]Can't%20use%20a%20key%20with%20a%20\%0a \a\1%00
+rm \a\1\b\2 b\ [0]Can't%20use%20a%20key%20with%20a%20\%0a \a\1\b\2%00
+rm \ a ~ \%00
+rm \\\\ ~ ~ \\%00\%00
+rm \a a ~ \a%00
+rm a a ~ a%00
+rm \a\1\a\2\a\3 a ~ \a\2\a\3%00a\3%00
+rm \a\1 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \a\1%00
+rm \k\1\_pw\hexenwail\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%c8f%7f%0d\_x\hexenwail kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \k\1\_pw\hexenwail\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%c8f%7f%0d\_x\hexenwail%00
+rm _x\12345678\name\%01%0d\team\%01%0e%0e%ff _x ~ \name\%01%0d\team\%01%0e%0e%ff%00\team\%01%0e%0e%ff%00
+rm \*\0\topcolor\hexenwail * ~ \topcolor\hexenwail%00ail%00
+rm \ca\two%20words _pw ~ \ca\two%20words%00
+rm \be\hexenwail be ~ %00be\hexenwail%00
+rm \ccefb\Z\_x\12345678\*\Z ccefb ~ \_x\12345678\*\Z%00678\*\Z%00
+rm \_\\cf%ff\_\two%20words\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\ _ ~ \cf%ff\_\two%20words\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\%00x\%00
+rm _\x\eb\B\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\ ~ ~ _\x\eb\B\\%00vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\%00
+rm \_pw\%80b%80%0e\*\-\*spectator\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01c _pw ~ \*\-\*spectator\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01c%00kkkkk\%01c%00
+rm \topcolor\BFGDG\_\1 * ~ \topcolor\BFGDG\_\1%00
+rm \e\x\_pw\%c8\*spectator\%0e%c8%01 _ ~ \e\x\_pw\%c8\*spectator\%0e%c8%01%00
+rm ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ %00
+rm \hexenwail\*\%01%80%0d\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\d\two%20words _x ~ \hexenwail\*\%01%80%0d\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\d\two%20words%00
+rm \aeef\\a\acbac\ _pw ~ \aeef\\a\acbac\%00
+rm \k\\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\f%01\k\\two%20words\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \k\\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\f%01\k\\two%20words\%00
+rm ~ b ~ %00
+rm \daaa\hexenwail\_\\Z daaa ~ \_\\Z%00hexenwail\_\\Z%00
+rm \_\x\_pw\%7f\topcolor\hexenwail k ~ \_\x\_pw\%7f\topcolor\hexenwail%00
+rm \topcolor\12345678\b\e%1fa team ~ \topcolor\12345678\b\e%1fa%00
+rm ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ %00
+rm ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ %00
+rm \a\dde%c8\_pw\12345678\*\ _ ~ \a\dde%c8\_pw\12345678\*\%00
+rm \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\bb%80\f\x\*\%01 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \f\x\*\%01%00kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\bb%80\f\x\*\%01%00
+rm \fef\e%01%1f\*spectator\\afabb\0\_\0 _pw ~ \fef\e%01%1f\*spectator\\afabb\0\_\0%00
+rm ~ _x ~ %00
+rm \a\\_x\AF\*\two%20words\_pw\hexenwail\_x\Z a ~ \_x\AF\*\two%20words\_pw\hexenwail\_x\Z%00\Z%00
+rm ~ topcolor ~ %00
+rm \e\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\0\baae\two%20words\a\ ~ ~ \e\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\baae\two%20words\a\%00a\%00
+rm \name\ _x ~ \name\%00
+rm ~ b ~ %00
+rm ~ b ~ %00
+rm \b\-\team\%80 _pw ~ \b\-\team\%80%00
+rm \*gamedir\\fc%7f\ef\0 _pw ~ \*gamedir\\fc%7f\ef\0%00
+rm \a\two%20words\name\\name\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv a ~ \name\\name\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00vvvvvvvvvvv%00
+rm ~ aaecd ~ %00
+rm \*spectator\0\b\ *spectator ~ \b\%00ectator\0\b\%00
+rm \b\ k ~ \b\%00
+rm \name\0\_pw\\%0d%80f%80\*spectator\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\ name ~ \_pw\\%0d%80f%80\*spectator\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\%0045678\%00
+rm \*\1\k\1 _x ~ \*\1\k\1%00
+rm \*spectator\12345678\*\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\cc\x eafbd ~ \*spectator\12345678\*\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\cc\x%00
+rm \beb\two%20words d ~ \beb\two%20words%00
+rm \_x\%c8c\_pw\two%20words\_\1\dfbdf\1 _x ~ \_pw\two%20words\_\1\dfbdf\1%00bdf\1%00
+rm \b\CFAACC\_\two%20words\_pw\- b ~ \_\two%20words\_pw\-%00ds\_pw\-%00
+rm \_\EDDH\name\d%80f\fdfed\two%20words name ~ \_\EDDH\fdfed\two%20words%00wo%20words%00
+rm \name\f\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv name ~ \\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00vvvvvv%00
+rm \*\x * ~ %00*\x%00
+rm \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\a\hexenwail\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%c8c kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \a\hexenwail\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%c8c%00kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%c8c%00
+rm \k\\bdd%0d\\%7f\_\aaa ~ ~ \k\\bdd%0d\\%7f\_\aaa%00
+rm \team\x\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ k ~ \team\x\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%00
+rm \team\hexenwail\dbccd\%01c\_\%0de%7ff kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \team\hexenwail\dbccd\%01c\_\%0de%7ff%00
+rm \name\HHCB\*\B\team\two%20words\ef\\EEF\eae\%0dad team ~ \name\HHCB\*\B\ef\\EEF\eae\%0dad%00f\\EEF\eae\%0dad%00
+rm ~ ~ ~ %00
+rm \cd\ _pw ~ \cd\%00
+rm \b\hexenwail ~ ~ \b\hexenwail%00
+rm \_x\0\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfce\%c8%c8 b ~ \_x\0\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\dfce\%c8%c8%00
+rm ~ b ~ %00
+rm \*gamedir\CF\_x\two%20words\team\%80%0d%01f\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv bf ~ \*gamedir\CF\_x\two%20words\team\%80%0d%01f\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+rm \_x\Z\*\1 topcolor ~ \_x\Z\*\1%00
+rm \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ %00kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%00
+rm \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\x\k\AA _x ~ \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\x\k\AA%00
+rm ~ b ~ %00
+rm ~ *spectator ~ %00
+rm \team\12345678\ec\ *gamedir ~ \team\12345678\ec\%00
+rm *\two%20words\dc\EDD\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\hexenwail\*gamedir\ bee ~ *\two%20words\dc\EDD\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\hexenwail\*gamedir\%00
+rm ~ team ~ %00
+rm \a\\ bddad ~ \a\\%00
+rm \_pw\F * ~ \_pw\F%00
+rm ~ *spectator ~ %00
+rm \da\x\bebe\HGHEB\ee\%7f%80 k ~ \da\x\bebe\HGHEB\ee\%7f%80%00
+rm \edd\%0dab\*spectator\x\ddc\adc\k\ _x ~ \edd\%0dab\*spectator\x\ddc\adc\k\%00
+rm ~ cde ~ %00
+rm \topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\-\name\hexenwail\abe\Z\acd\hexenwail topcolor ~ \_x\-\name\hexenwail\abe\Z\acd\hexenwail%00vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\-\name\hexenwail\abe\Z\acd\hexenwail%00
+rm \baecf\12345678\*spectator\%7f ~ ~ \baecf\12345678\*spectator\%7f%00
+rm ~ ab ~ %00
+rm \a\c _ ~ \a\c%00
+rm \fdfdc\%01\k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\_x\F\*spectator\CGHDH name ~ \fdfdc\%01\k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\_x\F\*spectator\CGHDH%00
+rm \b\hexenwail\*\1\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\ecae\%1f\ b ~ \*\1\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\ecae\%1f\%00ail\ecae\%1f\%00
+rm \a\e kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \a\e%00
+rm name\%0ef\eacc\x kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ name\%0ef\eacc\x%00
+rm ~ acaee ~ %00
+rm \topcolor\\HDEBB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail _ ~ \topcolor\\HDEBB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail%00
+rm ~ bb ~ %00
+rm \*gamedir\hexenwail\topcolor\0 name ~ \*gamedir\hexenwail\topcolor\0%00
+rm ~ *spectator ~ %00
+rm \b\two%20words\b\%80%01%7fc a ~ \b\two%20words\b\%80%01%7fc%00
+rm ~ _x ~ %00
+rm \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x _ ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x%00
+rm \aeb\0\b\hexenwail ~ ~ \aeb\0\b\hexenwail%00
+rm ~ ~ ~ %00
+rm \team\Z\*gamedir\HBEE\k\hexenwail\db\DCFGEC\name\%80f%c8%80 a ~ \team\Z\*gamedir\HBEE\k\hexenwail\db\DCFGEC\name\%80f%c8%80%00
+rm *spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv k ~ *spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+rm *spectator\D\_\%c8\_x\1\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\%7f * ~ *spectator\D\_\%c8\_x\1\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\%7f%00
+rm \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _ ~ %00_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+rm ~ *gamedir ~ %00
+rm \_x\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\x name ~ \_x\b\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\x%00
+rm \topcolor\12345678\\two%20words\k\ aac ~ \topcolor\12345678\\two%20words\k\%00
+rm \_pw\fe%01c\*\\x * ~ \_pw\fe%01c\x%00\x%00
+rm \*spectator\\topcolor\CEEECA\\BGE k ~ \*spectator\\topcolor\CEEECA\\BGE%00
+rm \_x\%7f%7f\*spectator\\ccf\f%01\_pw\d\*gamedir\F\ a ~ \_x\%7f%7f\*spectator\\ccf\f%01\_pw\d\*gamedir\F\%00
+rm _\Z\name\FCCHF\*gamedir\DH _ ~ \name\FCCHF\*gamedir\DH%00DH%00
+rm \k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ \k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+rm ~ a ~ %00
+rm \team\AAEC\b\\k\-\topcolor\\ topcolor ~ \team\AAEC\b\\k\-\%00opcolor\\%00
+rm \b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\\_x\HFCAF\topcolor\c%0e%01e k ~ \b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\\_x\HFCAF\topcolor\c%0e%01e%00
+rm \_x\CF _x ~ %00_x\CF%00
+rm \_\two%20words * ~ \_\two%20words%00
+rm \eecc\%01de\*gamedir\two%20words\k\%c8\*\efd\ b ~ \eecc\%01de\*gamedir\two%20words\k\%c8\*\efd\%00
+rm \name\%7fd\*gamedir\b name ~ \*gamedir\b%00medir\b%00
+rm ~ topcolor ~ %00
+rm \a\hexenwail\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ ffceb ~ \a\hexenwail\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\%00
+rmp \_pw\x\name\y\_z\w 5f ~ \name\y%00_z\w%00\_z\w%00
+rmp \_a\1\b\2 5f ~ \b\2%00\b\2%00
+rmp \b\2\_a\1 5f ~ \b\2%00_a\1%00
+rmp \_a\1\_b\2 5f ~ %00_b\2%00_b\2%00
+rmp \a\1\b\2 5f ~ \a\1\b\2%00
+rmp ~ 5f ~ %00
+rmp \_a\1\_A\2 5f ~ %00_A\2%00_A\2%00
+rmp \a_b\1\b\2 5f ~ \a_b\1\b\2%00
+rmp \\a\1\\b\2 5c ~ \\a\1\\b\2%00
+rmp \*gamedir\hw\name\y 2a ~ \name\y%00r\hw\name\y%00
+rmp \*a\1\*b\2\*c\3 2a ~ %00*c\3%00*c\3%00*c\3%00
+rmp \*a\1\x\*b\*c\3 2a ~ \x\*b%00*c\3%00*c\3%00
+rmp \_a\1\_a\2\b\3 5f ~ \b\3%00\b\3%00\b\3%00
+rmp \_a\1\_ 5f ~ \_%00\1\_%00
+rmp \_a 5f ~ \_a%00
+rmp _a\1\b\2 5f ~ \b\2%00b\2%00
+rmp \a\1\_b\ 5f ~ \a\1%00_b\%00
+rmp \a\1\\x 00 ~ \a\1%00\x%00
+rmp \a\1\\x\y\z 00 ~ \a\1\y\z%00\z%00
+rmp \\v\a\1 00 ~ \a\1%00\1%00
+rmp \%e9x\1\b\2 e9 ~ \b\2%00\b\2%00
+rmp \a\1\%e9x\1 e9 ~ \a\1%00%e9x\1%00
+rmp \ 00 ~ \%00
+rmp \*spectator\12345678\e\FHEGHB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 2a ~ \e\FHEGHB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00vvvvvvvvvvvvvvvvvvv%00
+rmp \team\hexenwail\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\1 5f ~ \team\hexenwail\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\1%00
+rmp \a\c\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\d%0ea\ 6e ~ \a\c\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\d%0ea\%00
+rmp ~ 6e ~ %00
+rmp \dde\12345678\abf\DCBHDC\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\a\-\fd\%0e 5f ~ \dde\12345678\abf\DCBHDC\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\a\-\fd\%0e%00
+rmp \topcolor\0\*gamedir\two%20words\topcolor\AABC 5f ~ \topcolor\0\*gamedir\two%20words\topcolor\AABC%00
+rmp ~ 61 ~ %00
+rmp \ed\12345678\b\%01%0e%1f%0e\fdebe\1 e9 ~ \ed\12345678\b\%01%0e%1f%0e\fdebe\1%00
+rmp \topcolor\AEBE 61 ~ \topcolor\AEBE%00
+rmp ~ 5f ~ %00
+rmp ~ 6e ~ %00
+rmp \*spectator\12345678\name\hexenwail\ 61 ~ \*spectator\12345678\name\hexenwail\%00
+rmp \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%0de\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\cdd\ac%01\_pw\two%20words 61 ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%0de\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\cdd\ac%01\_pw\two%20words%00
+rmp \*spectator\-\bfc\f%1f%0e\b\FFDG\_\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\x 2a ~ \bfc\f%1f%0e\b\FFDG\_\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\x%00vvvvv\team\x%00
+rmp \_\c%01\b\Z\*spectator\BEE\b\hexenwail e9 ~ \_\c%01\b\Z\*spectator\BEE\b\hexenwail%00
+rmp ~ 00 ~ %00
+rmp \k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\%1f\d\x\\BH 61 ~ \k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\d\x\\BH%00\BH%00
+rmp \\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\fe\\b\- 6e ~ \\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\fe\\b\-%00
+rmp ~ 2a ~ %00
+rmp \_x\AFEH\_x\Z\f\FAADD 00 ~ \_x\AFEH\_x\Z\f\FAADD%00
+rmp \ 6e ~ \%00
+rmp \\b\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\Z\_pw\%c8aad\*spectator\ e9 ~ \\b\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\Z\_pw\%c8aad\*spectator\%00
+rmp ~ e9 ~ %00
+rmp *\ 2a ~ %00\%00
+rmp \aaee\\HEB\k\F\ e9 ~ \aaee\\HEB\k\F\%00
+rmp \_pw\A 61 ~ \_pw\A%00
+rmp \\c%80e%ff\\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\- 6e ~ \\c%80e%ff\\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-%00
+rmp \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\name\B\cba\HF\_\ 2a ~ \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\name\B\cba\HF\_\%00
+rmp \aaf\%c8\a\12345678\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\\12345678 00 ~ \aaf\%c8\a\12345678\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\\12345678%00
+rmp \aceb\0 5f ~ \aceb\0%00
+rmp \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\-\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\\topcolor\hexenwail 2a ~ \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\\topcolor\hexenwail%00vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\\topcolor\hexenwail%00\hexenwail%00
+rmp \_pw\AECFB\name\bd%7f\*\1\*\two%20words\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv e9 ~ \_pw\AECFB\name\bd%7f\*\1\*\two%20words\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+rmp \_x\%01a\topcolor\- 5f ~ \topcolor\-%00lor\-%00
+rmp \_\12345678\_\%80\ 2a ~ \_\12345678\_\%80\%00
+rmp \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv 5f ~ \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+rmp team\%0d%01\b\GD\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\HBHC\*\Z e9 ~ team\%0d%01\b\GD\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\HBHC\*\Z%00
+rmp \ebdfb\%c8e%1f 00 ~ \ebdfb\%c8e%1f%00
+rmp ~ 5f ~ %00
+rmp *spectator\%c8%1fd%c8\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\EHHBB\_x\GHE 5f ~ *spectator\%c8%1fd%c8\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\EHHBB%00_x\GHE%00\GHE%00
+rmp \name\0\topcolor\e\k\1\_\1\*\- 5f ~ \name\0\topcolor\e\k\1\*\-%00*\-%00
+rmp \_\1\team\x\dc\0\\1 e9 ~ \_\1\team\x\dc\0\\1%00
+rmp _pw\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678 2a ~ _pw\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678%00
+rmp *gamedir\x\eccef\0 6e ~ *gamedir\x\eccef\0%00
+rmp \dccc\%80\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\1\cb\EDEDG\daa\CDED\*gamedir\x 5f ~ \dccc\%80\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\1\cb\EDEDG\daa\CDED\*gamedir\x%00
+rmp ~ e9 ~ %00
+rmp \c\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\%0eb 6e ~ \c\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\%0eb%00
+rmp \_x\%80%80 e9 ~ \_x\%80%80%00
+rmp \a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\name\-\k\0 5f ~ \a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\name\-\k\0%00
+rmp ~ 2a ~ %00
+rmp \_x\%01\*spectator\12345678 00 ~ \_x\%01\*spectator\12345678%00
+rmp \topcolor\H\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\HBD\k\Z 61 ~ \topcolor\H\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\HBD\k\Z%00
+rmp ~ 5f ~ %00
+rmp \b\- 5f ~ \b\-%00
+rmp \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\b\_\E\deaf\x\ 5f ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\team\b\_\E\deaf\x\%00
+rmp \edafa\Z\*spectator\EAF\_pw\-\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\0 00 ~ \edafa\Z\*spectator\EAF\_pw\-\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\0%00
+rmp ~ 00 ~ %00
+rmp ~ 5f ~ %00
+rmp \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ 6e ~ \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\%00
+rmp \fbab\CBFCEH\\\*\x 6e ~ \fbab\CBFCEH\\\*\x%00
+rmp \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\eda\ 5f ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\eda\%00
+rmp *\x\bedae\0\ 00 ~ *\x\bedae\0\%00
+rmp \_\ 6e ~ \_\%00
+rmp \_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\two%20words 5f ~ \a\two%20words%00vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\a\two%20words%00
+rmp ~ 2a ~ %00
+rmp ~ 5f ~ %00
+rmp \\A\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\EDA\_x\%0dea 61 ~ \\A\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\EDA\_x\%0dea%00
+rmp \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\FFC\ffc\\D 5f ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\FFC\ffc\\D%00
+rmp ~ 00 ~ %00
+rmp \topcolor\-\b\12345678\team\\team\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ 00 ~ \topcolor\-\b\12345678\team\\team\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%00
+set K 1 196 ~ a 1 ~ \a\1%00
+set K 1 196 \a\1 b 2 ~ \a\1\b\2%00
+set K 1 196 \a\1\b\2 a 9 ~ \b\2\a\9%00
+set K 1 196 \a\1\b\2 b 9 ~ \a\1\b\9%00
+set K 1 196 \a\1\b\2 a ~ ~ \b\2%00b\2%00
+set K 1 196 \a\1 zz ~ ~ \a\1%00
+set K 1 196 ~ a ~ ~ %00
+set K 1 512 \a\1 *gamedir hw [0]Can't%20set%20*%20keys%0a \a\1%00
+set S 1 512 \a\1 *gamedir hw ~ \a\1\*gamedir\hw%00
+set S 1 512 \a\1\*gamedir\hw *gamedir data1 ~ \a\1\*gamedir\data1%00
+set S 1 512 ~ * v ~ \*\v%00
+set K 1 512 ~ * v [0]Can't%20set%20*%20keys%0a %00
+set K 1 512 ~ ~ v ~ \\v%00
+set K 1 512 \\x\y ~ v ~ \y\\v%00
+set K 1 196 \a\1 b\c 2 [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a \a\1%00
+set K 1 196 \a\1 b 2\3 [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a \a\1%00
+set K 1 196 \a\1 b"c 2 [0]Can't%20use%20keys%20or%20values%20with%20a%20"%0a \a\1%00
+set K 1 196 \a\1 b 2"3 [0]Can't%20use%20keys%20or%20values%20with%20a%20"%0a \a\1%00
+set S 1 512 \a\1 b 2\3 [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a \a\1%00
+set S 1 512 \a\1 b " [0]Can't%20use%20keys%20or%20values%20with%20a%20"%0a \a\1%00
+set S 1 512 \a\1 \ v [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a \a\1%00
+set S 1 512 \a\1 b \ [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a \a\1%00
+set K 1 512 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\1%00
+set K 1 512 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 1 512 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set K 1 512 ~ a vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set K 1 512 \a\1 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 2 [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \a\1%00
+set K 1 512 \a\1 b vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \a\1%00
+set K 1 512 \a\1 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \a\1%00
+set K 1 512 \a\1 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ ~ \a\1%00
+set K 1 8 \a\1 b v [0]Info%20string%20length%20exceeded%0a \a\1%00
+set K 1 9 \a\1 b v ~ \a\1\b\v%00
+set K 1 32 \a\1 b v ~ \a\1\b\v%00
+set K 1 7 \a\1 b v [0]Info%20string%20length%20exceeded%0a \a\1%00
+set K 1 4 ~ b v [0]Info%20string%20length%20exceeded%0a %00
+set K 1 5 ~ b v ~ \b\v%00
+set K 1 0 ~ b v [0]Info%20string%20length%20exceeded%0a %00
+set K 1 1 ~ b v [0]Info%20string%20length%20exceeded%0a %00
+set K 1 3 \a\1 b v [0]Info%20string%20length%20exceeded%0a \a\1%00
+set K 1 8 \a\1\b\12345678 b v [0]Info%20string%20length%20exceeded%0a \a\1%00b\12345678%00
+set K 1 9 \a\1\b\12345678 b v ~ \a\1\b\v%00345678%00
+set K 1 0 \a\1 a ~ ~ %00a\1%00
+set K 1 100 \a\1 a ~ ~ %00a\1%00
+set S none 512 ~ k %01%0d%0e%1f%7f%80%ffA ~ \k\%7f%7fA%00
+set S none 512 \a\1 b %01%02 ~ \a\1\b\%00
+set S none 512 ~ %0d v ~ \\v%00
+set S none 512 ~ k%e9 v%e9%81 ~ \ki\vi%00
+set S none 512 ~ %80 %80 ~ \\%00
+set K none 512 ~ n A%20B%09C ~ \n\A%20BC%00
+set S none 512 ~ k %0b%0c%0e%0f ~ \k\%00
+set S 0 512 ~ k %01%0d%0e%1f%7f%80%ffA ~ \k\%7f%7fA%00
+set S 0 512 \a\1 b %01%02 ~ \a\1\b\%00
+set S 0 512 ~ %0d v ~ \\v%00
+set S 0 512 ~ k%e9 v%e9%81 ~ \ki\vi%00
+set S 0 512 ~ %80 %80 ~ \\%00
+set K 0 512 ~ n A%20B%09C ~ \n\A%20BC%00
+set S 0 512 ~ k %0b%0c%0e%0f ~ \k\%00
+set S 1 512 ~ k %01%0d%0e%1f%7f%80%ffA ~ \k\%0e%1f%7f%80%ffA%00
+set S 1 512 \a\1 b %01%02 ~ \a\1\b\%00
+set S 1 512 ~ %0d v ~ \\v%00
+set S 1 512 ~ k%e9 v%e9%81 ~ \k%e9\v%e9%81%00
+set S 1 512 ~ %80 %80 ~ \%80\%80%00
+set K 1 512 ~ n A%20B%09C ~ \n\A%20BC%00
+set S 1 512 ~ k %0b%0c%0e%0f ~ \k\%0e%0f%00
+set S 2 512 ~ k %01%0d%0e%1f%7f%80%ffA ~ \k\%0e%1f%7f%80%ffA%00
+set S 2 512 \a\1 b %01%02 ~ \a\1\b\%00
+set S 2 512 ~ %0d v ~ \\v%00
+set S 2 512 ~ k%e9 v%e9%81 ~ \k%e9\v%e9%81%00
+set S 2 512 ~ %80 %80 ~ \%80\%80%00
+set K 2 512 ~ n A%20B%09C ~ \n\A%20BC%00
+set S 2 512 ~ k %0b%0c%0e%0f ~ \k\%0e%0f%00
+set S none 512 \a\1 b 2 ~ \a\1\b\2%00
+set S 0 512 \a\1 b 2 ~ \a\1\b\2%00
+set S 3 512 \a\1 b %80%90 ~ \a\1\b\%80%90%00
+set S none 512 \a\1 b %80%90 ~ \a\1\b\%00
+set K 2 79 ~ team da%01 ~ \team\da%00
+set K none 47 \b\hexenwail\topcolor\DCAAD\*\two%20words\b\Z _ 1 [0]Info%20string%20length%20exceeded%0a \b\hexenwail\topcolor\DCAAD\*\two%20words\b\Z%00
+set K 1 102 \_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\0\_\-\a\hexenwail *gamedir e%ff [0]Can't%20set%20*%20keys%0a \_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\0\_\-\a\hexenwail%00
+set K 2 37 \team\1\_pw\hexenwail\*spectator\ k %c8c%c8 [0]Info%20string%20length%20exceeded%0a \team\1\_pw\hexenwail\*spectator\%00
+set S none 49 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk EGCC [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set S 2 1000 \team\\12345678\*\hexenwail dca ~ ~ \team\\12345678\*\hexenwail%00
+set S 2 29 ~ k x ~ \k\x%00
+set K 2 101 _pw\0\_x\\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\Z *spectator D [0]Can't%20set%20*%20keys%0a _pw\0\_x\\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\Z%00
+set S 0 26 \a\GEFAEA\*\CGFEHA _x - ~ \a\GEFAEA\*\CGFEHA\_x\-%00
+set K 1 79 \_\F\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678 b ~ ~ \_\F\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678%00
+set K 1 98 ~ ~ Z ~ \\Z%00
+set S 2 40 \b\eb%0d%c8\f\x\*gamedir\%80d%0de topcolor ~ ~ \b\eb%0d%c8\f\x\*gamedir\%80d%0de%00
+set S 1 1000 ~ * ~ ~ %00
+set K 2 1000 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\GA\k\ADHDHF team 1 ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\GA\k\ADHDHF\team\1%00
+set K 1 40 \_\12345678\_pw\hexenwail _ %0db%01 ~ \_pw\hexenwail\_\b%00enwail%00
+set S 1 29 \\%0d%c8c%0e\*\0\ca\db%1f%80\team\ _pw x [0]Info%20string%20length%20exceeded%0a \\%0d%c8c%0e\*\0\ca\db%1f%80\team\%00
+set S 1 1000 \name\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\two%20words\dda\12345678 team vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \name\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\two%20words\dda\12345678%00
+set S none 59 ~ a HAFDA ~ \a\HAFDA%00
+set S none 107 \ b 1 ~ \\b\1%00
+set S 2 73 \_x\ a vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \_x\%00
+set S none 1000 ~ ~ x ~ \\x%00
+set S 2 99 ~ *gamedir vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ \*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 2 15 \k\x topcolor ~ ~ \k\x%00
+set S 0 169 \*gamedir\0\\0\*\hexenwail\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk hexenwail [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \*gamedir\0\\0\*\hexenwail\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 2 12 ~ name EHACA ~ \name\EHACA%00
+set K 0 26 \_pw\x\b\Z\b\\topcolor\1 _ ~ ~ \_pw\x\b\Z\b\\topcolor\1%00
+set K 2 13 \ fec hexenwail [0]Info%20string%20length%20exceeded%0a \%00
+set K 0 104 \name\%ff%1fd\_\D kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk CD [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \name\%ff%1fd\_\D%00
+set S none 28 \topcolor\two%20words *gamedir x [0]Info%20string%20length%20exceeded%0a \topcolor\two%20words%00
+set K 2 18 \_pw\1\\BDDA _x %c8%fff [0]Info%20string%20length%20exceeded%0a \_pw\1\\BDDA%00
+set K 0 151 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%0d\*\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _pw hexenwail [0]Info%20string%20length%20exceeded%0a \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%01%0d\*\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 1 77 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ 12345678 [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a %00
+set K 2 158 \a\e\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\-\b\Z name Z [0]Info%20string%20length%20exceeded%0a \a\e\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\-\b\Z%00
+set K 0 1000 \*\\cf\two%20words _ ~ ~ \*\\cf\two%20words%00
+set S 2 87 \a\Z\a\FFF\\b%ffa%c8\_\\G ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ \a\Z\a\FFF\_\\G\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S none 12 ~ topcolor %0ef [0]Info%20string%20length%20exceeded%0a %00
+set S none 23 \a\CBDCB\caac\\HG\_pw\ ~ ~ ~ \a\CBDCB\caac\\HG\_pw\%00
+set K 2 1000 \b\\ * 1 [0]Can't%20set%20*%20keys%0a \b\\%00
+set K 0 1000 \team\Z\*gamedir\HB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\HH\name\ *spectator 12345678 [0]Can't%20set%20*%20keys%0a \team\Z\*gamedir\HB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\HH\name\%00
+set S none 94 \_x\Z\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\1\a\%80%0e a Z ~ \_x\Z\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\1\a\Z%00%00
+set K 2 79 \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\Z *spectator x [0]Can't%20set%20*%20keys%0a \_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\Z%00
+set S none 45 \b\GH\name\%ff%c8\name\-\topcolor\two%20words a ~ ~ \b\GH\name\%ff%c8\name\-\topcolor\two%20words%00
+set S 2 7 ~ team ~ ~ %00
+set S 2 8 ~ dfcf %0ee%80 [0]Info%20string%20length%20exceeded%0a %00
+set K 1 21 \k\1\ef\%7fee a BEFHB ~ \k\1\ef\%7fee\a\BEFHB%00
+set K none 11 ~ _x two%20words [0]Info%20string%20length%20exceeded%0a %00
+set K 0 114 \team\hexenwail\*spectator\hexenwail\fd\x\b\x kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk x ~ \team\hexenwail\*spectator\hexenwail\fd\x\b\x\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x%00
+set K 0 84 \ef\GA\b\f%0d%c8\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\0 _x Z ~ \ef\GA\b\f%0d%c8\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\Z%00
+set S 2 1000 ~ _pw - ~ \_pw\-%00
+set S none 8 ~ * fc ~ \*\fc%00
+set K 0 84 \bcf\1\_\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x _ 1 ~ \bcf\1\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\_\1%00
+set K none 120 \_\\*\\*\12345678 *gamedir ~ [0]Can't%20set%20*%20keys%0a \_\\*\\*\12345678%00
+set K 2 97 \team\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z\d\%01%1f%7f%7f\*\x name %1f%ff%0dd ~ \team\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z\d\%01%1f%7f%7f\*\x\name\%1f%ffd%00
+set K 1 110 ~ _x x ~ \_x\x%00
+set S none 31 \_x\b%ff\a\1\team\Z _x 12345678 ~ \a\1\team\Z\_x\12345678%00
+set S 2 5 \ team 0 [0]Info%20string%20length%20exceeded%0a \%00
+set S none 28 ~ topcolor 1 ~ \topcolor\1%00
+set S 2 88 \_pw\-\_\CHHCDB\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\FBH f - [0]Info%20string%20length%20exceeded%0a \_pw\-\_\CHHCDB\a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\FBH%00
+set K 0 16 \\%ff%80%ffb team db ~ \\%ff%80%ffb\team\db%00
+set S 2 1000 \\two%20words\_x\12345678\topcolor\1 *gamedir vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ \\two%20words\_x\12345678\topcolor\1\*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 1 1 ~ * 0 [0]Info%20string%20length%20exceeded%0a %00
+set K none 133 \a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv b 0 [0]Info%20string%20length%20exceeded%0a \a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 0 19 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\a%7fd%0e\name\e\*gamedir\two%20words\k\FGHDH daccd d%0d [0]Info%20string%20length%20exceeded%0a \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\a%7fd%0e\name\e\*gamedir\two%20words\k\FGHDH%00
+set S 0 1000 \adc\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\e%c8a\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk two%20words [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \adc\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\e%c8a\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 2 97 ~ b ~ ~ %00
+set K 0 1000 \fc\hexenwail\topcolor\two%20words\caf\ * C [0]Can't%20set%20*%20keys%0a \fc\hexenwail\topcolor\two%20words\caf\%00
+set S 1 86 \*spectator\12345678\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\x ~ Z [0]Info%20string%20length%20exceeded%0a \*spectator\12345678\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_\x%00
+set S 0 13 \\x *gamedir ~ ~ \\x%00
+set K 1 143 \_pw\GDHDC\_\ a x ~ \_pw\GDHDC\_\\a\x%00
+set S none 5 ~ _x 0 [0]Info%20string%20length%20exceeded%0a %00
+set S 1 152 \topcolor\H\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv * ~ ~ \topcolor\H\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K none 56 \e\EDEEGD\a\Z\topcolor\BHEHHE\cfdef\%ff%0d%0d topcolor %c8%c8%80d ~ \e\EDEEGD\a\Z\cfdef\%ff%0d%0d\topcolor\HHd%00%0d%0d%00
+set S none 1000 \*\-\name\ a d%c8 ~ \*\-\name\\a\dH%00
+set K 0 44 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CGBFE\*gamedir\Z\bdeb\%0d%7fcd *gamedir 1 [0]Can't%20set%20*%20keys%0a \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CGBFE\*gamedir\Z\bdeb\%0d%7fcd%00
+set K 2 78 \_pw\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0 name %7f%c8d [0]Info%20string%20length%20exceeded%0a \_pw\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0%00
+set K none 101 \*gamedir\0\a\FCFF\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\1 _pw %ff%80%0e ~ \*gamedir\0\a\FCFF\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\1\_pw\%7f%00
+set K 2 96 ~ * 12345678 [0]Can't%20set%20*%20keys%0a %00
+set K 1 84 \_\1\b\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\b *gamedir %01 [0]Can't%20set%20*%20keys%0a \_\1\b\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\b%00
+set S 1 85 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678 dbe b%0e ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\dbe\b%0e%00
+set S none 169 \*gamedir\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\GGABG\*gamedir\\two%20words\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ _ - [0]Info%20string%20length%20exceeded%0a \*gamedir\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\GGABG\*gamedir\\two%20words\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%00
+set S 1 45 \k\x\*gamedir\1\name\two%20words _pw two%20words ~ \k\x\*gamedir\1\name\two%20words\_pw\two%20words%00
+set S none 33 \_pw\0\\12345678\faafb\0\b\BD k %01a [0]Info%20string%20length%20exceeded%0a \_pw\0\\12345678\faafb\0\b\BD%00
+set S none 72 ~ * vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set S 1 1000 \b\1\_x\x\ topcolor two%20words ~ \b\1\_x\x\\topcolor\two%20words%00
+set S 0 1000 ~ ~ x ~ \\x%00
+set K none 29 \cdac\BB\bf\x\name\a%80f%c8 k ~ ~ \cdac\BB\bf\x\name\a%80f%c8%00
+set K 2 9 \ab\ k 0 ~ \ab\\k\0%00
+set K 0 39 ~ team hexenwail ~ \team\hexenwail%00
+set K 2 223 \\Z\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\HBDEE ~ ~ ~ \team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\HBDEE%00EE%00
+set K 2 102 \\%ff%01\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%80%c8cd\name\12345678 name 12345678 ~ \\%ff%01\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%80%c8cd\name\12345678%00
+set S 0 1000 befec\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\name\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv _pw x ~ befec\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\name\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\x%00
+set S 2 27 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk fdf [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set S none 121 ~ fbdbb %1f ~ \fbdbb\%00
+set S 1 33 \b\CDCAE\b\DBEH\aefda\12345678\team\ name %0df [0]Info%20string%20length%20exceeded%0a \b\CDCAE\b\DBEH\aefda\12345678\team\%00
+set S 0 13 ~ topcolor %01 ~ \topcolor\%00
+set K none 9 ~ name x ~ \name\x%00
+set K none 1000 \\e%0dc%0e b %01 ~ \\e%0dc%0e\b\%00
+set K 2 1000 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\de\hexenwail *gamedir 1 [0]Can't%20set%20*%20keys%0a kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\de\hexenwail%00
+set S none 5 ~ team ~ ~ %00
+set S 2 18 \*gamedir\ team 1 ~ \*gamedir\\team\1%00
+set S none 17 \\\bd\a\\- df a%0e ~ \\\bd\a\\-\df\a%00
+set S 1 66 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk Z ~ \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z%00
+set S none 1000 \ccbe\1\_\hexenwail *spectator %0db ~ \ccbe\1\_\hexenwail\*spectator\b%00
+set K 0 12 _x\-\be\x _pw c [0]Info%20string%20length%20exceeded%0a _x\-\be\x%00
+set K 1 97 \_x\ _ hexenwail" [0]Can't%20use%20keys%20or%20values%20with%20a%20"%0a \_x\%00
+set S none 102 \faf\Z\name\\hexenwail\name\0\\%ffe%01 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk - [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \faf\Z\name\\hexenwail\name\0\\%ffe%01%00
+set K 2 5 ~ k ~ ~ %00
+set K 1 64 \topcolor\BHHFHE\a\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\\Z topcolor vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Info%20string%20length%20exceeded%0a \a\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678\\Z%00kkk\12345678\\Z%00
+set K 2 77 \da\hexenwail name vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Info%20string%20length%20exceeded%0a \da\hexenwail%00
+set S 1 13 ~ * hexenwail ~ \*\hexenwail%00
+set K none 108 \*spectator\c%ff%80%80\k\%0d%0e%01f\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\fa%80 ~ hexenwail ~ \*spectator\c%ff%80%80\k\%0d%0e%01f\_pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\hexenwail%00
+set K 2 1000 name\Z\k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\ _ C ~ name\Z\k\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\\_\C%00
+set K 2 1000 ~ b x ~ \b\x%00
+set S none 1000 \team\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z\_pw\Z\*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv k two%20words ~ \team\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z\_pw\Z\*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\k\two%20words%00
+set K none 36 b\eb%ff\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\b\x\*spectator\12345678\ a 12345678 [0]Info%20string%20length%20exceeded%0a b\eb%ff\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\b\x\*spectator\12345678\%00
+set S 2 9 ~ _ hexenwail [0]Info%20string%20length%20exceeded%0a %00
+set K 1 12 \ _pw bc%7f ~ \\_pw\bc%7f%00
+set K 2 44 \_\two%20words\*gamedir\cff\b\DEHDD\_pw\ _ Z ~ \*gamedir\cff\b\DEHDD\_pw\\_\Z%00DD\_pw\%00
+set S 0 37 \name\H\cf\C\eaf\Z topcolor hexenwail [0]Info%20string%20length%20exceeded%0a \name\H\cf\C\eaf\Z%00
+set K none 46 \team\\12345678\ebaa\two%20words\ *gamedir CCDEH [0]Can't%20set%20*%20keys%0a \team\\12345678\ebaa\two%20words\%00
+set S 0 53 \e\hexenwail\*gamedir\12345678\afaa\-\_pw\Z eb hexenwail [0]Info%20string%20length%20exceeded%0a \e\hexenwail\*gamedir\12345678\afaa\-\_pw\Z%00
+set K 1 88 \*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\%c8 _ x ~ \*gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*spectator\%c8\_\x%00
+set K none 1000 ~ topcolor 0 ~ \topcolor\0%00
+set S 1 78 \\12345678\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ - ~ \_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\-%00vvvvvv%00
+set K 1 1000 ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk ~ [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set S none 59 \*\two%20words\e\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv edde HD [0]Info%20string%20length%20exceeded%0a \*\two%20words\e\Z\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 0 1000 \_pw\hexenwail\k\12345678\b\-\bdbf\1 cbaac ~ ~ \_pw\hexenwail\k\12345678\b\-\bdbf\1%00
+set K 0 98 \b\two%20words\bedf\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%7f%01ba ~ GBGG [0]Info%20string%20length%20exceeded%0a \b\two%20words\bedf\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%7f%01ba%00
+set S 2 121 ~ ffead ~ ~ %00
+set K 1 15 \team\%0d\ cfbc 0 [0]Info%20string%20length%20exceeded%0a \team\%0d\%00
+set S 2 1000 \\%1f\topcolor\b%01b\topcolor\\1 ~ CDBAH ~ \topcolor\b%01b\topcolor\\1\\CDBAH%00
+set K 0 69 _pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv k 12345678 [0]Info%20string%20length%20exceeded%0a _pw\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S none 5 ~ a - ~ \a\-%00
+set S 0 117 k\H\a\\Z\\%01%80\\two%20words k Z ~ \a\\Z\\%01%80\\two%20words\k\Z%00
+set S none 25 \a\hexenwail\k\%01%0e%0db _pw GAH [0]Info%20string%20length%20exceeded%0a \a\hexenwail\k\%01%0e%0db%00
+set S none 75 \name\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\e%c8%c8\ b x [0]Info%20string%20length%20exceeded%0a \name\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\e%c8%c8\%00
+set S 2 11 ~ *spectator Z [0]Info%20string%20length%20exceeded%0a %00
+set K none 98 \b\two%20words\afddf\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\ b x ~ \afddf\0\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\\b\x%00enwail\%00
+set S 2 139 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv *spectator BB [0]Info%20string%20length%20exceeded%0a \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 1 84 ~ topcolor x ~ \topcolor\x%00
+set K none 42 \topcolor\D\ecbc\\name\%1f\name\0\ _x HEHDF ~ \topcolor\D\ecbc\\name\%1f\name\0\\_x\HEHDF%00
+set S 0 29 e\1\*\EGF\_pw\%ffa%ff%0e\bba\ _ 0 ~ e\1\*\EGF\_pw\%ffa%ff%0e\bba\\_\0%00
+set S 0 65 ~ _pw 0 ~ \_pw\0%00
+set K 1 27 \\\name\FCCEC _pw hexenwail [0]Info%20string%20length%20exceeded%0a \\\name\FCCEC%00
+set S 2 73 \*spectator\%c8%ff%ffb\*spectator\1\*spectator\1\\\hexenwail *spectator\ a%80a%0e [0]Can't%20use%20keys%20or%20values%20with%20a%20\%0a \*spectator\%c8%ff%ffb\*spectator\1\*spectator\1\\\hexenwail%00
+set K none 74 ~ dddbc 0 ~ \dddbc\0%00
+set S 0 75 \_pw\\\e%0d _x vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ \_pw\\\e%0d\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 1 1000 \ab\x\*\\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\%0d kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \ab\x\*\\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\%0d%00
+set K none 24 \%7fba%1f\a\hexenwail a - ~ \%7fba%1f\a\hexenwail\a\-%00
+set S none 101 \*spectator\a\_\0\\x\team\CCEF ada vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \*spectator\a\_\0\\x\team\CCEF%00
+set K none 73 \c\\%80a kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk x [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \c\\%80a%00
+set S 2 5 ~ _pw G [0]Info%20string%20length%20exceeded%0a %00
+set K 1 1000 ~ _ 1 ~ \_\1%00
+set S 0 22 \\-\d\two%20words _x f ~ \\-\d\two%20words\_x\f%00
+set K 1 2 \ _ ~ ~ \%00
+set K 1 101 name\Z\efceb\EDCFA\bfb\ca%c8\_x\ team vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a name\Z\efceb\EDCFA\bfb\ca%c8\_x\%00
+set S 0 99 \_\0\deb\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\cd%1f kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk two%20words [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \_\0\deb\\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_x\cd%1f%00
+set S 2 1000 ~ k hexenwail ~ \k\hexenwail%00
+set K 2 65 \name\\k\ be - ~ \name\\k\\be\-%00
+set S 2 6 ~ k cd%0d [0]Info%20string%20length%20exceeded%0a %00
+set S none 65 \k\\x\\0\k\two%20words k ~ ~ \x\\0\k\two%20words%00ds%00
+set S 1 73 ~ _pw vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a %00
+set S 1 101 *gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ab\1\k\DFF\team\x topcolor fea [0]Info%20string%20length%20exceeded%0a *gamedir\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\ab\1\k\DFF\team\x%00
+set K none 92 \ebccc\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\fdec\b\*spectator\f k %01d%1f [0]Info%20string%20length%20exceeded%0a \ebccc\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\fdec\b\*spectator\f%00
+set S none 61 ~ ~ vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Info%20string%20length%20exceeded%0a %00
+set K 0 1000 \*\c%c8%0e\k\DC\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ddf ~ %0ed%7f ~ \*\c%c8%0e\k\DC\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ddf\\d%7f%00
+set S 1 1 ~ a 1 [0]Info%20string%20length%20exceeded%0a %00
+set K 2 99 \fcfb\hexenwail b d ~ \fcfb\hexenwail\b\d%00
+set S 2 150 topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv topcolor vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 2 22 \*gamedir\ffe\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%0dae\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\a\ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \*gamedir\ffe\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\%0dae\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\a\%00
+set K none 15 ~ *spectator ~ [0]Can't%20set%20*%20keys%0a %00
+set K 1 42 \_\dceb\_pw\x\a\\1\b\DFFAEG name two%20words [0]Info%20string%20length%20exceeded%0a \_\dceb\_pw\x\a\\1\b\DFFAEG%00
+set K none 24 \*gamedir\FHF\ a hexenwail [0]Info%20string%20length%20exceeded%0a \*gamedir\FHF\%00
+set K 1 1000 \_pw\x _ ~ ~ \_pw\x%00
+set K none 81 \_\\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv name EHCG [0]Info%20string%20length%20exceeded%0a \_\\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S none 149 a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\0\ea\%c8c%1f kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 1 [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\0\ea\%c8c%1f%00
+set S 0 124 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\HGGHA\*gamedir\Z\*\EC b Z [0]Info%20string%20length%20exceeded%0a \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*\HGGHA\*gamedir\Z\*\EC%00
+set S 0 68 \c\two%20words a 12345678 ~ \c\two%20words\a\12345678%00
+set S none 27 _x\%01%1f\name\CF *gamedir - ~ _x\%01%1f\name\CF\*gamedir\-%00
+set K 1 1000 *gamedir\e%0d%7f\ffbad\1 a fd%0ec ~ *gamedir\e%0d%7f\ffbad\1\a\fd%0ec%00
+set S 0 10 \_\ac%80 _pw 0 [0]Info%20string%20length%20exceeded%0a \_\ac%80%00
+set K 2 1000 \name\\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\EA\k\\ec\1 _x c ~ \name\\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\EA\k\\ec\1\_x\c%00
+set S 2 1000 ~ team hexenwail ~ \team\hexenwail%00
+set S 1 1000 _\12345678\e\Z\bf\12345678 a %1f ~ _\12345678\e\Z\bf\12345678\a\%1f%00
+set K 2 35 \*spectator\1\*gamedir\%0d%80\*\Z _pw c [0]Info%20string%20length%20exceeded%0a \*spectator\1\*gamedir\%0d%80\*\Z%00
+set S 1 6 ~ name 0 [0]Info%20string%20length%20exceeded%0a %00
+set K 1 27 \two%20words\_pw\GEAH b BD ~ \two%20words\_pw\GEAH\b\BD%00
+set S 2 93 \*gamedir\CHH\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ 12345678" [0]Can't%20use%20keys%20or%20values%20with%20a%20"%0a \*gamedir\CHH\_\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K none 1000 ~ d ~ ~ %00
+set S 1 16 \ *spectator e ~ \\*spectator\e%00
+set S 1 79 \be\\%0d%ff\c\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\ _ - [0]Info%20string%20length%20exceeded%0a \be\\%0d%ff\c\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\%00
+set S 2 1000 \_x\b%01%01%7f\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\%7fcc\b\ *gamedir G ~ \_x\b%01%01%7f\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\b\%7fcc\b\\*gamedir\G%00
+set S 0 108 _x\hexenwail\team\\two%20words\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\_pw\-\ _x d%80e ~ \team\\two%20words\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\_pw\-\\_x\de%00pw\-\%00
+set K none 6 ~ cbaf x [0]Info%20string%20length%20exceeded%0a %00
+set S 0 32 \name\Z\team\hexenwail _pw a%0d" [0]Can't%20use%20keys%20or%20values%20with%20a%20"%0a \name\Z\team\hexenwail%00
+set K 2 81 \*\\%1f%c8%0e\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail *\ Z [0]Can't%20set%20*%20keys%0a \*\\%1f%c8%0e\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail%00
+set S 0 68 ~ bbd vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ \bbd\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 1 85 \*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv *gamedir d [0]Can't%20set%20*%20keys%0a \*spectator\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set K 2 165 team\hexenwail\\0\dde\ADFBA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\- kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk hexenwail [0]Info%20string%20length%20exceeded%0a team\hexenwail\\0\dde\ADFBA\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-%00
+set S 2 151 ~ *spectator x ~ \*spectator\x%00
+set S 2 34 *\\0\name\CBC\b\12345678\b\Z accf Z [0]Info%20string%20length%20exceeded%0a *\\0\name\CBC\b\12345678\b\Z%00
+set K none 27 \b\hexenwail\k\ aff two%20words [0]Info%20string%20length%20exceeded%0a \b\hexenwail\k\%00
+set S 2 85 \*\\b\B\_x\f\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0 b %1f%1f ~ \*\\_x\f\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\0\b\%1f%1f%00
+set S none 107 \*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\bfeca\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv *gamedir 12345678 [0]Info%20string%20length%20exceeded%0a \*\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\bfeca\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%00
+set S 1 98 \k\ECAHD\k\x\*spectator\%0dae%c8\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\EEGCA k 1 ~ \k\x\*spectator\%0dae%c8\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\EEGCA\k\1%00GCA%00
+set K 2 78 \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\DAEB\_x\ * Z [0]Can't%20set%20*%20keys%0a \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\DAEB\_x\%00
+set S 1 160 kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\FBEF\_\1\a\1\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\ _pw hexenwail ~ kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\FBEF\_\1\a\1\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\_pw\hexenwail%00
+set K none 57 _\bf%0df\ * ~ [0]Can't%20set%20*%20keys%0a _\bf%0df\%00
+set S none 0 ~ ~ 0 [0]Info%20string%20length%20exceeded%0a %00
+set K 0 141 \_\AAG\df\F\k\- kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk 12345678 ~ \_\AAG\df\F\k\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\12345678%00
+set S 0 15 \edea\ACG\\- _ 0 [0]Info%20string%20length%20exceeded%0a \edea\ACG\\-%00
+set K 2 33 \\\Z\topcolor\GAD\topcolor\ a H ~ \\\Z\topcolor\GAD\topcolor\\a\H%00
+set S 1 91 \\\team\DFDB\\two%20words a vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]Keys%20and%20values%20must%20be%20<%2064%20characters.%0a \\\team\DFDB\\two%20words%00
+set S 1 9 ~ team - ~ \team\-%00
+set K 2 113 \d\Z\*spectator\GCEDGB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\name\%ff k eef ~ \d\Z\*spectator\GCEDGB\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\hexenwail\name\%ff\k\eef%00
+set S 2 101 \e\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\c%0dd%7f\k\12345678\b\f%7fa _ ~ ~ \e\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\_pw\c%0dd%7f\k\12345678\b\f%7fa%00
+set S none 82 \topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv ~ a%0e ~ \topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\a%00
+set K 0 10 ~ *spectator x [0]Can't%20set%20*%20keys%0a %00
+set K 1 31 \b\hexenwail\team\1 bfeaa BGHFBB [0]Info%20string%20length%20exceeded%0a \b\hexenwail\team\1%00
+set S none 1000 ~ _pw d%ff%80a ~ \_pw\d%7fa%00
+print \a\1 [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a
+print \a\1\b\2 [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]2%0a
+print \qqqqqqqqqqqqqqqqqqq\1\rrrrrrrrrrrrrrrrrrrr\2\sssssssssssssssssssss\3 [0]qqqqqqqqqqqqqqqqqqq%20[0]1%0a[0]rrrrrrrrrrrrrrrrrrrr[0]2%0a[0]sssssssssssssssssssss[0]3%0a
+print \\a\\b [0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]a%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]b%0a
+print ~ ~
+print \\ [0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \ ~
+print \a [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]MISSING%20VALUE%0a
+print \a\1\b [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]MISSING%20VALUE%0a
+print \a\ [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print a\1 [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a
+print a [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]MISSING%20VALUE%0a
+print \a\1\ [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a
+print \a\1\\ [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \a\1\\x [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]1%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]x%0a
+print \\\ [0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \a\\\b [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]b%0a
+print \k\v%20w\x [0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]v%20w%0a[0]x%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]MISSING%20VALUE%0a
+print *\12345678\a\two%20words\_pw\BDF [0]*%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]12345678%0a[0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]two%20words%0a[0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]BDF%0a
+print \name\x\b\DDBB\b\%80a\*\ [0]name%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]x%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]DDBB%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%80a%0a[0]*%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \cbbcc\0 [0]cbbcc%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]0%0a
+print \*\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CH\*spectator\x\name\%1f%80e [0]*%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]CH%0a[0]*spectator%20%20%20%20%20%20%20%20%20%20[0]x%0a[0]name%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%1f%80e%0a
+print \b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\topcolor\ef\fe\%01c%0ee\\Z [0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a[0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]ef%0a[0]fe%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%01c%0ee%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]Z%0a
+print \f\Z\k\ [0]f%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]Z%0a[0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \_\ [0]_%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print ~ ~
+print ~ ~
+print \a\12345678\_pw\BCFEH\k\\GBAG\_pw\0 [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]12345678%0a[0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]BCFEH%0a[0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]GBAG%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]_pw%0a[0]0%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]MISSING%20VALUE%0a
+print \b\CAA\team\12345678\*spectator\ [0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]CAA%0a[0]team%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]12345678%0a[0]*spectator%20%20%20%20%20%20%20%20%20%20[0]%0a
+print ~ ~
+print \*\cd%0d%01\topcolor\12345678\b\0\_pw\ [0]*%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]cd%0d%01%0a[0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]12345678%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]0%0a[0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print ~ ~
+print \a\adab\name\\%1fdd\topcolor\-\_x\0 [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]adab%0a[0]name%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]%1fdd%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]topcolor%0a[0]-%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]_x%0a[0]0%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]MISSING%20VALUE%0a
+print \\12345678\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\-\*spectator\cc%80%c8\ [0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]12345678%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]-%0a[0]*spectator%20%20%20%20%20%20%20%20%20%20[0]cc%80%c8%0a
+print \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\x\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]x%0a[0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a
+print \b\x\a\\team\ee [0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]x%0a[0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]team%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]ee%0a
+print \topcolor\ [0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\Z\name\0\*gamedir\db%0dc\_\0 [0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]Z%0a[0]name%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]0%0a[0]*gamedir%20%20%20%20%20%20%20%20%20%20%20%20[0]db%0dc%0a[0]_%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]0%0a
+print \b\-\topcolor\ADEE\topcolor\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\*gamedir\b\ [0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]-%0a[0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]ADEE%0a[0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a[0]*gamedir%20%20%20%20%20%20%20%20%20%20%20%20[0]b%0a
+print \a\CGAA\team\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]CGAA%0a[0]team%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a
+print \team\%0d\b\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]team%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0d%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a
+print \k\Z [0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]Z%0a
+print \team\\\ [0]team%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print \_pw\- [0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]-%0a
+print \*spectator\0\_\Z\_\two%20words\a\FGCHDE [0]*spectator%20%20%20%20%20%20%20%20%20%20[0]0%0a[0]_%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]Z%0a[0]_%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]two%20words%0a[0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]FGCHDE%0a
+print \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\\k\Z [0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a[0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]Z%0a
+print \topcolor\x\ae\hexenwail\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\GBF\k\ [0]topcolor%20%20%20%20%20%20%20%20%20%20%20%20[0]x%0a[0]ae%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]hexenwail%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]GBF%0a[0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%0a
+print ~ ~
+print \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\DCHBA\caba\AH\ [0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]DCHBA%0a[0]caba%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]AH%0a
+print \cbefd\GHGBAC\b\HAGCD\_pw\two%20words\_\%7f [0]cbefd%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]GHGBAC%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]HAGCD%0a[0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]two%20words%0a[0]_%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%7f%0a
+print ~ ~
+print \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\d\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\CEDBEF\_x\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]d%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]CEDBEF%0a[0]_x%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a
+print \beab\%ffe\_pw\%ffc [0]beab%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%ffe%0a[0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%ffc%0a
+print \*gamedir\12345678\*gamedir\%1f%0ede\b\bd%80%01\k\- [0]*gamedir%20%20%20%20%20%20%20%20%20%20%20%20[0]12345678%0a[0]*gamedir%20%20%20%20%20%20%20%20%20%20%20%20[0]%1f%0ede%0a[0]b%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]bd%80%01%0a[0]k%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]-%0a
+print \_pw\d%c8f\be\0\\-\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv [0]_pw%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]d%c8f%0a[0]be%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]0%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]-%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a
+print \kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\1\adf\%1f%ff\*gamedir\FB [0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a[0]kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk[0]1%0a[0]adf%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]%1f%ff%0a[0]*gamedir%20%20%20%20%20%20%20%20%20%20%20%20[0]FB%0a
+print \a\vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\\eb%7f\*gamedir\a%c8 [0]a%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv%0a[0]%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20%20[0]eb%7f%0a[0]*gamedir%20%20%20%20%20%20%20%20%20%20%20%20[0]a%c8%0a
+print ~ ~
+sweep 7 21845 01bbae1d62aa55ef

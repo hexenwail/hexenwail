@@ -2,15 +2,18 @@
 #
 # check-rust-strlcat.sh -- gate for the Rust port of common/strlcat.c.
 #
-# The differential half compares q_strlcat's return value and every byte it
-# writes with the C original over destination sizes 0..288 in four initial
-# contents (empty, terminator at the last usable byte, no terminator within
-# `siz`, and a case-derived partial string), source lengths 0..256, and
-# unaligned source/destination offsets.  The CMake half proves the engine
-# build every gate shares (scripts/lib/rust-gate.sh) links it exactly once per
-# binary, Hexen II and HexenWorld alike, with no C object left in the build.
+# The fixture half replays expected values frozen from the C original (source
+# length x size x destination string length grids including "no NUL within
+# siz", junk after either NUL, long sources around dlen+len, seeded random
+# mixes) against the Rust port with guard bytes and unaligned offsets, with no C
+# compiler, plus a generated grid (dst string 0..40 x src 0..40 x size 0..48 x
+# offsets) checked against the contract directly, siz < strlen(dst) included.
+# tests/gen_fixtures.sh --check (step 1b, needs cc) re-proves the fixture
+# against common/strlcat.c.  The CMake half proves Hexen II and HexenWorld both
+# link it: the engine build every gate shares (scripts/lib/rust-gate.sh) has it
+# exactly once per binary with no C object left in the build.
 #
-# Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
+# Requires cargo/rustc, cc, cmake and nm -- run inside `nix develop`.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -31,58 +34,64 @@ work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
 symbol=q_strlcat
 
-for tool in cc cargo cmake nm; do
+for tool in cargo cc cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
 	}
 done
 
-echo "== 1. build the consolidated crate with all migrated subsystems =="
-cargo build --release --offline \
-	--manifest-path "$crate/Cargo.toml" \
-	--features hashindex,mathlib,sizebuf,crc,link_ops,strlcpy,strlcat
-
-echo
-echo "== 2. differential harness: Rust vs the C original, one binary =="
-diff_log="$work/diff.log"
-set +e
-RUST_LIB="$crate/target/release/libengine_rs.a" \
-	OUT="$work/diff" \
-	bash "$crate/strlcat/tests/run_diff_harness.sh" >"$diff_log" 2>&1
-harness_status=$?
-set -e
-grep -E 'RESULT:|differential harness:' "$diff_log" || true
-if [ "$harness_status" -ne 0 ]; then
-	echo "FAIL: differential harness exited $harness_status" >&2
-	cat "$diff_log" >&2
+echo "== 1. fixture replay: the frozen common/strlcat.c oracle, cargo test --release =="
+# The differential harness against the C original was retired (#475).  Its
+# expected values are frozen in engine/rust/strlcat/tests/fixtures/strlcat.txt
+# and replayed against src/strlcat.rs with no C compiler.  The fixture is
+# re-proved against C in step 1b by tests/gen_fixtures.sh --check, and shown
+# able to fail by tests/mutants.sh, which rewrites a tracked source and so is
+# not run here (docs/rust-harness-retirement.md).  The replay runs --release:
+# the engine ships release with panic=abort, so the replay must too.
+replay_log="$work/replay.log"
+if ! cargo test --release --offline --manifest-path "$crate/strlcat/Cargo.toml" >"$replay_log" 2>&1; then
+	echo "FAIL: strlcat fixture replay failed" >&2
+	cat "$replay_log" >&2
 	exit 1
 fi
-grep -q '^RESULT: PASS$' "$diff_log" || {
-	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
-	cat "$diff_log" >&2
-	exit 1
-}
-# The PASS line carries the case count, and RESULT alone would still pass if the
-# enumeration were cut down to nothing -- so floor the count at seven digits
-# (a million cases) rather than pinning it, which would mean editing the gate
-# every time the enumeration is deliberately widened.
-count_line=$(grep -E '^strlcat differential harness: PASS \(' "$diff_log" || true)
-count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
-if [ "${#count}" -lt 7 ]; then
-	echo "FAIL: harness case count is below the one-million floor" >&2
-	echo "      observed: ${count_line:-<no 'strlcat differential harness: PASS (N cases)' line>}" >&2
-	cat "$diff_log" >&2
+# A green exit is not enough: require that the replay tests themselves ran, so
+# a renamed or filtered-out test cannot read as green.
+for t in replay_c_fixtures size_zero_leaves_a_real_destination_alone \
+         full_dstlen_srclen_size_offset_grid_matches_the_contract; do
+	grep -q "^test $t \\.\\.\\. ok\$" "$replay_log" || {
+		echo "FAIL: $t did not run and pass" >&2
+		cat "$replay_log" >&2
+		exit 1
+	}
+done
+fixture="$crate/strlcat/tests/fixtures/strlcat.txt"
+records=$(grep -cvE '^(#|$)' "$fixture")
+if [ "$records" -lt 800 ]; then
+	echo "FAIL: strlcat fixture has $records records, below the 800 floor" >&2
 	exit 1
 fi
+echo "  replay_c_fixtures ok ($records records)"
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 1b. the fixture still matches common/strlcat.c (tests/gen_fixtures.sh --check) =="
+# Nothing else re-proves the frozen values against C: the replay only shows
+# the Rust agrees with the fixture.  Drift in the C or an edited fixture fails
+# the gate here.  Needs cc.
+if ! check_log=$(bash "$crate/strlcat/tests/gen_fixtures.sh" --check 2>&1); then
+	echo "FAIL: strlcat fixture no longer matches the C original" >&2
+	echo "$check_log" >&2
+	exit 1
+fi
+echo "  $check_log"
+
+echo
+echo "== 2. the engine build: glhexen2, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
 echo
-echo "== 4. exactly one q_strlcat definition per binary =="
+echo "== 3. exactly one q_strlcat definition per binary =="
 archive="$engine_build/rust/client/libengine_rs.a"
 [ -f "$archive" ] || { echo "FAIL: $archive was not built" >&2; exit 1; }
 n=$(nm "$archive" 2>/dev/null | grep -cE " T $symbol\$" || true)
@@ -106,6 +115,6 @@ stray=$(find "$engine_build" -name 'strlcat.c.o' | wc -l)
 	exit 1
 }
 
-echo "PASS: Rust strlcat -- differential harness green, the consolidated"
+echo "PASS: Rust strlcat -- fixture replay green, the consolidated"
 echo "      archive links exactly one definition per target, and no strlcat.c"
 echo "      object is left in the engine build."

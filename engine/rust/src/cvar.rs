@@ -36,7 +36,8 @@
 //
 // cvar_t is described here rather than in a module of its own because
 // info_str.rs reads `sv_highchars.integer` through Cvar_FindVar and needs the
-// struct even in a harness build that links only that port; lib.rs compiles
+// struct even in a build that links only that port (the info-str-rs test
+// crate); lib.rs compiles
 // this module for either feature and the `#[cfg(feature = "cvar")]` below
 // keeps the functions out of the info_str-only build, as sizebuf.rs does for
 // msg_io.

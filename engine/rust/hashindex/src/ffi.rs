@@ -94,10 +94,11 @@ const _: () = {
 
 // --- ABI cross-check surface ------------------------------------------------
 //
-// Exported so the C-side differential harness can assert that its own
-// `offsetof(hashindex_t, ...)` agrees with what Rust computed.  A constant
-// cannot be read from C as a compile-time value, so these are accessors and
-// the harness checks them at startup, before any behavioural comparison.
+// Exported so C can assert that its own `offsetof(hashindex_t, ...)` agrees
+// with what Rust computed.  A constant cannot be read from C as a compile-time
+// value, so these are accessors.  The frozen `layout` fixture record
+// (tests/fixtures/hashindex.txt) pins the same numbers, and the replay
+// (tests/replay.rs) checks them before any behavioural record.
 
 #[no_mangle]
 pub extern "C" fn HashIndexC_sizeof() -> usize {
@@ -174,8 +175,8 @@ pub unsafe extern "C" fn Hash_Allocate(hi: *mut HashIndexC, hash_size: c_int) {
 /// `Hash_Free` -- hashindex.c:75-87.
 ///
 /// Note what it does *not* do: `hash_size` and `hash_mask` are left untouched,
-/// and only the two pointers are nulled.  The differential harness relies on
-/// that, so it is preserved rather than "tidied up".
+/// and only the two pointers are nulled.  The frozen fixtures
+/// (tests/replay.rs) record that, so it is preserved rather than "tidied up".
 #[no_mangle]
 pub unsafe extern "C" fn Hash_Free(hi: *mut HashIndexC) {
     if !(*hi).hash.is_null() {

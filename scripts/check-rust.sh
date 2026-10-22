@@ -14,8 +14,8 @@
 #   3. one engine build of glhexen2, h2ded and hwsv, shared by every gate
 #      below (it used to be two per gate: twenty-two builds of one tree).
 #   4. #233 archive mapping/ownership gate, then each port's gate -- crate,
-#      differential harness against the C original (crc, strlcpy, huffman and
-#      mathlib instead replay frozen fixtures and re-check them against the C
+#      differential harness against the C original (crc, strlcpy, huffman,
+#      strlcat, mathlib, hashindex and info_str instead replay frozen fixtures and re-check them against the C
 #      with tests/gen_fixtures.sh --check, #475), symbol and stray-object
 #      checks on the shared build.
 #   5. the Rust/C struct layouts on the host (scripts/check-rust-abi.sh; the
@@ -138,6 +138,6 @@ if [ "${#failed[@]}" -ne 0 ]; then
 fi
 echo "PASS: every Rust gate -- toolchain pinned, the old switches rejected, all"
 echo "      ${#ports[@]} ports link once and agree with their C originals (crc, strlcpy,"
-echo "      huffman and mathlib by frozen fixtures re-checked against the C; the"
+echo "      strlcat, huffman, mathlib, hashindex and info_str by frozen fixtures re-checked against the C; the"
 echo "      rest by their own differential harness or fixture), layouts match,"
 echo "      and each port carries its original's copyright notices."

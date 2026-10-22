@@ -1,1 +1,3 @@
 /target
+# Test-only replay host crate
+/replay/target/

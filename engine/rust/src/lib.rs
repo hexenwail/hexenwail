@@ -32,7 +32,7 @@ pub mod sizebuf;
 
 // cvar is the Phase 6 engine-state port, and info_str reads
 // `sv_highchars.integer` through Cvar_FindVar, so it needs cvar_t even in a
-// harness build that links only that port.  Same split as sizebuf/msg_io: the
+// build that links only that port (the info-str-rs test crate).  Same split as sizebuf/msg_io: the
 // layout is unconditional in cvar.rs and the functions are behind
 // `feature = "cvar"`.
 #[cfg(any(feature = "cvar", feature = "info_str", feature = "cmd", feature = "quakefs", feature = "net_chan"))]

@@ -5,12 +5,17 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 description = "Rust port of the Hexenwail/uhexen2 hashindex subsystem (engine/h2shared/hashindex.c)"
 publish = false
+autotests = false
 
 [lib]
 name = "hashindex_rs"
 # staticlib, not cdylib: the engine is an ordinary executable and the
 # WASM/Emscripten path has no dynamic loader at all.
 crate-type = ["staticlib"]
+# no_std staticlib with its own panic handler: it cannot host a test harness.
+# The replay lives in replay/ (see that crate).
+test = false
+doctest = false
 
 # There are deliberately NO dependencies.  The crate declares the handful of C
 # symbols it needs (malloc/free/memset/abort/Sys_Error) in an extern block
