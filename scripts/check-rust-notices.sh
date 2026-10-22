@@ -137,6 +137,7 @@ original_files() {
 	cat <<-'EOF'
 	engine/rust/src/lib.rs
 	engine/rust/crc/src/lib.rs
+	engine/rust/huffman/src/lib.rs
 	EOF
 }
 

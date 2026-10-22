@@ -70,8 +70,7 @@ accessor, HuffEncode (bit position, advance, output offset, padding count,
 length rounding, raw-fallback threshold, marker, outlen), HuffDecode (inlen
 guard, raw copy size, padding count, the declared-end bound removed and one bit
 late, the maxlen check and its return, the payload offset). All die under this
-replay and died under the retired live harness (the replay-only extras are
-noted in the docs/rust-harness-retirement.md huffman section).
+replay, and the same twenty-six died under the retired live harness.
 
 One candidate is not in the list because it is equivalent for this table: moving
 BuildTree's merged node into the other work slot. Slots only break frequency
