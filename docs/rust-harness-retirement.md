@@ -70,16 +70,30 @@ the original stays in the tree. Do not delete it.
 - The fixture is only as good as the C original; the same-author caveat in #475 applies.
 - Do not claim a time win for leaf ports: the crc harness ran in about 1 s of a
   16 min `check-rust.sh`. The gain is decoupling from vanilla, not wall time.
+- Do not let `timeout` wrap `cargo test` in a mutant kill command: a timeout during
+  a slow compile exits 124 and reads as a kill. Run `cargo test --no-run` first
+  (failure is a broken mutant, exit 2), then time-limit only the run.
+- An equivalent-mutant claim is a claim: before writing "left out as equivalent",
+  apply it and run the replay. hashindex's `hash[k] == index` head test was
+  listed as equivalent and is not (the replay kills it).
+- Agent sandboxes may put an `mbx-cargo-shim` `cargo` first on PATH. It caches
+  builds without hashing the `#[path = "../../src/x.rs"]` files outside the crate
+  dir, so every mutant "survives" and even `return 12345;` passes. Use the real
+  cargo (inside `nix develop .#default -c`), and prove it sees a source edit before
+  trusting a `mutants.sh` run.
+- Test crates that compile a file with `#[cfg(feature = "x")]` gates need
+  `[lints.rust] unexpected_cfgs` with `check-cfg` for that feature (see
+  `info_str/Cargo.toml`), or every gate warns.
 - `saturating_sub` on a signed zero goes negative; write mutants that actually
   compile and behave as intended, and read the kill reason once.
 
-## Findings: strlcpy
+## Findings: strlcpy (#475)
 
 - `strlcpy` and `strlcat` are separate files and gates
   (`src/strlcpy.rs`, `src/strlcat.rs`, `check-rust-strlcpy.sh`,
   `check-rust-strlcat.sh`, own harness dirs). Not entangled: retiring one leaves
   the other untouched. (strlcat has since been retired the same way; see
-  "Findings: strlcat".)
+  "Findings: strlcat (#475)".)
 - Pointer-writing ports: record the destination as the full `siz`-byte buffer
   (started all `a5`) so the fixture captures the untouched tail, and replay in
   guard zones. `siz == 0` is called with NULL, as the C original permits.
@@ -95,7 +109,7 @@ the original stays in the tree. Do not delete it.
   `run_diff_harness.sh`; check the unmutated baseline exits 0 first so a build
   failure is not read as a kill.
 
-## Findings from `huffman` (#475)
+## Findings: huffman (#475)
 
 Worked example: `engine/rust/huffman/` and `scripts/check-rust-huffman.sh`. A
 stateful port with a build step, two C variants and a deliberate divergence from
@@ -134,7 +148,7 @@ the C.
   only matters for frequency ties; the shipped table has none among merged
   weights. Not a fixture gap; left out of `mutants.sh` with a note in the README.
 
-## Findings from `mathlib` (#475)
+## Findings: mathlib (#475)
 
 - **The port already has a crate.** `mathlib/` is a `no_std` staticlib with a
   `#[panic_handler]`, so it cannot host `cargo test`. The test-only crate lives in
@@ -157,7 +171,8 @@ the C.
   that start with a bare token can match the doc comment first; anchor them on
   code.
 - **A mutant can hang.** `GreatestCommonDivisor` with `/` for `%` loops forever.
-  `mutants.sh` runs the replay under `timeout 120` and counts that as a kill.
+  `mutants.sh` compiles first (no timeout), then runs the test binary under
+  `timeout 120` and counts that as a kill.
 - **Pilot bug: `mutants.sh` swallowed the broken-mutant message.** `crc`'s loop
   ran the kill command with `2>&1` sent to `/dev/null`, so `exit 2` from a mutant
   that did not compile printed nothing. `mathlib/tests/mutants.sh` captures stderr
@@ -166,7 +181,7 @@ the C.
   killed 28 of 38 here, and the replay killed all 38. Keep the mutants that only
   the replay kills; they are what the harness was missing.
 
-## Findings: strlcat
+## Findings: strlcat (#475)
 
 Worked example: `engine/rust/strlcat/` and `scripts/check-rust-strlcat.sh`. The
 strlcpy crate shape, reused: a std test-only crate compiling `src/strlcat.rs`
@@ -198,7 +213,7 @@ unchanged, no C symbols to stub, no `autotests` tricks needed.
 - **Undefined in C, not matched.** Overlapping `src`/`dst` and a source with no
   NUL. Neither is in the contract and neither is in the fixture.
 
-## Findings: hashindex
+## Findings: hashindex (#475)
 
 Worked example: `engine/rust/hashindex/` and `scripts/check-rust-hashindex.sh`. A
 stateful table with no return values: every observable is the memory the caller
@@ -240,8 +255,10 @@ reads afterwards.
   distributions (any key, a small colliding pool, aliases of a few buckets,
   extremes). The model is what restores the old harness's million-operation volume
   cheaply; the fixture is what ties the model's rules to the C.
-- **Mutants.** 25, replay kills 25; the live harness killed 19 of the same 25
-  first. The six it missed were the `Hash_Allocate` re-init guard and check order,
+- **Mutants.** 26, replay kills 26; the live harness killed 19 of the first 25
+  (the 26th, dropping `Hash_Remove`'s `hash[k] == index` head test, was added
+  after the review found it was wrongly listed as equivalent, and was not run
+  against the retired harness). The six it missed were the `Hash_Allocate` re-init guard and check order,
   `Hash_Add` accepting index -1, the NULL guards on `Hash_Remove` and `Hash_Clear`,
   and a half-size `Hash_Clear`. A guard dropped in Rust usually dies by SIGSEGV on
   the null pointer, not by an assertion: still a kill, and `mutants.sh` counts it.
@@ -311,8 +328,8 @@ only one target compiles.
   closes. Two equivalent mutants are left out and noted in `mutants.sh`
   (`l < 20` -> `l <= 20` in `Info_Print`, and the `!= 0` rewrite of the cvar
   test). A mutant can hang the replay (observed: one ran for minutes before a
-  timeout was added), so the kill command runs under `timeout 60`, which counts
-  as a kill.
+  timeout was added), so the kill command runs the already built test under `timeout 60`, which
+  counts as a kill.
 - **Accepted losses.** A key or value segment of 512 bytes or more overruns the
   C's `pkey`/`value` stack buffers and the rotation slots, and a `maxsize` above
   the caller's buffer lets the C write past it; both are undefined in C and are
