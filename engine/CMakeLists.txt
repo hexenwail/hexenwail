@@ -43,9 +43,9 @@ option(USE_CODEC_TIMIDITY "Enable the vendored libTiMidity MIDI fallback codec" 
 # target that compiled the C: the client, h2ded, hwsv, the MinGW cross builds
 # and the WebAssembly client.
 # Their C originals stay in the tree only as the reference the differential
-# harnesses under engine/rust/*/tests compare against (crc, strlcpy, huffman
-# and mathlib: the frozen fixtures that `gen_fixtures.sh --check` re-proves
-# against them); no engine target compiles them.  See "Rust engine archive" below for how the archive is
+# harnesses under engine/rust/*/tests compare against (crc, strlcpy, huffman,
+# mathlib and info_str: the frozen fixtures that `gen_fixtures.sh --check`
+# re-proves against them); no engine target compiles them.  See "Rust engine archive" below for how the archive is
 # built and which target triple it is built for.
 
 # Dedicated servers are separate, rarely-wanted artifacts.  HexenWorld client

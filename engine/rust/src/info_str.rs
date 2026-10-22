@@ -15,10 +15,10 @@
 //    is the only target built with SERVERONLY (and H2W).  Every Hexen II use of
 //    Info_* sits inside `#if defined(H2W)` (pr_cmds.c, gl_model.c, pr_edict.c,
 //    quakefs.c), so glhexen2 and h2ded never reference these symbols at all.
-//    The port therefore implements the SERVERONLY variant, and the differential
-//    harness compiles the C exactly as hwsv does, so it compares against the
-//    code that actually ships rather than against the client variant no binary
-//    in this tree contains.
+//    The port therefore implements the SERVERONLY variant, and the fixture
+//    generator (info_str/tests/gen_fixtures.sh) compiles the C exactly as hwsv
+//    does, so the frozen values are the code that actually ships rather than
+//    the client variant no binary in this tree contains.
 //
 //    The client variant differs only in the high-bit filter of
 //    Info_SetValueForStarKey: it forces 7-bit characters except for the key
@@ -33,7 +33,7 @@
 //    so the four buffers exist to let two or more returned values be held at
 //    once (Info_SetValueForKey's callers compare a value taken before a write
 //    with one taken after: sv_main.c:1532, :1565, :1602).  Callers observe the
-//    rotation, so it is part of the contract, and the harness compares
+//    rotation, so it is part of the contract, and the fixture replay checks
 //    successive calls rather than a single one.
 //
 // 3. The C reads the hwsv-only global `sv_highchars` directly. This port
@@ -46,7 +46,7 @@
 // The rest is deliberately literal: statement order, the parse loops, the
 // in-place rewrite boundaries (Info_RemoveKey's memmove, Info_RemovePrefixedKeys
 // restarting from `start`) and the `> 13` retention are the contract, and the
-// harness compares them across successive calls and against the caller's own
+// replay compares them across successive calls and against the caller's own
 // buffer, not just against a return value.
 
 use core::ffi::{c_char, c_int, c_uint, c_void};
@@ -89,10 +89,10 @@ extern "C" {
 // `cvar_t` from engine/h2shared/cvar.h -- the HexenWorld server compiles the
 // same header.  Only `integer` is ever read here, so the layout lives with the
 // port that owns the type (cvar.rs); declaring it a second time would be a
-// second thing to keep in step, and the CvarC_* layout accessors the
-// differential harness calls are exported from there too.  cvar.rs is compiled
-// whenever this module is (see lib.rs), which is what makes the import legal in
-// an info_str-only harness build.
+// second thing to keep in step, and the CvarC_* layout accessors that
+// check-rust-abi.sh compares with the real struct are exported from there too.
+// cvar.rs is compiled whenever this module is (see lib.rs), which is what makes
+// the import legal in an info_str-only build, the test crate's included.
 use crate::cvar::CvarC;
 
 /// `sv_highchars.integer` from engine/hexenworld/server/sv_main.c, read through
@@ -149,7 +149,7 @@ static mut INFO_VALUE: [[c_char; MAX_INFO_VALUE]; 4] = [[0; MAX_INFO_VALUE]; 4];
 static mut INFO_VALUE_INDEX: usize = 0;
 
 /// C returns a string literal `""` on every miss; that pointer is a different
-/// object from the rotation slot, which is why the harness must compare the
+/// object from the rotation slot, which is why the replay compares the
 /// text and the pointer's slot, not the address.
 const EMPTY: *const c_char = c"".as_ptr();
 
