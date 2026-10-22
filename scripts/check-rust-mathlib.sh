@@ -26,7 +26,7 @@
 #      is the duplicate-symbol hazard the CMake source-list removal exists to
 #      prevent, and the failure mode if that removal is ever lost
 #
-# Requires cargo/rustc, cmake and nm -- run it inside `nix develop`.
+# Requires cargo/rustc, cc, cmake and nm -- run it inside `nix develop`.
 # No game data needed for the default checks: nothing here starts the engine.
 #
 #   ./scripts/check-rust-mathlib.sh            # fast: crate, replay, builds
@@ -61,7 +61,7 @@ symbols=(Q_isnan anglemod GreatestCommonDivisor NearestMultiple Q_log2 \
          Invert24To16 BOPS_Error FloorDivMod AngleVectors \
          R_ConcatRotations R_ConcatTransforms BoxOnPlaneSide)
 
-for tool in cargo cmake nm; do
+for tool in cargo cc cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
@@ -72,9 +72,9 @@ echo "== 1. build the crate (offline, no dependencies) =="
 cargo build --release --offline --manifest-path "$crate/Cargo.toml"
 
 echo
-echo "== 2. fixture replay: the frozen engine/h2shared/mathlib.c oracle, plain cargo test =="
+echo "== 2. fixture replay: the frozen engine/h2shared/mathlib.c oracle, cargo test --release =="
 replay_log="$work/replay.log"
-if ! cargo test --offline --manifest-path "$crate/replay/Cargo.toml" >"$replay_log" 2>&1; then
+if ! cargo test --release --offline --manifest-path "$crate/replay/Cargo.toml" >"$replay_log" 2>&1; then
 	echo "FAIL: mathlib fixture replay failed" >&2
 	cat "$replay_log" >&2
 	exit 1
@@ -96,6 +96,18 @@ if [ "$records" -lt 1000 ]; then
 	exit 1
 fi
 echo "  replay ok ($records records)"
+
+echo
+echo "== 1b. the fixture still matches engine/h2shared/mathlib.c (tests/gen_fixtures.sh --check) =="
+# Nothing else re-proves the frozen values against C: the replay only shows
+# the Rust agrees with the fixture.  Drift in the C or an edited fixture fails
+# the gate here.  Needs cc.
+if ! check_log=$(bash "$crate/tests/gen_fixtures.sh" --check 2>&1); then
+	echo "FAIL: mathlib fixture no longer matches the C original" >&2
+	echo "$check_log" >&2
+	exit 1
+fi
+echo "  $check_log"
 
 echo
 echo "== 3. the engine build: glhexen2, h2ded and hwsv =="

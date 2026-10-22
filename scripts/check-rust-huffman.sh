@@ -8,10 +8,18 @@
 # for bit, the 256 codes, encodes (the raw 0xff fallback and compressed
 # packets), round-trip decodes at several maxlen values, the padding, truncation
 # and header-byte sweeps, and a seeded fuzz of malformed packets.  The audit
-# half, tests/gen_fixtures.sh --check, still builds the C both ways -- as hwsv
-# (Hunk_AllocName) and as the integrated client (malloc) -- and fails if the
-# two differ in a byte, which is what makes the Rust's one allocation path
-# (malloc for both targets) safe; it needs cc and is not part of this gate.
+# half, tests/gen_fixtures.sh --check (step 1b, needs cc), builds the C both
+# ways -- as hwsv (Hunk_AllocName) and as the integrated client (malloc) -- and
+# fails if the two differ in a byte or from the committed fixture, which is
+# what makes the Rust's one allocation path (malloc for both targets) safe.
+#
+# ACCEPTED LOSS: the retired harness also compared the bytes HuffEncode leaves
+# past outlen in the output buffer (the raw fallback leaves scratch bits of the
+# failed compressed attempt there).  The fixture does not freeze them: no
+# caller reads past outlen, and they are an artefact of the C's two-pass
+# encode, not behaviour.  A change that only alters those scratch bytes passes.
+# Round trips over 1500 further seeded payloads are checked against the
+# encoder's size invariants (outlen <= inlen + 1, from huffman.c).
 #
 # The decode half is guarded: every replayed decode runs in a forked child with
 # the packet placed against an unmapped page, so a decoder that reads past the
@@ -39,7 +47,7 @@
 # hexenworld/shared/huffman.c directly (hw_utils/CMakeLists.txt) and link no
 # part of the Rust archive, so they keep the C original either way.
 #
-# Requires cargo/rustc, cmake and nm -- run inside `nix develop`.
+# Requires cargo/rustc, cc, cmake and nm -- run inside `nix develop`.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -61,28 +69,31 @@ mkdir -p "$work"
 symbols=(HuffInit HuffEncode HuffDecode)
 accessors=(Huffman_freq Huffman_lookup_len Huffman_lookup_bits)
 
-for tool in cargo cmake nm; do
+for tool in cargo cc cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
 	}
 done
 
-echo "== 1. fixture replay: the frozen huffman.c oracle, plain cargo test =="
+echo "== 1. fixture replay: the frozen huffman.c oracle, cargo test --release =="
 # The differential harness against the C original was retired (#475).  Its
 # expected values are frozen in engine/rust/huffman/tests/fixtures/huffman.txt
 # and replayed against src/huffman.rs with no C compiler.  The fixture is
-# audited against C by tests/gen_fixtures.sh --check, and shown able to fail by
-# tests/mutants.sh; neither runs here (docs/rust-harness-retirement.md).
+# re-proved against C in step 1b by tests/gen_fixtures.sh --check, and shown
+# able to fail by tests/mutants.sh, which rewrites a tracked source and so is
+# not run here (docs/rust-harness-retirement.md).  The replay runs --release:
+# the engine ships release with panic=abort, so the replay must too.
 replay_log="$work/replay.log"
-if ! cargo test --offline --manifest-path "$crate/huffman/Cargo.toml" >"$replay_log" 2>&1; then
+if ! cargo test --release --offline --manifest-path "$crate/huffman/Cargo.toml" >"$replay_log" 2>&1; then
 	echo "FAIL: huffman fixture replay failed" >&2
 	cat "$replay_log" >&2
 	exit 1
 fi
 # A green exit is not enough: require that both replay tests ran, so a renamed
 # or filtered-out test cannot read as green.
-for t in replay_c_fixtures code_table_is_a_complete_prefix_code; do
+for t in replay_c_fixtures code_table_is_a_complete_prefix_code \
+         seeded_weighted_payloads_round_trip_and_obey_the_encoder_invariants; do
 	grep -q "^test $t \.\.\. ok\$" "$replay_log" || {
 		echo "FAIL: $t did not run and pass" >&2
 		cat "$replay_log" >&2
@@ -98,6 +109,18 @@ fi
 # Per-category floors live in replay.rs and fail the test itself; this count
 # only catches a fixture truncated below anything those floors would allow.
 echo "  replay_c_fixtures ok ($records records)"
+
+echo
+echo "== 1b. the fixture still matches hexenworld/shared/huffman.c (tests/gen_fixtures.sh --check) =="
+# Nothing else re-proves the frozen values against C: the replay only shows
+# the Rust agrees with the fixture.  Drift in the C or an edited fixture fails
+# the gate here.  Needs cc.
+if ! check_log=$(bash "$crate/huffman/tests/gen_fixtures.sh" --check 2>&1); then
+	echo "FAIL: huffman fixture no longer matches the C original" >&2
+	echo "$check_log" >&2
+	exit 1
+fi
+echo "  $check_log"
 
 echo "== 2. build the consolidated crate with every migrated subsystem =="
 cargo build --release --offline \

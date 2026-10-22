@@ -5,12 +5,16 @@
 # The fixture half replays expected values frozen from the C original
 # (every CRC table entry, directed and seeded byte steps, CRC_Value, the
 # published check value, and blocks of every length 0..40 plus longer ones at
-# unaligned offsets) against the Rust port, with no C compiler.  The CMake
+# unaligned offsets) against the Rust port, with no C compiler.  The replay
+# also compares the port with an independent bit-by-bit CRC-CCITT over all 2^24
+# (crc, byte) steps, all 2^16 CRC_Value inputs and 5000 seeded blocks of up to
+# 8192 bytes at offsets 0..15.  tests/gen_fixtures.sh --check (step 1b, needs
+# cc) re-proves the fixture against common/crc.c.  The CMake
 # half proves the consolidated engine archive exports it and the engine build
 # every gate shares (scripts/lib/rust-gate.sh) links it exactly once per
 # binary with no C object left in the build.
 #
-# Requires cargo/rustc, cmake and nm -- run inside `nix develop`.
+# Requires cargo/rustc, cc, cmake and nm -- run inside `nix develop`.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -31,32 +35,39 @@ work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
 symbols=(CRC_Init CRC_ProcessByte CRC_ProcessBlock CRC_Value CRC_Block)
 
-for tool in cargo cmake nm; do
+for tool in cargo cc cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
 	}
 done
 
-echo "== 1. fixture replay: the frozen common/crc.c oracle, plain cargo test =="
+echo "== 1. fixture replay: the frozen common/crc.c oracle, cargo test --release =="
 # The differential harness against the C original was retired (#475).  Its
 # expected values are frozen in engine/rust/crc/tests/fixtures/crc.txt and
-# replayed against src/crc.rs with no C compiler.  The fixture is audited
-# against C by tests/gen_fixtures.sh --check, and shown able to fail by
-# tests/mutants.sh; neither runs here (docs/rust-harness-retirement.md).
+# replayed against src/crc.rs with no C compiler.  The fixture is
+# re-proved against C in step 1b by tests/gen_fixtures.sh --check, and shown
+# able to fail by tests/mutants.sh, which rewrites a tracked source and so is not run here
+# (docs/rust-harness-retirement.md).  The replay runs --release: the engine
+# ships release with panic=abort, so the replay must too.
 replay_log="$work/replay.log"
-if ! cargo test --offline --manifest-path "$crate/crc/Cargo.toml" >"$replay_log" 2>&1; then
+if ! cargo test --release --offline --manifest-path "$crate/crc/Cargo.toml" >"$replay_log" 2>&1; then
 	echo "FAIL: crc fixture replay failed" >&2
 	cat "$replay_log" >&2
 	exit 1
 fi
 # A green exit is not enough: require that the replay test itself ran, so a
 # renamed or filtered-out test cannot read as green.
-grep -q '^test replay_c_fixtures \.\.\. ok$' "$replay_log" || {
-	echo "FAIL: replay_c_fixtures did not run and pass" >&2
-	cat "$replay_log" >&2
-	exit 1
-}
+for t in replay_c_fixtures reference_pins_the_published_check_value \
+         every_crc_byte_step_matches_the_reference \
+         crc_value_matches_the_reference_for_every_input \
+         seeded_blocks_up_to_8192_bytes_at_every_offset_match_the_reference; do
+	grep -q "^test $t \.\.\. ok\$" "$replay_log" || {
+		echo "FAIL: $t did not run and pass" >&2
+		cat "$replay_log" >&2
+		exit 1
+	}
+done
 fixture="$crate/crc/tests/fixtures/crc.txt"
 records=$(grep -cvE '^(#|$)' "$fixture")
 if [ "$records" -lt 400 ]; then
@@ -64,6 +75,18 @@ if [ "$records" -lt 400 ]; then
 	exit 1
 fi
 echo "  replay_c_fixtures ok ($records records)"
+
+echo
+echo "== 1b. the fixture still matches common/crc.c (tests/gen_fixtures.sh --check) =="
+# Nothing else re-proves the frozen values against C: the replay only shows
+# the Rust agrees with the fixture.  Drift in the C or an edited fixture fails
+# the gate here.  Needs cc.
+if ! check_log=$(bash "$crate/crc/tests/gen_fixtures.sh" --check 2>&1); then
+	echo "FAIL: crc fixture no longer matches the C original" >&2
+	echo "$check_log" >&2
+	exit 1
+fi
+echo "  $check_log"
 
 echo
 echo "== 2. the engine build: glhexen2, h2ded and hwsv =="

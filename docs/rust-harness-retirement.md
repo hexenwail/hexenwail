@@ -23,21 +23,32 @@ Worked example: `engine/rust/crc/` and `scripts/check-rust-crc.sh`.
    buffer offsets, check inputs are unmodified, and assert per-record-kind floors
    so a truncated fixture cannot read green. `.gitignore`: `/target/`, `Cargo.lock`.
    Ports whose module needs C symbols (Sys_Error, Hunk_*) need stubs in the test
-   crate, or must keep a link-time oracle.
+   crate, or must keep a link-time oracle. If the port's own crate is the
+   `no_std` staticlib (mathlib), set `autotests = false` and `[lib] test = false,
+   doctest = false` there, so a plain `cargo test` on it is a no-op instead of
+   trying to build `tests/replay.rs` against a panic handler. **Run replays with
+   `cargo test --release`**: the engine ships release with `panic=abort`.
+   Where the harness was exhaustive, restore that cheaply with an independent
+   reference written in the test (crc: a bit-by-bit CCITT over all 2^24 steps;
+   strlcpy: the semantic checked over the full length x size x offset grid;
+   huffman: encoder size invariants over seeded round trips), not a big fixture.
 4. **Mutants.** `tests/mutants.sh` applies each mutant to `src/<port>.rs`, runs the
    replay, requires a kill, restores the file. Strip compile-time asserts in the
    mutated copy, otherwise the compiler kills table mutants, not the fixtures. A
    mutant that does not compile is an error, not a kill. **Before deleting the C
    harness, run the same list against it** (pass a kill command after `--`) and
-   require the same set to die. Record the list in the fixture README.
+   require the same set to die. Record the list in the fixture README. The kill
+   command runs `cargo test --release`.
 5. **Delete the C side.** `git rm` the harness `.c` and runner `.sh`. Keep the C
    original if anything reads it (notices gate, `utils/CMakeLists.txt`).
 6. **Gate edit.** In `scripts/check-rust-<port>.sh`: drop the harness build/run
    step and its case-count floor; add a step that runs
-   `cargo test --offline --manifest-path engine/rust/<port>/Cargo.toml`, greps for
-   the replay test line `... ok`, and floors the record count. Remove `cc` from the
-   tool list if nothing else needs it. Keep the symbol, single-definition and
-   stray-object checks.
+   `cargo test --release --offline --manifest-path engine/rust/<port>/Cargo.toml`,
+   greps for every replay test line `... ok`, and floors the record count. **Keep
+   `cc` and run `tests/gen_fixtures.sh --check` in the gate** (it is 1-4 s): it
+   is the only thing that re-proves the frozen values against the C, so drift in
+   the C or a hand-edited fixture must fail the gate. Keep the symbol,
+   single-definition and stray-object checks.
 
 ## Keep permanently
 
@@ -51,7 +62,7 @@ the original stays in the tree. Do not delete it.
 - [ ] `gen_fixtures.sh --check` clean; `mutants.sh` all killed; same mutants killed by the live harness first
 - [ ] `grep -rn "<port>/tests\|run_diff_harness" scripts .github engine/CMakeLists.txt` finds no stale reference to the deleted files (other ports' gates may name their own harness; leave those)
 - [ ] `check-rust-<port>.sh`, `check-rust-notices.sh` and `--self-test`, `check-rust-archives.sh`, `shellcheck -x` on touched scripts, then one `check-rust.sh`
-- [ ] new scripts pass `shellcheck -x` (`lint.yml` lists only `check-rust.sh`, `-abi`, `-notices`; per-port gates are checked by hand)
+- [ ] new scripts pass `shellcheck -x` and are added to the list in `lint.yml`
 - [ ] Real-engine evidence per #475 (demo replay or `tools/hw-drive.sh` smoke) before deleting a non-leaf oracle
 
 ## Watch for
@@ -64,7 +75,7 @@ the original stays in the tree. Do not delete it.
 
 ## Findings: strlcpy
 
-- `strlcpy` and `strlcat` are separate files, crates-to-be and gates
+- `strlcpy` and `strlcat` are separate files and gates
   (`src/strlcpy.rs`, `src/strlcat.rs`, `check-rust-strlcpy.sh`,
   `check-rust-strlcat.sh`, own harness dirs). Not entangled: retiring one leaves
   the other untouched. `check-rust-strlcat.sh` builds with `--features ...,strlcpy,strlcat`
@@ -146,7 +157,7 @@ the C.
   that start with a bare token can match the doc comment first; anchor them on
   code.
 - **A mutant can hang.** `GreatestCommonDivisor` with `/` for `%` loops forever.
-  `mutants.sh` runs the replay under `timeout 60` and counts that as a kill.
+  `mutants.sh` runs the replay under `timeout 120` and counts that as a kill.
 - **Pilot bug: `mutants.sh` swallowed the broken-mutant message.** `crc`'s loop
   ran the kill command with `2>&1` sent to `/dev/null`, so `exit 2` from a mutant
   that did not compile printed nothing. `mathlib/tests/mutants.sh` captures stderr

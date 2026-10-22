@@ -19,16 +19,19 @@ orig="$(mktemp)"
 cp "$src" "$orig"
 trap 'cp "$orig" "$src"; rm -f "$orig"' EXIT
 
-# Default kill command: the replay must run and fail.  A mutant that merely
-# fails to compile proves nothing, so that is an error, not a kill.
+# Default kill command: the release-profile replay (what the engine ships) must
+# run and fail.  A mutant that merely fails to compile proves nothing, so that
+# is an error (return 2, printed by the loop below), not a kill.
 replay() {
 	local out
-	if out=$(cargo test --offline --manifest-path "$crate/Cargo.toml" 2>&1); then return 0; fi
+	if out=$(cargo test --release --offline --manifest-path "$crate/Cargo.toml" 2>&1); then return 0; fi
 	if grep -q 'could not compile' <<<"$out"; then
-		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; exit 2
+		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; return 2
 	fi
 	return 1
 }
+errf="$(mktemp)"
+trap 'cp "$orig" "$src"; rm -f "$orig" "$errf"' EXIT
 if [ "${1:-}" = "--" ]; then shift; kill_cmd=("$@"); else kill_cmd=(replay); fi
 
 # name|perl -0 substitution (applied to huffman.rs)
@@ -67,7 +70,10 @@ for m in "${mutants[@]}"; do
 	name="${m%%|*}"; sub="${m#*|}"
 	perl -0pe "$sub" "$orig" >"$src"
 	if cmp -s "$src" "$orig"; then echo "BROKEN MUTANT (no change): $name" >&2; exit 2; fi
-	if "${kill_cmd[@]}" >/dev/null 2>&1; then
+	rc=0
+	"${kill_cmd[@]}" >/dev/null 2>"$errf" || rc=$?
+	if [ "$rc" -eq 2 ]; then cat "$errf" >&2; echo "(mutant: $name)" >&2; exit 2; fi
+	if [ "$rc" -eq 0 ]; then
 		echo "SURVIVED: $name"; survived=$((survived + 1))
 	else
 		echo "killed:   $name"
