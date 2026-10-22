@@ -140,6 +140,7 @@ original_files() {
 	engine/rust/strlcpy/src/lib.rs
 	engine/rust/strlcat/src/lib.rs
 	engine/rust/huffman/src/lib.rs
+	engine/rust/info_str/src/lib.rs
 	engine/rust/mathlib/replay/src/lib.rs
 	engine/rust/hashindex/replay/src/lib.rs
 	EOF

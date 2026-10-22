@@ -47,13 +47,15 @@ jobs:
             scripts/check-rust-crc.sh scripts/check-rust-strlcpy.sh \
             scripts/check-rust-huffman.sh scripts/check-rust-mathlib.sh \
             scripts/check-rust-strlcat.sh \
+            scripts/check-rust-info-str.sh \
             engine/rust/crc/tests/gen_fixtures.sh engine/rust/crc/tests/mutants.sh \
             engine/rust/strlcpy/tests/gen_fixtures.sh engine/rust/strlcpy/tests/mutants.sh \
             engine/rust/strlcat/tests/gen_fixtures.sh engine/rust/strlcat/tests/mutants.sh \
             engine/rust/huffman/tests/gen_fixtures.sh engine/rust/huffman/tests/mutants.sh \
             engine/rust/mathlib/tests/gen_fixtures.sh engine/rust/mathlib/tests/mutants.sh \
             scripts/check-rust-hashindex.sh \
-            engine/rust/hashindex/tests/gen_fixtures.sh engine/rust/hashindex/tests/mutants.sh
+            engine/rust/hashindex/tests/gen_fixtures.sh engine/rust/hashindex/tests/mutants.sh \
+            engine/rust/info_str/tests/gen_fixtures.sh engine/rust/info_str/tests/mutants.sh
 
       # The metainfo is what GNOME Software and KDE Discover read, and Flathub
       # rejects a submission whose metainfo does not validate.  Nothing checked
