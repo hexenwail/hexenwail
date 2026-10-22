@@ -18,8 +18,6 @@
 # Equivalent mutants left out on purpose:
 #  - Hash_Remove computing `k` before or after the NULL check: the order is
 #    unobservable, both paths reach the same Sys_Error.
-#  - Hash_Remove's `hash[k] == index` head test: the chain walk below it would
-#    find the same head, so dropping it only changes a branch, not a result.
 #
 # Not part of check-rust-hashindex.sh (it rewrites a tracked source); run it when
 # the fixtures or ffi.rs change.  Needs perl and cargo.
@@ -39,15 +37,12 @@ trap 'cp "$orig" "$src"; rm -f "$orig" "$errf"' EXIT
 # an error (return 2, printed by the loop below), not a kill.
 replay() {
 	local out
-	# A mutant that loops forever is a kill: timeout exits 124.
-	if out=$(timeout 300 cargo test --release --offline --manifest-path "$crate/Cargo.toml" 2>&1); then
-		return 0
+	# Compile first, with no timeout: a slow build must never read as a kill.
+	if ! out=$(cargo test --release --offline --no-run --manifest-path "$crate/Cargo.toml" 2>&1); then
+		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; return 2
 	fi
-	if grep -q 'could not compile' <<<"$out"; then
-		echo "BROKEN MUTANT (does not compile)" >&2
-		echo "$out" >&2
-		return 2
-	fi
+	# A mutant that loops forever, once built, is a kill: timeout exits 124.
+	if timeout 300 cargo test --release --offline --manifest-path "$crate/Cargo.toml" >/dev/null 2>&1; then return 0; fi
 	return 1
 }
 if [ "${1:-}" = "--" ]; then shift; kill_cmd=("$@"); else kill_cmd=(replay); fi
@@ -71,6 +66,7 @@ mutants=(
 	'Add buckets by key >> 1|s/let h = \(key & \(\*hi\)\.hash_mask\) as isize;/let h = ((key >> 1) \& (*hi).hash_mask) as isize;/'
 	'Add NULL guard dropped|s/if \(\*hi\)\.hash\.is_null\(\) \{\n        Sys_Error\(c"Hash_Add/if false {\n        Sys_Error(c"Hash_Add/'
 	'Remove buckets with half the mask|s/let k = \(key & \(\*hi\)\.hash_mask\) as isize;/let k = (key \& ((*hi).hash_mask >> 1)) as isize;/'
+	'Remove head test dropped|s/if \*hash\.offset\(k\) == index \{/if false {/'
 	'Remove head promotes -1, not the next link|s/\*hash\.offset\(k\) = \*chain\.offset\(index as isize\);/*hash.offset(k) = NULL_INDEX;/'
 	'Remove relink drops the tail|s/\*chain\.offset\(i as isize\) = \*chain\.offset\(index as isize\);/*chain.offset(i as isize) = NULL_INDEX;/'
 	'Remove walk stops after one link|s/i = \*chain\.offset\(i as isize\);/i = NULL_INDEX;/'

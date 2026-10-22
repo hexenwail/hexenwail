@@ -84,18 +84,18 @@ Regenerate or audit against C (needs cc and the engine headers, so run it inside
 
 ## Mutants
 
-`bash engine/rust/hashindex/tests/mutants.sh` (needs perl, cargo) applies 25 mutants
+`bash engine/rust/hashindex/tests/mutants.sh` (needs perl, cargo) applies 26 mutants
 to `src/ffi.rs`, one at a time, and requires the release-profile replay to die for
 each. They cover the power-of-two test (size 0 and 2^n - 1), the re-initialise guard
 and the order of the two `Hash_Allocate` checks, the `indexChain` fill, the mask,
 `Hash_Free` leaving each pointer (and zeroing the mask), `Hash_Add` (no link to the
 old head, head never updated, `>` for `>=`, accepting -1, wrong bucket, NULL guard),
-`Hash_Remove` (half mask, head promotion, relink, walk, stale slot, NULL guard),
+`Hash_Remove` (half mask, head test, head promotion, relink, walk, stale slot, NULL guard),
 `Hash_Clear` (half clear, also clearing `indexChain`, NULL guard) and the struct
 layout (pointers swapped, compile-time asserts stripped so the layout record has to
-catch it). All 25 die.
+catch it), and `Hash_Remove`'s head test dropped. All 26 die.
 
-The same 25 against the retired live harness before it was deleted: it killed 19
+The first 25 against the retired live harness before it was deleted: it killed 19
 and 6 survived (`Allocate` re-init guard and check order, `Add` accepting -1, the
 `Remove` and `Clear` NULL guards, `Clear` half the table), so every mutant the
 harness killed is killed by the replay and the replay kills 6 more. The harness
@@ -104,5 +104,6 @@ table, never index -1), and its one clear case held entries only in the low half
 the table, so a clear of half the array looked fine.
 
 Equivalent mutants left out: `Hash_Remove` computing the bucket before or after the
-NULL check (unobservable, both reach the same `Sys_Error`), and dropping the
-`hash[k] == index` head test in `Hash_Remove` (the chain walk finds the same head).
+NULL check (unobservable, both reach the same `Sys_Error`). Dropping the
+`hash[k] == index` head test in `Hash_Remove` is NOT equivalent (the chain walk
+starts below the head and never unlinks it); it is mutant 'Remove head test dropped'.
