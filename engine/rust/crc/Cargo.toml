@@ -1,0 +1,15 @@
+[package]
+name = "crc-rs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Test-only host crate that replays frozen common/crc.c fixtures against engine/rust/src/crc.rs"
+publish = false
+
+# Not linked into the engine.  The engine archive (engine/rust, no_std
+# staticlib) cannot host a `cargo test` target, so this crate compiles the
+# very same source file and runs the fixture replay in tests/replay.rs.
+
+[lib]
+name = "crc_rs"
+path = "src/lib.rs"

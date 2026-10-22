@@ -55,6 +55,13 @@ reaches the harness as designed:
 ASAN_OPTIONS=detect_leaks=0:handle_segv=0 bash huffman/tests/run_diff_harness.sh
 ```
 
+(Historical: that script, and the crc, strlcpy and mathlib harnesses, were
+retired in #475 and no longer exist.  the last copy is the parent of the commit that deleted it; find it with
+`git log --diff-filter=D --format=%H -- engine/rust/huffman/tests/run_diff_harness.sh`
+and `git show <that sha>^:engine/rust/huffman/tests/run_diff_harness.sh`.  The
+guard-page decode now lives in `engine/rust/huffman/tests/replay.rs`; no
+sanitizer pass has been run over the replay crates.)
+
 ## Result
 
 All seventeen harnesses pass with **zero** sanitizer reports:

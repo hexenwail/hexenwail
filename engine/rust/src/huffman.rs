@@ -19,10 +19,11 @@
 //    sequenced packet then walks freed memory.  This archive is built once and
 //    linked into both, so it has to pick one: malloc, for the life of the
 //    process, which is what the client path already does and what hwsv's hunk
-//    amounts to.  The differential harness compiles the C both ways -- with
-//    H2W_INTEGRATED and without, stubbing Hunk_AllocName in the second -- and
-//    requires the two to produce identical bytes before either is compared
-//    with this module, so the choice is shown to be safe rather than asserted.
+//    amounts to.  The fixture generator (huffman/tests/gen_fixtures.sh)
+//    compiles the C both ways -- with H2W_INTEGRATED and without, stubbing
+//    Hunk_AllocName in the second -- and refuses to write a fixture unless the
+//    two produce identical bytes, so the choice is shown to be safe rather
+//    than asserted.
 //
 // 2. Out-of-range bit reads on malformed input.  HuffDecode walks the tree
 //    with `do { ... } while (tmp->zero)` and bounds only the outer loop, by
@@ -39,10 +40,11 @@
 //    unspecified there rather than undefined, and there is still no
 //    byte-for-byte answer to reproduce, because the result depends on prior
 //    traffic.  This module stops decoding at the declared end instead (see the
-//    bound in HuffDecode), and the harness pins that case separately: the C arm
-//    is run under a guard page -- a tighter allocation than production, which
-//    is what makes the read observable at all -- and the bounded result is
-//    checked against an independent decoder built from the C's own code table.
+//    bound in HuffDecode), and the fixture pins that case separately: the
+//    generator runs the C under a guard page -- a tighter allocation than
+//    production, which is what makes the read observable at all -- and records
+//    its decode of the same packet with a zero tail, of which this module's
+//    bounded result must be a strict prefix (huffman/tests/replay.rs).
 //
 // Everything else is deliberately literal: Masks, PutBit, GetBit, FindTab,
 // BuildTree's tie-breaking and node numbering, the Sys_Error fatal paths, the
@@ -393,16 +395,16 @@ pub unsafe extern "C" fn HuffEncode(
 }
 
 //============================================================================
-// accessors for the differential harness
+// accessors for the fixture replay
 //============================================================================
 
-// The harness compares this module's state with the C's, and neither the
+// The replay compares this module's state with the C's, and neither the
 // frequency table nor HuffLookup is reachable from outside the C translation
 // unit.  These three accessors expose the Rust side so the comparison can be
 // made, in the same spirit as the layout accessors the sizebuf, msg_io and
 // info_str ports export.
 
-/// `HUFF_FREQ[index]`, so the harness can compare all 256 values against
+/// `HUFF_FREQ[index]`, so the replay can compare all 256 values against
 /// `static const float HuffFreq[256]` bit for bit -- BuildTree compares with
 /// `<`, so a single differing float would rewrite every encoded byte.
 #[no_mangle]

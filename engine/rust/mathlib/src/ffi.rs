@@ -90,8 +90,8 @@ pub struct MPlane {
 
 // --- ABI cross-check surface ------------------------------------------------
 //
-// Exported so the C-side differential harness can assert that its own
-// `offsetof(mplane_t, ...)` agrees with what Rust computed.
+// Exported so the C-side layout check (scripts/check-rust-abi.sh) can assert
+// that its own `offsetof(mplane_t, ...)` agrees with what Rust computed.
 
 #[no_mangle]
 pub extern "C" fn MathlibMPlane_sizeof() -> usize {
@@ -321,7 +321,11 @@ pub unsafe extern "C" fn Q_isnan(x: c_float) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn anglemod(a: c_float) -> c_float {
-    (360.0 / 65536.0) * ((a * (65536.0 / 360.0)) as c_int & 65535) as c_float
+    // C: a = (360.0/65536) * ((int)(a*(65536/360.0)) & 65535).  The constants
+    // are doubles, so `a` is promoted and the whole expression runs in double;
+    // doing it in f32 truncates a different integer for some inputs.
+    ((360.0_f64 / 65536.0) * (((a as c_double) * (65536.0_f64 / 360.0)) as c_int & 65535) as c_double)
+        as c_float
 }
 
 // --- GreatestCommonDivisor ------------------------------------------------

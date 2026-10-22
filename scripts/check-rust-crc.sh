@@ -2,14 +2,19 @@
 #
 # check-rust-crc.sh -- gate for the Rust port of common/crc.c.
 #
-# The differential half proves the CCITT CRC is bit-identical to the C
-# original: every (running value, byte) step exhaustively, CRC_Value over all
-# 2^16 inputs, a published check value, and seeded random blocks at unaligned
-# offsets.  The CMake half proves the consolidated engine archive exports it
-# and the engine build every gate shares (scripts/lib/rust-gate.sh) links it
-# exactly once per binary with no C object left in the build.
+# The fixture half replays expected values frozen from the C original
+# (every CRC table entry, directed and seeded byte steps, CRC_Value, the
+# published check value, and blocks of every length 0..40 plus longer ones at
+# unaligned offsets) against the Rust port, with no C compiler.  The replay
+# also compares the port with an independent bit-by-bit CRC-CCITT over all 2^24
+# (crc, byte) steps, all 2^16 CRC_Value inputs and 5000 seeded blocks of up to
+# 8192 bytes at offsets 0..15.  tests/gen_fixtures.sh --check (step 1b, needs
+# cc) re-proves the fixture against common/crc.c.  The CMake
+# half proves the consolidated engine archive exports it and the engine build
+# every gate shares (scripts/lib/rust-gate.sh) links it exactly once per
+# binary with no C object left in the build.
 #
-# Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
+# Requires cargo/rustc, cc, cmake and nm -- run inside `nix develop`.
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -30,60 +35,66 @@ work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
 symbols=(CRC_Init CRC_ProcessByte CRC_ProcessBlock CRC_Value CRC_Block)
 
-for tool in cc cargo cmake nm; do
+for tool in cargo cc cmake nm; do
 	command -v "$tool" >/dev/null || {
 		echo "error: $tool not on PATH -- run this inside 'nix develop'" >&2
 		exit 2
 	}
 done
 
-echo "== 1. build the consolidated crate with all migrated subsystems =="
-cargo build --release --offline \
-	--manifest-path "$crate/Cargo.toml" \
-	--features hashindex,mathlib,sizebuf,crc
-
-echo
-echo "== 2. differential harness: Rust vs the C original, one binary =="
-diff_log="$work/diff.log"
-set +e
-RUST_LIB="$crate/target/release/libengine_rs.a" \
-	OUT="$work/diff" \
-	bash "$crate/crc/tests/run_diff_harness.sh" >"$diff_log" 2>&1
-harness_status=$?
-set -e
-grep -E 'RESULT:|differential harness:' "$diff_log" || true
-if [ "$harness_status" -ne 0 ]; then
-	echo "FAIL: differential harness exited $harness_status" >&2
-	cat "$diff_log" >&2
+echo "== 1. fixture replay: the frozen common/crc.c oracle, cargo test --release =="
+# The differential harness against the C original was retired (#475).  Its
+# expected values are frozen in engine/rust/crc/tests/fixtures/crc.txt and
+# replayed against src/crc.rs with no C compiler.  The fixture is
+# re-proved against C in step 1b by tests/gen_fixtures.sh --check, and shown
+# able to fail by tests/mutants.sh, which rewrites a tracked source and so is not run here
+# (docs/rust-harness-retirement.md).  The replay runs --release: the engine
+# ships release with panic=abort, so the replay must too.
+replay_log="$work/replay.log"
+if ! cargo test --release --offline --manifest-path "$crate/crc/Cargo.toml" >"$replay_log" 2>&1; then
+	echo "FAIL: crc fixture replay failed" >&2
+	cat "$replay_log" >&2
 	exit 1
 fi
-grep -q '^RESULT: PASS$' "$diff_log" || {
-	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
-	cat "$diff_log" >&2
-	exit 1
-}
-# The PASS line carries the case count, and RESULT alone would still pass if the
-# enumeration were cut down to nothing -- so floor the count at eight digits (ten
-# million cases) rather than pinning it, which would mean editing the gate every
-# time the enumeration is deliberately widened.
-# Observed today: 16,884,495 cases, and the count is deterministic.  The floor
-# is one decimal place below it.
-count_line=$(grep -E '^crc differential harness: PASS \(' "$diff_log" || true)
-count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
-if [ "${#count}" -lt 8 ]; then
-	echo "FAIL: harness case count is below the ten-million floor" >&2
-	echo "      observed: ${count_line:-<no 'crc differential harness: PASS (N cases)' line>}" >&2
-	cat "$diff_log" >&2
+# A green exit is not enough: require that the replay test itself ran, so a
+# renamed or filtered-out test cannot read as green.
+for t in replay_c_fixtures reference_pins_the_published_check_value \
+         every_crc_byte_step_matches_the_reference \
+         crc_value_matches_the_reference_for_every_input \
+         seeded_blocks_up_to_8192_bytes_at_every_offset_match_the_reference; do
+	grep -q "^test $t \.\.\. ok\$" "$replay_log" || {
+		echo "FAIL: $t did not run and pass" >&2
+		cat "$replay_log" >&2
+		exit 1
+	}
+done
+fixture="$crate/crc/tests/fixtures/crc.txt"
+records=$(grep -cvE '^(#|$)' "$fixture")
+if [ "$records" -lt 400 ]; then
+	echo "FAIL: crc fixture has $records records, below the 400 floor" >&2
 	exit 1
 fi
+echo "  replay_c_fixtures ok ($records records)"
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 1b. the fixture still matches common/crc.c (tests/gen_fixtures.sh --check) =="
+# Nothing else re-proves the frozen values against C: the replay only shows
+# the Rust agrees with the fixture.  Drift in the C or an edited fixture fails
+# the gate here.  Needs cc.
+if ! check_log=$(bash "$crate/crc/tests/gen_fixtures.sh" --check 2>&1); then
+	echo "FAIL: crc fixture no longer matches the C original" >&2
+	echo "$check_log" >&2
+	exit 1
+fi
+echo "  $check_log"
+
+echo
+echo "== 2. the engine build: glhexen2, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
 echo
-echo "== 4. exactly one crc definition per binary =="
+echo "== 3. exactly one crc definition per binary =="
 # The archive must export the whole C ABI.  In a linked binary, CRC_Value has
 # no engine caller, so whether it is present depends on how rustc partitioned
 # codegen units; require it at most once there, and every called symbol
@@ -119,6 +130,6 @@ stray=$(find "$engine_build" -name 'crc.c.o' | wc -l)
 	exit 1
 }
 
-echo "PASS: Rust crc -- differential harness green, the consolidated archive"
+echo "PASS: Rust crc -- fixture replay green, the consolidated archive"
 echo "      links exactly one symbol per target, and no crc.c object is left"
 echo "      in the engine build."
