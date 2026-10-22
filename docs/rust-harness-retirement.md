@@ -197,3 +197,58 @@ unchanged, no C symbols to stub, no `autotests` tricks needed.
   `run_diff_harness.sh`, baseline checked to exit 0 first) killed the same 18.
 - **Undefined in C, not matched.** Overlapping `src`/`dst` and a source with no
   NUL. Neither is in the contract and neither is in the fixture.
+
+## Findings: hashindex
+
+Worked example: `engine/rust/hashindex/` and `scripts/check-rust-hashindex.sh`. A
+stateful table with no return values: every observable is the memory the caller
+reads afterwards.
+
+- **Freeze sequences, not calls.** The fixture is a script of operations
+  (`add`, `rem`, `clr`, `free`, `alloc`) with the expected observation after each:
+  a `state` line (size, mask, NULL-ness of both pointers, both arrays, as an FNV
+  digest above 32 entries) and `look` lines (the chain a `Hash_First`/`Hash_Next`
+  walk visits, in order). Comparing the whole line as text means one wrong array
+  element or one swapped chain position fails with the line number.
+- **Defined but out of contract still counts.** Remove of an absent index, remove
+  under the wrong key, `Hash_Clear` leaving `indexChain` stale, and a double add
+  (a cycle: lookups are bounded at `hashSize + 1`) all have defined C results.
+  They are frozen. What the C leaves undefined (an out-of-range index to
+  `Hash_Remove`, a remove that walks a cycle) is excluded and noted in the fixture
+  README as accepted loss.
+- **The crate is a `no_std` staticlib**, like mathlib: `autotests = false` and
+  `[lib] test = false, doctest = false` on it, the replay in `hashindex/replay/`
+  (`[[test]] path = "../tests/replay.rs"`), and `replay/src/lib.rs` registered in
+  `check-rust-notices.sh`. `cargo test --no-run` works on the staticlib and the replay
+  crate. (The consolidated `engine/rust` crate cannot host `cargo test`, for the same
+  panic-handler reason; that was already so and is not part of any port's replay.)
+- **Sys_Error with one argument.** Every message in `hashindex.c` has at most one
+  `%d`. The stub takes `(fmt, int)`, which is ABI-compatible on x86-64 and aarch64
+  Linux, and substitutes the int only when the template contains `%d`, so the
+  replay compares the full formatted message with what the C printed instead of
+  just the template. (Reading the int when no argument was passed is harmless: it
+  is a register, and it is not used.)
+- **Fatal cases are data.** A `fatal <setup> <op> <a> <b> <message>` record names
+  the state (`zero`, `alloc:n`, `freed:n`) and the call; the generator forks the C
+  once per record, the replay re-runs the test binary as a child per record
+  (`fatal_child`, selected by an env var) and requires SIGABRT plus the exact
+  line. No hand-kept pair of per-case functions in two languages.
+- **Independent model.** The replay carries a bucket-list model of the table
+  (`Vec<Vec<i32>>`, head first) and derives `hash[]` and `indexChain[]` from it,
+  including the stale slots a `Hash_Clear` leaves. It runs about 900,000 seeded
+  operations at sizes 1 to 4096 with free-and-reallocate at new sizes and four key
+  distributions (any key, a small colliding pool, aliases of a few buckets,
+  extremes). The model is what restores the old harness's million-operation volume
+  cheaply; the fixture is what ties the model's rules to the C.
+- **Mutants.** 25, replay kills 25; the live harness killed 19 of the same 25
+  first. The six it missed were the `Hash_Allocate` re-init guard and check order,
+  `Hash_Add` accepting index -1, the NULL guards on `Hash_Remove` and `Hash_Clear`,
+  and a half-size `Hash_Clear`. A guard dropped in Rust usually dies by SIGSEGV on
+  the null pointer, not by an assertion: still a kill, and `mutants.sh` counts it.
+- **`run_engine_smoke.sh` stays.** It is not a differential harness: it runs the
+  real engine (h2ded and glhexen2 on a pak load and a map load) against a C-only
+  reference build and diffs the logs. Seven gates call it, including
+  `check-rust-hashindex.sh --engine`; it lives in `hashindex/tests/` for history
+  only and keeps that path.
+- **No porting bug found.** The Rust matched the C on every frozen record. The
+  freeze did tighten coverage (see the mutant table above), not the port.

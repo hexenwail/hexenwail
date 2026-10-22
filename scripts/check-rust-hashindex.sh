@@ -5,18 +5,25 @@
 # WHY THIS EXISTS
 #
 #   The Rust hashindex is the only one any engine target links; hashindex.c
-#   is compiled by the differential harness below and by nothing else.
+#   is compiled by nothing in the engine build, only by the fixture generator.
 #
-#   The differential harness is the half that matters.  A build gate alone
-#   proves the crate compiles and links; it says nothing about whether the Rust
-#   implementation still computes what the C original computes.
+#   The fixture replay is the half that matters.  A build gate alone proves the
+#   crate compiles and links; it says nothing about whether the Rust
+#   implementation still computes what the C original computed.
 #
 # WHAT IT CHECKS
 #
 #   1. the crate builds, offline, with no dependencies
-#   2. the differential harness passes -- Rust and C agree on the raw array
-#      contents AND on per-bucket chain ORDER, over 1.2M operations, plus
-#      abort parity on the four fatal paths
+#   2. the fixture replay passes -- the operation sequences frozen from the C
+#      original (tests/fixtures/hashindex.txt: raw arrays, size/mask/NULL state
+#      and per-bucket chain ORDER after every step, plus the fatal paths'
+#      Sys_Error messages) are reproduced by the Rust port, and so is an
+#      independent reference model over ~1M seeded operations.  Run with
+#      `cargo test --release`, the profile the engine ships.  The differential
+#      harness against hashindex.c was retired (#475)
+#   2b. tests/gen_fixtures.sh --check: the fixture still matches what the
+#      unmodified hashindex.c produces (needs cc).  tests/mutants.sh shows the
+#      replay can fail; it rewrites a tracked source, so it is not run here
 #   3. the engine build every gate shares (scripts/lib/rust-gate.sh)
 #   4. exactly one definition of each of the five symbols in each binary; this
 #      is the duplicate-symbol hazard the CMake source-list removal exists to
@@ -25,7 +32,7 @@
 # Requires cc, cargo/rustc and cmake -- run it inside `nix develop`.
 # No game data needed for the default checks: nothing here starts the engine.
 #
-#   ./scripts/check-rust-hashindex.sh            # fast: crate, harness, builds
+#   ./scripts/check-rust-hashindex.sh            # fast: crate, replay, builds
 #   OFF_BIN=... ./scripts/check-rust-hashindex.sh --engine
 #       also run the real engine and diff it end to end against a C-only
 #       reference binary (how to build one: scripts/lib/rust-gate.sh)
@@ -53,7 +60,6 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crate="$root/engine/rust/hashindex"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
-rust_lib="$crate/target/release/libhashindex_rs.a"
 symbols=(Hash_Allocate Hash_Free Hash_Add Hash_Remove Hash_Clear)
 
 for tool in cc cargo cmake nm; do
@@ -67,36 +73,42 @@ echo "== 1. build the crate (offline, no dependencies) =="
 cargo build --release --offline --manifest-path "$crate/Cargo.toml"
 
 echo
-echo "== 2. differential harness: Rust vs the C original, one binary =="
-diff_log="$work/diff.log"
-set +e
-RUST_LIB="$rust_lib" OUT="$work/diff" "$crate/tests/run_diff_harness.sh" >"$diff_log" 2>&1
-harness_status=$?
-set -e
-grep -E 'RESULT:|checks run:' "$diff_log" || true
-if [ "$harness_status" -ne 0 ]; then
-	echo "FAIL: differential harness exited $harness_status (a divergence)" >&2
-	sed -n '/FAIL /p' "$diff_log" | head -20 >&2
+echo "== 2. fixture replay: the frozen engine/h2shared/hashindex.c oracle, cargo test --release =="
+replay_log="$work/replay.log"
+if ! cargo test --release --offline --manifest-path "$crate/replay/Cargo.toml" >"$replay_log" 2>&1; then
+	echo "FAIL: hashindex fixture replay failed" >&2
+	cat "$replay_log" >&2
 	exit 1
 fi
-# Re-assert the summary line too: a harness that somehow exited 0 without
-# having run anything must not pass as green.
-grep -q '^RESULT: PASS$' "$diff_log" || {
-	echo "FAIL: harness did not print 'RESULT: PASS'" >&2
-	exit 1
-}
-# RESULT: PASS reflects the failure count alone, so it stays green however little
-# ran -- floor the check count at six digits (a hundred thousand checks) rather
-# than pinning it, which would mean editing the gate every time the enumeration
-# is deliberately widened.
-# Observed today: 342,295 checks.  The floor is one decimal place below it.
-count_line=$(grep -E '^checks run: [0-9]+' "$diff_log" || true)
-count=$(printf '%s\n' "$count_line" | grep -oE '[0-9]+' | head -n1 || true)
-if [ "${#count}" -lt 6 ]; then
-	echo "FAIL: harness check count is below the hundred-thousand floor" >&2
-	echo "      observed: ${count_line:-<no 'checks run: N   failures: M' line>}" >&2
+# A green exit is not enough: require that the replay tests themselves ran, so
+# a renamed or filtered-out test cannot read as green.
+for t in replay_c_fixtures fatal_paths_call_sys_error fatal_child \
+         model_matches_port_on_long_seeded_sequences; do
+	grep -q "^test $t \.\.\. ok\$" "$replay_log" || {
+		echo "FAIL: $t did not run and pass" >&2
+		cat "$replay_log" >&2
+		exit 1
+	}
+done
+fixture="$crate/tests/fixtures/hashindex.txt"
+records=$(grep -cvE '^(#|$)' "$fixture")
+if [ "$records" -lt 3000 ]; then
+	echo "FAIL: hashindex fixture has $records records, below the 3000 floor" >&2
 	exit 1
 fi
+echo "  replay ok ($records records)"
+
+echo
+echo "== 2b. the fixture still matches engine/h2shared/hashindex.c (tests/gen_fixtures.sh --check) =="
+# Nothing else re-proves the frozen values against C: the replay only shows
+# the Rust agrees with the fixture.  Drift in the C or an edited fixture fails
+# the gate here.  Needs cc.
+if ! check_log=$(bash "$crate/tests/gen_fixtures.sh" --check 2>&1); then
+	echo "FAIL: hashindex fixture no longer matches the C original" >&2
+	echo "$check_log" >&2
+	exit 1
+fi
+echo "  ${check_log##*$'\n'}"
 
 echo
 echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
@@ -145,12 +157,12 @@ if [ "$run_engine" -eq 1 ]; then
 		"$crate/tests/run_engine_smoke.sh" hashindex
 
 	echo
-	echo "PASS: Rust hashindex -- differential harness green; all three targets"
+	echo "PASS: Rust hashindex -- fixture replay green; all three targets"
 	echo "      link it with no duplicate symbol and no C object; and the real"
 	echo "      engine produces the C-only reference's output on a pak load and a"
 	echo "      map load."
 else
-	echo "PASS: Rust hashindex -- differential harness green, and all three targets"
+	echo "PASS: Rust hashindex -- fixture replay green, and all three targets"
 	echo "      link it with no duplicate symbol and no C object."
 	echo "      (re-run with --engine and OFF_BIN=... to also drive the real engine)"
 fi

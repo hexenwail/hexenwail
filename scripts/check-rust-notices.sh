@@ -129,7 +129,7 @@ derived_map() {
 }
 
 # Rust sources that translate no C file: the crate root that wires the ports
-# together, and the test-only host crates that compile crc.rs, strlcpy.rs, strlcat.rs and mathlib's ffi.rs for
+# together, and the test-only host crates that compile crc.rs, strlcpy.rs, strlcat.rs and the ffi.rs of mathlib and hashindex for
 # their fixture replays (they only include the file, which carries the notices).  (build.rs
 # reads hufffreq.h as data at build time and is outside the src/ directories
 # this gate walks.)
@@ -141,6 +141,7 @@ original_files() {
 	engine/rust/strlcat/src/lib.rs
 	engine/rust/huffman/src/lib.rs
 	engine/rust/mathlib/replay/src/lib.rs
+	engine/rust/hashindex/replay/src/lib.rs
 	EOF
 }
 

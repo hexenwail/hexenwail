@@ -3,9 +3,10 @@
 # run_engine_smoke.sh -- run the REAL ENGINE with a Rust port and with the C
 # original, and diff the output.
 #
-# WHY THIS EXISTS, given the differential harness already passes:
+# WHY THIS EXISTS, given the module-level tests already pass:
 #
-#   A differential harness verifies a port as a MODULE, in isolation.  It says
+#   Module-level tests (differential harnesses, frozen-fixture replays) verify a
+#   port as a MODULE, in isolation.  It says
 #   nothing about the engine's actual use of it: the by-value embedding sites,
 #   the FS_LoadPackFile / FS_LoadZipFile paths, initialization order, and the
 #   tables a real map load drives.  This runs the engine and compares.
