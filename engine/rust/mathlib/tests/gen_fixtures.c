@@ -19,7 +19,9 @@
 #include "quakedef.h"
 
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void Sys_Error(const char *fmt, ...)
@@ -87,6 +89,49 @@ static void emit_isnan(float f)
 static void emit_anglemod(float f)
 {
 	printf("anglemod %08x %08x\n", bits(f), bits(anglemod(f)));
+}
+
+/* anglemod written in single precision: what the Rust port did before it was
+ * fixed to match mathlib.c, whose 65536/360.0 and 360.0/65536 constants make
+ * the real expression run in double.  Used only to pick inputs where the two
+ * differ, so the fixture pins the double semantic with many records. */
+static float anglemod_f32(float a)
+{
+	return (360.0f / 65536.0f) * (float)((int)(a * (65536.0f / 360.0f)) & 65535);
+}
+
+/* Emit up to `want` anglemod records in [lo, hi] on which the f32 and double
+ * expressions disagree.  The two can only differ where a * (65536/360) lies
+ * within an f32 rounding error of an integer, so walk the angles k*360/65536
+ * for each integer k in range and try the f32 neighbours of each.  Deterministic
+ * (no rng); `stride` spaces the k values so the records spread over the range. */
+static void emit_anglemod_distinguishing(float lo, float hi, int stride, int want)
+{
+	int k, d, got = 0;
+	int k0 = (int)floor((double)lo * (65536.0 / 360.0));
+	int k1 = (int)ceil((double)hi * (65536.0 / 360.0));
+
+	for (k = k0; k <= k1 && got < want; k += stride) {
+		float x = (float)((double)k * (360.0 / 65536.0));
+
+		for (d = -4; d <= 4 && got < want; ++d) {
+			float y = x;
+			int j;
+
+			for (j = 0; j < abs(d); ++j)
+				y = nextafterf(y, d < 0 ? -1e30f : 1e30f);
+			if (y >= lo && y <= hi && bits(anglemod(y)) != bits(anglemod_f32(y))) {
+				emit_anglemod(y);
+				++got;
+				break;
+			}
+		}
+	}
+	if (got != want) {
+		fprintf(stderr, "anglemod: only %d/%d distinguishing inputs in %g..%g\n",
+			got, want, lo, hi);
+		exit(1);
+	}
 }
 
 static void emit_anglevec(const float *ang)
@@ -195,6 +240,16 @@ int main(void)
 		for (i = 0; i < (int)(sizeof more / sizeof more[0]); ++i)
 			emit_anglemod(more[i]);
 	}
+	/* Inputs on which single-precision arithmetic gives a different answer from
+	 * the C's double expression: 1.46667469 gives 1.46118164 in C and 1.4666748
+	 * in f32.  A neighbourhood, larger positive and negative angles. */
+	emit_anglemod(1.46667469f);
+	emit_anglemod(-2779.5f);
+	emit_anglemod_distinguishing(1.4667f, 1.5326f, 1, 12);
+	emit_anglemod_distinguishing(100.0f, 400.0f, 7, 12);
+	emit_anglemod_distinguishing(-3000.0f, -2700.0f, 11, 12);
+	emit_anglemod_distinguishing(-359.0f, -0.5f, 13, 12);
+	emit_anglemod_distinguishing(3000.0f, 9000.0f, 17, 12);
 	for (i = 0; i < 32; ++i)
 		emit_anglemod(dy(8000) * 1.0f);
 	for (i = 0; i < 16; ++i)

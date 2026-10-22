@@ -67,6 +67,7 @@ fn replay_c_fixtures() {
     let (mut fdm_neg, mut fdm_neg_exact, mut fdm_pos) = (0, 0, 0);
     let (mut near_neg, mut near_adjusted) = (0, 0);
     let (mut inv_small, mut inv_big) = (0, 0);
+    let mut angle_f32_differs = 0;
 
     for (lineno, line) in FIXTURE.lines().enumerate() {
         let at = format!("mathlib.txt:{}: {line}", lineno + 1);
@@ -94,6 +95,15 @@ fn replay_c_fixtures() {
             "anglemod" => {
                 let got = unsafe { anglemod(fbits(f[1])) };
                 assert_eq!(got.to_bits(), fbits(f[2]).to_bits(), "{at}: got {got:e}");
+                // The C expression runs in double (its constants are doubles).
+                // Count records where the same expression in single precision
+                // gives a different answer: those are what kill an f32 port.
+                let a = fbits(f[1]);
+                let f32_way = (360.0_f32 / 65536.0_f32)
+                    * (((a * (65536.0_f32 / 360.0_f32)) as i32) & 65535) as f32;
+                if f32_way.to_bits() != got.to_bits() {
+                    angle_f32_differs += 1;
+                }
             }
             "log2" => assert_eq!(unsafe { Q_log2(int(f[1])) }, int(f[2]), "{at}"),
             "inv" => {
@@ -186,7 +196,7 @@ fn replay_c_fixtures() {
     };
     assert_eq!(n["layout"], 1);
     floor("isnan", 40);
-    floor("anglemod", 60);
+    floor("anglemod", 130);
     floor("log2", 90);
     floor("inv", 40);
     floor("gcd", 100);
@@ -196,6 +206,7 @@ fn replay_c_fixtures() {
     floor("xform", 40);
     floor("bops", 120);
     floor("fdm", 190);
+    assert!(angle_f32_differs >= 60, "anglemod records distinguishing f32 from double: {angle_f32_differs}");
     assert!(nan_true >= 15 && nan_false >= 25, "isnan outcomes: {nan_true} nan, {nan_false} not");
     assert!(inv_small >= 5 && inv_big >= 30, "inv branches: {inv_small} small, {inv_big} big");
     assert!(near_neg >= 100 && near_adjusted >= 60, "nearest negatives: {near_neg}, adjusted {near_adjusted}");

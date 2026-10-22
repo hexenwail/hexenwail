@@ -19,14 +19,15 @@ orig="$(mktemp)"
 cp "$src" "$orig"
 trap 'cp "$orig" "$src"; rm -f "$orig"' EXIT
 
-# Default kill command: the replay must run and fail.  A mutant that merely
+# Default kill command: the release-profile replay (what the engine ships) must
+# run and fail.  A mutant that merely
 # fails to compile proves nothing, so that is an error, not a kill.
 replay() {
 	local out
 	# A mutant that loops forever (GCD with the wrong step) is a kill: 124.
-	if out=$(timeout 60 cargo test --offline --manifest-path "$crate/Cargo.toml" 2>&1); then return 0; fi
+	if out=$(timeout 120 cargo test --release --offline --manifest-path "$crate/Cargo.toml" 2>&1); then return 0; fi
 	if grep -q 'could not compile' <<<"$out"; then
-		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; exit 2
+		echo "BROKEN MUTANT (does not compile)" >&2; echo "$out" >&2; return 2
 	fi
 	return 1
 }

@@ -31,7 +31,11 @@ each result 1/2/3, exact-boundary planes; both FloorDivMod branches including th
 exact-multiple negatives (remainder 0); NearestMultiple on negatives; Q_log2 at
 every power of two and its neighbours; Invert24To16 on both sides of its 256
 threshold; NaN/Inf/denormal/payload bit patterns for Q_isnan; the 360-degree wrap
-for anglemod. The replay floors every kind and branch, so a truncated fixture fails.
+for anglemod, plus 62 anglemod records chosen by the generator because the same
+expression in single precision gives a different answer from the C (whose
+`65536/360.0` constants make it run in double): 1.46667469 gives 1.46118164 in
+C and 1.4666748 in f32, and the rest cover the 1.4667..1.5326 neighbourhood,
+larger positive angles and negative angles such as -2779.5. The replay floors every kind and branch, so a truncated fixture fails.
 
 Deliberately not in the fixture:
 
