@@ -169,15 +169,34 @@ float  len, traveltime;
 	if(!tspeed)
 		objerror("SUB_CalcAngleMove: No speed defined!");
 
-	destdelta = destangle - self.angles;	// set destdelta to the vector needed to move
-	len = vlen(destdelta);					// calculate length of vector
-	traveltime = len / tspeed;				// divide by speed to get time to reach dest
+	// [2026-10-28] jsH2+ (jsHexen2-progs 26e6543) Already there: finish on a
+	// 0.1s think, exactly as SUB_CalcMove does for tdest == origin. Vanilla
+	// carried on with a zero traveltime, so nextthink landed ON ltime and
+	// avelocity became 0 * (1/0), a NaN. The engine only runs a pusher's
+	// think when nextthink lies past its current ltime, and gives it no
+	// movetime to get there, so it froze for good and ignored every later
+	// trigger. This is how a rotating door blocked on its very first frame
+	// of closing (someone in the doorway) "gets stuck open and never tries
+	// to return": the blocked handler reverses it toward pos2, where it
+	// already is. Trains guard this case themselves before calling
+	// (train_rotate), so they are unaffected.
+	if(destangle == self.angles)
+	{
+		self.avelocity	= '0 0 0';
+		self.nextthink	= self.ltime + 0.1;
+	}
+	else
+	{
+		destdelta = destangle - self.angles;	// set destdelta to the vector needed to move
+		len = vlen(destdelta);					// calculate length of vector
+		traveltime = len / tspeed;				// divide by speed to get time to reach dest
 
-// set nextthink to trigger a think when dest is reached
-	self.nextthink	= self.ltime + traveltime;
+		// set nextthink to trigger a think when dest is reached
+		self.nextthink	= self.ltime + traveltime;
 
-// scale the destdelta vector by the time spent traveling to get velocity
-	self.avelocity	= destdelta * (1 / traveltime);
+		// scale the destdelta vector by the time spent traveling to get velocity
+		self.avelocity	= destdelta * (1 / traveltime);
+	}
 
 	self.think1		= func;
 	self.finalangle = destangle;

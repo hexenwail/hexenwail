@@ -108,6 +108,7 @@ entity ignore;
 		ignore=world;
 	}
 
+	self.takedamage=DAMAGE_NO;	// [2026-10-28] jsH2+ see MultiExplode
 	T_RadiusDamage (self, self.owner, self.dmg, ignore);
 
 	if(self.classname=="minigrenade"&&random()<0.5)
@@ -129,6 +130,19 @@ void() MultiExplode =
 float nummeteorites;
 //FIXME: For some reason, the light casting effects in Hex2
 //are a lot more costly than they were in Quake...
+
+	// [2026-10-28] jsH2+ (jsHexen2-progs a51d7e1) Not killable once it is
+	// going off. Vanilla stayed damageable right through its own blast, so a
+	// second explosive caught in it could blow up synchronously, kill THIS
+	// one inside our T_RadiusDamage and run MultiExplode on it again - which
+	// removed it. Back here, self was a freed entity whose origin the engine
+	// zeroes, so the TE_EXPLOSION and BecomeExplosion below fired at '0 0 0':
+	// the FIXME's "sometimes the explosions are spawned at the world origin".
+	// Same stance as obj_barrel_explode, which clears takedamage before it
+	// detonates. Also keeps the multigrenade's lingering sound husk from being
+	// shot into a second full explosion.
+	self.takedamage=DAMAGE_NO;
+
 	if(self.classname=="stickmine")
 	{
 		SprayFire();
