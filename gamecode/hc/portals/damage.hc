@@ -413,6 +413,35 @@ float Pal_DivineIntervention(void)
 	return(TRUE);
 }
 
+void() SuperGrenadeExplode;
+void TripDie (void);
+
+// [2026-10-28] jsH2+ (jsHexen2-progs 922564c) Explosives that die by
+// exploding (grenades, mines, flaming arrows, meteors, acid blobs,
+// skull-wizard shots) used to run that explosion INSIDE the T_Damage that
+// killed them - usually from inside another explosion's T_RadiusDamage
+// loop. Two faults came with it. Each link of a chain nests four more progs
+// calls, so a cluster of about eight (thrown minigrenades, a cluster of
+// shots) overran the VM's 32-call stack and took the server down with a
+// "stack overflow" - Raven's "crashes in a loop" FIXME in T_RadiusDamage.
+// And the inner findradius rewrites .chain on every entity it collects, so
+// the outer loop walked off along the inner list and silently skipped the
+// rest of its own victims. Barrels never had either problem because
+// obj_barrel_explode already defers its blast with a think ("delay so too
+// many don't cause crash"); these now do the same, a frame later, and
+// Killed's own self-kill branch below already works this way. Returns TRUE
+// if it deferred, so the caller skips th_die.
+float DeferChainedExplosion ()
+{
+	if(self.th_die!=MultiExplode&&self.th_die!=DarkExplosion&&
+		self.th_die!=SuperGrenadeExplode&&self.th_die!=TripDie)
+		return FALSE;
+	self.takedamage=DAMAGE_NO;	// can't be killed twice in the gap
+	self.think=self.th_die;
+	thinktime self : 0;
+	return TRUE;
+}
+
 /*
 ============
 Killed
@@ -428,7 +457,8 @@ entity oself;
 		if (self.movetype == MOVETYPE_PUSH || self.movetype == MOVETYPE_NONE)
 		{	// doors, triggers, etc
 			if(self.th_die)
-				self.th_die();
+				if(!DeferChainedExplosion())	// [2026-10-28] jsH2+ stuck arrows, laid mines
+					self.th_die();
 			self=oself;
 			return;
 		}
@@ -596,7 +626,10 @@ entity oself;
 		if(self.classname=="player")
 			PlayerDie();	
 		else if (self.th_die)
-			self.th_die ();
+		{
+			if(!DeferChainedExplosion())	// [2026-10-28] jsH2+ see above
+				self.th_die ();
+		}
 
 		self = oself;
 	}
