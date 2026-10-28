@@ -82,15 +82,29 @@ static qboolean CL_AutoProtocolFallback (qboolean force)
  * mod written for one of them says `freelook 1` and, until now, got "Unknown
  * command" and no mouselook setting at all.
  *
- * DEFAULT 0, not upstream's 1, and deliberately.  Quake's shipped behaviour is
- * always-on mouselook; Hexen II's is hold-MOUSE3, and this engine has shipped
- * that for its whole life.  Defaulting to 1 would silently change how the game
- * controls for every existing player, while defaulting to 0 closes the compat
- * gap just as completely -- a config that asks for freelook 1 now gets it.
- * Whether to follow upstream and flip the default is a field-tester question,
- * not a porting one.  uhexen2-a5nn.25
+ * DEFAULT 0 on the desktop, not upstream's 1, and deliberately.  Quake's
+ * shipped behaviour is always-on mouselook; Hexen II's is hold-MOUSE3, and the
+ * desktop build has shipped that for its whole life.  Defaulting to 1 would
+ * silently change how the game controls for every existing player, while
+ * defaulting to 0 closes the compat gap just as completely -- a config that
+ * asks for freelook 1 now gets it.
+ *
+ * The web build defaults to 1 instead.  A browser player arrives expecting
+ * what every other in-browser game does -- the mouse looks -- and a first
+ * visit will not go looking in the Options menu for a row to tick.  The
+ * hold-MOUSE3 habit is also a poor fit on the web: MOUSE3 is the right
+ * button, and right-click in a page has the browser's own meanings.  The
+ * phone's look pad was already always free look whatever this cvar said
+ * (IN_TouchLook), so the captured mouse was the only pointer path still on
+ * hold-MOUSE3.  CVAR_ARCHIVE still decides for returning players: whoever
+ * unticked the Options row keeps it unticked, because the value their
+ * config.cfg carries is set after registration.
  */
+#ifdef __EMSCRIPTEN__
+cvar_t	freelook = {"freelook", "1", CVAR_ARCHIVE};
+#else
 cvar_t	freelook = {"freelook", "0", CVAR_ARCHIVE};
+#endif
 /* Whether the startup demo loop runs at all: 0 goes straight to the main menu
  * instead.  QuakeSpasm's customization, carried by Ironwail, and the name a
  * config from either of them uses.
