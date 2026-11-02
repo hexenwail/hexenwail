@@ -151,6 +151,10 @@ pub mod sv_main_datagram;
 #[cfg(feature = "sv_main_connect")]
 pub mod sv_main_connect;
 
+// E2 / slice E of #469: Hexen II's SV_SpawnServer and the map_checks readout.
+#[cfg(feature = "sv_main_spawn")]
+pub mod sv_main_spawn;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

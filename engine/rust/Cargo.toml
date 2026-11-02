@@ -93,6 +93,15 @@ sv_main_datagram = ["sv_main_ents"]
 # numbers and per-protocol limits through sv_main_sound's facts.
 sv_main_connect = ["sv_main_sound"]
 
+# E2 / slice E of #469: Hexen II's SV_SpawnServer and the map_checks readout
+# (SV_PrintMapChecklist, SV_MapCheckThresh, SV_MapCheckTitle).  Reads
+# engine/rust/sv_main_target.c only.  Its callees -- slice D's
+# SV_SendReconnect, SV_CreateBaseline and SV_SendServerinfo, SZ_Init,
+# Cvar_Set, SV_ClearWorld, SV_Physics, FS_FileExists and the rest -- are
+# extern "C" calls resolved by the engine link, not feature dependencies, so
+# its differential harness can record each one.  world_hull is for cvt_c.
+sv_main_spawn = ["world_hull"]
+
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go
 # through the engine's noreturn C callbacks, so abort rather than unwind.
