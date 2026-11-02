@@ -41,6 +41,9 @@ rename() { # prefix
 		printf -- '-D%s=%s%s ' "$s" "$1" "$s"
 	done
 }
+# sv_main_target.c is compiled sectioned and linked with --gc-sections: it
+# carries every slice's accessors, and this harness defines only the globals
+# its own slice's accessors read (E2 / slice E).
 WARN=(-Wall -Wno-unused-function)
 LIMIT=${HARNESS_TIMEOUT:-600}
 
@@ -54,12 +57,12 @@ build() { # name ieee-cflags...
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$rust_root/world_target.c" -o "$OUT/$name/world_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
-		-c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
+		-ffunction-sections -fdata-sections -c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$here/connect_harness.c" -o "$OUT/$name/connect_harness.o"
 	cc "$@" -o "$OUT/$name/connect_harness" "$OUT/$name/connect_harness.o" \
 		"$OUT/$name/c_ref.o" "$OUT/$name/world_target.o" \
-		"$OUT/$name/sv_main_target.o" "$RUST_LIB" -lm
+		"$OUT/$name/sv_main_target.o" "$RUST_LIB" -lm -Wl,--gc-sections
 }
 
 run() { # dir
@@ -117,7 +120,7 @@ mkdir -p "$OUT/listen"
 cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 	-c "$here/test_listen_branch.c" -o "$OUT/listen/test_listen_branch.o"
 cc "$OUT/listen/test_listen_branch.o" "$OUT/opt/sv_main_target.o" \
-	"$RUST_LIB" -lm -o "$OUT/listen/test_listen_branch"
+	"$RUST_LIB" -lm -Wl,--gc-sections -o "$OUT/listen/test_listen_branch"
 (cd "$OUT/listen" && ./test_listen_branch)
 
 echo "RESULT: PASS"
