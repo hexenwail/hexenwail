@@ -884,6 +884,9 @@ endif()
 # Slice D (connect/signon) rides along with C (datagrams): each needs only
 # sv_main_sound/sv_main_ents, and both share sv_main_target.c.
 set(RUST_ENGINE_H2_SERVER_FEATURES sv_main_sound sv_main_ents sv_main_datagram sv_main_connect)
+# E1 / slice E: the extended inventory, worldspawn sky, level name and
+# savegame helpers (sv_main_inv.rs); sv_main_target.c again.
+list(APPEND RUST_ENGINE_H2_SERVER_FEATURES sv_main_inv)
 list(APPEND RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 list(APPEND RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 # world_trace_hw: hexenworld/server/world.c's hull traces report a bad node

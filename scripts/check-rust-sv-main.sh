@@ -13,7 +13,11 @@
 # signon functions (SV_ProtocolName, SV_SendServerinfo, SV_ConnectClient,
 # SV_CheckForNewClients, SV_ModelIndex, SV_SignonBufferCount/Size,
 # SV_ReserveSignonSpace, SV_SendSignonBuffer, SV_CreateBaseline,
-# SV_SendReconnect; sv_main_connect.rs).  Hexen II only:
+# SV_SendReconnect; sv_main_connect.rs).  Slice E, unit E1: the extended
+# inventory, worldspawn sky, level name and savegame helpers
+# (SV_ParseWorldspawnSky, SV_ClientInventoryPage, INV_UpdateExItem,
+# SV_GetLevelname, SV_SaveSpawnparms, INV_WritePage, SV_LoadInventory,
+# INV_SavePages; sv_main_inv.rs).  Hexen II only:
 # HexenWorld's server has its own sv_main.c, and its own C message functions
 # of the same names in sv_send.c, which multicast; it has no SV_Max*.
 #
@@ -63,6 +67,10 @@ ents_symbols=(SV_PrepareClientEntities SV_CleanupEnts)
 # SV_CreateBaseline and SV_SendReconnect stay C-visible for the still-C callers
 connect_symbols=(SV_ProtocolName SV_SendServerinfo SV_CheckForNewClients SV_ModelIndex
 	SV_ReserveSignonSpace SV_SendSignonBuffer SV_CreateBaseline SV_SendReconnect)
+# E1 / slice E: the inventory and savegame helpers, all exported (the still-C
+# host_cmd.c, pr_cmds.c, cl_parse.c and SV_SpawnServer call them)
+inv_symbols=(SV_ParseWorldspawnSky SV_ClientInventoryPage INV_UpdateExItem SV_GetLevelname
+	SV_SaveSpawnparms INV_WritePage SV_LoadInventory INV_SavePages)
 
 for tool in cc gcov cargo cmake nm; do
 	command -v "$tool" >/dev/null || {
@@ -72,12 +80,13 @@ for tool in cc gcov cargo cmake nm; do
 done
 
 step=1
-for port in sound ents datagram connect; do
+for port in sound ents datagram connect inv; do
 	case "$port" in
 		sound) feature=sv_main_sound; name=sv_main_sound; runner=run_diff_harness.sh; floor_digits=6 ;;
 		ents) feature=sv_main_ents; name=sv_main_ents; runner=run_ents_harness.sh; floor_digits=5 ;;
 		datagram) feature=sv_main_datagram; name=sv_main_datagram; runner=run_datagram_harness.sh; floor_digits=5 ;;
 		connect) feature=sv_main_connect; name=sv_main_connect; runner=run_connect_harness.sh; floor_digits=6 ;;
+		inv) feature=sv_main_inv; name=sv_main_inv; runner=run_inv_harness.sh; floor_digits=5 ;;
 	esac
 	echo "== $step. build the crate with $feature =="
 	step=$((step + 1))
@@ -105,7 +114,8 @@ for port in sound ents datagram connect; do
 	# RESULT alone would still pass with the enumeration cut to nothing, so
 	# floor the case count.  Observed: 120,000 for the sound messages
 	# (six digits); 12,000 for the entity updates, whose cases are whole
-	# frames of up to 8300 edicts (five).
+	# frames of up to 8300 edicts (five); 36,000 and the directed ones for
+	# the inventory and savegame helpers (five).
 	count_line=$(grep -E "^$name differential harness \([a-z0-9]+\): PASS \(" "$log" || true)
 	count=$(printf '%s\n' "$count_line" | sed -n 's/.*PASS (\([0-9]*\) cases.*/\1/p')
 	if [ "${#count}" -lt "$floor_digits" ]; then
@@ -155,6 +165,16 @@ for bin in glhexen2 h2ded hwsv; do
 			exit 1
 		fi
 	done
+	for sym in "${inv_symbols[@]}"; do
+		if [ "$bin" = hwsv ]; then want=0; else want=1; fi
+		# hwsv's own sv_init.c defines SV_GetLevelname and SV_SaveSpawnparms
+		[ "$bin" = hwsv ] && case "$sym" in SV_GetLevelname|SV_SaveSpawnparms) want=1 ;; esac
+		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
+		if [ "$n" -ne "$want" ]; then
+			echo "FAIL: $bin: $sym has $n definitions, expected $want" >&2
+			exit 1
+		fi
+	done
 	echo "  $bin: each defined once$([ "$bin" = hwsv ] && echo ' (HexenWorld'"'"'s sv_send.c), SV_Max* and the entity updates absent')"
 done
 # hwsv's message functions must be its sv_send.c's, not the Rust
@@ -177,7 +197,7 @@ fi
 while IFS= read -r obj; do
 	for sym in "${sound_symbols[@]}" SV_SoundEntityFits "${ents_symbols[@]}" \
 		SV_AddToFatPVS SV_FatPVS SV_EntityUpdateSize SV_EntityPriority \
-		"${connect_symbols[@]}"; do
+		"${connect_symbols[@]}" "${inv_symbols[@]}"; do
 		if nm "$obj" | grep -qE " [Tt] $sym\$"; then
 			echo "FAIL: ${obj#"$engine_build"/} still defines $sym" >&2
 			exit 1
@@ -185,7 +205,7 @@ while IFS= read -r obj; do
 	done
 done <<<"$objects"
 echo "  $nobj Hexen II sv_main.c object(s): none defines the ported functions"
-stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'sv_main_datagram_*.c.o' -o -name 'sv_main_connect_*.c.o' -o -name 'c_ref_ents.c.o' -o -name 'c_ref_connect.c.o' | wc -l)
+stray=$(find "$engine_build" -name 'sv_main_sound_*.c.o' -o -name 'sv_main_ents_*.c.o' -o -name 'sv_main_datagram_*.c.o' -o -name 'sv_main_connect_*.c.o' -o -name 'sv_main_inv_*.c.o' -o -name 'c_ref_ents.c.o' -o -name 'c_ref_connect.c.o' -o -name 'c_ref_inv.c.o' | wc -l)
 [ "$stray" -eq 0 ] || {
 	echo "FAIL: $stray harness fixture object(s) in the engine build" >&2
 	exit 1
