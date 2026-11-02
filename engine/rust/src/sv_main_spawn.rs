@@ -78,11 +78,12 @@
 //
 // DEPARTURES FROM THE C, UNDEFINED BEHAVIOUR ONLY
 //
-//   * A world model with more than MAX_MODELS-1 submodels: the C reads
+//   * A world model with MAX_MODELS (2048) or more submodels: the C reads
 //     localmodels[] past its end and writes sv.model_precache[] and
-//     sv.models[] past theirs.  The port's index check aborts instead.
-//     Nothing caps numsubmodels in the three model loaders, so this is
-//     reachable from a BSP; filed separately.
+//     sv.models[] past theirs.  The port's index check aborts instead.  No
+//     loader caps numsubmodels; the model cache (MAX_MOD_KNOWN, also 2048)
+//     Host_Errors first unless the world and its "*N" entries are all it
+//     holds, which a first map load on h2ded can be.  Filed separately.
 //   * A target whose MAX_OSPATH exceeds 4096 bytes would abort at the
 //     checklist's pointfile buffer; no target's does (256, or PATH_MAX).
 
@@ -774,6 +775,8 @@ pub unsafe extern "C" fn SV_SpawnServer(server: *const c_char, startspot: *const
 
     let current_skill = SvMainSpawn_CurrentSkill();
     *current_skill = SvMainSpawn_SkillInteger();
+    // (spawn_mutants.sh EQUIVALENT: `< 1` here only adds 0, which the
+    // branch would store as 0 again.)
     if *current_skill < 0 {
         *current_skill = 0;
     }
@@ -816,6 +819,11 @@ pub unsafe extern "C" fn SV_SpawnServer(server: *const c_char, startspot: *const
                 fi as usize * f.function_size + f.function_first_statement,
             );
             let bi = first_statement.wrapping_neg();
+            // (spawn_mutants.sh EQUIVALENT, both kept because the C has
+            // them: `first_statement < 0` is implied by 107 <= bi <= 112,
+            // INT_MIN wrapping to itself; and the break only stops the scan
+            // early, since nothing after the loop reads fi and needs_114
+            // never goes back to false.)
             if first_statement < 0 && bi >= 107 && bi <= 112 {
                 needs_114 = true;
                 break;
