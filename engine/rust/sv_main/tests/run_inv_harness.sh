@@ -138,6 +138,7 @@ echo "== $VARIANT: the same run with C line coverage =="
 build cov -O0 -g --coverage
 # The children use exit(), not _exit(), so libgcov's exit handler dumps
 # and merges the per-process coverage automatically.
+# shellcheck disable=SC2086  # CASES is one word or none
 (cd "$OUT/cov" && ./inv_harness $CASES >/dev/null 2>&1) || true
 (cd "$OUT/cov" && gcov -o . c_ref.o >/dev/null 2>&1) || true
 gcov_file="$OUT/cov/$fixture.gcov"

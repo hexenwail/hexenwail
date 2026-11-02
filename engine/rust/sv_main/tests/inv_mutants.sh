@@ -132,7 +132,7 @@ else
 fi
 
 lib="$work/target/release/libengine_rs.a"
-killed=0 survived=0 equivalent=0 bad=0
+killed=0 equivalent=0 bad=0
 for n in "${sel[@]}"; do
 	m="${mutants[$((n - 1))]}"
 	kind="${m%%|*}"; rest="${m#*|}"
