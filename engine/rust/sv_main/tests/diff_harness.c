@@ -81,6 +81,10 @@ server_static_t	svs;
 /* SvMain_IsDedicated's global, new in slice D's half of sv_main_target.c:
  * these harnesses are always the dedicated server. */
 qboolean	isDedicated = true;
+/* E1 / slice E: sv_main_target.c's inventory accessors name these, and
+ * the object is linked whole; never read here */
+int		host_string_count;
+char		com_token[1024];
 cvar_t	sv_update_player = { "sv_update_player", "1", CVAR_NONE };
 cvar_t	sv_update_monsters = { "sv_update_monsters", "1", CVAR_NONE };
 cvar_t	sv_update_missiles = { "sv_update_missiles", "1", CVAR_NONE };
