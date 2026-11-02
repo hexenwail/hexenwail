@@ -1500,6 +1500,32 @@ static void report_mismatch (const char *kind, uint64_t seed,
 static long	spawn_cases, spawn_fatal, spawn_fail_world, spawn_two, spawn_checklists;
 static long	spawn_upgrades_114, spawn_upgrades_alpha;
 
+/* SV_SpawnServer's branches whose false arm has no line of its own, so
+ * gcov cannot show it ran: how often each arm was taken.  The runner
+ * floors both sides in every config. */
+enum {
+	ARM_ACTIVE,		/* if (sv.active) SV_SendReconnect */
+	ARM_CHANGELEVEL,	/* if (svs.changelevel_issued) SaveGamestate */
+	ARM_COOP_CVARS,		/* if (coop.integer) Cvar_Set ("deathmatch", "0") */
+	ARM_STARTSPOT,		/* if (startspot) q_strlcpy */
+	ARM_USERSET,		/* if (!sv_protocol_userset): counted as userset */
+	ARM_EX_ITEMS,		/* if (sv.ex_items == NULL) */
+	ARM_EX_PAGES,		/* if (sv.ex_inventory_pages == NULL) */
+	ARM_RANDOMCLASS,	/* if (sv_globals.randomclass) */
+	ARM_COOP_GLOBALS,	/* if (coop.integer) *coop = ... else *deathmatch = ... */
+	NUM_ARMS
+};
+static const char *arm_names[NUM_ARMS] = {
+	"active", "changelevel_issued", "coop_cvars", "startspot", "userset",
+	"ex_items_null", "ex_pages_null", "randomclass", "coop_globals"
+};
+static long	arm_counts[NUM_ARMS][2];	/* [arm][taken?] */
+
+static void count_arm (int arm, int taken)
+{
+	arm_counts[arm][taken ? 1 : 0]++;
+}
+
 static int run_spawn_case (uint64_t seed)
 {
 	unsigned char *r;
@@ -1547,6 +1573,25 @@ static int run_spawn_case (uint64_t seed)
 		spawn_upgrades_114++;
 	if (memmem (keep, len_c, "Progs uses .alpha", 17))
 		spawn_upgrades_alpha++;
+	/* Both arms of each branch line coverage cannot see, for the first
+	 * spawn, from the inputs the parent set: the early tests are always
+	 * reached (nothing before them is fatal); the late ones only when the
+	 * first spawn returned ("#spawn 1" is written after the call) with
+	 * its world loaded. */
+	{
+		int late = memmem (keep, len_c, "\n#spawn 1\n", 10) && !case_world_fail[0];
+		count_arm (ARM_ACTIVE, sv.active);
+		count_arm (ARM_CHANGELEVEL, svs.changelevel_issued);
+		count_arm (ARM_COOP_CVARS, coop.integer != 0);
+		count_arm (ARM_STARTSPOT, case_startspot[0] != NULL);
+		count_arm (ARM_USERSET, sv_protocol_userset);
+		if (late) {
+			count_arm (ARM_EX_ITEMS, !case_preset_items);
+			count_arm (ARM_EX_PAGES, !case_preset_pages);
+			count_arm (ARM_RANDOMCLASS, case_rc_present);
+			count_arm (ARM_COOP_GLOBALS, coop.integer != 0);
+		}
+	}
 	return 0;
 }
 
@@ -1830,6 +1875,13 @@ int main (int argc, char **argv)
 		"title %ld, thresh %ld, abort 1\n",
 		checklist_cases, checklist_warnings_shapes[0], checklist_warnings_shapes[1],
 		checklist_warnings_shapes[2], title_cases, thresh_cases);
+	{
+		int a;
+		printf ("          arms (taken/not):");
+		for (a = 0; a < NUM_ARMS; a++)
+			printf (" %s %ld/%ld", arm_names[a], arm_counts[a][1], arm_counts[a][0]);
+		printf ("\n");
+	}
 	printf ("sv_main_spawn %s config: PASS (%ld cases)\n", HARNESS_CONFIG,
 		spawn_cases + checklist_cases + title_cases + thresh_cases + 1);
 	printf ("RESULT: PASS\n");

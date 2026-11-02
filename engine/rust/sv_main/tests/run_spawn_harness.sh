@@ -90,6 +90,42 @@ run() { # dir
 	return "$status"
 }
 
+# The total case count is mostly checklist, title and thresh cases, which
+# would meet the gate's floor with no SV_SpawnServer case at all, and gcov
+# runs on one config and sees lines, not the false arm of a bare `if`.  So
+# every config floors its own spawn cases, each outcome the generator aims
+# at, and both arms of each branch the harness counts.
+SPAWN_FLOOR=${SPAWN_FLOOR:-1000}
+floors() { # config log
+	local config=$1 log=$2 line spawn k v arms name t f bad=0
+	line=$(grep -m1 '^outcomes: spawn ' "$log" || true)
+	spawn=$(sed -n 's/^outcomes: spawn \([0-9]*\) .*/\1/p' <<<"$line")
+	if [ -z "$spawn" ] || [ "$spawn" -lt "$SPAWN_FLOOR" ]; then
+		echo "FAIL: $config ran ${spawn:-no} SV_SpawnServer cases (floor $SPAWN_FLOOR)" >&2
+		bad=1
+	fi
+	for k in fatal "world missing" changelevel "checklist printed" "upgraded to 21" "to 100"; do
+		v=$(sed -n "s/.*[(,] *$k \([0-9]*\)[,)].*/\1/p" <<<"$line")
+		if [ -z "$v" ] || [ "$v" -lt 1 ]; then
+			echo "FAIL: $config outcome '$k' is ${v:-missing}; the generator must reach it" >&2
+			bad=1
+		fi
+	done
+	arms=$(grep -m1 '^ *arms (taken/not):' "$log" | sed 's/^ *arms (taken\/not)://' || true)
+	[ -n "$arms" ] || { echo "FAIL: $config printed no arm counts" >&2; bad=1; }
+	# shellcheck disable=SC2086  # word pairs: name taken/not
+	set -- $arms
+	while [ $# -ge 2 ]; do
+		name=$1; t=${2%/*}; f=${2#*/}; shift 2
+		if [ "$t" -lt 1 ] || [ "$f" -lt 1 ]; then
+			echo "FAIL: $config branch '$name' ran $t taken / $f not taken; both must run" >&2
+			bad=1
+		fi
+	done
+	[ "$bad" -eq 0 ] || exit 1
+	echo "floors: $config -- $spawn spawn cases, every outcome and both arms of every counted branch"
+}
+
 # SPAWN_CONFIGS and HARNESS_COVERAGE=0 are for spawn_mutants.sh, which
 # needs a quick kill and not a coverage proof; the gate sets neither.
 configs="${SPAWN_CONFIGS:-serveronly glquake websoft}"
@@ -106,6 +142,7 @@ for config in $configs; do
 	fi
 	n=$(sed -n 's/^sv_main_spawn [a-z]* config: PASS (\([0-9]*\) cases)$/\1/p' "$log")
 	total=$((total + n))
+	floors "$config" "$log"
 done
 
 if [ "${HARNESS_COVERAGE:-1}" = 0 ]; then
