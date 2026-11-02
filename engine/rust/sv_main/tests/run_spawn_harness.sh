@@ -61,16 +61,20 @@ build() { # dir config ref-cflags...
 	local defs
 	read -r -a defs <<<"$(config_defs "$config")"
 	mkdir -p "$OUT/$dir"
-	cc "${INCS[@]}" "${defs[@]}" "${WARN[@]}" "${SECT[@]}" "$@" \
-		-DSV_SpawnServer=c_SV_SpawnServer \
-		-DSV_FIXTURE="\"$here/$fixture\"" \
-		-c "$here/c_ref_spawn.c" -o "$OUT/$dir/c_ref.o"
-	local src
-	for src in "$rust_root/sv_main_target.c" "$rust_root/sv_main_variadic.c" \
-		"$here/spawn_harness.c" "$root/common/strlcpy.c" "$root/common/qsnprint.c"; do
-		cc "${INCS[@]}" "${defs[@]}" "${WARN[@]}" "${SECT[@]}" -O2 -g \
-			-c "$src" -o "$OUT/$dir/$(basename "$src" .c).o"
-	done
+	# HARNESS_REUSE_OBJECTS=1 (spawn_mutants.sh): the C objects do not
+	# depend on the Rust, so a mutant only needs the link
+	if [ "${HARNESS_REUSE_OBJECTS:-0}" != 1 ] || [ ! -f "$OUT/$dir/qsnprint.o" ]; then
+		cc "${INCS[@]}" "${defs[@]}" "${WARN[@]}" "${SECT[@]}" "$@" \
+			-DSV_SpawnServer=c_SV_SpawnServer \
+			-DSV_FIXTURE="\"$here/$fixture\"" \
+			-c "$here/c_ref_spawn.c" -o "$OUT/$dir/c_ref.o"
+		local src
+		for src in "$rust_root/sv_main_target.c" "$rust_root/sv_main_variadic.c" \
+			"$here/spawn_harness.c" "$root/common/strlcpy.c" "$root/common/qsnprint.c"; do
+			cc "${INCS[@]}" "${defs[@]}" "${WARN[@]}" "${SECT[@]}" -O2 -g \
+				-c "$src" -o "$OUT/$dir/$(basename "$src" .c).o"
+		done
+	fi
 	cc "$@" -Wl,--gc-sections -o "$OUT/$dir/spawn_harness" \
 		"$OUT/$dir/spawn_harness.o" "$OUT/$dir/c_ref.o" \
 		"$OUT/$dir/sv_main_target.o" "$OUT/$dir/sv_main_variadic.o" \

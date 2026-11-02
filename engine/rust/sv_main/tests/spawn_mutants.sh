@@ -28,6 +28,8 @@ orig="$work/sv_main_spawn.rs.orig"
 cp "$src" "$orig"
 trap 'cp "$orig" "$src"' EXIT
 filter="${1:-}"
+# the harness objects are built once per campaign (HARNESS_REUSE_OBJECTS)
+rm -rf "$work/h"
 
 kill_cmd() {
 	local out
@@ -48,7 +50,7 @@ kill_cmd() {
 		return 2
 	fi
 	VARIANT=h2 RUST_LIB="$work/target/release/libengine_rs.a" OUT="$work/h" \
-		HARNESS_COVERAGE=0 HARNESS_SPAWN="${MUTANT_SPAWN:-1500}" \
+		HARNESS_COVERAGE=0 HARNESS_REUSE_OBJECTS=1 HARNESS_SPAWN="${MUTANT_SPAWN:-1500}" \
 		bash "$here/run_spawn_harness.sh" >"$work/last.log" 2>&1
 }
 

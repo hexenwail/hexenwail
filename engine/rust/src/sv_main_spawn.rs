@@ -296,6 +296,9 @@ extern "C" {
     fn PR_HasField(name: *const c_char) -> c_int;
     fn Host_LoadStrings();
     fn Hunk_AllocName(size: c_int, name: *const c_char) -> *mut c_void;
+    // cmd.rs declares it with sizebuf.rs's SizeBufC, a type this feature
+    // does not compile; the ABI is the same pointer.
+    #[allow(clashing_extern_declarations)]
     fn SZ_Init(buf: *mut u8, data: *mut u8, length: c_int);
     fn EDICT_NUM(n: c_int) -> *mut u8;
     fn ED_ClearEdict(e: *mut u8);
