@@ -26,9 +26,9 @@ check_count() { # file symbol expected-count
 
 for target in glhexen2 h2ded hwsv; do
     case "$target" in
-        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect;
+        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect,sv_main_inv;
             wad=1; info=0; hw=1 ;;
-        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect;
+        h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect,sv_main_inv;
             wad=0; info=0; hw=0 ;;
         hwsv) variant=hwsv; features=$common,info_str,huffman,net_udp_hw,net_chan,world_trace_hw;
             wad=0; info=1; hw=1 ;;
@@ -103,6 +103,14 @@ for target in glhexen2 h2ded hwsv; do
     for sym in SV_CheckForNewClients SV_ModelIndex SV_ReserveSignonSpace SV_SendSignonBuffer SV_SendServerinfo; do
         check_count "$archive" "$sym" "$h2"
         case "$sym" in SV_ModelIndex) check_count "$binary" "$sym" 1 ;; *) check_count "$binary" "$sym" "$h2" ;; esac
+    done
+    # E1 / slice E: the inventory and savegame helpers (#469).  The Hexen II
+    # archives carry all eight; hwsv's carries none, and its binary has only
+    # the two its own sv_init.c defines, SV_GetLevelname and SV_SaveSpawnparms.
+    for sym in SV_ParseWorldspawnSky SV_ClientInventoryPage INV_UpdateExItem SV_GetLevelname \
+        SV_SaveSpawnparms INV_WritePage SV_LoadInventory INV_SavePages; do
+        check_count "$archive" "$sym" "$h2"
+        case "$sym" in SV_GetLevelname|SV_SaveSpawnparms) check_count "$binary" "$sym" 1 ;; *) check_count "$binary" "$sym" "$h2" ;; esac
     done
     # The hull traces' fatal path names the target's own error function: the
     # hwsv archive must reach SV_Error (world_trace_hw) and the other two must

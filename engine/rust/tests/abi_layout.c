@@ -164,8 +164,19 @@ int NET_IsLocalConnection (void *sock) { (void) sock; return 0; }
 int NET_MaxUnreliableMessage (void *sock) { (void) sock; return 0; }
 const char *NET_QSocketGetAddressString (const void *sock) { (void) sock; return NULL; }
 int NET_SendToAll (void *data, double blocktime) { (void) data; (void) blocktime; return 0; }
-void *SV_ClientInventoryPage (int clientnum) { (void) clientnum; return NULL; }
-const char *SV_GetLevelname (void) { return NULL; }
+/* E1 / slice E (#469): SV_ClientInventoryPage and SV_GetLevelname, which
+ * slice D's port calls, are the archive's own now (sv_main_inv.rs); its
+ * accessors and the engine functions it calls are stood in for here. */
+const sv_main_inv_facts_t SvMainInv_TargetFacts;
+void *SvMain_InventoryPages (void) { return NULL; }
+int *SvMain_NextPageId (void) { return NULL; }
+char *SvMain_SkyboxBuf (void) { return NULL; }
+int *SvMain_ServerFlags (void) { return NULL; }
+float *SvMain_GlobalServerFlags (void) { return NULL; }
+int SvMain_HostStringCount (void) { return 0; }
+char *SvMain_ComToken (void) { return NULL; }
+struct client_s **SvMain_HostClient (void) { return NULL; }
+const char *Host_GetString (int idx) { (void) idx; return NULL; }
 unsigned char *SvMain_FatPvs (void) { return NULL; }
 void *EDICT_NUM (int n) { (void) n; abort (); }
 unsigned char *Mod_LeafPVS (void *leaf, void *model) { (void) leaf; (void) model; abort (); }
@@ -331,6 +342,12 @@ RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_volume)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_max_sounds_uh2)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_protocol_hexenwail_1)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_attenuation)
+RUST_ACCESSOR(SvMainInvFacts_sizeof)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_max_clients)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_ex_size)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_ex_next)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_client_ex_inventory)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_skybox_size)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -714,6 +731,14 @@ int main (void)
 	OFF(sv_main_target_facts_t, max_sounds_uh2, SvMainTargetFacts, max_sounds_uh2);
 	OFF(sv_main_target_facts_t, protocol_hexenwail_1, SvMainTargetFacts, protocol_hexenwail_1);
 	OFF(sv_main_target_facts_t, default_sound_packet_attenuation, SvMainTargetFacts, default_sound_packet_attenuation);
+
+	/* E1 / slice E (#469): sv_main_inv.rs's SvMainInvFacts */
+	SIZE(sv_main_inv_facts_t, SvMainInvFacts);
+	OFF(sv_main_inv_facts_t, max_clients, SvMainInvFacts, max_clients);
+	OFF(sv_main_inv_facts_t, ex_size, SvMainInvFacts, ex_size);
+	OFF(sv_main_inv_facts_t, ex_next, SvMainInvFacts, ex_next);
+	OFF(sv_main_inv_facts_t, client_ex_inventory, SvMainInvFacts, client_ex_inventory);
+	OFF(sv_main_inv_facts_t, skybox_size, SvMainInvFacts, skybox_size);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

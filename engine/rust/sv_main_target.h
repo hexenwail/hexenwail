@@ -231,4 +231,34 @@ int			*SvMain_NetActiveConnections (void); /* &net_activeconnections */
 struct qmodel_s		**SvMain_Models (void);		/* sv.models */
 int			SvMain_IsDedicated (void);	/* isDedicated */
 
+/* E1 / slice E: sv_main_inv.rs (#469 slice E, unit E1) -- the extended
+ * inventory pages, the worldspawn sky, the level name and the savegame
+ * stdio helpers. */
+typedef struct sv_main_inv_facts_s
+{
+	/* quakedef.h's MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS;
+	 * stdio.h's EOF */
+	int	max_inventory_ex, max_inventory_ex_pages, max_clients, eof;
+	/* ex_inventory_page_t's layout */
+	size_t	ex_size, ex_id, ex_client_id, ex_changed_items, ex_new_items;
+	size_t	ex_item_id, ex_item_cnt, ex_next;
+	/* client_t members */
+	size_t	client_size, client_active, client_ex_inventory;
+	/* edict_t's v, and entvars_t's message and netname relative to v */
+	size_t	edict_v, v_message, v_netname;
+	/* qmodel_t's entities (the target's own qmodel_t: gl_model.h,
+	 * model.h or sv_model.h), and sizeof sv.skybox */
+	size_t	qmodel_entities, skybox_size;
+} sv_main_inv_facts_t;
+
+extern const sv_main_inv_facts_t	SvMainInv_TargetFacts;
+
+void		*SvMain_InventoryPages (void);	/* sv.ex_inventory_pages */
+int		*SvMain_NextPageId (void);	/* &sv.next_page_id */
+char		*SvMain_SkyboxBuf (void);	/* sv.skybox, for writing */
+int		*SvMain_ServerFlags (void);	/* &svs.serverflags */
+float		*SvMain_GlobalServerFlags (void); /* sv_globals.serverflags */
+int		SvMain_HostStringCount (void);	/* host_string_count */
+char		*SvMain_ComToken (void);	/* com_token */
+
 #endif	/* SV_MAIN_TARGET_H */
