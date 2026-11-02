@@ -176,7 +176,6 @@ float *SvMain_GlobalServerFlags (void) { return NULL; }
 int SvMain_HostStringCount (void) { return 0; }
 char *SvMain_ComToken (void) { return NULL; }
 struct client_s **SvMain_HostClient (void) { return NULL; }
-const char *COM_Parse (const char *data) { (void) data; return NULL; }
 const char *Host_GetString (int idx) { (void) idx; return NULL; }
 unsigned char *SvMain_FatPvs (void) { return NULL; }
 void *EDICT_NUM (int n) { (void) n; abort (); }

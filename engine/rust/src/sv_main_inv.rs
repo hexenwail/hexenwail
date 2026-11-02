@@ -102,7 +102,7 @@
 // Every one of these is a defect of the C, reported separately; none is fixed
 // here.
 
-use core::ffi::{c_char, c_int};
+use core::ffi::{c_char, c_int, c_void};
 
 use crate::world_hull::cvt_c;
 
@@ -162,10 +162,9 @@ accessor!(
 );
 
 /// The C library's `FILE`, opaque: only ever handed back to the library.
-#[repr(C)]
-pub struct CFile {
-    _opaque: [u8; 0],
-}
+/// `c_void`, as cvar.rs's fprintf and quakefs.rs's LibcFile spell it, so the
+/// crate's declarations of the same libc functions agree.
+pub type CFile = c_void;
 
 /// stdio.h's EOF is never '\n' or '\r', so the item loop needs no name for it.
 const NEWLINE: c_int = b'\n' as c_int;
