@@ -13,7 +13,10 @@
 # engine/rust/world_target.c and engine/rust/sv_main_target.c with Hexen II's
 # headers, the engine's own COM_Parse (extracted from
 # engine/h2shared/common.c, below) and common/strlcpy.c's q_strlcpy, each
-# renamed so the harness can log the calls around it.
+# renamed so the harness can log the calls around it.  sv_main_target.c is
+# compiled sectioned and linked with --gc-sections, as every sv_main runner
+# is: it carries every slice's accessors, and this harness defines only the
+# globals its own slice's accessors read.
 #
 # The C original is compiled with -ftrivial-auto-var-init=zero: where
 # SV_LoadInventory reads an int no fscanf assigned, the C's value is
@@ -85,13 +88,13 @@ build() { # name cflags...
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$rust_root/world_target.c" -o "$OUT/$name/world_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
-		-c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
+		-ffunction-sections -fdata-sections -c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$here/inv_harness.c" -o "$OUT/$name/inv_harness.o"
 	cc "$@" -o "$OUT/$name/inv_harness" "$OUT/$name/inv_harness.o" \
 		"$OUT/$name/c_ref.o" "$OUT/$name/com_parse.o" "$OUT/$name/strlcpy.o" \
 		"$OUT/$name/world_target.o" "$OUT/$name/sv_main_target.o" \
-		"$RUST_LIB" -lm
+		"$RUST_LIB" -lm -Wl,--gc-sections
 }
 
 run() { # dir

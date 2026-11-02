@@ -42,11 +42,6 @@ unsigned int		info_mask, info_mask2;
 qboolean		sv_datagram_dropped;
 cvar_t			sv_maxdatagram;
 double			realtime;
-/* E1 / slice E: sv_main_target.c's inventory accessors name these, and
- * the object is linked whole; never read here */
-sv_globals_t		sv_globals;
-int			host_string_count;
-char			com_token[1024];
 
 /* ---- recorders ---- */
 static int	ces_calls;

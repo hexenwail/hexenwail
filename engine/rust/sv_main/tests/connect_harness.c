@@ -112,9 +112,6 @@ cvar_t		sv_maxdatagram = {"sv_maxdatagram", "0", CVAR_NONE};
 char		*pr_strings;
 int		pr_stringssize;
 int		host_string_count;
-/* E1 / slice E: sv_main_target.c's inventory accessors name these, and
- * the object is linked whole; never read here */
-char		com_token[1024];
 char		*host_strings[64];
 
 /* ---- stub control: set by the parent per case, read by the stubs ---- */

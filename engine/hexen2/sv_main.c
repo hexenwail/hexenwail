@@ -144,8 +144,6 @@ qboolean	sv_protocol_userset = false;
 int		sv_kingofhill;		/* mission pack, king of the hill. */
 unsigned int	info_mask, info_mask2;	/* mission pack, objectives */
 
-extern float	scr_centertime_off;
-
 //============================================================================
 
 
@@ -387,7 +385,6 @@ CLIENT SPAWNING
 /* SV_SendServerinfo -- ported to Rust: engine/rust/src/sv_main_connect.rs
  * (#469 slice D); the C original is
  * engine/rust/sv_main/tests/sv_main_connect_h2.c.  Called from SV_SpawnServer, sv_main_spawn.rs (E2 / slice E). */
-void SV_SendServerinfo (client_t *client);
 
 /* SV_ConnectClient -- ported to Rust: engine/rust/src/sv_main_connect.rs
  * (#469 slice D); the C original is
@@ -418,9 +415,7 @@ FRAME UPDATES
  * engine/rust/src/sv_main_ents.rs (#469 slice B of #455); the C originals are
  * engine/rust/sv_main/tests/sv_main_ents_h2.c.  The fat PVS buffer is
  * engine/rust/sv_main_target.c's.  SV_SendClientDatagram and
- * SV_SendClientMessages below call these two. */
-void SV_PrepareClientEntities (client_t *client, edict_t *clent, sizebuf_t *msg);
-void SV_CleanupEnts (void);
+ * SV_SendClientMessages (sv_main_datagram.rs) call these two. */
 
 /*
  * SV_WriteClientdataToMessage -- engine/rust/src/sv_main_datagram.rs (#469 slice C of #455);
@@ -481,13 +476,11 @@ SERVER SPAWNING
 /* SV_CreateBaseline -- ported to Rust: engine/rust/src/sv_main_connect.rs
  * (#469 slice D); the C original is
  * engine/rust/sv_main/tests/sv_main_connect_h2.c.  Called from SV_SpawnServer, sv_main_spawn.rs (E2 / slice E). */
-void SV_CreateBaseline (void);
 
 
 /* SV_SendReconnect -- ported to Rust: engine/rust/src/sv_main_connect.rs
  * (#469 slice D); the C original is
  * engine/rust/sv_main/tests/sv_main_connect_h2.c.  Called from SV_SpawnServer, sv_main_spawn.rs (E2 / slice E). */
-void SV_SendReconnect (void);
 
 
 /* SV_GetLevelname -- ported to Rust: engine/rust/src/sv_main_inv.rs

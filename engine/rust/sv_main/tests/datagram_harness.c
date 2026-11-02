@@ -92,10 +92,6 @@ double		realtime;
 /* SvMain_IsDedicated's global (slice D's half of sv_main_target.c): always
  * the dedicated server here. */
 qboolean	isDedicated = true;
-/* E1 / slice E: sv_main_target.c's inventory accessors name these, and
- * the object is linked whole; never read here */
-int		host_string_count;
-char		com_token[1024];
 /* sv_main_target.c's slice D accessors name these.  Unused here, but the
  * object is linked whole, so each must resolve. */
 cvar_t		coop = { "coop", "0", CVAR_NONE };
