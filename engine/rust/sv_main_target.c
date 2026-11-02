@@ -244,3 +244,135 @@ int *SvMain_ServerFlags (void)			{ return &svs.serverflags; }
 float *SvMain_GlobalServerFlags (void)		{ return sv_globals.serverflags; }
 int SvMain_HostStringCount (void)		{ return host_string_count; }
 char *SvMain_ComToken (void)			{ return com_token; }
+/* sv_main_spawn.rs (E2 / slice E of #469): SV_SpawnServer and the map_checks
+ * readout.  The build facts are the C's own preprocessor tests, answered
+ * here because this file is compiled per target. */
+#if !defined(SERVERONLY)
+#define SV_MAIN_SPAWN_CLIENT	1
+#else
+#define SV_MAIN_SPAWN_CLIENT	0
+#endif
+#if defined(GLQUAKE)
+#define SV_MAIN_SPAWN_GLQUAKE	1
+#else
+#define SV_MAIN_SPAWN_GLQUAKE	0
+#endif
+
+/* qboolean is an enum; the Rust reads and writes these members as int */
+COMPILE_TIME_ASSERT(sv_main_spawn_qboolean, sizeof (qboolean) == sizeof (int));
+
+/* sv_main.c's file-scope state SV_SpawnServer reads; not static there for
+ * this file's sake */
+extern	char		localmodels[MAX_MODELS][8];
+extern	qboolean	sv_protocol_userset;
+extern	cvar_t		max_edicts;
+#if SV_MAIN_SPAWN_CLIENT
+/* gl_screen.c's / screen.c's; no header declares it (sv_main.c had its own) */
+extern	float		scr_centertime_off;
+#endif
+
+#define SV(member)	offsetof (server_t, member)
+#define SVS(member)	offsetof (server_static_t, member)
+#define MEMBER_SIZE(type, member)	sizeof (((type *)0)->member)
+
+const sv_main_spawn_facts_t SvMainSpawn_TargetFacts =
+{
+	SV_MAIN_SPAWN_CLIENT, SV_MAIN_SPAWN_GLQUAKE,
+	_PRINT_NORMAL, _PRINT_DEVEL, _PRINT_SAFE,
+	MAPCHECK_FAILED, MAPCHECK_PARTIAL, MAPCHECK_OK, MAPCHECK_NA,
+	PROTOCOL_UH2_114, PROTOCOL_HEXENWAIL_1,
+	MIN_EDICTS, MAX_EDICTS, MAX_MODELS, MAX_QPATH, MAX_OSPATH,
+	MAX_SIGNON_SIZE, MAX_SIGNON_BUFFERS, MAX_ITEMS_EX, MAX_INVENTORY_EX_PAGES,
+	SOLID_BSP, MOVETYPE_PUSH, ss_loading, ss_active,
+	SV(active), SV(paused), SV(time), SV(name), MEMBER_SIZE (server_t, name),
+	SV(midi_name), SV(mod_name), MEMBER_SIZE (server_t, mod_name), SV(cd_track),
+	SV(startspot), MEMBER_SIZE (server_t, startspot),
+	SV(modelname), MEMBER_SIZE (server_t, modelname),
+	SV(worldmodel), SV(model_precache), SV(models), SV(sound_precache),
+	SV(states), SV(num_edicts), SV(edicts), SV(state),
+	SV(datagram), SV(datagram_buf), MEMBER_SIZE (server_t, datagram_buf),
+	SV(reliable_datagram), SV(reliable_datagram_buf),
+	MEMBER_SIZE (server_t, reliable_datagram_buf),
+	SV(signon), SV(num_signon_buffers), SV(signon_size), SV(signon_bufs),
+	SV(ex_items), SV(ex_inventory_pages), SV(num_ex_items),
+	SV(mapchecks.active), SV(mapchecks.numwarnings),
+	SV(mapchecks.changelevel), SV(mapchecks.changespot),
+	SV(mapchecks.trigger_changelevel), SV(mapchecks.valid_changelevel),
+	SV(mapchecks.intermission), SV(mapchecks.skill_triggers),
+	SV(mapchecks.coop_spawns), SV(mapchecks.dm_spawns),
+	SV(mapchecks.sp_spawns), SV(mapchecks.skill_ents),
+	SVS(maxclients), SVS(clients), SVS(serverflags), SVS(changelevel_issued),
+	sizeof (client_t), CL(active), CL(edict), CL(send_all_v), CL(ex_inventory),
+	offsetof (edict_t, free), offsetof (edict_t, freetime), offsetof (edict_t, v),
+	V(model), V(modelindex), V(solid), V(movetype), V(message),
+	offsetof (sizebuf_t, name), offsetof (sizebuf_t, cursize),
+	sizeof (client_state2_t), sizeof (ex_item_t), EXI(id), EXI(icon),
+	sizeof (ex_inventory_page_t),
+	offsetof (dprograms_t, numfunctions), offsetof (dprograms_t, entityfields),
+	sizeof (dfunction_t), offsetof (dfunction_t, first_statement),
+	offsetof (sv_globals_t, coop), offsetof (sv_globals_t, deathmatch),
+	offsetof (sv_globals_t, randomclass), offsetof (sv_globals_t, mapname),
+	offsetof (sv_globals_t, startspot), offsetof (sv_globals_t, serverflags),
+	offsetof (qmodel_t, name), offsetof (qmodel_t, numsubmodels),
+	offsetof (qmodel_t, lightdata), offsetof (qmodel_t, visdata),
+	offsetof (qmodel_t, entities),
+#if SV_MAIN_SPAWN_CLIENT
+	offsetof (qmodel_t, numtextures), offsetof (qmodel_t, textures),
+	offsetof (texture_t, name), offsetof (texture_t, width),
+	offsetof (texture_t, height),
+#else
+	0, 0, 0, 0, 0,
+#endif
+	sizeof (localmodels[0])
+};
+
+/* SV_SpawnServer's `static char dummy[8] = { 0,0,0,0,0,0,0,0 };' */
+static char	precache_dummy[8];
+
+unsigned char *SvMainSpawn_Server (void)	{ return (unsigned char *)&sv; }
+unsigned char *SvMainSpawn_Static (void)	{ return (unsigned char *)&svs; }
+unsigned char *SvMainSpawn_Globals (void)	{ return (unsigned char *)&sv_globals; }
+unsigned char *SvMainSpawn_Progs (void)		{ return (unsigned char *)progs; }
+unsigned char *SvMainSpawn_Functions (void)	{ return (unsigned char *)pr_functions; }
+int *SvMainSpawn_PhysicsWalk (void)		{ return &sv_physics_walk; }
+int *SvMainSpawn_CurrentSkill (void)		{ return &current_skill; }
+double *SvMainSpawn_HostFrametime (void)	{ return &host_frametime; }
+int *SvMainSpawn_Protocol (void)		{ return &sv_protocol; }
+int SvMainSpawn_ProtocolUserset (void)		{ return sv_protocol_userset; }
+int *SvMainSpawn_MaxEdicts (void)		{ return &sv_max_edicts; }
+char *SvMainSpawn_LocalModels (void)		{ return localmodels[0]; }
+const char *SvMainSpawn_GamedirNoPath (void)	{ return fs_gamedir_nopath; }
+unsigned char **SvMainSpawn_HostClient (void)	{ return (unsigned char **)&host_client; }
+int SvMainSpawn_EdictSize (void)		{ return pr_edict_size; }
+char *SvMainSpawn_PrecacheDummy (void)		{ return precache_dummy; }
+const char *SvMainSpawn_HostnameString (void)	{ return hostname.string; }
+int SvMainSpawn_CoopInteger (void)		{ return coop.integer; }
+float SvMainSpawn_CoopValue (void)		{ return coop.value; }
+float SvMainSpawn_DeathmatchValue (void)	{ return deathmatch.value; }
+int SvMainSpawn_SkillInteger (void)		{ return skill.integer; }
+int SvMainSpawn_MapChecksInteger (void)		{ return map_checks.integer; }
+int SvMainSpawn_DeveloperInteger (void)		{ return developer.integer; }
+float SvMainSpawn_MaxEdictsValue (void)		{ return max_edicts.value; }
+int SvMainSpawn_MaxTempEdictsInteger (void)	{ return max_temp_edicts.integer; }
+float SvMainSpawn_RandomclassValue (void)	{ return randomclass.value; }
+
+#if SV_MAIN_SPAWN_CLIENT
+float *SvMainSpawn_CenterTimeOff (void)		{ return &scr_centertime_off; }
+int *SvMainSpawn_TotalLoadingSize (void)	{ return &total_loading_size; }
+int *SvMainSpawn_CurrentLoadingSize (void)	{ return &current_loading_size; }
+int *SvMainSpawn_LoadingStage (void)		{ return &loading_stage; }
+void SvMainSpawn_ShowLoadingSize (void)		{ D_ShowLoadingSize (); }
+void SvMainSpawn_EndLoadingPlaque (void)	{ SCR_EndLoadingPlaque (); }
+#else
+float *SvMainSpawn_CenterTimeOff (void)		{ return NULL; }
+int *SvMainSpawn_TotalLoadingSize (void)	{ return NULL; }
+int *SvMainSpawn_CurrentLoadingSize (void)	{ return NULL; }
+int *SvMainSpawn_LoadingStage (void)		{ return NULL; }
+void SvMainSpawn_ShowLoadingSize (void)		{ }
+void SvMainSpawn_EndLoadingPlaque (void)	{ }
+#endif
+#if SV_MAIN_SPAWN_GLQUAKE
+int *SvMainSpawn_FlushTextures (void)		{ return (int *)&flush_textures; }
+#else
+int *SvMainSpawn_FlushTextures (void)		{ return NULL; }
+#endif

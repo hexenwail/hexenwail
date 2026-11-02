@@ -887,6 +887,9 @@ set(RUST_ENGINE_H2_SERVER_FEATURES sv_main_sound sv_main_ents sv_main_datagram s
 # E1 / slice E: the extended inventory, worldspawn sky, level name and
 # savegame helpers (sv_main_inv.rs); sv_main_target.c again.
 list(APPEND RUST_ENGINE_H2_SERVER_FEATURES sv_main_inv)
+# E2 / slice E: SV_SpawnServer and the map_checks readout.  hwsv keeps its own
+# SV_SpawnServer, HexenWorld's sv_init.c.
+list(APPEND RUST_ENGINE_H2_SERVER_FEATURES sv_main_spawn)
 list(APPEND RUST_ENGINE_CLIENT_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 list(APPEND RUST_ENGINE_H2DED_FEATURES ${RUST_ENGINE_H2_SERVER_FEATURES})
 # world_trace_hw: hexenworld/server/world.c's hull traces report a bad node
@@ -1063,6 +1066,12 @@ function(engine_rs_attach tgt variant)
     list(FIND ARGN sv_main_sound _h2_sv_main_feature)
     if(_h2_sv_main_feature GREATER -1)
         target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/sv_main_target.c)
+    endif()
+    # E2 / slice E: SV_PrintMapCheck, the C-variadic half of the map_checks
+    # readout sv_main_spawn.rs prints.  See the file's header.
+    list(FIND ARGN sv_main_spawn _h2_sv_main_spawn_feature)
+    if(_h2_sv_main_spawn_feature GREATER -1)
+        target_sources(${tgt} PRIVATE ${RUST_ENGINE_RS_DIR}/sv_main_variadic.c)
     endif()
 
     list(FIND ARGN net_udp_h2 _h2_udp_feature)
