@@ -151,6 +151,11 @@ pub mod sv_main_datagram;
 #[cfg(feature = "sv_main_connect")]
 pub mod sv_main_connect;
 
+// E1 / slice E: Hexen II's sv_main.c extended inventory, worldspawn sky,
+// level name and savegame helpers (#469 slice E, unit E1).
+#[cfg(feature = "sv_main_inv")]
+pub mod sv_main_inv;
+
 /// There is exactly one panic handler for every combination of Rust ports.
 /// Panics must never unwind through a C caller.
 #[panic_handler]

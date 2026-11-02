@@ -221,3 +221,26 @@ struct qmodel_s **SvMain_Models (void)		{ return sv.models; }
  * true, the client's sets it from -dedicated. */
 extern qboolean	isDedicated;
 int SvMain_IsDedicated (void)			{ return isDedicated; }
+
+/* E1 / slice E: sv_main_inv.rs (#469 slice E, unit E1).  EX() and CL() are
+ * slice C's and D's macros above; V() is slice B's. */
+#define EXP(member)	offsetof (ex_inventory_page_t, member)
+
+const sv_main_inv_facts_t SvMainInv_TargetFacts =
+{
+	MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS,
+	sizeof (ex_inventory_page_t), EXP(id), EXP(client_id),
+	EXP(changed_items), EXP(new_items),
+	EXP(item_id), EXP(item_cnt), EXP(next),
+	sizeof (client_t), CL(active), CL(ex_inventory),
+	offsetof (edict_t, v), V(message), V(netname),
+	offsetof (qmodel_t, entities), sizeof (((server_t *)0)->skybox)
+};
+
+void *SvMain_InventoryPages (void)		{ return sv.ex_inventory_pages; }
+int *SvMain_NextPageId (void)			{ return &sv.next_page_id; }
+char *SvMain_SkyboxBuf (void)			{ return sv.skybox; }
+int *SvMain_ServerFlags (void)			{ return &svs.serverflags; }
+float *SvMain_GlobalServerFlags (void)		{ return sv_globals.serverflags; }
+int SvMain_HostStringCount (void)		{ return host_string_count; }
+char *SvMain_ComToken (void)			{ return com_token; }
