@@ -18,10 +18,10 @@
  * One more thing is defined around the include, and only for the C side: the
  * fixture's fscanf and fgetc go through inv_harness.c's observers, which call
  * the C library's vfscanf and fgetc and return what they return.  They exist
- * to stop the C at the one place SV_LoadInventory's behaviour becomes
- * undefined -- an item loop about to index past MAX_INVENTORY_EX -- before it
- * writes past the page, so the harness can compare that stop with the Rust's
- * bounds-check abort (see inv_harness.c).  They change no byte the fixture
+ * to stop the C where SV_LoadInventory's behaviour becomes undefined -- an
+ * item loop about to index past MAX_INVENTORY_EX, or reading EOF inside a
+ * line -- before it writes past the page, so the harness can compare that
+ * stop with the Rust's refusal of the save (see inv_harness.c).  They change no byte the fixture
  * reads or writes.
  */
 

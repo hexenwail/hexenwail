@@ -17,8 +17,10 @@
 #
 # The C original is compiled with -ftrivial-auto-var-init=zero: where
 # SV_LoadInventory reads an int no fscanf assigned, the C's value is
-# indeterminate and the port's is 0, and this makes the C's 0 too, so those
-# inputs are compared instead of skipped (see sv_main_inv.rs).  The run is
+# unspecified (its address was taken, so not undefined) and the port's is 0;
+# this makes the C's 0 too, so those inputs are compared instead of skipped
+# (see sv_main_inv.rs).  For input where every int is assigned before it is
+# read, the flag changes nothing.  The run is
 # repeated with --coverage, where every line of the original must run.  Both
 # runs are under a timeout.
 set -euo pipefail
@@ -109,10 +111,11 @@ run "$OUT/opt" | tee "$OUT/opt.log"
 
 # Each way a call can end must have been compared, not merely be possible:
 # the Host_Error of a bad page count, the undefined-behaviour stop of an
-# overlong or EOF-cut item line, and INV_UpdateExItem's spin.
+# overlong or EOF-cut item line (the C's stop, the port's Host_Error),
+# and INV_UpdateExItem's spin.
 floor() { # kind column minimum
 	local n
-	n=$(awk -v k="$1" -v c="$2" '$1 == k && NF == 5 {print $c}' "$OUT/opt.log")
+	n=$(awk -v k="$1" -v c="$2" '$1 == k && NF == 6 {print $c}' "$OUT/opt.log")
 	[ -n "$n" ] && [ "$n" -ge "$3" ] || {
 		echo "FAIL: outcome floor: $1 column $2 is ${n:-missing}, need >= $3" >&2
 		exit 1
@@ -121,9 +124,10 @@ floor() { # kind column minimum
 for kind in sky page update levelname spawnparms writepage load savepages roundtrip; do
 	floor "$kind" 2 100
 done
-floor load 3 100
-floor load 4 100
-floor update 5 3
+floor load 3 100	# Host_Error: a bad page count
+floor load 4 100	# the C overruns item_id[], the port refuses
+floor load 5 100	# EOF inside a line: the C loops, the port refuses
+floor update 6 3	# INV_UpdateExItem's spin, on both sides
 
 [ -n "${HARNESS_SKIP_COVERAGE:-}" ] && { echo "RESULT: PASS (coverage skipped)"; exit 0; }
 

@@ -65,8 +65,10 @@
 //     (svs.clients when maxclients <= 0), as the C's for loop does; INV_SavePages
 //     walks a local copy and leaves the global alone.  The C loop's
 //     `host_client->active` test guards nothing (the body is all comments),
-//     so the port does not make the read; an optimising compiler drops it
-//     from the C too.
+//     so the port does not make the read.  GCC at -O1 and above drops it
+//     from the C too; at -O0 the C reads it, which only shows when
+//     svs.clients is invalid with maxclients > 0 -- undefined behaviour in
+//     the C, where it faults and the port does not.
 //   * SV_LoadInventory's page search is bounded by svs.maxclients, not by
 //     the array's maxclients * MAX_INVENTORY_EX_PAGES; its ints keep the value
 //     of the last fscanf that assigned them; nextId is read and ignored; and a
@@ -82,25 +84,41 @@
 //   * `item_cnt += inv_cnt`, `++sv.next_page_id` and
 //     `svs.maxclients * MAX_INVENTORY_EX_PAGES` can overflow int.  The port
 //     wraps (two's complement), which is what the compiled C does.
-//   * SV_LoadInventory reads an int no fscanf ever assigned (the first
-//     "Page:" line or the first item pair fails to scan).  The C reads stack
-//     garbage; the port reads 0.  The harness compiles the C with
-//     -ftrivial-auto-var-init=zero so those inputs are compared too.
-//   * SV_LoadInventory's item_idx has no bound: a line with more than
-//     MAX_INVENTORY_EX pairs writes past item_id[] and item_cnt[] (into the
-//     rest of the page, then the next page), and a line cut short by EOF
-//     loops forever -- fgetc keeps returning EOF, which is neither '\n' nor
-//     '\r' -- writing further each time until it faults.  The port aborts
-//     (bounds check, panic = abort) at the top of the item loop once
-//     item_idx reaches MAX_INVENTORY_EX, before the fscanf that iteration
-//     would make: the stream is where the C's was, and nothing has been
-//     written past the page.
+//   * SV_LoadInventory's item_idx has no bound.  What the C did in practice
+//     with a newline-terminated "Page:" line of more than MAX_INVENTORY_EX
+//     pairs: up to about 96 it loaded and played on with a garbage page
+//     (item_id[32 + k] is item_cnt[k], then inv_order[] and item_gettime[]
+//     are overwritten, and `1 << item_idx` wraps); past that it overwrote
+//     ->next and the next page, and crashed later.  A line cut short by EOF
+//     looped forever -- fgetc keeps returning EOF, which is neither '\n' nor
+//     '\r' -- writing further each time until it faulted.  THIS PORT
+//     DEPARTS ON PURPOSE: it refuses the save with a Host_Error, "page has
+//     more than 32 items" at the top of the iteration that would index
+//     item_id[MAX_INVENTORY_EX] (before its fscanf), and "savegame ends
+//     inside a page" at the first EOF the item loop reads (from there the C
+//     can only end in the overrun).  Nothing is written past the page, and a
+//     hand-edited or corrupt save ends in the engine's normal "can't load"
+//     path with a message instead of a corrupted game or a crash.  This
+//     Rust frame holds only ints and raw pointers, nothing with a Drop, so
+//     Host_Error's longjmp out of it is the same as the bad-numpages one
+//     above it.
 //   * SV_LoadInventory with sv.ex_inventory_pages NULL dereferences NULL.
 //     SV_SpawnServer always allocates the array first, so this is
 //     unreachable; the port aborts where the C would first read through it.
 //
-// Every one of these is a defect of the C, reported separately; none is fixed
-// here.
+// UNSPECIFIED, NOT UNDEFINED
+//
+//   SV_LoadInventory can read an int no fscanf ever assigned (the first
+//   "Page:" line or the first item pair fails to scan).  Each one's address
+//   was taken, so in C11 that is an unspecified value, not undefined
+//   behaviour; the port's is 0.  The harness compiles the C with
+//   -ftrivial-auto-var-init=zero so these inputs are compared too; for any
+//   input where every int is assigned before it is read, that flag changes
+//   nothing.
+//
+// Each C behaviour above is a defect of the C, reported separately.  Only the
+// item-loop refusal changes what the engine does, and only on input whose C
+// behaviour was undefined.
 
 use core::ffi::{c_char, c_int, c_void};
 
@@ -112,6 +130,7 @@ pub struct SvMainInvFacts {
     pub max_inventory_ex: c_int,
     pub max_inventory_ex_pages: c_int,
     pub max_clients: c_int,
+    pub eof: c_int,
     pub ex_size: usize,
     pub ex_id: usize,
     pub ex_client_id: usize,
@@ -166,7 +185,7 @@ accessor!(
 /// crate's declarations of the same libc functions agree.
 pub type CFile = c_void;
 
-/// stdio.h's EOF is never '\n' or '\r', so the item loop needs no name for it.
+/// The item loop's line ends.
 const NEWLINE: c_int = b'\n' as c_int;
 const RETURN: c_int = b'\r' as c_int;
 
@@ -497,7 +516,7 @@ pub unsafe extern "C" fn INV_WritePage(file: *mut CFile, page: *mut u8, client_i
 pub unsafe extern "C" fn SV_LoadInventory(file: *mut CFile) {
     let f = facts();
     let mut total: c_int = 0;
-    // Zero where the C's are uninitialised: see the module header.
+    // Zero where the C's are unspecified: see the module header.
     let mut id: c_int = 0;
     let mut client_id: c_int = 0;
     let mut next_id: c_int = 0;
@@ -544,8 +563,19 @@ pub unsafe extern "C" fn SV_LoadInventory(file: *mut CFile) {
         let mut item_idx: c_int = 0;
         let mut c = fgetc(file); // read one char, see what it is
         while c != NEWLINE && c != RETURN {
+            // The two refusals are this port's on purpose: see the header.
+            if c == f.eof {
+                Host_Error(
+                    c"%s: savegame ends inside a page".as_ptr(),
+                    c"SV_LoadInventory".as_ptr(),
+                );
+            }
             if item_idx >= f.max_inventory_ex {
-                abort(); // the C writes past the page here: see the module header
+                Host_Error(
+                    c"%s: page has more than %d items".as_ptr(),
+                    c"SV_LoadInventory".as_ptr(),
+                    f.max_inventory_ex,
+                );
             }
             fscanf(
                 file,

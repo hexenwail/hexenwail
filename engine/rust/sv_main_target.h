@@ -236,8 +236,9 @@ int			SvMain_IsDedicated (void);	/* isDedicated */
  * stdio helpers. */
 typedef struct sv_main_inv_facts_s
 {
-	/* quakedef.h's MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS */
-	int	max_inventory_ex, max_inventory_ex_pages, max_clients;
+	/* quakedef.h's MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS;
+	 * stdio.h's EOF */
+	int	max_inventory_ex, max_inventory_ex_pages, max_clients, eof;
 	/* ex_inventory_page_t's layout */
 	size_t	ex_size, ex_id, ex_client_id, ex_changed_items, ex_new_items;
 	size_t	ex_item_id, ex_item_cnt, ex_next;

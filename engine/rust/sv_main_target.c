@@ -228,7 +228,7 @@ int SvMain_IsDedicated (void)			{ return isDedicated; }
 
 const sv_main_inv_facts_t SvMainInv_TargetFacts =
 {
-	MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS,
+	MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS, EOF,
 	sizeof (ex_inventory_page_t), EXP(id), EXP(client_id),
 	EXP(changed_items), EXP(new_items),
 	EXP(item_id), EXP(item_cnt), EXP(next),

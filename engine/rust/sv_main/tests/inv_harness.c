@@ -26,14 +26,17 @@
  *   0   returned.
  *   42  Host_Error (the stub serializes, then exits; Host_Error does not
  *       return).
- *   43  C side only: SV_LoadInventory's item loop was about to index
- *       item_id[MAX_INVENTORY_EX] -- undefined behaviour.  The fixture's
- *       fgetc is observed (c_ref_inv.c), and the observer stops the C there,
- *       before it writes past the page.
- *   44  Rust side only: abort(), the port's bounds check at the same point.
- *       43 and 44 are the same outcome; everything serialized must still
- *       match, so the two stopped at the same byte of the stream with the
- *       same pages.
+ *   43  C side only: SV_LoadInventory's item loop reached undefined
+ *       behaviour -- it was about to index item_id[MAX_INVENTORY_EX].
+ *   46  C side only: the same loop's fgetc returned EOF inside a line, from
+ *       where the C can only loop on to that overrun.  The fixture's fgetc is observed (c_ref_inv.c),
+ *       and the observer stops the C there, before it writes past the page,
+ *       logging the Host_Error line the port must give at that point.
+ *       A C 43 or 46 pairs only with a Rust 42: the port refuses those saves on
+ *       purpose (sv_main_inv.rs), and everything serialized must match --
+ *       the same byte of the stream, the same pages, the same message.
+ *   44  Rust side only: abort().  Only the NULL-page-array check makes it,
+ *       tested on the Rust alone (rust_null_pages).
  *   45  SIGALRM: the call did not return within SPIN_MS (150 ms).  INV_UpdateExItem
  *       spins forever when it links a full page back into its own chain (a
  *       C defect, kept); both sides must spin, with the same state.
@@ -413,9 +416,18 @@ int inv_harness_c_fgetc (FILE *f)
 {
 	int c = fgetc (f);
 	/* fgetc number n after the page scan starts the body with
-	 * item_idx = n - 1; item_idx == MAX_INVENTORY_EX is the overrun */
-	if (++c_item_fgetcs > MAX_INVENTORY_EX && c != '\n' && c != '\r')
+	 * item_idx = n - 1; item_idx == MAX_INVENTORY_EX is the overrun.  EOF
+	 * is checked first, as the port does. */
+	++c_item_fgetcs;
+	if (c == EOF) {
+		log_call ("Host_Error: SV_LoadInventory: savegame ends inside a page\n");
+		finish_child (46);
+	}
+	if (c_item_fgetcs > MAX_INVENTORY_EX && c != '\n' && c != '\r') {
+		log_call ("Host_Error: SV_LoadInventory: page has more than %d items\n",
+			  MAX_INVENTORY_EX);
 		finish_child (43);
+	}
 	return c;
 }
 
@@ -503,6 +515,7 @@ static int check_facts (void)
 	CKF (max_inventory_ex, MAX_INVENTORY_EX);
 	CKF (max_inventory_ex_pages, MAX_INVENTORY_EX_PAGES);
 	CKF (max_clients, MAX_CLIENTS);
+	CKF (eof, EOF);
 	CKZ (ex_size, sizeof (ex_inventory_page_t));
 	CKZ (ex_id, offsetof (ex_inventory_page_t, id));
 	CKZ (ex_client_id, offsetof (ex_inventory_page_t, client_id));
@@ -1137,7 +1150,8 @@ static void run_child (void)
 /* ---- the parent: fork both sides, compare ---- */
 static const char *tmpdir_g;
 static long	cases_run, cases_pass;
-static long	outcomes[NKINDS][5];	/* returned, Host_Error, UB stop, spin, crash */
+/* returned, Host_Error, too-many-items stop, EOF stop, spin, crash */
+static long	outcomes[NKINDS][6];
 
 static int outcome_of (int status)
 {
@@ -1148,9 +1162,10 @@ static int outcome_of (int status)
 	switch (code) {
 	case 0: return 0;
 	case 42: return 1;
-	case 43: case 44: return 2;
-	case 45: return 3;
-	default: return 4;
+	case 43: return 2;	/* paired with a Rust 42 below */
+	case 46: return 3;	/* likewise */
+	case 45: return 4;
+	default: return 5;
 	}
 }
 
@@ -1210,11 +1225,14 @@ static int run_prepared (const char *label)
 	cases_run++;
 	oc = outcome_of (sc);
 	orr = outcome_of (sr);
+	if ((oc == 2 || oc == 3) && orr == 1)	/* the C's UB stop, the port's refusal */
+		orr = oc;
 	ec = WIFEXITED (sc) ? WEXITSTATUS (sc) : -1;
 	er = WIFEXITED (sr) ? WEXITSTATUS (sr) : -1;
-	/* 43 is the C's undefined-behaviour stop and 44 the Rust's abort; each
-	 * belongs to its own side only */
-	if (oc != orr || (oc == 2 && (ec != 43 || er != 44)) || (oc != 2 && ec != er) || oc == 4) {
+	/* 43 is the C's undefined-behaviour stop, and pairs only with the
+	 * Rust's Host_Error (42) */
+	if (oc != orr || ((oc == 2 || oc == 3) && er != 42) ||
+	    (oc != 2 && oc != 3 && ec != er) || oc == 5) {
 		printf ("MISMATCH case %ld (%s, kind %s): C exit %d/status %d, Rust exit %d/status %d\n",
 			cases_run - 1, label, kind_names[case_kind], ec, sc, er, sr);
 		return 1;
@@ -1349,7 +1367,7 @@ static int directed (void)
 	bad |= directed_load ("Pages: 1\nPage: 3 -1 0 5 6", 2, 1, "load EOF mid-line");
 	bad |= directed_load ("Pages: 1\nPage: 3 -1 0", 2, 1, "load EOF after header");
 	bad |= directed_load ("Pages: 2\nPage: 3 -1 0\n", 2, 1, "load EOF before a page");
-	/* the first scans fail: the C's uninitialised ints (read as 0) */
+	/* the first scans fail: the C's unassigned ints (unspecified; 0 here) */
 	bad |= directed_load ("Pages: 1\nx\n", 2, 1, "load page scan fails");
 	bad |= directed_load ("Pages: 1\nPage: 1 -1 0 x\n", 2, 1, "load item scan fails");
 	bad |= directed_load ("Pages: 2\nPage: 1 -1 0 4 4\nPage: x\n", 2, 0, "load stale ints");
@@ -1550,6 +1568,21 @@ static int directed (void)
 		page_store[3].next = &page_store[4];
 		bad |= directed_update (3, 500, 2, i, "update mixed-owner chain");
 	}
+	/* the first walk updates the id on every page of the chain, and the
+	 * result is the LAST count written, not the first */
+	for (i = 0; i < 2; i++) {
+		rng_seed (0x1A57 + (uint64_t)i);
+		gen_pages (1);
+		svs.maxclients = 1;
+		for (n = 0; n < MAX_INVENTORY_EX_PAGES; n++)
+			fill_page (n, 0, 0, 0, 0);
+		fill_page (0, 1, 0, 4, 10);	/* ids 10..13 */
+		fill_page (2, 2, 0, 4, 10);
+		page_store[0].item_cnt[2] = 5;	/* id 12: 5 here ... */
+		page_store[2].item_cnt[2] = 40;	/* ... and 40 here */
+		page_store[0].next = &page_store[2];
+		bad |= directed_update (0, 12, 3, i ? 1 : 2, "update result is the last written");
+	}
 	/* the C's spin: the extension finds the start page itself */
 	for (i = 0; i < 3; i++) {
 		rng_seed (0x5B1 + (uint64_t)i);
@@ -1632,10 +1665,11 @@ int main (int argc, char **argv)
 		if (run_seeded (0x1E1E0000ULL + (uint64_t)i, (int)(i % NKINDS)))
 			bad = 1;
 
-	printf ("outcomes: kind        returned host_error ub_stop  spin\n");
+	printf ("outcomes: kind        returned host_error ub_items ub_eof  spin\n");
 	for (k = 0; k < NKINDS; k++)
-		printf ("          %-11s %8ld %10ld %7ld %5ld\n", kind_names[k],
-			outcomes[k][0], outcomes[k][1], outcomes[k][2], outcomes[k][3]);
+		printf ("          %-11s %8ld %10ld %8ld %6ld %5ld\n", kind_names[k],
+			outcomes[k][0], outcomes[k][1], outcomes[k][2],
+			outcomes[k][3], outcomes[k][4]);
 	printf ("sv_main_inv differential harness (%s): %s (%ld cases, %ld pass)\n",
 		"h2", bad ? "FAIL" : "PASS", cases_run, cases_pass);
 	if (!getenv ("HARNESS_KEEP_TMP")) {
