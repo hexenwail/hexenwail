@@ -465,6 +465,9 @@ unsafe fn print_map_checklist() {
 
     // vis data
     if (*ptr_at::<u8>(worldmodel(), f.qmodel_visdata)).is_null() {
+        // (spawn_mutants.sh EQUIVALENT: one byte less changes nothing --
+        // sv.name holds at most 63 chars, so "maps/<name>.pts" is at most
+        // 72 bytes, far inside MAX_OSPATH, 256 or PATH_MAX.)
         let mut storage = [0 as c_char; 4096];
         let pointfile = &mut storage[..f.max_ospath as usize];
         q_snprintf(
@@ -550,6 +553,9 @@ unsafe fn print_map_checklist() {
     // skill levels
     let ents = f.mc_skill_ents;
     let int = core::mem::size_of::<c_int>();
+    // (spawn_mutants.sh EQUIVALENT: comparing [0] with [2] in the second
+    // test is the same predicate -- if [0] != [1] the first test is already
+    // true, and if [0] == [1] the two second tests coincide.)
     let skill_levels = mc(f.mc_skill_triggers) > 0
         || (mc(ents) != mc(ents + int) || mc(ents + int) != mc(ents + 2 * int));
     SV_PrintMapCheck(

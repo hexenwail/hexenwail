@@ -845,7 +845,10 @@ void SV_CreateBaseline (void)
 	int i;
 	log_call ("SV_CreateBaseline signon=%d/%d\n", sv.num_signon_buffers, sv.signon.cursize);
 	sv.num_signon_buffers = case_nbuf;
-	for (i = 0; i < case_nbuf && i < MAX_SIGNON_BUFFERS; i++)
+	/* Entries past the count are filled too: the spawn's total must read
+	 * exactly the first num_signon_buffers of them, and a zero there
+	 * would hide a loop that runs one long. */
+	for (i = 0; i < MAX_SIGNON_BUFFERS; i++)
 		sv.signon_size[i] = case_bufsize[i];
 	sv.signon.cursize = case_cursize;
 }
