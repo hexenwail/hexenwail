@@ -444,6 +444,8 @@ void SV_CheckForNewClients (void);
 void SV_RunClients (void);
 void SV_SaveSpawnparms (void);
 void SV_SpawnServer (const char *server, const char *startspot);
+/* sv_main_inv.rs (E1); called by SV_SpawnServer (sv_main_spawn.rs, E2) -- #469 slice E */
+void SV_ParseWorldspawnSky (void);
 
 const char *SV_GetLevelname (void);
 

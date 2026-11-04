@@ -93,6 +93,23 @@ sv_main_datagram = ["sv_main_ents"]
 # numbers and per-protocol limits through sv_main_sound's facts.
 sv_main_connect = ["sv_main_sound"]
 
+# E1 / slice E: Hexen II's sv_main.c extended inventory, worldspawn sky, level
+# name and savegame helpers (#469 slice E, unit E1): SV_ParseWorldspawnSky,
+# SV_ClientInventoryPage, INV_UpdateExItem, SV_GetLevelname,
+# SV_SaveSpawnparms, INV_WritePage, SV_LoadInventory, INV_SavePages.  Reads
+# engine/rust/sv_main_target.c (via sv_main_sound, which compiles it in) and
+# world_hull's cvt_c.  q_strlcpy and COM_Parse are extern, as in cvar and
+# cmd: every target has them, and the harness wraps them to log the calls.
+sv_main_inv = ["sv_main_sound"]
+# E2 / slice E of #469: Hexen II's SV_SpawnServer and the map_checks readout
+# (SV_PrintMapChecklist, SV_MapCheckThresh, SV_MapCheckTitle).  Reads
+# engine/rust/sv_main_target.c only.  Its callees -- slice D's
+# SV_SendReconnect, SV_CreateBaseline and SV_SendServerinfo, SZ_Init,
+# Cvar_Set, SV_ClearWorld, SV_Physics, FS_FileExists and the rest -- are
+# extern "C" calls resolved by the engine link, not feature dependencies, so
+# its differential harness can record each one.  world_hull is for cvt_c.
+sv_main_spawn = ["world_hull"]
+
 [profile.release]
 # Unwinding across an FFI boundary is undefined behaviour. Fatal paths go
 # through the engine's noreturn C callbacks, so abort rather than unwind.
