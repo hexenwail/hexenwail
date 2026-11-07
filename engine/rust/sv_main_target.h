@@ -231,4 +231,154 @@ int			*SvMain_NetActiveConnections (void); /* &net_activeconnections */
 struct qmodel_s		**SvMain_Models (void);		/* sv.models */
 int			SvMain_IsDedicated (void);	/* isDedicated */
 
+/* E1 / slice E: sv_main_inv.rs (#469 slice E, unit E1) -- the extended
+ * inventory pages, the worldspawn sky, the level name and the savegame
+ * stdio helpers. */
+typedef struct sv_main_inv_facts_s
+{
+	/* quakedef.h's MAX_INVENTORY_EX, MAX_INVENTORY_EX_PAGES, MAX_CLIENTS;
+	 * stdio.h's EOF */
+	int	max_inventory_ex, max_inventory_ex_pages, max_clients, eof;
+	/* ex_inventory_page_t's layout */
+	size_t	ex_size, ex_id, ex_client_id, ex_changed_items, ex_new_items;
+	size_t	ex_item_id, ex_item_cnt, ex_next;
+	/* client_t members */
+	size_t	client_size, client_active, client_ex_inventory;
+	/* edict_t's v, and entvars_t's message and netname relative to v */
+	size_t	edict_v, v_message, v_netname;
+	/* qmodel_t's entities (the target's own qmodel_t: gl_model.h,
+	 * model.h or sv_model.h), and sizeof sv.skybox */
+	size_t	qmodel_entities, skybox_size;
+} sv_main_inv_facts_t;
+
+extern const sv_main_inv_facts_t	SvMainInv_TargetFacts;
+
+void		*SvMain_InventoryPages (void);	/* sv.ex_inventory_pages */
+int		*SvMain_NextPageId (void);	/* &sv.next_page_id */
+char		*SvMain_SkyboxBuf (void);	/* sv.skybox, for writing */
+int		*SvMain_ServerFlags (void);	/* &svs.serverflags */
+float		*SvMain_GlobalServerFlags (void); /* sv_globals.serverflags */
+int		SvMain_HostStringCount (void);	/* host_string_count */
+char		*SvMain_ComToken (void);	/* com_token */
+/* sv_main_spawn.rs (E2 / slice E of #469): SV_SpawnServer and the map_checks
+ * readout.  Every server_t, server_static_t, client_t, edict_t, entvars_t,
+ * dprograms_t, dfunction_t, sv_globals_t, qmodel_t and texture_t member is
+ * an offset into the object the matching accessor below returns.  The two
+ * build facts stand in for SV_SpawnServer's `#if !defined(SERVERONLY)' and
+ * `#ifdef GLQUAKE' arms: this file is compiled per target, so it answers
+ * them for the target, and the one Rust archive branches on the answer. */
+
+/* sv_main.c's map_checks status, for SV_PrintMapCheck (sv_main_variadic.c) */
+typedef enum
+{
+	MAPCHECK_FAILED,
+	MAPCHECK_PARTIAL,
+	MAPCHECK_OK,
+	MAPCHECK_NA		/* passes because it does not apply here */
+} mapcheck_t;
+
+/* C-variadic, so it stays C (sv_main_variadic.c); sv_main_spawn.rs calls it */
+void	SV_PrintMapCheck (mapcheck_t status, const char *format, ...);
+
+typedef struct sv_main_spawn_facts_s
+{
+	/* 1 when this target compiles SV_SpawnServer's !SERVERONLY arms (the
+	 * loading plaque, scr_centertime_off) and SV_PrintMapChecklist's sky
+	 * texture block; 1 when it compiles the GLQUAKE flush_textures line */
+	int	client_build, glquake_build;
+	/* printsys.h's flags, the mapcheck_t values */
+	int	print_normal, print_devel, print_safe;
+	int	mapcheck_failed, mapcheck_partial, mapcheck_ok, mapcheck_na;
+	/* header constants */
+	int	protocol_uh2_114, protocol_hexenwail_1;
+	int	min_edicts, max_edicts, max_models, max_qpath, max_ospath;
+	int	max_signon_size, max_signon_buffers, max_items_ex, max_inventory_ex_pages;
+	int	solid_bsp, movetype_push, ss_loading, ss_active;
+	/* server_t, relative to &sv */
+	size_t	sv_active, sv_paused, sv_time, sv_name, sv_name_size;
+	size_t	sv_midi_name, sv_mod_name, sv_mod_name_size, sv_cd_track;
+	size_t	sv_startspot, sv_startspot_size, sv_modelname, sv_modelname_size;
+	size_t	sv_worldmodel, sv_model_precache, sv_models, sv_sound_precache;
+	size_t	sv_states, sv_num_edicts, sv_edicts, sv_state;
+	size_t	sv_datagram, sv_datagram_buf, sv_datagram_buf_size;
+	size_t	sv_reliable_datagram, sv_reliable_datagram_buf, sv_reliable_datagram_buf_size;
+	size_t	sv_signon, sv_num_signon_buffers, sv_signon_size, sv_signon_bufs;
+	size_t	sv_ex_items, sv_ex_inventory_pages, sv_num_ex_items;
+	/* server_t's mapchecks, relative to &sv */
+	size_t	mc_active, mc_numwarnings, mc_changelevel, mc_changespot;
+	size_t	mc_trigger_changelevel, mc_valid_changelevel, mc_intermission;
+	size_t	mc_skill_triggers, mc_coop_spawns, mc_dm_spawns, mc_sp_spawns;
+	size_t	mc_skill_ents;
+	/* server_static_t, relative to &svs */
+	size_t	svs_maxclients, svs_clients, svs_serverflags, svs_changelevel_issued;
+	/* client_t */
+	size_t	client_size, client_active, client_edict, client_send_all_v;
+	size_t	client_ex_inventory;
+	/* edict_t, then entvars_t relative to v */
+	size_t	edict_free, edict_freetime, edict_v;
+	size_t	v_model, v_modelindex, v_solid, v_movetype, v_message;
+	/* sizebuf_t's name and cursize */
+	size_t	sizebuf_name, sizebuf_cursize;
+	/* the hunk allocations' element sizes, and ex_item_t */
+	size_t	client_state2_size, ex_item_size, ex_item_id, ex_item_icon;
+	size_t	ex_inventory_page_size;
+	/* dprograms_t and dfunction_t */
+	size_t	progs_numfunctions, progs_entityfields;
+	size_t	function_size, function_first_statement;
+	/* sv_globals_t's pointer members */
+	size_t	g_coop, g_deathmatch, g_randomclass, g_mapname, g_startspot;
+	size_t	g_serverflags;
+	/* qmodel_t */
+	size_t	qmodel_name, qmodel_numsubmodels, qmodel_lightdata;
+	size_t	qmodel_visdata, qmodel_entities;
+	/* qmodel_t's texture list and texture_t: read only when client_build
+	 * is 1 (h2ded's sv_model.h has neither), and 0 otherwise */
+	size_t	qmodel_numtextures, qmodel_textures;
+	size_t	texture_name, texture_width, texture_height;
+	/* sizeof localmodels[0] */
+	size_t	localmodel_size;
+} sv_main_spawn_facts_t;
+
+extern const sv_main_spawn_facts_t	SvMainSpawn_TargetFacts;
+
+unsigned char	*SvMainSpawn_Server (void);		/* &sv */
+unsigned char	*SvMainSpawn_Static (void);		/* &svs */
+unsigned char	*SvMainSpawn_Globals (void);		/* &sv_globals */
+unsigned char	*SvMainSpawn_Progs (void);		/* progs */
+unsigned char	*SvMainSpawn_Functions (void);		/* pr_functions */
+int		*SvMainSpawn_PhysicsWalk (void);	/* &sv_physics_walk */
+int		*SvMainSpawn_CurrentSkill (void);	/* &current_skill */
+double		*SvMainSpawn_HostFrametime (void);	/* &host_frametime */
+int		*SvMainSpawn_Protocol (void);		/* &sv_protocol */
+int		SvMainSpawn_ProtocolUserset (void);	/* sv_protocol_userset */
+int		*SvMainSpawn_MaxEdicts (void);		/* &sv_max_edicts */
+char		*SvMainSpawn_LocalModels (void);	/* localmodels[0] */
+const char	*SvMainSpawn_GamedirNoPath (void);	/* fs_gamedir_nopath */
+unsigned char	**SvMainSpawn_HostClient (void);	/* &host_client */
+int		SvMainSpawn_EdictSize (void);		/* pr_edict_size */
+/* SV_SpawnServer's `static char dummy[8]', entry 0 of both precache lists:
+ * C storage, one object for the life of the process, as the C's was */
+char		*SvMainSpawn_PrecacheDummy (void);
+/* the cvars, each read where the C reads it */
+const char	*SvMainSpawn_HostnameString (void);	/* hostname.string */
+int		SvMainSpawn_CoopInteger (void);		/* coop.integer */
+float		SvMainSpawn_CoopValue (void);		/* coop.value */
+float		SvMainSpawn_DeathmatchValue (void);	/* deathmatch.value */
+int		SvMainSpawn_SkillInteger (void);	/* skill.integer */
+int		SvMainSpawn_MapChecksInteger (void);	/* map_checks.integer */
+int		SvMainSpawn_DeveloperInteger (void);	/* developer.integer */
+float		SvMainSpawn_MaxEdictsValue (void);	/* max_edicts.value */
+int		SvMainSpawn_MaxTempEdictsInteger (void); /* max_temp_edicts.integer */
+float		SvMainSpawn_RandomclassValue (void);	/* randomclass.value */
+/* client builds' globals and calls; NULL, and calls that do nothing, in
+ * h2ded, where sv_main_spawn.rs never reaches them (client_build is 0) */
+float		*SvMainSpawn_CenterTimeOff (void);	/* &scr_centertime_off */
+int		*SvMainSpawn_TotalLoadingSize (void);	/* &total_loading_size */
+int		*SvMainSpawn_CurrentLoadingSize (void);	/* &current_loading_size */
+int		*SvMainSpawn_LoadingStage (void);	/* &loading_stage */
+void		SvMainSpawn_ShowLoadingSize (void);	/* D_ShowLoadingSize () */
+void		SvMainSpawn_EndLoadingPlaque (void);	/* SCR_EndLoadingPlaque () */
+/* GLQUAKE's &flush_textures; NULL elsewhere (glquake_build is 0) */
+int		*SvMainSpawn_FlushTextures (void);
+
 #endif	/* SV_MAIN_TARGET_H */

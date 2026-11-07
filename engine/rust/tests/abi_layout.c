@@ -164,9 +164,68 @@ int NET_IsLocalConnection (void *sock) { (void) sock; return 0; }
 int NET_MaxUnreliableMessage (void *sock) { (void) sock; return 0; }
 const char *NET_QSocketGetAddressString (const void *sock) { (void) sock; return NULL; }
 int NET_SendToAll (void *data, double blocktime) { (void) data; (void) blocktime; return 0; }
-void *SV_ClientInventoryPage (int clientnum) { (void) clientnum; return NULL; }
-const char *SV_GetLevelname (void) { return NULL; }
+/* E1 / slice E (#469): SV_ClientInventoryPage and SV_GetLevelname, which
+ * slice D's port calls, are the archive's own now (sv_main_inv.rs); its
+ * accessors and the engine functions it calls are stood in for here. */
+const sv_main_inv_facts_t SvMainInv_TargetFacts;
+void *SvMain_InventoryPages (void) { return NULL; }
+int *SvMain_NextPageId (void) { return NULL; }
+char *SvMain_SkyboxBuf (void) { return NULL; }
+int *SvMain_ServerFlags (void) { return NULL; }
+float *SvMain_GlobalServerFlags (void) { return NULL; }
+int SvMain_HostStringCount (void) { return 0; }
+char *SvMain_ComToken (void) { return NULL; }
+struct client_s **SvMain_HostClient (void) { return NULL; }
+const char *Host_GetString (int idx) { (void) idx; return NULL; }
 unsigned char *SvMain_FatPvs (void) { return NULL; }
+/* E2 / slice E: sv_main_spawn.rs's accessors and engine calls.  The facts
+ * accessors above pull its object in, so each must resolve; none is ever
+ * called. */
+const sv_main_spawn_facts_t SvMainSpawn_TargetFacts;
+unsigned char *SvMainSpawn_Server (void) { return NULL; }
+unsigned char *SvMainSpawn_Static (void) { return NULL; }
+unsigned char *SvMainSpawn_Globals (void) { return NULL; }
+unsigned char *SvMainSpawn_Progs (void) { return NULL; }
+unsigned char *SvMainSpawn_Functions (void) { return NULL; }
+int *SvMainSpawn_PhysicsWalk (void) { return NULL; }
+int *SvMainSpawn_CurrentSkill (void) { return NULL; }
+double *SvMainSpawn_HostFrametime (void) { return NULL; }
+int *SvMainSpawn_Protocol (void) { return NULL; }
+int SvMainSpawn_ProtocolUserset (void) { return 0; }
+int *SvMainSpawn_MaxEdicts (void) { return NULL; }
+char *SvMainSpawn_LocalModels (void) { return NULL; }
+const char *SvMainSpawn_GamedirNoPath (void) { return NULL; }
+unsigned char **SvMainSpawn_HostClient (void) { return NULL; }
+int SvMainSpawn_EdictSize (void) { return 0; }
+char *SvMainSpawn_PrecacheDummy (void) { return NULL; }
+const char *SvMainSpawn_HostnameString (void) { return NULL; }
+int SvMainSpawn_CoopInteger (void) { return 0; }
+float SvMainSpawn_CoopValue (void) { return 0; }
+float SvMainSpawn_DeathmatchValue (void) { return 0; }
+int SvMainSpawn_SkillInteger (void) { return 0; }
+int SvMainSpawn_MapChecksInteger (void) { return 0; }
+int SvMainSpawn_DeveloperInteger (void) { return 0; }
+float SvMainSpawn_MaxEdictsValue (void) { return 0; }
+int SvMainSpawn_MaxTempEdictsInteger (void) { return 0; }
+float SvMainSpawn_RandomclassValue (void) { return 0; }
+float *SvMainSpawn_CenterTimeOff (void) { return NULL; }
+int *SvMainSpawn_TotalLoadingSize (void) { return NULL; }
+int *SvMainSpawn_CurrentLoadingSize (void) { return NULL; }
+int *SvMainSpawn_LoadingStage (void) { return NULL; }
+void SvMainSpawn_ShowLoadingSize (void) { }
+void SvMainSpawn_EndLoadingPlaque (void) { }
+int *SvMainSpawn_FlushTextures (void) { return NULL; }
+void SV_PrintMapCheck (mapcheck_t status, const char *format, ...) { (void) status; (void) format; abort (); }
+int SaveGamestate (int clients_only) { (void) clients_only; abort (); }
+void Host_ClearMemory (void) { abort (); }
+void PR_LoadProgs (void) { abort (); }
+int PR_HasField (const char *name) { (void) name; abort (); }
+void Host_LoadStrings (void) { abort (); }
+void ED_ClearEdict (void *e) { (void) e; abort (); }
+void *Mod_ForName (const char *name, int crash) { (void) name; (void) crash; abort (); }
+int PR_SetEngineString (const char *s) { (void) s; abort (); }
+void ED_LoadFromFile (const char *data) { (void) data; abort (); }
+const char *COM_SkipPath (const char *pathname) { (void) pathname; abort (); }
 void *EDICT_NUM (int n) { (void) n; abort (); }
 unsigned char *Mod_LeafPVS (void *leaf, void *model) { (void) leaf; (void) model; abort (); }
 struct qmodel_s **World_SvModels (void) { return NULL; }
@@ -331,6 +390,20 @@ RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_volume)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_max_sounds_uh2)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_protocol_hexenwail_1)
 RUST_ACCESSOR(SvMainTargetFacts_offsetof_default_sound_packet_attenuation)
+RUST_ACCESSOR(SvMainInvFacts_sizeof)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_max_clients)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_ex_size)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_ex_next)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_client_ex_inventory)
+RUST_ACCESSOR(SvMainInvFacts_offsetof_skybox_size)
+/* E2 / slice E: sv_main_spawn.rs's facts table, ints then size_ts, so
+ * wasm32's 4-byte size_t moves every offset after ss_active */
+RUST_ACCESSOR(SvMainSpawnFacts_sizeof)
+RUST_ACCESSOR(SvMainSpawnFacts_offsetof_ss_active)
+RUST_ACCESSOR(SvMainSpawnFacts_offsetof_sv_active)
+RUST_ACCESSOR(SvMainSpawnFacts_offsetof_mc_skill_ents)
+RUST_ACCESSOR(SvMainSpawnFacts_offsetof_g_serverflags)
+RUST_ACCESSOR(SvMainSpawnFacts_offsetof_localmodel_size)
 STRUCT_ACCESSORS(WorldAreaNode)
 RUST_ACCESSOR(WorldAreaNode_offsetof_dist)
 RUST_ACCESSOR(WorldAreaNode_offsetof_children)
@@ -714,6 +787,21 @@ int main (void)
 	OFF(sv_main_target_facts_t, max_sounds_uh2, SvMainTargetFacts, max_sounds_uh2);
 	OFF(sv_main_target_facts_t, protocol_hexenwail_1, SvMainTargetFacts, protocol_hexenwail_1);
 	OFF(sv_main_target_facts_t, default_sound_packet_attenuation, SvMainTargetFacts, default_sound_packet_attenuation);
+
+	/* E1 / slice E (#469): sv_main_inv.rs's SvMainInvFacts */
+	SIZE(sv_main_inv_facts_t, SvMainInvFacts);
+	OFF(sv_main_inv_facts_t, max_clients, SvMainInvFacts, max_clients);
+	OFF(sv_main_inv_facts_t, ex_size, SvMainInvFacts, ex_size);
+	OFF(sv_main_inv_facts_t, ex_next, SvMainInvFacts, ex_next);
+	OFF(sv_main_inv_facts_t, client_ex_inventory, SvMainInvFacts, client_ex_inventory);
+	OFF(sv_main_inv_facts_t, skybox_size, SvMainInvFacts, skybox_size);
+	/* E2 / slice E */
+	SIZE(sv_main_spawn_facts_t, SvMainSpawnFacts);
+	OFF(sv_main_spawn_facts_t, ss_active, SvMainSpawnFacts, ss_active);
+	OFF(sv_main_spawn_facts_t, sv_active, SvMainSpawnFacts, sv_active);
+	OFF(sv_main_spawn_facts_t, mc_skill_ents, SvMainSpawnFacts, mc_skill_ents);
+	OFF(sv_main_spawn_facts_t, g_serverflags, SvMainSpawnFacts, g_serverflags);
+	OFF(sv_main_spawn_facts_t, localmodel_size, SvMainSpawnFacts, localmodel_size);
 
 	SIZE(abi_areanode_t, WorldAreaNode);
 	OFF(abi_areanode_t, dist, WorldAreaNode, dist);

@@ -46,6 +46,9 @@ rename() { # prefix
 		printf -- '-D%s=%s%s ' "$s" "$1" "$s"
 	done
 }
+# sv_main_target.c is compiled sectioned and linked with --gc-sections: it
+# carries every slice's accessors, and this harness defines only the globals
+# its own slice's accessors read (E2 / slice E).
 WARN=(-Wall -Wno-unused-function)
 LIMIT=${HARNESS_TIMEOUT:-900}
 
@@ -58,7 +61,7 @@ build() { # name ieee-cflags...
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$rust_root/world_target.c" -o "$OUT/$name/world_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
-		-c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
+		-ffunction-sections -fdata-sections -c "$rust_root/sv_main_target.c" -o "$OUT/$name/sv_main_target.o"
 	cc "${INCS[@]}" "${CDEFS[@]}" "${WARN[@]}" -O2 -g \
 		-c "$here/datagram_harness.c" -o "$OUT/$name/datagram_harness.o"
 	# The harness calls __gcov_dump through a weak declaration (libgcov on
@@ -70,7 +73,7 @@ build() { # name ieee-cflags...
 	case " $* " in *" --coverage "*) link_extra=(-Wl,-u,__gcov_dump) ;; esac
 	cc "$@" "${link_extra[@]}" -o "$OUT/$name/datagram_harness" "$OUT/$name/datagram_harness.o" \
 		"$OUT/$name/${fixture%.c}.o" "$OUT/$name/world_target.o" \
-		"$OUT/$name/sv_main_target.o" "$RUST_LIB" -lm
+		"$OUT/$name/sv_main_target.o" "$RUST_LIB" -lm -Wl,--gc-sections
 }
 
 # The harness forks twice per case, and fork() gets slower the longer one
