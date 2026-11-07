@@ -605,6 +605,12 @@ entity() SelectSpawnPoint =
 	{
 		dprint("dmatch start\n");
 		spot = lastspawn;
+		// [2026-10-28] jsH2+ (jsHexen2-progs e38568d) a map with no info_player_deathmatch never left the loop
+		// below (the runaway counter then killed the server). With at least one spot
+		// it always exits (its spot==lastspawn return), so skip it only when there are
+		// none and fall through to the info_player_start search below. (A wrap counter
+		// here also tripped on maps WITH spots, via the random skip - Papa.)
+		if (find(world, classname, "info_player_deathmatch"))
 		loop /*while (1)*/ {
 			spot = find(spot, classname, "info_player_deathmatch");
 			if (spot != world&&random()<0.5)//add some randomness

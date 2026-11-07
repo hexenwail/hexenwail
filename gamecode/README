@@ -21,6 +21,34 @@ and recording it here with the upstream ref.  See gamecode/vendor/README.md.
 Hexenwail fork (diverges from 1.29c):
 =====================================
 
+2026-10-28 [jsHexen2-progs 8e88d1f]:
+- Bumped jsHexen2-progs vendored tree to 8e88d1f and ported the corresponding
+  fixes into our gamecode (our .hc wins):
+    - portals/subs.hc: SUB_CalcAngleMove guards the zero-travel case (rotating
+      door blocked at endpoint no longer freezes for good); jsHexen2-progs 26e6543.
+    - portals/rat.hc: rat jump no longer deletes the rat via the walkmove failure
+      branch; jsHexen2-progs 6fd1e2e.
+    - portals/damage.hc: added DeferChainedExplosion() and wired it into Killed's
+      pusher and post-damage branches, deferring chained explosive deaths a frame
+      to stop stack overflow crashes and skipped blast victims; jsHexen2-progs 922564c.
+    - portals/explode.hc: MultiExplode and DarkExplosion clear takedamage before
+      their blast, stopping explosions firing at the world origin; jsHexen2-progs a51d7e1.
+    - portals/client.hc: SelectSpawnPoint skips the DM spot search entirely on a map
+      with no info_player_deathmatch, preventing an infinite loop from killing the
+      server; jsHexen2-progs e507ce9, refined by e38568d (pre-search existence check
+      replaces the earlier wrap counter, which tripped on maps WITH spots).
+    - portals/lightwp.hc: Tempest Staff charge light uses EF_BRIGHTLIGHT with an
+      EF_TORCHLIGHT ownership guard; lefty resets on add. Fixes a stray white light
+      after the torch gutters out; jsHexen2-progs 68cc25e and e2e0748.
+    - portals/warhamer.hc: ThrowHammerReturn no longer plays weappkup.wav, since the
+      tomed hammer returns on every swing and the select frames already carry the
+      catch cue; jsHexen2-progs 3582715.
+- MeatChunks shatter debris (portals/chunk.hc) and single-player respawn queueing
+  (portals/Client.hc) were deliberately NOT taken: upstream reverted their own
+  versions (8e88d1f and 8043d2c respectively).
+- ident.hc (h2, hw, portals, siege): restamped HexenwailGamecode_YYYYMMDD from
+  20260815 to 20261028.
+
 2026-08-15 [c562af1be, d0f4a5054]:
 - ident.hc (h2, hw, portals, siege): NEW.  Defines HexenwailGamecode_YYYYMMDD(),
   a marker function that is never called, so the engine can tell whether the

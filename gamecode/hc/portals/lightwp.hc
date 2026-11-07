@@ -350,17 +350,32 @@ void lightning_fire_normal (void)
 		self.wfs = advanceweaponframe($normal1,$normal16);
 		if(self.weaponframe==$normal2)
 		{//FIXME:  WHY THE FUCK CAN'T I SET DRAWFLAGS?!!!!
-			if(self.effects&EF_DIMLIGHT)
+			// [2026-10-28] jsH2+ (jsHexen2-progs 68cc25e, e2e0748) the charge
+			// light is EF_BRIGHTLIGHT (white, like the tome flashes) instead of
+			// EF_DIMLIGHT (the torch's orange). The staff and the torch no longer
+			// share a bit at all - the original light-theft bug class is gone at
+			// the root. lefty ownership + EF_TORCHLIGHT guard protect a full-blaze
+			// torch's BRIGHT. ...except the full-blaze torch marks itself with
+			// that same BRIGHT bit, so a guttering torch made the staff keep its
+			// own light, and once the torch died nothing removed it - a stray
+			// white light. The strips below now defer only to a torch in full
+			// blaze (EF_TORCHLIGHT, set exactly while it owns BRIGHT), and lefty
+			// is reset when the staff adds the light, so a stale lefty from a
+			// weapon switch can't make the staff skip its own cleanup.
+			if(self.effects&EF_BRIGHTLIGHT)
 				self.lefty=TRUE;
 			else
-				self.effects(+)EF_DIMLIGHT;
+			{
+				self.effects(+)EF_BRIGHTLIGHT;
+				self.lefty=FALSE;
+			}
 //			self.drawflags(+)MLS_ABSLIGHT;
 //			self.abslight=(self.weaponframe - $normal1)/15;
 		}
 		else if(self.weaponframe==$normal16)
 		{
-			if(!self.lefty)
-				self.effects(-)EF_DIMLIGHT;
+			if(!self.lefty && !(self.effects&EF_TORCHLIGHT))
+				self.effects(-)EF_BRIGHTLIGHT;
 			else
 				self.lefty=FALSE;
 //			self.drawflags(-)MLS_ABSLIGHT;
@@ -371,10 +386,10 @@ void lightning_fire_normal (void)
 	self.last_attack=time;
 	if(self.artifact_active&ART_TOMEOFPOWER)
 	{
-		if(self.effects&EF_DIMLIGHT)
+		if(self.effects&EF_BRIGHTLIGHT)
 		{
 			if(!self.lefty)
-				self.effects(-)EF_DIMLIGHT;
+				self.effects(-)EF_BRIGHTLIGHT;
 			else
 				self.lefty=FALSE;
 		}
@@ -385,10 +400,10 @@ void lightning_fire_normal (void)
 			(!self.button0&&self.weaponframe==$normal16)
 			)
 	{
-		if(self.effects&EF_DIMLIGHT)
+		if(self.effects&EF_BRIGHTLIGHT)
 		{
 			if(!self.lefty)
-				self.effects(-)EF_DIMLIGHT;
+				self.effects(-)EF_BRIGHTLIGHT;
 			else
 				self.lefty=FALSE;
 		}

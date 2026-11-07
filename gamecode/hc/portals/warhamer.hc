@@ -55,7 +55,12 @@ void()warhammer_select;
 
 void ThrowHammerReturn (void)
 {
-	sound(self.controller, CHAN_ITEM, "weapons/weappkup.wav",1, ATTN_NORM);
+// [2026-10-28] jsH2+ (jsHexen2-progs 3582715) no weapon-pickup sound on the catch: with
+// the Tome of Power the hammer is thrown and returns on every swing, so weappkup.wav
+// played on every attack and read as picking up a new weapon. Raven's own note below
+// planned the select frames for the catch, which warhammer_select already plays - that
+// is the catch cue.
+//	sound(self.controller, CHAN_ITEM, "weapons/weappkup.wav",1, ATTN_NORM);
 //	if(self.controller.weapon==IT_WEAPON1)
 // Only play selection if they're still on weapon1
 //Or, if using another weapon, play the select frames,

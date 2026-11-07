@@ -97,6 +97,14 @@ float player_see_me;
 			thinktime self : 0.5;
 			self.velocity=v_forward*200+'0 0 150';
 			self.flags(-)FL_ONGROUND;
+			// [2026-10-28] jsH2+ (jsHexen2-progs 6fd1e2e) Let the leap happen: the
+			// walkmove at the bottom of this function refuses to move anything
+			// that is not on the ground, and its failure branch deletes the rat
+			// -- so in vanilla every rat vanished in the same think it jumped.
+			// The next think (0.5s, set above) runs after it has landed; one that
+			// comes down on top of another rat is still not on the ground then,
+			// and is removed by that same branch as before.
+			return;
 		}
 	}
 
