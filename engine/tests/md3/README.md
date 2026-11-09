@@ -47,7 +47,7 @@ enhanced-model path picks it up:
 ```bash
 mkdir -p ~/hexen2/md3test/models
 cp engine/tests/md3/quad.md3 ~/hexen2/md3test/models/barrel.md3
-glhexen2 -basedir ~/hexen2 -game md3test +developer 1 \
+hexenwail -basedir ~/hexen2 -game md3test +developer 1 \
          +r_enhancedmodels 1 +r_enhancedmodels_priority md3 +map demo1
 ```
 

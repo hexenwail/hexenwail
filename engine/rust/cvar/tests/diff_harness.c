@@ -1346,7 +1346,7 @@ static void run_case(const char *what, void (*scenario)(void))
 
 int main(void)
 {
-	printf("cvar differential harness: the C original as glhexen2 compiles it "
+	printf("cvar differential harness: the C original as hexenwail compiles it "
 		"and the Rust module\n");
 
 	layout_check();

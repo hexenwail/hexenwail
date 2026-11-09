@@ -1024,7 +1024,7 @@ static void Mod_UploadBrushTexture (texture_t *tx, const char *modelname)
 			// Fall back to internal BSP texture
 			int tex_flags = TEX_MIPMAP | TEX_EMBEDDED_MIPS;
 			// Check for fence texture (name starts with '{')
-			// Per Spoike: index 255 is alpha=0, glhexen2 also uses index 0
+			// Per Spoike: index 255 is alpha=0, hexenwail also uses index 0
 			if (tx->name[0] == '{')
 				tex_flags |= (TEX_ALPHA | TEX_HOLEY | TEX_FENCE);  // Enable alpha testing and binary transparency
 			tx->gl_texturenum = GL_LoadTexture(tx->name, (byte *)(tx+1), tx->width, tx->height, tex_flags);

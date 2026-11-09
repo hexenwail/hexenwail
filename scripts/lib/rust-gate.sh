@@ -12,15 +12,15 @@
 
 # rust_gate_engine_build WORKDIR
 #
-# Prints the path of a CMake build of glhexen2, h2ded and hwsv.  With
+# Prints the path of a CMake build of hexenwail, h2ded and hwsv.  With
 # ENGINE_BUILD set (scripts/check-rust.sh sets it) that build is reused as is;
 # otherwise one is configured and built under WORKDIR/build.  Build output
 # goes to WORKDIR/build.log, so stdout carries the path alone.
 rust_gate_engine_build() {
 	local work=$1
 	if [ -n "${ENGINE_BUILD:-}" ]; then
-		[ -x "$ENGINE_BUILD/bin/glhexen2" ] || {
-			echo "error: ENGINE_BUILD=$ENGINE_BUILD has no bin/glhexen2" >&2
+		[ -x "$ENGINE_BUILD/bin/hexenwail" ] || {
+			echo "error: ENGINE_BUILD=$ENGINE_BUILD has no bin/hexenwail" >&2
 			return 1
 		}
 		printf '%s\n' "$ENGINE_BUILD"
@@ -50,15 +50,15 @@ rust_gate_engine_build() {
 #     -DUSE_CRC_RS=OFF -DUSE_LINK_OPS_RS=OFF -DUSE_MSG_IO_RS=OFF \
 #     -DUSE_INFO_STR_RS=OFF -DUSE_STRLCPY_RS=OFF -DUSE_STRLCAT_RS=OFF \
 #     -DUSE_HUFFMAN_RS=OFF -DUSE_WAD_RS=OFF
-#   cmake --build /tmp/c-ref/build -j"$(getconf _NPROCESSORS_ONLN)" --target glhexen2 h2ded
-#   OFF_BIN=/tmp/c-ref/build/bin/glhexen2 ./scripts/check-rust-hashindex.sh --engine
+#   cmake --build /tmp/c-ref/build -j"$(getconf _NPROCESSORS_ONLN)" --target hexenwail h2ded
+#   OFF_BIN=/tmp/c-ref/build/bin/hexenwail ./scripts/check-rust-hashindex.sh --engine
 rust_gate_reference_bin() {
 	if [ -z "${OFF_BIN:-}" ] || [ ! -x "$OFF_BIN" ]; then
-		echo "error: --engine needs OFF_BIN=<a C-only glhexen2> to compare against;" >&2
+		echo "error: --engine needs OFF_BIN=<a C-only hexenwail> to compare against;" >&2
 		echo "       see rust_gate_reference_bin in scripts/lib/rust-gate.sh" >&2
 		return 1
 	fi
-	# run_engine_smoke.sh also runs the h2ded next to each glhexen2.
+	# run_engine_smoke.sh also runs the h2ded next to each hexenwail.
 	[ -x "$(dirname "$OFF_BIN")/h2ded" ] || {
 		echo "error: no h2ded next to OFF_BIN; build the reference with" >&2
 		echo "       -DBUILD_DEDICATED=ON (see scripts/lib/rust-gate.sh)" >&2

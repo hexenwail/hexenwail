@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Build engine/h2shared/cvar.c the way glhexen2 compiles it -- -DGLQUAKE, with
+# Build engine/h2shared/cvar.c the way hexenwail compiles it -- -DGLQUAKE, with
 # engine/hexen2 and engine/h2shared ahead of common/ on the include path -- with
 # every exported name renamed so it can share a binary with the Rust cvar
 # module, and compare the two against each other.
@@ -68,7 +68,7 @@ RENAME=(
 	-DCvar_WriteVariables=c_Cvar_WriteVariables
 )
 
-echo "== compiling the C original as glhexen2 does (-DGLQUAKE) =="
+echo "== compiling the C original as hexenwail does (-DGLQUAKE) =="
 cc "${INCS[@]}" "${CFLAGS[@]}" -DGLQUAKE "${RENAME[@]}" \
 	-c "$engine/h2shared/cvar.c" -o "$OUT/cvar_c.o"
 

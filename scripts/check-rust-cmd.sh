@@ -136,7 +136,7 @@ done < <(grep -E '^checked [0-9]+ expectations, [0-9]+ failures, [0-9]+ cases, [
 echo "  $(grep -E '^checked ' "$diff_log" | tr '\n' ';')"
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 3. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -162,11 +162,11 @@ echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} functions and ${#accessors
 
 echo
 echo "== 5. exactly one cmd definition, and the predicates, in every target =="
-# cmd.c is compiled into all three: COMMON_SOURCES for glhexen2 and h2ded,
+# cmd.c is compiled into all three: COMMON_SOURCES for hexenwail and h2ded,
 # HWSV_SOURCES for hwsv, with the SERVERONLY guard inside it.  So every target
 # has callers and every target must define the whole surface exactly once, plus
 # the per-target predicates engine_rs_attach compiles in.
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do

@@ -3,7 +3,7 @@
 #
 # check-rust-cvar.sh -- gate for the Rust port of engine/h2shared/cvar.c.
 #
-# The differential half compiles the C original exactly as glhexen2 compiles it
+# The differential half compiles the C original exactly as hexenwail compiles it
 # (-DGLQUAKE, the Hexen II include order) with all twenty-five exported names
 # renamed, links it beside the Rust module into one binary, and compares the two
 # after every call: the list order as Cvar_FindVarAfter reports it, every field
@@ -28,7 +28,7 @@
 # (Cvar_Init registers the console commands and every subsystem registers its
 # own variables), so an ON/OFF console diff reaches the port; it resolves the
 # demo data and Xvfb out of nix itself, so it needs network (or a populated
-# store) and a C-only reference glhexen2.
+# store) and a C-only reference hexenwail.
 #
 # Requires cc, cargo/rustc, cmake and nm -- run inside `nix develop`.
 #
@@ -81,7 +81,7 @@ cargo build --release --offline \
 	--features cvar
 
 echo
-echo "== 2. differential harness: the C as glhexen2 compiles it, and Rust =="
+echo "== 2. differential harness: the C as hexenwail compiles it, and Rust =="
 diff_log="$work/diff.log"
 set +e
 RUST_LIB="$crate/target/release/libengine_rs.a" \
@@ -125,7 +125,7 @@ fi
 echo "  $cases cases, $bytes trace bytes compared"
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 3. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -151,10 +151,10 @@ echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} functions and ${#accessors
 
 echo
 echo "== 5. exactly one cvar definition in every target =="
-# cvar.c is compiled into all three: COMMON_SOURCES for glhexen2 and h2ded,
+# cvar.c is compiled into all three: COMMON_SOURCES for hexenwail and h2ded,
 # HWSV_SOURCES for hwsv, with no conditional arm.  So every target has callers
 # and every target must define the whole surface exactly once.
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
@@ -183,7 +183,7 @@ if [ "$run_engine" -eq 1 ]; then
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$engine_build/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/hexenwail" \
 	OFF_BIN="$(rust_gate_reference_bin)" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \

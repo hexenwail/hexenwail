@@ -31,7 +31,7 @@
 #   nix build .#demodata  -o result-demodata
 #   ./scripts/quit-smoke.sh
 #
-# Environment: ENGINE   (default ./result/bin/glhexen2)
+# Environment: ENGINE   (default ./result/bin/hexenwail)
 #              DEMODATA (default ./result-demodata/share/hexenwail)
 #              LIMIT    seconds to allow for the whole run (default 120)
 #              OUT      work dir (default a mktemp dir, kept on failure)
@@ -39,7 +39,7 @@
 set -u
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-ENGINE=${ENGINE:-$ROOT/result/bin/glhexen2}
+ENGINE=${ENGINE:-$ROOT/result/bin/hexenwail}
 DEMODATA=${DEMODATA:-$ROOT/result-demodata/share/hexenwail}
 LIMIT=${LIMIT:-120}
 OUT=${OUT:-$(mktemp -d "${TMPDIR:-/tmp}/quit-smoke.XXXXXX")}

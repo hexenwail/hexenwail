@@ -2,14 +2,14 @@
 //
 // Differential harness for engine/h2shared/wad.c and the Rust wad module.
 //
-// The C original is compiled exactly as glhexen2 compiles it -- -DGLQUAKE, the
+// The C original is compiled exactly as hexenwail compiles it -- -DGLQUAKE, the
 // Hexen II include order -- and every exported name is renamed with a c_ prefix
 // so the Rust module can define the unprefixed ABI in the same binary.  The two
 // are driven through one table of calls and must agree byte for byte.
 //
 // Why one C variant is enough here.  wad.c is in COMMON_SOURCES and is removed
 // again for h2ded ("gfx.wad lumps are renderer-only data",
-// engine/CMakeLists.txt:1308); HWSV_SOURCES never lists it.  glhexen2 is
+// engine/CMakeLists.txt:1308); HWSV_SOURCES never lists it.  hexenwail is
 // therefore the only target that compiles it, and there is no second variant to
 // reconcile.  The file has no #ifdefs of its own.
 //
@@ -1153,7 +1153,7 @@ static void run_case(const char *what, void (*scenario)(void))
 
 int main(void)
 {
-	printf("wad differential harness: the C as glhexen2 compiles it (-DGLQUAKE) "
+	printf("wad differential harness: the C as hexenwail compiles it (-DGLQUAKE) "
 		"and the Rust module\n");
 
 	struct_layout();

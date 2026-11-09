@@ -189,7 +189,7 @@ extern "C" {
 pub mod quakefs;
 
 // net_udp_hw is HexenWorld's transport.  Its C original is compiled into
-// glhexen2 and hwsv only, and net.h renames every symbol of it in the client,
+// hexenwail and hwsv only, and net.h renames every symbol of it in the client,
 // so the module exports the unambiguous HWNET_* spelling and the per-target C
 // shim owns the C-visible storage and the plain NET_* names hwsv uses; see the
 // module header.
@@ -199,7 +199,7 @@ pub mod net_udp_hw;
 // HexenWorld's channel layer: the packet header, the reliable queue and the
 // bandwidth choke above the transport.  It shares the sizebuf ABI (net_message
 // and the channel's own buffers) and the cvar ABI (its two cvars), and like the
-// transport it is built into glhexen2 and hwsv only.
+// transport it is built into hexenwail and hwsv only.
 #[cfg(feature = "net_chan")]
 pub mod net_chan;
 

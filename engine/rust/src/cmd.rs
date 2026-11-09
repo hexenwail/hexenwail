@@ -43,7 +43,7 @@
 //    Two arms of the C are deliberately NOT reproduced:
 //
 //      * Cmd_ForwardToServer() sits under H2W && !SERVERONLY, a configuration
-//        no target in this tree builds (glhexen2 is GLQUAKE + H2W_INTEGRATED,
+//        no target in this tree builds (hexenwail is GLQUAKE + H2W_INTEGRATED,
 //        never H2W), so referencing it would be an undefined symbol in the
 //        targets the archive is linked into -- the #233 rule.  Like info_str's
 //        never-compiled client variant, it is documented rather than ported.

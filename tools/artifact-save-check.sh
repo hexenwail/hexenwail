@@ -26,7 +26,7 @@
 # Usage:
 #   tools/artifact-save-check.sh <basedir with retail data1> [outdir]
 # Env:
-#   ENGINE      engine binary (default ./result/bin/glhexen2)
+#   ENGINE      engine binary (default ./result/bin/hexenwail)
 #   OLD_ENGINE  optional pre-r11 binary for case 4
 #   MAP         map to start on (default demo1)
 #
@@ -37,7 +37,7 @@ set -u
 
 BASE=$(readlink -f "${1:?usage: $0 <basedir> [outdir]}")
 OUT=${2:-/tmp/artifact-save-check}
-ENGINE=$(readlink -f "${ENGINE:-./result/bin/glhexen2}")
+ENGINE=$(readlink -f "${ENGINE:-./result/bin/hexenwail}")
 MAP=${MAP:-demo1}
 USERDIR=$OUT/userdir
 SAVES=$USERDIR/data1

@@ -37,10 +37,10 @@
 # aborting stub.  The tree is malloc'd, so no Hunk_* stub is needed.
 #
 # The CMake half checks the engine build every gate shares
-# (scripts/lib/rust-gate.sh).  huffman.c used to be compiled into glhexen2
+# (scripts/lib/rust-gate.sh).  huffman.c used to be compiled into hexenwail
 # through HW_CLIENT_NET_SOURCES and into hwsv through HWSV_SOURCES, and h2ded
 # never compiled it at all.  So the build must define each symbol exactly once
-# in glhexen2 and hwsv and at most once in h2ded, with no huffman.c objects
+# in hexenwail and hwsv and at most once in h2ded, with no huffman.c objects
 # anywhere.
 #
 # hw_utils is deliberately out of scope: hwterm and hwrcon compile
@@ -129,7 +129,7 @@ cargo build --release --offline \
 	--features hashindex,mathlib,sizebuf,crc,link_ops,msg_io,info_str,huffman
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 3. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -160,13 +160,13 @@ echo "  no huffman.c object in the build (the Rust archive is the only definitio
 
 echo
 echo "== 5. exactly one definition where the C original is reachable =="
-# glhexen2 compiles huffman.c through HW_CLIENT_NET_SOURCES and hwsv through
+# hexenwail compiles huffman.c through HW_CLIENT_NET_SOURCES and hwsv through
 # HWSV_SOURCES, and both link the Rust archive, so each must end up with
 # exactly one definition of every name.  h2ded never compiles it and has no
 # caller, so a definition there is the archive member being pulled in for
 # another port -- allowed, but never more than one.
 for sym in "${symbols[@]}"; do
-	for bin in glhexen2 hwsv; do
+	for bin in hexenwail hwsv; do
 		path="$engine_build/bin/$bin"
 		[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 		n=$(nm "$path" | grep -cE " [Tt] $sym\$" || true)
@@ -181,7 +181,7 @@ for sym in "${symbols[@]}"; do
 		exit 1
 	fi
 done
-echo "  glhexen2 and hwsv: ${#symbols[@]}/${#symbols[@]} symbols exactly once"
+echo "  hexenwail and hwsv: ${#symbols[@]}/${#symbols[@]} symbols exactly once"
 echo "  h2ded: every symbol at most once (it never compiles huffman.c)"
 
 echo

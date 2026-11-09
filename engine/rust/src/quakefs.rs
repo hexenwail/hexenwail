@@ -13,7 +13,7 @@
 // 1. The client half calls symbols no dedicated binary has.  Host_ClearMemory,
 //    CL_Disconnect, Draw_ReInit, TexMgr_NewGame, BGM_Stop, M_BuildBindList,
 //    VID_Lock, Cmd_StartupScript, Con_ShowList and the client_state_t `cls` are
-//    compiled into glhexen2 and the web client and into nothing else, so a
+//    compiled into hexenwail and the web client and into nothing else, so a
 //    direct reference here would be an undefined symbol in h2ded and hwsv --
 //    one archive, one object, every extern must resolve everywhere (issue
 //    #233).  Every such site is a small contiguous statement group and goes

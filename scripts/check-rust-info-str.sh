@@ -21,7 +21,7 @@
 # (scripts/lib/rust-gate.sh), and covers the shape this port introduced: info_str.c is
 # compiled into HWSV_SOURCES alone, so the C symbols exist in hwsv and nowhere
 # else, while the Rust archive is linked into all three targets.  hwsv must
-# therefore define each of the six exactly once, and glhexen2 and h2ded at most
+# therefore define each of the six exactly once, and hexenwail and h2ded at most
 # once -- whether the unreferenced member is pulled in depends on the linker.
 #
 # There is deliberately no --engine smoke arm.  The hwsv smoke CI runs dies at
@@ -104,7 +104,7 @@ fi
 echo "  $check_log"
 
 echo
-echo "== 2. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 2. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -134,11 +134,11 @@ echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} symbols and 2/2 accessors 
 # Cvar_FindVar instead of the global.  The consolidated archive is one object
 # member, so any target pulling it for any other port inherits every undefined
 # symbol in it -- and only hwsv defines sv_highchars.  A direct reference here
-# is a link error in glhexen2 and h2ded, so it must never come back.
+# is a link error in hexenwail and h2ded, so it must never come back.
 stray_hwsv_only=$(nm -u "$archive" 2>/dev/null | grep -cE " U sv_highchars\$" || true)
 if [ "$stray_hwsv_only" -ne 0 ]; then
 	echo "FAIL: libengine_rs.a references the hwsv-only global sv_highchars;" >&2
-	echo "      glhexen2 and h2ded do not define it and will not link." >&2
+	echo "      hexenwail and h2ded do not define it and will not link." >&2
 	exit 1
 fi
 echo "  libengine_rs.a: no reference to the hwsv-only sv_highchars global"
@@ -157,7 +157,7 @@ for sym in "${symbols[@]}"; do
 	fi
 done
 echo "  hwsv: ${#symbols[@]}/${#symbols[@]} symbols exactly once"
-for bin in glhexen2 h2ded; do
+for bin in hexenwail h2ded; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do

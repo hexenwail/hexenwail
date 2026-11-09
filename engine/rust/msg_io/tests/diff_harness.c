@@ -4,7 +4,7 @@
 // module.
 //
 // msg_io.c is the one engine source compiled with different code per target:
-// hwsv compiles it with -DH2W and glhexen2/h2ded without, and the H2W build is
+// hwsv compiles it with -DH2W and hexenwail/h2ded without, and the H2W build is
 // the only one that defines MSG_WriteAngle16, MSG_WriteUsercmd,
 // MSG_ReadStringLine, MSG_ReadAngle16 and MSG_ReadUsercmd.  The consolidated
 // Rust static library is built once and linked into all three, so it defines

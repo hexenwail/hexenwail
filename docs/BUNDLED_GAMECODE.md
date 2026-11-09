@@ -496,7 +496,7 @@ Neither hole is exotic. Both are reachable from the shipped Mods menu.
 
 ### Worked example: `-game sot` → Mods menu → "Hexen II"
 
-1. **Launch `glhexen2 -game sot`.** `FS_AddGameDirectory("sot")` pushes the mod
+1. **Launch `hexenwail -game sot`.** `FS_AddGameDirectory("sot")` pushes the mod
    at a fresh `path_id` and sets `fs_gamedir_nopath = "sot"`.
 2. **Map spawn.** `PR_LoadProgs()` at `sv_main.c :: SV_SpawnServer()`. `PR_GetProgFilename()`
    returns `"progs.dat"` — `sot` ships no `maplist.txt` (F8), so the maplist
@@ -717,7 +717,7 @@ it could **override the player**, 10–11 ways it could **degrade badly**, and
    Any of `-portals`, `-missionpack`, `-h2mp`, `-game <dir>` or `-mod <dir>`
    sets `check_portals` (`quakefs.c :: FS_Init()` — the `#else` arm is the live
    one, since no build in this tree defines `H2MP` or `H2W`), and `portals` is
-   then pushed onto the path (`quakefs.c :: FS_Init()`). So `glhexen2 -game
+   then pushed onto the path (`quakefs.c :: FS_Init()`). So `hexenwail -game
    mappack` yields `data1`, `portals`, `mappack`, and a mappack with no gamecode
    of its own resolves `progs.dat` **from `portals`** — not from `data1`.
 
@@ -958,7 +958,7 @@ a lost inventory or a broken objective is not.
 
 | # | Check |
 |---|---|
-| K1 | unzip the Linux artifact to a clean directory, run from **outside** it, with `-basedir` pointing at a game tree that is *not* the extracted directory (`cd /tmp && /path/to/linux-x86_64/bin/glhexen2 -basedir /somewhere/else`) — this is the row that proves F5, since `basedir` will be wrong by construction. Without `-basedir` the engine does not start at all; see the results below |
+| K1 | unzip the Linux artifact to a clean directory, run from **outside** it, with `-basedir` pointing at a game tree that is *not* the extracted directory (`cd /tmp && /path/to/linux-x86_64/bin/hexenwail -basedir /somewhere/else`) — this is the row that proves F5, since `basedir` will be wrong by construction. Without `-basedir` the engine does not start at all; see the results below |
 | K2 | ~~same for `linux-x86_64-nixos`~~ — n/a, that tree is no longer built into `.#release` (uhexen2-2tia). The flake install path is checked instead: `nix run` must print a `Gamecode:` line pointing inside the store, not at the player's `data1/` (uhexen2-9die) |
 | K2a | `.#nixos` and `.#h2ded` must carry **no** `share/hexenwail` at all — an empty one shadows `PR_FindBundleDir()`'s layer 3 |
 | K2b | a `.hc` edit must leave `.#nixos.drvPath` and `.#h2ded.drvPath` unchanged while moving `.#gamecode.drvPath` (uhexen2-r32l) |
@@ -1080,7 +1080,7 @@ spawn from the new gamedir's `autoexec.cfg`, which the switch reaches via its
 closing `exec hexen.rc`.
 
 **K1's wording needs an edit, not its intent.** Taken literally — `cd /tmp &&
-/path/to/linux-x86_64/bin/glhexen2` — the engine never starts: `basedir` defaults
+/path/to/linux-x86_64/bin/hexenwail` — the engine never starts: `basedir` defaults
 to the working directory, `/tmp` has no `data1`, and it exits with "Unable to
 find a proper Hexen II installation". Pass `-basedir` at a game tree that is not
 the extracted directory. That is a stronger test than the row asks for, since

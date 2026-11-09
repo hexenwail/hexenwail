@@ -56,4 +56,4 @@ if [ ! -f "${PAK}" ]; then
     fi
 fi
 
-exec /app/bin/glhexen2 "$@"
+exec /app/bin/hexenwail "$@"

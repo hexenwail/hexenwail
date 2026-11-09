@@ -30,7 +30,7 @@
 #   nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
 #     nixpkgs#bubblewrap nixpkgs#util-linux --command \
 #     scripts/hw-cmd-check.sh --basedir ~/hexen2 \
-#       [--client result/bin/glhexen2] [--server result-1/bin/hwsv] \
+#       [--client result/bin/hexenwail] [--server result-1/bin/hwsv] \
 #       [--port 26972] [--map hwdm1] [--keep DIR]
 #
 # Exit status 0 on pass, 1 on any failed assertion, 2 on bad usage, 77 skip.
@@ -41,7 +41,7 @@ set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 BASEDIR=""
-CLIENT="$ROOT/result/bin/glhexen2"
+CLIENT="$ROOT/result/bin/hexenwail"
 SERVER="$ROOT/result-1/bin/hwsv"   # 2nd link of: nix build .#default .#hwsv-bundled
 PORT=26972
 MAP=hwdm1

@@ -150,7 +150,7 @@ fi
 echo "  ratio ${mean_ratio}x, within the ${BENCH_BUDGET_RATIO}x budget"
 
 echo
-echo "== 4. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 4. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -169,7 +169,7 @@ echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} functions and ${#accessors
 
 echo
 echo "== 6. exactly one zone definition in every target =="
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}" "${target_fns[@]}"; do

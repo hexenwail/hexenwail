@@ -17,7 +17,7 @@
 # harness.  So a difference in the traces is a difference in quakefs.
 #
 # ARMS.  The C original and the per-target shim are compiled with one of:
-#   client      -DGLQUAKE -DH2W_INTEGRATED   (glhexen2)
+#   client      -DGLQUAKE -DH2W_INTEGRATED   (hexenwail)
 #   serveronly  -DSERVERONLY                 (h2ded)
 #   h2w         -DH2W -DSERVERONLY           (hwsv)
 # The Rust module is the same code in all three; what changes is the shim it

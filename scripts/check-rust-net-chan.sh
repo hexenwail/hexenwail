@@ -153,7 +153,7 @@ done
 echo "  ${#formats[@]} format strings present in both"
 
 echo
-echo "== 4. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 4. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -192,16 +192,16 @@ check_at_most_once() {
 	}
 }
 
-# glhexen2: H2W_INTEGRATED, so the renamed spellings, and the shim's storage
+# hexenwail: H2W_INTEGRATED, so the renamed spellings, and the shim's storage
 # for net_drop together with the transport's for the message buffers.
 for sym in "${hw_functions[@]}" "${hw_extra[@]}"; do
-	check_once "$engine_build/bin/glhexen2" "$sym" glhexen2
+	check_once "$engine_build/bin/hexenwail" "$sym" hexenwail
 done
-check_once "$engine_build/bin/glhexen2" hw_net_drop glhexen2
+check_once "$engine_build/bin/hexenwail" hw_net_drop hexenwail
 for sym in "${accessors[@]}"; do
-	check_once "$engine_build/bin/glhexen2" "$sym" glhexen2
+	check_once "$engine_build/bin/hexenwail" "$sym" hexenwail
 done
-echo "  glhexen2: ${#hw_functions[@]} HWNetchan_* functions, the variadic $(printf '%s' "${hw_extra[@]}"), hw_net_drop and ${#accessors[@]} accessors exactly once"
+echo "  hexenwail: ${#hw_functions[@]} HWNetchan_* functions, the variadic $(printf '%s' "${hw_extra[@]}"), hw_net_drop and ${#accessors[@]} accessors exactly once"
 
 # hwsv: the plain names the C calls, which the shim forwards, plus the
 # HWNetchan_* entry points the forwards reach.

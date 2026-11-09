@@ -4,7 +4,7 @@
  *
  * The mechanism is the per-target C shim decided on #233 (option (a)) and
  * already carried by zone_target.c and cmd_target.c.  One static library is
- * linked into glhexen2, h2ded and hwsv alike, but quakefs.c's client half
+ * linked into hexenwail, h2ded and hwsv alike, but quakefs.c's client half
  * calls symbols that exist in no dedicated binary at all -- Host_ClearMemory,
  * CL_Disconnect, Draw_ReInit, TexMgr_NewGame, BGM_Stop, M_BuildBindList,
  * VID_Lock, Cmd_StartupScript, Con_ShowList and the client_state_t `cls` -- so
@@ -46,7 +46,7 @@
  *==========================================================================*/
 
 /* Whether this target is the H2W build -- hwsv, and only hwsv in this tree:
- * glhexen2 is GLQUAKE + H2W_INTEGRATED and never H2W. */
+ * hexenwail is GLQUAKE + H2W_INTEGRATED and never H2W. */
 #if defined(H2W)
 
 int QuakeFS_TargetIsH2W (void)
@@ -84,7 +84,7 @@ int QuakeFS_TargetHasClientCommands (void)
 #endif	/* SERVERONLY */
 
 /* Whether this target is the H2W-integrated *client* -- H2W_INTEGRATED and
- * neither H2W nor SERVERONLY, which in this tree means native glhexen2 alone.
+ * neither H2W nor SERVERONLY, which in this tree means native hexenwail alone.
  * The wasm client does not define it either: CLIENT_DEFINITIONS only gains
  * H2W_INTEGRATED under USE_HEXENWORLD_CLIENT with the Emscripten build
  * excluded, so the web client takes quakefs.c's plain-Hexen II branch in

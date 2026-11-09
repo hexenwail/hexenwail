@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Build engine/h2shared/wad.c the way glhexen2 compiles it -- -DGLQUAKE, with
+# Build engine/h2shared/wad.c the way hexenwail compiles it -- -DGLQUAKE, with
 # engine/hexen2 and engine/h2shared ahead of common/ on the include path -- with
 # every exported name and all three exported globals renamed so it can share a
 # binary with the Rust wad module, and compare the two byte for byte.
 #
 # Only one C variant exists to compare against: wad.c is in COMMON_SOURCES and
-# is removed again for h2ded, and HWSV_SOURCES never lists it, so glhexen2 is
+# is removed again for h2ded, and HWSV_SOURCES never lists it, so hexenwail is
 # the only target that compiles it.  The file has no #ifdefs of its own.
 #
 # The Rust staticlib must have been built with the wad feature.  FS_LoadMallocFile,
@@ -45,7 +45,7 @@ RENAME=(
 	-Dwad_base=c_wad_base
 )
 
-echo "== compiling the C original as glhexen2 does (-DGLQUAKE) =="
+echo "== compiling the C original as hexenwail does (-DGLQUAKE) =="
 cc "${INCS[@]}" "${CFLAGS[@]}" -DGLQUAKE "${RENAME[@]}" \
 	-c "$engine/h2shared/wad.c" -o "$OUT/wad_c.o"
 

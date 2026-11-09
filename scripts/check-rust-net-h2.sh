@@ -42,7 +42,7 @@ grep -q '^dedicated driver tables: 40 entries/layout/function-pointer checks pas
   echo 'FAIL: dedicated table expectation floor changed' >&2; exit 1;
 }
 build=$(rust_gate_engine_build "$work")
-for tgt in glhexen2 h2ded; do
+for tgt in hexenwail h2ded; do
   if find "$build/CMakeFiles/$tgt.dir" -type f \
       \( -name 'net_bsd.c.o' -o -name 'net_udp.c.o' -o -name 'net_loop.c.o' \) | grep -q .; then
     echo "FAIL: $tgt still compiles a Hexen II transport C original" >&2
@@ -54,8 +54,8 @@ for tgt in glhexen2 h2ded; do
   done
 done
 for sym in Loop_Init Loop_Connect; do
-  n=$(nm -g --defined-only "$build/bin/glhexen2" | grep -cE " [A-Z] $sym\$" || true)
-  [ "$n" -eq 1 ] || { echo "FAIL: glhexen2 defines $sym $n times" >&2; exit 1; }
+  n=$(nm -g --defined-only "$build/bin/hexenwail" | grep -cE " [A-Z] $sym\$" || true)
+  [ "$n" -eq 1 ] || { echo "FAIL: hexenwail defines $sym $n times" >&2; exit 1; }
 done
 if nm -g --defined-only "$build/bin/h2ded" | grep -qE ' [A-Z] Loop_Init$'; then
   echo 'FAIL: h2ded unexpectedly exports loopback' >&2; exit 1;

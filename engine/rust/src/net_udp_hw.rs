@@ -34,7 +34,7 @@
 //    in the C and stay private here.
 //
 // 3. **The browser build does not contain this transport.**  net_udp.c is
-//    compiled into glhexen2 and hwsv only -- never h2ded, never Emscripten --
+//    compiled into hexenwail and hwsv only -- never h2ded, never Emscripten --
 //    so on wasm32 this module compiles to nothing and nothing references it.
 //    The `imp` module below is gated accordingly rather than shipping stubs
 //    that would pretend to send.

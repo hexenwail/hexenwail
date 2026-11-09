@@ -43,7 +43,7 @@ set -u
 [ $# -ge 6 ] || { sed -n '3,8p' "$0" >&2; exit 2; }
 OUT=$1; EV=$2; MAP=$3; PX=$4; PY=$5; PZ=$6
 BASEDIR=${7:-${BASEDIR:-$HOME/hexen2}}
-ENGINE=${ENGINE:-./result/bin/glhexen2}
+ENGINE=${ENGINE:-./result/bin/hexenwail}
 SAMPLES=${SAMPLES:-60}          # viewpos samples
 STRIDE=${STRIDE:-4}             # frames between samples (host_framerate 0.05)
 TIMEOUT=${TIMEOUT:-300}

@@ -1,6 +1,6 @@
 ---
 name: run-hexenwail
-description: Build, launch, drive and screenshot the Hexenwail (uHexen2) Hexen II engine headlessly. Use when asked to run, start, launch, play, test, smoke-test or screenshot the engine, to see a renderer/menu/HUD change on screen, or to exercise gamecode, maps, savegames, protocol, shaders or cvars without a display. Covers glhexen2 (GL client, under Xvfb), h2ded (dedicated server, no X at all), hwsv with a connected HexenWorld client, and the WebAssembly/PWA web client.
+description: Build, launch, drive and screenshot the Hexenwail (uHexen2) Hexen II engine headlessly. Use when asked to run, start, launch, play, test, smoke-test or screenshot the engine, to see a renderer/menu/HUD change on screen, or to exercise gamecode, maps, savegames, protocol, shaders or cvars without a display. Covers hexenwail (GL client, under Xvfb), h2ded (dedicated server, no X at all), hwsv with a connected HexenWorld client, and the WebAssembly/PWA web client.
 ---
 
 # Running Hexenwail
@@ -41,7 +41,7 @@ when present and runs on `-userdir` alone without it (`NO_BWRAP=1` forces that).
 ## Build
 
 ```bash
-nix build .#default        -o result            # glhexen2 + bundled gamecode
+nix build .#default        -o result            # hexenwail + bundled gamecode
 nix build .#h2ded-bundled  -o result-h2ded      # dedicated server
 nix build .#demodata       -o result-demodata   # Raven's free 1997 demo data
 ```
@@ -61,7 +61,7 @@ CI's own smoke step runs. `-help` is handled before any SDL or video init:
 
 ```bash
 SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \
-  timeout -k 5 10 ./result/bin/glhexen2 -help
+  timeout -k 5 10 ./result/bin/hexenwail -help
 ```
 
 ## Test
@@ -216,7 +216,7 @@ nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubble
 ~75 s. Confirm the commands actually landed by grepping the log for their
 echoes (`godmode ON`, `]chase_active 1`) before trusting the PNGs.
 
-Other environment: `ENGINE=` (default `./result/bin/glhexen2`), `W=`/`H=`
+Other environment: `ENGINE=` (default `./result/bin/hexenwail`), `W=`/`H=`
 (default 800x600), `WORK=` (sandboxed HOME), `DISPLAY_N=`. Each run claims its
 **own** X display atomically via Xvfb, so runs may be started concurrently; a
 run that finds its display occupied aborts rather than screenshotting someone
@@ -259,7 +259,7 @@ are under `/tmp/out-hw/client/`, the server console is `/tmp/out-hw/server.log`.
   mean wire particle type 28 is drawn as red fire again. The player reaches a
   wall after about four frames, so judge the early ones.
 - To compare against an older client, build it with `-o result-old` and pass
-  `ENGINE=./result-old/bin/glhexen2`.
+  `ENGINE=./result-old/bin/hexenwail`.
 
 ## Run: human path
 
@@ -314,9 +314,9 @@ a window and blocks.
   `headless-drive.sh` or `serve.sh` does not invalidate anyone's cached build.
   Keep it that way; anything that must run during a build belongs in `scripts/`.
 - **`nix build` without `-o`/`--no-link` repoints `./result`.** The GUI lane
-  defaults to `ENGINE=./result/bin/glhexen2`, so building any other output
+  defaults to `ENGINE=./result/bin/hexenwail`, so building any other output
   (`.#gamecode`, `.#h2ded`, …) bare will silently leave the driver pointing at
-  a derivation that has no `bin/glhexen2`. Always pass `-o <name>` or
+  a derivation that has no `bin/hexenwail`. Always pass `-o <name>` or
   `--no-link`.
 - Both drivers `rm -rf` their outdir on start and bind a throwaway `$HOME` over
   the real one, so a run cannot touch your real user directory

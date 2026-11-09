@@ -78,7 +78,7 @@ For Portal of Praevus, copy pak3.pak into the "portals" directory.
 
 Game binaries:
 
-   glhexen2  -  Linux
+   hexenwail  -  Linux
    hexenwail.exe  -  Windows
 
 
@@ -98,7 +98,7 @@ pack with Hexenwail: hexenwail.exe -portals
 1.3 Running the Game
 
     cd /home/myname/hexen2
-    ./glhexen2 [options]
+    ./hexenwail [options]
 
 Starts in windowed mode by default. Use -f for fullscreen, -portals
 for the mission pack.
@@ -204,8 +204,8 @@ OpenGL:
 3. MODS
 -------
 
-    ./glhexen2 -game fo4d
-    ./glhexen2 -portals -game somemod
+    ./hexenwail -game fo4d
+    ./hexenwail -portals -game somemod
 
 Notable mods:
   Fortress of Four Doors - fo4d.zip
@@ -223,7 +223,7 @@ Mods require the full retail version (not demo).
 
 * Dedicated server coop: skull wizards may become non-solid after
   blinking, Dark Pharaoh's staff may disappear, save loading buggy.
-  Does not occur with "glhexen2 -dedicated".
+  Does not occur with "hexenwail -dedicated".
 
 * Shadows are broken and disabled by default.
 

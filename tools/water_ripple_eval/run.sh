@@ -15,12 +15,12 @@
 #   nix shell nixpkgs#ericw-tools nixpkgs#xorg-server nixpkgs#xdotool \
 #     nixpkgs#imagemagick nixpkgs#bubblewrap --command \
 #     ./tools/water_ripple_eval/run.sh <outdir>
-# Environment: ENGINE (default ./result/bin/glhexen2), LIMIT (see lift_metric.py)
+# Environment: ENGINE (default ./result/bin/hexenwail), LIMIT (see lift_metric.py)
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 out=$(mkdir -p "$1" && cd "$1" && pwd)
-engine=$(readlink -f "${ENGINE:-./result/bin/glhexen2}")
+engine=$(readlink -f "${ENGINE:-./result/bin/hexenwail}")
 demo=$(readlink -f "$(nix build .#demodata --no-link --print-out-paths)/share/hexenwail")
 
 rm -rf "$out/map" "$out/base" "$out/shots"

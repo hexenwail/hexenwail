@@ -94,7 +94,7 @@ Options: `--scale 2|3|4` (default 4), `--upscaler realcugan|realesrgan` (default
 
 **Flatpak:** Drop your game data into `~/.var/app/io.github.hexenwail.hexenwail/.hexen2/`
 
-To launch a mod with portals data included: `glhexen2 -mod <modname>`
+To launch a mod with portals data included: `hexenwail -mod <modname>`
 
 ## Multiplayer
 

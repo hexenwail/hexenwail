@@ -6,7 +6,7 @@
  *
  * Hexen II only: HexenWorld's server has its own sv_main.c, and no
  * sv_protocol.  CMake compiles this into the targets that link the
- * sv_main_sound feature, glhexen2 and h2ded.
+ * sv_main_sound feature, hexenwail and h2ded.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  * Copyright (C) 2026 Hexenwail contributors.

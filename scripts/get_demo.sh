@@ -16,7 +16,7 @@
 #
 # Usage: scripts/get_demo.sh [destination]
 #   destination defaults to the current directory; "data1" is created inside
-#   it.  Point it at the directory holding the hexenwail/glhexen2 binary --
+#   it.  Point it at the directory holding the hexenwail binary --
 #   the engine prints that path as "basedir is: ..." on startup.
 
 set -eu

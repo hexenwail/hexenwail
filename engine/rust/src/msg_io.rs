@@ -13,7 +13,7 @@
 // 1. The C file is compiled twice, with different code.  hwsv compiles it with
 //    -DH2W, and that is the only build which defines MSG_WriteAngle16,
 //    MSG_WriteUsercmd, MSG_ReadStringLine, MSG_ReadAngle16 and
-//    MSG_ReadUsercmd; glhexen2 and h2ded compile it without, so those five
+//    MSG_ReadUsercmd; hexenwail and h2ded compile it without, so those five
 //    symbols do not exist in a Hexen II binary at all.  The consolidated
 //    static library is built once and linked into all three, so it cannot hold
 //    two definitions of one symbol, and this module defines the union instead.
@@ -23,7 +23,7 @@
 //    touch a usercmd_t are hexenworld/server/sv_user.c and sv_ents.c, and
 //    MSG_ReadStringLine's only caller is hexenworld/server/sv_main.c -- all
 //    three are hwsv-only.  The HexenWorld client half that *is* linked into
-//    glhexen2 (hexen2/cl_hw.c, built with H2W_INTEGRATED) writes and reads its
+//    hexenwail (hexen2/cl_hw.c, built with H2W_INTEGRATED) writes and reads its
 //    usercmds by hand, precisely so it does not need the H2W msg_io.
 //
 // 2. MSG_WriteUsercmd / MSG_ReadUsercmd therefore take the *HexenWorld*

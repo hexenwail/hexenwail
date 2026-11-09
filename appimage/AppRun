@@ -16,7 +16,7 @@
 # runs the demo fetch directly.
 
 HERE=$(dirname "$(readlink -f "$0")")
-BIN="$HERE/usr/bin/glhexen2"
+BIN="$HERE/usr/bin/hexenwail"
 GETDEMO="$HERE/usr/bin/get_demo.sh"
 USERDATA="${HOME}/.hexen2"
 

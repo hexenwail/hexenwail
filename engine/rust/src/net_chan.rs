@@ -29,7 +29,7 @@
 //    entry point Rust cannot define (point 4).
 //
 // 3. **The browser build does not contain it.**  net_chan.c is compiled into
-//    glhexen2 and hwsv only: no HexenWorld transport, no channel.  The `imp`
+//    hexenwail and hwsv only: no HexenWorld transport, no channel.  The `imp`
 //    module is gated the same way, so on wasm32 this file compiles to nothing
 //    rather than to stubs that would pretend to sequence packets.
 //

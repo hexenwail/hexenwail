@@ -4,7 +4,7 @@
 #
 # The differential half is a three-way comparison, because msg_io.c is the one
 # engine source compiled with different code per target: the harness builds the
-# C original twice, once as glhexen2/h2ded compile it (no H2W) and once as hwsv
+# C original twice, once as hexenwail/h2ded compile it (no H2W) and once as hwsv
 # does (-DH2W), and links both against the single Rust union.  That is the
 # evidence for the claim that the Rust module can define both variants at once,
 # and it covers golden packets per primitive, signed/unsigned boundaries, NaN
@@ -101,7 +101,7 @@ if [ "${#count}" -lt 3 ]; then
 fi
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 3. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -111,7 +111,7 @@ echo "== 4. exactly one msg_io definition per binary =="
 # from hexenworld/server, the rest from both -- so each must be present exactly
 # once.  A second definition is what "the staticlib cannot hold two variants"
 # would look like if the union were done wrong.
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
@@ -148,7 +148,7 @@ if [ "$run_engine" -eq 1 ]; then
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$engine_build/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/hexenwail" \
 	OFF_BIN="$reference" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \

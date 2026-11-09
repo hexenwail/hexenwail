@@ -17,7 +17,7 @@
 # and a tester running a differently laid-out build than users get defeats
 # the tester build's purpose, so both call this now.
 #
-# The Linux tree is linux-x86_64/ whole, never bin/glhexen2 alone: that cannot
+# The Linux tree is linux-x86_64/ whole, never bin/hexenwail alone: that cannot
 # start, because linux-fhs patchelfs the binary to rpath $ORIGIN/../lib and
 # bundles 36 shared objects there (uhexen2-3aet), and bin/ also carries
 # soundfont.sf2.  gamecode/ is a shared staging tree, not part of any platform

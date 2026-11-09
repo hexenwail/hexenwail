@@ -233,7 +233,7 @@ jobs:
             echo ""
             echo "### Downloads"
             echo ""
-            echo "- **Linux x86_64** — extract and run \`glhexen2\` from your Hexen II data directory"
+            echo "- **Linux x86_64** — extract and run \`hexenwail\` from your Hexen II data directory"
             echo "- **Linux Flatpak** — \`flatpak install hexenwail-*.flatpak\`, then place game data in \`~/.var/app/io.github.hexenwail.hexenwail/.hexen2/data1/\`"
             echo "- **Linux AppImage** — one file: \`chmod +x\` it and put it in your Hexen II folder (beside \`data1/\`), or keep game data in \`~/.hexen2/data1/\`; run it with \`--get-demo\` to fetch the free demo"
             echo "- **Windows x86_64** — extract anywhere, drop \`pak0.pak\`/\`pak1.pak\` into the included \`data1/\` folder, run \`hexenwail.exe\`"

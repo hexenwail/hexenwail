@@ -14,7 +14,7 @@
 //    one CMake source list -- HWSV_SOURCES, engine/CMakeLists.txt -- and hwsv
 //    is the only target built with SERVERONLY (and H2W).  Every Hexen II use of
 //    Info_* sits inside `#if defined(H2W)` (pr_cmds.c, gl_model.c, pr_edict.c,
-//    quakefs.c), so glhexen2 and h2ded never reference these symbols at all.
+//    quakefs.c), so hexenwail and h2ded never reference these symbols at all.
 //    The port therefore implements the SERVERONLY variant, and the fixture
 //    generator (info_str/tests/gen_fixtures.sh) compiles the C exactly as hwsv
 //    does, so the frozen values are the code that actually ships rather than
@@ -70,7 +70,7 @@ extern "C" {
     fn CON_Printf(flags: c_uint, fmt: *const c_char, ...);
 
     /// Declared in engine/h2shared/cvar.h, defined in cvar.c, which both
-    /// COMMON_SOURCES (glhexen2, h2ded) and HWSV_SOURCES compile -- so unlike
+    /// COMMON_SOURCES (hexenwail, h2ded) and HWSV_SOURCES compile -- so unlike
     /// the sv_highchars global it stands in, this symbol exists in every target
     /// that links this archive.
     fn Cvar_FindVar(var_name: *const c_char) -> *mut CvarC;

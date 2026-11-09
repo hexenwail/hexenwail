@@ -23,7 +23,7 @@
 #   pimped:  the model owns 0 dlights, mcache says NO_DLIGHT, and every other
 #            model's dlight count is unchanged (the flag reaches no one else)
 #
-# Engine: ENGINE (default ./result/bin/glhexen2).  Runs offscreen; on a box
+# Engine: ENGINE (default ./result/bin/hexenwail).  Runs offscreen; on a box
 # without a GPU set SDL_VIDEODRIVER=x11 under Xvfb instead.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -33,7 +33,7 @@ set -euo pipefail
 BASEDIR=${1:-$HOME/hexen2}
 MAP=${2:-courtyard}
 MODEL=${3:-models/flame7.mdl}
-ENGINE=${ENGINE:-./result/bin/glhexen2}
+ENGINE=${ENGINE:-./result/bin/hexenwail}
 WAITS=${WAITS:-150}
 BSP="$BASEDIR/sot/maps/$MAP.bsp"
 

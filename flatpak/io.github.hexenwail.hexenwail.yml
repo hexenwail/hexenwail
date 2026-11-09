@@ -184,8 +184,8 @@ modules:
       # fix took and stops it regressing silently a third time.
       - |
         for so in libvorbisfile.so.3 libopusfile.so.0 libxmp.so.4 libfluidsynth.so.3; do
-          grep -qa "$so" /app/bin/glhexen2 || {
-            echo "FATAL: glhexen2 did not link $so -- a codec was silently disabled"
+          grep -qa "$so" /app/bin/hexenwail || {
+            echo "FATAL: hexenwail did not link $so -- a codec was silently disabled"
             exit 1
           }
         done

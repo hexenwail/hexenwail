@@ -32,7 +32,7 @@
 # requires every line of the C original to have run under gcov.
 #
 # The CMake half proves the shared engine build links each exported symbol
-# exactly once in glhexen2 and h2ded; that hwsv defines the message functions
+# exactly once in hexenwail and h2ded; that hwsv defines the message functions
 # once, in its own sv_send.c, and the SV_Max* not at all; and that no Hexen
 # II sv_main.c object still defines any of them.
 #
@@ -83,7 +83,7 @@ for tool in cc gcov cargo cmake nm; do
 done
 
 step=1
-# E2 / slice E: SV_SpawnServer is the archive's in glhexen2 and h2ded and
+# E2 / slice E: SV_SpawnServer is the archive's in hexenwail and h2ded and
 # hwsv's own (HexenWorld's sv_init.c) in hwsv; SV_PrintMapCheck, the
 # C-variadic half of the checklist, is sv_main_variadic.c's, Hexen II only.
 spawn_symbols=(SV_SpawnServer SV_PrintMapCheck)
@@ -135,14 +135,14 @@ for port in sound ents datagram connect inv spawn; do
 	echo
 done
 
-echo "== $step. the engine build: glhexen2, h2ded and hwsv =="
+echo "== $step. the engine build: hexenwail, h2ded and hwsv =="
 step=$((step + 1))
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
 echo
 echo "== $step. one definition in each binary, none in sv_main.c =="
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${sound_symbols[@]}"; do

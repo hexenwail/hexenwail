@@ -40,7 +40,7 @@ set -u
 OUT=$1; MAP=$2; shift 2
 BASEDIR=${BASEDIR:-$HOME/hexen2}
 SERVER=${SERVER:-./result-h2ded/bin/h2ded}
-CLIENT=${CLIENT:-./result/bin/glhexen2}
+CLIENT=${CLIENT:-./result/bin/hexenwail}
 FRAMES=${FRAMES:-250}           # client frames to sit connected for
 BOOT=${BOOT:-6}                 # seconds to let the server spawn the map
 TIMEOUT=${TIMEOUT:-45}

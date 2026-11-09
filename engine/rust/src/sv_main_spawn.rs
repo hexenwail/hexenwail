@@ -44,7 +44,7 @@
 //     failure path) and SV_PrintMapChecklist's `#ifndef SERVERONLY` sky
 //     texture block run when the target's facts say client_build; the
 //     `#ifdef GLQUAKE` flush_textures line when they say glquake_build.  These
-//     are build-time facts, not isDedicated: glhexen2 -dedicated compiled
+//     are build-time facts, not isDedicated: hexenwail -dedicated compiled
 //     the client arms and ran them, so it still does.
 //   * `(int) max_edicts.value` and `(int) sv.edicts->v.message` are the
 //     target's own float-to-int conversion (world_hull.rs's cvt_c).

@@ -50,7 +50,7 @@ build:
 		-DUSE_ALSA=ON
 	cd engine/build && make -j$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 	@echo ""
-	@echo "Build complete: engine/build/bin/glhexen2"
+	@echo "Build complete: engine/build/bin/hexenwail"
 
 # Release (use ./release.sh for tagged releases)
 release:

@@ -5,7 +5,7 @@
  * #469), in one binary.
  *
  * run_spawn_harness.sh builds this three times, once per way the engine
- * compiles sv_main.c: -DSERVERONLY (h2ded), -DGLQUAKE (glhexen2, gles) and
+ * compiles sv_main.c: -DSERVERONLY (h2ded), -DGLQUAKE (hexenwail, gles) and
  * -DWEBSOFT (the web software renderer), each with the real
  * engine/rust/sv_main_target.c and engine/rust/sv_main_variadic.c compiled
  * the same way and linked against the one Rust archive.  The fixture's

@@ -2,7 +2,7 @@
 #
 # check-rust-wad.sh -- gate for the Rust port of engine/h2shared/wad.c.
 #
-# The differential half compiles the C original exactly as glhexen2 does
+# The differential half compiles the C original exactly as hexenwail does
 # (-DGLQUAKE, the Hexen II include order) with its four exported functions and
 # all three exported globals renamed, links it against the Rust module in one
 # binary, and compares the two across a wad built inside the harness: lump
@@ -14,8 +14,8 @@
 #
 # The CMake half checks the engine build every gate shares
 # (scripts/lib/rust-gate.sh), and covers the shape this port introduced: only
-# glhexen2 ever compiled wad.c (h2ded removed it -- gfx.wad lumps are
-# renderer-only data -- and HWSV_SOURCES never listed it), so glhexen2 is the
+# hexenwail ever compiled wad.c (h2ded removed it -- gfx.wad lumps are
+# renderer-only data -- and HWSV_SOURCES never listed it), so hexenwail is the
 # only target with a caller, and the other two may only ever have the
 # unreferenced archive member pulled in for another port.
 #
@@ -67,7 +67,7 @@ cargo build --release --offline \
 	--features wad
 
 echo
-echo "== 2. differential harness: the C as glhexen2 compiles it, and Rust =="
+echo "== 2. differential harness: the C as hexenwail compiles it, and Rust =="
 diff_log="$work/diff.log"
 set +e
 RUST_LIB="$crate/target/release/libengine_rs.a" \
@@ -103,7 +103,7 @@ if [ "${#count}" -lt 3 ]; then
 fi
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 3. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -141,23 +141,23 @@ echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} functions, ${#globals[@]}/
 
 echo
 echo "== 5. exactly one wad definition where it is reachable =="
-# glhexen2 is the only target with a caller -- the renderer, the menu and the
+# hexenwail is the only target with a caller -- the renderer, the menu and the
 # status bar -- so it must define every function, and all three globals.
 for sym in "${symbols[@]}"; do
-	n=$(nm "$engine_build/bin/glhexen2" | grep -cE " [Tt] $sym\$" || true)
+	n=$(nm "$engine_build/bin/hexenwail" | grep -cE " [Tt] $sym\$" || true)
 	if [ "$n" -ne 1 ]; then
-		echo "FAIL: glhexen2: $sym has $n definitions, expected exactly 1" >&2
+		echo "FAIL: hexenwail: $sym has $n definitions, expected exactly 1" >&2
 		exit 1
 	fi
 done
 for sym in "${globals[@]}"; do
-	n=$(nm "$engine_build/bin/glhexen2" | grep -cE " [BbDd] $sym\$" || true)
+	n=$(nm "$engine_build/bin/hexenwail" | grep -cE " [BbDd] $sym\$" || true)
 	if [ "$n" -ne 1 ]; then
-		echo "FAIL: glhexen2: $sym has $n definitions, expected exactly 1" >&2
+		echo "FAIL: hexenwail: $sym has $n definitions, expected exactly 1" >&2
 		exit 1
 	fi
 done
-echo "  glhexen2: ${#symbols[@]}/${#symbols[@]} functions and ${#globals[@]}/${#globals[@]} globals exactly once"
+echo "  hexenwail: ${#symbols[@]}/${#symbols[@]} functions and ${#globals[@]}/${#globals[@]} globals exactly once"
 # h2ded removes wad.c from its source list and hwsv never had it, so neither has
 # a caller: a definition there is the unreferenced archive member being pulled
 # in for another port, which is allowed but must never be more than one.
@@ -197,7 +197,7 @@ if [ "$run_engine" -eq 1 ]; then
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$engine_build/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/hexenwail" \
 	OFF_BIN="$(rust_gate_reference_bin)" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \
@@ -205,7 +205,7 @@ if [ "$run_engine" -eq 1 ]; then
 fi
 
 echo
-echo "PASS: Rust wad -- the C as glhexen2 compiles it and the Rust module agree"
+echo "PASS: Rust wad -- the C as hexenwail compiles it and the Rust module agree"
 echo "      byte for byte across the mapping they both edit in place, the"
 echo "      consolidated archive links exactly one definition in the one target"
 echo "      that has a caller, and no wad.c object is left in the engine"

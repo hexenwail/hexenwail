@@ -14,7 +14,7 @@
 # built three times, once per way the engine compiles sv_main.c --
 #
 #   serveronly  -DSERVERONLY             h2ded
-#   glquake     -DGLQUAKE -DSDLQUAKE     glhexen2, the GLES and WebGL2 clients
+#   glquake     -DGLQUAKE -DSDLQUAKE     hexenwail, the GLES and WebGL2 clients
 #   websoft     -DWEBQUAKE -DWEBSOFT     the web software renderer
 #
 # -- each compiling the C original, engine/rust/sv_main_target.c and

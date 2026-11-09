@@ -73,7 +73,7 @@ sv_phys_move = ["sv_phys_push", "sv_phys_walk"]
 # Hexen II's sv_main.c sound and particle messages and per-protocol limits
 # (#469 slice A, of #455): SV_StartParticle..4, SV_StopSound,
 # SV_UpdateSoundPos, SV_StartSound, SV_MaxSounds, SV_MaxDatagram,
-# SV_MaxReliableMessage.  Hexen II's targets only (glhexen2, h2ded); reads
+# SV_MaxReliableMessage.  Hexen II's targets only (hexenwail, h2ded); reads
 # engine/rust/sv_main_target.c besides world_target.c.
 sv_main_sound = ["world_hull", "msg_io", "sizebuf"]
 # Hexen II's sv_main.c entity updates (#469 slice B): the fat PVS,
@@ -83,7 +83,7 @@ sv_main_ents = ["sv_main_sound"]
 # Hexen II's sv_main.c client data and datagrams (#469 slice C):
 # SV_ClearDatagram, SV_WriteClientdataToMessage, SV_SendClientDatagram,
 # SV_UpdateToReliableMessages, SV_SendNop and SV_SendClientMessages.
-# Hexen II's targets only (glhexen2, h2ded); reads
+# Hexen II's targets only (hexenwail, h2ded); reads
 # engine/rust/sv_main_target.c besides world_target.c.
 sv_main_datagram = ["sv_main_ents"]
 

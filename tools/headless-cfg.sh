@@ -13,7 +13,7 @@
 #
 # Example:
 #   ./tools/headless-cfg.sh 2 demo1 /tmp/run.cfg 108
-#   glhexen2 -basedir ~/hexen2 -condebug +exec /tmp/run.cfg > /tmp/run.log
+#   hexenwail -basedir ~/hexen2 -condebug +exec /tmp/run.cfg > /tmp/run.log
 #   ./tools/edict_pick.py /tmp/run.log player,timebomb
 #
 # <class> is the playerclass number (1 paladin, 2 crusader, 3 necromancer,

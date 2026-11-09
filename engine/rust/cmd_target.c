@@ -2,7 +2,7 @@
  * cmd_target.c -- the per-target facts the Rust cmd port needs.
  *
  * Same mechanism as zone_target.c beside it: the per-target C shim decided on
- * #233 (option (a)).  engine/rust is one static library linked into glhexen2,
+ * #233 (option (a)).  engine/rust is one static library linked into hexenwail,
  * h2ded and hwsv alike, but cmd.c's behaviour differs between them in two
  * ways that a single implementation cannot know by itself:
  *
@@ -70,7 +70,7 @@ int Cmd_TargetHasBuiltinStartupScript (void)
 #endif	/* __EMSCRIPTEN__ */
 
 /* Whether this target is the HexenWorld build -- hwsv, and only hwsv, in this
- * tree: glhexen2 is GLQUAKE + H2W_INTEGRATED and never H2W. */
+ * tree: hexenwail is GLQUAKE + H2W_INTEGRATED and never H2W. */
 #if defined(H2W)
 
 int Cmd_TargetIsH2W (void)

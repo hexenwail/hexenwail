@@ -26,7 +26,7 @@
 #   h2ded   -- startup pak load.  FS_LoadPackFile calls Hash_Allocate and then
 #              Hash_Add once per entry: 797 of them against the Nov 1997 demo
 #              pak.  This is the densest hashindex traffic in the server.
-#   glhexen2 -- the same pak load plus a real map load, which also drives the
+#   hexenwail -- the same pak load plus a real map load, which also drives the
 #              MODEL and SOUND tables (model.c hash_mod, snd_dma.c hash_sfx)
 #              and the texture table (gl_draw.c).  Those three are only
 #              reachable in the client -- h2ded does not compile them.
@@ -37,8 +37,8 @@
 # USAGE
 #
 #   DEMO_DIR=<dir containing data1/> \
-#   ON_BIN=<glhexen2 from this tree, which always links the Rust archive> \
-#   OFF_BIN=<a C-only glhexen2; see rust_gate_reference_bin in
+#   ON_BIN=<hexenwail from this tree, which always links the Rust archive> \
+#   OFF_BIN=<a C-only hexenwail; see rust_gate_reference_bin in
 #            scripts/lib/rust-gate.sh for how to build one> \
 #   XVFB=<path to Xvfb> \
 #   ./run_engine_smoke.sh [subsystem]
@@ -66,8 +66,8 @@ case "$SUBSYSTEM" in
 esac
 
 : "${DEMO_DIR:?set DEMO_DIR to the basedir holding data1/}"
-: "${ON_BIN:?set ON_BIN to this tree's glhexen2}"
-: "${OFF_BIN:?set OFF_BIN to a C-only reference glhexen2}"
+: "${ON_BIN:?set ON_BIN to this tree's hexenwail}"
+: "${OFF_BIN:?set OFF_BIN to a C-only reference hexenwail}"
 XVFB="${XVFB:-Xvfb}"
 WORK="${WORK:-$(mktemp -d)}"
 mkdir -p "$WORK"
@@ -103,7 +103,7 @@ run() {
 
 	# -k 5: the engine ignores SIGTERM during shutdown.
 	DISPLAY=":$dpy" timeout -k 5 45 stdbuf -o0 \
-		"$bindir/glhexen2" -basedir "$DEMO_DIR" -userdir "$ud" \
+		"$bindir/hexenwail" -basedir "$DEMO_DIR" -userdir "$ud" \
 		+map demo1 > "$WORK/gl-$tag.log" 2>&1 || true
 	# The dedicated server needs no display and no input.
 	timeout -k 5 25 stdbuf -o0 \
@@ -122,7 +122,7 @@ fail=0
 for which in gl h2; do
 	normalize "$WORK/$which-off.log" > "$WORK/$which-off.norm"
 	normalize "$WORK/$which-on.log"  > "$WORK/$which-on.norm"
-	label=$([ "$which" = gl ] && echo glhexen2 || echo h2ded)
+	label=$([ "$which" = gl ] && echo hexenwail || echo h2ded)
 	lines=$(wc -l < "$WORK/$which-on.norm")
 
 	if diff -u "$WORK/$which-off.norm" "$WORK/$which-on.norm" > "$WORK/$which.diff"; then
@@ -144,9 +144,9 @@ done
 # The client must have reached a map, or it never exercised the model, sound
 # and texture tables -- the call sites h2ded cannot reach at all.
 if grep -q 'Precache:' "$WORK/gl-on.norm"; then
-	echo "  glhexen2: map loaded ($(grep -o 'Precache: [0-9]*/[0-9]* models, [0-9]*/[0-9]* sounds' "$WORK/gl-on.norm" | head -1))"
+	echo "  hexenwail: map loaded ($(grep -o 'Precache: [0-9]*/[0-9]* models, [0-9]*/[0-9]* sounds' "$WORK/gl-on.norm" | head -1))"
 else
-	echo "  glhexen2: NO map load -- the model/sound/texture hash tables were not exercised" >&2
+	echo "  hexenwail: NO map load -- the model/sound/texture hash tables were not exercised" >&2
 	fail=1
 fi
 

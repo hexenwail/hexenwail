@@ -358,7 +358,7 @@ jobs:
   # compared against are different numbers again.
   #
   # Only the differential fixture runs here, not scripts/check-rust.sh.  The
-  # engine does not build on macOS yet -- glhexen2 is behind ANGLE
+  # engine does not build on macOS yet -- hexenwail is behind ANGLE
   # (uhexen2-6wj4, and docs/COMPILE still lists Linux and Windows) -- and the
   # fixture does not need it: it links the Rust archive against the C originals
   # compiled by the same host compiler, which is the comparison that decides

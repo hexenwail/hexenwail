@@ -12,7 +12,7 @@
 #   headless-drive.sh <scenario> <outdir> <basedir> [extra engine args...]
 #
 # Environment:
-#   ENGINE    path to the engine binary  (default: ./result/bin/glhexen2)
+#   ENGINE    path to the engine binary  (default: ./result/bin/hexenwail)
 #   WORK      scratch dir: WORK/home is the sandboxed HOME, WORK/userdir the
 #             engine's -userdir (default: <outdir>/work)
 #   DISPLAY_N X display number           (default: let Xvfb pick a free one)
@@ -69,7 +69,7 @@ SCEN="$1"; shift
 OUT="$1"; shift
 BASEDIR="$1"; shift
 
-ENGINE=${ENGINE:-./result/bin/glhexen2}
+ENGINE=${ENGINE:-./result/bin/hexenwail}
 W=${W:-800}; H=${H:-600}
 
 for dep in Xvfb xdotool bwrap import; do

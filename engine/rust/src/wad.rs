@@ -15,7 +15,7 @@
 //    of W_LoadWadFile, W_GetLumpName and SwapPic -- gl_draw.c, draw.c, menu.c,
 //    host.c, gl_vidsdl.c -- is client-only.  So the differential harness
 //    compares against the one C that ships, and the gate expects exactly one
-//    definition in glhexen2 and at most one in h2ded and hwsv.
+//    definition in hexenwail and at most one in h2ded and hwsv.
 //
 // 2. The mutation is in place, inside the zone allocation.  W_CleanupName is
 //    documented "Can safely be performed in place" and the call site marks it

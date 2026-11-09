@@ -153,7 +153,7 @@ done
 echo "  2 address format strings present in both"
 
 echo
-echo "== 4. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 4. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -192,12 +192,12 @@ check_at_most_once() {
 	}
 }
 
-# glhexen2: H2W_INTEGRATED, so the renamed spellings, and Hexen II's own
+# hexenwail: H2W_INTEGRATED, so the renamed spellings, and Hexen II's own
 # net_message/NET_Init stay Hexen II's.
 for sym in "${hw_functions[@]}" "${hw_globals[@]}" "${accessors[@]}"; do
-	check_once "$engine_build/bin/glhexen2" "$sym" glhexen2
+	check_once "$engine_build/bin/hexenwail" "$sym" hexenwail
 done
-echo "  glhexen2: ${#hw_functions[@]} HWNET_* functions, ${#hw_globals[@]} hw_net_* globals and ${#accessors[@]} shim accessors exactly once"
+echo "  hexenwail: ${#hw_functions[@]} HWNET_* functions, ${#hw_globals[@]} hw_net_* globals and ${#accessors[@]} shim accessors exactly once"
 
 # hwsv: the plain names, the wrappers the shim adds, and the shim's storage.
 for sym in "${plain_functions[@]}" "${plain_globals[@]}" "${hw_functions[@]}" "${accessors[@]}"; do

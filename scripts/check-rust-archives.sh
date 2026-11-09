@@ -24,9 +24,9 @@ check_count() { # file symbol expected-count
     fi
 }
 
-for target in glhexen2 h2ded hwsv; do
+for target in hexenwail h2ded hwsv; do
     case "$target" in
-        glhexen2) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect,sv_main_inv,sv_main_spawn;
+        hexenwail) variant=client; features=$common,wad,net_loop_h2,net_bsd_h2,net_udp_h2,huffman,net_udp_hw,net_chan,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect,sv_main_inv,sv_main_spawn;
             wad=1; info=0; hw=1 ;;
         h2ded) variant=h2ded; features=$common,net_bsd_h2,net_udp_h2,h2ded_target,sv_main_sound,sv_main_ents,sv_main_datagram,sv_main_connect,sv_main_inv,sv_main_spawn;
             wad=0; info=0; hw=0 ;;
@@ -71,7 +71,7 @@ for target in glhexen2 h2ded hwsv; do
         if [ "$target" = hwsv ]; then h2=0; else h2=1; fi
         check_count "$file" net_landrivers "$h2"
         check_count "$file" UDP_Init "$h2"
-        if [ "$target" = glhexen2 ]; then loop=1; else loop=0; fi
+        if [ "$target" = hexenwail ]; then loop=1; else loop=0; fi
         check_count "$file" Loop_Init "$loop"
         check_count "$file" SV_RecursiveHullCheck 1
         check_count "$file" SV_HullPointContents 1

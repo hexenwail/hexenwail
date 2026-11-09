@@ -86,7 +86,7 @@ fi
 echo "  $check_log"
 
 echo
-echo "== 2. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 2. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -99,7 +99,7 @@ if [ "$n" -ne 1 ]; then
 	echo "FAIL: libengine_rs.a: $symbol has $n definitions, expected exactly 1" >&2
 	exit 1
 fi
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	n=$(nm "$path" | grep -cE " [Tt] $symbol\$" || true)

@@ -111,13 +111,13 @@ fi
 echo "  ${check_log##*$'\n'}"
 
 echo
-echo "== 3. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 3. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
 echo
 echo "== 4. exactly one definition of each symbol, in each binary =="
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do
@@ -150,7 +150,7 @@ if [ "$run_engine" -eq 1 ]; then
 	demo="$(nix build "$root#demodata" --no-link --print-out-paths)/share/hexenwail"
 	xvfb="$(nix build nixpkgs#xvfb --no-link --print-out-paths)/bin/Xvfb"
 	DEMO_DIR="$demo" \
-	ON_BIN="$engine_build/bin/glhexen2" \
+	ON_BIN="$engine_build/bin/hexenwail" \
 	OFF_BIN="$reference" \
 	XVFB="$xvfb" \
 	WORK="$work/smoke" \

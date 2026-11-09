@@ -39,7 +39,18 @@ Build steps:
     cmake ..
     make
 
-The binary will be named glhexen2 (Linux) or hexenwail.exe (Windows).
+The binary will be named hexenwail (Linux) or hexenwail.exe (Windows).
+
+Renamed binary
+===============
+
+The Linux client binary used to be named `glhexen2`; it is now `hexenwail`,
+matching the Windows (`hexenwail.exe`) and WebAssembly (`hexenwail.html`)
+outputs. Update any scripts, aliases, or desktop entries that invoked
+`glhexen2` — there is no shipped compatibility alias (no second binary or
+symlink in the Nix outputs or release trees). The only place the old name is
+still accepted is `scripts/hexen2-run.sh`'s dispatch whitelist, as a
+transition. The dedicated servers are unchanged (`h2ded`, `hwsv`).
 
 
 Building against OpenGL ES 3.0 instead of desktop GL:

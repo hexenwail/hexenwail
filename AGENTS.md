@@ -182,7 +182,7 @@ Always build through nix, never raw `cmake`/`make` — the flake pins the
 toolchain the CI targets are built with.
 
 ```bash
-nix build .#default          # desktop GL client (glhexen2)
+nix build .#default          # desktop GL client (hexenwail)
 nix build .#h2ded            # dedicated server
 nix build .#hwsv             # HexenWorld dedicated server
 nix build .#gles             # desktop client on the GLES 3.0 tier (the WebGL2 render path)

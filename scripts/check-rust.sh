@@ -11,7 +11,7 @@
 #      other would have the web client compiling different Rust.
 #   2. the removed switches stay removed: configuring with any old
 #      -DUSE_*_RS=OFF must stop with the explanation, not silently link Rust.
-#   3. one engine build of glhexen2, h2ded and hwsv, shared by every gate
+#   3. one engine build of hexenwail, h2ded and hwsv, shared by every gate
 #      below (it used to be two per gate: twenty-two builds of one tree).
 #   4. #233 archive mapping/ownership gate, then each port's gate -- crate,
 #      differential harness against the C original (crc, strlcpy, huffman,

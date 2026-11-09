@@ -89,7 +89,7 @@ fi
 echo "  $check_log"
 
 echo
-echo "== 2. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 2. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -109,7 +109,7 @@ for sym in "${symbols[@]}"; do
 	fi
 done
 echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} symbols exported exactly once"
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}"; do

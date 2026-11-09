@@ -263,7 +263,7 @@ reads afterwards.
   and a half-size `Hash_Clear`. A guard dropped in Rust usually dies by SIGSEGV on
   the null pointer, not by an assertion: still a kill, and `mutants.sh` counts it.
 - **`run_engine_smoke.sh` stays.** It is not a differential harness: it runs the
-  real engine (h2ded and glhexen2 on a pak load and a map load) against a C-only
+  real engine (h2ded and hexenwail on a pak load and a map load) against a C-only
   reference build and diffs the logs. Seven gates call it, including
   `check-rust-hashindex.sh --engine`; it lives in `hashindex/tests/` for history
   only and keeps that path.

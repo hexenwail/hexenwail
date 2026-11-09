@@ -2,7 +2,7 @@
  * zone_target.c -- the per-target zone configuration, for the Rust zone port.
  *
  * Why this file exists.  engine/rust is one static library, built once and
- * linked into glhexen2, h2ded and hwsv alike (see #248).  zone.c's behaviour
+ * linked into hexenwail, h2ded and hwsv alike (see #248).  zone.c's behaviour
  * is not the same in all three: ZONE_DEFSIZE is 1 MB under SERVERONLY and 2 MB
  * otherwise, the secondary zone exists only in the client, the cache API is
  * compiled out of the dedicated servers, and isDedicated is a variable in the

@@ -120,7 +120,7 @@ if [ "$HW_DATA" -eq 1 ] && [ -e "$BASEDIR/$MOD" ]; then
 	exit 2
 fi
 
-command -v "$CLIENT" >/dev/null 2>&1 || CLIENT="${CLIENT:-glhexen2}"
+command -v "$CLIENT" >/dev/null 2>&1 || CLIENT="${CLIENT:-hexenwail}"
 command -v "$SERVER" >/dev/null 2>&1 || SERVER="${SERVER:-hwsv}"
 command -v "$XVFB" >/dev/null 2>&1 || XVFB="${XVFB:-Xvfb}"
 

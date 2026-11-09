@@ -12,10 +12,10 @@ hexen2dir=/usr/games/hexen2
 prog=`basename "$0"|sed -e 's/\.sh//g'|sed -e 's/-run//g'`
 
 case $prog in
-  hexen2|glhexen2|h2ded|hwcl|glhwcl|hwsv) # good
+  hexen2|hexenwail|glhexen2|h2ded|hwcl|glhwcl|hwsv) # good
     ;;
   *)  echo "Bad binary name '$prog'"
-      echo "must be one of hexen2, glhexen2, h2ded, hwcl, glhwcl, or hwsv"
+      echo "must be one of hexen2, hexenwail, glhexen2, h2ded, hwcl, glhwcl, or hwsv"
       exit 1
     ;;
 esac

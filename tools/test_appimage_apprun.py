@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """appimage/AppRun picks the basedir the way the Linux zip is used (#173).
 
-Runs the real AppRun against a stub tree whose glhexen2 echoes its arguments:
+Runs the real AppRun against a stub tree whose hexenwail echoes its arguments:
   - data1/pak0.pak beside the .AppImage  -> -basedir <that dir>
   - otherwise ~/.hexen2/data1/pak0.pak   -> no -basedir (the engine's
     userdir finds the paks, as in the Flatpak)
@@ -32,9 +32,9 @@ def run(args, appimage_dir=None, home_data=False):
         app = t / "AppDir"
         (app / "usr/bin").mkdir(parents=True)
         shutil.copy(ROOT / "appimage/AppRun", app / "AppRun")
-        (app / "usr/bin/glhexen2").write_text('#!/bin/sh\necho "ENGINE $*"\n')
+        (app / "usr/bin/hexenwail").write_text('#!/bin/sh\necho "ENGINE $*"\n')
         (app / "usr/bin/get_demo.sh").write_text('#!/bin/sh\necho "GETDEMO $*"\n')
-        for f in ("AppRun", "usr/bin/glhexen2", "usr/bin/get_demo.sh"):
+        for f in ("AppRun", "usr/bin/hexenwail", "usr/bin/get_demo.sh"):
             os.chmod(app / f, 0o755)
         home = t / "home"
         home.mkdir()

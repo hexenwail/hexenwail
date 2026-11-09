@@ -274,7 +274,7 @@ sys.exit(1 if bad else 0)
 PY
 
 echo
-echo "== 5. the engine build: glhexen2, h2ded and hwsv =="
+echo "== 5. the engine build: hexenwail, h2ded and hwsv =="
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
@@ -311,7 +311,7 @@ echo "  libengine_rs.a: ${#symbols[@]}/${#symbols[@]} FS functions and ${#global
 
 echo
 echo "== 7. exactly one quakefs definition, and the shim symbols, in every target =="
-targets=(glhexen2 h2ded hwsv)
+targets=(hexenwail h2ded hwsv)
 predicates=(QuakeFS_TargetIsH2W QuakeFS_TargetIsH2WIntegrated QuakeFS_TargetHasClientCommands QuakeFS_TargetClientReset QuakeFS_TargetClientClearState QuakeFS_TargetClientReinit QuakeFS_TargetVidLock QuakeFS_TargetShowList QuakeFS_TargetSetHwServerinfo QuakeFS_TargetHostError Zone_TargetDefSize Zone_TargetSecSize Zone_TargetHasCache Zone_TargetDedicated Cmd_TargetHasClientLists Cmd_TargetIsH2W Cmd_TargetHasBuiltinStartupScript)
 for bin in "${targets[@]}"; do
 	path="$engine_build/bin/$bin"

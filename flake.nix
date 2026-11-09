@@ -279,11 +279,11 @@
               license = licenses.gpl2Plus;
               platforms = platforms.linux;
               maintainers = [ ];
-              mainProgram = "glhexen2";
+              mainProgram = "hexenwail";
             };
           };
         in {
-          # OpenGL version (glhexen2) - NixOS build with Nix store rpaths
+          # OpenGL version (hexenwail) - NixOS build with Nix store rpaths
           # NOTE: Uses CMake build system
           nixos = pkgs.stdenv.mkDerivation (linuxBuildAttrs // {
             installPhase = ''
@@ -303,7 +303,7 @@
               # point at.  uhexen2-9die.
 
               # Install the OpenGL binary from CMake build directory
-              install -Dm755 bin/glhexen2 $out/bin/glhexen2
+              install -Dm755 bin/hexenwail $out/bin/hexenwail
 
 
               runHook postInstall
@@ -325,7 +325,7 @@
           # target -- so a symlinkJoin would send the lookup back to the
           # gamecode-less `nixos` output and find nothing.
           #
-          # Layout matches the release tree's: bin/glhexen2 with the gamecode
+          # Layout matches the release tree's: bin/hexenwail with the gamecode
           # at ../share/hexenwail, which is PR_FindBundleDir()'s layer 2.
           # hw/ and siege/ progs are withheld here for the same reason as in
           # the release derivation -- see the note there.  Their strings.txt
@@ -341,8 +341,8 @@
               passthru = { inherit (nixosPkg) version; };
             } ''
               mkdir -p $out/bin
-              cp ${nixosPkg}/bin/glhexen2 $out/bin/glhexen2
-              chmod +w $out/bin/glhexen2
+              cp ${nixosPkg}/bin/hexenwail $out/bin/hexenwail
+              chmod +w $out/bin/hexenwail
 
               install -Dm644 \
                 ${gamecodePkg}/share/hexenwail/data1/progs.dat \
@@ -434,7 +434,7 @@
             cmakeFlags = linuxBuildAttrs.cmakeFlags ++ [ "-DUSE_GLES=ON" ];
             installPhase = ''
               runHook preInstall
-              install -Dm755 bin/glhexen2 $out/bin/glhexen2
+              install -Dm755 bin/hexenwail $out/bin/hexenwail
               runHook postInstall
             '';
           });
@@ -848,8 +848,8 @@
           } ''
             mkdir -p $out/bin $out/lib
 
-            cp ${nixosPkg}/bin/glhexen2 $out/bin/glhexen2
-            chmod +w $out/bin/glhexen2
+            cp ${nixosPkg}/bin/hexenwail $out/bin/hexenwail
+            chmod +w $out/bin/hexenwail
 
             # Bundle a GM soundfont next to the binary so MIDI music works on
             # machines with no system soundfont (the compile-time SOUNDFONT_PATH
@@ -873,7 +873,7 @@
             patchelf \
               --set-interpreter /lib64/ld-linux-x86-64.so.2 \
               --set-rpath "\$ORIGIN/../lib" \
-              $out/bin/glhexen2
+              $out/bin/hexenwail
             for so in $out/lib/*.so $out/lib/*.so.*; do
               [ -f "$so" ] && patchelf --set-rpath "\$ORIGIN" "$so" 2>/dev/null || true
             done
@@ -881,7 +881,7 @@
             # Every DT_NEEDED in the bundle must be bundled or a host library
             # (hostLibs above).  GitHub #424.
             missing=""
-            for f in $out/bin/glhexen2 $out/lib/*.so*; do
+            for f in $out/bin/hexenwail $out/lib/*.so*; do
               [ -f "$f" ] || continue
               for n in $(readelf -d "$f" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
                 case " ${pkgs.lib.concatStringsSep " " hostLibs} " in *" $n "*) continue ;; esac
@@ -1593,7 +1593,7 @@ EOF
             # The same three files again, this time where the engine finds them
             # by itself.  uhexen2-xsmc.
             #
-            # The binary sits at <platform>/bin/glhexen2, so the engine's
+            # The binary sits at <platform>/bin/hexenwail, so the engine's
             # <exedir>/../share/hexenwail/ lookup resolves to
             # <platform>/share/hexenwail/ -- which is already exactly the
             # layout packages.gamecode installs into, so nothing has to be
@@ -1826,7 +1826,7 @@ EOF
         # 1997 progs.dat.  uhexen2-9die.
         apps.default = {
           type = "app";
-          program = "${self.packages.${system}.nixos-bundled}/bin/glhexen2";
+          program = "${self.packages.${system}.nixos-bundled}/bin/hexenwail";
         };
 
         # nix run .#get-demo [destination]

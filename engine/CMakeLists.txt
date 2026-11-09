@@ -1,8 +1,8 @@
-# CMake build for Hexen II OpenGL client (glhexen2)
+# CMake build for Hexen II OpenGL client (hexenwail)
 # Builds for: Linux (x86_64) and Windows 64-bit
 
 cmake_minimum_required(VERSION 3.16)
-project(glhexen2 VERSION 1.5.10 LANGUAGES C)
+project(hexenwail VERSION 1.5.10 LANGUAGES C)
 
 include(CTest)
 
@@ -1207,7 +1207,7 @@ elseif(WIN32)
     set(EXECUTABLE_NAME hexenwail)
     add_executable(${EXECUTABLE_NAME} WIN32 ${ALL_SOURCES} ${RESOURCES})
 else()
-    set(EXECUTABLE_NAME glhexen2)
+    set(EXECUTABLE_NAME hexenwail)
     add_executable(${EXECUTABLE_NAME} ${ALL_SOURCES})
 endif()
 
@@ -1513,7 +1513,7 @@ endif()
 # Summary
 #============================================================================
 message(STATUS "")
-message(STATUS "=== glhexen2 Configuration ===")
+message(STATUS "=== hexenwail Configuration ===")
 message(STATUS "Target OS: ${TARGET_OS}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Sound support: ${USE_SOUND}")

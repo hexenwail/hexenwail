@@ -153,7 +153,7 @@ and fields you ask for. No X server is needed.
 
 ```sh
 tools/headless-cfg.sh 2 demo1 /tmp/run.cfg 108     # class 2 (crusader), throw impulse 108
-glhexen2 -basedir ~/hexen2 -condebug +exec /tmp/run.cfg > /tmp/run.log
+hexenwail -basedir ~/hexen2 -condebug +exec /tmp/run.cfg > /tmp/run.log
 tools/edict_pick.py /tmp/run.log player,timebomb
 ```
 
@@ -195,14 +195,14 @@ ImageMagick `import`.
 
 ```sh
 nix build .#default
-ENGINE=result/bin/glhexen2 tools/headless-drive.sh noportals /tmp/out ~/hexen2
+ENGINE=result/bin/hexenwail tools/headless-drive.sh noportals /tmp/out ~/hexen2
 ```
 
 Requires `Xvfb`, `xdotool`, `bwrap` and `import`. Without them:
 
 ```sh
 nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick nixpkgs#bubblewrap --command \
-  env ENGINE=result/bin/glhexen2 tools/headless-drive.sh noportals /tmp/out ~/hexen2
+  env ENGINE=result/bin/hexenwail tools/headless-drive.sh noportals /tmp/out ~/hexen2
 ```
 
 (`Xvfb` ships in `xorg-server`; there is no `nixpkgs#xvfb`.)

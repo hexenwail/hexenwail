@@ -4,9 +4,9 @@
 # its own, for platforms where the engine itself does not build.
 #
 # scripts/check-rust-net-h2.sh is the whole gate: this fixture plus a build of
-# glhexen2/h2ded/hwsv and the object- and symbol-ownership checks over them.
+# hexenwail/h2ded/hwsv and the object- and symbol-ownership checks over them.
 # That half needs a platform the engine builds on, and macOS is not one yet --
-# glhexen2 there is behind ANGLE (uhexen2-6wj4, and docs/COMPILE still lists
+# hexenwail there is behind ANGLE (uhexen2-6wj4, and docs/COMPILE still lists
 # Linux and Windows).  This half needs only a C compiler, cargo and the two C
 # originals, and it is the half that decides whether the port computes the same
 # bytes as the C original does.  That question is platform-specific: under

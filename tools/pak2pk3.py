@@ -438,7 +438,7 @@ def main(argv=None):
                 "engine would not recognise the mission pack.  Leave it as "
                 "paks." % args.gamedir)
         # hwsv requires GAME_HEXENWORLD, and as a .pk3 only the 0.14 - 0.15
-        # pak4 carries marks for it.  glhexen2 mounts hw only to join a
+        # pak4 carries marks for it.  hexenwail mounts hw only to join a
         # HexenWorld server, and identifies nothing there.
         if plan and gamedir_name == "hw" and "hw pak4" not in found:
             raise PakError(

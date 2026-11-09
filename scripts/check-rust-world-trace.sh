@@ -149,14 +149,14 @@ for port in trace hull link move svmove svphys svpush svwalk svmovetype; do
 done
 done
 
-echo "== $step. the engine build: glhexen2, h2ded and hwsv =="
+echo "== $step. the engine build: hexenwail, h2ded and hwsv =="
 step=$((step + 1))
 engine_build=$(rust_gate_engine_build "$work")
 echo "  $engine_build"
 
 echo
 echo "== $step. exactly one definition per binary, none left in world.c =="
-for bin in glhexen2 h2ded hwsv; do
+for bin in hexenwail h2ded hwsv; do
 	path="$engine_build/bin/$bin"
 	[ -x "$path" ] || { echo "FAIL: $path was not built" >&2; exit 1; }
 	for sym in "${symbols[@]}" "${sv_move_symbols[@]}" "${sv_phys_symbols[@]}"; do

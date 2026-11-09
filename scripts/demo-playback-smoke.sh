@@ -36,14 +36,14 @@
 #   nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
 #             nixpkgs#bubblewrap --command ./scripts/demo-playback-smoke.sh
 #
-# Environment: ENGINE (default ./result/bin/glhexen2),
+# Environment: ENGINE (default ./result/bin/hexenwail),
 #              DEMODATA (default ./result-demodata/share/hexenwail),
 #              OUT (default a mktemp dir, kept on failure).
 
 set -u
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-ENGINE=${ENGINE:-$ROOT/result/bin/glhexen2}
+ENGINE=${ENGINE:-$ROOT/result/bin/hexenwail}
 DEMODATA=${DEMODATA:-$ROOT/result-demodata/share/hexenwail}
 DRIVE=$ROOT/tools/headless-drive.sh
 OUT=${OUT:-$(mktemp -d "${TMPDIR:-/tmp}/demo-playback.XXXXXX")}

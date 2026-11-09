@@ -16,7 +16,7 @@
 #   STEPS    step file, headless-drive.sh `script` verbs (required)
 #   BASEDIR  RETAIL game data             (default: ~/hexen2)
 #   SERVER   hwsv binary                  (default: ./result-hwsv/bin/hwsv)
-#   ENGINE   client binary                (default: ./result/bin/glhexen2)
+#   ENGINE   client binary                (default: ./result/bin/hexenwail)
 #   MAP      map both sides load          (default: demo1)
 #   PORT     server UDP port              (default: 26950)
 #   SVARGS   server command line tail     (default: +deathmatch 0 +coop 0 +skill 0)

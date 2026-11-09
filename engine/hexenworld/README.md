@@ -150,7 +150,7 @@ run them. Run them locally after touching the HexenWorld client:
       nix shell nixpkgs#xorg-server nixpkgs#xdotool nixpkgs#imagemagick \
         nixpkgs#bubblewrap nixpkgs#python3 nixpkgs#util-linux --command \
         scripts/hw-hud-check.sh --basedir ~/hexen2 \
-          --client result/bin/glhexen2 --server result-1/bin/hwsv
+          --client result/bin/hexenwail --server result-1/bin/hwsv
 
 ## Not yet done
 
