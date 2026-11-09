@@ -315,6 +315,25 @@ if(GLSLANG_VALIDATOR)
     )
 endif()
 
+# DXIL/MSL/JSON, for the SDL_GPU D3D12 and Metal drivers.  Same posture as
+# shaders_spirv above: deliberately NOT part of ALL, and it joins ALL when
+# the backend starts reading the outputs.  It depends on shaders_spirv, so
+# the Vulkan .spv inputs exist by the time it runs.  Run it with
+# `make shaders_cross`.  GitHub #448.
+find_program(SHADERCROSS shadercross)
+if(SHADERCROSS AND TARGET shaders_spirv)
+    add_custom_target(shaders_cross
+        COMMAND ${CMAKE_COMMAND}
+                -DSPV_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/spirv
+                -DCROSS_DIR=${CMAKE_CURRENT_BINARY_DIR}/generated/cross
+                -DSHADERCROSS=${SHADERCROSS}
+                -P ${CMAKE_CURRENT_LIST_DIR}/cmake/CrossCompileShaders.cmake
+        DEPENDS shaders_spirv
+        COMMENT "Cross-compiling shaders to DXIL/MSL/JSON"
+        VERBATIM
+    )
+endif()
+
 # Windows-specific includes
 if(WIN32)
     include_directories(${OSLIBS}/windows/misc/include)

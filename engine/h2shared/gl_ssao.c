@@ -141,6 +141,32 @@ static void SS_BindBlock (GLuint prog)
 		glUniformBlockBinding_fp (prog, blk, SSAO_UBO_BINDING);
 }
 
+/* The composite fragment shader declares its samplers with FRAG_TEX, whose
+ * plain (GL) arm is empty -- ES 3.00 rejects layout(binding=) on samplers --
+ * so the texture units are assigned here, once, at program build.  The units
+ * are SSAO_TEX_UNIT + 0..3, the same units SS_BindTex uses at draw time, in
+ * sampler order.  GitHub #448. */
+static void SS_BindSamplers (GLuint prog)
+{
+	static const char *const names[4] =
+	{
+		"u_world_depth", "u_scene_depth", "filtered_ao", "prepared_depth"
+	};
+	GLint	loc;
+	int	i;
+
+	if (!prog || !glGetUniformLocation_fp || !glUniform1i_fp)
+		return;
+	R_UseProgram (prog);
+	for (i = 0; i < 4; i++)
+	{
+		loc = glGetUniformLocation_fp (prog, names[i]);
+		if (loc >= 0)
+			glUniform1i_fp (loc, SSAO_TEX_UNIT + i);
+	}
+	R_UseProgram (0);
+}
+
 static qboolean SS_BuildPrograms (void)
 {
 	char	header[64];
@@ -172,6 +198,7 @@ static qboolean SS_BuildPrograms (void)
 		SS_BindBlock (ss_eval_prog[q]);
 	SS_BindBlock (ss_filter_prog);
 	SS_BindBlock (ss_comp_prog);
+	SS_BindSamplers (ss_comp_prog);
 
 	glGenBuffers_fp (1, &ss_ubo);
 	GL_BindBuffer (GL_UNIFORM_BUFFER, ss_ubo);

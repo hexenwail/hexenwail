@@ -3,13 +3,21 @@
  * depth snapshots, before and after the entities, are bitwise equal.  vkQuake
  * marks entity pixels in the stencil instead; the snapshots make that
  * unnecessary here.  Blended as (0, 0, 0, contribution) over the scene, which
- * multiplies it by 1 - contribution.  No #version: gl_ssao.c supplies it. */
+ * multiplies it by 1 - contribution.  No #version: gl_ssao.c supplies it.
+ *
+ * SDL_GPU numbers a graphics pipeline's fragment resources in set 2
+ * (samplers) and set 3 (uniforms), so this stage declares its samplers with
+ * FRAG_TEX and its params block with FRAG_UBO -- not the compute macros the
+ * other SSAO stages use.  The plain (GL) arm of FRAG_TEX is empty, so the C
+ * side assigns the texture units with glUniform1i at program build
+ * (gl_ssao.c).  GitHub #448. */
+#define SSAO_PARAMS_BIND FRAG_UBO(0)
 #include "ssao.inc"
 
-TEXBIND(8) uniform sampler2D u_world_depth;	/* full res, GL rows */
-TEXBIND(9) uniform sampler2D u_scene_depth;
-TEXBIND(10) uniform sampler2D filtered_ao;	/* AO res, top-down rows */
-TEXBIND(11) uniform sampler2D prepared_depth;	/* the pyramid, level 0 */
+FRAG_TEX(0) uniform sampler2D u_world_depth;	/* full res, GL rows */
+FRAG_TEX(1) uniform sampler2D u_scene_depth;
+FRAG_TEX(2) uniform sampler2D filtered_ao;	/* AO res, top-down rows */
+FRAG_TEX(3) uniform sampler2D prepared_depth;	/* the pyramid, level 0 */
 
 layout (location = 0) out vec4 out_color;
 

@@ -2,9 +2,15 @@
  * the world's depth and against the scene's, so that their ratio is the
  * occlusion the ENTITIES add (vkQuake ssao_evaluate.inc, ported verbatim apart
  * from the bindings).  QUALITY (1-3) is a #define from gl_ssao.c, where
- * vkQuake uses a specialisation constant.  No #version: gl_ssao.c supplies
- * it, with the QUALITY define. */
+ * vkQuake uses a specialisation constant.  The offline build (glslang /
+ * SPIR-V) has no such header, so the shader defaults QUALITY to 2 (Medium)
+ * below; the GL path's own define wins because the #ifndef never fires
+ * there.  No #version: gl_ssao.c supplies it, with the QUALITY define. */
 #include "ssao.inc"
+
+#ifndef QUALITY
+  #define QUALITY 2
+#endif
 
 const uint quality = uint (QUALITY);
 

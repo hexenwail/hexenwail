@@ -49,8 +49,16 @@
 #define half4 vec4
 
 /* One block for every stage; each reads the fields it needs.  vec4s only, so
- * std140 cannot be got wrong. */
-UBO(0) uniform SsaoParams {
+ * std140 cannot be got wrong.
+ *
+ * The block qualifier is overridable: the compute stages use the default
+ * UBO(0) (SDL_GPU compute set 2), while the composite fragment shader
+ * defines SSAO_PARAMS_BIND as FRAG_UBO(0) (SDL_GPU graphics fragment set 3)
+ * before including this file.  GitHub #448. */
+#ifndef SSAO_PARAMS_BIND
+  #define SSAO_PARAMS_BIND UBO(0)
+#endif
+SSAO_PARAMS_BIND uniform SsaoParams {
 	vec4  u_viewport;	/* xy: AO size; zw: ndc -> view multiplier */
 	vec4  u_projection;	/* xy: ndc -> view offset; w: AO scale (1 or 2) */
 	vec4  u_settings;	/* x radius, y strength, z fog density / final flag, w slices */

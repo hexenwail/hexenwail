@@ -7,16 +7,25 @@ name: Shaders SPIR-V
 # it, so a new shader could ship without its Vulkan bindings and nothing
 # noticed.  The five SSAO stages from #446 are the most recent example.
 #
+# The same job then runs shaders_cross: CrossCompileShaders.cmake feeds
+# the Vulkan .spv to shadercross and demands DXIL, MSL and a reflection
+# JSON per stage.  That is what proves the descriptor sets are the ones
+# SDL_GPU expects per stage -- the composite fragment shader's compute
+# numbering only failed there (#448).  The flake.nix shadercross pin is
+# already in the paths below.
+#
 # The paths are everything the gate reads: the shaders themselves
-# (.glsl AND .inc -- layout.inc/ssao.inc are the risk), the two CMake
-# scripts that expand and compile them, the CMakeLists target definition,
-# and the flake.nix glslang pin the target depends on.
-# GitHub #449, part of #77 / #339, route recorded in #447.
+# (.glsl AND .inc -- layout.inc/ssao.inc are the risk), the three CMake
+# scripts that expand, compile and cross-compile them, the CMakeLists
+# target definitions, and the flake.nix pins the targets depend on.
+# GitHub #449, part of #77 / #339, route recorded in #447.  #448 extends
+# it with the cross-compile gate.
 on:
   pull_request:
     paths:
       - 'engine/shaders/**'
       - 'engine/cmake/CompileSpirv.cmake'
+      - 'engine/cmake/CrossCompileShaders.cmake'
       - 'engine/cmake/EmbedShaders.cmake'
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
@@ -26,6 +35,7 @@ on:
     paths:
       - 'engine/shaders/**'
       - 'engine/cmake/CompileSpirv.cmake'
+      - 'engine/cmake/CrossCompileShaders.cmake'
       - 'engine/cmake/EmbedShaders.cmake'
       - 'engine/CMakeLists.txt'
       - 'flake.nix'
@@ -42,7 +52,7 @@ concurrency:
 
 jobs:
   shaders-spirv:
-    name: Compile shaders to SPIR-V (Vulkan and OpenGL)
+    name: Compile shaders to SPIR-V and cross-compile to DXIL/MSL
     runs-on: ubuntu-latest
     # Seconds of glslang after nix setup and one engine configure.
     # A "something is stuck" bound, not a target.
@@ -64,3 +74,13 @@ jobs:
           set -euo pipefail
           nix develop -c cmake -S . -B /tmp/shader-build
           nix develop -c cmake --build /tmp/shader-build --target shaders_spirv
+
+      # Second target, same configure: shaders_cross depends on
+      # shaders_spirv, so the .spv inputs exist by the time it runs.
+      # CrossCompileShaders.cmake fails the build on any error, and a
+      # missing target (shadercross absent from the dev shell) fails here
+      # loudly instead of passing vacuously.  GitHub #448.
+      - name: Build shaders_cross
+        run: |
+          set -euo pipefail
+          nix develop -c cmake --build /tmp/shader-build --target shaders_cross

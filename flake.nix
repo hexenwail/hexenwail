@@ -554,6 +554,63 @@
             };
           };
 
+          # SDL_shadercross: SDL's SPIR-V -> DXIL/MSL/JSON cross-compiler,
+          # used by the `shaders_cross` CMake target (engine/cmake/
+          # CrossCompileShaders.cmake) for the SDL_GPU D3D12 and Metal
+          # drivers.  GitHub #448.
+          #
+          # Not in nixpkgs, so it is built here from the upstream repo.
+          # Upstream has no tags or releases, so the pin is a commit on
+          # master (2026-09-03); the hash is the tarball hash, verified
+          # with nix-prefetch-url and an independent sha256sum.
+          #
+          # Non-vendored build: the repo's external/ submodules (SPIRV-Cross,
+          # SPIRV-Headers, SPIRV-Tools, DirectXShaderCompiler) are only for
+          # SDLSHADERCROSS_VENDORED=ON, which would build DXC/LLVM from
+          # source -- infeasible for CI.  With VENDORED=OFF the fetch has no
+          # submodules and the empty external/ dirs are never touched; the
+          # build finds spirv-cross (shared, with its installed CMake config)
+          # and DirectXShaderCompiler (headers in the dev output) through
+          # CMAKE_PREFIX_PATH.  Upstream's CMakeLists shadows a -D
+          # DirectXShaderCompiler_ROOT with its own nonexistent path, so
+          # there is nothing to override there.
+          sdl3-shadercross = pkgs.stdenv.mkDerivation {
+            pname = "sdl3-shadercross";
+            version = "3.0.0";
+
+            src = pkgs.fetchurl {
+              url = "https://github.com/libsdl-org/SDL_shadercross/archive/1ff05bec573988a98ef9e0260b4da44f512b8367.tar.gz";
+              hash = "sha256-YKrjX/cb0dX4WzY+nQd6hrsn3TYzPEJoXlbC/VQRdNI=";
+            };
+
+            nativeBuildInputs = [ pkgs.cmake ];
+
+            buildInputs = with pkgs; [
+              sdl3
+              spirv-cross
+              # Both outputs: libdxcompiler/libdxil are in out, dxcapi.h in dev.
+              directx-shader-compiler
+              directx-shader-compiler.dev
+            ];
+
+            cmakeFlags = [
+              # See the note above: vendored would build DXC/LLVM from source.
+              "-DSDLSHADERCROSS_VENDORED=OFF"
+              # As a top-level project upstream defaults this ON; the flake
+              # never packages anything.
+              "-DSDLSHADERCROSS_INSTALL_CPACK=OFF"
+            ];
+
+            meta = with pkgs.lib; {
+              description = "SDL library for cross-compiling SPIR-V shaders to DXIL, MSL and JSON (SDL3_shadercross)";
+              homepage = "https://github.com/libsdl-org/SDL_shadercross";
+              license = licenses.zlib;
+              platforms = platforms.linux;
+              mainProgram = "shadercross";
+              maintainers = [ ];
+            };
+          };
+
           # The HexenC gamecode, compiled to progs bytecode with hcc.
           #
           # This exists because gamecode fixes were rotting in place: nothing
@@ -1782,6 +1839,11 @@ EOF
             glslang
             spirv-tools
             spirv-cross
+            # shadercross is the flake's own sdl3-shadercross package
+            # (#448): the CLI the shaders_cross target runs, SPIR-V ->
+            # DXIL/MSL/JSON for the SDL_GPU D3D12 and Metal drivers.  It is
+            # the Metal/D3D12 feed now, not the spirv-cross line above.
+            self.packages.${system}.sdl3-shadercross
           ];
 
           shellHook = ''
