@@ -46,9 +46,16 @@
 
 set -euo pipefail
 
+# One part per slice harness.  --list-parts prints them; RUST_GATE_PARTS
+# (space-separated) runs a subset, which is how scripts/check-rust.sh
+# --shard splits this gate across CI jobs.  The symbol checks after the
+# harnesses run whatever the subset.
+all_parts=(sound ents datagram connect inv spawn)
+
 for arg in "$@"; do
 	case "$arg" in
 		-h|--help) sed -n '2,/^# SPDX/p' "$0"; exit 0 ;;
+		--list-parts) printf '%s\n' "${all_parts[@]}"; exit 0 ;;
 		*) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
 	esac
 done
@@ -56,6 +63,8 @@ done
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/rust-gate.sh
 . "$root/scripts/lib/rust-gate.sh"
+selected=$(rust_gate_parts_selected "${all_parts[@]}") || exit 2
+mapfile -t parts <<<"$selected"
 crate="$root/engine/rust"
 work="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$work"
@@ -88,7 +97,7 @@ step=1
 # C-variadic half of the checklist, is sv_main_variadic.c's, Hexen II only.
 spawn_symbols=(SV_SpawnServer SV_PrintMapCheck)
 
-for port in sound ents datagram connect inv spawn; do
+for port in "${parts[@]}"; do
 	case "$port" in
 		sound) feature=sv_main_sound; name=sv_main_sound; runner=run_diff_harness.sh; floor_digits=6 ;;
 		ents) feature=sv_main_ents; name=sv_main_ents; runner=run_ents_harness.sh; floor_digits=5 ;;

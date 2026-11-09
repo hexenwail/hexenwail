@@ -108,6 +108,12 @@ jobs:
       - name: Software renderer cvar defaults match GL
         run: python3 tools/test_soft_cvar_defaults.py
 
+      # ci.yml splits scripts/check-rust.sh across a job matrix.  A plan that
+      # dropped an item would leave every shard green, so the partition is
+      # checked here, where it fails in seconds rather than never.
+      - name: Rust gate shards cover every item exactly once
+        run: python3 tools/test_rust_gate_shards.py
+
       # Data-free coverage for the unified multiplayer path. The harness
       # extracts the production C functions rather than maintaining a Python
       # reimplementation, then compiles them against narrow engine stubs.
