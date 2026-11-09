@@ -85,6 +85,11 @@ EXCEPTIONS = {
                    "defaults it on as shipped, the GL build off.  Whichever build "
                    "writes config.cfg first decides for both -- a policy question "
                    "for GitHub #362.",
+    "r_renderer": "the default names the backend this binary runs -- gles on the "
+                  "webgl2 build, software here -- so the two builds cannot agree "
+                  "on it by design.  The value is per-build identity, not a player "
+                  "setting: a config carrying one build's value reads back as that "
+                  "build's name on the other.  GitHub #103.",
 }
 
 DECL = re.compile(r'\bcvar_t\s+(\w+)\s*=\s*\{')

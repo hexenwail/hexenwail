@@ -77,6 +77,7 @@ extern cvar_t	gl_coloredlight;
 extern cvar_t	r_softparticles;
 extern cvar_t	gl_waterwarp_speed;
 extern cvar_t	gl_waterwarp_amount;
+extern cvar_t	r_renderer;	/* "software" here; "opengl"/"gles" on the GL builds */
 
 /* Real software-renderer cvars, defined in r_main.c. */
 extern cvar_t	r_dynamic;

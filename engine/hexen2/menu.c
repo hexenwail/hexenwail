@@ -3541,6 +3541,7 @@ enum
 	REND_MOTIONBLUR,
 	REND_HDR,
 	REND_HDR_EXPOSURE,
+	REND_RENDERER,
 	REND_ITEMS
 };
 
@@ -3573,7 +3574,26 @@ static const char *rend_labels[REND_ITEMS] = {
 	"Motion Blur   :",	/* REND_MOTIONBLUR */
 	"HDR Tonemap   :",	/* REND_HDR */
 	"HDR Exposure  :",	/* REND_HDR_EXPOSURE */
+	"Renderer      :",	/* REND_RENDERER */
 };
+
+/* Backends this binary was compiled with, in menu order.  The first entry
+ * is the backend this binary runs; the rest are alternatives it can switch
+ * to.  One entry today on every build -- desktop GL, GLES, software -- so
+ * the Renderer row stays hidden; when #340 lands the SDL_GPU backend it
+ * adds "sdl-gpu" to the desktop GL arm (the GLES tier stays WebGL2, per
+ * #77) and the row appears with no further menu work.  GitHub #103. */
+static const char *available_renderers[] = {
+#if defined(WEBSOFT)
+	"software",
+#elif defined(USE_GLES)
+	"gles",
+#else
+	"opengl",
+#endif
+};
+#define NUM_AVAILABLE_RENDERERS \
+	(sizeof (available_renderers) / sizeof (available_renderers[0]))
 
 static qboolean M_Rendering_IsSkip (int i)
 {
@@ -3606,6 +3626,7 @@ static qboolean M_Rendering_IsSkip (int i)
 	case REND_MOTIONBLUR:
 	case REND_HDR:
 	case REND_HDR_EXPOSURE:
+	case REND_RENDERER:	/* hidden here; the GL side hides it while the count is 1 */
 		return true;
 	default:
 		break;
@@ -3625,6 +3646,11 @@ static qboolean M_Rendering_IsSkip (int i)
 	if (i == REND_ANISOTROPY && !gl_renderer_caps.anisotropy)
 		return true;
 	if ((i == REND_HDR || i == REND_HDR_EXPOSURE) && !gl_renderer_caps.float_color_buffer)
+		return true;
+	/* One backend in this binary means nothing to choose: hide the row
+	 * rather than offer a choice of one.  When #340 lands, the table
+	 * above gains "sdl-gpu" and this stops firing.  GitHub #103. */
+	if (i == REND_RENDERER && NUM_AVAILABLE_RENDERERS <= 1)
 		return true;
 #endif
 	return M_Filter_Active() && !M_Filter_Matches(rend_labels[i]);
@@ -3814,6 +3840,27 @@ static void M_Rendering_AdjustSliders (int dir)
 		Cvar_SetValue ("r_hdr_exposure", f);
 		break;
 	}
+	case REND_RENDERER:
+	{
+		/* Cycle r_renderer among the backends this binary was compiled
+		 * with.  Dead code until #340 lands a second backend: the row is
+		 * hidden while the count is 1, so this case cannot be reached
+		 * today.  The new value needs a quit + relaunch -- vid_restart
+		 * only re-inits the video mode, it cannot change the renderer --
+		 * which is why the row draws "(restart)" beside it.  GitHub #103. */
+		int i, num = NUM_AVAILABLE_RENDERERS;
+		const char *cur = Cvar_VariableString ("r_renderer");
+		for (i = 0; i < num; i++)
+		{
+			if (!strcmp (available_renderers[i], cur))
+				break;
+		}
+		i += dir;
+		if (i < 0) i = num - 1;
+		if (i >= num) i = 0;
+		Cvar_Set ("r_renderer", available_renderers[i]);
+		break;
+	}
 	}
 }
 
@@ -3838,6 +3885,7 @@ static const char *M_Rendering_Note (int row)
 	case REND_LIQUIDWARP:	return "Ripple strength on liquid surfaces";	/* gl_waterwarp_amount */
 	case REND_FLASHINTENSITY: return "Reach of muzzle and effect lights";	/* gl_flashintensity */
 	case REND_HDR:		return "ACES tonemapping for bright scenes";	/* r_hdr */
+	case REND_RENDERER:	return "takes effect after restart";		/* r_renderer */
 	default:		return NULL;
 	}
 }
@@ -4046,6 +4094,20 @@ static void M_Rendering_Draw (void)
 			M_DrawSliderValue (220, 92 + 8*REND_HDR_EXPOSURE,
 				(r_hdr_exposure.value - 0.1f) / 3.9f,
 				"%.2f", r_hdr_exposure.value);
+	}
+
+	if (!M_Rendering_IsSkip(REND_RENDERER))
+	{
+		const char *cur = Cvar_VariableString ("r_renderer");
+		M_Print (76, 92 + 8*REND_RENDERER, rend_labels[REND_RENDERER]);
+		/* The value only takes effect after a quit + relaunch: nothing
+		 * in the engine can switch renderers at runtime (vid_restart
+		 * only re-inits the video mode).  Say so beside the row rather
+		 * than let the change look live.  GitHub #103. */
+		if (!strcmp (cur, available_renderers[0]))
+			M_PrintWhite (220, 92 + 8*REND_RENDERER, cur);
+		else
+			M_PrintWhite (220, 92 + 8*REND_RENDERER, va ("%s (restart)", cur));
 	}
 
 	{

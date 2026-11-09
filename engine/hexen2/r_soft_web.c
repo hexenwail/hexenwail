@@ -87,6 +87,13 @@ cvar_t	gl_waterwarp_amount = {"gl_waterwarp_amount", "0.5", CVAR_ARCHIVE};
  * would come back to the GL one with the bar turned off. */
 cvar_t	scr_demobar_timeout = {"scr_demobar_timeout", "1", CVAR_ARCHIVE};
 
+/* The renderer this build runs.  Kept out of the GPU-only block above on
+ * purpose: its default deliberately differs from the GL build's ("software"
+ * here, "opengl"/"gles" there), because the default names the running
+ * backend -- it is per-build identity, not a player setting.  See the
+ * EXCEPTIONS entry in tools/test_soft_cvar_defaults.py.  GitHub #103. */
+cvar_t	r_renderer = {"r_renderer", "software", CVAR_ARCHIVE};
+
 int	gl_filter_idx = 0;
 float	gl_max_anisotropy = 1.0f;
 
@@ -135,6 +142,7 @@ void R_SoftWebInitCvars (void)
 	Cvar_RegisterVariable (&gl_waterwarp_speed);
 	Cvar_RegisterVariable (&gl_waterwarp_amount);
 	Cvar_RegisterVariable (&scr_demobar_timeout);
+	Cvar_RegisterVariable (&r_renderer);
 }
 
 /*

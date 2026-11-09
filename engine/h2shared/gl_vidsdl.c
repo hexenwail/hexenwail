@@ -331,6 +331,17 @@ static cvar_t	vid_config_fscr= {"vid_config_fscr", "1", CVAR_NONE};	/* 0=windowe
 static cvar_t	vid_window_x = {"vid_window_x", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_window_y = {"vid_window_y", "-1", CVAR_ARCHIVE};
 static cvar_t	vid_vsync = {"vid_vsync", "0", CVAR_ARCHIVE};	/* 0=off, 1=on, -1=adaptive */
+/* Which renderer backend this binary runs.  The value is the backend
+ * name, not an API: "opengl" here, "gles" on the GLES tier, "software"
+ * in the software build -- and later "sdl-gpu" once #340 lands the SDL_GPU
+ * backend (#447 settled one backend, not per-API renderers).  Archived so
+ * the choice round-trips through config.cfg; today every build has exactly
+ * one backend, so the menu row that drives it stays hidden.  GitHub #103. */
+#if defined(USE_GLES)
+static cvar_t	r_renderer = {"r_renderer", "gles", CVAR_ARCHIVE};
+#else
+static cvar_t	r_renderer = {"r_renderer", "opengl", CVAR_ARCHIVE};
+#endif
 extern cvar_t	gl_texture_anisotropy;	/* defined in gl_draw.c */
 static cvar_t	vid_borderless = {"vid_borderless", "0", CVAR_ARCHIVE};
 /* Pixel aspect ratio: displayed pixel width / height.  0 means derive it
@@ -2981,6 +2992,7 @@ void	VID_Init (const unsigned char *palette)
 	Cvar_RegisterVariable (&vid_window_x);
 	Cvar_RegisterVariable (&vid_window_y);
 	Cvar_RegisterVariable (&vid_vsync);
+	Cvar_RegisterVariable (&r_renderer);
 	Cvar_RegisterVariable (&vid_borderless);
 	Cvar_RegisterVariable (&vid_pixelaspect);
 	Cvar_RegisterVariable (&vid_config_swy);
