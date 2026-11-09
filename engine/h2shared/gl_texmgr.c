@@ -87,9 +87,7 @@ void TexMgr_FreeTexture (gltexture_t *kill)
 		return;
 	if (kill->texnum)
 	{
-		if (currenttexture == kill->texnum)
-			currenttexture = GL_UNUSED_TEXTURE;
-		glDeleteTextures_fp (1, &kill->texnum);
+		R_DeleteTextures (1, &kill->texnum);
 		kill->texnum = 0;	/* sentinel: TexMgr_LoadImage recycles slots
 					 * with texnum == 0.  glGenTextures never
 					 * returns 0, so this can't collide with a
@@ -270,8 +268,7 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, char *name, int width, int heigh
 
 	/* Generate and upload the texture */
 	glGenTextures_fp(1, &texnum);
-	glBindTexture_fp(GL_TEXTURE_2D, texnum);
-	currenttexture = texnum;
+	R_BindTextureSlot (0, texnum);
 
 	if (flags & TEXPREF_NEAREST)
 	{
@@ -390,7 +387,7 @@ int TexMgr_PadConditional(int s)
 
 /*
 ================
-GL_Bind - implementation using uhexen2's currenttexture
+GL_Bind - gltexture_t overload; the GLuint form is a macro in glquake.h
 ================
 */
 void GL_Bind (gltexture_t *texture)
@@ -398,29 +395,5 @@ void GL_Bind (gltexture_t *texture)
 	if (!texture)
 		return;
 
-	if (currenttexture != texture->texnum)
-	{
-		currenttexture = texture->texnum;
-		glBindTexture_fp(GL_TEXTURE_2D, currenttexture);
-	}
-}
-
-/*
-================
-GL_EnableMultitexture
-================
-*/
-void GL_EnableMultitexture(void)
-{
-	glActiveTexture_fp(GL_TEXTURE1);
-}
-
-/*
-================
-GL_DisableMultitexture
-================
-*/
-void GL_DisableMultitexture(void)
-{
-	glActiveTexture_fp(GL_TEXTURE0);
+	R_BindTextureSlot (0, texture->texnum);
 }

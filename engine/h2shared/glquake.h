@@ -230,16 +230,21 @@ extern	GLuint		gl_extra_textures[MAX_EXTRA_TEXTURES];	// generic textures for mo
  * feature; it is what the decision was waiting on. */
 extern	int		c_texbinds;
 
-/* the GL_Bind macro */
-#define GL_Bind(texnum)							\
-	do {								\
-		if (currenttexture != (texnum))				\
-		{							\
-			currenttexture = (texnum);			\
-			c_texbinds++;					\
-			glBindTexture_fp(GL_TEXTURE_2D,currenttexture);	\
-		}							\
-	} while (0)
+#include "gl_texbind.h"
+
+/* GL_Bind is now just "bind to slot 0" through the module.  It used to carry
+ * its own one-entry cache keyed on a currenttexture global, which tracked unit
+ * 0 but was called from blocks that had made unit 1 active -- so it could
+ * both bind to the wrong unit and cache-hit its way out of a bind it
+ * genuinely needed.  gl_texbind.c shadows every unit separately and there is
+ * nothing left to get wrong.  uhexen2-p4ln.3.
+ *
+ * Slice 1 of #338 keeps this macro as a wrapper so the unconverted call
+ * sites keep working while the two caches cannot disagree; slice 2 deletes
+ * it and converts the remaining sites to R_BindTextureSlot/R_BindTextures.
+ * c_texbinds is now incremented in the module, next to the one surviving
+ * glBindTexture call. */
+#define GL_Bind(texnum)		R_BindTextureSlot (0, (texnum))
 
 extern	int		gl_texlevel;
 extern	int		numgltextures;

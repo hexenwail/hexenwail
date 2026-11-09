@@ -61,10 +61,6 @@ extern void TexMgr_FreeTexture (gltexture_t *kill);
 #define TEXPREF_RGBA			0x1000
 #define TEXPREF_TRANSPARENT		0x2000
 
-// Multitexture functions from gl_texmgr.h
-extern void GL_EnableMultitexture (void);
-extern void GL_DisableMultitexture (void);
-
 // Undef the GL_Bind macro so we can use the function from gl_texmgr
 #undef GL_Bind
 
@@ -1790,7 +1786,7 @@ void Sky_DrawSkyBox (void)
 			continue;
 
 		if (!use_cubemap)	/* Bind the actual skybox texture */
-			glBindTexture_fp(GL_TEXTURE_2D, skybox_texnums[skytexorder[i]]);
+			R_BindTextureSlot (0, skybox_texnums[skytexorder[i]]);
 
 		skymins[0][i] = -1;
 		skymins[1][i] = -1;

@@ -2905,7 +2905,7 @@ void GL_Shaders_Init (void)
 	{
 		static const unsigned char black_pixel[4] = {0, 0, 0, 255};
 		glGenTextures_fp(1, &gl_null_fb_texture);
-		glBindTexture_fp(GL_TEXTURE_2D, gl_null_fb_texture);
+		R_BindTextureSlot (0, gl_null_fb_texture);
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2928,7 +2928,7 @@ void GL_Shaders_Init (void)
 		static const unsigned char black_pixel2[4] = {0, 0, 0, 255};
 
 		glGenTextures_fp(1, &gl_flat_normal_texture);
-		glBindTexture_fp(GL_TEXTURE_2D, gl_flat_normal_texture);
+		R_BindTextureSlot (0, gl_flat_normal_texture);
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, flat_normal_pixel);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2937,7 +2937,7 @@ void GL_Shaders_Init (void)
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
 		glGenTextures_fp(1, &gl_null_gloss_texture);
-		glBindTexture_fp(GL_TEXTURE_2D, gl_null_gloss_texture);
+		R_BindTextureSlot (0, gl_null_gloss_texture);
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, black_pixel2);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2953,18 +2953,13 @@ void GL_Shaders_Init (void)
 	{
 		static const unsigned char white_pixel[4] = {255, 255, 255, 255};
 		glGenTextures_fp(1, &gl_solid_white_texture);
-		glBindTexture_fp(GL_TEXTURE_2D, gl_solid_white_texture);
+		R_BindTextureSlot (0, gl_solid_white_texture);
 		glTexImage2D_fp(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
 				GL_RGBA, GL_UNSIGNED_BYTE, white_pixel);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		glTexParameterf_fp(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-		/* Both blocks above bound straight through glBindTexture_fp, behind
-		 * GL_Bind's back.  Tell the cache what is actually bound now, or the
-		 * next GL_Bind of a texture that happens to match the stale value
-		 * would skip a bind it genuinely needs. */
-		currenttexture = gl_solid_white_texture;
 	}
 
 	/* OIT variants for translucent rendering.
@@ -3067,23 +3062,23 @@ void GL_Shaders_Shutdown (void)
 	 * d2c46f078. */
 	if (gl_null_fb_texture)
 	{
-		glDeleteTextures_fp(1, &gl_null_fb_texture);
+		R_DeleteTextures (1, &gl_null_fb_texture);
 		gl_null_fb_texture = 0;
 	}
 	if (gl_flat_normal_texture)
 	{
-		glDeleteTextures_fp(1, &gl_flat_normal_texture);
+		R_DeleteTextures (1, &gl_flat_normal_texture);
 		gl_flat_normal_texture = 0;
 	}
 	if (gl_null_gloss_texture)
 	{
-		glDeleteTextures_fp(1, &gl_null_gloss_texture);
+		R_DeleteTextures (1, &gl_null_gloss_texture);
 		gl_null_gloss_texture = 0;
 	}
 	if (gl_solid_white_texture)
 	{
-		glDeleteTextures_fp(1, &gl_solid_white_texture);
+		R_DeleteTextures (1, &gl_solid_white_texture);
 		gl_solid_white_texture = 0;
 	}
-	currenttexture = GL_UNUSED_TEXTURE;
+	R_ResetTextureBindings ();
 }

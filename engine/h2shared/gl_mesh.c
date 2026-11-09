@@ -406,7 +406,7 @@ static void GL_FreeAliasGPUMesh (alias_gpu_mesh_t *gm)
 	if (gm->ssbo_pose)     { GL_ForgetBuffer(gm->ssbo_pose);     glDeleteBuffers_fp(1, &gm->ssbo_pose); }
 	if (gm->ssbo_pose_md3) { GL_ForgetBuffer(gm->ssbo_pose_md3); glDeleteBuffers_fp(1, &gm->ssbo_pose_md3); }
 	if (gm->ssbo_bones)    { GL_ForgetBuffer(gm->ssbo_bones);    glDeleteBuffers_fp(1, &gm->ssbo_bones); }
-	if (gm->tex_pose)      { glDeleteTextures_fp(1, &gm->tex_pose); }
+	if (gm->tex_pose)      { R_DeleteTextures (1, &gm->tex_pose); }
 	memset(gm, 0, sizeof(*gm));
 }
 

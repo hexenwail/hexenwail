@@ -903,12 +903,14 @@ static void EmitSkyPolysMulti (msurface_t *fa)
 
 	if (alpha >= 1.0f)
 	{
-		/* single-pass multitexture: blend both layers in the shader */
-		GL_Bind (solidskytexture);
-
-		glActiveTexture_fp (GL_TEXTURE1);
-		GL_Bind (alphaskytexture);
-		glActiveTexture_fp (GL_TEXTURE0);
+		/* single-pass multitexture: blend both layers in the shader.
+		 * One R_BindTextures call, not a GL_Bind plus a unit-1 detour:
+		 * GL_Bind only ever names slot 0, so the second bind above
+		 * used to land on TU0 and leave TU1 holding stale contents. */
+		{
+			const GLuint sky_layers[2] = { solidskytexture, alphaskytexture };
+			R_BindTextures (0, 2, sky_layers);
+		}
 
 		for (p = fa->polys ; p ; p = p->next)
 		{
@@ -1176,11 +1178,13 @@ void R_DrawSkyChain (msurface_t *s)
 	}
 	else if (alpha >= 1.0f)
 	{
-		/* single-pass: shader blends both layers using TU0/TU1 */
-		GL_Bind (solidskytexture);
-		glActiveTexture_fp (GL_TEXTURE1);
-		GL_Bind (alphaskytexture);
-		glActiveTexture_fp (GL_TEXTURE0);
+		/* single-pass: shader blends both layers using TU0/TU1.
+		 * One R_BindTextures call -- see the same fix in
+		 * EmitSkyPolysMulti above. */
+		{
+			const GLuint sky_layers[2] = { solidskytexture, alphaskytexture };
+			R_BindTextures (0, 2, sky_layers);
+		}
 		EMIT_LOOP (&gl_shader_sky_layers, SKYWARP_VERT_MULTI,
 			   GL_ImmColor4f(1.0f, 1.0f, 1.0f, 1.0f));
 	}

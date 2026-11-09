@@ -2023,11 +2023,11 @@ static void GL_Init (void)
 	glActiveTexture_fp = (glActiveTexture_f) SDL_GL_GetProcAddress("glActiveTexture");
 	if (!glActiveTexture_fp)
 		Sys_Error("glActiveTexture not found");
-	glActiveTexture_fp(GL_TEXTURE0);
-#else
-	/* Emscripten: use direct function call */
-	glActiveTexture(GL_TEXTURE0);
 #endif
+	/* Seeds the binding shadow and puts the active unit where gl_texbind.c
+	 * promises to keep it.  On Emscripten glActiveTexture_fp is a direct
+	 * call (gl_func.h), so R_TexBind_Init needs no separate branch here. */
+	R_TexBind_Init();
 
 	/* NPOT textures: always available on GL 4.3 */
 	Con_SafePrintf("NPOT textures enabled\n");
@@ -2456,6 +2456,7 @@ static void VID_ChangeVideoMode (int newmode)
 	R_SSAO_Shutdown ();	/* GitHub #188; GL reuses program names */
 	GL_Shaders_Shutdown();
 	R_Uniforms_Shutdown();
+	R_TexBind_Shutdown();
 #ifndef USE_GLES
 	GL_DeleteFrameResources ();
 #endif

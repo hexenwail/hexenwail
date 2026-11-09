@@ -817,9 +817,11 @@ static void GL_ImageDump_f (void)
 	glPixelStorei_fp (GL_PACK_ALIGNMENT, prev_pack);
 	glBindTexture_fp (GL_TEXTURE_2D, (GLuint)prev_tex);
 	glActiveTexture_fp ((GLenum)prev_unit);
-	/* Resync GL_Bind's cache to what the active unit really holds. */
-	glGetIntegerv_fp (GL_TEXTURE_BINDING_2D, &prev_tex);
-	currenttexture = (GLuint)prev_tex;
+	/* The dump bound textures behind the module's back, so the shadow no
+	 * longer knows what the units hold.  Forget it (and re-assert unit 0);
+	 * the next module bind re-issues.  The GL binding itself was already
+	 * restored above. */
+	R_ResetTextureBindings ();
 
 	Con_Printf ("imagedump: wrote %d texture%s to %s\n",
 		    written, (written == 1) ? "" : "s", dirpath);
@@ -1003,7 +1005,7 @@ void Draw_ReInit (void)
 
 	D_ClearOpenGLTextures(0);
 	if (lightmap_textures[0])
-		glDeleteTextures_fp (MAX_LIGHTMAPS, lightmap_textures);
+		R_DeleteTextures (MAX_LIGHTMAPS, lightmap_textures);
 	memset (lightmap_textures, 0, sizeof(lightmap_textures));
 	// make sure all of alias models are cleared
 	Draw_ClearAllModels ();
@@ -3441,7 +3443,7 @@ static GLuint GL_LoadTextureEx (const char *identifier, byte *data, int width, i
 					else
 						Con_DPrintf ("Texture cache mismatch: %lu, %s, creating new entry\n",
 								    (unsigned long)old_texnum, identifier);
-					glDeleteTextures_fp (1, &old_texnum);
+					R_DeleteTextures (1, &old_texnum);
 					if (currenttexture == old_texnum)
 						currenttexture = GL_UNUSED_TEXTURE;
 					Hash_Remove (&hash_gltextures, key, i);
