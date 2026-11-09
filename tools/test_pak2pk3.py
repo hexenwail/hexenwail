@@ -83,6 +83,7 @@ def main():
     # The tool's marks must be the engine's.
     qfs = (ROOT / "engine/h2shared/quakefs.c").read_text()
     for key, cname in (("data1 demo", "mark_data1_demo"),
+                       ("data1 old demo", "mark_data1_old_demo"),
                        ("data1 pak0", "mark_data1_pak0"),
                        ("data1 pak1", "mark_data1_pak1"),
                        ("portals", "mark_portals"),
@@ -217,6 +218,42 @@ def main():
         check(r3m.returncode != 0 and "pak5.pak" in r3m.stderr
               and not (work / "out3m").exists(),
               "a mod pak beside the demo is refused, --force included")
+
+        # The Aug. 1997 (0.42) demo's shape (#130): one pak0 carrying the
+        # old-demo marks.  It identifies as the old demo, not as the Nov.
+        # demo and not as a v1.11 pak0 -- and the run refuses it distinctly,
+        # because the engine identifies it and then refuses it at startup
+        # ("Old version of Hexen II demo isn't supported"), rather than
+        # failing to identify it at all.
+        demo4 = work / "demo4" / "data1"
+        demo4.mkdir(parents=True)
+        check(pak2pk3.identify(marks("data1 old demo")) == "data1 old demo",
+              "the 0.42 demo's pak0 is identified as the old demo")
+        check(pak2pk3.identify(marks("data1 demo")) == "data1 demo",
+              "the Nov. 1997 demo's pak0 still identifies as the demo, not the old demo")
+        make_pak(demo4 / "pak0.pak", marks("data1 old demo"))
+        r3o = run(demo4, work / "out3o")
+        check(r3o.returncode != 0 and "0.42" in r3o.stderr
+              and "isn't supported" in r3o.stderr
+              and "--force" not in r3o.stderr
+              and not (work / "out3o").exists(),
+              "the 0.42 demo's data1 is refused by name, offering nothing that cannot work")
+        r3of = run(demo4, work / "out3of", "--force")
+        check(r3of.returncode != 0 and not (work / "out3of").exists(),
+              "--force does not override the old demo's refusal")
+        # One byte off a marker drops the identification: the same pak0 is
+        # then refused as unrecognised content, not as the old demo.
+        mutant = marks("data1 old demo")
+        mutant[0] = (mutant[0][0], mutant[0][1] + b"Z")
+        check(pak2pk3.identify(mutant) is None,
+              "one byte off a 0.42 marker drops the identification")
+        demo5 = work / "demo5" / "data1"
+        demo5.mkdir(parents=True)
+        make_pak(demo5 / "pak0.pak", mutant)
+        r3p = run(demo5, work / "out3p")
+        check(r3p.returncode != 0 and "pak0.pak and pak1.pak pair" in r3p.stderr
+              and "0.42" not in r3p.stderr and not (work / "out3p").exists(),
+              "the one-byte mutant is refused as unrecognised, not as the old demo")
 
         # HexenWorld's hw: an unknown pak4 (0.09, 0.11, a mod's) is refused,
         # --force included, since hwsv would not start on it.

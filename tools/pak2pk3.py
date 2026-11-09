@@ -42,10 +42,14 @@ WHAT IS PRESERVED, because the engine depends on it
 WHAT IS REFUSED, and why
 
 - A data1 with neither a v1.11 pak0 and pak1 pair nor the Nov. 1997 demo's
-  pak0: the OEM release, pre-1.11 installs, the older 0.42 demo.  As .pk3s
-  the engine identifies data1 only from those, and a converted one fails
-  with "Unable to find a proper Hexen II installation".  A portals without
-  the v1.11 pak3 likewise.  Not overridable.
+  pak0: the OEM release and pre-1.11 installs.  As .pk3s the engine
+  identifies data1 only from those, and a converted one fails with "Unable
+  to find a proper Hexen II installation".  A portals without the v1.11 pak3
+  likewise.  Not overridable.
+- The Aug. 1997 (0.42) demo's data1: the engine identifies it as a pk3
+  (GAME_OLD_DEMO) and then refuses it at startup ("Old version of Hexen II
+  demo isn't supported"), so converting it still produces an install that
+  will not start.  Not overridable.
 - On the demo's data1, --loose and any pak beside its pak0.  The demo runs
   no modified content, and every pk3 that is not a whole Raven pak counts
   as modified.  Not overridable.
@@ -139,6 +143,14 @@ CONTENT_MARKS = {
         "strings.txt": 16539, "models/h_cru.mdl": 16896,
         "models/h_nec.mdl": 8052, "models/castrch.mdl": 16996,
         "gfx/menu/netp2.lmp": 7760}),
+    # The Aug. 1997 (0.42) demo's pak0 (old_pakdata[2] in quakefs.c): 701
+    # files, MD5 208643a09193dafbca4b851762479438.  None of the Nov. demo's
+    # marks matches here, so the Nov demo still identifies as "data1 demo"
+    # above, and this row must sit after it.  (#130)
+    "data1 old demo": ("data1", {
+        "default.cfg": 2646, "strings.txt": 12300,
+        "gfx.wad": 112732, "maps/demo1.bsp": 2440396,
+        "models/h_ogre.mdl": 14900}),
     "data1 pak0": ("data1", {
         "maplist.txt": 193, "puzzles.txt": 1131, "default.cfg": 2793,
         "gfx.wad": 10732, "gfx/palette.lmp": 768, "maps/demo1.bsp": 1896452}),
@@ -396,18 +408,27 @@ def main(argv=None):
         # FS_Init counts a data1 as an installation with BOTH the pak0 and
         # the pak1 content (GAME_REGISTERED0 | GAME_REGISTERED1), or with the
         # Nov. 1997 demo's pak0 (GAME_DEMO, whose row in contentdata[] takes
-        # back the GAME_REGISTERED0 its pak0 also matches).  Anything else, as
-        # a .pk3, fails: "Unable to find a proper Hexen II installation".
-        # OEM, pre-1.11 and 0.42-demo data1 paks carry no marks.
+        # back the GAME_REGISTERED0 its pak0 also matches).  The Aug. 1997
+        # (0.42) demo's pak0 is identified too (GAME_OLD_DEMO), but FS_Init
+        # refuses it at startup ("Old version of Hexen II demo isn't
+        # supported"), so it is refused here as well, distinctly.  Anything
+        # else, as a .pk3, fails: "Unable to find a proper Hexen II
+        # installation".  OEM and pre-1.11 data1 paks carry no marks.
         # An empty plan is --loose on a gamedir already converted: fine.
         found = {key for _, _, key in plan if base_ok(key)}
+        if plan and gamedir_name == "data1" and "data1 old demo" in found:
+            raise PakError(
+                "%s is the Aug. 1997 (0.42) demo, which the engine "
+                "identifies but does not support: it would refuse to start "
+                "with \"Old version of Hexen II demo isn't supported\".  "
+                "Leave this data1 as paks." % args.gamedir)
         if plan and gamedir_name == "data1" and \
                 not {"data1 pak0", "data1 pak1"} <= found and \
                 "data1 demo" not in found:
             raise PakError(
                 "%s has no v1.11 pak0.pak and pak1.pak pair, and no Nov. 1997 "
-                "demo pak0.pak (the OEM release, pre-1.11 installs and the "
-                "older demo have neither).  As .pk3s the engine identifies "
+                "demo pak0.pak (the OEM release and pre-1.11 installs have "
+                "neither).  As .pk3s the engine identifies "
                 "data1 only from those, and would refuse to start: \"Unable "
                 "to find a proper Hexen II installation\".  Leave this data1 "
                 "as paks." % args.gamedir)

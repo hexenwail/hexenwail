@@ -736,6 +736,63 @@ static void write_demo_pk3(const char *path, int members)
 	free(central);
 }
 
+/* A pk3 shaped like the Aug. 1997 (0.42) demo's pak0 repacked (#130): the
+ * members mark_data1_old_demo[] looks for, at their sizes, padded with
+ * one-byte fillers to `members` entries.  `mutant` adds one byte to the
+ * first marker, which must drop the identification entirely. */
+static void write_old_demo_pk3(const char *path, int members, int mutant)
+{
+	static const struct { const char *name; size_t size; } marks[] = {
+		{ "default.cfg", 2646 }, { "strings.txt", 12300 },
+		{ "gfx.wad", 112732 }, { "maps/demo1.bsp", 2440396 },
+		{ "models/h_ogre.mdl", 14900 }
+	};
+	const int nmarks = (int)(sizeof marks / sizeof marks[0]);
+	unsigned char hdr[512], *central;
+	static unsigned char zeros[65536];
+	size_t cd = 0, off = 0, left;
+	unsigned long crc;
+	char name[64];
+	int i;
+	FILE *f = fopen(path, "wb");
+
+	if (!f) {
+		fprintf(stderr, "harness: cannot write %s\n", path);
+		exit(2);
+	}
+	central = malloc((size_t)members * 128);
+	for (i = 0; i < members; i++) {
+		size_t size, n;
+
+		if (i < nmarks) {
+			snprintf(name, sizeof name, "%s", marks[i].name);
+			size = marks[i].size + (size_t)(mutant && i == 0 ? 1 : 0);
+		} else {
+			snprintf(name, sizeof name, "filler/%04d.txt", i);
+			size = 1;
+		}
+		crc = crc32_zeros(size);
+		/* zip_local copies the payload too; write the header alone and
+		 * stream the zeros after it. */
+		n = zip_local(hdr, name, zeros, 0, size, crc, 0);
+		put32(hdr + 18, (unsigned long)size);	/* compressed size */
+		fwrite(hdr, 1, n, f);
+		for (left = size; left; left -= (left < sizeof zeros ? left : sizeof zeros))
+			fwrite(zeros, 1, left < sizeof zeros ? left : sizeof zeros, f);
+		cd += zip_central(central + cd, name, off, size, size, crc, 0);
+		off += n + size;
+	}
+	fwrite(central, 1, cd, f);
+	put32(hdr, 0x06054b50UL);
+	put16(hdr + 4, 0); put16(hdr + 6, 0);
+	put16(hdr + 8, (unsigned int)members); put16(hdr + 10, (unsigned int)members);
+	put32(hdr + 12, (unsigned long)cd); put32(hdr + 16, (unsigned long)off);
+	put16(hdr + 20, 0);
+	fwrite(hdr, 1, 22, f);
+	fclose(f);
+	free(central);
+}
+
 static void fixture_setup(void)
 {
 	const char *demo = getenv("QF_BASEDIR");
@@ -1136,6 +1193,45 @@ static void scenario_demo_pk3(void) { demo_pk3_case("demo", 797, 0); }
 static void scenario_demo_pk3_mod(void) { demo_pk3_case("demo-mod", 797, 1); }
 static void scenario_demo_pk3_short(void) { demo_pk3_case("demo-short", 796, 0); }
 
+/* The Aug. 1997 (0.42) demo as a pk3 (#130), on a base of its own.  701
+ * members is the 0.42 pak's count, so the archive is a whole Raven pak --
+ * but the engine does not support that demo (ENABLE_OLD_DEMO is 0), so
+ * FS_Init must refuse it with "Old version of Hexen II demo isn't
+ * supported", on both arms.  A one-byte change to a marker drops the
+ * identification entirely, and the refusal becomes "Unable to find a
+ * proper Hexen II installation" instead -- that is what proves the marks
+ * are load-bearing, not the member count. */
+static void old_demo_pk3_case(const char *tag, int members, int mutant)
+{
+	char p[512];
+
+	snprintf(base, sizeof base, "%s/base-%s", root, tag);
+	mkdir(base, 0755);
+	path_join(p, sizeof p, base, "data1");
+	mkdir(p, 0755);
+	path_join(p, sizeof p, base, "data1/000-pak0.pk3");
+	write_old_demo_pk3(p, members, mutant);
+
+	err_armed = 1;
+	if (setjmp(err_env)) {
+		call("FS_Init refused");
+		if (mutant)
+			check(strstr(err_buf, "Unable to find a proper Hexen II installation") != NULL,
+			      "%s: mutant refused for the wrong reason: %s", tag, err_buf);
+		else
+			check(strstr(err_buf, "Old version of Hexen II demo isn't supported") != NULL,
+			      "%s: refused for the wrong reason: %s", tag, err_buf);
+		return;
+	}
+	parms_init();
+	FS_Init();
+	call("FS_Init returned");
+	check(0, "%s: FS_Init accepted the old demo pk3", tag);
+}
+
+static void scenario_old_demo_pk3(void) { old_demo_pk3_case("old-demo", 701, 0); }
+static void scenario_old_demo_pk3_mutant(void) { old_demo_pk3_case("old-demo-mutant", 701, 1); }
+
 /*----------------------------------------------------------------------------
  * case runner
  *--------------------------------------------------------------------------*/
@@ -1252,6 +1348,10 @@ int main(int argc, char **argv)
 		run_case("demo-pk3-mod", scenario_demo_pk3_mod);
 	if (!only || !strcmp(only, "demo-pk3-short"))
 		run_case("demo-pk3-short", scenario_demo_pk3_short);
+	if (!only || !strcmp(only, "old-demo-pk3"))
+		run_case("old-demo-pk3", scenario_old_demo_pk3);
+	if (!only || !strcmp(only, "old-demo-pk3-mutant"))
+		run_case("old-demo-pk3-mutant", scenario_old_demo_pk3_mutant);
 
 	rec_int(0xF1A1);
 	rec_int(checks);

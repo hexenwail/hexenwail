@@ -304,6 +304,29 @@ static const contentmark_t mark_data1_demo[] =
 	{ "gfx/menu/netp2.lmp",		7760	}
 };
 
+/* The Aug. 1997 (0.42) demo's data1/pak0.pak (old_pakdata[2]).  Read off a
+ * pak whose MD5 is the one old_pakdata[2] records
+ * (208643a09193dafbca4b851762479438): 701 files, 23,537,707 bytes.
+ *
+ * Two of its members match the v1.11 pak0 marks (maplist.txt 193,
+ * gfx/palette.lmp 768), so it does NOT match mark_data1_pak0 as a whole and
+ * its row takes nothing back (supersedes 0).  And none of the Nov. 1997
+ * demo's marks matches here -- strings.txt is 12300, not 16539, and
+ * h_cru/h_nec/castrch/netp2 are absent -- so a Nov-demo pk3 can never gain
+ * GAME_OLD_DEMO from this row (that would refuse it and regress #370).
+ * default.cfg, gfx.wad and demo1.bsp differ from both the v1.11 and the
+ * Nov demo sizes; the Mill is merged into demo1 in 0.42, which is why its
+ * bsp is the biggest of the three.  The ogre model ships only in 0.42.
+ * GitHub #130. */
+static const contentmark_t mark_data1_old_demo[] =
+{
+	{ "default.cfg",		2646	},
+	{ "strings.txt",		12300	},
+	{ "gfx.wad",			112732	},
+	{ "maps/demo1.bsp",		2440396	},
+	{ "models/h_ogre.mdl",		14900	}
+};
+
 /* HexenWorld 0.14 - 0.15 hw/pak4.pak, the release check_known_paks knows by
  * CRC 41062.  Every map in it is a hwdm*, which no other set carries, and the
  * taunt and the demoness head are HexenWorld's own.  Read off a pak4 whose
@@ -331,6 +354,7 @@ static const struct
 	{ mark_data1_pak0, (int)(sizeof(mark_data1_pak0)/sizeof(mark_data1_pak0[0])), "data1",   GAME_REGISTERED0, 0,                696 },
 	{ mark_data1_pak1, (int)(sizeof(mark_data1_pak1)/sizeof(mark_data1_pak1[0])), "data1",   GAME_REGISTERED1, 0,                523 },
 	{ mark_data1_demo, (int)(sizeof(mark_data1_demo)/sizeof(mark_data1_demo[0])), "data1",   GAME_DEMO,        GAME_REGISTERED0, 797 },
+	{ mark_data1_old_demo, (int)(sizeof(mark_data1_old_demo)/sizeof(mark_data1_old_demo[0])), "data1",   GAME_OLD_DEMO,    0,                701 },
 	{ mark_portals,    (int)(sizeof(mark_portals)   /sizeof(mark_portals[0])),    "portals", GAME_PORTALS,     0,                245 },
 	{ mark_hw_pak4,    (int)(sizeof(mark_hw_pak4)   /sizeof(mark_hw_pak4[0])),    "hw",      GAME_HEXENWORLD,  0,                102 }
 };
@@ -527,11 +551,12 @@ per-container attribution the pak path has -- pak0's content and pak1's content
 stay separate flags, so mixing editions is still detectable -- and it means a
 mod that happens to override a marker file cannot demote a real install.
 
-Listed: the v1.11 content sets, the Nov. 1997 demo's pak0, and HexenWorld 0.14
-- 0.15's hw/pak4 (#130).  The pre-1.11 editions, the OEM bundle, the older demo
-and the older HexenWorld paks keep their pak-only identification: none is at
-hand to read, and a table that cannot be tested against real data is worse
-than no table.  An unrecognised archive falls through to GAME_MODIFIED, exactly as
+Listed: the v1.11 content sets, the Nov. 1997 demo's pak0, the Aug. 1997
+(0.42) demo's pak0, and HexenWorld 0.14 - 0.15's hw/pak4 (#130).  The
+pre-1.11 editions, the OEM bundle and the older HexenWorld paks keep their
+pak-only identification: none is at hand to read, and a table that cannot
+be tested against real data is worse than no table.  An unrecognised
+archive falls through to GAME_MODIFIED, exactly as
 every archive did before.
 =================
 */

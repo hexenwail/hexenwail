@@ -82,7 +82,7 @@ const MAX_LISTNAMES: usize = 256;
 const MAX_MATCHES: c_int = 128;
 /// `MAX_PAKDATA` and `MAX_CONTENTDATA` from quakefs.c.
 const MAX_PAKDATA: usize = 5;
-const MAX_CONTENTDATA: usize = 5;
+const MAX_CONTENTDATA: usize = 6;
 
 /// `IDPAKHEADER` from common/pakfile.h.
 const IDPAKHEADER: u32 = (b'K' as u32) << 24 | (b'C' as u32) << 16 | (b'A' as u32) << 8 | (b'P' as u32);
@@ -389,6 +389,21 @@ static MARK_DATA1_DEMO: [ContentMarkC; 5] = [
     ContentMarkC { name: c"gfx/menu/netp2.lmp", filelen: 7760 },
 ];
 
+/// `mark_data1_old_demo[]` -- the Aug. 1997 (0.42) demo pak0's fingerprint
+/// (#130).  Read off a pak whose MD5 is the one `OLD_PAKDATA[2]` records
+/// (208643a09193dafbca4b851762479438): 701 files, 23,537,707 bytes.  Two
+/// members match the v1.11 pak0 marks, so it does not match that row as a
+/// whole and supersedes nothing; and none of the Nov. 1997 demo's marks
+/// matches here, so a Nov-demo pk3 can never gain `GAME_OLD_DEMO` from
+/// this row.
+static MARK_DATA1_OLD_DEMO: [ContentMarkC; 5] = [
+    ContentMarkC { name: c"default.cfg", filelen: 2646 },
+    ContentMarkC { name: c"strings.txt", filelen: 12300 },
+    ContentMarkC { name: c"gfx.wad", filelen: 112732 },
+    ContentMarkC { name: c"maps/demo1.bsp", filelen: 2440396 },
+    ContentMarkC { name: c"models/h_ogre.mdl", filelen: 14900 },
+];
+
 /// `mark_hw_pak4[]` -- HexenWorld 0.14 - 0.15's hw/pak4 fingerprint (#130).
 static MARK_HW_PAK4: [ContentMarkC; 5] = [
     ContentMarkC { name: c"maps/hwdm1.bsp", filelen: 1066196 },
@@ -421,6 +436,13 @@ static CONTENTDATA: [ContentDataC; MAX_CONTENTDATA] = [
         gameflag: GAME_DEMO,
         supersedes: GAME_REGISTERED0,
         numfiles: 797,
+    },
+    ContentDataC {
+        marks: &MARK_DATA1_OLD_DEMO,
+        dirname: c"data1",
+        gameflag: GAME_OLD_DEMO,
+        supersedes: 0,
+        numfiles: 701,
     },
     ContentDataC {
         marks: &MARK_PORTALS,

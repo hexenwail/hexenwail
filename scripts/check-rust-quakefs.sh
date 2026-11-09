@@ -58,9 +58,13 @@ HARNESS_FEATURES=quakefs,zone,hashindex,cvar,cmd,info_str,sizebuf,crc,strlcpy,st
 # Floors, recorded beside the numbers the arms actually produce.  The floor is
 # one decimal place below the observation, so widening the enumeration does not
 # mean editing the gate.
-# Observed: client 8 cases / 12234 trace bytes; serveronly 8 cases / 12314.
-# (The numbers are re-recorded whenever the harness changes shape; the floors
-# below are what the gate enforces, and they are one step under these.)
+# Observed: client 9 cases / 10075 trace bytes; serveronly 9 cases / 10203.
+# (The gate's case count collapses the demo-pk3 and old-demo-pk3 variants,
+# whose names carry digits its [a-z-]+ match stops at, so the two new cases
+# read as one.  Trace bytes vary with the fixture path, so the byte counts
+# are approximate.  The numbers are re-recorded whenever the harness changes
+# shape; the floors below are what the gate enforces, and they are one step
+# under these.)
 FLOOR_CASES=6
 FLOOR_BYTES=5000
 
@@ -211,9 +215,11 @@ else:
     print(f"  contentdata[]: {len(crows)} rows match")
 # Each row's member count is a Raven pak's, so it must be one the pak tables
 # already record for that gamedir; a typo there would make a faithful repack
-# count as modified.
+# count as modified.  The old demo's 701 lives only in old_pakdata (and any
+# future OEM row's count only in oem0_pakdata), so those tables are scanned
+# too -- pakdata and demo_pakdata alone would fail the new row. (#130)
 known = set()
-for tname in ("pakdata", "demo_pakdata"):
+for tname in ("pakdata", "demo_pakdata", "old_pakdata", "oem0_pakdata"):
     for nf, d in re.findall(r'\{\s*(-?\d+),\s*\d+\s*,\s*\d+,\s*"(\w+)"',
                             block(c, r'static pakdata_t %s\[' % tname) or ''):
         known.add((int(nf), d))
