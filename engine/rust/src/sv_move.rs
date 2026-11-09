@@ -27,7 +27,11 @@
 // arguments (floats promoted to double, as C's varargs promote them), so a
 // diagnostic run reads the same.  engine/tests/sv_checkbottom_test.c now pins
 // the moved C original's shape; the differential harness holds this module
-// to it, log lines included.
+// to it, log lines included.  The one exception is the two SV_movestep
+// allsolid refusals, which additionally log the stepped foot position and
+// dump nearby movers (#278, diagnostics only); the frozen fixtures carry
+// the identical lines, see their headers — that lockstep edit to frozen
+// fixtures needs a maintainer ruling before landing.
 //
 // THE TWO C ORIGINALS
 //
@@ -422,11 +426,15 @@ pub unsafe extern "C" fn SV_movestep(ent: *mut u8, move_: *mut f32, relink: c_in
         SV_DebugMoveStep_Log(
             ent,
             &trace,
-            c"step-down trace allsolid (move=%.0f %.0f %.0f)".as_ptr(),
+            c"step-down trace allsolid (move=%.0f %.0f %.0f) foot=%.0f %.0f %.0f".as_ptr(),
             *move_.add(0) as f64,
             *move_.add(1) as f64,
             *move_.add(2) as f64,
+            neworg[0] as f64,
+            neworg[1] as f64,
+            neworg[2] as f64,
         );
+        SV_DebugMoveStep_DumpMovers(neworg.as_ptr());
         return 0;
     }
 
@@ -440,12 +448,17 @@ pub unsafe extern "C" fn SV_movestep(ent: *mut u8, move_: *mut f32, relink: c_in
             SV_DebugMoveStep_Log(
                 ent,
                 &trace,
-                c"step-down still %s after retry (move=%.0f %.0f %.0f)".as_ptr(),
+                c"step-down still %s after retry (move=%.0f %.0f %.0f) foot=%.0f %.0f %.0f"
+                    .as_ptr(),
                 if trace.allsolid != 0 { c"allsolid".as_ptr() } else { c"startsolid".as_ptr() },
                 *move_.add(0) as f64,
                 *move_.add(1) as f64,
                 *move_.add(2) as f64,
+                neworg[0] as f64,
+                neworg[1] as f64,
+                neworg[2] as f64,
             );
+            SV_DebugMoveStep_DumpMovers(neworg.as_ptr());
             return 0;
         }
     }

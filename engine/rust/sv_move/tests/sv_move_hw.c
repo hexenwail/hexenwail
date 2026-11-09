@@ -6,6 +6,16 @@
  * engine/tests/sv_checkbottom_test.c pins SV_CheckBottom's corner box here
  * (#278).
  *
+ * NOTE (#278, diagnostics-only): the two SV_movestep allsolid refusals
+ * below no longer match the C original byte-for-byte.  The Rust port
+ * gained a `foot=` field in the log line and a SV_DebugMoveStep_DumpMovers
+ * call at each return, and this fixture was changed in lockstep so the
+ * differential harness still compares like with like.  No movement
+ * decision changed; the lines only make a field report diagnosable.
+ * This deviation from "moved verbatim" needs a maintainer ruling before
+ * landing: either accept the lockstep edit, or keep the fixture
+ * byte-verbatim and teach the harness to expect the new lines instead.
+ *
  * (from sv_move.c -- monster movement)
  *
  * Copyright (C) 1996-1997  Id Software, Inc.
@@ -230,7 +240,8 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 
 	if (trace.allsolid)
 	{
-		SV_DebugMoveStep_Log (ent, &trace, "step-down trace allsolid (move=%.0f %.0f %.0f)", move[0], move[1], move[2]);
+		SV_DebugMoveStep_Log (ent, &trace, "step-down trace allsolid (move=%.0f %.0f %.0f) foot=%.0f %.0f %.0f", move[0], move[1], move[2], neworg[0], neworg[1], neworg[2]);
+		SV_DebugMoveStep_DumpMovers (neworg);
 		return false;
 	}
 
@@ -244,9 +255,10 @@ qboolean SV_movestep (edict_t *ent, vec3_t move, qboolean relink, qboolean noene
 		}
 		if (trace.allsolid || trace.startsolid)
 		{
-			SV_DebugMoveStep_Log (ent, &trace, "step-down still %s after retry (move=%.0f %.0f %.0f)",
+			SV_DebugMoveStep_Log (ent, &trace, "step-down still %s after retry (move=%.0f %.0f %.0f) foot=%.0f %.0f %.0f",
 				trace.allsolid ? "allsolid" : "startsolid",
-				move[0], move[1], move[2]);
+				move[0], move[1], move[2], neworg[0], neworg[1], neworg[2]);
+			SV_DebugMoveStep_DumpMovers (neworg);
 			return false;
 		}
 	}
