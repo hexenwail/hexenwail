@@ -737,11 +737,14 @@ static void run_child (int impl, call_t call, world_t *w, int num, float p1f, fl
 		close (fds[0]);
 		err_fd = fds[1];
 		/* A NaN frac never drops below 0, so the C's backup loop can spin
-		 * forever; 100 ms is ample for any finite trace here.  SIGALRM's
-		 * default action ends the child, and the parent calls that HUNG. */
+		 * forever; 100 ms is ample for any finite trace here.  SIGPROF's
+		 * default action ends the child, and the parent calls that HUNG.
+		 * CPU time, not wall-clock (world_move's harness does the same): a
+		 * loaded CI runner must not turn a slow return into a hang -- the
+		 * same ITIMER_REAL pattern flaked sv_main_inv's harness. */
 		memset (&it, 0, sizeof (it));
 		it.it_value.tv_usec = 100000;
-		setitimer (ITIMER_REAL, &it, NULL);
+		setitimer (ITIMER_PROF, &it, NULL);
 		con_len = 0; con_log[0] = 0;
 		VectorCopy (p1, a); VectorCopy (p2, b);
 		if (call == CALL_HPC)
@@ -761,6 +764,8 @@ static void run_child (int impl, call_t call, world_t *w, int num, float p1f, fl
 			hexdump (hx, sizeof (hx), &t, sizeof (t));
 			snprintf (buf, sizeof (buf), "RETURNED|%d|%s|%.80s", rc, hx, con_log);
 		}
+		memset (&it, 0, sizeof (it));
+		setitimer (ITIMER_PROF, &it, NULL);	/* returned: off before writing and exiting */
 		if (write (err_fd, buf, strlen (buf)) < 0)
 			_exit (98);
 		exit (0);
@@ -771,7 +776,7 @@ static void run_child (int impl, call_t call, world_t *w, int num, float p1f, fl
 	out[got] = 0;
 	close (fds[0]);
 	if (waitpid (pid, &status, 0) < 0) { perror ("waitpid"); exit (2); }
-	if (WIFSIGNALED (status) && WTERMSIG (status) == SIGALRM)
+	if (WIFSIGNALED (status) && WTERMSIG (status) == SIGPROF)
 		snprintf (out, outsz, "HUNG");
 	else if (!WIFEXITED (status) || (WEXITSTATUS (status) != 0 && WEXITSTATUS (status) != 77))
 		snprintf (out, outsz, "CRASHED|status %d", status);

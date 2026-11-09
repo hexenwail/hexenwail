@@ -37,9 +37,11 @@
  *       the same byte of the stream, the same pages, the same message.
  *   44  Rust side only: abort().  Only the NULL-page-array check makes it,
  *       tested on the Rust alone (rust_null_pages).
- *   45  SIGALRM: the call did not return within SPIN_MS (150 ms).  INV_UpdateExItem
- *       spins forever when it links a full page back into its own chain (a
- *       C defect, kept); both sides must spin, with the same state.
+ *   45  SIGPROF: the call used SPIN_MS (150 ms) of CPU without returning.
+ *       INV_UpdateExItem spins forever when it links a full page back into
+ *       its own chain (a C defect, kept); both sides must spin, with the
+ *       same state.  (Or SIGALRM, the SPIN_WALL_S wall-clock backstop for a
+ *       call that blocks rather than spins; nothing here does.)
  *
  * Before the cases, the facts table sv_main_inv.rs reads is checked against
  * this compile of the Hexen II headers, and its layout against the Rust's.
@@ -112,9 +114,20 @@ char		*pr_strings;
 int		pr_stringssize;
 int		host_string_count;
 
-/* a call that has not returned after this long is spinning: every
- * function here returns in microseconds when it returns at all */
-#define SPIN_MS	150
+/* a call that has used this much CPU without returning is spinning: every
+ * function here returns in microseconds when it returns at all.
+ *
+ * CPU time (ITIMER_PROF), not wall-clock.  This was ITIMER_REAL, and a busy CI
+ * runner turned a K_WRITEPAGE case -- an fopen, an unbuffered write per field
+ * -- into a 150 ms wall-clock "spin" on the Rust side while the C side, run a
+ * moment earlier, returned: MISMATCH case 32775 (seed 505315145), exit 0
+ * against 45, green again on a rerun of the same commit.  Disk waits and time
+ * spent preempted are not the call's CPU, so they no longer count; the real
+ * spin is a pure-CPU loop and still trips at SPIN_MS.  SPIN_WALL_S is the
+ * wall-clock backstop for a call that blocks instead, so nothing can hang the
+ * run; it is far past anything a loaded runner can stretch a return to. */
+#define SPIN_MS		150
+#define SPIN_WALL_S	30
 
 /* ---- per-case backing stores ---- */
 #define NSTORE	((MAX_CLIENTS + 1) * MAX_INVENTORY_EX_PAGES)
@@ -287,10 +300,16 @@ static void serialize_side (void)
 static void finish_child (int code)
 {
 	static int finishing;
+	struct itimerval off;
 	FILE *f;
 	if (finishing)
 		_exit (99);
 	finishing = 1;
+	/* The verdict is decided; serializing and libgcov's exit-time dump must
+	 * not be cut short by a timer firing for a call that already returned. */
+	memset (&off, 0, sizeof off);
+	setitimer (ITIMER_PROF, &off, NULL);
+	setitimer (ITIMER_REAL, &off, NULL);
 	serialize_side ();
 	f = fopen (out_path, "wb");
 	if (!f)
@@ -1050,6 +1069,7 @@ static void run_child (void)
 	sa.sa_handler = abort_handler;
 	sigaction (SIGABRT, &sa, NULL);
 	sa.sa_handler = alarm_handler;
+	sigaction (SIGPROF, &sa, NULL);
 	sigaction (SIGALRM, &sa, NULL);
 	calllog_len = 0;
 	c_item_fgetcs = 0;
@@ -1060,6 +1080,9 @@ static void run_child (void)
 		struct itimerval it;
 		memset (&it, 0, sizeof it);
 		it.it_value.tv_usec = SPIN_MS * 1000;
+		setitimer (ITIMER_PROF, &it, NULL);
+		memset (&it, 0, sizeof it);
+		it.it_value.tv_sec = SPIN_WALL_S;
 		setitimer (ITIMER_REAL, &it, NULL);
 	}
 
